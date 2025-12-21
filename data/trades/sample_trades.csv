@@ -1,0 +1,6 @@
+timestamp,symbol,side,price,quantity,fee,exchange
+2024-01-15T10:30:00Z,BTCUSDT,buy,42500.00,0.1,4.25,Binance
+2024-01-15T14:45:00Z,BTCUSDT,sell,43000.00,0.1,4.30,Binance
+2024-01-16T09:20:00Z,ETHUSDT,buy,2250.00,1.0,2.25,Binance
+2024-01-16T16:30:00Z,ETHUSDT,sell,2300.00,1.0,2.30,Binance
+2024-01-17T11:00:00Z,BTCUSDT,buy,41800.00,0.15,6.27,Binance
