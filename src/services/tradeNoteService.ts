@@ -47,7 +47,7 @@ export class TradeNoteService {
         timeframe: '15m',
         trend: 'neutral' as const,
       },
-      aiSummary,
+      aiSummary: aiSummary.summary,
       features,
       createdAt: new Date(),
     };

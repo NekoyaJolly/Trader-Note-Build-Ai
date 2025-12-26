@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { NotificationService } from '../services/notificationService';
 import { NotificationTriggerService } from '../services/notification/notificationTriggerService';
 import { NotificationLogRepository } from '../backend/repositories/notificationLogRepository';
+import { prisma } from '../backend/db/client';
 
 /**
  * NotificationController
@@ -27,12 +28,70 @@ export class NotificationController {
    */
   getNotifications = async (req: Request, res: Response): Promise<void> => {
     try {
+      // UI の一覧表示に必要な情報を DB から組み立てる
+      // 返却形式: NotificationListItem[] 相当（Phase4 仕様）
       const unreadOnly = req.query.unreadOnly === 'true';
-      const notifications = this.notificationService.getNotifications(unreadOnly);
 
-      res.json({ notifications });
+      // Notification を取得（最新順）。MatchResult と TradeNote をリレーション取得
+      const notifs = await prisma.notification.findMany({
+        where: unreadOnly ? { status: 'unread' } : undefined,
+        orderBy: { sentAt: 'desc' },
+        include: {
+          matchResult: {
+            include: {
+              note: true,
+            },
+          },
+        },
+      });
+
+      // NotificationLog の reasonSummary を取得するために noteId × snapshotId で突き合わせ
+      const result: any[] = [];
+      for (const n of notifs) {
+        const mr = n.matchResult;
+        if (!mr || !mr.note) {
+          // 関連が欠落している場合はスキップ（データ不整合防止）
+          continue;
+        }
+
+        const log = await prisma.notificationLog.findUnique({
+          where: {
+            noteId_marketSnapshotId_channel: {
+              noteId: mr.noteId,
+              marketSnapshotId: mr.marketSnapshotId,
+              channel: 'in_app',
+            },
+          },
+        });
+
+        result.push({
+          id: n.id,
+          matchResultId: mr.id,
+          sentAt: n.sentAt.toISOString(),
+          channel: 'in_app',
+          isRead: n.status !== 'unread',
+          readAt: n.readAt ? n.readAt.toISOString() : null,
+          createdAt: n.createdAt.toISOString(),
+          matchResult: {
+            score: mr.score,
+            evaluatedAt: mr.evaluatedAt.toISOString(),
+          },
+          tradeNote: {
+            symbol: mr.note.symbol,
+            side: mr.note.side === 'buy' ? 'BUY' : 'SELL',
+            timeframe: mr.note.timeframe || '',
+          },
+          reasonSummary: log?.reasonSummary || '',
+        });
+      }
+
+      res.json({ notifications: result });
     } catch (error) {
       console.error('Error getting notifications:', error);
+      if (error instanceof Error) {
+        console.error('Notification list error message:', error.message);
+        console.error(error.stack);
+      }
       res.status(500).json({ error: 'Failed to retrieve notifications' });
     }
   };

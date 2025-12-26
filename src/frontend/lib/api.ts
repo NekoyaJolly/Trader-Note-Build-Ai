@@ -10,10 +10,10 @@ import type {
 
 /**
  * バックエンド API のベース URL
- * 環境変数から取得、デフォルトは localhost:3000
+ * 環境変数から取得、デフォルトは localhost:3100
  */
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000";
+  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3100";
 
 /**
  * 通知一覧を取得
@@ -30,7 +30,17 @@ export async function fetchNotifications(): Promise<NotificationListItem[]> {
     );
   }
 
-  return response.json();
+  const payload = await response.json();
+
+  // API レスポンスのラップ構造をここで吸収し、UI には配列のみ渡す
+  const notifications =
+    payload?.notifications ?? payload?.data?.notifications ?? [];
+
+  if (!Array.isArray(notifications)) {
+    throw new Error("通知一覧のレスポンス形式が不正です");
+  }
+
+  return notifications;
 }
 
 /**

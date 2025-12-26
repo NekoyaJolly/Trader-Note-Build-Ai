@@ -4,7 +4,8 @@ dotenv.config();
 
 export const config = {
   server: {
-    port: parseInt(process.env.PORT || '3000', 10),
+    // 優先度: BACKEND_PORT > PORT > 3100（env設定がある場合はそちらを優先）
+    port: parseInt(process.env.BACKEND_PORT || process.env.PORT || '3100', 10),
     env: process.env.NODE_ENV || 'development',
   },
   database: {
