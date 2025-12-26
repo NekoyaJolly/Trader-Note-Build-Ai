@@ -1,16 +1,16 @@
-# Changelog
+# 変更ログ
 
 All notable changes to TradeAssist MVP will be documented in this file.
 
 ## [1.0.0] - 2025-12-21
 
-### Added - Initial MVP Release
+### 追加 - 初期 MVP リリース
 
-#### Core Features
-- **Trade Import System**
-  - CSV file import functionality
-  - Trade data validation and parsing
-  - Placeholder for exchange API integration
+#### コア機能
+- **トレード インポート システム**
+  - CSV ファイル インポート機能
+  - トレード データ検証とパース
+  - 取引所 API 統合のプレースホルダー
 
 - **Trade Note Generation**
   - Automatic structured note creation from trades

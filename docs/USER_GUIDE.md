@@ -1,4 +1,4 @@
-# TradeAssist MVP User Guide
+# TradeAssist MVP ユーザーガイド
 
 ## Getting Started
 

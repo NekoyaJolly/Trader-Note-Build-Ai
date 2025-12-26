@@ -1,4 +1,4 @@
-# Quick Start Guide
+# クイックスタートガイド
 
 Get TradeAssist MVP up and running in 5 minutes!
 

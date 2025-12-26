@@ -1,23 +1,23 @@
-# API Documentation
+# API ドキュメント
 
-## Base URL
+## ベース URL
 ```
 http://localhost:3000
 ```
 
-## Authentication
-Currently no authentication is required. In production, implement JWT or API key authentication.
+## 認証
+現在、認証は不要です。本番環境では JWT または API キー認証を実装してください。
 
 ---
 
-## Endpoints
+## エンドポイント
 
-### Health Check
+### ヘルスチェック
 
 #### GET /health
-Check server health and scheduler status.
+サーバーヘルスとスケジューラーステータスを確認します。
 
-**Response:**
+**応答:**
 ```json
 {
   "status": "ok",
@@ -28,19 +28,19 @@ Check server health and scheduler status.
 
 ---
 
-### Trade Import & Notes
+### トレードインポートとノート
 
 #### POST /api/trades/import/csv
-Import trades from a CSV file in the `data/trades/` directory.
+`data/trades/` ディレクトリ内の CSV ファイルからトレードをインポートします。
 
-**Request Body:**
+**リクエストボディ:**
 ```json
 {
   "filename": "sample_trades.csv"
 }
 ```
 
-**Response:**
+**応答:**
 ```json
 {
   "success": true,
@@ -57,51 +57,51 @@ Import trades from a CSV file in the `data/trades/` directory.
 ```
 
 #### GET /api/trades/notes
-Get all stored trade notes.
+保存されているすべてのトレードノートを取得します。
 
 #### GET /api/trades/notes/:id
-Get a specific trade note by ID.
+ID で特定のトレードノートを取得します。
 
 ---
 
-### Matching
+### マッチング
 
 #### POST /api/matching/check
-Manually trigger a match check against current market conditions.
+現在の市場条件に対してマッチングチェックを手動でトリガーします。
 
 #### GET /api/matching/history
-Get history of all matches found.
+検出されたすべてのマッチの履歴を取得します。
 
 ---
 
-### Notifications
+### 通知
 
 #### GET /api/notifications
-Get all notifications (query param: `unreadOnly=true` for unread only).
+すべての通知を取得します（クエリパラメータ: 未読のみの場合 `unreadOnly=true`）。
 
 #### PUT /api/notifications/:id/read
-Mark a notification as read.
+通知を既読にマークします。
 
 #### PUT /api/notifications/read-all
-Mark all notifications as read.
+すべての通知を既読にマークします。
 
 #### DELETE /api/notifications/:id
-Delete a specific notification.
+特定の通知を削除します。
 
 #### DELETE /api/notifications
-Clear all notifications.
+すべての通知をクリアします。
 
 ---
 
-### Orders
+### 注文
 
 #### GET /api/orders/preset/:noteId
-Generate an order preset based on a matched trade note.
+マッチしたトレードノートに基づいて注文プリセットを生成します。
 
 #### POST /api/orders/confirmation
 Get order confirmation details before execution.
 
-**Request Body:**
+**リクエストボディ:**
 ```json
 {
   "symbol": "BTCUSDT",

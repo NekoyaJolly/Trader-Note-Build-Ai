@@ -1,6 +1,6 @@
 # TradeAssist MVP
 
-TradeAssist MVP is an intelligent trading assistant that automatically generates structured trade notes and matches them with real-time market conditions to provide actionable insights.
+TradeAssist MVP は、トレード履歴を自動的に構造化したトレードノートとして生成し、リアルタイム市場データとマッチングさせることで、実行可能なインサイトを提供するインテリジェントな取引支援システムです。 that automatically generates structured trade notes and matches them with real-time market conditions to provide actionable insights.
 
 ## Core Features
 

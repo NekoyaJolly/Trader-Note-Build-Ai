@@ -1,4 +1,4 @@
-# TradeAssist MVP Architecture
+# TradeAssist MVP アーキテクチャ
 
 ## System Overview
 
