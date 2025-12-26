@@ -30,6 +30,8 @@ TradeAssist MVP は、トレード履歴を自動的に構造化したトレー�
 
 ## Installation
 
+### Backend
+
 ```bash
 # Install dependencies
 npm install
@@ -48,13 +50,46 @@ npm run prisma:generate
 npm run prisma:migrate
 ```
 
+### Frontend (Phase5 UI)
+
+```bash
+# フロントエンドディレクトリに移動
+cd src/frontend
+
+# 依存関係インストール
+npm install
+
+# 環境変数設定
+cp .env.example .env.local
+
+# .env.local を編集してバックエンド URL を設定
+# NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
+```
+
 ## Usage
 
 ### Development Mode
 
+#### Backend のみ起動
+
+```bash
+npm run dev:backend
+```
+
+#### Frontend のみ起動
+
+```bash
+npm run dev:frontend
+```
+
+#### Backend + Frontend 同時起動
+
 ```bash
 npm run dev
 ```
+
+* Backend: http://localhost:3000
+* Frontend: http://localhost:3001
 
 ### Production Mode
 
@@ -205,8 +240,18 @@ Edit `.env` to configure:
 
 ```
 src/
+├── backend/         # Backend サービスロジック
+│   ├── db/          # データベースクライアント
+│   ├── repositories/ # データアクセス層
+│   ├── services/    # ビジネスロジック
+│   └── tests/       # バックエンドテスト
 ├── config/          # Configuration management
 ├── controllers/     # Route controllers
+├── frontend/        # Phase5 UI (Next.js)
+│   ├── app/         # Next.js App Router ページ
+│   ├── components/  # 再利用可能コンポーネント
+│   ├── lib/         # API クライアント
+│   └── types/       # TypeScript 型定義
 ├── models/          # TypeScript interfaces
 ├── routes/          # API routes
 ├── services/        # Business logic services
@@ -215,7 +260,31 @@ src/
 data/
 ├── trades/          # Trade CSV files
 └── notes/           # Stored trade notes (JSON)
+
+docs/
+├── phase0/          # Phase0 設計ドキュメント
+├── phase2/          # Phase2 完了レポート
+├── phase4/          # Phase4 完了レポート
+└── phase5/          # Phase5 完了レポート + UI 仕様
 ```
+
+## Phase5 UI (通知・判定可視化)
+
+Phase5 では、通知と判定結果を可視化する Web UI を実装しています。
+
+### 実装画面
+
+* **ホーム画面** (`/`): システム概要と通知一覧へのリンク
+* **通知一覧** (`/notifications`): 未読/既読管理、スコア表示、詳細遷移
+* **通知詳細** (`/notifications/:id`): 判定理由の詳細、MarketSnapshot、Order Preset リンク
+
+### 設計原則
+
+* **判断はユーザーが行う**: 自動売買は一切行いません
+* **UI は説明責任を果たす**: 判定理由を完全可視化
+* **「当たる」より「納得できる」**: 理解可能な通知を優先
+
+詳細は [src/frontend/README.md](src/frontend/README.md) および [docs/phase5/phase5-ui-specification](docs/phase5/phase5-ui-specification) を参照。
 
 ## License
 
