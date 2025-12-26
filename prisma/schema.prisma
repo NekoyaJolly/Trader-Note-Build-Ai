@@ -96,6 +96,10 @@ model MatchResult {
   threshold         Float
   trendMatched      Boolean
   priceRangeMatched Boolean
+  // ルールベース判定の理由を人間可読な形で保持する
+  reasons           Json
+  // 判定を実行した日時（decidedAt は既存互換用に併存）
+  evaluatedAt       DateTime @default(now()) @db.Timestamptz(6)
   decidedAt         DateTime @default(now()) @db.Timestamptz(6)
   createdAt         DateTime @default(now()) @db.Timestamptz(6)
 
