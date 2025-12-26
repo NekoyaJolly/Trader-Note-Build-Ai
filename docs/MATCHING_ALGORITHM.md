@@ -436,3 +436,63 @@ MATCH_THRESHOLD=0.75
 The matching algorithm provides a quantitative, reproducible method for identifying similar market conditions. By combining mathematical similarity with rule-based validation, it balances precision with recall, delivering actionable insights while minimizing false positives.
 
 The configurable threshold allows users to tune the system to their risk tolerance and trading style, making it adaptable to different strategies and market conditions.
+
+---
+
+## Phase4: 通知トリガロジック
+
+### 目的
+Phase3 で確定した MatchResult を、ユーザー体験を壊さずに通知へ変換する。
+
+### 通知トリガ条件
+1. **スコア閾値チェック**
+   - 最小スコア: 0.75（環境変数 `NOTIFY_THRESHOLD` で変更可）
+   - スコアが閾値未満 → スキップ
+
+2. **理由数チェック**
+   - 最小理由数: 1
+   - 理由がない → スキップ
+
+3. **冪等性チェック（重複防止）**
+   - noteId × marketSnapshotId × channel の組み合わせが一意か確認
+   - 既に通知済み → スキップ
+
+4. **クールダウンチェック**
+   - 同一 noteId について一定時間内の再通知を防止
+   - クールダウン期間: 1 時間（環境変数 `NOTIFY_COOLDOWN_MS` で変更可）
+   - クールダウン中 → スキップ
+
+5. **重複抑制チェック**
+   - 同一 evaluatedAt（秒単位）の再送信を防止
+   - 許容時差: 5 秒（デフォルト）
+   - 重複と判定 → スキップ
+
+### 通知ログ（NotificationLog テーブル）
+配信判定とスキップ理由の永続化
+
+```sql
+CREATE TABLE "NotificationLog" (
+  id UUID PRIMARY KEY,
+  noteId UUID NOT NULL,           -- トレードノート ID
+  marketSnapshotId UUID NOT NULL, -- マーケットスナップショット ID
+  symbol VARCHAR NOT NULL,         -- シンボル（インデックス用）
+  score FLOAT NOT NULL,            -- 判定時のスコア
+  channel VARCHAR NOT NULL,        -- in_app | push | webhook
+  status ENUM NOT NULL,            -- sent | skipped | failed
+  reasonSummary VARCHAR NOT NULL,  -- 配信理由（短文）
+  sentAt TIMESTAMPTZ NOT NULL,    -- 配信・判定時刻
+  createdAt TIMESTAMPTZ NOT NULL,
+  
+  UNIQUE (noteId, marketSnapshotId, channel)  -- 冪等性保証
+);
+```
+
+### 通知配信実装
+- **In-App**: Notification テーブルに記録（Phase4 デフォルト）
+- **Push**: スタブ実装（Phase5 以降で FCM/APNs 統合）
+- **Webhook**: スタブ実装（Phase5 以降で Slack/Teams 統合）
+
+### 設計原則
+> **当たる通知より、うるさくない通知。**
+
+再通知を完全に防ぐことを優先。ユーザーが重複通知で煩わされるリスクを完全に排除する。

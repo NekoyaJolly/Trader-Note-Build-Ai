@@ -23,6 +23,13 @@ enum NotificationStatus {
   deleted
 }
 
+// 通知ログのステータス（配信履歴用）
+enum NotificationLogStatus {
+  sent      // 通知を配信した
+  skipped   // 再通知防止または他の理由でスキップした
+  failed    // 配信に失敗した
+}
+
 model Trade {
   id         String   @id @default(uuid()) @db.Uuid
   timestamp  DateTime @db.Timestamptz(6)
@@ -52,9 +59,10 @@ model TradeNote {
   createdAt     DateTime  @default(now()) @db.Timestamptz(6)
   updatedAt     DateTime  @updatedAt @db.Timestamptz(6)
 
-  trade       Trade      @relation(fields: [tradeId], references: [id])
-  aiSummary   AISummary?
-  matchResult MatchResult[]
+  trade            Trade              @relation(fields: [tradeId], references: [id])
+  aiSummary        AISummary?
+  matchResult      MatchResult[]
+  notificationLogs NotificationLog[]  @relation("NotificationLogNote")
 
   @@index([symbol], map: "idx_tradenote_symbol")
 }
@@ -81,7 +89,8 @@ model MarketSnapshot {
   fetchedAt  DateTime @db.Timestamptz(6)
   createdAt  DateTime @default(now()) @db.Timestamptz(6)
 
-  matchResults MatchResult[]
+  matchResults      MatchResult[]
+  notificationLogs  NotificationLog[]  @relation("NotificationLogSnapshot")
 
   @@unique([symbol, timeframe, fetchedAt], map: "uq_snapshot_symbol_timeframe_fetched")
   @@index([symbol, timeframe], map: "idx_snapshot_symbol_timeframe")
@@ -141,4 +150,41 @@ model OrderPreset {
   matchResult MatchResult @relation(fields: [matchResultId], references: [id])
 
   @@index([symbol, createdAt], map: "idx_orderpreset_symbol_created")
+}
+
+// ========================================
+// Phase4: 通知ログテーブル
+// ========================================
+// 目的: 再通知防止（冪等性・クールダウン）と配信履歴の永続化
+// 設計: noteId × marketSnapshotId × channel で一意性を保証し、
+//      同じ条件の再通知を防ぐ。
+// 備考: 本テーブルは **配信判定とスキップ理由の記録** が主目的。
+//      ユーザーへの通知表示は Notification テーブルを使う。
+model NotificationLog {
+  id               String                 @id @default(uuid()) @db.Uuid
+  noteId           String                 @db.Uuid
+  marketSnapshotId String                 @db.Uuid
+  symbol           String
+  // MatchResult から引き継ぐスコア（判定の根拠を保持）
+  score            Float
+  // 通知チャネル（in_app / push / webhook）
+  channel          String
+  // 通知のステータス：配信成功 / スキップ / 失敗
+  status           NotificationLogStatus  @default(sent)
+  // 通知内容の要約（短文）
+  reasonSummary    String
+  // 配信時刻（UTC）
+  sentAt           DateTime               @default(now()) @db.Timestamptz(6)
+  // 作成時刻
+  createdAt        DateTime               @default(now()) @db.Timestamptz(6)
+
+  note           TradeNote      @relation("NotificationLogNote", fields: [noteId], references: [id])
+  marketSnapshot MarketSnapshot @relation("NotificationLogSnapshot", fields: [marketSnapshotId], references: [id])
+
+  // 冪等性を保証：noteId × marketSnapshotId × channel の組み合わせは一意
+  @@unique([noteId, marketSnapshotId, channel], map: "uq_notiflog_note_snapshot_channel")
+  // クエリ効率: symbol と sentAt でフィルタリング
+  @@index([symbol, sentAt], map: "idx_notiflog_symbol_sent")
+  // クール検索: noteId で最新の sent を取得
+  @@index([noteId, sentAt], map: "idx_notiflog_note_sent")
 }

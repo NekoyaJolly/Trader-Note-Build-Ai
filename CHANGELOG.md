@@ -2,6 +2,57 @@
 
 All notable changes to TradeAssist MVP will be documented in this file.
 
+## [1.0.0-phase4] - 2025-12-27
+
+### 追加 - Phase4: 通知ロジック実装
+
+#### 通知トリガロジック
+- **NotificationTriggerService**: MatchResult を評価し、通知を配信するサービス
+- **スコア閾値チェック**: 最小スコア 0.75 以上のみ通知
+- **再通知防止機構**:
+  - **冪等性保証**: noteId × marketSnapshotId × channel で一意性
+  - **クールダウン**: 同一 noteId について 1 時間内の再通知を防止
+  - **重複抑制**: 直近 5 秒以内の同一条件通知を検査
+
+#### 通知配信抽象化
+- **NotificationSender インターフェース**: 複数チャネル対応
+- **InAppNotificationSender**: In-App 通知実装（Notification テーブルに記録）
+- **Push・Webhook**: スタブ実装（Phase5 で統合予定）
+
+#### データベース変更
+- **新規テーブル: NotificationLog**
+  - 通知配信ログの永続化
+  - スキップ理由の記録
+  - channel 別の冪等性管理
+  - インデックス: symbol, noteId ごとの高速検索
+
+#### 新規 API エンドポイント
+- `POST /api/notifications/check`: 通知を評価・配信
+- `GET /api/notifications/logs`: 通知ログを取得
+- `GET /api/notifications/logs/:id`: 通知ログを ID で取得
+- `DELETE /api/notifications/logs/:id`: 通知ログを削除
+
+#### テスト
+- **NotificationTriggerService**: 13 個のテストケース（全成功）
+  - スコア未満でスキップ
+  - 初回一致で通知
+  - 冪等性による再通知防止
+  - クールダウン中でスキップ
+  - ログ記録確認
+  - エッジケース検証
+
+#### ドキュメント
+- API.md に Phase4 エンドポイント記載
+- MATCHING_ALGORITHM.md に通知ロジック説明を追加
+- Phase4 completion-report.md を新規作成
+
+### 設計原則
+> **当たる通知より、うるさくない通知。**
+
+ユーザーが重複通知で煩わされることを完全に防ぐ。再通知防止を最優先。
+
+---
+
 ## [1.0.0] - 2025-12-21
 
 ### 追加 - 初期 MVP リリース

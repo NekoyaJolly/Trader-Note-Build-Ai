@@ -103,7 +103,65 @@ Phase5 Agent
 
 ---
 
-## レビュー手順（各 Phase 共通）
+## Phase3
+
+### 使用プロンプト
+
+* `Phase3_Agent_Prompt`（MatchEvaluationService 実装）
+
+### 生成物
+
+* MatchEvaluationService
+* RuleBasedMatchEvaluator
+* MatchResult テーブル・Repository
+* 単体テスト
+
+### 完了判定
+
+* MatchResult が DB に保存される
+* score / reasons が記録される
+* テスト全数成功
+
+---
+
+## Phase4
+
+### 使用プロンプト
+
+* `Phase4_Agent_Prompt`（通知ロジック実装）
+
+### 生成物
+
+* NotificationLog テーブル・Repository
+* NotificationSender インターフェース
+* InAppNotificationSender 実装
+* NotificationTriggerService（再通知防止ロジック）
+* NotificationController 統合
+* 単体テスト（13 ケース）
+* API ドキュメント更新
+* ドキュメント（Phase4 completion-report.md、MATCHING_ALGORITHM.md 更新）
+
+### 主な実装内容
+
+#### 再通知防止機構
+1. **冪等性チェック**: noteId × marketSnapshotId × channel で一意性保証
+2. **クールダウン**: 同一 noteId について 1 時間内の再通知を防止
+3. **重複抑制**: 直近 5 秒以内の同一条件通知を検査
+
+#### 新規エンドポイント
+* POST /api/notifications/check
+* GET /api/notifications/logs
+* GET /api/notifications/logs/:id
+* DELETE /api/notifications/logs/:id
+
+### 完了判定
+
+* 通知トリガが正しく動作（テスト 13/13 成功）
+* 再通知事故が起きない（冪等性確認）
+* ログが DB に保存される
+* NotificationLog テーブルが migration 完了
+
+---
 
 1. `Agent_Review_Checklist` を開く
 2. 前提チェック（即 NG 項目）確認

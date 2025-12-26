@@ -93,6 +93,75 @@ ID で特定のトレードノートを取得します。
 
 ---
 
+### Phase4: 通知トリガ・ログ
+
+#### POST /api/notifications/check
+MatchResult から通知を評価し、配信・記録する（再通知防止ロジック適用）。
+
+**リクエストボディ:**
+```json
+{
+  "matchResultId": "uuid",
+  "channel": "in_app"  // 省略可（デフォルト: in_app）
+}
+```
+
+**レスポンス:**
+```json
+{
+  "shouldNotify": true,
+  "status": "sent",
+  "notificationLogId": "uuid",
+  "inAppNotificationId": "uuid"
+}
+```
+
+または（スキップ時）:
+```json
+{
+  "shouldNotify": false,
+  "status": "skipped",
+  "skipReason": "クールダウン中: 次の通知は 2025-12-27T02:27:38Z 以降"
+}
+```
+
+#### GET /api/notifications/logs
+通知ログを取得します。
+
+**クエリパラメータ:**
+- `symbol`: シンボルでフィルタ
+- `noteId`: ノート ID でフィルタ
+- `status`: `sent` | `skipped` | `failed` でフィルタ
+- `limit`: 最大件数（デフォルト: 50）
+
+**レスポンス:**
+```json
+{
+  "logs": [
+    {
+      "id": "uuid",
+      "noteId": "uuid",
+      "marketSnapshotId": "uuid",
+      "symbol": "BTCUSDT",
+      "score": 0.85,
+      "channel": "in_app",
+      "status": "sent",
+      "reasonSummary": "スコア: 0.850｜トレンド一致 ｜ 価格レンジ一致",
+      "sentAt": "2025-12-27T01:27:38Z",
+      "createdAt": "2025-12-27T01:27:38Z"
+    }
+  ]
+}
+```
+
+#### GET /api/notifications/logs/:id
+指定 ID の通知ログを取得します。
+
+#### DELETE /api/notifications/logs/:id
+指定 ID の通知ログを削除します。
+
+---
+
 ### 注文
 
 #### GET /api/orders/preset/:noteId
