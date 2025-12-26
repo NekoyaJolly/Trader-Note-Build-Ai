@@ -41,6 +41,11 @@ cp .env.example .env
 # - AI_API_KEY: Your AI service API key (OpenAI, etc.)
 # - MARKET_API_KEY: Your market data API key
 # - PUSH_NOTIFICATION_KEY: Your push notification service key
+# - DB_URL: PostgreSQL 接続文字列（例: postgresql://postgres:postgres@localhost:5432/tradeassist）
+
+# Prisma クライアントと初期マイグレーションを適用
+npm run prisma:generate
+npm run prisma:migrate
 ```
 
 ## Usage

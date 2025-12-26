@@ -1,0 +1,140 @@
+// Prisma スキーマ: Phase0 data-model に準拠し、全フィールドは原則 UTC/NOT NULL で設計
+// モデル追加時は日本語コメントで意図を明示すること
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DB_URL")
+}
+
+// 売買区分を明示する列挙
+enum TradeSide {
+  buy
+  sell
+}
+
+// 通知ステータス
+enum NotificationStatus {
+  unread
+  read
+  deleted
+}
+
+model Trade {
+  id         String   @id @default(uuid()) @db.Uuid
+  timestamp  DateTime @db.Timestamptz(6)
+  symbol     String
+  side       TradeSide
+  price      Decimal  @db.Decimal(18, 8)
+  quantity   Decimal  @db.Decimal(18, 8)
+  fee        Decimal? @db.Decimal(18, 8)
+  exchange   String?
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(6)
+
+  note TradeNote?
+
+  @@index([symbol, timestamp], map: "idx_trade_symbol_timestamp")
+}
+
+model TradeNote {
+  id            String    @id @default(uuid()) @db.Uuid
+  tradeId       String    @unique @db.Uuid
+  symbol        String
+  entryPrice    Decimal   @db.Decimal(18, 8)
+  side          TradeSide
+  indicators    Json?
+  featureVector Float[]
+  timeframe     String?
+  createdAt     DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @db.Timestamptz(6)
+
+  trade       Trade      @relation(fields: [tradeId], references: [id])
+  aiSummary   AISummary?
+  matchResult MatchResult[]
+
+  @@index([symbol], map: "idx_tradenote_symbol")
+}
+
+model AISummary {
+  id               String   @id @default(uuid()) @db.Uuid
+  noteId           String   @unique @db.Uuid
+  summary          String
+  promptTokens     Int?
+  completionTokens Int?
+  model            String?
+  createdAt        DateTime @default(now()) @db.Timestamptz(6)
+
+  note TradeNote @relation(fields: [noteId], references: [id])
+}
+
+model MarketSnapshot {
+  id         String   @id @default(uuid()) @db.Uuid
+  symbol     String
+  timeframe  String
+  close      Decimal  @db.Decimal(18, 8)
+  volume     Decimal  @db.Decimal(18, 8)
+  indicators Json
+  fetchedAt  DateTime @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+
+  matchResults MatchResult[]
+
+  @@unique([symbol, timeframe, fetchedAt], map: "uq_snapshot_symbol_timeframe_fetched")
+  @@index([symbol, timeframe], map: "idx_snapshot_symbol_timeframe")
+}
+
+model MatchResult {
+  id                String   @id @default(uuid()) @db.Uuid
+  noteId            String   @db.Uuid
+  marketSnapshotId  String   @db.Uuid
+  symbol            String
+  score             Float
+  threshold         Float
+  trendMatched      Boolean
+  priceRangeMatched Boolean
+  decidedAt         DateTime @default(now()) @db.Timestamptz(6)
+  createdAt         DateTime @default(now()) @db.Timestamptz(6)
+
+  note           TradeNote      @relation(fields: [noteId], references: [id])
+  marketSnapshot MarketSnapshot @relation(fields: [marketSnapshotId], references: [id])
+  notifications  Notification[]
+  orderPresets   OrderPreset[]
+
+  @@unique([noteId, marketSnapshotId], map: "uq_match_note_snapshot")
+  @@index([symbol, decidedAt], map: "idx_match_symbol_decided")
+}
+
+model Notification {
+  id            String             @id @default(uuid()) @db.Uuid
+  matchResultId String             @db.Uuid
+  title         String
+  message       String
+  status        NotificationStatus @default(unread)
+  sentAt        DateTime           @default(now()) @db.Timestamptz(6)
+  readAt        DateTime?          @db.Timestamptz(6)
+  createdAt     DateTime           @default(now()) @db.Timestamptz(6)
+
+  matchResult MatchResult @relation(fields: [matchResultId], references: [id])
+
+  @@index([status, sentAt], map: "idx_notification_status_sent")
+}
+
+model OrderPreset {
+  id                String    @id @default(uuid()) @db.Uuid
+  matchResultId     String    @db.Uuid
+  symbol            String
+  side              TradeSide
+  suggestedPrice    Decimal   @db.Decimal(18, 8)
+  suggestedQuantity Decimal   @db.Decimal(18, 8)
+  confidence        Float
+  feesEstimate      Decimal?  @db.Decimal(18, 8)
+  createdAt         DateTime  @default(now()) @db.Timestamptz(6)
+
+  matchResult MatchResult @relation(fields: [matchResultId], references: [id])
+
+  @@index([symbol, createdAt], map: "idx_orderpreset_symbol_created")
+}

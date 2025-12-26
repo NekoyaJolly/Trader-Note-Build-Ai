@@ -7,9 +7,13 @@ export const config = {
     port: parseInt(process.env.PORT || '3000', 10),
     env: process.env.NODE_ENV || 'development',
   },
+  database: {
+    url: process.env.DB_URL || '',
+  },
   ai: {
     apiKey: process.env.AI_API_KEY || '',
     model: process.env.AI_MODEL || 'gpt-4o-mini',
+    baseURL: process.env.AI_BASE_URL || 'https://api.openai.com/v1',
   },
   market: {
     apiUrl: process.env.MARKET_API_URL || '',

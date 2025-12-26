@@ -1,72 +1,93 @@
 import fs from 'fs';
-import path from 'path';
 import csv from 'csv-parser';
-import { Trade } from '../models/types';
-import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
+import { TradeSide } from '@prisma/client';
+import { TradeRepository } from '../backend/repositories/tradeRepository';
 
-/**
- * Service for importing trade history from CSV files
- */
 export class TradeImportService {
-  /**
-   * Import trades from CSV file
-   * Expected CSV format: timestamp,symbol,side,price,quantity,fee,exchange
-   */
-  async importFromCSV(filePath: string): Promise<Trade[]> {
-    const trades: Trade[] = [];
+  private tradeRepository: TradeRepository;
 
-    return new Promise((resolve, reject) => {
+  constructor() {
+    this.tradeRepository = new TradeRepository();
+  }
+
+  /**
+   * CSV からトレードを取り込み DB に保存する
+   * 期待フォーマット: timestamp,symbol,side,price,quantity,fee,exchange
+   */
+  async importFromCSV(filePath: string): Promise<{ tradesImported: number }> {
+    const trades: Array<{
+      id: string;
+      timestamp: Date;
+      symbol: string;
+      side: TradeSide;
+      price: number;
+      quantity: number;
+      fee?: number;
+      exchange?: string;
+    }> = [];
+
+    await new Promise<void>((resolve, reject) => {
       fs.createReadStream(filePath)
         .pipe(csv())
         .on('data', (row) => {
           try {
-            const trade: Trade = {
-              id: uuidv4(),
-              timestamp: new Date(row.timestamp),
-              symbol: row.symbol.toUpperCase(),
-              side: row.side.toLowerCase() as 'buy' | 'sell',
-              price: parseFloat(row.price),
-              quantity: parseFloat(row.quantity),
+            const parsedSide = String(row.side || '').toLowerCase();
+            if (!this.isValidSide(parsedSide)) {
+              // サイドが不正な行はスキップ
+              return;
+            }
+
+            const timestamp = new Date(row.timestamp);
+            if (Number.isNaN(timestamp.getTime())) {
+              // 日付が不正な行はスキップ
+              return;
+            }
+
+            const price = parseFloat(row.price);
+            const quantity = parseFloat(row.quantity);
+            if (!(price > 0) || !(quantity > 0)) {
+              // 価格・数量が不正な行はスキップ
+              return;
+            }
+
+            trades.push({
+              id: crypto.randomUUID(),
+              timestamp: new Date(timestamp.toISOString()), // UTC 前提
+              symbol: String(row.symbol || '').toUpperCase(),
+              side: parsedSide as TradeSide,
+              price,
+              quantity,
               fee: row.fee ? parseFloat(row.fee) : undefined,
               exchange: row.exchange || undefined,
-            };
-            trades.push(trade);
+            });
           } catch (error) {
             console.error('Error parsing row:', row, error);
           }
         })
-        .on('end', () => {
-          console.log(`Imported ${trades.length} trades from ${filePath}`);
-          resolve(trades);
-        })
-        .on('error', (error) => {
-          reject(error);
-        });
+        .on('end', () => resolve())
+        .on('error', (error) => reject(error));
     });
+
+    const inserted = await this.tradeRepository.bulkInsert(trades);
+    console.log(`Imported ${inserted} trades from ${filePath}`);
+
+    return { tradesImported: inserted };
   }
 
   /**
    * Import trades from API
    * This is a placeholder for actual API integration
    */
-  async importFromAPI(exchange: string, apiKey: string): Promise<Trade[]> {
+  async importFromAPI(exchange: string, apiKey: string): Promise<[]> {
     // Placeholder for API integration
     // In a real implementation, this would call the exchange API
     console.log(`API import from ${exchange} not yet implemented`);
     return [];
   }
 
-  /**
-   * Validate trade data
-   */
-  validateTrade(trade: Trade): boolean {
-    return (
-      !!trade.id &&
-      !!trade.timestamp &&
-      !!trade.symbol &&
-      (trade.side === 'buy' || trade.side === 'sell') &&
-      trade.price > 0 &&
-      trade.quantity > 0
-    );
+  // サイドのバリデーション
+  private isValidSide(side: string): side is TradeSide {
+    return side === 'buy' || side === 'sell';
   }
 }

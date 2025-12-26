@@ -1,21 +1,16 @@
 import { Request, Response } from 'express';
 import { TradeImportService } from '../services/tradeImportService';
-import { TradeNoteService } from '../services/tradeNoteService';
 import path from 'path';
 import { config } from '../config';
 
 export class TradeController {
   private importService: TradeImportService;
-  private noteService: TradeNoteService;
 
   constructor() {
     this.importService = new TradeImportService();
-    this.noteService = new TradeNoteService();
   }
 
-  /**
-   * Import trades from CSV file
-   */
+  // CSV からトレードを取り込み、DB に保存する（Phase1 ではノート生成しない）
   importCSV = async (req: Request, res: Response): Promise<void> => {
     try {
       const { filename } = req.body;
@@ -26,21 +21,14 @@ export class TradeController {
       }
 
       const filepath = path.join(process.cwd(), config.paths.trades, filename);
-      const trades = await this.importService.importFromCSV(filepath);
-
-      // Generate notes for each trade
-      const notes = [];
-      for (const trade of trades) {
-        const note = await this.noteService.generateNote(trade);
-        await this.noteService.saveNote(note);
-        notes.push(note);
-      }
+      const result = await this.importService.importFromCSV(filepath);
 
       res.json({
         success: true,
-        tradesImported: trades.length,
-        notesGenerated: notes.length,
-        notes: notes.map(n => ({ id: n.id, symbol: n.symbol, timestamp: n.timestamp }))
+        tradesImported: result.tradesImported,
+        // Phase1 ではノート生成を行わないため空で返す
+        notesGenerated: 0,
+        notes: []
       });
     } catch (error) {
       console.error('Error importing CSV:', error);
@@ -49,60 +37,18 @@ export class TradeController {
   };
 
   /**
-   * Import trades from API
-   */
-  importAPI = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { exchange, apiKey } = req.body;
-
-      if (!exchange || !apiKey) {
-        res.status(400).json({ error: 'Exchange and API key are required' });
-        return;
-      }
-
-      const trades = await this.importService.importFromAPI(exchange, apiKey);
-
-      res.json({
-        success: true,
-        tradesImported: trades.length,
-        message: 'API import not yet fully implemented'
-      });
-    } catch (error) {
-      console.error('Error importing from API:', error);
-      res.status(500).json({ error: 'Failed to import from API' });
-    }
-  };
-
-  /**
    * Get all trade notes
    */
   getAllNotes = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const notes = await this.noteService.loadAllNotes();
-      res.json({ notes });
-    } catch (error) {
-      console.error('Error getting notes:', error);
-      res.status(500).json({ error: 'Failed to retrieve notes' });
-    }
+    // Phase1 スコープ外（ノート生成未対応）。利用者に空配列を返却する。
+    res.json({ notes: [] });
   };
 
   /**
    * Get a specific note by ID
    */
   getNoteById = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { id } = req.params;
-      const note = await this.noteService.getNoteById(id);
-
-      if (!note) {
-        res.status(404).json({ error: 'Note not found' });
-        return;
-      }
-
-      res.json({ note });
-    } catch (error) {
-      console.error('Error getting note:', error);
-      res.status(500).json({ error: 'Failed to retrieve note' });
-    }
+    // Phase1 スコープ外（ノート生成未対応）。常に 404 を返却する。
+    res.status(404).json({ error: 'Note not found (Phase1: not generated yet)' });
   };
 }

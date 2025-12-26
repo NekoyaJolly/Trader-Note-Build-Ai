@@ -11,12 +11,6 @@ const tradeController = new TradeController();
 router.post('/import/csv', tradeController.importCSV);
 
 /**
- * POST /api/trades/import/api
- * Import trades from exchange API
- */
-router.post('/import/api', tradeController.importAPI);
-
-/**
  * GET /api/trades/notes
  * Get all trade notes
  */
