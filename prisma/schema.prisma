@@ -1,6 +1,3 @@
-// Prisma スキーマ: Phase0 data-model に準拠し、全フィールドは原則 UTC/NOT NULL で設計
-// モデル追加時は日本語コメントで意図を明示すること
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,112 +7,85 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// 売買区分を明示する列挙
-enum TradeSide {
-  buy
-  sell
-}
-
-// 通知ステータス
-enum NotificationStatus {
-  unread
-  read
-  deleted
-}
-
-// 通知ログのステータス（配信履歴用）
-enum NotificationLogStatus {
-  sent      // 通知を配信した
-  skipped   // 再通知防止または他の理由でスキップした
-  failed    // 配信に失敗した
-}
-
 model Trade {
-  id         String   @id @default(uuid()) @db.Uuid
-  timestamp  DateTime @db.Timestamptz(6)
-  symbol     String
-  side       TradeSide
-  price      Decimal  @db.Decimal(18, 8)
-  quantity   Decimal  @db.Decimal(18, 8)
-  fee        Decimal? @db.Decimal(18, 8)
-  exchange   String?
-  createdAt  DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt  DateTime @updatedAt @db.Timestamptz(6)
-
-  note TradeNote?
+  id        String     @id @default(uuid()) @db.Uuid
+  timestamp DateTime   @db.Timestamptz(6)
+  symbol    String
+  side      TradeSide
+  price     Decimal    @db.Decimal(18, 8)
+  quantity  Decimal    @db.Decimal(18, 8)
+  fee       Decimal?   @db.Decimal(18, 8)
+  exchange  String?
+  createdAt DateTime   @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime   @updatedAt @db.Timestamptz(6)
+  note      TradeNote?
 
   @@index([symbol, timestamp], map: "idx_trade_symbol_timestamp")
 }
 
 model TradeNote {
-  id            String    @id @default(uuid()) @db.Uuid
-  tradeId       String    @unique @db.Uuid
-  symbol        String
-  entryPrice    Decimal   @db.Decimal(18, 8)
-  side          TradeSide
-  indicators    Json?
-  featureVector Float[]
-  timeframe     String?
-  createdAt     DateTime  @default(now()) @db.Timestamptz(6)
-  updatedAt     DateTime  @updatedAt @db.Timestamptz(6)
-
-  trade            Trade              @relation(fields: [tradeId], references: [id])
+  id               String            @id @default(uuid()) @db.Uuid
+  tradeId          String            @unique @db.Uuid
+  symbol           String
+  entryPrice       Decimal           @db.Decimal(18, 8)
+  side             TradeSide
+  indicators       Json?
+  featureVector    Float[]
+  timeframe        String?
+  createdAt        DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime          @updatedAt @db.Timestamptz(6)
   aiSummary        AISummary?
   matchResult      MatchResult[]
-  notificationLogs NotificationLog[]  @relation("NotificationLogNote")
+  notificationLogs NotificationLog[] @relation("NotificationLogNote")
+  trade            Trade             @relation(fields: [tradeId], references: [id])
 
   @@index([symbol], map: "idx_tradenote_symbol")
 }
 
 model AISummary {
-  id               String   @id @default(uuid()) @db.Uuid
-  noteId           String   @unique @db.Uuid
+  id               String    @id @default(uuid()) @db.Uuid
+  noteId           String    @unique @db.Uuid
   summary          String
   promptTokens     Int?
   completionTokens Int?
   model            String?
-  createdAt        DateTime @default(now()) @db.Timestamptz(6)
-
-  note TradeNote @relation(fields: [noteId], references: [id])
+  createdAt        DateTime  @default(now()) @db.Timestamptz(6)
+  note             TradeNote @relation(fields: [noteId], references: [id])
 }
 
 model MarketSnapshot {
-  id         String   @id @default(uuid()) @db.Uuid
-  symbol     String
-  timeframe  String
-  close      Decimal  @db.Decimal(18, 8)
-  volume     Decimal  @db.Decimal(18, 8)
-  indicators Json
-  fetchedAt  DateTime @db.Timestamptz(6)
-  createdAt  DateTime @default(now()) @db.Timestamptz(6)
-
-  matchResults      MatchResult[]
-  notificationLogs  NotificationLog[]  @relation("NotificationLogSnapshot")
+  id               String            @id @default(uuid()) @db.Uuid
+  symbol           String
+  timeframe        String
+  close            Decimal           @db.Decimal(18, 8)
+  volume           Decimal           @db.Decimal(18, 8)
+  indicators       Json
+  fetchedAt        DateTime          @db.Timestamptz(6)
+  createdAt        DateTime          @default(now()) @db.Timestamptz(6)
+  matchResults     MatchResult[]
+  notificationLogs NotificationLog[] @relation("NotificationLogSnapshot")
 
   @@unique([symbol, timeframe, fetchedAt], map: "uq_snapshot_symbol_timeframe_fetched")
   @@index([symbol, timeframe], map: "idx_snapshot_symbol_timeframe")
 }
 
 model MatchResult {
-  id                String   @id @default(uuid()) @db.Uuid
-  noteId            String   @db.Uuid
-  marketSnapshotId  String   @db.Uuid
+  id                String         @id @default(uuid()) @db.Uuid
+  noteId            String         @db.Uuid
+  marketSnapshotId  String         @db.Uuid
   symbol            String
   score             Float
   threshold         Float
   trendMatched      Boolean
   priceRangeMatched Boolean
-  // ルールベース判定の理由を人間可読な形で保持する
+  decidedAt         DateTime       @default(now()) @db.Timestamptz(6)
+  createdAt         DateTime       @default(now()) @db.Timestamptz(6)
+  evaluatedAt       DateTime       @default(now()) @db.Timestamptz(6)
   reasons           Json
-  // 判定を実行した日時（decidedAt は既存互換用に併存）
-  evaluatedAt       DateTime @default(now()) @db.Timestamptz(6)
-  decidedAt         DateTime @default(now()) @db.Timestamptz(6)
-  createdAt         DateTime @default(now()) @db.Timestamptz(6)
-
-  note           TradeNote      @relation(fields: [noteId], references: [id])
-  marketSnapshot MarketSnapshot @relation(fields: [marketSnapshotId], references: [id])
-  notifications  Notification[]
-  orderPresets   OrderPreset[]
+  marketSnapshot    MarketSnapshot @relation(fields: [marketSnapshotId], references: [id])
+  note              TradeNote      @relation(fields: [noteId], references: [id])
+  notifications     Notification[]
+  orderPresets      OrderPreset[]
 
   @@unique([noteId, marketSnapshotId], map: "uq_match_note_snapshot")
   @@index([symbol, decidedAt], map: "idx_match_symbol_decided")
@@ -130,61 +100,58 @@ model Notification {
   sentAt        DateTime           @default(now()) @db.Timestamptz(6)
   readAt        DateTime?          @db.Timestamptz(6)
   createdAt     DateTime           @default(now()) @db.Timestamptz(6)
-
-  matchResult MatchResult @relation(fields: [matchResultId], references: [id])
+  matchResult   MatchResult        @relation(fields: [matchResultId], references: [id])
 
   @@index([status, sentAt], map: "idx_notification_status_sent")
 }
 
 model OrderPreset {
-  id                String    @id @default(uuid()) @db.Uuid
-  matchResultId     String    @db.Uuid
+  id                String      @id @default(uuid()) @db.Uuid
+  matchResultId     String      @db.Uuid
   symbol            String
   side              TradeSide
-  suggestedPrice    Decimal   @db.Decimal(18, 8)
-  suggestedQuantity Decimal   @db.Decimal(18, 8)
+  suggestedPrice    Decimal     @db.Decimal(18, 8)
+  suggestedQuantity Decimal     @db.Decimal(18, 8)
   confidence        Float
-  feesEstimate      Decimal?  @db.Decimal(18, 8)
-  createdAt         DateTime  @default(now()) @db.Timestamptz(6)
-
-  matchResult MatchResult @relation(fields: [matchResultId], references: [id])
+  feesEstimate      Decimal?    @db.Decimal(18, 8)
+  createdAt         DateTime    @default(now()) @db.Timestamptz(6)
+  matchResult       MatchResult @relation(fields: [matchResultId], references: [id])
 
   @@index([symbol, createdAt], map: "idx_orderpreset_symbol_created")
 }
 
-// ========================================
-// Phase4: 通知ログテーブル
-// ========================================
-// 目的: 再通知防止（冪等性・クールダウン）と配信履歴の永続化
-// 設計: noteId × marketSnapshotId × channel で一意性を保証し、
-//      同じ条件の再通知を防ぐ。
-// 備考: 本テーブルは **配信判定とスキップ理由の記録** が主目的。
-//      ユーザーへの通知表示は Notification テーブルを使う。
 model NotificationLog {
-  id               String                 @id @default(uuid()) @db.Uuid
-  noteId           String                 @db.Uuid
-  marketSnapshotId String                 @db.Uuid
+  id               String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  noteId           String                @db.Uuid
+  marketSnapshotId String                @db.Uuid
   symbol           String
-  // MatchResult から引き継ぐスコア（判定の根拠を保持）
   score            Float
-  // 通知チャネル（in_app / push / webhook）
   channel          String
-  // 通知のステータス：配信成功 / スキップ / 失敗
-  status           NotificationLogStatus  @default(sent)
-  // 通知内容の要約（短文）
+  status           NotificationLogStatus @default(sent)
   reasonSummary    String
-  // 配信時刻（UTC）
-  sentAt           DateTime               @default(now()) @db.Timestamptz(6)
-  // 作成時刻
-  createdAt        DateTime               @default(now()) @db.Timestamptz(6)
+  sentAt           DateTime              @default(now()) @db.Timestamptz(6)
+  createdAt        DateTime              @default(now()) @db.Timestamptz(6)
+  marketSnapshot   MarketSnapshot        @relation("NotificationLogSnapshot", fields: [marketSnapshotId], references: [id])
+  note             TradeNote             @relation("NotificationLogNote", fields: [noteId], references: [id])
 
-  note           TradeNote      @relation("NotificationLogNote", fields: [noteId], references: [id])
-  marketSnapshot MarketSnapshot @relation("NotificationLogSnapshot", fields: [marketSnapshotId], references: [id])
-
-  // 冪等性を保証：noteId × marketSnapshotId × channel の組み合わせは一意
   @@unique([noteId, marketSnapshotId, channel], map: "uq_notiflog_note_snapshot_channel")
-  // クエリ効率: symbol と sentAt でフィルタリング
   @@index([symbol, sentAt], map: "idx_notiflog_symbol_sent")
-  // クール検索: noteId で最新の sent を取得
   @@index([noteId, sentAt], map: "idx_notiflog_note_sent")
+}
+
+enum TradeSide {
+  buy
+  sell
+}
+
+enum NotificationStatus {
+  unread
+  read
+  deleted
+}
+
+enum NotificationLogStatus {
+  sent
+  skipped
+  failed
 }
