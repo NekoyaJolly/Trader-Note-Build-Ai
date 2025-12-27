@@ -1,4 +1,4 @@
-import { MatchResult, PrismaClient } from '@prisma/client';
+import { MatchResult, PrismaClient, TradeNote, MarketSnapshot } from '@prisma/client';
 import { prisma } from '../db/client';
 
 /**
@@ -18,6 +18,11 @@ export interface MatchResultUpsertInput {
   reasons: string[];      // 人間可読な理由の配列（日本語）
   evaluatedAt: Date;      // 判定実行時刻（UTC 前提）
 }
+
+export type MatchResultWithRelations = MatchResult & {
+  note: TradeNote;
+  marketSnapshot: MarketSnapshot;
+};
 
 export class MatchResultRepository {
   private prisma: PrismaClient;
@@ -60,5 +65,17 @@ export class MatchResultRepository {
         decidedAt: input.evaluatedAt,
       },
     });
+  }
+
+  /**
+   * MatchResult を ID 配列で取得し、関連する Note と Snapshot を含めて返す
+   */
+  async findWithRelations(ids: string[]): Promise<MatchResultWithRelations[]> {
+    if (ids.length === 0) return [];
+
+    return this.prisma.matchResult.findMany({
+      where: { id: { in: ids } },
+      include: { note: true, marketSnapshot: true },
+    }) as Promise<MatchResultWithRelations[]>;
   }
 }

@@ -11,18 +11,21 @@ import { TradeNoteGeneratorService } from '../../services/note-generator/tradeNo
 import { TradeNoteRepository } from '../../backend/repositories/tradeNoteRepository';
 import { AISummaryService } from '../../services/aiSummaryService';
 import { FeatureExtractor, MarketContext } from '../../services/note-generator/featureExtractor';
+import { DecisionInferenceService } from '../../services/inference/decisionInferenceService';
 import { Trade, TradeSide, Prisma } from '@prisma/client';
 
 // モックを作成
 jest.mock('../../backend/repositories/tradeNoteRepository');
 jest.mock('../../services/aiSummaryService');
 jest.mock('../../services/note-generator/featureExtractor');
+jest.mock('../../services/inference/decisionInferenceService');
 
 describe('TradeNoteGeneratorService', () => {
   let service: TradeNoteGeneratorService;
   let mockRepository: jest.Mocked<TradeNoteRepository>;
   let mockAIService: jest.Mocked<AISummaryService>;
   let mockFeatureExtractor: jest.Mocked<FeatureExtractor>;
+  let mockInferenceService: jest.Mocked<DecisionInferenceService>;
 
   // テスト用のモックトレードデータ
   const createMockTrade = (overrides?: Partial<Trade>): Trade => ({
@@ -83,11 +86,21 @@ describe('TradeNoteGeneratorService', () => {
       version: '1.0.0',
     });
 
+    // モック推定サービスのセットアップ
+    mockInferenceService = new DecisionInferenceService() as jest.Mocked<DecisionInferenceService>;
+    mockInferenceService.infer = jest.fn().mockResolvedValue({
+      primaryTimeframe: '15m',
+      secondaryTimeframes: ['60m'],
+      inferredMode: 'trend',
+      rationale: 'テスト推定',
+    });
+
     // サービスをモックと共にインスタンス化
     service = new TradeNoteGeneratorService(
       mockRepository,
       mockAIService,
-      mockFeatureExtractor
+      mockFeatureExtractor,
+      mockInferenceService
     );
   });
 
@@ -123,6 +136,7 @@ describe('TradeNoteGeneratorService', () => {
           symbol: 'BTCUSD',
           entryPrice: 50000,
           side: TradeSide.buy,
+          timeframe: '15m',
         }),
         expect.objectContaining({
           summary: 'テスト要約',
@@ -136,6 +150,7 @@ describe('TradeNoteGeneratorService', () => {
       expect(result.featureVector).toEqual([0.02, 0.5, 0.65, 0.05, 1, 0.02, 0]);
       expect(result.tokenUsage?.promptTokens).toBe(100);
       expect(result.tokenUsage?.completionTokens).toBe(50);
+      expect(result.inference?.primaryTimeframe).toBe('15m');
     });
 
     test('市場コンテキストなしでもノートを生成できる', async () => {
@@ -146,16 +161,18 @@ describe('TradeNoteGeneratorService', () => {
       // 特徴量抽出が呼ばれたことを確認 (marketContext は undefined)
       expect(mockFeatureExtractor.extractFeatures).toHaveBeenCalledWith(trade, undefined);
 
-      // リポジトリが呼ばれたことを確認 (indicators は undefined)
+      // 推定結果がインジケータに含まれることを確認
       expect(mockRepository.createWithSummary).toHaveBeenCalledWith(
         expect.objectContaining({
           tradeId: 'test-trade-id',
-          indicators: undefined,
+          indicators: expect.objectContaining({ inferredMode: 'trend' }),
+          timeframe: '15m',
         }),
         expect.any(Object)
       );
 
       expect(result.noteId).toBe('test-note-id');
+      expect(result.inference?.inferredMode).toBe('trend');
     });
 
     test('売り注文でもノートを生成できる', async () => {

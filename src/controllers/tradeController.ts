@@ -26,6 +26,8 @@ export class TradeController {
       res.json({
         success: true,
         tradesImported: result.tradesImported,
+        tradesSkipped: result.skipped,
+        importErrors: result.errors,
         // Phase1 ではノート生成を行わないため空で返す
         notesGenerated: 0,
         notes: []

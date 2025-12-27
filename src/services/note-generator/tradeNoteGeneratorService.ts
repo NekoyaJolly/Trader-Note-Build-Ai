@@ -16,6 +16,7 @@ import { Trade, TradeSide } from '@prisma/client';
 import { TradeNoteRepository } from '../../backend/repositories/tradeNoteRepository';
 import { AISummaryService, TradeDataForSummary } from '../aiSummaryService';
 import { FeatureExtractor, MarketContext, FeatureVector } from './featureExtractor';
+import { DecisionInferenceService, DecisionInferenceResult } from '../inference/decisionInferenceService';
 
 /**
  * ノート生成結果
@@ -30,6 +31,7 @@ export interface TradeNoteGenerationResult {
     promptTokens?: number;
     completionTokens?: number;
   };
+  inference?: DecisionInferenceResult; // 推定結果（時間足・判断モード）
 }
 
 /**
@@ -39,16 +41,19 @@ export class TradeNoteGeneratorService {
   private repository: TradeNoteRepository;
   private aiService: AISummaryService;
   private featureExtractor: FeatureExtractor;
+  private decisionInferenceService: DecisionInferenceService;
 
   constructor(
     repository?: TradeNoteRepository,
     aiService?: AISummaryService,
-    featureExtractor?: FeatureExtractor
+    featureExtractor?: FeatureExtractor,
+    decisionInferenceService?: DecisionInferenceService
   ) {
     // 依存性注入を許可 (テストしやすくするため)
     this.repository = repository || new TradeNoteRepository();
     this.aiService = aiService || new AISummaryService();
     this.featureExtractor = featureExtractor || new FeatureExtractor();
+    this.decisionInferenceService = decisionInferenceService || new DecisionInferenceService();
   }
 
   /**
@@ -81,6 +86,23 @@ export class TradeNoteGeneratorService {
     const summaryData = this.prepareTradeDataForSummary(trade, marketContext);
     const aiResult = await this.aiService.generateTradeSummary(summaryData);
 
+    // ステップ 2.5: 時間足・判断モード推定（AI キーがなくてもヒューリスティックで推定）
+    const inference = await this.decisionInferenceService.infer({
+      trade,
+      featureVector: featureVector.values,
+      marketContext,
+    });
+
+    const indicators = marketContext ? this.extractIndicators(marketContext) : {};
+    const indicatorsWithInference = {
+      ...indicators,
+      inferredMode: inference.inferredMode,
+      inferenceRationale: inference.rationale,
+      secondaryTimeframes: inference.secondaryTimeframes,
+    };
+    const indicatorsPayload = Object.keys(indicatorsWithInference).length > 0 ? indicatorsWithInference : undefined;
+    const primaryTimeframe = inference.primaryTimeframe || marketContext?.timeframe;
+
     // ステップ 3: DB に永続化
     const savedNote = await this.repository.createWithSummary(
       {
@@ -88,9 +110,9 @@ export class TradeNoteGeneratorService {
         symbol: trade.symbol,
         entryPrice: Number(trade.price),
         side: trade.side,
-        indicators: marketContext ? this.extractIndicators(marketContext) : undefined,
+        indicators: indicatorsPayload,
         featureVector: featureVector.values,
-        timeframe: marketContext?.timeframe,
+        timeframe: primaryTimeframe,
       },
       {
         summary: aiResult.summary,
@@ -111,6 +133,7 @@ export class TradeNoteGeneratorService {
         promptTokens: aiResult.promptTokens,
         completionTokens: aiResult.completionTokens,
       },
+      inference,
     };
   }
 

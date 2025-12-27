@@ -37,6 +37,13 @@ async function main() {
     // 結果出力
     console.log('\n=== インポート完了 ===');
     console.log(`✓ Trade レコード保存: OK（件数: ${result.tradesImported}）`);
+    console.log(`✓ スキップ行: ${result.skipped} 件`);
+    if (result.errors.length > 0) {
+      console.log('⚠️ インポート時の警告:');
+      for (const err of result.errors) {
+        console.log(`  - ${err}`);
+      }
+    }
     console.log('✓ Prisma エラー: なし\n');
 
     // DB 接続確認

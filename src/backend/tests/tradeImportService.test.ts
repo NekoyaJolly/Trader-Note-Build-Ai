@@ -21,6 +21,8 @@ describe('TradeImportService', () => {
 
     // 取り込み件数が 5 件であり、DB 件数が +5 されること
     expect(result.tradesImported).toBe(5);
+    expect(result.skipped).toBe(0);
+    expect(result.errors).toHaveLength(0);
     expect(after - before).toBe(5);
   });
 
@@ -43,6 +45,8 @@ describe('TradeImportService', () => {
 
     // 有効行は 1 行のみ保存される
     expect(result.tradesImported).toBe(1);
+    expect(result.skipped).toBe(3);
+    expect(result.errors.length).toBeGreaterThanOrEqual(3);
     expect(after - before).toBe(1);
 
     // 後片付け

@@ -41,4 +41,13 @@ export class TradeRepository {
   async countAll(): Promise<number> {
     return prisma.trade.count();
   }
+
+  // ノート未生成のトレードを取得（古い順）
+  async findTradesWithoutNotes(limit: number = 500): Promise<PrismaTrade[]> {
+    return prisma.trade.findMany({
+      where: { note: null },
+      orderBy: { timestamp: 'asc' },
+      take: limit,
+    });
+  }
 }
