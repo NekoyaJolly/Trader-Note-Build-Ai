@@ -1,7 +1,8 @@
 {
-  "buildCommand": "cd src/frontend && npm run build",
-  "outputDirectory": "src/frontend/.next",
-  "installCommand": "cd src/frontend && npm install",
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "rootDirectory": "src/frontend"
+  "installCommand": "cd src/frontend && npm install",
+  "buildCommand": "cd src/frontend && npm run build",
+  "devCommand": "cd src/frontend && npm run dev",
+  "outputDirectory": "src/frontend/.next"
 }
