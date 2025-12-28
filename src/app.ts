@@ -26,11 +26,18 @@ class App {
    */
   private initializeMiddlewares(): void {
     // CORS設定: 本番環境のVercelからのアクセスを許可
+    // Vercel ドメイン一覧:
+    //   - trader-note-build-ai.vercel.app (本番)
+    //   - trader-note-build-ai-git-main-nekoya258.vercel.app (main ブランチプレビュー)
+    //   - trader-note-build-XXXX-nekoya258.vercel.app (コミットプレビュー)
     const allowedOrigins = [
       'http://localhost:3000',
       'http://localhost:3102',
+      // 本番ドメイン
       'https://trader-note-build-ai.vercel.app',
-      'https://trader-note-build-ai-*.vercel.app', // Vercel Preview deployments
+      // Git ブランチ / コミットプレビュー（nekoya258 ユーザー）
+      'https://trader-note-build-ai-*-nekoya258.vercel.app',
+      'https://trader-note-build-*-nekoya258.vercel.app',
     ];
 
     this.app.use(cors({
