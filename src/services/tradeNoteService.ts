@@ -56,14 +56,17 @@ export class TradeNoteService {
   }
 
   /**
-   * Save a trade note to storage
+   * トレードノートをストレージに保存
    */
   async saveNote(note: TradeNote): Promise<void> {
     const filename = `${note.id}.json`;
     const filepath = path.join(this.notesPath, filename);
     
     fs.writeFileSync(filepath, JSON.stringify(note, null, 2));
-    console.log(`Saved trade note: ${filename}`);
+    // 本番環境ではデバッグログを抑制
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`Saved trade note: ${filename}`);
+    }
   }
 
   /**

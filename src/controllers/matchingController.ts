@@ -2,6 +2,10 @@ import { Request, Response } from 'express';
 import { MatchingService } from '../services/matchingService';
 import { NotificationService } from '../services/notificationService';
 
+/**
+ * マッチングコントローラー
+ * 市場条件と過去トレードノートの一致判定を行う
+ */
 export class MatchingController {
   private matchingService: MatchingService;
   private notificationService: NotificationService;
@@ -12,13 +16,13 @@ export class MatchingController {
   }
 
   /**
-   * Manually trigger a match check
+   * 手動でマッチチェックをトリガー
    */
   checkMatches = async (req: Request, res: Response): Promise<void> => {
     try {
       const matches = await this.matchingService.checkForMatches();
 
-      // Send notifications for matches
+      // マッチに対して通知を送信
       for (const match of matches) {
         await this.notificationService.notifyMatch(match);
       }
@@ -35,16 +39,17 @@ export class MatchingController {
       });
     } catch (error) {
       console.error('Error checking matches:', error);
-      res.status(500).json({ error: 'Failed to check matches' });
+      // 本番環境では内部エラーの詳細を隠蔽
+      res.status(500).json({ error: '一致判定処理に失敗しました' });
     }
   };
 
   /**
-   * Get match history
+   * マッチ履歴を取得
    */
   getMatchHistory = async (req: Request, res: Response): Promise<void> => {
     try {
-      // Get notifications of type 'match'
+      // マッチタイプの通知を取得
       const notifications = this.notificationService.getNotifications();
       const matchNotifications = notifications.filter(n => n.type === 'match');
 
@@ -53,7 +58,8 @@ export class MatchingController {
       });
     } catch (error) {
       console.error('Error getting match history:', error);
-      res.status(500).json({ error: 'Failed to retrieve match history' });
+      // 本番環境では内部エラーの詳細を隠蔽
+      res.status(500).json({ error: 'マッチ履歴の取得に失敗しました' });
     }
   };
 }

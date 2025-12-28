@@ -2,14 +2,23 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+/**
+ * アプリケーション設定
+ * 環境変数から設定値を取得し、型安全に提供する
+ * 注意: DATABASE_URL は Prisma が直接参照するため、ここでの定義は参考用
+ */
 export const config = {
   server: {
     // 優先度: BACKEND_PORT > PORT > 3100（env設定がある場合はそちらを優先）
     port: parseInt(process.env.BACKEND_PORT || process.env.PORT || '3100', 10),
     env: process.env.NODE_ENV || 'development',
+    // 本番環境かどうかを判定するヘルパー
+    isProduction: process.env.NODE_ENV === 'production',
   },
   database: {
-    url: process.env.DB_URL || '',
+    // Prisma が DATABASE_URL を直接参照するため、ここでは参照用として保持
+    // 後方互換性のため DB_URL も fallback として許容
+    url: process.env.DATABASE_URL || process.env.DB_URL || '',
   },
   ai: {
     apiKey: process.env.AI_API_KEY || '',

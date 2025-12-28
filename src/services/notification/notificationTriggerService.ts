@@ -145,9 +145,13 @@ export class NotificationTriggerService {
     }
 
     // ===== ステップ 6: 通知を配信 =====
-    console.log(
-      `✓ 通知条件をパス: ${matchResult.symbol} (score=${matchResult.score.toFixed(3)})`
-    );
+    // 本番環境ではデバッグログを抑制
+    const isProduction = process.env.NODE_ENV === 'production';
+    if (!isProduction) {
+      console.log(
+        `✓ 通知条件をパス: ${matchResult.symbol} (score=${matchResult.score.toFixed(3)})`
+      );
+    }
 
     const reasonSummary = this.buildReasonSummary(reasonArray, matchResult.score);
 
@@ -167,6 +171,7 @@ export class NotificationTriggerService {
       });
       inAppNotificationId = inAppResult.id;
     } catch (error) {
+      // エラーログは常に出力（本番でも重要な情報）
       console.error('In-App 通知送信エラー:', error);
     }
 
@@ -190,6 +195,7 @@ export class NotificationTriggerService {
         inAppNotificationId,
       };
     } catch (error) {
+      // エラーログは常に出力
       console.error('通知ログ記録エラー:', error);
       return {
         shouldNotify: false,

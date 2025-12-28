@@ -156,6 +156,8 @@ export class TradeNoteGeneratorService {
     getMarketContext?: (trade: Trade) => Promise<MarketContext | undefined>
   ): Promise<TradeNoteGenerationResult[]> {
     const results: TradeNoteGenerationResult[] = [];
+    // 本番環境かどうか（ログ出力制御用）
+    const isProduction = process.env.NODE_ENV === 'production';
 
     for (const trade of trades) {
       try {
@@ -166,8 +168,12 @@ export class TradeNoteGeneratorService {
         const result = await this.generateAndSaveNote(trade, marketContext);
         results.push(result);
 
-        console.log(`ノート生成成功: トレード ${trade.id} → ノート ${result.noteId}`);
+        // 本番環境ではデバッグログを抑制
+        if (!isProduction) {
+          console.log(`ノート生成成功: トレード ${trade.id} → ノート ${result.noteId}`);
+        }
       } catch (error) {
+        // エラーログは本番でも出力（重要な情報）
         console.error(`ノート生成エラー (トレード ${trade.id}):`, error);
         // エラーが発生してもスキップして続行
       }

@@ -102,15 +102,17 @@ export class NotificationService {
   }
 
   /**
-   * Send push notification (placeholder)
+   * Push 通知を送信（プレースホルダー）
+   * 注意: 将来的に FCM/APNs または OneSignal と統合予定
    */
   private async sendPushNotification(notification: Notification): Promise<void> {
-    // Placeholder for push notification service integration
-    // In production, this would integrate with FCM, APNs, or a service like OneSignal
+    // 将来の Push 通知サービス統合用スタブ
+    // 本番環境ではデバッグログを抑制
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('Push notification (simulated):', notification.title);
+    }
     
-    console.log('Push notification (simulated):', notification.title);
-    
-    // Example integration:
+    // 将来の統合例:
     // await fetch('https://push-service.example.com/send', {
     //   method: 'POST',
     //   headers: {

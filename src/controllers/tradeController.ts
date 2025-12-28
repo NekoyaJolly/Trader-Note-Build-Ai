@@ -42,7 +42,8 @@ export class TradeController {
       });
     } catch (error) {
       console.error('Error importing CSV:', error);
-      res.status(500).json({ error: 'Failed to import CSV' });
+      // 本番環境では内部エラーの詳細を隠蔽
+      res.status(500).json({ error: 'CSV の取り込みに失敗しました' });
     }
   };
 
@@ -107,7 +108,10 @@ export class TradeController {
       });
     } catch (error) {
       console.error('Error uploading CSV text:', error);
-      const errorMsg = (error as Error).message || 'CSV の取り込みに失敗しました';
+      // 本番環境では内部エラーの詳細を隠蔽
+      const isProduction = process.env.NODE_ENV === 'production';
+      const safeMessage = 'CSV の取り込みに失敗しました。ファイル形式を確認してください。';
+      const errorMsg = isProduction ? safeMessage : ((error as Error).message || safeMessage);
       res.status(500).json({ error: errorMsg });
     }
   };

@@ -28,38 +28,40 @@ export class OrderController {
       // Get current market data
       const currentMarket = await this.marketService.getCurrentMarketData(note.symbol);
 
-      // Generate preset based on historical note and current market
+      // 過去ノートと現在市場データに基づいてプリセットを生成
       const preset: OrderPreset = {
         symbol: note.symbol,
         side: note.side,
         suggestedPrice: currentMarket.close,
         suggestedQuantity: note.quantity,
         basedOnNoteId: note.id,
-        confidence: 0.8, // Placeholder confidence score
+        confidence: 0.8, // 信頼度スコア（将来的に算出ロジックを追加予定）
       };
 
       res.json({ preset });
     } catch (error) {
       console.error('Error generating preset:', error);
-      res.status(500).json({ error: 'Failed to generate order preset' });
+      // 本番環境では内部エラーの詳細を隠蔽
+      res.status(500).json({ error: '注文プリセットの生成に失敗しました' });
     }
   };
 
   /**
-   * Get order confirmation data
+   * 注文確認データを取得
+   * 注意: 本システムは自動売買を行いません。これは参考情報のみを提供します。
    */
   getConfirmation = async (req: Request, res: Response): Promise<void> => {
     try {
       const { symbol, side, price, quantity } = req.body;
 
       if (!symbol || !side || !price || !quantity) {
-        res.status(400).json({ error: 'Missing required fields' });
+        res.status(400).json({ error: '必須項目が不足しています（symbol, side, price, quantity）' });
         return;
       }
 
-      // Calculate estimated costs
+      // 概算コストを計算（参考値）
       const estimatedCost = price * quantity;
-      const estimatedFee = estimatedCost * 0.001; // 0.1% fee estimate
+      const estimatedFee = estimatedCost * 0.001; // 0.1% 手数料想定
 
       res.json({
         confirmation: {
@@ -70,12 +72,14 @@ export class OrderController {
           estimatedCost,
           estimatedFee,
           total: estimatedCost + estimatedFee,
-          warning: 'This is a suggestion only. Please review carefully before executing.',
+          // 重要: 自動売買ではなく参考情報であることを明示
+          warning: 'これは参考情報です。本システムは自動売買を行いません。実際の注文は取引所で行ってください。',
         }
       });
     } catch (error) {
       console.error('Error getting confirmation:', error);
-      res.status(500).json({ error: 'Failed to get order confirmation' });
+      // 本番環境では内部エラーの詳細を隠蔽
+      res.status(500).json({ error: '注文確認情報の取得に失敗しました' });
     }
   };
 }

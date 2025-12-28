@@ -24,13 +24,15 @@ export class TradeImportService {
 
     if (trades.length === 0) {
       // 有効行が存在しない場合は DB への書き込みを行わずに終了する
-      // 有効行が存在しない場合は DB への書き込みを行わずに終了する
       return { tradesImported: 0, skipped, errors, file: filePath, insertedIds: [], parsedTrades: [] };
     }
 
     // CSV の有効行を DB に保存する
     const inserted = await this.tradeRepository.bulkInsert(trades);
-    console.log(`Imported ${inserted} trades from ${filePath}`);
+    // 本番環境ではデバッグログを抑制
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`Imported ${inserted} trades from ${filePath}`);
+    }
 
     // 取り込んだトレードの ID を返却し、後続処理（ノート生成等）で利用できるようにする
     return { tradesImported: inserted, skipped, errors, file: filePath, insertedIds: trades.map((t) => t.id), parsedTrades: trades };
@@ -143,13 +145,15 @@ export class TradeImportService {
   }
 
   /**
-   * Import trades from API
-   * This is a placeholder for actual API integration
+   * API 経由でトレードを取り込む
+   * 注意: 現在は未実装（将来の拡張用）
    */
   async importFromAPI(exchange: string, apiKey: string): Promise<[]> {
-    // Placeholder for API integration
-    // In a real implementation, this would call the exchange API
-    console.log(`API import from ${exchange} not yet implemented`);
+    // 将来の API 統合用スタブ
+    // 本番環境ではログ出力を抑制
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`API import from ${exchange} not yet implemented`);
+    }
     return [];
   }
 

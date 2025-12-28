@@ -87,12 +87,13 @@ export class NotificationController {
 
       res.json({ notifications: result });
     } catch (error) {
+      // 本番環境ではスタックトレースをログにのみ記録し、ユーザーには安全なメッセージを返す
       console.error('Error getting notifications:', error);
-      if (error instanceof Error) {
+      if (process.env.NODE_ENV !== 'production' && error instanceof Error) {
         console.error('Notification list error message:', error.message);
         console.error(error.stack);
       }
-      res.status(500).json({ error: 'Failed to retrieve notifications' });
+      res.status(500).json({ error: '通知一覧の取得に失敗しました。しばらく待ってから再度お試しください。' });
     }
   };
 
@@ -216,9 +217,11 @@ export class NotificationController {
       res.json(triggerResult);
     } catch (error) {
       console.error('Error checking and notifying:', error);
+      // 本番環境ではエラー詳細を隠蔽し、ログにのみ記録
+      const isProduction = process.env.NODE_ENV === 'production';
       res.status(500).json({
-        error: 'Failed to check and notify',
-        message: error instanceof Error ? error.message : 'unknown',
+        error: '通知処理に失敗しました',
+        message: isProduction ? undefined : (error instanceof Error ? error.message : 'unknown'),
       });
     }
   };
