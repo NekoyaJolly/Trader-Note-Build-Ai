@@ -85,13 +85,12 @@ export default function NoteDetailPage() {
         <h1 className="text-3xl font-bold text-slate-900 drop-shadow-sm dark:text-slate-100">ノート詳細</h1>
         <Link
           href="/notes"
-          className="px-3 py-2 rounded text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors"
-        >
-          ← 一覧に戻る
-        <Link
-          href="/notifications"
           className="px-3 py-2 rounded text-sm font-medium text-slate-900 dark:text-slate-100 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
         >
+          ← 一覧に戻る
+        </Link>
+      </div>
+
       <Card>
         <CardContent>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
