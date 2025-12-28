@@ -25,7 +25,40 @@ class App {
    * Initialize middlewares
    */
   private initializeMiddlewares(): void {
-    this.app.use(cors());
+    // CORS設定: 本番環境のVercelからのアクセスを許可
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://localhost:3102',
+      'https://trader-note-build-ai.vercel.app',
+      'https://trader-note-build-ai-*.vercel.app', // Vercel Preview deployments
+    ];
+
+    this.app.use(cors({
+      origin: (origin, callback) => {
+        // origin が undefined の場合（same-origin リクエスト）は許可
+        if (!origin) return callback(null, true);
+        
+        // 許可リストに含まれるか、ワイルドカードにマッチするかをチェック
+        const isAllowed = allowedOrigins.some(allowed => {
+          if (allowed.includes('*')) {
+            const regex = new RegExp('^' + allowed.replace(/\*/g, '.*') + '$');
+            return regex.test(origin);
+          }
+          return allowed === origin;
+        });
+
+        if (isAllowed) {
+          callback(null, true);
+        } else {
+          console.warn(`CORS blocked origin: ${origin}`);
+          callback(new Error('Not allowed by CORS'));
+        }
+      },
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+    }));
+    
     this.app.use(express.json());
     this.app.use(express.urlencoded({ extended: true }));
   }
