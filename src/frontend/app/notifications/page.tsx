@@ -136,7 +136,7 @@ export default function NotificationsPage() {
     <div className="container mx-auto px-4 py-8 max-w-7xl">
       {/* ヘッダー */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold text-gray-800">通知一覧</h1>
+          <h1 className="text-3xl font-bold text-slate-900 drop-shadow-sm dark:text-slate-100">通知一覧</h1>
           {notifications.length > 0 && (
             <Button onClick={handleMarkAllAsRead} variant="default">
               すべて既読にする

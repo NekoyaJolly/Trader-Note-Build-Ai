@@ -108,12 +108,12 @@ export default function NotificationDetailPage() {
     <div className="container mx-auto px-4 py-8 max-w-7xl">
       {/* ヘッダー */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold text-gray-800">通知詳細</h1>
+        <h1 className="text-3xl font-bold text-slate-900 drop-shadow-sm dark:text-slate-100">通知詳細</h1>
         <Link
           href="/notifications"
-          className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors"
+          className="px-3 py-2 rounded text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors"
         >
-          一覧に戻る
+          ← 一覧に戻る
         </Link>
       </div>
 

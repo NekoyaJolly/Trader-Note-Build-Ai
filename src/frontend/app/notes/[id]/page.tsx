@@ -82,7 +82,7 @@ export default function NoteDetailPage() {
     <div className="space-y-6">
       {/* ヘッダー */}
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-800">ノート詳細</h1>
+        <h1 className="text-3xl font-bold text-slate-900 drop-shadow-sm dark:text-slate-100">ノート詳細</h1>
         <Link
           href="/notes"
           className="px-3 py-2 rounded text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors"

@@ -70,7 +70,7 @@ export default function NotesPage() {
     <div className="space-y-6">
       {/* ヘッダー */}
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-800">トレードノート</h1>
+        <h1 className="text-3xl font-bold text-slate-900 drop-shadow-sm dark:text-slate-100">トレードノート</h1>
       </div>
 
       {/* Empty 状態 */}
