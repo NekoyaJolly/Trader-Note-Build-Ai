@@ -5,6 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc && npm run build:frontend",
+    "build:backend": "npx prisma generate && tsc",
     "build:frontend": "cd src/frontend && npm run build",
     "start": "node dist/index.js",
     "dev": "concurrently \"BACKEND_PORT=3100 nodemon --exec ts-node src/index.ts\" \"cd src/frontend && npm run dev\"",
