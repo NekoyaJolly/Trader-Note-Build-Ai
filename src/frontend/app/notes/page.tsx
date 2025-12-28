@@ -6,7 +6,8 @@ import { fetchNotes } from "@/lib/api";
 import type { NoteListItem } from "@/types/note";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/Alert";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { Card } from "@/components/ui/Card";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 
 /**
@@ -75,11 +76,15 @@ export default function NotesPage() {
       {/* Empty 状態 */}
       {notes.length === 0 ? (
         <Card>
-          <div className="text-center text-gray-600 py-10">
-            <div className="text-2xl mb-2">📄</div>
-            <p className="mb-1">ノートはまだありません。</p>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-3">
+              <span className="text-2xl">📄</span>
+              ノートはまだありません
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
             <p className="text-sm text-gray-500">Phase1 ではノート生成は未対応のため、ここでは空表示となります。</p>
-          </div>
+          </CardContent>
         </Card>
       ) : (
         // 一覧表示（テーブル）
@@ -111,12 +116,9 @@ export default function NotesPage() {
                       </Badge>
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <Link
-                        href={`/notes/${note.id}`}
-                        className="text-xs px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
-                      >
-                        詳細
-                      </Link>
+                      <Button size="sm" asChild>
+                        <Link href={`/notes/${note.id}`}>詳細</Link>
+                      </Button>
                     </td>
                   </tr>
                 ))}

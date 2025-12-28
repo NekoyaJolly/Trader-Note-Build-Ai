@@ -16,6 +16,9 @@ import Link from "next/link";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/Alert";
 import { Skeleton } from "@/components/ui/Skeleton";
 import ScoreGauge from "@/components/ScoreGauge";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
 import type { NotificationListItem } from "@/types/notification";
 import {
   fetchNotifications,
@@ -119,12 +122,9 @@ export default function NotificationsPage() {
         <AlertDescription>
           {error}
           <div className="mt-3">
-            <button
-              onClick={loadNotifications}
-              className="px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-            >
+            <Button onClick={loadNotifications} size="sm" variant="default">
               再読み込み
-            </button>
+            </Button>
           </div>
         </AlertDescription>
       </Alert>
@@ -136,26 +136,32 @@ export default function NotificationsPage() {
       {/* ヘッダー */}
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold text-gray-800">通知一覧</h1>
-        {notifications.length > 0 && (
-          <button
-            onClick={handleMarkAllAsRead}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
-          >
-            すべて既読にする
-          </button>
-        )}
+          {notifications.length > 0 && (
+            <Button onClick={handleMarkAllAsRead} variant="default">
+              すべて既読にする
+            </Button>
+          )}
       </div>
 
       {/* 通知がない場合 */}
-      {notifications.length === 0 ? (
-        <div className="text-center text-gray-500 py-12">
-          通知はありません
-        </div>
-      ) : (
-        /* 通知リスト */
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="min-w-full">
+        {notifications.length === 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-3">
+                <span className="text-2xl">🔔</span>
+                通知はありません
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-600">現在、表示できる通知がありません。市場一致判定に基づく通知が生成されると、ここに一覧表示されます。</p>
+            </CardContent>
+          </Card>
+        ) : (
+          /* 通知リスト */
+          <Card>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+              <table className="min-w-full">
               <thead className="bg-gray-100 border-b">
                 <tr>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
@@ -193,13 +199,13 @@ export default function NotificationsPage() {
                     }`}
                   >
                     {/* 未読/既読状態 */}
-                    <td className="px-4 py-3">
-                      {!notification.isRead ? (
-                        <span className="inline-block w-3 h-3 bg-blue-500 rounded-full"></span>
-                      ) : (
-                        <span className="inline-block w-3 h-3 bg-gray-300 rounded-full"></span>
-                      )}
-                    </td>
+                      <td className="px-4 py-3">
+                        {!notification.isRead ? (
+                          <Badge variant="secondary">未読</Badge>
+                        ) : (
+                          <Badge variant="outline">既読</Badge>
+                        )}
+                      </td>
 
                     {/* 通知時刻 */}
                     <td className="px-4 py-3 text-sm text-gray-700">
@@ -217,17 +223,11 @@ export default function NotificationsPage() {
                     </td>
 
                     {/* 売買方向 */}
-                    <td className="px-4 py-3 text-sm">
-                      <span
-                        className={`px-2 py-1 rounded text-xs font-semibold ${
-                          notification.tradeNote.side === "BUY"
-                            ? "bg-green-100 text-green-700"
-                            : "bg-red-100 text-red-700"
-                        }`}
-                      >
-                        {notification.tradeNote.side}
-                      </span>
-                    </td>
+                      <td className="px-4 py-3 text-sm">
+                        <Badge variant={notification.tradeNote.side === "BUY" ? "secondary" : "destructive"}>
+                          {notification.tradeNote.side}
+                        </Badge>
+                      </td>
 
                     {/* スコアゲージ */}
                     <td className="px-4 py-3">
@@ -248,27 +248,26 @@ export default function NotificationsPage() {
                     <td className="px-4 py-3 text-center">
                       <div className="flex items-center justify-center gap-2">
                         {!notification.isRead && (
-                          <button
+                          <Button
                             onClick={(e) => handleMarkAsRead(notification.id, e)}
-                            className="text-xs px-2 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition-colors"
+                            size="sm"
+                            variant="secondary"
                           >
                             既読
-                          </button>
+                          </Button>
                         )}
-                        <Link
-                          href={`/notifications/${notification.id}`}
-                          className="text-xs px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
-                        >
-                          詳細
-                        </Link>
+                        <Button size="sm" asChild>
+                          <Link href={`/notifications/${notification.id}`}>詳細</Link>
+                        </Button>
                       </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </div>
-        </div>
+            </div>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

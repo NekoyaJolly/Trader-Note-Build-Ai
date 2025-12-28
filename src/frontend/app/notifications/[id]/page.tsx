@@ -17,6 +17,11 @@ import Link from "next/link";
 import ScoreGauge from "@/components/ScoreGauge";
 import MatchReasonVisualizer from "@/components/MatchReasonVisualizer";
 import MarketSnapshotView from "@/components/MarketSnapshotView";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/Alert";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
 import type { NotificationDetail } from "@/types/notification";
 import { fetchNotificationDetail, markNotificationAsRead } from "@/lib/api";
 
@@ -70,23 +75,32 @@ export default function NotificationDetailPage() {
     }
   }
 
-  // ローディング表示
+  // ローディング表示（Skeleton で統一）
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-gray-600">読み込み中...</div>
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-64" />
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-48 w-full" />
       </div>
     );
   }
 
-  // エラー表示
+  // エラー表示（Alert で統一）
   if (error || !notification) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-red-600">
-          エラー: {error || "通知が見つかりません"}
-        </div>
-      </div>
+      <Alert variant="destructive">
+        <AlertTitle>通知の取得に失敗しました</AlertTitle>
+        <AlertDescription>
+          {error || "通知が見つかりません"}
+          <div className="mt-3">
+            <Button onClick={loadNotificationDetail} size="sm" variant="default">
+              再読み込み
+            </Button>
+          </div>
+        </AlertDescription>
+      </Alert>
     );
   }
 
@@ -103,12 +117,12 @@ export default function NotificationDetailPage() {
         </Link>
       </div>
 
-      {/* 通知サマリー */}
-      <section className="bg-white rounded-lg shadow p-6 mb-6">
-        <h2 className="text-xl font-semibold text-gray-800 mb-4">
-          通知サマリー
-        </h2>
-
+      {/* 通知サマリー（Card 構造へ統一） */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>通知サマリー</CardTitle>
+        </CardHeader>
+        <CardContent>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* 左カラム */}
           <div className="space-y-4">
@@ -121,15 +135,9 @@ export default function NotificationDetailPage() {
 
             <div>
               <div className="text-sm text-gray-500 mb-1">売買方向</div>
-              <span
-                className={`inline-block px-3 py-1 rounded font-semibold ${
-                  notification.tradeNote.side === "BUY"
-                    ? "bg-green-100 text-green-700"
-                    : "bg-red-100 text-red-700"
-                }`}
-              >
+              <Badge variant={notification.tradeNote.side === "BUY" ? "secondary" : "destructive"}>
                 {notification.tradeNote.side}
-              </span>
+              </Badge>
             </div>
 
             <div>
@@ -164,56 +172,59 @@ export default function NotificationDetailPage() {
             </div>
           </div>
         </div>
-      </section>
+        </CardContent>
+      </Card>
 
-      {/* 判定理由（メイン） */}
-      <section className="bg-white rounded-lg shadow p-6 mb-6">
-        <h2 className="text-xl font-semibold text-gray-800 mb-4">判定理由</h2>
-        <MatchReasonVisualizer reasons={notification.matchResult.reasons} />
-      </section>
+      {/* 判定理由（Card 構造へ統一） */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>判定理由</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <MatchReasonVisualizer reasons={notification.matchResult.reasons} />
+        </CardContent>
+      </Card>
 
-      {/* MarketSnapshot 表示 */}
-      <section className="bg-white rounded-lg shadow p-6 mb-6">
-        <h2 className="text-xl font-semibold text-gray-800 mb-4">
-          市場スナップショット
-        </h2>
+      {/* MarketSnapshot 表示（Card 構造で他画面と統一） */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>市場スナップショット</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {/* 15分足 */}
+            <MarketSnapshotView snapshot={notification.marketSnapshot15m} />
 
-        <div className="space-y-4">
-          {/* 15分足 */}
-          <MarketSnapshotView snapshot={notification.marketSnapshot15m} />
+            {/* 60分足 */}
+            <MarketSnapshotView snapshot={notification.marketSnapshot60m} />
+          </div>
+        </CardContent>
+      </Card>
 
-          {/* 60分足 */}
-          <MarketSnapshotView snapshot={notification.marketSnapshot60m} />
-        </div>
-      </section>
-
-      {/* Order Preset 連携 */}
-      <section className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-xl font-semibold text-gray-800 mb-4">
-          発注支援（参照のみ）
-        </h2>
-
-        <div className="bg-yellow-50 border border-yellow-200 rounded p-4 mb-4">
-          <p className="text-sm text-yellow-800">
-            ⚠️
-            このリンクは参照用です。実際の発注はブローカーの画面で確認・実行してください。
-          </p>
-        </div>
-
-        <div className="flex items-center gap-4">
-          <Link
-            href={`/orders/preset?symbol=${notification.tradeNote.symbol}&side=${notification.tradeNote.side}`}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
-            target="_blank"
-          >
-            発注画面を開く（新しいタブ）
-          </Link>
-
-          <span className="text-sm text-gray-500">
-            ※ 自動実行は行いません
-          </span>
-        </div>
-      </section>
+      {/* Order Preset 連携（Card 構造へ統一） */}
+      <Card>
+        <CardHeader>
+          <CardTitle>発注支援（参照のみ）</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="bg-yellow-50 border border-yellow-200 rounded p-4 mb-4">
+            <p className="text-sm text-yellow-800">
+              ⚠️ このリンクは参照用です。実際の発注はブローカーの画面で確認・実行してください。
+            </p>
+          </div>
+          <div className="flex items-center gap-4">
+            <Button asChild>
+              <Link
+                href={`/orders/preset?symbol=${notification.tradeNote.symbol}&side=${notification.tradeNote.side}`}
+                target="_blank"
+              >
+                発注画面を開く（新しいタブ）
+              </Link>
+            </Button>
+            <span className="text-sm text-gray-500">※ 自動実行は行いません</span>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
