@@ -9,7 +9,8 @@ const Card = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      "rounded-lg border bg-card text-card-foreground shadow-sm",
+      // bg-card と text-card-foreground は CSS 変数で定義（視認性確保）
+      "rounded-lg border bg-[var(--card)] text-[var(--card-foreground)] shadow-sm",
       className
     )}
     {...props}

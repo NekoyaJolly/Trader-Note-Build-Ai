@@ -85,9 +85,9 @@ export default function NoteDetailPage() {
         <h1 className="text-3xl font-bold text-gray-800">ノート詳細</h1>
         <Link
           href="/notes"
-          className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors"
+          className="px-3 py-2 rounded text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors"
         >
-          一覧に戻る
+          ← 一覧に戻る
         </Link>
       </div>
 

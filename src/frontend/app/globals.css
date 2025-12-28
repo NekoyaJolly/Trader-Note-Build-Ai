@@ -29,5 +29,9 @@ body {
 :root {
   --primary: #2563eb; /* blue-600 */
   --primary-foreground: #ffffff;
+  /* Card コンポーネント用の背景色・テキスト色 */
+  --card: #f8fafc; /* slate-50: 明るいグレー背景 */
+  --card-foreground: #1e293b; /* slate-800: 濃いグレーテキスト */
+  --muted-foreground: #64748b; /* slate-500: 補助テキスト */
 }
 

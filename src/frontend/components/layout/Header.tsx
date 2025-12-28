@@ -2,16 +2,31 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState, useRef, useEffect } from "react";
 
 /**
  * アプリ共通ヘッダー
  * ナビゲーションとアプリ名を表示する。
+ * 「ノート」ボタンはドロップダウンメニューを持ち、ノート一覧とインポート画面への導線を提供。
  */
 export default function Header() {
   const pathname = usePathname();
+  const [isNoteMenuOpen, setIsNoteMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   // 現在のパスに応じてナビの強調表示を切り替える
   const isActive = (href: string) => pathname?.startsWith(href);
+
+  // メニュー外クリックで閉じる
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsNoteMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   return (
     <header className="sticky top-0 z-40 w-full border-b bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60">
@@ -23,6 +38,7 @@ export default function Header() {
 
         {/* ナビゲーション */}
         <nav className="flex items-center gap-4">
+          {/* 通知ボタン */}
           <Link
             href="/notifications"
             className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
@@ -33,16 +49,48 @@ export default function Header() {
           >
             通知
           </Link>
-          <Link
-            href="/notes"
-            className={`px-3 py-2 rounded text-sm font-medium transition-colors ${
-              isActive("/notes")
-                ? "bg-blue-100 text-blue-700"
-                : "text-gray-700 hover:bg-gray-100"
-            }`}
-          >
-            ノート
-          </Link>
+
+          {/* ノートメニュー（ドロップダウン） */}
+          <div className="relative" ref={menuRef}>
+            <button
+              onClick={() => setIsNoteMenuOpen(!isNoteMenuOpen)}
+              className={`px-3 py-2 rounded text-sm font-medium transition-colors flex items-center gap-1 ${
+                isActive("/notes") || isActive("/import")
+                  ? "bg-blue-100 text-blue-700"
+                  : "text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              ノート
+              <svg
+                className={`w-4 h-4 transition-transform ${isNoteMenuOpen ? "rotate-180" : ""}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {/* ドロップダウンメニュー */}
+            {isNoteMenuOpen && (
+              <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50">
+                <Link
+                  href="/notes"
+                  onClick={() => setIsNoteMenuOpen(false)}
+                  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                >
+                  📋 ノート一覧
+                </Link>
+                <Link
+                  href="/import"
+                  onClick={() => setIsNoteMenuOpen(false)}
+                  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                >
+                  📥 ノート作成（インポート）
+                </Link>
+              </div>
+            )}
+          </div>
         </nav>
       </div>
     </header>
