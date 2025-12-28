@@ -300,5 +300,245 @@
     },
     "timestamp": "2025-12-28T18:18:39.300Z",
     "read": false
+  },
+  {
+    "id": "8c7d8af4-18b4-43fe-ad26-5e42c54dfd74",
+    "type": "match",
+    "title": "Trade Opportunity: ETHUSDT",
+    "message": "Current market conditions match historical trade note (75.5% match)",
+    "matchResult": {
+      "noteId": "3ec79b68-a08f-4994-bdf1-f1c68cd4f691",
+      "symbol": "ETHUSDT",
+      "matchScore": 0.7552725915642962,
+      "threshold": 0.75,
+      "isMatch": true,
+      "currentMarket": {
+        "symbol": "ETHUSDT",
+        "timestamp": "2025-12-28T19:51:10.626Z",
+        "timeframe": "15m",
+        "open": 50347.08242211703,
+        "high": 50727.5652518443,
+        "low": 50215.53464807517,
+        "close": 50402.80559321502,
+        "volume": 30595.88502501076,
+        "indicators": {
+          "rsi": 20.45221854144308,
+          "macd": -0.8672686188415679,
+          "trend": "neutral"
+        }
+      },
+      "historicalNote": {
+        "id": "3ec79b68-a08f-4994-bdf1-f1c68cd4f691",
+        "tradeId": "941b6413-33dd-4028-93ad-7c3afc9caf8a",
+        "timestamp": "2024-01-16T16:30:00.000Z",
+        "symbol": "ETHUSDT",
+        "side": "sell",
+        "entryPrice": 2300,
+        "quantity": 1,
+        "marketContext": {
+          "timeframe": "15m",
+          "trend": "neutral",
+          "indicators": {
+            "rsi": 50,
+            "macd": 0,
+            "volume": 0
+          }
+        },
+        "aiSummary": "2024/1/17 に ETHUSDT を 売り (価格: 2300, 数量: 1)。市場は横ばい。",
+        "features": [
+          2300,
+          1,
+          50,
+          0,
+          0,
+          0,
+          -1
+        ],
+        "createdAt": "2025-12-28T16:17:51.569Z"
+      },
+      "timestamp": "2025-12-28T19:51:10.626Z"
+    },
+    "timestamp": "2025-12-28T19:51:10.627Z",
+    "read": false
+  },
+  {
+    "id": "20e889ad-41ef-4a28-b0cb-37be0256b6f1",
+    "type": "match",
+    "title": "Trade Opportunity: ETHUSDT",
+    "message": "Current market conditions match historical trade note (75.5% match)",
+    "matchResult": {
+      "noteId": "3f323fad-c17a-4561-86d2-b058f0f6dcc2",
+      "symbol": "ETHUSDT",
+      "matchScore": 0.7552705143025003,
+      "threshold": 0.75,
+      "isMatch": true,
+      "currentMarket": {
+        "symbol": "ETHUSDT",
+        "timestamp": "2025-12-28T19:51:10.626Z",
+        "timeframe": "15m",
+        "open": 50347.08242211703,
+        "high": 50727.5652518443,
+        "low": 50215.53464807517,
+        "close": 50402.80559321502,
+        "volume": 30595.88502501076,
+        "indicators": {
+          "rsi": 20.45221854144308,
+          "macd": -0.8672686188415679,
+          "trend": "neutral"
+        }
+      },
+      "historicalNote": {
+        "id": "3f323fad-c17a-4561-86d2-b058f0f6dcc2",
+        "tradeId": "47dbddcd-b09f-4b65-9463-46c39957fcb9",
+        "timestamp": "2024-01-16T09:20:00.000Z",
+        "symbol": "ETHUSDT",
+        "side": "buy",
+        "entryPrice": 2250,
+        "quantity": 1,
+        "marketContext": {
+          "timeframe": "15m",
+          "trend": "neutral",
+          "indicators": {
+            "rsi": 50,
+            "macd": 0,
+            "volume": 0
+          }
+        },
+        "aiSummary": "2024/1/16 に ETHUSDT を 買い (価格: 2250, 数量: 1)。市場は横ばい。",
+        "features": [
+          2250,
+          1,
+          50,
+          0,
+          0,
+          0,
+          1
+        ],
+        "createdAt": "2025-12-28T16:17:51.569Z"
+      },
+      "timestamp": "2025-12-28T19:51:10.626Z"
+    },
+    "timestamp": "2025-12-28T19:51:10.628Z",
+    "read": false
+  },
+  {
+    "id": "11374192-acc1-4588-90b9-a902b27bc1ac",
+    "type": "match",
+    "title": "Trade Opportunity: ETHUSDT",
+    "message": "Current market conditions match historical trade note (83.2% match)",
+    "matchResult": {
+      "noteId": "3ec79b68-a08f-4994-bdf1-f1c68cd4f691",
+      "symbol": "ETHUSDT",
+      "matchScore": 0.8323823567618243,
+      "threshold": 0.75,
+      "isMatch": true,
+      "currentMarket": {
+        "symbol": "ETHUSDT",
+        "timestamp": "2025-12-28T19:51:12.735Z",
+        "timeframe": "15m",
+        "open": 50432.48989298874,
+        "high": 50748.545313348695,
+        "low": 49893.55626659768,
+        "close": 50187.595662716376,
+        "volume": 18440.509169175057,
+        "indicators": {
+          "rsi": 52.11695541507291,
+          "macd": -1.9145431407512281,
+          "trend": "neutral"
+        }
+      },
+      "historicalNote": {
+        "id": "3ec79b68-a08f-4994-bdf1-f1c68cd4f691",
+        "tradeId": "941b6413-33dd-4028-93ad-7c3afc9caf8a",
+        "timestamp": "2024-01-16T16:30:00.000Z",
+        "symbol": "ETHUSDT",
+        "side": "sell",
+        "entryPrice": 2300,
+        "quantity": 1,
+        "marketContext": {
+          "timeframe": "15m",
+          "trend": "neutral",
+          "indicators": {
+            "rsi": 50,
+            "macd": 0,
+            "volume": 0
+          }
+        },
+        "aiSummary": "2024/1/17 に ETHUSDT を 売り (価格: 2300, 数量: 1)。市場は横ばい。",
+        "features": [
+          2300,
+          1,
+          50,
+          0,
+          0,
+          0,
+          -1
+        ],
+        "createdAt": "2025-12-28T16:17:51.569Z"
+      },
+      "timestamp": "2025-12-28T19:51:12.735Z"
+    },
+    "timestamp": "2025-12-28T19:51:12.735Z",
+    "read": false
+  },
+  {
+    "id": "ba8c8749-5e84-4bb8-b8f4-1b4afdccbfe9",
+    "type": "match",
+    "title": "Trade Opportunity: ETHUSDT",
+    "message": "Current market conditions match historical trade note (83.2% match)",
+    "matchResult": {
+      "noteId": "3f323fad-c17a-4561-86d2-b058f0f6dcc2",
+      "symbol": "ETHUSDT",
+      "matchScore": 0.8323788584558112,
+      "threshold": 0.75,
+      "isMatch": true,
+      "currentMarket": {
+        "symbol": "ETHUSDT",
+        "timestamp": "2025-12-28T19:51:12.735Z",
+        "timeframe": "15m",
+        "open": 50432.48989298874,
+        "high": 50748.545313348695,
+        "low": 49893.55626659768,
+        "close": 50187.595662716376,
+        "volume": 18440.509169175057,
+        "indicators": {
+          "rsi": 52.11695541507291,
+          "macd": -1.9145431407512281,
+          "trend": "neutral"
+        }
+      },
+      "historicalNote": {
+        "id": "3f323fad-c17a-4561-86d2-b058f0f6dcc2",
+        "tradeId": "47dbddcd-b09f-4b65-9463-46c39957fcb9",
+        "timestamp": "2024-01-16T09:20:00.000Z",
+        "symbol": "ETHUSDT",
+        "side": "buy",
+        "entryPrice": 2250,
+        "quantity": 1,
+        "marketContext": {
+          "timeframe": "15m",
+          "trend": "neutral",
+          "indicators": {
+            "rsi": 50,
+            "macd": 0,
+            "volume": 0
+          }
+        },
+        "aiSummary": "2024/1/16 に ETHUSDT を 買い (価格: 2250, 数量: 1)。市場は横ばい。",
+        "features": [
+          2250,
+          1,
+          50,
+          0,
+          0,
+          0,
+          1
+        ],
+        "createdAt": "2025-12-28T16:17:51.569Z"
+      },
+      "timestamp": "2025-12-28T19:51:12.735Z"
+    },
+    "timestamp": "2025-12-28T19:51:12.737Z",
+    "read": false
   }
 ]

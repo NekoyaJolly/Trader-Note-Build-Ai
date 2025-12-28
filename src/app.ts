@@ -125,8 +125,17 @@ class App {
       console.log('  POST /api/orders/confirmation');
       console.log('═══════════════════════════════════════\n');
 
-      // Start the matching scheduler
-      this.scheduler.start();
+      // スケジューラー起動: 本番運用ルールに従い、CRON_ENABLED が true の場合のみ起動
+      // 理由: 開発環境では通知ファイルの更新が再起動ループの原因となるため、デフォルト無効化
+      const cronEnabled = process.env.CRON_ENABLED === 'true';
+      if (cronEnabled) {
+        this.scheduler.start();
+      } else {
+        // 本番環境ではデバッグログを抑制
+        if (!config.server.isProduction) {
+          console.log('スケジューラーはCRON_ENABLEDがtrueの時のみ起動（現在は無効）');
+        }
+      }
     });
   }
 

@@ -1,0 +1,15 @@
+{
+  "watch": ["src"],
+  "ext": "ts",
+  "ignore": [
+    "data/**",
+    "dist/**",
+    "node_modules/**"
+  ],
+  "exec": "ts-node",
+  "delay": 500,
+  "timeout": 20000,
+  "env": {
+    "NODE_ENV": "development"
+  }
+}
