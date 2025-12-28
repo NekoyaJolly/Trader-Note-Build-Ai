@@ -1,14 +1,15 @@
-import type { PropsWithChildren } from "react";
+import { cn } from "@/lib/utils"
 
-/**
- * Skeleton コンポーネント（最小構成）
- * ローディング中のプレースホルダ表示。
- */
-export function Skeleton(
-  props: PropsWithChildren<{ className?: string }>
-) {
-  const { className, children } = props;
+function Skeleton({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={`animate-pulse bg-gray-200 rounded ${className || "h-4 w-full"}`}>{children}</div>
-  );
+    <div
+      className={cn("animate-pulse rounded-md bg-muted", className)}
+      {...props}
+    />
+  )
 }
+
+export { Skeleton }

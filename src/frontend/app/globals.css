@@ -24,3 +24,10 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* shadcn/ui で利用する CSS 変数（簡易） */
+:root {
+  --primary: #2563eb; /* blue-600 */
+  --primary-foreground: #ffffff;
+}
+

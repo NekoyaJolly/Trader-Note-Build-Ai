@@ -13,6 +13,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/Alert";
+import { Skeleton } from "@/components/ui/Skeleton";
 import ScoreGauge from "@/components/ScoreGauge";
 import type { NotificationListItem } from "@/types/notification";
 import {
@@ -97,8 +99,14 @@ export default function NotificationsPage() {
   // ローディング表示
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-gray-600">読み込み中...</div>
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-64" />
+        <Skeleton className="h-6 w-full" />
+        <div className="space-y-2">
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+        </div>
       </div>
     );
   }
@@ -106,9 +114,20 @@ export default function NotificationsPage() {
   // エラー表示
   if (error) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-red-600">エラー: {error}</div>
-      </div>
+      <Alert variant="destructive">
+        <AlertTitle>通知の取得に失敗しました</AlertTitle>
+        <AlertDescription>
+          {error}
+          <div className="mt-3">
+            <button
+              onClick={loadNotifications}
+              className="px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              再読み込み
+            </button>
+          </div>
+        </AlertDescription>
+      </Alert>
     );
   }
 

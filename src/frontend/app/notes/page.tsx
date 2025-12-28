@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { fetchNotes } from "@/lib/api";
 import type { NoteListItem } from "@/types/note";
-import { Alert } from "@/components/ui/Alert";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/Alert";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -57,7 +57,12 @@ export default function NotesPage() {
 
   // エラー表示
   if (error) {
-    return <Alert variant="error" title="読み込みエラー">{error}</Alert>;
+    return (
+      <Alert variant="destructive">
+        <AlertTitle>読み込みエラー</AlertTitle>
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
+    );
   }
 
   return (
@@ -101,7 +106,7 @@ export default function NotesPage() {
                       {note.modeEstimated ?? "未推定"}
                     </td>
                     <td className="px-4 py-3 text-sm">
-                      <Badge variant={note.status === "approved" ? "success" : "neutral"}>
+                      <Badge variant={note.status === "approved" ? "secondary" : "outline"}>
                         {note.status ?? "draft"}
                       </Badge>
                     </td>
