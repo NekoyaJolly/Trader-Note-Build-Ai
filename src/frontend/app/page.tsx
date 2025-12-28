@@ -39,18 +39,23 @@ export default function Home() {
             </p>
           </Link>
 
-          {/* 今後の拡張機能 */}
-          <div className="bg-gray-200 rounded-lg shadow p-6 opacity-60">
+          {/* トレードノートカード */}
+          <Link
+            href="/notes"
+            className="block bg-white rounded-lg shadow-lg p-6 hover:shadow-xl transition-shadow"
+          >
             <div className="flex items-center mb-4">
-              <div className="w-12 h-12 bg-gray-400 rounded-lg flex items-center justify-center text-white text-2xl">
+              <div className="w-12 h-12 bg-gray-500 rounded-lg flex items-center justify-center text-white text-2xl">
                 📊
               </div>
-              <h2 className="ml-4 text-2xl font-semibold text-gray-600">
+              <h2 className="ml-4 text-2xl font-semibold text-gray-800">
                 トレードノート
               </h2>
             </div>
-            <p className="text-gray-500">（Phase6 以降で実装予定）</p>
-          </div>
+            <p className="text-gray-600">
+              生成されたノートの一覧と詳細を確認し、AI 要約をレビューします。
+            </p>
+          </Link>
         </div>
 
         {/* 説明セクション */}
