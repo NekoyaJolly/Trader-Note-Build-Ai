@@ -1,0 +1,184 @@
+[
+  {
+    "id": "1f597d4c-f4c8-4708-8c67-cc048f2f02b0",
+    "type": "match",
+    "title": "Trade Opportunity: BTCUSDT",
+    "message": "Current market conditions match historical trade note (81.0% match)",
+    "matchResult": {
+      "noteId": "12e1f3f7-85b6-4b96-8994-afb267dc986a",
+      "symbol": "BTCUSDT",
+      "matchScore": 0.8101698004065987,
+      "threshold": 0.75,
+      "isMatch": true,
+      "currentMarket": {
+        "symbol": "BTCUSDT",
+        "timestamp": "2025-12-28T17:18:39.286Z",
+        "timeframe": "15m",
+        "open": 49517.56676140815,
+        "high": 50192.75757095297,
+        "low": 49357.801446516554,
+        "close": 49759.75662458148,
+        "volume": 21779.959056570155,
+        "indicators": {
+          "rsi": 51.22760345606348,
+          "macd": -2.1777548709311856,
+          "trend": "neutral"
+        }
+      },
+      "historicalNote": {
+        "id": "12e1f3f7-85b6-4b96-8994-afb267dc986a",
+        "tradeId": "48a10cd7-3001-42fe-a3e3-adc56bb770f0",
+        "timestamp": "2024-01-17T11:00:00.000Z",
+        "symbol": "BTCUSDT",
+        "side": "buy",
+        "entryPrice": 41800,
+        "quantity": 0.15,
+        "marketContext": {
+          "timeframe": "15m",
+          "trend": "neutral",
+          "indicators": {
+            "rsi": 50,
+            "macd": 0,
+            "volume": 0
+          }
+        },
+        "aiSummary": "2024/1/17 に BTCUSDT を 買い (価格: 41800, 数量: 0.15)。市場は横ばい。",
+        "features": [
+          41800,
+          0.15,
+          50,
+          0,
+          0,
+          0,
+          1
+        ],
+        "createdAt": "2025-12-28T16:17:51.570Z"
+      },
+      "timestamp": "2025-12-28T17:18:39.286Z"
+    },
+    "timestamp": "2025-12-28T17:18:39.287Z",
+    "read": false
+  },
+  {
+    "id": "200cf885-b211-4a0b-b97f-455f1daff525",
+    "type": "match",
+    "title": "Trade Opportunity: BTCUSDT",
+    "message": "Current market conditions match historical trade note (81.0% match)",
+    "matchResult": {
+      "noteId": "203a4247-eac9-4ffd-baba-a9c8a8de8fe4",
+      "symbol": "BTCUSDT",
+      "matchScore": 0.8101695260831787,
+      "threshold": 0.75,
+      "isMatch": true,
+      "currentMarket": {
+        "symbol": "BTCUSDT",
+        "timestamp": "2025-12-28T17:18:39.286Z",
+        "timeframe": "15m",
+        "open": 49517.56676140815,
+        "high": 50192.75757095297,
+        "low": 49357.801446516554,
+        "close": 49759.75662458148,
+        "volume": 21779.959056570155,
+        "indicators": {
+          "rsi": 51.22760345606348,
+          "macd": -2.1777548709311856,
+          "trend": "neutral"
+        }
+      },
+      "historicalNote": {
+        "id": "203a4247-eac9-4ffd-baba-a9c8a8de8fe4",
+        "tradeId": "39d67b1e-4661-4ee3-9a7e-c463ded6263d",
+        "timestamp": "2024-01-15T10:30:00.000Z",
+        "symbol": "BTCUSDT",
+        "side": "buy",
+        "entryPrice": 42500,
+        "quantity": 0.1,
+        "marketContext": {
+          "timeframe": "15m",
+          "trend": "neutral",
+          "indicators": {
+            "rsi": 50,
+            "macd": 0,
+            "volume": 0
+          }
+        },
+        "aiSummary": "2024/1/15 に BTCUSDT を 買い (価格: 42500, 数量: 0.1)。市場は横ばい。",
+        "features": [
+          42500,
+          0.1,
+          50,
+          0,
+          0,
+          0,
+          1
+        ],
+        "createdAt": "2025-12-28T16:17:51.568Z",
+        "status": "approved",
+        "approvedAt": "2025-12-28T16:17:51.728Z"
+      },
+      "timestamp": "2025-12-28T17:18:39.286Z"
+    },
+    "timestamp": "2025-12-28T17:18:39.289Z",
+    "read": false
+  },
+  {
+    "id": "3ead6d1a-e962-4adc-a1c9-361f607359ba",
+    "type": "match",
+    "title": "Trade Opportunity: BTCUSDT",
+    "message": "Current market conditions match historical trade note (81.0% match)",
+    "matchResult": {
+      "noteId": "b16cbf03-59e8-4fb5-8127-5aefdcb0bac3",
+      "symbol": "BTCUSDT",
+      "matchScore": 0.8101695209549808,
+      "threshold": 0.75,
+      "isMatch": true,
+      "currentMarket": {
+        "symbol": "BTCUSDT",
+        "timestamp": "2025-12-28T17:18:39.286Z",
+        "timeframe": "15m",
+        "open": 49517.56676140815,
+        "high": 50192.75757095297,
+        "low": 49357.801446516554,
+        "close": 49759.75662458148,
+        "volume": 21779.959056570155,
+        "indicators": {
+          "rsi": 51.22760345606348,
+          "macd": -2.1777548709311856,
+          "trend": "neutral"
+        }
+      },
+      "historicalNote": {
+        "id": "b16cbf03-59e8-4fb5-8127-5aefdcb0bac3",
+        "tradeId": "0d3a1619-d820-4025-bebf-fa6432631bd7",
+        "timestamp": "2024-01-15T14:45:00.000Z",
+        "symbol": "BTCUSDT",
+        "side": "sell",
+        "entryPrice": 43000,
+        "quantity": 0.1,
+        "marketContext": {
+          "timeframe": "15m",
+          "trend": "neutral",
+          "indicators": {
+            "rsi": 50,
+            "macd": 0,
+            "volume": 0
+          }
+        },
+        "aiSummary": "2024/1/15 に BTCUSDT を 売り (価格: 43000, 数量: 0.1)。市場は横ばい。",
+        "features": [
+          43000,
+          0.1,
+          50,
+          0,
+          0,
+          0,
+          -1
+        ],
+        "createdAt": "2025-12-28T16:17:51.568Z"
+      },
+      "timestamp": "2025-12-28T17:18:39.286Z"
+    },
+    "timestamp": "2025-12-28T17:18:39.294Z",
+    "read": false
+  }
+]
