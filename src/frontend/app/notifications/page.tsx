@@ -19,6 +19,7 @@ import ScoreGauge from "@/components/ScoreGauge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { Progress } from "@/components/ui/Progress";
 import type { NotificationListItem } from "@/types/notification";
 import {
   fetchNotifications,
@@ -162,7 +163,7 @@ export default function NotificationsPage() {
             <CardContent className="p-0">
               <div className="overflow-x-auto">
               <table className="min-w-full">
-              <thead className="bg-gray-100 border-b">
+              <thead className="bg-gray-50 dark:bg-gray-800/40 border-b">
                 <tr>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
                     状態
@@ -231,11 +232,20 @@ export default function NotificationsPage() {
 
                     {/* スコアゲージ */}
                     <td className="px-4 py-3">
-                      <div className="w-48">
+                      <div className="w-56 flex flex-col gap-2">
+                        {/* 日本語コメント: 直感性のためゲージとバーの二軸表示 */}
                         <ScoreGauge
                           score={notification.matchResult.score}
                           size="small"
                         />
+                        <div className="flex items-center gap-3">
+                          <div className="flex-1">
+                            <Progress value={Math.round(notification.matchResult.score * 100)} />
+                          </div>
+                          <span className="text-xs text-gray-600 w-10 text-right">
+                            {Math.round(notification.matchResult.score * 100)}%
+                          </span>
+                        </div>
                       </div>
                     </td>
 
@@ -246,17 +256,18 @@ export default function NotificationsPage() {
 
                     {/* 操作ボタン */}
                     <td className="px-4 py-3 text-center">
-                      <div className="flex items-center justify-center gap-2">
+                      <div className="flex items-stretch justify-center gap-2 flex-col sm:flex-row">
                         {!notification.isRead && (
                           <Button
                             onClick={(e) => handleMarkAsRead(notification.id, e)}
                             size="sm"
                             variant="secondary"
+                            className="sm:w-auto w-full"
                           >
                             既読
                           </Button>
                         )}
-                        <Button size="sm" asChild>
+                        <Button size="sm" asChild className="sm:w-auto w-full">
                           <Link href={`/notifications/${notification.id}`}>詳細</Link>
                         </Button>
                       </div>
