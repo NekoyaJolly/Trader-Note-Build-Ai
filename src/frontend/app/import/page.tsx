@@ -84,14 +84,14 @@ export default function ImportPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-12">
+    <div className="min-h-screen bg-gray-50 dark:bg-slate-900 py-12 text-gray-900 dark:text-slate-100">
       <div className="max-w-3xl mx-auto px-4">
-        <Card className="bg-white">
+        <Card className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
           <CardHeader>
-            <CardTitle>過去トレードのインポート</CardTitle>
+            <CardTitle className="text-slate-900 dark:text-slate-100">過去トレードのインポート</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4 text-gray-900">
+            <div className="space-y-4 text-gray-900 dark:text-slate-100">
               <p className="text-base leading-relaxed font-medium">MT4 / MT5 / 多くのブローカーで CSV 出力が可能です。完璧な形式でなくても大丈夫です。</p>
               <p className="text-base leading-relaxed">一部データに欠損があっても、自動でスキップされます。</p>
             </div>
@@ -101,7 +101,7 @@ export default function ImportPage() {
                 type="file"
                 accept=".csv,text/csv"
                 onChange={handleSelect}
-                className="block w-full rounded border p-2 bg-white text-gray-900"
+                className="block w-full rounded border border-slate-200 dark:border-slate-600 p-2 bg-white dark:bg-slate-900 text-gray-900 dark:text-slate-100"
               />
 
               <div className="flex items-center gap-3">
@@ -119,15 +119,15 @@ export default function ImportPage() {
 
               {message && (
                 <Alert>
-                  <AlertTitle>インポート完了</AlertTitle>
-                  <AlertDescription>{message}</AlertDescription>
+                  <AlertTitle className="text-slate-900 dark:text-slate-100">インポート完了</AlertTitle>
+                  <AlertDescription className="text-gray-800 dark:text-slate-100">{message}</AlertDescription>
                 </Alert>
               )}
 
               {error && (
                 <Alert variant="destructive">
-                  <AlertTitle>インポート失敗</AlertTitle>
-                  <AlertDescription>{error}</AlertDescription>
+                  <AlertTitle className="text-slate-900 dark:text-slate-100">インポート失敗</AlertTitle>
+                  <AlertDescription className="text-gray-800 dark:text-slate-100">{error}</AlertDescription>
                 </Alert>
               )}
             </div>
