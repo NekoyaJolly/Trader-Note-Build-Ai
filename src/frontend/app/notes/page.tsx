@@ -83,7 +83,7 @@ export default function NotesPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-gray-500">Phase1 ではノート生成は未対応のため、ここでは空表示となります。</p>
+            <p className="text-base text-gray-700 leading-relaxed">トレードデータをインポートすると、ここにノートが表示されます。</p>
           </CardContent>
         </Card>
       ) : (
@@ -93,21 +93,21 @@ export default function NotesPage() {
             <table className="min-w-full">
               <thead className="bg-gray-100 border-b">
                 <tr>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">通貨ペア</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">エントリー時間</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">AI 推定</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">状態</th>
-                  <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">操作</th>
+                  <th className="px-4 py-3 text-left text-sm font-bold text-gray-900">通貨ペア</th>
+                  <th className="px-4 py-3 text-left text-sm font-bold text-gray-900">エントリー時間</th>
+                  <th className="px-4 py-3 text-left text-sm font-bold text-gray-900">AI 推定</th>
+                  <th className="px-4 py-3 text-left text-sm font-bold text-gray-900">状態</th>
+                  <th className="px-4 py-3 text-center text-sm font-bold text-gray-900">操作</th>
                 </tr>
               </thead>
               <tbody>
                 {notes.map((note) => (
                   <tr key={note.id} className="border-b hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3 text-sm font-semibold text-gray-800">{note.symbol}</td>
-                    <td className="px-4 py-3 text-sm text-gray-700">
+                    <td className="px-4 py-3 text-sm font-bold text-gray-900">{note.symbol}</td>
+                    <td className="px-4 py-3 text-sm text-gray-800">
                       {new Date(note.timestamp).toLocaleString("ja-JP")}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-700">
+                    <td className="px-4 py-3 text-sm text-gray-800">
                       {note.modeEstimated ?? "未推定"}
                     </td>
                     <td className="px-4 py-3 text-sm">

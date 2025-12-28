@@ -50,4 +50,13 @@ export class TradeRepository {
       take: limit,
     });
   }
+
+  // 指定した ID 群のトレードを取得（順序はDB任せ）
+  async findByIds(ids: string[]): Promise<PrismaTrade[]> {
+    if (ids.length === 0) return [];
+    return prisma.trade.findMany({
+      where: { id: { in: ids } },
+      orderBy: { timestamp: 'asc' },
+    });
+  }
 }

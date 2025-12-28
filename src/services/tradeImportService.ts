@@ -17,20 +17,23 @@ export class TradeImportService {
    * CSV からトレードを取り込み DB に保存する
    * 期待フォーマット: timestamp,symbol,side,price,quantity,fee,exchange
    */
-  async importFromCSV(filePath: string): Promise<{ tradesImported: number; skipped: number; errors: string[]; file: string }> {
+  async importFromCSV(filePath: string): Promise<{ tradesImported: number; skipped: number; errors: string[]; file: string; insertedIds: string[]; parsedTrades: Array<{ id: string; timestamp: Date; symbol: string; side: TradeSide; price: number; quantity: number; fee?: number; exchange?: string }> }> {
     this.validateFile(filePath);
 
     const { trades, skipped, errors } = await this.parseCSV(filePath);
 
     if (trades.length === 0) {
       // 有効行が存在しない場合は DB への書き込みを行わずに終了する
-      return { tradesImported: 0, skipped, errors, file: filePath };
+      // 有効行が存在しない場合は DB への書き込みを行わずに終了する
+      return { tradesImported: 0, skipped, errors, file: filePath, insertedIds: [], parsedTrades: [] };
     }
 
+    // CSV の有効行を DB に保存する
     const inserted = await this.tradeRepository.bulkInsert(trades);
     console.log(`Imported ${inserted} trades from ${filePath}`);
 
-    return { tradesImported: inserted, skipped, errors, file: filePath };
+    // 取り込んだトレードの ID を返却し、後続処理（ノート生成等）で利用できるようにする
+    return { tradesImported: inserted, skipped, errors, file: filePath, insertedIds: trades.map((t) => t.id), parsedTrades: trades };
   }
 
   // CSV ファイルの存在・拡張子・ヘッダーを検証する

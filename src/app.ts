@@ -73,8 +73,10 @@ class App {
       console.log('\nAvailable endpoints:');
       console.log('  GET  /health');
       console.log('  POST /api/trades/import/csv');
+      console.log('  POST /api/trades/import/upload-text');
       console.log('  GET  /api/trades/notes');
       console.log('  GET  /api/trades/notes/:id');
+      console.log('  POST /api/trades/notes/:id/approve');
       console.log('  POST /api/matching/check');
       console.log('  GET  /api/matching/history');
       console.log('  GET  /api/notifications');

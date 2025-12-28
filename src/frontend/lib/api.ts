@@ -102,7 +102,7 @@ export async function markAllNotificationsAsRead(): Promise<void> {
  * Phase1 では空配列が返るため、UI 側で Empty を適切に表示する。
  */
 export async function fetchNotes(): Promise<NoteListItem[]> {
-  const response = await fetch(`${API_BASE_URL}/api/notes`, {
+  const response = await fetch(`${API_BASE_URL}/api/trades/notes`, {
     cache: "no-store",
   });
 
@@ -139,7 +139,7 @@ export async function fetchNotes(): Promise<NoteListItem[]> {
  * Phase1 では 404 が返り得るため、エラー表示を行う。
  */
 export async function fetchNoteDetail(id: string): Promise<NoteDetail> {
-  const response = await fetch(`${API_BASE_URL}/api/notes/${id}`, {
+  const response = await fetch(`${API_BASE_URL}/api/trades/notes/${id}`, {
     cache: "no-store",
   });
 
@@ -151,6 +151,42 @@ export async function fetchNoteDetail(id: string): Promise<NoteDetail> {
 
   const data = await response.json();
   return data;
+}
+
+/**
+ * CSV テキストをアップロードして取り込み＆ノート生成
+ * POST /api/trades/import/upload-text
+ */
+export async function uploadCsvText(
+  filename: string,
+  csvText: string
+): Promise<{ tradesImported: number; noteIds: string[] }> {
+  const response = await fetch(`${API_BASE_URL}/api/trades/import/upload-text`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename, csvText }),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `CSV アップロードに失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+  return response.json();
+}
+
+/**
+ * ノート承認（簡易）
+ * POST /api/trades/notes/:id/approve
+ */
+export async function approveNote(id: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/trades/notes/${id}/approve`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(
+      `ノート承認に失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
 }
 
 /**

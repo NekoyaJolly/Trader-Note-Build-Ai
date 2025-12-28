@@ -4,11 +4,14 @@
  */
 
 import Link from "next/link";
+import OnboardingIntro from "@/components/OnboardingIntro";
 
 export default function Home() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-100">
       <main className="max-w-4xl w-full mx-auto px-6 py-12">
+        {/* 初回オンボーディング（初回のみオーバーレイ表示） */}
+        <OnboardingIntro />
         {/* ヘッダー */}
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold text-gray-900 mb-4">

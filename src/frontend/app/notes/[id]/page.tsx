@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import type { NoteDetail } from "@/types/note";
-import { fetchNoteDetail } from "@/lib/api";
+import { fetchNoteDetail, approveNote } from "@/lib/api";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/Alert";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
@@ -96,26 +96,26 @@ export default function NoteDetailPage() {
         <CardContent>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-2">
-            <div className="text-sm text-gray-500">通貨ペア</div>
-            <div className="text-lg font-semibold text-gray-800">{note.symbol}</div>
+            <div className="text-sm font-semibold text-gray-600">通貨ペア</div>
+            <div className="text-lg font-bold text-gray-900">{note.symbol}</div>
 
-            <div className="text-sm text-gray-500">方向</div>
+            <div className="text-sm font-semibold text-gray-600">方向</div>
             <Badge variant={note.side === "buy" ? "secondary" : "destructive"}>{note.side}</Badge>
 
-            <div className="text-sm text-gray-500">エントリー時間</div>
-            <div className="text-base text-gray-700">{new Date(note.timestamp).toLocaleString("ja-JP")}</div>
+            <div className="text-sm font-semibold text-gray-600">エントリー時間</div>
+            <div className="text-base font-medium text-gray-900">{new Date(note.timestamp).toLocaleString("ja-JP")}</div>
           </div>
           <div className="space-y-2">
-            <div className="text-sm text-gray-500">数量</div>
-            <div className="text-base text-gray-700">{note.quantity}</div>
+            <div className="text-sm font-semibold text-gray-600">数量</div>
+            <div className="text-base font-medium text-gray-900">{note.quantity}</div>
 
-            <div className="text-sm text-gray-500">エントリー価格</div>
-            <div className="text-base text-gray-700">{note.entryPrice}</div>
+            <div className="text-sm font-semibold text-gray-600">エントリー価格</div>
+            <div className="text-base font-medium text-gray-900">{note.entryPrice}</div>
 
             {typeof note.exitPrice === "number" ? (
               <>
-                <div className="text-sm text-gray-500">エグジット価格</div>
-                <div className="text-base text-gray-700">{note.exitPrice}</div>
+                <div className="text-sm font-semibold text-gray-600">エグジット価格</div>
+                <div className="text-base font-medium text-gray-900">{note.exitPrice}</div>
               </>
             ) : null}
           </div>
@@ -131,16 +131,16 @@ export default function NoteDetailPage() {
         <CardContent>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div>
-            <div className="text-sm text-gray-500">時間足</div>
-            <div className="text-base text-gray-700">{note.marketContext.timeframe}</div>
+            <div className="text-sm font-semibold text-gray-600">時間足</div>
+            <div className="text-base font-medium text-gray-900">{note.marketContext.timeframe}</div>
           </div>
           <div>
-            <div className="text-sm text-gray-500">トレンド</div>
-            <div className="text-base text-gray-700">{note.marketContext.trend}</div>
+            <div className="text-sm font-semibold text-gray-600">トレンド</div>
+            <div className="text-base font-medium text-gray-900">{note.marketContext.trend}</div>
           </div>
           <div>
-            <div className="text-sm text-gray-500">インジケーター</div>
-            <div className="text-base text-gray-700">
+            <div className="text-sm font-semibold text-gray-600">インジケーター</div>
+            <div className="text-base font-medium text-gray-900">
               RSI: {note.marketContext.indicators?.rsi ?? "-"}, MACD: {note.marketContext.indicators?.macd ?? "-"}, VOL: {note.marketContext.indicators?.volume ?? "-"}
             </div>
           </div>
@@ -154,8 +154,8 @@ export default function NoteDetailPage() {
           <CardTitle>AI 要約（Draft）</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-gray-700 whitespace-pre-wrap">{note.aiSummary}</p>
-          <div className="mt-3 text-xs text-gray-500">※ Phase1 では常に Draft 相当です。承認は UI 上の操作のみ行います。</div>
+          <p className="text-base text-gray-900 leading-relaxed whitespace-pre-wrap font-medium">{note.aiSummary}</p>
+          <div className="mt-3 text-sm text-gray-600">※ 過去データから推定して作成されています。内容を確認して承認してください。</div>
         </CardContent>
       </Card>
 
@@ -167,14 +167,21 @@ export default function NoteDetailPage() {
         <CardContent>
         <div className="flex items-center gap-3">
           <Button
-            onClick={() => setApproved(true)}
+            onClick={async () => {
+              try {
+                await approveNote(id);
+                setApproved(true);
+              } catch (e) {
+                alert("承認に失敗しました。時間をおいて再試行してください。");
+              }
+            }}
             variant={approved ? "secondary" : "default"}
             disabled={approved}
           >
             {approved ? "承認済み" : "承認する"}
           </Button>
-          <span className="text-xs text-gray-500">
-            ※ 本番 API ではサーバー側で承認状態を保存します（Phase6 以降）。
+          <span className="text-sm text-gray-700">
+            ※ 承認後は完了メッセージが表示されます。編集機能は現時点では未提供です。
           </span>
         </div>
         </CardContent>
