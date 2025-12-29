@@ -13,6 +13,7 @@ const config: Config = {
   setupFiles: ['<rootDir>/jest.setup.ts'],
   moduleFileExtensions: ['ts', 'js', 'json'],
   verbose: true,
+  testTimeout: 30000, // 30秒（デフォルト5秒から延長）
 };
 
 export default config;

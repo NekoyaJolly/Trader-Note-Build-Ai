@@ -1,8 +1,6 @@
 name: Security & Quality Checks
 
 on:
-  push:
-    branches: [main, develop]
   pull_request:
     branches: [main, develop]
   schedule:

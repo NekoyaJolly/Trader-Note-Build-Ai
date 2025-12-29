@@ -2,7 +2,7 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, develop]
+    branches: [develop]
   pull_request:
     branches: [main, develop]
 
@@ -67,6 +67,13 @@ jobs:
       - name: 依存関係をインストール
         run: npm ci
 
+      - name: Prisma セットアップ
+        run: |
+          npx prisma generate
+          npx prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+
       - name: Jest ユニットテスト実行
         run: npm test -- --coverage --passWithNoTests
         env:
@@ -86,6 +93,22 @@ jobs:
   e2e-local:
     name: Local E2E Tests
     runs-on: ubuntu-latest
+    services:
+      # PostgreSQL テスト用
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
@@ -99,12 +122,10 @@ jobs:
       - name: 依存関係をインストール
         run: npm ci
 
-      - name: データベースセットアップ（Prisma migrate）
+      - name: Prisma セットアップ
         run: |
-          # .env が無い場合はスキップ（CI環境のため）
-          if [ -f .env ]; then
-            npx prisma migrate deploy || echo "Migration skipped in CI"
-          fi
+          npx prisma generate
+          npx prisma migrate deploy
         env:
           DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
 
@@ -113,6 +134,7 @@ jobs:
         env:
           NODE_ENV: development
           PORT: 3100
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
 
       - name: サーバー起動待機（最大30秒）
         run: |
