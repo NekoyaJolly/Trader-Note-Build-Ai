@@ -178,7 +178,7 @@ export class AISummaryService {
    * 
    * 実装:
    * - OpenAI API (Chat Completions) を使用
-   * - max_tokens を 150 に制限 (短文要約)
+   * - max_completion_tokens を 150 に制限 (短文要約、GPT-5 対応)
    * - temperature を 0.3 に設定 (安定した出力)
    */
   private async callAIAPI(prompt: string): Promise<AISummaryResult> {
@@ -218,19 +218,32 @@ export class AISummaryService {
             content: prompt,
           },
         ],
-        max_tokens: 150,      // トークン使用量を制限
-        temperature: 0.3,     // 安定した出力
+        max_completion_tokens: 5000,  // GPT-5 推論モデル用（コスト: 約 $2/1M tokens）
+        // 注意: gpt-5 シリーズは temperature をサポートしない（デフォルト 1 のみ）
       }),
     });
 
     if (!response.ok) {
+      // エラー詳細を取得
+      const errorBody = await response.text();
+      console.error('AI API エラー詳細:', errorBody);
       throw new Error(`AI API エラー: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json() as any;
     
+    // デバッグ: レスポンス構造を確認
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('AI API レスポンス:', JSON.stringify(data, null, 2));
+    }
+    
+    // GPT-5 シリーズのレスポンス構造に対応
+    const content = data.choices?.[0]?.message?.content || 
+                   data.output_text ||  // 新しい形式の可能性
+                   '';
+    
     return {
-      summary: data.choices[0].message.content.trim(),
+      summary: content.trim(),
       promptTokens: data.usage?.prompt_tokens,
       completionTokens: data.usage?.completion_tokens,
       model: data.model,

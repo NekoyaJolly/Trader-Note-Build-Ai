@@ -37,6 +37,7 @@ export default function NoteDetailPage() {
 
   /**
    * ノート詳細を API から取得
+   * APIから取得した承認状態を反映する
    */
   async function loadNote() {
     try {
@@ -44,6 +45,8 @@ export default function NoteDetailPage() {
       setError(null);
       const data = await fetchNoteDetail(id);
       setNote(data);
+      // APIから取得した承認状態を反映
+      setApproved(data.status === "approved");
     } catch (err) {
       setError(err instanceof Error ? err.message : "ノート詳細の取得に失敗しました");
     } finally {

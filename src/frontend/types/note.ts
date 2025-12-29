@@ -42,4 +42,7 @@ export interface NoteDetail {
   aiSummary: string;
   features: number[];
   createdAt: string;
+  status?: "draft" | "approved"; // ノートの状態（承認状況）
+  modeEstimated?: string; // AI による判断モード推定
+  approvedAt?: string; // 承認日時（ISO 8601）
 }

@@ -22,7 +22,7 @@ export const config = {
   },
   ai: {
     apiKey: process.env.AI_API_KEY || '',
-    model: process.env.AI_MODEL || 'gpt-4o-mini',
+    model: process.env.AI_MODEL || 'gpt-5-mini',
     baseURL: process.env.AI_BASE_URL || 'https://api.openai.com/v1',
   },
   market: {

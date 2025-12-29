@@ -119,15 +119,15 @@ export async function fetchNotes(): Promise<NoteListItem[]> {
     throw new Error("ノート一覧のレスポンス形式が不正です");
   }
 
-  // API のフィールド差異を UI 用に最小整形（存在するフィールドのみ利用）
+  // API のフィールド差異を UI 用に最小整形（APIから取得した値を優先）
   const normalized: NoteListItem[] = notes.map((n: any) => ({
     id: String(n.id),
     symbol: String(n.symbol ?? ""),
     side: n.side === "sell" ? "sell" : "buy", // デフォルトは buy
     timestamp: String(n.timestamp ?? n.createdAt ?? new Date().toISOString()),
     aiSummary: n.aiSummary ?? null,
-    status: "draft",
-    modeEstimated: "未推定",
+    status: n.status ?? "draft", // APIから取得した値を使用、なければdraft
+    modeEstimated: n.modeEstimated ?? n.decisionMode ?? "未推定", // APIから取得した値を使用
   }));
 
   return normalized;
