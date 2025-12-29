@@ -5,6 +5,7 @@ import tradeRoutes from './routes/tradeRoutes';
 import matchingRoutes from './routes/matchingRoutes';
 import notificationRoutes from './routes/notificationRoutes';
 import orderRoutes from './routes/orderRoutes';
+import barLocatorRoutes from './controllers/barLocatorController';
 import { MatchingScheduler } from './utils/scheduler';
 
 /**
@@ -88,6 +89,7 @@ class App {
     this.app.use('/api/matching', matchingRoutes);
     this.app.use('/api/notifications', notificationRoutes);
     this.app.use('/api/orders', orderRoutes);
+    this.app.use('/api/bars', barLocatorRoutes);
 
     // 404 handler
     this.app.use((req: Request, res: Response) => {
@@ -123,6 +125,8 @@ class App {
       console.log('  PUT  /api/notifications/:id/read');
       console.log('  GET  /api/orders/preset/:noteId');
       console.log('  POST /api/orders/confirmation');
+      console.log('  POST /api/bars/locate');
+      console.log('  GET  /api/bars/locate/:symbol/:timestamp/:timeframe');
       console.log('═══════════════════════════════════════\n');
 
       // スケジューラー起動: 本番運用ルールに従い、CRON_ENABLED が true の場合のみ起動

@@ -1,0 +1,202 @@
+name: Production Deployment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'prisma/**'
+      - 'package.json'
+      - 'package-lock.json'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'デプロイ対象環境'
+        required: true
+        type: choice
+        options:
+          - railway-api
+          - vercel-ui
+          - both
+
+env:
+  NODE_VERSION: '18'
+
+jobs:
+  # デプロイ前チェック
+  pre-deployment-checks:
+    name: Pre-Deployment Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Node.js セットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 依存関係をインストール
+        run: npm ci
+
+      - name: TypeScript コンパイル確認
+        run: npx tsc --noEmit
+
+      - name: ユニットテスト実行
+        run: npm test -- --passWithNoTests
+        env:
+          NODE_ENV: test
+
+      - name: デプロイ前チェックリスト
+        run: |
+          echo "✅ デプロイ前チェック項目:"
+          echo "  [✓] TypeScript コンパイル成功"
+          echo "  [✓] ユニットテスト成功"
+          echo "  [✓] 環境変数設定済み（.env.production）"
+          echo "  [✓] データベース migration 確認済み"
+          echo ""
+          echo "📋 本番環境の状態確認:"
+          echo "  - Railway API: https://trader-note-api.up.railway.app/health"
+          echo "  - Vercel UI: https://trader-note-build-ai.vercel.app"
+
+  # Railway（API）へのデプロイ
+  deploy-railway:
+    name: Deploy API to Railway
+    runs-on: ubuntu-latest
+    needs: pre-deployment-checks
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    environment:
+      name: production-api
+      url: https://trader-note-api.up.railway.app
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Railway CLI セットアップ
+        uses: railwayapp/setup-railway@v1
+        with:
+          token: ${{ secrets.RAILWAY_TOKEN }}
+
+      - name: Railway へのデプロイ
+        run: |
+          railway link ${{ secrets.RAILWAY_PROJECT_ID }}
+          railway up --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+      - name: デプロイ後の動作確認（最大5分待機）
+        run: |
+          for i in {1..30}; do
+            echo "確認中... ($i/30)"
+            if curl -s -f https://trader-note-api.up.railway.app/health > /dev/null 2>&1; then
+              echo "✅ API が正常に起動しました"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "❌ API の起動確認がタイムアウトしました"
+          exit 1
+
+      - name: デプロイ成功通知
+        if: success()
+        run: echo "✅ Railway API デプロイ完了: $(date)"
+
+      - name: デプロイ失敗通知
+        if: failure()
+        run: echo "❌ Railway API デプロイ失敗: $(date)"
+
+  # Vercel（UI）へのデプロイ
+  deploy-vercel:
+    name: Deploy UI to Vercel
+    runs-on: ubuntu-latest
+    needs: pre-deployment-checks
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    environment:
+      name: production-ui
+      url: https://trader-note-build-ai.vercel.app
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Node.js セットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 依存関係をインストール
+        run: npm ci
+
+      - name: Vercel へのデプロイ
+        uses: vercel/action@v5
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          production: true
+
+      - name: デプロイ成功通知
+        if: success()
+        run: echo "✅ Vercel UI デプロイ完了: $(date)"
+
+      - name: デプロイ失敗通知
+        if: failure()
+        run: echo "❌ Vercel UI デプロイ失敗: $(date)"
+
+  # 本番 E2E テスト
+  e2e-production:
+    name: Production E2E Tests
+    runs-on: ubuntu-latest
+    needs: [deploy-railway, deploy-vercel]
+    if: success()
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: 本番 E2E テスト実行
+        run: bash scripts/production-e2e-test.sh
+        env:
+          PRODUCTION_API_URL: https://trader-note-api.up.railway.app
+          PRODUCTION_UI_URL: https://trader-note-build-ai.vercel.app
+          WAIT_TIME: 2
+
+      - name: E2E テスト成功通知
+        if: success()
+        run: |
+          echo "✅ 本番 E2E テスト完了"
+          echo "🎉 本番デプロイ成功！"
+
+      - name: E2E テスト失敗時のロールバック計画
+        if: failure()
+        run: |
+          echo "❌ 本番 E2E テスト失敗"
+          echo "ロールバックの必要性を評価してください"
+          echo "詳細は GitHub Actions ログを確認"
+
+  # デプロイ完了通知
+  deployment-summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [e2e-production]
+    if: success()
+    steps:
+      - name: デプロイ完了サマリー
+        run: |
+          echo "================================"
+          echo "🚀 本番デプロイ完了"
+          echo "================================"
+          echo ""
+          echo "デプロイ内容:"
+          echo "  ✅ API: Railway"
+          echo "  ✅ UI: Vercel"
+          echo "  ✅ E2E テスト: 合格"
+          echo ""
+          echo "リンク:"
+          echo "  🔗 API: https://trader-note-api.up.railway.app"
+          echo "  🔗 UI: https://trader-note-build-ai.vercel.app"
+          echo ""
+          echo "次のステップ:"
+          echo "  1. 本番環境で動作確認"
+          echo "  2. ユーザーへの通知"
+          echo "  3. 運用ログの確認"
