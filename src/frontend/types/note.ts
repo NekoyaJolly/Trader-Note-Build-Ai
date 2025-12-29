@@ -1,7 +1,6 @@
 /**
  * トレードノート関連の型定義
- * バックエンドの Phase1 実装では空配列/404 を返す前提に合わせ、
- * UI 側では受け取り型を明示して安全に扱う。
+ * バックエンドの TradeNote 型と整合させる
  */
 
 /**
@@ -13,8 +12,7 @@ export interface NoteListItem {
   side: "buy" | "sell";
   timestamp: string; // ISO 8601 形式
   aiSummary?: string | null;
-  status?: "draft" | "approved"; // Phase1 では常に draft 相当
-  modeEstimated?: "順張り" | "逆張り" | "未推定"; // AI 推定（任意）
+  status?: "draft" | "approved";
 }
 
 /**
@@ -42,7 +40,6 @@ export interface NoteDetail {
   aiSummary: string;
   features: number[];
   createdAt: string;
-  status?: "draft" | "approved"; // ノートの状態（承認状況）
-  modeEstimated?: string; // AI による判断モード推定
+  status?: "draft" | "approved";
   approvedAt?: string; // 承認日時（ISO 8601）
 }

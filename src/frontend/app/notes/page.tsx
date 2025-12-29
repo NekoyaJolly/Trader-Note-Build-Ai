@@ -5,7 +5,7 @@
  * /notes
  *
  * 要件:
- * - ペア / エントリー時間 / 判断モード（AI推定） / 状態
+ * - ペア / エントリー時間 / 状態
  * - Loading / Empty / Error 状態
  * - クリックで詳細遷移
  * 
@@ -21,8 +21,6 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import EmptyState from "@/components/EmptyState";
-import DecisionModeBadge from "@/components/DecisionModeBadge";
-import type { DecisionMode } from "@/components/DecisionModeBadge";
 
 export default function NotesPage() {
   const [notes, setNotes] = useState<NoteListItem[]>([]);
@@ -47,17 +45,6 @@ export default function NotesPage() {
     } finally {
       setIsLoading(false);
     }
-  }
-
-  /**
-   * AI 推定モードを DecisionMode 型に変換
-   */
-  function getDecisionMode(mode: string | null | undefined): DecisionMode {
-    if (!mode) return "neutral";
-    const lower = mode.toLowerCase();
-    if (lower.includes("trend") || lower.includes("順張")) return "trend";
-    if (lower.includes("reversal") || lower.includes("逆張")) return "reversal";
-    return "neutral";
   }
 
   // ローディング表示（Skeleton）
@@ -113,7 +100,6 @@ export default function NotesPage() {
                 <tr>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-300">通貨ペア</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-300">エントリー時間</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-300">AI 推定</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-300">状態</th>
                   <th className="px-4 py-3 text-center text-sm font-semibold text-gray-300">操作</th>
                 </tr>
@@ -124,13 +110,6 @@ export default function NotesPage() {
                     <td className="px-4 py-3 text-sm font-bold text-white">{note.symbol}</td>
                     <td className="px-4 py-3 text-sm text-gray-300">
                       {new Date(note.timestamp).toLocaleString("ja-JP")}
-                    </td>
-                    <td className="px-4 py-3 text-sm">
-                      <DecisionModeBadge 
-                        mode={getDecisionMode(note.modeEstimated)} 
-                        size="small"
-                        label={note.modeEstimated || "未推定"}
-                      />
                     </td>
                     <td className="px-4 py-3 text-sm">
                       <Badge 

@@ -98,8 +98,7 @@ export async function markAllNotificationsAsRead(): Promise<void> {
 
 /**
  * ノート一覧を取得
- * GET /api/notes
- * Phase1 では空配列が返るため、UI 側で Empty を適切に表示する。
+ * GET /api/trades/notes
  */
 export async function fetchNotes(): Promise<NoteListItem[]> {
   const response = await fetch(`${API_BASE_URL}/api/trades/notes`, {
@@ -119,15 +118,14 @@ export async function fetchNotes(): Promise<NoteListItem[]> {
     throw new Error("ノート一覧のレスポンス形式が不正です");
   }
 
-  // API のフィールド差異を UI 用に最小整形（APIから取得した値を優先）
-  const normalized: NoteListItem[] = notes.map((n: any) => ({
+  // API レスポンスを UI 用の型に整形
+  const normalized: NoteListItem[] = notes.map((n: Record<string, unknown>) => ({
     id: String(n.id),
     symbol: String(n.symbol ?? ""),
-    side: n.side === "sell" ? "sell" : "buy", // デフォルトは buy
+    side: n.side === "sell" ? "sell" : "buy",
     timestamp: String(n.timestamp ?? n.createdAt ?? new Date().toISOString()),
-    aiSummary: n.aiSummary ?? null,
-    status: n.status ?? "draft", // APIから取得した値を使用、なければdraft
-    modeEstimated: n.modeEstimated ?? n.decisionMode ?? "未推定", // APIから取得した値を使用
+    aiSummary: (n.aiSummary as string | null) ?? null,
+    status: (n.status as "draft" | "approved") ?? "draft",
   }));
 
   return normalized;

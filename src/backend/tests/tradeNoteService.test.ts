@@ -72,9 +72,10 @@ describe('TradeNoteService', () => {
     };
 
     const note = await service.generateNote(trade, {
-      // 日本語コメント: extractFeatures にのみ利用される簡易コンテキスト
-      indicators: { rsi: 42, macd: -0.5, volume: 1000 },
+      // 市場コンテキスト: 正しい MarketContext 型に準拠
+      timeframe: '1h',
       trend: 'bearish',
+      indicators: { rsi: 42, macd: -0.5, volume: 1000 },
     });
 
     await service.saveNote(note);

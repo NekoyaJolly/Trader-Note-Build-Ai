@@ -13,7 +13,22 @@ export interface Trade {
 }
 
 /**
+ * トレード時点の市場コンテキスト
+ * ノート生成時に使用する市場情報の型定義
+ */
+export interface MarketContext {
+  timeframe: string; // 例: '15m', '1h', '4h'
+  trend: 'bullish' | 'bearish' | 'neutral';
+  indicators?: {
+    rsi?: number;
+    macd?: number;
+    volume?: number;
+  };
+}
+
+/**
  * Structured trade note with AI summary
+ * トレード履歴から生成される構造化ノート
  */
 export interface TradeNote {
   id: string;
@@ -26,21 +41,13 @@ export interface TradeNote {
   quantity: number;
   profitLoss?: number;
   
-  // Market context at time of trade
-  marketContext: {
-    timeframe: string; // e.g., '15m', '1h'
-    trend: 'bullish' | 'bearish' | 'neutral';
-    indicators?: {
-      rsi?: number;
-      macd?: number;
-      volume?: number;
-    };
-  };
+  // トレード時点の市場コンテキスト
+  marketContext: MarketContext;
   
-  // AI-generated summary
+  // AI が生成した要約
   aiSummary: string;
   
-  // Feature vector for matching
+  // 一致判定用の特徴量ベクトル
   features: number[];
   
   createdAt: Date;
@@ -48,9 +55,6 @@ export interface TradeNote {
   // 承認状態
   status?: 'draft' | 'approved';
   approvedAt?: Date;
-  
-  // AI による判断モード推定（順張り/逆張り）
-  modeEstimated?: string;
 }
 
 /**

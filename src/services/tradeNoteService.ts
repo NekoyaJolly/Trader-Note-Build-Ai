@@ -1,4 +1,4 @@
-import { Trade, TradeNote } from '../models/types';
+import { Trade, TradeNote, MarketContext } from '../models/types';
 import { AISummaryService } from './aiSummaryService';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
@@ -6,7 +6,12 @@ import path from 'path';
 import { config } from '../config';
 
 /**
- * Service for generating structured trade notes
+ * トレードノート生成サービス
+ * 
+ * 責務:
+ * - トレード履歴から構造化ノートを生成
+ * - AI 要約の取得と保存
+ * - 一致判定用の特徴量抽出
  */
 export class TradeNoteService {
   private aiService: AISummaryService;
@@ -19,24 +24,40 @@ export class TradeNoteService {
   }
 
   /**
-   * Generate a structured trade note from a trade
+   * トレードから構造化ノートを生成
+   * 
+   * @param trade - トレードデータ
+   * @param marketContext - トレード時点の市場コンテキスト（オプション）
+   * @returns 生成されたトレードノート
    */
-  async generateNote(trade: Trade, marketContext?: any): Promise<TradeNote> {
-    // Generate AI summary
+  async generateNote(trade: Trade, marketContext?: MarketContext): Promise<TradeNote> {
+    // MarketContext を AI サービス用の形式に変換
+    // bullish/bearish → uptrend/downtrend への変換
+    const aiMarketContext = marketContext ? {
+      trend: this.convertTrendForAI(marketContext.trend),
+      rsi: marketContext.indicators?.rsi,
+      macd: marketContext.indicators?.macd,
+      timeframe: marketContext.timeframe,
+    } : undefined;
+
+    // AI 要約を生成
     const aiSummary = await this.aiService.generateTradeSummary({
       symbol: trade.symbol,
       side: trade.side,
       price: trade.price,
       quantity: trade.quantity,
       timestamp: trade.timestamp,
-      marketContext,
+      marketContext: aiMarketContext,
     });
 
-    // Extract features for matching
+    // 一致判定用の特徴量を抽出
     const features = this.extractFeatures(trade, marketContext);
 
-    // 判断モードを推定（RSI ベースのヒューリスティック）
-    const modeEstimated = this.estimateDecisionMode(trade, marketContext);
+    // デフォルトの市場コンテキスト（未指定時）
+    const defaultMarketContext: MarketContext = {
+      timeframe: '15m',
+      trend: 'neutral',
+    };
 
     const note: TradeNote = {
       id: uuidv4(),
@@ -46,58 +67,29 @@ export class TradeNoteService {
       side: trade.side,
       entryPrice: trade.price,
       quantity: trade.quantity,
-      marketContext: marketContext || {
-        timeframe: '15m',
-        trend: 'neutral' as const,
-      },
+      marketContext: marketContext ?? defaultMarketContext,
       aiSummary: aiSummary.summary,
       features,
       createdAt: new Date(),
       status: 'draft',
-      modeEstimated,
     };
 
     return note;
   }
 
   /**
-   * 判断モードを推定（順張り/逆張り）
-   * RSI とトレンドに基づく簡易ヒューリスティック
+   * トレンド値を AI サービス用の形式に変換
+   * bullish → uptrend, bearish → downtrend
    */
-  private estimateDecisionMode(trade: Trade, marketContext?: any): string {
-    const rsi = marketContext?.indicators?.rsi;
-    const trend = marketContext?.trend;
-    const side = trade.side;
-
-    // RSI が取得できない場合は未推定
-    if (rsi === undefined || rsi === null) {
-      return '未推定';
+  private convertTrendForAI(trend: 'bullish' | 'bearish' | 'neutral'): 'uptrend' | 'downtrend' | 'neutral' {
+    switch (trend) {
+      case 'bullish':
+        return 'uptrend';
+      case 'bearish':
+        return 'downtrend';
+      default:
+        return 'neutral';
     }
-
-    // RSI ベースの判断モード推定
-    // 順張り: トレンド方向にエントリー
-    // 逆張り: トレンドに逆らってエントリー（RSI 極端値で反転狙い）
-    if (side === 'buy') {
-      // 買いエントリー
-      if (rsi < 30) {
-        // RSI 売られすぎで買い → 逆張り
-        return '逆張り';
-      } else if (rsi > 50 && (trend === 'bullish' || trend === 'neutral')) {
-        // RSI 中立以上 & 上昇/横ばいトレンドで買い → 順張り
-        return '順張り';
-      }
-    } else {
-      // 売りエントリー
-      if (rsi > 70) {
-        // RSI 買われすぎで売り → 逆張り
-        return '逆張り';
-      } else if (rsi < 50 && (trend === 'bearish' || trend === 'neutral')) {
-        // RSI 中立以下 & 下降/横ばいトレンドで売り → 順張り
-        return '順張り';
-      }
-    }
-
-    return '未推定';
   }
 
   /**
@@ -160,32 +152,38 @@ export class TradeNoteService {
   }
 
   /**
-   * Extract numerical features from trade for matching
-   * This creates a feature vector that can be compared with current market state
+   * トレードから一致判定用の特徴量を抽出
+   * 現在の市場状態と比較可能な特徴量ベクトルを作成
+   * 
+   * @param trade - トレードデータ
+   * @param marketContext - 市場コンテキスト
+   * @returns 特徴量の配列
    */
-  private extractFeatures(trade: Trade, marketContext?: any): number[] {
+  private extractFeatures(trade: Trade, marketContext?: MarketContext): number[] {
     const features: number[] = [];
 
-    // Price-related features (normalized)
+    // 価格関連の特徴量
     features.push(trade.price);
     features.push(trade.quantity);
 
-    // Market context features
+    // 市場コンテキストの特徴量
     if (marketContext?.indicators) {
-      features.push(marketContext.indicators.rsi || 50);
-      features.push(marketContext.indicators.macd || 0);
-      features.push(marketContext.indicators.volume || 0);
+      // インジケーター値（未設定時はデフォルト値）
+      features.push(marketContext.indicators.rsi ?? 50);
+      features.push(marketContext.indicators.macd ?? 0);
+      features.push(marketContext.indicators.volume ?? 0);
     } else {
-      features.push(50, 0, 0); // Default values
+      // インジケーター未設定時のデフォルト値
+      features.push(50, 0, 0);
     }
 
-    // Trend encoding: bullish=1, neutral=0, bearish=-1
+    // トレンドの数値エンコーディング: bullish=1, neutral=0, bearish=-1
     const trendValue = 
       marketContext?.trend === 'bullish' ? 1 :
       marketContext?.trend === 'bearish' ? -1 : 0;
     features.push(trendValue);
 
-    // Side encoding: buy=1, sell=-1
+    // 売買方向のエンコーディング: buy=1, sell=-1
     features.push(trade.side === 'buy' ? 1 : -1);
 
     return features;
