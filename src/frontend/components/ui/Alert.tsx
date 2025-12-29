@@ -1,16 +1,26 @@
+/**
+ * Alert コンポーネント
+ * Neon Dark テーマ対応
+ * 
+ * デザイン仕様:
+ * - default: slate-800 背景 (情報/デフォルト)
+ * - destructive: red-500 系 (エラー/警告)
+ */
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 
 const alertVariants = cva(
-  "relative w-full rounded-lg border p-4 [&>svg~*]:pl-7 [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg]:text-foreground",
+  "relative w-full rounded-xl border p-4 [&>svg~*]:pl-7 [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4",
   {
     variants: {
       variant: {
-        default: "bg-background text-gray-900 border-gray-200",
+        // デフォルト: slate-800 背景
+        default: "bg-slate-800 text-gray-200 border-slate-700",
+        // エラー/警告: red-500 系
         destructive:
-          "border-red-300 bg-red-50 text-red-900 dark:border-red-600 [&>svg]:text-red-600",
+          "border-red-500/50 bg-red-500/10 text-red-400 [&>svg]:text-red-400",
       },
     },
     defaultVariants: {
@@ -38,7 +48,7 @@ const AlertTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <h5
     ref={ref}
-    className={cn("mb-1 font-bold leading-none tracking-tight text-gray-900", className)}
+    className={cn("mb-1 font-bold leading-none tracking-tight text-white", className)}
     {...props}
   />
 ))
@@ -50,7 +60,7 @@ const AlertDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("text-sm [&_p]:leading-relaxed text-gray-800", className)}
+    className={cn("text-sm [&_p]:leading-relaxed text-gray-300", className)}
     {...props}
   />
 ))

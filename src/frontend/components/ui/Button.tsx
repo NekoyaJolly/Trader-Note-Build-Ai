@@ -1,3 +1,13 @@
+/**
+ * Button コンポーネント
+ * Neon Dark テーマ対応
+ * 
+ * デザイン仕様:
+ * - default: ネオングラデーション (pink-500 → violet-500)
+ * - secondary: green-500 系 (成功/承認)
+ * - destructive: red-500 系 (削除/警告)
+ * - ghost/outline: 透明背景 + slate-700 ボーダー
+ */
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
@@ -5,29 +15,29 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-  // ヘッダーのナビボタンと統一したシンプルなデザイン
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  // 共通スタイル: フォーカスリング + トランジション
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-semibold transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        // デフォルト: アクティブ状態のヘッダーボタン風
-        default: "bg-blue-100 text-blue-700 hover:bg-blue-200",
-        // 破壊的アクション
-        destructive: "bg-red-100 text-red-700 hover:bg-red-200",
-        // アウトライン: 非アクティブ状態のヘッダーボタン風
-        outline: "text-gray-700 hover:bg-gray-100",
-        // セカンダリ: 承認済みなどの完了状態
-        secondary: "bg-green-100 text-green-700 hover:bg-green-200",
-        // ゴースト: 目立たないボタン
-        ghost: "text-gray-700 hover:bg-gray-100",
+        // デフォルト: ネオングラデーション + グロー効果
+        default: "bg-gradient-to-r from-pink-500 to-violet-500 text-white hover:from-pink-400 hover:to-violet-400 hover:shadow-[0_0_20px_rgba(236,72,153,0.4)]",
+        // 破壊的アクション: 赤系
+        destructive: "bg-red-500/20 text-red-400 border border-red-500/50 hover:bg-red-500/30 hover:shadow-[0_0_15px_rgba(239,68,68,0.3)]",
+        // アウトライン: 透明背景 + ボーダー
+        outline: "border border-slate-600 text-gray-300 hover:bg-slate-700/50 hover:text-white",
+        // セカンダリ: グリーン系 (承認/成功)
+        secondary: "bg-green-500/20 text-green-400 border border-green-500/50 hover:bg-green-500/30 hover:shadow-[0_0_15px_rgba(34,197,94,0.3)]",
+        // ゴースト: 最小限のスタイル
+        ghost: "text-gray-400 hover:text-white hover:bg-slate-700/50",
         // リンク風
-        link: "text-blue-700 underline-offset-4 hover:underline",
+        link: "text-violet-400 underline-offset-4 hover:text-violet-300 hover:underline",
       },
       size: {
-        default: "px-3 py-2",
-        sm: "px-2 py-1 text-xs",
-        lg: "px-4 py-3",
-        icon: "p-2",
+        default: "px-4 py-2.5",
+        sm: "px-3 py-1.5 text-xs",
+        lg: "px-6 py-3 text-base",
+        icon: "p-2.5",
       },
     },
     defaultVariants: {

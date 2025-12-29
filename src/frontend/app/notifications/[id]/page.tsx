@@ -108,10 +108,10 @@ export default function NotificationDetailPage() {
     <div className="container mx-auto px-4 py-8 max-w-7xl">
       {/* ヘッダー */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold text-slate-900 drop-shadow-sm dark:text-slate-100">通知詳細</h1>
+        <h1 className="text-3xl font-bold text-white">通知詳細</h1>
         <Link
           href="/notifications"
-          className="px-3 py-2 rounded text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors"
+          className="px-3 py-2 rounded-lg text-sm font-medium text-gray-300 hover:bg-slate-700/50 hover:text-white transition-all duration-300"
         >
           ← 一覧に戻る
         </Link>
@@ -127,22 +127,22 @@ export default function NotificationDetailPage() {
           {/* 左カラム */}
           <div className="space-y-4">
             <div>
-              <div className="text-sm text-gray-500 mb-1">通貨ペア</div>
-              <div className="text-lg font-bold text-gray-800">
+              <div className="text-sm text-gray-400 mb-1">通貨ペア</div>
+              <div className="text-lg font-bold text-white">
                 {notification.tradeNote.symbol}
               </div>
             </div>
 
             <div>
-              <div className="text-sm text-gray-500 mb-1">売買方向</div>
+              <div className="text-sm text-gray-400 mb-1">売買方向</div>
               <Badge variant={notification.tradeNote.side === "BUY" ? "secondary" : "destructive"}>
                 {notification.tradeNote.side}
               </Badge>
             </div>
 
             <div>
-              <div className="text-sm text-gray-500 mb-1">時間足</div>
-              <div className="text-base font-semibold text-gray-800">
+              <div className="text-sm text-gray-400 mb-1">時間足</div>
+              <div className="text-base font-semibold text-gray-200">
                 {notification.tradeNote.timeframe}
               </div>
             </div>
@@ -151,8 +151,8 @@ export default function NotificationDetailPage() {
           {/* 右カラム */}
           <div className="space-y-4">
             <div>
-              <div className="text-sm text-gray-500 mb-1">判定時刻</div>
-              <div className="text-base text-gray-700">
+              <div className="text-sm text-gray-400 mb-1">判定時刻</div>
+              <div className="text-base text-gray-300">
                 {new Date(notification.matchResult.evaluatedAt).toLocaleString(
                   "ja-JP"
                 )}
@@ -160,14 +160,14 @@ export default function NotificationDetailPage() {
             </div>
 
             <div>
-              <div className="text-sm text-gray-500 mb-1">通知送信時刻</div>
-              <div className="text-base text-gray-700">
+              <div className="text-sm text-gray-400 mb-1">通知送信時刻</div>
+              <div className="text-base text-gray-300">
                 {new Date(notification.sentAt).toLocaleString("ja-JP")}
               </div>
             </div>
 
             <div>
-              <div className="text-sm text-gray-500 mb-2">一致度スコア</div>
+              <div className="text-sm text-gray-400 mb-2">一致度スコア</div>
               <ScoreGauge score={notification.matchResult.score} size="large" />
             </div>
           </div>
@@ -207,8 +207,8 @@ export default function NotificationDetailPage() {
           <CardTitle>発注支援（参照のみ）</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="bg-yellow-50 border border-yellow-200 rounded p-4 mb-4">
-            <p className="text-sm text-yellow-800">
+          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 mb-4">
+            <p className="text-sm text-yellow-400">
               ⚠️ このリンクは参照用です。実際の発注はブローカーの画面で確認・実行してください。
             </p>
           </div>
@@ -221,7 +221,7 @@ export default function NotificationDetailPage() {
                 発注画面を開く（新しいタブ）
               </Link>
             </Button>
-            <span className="text-sm text-gray-500">※ 自動実行は行いません</span>
+            <span className="text-sm text-gray-400">※ 自動実行は行いません</span>
           </div>
         </CardContent>
       </Card>

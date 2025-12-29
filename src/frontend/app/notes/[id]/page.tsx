@@ -82,10 +82,10 @@ export default function NoteDetailPage() {
     <div className="space-y-6">
       {/* ヘッダー */}
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-slate-900 drop-shadow-sm dark:text-slate-100">ノート詳細</h1>
+        <h1 className="text-3xl font-bold text-white">ノート詳細</h1>
         <Link
           href="/notes"
-          className="px-3 py-2 rounded text-sm font-medium text-slate-900 dark:text-slate-100 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
+          className="px-3 py-2 rounded-lg text-sm font-medium text-gray-300 hover:bg-slate-700/50 hover:text-white transition-all duration-300"
         >
           ← 一覧に戻る
         </Link>
@@ -95,26 +95,26 @@ export default function NoteDetailPage() {
         <CardContent>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-2">
-            <div className="text-sm font-semibold text-gray-600">通貨ペア</div>
-            <div className="text-lg font-bold text-gray-900">{note.symbol}</div>
+            <div className="text-sm font-semibold text-gray-400">通貨ペア</div>
+            <div className="text-lg font-bold text-white">{note.symbol}</div>
 
-            <div className="text-sm font-semibold text-gray-600">方向</div>
+            <div className="text-sm font-semibold text-gray-400">方向</div>
             <Badge variant={note.side === "buy" ? "secondary" : "destructive"}>{note.side}</Badge>
 
-            <div className="text-sm font-semibold text-gray-600">エントリー時間</div>
-            <div className="text-base font-medium text-gray-900">{new Date(note.timestamp).toLocaleString("ja-JP")}</div>
+            <div className="text-sm font-semibold text-gray-400">エントリー時間</div>
+            <div className="text-base font-medium text-gray-200">{new Date(note.timestamp).toLocaleString("ja-JP")}</div>
           </div>
           <div className="space-y-2">
-            <div className="text-sm font-semibold text-gray-600">数量</div>
-            <div className="text-base font-medium text-gray-900">{note.quantity}</div>
+            <div className="text-sm font-semibold text-gray-400">数量</div>
+            <div className="text-base font-medium text-gray-200">{note.quantity}</div>
 
-            <div className="text-sm font-semibold text-gray-600">エントリー価格</div>
-            <div className="text-base font-medium text-gray-900">{note.entryPrice}</div>
+            <div className="text-sm font-semibold text-gray-400">エントリー価格</div>
+            <div className="text-base font-medium text-gray-200">{note.entryPrice}</div>
 
             {typeof note.exitPrice === "number" ? (
               <>
-                <div className="text-sm font-semibold text-gray-600">エグジット価格</div>
-                <div className="text-base font-medium text-gray-900">{note.exitPrice}</div>
+                <div className="text-sm font-semibold text-gray-400">エグジット価格</div>
+                <div className="text-base font-medium text-gray-200">{note.exitPrice}</div>
               </>
             ) : null}
           </div>
@@ -130,16 +130,16 @@ export default function NoteDetailPage() {
         <CardContent>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div>
-            <div className="text-sm font-semibold text-gray-600">時間足</div>
-            <div className="text-base font-medium text-gray-900">{note.marketContext.timeframe}</div>
+            <div className="text-sm font-semibold text-gray-400">時間足</div>
+            <div className="text-base font-medium text-gray-200">{note.marketContext.timeframe}</div>
           </div>
           <div>
-            <div className="text-sm font-semibold text-gray-600">トレンド</div>
-            <div className="text-base font-medium text-gray-900">{note.marketContext.trend}</div>
+            <div className="text-sm font-semibold text-gray-400">トレンド</div>
+            <div className="text-base font-medium text-gray-200">{note.marketContext.trend}</div>
           </div>
           <div>
-            <div className="text-sm font-semibold text-gray-600">インジケーター</div>
-            <div className="text-base font-medium text-gray-900">
+            <div className="text-sm font-semibold text-gray-400">インジケーター</div>
+            <div className="text-base font-medium text-gray-200">
               RSI: {note.marketContext.indicators?.rsi ?? "-"}, MACD: {note.marketContext.indicators?.macd ?? "-"}, VOL: {note.marketContext.indicators?.volume ?? "-"}
             </div>
           </div>
@@ -153,8 +153,8 @@ export default function NoteDetailPage() {
           <CardTitle>AI 要約（Draft）</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-base text-gray-900 leading-relaxed whitespace-pre-wrap font-medium">{note.aiSummary}</p>
-          <div className="mt-3 text-sm text-gray-600">※ 過去データから推定して作成されています。内容を確認して承認してください。</div>
+          <p className="text-base text-gray-200 leading-relaxed whitespace-pre-wrap font-medium">{note.aiSummary}</p>
+          <div className="mt-3 text-sm text-gray-400">※ 過去データから推定して作成されています。内容を確認して承認してください。</div>
         </CardContent>
       </Card>
 
@@ -179,7 +179,7 @@ export default function NoteDetailPage() {
           >
             {approved ? "承認済み" : "承認する"}
           </Button>
-          <span className="text-sm text-gray-700">
+          <span className="text-sm text-gray-400">
             ※ 承認後は完了メッセージが表示されます。編集機能は現時点では未提供です。
           </span>
         </div>

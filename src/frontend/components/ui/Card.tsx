@@ -1,3 +1,12 @@
+/**
+ * Card コンポーネント
+ * Neon Dark テーマ対応
+ * 
+ * デザイン仕様:
+ * - 背景: slate-800 (Surface Dark)
+ * - ボーダー: slate-700 (微細な区切り)
+ * - ホバー時: ネオングロー効果
+ */
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
@@ -9,8 +18,10 @@ const Card = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      // bg-card と text-card-foreground は CSS 変数で定義（視認性確保）
-      "rounded-lg border bg-[var(--card)] text-[var(--card-foreground)] shadow-sm",
+      // Neon Dark テーマ: slate-800 背景 + slate-700 ボーダー
+      "rounded-xl border border-slate-700 bg-slate-800 text-gray-100 shadow-lg transition-all duration-300",
+      // ホバー時にネオングロー効果
+      "hover:border-slate-600 hover:shadow-[0_0_20px_rgba(139,92,246,0.15)]",
       className
     )}
     {...props}
@@ -37,7 +48,8 @@ const CardTitle = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      "text-2xl font-bold leading-none tracking-tight text-gray-900",
+      // Neon Dark テーマ: 白色テキスト
+      "text-2xl font-bold leading-none tracking-tight text-white",
       className
     )}
     {...props}
@@ -51,7 +63,7 @@ const CardDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("text-sm text-muted-foreground", className)}
+    className={cn("text-sm text-gray-400", className)}
     {...props}
   />
 ))

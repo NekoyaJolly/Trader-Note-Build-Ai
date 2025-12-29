@@ -1,5 +1,5 @@
 /**
- * 通知一覧画面
+ * 通知一覧画面（Neon Dark テーマ対応）
  * /notifications
  *
  * 機能:
@@ -7,6 +7,8 @@
  * - スコアゲージ表示
  * - 行クリックで詳細画面遷移
  * - 一括既読/個別既読
+ * 
+ * @see docs/phase12/UI_DESIGN_GUIDE.md
  */
 
 "use client";
@@ -16,10 +18,9 @@ import Link from "next/link";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/Alert";
 import { Skeleton } from "@/components/ui/Skeleton";
 import ScoreGauge from "@/components/ScoreGauge";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { Progress } from "@/components/ui/Progress";
+import EmptyState from "@/components/EmptyState";
 import type { NotificationListItem } from "@/types/notification";
 import {
   fetchNotifications,
@@ -104,12 +105,12 @@ export default function NotificationsPage() {
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-6 w-full" />
+        <Skeleton className="h-8 w-64 bg-slate-700" />
+        <Skeleton className="h-6 w-full bg-slate-700" />
         <div className="space-y-2">
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-16 w-full bg-slate-700" />
+          <Skeleton className="h-16 w-full bg-slate-700" />
+          <Skeleton className="h-16 w-full bg-slate-700" />
         </div>
       </div>
     );
@@ -133,60 +134,57 @@ export default function NotificationsPage() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-7xl">
+    <div className="space-y-6">
       {/* ヘッダー */}
-      <div className="flex items-center justify-between mb-6">
-          <h1 className="text-3xl font-bold text-slate-900 drop-shadow-sm dark:text-slate-100">通知一覧</h1>
-          {notifications.length > 0 && (
-            <Button onClick={handleMarkAllAsRead} variant="default">
-              すべて既読にする
-            </Button>
-          )}
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-white">🔔 通知一覧</h1>
+        {notifications.length > 0 && (
+          <Button onClick={handleMarkAllAsRead} variant="secondary" size="sm">
+            すべて既読にする
+          </Button>
+        )}
       </div>
 
       {/* 通知がない場合 */}
-        {notifications.length === 0 ? (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-3">
-                <span className="text-2xl">🔔</span>
-                通知はありません
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-gray-600">現在、表示できる通知がありません。市場一致判定に基づく通知が生成されると、ここに一覧表示されます。</p>
-            </CardContent>
-          </Card>
-        ) : (
-          /* 通知リスト */
-          <Card>
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
-              <table className="min-w-full">
-              <thead className="bg-gray-50 dark:bg-gray-800/40 border-b">
+      {notifications.length === 0 ? (
+        <EmptyState
+          icon={
+            <svg className="w-16 h-16 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+            </svg>
+          }
+          title="通知はありません"
+          description="市場一致判定に基づく通知が生成されると、ここに一覧表示されます。"
+        />
+      ) : (
+        /* 通知リスト */
+        <div className="card-surface overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="min-w-full">
+              <thead className="bg-slate-700/50 border-b border-slate-600">
                 <tr>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-300">
                     状態
                   </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-300">
                     通知時刻
                   </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-300">
                     通貨ペア
                   </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-300">
                     時間足
                   </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-300">
                     売買
                   </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-300">
                     一致度
                   </th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-300">
                     判定理由
                   </th>
-                  <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
+                  <th className="px-4 py-3 text-center text-sm font-semibold text-gray-300">
                     操作
                   </th>
                 </tr>
@@ -195,79 +193,74 @@ export default function NotificationsPage() {
                 {notifications.map((notification) => (
                   <tr
                     key={notification.id}
-                    className={`border-b hover:bg-gray-50 transition-colors ${
-                      !notification.isRead ? "bg-blue-50" : ""
+                    className={`border-b border-slate-700 hover:bg-slate-700/30 transition-colors ${
+                      !notification.isRead ? "bg-blue-900/20" : ""
                     }`}
                   >
                     {/* 未読/既読状態 */}
-                      <td className="px-4 py-3">
-                        {!notification.isRead ? (
-                          <Badge variant="secondary">未読</Badge>
-                        ) : (
-                          <Badge variant="outline">既読</Badge>
-                        )}
-                      </td>
+                    <td className="px-4 py-3">
+                      {!notification.isRead ? (
+                        <Badge variant="secondary" className="bg-blue-500/20 text-blue-400">未読</Badge>
+                      ) : (
+                        <Badge variant="outline" className="border-gray-600 text-gray-400">既読</Badge>
+                      )}
+                    </td>
 
                     {/* 通知時刻 */}
-                    <td className="px-4 py-3 text-sm text-gray-700">
+                    <td className="px-4 py-3 text-sm text-gray-300">
                       {new Date(notification.sentAt).toLocaleString("ja-JP")}
                     </td>
 
                     {/* 通貨ペア */}
-                    <td className="px-4 py-3 text-sm font-semibold text-gray-800">
+                    <td className="px-4 py-3 text-sm font-semibold text-white">
                       {notification.tradeNote.symbol}
                     </td>
 
                     {/* 時間足 */}
-                    <td className="px-4 py-3 text-sm text-gray-700">
+                    <td className="px-4 py-3 text-sm text-gray-300">
                       {notification.tradeNote.timeframe}
                     </td>
 
                     {/* 売買方向 */}
-                      <td className="px-4 py-3 text-sm">
-                        <Badge variant={notification.tradeNote.side === "BUY" ? "secondary" : "destructive"}>
-                          {notification.tradeNote.side}
-                        </Badge>
-                      </td>
+                    <td className="px-4 py-3 text-sm">
+                      <Badge 
+                        variant={notification.tradeNote.side === "BUY" ? "secondary" : "destructive"}
+                        className={notification.tradeNote.side === "BUY" 
+                          ? "bg-green-500/20 text-green-400" 
+                          : "bg-red-500/20 text-red-400"
+                        }
+                      >
+                        {notification.tradeNote.side}
+                      </Badge>
+                    </td>
 
                     {/* スコアゲージ */}
                     <td className="px-4 py-3">
-                      <div className="w-56 flex flex-col gap-2">
-                        {/* 日本語コメント: 直感性のためゲージとバーの二軸表示 */}
-                        <ScoreGauge
-                          score={notification.matchResult.score}
-                          size="small"
-                        />
-                        <div className="flex items-center gap-3">
-                          <div className="flex-1">
-                            <Progress value={Math.round(notification.matchResult.score * 100)} />
-                          </div>
-                          <span className="text-xs text-gray-600 w-10 text-right">
-                            {Math.round(notification.matchResult.score * 100)}%
-                          </span>
-                        </div>
-                      </div>
+                      <ScoreGauge
+                        score={notification.matchResult.score}
+                        size="small"
+                      />
                     </td>
 
                     {/* 判定理由要約 */}
-                    <td className="px-4 py-3 text-sm text-gray-700">
+                    <td className="px-4 py-3 text-sm text-gray-400 max-w-xs truncate">
                       {notification.reasonSummary}
                     </td>
 
                     {/* 操作ボタン */}
                     <td className="px-4 py-3 text-center">
-                      <div className="flex items-stretch justify-center gap-2 flex-col sm:flex-row">
+                      <div className="flex items-center justify-center gap-2">
                         {!notification.isRead && (
                           <Button
                             onClick={(e) => handleMarkAsRead(notification.id, e)}
                             size="sm"
-                            variant="secondary"
-                            className="sm:w-auto w-full"
+                            variant="ghost"
+                            className="text-gray-400 hover:text-white"
                           >
                             既読
                           </Button>
                         )}
-                        <Button size="sm" asChild className="sm:w-auto w-full">
+                        <Button size="sm" asChild className="bg-gradient-to-r from-pink-500 to-violet-500 hover:opacity-90">
                           <Link href={`/notifications/${notification.id}`}>詳細</Link>
                         </Button>
                       </div>
@@ -276,9 +269,8 @@ export default function NotificationsPage() {
                 ))}
               </tbody>
             </table>
-            </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
     </div>
   );

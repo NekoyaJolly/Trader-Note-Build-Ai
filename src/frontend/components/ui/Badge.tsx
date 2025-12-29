@@ -1,20 +1,34 @@
+/**
+ * Badge コンポーネント
+ * Neon Dark テーマ対応
+ * 
+ * デザイン仕様:
+ * - default: ネオングラデーション (pink-500/violet-500)
+ * - secondary: グリーン系 (BUY / 上昇)
+ * - destructive: レッド系 (SELL / 下落)
+ * - outline: 透明背景 + ボーダー
+ */
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 
 const badgeVariants = cva(
-  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-all duration-300",
   {
     variants: {
       variant: {
+        // デフォルト: ネオングラデーション背景
         default:
-          "border-transparent bg-primary text-primary-foreground hover:bg-primary/80",
+          "border-transparent bg-gradient-to-r from-pink-500/20 to-violet-500/20 text-pink-300 border-pink-500/30",
+        // セカンダリ: グリーン系 (BUY / 成功 / 上昇)
         secondary:
-          "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
+          "border-transparent bg-green-500/20 text-green-400 border-green-500/30",
+        // 破壊的: レッド系 (SELL / 警告 / 下落)
         destructive:
-          "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80",
-        outline: "text-foreground",
+          "border-transparent bg-red-500/20 text-red-400 border-red-500/30",
+        // アウトライン: 透明背景
+        outline: "text-gray-400 border-slate-600",
       },
     },
     defaultVariants: {
