@@ -1,6 +1,6 @@
 # Dependencies
 node_modules/
-package-lock.json
+# package-lock.json は CI/CD で必要なため除外しない
 
 # Environment
 .env
