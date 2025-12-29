@@ -67,16 +67,16 @@ jobs:
     needs: pre-deployment-checks
     if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
     environment:
-      name: production-api
+      name: production
       url: https://trader-note-api.up.railway.app
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
 
       - name: Railway CLI セットアップ
-        uses: railwayapp/setup-railway@v1
+        uses: railwayapp/railway-action@v2
         with:
-          token: ${{ secrets.RAILWAY_TOKEN }}
+          railwayToken: ${{ secrets.RAILWAY_TOKEN }}
 
       - name: Railway へのデプロイ
         run: |
@@ -100,12 +100,11 @@ jobs:
 
       - name: デプロイ成功通知
         if: success()
-        run: echo "✅ Railway API デプロイ完了: $(date)"
+        run: 'echo "✅ Railway API デプロイ完了: $(date)"'
 
       - name: デプロイ失敗通知
         if: failure()
-        run: echo "❌ Railway API デプロイ失敗: $(date)"
-
+        run: 'echo "❌ Railway API デプロイ失敗: $(date)"'
   # Vercel（UI）へのデプロイ
   deploy-vercel:
     name: Deploy UI to Vercel
@@ -113,7 +112,7 @@ jobs:
     needs: pre-deployment-checks
     if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
     environment:
-      name: production-ui
+      name: production
       url: https://trader-note-build-ai.vercel.app
     steps:
       - name: リポジトリをチェックアウト
@@ -138,12 +137,11 @@ jobs:
 
       - name: デプロイ成功通知
         if: success()
-        run: echo "✅ Vercel UI デプロイ完了: $(date)"
+        run: 'echo "✅ Vercel UI デプロイ完了: $(date)"'
 
       - name: デプロイ失敗通知
         if: failure()
-        run: echo "❌ Vercel UI デプロイ失敗: $(date)"
-
+        run: 'echo "❌ Vercel UI デプロイ失敗: $(date)"'
   # 本番 E2E テスト
   e2e-production:
     name: Production E2E Tests
