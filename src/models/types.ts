@@ -44,6 +44,13 @@ export interface TradeNote {
   features: number[];
   
   createdAt: Date;
+  
+  // 承認状態
+  status?: 'draft' | 'approved';
+  approvedAt?: Date;
+  
+  // AI による判断モード推定（順張り/逆張り）
+  modeEstimated?: string;
 }
 
 /**

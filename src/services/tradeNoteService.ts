@@ -35,6 +35,9 @@ export class TradeNoteService {
     // Extract features for matching
     const features = this.extractFeatures(trade, marketContext);
 
+    // 判断モードを推定（RSI ベースのヒューリスティック）
+    const modeEstimated = this.estimateDecisionMode(trade, marketContext);
+
     const note: TradeNote = {
       id: uuidv4(),
       tradeId: trade.id,
@@ -50,9 +53,51 @@ export class TradeNoteService {
       aiSummary: aiSummary.summary,
       features,
       createdAt: new Date(),
+      status: 'draft',
+      modeEstimated,
     };
 
     return note;
+  }
+
+  /**
+   * 判断モードを推定（順張り/逆張り）
+   * RSI とトレンドに基づく簡易ヒューリスティック
+   */
+  private estimateDecisionMode(trade: Trade, marketContext?: any): string {
+    const rsi = marketContext?.indicators?.rsi;
+    const trend = marketContext?.trend;
+    const side = trade.side;
+
+    // RSI が取得できない場合は未推定
+    if (rsi === undefined || rsi === null) {
+      return '未推定';
+    }
+
+    // RSI ベースの判断モード推定
+    // 順張り: トレンド方向にエントリー
+    // 逆張り: トレンドに逆らってエントリー（RSI 極端値で反転狙い）
+    if (side === 'buy') {
+      // 買いエントリー
+      if (rsi < 30) {
+        // RSI 売られすぎで買い → 逆張り
+        return '逆張り';
+      } else if (rsi > 50 && (trend === 'bullish' || trend === 'neutral')) {
+        // RSI 中立以上 & 上昇/横ばいトレンドで買い → 順張り
+        return '順張り';
+      }
+    } else {
+      // 売りエントリー
+      if (rsi > 70) {
+        // RSI 買われすぎで売り → 逆張り
+        return '逆張り';
+      } else if (rsi < 50 && (trend === 'bearish' || trend === 'neutral')) {
+        // RSI 中立以下 & 下降/横ばいトレンドで売り → 順張り
+        return '順張り';
+      }
+    }
+
+    return '未推定';
   }
 
   /**

@@ -161,7 +161,7 @@ export default function NoteDetailPage() {
         </CardContent>
       </Card>
 
-      {/* ユーザー承認 UI（ローカル） */}
+      {/* ユーザー承認 UI */}
       <Card>
         <CardHeader>
           <CardTitle>承認</CardTitle>
@@ -173,6 +173,10 @@ export default function NoteDetailPage() {
               try {
                 await approveNote(id);
                 setApproved(true);
+                // 承認成功後、少し待ってから一覧ページへ遷移
+                setTimeout(() => {
+                  window.location.href = '/notes';
+                }, 500);
               } catch (e) {
                 alert("承認に失敗しました。時間をおいて再試行してください。");
               }
@@ -183,7 +187,7 @@ export default function NoteDetailPage() {
             {approved ? "承認済み" : "承認する"}
           </Button>
           <span className="text-sm text-gray-400">
-            ※ 承認後は完了メッセージが表示されます。編集機能は現時点では未提供です。
+            ※ 承認するとノート一覧に戻ります。
           </span>
         </div>
         </CardContent>
