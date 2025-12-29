@@ -155,3 +155,106 @@ enum NotificationLogStatus {
   skipped
   failed
 }
+
+// ============================================
+// OHLCV 時系列データ（TimescaleDB 対応準備）
+// 技術スタック選定シート ③ に基づく
+// ============================================
+
+/// OHLCV ローソク足データ
+/// 将来的に TimescaleDB のハイパーテーブルに変換予定
+/// 変換 SQL: SELECT create_hypertable('OHLCVCandle', 'timestamp');
+model OHLCVCandle {
+  id        String   @id @default(uuid()) @db.Uuid
+  /// 銘柄シンボル（例: BTCUSD, EURUSD）
+  symbol    String
+  /// 時間足（例: 1m, 5m, 15m, 1h, 4h, 1d）
+  timeframe String
+  /// ローソク足開始時刻（UTC）
+  timestamp DateTime @db.Timestamptz(6)
+  /// 始値
+  open      Decimal  @db.Decimal(18, 8)
+  /// 高値
+  high      Decimal  @db.Decimal(18, 8)
+  /// 安値
+  low       Decimal  @db.Decimal(18, 8)
+  /// 終値
+  close     Decimal  @db.Decimal(18, 8)
+  /// 出来高
+  volume    Decimal  @db.Decimal(18, 8)
+  /// データソース（例: twelvedata, binance）
+  source    String?
+  /// 作成日時
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  // 複合ユニーク制約（同一銘柄・時間足・時刻の重複防止）
+  @@unique([symbol, timeframe, timestamp], map: "uq_ohlcv_symbol_timeframe_timestamp")
+  // 時系列クエリ用インデックス
+  @@index([symbol, timeframe, timestamp], map: "idx_ohlcv_symbol_timeframe_timestamp")
+  // 銘柄別クエリ用インデックス
+  @@index([symbol, timestamp], map: "idx_ohlcv_symbol_timestamp")
+}
+
+/// Raw JSON 形式のトレードノート保存
+/// 技術スタック選定シート ⑧ に基づくハイブリッド保存
+model TradeNoteRaw {
+  id        String   @id @default(uuid()) @db.Uuid
+  /// 関連するトレードノート ID
+  noteId    String   @unique @db.Uuid
+  /// Raw JSON データ（将来の再評価・再生成用）
+  rawData   Json
+  /// スキーマバージョン（破壊的変更対応）
+  version   Int      @default(1)
+  /// 作成日時
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  @@index([noteId], map: "idx_tradenoteraw_noteid")
+}
+
+/// 再評価ジョブ管理
+/// 技術スタック選定シート ⑨ に基づく
+model RevaluationJob {
+  id           String               @id @default(uuid()) @db.Uuid
+  /// ジョブタイプ（note_regenerate, feature_recalculate, ai_summary_regenerate）
+  jobType      RevaluationJobType
+  /// 対象ノート ID（null の場合は全ノート対象）
+  targetNoteId String?              @db.Uuid
+  /// 対象銘柄（null の場合は全銘柄対象）
+  targetSymbol String?
+  /// ジョブ状態
+  status       RevaluationJobStatus @default(pending)
+  /// 処理済み件数
+  processedCount Int               @default(0)
+  /// 総件数
+  totalCount     Int               @default(0)
+  /// エラーメッセージ
+  errorMessage   String?
+  /// 開始日時
+  startedAt      DateTime?         @db.Timestamptz(6)
+  /// 完了日時
+  completedAt    DateTime?         @db.Timestamptz(6)
+  /// 作成日時
+  createdAt      DateTime          @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt      DateTime          @updatedAt @db.Timestamptz(6)
+
+  @@index([status, createdAt], map: "idx_revaluationjob_status_created")
+  @@index([jobType, status], map: "idx_revaluationjob_type_status")
+}
+
+enum RevaluationJobType {
+  note_regenerate
+  feature_recalculate
+  ai_summary_regenerate
+  full_reprocess
+}
+
+enum RevaluationJobStatus {
+  pending
+  running
+  completed
+  failed
+  cancelled
+}

@@ -1,8 +1,40 @@
 @import "tailwindcss";
 
+/* ====================================
+   TradeAssist MVP - Neon Dark Theme
+   デザインガイド: docs/phase12/UI_DESIGN_GUIDE.md
+   ==================================== */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Neon Gradient - メインアクセント */
+  --neon-start: #EC4899;
+  --neon-end: #8B5CF6;
+  --neon-gradient: linear-gradient(135deg, var(--neon-start), var(--neon-end));
+  
+  /* Dark Theme Colors */
+  --bg-dark: #0F172A;
+  --surface-dark: #1E293B;
+  --border-dark: #334155;
+  
+  /* Semantic Colors */
+  --success: #22C55E;
+  --warning: #F59E0B;
+  --danger: #EF4444;
+  --info: #3B82F6;
+  
+  /* Text Colors */
+  --text-primary: #FFFFFF;
+  --text-secondary: #9CA3AF;
+  --text-muted: #6B7280;
+  
+  /* shadcn/ui 互換変数 */
+  --background: var(--bg-dark);
+  --foreground: var(--text-primary);
+  --primary: var(--info);
+  --primary-foreground: #ffffff;
+  --card: var(--surface-dark);
+  --card-foreground: var(--text-primary);
+  --muted-foreground: var(--text-secondary);
 }
 
 @theme inline {
@@ -12,26 +44,112 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+/* ダークモードをデフォルトに */
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--bg-dark);
+  color: var(--text-primary);
   font-family: Arial, Helvetica, sans-serif;
 }
 
-/* shadcn/ui で利用する CSS 変数（簡易） */
-:root {
-  --primary: #2563eb; /* blue-600 */
-  --primary-foreground: #ffffff;
-  /* Card コンポーネント用の背景色・テキスト色 */
-  --card: #f8fafc; /* slate-50: 明るいグレー背景 */
-  --card-foreground: #1e293b; /* slate-800: 濃いグレーテキスト */
-  --muted-foreground: #64748b; /* slate-500: 補助テキスト */
+/* ====================================
+   Neon Effects
+   ==================================== */
+
+/* ネオングロー効果 */
+.neon-glow {
+  box-shadow: 0 0 20px rgba(236, 72, 153, 0.3),
+              0 0 40px rgba(139, 92, 246, 0.2);
+}
+
+/* ネオンボーダー（カード用） */
+.neon-border {
+  border: 1px solid transparent;
+  background: 
+    linear-gradient(var(--surface-dark), var(--surface-dark)) padding-box,
+    var(--neon-gradient) border-box;
+  border-radius: 12px;
+}
+
+/* ネオンテキスト */
+.neon-text {
+  background: var(--neon-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ====================================
+   Score Gauge
+   ==================================== */
+
+/* SVG グラデーション定義用のスタイル */
+.score-gauge-ring {
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.5s ease-out;
+}
+
+/* ====================================
+   Component Utilities
+   ==================================== */
+
+/* カード背景 */
+.card-surface {
+  background: var(--surface-dark);
+  border: 1px solid var(--border-dark);
+  border-radius: 12px;
+}
+
+/* アクティブナビゲーション */
+.nav-active {
+  background: #334155;
+  border-left: 3px solid;
+  border-image: var(--neon-gradient) 1;
+}
+
+/* ホバーエフェクト */
+.hover-glow:hover {
+  box-shadow: 0 0 15px rgba(236, 72, 153, 0.2),
+              0 0 30px rgba(139, 92, 246, 0.1);
+}
+
+/* トランジション共通 */
+.transition-smooth {
+  transition: all 0.2s ease-out;
+}
+
+/* ====================================
+   Badge Variants
+   ==================================== */
+
+/* トレンドバッジ */
+.badge-trend-up {
+  background: rgba(34, 197, 94, 0.2);
+  color: #4ADE80;
+}
+
+.badge-trend-down {
+  background: rgba(239, 68, 68, 0.2);
+  color: #F87171;
+}
+
+.badge-trend-neutral {
+  background: rgba(107, 114, 128, 0.2);
+  color: #9CA3AF;
+}
+
+/* 判断モードバッジ */
+.badge-decision-trend {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60A5FA;
+}
+
+.badge-decision-reversal {
+  background: rgba(245, 158, 11, 0.2);
+  color: #FBBF24;
+}
+
+.badge-decision-neutral {
+  background: rgba(107, 114, 128, 0.2);
+  color: #9CA3AF;
 }
 

@@ -1,6 +1,10 @@
 /**
- * スコアゲージコンポーネント
- * 一致度スコア (0.0 〜 1.0) を視覚的に表示
+ * スコアゲージコンポーネント（Neon Dark テーマ対応）
+ * 
+ * 一致度スコア (0.0 〜 1.0) を円形ゲージで視覚的に表示
+ * ネオングラデーションを使用したプロフェッショナルなデザイン
+ * 
+ * @see docs/phase12/UI_DESIGN_GUIDE.md
  */
 
 interface ScoreGaugeProps {
@@ -9,74 +13,120 @@ interface ScoreGaugeProps {
    */
   score: number;
   /**
-   * 閾値ライン（オプション）
-   * この値を超えると色が変わる
+   * サイズ（デフォルト: large）
+   * - large: 120px - 詳細パネル、カード内
+   * - small: 64px - リスト表示、コンパクト
    */
-  threshold?: number;
+  size?: "small" | "large";
   /**
-   * サイズ（デフォルト: medium）
+   * 精度ラベル（オプション）
+   * 例: "精度" を表示する場合
    */
-  size?: "small" | "medium" | "large";
+  label?: string;
+  /**
+   * アニメーション有効化（デフォルト: true）
+   */
+  animated?: boolean;
 }
 
 /**
- * スコアゲージコンポーネント
- * 0〜1 のスコアを 0〜100% のゲージで表示
+ * 円形スコアゲージコンポーネント
+ * ネオングラデーションのリングで 0〜100% を表示
  */
 export default function ScoreGauge({
   score,
-  threshold = 0.7,
-  size = "medium",
+  size = "large",
+  label,
+  animated = true,
 }: ScoreGaugeProps) {
-  // スコアを 0〜100% に変換
+  // スコアを 0〜100 に変換
   const percentage = Math.min(Math.max(score * 100, 0), 100);
-
-  // 閾値判定による色分け
-  const isHighScore = score >= threshold;
-  const gaugeColor = isHighScore
-    ? "bg-green-500" // 閾値以上: 緑
-    : "bg-blue-400"; // 閾値未満: 青
-
-  // サイズ別のスタイル
-  const sizeClasses = {
-    small: "h-2 text-sm",
-    medium: "h-4 text-base",
-    large: "h-6 text-lg",
+  
+  // サイズ別の設定
+  const config = {
+    large: {
+      size: 120,
+      strokeWidth: 8,
+      radius: 52,
+      fontSize: "text-3xl",
+      labelSize: "text-xs",
+    },
+    small: {
+      size: 64,
+      strokeWidth: 6,
+      radius: 26,
+      fontSize: "text-lg",
+      labelSize: "text-[10px]",
+    },
   };
 
-  return (
-    <div className="flex items-center gap-3">
-      {/* スコア数値表示 */}
-      <span
-        className={`font-mono font-semibold ${sizeClasses[size]} ${
-          isHighScore ? "text-green-600" : "text-gray-700"
-        }`}
-      >
-        {score.toFixed(2)}
-      </span>
+  const { size: svgSize, strokeWidth, radius, fontSize, labelSize } = config[size];
+  
+  // 円周と進捗
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (percentage / 100) * circumference;
+  
+  // 中心座標
+  const center = svgSize / 2;
 
-      {/* ゲージバー */}
-      <div className="flex-1 bg-gray-200 rounded-full overflow-hidden relative">
-        {/* ゲージ本体 */}
-        <div
-          className={`${gaugeColor} ${sizeClasses[size]} rounded-full transition-all duration-300`}
-          style={{ width: `${percentage}%` }}
+  return (
+    <div className="relative inline-flex items-center justify-center">
+      {/* SVG 円形ゲージ */}
+      <svg
+        width={svgSize}
+        height={svgSize}
+        className={animated ? "transition-all duration-500" : ""}
+      >
+        {/* グラデーション定義 */}
+        <defs>
+          <linearGradient id="neonGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#EC4899" />
+            <stop offset="100%" stopColor="#8B5CF6" />
+          </linearGradient>
+        </defs>
+
+        {/* 背景リング（トラック） */}
+        <circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          stroke="#334155"
+          strokeWidth={strokeWidth}
         />
 
-        {/* 閾値ライン（オプション表示） */}
-        {threshold && (
-          <div
-            className="absolute top-0 bottom-0 w-0.5 bg-red-400"
-            style={{ left: `${threshold * 100}%` }}
-            title={`閾値: ${threshold.toFixed(2)}`}
-          />
-        )}
-      </div>
+        {/* 進捗リング（ネオングラデーション） */}
+        <circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          stroke="url(#neonGradient)"
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={strokeDashoffset}
+          transform={`rotate(-90 ${center} ${center})`}
+          className={animated ? "score-gauge-ring" : ""}
+          style={{
+            filter: "drop-shadow(0 0 6px rgba(236, 72, 153, 0.5))",
+          }}
+        />
+      </svg>
 
-      {/* パーセント表示 */}
-      <span className={`text-gray-600 ${sizeClasses[size]}`}>
-        {percentage.toFixed(0)}%
-      </span>
+      {/* 中央のスコア表示 */}
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        {/* ラベル（オプション） */}
+        {label && (
+          <span className={`${labelSize} text-gray-400 mb-0.5`}>
+            {label}
+          </span>
+        )}
+        {/* スコア数値 */}
+        <span className={`${fontSize} font-bold text-white`}>
+          {Math.round(percentage)}
+        </span>
+      </div>
     </div>
   );
 }
