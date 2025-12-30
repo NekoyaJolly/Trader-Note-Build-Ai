@@ -215,7 +215,7 @@ export default function NotificationDetailPage() {
           <div className="flex items-center gap-4">
             <Button asChild>
               <Link
-                href={`/orders/preset?symbol=${notification.tradeNote.symbol}&side=${notification.tradeNote.side}`}
+                href={`/orders/preset?noteId=${notification.tradeNote.id}`}
                 target="_blank"
               >
                 発注画面を開く（新しいタブ）

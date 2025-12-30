@@ -112,11 +112,36 @@
 
 ### 1. Trade Import Flow
 ```
-CSV/API → TradeImportService → TradeNoteService
+CSV/API → TradeImportService → TradeNormalizationService (Phase 1)
+                                      ↓
+                              TradeDefinitionService (Phase 1)
                                       ↓
                                 AISummaryService
                                       ↓
+                              TradeNoteService
+                                      ↓
                              JSON File Storage
+```
+
+#### Phase 1: Definition Pipeline（定義化パイプライン）
+```
+CSV → TradeImportService.importFromCSV()
+         ↓
+TradeNormalizationService.normalizeTradeData()
+  - タイムスタンプ UTC 正規化
+  - シンボル正規化（BTCUSD → BTC/USD）
+  - Side 正規化（buy/sell/long/short/日本語）
+  - ユーザーフレンドリーエラーメッセージ生成
+         ↓
+TradeDefinitionService.generateDefinition()
+  - MarketDataService から市場データ取得
+  - IndicatorService で 20 種インジケーター計算
+  - DerivedContext 導出（trend, volatility, momentum）
+  - 特徴量ベクトル生成（20 次元）
+         ↓
+TradeNoteService.generateNote()
+  - AI 要約生成
+  - TradeNote 保存
 ```
 
 ### 2. Matching Flow (Scheduled)
@@ -159,6 +184,27 @@ Manual Execution on Exchange (NO AUTO-TRADE)
 - Import trades from CSV files
 - Parse and validate trade data
 - Placeholder for exchange API integration
+
+**TradeNormalizationService** (Phase 1)
+- タイムスタンプ UTC 正規化
+- シンボル名の標準化（表記揺れ吸収）
+- Side 値の正規化（buy/sell/long/short/日本語対応）
+- ユーザーフレンドリーなバリデーションエラー生成
+
+**TradeDefinitionService** (Phase 1)
+- Trade + MarketSnapshot + IndicatorSet を統合
+- 特徴量ベクトル生成（pgvector 対応用）
+- 派生コンテキスト導出（trend, volatility, momentum）
+- バッチ処理対応
+
+**IndicatorService** (Phase 1 拡張)
+- 20 種類のテクニカル指標をサポート
+  - Momentum: RSI, Stochastic, Williams%R, ROC, MFI
+  - Trend: SMA, EMA, DEMA, TEMA, MACD, Aroon, CCI, PSAR, Ichimoku
+  - Volatility: ATR, BB, KC
+  - Volume: OBV, VWAP, CMF
+- 同一インジケーター複数期間対応
+- indicatorts ライブラリをラップ
 
 **TradeNoteService**
 - Generate structured notes from trades

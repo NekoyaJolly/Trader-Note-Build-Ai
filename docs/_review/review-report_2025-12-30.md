@@ -1,52 +1,138 @@
 # カバレッジ・整合性レビュー（2025-12-30）
 
+本レポートは「実装・Doc・導線」の整合性を、事実（根拠リンク）ベースで点検した結果です。
+
 ## 1. サマリー（重要度別件数）
 - Critical: 0
 - High: 2
-- Medium: 2
-- Low: 1
+- Medium: 6
+- Low: 2
 
 ## 2. 変更点（implementation-matrix 更新概要）
-- 環境変数行を ✅（DATABASE_URL/NOTIFY_THRESHOLD へ統一済み）に更新。
-- トレード取込行を ⚠️/❌/⚠️ に変更（import/csv はノート未生成、upload-text に依存）。
-- UI 行の Doc を ⚠️ に変更（README の API メソッド誤記を明示）。
-- インジケーター行を ❌/❌ に変更（RSI/SMA 計算未実装）。
+- 正式ファイルとして docs/_coverage/implementation-matrix.md を新規作成し、誤綴りファイルは誘導メモを追記。
+- 「縦割り導線（UI→API→DB/FS）」と「逆方向（DB/FS→API→UI）」で、死んだ UI / Doc と不一致の API を優先的に ⚠️/❌ 化。
 
 ## 3. 検出事項一覧（重要度順）
 
-### High-1: CSV 取込 API が仕様より縮退（ノート未生成）
-- 事実: import/csv エンドポイントは DB 取込のみで `notesGenerated: 0` を固定返却し、ノート生成は upload-text 経由のみ ([src/controllers/tradeController.ts#L20-L47](src/controllers/tradeController.ts#L20-L47))。API.md/README は import/csv でノート生成まで行う例を掲載。
-- 影響: ドキュメント通りに import/csv を叩くとノートができず、後続マッチング・通知に進めない。E2E 想定が破綻。
-- 推奨修正: 1) import/csv でもノート生成を行う、または 2) ドキュメントを「ノート生成は /import/upload-text を使用」と明記し、返却値を合わせる。後者の場合でも失敗系テストを追加。
+### High-1: 発注支援 UI の導線が切れている（/orders/preset が存在しない）
+- 事実（根拠）:
+	- 通知詳細画面が `/orders/preset?...` へ遷移するリンクを持つ: [src/frontend/app/notifications/[id]/page.tsx](src/frontend/app/notifications/[id]/page.tsx#L218)
+	- バックエンドは `GET /api/orders/preset/:noteId` を提供している: [src/routes/orderRoutes.ts](src/routes/orderRoutes.ts#L11-L21)
+- 影響:
+	- ユーザーが「通知→発注支援」へ進む主要導線で 404 が確定し、MVP の価値提供（発注支援 UI）が成立しない。
+- 推奨修正（最小手数）:
+	- 実装修正案（どちらかに統一）
+		- A案: フロントに `src/frontend/app/orders/preset/page.tsx` を追加し、クエリ（symbol/side）から `POST /api/orders/confirmation` を呼ぶ形へ寄せる
+		- B案: UI リンクを noteId ベースに変更し、`GET /api/orders/preset/:noteId` へ統一
 
-### High-2: 通知トリガ API がログ/クールダウンを実装していない
-- 事実: `/api/notifications/check` は MatchingService で生成したマッチを即座にファイル通知へ書き出すだけで、NotificationLog 永続化やクールダウン判定を実行していない ([src/controllers/notificationController.ts#L159-L176](src/controllers/notificationController.ts#L159-L176), [src/services/notification/notificationTriggerService.ts#L14-L33](src/services/notification/notificationTriggerService.ts#L14-L33)). NOTIFY_THRESHOLD 判定のみで skipReason 以外の Runbook 要件を満たさない。
-- 影響: 冪等性・再通知防止・履歴参照が不可能。Phase4 要件（ログ取得・重複抑制）が未達で、本番通知設計と乖離。
-- 推奨修正: MatchResult/NotificationLog を Prisma 保存し、クールダウン・重複チェックを実装。Doc も実装に合わせて skipReason/ログ構造を更新。
+```diff
+*** a/src/frontend/app/notifications/[id]/page.tsx
+--- b/src/frontend/app/notifications/[id]/page.tsx
+@@
+-                href={`/orders/preset?symbol=${notification.tradeNote.symbol}&side=${notification.tradeNote.side}`}
++                // 提案: noteId を使う場合は API と揃える（例）
++                href={`/orders/preset?noteId=${notification.tradeNote.id}`}
+```
 
-### Medium-1: マッチ履歴 API が通知ファイルを代用
-- 事実: `/api/matching/history` は DB の MatchResult ではなくファイル通知から type=match を抽出して返すのみ ([src/controllers/matchingController.ts#L59-L67](src/controllers/matchingController.ts#L59-L67))。
-- 影響: 過去マッチが通知されていない場合は履歴が空になる。履歴粒度（閾値・理由・スナップショットID）も欠落し、Doc の想定と異なる。
-- 推奨修正: MatchResult 永続化を前提に履歴を提供するか、現状の挙動を API ドキュメントに明記し「通知済みのみを返す暫定仕様」とする。
+（注）上記は方針提示のみです。実際のキー（noteId の取得元）は型/レスポンスに合わせて調整が必要です。
 
-### Medium-2: RSI/SMA 定義と実装が乖離（定数埋め込みのみ）
-- 事実: MarketDataService の calculateIndicators は RSI=50, MACD=0 を固定設定し、SMA/傾き等は未計算 ([src/services/marketDataService.ts#L171-L186](src/services/marketDataService.ts#L171-L186)). RSI/SMA 定義書の Layer2/3 特徴量は生成されていない。
-- 影響: インジケーター依存のマッチング理由が常に中立扱いとなり、定義書にある過熱判定や乖離判定が利用できない。マッチング精度低下。
-- 推奨修正: RSI/SMA の計算実装（期間・閾値バリデーションを含む）を追加し、TradeNote/MarketSnapshot に特徴量を保存。少なくともテスト用スタブ値で Layer2/3 を生成する。
+### High-2: /api/notifications/check の仕様が Docs と一致しない（matchResultId が無視される）
+- 事実（根拠）:
+	- Docs は `matchResultId` と `channel` を受け取る仕様: [docs/API.md](docs/API.md#L115-L127), [README.md](README.md#L155-L156)
+	- 実装は `req.body` を参照せず、毎回 `checkForMatches()` を実行し `channel: 'in_app'` を固定: [src/controllers/notificationController.ts](src/controllers/notificationController.ts#L163-L187)
+	- 実装レスポンスは `processed/notified/skipped/results` 形式: [src/controllers/notificationController.ts](src/controllers/notificationController.ts#L213-L217)
+- 影響:
+	- Doc 通りに叩くと「特定 matchResultId を評価する」ユースケースが成立せず、統合側が誤実装しやすい。
+- 推奨修正（最小手数）:
+	- Doc を実装に合わせて修正（matchResultId を廃止/未使用と明記し、レスポンス例も更新）
+	- もしくは実装を Doc に寄せて `matchResultId` 指定評価に変更
 
-### Low-1: フロント README の API メソッド誤記
-- 事実: フロント README は 通知既読/全既読を POST と記載しているが、実装は PUT ([src/frontend/README.md#L84-L88](src/frontend/README.md#L84-L88), [src/routes/notificationRoutes.ts#L16-L44](src/routes/notificationRoutes.ts#L16-L44))。
-- 影響: 手動操作や新規開発者の理解を誤らせ、API コール実装ミスを誘発。
-- 推奨修正: README のメソッドを PUT に修正し、ヘルスチェックのベースパスなど最新の API 一覧を再確認して追記。
+```diff
+*** a/docs/API.md
+--- b/docs/API.md
+@@
+-  "matchResultId": "uuid",
+-  "channel": "in_app"  // 省略可（デフォルト: in_app）
++  // 注意: 現実装は matchResultId を参照せず、サーバー側で最新のマッチングを再実行します。
++  // channel も現状は in_app 固定です。
+```
 
-## 4. 代表的な矛盾
-- import/csv はノートを返さない一方で Docs はノート生成を約束。
-- 通知トリガはログ/クールダウンなしの簡易実装だが Runbook は詳細条件を要求。
-- マッチ履歴は通知ファイル依存で、Doc 想定の MatchResult 履歴と整合しない。
-- フロント README の API メソッドとバックエンド実装が食い違う。
+### Medium-1: /api/matching/history のレスポンス形が README と不一致
+- 事実（根拠）:
+	- README は `{ matches: [...], total: 100 }` 例: [README.md](README.md#L139-L142)
+	- 実装は `{ success, count, matches }`: [src/controllers/matchingController.ts](src/controllers/matchingController.ts#L78-L111), [src/controllers/matchingController.ts](src/controllers/matchingController.ts#L91)
+- 影響:
+	- UI/外部クライアントが README を参照して実装するとパースに失敗する。
+- 推奨修正:
+	- README と API.md でレスポンス例を現実装に合わせる、または実装を total/cursor 形式に揃える。
 
-## 5. 次アクション
-1. 通知トリガの保存戦略（MatchResult/NotificationLog）を決め、API 実装と Doc を同期。
-2. import/csv の挙動を仕様と揃えるか仕様を修正し、E2E テストを追加。
-3. RSI/SMA の簡易実装またはスタブ生成を追加し、Layer2/3 特徴量をマッチングで利用可能にする。
-4. フロント README の API メソッドを更新し、UI/API 整合チェック用のスモークテストを追加。
+### Medium-2: /api/trades/import/csv のレスポンスが API.md と不一致（notes vs noteIds）
+- 事実（根拠）:
+	- API.md は `notes: [...]` 例: [docs/API.md](docs/API.md#L48-L52)
+	- 実装は `noteIds: [...]` を返す: [src/controllers/tradeController.ts](src/controllers/tradeController.ts#L98-L101)
+- 影響:
+	- Docs に従うとレスポンス整形がズレる。E2E/導通確認の手順が曖昧になる。
+- 推奨修正:
+	- Doc を `noteIds` に合わせる（または実装を `notes` に合わせる）。
+
+### Medium-3: /api/trades/import/upload-text が Docs に存在しない
+- 事実（根拠）:
+	- ルートが存在: [src/routes/tradeRoutes.ts](src/routes/tradeRoutes.ts#L17)
+	- サーバ起動ログでも公開を明示: [src/app.ts](src/app.ts#L118)
+- 影響:
+	- UI はこの導線を使うため、外部利用者・運用者が API を特定できない。
+- 推奨修正:
+	- docs/API.md と README に upload-text を追記。
+
+### Medium-4: ノート承認 API が Docs に存在しない
+- 事実（根拠）:
+	- ルートが存在: [src/routes/tradeRoutes.ts](src/routes/tradeRoutes.ts#L35)
+- 影響:
+	- UI の「承認フロー」を API として説明できず、運用手順の合意が困難。
+- 推奨修正:
+	- docs/API.md に `POST /api/trades/notes/:id/approve` を追記。
+
+### Medium-5: マッチング手動実行が通知生成まで行うが、通知抑止・ログとは分離されている
+- 事実（根拠）:
+	- `/api/matching/check` は通知生成を実行: [src/controllers/matchingController.ts](src/controllers/matchingController.ts#L31)
+	- 通知生成は `evaluateWithPersistence` ではなく `evaluate` を利用: [src/services/notificationService.ts](src/services/notificationService.ts#L55)
+- 影響:
+	- 「通知抑止の一貫性」がエンドポイントにより揺れる可能性がある（運用事故の温床）。
+- 推奨修正:
+	- 少なくとも Doc に副作用と差分（抑止/ログの有無）を明記。
+
+### Medium-6: /api/notifications/logs のデフォルト動作が Docs と異なる（失敗ログのみ）
+- 事実（根拠）:
+	- 実装はフィルタ無しの場合 `getFailedLogs` を返す: [src/controllers/notificationController.ts](src/controllers/notificationController.ts#L259-L260)
+- 影響:
+	- 運用で「直近の全ログ」を取りたい際に取り漏れが起きる。
+- 推奨修正:
+	- Doc に「フィルタ無しは失敗ログのみ」と明記、またはデフォルトを全件へ変更。
+
+### Low-1: フロント README が通知既読のメソッドを誤記（POST→PUT）
+- 事実（根拠）:
+	- フロント README は POST と記載: [src/frontend/README.md](src/frontend/README.md#L86-L87)
+	- 実装ルートは PUT: [src/routes/notificationRoutes.ts](src/routes/notificationRoutes.ts#L27), [src/routes/notificationRoutes.ts](src/routes/notificationRoutes.ts#L33)
+- 影響:
+	- 開発者が誤って POST を叩く可能性がある。
+- 推奨修正:
+	- README を PUT に修正。
+
+### Low-2: ドキュメント内の英語テンプレ文が混在
+- 事実（根拠）:
+	- README 冒頭に英語文が混在: [README.md](README.md#L3)
+	- フロント README に Next.js テンプレ文章が残置: [src/frontend/README.md](src/frontend/README.md#L123-L152)
+- 影響:
+	- AGENTS.md の「日本語記述」ルールに抵触しやすい（ただし動作には直接影響しない）。
+
+## 4. 代表的な矛盾（Docs ↔ 実装）
+- ポート/ベースURL: Docs は 3000/3001、実装既定は 3100/3102（CORS も 3102 を許可）: [src/config/index.ts](src/config/index.ts#L18), [src/app.ts](src/app.ts#L36), [README.md](README.md#L91-L92)
+- 通知check: `matchResultId` 指定型の Docs に対し、実装は「サーバ側で再マッチング」: [docs/API.md](docs/API.md#L115-L127), [src/controllers/notificationController.ts](src/controllers/notificationController.ts#L163-L187)
+- 発注支援: UI が `/orders/preset` へ遷移するがページ不在、API は :noteId 前提: [src/frontend/app/notifications/[id]/page.tsx](src/frontend/app/notifications/[id]/page.tsx#L218), [src/routes/orderRoutes.ts](src/routes/orderRoutes.ts#L11-L21)
+
+## 5. 次アクション（最小手数で埋める順番）
+1. 発注支援導線を 1 つに統一（UI ページ追加 or UI リンク修正）
+2. /api/notifications/check の仕様を「Doc か 実装」のどちらかに寄せて固定
+3. README / docs/API.md のレスポンス形（matching/history、import/csv）を実装に同期
+4. Docs に upload-text / approve エンドポイントを追記
+5. ポート/CRON_ENABLED の説明を README と API.md に反映

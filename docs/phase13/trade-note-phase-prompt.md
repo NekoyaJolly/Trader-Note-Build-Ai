@@ -34,15 +34,15 @@
 
 ## 実装指示
 1. **環境統一**
-   - Node.js 18+ / TypeScript
-   - Docker 開発コンテナ
+   - Node.js 22+ / TypeScript
+ 
 
-2. **DB 構築**
+1. **DB 構築**
    - Railway PostgreSQL 作成
    - TimescaleDB 拡張有効化
    - pgvector 拡張有効化（未使用でも導入）
 
-3. **CI 基盤**
+2. **CI 基盤**
    - GitHub Actions
      - lint
      - typecheck

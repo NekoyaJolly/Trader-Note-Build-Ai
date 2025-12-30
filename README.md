@@ -88,8 +88,8 @@ npm run dev:frontend
 npm run dev
 ```
 
-* Backend: http://localhost:3000
-* Frontend: http://localhost:3001
+* Backend: http://localhost:3100 (環境変数 `BACKEND_PORT` で変更可)
+* Frontend: http://localhost:3001 (デフォルト)
 
 ### Production Mode
 
@@ -112,8 +112,25 @@ Body: { "filename": "sample_trades.csv" }
 Response: { 
   "success": true, 
   "tradesImported": 5, 
-  "notesGenerated": 5,  // ← 実際に生成されたノート数
-  "notes": [...]
+  "tradesSkipped": 0,
+  "importErrors": [],
+  "insertedIds": ["uuid-1", "uuid-2", ...],
+  "notesGenerated": 5,
+  "noteIds": ["note-uuid-1", "note-uuid-2", ...]
+}
+```
+
+**Upload CSV text（クライアントからCSVを送信）**
+```
+POST /api/trades/import/upload-text
+Body: { 
+  "filename": "my_trades.csv", 
+  "csvText": "timestamp,symbol,side,...\n..." 
+}
+Response: { 
+  "success": true, 
+  "tradesImported": 1, 
+  "noteIds": ["note-uuid-1"]
 }
 ```
 
@@ -136,10 +153,23 @@ POST /api/matching/check
 
 **Get match history（DBから取得）**
 ```
-GET /api/matching/history
+GET /api/matching/history?symbol=BTCUSDT&limit=50
 Response: {
-  "matches": [...],  // MatchResult のリスト
-  "total": 100
+  "success": true,
+  "count": 2,
+  "matches": [
+    {
+      "id": "uuid",
+      "noteId": "note-uuid",
+      "symbol": "BTCUSDT",
+      "matchScore": 0.85,
+      "threshold": 0.75,
+      "trendMatched": true,
+      "priceRangeMatched": true,
+      "reasons": [...],
+      "evaluatedAt": "2025-12-27T01:27:30Z"
+    }
+  ]
 }
 ```
 
@@ -153,16 +183,17 @@ GET /api/notifications?unreadOnly=true
 **Check and notify（再通知防止適用）**
 ```
 POST /api/notifications/check
-Body: { "matchResultId": "uuid", "channel": "in_app" }
-Response (sent): { 
-  "shouldNotify": true, 
-  "status": "sent", 
-  "notificationLogId": "uuid" 
-}
-Response (skipped): { 
-  "shouldNotify": false, 
-  "status": "skipped", 
-  "skipReason": "クールダウン中: 次の通知は..." 
+※ 現在の実装ではリクエストボディは無視され、サーバ側で最新のマッチングを再実行します。
+
+Response: { 
+  "processed": 5,
+  "notified": 2,
+  "skipped": 3,
+  "shouldNotify": true,
+  "results": [
+    { "noteId": "uuid", "shouldNotify": true, "status": "sent" },
+    { "noteId": "uuid", "shouldNotify": false, "status": "skipped", "skipReason": "クールダウン中" }
+  ]
 }
 ```
 
@@ -252,14 +283,16 @@ timestamp,symbol,side,price,quantity,fee,exchange
 
 Edit `.env` to configure:
 
-- `PORT`: Server port (default: 3000)
+- `BACKEND_PORT` / `PORT`: Server port (default: 3100)
+- `DATABASE_URL`: PostgreSQL connection string (required)
 - `AI_API_KEY`: Your AI service API key
-- `AI_MODEL`: AI model to use (default: gpt-4o-mini)
+- `AI_MODEL`: AI model to use (default: gpt-5-mini)
+- `AI_BASE_URL`: AI API base URL (default: https://api.openai.com/v1)
 - `MARKET_API_URL`: Market data API URL
 - `MARKET_API_KEY`: Market data API key
 - `MATCH_THRESHOLD`: Match score threshold (0-1, default: 0.75)
-- `NOTIFY_THRESHOLD`: Notification trigger threshold (0-1, default: 0.75)
 - `CHECK_INTERVAL_MINUTES`: Matching check interval (default: 15)
+- `CRON_ENABLED`: Enable scheduler (default: true)
 - `PUSH_NOTIFICATION_KEY`: Push notification service key
 
 ## Design Principles

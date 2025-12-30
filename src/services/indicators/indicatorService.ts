@@ -21,6 +21,18 @@ import {
   stochasticOscillator,
   obv,
   vwap,
+  // 新規追加インジケーター（Phase 1）
+  williamsR,
+  communityChannelIndex,
+  aroon,
+  priceRateOfChange,
+  moneyFlowIndex,
+  chaikinMoneyFlow,
+  doubleExponentialMovingAverage,
+  tripleExponentialMovingAverage,
+  keltnerChannel,
+  parabolicSAR,
+  ichimokuCloud,
 } from 'indicatorts';
 
 /**
@@ -101,8 +113,58 @@ export interface ATRResultType {
 }
 
 /**
+ * Aroon 計算結果の型定義
+ */
+export interface AroonResult {
+  /** Aroon Up ライン */
+  up: number[];
+  /** Aroon Down ライン */
+  down: number[];
+}
+
+/**
+ * ケルトナーチャネル計算結果の型定義
+ */
+export interface KeltnerChannelResult {
+  /** 上部バンド */
+  upperBand: number[];
+  /** 中央ライン（EMA） */
+  middleLine: number[];
+  /** 下部バンド */
+  lowerBand: number[];
+}
+
+/**
+ * パラボリックSAR計算結果の型定義
+ */
+export interface ParabolicSARResult {
+  /** SAR値の配列 */
+  sar: number[];
+  /** トレンド方向（true=上昇、false=下降） */
+  trends: boolean[];
+}
+
+/**
+ * 一目均衡表計算結果の型定義
+ */
+export interface IchimokuCloudResult {
+  /** 転換線 */
+  conversionLine: number[];
+  /** 基準線 */
+  baseLine: number[];
+  /** 先行スパンA */
+  leadingSpanA: number[];
+  /** 先行スパンB */
+  leadingSpanB: number[];
+  /** 遅行スパン */
+  laggingSpan: number[];
+}
+
+/**
  * 特徴量スナップショットの型定義
  * トレードノート用の市場状態を表現
+ * 
+ * Phase 1 で 20 種類のインジケーターをサポート
  */
 export interface FeatureSnapshot {
   /** タイムスタンプ */
@@ -113,6 +175,8 @@ export interface FeatureSnapshot {
   close: number;
   /** 出来高 */
   volume: number;
+  
+  // === 既存インジケーター（9種） ===
   /** RSI 値 */
   rsi?: number;
   /** SMA 値 */
@@ -129,6 +193,32 @@ export interface FeatureSnapshot {
   stochastic?: StochasticResult;
   /** OBV 値 */
   obv?: number;
+  /** VWAP 値 */
+  vwap?: number;
+  
+  // === 新規追加インジケーター（11種）===
+  /** Williams %R 値 */
+  williamsR?: number;
+  /** CCI（コモディティチャネル指数）値 */
+  cci?: number;
+  /** Aroon 値 */
+  aroon?: AroonResult;
+  /** ROC（変化率）値 */
+  roc?: number;
+  /** MFI（マネーフローインデックス）値 */
+  mfi?: number;
+  /** CMF（チャイキンマネーフロー）値 */
+  cmf?: number;
+  /** DEMA（二重指数移動平均）値 */
+  dema?: number;
+  /** TEMA（三重指数移動平均）値 */
+  tema?: number;
+  /** ケルトナーチャネル */
+  keltnerChannel?: KeltnerChannelResult;
+  /** パラボリックSAR */
+  parabolicSar?: ParabolicSARResult;
+  /** 一目均衡表 */
+  ichimoku?: IchimokuCloudResult;
 }
 
 /**
@@ -350,6 +440,324 @@ export class IndicatorService {
     }
     
     return vwap(closes, volumes, period ? { period } : undefined);
+  }
+
+  // ==========================================
+  // 新規追加インジケーター（Phase 1: 11種類）
+  // ==========================================
+
+  /**
+   * Williams %R を計算
+   * 
+   * @param highs - 高値の配列
+   * @param lows - 安値の配列
+   * @param closes - 終値の配列
+   * @param period - 計算期間（デフォルト: 14）
+   * @returns Williams %R 値の配列（-100〜0の範囲）
+   * 
+   * 使用例:
+   * - Williams %R < -80: 売られすぎ
+   * - Williams %R > -20: 買われすぎ
+   */
+  calculateWilliamsR(
+    highs: number[],
+    lows: number[],
+    closes: number[],
+    period: number = 14
+  ): number[] {
+    if (highs.length < period || lows.length < period || closes.length < period) {
+      console.warn(`Williams %R 計算には最低 ${period} 個のデータが必要です`);
+      return [];
+    }
+    
+    return williamsR(highs, lows, closes, { period });
+  }
+
+  /**
+   * CCI（コモディティチャネル指数）を計算
+   * 
+   * @param highs - 高値の配列
+   * @param lows - 安値の配列
+   * @param closes - 終値の配列
+   * @param period - 計算期間（デフォルト: 20）
+   * @returns CCI 値の配列
+   * 
+   * 使用例:
+   * - CCI > 100: 買われすぎ
+   * - CCI < -100: 売られすぎ
+   */
+  calculateCCI(
+    highs: number[],
+    lows: number[],
+    closes: number[],
+    period: number = 20
+  ): number[] {
+    if (highs.length < period || lows.length < period || closes.length < period) {
+      console.warn(`CCI 計算には最低 ${period} 個のデータが必要です`);
+      return [];
+    }
+    
+    return communityChannelIndex(highs, lows, closes, { period });
+  }
+
+  /**
+   * Aroon（アルーン）指標を計算
+   * 
+   * @param highs - 高値の配列
+   * @param lows - 安値の配列
+   * @param period - 計算期間（デフォルト: 25）
+   * @returns Aroon Up/Down の計算結果
+   * 
+   * 使用例:
+   * - Aroon Up > 70 & Aroon Down < 30: 強い上昇トレンド
+   * - Aroon Down > 70 & Aroon Up < 30: 強い下降トレンド
+   */
+  calculateAroon(
+    highs: number[],
+    lows: number[],
+    period: number = 25
+  ): AroonResult {
+    if (highs.length < period || lows.length < period) {
+      console.warn(`Aroon 計算には最低 ${period} 個のデータが必要です`);
+      return { up: [], down: [] };
+    }
+    
+    const result = aroon(highs, lows, { period });
+    return {
+      up: result.up,
+      down: result.down,
+    };
+  }
+
+  /**
+   * ROC（価格変化率）を計算
+   * 
+   * @param closes - 終値の配列
+   * @param period - 計算期間（デフォルト: 10）
+   * @returns ROC 値の配列（パーセンテージ）
+   */
+  calculateROC(
+    closes: number[],
+    period: number = 10
+  ): number[] {
+    if (closes.length < period + 1) {
+      console.warn(`ROC 計算には最低 ${period + 1} 個のデータが必要です`);
+      return [];
+    }
+    
+    return priceRateOfChange(closes, { period });
+  }
+
+  /**
+   * MFI（マネーフローインデックス）を計算
+   * 
+   * @param highs - 高値の配列
+   * @param lows - 安値の配列
+   * @param closes - 終値の配列
+   * @param volumes - 出来高の配列
+   * @param period - 計算期間（デフォルト: 14）
+   * @returns MFI 値の配列（0〜100の範囲）
+   * 
+   * 使用例:
+   * - MFI > 80: 買われすぎ
+   * - MFI < 20: 売られすぎ
+   */
+  calculateMFI(
+    highs: number[],
+    lows: number[],
+    closes: number[],
+    volumes: number[],
+    period: number = 14
+  ): number[] {
+    if (highs.length < period || lows.length < period || closes.length < period || volumes.length < period) {
+      console.warn(`MFI 計算には最低 ${period} 個のデータが必要です`);
+      return [];
+    }
+    
+    return moneyFlowIndex(highs, lows, closes, volumes, { period });
+  }
+
+  /**
+   * CMF（チャイキンマネーフロー）を計算
+   * 
+   * @param highs - 高値の配列
+   * @param lows - 安値の配列
+   * @param closes - 終値の配列
+   * @param volumes - 出来高の配列
+   * @param period - 計算期間（デフォルト: 20）
+   * @returns CMF 値の配列（-1〜1の範囲）
+   * 
+   * 使用例:
+   * - CMF > 0: 買い圧力優勢
+   * - CMF < 0: 売り圧力優勢
+   */
+  calculateCMF(
+    highs: number[],
+    lows: number[],
+    closes: number[],
+    volumes: number[],
+    period: number = 20
+  ): number[] {
+    if (highs.length < period || lows.length < period || closes.length < period || volumes.length < period) {
+      console.warn(`CMF 計算には最低 ${period} 個のデータが必要です`);
+      return [];
+    }
+    
+    return chaikinMoneyFlow(highs, lows, closes, volumes, { period });
+  }
+
+  /**
+   * DEMA（二重指数移動平均）を計算
+   * 
+   * @param closes - 終値の配列
+   * @param period - 計算期間（デフォルト: 20）
+   * @returns DEMA 値の配列
+   */
+  calculateDEMA(
+    closes: number[],
+    period: number = 20
+  ): number[] {
+    if (closes.length < period * 2) {
+      console.warn(`DEMA 計算には最低 ${period * 2} 個のデータが必要です`);
+      return [];
+    }
+    
+    return doubleExponentialMovingAverage(closes, { period });
+  }
+
+  /**
+   * TEMA（三重指数移動平均）を計算
+   * 
+   * @param closes - 終値の配列
+   * @param period - 計算期間（デフォルト: 20）
+   * @returns TEMA 値の配列
+   */
+  calculateTEMA(
+    closes: number[],
+    period: number = 20
+  ): number[] {
+    if (closes.length < period * 3) {
+      console.warn(`TEMA 計算には最低 ${period * 3} 個のデータが必要です`);
+      return [];
+    }
+    
+    return tripleExponentialMovingAverage(closes, { period });
+  }
+
+  /**
+   * ケルトナーチャネルを計算
+   * 
+   * @param highs - 高値の配列
+   * @param lows - 安値の配列
+   * @param closes - 終値の配列
+   * @param period - 計算期間（デフォルト: 20）
+   * @param _multiplier - ATR 倍率（デフォルト: 2）※ライブラリ固定のため未使用
+   * @returns ケルトナーチャネル計算結果
+   * 
+   * 注意: indicatorts ライブラリは内部で 2 * ATR を固定使用
+   */
+  calculateKeltnerChannel(
+    highs: number[],
+    lows: number[],
+    closes: number[],
+    period: number = 20,
+    _multiplier: number = 2
+  ): KeltnerChannelResult {
+    if (highs.length < period || lows.length < period || closes.length < period) {
+      console.warn(`ケルトナーチャネル計算には最低 ${period} 個のデータが必要です`);
+      return { upperBand: [], middleLine: [], lowerBand: [] };
+    }
+    
+    // indicatorts の keltnerChannel は period のみをサポート
+    const result = keltnerChannel(highs, lows, closes, { period });
+    return {
+      upperBand: result.upper,
+      middleLine: result.middle,
+      lowerBand: result.lower,
+    };
+  }
+
+  /**
+   * パラボリックSARを計算
+   * 
+   * @param highs - 高値の配列
+   * @param lows - 安値の配列
+   * @param closes - 終値の配列
+   * @param step - 加速因子ステップ（デフォルト: 0.02）
+   * @param max - 加速因子最大値（デフォルト: 0.2）
+   * @returns パラボリックSAR計算結果
+   * 
+   * 使用例:
+   * - 価格 > SAR: 上昇トレンド
+   * - 価格 < SAR: 下降トレンド
+   */
+  calculateParabolicSAR(
+    highs: number[],
+    lows: number[],
+    closes: number[],
+    step: number = 0.02,
+    max: number = 0.2
+  ): ParabolicSARResult {
+    if (highs.length < 2 || lows.length < 2 || closes.length < 2) {
+      console.warn('パラボリックSAR 計算には最低 2 個のデータが必要です');
+      return { sar: [], trends: [] };
+    }
+    
+    const result = parabolicSAR(highs, lows, closes, { step, max });
+    return {
+      sar: result.psarResult,
+      // indicatorts の Trend 型を boolean に変換
+      trends: result.trends.map(t => t === 1), // 1 = Rising (上昇)
+    };
+  }
+
+  /**
+   * 一目均衡表を計算
+   * 
+   * @param highs - 高値の配列
+   * @param lows - 安値の配列
+   * @param closes - 終値の配列
+   * @param conversionPeriod - 転換線期間（デフォルト: 9）
+   * @param basePeriod - 基準線期間（デフォルト: 26）
+   * @param spanBPeriod - 先行スパンB期間（デフォルト: 52）
+   * @param closePeriod - 遅行スパン期間（デフォルト: 26）
+   * @returns 一目均衡表計算結果
+   */
+  calculateIchimokuCloud(
+    highs: number[],
+    lows: number[],
+    closes: number[],
+    conversionPeriod: number = 9,
+    basePeriod: number = 26,
+    spanBPeriod: number = 52,
+    closePeriod: number = 26
+  ): IchimokuCloudResult {
+    const minRequired = Math.max(conversionPeriod, basePeriod, spanBPeriod);
+    if (highs.length < minRequired || lows.length < minRequired || closes.length < minRequired) {
+      console.warn(`一目均衡表計算には最低 ${minRequired} 個のデータが必要です`);
+      return {
+        conversionLine: [],
+        baseLine: [],
+        leadingSpanA: [],
+        leadingSpanB: [],
+        laggingSpan: [],
+      };
+    }
+    
+    // indicatorts の ichimokuCloud API に合わせる
+    const result = ichimokuCloud(highs, lows, closes, {
+      short: conversionPeriod,
+      medium: basePeriod,
+      long: spanBPeriod,
+      close: closePeriod,
+    });
+    return {
+      conversionLine: result.tenkan,
+      baseLine: result.kijun,
+      leadingSpanA: result.ssa,
+      leadingSpanB: result.ssb,
+      laggingSpan: result.laggingSpan,
+    };
   }
 
   /**

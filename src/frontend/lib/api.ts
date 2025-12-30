@@ -205,11 +205,80 @@ export async function fetchHealth(): Promise<{ status: string }> {
  * 日次ステータス
  * GET /api/daily-status
  */
-export async function fetchDailyStatus(): Promise<any> {
+export async function fetchDailyStatus(): Promise<{ status: string }> {
   const response = await fetch(`${API_BASE_URL}/api/daily-status`, { cache: "no-store" });
   if (!response.ok) {
     throw new Error(
       `日次ステータス取得に失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+  return response.json();
+}
+
+/**
+ * 注文プリセットの型定義
+ */
+export interface OrderPreset {
+  symbol: string;
+  side: "buy" | "sell" | "BUY" | "SELL";
+  suggestedPrice: number;
+  suggestedQuantity: number;
+  basedOnNoteId: string;
+  confidence: number;
+}
+
+/**
+ * 注文プリセットを取得
+ * GET /api/orders/preset/:noteId
+ * 
+ * 注意: 本システムは自動売買を行いません。参考情報のみを提供します。
+ */
+export async function fetchOrderPreset(noteId: string): Promise<{ preset: OrderPreset }> {
+  const response = await fetch(`${API_BASE_URL}/api/orders/preset/${noteId}`, {
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(
+      `注文プリセットの取得に失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+  return response.json();
+}
+
+/**
+ * 注文確認情報の型定義
+ */
+export interface OrderConfirmation {
+  symbol: string;
+  side: string;
+  price: number;
+  quantity: number;
+  estimatedCost: number;
+  estimatedFee: number;
+  total: number;
+  warning: string;
+}
+
+/**
+ * 注文確認情報を取得
+ * POST /api/orders/confirmation
+ * 
+ * 注意: 本システムは自動売買を行いません。参考情報のみを提供します。
+ */
+export async function fetchOrderConfirmation(params: {
+  symbol: string;
+  side: string;
+  price: number;
+  quantity: number;
+}): Promise<{ confirmation: OrderConfirmation }> {
+  const response = await fetch(`${API_BASE_URL}/api/orders/confirmation`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `注文確認情報の取得に失敗しました: ${response.status} ${response.statusText}`
     );
   }
   return response.json();
