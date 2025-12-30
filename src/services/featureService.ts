@@ -182,6 +182,13 @@ export class FeatureService {
    * @param symbol - 検索対象銘柄（省略時は全銘柄）
    * @param topK - 取得件数
    * @param minSimilarity - 最小類似度（0〜1）
+  /**
+   * 類似ノートを検索する
+   * 
+   * @param ohlcvData - 検索クエリ用のOHLCV データ
+   * @param symbol - フィルタリング用のシンボル（省略可能）
+   * @param topK - 返却する最大件数
+   * @param minSimilarity - 最小類似度（これ以下は除外）
    * @returns 類似ノートの配列（類似度降順）
    */
   async findSimilarNotes(
@@ -196,7 +203,8 @@ export class FeatureService {
     const queryVector = indicatorService.generateFeatureVector(querySnapshot);
 
     // 特徴量ベクトルを持つノートを取得
-    const whereClause: any = {
+    // Prisma の生成型を使用
+    const whereClause: Prisma.TradeNoteWhereInput = {
       featureVector: {
         isEmpty: false,
       },
@@ -262,8 +270,8 @@ export class FeatureService {
       return [];
     }
 
-    // 同一銘柄で検索
-    const whereClause: any = {
+    // 同一銘柄で検索（Prisma の生成型を使用）
+    const whereClause: Prisma.TradeNoteWhereInput = {
       featureVector: {
         isEmpty: false,
       },

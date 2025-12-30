@@ -34,12 +34,29 @@ model TradeNote {
   timeframe        String?
   createdAt        DateTime          @default(now()) @db.Timestamptz(6)
   updatedAt        DateTime          @updatedAt @db.Timestamptz(6)
+  /// 承認日時
+  approvedAt       DateTime?         @db.Timestamptz(6)
+  /// 最終編集日時
+  lastEditedAt     DateTime?         @db.Timestamptz(6)
+  /// トレード時点の市場コンテキスト（JSON: trend, calculatedIndicators等）
+  marketContext    Json?
+  /// 非承認日時
+  rejectedAt       DateTime?         @db.Timestamptz(6)
+  /// 承認状態（draft: 下書き、approved: 承認済み、rejected: 非承認）
+  status           NoteStatus        @default(draft)
+  /// タグ（検索用）
+  tags             String[]          @default([])
+  /// ユーザーによる追記コメント
+  userNotes        String?
   aiSummary        AISummary?
+  backtestRuns     BacktestRun[]
   matchResult      MatchResult[]
   notificationLogs NotificationLog[] @relation("NotificationLogNote")
   trade            Trade             @relation(fields: [tradeId], references: [id])
 
   @@index([symbol], map: "idx_tradenote_symbol")
+  @@index([status], map: "idx_tradenote_status")
+  @@index([symbol, status], map: "idx_tradenote_symbol_status")
 }
 
 model AISummary {
@@ -139,28 +156,6 @@ model NotificationLog {
   @@index([noteId, sentAt], map: "idx_notiflog_note_sent")
 }
 
-enum TradeSide {
-  buy
-  sell
-}
-
-enum NotificationStatus {
-  unread
-  read
-  deleted
-}
-
-enum NotificationLogStatus {
-  sent
-  skipped
-  failed
-}
-
-// ============================================
-// OHLCV 時系列データ（TimescaleDB 対応準備）
-// 技術スタック選定シート ③ に基づく
-// ============================================
-
 /// OHLCV ローソク足データ
 /// 将来的に TimescaleDB のハイパーテーブルに変換予定
 /// 変換 SQL: SELECT create_hypertable('OHLCVCandle', 'timestamp');
@@ -187,11 +182,8 @@ model OHLCVCandle {
   /// 作成日時
   createdAt DateTime @default(now()) @db.Timestamptz(6)
 
-  // 複合ユニーク制約（同一銘柄・時間足・時刻の重複防止）
   @@unique([symbol, timeframe, timestamp], map: "uq_ohlcv_symbol_timeframe_timestamp")
-  // 時系列クエリ用インデックス
   @@index([symbol, timeframe, timestamp], map: "idx_ohlcv_symbol_timeframe_timestamp")
-  // 銘柄別クエリ用インデックス
   @@index([symbol, timestamp], map: "idx_ohlcv_symbol_timestamp")
 }
 
@@ -216,32 +208,225 @@ model TradeNoteRaw {
 /// 再評価ジョブ管理
 /// 技術スタック選定シート ⑨ に基づく
 model RevaluationJob {
-  id           String               @id @default(uuid()) @db.Uuid
+  id             String               @id @default(uuid()) @db.Uuid
   /// ジョブタイプ（note_regenerate, feature_recalculate, ai_summary_regenerate）
-  jobType      RevaluationJobType
+  jobType        RevaluationJobType
   /// 対象ノート ID（null の場合は全ノート対象）
-  targetNoteId String?              @db.Uuid
+  targetNoteId   String?              @db.Uuid
   /// 対象銘柄（null の場合は全銘柄対象）
-  targetSymbol String?
+  targetSymbol   String?
   /// ジョブ状態
-  status       RevaluationJobStatus @default(pending)
+  status         RevaluationJobStatus @default(pending)
   /// 処理済み件数
-  processedCount Int               @default(0)
+  processedCount Int                  @default(0)
   /// 総件数
-  totalCount     Int               @default(0)
+  totalCount     Int                  @default(0)
   /// エラーメッセージ
   errorMessage   String?
   /// 開始日時
-  startedAt      DateTime?         @db.Timestamptz(6)
+  startedAt      DateTime?            @db.Timestamptz(6)
   /// 完了日時
-  completedAt    DateTime?         @db.Timestamptz(6)
+  completedAt    DateTime?            @db.Timestamptz(6)
   /// 作成日時
-  createdAt      DateTime          @default(now()) @db.Timestamptz(6)
+  createdAt      DateTime             @default(now()) @db.Timestamptz(6)
   /// 更新日時
-  updatedAt      DateTime          @updatedAt @db.Timestamptz(6)
+  updatedAt      DateTime             @updatedAt @db.Timestamptz(6)
 
   @@index([status, createdAt], map: "idx_revaluationjob_status_created")
   @@index([jobType, status], map: "idx_revaluationjob_type_status")
+}
+
+/// バックテスト実行条件
+model BacktestRun {
+  id                String          @id @default(uuid()) @db.Uuid
+  /// 対象ノート ID
+  noteId            String          @db.Uuid
+  /// 銘柄シンボル
+  symbol            String
+  /// 時間足（例: 1m, 5m, 15m）
+  timeframe         String
+  /// バックテスト開始日
+  startDate         DateTime        @db.Timestamptz(6)
+  /// バックテスト終了日
+  endDate           DateTime        @db.Timestamptz(6)
+  /// 一致判定しきい値（0.0〜1.0）
+  matchThreshold    Float
+  /// 利確幅（pips/ポイント）
+  takeProfit        Decimal         @db.Decimal(18, 8)
+  /// 損切幅（pips/ポイント）
+  stopLoss          Decimal         @db.Decimal(18, 8)
+  /// 最大保有時間（分）
+  maxHoldingMinutes Int             @default(1440)
+  /// 取引コスト（スプレッド/手数料）
+  tradingCost       Decimal?        @db.Decimal(18, 8)
+  /// 実行状態
+  status            BacktestStatus  @default(pending)
+  /// 作成日時
+  createdAt         DateTime        @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt         DateTime        @updatedAt @db.Timestamptz(6)
+  events            BacktestEvent[]
+  result            BacktestResult?
+  note              TradeNote       @relation(fields: [noteId], references: [id])
+
+  @@index([noteId], map: "idx_backtestrun_noteid")
+  @@index([status, createdAt], map: "idx_backtestrun_status_created")
+}
+
+/// バックテスト集計結果
+model BacktestResult {
+  id           String      @id @default(uuid()) @db.Uuid
+  /// 対応するバックテスト実行 ID
+  runId        String      @unique @db.Uuid
+  /// セットアップ出現回数
+  setupCount   Int
+  /// 勝ちトレード数
+  winCount     Int
+  /// 負けトレード数
+  lossCount    Int
+  /// タイムアウト数
+  timeoutCount Int
+  /// 勝率（0.0〜1.0）
+  winRate      Float
+  /// プロフィットファクター（総利益/総損失）
+  profitFactor Float?
+  /// 総利益
+  totalProfit  Decimal     @db.Decimal(18, 8)
+  /// 総損失
+  totalLoss    Decimal     @db.Decimal(18, 8)
+  /// 平均損益
+  averagePnL   Decimal     @db.Decimal(18, 8)
+  /// 期待値（平均損益 × 勝率 - 平均損失 × 敗率）
+  expectancy   Decimal     @db.Decimal(18, 8)
+  /// 最大ドローダウン
+  maxDrawdown  Decimal?    @db.Decimal(18, 8)
+  /// 計算完了日時
+  completedAt  DateTime    @default(now()) @db.Timestamptz(6)
+  run          BacktestRun @relation(fields: [runId], references: [id])
+}
+
+/// バックテスト個別イベント（各一致場面の結果）
+model BacktestEvent {
+  id         String          @id @default(uuid()) @db.Uuid
+  /// 対応するバックテスト実行 ID
+  runId      String          @db.Uuid
+  /// エントリー時刻
+  entryTime  DateTime        @db.Timestamptz(6)
+  /// エントリー価格
+  entryPrice Decimal         @db.Decimal(18, 8)
+  /// 一致スコア
+  matchScore Float
+  /// 決済時刻
+  exitTime   DateTime?       @db.Timestamptz(6)
+  /// 決済価格
+  exitPrice  Decimal?        @db.Decimal(18, 8)
+  /// 結果（win: 利確到達、loss: 損切到達、timeout: タイムアウト）
+  outcome    BacktestOutcome
+  /// 損益（pips/ポイント）
+  pnl        Decimal?        @db.Decimal(18, 8)
+  /// 作成日時
+  createdAt  DateTime        @default(now()) @db.Timestamptz(6)
+  run        BacktestRun     @relation(fields: [runId], references: [id])
+
+  @@index([runId, entryTime], map: "idx_backtestevent_run_entry")
+}
+
+/// Web Push 購読情報
+model PushSubscription {
+  id           String    @id @default(uuid()) @db.Uuid
+  /// ユーザー識別子（将来のマルチユーザー対応用、現在は "default"）
+  userId       String    @default("default")
+  /// Push API エンドポイント URL
+  endpoint     String    @unique
+  /// 暗号化キー（p256dh）
+  p256dh       String
+  /// 認証シークレット
+  auth         String
+  /// 有効フラグ
+  active       Boolean   @default(true)
+  /// 最終プッシュ送信日時
+  lastPushedAt DateTime? @db.Timestamptz(6)
+  /// 連続失敗回数（リトライ制御用）
+  failureCount Int       @default(0)
+  /// 作成日時
+  createdAt    DateTime  @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt    DateTime  @updatedAt @db.Timestamptz(6)
+
+  @@index([userId, active], map: "idx_pushsub_user_active")
+}
+
+/// Push通知送信ログ
+model PushLog {
+  id             String        @id @default(uuid()) @db.Uuid
+  /// 購読 ID
+  subscriptionId String        @db.Uuid
+  /// 通知 ID（Notification テーブルとの紐付け）
+  notificationId String?       @db.Uuid
+  /// 送信ステータス
+  status         PushLogStatus @default(pending)
+  /// エラーメッセージ
+  errorMessage   String?
+  /// リトライ回数
+  retryCount     Int           @default(0)
+  /// 送信日時
+  sentAt         DateTime?     @db.Timestamptz(6)
+  /// 作成日時
+  createdAt      DateTime      @default(now()) @db.Timestamptz(6)
+
+  @@index([subscriptionId, createdAt], map: "idx_pushlog_sub_created")
+  @@index([status, createdAt], map: "idx_pushlog_status_created")
+}
+
+/// マッチング詳細（一致理由の内訳を保存）
+model MatchDetail {
+  id            String   @id @default(uuid()) @db.Uuid
+  /// マッチ結果 ID
+  matchResultId String   @db.Uuid
+  /// 特徴量名（例: rsi, macd, trend）
+  featureName   String
+  /// ノート側の値
+  noteValue     Float?
+  /// スナップショット側の値
+  snapshotValue Float?
+  /// この特徴量の一致度（0.0〜1.0）
+  similarity    Float
+  /// 重み付け係数
+  weight        Float    @default(1.0)
+  /// 寄与度（similarity × weight）
+  contribution  Float
+  /// 異常値フラグ（Z-score が ±3σ を超えた場合）
+  isAnomaly     Boolean  @default(false)
+  /// 異常値の場合の詳細
+  anomalyDetail String?
+  /// 作成日時
+  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([matchResultId], map: "idx_matchdetail_matchresult")
+}
+
+/// ノートの承認状態
+enum NoteStatus {
+  draft
+  approved
+  rejected
+}
+
+enum TradeSide {
+  buy
+  sell
+}
+
+enum NotificationStatus {
+  unread
+  read
+  deleted
+}
+
+enum NotificationLogStatus {
+  sent
+  skipped
+  failed
 }
 
 enum RevaluationJobType {
@@ -257,4 +442,24 @@ enum RevaluationJobStatus {
   completed
   failed
   cancelled
+}
+
+enum BacktestStatus {
+  pending
+  running
+  completed
+  failed
+}
+
+enum BacktestOutcome {
+  win
+  loss
+  timeout
+}
+
+enum PushLogStatus {
+  pending
+  sent
+  failed
+  retrying
 }

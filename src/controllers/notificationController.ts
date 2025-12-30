@@ -3,6 +3,79 @@ import { NotificationService } from '../services/notificationService';
 import { NotificationLogRepository } from '../backend/repositories/notificationLogRepository';
 import { MatchingService } from '../services/matchingService';
 import { NotificationTriggerService } from '../services/notification/notificationTriggerService';
+import { Prisma } from '@prisma/client';
+
+/**
+ * 一致判定理由の詳細構造（Phase 3: 説明責任）
+ * フロントエンド MatchReason 型と互換
+ */
+interface DetailedMatchReason {
+  featureName: string;
+  noteValue: number;
+  currentValue: number;
+  diff: number;
+  weight: number;
+  contribution: number;
+  description: string;
+}
+
+/**
+ * 通知データの内部表現型
+ * NotificationService から返される形式
+ */
+interface NotificationData {
+  id: string;
+  timestamp: Date;
+  message?: string;
+  read?: boolean;
+  matchResult?: MatchResultData;
+}
+
+/**
+ * マッチ結果データの内部表現型
+ */
+interface MatchResultData {
+  noteId?: string;
+  symbol?: string;
+  timestamp?: Date | string;
+  matchScore?: number;
+  isMatch?: boolean;
+  threshold?: number;
+  reasons?: Prisma.JsonValue;
+  historicalNote?: HistoricalNoteData;
+  currentMarket?: MarketData;
+}
+
+/**
+ * 過去ノートデータの内部表現型
+ */
+interface HistoricalNoteData {
+  id?: string;
+  tradeId?: string;
+  symbol?: string;
+  side?: string;
+  aiSummary?: string | null;
+  createdAt?: Date;
+  marketContext?: {
+    timeframe?: string;
+  };
+}
+
+/**
+ * 市場データの内部表現型
+ */
+interface MarketData {
+  timestamp?: Date | string;
+  open?: number;
+  high?: number;
+  low?: number;
+  close?: number;
+  volume?: number;
+  indicators?: {
+    rsi?: number | null;
+    macd?: number | null;
+  };
+}
 
 /**
  * NotificationController
@@ -308,8 +381,11 @@ export class NotificationController {
 
   /**
    * 通知一覧で必要な情報へ変換する
+   * 
+   * @param notification - NotificationService から取得した通知データ
+   * @returns UI 表示用の一覧アイテム
    */
-  private buildListItem(notification: any) {
+  private buildListItem(notification: NotificationData) {
     const match = notification.matchResult;
     const historicalNote = match?.historicalNote;
 
@@ -322,7 +398,7 @@ export class NotificationController {
       id: notification.id,
       matchResultId: match?.noteId || notification.id,
       sentAt: notification.timestamp.toISOString(),
-      channel: 'in_app',
+      channel: 'in_app' as const,
       isRead: Boolean(notification.read),
       readAt: notification.read ? notification.timestamp.toISOString() : null,
       createdAt: notification.timestamp.toISOString(),
@@ -341,8 +417,11 @@ export class NotificationController {
 
   /**
    * 通知詳細で必要な情報へ変換する
+   * 
+   * @param notification - NotificationService から取得した通知データ
+   * @returns UI 表示用の詳細アイテム
    */
-  private buildDetailItem(notification: any) {
+  private buildDetailItem(notification: NotificationData) {
     const listItem = this.buildListItem(notification);
     const match = notification.matchResult;
     const historicalNote = match?.historicalNote;
@@ -359,7 +438,7 @@ export class NotificationController {
         evaluatedAt: listItem.matchResult.evaluatedAt,
         score: listItem.matchResult.score,
         matched: Boolean(match?.isMatch ?? (listItem.matchResult.score >= (match?.threshold ?? 0))),
-        reasons: (match?.reasons as any[]) || [],
+        reasons: this.extractReasons(match?.reasons),
         marketSnapshotId15m: snapshot15m.id,
         marketSnapshotId60m: snapshot60m.id,
         createdAt: listItem.createdAt,
@@ -381,9 +460,138 @@ export class NotificationController {
   }
 
   /**
-   * MarketSnapshot 表示用のダミー含むスナップショット生成
+   * JSON 形式の reasons から詳細形式の理由配列を抽出する
+   * Phase 3: 説明責任対応 - UI表示用の詳細形式を返す
+   * 
+   * @param reasons - Prisma.JsonValue 形式の reasons
+   * @returns 詳細形式の理由配列（DetailedMatchReason[]）
    */
-  private buildSnapshot(currentMarket: any, timeframe: string, symbol: string) {
+  private extractReasons(reasons: Prisma.JsonValue | undefined): DetailedMatchReason[] {
+    if (!reasons) return this.getDefaultReasons();
+    
+    // すでに詳細形式（detailedReasons）がある場合
+    if (typeof reasons === 'object' && reasons !== null) {
+      const obj = reasons as Record<string, unknown>;
+      
+      // 新形式: detailedReasons 配列が存在する場合
+      if (Array.isArray(obj.detailedReasons)) {
+        return obj.detailedReasons.map((r: unknown) => {
+          const reason = r as Record<string, unknown>;
+          return {
+            featureName: String(reason.featureName || ''),
+            noteValue: Number(reason.noteValue) || 0,
+            currentValue: Number(reason.currentValue) || 0,
+            diff: Number(reason.diff) || 0,
+            weight: Number(reason.weight) || 0,
+            contribution: Number(reason.contribution) || 0,
+            description: String(reason.description || ''),
+          };
+        });
+      }
+
+      // 旧形式: explanations + breakdown がある場合に変換
+      if (Array.isArray(obj.explanations) && obj.breakdown) {
+        const explanations = obj.explanations.filter((r): r is string => typeof r === 'string');
+        const breakdown = obj.breakdown as Record<string, number>;
+        return this.convertBreakdownToDetailedReasons(explanations, breakdown);
+      }
+      
+      // 旧形式: explanations のみの場合
+      if (Array.isArray(obj.explanations)) {
+        const explanations = obj.explanations.filter((r): r is string => typeof r === 'string');
+        return this.convertStringsToDetailedReasons(explanations);
+      }
+    }
+    
+    // 文字列配列の場合（最も古い形式）
+    if (Array.isArray(reasons)) {
+      const strings = reasons.filter((r): r is string => typeof r === 'string');
+      return this.convertStringsToDetailedReasons(strings);
+    }
+    
+    return this.getDefaultReasons();
+  }
+
+  /**
+   * 文字列配列から詳細形式に変換
+   * 既存データ互換用
+   */
+  private convertStringsToDetailedReasons(strings: string[]): DetailedMatchReason[] {
+    // 特徴量名と重みのマッピング
+    const featureMap: { pattern: RegExp; featureName: string; weight: number }[] = [
+      { pattern: /価格変化率/, featureName: '価格変化率', weight: 0.2 },
+      { pattern: /取引量/, featureName: '取引量', weight: 0.15 },
+      { pattern: /RSI/, featureName: 'RSI', weight: 0.2 },
+      { pattern: /MACD/, featureName: 'MACD', weight: 0.15 },
+      { pattern: /トレンド/, featureName: 'トレンド', weight: 0.1 },
+      { pattern: /ボラティリティ/, featureName: 'ボラティリティ', weight: 0.1 },
+      { pattern: /時間帯/, featureName: '時間帯', weight: 0.1 },
+    ];
+
+    return strings.map((desc, index) => {
+      const match = featureMap.find(f => f.pattern.test(desc));
+      return {
+        featureName: match?.featureName || `特徴量${index + 1}`,
+        noteValue: 0,
+        currentValue: 0,
+        diff: 0,
+        weight: match?.weight || 0.1,
+        contribution: 0,
+        description: desc,
+      };
+    });
+  }
+
+  /**
+   * breakdown オブジェクトから詳細形式に変換
+   */
+  private convertBreakdownToDetailedReasons(
+    explanations: string[],
+    breakdown: Record<string, number>
+  ): DetailedMatchReason[] {
+    const featureNames = ['価格変化率', '取引量', 'RSI', 'MACD', 'トレンド', 'ボラティリティ', '時間帯'];
+    const breakdownKeys = ['priceChange', 'volume', 'rsi', 'macd', 'trend', 'volatility', 'timeFlag'];
+    const weights = [0.2, 0.15, 0.2, 0.15, 0.1, 0.1, 0.1];
+
+    return featureNames.map((name, index) => {
+      const key = breakdownKeys[index];
+      const similarity = breakdown[key] ?? 0;
+      return {
+        featureName: name,
+        noteValue: 0,
+        currentValue: 0,
+        diff: 0,
+        weight: weights[index],
+        contribution: similarity * weights[index],
+        description: explanations[index] || `${name}の評価`,
+      };
+    });
+  }
+
+  /**
+   * デフォルトの理由配列を返す（データがない場合）
+   */
+  private getDefaultReasons(): DetailedMatchReason[] {
+    return [
+      { featureName: '価格変化率', noteValue: 0, currentValue: 0, diff: 0, weight: 0.2, contribution: 0, description: 'データなし' },
+      { featureName: '取引量', noteValue: 0, currentValue: 0, diff: 0, weight: 0.15, contribution: 0, description: 'データなし' },
+      { featureName: 'RSI', noteValue: 0, currentValue: 0, diff: 0, weight: 0.2, contribution: 0, description: 'データなし' },
+      { featureName: 'MACD', noteValue: 0, currentValue: 0, diff: 0, weight: 0.15, contribution: 0, description: 'データなし' },
+      { featureName: 'トレンド', noteValue: 0, currentValue: 0, diff: 0, weight: 0.1, contribution: 0, description: 'データなし' },
+      { featureName: 'ボラティリティ', noteValue: 0, currentValue: 0, diff: 0, weight: 0.1, contribution: 0, description: 'データなし' },
+      { featureName: '時間帯', noteValue: 0, currentValue: 0, diff: 0, weight: 0.1, contribution: 0, description: 'データなし' },
+    ];
+  }
+
+  /**
+   * MarketSnapshot 表示用のダミー含むスナップショット生成
+   * 
+   * @param currentMarket - 現在の市場データ
+   * @param timeframe - タイムフレーム
+   * @param symbol - シンボル
+   * @returns UI 表示用のスナップショット
+   */
+  private buildSnapshot(currentMarket: MarketData | undefined, timeframe: string, symbol: string) {
     const baseTimestamp = currentMarket?.timestamp ? new Date(currentMarket.timestamp) : new Date();
 
     const price = currentMarket?.close ?? 0;

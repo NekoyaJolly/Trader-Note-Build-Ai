@@ -13,15 +13,50 @@ export interface TradeCreateInput {
 }
 
 /**
+ * bulkInsert の戻り値型
+ * count: 実際にinsertされた件数
+ * insertedIds: 実際にinsertされたトレードのID配列
+ */
+export interface BulkInsertResult {
+  count: number;
+  insertedIds: string[];
+}
+
+/**
  * Trade テーブルを扱うリポジトリ
  */
 export class TradeRepository {
-  // トレードをまとめて保存（既存IDとは衝突しない前提で createMany）
-  async bulkInsert(trades: TradeCreateInput[]): Promise<number> {
-    if (trades.length === 0) return 0;
+  /**
+   * トレードをまとめて保存（重複チェック付き）
+   * timestamp + symbol + side の組み合わせで重複を判定
+   * @returns 実際にinsertされた件数とID配列
+   */
+  async bulkInsert(trades: TradeCreateInput[]): Promise<BulkInsertResult> {
+    if (trades.length === 0) return { count: 0, insertedIds: [] };
+
+    // 既存のトレードを取得して重複チェック
+    const existingTrades = await prisma.trade.findMany({
+      select: { timestamp: true, symbol: true, side: true },
+    });
+    
+    // 既存トレードのキーセットを作成
+    const existingKeys = new Set(
+      existingTrades.map(t => `${t.timestamp.toISOString()}_${t.symbol}_${t.side}`)
+    );
+    
+    // 重複を除外
+    const newTrades = trades.filter(t => {
+      const key = `${t.timestamp.toISOString()}_${t.symbol}_${t.side}`;
+      return !existingKeys.has(key);
+    });
+    
+    if (newTrades.length === 0) {
+      console.log('[TradeRepository] All trades already exist, skipping insert');
+      return { count: 0, insertedIds: [] };
+    }
 
     const result = await prisma.trade.createMany({
-      data: trades.map((t) => ({
+      data: newTrades.map((t) => ({
         id: t.id,
         timestamp: t.timestamp,
         symbol: t.symbol,
@@ -31,10 +66,11 @@ export class TradeRepository {
         fee: t.fee ?? undefined,
         exchange: t.exchange ?? undefined,
       })),
-      skipDuplicates: false,
+      skipDuplicates: true,
     });
 
-    return result.count;
+    console.log(`[TradeRepository] Inserted ${result.count} new trades (${trades.length - newTrades.length} duplicates skipped)`);
+    return { count: result.count, insertedIds: newTrades.map(t => t.id) };
   }
 
   // 登録済み件数を確認するためのヘルパー

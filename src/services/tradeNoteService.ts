@@ -8,6 +8,18 @@ import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
 import { config } from '../config';
+import { TradeNoteRepository, TradeNoteWithSummary, FindNotesOptions } from '../backend/repositories/tradeNoteRepository';
+import { TradeSide, NoteStatus as PrismaNoteStatus, Prisma } from '@prisma/client';
+import { toMarketContextJson } from '../models/prismaTypes';
+
+/**
+ * ストレージモード
+ * - 'db': DBのみ使用（推奨）
+ * - 'fs': FSのみ使用（レガシー）
+ * - 'hybrid': DB優先、FS フォールバック
+ */
+type StorageMode = 'db' | 'fs' | 'hybrid';
+
 
 /**
  * ノート更新時に許可するフィールド
@@ -27,17 +39,30 @@ export interface NoteUpdatePayload {
  * - 一致判定用の特徴量抽出
  * - 市場データからインジケーター値を取得
  * - ノートの承認/非承認/編集
+ * 
+ * Phase 8: DBストレージモード対応
+ * - 'db' モードではDBのみ使用（推奨）
+ * - 'fs' モードではFSのみ使用（レガシー互換）
+ * - 'hybrid' モードではDB優先、FSフォールバック
  */
 export class TradeNoteService {
   private aiService: AISummaryService;
   private marketDataService: MarketDataService;
   private notesPath: string;
+  private repository: TradeNoteRepository;
+  private storageMode: StorageMode;
 
-  constructor() {
+  constructor(storageMode: StorageMode = 'db') {
     this.aiService = new AISummaryService();
     this.marketDataService = new MarketDataService();
     this.notesPath = path.join(process.cwd(), config.paths.notes);
-    this.ensureNotesDirectory();
+    this.repository = new TradeNoteRepository();
+    this.storageMode = storageMode;
+    
+    // FSモードまたはhybridモードの場合のみディレクトリを作成
+    if (this.storageMode === 'fs' || this.storageMode === 'hybrid') {
+      this.ensureNotesDirectory();
+    }
   }
 
   /**
@@ -383,22 +408,126 @@ export class TradeNoteService {
 
   /**
    * トレードノートをストレージに保存
+   * 
+   * Phase 8: DBモードでは TradeNoteRepository を使用
+   * FSモードでは従来の JSON ファイル保存を使用
    */
   async saveNote(note: TradeNote): Promise<void> {
+    if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
+      await this.saveNoteToDb(note);
+    }
+    
+    if (this.storageMode === 'fs' || this.storageMode === 'hybrid') {
+      await this.saveNoteToFs(note);
+    }
+  }
+
+  /**
+   * DBにノートを保存する
+   */
+  private async saveNoteToDb(note: TradeNote): Promise<void> {
+    // 既存のノートを確認
+    const existing = await this.repository.findByTradeId(note.tradeId);
+    
+    if (existing) {
+      // 既存ノートの更新
+      await this.repository.updateUserContent(existing.id, {
+        userNotes: note.userNotes,
+        tags: note.tags,
+        // MarketContext を Prisma 互換 JSON に変換
+        marketContext: note.marketContext 
+          ? toMarketContextJson(note.marketContext) 
+          : undefined,
+      });
+      
+      // ステータスの更新
+      if (note.status === 'approved' && existing.status !== 'approved') {
+        await this.repository.approve(existing.id);
+      } else if (note.status === 'rejected' && existing.status !== 'rejected') {
+        await this.repository.reject(existing.id);
+      } else if (note.status === 'draft' && existing.status !== 'draft') {
+        await this.repository.revertToDraft(existing.id);
+      }
+    } else {
+      // 新規ノートの作成
+      // side は小文字で保存（Prisma TradeSide enumは 'buy' | 'sell'）
+      await this.repository.createWithSummary(
+        {
+          tradeId: note.tradeId,
+          symbol: note.symbol,
+          entryPrice: note.entryPrice,
+          side: note.side.toLowerCase() as TradeSide,
+          featureVector: note.features || [],
+          timeframe: note.marketContext?.timeframe || '15m',
+          status: (note.status || 'draft').toUpperCase() as PrismaNoteStatus,
+          // MarketContext を Prisma 互換 JSON に変換
+          marketContext: note.marketContext 
+            ? toMarketContextJson(note.marketContext) 
+            : undefined,
+          userNotes: note.userNotes,
+          tags: note.tags,
+        },
+        {
+          summary: note.aiSummary || '',
+        }
+      );
+    }
+    
+    // 本番環境ではデバッグログを抑制
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[DB] Saved trade note: ${note.id}`);
+    }
+  }
+
+  /**
+   * FSにノートを保存する（レガシー互換）
+   */
+  private async saveNoteToFs(note: TradeNote): Promise<void> {
     const filename = `${note.id}.json`;
     const filepath = path.join(this.notesPath, filename);
     
     fs.writeFileSync(filepath, JSON.stringify(note, null, 2));
     // 本番環境ではデバッグログを抑制
     if (process.env.NODE_ENV !== 'production') {
-      console.log(`Saved trade note: ${filename}`);
+      console.log(`[FS] Saved trade note: ${filename}`);
     }
   }
 
   /**
    * Load all trade notes from storage
+   * 
+   * Phase 8: DBモードでは TradeNoteRepository を使用
    */
   async loadAllNotes(): Promise<TradeNote[]> {
+    if (this.storageMode === 'db') {
+      return this.loadAllNotesFromDb();
+    }
+    
+    if (this.storageMode === 'hybrid') {
+      // DB優先で取得、なければFSにフォールバック
+      const dbNotes = await this.loadAllNotesFromDb();
+      if (dbNotes.length > 0) {
+        return dbNotes;
+      }
+      console.log('[Hybrid] DB empty, falling back to FS');
+      return this.loadAllNotesFromFs();
+    }
+    
+    return this.loadAllNotesFromFs();
+  }
+
+  /**
+   * DBから全ノートを取得
+   */
+  private async loadAllNotesFromDb(): Promise<TradeNote[]> {
+    const dbNotes = await this.repository.findAll(1000, 0);
+    return dbNotes.map(this.convertDbNoteToTradeNote);
+  }
+
+  /**
+   * FSから全ノートを取得（レガシー互換）
+   */
+  private async loadAllNotesFromFs(): Promise<TradeNote[]> {
     const notes: TradeNote[] = [];
     
     if (!fs.existsSync(this.notesPath)) {
@@ -424,8 +553,41 @@ export class TradeNoteService {
 
   /**
    * Get a specific note by ID
+   * 
+   * Phase 8: DBモードでは TradeNoteRepository を使用
    */
   async getNoteById(noteId: string): Promise<TradeNote | null> {
+    if (this.storageMode === 'db') {
+      return this.getNoteByIdFromDb(noteId);
+    }
+    
+    if (this.storageMode === 'hybrid') {
+      const dbNote = await this.getNoteByIdFromDb(noteId);
+      if (dbNote) {
+        return dbNote;
+      }
+      console.log(`[Hybrid] Note ${noteId} not found in DB, falling back to FS`);
+      return this.getNoteByIdFromFs(noteId);
+    }
+    
+    return this.getNoteByIdFromFs(noteId);
+  }
+
+  /**
+   * DBから単一ノートを取得
+   */
+  private async getNoteByIdFromDb(noteId: string): Promise<TradeNote | null> {
+    const dbNote = await this.repository.findById(noteId);
+    if (!dbNote) {
+      return null;
+    }
+    return this.convertDbNoteToTradeNote(dbNote);
+  }
+
+  /**
+   * FSから単一ノートを取得（レガシー互換）
+   */
+  private async getNoteByIdFromFs(noteId: string): Promise<TradeNote | null> {
     const filepath = path.join(this.notesPath, `${noteId}.json`);
     
     if (!fs.existsSync(filepath)) {
@@ -439,6 +601,49 @@ export class TradeNoteService {
     
     return note;
   }
+
+  /**
+   * DBノートをTradeNote型に変換
+   */
+  private convertDbNoteToTradeNote(dbNote: TradeNoteWithSummary): TradeNote {
+    // marketContext の型安全な変換
+    let marketContext: MarketContext;
+    if (dbNote.marketContext && typeof dbNote.marketContext === 'object' && !Array.isArray(dbNote.marketContext)) {
+      const mc = dbNote.marketContext as Record<string, unknown>;
+      marketContext = {
+        timeframe: (mc.timeframe as string) || dbNote.timeframe || '15m',
+        trend: (mc.trend as 'bullish' | 'bearish' | 'neutral') || 'neutral',
+        indicators: mc.indicators as MarketContext['indicators'],
+        calculatedIndicators: mc.calculatedIndicators as Record<string, number | null>,
+      };
+    } else {
+      marketContext = {
+        timeframe: dbNote.timeframe || '15m',
+        trend: 'neutral',
+      };
+    }
+    
+    return {
+      id: dbNote.id,
+      tradeId: dbNote.tradeId,
+      timestamp: dbNote.createdAt,
+      symbol: dbNote.symbol,
+      side: dbNote.side.toLowerCase() as 'buy' | 'sell',
+      entryPrice: Number(dbNote.entryPrice),
+      quantity: 0, // DBには数量が保存されていない場合のデフォルト
+      marketContext,
+      aiSummary: dbNote.aiSummary?.summary || '',
+      features: dbNote.featureVector || [],
+      createdAt: dbNote.createdAt,
+      status: (dbNote.status?.toLowerCase() || 'draft') as NoteStatus,
+      approvedAt: dbNote.approvedAt || undefined,
+      rejectedAt: dbNote.rejectedAt || undefined,
+      lastEditedAt: dbNote.lastEditedAt || undefined,
+      userNotes: dbNote.userNotes || undefined,
+      tags: dbNote.tags || undefined,
+    };
+  }
+
 
   /**
    * トレードから一致判定用の特徴量を抽出
@@ -492,8 +697,15 @@ export class TradeNoteService {
   /**
    * 承認済みノートのみを取得
    * マッチング対象となるノートのみを返却する
+   * 
+   * Phase 8: DBモードではリポジトリの専用メソッドを使用
    */
   async loadApprovedNotes(): Promise<TradeNote[]> {
+    if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
+      const dbNotes = await this.repository.findApproved();
+      return dbNotes.map(n => this.convertDbNoteToTradeNote(n));
+    }
+    
     const allNotes = await this.loadAllNotes();
     return allNotes.filter(note => note.status === 'approved');
   }
@@ -501,9 +713,17 @@ export class TradeNoteService {
   /**
    * 指定ステータスのノートを取得
    * 
+   * Phase 8: DBモードではリポジトリの専用メソッドを使用
    * @param status - 取得したいステータス（draft, approved, rejected）
    */
   async loadNotesByStatus(status: NoteStatus): Promise<TradeNote[]> {
+    if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
+      const dbNotes = await this.repository.findWithOptions({
+        status: status.toUpperCase() as PrismaNoteStatus,
+      });
+      return dbNotes.map(n => this.convertDbNoteToTradeNote(n));
+    }
+    
     const allNotes = await this.loadAllNotes();
     return allNotes.filter(note => note.status === status);
   }
@@ -512,24 +732,37 @@ export class TradeNoteService {
    * ノートを承認する
    * 承認済みのノートはマッチング対象になる
    * 
+   * Phase 8: DBモードではリポジトリを直接使用
    * @param noteId - 承認するノートのID
    * @returns 承認後のノート
    */
   async approveNote(noteId: string): Promise<TradeNote> {
+    if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
+      await this.repository.approve(noteId);
+      const updated = await this.getNoteByIdFromDb(noteId);
+      if (!updated) {
+        throw new Error(`ノートが見つかりませんでした: ${noteId}`);
+      }
+      
+      // hybridモードの場合、FSも更新
+      if (this.storageMode === 'hybrid') {
+        await this.saveNoteToFs(updated);
+      }
+      return updated;
+    }
+    
+    // FSモード（レガシー）
     const note = await this.getNoteById(noteId);
     if (!note) {
       throw new Error(`ノートが見つかりませんでした: ${noteId}`);
     }
 
-    // 既に承認済みの場合はそのまま返す
     if (note.status === 'approved') {
       return note;
     }
 
-    // ステータスを更新
     note.status = 'approved';
     note.approvedAt = new Date();
-    // rejected から approved への遷移時は rejectedAt をクリア
     delete note.rejectedAt;
 
     await this.saveNote(note);
@@ -540,24 +773,37 @@ export class TradeNoteService {
    * ノートを非承認（reject）する
    * 非承認のノートはマッチング対象外、アーカイブ扱い
    * 
+   * Phase 8: DBモードではリポジトリを直接使用
    * @param noteId - 非承認にするノートのID
    * @returns 非承認後のノート
    */
   async rejectNote(noteId: string): Promise<TradeNote> {
+    if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
+      await this.repository.reject(noteId);
+      const updated = await this.getNoteByIdFromDb(noteId);
+      if (!updated) {
+        throw new Error(`ノートが見つかりませんでした: ${noteId}`);
+      }
+      
+      // hybridモードの場合、FSも更新
+      if (this.storageMode === 'hybrid') {
+        await this.saveNoteToFs(updated);
+      }
+      return updated;
+    }
+    
+    // FSモード（レガシー）
     const note = await this.getNoteById(noteId);
     if (!note) {
       throw new Error(`ノートが見つかりませんでした: ${noteId}`);
     }
 
-    // 既に非承認の場合はそのまま返す
     if (note.status === 'rejected') {
       return note;
     }
 
-    // ステータスを更新
     note.status = 'rejected';
     note.rejectedAt = new Date();
-    // approved から rejected への遷移時は approvedAt を保持（履歴として）
 
     await this.saveNote(note);
     return note;
@@ -567,37 +813,70 @@ export class TradeNoteService {
    * ノートを下書きに戻す
    * 承認/非承認から編集モードに戻す際に使用
    * 
+   * Phase 8: DBモードではリポジトリを直接使用
    * @param noteId - 下書きに戻すノートのID
    * @returns 下書き状態のノート
    */
   async revertToDraft(noteId: string): Promise<TradeNote> {
+    if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
+      await this.repository.revertToDraft(noteId);
+      const updated = await this.getNoteByIdFromDb(noteId);
+      if (!updated) {
+        throw new Error(`ノートが見つかりませんでした: ${noteId}`);
+      }
+      
+      // hybridモードの場合、FSも更新
+      if (this.storageMode === 'hybrid') {
+        await this.saveNoteToFs(updated);
+      }
+      return updated;
+    }
+    
+    // FSモード（レガシー）
     const note = await this.getNoteById(noteId);
     if (!note) {
       throw new Error(`ノートが見つかりませんでした: ${noteId}`);
     }
 
-    // 既に draft の場合はそのまま返す
     if (note.status === 'draft') {
       return note;
     }
 
-    // ステータスを更新
     note.status = 'draft';
-    // 承認/非承認のタイムスタンプは履歴として保持
 
     await this.saveNote(note);
     return note;
   }
 
+
   /**
    * ノートの内容を更新する
    * AI 要約、ユーザーメモ、タグなどを編集可能
    * 
+   * Phase 8: DBモードではリポジトリを直接使用
    * @param noteId - 更新するノートのID
    * @param updates - 更新内容
    * @returns 更新後のノート
    */
   async updateNote(noteId: string, updates: NoteUpdatePayload): Promise<TradeNote> {
+    if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
+      await this.repository.updateUserContent(noteId, {
+        userNotes: updates.userNotes,
+        tags: updates.tags,
+      });
+      const updated = await this.getNoteByIdFromDb(noteId);
+      if (!updated) {
+        throw new Error(`ノートが見つかりませんでした: ${noteId}`);
+      }
+      
+      // hybridモードの場合、FSも更新
+      if (this.storageMode === 'hybrid') {
+        await this.saveNoteToFs(updated);
+      }
+      return updated;
+    }
+    
+    // FSモード（レガシー）
     const note = await this.getNoteById(noteId);
     if (!note) {
       throw new Error(`ノートが見つかりませんでした: ${noteId}`);
@@ -624,8 +903,35 @@ export class TradeNoteService {
   /**
    * ノートのステータス集計を取得
    * UI のダッシュボード等で使用
+   * 
+   * Phase 8: DBモードではリポジトリのグループ化クエリを使用
    */
   async getStatusCounts(): Promise<{ draft: number; approved: number; rejected: number; total: number }> {
+    if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
+      const statusCounts = await this.repository.countByStatus();
+      const counts = {
+        draft: 0,
+        approved: 0,
+        rejected: 0,
+        total: 0,
+      };
+      
+      for (const { status, count } of statusCounts) {
+        const statusLower = status.toLowerCase();
+        if (statusLower === 'draft') {
+          counts.draft = count;
+        } else if (statusLower === 'approved') {
+          counts.approved = count;
+        } else if (statusLower === 'rejected') {
+          counts.rejected = count;
+        }
+        counts.total += count;
+      }
+      
+      return counts;
+    }
+    
+    // FSモード（レガシー）
     const allNotes = await this.loadAllNotes();
     const counts = {
       draft: 0,

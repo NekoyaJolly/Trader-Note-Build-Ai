@@ -1,4 +1,4 @@
-import { MatchResult, PrismaClient, TradeNote, MarketSnapshot } from '@prisma/client';
+import { MatchResult, PrismaClient, TradeNote, MarketSnapshot, Prisma } from '@prisma/client';
 import { prisma } from '../db/client';
 
 /**
@@ -6,7 +6,53 @@ import { prisma } from '../db/client';
  * 
  * 目的: ルールベースの一致判定結果を永続化し、再現性のある履歴を残す。
  * 前提: noteId と marketSnapshotId の組み合わせは一意（スキーマのユニーク制約に依存）。
+ * 
+ * Phase 3: 照合の説明責任
+ * - reasons フィールドに詳細なスコア内訳を保存
+ * - 人間可読な説明と数値スコアの両方を記録
  */
+
+/**
+ * スコア内訳の詳細（Phase 3: 説明責任）
+ * Prisma.InputJsonValue と互換性を持つためインデックスシグネチャを含む
+ */
+export interface MatchScoreBreakdown {
+  // インデックスシグネチャ（Prisma JSON互換）
+  [key: string]: number | undefined;
+  // 部分スコア（0.0〜1.0）
+  priceChange: number;
+  volume: number;
+  rsi: number;
+  macd: number;
+  trend: number;
+  volatility: number;
+  timeFlag: number;
+}
+
+/**
+ * 保存される reasons JSON の構造
+ * Prisma.InputJsonValue と互換性を持つためインデックスシグネチャを含む
+ */
+export interface MatchReasonsData {
+  // インデックスシグネチャ（Prisma JSON互換）
+  [key: string]: string[] | MatchScoreBreakdown | number[] | undefined;
+  // 人間可読な理由の配列（日本語）
+  explanations: string[];
+  // 数値スコアの内訳（Phase 3: 可視化用）
+  breakdown?: MatchScoreBreakdown;
+  // 特徴量ベクトル（再現性確保用）
+  noteFeatureVector?: number[];
+  marketFeatureVector?: number[];
+}
+
+/**
+ * MatchResult の where 条件型
+ */
+export interface MatchResultWhereInput {
+  symbol?: string;
+  score?: { gte: number };
+}
+
 export interface MatchResultUpsertInput {
   noteId: string;
   marketSnapshotId: string;
@@ -15,7 +61,7 @@ export interface MatchResultUpsertInput {
   threshold: number;      // 判定に用いた閾値（再計算時の再現性確保のため保存）
   trendMatched: boolean;  // トレンド一致の有無
   priceRangeMatched: boolean; // 価格レンジ一致の有無
-  reasons: string[];      // 人間可読な理由の配列（日本語）
+  reasons: string[] | MatchReasonsData; // 理由（旧形式: string[]、新形式: MatchReasonsData）
   evaluatedAt: Date;      // 判定実行時刻（UTC 前提）
 }
 
@@ -36,6 +82,12 @@ export class MatchResultRepository {
    * 既存レコードがある場合はスコアと理由を上書きし、再評価の痕跡を残す。
    */
   async upsertByNoteAndSnapshot(input: MatchResultUpsertInput): Promise<MatchResult> {
+    // reasons を Prisma Json 型と互換性のある形式に変換
+    // 旧形式（string[]）と新形式（MatchReasonsData）の両方に対応
+    const reasonsData: Prisma.InputJsonValue = Array.isArray(input.reasons)
+      ? { explanations: input.reasons }
+      : input.reasons;
+    
     return this.prisma.matchResult.upsert({
       where: {
         noteId_marketSnapshotId: {
@@ -51,7 +103,7 @@ export class MatchResultRepository {
         threshold: input.threshold,
         trendMatched: input.trendMatched,
         priceRangeMatched: input.priceRangeMatched,
-        reasons: input.reasons,
+        reasons: reasonsData,
         evaluatedAt: input.evaluatedAt,
         decidedAt: input.evaluatedAt,
       },
@@ -60,7 +112,7 @@ export class MatchResultRepository {
         threshold: input.threshold,
         trendMatched: input.trendMatched,
         priceRangeMatched: input.priceRangeMatched,
-        reasons: input.reasons,
+        reasons: reasonsData,
         evaluatedAt: input.evaluatedAt,
         decidedAt: input.evaluatedAt,
       },
@@ -93,7 +145,7 @@ export class MatchResultRepository {
   } = {}): Promise<MatchResult[]> {
     const { symbol, limit = 50, offset = 0, minScore } = options;
 
-    const where: any = {};
+    const where: MatchResultWhereInput = {};
     if (symbol) {
       where.symbol = symbol;
     }
@@ -129,7 +181,7 @@ export class MatchResultRepository {
   async countHistory(options: { symbol?: string; minScore?: number } = {}): Promise<number> {
     const { symbol, minScore } = options;
 
-    const where: any = {};
+    const where: MatchResultWhereInput = {};
     if (symbol) {
       where.symbol = symbol;
     }

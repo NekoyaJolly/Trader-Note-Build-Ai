@@ -6,6 +6,16 @@
  * - Prisma 型への依存を Repository 層に閉じ込める
  * - Layer1/2 のファイル保存・通知判定・UI 表示で利用する
  */
+
+import { MatchResult, MarketSnapshot, Prisma } from '@prisma/client';
+
+/**
+ * DB から取得した MatchResult の型（関連テーブル含む）
+ */
+type MatchResultWithSnapshot = MatchResult & {
+  marketSnapshot?: MarketSnapshot | null;
+};
+
 export interface MatchResultDTO {
   /** マッチ結果 ID (UUID) */
   id: string;
@@ -43,8 +53,14 @@ export interface MatchResultDTO {
 /**
  * DB から取得した MatchResult を DTO に変換するヘルパー関数
  * Repository 層で使用する
+ * 
+ * @param dbRecord - Prisma から取得した MatchResult（関連テーブル含む可能性あり）
+ * @returns MatchResultDTO
  */
-export function toMatchResultDTO(dbRecord: any): MatchResultDTO {
+export function toMatchResultDTO(dbRecord: MatchResultWithSnapshot): MatchResultDTO {
+  // reasons を安全に配列として抽出
+  const reasons = extractReasons(dbRecord.reasons);
+  
   return {
     id: dbRecord.id,
     matchScore: dbRecord.score,
@@ -55,9 +71,37 @@ export function toMatchResultDTO(dbRecord: any): MatchResultDTO {
     threshold: dbRecord.threshold,
     trendMatched: dbRecord.trendMatched,
     priceRangeMatched: dbRecord.priceRangeMatched,
-    reasons: Array.isArray(dbRecord.reasons) ? dbRecord.reasons : [],
-    warnings: Array.isArray(dbRecord.warnings) ? dbRecord.warnings : [],
+    reasons,
+    warnings: [],  // DB スキーマには warnings フィールドがないため空配列
     evaluatedAt: dbRecord.evaluatedAt,
     createdAt: dbRecord.createdAt,
   };
+}
+
+/**
+ * JSON 形式の reasons から文字列配列を抽出する
+ * 
+ * @param reasonsJson - DB から取得した reasons フィールド（Prisma.JsonValue）
+ * @returns 人間可読な理由の配列
+ */
+function extractReasons(reasonsJson: Prisma.JsonValue): string[] {
+  if (!reasonsJson || typeof reasonsJson !== 'object') {
+    return [];
+  }
+  
+  // 配列形式の場合
+  if (Array.isArray(reasonsJson)) {
+    return reasonsJson.filter((r): r is string => typeof r === 'string');
+  }
+  
+  // オブジェクト形式の場合（新形式: { explanations: string[] }）
+  const obj = reasonsJson as Record<string, unknown>;
+  if (Array.isArray(obj.explanations)) {
+    return obj.explanations.filter((r): r is string => typeof r === 'string');
+  }
+  if (Array.isArray(obj.messages)) {
+    return obj.messages.filter((r): r is string => typeof r === 'string');
+  }
+  
+  return [];
 }

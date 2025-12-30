@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { BacktestPanel } from "@/components";
 
 /**
  * ノート詳細画面
@@ -463,6 +464,11 @@ export default function NoteDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* バックテストパネル（承認済みノートのみ表示） */}
+      {currentStatus === "approved" && (
+        <BacktestPanel noteId={id} symbol={note.symbol} />
+      )}
     </div>
   );
 }

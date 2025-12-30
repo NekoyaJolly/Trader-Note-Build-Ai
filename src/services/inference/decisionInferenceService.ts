@@ -157,21 +157,37 @@ export class DecisionInferenceService {
       throw new Error(`AI 推定 API エラー: ${response.status} ${response.statusText}`);
     }
 
-    const data = (await response.json()) as any;
+    // OpenAI API レスポンスの型定義
+    interface OpenAIResponse {
+      choices?: Array<{ message?: { content?: string } }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+      model?: string;
+    }
+    
+    // AI 応答のパース結果の型定義
+    interface ParsedInferenceResult {
+      primaryTimeframe?: string;
+      secondaryTimeframes?: string[];
+      inferredMode?: string;
+      rationale?: string;
+    }
+
+    const data = await response.json() as OpenAIResponse;
     const content = data.choices?.[0]?.message?.content || '{}';
 
-    let parsed: any;
+    let parsed: ParsedInferenceResult;
     try {
       parsed = JSON.parse(content);
     } catch (error) {
       throw new Error('AI 応答の JSON パースに失敗しました');
     }
 
+    // デフォルト値を設定して必須フィールドを保証
     return {
-      primaryTimeframe: parsed.primaryTimeframe,
-      secondaryTimeframes: parsed.secondaryTimeframes,
-      inferredMode: parsed.inferredMode,
-      rationale: parsed.rationale,
+      primaryTimeframe: parsed.primaryTimeframe || '1h',
+      secondaryTimeframes: parsed.secondaryTimeframes || ['15m', '4h'],
+      inferredMode: (parsed.inferredMode as InferredMode) || 'other',
+      rationale: parsed.rationale || 'AI 推定結果',
       promptTokens: data.usage?.prompt_tokens,
       completionTokens: data.usage?.completion_tokens,
       model: data.model,

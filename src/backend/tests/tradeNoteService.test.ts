@@ -22,7 +22,8 @@ import { Trade } from '../../models/types';
 import { config } from '../../config';
 
 describe('TradeNoteService', () => {
-  const service = new TradeNoteService();
+  // Phase 8: テストではFSモードを使用（レガシー互換性テスト）
+  const service = new TradeNoteService('fs');
   const notesDir = path.join(process.cwd(), config.paths.notes);
   const createdFiles: string[] = [];
 

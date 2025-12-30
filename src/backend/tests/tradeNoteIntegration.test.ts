@@ -14,7 +14,8 @@ import { Trade } from '../../models/types';
 
 describe('CSV取込 → ノート生成 統合テスト', () => {
   const importService = new TradeImportService();
-  const noteService = new TradeNoteService();
+  // Phase 8: テストではFSモードを使用（統合テストの互換性維持）
+  const noteService = new TradeNoteService('fs');
   const tradeRepo = new TradeRepository();
   
   // テスト用の一時 CSV ファイルパス

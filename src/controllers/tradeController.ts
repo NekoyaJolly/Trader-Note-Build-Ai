@@ -6,6 +6,20 @@ import fs from 'fs';
 import { TradeRepository } from '../backend/repositories/tradeRepository';
 import { TradeNoteService, NoteUpdatePayload } from '../services/tradeNoteService';
 import { NoteStatus } from '../models/types';
+import { Trade as DbTrade, Prisma } from '@prisma/client';
+
+/**
+ * トレードデータの共通型
+ * DB 型と ParsedTrade の両方に対応
+ */
+interface TradeData {
+  id: string;
+  timestamp: Date | string;
+  symbol: string;
+  side: string;
+  price: number | Prisma.Decimal;
+  quantity: number | Prisma.Decimal;
+}
 
 export class TradeController {
   private importService: TradeImportService;
@@ -56,7 +70,7 @@ export class TradeController {
       const noteErrors: string[] = [];
 
       // DB から取得、失敗時は parsedTrades を使用
-      let trades: any[] = [];
+      let trades: TradeData[] = [];
       try {
         if (result.insertedIds.length > 0) {
           trades = await this.tradeRepository.findByIds(result.insertedIds);
@@ -70,11 +84,14 @@ export class TradeController {
       // ユーザー設定のインジケーターを適用してノートを生成
       for (const t of trades) {
         try {
+          // side を 'buy' | 'sell' 型に変換（小文字に正規化）
+          const normalizedSide = t.side.toLowerCase() as 'buy' | 'sell';
+          
           const note = await this.noteService.generateNoteWithUserIndicators({
             id: t.id,
             timestamp: new Date(t.timestamp),
             symbol: t.symbol,
-            side: t.side,
+            side: normalizedSide,
             price: Number(t.price),
             quantity: Number(t.quantity),
           }, '15m');

@@ -17,6 +17,21 @@ export interface NotificationTriggerResult {
   notificationLogId?: string;
 }
 
+/**
+ * evaluateAndNotify の互換入力型
+ * 旧形式と新形式の両方に対応
+ */
+interface LegacyMatchResult {
+  // 新形式
+  score?: number;
+  noteId?: string;
+  marketSnapshot?: unknown;
+  // 旧形式
+  matchScore?: number;
+  historicalNoteId?: string;
+  currentMarket?: unknown;
+}
+
 const NOTIFICATION_THRESHOLD = parseFloat(process.env.NOTIFY_THRESHOLD || '0.75');
 // クールダウン期間: 1時間（ミリ秒）
 const COOLDOWN_MS = 60 * 60 * 1000;
@@ -193,8 +208,13 @@ export class NotificationTriggerService {
     }
   }
 
-  // 互換用: 旧シグネチャを利用するコードから呼ばれても、判定のみ実行する
-  async evaluateAndNotify(matchResult: any): Promise<NotificationTriggerResult> {
+  /**
+   * 互換用: 旧シグネチャを利用するコードから呼ばれても、判定のみ実行する
+   * 
+   * @param matchResult - 旧形式または新形式のマッチ結果
+   * @returns 通知トリガ結果
+   */
+  async evaluateAndNotify(matchResult: LegacyMatchResult): Promise<NotificationTriggerResult> {
     return this.evaluate({
       matchScore: matchResult?.score ?? matchResult?.matchScore ?? 0,
       historicalNoteId: matchResult?.noteId ?? matchResult?.historicalNoteId ?? '',

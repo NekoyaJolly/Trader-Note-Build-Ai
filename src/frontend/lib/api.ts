@@ -475,3 +475,118 @@ export async function fetchSetupStatus(): Promise<{ hasCompletedSetup: boolean }
   return payload.data;
 }
 
+// ========================================
+// バックテスト API
+// ========================================
+
+/**
+ * バックテスト実行パラメータ
+ */
+export interface BacktestExecuteParams {
+  /** ノートID */
+  noteId: string;
+  /** 開始日（ISO形式） */
+  startDate: string;
+  /** 終了日（ISO形式） */
+  endDate: string;
+  /** 時間足（例: '1h', '4h', '1d'） */
+  timeframe: string;
+  /** 一致スコア閾値（0-100） */
+  matchThreshold: number;
+  /** 利確幅（%） */
+  takeProfit?: number;
+  /** 損切幅（%） */
+  stopLoss?: number;
+  /** 最大保有時間（分） */
+  maxHoldingMinutes?: number;
+  /** 取引コスト（%） */
+  tradingCost?: number;
+}
+
+/**
+ * バックテスト結果サマリー
+ */
+export interface BacktestSummary {
+  runId: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  setupCount: number;
+  winCount: number;
+  lossCount: number;
+  timeoutCount: number;
+  winRate: number;
+  profitFactor: number | null;
+  totalProfit: number;
+  totalLoss: number;
+  averagePnL: number;
+  expectancy: number;
+  maxDrawdown: number | null;
+  events: BacktestEventSummary[];
+}
+
+/**
+ * バックテストイベントサマリー
+ */
+export interface BacktestEventSummary {
+  entryTime: string;
+  entryPrice: number;
+  matchScore: number;
+  exitTime: string | null;
+  exitPrice: number | null;
+  outcome: 'win' | 'loss' | 'timeout';
+  pnl: number | null;
+}
+
+/**
+ * バックテストを実行
+ * POST /api/backtest/execute
+ */
+export async function executeBacktest(
+  params: BacktestExecuteParams
+): Promise<{ runId: string }> {
+  const response = await fetch(`${API_BASE_URL}/api/backtest/execute`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "バックテストの実行に失敗しました");
+  }
+  return response.json();
+}
+
+/**
+ * バックテスト結果を取得
+ * GET /api/backtest/:runId
+ */
+export async function fetchBacktestResult(
+  runId: string
+): Promise<BacktestSummary | null> {
+  const response = await fetch(`${API_BASE_URL}/api/backtest/${runId}`, {
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    if (response.status === 404) {
+      return null;
+    }
+    throw new Error("バックテスト結果の取得に失敗しました");
+  }
+  return response.json();
+}
+
+/**
+ * ノートのバックテスト履歴を取得
+ * GET /api/backtest/history/:noteId
+ */
+export async function fetchBacktestHistory(
+  noteId: string
+): Promise<BacktestSummary[]> {
+  const response = await fetch(`${API_BASE_URL}/api/backtest/history/${noteId}`, {
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error("バックテスト履歴の取得に失敗しました");
+  }
+  const payload = await response.json();
+  return payload.runs ?? [];
+}

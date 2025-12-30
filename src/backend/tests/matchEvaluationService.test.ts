@@ -45,6 +45,14 @@ describe('MatchEvaluationService', () => {
     timeframe: '15m',
     createdAt: new Date(),
     updatedAt: new Date(),
+    // Phase 8: 追加フィールド
+    status: 'approved',
+    approvedAt: new Date(),
+    rejectedAt: null,
+    lastEditedAt: null,
+    marketContext: null,
+    userNotes: null,
+    tags: [],
   };
 
   // 市場スナップショット（平均出来高や前日終値を含め、FeatureExtractor と同スケールにする）

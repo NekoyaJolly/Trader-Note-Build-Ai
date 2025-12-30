@@ -5,6 +5,34 @@ import { Notification } from '../../models/types';
 import { NotificationRepository } from '../../domain/notification/NotificationRepository';
 
 /**
+ * JSON ファイルから読み込んだ生データの型
+ * 日付は文字列形式で格納されている
+ */
+interface RawNotification {
+  id: string;
+  type?: 'match' | 'info' | 'warning';
+  title?: string;
+  message?: string;
+  timestamp: string;
+  read?: boolean;
+  matchResult?: RawMatchResult;
+}
+
+interface RawMatchResult {
+  timestamp?: string;
+  currentMarket?: {
+    timestamp?: string;
+    [key: string]: unknown;
+  };
+  historicalNote?: {
+    timestamp?: string;
+    createdAt?: string;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+/**
  * 通知をファイルストレージに保存するリポジトリ実装
  * 既存の data/notifications.json をそのまま利用する
  */
@@ -21,9 +49,9 @@ export class FileNotificationRepository implements NotificationRepository {
     }
 
     const content = await fsp.readFile(this.notificationsPath, 'utf-8');
-    const data = JSON.parse(content);
+    const data: RawNotification[] = JSON.parse(content);
 
-    return data.map((n: any) => this.convertDates(n));
+    return data.map((n) => this.convertDates(n));
   }
 
   async save(notification: Notification): Promise<void> {
@@ -45,9 +73,20 @@ export class FileNotificationRepository implements NotificationRepository {
     );
   }
 
-  private convertDates(raw: any): Notification {
+  /**
+   * 生データを Notification 型に変換する
+   * 日付文字列を Date オブジェクトに変換
+   * 
+   * @param raw - ファイルから読み込んだ生データ
+   * @returns Notification 型のデータ
+   */
+  private convertDates(raw: RawNotification): Notification {
+    // デフォルト値を設定して Notification 型を満たす
     const notification: Notification = {
-      ...raw,
+      id: raw.id,
+      type: raw.type || 'match',
+      title: raw.title || '',
+      message: raw.message || '',
       timestamp: new Date(raw.timestamp),
       read: Boolean(raw.read),
     };
@@ -75,7 +114,7 @@ export class FileNotificationRepository implements NotificationRepository {
                 : undefined,
             }
           : undefined,
-      } as any;
+      } as Notification['matchResult'];
     }
 
     return notification;

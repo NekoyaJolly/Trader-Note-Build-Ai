@@ -48,7 +48,8 @@ describe('TradeNoteService - 承認フロー', () => {
   let testNoteIds: string[] = [];
 
   beforeEach(() => {
-    noteService = new TradeNoteService();
+    // Phase 8: テストではFSモードを使用（レガシー互換性テスト）
+    noteService = new TradeNoteService('fs');
     testNoteIds = [];
   });
 
@@ -304,7 +305,8 @@ describe('MatchingService - 承認済みフィルタ', () => {
   let testNoteIds: string[] = [];
 
   beforeEach(() => {
-    noteService = new TradeNoteService();
+    // Phase 8: テストではFSモードを使用（レガシー互換性テスト）
+    noteService = new TradeNoteService('fs');
     testNoteIds = [];
   });
 

@@ -12,7 +12,7 @@
  */
 
 import { Worker, Job } from 'bullmq';
-import { PrismaClient, RevaluationJobType } from '@prisma/client';
+import { PrismaClient, RevaluationJobType, Prisma } from '@prisma/client';
 import {
   QUEUE_NAMES,
   getRedisConnection,
@@ -62,8 +62,8 @@ async function processNoteRegenerate(
       startedAt: new Date(),
     });
 
-    // 対象ノートを取得
-    const whereClause: any = {};
+    // 対象ノートを取得（Prisma の生成型を使用）
+    const whereClause: Prisma.TradeNoteWhereInput = {};
     if (targetNoteId) {
       whereClause.id = targetNoteId;
     }
@@ -134,8 +134,8 @@ async function processFeatureRecalculate(
       startedAt: new Date(),
     });
 
-    // 対象ノートを取得
-    const whereClause: any = {};
+    // 対象ノートを取得（Prisma の生成型を使用）
+    const whereClause: Prisma.TradeNoteWhereInput = {};
     if (targetNoteId) {
       whereClause.id = targetNoteId;
     }
@@ -224,8 +224,8 @@ async function processAISummaryRegenerate(
       startedAt: new Date(),
     });
 
-    // 対象ノートを取得
-    const whereClause: any = {};
+    // 対象ノートを取得（Prisma の生成型を使用）
+    const whereClause: Prisma.TradeNoteWhereInput = {};
     if (targetNoteId) {
       whereClause.id = targetNoteId;
     }

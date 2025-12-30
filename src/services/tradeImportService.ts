@@ -27,15 +27,16 @@ export class TradeImportService {
       return { tradesImported: 0, skipped, errors, file: filePath, insertedIds: [], parsedTrades: [] };
     }
 
-    // CSV の有効行を DB に保存する
-    const inserted = await this.tradeRepository.bulkInsert(trades);
+    // CSV の有効行を DB に保存する（重複チェック付き）
+    const insertResult = await this.tradeRepository.bulkInsert(trades);
     // 本番環境ではデバッグログを抑制
     if (process.env.NODE_ENV !== 'production') {
-      console.log(`Imported ${inserted} trades from ${filePath}`);
+      console.log(`Imported ${insertResult.count} trades from ${filePath}`);
     }
 
-    // 取り込んだトレードの ID を返却し、後続処理（ノート生成等）で利用できるようにする
-    return { tradesImported: inserted, skipped, errors, file: filePath, insertedIds: trades.map((t) => t.id), parsedTrades: trades };
+    // 実際に挿入されたトレードのみを返却し、後続処理（ノート生成等）で利用できるようにする
+    const insertedTrades = trades.filter(t => insertResult.insertedIds.includes(t.id));
+    return { tradesImported: insertResult.count, skipped, errors, file: filePath, insertedIds: insertResult.insertedIds, parsedTrades: insertedTrades };
   }
 
   // CSV ファイルの存在・拡張子・ヘッダーを検証する

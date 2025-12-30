@@ -12,7 +12,48 @@ import { TradeNoteRepository } from '../../backend/repositories/tradeNoteReposit
 import { AISummaryService } from '../../services/aiSummaryService';
 import { FeatureExtractor, MarketContext } from '../../services/note-generator/featureExtractor';
 import { DecisionInferenceService } from '../../services/inference/decisionInferenceService';
-import { Trade, TradeSide, Prisma } from '@prisma/client';
+import { Trade, TradeSide, Prisma, NoteStatus } from '@prisma/client';
+
+// モックを作成
+jest.mock('../../backend/repositories/tradeNoteRepository');
+jest.mock('../../services/aiSummaryService');
+jest.mock('../../services/note-generator/featureExtractor');
+jest.mock('../../services/inference/decisionInferenceService');
+
+/**
+ * TradeNoteWithSummary のデフォルトフィールドを追加するヘルパー
+ * Phase 8 で追加された status, approvedAt 等の必須フィールドを含む
+ */
+const createMockNoteWithSummary = (overrides?: Record<string, any>) => ({
+  id: 'test-note-id',
+  tradeId: 'test-trade-id',
+  symbol: 'BTCUSD',
+  entryPrice: new Prisma.Decimal(50000),
+  side: TradeSide.buy,
+  featureVector: [0.02, 0.5, 0.65, 0.05, 1, 0.02, 0],
+  indicators: {},
+  timeframe: '15m',
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  // Phase 8: 追加フィールド
+  status: 'draft' as NoteStatus,
+  approvedAt: null,
+  rejectedAt: null,
+  lastEditedAt: null,
+  marketContext: null,
+  userNotes: null,
+  tags: [],
+  aiSummary: {
+    id: 'test-summary-id',
+    noteId: 'test-note-id',
+    summary: 'テスト要約',
+    promptTokens: 100,
+    completionTokens: 50,
+    model: 'test-model',
+    createdAt: new Date(),
+  },
+  ...overrides,
+});
 
 // モックを作成
 jest.mock('../../backend/repositories/tradeNoteRepository');
@@ -48,27 +89,7 @@ describe('TradeNoteGeneratorService', () => {
 
     // モックリポジトリのセットアップ
     mockRepository = new TradeNoteRepository() as jest.Mocked<TradeNoteRepository>;
-    mockRepository.createWithSummary = jest.fn().mockResolvedValue({
-      id: 'test-note-id',
-      tradeId: 'test-trade-id',
-      symbol: 'BTCUSD',
-      entryPrice: new Prisma.Decimal(50000),
-      side: TradeSide.buy,
-      featureVector: [0.02, 0.5, 0.65, 0.05, 1, 0.02, 0],
-      indicators: {},
-      timeframe: '15m',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      aiSummary: {
-        id: 'test-summary-id',
-        noteId: 'test-note-id',
-        summary: 'テスト要約',
-        promptTokens: 100,
-        completionTokens: 50,
-        model: 'test-model',
-        createdAt: new Date(),
-      },
-    });
+    mockRepository.createWithSummary = jest.fn().mockResolvedValue(createMockNoteWithSummary());
 
     // モック AI サービスのセットアップ
     mockAIService = new AISummaryService() as jest.Mocked<AISummaryService>;
@@ -199,17 +220,9 @@ describe('TradeNoteGeneratorService', () => {
 
       // 各トレードに対して異なるノート ID を返すよう設定
       mockRepository.createWithSummary
-        .mockResolvedValueOnce({
+        .mockResolvedValueOnce(createMockNoteWithSummary({
           id: 'note-1',
           tradeId: 'trade-1',
-          symbol: 'BTCUSD',
-          entryPrice: new Prisma.Decimal(50000),
-          side: TradeSide.buy,
-          featureVector: [0.02, 0.5, 0.65, 0.05, 1, 0.02, 0],
-          indicators: {},
-          timeframe: '15m',
-          createdAt: new Date(),
-          updatedAt: new Date(),
           aiSummary: {
             id: 'summary-1',
             noteId: 'note-1',
@@ -219,18 +232,10 @@ describe('TradeNoteGeneratorService', () => {
             model: 'test-model',
             createdAt: new Date(),
           },
-        })
-        .mockResolvedValueOnce({
+        }))
+        .mockResolvedValueOnce(createMockNoteWithSummary({
           id: 'note-2',
           tradeId: 'trade-2',
-          symbol: 'BTCUSD',
-          entryPrice: new Prisma.Decimal(50000),
-          side: TradeSide.buy,
-          featureVector: [0.02, 0.5, 0.65, 0.05, 1, 0.02, 0],
-          indicators: {},
-          timeframe: '15m',
-          createdAt: new Date(),
-          updatedAt: new Date(),
           aiSummary: {
             id: 'summary-2',
             noteId: 'note-2',
@@ -240,18 +245,10 @@ describe('TradeNoteGeneratorService', () => {
             model: 'test-model',
             createdAt: new Date(),
           },
-        })
-        .mockResolvedValueOnce({
+        }))
+        .mockResolvedValueOnce(createMockNoteWithSummary({
           id: 'note-3',
           tradeId: 'trade-3',
-          symbol: 'BTCUSD',
-          entryPrice: new Prisma.Decimal(50000),
-          side: TradeSide.buy,
-          featureVector: [0.02, 0.5, 0.65, 0.05, 1, 0.02, 0],
-          indicators: {},
-          timeframe: '15m',
-          createdAt: new Date(),
-          updatedAt: new Date(),
           aiSummary: {
             id: 'summary-3',
             noteId: 'note-3',
@@ -261,7 +258,7 @@ describe('TradeNoteGeneratorService', () => {
             model: 'test-model',
             createdAt: new Date(),
           },
-        });
+        }));
 
       const results = await service.batchGenerateNotes(trades);
 
@@ -281,17 +278,9 @@ describe('TradeNoteGeneratorService', () => {
 
       // 2 番目のトレードでエラーを発生させる
       mockRepository.createWithSummary
-        .mockResolvedValueOnce({
+        .mockResolvedValueOnce(createMockNoteWithSummary({
           id: 'note-1',
           tradeId: 'trade-1',
-          symbol: 'BTCUSD',
-          entryPrice: new Prisma.Decimal(50000),
-          side: TradeSide.buy,
-          featureVector: [0.02, 0.5, 0.65, 0.05, 1, 0.02, 0],
-          indicators: {},
-          timeframe: '15m',
-          createdAt: new Date(),
-          updatedAt: new Date(),
           aiSummary: {
             id: 'summary-1',
             noteId: 'note-1',
@@ -301,19 +290,11 @@ describe('TradeNoteGeneratorService', () => {
             model: 'test-model',
             createdAt: new Date(),
           },
-        })
+        }))
         .mockRejectedValueOnce(new Error('DB エラー'))
-        .mockResolvedValueOnce({
+        .mockResolvedValueOnce(createMockNoteWithSummary({
           id: 'note-3',
           tradeId: 'trade-3',
-          symbol: 'BTCUSD',
-          entryPrice: new Prisma.Decimal(50000),
-          side: TradeSide.buy,
-          featureVector: [0.02, 0.5, 0.65, 0.05, 1, 0.02, 0],
-          indicators: {},
-          timeframe: '15m',
-          createdAt: new Date(),
-          updatedAt: new Date(),
           aiSummary: {
             id: 'summary-3',
             noteId: 'note-3',
@@ -323,7 +304,7 @@ describe('TradeNoteGeneratorService', () => {
             model: 'test-model',
             createdAt: new Date(),
           },
-        });
+        }));
 
       const results = await service.batchGenerateNotes(trades);
 

@@ -238,7 +238,7 @@ export class TradeNoteGeneratorService {
    * @param marketContext - 市場コンテキスト
    * @returns 指標データ (JSON 互換オブジェクト)
    */
-  private extractIndicators(marketContext: MarketContext): any {
+  private extractIndicators(marketContext: MarketContext): Record<string, unknown> {
     return {
       rsi: marketContext.rsi,
       macd: marketContext.macd,

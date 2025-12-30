@@ -5,6 +5,27 @@ import { MarketSnapshotRepository } from '../../repositories/marketSnapshotRepos
 import { MatchResultRepository } from '../../repositories/matchResultRepository';
 
 /**
+ * 一致判定理由の詳細構造（UI表示用）
+ * フロントエンドの MatchReason 型と互換性を持つ
+ */
+export interface DetailedMatchReason {
+  /** 特徴量名（例: "priceChange", "rsi"） */
+  featureName: string;
+  /** ノート側の値 */
+  noteValue: number;
+  /** 現在市場の値 */
+  currentValue: number;
+  /** 差分（絶対値） */
+  diff: number;
+  /** 重み係数（0.0〜1.0） */
+  weight: number;
+  /** スコアへの寄与度（weight × similarity） */
+  contribution: number;
+  /** 日本語での説明 */
+  description: string;
+}
+
+/**
  * 特徴量一致度をスコアリングするための重み設定
  * 合計が 1.0 になるよう配分し、どの要素が寄与しているかを明示する。
  */
@@ -85,12 +106,26 @@ export class RuleBasedMatchEvaluator {
 
   /**
    * 2 つの特徴量ベクトルを比較し、スコアと理由を返す。
+   * 
+   * Phase 3: 説明責任対応
+   * - breakdown: 各特徴量の部分スコアを返す（UIでの可視化用）
+   * - detailedReasons: UI表示用の詳細理由配列
    */
   evaluate(noteVector: number[], marketVector: number[]): {
     score: number;
     reasons: string[];
+    detailedReasons: DetailedMatchReason[];
     trendMatched: boolean;
     priceRangeMatched: boolean;
+    breakdown: {
+      priceChange: number;
+      volume: number;
+      rsi: number;
+      macd: number;
+      trend: number;
+      volatility: number;
+      timeFlag: number;
+    };
   } {
     if (
       noteVector.length !== RuleBasedMatchEvaluator.VECTOR_LENGTH ||
@@ -121,6 +156,73 @@ export class RuleBasedMatchEvaluator {
     reasons.push(this.buildVolatilityReason(noteVector[5], marketVector[5], partial.volatility));
     reasons.push(this.buildTimeReason(noteVector[6], marketVector[6], partial.timeFlag));
 
+    // Phase 3: UI表示用の詳細理由を生成
+    const detailedReasons: DetailedMatchReason[] = [
+      {
+        featureName: '価格変化率',
+        noteValue: noteVector[0],
+        currentValue: marketVector[0],
+        diff: Math.abs(noteVector[0] - marketVector[0]),
+        weight: FEATURE_WEIGHTS.priceChange,
+        contribution: partial.priceChange * FEATURE_WEIGHTS.priceChange,
+        description: reasons[0],
+      },
+      {
+        featureName: '取引量',
+        noteValue: noteVector[1],
+        currentValue: marketVector[1],
+        diff: Math.abs(noteVector[1] - marketVector[1]),
+        weight: FEATURE_WEIGHTS.volume,
+        contribution: partial.volume * FEATURE_WEIGHTS.volume,
+        description: reasons[1],
+      },
+      {
+        featureName: 'RSI',
+        noteValue: noteVector[2],
+        currentValue: marketVector[2],
+        diff: Math.abs(noteVector[2] - marketVector[2]),
+        weight: FEATURE_WEIGHTS.rsi,
+        contribution: partial.rsi * FEATURE_WEIGHTS.rsi,
+        description: reasons[2],
+      },
+      {
+        featureName: 'MACD',
+        noteValue: noteVector[3],
+        currentValue: marketVector[3],
+        diff: Math.abs(noteVector[3] - marketVector[3]),
+        weight: FEATURE_WEIGHTS.macd,
+        contribution: partial.macd * FEATURE_WEIGHTS.macd,
+        description: reasons[3],
+      },
+      {
+        featureName: 'トレンド',
+        noteValue: noteVector[4],
+        currentValue: marketVector[4],
+        diff: Math.abs(noteVector[4] - marketVector[4]),
+        weight: FEATURE_WEIGHTS.trend,
+        contribution: partial.trend * FEATURE_WEIGHTS.trend,
+        description: reasons[4],
+      },
+      {
+        featureName: 'ボラティリティ',
+        noteValue: noteVector[5],
+        currentValue: marketVector[5],
+        diff: Math.abs(noteVector[5] - marketVector[5]),
+        weight: FEATURE_WEIGHTS.volatility,
+        contribution: partial.volatility * FEATURE_WEIGHTS.volatility,
+        description: reasons[5],
+      },
+      {
+        featureName: '時間帯',
+        noteValue: noteVector[6],
+        currentValue: marketVector[6],
+        diff: Math.abs(noteVector[6] - marketVector[6]),
+        weight: FEATURE_WEIGHTS.timeFlag,
+        contribution: partial.timeFlag * FEATURE_WEIGHTS.timeFlag,
+        description: reasons[6],
+      },
+    ];
+
     // 重み付き合算で最終スコアを計算
     const score = this.weightedSum(partial);
     const trendMatched = partial.trend === 1;
@@ -129,23 +231,32 @@ export class RuleBasedMatchEvaluator {
     return {
       score,
       reasons,
+      detailedReasons,
       trendMatched,
       priceRangeMatched,
+      // Phase 3: スコア内訳を追加（UIでの可視化用）
+      breakdown: partial,
     };
   }
 
   // --- 以下は特徴量変換と理由生成のユーティリティ ---
 
-  private toNumber(value: any): number {
+  /**
+   * 値を数値に変換（null/undefinedは0）
+   */
+  private toNumber(value: unknown): number {
     if (value === null || value === undefined) return 0;
     if (typeof value === 'number') return value;
-    const num = Number(value as any);
+    const num = Number(value);
     return Number.isFinite(num) ? num : 0;
   }
 
-  private toOptionalNumber(value: any): number | undefined {
+  /**
+   * 値をオプショナルな数値に変換（null/undefinedはundefined）
+   */
+  private toOptionalNumber(value: unknown): number | undefined {
     if (value === null || value === undefined) return undefined;
-    const num = Number(value as any);
+    const num = Number(value);
     return Number.isFinite(num) ? num : undefined;
   }
 
@@ -172,7 +283,10 @@ export class RuleBasedMatchEvaluator {
     return Math.tanh(macd / 10);
   }
 
-  private extractTrend(trendValue: any, priceChange: number): number {
+  /**
+   * トレンド値を数値（-1/0/1）に変換
+   */
+  private extractTrend(trendValue: string | number | null | undefined, priceChange: number): number {
     if (trendValue === 'bullish' || trendValue === 'uptrend') return 1;
     if (trendValue === 'bearish' || trendValue === 'downtrend') return -1;
     if (trendValue === 'neutral') return 0;
@@ -188,7 +302,10 @@ export class RuleBasedMatchEvaluator {
     return 0;
   }
 
-  private extractTimeFlag(marketHours: any): number {
+  /**
+   * 市場時間情報から時間フラグを抽出
+   */
+  private extractTimeFlag(marketHours: { isNearOpen?: boolean; isNearClose?: boolean } | null | undefined): number {
     if (!marketHours) return 0;
     if (marketHours.isNearOpen || marketHours.isNearClose) return 1;
     return 0;

@@ -28,6 +28,24 @@ export default function Home() {
 
         {/* 機能カード */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          {/* トレード取込カード */}
+          <Link
+            href="/import"
+            className="block card-surface p-6 hover-glow transition-smooth"
+          >
+            <div className="flex items-center mb-4">
+              <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-emerald-500 rounded-lg flex items-center justify-center text-white text-2xl">
+                📥
+              </div>
+              <h2 className="ml-4 text-2xl font-semibold text-white">
+                トレード取込
+              </h2>
+            </div>
+            <p className="text-gray-400">
+              CSVファイルから過去のトレード履歴をインポートし、ノートを自動生成します。
+            </p>
+          </Link>
+
           {/* 通知一覧カード */}
           <Link
             href="/notifications"
@@ -61,6 +79,24 @@ export default function Home() {
             </div>
             <p className="text-gray-400">
               生成されたノートの一覧と詳細を確認し、AI 要約をレビューします。
+            </p>
+          </Link>
+
+          {/* 設定カード */}
+          <Link
+            href="/settings"
+            className="block card-surface p-6 hover-glow transition-smooth"
+          >
+            <div className="flex items-center mb-4">
+              <div className="w-12 h-12 bg-gradient-to-br from-gray-500 to-slate-600 rounded-lg flex items-center justify-center text-white text-2xl">
+                ⚙️
+              </div>
+              <h2 className="ml-4 text-2xl font-semibold text-white">
+                設定
+              </h2>
+            </div>
+            <p className="text-gray-400">
+              通知閾値、時間足、インジケーター設定などをカスタマイズします。
             </p>
           </Link>
         </div>

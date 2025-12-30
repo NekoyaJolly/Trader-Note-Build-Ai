@@ -8,8 +8,19 @@ import { TradeNoteService } from './tradeNoteService';
 import { config } from '../config';
 
 /**
+ * ストレージモード
+ * - 'db': DBのみ使用（将来推奨、MatchResult紐付け必須）
+ * - 'fs': FSのみ使用（現状、単独通知対応）
+ */
+type StorageMode = 'db' | 'fs';
+
+/**
  * Service for managing notifications
  * Supports both push notifications and in-app notifications
+ * 
+ * Phase 8: ストレージモード対応
+ * - FSモード: 従来のファイルベース（MatchResultなしの単独通知対応）
+ * - DBモード: DB永続化（MatchResult紐付け必須、将来推奨）
  */
 export class NotificationService {
   private notifications: Notification[] = [];
@@ -17,15 +28,18 @@ export class NotificationService {
   private readonly triggerService: NotificationTriggerService;
   private readonly noteService: TradeNoteService;
   private readonly loadPromise: Promise<void>;
+  private readonly storageMode: StorageMode;
 
   constructor(
     repository?: NotificationRepository,
     triggerService?: NotificationTriggerService,
     noteService?: TradeNoteService,
+    storageMode: StorageMode = 'fs', // デフォルトはFSモード（互換性維持）
   ) {
     this.repository = repository || new FileNotificationRepository();
     this.triggerService = triggerService || new NotificationTriggerService();
-    this.noteService = noteService || new TradeNoteService();
+    this.noteService = noteService || new TradeNoteService('fs'); // 通知サービスはFSモードのノートサービスを使用
+    this.storageMode = storageMode;
     this.loadPromise = this.loadFromRepository();
   }
 
