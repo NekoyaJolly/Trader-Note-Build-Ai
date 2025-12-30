@@ -44,6 +44,8 @@ export interface NoteDetail {
       macd?: number;
       volume?: number;
     };
+    /** ユーザー設定に基づいて計算されたインジケーター値 */
+    calculatedIndicators?: Record<string, number | null>;
   };
   aiSummary: string;
   features: number[];

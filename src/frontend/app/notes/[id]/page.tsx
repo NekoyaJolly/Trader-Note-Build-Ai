@@ -234,7 +234,7 @@ export default function NoteDetailPage() {
           <CardTitle>市場コンテキスト</CardTitle>
         </CardHeader>
         <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
           <div>
             <div className="text-sm font-semibold text-gray-400">時間足</div>
             <div className="text-base font-medium text-gray-200">{note.marketContext.timeframe}</div>
@@ -243,13 +243,31 @@ export default function NoteDetailPage() {
             <div className="text-sm font-semibold text-gray-400">トレンド</div>
             <div className="text-base font-medium text-gray-200">{note.marketContext.trend}</div>
           </div>
+        </div>
+        
+        {/* ユーザー設定インジケーター */}
+        {note.marketContext.calculatedIndicators && Object.keys(note.marketContext.calculatedIndicators).length > 0 ? (
+          <div>
+            <div className="text-sm font-semibold text-gray-400 mb-2">インジケーター</div>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {Object.entries(note.marketContext.calculatedIndicators).map(([key, value]) => (
+                <div key={key} className="bg-gray-800 rounded-lg p-3">
+                  <div className="text-xs text-gray-500">{key}</div>
+                  <div className="text-sm font-medium text-gray-200">
+                    {value !== null ? (typeof value === 'number' ? value.toFixed(2) : value) : '-'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
           <div>
             <div className="text-sm font-semibold text-gray-400">インジケーター</div>
             <div className="text-base font-medium text-gray-200">
               RSI: {note.marketContext.indicators?.rsi ?? "-"}, MACD: {note.marketContext.indicators?.macd ?? "-"}, VOL: {note.marketContext.indicators?.volume ?? "-"}
             </div>
           </div>
-        </div>
+        )}
         </CardContent>
       </Card>
 
