@@ -52,7 +52,8 @@ export class AISummaryService {
   private baseURL: string;
 
   constructor() {
-    this.apiKey = config.ai.apiKey;
+    // テストで環境変数を削除した場合も即時反映するため、毎回 process.env を優先
+    this.apiKey = process.env.AI_API_KEY || '';
     this.model = config.ai.model;
     this.baseURL = config.ai.baseURL || 'https://api.openai.com/v1';
   }

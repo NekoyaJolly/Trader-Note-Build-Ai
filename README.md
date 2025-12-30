@@ -43,7 +43,7 @@ cp .env.example .env
 # - AI_API_KEY: Your AI service API key (OpenAI, etc.)
 # - MARKET_API_KEY: Your market data API key
 # - PUSH_NOTIFICATION_KEY: Your push notification service key
-# - DB_URL: PostgreSQL 接続文字列（例: postgresql://postgres:postgres@localhost:5432/tradeassist）
+# - DATABASE_URL: PostgreSQL 接続文字列（例: postgresql://postgres:postgres@localhost:5432/tradeassist）
 
 # Prisma クライアントと初期マイグレーションを適用
 npm run prisma:generate
@@ -185,11 +185,11 @@ GET /health
 ### Services
 
 - **TradeImportService**: Imports trade data from CSV/API
-- **TradeNoteService**: Generates and manages structured trade notes
+- **TradeNoteService**: Generates and manages structured trade notes（現状は FS 保存）
 - **AISummaryService**: Generates AI-powered trade summaries
 - **MarketDataService**: Fetches real-time market data
 - **MatchingService**: Matches historical notes with current market
-- **NotificationService**: Manages notifications (push & in-app)
+- **NotificationService**: Manages notifications (push & in-app。現状は FS 保存で既読状態もファイルに保持）
 
 ### Matching Algorithm
 
@@ -225,6 +225,7 @@ Edit `.env` to configure:
 - `MARKET_API_URL`: Market data API URL
 - `MARKET_API_KEY`: Market data API key
 - `MATCH_THRESHOLD`: Match score threshold (0-1, default: 0.75)
+- `NOTIFY_THRESHOLD`: Notification trigger threshold (0-1, default: 0.75)
 - `CHECK_INTERVAL_MINUTES`: Matching check interval (default: 15)
 - `PUSH_NOTIFICATION_KEY`: Push notification service key
 

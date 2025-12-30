@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { MatchingService } from '../services/matchingService';
 import { NotificationService } from '../services/notificationService';
+import { TradeNoteService } from '../services/tradeNoteService';
 
 /**
  * マッチングコントローラー
@@ -9,10 +10,12 @@ import { NotificationService } from '../services/notificationService';
 export class MatchingController {
   private matchingService: MatchingService;
   private notificationService: NotificationService;
+  private noteService: TradeNoteService;
 
   constructor() {
     this.matchingService = new MatchingService();
     this.notificationService = new NotificationService();
+    this.noteService = new TradeNoteService();
   }
 
   /**
@@ -21,21 +24,27 @@ export class MatchingController {
   checkMatches = async (req: Request, res: Response): Promise<void> => {
     try {
       const matches = await this.matchingService.checkForMatches();
-
-      // マッチに対して通知を送信
-      for (const match of matches) {
-        await this.notificationService.notifyMatch(match);
-      }
+      await this.notificationService.trigger(matches);
 
       res.json({
         success: true,
         matchesFound: matches.length,
-        matches: matches.map(m => ({
-          noteId: m.noteId,
-          symbol: m.symbol,
-          matchScore: m.matchScore,
-          timestamp: m.timestamp
-        }))
+        matches: await Promise.all(
+          matches.map(async (m) => {
+            const note = await this.noteService.getNoteById(m.historicalNoteId);
+            return {
+              matchScore: m.matchScore,
+              timestamp: m.evaluatedAt,
+              note: note
+                ? {
+                    id: note.id,
+                    title: note.title,
+                  }
+                : null,
+              marketSnapshot: m.marketSnapshot,
+            };
+          })
+        ),
       });
     } catch (error) {
       console.error('Error checking matches:', error);
@@ -50,7 +59,7 @@ export class MatchingController {
   getMatchHistory = async (req: Request, res: Response): Promise<void> => {
     try {
       // マッチタイプの通知を取得
-      const notifications = this.notificationService.getNotifications();
+      const notifications = await this.notificationService.getNotifications();
       const matchNotifications = notifications.filter(n => n.type === 'match');
 
       res.json({

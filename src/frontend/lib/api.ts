@@ -70,7 +70,7 @@ export async function fetchNotificationDetail(
  */
 export async function markNotificationAsRead(id: string): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/api/notifications/${id}/read`, {
-    method: "POST",
+    method: "PUT",
   });
 
   if (!response.ok) {
@@ -86,7 +86,7 @@ export async function markNotificationAsRead(id: string): Promise<void> {
  */
 export async function markAllNotificationsAsRead(): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/api/notifications/read-all`, {
-    method: "POST",
+    method: "PUT",
   });
 
   if (!response.ok) {
@@ -192,7 +192,7 @@ export async function approveNote(id: string): Promise<void> {
  * GET /api/health
  */
 export async function fetchHealth(): Promise<{ status: string }> {
-  const response = await fetch(`${API_BASE_URL}/api/health`, { cache: "no-store" });
+  const response = await fetch(`${API_BASE_URL}/health`, { cache: "no-store" });
   if (!response.ok) {
     throw new Error(
       `ヘルスチェックに失敗しました: ${response.status} ${response.statusText}`

@@ -7,6 +7,11 @@ dotenv.config();
  * 環境変数から設定値を取得し、型安全に提供する
  * 注意: DATABASE_URL は Prisma が直接参照するため、ここでの定義は参考用
  */
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) {
+  throw new Error('DATABASE_URL is required');
+}
+
 export const config = {
   server: {
     // 優先度: BACKEND_PORT > PORT > 3100（env設定がある場合はそちらを優先）
@@ -17,8 +22,7 @@ export const config = {
   },
   database: {
     // Prisma が DATABASE_URL を直接参照するため、ここでは参照用として保持
-    // 後方互換性のため DB_URL も fallback として許容
-    url: process.env.DATABASE_URL || process.env.DB_URL || '',
+    url: databaseUrl,
   },
   ai: {
     apiKey: process.env.AI_API_KEY || '',

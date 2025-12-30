@@ -15,6 +15,12 @@ const notificationController = new NotificationController();
 router.get('/', notificationController.getNotifications);
 
 /**
+ * GET /api/notifications/:id
+ * 通知の詳細を取得
+ */
+router.get('/:id', notificationController.getNotificationById);
+
+/**
  * PUT /api/notifications/:id/read
  * 通知を既読にマーク
  */

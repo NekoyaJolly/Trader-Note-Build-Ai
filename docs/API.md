@@ -79,6 +79,23 @@ ID で特定のトレードノートを取得します。
 #### GET /api/notifications
 すべての通知を取得します（クエリパラメータ: 未読のみの場合 `unreadOnly=true`）。
 
+#### GET /api/notifications/:id
+特定の通知を取得します。現状はファイルストアに保存された通知を返します。
+
+**レスポンス例:**
+```json
+{
+  "id": "uuid",
+  "matchResultId": "uuid",
+  "sentAt": "2025-12-27T01:27:38Z",
+  "channel": "in_app",
+  "isRead": false,
+  "matchResult": { "score": 0.82, "evaluatedAt": "2025-12-27T01:27:30Z" },
+  "tradeNote": { "symbol": "BTCUSDT", "side": "BUY", "timeframe": "15m" },
+  "reasonSummary": "スコア: 0.820"
+}
+```
+
 #### PUT /api/notifications/:id/read
 通知を既読にマークします。
 

@@ -1,8 +1,9 @@
-import { TradeNote, MarketData, MatchResult } from '../models/types';
+import { TradeNote, MarketData } from '../models/types';
 import { MarketDataService } from './marketDataService';
 import { TradeNoteService } from './tradeNoteService';
 import { config } from '../config';
 import { v4 as uuidv4 } from 'uuid';
+import { MatchResultDTO } from '../domain/matching/MatchResultDTO';
 
 /**
  * Service for matching historical trade notes with current market conditions
@@ -22,9 +23,9 @@ export class MatchingService {
   /**
    * Check all notes for matches with current market conditions
    */
-  async checkForMatches(): Promise<MatchResult[]> {
+  async checkForMatches(): Promise<MatchResultDTO[]> {
     const notes = await this.noteService.loadAllNotes();
-    const matches: MatchResult[] = [];
+    const matches: MatchResultDTO[] = [];
 
     // Group notes by symbol
     const notesBySymbol = this.groupNotesBySymbol(notes);
@@ -41,14 +42,11 @@ export class MatchingService {
 
           if (isMatch) {
             matches.push({
-              noteId: note.id,
-              symbol,
+              id: uuidv4(),
               matchScore,
-              threshold: this.threshold,
-              isMatch,
-              currentMarket,
-              historicalNote: note,
-              timestamp: new Date(),
+              historicalNoteId: note.id,
+              marketSnapshot: currentMarket,
+              evaluatedAt: new Date(),
             });
           }
         }
