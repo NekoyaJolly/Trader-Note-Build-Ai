@@ -4,9 +4,9 @@
  * ノート一覧画面（Neon Dark テーマ対応）
  * /notes
  *
- * 要件:
- * - ペア / エントリー時間 / 状態
- * - Loading / Empty / Error 状態
+ * Phase 2 要件:
+ * - ステータスフィルタ（全件 / 下書き / 承認済み / 非承認）
+ * - ステータス件数表示
  * - クリックで詳細遷移
  * 
  * @see docs/phase12/UI_DESIGN_GUIDE.md
@@ -14,31 +14,49 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { fetchNotes } from "@/lib/api";
-import type { NoteListItem } from "@/types/note";
+import { fetchNotes, fetchNoteStatusCounts } from "@/lib/api";
+import type { NoteListItem, NoteStatus, NoteStatusCounts } from "@/types/note";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/Alert";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import EmptyState from "@/components/EmptyState";
 
+/**
+ * ステータスフィルタの選択肢
+ */
+type StatusFilter = "all" | NoteStatus;
+
 export default function NotesPage() {
   const [notes, setNotes] = useState<NoteListItem[]>([]);
+  const [statusCounts, setStatusCounts] = useState<NoteStatusCounts | null>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadNotes();
-  }, []);
+    loadData();
+  }, [statusFilter]);
 
   /**
-   * ノート一覧を API から取得
+   * ノート一覧とステータス集計を取得
    */
-  async function loadNotes() {
+  async function loadData() {
     try {
       setIsLoading(true);
       setError(null);
-      const data = await fetchNotes();
+      
+      // ステータス集計は常に取得
+      const countsPromise = fetchNoteStatusCounts().catch(() => null);
+      
+      // フィルタに応じてノートを取得
+      const notesPromise = statusFilter === "all"
+        ? fetchNotes()
+        : fetchNotes(statusFilter);
+      
+      const [counts, data] = await Promise.all([countsPromise, notesPromise]);
+      
+      setStatusCounts(counts);
       setNotes(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "ノート一覧の取得に失敗しました");
@@ -47,11 +65,38 @@ export default function NotesPage() {
     }
   }
 
+  /**
+   * ステータスに応じたバッジスタイル
+   */
+  function getStatusBadge(status: NoteStatus) {
+    switch (status) {
+      case "approved":
+        return (
+          <Badge className="bg-green-500/20 text-green-400 border-green-600/30">
+            承認済み
+          </Badge>
+        );
+      case "rejected":
+        return (
+          <Badge className="bg-red-500/20 text-red-400 border-red-600/30">
+            非承認
+          </Badge>
+        );
+      default:
+        return (
+          <Badge variant="outline" className="border-yellow-600/30 text-yellow-400">
+            下書き
+          </Badge>
+        );
+    }
+  }
+
   // ローディング表示（Skeleton）
   if (isLoading) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-8 w-64 bg-slate-700" />
+        <Skeleton className="h-12 w-full bg-slate-700" />
         <Skeleton className="h-20 w-full bg-slate-700" />
         <Skeleton className="h-20 w-full bg-slate-700" />
         <Skeleton className="h-20 w-full bg-slate-700" />
@@ -79,6 +124,50 @@ export default function NotesPage() {
         </Button>
       </div>
 
+      {/* ステータスフィルタタブ */}
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => setStatusFilter("all")}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            statusFilter === "all"
+              ? "bg-gradient-to-r from-pink-500 to-violet-500 text-white"
+              : "bg-slate-700/50 text-gray-400 hover:text-white hover:bg-slate-700"
+          }`}
+        >
+          全件 {statusCounts && <span className="ml-1 opacity-75">({statusCounts.total})</span>}
+        </button>
+        <button
+          onClick={() => setStatusFilter("draft")}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            statusFilter === "draft"
+              ? "bg-yellow-600/30 text-yellow-400 border border-yellow-600/50"
+              : "bg-slate-700/50 text-gray-400 hover:text-yellow-400 hover:bg-slate-700"
+          }`}
+        >
+          下書き {statusCounts && <span className="ml-1 opacity-75">({statusCounts.draft})</span>}
+        </button>
+        <button
+          onClick={() => setStatusFilter("approved")}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            statusFilter === "approved"
+              ? "bg-green-600/30 text-green-400 border border-green-600/50"
+              : "bg-slate-700/50 text-gray-400 hover:text-green-400 hover:bg-slate-700"
+          }`}
+        >
+          承認済み {statusCounts && <span className="ml-1 opacity-75">({statusCounts.approved})</span>}
+        </button>
+        <button
+          onClick={() => setStatusFilter("rejected")}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            statusFilter === "rejected"
+              ? "bg-red-600/30 text-red-400 border border-red-600/50"
+              : "bg-slate-700/50 text-gray-400 hover:text-red-400 hover:bg-slate-700"
+          }`}
+        >
+          非承認 {statusCounts && <span className="ml-1 opacity-75">({statusCounts.rejected})</span>}
+        </button>
+      </div>
+
       {/* Empty 状態 */}
       {notes.length === 0 ? (
         <EmptyState
@@ -87,9 +176,12 @@ export default function NotesPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
           }
-          title="ノートはまだありません"
-          description="トレードデータをインポートすると、ここにノートが表示されます。"
-          actionLink={{ label: "CSVをインポート", href: "/import" }}
+          title={statusFilter === "all" ? "ノートはまだありません" : `${statusFilter === "draft" ? "下書き" : statusFilter === "approved" ? "承認済み" : "非承認"}のノートはありません`}
+          description={statusFilter === "all" 
+            ? "トレードデータをインポートすると、ここにノートが表示されます。"
+            : "フィルタを変更するか、ノートの状態を変更してください。"
+          }
+          actionLink={statusFilter === "all" ? { label: "CSVをインポート", href: "/import" } : undefined}
         />
       ) : (
         // 一覧表示（テーブル）
@@ -99,6 +191,7 @@ export default function NotesPage() {
               <thead className="bg-slate-700/50 border-b border-slate-600">
                 <tr>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-300">通貨ペア</th>
+                  <th className="px-4 py-3 text-left text-sm font-semibold text-gray-300">方向</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-300">エントリー時間</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-300">状態</th>
                   <th className="px-4 py-3 text-center text-sm font-semibold text-gray-300">操作</th>
@@ -108,19 +201,16 @@ export default function NotesPage() {
                 {notes.map((note) => (
                   <tr key={note.id} className="border-b border-slate-700 hover:bg-slate-700/30 transition-colors">
                     <td className="px-4 py-3 text-sm font-bold text-white">{note.symbol}</td>
+                    <td className="px-4 py-3 text-sm">
+                      <Badge variant={note.side === "buy" ? "secondary" : "destructive"}>
+                        {note.side === "buy" ? "買い" : "売り"}
+                      </Badge>
+                    </td>
                     <td className="px-4 py-3 text-sm text-gray-300">
                       {new Date(note.timestamp).toLocaleString("ja-JP")}
                     </td>
                     <td className="px-4 py-3 text-sm">
-                      <Badge 
-                        variant={note.status === "approved" ? "secondary" : "outline"}
-                        className={note.status === "approved" 
-                          ? "bg-green-500/20 text-green-400" 
-                          : "border-gray-600 text-gray-400"
-                        }
-                      >
-                        {note.status ?? "draft"}
-                      </Badge>
+                      {getStatusBadge(note.status ?? "draft")}
                     </td>
                     <td className="px-4 py-3 text-center">
                       <Button size="sm" asChild className="bg-gradient-to-r from-pink-500 to-violet-500 hover:opacity-90">

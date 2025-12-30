@@ -4,7 +4,8 @@ import path from 'path';
 import { config } from '../config';
 import fs from 'fs';
 import { TradeRepository } from '../backend/repositories/tradeRepository';
-import { TradeNoteService } from '../services/tradeNoteService';
+import { TradeNoteService, NoteUpdatePayload } from '../services/tradeNoteService';
+import { NoteStatus } from '../models/types';
 
 export class TradeController {
   private importService: TradeImportService;
@@ -184,11 +185,33 @@ export class TradeController {
 
   /**
    * Get all trade notes
+   * クエリパラメータで status フィルタ可能
+   * ?status=approved / ?status=draft / ?status=rejected
    */
   getAllNotes = async (req: Request, res: Response): Promise<void> => {
-    // ファイルストレージ上のノートを全件返却する
-    const notes = await this.noteService.loadAllNotes();
+    const statusParam = req.query.status as string | undefined;
+    
+    let notes;
+    if (statusParam && ['draft', 'approved', 'rejected'].includes(statusParam)) {
+      notes = await this.noteService.loadNotesByStatus(statusParam as NoteStatus);
+    } else {
+      notes = await this.noteService.loadAllNotes();
+    }
+    
     res.json({ notes });
+  };
+
+  /**
+   * Get status counts for dashboard
+   */
+  getStatusCounts = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const counts = await this.noteService.getStatusCounts();
+      res.json(counts);
+    } catch (error) {
+      console.error('Error getting status counts:', error);
+      res.status(500).json({ error: 'ステータス集計の取得に失敗しました' });
+    }
   };
 
   /**
@@ -204,25 +227,77 @@ export class TradeController {
     res.json(note);
   };
 
-  // ノート承認（簡易実装）：JSON ファイルに承認フラグと時刻を書き込む
+  // ノート承認
   approveNote = async (req: Request, res: Response): Promise<void> => {
     const noteId = String(req.params.id);
-    const notesDir = path.join(process.cwd(), config.paths.notes);
-    const filepath = path.join(notesDir, `${noteId}.json`);
-    if (!fs.existsSync(filepath)) {
-      res.status(404).json({ error: 'ノートが見つかりませんでした' });
-      return;
-    }
     try {
-      const content = fs.readFileSync(filepath, 'utf-8');
-      const data = JSON.parse(content);
-      data.status = 'approved';
-      data.approvedAt = new Date().toISOString();
-      fs.writeFileSync(filepath, JSON.stringify(data, null, 2));
-      res.json({ success: true, status: 'approved' });
-    } catch (e) {
-      console.error('Error approving note:', e);
-      res.status(500).json({ error: 'ノートの承認に失敗しました' });
+      const note = await this.noteService.approveNote(noteId);
+      res.json({ success: true, status: note.status, note });
+    } catch (error) {
+      const message = (error as Error).message;
+      if (message.includes('見つかりませんでした')) {
+        res.status(404).json({ error: message });
+      } else {
+        console.error('Error approving note:', error);
+        res.status(500).json({ error: 'ノートの承認に失敗しました' });
+      }
+    }
+  };
+
+  // ノート非承認（reject）
+  rejectNote = async (req: Request, res: Response): Promise<void> => {
+    const noteId = String(req.params.id);
+    try {
+      const note = await this.noteService.rejectNote(noteId);
+      res.json({ success: true, status: note.status, note });
+    } catch (error) {
+      const message = (error as Error).message;
+      if (message.includes('見つかりませんでした')) {
+        res.status(404).json({ error: message });
+      } else {
+        console.error('Error rejecting note:', error);
+        res.status(500).json({ error: 'ノートの非承認に失敗しました' });
+      }
+    }
+  };
+
+  // ノートを下書きに戻す
+  revertToDraft = async (req: Request, res: Response): Promise<void> => {
+    const noteId = String(req.params.id);
+    try {
+      const note = await this.noteService.revertToDraft(noteId);
+      res.json({ success: true, status: note.status, note });
+    } catch (error) {
+      const message = (error as Error).message;
+      if (message.includes('見つかりませんでした')) {
+        res.status(404).json({ error: message });
+      } else {
+        console.error('Error reverting note to draft:', error);
+        res.status(500).json({ error: 'ノートの状態変更に失敗しました' });
+      }
+    }
+  };
+
+  // ノート内容の更新
+  updateNote = async (req: Request, res: Response): Promise<void> => {
+    const noteId = String(req.params.id);
+    const { aiSummary, userNotes, tags } = req.body as NoteUpdatePayload;
+
+    try {
+      const note = await this.noteService.updateNote(noteId, {
+        aiSummary,
+        userNotes,
+        tags,
+      });
+      res.json({ success: true, note });
+    } catch (error) {
+      const message = (error as Error).message;
+      if (message.includes('見つかりませんでした')) {
+        res.status(404).json({ error: message });
+      } else {
+        console.error('Error updating note:', error);
+        res.status(500).json({ error: 'ノートの更新に失敗しました' });
+      }
     }
   };
 }

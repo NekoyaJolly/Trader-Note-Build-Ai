@@ -1,4 +1,12 @@
 /**
+ * ノートの承認状態を表す型
+ * - draft: AI 生成直後。ユーザーが「承認/非承認/編集」可能
+ * - approved: マッチング対象。検索・通知・バックテスト対象
+ * - rejected: アーカイブ扱い。マッチング対象外
+ */
+export type NoteStatus = 'draft' | 'approved' | 'rejected';
+
+/**
  * Trade data structure from CSV/API import
  */
 export interface Trade {
@@ -52,9 +60,17 @@ export interface TradeNote {
   
   createdAt: Date;
   
-  // 承認状態
-  status?: 'draft' | 'approved';
+  // 承認状態（draft: 下書き、approved: 承認済み、rejected: 非承認）
+  status: NoteStatus;
+  
+  // 状態遷移のタイムスタンプ
   approvedAt?: Date;
+  rejectedAt?: Date;
+  lastEditedAt?: Date;
+  
+  // ユーザーによる編集内容（AI要約の上書き等）
+  userNotes?: string;
+  tags?: string[];
 }
 
 /**

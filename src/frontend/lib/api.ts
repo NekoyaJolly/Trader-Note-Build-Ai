@@ -7,7 +7,7 @@ import type {
   NotificationListItem,
   NotificationDetail,
 } from "@/types/notification";
-import type { NoteListItem, NoteDetail } from "@/types/note";
+import type { NoteListItem, NoteDetail, NoteUpdatePayload, NoteStatusCounts, NoteStatus } from "@/types/note";
 
 /**
  * バックエンド API のベース URL
@@ -99,9 +99,15 @@ export async function markAllNotificationsAsRead(): Promise<void> {
 /**
  * ノート一覧を取得
  * GET /api/trades/notes
+ * @param status - フィルタするステータス（省略時は全件）
  */
-export async function fetchNotes(): Promise<NoteListItem[]> {
-  const response = await fetch(`${API_BASE_URL}/api/trades/notes`, {
+export async function fetchNotes(status?: NoteStatus): Promise<NoteListItem[]> {
+  const url = new URL(`${API_BASE_URL}/api/trades/notes`);
+  if (status) {
+    url.searchParams.set("status", status);
+  }
+  
+  const response = await fetch(url.toString(), {
     cache: "no-store",
   });
 
@@ -125,7 +131,7 @@ export async function fetchNotes(): Promise<NoteListItem[]> {
     side: n.side === "sell" ? "sell" : "buy",
     timestamp: String(n.timestamp ?? n.createdAt ?? new Date().toISOString()),
     aiSummary: (n.aiSummary as string | null) ?? null,
-    status: (n.status as "draft" | "approved") ?? "draft",
+    status: (n.status as NoteStatus) ?? "draft",
   }));
 
   return normalized;
@@ -173,7 +179,7 @@ export async function uploadCsvText(
 }
 
 /**
- * ノート承認（簡易）
+ * ノート承認
  * POST /api/trades/notes/:id/approve
  */
 export async function approveNote(id: string): Promise<void> {
@@ -185,6 +191,69 @@ export async function approveNote(id: string): Promise<void> {
       `ノート承認に失敗しました: ${response.status} ${response.statusText}`
     );
   }
+}
+
+/**
+ * ノート非承認（reject）
+ * POST /api/trades/notes/:id/reject
+ */
+export async function rejectNote(id: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/trades/notes/${id}/reject`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(
+      `ノート非承認に失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+}
+
+/**
+ * ノートを下書きに戻す
+ * POST /api/trades/notes/:id/revert-to-draft
+ */
+export async function revertNoteToDraft(id: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/trades/notes/${id}/revert-to-draft`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(
+      `ノートの状態変更に失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+}
+
+/**
+ * ノート内容を更新
+ * PUT /api/trades/notes/:id
+ */
+export async function updateNote(id: string, payload: NoteUpdatePayload): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/trades/notes/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `ノート更新に失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+}
+
+/**
+ * ノートステータス集計を取得
+ * GET /api/trades/notes/status-counts
+ */
+export async function fetchNoteStatusCounts(): Promise<NoteStatusCounts> {
+  const response = await fetch(`${API_BASE_URL}/api/trades/notes/status-counts`, {
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(
+      `ステータス集計の取得に失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+  return response.json();
 }
 
 /**

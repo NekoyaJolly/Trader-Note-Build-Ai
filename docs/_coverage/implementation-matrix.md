@@ -111,3 +111,49 @@
 | tradeDefinitionService.test.ts | 8 | [src/backend/tests/tradeDefinitionService.test.ts](src/backend/tests/tradeDefinitionService.test.ts) |
 | indicatorService.test.ts（既存拡張） | 16 | [src/backend/tests/indicatorService.test.ts](src/backend/tests/indicatorService.test.ts) |
 
+---
+
+## 7. Phase 2 — ノート承認フロー（2025-12-31 追加）
+
+最終確認日: 2025-12-31
+
+### 7.1 データモデル拡張
+
+| Requirement | 判定 | 実装 | テスト | Doc 整合 | 根拠（実装） | メモ |
+|---|:--:|:--:|:--:|:--:|---|---|
+| NoteStatus 型定義（draft/approved/rejected） | ✅ | ✅ | ✅ | ✅ | [src/models/types.ts#NoteStatus](src/models/types.ts) | 3ステータス対応、状態遷移可能 |
+| TradeNote 拡張（rejectedAt, lastEditedAt, userNotes, tags） | ✅ | ✅ | ✅ | ✅ | [src/models/types.ts#TradeNote](src/models/types.ts) | 編集履歴・ユーザー追記対応 |
+
+### 7.2 API エンドポイント
+
+| Requirement | 判定 | UI | API | 永続化 | Doc 整合 | 根拠（実装） | 根拠（Docs） | メモ |
+|---|:--:|:--:|:--:|:--:|:--:|---|---|---|
+| ノート一覧（status フィルタ）: GET /api/trades/notes?status= | ✅ | ✅ | ✅ | ✅(FS) | ✅ | [src/controllers/tradeController.ts#getAllNotes](src/controllers/tradeController.ts) | [docs/API.md](docs/API.md) | draft/approved/rejected でフィルタ可能 |
+| ステータス集計: GET /api/trades/notes/status-counts | ✅ | ✅ | ✅ | ✅(FS) | ✅ | [src/controllers/tradeController.ts#getStatusCounts](src/controllers/tradeController.ts), [src/routes/tradeRoutes.ts](src/routes/tradeRoutes.ts) | [docs/API.md](docs/API.md) | ダッシュボード用 |
+| ノート承認: POST /api/trades/notes/:id/approve | ✅ | ✅ | ✅ | ✅(FS) | ✅ | [src/services/tradeNoteService.ts#approveNote](src/services/tradeNoteService.ts), [src/controllers/tradeController.ts#approveNote](src/controllers/tradeController.ts) | [docs/API.md](docs/API.md) | 既存を拡張 |
+| ノート非承認: POST /api/trades/notes/:id/reject | ✅ | ✅ | ✅ | ✅(FS) | ✅ | [src/services/tradeNoteService.ts#rejectNote](src/services/tradeNoteService.ts), [src/controllers/tradeController.ts#rejectNote](src/controllers/tradeController.ts) | [docs/API.md](docs/API.md) | 新規追加 |
+| 下書きに戻す: POST /api/trades/notes/:id/revert-to-draft | ✅ | ✅ | ✅ | ✅(FS) | ✅ | [src/services/tradeNoteService.ts#revertToDraft](src/services/tradeNoteService.ts), [src/controllers/tradeController.ts#revertToDraft](src/controllers/tradeController.ts) | [docs/API.md](docs/API.md) | 新規追加（後戻り可能設計） |
+| ノート更新: PUT /api/trades/notes/:id | ✅ | ✅ | ✅ | ✅(FS) | ✅ | [src/services/tradeNoteService.ts#updateNote](src/services/tradeNoteService.ts), [src/controllers/tradeController.ts#updateNote](src/controllers/tradeController.ts) | [docs/API.md](docs/API.md) | AI要約/ユーザーメモ/タグ編集 |
+
+### 7.3 マッチング制御
+
+| Requirement | 判定 | 実装 | テスト | Doc 整合 | 根拠（実装） | メモ |
+|---|:--:|:--:|:--:|:--:|---|---|
+| 承認済みノートのみマッチング対象 | ✅ | ✅ | ✅ | ✅ | [src/services/matchingService.ts#checkForMatches](src/services/matchingService.ts), [src/services/tradeNoteService.ts#loadApprovedNotes](src/services/tradeNoteService.ts) | Phase 2 Done条件達成 |
+
+### 7.4 UI 実装
+
+| Requirement | 判定 | 実装 | 根拠（実装） | メモ |
+|---|:--:|:--:|---|---|
+| ノート詳細: 承認/非承認/編集ボタン | ✅ | ✅ | [src/frontend/app/notes/[id]/page.tsx](src/frontend/app/notes/[id]/page.tsx) | ステータスに応じた動的ボタン表示 |
+| ノート詳細: ステータスバッジ表示 | ✅ | ✅ | [src/frontend/app/notes/[id]/page.tsx](src/frontend/app/notes/[id]/page.tsx) | draft/approved/rejected を色分け |
+| ノート詳細: 編集モード（AI要約/ユーザーメモ/タグ） | ✅ | ✅ | [src/frontend/app/notes/[id]/page.tsx](src/frontend/app/notes/[id]/page.tsx) | インライン編集UI |
+| ノート一覧: ステータスフィルタタブ | ✅ | ✅ | [src/frontend/app/notes/page.tsx](src/frontend/app/notes/page.tsx) | 全件/下書き/承認済み/非承認 |
+| ノート一覧: ステータス件数表示 | ✅ | ✅ | [src/frontend/app/notes/page.tsx](src/frontend/app/notes/page.tsx) | タブに件数を表示 |
+
+### 7.5 テストカバレッジ
+
+| テストファイル | テスト数 | 根拠 |
+|---|:--:|---|
+| noteApprovalFlow.test.ts | 16 | [src/backend/tests/noteApprovalFlow.test.ts](src/backend/tests/noteApprovalFlow.test.ts) |
+

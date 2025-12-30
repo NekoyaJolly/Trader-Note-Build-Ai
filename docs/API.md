@@ -104,6 +104,9 @@ http://localhost:3100
 #### GET /api/trades/notes
 保存されているすべてのトレードノートを取得します。
 
+**クエリパラメータ:**
+- `status`: ステータスでフィルタ（`draft` / `approved` / `rejected`）
+
 **応答:**
 ```json
 {
@@ -124,6 +127,21 @@ http://localhost:3100
 
 ---
 
+#### GET /api/trades/notes/status-counts
+ステータス別のノート件数を取得します。ダッシュボード表示用。
+
+**応答:**
+```json
+{
+  "draft": 5,
+  "approved": 10,
+  "rejected": 2,
+  "total": 17
+}
+```
+
+---
+
 #### GET /api/trades/notes/:id
 ID で特定のトレードノートを取得します。
 
@@ -139,7 +157,37 @@ ID で特定のトレードノートを取得します。
   "exitConditions": "...",
   "aiSummary": "RSI が売られすぎ水準...",
   "status": "draft",
-  "createdAt": "2024-01-15T10:35:00.000Z"
+  "createdAt": "2024-01-15T10:35:00.000Z",
+  "userNotes": "ユーザーによる追記",
+  "tags": ["レンジ相場", "RSI反転"]
+}
+```
+
+---
+
+#### PUT /api/trades/notes/:id
+ノートの内容を更新します（AI 要約、ユーザーメモ、タグ）。
+
+**リクエストボディ:**
+```json
+{
+  "aiSummary": "更新されたAI要約",
+  "userNotes": "ユーザーによる追記メモ",
+  "tags": ["レンジ相場", "RSI反転"]
+}
+```
+
+**応答:**
+```json
+{
+  "success": true,
+  "note": {
+    "id": "uuid",
+    "aiSummary": "更新されたAI要約",
+    "userNotes": "ユーザーによる追記メモ",
+    "tags": ["レンジ相場", "RSI反転"],
+    "lastEditedAt": "2024-01-15T12:00:00.000Z"
+  }
 }
 ```
 
@@ -152,7 +200,12 @@ ID で特定のトレードノートを取得します。
 ```json
 {
   "success": true,
-  "status": "approved"
+  "status": "approved",
+  "note": {
+    "id": "uuid",
+    "status": "approved",
+    "approvedAt": "2024-01-15T12:00:00.000Z"
+  }
 }
 ```
 
@@ -160,6 +213,41 @@ ID で特定のトレードノートを取得します。
 ```json
 {
   "error": "ノートが見つかりませんでした"
+}
+```
+
+---
+
+#### POST /api/trades/notes/:id/reject
+ノートを非承認（rejected）にします。非承認のノートはマッチング対象外となります。
+
+**応答:**
+```json
+{
+  "success": true,
+  "status": "rejected",
+  "note": {
+    "id": "uuid",
+    "status": "rejected",
+    "rejectedAt": "2024-01-15T12:00:00.000Z"
+  }
+}
+```
+
+---
+
+#### POST /api/trades/notes/:id/revert-to-draft
+ノートを下書き状態に戻します。承認済み/非承認から編集モードに戻す際に使用。
+
+**応答:**
+```json
+{
+  "success": true,
+  "status": "draft",
+  "note": {
+    "id": "uuid",
+    "status": "draft"
+  }
 }
 ```
 

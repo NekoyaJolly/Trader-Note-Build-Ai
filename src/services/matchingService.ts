@@ -31,12 +31,22 @@ export class MatchingService {
   }
 
   /**
-   * 全ノートに対して現在の市場状態との一致をチェック
+   * 承認済みノートに対して現在の市場状態との一致をチェック
    * マッチした結果は DB に永続化される
+   * 
+   * 重要: 承認済み（approved）のノートのみがマッチング対象
+   * draft や rejected のノートは照合しない
    */
   async checkForMatches(): Promise<MatchResultDTO[]> {
-    const notes = await this.noteService.loadAllNotes();
+    // 承認済みノートのみを取得（Phase 2 要件）
+    const notes = await this.noteService.loadApprovedNotes();
     const matches: MatchResultDTO[] = [];
+
+    // マッチング対象がない場合は早期リターン
+    if (notes.length === 0) {
+      console.log('[MatchingService] 承認済みノートがありません。マッチングをスキップします。');
+      return matches;
+    }
 
     // ノートをシンボル別にグループ化
     const notesBySymbol = this.groupNotesBySymbol(notes);

@@ -1,10 +1,19 @@
-import { Trade, TradeNote, MarketContext } from '../models/types';
+import { Trade, TradeNote, MarketContext, NoteStatus } from '../models/types';
 import { AISummaryService } from './aiSummaryService';
 import { MarketDataService } from './marketDataService';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
 import { config } from '../config';
+
+/**
+ * ノート更新時に許可するフィールド
+ */
+export interface NoteUpdatePayload {
+  aiSummary?: string;
+  userNotes?: string;
+  tags?: string[];
+}
 
 /**
  * トレードノート生成サービス
@@ -14,6 +23,7 @@ import { config } from '../config';
  * - AI 要約の取得と保存
  * - 一致判定用の特徴量抽出
  * - 市場データからインジケーター値を取得
+ * - ノートの承認/非承認/編集
  */
 export class TradeNoteService {
   private aiService: AISummaryService;
@@ -227,5 +237,169 @@ export class TradeNoteService {
     if (!fs.existsSync(this.notesPath)) {
       fs.mkdirSync(this.notesPath, { recursive: true });
     }
+  }
+
+  // ========== 承認フロー関連メソッド ==========
+
+  /**
+   * 承認済みノートのみを取得
+   * マッチング対象となるノートのみを返却する
+   */
+  async loadApprovedNotes(): Promise<TradeNote[]> {
+    const allNotes = await this.loadAllNotes();
+    return allNotes.filter(note => note.status === 'approved');
+  }
+
+  /**
+   * 指定ステータスのノートを取得
+   * 
+   * @param status - 取得したいステータス（draft, approved, rejected）
+   */
+  async loadNotesByStatus(status: NoteStatus): Promise<TradeNote[]> {
+    const allNotes = await this.loadAllNotes();
+    return allNotes.filter(note => note.status === status);
+  }
+
+  /**
+   * ノートを承認する
+   * 承認済みのノートはマッチング対象になる
+   * 
+   * @param noteId - 承認するノートのID
+   * @returns 承認後のノート
+   */
+  async approveNote(noteId: string): Promise<TradeNote> {
+    const note = await this.getNoteById(noteId);
+    if (!note) {
+      throw new Error(`ノートが見つかりませんでした: ${noteId}`);
+    }
+
+    // 既に承認済みの場合はそのまま返す
+    if (note.status === 'approved') {
+      return note;
+    }
+
+    // ステータスを更新
+    note.status = 'approved';
+    note.approvedAt = new Date();
+    // rejected から approved への遷移時は rejectedAt をクリア
+    delete note.rejectedAt;
+
+    await this.saveNote(note);
+    return note;
+  }
+
+  /**
+   * ノートを非承認（reject）する
+   * 非承認のノートはマッチング対象外、アーカイブ扱い
+   * 
+   * @param noteId - 非承認にするノートのID
+   * @returns 非承認後のノート
+   */
+  async rejectNote(noteId: string): Promise<TradeNote> {
+    const note = await this.getNoteById(noteId);
+    if (!note) {
+      throw new Error(`ノートが見つかりませんでした: ${noteId}`);
+    }
+
+    // 既に非承認の場合はそのまま返す
+    if (note.status === 'rejected') {
+      return note;
+    }
+
+    // ステータスを更新
+    note.status = 'rejected';
+    note.rejectedAt = new Date();
+    // approved から rejected への遷移時は approvedAt を保持（履歴として）
+
+    await this.saveNote(note);
+    return note;
+  }
+
+  /**
+   * ノートを下書きに戻す
+   * 承認/非承認から編集モードに戻す際に使用
+   * 
+   * @param noteId - 下書きに戻すノートのID
+   * @returns 下書き状態のノート
+   */
+  async revertToDraft(noteId: string): Promise<TradeNote> {
+    const note = await this.getNoteById(noteId);
+    if (!note) {
+      throw new Error(`ノートが見つかりませんでした: ${noteId}`);
+    }
+
+    // 既に draft の場合はそのまま返す
+    if (note.status === 'draft') {
+      return note;
+    }
+
+    // ステータスを更新
+    note.status = 'draft';
+    // 承認/非承認のタイムスタンプは履歴として保持
+
+    await this.saveNote(note);
+    return note;
+  }
+
+  /**
+   * ノートの内容を更新する
+   * AI 要約、ユーザーメモ、タグなどを編集可能
+   * 
+   * @param noteId - 更新するノートのID
+   * @param updates - 更新内容
+   * @returns 更新後のノート
+   */
+  async updateNote(noteId: string, updates: NoteUpdatePayload): Promise<TradeNote> {
+    const note = await this.getNoteById(noteId);
+    if (!note) {
+      throw new Error(`ノートが見つかりませんでした: ${noteId}`);
+    }
+
+    // 許可されたフィールドのみ更新
+    if (updates.aiSummary !== undefined) {
+      note.aiSummary = updates.aiSummary;
+    }
+    if (updates.userNotes !== undefined) {
+      note.userNotes = updates.userNotes;
+    }
+    if (updates.tags !== undefined) {
+      note.tags = updates.tags;
+    }
+
+    // 編集日時を記録
+    note.lastEditedAt = new Date();
+
+    await this.saveNote(note);
+    return note;
+  }
+
+  /**
+   * ノートのステータス集計を取得
+   * UI のダッシュボード等で使用
+   */
+  async getStatusCounts(): Promise<{ draft: number; approved: number; rejected: number; total: number }> {
+    const allNotes = await this.loadAllNotes();
+    const counts = {
+      draft: 0,
+      approved: 0,
+      rejected: 0,
+      total: allNotes.length,
+    };
+
+    for (const note of allNotes) {
+      switch (note.status) {
+        case 'approved':
+          counts.approved++;
+          break;
+        case 'rejected':
+          counts.rejected++;
+          break;
+        default:
+          // status が未設定または 'draft' の場合
+          counts.draft++;
+      }
+    }
+
+    return counts;
   }
 }

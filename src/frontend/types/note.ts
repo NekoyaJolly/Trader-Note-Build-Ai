@@ -4,6 +4,14 @@
  */
 
 /**
+ * ノートの承認状態を表す型
+ * - draft: AI 生成直後。ユーザーが「承認/非承認/編集」可能
+ * - approved: マッチング対象。検索・通知・バックテスト対象
+ * - rejected: アーカイブ扱い。マッチング対象外
+ */
+export type NoteStatus = "draft" | "approved" | "rejected";
+
+/**
  * ノート一覧用の簡易型
  */
 export interface NoteListItem {
@@ -12,7 +20,7 @@ export interface NoteListItem {
   side: "buy" | "sell";
   timestamp: string; // ISO 8601 形式
   aiSummary?: string | null;
-  status?: "draft" | "approved";
+  status: NoteStatus;
 }
 
 /**
@@ -40,6 +48,29 @@ export interface NoteDetail {
   aiSummary: string;
   features: number[];
   createdAt: string;
-  status?: "draft" | "approved";
+  status: NoteStatus;
   approvedAt?: string; // 承認日時（ISO 8601）
+  rejectedAt?: string; // 非承認日時（ISO 8601）
+  lastEditedAt?: string; // 最終編集日時（ISO 8601）
+  userNotes?: string; // ユーザーによる追記
+  tags?: string[]; // タグ
+}
+
+/**
+ * ノート更新用のペイロード
+ */
+export interface NoteUpdatePayload {
+  aiSummary?: string;
+  userNotes?: string;
+  tags?: string[];
+}
+
+/**
+ * ノートステータス集計
+ */
+export interface NoteStatusCounts {
+  draft: number;
+  approved: number;
+  rejected: number;
+  total: number;
 }

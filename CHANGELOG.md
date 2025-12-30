@@ -2,6 +2,72 @@
 
 All notable changes to TradeAssist MVP will be documented in this file.
 
+## [1.0.0-phase2] - 2025-12-31
+
+### 追加 - Phase2: ノート承認フロー
+
+#### 目的
+> **AI生成は必ず揺れる。ユーザーが承認・編集・非承認を行える「後戻りできる」導線を確実にする。**
+
+#### データモデル拡張
+- **NoteStatus 型定義**: draft / approved / rejected の3ステータス
+- **TradeNote 拡張**:
+  - `rejectedAt`: 非承認日時
+  - `lastEditedAt`: 最終編集日時
+  - `userNotes`: ユーザーによる追記メモ
+  - `tags`: タグ配列
+
+#### 新規 API エンドポイント
+- `GET /api/trades/notes?status=`: ステータスでフィルタ可能なノート一覧
+- `GET /api/trades/notes/status-counts`: ステータス別件数（ダッシュボード用）
+- `PUT /api/trades/notes/:id`: ノート内容の更新（AI要約/ユーザーメモ/タグ）
+- `POST /api/trades/notes/:id/reject`: ノートを非承認にする
+- `POST /api/trades/notes/:id/revert-to-draft`: 下書きに戻す
+
+#### サービス拡張
+- **TradeNoteService**:
+  - `approveNote()`: ノート承認
+  - `rejectNote()`: ノート非承認
+  - `revertToDraft()`: 下書きに戻す
+  - `updateNote()`: 内容更新
+  - `loadApprovedNotes()`: 承認済みノートのみ取得
+  - `loadNotesByStatus()`: ステータス別取得
+  - `getStatusCounts()`: ステータス集計
+
+#### マッチング制御
+- **MatchingService**: `checkForMatches()` が承認済み（approved）ノートのみを照合対象に
+- draft / rejected ノートはマッチング対象外
+
+#### UI 実装
+- **ノート詳細ページ**:
+  - ステータスバッジ表示（draft: 黄色, approved: 緑, rejected: 赤）
+  - 承認/非承認/下書きに戻すボタン（ステータスに応じて動的表示）
+  - 編集モード（AI要約/ユーザーメモ/タグ編集）
+  - 状態遷移のタイムスタンプ表示
+- **ノート一覧ページ**:
+  - ステータスフィルタタブ（全件/下書き/承認済み/非承認）
+  - 各タブに件数表示
+  - 方向（買い/売り）列追加
+
+#### テスト
+- **noteApprovalFlow.test.ts**: 16 個のテストケース（全成功）
+  - 承認フロー（draft→approved, rejected→approved）
+  - 非承認フロー（draft→rejected, approved→rejected）
+  - 下書き戻し（approved→draft, rejected→draft）
+  - 内容更新（AI要約/ユーザーメモ/タグ）
+  - ステータス別取得
+  - ステータス集計
+  - 承認済みフィルタリング
+
+#### ドキュメント
+- API.md に Phase2 エンドポイント追加
+- implementation-matrix.md にセクション 7 追加
+
+### Done 条件
+✅ **承認済みノートのみがマッチング照合に使われる**
+
+---
+
 ## [1.0.0-phase4] - 2025-12-27
 
 ### 追加 - Phase4: 通知ロジック実装
