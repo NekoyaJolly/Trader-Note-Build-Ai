@@ -4,54 +4,112 @@ import { TradeNoteService } from './tradeNoteService';
 import { config } from '../config';
 import { v4 as uuidv4 } from 'uuid';
 import { MatchResultDTO } from '../domain/matching/MatchResultDTO';
+import { MatchResultRepository } from '../backend/repositories/matchResultRepository';
+import { MarketSnapshotRepository } from '../backend/repositories/marketSnapshotRepository';
 
 /**
- * Service for matching historical trade notes with current market conditions
- * Uses rule-based matching with feature vector comparison
+ * マッチングサービス
+ * 
+ * 責務:
+ * - 過去トレードノートと現在の市場状態の一致判定
+ * - ルールベースの特徴量比較（コサイン類似度）
+ * - MatchResult の DB 永続化
  */
 export class MatchingService {
   private marketDataService: MarketDataService;
   private noteService: TradeNoteService;
+  private matchResultRepository: MatchResultRepository;
+  private marketSnapshotRepository: MarketSnapshotRepository;
   private threshold: number;
 
   constructor() {
     this.marketDataService = new MarketDataService();
     this.noteService = new TradeNoteService();
+    this.matchResultRepository = new MatchResultRepository();
+    this.marketSnapshotRepository = new MarketSnapshotRepository();
     this.threshold = config.matching.threshold;
   }
 
   /**
-   * Check all notes for matches with current market conditions
+   * 全ノートに対して現在の市場状態との一致をチェック
+   * マッチした結果は DB に永続化される
    */
   async checkForMatches(): Promise<MatchResultDTO[]> {
     const notes = await this.noteService.loadAllNotes();
     const matches: MatchResultDTO[] = [];
 
-    // Group notes by symbol
+    // ノートをシンボル別にグループ化
     const notesBySymbol = this.groupNotesBySymbol(notes);
 
     for (const [symbol, symbolNotes] of notesBySymbol.entries()) {
       try {
-        // Get current market data for this symbol
-        const currentMarket = await this.marketDataService.getCurrentMarketData(symbol);
+        // 現在の市場データを取得（インジケーター計算付き）
+        const currentMarket = await this.marketDataService.getCurrentMarketDataWithIndicators(symbol);
         
-        // Check each note for matches
+        // MarketSnapshot を DB に保存
+        let marketSnapshotId: string | undefined;
+        try {
+          const snapshot = await this.marketSnapshotRepository.upsertSnapshot({
+            symbol: currentMarket.symbol,
+            timeframe: currentMarket.timeframe,
+            close: currentMarket.close,
+            volume: currentMarket.volume,
+            indicators: currentMarket.indicators || {},
+            fetchedAt: currentMarket.timestamp,
+          });
+          marketSnapshotId = snapshot.id;
+        } catch (snapshotError) {
+          console.warn('MarketSnapshot 保存をスキップ:', snapshotError);
+        }
+        
+        // 各ノートに対してマッチスコアを計算
         for (const note of symbolNotes) {
           const matchScore = this.calculateMatchScore(note, currentMarket);
           const isMatch = matchScore >= this.threshold;
+          const trendMatched = this.checkTrendMatch(note, currentMarket);
+          const priceRangeMatched = this.checkPriceRange(note, currentMarket);
+          const reasons = this.generateMatchReasons(note, currentMarket, matchScore, trendMatched, priceRangeMatched);
 
           if (isMatch) {
+            const matchId = uuidv4();
+            const evaluatedAt = new Date();
+
+            // MatchResult を DB に永続化（marketSnapshotId がある場合のみ）
+            if (marketSnapshotId) {
+              try {
+                await this.matchResultRepository.upsertByNoteAndSnapshot({
+                  noteId: note.id,
+                  marketSnapshotId,
+                  symbol,
+                  score: matchScore,
+                  threshold: this.threshold,
+                  trendMatched,
+                  priceRangeMatched,
+                  reasons,
+                  evaluatedAt,
+                });
+              } catch (persistError) {
+                console.warn('MatchResult 永続化をスキップ:', persistError);
+              }
+            }
+
             matches.push({
-              id: uuidv4(),
+              id: matchId,
               matchScore,
               historicalNoteId: note.id,
               marketSnapshot: currentMarket,
-              evaluatedAt: new Date(),
+              marketSnapshotId,
+              symbol,
+              threshold: this.threshold,
+              trendMatched,
+              priceRangeMatched,
+              reasons,
+              evaluatedAt,
             });
           }
         }
       } catch (error) {
-        console.error(`Error checking matches for ${symbol}:`, error);
+        console.error(`${symbol} のマッチチェックエラー:`, error);
       }
     }
 
@@ -59,21 +117,52 @@ export class MatchingService {
   }
 
   /**
-   * Calculate match score between a note and current market
-   * Returns a score between 0 and 1
+   * マッチ履歴を DB から取得
+   */
+  async getMatchHistory(options: {
+    symbol?: string;
+    limit?: number;
+    offset?: number;
+    minScore?: number;
+  } = {}): Promise<MatchResultDTO[]> {
+    try {
+      const results = await this.matchResultRepository.findHistory(options);
+      return results.map(r => ({
+        id: r.id,
+        matchScore: r.score,
+        historicalNoteId: r.noteId,
+        marketSnapshot: (r as any).marketSnapshot || {},
+        marketSnapshotId: r.marketSnapshotId,
+        symbol: r.symbol,
+        threshold: r.threshold,
+        trendMatched: r.trendMatched,
+        priceRangeMatched: r.priceRangeMatched,
+        reasons: Array.isArray(r.reasons) ? r.reasons as string[] : [],
+        evaluatedAt: r.evaluatedAt,
+        createdAt: r.createdAt,
+      }));
+    } catch (error) {
+      console.error('マッチ履歴取得エラー:', error);
+      return [];
+    }
+  }
+
+  /**
+   * マッチスコアを計算
+   * ノートと現在の市場データ間のスコア（0 - 1）を返す
    */
   calculateMatchScore(note: TradeNote, currentMarket: MarketData): number {
-    // Extract current market features
+    // 現在の市場から特徴量を抽出
     const currentFeatures = this.extractMarketFeatures(currentMarket);
     
-    // Compare feature vectors using cosine similarity
+    // コサイン類似度を計算
     const similarity = this.cosineSimilarity(note.features, currentFeatures);
     
-    // Additional rule-based checks
+    // ルールベースの追加チェック
     const trendMatch = this.checkTrendMatch(note, currentMarket);
     const priceRangeMatch = this.checkPriceRange(note, currentMarket);
     
-    // Weighted combination of scores
+    // 重み付け組み合わせ
     const finalScore = (
       similarity * 0.6 +
       (trendMatch ? 0.3 : 0) +
@@ -84,60 +173,116 @@ export class MatchingService {
   }
 
   /**
-   * Extract features from current market data
+   * マッチ理由を生成（日本語）
+   */
+  private generateMatchReasons(
+    note: TradeNote,
+    market: MarketData,
+    score: number,
+    trendMatched: boolean,
+    priceRangeMatched: boolean
+  ): string[] {
+    const reasons: string[] = [];
+
+    reasons.push(`一致スコア: ${(score * 100).toFixed(1)}%`);
+
+    if (trendMatched) {
+      reasons.push(`トレンド一致: ${market.indicators?.trend || 'neutral'}`);
+    } else {
+      reasons.push(`トレンド不一致: ノート=${note.marketContext.trend}, 現在=${market.indicators?.trend || 'neutral'}`);
+    }
+
+    if (priceRangeMatched) {
+      const deviation = Math.abs(market.close - note.entryPrice) / note.entryPrice * 100;
+      reasons.push(`価格レンジ一致: ${deviation.toFixed(2)}% 以内`);
+    } else {
+      const deviation = Math.abs(market.close - note.entryPrice) / note.entryPrice * 100;
+      reasons.push(`価格レンジ外: ${deviation.toFixed(2)}% 乖離`);
+    }
+
+    return reasons;
+  }
+
+  /**
+   * 現在の市場データから特徴量を抽出
    */
   private extractMarketFeatures(market: MarketData): number[] {
     const features: number[] = [];
 
-    // Price-related features
+    // 価格関連の特徴量
     features.push(market.close);
     features.push(market.volume);
 
-    // Indicators
-    features.push(market.indicators?.rsi || 50);
-    features.push(market.indicators?.macd || 0);
+    // インジケーター（実際の計算値を使用）
+    features.push(market.indicators?.rsi ?? 50);
+    features.push(market.indicators?.macd ?? 0);
     features.push(market.volume);
 
-    // Trend encoding
+    // トレンドエンコーディング
     const trendValue = 
       market.indicators?.trend === 'bullish' ? 1 :
       market.indicators?.trend === 'bearish' ? -1 : 0;
     features.push(trendValue);
 
-    // Placeholder for side (neutral for current market)
+    // サイドのプレースホルダー（現在の市場では中立）
     features.push(0);
 
     return features;
   }
 
   /**
-   * Calculate cosine similarity between two feature vectors
+   * コサイン類似度を計算
+   * 
+   * 次元不一致の場合:
+   * - 短い方のベクトルを0で埋めて長さを揃える
+   * - NaN/undefined/Infinity は 0 として扱う
    */
   private cosineSimilarity(vecA: number[], vecB: number[]): number {
-    if (vecA.length !== vecB.length) {
-      console.warn('Feature vector length mismatch');
+    // 空のベクトルチェック
+    if (!vecA || !vecB || vecA.length === 0 || vecB.length === 0) {
+      console.warn('空の特徴量ベクトル');
       return 0;
     }
+
+    // 次元を揃える（短い方を0で埋める）
+    const maxLen = Math.max(vecA.length, vecB.length);
+    const a = [...vecA];
+    const b = [...vecB];
+    
+    while (a.length < maxLen) a.push(0);
+    while (b.length < maxLen) b.push(0);
 
     let dotProduct = 0;
     let normA = 0;
     let normB = 0;
 
-    for (let i = 0; i < vecA.length; i++) {
-      dotProduct += vecA[i] * vecB[i];
-      normA += vecA[i] * vecA[i];
-      normB += vecB[i] * vecB[i];
+    for (let i = 0; i < maxLen; i++) {
+      // NaN/undefined/Infinity を 0 として扱う
+      const valA = isFinite(a[i]) ? a[i] : 0;
+      const valB = isFinite(b[i]) ? b[i] : 0;
+      
+      dotProduct += valA * valB;
+      normA += valA * valA;
+      normB += valB * valB;
     }
 
+    // 0除算防御
     if (normA === 0 || normB === 0) {
       return 0;
     }
 
-    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+    const similarity = dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+    
+    // NaN チェック
+    if (isNaN(similarity)) {
+      return 0;
+    }
+
+    return similarity;
   }
 
   /**
-   * Check if trends match
+   * トレンド一致をチェック
    */
   private checkTrendMatch(note: TradeNote, market: MarketData): boolean {
     const noteTrend = note.marketContext.trend;

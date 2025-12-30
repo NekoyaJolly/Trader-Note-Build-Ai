@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { NotificationService } from '../services/notificationService';
 import { NotificationLogRepository } from '../backend/repositories/notificationLogRepository';
 import { MatchingService } from '../services/matchingService';
+import { NotificationTriggerService } from '../services/notification/notificationTriggerService';
 
 /**
  * NotificationController
@@ -10,16 +11,19 @@ import { MatchingService } from '../services/matchingService';
  * 1. 既存の Notification API（読み取り/削除）を維持
  * 2. Phase4 で追加された通知トリガ・ログ API
  * 3. 通知の配信判定と記録
+ * 4. クールダウン・重複抑止・冪等性の保証
  */
 export class NotificationController {
   private notificationService: NotificationService;
   private notificationLogRepository: NotificationLogRepository;
   private matchingService: MatchingService;
+  private triggerService: NotificationTriggerService;
 
   constructor() {
     this.notificationService = new NotificationService();
     this.notificationLogRepository = new NotificationLogRepository();
     this.matchingService = new MatchingService();
+    this.triggerService = new NotificationTriggerService();
   }
 
   /**
@@ -141,32 +145,79 @@ export class NotificationController {
    * POST /api/notifications/check
    * 
    * 目的: 通知トリガを手動でチェック・評価し、通知を配信する
-   * リクエストボディ:
-   * {
-   *   "matchResultId": "uuid",
-   *   "channel": "in_app" | "push" | "webhook"  // オプション、デフォルト: in_app
-   * }
+   * 
+   * 処理フロー:
+   * 1. マッチング判定を実行
+   * 2. 各マッチに対してクールダウン・重複・冪等性チェック
+   * 3. 通知を生成（In-app 通知）
+   * 4. NotificationLog を DB に永続化
    * 
    * レスポンス:
    * {
-   *   "shouldNotify": boolean,
-   *   "status": "sent" | "skipped" | "failed",
-   *   "skipReason"?: string,
-   *   "notificationLogId"?: string,
-   *   "inAppNotificationId"?: string
+   *   "processed": number,
+   *   "notified": number,
+   *   "skipped": number,
+   *   "results": [{ shouldNotify, status, skipReason?, notificationLogId? }]
    * }
    */
   checkAndNotify = async (req: Request, res: Response): Promise<void> => {
     try {
+      // 1. マッチング判定を実行
       const matches = await this.matchingService.checkForMatches();
-      await this.notificationService.trigger(matches);
+      
+      const results: Array<{
+        noteId: string;
+        shouldNotify: boolean;
+        status: string;
+        skipReason?: string;
+        notificationLogId?: string;
+      }> = [];
+      
+      let notifiedCount = 0;
+      let skippedCount = 0;
+
+      // 2. 各マッチに対して通知判定（クールダウン・重複チェック含む）
+      for (const match of matches) {
+        const triggerResult = await this.triggerService.evaluateWithPersistence({
+          matchScore: match.matchScore,
+          historicalNoteId: match.historicalNoteId,
+          marketSnapshot: match.marketSnapshot,
+          marketSnapshotId: match.marketSnapshotId,
+          symbol: match.symbol,
+          channel: 'in_app',
+        });
+
+        if (triggerResult.shouldNotify) {
+          notifiedCount++;
+        } else {
+          skippedCount++;
+        }
+
+        results.push({
+          noteId: match.historicalNoteId,
+          shouldNotify: triggerResult.shouldNotify,
+          status: triggerResult.status,
+          skipReason: triggerResult.skipReason,
+          notificationLogId: triggerResult.notificationLogId,
+        });
+      }
+
+      // 3. 通知を生成（既存の In-app 通知フロー）
+      // shouldNotify が true のマッチのみを抽出して通知生成
+      const matchesToNotify = matches.filter((m, i) => results[i]?.shouldNotify);
+      if (matchesToNotify.length > 0) {
+        await this.notificationService.trigger(matchesToNotify);
+      }
 
       res.json({
         processed: matches.length,
-        shouldNotify: matches.length > 0,
+        notified: notifiedCount,
+        skipped: skippedCount,
+        shouldNotify: notifiedCount > 0,
+        results,
       });
     } catch (error) {
-      console.error('Error checking and notifying:', error);
+      console.error('通知チェックエラー:', error);
       // 本番環境ではエラー詳細を隠蔽し、ログにのみ記録
       const isProduction = process.env.NODE_ENV === 'production';
       res.status(500).json({

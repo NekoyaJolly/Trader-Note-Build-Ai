@@ -105,10 +105,16 @@ npm start
 
 ### Trade Import & Notes
 
-**Import trades from CSV**
+**Import trades from CSV（ノート自動生成）**
 ```
 POST /api/trades/import/csv
 Body: { "filename": "sample_trades.csv" }
+Response: { 
+  "success": true, 
+  "tradesImported": 5, 
+  "notesGenerated": 5,  // ← 実際に生成されたノート数
+  "notes": [...]
+}
 ```
 
 **Get all trade notes**
@@ -128,9 +134,13 @@ GET /api/trades/notes/:id
 POST /api/matching/check
 ```
 
-**Get match history**
+**Get match history（DBから取得）**
 ```
 GET /api/matching/history
+Response: {
+  "matches": [...],  // MatchResult のリスト
+  "total": 100
+}
 ```
 
 ### Notifications
@@ -138,6 +148,27 @@ GET /api/matching/history
 **Get all notifications**
 ```
 GET /api/notifications?unreadOnly=true
+```
+
+**Check and notify（再通知防止適用）**
+```
+POST /api/notifications/check
+Body: { "matchResultId": "uuid", "channel": "in_app" }
+Response (sent): { 
+  "shouldNotify": true, 
+  "status": "sent", 
+  "notificationLogId": "uuid" 
+}
+Response (skipped): { 
+  "shouldNotify": false, 
+  "status": "skipped", 
+  "skipReason": "クールダウン中: 次の通知は..." 
+}
+```
+
+**Get notification logs**
+```
+GET /api/notifications/logs?symbol=BTCUSDT&limit=50
 ```
 
 **Mark notification as read**
@@ -184,20 +215,22 @@ GET /health
 
 ### Services
 
-- **TradeImportService**: Imports trade data from CSV/API
-- **TradeNoteService**: Generates and manages structured trade notes（現状は FS 保存）
+- **TradeImportService**: Imports trade data from CSV/API（取込後に自動でノート生成を呼び出し）
+- **TradeNoteService**: Generates and manages structured trade notes（現状は FS 保存。MarketDataService 経由で実インジケーター取得可能）
 - **AISummaryService**: Generates AI-powered trade summaries
-- **MarketDataService**: Fetches real-time market data
-- **MatchingService**: Matches historical notes with current market
+- **MarketDataService**: Fetches real-time market data（indicatorService 経由で RSI/MACD/BB/SMA を計算）
+- **MatchingService**: Matches historical notes with current market（MatchResult を DB に永続化）
 - **NotificationService**: Manages notifications (push & in-app。現状は FS 保存で既読状態もファイルに保持）
+- **NotificationTriggerService**: 通知判定・冪等性・クールダウン・重複抑制を担当（NotificationLog を DB に永続化）
 
 ### Matching Algorithm
 
-1. **Feature Extraction**: Extracts numerical features from trade notes and market data
-2. **Cosine Similarity**: Compares feature vectors to calculate base similarity
+1. **Feature Extraction**: Extracts numerical features from trade notes and market data（7次元: price, quantity, rsi, macd, volume, trend, side）
+2. **Cosine Similarity**: Compares feature vectors to calculate base similarity（次元不一致・NaN・Infinity 防御付き）
 3. **Rule-Based Checks**: Additional checks for trend matching and price range
-4. **Weighted Score**: Combines similarity, trend match, and price range into final score
+4. **Weighted Score**: Combines similarity, trend match, and price range into final score（重み: 0.6 / 0.3 / 0.1）
 5. **Threshold Filtering**: Only matches above configured threshold trigger notifications
+6. **Notification Suppression**: 冪等性（noteId×snapshotId×channel）、クールダウン（1時間）、重複抑制（5秒）で再通知を防止
 
 ### Scheduler
 

@@ -115,6 +115,11 @@ ID で特定のトレードノートを取得します。
 #### POST /api/notifications/check
 MatchResult から通知を評価し、配信・記録する（再通知防止ロジック適用）。
 
+**再通知防止ルール:**
+- **冪等性**: 同一 noteId × snapshotId × channel の組み合わせは再送しない
+- **クールダウン**: 同一 noteId への通知は 1 時間のクールダウン
+- **重複抑制**: 同一スナップショットへの通知は 5 秒のデバウンス
+
 **リクエストボディ:**
 ```json
 {
@@ -123,7 +128,7 @@ MatchResult から通知を評価し、配信・記録する（再通知防止�
 }
 ```
 
-**レスポンス:**
+**レスポンス（送信時）:**
 ```json
 {
   "shouldNotify": true,
@@ -133,12 +138,45 @@ MatchResult から通知を評価し、配信・記録する（再通知防止�
 }
 ```
 
-または（スキップ時）:
+**レスポンス（スキップ時 - クールダウン）:**
 ```json
 {
   "shouldNotify": false,
   "status": "skipped",
-  "skipReason": "クールダウン中: 次の通知は 2025-12-27T02:27:38Z 以降"
+  "skipReason": "クールダウン中: 次の通知は 2025-12-27T02:27:38Z 以降",
+  "log": {
+    "id": "uuid",
+    "status": "skipped",
+    "skipReason": "cooldown"
+  }
+}
+```
+
+**レスポンス（スキップ時 - 冪等性）:**
+```json
+{
+  "shouldNotify": false,
+  "status": "skipped",
+  "skipReason": "冪等性: この組み合わせは既に通知済みです",
+  "log": {
+    "id": "uuid",
+    "status": "skipped",
+    "skipReason": "idempotency"
+  }
+}
+```
+
+**レスポンス（スキップ時 - 重複抑制）:**
+```json
+{
+  "shouldNotify": false,
+  "status": "skipped",
+  "skipReason": "重複抑制: 5秒以内の再通知です",
+  "log": {
+    "id": "uuid",
+    "status": "skipped",
+    "skipReason": "duplicate_suppression"
+  }
 }
 ```
 

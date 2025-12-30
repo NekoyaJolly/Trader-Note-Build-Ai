@@ -1,5 +1,6 @@
 import { Trade, TradeNote, MarketContext } from '../models/types';
 import { AISummaryService } from './aiSummaryService';
+import { MarketDataService } from './marketDataService';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
@@ -12,13 +13,16 @@ import { config } from '../config';
  * - トレード履歴から構造化ノートを生成
  * - AI 要約の取得と保存
  * - 一致判定用の特徴量抽出
+ * - 市場データからインジケーター値を取得
  */
 export class TradeNoteService {
   private aiService: AISummaryService;
+  private marketDataService: MarketDataService;
   private notesPath: string;
 
   constructor() {
     this.aiService = new AISummaryService();
+    this.marketDataService = new MarketDataService();
     this.notesPath = path.join(process.cwd(), config.paths.notes);
     this.ensureNotesDirectory();
   }
@@ -28,16 +32,43 @@ export class TradeNoteService {
    * 
    * @param trade - トレードデータ
    * @param marketContext - トレード時点の市場コンテキスト（オプション）
+   * @param fetchMarketData - 市場データを取得してインジケーターを計算するか（デフォルト: false）
    * @returns 生成されたトレードノート
    */
-  async generateNote(trade: Trade, marketContext?: MarketContext): Promise<TradeNote> {
+  async generateNote(
+    trade: Trade,
+    marketContext?: MarketContext,
+    fetchMarketData: boolean = false
+  ): Promise<TradeNote> {
+    // 市場データを取得してインジケーターを計算（オプション）
+    let actualMarketContext = marketContext;
+    if (fetchMarketData && !marketContext) {
+      try {
+        const marketData = await this.marketDataService.getCurrentMarketDataWithIndicators(
+          trade.symbol,
+          '15m'
+        );
+        actualMarketContext = {
+          timeframe: marketData.timeframe,
+          trend: marketData.indicators?.trend || 'neutral',
+          indicators: {
+            rsi: marketData.indicators?.rsi,
+            macd: marketData.indicators?.macd,
+            volume: marketData.volume,
+          },
+        };
+      } catch (error) {
+        console.warn('市場データ取得をスキップ:', error);
+      }
+    }
+
     // MarketContext を AI サービス用の形式に変換
     // bullish/bearish → uptrend/downtrend への変換
-    const aiMarketContext = marketContext ? {
-      trend: this.convertTrendForAI(marketContext.trend),
-      rsi: marketContext.indicators?.rsi,
-      macd: marketContext.indicators?.macd,
-      timeframe: marketContext.timeframe,
+    const aiMarketContext = actualMarketContext ? {
+      trend: this.convertTrendForAI(actualMarketContext.trend),
+      rsi: actualMarketContext.indicators?.rsi,
+      macd: actualMarketContext.indicators?.macd,
+      timeframe: actualMarketContext.timeframe,
     } : undefined;
 
     // AI 要約を生成
@@ -51,7 +82,7 @@ export class TradeNoteService {
     });
 
     // 一致判定用の特徴量を抽出
-    const features = this.extractFeatures(trade, marketContext);
+    const features = this.extractFeatures(trade, actualMarketContext);
 
     // デフォルトの市場コンテキスト（未指定時）
     const defaultMarketContext: MarketContext = {
@@ -67,7 +98,7 @@ export class TradeNoteService {
       side: trade.side,
       entryPrice: trade.price,
       quantity: trade.quantity,
-      marketContext: marketContext ?? defaultMarketContext,
+      marketContext: actualMarketContext ?? defaultMarketContext,
       aiSummary: aiSummary.summary,
       features,
       createdAt: new Date(),

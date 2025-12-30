@@ -78,4 +78,65 @@ export class MatchResultRepository {
       include: { note: true, marketSnapshot: true },
     }) as Promise<MatchResultWithRelations[]>;
   }
+
+  /**
+   * マッチ履歴を取得（ページング対応）
+   * 
+   * @param options - フィルタ・ページングオプション
+   * @returns MatchResult の配列（新しい順）
+   */
+  async findHistory(options: {
+    symbol?: string;
+    limit?: number;
+    offset?: number;
+    minScore?: number;
+  } = {}): Promise<MatchResult[]> {
+    const { symbol, limit = 50, offset = 0, minScore } = options;
+
+    const where: any = {};
+    if (symbol) {
+      where.symbol = symbol;
+    }
+    if (minScore !== undefined) {
+      where.score = { gte: minScore };
+    }
+
+    return this.prisma.matchResult.findMany({
+      where,
+      orderBy: { evaluatedAt: 'desc' },
+      take: limit,
+      skip: offset,
+      include: {
+        note: true,
+        marketSnapshot: true,
+      },
+    });
+  }
+
+  /**
+   * マッチ結果を ID で取得
+   */
+  async findById(id: string): Promise<MatchResultWithRelations | null> {
+    return this.prisma.matchResult.findUnique({
+      where: { id },
+      include: { note: true, marketSnapshot: true },
+    }) as Promise<MatchResultWithRelations | null>;
+  }
+
+  /**
+   * マッチ履歴の総数を取得
+   */
+  async countHistory(options: { symbol?: string; minScore?: number } = {}): Promise<number> {
+    const { symbol, minScore } = options;
+
+    const where: any = {};
+    if (symbol) {
+      where.symbol = symbol;
+    }
+    if (minScore !== undefined) {
+      where.score = { gte: minScore };
+    }
+
+    return this.prisma.matchResult.count({ where });
+  }
 }

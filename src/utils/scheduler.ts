@@ -82,10 +82,8 @@ export class MatchingScheduler {
           console.log(`${matches.length} 件のマッチを検出`);
         }
         
-        // 各マッチに対して通知を送信
-        for (const match of matches) {
-          await this.notificationService.notifyMatch(match);
-        }
+        // 各マッチに対して通知をトリガー（一括処理）
+        await this.notificationService.trigger(matches);
       } else {
         // 本番環境ではマッチなしログを抑制（スパム防止）
         if (!this.isProduction) {

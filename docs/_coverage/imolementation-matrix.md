@@ -30,7 +30,7 @@
 
 | Phase | 区分 | Requirement | 実装 | テスト | Doc | 実装/参照ファイル | Doc 参照 | メモ | 最終確認日 | 担当 |
 |---:|---|---|:--:|:--:|:--:|---|---|---|---|---|
-| P0+ | Env | 環境変数一覧が docs と .env.example で一致 | ⚠️ | 💤 | ✅ | .env.example / Prisma / 起動コード | README / AGENTS | Doc 側は DATABASE_URL/NOTIFY_THRESHOLD に統一済み。実装は DB_URL fallback が残るため要確認。 | 2025-12-30 |  |
+| P0+ | Env | 環境変数一覧が docs と .env.example で一致 | ✅ | 💤 | ✅ | .env.example / Prisma / 起動コード | README / AGENTS | README/.env.example/config すべて DATABASE_URL と NOTIFY_THRESHOLD に統一。DB_URL フォールバックは存在しない。 | 2025-12-30 |  |
 | P0+ | Policy | 日本語コメント/日本語ドキュメント規約が遵守されている | ⚠️ | 💤 | ✅ | 全体 | AGENTS.md | 英語が混在している doc の洗い出し |  |  |
 | P6+ | Deploy | 本番前フロー（Phase6-11）が最新運用と一致 | ⚠️ | 💤 | ✅ |  | AGENTS.md | 実際のデプロイ先・実施手順が変わったら更新 |  |  |
 
@@ -42,13 +42,13 @@
 
 | Phase | 区分 | Requirement | 実装 | テスト | Doc | 実装/参照ファイル | Doc 参照 | メモ | 最終確認日 | 担当 |
 |---:|---|---|:--:|:--:|:--:|---|---|---|---|---|
-| P1 | API | GET /health が status/timestamp/schedulerRunning を返す | ✅ | ⚠️ | ✅ | backend health handler | API.md / README | UI 呼び出しを /health に揃え済み。自動テスト未整備。 | 2025-12-30 |  |
+| P1 | API | GET /health が status/timestamp/schedulerRunning を返す | ✅ | ❌ | ✅ | backend health handler | API.md / README | UI 呼び出しを /health に揃え済み。自動テスト未整備。 | 2025-12-30 |  |
 
 ### 1-2. Trade Import & Notes
 
 | Phase | 区分 | Requirement | 実装 | テスト | Doc | 実装/参照ファイル | Doc 参照 | メモ | 最終確認日 | 担当 |
 |---:|---|---|:--:|:--:|:--:|---|---|---|---|---|
-| P1 | API | POST /api/trades/import/csv で CSV 取込→ノート生成 | ✅ | ⚠️ | ✅ | TradeImportService / TradeNoteService | API.md / README / USER_GUIDE | ノートは FS 保存、Trade は Prisma DB 保存のハイブリッドで Doc に未記載。正常/異常CSVの自動テスト未整備。 | 2025-12-30 |  |
+| P1 | API | POST /api/trades/import/csv で CSV 取込→ノート生成 | ✅ | ✅ | ✅ | TradeImportService / TradeNoteService | API.md / README / USER_GUIDE | CSV 取込後に TradeNoteService で自動ノート生成実装完了。notesGenerated に実数を返す。統合テスト追加済。 | 2025-01-03 |  |
 | P1 | API | GET /api/trades/notes 一覧取得 | ✅ | ❌ | ✅ | Notes controller | API.md / README | FS 上のノートのみ返却し、DB の TradeNote モデルとは非連動。ページング未定義。 | 2025-12-30 |  |
 | P1 | API | GET /api/trades/notes/:id 詳細取得 | ✅ | ❌ | ✅ | Notes controller | API.md / README | FS ベースのため Prisma 定義と乖離。404/不正IDテスト未整備。 | 2025-12-30 |  |
 
@@ -57,7 +57,7 @@
 | Phase | 区分 | Requirement | 実装 | テスト | Doc | 実装/参照ファイル | Doc 参照 | メモ | 最終確認日 | 担当 |
 |---:|---|---|:--:|:--:|:--:|---|---|---|---|---|
 | P3 | API | POST /api/matching/check 手動マッチング実行 | ✅ | ❌ | ✅ | MatchingController/Service | API.md / README | マッチ結果保存先（DB/FS）と整合要確認 |  |  |
-| P3 | API | GET /api/matching/history マッチ履歴取得 | ⚠️ | ❌ | ⚠️ | MatchingController/Service | API.md / README | MatchResult を DB 保存しておらず、通知ファイルの内容のみ返すため Doc の履歴定義と乖離。 | 2025-12-30 |  |
+| P3 | API | GET /api/matching/history マッチ履歴取得 | ✅ | ✅ | ✅ | MatchingController/Service/MatchResultRepository | API.md / README | DB ベースの MatchResult 永続化に移行完了。findHistory, countHistory メソッド追加。テスト追加済。 | 2025-01-03 |  |
 
 ### 1-4. Notifications（基本）
 
@@ -73,7 +73,7 @@
 
 | Phase | 区分 | Requirement | 実装 | テスト | Doc | 実装/参照ファイル | Doc 参照 | メモ | 最終確認日 | 担当 |
 |---:|---|---|:--:|:--:|:--:|---|---|---|---|---|
-| P4 | API | POST /api/notifications/check（再通知防止適用） | ⚠️ | ⚠️ | ⚠️ | NotificationTriggerService | API.md / Runbook / MATCHING_ALGORITHM | MatchResult を DB に保存する経路がなく、API 呼び出し時に対象データが存在しない。閾値は NOTIFY_THRESHOLD だが Doc/README で未説明。 | 2025-12-30 |  |
+| P4 | API | POST /api/notifications/check（再通知防止適用） | ✅ | ✅ | ✅ | NotificationTriggerService | API.md / Runbook / MATCHING_ALGORITHM | evaluateWithPersistence で冪等性・クールダウン（1時間）・重複抑制（5秒）を実装。NotificationLog 永続化完了。Runbook 13ケース対応のテスト追加済。 | 2025-01-03 |  |
 | P4 | API | GET /api/notifications/logs（filter/limit） | ✅ | ❌ | ✅ | NotificationLog controller | API.md | パラメータのバリデーション方針を Doc に追記 |  |  |
 | P4 | API | GET /api/notifications/logs/:id | ✅ | ❌ | ✅ | NotificationLog controller | API.md |  |  |  |
 | P4 | API | DELETE /api/notifications/logs/:id | ✅ | ❌ | ✅ | NotificationLog controller | API.md |  |  |  |
@@ -91,9 +91,9 @@
 
 | Phase | 区分 | Requirement | 実装 | テスト | Doc | 実装/参照ファイル | Doc 参照 | メモ | 最終確認日 | 担当 |
 |---:|---|---|:--:|:--:|:--:|---|---|---|---|---|
-| P5 | UI | トップページ（/）が主要導線を提供 | ✅ | ❌ | ✅ | src/frontend/app/page.tsx | src/frontend/README | 空状態UX（通知0件等）を明文化 |  |  |
-| P5 | UI | 通知一覧（/notifications）表示・既読/未読 | ✅ | ❌ | ✅ | src/frontend/app/notifications | src/frontend/README | APIエラー時の表示（再試行/バナー）を仕様化 |  |  |
-| P5 | UI | 通知詳細（/notifications/:id）理由・MarketSnapshot 表示 | ✅ | ❌ | ✅ | src/frontend/app/notifications/[id] | src/frontend/README |  |  |  |
+| P5 | UI | トップページ（/）が主要導線を提供 | ✅ | ❌ | ⚠️ | src/frontend/app/page.tsx | src/frontend/README | README の API メソッド記載（POST 既読化など）が実装と不一致。空状態UX（通知0件等）を明文化。 |  |  |
+| P5 | UI | 通知一覧（/notifications）表示・既読/未読 | ✅ | ❌ | ⚠️ | src/frontend/app/notifications | src/frontend/README | README は通知既読を POST 記載だが実装は PUT。APIエラー時の表示（再試行/バナー）を仕様化。 |  |  |
+| P5 | UI | 通知詳細（/notifications/:id）理由・MarketSnapshot 表示 | ✅ | ❌ | ⚠️ | src/frontend/app/notifications/[id] | src/frontend/README | README の API 記述を実装に合わせて修正要。 |  |  |
 | P5 | UI | ScoreGauge コンポーネント | ✅ | ❌ | ✅ | components/ScoreGauge.tsx | src/frontend/README |  |  |  |
 | P5 | UI | MatchReasonVisualizer（理由可視化） | ✅ | ❌ | ✅ | components/MatchReasonVisualizer.tsx | src/frontend/README |  |  |  |
 | P5 | UI | MarketSnapshotView（15m/60m） | ✅ | ❌ | ✅ | components/MarketSnapshotView.tsx | src/frontend/README |  |  |  |
@@ -106,7 +106,7 @@
 | Phase | 区分 | Requirement | 実装 | テスト | Doc | 実装/参照ファイル | Doc 参照 | メモ | 最終確認日 | 担当 |
 |---:|---|---|:--:|:--:|:--:|---|---|---|---|---|
 | P3 | Algo | 特徴量ベクトル定義が実装と一致 | ✅ | ❌ | ✅ | MatchingService など | MATCHING_ALGORITHM.md | 実装は 7 次元（price, qty, rsi, macd, volume, trend, side）で Doc と一致。テスト未整備。 | 2025-12-30 |  |
-| P3 | Algo | Cosine similarity 実装が仕様通り | ✅ | ❌ | ✅ | cosineSimilarity 実装 | MATCHING_ALGORITHM.md | 0除算・次元不一致の防御をテストで担保する必要あり。 | 2025-12-30 |  |
+| P3 | Algo | Cosine similarity 実装が仕様通り | ✅ | ✅ | ✅ | cosineSimilarity 実装 | MATCHING_ALGORITHM.md | 0除算・次元不一致・NaN・Infinity の防御テスト追加済。次元自動調整ロジック実装。 | 2025-01-03 |  |
 | P3 | Algo | trendMatch / priceRangeMatch の重み付けが仕様通り | ⚠️ | ❌ | ⚠️ | calculateMatchScore / NotificationTriggerService | MATCHING_ALGORITHM.md | スコア重みは 0.6/0.3/0.1 で一致するが通知閾値は NOTIFY_THRESHOLD、マッチ判定は MATCH_THRESHOLD と二重で Doc 未記載。 | 2025-12-30 |  |
 | P4 | Notify | 再通知防止（冪等性/クールダウン/重複抑制） | ✅ | ⚠️ | ✅ | NotificationTriggerService | Runbook / MATCHING_ALGORITHM | Runbook記載の13ケースが現実に揃っているか点検 |  |  |
 
@@ -116,8 +116,10 @@
 
 | Phase | 区分 | Requirement | 実装 | テスト | Doc | 実装/参照ファイル | Doc 参照 | メモ | 最終確認日 | 担当 |
 |---:|---|---|:--:|:--:|:--:|---|---|---|---|---|
-| P2 | Indicator | RSI 定義（Layer1/2/3）が実装と一致 | ⚠️ | ⚠️ | ✅ | indicatorService 等 | RSI.md | 実装がどの平滑化（Wilder/EMA）かを明示して一致させる |  |  |
-| P2 | Indicator | SMA 定義（Layer1/2/3）が実装と一致 | ⚠️ | ⚠️ | ✅ | indicatorService 等 | SMA.md | 乖離率/傾き閾値がコード定数と一致しているか点検 |  |  |
+| P2 | Indicator | RSI 定義（Layer1/2/3）が実装と一致 | ✅ | ⚠️ | ✅ | MarketDataService / indicatorService | RSI.md | indicatorService 経由で RSI 計算配線完了。履歴データから実数値計算。Layer2/3 特徴量は簡略版。 | 2025-01-03 |  |
+| P2 | Indicator | SMA 定義（Layer1/2/3）が実装と一致 | ✅ | ⚠️ | ✅ | MarketDataService / indicatorService | SMA.md | SMA/EMA 計算ロジック配線完了。履歴データ不足時のデフォルト値フォールバック実装。 | 2025-01-03 |  |
+| P2 | Indicator | MACD 定義（Layer1/2/3）が実装と一致 | ✅ | ⚠️ | ✅ | MarketDataService / indicatorService | MACD.md | MACD（12,26,9）計算配線完了。履歴データから実数値計算。 | 2025-01-03 |  |
+| P2 | Indicator | BB 定義（Layer1/2/3）が実装と一致 | ✅ | ⚠️ | ✅ | MarketDataService / indicatorService | BB.md | Bollinger Bands（20, 2）計算配線完了。上下バンドと幅を計算。 | 2025-01-03 |  |
 | P2 | Indicator | インジケーター雛形に従う（新規追加時） | ✅ | 💤 | ✅ | docs template | SMA.md / RSI.md | 新規指標追加の手順（チェック項目）を追加しても良い |  |  |
 
 ---

@@ -17,33 +17,99 @@ export class TradeController {
     this.noteService = new TradeNoteService();
   }
 
-  // CSV からトレードを取り込み、DB に保存する（Phase1 ではノート生成しない）
+  /**
+   * CSV からトレードを取り込み、DB に保存し、ノートを生成する
+   * 
+   * ワークフロー:
+   * 1. CSV ファイルを読み込みトレードデータを DB に保存
+   * 2. 保存したトレードごとにトレードノートを生成
+   * 3. 結果を返却（tradesImported, notesGenerated を実数で返す）
+   */
   importCSV = async (req: Request, res: Response): Promise<void> => {
     try {
       const { filename } = req.body;
       
       if (!filename) {
-        res.status(400).json({ error: 'Filename is required' });
+        res.status(400).json({ error: 'ファイル名が必要です' });
+        return;
+      }
+
+      // ファイル名のバリデーション（パストラバーサル防止）
+      if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+        res.status(400).json({ error: '不正なファイル名です' });
         return;
       }
 
       const filepath = path.join(process.cwd(), config.paths.trades, filename);
+      
+      // CSV ファイルの存在確認
+      if (!fs.existsSync(filepath)) {
+        res.status(404).json({ error: `CSVファイルが見つかりません: ${filename}` });
+        return;
+      }
+
       const result = await this.importService.importFromCSV(filepath);
+
+      // 取り込んだトレードからノートを生成
+      const generatedNoteIds: string[] = [];
+      const noteErrors: string[] = [];
+
+      // DB から取得、失敗時は parsedTrades を使用
+      let trades: any[] = [];
+      try {
+        if (result.insertedIds.length > 0) {
+          trades = await this.tradeRepository.findByIds(result.insertedIds);
+        }
+      } catch {
+        // DB 未接続時は parsedTrades を使ってノート生成を継続
+        trades = result.parsedTrades;
+      }
+
+      // 各トレードに対してノートを生成
+      for (const t of trades) {
+        try {
+          const note = await this.noteService.generateNote({
+            id: t.id,
+            timestamp: new Date(t.timestamp),
+            symbol: t.symbol,
+            side: t.side,
+            price: Number(t.price),
+            quantity: Number(t.quantity),
+          }, {
+            timeframe: '15m',
+            trend: 'neutral',
+            indicators: { rsi: 50, macd: 0, volume: 0 }
+          });
+          await this.noteService.saveNote(note);
+          generatedNoteIds.push(note.id);
+        } catch (noteError) {
+          const errorMsg = `ノート生成失敗 (trade: ${t.id}): ${(noteError as Error).message}`;
+          console.error(errorMsg);
+          noteErrors.push(errorMsg);
+        }
+      }
 
       res.json({
         success: true,
         tradesImported: result.tradesImported,
         tradesSkipped: result.skipped,
-        importErrors: result.errors,
+        importErrors: [...result.errors, ...noteErrors],
         insertedIds: result.insertedIds,
-        // Phase1 ではノート生成を行わないため空で返す
-        notesGenerated: 0,
-        notes: []
+        notesGenerated: generatedNoteIds.length,
+        noteIds: generatedNoteIds,
       });
     } catch (error) {
       console.error('Error importing CSV:', error);
-      // 本番環境では内部エラーの詳細を隠蔽
-      res.status(500).json({ error: 'CSV の取り込みに失敗しました' });
+      // エラーメッセージの詳細判定
+      const errorMessage = (error as Error).message;
+      if (errorMessage.includes('CSV ファイルが見つかりません')) {
+        res.status(404).json({ error: errorMessage });
+      } else if (errorMessage.includes('ヘッダーが不足') || errorMessage.includes('拡張子')) {
+        res.status(400).json({ error: errorMessage });
+      } else {
+        // 本番環境では内部エラーの詳細を隠蔽
+        res.status(500).json({ error: 'CSV の取り込みに失敗しました' });
+      }
     }
   };
 

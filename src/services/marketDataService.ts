@@ -1,5 +1,6 @@
 import { MarketData } from '../models/types';
 import { config } from '../config';
+import { indicatorService, OHLCVData, FeatureSnapshot } from './indicators';
 
 /**
  * 市場データサービス
@@ -11,6 +12,10 @@ import { config } from '../config';
  * 制約:
  * - API レート制限を考慮（無料プランは8回/分）
  * - エラー時はシミュレーションデータにフォールバック
+ * 
+ * インジケーター計算:
+ * - 単一バーではなく履歴データを取得して計算
+ * - indicatorService を使用して実際の値を計算
  */
 
 /**
@@ -172,17 +177,111 @@ export class MarketDataService {
    * 複数ローソク足の市場インジケーターを計算
    * 
    * @param marketData - 市場データ
+   * @param historicalData - 計算に使用する履歴データ（オプション）
    * 
-   * 注意: 単一バーからの簡易計算のため精度は低い
-   * 本格的な計算は indicatorService を使用すること
+   * 注意: 
+   * - 履歴データがある場合は実際のインジケーター値を計算
+   * - 履歴データがない場合は簡易トレンド判定のみ
    */
-  calculateIndicators(marketData: MarketData): void {
-    // 単一バーからの簡易トレンド判定
+  calculateIndicators(marketData: MarketData, historicalData?: OHLCVData[]): void {
+    // 履歴データがない場合は簡易判定のみ
+    if (!historicalData || historicalData.length < 2) {
+      marketData.indicators = {
+        rsi: 50, // データ不足時は中立値
+        macd: 0, // データ不足時はゼロ
+        trend: this.determineTrend(marketData),
+      };
+      return;
+    }
+
+    // 履歴データから終値を抽出
+    const closes = historicalData.map(d => d.close);
+
+    // RSI 計算（期間: 14）
+    let rsi = 50; // デフォルト値
+    if (closes.length >= 15) {
+      const rsiValues = indicatorService.calculateRSI(closes, 14);
+      if (rsiValues.length > 0) {
+        rsi = rsiValues[rsiValues.length - 1];
+        // NaN チェック
+        if (isNaN(rsi)) rsi = 50;
+      }
+    }
+
+    // MACD 計算（12, 26, 9）
+    let macdValue = 0; // デフォルト値
+    if (closes.length >= 27) {
+      const macdResult = indicatorService.calculateMACD(closes, 12, 26, 9);
+      if (macdResult.histogram.length > 0) {
+        macdValue = macdResult.histogram[macdResult.histogram.length - 1];
+        // NaN チェック
+        if (isNaN(macdValue)) macdValue = 0;
+      }
+    }
+
+    // トレンド判定（RSI と価格変動から）
+    let trend: 'bullish' | 'bearish' | 'neutral' = 'neutral';
+    if (rsi > 60) {
+      trend = 'bullish';
+    } else if (rsi < 40) {
+      trend = 'bearish';
+    } else {
+      // RSI が中間の場合は価格変動で判定
+      trend = this.determineTrend(marketData);
+    }
+
     marketData.indicators = {
-      rsi: 50, // 単一バーでは計算不可、中立値をセット
-      macd: 0, // 単一バーでは計算不可
-      trend: this.determineTrend(marketData),
+      rsi,
+      macd: macdValue,
+      trend,
     };
+  }
+
+  /**
+   * 履歴データを含めた市場データを取得（インジケーター計算付き）
+   * 
+   * @param symbol - 銘柄シンボル
+   * @param timeframe - 時間足
+   * @returns インジケーターが計算された市場データ
+   */
+  async getCurrentMarketDataWithIndicators(
+    symbol: string,
+    timeframe: string = '15m'
+  ): Promise<MarketData> {
+    // 履歴データを取得（インジケーター計算に必要な本数）
+    const historicalData = await this.getHistoricalData(symbol, timeframe, 50);
+    
+    if (historicalData.length === 0) {
+      return this.generateSimulatedData(symbol, timeframe);
+    }
+
+    // 最新のデータを MarketData 形式に変換
+    const latest = historicalData[historicalData.length - 1];
+    const marketData: MarketData = {
+      symbol,
+      timestamp: latest.timestamp,
+      timeframe,
+      open: latest.open,
+      high: latest.high,
+      low: latest.low,
+      close: latest.close,
+      volume: latest.volume,
+    };
+
+    // OHLCV データに変換
+    const ohlcvData: OHLCVData[] = historicalData.map(d => ({
+      timestamp: d.timestamp,
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+      volume: d.volume,
+    }));
+
+    // インジケーターを計算
+    this.calculateIndicators(marketData, ohlcvData);
+
+    return marketData;
   }
 
   /**
