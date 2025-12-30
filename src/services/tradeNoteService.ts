@@ -1,6 +1,9 @@
 import { Trade, TradeNote, MarketContext, NoteStatus } from '../models/types';
 import { AISummaryService } from './aiSummaryService';
 import { MarketDataService } from './marketDataService';
+import { indicatorSettingsService } from './indicatorSettingsService';
+import { indicatorService, OHLCVData } from './indicators';
+import { IndicatorConfig } from '../models/indicatorConfig';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
@@ -116,6 +119,251 @@ export class TradeNoteService {
     };
 
     return note;
+  }
+
+  /**
+   * ユーザー設定のインジケーターを適用してノートを生成
+   * 
+   * CSVインポート時に呼び出され、サイドバーで設定したインジケーターを
+   * 市場データに適用してノートを生成する
+   * 
+   * @param trade - トレードデータ
+   * @param timeframe - 時間足（デフォルト: 15m）
+   * @returns 生成されたトレードノート
+   */
+  async generateNoteWithUserIndicators(
+    trade: Trade,
+    timeframe: string = '15m'
+  ): Promise<TradeNote> {
+    // === ユーザー設定のインジケーターを取得 ===
+    const activeConfigs = await indicatorSettingsService.getActiveConfigs();
+    
+    // インジケーター設定がない場合は従来の generateNote にフォールバック
+    if (activeConfigs.length === 0) {
+      console.log('[TradeNoteService] ユーザー設定インジケーターなし、デフォルト処理を使用');
+      return this.generateNote(trade, undefined, true);
+    }
+
+    // === 市場データを取得 ===
+    let ohlcvData: OHLCVData[] = [];
+    try {
+      const marketData = await this.marketDataService.getHistoricalData(
+        trade.symbol,
+        timeframe,
+        60 // 前後1時間のデータを取得
+      );
+      
+      if (marketData.length > 0) {
+        ohlcvData = marketData.map(md => ({
+          timestamp: md.timestamp,
+          open: md.open,
+          high: md.high,
+          low: md.low,
+          close: md.close,
+          volume: md.volume,
+        }));
+      }
+    } catch (error) {
+      console.warn('[TradeNoteService] 市場データ取得失敗、モックデータを使用:', error);
+    }
+
+    // 市場データがない場合はモックデータを生成
+    if (ohlcvData.length === 0) {
+      ohlcvData = this.generateMockOHLCV(trade, 50);
+    }
+
+    // === ユーザー設定のインジケーターを計算 ===
+    const calculatedIndicators: Record<string, number | null> = {};
+    
+    for (const indicatorConfig of activeConfigs) {
+      try {
+        // IndicatorService.calculate() を使用して型安全に計算
+        const result = indicatorService.calculate(
+          indicatorConfig.indicatorId,
+          ohlcvData,
+          indicatorConfig.params
+        );
+        
+        // extractLatestValue() で最新値を取得
+        const latestValue = indicatorService.extractLatestValue(result);
+        calculatedIndicators[indicatorConfig.label || indicatorConfig.indicatorId] = latestValue;
+      } catch (error) {
+        console.warn(`[TradeNoteService] インジケーター計算失敗 (${indicatorConfig.indicatorId}):`, error);
+        calculatedIndicators[indicatorConfig.label || indicatorConfig.indicatorId] = null;
+      }
+    }
+
+    // === 基本インジケーター値の抽出（後方互換性） ===
+    const rsiValue = this.extractIndicatorValue(calculatedIndicators, 'RSI');
+    const macdValue = this.extractIndicatorValue(calculatedIndicators, 'MACD');
+    
+    // === トレンドの判定 ===
+    const trend = this.determineTrend(calculatedIndicators, ohlcvData);
+
+    // === 市場コンテキストを構築 ===
+    const latestOHLCV = ohlcvData[ohlcvData.length - 1];
+    const marketContext: MarketContext = {
+      timeframe,
+      trend,
+      indicators: {
+        rsi: rsiValue ?? undefined,
+        macd: macdValue ?? undefined,
+        volume: latestOHLCV?.volume,
+      },
+      calculatedIndicators,
+    };
+
+    // === AI 要約を生成 ===
+    const aiMarketContext = {
+      trend: this.convertTrendForAI(trend),
+      rsi: rsiValue ?? undefined,
+      macd: macdValue ?? undefined,
+      timeframe,
+      // ユーザー設定インジケーターの情報を追加
+      additionalIndicators: Object.entries(calculatedIndicators)
+        .filter(([_, v]) => v !== null)
+        .map(([label, value]) => `${label}: ${value?.toFixed(2)}`)
+        .join(', '),
+    };
+
+    const aiSummary = await this.aiService.generateTradeSummary({
+      symbol: trade.symbol,
+      side: trade.side,
+      price: trade.price,
+      quantity: trade.quantity,
+      timestamp: trade.timestamp,
+      marketContext: aiMarketContext,
+    });
+
+    // === 特徴量を抽出 ===
+    const features = this.extractFeaturesWithIndicators(trade, marketContext, calculatedIndicators);
+
+    // === ノートを構築 ===
+    const note: TradeNote = {
+      id: uuidv4(),
+      tradeId: trade.id,
+      timestamp: trade.timestamp,
+      symbol: trade.symbol,
+      side: trade.side,
+      entryPrice: trade.price,
+      quantity: trade.quantity,
+      marketContext,
+      aiSummary: aiSummary.summary,
+      features,
+      createdAt: new Date(),
+      status: 'draft',
+    };
+
+    console.log(`[TradeNoteService] ユーザー設定インジケーター ${activeConfigs.length}個を適用してノート生成完了: ${note.id}`);
+    return note;
+  }
+
+  /**
+   * モック OHLCV データを生成（市場データ取得失敗時用）
+   */
+  private generateMockOHLCV(trade: Trade, count: number = 50): OHLCVData[] {
+    const data: OHLCVData[] = [];
+    const basePrice = trade.price;
+    const baseTime = trade.timestamp.getTime();
+    
+    for (let i = count; i > 0; i--) {
+      const variation = (Math.random() - 0.5) * basePrice * 0.02;
+      const open = basePrice + variation;
+      const close = basePrice + (Math.random() - 0.5) * basePrice * 0.02;
+      const high = Math.max(open, close) + Math.random() * basePrice * 0.01;
+      const low = Math.min(open, close) - Math.random() * basePrice * 0.01;
+      
+      data.push({
+        timestamp: new Date(baseTime - i * 15 * 60 * 1000), // 15分足
+        open,
+        high,
+        low,
+        close,
+        volume: 1000 + Math.random() * 9000,
+      });
+    }
+    
+    return data;
+  }
+
+  /**
+   * 計算済みインジケーターから特定のインジケーター値を抽出
+   */
+  private extractIndicatorValue(
+    calculatedIndicators: Record<string, number | null>,
+    prefix: string
+  ): number | null {
+    for (const [label, value] of Object.entries(calculatedIndicators)) {
+      if (label.toUpperCase().startsWith(prefix.toUpperCase()) && value !== null) {
+        return value;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * インジケーター値からトレンドを判定
+   */
+  private determineTrend(
+    calculatedIndicators: Record<string, number | null>,
+    ohlcvData: OHLCVData[]
+  ): 'bullish' | 'bearish' | 'neutral' {
+    // RSI によるトレンド判定
+    const rsi = this.extractIndicatorValue(calculatedIndicators, 'RSI');
+    if (rsi !== null) {
+      if (rsi > 60) return 'bullish';
+      if (rsi < 40) return 'bearish';
+    }
+    
+    // SMA によるトレンド判定（価格が SMA より上なら強気）
+    const sma = this.extractIndicatorValue(calculatedIndicators, 'SMA');
+    if (sma !== null && ohlcvData.length > 0) {
+      const latestClose = ohlcvData[ohlcvData.length - 1].close;
+      if (latestClose > sma * 1.01) return 'bullish';
+      if (latestClose < sma * 0.99) return 'bearish';
+    }
+    
+    return 'neutral';
+  }
+
+  /**
+   * ユーザー設定インジケーターを含めた特徴量を抽出
+   */
+  private extractFeaturesWithIndicators(
+    trade: Trade,
+    marketContext: MarketContext,
+    calculatedIndicators: Record<string, number | null>
+  ): number[] {
+    const features: number[] = [];
+
+    // 価格関連の特徴量
+    features.push(trade.price);
+    features.push(trade.quantity);
+
+    // 基本インジケーター値
+    features.push(marketContext.indicators?.rsi ?? 50);
+    features.push(marketContext.indicators?.macd ?? 0);
+    features.push(marketContext.indicators?.volume ?? 0);
+
+    // トレンドの数値エンコーディング
+    const trendValue = 
+      marketContext.trend === 'bullish' ? 1 :
+      marketContext.trend === 'bearish' ? -1 : 0;
+    features.push(trendValue);
+
+    // 売買方向のエンコーディング
+    features.push(trade.side === 'buy' ? 1 : -1);
+
+    // ユーザー設定インジケーターの値を特徴量に追加
+    // 一貫した順序を維持するためにソートしてから追加
+    const sortedIndicators = Object.entries(calculatedIndicators)
+      .sort(([a], [b]) => a.localeCompare(b));
+    
+    for (const [_, value] of sortedIndicators) {
+      features.push(value ?? 0);
+    }
+
+    return features;
   }
 
   /**

@@ -959,7 +959,242 @@ export class IndicatorService {
     if (bearishSignals > bullishSignals + 1) return 'downtrend';
     return 'neutral';
   }
+
+  /**
+   * インジケーター ID に基づいて適切な計算メソッドを呼び出す汎用メソッド
+   * 
+   * @param indicatorId - インジケーター識別子
+   * @param ohlcvData - OHLCV データ配列
+   * @param params - インジケーターパラメータ
+   * @returns 計算結果
+   */
+  calculate(
+    indicatorId: string,
+    ohlcvData: OHLCVData[],
+    params: IndicatorCalculateParams
+  ): IndicatorCalculateResult {
+    const closes = ohlcvData.map(d => d.close);
+    const highs = ohlcvData.map(d => d.high);
+    const lows = ohlcvData.map(d => d.low);
+    const volumes = ohlcvData.map(d => d.volume);
+
+    switch (indicatorId.toLowerCase()) {
+      case 'rsi':
+        return { type: 'array', values: this.calculateRSI(closes, params.period ?? 14) };
+      
+      case 'sma':
+        return { type: 'array', values: this.calculateSMA(closes, params.period ?? 20) };
+      
+      case 'ema':
+        return { type: 'array', values: this.calculateEMA(closes, params.period ?? 20) };
+      
+      case 'macd':
+        return { type: 'macd', result: this.calculateMACD(
+          closes,
+          params.fastPeriod ?? 12,
+          params.slowPeriod ?? 26,
+          params.signalPeriod ?? 9
+        )};
+      
+      case 'bb':
+        return { type: 'bollingerBands', result: this.calculateBollingerBands(
+          closes,
+          params.period ?? 20,
+          params.stdDev ?? 2
+        )};
+      
+      case 'atr':
+        return { type: 'atr', result: this.calculateATR(highs, lows, closes, params.period ?? 14) };
+      
+      case 'stochastic':
+        return { type: 'stochastic', result: this.calculateStochastic(
+          highs,
+          lows,
+          closes,
+          params.kPeriod ?? 14,
+          params.dPeriod ?? 3
+        )};
+      
+      case 'obv':
+        return { type: 'array', values: this.calculateOBV(closes, volumes) };
+      
+      case 'vwap':
+        return { type: 'array', values: this.calculateVWAP(closes, volumes, params.period) };
+      
+      case 'williamsr':
+        return { type: 'array', values: this.calculateWilliamsR(
+          highs,
+          lows,
+          closes,
+          params.period ?? 14
+        )};
+      
+      case 'cci':
+        return { type: 'array', values: this.calculateCCI(
+          highs,
+          lows,
+          closes,
+          params.period ?? 20
+        )};
+      
+      case 'aroon':
+        return { type: 'aroon', result: this.calculateAroon(highs, lows, params.period ?? 25) };
+      
+      case 'roc':
+        return { type: 'array', values: this.calculateROC(closes, params.period ?? 12) };
+      
+      case 'mfi':
+        return { type: 'array', values: this.calculateMFI(
+          highs,
+          lows,
+          closes,
+          volumes,
+          params.period ?? 14
+        )};
+      
+      case 'cmf':
+        return { type: 'array', values: this.calculateCMF(
+          highs,
+          lows,
+          closes,
+          volumes,
+          params.period ?? 20
+        )};
+      
+      case 'dema':
+        return { type: 'array', values: this.calculateDEMA(closes, params.period ?? 20) };
+      
+      case 'tema':
+        return { type: 'array', values: this.calculateTEMA(closes, params.period ?? 20) };
+      
+      case 'kc':
+        return { type: 'keltnerChannel', result: this.calculateKeltnerChannel(
+          highs,
+          lows,
+          closes,
+          params.emaPeriod ?? params.period ?? 20,
+          params.multiplier ?? 2
+        )};
+      
+      case 'psar':
+        return { type: 'parabolicSAR', result: this.calculateParabolicSAR(
+          highs,
+          lows,
+          closes,
+          params.step ?? 0.02,
+          params.max ?? 0.2
+        )};
+      
+      case 'ichimoku':
+        return { type: 'ichimoku', result: this.calculateIchimokuCloud(
+          highs,
+          lows,
+          closes,
+          params.tenkanPeriod ?? 9,
+          params.kijunPeriod ?? 26,
+          params.senkouSpanBPeriod ?? 52,
+          params.chikouOffset ?? 26
+        )};
+      
+      default:
+        console.warn(`[IndicatorService] 未対応のインジケーター: ${indicatorId}`);
+        return { type: 'array', values: [] };
+    }
+  }
+
+  /**
+   * 計算結果から最新の数値を抽出するヘルパー
+   * 
+   * @param result - calculate() の結果
+   * @returns 最新の数値（取得できない場合は null）
+   */
+  extractLatestValue(result: IndicatorCalculateResult): number | null {
+    switch (result.type) {
+      case 'array':
+        return result.values.length > 0 ? result.values[result.values.length - 1] : null;
+      
+      case 'macd':
+        return result.result.macdLine.length > 0 
+          ? result.result.macdLine[result.result.macdLine.length - 1] 
+          : null;
+      
+      case 'bollingerBands':
+        return result.result.middleBand.length > 0 
+          ? result.result.middleBand[result.result.middleBand.length - 1] 
+          : null;
+      
+      case 'atr':
+        return result.result.atrLine.length > 0 
+          ? result.result.atrLine[result.result.atrLine.length - 1] 
+          : null;
+      
+      case 'stochastic':
+        return result.result.k.length > 0 
+          ? result.result.k[result.result.k.length - 1] 
+          : null;
+      
+      case 'aroon':
+        return result.result.up.length > 0 
+          ? result.result.up[result.result.up.length - 1] 
+          : null;
+      
+      case 'keltnerChannel':
+        return result.result.middleLine.length > 0 
+          ? result.result.middleLine[result.result.middleLine.length - 1] 
+          : null;
+      
+      case 'parabolicSAR':
+        return result.result.sar.length > 0 
+          ? result.result.sar[result.result.sar.length - 1] 
+          : null;
+      
+      case 'ichimoku':
+        return result.result.baseLine.length > 0 
+          ? result.result.baseLine[result.result.baseLine.length - 1] 
+          : null;
+      
+      default:
+        return null;
+    }
+  }
 }
+
+/**
+ * インジケーター計算パラメータの型定義
+ */
+export interface IndicatorCalculateParams {
+  period?: number;
+  fastPeriod?: number;
+  slowPeriod?: number;
+  signalPeriod?: number;
+  stdDev?: number;
+  kPeriod?: number;
+  dPeriod?: number;
+  emaPeriod?: number;
+  atrPeriod?: number;
+  multiplier?: number;
+  step?: number;
+  max?: number;
+  tenkanPeriod?: number;
+  kijunPeriod?: number;
+  senkouSpanBPeriod?: number;
+  chikouOffset?: number;
+}
+
+/**
+ * インジケーター計算結果の判別可能なユニオン型
+ * 型安全にインジケーター計算結果を扱うための discriminated union
+ */
+export type IndicatorCalculateResult =
+  | { type: 'array'; values: number[] }
+  | { type: 'macd'; result: MACDResult }
+  | { type: 'bollingerBands'; result: BollingerBandsResult }
+  | { type: 'atr'; result: ATRResultType }
+  | { type: 'stochastic'; result: StochasticResult }
+  | { type: 'aroon'; result: AroonResult }
+  | { type: 'keltnerChannel'; result: KeltnerChannelResult }
+  | { type: 'parabolicSAR'; result: ParabolicSARResult }
+  | { type: 'ichimoku'; result: IchimokuCloudResult };
 
 // シングルトンインスタンスをエクスポート
 export const indicatorService = new IndicatorService();

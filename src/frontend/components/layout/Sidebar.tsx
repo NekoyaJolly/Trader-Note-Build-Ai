@@ -5,13 +5,29 @@
  * 
  * デスクトップ画面で表示される固定サイドバー
  * プロジェクト内の全ページへの遷移を提供
+ * インジケーター設定機能を含む
  * 
  * @see docs/phase12/UI_DESIGN_GUIDE.md
  */
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import IndicatorConfigModal from "@/components/IndicatorConfigModal";
+import { 
+  fetchIndicatorSettings, 
+  fetchIndicatorMetadata, 
+  saveIndicatorConfig,
+  deleteIndicatorConfig,
+} from "@/lib/api";
+import type { 
+  IndicatorMetadata, 
+  IndicatorConfig, 
+  IndicatorParams,
+  IndicatorId,
+  IndicatorCategory,
+  CATEGORY_INFO,
+} from "@/types/indicator";
 
 // ナビゲーションアイテムの型定義
 interface NavItem {
@@ -83,6 +99,21 @@ const ChevronIcon = ({ isOpen }: { isOpen: boolean }) => (
   </svg>
 );
 
+// インジケーターアイコン
+const IndicatorIcon = () => (
+  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+  </svg>
+);
+
+// カテゴリ情報
+const CATEGORY_DISPLAY: Record<IndicatorCategory, { label: string; color: string }> = {
+  momentum: { label: 'モメンタム', color: 'text-blue-400' },
+  trend: { label: 'トレンド', color: 'text-green-400' },
+  volatility: { label: 'ボラティリティ', color: 'text-yellow-400' },
+  volume: { label: '出来高', color: 'text-purple-400' },
+};
+
 // ナビゲーション構造定義
 const navItems: NavItem[] = [
   {
@@ -145,6 +176,93 @@ export default function Sidebar({ isCollapsed = false, onCollapsedChange }: Side
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({
     "/notes": true, // デフォルトで展開
   });
+
+  // カテゴリアコーディオンの状態
+  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({
+    main: true,      // メインメニューはデフォルト展開
+    tools: false,    // 分析ツール
+    utility: false,  // ユーティリティ
+  });
+
+  // カテゴリの展開/折りたたみトグル
+  const toggleCategory = (category: string) => {
+    setExpandedCategories(prev => ({
+      ...prev,
+      [category]: !prev[category],
+    }));
+  };
+
+  // インジケーター関連の状態
+  const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false);
+  const [indicators, setIndicators] = useState<IndicatorMetadata[]>([]);
+  const [activeConfigs, setActiveConfigs] = useState<IndicatorConfig[]>([]);
+  const [selectedIndicator, setSelectedIndicator] = useState<IndicatorMetadata | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // インジケーター設定を読み込む
+  const loadIndicatorData = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const [metadataRes, settingsRes] = await Promise.all([
+        fetchIndicatorMetadata(),
+        fetchIndicatorSettings(),
+      ]);
+      setIndicators(metadataRes.indicators);
+      setActiveConfigs(settingsRes.activeSet.configs.filter(c => c.enabled));
+    } catch (error) {
+      console.error('インジケーター設定の読み込みエラー:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // 初回ロード
+  useEffect(() => {
+    loadIndicatorData();
+  }, [loadIndicatorData]);
+
+  // インジケーターがアクティブか判定
+  const isIndicatorActive = (indicatorId: IndicatorId): boolean => {
+    return activeConfigs.some(c => c.indicatorId === indicatorId);
+  };
+
+  // 指定インジケーターの設定を取得
+  const getExistingConfig = (indicatorId: IndicatorId): IndicatorConfig | undefined => {
+    return activeConfigs.find(c => c.indicatorId === indicatorId);
+  };
+
+  // インジケーター保存ハンドラ
+  const handleSaveIndicator = async (params: IndicatorParams) => {
+    if (!selectedIndicator) return;
+    try {
+      await saveIndicatorConfig({
+        indicatorId: selectedIndicator.id,
+        params,
+        enabled: true,
+      });
+      await loadIndicatorData();
+      setIsModalOpen(false);
+      setSelectedIndicator(null);
+    } catch (error) {
+      console.error('インジケーター保存エラー:', error);
+      alert('インジケーターの保存に失敗しました');
+    }
+  };
+
+  // インジケーター削除ハンドラ
+  const handleDeleteIndicator = async () => {
+    if (!selectedIndicator) return;
+    try {
+      await deleteIndicatorConfig(selectedIndicator.id);
+      await loadIndicatorData();
+      setIsModalOpen(false);
+      setSelectedIndicator(null);
+    } catch (error) {
+      console.error('インジケーター削除エラー:', error);
+      alert('インジケーターの削除に失敗しました');
+    }
+  };
 
   // アクティブ判定
   const isActive = (href: string) => {
@@ -278,25 +396,155 @@ export default function Sidebar({ isCollapsed = false, onCollapsedChange }: Side
       </div>
 
       {/* ナビゲーション */}
-      <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
-        {/* メインナビゲーション */}
+      <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-2">
+        {/* メインメニュー（アコーディオン） */}
         <div className="space-y-1">
           {!isCollapsed && (
-            <p className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-              メインメニュー
-            </p>
+            <button
+              onClick={() => toggleCategory('main')}
+              className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider hover:text-gray-300 transition-colors"
+            >
+              <span>メインメニュー</span>
+              <ChevronIcon isOpen={expandedCategories.main} />
+            </button>
           )}
-          {navItems.slice(0, 4).map(item => renderNavItem(item))}
+          {(isCollapsed || expandedCategories.main) && (
+            <div className="space-y-1">
+              {navItems.slice(0, 4).map(item => renderNavItem(item))}
+            </div>
+          )}
         </div>
 
-        {/* ユーティリティ */}
-        <div className="pt-4 mt-4 border-t border-slate-700 space-y-1">
+        {/* 分析ツール（アコーディオン） */}
+        <div className="pt-2 mt-2 border-t border-slate-700 space-y-1">
           {!isCollapsed && (
-            <p className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-              ユーティリティ
-            </p>
+            <button
+              onClick={() => toggleCategory('tools')}
+              className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider hover:text-gray-300 transition-colors"
+            >
+              <span className="flex items-center gap-2">
+                分析ツール
+                {activeConfigs.length > 0 && (
+                  <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-cyan-500/30 text-cyan-300">
+                    {activeConfigs.length}
+                  </span>
+                )}
+              </span>
+              <ChevronIcon isOpen={expandedCategories.tools} />
+            </button>
           )}
-          {navItems.slice(4).map(item => renderNavItem(item))}
+          {(isCollapsed || expandedCategories.tools) && (
+            <>
+              {/* インジケーターボタン */}
+              <div className="w-full">
+                <button
+                  onClick={() => setIndicatorMenuOpen(!indicatorMenuOpen)}
+                  className={`
+                    w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg
+                    text-sm font-medium transition-smooth group
+                    ${indicatorMenuOpen || activeConfigs.length > 0
+                      ? "bg-gradient-to-r from-cyan-500/20 to-blue-500/20 text-white border border-cyan-500/30"
+                      : "text-gray-300 hover:bg-slate-700/50 hover:text-white"
+                    }
+                  `}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className={`${indicatorMenuOpen || activeConfigs.length > 0 ? "text-cyan-400" : "text-gray-400 group-hover:text-gray-300"}`}>
+                      <IndicatorIcon />
+                    </span>
+                    {!isCollapsed && (
+                      <span className="flex items-center gap-2">
+                        インジケーター
+                        {activeConfigs.length > 0 && (
+                          <span className="px-1.5 py-0.5 text-xs rounded-full bg-cyan-500/30 text-cyan-300">
+                            {activeConfigs.length}
+                          </span>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                  {!isCollapsed && <ChevronIcon isOpen={indicatorMenuOpen} />}
+                </button>
+
+                {/* インジケーター一覧メニュー */}
+                {!isCollapsed && indicatorMenuOpen && (
+                  <div className="mt-1 ml-4 border-l border-slate-700 pl-2 space-y-1 max-h-64 overflow-y-auto">
+                    {isLoading ? (
+                      <p className="text-xs text-gray-500 px-3 py-2">読み込み中...</p>
+                    ) : (
+                      // カテゴリ別に表示
+                      (['trend', 'momentum', 'volatility', 'volume'] as IndicatorCategory[]).map(category => {
+                        const categoryIndicators = indicators.filter(i => i.category === category);
+                        if (categoryIndicators.length === 0) return null;
+                        
+                        return (
+                          <div key={category} className="mb-2">
+                            <p className={`px-3 py-1 text-[10px] font-semibold uppercase tracking-wider ${CATEGORY_DISPLAY[category].color}`}>
+                              {CATEGORY_DISPLAY[category].label}
+                            </p>
+                            {categoryIndicators.map(indicator => {
+                              const isActive = isIndicatorActive(indicator.id);
+                              const config = getExistingConfig(indicator.id);
+                              
+                              return (
+                                <button
+                                  key={indicator.id}
+                                  onClick={() => {
+                                    setSelectedIndicator(indicator);
+                                    setIsModalOpen(true);
+                                  }}
+                                  className={`
+                                    w-full flex items-center justify-between px-3 py-1.5 rounded-md
+                                    text-xs transition-all duration-200
+                                    ${isActive
+                                      ? "text-white bg-slate-700/50"
+                                      : "text-gray-400 hover:text-white hover:bg-slate-700/30"
+                                    }
+                                  `}
+                                >
+                                  <span className="truncate">
+                                    {config?.label || indicator.displayName}
+                                  </span>
+                                  {isActive && (
+                                    <span 
+                                      className="w-2 h-2 rounded-full flex-shrink-0"
+                                      style={{
+                                        background: 'linear-gradient(90deg, #06b6d4, #3b82f6)',
+                                        boxShadow: '0 0 8px #06b6d4, 0 0 16px rgba(6, 182, 212, 0.5)',
+                                        animation: 'neon-pulse 2s ease-in-out infinite',
+                                      }}
+                                    />
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* ユーティリティ（アコーディオン） */}
+        <div className="pt-2 mt-2 border-t border-slate-700 space-y-1">
+          {!isCollapsed && (
+            <button
+              onClick={() => toggleCategory('utility')}
+              className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider hover:text-gray-300 transition-colors"
+            >
+              <span>ユーティリティ</span>
+              <ChevronIcon isOpen={expandedCategories.utility} />
+            </button>
+          )}
+          {(isCollapsed || expandedCategories.utility) && (
+            <div className="space-y-1">
+              {navItems.slice(4).map(item => renderNavItem(item))}
+            </div>
+          )}
         </div>
       </nav>
 
@@ -314,6 +562,32 @@ export default function Sidebar({ isCollapsed = false, onCollapsedChange }: Side
           </div>
         </div>
       )}
+
+      {/* インジケーター設定モーダル */}
+      {isModalOpen && selectedIndicator && (
+        <IndicatorConfigModal
+          indicator={selectedIndicator}
+          existingConfig={getExistingConfig(selectedIndicator.id)}
+          onSave={handleSaveIndicator}
+          onClose={() => {
+            setIsModalOpen(false);
+            setSelectedIndicator(null);
+          }}
+          onDelete={isIndicatorActive(selectedIndicator.id) ? handleDeleteIndicator : undefined}
+        />
+      )}
+
+      {/* ネオンアニメーション用のスタイル */}
+      <style jsx>{`
+        @keyframes neon-pulse {
+          0%, 100% {
+            box-shadow: 0 0 8px #06b6d4, 0 0 16px rgba(6, 182, 212, 0.5);
+          }
+          50% {
+            box-shadow: 0 0 12px #06b6d4, 0 0 24px rgba(6, 182, 212, 0.7);
+          }
+        }
+      `}</style>
     </aside>
   );
 }

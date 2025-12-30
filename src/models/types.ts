@@ -27,11 +27,15 @@ export interface Trade {
 export interface MarketContext {
   timeframe: string; // 例: '15m', '1h', '4h'
   trend: 'bullish' | 'bearish' | 'neutral';
+  // 基本インジケーター（後方互換性のため維持）
   indicators?: {
     rsi?: number;
     macd?: number;
     volume?: number;
   };
+  // ユーザー設定インジケーターの計算結果
+  // キー例: 'RSI(14)', 'SMA(20)', 'BB(20,2)'
+  calculatedIndicators?: Record<string, number | null>;
 }
 
 /**

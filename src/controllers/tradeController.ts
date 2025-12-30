@@ -67,20 +67,17 @@ export class TradeController {
       }
 
       // 各トレードに対してノートを生成
+      // ユーザー設定のインジケーターを適用してノートを生成
       for (const t of trades) {
         try {
-          const note = await this.noteService.generateNote({
+          const note = await this.noteService.generateNoteWithUserIndicators({
             id: t.id,
             timestamp: new Date(t.timestamp),
             symbol: t.symbol,
             side: t.side,
             price: Number(t.price),
             quantity: Number(t.quantity),
-          }, {
-            timeframe: '15m',
-            trend: 'neutral',
-            indicators: { rsi: 50, macd: 0, volume: 0 }
-          });
+          }, '15m');
           await this.noteService.saveNote(note);
           generatedNoteIds.push(note.id);
         } catch (noteError) {
@@ -134,28 +131,37 @@ export class TradeController {
       const result = await this.importService.importFromCSV(savePath);
 
       // 取り込んだトレードから Draft ノートを作成（DB 未設定でも parsedTrades を用いて生成可能）
-      let trades = [] as Awaited<ReturnType<typeof this.tradeRepository.findByIds>>;
+      // ユーザー設定のインジケーターを適用してノートを生成
+      type TradeRecord = { id: string; timestamp: Date; symbol: string; side: 'buy' | 'sell'; price: number | { toNumber(): number }; quantity: number | { toNumber(): number } };
+      let trades: TradeRecord[] = [];
       try {
-        trades = await this.tradeRepository.findByIds(result.insertedIds);
+        const dbTrades = await this.tradeRepository.findByIds(result.insertedIds);
+        trades = dbTrades.map(t => ({
+          id: t.id,
+          timestamp: t.timestamp,
+          symbol: t.symbol,
+          side: t.side as 'buy' | 'sell',
+          price: t.price,
+          quantity: t.quantity,
+        }));
       } catch {
         // DB 未接続時は parsedTrades を使ってノート生成を継続
-        trades = result.parsedTrades as any;
+        trades = result.parsedTrades as TradeRecord[];
       }
       const generatedNoteIds: string[] = [];
       for (const t of trades) {
         try {
-          const note = await this.noteService.generateNote({
-            id: t.id as any,
-            timestamp: (t as any).timestamp as Date,
-            symbol: (t as any).symbol,
-            side: (t as any).side,
-            price: Number((t as any).price),
-            quantity: Number((t as any).quantity),
-          }, {
-            timeframe: '15m',
-            trend: 'neutral',
-            indicators: { rsi: 50, macd: 0, volume: 0 }
-          });
+          // Decimal型（Prisma）の場合はtoNumber()で変換、それ以外はNumber()
+          const price = typeof t.price === 'object' && 'toNumber' in t.price ? t.price.toNumber() : Number(t.price);
+          const quantity = typeof t.quantity === 'object' && 'toNumber' in t.quantity ? t.quantity.toNumber() : Number(t.quantity);
+          const note = await this.noteService.generateNoteWithUserIndicators({
+            id: t.id,
+            timestamp: new Date(t.timestamp),
+            symbol: t.symbol,
+            side: t.side,
+            price,
+            quantity,
+          }, '15m');
           await this.noteService.saveNote(note);
           generatedNoteIds.push(note.id);
         } catch (noteError) {

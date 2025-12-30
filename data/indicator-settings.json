@@ -1,0 +1,110 @@
+{
+  "activeSet": {
+    "name": "デフォルト",
+    "configs": [
+      {
+        "configId": "rsi-14",
+        "indicatorId": "rsi",
+        "label": "RSI(14)",
+        "params": {
+          "period": 14
+        },
+        "enabled": true
+      },
+      {
+        "configId": "sma-20",
+        "indicatorId": "sma",
+        "label": "SMA(20)",
+        "params": {
+          "period": 20
+        },
+        "enabled": true
+      },
+      {
+        "configId": "ema-20",
+        "indicatorId": "ema",
+        "label": "EMA(20)",
+        "params": {
+          "period": 20
+        },
+        "enabled": true
+      },
+      {
+        "configId": "macd-default",
+        "indicatorId": "macd",
+        "label": "MACD",
+        "params": {
+          "fastPeriod": 12,
+          "slowPeriod": 26,
+          "signalPeriod": 9
+        },
+        "enabled": true
+      },
+      {
+        "configId": "bb-20",
+        "indicatorId": "bb",
+        "label": "BB(20,2)",
+        "params": {
+          "period": 20,
+          "stdDev": 2
+        },
+        "enabled": true
+      },
+      {
+        "configId": "atr-14",
+        "indicatorId": "atr",
+        "label": "ATR(14)",
+        "params": {
+          "period": 14
+        },
+        "enabled": true
+      },
+      {
+        "configId": "stoch-14-3",
+        "indicatorId": "stochastic",
+        "label": "Stoch(14,3)",
+        "params": {
+          "kPeriod": 14,
+          "dPeriod": 3
+        },
+        "enabled": true
+      },
+      {
+        "configId": "obv-default",
+        "indicatorId": "obv",
+        "label": "OBV",
+        "params": {},
+        "enabled": true
+      },
+      {
+        "configId": "vwap-default",
+        "indicatorId": "vwap",
+        "label": "VWAP",
+        "params": {},
+        "enabled": true
+      },
+      {
+        "configId": "williamsR-period21",
+        "indicatorId": "williamsR",
+        "label": "WILLIAMSR(21)",
+        "params": {
+          "period": 21
+        },
+        "enabled": true
+      },
+      {
+        "configId": "cmf-period20",
+        "indicatorId": "cmf",
+        "label": "CMF(20)",
+        "params": {
+          "period": 20
+        },
+        "enabled": true
+      }
+    ],
+    "createdAt": "2025-12-30T18:47:34.801Z",
+    "updatedAt": "2025-12-30T18:53:10.677Z"
+  },
+  "updatedAt": "2025-12-30T18:53:10.677Z",
+  "hasCompletedSetup": true
+}

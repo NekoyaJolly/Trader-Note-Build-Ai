@@ -352,3 +352,126 @@ export async function fetchOrderConfirmation(params: {
   }
   return response.json();
 }
+
+// ============================================
+// インジケーター設定 API
+// ============================================
+
+import type {
+  UserIndicatorSettings,
+  IndicatorMetadata,
+  IndicatorConfig,
+  SaveIndicatorConfigRequest,
+  IndicatorId,
+} from "@/types/indicator";
+
+/**
+ * インジケーター設定を取得
+ * GET /api/indicators/settings
+ */
+export async function fetchIndicatorSettings(): Promise<UserIndicatorSettings> {
+  const response = await fetch(`${API_BASE_URL}/api/indicators/settings`, {
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(
+      `インジケーター設定の取得に失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * インジケーターメタデータを取得
+ * GET /api/indicators/metadata
+ */
+export async function fetchIndicatorMetadata(category?: string): Promise<{
+  indicators: IndicatorMetadata[];
+  categories: string[];
+}> {
+  const url = category
+    ? `${API_BASE_URL}/api/indicators/metadata?category=${category}`
+    : `${API_BASE_URL}/api/indicators/metadata`;
+  
+  const response = await fetch(url, {
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(
+      `メタデータの取得に失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * インジケーター設定を保存
+ * POST /api/indicators/settings
+ */
+export async function saveIndicatorConfig(
+  request: SaveIndicatorConfigRequest
+): Promise<IndicatorConfig> {
+  const response = await fetch(`${API_BASE_URL}/api/indicators/settings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "インジケーター設定の保存に失敗しました");
+  }
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * インジケーター設定を削除
+ * DELETE /api/indicators/settings/:indicatorId
+ */
+export async function deleteIndicatorConfig(indicatorId: IndicatorId): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/indicators/settings/${indicatorId}`,
+    {
+      method: "DELETE",
+    }
+  );
+  if (!response.ok) {
+    throw new Error("インジケーター設定の削除に失敗しました");
+  }
+}
+
+/**
+ * インジケーター設定をリセット
+ * POST /api/indicators/settings/reset
+ */
+export async function resetIndicatorSettings(): Promise<UserIndicatorSettings> {
+  const response = await fetch(`${API_BASE_URL}/api/indicators/settings/reset`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error("インジケーター設定のリセットに失敗しました");
+  }
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * セットアップ状態を取得
+ * GET /api/indicators/settings/setup-status
+ */
+export async function fetchSetupStatus(): Promise<{ hasCompletedSetup: boolean }> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/indicators/settings/setup-status`,
+    {
+      cache: "no-store",
+    }
+  );
+  if (!response.ok) {
+    throw new Error("セットアップ状態の取得に失敗しました");
+  }
+  const payload = await response.json();
+  return payload.data;
+}
+
