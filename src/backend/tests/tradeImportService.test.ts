@@ -7,10 +7,18 @@ import path from 'path';
 import fs from 'fs';
 import { TradeImportService } from '../../services/tradeImportService';
 import { TradeRepository } from '../../backend/repositories/tradeRepository';
+import { prisma } from '../../backend/db/client';
 
 describe('TradeImportService', () => {
   const service = new TradeImportService();
   const repo = new TradeRepository();
+
+  // 各テスト前にDBをクリーンアップ（重複チェックに影響されないようにする）
+  beforeEach(async () => {
+    // TradeNote → Trade の順に削除（外部キー制約を考慮）
+    await prisma.tradeNote.deleteMany({});
+    await prisma.trade.deleteMany({});
+  });
 
   test('CSV 正常系: sample_trades.csv を取り込み、5件保存される', async () => {
     const before = await repo.countAll();
