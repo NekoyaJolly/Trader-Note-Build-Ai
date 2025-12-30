@@ -6,6 +6,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { MatchResultDTO } from '../domain/matching/MatchResultDTO';
 import { MatchResultRepository } from '../backend/repositories/matchResultRepository';
 import { MarketSnapshotRepository } from '../backend/repositories/marketSnapshotRepository';
+import { 
+  normalizeIndicators, 
+  DEFAULT_ANOMALY_THRESHOLD,
+  NormalizedIndicators 
+} from '../utils/indicatorNormalizer';
 
 /**
  * マッチングサービス
@@ -79,6 +84,12 @@ export class MatchingService {
           const trendMatched = this.checkTrendMatch(note, currentMarket);
           const priceRangeMatched = this.checkPriceRange(note, currentMarket);
           const reasons = this.generateMatchReasons(note, currentMarket, matchScore, trendMatched, priceRangeMatched);
+          
+          // 無界インジケーターの異常値チェック（マッチした場合のみ警告を生成）
+          let warnings: string[] = [];
+          if (isMatch) {
+            warnings = this.checkIndicatorAnomalies(note, currentMarket);
+          }
 
           if (isMatch) {
             const matchId = uuidv4();
@@ -114,6 +125,7 @@ export class MatchingService {
               trendMatched,
               priceRangeMatched,
               reasons,
+              warnings,
               evaluatedAt,
             });
           }
@@ -322,5 +334,63 @@ export class MatchingService {
     }
 
     return grouped;
+  }
+
+  /**
+   * 無界インジケーターの異常値をチェック
+   * 
+   * ノートの過去インジケーター値を基準に、現在の市場データが
+   * ±3σ以上乖離している場合に警告を生成する
+   * 
+   * 対象インジケーター（無界）:
+   * - OBV, VWAP, ATR, MACD, CCI, ROC, SMA, EMA, DEMA, TEMA, BB, KC, PSAR, Ichimoku
+   * 
+   * 非対象（有界、正規化不要）:
+   * - RSI, Stochastic, Williams %R, MFI, CMF, Aroon
+   */
+  private checkIndicatorAnomalies(note: TradeNote, market: MarketData): string[] {
+    // 現在の市場インジケーター値を抽出
+    const currentIndicators: Record<string, number | undefined> = {};
+    if (market.indicators) {
+      // インジケーターオブジェクトから数値フィールドを抽出
+      for (const [key, value] of Object.entries(market.indicators)) {
+        if (typeof value === 'number') {
+          currentIndicators[key] = value;
+        }
+      }
+    }
+
+    // ノートの過去インジケーター値を取得（特徴量から推定）
+    // 注: 現在の実装ではノートにはインジケーター履歴が保存されていないため、
+    //     単一のノートのみで正規化を行う。将来的には複数ノートの履歴を使用可能
+    const historicalIndicators: Record<string, number | undefined>[] = [];
+    
+    // ノートに marketContext.indicators がある場合はそれを使用
+    if (note.marketContext && typeof note.marketContext === 'object') {
+      const noteIndicators: Record<string, number | undefined> = {};
+      // marketContext から数値フィールドを抽出
+      for (const [key, value] of Object.entries(note.marketContext)) {
+        if (typeof value === 'number') {
+          noteIndicators[key] = value;
+        }
+      }
+      if (Object.keys(noteIndicators).length > 0) {
+        historicalIndicators.push(noteIndicators);
+      }
+    }
+
+    // 過去データが不十分な場合は警告なし
+    if (historicalIndicators.length === 0) {
+      return [];
+    }
+
+    // 正規化と異常値検出を実行
+    const result: NormalizedIndicators = normalizeIndicators(
+      currentIndicators,
+      historicalIndicators,
+      DEFAULT_ANOMALY_THRESHOLD
+    );
+
+    return result.warnings;
   }
 }

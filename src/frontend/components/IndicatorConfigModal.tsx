@@ -67,9 +67,9 @@ function getParamFields(indicatorId: string): ParamFieldConfig[] {
       ];
     case 'bb':
     case 'kc':
+      // BB/KCの標準偏差はindicatortsライブラリの制約により2固定
       return [
         { key: 'period', label: '期間', min: 1, max: 100 },
-        { key: 'stdDev', label: '標準偏差', min: 0.5, max: 4, step: 0.1 },
       ];
     case 'psar':
       return [

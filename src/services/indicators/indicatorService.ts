@@ -326,13 +326,13 @@ export class IndicatorService {
    * 
    * @param closingPrices - 終値の配列
    * @param period - 計算期間（デフォルト: 20）
-   * @param stdDev - 標準偏差倍率（デフォルト: 2）- indicatorts では固定 2σ
    * @returns ボリンジャーバンド計算結果
+   * 
+   * 注: indicatortsライブラリの制約により標準偏差は2σ固定
    */
   calculateBollingerBands(
     closingPrices: number[],
-    period: number = 20,
-    _stdDev: number = 2
+    period: number = 20
   ): BollingerBandsResult {
     if (closingPrices.length < period) {
       console.warn(`ボリンジャーバンド計算には最低 ${period} 個のデータが必要です`);
@@ -999,8 +999,7 @@ export class IndicatorService {
       case 'bb':
         return { type: 'bollingerBands', result: this.calculateBollingerBands(
           closes,
-          params.period ?? 20,
-          params.stdDev ?? 2
+          params.period ?? 20
         )};
       
       case 'atr':
@@ -1167,7 +1166,7 @@ export interface IndicatorCalculateParams {
   fastPeriod?: number;
   slowPeriod?: number;
   signalPeriod?: number;
-  stdDev?: number;
+  // stdDevはindicatortsライブラリの制約により2固定のため削除
   kPeriod?: number;
   dPeriod?: number;
   emaPeriod?: number;

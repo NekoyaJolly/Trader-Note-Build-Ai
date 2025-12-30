@@ -43,10 +43,9 @@
       {
         "configId": "bb-20",
         "indicatorId": "bb",
-        "label": "BB(20,2)",
+        "label": "BB(20)",
         "params": {
-          "period": 20,
-          "stdDev": 2
+          "period": 20
         },
         "enabled": true
       },

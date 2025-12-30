@@ -28,7 +28,7 @@ export interface IndicatorParams {
   signalPeriod?: number;
   kPeriod?: number;
   dPeriod?: number;
-  stdDev?: number;
+  // stdDevはindicatortsライブラリの制約により2固定のため削除
   step?: number;
   maxStep?: number;
   conversionPeriod?: number;
@@ -43,7 +43,7 @@ export interface IndicatorParams {
 export interface ParamConstraints {
   minPeriod?: number;
   maxPeriod?: number;
-  stdDevRange?: { min: number; max: number };
+  // stdDevRangeはindicatortsライブラリの制約により不要
 }
 
 /**

@@ -144,16 +144,6 @@ describe('IndicatorConfig', () => {
       expect(errors[0]).toContain('不明なインジケーター');
     });
 
-    it('標準偏差が範囲外でエラーになること', () => {
-      const config: IndicatorConfig = {
-        configId: 'test-bb',
-        indicatorId: 'bb',
-        params: { period: 20, stdDev: 0.1 }, // 最小値は0.5
-        enabled: true,
-      };
-      const errors = validateIndicatorConfig(config);
-      expect(errors.length).toBeGreaterThan(0);
-      expect(errors[0]).toContain('標準偏差');
-    });
+    // 注: BB/KCの標準偏差はindicatortsライブラリの制約により2固定のためテスト不要
   });
 });

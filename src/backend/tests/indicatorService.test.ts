@@ -102,7 +102,8 @@ describe('IndicatorService', () => {
 
   describe('calculateBollingerBands', () => {
     it('ボリンジャーバンドを正しく計算できること', () => {
-      const result = service.calculateBollingerBands(sampleClosingPrices, 20, 2);
+      // 注: indicatortsライブラリの制約により標準偏差は2σ固定
+      const result = service.calculateBollingerBands(sampleClosingPrices, 20);
       
       expect(result.upperBand).toBeDefined();
       expect(result.middleBand).toBeDefined();

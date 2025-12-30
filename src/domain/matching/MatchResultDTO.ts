@@ -27,6 +27,13 @@ export interface MatchResultDTO {
   priceRangeMatched?: boolean;
   /** 判定理由（人間可読な日本語） */
   reasons?: string[];
+  /** 
+   * 警告メッセージ（異常値検出時など）
+   * 
+   * 無界インジケーター（OBV, VWAP, ATR, MACD等）が
+   * 過去の平均から±3σ以上乖離している場合に警告を出す
+   */
+  warnings?: string[];
   /** 評価実行時刻 */
   evaluatedAt: Date;
   /** 作成時刻 */
@@ -49,6 +56,7 @@ export function toMatchResultDTO(dbRecord: any): MatchResultDTO {
     trendMatched: dbRecord.trendMatched,
     priceRangeMatched: dbRecord.priceRangeMatched,
     reasons: Array.isArray(dbRecord.reasons) ? dbRecord.reasons : [],
+    warnings: Array.isArray(dbRecord.warnings) ? dbRecord.warnings : [],
     evaluatedAt: dbRecord.evaluatedAt,
     createdAt: dbRecord.createdAt,
   };

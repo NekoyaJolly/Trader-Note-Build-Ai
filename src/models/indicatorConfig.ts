@@ -82,7 +82,7 @@ export interface ParamConstraints {
   // 期間パラメータの最大値
   maxPeriod?: number;
   // 標準偏差倍率の範囲（BB, KC用）
-  stdDevRange?: { min: number; max: number };
+  // 注: BB/KCの標準偏差はindicatortsライブラリの制約により2固定
 }
 
 /**
@@ -104,7 +104,7 @@ export interface IndicatorParams {
   kPeriod?: number;
   dPeriod?: number;
   // BB/KC用: 標準偏差の倍率
-  stdDev?: number;
+  // stdDevはindicatortsライブラリの制約により2固定のため削除
   // Parabolic SAR用
   step?: number;
   maxStep?: number;
@@ -288,17 +288,17 @@ export const INDICATOR_METADATA: readonly IndicatorMetadata[] = [
     id: 'bb',
     displayName: 'ボリンジャーバンド',
     category: 'volatility',
-    description: '移動平均と標準偏差でバンドを形成',
-    defaultParams: { period: 20, stdDev: 2 },
-    paramConstraints: { minPeriod: 1, maxPeriod: 100, stdDevRange: { min: 0.5, max: 4 } },
+    description: '移動平均と標準偏差でバンドを形成（2σ固定）',
+    defaultParams: { period: 20 },
+    paramConstraints: { minPeriod: 1, maxPeriod: 100 },
   },
   {
     id: 'kc',
     displayName: 'ケルトナーチャネル',
     category: 'volatility',
-    description: 'ATRを使用したトレンドバンド',
-    defaultParams: { period: 20, stdDev: 2 },
-    paramConstraints: { minPeriod: 1, maxPeriod: 100, stdDevRange: { min: 0.5, max: 4 } },
+    description: 'ATRを使用したトレンドバンド（ATR×2固定）',
+    defaultParams: { period: 20 },
+    paramConstraints: { minPeriod: 1, maxPeriod: 100 },
   },
   // === Volume 系 ===
   {
@@ -362,7 +362,7 @@ export function createDefaultIndicatorSet(): IndicatorSet {
       { configId: 'sma-20', indicatorId: 'sma', label: 'SMA(20)', params: { period: 20 }, enabled: true },
       { configId: 'ema-20', indicatorId: 'ema', label: 'EMA(20)', params: { period: 20 }, enabled: true },
       { configId: 'macd-default', indicatorId: 'macd', label: 'MACD', params: { fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }, enabled: true },
-      { configId: 'bb-20', indicatorId: 'bb', label: 'BB(20,2)', params: { period: 20, stdDev: 2 }, enabled: true },
+      { configId: 'bb-20', indicatorId: 'bb', label: 'BB(20)', params: { period: 20 }, enabled: true },
       { configId: 'atr-14', indicatorId: 'atr', label: 'ATR(14)', params: { period: 14 }, enabled: true },
       { configId: 'stoch-14-3', indicatorId: 'stochastic', label: 'Stoch(14,3)', params: { kPeriod: 14, dPeriod: 3 }, enabled: true },
       { configId: 'obv-default', indicatorId: 'obv', label: 'OBV', params: {}, enabled: true },
@@ -403,12 +403,7 @@ export function validateIndicatorConfig(config: IndicatorConfig): string[] {
     }
   }
 
-  // 標準偏差のバリデーション
-  if (params.stdDev !== undefined && paramConstraints.stdDevRange) {
-    if (params.stdDev < paramConstraints.stdDevRange.min || params.stdDev > paramConstraints.stdDevRange.max) {
-      errors.push(`${metadata.displayName}の標準偏差は${paramConstraints.stdDevRange.min}〜${paramConstraints.stdDevRange.max}の範囲で設定してください`);
-    }
-  }
+  // 注: BB/KCの標準偏差はindicatortsライブラリの制約により2固定
 
   return errors;
 }
