@@ -38,7 +38,7 @@ export class MatchingController {
               note: note
                 ? {
                     id: note.id,
-                    title: note.title,
+                    symbol: note.symbol,
                   }
                 : null,
               marketSnapshot: m.marketSnapshot,
