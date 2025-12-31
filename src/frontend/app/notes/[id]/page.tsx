@@ -10,7 +10,8 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { BacktestPanel } from "@/components";
+// 直接インポートに変更（index.ts経由でのモジュール解決問題を回避）
+import BacktestPanel from "@/components/BacktestPanel";
 
 /**
  * ノート詳細画面

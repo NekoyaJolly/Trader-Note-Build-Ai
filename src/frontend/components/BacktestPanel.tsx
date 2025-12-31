@@ -71,12 +71,16 @@ export function BacktestPanel({ noteId, symbol }: BacktestPanelProps) {
     setResult(null);
 
     try {
+      // matchThreshold を 0-100 スケールから 0.0-1.0 スケールに変換
+      // バックエンドは 0.0〜1.0 の範囲を期待するため
+      const normalizedThreshold = matchThreshold / 100;
+      
       const params: BacktestExecuteParams = {
         noteId,
         startDate: new Date(startDate).toISOString(),
         endDate: new Date(endDate).toISOString(),
         timeframe,
-        matchThreshold,
+        matchThreshold: normalizedThreshold,
         takeProfit,
         stopLoss,
         maxHoldingMinutes,

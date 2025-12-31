@@ -123,6 +123,11 @@ export class TradeNoteRepository {
           indicators: noteInput.indicators || {},
           featureVector: noteInput.featureVector,
           timeframe: noteInput.timeframe,
+          // Phase 8: 追加フィールド
+          status: noteInput.status,
+          marketContext: noteInput.marketContext,
+          userNotes: noteInput.userNotes,
+          tags: noteInput.tags,
         },
       });
 

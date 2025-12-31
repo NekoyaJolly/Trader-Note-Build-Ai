@@ -179,8 +179,9 @@ export class TradeController {
             price,
             quantity,
           }, '15m');
-          await this.noteService.saveNote(note);
-          generatedNoteIds.push(note.id);
+          // saveNote はDBに保存された実際のノートIDを返す
+          const savedNoteId = await this.noteService.saveNote(note);
+          generatedNoteIds.push(savedNoteId);
         } catch (noteError) {
           console.error('Error generating note for trade:', (noteError as Error).message);
           result.errors.push(`ノート生成失敗: ${(noteError as Error).message}`);

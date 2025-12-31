@@ -411,21 +411,28 @@ export class TradeNoteService {
    * 
    * Phase 8: DBモードでは TradeNoteRepository を使用
    * FSモードでは従来の JSON ファイル保存を使用
+   * 
+   * @returns DBに保存された場合はDB上のノートID、FSのみの場合は渡されたノートのIDを返す
    */
-  async saveNote(note: TradeNote): Promise<void> {
+  async saveNote(note: TradeNote): Promise<string> {
+    let savedNoteId = note.id;
+    
     if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
-      await this.saveNoteToDb(note);
+      savedNoteId = await this.saveNoteToDb(note);
     }
     
     if (this.storageMode === 'fs' || this.storageMode === 'hybrid') {
       await this.saveNoteToFs(note);
     }
+    
+    return savedNoteId;
   }
 
   /**
    * DBにノートを保存する
+   * @returns DBに保存されたノートのID（既存の場合はそのID、新規の場合はDB生成のID）
    */
-  private async saveNoteToDb(note: TradeNote): Promise<void> {
+  private async saveNoteToDb(note: TradeNote): Promise<string> {
     // 既存のノートを確認
     const existing = await this.repository.findByTradeId(note.tradeId);
     
@@ -448,10 +455,23 @@ export class TradeNoteService {
       } else if (note.status === 'draft' && existing.status !== 'draft') {
         await this.repository.revertToDraft(existing.id);
       }
+      
+      // 本番環境ではデバッグログを抑制
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`[DB] Updated trade note: ${existing.id}`);
+      }
+      return existing.id;
     } else {
       // 新規ノートの作成
       // side は小文字で保存（Prisma TradeSide enumは 'buy' | 'sell'）
-      await this.repository.createWithSummary(
+      // status は小文字で保存（Prisma NoteStatus enumは 'draft' | 'approved' | 'rejected'）
+      const statusValue = (note.status || 'draft').toLowerCase();
+      // 型安全に NoteStatus enum に変換
+      const validStatus: PrismaNoteStatus = 
+        statusValue === 'approved' ? 'approved' :
+        statusValue === 'rejected' ? 'rejected' : 'draft';
+      
+      const created = await this.repository.createWithSummary(
         {
           tradeId: note.tradeId,
           symbol: note.symbol,
@@ -459,7 +479,7 @@ export class TradeNoteService {
           side: note.side.toLowerCase() as TradeSide,
           featureVector: note.features || [],
           timeframe: note.marketContext?.timeframe || '15m',
-          status: (note.status || 'draft').toUpperCase() as PrismaNoteStatus,
+          status: validStatus,
           // MarketContext を Prisma 互換 JSON に変換
           marketContext: note.marketContext 
             ? toMarketContextJson(note.marketContext) 
@@ -471,11 +491,12 @@ export class TradeNoteService {
           summary: note.aiSummary || '',
         }
       );
-    }
-    
-    // 本番環境ではデバッグログを抑制
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(`[DB] Saved trade note: ${note.id}`);
+      
+      // 本番環境ではデバッグログを抑制
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`[DB] Created trade note: ${created.id}`);
+      }
+      return created.id;
     }
   }
 
