@@ -19,8 +19,14 @@ import {
   createNotesFromBacktest,
   runWalkForwardTest,
   fetchWalkForwardHistory,
+  fetchFilterAnalysis,
+  verifyFilters,
   BacktestHistoryItem,
   WalkForwardResult,
+  FilterAnalysisResult,
+  FilterVerifyResult,
+  FilterCondition,
+  AnalysisIndicator,
 } from "@/lib/api";
 import type { Strategy, BacktestResult, BacktestResultSummary, BacktestTradeEvent } from "@/types/strategy";
 import Sidebar from "@/components/layout/Sidebar";
@@ -249,7 +255,7 @@ export default function StrategyBacktestPage() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"summary" | "trades" | "history" | "walkforward">("summary");
+  const [activeTab, setActiveTab] = useState<"summary" | "trades" | "history" | "walkforward" | "filter">("summary");
   
   // ウォークフォワードテストステート
   const [walkForwardParams, setWalkForwardParams] = useState({
@@ -260,6 +266,13 @@ export default function StrategyBacktestPage() {
   const [walkForwardResult, setWalkForwardResult] = useState<WalkForwardResult | null>(null);
   const [walkForwardHistory, setWalkForwardHistory] = useState<WalkForwardResult[]>([]);
   const [runningWalkForward, setRunningWalkForward] = useState(false);
+  
+  // フィルター分析ステート
+  const [filterAnalysis, setFilterAnalysis] = useState<FilterAnalysisResult | null>(null);
+  const [filterVerifyResult, setFilterVerifyResult] = useState<FilterVerifyResult | null>(null);
+  const [selectedFilters, setSelectedFilters] = useState<FilterCondition[]>([]);
+  const [loadingFilter, setLoadingFilter] = useState(false);
+  const [verifyingFilter, setVerifyingFilter] = useState(false);
   
   // ノート作成ステート
   const [creatingNotes, setCreatingNotes] = useState(false);
@@ -721,6 +734,16 @@ export default function StrategyBacktestPage() {
                         トレード一覧 ({result.trades.length})
                       </button>
                       <button
+                        onClick={() => setActiveTab("filter")}
+                        className={`px-6 py-3 text-sm font-medium transition-colors ${
+                          activeTab === "filter"
+                            ? "text-blue-400 border-b-2 border-blue-400"
+                            : "text-gray-400 hover:text-gray-200"
+                        }`}
+                      >
+                        フィルター分析
+                      </button>
+                      <button
                         onClick={() => setActiveTab("walkforward")}
                         className={`px-6 py-3 text-sm font-medium transition-colors ${
                           activeTab === "walkforward"
@@ -926,6 +949,275 @@ export default function StrategyBacktestPage() {
 
                     {activeTab === "trades" && (
                       <TradeResultTable trades={result.trades} />
+                    )}
+
+                    {activeTab === "filter" && (
+                      <div>
+                        <h3 className="text-lg font-semibold text-white mb-4">
+                          フィルター分析
+                        </h3>
+                        <p className="text-sm text-gray-400 mb-6">
+                          勝ち/負けトレードのインジケーター傾向を分析し、
+                          勝率改善に有効なフィルター条件を探索します。
+                          最大5つまで同時に追加して検証できます。
+                        </p>
+
+                        {/* 分析実行ボタン */}
+                        {!filterAnalysis && (
+                          <button
+                            onClick={async () => {
+                              if (!result.id) return;
+                              setLoadingFilter(true);
+                              try {
+                                const analysis = await fetchFilterAnalysis(strategyId, result.id);
+                                setFilterAnalysis(analysis);
+                              } catch (err) {
+                                setError(err instanceof Error ? err.message : '分析に失敗しました');
+                              } finally {
+                                setLoadingFilter(false);
+                              }
+                            }}
+                            disabled={loadingFilter}
+                            className={`px-6 py-3 rounded-lg font-medium ${
+                              loadingFilter
+                                ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                                : 'bg-blue-600 hover:bg-blue-700 text-white'
+                            }`}
+                          >
+                            {loadingFilter ? '分析中...' : 'インジケーター傾向を分析'}
+                          </button>
+                        )}
+
+                        {/* 分析結果 */}
+                        {filterAnalysis && (
+                          <div className="space-y-6">
+                            {/* 概要 */}
+                            <div className="bg-slate-700 rounded-lg p-4">
+                              <div className="grid grid-cols-3 gap-4 text-center">
+                                <div>
+                                  <div className="text-2xl font-bold text-white">{filterAnalysis.totalTrades}</div>
+                                  <div className="text-sm text-gray-400">総トレード</div>
+                                </div>
+                                <div>
+                                  <div className="text-2xl font-bold text-green-400">{filterAnalysis.winTrades}</div>
+                                  <div className="text-sm text-gray-400">勝ちトレード</div>
+                                </div>
+                                <div>
+                                  <div className="text-2xl font-bold text-red-400">{filterAnalysis.loseTrades}</div>
+                                  <div className="text-sm text-gray-400">負けトレード</div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* インジケーター傾向 */}
+                            <div>
+                              <h4 className="text-md font-semibold text-white mb-3">
+                                インジケーター別 勝ち/負け傾向（有効度順）
+                              </h4>
+                              <div className="space-y-2">
+                                {filterAnalysis.indicators.slice(0, 10).map((ind) => (
+                                  <div
+                                    key={ind.indicator}
+                                    className={`bg-slate-700 rounded-lg p-3 cursor-pointer transition-colors ${
+                                      selectedFilters.some(f => f.indicator === ind.indicator)
+                                        ? 'ring-2 ring-blue-500'
+                                        : 'hover:bg-slate-600'
+                                    }`}
+                                    onClick={() => {
+                                      const exists = selectedFilters.find(f => f.indicator === ind.indicator);
+                                      if (exists) {
+                                        setSelectedFilters(prev => prev.filter(f => f.indicator !== ind.indicator));
+                                      } else if (selectedFilters.length < 5) {
+                                        // 推奨条件から operator と value を推測
+                                        const threshold = (ind.winAverage + ind.loseAverage) / 2;
+                                        const operator = ind.difference > 0 ? '>' : '<';
+                                        setSelectedFilters(prev => [...prev, {
+                                          indicator: ind.indicator,
+                                          operator: operator as '<' | '>',
+                                          value: parseFloat(threshold.toFixed(4)),
+                                        }]);
+                                      }
+                                    }}
+                                  >
+                                    <div className="flex justify-between items-center">
+                                      <div>
+                                        <span className="font-medium text-white">{ind.displayName}</span>
+                                        <span className="ml-2 text-xs text-gray-400">
+                                          有効度: {ind.significanceScore.toFixed(1)}%
+                                        </span>
+                                      </div>
+                                      <div className="text-sm">
+                                        <span className="text-green-400">勝: {ind.winAverage.toFixed(2)}</span>
+                                        <span className="mx-2 text-gray-500">|</span>
+                                        <span className="text-red-400">負: {ind.loseAverage.toFixed(2)}</span>
+                                      </div>
+                                    </div>
+                                    <div className="mt-1 text-xs text-gray-400">
+                                      推奨: {ind.suggestedCondition}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* 選択したフィルター */}
+                            {selectedFilters.length > 0 && (
+                              <div className="bg-slate-700 rounded-lg p-4">
+                                <h4 className="text-md font-semibold text-white mb-3">
+                                  選択中のフィルター（{selectedFilters.length}/5）
+                                </h4>
+                                <div className="flex flex-wrap gap-2 mb-4">
+                                  {selectedFilters.map((filter, idx) => (
+                                    <div
+                                      key={idx}
+                                      className="bg-blue-600/30 text-blue-300 px-3 py-1 rounded-full text-sm flex items-center gap-2"
+                                    >
+                                      <span>{filter.indicator} {filter.operator} {filter.value}</span>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setSelectedFilters(prev => prev.filter((_, i) => i !== idx));
+                                        }}
+                                        className="hover:text-white"
+                                      >
+                                        ×
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                                <button
+                                  onClick={async () => {
+                                    if (!result.id || selectedFilters.length === 0) return;
+                                    setVerifyingFilter(true);
+                                    try {
+                                      const verifyResult = await verifyFilters(strategyId, result.id, selectedFilters);
+                                      setFilterVerifyResult(verifyResult);
+                                    } catch (err) {
+                                      setError(err instanceof Error ? err.message : '検証に失敗しました');
+                                    } finally {
+                                      setVerifyingFilter(false);
+                                    }
+                                  }}
+                                  disabled={verifyingFilter}
+                                  className={`px-6 py-2 rounded-lg font-medium ${
+                                    verifyingFilter
+                                      ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                                      : 'bg-green-600 hover:bg-green-700 text-white'
+                                  }`}
+                                >
+                                  {verifyingFilter ? '検証中...' : 'フィルター効果を検証'}
+                                </button>
+                              </div>
+                            )}
+
+                            {/* 検証結果 */}
+                            {filterVerifyResult && (
+                              <div className="bg-slate-700 rounded-lg p-4">
+                                <h4 className="text-md font-semibold text-white mb-4">
+                                  フィルター適用効果
+                                </h4>
+                                <div className="grid grid-cols-2 gap-6">
+                                  {/* 適用前 */}
+                                  <div>
+                                    <div className="text-sm text-gray-400 mb-2">適用前</div>
+                                    <div className="space-y-2">
+                                      <div className="flex justify-between">
+                                        <span className="text-gray-300">トレード数</span>
+                                        <span className="text-white">{filterVerifyResult.before.totalTrades}</span>
+                                      </div>
+                                      <div className="flex justify-between">
+                                        <span className="text-gray-300">勝率</span>
+                                        <span className="text-white">{(filterVerifyResult.before.winRate * 100).toFixed(1)}%</span>
+                                      </div>
+                                      <div className="flex justify-between">
+                                        <span className="text-gray-300">PF</span>
+                                        <span className="text-white">{filterVerifyResult.before.profitFactor.toFixed(2)}</span>
+                                      </div>
+                                      <div className="flex justify-between">
+                                        <span className="text-gray-300">純利益</span>
+                                        <span className={filterVerifyResult.before.netProfit >= 0 ? 'text-green-400' : 'text-red-400'}>
+                                          {filterVerifyResult.before.netProfit.toLocaleString()} JPY
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* 適用後 */}
+                                  <div>
+                                    <div className="text-sm text-gray-400 mb-2">適用後</div>
+                                    <div className="space-y-2">
+                                      <div className="flex justify-between">
+                                        <span className="text-gray-300">トレード数</span>
+                                        <span className="text-white">
+                                          {filterVerifyResult.after.totalTrades}
+                                          <span className="text-xs text-gray-400 ml-1">
+                                            (-{filterVerifyResult.after.filteredOutTrades})
+                                          </span>
+                                        </span>
+                                      </div>
+                                      <div className="flex justify-between">
+                                        <span className="text-gray-300">勝率</span>
+                                        <span className={filterVerifyResult.improvement.winRateChange >= 0 ? 'text-green-400' : 'text-red-400'}>
+                                          {(filterVerifyResult.after.winRate * 100).toFixed(1)}%
+                                          <span className="text-xs ml-1">
+                                            ({filterVerifyResult.improvement.winRateChange >= 0 ? '+' : ''}{(filterVerifyResult.improvement.winRateChange * 100).toFixed(1)}%)
+                                          </span>
+                                        </span>
+                                      </div>
+                                      <div className="flex justify-between">
+                                        <span className="text-gray-300">PF</span>
+                                        <span className={filterVerifyResult.improvement.pfChange >= 0 ? 'text-green-400' : 'text-red-400'}>
+                                          {filterVerifyResult.after.profitFactor.toFixed(2)}
+                                          <span className="text-xs ml-1">
+                                            ({filterVerifyResult.improvement.pfChange >= 0 ? '+' : ''}{filterVerifyResult.improvement.pfChange.toFixed(2)})
+                                          </span>
+                                        </span>
+                                      </div>
+                                      <div className="flex justify-between">
+                                        <span className="text-gray-300">純利益</span>
+                                        <span className={filterVerifyResult.after.netProfit >= 0 ? 'text-green-400' : 'text-red-400'}>
+                                          {filterVerifyResult.after.netProfit.toLocaleString()} JPY
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* 判定 */}
+                                <div className={`mt-4 p-3 rounded-lg ${
+                                  filterVerifyResult.after.profitFactor >= 1.0
+                                    ? 'bg-green-600/20 border border-green-500'
+                                    : 'bg-yellow-600/20 border border-yellow-500'
+                                }`}>
+                                  {filterVerifyResult.after.profitFactor >= 1.0 ? (
+                                    <div className="text-green-400">
+                                      ✅ PF 1.0以上達成！このフィルター条件は有効です。
+                                      ストラテジーに追加してノート化を検討できます。
+                                    </div>
+                                  ) : (
+                                    <div className="text-yellow-400">
+                                      ⚠️ PF {filterVerifyResult.after.profitFactor.toFixed(2)} - まだ優位性不足。
+                                      他のフィルターを追加するか、条件を調整してください。
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 再分析ボタン */}
+                            <button
+                              onClick={() => {
+                                setFilterAnalysis(null);
+                                setFilterVerifyResult(null);
+                                setSelectedFilters([]);
+                              }}
+                              className="text-sm text-gray-400 hover:text-white"
+                            >
+                              分析結果をクリア
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     )}
 
                     {activeTab === "walkforward" && (

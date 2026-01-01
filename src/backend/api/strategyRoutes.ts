@@ -31,6 +31,7 @@ import {
   runBacktest,
   getBacktestResult,
   getBacktestHistory,
+  BacktestTimeframe,
 } from '../services/strategyBacktestService';
 import {
   createStrategyNote,
@@ -64,6 +65,12 @@ import {
   getWalkForwardResult,
   getWalkForwardHistory,
 } from '../services/walkForwardService';
+import {
+  analyzeFilters,
+  verifyFilters,
+  getAvailableFilterIndicators,
+  FilterCondition,
+} from '../services/filterAnalysisService';
 import { PrismaClient } from '@prisma/client';
 
 // Prismaクライアント（バージョン比較用）
@@ -1401,6 +1408,173 @@ router.get('/:id/versions/compare', async (req: Request, res: Response) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
     console.error('[StrategyRoutes] バージョン比較エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+// ============================================
+// フィルター分析 API
+// ============================================
+
+/**
+ * GET /api/strategies/:id/backtest/:runId/filter-analysis
+ * バックテスト結果のフィルター分析
+ * 
+ * 勝ち/負けトレードのインジケーター傾向を分析し、
+ * 有効なフィルター候補を自動提案
+ */
+router.get('/:id/backtest/:runId/filter-analysis', async (req: Request, res: Response) => {
+  try {
+    const { id, runId } = req.params;
+    
+    // バックテスト結果を取得
+    const backtestResult = await getBacktestResult(runId);
+    if (!backtestResult) {
+      return res.status(404).json({
+        success: false,
+        error: 'バックテスト結果が見つかりません',
+      });
+    }
+    
+    // OHLCVデータを再取得（分析用）
+    // 注: 本来はバックテスト時のデータをキャッシュすべきだが、MVP版では再取得
+    const { fetchHistoricalData } = await import('../services/strategyBacktestService');
+    const strategy = await prisma.strategy.findUnique({
+      where: { id },
+    });
+    
+    if (!strategy) {
+      return res.status(404).json({
+        success: false,
+        error: 'ストラテジーが見つかりません',
+      });
+    }
+    
+    const ohlcvData = await fetchHistoricalData(
+      strategy.symbol,
+      '1m' as BacktestTimeframe, // 分析用に1分足
+      new Date(backtestResult.startDate),
+      new Date(backtestResult.endDate)
+    );
+    
+    // フィルター分析実行
+    const analysisResult = analyzeFilters({
+      trades: backtestResult.trades,
+      ohlcvData,
+      timeframe: backtestResult.timeframe as '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d',
+    });
+    
+    res.json({
+      success: true,
+      data: analysisResult,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] フィルター分析エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * POST /api/strategies/:id/backtest/:runId/filter-verify
+ * フィルター適用効果を検証
+ * 
+ * Request Body:
+ * - filters: FilterCondition[] (最大5つ)
+ *   - indicator: 'SMA_20' | 'RSI_14' | 'MACD_HIST' など
+ *   - operator: '<' | '<=' | '>' | '>=' | '='
+ *   - value: number
+ */
+router.post('/:id/backtest/:runId/filter-verify', async (req: Request, res: Response) => {
+  try {
+    const { id, runId } = req.params;
+    const { filters } = req.body as { filters: FilterCondition[] };
+    
+    if (!filters || !Array.isArray(filters)) {
+      return res.status(400).json({
+        success: false,
+        error: 'フィルター条件を指定してください',
+      });
+    }
+    
+    if (filters.length === 0 || filters.length > 5) {
+      return res.status(400).json({
+        success: false,
+        error: 'フィルターは1〜5個まで選択してください',
+      });
+    }
+    
+    // バックテスト結果を取得
+    const backtestResult = await getBacktestResult(runId);
+    if (!backtestResult) {
+      return res.status(404).json({
+        success: false,
+        error: 'バックテスト結果が見つかりません',
+      });
+    }
+    
+    // OHLCVデータを再取得
+    const { fetchHistoricalData } = await import('../services/strategyBacktestService');
+    const strategy = await prisma.strategy.findUnique({
+      where: { id },
+    });
+    
+    if (!strategy) {
+      return res.status(404).json({
+        success: false,
+        error: 'ストラテジーが見つかりません',
+      });
+    }
+    
+    const ohlcvData = await fetchHistoricalData(
+      strategy.symbol,
+      '1m' as BacktestTimeframe,
+      new Date(backtestResult.startDate),
+      new Date(backtestResult.endDate)
+    );
+    
+    // フィルター検証実行
+    const verifyResult = verifyFilters({
+      trades: backtestResult.trades,
+      ohlcvData,
+      timeframe: backtestResult.timeframe as '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d',
+      filters,
+      initialCapital: 1000000, // デフォルト
+    });
+    
+    res.json({
+      success: true,
+      data: verifyResult,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] フィルター検証エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * GET /api/filters/indicators
+ * 利用可能なフィルターインジケーター一覧
+ */
+router.get('/filters/indicators', async (_req: Request, res: Response) => {
+  try {
+    const indicators = getAvailableFilterIndicators();
+    res.json({
+      success: true,
+      data: indicators,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
     res.status(500).json({
       success: false,
       error: message,

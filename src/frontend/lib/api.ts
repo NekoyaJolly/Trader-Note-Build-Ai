@@ -1642,3 +1642,146 @@ export async function fetchVersionComparison(
   const payload = await response.json();
   return payload.data;
 }
+
+// ============================================
+// フィルター分析 API
+// ============================================
+
+/** 分析対象インジケーター */
+export type AnalysisIndicator = 
+  | 'SMA_20' 
+  | 'SMA_50' 
+  | 'SMA_200'
+  | 'EMA_20'
+  | 'EMA_50'
+  | 'RSI_14'
+  | 'MACD_HIST'
+  | 'BB_UPPER'
+  | 'BB_LOWER'
+  | 'BB_POSITION';
+
+/** インジケーター分析結果 */
+export interface IndicatorAnalysis {
+  indicator: AnalysisIndicator;
+  displayName: string;
+  winAverage: number;
+  loseAverage: number;
+  difference: number;
+  significanceScore: number;
+  suggestedCondition: string;
+  estimatedImprovement: number;
+}
+
+/** フィルター提案 */
+export interface FilterSuggestion {
+  filters: AnalysisIndicator[];
+  displayName: string;
+  estimatedWinRate: number;
+  estimatedPF: number;
+  estimatedTradeCount: number;
+}
+
+/** フィルター分析結果 */
+export interface FilterAnalysisResult {
+  totalTrades: number;
+  winTrades: number;
+  loseTrades: number;
+  indicators: IndicatorAnalysis[];
+  recommendedFilters: FilterSuggestion[];
+}
+
+/** フィルター条件 */
+export interface FilterCondition {
+  indicator: AnalysisIndicator;
+  operator: '<' | '<=' | '>' | '>=' | '=';
+  value: number;
+}
+
+/** フィルター検証結果 */
+export interface FilterVerifyResult {
+  before: {
+    totalTrades: number;
+    winRate: number;
+    profitFactor: number;
+    netProfit: number;
+  };
+  after: {
+    totalTrades: number;
+    winRate: number;
+    profitFactor: number;
+    netProfit: number;
+    filteredOutTrades: number;
+  };
+  improvement: {
+    winRateChange: number;
+    pfChange: number;
+    tradeReduction: number;
+  };
+}
+
+/**
+ * フィルター分析を取得
+ * GET /api/strategies/:id/backtest/:runId/filter-analysis
+ */
+export async function fetchFilterAnalysis(
+  strategyId: string,
+  runId: string
+): Promise<FilterAnalysisResult> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/backtest/${runId}/filter-analysis`
+  );
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'フィルター分析の取得に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * フィルター適用効果を検証
+ * POST /api/strategies/:id/backtest/:runId/filter-verify
+ */
+export async function verifyFilters(
+  strategyId: string,
+  runId: string,
+  filters: FilterCondition[]
+): Promise<FilterVerifyResult> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/backtest/${runId}/filter-verify`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filters }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || 'フィルター検証に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * 利用可能なフィルターインジケーター一覧
+ * GET /api/strategies/filters/indicators
+ */
+export async function fetchFilterIndicators(): Promise<{
+  id: AnalysisIndicator;
+  name: string;
+  description: string;
+}[]> {
+  const response = await fetch(`${API_BASE_URL}/api/strategies/filters/indicators`);
+
+  if (!response.ok) {
+    throw new Error('フィルターインジケーター一覧の取得に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
