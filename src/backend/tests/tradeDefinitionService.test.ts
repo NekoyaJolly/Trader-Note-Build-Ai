@@ -139,8 +139,8 @@ describe('TradeDefinitionService', () => {
       expect(result.success).toBe(true);
       expect(result.definition?.featureVector).toBeDefined();
       expect(Array.isArray(result.definition?.featureVector)).toBe(true);
-      expect(result.definition?.featureVector.length).toBe(20); // 20次元ベクトル
-      expect(result.definition?.vectorDimension).toBe(20);
+      expect(result.definition?.featureVector.length).toBe(12); // 12次元ベクトル（統一後）
+      expect(result.definition?.vectorDimension).toBe(12);
     });
 
     it('市場データ取得失敗時もモックデータで処理を継続すること', async () => {

@@ -18,6 +18,10 @@ import {
   SMAValue,
   EMAValue,
 } from './strategyNoteService';
+import {
+  calculateCosineSimilarity,
+  SIMILARITY_THRESHOLDS,
+} from '../../services/featureVectorService';
 
 const prisma = new PrismaClient();
 
@@ -518,19 +522,21 @@ export async function findSimilarToNote(
 
 /**
  * 特徴量ベクトルを使った高速類似検索
+ * 
+ * 12次元統一ベクトルに対応したコサイン類似度を使用
  * （将来的に pgvector を使う場合のインターフェース）
  * 
  * @param featureVector - 検索対象の特徴量ベクトル
- * @param threshold - 類似度しきい値
+ * @param threshold - 類似度しきい値（デフォルト: 0.70 = WEAK）
  * @param limit - 最大件数
- * @returns 類似ノートIDと距離のリスト
+ * @returns 類似ノートIDと距離/類似度のリスト
  */
 export async function searchByFeatureVector(
   featureVector: number[],
-  threshold: number = 0.7,
+  threshold: number = SIMILARITY_THRESHOLDS.WEAK,
   limit: number = 10
 ): Promise<{ noteId: string; distance: number; similarity: number }[]> {
-  // 現在はメモリ内でユークリッド距離を計算
+  // 現在はメモリ内でコサイン類似度を計算
   // 将来的に pgvector の <-> 演算子を使用する想定
   
   const notes = await prisma.strategyNote.findMany({
@@ -544,20 +550,23 @@ export async function searchByFeatureVector(
   const results: { noteId: string; distance: number; similarity: number }[] = [];
   
   for (const note of notes) {
-    if (note.featureVector.length !== featureVector.length) continue;
+    // 次元が異なる場合はパディングで対応（後方互換用）
+    const maxLen = Math.max(featureVector.length, note.featureVector.length);
+    const vecA = [...featureVector];
+    const vecB = [...note.featureVector];
+    while (vecA.length < maxLen) vecA.push(0);
+    while (vecB.length < maxLen) vecB.push(0);
     
-    // ユークリッド距離を計算
+    // コサイン類似度を計算（featureVectorService の統一実装を使用）
+    const similarity = calculateCosineSimilarity(vecA, vecB);
+    
+    // ユークリッド距離も参考用に計算
     let sumSquares = 0;
-    for (let i = 0; i < featureVector.length; i++) {
-      const diff = featureVector[i] - note.featureVector[i];
+    for (let i = 0; i < maxLen; i++) {
+      const diff = vecA[i] - vecB[i];
       sumSquares += diff * diff;
     }
     const distance = Math.sqrt(sumSquares);
-    
-    // 距離を類似度に変換（距離が0なら類似度1、距離が大きいほど類似度は低下）
-    // 特徴量ベクトルの各要素は0-1に正規化されているため、最大距離はsqrt(18)≈4.24
-    const maxDistance = Math.sqrt(featureVector.length);
-    const similarity = Math.max(0, 1 - distance / maxDistance);
     
     if (similarity >= threshold) {
       results.push({
@@ -568,7 +577,7 @@ export async function searchByFeatureVector(
     }
   }
   
-  // 距離昇順（類似度降順）でソート
-  results.sort((a, b) => a.distance - b.distance);
+  // 類似度降順でソート
+  results.sort((a, b) => b.similarity - a.similarity);
   return results.slice(0, limit);
 }

@@ -4,12 +4,13 @@
  *
  * 機能:
  * - 指定ノートに類似したトレードノートを一覧表示
+ * - 12次元特徴量ベクトル + コサイン類似度で検索
  * - 類似度スコアでソート
  * - FeatureVectorViz による可視化
  */
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
@@ -18,9 +19,34 @@ import { Alert, AlertTitle, AlertDescription } from "@/components/ui/Alert";
 import SimilarNoteCard, { SimilarNote } from "@/components/SimilarNoteCard";
 import FeatureVectorViz, { FeatureDataPoint } from "@/components/FeatureVectorViz";
 import EmptyState from "@/components/EmptyState";
+import { SIMILARITY_THRESHOLDS } from "@/lib/api";
 
-// モックデータ用の型定義
-interface SimilarNotesResponse {
+// バックエンド API のベース URL
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3100";
+
+// APIレスポンス型
+interface SimilarNotesApiResponse {
+  success: boolean;
+  data?: {
+    baseNoteId: string;
+    similarNotes: Array<{
+      noteId: string;
+      symbol: string;
+      side: string;
+      timestamp: string;
+      similarity: number;
+      summarySnippet: string;
+      result: string;
+    }>;
+    threshold: number;
+    limit: number;
+  };
+  error?: string;
+}
+
+// コンポーネント用データ型
+interface SimilarNotesData {
   baseNote: {
     id: string;
     symbol: string;
@@ -38,93 +64,90 @@ export default function SimilarNotesPage() {
   const params = useParams();
   const noteId = params.id as string;
 
-  const [data, setData] = useState<SimilarNotesResponse | null>(null);
+  const [data, setData] = useState<SimilarNotesData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!noteId) return;
-    loadSimilarNotes();
-  }, [noteId]);
-
   /**
-   * 類似ノートデータを取得
-   * ※ 現在はモックデータを使用
+   * 類似ノートデータをバックエンドAPIから取得
    */
-  async function loadSimilarNotes() {
+  const loadSimilarNotes = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
 
-      // TODO: 実際の API 呼び出しに置き換え
-      // const response = await fetch(`/api/trades/notes/${noteId}/similar`);
-      // const data = await response.json();
+      // 類似ノート検索API呼び出し
+      const response = await fetch(
+        `${API_BASE_URL}/api/trades/notes/${noteId}/similar`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            threshold: SIMILARITY_THRESHOLDS.WEAK, // 0.70
+            limit: 20,
+          }),
+        }
+      );
 
-      // モックデータ（開発用）
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
-      const mockData: SimilarNotesResponse = {
-        baseNote: {
-          id: noteId,
-          symbol: "USD/JPY",
-          side: "buy",
-          timestamp: new Date().toISOString(),
-        },
-        similarNotes: [
-          {
-            id: "similar-1",
-            symbol: "USD/JPY",
-            side: "buy",
-            similarity: 92,
-            timestamp: "2024-12-20T10:30:00Z",
-            summarySnippet: "RSIが30を下回り、MACDがゴールデンクロス直前。上昇トレンドへの転換シグナル。",
-            result: "win",
-          },
-          {
-            id: "similar-2",
-            symbol: "USD/JPY",
-            side: "buy",
-            similarity: 85,
-            timestamp: "2024-12-15T14:00:00Z",
-            summarySnippet: "ボリンジャーバンドの下限に接触後の反発。RSIは35付近。",
-            result: "win",
-          },
-          {
-            id: "similar-3",
-            symbol: "EUR/USD",
-            side: "buy",
-            similarity: 78,
-            timestamp: "2024-12-10T09:15:00Z",
-            summarySnippet: "日足で強い支持線に到達。4時間足でダイバージェンス確認。",
-            result: "loss",
-          },
-          {
-            id: "similar-4",
-            symbol: "USD/JPY",
-            side: "buy",
-            similarity: 72,
-            timestamp: "2024-12-05T16:45:00Z",
-            summarySnippet: "経済指標発表後の急落からの戻り。テクニカル的には過売り状態。",
-            result: "breakeven",
-          },
-        ],
-        featureVector: [
-          { feature: "RSI", label: "RSI", noteValue: 28, currentValue: 45 },
-          { feature: "MACD Histogram", label: "MACD", noteValue: -15, currentValue: 5 },
-          { feature: "BB Position", label: "BB", noteValue: 10, currentValue: 50 },
-          { feature: "Volume", label: "VOL", noteValue: 85, currentValue: 60 },
-          { feature: "Trend Strength", label: "Trend", noteValue: 65, currentValue: 70 },
-          { feature: "Volatility", label: "Volat", noteValue: 40, currentValue: 35 },
-        ],
+      const result: SimilarNotesApiResponse = await response.json();
+
+      if (!result.success || !result.data) {
+        throw new Error(result.error || "類似ノートの取得に失敗しました");
+      }
+
+      // 基準ノート情報を取得（最初の類似ノートから推測、または別APIから取得）
+      // TODO: 基準ノートの詳細情報を別途取得する
+      const baseNoteInfo = result.data.similarNotes[0]
+        ? {
+            id: noteId,
+            symbol: result.data.similarNotes[0].symbol,
+            side: result.data.similarNotes[0].side,
+            timestamp: new Date().toISOString(),
+          }
+        : {
+            id: noteId,
+            symbol: "不明",
+            side: "不明",
+            timestamp: new Date().toISOString(),
+          };
+
+      // APIレスポンスをコンポーネント用データに変換
+      const formattedData: SimilarNotesData = {
+        baseNote: baseNoteInfo,
+        similarNotes: result.data.similarNotes.map((n) => ({
+          id: n.noteId,
+          symbol: n.symbol,
+          side: n.side,
+          similarity: n.similarity,
+          timestamp: n.timestamp,
+          summarySnippet: n.summarySnippet,
+          result: n.result as "win" | "loss" | "breakeven" | "pending",
+        })),
+        // TODO: 特徴量ベクトルの比較データを取得
+        featureVector: [],
       };
 
-      setData(mockData);
+      setData(formattedData);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "類似ノートの取得に失敗しました");
+      console.error("類似ノート取得エラー:", err);
+      setError(
+        err instanceof Error ? err.message : "類似ノートの取得に失敗しました"
+      );
     } finally {
       setIsLoading(false);
     }
-  }
+  }, [noteId]);
+
+  useEffect(() => {
+    if (!noteId) return;
+    loadSimilarNotes();
+  }, [noteId, loadSimilarNotes]);
 
   // ローディング表示
   if (isLoading) {
@@ -150,7 +173,10 @@ export default function SimilarNotesPage() {
         <AlertDescription>
           {error || "データが見つかりませんでした"}
           <div className="mt-3">
-            <Link href={`/notes/${noteId}`} className="text-violet-400 hover:underline">
+            <Link
+              href={`/notes/${noteId}`}
+              className="text-violet-400 hover:underline"
+            >
               ノート詳細に戻る
             </Link>
           </div>
@@ -166,7 +192,8 @@ export default function SimilarNotesPage() {
         <div>
           <h1 className="text-3xl font-bold text-white">類似トレード</h1>
           <p className="text-gray-400 mt-1">
-            {data.baseNote.symbol} - {data.baseNote.side.toUpperCase()} の類似パターン
+            {data.baseNote.symbol} - {data.baseNote.side.toUpperCase()}{" "}
+            の類似パターン
           </p>
         </div>
         <Link
@@ -177,12 +204,14 @@ export default function SimilarNotesPage() {
         </Link>
       </div>
 
-      {/* 特徴量ベクトル可視化 */}
-      <FeatureVectorViz
-        data={data.featureVector}
-        showComparison={true}
-        title="特徴量比較（ノート作成時 vs 現在）"
-      />
+      {/* 特徴量ベクトル可視化（データがある場合のみ表示） */}
+      {data.featureVector.length > 0 && (
+        <FeatureVectorViz
+          data={data.featureVector}
+          showComparison={true}
+          title="特徴量比較（ノート作成時 vs 現在）"
+        />
+      )}
 
       {/* 類似ノート一覧 */}
       <Card>
@@ -216,33 +245,37 @@ export default function SimilarNotesPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {/* 類似ノート数 */}
               <div className="text-center p-4 bg-slate-700/30 rounded-lg">
-                <div className="text-3xl font-bold text-white">{data.similarNotes.length}</div>
+                <div className="text-3xl font-bold text-white">
+                  {data.similarNotes.length}
+                </div>
                 <div className="text-sm text-gray-400">類似ノート数</div>
               </div>
-              
+
               {/* 平均類似度 */}
               <div className="text-center p-4 bg-slate-700/30 rounded-lg">
                 <div className="text-3xl font-bold text-violet-400">
                   {Math.round(
                     data.similarNotes.reduce((sum, n) => sum + n.similarity, 0) /
                       data.similarNotes.length
-                  )}%
+                  )}
+                  %
                 </div>
                 <div className="text-sm text-gray-400">平均類似度</div>
               </div>
-              
+
               {/* 勝率 */}
               <div className="text-center p-4 bg-slate-700/30 rounded-lg">
                 <div className="text-3xl font-bold text-green-400">
                   {Math.round(
                     (data.similarNotes.filter((n) => n.result === "win").length /
-                      data.similarNotes.filter((n) => n.result).length) *
+                      data.similarNotes.filter((n) => n.result && n.result !== "pending").length) *
                       100
-                  ) || 0}%
+                  ) || 0}
+                  %
                 </div>
                 <div className="text-sm text-gray-400">勝率</div>
               </div>
-              
+
               {/* 最高類似度 */}
               <div className="text-center p-4 bg-slate-700/30 rounded-lg">
                 <div className="text-3xl font-bold text-pink-400">

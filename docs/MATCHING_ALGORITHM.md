@@ -2,81 +2,163 @@
 
 ## Overview
 
-The TradeAssist MVP matching system compares historical trade notes with current real-time market conditions to identify potential trading opportunities. This document explains the algorithm in detail.
+TradeAssist MVP のマッチングシステムは、過去のトレードノートと現在のリアルタイム市場状況を比較し、潜在的な取引機会を特定します。本ドキュメントではアルゴリズムの詳細を解説します。
 
 ## Core Concept
 
-The system extracts numerical features from both historical trades and current market data, then compares them using mathematical similarity metrics combined with rule-based validation.
+システムは、過去のトレードと現在の市場データから数値特徴量を抽出し、コサイン類似度とルールベース検証を組み合わせて比較します。
 
 ---
 
 ## Feature Extraction
 
-### Historical Trade Features
+### 12次元統一特徴量ベクトル
 
-From each trade note, we extract a 7-dimensional feature vector:
+トレードノートと市場データから **12次元の統一特徴量ベクトル** を抽出します。
 
 ```typescript
-features = [
-  trade.price,              // Entry price
-  trade.quantity,           // Position size
-  rsi || 50,               // RSI indicator (default: 50)
-  macd || 0,               // MACD indicator (default: 0)
-  volume || 0,             // Trading volume
-  trendValue,              // -1 (bearish), 0 (neutral), 1 (bullish)
-  sideValue                // -1 (sell), 1 (buy)
+// 12次元特徴量ベクトルの構成
+featureVector = [
+  // トレンド系（5次元: index 0-4）
+  sma20,           // 20期間単純移動平均
+  sma50,           // 50期間単純移動平均
+  sma200,          // 200期間単純移動平均
+  ema20,           // 20期間指数移動平均
+  ema50,           // 50期間指数移動平均
+  
+  // モメンタム系（2次元: index 5-6）
+  macdLine,        // MACDライン
+  macdSignal,      // MACDシグナル
+  
+  // 過熱度系（1次元: index 7）
+  rsi,             // 相対力指数 (0-100)
+  
+  // ボラティリティ系（2次元: index 8-9）
+  bbUpper,         // ボリンジャーバンド上限
+  bbLower,         // ボリンジャーバンド下限
+  
+  // ローソク足系（1次元: index 10）
+  candlePattern,   // ローソク足パターンスコア (-3〜+3)
+  
+  // 時間軸（1次元: index 11）
+  timeContext      // 時間帯コンテキスト (0-3)
 ]
 ```
 
+**Feature Breakdown:**
+
+| Index | Feature       | カテゴリ        | Range         | Description                      |
+|-------|---------------|-----------------|---------------|----------------------------------|
+| 0     | sma20         | トレンド系      | 0-∞           | 20期間単純移動平均               |
+| 1     | sma50         | トレンド系      | 0-∞           | 50期間単純移動平均               |
+| 2     | sma200        | トレンド系      | 0-∞           | 200期間単純移動平均              |
+| 3     | ema20         | トレンド系      | 0-∞           | 20期間指数移動平均               |
+| 4     | ema50         | トレンド系      | 0-∞           | 50期間指数移動平均               |
+| 5     | macdLine      | モメンタム系    | -∞ to +∞      | MACD ライン                      |
+| 6     | macdSignal    | モメンタム系    | -∞ to +∞      | MACD シグナル                    |
+| 7     | rsi           | 過熱度系        | 0-100         | 相対力指数                       |
+| 8     | bbUpper       | ボラティリティ  | 0-∞           | ボリンジャーバンド上限           |
+| 9     | bbLower       | ボラティリティ  | 0-∞           | ボリンジャーバンド下限           |
+| 10    | candlePattern | ローソク足系    | -3 to +3      | ローソク足パターンスコア         |
+| 11    | timeContext   | 時間軸          | 0-3           | 時間帯コンテキスト               |
+
+### カテゴリ別説明
+
+#### トレンド系（5次元: index 0-4）
+複数の移動平均を使ってトレンドの強さと方向を捉えます。
+- **SMA20/50/200**: 短期・中期・長期のトレンド方向
+- **EMA20/50**: より直近の価格変動に敏感なトレンド
+
+#### モメンタム系（2次元: index 5-6）
+相場の勢いと転換点を検出します。
+- **MACD Line**: 短期EMA(12) と長期EMA(26) の差
+- **MACD Signal**: MACDラインの9期間EMA
+
+#### 過熱度系（1次元: index 7）
+買われすぎ・売られすぎの状態を判定します。
+- **RSI**: 0-100の範囲で相対的な強さを測定
+
+#### ボラティリティ系（2次元: index 8-9）
+価格変動の幅を把握します。
+- **BB Upper/Lower**: 価格の統計的な上下限（標準偏差±2σ）
+
+#### ローソク足系（1次元: index 10）
+価格パターンから相場心理を読み取ります。
+- 強気パターン（ハンマー、エンガルフィング等）: +1〜+3
+- 弱気パターン（シューティングスター等）: -1〜-3
+- ニュートラル: 0
+
+#### 時間軸（1次元: index 11）
+取引の時間帯コンテキストを数値化します。
+- 0: アジア市場 (0:00-8:00 UTC)
+- 1: 欧州市場 (8:00-14:00 UTC)
+- 2: 米国市場 (14:00-22:00 UTC)
+- 3: その他/重複時間帯
+
 **Example:**
 ```
-Trade: BUY 0.1 BTCUSDT at $42,500
-Features: [42500, 0.1, 50, 0, 0, 0, 1]
+Trade: BUY BTCUSDT at $43,000 during US session
+Features: [43000, 42500, 40000, 43100, 42600, 150, 120, 52, 45000, 40000, 1, 2]
+
+各インデックス:
+  [0] SMA20: 43000
+  [1] SMA50: 42500
+  [2] SMA200: 40000
+  [3] EMA20: 43100
+  [4] EMA50: 42600
+  [5] MACD Line: 150
+  [6] MACD Signal: 120
+  [7] RSI: 52
+  [8] BB Upper: 45000
+  [9] BB Lower: 40000
+  [10] Candle Pattern: 1 (Bullish Engulfing)
+  [11] Time Context: 2 (US Session)
 ```
 
-### Current Market Features
+### 後方互換性（Legacy Vector Conversion）
 
-From real-time market data, we extract a similar feature vector:
+旧バージョンの7次元/8次元/18次元ベクトルは自動的に12次元に変換されます：
 
 ```typescript
-features = [
-  market.close,             // Current price
-  market.volume,            // Current volume
-  market.indicators.rsi,    // Current RSI
-  market.indicators.macd,   // Current MACD
-  market.volume,            // Volume (repeated for consistency)
-  trendValue,              // Current trend encoding
-  0                        // Neutral for current market
-]
-```
+import { convertLegacyVector } from '@/services/featureVectorService';
 
-**Example:**
-```
-Market: BTCUSDT at $42,550, RSI=55, Bullish
-Features: [42550, 1000000, 55, 0.5, 1000000, 1, 0]
-```
+// 7次元: [price, quantity, rsi, macd, volume, trend, side]
+// 8次元: 7次元 + histogram
+// 18次元: 旧フル特徴量
+// → いずれも12次元に正規化
 
----
+const legacyVector = [42500, 0.1, 50, 0, 1000000, 1, 1]; // 7次元
+const modernVector = convertLegacyVector(legacyVector);  // 12次元
+```
 
 ## Similarity Calculation
 
 ### Step 1: Cosine Similarity
 
-We use cosine similarity to compare the feature vectors. This measures the angle between vectors, making it scale-invariant.
+12次元特徴量ベクトル間の類似度を **コサイン類似度** で計算します。
+これはベクトル間の角度を測定するため、スケールに依存しません。
 
 **Formula:**
 ```
 similarity = (A · B) / (||A|| × ||B||)
 
 where:
-  A · B = dot product
-  ||A|| = magnitude of vector A
-  ||B|| = magnitude of vector B
+  A · B = dot product（内積）
+  ||A|| = magnitude of vector A（ベクトルAの大きさ）
+  ||B|| = magnitude of vector B（ベクトルBの大きさ）
 ```
 
 **Implementation:**
 ```typescript
-function cosineSimilarity(vecA: number[], vecB: number[]): number {
+import { calculateCosineSimilarity } from '@/services/featureVectorService';
+
+// 12次元ベクトル同士の類似度計算
+const similarity = calculateCosineSimilarity(vectorA, vectorB);
+```
+
+**内部実装:**
+```typescript
+function calculateCosineSimilarity(vecA: number[], vecB: number[]): number {
   let dotProduct = 0;
   let normA = 0;
   let normB = 0;
@@ -94,8 +176,25 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
 ```
 
 **Result Range:** 0 to 1
-- 0: Completely dissimilar
-- 1: Identical conditions
+- 0: 完全に異なる
+- 1: 完全に同一
+
+### 類似度閾値 (Similarity Thresholds)
+
+```typescript
+// src/services/featureVectorService.ts で定義
+export const SIMILARITY_THRESHOLDS = {
+  STRONG: 0.90,  // 非常に類似（強い一致）
+  MEDIUM: 0.80,  // 中程度の類似
+  WEAK: 0.70,    // 弱い類似（最小閾値）
+} as const;
+```
+
+| 閾値   | 値    | 用途                           |
+|--------|-------|--------------------------------|
+| STRONG | 0.90  | ほぼ同一条件、高確度マッチ     |
+| MEDIUM | 0.80  | 類似条件、標準マッチ           |
+| WEAK   | 0.70  | 参考レベル、探索的マッチ       |
 
 ---
 
@@ -170,9 +269,17 @@ finalScore = (0.85 × 0.6) + 0.3 + 0.1
 
 ## Threshold Filtering
 
-Only matches that exceed the configured threshold trigger notifications.
+閾値を超えたマッチのみが通知をトリガーします。
 
-**Default Threshold:** 0.75 (75%)
+### 類似度閾値の選択
+
+**推奨閾値:**
+
+| 用途                     | 閾値   | 説明                         |
+|--------------------------|--------|------------------------------|
+| 類似ノート検索           | WEAK (0.70)   | 広く関連ノートを発見        |
+| バックテストマッチ       | MEDIUM (0.80) | バランスの取れた精度        |
+| リアルタイム通知         | STRONG (0.90) | 高確度マッチのみ通知        |
 
 **Configuration:**
 ```env

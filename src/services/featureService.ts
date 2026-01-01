@@ -17,6 +17,10 @@ import {
   OHLCVData,
   FeatureSnapshot,
 } from './indicators/indicatorService';
+import {
+  calculateCosineSimilarity,
+  SIMILARITY_THRESHOLDS,
+} from './featureVectorService';
 
 const prisma = new PrismaClient();
 const indicatorService = new IndicatorService();
@@ -124,31 +128,24 @@ export class FeatureService {
   /**
    * コサイン類似度を計算
    * 
+   * featureVectorService の統一 calculateCosineSimilarity を使用
+   * 次元が異なる場合はパディングで対応
+   * 
    * @param vecA - ベクトル A
    * @param vecB - ベクトル B
    * @returns コサイン類似度（-1〜1）
    */
   private cosineSimilarity(vecA: number[], vecB: number[]): number {
     if (vecA.length !== vecB.length || vecA.length === 0) {
-      return 0;
+      // 次元が異なる場合はパディングで対応（後方互換用）
+      const maxLen = Math.max(vecA.length, vecB.length);
+      const a = [...vecA];
+      const b = [...vecB];
+      while (a.length < maxLen) a.push(0);
+      while (b.length < maxLen) b.push(0);
+      return calculateCosineSimilarity(a, b);
     }
-
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
-
-    for (let i = 0; i < vecA.length; i++) {
-      dotProduct += vecA[i] * vecB[i];
-      normA += vecA[i] * vecA[i];
-      normB += vecB[i] * vecB[i];
-    }
-
-    const denominator = Math.sqrt(normA) * Math.sqrt(normB);
-    if (denominator === 0) {
-      return 0;
-    }
-
-    return dotProduct / denominator;
+    return calculateCosineSimilarity(vecA, vecB);
   }
 
   /**

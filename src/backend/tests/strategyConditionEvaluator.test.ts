@@ -213,14 +213,18 @@ describe('StrategyConditionEvaluator', () => {
 
   describe('evaluateConditionGroup', () => {
     test('AND 演算子: すべての条件が真の場合', async () => {
+      // RSI が 30〜70 の範囲に収まるよう、上下に変動するデータを生成
+      // 価格が一定範囲内で推移すると RSI は中央値付近（50前後）に収束する
       const mockData: OHLCV[] = [];
       for (let i = 0; i < 50; i++) {
+        // sin波で価格を変動させる（150を中心に ±2 の範囲）
+        const price = 150.0 + Math.sin(i * 0.3) * 2;
         mockData.push({
           timestamp: new Date(`2024-01-01T${String(i).padStart(2, '0')}:00:00Z`),
-          open: 150.0,
-          high: 151.0,
-          low: 149.0,
-          close: 150.0 + i * 0.1,
+          open: price - 0.5,
+          high: price + 0.5,
+          low: price - 0.5,
+          close: price,
           volume: 1000,
         });
       }
@@ -257,7 +261,7 @@ describe('StrategyConditionEvaluator', () => {
 
       const result = await evaluateConditionGroup(ctx, group);
 
-      // 緩やかな上昇トレンドなので RSI は 30〜70 の範囲内のはず
+      // 変動するデータなので RSI は 30〜70 の範囲内のはず
       expect(result).toBe(true);
     });
 

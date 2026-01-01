@@ -17,6 +17,25 @@ const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3100";
 
 /**
+ * 類似度閾値の定数（12次元統一ベクトル + コサイン類似度）
+ * バックエンドの SIMILARITY_THRESHOLDS と同期
+ */
+export const SIMILARITY_THRESHOLDS = {
+  /** 強マッチ: 高い信頼度でパターン一致 */
+  STRONG: 0.90,
+  /** 中マッチ: 参考レベルの一致 */
+  MEDIUM: 0.80,
+  /** 弱マッチ: 注意が必要な一致 */
+  WEAK: 0.70,
+} as const;
+
+/**
+ * 12次元特徴量ベクトルの次元数
+ * バックエンドの VECTOR_DIMENSION と同期
+ */
+export const VECTOR_DIMENSION = 12;
+
+/**
  * 通知一覧を取得
  * GET /api/notifications
  */
@@ -1216,11 +1235,16 @@ export async function createNotesFromBacktest(
 /**
  * 特定のノートに類似したノートを検索
  * POST /api/strategies/:id/notes/:noteId/similar
+ * 
+ * 類似度閾値（12次元統一ベクトル + コサイン類似度）:
+ * - 0.90 以上: 強マッチ（高い信頼度）
+ * - 0.80 以上: 中マッチ（参考レベル）
+ * - 0.70 以上: 弱マッチ（注意が必要）
  */
 export async function searchSimilarNotes(
   strategyId: string,
   noteId: string,
-  threshold: number = 0.7,
+  threshold: number = 0.70,  // デフォルト: 弱マッチ以上
   limit: number = 10
 ): Promise<SimilarNoteResult[]> {
   const response = await fetch(

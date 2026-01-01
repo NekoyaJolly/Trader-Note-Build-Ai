@@ -15,7 +15,12 @@ describe('TradeImportService', () => {
 
   // 各テスト前にDBをクリーンアップ（重複チェックに影響されないようにする）
   beforeEach(async () => {
-    // TradeNote → Trade の順に削除（外部キー制約を考慮）
+    // 外部キー制約を考慮した削除順序:
+    // AISummary, BacktestRun, MatchResult, NotificationLog → TradeNote → Trade
+    await prisma.aISummary.deleteMany({});
+    await prisma.backtestRun.deleteMany({});
+    await prisma.matchResult.deleteMany({});
+    await prisma.notificationLog.deleteMany({});
     await prisma.tradeNote.deleteMany({});
     await prisma.trade.deleteMany({});
   });

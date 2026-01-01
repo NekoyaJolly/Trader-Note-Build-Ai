@@ -7,6 +7,8 @@ import { TradeRepository } from '../backend/repositories/tradeRepository';
 import { TradeNoteService, NoteUpdatePayload } from '../services/tradeNoteService';
 import { NoteStatus } from '../models/types';
 import { Trade as DbTrade, Prisma } from '@prisma/client';
+import { FeatureService } from '../services/featureService';
+import { SIMILARITY_THRESHOLDS } from '../services/featureVectorService';
 
 /**
  * トレードデータの共通型
@@ -25,11 +27,13 @@ export class TradeController {
   private importService: TradeImportService;
   private tradeRepository: TradeRepository;
   private noteService: TradeNoteService;
+  private featureService: FeatureService;
 
   constructor() {
     this.importService = new TradeImportService();
     this.tradeRepository = new TradeRepository();
     this.noteService = new TradeNoteService();
+    this.featureService = new FeatureService();
   }
 
   /**
@@ -324,4 +328,76 @@ export class TradeController {
       }
     }
   };
+
+  /**
+   * 類似ノートを検索
+   * POST /api/trades/notes/:id/similar
+   * 
+   * 12次元特徴量ベクトル + コサイン類似度を使用
+   */
+  findSimilarNotes = async (req: Request, res: Response): Promise<void> => {
+    const noteId = String(req.params.id);
+    // リクエストボディから閾値と件数を取得（デフォルト: WEAK閾値, 10件）
+    const threshold = Number(req.body.threshold) || SIMILARITY_THRESHOLDS.WEAK;
+    const limit = Number(req.body.limit) || 10;
+
+    try {
+      const results = await this.featureService.findSimilarToNote(
+        noteId,
+        limit,
+        threshold
+      );
+
+      // フロントエンド用にレスポンスを整形
+      // note は include で trade と aiSummary を含む拡張型
+      type NoteWithRelations = typeof results[number]['note'] & {
+        trade?: { side: string } | null;
+        aiSummary?: { summary: string } | null;
+        entryTime?: Date;
+        pnl?: Prisma.Decimal | null;
+      };
+
+      const formattedResults = results.map(r => {
+        const note = r.note as NoteWithRelations;
+        return {
+          noteId: note.id,
+          symbol: note.symbol,
+          side: note.trade?.side || 'buy',
+          timestamp: note.entryTime || note.createdAt,
+          similarity: Math.round(r.similarity * 100), // パーセンテージに変換
+          summarySnippet: note.aiSummary?.summary || note.userNotes || '',
+          result: this.determineTradeResult(note),
+        };
+      });
+
+      res.json({
+        success: true,
+        data: {
+          baseNoteId: noteId,
+          similarNotes: formattedResults,
+          threshold,
+          limit,
+        },
+      });
+    } catch (error) {
+      const message = (error as Error).message;
+      console.error('Error finding similar notes:', error);
+      res.status(500).json({
+        success: false,
+        error: message || '類似ノートの検索に失敗しました',
+      });
+    }
+  };
+
+  /**
+   * ノートの結果を判定（win/loss/breakeven）
+   * TODO: 実際の損益計算ロジックに置き換え
+   */
+  private determineTradeResult(note: { pnl?: number | null | Prisma.Decimal }): string {
+    if (!note.pnl) return 'pending';
+    const pnl = typeof note.pnl === 'number' ? note.pnl : Number(note.pnl);
+    if (pnl > 0) return 'win';
+    if (pnl < 0) return 'loss';
+    return 'breakeven';
+  }
 }

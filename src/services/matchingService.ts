@@ -11,6 +11,12 @@ import {
   DEFAULT_ANOMALY_THRESHOLD,
   NormalizedIndicators 
 } from '../utils/indicatorNormalizer';
+import {
+  calculateCosineSimilarity,
+  generateFeatureVectorFromIndicators,
+  SIMILARITY_THRESHOLDS,
+  type IndicatorData,
+} from './featureVectorService';
 
 /**
  * マッチングサービス
@@ -226,38 +232,83 @@ export class MatchingService {
   }
 
   /**
-   * 現在の市場データから特徴量を抽出
+   * 現在の市場データから12次元特徴量ベクトルを抽出
+   * 
+   * 12次元構成:
+   * - トレンド系 (0-2): trendDirection, trendStrength, trendAlignment
+   * - モメンタム系 (3-4): macdHistogram, macdCrossover
+   * - 過熱度系 (5-6): rsiValue, rsiZone
+   * - ボラティリティ系 (7-8): bbPosition, bbWidth
+   * - ローソク足構造 (9-10): candleBody, candleDirection
+   * - 時間軸 (11): sessionFlag
    */
   private extractMarketFeatures(market: MarketData): number[] {
-    const features: number[] = [];
+    // MarketData のインジケーターを IndicatorData 形式に変換
+    // 注: MarketData.indicators の型は限定的なため、存在するフィールドのみ使用
+    const marketIndicators = market.indicators as Record<string, unknown> | undefined;
+    
+    const indicatorData: IndicatorData = {
+      rsi: market.indicators?.rsi,
+      rsiZone: this.determineRsiZone(market.indicators?.rsi),
+      macdHistogram: market.indicators?.macd,
+      macdCrossover: this.determineMacdCrossover(market.indicators),
+      smaSlope: this.determineTrendSlope(market.indicators?.trend),
+      emaSlope: this.determineTrendSlope(market.indicators?.trend),
+      priceVsSma: this.determinePricePosition(market.indicators?.trend),
+      priceVsEma: this.determinePricePosition(market.indicators?.trend),
+      // BB データは MarketData の基本型には含まれないため、拡張データがあれば使用
+      bbPosition: (marketIndicators?.bb as { percentB?: number })?.percentB,
+      bbWidth: (marketIndicators?.bb as { width?: number })?.width,
+      close: market.close,
+    };
 
-    // 価格関連の特徴量
-    features.push(market.close);
-    features.push(market.volume);
+    // 12次元ベクトルを生成
+    return generateFeatureVectorFromIndicators(indicatorData, new Date(market.timestamp));
+  }
 
-    // インジケーター（実際の計算値を使用）
-    features.push(market.indicators?.rsi ?? 50);
-    features.push(market.indicators?.macd ?? 0);
-    features.push(market.volume);
+  /**
+   * RSI ゾーンを判定
+   */
+  private determineRsiZone(rsi?: number): 'overbought' | 'oversold' | 'neutral' {
+    if (rsi === undefined) return 'neutral';
+    if (rsi >= 70) return 'overbought';
+    if (rsi <= 30) return 'oversold';
+    return 'neutral';
+  }
 
-    // トレンドエンコーディング
-    const trendValue = 
-      market.indicators?.trend === 'bullish' ? 1 :
-      market.indicators?.trend === 'bearish' ? -1 : 0;
-    features.push(trendValue);
+  /**
+   * MACD クロスオーバーを判定（トレンドから推定）
+   */
+  private determineMacdCrossover(indicators?: MarketData['indicators']): 'bullish' | 'bearish' | 'none' {
+    if (!indicators) return 'none';
+    if (indicators.trend === 'bullish') return 'bullish';
+    if (indicators.trend === 'bearish') return 'bearish';
+    return 'none';
+  }
 
-    // サイドのプレースホルダー（現在の市場では中立）
-    features.push(0);
+  /**
+   * トレンドから傾きを判定
+   */
+  private determineTrendSlope(trend?: string): 'up' | 'down' | 'flat' {
+    if (trend === 'bullish') return 'up';
+    if (trend === 'bearish') return 'down';
+    return 'flat';
+  }
 
-    return features;
+  /**
+   * 価格位置を判定
+   */
+  private determinePricePosition(trend?: string): 'above' | 'below' | 'at' {
+    if (trend === 'bullish') return 'above';
+    if (trend === 'bearish') return 'below';
+    return 'at';
   }
 
   /**
    * コサイン類似度を計算
    * 
-   * 次元不一致の場合:
-   * - 短い方のベクトルを0で埋めて長さを揃える
-   * - NaN/undefined/Infinity は 0 として扱う
+   * 統一された featureVectorService の calculateCosineSimilarity を使用
+   * 次元が異なる場合は旧ベクトルを12次元に変換してから計算
    */
   private cosineSimilarity(vecA: number[], vecB: number[]): number {
     // 空のベクトルチェック
@@ -266,7 +317,8 @@ export class MatchingService {
       return 0;
     }
 
-    // 次元を揃える（短い方を0で埋める）
+    // 次元が異なる場合は長い方に合わせてパディング
+    // 注: 本来は両方12次元であるべきだが、後方互換のため対応
     const maxLen = Math.max(vecA.length, vecB.length);
     const a = [...vecA];
     const b = [...vecB];
@@ -274,33 +326,7 @@ export class MatchingService {
     while (a.length < maxLen) a.push(0);
     while (b.length < maxLen) b.push(0);
 
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
-
-    for (let i = 0; i < maxLen; i++) {
-      // NaN/undefined/Infinity を 0 として扱う
-      const valA = isFinite(a[i]) ? a[i] : 0;
-      const valB = isFinite(b[i]) ? b[i] : 0;
-      
-      dotProduct += valA * valB;
-      normA += valA * valA;
-      normB += valB * valB;
-    }
-
-    // 0除算防御
-    if (normA === 0 || normB === 0) {
-      return 0;
-    }
-
-    const similarity = dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-    
-    // NaN チェック
-    if (isNaN(similarity)) {
-      return 0;
-    }
-
-    return similarity;
+    return calculateCosineSimilarity(a, b);
   }
 
   /**

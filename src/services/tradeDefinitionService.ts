@@ -29,6 +29,11 @@ import { IndicatorConfig, IndicatorId } from '../models/indicatorConfig';
 import { indicatorService, OHLCVData } from './indicators';
 import { MarketDataService } from './marketDataService';
 import { tradeNormalizationService, NormalizationResult } from './tradeNormalizationService';
+import {
+  generateFeatureVectorFromIndicators,
+  VECTOR_DIMENSION,
+  type IndicatorData,
+} from './featureVectorService';
 
 /**
  * 設定バージョン
@@ -649,28 +654,22 @@ export class TradeDefinitionService {
   }
 
   /**
-   * 特徴量ベクトルを生成
+   * 12次元特徴量ベクトルを生成
    * 
-   * ベクトル構成（20次元）:
-   * [0] RSI（正規化）
-   * [1] SMA乖離率
-   * [2] EMA乖離率
-   * [3] MACDヒストグラム（正規化）
-   * [4] BB位置（正規化）
-   * [5] ストキャスティクス%K
-   * [6] ATR相対値
-   * [7] OBV方向
-   * [8] トレンド方向（-1, 0, 1）
-   * [9] トレンド強度（正規化）
-   * [10] ボラティリティ（0, 0.5, 1）
-   * [11] モメンタム（-1, 0, 1）
-   * [12-19] 予備（将来の拡張用）
+   * featureVectorService の統一12次元フォーマットを使用:
+   * - トレンド系 (0-2): trendDirection, trendStrength, trendAlignment
+   * - モメンタム系 (3-4): macdHistogram, macdCrossover
+   * - 過熱度系 (5-6): rsiValue, rsiZone
+   * - ボラティリティ系 (7-8): bbPosition, bbWidth
+   * - ローソク足構造 (9-10): candleBody, candleDirection
+   * - 時間軸 (11): sessionFlag
    */
   private generateFeatureVector(
     indicatorSnapshot: IndicatorSnapshot,
     derivedContext: DerivedContext
   ): number[] {
-    const vector: number[] = new Array(20).fill(0.5); // デフォルト値で初期化
+    // インジケーター結果を IndicatorData 形式に変換
+    const indicatorData: IndicatorData = {};
 
     for (const result of indicatorSnapshot.results) {
       if (!result.calculated) continue;
@@ -678,35 +677,67 @@ export class TradeDefinitionService {
       switch (result.indicatorId) {
         case 'rsi':
           if (result.value !== undefined) {
-            vector[0] = result.value / 100;
-          }
-          break;
-        case 'stochastic':
-          if (result.values?.k) {
-            const k = result.values.k as number[];
-            if (k.length > 0) {
-              vector[5] = k[k.length - 1] / 100;
-            }
+            indicatorData.rsi = result.value;
+            indicatorData.rsiZone = result.value >= 70 ? 'overbought' : result.value <= 30 ? 'oversold' : 'neutral';
           }
           break;
         case 'macd':
           if (result.values?.histogram) {
             const hist = result.values.histogram as number[];
             if (hist.length > 0) {
-              vector[3] = Math.tanh(hist[hist.length - 1] / 100);
+              indicatorData.macdHistogram = hist[hist.length - 1];
+              // クロスオーバーはトレンドから推定
+              indicatorData.macdCrossover = derivedContext.trend === 'uptrend' ? 'bullish' :
+                                            derivedContext.trend === 'downtrend' ? 'bearish' : 'none';
             }
+          }
+          break;
+        case 'sma':
+          if (result.value !== undefined) {
+            indicatorData.sma = result.value;
+            indicatorData.smaSlope = derivedContext.trend === 'uptrend' ? 'up' :
+                                     derivedContext.trend === 'downtrend' ? 'down' : 'flat';
+          }
+          break;
+        case 'ema':
+          if (result.value !== undefined) {
+            indicatorData.ema = result.value;
+            indicatorData.emaSlope = derivedContext.trend === 'uptrend' ? 'up' :
+                                     derivedContext.trend === 'downtrend' ? 'down' : 'flat';
+          }
+          break;
+        case 'bb':
+          if (result.values) {
+            const upper = result.values.upperBand as number[];
+            const lower = result.values.lowerBand as number[];
+            const middle = result.values.middleBand as number[];
+            if (upper?.length > 0 && lower?.length > 0 && middle?.length > 0) {
+              indicatorData.bbUpper = upper[upper.length - 1];
+              indicatorData.bbLower = lower[lower.length - 1];
+              indicatorData.bbMiddle = middle[middle.length - 1];
+            }
+          }
+          break;
+        case 'atr':
+          if (result.value !== undefined) {
+            indicatorData.atr = result.value;
           }
           break;
       }
     }
 
-    // 派生コンテキストからの値
-    vector[8] = derivedContext.trend === 'uptrend' ? 1 : derivedContext.trend === 'downtrend' ? -1 : 0;
-    vector[9] = derivedContext.trendStrength / 100;
-    vector[10] = derivedContext.volatility === 'high' ? 1 : derivedContext.volatility === 'low' ? 0 : 0.5;
-    vector[11] = derivedContext.momentum === 'overbought' ? 1 : derivedContext.momentum === 'oversold' ? -1 : 0;
+    // トレンド情報を追加
+    indicatorData.priceVsSma = derivedContext.trend === 'uptrend' ? 'above' :
+                               derivedContext.trend === 'downtrend' ? 'below' : 'at';
+    indicatorData.priceVsEma = indicatorData.priceVsSma;
 
-    return vector;
+    // ATR 相対値を計算
+    if (indicatorData.atr !== undefined && indicatorData.sma !== undefined && indicatorData.sma > 0) {
+      indicatorData.atrRelative = indicatorData.atr / indicatorData.sma;
+    }
+
+    // featureVectorService の統一12次元ベクトル生成を使用
+    return generateFeatureVectorFromIndicators(indicatorData, new Date());
   }
 
   /**
