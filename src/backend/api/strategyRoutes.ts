@@ -49,6 +49,25 @@ import {
   findSimilarToNote,
   SimilaritySearchParams,
 } from '../services/similarityService';
+import {
+  getStrategyAlert,
+  createStrategyAlert,
+  updateStrategyAlert,
+  deleteStrategyAlert,
+  triggerAlert,
+  getAlertLogs,
+  pauseAlert,
+  resumeAlert,
+} from '../services/strategyAlertService';
+import {
+  runWalkForwardTest,
+  getWalkForwardResult,
+  getWalkForwardHistory,
+} from '../services/walkForwardService';
+import { PrismaClient } from '@prisma/client';
+
+// Prismaクライアント（バージョン比較用）
+const prisma = new PrismaClient();
 
 const router = Router();
 
@@ -850,6 +869,521 @@ router.post('/notes/search-similar', async (req: Request, res: Response) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
     console.error('[StrategyRoutes] 類似検索エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+// ============================================
+// Phase D: アラートエンドポイント
+// ============================================
+
+/**
+ * GET /api/strategies/:id/alerts
+ * ストラテジーのアラート設定を取得
+ */
+router.get('/:id/alerts', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const alert = await getStrategyAlert(id);
+
+    res.json({
+      success: true,
+      data: { alert },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] アラート設定取得エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * POST /api/strategies/:id/alerts
+ * ストラテジーのアラート設定を作成
+ */
+router.post('/:id/alerts', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { enabled, cooldownMinutes, channels, minMatchScore } = req.body;
+
+    const alert = await createStrategyAlert({
+      strategyId: id,
+      enabled,
+      cooldownMinutes,
+      channels,
+      minMatchScore,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: { alert },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] アラート設定作成エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * PUT /api/strategies/:id/alerts
+ * ストラテジーのアラート設定を更新
+ */
+router.put('/:id/alerts', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { enabled, cooldownMinutes, channels, minMatchScore } = req.body;
+
+    const alert = await updateStrategyAlert(id, {
+      enabled,
+      cooldownMinutes,
+      channels,
+      minMatchScore,
+    });
+
+    res.json({
+      success: true,
+      data: { alert },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] アラート設定更新エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * DELETE /api/strategies/:id/alerts
+ * ストラテジーのアラート設定を削除
+ */
+router.delete('/:id/alerts', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    await deleteStrategyAlert(id);
+
+    res.json({
+      success: true,
+      data: { message: 'アラート設定を削除しました' },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] アラート設定削除エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * POST /api/strategies/:id/alerts/trigger
+ * アラートを手動発火（テスト用）
+ */
+router.post('/:id/alerts/trigger', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { matchScore, indicatorValues } = req.body;
+
+    if (typeof matchScore !== 'number' || matchScore < 0 || matchScore > 1) {
+      return res.status(400).json({
+        success: false,
+        error: 'matchScore は 0.0〜1.0 の数値で指定してください',
+      });
+    }
+
+    const result = await triggerAlert({
+      strategyId: id,
+      matchScore,
+      indicatorValues: indicatorValues || {},
+    });
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] アラート発火エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * PUT /api/strategies/:id/alerts/pause
+ * アラートを一時停止
+ */
+router.put('/:id/alerts/pause', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const alert = await pauseAlert(id);
+
+    res.json({
+      success: true,
+      data: { alert },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] アラート一時停止エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * PUT /api/strategies/:id/alerts/resume
+ * アラートを再開
+ */
+router.put('/:id/alerts/resume', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const alert = await resumeAlert(id);
+
+    res.json({
+      success: true,
+      data: { alert },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] アラート再開エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * GET /api/strategies/:id/alerts/logs
+ * アラート発火履歴を取得
+ */
+router.get('/:id/alerts/logs', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { limit } = req.query;
+
+    const logs = await getAlertLogs(id, limit ? parseInt(limit as string, 10) : 50);
+
+    res.json({
+      success: true,
+      data: { logs },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] アラート履歴取得エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * GET /api/strategies/:id/alerts/stream
+ * リアルタイム監視用 Server-Sent Events (SSE) エンドポイント
+ * 
+ * クライアントがこのエンドポイントに接続すると、
+ * ストラテジー条件成立時にリアルタイムで通知を受け取れる
+ */
+router.get('/:id/alerts/stream', async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  // SSE ヘッダー設定
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // nginx プロキシ対応
+
+  // 接続確認イベント送信
+  res.write(`event: connected\n`);
+  res.write(`data: ${JSON.stringify({ strategyId: id, timestamp: new Date().toISOString() })}\n\n`);
+
+  // ハートビート（30秒ごと）
+  const heartbeatInterval = setInterval(() => {
+    res.write(`event: heartbeat\n`);
+    res.write(`data: ${JSON.stringify({ timestamp: new Date().toISOString() })}\n\n`);
+  }, 30000);
+
+  // 条件チェック用ポーリング（10秒ごと）
+  // 注: 本格的な実装ではWebSocketやPub/Subを使用するが、MVP段階ではポーリングで代替
+  const checkInterval = setInterval(async () => {
+    try {
+      // ここでストラテジー条件をチェック
+      // 実際の実装では marketDataService からリアルタイムデータを取得し、
+      // ストラテジー条件と照合する
+      
+      // MVPでは条件チェックは別プロセス（バッチ or 外部トリガー）で行い、
+      // このSSEは通知の配信のみを担当する設計
+      
+      // TODO: 外部から発火されたアラートをここで配信
+      // 現在は接続維持のみ
+    } catch (error) {
+      console.error('[SSE] 条件チェックエラー:', error);
+    }
+  }, 10000);
+
+  // クライアント切断時のクリーンアップ
+  req.on('close', () => {
+    clearInterval(heartbeatInterval);
+    clearInterval(checkInterval);
+    console.log(`[SSE] クライアント切断: strategyId=${id}`);
+  });
+});
+
+// ============================================
+// Phase D: ウォークフォワードテスト
+// ============================================
+
+/**
+ * POST /api/strategies/:id/walkforward
+ * ウォークフォワードテストを実行
+ */
+router.post('/:id/walkforward', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const {
+      startDate,
+      endDate,
+      splitCount,
+      inSampleDays,
+      outOfSampleDays,
+      timeframe,
+      initialCapital,
+      positionSize,
+    } = req.body;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'startDate と endDate は必須です',
+      });
+    }
+
+    const result = await runWalkForwardTest({
+      strategyId: id,
+      startDate,
+      endDate,
+      splitCount,
+      inSampleDays,
+      outOfSampleDays,
+      timeframe,
+      initialCapital,
+      positionSize,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] ウォークフォワードテストエラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * GET /api/strategies/:id/walkforward/history
+ * ウォークフォワードテスト履歴を取得
+ */
+router.get('/:id/walkforward/history', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { limit } = req.query;
+
+    const history = await getWalkForwardHistory(id, limit ? parseInt(limit as string, 10) : 10);
+
+    res.json({
+      success: true,
+      data: { history },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] ウォークフォワード履歴取得エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * GET /api/strategies/:id/walkforward/:runId
+ * ウォークフォワードテスト結果詳細を取得
+ */
+router.get('/:id/walkforward/:runId', async (req: Request, res: Response) => {
+  try {
+    const { runId } = req.params;
+    const result = await getWalkForwardResult(runId);
+
+    if (!result) {
+      return res.status(404).json({
+        success: false,
+        error: 'ウォークフォワードテスト結果が見つかりません',
+      });
+    }
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] ウォークフォワード結果取得エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+// ============================================
+// Phase D: バージョン比較
+// ============================================
+
+/**
+ * GET /api/strategies/:id/versions/compare
+ * 複数バージョンのバックテスト結果を比較
+ * 
+ * クエリパラメータ:
+ * - versionNumbers: カンマ区切りのバージョン番号 (例: "1,2,3")
+ */
+router.get('/:id/versions/compare', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { versionNumbers } = req.query;
+
+    // バージョン番号をパース
+    const versions = versionNumbers
+      ? (versionNumbers as string).split(',').map(v => parseInt(v.trim(), 10)).filter(v => !isNaN(v))
+      : [];
+
+    // ストラテジーとバージョンを取得
+    const strategy = await prisma.strategy.findUnique({
+      where: { id },
+      include: {
+        versions: {
+          where: versions.length > 0 ? { versionNumber: { in: versions } } : {},
+          orderBy: { versionNumber: 'asc' },
+        },
+      },
+    });
+
+    if (!strategy) {
+      return res.status(404).json({
+        success: false,
+        error: 'ストラテジーが見つかりません',
+      });
+    }
+
+    // 各バージョンの最新バックテスト結果を取得
+    const comparisonData = await Promise.all(
+      strategy.versions.map(async (version) => {
+        // このバージョンの最新バックテスト結果を取得
+        const latestRun = await prisma.strategyBacktestRun.findFirst({
+          where: {
+            strategyId: id,
+            versionId: version.id,
+            status: 'completed',
+          },
+          include: {
+            result: true,
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        return {
+          versionNumber: version.versionNumber,
+          versionId: version.id,
+          changeNote: version.changeNote,
+          createdAt: version.createdAt.toISOString(),
+          backtest: latestRun?.result ? {
+            runId: latestRun.id,
+            executedAt: latestRun.createdAt.toISOString(),
+            startDate: latestRun.startDate.toISOString().split('T')[0],
+            endDate: latestRun.endDate.toISOString().split('T')[0],
+            timeframe: latestRun.timeframe,
+            metrics: {
+              setupCount: latestRun.result.setupCount,
+              winCount: latestRun.result.winCount,
+              lossCount: latestRun.result.lossCount,
+              winRate: latestRun.result.winRate,
+              profitFactor: latestRun.result.profitFactor,
+              totalProfit: Number(latestRun.result.totalProfit),
+              totalLoss: Number(latestRun.result.totalLoss),
+              averagePnL: Number(latestRun.result.averagePnL),
+              expectancy: Number(latestRun.result.expectancy),
+              maxDrawdown: latestRun.result.maxDrawdown ? Number(latestRun.result.maxDrawdown) : null,
+            },
+          } : null,
+        };
+      })
+    );
+
+    // 比較サマリーを計算
+    const versionsWithBacktest = comparisonData.filter(v => v.backtest !== null);
+    const summary = versionsWithBacktest.length > 0 ? {
+      bestWinRate: {
+        versionNumber: versionsWithBacktest.reduce((best, v) => 
+          (v.backtest?.metrics.winRate ?? 0) > (best.backtest?.metrics.winRate ?? 0) ? v : best
+        ).versionNumber,
+        value: Math.max(...versionsWithBacktest.map(v => v.backtest?.metrics.winRate ?? 0)),
+      },
+      bestProfitFactor: {
+        versionNumber: versionsWithBacktest.reduce((best, v) => 
+          (v.backtest?.metrics.profitFactor ?? 0) > (best.backtest?.metrics.profitFactor ?? 0) ? v : best
+        ).versionNumber,
+        value: Math.max(...versionsWithBacktest.map(v => v.backtest?.metrics.profitFactor ?? 0)),
+      },
+      bestExpectancy: {
+        versionNumber: versionsWithBacktest.reduce((best, v) => 
+          (v.backtest?.metrics.expectancy ?? 0) > (best.backtest?.metrics.expectancy ?? 0) ? v : best
+        ).versionNumber,
+        value: Math.max(...versionsWithBacktest.map(v => v.backtest?.metrics.expectancy ?? 0)),
+      },
+      lowestDrawdown: {
+        versionNumber: versionsWithBacktest
+          .filter(v => v.backtest?.metrics.maxDrawdown !== null)
+          .reduce((best, v) => 
+            (v.backtest?.metrics.maxDrawdown ?? Infinity) < (best.backtest?.metrics.maxDrawdown ?? Infinity) ? v : best
+          , versionsWithBacktest[0]).versionNumber,
+        value: Math.min(...versionsWithBacktest
+          .filter(v => v.backtest?.metrics.maxDrawdown !== null)
+          .map(v => v.backtest?.metrics.maxDrawdown ?? Infinity)),
+      },
+    } : null;
+
+    res.json({
+      success: true,
+      data: {
+        strategyId: id,
+        strategyName: strategy.name,
+        versions: comparisonData,
+        summary,
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] バージョン比較エラー:', message);
     res.status(500).json({
       success: false,
       error: message,

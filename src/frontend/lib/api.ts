@@ -1271,3 +1271,373 @@ export async function searchSimilarByIndicators(
   const payload = await response.json();
   return payload.data?.results ?? [];
 }
+
+// ============================================
+// Phase D: アラートAPI
+// ============================================
+
+/** アラート通知チャネル */
+export type AlertChannel = 'in_app' | 'web_push';
+
+/** アラートステータス */
+export type AlertStatus = 'enabled' | 'disabled' | 'paused';
+
+/** アラート設定 */
+export interface StrategyAlert {
+  id: string;
+  strategyId: string;
+  enabled: boolean;
+  status: AlertStatus;
+  cooldownMinutes: number;
+  channels: AlertChannel[];
+  minMatchScore: number;
+  lastTriggeredAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** アラート発火ログ */
+export interface AlertLog {
+  id: string;
+  alertId: string;
+  matchScore: number;
+  indicatorValues: Record<string, unknown>;
+  channel: AlertChannel;
+  success: boolean;
+  errorMessage: string | null;
+  triggeredAt: string;
+}
+
+/**
+ * ストラテジーのアラート設定を取得
+ * GET /api/strategies/:id/alerts
+ */
+export async function fetchStrategyAlert(strategyId: string): Promise<StrategyAlert | null> {
+  const response = await fetch(`${API_BASE_URL}/api/strategies/${strategyId}/alerts`);
+  
+  if (!response.ok) {
+    throw new Error('アラート設定の取得に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data?.alert ?? null;
+}
+
+/**
+ * ストラテジーのアラート設定を作成
+ * POST /api/strategies/:id/alerts
+ */
+export async function createStrategyAlert(
+  strategyId: string,
+  settings: {
+    enabled?: boolean;
+    cooldownMinutes?: number;
+    channels?: AlertChannel[];
+    minMatchScore?: number;
+  }
+): Promise<StrategyAlert> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/alerts`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error('アラート設定の作成に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data.alert;
+}
+
+/**
+ * ストラテジーのアラート設定を更新
+ * PUT /api/strategies/:id/alerts
+ */
+export async function updateStrategyAlert(
+  strategyId: string,
+  settings: {
+    enabled?: boolean;
+    cooldownMinutes?: number;
+    channels?: AlertChannel[];
+    minMatchScore?: number;
+  }
+): Promise<StrategyAlert> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/alerts`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error('アラート設定の更新に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data.alert;
+}
+
+/**
+ * ストラテジーのアラート設定を削除
+ * DELETE /api/strategies/:id/alerts
+ */
+export async function deleteStrategyAlert(strategyId: string): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/alerts`,
+    { method: 'DELETE' }
+  );
+
+  if (!response.ok) {
+    throw new Error('アラート設定の削除に失敗しました');
+  }
+}
+
+/**
+ * アラート発火履歴を取得
+ * GET /api/strategies/:id/alerts/logs
+ */
+export async function fetchAlertLogs(
+  strategyId: string,
+  limit: number = 50
+): Promise<AlertLog[]> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/alerts/logs?limit=${limit}`
+  );
+
+  if (!response.ok) {
+    throw new Error('アラート履歴の取得に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data?.logs ?? [];
+}
+
+/**
+ * アラートを一時停止
+ * PUT /api/strategies/:id/alerts/pause
+ */
+export async function pauseAlert(strategyId: string): Promise<StrategyAlert> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/alerts/pause`,
+    { method: 'PUT' }
+  );
+
+  if (!response.ok) {
+    throw new Error('アラートの一時停止に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data.alert;
+}
+
+/**
+ * アラートを再開
+ * PUT /api/strategies/:id/alerts/resume
+ */
+export async function resumeAlert(strategyId: string): Promise<StrategyAlert> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/alerts/resume`,
+    { method: 'PUT' }
+  );
+
+  if (!response.ok) {
+    throw new Error('アラートの再開に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data.alert;
+}
+
+// ============================================
+// Phase D: ウォークフォワードAPI
+// ============================================
+
+/** ウォークフォワード分割結果 */
+export interface WalkForwardSplit {
+  splitNumber: number;
+  inSamplePeriod: { start: string; end: string };
+  outOfSamplePeriod: { start: string; end: string };
+  inSample: {
+    winRate: number;
+    tradeCount: number;
+    profitFactor: number | null;
+  };
+  outOfSample: {
+    winRate: number;
+    tradeCount: number;
+    profitFactor: number | null;
+  };
+  winRateDiff: number;
+}
+
+/** ウォークフォワードテスト結果 */
+export interface WalkForwardResult {
+  id: string;
+  strategyId: string;
+  type: 'fixed_split' | 'rolling_window';
+  splitCount: number;
+  splits: WalkForwardSplit[];
+  overfitScore: number;
+  overfitWarning: boolean;
+  summary: {
+    avgInSampleWinRate: number;
+    avgOutOfSampleWinRate: number;
+    avgWinRateDiff: number;
+    totalInSampleTrades: number;
+    totalOutOfSampleTrades: number;
+  };
+  status: 'completed' | 'failed';
+  errorMessage?: string;
+}
+
+/**
+ * ウォークフォワードテストを実行
+ * POST /api/strategies/:id/walkforward
+ */
+export async function runWalkForwardTest(
+  strategyId: string,
+  params: {
+    startDate: string;
+    endDate: string;
+    splitCount?: number;
+    inSampleDays?: number;
+    outOfSampleDays?: number;
+    timeframe?: string;
+    initialCapital?: number;
+    positionSize?: number;
+  }
+): Promise<WalkForwardResult> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/walkforward`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error('ウォークフォワードテストの実行に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * ウォークフォワードテスト履歴を取得
+ * GET /api/strategies/:id/walkforward/history
+ */
+export async function fetchWalkForwardHistory(
+  strategyId: string,
+  limit: number = 10
+): Promise<WalkForwardResult[]> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/walkforward/history?limit=${limit}`
+  );
+
+  if (!response.ok) {
+    throw new Error('ウォークフォワード履歴の取得に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data?.history ?? [];
+}
+
+/**
+ * ウォークフォワードテスト結果詳細を取得
+ * GET /api/strategies/:id/walkforward/:runId
+ */
+export async function fetchWalkForwardResult(
+  strategyId: string,
+  runId: string
+): Promise<WalkForwardResult | null> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/walkforward/${runId}`
+  );
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new Error('ウォークフォワード結果の取得に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+
+// ============================================
+// Phase D: バージョン比較API
+// ============================================
+
+/** バージョン比較データ */
+export interface VersionComparisonData {
+  versionNumber: number;
+  versionId: string;
+  changeNote: string | null;
+  createdAt: string;
+  backtest: {
+    runId: string;
+    executedAt: string;
+    startDate: string;
+    endDate: string;
+    timeframe: string;
+    metrics: {
+      setupCount: number;
+      winCount: number;
+      lossCount: number;
+      winRate: number;
+      profitFactor: number | null;
+      totalProfit: number;
+      totalLoss: number;
+      averagePnL: number;
+      expectancy: number;
+      maxDrawdown: number | null;
+    };
+  } | null;
+}
+
+/** バージョン比較結果 */
+export interface VersionComparisonResult {
+  strategyId: string;
+  strategyName: string;
+  versions: VersionComparisonData[];
+  summary: {
+    bestWinRate: { versionNumber: number; value: number };
+    bestProfitFactor: { versionNumber: number; value: number };
+    bestExpectancy: { versionNumber: number; value: number };
+    lowestDrawdown: { versionNumber: number; value: number };
+  } | null;
+}
+
+/**
+ * バージョン比較データを取得
+ * GET /api/strategies/:id/versions/compare
+ */
+export async function fetchVersionComparison(
+  strategyId: string,
+  versionNumbers?: number[]
+): Promise<VersionComparisonResult> {
+  const params = versionNumbers?.length
+    ? `?versionNumbers=${versionNumbers.join(',')}`
+    : '';
+
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/versions/compare${params}`
+  );
+
+  if (!response.ok) {
+    throw new Error('バージョン比較データの取得に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}

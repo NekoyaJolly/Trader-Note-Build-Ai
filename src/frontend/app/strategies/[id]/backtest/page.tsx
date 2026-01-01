@@ -17,7 +17,10 @@ import {
   runStrategyBacktest,
   fetchStrategyBacktestHistory,
   createNotesFromBacktest,
+  runWalkForwardTest,
+  fetchWalkForwardHistory,
   BacktestHistoryItem,
+  WalkForwardResult,
 } from "@/lib/api";
 import type { Strategy, BacktestResult, BacktestResultSummary, BacktestTradeEvent } from "@/types/strategy";
 import Sidebar from "@/components/layout/Sidebar";
@@ -244,7 +247,17 @@ export default function StrategyBacktestPage() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"summary" | "trades" | "history">("summary");
+  const [activeTab, setActiveTab] = useState<"summary" | "trades" | "history" | "walkforward">("summary");
+  
+  // ウォークフォワードテストステート
+  const [walkForwardParams, setWalkForwardParams] = useState({
+    splitCount: 5,
+    startDate: getDefaultStartDate(),
+    endDate: getDefaultEndDate(),
+  });
+  const [walkForwardResult, setWalkForwardResult] = useState<WalkForwardResult | null>(null);
+  const [walkForwardHistory, setWalkForwardHistory] = useState<WalkForwardResult[]>([]);
+  const [runningWalkForward, setRunningWalkForward] = useState(false);
   
   // ノート作成ステート
   const [creatingNotes, setCreatingNotes] = useState(false);
@@ -283,6 +296,14 @@ export default function StrategyBacktestPage() {
       // バックテスト履歴を取得
       const historyData = await fetchStrategyBacktestHistory(strategyId);
       setHistory(historyData);
+
+      // ウォークフォワード履歴を取得
+      try {
+        const wfHistory = await fetchWalkForwardHistory(strategyId);
+        setWalkForwardHistory(wfHistory);
+      } catch {
+        // ウォークフォワード履歴取得失敗は無視
+      }
 
     } catch (err) {
       const message = err instanceof Error ? err.message : "データの取得に失敗しました";
@@ -339,6 +360,32 @@ export default function StrategyBacktestPage() {
   const handleSelectHistory = async (historyId: string) => {
     // TODO: fetchBacktestResult(strategyId, historyId) を実装
     console.log("選択された履歴:", historyId);
+  };
+
+  /** ウォークフォワードテストを実行 */
+  const handleRunWalkForward = async () => {
+    try {
+      setRunningWalkForward(true);
+      setError(null);
+
+      const result = await runWalkForwardTest(strategyId, {
+        testType: "fixed_split",
+        splitCount: walkForwardParams.splitCount,
+        startDate: walkForwardParams.startDate,
+        endDate: walkForwardParams.endDate,
+      });
+
+      setWalkForwardResult(result);
+
+      // 履歴を再取得
+      const wfHistory = await fetchWalkForwardHistory(strategyId);
+      setWalkForwardHistory(wfHistory);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "ウォークフォワードテストの実行に失敗しました";
+      setError(message);
+    } finally {
+      setRunningWalkForward(false);
+    }
   };
 
   /** 勝ちトレードからノートを作成 */
@@ -645,6 +692,16 @@ export default function StrategyBacktestPage() {
                       >
                         トレード一覧 ({result.trades.length})
                       </button>
+                      <button
+                        onClick={() => setActiveTab("walkforward")}
+                        className={`px-6 py-3 text-sm font-medium transition-colors ${
+                          activeTab === "walkforward"
+                            ? "text-blue-400 border-b-2 border-blue-400"
+                            : "text-gray-400 hover:text-gray-200"
+                        }`}
+                      >
+                        ウォークフォワード
+                      </button>
                     </div>
                   </div>
 
@@ -829,6 +886,213 @@ export default function StrategyBacktestPage() {
 
                     {activeTab === "trades" && (
                       <TradeResultTable trades={result.trades} />
+                    )}
+
+                    {activeTab === "walkforward" && (
+                      <div>
+                        <h3 className="text-lg font-semibold text-white mb-4">
+                          ウォークフォワードテスト
+                        </h3>
+                        <p className="text-sm text-gray-400 mb-6">
+                          期間を複数に分割し、In-Sample（学習期間）とOut-of-Sample（検証期間）で
+                          パフォーマンスを比較することで、過学習のリスクを検出します。
+                        </p>
+
+                        {/* ウォークフォワードパラメータ */}
+                        <div className="bg-slate-700 rounded-lg p-4 mb-6">
+                          <div className="grid grid-cols-3 gap-4">
+                            <div>
+                              <label className="block text-sm text-gray-400 mb-1">
+                                分割数
+                              </label>
+                              <select
+                                value={walkForwardParams.splitCount}
+                                onChange={(e) => setWalkForwardParams(prev => ({
+                                  ...prev,
+                                  splitCount: parseInt(e.target.value)
+                                }))}
+                                className="w-full bg-slate-600 border border-slate-500 rounded px-3 py-2 text-white"
+                              >
+                                <option value={3}>3分割</option>
+                                <option value={4}>4分割</option>
+                                <option value={5}>5分割</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-sm text-gray-400 mb-1">
+                                開始日
+                              </label>
+                              <input
+                                type="date"
+                                value={walkForwardParams.startDate}
+                                onChange={(e) => setWalkForwardParams(prev => ({
+                                  ...prev,
+                                  startDate: e.target.value
+                                }))}
+                                className="w-full bg-slate-600 border border-slate-500 rounded px-3 py-2 text-white"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm text-gray-400 mb-1">
+                                終了日
+                              </label>
+                              <input
+                                type="date"
+                                value={walkForwardParams.endDate}
+                                onChange={(e) => setWalkForwardParams(prev => ({
+                                  ...prev,
+                                  endDate: e.target.value
+                                }))}
+                                className="w-full bg-slate-600 border border-slate-500 rounded px-3 py-2 text-white"
+                              />
+                            </div>
+                          </div>
+                          <div className="mt-4 flex items-center gap-4">
+                            <button
+                              onClick={handleRunWalkForward}
+                              disabled={runningWalkForward}
+                              className={`px-6 py-2 rounded font-medium transition-colors ${
+                                runningWalkForward
+                                  ? "bg-gray-600 text-gray-400 cursor-not-allowed"
+                                  : "bg-blue-600 hover:bg-blue-700 text-white"
+                              }`}
+                            >
+                              {runningWalkForward ? "実行中..." : "ウォークフォワード実行"}
+                            </button>
+                            <span className="text-xs text-gray-500">
+                              In-Sample: 70% / Out-of-Sample: 30%
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* ウォークフォワード結果 */}
+                        {walkForwardResult && (
+                          <div>
+                            {/* オーバーフィットスコア */}
+                            <div className="bg-slate-700 rounded-lg p-4 mb-6">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-sm text-gray-400">オーバーフィットスコア</span>
+                                <span className={`text-xl font-bold ${
+                                  walkForwardResult.overfitScore <= 0.2 ? "text-green-400" :
+                                  walkForwardResult.overfitScore <= 0.4 ? "text-yellow-400" :
+                                  "text-red-400"
+                                }`}>
+                                  {(walkForwardResult.overfitScore * 100).toFixed(1)}%
+                                </span>
+                              </div>
+                              <div className="w-full bg-slate-600 rounded-full h-2">
+                                <div
+                                  className={`h-2 rounded-full ${
+                                    walkForwardResult.overfitScore <= 0.2 ? "bg-green-500" :
+                                    walkForwardResult.overfitScore <= 0.4 ? "bg-yellow-500" :
+                                    "bg-red-500"
+                                  }`}
+                                  style={{ width: `${Math.min(walkForwardResult.overfitScore * 100, 100)}%` }}
+                                />
+                              </div>
+                              <div className="flex justify-between mt-1 text-xs text-gray-500">
+                                <span>良好 (0-20%)</span>
+                                <span>要注意 (20-40%)</span>
+                                <span>過学習リスク (40%+)</span>
+                              </div>
+                            </div>
+
+                            {/* スプリット詳細 */}
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-sm">
+                                <thead className="bg-slate-700 text-gray-300">
+                                  <tr>
+                                    <th className="px-3 py-2 text-left">期間</th>
+                                    <th className="px-3 py-2 text-center">IS 勝率</th>
+                                    <th className="px-3 py-2 text-center">OOS 勝率</th>
+                                    <th className="px-3 py-2 text-center">乖離</th>
+                                    <th className="px-3 py-2 text-center">IS PF</th>
+                                    <th className="px-3 py-2 text-center">OOS PF</th>
+                                    <th className="px-3 py-2 text-center">トレード数</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-700">
+                                  {walkForwardResult.splits.map((split, idx) => {
+                                    const divergence = Math.abs(
+                                      split.inSampleMetrics.winRate - split.outOfSampleMetrics.winRate
+                                    );
+                                    return (
+                                      <tr key={split.splitNumber} className="hover:bg-slate-700/50">
+                                        <td className="px-3 py-2">
+                                          <div className="text-gray-200">Split {idx + 1}</div>
+                                          <div className="text-xs text-gray-500">
+                                            {new Date(split.inSampleStart).toLocaleDateString("ja-JP")}
+                                            〜
+                                            {new Date(split.outOfSampleEnd).toLocaleDateString("ja-JP")}
+                                          </div>
+                                        </td>
+                                        <td className="px-3 py-2 text-center text-green-400">
+                                          {(split.inSampleMetrics.winRate * 100).toFixed(1)}%
+                                        </td>
+                                        <td className="px-3 py-2 text-center text-blue-400">
+                                          {(split.outOfSampleMetrics.winRate * 100).toFixed(1)}%
+                                        </td>
+                                        <td className={`px-3 py-2 text-center ${
+                                          divergence > 0.1 ? "text-red-400" : "text-gray-400"
+                                        }`}>
+                                          {(divergence * 100).toFixed(1)}%
+                                        </td>
+                                        <td className="px-3 py-2 text-center">
+                                          {split.inSampleMetrics.profitFactor?.toFixed(2) || "-"}
+                                        </td>
+                                        <td className="px-3 py-2 text-center">
+                                          {split.outOfSampleMetrics.profitFactor?.toFixed(2) || "-"}
+                                        </td>
+                                        <td className="px-3 py-2 text-center text-gray-400">
+                                          {split.inSampleMetrics.totalTrades} / {split.outOfSampleMetrics.totalTrades}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+
+                            <div className="mt-4 text-xs text-gray-500">
+                              IS = In-Sample（学習期間） / OOS = Out-of-Sample（検証期間）
+                            </div>
+                          </div>
+                        )}
+
+                        {/* ウォークフォワード履歴 */}
+                        {walkForwardHistory.length > 0 && (
+                          <div className="mt-8 pt-6 border-t border-slate-700">
+                            <h4 className="text-sm font-medium text-gray-300 mb-3">
+                              過去のテスト結果
+                            </h4>
+                            <div className="space-y-2">
+                              {walkForwardHistory.slice(0, 5).map((wf) => (
+                                <div
+                                  key={wf.id}
+                                  className="bg-slate-700 rounded p-3 cursor-pointer hover:bg-slate-600"
+                                  onClick={() => setWalkForwardResult(wf)}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-sm text-gray-300">
+                                      {new Date(wf.createdAt).toLocaleDateString("ja-JP")}
+                                    </span>
+                                    <span className={`text-sm font-medium ${
+                                      wf.overfitScore <= 0.2 ? "text-green-400" :
+                                      wf.overfitScore <= 0.4 ? "text-yellow-400" :
+                                      "text-red-400"
+                                    }`}>
+                                      OF: {(wf.overfitScore * 100).toFixed(1)}%
+                                    </span>
+                                  </div>
+                                  <div className="text-xs text-gray-500 mt-1">
+                                    {wf.splits.length}分割 | {wf.startDate} 〜 {wf.endDate}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>

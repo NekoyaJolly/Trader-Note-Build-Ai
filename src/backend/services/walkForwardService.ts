@@ -1,0 +1,602 @@
+/**
+ * ウォークフォワードテストサービス
+ * 
+ * 目的:
+ * - 過学習（オーバーフィッティング）の検出
+ * - In-Sample期間で最適化された戦略がOut-of-Sample期間でも機能するか検証
+ * - 固定分割方式（3〜5分割）で実装
+ * 
+ * アルゴリズム:
+ * 1. テスト期間を N 分割
+ * 2. 各分割で In-Sample (学習用) と Out-of-Sample (検証用) に分ける
+ * 3. In-Sample でバックテスト → Out-of-Sample でバックテスト
+ * 4. 勝率・PFの乖離から過学習スコアを算出
+ */
+
+import { PrismaClient, BacktestStatus, WalkForwardType } from '@prisma/client';
+import {
+  runBacktest,
+  BacktestRequest,
+  BacktestResult,
+  BacktestTimeframe,
+} from './strategyBacktestService';
+
+// Prismaクライアントのシングルトンインスタンス
+const prisma = new PrismaClient();
+
+// ============================================
+// 型定義
+// ============================================
+
+/** ウォークフォワードテスト実行リクエスト */
+export interface WalkForwardRequest {
+  /** 対象ストラテジーID */
+  strategyId: string;
+  /** テスト開始日 (YYYY-MM-DD) */
+  startDate: string;
+  /** テスト終了日 (YYYY-MM-DD) */
+  endDate: string;
+  /** 分割数（3〜5推奨） */
+  splitCount?: number;
+  /** In-Sample日数（省略時は自動計算） */
+  inSampleDays?: number;
+  /** Out-of-Sample日数（省略時は自動計算） */
+  outOfSampleDays?: number;
+  /** 時間足 */
+  timeframe?: BacktestTimeframe;
+  /** 初期資金 */
+  initialCapital?: number;
+  /** ポジションサイズ */
+  positionSize?: number;
+}
+
+/** 分割結果 */
+export interface SplitResult {
+  /** 分割番号 */
+  splitNumber: number;
+  /** In-Sample期間 */
+  inSamplePeriod: {
+    start: string;
+    end: string;
+  };
+  /** Out-of-Sample期間 */
+  outOfSamplePeriod: {
+    start: string;
+    end: string;
+  };
+  /** In-Sample結果 */
+  inSample: {
+    winRate: number;
+    tradeCount: number;
+    profitFactor: number | null;
+  };
+  /** Out-of-Sample結果 */
+  outOfSample: {
+    winRate: number;
+    tradeCount: number;
+    profitFactor: number | null;
+  };
+  /** 勝率乖離（In - Out） */
+  winRateDiff: number;
+}
+
+/** ウォークフォワードテスト結果 */
+export interface WalkForwardResult {
+  /** 実行ID */
+  id: string;
+  /** ストラテジーID */
+  strategyId: string;
+  /** テスト種別 */
+  type: WalkForwardType;
+  /** 分割数 */
+  splitCount: number;
+  /** 各分割の結果 */
+  splits: SplitResult[];
+  /** 過学習スコア（0.0〜1.0、低いほど良い） */
+  overfitScore: number;
+  /** 過学習警告フラグ */
+  overfitWarning: boolean;
+  /** 統計サマリー */
+  summary: {
+    /** In-Sample平均勝率 */
+    avgInSampleWinRate: number;
+    /** Out-of-Sample平均勝率 */
+    avgOutOfSampleWinRate: number;
+    /** 平均勝率乖離 */
+    avgWinRateDiff: number;
+    /** In-Sample合計トレード数 */
+    totalInSampleTrades: number;
+    /** Out-of-Sample合計トレード数 */
+    totalOutOfSampleTrades: number;
+  };
+  /** 実行ステータス */
+  status: 'completed' | 'failed';
+  /** エラーメッセージ（失敗時） */
+  errorMessage?: string;
+}
+
+// ============================================
+// 期間分割ロジック
+// ============================================
+
+interface PeriodSplit {
+  inSampleStart: Date;
+  inSampleEnd: Date;
+  outOfSampleStart: Date;
+  outOfSampleEnd: Date;
+}
+
+/**
+ * 期間を固定分割する
+ * 
+ * 例: 12ヶ月のデータを4分割、In-Sample:Out-of-Sample = 2:1 の場合
+ * Split 1: In(月1-2), Out(月3)
+ * Split 2: In(月4-5), Out(月6)
+ * Split 3: In(月7-8), Out(月9)
+ * Split 4: In(月10-11), Out(月12)
+ */
+function calculatePeriodSplits(
+  startDate: Date,
+  endDate: Date,
+  splitCount: number,
+  inSampleDays?: number,
+  outOfSampleDays?: number
+): PeriodSplit[] {
+  const totalDays = Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+  
+  // 日数が指定されていない場合は自動計算
+  // デフォルト: In-Sample 70%, Out-of-Sample 30%
+  const daysPerSplit = Math.floor(totalDays / splitCount);
+  const inDays = inSampleDays ?? Math.floor(daysPerSplit * 0.7);
+  const outDays = outOfSampleDays ?? Math.floor(daysPerSplit * 0.3);
+
+  const splits: PeriodSplit[] = [];
+  let currentStart = new Date(startDate);
+
+  for (let i = 0; i < splitCount; i++) {
+    const inSampleStart = new Date(currentStart);
+    const inSampleEnd = new Date(currentStart);
+    inSampleEnd.setDate(inSampleEnd.getDate() + inDays - 1);
+
+    const outOfSampleStart = new Date(inSampleEnd);
+    outOfSampleStart.setDate(outOfSampleStart.getDate() + 1);
+    const outOfSampleEnd = new Date(outOfSampleStart);
+    outOfSampleEnd.setDate(outOfSampleEnd.getDate() + outDays - 1);
+
+    // 終了日を超えないように調整
+    if (outOfSampleEnd > endDate) {
+      outOfSampleEnd.setTime(endDate.getTime());
+    }
+
+    splits.push({
+      inSampleStart,
+      inSampleEnd,
+      outOfSampleStart,
+      outOfSampleEnd,
+    });
+
+    // 次の分割の開始位置
+    currentStart = new Date(outOfSampleEnd);
+    currentStart.setDate(currentStart.getDate() + 1);
+
+    // 残り期間が不足したら終了
+    if (currentStart >= endDate) {
+      break;
+    }
+  }
+
+  return splits;
+}
+
+/**
+ * 過学習スコアを計算
+ * 
+ * 計算方法:
+ * 1. 各分割の勝率乖離（In-Sample - Out-of-Sample）を計算
+ * 2. 乖離の平均値と標準偏差を算出
+ * 3. スコア = 正規化された乖離 (0.0〜1.0)
+ * 
+ * 解釈:
+ * - 0.0〜0.2: 過学習の兆候なし（良好）
+ * - 0.2〜0.4: 軽度の過学習の可能性
+ * - 0.4〜0.6: 中程度の過学習
+ * - 0.6以上: 深刻な過学習の疑い
+ */
+function calculateOverfitScore(splits: SplitResult[]): number {
+  if (splits.length === 0) return 0;
+
+  // 有効な分割のみ（トレード数が0でないもの）
+  const validSplits = splits.filter(
+    s => s.inSample.tradeCount > 0 && s.outOfSample.tradeCount > 0
+  );
+
+  if (validSplits.length === 0) return 0;
+
+  // 勝率乖離の計算
+  const diffs = validSplits.map(s => Math.max(0, s.winRateDiff)); // 正の乖離のみ（In > Out）
+  const avgDiff = diffs.reduce((sum, d) => sum + d, 0) / diffs.length;
+
+  // スコア正規化（乖離15%以上で1.0）
+  const normalizedScore = Math.min(1, avgDiff / 0.15);
+
+  return Math.round(normalizedScore * 100) / 100;
+}
+
+// ============================================
+// メイン実行関数
+// ============================================
+
+/**
+ * ウォークフォワードテストを実行
+ */
+export async function runWalkForwardTest(
+  request: WalkForwardRequest
+): Promise<WalkForwardResult> {
+  const {
+    strategyId,
+    startDate,
+    endDate,
+    splitCount = 4,
+    inSampleDays,
+    outOfSampleDays,
+    timeframe = '1h',
+    initialCapital = 1000000,
+    positionSize = 0.1,
+  } = request;
+
+  // ストラテジー存在チェック
+  const strategy = await prisma.strategy.findUnique({
+    where: { id: strategyId },
+    include: {
+      versions: {
+        orderBy: { versionNumber: 'desc' },
+        take: 1,
+      },
+    },
+  });
+
+  if (!strategy) {
+    throw new Error(`ストラテジー ${strategyId} が見つかりません`);
+  }
+
+  const currentVersion = strategy.versions[0];
+  if (!currentVersion) {
+    throw new Error(`ストラテジー ${strategyId} にバージョンがありません`);
+  }
+
+  // WalkForwardRun を作成
+  const run = await prisma.walkForwardRun.create({
+    data: {
+      strategyId,
+      versionId: currentVersion.id,
+      type: WalkForwardType.fixed_split,
+      splitCount,
+      inSampleDays: inSampleDays ?? 0, // 後で更新
+      outOfSampleDays: outOfSampleDays ?? 0, // 後で更新
+      startDate: new Date(startDate),
+      endDate: new Date(endDate),
+      timeframe,
+      status: BacktestStatus.running,
+    },
+  });
+
+  try {
+    console.log(`[WalkForward] 実行開始: ${strategy.name} (${splitCount}分割)`);
+
+    // 期間を分割
+    const periodSplits = calculatePeriodSplits(
+      new Date(startDate),
+      new Date(endDate),
+      splitCount,
+      inSampleDays,
+      outOfSampleDays
+    );
+
+    const splitResults: SplitResult[] = [];
+
+    // 各分割でバックテスト実行
+    for (let i = 0; i < periodSplits.length; i++) {
+      const split = periodSplits[i];
+      console.log(`[WalkForward] Split ${i + 1}/${periodSplits.length} 実行中...`);
+
+      // In-Sample バックテスト
+      const inSampleRequest: BacktestRequest = {
+        strategyId,
+        startDate: split.inSampleStart.toISOString().split('T')[0],
+        endDate: split.inSampleEnd.toISOString().split('T')[0],
+        stage1Timeframe: timeframe,
+        runStage2: false,
+        initialCapital,
+        positionSize,
+      };
+      const inSampleResult = await runBacktest(inSampleRequest);
+
+      // Out-of-Sample バックテスト
+      const outOfSampleRequest: BacktestRequest = {
+        strategyId,
+        startDate: split.outOfSampleStart.toISOString().split('T')[0],
+        endDate: split.outOfSampleEnd.toISOString().split('T')[0],
+        stage1Timeframe: timeframe,
+        runStage2: false,
+        initialCapital,
+        positionSize,
+      };
+      const outOfSampleResult = await runBacktest(outOfSampleRequest);
+
+      // 結果を集計
+      const winRateDiff = inSampleResult.summary.winRate - outOfSampleResult.summary.winRate;
+
+      const splitResult: SplitResult = {
+        splitNumber: i + 1,
+        inSamplePeriod: {
+          start: split.inSampleStart.toISOString().split('T')[0],
+          end: split.inSampleEnd.toISOString().split('T')[0],
+        },
+        outOfSamplePeriod: {
+          start: split.outOfSampleStart.toISOString().split('T')[0],
+          end: split.outOfSampleEnd.toISOString().split('T')[0],
+        },
+        inSample: {
+          winRate: inSampleResult.summary.winRate,
+          tradeCount: inSampleResult.summary.totalTrades,
+          profitFactor: inSampleResult.summary.profitFactor,
+        },
+        outOfSample: {
+          winRate: outOfSampleResult.summary.winRate,
+          tradeCount: outOfSampleResult.summary.totalTrades,
+          profitFactor: outOfSampleResult.summary.profitFactor,
+        },
+        winRateDiff,
+      };
+
+      splitResults.push(splitResult);
+
+      // DBに分割結果を保存
+      await prisma.walkForwardSplit.create({
+        data: {
+          runId: run.id,
+          splitNumber: i + 1,
+          inSampleStart: split.inSampleStart,
+          inSampleEnd: split.inSampleEnd,
+          outOfSampleStart: split.outOfSampleStart,
+          outOfSampleEnd: split.outOfSampleEnd,
+          inSampleWinRate: inSampleResult.summary.winRate,
+          inSampleTradeCount: inSampleResult.summary.totalTrades,
+          inSampleProfitFactor: inSampleResult.summary.profitFactor,
+          outOfSampleWinRate: outOfSampleResult.summary.winRate,
+          outOfSampleTradeCount: outOfSampleResult.summary.totalTrades,
+          outOfSampleProfitFactor: outOfSampleResult.summary.profitFactor,
+          winRateDiff,
+        },
+      });
+    }
+
+    // 過学習スコアを計算
+    const overfitScore = calculateOverfitScore(splitResults);
+    const overfitWarning = overfitScore >= 0.4;
+
+    // サマリー計算
+    const totalInSampleTrades = splitResults.reduce((sum, s) => sum + s.inSample.tradeCount, 0);
+    const totalOutOfSampleTrades = splitResults.reduce((sum, s) => sum + s.outOfSample.tradeCount, 0);
+    const avgInSampleWinRate = splitResults.length > 0
+      ? splitResults.reduce((sum, s) => sum + s.inSample.winRate, 0) / splitResults.length
+      : 0;
+    const avgOutOfSampleWinRate = splitResults.length > 0
+      ? splitResults.reduce((sum, s) => sum + s.outOfSample.winRate, 0) / splitResults.length
+      : 0;
+    const avgWinRateDiff = avgInSampleWinRate - avgOutOfSampleWinRate;
+
+    // 実行結果を更新
+    await prisma.walkForwardRun.update({
+      where: { id: run.id },
+      data: {
+        status: BacktestStatus.completed,
+        overfitScore,
+        overfitWarning,
+        inSampleDays: inSampleDays ?? Math.floor(
+          (new Date(periodSplits[0]?.inSampleEnd || startDate).getTime() -
+           new Date(periodSplits[0]?.inSampleStart || startDate).getTime()) /
+          (1000 * 60 * 60 * 24)
+        ),
+        outOfSampleDays: outOfSampleDays ?? Math.floor(
+          (new Date(periodSplits[0]?.outOfSampleEnd || endDate).getTime() -
+           new Date(periodSplits[0]?.outOfSampleStart || endDate).getTime()) /
+          (1000 * 60 * 60 * 24)
+        ),
+      },
+    });
+
+    console.log(`[WalkForward] 完了: 過学習スコア=${overfitScore}, 警告=${overfitWarning}`);
+
+    return {
+      id: run.id,
+      strategyId,
+      type: WalkForwardType.fixed_split,
+      splitCount,
+      splits: splitResults,
+      overfitScore,
+      overfitWarning,
+      summary: {
+        avgInSampleWinRate,
+        avgOutOfSampleWinRate,
+        avgWinRateDiff,
+        totalInSampleTrades,
+        totalOutOfSampleTrades,
+      },
+      status: 'completed',
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : '不明なエラー';
+    
+    // エラー状態で更新
+    await prisma.walkForwardRun.update({
+      where: { id: run.id },
+      data: {
+        status: BacktestStatus.failed,
+      },
+    });
+
+    console.error('[WalkForward] 実行エラー:', errorMessage);
+
+    return {
+      id: run.id,
+      strategyId,
+      type: WalkForwardType.fixed_split,
+      splitCount,
+      splits: [],
+      overfitScore: 0,
+      overfitWarning: false,
+      summary: {
+        avgInSampleWinRate: 0,
+        avgOutOfSampleWinRate: 0,
+        avgWinRateDiff: 0,
+        totalInSampleTrades: 0,
+        totalOutOfSampleTrades: 0,
+      },
+      status: 'failed',
+      errorMessage,
+    };
+  }
+}
+
+// ============================================
+// 履歴取得
+// ============================================
+
+/**
+ * ウォークフォワードテスト結果を取得
+ */
+export async function getWalkForwardResult(runId: string): Promise<WalkForwardResult | null> {
+  const run = await prisma.walkForwardRun.findUnique({
+    where: { id: runId },
+    include: {
+      splits: {
+        orderBy: { splitNumber: 'asc' },
+      },
+    },
+  });
+
+  if (!run) return null;
+
+  const splits: SplitResult[] = run.splits.map(s => ({
+    splitNumber: s.splitNumber,
+    inSamplePeriod: {
+      start: s.inSampleStart.toISOString().split('T')[0],
+      end: s.inSampleEnd.toISOString().split('T')[0],
+    },
+    outOfSamplePeriod: {
+      start: s.outOfSampleStart.toISOString().split('T')[0],
+      end: s.outOfSampleEnd.toISOString().split('T')[0],
+    },
+    inSample: {
+      winRate: s.inSampleWinRate,
+      tradeCount: s.inSampleTradeCount,
+      profitFactor: s.inSampleProfitFactor,
+    },
+    outOfSample: {
+      winRate: s.outOfSampleWinRate,
+      tradeCount: s.outOfSampleTradeCount,
+      profitFactor: s.outOfSampleProfitFactor,
+    },
+    winRateDiff: s.winRateDiff,
+  }));
+
+  // サマリー計算
+  const totalInSampleTrades = splits.reduce((sum, s) => sum + s.inSample.tradeCount, 0);
+  const totalOutOfSampleTrades = splits.reduce((sum, s) => sum + s.outOfSample.tradeCount, 0);
+  const avgInSampleWinRate = splits.length > 0
+    ? splits.reduce((sum, s) => sum + s.inSample.winRate, 0) / splits.length
+    : 0;
+  const avgOutOfSampleWinRate = splits.length > 0
+    ? splits.reduce((sum, s) => sum + s.outOfSample.winRate, 0) / splits.length
+    : 0;
+
+  return {
+    id: run.id,
+    strategyId: run.strategyId,
+    type: run.type,
+    splitCount: run.splitCount,
+    splits,
+    overfitScore: run.overfitScore ?? 0,
+    overfitWarning: run.overfitWarning ?? false,
+    summary: {
+      avgInSampleWinRate,
+      avgOutOfSampleWinRate,
+      avgWinRateDiff: avgInSampleWinRate - avgOutOfSampleWinRate,
+      totalInSampleTrades,
+      totalOutOfSampleTrades,
+    },
+    status: run.status === BacktestStatus.completed ? 'completed' : 'failed',
+  };
+}
+
+/**
+ * ストラテジーのウォークフォワードテスト履歴を取得
+ */
+export async function getWalkForwardHistory(
+  strategyId: string,
+  limit: number = 10
+): Promise<WalkForwardResult[]> {
+  const runs = await prisma.walkForwardRun.findMany({
+    where: { strategyId },
+    include: {
+      splits: {
+        orderBy: { splitNumber: 'asc' },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+  });
+
+  return runs.map(run => {
+    const splits: SplitResult[] = run.splits.map(s => ({
+      splitNumber: s.splitNumber,
+      inSamplePeriod: {
+        start: s.inSampleStart.toISOString().split('T')[0],
+        end: s.inSampleEnd.toISOString().split('T')[0],
+      },
+      outOfSamplePeriod: {
+        start: s.outOfSampleStart.toISOString().split('T')[0],
+        end: s.outOfSampleEnd.toISOString().split('T')[0],
+      },
+      inSample: {
+        winRate: s.inSampleWinRate,
+        tradeCount: s.inSampleTradeCount,
+        profitFactor: s.inSampleProfitFactor,
+      },
+      outOfSample: {
+        winRate: s.outOfSampleWinRate,
+        tradeCount: s.outOfSampleTradeCount,
+        profitFactor: s.outOfSampleProfitFactor,
+      },
+      winRateDiff: s.winRateDiff,
+    }));
+
+    const totalInSampleTrades = splits.reduce((sum, s) => sum + s.inSample.tradeCount, 0);
+    const totalOutOfSampleTrades = splits.reduce((sum, s) => sum + s.outOfSample.tradeCount, 0);
+    const avgInSampleWinRate = splits.length > 0
+      ? splits.reduce((sum, s) => sum + s.inSample.winRate, 0) / splits.length
+      : 0;
+    const avgOutOfSampleWinRate = splits.length > 0
+      ? splits.reduce((sum, s) => sum + s.outOfSample.winRate, 0) / splits.length
+      : 0;
+
+    return {
+      id: run.id,
+      strategyId: run.strategyId,
+      type: run.type,
+      splitCount: run.splitCount,
+      splits,
+      overfitScore: run.overfitScore ?? 0,
+      overfitWarning: run.overfitWarning ?? false,
+      summary: {
+        avgInSampleWinRate,
+        avgOutOfSampleWinRate,
+        avgWinRateDiff: avgInSampleWinRate - avgOutOfSampleWinRate,
+        totalInSampleTrades,
+        totalOutOfSampleTrades,
+      },
+      status: run.status === BacktestStatus.completed ? 'completed' : 'failed',
+    };
+  });
+}

@@ -513,6 +513,10 @@ model Strategy {
   strategyNotes    StrategyNote[]
   /// ストラテジーバックテスト実行履歴
   backtestRuns     StrategyBacktestRun[]
+  /// ストラテジーアラート設定（1:1）
+  alert            StrategyAlert?
+  /// ウォークフォワードテスト実行履歴
+  walkForwardRuns  WalkForwardRun[]
 
   @@index([symbol], map: "idx_strategy_symbol")
   @@index([status], map: "idx_strategy_status")
@@ -669,4 +673,166 @@ model StrategyBacktestEvent {
   run             StrategyBacktestRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
   @@index([runId, entryTime], map: "idx_strategybacktestevent_run_entry")
+}
+
+// ============================================
+// Phase D: アラート + ウォークフォワード
+// ============================================
+
+/// アラート通知チャネル
+enum AlertChannel {
+  /// アプリ内通知
+  in_app
+  /// Web Push通知
+  web_push
+}
+
+/// アラートステータス
+enum AlertStatus {
+  /// 有効
+  enabled
+  /// 無効
+  disabled
+  /// 一時停止（クールダウン中）
+  paused
+}
+
+/// ストラテジーアラート設定
+/// ストラテジー条件成立時のリアルタイム通知設定
+model StrategyAlert {
+  id               String         @id @default(uuid()) @db.Uuid
+  /// 対象ストラテジー ID
+  strategyId       String         @unique @db.Uuid
+  /// 有効/無効
+  enabled          Boolean        @default(true)
+  /// ステータス
+  status           AlertStatus    @default(enabled)
+  /// クールダウン時間（分）- 同一ストラテジーの連続アラート抑制
+  cooldownMinutes  Int            @default(60)
+  /// 通知チャネル
+  channels         AlertChannel[] @default([in_app])
+  /// 最小一致スコア（0.0〜1.0）- この閾値以上で通知
+  minMatchScore    Float          @default(0.7)
+  /// 最終アラート発火日時
+  lastTriggeredAt  DateTime?      @db.Timestamptz(6)
+  /// 作成日時
+  createdAt        DateTime       @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt        DateTime       @updatedAt @db.Timestamptz(6)
+  /// 関連ストラテジー
+  strategy         Strategy       @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  /// アラート履歴
+  logs             StrategyAlertLog[]
+
+  @@index([enabled, status], map: "idx_strategyalert_enabled_status")
+}
+
+/// ストラテジーアラート発火履歴
+model StrategyAlertLog {
+  id                 String        @id @default(uuid()) @db.Uuid
+  /// 対象アラート ID
+  alertId            String        @db.Uuid
+  /// 一致スコア
+  matchScore         Float
+  /// 条件成立時のインジケーター値（JSON）
+  indicatorValues    Json
+  /// 通知先チャネル
+  channel            AlertChannel
+  /// 通知成功/失敗
+  success            Boolean
+  /// エラーメッセージ（失敗時）
+  errorMessage       String?
+  /// 発火日時
+  triggeredAt        DateTime      @default(now()) @db.Timestamptz(6)
+  /// 関連アラート設定
+  alert              StrategyAlert @relation(fields: [alertId], references: [id], onDelete: Cascade)
+
+  @@index([alertId, triggeredAt], map: "idx_strategyalertlog_alert_triggered")
+}
+
+/// ウォークフォワードテスト種別
+enum WalkForwardType {
+  /// 固定分割（N分割）
+  fixed_split
+  /// ローリングウィンドウ（将来拡張用）
+  rolling_window
+}
+
+/// ウォークフォワードテスト実行
+model WalkForwardRun {
+  id                String             @id @default(uuid()) @db.Uuid
+  /// 対象ストラテジー ID
+  strategyId        String             @db.Uuid
+  /// 使用したバージョン ID
+  versionId         String             @db.Uuid
+  /// テスト種別
+  type              WalkForwardType    @default(fixed_split)
+  /// 分割数（固定分割の場合）
+  splitCount        Int                @default(4)
+  /// In-Sample期間（日数）
+  inSampleDays      Int
+  /// Out-of-Sample期間（日数）
+  outOfSampleDays   Int
+  /// テスト開始日
+  startDate         DateTime           @db.Timestamptz(6)
+  /// テスト終了日
+  endDate           DateTime           @db.Timestamptz(6)
+  /// 時間足
+  timeframe         String             @default("1h")
+  /// 実行状態
+  status            BacktestStatus     @default(pending)
+  /// 過学習スコア（0.0〜1.0、低いほど良い）
+  /// In-Sample勝率とOut-of-Sample勝率の乖離で算出
+  overfitScore      Float?
+  /// 総合判定（過学習の疑いあり/なし）
+  overfitWarning    Boolean?
+  /// 作成日時
+  createdAt         DateTime           @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt         DateTime           @updatedAt @db.Timestamptz(6)
+  /// 関連ストラテジー
+  strategy          Strategy           @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  /// 分割ごとの結果
+  splits            WalkForwardSplit[]
+
+  @@index([strategyId], map: "idx_walkforwardrun_strategyid")
+  @@index([status, createdAt], map: "idx_walkforwardrun_status_created")
+}
+
+/// ウォークフォワードテスト分割結果
+model WalkForwardSplit {
+  id                   String          @id @default(uuid()) @db.Uuid
+  /// 対応するウォークフォワード実行 ID
+  runId                String          @db.Uuid
+  /// 分割番号（1, 2, 3...）
+  splitNumber          Int
+  /// In-Sample開始日
+  inSampleStart        DateTime        @db.Timestamptz(6)
+  /// In-Sample終了日
+  inSampleEnd          DateTime        @db.Timestamptz(6)
+  /// Out-of-Sample開始日
+  outOfSampleStart     DateTime        @db.Timestamptz(6)
+  /// Out-of-Sample終了日
+  outOfSampleEnd       DateTime        @db.Timestamptz(6)
+  /// In-Sample勝率
+  inSampleWinRate      Float
+  /// In-Sampleトレード数
+  inSampleTradeCount   Int
+  /// In-SampleプロフィットファクターInt
+  inSampleProfitFactor Float?
+  /// Out-of-Sample勝率
+  outOfSampleWinRate   Float
+  /// Out-of-Sampleトレード数
+  outOfSampleTradeCount Int
+  /// Out-of-Sampleプロフィットファクター
+  outOfSampleProfitFactor Float?
+  /// 勝率の乖離（In - Out）
+  winRateDiff          Float
+  /// 作成日時
+  createdAt            DateTime        @default(now()) @db.Timestamptz(6)
+  /// 関連ウォークフォワード実行
+  run                  WalkForwardRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, splitNumber], map: "uq_walkforwardsplit_run_number")
+  @@index([runId], map: "idx_walkforwardsplit_runid")
 }
