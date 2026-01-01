@@ -173,17 +173,34 @@ const navItems: NavItem[] = [
   },
 ];
 
-// サイドバーの状態を管理するコンテキスト用（オプション）
+// サイドバーの状態を管理するコンテキスト用
 interface SidebarProps {
+  /** 折りたたみ状態（外部制御用） */
   isCollapsed?: boolean;
+  /** 折りたたみ状態変更時のコールバック */
   onCollapsedChange?: (collapsed: boolean) => void;
 }
 
 /**
  * サイドバーナビゲーション
- * デスクトップ画面（md以上）で表示
+ * 全デバイスで表示、初期状態は折りたたみ
  */
-export default function Sidebar({ isCollapsed = false, onCollapsedChange }: SidebarProps) {
+export default function Sidebar({ isCollapsed: externalCollapsed, onCollapsedChange }: SidebarProps) {
+  // 内部の折りたたみ状態（外部から制御されない場合のデフォルト：折りたたみ）
+  const [internalCollapsed, setInternalCollapsed] = useState(true);
+  
+  // 外部制御があればそちらを優先、なければ内部状態を使用
+  const isCollapsed = externalCollapsed ?? internalCollapsed;
+  
+  // 折りたたみトグルハンドラ
+  const handleCollapsedToggle = () => {
+    const newValue = !isCollapsed;
+    if (onCollapsedChange) {
+      onCollapsedChange(newValue);
+    } else {
+      setInternalCollapsed(newValue);
+    }
+  };
   const pathname = usePathname();
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({
     "/notes": true, // デフォルトで展開
@@ -373,7 +390,7 @@ export default function Sidebar({ isCollapsed = false, onCollapsedChange }: Side
   return (
     <aside 
       className={`
-        hidden md:flex flex-col fixed top-0 left-0 z-40
+        flex flex-col fixed top-0 left-0 z-40
         h-screen bg-slate-900 border-r border-slate-700
         transition-all duration-300 ease-in-out
         ${isCollapsed ? "w-16" : "w-64"}
@@ -392,7 +409,7 @@ export default function Sidebar({ isCollapsed = false, onCollapsedChange }: Side
         
         {/* 折りたたみボタン */}
         <button
-          onClick={() => onCollapsedChange?.(!isCollapsed)}
+          onClick={handleCollapsedToggle}
           className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700 transition-smooth"
           aria-label={isCollapsed ? "サイドバーを展開" : "サイドバーを折りたたみ"}
         >

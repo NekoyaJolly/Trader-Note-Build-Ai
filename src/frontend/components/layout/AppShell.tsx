@@ -4,7 +4,8 @@
  * アプリケーションシェルコンポーネント
  * 
  * サイドバーナビゲーションとメインコンテンツエリアを統合するラッパー
- * デスクトップ画面でサイドバーを表示し、モバイルでは非表示
+ * 全デバイスでサイドバーを表示
+ * 初期状態：折りたたみ
  * 
  * @see docs/phase12/UI_DESIGN_GUIDE.md
  */
@@ -22,8 +23,8 @@ interface AppShellProps {
  * メインコンテンツのマージンを動的に調整
  */
 export default function AppShell({ children }: AppShellProps) {
-  // サイドバーの折りたたみ状態をローカルストレージから復元
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  // サイドバーの折りたたみ状態（初期値: true = 折りたたみ）
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const [mounted, setMounted] = useState(false);
 
   // クライアントサイドでのみローカルストレージを使用
@@ -33,6 +34,7 @@ export default function AppShell({ children }: AppShellProps) {
     if (saved !== null) {
       setIsCollapsed(JSON.parse(saved));
     }
+    // 初回アクセス時（保存値がない）は折りたたみ状態を維持
   }, []);
 
   // 折りたたみ状態を保存
@@ -42,17 +44,21 @@ export default function AppShell({ children }: AppShellProps) {
   };
 
   // 初回レンダリング時のハイドレーションエラーを防ぐ
+  // 折りたたみ状態でレンダリング（デフォルト = w-16）
   if (!mounted) {
     return (
-      <div className="min-h-screen">
-        {children}
+      <div className="flex min-h-screen">
+        <div className="w-16" /> {/* サイドバーのプレースホルダー */}
+        <div className="flex-1 flex flex-col min-h-screen ml-16">
+          {children}
+        </div>
       </div>
     );
   }
 
   return (
     <div className="flex min-h-screen">
-      {/* サイドバー（デスクトップのみ） */}
+      {/* サイドバー（全デバイスで表示） */}
       <Sidebar 
         isCollapsed={isCollapsed} 
         onCollapsedChange={handleCollapsedChange} 
@@ -63,8 +69,7 @@ export default function AppShell({ children }: AppShellProps) {
         className={`
           flex-1 flex flex-col min-h-screen
           transition-all duration-300 ease-in-out
-          md:ml-64
-          ${isCollapsed ? "md:ml-16" : "md:ml-64"}
+          ${isCollapsed ? "ml-16" : "ml-64"}
         `}
       >
         {children}
