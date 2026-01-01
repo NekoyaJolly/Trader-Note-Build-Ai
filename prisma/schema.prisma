@@ -7,43 +7,29 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ============================================
-// 認証・ユーザー管理
-// ============================================
-
-/// ユーザーロール
-enum UserRole {
-  /// 一般ユーザー
-  user
-  /// 管理者
-  admin
-}
-
 /// ユーザー（JWT認証用）
 model User {
-  id              String    @id @default(uuid()) @db.Uuid
+  id                String             @id @default(uuid()) @db.Uuid
   /// メールアドレス（ログインID）
-  email           String    @unique
+  email             String             @unique
   /// ハッシュ化されたパスワード（bcrypt）
-  passwordHash    String
+  passwordHash      String
   /// ユーザー名（表示用）
-  displayName     String?
+  displayName       String?
   /// ロール
-  role            UserRole  @default(user)
+  role              UserRole           @default(user)
   /// アカウント有効フラグ
-  active          Boolean   @default(true)
+  active            Boolean            @default(true)
   /// リフレッシュトークン（ローテーション用）
-  refreshToken    String?
+  refreshToken      String?
   /// 最終ログイン日時
-  lastLoginAt     DateTime? @db.Timestamptz(6)
+  lastLoginAt       DateTime?          @db.Timestamptz(6)
   /// 作成日時
-  createdAt       DateTime  @default(now()) @db.Timestamptz(6)
+  createdAt         DateTime           @default(now()) @db.Timestamptz(6)
   /// 更新日時
-  updatedAt       DateTime  @updatedAt @db.Timestamptz(6)
-  /// ウォッチリスト（監視対象シンボル）
-  watchlists      Watchlist[]
-  /// Push購読（将来のマルチユーザー対応時に紐付け）
+  updatedAt         DateTime           @updatedAt @db.Timestamptz(6)
   pushSubscriptions PushSubscription[] @relation("UserPushSubscriptions")
+  watchlists        Watchlist[]
 
   @@index([email], map: "idx_user_email")
   @@index([active], map: "idx_user_active")
@@ -52,32 +38,27 @@ model User {
 /// ウォッチリスト（監視対象シンボル）
 /// 日次OHLCV蓄積の対象シンボルを管理
 model Watchlist {
-  id           String   @id @default(uuid()) @db.Uuid
+  id         String   @id @default(uuid()) @db.Uuid
   /// ユーザー ID
-  userId       String   @db.Uuid
+  userId     String   @db.Uuid
   /// シンボル（例: USDJPY, EURUSD, XAUUSD）
-  symbol       String
+  symbol     String
   /// 取得する時間足（例: ["15m", "1h", "4h"]）
-  timeframes   String[] @default(["15m", "1h"])
+  timeframes String[] @default(["15m", "1h"])
   /// 有効フラグ
-  active       Boolean  @default(true)
+  active     Boolean  @default(true)
   /// メモ（例: 主要通貨ペア）
-  notes        String?
+  notes      String?
   /// 作成日時
-  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
   /// 更新日時
-  updatedAt    DateTime @updatedAt @db.Timestamptz(6)
-  /// 関連ユーザー
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(6)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, symbol], map: "uq_watchlist_user_symbol")
   @@index([userId, active], map: "idx_watchlist_user_active")
   @@index([active], map: "idx_watchlist_active")
 }
-
-// ============================================
-// トレード・ノート関連
-// ============================================
 
 model Trade {
   id        String     @id @default(uuid()) @db.Uuid
@@ -132,12 +113,13 @@ model TradeNote {
   /// 一時停止（この日時まで無効。null の場合は停止なし）
   pausedUntil      DateTime?         @db.Timestamptz(6)
   
-  aiSummary        AISummary?
-  backtestRuns     BacktestRun[]
-  matchResult      MatchResult[]
-  notificationLogs NotificationLog[] @relation("NotificationLogNote")
-  evaluationLogs   EvaluationLog[]   @relation("EvaluationLogNote")
-  trade            Trade             @relation(fields: [tradeId], references: [id])
+  aiSummary               AISummary?
+  backtestRuns            BacktestRun[]
+  evaluationLogs          EvaluationLog[]          @relation("EvaluationLogNote")
+  matchResult             MatchResult[]
+  notificationLogs        NotificationLog[]        @relation("NotificationLogNote")
+  notificationSkipLogs    NotificationSkipLog[]    @relation("NotificationSkipLogNote")
+  trade                   Trade                    @relation(fields: [tradeId], references: [id])
 
   @@index([symbol], map: "idx_tradenote_symbol")
   @@index([status], map: "idx_tradenote_status")
@@ -166,31 +148,32 @@ model MarketSnapshot {
   indicators       Json
   fetchedAt        DateTime          @db.Timestamptz(6)
   createdAt        DateTime          @default(now()) @db.Timestamptz(6)
+  evaluationLogs   EvaluationLog[]   @relation("EvaluationLogSnapshot")
   matchResults     MatchResult[]
   notificationLogs NotificationLog[] @relation("NotificationLogSnapshot")
-  evaluationLogs   EvaluationLog[]   @relation("EvaluationLogSnapshot")
 
   @@unique([symbol, timeframe, fetchedAt], map: "uq_snapshot_symbol_timeframe_fetched")
   @@index([symbol, timeframe], map: "idx_snapshot_symbol_timeframe")
 }
 
 model MatchResult {
-  id                String         @id @default(uuid()) @db.Uuid
-  noteId            String         @db.Uuid
-  marketSnapshotId  String         @db.Uuid
-  symbol            String
-  score             Float
-  threshold         Float
-  trendMatched      Boolean
-  priceRangeMatched Boolean
-  decidedAt         DateTime       @default(now()) @db.Timestamptz(6)
-  createdAt         DateTime       @default(now()) @db.Timestamptz(6)
-  evaluatedAt       DateTime       @default(now()) @db.Timestamptz(6)
-  reasons           Json
-  marketSnapshot    MarketSnapshot @relation(fields: [marketSnapshotId], references: [id])
-  note              TradeNote      @relation(fields: [noteId], references: [id])
-  notifications     Notification[]
-  orderPresets      OrderPreset[]
+  id                   String                @id @default(uuid()) @db.Uuid
+  noteId               String                @db.Uuid
+  marketSnapshotId     String                @db.Uuid
+  symbol               String
+  score                Float
+  threshold            Float
+  trendMatched         Boolean
+  priceRangeMatched    Boolean
+  decidedAt            DateTime              @default(now()) @db.Timestamptz(6)
+  createdAt            DateTime              @default(now()) @db.Timestamptz(6)
+  evaluatedAt          DateTime              @default(now()) @db.Timestamptz(6)
+  reasons              Json
+  marketSnapshot       MarketSnapshot        @relation(fields: [marketSnapshotId], references: [id])
+  note                 TradeNote             @relation(fields: [noteId], references: [id])
+  notifications        Notification[]
+  notificationSkipLogs NotificationSkipLog[] @relation("NotificationSkipLogMatch")
+  orderPresets         OrderPreset[]
 
   @@unique([noteId, marketSnapshotId], map: "uq_match_note_snapshot")
   @@index([symbol, decidedAt], map: "idx_match_symbol_decided")
@@ -244,10 +227,6 @@ model NotificationLog {
   @@index([noteId, sentAt], map: "idx_notiflog_note_sent")
 }
 
-// ============================================
-// 評価ログ（フェーズ7: ノート評価の永続化）
-// ============================================
-
 /// 評価ログ
 /// NoteEvaluator.evaluate() の結果を永続化し、
 /// ノートの有効性分析（勝率・再現性）の基盤データとなる
@@ -261,8 +240,6 @@ model EvaluationLog {
   symbol           String
   /// 時間足（例: 15m, 1h）
   timeframe        String
-  
-  // === EvaluationResult 主要フィールド ===
   /// 類似度スコア（0.0〜1.0）
   similarity       Float
   /// 類似度レベル（strong, medium, weak, none）
@@ -273,79 +250,20 @@ model EvaluationLog {
   vectorDimension  Int
   /// 使用したインジケーターラベル一覧
   usedIndicators   String[]
-  
-  // === オプション診断情報 ===
   /// 診断情報（noteVector, marketVector 等）
   /// 環境変数 SAVE_EVALUATION_DIAGNOSTICS=true で保存
   diagnostics      Json?
-  
   /// 評価実行日時
   evaluatedAt      DateTime       @db.Timestamptz(6)
   /// レコード作成日時
   createdAt        DateTime       @default(now()) @db.Timestamptz(6)
-  
-  /// 関連: ノート
-  note             TradeNote      @relation("EvaluationLogNote", fields: [noteId], references: [id])
-  /// 関連: 市場スナップショット
   marketSnapshot   MarketSnapshot @relation("EvaluationLogSnapshot", fields: [marketSnapshotId], references: [id])
+  note             TradeNote      @relation("EvaluationLogNote", fields: [noteId], references: [id])
 
-  // 冪等性: 同一ノート×スナップショット×時間足の組み合わせは一意
   @@unique([noteId, marketSnapshotId, timeframe], map: "uq_evallog_note_snapshot_timeframe")
-  // 検索用インデックス
   @@index([noteId, evaluatedAt], map: "idx_evallog_note_evaluated")
   @@index([symbol, evaluatedAt], map: "idx_evallog_symbol_evaluated")
   @@index([triggered, evaluatedAt], map: "idx_evallog_triggered_evaluated")
-}
-
-// ============================================
-// フェーズ8: 同時ヒット制御設定
-// ============================================
-
-/// 通知バッチ設定
-/// 複数ノートが同時にヒットした場合の制御設定
-model NotificationBatchConfig {
-  id                String   @id @default(uuid()) @db.Uuid
-  /// 設定名（例: default, aggressive, conservative）
-  name              String   @unique
-  /// 同時通知上限（デフォルト: 3）
-  maxSimultaneous   Int      @default(3)
-  /// シンボルごとにグループ化するか
-  groupBySymbol     Boolean  @default(true)
-  /// グループ内クールダウン（分）
-  cooldownMinutes   Int      @default(15)
-  /// 有効フラグ
-  active            Boolean  @default(true)
-  /// 作成日時
-  createdAt         DateTime @default(now()) @db.Timestamptz(6)
-  /// 更新日時
-  updatedAt         DateTime @updatedAt @db.Timestamptz(6)
-  
-  @@index([active], map: "idx_notifbatch_active")
-}
-
-/// 通知スキップログ
-/// 同時ヒット制御でスキップされた通知を記録
-model NotificationSkipLog {
-  id               String   @id @default(uuid()) @db.Uuid
-  /// スキップされたノート ID
-  noteId           String   @db.Uuid
-  /// 市場スナップショット ID
-  marketSnapshotId String   @db.Uuid
-  /// シンボル
-  symbol           String
-  /// 類似度スコア
-  similarity       Float
-  /// スキップ理由（例: max_simultaneous, cooldown, lower_priority）
-  skipReason       String
-  /// 同時ヒットしたノート数
-  simultaneousCount Int
-  /// この通知の優先度順位
-  priorityRank     Int
-  /// スキップ日時
-  skippedAt        DateTime @default(now()) @db.Timestamptz(6)
-  
-  @@index([noteId, skippedAt], map: "idx_skiplog_note_skipped")
-  @@index([symbol, skippedAt], map: "idx_skiplog_symbol_skipped")
 }
 
 /// OHLCV ローソク足データ
@@ -526,8 +444,6 @@ model BacktestEvent {
 /// Web Push 購読情報
 model PushSubscription {
   id           String    @id @default(uuid()) @db.Uuid
-  /// ユーザー ID（マルチユーザー対応）
-  userId       String    @db.Uuid
   /// Push API エンドポイント URL
   endpoint     String    @unique
   /// 暗号化キー（p256dh）
@@ -544,7 +460,8 @@ model PushSubscription {
   createdAt    DateTime  @default(now()) @db.Timestamptz(6)
   /// 更新日時
   updatedAt    DateTime  @updatedAt @db.Timestamptz(6)
-  /// 関連ユーザー
+  /// ユーザー ID（マルチユーザー対応）
+  userId       String    @db.Uuid
   user         User      @relation("UserPushSubscriptions", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, active], map: "idx_pushsub_user_active")
@@ -597,6 +514,324 @@ model MatchDetail {
   createdAt     DateTime @default(now()) @db.Timestamptz(6)
 
   @@index([matchResultId], map: "idx_matchdetail_matchresult")
+}
+
+/// ストラテジー（売買戦略の定義）
+model Strategy {
+  id               String                @id @default(uuid()) @db.Uuid
+  /// ストラテジー名
+  name             String
+  /// 説明
+  description      String?
+  /// 対象シンボル（USDJPY, EURUSD, XAUUSD 等）
+  symbol           String
+  /// トレード方向（buy/sell）
+  side             TradeSide
+  /// ステータス
+  status           StrategyStatus        @default(draft)
+  /// 現在のバージョン ID
+  currentVersionId String?               @db.Uuid
+  /// タグ（検索・分類用）
+  tags             String[]              @default([])
+  /// 作成日時
+  createdAt        DateTime              @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt        DateTime              @updatedAt @db.Timestamptz(6)
+  alert            StrategyAlert?
+  backtestRuns     StrategyBacktestRun[]
+  strategyNotes    StrategyNote[]
+  versions         StrategyVersion[]
+  walkForwardRuns  WalkForwardRun[]
+
+  @@index([symbol], map: "idx_strategy_symbol")
+  @@index([status], map: "idx_strategy_status")
+  @@index([symbol, status], map: "idx_strategy_symbol_status")
+}
+
+/// ストラテジーバージョン（変更履歴）
+/// 保存時に常に新バージョンを作成し、履歴を保持
+model StrategyVersion {
+  id              String   @id @default(uuid()) @db.Uuid
+  /// 親ストラテジー ID
+  strategyId      String   @db.Uuid
+  /// バージョン番号（1, 2, 3...）
+  versionNumber   Int
+  /// エントリー条件（JSON: ConditionGroup）
+  entryConditions Json
+  /// イグジット設定（JSON: ExitSettings）
+  exitSettings    Json
+  /// エントリータイミング（next_open 等）
+  entryTiming     String   @default("next_open")
+  /// 変更理由メモ
+  changeNote      String?
+  /// 作成日時
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+  strategy        Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  @@unique([strategyId, versionNumber], map: "uq_strategyversion_strategy_version")
+  @@index([strategyId], map: "idx_strategyversion_strategyid")
+}
+
+/// ストラテジーノート（優位性確認済みセットアップ）
+/// バックテストで勝ったセットアップを保存し、パターン検出に活用
+model StrategyNote {
+  id                String             @id @default(uuid()) @db.Uuid
+  /// 親ストラテジー ID
+  strategyId        String             @db.Uuid
+  /// エントリー時刻（バックテストで検出された時刻）
+  entryTime         DateTime           @db.Timestamptz(6)
+  /// エントリー価格
+  entryPrice        Decimal            @db.Decimal(18, 8)
+  /// 一致した条件のスナップショット（JSON）
+  conditionSnapshot Json
+  /// インジケーター値のスナップショット（JSON）
+  indicatorValues   Json
+  /// バックテスト結果（win/loss/timeout）
+  outcome           BacktestOutcome
+  /// 損益
+  pnl               Decimal?           @db.Decimal(18, 8)
+  /// メモ
+  notes             String?
+  /// 作成日時
+  createdAt         DateTime           @default(now()) @db.Timestamptz(6)
+  /// 特徴量ベクトル（類似度検索用）
+  /// インジケーター定義の Section 12 に基づいて計算
+  featureVector     Float[]            @default([])
+  /// ノートの状態（draft/active/archived）
+  status            StrategyNoteStatus @default(draft)
+  /// タグ（カテゴリ、パターン名など）
+  tags              String[]           @default([])
+  /// 更新日時
+  updatedAt         DateTime           @updatedAt @db.Timestamptz(6)
+  strategy          Strategy           @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  @@index([strategyId], map: "idx_strategynote_strategyid")
+  @@index([strategyId, outcome], map: "idx_strategynote_strategy_outcome")
+  @@index([status], map: "idx_strategynote_status")
+  @@index([strategyId, status], map: "idx_strategynote_strategy_status")
+}
+
+/// ストラテジーバックテスト実行（ストラテジー条件ベース）
+model StrategyBacktestRun {
+  id         String                  @id @default(uuid()) @db.Uuid
+  /// 対象ストラテジー ID
+  strategyId String                  @db.Uuid
+  /// 使用したバージョン ID
+  versionId  String                  @db.Uuid
+  /// 銘柄シンボル
+  symbol     String
+  /// 時間足（例: 15m, 1h, 4h）
+  timeframe  String
+  /// バックテスト開始日
+  startDate  DateTime                @db.Timestamptz(6)
+  /// バックテスト終了日
+  endDate    DateTime                @db.Timestamptz(6)
+  /// ステージ（stage1: 高速スキャン、stage2: 1分足精密検証）
+  stage      String                  @default("stage1")
+  /// 実行状態
+  status     BacktestStatus          @default(pending)
+  /// 作成日時
+  createdAt  DateTime                @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt  DateTime                @updatedAt @db.Timestamptz(6)
+  events     StrategyBacktestEvent[]
+  result     StrategyBacktestResult?
+  strategy   Strategy                @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  @@index([strategyId], map: "idx_strategybacktestrun_strategyid")
+  @@index([status, createdAt], map: "idx_strategybacktestrun_status_created")
+}
+
+/// ストラテジーバックテスト集計結果
+model StrategyBacktestResult {
+  id           String              @id @default(uuid()) @db.Uuid
+  /// 対応するバックテスト実行 ID
+  runId        String              @unique @db.Uuid
+  /// セットアップ出現回数
+  setupCount   Int
+  /// 勝ちトレード数
+  winCount     Int
+  /// 負けトレード数
+  lossCount    Int
+  /// タイムアウト数
+  timeoutCount Int
+  /// 勝率（0.0〜1.0）
+  winRate      Float
+  /// プロフィットファクター（総利益/総損失）
+  profitFactor Float?
+  /// 総利益
+  totalProfit  Decimal             @db.Decimal(18, 8)
+  /// 総損失
+  totalLoss    Decimal             @db.Decimal(18, 8)
+  /// 平均損益
+  averagePnL   Decimal             @db.Decimal(18, 8)
+  /// 期待値
+  expectancy   Decimal             @db.Decimal(18, 8)
+  /// 最大ドローダウン
+  maxDrawdown  Decimal?            @db.Decimal(18, 8)
+  /// 計算完了日時
+  completedAt  DateTime            @default(now()) @db.Timestamptz(6)
+  run          StrategyBacktestRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+}
+
+/// ストラテジーバックテスト個別イベント
+model StrategyBacktestEvent {
+  id              String              @id @default(uuid()) @db.Uuid
+  /// 対応するバックテスト実行 ID
+  runId           String              @db.Uuid
+  /// エントリー時刻
+  entryTime       DateTime            @db.Timestamptz(6)
+  /// エントリー価格
+  entryPrice      Decimal             @db.Decimal(18, 8)
+  /// 条件成立時のインジケーター値（JSON）
+  indicatorValues Json?
+  /// 決済時刻
+  exitTime        DateTime?           @db.Timestamptz(6)
+  /// 決済価格
+  exitPrice       Decimal?            @db.Decimal(18, 8)
+  /// 結果
+  outcome         BacktestOutcome
+  /// 損益
+  pnl             Decimal?            @db.Decimal(18, 8)
+  /// 作成日時
+  createdAt       DateTime            @default(now()) @db.Timestamptz(6)
+  run             StrategyBacktestRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, entryTime], map: "idx_strategybacktestevent_run_entry")
+}
+
+/// ストラテジーアラート設定
+/// ストラテジー条件成立時のリアルタイム通知設定
+model StrategyAlert {
+  id              String             @id @default(uuid()) @db.Uuid
+  /// 対象ストラテジー ID
+  strategyId      String             @unique @db.Uuid
+  /// 有効/無効
+  enabled         Boolean            @default(true)
+  /// ステータス
+  status          AlertStatus        @default(enabled)
+  /// クールダウン時間（分）- 同一ストラテジーの連続アラート抑制
+  cooldownMinutes Int                @default(60)
+  /// 通知チャネル
+  channels        AlertChannel[]     @default([in_app])
+  /// 最小一致スコア（0.0〜1.0）- この閾値以上で通知
+  minMatchScore   Float              @default(0.7)
+  /// 最終アラート発火日時
+  lastTriggeredAt DateTime?          @db.Timestamptz(6)
+  /// 作成日時
+  createdAt       DateTime           @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt       DateTime           @updatedAt @db.Timestamptz(6)
+  strategy        Strategy           @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  logs            StrategyAlertLog[]
+
+  @@index([enabled, status], map: "idx_strategyalert_enabled_status")
+}
+
+/// ストラテジーアラート発火履歴
+model StrategyAlertLog {
+  id              String        @id @default(uuid()) @db.Uuid
+  /// 対象アラート ID
+  alertId         String        @db.Uuid
+  /// 一致スコア
+  matchScore      Float
+  /// 条件成立時のインジケーター値（JSON）
+  indicatorValues Json
+  /// 通知先チャネル
+  channel         AlertChannel
+  /// 通知成功/失敗
+  success         Boolean
+  /// エラーメッセージ（失敗時）
+  errorMessage    String?
+  /// 発火日時
+  triggeredAt     DateTime      @default(now()) @db.Timestamptz(6)
+  alert           StrategyAlert @relation(fields: [alertId], references: [id], onDelete: Cascade)
+
+  @@index([alertId, triggeredAt], map: "idx_strategyalertlog_alert_triggered")
+}
+
+/// ウォークフォワードテスト実行
+model WalkForwardRun {
+  id              String             @id @default(uuid()) @db.Uuid
+  /// 対象ストラテジー ID
+  strategyId      String             @db.Uuid
+  /// 使用したバージョン ID
+  versionId       String             @db.Uuid
+  /// テスト種別
+  type            WalkForwardType    @default(fixed_split)
+  /// 分割数（固定分割の場合）
+  splitCount      Int                @default(4)
+  /// In-Sample期間（日数）
+  inSampleDays    Int
+  /// Out-of-Sample期間（日数）
+  outOfSampleDays Int
+  /// テスト開始日
+  startDate       DateTime           @db.Timestamptz(6)
+  /// テスト終了日
+  endDate         DateTime           @db.Timestamptz(6)
+  /// 時間足
+  timeframe       String             @default("1h")
+  /// 実行状態
+  status          BacktestStatus     @default(pending)
+  /// 過学習スコア（0.0〜1.0、低いほど良い）
+  /// In-Sample勝率とOut-of-Sample勝率の乖離で算出
+  overfitScore    Float?
+  /// 総合判定（過学習の疑いあり/なし）
+  overfitWarning  Boolean?
+  /// 作成日時
+  createdAt       DateTime           @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt       DateTime           @updatedAt @db.Timestamptz(6)
+  strategy        Strategy           @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  splits          WalkForwardSplit[]
+
+  @@index([strategyId], map: "idx_walkforwardrun_strategyid")
+  @@index([status, createdAt], map: "idx_walkforwardrun_status_created")
+}
+
+/// ウォークフォワードテスト分割結果
+model WalkForwardSplit {
+  id                      String         @id @default(uuid()) @db.Uuid
+  /// 対応するウォークフォワード実行 ID
+  runId                   String         @db.Uuid
+  /// 分割番号（1, 2, 3...）
+  splitNumber             Int
+  /// In-Sample開始日
+  inSampleStart           DateTime       @db.Timestamptz(6)
+  /// In-Sample終了日
+  inSampleEnd             DateTime       @db.Timestamptz(6)
+  /// Out-of-Sample開始日
+  outOfSampleStart        DateTime       @db.Timestamptz(6)
+  /// Out-of-Sample終了日
+  outOfSampleEnd          DateTime       @db.Timestamptz(6)
+  /// In-Sample勝率
+  inSampleWinRate         Float
+  /// In-Sampleトレード数
+  inSampleTradeCount      Int
+  /// In-SampleプロフィットファクターInt
+  inSampleProfitFactor    Float?
+  /// Out-of-Sample勝率
+  outOfSampleWinRate      Float
+  /// Out-of-Sampleトレード数
+  outOfSampleTradeCount   Int
+  /// Out-of-Sampleプロフィットファクター
+  outOfSampleProfitFactor Float?
+  /// 勝率の乖離（In - Out）
+  winRateDiff             Float
+  /// 作成日時
+  createdAt               DateTime       @default(now()) @db.Timestamptz(6)
+  run                     WalkForwardRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, splitNumber], map: "uq_walkforwardsplit_run_number")
+  @@index([runId], map: "idx_walkforwardsplit_runid")
+}
+
+/// ユーザーロール
+enum UserRole {
+  /// 一般ユーザー
+  user
+  /// 管理者
+  admin
 }
 
 /// ノートの承認状態
@@ -668,210 +903,12 @@ enum PushLogStatus {
   retrying
 }
 
-// ============================================
-// Strategy（ストラテジー）関連モデル
-// Phase A: インジケーター条件ベースのバックテスト
-// ============================================
-
 /// ストラテジーステータス
 enum StrategyStatus {
-  draft     // 下書き
-  active    // アクティブ（バックテスト・アラート対象）
-  archived  // アーカイブ
+  draft
+  active
+  archived
 }
-
-/// ストラテジー（売買戦略の定義）
-model Strategy {
-  id               String            @id @default(uuid()) @db.Uuid
-  /// ストラテジー名
-  name             String
-  /// 説明
-  description      String?
-  /// 対象シンボル（USDJPY, EURUSD, XAUUSD 等）
-  symbol           String
-  /// トレード方向（buy/sell）
-  side             TradeSide
-  /// ステータス
-  status           StrategyStatus    @default(draft)
-  /// 現在のバージョン ID
-  currentVersionId String?           @db.Uuid
-  /// タグ（検索・分類用）
-  tags             String[]          @default([])
-  /// 作成日時
-  createdAt        DateTime          @default(now()) @db.Timestamptz(6)
-  /// 更新日時
-  updatedAt        DateTime          @updatedAt @db.Timestamptz(6)
-  /// バージョン履歴
-  versions         StrategyVersion[]
-  /// ストラテジーノート（優位性確認済みセットアップ）
-  strategyNotes    StrategyNote[]
-  /// ストラテジーバックテスト実行履歴
-  backtestRuns     StrategyBacktestRun[]
-  /// ストラテジーアラート設定（1:1）
-  alert            StrategyAlert?
-  /// ウォークフォワードテスト実行履歴
-  walkForwardRuns  WalkForwardRun[]
-
-  @@index([symbol], map: "idx_strategy_symbol")
-  @@index([status], map: "idx_strategy_status")
-  @@index([symbol, status], map: "idx_strategy_symbol_status")
-}
-
-/// ストラテジーバージョン（変更履歴）
-/// 保存時に常に新バージョンを作成し、履歴を保持
-model StrategyVersion {
-  id               String   @id @default(uuid()) @db.Uuid
-  /// 親ストラテジー ID
-  strategyId       String   @db.Uuid
-  /// バージョン番号（1, 2, 3...）
-  versionNumber    Int
-  /// エントリー条件（JSON: ConditionGroup）
-  entryConditions  Json
-  /// イグジット設定（JSON: ExitSettings）
-  exitSettings     Json
-  /// エントリータイミング（next_open 等）
-  entryTiming      String   @default("next_open")
-  /// 変更理由メモ
-  changeNote       String?
-  /// 作成日時
-  createdAt        DateTime @default(now()) @db.Timestamptz(6)
-  strategy         Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
-
-  @@unique([strategyId, versionNumber], map: "uq_strategyversion_strategy_version")
-  @@index([strategyId], map: "idx_strategyversion_strategyid")
-}
-
-/// ストラテジーノート（優位性確認済みセットアップ）
-/// バックテストで勝ったセットアップを保存し、パターン検出に活用
-model StrategyNote {
-  id             String   @id @default(uuid()) @db.Uuid
-  /// 親ストラテジー ID
-  strategyId     String   @db.Uuid
-  /// エントリー時刻（バックテストで検出された時刻）
-  entryTime      DateTime @db.Timestamptz(6)
-  /// エントリー価格
-  entryPrice     Decimal  @db.Decimal(18, 8)
-  /// 一致した条件のスナップショット（JSON）
-  conditionSnapshot Json
-  /// インジケーター値のスナップショット（JSON）
-  indicatorValues Json
-  /// バックテスト結果（win/loss/timeout）
-  outcome        BacktestOutcome
-  /// 損益
-  pnl            Decimal? @db.Decimal(18, 8)
-  /// メモ
-  notes          String?
-  /// ノートの状態（draft/active/archived）
-  status         StrategyNoteStatus @default(draft)
-  /// タグ（カテゴリ、パターン名など）
-  tags           String[]  @default([])
-  /// 特徴量ベクトル（類似度検索用）
-  /// インジケーター定義の Section 12 に基づいて計算
-  featureVector  Float[]   @default([])
-  /// 作成日時
-  createdAt      DateTime @default(now()) @db.Timestamptz(6)
-  /// 更新日時
-  updatedAt      DateTime @updatedAt @db.Timestamptz(6)
-  strategy       Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
-
-  @@index([strategyId], map: "idx_strategynote_strategyid")
-  @@index([strategyId, outcome], map: "idx_strategynote_strategy_outcome")
-  @@index([status], map: "idx_strategynote_status")
-  @@index([strategyId, status], map: "idx_strategynote_strategy_status")
-}
-
-/// ストラテジーバックテスト実行（ストラテジー条件ベース）
-model StrategyBacktestRun {
-  id                String                   @id @default(uuid()) @db.Uuid
-  /// 対象ストラテジー ID
-  strategyId        String                   @db.Uuid
-  /// 使用したバージョン ID
-  versionId         String                   @db.Uuid
-  /// 銘柄シンボル
-  symbol            String
-  /// 時間足（例: 15m, 1h, 4h）
-  timeframe         String
-  /// バックテスト開始日
-  startDate         DateTime                 @db.Timestamptz(6)
-  /// バックテスト終了日
-  endDate           DateTime                 @db.Timestamptz(6)
-  /// ステージ（stage1: 高速スキャン、stage2: 1分足精密検証）
-  stage             String                   @default("stage1")
-  /// 実行状態
-  status            BacktestStatus           @default(pending)
-  /// 作成日時
-  createdAt         DateTime                 @default(now()) @db.Timestamptz(6)
-  /// 更新日時
-  updatedAt         DateTime                 @updatedAt @db.Timestamptz(6)
-  strategy          Strategy                 @relation(fields: [strategyId], references: [id], onDelete: Cascade)
-  events            StrategyBacktestEvent[]
-  result            StrategyBacktestResult?
-
-  @@index([strategyId], map: "idx_strategybacktestrun_strategyid")
-  @@index([status, createdAt], map: "idx_strategybacktestrun_status_created")
-}
-
-/// ストラテジーバックテスト集計結果
-model StrategyBacktestResult {
-  id           String              @id @default(uuid()) @db.Uuid
-  /// 対応するバックテスト実行 ID
-  runId        String              @unique @db.Uuid
-  /// セットアップ出現回数
-  setupCount   Int
-  /// 勝ちトレード数
-  winCount     Int
-  /// 負けトレード数
-  lossCount    Int
-  /// タイムアウト数
-  timeoutCount Int
-  /// 勝率（0.0〜1.0）
-  winRate      Float
-  /// プロフィットファクター（総利益/総損失）
-  profitFactor Float?
-  /// 総利益
-  totalProfit  Decimal             @db.Decimal(18, 8)
-  /// 総損失
-  totalLoss    Decimal             @db.Decimal(18, 8)
-  /// 平均損益
-  averagePnL   Decimal             @db.Decimal(18, 8)
-  /// 期待値
-  expectancy   Decimal             @db.Decimal(18, 8)
-  /// 最大ドローダウン
-  maxDrawdown  Decimal?            @db.Decimal(18, 8)
-  /// 計算完了日時
-  completedAt  DateTime            @default(now()) @db.Timestamptz(6)
-  run          StrategyBacktestRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-}
-
-/// ストラテジーバックテスト個別イベント
-model StrategyBacktestEvent {
-  id              String              @id @default(uuid()) @db.Uuid
-  /// 対応するバックテスト実行 ID
-  runId           String              @db.Uuid
-  /// エントリー時刻
-  entryTime       DateTime            @db.Timestamptz(6)
-  /// エントリー価格
-  entryPrice      Decimal             @db.Decimal(18, 8)
-  /// 条件成立時のインジケーター値（JSON）
-  indicatorValues Json?
-  /// 決済時刻
-  exitTime        DateTime?           @db.Timestamptz(6)
-  /// 決済価格
-  exitPrice       Decimal?            @db.Decimal(18, 8)
-  /// 結果
-  outcome         BacktestOutcome
-  /// 損益
-  pnl             Decimal?            @db.Decimal(18, 8)
-  /// 作成日時
-  createdAt       DateTime            @default(now()) @db.Timestamptz(6)
-  run             StrategyBacktestRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-
-  @@index([runId, entryTime], map: "idx_strategybacktestevent_run_entry")
-}
-
-// ============================================
-// Phase D: アラート + ウォークフォワード
-// ============================================
 
 /// アラート通知チャネル
 enum AlertChannel {
@@ -891,59 +928,6 @@ enum AlertStatus {
   paused
 }
 
-/// ストラテジーアラート設定
-/// ストラテジー条件成立時のリアルタイム通知設定
-model StrategyAlert {
-  id               String         @id @default(uuid()) @db.Uuid
-  /// 対象ストラテジー ID
-  strategyId       String         @unique @db.Uuid
-  /// 有効/無効
-  enabled          Boolean        @default(true)
-  /// ステータス
-  status           AlertStatus    @default(enabled)
-  /// クールダウン時間（分）- 同一ストラテジーの連続アラート抑制
-  cooldownMinutes  Int            @default(60)
-  /// 通知チャネル
-  channels         AlertChannel[] @default([in_app])
-  /// 最小一致スコア（0.0〜1.0）- この閾値以上で通知
-  minMatchScore    Float          @default(0.7)
-  /// 最終アラート発火日時
-  lastTriggeredAt  DateTime?      @db.Timestamptz(6)
-  /// 作成日時
-  createdAt        DateTime       @default(now()) @db.Timestamptz(6)
-  /// 更新日時
-  updatedAt        DateTime       @updatedAt @db.Timestamptz(6)
-  /// 関連ストラテジー
-  strategy         Strategy       @relation(fields: [strategyId], references: [id], onDelete: Cascade)
-  /// アラート履歴
-  logs             StrategyAlertLog[]
-
-  @@index([enabled, status], map: "idx_strategyalert_enabled_status")
-}
-
-/// ストラテジーアラート発火履歴
-model StrategyAlertLog {
-  id                 String        @id @default(uuid()) @db.Uuid
-  /// 対象アラート ID
-  alertId            String        @db.Uuid
-  /// 一致スコア
-  matchScore         Float
-  /// 条件成立時のインジケーター値（JSON）
-  indicatorValues    Json
-  /// 通知先チャネル
-  channel            AlertChannel
-  /// 通知成功/失敗
-  success            Boolean
-  /// エラーメッセージ（失敗時）
-  errorMessage       String?
-  /// 発火日時
-  triggeredAt        DateTime      @default(now()) @db.Timestamptz(6)
-  /// 関連アラート設定
-  alert              StrategyAlert @relation(fields: [alertId], references: [id], onDelete: Cascade)
-
-  @@index([alertId, triggeredAt], map: "idx_strategyalertlog_alert_triggered")
-}
-
 /// ウォークフォワードテスト種別
 enum WalkForwardType {
   /// 固定分割（N分割）
@@ -952,81 +936,60 @@ enum WalkForwardType {
   rolling_window
 }
 
-/// ウォークフォワードテスト実行
-model WalkForwardRun {
-  id                String             @id @default(uuid()) @db.Uuid
-  /// 対象ストラテジー ID
-  strategyId        String             @db.Uuid
-  /// 使用したバージョン ID
-  versionId         String             @db.Uuid
-  /// テスト種別
-  type              WalkForwardType    @default(fixed_split)
-  /// 分割数（固定分割の場合）
-  splitCount        Int                @default(4)
-  /// In-Sample期間（日数）
-  inSampleDays      Int
-  /// Out-of-Sample期間（日数）
-  outOfSampleDays   Int
-  /// テスト開始日
-  startDate         DateTime           @db.Timestamptz(6)
-  /// テスト終了日
-  endDate           DateTime           @db.Timestamptz(6)
-  /// 時間足
-  timeframe         String             @default("1h")
-  /// 実行状態
-  status            BacktestStatus     @default(pending)
-  /// 過学習スコア（0.0〜1.0、低いほど良い）
-  /// In-Sample勝率とOut-of-Sample勝率の乖離で算出
-  overfitScore      Float?
-  /// 総合判定（過学習の疑いあり/なし）
-  overfitWarning    Boolean?
+// ============================================================
+// フェーズ8: 複数ノート運用UX - 同時ヒット制御
+// ============================================================
+
+/// 通知バッチ設定（同時ヒット制御のグローバル設定）
+/// システム全体で1レコードのみ保持（シングルトン）
+model NotificationBatchConfig {
+  id               String   @id @default(uuid()) @db.Uuid
+  /// 同時に送信する最大通知数（デフォルト3）
+  maxSimultaneous  Int      @default(3)
+  /// シンボル別にグループ化するか（trueの場合、シンボルごとにmaxSimultaneous適用）
+  groupBySymbol    Boolean  @default(true)
+  /// クールダウン時間（分）- 同一ノートへの連続通知を抑制
+  cooldownMinutes  Int      @default(15)
   /// 作成日時
-  createdAt         DateTime           @default(now()) @db.Timestamptz(6)
+  createdAt        DateTime @default(now()) @db.Timestamptz(6)
   /// 更新日時
-  updatedAt         DateTime           @updatedAt @db.Timestamptz(6)
-  /// 関連ストラテジー
-  strategy          Strategy           @relation(fields: [strategyId], references: [id], onDelete: Cascade)
-  /// 分割ごとの結果
-  splits            WalkForwardSplit[]
-
-  @@index([strategyId], map: "idx_walkforwardrun_strategyid")
-  @@index([status, createdAt], map: "idx_walkforwardrun_status_created")
+  updatedAt        DateTime @updatedAt @db.Timestamptz(6)
 }
 
-/// ウォークフォワードテスト分割結果
-model WalkForwardSplit {
-  id                   String          @id @default(uuid()) @db.Uuid
-  /// 対応するウォークフォワード実行 ID
-  runId                String          @db.Uuid
-  /// 分割番号（1, 2, 3...）
-  splitNumber          Int
-  /// In-Sample開始日
-  inSampleStart        DateTime        @db.Timestamptz(6)
-  /// In-Sample終了日
-  inSampleEnd          DateTime        @db.Timestamptz(6)
-  /// Out-of-Sample開始日
-  outOfSampleStart     DateTime        @db.Timestamptz(6)
-  /// Out-of-Sample終了日
-  outOfSampleEnd       DateTime        @db.Timestamptz(6)
-  /// In-Sample勝率
-  inSampleWinRate      Float
-  /// In-Sampleトレード数
-  inSampleTradeCount   Int
-  /// In-SampleプロフィットファクターInt
-  inSampleProfitFactor Float?
-  /// Out-of-Sample勝率
-  outOfSampleWinRate   Float
-  /// Out-of-Sampleトレード数
-  outOfSampleTradeCount Int
-  /// Out-of-Sampleプロフィットファクター
-  outOfSampleProfitFactor Float?
-  /// 勝率の乖離（In - Out）
-  winRateDiff          Float
-  /// 作成日時
-  createdAt            DateTime        @default(now()) @db.Timestamptz(6)
-  /// 関連ウォークフォワード実行
-  run                  WalkForwardRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+/// 通知スキップログ（同時ヒット制御でスキップされた通知の記録）
+/// デバッグ・分析用。なぜ通知されなかったかを追跡可能にする
+model NotificationSkipLog {
+  id             String               @id @default(uuid()) @db.Uuid
+  /// スキップされた TradeNote ID
+  noteId         String               @db.Uuid
+  /// マッチ結果 ID（任意）
+  matchResultId  String?              @db.Uuid
+  /// スキップ理由
+  reason         NotificationSkipReason
+  /// 詳細情報（JSON形式で任意のメタデータ）
+  details        Json?
+  /// スキップ発生日時
+  skippedAt      DateTime             @default(now()) @db.Timestamptz(6)
 
-  @@unique([runId, splitNumber], map: "uq_walkforwardsplit_run_number")
-  @@index([runId], map: "idx_walkforwardsplit_runid")
+  note           TradeNote            @relation("NotificationSkipLogNote", fields: [noteId], references: [id])
+  matchResult    MatchResult?         @relation("NotificationSkipLogMatch", fields: [matchResultId], references: [id])
+
+  @@index([noteId], map: "idx_notification_skip_note")
+  @@index([skippedAt], map: "idx_notification_skip_at")
+  @@index([reason], map: "idx_notification_skip_reason")
 }
+
+/// 通知スキップ理由
+enum NotificationSkipReason {
+  /// 同時ヒット数上限超過（優先度が低いためスキップ）
+  max_simultaneous_exceeded
+  /// クールダウン中（同一ノートへの連続通知抑制）
+  cooldown_active
+  /// ノートが無効化されている
+  note_disabled
+  /// ノートが一時停止中
+  note_paused
+  /// 優先度が低い（同一シンボル内で優先度負け）
+  lower_priority
+}
+
