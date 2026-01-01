@@ -463,3 +463,189 @@ enum PushLogStatus {
   failed
   retrying
 }
+
+// ============================================
+// Strategy（ストラテジー）関連モデル
+// Phase A: インジケーター条件ベースのバックテスト
+// ============================================
+
+/// ストラテジーステータス
+enum StrategyStatus {
+  draft     // 下書き
+  active    // アクティブ（バックテスト・アラート対象）
+  archived  // アーカイブ
+}
+
+/// ストラテジー（売買戦略の定義）
+model Strategy {
+  id               String            @id @default(uuid()) @db.Uuid
+  /// ストラテジー名
+  name             String
+  /// 説明
+  description      String?
+  /// 対象シンボル（USDJPY, EURUSD, XAUUSD 等）
+  symbol           String
+  /// トレード方向（buy/sell）
+  side             TradeSide
+  /// ステータス
+  status           StrategyStatus    @default(draft)
+  /// 現在のバージョン ID
+  currentVersionId String?           @db.Uuid
+  /// タグ（検索・分類用）
+  tags             String[]          @default([])
+  /// 作成日時
+  createdAt        DateTime          @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt        DateTime          @updatedAt @db.Timestamptz(6)
+  /// バージョン履歴
+  versions         StrategyVersion[]
+  /// ストラテジーノート（優位性確認済みセットアップ）
+  strategyNotes    StrategyNote[]
+  /// ストラテジーバックテスト実行履歴
+  backtestRuns     StrategyBacktestRun[]
+
+  @@index([symbol], map: "idx_strategy_symbol")
+  @@index([status], map: "idx_strategy_status")
+  @@index([symbol, status], map: "idx_strategy_symbol_status")
+}
+
+/// ストラテジーバージョン（変更履歴）
+/// 保存時に常に新バージョンを作成し、履歴を保持
+model StrategyVersion {
+  id               String   @id @default(uuid()) @db.Uuid
+  /// 親ストラテジー ID
+  strategyId       String   @db.Uuid
+  /// バージョン番号（1, 2, 3...）
+  versionNumber    Int
+  /// エントリー条件（JSON: ConditionGroup）
+  entryConditions  Json
+  /// イグジット設定（JSON: ExitSettings）
+  exitSettings     Json
+  /// エントリータイミング（next_open 等）
+  entryTiming      String   @default("next_open")
+  /// 変更理由メモ
+  changeNote       String?
+  /// 作成日時
+  createdAt        DateTime @default(now()) @db.Timestamptz(6)
+  strategy         Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  @@unique([strategyId, versionNumber], map: "uq_strategyversion_strategy_version")
+  @@index([strategyId], map: "idx_strategyversion_strategyid")
+}
+
+/// ストラテジーノート（優位性確認済みセットアップ）
+/// バックテストで勝ったセットアップを保存し、パターン検出に活用
+model StrategyNote {
+  id             String   @id @default(uuid()) @db.Uuid
+  /// 親ストラテジー ID
+  strategyId     String   @db.Uuid
+  /// エントリー時刻（バックテストで検出された時刻）
+  entryTime      DateTime @db.Timestamptz(6)
+  /// エントリー価格
+  entryPrice     Decimal  @db.Decimal(18, 8)
+  /// 一致した条件のスナップショット（JSON）
+  conditionSnapshot Json
+  /// インジケーター値のスナップショット（JSON）
+  indicatorValues Json
+  /// バックテスト結果（win/loss/timeout）
+  outcome        BacktestOutcome
+  /// 損益
+  pnl            Decimal? @db.Decimal(18, 8)
+  /// メモ
+  notes          String?
+  /// 作成日時
+  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+  strategy       Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  @@index([strategyId], map: "idx_strategynote_strategyid")
+  @@index([strategyId, outcome], map: "idx_strategynote_strategy_outcome")
+}
+
+/// ストラテジーバックテスト実行（ストラテジー条件ベース）
+model StrategyBacktestRun {
+  id                String                   @id @default(uuid()) @db.Uuid
+  /// 対象ストラテジー ID
+  strategyId        String                   @db.Uuid
+  /// 使用したバージョン ID
+  versionId         String                   @db.Uuid
+  /// 銘柄シンボル
+  symbol            String
+  /// 時間足（例: 15m, 1h, 4h）
+  timeframe         String
+  /// バックテスト開始日
+  startDate         DateTime                 @db.Timestamptz(6)
+  /// バックテスト終了日
+  endDate           DateTime                 @db.Timestamptz(6)
+  /// ステージ（stage1: 高速スキャン、stage2: 1分足精密検証）
+  stage             String                   @default("stage1")
+  /// 実行状態
+  status            BacktestStatus           @default(pending)
+  /// 作成日時
+  createdAt         DateTime                 @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt         DateTime                 @updatedAt @db.Timestamptz(6)
+  strategy          Strategy                 @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  events            StrategyBacktestEvent[]
+  result            StrategyBacktestResult?
+
+  @@index([strategyId], map: "idx_strategybacktestrun_strategyid")
+  @@index([status, createdAt], map: "idx_strategybacktestrun_status_created")
+}
+
+/// ストラテジーバックテスト集計結果
+model StrategyBacktestResult {
+  id           String              @id @default(uuid()) @db.Uuid
+  /// 対応するバックテスト実行 ID
+  runId        String              @unique @db.Uuid
+  /// セットアップ出現回数
+  setupCount   Int
+  /// 勝ちトレード数
+  winCount     Int
+  /// 負けトレード数
+  lossCount    Int
+  /// タイムアウト数
+  timeoutCount Int
+  /// 勝率（0.0〜1.0）
+  winRate      Float
+  /// プロフィットファクター（総利益/総損失）
+  profitFactor Float?
+  /// 総利益
+  totalProfit  Decimal             @db.Decimal(18, 8)
+  /// 総損失
+  totalLoss    Decimal             @db.Decimal(18, 8)
+  /// 平均損益
+  averagePnL   Decimal             @db.Decimal(18, 8)
+  /// 期待値
+  expectancy   Decimal             @db.Decimal(18, 8)
+  /// 最大ドローダウン
+  maxDrawdown  Decimal?            @db.Decimal(18, 8)
+  /// 計算完了日時
+  completedAt  DateTime            @default(now()) @db.Timestamptz(6)
+  run          StrategyBacktestRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+}
+
+/// ストラテジーバックテスト個別イベント
+model StrategyBacktestEvent {
+  id              String              @id @default(uuid()) @db.Uuid
+  /// 対応するバックテスト実行 ID
+  runId           String              @db.Uuid
+  /// エントリー時刻
+  entryTime       DateTime            @db.Timestamptz(6)
+  /// エントリー価格
+  entryPrice      Decimal             @db.Decimal(18, 8)
+  /// 条件成立時のインジケーター値（JSON）
+  indicatorValues Json?
+  /// 決済時刻
+  exitTime        DateTime?           @db.Timestamptz(6)
+  /// 決済価格
+  exitPrice       Decimal?            @db.Decimal(18, 8)
+  /// 結果
+  outcome         BacktestOutcome
+  /// 損益
+  pnl             Decimal?            @db.Decimal(18, 8)
+  /// 作成日時
+  createdAt       DateTime            @default(now()) @db.Timestamptz(6)
+  run             StrategyBacktestRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, entryTime], map: "idx_strategybacktestevent_run_entry")
+}

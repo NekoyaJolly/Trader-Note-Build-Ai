@@ -154,6 +154,12 @@ const navItems: NavItem[] = [
     description: "マッチング通知",
   },
   {
+    href: "/strategies",
+    label: "ストラテジー",
+    icon: <ChartIcon />,
+    description: "エントリー戦略管理",
+  },
+  {
     href: "/settings",
     label: "設定",
     icon: <SettingsIcon />,

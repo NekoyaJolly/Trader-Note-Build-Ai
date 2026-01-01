@@ -610,5 +610,308 @@ export async function fetchBacktestHistory(
   return payload.runs ?? [];
 }
 
+// ========================================
+// ストラテジー API
+// ========================================
+
+import type {
+  Strategy,
+  StrategySummary,
+  CreateStrategyRequest,
+  UpdateStrategyRequest,
+  StrategyStatus,
+  StrategyVersion,
+  BacktestResult,
+} from "@/types/strategy";
+
+/**
+ * ストラテジー一覧を取得
+ * GET /api/strategies
+ */
+export async function fetchStrategies(
+  status?: StrategyStatus
+): Promise<Strategy[]> {
+  const url = new URL(`${API_BASE_URL}/api/strategies`);
+  
+  if (status) {
+    url.searchParams.set("status", status);
+  }
+  
+  const response = await fetch(url.toString(), {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `ストラテジー一覧の取得に失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+
+  const payload = await response.json();
+  return payload.data?.strategies ?? [];
+}
+
+/**
+ * ストラテジー詳細を取得
+ * GET /api/strategies/:id
+ */
+export async function fetchStrategy(id: string): Promise<Strategy> {
+  const response = await fetch(`${API_BASE_URL}/api/strategies/${id}`, {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("ストラテジーが見つかりません");
+    }
+    throw new Error(
+      `ストラテジー詳細の取得に失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * ストラテジーバージョンを取得
+ * GET /api/strategies/:id/versions/:versionNumber
+ */
+export async function fetchStrategyVersion(
+  strategyId: string,
+  versionNumber: number
+): Promise<StrategyVersion> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/versions/${versionNumber}`,
+    { cache: "no-store" }
+  );
+
+  if (!response.ok) {
+    throw new Error("バージョン情報の取得に失敗しました");
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * ストラテジーを作成
+ * POST /api/strategies
+ */
+export async function createStrategy(
+  request: CreateStrategyRequest
+): Promise<Strategy> {
+  const response = await fetch(`${API_BASE_URL}/api/strategies`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "ストラテジーの作成に失敗しました");
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * ストラテジーを更新
+ * PUT /api/strategies/:id
+ */
+export async function updateStrategy(
+  id: string,
+  request: UpdateStrategyRequest
+): Promise<Strategy> {
+  const response = await fetch(`${API_BASE_URL}/api/strategies/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "ストラテジーの更新に失敗しました");
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * ストラテジーを削除
+ * DELETE /api/strategies/:id
+ */
+export async function deleteStrategy(id: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/strategies/${id}`, {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "ストラテジーの削除に失敗しました");
+  }
+}
+
+/**
+ * ストラテジーのステータスを変更
+ * PUT /api/strategies/:id/status
+ */
+export async function updateStrategyStatus(
+  id: string,
+  status: StrategyStatus
+): Promise<Strategy> {
+  const response = await fetch(`${API_BASE_URL}/api/strategies/${id}/status`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "ステータスの更新に失敗しました");
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * ストラテジーを複製
+ * POST /api/strategies/:id/duplicate
+ */
+export async function duplicateStrategy(id: string): Promise<Strategy> {
+  const response = await fetch(`${API_BASE_URL}/api/strategies/${id}/duplicate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "ストラテジーの複製に失敗しました");
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+
+// ============================================
+// バックテスト API
+// ============================================
+
+/** バックテスト実行パラメータ */
+export interface BacktestRequestParams {
+  startDate: string;
+  endDate: string;
+  stage1Timeframe: "15m" | "30m" | "1h" | "4h" | "1d";
+  enableStage2: boolean;
+  initialCapital: number;
+  positionSize: number;
+}
+
+/**
+ * ストラテジーのバックテストを実行
+ * POST /api/strategies/:id/backtest
+ */
+export async function runStrategyBacktest(
+  strategyId: string,
+  params: BacktestRequestParams
+): Promise<BacktestResult> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/backtest`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "バックテストの実行に失敗しました");
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * ストラテジーのバックテスト履歴を取得
+ * GET /api/strategies/:id/backtest/history
+ */
+export async function fetchStrategyBacktestHistory(
+  strategyId: string,
+  limit?: number
+): Promise<BacktestHistoryItem[]> {
+  const params = new URLSearchParams();
+  if (limit) {
+    params.set("limit", String(limit));
+  }
+
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/backtest/history?${params}`,
+    { cache: "no-store" }
+  );
+
+  if (!response.ok) {
+    throw new Error("バックテスト履歴の取得に失敗しました");
+  }
+
+  const payload = await response.json();
+  return payload.data?.history ?? [];
+}
+
+/**
+ * ストラテジーのバックテスト結果詳細を取得
+ * GET /api/strategies/:id/backtest/:runId
+ */
+export async function fetchStrategyBacktestResult(
+  strategyId: string,
+  runId: string
+): Promise<BacktestResult> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/backtest/${runId}`,
+    { cache: "no-store" }
+  );
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error("バックテスト結果が見つかりません");
+    }
+    throw new Error("バックテスト結果の取得に失敗しました");
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+
 // 型の再エクスポート（外部から使用するため）
 export type { NoteSummary } from "@/types/note";
+export type {
+  Strategy,
+  StrategySummary,
+  StrategyVersion,
+  StrategyStatus,
+  CreateStrategyRequest,
+  UpdateStrategyRequest,
+  BacktestResult,
+  BacktestResultSummary,
+  BacktestTradeEvent,
+} from "@/types/strategy";
+
+/** バックテスト履歴アイテム */
+export interface BacktestHistoryItem {
+  id: string;
+  executedAt: string;
+  startDate: string;
+  endDate: string;
+  timeframe: string;
+  status: string;
+  summary?: {
+    totalTrades: number;
+    winRate: number;
+    profitFactor: number;
+  };
+}
+

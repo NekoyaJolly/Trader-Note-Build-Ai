@@ -8,6 +8,7 @@ import orderRoutes from './routes/orderRoutes';
 import indicatorRoutes from './routes/indicatorRoutes';
 import backtestRoutes from './routes/backtestRoutes';
 import barLocatorRoutes from './controllers/barLocatorController';
+import strategyRoutes from './backend/api/strategyRoutes';
 import { MatchingScheduler } from './utils/scheduler';
 
 /**
@@ -94,6 +95,7 @@ class App {
     this.app.use('/api/indicators', indicatorRoutes);
     this.app.use('/api/backtest', backtestRoutes);
     this.app.use('/api/bars', barLocatorRoutes);
+    this.app.use('/api/strategies', strategyRoutes);
 
     // 404 handler
     this.app.use((req: Request, res: Response) => {
