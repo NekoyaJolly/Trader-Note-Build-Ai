@@ -125,12 +125,22 @@ export interface BacktestResult {
 }
 
 // ============================================
-// ヒストリカルデータ取得（モック実装）
+// ヒストリカルデータ取得（DBキャッシュ優先）
 // ============================================
 
 /**
  * ヒストリカルOHLCVデータを取得
- * 実際の実装ではTwelveData APIなどから取得
+ *
+ * 優先順位:
+ * 1. DB (OHLCVCandle テーブル) からキャッシュ済みデータを取得
+ * 2. 不足期間があれば Twelve Data API から取得（将来実装）
+ * 3. DBにもAPIにもデータがない場合はモックデータを生成
+ *
+ * @param symbol - シンボル
+ * @param timeframe - 時間足
+ * @param startDate - 開始日
+ * @param endDate - 終了日
+ * @returns OHLCV データ配列
  */
 export async function fetchHistoricalData(
   symbol: string,
@@ -138,17 +148,86 @@ export async function fetchHistoricalData(
   startDate: Date,
   endDate: Date
 ): Promise<OHLCV[]> {
-  // TODO: 実際のAPI呼び出しを実装
-  // 現時点ではモックデータを返す
-  
+  // 1. DBからキャッシュ済みデータを取得
+  const cachedData = await prisma.oHLCVCandle.findMany({
+    where: {
+      symbol,
+      timeframe,
+      timestamp: {
+        gte: startDate,
+        lte: endDate,
+      },
+    },
+    orderBy: { timestamp: 'asc' },
+  });
+
+  // キャッシュが十分にある場合はそのまま返す
+  // （期間の80%以上のデータがあれば十分とみなす）
+  const expectedCandles = calculateExpectedCandles(timeframe, startDate, endDate);
+  const cacheRatio = cachedData.length / expectedCandles;
+
+  if (cacheRatio >= 0.8 && cachedData.length > 0) {
+    console.log(
+      `[fetchHistoricalData] DBキャッシュを使用: ${symbol}/${timeframe}, ` +
+        `${cachedData.length}/${expectedCandles}件 (${(cacheRatio * 100).toFixed(1)}%)`
+    );
+    return cachedData.map((c) => ({
+      timestamp: c.timestamp,
+      open: Number(c.open),
+      high: Number(c.high),
+      low: Number(c.low),
+      close: Number(c.close),
+      volume: Number(c.volume),
+    }));
+  }
+
+  // 2. キャッシュが不十分な場合
+  // TODO: Twelve Data API から不足分を取得する実装を追加
+  // 現時点ではモックデータにフォールバック
+
+  if (cachedData.length > 0) {
+    console.log(
+      `[fetchHistoricalData] 部分キャッシュ + モック: ${symbol}/${timeframe}, ` +
+        `キャッシュ=${cachedData.length}件, 期待=${expectedCandles}件`
+    );
+  } else {
+    console.log(`[fetchHistoricalData] モックデータを生成: ${symbol}/${timeframe}`);
+  }
+
+  // 3. モックデータを生成（キャッシュがない期間用）
+  return generateMockData(symbol, timeframe, startDate, endDate);
+}
+
+/**
+ * 期待されるキャンドル数を計算
+ */
+function calculateExpectedCandles(
+  timeframe: BacktestTimeframe,
+  startDate: Date,
+  endDate: Date
+): number {
+  const intervalMinutes = getIntervalMinutes(timeframe);
+  const diffMs = endDate.getTime() - startDate.getTime();
+  return Math.ceil(diffMs / (intervalMinutes * 60 * 1000));
+}
+
+/**
+ * モックOHLCVデータを生成（テスト・開発用）
+ */
+function generateMockData(
+  symbol: string,
+  timeframe: BacktestTimeframe,
+  startDate: Date,
+  endDate: Date
+): OHLCV[] {
   const data: OHLCV[] = [];
   const intervalMinutes = getIntervalMinutes(timeframe);
   let current = new Date(startDate);
-  
+
   // ベース価格（シンボルに応じて変更）
   let price = symbol.includes('JPY') ? 150.0 : 1.1;
   const volatility = symbol.includes('JPY') ? 0.5 : 0.005;
-  
+
   while (current <= endDate) {
     // ランダムウォークでOHLCV生成（テスト用）
     const change = (Math.random() - 0.5) * volatility;
@@ -156,7 +235,7 @@ export async function fetchHistoricalData(
     const close = price + change;
     const high = Math.max(open, close) + Math.random() * volatility * 0.5;
     const low = Math.min(open, close) - Math.random() * volatility * 0.5;
-    
+
     data.push({
       timestamp: new Date(current),
       open,
@@ -165,11 +244,11 @@ export async function fetchHistoricalData(
       close,
       volume: Math.floor(Math.random() * 10000) + 1000,
     });
-    
+
     price = close;
     current = new Date(current.getTime() + intervalMinutes * 60 * 1000);
   }
-  
+
   return data;
 }
 

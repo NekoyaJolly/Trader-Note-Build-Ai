@@ -736,11 +736,14 @@ export class TradeNoteService {
    * 
    * Phase 8: DBモードではリポジトリの専用メソッドを使用
    * @param status - 取得したいステータス（draft, approved, rejected）
+   * 注意: Prisma enum は小文字で定義されている（draft, approved, rejected）
    */
   async loadNotesByStatus(status: NoteStatus): Promise<TradeNote[]> {
     if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
+      // Prisma enum は小文字で定義されているため、toLowerCase() で正規化
+      const normalizedStatus = status.toLowerCase() as PrismaNoteStatus;
       const dbNotes = await this.repository.findWithOptions({
-        status: status.toUpperCase() as PrismaNoteStatus,
+        status: normalizedStatus,
       });
       return dbNotes.map(n => this.convertDbNoteToTradeNote(n));
     }

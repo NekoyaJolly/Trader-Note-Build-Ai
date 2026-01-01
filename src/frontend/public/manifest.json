@@ -1,0 +1,48 @@
+{
+  "name": "TradeAssist",
+  "short_name": "TradeAssist",
+  "description": "トレード支援アプリ - 自動ノート生成・パターン検出・通知",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a2e",
+  "theme_color": "#4f46e5",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "lang": "ja",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["finance", "productivity"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "ノート一覧",
+      "short_name": "ノート",
+      "url": "/notes",
+      "icons": [{"src": "/icon-192x192.png", "sizes": "192x192"}]
+    },
+    {
+      "name": "通知",
+      "short_name": "通知",
+      "url": "/notifications",
+      "icons": [{"src": "/icon-192x192.png", "sizes": "192x192"}]
+    },
+    {
+      "name": "ストラテジー",
+      "short_name": "戦略",
+      "url": "/strategies",
+      "icons": [{"src": "/icon-192x192.png", "sizes": "192x192"}]
+    }
+  ]
+}

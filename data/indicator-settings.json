@@ -21,11 +21,11 @@
         "enabled": true
       },
       {
-        "configId": "ema-20",
+        "configId": "ema-period18",
         "indicatorId": "ema",
-        "label": "EMA(20)",
+        "label": "EMA(18)",
         "params": {
-          "period": 20
+          "period": 18
         },
         "enabled": true
       },
@@ -102,8 +102,8 @@
       }
     ],
     "createdAt": "2025-12-30T18:47:34.801Z",
-    "updatedAt": "2025-12-30T18:53:10.677Z"
+    "updatedAt": "2025-12-31T00:46:52.718Z"
   },
-  "updatedAt": "2025-12-30T18:53:10.677Z",
+  "updatedAt": "2025-12-31T00:46:52.718Z",
   "hasCompletedSetup": true
 }

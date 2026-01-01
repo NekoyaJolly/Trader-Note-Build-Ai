@@ -7,6 +7,78 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ============================================
+// 認証・ユーザー管理
+// ============================================
+
+/// ユーザーロール
+enum UserRole {
+  /// 一般ユーザー
+  user
+  /// 管理者
+  admin
+}
+
+/// ユーザー（JWT認証用）
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  /// メールアドレス（ログインID）
+  email           String    @unique
+  /// ハッシュ化されたパスワード（bcrypt）
+  passwordHash    String
+  /// ユーザー名（表示用）
+  displayName     String?
+  /// ロール
+  role            UserRole  @default(user)
+  /// アカウント有効フラグ
+  active          Boolean   @default(true)
+  /// リフレッシュトークン（ローテーション用）
+  refreshToken    String?
+  /// 最終ログイン日時
+  lastLoginAt     DateTime? @db.Timestamptz(6)
+  /// 作成日時
+  createdAt       DateTime  @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(6)
+  /// ウォッチリスト（監視対象シンボル）
+  watchlists      Watchlist[]
+  /// Push購読（将来のマルチユーザー対応時に紐付け）
+  pushSubscriptions PushSubscription[] @relation("UserPushSubscriptions")
+
+  @@index([email], map: "idx_user_email")
+  @@index([active], map: "idx_user_active")
+}
+
+/// ウォッチリスト（監視対象シンボル）
+/// 日次OHLCV蓄積の対象シンボルを管理
+model Watchlist {
+  id           String   @id @default(uuid()) @db.Uuid
+  /// ユーザー ID
+  userId       String   @db.Uuid
+  /// シンボル（例: USDJPY, EURUSD, XAUUSD）
+  symbol       String
+  /// 取得する時間足（例: ["15m", "1h", "4h"]）
+  timeframes   String[] @default(["15m", "1h"])
+  /// 有効フラグ
+  active       Boolean  @default(true)
+  /// メモ（例: 主要通貨ペア）
+  notes        String?
+  /// 作成日時
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt    DateTime @updatedAt @db.Timestamptz(6)
+  /// 関連ユーザー
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, symbol], map: "uq_watchlist_user_symbol")
+  @@index([userId, active], map: "idx_watchlist_user_active")
+  @@index([active], map: "idx_watchlist_active")
+}
+
+// ============================================
+// トレード・ノート関連
+// ============================================
+
 model Trade {
   id        String     @id @default(uuid()) @db.Uuid
   timestamp DateTime   @db.Timestamptz(6)
@@ -334,8 +406,8 @@ model BacktestEvent {
 /// Web Push 購読情報
 model PushSubscription {
   id           String    @id @default(uuid()) @db.Uuid
-  /// ユーザー識別子（将来のマルチユーザー対応用、現在は "default"）
-  userId       String    @default("default")
+  /// ユーザー ID（マルチユーザー対応）
+  userId       String    @db.Uuid
   /// Push API エンドポイント URL
   endpoint     String    @unique
   /// 暗号化キー（p256dh）
@@ -352,6 +424,8 @@ model PushSubscription {
   createdAt    DateTime  @default(now()) @db.Timestamptz(6)
   /// 更新日時
   updatedAt    DateTime  @updatedAt @db.Timestamptz(6)
+  /// 関連ユーザー
+  user         User      @relation("UserPushSubscriptions", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, active], map: "idx_pushsub_user_active")
 }

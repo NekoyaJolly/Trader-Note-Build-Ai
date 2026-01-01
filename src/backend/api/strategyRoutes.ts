@@ -454,6 +454,18 @@ router.post('/:id/backtest', async (req: Request, res: Response) => {
       });
     }
 
+    // 期間制限（最大90日）
+    const MAX_BACKTEST_DAYS = 90;
+    const diffDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    if (diffDays > MAX_BACKTEST_DAYS) {
+      return res.status(400).json({
+        success: false,
+        error: `バックテスト期間は最大${MAX_BACKTEST_DAYS}日までです（指定: ${diffDays}日）`,
+        maxDays: MAX_BACKTEST_DAYS,
+        requestedDays: diffDays,
+      });
+    }
+
     // タイムフレームのバリデーション
     const validTimeframes = ['15m', '30m', '1h', '4h', '1d'];
     if (!validTimeframes.includes(stage1Timeframe)) {

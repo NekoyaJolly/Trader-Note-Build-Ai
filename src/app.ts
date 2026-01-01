@@ -9,6 +9,9 @@ import indicatorRoutes from './routes/indicatorRoutes';
 import backtestRoutes from './routes/backtestRoutes';
 import barLocatorRoutes from './controllers/barLocatorController';
 import strategyRoutes from './backend/api/strategyRoutes';
+import authRoutes from './routes/authRoutes';
+import watchlistRoutes from './routes/watchlistRoutes';
+import pushRoutes from './routes/pushRoutes';
 import { MatchingScheduler } from './utils/scheduler';
 
 /**
@@ -88,6 +91,16 @@ class App {
     });
 
     // API routes
+    // 認証ルート（認証不要）
+    this.app.use('/api/auth', authRoutes);
+    
+    // ウォッチリスト（認証必須）
+    this.app.use('/api/watchlist', watchlistRoutes);
+    
+    // Push通知（認証必須、一部認証不要）
+    this.app.use('/api/push', pushRoutes);
+    
+    // データルート
     this.app.use('/api/trades', tradeRoutes);
     this.app.use('/api/matching', matchingRoutes);
     this.app.use('/api/notifications', notificationRoutes);
@@ -120,6 +133,11 @@ class App {
       console.log('═══════════════════════════════════════');
       console.log('\nAvailable endpoints:');
       console.log('  GET  /health');
+      console.log('  POST /api/auth/register');
+      console.log('  POST /api/auth/login');
+      console.log('  POST /api/auth/refresh');
+      console.log('  POST /api/auth/logout');
+      console.log('  GET  /api/auth/me');
       console.log('  POST /api/trades/import/csv');
       console.log('  POST /api/trades/import/upload-text');
       console.log('  GET  /api/trades/notes');
