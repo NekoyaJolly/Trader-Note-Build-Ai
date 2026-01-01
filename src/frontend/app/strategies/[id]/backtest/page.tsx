@@ -16,6 +16,7 @@ import {
   fetchStrategy,
   runStrategyBacktest,
   fetchStrategyBacktestHistory,
+  fetchStrategyBacktestResult,
   createNotesFromBacktest,
   runWalkForwardTest,
   fetchWalkForwardHistory,
@@ -374,8 +375,20 @@ export default function StrategyBacktestPage() {
 
   /** 履歴から結果を選択 */
   const handleSelectHistory = async (historyId: string) => {
-    // TODO: fetchBacktestResult(strategyId, historyId) を実装
-    console.log("選択された履歴:", historyId);
+    try {
+      setError(null);
+      // 選択した履歴の結果を取得
+      const resultData = await fetchStrategyBacktestResult(strategyId, historyId);
+      setResult(resultData);
+      setActiveTab("summary");
+      // フィルター分析結果をリセット（新しい結果に切り替わったため）
+      setFilterAnalysis(null);
+      setFilterVerifyResult(null);
+      setSelectedFilters([]);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "結果の取得に失敗しました";
+      setError(message);
+    }
   };
 
   /** ウォークフォワードテストを実行 */
