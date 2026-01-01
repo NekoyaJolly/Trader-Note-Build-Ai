@@ -410,7 +410,8 @@ router.post('/:id/duplicate', async (req: Request, res: Response) => {
  * - stage1Timeframe: '15m' | '30m' | '1h' | '4h' | '1d' (デフォルト: '1h')
  * - enableStage2: boolean (Stage2精密検証を有効化、デフォルト: true)
  * - initialCapital: number (初期資金、デフォルト: 1000000)
- * - positionSize: number (ポジションサイズ、デフォルト: 0.1 = 10%)
+ * - lotSize: number (ロット数・通貨量、デフォルト: 10000 = 1万通貨)
+ * - leverage: number (レバレッジ、デフォルト: 25、最大1000)
  */
 router.post('/:id/backtest', async (req: Request, res: Response) => {
   try {
@@ -421,7 +422,8 @@ router.post('/:id/backtest', async (req: Request, res: Response) => {
       stage1Timeframe = '1h',
       enableStage2 = true,
       initialCapital = 1000000,
-      positionSize = 0.1,
+      lotSize = 10000, // デフォルト1万通貨
+      leverage = 25, // デフォルト25倍
     } = req.body;
 
     // 必須フィールドのバリデーション
@@ -485,7 +487,8 @@ router.post('/:id/backtest', async (req: Request, res: Response) => {
       stage1Timeframe: stage1Timeframe as '15m' | '30m' | '1h' | '4h' | '1d',
       runStage2: enableStage2,
       initialCapital,
-      positionSize,
+      lotSize,
+      leverage,
     });
 
     console.log(`[StrategyRoutes] バックテスト完了: runId=${result.id}, trades=${result.summary.totalTrades}`);
@@ -1177,7 +1180,8 @@ router.post('/:id/walkforward', async (req: Request, res: Response) => {
       outOfSampleDays,
       timeframe,
       initialCapital,
-      positionSize,
+      lotSize,
+      leverage,
     } = req.body;
 
     if (!startDate || !endDate) {
@@ -1196,7 +1200,8 @@ router.post('/:id/walkforward', async (req: Request, res: Response) => {
       outOfSampleDays,
       timeframe,
       initialCapital,
-      positionSize,
+      lotSize,
+      leverage,
     });
 
     res.status(201).json({

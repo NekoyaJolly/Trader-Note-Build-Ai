@@ -807,7 +807,8 @@ export interface BacktestRequestParams {
   stage1Timeframe: "15m" | "30m" | "1h" | "4h" | "1d";
   enableStage2: boolean;
   initialCapital: number;
-  positionSize: number;
+  lotSize: number; // 固定ロット数（通貨量）
+  leverage: number; // レバレッジ（1〜1000倍）
 }
 
 /**

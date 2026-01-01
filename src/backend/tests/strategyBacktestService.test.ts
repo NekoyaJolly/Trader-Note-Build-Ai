@@ -80,7 +80,7 @@ describe('calculateSummary', () => {
         exitTime: '2024-01-01T01:00:00Z',
         exitPrice: 110,
         side: 'buy',
-        positionSize: 1,
+        lotSize: 1,
         pnl: 10,
         pnlPercent: 0.1,
         exitReason: 'take_profit',
@@ -92,7 +92,7 @@ describe('calculateSummary', () => {
         exitTime: '2024-01-01T03:00:00Z',
         exitPrice: 120,
         side: 'buy',
-        positionSize: 1,
+        lotSize: 1,
         pnl: 10,
         pnlPercent: 0.091,
         exitReason: 'take_profit',
@@ -130,7 +130,7 @@ describe('calculateSummary', () => {
         exitTime: '2024-01-01T01:00:00Z',
         exitPrice: 95,
         side: 'buy',
-        positionSize: 1,
+        lotSize: 1,
         pnl: -5,
         pnlPercent: -0.05,
         exitReason: 'stop_loss',
@@ -142,7 +142,7 @@ describe('calculateSummary', () => {
         exitTime: '2024-01-01T03:00:00Z',
         exitPrice: 88,
         side: 'buy',
-        positionSize: 1,
+        lotSize: 1,
         pnl: -7,
         pnlPercent: -0.074,
         exitReason: 'stop_loss',
@@ -170,7 +170,7 @@ describe('calculateSummary', () => {
         exitTime: '2024-01-01T01:00:00Z',
         exitPrice: 120,
         side: 'buy',
-        positionSize: 1,
+        lotSize: 1,
         pnl: 20,
         pnlPercent: 0.2,
         exitReason: 'take_profit',
@@ -182,7 +182,7 @@ describe('calculateSummary', () => {
         exitTime: '2024-01-01T03:00:00Z',
         exitPrice: 110,
         side: 'buy',
-        positionSize: 1,
+        lotSize: 1,
         pnl: -10,
         pnlPercent: -0.083,
         exitReason: 'stop_loss',
@@ -194,7 +194,7 @@ describe('calculateSummary', () => {
         exitTime: '2024-01-01T05:00:00Z',
         exitPrice: 115,
         side: 'buy',
-        positionSize: 1,
+        lotSize: 1,
         pnl: 5,
         pnlPercent: 0.045,
         exitReason: 'take_profit',
@@ -230,14 +230,14 @@ describe('calculateSummary', () => {
   test('連勝・連敗のカウント', () => {
     const trades: BacktestTradeEvent[] = [
       // 3連勝
-      { eventId: 'e1', entryTime: '', entryPrice: 100, exitTime: '', exitPrice: 110, side: 'buy', positionSize: 1, pnl: 10, pnlPercent: 0.1, exitReason: 'take_profit' },
-      { eventId: 'e2', entryTime: '', entryPrice: 100, exitTime: '', exitPrice: 110, side: 'buy', positionSize: 1, pnl: 10, pnlPercent: 0.1, exitReason: 'take_profit' },
-      { eventId: 'e3', entryTime: '', entryPrice: 100, exitTime: '', exitPrice: 110, side: 'buy', positionSize: 1, pnl: 10, pnlPercent: 0.1, exitReason: 'take_profit' },
+      { eventId: 'e1', entryTime: '', entryPrice: 100, exitTime: '', exitPrice: 110, side: 'buy', lotSize: 1, pnl: 10, pnlPercent: 0.1, exitReason: 'take_profit' },
+      { eventId: 'e2', entryTime: '', entryPrice: 100, exitTime: '', exitPrice: 110, side: 'buy', lotSize: 1, pnl: 10, pnlPercent: 0.1, exitReason: 'take_profit' },
+      { eventId: 'e3', entryTime: '', entryPrice: 100, exitTime: '', exitPrice: 110, side: 'buy', lotSize: 1, pnl: 10, pnlPercent: 0.1, exitReason: 'take_profit' },
       // 2連敗
-      { eventId: 'e4', entryTime: '', entryPrice: 100, exitTime: '', exitPrice: 90, side: 'buy', positionSize: 1, pnl: -10, pnlPercent: -0.1, exitReason: 'stop_loss' },
-      { eventId: 'e5', entryTime: '', entryPrice: 100, exitTime: '', exitPrice: 90, side: 'buy', positionSize: 1, pnl: -10, pnlPercent: -0.1, exitReason: 'stop_loss' },
+      { eventId: 'e4', entryTime: '', entryPrice: 100, exitTime: '', exitPrice: 90, side: 'buy', lotSize: 1, pnl: -10, pnlPercent: -0.1, exitReason: 'stop_loss' },
+      { eventId: 'e5', entryTime: '', entryPrice: 100, exitTime: '', exitPrice: 90, side: 'buy', lotSize: 1, pnl: -10, pnlPercent: -0.1, exitReason: 'stop_loss' },
       // 1勝
-      { eventId: 'e6', entryTime: '', entryPrice: 100, exitTime: '', exitPrice: 110, side: 'buy', positionSize: 1, pnl: 10, pnlPercent: 0.1, exitReason: 'take_profit' },
+      { eventId: 'e6', entryTime: '', entryPrice: 100, exitTime: '', exitPrice: 110, side: 'buy', lotSize: 1, pnl: 10, pnlPercent: 0.1, exitReason: 'take_profit' },
     ];
 
     const summary = calculateSummary(trades, 1000000);
@@ -249,10 +249,10 @@ describe('calculateSummary', () => {
     // 資金推移: 1000 -> 1050 -> 1025 -> 1100 -> 1000
     // 最大ドローダウン: 1100 -> 1000 = 100 (9.09%)
     const trades: BacktestTradeEvent[] = [
-      { eventId: 'e1', entryTime: '', entryPrice: 100, exitTime: '', exitPrice: 105, side: 'buy', positionSize: 1, pnl: 50, pnlPercent: 0.05, exitReason: 'take_profit' },
-      { eventId: 'e2', entryTime: '', entryPrice: 105, exitTime: '', exitPrice: 102.5, side: 'buy', positionSize: 1, pnl: -25, pnlPercent: -0.024, exitReason: 'stop_loss' },
-      { eventId: 'e3', entryTime: '', entryPrice: 102.5, exitTime: '', exitPrice: 110, side: 'buy', positionSize: 1, pnl: 75, pnlPercent: 0.073, exitReason: 'take_profit' },
-      { eventId: 'e4', entryTime: '', entryPrice: 110, exitTime: '', exitPrice: 100, side: 'buy', positionSize: 1, pnl: -100, pnlPercent: -0.091, exitReason: 'stop_loss' },
+      { eventId: 'e1', entryTime: '', entryPrice: 100, exitTime: '', exitPrice: 105, side: 'buy', lotSize: 1, pnl: 50, pnlPercent: 0.05, exitReason: 'take_profit' },
+      { eventId: 'e2', entryTime: '', entryPrice: 105, exitTime: '', exitPrice: 102.5, side: 'buy', lotSize: 1, pnl: -25, pnlPercent: -0.024, exitReason: 'stop_loss' },
+      { eventId: 'e3', entryTime: '', entryPrice: 102.5, exitTime: '', exitPrice: 110, side: 'buy', lotSize: 1, pnl: 75, pnlPercent: 0.073, exitReason: 'take_profit' },
+      { eventId: 'e4', entryTime: '', entryPrice: 110, exitTime: '', exitPrice: 100, side: 'buy', lotSize: 1, pnl: -100, pnlPercent: -0.091, exitReason: 'stop_loss' },
     ];
 
     const summary = calculateSummary(trades, 1000);

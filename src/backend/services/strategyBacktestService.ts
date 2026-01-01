@@ -90,7 +90,8 @@ export interface BacktestRequest {
   stage1Timeframe: BacktestTimeframe;
   runStage2: boolean;
   initialCapital: number;
-  positionSize: number;
+  lotSize: number; // 固定ロット数（通貨量、例: 10000 = 1万通貨）
+  leverage: number; // レバレッジ（1〜1000倍）
 }
 
 /** OHLCVデータ */
@@ -213,6 +214,7 @@ function calculateExpectedCandles(
 
 /**
  * モックOHLCVデータを生成（テスト・開発用）
+ * シード値を使用して再現性のあるデータを生成
  */
 function generateMockData(
   symbol: string,
@@ -227,14 +229,21 @@ function generateMockData(
   // ベース価格（シンボルに応じて変更）
   let price = symbol.includes('JPY') ? 150.0 : 1.1;
   const volatility = symbol.includes('JPY') ? 0.5 : 0.005;
+  
+  // シード値：開始日とシンボルから決定的なシードを生成
+  let seed = startDate.getTime() + symbol.charCodeAt(0);
+  const seededRandom = () => {
+    seed = (seed * 9301 + 49297) % 233280;
+    return seed / 233280;
+  };
 
   while (current <= endDate) {
-    // ランダムウォークでOHLCV生成（テスト用）
-    const change = (Math.random() - 0.5) * volatility;
+    // シード付きランダムウォークでOHLCV生成（再現性あり）
+    const change = (seededRandom() - 0.5) * volatility;
     const open = price;
     const close = price + change;
-    const high = Math.max(open, close) + Math.random() * volatility * 0.5;
-    const low = Math.min(open, close) - Math.random() * volatility * 0.5;
+    const high = Math.max(open, close) + seededRandom() * volatility * 0.5;
+    const low = Math.min(open, close) - seededRandom() * volatility * 0.5;
 
     data.push({
       timestamp: new Date(current),
@@ -242,7 +251,7 @@ function generateMockData(
       high,
       low,
       close,
-      volume: Math.floor(Math.random() * 10000) + 1000,
+      volume: Math.floor(seededRandom() * 10000) + 1000,
     });
 
     price = close;
@@ -789,13 +798,18 @@ async function executeBacktestStage(
       );
       
       if (exitResult.shouldExit) {
-        // トレードを記録
+        // 固定ロット数で損益計算（シンプル）
+        // lotSize = 通貨量（例: 10000 = 1万通貨）
+        // pnl = 価格差 × ロット数
         const pnl = calculatePnl(
           strategy.side as TradeSide,
           entryPrice,
           exitResult.exitPrice,
-          request.positionSize
+          request.lotSize
         );
+        
+        // 必要証拠金 = ロット数 × エントリー価格 / レバレッジ
+        const requiredMargin = (request.lotSize * entryPrice) / request.leverage;
         
         trades.push({
           eventId: uuidv4(),
@@ -804,9 +818,10 @@ async function executeBacktestStage(
           exitTime: bar.timestamp.toISOString(),
           exitPrice: exitResult.exitPrice,
           side: strategy.side as TradeSide,
-          positionSize: request.positionSize,
+          lotSize: request.lotSize,
           pnl,
-          pnlPercent: (pnl / (entryPrice * request.positionSize)) * 100,
+          // pnlPercentは必要証拠金に対する利益率
+          pnlPercent: (pnl / requiredMargin) * 100,
           exitReason: exitResult.reason,
         });
         
@@ -1022,7 +1037,7 @@ export async function getBacktestResult(runId: string): Promise<BacktestResult |
       exitTime: e.exitTime?.toISOString() || '',
       exitPrice: e.exitPrice?.toNumber() || 0,
       side: run.strategy.side as TradeSide,
-      positionSize: 0.1, // デフォルト値
+      lotSize: 10000, // デフォルト値（1万通貨）
       pnl: e.pnl?.toNumber() || 0,
       pnlPercent: 0,
       exitReason: e.outcome === 'win' ? 'take_profit' : e.outcome === 'loss' ? 'stop_loss' : 'timeout' as const,
@@ -1089,7 +1104,7 @@ export async function getBacktestHistory(strategyId: string, limit: number = 20)
         exitTime: e.exitTime?.toISOString() || '',
         exitPrice: e.exitPrice?.toNumber() || 0,
         side: run.strategy.side as TradeSide,
-        positionSize: 0.1,
+        lotSize: 10000,
         pnl: e.pnl?.toNumber() || 0,
         pnlPercent: 0,
         exitReason: e.outcome === 'win' ? 'take_profit' : e.outcome === 'loss' ? 'stop_loss' : 'timeout' as const,

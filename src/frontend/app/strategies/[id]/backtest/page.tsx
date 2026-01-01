@@ -38,7 +38,8 @@ interface BacktestParams {
   stage1Timeframe: "15m" | "30m" | "1h" | "4h" | "1d";
   enableStage2: boolean;
   initialCapital: number;
-  positionSize: number;
+  lotSize: number; // 固定ロット数（通貨量、例: 10000 = 1万通貨）
+  leverage: number; // レバレッジ（1〜1000倍）
 }
 
 // BacktestHistoryItemはlib/api.tsからインポート
@@ -234,7 +235,8 @@ export default function StrategyBacktestPage() {
     stage1Timeframe: "1h",
     enableStage2: true,
     initialCapital: 1000000,
-    positionSize: 0.1,
+    lotSize: 10000, // デフォルト1万通貨
+    leverage: 25, // デフォルト25倍
   });
 
   // バックテスト結果
@@ -338,7 +340,8 @@ export default function StrategyBacktestPage() {
         stage1Timeframe: backtestParams.stage1Timeframe,
         enableStage2: backtestParams.enableStage2,
         initialCapital: backtestParams.initialCapital,
-        positionSize: backtestParams.positionSize,
+        lotSize: backtestParams.lotSize,
+        leverage: backtestParams.leverage,
       });
 
       setResult(resultData);
@@ -587,7 +590,7 @@ export default function StrategyBacktestPage() {
                   </p>
                 </div>
 
-                {/* 資金設定 */}
+                {/* 資金・ロット設定 */}
                 <div className="space-y-4 mb-6">
                   <div>
                     <label className="block text-sm text-gray-400 mb-1">
@@ -604,21 +607,41 @@ export default function StrategyBacktestPage() {
                         JPY
                       </span>
                     </div>
-                    <p className="text-xs text-gray-500 mt-1">※ 仮想の初期資金（パフォーマンス計算用）</p>
+                    <p className="text-xs text-gray-500 mt-1">※ 仮想の初期資金（ドローダウン計算用）</p>
                   </div>
                   <div>
                     <label className="block text-sm text-gray-400 mb-1">
-                      ポジションサイズ（%）
+                      ロット数（通貨量）
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        step="1000"
+                        min="1000"
+                        value={backtestParams.lotSize}
+                        onChange={(e) => handleParamChange("lotSize", parseInt(e.target.value) || 1000)}
+                        className="flex-1 bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <span className="bg-slate-600 border border-slate-500 rounded px-3 py-2 text-gray-300 text-sm">
+                        通貨
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">例: 10000 = 1万通貨、100000 = 1ロット</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-1">
+                      レバレッジ（倍）
                     </label>
                     <input
                       type="number"
-                      step="0.01"
-                      min="0.01"
-                      max="1"
-                      value={backtestParams.positionSize * 100}
-                      onChange={(e) => handleParamChange("positionSize", (parseFloat(e.target.value) || 0) / 100)}
+                      step="1"
+                      min="1"
+                      max="1000"
+                      value={backtestParams.leverage}
+                      onChange={(e) => handleParamChange("leverage", parseInt(e.target.value) || 1)}
                       className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
+                    <p className="text-xs text-gray-500 mt-1">国内25倍、海外最大1000倍</p>
                   </div>
                 </div>
 

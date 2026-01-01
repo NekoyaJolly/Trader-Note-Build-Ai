@@ -21,7 +21,8 @@ export interface BacktestTradeEvent {
   exitTime: string;
   exitPrice: number;
   side: TradeSide;
-  positionSize: number;
+  /** ロット数（通貨量）例: 10000 = 1万通貨 */
+  lotSize: number;
   pnl: number;
   pnlPercent: number;
   exitReason: 'take_profit' | 'stop_loss' | 'timeout' | 'signal';
@@ -57,21 +58,21 @@ export interface BacktestResultSummary {
  * @param side - 売買方向（'buy' または 'sell'）
  * @param entryPrice - エントリー価格
  * @param exitPrice - 決済価格
- * @param positionSize - ポジションサイズ（ロット数）
+ * @param lotSize - ロット数（通貨量）例: 10000 = 1万通貨
  * @returns 損益金額
  */
 export function calculatePnl(
   side: TradeSide,
   entryPrice: number,
   exitPrice: number,
-  positionSize: number
+  lotSize: number
 ): number {
   if (side === 'buy') {
     // 買いトレード: 決済価格 - エントリー価格
-    return (exitPrice - entryPrice) * positionSize;
+    return (exitPrice - entryPrice) * lotSize;
   } else {
     // 売りトレード: エントリー価格 - 決済価格
-    return (entryPrice - exitPrice) * positionSize;
+    return (entryPrice - exitPrice) * lotSize;
   }
 }
 

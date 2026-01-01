@@ -46,8 +46,10 @@ export interface WalkForwardRequest {
   timeframe?: BacktestTimeframe;
   /** 初期資金 */
   initialCapital?: number;
-  /** ポジションサイズ */
-  positionSize?: number;
+  /** ロット数（通貨量） */
+  lotSize?: number;
+  /** レバレッジ（デフォルト25倍） */
+  leverage?: number;
 }
 
 /** 分割結果 */
@@ -241,7 +243,8 @@ export async function runWalkForwardTest(
     outOfSampleDays,
     timeframe = '1h',
     initialCapital = 1000000,
-    positionSize = 0.1,
+    lotSize = 10000, // デフォルト1万通貨
+    leverage = 25, // デフォルト25倍
   } = request;
 
   // ストラテジー存在チェック
@@ -307,7 +310,8 @@ export async function runWalkForwardTest(
         stage1Timeframe: timeframe,
         runStage2: false,
         initialCapital,
-        positionSize,
+        lotSize,
+        leverage,
       };
       const inSampleResult = await runBacktest(inSampleRequest);
 
@@ -319,7 +323,8 @@ export async function runWalkForwardTest(
         stage1Timeframe: timeframe,
         runStage2: false,
         initialCapital,
-        positionSize,
+        lotSize,
+        leverage,
       };
       const outOfSampleResult = await runBacktest(outOfSampleRequest);
 
