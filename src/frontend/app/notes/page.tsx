@@ -15,7 +15,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { fetchNotes, fetchNoteStatusCounts } from "@/lib/api";
-import type { NoteListItem, NoteStatus, NoteStatusCounts } from "@/types/note";
+import type { NoteListItem, NoteStatus, NoteStatusCounts, NoteSummary } from "@/types/note";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/Alert";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Button } from "@/components/ui/Button";
@@ -28,7 +28,7 @@ import EmptyState from "@/components/EmptyState";
 type StatusFilter = "all" | NoteStatus;
 
 export default function NotesPage() {
-  const [notes, setNotes] = useState<NoteListItem[]>([]);
+  const [notes, setNotes] = useState<NoteSummary[]>([]);
   const [statusCounts, setStatusCounts] = useState<NoteStatusCounts | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [isLoading, setIsLoading] = useState(true);
@@ -57,7 +57,7 @@ export default function NotesPage() {
       const [counts, data] = await Promise.all([countsPromise, notesPromise]);
       
       setStatusCounts(counts);
-      setNotes(data);
+      setNotes(data.notes);
     } catch (err) {
       setError(err instanceof Error ? err.message : "ノート一覧の取得に失敗しました");
     } finally {
