@@ -7,7 +7,7 @@ import type {
   NotificationListItem,
   NotificationDetail,
 } from "@/types/notification";
-import type { NoteListItem, NoteDetail, NoteUpdatePayload, NoteStatusCounts, NoteStatus } from "@/types/note";
+import type { NoteListItem, NoteDetail, NoteUpdatePayload, NoteStatusCounts, NoteStatus, NoteSummary } from "@/types/note";
 
 /**
  * バックエンド API のベース URL
@@ -97,14 +97,31 @@ export async function markAllNotificationsAsRead(): Promise<void> {
 }
 
 /**
+ * ノート一覧取得のパラメータ型
+ */
+export interface FetchNotesParams {
+  status?: NoteStatus;
+  limit?: number;
+}
+
+/**
  * ノート一覧を取得
  * GET /api/trades/notes
- * @param status - フィルタするステータス（省略時は全件）
+ * @param params - フィルタ条件（NoteStatus または FetchNotesParams オブジェクト）
  */
-export async function fetchNotes(status?: NoteStatus): Promise<NoteListItem[]> {
+export async function fetchNotes(params?: NoteStatus | FetchNotesParams): Promise<{ notes: NoteSummary[] }> {
   const url = new URL(`${API_BASE_URL}/api/trades/notes`);
-  if (status) {
-    url.searchParams.set("status", status);
+  
+  // 後方互換性: string が渡された場合は status として扱う
+  const normalizedParams: FetchNotesParams = typeof params === 'string'
+    ? { status: params }
+    : params || {};
+  
+  if (normalizedParams.status) {
+    url.searchParams.set("status", normalizedParams.status);
+  }
+  if (normalizedParams.limit) {
+    url.searchParams.set("limit", String(normalizedParams.limit));
   }
   
   const response = await fetch(url.toString(), {
@@ -125,16 +142,18 @@ export async function fetchNotes(status?: NoteStatus): Promise<NoteListItem[]> {
   }
 
   // API レスポンスを UI 用の型に整形
-  const normalized: NoteListItem[] = notes.map((n: Record<string, unknown>) => ({
+  const normalized: NoteSummary[] = notes.map((n: Record<string, unknown>) => ({
     id: String(n.id),
     symbol: String(n.symbol ?? ""),
     side: n.side === "sell" ? "sell" : "buy",
+    entryPrice: Number(n.entryPrice ?? 0),
     timestamp: String(n.timestamp ?? n.createdAt ?? new Date().toISOString()),
+    createdAt: String(n.createdAt ?? new Date().toISOString()),
     aiSummary: (n.aiSummary as string | null) ?? null,
     status: (n.status as NoteStatus) ?? "draft",
   }));
 
-  return normalized;
+  return { notes: normalized };
 }
 
 /**
@@ -590,3 +609,6 @@ export async function fetchBacktestHistory(
   const payload = await response.json();
   return payload.runs ?? [];
 }
+
+// 型の再エクスポート（外部から使用するため）
+export type { NoteSummary } from "@/types/note";

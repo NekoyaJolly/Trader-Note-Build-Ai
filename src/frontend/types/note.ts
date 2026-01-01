@@ -24,6 +24,21 @@ export interface NoteListItem {
 }
 
 /**
+ * ノート一覧用の型（バックテストページ等で使用）
+ * NoteListItem に追加フィールドを含む
+ */
+export interface NoteSummary {
+  id: string;
+  symbol: string;
+  side: "buy" | "sell";
+  entryPrice: number;
+  timestamp: string;
+  createdAt: string;
+  aiSummary?: string | null;
+  status: NoteStatus;
+}
+
+/**
  * ノート詳細用の型（バックエンドの TradeNote に整合）
  */
 export interface NoteDetail {

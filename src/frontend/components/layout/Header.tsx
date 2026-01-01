@@ -217,6 +217,17 @@ export default function Header() {
             >
               📥 CSVインポート
             </Link>
+            <Link
+              href="/backtest"
+              onClick={() => setIsMobileMenuOpen(false)}
+              className={`block px-3 py-2.5 text-sm rounded-lg ${
+                isActive('/backtest') 
+                  ? 'bg-gradient-to-r from-pink-500/20 to-violet-500/20 text-white border border-pink-500/30' 
+                  : 'text-gray-300 hover:bg-slate-700'
+              }`}
+            >
+              📊 バックテスト
+            </Link>
           </div>
 
           {/* 分析ツール（インジケーター設定） */}

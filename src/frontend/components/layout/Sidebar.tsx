@@ -139,6 +139,12 @@ const navItems: NavItem[] = [
         icon: <ImportIcon />,
         description: "CSVからトレードを取り込み",
       },
+      {
+        href: "/backtest",
+        label: "バックテスト",
+        icon: <ChartIcon />,
+        description: "ノートの優位性を検証",
+      },
     ],
   },
   {

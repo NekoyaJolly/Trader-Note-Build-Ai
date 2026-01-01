@@ -31,6 +31,16 @@ interface BacktestPanelProps {
 }
 
 /**
+ * TP/SLの単位タイプ
+ */
+type TpSlUnit = 'percent' | 'pips';
+
+/**
+ * ブローカータイプ（手数料計算用）
+ */
+type BrokerType = 'domestic' | 'overseas' | 'custom';
+
+/**
  * バックテストパネル
  */
 export function BacktestPanel({ noteId, symbol }: BacktestPanelProps) {
@@ -45,12 +55,21 @@ export function BacktestPanel({ noteId, symbol }: BacktestPanelProps) {
     // デフォルト: 今日
     return new Date().toISOString().split("T")[0];
   });
-  const [timeframe, setTimeframe] = useState("1h");
+  const [timeframe, setTimeframe] = useState("15m"); // デフォルトを15分足に変更
   const [matchThreshold, setMatchThreshold] = useState(70);
-  const [takeProfit, setTakeProfit] = useState(2.0);
-  const [stopLoss, setStopLoss] = useState(1.0);
+  
+  // TP/SL設定（単位切り替え対応）
+  const [tpSlUnit, setTpSlUnit] = useState<TpSlUnit>('percent');
+  const [takeProfit, setTakeProfit] = useState(2.0); // % または Pips
+  const [stopLoss, setStopLoss] = useState(1.0); // % または Pips
+  
   const [maxHoldingMinutes, setMaxHoldingMinutes] = useState(1440); // 24時間
-  const [tradingCost, setTradingCost] = useState(0.1);
+  
+  // ブローカー手数料設定
+  const [brokerType, setBrokerType] = useState<BrokerType>('domestic');
+  const [lotUnit, setLotUnit] = useState(1000); // 1Lot あたりの通貨単位（国内:1000, 海外:10000）
+  const [costPerLot, setCostPerLot] = useState(0); // 1Lot あたりの往復手数料（通貨単位）
+  const [spreadPips, setSpreadPips] = useState(0.3); // スプレッド（Pips）
 
   // 実行状態
   const [isExecuting, setIsExecuting] = useState(false);
@@ -61,6 +80,56 @@ export function BacktestPanel({ noteId, symbol }: BacktestPanelProps) {
 
   // タブ状態（現在の結果 / 履歴）
   const [activeTab, setActiveTab] = useState<"current" | "history">("current");
+
+  /**
+   * ブローカータイプ変更時の設定更新
+   */
+  const handleBrokerTypeChange = (type: BrokerType) => {
+    setBrokerType(type);
+    switch (type) {
+      case 'domestic':
+        // 国内FX: 1Lot = 1,000通貨、手数料は通常無料（スプレッドで回収）
+        setLotUnit(1000);
+        setCostPerLot(0);
+        setSpreadPips(0.3);
+        break;
+      case 'overseas':
+        // 海外FX: 1Lot = 10,000通貨（または100,000）、ECN手数料あり
+        setLotUnit(10000);
+        setCostPerLot(7); // 例: $7/Lot
+        setSpreadPips(0.1);
+        break;
+      case 'custom':
+        // カスタム: 現在の値を維持
+        break;
+    }
+  };
+
+  /**
+   * Pips → % への変換（シンボルに応じた計算）
+   * FX通貨ペア: 1pip = 0.0001（JPYペアは0.01）
+   * 暗号通貨: シンボル価格に応じて調整
+   */
+  const pipsToPercent = (pips: number, symbolName: string): number => {
+    // JPYペアかどうか判定
+    const isJpyPair = symbolName.toUpperCase().includes('JPY');
+    // 暗号通貨ペア判定
+    const isCrypto = symbolName.toUpperCase().includes('BTC') || 
+                     symbolName.toUpperCase().includes('ETH') ||
+                     symbolName.toUpperCase().includes('USDT');
+    
+    if (isCrypto) {
+      // 暗号通貨: 1pip = $1 と仮定（簡易計算）
+      // 実際の価格を取得して計算する場合はAPI呼び出しが必要
+      return pips * 0.01; // 0.01% per pip（仮）
+    } else if (isJpyPair) {
+      // JPYペア: 1pip = 0.01円
+      return pips * 0.01;
+    } else {
+      // その他FX: 1pip = 0.0001
+      return pips * 0.01;
+    }
+  };
 
   /**
    * バックテストを実行
@@ -75,16 +144,35 @@ export function BacktestPanel({ noteId, symbol }: BacktestPanelProps) {
       // バックエンドは 0.0〜1.0 の範囲を期待するため
       const normalizedThreshold = matchThreshold / 100;
       
+      // TP/SL を % に統一（Pipsの場合は変換）
+      let takeProfitPct = takeProfit;
+      let stopLossPct = stopLoss;
+      if (tpSlUnit === 'pips') {
+        takeProfitPct = pipsToPercent(takeProfit, symbol);
+        stopLossPct = pipsToPercent(stopLoss, symbol);
+      }
+      
+      // 取引コストを計算（スプレッド + 手数料）
+      // スプレッドを%に変換 + 手数料分
+      const spreadCostPct = pipsToPercent(spreadPips, symbol);
+      // 手数料は通貨単位なので%には含めず、別途パラメータとして渡す
+      const totalTradingCostPct = spreadCostPct * 2; // 往復分
+      
       const params: BacktestExecuteParams = {
         noteId,
         startDate: new Date(startDate).toISOString(),
         endDate: new Date(endDate).toISOString(),
         timeframe,
         matchThreshold: normalizedThreshold,
-        takeProfit,
-        stopLoss,
+        takeProfit: takeProfitPct,
+        stopLoss: stopLossPct,
         maxHoldingMinutes,
-        tradingCost,
+        tradingCost: totalTradingCostPct,
+        // 拡張パラメータ（バックエンドで対応後に有効化）
+        // tpSlUnit,
+        // lotUnit,
+        // costPerLot,
+        // spreadPips,
       };
 
       const { runId } = await executeBacktest(params);
@@ -127,14 +215,16 @@ export function BacktestPanel({ noteId, symbol }: BacktestPanelProps) {
     }
   }, [
     noteId,
+    symbol,
     startDate,
     endDate,
     timeframe,
     matchThreshold,
+    tpSlUnit,
     takeProfit,
     stopLoss,
     maxHoldingMinutes,
-    tradingCost,
+    spreadPips,
   ]);
 
   /**
@@ -220,7 +310,7 @@ export function BacktestPanel({ noteId, symbol }: BacktestPanelProps) {
                   onChange={(e) => setTimeframe(e.target.value)}
                   disabled={isExecuting}
                 >
-                  <option value="5m">5分足</option>
+                  {/* 15分足以上から選択可能（将来的に1分足まで拡張予定） */}
                   <option value="15m">15分足</option>
                   <option value="30m">30分足</option>
                   <option value="1h">1時間足</option>
@@ -240,57 +330,169 @@ export function BacktestPanel({ noteId, symbol }: BacktestPanelProps) {
                   disabled={isExecuting}
                 />
               </div>
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">利確 (%)</label>
-                <input
-                  type="number"
-                  className="w-full px-3 py-2 rounded-lg bg-slate-800 text-gray-200 border border-slate-600 text-sm"
-                  value={takeProfit}
-                  onChange={(e) => setTakeProfit(Number(e.target.value))}
-                  min={0}
-                  step={0.1}
-                  disabled={isExecuting}
-                />
+            </div>
+
+            {/* TP/SL設定（単位切り替え対応） */}
+            <div className="border-t border-slate-700 pt-4">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-medium text-gray-300">利確・損切り設定</span>
+                <div className="flex rounded-lg overflow-hidden border border-slate-600">
+                  <button
+                    type="button"
+                    onClick={() => setTpSlUnit('percent')}
+                    disabled={isExecuting}
+                    className={`px-3 py-1 text-xs font-medium transition-colors ${
+                      tpSlUnit === 'percent'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-800 text-gray-400 hover:bg-slate-700'
+                    }`}
+                  >
+                    %
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTpSlUnit('pips')}
+                    disabled={isExecuting}
+                    className={`px-3 py-1 text-xs font-medium transition-colors ${
+                      tpSlUnit === 'pips'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-800 text-gray-400 hover:bg-slate-700'
+                    }`}
+                  >
+                    Pips
+                  </button>
+                </div>
               </div>
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">損切 (%)</label>
-                <input
-                  type="number"
-                  className="w-full px-3 py-2 rounded-lg bg-slate-800 text-gray-200 border border-slate-600 text-sm"
-                  value={stopLoss}
-                  onChange={(e) => setStopLoss(Number(e.target.value))}
-                  min={0}
-                  step={0.1}
-                  disabled={isExecuting}
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">最大保有時間 (分)</label>
-                <input
-                  type="number"
-                  className="w-full px-3 py-2 rounded-lg bg-slate-800 text-gray-200 border border-slate-600 text-sm"
-                  value={maxHoldingMinutes}
-                  onChange={(e) => setMaxHoldingMinutes(Number(e.target.value))}
-                  min={1}
-                  disabled={isExecuting}
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">取引コスト (%)</label>
-                <input
-                  type="number"
-                  className="w-full px-3 py-2 rounded-lg bg-slate-800 text-gray-200 border border-slate-600 text-sm"
-                  value={tradingCost}
-                  onChange={(e) => setTradingCost(Number(e.target.value))}
-                  min={0}
-                  step={0.01}
-                  disabled={isExecuting}
-                />
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">
+                    利確 ({tpSlUnit === 'percent' ? '%' : 'pips'})
+                  </label>
+                  <input
+                    type="number"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-800 text-gray-200 border border-slate-600 text-sm"
+                    value={takeProfit}
+                    onChange={(e) => setTakeProfit(Number(e.target.value))}
+                    min={0}
+                    step={tpSlUnit === 'percent' ? 0.1 : 1}
+                    disabled={isExecuting}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">
+                    損切 ({tpSlUnit === 'percent' ? '%' : 'pips'})
+                  </label>
+                  <input
+                    type="number"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-800 text-gray-200 border border-slate-600 text-sm"
+                    value={stopLoss}
+                    onChange={(e) => setStopLoss(Number(e.target.value))}
+                    min={0}
+                    step={tpSlUnit === 'percent' ? 0.1 : 1}
+                    disabled={isExecuting}
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs text-gray-400 mb-1">最大保有時間</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      className="flex-1 px-3 py-2 rounded-lg bg-slate-800 text-gray-200 border border-slate-600 text-sm"
+                      value={maxHoldingMinutes}
+                      onChange={(e) => setMaxHoldingMinutes(Number(e.target.value))}
+                      min={1}
+                      disabled={isExecuting}
+                    />
+                    <span className="flex items-center text-xs text-gray-500">
+                      分 ({Math.floor(maxHoldingMinutes / 60)}時間{maxHoldingMinutes % 60}分)
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
 
+            {/* ブローカー手数料設定 */}
+            <div className="border-t border-slate-700 pt-4">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-medium text-gray-300">取引コスト設定</span>
+                <select
+                  className="px-3 py-1 rounded-lg bg-slate-800 text-gray-200 border border-slate-600 text-xs"
+                  value={brokerType}
+                  onChange={(e) => handleBrokerTypeChange(e.target.value as BrokerType)}
+                  disabled={isExecuting}
+                >
+                  <option value="domestic">国内FX (1Lot=1,000通貨)</option>
+                  <option value="overseas">海外FX (1Lot=10,000通貨)</option>
+                  <option value="custom">カスタム</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">1Lot 通貨単位</label>
+                  <input
+                    type="number"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-800 text-gray-200 border border-slate-600 text-sm"
+                    value={lotUnit}
+                    onChange={(e) => {
+                      setLotUnit(Number(e.target.value));
+                      setBrokerType('custom');
+                    }}
+                    min={1}
+                    disabled={isExecuting}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">
+                    往復手数料/Lot
+                    <span className="text-[10px] text-gray-500 ml-1">(通貨単位)</span>
+                  </label>
+                  <input
+                    type="number"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-800 text-gray-200 border border-slate-600 text-sm"
+                    value={costPerLot}
+                    onChange={(e) => {
+                      setCostPerLot(Number(e.target.value));
+                      setBrokerType('custom');
+                    }}
+                    min={0}
+                    step={0.1}
+                    disabled={isExecuting}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">
+                    スプレッド
+                    <span className="text-[10px] text-gray-500 ml-1">(pips)</span>
+                  </label>
+                  <input
+                    type="number"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-800 text-gray-200 border border-slate-600 text-sm"
+                    value={spreadPips}
+                    onChange={(e) => {
+                      setSpreadPips(Number(e.target.value));
+                      setBrokerType('custom');
+                    }}
+                    min={0}
+                    step={0.1}
+                    disabled={isExecuting}
+                  />
+                </div>
+                <div className="flex items-end">
+                  <div className="w-full px-3 py-2 rounded-lg bg-slate-700/50 border border-slate-600 text-sm">
+                    <span className="text-xs text-gray-400">概算コスト: </span>
+                    <span className="text-cyan-400 font-medium">
+                      {(pipsToPercent(spreadPips, symbol) * 2).toFixed(3)}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <p className="mt-2 text-[10px] text-gray-500">
+                ※ 手数料は現在スプレッドのみをコストとして計算。Lot単位の手数料は今後対応予定。
+              </p>
+            </div>
+
             {/* 実行ボタン */}
-            <div className="flex justify-end">
+            <div className="flex justify-end pt-2">
               <Button
                 onClick={handleExecute}
                 disabled={isExecuting}
