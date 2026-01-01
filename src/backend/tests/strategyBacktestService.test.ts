@@ -106,8 +106,8 @@ describe('calculateSummary', () => {
     expect(summary.winningTrades).toBe(2);
     expect(summary.losingTrades).toBe(0);
     
-    // 勝率100%（0〜100のパーセント値）
-    expect(summary.winRate).toBe(100);
+    // 勝率100%（0〜1の小数値、フロントエンドで*100して%表示）
+    expect(summary.winRate).toBe(1);
     
     // 純利益
     expect(summary.netProfit).toBe(20);
@@ -208,8 +208,8 @@ describe('calculateSummary', () => {
     expect(summary.winningTrades).toBe(2);
     expect(summary.losingTrades).toBe(1);
     
-    // 勝率 2/3 ≈ 66.67%（0〜100のパーセント値）
-    expect(summary.winRate).toBeCloseTo(66.67, 1);
+    // 勝率 2/3 ≈ 0.667（0〜1の小数値）
+    expect(summary.winRate).toBeCloseTo(0.6667, 3);
     
     // 純利益: 20 - 10 + 5 = 15
     expect(summary.netProfit).toBe(15);
@@ -259,8 +259,8 @@ describe('calculateSummary', () => {
     
     // 最大ドローダウン: 1100 → 1000 = 100
     expect(summary.maxDrawdown).toBe(100);
-    // ドローダウン率: 100 / 1000 * 100 = 10%（0〜100のパーセント値）
-    expect(summary.maxDrawdownRate).toBe(10);
+    // ドローダウン率: 100 / 1000 = 0.1（0〜1の小数値）
+    expect(summary.maxDrawdownRate).toBe(0.1);
   });
 });
 

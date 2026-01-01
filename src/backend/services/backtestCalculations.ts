@@ -133,18 +133,27 @@ export function calculateSummary(
     }
   }
   
+  // 平均勝ち/負けは金額ベースで計算
+  const avgWinAmount = winningTrades.length > 0 ? grossProfit / winningTrades.length : 0;
+  const avgLossAmount = losingTrades.length > 0 ? grossLoss / losingTrades.length : 0;
+  
   return {
     totalTrades: trades.length,
     winningTrades: winningTrades.length,
     losingTrades: losingTrades.length,
-    winRate: (winningTrades.length / trades.length) * 100,
+    // 勝率: 0〜1の小数（フロントエンドで*100して%表示）
+    winRate: winningTrades.length / trades.length,
     netProfit: totalPnl,
-    netProfitRate: (totalPnl / initialCapital) * 100,
+    // 利益率: 0〜1の小数（フロントエンドで*100して%表示）
+    netProfitRate: totalPnl / initialCapital,
     maxDrawdown,
-    maxDrawdownRate: (maxDrawdown / initialCapital) * 100,
+    // ドローダウン率: 0〜1の小数（フロントエンドで*100して%表示）
+    maxDrawdownRate: maxDrawdown / initialCapital,
     profitFactor: grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0,
-    averageWin: winningTrades.length > 0 ? grossProfit / winningTrades.length : 0,
-    averageLoss: losingTrades.length > 0 ? grossLoss / losingTrades.length : 0,
+    // 平均勝ち金額（初期資金に対する比率ではなく、絶対金額）
+    averageWin: avgWinAmount,
+    // 平均負け金額（絶対値）
+    averageLoss: avgLossAmount,
     riskRewardRatio: grossLoss > 0 && losingTrades.length > 0 && winningTrades.length > 0
       ? (grossProfit / winningTrades.length) / (grossLoss / losingTrades.length)
       : 0,

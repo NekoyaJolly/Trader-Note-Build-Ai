@@ -593,12 +593,18 @@ export default function StrategyBacktestPage() {
                     <label className="block text-sm text-gray-400 mb-1">
                       初期資金
                     </label>
-                    <input
-                      type="number"
-                      value={backtestParams.initialCapital}
-                      onChange={(e) => handleParamChange("initialCapital", parseInt(e.target.value) || 0)}
-                      className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        value={backtestParams.initialCapital}
+                        onChange={(e) => handleParamChange("initialCapital", parseInt(e.target.value) || 0)}
+                        className="flex-1 bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <span className="bg-slate-600 border border-slate-500 rounded px-3 py-2 text-gray-300 text-sm">
+                        JPY
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">※ 仮想の初期資金（パフォーマンス計算用）</p>
                   </div>
                   <div>
                     <label className="block text-sm text-gray-400 mb-1">
@@ -758,6 +764,7 @@ export default function StrategyBacktestPage() {
                           <MetricCard
                             label="純利益"
                             value={result.summary.netProfit.toLocaleString()}
+                            unit="JPY"
                             color={result.summary.netProfit >= 0 ? "text-green-400" : "text-red-400"}
                           />
                           <MetricCard
@@ -769,11 +776,13 @@ export default function StrategyBacktestPage() {
                           <MetricCard
                             label="平均勝ち"
                             value={result.summary.averageWin.toLocaleString()}
+                            unit="JPY"
                             color="text-green-400"
                           />
                           <MetricCard
                             label="平均負け"
                             value={Math.abs(result.summary.averageLoss).toLocaleString()}
+                            unit="JPY"
                             color="text-red-400"
                           />
                         </div>
