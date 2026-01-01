@@ -140,3 +140,85 @@
 - **初期データ不足**: 期間 N 未満のデータしかない場合、標準偏差計算の信頼性が低いため、マッチング判定を保留する
 - **市場参加者の急激な入退出**: テーパリング発表やポジション調整局面では、標準偏差が過去の参考にならなくなり、バンド設定が陳腐化する。リアルタイム調整が必要な可能性あり
 - **RSI が極端な値かつ BB が矛盾シグナル**: 両指標が相反する場合は、**エントリー見送りを優先** として注意喚起を強化すること
+## 12. 類似度計算設定（StrategyNote 用）
+
+BB の特性に基づき、StrategyNote 検索時に使用する類似度パラメータを以下に定義する。
+
+### 比較タイプ
+- **similarityType**: `absolute`
+- BB は %B を主要な比較指標として使用し、0〜100 のスケールで位置を比較する
+
+### 主要比較値
+| 特徴量 | 重み | 許容範囲 | 説明 |
+|-------|------|---------|------|
+| percentB | 0.50 | ±10 | %B値の絶対差（0〜100スケール） |
+| bandWidthTrend | 0.30 | - | バンド幅傾向（拡張/収縮/横ばい）の一致 |
+| bandPosition | 0.20 | - | バンド位置ゾーン（上張り付き/中央/下張り付き）の一致 |
+
+### 許容閾値
+- **percentBTolerance**: ±10（%Bスケール）
+  - 例: 基準 %B=85 の場合、75〜95 の範囲で類似判定
+- **bandWidthSlopeTolerance**: ±0.5%（正規化バンド幅の変化率）
+
+### ゾーン分類
+%B 値に基づくゾーン分類を使用し、同一ゾーンならボーナスを与える：
+| ゾーン | %B 範囲 | 説明 |
+|-------|---------|------|
+| upperStick | > 90 | 上バンド張り付き |
+| upperApproach | 70〜90 | 上バンド接近 |
+| middle | 30〜70 | 中央帯 |
+| lowerApproach | 10〜30 | 下バンド接近 |
+| lowerStick | < 10 | 下バンド張り付き |
+
+- **同一ゾーン一致**: +20% ボーナス
+- **隣接ゾーン**: ペナルティなし
+- **2ゾーン以上離れ**: -30% ペナルティ
+
+### 総合重み
+- **indicatorWeight**: `0.9`
+- ボラティリティ補助指標として RSI と同等の重みを設定
+
+### 方向ボーナス/ペナルティ
+- SMA傾き方向と %B 位置の整合時: +10% ボーナス
+  - 例: SMA上向き + %B > 50 = 整合
+- SMA傾き方向と %B 位置の矛盾時: -15% ペナルティ
+  - 例: SMA上向き + %B < 30 = 矛盾
+
+### 実装ノート
+```typescript
+// BB 類似度計算の概念コード
+interface BBSimilarityInput {
+  percentB: number;                              // 0〜100（100超/0未満も許容）
+  bandWidthTrend: 'expanding' | 'contracting' | 'flat'; // バンド幅傾向
+  zone: 'upperStick' | 'upperApproach' | 'middle' | 'lowerApproach' | 'lowerStick';
+}
+
+function calculateBBSimilarity(
+  current: BBSimilarityInput,
+  reference: BBSimilarityInput
+): number {
+  let score = 0;
+  
+  // %B 絶対差 (50%)
+  const percentBDiff = Math.abs(current.percentB - reference.percentB);
+  const percentBScore = Math.max(0, 1 - percentBDiff / 20); // 20pt差で0になる
+  score += percentBScore * 0.50;
+  
+  // バンド幅傾向一致 (30%)
+  score += (current.bandWidthTrend === reference.bandWidthTrend ? 1 : 0.3) * 0.30;
+  
+  // ゾーン一致 (20%)
+  const zoneSimilarity = calculateZoneSimilarity(current.zone, reference.zone);
+  score += zoneSimilarity * 0.20;
+  
+  return score; // 0.0 ~ 1.0
+}
+
+function calculateZoneSimilarity(z1: string, z2: string): number {
+  const zones = ['lowerStick', 'lowerApproach', 'middle', 'upperApproach', 'upperStick'];
+  const diff = Math.abs(zones.indexOf(z1) - zones.indexOf(z2));
+  if (diff === 0) return 1.2; // 同一ゾーンボーナス
+  if (diff === 1) return 1.0; // 隣接
+  return 0.7; // 2ゾーン以上離れ
+}
+```

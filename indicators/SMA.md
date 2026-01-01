@@ -95,3 +95,93 @@
 - **ユーザー設定の極端な偏り**: 期間が 3 未満や 300 超のような非現実的な値に設定されている場合、トレンド判定が機能しなくなる
 - **初期データ不足**: 期間 N 未満のデータしかない場合、計算結果の信頼性が低いため、マッチング判定を保留する
 - **市場参加者の急激な入退出**: テーパリング発表やポジション調整局面では、トレンド転換が急激で SMA の遅延に致命的な損失につながる可能性がある
+## 12. 類似度計算設定（StrategyNote 用）
+
+SMA の特性に基づき、StrategyNote 検索時に使用する類似度パラメータを以下に定義する。
+
+### 比較タイプ
+- **similarityType**: `relative`
+- SMA は価格帯に依存するため、絶対値ではなく相対的な位置関係（乖離率・傾き方向）で比較する
+
+### 主要比較値
+| 特徴量 | 重み | 許容範囲 | 説明 |
+|-------|------|---------|------|
+| deviationRate | 0.35 | ±1.0% | 価格とSMAの乖離率 |
+| slopeDirection | 0.35 | - | 傾き方向（上向き/下向き/横ばい）の一致 |
+| trendStrength | 0.20 | ±0.2 | トレンド強度（0〜1スケール）の差 |
+| pricePosition | 0.10 | - | 価格がSMA上/下の位置一致 |
+
+### 許容閾値
+- **deviationTolerance**: ±1.0%（乖離率）
+  - 例: 基準乖離率 +2.5% の場合、+1.5%〜+3.5% の範囲で類似判定
+- **trendStrengthTolerance**: ±0.2（0〜1スケール）
+
+### 傾き方向分類
+| 方向 | 条件 | 説明 |
+|------|------|------|
+| up | 傾き > tol_slope | 上向きトレンド |
+| down | 傾き < -tol_slope | 下向きトレンド |
+| flat | \|傾き\| ≤ tol_slope | 横ばい |
+
+- **同一方向一致**: 100%
+- **up ↔ flat または down ↔ flat**: 50%
+- **up ↔ down**: 0%（完全不一致）
+
+### 総合重み
+- **indicatorWeight**: `1.0`
+- SMA はトレンド軸の主要指標として最高重みを設定
+
+### クロスイベントボーナス
+複数SMA使用時のクロスイベント一致にボーナスを与える：
+- **ゴールデンクロス直後（5本以内）同士**: +25% ボーナス
+- **デッドクロス直後（5本以内）同士**: +25% ボーナス
+- **クロスイベントの有無不一致**: -10% ペナルティ
+
+### 実装ノート
+```typescript
+// SMA 類似度計算の概念コード
+interface SMASimilarityInput {
+  deviationRate: number;                       // 乖離率 (%)
+  slopeDirection: 'up' | 'down' | 'flat';      // 傾き方向
+  trendStrength: number;                       // 0〜1
+  pricePosition: 'above' | 'below';            // 価格がSMA上/下
+  recentCross?: 'golden' | 'dead' | null;      // 直近クロスイベント
+}
+
+function calculateSMASimilarity(
+  current: SMASimilarityInput,
+  reference: SMASimilarityInput
+): number {
+  let score = 0;
+  
+  // 乖離率の類似度 (35%)
+  const devDiff = Math.abs(current.deviationRate - reference.deviationRate);
+  const devScore = Math.max(0, 1 - devDiff / 2.0); // 2%差で0になる
+  score += devScore * 0.35;
+  
+  // 傾き方向一致 (35%)
+  const slopeScore = calculateSlopeMatch(current.slopeDirection, reference.slopeDirection);
+  score += slopeScore * 0.35;
+  
+  // トレンド強度 (20%)
+  const strengthDiff = Math.abs(current.trendStrength - reference.trendStrength);
+  const strengthScore = Math.max(0, 1 - strengthDiff / 0.4); // 0.4差で0になる
+  score += strengthScore * 0.20;
+  
+  // 価格位置一致 (10%)
+  score += (current.pricePosition === reference.pricePosition ? 1 : 0) * 0.10;
+  
+  // クロスイベントボーナス
+  if (current.recentCross && current.recentCross === reference.recentCross) {
+    score *= 1.25; // 25%ボーナス
+  }
+  
+  return Math.min(1.0, score); // 上限1.0
+}
+
+function calculateSlopeMatch(s1: string, s2: string): number {
+  if (s1 === s2) return 1.0;
+  if ((s1 === 'flat' || s2 === 'flat')) return 0.5;
+  return 0; // up ↔ down
+}
+```

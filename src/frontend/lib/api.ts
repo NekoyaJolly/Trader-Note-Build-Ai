@@ -915,3 +915,359 @@ export interface BacktestHistoryItem {
   };
 }
 
+// ============================================
+// StrategyNote API
+// Phase C: 勝ちパターンノート機能
+// ============================================
+
+/** ストラテジーノートのステータス */
+export type StrategyNoteStatus = 'draft' | 'active' | 'archived';
+
+/** バックテストアウトカム */
+export type BacktestOutcome = 'win' | 'loss' | 'timeout';
+
+/** ストラテジーノートサマリー */
+export interface StrategyNoteSummary {
+  id: string;
+  strategyId: string;
+  strategyName: string;
+  entryTime: string;
+  entryPrice: number;
+  outcome: BacktestOutcome;
+  pnl: number | null;
+  status: StrategyNoteStatus;
+  tags: string[];
+  createdAt: string;
+}
+
+/** ストラテジーノート詳細 */
+export interface StrategyNoteDetail {
+  id: string;
+  strategyId: string;
+  strategyName: string;
+  entryTime: string;
+  entryPrice: number;
+  conditionSnapshot: object;
+  indicatorValues: IndicatorValues;
+  outcome: BacktestOutcome;
+  pnl: number | null;
+  notes: string | null;
+  status: StrategyNoteStatus;
+  tags: string[];
+  featureVector: number[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** インジケーター値の型定義 */
+export interface IndicatorValues {
+  rsi?: {
+    value: number;
+    direction: 'rising' | 'falling' | 'flat';
+    zone: 'overbought' | 'oversold' | 'neutral';
+  };
+  macd?: {
+    macdLine: number;
+    signalLine: number;
+    histogram: number;
+    histogramSign: 'positive' | 'negative';
+    histogramSlope: 'increasing' | 'decreasing' | 'flat';
+    zeroLinePosition: 'above' | 'below';
+    macdSlope: 'up' | 'down' | 'flat';
+  };
+  bb?: {
+    upper: number;
+    middle: number;
+    lower: number;
+    percentB: number;
+    bandWidthTrend: 'expanding' | 'contracting' | 'flat';
+    zone: 'upperStick' | 'upperApproach' | 'middle' | 'lowerApproach' | 'lowerStick';
+  };
+  sma?: {
+    value: number;
+    deviationRate: number;
+    slopeDirection: 'up' | 'down' | 'flat';
+    trendStrength: number;
+    pricePosition: 'above' | 'below';
+    period: number;
+  };
+  ema?: {
+    value: number;
+    deviationRate: number;
+    slopeDirection: 'up' | 'down' | 'flat';
+    trendStrength: number;
+    emaVsSmaPosition: 'above' | 'below';
+    period: number;
+  };
+}
+
+/** ストラテジーノート統計 */
+export interface StrategyNoteStats {
+  total: number;
+  active: number;
+  draft: number;
+  archived: number;
+  byOutcome: {
+    win: number;
+    loss: number;
+    timeout: number;
+  };
+}
+
+/** 類似ノート検索結果 */
+export interface SimilarNoteResult {
+  noteId: string;
+  strategyId: string;
+  strategyName: string;
+  entryTime: string;
+  outcome: string;
+  pnl: number | null;
+  similarity: number;
+  similarityDetails: {
+    indicator: string;
+    score: number;
+    weight: number;
+    weightedScore: number;
+  }[];
+}
+
+/** ストラテジーノート一覧取得パラメータ */
+export interface ListStrategyNotesParams {
+  status?: StrategyNoteStatus;
+  outcome?: BacktestOutcome;
+  tags?: string[];
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * ストラテジーのノート一覧を取得
+ * GET /api/strategies/:id/notes
+ */
+export async function fetchStrategyNotes(
+  strategyId: string,
+  params: ListStrategyNotesParams = {}
+): Promise<StrategyNoteSummary[]> {
+  const queryParams = new URLSearchParams();
+  if (params.status) queryParams.set('status', params.status);
+  if (params.outcome) queryParams.set('outcome', params.outcome);
+  if (params.tags?.length) queryParams.set('tags', params.tags.join(','));
+  if (params.limit) queryParams.set('limit', params.limit.toString());
+  if (params.offset) queryParams.set('offset', params.offset.toString());
+
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/notes?${queryParams}`,
+    { cache: 'no-store' }
+  );
+
+  if (!response.ok) {
+    throw new Error('ノート一覧の取得に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data?.notes ?? [];
+}
+
+/**
+ * ストラテジーのノート統計を取得
+ * GET /api/strategies/:id/notes/stats
+ */
+export async function fetchStrategyNoteStats(
+  strategyId: string
+): Promise<StrategyNoteStats> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/notes/stats`,
+    { cache: 'no-store' }
+  );
+
+  if (!response.ok) {
+    throw new Error('ノート統計の取得に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * ストラテジーノート詳細を取得
+ * GET /api/strategies/:id/notes/:noteId
+ */
+export async function fetchStrategyNoteDetail(
+  strategyId: string,
+  noteId: string
+): Promise<StrategyNoteDetail> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/notes/${noteId}`,
+    { cache: 'no-store' }
+  );
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error('ノートが見つかりません');
+    }
+    throw new Error('ノート詳細の取得に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * ストラテジーノートを更新
+ * PUT /api/strategies/:id/notes/:noteId
+ */
+export async function updateStrategyNoteDetail(
+  strategyId: string,
+  noteId: string,
+  data: {
+    status?: StrategyNoteStatus;
+    tags?: string[];
+    notes?: string;
+  }
+): Promise<StrategyNoteDetail> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/notes/${noteId}`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error('ノートの更新に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * ストラテジーノートのステータスを変更
+ * PUT /api/strategies/:id/notes/:noteId/status
+ */
+export async function updateStrategyNoteStatus(
+  strategyId: string,
+  noteId: string,
+  status: StrategyNoteStatus
+): Promise<StrategyNoteDetail> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/notes/${noteId}/status`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error('ステータスの更新に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * ストラテジーノートを削除
+ * DELETE /api/strategies/:id/notes/:noteId
+ */
+export async function deleteStrategyNote(
+  strategyId: string,
+  noteId: string
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/notes/${noteId}`,
+    { method: 'DELETE' }
+  );
+
+  if (!response.ok) {
+    throw new Error('ノートの削除に失敗しました');
+  }
+}
+
+/**
+ * バックテスト結果からノートを一括作成
+ * POST /api/strategies/:id/notes/from-backtest/:runId
+ */
+export async function createNotesFromBacktest(
+  strategyId: string,
+  runId: string,
+  onlyWins: boolean = true
+): Promise<{ createdCount: number }> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/notes/from-backtest/${runId}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ onlyWins }),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error('ノートの作成に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * 特定のノートに類似したノートを検索
+ * POST /api/strategies/:id/notes/:noteId/similar
+ */
+export async function searchSimilarNotes(
+  strategyId: string,
+  noteId: string,
+  threshold: number = 0.7,
+  limit: number = 10
+): Promise<SimilarNoteResult[]> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/notes/${noteId}/similar`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ threshold, limit }),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error('類似ノート検索に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data?.results ?? [];
+}
+
+/**
+ * インジケーター値から類似ノートを検索
+ * POST /api/strategies/notes/search-similar
+ */
+export async function searchSimilarByIndicators(
+  indicatorValues: IndicatorValues,
+  options: {
+    strategyId?: string;
+    status?: StrategyNoteStatus;
+    threshold?: number;
+    limit?: number;
+  } = {}
+): Promise<SimilarNoteResult[]> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/notes/search-similar`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        indicatorValues,
+        ...options,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error('類似検索に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data?.results ?? [];
+}

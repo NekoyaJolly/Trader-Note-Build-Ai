@@ -74,3 +74,64 @@
 - **極端な出来高低下やスプレッド拡大**: ノイズでヒストグラムが振れやすく、誤判定が増える
 - **設定の極端な偏り**: N_fast と N_slow が近すぎる（差が 2 未満）または過度に長期化（100 超）した場合、検出感度が崩れる
 - **MACD 単独利用**: SMA や RSI と矛盾した場合に MACD だけで判断することは禁止。必ず整合・矛盾を判定し、矛盾時は注意喚起または見送りを優先する
+## 12. 類似度計算設定（StrategyNote 用）
+
+MACD の特性に基づき、StrategyNote 検索時に使用する類似度パラメータを以下に定義する。
+
+### 比較タイプ
+- **similarityType**: `directional`
+- MACDはモメンタム・方向性を示すため、絶対値よりも符号・傾き・相対位置を重視した比較を行う
+
+### サブ特徴量と重み
+MACD は複数の構成要素を持つため、サブ特徴量ごとに重みを設定する。
+
+| サブ特徴量 | 重み | 説明 |
+|-----------|------|------|
+| histogramSign | 0.30 | ヒストグラムの符号（正/負）一致。同符号=1.0、異符号=0.0 |
+| histogramSlope | 0.25 | ヒストグラム増減傾向の一致（増加中/減少中/横ばい） |
+| zeroLinePosition | 0.25 | 0ライン上/下の位置一致。同じ側=1.0、異なる側=0.0 |
+| macdSlope | 0.20 | MACDライン自体の傾き方向の一致 |
+
+### 許容閾値
+- **histogramTolerance**: ヒストグラム傾き比較時の変化率許容幅 ±15%
+- **slopeTolerance**: 傾き方向判定の閾値（例: 変化率 ±0.5% 以下は「横ばい」扱い）
+
+### 総合重み
+- **indicatorWeight**: `0.8`
+- MACD は補助指標のため、RSI/SMA より若干低い重みを設定
+
+### 方向ボーナス/ペナルティ
+- SMA傾き方向との一致時: +15% ボーナス
+- SMA傾き方向との不一致時: -20% ペナルティ（矛盾フラグ考慮）
+
+### 実装ノート
+```typescript
+// MACD 類似度計算の概念コード
+interface MACDSimilarityInput {
+  histogramSign: 'positive' | 'negative';    // ヒストグラム符号
+  histogramSlope: 'increasing' | 'decreasing' | 'flat'; // 増減傾向
+  zeroLinePosition: 'above' | 'below';       // 0ライン位置
+  macdSlope: 'up' | 'down' | 'flat';         // MACDライン傾き
+}
+
+function calculateMACDSimilarity(
+  current: MACDSimilarityInput,
+  reference: MACDSimilarityInput
+): number {
+  let score = 0;
+  
+  // ヒストグラム符号一致 (30%)
+  score += (current.histogramSign === reference.histogramSign ? 1 : 0) * 0.30;
+  
+  // ヒストグラム傾き一致 (25%)
+  score += (current.histogramSlope === reference.histogramSlope ? 1 : 0.3) * 0.25;
+  
+  // 0ライン位置一致 (25%)
+  score += (current.zeroLinePosition === reference.zeroLinePosition ? 1 : 0) * 0.25;
+  
+  // MACDライン傾き一致 (20%)
+  score += (current.macdSlope === reference.macdSlope ? 1 : 0.3) * 0.20;
+  
+  return score; // 0.0 ~ 1.0
+}
+```

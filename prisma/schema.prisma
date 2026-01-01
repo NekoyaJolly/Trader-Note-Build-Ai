@@ -457,6 +457,16 @@ enum BacktestOutcome {
   timeout
 }
 
+/// ストラテジーノートの状態
+enum StrategyNoteStatus {
+  /// 下書き（作成直後）
+  draft
+  /// アクティブ（類似度検索対象）
+  active
+  /// アーカイブ（検索対象外）
+  archived
+}
+
 enum PushLogStatus {
   pending
   sent
@@ -553,12 +563,23 @@ model StrategyNote {
   pnl            Decimal? @db.Decimal(18, 8)
   /// メモ
   notes          String?
+  /// ノートの状態（draft/active/archived）
+  status         StrategyNoteStatus @default(draft)
+  /// タグ（カテゴリ、パターン名など）
+  tags           String[]  @default([])
+  /// 特徴量ベクトル（類似度検索用）
+  /// インジケーター定義の Section 12 に基づいて計算
+  featureVector  Float[]   @default([])
   /// 作成日時
   createdAt      DateTime @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt      DateTime @updatedAt @db.Timestamptz(6)
   strategy       Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
 
   @@index([strategyId], map: "idx_strategynote_strategyid")
   @@index([strategyId, outcome], map: "idx_strategynote_strategy_outcome")
+  @@index([status], map: "idx_strategynote_status")
+  @@index([strategyId, status], map: "idx_strategynote_strategy_status")
 }
 
 /// ストラテジーバックテスト実行（ストラテジー条件ベース）

@@ -32,6 +32,23 @@ import {
   getBacktestResult,
   getBacktestHistory,
 } from '../services/strategyBacktestService';
+import {
+  createStrategyNote,
+  listStrategyNotes,
+  getStrategyNote,
+  updateStrategyNote,
+  deleteStrategyNote,
+  changeNoteStatus,
+  createNotesFromBacktestRun,
+  getStrategyNoteStats,
+  CreateStrategyNoteInput,
+  UpdateStrategyNoteInput,
+} from '../services/strategyNoteService';
+import {
+  searchSimilarNotes,
+  findSimilarToNote,
+  SimilaritySearchParams,
+} from '../services/similarityService';
 
 const router = Router();
 
@@ -526,6 +543,313 @@ router.get('/:id/backtest/:runId', async (req: Request, res: Response) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
     console.error('[StrategyRoutes] バックテスト結果取得エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+// ============================================
+// StrategyNote エンドポイント
+// Phase C: 勝ちパターンノート機能
+// ============================================
+
+/**
+ * GET /api/strategies/:id/notes
+ * ストラテジーのノート一覧を取得
+ */
+router.get('/:id/notes', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { status, outcome, tags, limit, offset } = req.query;
+
+    const notes = await listStrategyNotes({
+      strategyId: id,
+      status: status as 'draft' | 'active' | 'archived' | undefined,
+      outcome: outcome as 'win' | 'loss' | 'timeout' | undefined,
+      tags: tags ? (tags as string).split(',') : undefined,
+      limit: limit ? parseInt(limit as string, 10) : undefined,
+      offset: offset ? parseInt(offset as string, 10) : undefined,
+    });
+
+    res.json({
+      success: true,
+      data: { notes },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] ノート一覧取得エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * GET /api/strategies/:id/notes/stats
+ * ストラテジーのノート統計を取得
+ */
+router.get('/:id/notes/stats', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const stats = await getStrategyNoteStats(id);
+
+    res.json({
+      success: true,
+      data: stats,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] ノート統計取得エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * POST /api/strategies/:id/notes
+ * ストラテジーノートを作成
+ */
+router.post('/:id/notes', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const input: CreateStrategyNoteInput = {
+      ...req.body,
+      strategyId: id,
+    };
+
+    const note = await createStrategyNote(input);
+
+    res.status(201).json({
+      success: true,
+      data: note,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] ノート作成エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * POST /api/strategies/:id/notes/from-backtest/:runId
+ * バックテスト結果からノートを一括作成
+ */
+router.post('/:id/notes/from-backtest/:runId', async (req: Request, res: Response) => {
+  try {
+    const { runId } = req.params;
+    const { onlyWins = true } = req.body;
+
+    const createdCount = await createNotesFromBacktestRun(runId, onlyWins);
+
+    res.status(201).json({
+      success: true,
+      data: { createdCount },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] バックテストからノート作成エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * GET /api/strategies/:id/notes/:noteId
+ * ストラテジーノート詳細を取得
+ */
+router.get('/:id/notes/:noteId', async (req: Request, res: Response) => {
+  try {
+    const { id, noteId } = req.params;
+    const note = await getStrategyNote(noteId);
+
+    if (!note) {
+      return res.status(404).json({
+        success: false,
+        error: 'ノートが見つかりません',
+      });
+    }
+
+    // ストラテジーIDが一致するか確認
+    if (note.strategyId !== id) {
+      return res.status(404).json({
+        success: false,
+        error: 'ノートが見つかりません',
+      });
+    }
+
+    res.json({
+      success: true,
+      data: note,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] ノート詳細取得エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * PUT /api/strategies/:id/notes/:noteId
+ * ストラテジーノートを更新
+ */
+router.put('/:id/notes/:noteId', async (req: Request, res: Response) => {
+  try {
+    const { noteId } = req.params;
+    const input: UpdateStrategyNoteInput = req.body;
+
+    const note = await updateStrategyNote(noteId, input);
+
+    if (!note) {
+      return res.status(404).json({
+        success: false,
+        error: 'ノートが見つかりません',
+      });
+    }
+
+    res.json({
+      success: true,
+      data: note,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] ノート更新エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * PUT /api/strategies/:id/notes/:noteId/status
+ * ストラテジーノートのステータスを変更
+ */
+router.put('/:id/notes/:noteId/status', async (req: Request, res: Response) => {
+  try {
+    const { noteId } = req.params;
+    const { status } = req.body;
+
+    if (!['draft', 'active', 'archived'].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        error: 'ステータスは draft, active, archived のいずれかです',
+      });
+    }
+
+    const note = await changeNoteStatus(noteId, status);
+
+    if (!note) {
+      return res.status(404).json({
+        success: false,
+        error: 'ノートが見つかりません',
+      });
+    }
+
+    res.json({
+      success: true,
+      data: note,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] ノートステータス変更エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * DELETE /api/strategies/:id/notes/:noteId
+ * ストラテジーノートを削除
+ */
+router.delete('/:id/notes/:noteId', async (req: Request, res: Response) => {
+  try {
+    const { noteId } = req.params;
+    const success = await deleteStrategyNote(noteId);
+
+    if (!success) {
+      return res.status(404).json({
+        success: false,
+        error: 'ノートが見つかりません',
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'ノートを削除しました',
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] ノート削除エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * POST /api/strategies/:id/notes/:noteId/similar
+ * 特定のノートに類似したノートを検索
+ */
+router.post('/:id/notes/:noteId/similar', async (req: Request, res: Response) => {
+  try {
+    const { noteId } = req.params;
+    const { threshold = 0.7, limit = 10 } = req.body;
+
+    const results = await findSimilarToNote(noteId, threshold, limit);
+
+    res.json({
+      success: true,
+      data: { results },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] 類似ノート検索エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * POST /api/strategies/notes/search-similar
+ * インジケーター値から類似ノートを検索
+ */
+router.post('/notes/search-similar', async (req: Request, res: Response) => {
+  try {
+    const params: SimilaritySearchParams = {
+      targetIndicatorValues: req.body.indicatorValues,
+      strategyId: req.body.strategyId,
+      status: req.body.status || 'active',
+      threshold: req.body.threshold || 0.7,
+      limit: req.body.limit || 10,
+    };
+
+    const results = await searchSimilarNotes(params);
+
+    res.json({
+      success: true,
+      data: { results },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] 類似検索エラー:', message);
     res.status(500).json({
       success: false,
       error: message,

@@ -16,6 +16,7 @@ import {
   fetchStrategy,
   runStrategyBacktest,
   fetchStrategyBacktestHistory,
+  createNotesFromBacktest,
   BacktestHistoryItem,
 } from "@/lib/api";
 import type { Strategy, BacktestResult, BacktestResultSummary, BacktestTradeEvent } from "@/types/strategy";
@@ -244,10 +245,14 @@ export default function StrategyBacktestPage() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"summary" | "trades" | "history">("summary");
-
-  // ============================================
-  // ヘルパー関数
-  // ============================================
+  
+  // ノート作成ステート
+  const [creatingNotes, setCreatingNotes] = useState(false);
+  const [noteCreationResult, setNoteCreationResult] = useState<{
+    success: boolean;
+    message: string;
+    createdCount?: number;
+  } | null>(null);
 
   /** デフォルト開始日（3ヶ月前）を取得 */
   function getDefaultStartDate(): string {
@@ -334,6 +339,58 @@ export default function StrategyBacktestPage() {
   const handleSelectHistory = async (historyId: string) => {
     // TODO: fetchBacktestResult(strategyId, historyId) を実装
     console.log("選択された履歴:", historyId);
+  };
+
+  /** 勝ちトレードからノートを作成 */
+  const handleCreateNotesFromWins = async () => {
+    // バックテスト結果がない、またはバックテストランIDがない場合は何もしない
+    if (!result?.id) {
+      setError("バックテスト結果IDがありません");
+      return;
+    }
+
+    // 勝ちトレードが存在するか確認
+    const winningTrades = result.trades.filter(
+      (t) => t.pnl > 0 || t.exitReason === "take_profit"
+    );
+    if (winningTrades.length === 0) {
+      setError("勝ちトレードがありません");
+      return;
+    }
+
+    try {
+      setCreatingNotes(true);
+      setNoteCreationResult(null);
+      setError(null);
+
+      // バックテスト結果からノートを作成（勝ちトレードのみ）
+      const response = await createNotesFromBacktest(
+        strategyId,
+        result.id,
+        true // winningOnly: 勝ちトレードのみ
+      );
+
+      setNoteCreationResult({
+        success: true,
+        message: `${response.createdCount}件のノートを作成しました`,
+        createdCount: response.createdCount,
+      });
+    } catch (err) {
+      const message = err instanceof Error 
+        ? err.message 
+        : "ノートの作成に失敗しました";
+      setNoteCreationResult({
+        success: false,
+        message,
+      });
+    } finally {
+      setCreatingNotes(false);
+    }
+  };
+
+  /** ノート一覧ページへ遷移 */
+  const handleGoToNotes = () => {
+    router.push(`/strategies/${strategyId}/notes`);
   };
 
   // ============================================
@@ -685,6 +742,88 @@ export default function StrategyBacktestPage() {
                             value={`${result.summary.maxConsecutiveWins} / ${result.summary.maxConsecutiveLosses}`}
                           />
                         </div>
+
+                        {/* ノート作成セクション */}
+                        {result.summary.winningTrades > 0 && (
+                          <div className="mt-8 pt-6 border-t border-slate-700">
+                            <h3 className="text-lg font-semibold text-white mb-3">
+                              勝ちパターンの記録
+                            </h3>
+                            <p className="text-sm text-gray-400 mb-4">
+                              勝ちトレード({result.summary.winningTrades}件)のインジケーター値をStrategyNoteとして保存し、
+                              将来の類似パターン検出に活用できます。
+                            </p>
+                            
+                            {/* ノート作成結果の表示 */}
+                            {noteCreationResult && (
+                              <div className={`mb-4 px-4 py-3 rounded ${
+                                noteCreationResult.success
+                                  ? "bg-green-600/20 border border-green-600 text-green-400"
+                                  : "bg-red-600/20 border border-red-600 text-red-400"
+                              }`}>
+                                <div className="flex items-center justify-between">
+                                  <span>{noteCreationResult.message}</span>
+                                  {noteCreationResult.success && noteCreationResult.createdCount && noteCreationResult.createdCount > 0 && (
+                                    <button
+                                      onClick={handleGoToNotes}
+                                      className="text-sm underline hover:no-underline"
+                                    >
+                                      ノート一覧を見る →
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="flex items-center gap-4">
+                              <button
+                                onClick={handleCreateNotesFromWins}
+                                disabled={creatingNotes}
+                                className={`px-6 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-2 ${
+                                  creatingNotes
+                                    ? "bg-gray-600 text-gray-400 cursor-not-allowed"
+                                    : "bg-green-600 hover:bg-green-700 text-white"
+                                }`}
+                              >
+                                {creatingNotes ? (
+                                  <>
+                                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                                      <circle
+                                        className="opacity-25"
+                                        cx="12"
+                                        cy="12"
+                                        r="10"
+                                        stroke="currentColor"
+                                        strokeWidth="4"
+                                        fill="none"
+                                      />
+                                      <path
+                                        className="opacity-75"
+                                        fill="currentColor"
+                                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                      />
+                                    </svg>
+                                    作成中...
+                                  </>
+                                ) : (
+                                  <>
+                                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                    </svg>
+                                    勝ちパターンをノート化
+                                  </>
+                                )}
+                              </button>
+                              
+                              <Link
+                                href={`/strategies/${strategyId}/notes`}
+                                className="text-sm text-blue-400 hover:underline"
+                              >
+                                既存のノートを見る
+                              </Link>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 
