@@ -120,51 +120,77 @@ export interface FilterVerifyResult {
 // インジケーター計算
 // ============================================
 
+// データサイズ制限（スタックオーバーフロー防止）
+const MAX_DATA_POINTS = 50000;
+
 /**
  * 全プリセットインジケーターを計算
+ * 大量データの場合はサンプリングする
  */
 function calculateAllIndicators(data: OHLCV[]): Map<AnalysisIndicator, number[]> {
-  const closes = data.map(d => d.close);
-  const highs = data.map(d => d.high);
-  const lows = data.map(d => d.low);
+  // データが大きすぎる場合はサンプリング
+  let workingData = data;
+  if (data.length > MAX_DATA_POINTS) {
+    // 間引いてサンプリング（トレード時点のデータは後でマッチングするため問題ない）
+    const step = Math.ceil(data.length / MAX_DATA_POINTS);
+    workingData = data.filter((_, i) => i % step === 0);
+    console.log(`[FilterAnalysis] データサンプリング: ${data.length} -> ${workingData.length}`);
+  }
+  
+  const closes = workingData.map(d => d.close);
   
   const result = new Map<AnalysisIndicator, number[]>();
   
-  // SMA
-  result.set('SMA_20', sma(closes, { period: 20 }));
-  result.set('SMA_50', sma(closes, { period: 50 }));
-  result.set('SMA_200', sma(closes, { period: 200 }));
-  
-  // EMA
-  result.set('EMA_20', ema(closes, { period: 20 }));
-  result.set('EMA_50', ema(closes, { period: 50 }));
-  
-  // RSI
-  result.set('RSI_14', rsi(closes, { period: 14 }));
-  
-  // MACD
-  const macdResult = macd(closes, { fast: 12, slow: 26, signal: 9 });
-  // histogram = macdLine - signalLine（手動計算）
-  const macdHist = macdResult.macdLine.map((m, i) => m - (macdResult.signalLine[i] || 0));
-  result.set('MACD_HIST', macdHist);
-  
-  // ボリンジャーバンド（multiplierはサポートされていないのでperiodのみ）
-  const bbResult = bb(closes, { period: 20 });
-  result.set('BB_UPPER', bbResult.upper);
-  result.set('BB_LOWER', bbResult.lower);
-  
-  // BB Position: 価格がBB内のどの位置にあるか（0=下限、1=上限）
-  const bbPosition: number[] = [];
-  for (let i = 0; i < closes.length; i++) {
-    const upper = bbResult.upper[i];
-    const lower = bbResult.lower[i];
-    if (upper && lower && upper !== lower) {
-      bbPosition.push((closes[i] - lower) / (upper - lower));
-    } else {
-      bbPosition.push(0.5);
+  try {
+    // SMA
+    result.set('SMA_20', sma(closes, { period: 20 }));
+    result.set('SMA_50', sma(closes, { period: 50 }));
+    result.set('SMA_200', sma(closes, { period: 200 }));
+    
+    // EMA
+    result.set('EMA_20', ema(closes, { period: 20 }));
+    result.set('EMA_50', ema(closes, { period: 50 }));
+    
+    // RSI
+    result.set('RSI_14', rsi(closes, { period: 14 }));
+    
+    // MACD（try-catch）
+    try {
+      const macdResult = macd(closes, { fast: 12, slow: 26, signal: 9 });
+      const macdHist = macdResult.macdLine.map((m, i) => m - (macdResult.signalLine[i] || 0));
+      result.set('MACD_HIST', macdHist);
+    } catch (e) {
+      console.warn('[FilterAnalysis] MACD計算エラー:', e);
+      result.set('MACD_HIST', new Array(closes.length).fill(0));
     }
+    
+    // ボリンジャーバンド（try-catch）
+    try {
+      const bbResult = bb(closes, { period: 20 });
+      result.set('BB_UPPER', bbResult.upper);
+      result.set('BB_LOWER', bbResult.lower);
+      
+      // BB Position
+      const bbPosition: number[] = [];
+      for (let i = 0; i < closes.length; i++) {
+        const upper = bbResult.upper[i];
+        const lower = bbResult.lower[i];
+        if (upper && lower && upper !== lower) {
+          bbPosition.push((closes[i] - lower) / (upper - lower));
+        } else {
+          bbPosition.push(0.5);
+        }
+      }
+      result.set('BB_POSITION', bbPosition);
+    } catch (e) {
+      console.warn('[FilterAnalysis] BB計算エラー:', e);
+      result.set('BB_UPPER', new Array(closes.length).fill(0));
+      result.set('BB_LOWER', new Array(closes.length).fill(0));
+      result.set('BB_POSITION', new Array(closes.length).fill(0.5));
+    }
+  } catch (e) {
+    console.error('[FilterAnalysis] インジケーター計算エラー:', e);
   }
-  result.set('BB_POSITION', bbPosition);
   
   return result;
 }
