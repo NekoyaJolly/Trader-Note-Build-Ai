@@ -67,7 +67,7 @@ export function BacktestPanel({ noteId, symbol }: BacktestPanelProps) {
   
   // ブローカー手数料設定
   const [brokerType, setBrokerType] = useState<BrokerType>('domestic');
-  const [lotUnit, setLotUnit] = useState(1000); // 1Lot あたりの通貨単位（国内:1000, 海外:10000）
+  const [lotUnit, setLotUnit] = useState(10000); // 1Lot あたりの通貨単位（国内:10000, 海外:100000）
   const [costPerLot, setCostPerLot] = useState(0); // 1Lot あたりの往復手数料（通貨単位）
   const [spreadPips, setSpreadPips] = useState(0.3); // スプレッド（Pips）
 
@@ -88,14 +88,14 @@ export function BacktestPanel({ noteId, symbol }: BacktestPanelProps) {
     setBrokerType(type);
     switch (type) {
       case 'domestic':
-        // 国内FX: 1Lot = 1,000通貨、手数料は通常無料（スプレッドで回収）
-        setLotUnit(1000);
+        // 国内FX: 1Lot = 10,000通貨、手数料は通常無料（スプレッドで回収）
+        setLotUnit(10000);
         setCostPerLot(0);
         setSpreadPips(0.3);
         break;
       case 'overseas':
-        // 海外FX: 1Lot = 10,000通貨（または100,000）、ECN手数料あり
-        setLotUnit(10000);
+        // 海外FX: 1Lot = 100,000通貨、ECN手数料あり
+        setLotUnit(100000);
         setCostPerLot(7); // 例: $7/Lot
         setSpreadPips(0.1);
         break;
@@ -421,8 +421,8 @@ export function BacktestPanel({ noteId, symbol }: BacktestPanelProps) {
                   onChange={(e) => handleBrokerTypeChange(e.target.value as BrokerType)}
                   disabled={isExecuting}
                 >
-                  <option value="domestic">国内FX (1Lot=1,000通貨)</option>
-                  <option value="overseas">海外FX (1Lot=10,000通貨)</option>
+                  <option value="domestic">国内FX (1Lot=10,000通貨)</option>
+                  <option value="overseas">海外FX (1Lot=100,000通貨)</option>
                   <option value="custom">カスタム</option>
                 </select>
               </div>
