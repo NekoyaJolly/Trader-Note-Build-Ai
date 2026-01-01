@@ -740,16 +740,25 @@ export default function StrategyBacktestPage() {
                         {/* ステータス */}
                         <div className="flex items-center gap-4 mb-6">
                           <span className={`px-3 py-1 rounded text-sm font-medium ${
-                            result.status === "completed"
+                            result.summary.stoppedReason === "bankruptcy"
+                              ? "bg-red-600/30 text-red-400"
+                              : result.status === "completed"
                               ? "bg-green-600/30 text-green-400"
                               : result.status === "failed"
                               ? "bg-red-600/30 text-red-400"
                               : "bg-yellow-600/30 text-yellow-400"
                           }`}>
-                            {result.status === "completed" ? "完了" 
+                            {result.summary.stoppedReason === "bankruptcy" 
+                              ? "破産終了" 
+                              : result.status === "completed" ? "完了" 
                               : result.status === "failed" ? "失敗" 
                               : "実行中"}
                           </span>
+                          {result.summary.stoppedReason === "bankruptcy" && (
+                            <span className="text-sm text-red-400">
+                              資金が50%を下回ったため終了（残高: {result.summary.finalCapital?.toLocaleString()} JPY）
+                            </span>
+                          )}
                           <span className="text-sm text-gray-400">
                             {result.startDate} 〜 {result.endDate}
                           </span>

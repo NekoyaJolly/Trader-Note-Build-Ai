@@ -768,8 +768,20 @@ async function executeBacktestStage(
   let entryTime = '';
   let entryIndex = 0;
   
+  // 資金残高追跡（破産判定用）
+  let currentCapital = request.initialCapital;
+  const bankruptcyThreshold = request.initialCapital * 0.5; // 50%を下回ったら破産
+  let isBankrupt = false;
+  
   // データをスキャン
   for (let i = 50; i < data.length; i++) { // 最初の50バーはインジケーター計算用にスキップ
+    // 破産判定: 資金が50%を切ったら停止
+    if (currentCapital <= bankruptcyThreshold) {
+      isBankrupt = true;
+      console.log(`[Backtest] 破産判定: 資金が${Math.round(currentCapital).toLocaleString()}円（初期資金の${Math.round(currentCapital / request.initialCapital * 100)}%）に減少。テスト終了。`);
+      break;
+    }
+    
     ctx.currentIndex = i;
     const bar = data[i];
     
@@ -825,13 +837,22 @@ async function executeBacktestStage(
           exitReason: exitResult.reason,
         });
         
+        // 資金残高を更新（破産判定用）
+        currentCapital += pnl;
+        
         inPosition = false;
       }
     }
   }
   
-  // サマリーを計算
+  // サマリーを計算（破産フラグも含める）
   const summary = calculateSummary(trades, request.initialCapital);
+  
+  // 破産した場合はサマリーに情報を追加
+  if (isBankrupt) {
+    summary.stoppedReason = 'bankruptcy';
+    summary.finalCapital = currentCapital;
+  }
   
   return {
     timeframe,

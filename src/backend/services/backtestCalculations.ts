@@ -46,6 +46,10 @@ export interface BacktestResultSummary {
   maxConsecutiveWins: number;
   maxConsecutiveLosses: number;
   sharpeRatio?: number;
+  /** 停止理由（破産など） */
+  stoppedReason?: 'bankruptcy' | 'completed';
+  /** 最終資金残高 */
+  finalCapital?: number;
 }
 
 // ============================================
