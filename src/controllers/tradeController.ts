@@ -400,4 +400,125 @@ export class TradeController {
     if (pnl < 0) return 'loss';
     return 'breakeven';
   }
+
+  // ============================================
+  // フェーズ8: ノート優先度/有効無効管理
+  // ============================================
+
+  /**
+   * ノートの優先度を更新
+   * PATCH /api/trades/notes/:id/priority
+   * 
+   * リクエストボディ:
+   * - priority: 1-10 の整数（高いほど優先）
+   */
+  updatePriority = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+      const { priority } = req.body;
+
+      if (typeof priority !== 'number' || priority < 1 || priority > 10) {
+        res.status(400).json({
+          success: false,
+          error: '優先度は 1-10 の整数で指定してください',
+        });
+        return;
+      }
+
+      await this.noteService.updateNotePriority(id, priority);
+
+      res.json({
+        success: true,
+        message: `ノートの優先度を ${priority} に更新しました`,
+        data: { noteId: id, priority },
+      });
+    } catch (error) {
+      const message = (error as Error).message;
+      console.error('Error updating note priority:', error);
+      res.status(500).json({
+        success: false,
+        error: message || '優先度の更新に失敗しました',
+      });
+    }
+  };
+
+  /**
+   * ノートの有効/無効を切り替え
+   * PATCH /api/trades/notes/:id/enabled
+   * 
+   * リクエストボディ:
+   * - enabled: boolean
+   */
+  setEnabled = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+      const { enabled } = req.body;
+
+      if (typeof enabled !== 'boolean') {
+        res.status(400).json({
+          success: false,
+          error: 'enabled は boolean で指定してください',
+        });
+        return;
+      }
+
+      await this.noteService.setNoteEnabled(id, enabled);
+
+      res.json({
+        success: true,
+        message: enabled ? 'ノートを有効にしました' : 'ノートを無効にしました',
+        data: { noteId: id, enabled },
+      });
+    } catch (error) {
+      const message = (error as Error).message;
+      console.error('Error setting note enabled:', error);
+      res.status(500).json({
+        success: false,
+        error: message || '有効/無効の切り替えに失敗しました',
+      });
+    }
+  };
+
+  /**
+   * ノートを一時停止（指定日時まで無効）
+   * PATCH /api/trades/notes/:id/pause
+   * 
+   * リクエストボディ:
+   * - pausedUntil: ISO 8601 形式の日時文字列、または null（停止解除）
+   */
+  setPausedUntil = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+      const { pausedUntil } = req.body;
+
+      let parsedDate: Date | null = null;
+      if (pausedUntil !== null && pausedUntil !== undefined) {
+        parsedDate = new Date(pausedUntil);
+        if (isNaN(parsedDate.getTime())) {
+          res.status(400).json({
+            success: false,
+            error: 'pausedUntil は有効な日時形式で指定してください',
+          });
+          return;
+        }
+      }
+
+      await this.noteService.setNotePausedUntil(id, parsedDate);
+
+      res.json({
+        success: true,
+        message: parsedDate 
+          ? `ノートを ${parsedDate.toISOString()} まで一時停止しました` 
+          : 'ノートの一時停止を解除しました',
+        data: { noteId: id, pausedUntil: parsedDate?.toISOString() || null },
+      });
+    } catch (error) {
+      const message = (error as Error).message;
+      console.error('Error setting note paused until:', error);
+      res.status(500).json({
+        success: false,
+        error: message || '一時停止の設定に失敗しました',
+      });
+    }
+  };
 }

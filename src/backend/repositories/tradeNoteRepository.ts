@@ -303,6 +303,83 @@ export class TradeNoteRepository {
   }
 
   /**
+   * マッチング対象の有効ノートを取得する（フェーズ8: 複数ノート運用UX）
+   * 
+   * 条件:
+   * - status = 'approved'
+   * - enabled = true
+   * - pausedUntil が null または現在時刻より前
+   * 
+   * 優先度の高い順にソート
+   */
+  async findActiveForMatching(options: Omit<FindNotesOptions, 'status'> = {}): Promise<TradeNoteWithSummary[]> {
+    const { symbol, tags, limit = 100, offset = 0 } = options;
+    const safeLimit = Math.min(limit, 1000);
+    const now = new Date();
+
+    const where: Prisma.TradeNoteWhereInput = {
+      status: 'approved',
+      enabled: true,
+      OR: [
+        { pausedUntil: null },
+        { pausedUntil: { lt: now } },
+      ],
+    };
+
+    if (symbol) {
+      where.symbol = symbol;
+    }
+    if (tags && tags.length > 0) {
+      where.tags = { hasSome: tags };
+    }
+
+    return await this.prisma.tradeNote.findMany({
+      where,
+      include: { aiSummary: true },
+      orderBy: [
+        { priority: 'desc' },
+        { createdAt: 'desc' },
+      ],
+      take: safeLimit,
+      skip: offset,
+    });
+  }
+
+  /**
+   * ノートの優先度を更新する（フェーズ8）
+   */
+  async updatePriority(noteId: string, priority: number): Promise<void> {
+    const clampedPriority = Math.max(1, Math.min(10, priority));
+    await this.prisma.tradeNote.update({
+      where: { id: noteId },
+      data: { priority: clampedPriority },
+    });
+  }
+
+  /**
+   * ノートの有効/無効を切り替える（フェーズ8）
+   */
+  async setEnabled(noteId: string, enabled: boolean): Promise<void> {
+    await this.prisma.tradeNote.update({
+      where: { id: noteId },
+      data: { enabled },
+    });
+  }
+
+  /**
+   * ノートを一時停止する（フェーズ8）
+   * 
+   * @param noteId ノートID
+   * @param until 停止終了日時（null で停止解除）
+   */
+  async setPausedUntil(noteId: string, until: Date | null): Promise<void> {
+    await this.prisma.tradeNote.update({
+      where: { id: noteId },
+      data: { pausedUntil: until },
+    });
+  }
+
+  /**
    * 下書きノートのみを取得する
    */
   async findDrafts(options: Omit<FindNotesOptions, 'status'> = {}): Promise<TradeNoteWithSummary[]> {

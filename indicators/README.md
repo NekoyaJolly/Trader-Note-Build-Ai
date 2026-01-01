@@ -1,4 +1,28 @@
-# インジケーター定義ドキュメント雛形
+# インジケーター定義ドキュメント（概念思想）
+
+本ディレクトリには TradeAssist で使用するインジケーターの**概念定義**が含まれています。
+
+> **実装仕様**については [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) の「NoteEvaluator アーキテクチャ」を参照してください。
+
+## 本ドキュメントの目的
+
+- 数値と語彙の三層モデル（Layer1/2/3）の思想を統一
+- インジケーターごとの判断基準・言語化ルールを定義
+- 将来拡張時の設計指針を提供
+
+## サポートインジケーター
+
+| ID | 名称 | カテゴリ | 定義ファイル |
+|----|------|----------|-------------|
+| `rsi` | Relative Strength Index | momentum | [RSI.md](RSI.md) |
+| `macd` | MACD | momentum | [MACD.md](MACD.md) |
+| `bb` | Bollinger Bands | volatility | [BB.md](BB.md) |
+| `sma` | Simple Moving Average | trend | [SMA.md](SMA.md) |
+| `ema` | Exponential Moving Average | trend | [EMA.md](EMA.md) |
+
+---
+
+## 定義ドキュメント雛形
 
 本雛形は TradeAssist に追加されるすべてのインジケーター定義で共通の骨組みを示す。思想・粒度・用語を統一し、数値と語彙の二層構造（三層モデル）を明示することを目的とする。
 
@@ -64,4 +88,13 @@
 - 経済指標直前・直後など、非連続な価格変動時
 - 出来高が極端に低い時間帯
 - ユーザー設定が極端に偏っている場合（例: 閾値が非現実的な値）
-  
+
+## 新規インジケーター追加時
+
+### 概念定義（本ディレクトリ）
+1. 本雛形に従って `.md` ファイルを作成
+2. Layer1/2/3 の三層モデルに沿って定義を記述
+3. ユーザー基準値・言語化ルールを明確化
+
+### 実装（別途）
+実装手順については [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) を参照。

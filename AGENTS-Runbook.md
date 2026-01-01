@@ -2,7 +2,7 @@
 
 ## 目的
 
-この Runbook は **TradeAssist MVP を AI Agent 主導で安全かつ再現性高く実装するための実行順制御書** です。
+この Runbook は **TradeAssist を AI Agent 主導で安全かつ再現性高く実装するための実行順制御書** です。
 
 * どの Agent を
 * どの順番で

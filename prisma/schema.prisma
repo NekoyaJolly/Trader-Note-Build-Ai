@@ -120,15 +120,30 @@ model TradeNote {
   tags             String[]          @default([])
   /// ユーザーによる追記コメント
   userNotes        String?
+  /// ノート固有のインジケーター設定（NoteIndicatorConfig 型の JSON）
+  /// グローバル設定とは別に、このノート独自の評価ロジックを定義可能
+  indicatorConfig  Json?
+  
+  // === フェーズ8: 複数ノート運用UX ===
+  /// ノート優先度（1-10、高いほど優先。同時ヒット時のソートに使用）
+  priority         Int               @default(5)
+  /// 有効フラグ（false の場合、マッチング対象から除外）
+  enabled          Boolean           @default(true)
+  /// 一時停止（この日時まで無効。null の場合は停止なし）
+  pausedUntil      DateTime?         @db.Timestamptz(6)
+  
   aiSummary        AISummary?
   backtestRuns     BacktestRun[]
   matchResult      MatchResult[]
   notificationLogs NotificationLog[] @relation("NotificationLogNote")
+  evaluationLogs   EvaluationLog[]   @relation("EvaluationLogNote")
   trade            Trade             @relation(fields: [tradeId], references: [id])
 
   @@index([symbol], map: "idx_tradenote_symbol")
   @@index([status], map: "idx_tradenote_status")
   @@index([symbol, status], map: "idx_tradenote_symbol_status")
+  @@index([enabled, status], map: "idx_tradenote_enabled_status")
+  @@index([priority], map: "idx_tradenote_priority")
 }
 
 model AISummary {
@@ -153,6 +168,7 @@ model MarketSnapshot {
   createdAt        DateTime          @default(now()) @db.Timestamptz(6)
   matchResults     MatchResult[]
   notificationLogs NotificationLog[] @relation("NotificationLogSnapshot")
+  evaluationLogs   EvaluationLog[]   @relation("EvaluationLogSnapshot")
 
   @@unique([symbol, timeframe, fetchedAt], map: "uq_snapshot_symbol_timeframe_fetched")
   @@index([symbol, timeframe], map: "idx_snapshot_symbol_timeframe")
@@ -226,6 +242,110 @@ model NotificationLog {
   @@unique([noteId, marketSnapshotId, channel], map: "uq_notiflog_note_snapshot_channel")
   @@index([symbol, sentAt], map: "idx_notiflog_symbol_sent")
   @@index([noteId, sentAt], map: "idx_notiflog_note_sent")
+}
+
+// ============================================
+// 評価ログ（フェーズ7: ノート評価の永続化）
+// ============================================
+
+/// 評価ログ
+/// NoteEvaluator.evaluate() の結果を永続化し、
+/// ノートの有効性分析（勝率・再現性）の基盤データとなる
+model EvaluationLog {
+  id               String         @id @default(uuid()) @db.Uuid
+  /// ノート ID
+  noteId           String         @db.Uuid
+  /// 市場スナップショット ID
+  marketSnapshotId String         @db.Uuid
+  /// シンボル（例: BTCUSDT）
+  symbol           String
+  /// 時間足（例: 15m, 1h）
+  timeframe        String
+  
+  // === EvaluationResult 主要フィールド ===
+  /// 類似度スコア（0.0〜1.0）
+  similarity       Float
+  /// 類似度レベル（strong, medium, weak, none）
+  level            String
+  /// 発火条件を満たしたか
+  triggered        Boolean
+  /// 使用したベクトル次元数
+  vectorDimension  Int
+  /// 使用したインジケーターラベル一覧
+  usedIndicators   String[]
+  
+  // === オプション診断情報 ===
+  /// 診断情報（noteVector, marketVector 等）
+  /// 環境変数 SAVE_EVALUATION_DIAGNOSTICS=true で保存
+  diagnostics      Json?
+  
+  /// 評価実行日時
+  evaluatedAt      DateTime       @db.Timestamptz(6)
+  /// レコード作成日時
+  createdAt        DateTime       @default(now()) @db.Timestamptz(6)
+  
+  /// 関連: ノート
+  note             TradeNote      @relation("EvaluationLogNote", fields: [noteId], references: [id])
+  /// 関連: 市場スナップショット
+  marketSnapshot   MarketSnapshot @relation("EvaluationLogSnapshot", fields: [marketSnapshotId], references: [id])
+
+  // 冪等性: 同一ノート×スナップショット×時間足の組み合わせは一意
+  @@unique([noteId, marketSnapshotId, timeframe], map: "uq_evallog_note_snapshot_timeframe")
+  // 検索用インデックス
+  @@index([noteId, evaluatedAt], map: "idx_evallog_note_evaluated")
+  @@index([symbol, evaluatedAt], map: "idx_evallog_symbol_evaluated")
+  @@index([triggered, evaluatedAt], map: "idx_evallog_triggered_evaluated")
+}
+
+// ============================================
+// フェーズ8: 同時ヒット制御設定
+// ============================================
+
+/// 通知バッチ設定
+/// 複数ノートが同時にヒットした場合の制御設定
+model NotificationBatchConfig {
+  id                String   @id @default(uuid()) @db.Uuid
+  /// 設定名（例: default, aggressive, conservative）
+  name              String   @unique
+  /// 同時通知上限（デフォルト: 3）
+  maxSimultaneous   Int      @default(3)
+  /// シンボルごとにグループ化するか
+  groupBySymbol     Boolean  @default(true)
+  /// グループ内クールダウン（分）
+  cooldownMinutes   Int      @default(15)
+  /// 有効フラグ
+  active            Boolean  @default(true)
+  /// 作成日時
+  createdAt         DateTime @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt         DateTime @updatedAt @db.Timestamptz(6)
+  
+  @@index([active], map: "idx_notifbatch_active")
+}
+
+/// 通知スキップログ
+/// 同時ヒット制御でスキップされた通知を記録
+model NotificationSkipLog {
+  id               String   @id @default(uuid()) @db.Uuid
+  /// スキップされたノート ID
+  noteId           String   @db.Uuid
+  /// 市場スナップショット ID
+  marketSnapshotId String   @db.Uuid
+  /// シンボル
+  symbol           String
+  /// 類似度スコア
+  similarity       Float
+  /// スキップ理由（例: max_simultaneous, cooldown, lower_priority）
+  skipReason       String
+  /// 同時ヒットしたノート数
+  simultaneousCount Int
+  /// この通知の優先度順位
+  priorityRank     Int
+  /// スキップ日時
+  skippedAt        DateTime @default(now()) @db.Timestamptz(6)
+  
+  @@index([noteId, skippedAt], map: "idx_skiplog_note_skipped")
+  @@index([symbol, skippedAt], map: "idx_skiplog_symbol_skipped")
 }
 
 /// OHLCV ローソク足データ

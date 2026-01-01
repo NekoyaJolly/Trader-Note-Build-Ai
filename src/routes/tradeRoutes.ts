@@ -58,6 +58,28 @@ router.post('/notes/:id/reject', tradeController.rejectNote);
  */
 router.post('/notes/:id/revert-to-draft', tradeController.revertToDraft);
 
+// ============================================
+// フェーズ8: ノート優先度/有効無効管理
+// ============================================
+
+/**
+ * PATCH /api/trades/notes/:id/priority
+ * ノートの優先度を更新（1-10）
+ */
+router.patch('/notes/:id/priority', tradeController.updatePriority);
+
+/**
+ * PATCH /api/trades/notes/:id/enabled
+ * ノートの有効/無効を切り替え
+ */
+router.patch('/notes/:id/enabled', tradeController.setEnabled);
+
+/**
+ * PATCH /api/trades/notes/:id/pause
+ * ノートを一時停止（指定日時まで無効）
+ */
+router.patch('/notes/:id/pause', tradeController.setPausedUntil);
+
 /**
  * POST /api/trades/notes/:id/similar
  * 特定のノートに類似したノートを検索

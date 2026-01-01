@@ -5,16 +5,18 @@
  * 
  * 責務:
  * - バックテスト実行のオーケストレーション
- * - 一致判定とエントリー/エグジット判定
+ * - NoteEvaluator に一致判定を委譲（Service は similarity を直接計算しない）
+ * - エントリー/エグジット判定
  * - 結果の集計と永続化
  * 
  * 制約:
  * - 未来データを使わない（look-ahead bias 対策）
  * - candle close 基準で評価
  * 
- * 12次元統一対応:
- * - 7次元ベクトルと12次元ベクトルの両方をサポート
- * - 旧7次元ベクトルは自動的に12次元に変換
+ * 設計方針（Task 6）:
+ * - Service は「今の市場」を渡すだけ
+ * - 類似度計算、閾値判定は NoteEvaluator の責務
+ * - ノートA（UserIndicator）もノートB（Legacy）も同じフローで評価
  */
 
 import { BacktestRun, BacktestResult, BacktestEvent, BacktestOutcome, BacktestStatus } from '@prisma/client';
@@ -28,14 +30,8 @@ import {
 } from '../backend/repositories/backtestRepository';
 import { OHLCVRepository, OHLCVQueryFilter } from '../backend/repositories/ohlcvRepository';
 import { TradeNoteRepository } from '../backend/repositories/tradeNoteRepository';
-import { RuleBasedMatchEvaluator } from '../backend/services/matching/matchEvaluationService';
-import {
-  VECTOR_DIMENSION,
-  convertLegacyVector,
-  calculateCosineSimilarity,
-  SIMILARITY_THRESHOLDS,
-  isValid12DVector,
-} from './featureVectorService';
+import { createNoteEvaluator } from './legacyNoteEvaluatorAdapter';
+import { NoteEvaluator, MarketSnapshot } from '../domain/noteEvaluator';
 
 /**
  * バックテスト実行パラメータ
@@ -97,12 +93,16 @@ export interface BacktestEventSummary {
 
 /**
  * バックテストサービスクラス
+ * 
+ * 設計（Task 6）:
+ * - Service は NoteEvaluator.evaluate() を呼ぶだけ
+ * - similarity を直接計算しない
+ * - threshold を直接参照しない
  */
 export class BacktestService {
   private readonly backtestRepo: BacktestRepository;
   private readonly ohlcvRepo: OHLCVRepository;
   private readonly noteRepo: TradeNoteRepository;
-  private readonly evaluator: RuleBasedMatchEvaluator;
 
   constructor(
     backtestRepo?: BacktestRepository,
@@ -112,11 +112,14 @@ export class BacktestService {
     this.backtestRepo = backtestRepo || new BacktestRepository();
     this.ohlcvRepo = ohlcvRepo || new OHLCVRepository();
     this.noteRepo = noteRepo || new TradeNoteRepository();
-    this.evaluator = new RuleBasedMatchEvaluator();
   }
 
   /**
    * バックテストを実行する
+   * 
+   * 設計（Task 6）:
+   * - ノートから NoteEvaluator を生成
+   * - 評価は NoteEvaluator.evaluate() に委譲
    * 
    * @param params - バックテストパラメータ
    * @returns 実行ID
@@ -128,25 +131,8 @@ export class BacktestService {
       throw new Error(`ノートが見つかりません: ${params.noteId}`);
     }
 
-    // 2. ノートの特徴量ベクトルを取得（12次元統一対応）
-    let noteVector = note.featureVector as number[];
-    if (!noteVector || noteVector.length === 0) {
-      throw new Error('ノートの特徴量ベクトルが設定されていません');
-    }
-
-    // 旧7次元ベクトルを12次元に変換（後方互換性）
-    if (noteVector.length === 7) {
-      console.log(`[BacktestService] 7次元ベクトルを12次元に変換: noteId=${params.noteId}`);
-      noteVector = convertLegacyVector(noteVector, '7d');
-    } else if (noteVector.length === 8) {
-      console.log(`[BacktestService] 8次元ベクトルを12次元に変換: noteId=${params.noteId}`);
-      noteVector = convertLegacyVector(noteVector, '8d');
-    } else if (noteVector.length === 18) {
-      console.log(`[BacktestService] 18次元ベクトルを12次元に変換: noteId=${params.noteId}`);
-      noteVector = convertLegacyVector(noteVector, '18d');
-    } else if (!isValid12DVector(noteVector)) {
-      throw new Error(`ノートの特徴量ベクトルが不正です（次元数: ${noteVector.length}）`);
-    }
+    // 2. ノートから NoteEvaluator を生成
+    const evaluator = createNoteEvaluator(note);
 
     // 3. バックテスト実行を作成
     const run = await this.backtestRepo.createRun({
@@ -191,11 +177,13 @@ export class BacktestService {
         volume: d.volume,
       }));
 
-      // 6. バックテストロジックを実行
+      // 6. バックテストロジックを実行（NoteEvaluator 経由）
       const eventInputs = await this.runBacktestLogic(
         run.id,
-        noteVector,
+        evaluator,
         note.side,
+        note.symbol,
+        params.timeframe,
         ohlcvDataWithDate,
         params,
       );
@@ -227,12 +215,25 @@ export class BacktestService {
 
   /**
    * バックテストのロジックを実行
-   * イベント入力データを蓄積して返す（DBへの保存は呼び出し元で行う）
+   * 
+   * 設計（Task 6）:
+   * - Service は OHLCV → MarketSnapshot に変換して NoteEvaluator に渡すだけ
+   * - 類似度計算、閾値判定は NoteEvaluator の責務
+   * 
+   * @param runId バックテスト実行ID
+   * @param evaluator NoteEvaluator インスタンス
+   * @param noteSide ノートのサイド（buy/sell）
+   * @param symbol シンボル
+   * @param timeframe 時間足
+   * @param ohlcvData OHLCVデータ配列
+   * @param params バックテストパラメータ
    */
   private async runBacktestLogic(
     runId: string,
-    noteVector: number[],
+    evaluator: NoteEvaluator,
     noteSide: string,
+    symbol: string,
+    timeframe: string,
     ohlcvData: Array<{
       timestamp: Date;
       open: number;
@@ -294,18 +295,18 @@ export class BacktestService {
         continue;
       }
 
-      // ポジションがない場合: エントリー判定
-      const marketVector = this.buildMarketVector(candle);
-      
-      // 12次元統一: コサイン類似度で評価
-      const evalResult = this.evaluateMatch(noteVector, marketVector);
+      // ポジションがない場合: NoteEvaluator で評価
+      const snapshot = this.convertOHLCVToSnapshot(candle, symbol, timeframe);
+      const evalResult = evaluator.evaluate(snapshot);
 
-      if (evalResult.score >= params.matchThreshold) {
+      // NoteEvaluator の閾値ではなく、パラメータの閾値を使用
+      // （バックテストでは閾値をパラメータで指定するため）
+      if (evalResult.similarity >= params.matchThreshold) {
         // マッチ: エントリー
         currentPosition = {
           entryTime: candle.timestamp,
           entryPrice: candle.close, // candle close でエントリー
-          matchScore: evalResult.score,
+          matchScore: evalResult.similarity,
         };
       }
     }
@@ -334,96 +335,43 @@ export class BacktestService {
   }
 
   /**
-   * OHLCV データから特徴量ベクトルを構築
+   * OHLCV データを MarketSnapshot に変換
    * 
-   * 12次元統一対応:
-   * - 12次元ベクトルを生成（7次元との後方互換性維持）
-   * - インジケーター計算は簡易版（実運用では FeatureExtractor を使用）
+   * NoteEvaluator.evaluate() に渡すための変換
    */
-  private buildMarketVector(candle: {
-    open: number;
-    high: number;
-    low: number;
-    close: number;
-    volume: number;
-  }): number[] {
-    // ローソク足から計算可能な基本特徴量
+  private convertOHLCVToSnapshot(
+    candle: {
+      timestamp: Date;
+      open: number;
+      high: number;
+      low: number;
+      close: number;
+      volume: number;
+    },
+    symbol: string,
+    timeframe: string,
+  ): MarketSnapshot {
+    // ローソク足から計算可能な基本インジケーターを設定
+    // 注: 簡易版。実運用では事前計算されたインジケーターを使用
     const priceChange = candle.open > 0 ? (candle.close - candle.open) / candle.open : 0;
-    const candleBody = candle.open > 0 ? Math.abs(candle.close - candle.open) / candle.open : 0;
-    const candleDirection = candle.close >= candle.open ? 1 : -1;
-
-    // トレンド方向の推定（簡易版）
-    // 正規化: -1（下降）〜 0（横ばい）〜 1（上昇）
-    const trendDirection = priceChange > 0.005 ? 1 : priceChange < -0.005 ? -1 : 0;
-    // トレンド強度: 0〜1
-    const trendStrength = Math.min(Math.abs(priceChange) * 20, 1);
-    // トレンド整合性: 簡易版では 0.5（中立）
-    const trendAlignment = 0.5;
-
-    // モメンタム系（簡易版）
-    // MACD ヒストグラム: -1〜1（データ不足時は 0）
-    const macdHistogram = 0;
-    // MACD クロスオーバー: -1, 0, 1（データ不足時は 0）
-    const macdCrossover = 0;
-
-    // 過熱度系（簡易版）
-    // RSI 値: 0〜1（データ不足時は 0.5 = 中立）
-    const rsiValue = 0.5;
-    // RSI ゾーン: -1（売られ過ぎ）, 0（中立）, 1（買われ過ぎ）
-    const rsiZone = 0;
-
-    // ボラティリティ系（簡易版）
-    // BB ポジション: -1〜1（データ不足時は 0）
-    const bbPosition = 0;
-    // BB 幅: 0〜1（データ不足時は 0.5）
-    const bbWidth = 0.5;
-
-    // 時間軸
-    // セッションフラグ: 0 or 1（時間情報なしの場合は 0.5）
-    const sessionFlag = 0.5;
-
-    // 12次元ベクトル
-    return [
-      trendDirection,   // [0] トレンド方向
-      trendStrength,    // [1] トレンド強度
-      trendAlignment,   // [2] トレンド整合性
-      macdHistogram,    // [3] MACD ヒストグラム
-      macdCrossover,    // [4] MACD クロスオーバー
-      rsiValue,         // [5] RSI 値
-      rsiZone,          // [6] RSI ゾーン
-      bbPosition,       // [7] BB ポジション
-      bbWidth,          // [8] BB 幅
-      candleBody,       // [9] ローソク足実体
-      candleDirection,  // [10] ローソク足方向
-      sessionFlag,      // [11] セッションフラグ
-    ];
-  }
-
-  /**
-   * 12次元ベクトルの類似度評価
-   * 
-   * 7次元の RuleBasedMatchEvaluator の代わりにコサイン類似度を使用
-   */
-  private evaluateMatch(
-    noteVector: number[],
-    marketVector: number[]
-  ): { score: number; reasons: string[] } {
-    // コサイン類似度を計算
-    const similarity = calculateCosineSimilarity(noteVector, marketVector);
-
-    // 理由を生成
-    const reasons: string[] = [];
-    if (similarity >= SIMILARITY_THRESHOLDS.STRONG) {
-      reasons.push('非常に高い類似度: パターンが強くマッチしています');
-    } else if (similarity >= SIMILARITY_THRESHOLDS.MEDIUM) {
-      reasons.push('高い類似度: パターンが概ねマッチしています');
-    } else if (similarity >= SIMILARITY_THRESHOLDS.WEAK) {
-      reasons.push('中程度の類似度: パターンが部分的にマッチしています');
-    } else {
-      reasons.push('低い類似度: パターンとの一致が弱いです');
-    }
-
-    return { score: similarity, reasons };
+    
+    return {
+      symbol,
+      timestamp: candle.timestamp,
+      timeframe,
+      ohlcv: {
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+        volume: candle.volume,
+      },
+      indicators: {
+        // 基本的な値のみ設定（NoteEvaluator が必要に応じて使用）
+        close: candle.close,
+        priceChange,
+      },
+    };
   }
 
   /**

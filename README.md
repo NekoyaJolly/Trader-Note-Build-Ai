@@ -1,32 +1,41 @@
-# TradeAssist MVP
+# TradeAssist
 
-TradeAssist MVP は、トレード履歴を自動的に構造化したトレードノートとして生成し、リアルタイム市場データとマッチングさせることで、実行可能なインサイトを提供するインテリジェントな取引支援システムです。 that automatically generates structured trade notes and matches them with real-time market conditions to provide actionable insights.
+TradeAssist は、トレード履歴を自動的に構造化したトレードノートとして生成し、リアルタイム市場データとマッチングさせることで、実行可能なインサイトを提供する**ノート主体のインテリジェント取引支援システム**です。
+
+## コンセプト
+
+> **「過去の自分のトレードを"定義済みの知識資産（ノート）"へ変換し、現在市場と照合して"再現可能な優位性"を通知・発注導線で即実行できる状態にする」**
+
+自動売買は一切行いません。判断の質を高める支援ツールとして設計されています。
 
 ## Core Features
 
-### 1. Automatic Trade Note Generation
-- Import trade history from CSV files or exchange APIs
-- Generate structured trade notes with market context
-- AI-powered summaries for each trade
-- Persistent storage of all trade notes
+### 1. ノート自動生成（Automatic Trade Note Generation）
+- CSV / Exchange API からのトレード履歴インポート
+- 12次元特徴量ベクトルによる市場状況の構造化
+- AI によるトレードサマリー自動生成
+- ノートは「評価の主語」として設計（NoteEvaluator アーキテクチャ）
 
-### 2. Real-Time Market Matching
-- Fetches real-time market data (15-minute and 1-hour intervals)
-- Compares current market conditions with historical trade notes
-- Calculates match scores using feature vectors and cosine similarity
-- Triggers notifications when match threshold is exceeded
+### 2. リアルタイム市場マッチング（Real-Time Market Matching）
+- 15分 / 1時間足のリアルタイム市場データ取得
+- **NoteEvaluator 経由**でノートと現在市場を比較評価
+- 12次元コサイン類似度 + ルールベースチェック
+- 閾値超過時に通知発火
 
-### 3. Smart Notifications
-- Push notifications for high-confidence matches
-- In-app notification system
-- Read/unread status tracking
-- Notification history
+### 3. スマート通知（Smart Notifications）
+- プッシュ通知 / アプリ内通知
+- 既読・未読管理
+- 冪等性・クールダウン・重複抑制による再通知防止
 
-### 4. Order Support UI
-- Generate order presets based on matched notes
-- Display suggested prices and quantities
-- User confirmation workflow
-- **No automatic trading** - all orders require user approval
+### 4. 発注支援 UI（Order Support UI）
+- マッチしたノートから注文プリセット生成
+- 価格・数量のサジェスト表示
+- **自動発注なし** - すべての注文にユーザー確認が必要
+
+### 5. バックテスト機能（Backtest）
+- 過去データでのノート有効性検証
+- NoteEvaluator 経由での統一評価
+- 戦略別パフォーマンス分析
 
 ## Installation
 
@@ -242,26 +251,103 @@ Body: {
 GET /health
 ```
 
+### Backtest
+
+**バックテスト実行**
+```
+POST /api/backtest
+Body: {
+  "noteId": "uuid",        // 対象ノートID
+  "symbol": "BTCUSDT",     // シンボル（省略可、ノートのsymbolを使用）
+  "from": "2024-01-01",    // 開始日（省略可）
+  "to": "2024-12-31",      // 終了日（省略可）
+  "limit": 100             // 最大データ件数（省略可）
+}
+Response: {
+  "success": true,
+  "results": [...],       // 評価結果配列
+  "summary": {
+    "totalEvaluations": 100,
+    "triggeredCount": 15,
+    "averageSimilarity": 0.68
+  }
+}
+```
+
+**バックテスト履歴取得**
+```
+GET /api/backtest/results?noteId=uuid&limit=50
+```
+
 ## Architecture
+
+### NoteEvaluator アーキテクチャ
+
+TradeAssist は「ノート主体」の設計を採用しています。
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                      NoteEvaluator                       │
+│  ノートを「評価の主語」として扱う抽象インターフェース     │
+├─────────────────────────────────────────────────────────┤
+│  getRequiredIndicators(): IndicatorSpec[]               │
+│  buildEntryVector(snapshot): number[]                    │
+│  evaluate(snapshot): EvaluationResult                    │
+└─────────────────────────────────────────────────────────┘
+         ▲                              ▲
+         │                              │
+┌────────┴────────┐           ┌────────┴────────┐
+│ LegacyAdapter   │           │ UserIndicator   │
+│ (12次元固定)    │           │ (可変次元)      │
+└─────────────────┘           └─────────────────┘
+```
+
+**設計原則:**
+- Service は類似度を直接計算しない
+- Service は閾値を知らない
+- Service は `NoteEvaluator.evaluate()` を呼ぶだけ
+- EntryVector 構築はノート側の責務
 
 ### Services
 
-- **TradeImportService**: Imports trade data from CSV/API（取込後に自動でノート生成を呼び出し）
-- **TradeNoteService**: Generates and manages structured trade notes（現状は FS 保存。MarketDataService 経由で実インジケーター取得可能）
-- **AISummaryService**: Generates AI-powered trade summaries
-- **MarketDataService**: Fetches real-time market data（indicatorService 経由で RSI/MACD/BB/SMA を計算）
-- **MatchingService**: Matches historical notes with current market（MatchResult を DB に永続化）
-- **NotificationService**: Manages notifications (push & in-app。現状は FS 保存で既読状態もファイルに保持）
-- **NotificationTriggerService**: 通知判定・冪等性・クールダウン・重複抑制を担当（NotificationLog を DB に永続化）
+- **TradeImportService**: CSV/API からのトレードデータ取込（自動ノート生成呼び出し）
+- **TradeNoteService**: 構造化トレードノートの生成・管理（FS 保存、MarketDataService 経由でインジケーター取得）
+- **AISummaryService**: AI によるトレードサマリー生成
+- **MarketDataService**: リアルタイム市場データ取得（indicatorService 経由で RSI/MACD/BB/SMA/EMA 計算）
+- **FeatureVectorService**: 12次元特徴量ベクトルの生成・比較
+- **NoteEvaluatorAdapter**: NoteEvaluator インターフェースの実装（Legacy/UserIndicator）
+- **MatchingService**: NoteEvaluator 経由でノートと現在市場を評価（MatchResult を DB 永続化）
+- **BacktestService**: NoteEvaluator 経由で過去データ評価
+- **NotificationService**: 通知管理（プッシュ & アプリ内、FS 保存）
+- **NotificationTriggerService**: 通知判定・冪等性・クールダウン・重複抑制（NotificationLog を DB 永続化）
+
+### 12次元特徴量ベクトル
+
+市場状況を数値化するための統一ベクトル形式：
+
+```
+[0]  RSI(14) 正規化値
+[1]  MACD ヒストグラム正規化値
+[2]  MACD シグナルクロス状態
+[3]  BB 位置（%B）
+[4]  BB バンド幅正規化値
+[5]  SMA(20) 乖離率
+[6]  EMA(12) 乖離率
+[7]  価格変化率（直近N本）
+[8]  出来高変化率
+[9]  トレンド方向（-1/0/1）
+[10] ボラティリティ正規化値
+[11] モメンタム複合指標
+```
 
 ### Matching Algorithm
 
-1. **Feature Extraction**: Extracts numerical features from trade notes and market data（7次元: price, quantity, rsi, macd, volume, trend, side）
-2. **Cosine Similarity**: Compares feature vectors to calculate base similarity（次元不一致・NaN・Infinity 防御付き）
-3. **Rule-Based Checks**: Additional checks for trend matching and price range
-4. **Weighted Score**: Combines similarity, trend match, and price range into final score（重み: 0.6 / 0.3 / 0.1）
-5. **Threshold Filtering**: Only matches above configured threshold trigger notifications
-6. **Notification Suppression**: 冪等性（noteId×snapshotId×channel）、クールダウン（1時間）、重複抑制（5秒）で再通知を防止
+1. **特徴量抽出**: NoteEvaluator がノートと市場から特徴量ベクトルを構築
+2. **コサイン類似度**: 12次元ベクトル間の類似度計算（NaN/Infinity 防御付き）
+3. **ルールベースチェック**: トレンド一致・価格範囲の追加検証
+4. **スコア統合**: 類似度 + トレンド + 価格範囲 → 最終スコア（重み: 0.6 / 0.3 / 0.1）
+5. **閾値フィルタ**: 設定閾値超過時のみ通知発火
+6. **通知抑制**: 冪等性（noteId×snapshotId×channel）、クールダウン（1時間）、重複抑制（5秒）
 
 ### Scheduler
 
@@ -295,55 +381,25 @@ Edit `.env` to configure:
 - `CRON_ENABLED`: Enable scheduler (default: true)
 - `PUSH_NOTIFICATION_KEY`: Push notification service key
 
-## Design Principles
+## Web UI
 
-1. **No Auto-Trading**: System provides suggestions only; user must confirm all trades
-2. **Token Efficiency**: AI summaries are concise to minimize API costs
-3. **Accountability**: All trade notes include context and reasoning
-4. **Low Frequency**: Focus on 15m/1h intervals for stability
-5. **Threshold-Based**: Only high-confidence matches trigger notifications
-
-## Project Structure
-
-```
-src/
-├── backend/         # Backend サービスロジック
-│   ├── db/          # データベースクライアント
-│   ├── repositories/ # データアクセス層
-│   ├── services/    # ビジネスロジック
-│   └── tests/       # バックエンドテスト
-├── config/          # Configuration management
-├── controllers/     # Route controllers
-├── frontend/        # Phase5 UI (Next.js)
-│   ├── app/         # Next.js App Router ページ
-│   ├── components/  # 再利用可能コンポーネント
-│   ├── lib/         # API クライアント
-│   └── types/       # TypeScript 型定義
-├── models/          # TypeScript interfaces
-├── routes/          # API routes
-├── services/        # Business logic services
-└── utils/           # Utility functions (scheduler, etc.)
-
-data/
-├── trades/          # Trade CSV files
-└── notes/           # Stored trade notes (JSON)
-
-docs/
-├── phase0/          # Phase0 設計ドキュメント
-├── phase2/          # Phase2 完了レポート
-├── phase4/          # Phase4 完了レポート
-└── phase5/          # Phase5 完了レポート + UI 仕様
-```
-
-## Phase5 UI (通知・判定可視化)
-
-Phase5 では、通知と判定結果を可視化する Web UI を実装しています。
+TradeAssist は統合された Web UI を提供しています。
 
 ### 実装画面
 
-* **ホーム画面** (`/`): システム概要と通知一覧へのリンク
-* **通知一覧** (`/notifications`): 未読/既読管理、スコア表示、詳細遷移
-* **通知詳細** (`/notifications/:id`): 判定理由の詳細、MarketSnapshot、Order Preset リンク
+| パス | 機能 |
+|------|------|
+| `/` | ホーム画面（システム概要、ナビゲーション） |
+| `/onboarding` | 初回セットアップウィザード |
+| `/import` | CSV インポート画面 |
+| `/notes` | ノート一覧 |
+| `/notes/:id` | ノート詳細（特徴量・サマリー・バックテスト） |
+| `/notifications` | 通知一覧（未読/既読管理） |
+| `/notifications/:id` | 通知詳細（判定理由可視化） |
+| `/backtest` | バックテスト実行・結果表示 |
+| `/orders` | 注文プリセット・確認 |
+| `/settings` | ユーザー設定（閾値・インジケーター） |
+| `/strategies` | 戦略管理 |
 
 ### 設計原則
 
@@ -351,7 +407,31 @@ Phase5 では、通知と判定結果を可視化する Web UI を実装して�
 * **UI は説明責任を果たす**: 判定理由を完全可視化
 * **「当たる」より「納得できる」**: 理解可能な通知を優先
 
-詳細は [src/frontend/README.md](src/frontend/README.md) および [docs/phase5/phase5-ui-specification](docs/phase5/phase5-ui-specification) を参照。
+詳細は [src/frontend/README.md](src/frontend/README.md) を参照。
+
+## Testing
+
+```bash
+# 全テスト実行
+npm test
+
+# 特定ファイルのみ
+npm test -- src/services/__tests__/featureVectorService.test.ts
+
+# カバレッジ付き
+npm test -- --coverage
+```
+
+現在のテスト数: **365 テスト** 全パス
+
+## Contributing
+
+開発ガイドラインは [AGENTS.md](AGENTS.md) を参照してください。
+
+主なルール:
+- すべてのコメントは**日本語**で記述
+- テスト未実装の変更は未完了扱い
+- 新規ライブラリ追加時は人間確認必須
 
 ## License
 

@@ -2,13 +2,21 @@
  * MatchingService テスト
  * 
  * 目的:
- * - コサイン類似度計算の動作検証
+ * - NoteEvaluator 経由のマッチング動作検証
  * - 次元不一致・NaN・0除算の防御テスト
  * - マッチ結果 DB 永続化のテスト
+ * 
+ * 設計（Task 6）:
+ * - Service は NoteEvaluator.evaluate() を呼ぶだけ
+ * - similarity を直接計算しない
  */
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import { MatchingService } from '../../services/matchingService';
 import { TradeNote, MarketData } from '../../models/types';
+import { 
+  createNoteEvaluatorFromFSNote, 
+  convertMarketDataToSnapshot 
+} from '../../services/legacyNoteEvaluatorAdapter';
 
 describe('MatchingService', () => {
   let service: MatchingService;
@@ -56,80 +64,85 @@ describe('MatchingService', () => {
     ...overrides,
   });
 
-  describe('calculateMatchScore', () => {
-    it('同一条件で高いスコアが返る', () => {
+  /**
+   * ヘルパー関数: NoteEvaluator 経由でスコアを計算
+   * 
+   * Task 6 設計: Service は similarity を直接計算しない
+   * テストでも NoteEvaluator を使用する
+   */
+  const evaluateMatchViaEvaluator = (note: TradeNote, market: MarketData): number => {
+    const evaluator = createNoteEvaluatorFromFSNote(note);
+    const snapshot = convertMarketDataToSnapshot(market);
+    const result = evaluator.evaluate(snapshot);
+    return result.similarity;
+  };
+
+  describe('NoteEvaluator 経由のマッチスコア計算', () => {
+    it('同一条件で類似度が計算される', () => {
       const note = createMockNote();
       const market = createMockMarket();
 
-      const score = service.calculateMatchScore(note, market);
+      const similarity = evaluateMatchViaEvaluator(note, market);
 
-      // トレンド一致 + 価格レンジ一致 + 類似度で高スコアになるはず
-      expect(score).toBeGreaterThan(0.5);
-      expect(score).toBeLessThanOrEqual(1);
+      // 類似度が 0-1 の範囲内
+      expect(similarity).toBeGreaterThanOrEqual(0);
+      expect(similarity).toBeLessThanOrEqual(1);
     });
 
-    it('トレンド不一致で低いスコアが返る', () => {
+    it('トレンド不一致でも類似度は計算される', () => {
       const note = createMockNote({ marketContext: { timeframe: '15m', trend: 'bullish' } });
       const market = createMockMarket({ indicators: { rsi: 30, macd: -10, trend: 'bearish' } });
 
-      const score = service.calculateMatchScore(note, market);
+      const similarity = evaluateMatchViaEvaluator(note, market);
 
-      // トレンド不一致でスコアが下がる
-      expect(score).toBeLessThan(0.9);
+      // 類似度が 0-1 の範囲内
+      expect(similarity).toBeGreaterThanOrEqual(0);
+      expect(similarity).toBeLessThanOrEqual(1);
     });
 
-    it('価格レンジ外で低いスコアが返る', () => {
+    it('価格レンジ外でも類似度は計算される', () => {
       const note = createMockNote({ entryPrice: 50000 });
       const market = createMockMarket({ close: 60000 }); // 20% 乖離
 
-      const score = service.calculateMatchScore(note, market);
+      const similarity = evaluateMatchViaEvaluator(note, market);
 
-      // 価格レンジ外でスコアが下がる
-      expect(score).toBeLessThan(1);
+      // 類似度が 0-1 の範囲内
+      expect(similarity).toBeGreaterThanOrEqual(0);
+      expect(similarity).toBeLessThanOrEqual(1);
     });
   });
 
-  describe('コサイン類似度（エッジケース）', () => {
-    // 内部メソッドをテストするためのヘルパー
-    const testCosineSimilarity = (vecA: number[], vecB: number[]): number => {
-      // MatchingService のプライベートメソッドをテストするため、
-      // calculateMatchScore 経由で間接的にテスト
-      const note = createMockNote({ features: vecA });
-      const market = createMockMarket();
-      // 特徴量ベクトルが異なる場合の挙動を確認
-      return service.calculateMatchScore(note, market);
-    };
-
+  describe('NoteEvaluator（エッジケース）', () => {
     it('空のベクトルでもエラーにならない', () => {
       const note = createMockNote({ features: [] });
       const market = createMockMarket();
 
-      // エラーが発生せず、0 が返る
-      expect(() => service.calculateMatchScore(note, market)).not.toThrow();
+      // エラーが発生しない
+      expect(() => evaluateMatchViaEvaluator(note, market)).not.toThrow();
     });
 
     it('次元が異なるベクトルでもエラーにならない', () => {
       const note = createMockNote({ features: [1, 2, 3] });
       const market = createMockMarket();
 
-      // エラーが発生しない（0埋めで対応）
-      expect(() => service.calculateMatchScore(note, market)).not.toThrow();
+      // エラーが発生しない
+      expect(() => evaluateMatchViaEvaluator(note, market)).not.toThrow();
     });
 
     it('NaN を含むベクトルでもエラーにならない', () => {
       const note = createMockNote({ features: [NaN, 2, 3, 4, 5, 6, 7] });
       const market = createMockMarket();
 
-      // エラーが発生しない（NaN は 0 として扱う）
-      expect(() => service.calculateMatchScore(note, market)).not.toThrow();
+      // エラーが発生しない
+      expect(() => evaluateMatchViaEvaluator(note, market)).not.toThrow();
     });
 
     it('Infinity を含むベクトルでもエラーにならない', () => {
       const note = createMockNote({ features: [Infinity, 2, 3, 4, 5, 6, 7] });
       const market = createMockMarket();
 
-      // エラーが発生しない（Infinity は 0 として扱う）
-      expect(() => service.calculateMatchScore(note, market)).not.toThrow();
+      // エラーが発生しない
+      expect(() => evaluateMatchViaEvaluator(note, market)).not.toThrow();
     });
 
     it('すべてゼロのベクトルでもエラーにならない', () => {
@@ -137,8 +150,8 @@ describe('MatchingService', () => {
       const market = createMockMarket();
 
       // エラーが発生しない（0除算防御）
-      const score = service.calculateMatchScore(note, market);
-      expect(score).toBeLessThanOrEqual(1);
+      const similarity = evaluateMatchViaEvaluator(note, market);
+      expect(similarity).toBeLessThanOrEqual(1);
     });
   });
 

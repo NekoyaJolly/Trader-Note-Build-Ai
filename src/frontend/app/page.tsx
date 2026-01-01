@@ -1,5 +1,5 @@
 /**
- * TradeAssist MVP - ホーム画面（Neon Dark テーマ対応）
+ * TradeAssist - ホーム画面（Neon Dark テーマ対応）
  * 
  * ダッシュボード機能を提供
  * 
@@ -136,7 +136,7 @@ export default function Home() {
 
         {/* フッター */}
         <div className="text-center mt-12 text-sm text-gray-500">
-          <p>TradeAssist MVP - Phase5 UI</p>
+          <p>TradeAssist - Phase5 UI</p>
         </div>
       </main>
     </div>

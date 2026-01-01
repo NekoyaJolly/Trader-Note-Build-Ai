@@ -53,3 +53,11 @@ export type {
   CreatePushSubscriptionInput, 
   CreatePushLogInput,
 } from './pushSubscriptionRepository';
+
+// === EvaluationLog ===
+export { EvaluationLogRepository, evaluationLogRepository } from './evaluationLogRepository';
+export type { 
+  EvaluationLogCreateInput,
+  EvaluationLogSearchCriteria,
+  NotePerformanceSummary,
+} from './evaluationLogRepository';

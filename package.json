@@ -1,7 +1,7 @@
 {
   "name": "trader-note-build-ai",
   "version": "1.0.0",
-  "description": "TradeAssist MVP - Trade note generation and market matching system",
+  "description": "TradeAssist - ノート主体のインテリジェント取引支援システム",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc && npm run build:frontend",

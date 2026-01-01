@@ -1,17 +1,112 @@
-# TradeAssist MVP アーキテクチャ
+# TradeAssist アーキテクチャ
 
 ## System Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        TradeAssist MVP                          │
+│                        TradeAssist                              │
 │                                                                 │
 │  Core Value:                                                    │
 │  1. Auto-generate & save structured trade notes                │
 │  2. Match notes with real-time market conditions               │
 │  3. Notify on high-confidence matches (no auto-trading)        │
+│                                                                 │
+│  Core Concept: 「ノートを評価の主語として扱う」                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## NoteEvaluator アーキテクチャ（正式仕様）
+
+### 設計思想
+
+TradeAssist は「ノート主体」の設計を採用しています。
+
+- **市場**は「入力」
+- **ノート**は「評価器」
+- **特徴量ベクトル**はノート固有（次元数可変）
+
+### インターフェース
+
+```typescript
+interface NoteEvaluator {
+  readonly noteId: string;
+  readonly symbol: string;
+  
+  // ノートが必要とするインジケーターを宣言
+  requiredIndicators(): IndicatorSpec[];
+  
+  // 市場スナップショットからノート固有の特徴量ベクトルを構築
+  buildFeatureVector(snapshot: MarketSnapshot): number[];
+  
+  // 類似度計算（デフォルト: コサイン類似度）
+  similarity(vectorA: number[], vectorB: number[]): number;
+  
+  // 発火条件判定
+  isTriggered(similarity: number): boolean;
+  
+  // 一括評価（便利メソッド）
+  evaluate(snapshot: MarketSnapshot): EvaluationResult;
+}
+```
+
+### 実装クラス
+
+| クラス | 用途 | ベクトル次元 |
+|--------|------|-------------|
+| `LegacyNoteEvaluator` | 既存ノート互換 | 12次元固定 |
+| `UserIndicatorNoteEvaluator` | ユーザー定義インジケーター | 可変 |
+
+### ファクトリ関数
+
+```typescript
+// indicatorConfig の有無で自動切替
+const evaluator = createNoteEvaluator(note);
+
+// note.indicatorConfig が null → LegacyNoteEvaluator
+// note.indicatorConfig が設定済み → UserIndicatorNoteEvaluator
+```
+
+### Service との連携
+
+```
+Service（matchingService, backtestService）
+    │
+    │  ① NoteEvaluator を生成
+    ▼
+createNoteEvaluator(note)
+    │
+    │  ② 必要なインジケーターを取得
+    ▼
+evaluator.requiredIndicators()
+    │
+    │  ③ 市場データ取得
+    ▼
+marketDataService.fetch(symbol, specs)
+    │
+    │  ④ 評価実行
+    ▼
+evaluator.evaluate(snapshot)
+    │
+    │  ⑤ 結果に基づき通知判定
+    ▼
+if (result.triggered) notify()
+```
+
+**重要なルール:**
+- Service は類似度を直接計算しない
+- Service は閾値を知らない
+- Service は `NoteEvaluator.evaluate()` を呼ぶだけ
+
+### 関連ファイル
+
+- `src/domain/noteEvaluator.ts` - インターフェース定義
+- `src/services/legacyNoteEvaluatorAdapter.ts` - 実装クラス
+- `src/services/matchingService.ts` - マッチング処理
+- `src/services/backtestService.ts` - バックテスト処理
+
+---
 
 ## Architecture Diagram
 

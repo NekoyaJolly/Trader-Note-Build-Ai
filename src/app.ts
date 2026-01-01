@@ -15,7 +15,7 @@ import pushRoutes from './routes/pushRoutes';
 import { MatchingScheduler } from './utils/scheduler';
 
 /**
- * TradeAssist MVP Application
+ * TradeAssist Application
  */
 class App {
   public app: Application;
@@ -124,7 +124,7 @@ class App {
 
     this.app.listen(port, () => {
       console.log('═══════════════════════════════════════');
-      console.log('  TradeAssist MVP Server');
+      console.log('  TradeAssist Server');
       console.log('═══════════════════════════════════════');
       console.log(`  Environment: ${config.server.env}`);
       console.log(`  Server running on port: ${port}`);

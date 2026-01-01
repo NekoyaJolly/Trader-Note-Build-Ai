@@ -6,39 +6,50 @@ import { v4 as uuidv4 } from 'uuid';
 import { MatchResultDTO } from '../domain/matching/MatchResultDTO';
 import { MatchResultRepository } from '../backend/repositories/matchResultRepository';
 import { MarketSnapshotRepository } from '../backend/repositories/marketSnapshotRepository';
+import { EvaluationLogRepository } from '../backend/repositories/evaluationLogRepository';
+import { 
+  SimultaneousHitControlService,
+  MatchHit,
+} from './notification/simultaneousHitControlService';
 import { 
   normalizeIndicators, 
   DEFAULT_ANOMALY_THRESHOLD,
   NormalizedIndicators 
 } from '../utils/indicatorNormalizer';
 import {
-  calculateCosineSimilarity,
-  generateFeatureVectorFromIndicators,
-  SIMILARITY_THRESHOLDS,
-  type IndicatorData,
-} from './featureVectorService';
+  createNoteEvaluatorFromFSNote,
+  convertMarketDataToSnapshot,
+} from './legacyNoteEvaluatorAdapter';
+import { NoteEvaluator, EvaluationResult } from '../domain/noteEvaluator';
 
 /**
  * マッチングサービス
  * 
  * 責務:
  * - 過去トレードノートと現在の市場状態の一致判定
- * - ルールベースの特徴量比較（コサイン類似度）
+ * - NoteEvaluator に評価を委譲（Service は similarity を直接計算しない）
  * - MatchResult の DB 永続化
+ * 
+ * 設計方針（Task 6）:
+ * - Service は「今の市場」を渡すだけ
+ * - 類似度計算、閾値判定は NoteEvaluator の責務
+ * - ノートA（UserIndicator）もノートB（Legacy）も同じフローで評価
  */
 export class MatchingService {
   private marketDataService: MarketDataService;
   private noteService: TradeNoteService;
   private matchResultRepository: MatchResultRepository;
   private marketSnapshotRepository: MarketSnapshotRepository;
-  private threshold: number;
+  private evaluationLogRepository: EvaluationLogRepository;
+  private simultaneousHitControl: SimultaneousHitControlService;
 
   constructor() {
     this.marketDataService = new MarketDataService();
     this.noteService = new TradeNoteService();
     this.matchResultRepository = new MatchResultRepository();
     this.marketSnapshotRepository = new MarketSnapshotRepository();
-    this.threshold = config.matching.threshold;
+    this.evaluationLogRepository = new EvaluationLogRepository();
+    this.simultaneousHitControl = new SimultaneousHitControlService();
   }
 
   /**
@@ -47,10 +58,17 @@ export class MatchingService {
    * 
    * 重要: 承認済み（approved）のノートのみがマッチング対象
    * draft や rejected のノートは照合しない
+   * 
+   * 設計（Task 6）:
+   * - 各ノートから NoteEvaluator を生成
+   * - NoteEvaluator.evaluate() に市場スナップショットを渡す
+   * - Service は類似度を直接計算しない
+   * 
+   * フェーズ8: loadActiveNotesForMatching を使用し、enabled/pausedUntil をフィルタ
    */
   async checkForMatches(): Promise<MatchResultDTO[]> {
-    // 承認済みノートのみを取得（Phase 2 要件）
-    const notes = await this.noteService.loadApprovedNotes();
+    // 有効なノートのみを取得（フェーズ8: enabled=true, pausedUntil 考慮）
+    const notes = await this.noteService.loadActiveNotesForMatching();
     const matches: MatchResultDTO[] = [];
 
     // マッチング対象がない場合は早期リターン
@@ -67,10 +85,13 @@ export class MatchingService {
         // 現在の市場データを取得（インジケーター計算付き）
         const currentMarket = await this.marketDataService.getCurrentMarketDataWithIndicators(symbol);
         
+        // MarketData → MarketSnapshot に変換（NoteEvaluator用）
+        const snapshot = convertMarketDataToSnapshot(currentMarket);
+        
         // MarketSnapshot を DB に保存
         let marketSnapshotId: string | undefined;
         try {
-          const snapshot = await this.marketSnapshotRepository.upsertSnapshot({
+          const savedSnapshot = await this.marketSnapshotRepository.upsertSnapshot({
             symbol: currentMarket.symbol,
             timeframe: currentMarket.timeframe,
             close: currentMarket.close,
@@ -78,18 +99,53 @@ export class MatchingService {
             indicators: currentMarket.indicators || {},
             fetchedAt: currentMarket.timestamp,
           });
-          marketSnapshotId = snapshot.id;
+          marketSnapshotId = savedSnapshot.id;
         } catch (snapshotError) {
           console.warn('MarketSnapshot 保存をスキップ:', snapshotError);
         }
         
-        // 各ノートに対してマッチスコアを計算
+        // 各ノートに対して NoteEvaluator で評価
         for (const note of symbolNotes) {
-          const matchScore = this.calculateMatchScore(note, currentMarket);
-          const isMatch = matchScore >= this.threshold;
+          // ノートから NoteEvaluator を生成
+          const evaluator = createNoteEvaluatorFromFSNote(note);
+          
+          // NoteEvaluator.evaluate() で評価（Service は類似度を直接計算しない）
+          const evalResult = evaluator.evaluate(snapshot);
+          
+          // ★ EvaluationLog を記録（triggered=false も含む、勝率計算の分母となる）
+          // marketSnapshotId が取得できている場合のみ記録
+          if (marketSnapshotId) {
+            try {
+              await this.evaluationLogRepository.upsertLog({
+                noteId: note.id,
+                marketSnapshotId,
+                symbol,
+                timeframe: currentMarket.timeframe,
+                evaluationResult: evalResult,
+              });
+            } catch (logError) {
+              // EvaluationLog 記録の失敗はマッチング処理をブロックしない
+              console.warn('[MatchingService] EvaluationLog 記録をスキップ:', logError);
+            }
+          }
+          
+          // 追加のルールベースチェック（トレンド・価格帯）
           const trendMatched = this.checkTrendMatch(note, currentMarket);
           const priceRangeMatched = this.checkPriceRange(note, currentMarket);
-          const reasons = this.generateMatchReasons(note, currentMarket, matchScore, trendMatched, priceRangeMatched);
+          
+          // 補正スコア（評価結果のsimilarityをベースに補正）
+          const adjustedScore = this.applyRuleAdjustment(evalResult.similarity, trendMatched, priceRangeMatched);
+          
+          // 理由を生成
+          const reasons = this.generateMatchReasonsFromEvaluation(
+            evalResult,
+            currentMarket,
+            trendMatched,
+            priceRangeMatched
+          );
+          
+          // NoteEvaluator の閾値で発火判定
+          const isMatch = evaluator.isTriggered(adjustedScore);
           
           // 無界インジケーターの異常値チェック（マッチした場合のみ警告を生成）
           let warnings: string[] = [];
@@ -100,6 +156,7 @@ export class MatchingService {
           if (isMatch) {
             const matchId = uuidv4();
             const evaluatedAt = new Date();
+            const threshold = evaluator.getThresholds().weak; // 発火に使用した閾値
 
             // MatchResult を DB に永続化（marketSnapshotId がある場合のみ）
             if (marketSnapshotId) {
@@ -108,8 +165,8 @@ export class MatchingService {
                   noteId: note.id,
                   marketSnapshotId,
                   symbol,
-                  score: matchScore,
-                  threshold: this.threshold,
+                  score: adjustedScore,
+                  threshold,
                   trendMatched,
                   priceRangeMatched,
                   reasons,
@@ -122,12 +179,12 @@ export class MatchingService {
 
             matches.push({
               id: matchId,
-              matchScore,
+              matchScore: adjustedScore,
               historicalNoteId: note.id,
               marketSnapshot: currentMarket,
               marketSnapshotId,
               symbol,
-              threshold: this.threshold,
+              threshold,
               trendMatched,
               priceRangeMatched,
               reasons,
@@ -142,6 +199,151 @@ export class MatchingService {
     }
 
     return matches;
+  }
+
+  /**
+   * 同時ヒット制御付きでマッチをチェック（フェーズ8）
+   * 
+   * 1. checkForMatches() で全マッチを取得
+   * 2. 同時ヒット制御を適用
+   * 3. 通知対象とスキップ対象を分離
+   * 
+   * @returns 通知対象のマッチ結果（優先度順）
+   */
+  async checkForMatchesWithControl(): Promise<{
+    toNotify: MatchResultDTO[];
+    skipped: MatchResultDTO[];
+    groupedMessage: Map<string, string>;
+  }> {
+    // 1. 全マッチを取得
+    const allMatches = await this.checkForMatches();
+    
+    if (allMatches.length === 0) {
+      return {
+        toNotify: [],
+        skipped: [],
+        groupedMessage: new Map(),
+      };
+    }
+
+    // 2. MatchResultDTO → MatchHit に変換
+    const hits: MatchHit[] = await Promise.all(
+      allMatches.map(async (match) => {
+        // ノートの優先度を取得（デフォルト: 5）
+        const priority = await this.getNotePriority(match.historicalNoteId);
+        return {
+          noteId: match.historicalNoteId,
+          symbol: match.symbol || '', // undefined の場合は空文字
+          similarity: match.matchScore,
+          marketSnapshotId: match.marketSnapshotId || '',
+          priority,
+          matchedAt: match.evaluatedAt,
+        };
+      })
+    );
+
+    // 3. 同時ヒット制御を適用
+    const controlResult = await this.simultaneousHitControl.control(hits);
+
+    // 4. 通知対象の noteId セット
+    const toNotifyNoteIds = new Set(controlResult.toNotify.map(h => h.noteId));
+
+    // 5. 通知対象とスキップ対象に分離
+    const toNotify = allMatches.filter(m => toNotifyNoteIds.has(m.historicalNoteId));
+    const skipped = allMatches.filter(m => !toNotifyNoteIds.has(m.historicalNoteId));
+
+    // 6. スキップログを記録
+    if (controlResult.toSkip.length > 0) {
+      await this.simultaneousHitControl.logSkippedHits(
+        controlResult.toSkip,
+        allMatches.length,
+        'max_simultaneous'
+      );
+    }
+
+    // 7. シンボルごとのまとめメッセージを生成
+    const groupedMessage = new Map<string, string>();
+    for (const [symbol, symbolHits] of controlResult.groupedBySymbol) {
+      const message = await this.simultaneousHitControl.generateGroupedMessage(symbolHits);
+      groupedMessage.set(symbol, message);
+    }
+
+    return {
+      toNotify,
+      skipped,
+      groupedMessage,
+    };
+  }
+
+  /**
+   * ノートの優先度を取得
+   * @private
+   */
+  private async getNotePriority(noteId: string): Promise<number> {
+    try {
+      const note = await this.noteService.getNoteById(noteId);
+      // TradeNote 型に priority がない場合はデフォルト値を返す
+      return (note as { priority?: number })?.priority ?? 5;
+    } catch {
+      return 5; // デフォルト優先度
+    }
+  }
+
+  /**
+   * ルールベースの補正を適用
+   * 
+   * 類似度スコアにトレンド一致・価格帯一致の補正を加える
+   * 
+   * @param baseSimilarity NoteEvaluator から得た類似度
+   * @param trendMatched トレンド一致フラグ
+   * @param priceRangeMatched 価格帯一致フラグ
+   * @returns 補正後スコア（0〜1）
+   */
+  private applyRuleAdjustment(
+    baseSimilarity: number,
+    trendMatched: boolean,
+    priceRangeMatched: boolean
+  ): number {
+    // 重み付け: 類似度60% + トレンド30% + 価格帯10%
+    const finalScore = (
+      baseSimilarity * 0.6 +
+      (trendMatched ? 0.3 : 0) +
+      (priceRangeMatched ? 0.1 : 0)
+    );
+    return Math.min(finalScore, 1);
+  }
+
+  /**
+   * 評価結果からマッチ理由を生成（日本語）
+   */
+  private generateMatchReasonsFromEvaluation(
+    evalResult: EvaluationResult,
+    market: MarketData,
+    trendMatched: boolean,
+    priceRangeMatched: boolean
+  ): string[] {
+    const reasons: string[] = [];
+
+    // 類似度レベルに応じたメッセージ
+    const levelMessages: Record<string, string> = {
+      strong: '非常に高い類似度',
+      medium: '高い類似度',
+      weak: '中程度の類似度',
+      none: '低い類似度',
+    };
+    reasons.push(`${levelMessages[evalResult.level]}: ${(evalResult.similarity * 100).toFixed(1)}%`);
+
+    if (trendMatched) {
+      reasons.push(`トレンド一致: ${market.indicators?.trend || 'neutral'}`);
+    } else {
+      reasons.push(`トレンド不一致: 現在=${market.indicators?.trend || 'neutral'}`);
+    }
+
+    if (priceRangeMatched) {
+      reasons.push('価格レンジ一致');
+    }
+
+    return reasons;
   }
 
   /**
@@ -176,160 +378,6 @@ export class MatchingService {
   }
 
   /**
-   * マッチスコアを計算
-   * ノートと現在の市場データ間のスコア（0 - 1）を返す
-   */
-  calculateMatchScore(note: TradeNote, currentMarket: MarketData): number {
-    // 現在の市場から特徴量を抽出
-    const currentFeatures = this.extractMarketFeatures(currentMarket);
-    
-    // コサイン類似度を計算
-    const similarity = this.cosineSimilarity(note.features, currentFeatures);
-    
-    // ルールベースの追加チェック
-    const trendMatch = this.checkTrendMatch(note, currentMarket);
-    const priceRangeMatch = this.checkPriceRange(note, currentMarket);
-    
-    // 重み付け組み合わせ
-    const finalScore = (
-      similarity * 0.6 +
-      (trendMatch ? 0.3 : 0) +
-      (priceRangeMatch ? 0.1 : 0)
-    );
-
-    return Math.min(finalScore, 1);
-  }
-
-  /**
-   * マッチ理由を生成（日本語）
-   */
-  private generateMatchReasons(
-    note: TradeNote,
-    market: MarketData,
-    score: number,
-    trendMatched: boolean,
-    priceRangeMatched: boolean
-  ): string[] {
-    const reasons: string[] = [];
-
-    reasons.push(`一致スコア: ${(score * 100).toFixed(1)}%`);
-
-    if (trendMatched) {
-      reasons.push(`トレンド一致: ${market.indicators?.trend || 'neutral'}`);
-    } else {
-      reasons.push(`トレンド不一致: ノート=${note.marketContext.trend}, 現在=${market.indicators?.trend || 'neutral'}`);
-    }
-
-    if (priceRangeMatched) {
-      const deviation = Math.abs(market.close - note.entryPrice) / note.entryPrice * 100;
-      reasons.push(`価格レンジ一致: ${deviation.toFixed(2)}% 以内`);
-    } else {
-      const deviation = Math.abs(market.close - note.entryPrice) / note.entryPrice * 100;
-      reasons.push(`価格レンジ外: ${deviation.toFixed(2)}% 乖離`);
-    }
-
-    return reasons;
-  }
-
-  /**
-   * 現在の市場データから12次元特徴量ベクトルを抽出
-   * 
-   * 12次元構成:
-   * - トレンド系 (0-2): trendDirection, trendStrength, trendAlignment
-   * - モメンタム系 (3-4): macdHistogram, macdCrossover
-   * - 過熱度系 (5-6): rsiValue, rsiZone
-   * - ボラティリティ系 (7-8): bbPosition, bbWidth
-   * - ローソク足構造 (9-10): candleBody, candleDirection
-   * - 時間軸 (11): sessionFlag
-   */
-  private extractMarketFeatures(market: MarketData): number[] {
-    // MarketData のインジケーターを IndicatorData 形式に変換
-    // 注: MarketData.indicators の型は限定的なため、存在するフィールドのみ使用
-    const marketIndicators = market.indicators as Record<string, unknown> | undefined;
-    
-    const indicatorData: IndicatorData = {
-      rsi: market.indicators?.rsi,
-      rsiZone: this.determineRsiZone(market.indicators?.rsi),
-      macdHistogram: market.indicators?.macd,
-      macdCrossover: this.determineMacdCrossover(market.indicators),
-      smaSlope: this.determineTrendSlope(market.indicators?.trend),
-      emaSlope: this.determineTrendSlope(market.indicators?.trend),
-      priceVsSma: this.determinePricePosition(market.indicators?.trend),
-      priceVsEma: this.determinePricePosition(market.indicators?.trend),
-      // BB データは MarketData の基本型には含まれないため、拡張データがあれば使用
-      bbPosition: (marketIndicators?.bb as { percentB?: number })?.percentB,
-      bbWidth: (marketIndicators?.bb as { width?: number })?.width,
-      close: market.close,
-    };
-
-    // 12次元ベクトルを生成
-    return generateFeatureVectorFromIndicators(indicatorData, new Date(market.timestamp));
-  }
-
-  /**
-   * RSI ゾーンを判定
-   */
-  private determineRsiZone(rsi?: number): 'overbought' | 'oversold' | 'neutral' {
-    if (rsi === undefined) return 'neutral';
-    if (rsi >= 70) return 'overbought';
-    if (rsi <= 30) return 'oversold';
-    return 'neutral';
-  }
-
-  /**
-   * MACD クロスオーバーを判定（トレンドから推定）
-   */
-  private determineMacdCrossover(indicators?: MarketData['indicators']): 'bullish' | 'bearish' | 'none' {
-    if (!indicators) return 'none';
-    if (indicators.trend === 'bullish') return 'bullish';
-    if (indicators.trend === 'bearish') return 'bearish';
-    return 'none';
-  }
-
-  /**
-   * トレンドから傾きを判定
-   */
-  private determineTrendSlope(trend?: string): 'up' | 'down' | 'flat' {
-    if (trend === 'bullish') return 'up';
-    if (trend === 'bearish') return 'down';
-    return 'flat';
-  }
-
-  /**
-   * 価格位置を判定
-   */
-  private determinePricePosition(trend?: string): 'above' | 'below' | 'at' {
-    if (trend === 'bullish') return 'above';
-    if (trend === 'bearish') return 'below';
-    return 'at';
-  }
-
-  /**
-   * コサイン類似度を計算
-   * 
-   * 統一された featureVectorService の calculateCosineSimilarity を使用
-   * 次元が異なる場合は旧ベクトルを12次元に変換してから計算
-   */
-  private cosineSimilarity(vecA: number[], vecB: number[]): number {
-    // 空のベクトルチェック
-    if (!vecA || !vecB || vecA.length === 0 || vecB.length === 0) {
-      console.warn('空の特徴量ベクトル');
-      return 0;
-    }
-
-    // 次元が異なる場合は長い方に合わせてパディング
-    // 注: 本来は両方12次元であるべきだが、後方互換のため対応
-    const maxLen = Math.max(vecA.length, vecB.length);
-    const a = [...vecA];
-    const b = [...vecB];
-    
-    while (a.length < maxLen) a.push(0);
-    while (b.length < maxLen) b.push(0);
-
-    return calculateCosineSimilarity(a, b);
-  }
-
-  /**
    * トレンド一致をチェック
    */
   private checkTrendMatch(note: TradeNote, market: MarketData): boolean {
@@ -340,15 +388,15 @@ export class MatchingService {
   }
 
   /**
-   * Check if current price is within reasonable range of note price
+   * 価格が過去ノートの価格帯内かチェック（5%以内）
    */
   private checkPriceRange(note: TradeNote, market: MarketData): boolean {
     const priceDeviation = Math.abs(market.close - note.entryPrice) / note.entryPrice;
-    return priceDeviation < 0.05; // Within 5% of historical price
+    return priceDeviation < 0.05;
   }
 
   /**
-   * Group notes by symbol
+   * ノートをシンボル別にグループ化
    */
   private groupNotesBySymbol(notes: TradeNote[]): Map<string, TradeNote[]> {
     const grouped = new Map<string, TradeNote[]>();
@@ -367,18 +415,11 @@ export class MatchingService {
    * 
    * ノートの過去インジケーター値を基準に、現在の市場データが
    * ±3σ以上乖離している場合に警告を生成する
-   * 
-   * 対象インジケーター（無界）:
-   * - OBV, VWAP, ATR, MACD, CCI, ROC, SMA, EMA, DEMA, TEMA, BB, KC, PSAR, Ichimoku
-   * 
-   * 非対象（有界、正規化不要）:
-   * - RSI, Stochastic, Williams %R, MFI, CMF, Aroon
    */
   private checkIndicatorAnomalies(note: TradeNote, market: MarketData): string[] {
     // 現在の市場インジケーター値を抽出
     const currentIndicators: Record<string, number | undefined> = {};
     if (market.indicators) {
-      // インジケーターオブジェクトから数値フィールドを抽出
       for (const [key, value] of Object.entries(market.indicators)) {
         if (typeof value === 'number') {
           currentIndicators[key] = value;
@@ -386,15 +427,11 @@ export class MatchingService {
       }
     }
 
-    // ノートの過去インジケーター値を取得（特徴量から推定）
-    // 注: 現在の実装ではノートにはインジケーター履歴が保存されていないため、
-    //     単一のノートのみで正規化を行う。将来的には複数ノートの履歴を使用可能
+    // ノートの過去インジケーター値を取得
     const historicalIndicators: Record<string, number | undefined>[] = [];
     
-    // ノートに marketContext.indicators がある場合はそれを使用
     if (note.marketContext && typeof note.marketContext === 'object') {
       const noteIndicators: Record<string, number | undefined> = {};
-      // marketContext から数値フィールドを抽出
       for (const [key, value] of Object.entries(note.marketContext)) {
         if (typeof value === 'number') {
           noteIndicators[key] = value;
@@ -405,12 +442,10 @@ export class MatchingService {
       }
     }
 
-    // 過去データが不十分な場合は警告なし
     if (historicalIndicators.length === 0) {
       return [];
     }
 
-    // 正規化と異常値検出を実行
     const result: NormalizedIndicators = normalizeIndicators(
       currentIndicators,
       historicalIndicators,

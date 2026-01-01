@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# TradeAssist MVP API Test Script
+# TradeAssist API Test Script
 # This script demonstrates the core functionality of the system
 
 BASE_URL="http://localhost:3000"
 
 echo "════════════════════════════════════════════════════"
-echo "  TradeAssist MVP - API Test Script"
+echo "  TradeAssist - API Test Script"
 echo "════════════════════════════════════════════════════"
 echo ""
 

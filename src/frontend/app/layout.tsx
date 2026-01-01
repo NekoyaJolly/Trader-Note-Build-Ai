@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TradeAssist MVP",
+  title: "TradeAssist",
   description: "トレードノート支援 + 市場一致判定 UI",
 };
 

@@ -732,6 +732,27 @@ export class TradeNoteService {
   }
 
   /**
+   * マッチング対象の有効ノートを取得する（フェーズ8: 複数ノート運用UX）
+   * 
+   * 条件:
+   * - status = 'approved'
+   * - enabled = true
+   * - pausedUntil が null または現在時刻より前
+   * 
+   * 優先度の高い順にソート
+   */
+  async loadActiveNotesForMatching(): Promise<TradeNote[]> {
+    if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
+      const dbNotes = await this.repository.findActiveForMatching();
+      return dbNotes.map(n => this.convertDbNoteToTradeNote(n));
+    }
+    
+    // ファイルモードでは enabled, pausedUntil, priority がないため approved のみフィルタ
+    const allNotes = await this.loadAllNotes();
+    return allNotes.filter(note => note.status === 'approved');
+  }
+
+  /**
    * 指定ステータスのノートを取得
    * 
    * Phase 8: DBモードではリポジトリの専用メソッドを使用
@@ -979,5 +1000,51 @@ export class TradeNoteService {
     }
 
     return counts;
+  }
+
+  // ============================================
+  // フェーズ8: ノート優先度/有効無効管理
+  // ============================================
+
+  /**
+   * ノートの優先度を更新
+   * @param noteId ノートID
+   * @param priority 優先度（1-10）
+   */
+  async updateNotePriority(noteId: string, priority: number): Promise<void> {
+    if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
+      await this.repository.updatePriority(noteId, priority);
+      return;
+    }
+    // ファイルモードでは非対応
+    console.warn('[TradeNoteService] ファイルモードでは優先度更新は非対応です');
+  }
+
+  /**
+   * ノートの有効/無効を切り替え
+   * @param noteId ノートID
+   * @param enabled 有効フラグ
+   */
+  async setNoteEnabled(noteId: string, enabled: boolean): Promise<void> {
+    if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
+      await this.repository.setEnabled(noteId, enabled);
+      return;
+    }
+    // ファイルモードでは非対応
+    console.warn('[TradeNoteService] ファイルモードでは有効/無効切り替えは非対応です');
+  }
+
+  /**
+   * ノートを一時停止（指定日時まで無効）
+   * @param noteId ノートID
+   * @param until 停止終了日時（null で停止解除）
+   */
+  async setNotePausedUntil(noteId: string, until: Date | null): Promise<void> {
+    if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
+      await this.repository.setPausedUntil(noteId, until);
+      return;
+    }
+    // ファイルモードでは非対応
+    console.warn('[TradeNoteService] ファイルモードでは一時停止は非対応です');
   }
 }
