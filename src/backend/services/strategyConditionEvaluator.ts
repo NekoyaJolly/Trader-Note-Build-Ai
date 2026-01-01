@@ -139,7 +139,14 @@ export async function getIndicatorValue(
             values = result.signalLine;
           } else if (field === 'histogram') {
             // histogram = macdLine - signalLine
-            values = result.macdLine.map((m, i) => m - (result.signalLine[i] || 0));
+            // 両方の配列が同じ長さであることを確認し、undefined 値を適切に処理
+            if (result.macdLine && result.signalLine) {
+              values = result.macdLine.map((m, i) => {
+                const signal = result.signalLine[i];
+                // 両方の値が存在する場合のみ計算、そうでなければ 0
+                return (m !== undefined && signal !== undefined) ? m - signal : 0;
+              });
+            }
           } else if (result.macdLine) {
             values = result.macdLine;
           }
@@ -436,11 +443,6 @@ async function evaluateSequence(
   
   const currentStep = ctx.sequenceState.currentStep;
   
-  if (currentStep >= sequence.length) {
-    // すべてのステップが完了している場合
-    return false;
-  }
-  
   // 最後のステップから時間が経ちすぎている場合はリセット
   if (
     ctx.sequenceState.lastStepIndex >= 0 &&
@@ -448,6 +450,11 @@ async function evaluateSequence(
   ) {
     ctx.sequenceState.currentStep = 0;
     ctx.sequenceState.lastStepIndex = -1;
+  }
+  
+  // すべてのステップが完了済みの場合は何もしない（次回の評価でリセットされる）
+  if (currentStep >= sequence.length) {
+    return false;
   }
   
   // 現在のステップを評価
@@ -466,8 +473,10 @@ async function evaluateSequence(
     
     // 最終ステップが成立した場合
     if (ctx.sequenceState.currentStep >= sequence.length) {
+      // 次回の評価用にリセット
       ctx.sequenceState.currentStep = 0;
       ctx.sequenceState.lastStepIndex = -1;
+      // シーケンス完了を示すため true を返す
       return true;
     }
   }
