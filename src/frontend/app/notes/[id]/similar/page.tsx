@@ -90,7 +90,7 @@ export default function SimilarNotesPage() {
           id: noteId,
           symbol: baseNoteData.symbol,
           side: baseNoteData.side,
-          timestamp: baseNoteData.entryTime,
+          timestamp: baseNoteData.timestamp,
         };
       } catch (baseNoteError) {
         console.warn("基準ノート取得エラー（類似検索は続行）:", baseNoteError);

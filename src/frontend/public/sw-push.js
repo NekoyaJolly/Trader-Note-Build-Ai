@@ -5,11 +5,6 @@
  * Push イベントを受信して通知を表示する
  */
 
-/// <reference lib="webworker" />
-
-// Service Worker の型定義
-declare const self: ServiceWorkerGlobalScope;
-
 /**
  * Push イベントハンドラ
  *
@@ -108,5 +103,3 @@ self.addEventListener("activate", (event) => {
     self.clients.claim()
   );
 });
-
-export {};
