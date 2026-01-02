@@ -5,10 +5,12 @@
  * - バックテスト実行 API
  * - バックテスト結果取得 API
  * - ノート別バックテスト履歴 API
+ * - データカバレッジチェック API
  */
 
 import { Request, Response } from 'express';
 import { BacktestService, BacktestParams, BacktestSummary } from '../services/backtestService';
+import { checkDataCoverage, CoverageCheckResult } from '../backend/services/strategyBacktestService';
 
 /**
  * バックテスト実行リクエストボディ
@@ -170,6 +172,54 @@ export class BacktestController {
 
     return { valid: true };
   }
+
+  /**
+   * POST /api/backtest/check-coverage
+   * バックテスト実行前にデータカバレッジをチェック
+   * 
+   * プリセットデータが十分にあるか確認し、不足している場合は
+   * フロントエンドでユーザーに API 取得の確認を求める
+   */
+  checkCoverage = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { symbol, timeframe, startDate, endDate } = req.body;
+
+      // バリデーション
+      if (!symbol || !timeframe || !startDate || !endDate) {
+        res.status(400).json({
+          error: '必須パラメータが不足しています: symbol, timeframe, startDate, endDate'
+        });
+        return;
+      }
+
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        res.status(400).json({
+          error: '無効な日時フォーマットです。ISO 8601 形式で指定してください'
+        });
+        return;
+      }
+
+      // カバレッジチェック実行
+      const coverage = await checkDataCoverage(symbol, timeframe, start, end);
+
+      res.json({
+        success: true,
+        data: {
+          ...coverage,
+          // Date を ISO 文字列に変換
+          coverageRatio: Math.round(coverage.coverageRatio * 100) / 100,
+        }
+      });
+    } catch (error) {
+      console.error('カバレッジチェックエラー:', error);
+      res.status(500).json({
+        error: 'カバレッジチェックに失敗しました'
+      });
+    }
+  };
 }
 
 // シングルトンインスタンスをエクスポート

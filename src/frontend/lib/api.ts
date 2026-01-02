@@ -1999,3 +1999,56 @@ export async function fetchNoteRanking(options: {
   return payload.data;
 }
 
+// ============================================
+// データカバレッジチェック API
+// ============================================
+
+/**
+ * データカバレッジチェック結果
+ */
+export interface CoverageCheckResult {
+  hasEnoughData: boolean;
+  coverageRatio: number;
+  missingBars: number;
+  expectedBars: number;
+  actualBars: number;
+}
+
+/**
+ * バックテスト実行前にデータカバレッジをチェック
+ * POST /api/backtest/check-coverage
+ * 
+ * @param symbol - シンボル（例: "USD/JPY"）
+ * @param timeframe - 時間足（例: "1h"）
+ * @param startDate - 開始日時
+ * @param endDate - 終了日時
+ * @returns カバレッジチェック結果
+ */
+export async function checkBacktestDataCoverage(
+  symbol: string,
+  timeframe: string,
+  startDate: string,
+  endDate: string
+): Promise<CoverageCheckResult> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/backtest/check-coverage`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        symbol,
+        timeframe,
+        startDate,
+        endDate,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "カバレッジチェックに失敗しました");
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}

@@ -266,6 +266,36 @@ model EvaluationLog {
   @@index([triggered, evaluatedAt], map: "idx_evallog_triggered_evaluated")
 }
 
+/// ヒストリカルデータプリセット
+/// ユーザーがアップロードしたCSVから生成されるOHLCVデータセットのメタ情報
+/// シンボル×時間足ごとに1プリセット
+model DataPreset {
+  id          String   @id @default(uuid()) @db.Uuid
+  /// シンボル（例: BTCUSD, USDJPY）
+  symbol      String
+  /// 時間足（例: 15m, 1h, 4h, 1d）
+  timeframe   String
+  /// データ開始日時（UTC）
+  startDate   DateTime @db.Timestamptz(6)
+  /// データ終了日時（UTC）
+  endDate     DateTime @db.Timestamptz(6)
+  /// レコード数
+  recordCount Int
+  /// プリセット名（表示用、オプション）
+  name        String?
+  /// 説明
+  description String?
+  /// 元ファイル名
+  sourceFile  String?
+  /// 作成日時
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
+
+  @@unique([symbol, timeframe], map: "uq_datapreset_symbol_timeframe")
+  @@index([symbol, timeframe], map: "idx_datapreset_symbol_timeframe")
+}
+
 /// OHLCV ローソク足データ
 /// 将来的に TimescaleDB のハイパーテーブルに変換予定
 /// 変換 SQL: SELECT create_hypertable('OHLCVCandle', 'timestamp');

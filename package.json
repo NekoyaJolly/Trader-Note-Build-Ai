@@ -22,6 +22,7 @@
   "license": "ISC",
   "dependencies": {
     "@prisma/client": "^5.22.0",
+    "@types/multer": "^2.0.0",
     "@types/uuid": "^10.0.0",
     "bcrypt": "^6.0.0",
     "bottleneck": "^2.19.5",
@@ -32,6 +33,7 @@
     "express": "^5.2.1",
     "indicatorts": "^2.2.2",
     "jsonwebtoken": "^9.0.3",
+    "multer": "^2.0.2",
     "uuid": "^9.0.1",
     "web-push": "^3.6.7"
   },

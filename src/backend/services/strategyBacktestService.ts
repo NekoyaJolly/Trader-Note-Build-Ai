@@ -95,29 +95,136 @@ export interface BacktestResult {
   errorMessage?: string;
 }
 
+/** データカバレッジチェック結果 */
+export interface CoverageCheckResult {
+  /** カバレッジが十分か */
+  hasCoverage: boolean;
+  /** プリセットが存在するか */
+  presetExists: boolean;
+  /** DB に存在するデータ件数 */
+  dataCount: number;
+  /** 期待されるデータ件数 */
+  expectedCount: number;
+  /** 不足開始日時 */
+  missingStart?: Date;
+  /** 不足終了日時 */
+  missingEnd?: Date;
+  /** カバレッジ率（0.0 〜 1.0） */
+  coverageRatio: number;
+}
+
 // ============================================
-// ヒストリカルデータ取得（DBキャッシュ優先）
+// ヒストリカルデータ取得（プリセット優先）
 // ============================================
+
+/**
+ * 指定期間のデータカバレッジをチェック
+ * 
+ * @param symbol - シンボル
+ * @param timeframe - 時間足
+ * @param startDate - 開始日
+ * @param endDate - 終了日
+ * @returns カバレッジ情報
+ */
+export async function checkDataCoverage(
+  symbol: string,
+  timeframe: BacktestTimeframe,
+  startDate: Date,
+  endDate: Date
+): Promise<CoverageCheckResult> {
+  // プリセットの存在確認
+  const preset = await prisma.dataPreset.findUnique({
+    where: {
+      symbol_timeframe: {
+        symbol,
+        timeframe,
+      },
+    },
+  });
+
+  // DB 内のデータ件数をカウント
+  const dataCount = await prisma.oHLCVCandle.count({
+    where: {
+      symbol,
+      timeframe,
+      timestamp: {
+        gte: startDate,
+        lte: endDate,
+      },
+    },
+  });
+
+  const expectedCount = calculateExpectedCandles(timeframe, startDate, endDate);
+  const coverageRatio = expectedCount > 0 ? dataCount / expectedCount : 0;
+
+  // プリセットがない場合
+  if (!preset) {
+    return {
+      hasCoverage: false,
+      presetExists: false,
+      dataCount,
+      expectedCount,
+      missingStart: startDate,
+      missingEnd: endDate,
+      coverageRatio,
+    };
+  }
+
+  // プリセットの期間と要求期間を比較
+  const presetStart = preset.startDate.getTime();
+  const presetEnd = preset.endDate.getTime();
+  const reqStart = startDate.getTime();
+  const reqEnd = endDate.getTime();
+
+  let missingStart: Date | undefined;
+  let missingEnd: Date | undefined;
+
+  if (reqStart < presetStart) {
+    missingStart = startDate;
+    missingEnd = new Date(Math.min(presetStart, reqEnd));
+  }
+  if (reqEnd > presetEnd) {
+    if (!missingStart) {
+      missingStart = new Date(Math.max(presetEnd, reqStart));
+    }
+    missingEnd = endDate;
+  }
+
+  // 80% 以上のカバレッジがあれば十分とみなす
+  const hasCoverage = coverageRatio >= 0.8 && !missingStart;
+
+  return {
+    hasCoverage,
+    presetExists: true,
+    dataCount,
+    expectedCount,
+    missingStart,
+    missingEnd,
+    coverageRatio,
+  };
+}
 
 /**
  * ヒストリカルOHLCVデータを取得
  *
  * 優先順位:
- * 1. DB (OHLCVCandle テーブル) からキャッシュ済みデータを取得
- * 2. 不足期間があれば Twelve Data API から取得（将来実装）
- * 3. DBにもAPIにもデータがない場合はモックデータを生成
+ * 1. DB (OHLCVCandle テーブル) からプリセットデータを取得
+ * 2. 不足があり forceApiFetch=true の場合のみ Twelve Data API から取得
+ * 3. それ以外は不足分をモックデータで補完
  *
  * @param symbol - シンボル
  * @param timeframe - 時間足
  * @param startDate - 開始日
  * @param endDate - 終了日
+ * @param forceApiFetch - 不足時に API 取得を強制するか（デフォルト: false）
  * @returns OHLCV データ配列
  */
 export async function fetchHistoricalData(
   symbol: string,
   timeframe: BacktestTimeframe,
   startDate: Date,
-  endDate: Date
+  endDate: Date,
+  forceApiFetch: boolean = false
 ): Promise<OHLCV[]> {
   // 1. DBからキャッシュ済みデータを取得
   const cachedData = await prisma.oHLCVCandle.findMany({
@@ -139,7 +246,7 @@ export async function fetchHistoricalData(
 
   if (cacheRatio >= 0.8 && cachedData.length > 0) {
     console.log(
-      `[fetchHistoricalData] DBキャッシュを使用: ${symbol}/${timeframe}, ` +
+      `[fetchHistoricalData] DBプリセットを使用: ${symbol}/${timeframe}, ` +
         `${cachedData.length}/${expectedCandles}件 (${(cacheRatio * 100).toFixed(1)}%)`
     );
     return cachedData.map((c) => ({
@@ -152,8 +259,8 @@ export async function fetchHistoricalData(
     }));
   }
 
-  // 2. キャッシュが不十分な場合、Twelve Data API から取得を試みる
-  if (marketDataService.isApiConfigured()) {
+  // 2. キャッシュが不十分かつ forceApiFetch=true の場合のみ API から取得
+  if (forceApiFetch && marketDataService.isApiConfigured()) {
     try {
       // 期待される本数と開始・終了時刻を計算
       const requiredCandles = expectedCandles - cachedData.length;
@@ -190,13 +297,19 @@ export async function fetchHistoricalData(
     } catch (error) {
       console.warn(`[fetchHistoricalData] API 取得エラー、モックにフォールバック:`, error);
     }
+  } else if (!forceApiFetch && cacheRatio < 0.8) {
+    // forceApiFetch=false かつプリセットが不十分な場合、APIは呼ばずにモック補完
+    console.log(
+      `[fetchHistoricalData] プリセット不足 (${(cacheRatio * 100).toFixed(1)}%)、` +
+        `forceApiFetch=false のため API をスキップしてモックで補完: ${symbol}/${timeframe}`
+    );
   }
 
-  // 3. API 未設定または取得失敗時はモックデータにフォールバック
+  // 3. API 未設定、forceApiFetch=false、または取得失敗時はモックデータにフォールバック
   if (cachedData.length > 0) {
     console.log(
-      `[fetchHistoricalData] 部分キャッシュ + モック: ${symbol}/${timeframe}, ` +
-        `キャッシュ=${cachedData.length}件, 期待=${expectedCandles}件`
+      `[fetchHistoricalData] 部分プリセット + モック: ${symbol}/${timeframe}, ` +
+        `プリセット=${cachedData.length}件, 期待=${expectedCandles}件`
     );
   } else {
     console.log(`[fetchHistoricalData] モックデータを生成: ${symbol}/${timeframe}`);

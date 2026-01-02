@@ -13,6 +13,7 @@ import strategyRoutes from './backend/api/strategyRoutes';
 import authRoutes from './routes/authRoutes';
 import watchlistRoutes from './routes/watchlistRoutes';
 import pushRoutes from './routes/pushRoutes';
+import ohlcvRoutes from './backend/api/ohlcvRoutes';
 import { MatchingScheduler } from './utils/scheduler';
 
 /**
@@ -111,6 +112,7 @@ class App {
     this.app.use('/api/settings', settingsRoutes);
     this.app.use('/api/bars', barLocatorRoutes);
     this.app.use('/api/strategies', strategyRoutes);
+    this.app.use('/api/ohlcv', ohlcvRoutes);
 
     // 404 handler
     this.app.use((req: Request, res: Response) => {

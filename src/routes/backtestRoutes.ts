@@ -10,6 +10,32 @@ import { backtestController } from '../controllers/backtestController';
 const router = Router();
 
 /**
+ * POST /api/backtest/check-coverage
+ * バックテスト実行前にデータカバレッジをチェック
+ * 
+ * Request Body:
+ * {
+ *   "symbol": "USD/JPY",
+ *   "timeframe": "15m",
+ *   "startDate": "2024-01-01T00:00:00Z",
+ *   "endDate": "2024-03-31T23:59:59Z"
+ * }
+ * 
+ * Response:
+ * {
+ *   "success": true,
+ *   "data": {
+ *     "hasEnoughData": true,
+ *     "coverageRatio": 0.95,
+ *     "missingBars": 50,
+ *     "expectedBars": 1000,
+ *     "actualBars": 950
+ *   }
+ * }
+ */
+router.post('/check-coverage', backtestController.checkCoverage);
+
+/**
  * POST /api/backtest/execute
  * バックテストを実行する
  * 

@@ -160,6 +160,12 @@ const navItems: NavItem[] = [
     description: "エントリー戦略管理",
   },
   {
+    href: "/data-presets",
+    label: "データプリセット",
+    icon: <ImportIcon />,
+    description: "ヒストリカルデータ管理",
+  },
+  {
     href: "/settings",
     label: "設定",
     icon: <SettingsIcon />,

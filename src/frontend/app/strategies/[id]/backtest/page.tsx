@@ -22,12 +22,14 @@ import {
   fetchWalkForwardHistory,
   fetchFilterAnalysis,
   verifyFilters,
+  checkBacktestDataCoverage,
   BacktestHistoryItem,
   WalkForwardResult,
   FilterAnalysisResult,
   FilterVerifyResult,
   FilterCondition,
   AnalysisIndicator,
+  CoverageCheckResult,
 } from "@/lib/api";
 import type { Strategy, BacktestResult, BacktestResultSummary, BacktestTradeEvent } from "@/types/strategy";
 import Sidebar from "@/components/layout/Sidebar";
@@ -283,6 +285,11 @@ export default function StrategyBacktestPage() {
     createdCount?: number;
   } | null>(null);
 
+  // データカバレッジチェックステート
+  const [coverageCheckResult, setCoverageCheckResult] = useState<CoverageCheckResult | null>(null);
+  const [showCoverageDialog, setShowCoverageDialog] = useState(false);
+  const [checkingCoverage, setCheckingCoverage] = useState(false);
+
   /** デフォルト開始日（3ヶ月前）を取得 */
   function getDefaultStartDate(): string {
     const date = new Date();
@@ -342,11 +349,48 @@ export default function StrategyBacktestPage() {
     setBacktestParams((prev) => ({ ...prev, [key]: value }));
   };
 
-  /** バックテスト実行 */
-  const handleRunBacktest = async () => {
+  /** 
+   * バックテスト実行前にデータカバレッジをチェック
+   * 不足している場合はダイアログで確認を求める
+   */
+  const handleRunBacktestWithCoverageCheck = async () => {
+    if (!strategy) return;
+
+    try {
+      setCheckingCoverage(true);
+      setError(null);
+
+      // カバレッジチェック実行
+      const coverage = await checkBacktestDataCoverage(
+        strategy.symbol,
+        backtestParams.stage1Timeframe,
+        backtestParams.startDate,
+        backtestParams.endDate
+      );
+
+      setCoverageCheckResult(coverage);
+
+      // 80%以上のカバレッジがあれば直接実行
+      if (coverage.hasEnoughData) {
+        await executeBacktest();
+      } else {
+        // 不足している場合はダイアログ表示
+        setShowCoverageDialog(true);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "カバレッジチェックに失敗しました";
+      setError(message);
+    } finally {
+      setCheckingCoverage(false);
+    }
+  };
+
+  /** バックテスト実行（実際の処理） */
+  const executeBacktest = async () => {
     try {
       setRunning(true);
       setError(null);
+      setShowCoverageDialog(false);
 
       const resultData = await runStrategyBacktest(strategyId, {
         startDate: backtestParams.startDate,
@@ -513,12 +557,54 @@ export default function StrategyBacktestPage() {
   }
 
   return (
-    <div className="flex min-h-screen bg-slate-900">
-      <Sidebar />
-      <div className="flex-1 flex flex-col">
-        <Header />
-        <main className="flex-1 p-6">
-          {/* ヘッダー部 */}
+    <>
+      {/* データカバレッジ不足ダイアログ */}
+      {showCoverageDialog && coverageCheckResult && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-800 rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold text-white mb-4">
+              ⚠️ データ不足の警告
+            </h3>
+            <div className="text-gray-300 mb-4 space-y-2">
+              <p>
+                選択した期間のヒストリカルデータが不足しています。
+              </p>
+              <div className="bg-slate-700 rounded p-3 text-sm">
+                <p>カバレッジ率: <span className="font-bold text-yellow-400">{(coverageCheckResult.coverageRatio * 100).toFixed(1)}%</span></p>
+                <p>期待バー数: {coverageCheckResult.expectedBars}</p>
+                <p>実際のバー数: {coverageCheckResult.actualBars}</p>
+                <p>不足バー数: <span className="text-red-400">{coverageCheckResult.missingBars}</span></p>
+              </div>
+              <p className="text-sm text-gray-400">
+                モックデータで補完して実行しますか？
+                より正確な結果を得るには、プリセット管理画面から
+                ヒストリカルデータをインポートしてください。
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowCoverageDialog(false)}
+                className="flex-1 px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded transition-colors"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={executeBacktest}
+                className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+              >
+                モックで実行
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="flex min-h-screen bg-slate-900">
+        <Sidebar />
+        <div className="flex-1 flex flex-col">
+          <Header />
+          <main className="flex-1 p-6">
+            {/* ヘッダー部 */}
           <div className="mb-6">
             <div className="flex items-center gap-2 text-sm text-gray-400 mb-2">
               <Link href="/strategies" className="hover:text-gray-200">
@@ -673,15 +759,35 @@ export default function StrategyBacktestPage() {
 
                 {/* 実行ボタン */}
                 <button
-                  onClick={handleRunBacktest}
-                  disabled={running}
+                  onClick={handleRunBacktestWithCoverageCheck}
+                  disabled={running || checkingCoverage}
                   className={`w-full py-3 rounded-lg font-medium transition-colors ${
-                    running
+                    running || checkingCoverage
                       ? "bg-gray-600 text-gray-400 cursor-not-allowed"
                       : "bg-blue-600 hover:bg-blue-700 text-white"
                   }`}
                 >
-                  {running ? (
+                  {checkingCoverage ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                          fill="none"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        />
+                      </svg>
+                      データチェック中...
+                    </span>
+                  ) : running ? (
                     <span className="flex items-center justify-center gap-2">
                       <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
                         <circle
@@ -1457,5 +1563,6 @@ export default function StrategyBacktestPage() {
         <Footer />
       </div>
     </div>
+    </>
   );
 }
