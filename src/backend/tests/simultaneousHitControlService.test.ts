@@ -255,26 +255,30 @@ describe('SimultaneousHitControlService', () => {
         createHit('note-5', 'BTCUSDT', 0.65, 6),
       ];
 
-      await service.logSkippedHits(skippedHits, 5, 'max_simultaneous');
+      await service.logSkippedHits(skippedHits, 5, 'max_simultaneous_exceeded');
 
       expect(mockPrismaClient.notificationSkipLog.createMany).toHaveBeenCalledWith({
         data: expect.arrayContaining([
           expect.objectContaining({
             noteId: 'note-4',
-            skipReason: 'max_simultaneous',
-            simultaneousCount: 5,
+            reason: 'max_simultaneous_exceeded',
+            details: expect.objectContaining({
+              simultaneousCount: 5,
+            }),
           }),
           expect.objectContaining({
             noteId: 'note-5',
-            skipReason: 'max_simultaneous',
-            simultaneousCount: 5,
+            reason: 'max_simultaneous_exceeded',
+            details: expect.objectContaining({
+              simultaneousCount: 5,
+            }),
           }),
         ]),
       });
     });
 
     it('空配列の場合は何もしない', async () => {
-      await service.logSkippedHits([], 0, 'max_simultaneous');
+      await service.logSkippedHits([], 0, 'max_simultaneous_exceeded');
 
       expect(mockPrismaClient.notificationSkipLog.createMany).not.toHaveBeenCalled();
     });

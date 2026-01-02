@@ -59,6 +59,10 @@ function createMockNote(overrides: Partial<{
     tags: [],
     userNotes: null,
     indicatorConfig: overrides.indicatorConfig ?? null,
+    // フェーズ8: 優先度/有効無効管理
+    priority: 5,
+    enabled: true,
+    pausedUntil: null,
   };
 }
 

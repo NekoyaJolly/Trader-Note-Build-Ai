@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 // 直接インポートに変更（index.ts経由でのモジュール解決問題を回避）
 import BacktestPanel from "@/components/BacktestPanel";
+import PerformancePanel from "@/components/PerformancePanel";
 
 /**
  * ノート詳細画面
@@ -469,6 +470,11 @@ export default function NoteDetailPage() {
       {/* バックテストパネル（承認済みノートのみ表示） */}
       {currentStatus === "approved" && (
         <BacktestPanel noteId={id} symbol={note.symbol} />
+      )}
+
+      {/* パフォーマンスパネル（承認済みノートのみ表示） */}
+      {currentStatus === "approved" && (
+        <PerformancePanel noteId={id} />
       )}
     </div>
   );

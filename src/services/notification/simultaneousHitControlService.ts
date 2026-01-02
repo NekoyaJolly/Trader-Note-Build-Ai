@@ -89,11 +89,12 @@ export class SimultaneousHitControlService {
   /**
    * アクティブなバッチ設定を取得
    * 設定がない場合はデフォルト値を返す
+   * 
+   * シングルトン想定: 最新の1件を取得
    */
   async getActiveConfig(): Promise<BatchConfig> {
     try {
       const config = await this.prisma.notificationBatchConfig.findFirst({
-        where: { active: true },
         orderBy: { createdAt: 'desc' },
       });
 
@@ -243,12 +244,14 @@ export class SimultaneousHitControlService {
     try {
       const skipLogs = skippedHits.map((hit, index) => ({
         noteId: hit.noteId,
-        marketSnapshotId: hit.marketSnapshotId,
-        symbol: hit.symbol,
-        similarity: hit.similarity,
-        skipReason,
-        simultaneousCount: totalHits,
-        priorityRank: index + 1, // スキップ内での順位
+        matchResultId: null, // 必要に応じて設定
+        reason: skipReason as 'max_simultaneous_exceeded' | 'cooldown_active' | 'note_disabled' | 'note_paused' | 'lower_priority',
+        details: {
+          symbol: hit.symbol,
+          similarity: hit.similarity,
+          simultaneousCount: totalHits,
+          priorityRank: index + 1,
+        },
       }));
 
       await this.prisma.notificationSkipLog.createMany({
@@ -279,66 +282,77 @@ export class SimultaneousHitControlService {
 
   /**
    * バッチ設定を作成/更新
+   * 
+   * シングルトン想定: 既存があれば更新、なければ作成
    */
   async upsertConfig(
-    name: string,
     config: Partial<BatchConfig>
   ): Promise<void> {
-    await this.prisma.notificationBatchConfig.upsert({
-      where: { name },
-      create: {
-        name,
-        maxSimultaneous: config.maxSimultaneous ?? DEFAULT_CONFIG.maxSimultaneous,
-        groupBySymbol: config.groupBySymbol ?? DEFAULT_CONFIG.groupBySymbol,
-        cooldownMinutes: config.cooldownMinutes ?? DEFAULT_CONFIG.cooldownMinutes,
-        active: true,
-      },
-      update: {
-        maxSimultaneous: config.maxSimultaneous,
-        groupBySymbol: config.groupBySymbol,
-        cooldownMinutes: config.cooldownMinutes,
-      },
-    });
+    const existing = await this.prisma.notificationBatchConfig.findFirst();
+    
+    if (existing) {
+      await this.prisma.notificationBatchConfig.update({
+        where: { id: existing.id },
+        data: {
+          maxSimultaneous: config.maxSimultaneous ?? existing.maxSimultaneous,
+          groupBySymbol: config.groupBySymbol ?? existing.groupBySymbol,
+          cooldownMinutes: config.cooldownMinutes ?? existing.cooldownMinutes,
+        },
+      });
+    } else {
+      await this.prisma.notificationBatchConfig.create({
+        data: {
+          maxSimultaneous: config.maxSimultaneous ?? DEFAULT_CONFIG.maxSimultaneous,
+          groupBySymbol: config.groupBySymbol ?? DEFAULT_CONFIG.groupBySymbol,
+          cooldownMinutes: config.cooldownMinutes ?? DEFAULT_CONFIG.cooldownMinutes,
+        },
+      });
+    }
   }
 
   /**
    * スキップログを検索
+   * 
+   * @returns reason と details を含むスキップログ配列
    */
   async getSkipLogs(options: {
     noteId?: string;
-    symbol?: string;
     from?: Date;
     to?: Date;
     limit?: number;
   } = {}): Promise<{
     noteId: string;
-    symbol: string;
-    similarity: number;
-    skipReason: string;
+    reason: string;
+    details: unknown;
     skippedAt: Date;
   }[]> {
     const where: Record<string, unknown> = {};
     
     if (options.noteId) where.noteId = options.noteId;
-    if (options.symbol) where.symbol = options.symbol;
     if (options.from || options.to) {
       where.skippedAt = {};
       if (options.from) (where.skippedAt as Record<string, Date>).gte = options.from;
       if (options.to) (where.skippedAt as Record<string, Date>).lte = options.to;
     }
 
-    return this.prisma.notificationSkipLog.findMany({
+    const logs = await this.prisma.notificationSkipLog.findMany({
       where,
       orderBy: { skippedAt: 'desc' },
       take: options.limit ?? 100,
       select: {
         noteId: true,
-        symbol: true,
-        similarity: true,
-        skipReason: true,
+        reason: true,
+        details: true,
         skippedAt: true,
       },
     });
+
+    return logs.map(log => ({
+      noteId: log.noteId,
+      reason: log.reason,
+      details: log.details,
+      skippedAt: log.skippedAt,
+    }));
   }
 }
 

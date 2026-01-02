@@ -9,6 +9,7 @@ import { NoteStatus } from '../models/types';
 import { Trade as DbTrade, Prisma } from '@prisma/client';
 import { FeatureService } from '../services/featureService';
 import { SIMILARITY_THRESHOLDS } from '../services/featureVectorService';
+import { NotePerformanceService, PerformanceReportOptions } from '../services/performance';
 
 /**
  * トレードデータの共通型
@@ -28,12 +29,14 @@ export class TradeController {
   private tradeRepository: TradeRepository;
   private noteService: TradeNoteService;
   private featureService: FeatureService;
+  private performanceService: NotePerformanceService;
 
   constructor() {
     this.importService = new TradeImportService();
     this.tradeRepository = new TradeRepository();
     this.noteService = new TradeNoteService();
     this.featureService = new FeatureService();
+    this.performanceService = new NotePerformanceService();
   }
 
   /**
@@ -518,6 +521,194 @@ export class TradeController {
       res.status(500).json({
         success: false,
         error: message || '一時停止の設定に失敗しました',
+      });
+    }
+  };
+
+  // ============================================
+  // フェーズ9: ノートパフォーマンス
+  // ============================================
+
+  /**
+   * ノートのパフォーマンスレポートを取得
+   * GET /api/trades/notes/:id/performance
+   * 
+   * クエリパラメータ:
+   * - from: 集計開始日時（ISO 8601）
+   * - to: 集計終了日時（ISO 8601）
+   * - timeframe: 時間足で絞り込み（例: 15m, 1h）
+   * - weakThreshold: 弱いパターン検出閾値（0.0〜1.0）
+   */
+  getPerformanceReport = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+      const { from, to, timeframe, weakThreshold } = req.query;
+
+      // オプション構築
+      const options: PerformanceReportOptions = {};
+      
+      if (from) {
+        const fromDate = new Date(from as string);
+        if (!isNaN(fromDate.getTime())) {
+          options.from = fromDate;
+        }
+      }
+      if (to) {
+        const toDate = new Date(to as string);
+        if (!isNaN(toDate.getTime())) {
+          options.to = toDate;
+        }
+      }
+      if (timeframe) {
+        options.timeframe = timeframe as string;
+      }
+      if (weakThreshold) {
+        const threshold = parseFloat(weakThreshold as string);
+        if (!isNaN(threshold) && threshold >= 0 && threshold <= 1) {
+          options.weakThreshold = threshold;
+        }
+      }
+
+      const report = await this.performanceService.generateReport(id, options);
+
+      if (!report) {
+        res.status(404).json({
+          success: false,
+          error: 'パフォーマンスデータが見つかりません（評価ログがありません）',
+        });
+        return;
+      }
+
+      res.json({
+        success: true,
+        data: report,
+      });
+    } catch (error) {
+      const message = (error as Error).message;
+      console.error('Error getting performance report:', error);
+      res.status(500).json({
+        success: false,
+        error: message || 'パフォーマンスレポートの取得に失敗しました',
+      });
+    }
+  };
+
+  /**
+   * ノートランキングを取得
+   * GET /api/trades/notes/performance/ranking
+   * 
+   * クエリパラメータ:
+   * - limit: 取得件数（デフォルト: 20）
+   * - from: 集計開始日時（ISO 8601）
+   * - to: 集計終了日時（ISO 8601）
+   * - timeframe: 時間足で絞り込み
+   */
+  getPerformanceRanking = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { limit, from, to, timeframe } = req.query;
+
+      // オプション構築
+      const options: PerformanceReportOptions = {};
+      
+      if (from) {
+        const fromDate = new Date(from as string);
+        if (!isNaN(fromDate.getTime())) {
+          options.from = fromDate;
+        }
+      }
+      if (to) {
+        const toDate = new Date(to as string);
+        if (!isNaN(toDate.getTime())) {
+          options.to = toDate;
+        }
+      }
+      if (timeframe) {
+        options.timeframe = timeframe as string;
+      }
+
+      const limitNum = limit ? parseInt(limit as string, 10) : 20;
+      const ranking = await this.performanceService.getRanking(limitNum, options);
+
+      res.json({
+        success: true,
+        data: ranking,
+        meta: {
+          limit: limitNum,
+          count: ranking.length,
+        },
+      });
+    } catch (error) {
+      const message = (error as Error).message;
+      console.error('Error getting performance ranking:', error);
+      res.status(500).json({
+        success: false,
+        error: message || 'パフォーマンスランキングの取得に失敗しました',
+      });
+    }
+  };
+
+  /**
+   * 複数ノートのパフォーマンスサマリーを一括取得
+   * POST /api/trades/notes/performance/bulk
+   * 
+   * リクエストボディ:
+   * - noteIds: string[] - ノート ID 配列
+   * - from?: 集計開始日時
+   * - to?: 集計終了日時
+   */
+  getBulkPerformanceSummary = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { noteIds, from, to, timeframe } = req.body;
+
+      if (!Array.isArray(noteIds) || noteIds.length === 0) {
+        res.status(400).json({
+          success: false,
+          error: 'noteIds は必須です（string 配列）',
+        });
+        return;
+      }
+
+      // オプション構築
+      const options: PerformanceReportOptions = {};
+      
+      if (from) {
+        const fromDate = new Date(from);
+        if (!isNaN(fromDate.getTime())) {
+          options.from = fromDate;
+        }
+      }
+      if (to) {
+        const toDate = new Date(to);
+        if (!isNaN(toDate.getTime())) {
+          options.to = toDate;
+        }
+      }
+      if (timeframe) {
+        options.timeframe = timeframe;
+      }
+
+      const summaryMap = await this.performanceService.getBulkSummary(noteIds, options);
+
+      // Map を Object に変換
+      const summaries: Record<string, unknown> = {};
+      summaryMap.forEach((value, key) => {
+        summaries[key] = value;
+      });
+
+      res.json({
+        success: true,
+        data: summaries,
+        meta: {
+          requestedCount: noteIds.length,
+          returnedCount: Object.keys(summaries).length,
+        },
+      });
+    } catch (error) {
+      const message = (error as Error).message;
+      console.error('Error getting bulk performance summary:', error);
+      res.status(500).json({
+        success: false,
+        error: message || 'パフォーマンスサマリーの取得に失敗しました',
       });
     }
   };

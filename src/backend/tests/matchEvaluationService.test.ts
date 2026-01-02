@@ -53,6 +53,11 @@ describe('MatchEvaluationService', () => {
     marketContext: null,
     userNotes: null,
     tags: [],
+    // フェーズ8: 優先度/有効無効管理
+    indicatorConfig: null,
+    priority: 5,
+    enabled: true,
+    pausedUntil: null,
   };
 
   // 市場スナップショット（平均出来高や前日終値を含め、FeatureExtractor と同スケールにする）

@@ -24,7 +24,7 @@ jest.mock('../../services/inference/decisionInferenceService');
  * TradeNoteWithSummary のデフォルトフィールドを追加するヘルパー
  * Phase 8 で追加された status, approvedAt 等の必須フィールドを含む
  */
-const createMockNoteWithSummary = (overrides?: Record<string, any>) => ({
+const createMockNoteWithSummary = (overrides?: Record<string, unknown>) => ({
   id: 'test-note-id',
   tradeId: 'test-trade-id',
   symbol: 'BTCUSD',
@@ -43,6 +43,11 @@ const createMockNoteWithSummary = (overrides?: Record<string, any>) => ({
   marketContext: null,
   userNotes: null,
   tags: [],
+  // フェーズ8: 優先度/有効無効管理
+  indicatorConfig: null,
+  priority: 5,
+  enabled: true,
+  pausedUntil: null,
   aiSummary: {
     id: 'test-summary-id',
     noteId: 'test-note-id',

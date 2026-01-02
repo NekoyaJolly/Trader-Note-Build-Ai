@@ -1809,3 +1809,161 @@ export async function fetchFilterIndicators(): Promise<{
   const payload = await response.json();
   return payload.data;
 }
+
+// ============================================
+// フェーズ9: ノートパフォーマンス API
+// ============================================
+
+/**
+ * 時間帯別パフォーマンス
+ */
+export interface HourlyPerformance {
+  hour: number;
+  triggerRate: number;
+  avgSimilarity: number;
+  evaluationCount: number;
+}
+
+/**
+ * 相場状況
+ */
+export type MarketCondition = 'trending_up' | 'trending_down' | 'ranging' | 'volatile';
+
+/**
+ * 相場状況別パフォーマンス
+ */
+export interface ConditionPerformance {
+  condition: MarketCondition;
+  triggerRate: number;
+  avgSimilarity: number;
+  evaluationCount: number;
+}
+
+/**
+ * 弱いパターン
+ */
+export interface WeakPattern {
+  description: string;
+  occurrences: number;
+  avgSimilarity: number;
+  details?: Record<string, unknown>;
+}
+
+/**
+ * ノートパフォーマンスレポート
+ */
+export interface NotePerformanceReport {
+  noteId: string;
+  symbol: string;
+  totalEvaluations: number;
+  triggeredCount: number;
+  triggerRate: number;
+  avgSimilarity: number;
+  maxSimilarity: number;
+  minSimilarity: number;
+  performanceByHour: HourlyPerformance[];
+  performanceByMarketCondition: ConditionPerformance[];
+  weakPatterns: WeakPattern[];
+  firstEvaluatedAt: string | null;
+  lastEvaluatedAt: string | null;
+  generatedAt: string;
+}
+
+/**
+ * ノートランキングエントリ
+ */
+export interface NoteRankingEntry {
+  noteId: string;
+  symbol: string;
+  triggerRate: number;
+  totalEvaluations: number;
+  avgSimilarity: number;
+  overallScore: number;
+  rank: number;
+}
+
+/**
+ * ノートのパフォーマンスレポートを取得
+ * GET /api/trades/notes/:id/performance
+ * 
+ * @param noteId - ノート ID
+ * @param options - 集計オプション
+ */
+export async function fetchNotePerformance(
+  noteId: string,
+  options: {
+    from?: Date;
+    to?: Date;
+    timeframe?: string;
+    weakThreshold?: number;
+  } = {}
+): Promise<NotePerformanceReport | null> {
+  const params = new URLSearchParams();
+  
+  if (options.from) {
+    params.set('from', options.from.toISOString());
+  }
+  if (options.to) {
+    params.set('to', options.to.toISOString());
+  }
+  if (options.timeframe) {
+    params.set('timeframe', options.timeframe);
+  }
+  if (options.weakThreshold !== undefined) {
+    params.set('weakThreshold', options.weakThreshold.toString());
+  }
+
+  const url = `${API_BASE_URL}/api/trades/notes/${noteId}/performance${params.toString() ? '?' + params.toString() : ''}`;
+  const response = await fetch(url, { cache: 'no-store' });
+
+  if (response.status === 404) {
+    // 評価ログがない場合
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new Error(`パフォーマンスレポートの取得に失敗しました: ${response.status}`);
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * ノートランキングを取得
+ * GET /api/trades/notes/performance/ranking
+ * 
+ * @param options - 取得オプション
+ */
+export async function fetchNoteRanking(options: {
+  limit?: number;
+  from?: Date;
+  to?: Date;
+  timeframe?: string;
+} = {}): Promise<NoteRankingEntry[]> {
+  const params = new URLSearchParams();
+  
+  if (options.limit) {
+    params.set('limit', options.limit.toString());
+  }
+  if (options.from) {
+    params.set('from', options.from.toISOString());
+  }
+  if (options.to) {
+    params.set('to', options.to.toISOString());
+  }
+  if (options.timeframe) {
+    params.set('timeframe', options.timeframe);
+  }
+
+  const url = `${API_BASE_URL}/api/trades/notes/performance/ranking${params.toString() ? '?' + params.toString() : ''}`;
+  const response = await fetch(url, { cache: 'no-store' });
+
+  if (!response.ok) {
+    throw new Error(`ノートランキングの取得に失敗しました: ${response.status}`);
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+

@@ -80,6 +80,45 @@ router.patch('/notes/:id/enabled', tradeController.setEnabled);
  */
 router.patch('/notes/:id/pause', tradeController.setPausedUntil);
 
+// ============================================
+// フェーズ9: ノートパフォーマンス
+// ============================================
+
+/**
+ * GET /api/trades/notes/performance/ranking
+ * ノートランキングを取得（総合スコア順）
+ * 
+ * クエリパラメータ:
+ * - limit: 取得件数（デフォルト: 20）
+ * - from: 集計開始日時（ISO 8601）
+ * - to: 集計終了日時（ISO 8601）
+ * - timeframe: 時間足で絞り込み
+ */
+router.get('/notes/performance/ranking', tradeController.getPerformanceRanking);
+
+/**
+ * POST /api/trades/notes/performance/bulk
+ * 複数ノートのパフォーマンスサマリーを一括取得
+ * 
+ * リクエストボディ:
+ * - noteIds: string[] - ノート ID 配列
+ * - from?: 集計開始日時
+ * - to?: 集計終了日時
+ */
+router.post('/notes/performance/bulk', tradeController.getBulkPerformanceSummary);
+
+/**
+ * GET /api/trades/notes/:id/performance
+ * ノートのパフォーマンスレポートを取得
+ * 
+ * クエリパラメータ:
+ * - from: 集計開始日時（ISO 8601）
+ * - to: 集計終了日時（ISO 8601）
+ * - timeframe: 時間足で絞り込み
+ * - weakThreshold: 弱いパターン検出閾値（0.0〜1.0）
+ */
+router.get('/notes/:id/performance', tradeController.getPerformanceReport);
+
 /**
  * POST /api/trades/notes/:id/similar
  * 特定のノートに類似したノートを検索
