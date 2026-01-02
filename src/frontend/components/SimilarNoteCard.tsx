@@ -28,8 +28,8 @@ export interface SimilarNote {
   timestamp: string;
   /** AI 要約（短縮版） */
   summarySnippet?: string;
-  /** トレード結果 (オプション) */
-  result?: "win" | "loss" | "breakeven";
+  /** トレード結果 (オプション - pending は未決済) */
+  result?: "win" | "loss" | "breakeven" | "pending";
 }
 
 export interface SimilarNoteCardProps {
@@ -42,8 +42,8 @@ export interface SimilarNoteCardProps {
 /**
  * トレード結果バッジ
  */
-function ResultBadge({ result }: { result?: "win" | "loss" | "breakeven" }) {
-  if (!result) return null;
+function ResultBadge({ result }: { result?: "win" | "loss" | "breakeven" | "pending" }) {
+  if (!result || result === "pending") return null;
 
   const config = {
     win: { label: "勝ち", className: "bg-green-500/20 text-green-400 border-green-500/30" },

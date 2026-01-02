@@ -123,7 +123,8 @@ export default function SimilarNotesPage() {
         similarNotes: result.data.similarNotes.map((n) => ({
           id: n.noteId,
           symbol: n.symbol,
-          side: n.side,
+          // バックエンド API のレスポンスを SimilarNote 型に合わせてキャスト
+          side: n.side as "BUY" | "SELL" | "buy" | "sell",
           similarity: n.similarity,
           timestamp: n.timestamp,
           summarySnippet: n.summarySnippet,
