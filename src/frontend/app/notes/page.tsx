@@ -115,20 +115,20 @@ export default function NotesPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* ヘッダー */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">📊 トレードノート</h1>
-        <Button asChild size="sm" className="bg-gradient-to-r from-pink-500 to-violet-500 hover:opacity-90">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4">
+        <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-white">📊 トレードノート</h1>
+        <Button asChild size="sm" className="bg-gradient-to-r from-pink-500 to-violet-500 hover:opacity-90 w-fit">
           <Link href="/import">+ インポート</Link>
         </Button>
       </div>
 
       {/* ステータスフィルタタブ */}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1.5 sm:gap-2">
         <button
           onClick={() => setStatusFilter("all")}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+          className={`px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
             statusFilter === "all"
               ? "bg-gradient-to-r from-pink-500 to-violet-500 text-white"
               : "bg-slate-700/50 text-gray-400 hover:text-white hover:bg-slate-700"
@@ -138,7 +138,7 @@ export default function NotesPage() {
         </button>
         <button
           onClick={() => setStatusFilter("draft")}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+          className={`px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
             statusFilter === "draft"
               ? "bg-yellow-600/30 text-yellow-400 border border-yellow-600/50"
               : "bg-slate-700/50 text-gray-400 hover:text-yellow-400 hover:bg-slate-700"
@@ -148,17 +148,17 @@ export default function NotesPage() {
         </button>
         <button
           onClick={() => setStatusFilter("approved")}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+          className={`px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
             statusFilter === "approved"
               ? "bg-green-600/30 text-green-400 border border-green-600/50"
               : "bg-slate-700/50 text-gray-400 hover:text-green-400 hover:bg-slate-700"
           }`}
         >
-          承認済み {statusCounts && <span className="ml-1 opacity-75">({statusCounts.approved})</span>}
+          承認済 {statusCounts && <span className="ml-1 opacity-75">({statusCounts.approved})</span>}
         </button>
         <button
           onClick={() => setStatusFilter("rejected")}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+          className={`px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
             statusFilter === "rejected"
               ? "bg-red-600/30 text-red-400 border border-red-600/50"
               : "bg-slate-700/50 text-gray-400 hover:text-red-400 hover:bg-slate-700"

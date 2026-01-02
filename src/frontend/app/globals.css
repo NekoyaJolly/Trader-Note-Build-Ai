@@ -99,6 +99,31 @@ body {
   border-radius: 12px;
 }
 
+/* ====================================
+   Mobile Responsive Utilities
+   ==================================== */
+
+/* モバイル用テキスト省略 */
+.mobile-truncate {
+  @apply truncate;
+}
+
+/* モバイル用の行制限 */
+.line-clamp-mobile-1 {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* モバイル向けフォントサイズ微調整 */
+@media (max-width: 640px) {
+  .card-surface {
+    border-radius: 8px;
+  }
+}
+
 /* アクティブナビゲーション */
 .nav-active {
   background: #334155;

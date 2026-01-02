@@ -84,31 +84,31 @@ export default function ImportPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-slate-900 py-12 text-gray-900 dark:text-slate-100">
-      <div className="max-w-3xl mx-auto px-4">
+    <div className="min-h-screen bg-gray-50 dark:bg-slate-900 py-6 sm:py-8 md:py-12 text-gray-900 dark:text-slate-100">
+      <div className="max-w-3xl mx-auto px-3 sm:px-4">
         <Card className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
           <CardHeader>
-            <CardTitle className="text-slate-900 dark:text-slate-100">過去トレードのインポート</CardTitle>
+            <CardTitle className="text-slate-900 dark:text-slate-100">トレード履歴インポート</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4 text-gray-900 dark:text-slate-100">
-              <p className="text-base leading-relaxed font-medium">MT4 / MT5 / 多くのブローカーで CSV 出力が可能です。完璧な形式でなくても大丈夫です。</p>
-              <p className="text-base leading-relaxed">一部データに欠損があっても、自動でスキップされます。</p>
+            <div className="space-y-2 sm:space-y-4 text-gray-900 dark:text-slate-100">
+              <p className="text-xs sm:text-sm md:text-base leading-relaxed font-medium">MT4/MT5などのCSV出力に対応</p>
+              <p className="text-xs sm:text-sm md:text-base leading-relaxed">欠損データは自動スキップ</p>
             </div>
 
-            <div className="mt-6 space-y-3">
+            <div className="mt-4 sm:mt-6 space-y-3">
               <input
                 type="file"
                 accept=".csv,text/csv"
                 onChange={handleSelect}
-                className="block w-full rounded border border-slate-200 dark:border-slate-600 p-2 bg-white dark:bg-slate-900 text-gray-900 dark:text-slate-100"
+                className="block w-full rounded border border-slate-200 dark:border-slate-600 p-2 bg-white dark:bg-slate-900 text-gray-900 dark:text-slate-100 text-sm"
               />
 
-              <div className="flex items-center gap-3">
-                <Button onClick={handleUpload} disabled={!file || isUploading}>
-                  {isUploading ? "アップロード中…" : "アップロード"}
+              <div className="flex items-center gap-2 sm:gap-3">
+                <Button onClick={handleUpload} disabled={!file || isUploading} size="sm">
+                  {isUploading ? "送信中…" : "アップロード"}
                 </Button>
-                <Button variant="outline" onClick={handleSkip}>スキップ</Button>
+                <Button variant="outline" onClick={handleSkip} size="sm">スキップ</Button>
               </div>
 
               {isUploading && (

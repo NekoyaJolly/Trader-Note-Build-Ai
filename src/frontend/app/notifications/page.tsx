@@ -134,13 +134,13 @@ export default function NotificationsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* ヘッダー */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">🔔 通知一覧</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4">
+        <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-white">🔔 通知一覧</h1>
         {notifications.length > 0 && (
-          <Button onClick={handleMarkAllAsRead} variant="secondary" size="sm">
-            すべて既読にする
+          <Button onClick={handleMarkAllAsRead} variant="secondary" size="sm" className="w-fit">
+            すべて既読
           </Button>
         )}
       </div>

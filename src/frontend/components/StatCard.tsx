@@ -115,7 +115,7 @@ export default function StatCard({
   return (
     <div
       className={`
-        card-surface rounded-xl p-4 border ${styles.border}
+        card-surface rounded-xl p-3 sm:p-4 border ${styles.border}
         transition-all duration-300
         ${isClickable ? "cursor-pointer hover:border-slate-600 hover:shadow-[0_0_20px_rgba(139,92,246,0.15)]" : ""}
         ${className}
@@ -127,13 +127,13 @@ export default function StatCard({
       <div className="flex items-start justify-between">
         {/* 左側: タイトル + 値 */}
         <div className="flex-1">
-          <p className="text-sm text-gray-400 mb-1">{title}</p>
+          <p className="text-xs sm:text-sm text-gray-400 mb-1">{title}</p>
           <div className="flex items-baseline gap-1">
-            <span className={`text-3xl font-bold ${styles.valueColor}`}>
+            <span className={`text-xl sm:text-2xl md:text-3xl font-bold ${styles.valueColor}`}>
               {value}
             </span>
             {unit && (
-              <span className="text-sm text-gray-500">{unit}</span>
+              <span className="text-xs sm:text-sm text-gray-500">{unit}</span>
             )}
           </div>
           
@@ -156,7 +156,7 @@ export default function StatCard({
         
         {/* 右側: アイコン */}
         {icon && (
-          <div className={`p-3 rounded-lg ${styles.iconBg}`}>
+          <div className={`p-2 sm:p-3 rounded-lg ${styles.iconBg}`}>
             {icon}
           </div>
         )}

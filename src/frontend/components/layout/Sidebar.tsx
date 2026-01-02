@@ -213,9 +213,7 @@ export default function Sidebar({ isCollapsed: externalCollapsed, onCollapsedCha
       }
     }
   };
-      setInternalCollapsed(newValue);
-    }
-  };
+
   const pathname = usePathname();
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({
     "/notes": true, // デフォルトで展開
@@ -414,15 +412,12 @@ export default function Sidebar({ isCollapsed: externalCollapsed, onCollapsedCha
       `}
     >
       {/* ロゴ部分 */}
-      <div className="flex items-center justify-between p-4 border-b border-slate-700">
-        <Link href="/" className="flex items-center gap-2">
-          {!isCollapsed && (
-            <span className="text-xl font-bold neon-text">TradeAssist</span>
-          )}
-          {isCollapsed && (
-            <span className="text-xl font-bold neon-text">TA</span>
-          )}
-        </Link>
+      <div className={`flex items-center ${isCollapsed ? "justify-center" : "justify-between"} p-2 sm:p-3 md:p-4 border-b border-slate-700`}>
+        {!isCollapsed && (
+          <Link href="/" className="flex items-center gap-2">
+            <span className="text-lg sm:text-xl font-bold neon-text">TradeAssist</span>
+          </Link>
+        )}
         
         {/* 折りたたみボタン */}
         <button
