@@ -13,10 +13,6 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import Link from "next/link";
-import Sidebar from "@/components/layout/Sidebar";
-import Header from "@/components/layout/Header";
-import Footer from "@/components/layout/Footer";
 
 // ============================================
 // 型定義
@@ -52,7 +48,7 @@ interface ImportResult {
 // API 関数
 // ============================================
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3100';
 
 /** プリセット一覧を取得 */
 async function fetchPresets(): Promise<DataPreset[]> {
@@ -75,6 +71,7 @@ async function importCSV(file: File, options?: {
   presetName?: string;
   description?: string;
 }): Promise<ImportResult> {
+  console.log('[importCSV] API_BASE_URL:', API_BASE_URL);
   const formData = new FormData();
   formData.append('file', file);
 
@@ -91,17 +88,21 @@ async function importCSV(file: File, options?: {
     formData.append('description', options.description);
   }
 
+  console.log('[importCSV] Sending request to:', `${API_BASE_URL}/api/ohlcv/import`);
   const response = await fetch(`${API_BASE_URL}/api/ohlcv/import`, {
     method: 'POST',
     body: formData,
   });
 
+  console.log('[importCSV] Response status:', response.status);
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
+    console.error('[importCSV] Error response:', error);
     throw new Error(error.error || 'インポートに失敗しました');
   }
 
   const payload = await response.json();
+  console.log('[importCSV] Success payload:', payload);
   return payload.data;
 }
 
@@ -340,11 +341,19 @@ export default function DataPresetsPage() {
 
   /** インポート実行 */
   const handleImport = async () => {
-    if (!selectedFile) return;
+    console.log('[DataPresets] handleImport called, selectedFile:', selectedFile?.name);
+    if (!selectedFile) {
+      console.log('[DataPresets] No file selected');
+      return;
+    }
 
     try {
       setImporting(true);
       setError(null);
+      console.log('[DataPresets] Starting import...', {
+        symbol: importOptions.symbol,
+        timeframe: importOptions.timeframe,
+      });
 
       const result = await importCSV(selectedFile, {
         symbol: importOptions.symbol || undefined,
@@ -353,6 +362,7 @@ export default function DataPresetsPage() {
         description: importOptions.description || undefined,
       });
 
+      console.log('[DataPresets] Import successful:', result);
       setImportResult(result);
       setSelectedFile(null);
       setImportOptions({
@@ -365,6 +375,7 @@ export default function DataPresetsPage() {
       // プリセット一覧を再取得
       await loadPresets();
     } catch (err) {
+      console.error('[DataPresets] Import error:', err);
       setError(err instanceof Error ? err.message : 'インポートに失敗しました');
     } finally {
       setImporting(false);
@@ -394,31 +405,10 @@ export default function DataPresetsPage() {
   // ============================================
 
   return (
-    <div className="flex min-h-screen bg-slate-900">
-      <Sidebar />
-      <div className="flex-1 flex flex-col">
-        <Header />
-        <main className="flex-1 p-6">
-          {/* ヘッダー部 */}
-          <div className="mb-6">
-            <div className="flex items-center gap-2 text-sm text-gray-400 mb-2">
-              <Link href="/dashboard" className="hover:text-gray-200">
-                ダッシュボード
-              </Link>
-              <span>/</span>
-              <span className="text-gray-200">データプリセット</span>
-            </div>
-            <h1 className="text-2xl font-bold text-white">
-              データプリセット管理
-            </h1>
-            <p className="text-gray-400 mt-1">
-              ヒストリカル OHLCV データをインポートしてバックテストに使用できます
-            </p>
-          </div>
-
+    <div className="space-y-6">
           {/* エラー表示 */}
           {error && (
-            <div className="bg-red-600/20 border border-red-600 text-red-400 px-4 py-3 rounded mb-6">
+            <div className="bg-red-600/20 border border-red-600 text-red-400 px-4 py-3 rounded">
               {error}
             </div>
           )}
@@ -596,9 +586,6 @@ time,open,high,low,close{"\n"}
               </div>
             </div>
           </div>
-        </main>
-        <Footer />
-      </div>
     </div>
   );
 }

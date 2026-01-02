@@ -15,6 +15,20 @@ const notificationController = new NotificationController();
 router.get('/', notificationController.getNotifications);
 
 /**
+ * GET /api/notifications/unread-count
+ * 未読通知数を取得
+ * 注意: /:id より前に定義する必要がある（固定パス優先）
+ */
+router.get('/unread-count', notificationController.getUnreadCount);
+
+/**
+ * PUT /api/notifications/read-all
+ * すべての通知を既読にマーク
+ * 注意: /:id より前に定義する必要がある（固定パス優先）
+ */
+router.put('/read-all', notificationController.markAllAsRead);
+
+/**
  * GET /api/notifications/:id
  * 通知の詳細を取得
  */
@@ -27,12 +41,6 @@ router.get('/:id', notificationController.getNotificationById);
 router.put('/:id/read', notificationController.markAsRead);
 
 /**
- * PUT /api/notifications/read-all
- * すべての通知を既読にマーク
- */
-router.put('/read-all', notificationController.markAllAsRead);
-
-/**
  * DELETE /api/notifications/:id
  * 通知を削除
  */
@@ -43,12 +51,6 @@ router.delete('/:id', notificationController.deleteNotification);
  * すべての通知をクリア
  */
 router.delete('/', notificationController.clearAll);
-
-/**
- * GET /api/notifications/unread-count
- * 未読通知数を取得
- */
-router.get('/unread-count', notificationController.getUnreadCount);
 
 // ========================================
 // Phase4 新規エンドポイント（通知トリガ・ログ）

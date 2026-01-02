@@ -91,19 +91,54 @@ export class OHLCVRepository {
    * @returns 挿入された件数
    */
   async bulkInsert(dataList: OHLCVInsertData[]): Promise<number> {
-    // Prisma は createMany で upsert をサポートしていないため、
-    // 個別に upsert を実行（将来的には raw SQL で最適化可能）
+    if (dataList.length === 0) {
+      return 0;
+    }
+
+    // バッチサイズ: 一度に処理する件数（大量データ対応）
+    const BATCH_SIZE = 500;
     let insertedCount = 0;
-    
-    for (const data of dataList) {
+
+    console.log(`[OHLCVRepository] バルク挿入開始: ${dataList.length}件`);
+
+    // バッチ処理でデータを分割して処理
+    for (let i = 0; i < dataList.length; i += BATCH_SIZE) {
+      const batch = dataList.slice(i, i + BATCH_SIZE);
+      
       try {
-        await this.upsert(data);
-        insertedCount++;
+        // createMany で一括挿入（重複は skipDuplicates でスキップ）
+        const result = await prisma.oHLCVCandle.createMany({
+          data: batch.map(data => ({
+            symbol: data.symbol,
+            timeframe: data.timeframe,
+            timestamp: data.timestamp,
+            open: new Prisma.Decimal(data.open),
+            high: new Prisma.Decimal(data.high),
+            low: new Prisma.Decimal(data.low),
+            close: new Prisma.Decimal(data.close),
+            volume: new Prisma.Decimal(data.volume),
+            source: data.source,
+          })),
+          skipDuplicates: true, // 重複データはスキップ
+        });
+        
+        insertedCount += result.count;
+        console.log(`[OHLCVRepository] バッチ ${Math.floor(i / BATCH_SIZE) + 1}: ${result.count}件挿入`);
       } catch (error) {
-        console.warn(`OHLCV 挿入エラー (${data.symbol} ${data.timeframe} ${data.timestamp}):`, error);
+        console.error(`[OHLCVRepository] バッチ挿入エラー:`, error);
+        // エラー時はフォールバックとして個別挿入を試行
+        for (const data of batch) {
+          try {
+            await this.upsert(data);
+            insertedCount++;
+          } catch {
+            // 個別エラーはスキップ
+          }
+        }
       }
     }
-    
+
+    console.log(`[OHLCVRepository] バルク挿入完了: ${insertedCount}件`);
     return insertedCount;
   }
 

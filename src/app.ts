@@ -1,4 +1,5 @@
-import express, { Application, Request, Response } from 'express';
+import express, { Application, Request, Response, NextFunction } from 'express';
+import { Server } from 'http';
 import cors from 'cors';
 import { config } from './config';
 import tradeRoutes from './routes/tradeRoutes';
@@ -22,6 +23,7 @@ import { MatchingScheduler } from './utils/scheduler';
 class App {
   public app: Application;
   private scheduler: MatchingScheduler;
+  private server: Server | null = null;
 
   constructor() {
     this.app = express();
@@ -114,6 +116,23 @@ class App {
     this.app.use('/api/strategies', strategyRoutes);
     this.app.use('/api/ohlcv', ohlcvRoutes);
 
+    // グローバルエラーハンドラー: ルート内で発生した例外をキャッチしてサーバーを維持
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    this.app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
+      console.error('═══════════════════════════════════════');
+      console.error('  Express エラーハンドラーがエラーをキャッチしました');
+      console.error('═══════════════════════════════════════');
+      console.error('URL:', req.method, req.url);
+      console.error('Error:', err.message);
+      console.error('Stack:', err.stack);
+      console.error('═══════════════════════════════════════');
+      
+      res.status(500).json({
+        error: 'Internal Server Error',
+        message: config.server.isProduction ? 'サーバーエラーが発生しました' : err.message,
+      });
+    });
+
     // 404 handler
     this.app.use((req: Request, res: Response) => {
       res.status(404).json({ error: 'Route not found' });
@@ -126,7 +145,8 @@ class App {
   public start(): void {
     const port = config.server.port;
 
-    this.app.listen(port, () => {
+    // サーバーインスタンスを保持してイベントループを維持
+    this.server = this.app.listen(port, () => {
       console.log('═══════════════════════════════════════');
       console.log('  TradeAssist Server');
       console.log('═══════════════════════════════════════');
@@ -176,6 +196,11 @@ class App {
    */
   public stop(): void {
     this.scheduler.stop();
+    if (this.server) {
+      this.server.close(() => {
+        console.log('HTTPサーバーを正常に停止しました');
+      });
+    }
   }
 }
 

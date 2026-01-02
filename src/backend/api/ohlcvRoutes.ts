@@ -66,8 +66,14 @@ const upload = multer({
  *   - 400: { success: false, error: string }
  */
 router.post('/import', upload.single('file'), async (req: Request, res: Response) => {
+  console.log('[OHLCV Import] リクエスト受信');
+  console.log('[OHLCV Import] Content-Type:', req.headers['content-type']);
+  console.log('[OHLCV Import] File:', req.file ? req.file.originalname : 'なし');
+  console.log('[OHLCV Import] Body:', req.body);
+  
   try {
     if (!req.file) {
+      console.log('[OHLCV Import] エラー: ファイルがありません');
       res.status(400).json({
         success: false,
         error: 'CSV ファイルが指定されていません',

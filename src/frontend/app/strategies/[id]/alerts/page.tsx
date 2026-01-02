@@ -26,9 +26,6 @@ import {
   AlertChannel,
 } from "@/lib/api";
 import type { Strategy } from "@/types/strategy";
-import Sidebar from "@/components/layout/Sidebar";
-import Header from "@/components/layout/Header";
-import Footer from "@/components/layout/Footer";
 
 export default function StrategyAlertsPage() {
   const params = useParams();
@@ -216,49 +213,18 @@ export default function StrategyAlertsPage() {
 
   if (!strategy) {
     return (
-      <div className="flex min-h-screen bg-slate-900">
-        <Sidebar />
-        <div className="flex-1 flex flex-col">
-          <Header />
-          <main className="flex-1 p-6">
-            <div className="text-center py-12">
-              <div className="text-red-400 mb-4">ストラテジーが見つかりません</div>
-              <Link href="/strategies" className="text-blue-400 hover:underline">
-                ストラテジー一覧に戻る
-              </Link>
-            </div>
-          </main>
-          <Footer />
-        </div>
+      <div className="text-center py-12">
+        <div className="text-red-400 mb-4">ストラテジーが見つかりません</div>
+        <Link href="/strategies" className="text-blue-400 hover:underline">
+          ストラテジー一覧に戻る
+        </Link>
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen bg-slate-900">
-      <Sidebar />
-      <div className="flex-1 flex flex-col">
-        <Header />
-        <main className="flex-1 p-6">
-          {/* パンくず */}
-          <div className="mb-6">
-            <div className="flex items-center gap-2 text-sm text-gray-400 mb-2">
-              <Link href="/strategies" className="hover:text-gray-200">
-                ストラテジー
-              </Link>
-              <span>/</span>
-              <Link href={`/strategies/${strategyId}`} className="hover:text-gray-200">
-                {strategy.name}
-              </Link>
-              <span>/</span>
-              <span className="text-gray-200">アラート設定</span>
-            </div>
-            <h1 className="text-2xl font-bold text-white">
-              アラート設定 - {strategy.name}
-            </h1>
-          </div>
-
-          {/* 成功メッセージ */}
+    <div className="space-y-6">
+          {/* 成功メッセージ */}}
           {success && (
             <div className="bg-green-600/20 border border-green-600 text-green-400 px-4 py-3 rounded mb-6">
               {success}
@@ -480,9 +446,6 @@ export default function StrategyAlertsPage() {
               )}
             </div>
           </div>
-        </main>
-        <Footer />
-      </div>
     </div>
   );
 }

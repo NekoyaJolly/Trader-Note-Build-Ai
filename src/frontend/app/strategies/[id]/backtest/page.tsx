@@ -12,6 +12,9 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import Sidebar from "@/components/layout/Sidebar";
+import Header from "@/components/layout/Header";
+import Footer from "@/components/layout/Footer";
 import {
   fetchStrategy,
   runStrategyBacktest,
@@ -32,9 +35,6 @@ import {
   CoverageCheckResult,
 } from "@/lib/api";
 import type { Strategy, BacktestResult, BacktestResultSummary, BacktestTradeEvent } from "@/types/strategy";
-import Sidebar from "@/components/layout/Sidebar";
-import Header from "@/components/layout/Header";
-import Footer from "@/components/layout/Footer";
 
 // ============================================
 // 型定義
@@ -57,7 +57,7 @@ interface BacktestParams {
 // サブコンポーネント
 // ============================================
 
-/** パフォーマンスメトリクスカード */
+/** パフォーマンスメトリクスカード（コンパクト版） */
 function MetricCard({ 
   label, 
   value, 
@@ -70,11 +70,13 @@ function MetricCard({
   color?: string;
 }) {
   return (
-    <div className="bg-slate-700 rounded-lg p-4">
-      <div className="text-sm text-gray-400 mb-1">{label}</div>
-      <div className={`text-xl font-bold ${color}`}>
-        {typeof value === "number" ? value.toLocaleString() : value}
-        {unit && <span className="text-sm ml-1 text-gray-400">{unit}</span>}
+    <div className="bg-slate-700/50 rounded px-2 py-1.5 sm:px-3 sm:py-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-gray-400 truncate">{label}</span>
+        <span className={`text-sm sm:text-base font-semibold ${color} whitespace-nowrap`}>
+          {typeof value === "number" ? value.toLocaleString() : value}
+          {unit && <span className="text-xs ml-0.5 text-gray-500">{unit}</span>}
+        </span>
       </div>
     </div>
   );
@@ -163,7 +165,7 @@ function TradeResultTable({ trades }: { trades: BacktestTradeEvent[] }) {
   );
 }
 
-/** バックテスト履歴リスト */
+/** バックテスト履歴リスト（コンパクト版） */
 function BacktestHistoryList({ 
   history, 
   onSelect 
@@ -173,25 +175,25 @@ function BacktestHistoryList({
 }) {
   if (!history || history.length === 0) {
     return (
-      <div className="text-center text-gray-400 py-4">
+      <div className="text-center text-gray-500 py-3 text-xs">
         バックテスト履歴がありません
       </div>
     );
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       {history.map((item) => (
         <button
           key={item.id}
           onClick={() => onSelect(item.id)}
-          className="w-full text-left bg-slate-700 hover:bg-slate-600 rounded-lg p-3 transition-colors"
+          className="w-full text-left bg-slate-700/50 hover:bg-slate-600/50 rounded px-2 py-1.5 transition-colors border border-slate-600/50 hover:border-cyan-500/30"
         >
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-sm text-gray-400">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-400">
               {new Date(item.executedAt).toLocaleString("ja-JP")}
             </span>
-            <span className={`text-xs px-2 py-0.5 rounded ${
+            <span className={`text-xs px-1.5 py-0.5 rounded ${
               item.status === "completed" 
                 ? "bg-green-600/30 text-green-400"
                 : item.status === "failed"
@@ -203,19 +205,16 @@ function BacktestHistoryList({
                 : "実行中"}
             </span>
           </div>
-          <div className="text-sm text-gray-200">
-            {item.startDate} 〜 {item.endDate}
-          </div>
           {item.summary && (
-            <div className="flex gap-4 mt-2 text-xs">
-              <span className="text-gray-400">
-                勝率: <span className="text-white">{(item.summary.winRate * 100).toFixed(1)}%</span>
+            <div className="flex gap-3 mt-1 text-xs">
+              <span className="text-gray-500">
+                勝率: <span className="text-cyan-400">{(item.summary.winRate * 100).toFixed(1)}%</span>
               </span>
-              <span className="text-gray-400">
-                PF: <span className="text-white">{item.summary.profitFactor.toFixed(2)}</span>
+              <span className="text-gray-500">
+                PF: <span className="text-cyan-400">{item.summary.profitFactor.toFixed(2)}</span>
               </span>
-              <span className="text-gray-400">
-                トレード数: <span className="text-white">{item.summary.totalTrades}</span>
+              <span className="text-gray-500">
+                {item.summary.totalTrades}件
               </span>
             </div>
           )}
@@ -599,161 +598,123 @@ export default function StrategyBacktestPage() {
         </div>
       )}
 
-      <div className="flex min-h-screen bg-slate-900">
-        <Sidebar />
-        <div className="flex-1 flex flex-col">
-          <Header />
-          <main className="flex-1 p-6">
-            {/* ヘッダー部 */}
-          <div className="mb-6">
-            <div className="flex items-center gap-2 text-sm text-gray-400 mb-2">
-              <Link href="/strategies" className="hover:text-gray-200">
-                ストラテジー
-              </Link>
-              <span>/</span>
-              <Link href={`/strategies/${strategyId}`} className="hover:text-gray-200">
-                {strategy.name}
-              </Link>
-              <span>/</span>
-              <span className="text-gray-200">バックテスト</span>
-            </div>
-            <h1 className="text-2xl font-bold text-white">
-              バックテスト - {strategy.name}
-            </h1>
-          </div>
-
+      <div className="space-y-3 sm:space-y-4">
           {/* エラー表示 */}
           {error && (
-            <div className="bg-red-600/20 border border-red-600 text-red-400 px-4 py-3 rounded mb-6">
+            <div className="bg-red-600/20 border border-red-500/50 text-red-400 px-3 py-2 rounded text-sm">
               {error}
             </div>
           )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4">
             {/* 左カラム: 実行パラメータ */}
             <div className="lg:col-span-1">
-              <div className="bg-slate-800 rounded-lg p-6">
-                <h2 className="text-lg font-semibold text-white mb-4">
+              <div className="card-surface p-3 sm:p-4">
+                <h2 className="text-sm sm:text-base font-semibold text-white mb-3">
                   実行パラメータ
                 </h2>
 
                 {/* 期間設定 */}
-                <div className="space-y-4 mb-6">
+                <div className="grid grid-cols-2 gap-2 mb-3">
                   <div>
-                    <label className="block text-sm text-gray-400 mb-1">
+                    <label className="block text-xs text-gray-400 mb-1">
                       開始日
                     </label>
                     <input
                       type="date"
                       value={backtestParams.startDate}
                       onChange={(e) => handleParamChange("startDate", e.target.value)}
-                      className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm text-gray-400 mb-1">
+                    <label className="block text-xs text-gray-400 mb-1">
                       終了日
                     </label>
                     <input
                       type="date"
                       value={backtestParams.endDate}
                       onChange={(e) => handleParamChange("endDate", e.target.value)}
-                      className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
                     />
                   </div>
                 </div>
 
                 {/* Stage1 時間足 */}
-                <div className="mb-4">
-                  <label className="block text-sm text-gray-400 mb-1">
-                    Stage1 時間足
-                  </label>
-                  <select
-                    value={backtestParams.stage1Timeframe}
-                    onChange={(e) => handleParamChange("stage1Timeframe", e.target.value)}
-                    className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="15m">15分足</option>
-                    <option value="30m">30分足</option>
-                    <option value="1h">1時間足</option>
-                    <option value="4h">4時間足</option>
-                    <option value="1d">日足</option>
-                  </select>
-                  <p className="text-xs text-gray-500 mt-1">
-                    高速スキャン用の時間足
-                  </p>
+                <div className="mb-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-xs text-gray-400">時間足</label>
+                    <select
+                      value={backtestParams.stage1Timeframe}
+                      onChange={(e) => handleParamChange("stage1Timeframe", e.target.value)}
+                      className="bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                    >
+                      <option value="15m">15分</option>
+                      <option value="30m">30分</option>
+                      <option value="1h">1時間</option>
+                      <option value="4h">4時間</option>
+                      <option value="1d">日足</option>
+                    </select>
+                  </div>
                 </div>
 
                 {/* Stage2 有効化 */}
-                <div className="mb-4">
+                <div className="mb-3">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={backtestParams.enableStage2}
                       onChange={(e) => handleParamChange("enableStage2", e.target.checked)}
-                      className="w-4 h-4 bg-slate-700 border-slate-600 rounded focus:ring-2 focus:ring-blue-500"
+                      className="w-3.5 h-3.5 bg-slate-700 border-slate-600 rounded focus:ring-1 focus:ring-cyan-500/50"
                     />
-                    <span className="text-sm text-gray-200">
-                      Stage2 精密検証を有効化
+                    <span className="text-xs text-gray-300">
+                      Stage2 精密検証
                     </span>
                   </label>
-                  <p className="text-xs text-gray-500 mt-1 ml-6">
-                    1分足でエントリータイミングを精密検証（処理時間増加）
-                  </p>
                 </div>
 
                 {/* 資金・ロット設定 */}
-                <div className="space-y-4 mb-6">
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-1">
-                      初期資金
-                    </label>
-                    <div className="flex gap-2">
+                <div className="space-y-2 mb-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-xs text-gray-400">初期資金</label>
+                    <div className="flex gap-1">
                       <input
                         type="number"
                         value={backtestParams.initialCapital}
                         onChange={(e) => handleParamChange("initialCapital", parseInt(e.target.value) || 0)}
-                        className="flex-1 bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-24 bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1 text-sm text-white text-right focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
                       />
-                      <span className="bg-slate-600 border border-slate-500 rounded px-3 py-2 text-gray-300 text-sm">
-                        JPY
-                      </span>
+                      <span className="text-xs text-gray-500 self-center">JPY</span>
                     </div>
-                    <p className="text-xs text-gray-500 mt-1">※ 仮想の初期資金（ドローダウン計算用）</p>
                   </div>
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-1">
-                      ロット数（通貨量）
-                    </label>
-                    <div className="flex gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-xs text-gray-400">ロット数</label>
+                    <div className="flex gap-1">
                       <input
                         type="number"
                         step="1000"
                         min="1000"
                         value={backtestParams.lotSize}
                         onChange={(e) => handleParamChange("lotSize", parseInt(e.target.value) || 1000)}
-                        className="flex-1 bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-24 bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1 text-sm text-white text-right focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
                       />
-                      <span className="bg-slate-600 border border-slate-500 rounded px-3 py-2 text-gray-300 text-sm">
-                        通貨
-                      </span>
+                      <span className="text-xs text-gray-500 self-center">通貨</span>
                     </div>
-                    <p className="text-xs text-gray-500 mt-1">例: 10000 = 1万通貨、100000 = 1ロット</p>
                   </div>
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-1">
-                      レバレッジ（倍）
-                    </label>
-                    <input
-                      type="number"
-                      step="1"
-                      min="1"
-                      max="1000"
-                      value={backtestParams.leverage}
-                      onChange={(e) => handleParamChange("leverage", parseInt(e.target.value) || 1)}
-                      className="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">国内25倍、海外最大1000倍</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-xs text-gray-400">レバレッジ</label>
+                    <div className="flex gap-1">
+                      <input
+                        type="number"
+                        step="1"
+                        min="1"
+                        max="1000"
+                        value={backtestParams.leverage}
+                        onChange={(e) => handleParamChange("leverage", parseInt(e.target.value) || 1)}
+                        className="w-16 bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1 text-sm text-white text-right focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                      />
+                      <span className="text-xs text-gray-500 self-center">倍</span>
+                    </div>
                   </div>
                 </div>
 
@@ -761,15 +722,15 @@ export default function StrategyBacktestPage() {
                 <button
                   onClick={handleRunBacktestWithCoverageCheck}
                   disabled={running || checkingCoverage}
-                  className={`w-full py-3 rounded-lg font-medium transition-colors ${
+                  className={`w-full py-2 rounded text-sm font-medium transition-all ${
                     running || checkingCoverage
-                      ? "bg-gray-600 text-gray-400 cursor-not-allowed"
-                      : "bg-blue-600 hover:bg-blue-700 text-white"
+                      ? "bg-gray-700 text-gray-500 cursor-not-allowed"
+                      : "bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/30"
                   }`}
                 >
                   {checkingCoverage ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                    <span className="flex items-center justify-center gap-1.5">
+                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
                         <circle
                           className="opacity-25"
                           cx="12"
@@ -785,11 +746,11 @@ export default function StrategyBacktestPage() {
                           d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                         />
                       </svg>
-                      データチェック中...
+                      チェック中...
                     </span>
                   ) : running ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                    <span className="flex items-center justify-center gap-1.5">
+                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
                         <circle
                           className="opacity-25"
                           cx="12"
@@ -814,8 +775,8 @@ export default function StrategyBacktestPage() {
               </div>
 
               {/* バックテスト履歴 */}
-              <div className="bg-slate-800 rounded-lg p-6 mt-6">
-                <h2 className="text-lg font-semibold text-white mb-4">
+              <div className="card-surface p-3 sm:p-4 mt-3">
+                <h2 className="text-xs sm:text-sm font-semibold text-white mb-2">
                   実行履歴
                 </h2>
                 <BacktestHistoryList
@@ -828,15 +789,15 @@ export default function StrategyBacktestPage() {
             {/* 右カラム: 結果表示 */}
             <div className="lg:col-span-2">
               {result ? (
-                <div className="bg-slate-800 rounded-lg">
+                <div className="card-surface">
                   {/* タブ */}
-                  <div className="border-b border-slate-700">
-                    <div className="flex">
+                  <div className="border-b border-slate-700/50">
+                    <div className="flex overflow-x-auto">
                       <button
                         onClick={() => setActiveTab("summary")}
-                        className={`px-6 py-3 text-sm font-medium transition-colors ${
+                        className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
                           activeTab === "summary"
-                            ? "text-blue-400 border-b-2 border-blue-400"
+                            ? "text-cyan-400 border-b-2 border-cyan-400"
                             : "text-gray-400 hover:text-gray-200"
                         }`}
                       >
@@ -844,29 +805,29 @@ export default function StrategyBacktestPage() {
                       </button>
                       <button
                         onClick={() => setActiveTab("trades")}
-                        className={`px-6 py-3 text-sm font-medium transition-colors ${
+                        className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
                           activeTab === "trades"
-                            ? "text-blue-400 border-b-2 border-blue-400"
+                            ? "text-cyan-400 border-b-2 border-cyan-400"
                             : "text-gray-400 hover:text-gray-200"
                         }`}
                       >
-                        トレード一覧 ({result.trades.length})
+                        トレード ({result.trades.length})
                       </button>
                       <button
                         onClick={() => setActiveTab("filter")}
-                        className={`px-6 py-3 text-sm font-medium transition-colors ${
+                        className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
                           activeTab === "filter"
-                            ? "text-blue-400 border-b-2 border-blue-400"
+                            ? "text-cyan-400 border-b-2 border-cyan-400"
                             : "text-gray-400 hover:text-gray-200"
                         }`}
                       >
-                        フィルター分析
+                        フィルター
                       </button>
                       <button
                         onClick={() => setActiveTab("walkforward")}
-                        className={`px-6 py-3 text-sm font-medium transition-colors ${
+                        className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
                           activeTab === "walkforward"
-                            ? "text-blue-400 border-b-2 border-blue-400"
+                            ? "text-cyan-400 border-b-2 border-cyan-400"
                             : "text-gray-400 hover:text-gray-200"
                         }`}
                       >
@@ -876,12 +837,12 @@ export default function StrategyBacktestPage() {
                   </div>
 
                   {/* コンテンツ */}
-                  <div className="p-6">
+                  <div className="p-3 sm:p-4">
                     {activeTab === "summary" && (
                       <div>
                         {/* ステータス */}
-                        <div className="flex items-center gap-4 mb-6">
-                          <span className={`px-3 py-1 rounded text-sm font-medium ${
+                        <div className="flex flex-wrap items-center gap-2 mb-3">
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
                             result.summary.stoppedReason === "bankruptcy"
                               ? "bg-red-600/30 text-red-400"
                               : result.status === "completed"
@@ -891,28 +852,23 @@ export default function StrategyBacktestPage() {
                               : "bg-yellow-600/30 text-yellow-400"
                           }`}>
                             {result.summary.stoppedReason === "bankruptcy" 
-                              ? "破産終了" 
+                              ? "破産" 
                               : result.status === "completed" ? "完了" 
                               : result.status === "failed" ? "失敗" 
                               : "実行中"}
                           </span>
-                          {result.summary.stoppedReason === "bankruptcy" && (
-                            <span className="text-sm text-red-400">
-                              資金が50%を下回ったため終了（残高: {result.summary.finalCapital?.toLocaleString()} JPY）
-                            </span>
-                          )}
-                          <span className="text-sm text-gray-400">
+                          <span className="text-xs text-gray-500">
                             {result.startDate} 〜 {result.endDate}
                           </span>
-                          <span className="text-sm text-gray-400">
-                            時間足: {result.timeframe}
+                          <span className="text-xs text-gray-500">
+                            {result.timeframe}
                           </span>
                         </div>
 
                         {/* メトリクスグリッド */}
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 sm:gap-2 mb-2">
                           <MetricCard
-                            label="総トレード数"
+                            label="トレード数"
                             value={result.summary.totalTrades}
                           />
                           <MetricCard
@@ -922,23 +878,23 @@ export default function StrategyBacktestPage() {
                             color={result.summary.winRate >= 0.5 ? "text-green-400" : "text-red-400"}
                           />
                           <MetricCard
-                            label="プロフィットファクター"
+                            label="PF"
                             value={result.summary.profitFactor.toFixed(2)}
                             color={result.summary.profitFactor >= 1 ? "text-green-400" : "text-red-400"}
                           />
                           <MetricCard
-                            label="最大ドローダウン"
+                            label="最大DD"
                             value={(result.summary.maxDrawdownRate * 100).toFixed(1)}
                             unit="%"
                             color="text-red-400"
                           />
                         </div>
 
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 sm:gap-2 mb-2">
                           <MetricCard
                             label="純利益"
                             value={result.summary.netProfit.toLocaleString()}
-                            unit="JPY"
+                            unit="円"
                             color={result.summary.netProfit >= 0 ? "text-green-400" : "text-red-400"}
                           />
                           <MetricCard
@@ -950,52 +906,51 @@ export default function StrategyBacktestPage() {
                           <MetricCard
                             label="平均勝ち"
                             value={result.summary.averageWin.toLocaleString()}
-                            unit="JPY"
+                            unit="円"
                             color="text-green-400"
                           />
                           <MetricCard
                             label="平均負け"
                             value={Math.abs(result.summary.averageLoss).toLocaleString()}
-                            unit="JPY"
+                            unit="円"
                             color="text-red-400"
                           />
                         </div>
 
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 sm:gap-2 mb-2">
                           <MetricCard
-                            label="勝ちトレード"
+                            label="勝ち"
                             value={result.summary.winningTrades}
                             color="text-green-400"
                           />
                           <MetricCard
-                            label="負けトレード"
+                            label="負け"
                             value={result.summary.losingTrades}
                             color="text-red-400"
                           />
                           <MetricCard
-                            label="リスクリワード比"
+                            label="RR比"
                             value={result.summary.riskRewardRatio.toFixed(2)}
                           />
                           <MetricCard
-                            label="最大連勝/連敗"
-                            value={`${result.summary.maxConsecutiveWins} / ${result.summary.maxConsecutiveLosses}`}
+                            label="連勝/連敗"
+                            value={`${result.summary.maxConsecutiveWins}/${result.summary.maxConsecutiveLosses}`}
                           />
                         </div>
 
                         {/* ノート作成セクション */}
                         {result.summary.winningTrades > 0 && (
-                          <div className="mt-8 pt-6 border-t border-slate-700">
-                            <h3 className="text-lg font-semibold text-white mb-3">
+                          <div className="mt-4 pt-3 border-t border-slate-700">
+                            <h4 className="text-sm font-semibold text-cyan-400 mb-1">
                               勝ちパターンの記録
-                            </h3>
-                            <p className="text-sm text-gray-400 mb-4">
-                              勝ちトレード({result.summary.winningTrades}件)のインジケーター値をStrategyNoteとして保存し、
-                              将来の類似パターン検出に活用できます。
+                            </h4>
+                            <p className="text-xs text-gray-400 mb-2">
+                              勝ち{result.summary.winningTrades}件をStrategyNoteとして保存
                             </p>
                             
                             {/* ノート作成結果の表示 */}
                             {noteCreationResult && (
-                              <div className={`mb-4 px-4 py-3 rounded ${
+                              <div className={`mb-2 px-2 py-1.5 rounded text-xs ${
                                 noteCreationResult.success
                                   ? "bg-green-600/20 border border-green-600 text-green-400"
                                   : "bg-red-600/20 border border-red-600 text-red-400"
@@ -1014,14 +969,14 @@ export default function StrategyBacktestPage() {
                               </div>
                             )}
 
-                            <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-3">
                               <button
                                 onClick={handleCreateNotesFromWins}
                                 disabled={creatingNotes}
-                                className={`px-6 py-2.5 rounded-lg font-medium transition-colors flex items-center gap-2 ${
+                                className={`px-3 py-1.5 rounded font-medium text-xs transition-colors flex items-center gap-1.5 ${
                                   creatingNotes
                                     ? "bg-gray-600 text-gray-400 cursor-not-allowed"
-                                    : "bg-green-600 hover:bg-green-700 text-white"
+                                    : "bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white shadow-lg shadow-green-500/20"
                                 }`}
                               >
                                 {creatingNotes ? (
@@ -1056,9 +1011,9 @@ export default function StrategyBacktestPage() {
                               
                               <Link
                                 href={`/strategies/${strategyId}/notes`}
-                                className="text-sm text-blue-400 hover:underline"
+                                className="text-xs text-cyan-400 hover:underline"
                               >
-                                既存のノートを見る
+                                ノート一覧 →
                               </Link>
                             </div>
                           </div>
@@ -1072,13 +1027,11 @@ export default function StrategyBacktestPage() {
 
                     {activeTab === "filter" && (
                       <div>
-                        <h3 className="text-lg font-semibold text-white mb-4">
+                        <h4 className="text-sm font-semibold text-cyan-400 mb-2">
                           フィルター分析
-                        </h3>
-                        <p className="text-sm text-gray-400 mb-6">
-                          勝ち/負けトレードのインジケーター傾向を分析し、
-                          勝率改善に有効なフィルター条件を探索します。
-                          最大5つまで同時に追加して検証できます。
+                        </h4>
+                        <p className="text-xs text-gray-400 mb-3">
+                          勝率改善フィルター条件を探索（最大5つまで）
                         </p>
 
                         {/* 分析実行ボタン */}
@@ -1097,49 +1050,40 @@ export default function StrategyBacktestPage() {
                               }
                             }}
                             disabled={loadingFilter}
-                            className={`px-6 py-3 rounded-lg font-medium ${
+                            className={`px-3 py-1.5 rounded font-medium text-xs ${
                               loadingFilter
                                 ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                                : 'bg-blue-600 hover:bg-blue-700 text-white'
+                                : 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-lg shadow-cyan-500/20'
                             }`}
                           >
-                            {loadingFilter ? '分析中...' : 'インジケーター傾向を分析'}
+                            {loadingFilter ? '分析中...' : 'インジケーター傾向分析'}
                           </button>
                         )}
 
                         {/* 分析結果 */}
                         {filterAnalysis && (
-                          <div className="space-y-6">
+                          <div className="space-y-3">
                             {/* 概要 */}
-                            <div className="bg-slate-700 rounded-lg p-4">
-                              <div className="grid grid-cols-3 gap-4 text-center">
-                                <div>
-                                  <div className="text-2xl font-bold text-white">{filterAnalysis.totalTrades}</div>
-                                  <div className="text-sm text-gray-400">総トレード</div>
-                                </div>
-                                <div>
-                                  <div className="text-2xl font-bold text-green-400">{filterAnalysis.winTrades}</div>
-                                  <div className="text-sm text-gray-400">勝ちトレード</div>
-                                </div>
-                                <div>
-                                  <div className="text-2xl font-bold text-red-400">{filterAnalysis.loseTrades}</div>
-                                  <div className="text-sm text-gray-400">負けトレード</div>
-                                </div>
+                            <div className="bg-slate-700/50 rounded px-3 py-2">
+                              <div className="flex justify-between text-xs">
+                                <span className="text-gray-400">総<span className="ml-1 text-white font-medium">{filterAnalysis.totalTrades}</span></span>
+                                <span className="text-gray-400">勝<span className="ml-1 text-green-400 font-medium">{filterAnalysis.winTrades}</span></span>
+                                <span className="text-gray-400">負<span className="ml-1 text-red-400 font-medium">{filterAnalysis.loseTrades}</span></span>
                               </div>
                             </div>
 
                             {/* インジケーター傾向 */}
                             <div>
-                              <h4 className="text-md font-semibold text-white mb-3">
-                                インジケーター別 勝ち/負け傾向（有効度順）
-                              </h4>
-                              <div className="space-y-2">
+                              <h5 className="text-xs font-medium text-gray-300 mb-2">
+                                インジケーター傾向（有効度順）
+                              </h5>
+                              <div className="space-y-1">
                                 {filterAnalysis.indicators.slice(0, 10).map((ind) => (
                                   <div
                                     key={ind.indicator}
-                                    className={`bg-slate-700 rounded-lg p-3 cursor-pointer transition-colors ${
+                                    className={`bg-slate-700/50 rounded px-2 py-1.5 cursor-pointer transition-colors text-xs ${
                                       selectedFilters.some(f => f.indicator === ind.indicator)
-                                        ? 'ring-2 ring-blue-500'
+                                        ? 'ring-1 ring-cyan-500'
                                         : 'hover:bg-slate-600'
                                     }`}
                                     onClick={() => {
@@ -1159,20 +1103,13 @@ export default function StrategyBacktestPage() {
                                     }}
                                   >
                                     <div className="flex justify-between items-center">
-                                      <div>
-                                        <span className="font-medium text-white">{ind.displayName}</span>
-                                        <span className="ml-2 text-xs text-gray-400">
-                                          有効度: {ind.significanceScore.toFixed(1)}%
-                                        </span>
+                                      <span className="font-medium text-white">{ind.displayName}</span>
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-green-400">{ind.winAverage.toFixed(2)}</span>
+                                        <span className="text-gray-500">/</span>
+                                        <span className="text-red-400">{ind.loseAverage.toFixed(2)}</span>
+                                        <span className="text-gray-500 text-[10px]">{ind.significanceScore.toFixed(0)}%</span>
                                       </div>
-                                      <div className="text-sm">
-                                        <span className="text-green-400">勝: {ind.winAverage.toFixed(2)}</span>
-                                        <span className="mx-2 text-gray-500">|</span>
-                                        <span className="text-red-400">負: {ind.loseAverage.toFixed(2)}</span>
-                                      </div>
-                                    </div>
-                                    <div className="mt-1 text-xs text-gray-400">
-                                      推奨: {ind.suggestedCondition}
                                     </div>
                                   </div>
                                 ))}
@@ -1181,15 +1118,15 @@ export default function StrategyBacktestPage() {
 
                             {/* 選択したフィルター */}
                             {selectedFilters.length > 0 && (
-                              <div className="bg-slate-700 rounded-lg p-4">
-                                <h4 className="text-md font-semibold text-white mb-3">
-                                  選択中のフィルター（{selectedFilters.length}/5）
-                                </h4>
-                                <div className="flex flex-wrap gap-2 mb-4">
+                              <div className="bg-slate-700/50 rounded px-2 py-2">
+                                <h5 className="text-xs font-medium text-gray-300 mb-2">
+                                  選択中（{selectedFilters.length}/5）
+                                </h5>
+                                <div className="flex flex-wrap gap-1.5 mb-2">
                                   {selectedFilters.map((filter, idx) => (
                                     <div
                                       key={idx}
-                                      className="bg-blue-600/30 text-blue-300 px-3 py-1 rounded-full text-sm flex items-center gap-2"
+                                      className="bg-cyan-600/30 text-cyan-300 px-2 py-0.5 rounded-full text-[10px] flex items-center gap-1"
                                     >
                                       <span>{filter.indicator} {filter.operator} {filter.value}</span>
                                       <button
@@ -1218,30 +1155,30 @@ export default function StrategyBacktestPage() {
                                     }
                                   }}
                                   disabled={verifyingFilter}
-                                  className={`px-6 py-2 rounded-lg font-medium ${
+                                  className={`px-3 py-1.5 rounded font-medium text-xs ${
                                     verifyingFilter
                                       ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                                      : 'bg-green-600 hover:bg-green-700 text-white'
+                                      : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white shadow-lg shadow-green-500/20'
                                   }`}
                                 >
-                                  {verifyingFilter ? '検証中...' : 'フィルター効果を検証'}
+                                  {verifyingFilter ? '検証中...' : '効果検証'}
                                 </button>
                               </div>
                             )}
 
                             {/* 検証結果 */}
                             {filterVerifyResult && (
-                              <div className="bg-slate-700 rounded-lg p-4">
-                                <h4 className="text-md font-semibold text-white mb-4">
-                                  フィルター適用効果
-                                </h4>
-                                <div className="grid grid-cols-2 gap-6">
+                              <div className="bg-slate-700/50 rounded px-2 py-2">
+                                <h5 className="text-xs font-medium text-gray-300 mb-2">
+                                  適用効果
+                                </h5>
+                                <div className="grid grid-cols-2 gap-3 text-xs">
                                   {/* 適用前 */}
                                   <div>
-                                    <div className="text-sm text-gray-400 mb-2">適用前</div>
-                                    <div className="space-y-2">
+                                    <div className="text-[10px] text-gray-400 mb-1">適用前</div>
+                                    <div className="space-y-1">
                                       <div className="flex justify-between">
-                                        <span className="text-gray-300">トレード数</span>
+                                        <span className="text-gray-300">トレード</span>
                                         <span className="text-white">{filterVerifyResult.before.totalTrades}</span>
                                       </div>
                                       <div className="flex justify-between">
@@ -1255,7 +1192,7 @@ export default function StrategyBacktestPage() {
                                       <div className="flex justify-between">
                                         <span className="text-gray-300">純利益</span>
                                         <span className={filterVerifyResult.before.netProfit >= 0 ? 'text-green-400' : 'text-red-400'}>
-                                          {filterVerifyResult.before.netProfit.toLocaleString()} JPY
+                                          {filterVerifyResult.before.netProfit.toLocaleString()}円
                                         </span>
                                       </div>
                                     </div>
@@ -1263,14 +1200,14 @@ export default function StrategyBacktestPage() {
 
                                   {/* 適用後 */}
                                   <div>
-                                    <div className="text-sm text-gray-400 mb-2">適用後</div>
-                                    <div className="space-y-2">
+                                    <div className="text-[10px] text-gray-400 mb-1">適用後</div>
+                                    <div className="space-y-1">
                                       <div className="flex justify-between">
-                                        <span className="text-gray-300">トレード数</span>
+                                        <span className="text-gray-300">トレード</span>
                                         <span className="text-white">
                                           {filterVerifyResult.after.totalTrades}
-                                          <span className="text-xs text-gray-400 ml-1">
-                                            (-{filterVerifyResult.after.filteredOutTrades})
+                                          <span className="text-[10px] text-gray-400 ml-0.5">
+                                            -{filterVerifyResult.after.filteredOutTrades}
                                           </span>
                                         </span>
                                       </div>
@@ -1278,8 +1215,8 @@ export default function StrategyBacktestPage() {
                                         <span className="text-gray-300">勝率</span>
                                         <span className={filterVerifyResult.improvement.winRateChange >= 0 ? 'text-green-400' : 'text-red-400'}>
                                           {(filterVerifyResult.after.winRate * 100).toFixed(1)}%
-                                          <span className="text-xs ml-1">
-                                            ({filterVerifyResult.improvement.winRateChange >= 0 ? '+' : ''}{(filterVerifyResult.improvement.winRateChange * 100).toFixed(1)}%)
+                                          <span className="text-[10px] ml-0.5">
+                                            {filterVerifyResult.improvement.winRateChange >= 0 ? '+' : ''}{(filterVerifyResult.improvement.winRateChange * 100).toFixed(1)}%
                                           </span>
                                         </span>
                                       </div>
@@ -1287,15 +1224,15 @@ export default function StrategyBacktestPage() {
                                         <span className="text-gray-300">PF</span>
                                         <span className={filterVerifyResult.improvement.pfChange >= 0 ? 'text-green-400' : 'text-red-400'}>
                                           {filterVerifyResult.after.profitFactor.toFixed(2)}
-                                          <span className="text-xs ml-1">
-                                            ({filterVerifyResult.improvement.pfChange >= 0 ? '+' : ''}{filterVerifyResult.improvement.pfChange.toFixed(2)})
+                                          <span className="text-[10px] ml-0.5">
+                                            {filterVerifyResult.improvement.pfChange >= 0 ? '+' : ''}{filterVerifyResult.improvement.pfChange.toFixed(2)}
                                           </span>
                                         </span>
                                       </div>
                                       <div className="flex justify-between">
                                         <span className="text-gray-300">純利益</span>
                                         <span className={filterVerifyResult.after.netProfit >= 0 ? 'text-green-400' : 'text-red-400'}>
-                                          {filterVerifyResult.after.netProfit.toLocaleString()} JPY
+                                          {filterVerifyResult.after.netProfit.toLocaleString()}円
                                         </span>
                                       </div>
                                     </div>
@@ -1303,21 +1240,19 @@ export default function StrategyBacktestPage() {
                                 </div>
 
                                 {/* 判定 */}
-                                <div className={`mt-4 p-3 rounded-lg ${
+                                <div className={`mt-2 px-2 py-1.5 rounded text-[10px] ${
                                   filterVerifyResult.after.profitFactor >= 1.0
                                     ? 'bg-green-600/20 border border-green-500'
                                     : 'bg-yellow-600/20 border border-yellow-500'
                                 }`}>
                                   {filterVerifyResult.after.profitFactor >= 1.0 ? (
-                                    <div className="text-green-400">
-                                      ✅ PF 1.0以上達成！このフィルター条件は有効です。
-                                      ストラテジーに追加してノート化を検討できます。
-                                    </div>
+                                    <span className="text-green-400">
+                                      ✅ PF1.0以上！フィルター有効
+                                    </span>
                                   ) : (
-                                    <div className="text-yellow-400">
-                                      ⚠️ PF {filterVerifyResult.after.profitFactor.toFixed(2)} - まだ優位性不足。
-                                      他のフィルターを追加するか、条件を調整してください。
-                                    </div>
+                                    <span className="text-yellow-400">
+                                      ⚠️ PF{filterVerifyResult.after.profitFactor.toFixed(2)} - 優位性不足
+                                    </span>
                                   )}
                                 </div>
                               </div>
@@ -1330,9 +1265,9 @@ export default function StrategyBacktestPage() {
                                 setFilterVerifyResult(null);
                                 setSelectedFilters([]);
                               }}
-                              className="text-sm text-gray-400 hover:text-white"
+                              className="text-[10px] text-gray-400 hover:text-cyan-400"
                             >
-                              分析結果をクリア
+                              クリア
                             </button>
                           </div>
                         )}
@@ -1341,20 +1276,19 @@ export default function StrategyBacktestPage() {
 
                     {activeTab === "walkforward" && (
                       <div>
-                        <h3 className="text-lg font-semibold text-white mb-4">
+                        <h4 className="text-sm font-semibold text-cyan-400 mb-2">
                           ウォークフォワードテスト
-                        </h3>
-                        <p className="text-sm text-gray-400 mb-6">
-                          期間を複数に分割し、In-Sample（学習期間）とOut-of-Sample（検証期間）で
-                          パフォーマンスを比較することで、過学習のリスクを検出します。
+                        </h4>
+                        <p className="text-xs text-gray-400 mb-3">
+                          IS/OOSで過学習リスクを検出
                         </p>
 
                         {/* ウォークフォワードパラメータ */}
-                        <div className="bg-slate-700 rounded-lg p-4 mb-6">
-                          <div className="grid grid-cols-3 gap-4">
+                        <div className="bg-slate-700/50 rounded px-3 py-2 mb-3">
+                          <div className="flex items-center gap-3">
                             <div>
-                              <label className="block text-sm text-gray-400 mb-1">
-                                分割数
+                              <label className="block text-[10px] text-gray-400">
+                                分割
                               </label>
                               <select
                                 value={walkForwardParams.splitCount}
@@ -1362,16 +1296,16 @@ export default function StrategyBacktestPage() {
                                   ...prev,
                                   splitCount: parseInt(e.target.value)
                                 }))}
-                                className="w-full bg-slate-600 border border-slate-500 rounded px-3 py-2 text-white"
+                                className="bg-slate-600 border border-slate-500 rounded px-2 py-1 text-xs text-white w-16"
                               >
-                                <option value={3}>3分割</option>
-                                <option value={4}>4分割</option>
-                                <option value={5}>5分割</option>
+                                <option value={3}>3</option>
+                                <option value={4}>4</option>
+                                <option value={5}>5</option>
                               </select>
                             </div>
                             <div>
-                              <label className="block text-sm text-gray-400 mb-1">
-                                開始日
+                              <label className="block text-[10px] text-gray-400">
+                                開始
                               </label>
                               <input
                                 type="date"
@@ -1380,12 +1314,12 @@ export default function StrategyBacktestPage() {
                                   ...prev,
                                   startDate: e.target.value
                                 }))}
-                                className="w-full bg-slate-600 border border-slate-500 rounded px-3 py-2 text-white"
+                                className="bg-slate-600 border border-slate-500 rounded px-2 py-1 text-xs text-white"
                               />
                             </div>
                             <div>
-                              <label className="block text-sm text-gray-400 mb-1">
-                                終了日
+                              <label className="block text-[10px] text-gray-400">
+                                終了
                               </label>
                               <input
                                 type="date"
@@ -1394,36 +1328,34 @@ export default function StrategyBacktestPage() {
                                   ...prev,
                                   endDate: e.target.value
                                 }))}
-                                className="w-full bg-slate-600 border border-slate-500 rounded px-3 py-2 text-white"
+                                className="bg-slate-600 border border-slate-500 rounded px-2 py-1 text-xs text-white"
                               />
                             </div>
-                          </div>
-                          <div className="mt-4 flex items-center gap-4">
                             <button
                               onClick={handleRunWalkForward}
                               disabled={runningWalkForward}
-                              className={`px-6 py-2 rounded font-medium transition-colors ${
+                              className={`px-3 py-1.5 rounded font-medium text-xs transition-colors ${
                                 runningWalkForward
                                   ? "bg-gray-600 text-gray-400 cursor-not-allowed"
-                                  : "bg-blue-600 hover:bg-blue-700 text-white"
+                                  : "bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-lg shadow-cyan-500/20"
                               }`}
                             >
-                              {runningWalkForward ? "実行中..." : "ウォークフォワード実行"}
+                              {runningWalkForward ? "実行中..." : "WF実行"}
                             </button>
-                            <span className="text-xs text-gray-500">
-                              In-Sample: 70% / Out-of-Sample: 30%
-                            </span>
+                          </div>
+                          <div className="text-[10px] text-gray-500 mt-1">
+                            IS: 70% / OOS: 30%
                           </div>
                         </div>
 
                         {/* ウォークフォワード結果 */}
                         {walkForwardResult && (
-                          <div>
+                          <div className="space-y-2">
                             {/* オーバーフィットスコア */}
-                            <div className="bg-slate-700 rounded-lg p-4 mb-6">
-                              <div className="flex items-center justify-between mb-2">
-                                <span className="text-sm text-gray-400">オーバーフィットスコア</span>
-                                <span className={`text-xl font-bold ${
+                            <div className="bg-slate-700/50 rounded px-3 py-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs text-gray-400">オーバーフィット</span>
+                                <span className={`text-sm font-bold ${
                                   walkForwardResult.overfitScore <= 0.2 ? "text-green-400" :
                                   walkForwardResult.overfitScore <= 0.4 ? "text-yellow-400" :
                                   "text-red-400"
@@ -1431,9 +1363,9 @@ export default function StrategyBacktestPage() {
                                   {(walkForwardResult.overfitScore * 100).toFixed(1)}%
                                 </span>
                               </div>
-                              <div className="w-full bg-slate-600 rounded-full h-2">
+                              <div className="w-full bg-slate-600 rounded-full h-1.5 mt-1">
                                 <div
-                                  className={`h-2 rounded-full ${
+                                  className={`h-1.5 rounded-full ${
                                     walkForwardResult.overfitScore <= 0.2 ? "bg-green-500" :
                                     walkForwardResult.overfitScore <= 0.4 ? "bg-yellow-500" :
                                     "bg-red-500"
@@ -1441,25 +1373,25 @@ export default function StrategyBacktestPage() {
                                   style={{ width: `${Math.min(walkForwardResult.overfitScore * 100, 100)}%` }}
                                 />
                               </div>
-                              <div className="flex justify-between mt-1 text-xs text-gray-500">
-                                <span>良好 (0-20%)</span>
-                                <span>要注意 (20-40%)</span>
-                                <span>過学習リスク (40%+)</span>
+                              <div className="flex justify-between mt-0.5 text-[10px] text-gray-500">
+                                <span>良好</span>
+                                <span>要注意</span>
+                                <span>過学習</span>
                               </div>
                             </div>
 
                             {/* スプリット詳細 */}
                             <div className="overflow-x-auto">
-                              <table className="w-full text-sm">
-                                <thead className="bg-slate-700 text-gray-300">
+                              <table className="w-full text-xs">
+                                <thead className="bg-slate-700/50 text-gray-300">
                                   <tr>
-                                    <th className="px-3 py-2 text-left">期間</th>
-                                    <th className="px-3 py-2 text-center">IS 勝率</th>
-                                    <th className="px-3 py-2 text-center">OOS 勝率</th>
-                                    <th className="px-3 py-2 text-center">乖離</th>
-                                    <th className="px-3 py-2 text-center">IS PF</th>
-                                    <th className="px-3 py-2 text-center">OOS PF</th>
-                                    <th className="px-3 py-2 text-center">トレード数</th>
+                                    <th className="px-2 py-1.5 text-left">#</th>
+                                    <th className="px-2 py-1.5 text-center">IS勝</th>
+                                    <th className="px-2 py-1.5 text-center">OOS勝</th>
+                                    <th className="px-2 py-1.5 text-center">乖離</th>
+                                    <th className="px-2 py-1.5 text-center">IS PF</th>
+                                    <th className="px-2 py-1.5 text-center">OOS PF</th>
+                                    <th className="px-2 py-1.5 text-center">数</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-700">
@@ -1495,7 +1427,7 @@ export default function StrategyBacktestPage() {
                                           {split.outOfSample.profitFactor?.toFixed(2) || "-"}
                                         </td>
                                         <td className="px-3 py-2 text-center text-gray-400">
-                                          {split.inSample.tradeCount} / {split.outOfSample.tradeCount}
+                                          {split.inSample.tradeCount}/{split.outOfSample.tradeCount}
                                         </td>
                                       </tr>
                                     );
@@ -1504,40 +1436,33 @@ export default function StrategyBacktestPage() {
                               </table>
                             </div>
 
-                            <div className="mt-4 text-xs text-gray-500">
-                              IS = In-Sample（学習期間） / OOS = Out-of-Sample（検証期間）
+                            <div className="mt-1 text-[10px] text-gray-500">
+                              IS=In-Sample / OOS=Out-of-Sample
                             </div>
                           </div>
                         )}
 
                         {/* ウォークフォワード履歴 */}
                         {walkForwardHistory.length > 0 && (
-                          <div className="mt-8 pt-6 border-t border-slate-700">
-                            <h4 className="text-sm font-medium text-gray-300 mb-3">
-                              過去のテスト結果
-                            </h4>
-                            <div className="space-y-2">
-                              {walkForwardHistory.slice(0, 5).map((wf) => (
+                          <div className="mt-3 pt-2 border-t border-slate-700">
+                            <h5 className="text-xs font-medium text-gray-400 mb-1">履歴</h5>
+                            <div className="space-y-1">
+                              {walkForwardHistory.slice(0, 3).map((wf) => (
                                 <div
                                   key={wf.id}
-                                  className="bg-slate-700 rounded p-3 cursor-pointer hover:bg-slate-600"
+                                  className="bg-slate-700/50 rounded px-2 py-1.5 cursor-pointer hover:bg-slate-600 text-xs flex items-center justify-between"
                                   onClick={() => setWalkForwardResult(wf)}
                                 >
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-sm text-gray-300">
-                                      {wf.type === 'fixed_split' ? '固定分割' : 'ローリング'}
-                                    </span>
-                                    <span className={`text-sm font-medium ${
-                                      wf.overfitScore <= 0.2 ? "text-green-400" :
-                                      wf.overfitScore <= 0.4 ? "text-yellow-400" :
-                                      "text-red-400"
-                                    }`}>
-                                      OF: {(wf.overfitScore * 100).toFixed(1)}%
-                                    </span>
-                                  </div>
-                                  <div className="text-xs text-gray-500 mt-1">
-                                    {wf.splits.length}分割 | {wf.splitCount} splits
-                                  </div>
+                                  <span className="text-gray-300">
+                                    {wf.type === 'fixed_split' ? '固定' : 'ローリング'} {wf.splitCount}分割
+                                  </span>
+                                  <span className={`font-medium ${
+                                    wf.overfitScore <= 0.2 ? "text-green-400" :
+                                    wf.overfitScore <= 0.4 ? "text-yellow-400" :
+                                    "text-red-400"
+                                  }`}>
+                                    {(wf.overfitScore * 100).toFixed(0)}%
+                                  </span>
                                 </div>
                               ))}
                             </div>
@@ -1548,21 +1473,14 @@ export default function StrategyBacktestPage() {
                   </div>
                 </div>
               ) : (
-                <div className="bg-slate-800 rounded-lg p-12 text-center">
-                  <div className="text-gray-400 mb-4">
-                    バックテストを実行して結果を確認してください
-                  </div>
-                  <div className="text-sm text-gray-500">
-                    左のパネルで期間とパラメータを設定し、「バックテスト実行」ボタンを押してください
-                  </div>
+                <div className="bg-slate-800/50 rounded px-4 py-8 text-center">
+                  <p className="text-sm text-gray-400">バックテストを実行して結果を確認</p>
+                  <p className="text-xs text-gray-500 mt-1">左パネルで設定→実行</p>
                 </div>
               )}
             </div>
           </div>
-        </main>
-        <Footer />
       </div>
-    </div>
     </>
   );
 }
