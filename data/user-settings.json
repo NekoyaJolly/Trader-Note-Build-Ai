@@ -1,0 +1,20 @@
+{
+  "notification": {
+    "enabled": true,
+    "scoreThreshold": 80,
+    "maxPerDay": 15
+  },
+  "timeframes": {
+    "primary": "1h",
+    "secondary": [
+      "4h",
+      "1d"
+    ]
+  },
+  "display": {
+    "darkMode": true,
+    "compactView": false,
+    "showAiSuggestions": true
+  },
+  "updatedAt": "2026-01-02T16:35:46.747Z"
+}

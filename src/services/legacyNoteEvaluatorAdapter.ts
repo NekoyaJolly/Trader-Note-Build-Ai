@@ -491,8 +491,8 @@ export function createNoteEvaluatorFromFSNote(note: FSTradeNote): NoteEvaluator 
     userNotes: note.userNotes ?? null,
     tags: note.tags ?? [],
     status: note.status.toUpperCase() as any,
-    approvedAt: note.approvedAt ?? null,
-    rejectedAt: note.rejectedAt ?? null,
+    activatedAt: note.activatedAt ?? null,
+    archivedAt: note.archivedAt ?? null,
     lastEditedAt: note.lastEditedAt ?? null,
     createdAt: note.createdAt,
     updatedAt: note.createdAt, // FS型にはないので createdAt で代用

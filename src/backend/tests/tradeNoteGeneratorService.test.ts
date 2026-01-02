@@ -22,7 +22,7 @@ jest.mock('../../services/inference/decisionInferenceService');
 
 /**
  * TradeNoteWithSummary のデフォルトフィールドを追加するヘルパー
- * Phase 8 で追加された status, approvedAt 等の必須フィールドを含む
+ * Phase 8 で追加された status, activatedAt 等の必須フィールドを含む
  */
 const createMockNoteWithSummary = (overrides?: Record<string, unknown>) => ({
   id: 'test-note-id',
@@ -37,8 +37,8 @@ const createMockNoteWithSummary = (overrides?: Record<string, unknown>) => ({
   updatedAt: new Date(),
   // Phase 8: 追加フィールド
   status: 'draft' as NoteStatus,
-  approvedAt: null,
-  rejectedAt: null,
+  activatedAt: null,
+  archivedAt: null,
   lastEditedAt: null,
   marketContext: null,
   userNotes: null,

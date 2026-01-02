@@ -1,7 +1,9 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import NotificationBell from "@/components/NotificationBell";
+import { fetchUnreadNotificationCount } from "@/lib/api";
 
 /**
  * アプリ共通ヘッダー
@@ -19,8 +21,24 @@ interface HeaderProps {
 }
 
 export default function Header({ isSidebarOpen, onToggleSidebar }: HeaderProps) {
-  // TODO: 実際の未読数を API から取得
-  const unreadCount = 3;
+  // 未読通知数をAPIから取得
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+
+  useEffect(() => {
+    // 初回読み込み
+    fetchUnreadNotificationCount()
+      .then(setUnreadCount)
+      .catch(console.error);
+
+    // 30秒ごとに更新（ポーリング）
+    const interval = setInterval(() => {
+      fetchUnreadNotificationCount()
+        .then(setUnreadCount)
+        .catch(console.error);
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <header className="sticky top-0 z-30 w-full border-b border-slate-700 bg-slate-900/95 backdrop-blur-sm">

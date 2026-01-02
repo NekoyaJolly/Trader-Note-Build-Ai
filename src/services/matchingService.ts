@@ -53,11 +53,11 @@ export class MatchingService {
   }
 
   /**
-   * 承認済みノートに対して現在の市場状態との一致をチェック
+   * 有効ノートに対して現在の市場状態との一致をチェック
    * マッチした結果は DB に永続化される
    * 
-   * 重要: 承認済み（approved）のノートのみがマッチング対象
-   * draft や rejected のノートは照合しない
+   * 重要: 有効化済み（active）のノートのみがマッチング対象
+   * draft や archived のノートは照合しない
    * 
    * 設計（Task 6）:
    * - 各ノートから NoteEvaluator を生成

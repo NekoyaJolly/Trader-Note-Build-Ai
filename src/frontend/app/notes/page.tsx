@@ -70,16 +70,16 @@ export default function NotesPage() {
    */
   function getStatusBadge(status: NoteStatus) {
     switch (status) {
-      case "approved":
+      case "active":
         return (
           <Badge className="bg-green-500/20 text-green-400 border-green-600/30">
             承認済み
           </Badge>
         );
-      case "rejected":
+      case "archived":
         return (
           <Badge className="bg-red-500/20 text-red-400 border-red-600/30">
-            非承認
+            アーカイブ
           </Badge>
         );
       default:
@@ -147,24 +147,24 @@ export default function NotesPage() {
           下書き {statusCounts && <span className="ml-1 opacity-75">({statusCounts.draft})</span>}
         </button>
         <button
-          onClick={() => setStatusFilter("approved")}
+          onClick={() => setStatusFilter("active")}
           className={`px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-            statusFilter === "approved"
+            statusFilter === "active"
               ? "bg-green-600/30 text-green-400 border border-green-600/50"
               : "bg-slate-700/50 text-gray-400 hover:text-green-400 hover:bg-slate-700"
           }`}
         >
-          承認済 {statusCounts && <span className="ml-1 opacity-75">({statusCounts.approved})</span>}
+          承認済 {statusCounts && <span className="ml-1 opacity-75">({statusCounts.active})</span>}
         </button>
         <button
-          onClick={() => setStatusFilter("rejected")}
+          onClick={() => setStatusFilter("archived")}
           className={`px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-            statusFilter === "rejected"
+            statusFilter === "archived"
               ? "bg-red-600/30 text-red-400 border border-red-600/50"
               : "bg-slate-700/50 text-gray-400 hover:text-red-400 hover:bg-slate-700"
           }`}
         >
-          非承認 {statusCounts && <span className="ml-1 opacity-75">({statusCounts.rejected})</span>}
+          アーカイブ {statusCounts && <span className="ml-1 opacity-75">({statusCounts.archived})</span>}
         </button>
       </div>
 
@@ -176,7 +176,7 @@ export default function NotesPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
           }
-          title={statusFilter === "all" ? "ノートはまだありません" : `${statusFilter === "draft" ? "下書き" : statusFilter === "approved" ? "承認済み" : "非承認"}のノートはありません`}
+          title={statusFilter === "all" ? "ノートはまだありません" : `${statusFilter === "draft" ? "下書き" : statusFilter === "active" ? "承認済み" : "アーカイブ"}のノートはありません`}
           description={statusFilter === "all" 
             ? "トレードデータをインポートすると、ここにノートが表示されます。"
             : "フィルタを変更するか、ノートの状態を変更してください。"

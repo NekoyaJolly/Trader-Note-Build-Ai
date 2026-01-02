@@ -34,7 +34,6 @@
   MarketSnapshotView.tsx      # 市場スナップショット表示
   MatchReasonVisualizer.tsx   # 判定理由可視化
   ScoreGauge.tsx              # スコアゲージ
-  SimilarNoteCard.tsx         # 類似ノートカード
   NotificationBell.tsx        # 通知ベル
   TrendBadge.tsx              # トレンドバッジ
   DecisionModeBadge.tsx       # 判断モードバッジ

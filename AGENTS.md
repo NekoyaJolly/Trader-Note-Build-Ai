@@ -51,11 +51,13 @@ AI エージェントは、作業開始前に必ず全文を読み、遵守し�
 
 | ドキュメント | 内容 |
 |--------------|------|
+| [NOTE.md](NOTE.md) | **ドメイン仕様**（ノート定義、TradeNote/StrategyNote の分類、状態管理） |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | **実装仕様**（NoteEvaluator アーキテクチャ、Service 連携フロー） |
 | [indicators/README.md](indicators/README.md) | **概念思想**（インジケーター三層モデル、言語化ルール） |
 | [README.md](README.md) | プロジェクト概要、セットアップ手順 |
 
 > **注意**: `indicators/` 配下は概念定義のみ。実装仕様は `docs/ARCHITECTURE.md` を参照すること。
+> **重要**: ノートのドメイン仕様は `NOTE.md` を正とする。
 
 ---
 

@@ -175,6 +175,14 @@ export class NotificationService {
     await this.persist();
   }
 
+  /**
+   * 未読通知数を取得
+   */
+  async countUnread(): Promise<number> {
+    await this.ensureLoaded();
+    return this.notifications.filter(n => !n.read).length;
+  }
+
   private async persist(): Promise<void> {
     await this.repository.saveAll(this.notifications);
   }

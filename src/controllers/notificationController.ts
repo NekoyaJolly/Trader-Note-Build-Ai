@@ -210,6 +210,20 @@ export class NotificationController {
     }
   };
 
+  /**
+   * GET /api/notifications/unread-count
+   * 未読通知数を取得
+   */
+  getUnreadCount = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const count = await this.notificationService.countUnread();
+      res.json({ success: true, data: { unreadCount: count } });
+    } catch (error) {
+      console.error('Error getting unread count:', error);
+      res.status(500).json({ error: '未読数の取得に失敗しました' });
+    }
+  };
+
   // ========================================
   // Phase4 新規エンドポイント
   // ========================================

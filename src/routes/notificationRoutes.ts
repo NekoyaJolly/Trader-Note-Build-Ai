@@ -44,6 +44,12 @@ router.delete('/:id', notificationController.deleteNotification);
  */
 router.delete('/', notificationController.clearAll);
 
+/**
+ * GET /api/notifications/unread-count
+ * 未読通知数を取得
+ */
+router.get('/unread-count', notificationController.getUnreadCount);
+
 // ========================================
 // Phase4 新規エンドポイント（通知トリガ・ログ）
 // ========================================

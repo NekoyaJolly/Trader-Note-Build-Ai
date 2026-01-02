@@ -42,7 +42,7 @@ describe('MatchingService', () => {
     aiSummary: 'テスト要約',
     features: [50000, 1000, 60, 10, 1000, 1, 1],
     createdAt: new Date(),
-    status: 'approved',
+    status: 'active',
     ...overrides,
   });
 

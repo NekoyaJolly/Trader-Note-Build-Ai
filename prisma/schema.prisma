@@ -87,15 +87,15 @@ model TradeNote {
   timeframe        String?
   createdAt        DateTime          @default(now()) @db.Timestamptz(6)
   updatedAt        DateTime          @updatedAt @db.Timestamptz(6)
-  /// 承認日時
-  approvedAt       DateTime?         @db.Timestamptz(6)
+  /// 有効化日時
+  activatedAt      DateTime?         @db.Timestamptz(6)
   /// 最終編集日時
   lastEditedAt     DateTime?         @db.Timestamptz(6)
   /// トレード時点の市場コンテキスト（JSON: trend, calculatedIndicators等）
   marketContext    Json?
-  /// 非承認日時
-  rejectedAt       DateTime?         @db.Timestamptz(6)
-  /// 承認状態（draft: 下書き、approved: 承認済み、rejected: 非承認）
+  /// アーカイブ日時
+  archivedAt       DateTime?         @db.Timestamptz(6)
+  /// 承認状態（draft: 下書き、active: 有効、archived: アーカイブ）
   status           NoteStatus        @default(draft)
   /// タグ（検索用）
   tags             String[]          @default([])
@@ -837,8 +837,8 @@ enum UserRole {
 /// ノートの承認状態
 enum NoteStatus {
   draft
-  approved
-  rejected
+  active
+  archived
 }
 
 enum TradeSide {

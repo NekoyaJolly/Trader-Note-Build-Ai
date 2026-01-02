@@ -46,9 +46,9 @@ describe('MatchEvaluationService', () => {
     createdAt: new Date(),
     updatedAt: new Date(),
     // Phase 8: 追加フィールド
-    status: 'approved',
-    approvedAt: new Date(),
-    rejectedAt: null,
+    status: 'active',
+    activatedAt: new Date(),
+    archivedAt: null,
     lastEditedAt: null,
     marketContext: null,
     userNotes: null,

@@ -16,6 +16,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { EventEmitter } from 'events';
 import { StrategyStatus, TradeSide } from '@prisma/client';
 import {
   listStrategies,
@@ -46,11 +47,6 @@ import {
   UpdateStrategyNoteInput,
 } from '../services/strategyNoteService';
 import {
-  searchSimilarNotes,
-  findSimilarToNote,
-  SimilaritySearchParams,
-} from '../services/similarityService';
-import {
   getStrategyAlert,
   createStrategyAlert,
   updateStrategyAlert,
@@ -77,6 +73,46 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 const router = Router();
+
+// ============================================
+// SSE アラート配信用イベントエミッター
+// ============================================
+
+/**
+ * アラートイベントの型定義
+ */
+interface StrategyAlert {
+  strategyId: string;
+  type: 'entry' | 'exit' | 'warning';
+  symbol: string;
+  message: string;
+  score?: number;
+  timestamp: Date;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * グローバルなアラートイベントエミッター
+ * 外部（バッチ処理、マーケットマッチングサービス等）からアラートを発火するために使用
+ */
+class StrategyAlertEmitter extends EventEmitter {
+  /**
+   * 特定のストラテジーにアラートを送信
+   * @param alert - アラート情報
+   */
+  emitAlert(alert: StrategyAlert): void {
+    console.log(`[StrategyAlertEmitter] アラート発火: strategyId=${alert.strategyId}, type=${alert.type}`);
+    this.emit(`alert:${alert.strategyId}`, alert);
+    // 全体購読者向けにも発火
+    this.emit('alert:all', alert);
+  }
+}
+
+// シングルトンインスタンスをエクスポート（外部から使用可能）
+export const strategyAlertEmitter = new StrategyAlertEmitter();
+
+// SSE 接続クライアント管理
+const sseClients = new Map<string, Set<Response>>();
 
 /**
  * GET /api/strategies
@@ -843,61 +879,6 @@ router.delete('/:id/notes/:noteId', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * POST /api/strategies/:id/notes/:noteId/similar
- * 特定のノートに類似したノートを検索
- */
-router.post('/:id/notes/:noteId/similar', async (req: Request, res: Response) => {
-  try {
-    const { noteId } = req.params;
-    const { threshold = 0.7, limit = 10 } = req.body;
-
-    const results = await findSimilarToNote(noteId, threshold, limit);
-
-    res.json({
-      success: true,
-      data: { results },
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
-    console.error('[StrategyRoutes] 類似ノート検索エラー:', message);
-    res.status(500).json({
-      success: false,
-      error: message,
-    });
-  }
-});
-
-/**
- * POST /api/strategies/notes/search-similar
- * インジケーター値から類似ノートを検索
- */
-router.post('/notes/search-similar', async (req: Request, res: Response) => {
-  try {
-    const params: SimilaritySearchParams = {
-      targetIndicatorValues: req.body.indicatorValues,
-      strategyId: req.body.strategyId,
-      status: req.body.status || 'active',
-      threshold: req.body.threshold || 0.7,
-      limit: req.body.limit || 10,
-    };
-
-    const results = await searchSimilarNotes(params);
-
-    res.json({
-      success: true,
-      data: { results },
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
-    console.error('[StrategyRoutes] 類似検索エラー:', message);
-    res.status(500).json({
-      success: false,
-      error: message,
-    });
-  }
-});
-
 // ============================================
 // Phase D: アラートエンドポイント
 // ============================================
@@ -1122,6 +1103,11 @@ router.get('/:id/alerts/logs', async (req: Request, res: Response) => {
  * 
  * クライアントがこのエンドポイントに接続すると、
  * ストラテジー条件成立時にリアルタイムで通知を受け取れる
+ * 
+ * 使用方法:
+ * 1. クライアントがこのエンドポイントに接続
+ * 2. 外部プロセス（バッチ、マーケットマッチング等）から strategyAlertEmitter.emitAlert() を呼び出す
+ * 3. 接続中のクライアントにリアルタイムでアラートが配信される
  */
 router.get('/:id/alerts/stream', async (req: Request, res: Response) => {
   const { id } = req.params;
@@ -1136,35 +1122,50 @@ router.get('/:id/alerts/stream', async (req: Request, res: Response) => {
   res.write(`event: connected\n`);
   res.write(`data: ${JSON.stringify({ strategyId: id, timestamp: new Date().toISOString() })}\n\n`);
 
+  // SSE クライアントを登録
+  if (!sseClients.has(id)) {
+    sseClients.set(id, new Set());
+  }
+  sseClients.get(id)!.add(res);
+  console.log(`[SSE] クライアント接続: strategyId=${id}, 接続数=${sseClients.get(id)!.size}`);
+
+  // アラートリスナーを登録
+  const alertListener = (alert: StrategyAlert) => {
+    try {
+      res.write(`event: alert\n`);
+      res.write(`data: ${JSON.stringify({
+        type: alert.type,
+        symbol: alert.symbol,
+        message: alert.message,
+        score: alert.score,
+        timestamp: alert.timestamp.toISOString(),
+        metadata: alert.metadata,
+      })}\n\n`);
+    } catch (error) {
+      console.error('[SSE] アラート送信エラー:', error);
+    }
+  };
+
+  // このストラテジーのアラートを購読
+  strategyAlertEmitter.on(`alert:${id}`, alertListener);
+
   // ハートビート（30秒ごと）
   const heartbeatInterval = setInterval(() => {
-    res.write(`event: heartbeat\n`);
-    res.write(`data: ${JSON.stringify({ timestamp: new Date().toISOString() })}\n\n`);
-  }, 30000);
-
-  // 条件チェック用ポーリング（10秒ごと）
-  // 注: 本格的な実装ではWebSocketやPub/Subを使用するが、MVP段階ではポーリングで代替
-  const checkInterval = setInterval(async () => {
     try {
-      // ここでストラテジー条件をチェック
-      // 実際の実装では marketDataService からリアルタイムデータを取得し、
-      // ストラテジー条件と照合する
-      
-      // MVPでは条件チェックは別プロセス（バッチ or 外部トリガー）で行い、
-      // このSSEは通知の配信のみを担当する設計
-      
-      // TODO: 外部から発火されたアラートをここで配信
-      // 現在は接続維持のみ
+      res.write(`event: heartbeat\n`);
+      res.write(`data: ${JSON.stringify({ timestamp: new Date().toISOString() })}\n\n`);
     } catch (error) {
-      console.error('[SSE] 条件チェックエラー:', error);
+      // 送信エラー時は接続が切れているとみなす
+      console.error('[SSE] ハートビート送信エラー:', error);
     }
-  }, 10000);
+  }, 30000);
 
   // クライアント切断時のクリーンアップ
   req.on('close', () => {
     clearInterval(heartbeatInterval);
-    clearInterval(checkInterval);
-    console.log(`[SSE] クライアント切断: strategyId=${id}`);
+    strategyAlertEmitter.off(`alert:${id}`, alertListener);
+    sseClients.get(id)?.delete(res);
+    console.log(`[SSE] クライアント切断: strategyId=${id}, 残り接続数=${sseClients.get(id)?.size || 0}`);
   });
 });
 

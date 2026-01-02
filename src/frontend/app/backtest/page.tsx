@@ -35,7 +35,7 @@ export default function BacktestPage() {
   const [selectedNote, setSelectedNote] = useState<NoteSummary | null>(null);
   
   // フィルター状態（承認済みノートのみ表示するかどうか）
-  const [showApprovedOnly, setShowApprovedOnly] = useState(true);
+  const [showActiveOnly, setShowActiveOnly] = useState(true);
 
   /**
    * ノート一覧を取得
@@ -48,7 +48,7 @@ export default function BacktestPage() {
       const response = await fetchNotes({ 
         limit: 100,
         // 承認済みのみの場合
-        ...(showApprovedOnly && { status: 'approved' }),
+        ...(showActiveOnly && { status: 'active' }),
       });
       setNotes(response.notes);
     } catch (e) {
@@ -56,7 +56,7 @@ export default function BacktestPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [showApprovedOnly]);
+  }, [showActiveOnly]);
 
   // 初回ロード
   useEffect(() => {
@@ -91,11 +91,11 @@ export default function BacktestPage() {
    */
   const getStatusBadgeStyle = (status: string) => {
     switch (status) {
-      case 'approved':
+      case 'active':
         return 'bg-green-600/20 text-green-400 border-green-500/30';
       case 'draft':
         return 'bg-yellow-600/20 text-yellow-400 border-yellow-500/30';
-      case 'rejected':
+      case 'archived':
         return 'bg-red-600/20 text-red-400 border-red-500/30';
       default:
         return 'bg-slate-600/20 text-gray-400 border-slate-500/30';
@@ -132,8 +132,8 @@ export default function BacktestPage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   <Badge className={getStatusBadgeStyle(selectedNote.status)}>
-                    {selectedNote.status === 'approved' ? '承認済' : 
-                     selectedNote.status === 'draft' ? '下書き' : '却下'}
+                    {selectedNote.status === 'active' ? '承認済' : 
+                     selectedNote.status === 'draft' ? '下書き' : 'アーカイブ'}
                   </Badge>
                   <span className="font-medium text-white">{selectedNote.symbol}</span>
                   <span className={`text-sm ${getSideColor(selectedNote.side)}`}>
@@ -174,8 +174,8 @@ export default function BacktestPage() {
                 <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={showApprovedOnly}
-                    onChange={(e) => setShowApprovedOnly(e.target.checked)}
+                    checked={showActiveOnly}
+                    onChange={(e) => setShowActiveOnly(e.target.checked)}
                     className="rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-cyan-500"
                   />
                   承認済みのみ
@@ -214,7 +214,7 @@ export default function BacktestPage() {
                 {notes.length === 0 ? (
                   <div className="text-center py-12">
                     <p className="text-gray-400 mb-4">
-                      {showApprovedOnly 
+                      {showActiveOnly 
                         ? "承認済みノートがありません" 
                         : "ノートがありません"}
                     </p>
@@ -235,8 +235,8 @@ export default function BacktestPage() {
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
                             <Badge className={getStatusBadgeStyle(note.status)}>
-                              {note.status === 'approved' ? '承認' : 
-                               note.status === 'draft' ? '下書' : '却下'}
+                              {note.status === 'active' ? '承認' : 
+                               note.status === 'draft' ? '下書' : 'アーカイブ'}
                             </Badge>
                             <span className="font-medium text-white">{note.symbol}</span>
                             <span className={`text-sm ${getSideColor(note.side)}`}>

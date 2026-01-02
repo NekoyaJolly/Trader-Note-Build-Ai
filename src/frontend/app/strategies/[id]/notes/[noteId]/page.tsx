@@ -6,7 +6,6 @@
  * 目的:
  * - ノートの詳細情報表示
  * - インジケーター値の可視化
- * - 類似ノート検索
  * - ステータス変更・編集
  * 
  * Phase C: 勝ちパターンノート機能
@@ -19,10 +18,8 @@ import {
   fetchStrategyNoteDetail,
   updateStrategyNoteStatus,
   deleteStrategyNote,
-  searchSimilarNotes,
   StrategyNoteDetail,
   StrategyNoteStatus,
-  SimilarNoteResult,
 } from '@/lib/api';
 
 /**
@@ -51,9 +48,7 @@ export default function StrategyNoteDetailPage() {
 
   // 状態管理
   const [note, setNote] = useState<StrategyNoteDetail | null>(null);
-  const [similarNotes, setSimilarNotes] = useState<SimilarNoteResult[]>([]);
   const [loading, setLoading] = useState(true);
-  const [similarLoading, setSimilarLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -77,23 +72,6 @@ export default function StrategyNoteDetailPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
-
-  /**
-   * 類似ノートを検索
-   */
-  const handleSearchSimilar = async () => {
-    if (!note) return;
-
-    setSimilarLoading(true);
-    try {
-      const results = await searchSimilarNotes(strategyId, noteId, 0.5, 10);
-      setSimilarNotes(results);
-    } catch (err) {
-      console.error('類似検索エラー:', err);
-    } finally {
-      setSimilarLoading(false);
-    }
-  };
 
   /**
    * ステータス変更
@@ -437,56 +415,8 @@ export default function StrategyNoteDetailPage() {
             </div>
           </div>
 
-          {/* 右側: 類似ノート */}
+          {/* 右側: 特徴量ベクトル */}
           <div className="space-y-6">
-            <div className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-gray-900">類似ノート</h2>
-                <button
-                  onClick={handleSearchSimilar}
-                  disabled={similarLoading}
-                  className="px-3 py-1 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {similarLoading ? '検索中...' : '検索'}
-                </button>
-              </div>
-
-              {similarNotes.length === 0 ? (
-                <p className="text-gray-500 text-sm">
-                  「検索」ボタンをクリックして類似ノートを検索してください
-                </p>
-              ) : (
-                <div className="space-y-3">
-                  {similarNotes.map((similar) => (
-                    <Link
-                      key={similar.noteId}
-                      href={`/strategies/${similar.strategyId}/notes/${similar.noteId}`}
-                      className="block border rounded-lg p-3 hover:bg-gray-50"
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span
-                          className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                            OUTCOME_CONFIG[similar.outcome]?.bgColor ?? 'bg-gray-100'
-                          } ${OUTCOME_CONFIG[similar.outcome]?.color ?? 'text-gray-600'}`}
-                        >
-                          {OUTCOME_CONFIG[similar.outcome]?.label ?? similar.outcome}
-                        </span>
-                        <span className="text-sm font-mono text-blue-600">
-                          {(similar.similarity * 100).toFixed(1)}%
-                        </span>
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {similar.strategyName}
-                      </div>
-                      <div className="text-xs text-gray-400">
-                        {new Date(similar.entryTime).toLocaleDateString('ja-JP')}
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </div>
-
             {/* 特徴量ベクトル（デバッグ用） */}
             <div className="bg-white rounded-lg shadow p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">特徴量ベクトル</h2>

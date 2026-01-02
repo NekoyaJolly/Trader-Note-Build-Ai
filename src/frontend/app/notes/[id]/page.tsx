@@ -69,10 +69,10 @@ export default function NoteDetailPage() {
    */
   function getStatusBadge(status: NoteStatus) {
     switch (status) {
-      case "approved":
+      case "active":
         return <Badge variant="secondary" className="bg-green-600/20 text-green-400 border-green-600/30">承認済み</Badge>;
-      case "rejected":
-        return <Badge variant="destructive" className="bg-red-600/20 text-red-400 border-red-600/30">非承認</Badge>;
+      case "archived":
+        return <Badge variant="destructive" className="bg-red-600/20 text-red-400 border-red-600/30">アーカイブ</Badge>;
       default:
         return <Badge variant="outline" className="bg-yellow-600/20 text-yellow-400 border-yellow-600/30">下書き</Badge>;
     }
@@ -379,16 +379,16 @@ export default function NoteDetailPage() {
                   承認するとマッチング対象になります。
                 </>
               )}
-              {currentStatus === "approved" && (
+              {currentStatus === "active" && (
                 <>
                   このノートは<span className="text-green-400 font-semibold">承認済み</span>です。
                   市場一致の照合対象になっています。
                 </>
               )}
-              {currentStatus === "rejected" && (
+              {currentStatus === "archived" && (
                 <>
-                  このノートは<span className="text-red-400 font-semibold">非承認</span>状態です。
-                  マッチング対象外（アーカイブ）として扱われます。
+                  このノートは<span className="text-red-400 font-semibold">アーカイブ</span>状態です。
+                  マッチング対象外として扱われます。
                 </>
               )}
             </div>
@@ -409,11 +409,11 @@ export default function NoteDetailPage() {
                     onClick={handleReject}
                     disabled={actionLoading}
                   >
-                    {actionLoading ? "処理中..." : "非承認にする"}
+                    {actionLoading ? "処理中..." : "アーカイブにする"}
                   </Button>
                 </>
               )}
-              {currentStatus === "approved" && (
+              {currentStatus === "active" && (
                 <>
                   <Button
                     variant="outline"
@@ -427,11 +427,11 @@ export default function NoteDetailPage() {
                     onClick={handleReject}
                     disabled={actionLoading}
                   >
-                    {actionLoading ? "処理中..." : "非承認にする"}
+                    {actionLoading ? "処理中..." : "アーカイブにする"}
                   </Button>
                 </>
               )}
-              {currentStatus === "rejected" && (
+              {currentStatus === "archived" && (
                 <>
                   <Button
                     variant="outline"
@@ -453,11 +453,11 @@ export default function NoteDetailPage() {
 
             {/* 状態遷移のタイムスタンプ */}
             <div className="text-xs text-gray-500 space-y-1">
-              {note.approvedAt && (
-                <div>承認日時: {new Date(note.approvedAt).toLocaleString("ja-JP")}</div>
+              {note.activatedAt && (
+                <div>承認日時: {new Date(note.activatedAt).toLocaleString("ja-JP")}</div>
               )}
-              {note.rejectedAt && (
-                <div>非承認日時: {new Date(note.rejectedAt).toLocaleString("ja-JP")}</div>
+              {note.archivedAt && (
+                <div>アーカイブ日時: {new Date(note.archivedAt).toLocaleString("ja-JP")}</div>
               )}
               {note.lastEditedAt && (
                 <div>最終編集: {new Date(note.lastEditedAt).toLocaleString("ja-JP")}</div>
@@ -468,12 +468,12 @@ export default function NoteDetailPage() {
       </Card>
 
       {/* バックテストパネル（承認済みノートのみ表示） */}
-      {currentStatus === "approved" && (
+      {currentStatus === "active" && (
         <BacktestPanel noteId={id} symbol={note.symbol} />
       )}
 
       {/* パフォーマンスパネル（承認済みノートのみ表示） */}
-      {currentStatus === "approved" && (
+      {currentStatus === "active" && (
         <PerformancePanel noteId={id} />
       )}
     </div>

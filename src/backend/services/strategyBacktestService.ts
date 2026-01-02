@@ -28,6 +28,7 @@ import {
   LogicalOperator,
   ComparisonOperator,
 } from './strategyConditionEvaluator';
+import { MarketDataService } from '../../services/marketDataService';
 
 // 計算関数を再エクスポート（後方互換性のため）
 export { calculatePnl, calculateSummary, createEmptySummary };
@@ -38,6 +39,8 @@ export { evaluateCondition, evaluateConditionGroup };
 export type { EvaluationContext, ConditionGroup, IndicatorCondition, OHLCV };
 
 const prisma = new PrismaClient();
+// 市場データサービスのインスタンス（Twelve Data API 連携用）
+const marketDataService = new MarketDataService();
 
 // ============================================
 // 型定義
@@ -149,10 +152,47 @@ export async function fetchHistoricalData(
     }));
   }
 
-  // 2. キャッシュが不十分な場合
-  // TODO: Twelve Data API から不足分を取得する実装を追加
-  // 現時点ではモックデータにフォールバック
+  // 2. キャッシュが不十分な場合、Twelve Data API から取得を試みる
+  if (marketDataService.isApiConfigured()) {
+    try {
+      // 期待される本数と開始・終了時刻を計算
+      const requiredCandles = expectedCandles - cachedData.length;
+      console.log(
+        `[fetchHistoricalData] Twelve Data API から取得: ${symbol}/${timeframe}, ` +
+          `不足=${requiredCandles}件`
+      );
 
+      // API から履歴データを取得（最大5000件）
+      const apiLimit = Math.min(requiredCandles + 50, 5000); // バッファを含めて取得
+      const apiData = await marketDataService.getHistoricalData(symbol, timeframe, apiLimit);
+
+      if (apiData.length > 0) {
+        // API で取得したデータを OHLCV 形式に変換
+        const ohlcvData: OHLCV[] = apiData
+          .filter((bar) => bar.timestamp >= startDate && bar.timestamp <= endDate)
+          .map((bar) => ({
+            timestamp: bar.timestamp,
+            open: bar.open,
+            high: bar.high,
+            low: bar.low,
+            close: bar.close,
+            volume: bar.volume,
+          }));
+
+        // DBにキャッシュ保存（将来の高速化のため）
+        await cacheOhlcvData(symbol, timeframe, ohlcvData);
+
+        console.log(
+          `[fetchHistoricalData] API データ取得成功: ${symbol}/${timeframe}, ${ohlcvData.length}件`
+        );
+        return ohlcvData;
+      }
+    } catch (error) {
+      console.warn(`[fetchHistoricalData] API 取得エラー、モックにフォールバック:`, error);
+    }
+  }
+
+  // 3. API 未設定または取得失敗時はモックデータにフォールバック
   if (cachedData.length > 0) {
     console.log(
       `[fetchHistoricalData] 部分キャッシュ + モック: ${symbol}/${timeframe}, ` +
@@ -162,8 +202,57 @@ export async function fetchHistoricalData(
     console.log(`[fetchHistoricalData] モックデータを生成: ${symbol}/${timeframe}`);
   }
 
-  // 3. モックデータを生成（キャッシュがない期間用）
+  // 4. モックデータを生成（キャッシュがない期間用）
   return generateMockData(symbol, timeframe, startDate, endDate);
+}
+
+/**
+ * OHLCV データをデータベースにキャッシュ
+ * 
+ * @param symbol - シンボル
+ * @param timeframe - 時間足
+ * @param data - OHLCV データ
+ */
+async function cacheOhlcvData(
+  symbol: string,
+  timeframe: string,
+  data: OHLCV[]
+): Promise<void> {
+  try {
+    // 重複を避けるため upsert を使用
+    for (const candle of data) {
+      await prisma.oHLCVCandle.upsert({
+        where: {
+          symbol_timeframe_timestamp: {
+            symbol,
+            timeframe,
+            timestamp: candle.timestamp,
+          },
+        },
+        update: {
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+          volume: candle.volume,
+        },
+        create: {
+          symbol,
+          timeframe,
+          timestamp: candle.timestamp,
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+          volume: candle.volume,
+        },
+      });
+    }
+    console.log(`[cacheOhlcvData] ${data.length}件のデータをキャッシュ: ${symbol}/${timeframe}`);
+  } catch (error) {
+    // キャッシュ失敗はワーニングのみ（メイン処理は継続）
+    console.warn(`[cacheOhlcvData] キャッシュ保存エラー:`, error);
+  }
 }
 
 /**

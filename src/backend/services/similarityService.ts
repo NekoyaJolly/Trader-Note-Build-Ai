@@ -458,69 +458,6 @@ export async function searchSimilarNotes(
 }
 
 /**
- * 特定のノートに類似したノートを検索
- * 
- * @param noteId - 基準ノートID
- * @param threshold - 類似度しきい値
- * @param limit - 最大件数
- * @returns 類似ノートのリスト
- */
-export async function findSimilarToNote(
-  noteId: string,
-  threshold: number = 0.7,
-  limit: number = 10
-): Promise<SimilarNoteSearchResult[]> {
-  // 基準ノートを取得
-  const baseNote = await prisma.strategyNote.findUnique({
-    where: { id: noteId },
-  });
-  
-  if (!baseNote) {
-    throw new Error(`ノートが見つかりません: ${noteId}`);
-  }
-  
-  const targetIndicatorValues = baseNote.indicatorValues as IndicatorValues;
-  
-  // 同じノートを除外するためにフィルタ
-  const where = {
-    status: 'active' as StrategyNoteStatus,
-    id: { not: noteId },
-  };
-  
-  const notes = await prisma.strategyNote.findMany({
-    where,
-    include: {
-      strategy: {
-        select: { name: true },
-      },
-    },
-  });
-  
-  const results: SimilarNoteSearchResult[] = [];
-  
-  for (const note of notes) {
-    const referenceValues = note.indicatorValues as IndicatorValues;
-    const similarityResult = calculateSimilarity(targetIndicatorValues, referenceValues);
-    
-    if (similarityResult.similarity >= threshold) {
-      results.push({
-        noteId: note.id,
-        strategyId: note.strategyId,
-        strategyName: note.strategy.name,
-        entryTime: note.entryTime,
-        outcome: note.outcome,
-        pnl: note.pnl ? note.pnl.toNumber() : null,
-        similarity: similarityResult.similarity,
-        similarityDetails: similarityResult.details,
-      });
-    }
-  }
-  
-  results.sort((a, b) => b.similarity - a.similarity);
-  return results.slice(0, limit);
-}
-
-/**
  * 特徴量ベクトルを使った高速類似検索
  * 
  * 12次元統一ベクトルに対応したコサイン類似度を使用

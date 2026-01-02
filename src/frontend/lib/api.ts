@@ -116,6 +116,25 @@ export async function markAllNotificationsAsRead(): Promise<void> {
 }
 
 /**
+ * 未読通知数を取得
+ * GET /api/notifications/unread-count
+ */
+export async function fetchUnreadNotificationCount(): Promise<number> {
+  const response = await fetch(`${API_BASE_URL}/api/notifications/unread-count`, {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    // エラー時は0を返す（UIが壊れないように）
+    console.error(`未読数取得エラー: ${response.status} ${response.statusText}`);
+    return 0;
+  }
+
+  const payload = await response.json();
+  return payload?.data?.unreadCount ?? 0;
+}
+
+/**
  * ノート一覧取得のパラメータ型
  */
 export interface FetchNotesParams {
@@ -508,6 +527,84 @@ export async function fetchSetupStatus(): Promise<{ hasCompletedSetup: boolean }
   );
   if (!response.ok) {
     throw new Error("セットアップ状態の取得に失敗しました");
+  }
+  const payload = await response.json();
+  return payload.data;
+}
+
+// ========================================
+// ユーザー設定 API
+// ========================================
+
+/**
+ * 時間足タイプ
+ */
+export type SettingsTimeframe = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d' | '1w';
+
+/**
+ * ユーザー設定の型
+ */
+export interface UserSettings {
+  notification: {
+    enabled: boolean;
+    scoreThreshold: number;
+    maxPerDay: number;
+  };
+  timeframes: {
+    primary: SettingsTimeframe;
+    secondary: SettingsTimeframe[];
+  };
+  display: {
+    darkMode: boolean;
+    compactView: boolean;
+    showAiSuggestions: boolean;
+  };
+  updatedAt: string;
+}
+
+/**
+ * ユーザー設定を取得
+ * GET /api/settings
+ */
+export async function fetchUserSettings(): Promise<UserSettings> {
+  const response = await fetch(`${API_BASE_URL}/api/settings`, {
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error("設定の取得に失敗しました");
+  }
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * ユーザー設定を更新
+ * PUT /api/settings
+ */
+export async function saveUserSettings(settings: Partial<UserSettings>): Promise<UserSettings> {
+  const response = await fetch(`${API_BASE_URL}/api/settings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "設定の保存に失敗しました");
+  }
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * ユーザー設定をリセット
+ * POST /api/settings/reset
+ */
+export async function resetUserSettings(): Promise<UserSettings> {
+  const response = await fetch(`${API_BASE_URL}/api/settings/reset`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error("設定のリセットに失敗しました");
   }
   const payload = await response.json();
   return payload.data;
@@ -1230,71 +1327,6 @@ export async function createNotesFromBacktest(
 
   const payload = await response.json();
   return payload.data;
-}
-
-/**
- * 特定のノートに類似したノートを検索
- * POST /api/strategies/:id/notes/:noteId/similar
- * 
- * 類似度閾値（12次元統一ベクトル + コサイン類似度）:
- * - 0.90 以上: 強マッチ（高い信頼度）
- * - 0.80 以上: 中マッチ（参考レベル）
- * - 0.70 以上: 弱マッチ（注意が必要）
- */
-export async function searchSimilarNotes(
-  strategyId: string,
-  noteId: string,
-  threshold: number = 0.70,  // デフォルト: 弱マッチ以上
-  limit: number = 10
-): Promise<SimilarNoteResult[]> {
-  const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/notes/${noteId}/similar`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ threshold, limit }),
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error('類似ノート検索に失敗しました');
-  }
-
-  const payload = await response.json();
-  return payload.data?.results ?? [];
-}
-
-/**
- * インジケーター値から類似ノートを検索
- * POST /api/strategies/notes/search-similar
- */
-export async function searchSimilarByIndicators(
-  indicatorValues: IndicatorValues,
-  options: {
-    strategyId?: string;
-    status?: StrategyNoteStatus;
-    threshold?: number;
-    limit?: number;
-  } = {}
-): Promise<SimilarNoteResult[]> {
-  const response = await fetch(
-    `${API_BASE_URL}/api/strategies/notes/search-similar`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        indicatorValues,
-        ...options,
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error('類似検索に失敗しました');
-  }
-
-  const payload = await response.json();
-  return payload.data?.results ?? [];
 }
 
 // ============================================

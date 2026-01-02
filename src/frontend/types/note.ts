@@ -5,11 +5,11 @@
 
 /**
  * ノートの承認状態を表す型
- * - draft: AI 生成直後。ユーザーが「承認/非承認/編集」可能
- * - approved: マッチング対象。検索・通知・バックテスト対象
- * - rejected: アーカイブ扱い。マッチング対象外
+ * - draft: AI 生成直後。ユーザーが「承認/アーカイブ/編集」可能
+ * - active: マッチング対象。検索・通知・バックテスト対象
+ * - archived: アーカイブ扱い。マッチング対象外
  */
-export type NoteStatus = "draft" | "approved" | "rejected";
+export type NoteStatus = "draft" | "active" | "archived";
 
 /**
  * ノート一覧用の簡易型
@@ -66,8 +66,8 @@ export interface NoteDetail {
   features: number[];
   createdAt: string;
   status: NoteStatus;
-  approvedAt?: string; // 承認日時（ISO 8601）
-  rejectedAt?: string; // 非承認日時（ISO 8601）
+  activatedAt?: string; // 有効化日時（ISO 8601）
+  archivedAt?: string; // アーカイブ日時（ISO 8601）
   lastEditedAt?: string; // 最終編集日時（ISO 8601）
   userNotes?: string; // ユーザーによる追記
   tags?: string[]; // タグ
@@ -87,7 +87,7 @@ export interface NoteUpdatePayload {
  */
 export interface NoteStatusCounts {
   draft: number;
-  approved: number;
-  rejected: number;
+  active: number;
+  archived: number;
   total: number;
 }

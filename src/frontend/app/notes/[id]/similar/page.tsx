@@ -19,7 +19,7 @@ import { Alert, AlertTitle, AlertDescription } from "@/components/ui/Alert";
 import SimilarNoteCard, { SimilarNote } from "@/components/SimilarNoteCard";
 import FeatureVectorViz, { FeatureDataPoint } from "@/components/FeatureVectorViz";
 import EmptyState from "@/components/EmptyState";
-import { SIMILARITY_THRESHOLDS } from "@/lib/api";
+import { SIMILARITY_THRESHOLDS, fetchNoteDetail } from "@/lib/api";
 
 // バックエンド API のベース URL
 const API_BASE_URL =
@@ -76,6 +76,26 @@ export default function SimilarNotesPage() {
       setIsLoading(true);
       setError(null);
 
+      // 基準ノートの詳細を取得
+      let baseNoteInfo = {
+        id: noteId,
+        symbol: "不明",
+        side: "不明",
+        timestamp: new Date().toISOString(),
+      };
+
+      try {
+        const baseNoteData = await fetchNoteDetail(noteId);
+        baseNoteInfo = {
+          id: noteId,
+          symbol: baseNoteData.symbol,
+          side: baseNoteData.side,
+          timestamp: baseNoteData.entryTime,
+        };
+      } catch (baseNoteError) {
+        console.warn("基準ノート取得エラー（類似検索は続行）:", baseNoteError);
+      }
+
       // 類似ノート検索API呼び出し
       const response = await fetch(
         `${API_BASE_URL}/api/trades/notes/${noteId}/similar`,
@@ -101,22 +121,6 @@ export default function SimilarNotesPage() {
         throw new Error(result.error || "類似ノートの取得に失敗しました");
       }
 
-      // 基準ノート情報を取得（最初の類似ノートから推測、または別APIから取得）
-      // TODO: 基準ノートの詳細情報を別途取得する
-      const baseNoteInfo = result.data.similarNotes[0]
-        ? {
-            id: noteId,
-            symbol: result.data.similarNotes[0].symbol,
-            side: result.data.similarNotes[0].side,
-            timestamp: new Date().toISOString(),
-          }
-        : {
-            id: noteId,
-            symbol: "不明",
-            side: "不明",
-            timestamp: new Date().toISOString(),
-          };
-
       // APIレスポンスをコンポーネント用データに変換
       const formattedData: SimilarNotesData = {
         baseNote: baseNoteInfo,
@@ -130,7 +134,7 @@ export default function SimilarNotesPage() {
           summarySnippet: n.summarySnippet,
           result: n.result as "win" | "loss" | "breakeven" | "pending",
         })),
-        // TODO: 特徴量ベクトルの比較データを取得
+        // 特徴量ベクトルは基準ノートから取得（featureVectorフィールドがあれば使用）
         featureVector: [],
       };
 

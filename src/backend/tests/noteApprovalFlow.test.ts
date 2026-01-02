@@ -74,14 +74,14 @@ describe('TradeNoteService - 承認フロー', () => {
       const result = await noteService.approveNote(note.id);
 
       // 検証
-      expect(result.status).toBe('approved');
-      expect(result.approvedAt).toBeDefined();
-      expect(result.rejectedAt).toBeUndefined();
+      expect(result.status).toBe('active');
+      expect(result.activatedAt).toBeDefined();
+      expect(result.archivedAt).toBeUndefined();
     });
 
     it('rejected ノートを承認できる（後戻り可能）', async () => {
       // 準備: rejected ノートを作成
-      const note = createTestNote({ status: 'rejected', rejectedAt: new Date() });
+      const note = createTestNote({ status: 'archived', archivedAt: new Date() });
       await noteService.saveNote(note);
       testNoteIds.push(note.id);
 
@@ -89,25 +89,25 @@ describe('TradeNoteService - 承認フロー', () => {
       const result = await noteService.approveNote(note.id);
 
       // 検証
-      expect(result.status).toBe('approved');
-      expect(result.approvedAt).toBeDefined();
-      // rejectedAt は削除される
-      expect(result.rejectedAt).toBeUndefined();
+      expect(result.status).toBe('active');
+      expect(result.activatedAt).toBeDefined();
+      // archivedAt は削除される
+      expect(result.archivedAt).toBeUndefined();
     });
 
     it('既に approved のノートは何も変更しない', async () => {
       // 準備
-      const approvedAt = new Date('2024-01-01');
-      const note = createTestNote({ status: 'approved', approvedAt });
+      const activatedAt = new Date('2024-01-01');
+      const note = createTestNote({ status: 'active', activatedAt });
       await noteService.saveNote(note);
       testNoteIds.push(note.id);
 
       // 実行
       const result = await noteService.approveNote(note.id);
 
-      // 検証: approvedAt は更新されない
-      expect(result.status).toBe('approved');
-      expect(new Date(result.approvedAt!).getTime()).toBe(approvedAt.getTime());
+      // 検証: activatedAt は更新されない
+      expect(result.status).toBe('active');
+      expect(new Date(result.activatedAt!).getTime()).toBe(activatedAt.getTime());
     });
 
     it('存在しないノートは例外を投げる', async () => {
@@ -127,13 +127,13 @@ describe('TradeNoteService - 承認フロー', () => {
       const result = await noteService.rejectNote(note.id);
 
       // 検証
-      expect(result.status).toBe('rejected');
-      expect(result.rejectedAt).toBeDefined();
+      expect(result.status).toBe('archived');
+      expect(result.archivedAt).toBeDefined();
     });
 
     it('approved ノートを非承認にできる', async () => {
       // 準備
-      const note = createTestNote({ status: 'approved', approvedAt: new Date() });
+      const note = createTestNote({ status: 'active', activatedAt: new Date() });
       await noteService.saveNote(note);
       testNoteIds.push(note.id);
 
@@ -141,17 +141,17 @@ describe('TradeNoteService - 承認フロー', () => {
       const result = await noteService.rejectNote(note.id);
 
       // 検証
-      expect(result.status).toBe('rejected');
-      expect(result.rejectedAt).toBeDefined();
-      // approvedAt は履歴として保持
-      expect(result.approvedAt).toBeDefined();
+      expect(result.status).toBe('archived');
+      expect(result.archivedAt).toBeDefined();
+      // activatedAt は履歴として保持
+      expect(result.activatedAt).toBeDefined();
     });
   });
 
   describe('revertToDraft', () => {
     it('approved ノートを draft に戻せる', async () => {
       // 準備
-      const note = createTestNote({ status: 'approved', approvedAt: new Date() });
+      const note = createTestNote({ status: 'active', activatedAt: new Date() });
       await noteService.saveNote(note);
       testNoteIds.push(note.id);
 
@@ -160,13 +160,13 @@ describe('TradeNoteService - 承認フロー', () => {
 
       // 検証
       expect(result.status).toBe('draft');
-      // 履歴として approvedAt は保持
-      expect(result.approvedAt).toBeDefined();
+      // 履歴として activatedAt は保持
+      expect(result.activatedAt).toBeDefined();
     });
 
     it('rejected ノートを draft に戻せる', async () => {
       // 準備
-      const note = createTestNote({ status: 'rejected', rejectedAt: new Date() });
+      const note = createTestNote({ status: 'archived', archivedAt: new Date() });
       await noteService.saveNote(note);
       testNoteIds.push(note.id);
 
@@ -226,12 +226,12 @@ describe('TradeNoteService - 承認フロー', () => {
     });
   });
 
-  describe('loadApprovedNotes', () => {
+  describe('loadActiveNotes', () => {
     it('承認済みノートのみを返す', async () => {
       // 準備: 各ステータスのノートを作成
       const draftNote = createTestNote({ status: 'draft' });
-      const approvedNote = createTestNote({ status: 'approved', approvedAt: new Date() });
-      const rejectedNote = createTestNote({ status: 'rejected', rejectedAt: new Date() });
+      const approvedNote = createTestNote({ status: 'active', activatedAt: new Date() });
+      const rejectedNote = createTestNote({ status: 'archived', archivedAt: new Date() });
 
       await noteService.saveNote(draftNote);
       await noteService.saveNote(approvedNote);
@@ -240,7 +240,7 @@ describe('TradeNoteService - 承認フロー', () => {
       testNoteIds.push(draftNote.id, approvedNote.id, rejectedNote.id);
 
       // 実行
-      const result = await noteService.loadApprovedNotes();
+      const result = await noteService.loadActiveNotes();
 
       // 検証
       const resultIds = result.map((n) => n.id);
@@ -254,7 +254,7 @@ describe('TradeNoteService - 承認フロー', () => {
     it('指定ステータスのノートのみを返す', async () => {
       // 準備
       const draftNote = createTestNote({ status: 'draft' });
-      const approvedNote = createTestNote({ status: 'approved', approvedAt: new Date() });
+      const approvedNote = createTestNote({ status: 'active', activatedAt: new Date() });
 
       await noteService.saveNote(draftNote);
       await noteService.saveNote(approvedNote);
@@ -263,7 +263,7 @@ describe('TradeNoteService - 承認フロー', () => {
 
       // 実行 & 検証
       const drafts = await noteService.loadNotesByStatus('draft');
-      const approved = await noteService.loadNotesByStatus('approved');
+      const approved = await noteService.loadNotesByStatus('active');
 
       expect(drafts.map((n) => n.id)).toContain(draftNote.id);
       expect(approved.map((n) => n.id)).toContain(approvedNote.id);
@@ -278,8 +278,8 @@ describe('TradeNoteService - 承認フロー', () => {
       // 新規ノートを追加
       const draftNote1 = createTestNote({ status: 'draft' });
       const draftNote2 = createTestNote({ status: 'draft' });
-      const approvedNote = createTestNote({ status: 'approved', approvedAt: new Date() });
-      const rejectedNote = createTestNote({ status: 'rejected', rejectedAt: new Date() });
+      const approvedNote = createTestNote({ status: 'active', activatedAt: new Date() });
+      const rejectedNote = createTestNote({ status: 'archived', archivedAt: new Date() });
 
       await noteService.saveNote(draftNote1);
       await noteService.saveNote(draftNote2);
@@ -293,8 +293,8 @@ describe('TradeNoteService - 承認フロー', () => {
 
       // 検証: 追加分のカウント
       expect(result.draft).toBe(initialCounts.draft + 2);
-      expect(result.approved).toBe(initialCounts.approved + 1);
-      expect(result.rejected).toBe(initialCounts.rejected + 1);
+      expect(result.active).toBe(initialCounts.active + 1);
+      expect(result.archived).toBe(initialCounts.archived + 1);
       expect(result.total).toBe(initialCounts.total + 4);
     });
   });
@@ -320,28 +320,28 @@ describe('MatchingService - 承認済みフィルタ', () => {
     }
   });
 
-  it('loadApprovedNotes は draft ノートを除外する', async () => {
+  it('loadActiveNotes は draft ノートを除外する', async () => {
     // 準備
     const draftNote = createTestNote({ status: 'draft' });
     await noteService.saveNote(draftNote);
     testNoteIds.push(draftNote.id);
 
     // 実行
-    const approvedNotes = await noteService.loadApprovedNotes();
+    const approvedNotes = await noteService.loadActiveNotes();
 
     // 検証
     const ids = approvedNotes.map((n) => n.id);
     expect(ids).not.toContain(draftNote.id);
   });
 
-  it('loadApprovedNotes は rejected ノートを除外する', async () => {
+  it('loadActiveNotes は rejected ノートを除外する', async () => {
     // 準備
-    const rejectedNote = createTestNote({ status: 'rejected', rejectedAt: new Date() });
+    const rejectedNote = createTestNote({ status: 'archived', archivedAt: new Date() });
     await noteService.saveNote(rejectedNote);
     testNoteIds.push(rejectedNote.id);
 
     // 実行
-    const approvedNotes = await noteService.loadApprovedNotes();
+    const approvedNotes = await noteService.loadActiveNotes();
 
     // 検証
     const ids = approvedNotes.map((n) => n.id);

@@ -10,12 +10,19 @@
  */
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import TimeframePicker, { Timeframe } from "@/components/TimeframePicker";
+import {
+  fetchUserSettings,
+  saveUserSettings,
+  resetUserSettings,
+  UserSettings,
+  SettingsTimeframe,
+} from "@/lib/api";
 
-// 設定データの型定義
+// 設定データの型定義（API型とUI型の橋渡し）
 interface Settings {
   // 通知設定
   notification: {
@@ -156,9 +163,41 @@ export default function SettingsPage() {
     },
   });
 
+  // 読み込み状態
+  const [isLoading, setIsLoading] = useState(true);
   // 保存中状態
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  // エラー状態
+  const [error, setError] = useState<string | null>(null);
+
+  /**
+   * 初回読み込み時にAPIから設定を取得
+   */
+  useEffect(() => {
+    async function loadSettings() {
+      try {
+        setIsLoading(true);
+        setError(null);
+        const data = await fetchUserSettings();
+        // API型からUI型に変換
+        setSettings({
+          notification: data.notification,
+          timeframes: {
+            primary: data.timeframes.primary as Timeframe,
+            secondary: data.timeframes.secondary as Timeframe[],
+          },
+          display: data.display,
+        });
+      } catch (err) {
+        console.error("設定の読み込みに失敗しました:", err);
+        setError("設定の読み込みに失敗しました");
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadSettings();
+  }, []);
 
   /**
    * 設定を更新
@@ -183,14 +222,61 @@ export default function SettingsPage() {
   async function handleSave() {
     try {
       setIsSaving(true);
-      // TODO: 実際の API 呼び出しに置き換え
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      setError(null);
+      // API型に変換して送信
+      await saveUserSettings({
+        notification: settings.notification,
+        timeframes: {
+          primary: settings.timeframes.primary as SettingsTimeframe,
+          secondary: settings.timeframes.secondary as SettingsTimeframe[],
+        },
+        display: settings.display,
+      });
       setSaveSuccess(true);
-    } catch (error) {
-      console.error("設定の保存に失敗しました:", error);
+    } catch (err) {
+      console.error("設定の保存に失敗しました:", err);
+      setError("設定の保存に失敗しました");
     } finally {
       setIsSaving(false);
     }
+  }
+
+  /**
+   * 設定をリセット
+   */
+  async function handleReset() {
+    if (!confirm("設定をデフォルトに戻しますか？")) {
+      return;
+    }
+    try {
+      setIsSaving(true);
+      setError(null);
+      const data = await resetUserSettings();
+      // API型からUI型に変換
+      setSettings({
+        notification: data.notification,
+        timeframes: {
+          primary: data.timeframes.primary as Timeframe,
+          secondary: data.timeframes.secondary as Timeframe[],
+        },
+        display: data.display,
+      });
+      setSaveSuccess(true);
+    } catch (err) {
+      console.error("設定のリセットに失敗しました:", err);
+      setError("設定のリセットに失敗しました");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  // ローディング表示
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-gray-400">設定を読み込み中...</div>
+      </div>
+    );
   }
 
   return (
@@ -200,6 +286,13 @@ export default function SettingsPage() {
         <h1 className="text-3xl font-bold text-white">設定</h1>
         <p className="text-gray-400 mt-1">アプリケーションの動作をカスタマイズ</p>
       </div>
+
+      {/* エラー表示 */}
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-red-400 text-sm">
+          {error}
+        </div>
+      )}
 
       {/* 通知設定 */}
       <Card>
@@ -321,7 +414,7 @@ export default function SettingsPage() {
             <Button variant="outline">
               データをエクスポート
             </Button>
-            <Button variant="outline">
+            <Button variant="outline" onClick={handleReset} disabled={isSaving}>
               設定をリセット
             </Button>
             <Button variant="destructive">

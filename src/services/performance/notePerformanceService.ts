@@ -121,7 +121,7 @@ export class NotePerformanceService {
     // アクティブなノートを取得
     const notes = await this.prisma.tradeNote.findMany({
       where: {
-        status: 'approved',
+        status: 'active',
         enabled: true,
       },
       select: { id: true, symbol: true },

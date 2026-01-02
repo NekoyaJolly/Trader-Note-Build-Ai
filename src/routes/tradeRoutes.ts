@@ -119,14 +119,4 @@ router.post('/notes/performance/bulk', tradeController.getBulkPerformanceSummary
  */
 router.get('/notes/:id/performance', tradeController.getPerformanceReport);
 
-/**
- * POST /api/trades/notes/:id/similar
- * 特定のノートに類似したノートを検索
- * 
- * リクエストボディ:
- * - threshold: 類似度閾値（0.0〜1.0、デフォルト: 0.70）
- * - limit: 最大件数（デフォルト: 10）
- */
-router.post('/notes/:id/similar', tradeController.findSimilarNotes);
-
 export default router;

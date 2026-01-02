@@ -295,18 +295,18 @@ export class TradeNoteRepository {
   // ==========================================================
 
   /**
-   * 承認済みノートのみを取得する
+   * 有効ノートのみを取得する
    * マッチング対象となるノートを取得する際に使用
    */
   async findApproved(options: Omit<FindNotesOptions, 'status'> = {}): Promise<TradeNoteWithSummary[]> {
-    return this.findWithOptions({ ...options, status: 'approved' });
+    return this.findWithOptions({ ...options, status: 'active' });
   }
 
   /**
    * マッチング対象の有効ノートを取得する（フェーズ8: 複数ノート運用UX）
    * 
    * 条件:
-   * - status = 'approved'
+   * - status = 'active'
    * - enabled = true
    * - pausedUntil が null または現在時刻より前
    * 
@@ -318,7 +318,7 @@ export class TradeNoteRepository {
     const now = new Date();
 
     const where: Prisma.TradeNoteWhereInput = {
-      status: 'approved',
+      status: 'active',
       enabled: true,
       OR: [
         { pausedUntil: null },
@@ -421,7 +421,7 @@ export class TradeNoteRepository {
   }
 
   /**
-   * ノートを承認する
+   * ノートを承認（有効化）する
    * 
    * @param id - TradeNote の ID
    * @returns 更新された TradeNote
@@ -430,15 +430,15 @@ export class TradeNoteRepository {
     return await this.prisma.tradeNote.update({
       where: { id },
       data: {
-        status: 'approved',
-        approvedAt: new Date(),
-        rejectedAt: null,
+        status: 'active',
+        activatedAt: new Date(),
+        archivedAt: null,
       },
     });
   }
 
   /**
-   * ノートを非承認にする
+   * ノートをアーカイブにする
    * 
    * @param id - TradeNote の ID
    * @returns 更新された TradeNote
@@ -447,8 +447,8 @@ export class TradeNoteRepository {
     return await this.prisma.tradeNote.update({
       where: { id },
       data: {
-        status: 'rejected',
-        rejectedAt: new Date(),
+        status: 'archived',
+        archivedAt: new Date(),
       },
     });
   }
@@ -464,8 +464,8 @@ export class TradeNoteRepository {
       where: { id },
       data: {
         status: 'draft',
-        approvedAt: null,
-        rejectedAt: null,
+        activatedAt: null,
+        archivedAt: null,
       },
     });
   }

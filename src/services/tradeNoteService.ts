@@ -448,9 +448,9 @@ export class TradeNoteService {
       });
       
       // ステータスの更新
-      if (note.status === 'approved' && existing.status !== 'approved') {
+      if (note.status === 'active' && existing.status !== 'active') {
         await this.repository.approve(existing.id);
-      } else if (note.status === 'rejected' && existing.status !== 'rejected') {
+      } else if (note.status === 'archived' && existing.status !== 'archived') {
         await this.repository.reject(existing.id);
       } else if (note.status === 'draft' && existing.status !== 'draft') {
         await this.repository.revertToDraft(existing.id);
@@ -464,12 +464,12 @@ export class TradeNoteService {
     } else {
       // 新規ノートの作成
       // side は小文字で保存（Prisma TradeSide enumは 'buy' | 'sell'）
-      // status は小文字で保存（Prisma NoteStatus enumは 'draft' | 'approved' | 'rejected'）
+      // status は小文字で保存（Prisma NoteStatus enumは 'draft' | 'active' | 'archived'）
       const statusValue = (note.status || 'draft').toLowerCase();
       // 型安全に NoteStatus enum に変換
       const validStatus: PrismaNoteStatus = 
-        statusValue === 'approved' ? 'approved' :
-        statusValue === 'rejected' ? 'rejected' : 'draft';
+        statusValue === 'active' ? 'active' :
+        statusValue === 'archived' ? 'archived' : 'draft';
       
       const created = await this.repository.createWithSummary(
         {
@@ -657,8 +657,8 @@ export class TradeNoteService {
       features: dbNote.featureVector || [],
       createdAt: dbNote.createdAt,
       status: (dbNote.status?.toLowerCase() || 'draft') as NoteStatus,
-      approvedAt: dbNote.approvedAt || undefined,
-      rejectedAt: dbNote.rejectedAt || undefined,
+      activatedAt: dbNote.activatedAt || undefined,
+      archivedAt: dbNote.archivedAt || undefined,
       lastEditedAt: dbNote.lastEditedAt || undefined,
       userNotes: dbNote.userNotes || undefined,
       tags: dbNote.tags || undefined,
@@ -716,26 +716,26 @@ export class TradeNoteService {
   // ========== 承認フロー関連メソッド ==========
 
   /**
-   * 承認済みノートのみを取得
+   * 有効ノートのみを取得
    * マッチング対象となるノートのみを返却する
    * 
    * Phase 8: DBモードではリポジトリの専用メソッドを使用
    */
-  async loadApprovedNotes(): Promise<TradeNote[]> {
+  async loadActiveNotes(): Promise<TradeNote[]> {
     if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
       const dbNotes = await this.repository.findApproved();
       return dbNotes.map(n => this.convertDbNoteToTradeNote(n));
     }
     
     const allNotes = await this.loadAllNotes();
-    return allNotes.filter(note => note.status === 'approved');
+    return allNotes.filter(note => note.status === 'active');
   }
 
   /**
    * マッチング対象の有効ノートを取得する（フェーズ8: 複数ノート運用UX）
    * 
    * 条件:
-   * - status = 'approved'
+   * - status = 'active'
    * - enabled = true
    * - pausedUntil が null または現在時刻より前
    * 
@@ -747,17 +747,17 @@ export class TradeNoteService {
       return dbNotes.map(n => this.convertDbNoteToTradeNote(n));
     }
     
-    // ファイルモードでは enabled, pausedUntil, priority がないため approved のみフィルタ
+    // ファイルモードでは enabled, pausedUntil, priority がないため active のみフィルタ
     const allNotes = await this.loadAllNotes();
-    return allNotes.filter(note => note.status === 'approved');
+    return allNotes.filter(note => note.status === 'active');
   }
 
   /**
    * 指定ステータスのノートを取得
    * 
    * Phase 8: DBモードではリポジトリの専用メソッドを使用
-   * @param status - 取得したいステータス（draft, approved, rejected）
-   * 注意: Prisma enum は小文字で定義されている（draft, approved, rejected）
+   * @param status - 取得したいステータス（draft, active, archived）
+   * 注意: Prisma enum は小文字で定義されている（draft, active, archived）
    */
   async loadNotesByStatus(status: NoteStatus): Promise<TradeNote[]> {
     if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
@@ -802,13 +802,13 @@ export class TradeNoteService {
       throw new Error(`ノートが見つかりませんでした: ${noteId}`);
     }
 
-    if (note.status === 'approved') {
+    if (note.status === 'active') {
       return note;
     }
 
-    note.status = 'approved';
-    note.approvedAt = new Date();
-    delete note.rejectedAt;
+    note.status = 'active';
+    note.activatedAt = new Date();
+    delete note.archivedAt;
 
     await this.saveNote(note);
     return note;
@@ -843,12 +843,12 @@ export class TradeNoteService {
       throw new Error(`ノートが見つかりませんでした: ${noteId}`);
     }
 
-    if (note.status === 'rejected') {
+    if (note.status === 'archived') {
       return note;
     }
 
-    note.status = 'rejected';
-    note.rejectedAt = new Date();
+    note.status = 'archived';
+    note.archivedAt = new Date();
 
     await this.saveNote(note);
     return note;
@@ -951,13 +951,13 @@ export class TradeNoteService {
    * 
    * Phase 8: DBモードではリポジトリのグループ化クエリを使用
    */
-  async getStatusCounts(): Promise<{ draft: number; approved: number; rejected: number; total: number }> {
+  async getStatusCounts(): Promise<{ draft: number; active: number; archived: number; total: number }> {
     if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
       const statusCounts = await this.repository.countByStatus();
       const counts = {
         draft: 0,
-        approved: 0,
-        rejected: 0,
+        active: 0,
+        archived: 0,
         total: 0,
       };
       
@@ -965,10 +965,10 @@ export class TradeNoteService {
         const statusLower = status.toLowerCase();
         if (statusLower === 'draft') {
           counts.draft = count;
-        } else if (statusLower === 'approved') {
-          counts.approved = count;
-        } else if (statusLower === 'rejected') {
-          counts.rejected = count;
+        } else if (statusLower === 'active') {
+          counts.active = count;
+        } else if (statusLower === 'archived') {
+          counts.archived = count;
         }
         counts.total += count;
       }
@@ -980,18 +980,18 @@ export class TradeNoteService {
     const allNotes = await this.loadAllNotes();
     const counts = {
       draft: 0,
-      approved: 0,
-      rejected: 0,
+      active: 0,
+      archived: 0,
       total: allNotes.length,
     };
 
     for (const note of allNotes) {
       switch (note.status) {
-        case 'approved':
-          counts.approved++;
+        case 'active':
+          counts.active++;
           break;
-        case 'rejected':
-          counts.rejected++;
+        case 'archived':
+          counts.archived++;
           break;
         default:
           // status が未設定または 'draft' の場合

@@ -87,7 +87,6 @@ TradeAssist は **ダークモードをデフォルト** とし、ネオング�
 | **発注確認画面** | `/orders/confirm` | 発注プリセット表示、確認フロー | `GET /api/orders/preset/:noteId`, `POST /api/orders/confirmation` |
 | **マッチング履歴** | `/matching/history` | 一致判定履歴、フィルタリング | `GET /api/matching/history` |
 | **設定画面** | `/settings` | 通知設定、閾値調整、タイムフレーム選択 | 新規 API |
-| **類似トレード検索** | `/notes/[id]/similar` | 類似ノート一覧 | `FeatureService.findSimilarToNote()` |
 | **インジケーター表示** | `/market/[symbol]` | RSI/MACD/BB 可視化 | `IndicatorService` |
 
 ---
@@ -109,7 +108,6 @@ TradeAssist は **ダークモードをデフォルト** とし、ネオング�
 | **`IndicatorChart`** | RSI/MACD/BB のチャート表示 | 高 |
 | **`TrendBadge`** | 上昇/下降/横ばいトレンドバッジ | 高 |
 | **`DecisionModeBadge`** | 順張り/逆張り/ニュートラル表示 | 高 |
-| **`SimilarNoteCard`** | 類似ノートカード（類似度%付き） | 中 |
 | **`OrderPresetCard`** | 発注プリセット確認カード | 中 |
 | **`FeatureVectorViz`** | 特徴量ベクトルの可視化（レーダーチャート） | 中 |
 | **`NotificationBell`** | ヘッダー未読バッジ付き通知アイコン | 高 |
@@ -510,12 +508,10 @@ TradeAssist は、単なる記録ツールではなく、**トレーダーの判
 - [ ] `MatchReasonVisualizer` 横バースタイル
 - [ ] 発注確認画面 `/orders/confirm`
 - [ ] マッチング履歴画面
-- [ ] `SimilarNoteCard`
 - [ ] サイドバーアクティブ状態
 
 ### Phase 3（拡張機能）
 - [ ] `FeatureVectorViz`（レーダーチャート）
-- [ ] 類似トレード検索画面
 - [ ] `JobProgressBar`
 - [ ] 設定画面
 - [ ] スワイプアクション（モバイル）
@@ -528,7 +524,6 @@ TradeAssist は、単なる記録ツールではなく、**トレーダーの判
 | バックエンドサービス | UI コンポーネント |
 |---------------------|------------------|
 | `IndicatorService` | `IndicatorChart`, `TrendBadge` |
-| `FeatureService.findSimilarNotes()` | `SimilarNoteCard`, 類似検索画面 |
 | `EnhancedAISummaryService` | ノート詳細の AI 要約セクション |
 | `RevaluationJobService` | `JobProgressBar`, 設定画面 |
 | `OrderController.generatePreset()` | `OrderPresetCard`, 発注確認画面 |
