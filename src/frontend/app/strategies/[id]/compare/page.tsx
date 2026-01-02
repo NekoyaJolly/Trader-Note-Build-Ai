@@ -19,9 +19,6 @@ import {
   VersionComparisonData,
 } from "@/lib/api";
 import type { Strategy } from "@/types/strategy";
-import Sidebar from "@/components/layout/Sidebar";
-import Header from "@/components/layout/Header";
-import Footer from "@/components/layout/Footer";
 
 /** メトリクス表示カード */
 function MetricCard({
@@ -140,30 +137,8 @@ export default function StrategyComparePage() {
   }
 
   return (
-    <div className="flex min-h-screen bg-slate-900">
-      <Sidebar />
-      <div className="flex-1 flex flex-col">
-        <Header />
-        <main className="flex-1 p-6">
-          {/* パンくず */}
-          <div className="mb-6">
-            <div className="flex items-center gap-2 text-sm text-gray-400 mb-2">
-              <Link href="/strategies" className="hover:text-gray-200">
-                ストラテジー
-              </Link>
-              <span>/</span>
-              <Link href={`/strategies/${strategyId}`} className="hover:text-gray-200">
-                {strategy.name}
-              </Link>
-              <span>/</span>
-              <span className="text-gray-200">バージョン比較</span>
-            </div>
-            <h1 className="text-2xl font-bold text-white">
-              バージョン比較 - {strategy.name}
-            </h1>
-          </div>
-
-          {/* エラーメッセージ */}
+    <div className="space-y-6">
+          {/* エラーメッセージ */}}
           {error && (
             <div className="bg-red-600/20 border border-red-600 text-red-400 px-4 py-3 rounded mb-6">
               {error}
@@ -330,9 +305,6 @@ export default function StrategyComparePage() {
               PF = プロフィットファクター | DD = ドローダウン
             </span>
           </div>
-        </main>
-        <Footer />
-      </div>
     </div>
   );
 }
