@@ -175,42 +175,21 @@ const navItems: NavItem[] = [
 
 // サイドバーの状態を管理するコンテキスト用
 interface SidebarProps {
-  /** 折りたたみ状態（外部制御用） */
-  isCollapsed?: boolean;
-  /** 折りたたみ状態変更時のコールバック */
-  onCollapsedChange?: (collapsed: boolean) => void;
+  /** サイドバー表示状態 */
+  isOpen?: boolean;
+  /** サイドバーを閉じるコールバック */
+  onClose?: () => void;
 }
 
 /**
- * サイドバーナビゲーション
- * 全デバイスで表示、初期状態は折りたたみ
+ * サイドバーナビゲーション（オーバーレイ式）
+ * ハンバーガーメニューから展開、ナビ選択で自動閉じ
  */
-export default function Sidebar({ isCollapsed: externalCollapsed, onCollapsedChange }: SidebarProps) {
-  // 内部の折りたたみ状態（外部から制御されない場合のデフォルト：折りたたみ）
-  const [internalCollapsed, setInternalCollapsed] = useState(true);
-  
-  // 外部制御があればそちらを優先、なければ内部状態を使用
-  const isCollapsed = externalCollapsed ?? internalCollapsed;
-  
-  // 折りたたみトグルハンドラ
-  const handleCollapsedToggle = () => {
-    const newValue = !isCollapsed;
-    if (onCollapsedChange) {
-      onCollapsedChange(newValue);
-    } else {
-      setInternalCollapsed(newValue);
-    }
-  };
-
-  // モバイル対応: ナビゲーション選択時にサイドバーを折りたたむ
+export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
+  // ナビゲーション選択時にサイドバーを閉じる
   const handleNavClick = () => {
-    // サイドバーが展開されている場合、選択後に折りたたむ
-    if (!isCollapsed) {
-      if (onCollapsedChange) {
-        onCollapsedChange(true);
-      } else {
-        setInternalCollapsed(true);
-      }
+    if (onClose) {
+      onClose();
     }
   };
 
@@ -346,7 +325,6 @@ export default function Sidebar({ isCollapsed: externalCollapsed, onCollapsedCha
                   : "text-gray-300 hover:bg-slate-700/50 hover:text-white"
                 }
                 ${depth > 0 ? "pl-10" : ""}
-                ${isCollapsed ? "hidden" : ""}
               `}
             >
               <div className="flex items-center gap-3">
@@ -359,15 +337,14 @@ export default function Sidebar({ isCollapsed: externalCollapsed, onCollapsedCha
             </button>
             
             {/* 子メニュー */}
-            {!isCollapsed && isExpanded && (
+            {isExpanded && (
               <div className="mt-1 ml-4 border-l border-slate-700 pl-2 space-y-1">
                 {item.children?.map(child => renderNavItem(child, depth + 1))}
               </div>
             )}
           </>
         ) : (
-          // 単独リンク - クリック時にサイドバーを折りたたむ
-          // 折りたたみ時は非表示（アイコンも含めて非表示）
+          // 単独リンク - クリック時にサイドバーを閉じる
           <Link
             href={item.href}
             onClick={handleNavClick}
@@ -379,7 +356,6 @@ export default function Sidebar({ isCollapsed: externalCollapsed, onCollapsedCha
                 : "text-gray-300 hover:bg-slate-700/50 hover:text-white"
               }
               ${depth > 0 ? "pl-6" : ""}
-              ${isCollapsed ? "hidden" : ""}
             `}
           >
             <span className={`${active ? "text-pink-400" : "text-gray-400 group-hover:text-gray-300"}`}>
@@ -403,43 +379,43 @@ export default function Sidebar({ isCollapsed: externalCollapsed, onCollapsedCha
   };
 
   return (
-    <aside 
-      className={`
-        flex flex-col fixed top-0 left-0 z-40
-        h-screen bg-slate-900 border-r border-slate-700
-        transition-all duration-300 ease-in-out
-        ${isCollapsed ? "w-16" : "w-64"}
-      `}
-    >
-      {/* ロゴ部分 */}
-      <div className={`flex items-center ${isCollapsed ? "justify-center" : "justify-between"} p-2 sm:p-3 md:p-4 border-b border-slate-700`}>
-        {!isCollapsed && (
-          <Link href="/" className="flex items-center gap-2">
-            <span className="text-lg sm:text-xl font-bold neon-text">TradeAssist</span>
-          </Link>
-        )}
-        
-        {/* 折りたたみボタン */}
-        <button
-          onClick={handleCollapsedToggle}
-          className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700 transition-smooth"
-          aria-label={isCollapsed ? "サイドバーを展開" : "サイドバーを折りたたみ"}
-        >
-          <svg 
-            className={`w-5 h-5 transition-transform ${isCollapsed ? "rotate-180" : ""}`} 
-            fill="none" 
-            stroke="currentColor" 
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-          </svg>
-        </button>
-      </div>
+    <>
+      {/* オーバーレイ背景（サイドバー展開時） */}
+      {isOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 transition-opacity duration-300"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
 
-      {/* ナビゲーション */}
-      <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-2">
-        {/* メインメニュー（アコーディオン） - 折りたたみ時は非表示 */}
-        {!isCollapsed && (
+      {/* サイドバーパネル */}
+      <aside 
+        className={`
+          fixed top-0 left-0 z-50
+          h-screen w-72 sm:w-80
+          bg-slate-900 
+          transform transition-transform duration-300 ease-in-out
+          ${isOpen ? "translate-x-0" : "-translate-x-full"}
+        `}
+      >
+        {/* ヘッダー部分（閉じるボタン） */}
+        <div className="flex items-center justify-between p-3 sm:p-4">
+          <span className="text-lg sm:text-xl font-bold neon-text">メニュー</span>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700 transition-all"
+            aria-label="メニューを閉じる"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* ナビゲーション */}
+        <nav className="flex-1 overflow-y-auto py-2 px-3 space-y-2">
+          {/* メインメニュー */}
           <div className="space-y-1">
             <button
               onClick={() => toggleCategory('main')}
@@ -454,10 +430,8 @@ export default function Sidebar({ isCollapsed: externalCollapsed, onCollapsedCha
               </div>
             )}
           </div>
-        )}
 
-        {/* 分析ツール（アコーディオン） - 折りたたみ時は非表示 */}
-        {!isCollapsed && (
+          {/* 分析ツール */}
           <div className="pt-2 mt-2 border-t border-slate-700 space-y-1">
             <button
               onClick={() => toggleCategory('tools')}
@@ -566,10 +540,8 @@ export default function Sidebar({ isCollapsed: externalCollapsed, onCollapsedCha
               </>
             )}
           </div>
-        )}
 
-        {/* ユーティリティ（アコーディオン） - 折りたたみ時は非表示 */}
-        {!isCollapsed && (
+          {/* ユーティリティ */}
           <div className="pt-2 mt-2 border-t border-slate-700 space-y-1">
             <button
               onClick={() => toggleCategory('utility')}
@@ -584,11 +556,9 @@ export default function Sidebar({ isCollapsed: externalCollapsed, onCollapsedCha
               </div>
             )}
           </div>
-        )}
-      </nav>
+        </nav>
 
-      {/* フッター情報 */}
-      {!isCollapsed && (
+        {/* フッター情報 */}
         <div className="p-4 border-t border-slate-700">
           <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50">
             <div className="w-8 h-8 rounded-full bg-gradient-to-r from-pink-500 to-violet-500 flex items-center justify-center">
@@ -600,7 +570,7 @@ export default function Sidebar({ isCollapsed: externalCollapsed, onCollapsedCha
             </div>
           </div>
         </div>
-      )}
+      </aside>
 
       {/* インジケーター設定モーダル */}
       {isModalOpen && selectedIndicator && (
@@ -627,6 +597,6 @@ export default function Sidebar({ isCollapsed: externalCollapsed, onCollapsedCha
           }
         }
       `}</style>
-    </aside>
+    </>
   );
 }

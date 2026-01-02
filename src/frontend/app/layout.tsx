@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import Header from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
 import AppShell from "@/components/layout/AppShell";
 
@@ -30,12 +29,10 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-slate-900`}
       >
-        {/* アプリシェル（サイドバー + メインコンテンツ） */}
+        {/* アプリシェル（ヘッダー + サイドバー + メインコンテンツ） */}
         <AppShell>
-          {/* 共通ヘッダー（通知ベルのみ） */}
-          <Header />
           {/* メインコンテンツ領域 */}
-          <main className="min-h-screen px-4 py-6 md:px-8">{children}</main>
+          <main className="min-h-screen px-3 sm:px-4 md:px-8 py-4 sm:py-6">{children}</main>
           {/* 共通フッター */}
           <Footer />
         </AppShell>

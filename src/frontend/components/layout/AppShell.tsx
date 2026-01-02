@@ -4,14 +4,15 @@
  * アプリケーションシェルコンポーネント
  * 
  * サイドバーナビゲーションとメインコンテンツエリアを統合するラッパー
- * 全デバイスでサイドバーを表示
- * 初期状態：折りたたみ
+ * モバイル: サイドバーはオーバーレイ表示（デフォルト非表示）
+ * デスクトップ: サイドバーは固定表示
  * 
  * @see docs/phase12/UI_DESIGN_GUIDE.md
  */
 
 import { useState, useEffect } from "react";
 import Sidebar from "./Sidebar";
+import Header from "./Header";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -19,59 +20,56 @@ interface AppShellProps {
 
 /**
  * アプリケーションシェル
- * サイドバーの状態（折りたたみ/展開）を管理し、
- * メインコンテンツのマージンを動的に調整
+ * サイドバーの状態（展開/非表示）を管理し、
+ * ヘッダーにサイドバートグルボタンを配置
  */
 export default function AppShell({ children }: AppShellProps) {
-  // サイドバーの折りたたみ状態（初期値: true = 折りたたみ）
-  const [isCollapsed, setIsCollapsed] = useState(true);
+  // サイドバーの表示状態（モバイル: false=非表示, デスクトップ: false=折りたたみ）
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  // クライアントサイドでのみローカルストレージを使用
+  // クライアントサイドでのみ初期化
   useEffect(() => {
     setMounted(true);
-    const saved = localStorage.getItem("sidebar-collapsed");
-    if (saved !== null) {
-      setIsCollapsed(JSON.parse(saved));
-    }
-    // 初回アクセス時（保存値がない）は折りたたみ状態を維持
   }, []);
 
-  // 折りたたみ状態を保存
-  const handleCollapsedChange = (collapsed: boolean) => {
-    setIsCollapsed(collapsed);
-    localStorage.setItem("sidebar-collapsed", JSON.stringify(collapsed));
+  // サイドバートグル
+  const handleToggleSidebar = () => {
+    setIsSidebarOpen(!isSidebarOpen);
+  };
+
+  // サイドバーを閉じる（ナビゲーション選択時など）
+  const handleCloseSidebar = () => {
+    setIsSidebarOpen(false);
   };
 
   // 初回レンダリング時のハイドレーションエラーを防ぐ
-  // 折りたたみ状態でレンダリング（デフォルト = w-16）
   if (!mounted) {
     return (
-      <div className="flex min-h-screen">
-        <div className="w-16" /> {/* サイドバーのプレースホルダー */}
-        <div className="flex-1 flex flex-col min-h-screen ml-16">
-          {children}
-        </div>
+      <div className="flex flex-col min-h-screen">
+        {/* ヘッダープレースホルダー */}
+        <div className="h-12 sm:h-14 border-b border-slate-700 bg-slate-900" />
+        <main className="flex-1">{children}</main>
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen">
-      {/* サイドバー（全デバイスで表示） */}
+    <div className="flex flex-col min-h-screen">
+      {/* 共通ヘッダー（ハンバーガーメニュー + タイトル + 通知ベル） */}
+      <Header 
+        isSidebarOpen={isSidebarOpen} 
+        onToggleSidebar={handleToggleSidebar} 
+      />
+
+      {/* サイドバー（オーバーレイ式） */}
       <Sidebar 
-        isCollapsed={isCollapsed} 
-        onCollapsedChange={handleCollapsedChange} 
+        isOpen={isSidebarOpen} 
+        onClose={handleCloseSidebar} 
       />
       
       {/* メインコンテンツエリア */}
-      <div 
-        className={`
-          flex-1 flex flex-col min-h-screen
-          transition-all duration-300 ease-in-out
-          ${isCollapsed ? "ml-16" : "ml-64"}
-        `}
-      >
+      <div className="flex-1 flex flex-col">
         {children}
       </div>
     </div>
