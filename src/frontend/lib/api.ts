@@ -1570,12 +1570,24 @@ export async function runWalkForwardTest(
     positionSize?: number;
   }
 ): Promise<WalkForwardResult> {
+  // フロントエンドの positionSize をバックエンドの lotSize にマッピング
+  const requestBody = {
+    startDate: params.startDate,
+    endDate: params.endDate,
+    splitCount: params.splitCount,
+    inSampleDays: params.inSampleDays,
+    outOfSampleDays: params.outOfSampleDays,
+    timeframe: params.timeframe,
+    initialCapital: params.initialCapital,
+    lotSize: params.positionSize, // positionSize → lotSize
+  };
+
   const response = await fetch(
     `${API_BASE_URL}/api/strategies/${strategyId}/walkforward`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify(requestBody),
     }
   );
 

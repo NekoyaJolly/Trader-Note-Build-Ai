@@ -110,7 +110,7 @@ class App {
     this.app.use('/api/notifications', notificationRoutes);
     this.app.use('/api/orders', orderRoutes);
     this.app.use('/api/indicators', indicatorRoutes);
-    this.app.use('/api/backtests', backtestRoutes);
+    this.app.use('/api/backtest', backtestRoutes);
     this.app.use('/api/settings', settingsRoutes);
     this.app.use('/api/bars', barLocatorRoutes);
     this.app.use('/api/strategies', strategyRoutes);

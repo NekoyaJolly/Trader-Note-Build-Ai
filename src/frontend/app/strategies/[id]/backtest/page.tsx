@@ -238,7 +238,7 @@ export default function StrategyBacktestPage() {
     startDate: getDefaultStartDate(),
     endDate: getDefaultEndDate(),
     stage1Timeframe: "1h",
-    enableStage2: true,
+    enableStage2: false,
     initialCapital: 1000000,
     lotSize: 10000, // デフォルト1万通貨
     leverage: 25, // デフォルト25倍
@@ -437,10 +437,14 @@ export default function StrategyBacktestPage() {
       setRunningWalkForward(true);
       setError(null);
 
+      // バックテストパラメータの時間足をウォークフォワードにも適用
       const result = await runWalkForwardTest(strategyId, {
         splitCount: walkForwardParams.splitCount,
         startDate: walkForwardParams.startDate,
         endDate: walkForwardParams.endDate,
+        timeframe: backtestParams.stage1Timeframe, // 時間足を追加
+        initialCapital: backtestParams.initialCapital,
+        positionSize: backtestParams.lotSize,
       });
 
       setWalkForwardResult(result);

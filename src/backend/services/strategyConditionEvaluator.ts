@@ -317,6 +317,21 @@ export async function evaluateConditionGroup(
   ctx: EvaluationContext,
   group: ConditionGroup
 ): Promise<boolean> {
+  // null/undefined チェック: グループが存在しない場合はfalseを返す
+  if (!group) {
+    console.warn('[ConditionEvaluator] 条件グループが存在しません');
+    return false;
+  }
+
+  // 条件配列が空の場合のチェック
+  if (!group.conditions || group.conditions.length === 0) {
+    // IF-THENやSEQUENCEは専用フィールドを使用するため、AND/OR/NOTのみチェック
+    if (group.operator !== 'IF_THEN' && group.operator !== 'SEQUENCE') {
+      console.warn('[ConditionEvaluator] 条件配列が空です');
+      return false;
+    }
+  }
+
   // IF-THEN演算子の処理
   if (group.operator === 'IF_THEN') {
     return evaluateIfThen(ctx, group);

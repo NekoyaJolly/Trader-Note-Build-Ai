@@ -129,7 +129,102 @@ interface PeriodSplit {
 }
 
 /**
- * 期間を固定分割する
+ * プリセットデータのタイムスタンプを取得
+ * 休場日を含まない実際のデータポイントを取得する
+ */
+async function getPresetTimestamps(
+  symbol: string,
+  timeframe: string,
+  startDate: Date,
+  endDate: Date
+): Promise<Date[]> {
+  // OHLCVCandleから実際のタイムスタンプを取得
+  const candles = await prisma.oHLCVCandle.findMany({
+    where: {
+      symbol,
+      timeframe,
+      timestamp: {
+        gte: startDate,
+        lte: endDate,
+      },
+    },
+    select: { timestamp: true },
+    orderBy: { timestamp: 'asc' },
+  });
+
+  return candles.map(c => c.timestamp);
+}
+
+/**
+ * 期間をプリセットデータのレコード数を基準に分割する
+ * 
+ * 休場日（週末・祝日）を含まず、実際のデータポイントで分割するため
+ * より正確な IS/OOS 期間が得られる
+ * 
+ * @param timestamps - プリセットの実データタイムスタンプ配列
+ * @param splitCount - 分割数
+ * @returns 分割された期間の配列
+ */
+function calculatePeriodSplitsFromTimestamps(
+  timestamps: Date[],
+  splitCount: number
+): PeriodSplit[] {
+  if (timestamps.length === 0) {
+    console.log('[WalkForward] タイムスタンプが空のため分割できません');
+    return [];
+  }
+
+  const totalRecords = timestamps.length;
+  const recordsPerSplit = Math.floor(totalRecords / splitCount);
+  
+  // 最小レコード数を確保（IS: 50本以上、OOS: 20本以上）
+  const MIN_IN_SAMPLE_RECORDS = 50;
+  const MIN_OUT_OF_SAMPLE_RECORDS = 20;
+  
+  // IS:OOS = 70:30 の比率で分割
+  let inRecords = Math.floor(recordsPerSplit * 0.7);
+  let outRecords = Math.floor(recordsPerSplit * 0.3);
+  
+  // 最小レコード数を満たすように調整
+  inRecords = Math.max(inRecords, MIN_IN_SAMPLE_RECORDS);
+  outRecords = Math.max(outRecords, MIN_OUT_OF_SAMPLE_RECORDS);
+  
+  console.log(`[WalkForward] データ基準分割: 総レコード=${totalRecords}, 分割数=${splitCount}, IS=${inRecords}本, OOS=${outRecords}本`);
+
+  const splits: PeriodSplit[] = [];
+  let currentIndex = 0;
+
+  for (let i = 0; i < splitCount; i++) {
+    // 残りのレコードが十分にあるかチェック
+    const remainingRecords = totalRecords - currentIndex;
+    if (remainingRecords < inRecords + outRecords) {
+      console.log(`[WalkForward] Split ${i + 1}: 残りレコード不足 (${remainingRecords}本), スキップ`);
+      break;
+    }
+
+    const inSampleStartIdx = currentIndex;
+    const inSampleEndIdx = currentIndex + inRecords - 1;
+    const outOfSampleStartIdx = inSampleEndIdx + 1;
+    const outOfSampleEndIdx = Math.min(outOfSampleStartIdx + outRecords - 1, totalRecords - 1);
+
+    splits.push({
+      inSampleStart: timestamps[inSampleStartIdx],
+      inSampleEnd: timestamps[inSampleEndIdx],
+      outOfSampleStart: timestamps[outOfSampleStartIdx],
+      outOfSampleEnd: timestamps[outOfSampleEndIdx],
+    });
+
+    console.log(`[WalkForward] Split ${i + 1}: IS[${inSampleStartIdx}-${inSampleEndIdx}] ${timestamps[inSampleStartIdx].toISOString().split('T')[0]}〜${timestamps[inSampleEndIdx].toISOString().split('T')[0]}, OOS[${outOfSampleStartIdx}-${outOfSampleEndIdx}] ${timestamps[outOfSampleStartIdx].toISOString().split('T')[0]}〜${timestamps[outOfSampleEndIdx].toISOString().split('T')[0]}`);
+
+    // 次の分割の開始位置
+    currentIndex = outOfSampleEndIdx + 1;
+  }
+
+  return splits;
+}
+
+/**
+ * 期間を固定分割する（フォールバック用 - プリセットがない場合）
  * 
  * 例: 12ヶ月のデータを4分割、In-Sample:Out-of-Sample = 2:1 の場合
  * Split 1: In(月1-2), Out(月3)
@@ -137,7 +232,7 @@ interface PeriodSplit {
  * Split 3: In(月7-8), Out(月9)
  * Split 4: In(月10-11), Out(月12)
  */
-function calculatePeriodSplits(
+function calculatePeriodSplitsByDays(
   startDate: Date,
   endDate: Date,
   splitCount: number,
@@ -149,8 +244,19 @@ function calculatePeriodSplits(
   // 日数が指定されていない場合は自動計算
   // デフォルト: In-Sample 70%, Out-of-Sample 30%
   const daysPerSplit = Math.floor(totalDays / splitCount);
-  const inDays = inSampleDays ?? Math.floor(daysPerSplit * 0.7);
-  const outDays = outOfSampleDays ?? Math.floor(daysPerSplit * 0.3);
+  
+  // 最小期間を確保（IS: 3日以上、OOS: 2日以上）
+  const MIN_IN_SAMPLE_DAYS = 3;
+  const MIN_OUT_OF_SAMPLE_DAYS = 2;
+  
+  let inDays = inSampleDays ?? Math.floor(daysPerSplit * 0.7);
+  let outDays = outOfSampleDays ?? Math.floor(daysPerSplit * 0.3);
+  
+  // 最小期間を満たすように調整
+  inDays = Math.max(inDays, MIN_IN_SAMPLE_DAYS);
+  outDays = Math.max(outDays, MIN_OUT_OF_SAMPLE_DAYS);
+  
+  console.log(`[WalkForward] 日数ベース分割（フォールバック）: 総日数=${totalDays}, 分割数=${splitCount}, IS=${inDays}日, OOS=${outDays}日`);
 
   const splits: PeriodSplit[] = [];
   let currentStart = new Date(startDate);
@@ -286,14 +392,45 @@ export async function runWalkForwardTest(
   try {
     console.log(`[WalkForward] 実行開始: ${strategy.name} (${splitCount}分割)`);
 
-    // 期間を分割
-    const periodSplits = calculatePeriodSplits(
+    // プリセットデータのタイムスタンプを取得して、データ基準で分割
+    const timestamps = await getPresetTimestamps(
+      strategy.symbol,
+      timeframe,
       new Date(startDate),
-      new Date(endDate),
-      splitCount,
-      inSampleDays,
-      outOfSampleDays
+      new Date(endDate)
     );
+
+    let periodSplits: PeriodSplit[];
+    
+    // 分割に必要な最小レコード数 = (IS最小 + OOS最小) × 分割数
+    const MIN_IS_RECORDS = 50;
+    const MIN_OOS_RECORDS = 20;
+    const minRequiredRecords = (MIN_IS_RECORDS + MIN_OOS_RECORDS) * splitCount;
+    
+    if (timestamps.length >= minRequiredRecords) {
+      // プリセットデータがある場合: データ基準で分割（休場日を自動スキップ）
+      console.log(`[WalkForward] プリセットデータ ${timestamps.length} 件を基準に分割 (必要: ${minRequiredRecords}件以上)`);
+      periodSplits = calculatePeriodSplitsFromTimestamps(timestamps, splitCount);
+    } else if (timestamps.length > 0) {
+      // プリセットデータが少ない場合: 分割数を調整して対応
+      const adjustedSplitCount = Math.max(1, Math.floor(timestamps.length / (MIN_IS_RECORDS + MIN_OOS_RECORDS)));
+      console.log(`[WalkForward] プリセットデータ ${timestamps.length}件、分割数を ${splitCount} → ${adjustedSplitCount} に調整`);
+      periodSplits = calculatePeriodSplitsFromTimestamps(timestamps, adjustedSplitCount);
+    } else {
+      // プリセットデータなし: 日数ベースで分割（フォールバック）
+      console.log(`[WalkForward] プリセットデータなし、日数ベースで分割`);
+      periodSplits = calculatePeriodSplitsByDays(
+        new Date(startDate),
+        new Date(endDate),
+        splitCount,
+        inSampleDays,
+        outOfSampleDays
+      );
+    }
+    
+    if (periodSplits.length === 0) {
+      throw new Error('期間分割に失敗しました。データが不足している可能性があります。');
+    }
 
     const splitResults: SplitResult[] = [];
 

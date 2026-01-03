@@ -142,7 +142,7 @@ export async function checkDataCoverage(
     },
   });
 
-  // DB 内のデータ件数をカウント
+  // DB 内のデータ件数をカウント（要求期間内）
   const dataCount = await prisma.oHLCVCandle.count({
     where: {
       symbol,
@@ -154,11 +154,14 @@ export async function checkDataCoverage(
     },
   });
 
-  const expectedCount = calculateExpectedCandles(timeframe, startDate, endDate);
-  const coverageRatio = expectedCount > 0 ? dataCount / expectedCount : 0;
-
   // プリセットがない場合
   if (!preset) {
+    // プリセットがない場合は旧ロジック（24時間連続の期待値）
+    const intervalMinutes = getIntervalMinutes(timeframe);
+    const diffMs = endDate.getTime() - startDate.getTime();
+    const expectedCount = Math.ceil(diffMs / (intervalMinutes * 60 * 1000));
+    const coverageRatio = expectedCount > 0 ? dataCount / expectedCount : 0;
+
     return {
       hasCoverage: false,
       presetExists: false,
@@ -176,6 +179,27 @@ export async function checkDataCoverage(
   const reqStart = startDate.getTime();
   const reqEnd = endDate.getTime();
 
+  // 期待バー数の計算:
+  // プリセットの実データ密度（recordCount / プリセット期間）を使用して
+  // 要求期間の期待値を算出する
+  const presetDurationMs = presetEnd - presetStart;
+  const requestDurationMs = Math.min(reqEnd, presetEnd) - Math.max(reqStart, presetStart);
+  
+  // 要求期間がプリセット期間と重なっている部分の期待値を計算
+  let expectedCount: number;
+  if (requestDurationMs > 0 && presetDurationMs > 0) {
+    // 実データの密度から期待値を算出（休場日も自動的に考慮される）
+    const dataPerMs = preset.recordCount / presetDurationMs;
+    expectedCount = Math.round(dataPerMs * requestDurationMs);
+  } else {
+    // 重なりがない場合
+    expectedCount = 0;
+  }
+
+  // カバレッジ率を計算
+  const coverageRatio = expectedCount > 0 ? Math.min(dataCount / expectedCount, 1.0) : 0;
+
+  // 不足期間の判定
   let missingStart: Date | undefined;
   let missingEnd: Date | undefined;
 
@@ -190,8 +214,8 @@ export async function checkDataCoverage(
     missingEnd = endDate;
   }
 
-  // 80% 以上のカバレッジがあれば十分とみなす
-  const hasCoverage = coverageRatio >= 0.8 && !missingStart;
+  // 95% 以上のカバレッジがあり、期間外への要求がなければ十分とみなす
+  const hasCoverage = coverageRatio >= 0.95 && !missingStart;
 
   return {
     hasCoverage,
@@ -240,11 +264,15 @@ export async function fetchHistoricalData(
   });
 
   // キャッシュが十分にある場合はそのまま返す
-  // （期間の80%以上のデータがあれば十分とみなす）
-  const expectedCandles = calculateExpectedCandles(timeframe, startDate, endDate);
+  // 期待バー数は時間差から算出（休場日を考慮せずに概算）
+  const intervalMinutes = getIntervalMinutes(timeframe);
+  const diffMs = endDate.getTime() - startDate.getTime();
+  const expectedCandles = Math.ceil(diffMs / (intervalMinutes * 60 * 1000));
   const cacheRatio = cachedData.length / expectedCandles;
 
-  if (cacheRatio >= 0.8 && cachedData.length > 0) {
+  // 50%以上のデータがあればキャッシュとして有効とみなす
+  // （休場日があるため100%にはならない前提）
+  if (cacheRatio >= 0.5 && cachedData.length > 0) {
     console.log(
       `[fetchHistoricalData] DBプリセットを使用: ${symbol}/${timeframe}, ` +
         `${cachedData.length}/${expectedCandles}件 (${(cacheRatio * 100).toFixed(1)}%)`
@@ -366,19 +394,6 @@ async function cacheOhlcvData(
     // キャッシュ失敗はワーニングのみ（メイン処理は継続）
     console.warn(`[cacheOhlcvData] キャッシュ保存エラー:`, error);
   }
-}
-
-/**
- * 期待されるキャンドル数を計算
- */
-function calculateExpectedCandles(
-  timeframe: BacktestTimeframe,
-  startDate: Date,
-  endDate: Date
-): number {
-  const intervalMinutes = getIntervalMinutes(timeframe);
-  const diffMs = endDate.getTime() - startDate.getTime();
-  return Math.ceil(diffMs / (intervalMinutes * 60 * 1000));
 }
 
 /**
@@ -557,6 +572,20 @@ async function executeBacktestStage(
   
   const entryConditions = strategy.currentVersion!.entryConditions as ConditionGroup;
   const exitSettings = strategy.currentVersion!.exitSettings as ExitSettings;
+  
+  // エントリー条件のバリデーション
+  if (!entryConditions || !entryConditions.conditions || entryConditions.conditions.length === 0) {
+    // IF-THENやSEQUENCEの場合は別のフィールドをチェック
+    const hasIfThenConditions = entryConditions?.operator === 'IF_THEN' && 
+      (entryConditions.ifCondition || entryConditions.thenCondition);
+    const hasSequenceConditions = entryConditions?.operator === 'SEQUENCE' && 
+      entryConditions.sequence && entryConditions.sequence.length > 0;
+    
+    if (!hasIfThenConditions && !hasSequenceConditions) {
+      throw new Error('エントリー条件が設定されていません。ストラテジーの編集画面で条件を追加してください。');
+    }
+  }
+  
   const trades: BacktestTradeEvent[] = [];
   
   // ポジション状態
