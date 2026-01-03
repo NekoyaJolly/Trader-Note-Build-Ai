@@ -27,44 +27,8 @@ export default function Home() {
         </div>
 
         {/* 機能カード */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 md:gap-6 mb-4 sm:mb-6 md:mb-8">
-          {/* トレード取込カード */}
-          <Link
-            href="/import"
-            className="block card-surface p-3 sm:p-4 md:p-6 hover-glow transition-smooth"
-          >
-            <div className="flex items-center mb-2 sm:mb-3 md:mb-4">
-              <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-gradient-to-br from-green-500 to-emerald-500 rounded-lg flex items-center justify-center text-white text-base sm:text-xl md:text-2xl">
-                📥
-              </div>
-              <h2 className="ml-2 sm:ml-3 md:ml-4 text-base sm:text-lg md:text-2xl font-semibold text-white">
-                トレード取込
-              </h2>
-            </div>
-            <p className="text-xs sm:text-sm text-gray-400">
-              CSVからトレード履歴をインポート
-            </p>
-          </Link>
-
-          {/* 通知一覧カード */}
-          <Link
-            href="/notifications"
-            className="block card-surface p-3 sm:p-4 md:p-6 hover-glow transition-smooth"
-          >
-            <div className="flex items-center mb-2 sm:mb-3 md:mb-4">
-              <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-gradient-to-br from-pink-500 to-violet-500 rounded-lg flex items-center justify-center text-white text-base sm:text-xl md:text-2xl">
-                🔔
-              </div>
-              <h2 className="ml-2 sm:ml-3 md:ml-4 text-base sm:text-lg md:text-2xl font-semibold text-white">
-                通知一覧
-              </h2>
-            </div>
-            <p className="text-xs sm:text-sm text-gray-400">
-              市場一致の通知を確認
-            </p>
-          </Link>
-
-          {/* トレードノートカード */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 md:gap-6">
+          {/* 1. トレードノートカード */}
           <Link
             href="/notes"
             className="block card-surface p-3 sm:p-4 md:p-6 hover-glow transition-smooth"
@@ -82,10 +46,64 @@ export default function Home() {
             </p>
           </Link>
 
-          {/* 設定カード */}
+          {/* 2. ストラテジーカード */}
+          <Link
+            href="/strategies"
+            className="block card-surface p-3 sm:p-4 md:p-6 hover-glow transition-smooth"
+          >
+            <div className="flex items-center mb-2 sm:mb-3 md:mb-4">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center text-white text-base sm:text-xl md:text-2xl">
+                🎯
+              </div>
+              <h2 className="ml-2 sm:ml-3 md:ml-4 text-base sm:text-lg md:text-2xl font-semibold text-white">
+                ストラテジー
+              </h2>
+            </div>
+            <p className="text-xs sm:text-sm text-gray-400">
+              エントリー戦略の管理・バックテスト
+            </p>
+          </Link>
+
+          {/* 3. トレード取込カード */}
+          <Link
+            href="/import"
+            className="block card-surface p-3 sm:p-4 md:p-6 hover-glow transition-smooth"
+          >
+            <div className="flex items-center mb-2 sm:mb-3 md:mb-4">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-gradient-to-br from-green-500 to-emerald-500 rounded-lg flex items-center justify-center text-white text-base sm:text-xl md:text-2xl">
+                📥
+              </div>
+              <h2 className="ml-2 sm:ml-3 md:ml-4 text-base sm:text-lg md:text-2xl font-semibold text-white">
+                トレード取り込み
+              </h2>
+            </div>
+            <p className="text-xs sm:text-sm text-gray-400">
+              CSVからトレード履歴をインポート
+            </p>
+          </Link>
+
+          {/* 4. データプリセットカード */}
+          <Link
+            href="/data-presets"
+            className="block card-surface p-3 sm:p-4 md:p-6 hover-glow transition-smooth"
+          >
+            <div className="flex items-center mb-2 sm:mb-3 md:mb-4">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-gradient-to-br from-orange-500 to-amber-500 rounded-lg flex items-center justify-center text-white text-base sm:text-xl md:text-2xl">
+                📁
+              </div>
+              <h2 className="ml-2 sm:ml-3 md:ml-4 text-base sm:text-lg md:text-2xl font-semibold text-white">
+                データプリセット
+              </h2>
+            </div>
+            <p className="text-xs sm:text-sm text-gray-400">
+              ヒストリカルデータの管理
+            </p>
+          </Link>
+
+          {/* 5. 設定カード */}
           <Link
             href="/settings"
-            className="block card-surface p-3 sm:p-4 md:p-6 hover-glow transition-smooth"
+            className="block card-surface p-3 sm:p-4 md:p-6 hover-glow transition-smooth md:col-span-2"
           >
             <div className="flex items-center mb-2 sm:mb-3 md:mb-4">
               <div className="w-8 h-8 sm:w-10 sm:h-10 md:w-12 md:h-12 bg-gradient-to-br from-gray-500 to-slate-600 rounded-lg flex items-center justify-center text-white text-base sm:text-xl md:text-2xl">
@@ -99,31 +117,6 @@ export default function Home() {
               通知やインジケーターを設定
             </p>
           </Link>
-        </div>
-
-        {/* 説明セクション */}
-        <div className="card-surface p-3 sm:p-4 md:p-6">
-          <h3 className="text-sm sm:text-base md:text-xl font-semibold text-white mb-2 sm:mb-3 md:mb-4">
-            システムの特徴
-          </h3>
-          <ul className="space-y-1.5 sm:space-y-2 md:space-y-3 text-xs sm:text-sm md:text-base text-gray-300">
-            <li className="flex items-start">
-              <span className="mr-2 sm:mr-3 text-green-400 flex-shrink-0">✓</span>
-              <span>履歴からノートを自動生成</span>
-            </li>
-            <li className="flex items-start">
-              <span className="mr-2 sm:mr-3 text-green-400 flex-shrink-0">✓</span>
-              <span>リアルタイム市場と一致判定</span>
-            </li>
-            <li className="flex items-start">
-              <span className="mr-2 sm:mr-3 text-green-400 flex-shrink-0">✓</span>
-              <span>判定理由を完全可視化</span>
-            </li>
-            <li className="flex items-start">
-              <span className="mr-2 sm:mr-3 text-amber-400 flex-shrink-0">⚠</span>
-              <span className="font-semibold">自動売買なし・判断は人間</span>
-            </li>
-          </ul>
         </div>
 
         {/* フッター */}
