@@ -423,13 +423,20 @@ export class MonteCarloService {
   
   /**
    * パーセンタイル順位を計算
+   * 
+   * 「実際の戦略がランダムシミュレーション結果のうち何%を上回っているか」を返す
+   * 例: 戦略の勝率が48.5%で、100回のシミュレーションのうち95回が勝率48.5%未満なら、
+   *     戦略は上位5%（パーセンタイル95）に位置する
    */
   private getPercentileRank(
     values: number[],
     target: number,
     lowerIsBetter = false
   ): number {
-    const count = values.filter(v => lowerIsBetter ? v >= target : v <= target).length;
+    // targetより劣る値の数をカウント
+    // 通常: targetより低い値の割合 = target以下の順位パーセンタイル
+    // lowerIsBetter: targetより高い値の割合 = targetが低いほど良い順位
+    const count = values.filter(v => lowerIsBetter ? v > target : v < target).length;
     return (count / values.length) * 100;
   }
 }
