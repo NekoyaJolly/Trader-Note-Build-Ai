@@ -45,7 +45,16 @@ export interface BacktestResultSummary {
   riskRewardRatio: number;
   maxConsecutiveWins: number;
   maxConsecutiveLosses: number;
+  /** シャープレシオ（年率換算） */
   sharpeRatio?: number;
+  /** ソルティノレシオ（下方リスクのみ考慮） */
+  sortinoRatio?: number;
+  /** t検定によるp値（帰無仮説: 平均リターン = 0） */
+  pValue?: number;
+  /** 統計的有意性（p < 0.05） */
+  isStatisticallySignificant?: boolean;
+  /** 信頼度レベル（トレード数ベース） */
+  confidenceLevel?: 'low' | 'medium' | 'high';
   /** 停止理由（破産など） */
   stoppedReason?: 'bankruptcy' | 'completed';
   /** 最終資金残高 */
@@ -142,6 +151,10 @@ export function calculateSummary(
   const avgWinAmount = winningTrades.length > 0 ? grossProfit / winningTrades.length : 0;
   const avgLossAmount = losingTrades.length > 0 ? grossLoss / losingTrades.length : 0;
   
+  // === 統計的指標の計算 ===
+  const returns = trades.map(t => t.pnlPercent);
+  const statisticalMetrics = calculateStatisticalMetrics(returns, trades.length);
+  
   return {
     totalTrades: trades.length,
     winningTrades: winningTrades.length,
@@ -164,7 +177,175 @@ export function calculateSummary(
       : 0,
     maxConsecutiveWins,
     maxConsecutiveLosses,
+    // 統計的指標
+    ...statisticalMetrics,
   };
+}
+
+/**
+ * 統計的指標を計算
+ * 
+ * @param returns - 各トレードのリターン（%）配列
+ * @param tradeCount - トレード数
+ * @returns 統計的指標オブジェクト
+ */
+function calculateStatisticalMetrics(returns: number[], tradeCount: number): {
+  sharpeRatio?: number;
+  sortinoRatio?: number;
+  pValue?: number;
+  isStatisticallySignificant?: boolean;
+  confidenceLevel?: 'low' | 'medium' | 'high';
+} {
+  if (tradeCount < 2) {
+    return {
+      confidenceLevel: 'low',
+    };
+  }
+  
+  // 平均リターン
+  const avgReturn = returns.reduce((a, b) => a + b, 0) / tradeCount;
+  
+  // 標準偏差
+  const variance = returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / (tradeCount - 1);
+  const stdDev = Math.sqrt(variance);
+  
+  // 下方偏差（ソルティノレシオ用、負のリターンのみ）
+  const negativeReturns = returns.filter(r => r < 0);
+  const downVariance = negativeReturns.length > 0
+    ? negativeReturns.reduce((sum, r) => sum + Math.pow(r, 2), 0) / negativeReturns.length
+    : 0;
+  const downStdDev = Math.sqrt(downVariance);
+  
+  // シャープレシオ（年率換算、リスクフリーレート0と仮定）
+  // 1日あたり約1トレードと仮定し、年間252営業日で換算
+  const annualizationFactor = Math.sqrt(252);
+  const sharpeRatio = stdDev > 0 ? (avgReturn / stdDev) * annualizationFactor : undefined;
+  
+  // ソルティノレシオ（下方リスクのみ考慮）
+  const sortinoRatio = downStdDev > 0 ? (avgReturn / downStdDev) * annualizationFactor : undefined;
+  
+  // t検定（帰無仮説: 平均リターン = 0）
+  const tStat = stdDev > 0 ? (avgReturn / (stdDev / Math.sqrt(tradeCount))) : 0;
+  const pValue = calculatePValue(tStat, tradeCount - 1);
+  
+  // 統計的有意性（p < 0.05）
+  const isStatisticallySignificant = pValue !== undefined ? pValue < 0.05 : undefined;
+  
+  // 信頼度レベル（トレード数ベース）
+  // 30件以上: high、10-29件: medium、10件未満: low
+  const confidenceLevel: 'low' | 'medium' | 'high' = 
+    tradeCount >= 30 ? 'high' : tradeCount >= 10 ? 'medium' : 'low';
+  
+  return {
+    sharpeRatio,
+    sortinoRatio,
+    pValue,
+    isStatisticallySignificant,
+    confidenceLevel,
+  };
+}
+
+/**
+ * t分布からp値を近似計算（両側検定）
+ * 
+ * @param tStat - t統計量
+ * @param df - 自由度
+ * @returns p値
+ */
+function calculatePValue(tStat: number, df: number): number {
+  // t分布のp値を近似計算
+  // 正規分布近似（df >= 30）または近似式を使用
+  const absTStat = Math.abs(tStat);
+  
+  if (df < 1) return 1;
+  
+  // 大きい自由度では正規分布で近似
+  if (df >= 30) {
+    // 標準正規分布のCDF近似
+    const z = absTStat;
+    const p = normalCDF(z);
+    return 2 * (1 - p); // 両側検定
+  }
+  
+  // 小さい自由度ではBeta関数を使った近似
+  // 簡易的なt分布CDF近似
+  const x = df / (df + tStat * tStat);
+  const beta = incompleteBeta(df / 2, 0.5, x);
+  return beta; // 両側検定のp値
+}
+
+/**
+ * 標準正規分布のCDF近似（Abramowitz and Stegun近似）
+ */
+function normalCDF(z: number): number {
+  const a1 = 0.254829592;
+  const a2 = -0.284496736;
+  const a3 = 1.421413741;
+  const a4 = -1.453152027;
+  const a5 = 1.061405429;
+  const p = 0.3275911;
+  
+  const sign = z < 0 ? -1 : 1;
+  z = Math.abs(z) / Math.sqrt(2);
+  
+  const t = 1.0 / (1.0 + p * z);
+  const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-z * z);
+  
+  return 0.5 * (1.0 + sign * y);
+}
+
+/**
+ * 不完全ベータ関数の近似（t分布のCDF計算用）
+ */
+function incompleteBeta(a: number, b: number, x: number): number {
+  // 簡易近似（連分数展開）
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  
+  // 数値計算による近似
+  const maxIterations = 100;
+  const epsilon = 1e-10;
+  
+  let result = 0;
+  let term = 1;
+  
+  for (let n = 0; n < maxIterations; n++) {
+    term *= (a + n) * x / (a + b + n);
+    result += term / (a + n + 1);
+    if (Math.abs(term) < epsilon) break;
+  }
+  
+  // Beta(a, b) の近似
+  const logBeta = gammaLn(a) + gammaLn(b) - gammaLn(a + b);
+  const beta = Math.exp(logBeta);
+  
+  return (Math.pow(x, a) * Math.pow(1 - x, b) / (a * beta)) * (1 + result);
+}
+
+/**
+ * log(Gamma(x)) の近似（Stirling近似）
+ */
+function gammaLn(x: number): number {
+  const coefficients = [
+    76.18009172947146,
+    -86.50532032941677,
+    24.01409824083091,
+    -1.231739572450155,
+    0.001208650973866179,
+    -0.000005395239384953,
+  ];
+  
+  let y = x;
+  let tmp = x + 5.5;
+  tmp -= (x + 0.5) * Math.log(tmp);
+  
+  let ser = 1.000000000190015;
+  for (let j = 0; j < 6; j++) {
+    y += 1;
+    ser += coefficients[j] / y;
+  }
+  
+  return -tmp + Math.log(2.5066282746310005 * ser / x);
 }
 
 /**
@@ -189,5 +370,10 @@ export function createEmptySummary(): BacktestResultSummary {
     riskRewardRatio: 0,
     maxConsecutiveWins: 0,
     maxConsecutiveLosses: 0,
+    sharpeRatio: undefined,
+    sortinoRatio: undefined,
+    pValue: undefined,
+    isStatisticallySignificant: undefined,
+    confidenceLevel: 'low',
   };
 }

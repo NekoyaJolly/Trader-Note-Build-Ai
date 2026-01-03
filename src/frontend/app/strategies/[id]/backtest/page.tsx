@@ -5,6 +5,7 @@
  * - バックテストの実行パラメータを設定
  * - バックテスト結果の表示（サマリー、トレード一覧）
  * - バックテスト履歴の閲覧
+ * - モンテカルロシミュレーション（Phase 15）
  */
 
 "use client";
@@ -32,6 +33,7 @@ import {
   CoverageCheckResult,
 } from "@/lib/api";
 import type { Strategy, BacktestResult, BacktestResultSummary, BacktestTradeEvent } from "@/types/strategy";
+import { MonteCarloTab } from "@/components/MonteCarloTab";
 
 // ============================================
 // 型定義
@@ -254,7 +256,7 @@ export default function StrategyBacktestPage() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"summary" | "trades" | "history" | "walkforward" | "filter">("summary");
+  const [activeTab, setActiveTab] = useState<"summary" | "trades" | "history" | "walkforward" | "filter" | "montecarlo">("summary");
   
   // ウォークフォワードテストステート
   const [walkForwardParams, setWalkForwardParams] = useState({
@@ -816,6 +818,16 @@ export default function StrategyBacktestPage() {
                       >
                         ウォークフォワード
                       </button>
+                      <button
+                        onClick={() => setActiveTab("montecarlo")}
+                        className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
+                          activeTab === "montecarlo"
+                            ? "text-cyan-400 border-b-2 border-cyan-400"
+                            : "text-gray-400 hover:text-gray-200"
+                        }`}
+                      >
+                        モンテカルロ
+                      </button>
                     </div>
                   </div>
 
@@ -919,6 +931,76 @@ export default function StrategyBacktestPage() {
                             label="連勝/連敗"
                             value={`${result.summary.maxConsecutiveWins}/${result.summary.maxConsecutiveLosses}`}
                           />
+                        </div>
+
+                        {/* 統計的指標セクション（Phase 15） */}
+                        <div className="mt-3 pt-3 border-t border-slate-700">
+                          <h4 className="text-xs font-semibold text-gray-400 mb-2 flex items-center gap-2">
+                            📊 統計的指標
+                            {result.summary.confidenceLevel && (
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-normal ${
+                                result.summary.confidenceLevel === 'high'
+                                  ? 'bg-green-500/20 text-green-400'
+                                  : result.summary.confidenceLevel === 'medium'
+                                  ? 'bg-yellow-500/20 text-yellow-400'
+                                  : 'bg-red-500/20 text-red-400'
+                              }`}>
+                                信頼度: {result.summary.confidenceLevel === 'high' ? '高' : result.summary.confidenceLevel === 'medium' ? '中' : '低'}
+                              </span>
+                            )}
+                          </h4>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 sm:gap-2">
+                            <MetricCard
+                              label="シャープレシオ"
+                              value={result.summary.sharpeRatio?.toFixed(2) || "-"}
+                              color={
+                                result.summary.sharpeRatio !== undefined
+                                  ? result.summary.sharpeRatio >= 1 ? "text-green-400"
+                                    : result.summary.sharpeRatio >= 0.5 ? "text-yellow-400"
+                                    : "text-red-400"
+                                  : "text-gray-400"
+                              }
+                            />
+                            <MetricCard
+                              label="ソルティノレシオ"
+                              value={result.summary.sortinoRatio?.toFixed(2) || "-"}
+                              color={
+                                result.summary.sortinoRatio !== undefined
+                                  ? result.summary.sortinoRatio >= 1.5 ? "text-green-400"
+                                    : result.summary.sortinoRatio >= 0.5 ? "text-yellow-400"
+                                    : "text-red-400"
+                                  : "text-gray-400"
+                              }
+                            />
+                            <MetricCard
+                              label="p値"
+                              value={result.summary.pValue !== undefined ? result.summary.pValue.toFixed(3) : "-"}
+                              color={
+                                result.summary.pValue !== undefined
+                                  ? result.summary.pValue < 0.05 ? "text-green-400"
+                                    : result.summary.pValue < 0.1 ? "text-yellow-400"
+                                    : "text-red-400"
+                                  : "text-gray-400"
+                              }
+                            />
+                            <MetricCard
+                              label="統計的有意性"
+                              value={
+                                result.summary.isStatisticallySignificant === undefined ? "-"
+                                  : result.summary.isStatisticallySignificant ? "有意 ✓" : "なし"
+                              }
+                              color={
+                                result.summary.isStatisticallySignificant
+                                  ? "text-green-400"
+                                  : "text-gray-400"
+                              }
+                            />
+                          </div>
+                          {result.summary.confidenceLevel === 'low' && (
+                            <p className="mt-2 text-[10px] text-orange-400">
+                              ⚠️ トレード数が少ないため、統計的信頼性が低い可能性があります（推奨: 30件以上）
+                            </p>
+                          )}
                         </div>
 
                         {/* ノート作成セクション */}
@@ -1452,6 +1534,21 @@ export default function StrategyBacktestPage() {
                           </div>
                         )}
                       </div>
+                    )}
+
+                    {/* モンテカルロシミュレーションタブ */}
+                    {activeTab === "montecarlo" && (
+                      <MonteCarloTab
+                        strategyId={params.id as string}
+                        defaultParams={{
+                          startDate: backtestParams.startDate,
+                          endDate: backtestParams.endDate,
+                          timeframe: backtestParams.stage1Timeframe,
+                          takeProfit: strategy?.currentVersion?.exitSettings?.takeProfit?.value || 2.0,
+                          stopLoss: strategy?.currentVersion?.exitSettings?.stopLoss?.value || 1.0,
+                          maxHoldingMinutes: strategy?.currentVersion?.exitSettings?.maxHoldingMinutes || 1440,
+                        }}
+                      />
                     )}
                   </div>
                 </div>

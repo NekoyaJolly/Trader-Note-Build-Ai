@@ -2,10 +2,12 @@
  * バックテスト関連のルート定義
  * 
  * Phase 5: ノート詳細からバックテストを実行可能にする
+ * Phase 15: SSE進捗ストリーミング追加
  */
 
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { backtestController } from '../controllers/backtestController';
+import { progressStore } from '../services/backtest/progressStore';
 
 const router = Router();
 
@@ -97,5 +99,56 @@ router.get('/:runId', backtestController.getResult);
  * }
  */
 router.get('/history/:noteId', backtestController.getHistory);
+
+/**
+ * GET /api/backtest/progress/:jobId
+ * バックテスト進捗をSSEでストリーミング
+ * 
+ * Response: Server-Sent Events
+ * - event: progress
+ * - data: { status, processedCandles, totalCandles, progressPercent, ohlcvData, indicators, tradeMarkers }
+ */
+router.get('/progress/:jobId', (req: Request, res: Response) => {
+  const { jobId } = req.params;
+  
+  // SSEヘッダー設定
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // Nginx対応
+  
+  // 初期状態を送信
+  const initialState = progressStore.getProgress(jobId);
+  if (initialState) {
+    res.write(`event: progress\n`);
+    res.write(`data: ${JSON.stringify(initialState)}\n\n`);
+  } else {
+    // ジョブが見つからない場合
+    res.write(`event: error\n`);
+    res.write(`data: ${JSON.stringify({ error: 'Job not found', jobId })}\n\n`);
+  }
+  
+  // 進捗更新をリッスン
+  const onProgress = (state: unknown) => {
+    res.write(`event: progress\n`);
+    res.write(`data: ${JSON.stringify(state)}\n\n`);
+  };
+  
+  progressStore.on(`progress:${jobId}`, onProgress);
+  
+  // 接続終了時のクリーンアップ
+  req.on('close', () => {
+    progressStore.off(`progress:${jobId}`, onProgress);
+  });
+  
+  // Keep-alive（30秒ごとにコメント送信）
+  const keepAliveInterval = setInterval(() => {
+    res.write(`: keep-alive\n\n`);
+  }, 30000);
+  
+  req.on('close', () => {
+    clearInterval(keepAliveInterval);
+  });
+});
 
 export default router;

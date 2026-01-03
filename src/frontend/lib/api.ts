@@ -1644,6 +1644,111 @@ export async function fetchWalkForwardResult(
 }
 
 // ============================================
+// Phase 15: モンテカルロシミュレーションAPI
+// ============================================
+
+/** モンテカルロシミュレーションパラメータ */
+export interface MonteCarloParams {
+  iterations: 100 | 500 | 1000;
+  startDate: string;
+  endDate: string;
+  timeframe?: string;
+  takeProfit?: number;
+  stopLoss?: number;
+  maxHoldingMinutes?: number;
+  initialCapital?: number;
+  lotSize?: number;
+  entryProbability?: number;
+}
+
+/** ヒストグラムビン */
+export interface HistogramBin {
+  min: number;
+  max: number;
+  count: number;
+  percentage: number;
+}
+
+/** 分布統計 */
+export interface DistributionStats {
+  mean: number;
+  median: number;
+  stdDev: number;
+  min: number;
+  max: number;
+  percentiles: {
+    p5: number;
+    p25: number;
+    p50: number;
+    p75: number;
+    p95: number;
+  };
+  histogram: HistogramBin[];
+}
+
+/** モンテカルロ統計 */
+export interface MonteCarloStatistics {
+  winRate: DistributionStats;
+  profitFactor: DistributionStats;
+  maxDrawdownRate: DistributionStats;
+  netProfitRate: DistributionStats;
+}
+
+/** 戦略比較結果 */
+export interface StrategyComparison {
+  winRatePercentile: number;
+  profitFactorPercentile: number;
+  maxDrawdownPercentile: number;
+  netProfitRatePercentile: number;
+  overallAssessment: 'excellent' | 'good' | 'average' | 'poor' | 'very_poor';
+  comment: string;
+}
+
+/** 個別シミュレーション結果 */
+export interface SimulationResult {
+  id: number;
+  winRate: number;
+  profitFactor: number;
+  maxDrawdownRate: number;
+  netProfitRate: number;
+  totalTrades: number;
+}
+
+/** モンテカルロ結果 */
+export interface MonteCarloResult {
+  iterations: number;
+  simulations: SimulationResult[];
+  statistics: MonteCarloStatistics;
+  comparison?: StrategyComparison;
+}
+
+/**
+ * モンテカルロシミュレーションを実行
+ * POST /api/strategies/:id/montecarlo
+ */
+export async function runMonteCarloSimulation(
+  strategyId: string,
+  params: MonteCarloParams
+): Promise<MonteCarloResult> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/montecarlo`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'モンテカルロシミュレーションに失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+
+// ============================================
 // Phase D: バージョン比較API
 // ============================================
 

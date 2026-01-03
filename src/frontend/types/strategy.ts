@@ -585,8 +585,16 @@ export interface BacktestResultSummary {
   maxConsecutiveWins: number;
   /** 最大連敗 */
   maxConsecutiveLosses: number;
-  /** シャープレシオ */
+  /** シャープレシオ（年率換算） */
   sharpeRatio?: number;
+  /** ソルティノレシオ（下方リスクのみ考慮） */
+  sortinoRatio?: number;
+  /** t検定によるp値（帰無仮説: 平均リターン = 0） */
+  pValue?: number;
+  /** 統計的有意性（p < 0.05） */
+  isStatisticallySignificant?: boolean;
+  /** 信頼度レベル（トレード数ベース） */
+  confidenceLevel?: 'low' | 'medium' | 'high';
   /** 停止理由（破産など） */
   stoppedReason?: 'bankruptcy' | 'completed';
   /** 最終資金残高 */

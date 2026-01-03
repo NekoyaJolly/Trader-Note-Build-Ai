@@ -67,6 +67,10 @@ import {
   getAvailableFilterIndicators,
   FilterCondition,
 } from '../services/filterAnalysisService';
+import {
+  monteCarloService,
+  MonteCarloParams,
+} from '../../services/backtest/monteCarloService';
 import { PrismaClient } from '@prisma/client';
 
 // Prismaクライアント（バージョン比較用）
@@ -1274,6 +1278,127 @@ router.get('/:id/walkforward/:runId', async (req: Request, res: Response) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
     console.error('[StrategyRoutes] ウォークフォワード結果取得エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+// ============================================
+// Phase 15: モンテカルロシミュレーション
+// ============================================
+
+/**
+ * POST /api/strategies/:id/montecarlo
+ * モンテカルロシミュレーションを実行
+ * 
+ * リクエストボディ:
+ * {
+ *   "iterations": 100 | 500 | 1000,
+ *   "startDate": "2025-01-01",
+ *   "endDate": "2025-12-31",
+ *   "timeframe": "15m",
+ *   "takeProfit": 2.0,
+ *   "stopLoss": 1.0,
+ *   "maxHoldingMinutes": 1440,
+ *   "initialCapital": 1000000,
+ *   "lotSize": 10000
+ * }
+ */
+router.post('/:id/montecarlo', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const {
+      iterations,
+      startDate,
+      endDate,
+      timeframe,
+      takeProfit,
+      stopLoss,
+      maxHoldingMinutes,
+      initialCapital,
+      lotSize,
+      entryProbability,
+    } = req.body;
+
+    // バリデーション
+    if (!iterations || ![100, 500, 1000].includes(iterations)) {
+      return res.status(400).json({
+        success: false,
+        error: 'iterations は 100, 500, 1000 のいずれかを指定してください',
+      });
+    }
+
+    // ストラテジー取得
+    const strategy = await prisma.strategy.findUnique({
+      where: { id },
+    });
+
+    if (!strategy) {
+      return res.status(404).json({
+        success: false,
+        error: 'ストラテジーが見つかりません',
+      });
+    }
+
+    // 最新のバックテスト結果を取得（比較用）
+    const latestBacktest = await prisma.strategyBacktestRun.findFirst({
+      where: { strategyId: id, status: 'completed' },
+      include: { result: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // パラメータ構築
+    const params: MonteCarloParams = {
+      symbol: strategy.symbol,
+      timeframe: timeframe || '15m',
+      startDate: new Date(startDate),
+      endDate: new Date(endDate),
+      iterations,
+      takeProfit: takeProfit || 2.0,
+      stopLoss: stopLoss || 1.0,
+      maxHoldingMinutes: maxHoldingMinutes || 1440,
+      initialCapital: initialCapital || 1000000,
+      lotSize: lotSize || 10000,
+      entryProbability: entryProbability || 0.05,
+    };
+
+    // 比較対象の結果があれば追加
+    if (latestBacktest?.result) {
+      // DBスキーマのフィールド名をBacktestResultSummary形式に変換
+      const result = latestBacktest.result;
+      const totalTrades = result.winCount + result.lossCount + result.timeoutCount;
+      
+      params.actualStrategy = {
+        totalTrades,
+        winningTrades: result.winCount,
+        losingTrades: result.lossCount,
+        winRate: result.winRate,
+        netProfit: Number(result.totalProfit) - Number(result.totalLoss),
+        netProfitRate: (Number(result.totalProfit) - Number(result.totalLoss)) / (initialCapital || 1000000),
+        maxDrawdown: result.maxDrawdown ? Number(result.maxDrawdown) : 0,
+        maxDrawdownRate: result.maxDrawdown ? Number(result.maxDrawdown) / (initialCapital || 1000000) : 0,
+        profitFactor: result.profitFactor || 0,
+        averageWin: result.winCount > 0 ? Number(result.totalProfit) / result.winCount : 0,
+        averageLoss: result.lossCount > 0 ? Math.abs(Number(result.totalLoss)) / result.lossCount : 0,
+        riskRewardRatio: 0, // DBスキーマに無いため0
+        maxConsecutiveWins: 0, // DBスキーマに無いため0
+        maxConsecutiveLosses: 0, // DBスキーマに無いため0
+      };
+    }
+
+    // シミュレーション実行
+    console.log(`[StrategyRoutes] モンテカルロシミュレーション開始: ${iterations}回`);
+    const result = await monteCarloService.runSimulation(params);
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] モンテカルロシミュレーションエラー:', message);
     res.status(500).json({
       success: false,
       error: message,
