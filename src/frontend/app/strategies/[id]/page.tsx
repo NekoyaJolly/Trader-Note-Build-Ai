@@ -19,9 +19,6 @@ import {
   duplicateStrategy,
 } from "@/lib/api";
 import type { Strategy, StrategyStatus, ConditionGroup, IndicatorCondition } from "@/types/strategy";
-import Sidebar from "@/components/layout/Sidebar";
-import Header from "@/components/layout/Header";
-import Footer from "@/components/layout/Footer";
 
 // ============================================
 // 条件表示用サブコンポーネント
@@ -212,15 +209,9 @@ export default function StrategyDetailPage() {
   // ローディング
   if (isLoading) {
     return (
-      <div className="flex h-screen bg-slate-900">
-        <Sidebar />
-        <div className="flex flex-col flex-1 overflow-hidden">
-          <Header />
-          <main className="flex-1 flex items-center justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-            <span className="ml-3 text-gray-400">読み込み中...</span>
-          </main>
-        </div>
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+        <span className="ml-3 text-gray-400">読み込み中...</span>
       </div>
     );
   }
@@ -228,19 +219,11 @@ export default function StrategyDetailPage() {
   // エラー
   if (error || !strategy) {
     return (
-      <div className="flex h-screen bg-slate-900">
-        <Sidebar />
-        <div className="flex flex-col flex-1 overflow-hidden">
-          <Header />
-          <main className="flex-1 flex items-center justify-center">
-            <div className="text-center">
-              <div className="text-red-400 mb-4">{error || "ストラテジーが見つかりません"}</div>
-              <Link href="/strategies" className="text-blue-400 hover:text-blue-300">
-                一覧に戻る
-              </Link>
-            </div>
-          </main>
-        </div>
+      <div className="text-center py-12">
+        <div className="text-red-400 mb-4">{error || "ストラテジーが見つかりません"}</div>
+        <Link href="/strategies" className="text-blue-400 hover:text-blue-300">
+          一覧に戻る
+        </Link>
       </div>
     );
   }
@@ -253,27 +236,22 @@ export default function StrategyDetailPage() {
   } | null;
 
   return (
-    <div className="flex h-screen bg-slate-900">
-      <Sidebar />
-      <div className="flex flex-col flex-1 overflow-hidden">
-        <Header />
-        <main className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-4xl mx-auto">
-            {/* パンくずリスト */}
-            <nav className="mb-6">
-              <ol className="flex items-center gap-2 text-sm">
-                <li>
-                  <Link href="/strategies" className="text-gray-400 hover:text-blue-400">
-                    ストラテジー
-                  </Link>
-                </li>
-                <li className="text-gray-500">/</li>
-                <li className="text-gray-200 truncate max-w-[200px]">{strategy.name}</li>
-              </ol>
-            </nav>
+    <div className="max-w-4xl mx-auto">
+      {/* パンくずリスト */}
+      <nav className="mb-6">
+        <ol className="flex items-center gap-2 text-sm">
+          <li>
+            <Link href="/strategies" className="text-gray-400 hover:text-blue-400">
+              ストラテジー
+            </Link>
+          </li>
+          <li className="text-gray-500">/</li>
+          <li className="text-gray-200 truncate max-w-[200px]">{strategy.name}</li>
+        </ol>
+      </nav>
 
-            {/* ヘッダー */}
-            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
+      {/* ヘッダー */}
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
               <div>
                 <div className="flex items-center gap-3 mb-2">
                   <h1 className="text-2xl font-bold text-gray-200">{strategy.name}</h1>
@@ -435,22 +413,18 @@ export default function StrategyDetailPage() {
               </div>
             )}
 
-            {/* メタ情報 */}
-            <div className="bg-slate-800 rounded-lg p-4 border border-slate-700">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span className="text-gray-500">作成日時</span>
-                  <span className="text-gray-300 ml-2">{formatDateTime(strategy.createdAt)}</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">更新日時</span>
-                  <span className="text-gray-300 ml-2">{formatDateTime(strategy.updatedAt)}</span>
-                </div>
-              </div>
-            </div>
+      {/* メタ情報 */}
+      <div className="bg-slate-800 rounded-lg p-4 border border-slate-700">
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <span className="text-gray-500">作成日時</span>
+            <span className="text-gray-300 ml-2">{formatDateTime(strategy.createdAt)}</span>
           </div>
-        </main>
-        <Footer />
+          <div>
+            <span className="text-gray-500">更新日時</span>
+            <span className="text-gray-300 ml-2">{formatDateTime(strategy.updatedAt)}</span>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -13,9 +13,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { fetchStrategies, deleteStrategy, updateStrategyStatus, duplicateStrategy } from "@/lib/api";
 import type { Strategy, StrategyStatus } from "@/types/strategy";
-import Sidebar from "@/components/layout/Sidebar";
-import Header from "@/components/layout/Header";
-import Footer from "@/components/layout/Footer";
 
 // ============================================
 // サブコンポーネント: ストラテジーカード
@@ -253,14 +250,9 @@ export default function StrategiesPage() {
   });
 
   return (
-    <div className="flex h-screen bg-slate-900">
-      <Sidebar />
-      <div className="flex flex-col flex-1 overflow-hidden">
-        <Header />
-        <main className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-6xl mx-auto">
-            {/* ヘッダー */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
+    <div className="max-w-6xl mx-auto">
+      {/* ヘッダー */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
               <div>
                 <h1 className="text-2xl font-bold text-gray-200">ストラテジー</h1>
                 <p className="text-gray-400 text-sm">
@@ -349,10 +341,6 @@ export default function StrategiesPage() {
                 ))}
               </div>
             )}
-          </div>
-        </main>
-        <Footer />
-      </div>
     </div>
   );
 }
