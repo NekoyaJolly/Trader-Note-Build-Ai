@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Progress } from "@/components/ui/Progress";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/Alert";
@@ -84,55 +83,77 @@ export default function ImportPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-slate-900 py-6 sm:py-8 md:py-12 text-gray-900 dark:text-slate-100">
-      <div className="max-w-3xl mx-auto px-3 sm:px-4">
-        <Card className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-          <CardHeader>
-            <CardTitle className="text-slate-900 dark:text-slate-100">トレード履歴インポート</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2 sm:space-y-4 text-gray-900 dark:text-slate-100">
-              <p className="text-xs sm:text-sm md:text-base leading-relaxed font-medium">MT4/MT5などのCSV出力に対応</p>
-              <p className="text-xs sm:text-sm md:text-base leading-relaxed">欠損データは自動スキップ</p>
+    <div className="space-y-4 sm:space-y-6">
+      {/* ヘッダー */}
+      <div className="text-center">
+        <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-white">トレード履歴インポート</h1>
+      </div>
+
+      {/* メインカード */}
+      <div className="card-surface p-4 sm:p-6 max-w-2xl mx-auto">
+        <div className="space-y-2 sm:space-y-4 text-gray-300 mb-6">
+          <p className="text-xs sm:text-sm md:text-base leading-relaxed font-medium">MT4/MT5などのCSV出力に対応</p>
+          <p className="text-xs sm:text-sm md:text-base leading-relaxed text-gray-400">欠損データは自動スキップ</p>
+        </div>
+
+        <div className="space-y-4">
+          {/* ファイル選択エリア */}
+          <div className="border-2 border-dashed border-slate-600 rounded-lg p-6 text-center hover:border-cyan-500/50 transition-colors">
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              onChange={handleSelect}
+              className="hidden"
+              id="csv-file-input"
+            />
+            <label
+              htmlFor="csv-file-input"
+              className="cursor-pointer block"
+            >
+              <div className="text-4xl mb-2">📁</div>
+              <p className="text-sm text-gray-300 mb-1">
+                {file ? file.name : "クリックしてCSVファイルを選択"}
+              </p>
+              <p className="text-xs text-gray-500">または、ファイルをドロップ</p>
+            </label>
+          </div>
+
+          {/* アクションボタン */}
+          <div className="flex items-center justify-center gap-2 sm:gap-3">
+            <Button 
+              onClick={handleUpload} 
+              disabled={!file || isUploading} 
+              size="sm"
+              className="bg-gradient-to-r from-pink-500 to-violet-500 hover:opacity-90"
+            >
+              {isUploading ? "送信中…" : "アップロード"}
+            </Button>
+            <Button variant="outline" onClick={handleSkip} size="sm">スキップ</Button>
+          </div>
+
+          {/* 進捗バー */}
+          {isUploading && (
+            <div className="mt-2">
+              <Progress value={progress} />
             </div>
+          )}
 
-            <div className="mt-4 sm:mt-6 space-y-3">
-              <input
-                type="file"
-                accept=".csv,text/csv"
-                onChange={handleSelect}
-                className="block w-full rounded border border-slate-200 dark:border-slate-600 p-2 bg-white dark:bg-slate-900 text-gray-900 dark:text-slate-100 text-sm"
-              />
+          {/* 成功メッセージ */}
+          {message && (
+            <Alert className="bg-green-500/10 border-green-500/30 text-green-400">
+              <AlertTitle>インポート完了</AlertTitle>
+              <AlertDescription>{message}</AlertDescription>
+            </Alert>
+          )}
 
-              <div className="flex items-center gap-2 sm:gap-3">
-                <Button onClick={handleUpload} disabled={!file || isUploading} size="sm">
-                  {isUploading ? "送信中…" : "アップロード"}
-                </Button>
-                <Button variant="outline" onClick={handleSkip} size="sm">スキップ</Button>
-              </div>
-
-              {isUploading && (
-                <div className="mt-2">
-                  <Progress value={progress} />
-                </div>
-              )}
-
-              {message && (
-                <Alert>
-                  <AlertTitle className="text-slate-900 dark:text-slate-100">インポート完了</AlertTitle>
-                  <AlertDescription className="text-gray-800 dark:text-slate-100">{message}</AlertDescription>
-                </Alert>
-              )}
-
-              {error && (
-                <Alert variant="destructive">
-                  <AlertTitle className="text-slate-900 dark:text-slate-100">インポート失敗</AlertTitle>
-                  <AlertDescription className="text-gray-800 dark:text-slate-100">{error}</AlertDescription>
-                </Alert>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+          {/* エラーメッセージ */}
+          {error && (
+            <Alert variant="destructive">
+              <AlertTitle>インポート失敗</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+        </div>
       </div>
     </div>
   );
