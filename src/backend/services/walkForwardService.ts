@@ -161,6 +161,11 @@ async function getPresetTimestamps(
  * 休場日（週末・祝日）を含まず、実際のデータポイントで分割するため
  * より正確な IS/OOS 期間が得られる
  * 
+ * ベストプラクティス（AmiBrokerガイド参考）:
+ * - IS:OOS比率は70:30を推奨
+ * - 短期間データでは分割数を少なくする（3分割が適切）
+ * - 最小でも各Splitで統計的に有意なトレード数を確保
+ * 
  * @param timestamps - プリセットの実データタイムスタンプ配列
  * @param splitCount - 分割数
  * @returns 分割された期間の配列
@@ -175,11 +180,28 @@ function calculatePeriodSplitsFromTimestamps(
   }
 
   const totalRecords = timestamps.length;
-  const recordsPerSplit = Math.floor(totalRecords / splitCount);
   
-  // 最小レコード数を確保（IS: 50本以上、OOS: 20本以上）
-  const MIN_IN_SAMPLE_RECORDS = 50;
-  const MIN_OUT_OF_SAMPLE_RECORDS = 20;
+  // 最小レコード数を緩和（IS: 30本以上、OOS: 15本以上）
+  // 短期間データでも分析可能にする
+  const MIN_IN_SAMPLE_RECORDS = 30;
+  const MIN_OUT_OF_SAMPLE_RECORDS = 15;
+  const MIN_RECORDS_PER_SPLIT = MIN_IN_SAMPLE_RECORDS + MIN_OUT_OF_SAMPLE_RECORDS; // 45本
+  
+  // データ量に応じて最適な分割数を自動計算
+  // 各分割で最低45本必要なので、それを基準に調整
+  const maxPossibleSplits = Math.floor(totalRecords / MIN_RECORDS_PER_SPLIT);
+  const effectiveSplitCount = Math.min(splitCount, maxPossibleSplits, 3); // 最大3分割に制限
+  
+  if (effectiveSplitCount < 1) {
+    console.log(`[WalkForward] データ不足: ${totalRecords}本では分割できません（最低${MIN_RECORDS_PER_SPLIT}本必要）`);
+    return [];
+  }
+  
+  if (effectiveSplitCount < splitCount) {
+    console.log(`[WalkForward] 分割数を${splitCount}から${effectiveSplitCount}に自動調整（データ量: ${totalRecords}本）`);
+  }
+  
+  const recordsPerSplit = Math.floor(totalRecords / effectiveSplitCount);
   
   // IS:OOS = 70:30 の比率で分割
   let inRecords = Math.floor(recordsPerSplit * 0.7);
@@ -189,23 +211,37 @@ function calculatePeriodSplitsFromTimestamps(
   inRecords = Math.max(inRecords, MIN_IN_SAMPLE_RECORDS);
   outRecords = Math.max(outRecords, MIN_OUT_OF_SAMPLE_RECORDS);
   
-  console.log(`[WalkForward] データ基準分割: 総レコード=${totalRecords}, 分割数=${splitCount}, IS=${inRecords}本, OOS=${outRecords}本`);
+  console.log(`[WalkForward] データ基準分割: 総レコード=${totalRecords}, 分割数=${effectiveSplitCount}, IS=${inRecords}本, OOS=${outRecords}本`);
 
   const splits: PeriodSplit[] = [];
   let currentIndex = 0;
 
-  for (let i = 0; i < splitCount; i++) {
+  for (let i = 0; i < effectiveSplitCount; i++) {
     // 残りのレコードが十分にあるかチェック
     const remainingRecords = totalRecords - currentIndex;
-    if (remainingRecords < inRecords + outRecords) {
+    
+    // 最後の分割では残り全てを使う
+    const isLastSplit = i === effectiveSplitCount - 1;
+    
+    if (!isLastSplit && remainingRecords < inRecords + outRecords) {
       console.log(`[WalkForward] Split ${i + 1}: 残りレコード不足 (${remainingRecords}本), スキップ`);
       break;
     }
 
+    let actualInRecords = inRecords;
+    let actualOutRecords = outRecords;
+    
+    // 最後の分割では残り全てを70:30で分割
+    if (isLastSplit && remainingRecords > 0) {
+      actualInRecords = Math.floor(remainingRecords * 0.7);
+      actualOutRecords = remainingRecords - actualInRecords;
+      console.log(`[WalkForward] 最後のSplit: 残り${remainingRecords}本を IS=${actualInRecords}本, OOS=${actualOutRecords}本 で分割`);
+    }
+
     const inSampleStartIdx = currentIndex;
-    const inSampleEndIdx = currentIndex + inRecords - 1;
+    const inSampleEndIdx = currentIndex + actualInRecords - 1;
     const outOfSampleStartIdx = inSampleEndIdx + 1;
-    const outOfSampleEndIdx = Math.min(outOfSampleStartIdx + outRecords - 1, totalRecords - 1);
+    const outOfSampleEndIdx = Math.min(outOfSampleStartIdx + actualOutRecords - 1, totalRecords - 1);
 
     splits.push({
       inSampleStart: timestamps[inSampleStartIdx],
@@ -401,21 +437,14 @@ export async function runWalkForwardTest(
     );
 
     let periodSplits: PeriodSplit[];
+    let actualSplitCount = splitCount;
     
-    // 分割に必要な最小レコード数 = (IS最小 + OOS最小) × 分割数
-    const MIN_IS_RECORDS = 50;
-    const MIN_OOS_RECORDS = 20;
-    const minRequiredRecords = (MIN_IS_RECORDS + MIN_OOS_RECORDS) * splitCount;
-    
-    if (timestamps.length >= minRequiredRecords) {
+    if (timestamps.length > 0) {
       // プリセットデータがある場合: データ基準で分割（休場日を自動スキップ）
-      console.log(`[WalkForward] プリセットデータ ${timestamps.length} 件を基準に分割 (必要: ${minRequiredRecords}件以上)`);
+      // calculatePeriodSplitsFromTimestamps 内で分割数が自動調整される
+      console.log(`[WalkForward] プリセットデータ ${timestamps.length} 件を基準に分割`);
       periodSplits = calculatePeriodSplitsFromTimestamps(timestamps, splitCount);
-    } else if (timestamps.length > 0) {
-      // プリセットデータが少ない場合: 分割数を調整して対応
-      const adjustedSplitCount = Math.max(1, Math.floor(timestamps.length / (MIN_IS_RECORDS + MIN_OOS_RECORDS)));
-      console.log(`[WalkForward] プリセットデータ ${timestamps.length}件、分割数を ${splitCount} → ${adjustedSplitCount} に調整`);
-      periodSplits = calculatePeriodSplitsFromTimestamps(timestamps, adjustedSplitCount);
+      actualSplitCount = periodSplits.length; // 実際に作成された分割数
     } else {
       // プリセットデータなし: 日数ベースで分割（フォールバック）
       console.log(`[WalkForward] プリセットデータなし、日数ベースで分割`);
@@ -548,13 +577,13 @@ export async function runWalkForwardTest(
       },
     });
 
-    console.log(`[WalkForward] 完了: 過学習スコア=${overfitScore}, 警告=${overfitWarning}`);
+    console.log(`[WalkForward] 完了: 過学習スコア=${overfitScore}, 警告=${overfitWarning}, 実際の分割数=${actualSplitCount}`);
 
     return {
       id: run.id,
       strategyId,
       type: WalkForwardType.fixed_split,
-      splitCount,
+      splitCount: actualSplitCount, // 実際に使用された分割数を返す
       splits: splitResults,
       overfitScore,
       overfitWarning,
