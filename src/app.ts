@@ -15,6 +15,7 @@ import authRoutes from './routes/authRoutes';
 import watchlistRoutes from './routes/watchlistRoutes';
 import pushRoutes from './routes/pushRoutes';
 import ohlcvRoutes from './backend/api/ohlcvRoutes';
+import { sideBRoutes } from './side-b/routes';
 import { MatchingScheduler } from './utils/scheduler';
 
 /**
@@ -115,6 +116,9 @@ class App {
     this.app.use('/api/bars', barLocatorRoutes);
     this.app.use('/api/strategies', strategyRoutes);
     this.app.use('/api/ohlcv', ohlcvRoutes);
+    
+    // Side-B: AI トレードプラン生成
+    this.app.use('/api/side-b', sideBRoutes);
 
     // グローバルエラーハンドラー: ルート内で発生した例外をキャッチしてサーバーを維持
     // eslint-disable-next-line @typescript-eslint/no-unused-vars

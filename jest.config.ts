@@ -9,7 +9,11 @@ const config: Config = {
   preset: 'ts-jest',
   testEnvironment: 'node',
   roots: ['<rootDir>/src'],
-  testMatch: ['**/backend/tests/**/*.test.ts', '**/services/tests/**/*.test.ts'],
+  testMatch: [
+    '**/backend/tests/**/*.test.ts',
+    '**/services/tests/**/*.test.ts',
+    '**/side-b/tests/**/*.test.ts',  // Side-B テスト追加
+  ],
   setupFiles: ['<rootDir>/jest.setup.ts'],
   moduleFileExtensions: ['ts', 'js', 'json'],
   verbose: true,
