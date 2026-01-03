@@ -12,6 +12,7 @@ dist/
 data/trades/*.csv
 !data/trades/sample_trades.csv
 data/notes/*.json
+data/notifications.json
 
 # Logs
 *.log

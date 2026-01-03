@@ -3,16 +3,29 @@ import { v4 as uuidv4 } from 'uuid';
 import { MatchResultDTO } from '../domain/matching/MatchResultDTO';
 import { NotificationRepository } from '../domain/notification/NotificationRepository';
 import { FileNotificationRepository } from '../infrastructure/file/FileNotificationRepository';
+import { DbNotificationRepositoryAdapter } from '../infrastructure/db/DbNotificationRepositoryAdapter';
 import { NotificationTriggerService } from './notification/notificationTriggerService';
 import { TradeNoteService } from './tradeNoteService';
 import { config } from '../config';
 
 /**
  * ストレージモード
- * - 'db': DBのみ使用（将来推奨、MatchResult紐付け必須）
- * - 'fs': FSのみ使用（現状、単独通知対応）
+ * - 'db': DBのみ使用（本番推奨、MatchResult紐付け必須）
+ * - 'fs': FSのみ使用（開発用、単独通知対応）
  */
 type StorageMode = 'db' | 'fs';
+
+/**
+ * 設定に基づいてリポジトリを選択するファクトリ関数
+ */
+function createRepository(storageMode: StorageMode): NotificationRepository {
+  if (storageMode === 'db') {
+    console.log('[NotificationService] DBモードで初期化');
+    return new DbNotificationRepositoryAdapter();
+  }
+  console.log('[NotificationService] FSモードで初期化');
+  return new FileNotificationRepository();
+}
 
 /**
  * Service for managing notifications
@@ -20,7 +33,7 @@ type StorageMode = 'db' | 'fs';
  * 
  * Phase 8: ストレージモード対応
  * - FSモード: 従来のファイルベース（MatchResultなしの単独通知対応）
- * - DBモード: DB永続化（MatchResult紐付け必須、将来推奨）
+ * - DBモード: DB永続化（MatchResult紐付け必須、本番推奨）
  */
 export class NotificationService {
   private notifications: Notification[] = [];
@@ -34,12 +47,13 @@ export class NotificationService {
     repository?: NotificationRepository,
     triggerService?: NotificationTriggerService,
     noteService?: TradeNoteService,
-    storageMode: StorageMode = 'fs', // デフォルトはFSモード（互換性維持）
+    storageMode: StorageMode = config.notification.storageMode, // 設定から取得（本番=db、開発=fs）
   ) {
-    this.repository = repository || new FileNotificationRepository();
-    this.triggerService = triggerService || new NotificationTriggerService();
-    this.noteService = noteService || new TradeNoteService('fs'); // 通知サービスはFSモードのノートサービスを使用
     this.storageMode = storageMode;
+    this.repository = repository || createRepository(storageMode);
+    this.triggerService = triggerService || new NotificationTriggerService();
+    // ストレージモードに合わせてノートサービスも切り替え
+    this.noteService = noteService || new TradeNoteService(storageMode);
     this.loadPromise = this.loadFromRepository();
   }
 

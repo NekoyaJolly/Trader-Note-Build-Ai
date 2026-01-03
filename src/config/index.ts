@@ -39,6 +39,9 @@ export const config = {
   },
   notification: {
     pushKey: process.env.PUSH_NOTIFICATION_KEY || '',
+    // 本番環境ではDBモード、開発環境ではFSモード（環境変数で上書き可能）
+    storageMode: (process.env.NOTIFICATION_STORAGE_MODE || 
+      (process.env.NODE_ENV === 'production' ? 'db' : 'fs')) as 'db' | 'fs',
   },
   paths: {
     trades: './data/trades',
