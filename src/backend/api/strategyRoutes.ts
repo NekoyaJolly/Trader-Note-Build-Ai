@@ -1320,6 +1320,7 @@ router.post('/:id/montecarlo', async (req: Request, res: Response) => {
       initialCapital,
       lotSize,
       entryProbability,
+      backtestRunId, // 比較対象のバックテストRunIDを追加
     } = req.body;
 
     // バリデーション
@@ -1342,12 +1343,23 @@ router.post('/:id/montecarlo', async (req: Request, res: Response) => {
       });
     }
 
-    // 最新のバックテスト結果を取得（比較用）
-    const latestBacktest = await prisma.strategyBacktestRun.findFirst({
-      where: { strategyId: id, status: 'completed' },
-      include: { result: true },
-      orderBy: { createdAt: 'desc' },
-    });
+    // バックテスト結果を取得（比較用）
+    // backtestRunIdが指定されている場合はそれを使用、なければ最新を取得
+    let targetBacktest;
+    if (backtestRunId) {
+      targetBacktest = await prisma.strategyBacktestRun.findUnique({
+        where: { id: backtestRunId },
+        include: { result: true },
+      });
+      console.log(`[StrategyRoutes] 指定されたバックテスト結果を使用: ${backtestRunId}`);
+    } else {
+      targetBacktest = await prisma.strategyBacktestRun.findFirst({
+        where: { strategyId: id, status: 'completed' },
+        include: { result: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      console.log(`[StrategyRoutes] 最新のバックテスト結果を使用`);
+    }
 
     // パラメータ構築
     const params: MonteCarloParams = {
@@ -1365,10 +1377,11 @@ router.post('/:id/montecarlo', async (req: Request, res: Response) => {
     };
 
     // 比較対象の結果があれば追加
-    if (latestBacktest?.result) {
+    if (targetBacktest?.result) {
       // DBスキーマのフィールド名をBacktestResultSummary形式に変換
-      const result = latestBacktest.result;
+      const result = targetBacktest.result;
       const totalTrades = result.winCount + result.lossCount + result.timeoutCount;
+      console.log(`[StrategyRoutes] 比較対象バックテスト: ${totalTrades}トレード, 勝率${result.winRate}%, PF${result.profitFactor}`);
       
       params.actualStrategy = {
         totalTrades,

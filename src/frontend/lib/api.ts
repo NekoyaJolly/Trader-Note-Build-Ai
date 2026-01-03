@@ -1659,6 +1659,8 @@ export interface MonteCarloParams {
   initialCapital?: number;
   lotSize?: number;
   entryProbability?: number;
+  /** 比較対象のバックテストRunID（指定されない場合は最新のバックテスト結果を使用） */
+  backtestRunId?: string;
 }
 
 /** ヒストグラムビン */

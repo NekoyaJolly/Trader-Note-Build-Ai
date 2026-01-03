@@ -30,6 +30,8 @@ import { runMonteCarloSimulation } from "@/lib/api";
 interface MonteCarloTabProps {
   /** ストラテジーID */
   strategyId: string;
+  /** 選択中のバックテストRunID（比較対象として使用） */
+  backtestRunId?: string;
   /** バックテストパラメータのデフォルト値 */
   defaultParams?: {
     startDate?: string;
@@ -174,7 +176,7 @@ function DistributionHistogram({
 /**
  * モンテカルロシミュレーションタブ
  */
-export function MonteCarloTab({ strategyId, defaultParams }: MonteCarloTabProps) {
+export function MonteCarloTab({ strategyId, backtestRunId, defaultParams }: MonteCarloTabProps) {
   // 状態
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<MonteCarloResult | null>(null);
@@ -206,6 +208,8 @@ export function MonteCarloTab({ strategyId, defaultParams }: MonteCarloTabProps)
         takeProfit: defaultParams?.takeProfit || 2.0,
         stopLoss: defaultParams?.stopLoss || 1.0,
         maxHoldingMinutes: defaultParams?.maxHoldingMinutes || 1440,
+        // 選択中のバックテストRunIDを渡す（比較対象として使用）
+        backtestRunId,
       };
       
       const res = await runMonteCarloSimulation(strategyId, params);

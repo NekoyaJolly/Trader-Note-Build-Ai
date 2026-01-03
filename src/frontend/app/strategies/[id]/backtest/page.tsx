@@ -1540,6 +1540,7 @@ export default function StrategyBacktestPage() {
                     {activeTab === "montecarlo" && (
                       <MonteCarloTab
                         strategyId={params.id as string}
+                        backtestRunId={result?.id}
                         defaultParams={{
                           startDate: backtestParams.startDate,
                           endDate: backtestParams.endDate,
