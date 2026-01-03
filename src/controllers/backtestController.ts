@@ -205,12 +205,16 @@ export class BacktestController {
       // カバレッジチェック実行
       const coverage = await checkDataCoverage(symbol, timeframe, start, end);
 
+      // フロントエンドで期待するフィールド名にマッピング
+      // hasEnoughData: 95%以上のカバレッジがあれば true（警告不要）
       res.json({
         success: true,
         data: {
-          ...coverage,
-          // Date を ISO 文字列に変換
-          coverageRatio: Math.round(coverage.coverageRatio * 100) / 100,
+          hasEnoughData: coverage.hasCoverage, // 95%以上でtrue
+          coverageRatio: coverage.coverageRatio,
+          missingBars: coverage.expectedCount - coverage.dataCount,
+          expectedBars: coverage.expectedCount,
+          actualBars: coverage.dataCount,
         }
       });
     } catch (error) {

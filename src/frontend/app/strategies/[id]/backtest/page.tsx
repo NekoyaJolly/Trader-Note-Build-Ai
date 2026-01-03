@@ -349,7 +349,7 @@ export default function StrategyBacktestPage() {
 
   /** 
    * バックテスト実行前にデータカバレッジをチェック
-   * 不足している場合はダイアログで確認を求める
+   * 95%未満の場合のみダイアログで確認を求める
    */
   const handleRunBacktestWithCoverageCheck = async () => {
     if (!strategy) return;
@@ -368,11 +368,11 @@ export default function StrategyBacktestPage() {
 
       setCoverageCheckResult(coverage);
 
-      // 80%以上のカバレッジがあれば直接実行
+      // 95%以上のカバレッジがあれば警告なしで直接実行
       if (coverage.hasEnoughData) {
         await executeBacktest();
       } else {
-        // 不足している場合はダイアログ表示
+        // 95%未満の場合はダイアログ表示
         setShowCoverageDialog(true);
       }
     } catch (err) {
@@ -551,7 +551,7 @@ export default function StrategyBacktestPage() {
             </h3>
             <div className="text-gray-300 mb-4 space-y-2">
               <p>
-                選択した期間のヒストリカルデータが不足しています。
+                選択した期間のヒストリカルデータが不足しています（カバレッジ率95%未満）。
               </p>
               <div className="bg-slate-700 rounded p-3 text-sm">
                 <p>カバレッジ率: <span className="font-bold text-yellow-400">{(coverageCheckResult.coverageRatio * 100).toFixed(1)}%</span></p>
@@ -560,7 +560,7 @@ export default function StrategyBacktestPage() {
                 <p>不足バー数: <span className="text-red-400">{coverageCheckResult.missingBars}</span></p>
               </div>
               <p className="text-sm text-gray-400">
-                モックデータで補完して実行しますか？
+                既存データのみでバックテストを実行しますか？
                 より正確な結果を得るには、プリセット管理画面から
                 ヒストリカルデータをインポートしてください。
               </p>
@@ -576,7 +576,7 @@ export default function StrategyBacktestPage() {
                 onClick={executeBacktest}
                 className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
               >
-                モックで実行
+                既存データのみでテスト
               </button>
             </div>
           </div>

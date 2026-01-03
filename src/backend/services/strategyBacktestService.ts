@@ -234,7 +234,8 @@ export async function checkDataCoverage(
  * 優先順位:
  * 1. DB (OHLCVCandle テーブル) からプリセットデータを取得
  * 2. 不足があり forceApiFetch=true の場合のみ Twelve Data API から取得
- * 3. それ以外は不足分をモックデータで補完
+ * 3. 本番環境（NODE_ENV=production）ではモックデータを使用せず既存データのみ返却
+ * 4. 開発環境でのみ不足分をモックデータで補完
  *
  * @param symbol - シンボル
  * @param timeframe - 時間足
@@ -326,24 +327,51 @@ export async function fetchHistoricalData(
       console.warn(`[fetchHistoricalData] API 取得エラー、モックにフォールバック:`, error);
     }
   } else if (!forceApiFetch && cacheRatio < 0.8) {
-    // forceApiFetch=false かつプリセットが不十分な場合、APIは呼ばずにモック補完
+    // forceApiFetch=false かつプリセットが不十分な場合、APIは呼ばずに既存データのみ使用
     console.log(
       `[fetchHistoricalData] プリセット不足 (${(cacheRatio * 100).toFixed(1)}%)、` +
-        `forceApiFetch=false のため API をスキップしてモックで補完: ${symbol}/${timeframe}`
+        `forceApiFetch=false のため API をスキップ: ${symbol}/${timeframe}`
     );
   }
 
-  // 3. API 未設定、forceApiFetch=false、または取得失敗時はモックデータにフォールバック
+  // 3. 本番環境ではモックデータを使用せず、既存データのみを返却
+  const isProduction = process.env.NODE_ENV === 'production';
+  
+  if (isProduction) {
+    // 本番環境: 既存データのみを返却（モック補完なし）
+    if (cachedData.length > 0) {
+      console.log(
+        `[fetchHistoricalData] 本番環境: 既存データのみ使用: ${symbol}/${timeframe}, ` +
+          `${cachedData.length}件 (カバレッジ ${(cacheRatio * 100).toFixed(1)}%)`
+      );
+      return cachedData.map((c) => ({
+        timestamp: c.timestamp,
+        open: Number(c.open),
+        high: Number(c.high),
+        low: Number(c.low),
+        close: Number(c.close),
+        volume: Number(c.volume),
+      }));
+    } else {
+      console.warn(
+        `[fetchHistoricalData] 本番環境: データなし: ${symbol}/${timeframe}, ` +
+          `プリセット管理からヒストリカルデータをインポートしてください`
+      );
+      return [];
+    }
+  }
+
+  // 4. 開発環境のみ: モックデータで補完
   if (cachedData.length > 0) {
     console.log(
-      `[fetchHistoricalData] 部分プリセット + モック: ${symbol}/${timeframe}, ` +
+      `[fetchHistoricalData] 開発環境: 部分プリセット + モック: ${symbol}/${timeframe}, ` +
         `プリセット=${cachedData.length}件, 期待=${expectedCandles}件`
     );
   } else {
-    console.log(`[fetchHistoricalData] モックデータを生成: ${symbol}/${timeframe}`);
+    console.log(`[fetchHistoricalData] 開発環境: モックデータを生成: ${symbol}/${timeframe}`);
   }
 
-  // 4. モックデータを生成（キャッシュがない期間用）
+  // 5. モックデータを生成（開発環境のみ、キャッシュがない期間用）
   return generateMockData(symbol, timeframe, startDate, endDate);
 }
 
