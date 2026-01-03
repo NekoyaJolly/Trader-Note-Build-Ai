@@ -224,7 +224,7 @@ export default function StrategyAlertsPage() {
 
   return (
     <div className="space-y-6">
-          {/* 成功メッセージ */}}
+          {/* 成功メッセージ */}
           {success && (
             <div className="bg-green-600/20 border border-green-600 text-green-400 px-4 py-3 rounded mb-6">
               {success}

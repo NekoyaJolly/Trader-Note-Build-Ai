@@ -138,7 +138,7 @@ export default function StrategyComparePage() {
 
   return (
     <div className="space-y-6">
-          {/* エラーメッセージ */}}
+          {/* エラーメッセージ */}
           {error && (
             <div className="bg-red-600/20 border border-red-600 text-red-400 px-4 py-3 rounded mb-6">
               {error}
