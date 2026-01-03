@@ -62,6 +62,9 @@ export interface ExitSettings {
   maxHoldingMinutes?: number;
 }
 
+/** バックテスト実行ソース（どこから実行されたか） */
+export type BacktestSource = 'manual' | 'walkforward' | 'montecarlo';
+
 /** バックテスト実行リクエスト */
 export interface BacktestRequest {
   strategyId: string;
@@ -72,6 +75,8 @@ export interface BacktestRequest {
   initialCapital: number;
   lotSize: number; // 固定ロット数（通貨量、例: 10000 = 1万通貨）
   leverage: number; // レバレッジ（1〜1000倍）
+  /** 実行ソース（省略時は 'manual'）*/
+  source?: BacktestSource;
 }
 
 // BacktestTradeEventはbacktestCalculations.tsから再エクスポート
@@ -544,7 +549,8 @@ export async function runBacktest(request: BacktestRequest): Promise<BacktestRes
     await saveBacktestResult(
       backtestResult,
       strategy.currentVersion.id,
-      strategy.symbol
+      strategy.symbol,
+      request.source || 'manual'
     );
     
     return backtestResult;
@@ -800,8 +806,14 @@ function toBacktestOutcome(exitReason: 'take_profit' | 'stop_loss' | 'timeout' |
 /**
  * バックテスト結果をDBに保存
  * 注意: 現在のPrismaスキーマはStrategyBacktestResultを別テーブルで保持
+ * @param source - 実行ソース（manual/walkforward/montecarlo）
  */
-async function saveBacktestResult(result: BacktestResult, versionId: string, symbol: string): Promise<void> {
+async function saveBacktestResult(
+  result: BacktestResult,
+  versionId: string,
+  symbol: string,
+  source: BacktestSource = 'manual'
+): Promise<void> {
   // バックテスト実行レコードを作成
   await prisma.strategyBacktestRun.create({
     data: {
@@ -813,6 +825,7 @@ async function saveBacktestResult(result: BacktestResult, versionId: string, sym
       startDate: new Date(result.startDate),
       endDate: new Date(result.endDate),
       stage: result.stage,
+      source: source,
       status: result.status === 'completed' ? 'completed' : result.status === 'failed' ? 'failed' : 'running',
     },
   });
@@ -924,10 +937,23 @@ export async function getBacktestResult(runId: string): Promise<BacktestResult |
 
 /**
  * ストラテジーのバックテスト履歴を取得
+ * @param strategyId - ストラテジーID
+ * @param limit - 取得件数上限
+ * @param source - 実行ソースでフィルタリング（省略時は 'manual' のみ）
  */
-export async function getBacktestHistory(strategyId: string, limit: number = 20): Promise<BacktestResult[]> {
+export async function getBacktestHistory(
+  strategyId: string,
+  limit: number = 20,
+  source: BacktestSource | 'all' = 'manual'
+): Promise<BacktestResult[]> {
+  // フィルタ条件を構築（source='all' の場合はフィルタなし）
+  const whereCondition: { strategyId: string; source?: string } = { strategyId };
+  if (source !== 'all') {
+    whereCondition.source = source;
+  }
+
   const runs = await prisma.strategyBacktestRun.findMany({
-    where: { strategyId },
+    where: whereCondition,
     orderBy: { createdAt: 'desc' },
     include: {
       events: true,

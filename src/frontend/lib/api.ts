@@ -1724,6 +1724,24 @@ export interface MonteCarloResult {
   comparison?: StrategyComparison;
 }
 
+/** モンテカルロ履歴エントリ */
+export interface MonteCarloHistoryEntry {
+  id: string;
+  iterations: number;
+  timeframe: string;
+  expectedWinRate: number;
+  expectedProfitFactor: number | null;
+  simulatedMeanWinRate: number;
+  simulatedMeanProfitFactor: number | null;
+  percentiles: {
+    winRate: number;
+    profitFactor: number | null;
+    maxDrawdown: number | null;
+    totalProfit: number | null;
+  };
+  createdAt: string;
+}
+
 /**
  * モンテカルロシミュレーションを実行
  * POST /api/strategies/:id/montecarlo
@@ -1748,6 +1766,27 @@ export async function runMonteCarloSimulation(
 
   const payload = await response.json();
   return payload.data;
+}
+
+/**
+ * モンテカルロシミュレーション履歴を取得
+ * GET /api/strategies/:id/montecarlo/history
+ */
+export async function fetchMonteCarloHistory(
+  strategyId: string,
+  limit: number = 10
+): Promise<MonteCarloHistoryEntry[]> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/montecarlo/history?limit=${limit}`,
+    { cache: 'no-store' }
+  );
+
+  if (!response.ok) {
+    throw new Error('モンテカルロ履歴の取得に失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data?.history ?? [];
 }
 
 // ============================================

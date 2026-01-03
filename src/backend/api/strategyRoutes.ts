@@ -568,15 +568,25 @@ router.post('/:id/backtest', async (req: Request, res: Response) => {
  * 
  * Query Parameters:
  * - limit: number (取得件数、デフォルト: 20)
+ * - source: 'manual' | 'walkforward' | 'montecarlo' | 'all' (デフォルト: 'manual')
+ *   通常のバックテスト履歴表示では 'manual' のみを表示
+ *   WFやモンテカルロ由来の履歴を含める場合は 'all' を指定
  */
 router.get('/:id/backtest/history', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { limit } = req.query;
+    const { limit, source } = req.query;
+
+    // source パラメータを検証（不正な値は 'manual' にフォールバック）
+    const validSources = ['manual', 'walkforward', 'montecarlo', 'all'];
+    const sourceFilter = validSources.includes(source as string)
+      ? (source as 'manual' | 'walkforward' | 'montecarlo' | 'all')
+      : 'manual';
 
     const history = await getBacktestHistory(
       id,
-      limit ? parseInt(limit as string, 10) : 20
+      limit ? parseInt(limit as string, 10) : 20,
+      sourceFilter
     );
 
     res.json({
@@ -1405,6 +1415,33 @@ router.post('/:id/montecarlo', async (req: Request, res: Response) => {
     console.log(`[StrategyRoutes] モンテカルロシミュレーション開始: ${iterations}回`);
     const result = await monteCarloService.runSimulation(params);
 
+    // 結果をDBに保存（履歴として残す）
+    try {
+      await prisma.monteCarloRun.create({
+        data: {
+          strategyId: id,
+          backtestRunId: backtestRunId || null,
+          iterations,
+          timeframe: timeframe || '15m',
+          expectedWinRate: params.actualStrategy?.winRate || 0,
+          expectedProfitFactor: params.actualStrategy?.profitFactor || null,
+          simulatedMeanWinRate: result.statistics.winRate.mean,
+          simulatedMeanProfitFactor: result.statistics.profitFactor.mean || null,
+          // StrategyComparison の直接プロパティを使用
+          winRatePercentile: result.comparison?.winRatePercentile || 0,
+          profitFactorPercentile: result.comparison?.profitFactorPercentile || null,
+          maxDrawdownPercentile: result.comparison?.maxDrawdownPercentile || null,
+          totalProfitPercentile: result.comparison?.netProfitRatePercentile || null,
+          winRate5thPercentile: result.statistics.winRate.percentiles.p5,
+          winRate95thPercentile: result.statistics.winRate.percentiles.p95,
+        },
+      });
+      console.log(`[StrategyRoutes] モンテカルロ結果をDBに保存`);
+    } catch (dbError) {
+      // DB保存エラーはログのみ、レスポンスには影響させない
+      console.warn(`[StrategyRoutes] モンテカルロ結果のDB保存に失敗:`, dbError);
+    }
+
     res.json({
       success: true,
       data: result,
@@ -1412,6 +1449,69 @@ router.post('/:id/montecarlo', async (req: Request, res: Response) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
     console.error('[StrategyRoutes] モンテカルロシミュレーションエラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
+ * GET /api/strategies/:id/montecarlo/history
+ * モンテカルロシミュレーション履歴を取得
+ * 
+ * Query Parameters:
+ * - limit: number (取得件数、デフォルト: 10)
+ */
+router.get('/:id/montecarlo/history', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { limit } = req.query;
+
+    const history = await prisma.monteCarloRun.findMany({
+      where: { strategyId: id },
+      orderBy: { createdAt: 'desc' },
+      take: limit ? parseInt(limit as string, 10) : 10,
+    });
+
+    // フロントエンド用にフォーマット（明示的にMonteCarloRun型を使用）
+    const formattedHistory = history.map((run: {
+      id: string;
+      iterations: number;
+      timeframe: string;
+      expectedWinRate: number;
+      expectedProfitFactor: number | null;
+      simulatedMeanWinRate: number;
+      simulatedMeanProfitFactor: number | null;
+      winRatePercentile: number;
+      profitFactorPercentile: number | null;
+      maxDrawdownPercentile: number | null;
+      totalProfitPercentile: number | null;
+      createdAt: Date;
+    }) => ({
+      id: run.id,
+      iterations: run.iterations,
+      timeframe: run.timeframe,
+      expectedWinRate: run.expectedWinRate,
+      expectedProfitFactor: run.expectedProfitFactor,
+      simulatedMeanWinRate: run.simulatedMeanWinRate,
+      simulatedMeanProfitFactor: run.simulatedMeanProfitFactor,
+      percentiles: {
+        winRate: run.winRatePercentile,
+        profitFactor: run.profitFactorPercentile,
+        maxDrawdown: run.maxDrawdownPercentile,
+        totalProfit: run.totalProfitPercentile,
+      },
+      createdAt: run.createdAt.toISOString(),
+    }));
+
+    res.json({
+      success: true,
+      data: { history: formattedHistory },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] モンテカルロ履歴取得エラー:', message);
     res.status(500).json({
       success: false,
       error: message,

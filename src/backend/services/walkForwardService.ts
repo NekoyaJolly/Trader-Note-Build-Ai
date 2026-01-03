@@ -469,6 +469,7 @@ export async function runWalkForwardTest(
       console.log(`[WalkForward] Split ${i + 1}/${periodSplits.length} 実行中...`);
 
       // In-Sample バックテスト
+      // source: 'walkforward' を指定して、メインの履歴と区別する
       const inSampleRequest: BacktestRequest = {
         strategyId,
         startDate: split.inSampleStart.toISOString().split('T')[0],
@@ -478,10 +479,12 @@ export async function runWalkForwardTest(
         initialCapital,
         lotSize,
         leverage,
+        source: 'walkforward',
       };
       const inSampleResult = await runBacktest(inSampleRequest);
 
       // Out-of-Sample バックテスト
+      // source: 'walkforward' を指定して、メインの履歴と区別する
       const outOfSampleRequest: BacktestRequest = {
         strategyId,
         startDate: split.outOfSampleStart.toISOString().split('T')[0],
@@ -491,6 +494,7 @@ export async function runWalkForwardTest(
         initialCapital,
         lotSize,
         leverage,
+        source: 'walkforward',
       };
       const outOfSampleResult = await runBacktest(outOfSampleRequest);
 

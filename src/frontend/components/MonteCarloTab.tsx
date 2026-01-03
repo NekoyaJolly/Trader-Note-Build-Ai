@@ -5,10 +5,11 @@
  * - ランダム戦略との比較結果を可視化
  * - 勝率・PF・最大DDの分布をヒストグラムで表示
  * - 実際の戦略のパーセンタイル順位を表示
+ * - 過去の実行履歴を表示
  */
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   BarChart,
   Bar,
@@ -24,8 +25,9 @@ import type {
   MonteCarloResult,
   MonteCarloParams,
   DistributionStats,
+  MonteCarloHistoryEntry,
 } from "@/lib/api";
-import { runMonteCarloSimulation } from "@/lib/api";
+import { runMonteCarloSimulation, fetchMonteCarloHistory } from "@/lib/api";
 
 interface MonteCarloTabProps {
   /** ストラテジーID */
@@ -182,10 +184,30 @@ export function MonteCarloTab({ strategyId, backtestRunId, defaultParams }: Mont
   const [result, setResult] = useState<MonteCarloResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   
+  // 履歴
+  const [history, setHistory] = useState<MonteCarloHistoryEntry[]>([]);
+  
   // パラメータ
   const [iterations, setIterations] = useState<100 | 500 | 1000>(100);
   const [startDate, setStartDate] = useState(defaultParams?.startDate || '');
   const [endDate, setEndDate] = useState(defaultParams?.endDate || '');
+  
+  /**
+   * 履歴を読み込む
+   */
+  const loadHistory = useCallback(async () => {
+    try {
+      const h = await fetchMonteCarloHistory(strategyId);
+      setHistory(h);
+    } catch (err) {
+      console.warn('モンテカルロ履歴の取得に失敗:', err);
+    }
+  }, [strategyId]);
+
+  // 初回読み込み
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
   
   /**
    * シミュレーション実行
@@ -214,6 +236,8 @@ export function MonteCarloTab({ strategyId, backtestRunId, defaultParams }: Mont
       
       const res = await runMonteCarloSimulation(strategyId, params);
       setResult(res);
+      // 実行後に履歴を再読み込み
+      await loadHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'シミュレーションに失敗しました');
     } finally {
@@ -440,6 +464,72 @@ export function MonteCarloTab({ strategyId, backtestRunId, defaultParams }: Mont
             </div>
           </div>
         </>
+      )}
+      
+      {/* 実行履歴 */}
+      {history.length > 0 && (
+        <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
+          <h4 className="text-sm font-semibold text-gray-300 mb-3">📜 実行履歴</h4>
+          <div className="space-y-2">
+            {history.slice(0, 5).map((entry) => (
+              <div
+                key={entry.id}
+                className="bg-slate-700/50 rounded-lg p-3 border border-slate-600"
+              >
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-xs text-gray-500">
+                    {new Date(entry.createdAt).toLocaleString('ja-JP', {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    {entry.iterations}回 / {entry.timeframe}
+                  </span>
+                </div>
+                <div className="grid grid-cols-4 gap-2 text-xs">
+                  <div className="text-center">
+                    <div className="text-gray-500">期待勝率</div>
+                    <div className="text-white font-mono">
+                      {(entry.expectedWinRate * 100).toFixed(1)}%
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-gray-500">MC平均</div>
+                    <div className="text-white font-mono">
+                      {(entry.simulatedMeanWinRate * 100).toFixed(1)}%
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-gray-500">勝率%ile</div>
+                    <div className="font-mono" style={{ color: getPercentileColor(entry.percentiles.winRate) }}>
+                      {entry.percentiles.winRate.toFixed(0)}%
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-gray-500">PF%ile</div>
+                    <div className="font-mono" style={{
+                      color: entry.percentiles.profitFactor != null
+                        ? getPercentileColor(entry.percentiles.profitFactor)
+                        : '#9CA3AF'
+                    }}>
+                      {entry.percentiles.profitFactor != null
+                        ? `${entry.percentiles.profitFactor.toFixed(0)}%`
+                        : '-'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {history.length > 5 && (
+            <p className="text-xs text-gray-500 mt-2 text-center">
+              他 {history.length - 5} 件の履歴
+            </p>
+          )}
+        </div>
       )}
     </div>
   );

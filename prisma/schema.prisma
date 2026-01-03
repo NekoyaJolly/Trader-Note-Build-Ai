@@ -77,49 +77,49 @@ model Trade {
 }
 
 model TradeNote {
-  id               String            @id @default(uuid()) @db.Uuid
-  tradeId          String            @unique @db.Uuid
-  symbol           String
-  entryPrice       Decimal           @db.Decimal(18, 8)
-  side             TradeSide
-  indicators       Json?
-  featureVector    Float[]
-  timeframe        String?
-  createdAt        DateTime          @default(now()) @db.Timestamptz(6)
-  updatedAt        DateTime          @updatedAt @db.Timestamptz(6)
+  id              String     @id @default(uuid()) @db.Uuid
+  tradeId         String     @unique @db.Uuid
+  symbol          String
+  entryPrice      Decimal    @db.Decimal(18, 8)
+  side            TradeSide
+  indicators      Json?
+  featureVector   Float[]
+  timeframe       String?
+  createdAt       DateTime   @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime   @updatedAt @db.Timestamptz(6)
   /// 有効化日時
-  activatedAt      DateTime?         @db.Timestamptz(6)
+  activatedAt     DateTime?  @db.Timestamptz(6)
   /// 最終編集日時
-  lastEditedAt     DateTime?         @db.Timestamptz(6)
+  lastEditedAt    DateTime?  @db.Timestamptz(6)
   /// トレード時点の市場コンテキスト（JSON: trend, calculatedIndicators等）
-  marketContext    Json?
+  marketContext   Json?
   /// アーカイブ日時
-  archivedAt       DateTime?         @db.Timestamptz(6)
+  archivedAt      DateTime?  @db.Timestamptz(6)
   /// 承認状態（draft: 下書き、active: 有効、archived: アーカイブ）
-  status           NoteStatus        @default(draft)
+  status          NoteStatus @default(draft)
   /// タグ（検索用）
-  tags             String[]          @default([])
+  tags            String[]   @default([])
   /// ユーザーによる追記コメント
-  userNotes        String?
+  userNotes       String?
   /// ノート固有のインジケーター設定（NoteIndicatorConfig 型の JSON）
   /// グローバル設定とは別に、このノート独自の評価ロジックを定義可能
-  indicatorConfig  Json?
-  
+  indicatorConfig Json?
+
   // === フェーズ8: 複数ノート運用UX ===
   /// ノート優先度（1-10、高いほど優先。同時ヒット時のソートに使用）
-  priority         Int               @default(5)
+  priority    Int       @default(5)
   /// 有効フラグ（false の場合、マッチング対象から除外）
-  enabled          Boolean           @default(true)
+  enabled     Boolean   @default(true)
   /// 一時停止（この日時まで無効。null の場合は停止なし）
-  pausedUntil      DateTime?         @db.Timestamptz(6)
-  
-  aiSummary               AISummary?
-  backtestRuns            BacktestRun[]
-  evaluationLogs          EvaluationLog[]          @relation("EvaluationLogNote")
-  matchResult             MatchResult[]
-  notificationLogs        NotificationLog[]        @relation("NotificationLogNote")
-  notificationSkipLogs    NotificationSkipLog[]    @relation("NotificationSkipLogNote")
-  trade                   Trade                    @relation(fields: [tradeId], references: [id])
+  pausedUntil DateTime? @db.Timestamptz(6)
+
+  aiSummary            AISummary?
+  backtestRuns         BacktestRun[]
+  evaluationLogs       EvaluationLog[]       @relation("EvaluationLogNote")
+  matchResult          MatchResult[]
+  notificationLogs     NotificationLog[]     @relation("NotificationLogNote")
+  notificationSkipLogs NotificationSkipLog[] @relation("NotificationSkipLogNote")
+  trade                Trade                 @relation(fields: [tradeId], references: [id])
 
   @@index([symbol], map: "idx_tradenote_symbol")
   @@index([status], map: "idx_tradenote_status")
@@ -569,6 +569,7 @@ model Strategy {
   updatedAt        DateTime              @updatedAt @db.Timestamptz(6)
   alert            StrategyAlert?
   backtestRuns     StrategyBacktestRun[]
+  monteCarloRuns   MonteCarloRun[]
   strategyNotes    StrategyNote[]
   versions         StrategyVersion[]
   walkForwardRuns  WalkForwardRun[]
@@ -658,6 +659,8 @@ model StrategyBacktestRun {
   endDate    DateTime                @db.Timestamptz(6)
   /// ステージ（stage1: 高速スキャン、stage2: 1分足精密検証）
   stage      String                  @default("stage1")
+  /// 実行ソース（manual: 手動実行、walkforward: WFテスト、montecarlo: モンテカルロ）
+  source     String                  @default("manual")
   /// 実行状態
   status     BacktestStatus          @default(pending)
   /// 作成日時
@@ -670,6 +673,7 @@ model StrategyBacktestRun {
 
   @@index([strategyId], map: "idx_strategybacktestrun_strategyid")
   @@index([status, createdAt], map: "idx_strategybacktestrun_status_created")
+  @@index([source], map: "idx_strategybacktestrun_source")
 }
 
 /// ストラテジーバックテスト集計結果
@@ -856,6 +860,47 @@ model WalkForwardSplit {
   @@index([runId], map: "idx_walkforwardsplit_runid")
 }
 
+/// モンテカルロシミュレーション実行履歴
+model MonteCarloRun {
+  id                        String   @id @default(uuid()) @db.Uuid
+  /// 対象ストラテジー ID
+  strategyId                String   @db.Uuid
+  /// 参照バックテスト実行 ID（オプション）
+  backtestRunId             String?  @db.Uuid
+  /// シミュレーション回数
+  iterations                Int      @default(100)
+  /// シード値（再現性用）
+  seed                      Int?
+  /// 時間足
+  timeframe                 String   @default("1h")
+  /// 期待勝率（実際のバックテスト結果）
+  expectedWinRate           Float
+  /// 期待PF（実際のバックテスト結果）
+  expectedProfitFactor      Float?
+  /// シミュレーション平均勝率
+  simulatedMeanWinRate      Float
+  /// シミュレーション平均PF
+  simulatedMeanProfitFactor Float?
+  /// 勝率パーセンタイル（0-100）
+  winRatePercentile         Float
+  /// PFパーセンタイル（0-100）
+  profitFactorPercentile    Float?
+  /// DDパーセンタイル（0-100）
+  maxDrawdownPercentile     Float?
+  /// 総利益パーセンタイル（0-100）
+  totalProfitPercentile     Float?
+  /// 5%タイル勝率
+  winRate5thPercentile      Float?
+  /// 95%タイル勝率
+  winRate95thPercentile     Float?
+  /// 作成日時
+  createdAt                 DateTime @default(now()) @db.Timestamptz(6)
+  strategy                  Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  @@index([strategyId], map: "idx_montecarlorun_strategyid")
+  @@index([createdAt], map: "idx_montecarlorun_created")
+}
+
 /// ユーザーロール
 enum UserRole {
   /// 一般ユーザー
@@ -973,36 +1018,36 @@ enum WalkForwardType {
 /// 通知バッチ設定（同時ヒット制御のグローバル設定）
 /// システム全体で1レコードのみ保持（シングルトン）
 model NotificationBatchConfig {
-  id               String   @id @default(uuid()) @db.Uuid
+  id              String   @id @default(uuid()) @db.Uuid
   /// 同時に送信する最大通知数（デフォルト3）
-  maxSimultaneous  Int      @default(3)
+  maxSimultaneous Int      @default(3)
   /// シンボル別にグループ化するか（trueの場合、シンボルごとにmaxSimultaneous適用）
-  groupBySymbol    Boolean  @default(true)
+  groupBySymbol   Boolean  @default(true)
   /// クールダウン時間（分）- 同一ノートへの連続通知を抑制
-  cooldownMinutes  Int      @default(15)
+  cooldownMinutes Int      @default(15)
   /// 作成日時
-  createdAt        DateTime @default(now()) @db.Timestamptz(6)
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
   /// 更新日時
-  updatedAt        DateTime @updatedAt @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @db.Timestamptz(6)
 }
 
 /// 通知スキップログ（同時ヒット制御でスキップされた通知の記録）
 /// デバッグ・分析用。なぜ通知されなかったかを追跡可能にする
 model NotificationSkipLog {
-  id             String               @id @default(uuid()) @db.Uuid
+  id            String                 @id @default(uuid()) @db.Uuid
   /// スキップされた TradeNote ID
-  noteId         String               @db.Uuid
+  noteId        String                 @db.Uuid
   /// マッチ結果 ID（任意）
-  matchResultId  String?              @db.Uuid
+  matchResultId String?                @db.Uuid
   /// スキップ理由
-  reason         NotificationSkipReason
+  reason        NotificationSkipReason
   /// 詳細情報（JSON形式で任意のメタデータ）
-  details        Json?
+  details       Json?
   /// スキップ発生日時
-  skippedAt      DateTime             @default(now()) @db.Timestamptz(6)
+  skippedAt     DateTime               @default(now()) @db.Timestamptz(6)
 
-  note           TradeNote            @relation("NotificationSkipLogNote", fields: [noteId], references: [id])
-  matchResult    MatchResult?         @relation("NotificationSkipLogMatch", fields: [matchResultId], references: [id])
+  note        TradeNote    @relation("NotificationSkipLogNote", fields: [noteId], references: [id])
+  matchResult MatchResult? @relation("NotificationSkipLogMatch", fields: [matchResultId], references: [id])
 
   @@index([noteId], map: "idx_notification_skip_note")
   @@index([skippedAt], map: "idx_notification_skip_at")
@@ -1022,4 +1067,3 @@ enum NotificationSkipReason {
   /// 優先度が低い（同一シンボル内で優先度負け）
   lower_priority
 }
-
