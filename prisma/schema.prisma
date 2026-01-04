@@ -1153,6 +1153,7 @@ model AITradePlan {
   // リレーション
   research           MarketResearch @relation(fields: [researchId], references: [id])
   virtualTrades      VirtualTrade[]
+  aiNotes            AITradeNote[]
 
   @@unique([targetDate, symbol], map: "uq_ai_trade_plan_date_symbol")
   @@index([targetDate], map: "idx_ai_trade_plan_date")
@@ -1209,6 +1210,7 @@ model VirtualTrade {
 
   // リレーション
   plan           AITradePlan        @relation(fields: [planId], references: [id])
+  aiNote         AITradeNote?
 
   @@index([planId], map: "idx_virtual_trade_plan")
   @@index([status], map: "idx_virtual_trade_status")
@@ -1266,3 +1268,85 @@ model VirtualPortfolio {
   @@index([name], map: "idx_virtual_portfolio_name")
 }
 
+/// AIトレードノート（Phase C）
+/// 仮想トレードの結果をAIが自動分析して記録
+model AITradeNote {
+  id              String      @id @default(uuid()) @db.Uuid
+  /// 仮想トレードID
+  virtualTradeId  String      @unique @db.Uuid
+  /// 元のプランID
+  planId          String      @db.Uuid
+
+  // 基本情報
+  /// 日付（YYYY-MM-DD）
+  date            DateTime    @db.Date
+  /// シンボル
+  symbol          String
+  /// 方向（long/short）
+  direction       String
+
+  // 結果
+  /// 勝敗（win/loss/breakeven）
+  outcome         String
+  /// 損益（pips）
+  pnlPips         Decimal     @db.Decimal(10, 2)
+  /// 損益（%）
+  pnlPercentage   Decimal     @db.Decimal(10, 4)
+  /// 実際のRR比
+  rrActual        Decimal     @db.Decimal(5, 2)
+  /// 保有時間（分）
+  holdingDuration Int
+
+  // 分析（JSONB）
+  /// エントリー分析
+  entryAnalysis   Json
+  /// 決済分析
+  exitAnalysis    Json
+  /// プラン評価
+  planEvaluation  Json
+  /// 市場振り返り
+  marketReview    Json
+  /// 学び
+  learnings       Json
+  /// 類似パターン
+  similarPatterns Json?
+
+  /// 使用したAIモデル
+  aiModel         String
+
+  /// 作成日時
+  createdAt       DateTime    @default(now()) @db.Timestamptz(6)
+
+  // リレーション
+  virtualTrade    VirtualTrade @relation(fields: [virtualTradeId], references: [id])
+  plan            AITradePlan  @relation(fields: [planId], references: [id])
+
+  @@index([date], map: "idx_ai_trade_note_date")
+  @@index([outcome], map: "idx_ai_trade_note_outcome")
+  @@index([symbol], map: "idx_ai_trade_note_symbol")
+}
+
+/// AIノートサマリー（期間集計）
+model AINoteSummary {
+  id            String   @id @default(uuid()) @db.Uuid
+  /// 期間タイプ（daily/weekly/monthly）
+  period        String
+  /// 開始日
+  startDate     DateTime @db.Date
+  /// 終了日
+  endDate       DateTime @db.Date
+
+  // 統計・分析・総括（JSONB）
+  /// 統計データ
+  statistics    Json
+  /// 分析結果
+  analysis      Json
+  /// 総括
+  summary       Json
+
+  /// 作成日時
+  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([period, startDate, endDate], map: "uq_ai_note_summary_period")
+  @@index([period, startDate], map: "idx_ai_note_summary_period")
+}

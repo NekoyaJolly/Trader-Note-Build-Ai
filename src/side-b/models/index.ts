@@ -90,3 +90,47 @@ export {
   canOpenNewTrade,
   calculateRiskAmount as calculatePortfolioRiskAmount,
 } from './virtualPortfolio';
+
+// AIトレードノート（Phase C）
+export {
+  // 列挙型
+  type TradeOutcome,
+  type TimingEvaluation,
+  type ExitTimingEvaluation,
+  type AccuracyEvaluation,
+  type ExitType,
+  type SummaryPeriod,
+  // サブ型
+  type TradeResult,
+  type EntryAnalysis,
+  type ExitAnalysis,
+  type PlanEvaluation,
+  type MarketReview,
+  type Learnings,
+  type SimilarPattern,
+  // メイン型
+  type AITradeNote,
+  type CreateAITradeNoteInput,
+  // サマリー型
+  type RegimePerformance,
+  type TimeOfDayPerformance,
+  type SummaryStatistics,
+  type SummaryAnalysis,
+  type SummarySummary,
+  type AINoteSummary,
+  type CreateAINoteSummaryInput,
+  // ユーティリティ
+  outcomeToJapanese,
+  timingToJapanese,
+  exitTimingToJapanese,
+  accuracyToJapanese,
+  exitTypeToJapanese,
+  periodToJapanese,
+  determineOutcome,
+  calculateHoldingDuration,
+  calculateActualRR,
+  createDefaultLearnings,
+  createDefaultStatistics,
+  calculateStatisticsFromNotes,
+  calculateNoteSimilarity,
+} from './aiTradeNote';

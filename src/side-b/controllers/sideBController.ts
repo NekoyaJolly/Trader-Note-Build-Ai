@@ -38,6 +38,7 @@ import {
   cancelPendingTrade,
   getPortfolioSummary,
 } from '../services';
+import * as aiNoteService from '../services/aiNoteService';
 import {
   getOrCreateDefaultPortfolio,
   updatePortfolioSettings,
@@ -594,7 +595,133 @@ export class SideBController {
       res.status(500).json({ error: 'ポートフォリオ設定更新に失敗しました' });
     }
   };
+
+  // ===========================================
+  // AIトレードノート（Phase C）
+  // ===========================================
+
+  /**
+   * GET /api/side-b/ai-notes
+   * AIノート一覧を取得
+   */
+  listAINotes = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { from, to, outcome, symbol, limit, offset } = req.query;
+
+      // outcomeのバリデーション
+      const validOutcomes = ['win', 'loss', 'breakeven'];
+      const outcomeFilter = outcome && validOutcomes.includes(outcome as string)
+        ? outcome as 'win' | 'loss' | 'breakeven'
+        : undefined;
+
+      const result = await aiNoteService.listNotes({
+        from: from as string | undefined,
+        to: to as string | undefined,
+        outcome: outcomeFilter,
+        symbol: symbol as string | undefined,
+        limit: limit ? parseInt(limit as string, 10) : 20,
+        offset: offset ? parseInt(offset as string, 10) : 0,
+      });
+
+      res.json({
+        success: true,
+        notes: result.notes,
+        total: result.total,
+        stats: result.stats,
+      });
+    } catch (error) {
+      console.error('[SideBController] listAINotes error:', error);
+      res.status(500).json({ error: 'AIノート一覧取得に失敗しました' });
+    }
+  };
+
+  /**
+   * GET /api/side-b/ai-notes/:id
+   * AIノート詳細を取得
+   */
+  getAINoteById = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+
+      const note = await aiNoteService.getNote(id);
+
+      if (!note) {
+        res.status(404).json({ error: 'AIノートが見つかりません' });
+        return;
+      }
+
+      res.json({ success: true, note });
+    } catch (error) {
+      console.error('[SideBController] getAINoteById error:', error);
+      res.status(500).json({ error: 'AIノート取得に失敗しました' });
+    }
+  };
+
+  /**
+   * GET /api/side-b/ai-notes/summaries
+   * サマリー一覧を取得
+   */
+  listAINoteSummaries = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { period, limit, offset } = req.query;
+
+      // periodのバリデーション
+      const validPeriods = ['daily', 'weekly', 'monthly'];
+      const periodFilter = period && validPeriods.includes(period as string)
+        ? period as 'daily' | 'weekly' | 'monthly'
+        : undefined;
+
+      const result = await aiNoteService.listSummaries({
+        period: periodFilter,
+        limit: limit ? parseInt(limit as string, 10) : 10,
+        offset: offset ? parseInt(offset as string, 10) : 0,
+      });
+
+      res.json({
+        success: true,
+        summaries: result.summaries,
+        total: result.total,
+      });
+    } catch (error) {
+      console.error('[SideBController] listAINoteSummaries error:', error);
+      res.status(500).json({ error: 'サマリー一覧取得に失敗しました' });
+    }
+  };
+
+  /**
+   * POST /api/side-b/ai-notes/summaries/generate
+   * サマリーを手動生成
+   */
+  generateAINoteSummary = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { period, startDate, endDate } = req.body;
+
+      // バリデーション
+      const validPeriods = ['daily', 'weekly', 'monthly'];
+      if (!period || !validPeriods.includes(period)) {
+        res.status(400).json({ error: 'period は daily/weekly/monthly のいずれかです' });
+        return;
+      }
+
+      if (!startDate || !endDate) {
+        res.status(400).json({ error: 'startDate と endDate は必須です' });
+        return;
+      }
+
+      const summary = await aiNoteService.generateSummary(
+        period as 'daily' | 'weekly' | 'monthly',
+        startDate,
+        endDate
+      );
+
+      res.json({ success: true, summary });
+    } catch (error) {
+      console.error('[SideBController] generateAINoteSummary error:', error);
+      res.status(500).json({ error: 'サマリー生成に失敗しました' });
+    }
+  };
 }
 
 // デフォルトインスタンス
 export const sideBController = new SideBController();
+

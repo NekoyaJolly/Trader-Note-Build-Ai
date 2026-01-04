@@ -49,9 +49,9 @@ const phases = [
     id: "note",
     icon: "📝",
     label: "Note",
-    status: "planned",
+    status: "ready", // Phase C 実装完了！
     gradient: "from-cyan-500 to-blue-600",
-    href: null,
+    href: "/side-b/ai-notes",
   },
 ];
 

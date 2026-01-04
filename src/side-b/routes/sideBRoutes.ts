@@ -29,6 +29,12 @@
  * - GET    /api/side-b/portfolio          - ポートフォリオ取得
  * - PUT    /api/side-b/portfolio/settings - ポートフォリオ設定更新
  * 
+ * AIトレードノート (Phase C):
+ * - GET    /api/side-b/ai-notes           - AIノート一覧
+ * - GET    /api/side-b/ai-notes/:id       - AIノート詳細
+ * - GET    /api/side-b/ai-notes/summaries - サマリー一覧
+ * - POST   /api/side-b/ai-notes/summaries/generate - サマリー生成
+ * 
  * 管理:
  * - POST   /api/side-b/cleanup            - 期限切れデータ削除
  */
@@ -223,5 +229,51 @@ router.get('/portfolio', sideBController.getPortfolio);
  * - spreadPips?: number
  */
 router.put('/portfolio/settings', sideBController.updatePortfolioSettings);
+
+// ===========================================
+// AIトレードノート（Phase C）
+// ===========================================
+
+/**
+ * GET /api/side-b/ai-notes
+ * AIノート一覧を取得
+ * 
+ * Query:
+ * - from?: string (YYYY-MM-DD)
+ * - to?: string (YYYY-MM-DD)
+ * - outcome?: 'win' | 'loss' | 'breakeven'
+ * - symbol?: string
+ * - limit?: number (default: 20)
+ * - offset?: number (default: 0)
+ */
+router.get('/ai-notes', sideBController.listAINotes);
+
+/**
+ * GET /api/side-b/ai-notes/summaries
+ * サマリー一覧を取得
+ * 
+ * Query:
+ * - period?: 'daily' | 'weekly' | 'monthly'
+ * - limit?: number
+ * - offset?: number
+ */
+router.get('/ai-notes/summaries', sideBController.listAINoteSummaries);
+
+/**
+ * POST /api/side-b/ai-notes/summaries/generate
+ * サマリーを手動生成
+ * 
+ * Body:
+ * - period: 'daily' | 'weekly' | 'monthly' (必須)
+ * - startDate: string (YYYY-MM-DD, 必須)
+ * - endDate: string (YYYY-MM-DD, 必須)
+ */
+router.post('/ai-notes/summaries/generate', sideBController.generateAINoteSummary);
+
+/**
+ * GET /api/side-b/ai-notes/:id
+ * AIノート詳細を取得
+ */
+router.get('/ai-notes/:id', sideBController.getAINoteById);
 
 export default router;
