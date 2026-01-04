@@ -1227,5 +1227,42 @@ enum VirtualTradeStatus {
   cancelled
   /// 期限切れ
   expired
+  /// 無効化（無効化条件に該当）
+  invalidated
+}
+
+/// 仮想ポートフォリオ（Phase B用）
+/// AIの仮想トレード統計を管理
+model VirtualPortfolio {
+  id                   String   @id @default(uuid()) @db.Uuid
+  /// 名前（例: "Default", "Conservative"）
+  name                 String   @default("Default")
+  
+  // 資金管理
+  /// 初期仮想資金
+  initialBalance       Decimal  @db.Decimal(18, 2) @default(100000)
+  /// 現在の仮想残高
+  currentBalance       Decimal  @db.Decimal(18, 2) @default(100000)
+
+  // 統計情報（JSON）
+  /// 統計サマリー（totalTrades, winRate, profitFactor, maxDrawdown等）
+  stats                Json     @default("{}")
+
+  // 設定
+  /// 同時保有上限
+  maxOpenPositions     Int      @default(3)
+  /// 1トレードあたりのリスク率（%）
+  riskPercentPerTrade  Decimal  @db.Decimal(5, 2) @default(1.0)
+  /// スプレッド考慮フラグ
+  enableSpread         Boolean  @default(false)
+  /// 想定スプレッド（pips）
+  spreadPips           Decimal  @db.Decimal(5, 2) @default(2.0)
+
+  /// 作成日時
+  createdAt            DateTime @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt            DateTime @updatedAt @db.Timestamptz(6)
+
+  @@index([name], map: "idx_virtual_portfolio_name")
 }
 

@@ -18,3 +18,20 @@ export {
   type PlanAIResult,
   type UserTradingPreferences,
 } from './planAIService';
+
+// Phase B: 仮想トレード
+export {
+  type CreateTradeResult,
+  type MonitoringResult,
+  type PortfolioSummary,
+  createTradeFromPlan,
+  getTrade,
+  listTrades,
+  closeTradeManually,
+  cancelPendingTrade,
+  monitorEntryConditions,
+  monitorPositions,
+  expirePendingTrades,
+  refreshPortfolioStats,
+  getPortfolioSummary,
+} from './virtualTradeService';

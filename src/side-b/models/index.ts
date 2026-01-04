@@ -57,3 +57,36 @@ export {
   regimeToJapanese,
   regimeToEmoji,
 } from './tradePlan';
+
+// 仮想トレード（Phase B）
+export {
+  type VirtualTradeStatus,
+  type ExitReason,
+  type TradeDirection,
+  type VirtualTradeEntry,
+  type VirtualTradeExit,
+  type VirtualTradePnL,
+  type VirtualTrade,
+  type CreateVirtualTradeInput,
+  type CloseVirtualTradeInput,
+  type UpdateVirtualTradeInput,
+  checkExitCondition,
+  checkEntryCondition,
+  calculatePnL,
+  isActiveTrade,
+  isClosedTrade,
+} from './virtualTrade';
+
+// 仮想ポートフォリオ（Phase B）
+export {
+  type PortfolioStats,
+  type PortfolioSettings,
+  type VirtualPortfolio,
+  type UpdatePortfolioSettings,
+  type CreatePortfolioInput,
+  DEFAULT_PORTFOLIO_STATS,
+  DEFAULT_PORTFOLIO_SETTINGS,
+  calculateStats,
+  canOpenNewTrade,
+  calculateRiskAmount as calculatePortfolioRiskAmount,
+} from './virtualPortfolio';
