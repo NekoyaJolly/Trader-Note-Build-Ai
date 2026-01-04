@@ -11,6 +11,15 @@
  * - GET /api/side-b/plans/:id - プラン取得
  * - GET /api/side-b/plans - プラン一覧
  * - POST /api/side-b/pipeline - フルパイプライン実行
+ * 
+ * Phase B追加:
+ * - POST /api/side-b/trades - 仮想トレード作成
+ * - GET /api/side-b/trades - 仮想トレード一覧
+ * - GET /api/side-b/trades/:id - 仮想トレード詳細
+ * - POST /api/side-b/trades/:id/close - 仮想トレード決済
+ * - POST /api/side-b/trades/:id/cancel - 仮想トレードキャンセル
+ * - GET /api/side-b/portfolio - ポートフォリオ取得
+ * - PUT /api/side-b/portfolio/settings - ポートフォリオ設定更新
  */
 
 import { Request, Response } from 'express';
@@ -21,6 +30,19 @@ import {
   MarketResearchWithTypes,
   AITradePlanWithTypes,
 } from '..';
+import {
+  createTradeFromPlan,
+  getTrade,
+  listTrades,
+  closeTradeManually,
+  cancelPendingTrade,
+  getPortfolioSummary,
+} from '../services';
+import {
+  getOrCreateDefaultPortfolio,
+  updatePortfolioSettings,
+} from '../repositories';
+import type { ExitReason, UpdatePortfolioSettings } from '../models';
 
 export class SideBController {
   // ===========================================
@@ -384,6 +406,192 @@ export class SideBController {
     } catch (error) {
       console.error('[SideBController] cleanup error:', error);
       res.status(500).json({ error: 'クリーンアップに失敗しました' });
+    }
+  };
+
+  // ===========================================
+  // 仮想トレード（Phase B）
+  // ===========================================
+
+  /**
+   * POST /api/side-b/trades
+   * プランからシナリオに基づいて仮想トレードを作成
+   */
+  createVirtualTrade = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { planId, scenarioId } = req.body;
+
+      if (!planId) {
+        res.status(400).json({ error: 'planId は必須です' });
+        return;
+      }
+
+      const result = await createTradeFromPlan(planId, scenarioId);
+
+      if (!result.success) {
+        res.status(400).json({ error: result.error });
+        return;
+      }
+
+      res.json({
+        success: true,
+        trade: result.trade,
+      });
+    } catch (error) {
+      console.error('[SideBController] createVirtualTrade error:', error);
+      res.status(500).json({ error: '仮想トレード作成に失敗しました' });
+    }
+  };
+
+  /**
+   * GET /api/side-b/trades
+   * 仮想トレード一覧を取得
+   */
+  listVirtualTrades = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { status, planId, symbol, limit } = req.query;
+
+      // statusをVirtualTradeStatus型にキャスト（バリデーション省略）
+      const validStatuses = ['pending', 'open', 'closed', 'expired', 'cancelled', 'invalidated'];
+      const statusFilter = status && validStatuses.includes(status as string)
+        ? status as 'pending' | 'open' | 'closed' | 'expired' | 'cancelled' | 'invalidated'
+        : undefined;
+
+      const trades = await listTrades({
+        status: statusFilter,
+        planId: planId as string | undefined,
+        symbol: symbol as string | undefined,
+        limit: limit ? parseInt(limit as string, 10) : undefined,
+      });
+
+      res.json({
+        success: true,
+        trades,
+        count: trades.length,
+      });
+    } catch (error) {
+      console.error('[SideBController] listVirtualTrades error:', error);
+      res.status(500).json({ error: '仮想トレード一覧取得に失敗しました' });
+    }
+  };
+
+  /**
+   * GET /api/side-b/trades/:id
+   * 仮想トレード詳細を取得
+   */
+  getVirtualTradeById = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+
+      const trade = await getTrade(id);
+
+      if (!trade) {
+        res.status(404).json({ error: '仮想トレードが見つかりません' });
+        return;
+      }
+
+      res.json({ success: true, trade });
+    } catch (error) {
+      console.error('[SideBController] getVirtualTradeById error:', error);
+      res.status(500).json({ error: '仮想トレード取得に失敗しました' });
+    }
+  };
+
+  /**
+   * POST /api/side-b/trades/:id/close
+   * 仮想トレードを手動決済
+   */
+  closeVirtualTrade = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+      const { exitPrice, reason, note } = req.body;
+
+      if (!exitPrice || typeof exitPrice !== 'number') {
+        res.status(400).json({ error: 'exitPrice は必須です（数値）' });
+        return;
+      }
+
+      const trade = await closeTradeManually(
+        id,
+        exitPrice,
+        (reason as ExitReason) || 'manual',
+        note,
+      );
+
+      if (!trade) {
+        res.status(400).json({ error: '決済できません（オープン状態のトレードのみ可能）' });
+        return;
+      }
+
+      res.json({ success: true, trade });
+    } catch (error) {
+      console.error('[SideBController] closeVirtualTrade error:', error);
+      res.status(500).json({ error: '仮想トレード決済に失敗しました' });
+    }
+  };
+
+  /**
+   * POST /api/side-b/trades/:id/cancel
+   * 待機中の仮想トレードをキャンセル
+   */
+  cancelVirtualTrade = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+
+      const success = await cancelPendingTrade(id);
+
+      if (!success) {
+        res.status(400).json({ error: 'キャンセルできません（待機中のトレードのみ可能）' });
+        return;
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('[SideBController] cancelVirtualTrade error:', error);
+      res.status(500).json({ error: '仮想トレードキャンセルに失敗しました' });
+    }
+  };
+
+  // ===========================================
+  // ポートフォリオ（Phase B）
+  // ===========================================
+
+  /**
+   * GET /api/side-b/portfolio
+   * ポートフォリオサマリーを取得
+   */
+  getPortfolio = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const summary = await getPortfolioSummary();
+
+      res.json({ success: true, ...summary });
+    } catch (error) {
+      console.error('[SideBController] getPortfolio error:', error);
+      res.status(500).json({ error: 'ポートフォリオ取得に失敗しました' });
+    }
+  };
+
+  /**
+   * PUT /api/side-b/portfolio/settings
+   * ポートフォリオ設定を更新
+   */
+  updatePortfolioSettings = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const settings: UpdatePortfolioSettings = req.body;
+
+      // 簡易バリデーション
+      if (settings.maxOpenPositions !== undefined && (settings.maxOpenPositions < 1 || settings.maxOpenPositions > 10)) {
+        res.status(400).json({ error: 'maxOpenPositions は 1-10 の範囲です' });
+        return;
+      }
+
+      const portfolio = await getOrCreateDefaultPortfolio();
+      const updated = await updatePortfolioSettings(portfolio.id, settings);
+
+      res.json({ success: true, portfolio: updated });
+    } catch (error) {
+      console.error('[SideBController] updatePortfolioSettings error:', error);
+      res.status(500).json({ error: 'ポートフォリオ設定更新に失敗しました' });
     }
   };
 }

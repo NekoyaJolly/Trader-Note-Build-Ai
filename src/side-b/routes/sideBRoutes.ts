@@ -18,6 +18,17 @@
  * パイプライン:
  * - POST   /api/side-b/pipeline           - フルパイプライン実行
  * 
+ * 仮想トレード (Phase B):
+ * - POST   /api/side-b/trades             - 仮想トレード作成
+ * - GET    /api/side-b/trades             - 仮想トレード一覧
+ * - GET    /api/side-b/trades/:id         - 仮想トレード詳細
+ * - POST   /api/side-b/trades/:id/close   - 仮想トレード決済
+ * - POST   /api/side-b/trades/:id/cancel  - 仮想トレードキャンセル
+ * 
+ * ポートフォリオ (Phase B):
+ * - GET    /api/side-b/portfolio          - ポートフォリオ取得
+ * - PUT    /api/side-b/portfolio/settings - ポートフォリオ設定更新
+ * 
  * 管理:
  * - POST   /api/side-b/cleanup            - 期限切れデータ削除
  */
@@ -141,5 +152,76 @@ router.post('/pipeline', sideBController.runPipeline);
  * 期限切れリサーチを削除
  */
 router.post('/cleanup', sideBController.cleanup);
+
+// ===========================================
+// 仮想トレード（Phase B）
+// ===========================================
+
+/**
+ * POST /api/side-b/trades
+ * プランからシナリオに基づいて仮想トレードを作成
+ * 
+ * Body:
+ * - planId: string (必須)
+ * - scenarioId?: string (指定しない場合は最初のシナリオ)
+ */
+router.post('/trades', sideBController.createVirtualTrade);
+
+/**
+ * GET /api/side-b/trades
+ * 仮想トレード一覧を取得
+ * 
+ * Query:
+ * - status?: string (pending, open, closed, expired, cancelled)
+ * - planId?: string
+ * - symbol?: string
+ * - limit?: number
+ */
+router.get('/trades', sideBController.listVirtualTrades);
+
+/**
+ * GET /api/side-b/trades/:id
+ * 仮想トレード詳細を取得
+ */
+router.get('/trades/:id', sideBController.getVirtualTradeById);
+
+/**
+ * POST /api/side-b/trades/:id/close
+ * 仮想トレードを手動決済
+ * 
+ * Body:
+ * - exitPrice: number (必須)
+ * - reason?: string (manual, invalidation)
+ * - note?: string
+ */
+router.post('/trades/:id/close', sideBController.closeVirtualTrade);
+
+/**
+ * POST /api/side-b/trades/:id/cancel
+ * 待機中の仮想トレードをキャンセル
+ */
+router.post('/trades/:id/cancel', sideBController.cancelVirtualTrade);
+
+// ===========================================
+// ポートフォリオ（Phase B）
+// ===========================================
+
+/**
+ * GET /api/side-b/portfolio
+ * ポートフォリオサマリーを取得
+ */
+router.get('/portfolio', sideBController.getPortfolio);
+
+/**
+ * PUT /api/side-b/portfolio/settings
+ * ポートフォリオ設定を更新
+ * 
+ * Body:
+ * - maxOpenPositions?: number (1-10)
+ * - riskPercentPerTrade?: number (0.1-10)
+ * - enableSpread?: boolean
+ * - spreadPips?: number
+ */
+router.put('/portfolio/settings', sideBController.updatePortfolioSettings);
 
 export default router;
