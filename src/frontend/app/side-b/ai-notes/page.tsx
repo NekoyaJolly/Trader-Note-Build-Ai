@@ -241,8 +241,8 @@ export default function AINotesPage() {
   const [activeTab, setActiveTab] = useState<"notes" | "summaries">("notes");
   const [generatingSummary, setGeneratingSummary] = useState(false);
 
-  // API ベース URL
-  const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3100/api";
+  // API ベース URL（環境変数から取得し、/api パスを追加）
+  const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3100") + "/api";
 
   // データ取得
   const fetchData = useCallback(async () => {
@@ -266,8 +266,9 @@ export default function AINotesPage() {
       const notesData = await notesRes.json();
       const summariesData = await summariesRes.json();
 
-      setNotes(notesData);
-      setSummaries(summariesData);
+      // APIレスポンスからノート配列とサマリー配列を抽出
+      setNotes(notesData.notes || []);
+      setSummaries(summariesData.summaries || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "データの取得に失敗しました");
     } finally {

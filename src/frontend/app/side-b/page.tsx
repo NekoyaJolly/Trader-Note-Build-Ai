@@ -60,6 +60,59 @@ interface ChatMessage {
   role: "ai" | "user";
   content: string;
   timestamp: Date;
+  data?: unknown; // API レスポンスデータ（オプション）
+}
+
+// APIベースURL
+const API_BASE = (typeof window !== "undefined" && process.env.NEXT_PUBLIC_API_BASE_URL) 
+  ? process.env.NEXT_PUBLIC_API_BASE_URL + "/api/side-b"
+  : "http://localhost:3100/api/side-b";
+
+// ユーザー入力からシンボルと意図を解析
+function parseUserIntent(message: string): { 
+  intent: "research" | "plan" | "unknown"; 
+  symbol: string | null;
+  timeframe: string;
+} {
+  const msg = message.toLowerCase();
+  
+  // シンボル検出（よく使われる通貨ペアや商品）
+  const symbolPatterns = [
+    /xauusd|gold|ゴールド|金/i,
+    /eurusd|eur\/usd|ユーロドル/i,
+    /usdjpy|usd\/jpy|ドル円/i,
+    /gbpusd|gbp\/usd|ポンドドル/i,
+  ];
+  
+  let symbol: string | null = null;
+  if (symbolPatterns[0].test(msg)) symbol = "XAU/USD";
+  else if (symbolPatterns[1].test(msg)) symbol = "EUR/USD";
+  else if (symbolPatterns[2].test(msg)) symbol = "USD/JPY";
+  else if (symbolPatterns[3].test(msg)) symbol = "GBP/USD";
+  
+  // デフォルトシンボル（指定がない場合）
+  if (!symbol) symbol = "XAU/USD";
+  
+  // 時間足検出
+  let timeframe = "15m";
+  if (/1h|1時間|hourly/i.test(msg)) timeframe = "1h";
+  else if (/4h|4時間/i.test(msg)) timeframe = "4h";
+  else if (/5m|5分/i.test(msg)) timeframe = "5m";
+  else if (/30m|30分/i.test(msg)) timeframe = "30m";
+  else if (/daily|日足|1d/i.test(msg)) timeframe = "1d";
+  
+  // 意図検出
+  let intent: "research" | "plan" | "unknown" = "unknown";
+  if (/research|リサーチ|分析|調査|市場|マーケット/i.test(msg)) {
+    intent = "research";
+  } else if (/plan|プラン|計画|戦略|エントリー|トレード/i.test(msg)) {
+    intent = "plan";
+  } else if (/xauusd|eurusd|usdjpy|gbpusd|gold|ゴールド|ドル|ユーロ|ポンド/i.test(msg)) {
+    // シンボルが含まれていればリサーチと推定
+    intent = "research";
+  }
+  
+  return { intent, symbol, timeframe };
 }
 
 export default function SideBDashboard() {
@@ -91,19 +144,107 @@ export default function SideBDashboard() {
     };
 
     setMessages((prev) => [...prev, userMessage]);
+    const userInput = inputValue;
     setInputValue("");
     setIsTyping(true);
 
-    // AI応答シミュレーション（実際はAPIコール）
-    setTimeout(() => {
+    try {
+      // ユーザー意図を解析
+      const { intent, symbol, timeframe } = parseUserIntent(userInput);
+      
+      let aiResponse: ChatMessage;
+
+      if (intent === "research") {
+        // Research API 呼び出し
+        const response = await fetch(`${API_BASE}/research`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ symbol, timeframe }),
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.error || "リサーチ生成に失敗しました");
+        }
+
+        // リサーチ結果をフォーマット
+        const research = data.research;
+        const content = `🔬 **${symbol} マーケットリサーチ**\n\n` +
+          `📊 **市場状況**: ${research?.analysis?.marketCondition || "分析中"}\n` +
+          `📈 **トレンド**: ${research?.analysis?.trend || "不明"}\n` +
+          `💪 **強度**: ${research?.analysis?.strength || "N/A"}\n\n` +
+          `🎯 **主要レベル**:\n` +
+          `• サポート: ${research?.keyLevels?.support?.join(", ") || "N/A"}\n` +
+          `• レジスタンス: ${research?.keyLevels?.resistance?.join(", ") || "N/A"}\n\n` +
+          `📝 **サマリー**: ${research?.summary || "リサーチ完了"}\n\n` +
+          `次のステップ: 「${symbol}のプランを作成」と入力してください。`;
+        
+        aiResponse = {
+          role: "ai",
+          content,
+          timestamp: new Date(),
+          data: research,
+        };
+        
+      } else if (intent === "plan") {
+        // Plan API 呼び出し
+        const response = await fetch(`${API_BASE}/plans`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ symbol, timeframe }),
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.error || "プラン生成に失敗しました");
+        }
+
+        // プラン結果をフォーマット
+        const plan = data.plan;
+        const scenario = plan?.scenarios?.[0];
+        const content = `📋 **${symbol} トレードプラン**\n\n` +
+          `🎯 **推奨シナリオ**: ${scenario?.direction?.toUpperCase() || "N/A"}\n` +
+          `📍 **エントリー**: ${scenario?.entry?.price || "N/A"}\n` +
+          `🛡️ **ストップ**: ${scenario?.stopLoss?.price || "N/A"}\n` +
+          `🎁 **ターゲット**: ${scenario?.takeProfit?.[0]?.price || "N/A"}\n` +
+          `⚖️ **リスクリワード**: ${scenario?.riskReward || "N/A"}\n\n` +
+          `📊 **確信度**: ${scenario?.confidence || "N/A"}%\n` +
+          `📝 **根拠**: ${scenario?.reasoning || "プラン生成完了"}\n\n` +
+          `次のステップ: Trade タブで仮想トレードを作成できます。`;
+        
+        aiResponse = {
+          role: "ai",
+          content,
+          timestamp: new Date(),
+          data: plan,
+        };
+        
+      } else {
+        // 不明な意図
+        aiResponse = {
+          role: "ai",
+          content: "ご質問ありがとうございます。\n\n以下のコマンドをお試しください:\n\n" +
+            "🔬 **リサーチ**: 「XAUUSDの市場分析」「ゴールドをリサーチ」\n" +
+            "📋 **プラン**: 「XAUUSDのプランを作成」「ゴールドのエントリー戦略」\n\n" +
+            "対応シンボル: XAU/USD, EUR/USD, USD/JPY, GBP/USD",
+          timestamp: new Date(),
+        };
+      }
+      
+      setMessages((prev) => [...prev, aiResponse]);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "エラーが発生しました";
       const aiResponse: ChatMessage = {
         role: "ai",
-        content: "申し訳ありません。現在チャット機能は開発中です。\n\nAPIエンドポイントは準備ができています:\n• POST /api/side-b/research\n• POST /api/side-b/plan\n\n詳細は開発者ツールでご確認ください。",
+        content: `⚠️ エラーが発生しました:\n${errorMessage}\n\nしばらく待ってから再度お試しください。`,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, aiResponse]);
+    } finally {
       setIsTyping(false);
-    }, 1000);
+    }
   };
 
   // Enterキーで送信

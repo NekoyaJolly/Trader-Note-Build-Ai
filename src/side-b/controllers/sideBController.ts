@@ -44,6 +44,10 @@ import {
   updatePortfolioSettings,
 } from '../repositories';
 import type { ExitReason, UpdatePortfolioSettings } from '../models';
+import { MarketDataService } from '../../services/marketDataService';
+
+// MarketDataService インスタンス（OHLCV自動取得用）
+const marketDataService = new MarketDataService();
 
 export class SideBController {
   // ===========================================
@@ -53,10 +57,12 @@ export class SideBController {
   /**
    * POST /api/side-b/research
    * リサーチを生成
+   * 
+   * ohlcvDataが省略された場合、MarketDataServiceから自動取得します。
    */
   generateResearch = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { symbol, timeframe, ohlcvData, indicators, forceRefresh } = req.body;
+      const { symbol, timeframe = '15m', ohlcvData, indicators, forceRefresh } = req.body;
 
       // バリデーション
       if (!symbol) {
@@ -64,16 +70,36 @@ export class SideBController {
         return;
       }
 
-      if (!ohlcvData || !Array.isArray(ohlcvData) || ohlcvData.length === 0) {
-        res.status(400).json({ error: 'ohlcvData は必須です（配列）' });
-        return;
-      }
+      let parsedOhlcv: Array<{ timestamp: Date; open: number; high: number; low: number; close: number; volume?: number }>;
 
-      // OHLCVデータの変換（timestampをDateに）
-      const parsedOhlcv = ohlcvData.map((d: { timestamp: string | Date; open: number; high: number; low: number; close: number; volume?: number }) => ({
-        ...d,
-        timestamp: new Date(d.timestamp),
-      }));
+      // OHLCVデータが提供されていない場合は自動取得
+      if (!ohlcvData || !Array.isArray(ohlcvData) || ohlcvData.length === 0) {
+        console.log(`[SideBController] ohlcvData未提供のため、${symbol}/${timeframe} のデータを自動取得します`);
+        
+        const historicalData = await marketDataService.getHistoricalData(symbol, timeframe, 100);
+        
+        if (!historicalData || historicalData.length === 0) {
+          res.status(500).json({ error: '市場データの取得に失敗しました' });
+          return;
+        }
+
+        parsedOhlcv = historicalData.map(d => ({
+          timestamp: d.timestamp,
+          open: d.open,
+          high: d.high,
+          low: d.low,
+          close: d.close,
+          volume: d.volume,
+        }));
+        
+        console.log(`[SideBController] ${parsedOhlcv.length}件のOHLCVデータを取得しました`);
+      } else {
+        // OHLCVデータの変換（timestampをDateに）
+        parsedOhlcv = ohlcvData.map((d: { timestamp: string | Date; open: number; high: number; low: number; close: number; volume?: number }) => ({
+          ...d,
+          timestamp: new Date(d.timestamp),
+        }));
+      }
 
       const result = await aiOrchestrator.generateResearch({
         symbol,
@@ -192,10 +218,13 @@ export class SideBController {
   /**
    * POST /api/side-b/plans
    * プランを生成
+   * 
+   * researchIdを指定すると既存リサーチを使用。
+   * 指定しない場合、ohlcvDataが必要（省略時は自動取得）。
    */
   generatePlan = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { symbol, targetDate, researchId, userPreferences, ohlcvData, indicators } = req.body;
+      const { symbol, targetDate, researchId, userPreferences, ohlcvData, indicators, timeframe = '15m' } = req.body;
 
       // バリデーション
       if (!symbol) {
@@ -203,17 +232,38 @@ export class SideBController {
         return;
       }
 
-      // researchIdがない場合はohlcvDataが必要
-      if (!researchId && (!ohlcvData || !Array.isArray(ohlcvData) || ohlcvData.length === 0)) {
-        res.status(400).json({ error: 'researchId または ohlcvData が必要です' });
-        return;
-      }
+      let parsedOhlcv: Array<{ timestamp: Date; open: number; high: number; low: number; close: number; volume?: number }> | undefined;
 
-      // OHLCVデータの変換
-      const parsedOhlcv = ohlcvData?.map((d: { timestamp: string | Date; open: number; high: number; low: number; close: number; volume?: number }) => ({
-        ...d,
-        timestamp: new Date(d.timestamp),
-      }));
+      // researchIdがない場合はohlcvDataが必要（自動取得可能）
+      if (!researchId) {
+        if (!ohlcvData || !Array.isArray(ohlcvData) || ohlcvData.length === 0) {
+          console.log(`[SideBController] ohlcvData未提供のため、${symbol}/${timeframe} のデータを自動取得します`);
+          
+          const historicalData = await marketDataService.getHistoricalData(symbol, timeframe, 100);
+          
+          if (!historicalData || historicalData.length === 0) {
+            res.status(500).json({ error: '市場データの取得に失敗しました' });
+            return;
+          }
+
+          parsedOhlcv = historicalData.map(d => ({
+            timestamp: d.timestamp,
+            open: d.open,
+            high: d.high,
+            low: d.low,
+            close: d.close,
+            volume: d.volume,
+          }));
+          
+          console.log(`[SideBController] ${parsedOhlcv.length}件のOHLCVデータを取得しました`);
+        } else {
+          // OHLCVデータの変換
+          parsedOhlcv = ohlcvData.map((d: { timestamp: string | Date; open: number; high: number; low: number; close: number; volume?: number }) => ({
+            ...d,
+            timestamp: new Date(d.timestamp),
+          }));
+        }
+      }
 
       const result = await aiOrchestrator.generatePlan({
         symbol,

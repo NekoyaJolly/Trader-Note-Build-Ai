@@ -63,39 +63,21 @@ interface VirtualTrade {
   updatedAt: string;
 }
 
-// ポートフォリオ設定
-interface PortfolioSettings {
-  defaultRiskPercent: number;
-  maxOpenPositions: number;
-  maxDailyDrawdown: number;
-  trailingStopEnabled: boolean;
-  trailingStopDistance: number;
-}
-
-// ポートフォリオ統計
-interface PortfolioStats {
-  totalTrades: number;
-  wins: number;
-  losses: number;
-  winRate: number;
-  profitFactor: number;
-  totalPnlPips: number;
-  totalPnlAmount: number;
-  averagePnlPips: number;
-  openPositions: number;
-}
-
-// ポートフォリオサマリー
+// ポートフォリオサマリー（APIレスポンス形式に合わせる）
 interface PortfolioSummary {
   portfolio: {
     id: string;
-    balance: number;
+    name: string;
     initialBalance: number;
-    settings: PortfolioSettings;
-    stats: PortfolioStats;
+    currentBalance: number;
   };
-  openTrades: VirtualTrade[];
-  recentTrades: VirtualTrade[];
+  stats: {
+    totalTrades: number;
+    winRate: number;
+    profitFactor: number;
+    totalPnlPips: number;
+  };
+  openPositions: VirtualTrade[];
 }
 
 // ===== ユーティリティ =====
@@ -163,7 +145,8 @@ const getPnLColor = (pnl: number | null): string => {
 
 // ===== APIクライアント =====
 
-const API_BASE = "/api/side-b";
+// 環境変数からAPIベースURLを取得（バックエンドサーバーへ接続）
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3100") + "/api/side-b";
 
 async function fetchPortfolio(): Promise<PortfolioSummary> {
   const res = await fetch(`${API_BASE}/portfolio`);
@@ -335,15 +318,15 @@ export default function TradesPage() {
             <div className="card-surface rounded-xl p-4">
               <p className="text-xs text-gray-400 mb-1">残高</p>
               <p className="text-lg sm:text-xl font-bold text-white">
-                ${formatNumber(portfolio.portfolio.balance, 0)}
+                ${formatNumber(portfolio.portfolio.currentBalance, 0)}
               </p>
               <p className={`text-xs mt-1 ${
-                portfolio.portfolio.balance >= portfolio.portfolio.initialBalance 
+                portfolio.portfolio.currentBalance >= portfolio.portfolio.initialBalance 
                   ? "text-green-400" 
                   : "text-red-400"
               }`}>
-                {portfolio.portfolio.balance >= portfolio.portfolio.initialBalance ? "+" : ""}
-                ${formatNumber(portfolio.portfolio.balance - portfolio.portfolio.initialBalance, 0)}
+                {portfolio.portfolio.currentBalance >= portfolio.portfolio.initialBalance ? "+" : ""}
+                ${formatNumber(portfolio.portfolio.currentBalance - portfolio.portfolio.initialBalance, 0)}
               </p>
             </div>
 
@@ -351,10 +334,10 @@ export default function TradesPage() {
             <div className="card-surface rounded-xl p-4">
               <p className="text-xs text-gray-400 mb-1">オープン</p>
               <p className="text-lg sm:text-xl font-bold text-blue-400">
-                {portfolio.portfolio.stats.openPositions}
+                {portfolio.openPositions.length}
               </p>
               <p className="text-xs text-gray-500 mt-1">
-                / {portfolio.portfolio.settings.maxOpenPositions} 最大
+                ポジション
               </p>
             </div>
 
@@ -362,22 +345,22 @@ export default function TradesPage() {
             <div className="card-surface rounded-xl p-4">
               <p className="text-xs text-gray-400 mb-1">勝率</p>
               <p className="text-lg sm:text-xl font-bold text-white">
-                {formatNumber(portfolio.portfolio.stats.winRate, 1)}%
+                {formatNumber(portfolio.stats.winRate, 1)}%
               </p>
               <p className="text-xs text-gray-500 mt-1">
-                {portfolio.portfolio.stats.wins}W / {portfolio.portfolio.stats.losses}L
+                {portfolio.stats.totalTrades} トレード
               </p>
             </div>
 
             {/* 総PnL */}
             <div className="card-surface rounded-xl p-4">
               <p className="text-xs text-gray-400 mb-1">総PnL</p>
-              <p className={`text-lg sm:text-xl font-bold ${getPnLColor(portfolio.portfolio.stats.totalPnlPips)}`}>
-                {portfolio.portfolio.stats.totalPnlPips > 0 ? "+" : ""}
-                {formatNumber(portfolio.portfolio.stats.totalPnlPips, 1)} pips
+              <p className={`text-lg sm:text-xl font-bold ${getPnLColor(portfolio.stats.totalPnlPips)}`}>
+                {portfolio.stats.totalPnlPips > 0 ? "+" : ""}
+                {formatNumber(portfolio.stats.totalPnlPips, 1)} pips
               </p>
               <p className="text-xs text-gray-500 mt-1">
-                PF: {formatNumber(portfolio.portfolio.stats.profitFactor, 2)}
+                PF: {formatNumber(portfolio.stats.profitFactor, 2)}
               </p>
             </div>
           </div>
