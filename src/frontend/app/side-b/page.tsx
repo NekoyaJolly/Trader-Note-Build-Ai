@@ -16,8 +16,10 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import Link from "next/link";
 
 // フェーズ定義
+// status: ready = 実装済み, planned = 開発中
 const phases = [
   {
     id: "research",
@@ -25,6 +27,7 @@ const phases = [
     label: "Research",
     status: "ready",
     gradient: "from-purple-500 to-violet-600",
+    href: null, // チャットから実行
   },
   {
     id: "plan",
@@ -32,13 +35,15 @@ const phases = [
     label: "Plan",
     status: "ready",
     gradient: "from-indigo-500 to-purple-600",
+    href: null, // チャットから実行
   },
   {
     id: "trade",
     icon: "📊",
     label: "Trade",
-    status: "planned",
+    status: "ready", // Phase B 実装完了！
     gradient: "from-blue-500 to-indigo-600",
+    href: "/side-b/trades",
   },
   {
     id: "note",
@@ -46,6 +51,7 @@ const phases = [
     label: "Note",
     status: "planned",
     gradient: "from-cyan-500 to-blue-600",
+    href: null,
   },
 ];
 
@@ -125,31 +131,55 @@ export default function SideBDashboard() {
 
         {/* フェーズアイコン（横並び） */}
         <div className="flex justify-center gap-3 sm:gap-4 md:gap-6 mb-6 sm:mb-8">
-          {phases.map((phase) => (
-            <button
-              key={phase.id}
-              className={`relative group transition-all duration-300 ${
-                phase.status === "planned" ? "opacity-50 cursor-not-allowed" : "hover:scale-110"
-              }`}
-              disabled={phase.status === "planned"}
-              title={phase.label}
-            >
-              {/* アイコン */}
-              <div
-                className={`w-10 h-10 sm:w-12 sm:h-12 md:w-14 md:h-14 bg-gradient-to-br ${phase.gradient} rounded-lg flex items-center justify-center text-white text-lg sm:text-xl md:text-2xl shadow-lg`}
-              >
-                {phase.icon}
+          {phases.map((phase) => {
+            // リンク先がある場合はLinkコンポーネントを使用
+            const PhaseIcon = (
+              <div className="relative group">
+                {/* アイコン */}
+                <div
+                  className={`w-10 h-10 sm:w-12 sm:h-12 md:w-14 md:h-14 bg-gradient-to-br ${phase.gradient} rounded-lg flex items-center justify-center text-white text-lg sm:text-xl md:text-2xl shadow-lg`}
+                >
+                  {phase.icon}
+                </div>
+                {/* ラベル */}
+                <span className="block text-[10px] sm:text-xs text-gray-400 mt-1 text-center">
+                  {phase.label}
+                </span>
+                {/* ステータスバッジ */}
+                {phase.status === "ready" && (
+                  <span className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-slate-900" />
+                )}
               </div>
-              {/* ラベル */}
-              <span className="block text-[10px] sm:text-xs text-gray-400 mt-1 text-center">
-                {phase.label}
-              </span>
-              {/* ステータスバッジ */}
-              {phase.status === "ready" && (
-                <span className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-slate-900" />
-              )}
-            </button>
-          ))}
+            );
+
+            // リンクがある場合
+            if (phase.href) {
+              return (
+                <Link
+                  key={phase.id}
+                  href={phase.href}
+                  className="transition-all duration-300 hover:scale-110"
+                  title={phase.label}
+                >
+                  {PhaseIcon}
+                </Link>
+              );
+            }
+
+            // リンクがない場合（planned または チャットから実行）
+            return (
+              <button
+                key={phase.id}
+                className={`transition-all duration-300 ${
+                  phase.status === "planned" ? "opacity-50 cursor-not-allowed" : "hover:scale-110"
+                }`}
+                disabled={phase.status === "planned"}
+                title={phase.label}
+              >
+                {PhaseIcon}
+              </button>
+            );
+          })}
         </div>
 
         {/* AIチャットエリア（カード3枚分の高さ） */}
