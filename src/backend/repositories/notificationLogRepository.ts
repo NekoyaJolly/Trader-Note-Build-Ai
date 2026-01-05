@@ -243,4 +243,50 @@ export class NotificationLogRepository {
   async getFailedLogs(limit: number = 50): Promise<NotificationLog[]> {
     return this.getLogsByStatus('failed', limit);
   }
+
+  /**
+   * 24時間以内の通知件数をカウント
+   * 
+   * リアルタイム類似度通知の rate limit（24時間あたり最大30件）に使用
+   * 
+   * @param hours - 過去何時間をカウント対象とするか（デフォルト: 24）
+   * @returns sent ステータスの通知件数
+   */
+  async countRecentNotifications(hours: number = 24): Promise<number> {
+    const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+    
+    const count = await this.prisma.notificationLog.count({
+      where: {
+        status: 'sent',
+        sentAt: {
+          gte: since,
+        },
+      },
+    });
+    
+    return count;
+  }
+
+  /**
+   * 特定シンボルの24時間以内の通知件数をカウント
+   * 
+   * @param symbol - シンボル
+   * @param hours - 過去何時間をカウント対象とするか（デフォルト: 24）
+   * @returns sent ステータスの通知件数
+   */
+  async countRecentNotificationsBySymbol(symbol: string, hours: number = 24): Promise<number> {
+    const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+    
+    const count = await this.prisma.notificationLog.count({
+      where: {
+        symbol,
+        status: 'sent',
+        sentAt: {
+          gte: since,
+        },
+      },
+    });
+    
+    return count;
+  }
 }

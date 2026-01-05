@@ -33,10 +33,12 @@ interface LegacyMatchResult {
 }
 
 const NOTIFICATION_THRESHOLD = parseFloat(process.env.NOTIFY_THRESHOLD || '0.75');
-// クールダウン期間: 1時間（ミリ秒）
-const COOLDOWN_MS = 60 * 60 * 1000;
+// クールダウン期間: デフォルト1時間（ミリ秒）、リアルタイム用は120-300秒推奨
+const COOLDOWN_MS = parseInt(process.env.NOTIFICATION_COOLDOWN_MS || '3600000', 10);
 // 重複抑制: 5秒以内の同一条件を抑止
 const DUPLICATE_TOLERANCE_SEC = 5;
+// 24時間あたりの通知上限（リアルタイム類似度通知用）
+const DAILY_NOTIFICATION_LIMIT = parseInt(process.env.DAILY_NOTIFICATION_LIMIT || '30', 10);
 
 /**
  * 通知トリガサービス
@@ -77,7 +79,7 @@ export class NotificationTriggerService {
   }
 
   /**
-   * 完全な通知判定（スコア + 冪等性 + クールダウン + 重複抑制）を実行
+   * 完全な通知判定（スコア + 冪等性 + クールダウン + 重複抑制 + 24時間上限）を実行
    * DB への NotificationLog 永続化も行う
    */
   async evaluateWithPersistence(input: NotificationTriggerInput): Promise<NotificationTriggerResult> {
@@ -86,6 +88,17 @@ export class NotificationTriggerService {
     const channel = input.channel || 'in_app';
     const symbol = input.symbol || '';
     const score = input.matchScore;
+
+    // 0. 24時間上限チェック（リアルタイム通知の過負荷防止）
+    const dailyCount = await this.notificationLogRepository.countRecentNotifications(24);
+    if (dailyCount >= DAILY_NOTIFICATION_LIMIT) {
+      return {
+        shouldNotify: false,
+        status: 'skipped',
+        skipReason: `24時間上限到達: ${dailyCount}/${DAILY_NOTIFICATION_LIMIT}件`,
+        reasonSummary: `スコア: ${score.toFixed(3)} (上限到達)`,
+      };
+    }
 
     // 1. スコア閾値判定
     if (score < NOTIFICATION_THRESHOLD) {

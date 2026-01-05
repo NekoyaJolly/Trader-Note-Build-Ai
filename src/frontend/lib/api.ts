@@ -2210,3 +2210,204 @@ export async function checkBacktestDataCoverage(
   const payload = await response.json();
   return payload.data;
 }
+
+// ========================================
+// インジケータープロファイル API
+// ========================================
+
+/**
+ * プロファイル選択オプション
+ * 特殊オプション（AIに任せる、プロファイルなし）とユーザープロファイルを含む
+ */
+export interface ProfileOption {
+  id: string;
+  label: string;
+  description: string;
+  icon: string;
+  isSpecial: boolean;
+  isDefault?: boolean;
+}
+
+/**
+ * インジケーター設定
+ */
+export interface ProfileIndicatorConfig {
+  configId: string;
+  indicatorId: string;
+  label: string;
+  // IndicatorParamsと互換性を持たせるため、より緩やかな型定義
+  params: {
+    period?: number;
+    fastPeriod?: number;
+    slowPeriod?: number;
+    signalPeriod?: number;
+    kPeriod?: number;
+    dPeriod?: number;
+    step?: number;
+    maxStep?: number;
+    conversionPeriod?: number;
+    basePeriod?: number;
+    spanBPeriod?: number;
+    displacement?: number;
+    [key: string]: number | string | boolean | undefined;
+  };
+  enabled: boolean;
+}
+
+/**
+ * インジケータープロファイル
+ */
+export interface IndicatorProfile {
+  id: string;
+  name: string;
+  description?: string;
+  indicators: ProfileIndicatorConfig[];
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * プロファイル作成リクエスト
+ */
+export interface CreateProfileRequest {
+  name: string;
+  description?: string;
+  indicators: ProfileIndicatorConfig[];
+  isDefault?: boolean;
+}
+
+/**
+ * プロファイル更新リクエスト
+ */
+export interface UpdateProfileRequest {
+  name?: string;
+  description?: string;
+  indicators?: ProfileIndicatorConfig[];
+  isDefault?: boolean;
+}
+
+/**
+ * プロファイル選択オプション一覧を取得
+ * 特殊オプション（AIに任せる、プロファイルなし）を含む
+ * GET /api/profiles/options
+ */
+export async function fetchProfileOptions(): Promise<ProfileOption[]> {
+  const response = await fetch(`${API_BASE_URL}/api/profiles/options`, {
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(
+      `プロファイルオプションの取得に失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+  const payload = await response.json();
+  return payload.data.options;
+}
+
+/**
+ * プロファイル一覧を取得
+ * GET /api/profiles
+ */
+export async function fetchProfiles(): Promise<IndicatorProfile[]> {
+  const response = await fetch(`${API_BASE_URL}/api/profiles`, {
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(
+      `プロファイル一覧の取得に失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+  const payload = await response.json();
+  return payload.data.profiles;
+}
+
+/**
+ * プロファイル詳細を取得
+ * GET /api/profiles/:id
+ */
+export async function fetchProfileById(id: string): Promise<IndicatorProfile | null> {
+  const response = await fetch(`${API_BASE_URL}/api/profiles/${encodeURIComponent(id)}`, {
+    cache: "no-store",
+  });
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(
+      `プロファイルの取得に失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+  const payload = await response.json();
+  return payload.data.profile;
+}
+
+/**
+ * プロファイルを作成
+ * POST /api/profiles
+ */
+export async function createProfile(request: CreateProfileRequest): Promise<IndicatorProfile> {
+  const response = await fetch(`${API_BASE_URL}/api/profiles`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "プロファイルの作成に失敗しました");
+  }
+  const payload = await response.json();
+  return payload.data.profile;
+}
+
+/**
+ * プロファイルを更新
+ * PUT /api/profiles/:id
+ */
+export async function updateProfile(
+  id: string,
+  request: UpdateProfileRequest
+): Promise<IndicatorProfile> {
+  const response = await fetch(`${API_BASE_URL}/api/profiles/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "プロファイルの更新に失敗しました");
+  }
+  const payload = await response.json();
+  return payload.data.profile;
+}
+
+/**
+ * プロファイルを削除
+ * DELETE /api/profiles/:id
+ */
+export async function deleteProfile(id: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/profiles/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "プロファイルの削除に失敗しました");
+  }
+}
+
+/**
+ * デフォルトプロファイルを設定
+ * PUT /api/profiles/:id/default
+ */
+export async function setDefaultProfile(id: string): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/profiles/${encodeURIComponent(id)}/default`,
+    {
+      method: "PUT",
+    }
+  );
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "デフォルト設定に失敗しました");
+  }
+}

@@ -138,7 +138,19 @@ export class TradeController {
   // クライアントから CSV テキストを受け取り、サーバー側でファイル保存→取り込み→Draft ノート生成までを一気通貫で実行する
   uploadCSVText = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { filename, csvText } = req.body as { filename?: string; csvText?: string };
+      const { 
+        filename, 
+        csvText, 
+        profileId,
+        applyMode = 'bulk',
+        userComment,
+      } = req.body as { 
+        filename?: string; 
+        csvText?: string; 
+        profileId?: string;
+        applyMode?: 'bulk' | 'individual';
+        userComment?: string;
+      };
 
       // 入力検証（技術用語を避けたメッセージはフロント側で実施）
       if (!filename || !csvText) {
@@ -178,14 +190,26 @@ export class TradeController {
           // Decimal型（Prisma）の場合はtoNumber()で変換、それ以外はNumber()
           const price = typeof t.price === 'object' && 'toNumber' in t.price ? t.price.toNumber() : Number(t.price);
           const quantity = typeof t.quantity === 'object' && 'toNumber' in t.quantity ? t.quantity.toNumber() : Number(t.quantity);
-          const note = await this.noteService.generateNoteWithUserIndicators({
-            id: t.id,
-            timestamp: new Date(t.timestamp),
-            symbol: t.symbol,
-            side: t.side,
-            price,
-            quantity,
-          }, '15m');
+          
+          // プロファイルIDが指定されている場合はそれを使用、なければ従来の処理
+          const note = profileId 
+            ? await this.noteService.generateNoteWithProfile({
+                id: t.id,
+                timestamp: new Date(t.timestamp),
+                symbol: t.symbol,
+                side: t.side,
+                price,
+                quantity,
+              }, profileId, '15m', userComment)
+            : await this.noteService.generateNoteWithUserIndicators({
+                id: t.id,
+                timestamp: new Date(t.timestamp),
+                symbol: t.symbol,
+                side: t.side,
+                price,
+                quantity,
+              }, '15m');
+          
           // saveNote はDBに保存された実際のノートIDを返す
           const savedNoteId = await this.noteService.saveNote(note);
           generatedNoteIds.push(savedNoteId);

@@ -43,6 +43,18 @@ export const config = {
     storageMode: (process.env.NOTIFICATION_STORAGE_MODE || 
       (process.env.NODE_ENV === 'production' ? 'db' : 'fs')) as 'db' | 'fs',
   },
+  ctrader: {
+    clientId: process.env.CTRADER_CLIENT_ID || '',
+    clientSecret: process.env.CTRADER_CLIENT_SECRET || '',
+    // OAuth エンドポイント
+    authUrl: 'https://openapi.ctrader.com/apps/auth',
+    tokenUrl: 'https://openapi.ctrader.com/apps/token',
+    // WebSocket エンドポイント
+    wsUrl: 'wss://live.ctraderapi.com',
+    wsDemoUrl: 'wss://demo.ctraderapi.com',
+    // Redirect URI（Vercel）
+    redirectUri: process.env.CTRADER_REDIRECT_URI || 'https://trader-note-build-ai.vercel.app/auth/ctrader/callback',
+  },
   paths: {
     trades: './data/trades',
     notes: './data/notes',

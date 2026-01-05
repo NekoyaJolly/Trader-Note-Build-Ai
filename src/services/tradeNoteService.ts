@@ -2,8 +2,15 @@ import { Trade, TradeNote, MarketContext, NoteStatus } from '../models/types';
 import { AISummaryService } from './aiSummaryService';
 import { MarketDataService } from './marketDataService';
 import { indicatorSettingsService } from './indicatorSettingsService';
+import { getIndicatorProfileService } from './indicatorProfileService';
 import { indicatorService, OHLCVData } from './indicators';
 import { IndicatorConfig } from '../models/indicatorConfig';
+import { 
+  RESERVED_PROFILE_IDS, 
+  isReservedProfileId,
+  NoteProfileConfig,
+  createNoteProfileConfig,
+} from '../models/indicatorProfile';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
@@ -281,6 +288,431 @@ export class TradeNoteService {
 
     console.log(`[TradeNoteService] ユーザー設定インジケーター ${activeConfigs.length}個を適用してノート生成完了: ${note.id}`);
     return note;
+  }
+
+  /**
+   * プロファイルを指定してノートを生成
+   * 
+   * CSVインポート時に呼び出され、選択されたプロファイルのインジケーターを
+   * 市場データに適用してノートを生成する。
+   * 
+   * プロファイルの種類:
+   * - __AI_AUTO__: AIに任せる（12次元特徴量）
+   * - __NONE__: プロファイルなし（特徴量なし）
+   * - UUID: ユーザー定義プロファイル
+   * 
+   * @param trade - トレードデータ
+   * @param profileId - プロファイルID（予約IDまたはUUID）
+   * @param timeframe - 時間足（デフォルト: 15m）
+   * @param userComment - ユーザーコメント（任意）
+   * @returns 生成されたトレードノート
+   */
+  async generateNoteWithProfile(
+    trade: Trade,
+    profileId: string,
+    timeframe: string = '15m',
+    userComment?: string
+  ): Promise<TradeNote> {
+    // === プロファイルなしの場合 ===
+    if (profileId === RESERVED_PROFILE_IDS.NONE) {
+      console.log('[TradeNoteService] プロファイルなし、OHLCVのみで生成');
+      return this.generateNoteWithoutFeatures(trade, timeframe, userComment);
+    }
+
+    // === AIに任せる場合（12次元特徴量） ===
+    if (profileId === RESERVED_PROFILE_IDS.AI_AUTO) {
+      console.log('[TradeNoteService] AIに任せる、12次元特徴量で生成');
+      return this.generateNoteWith12DFeatures(trade, timeframe, userComment);
+    }
+
+    // === ユーザー定義プロファイルの場合 ===
+    const profileService = getIndicatorProfileService();
+    const profile = await profileService.getProfileById(profileId);
+    
+    if (!profile) {
+      console.warn(`[TradeNoteService] プロファイルが見つかりません: ${profileId}、デフォルト処理を使用`);
+      return this.generateNoteWithUserIndicators(trade, timeframe);
+    }
+
+    // プロファイルのインジケーター設定を使用
+    const activeConfigs = profile.indicators.filter(i => i.enabled);
+    
+    if (activeConfigs.length === 0) {
+      console.log('[TradeNoteService] プロファイルにインジケーターがありません、OHLCVのみで生成');
+      return this.generateNoteWithoutFeatures(trade, timeframe, userComment);
+    }
+
+    // === 市場データを取得 ===
+    let ohlcvData = await this.fetchOHLCVData(trade, timeframe);
+    if (ohlcvData.length === 0) {
+      ohlcvData = this.generateMockOHLCV(trade, 50);
+    }
+
+    // === インジケーターを計算 ===
+    const calculatedIndicators = this.calculateIndicators(activeConfigs, ohlcvData);
+
+    // === 基本インジケーター値の抽出（後方互換性） ===
+    const rsiValue = this.extractIndicatorValue(calculatedIndicators, 'RSI');
+    const macdValue = this.extractIndicatorValue(calculatedIndicators, 'MACD');
+    
+    // === トレンドの判定 ===
+    const trend = this.determineTrend(calculatedIndicators, ohlcvData);
+
+    // === 市場コンテキストを構築 ===
+    const latestOHLCV = ohlcvData[ohlcvData.length - 1];
+    const marketContext: MarketContext = {
+      timeframe,
+      trend,
+      indicators: {
+        rsi: rsiValue ?? undefined,
+        macd: macdValue ?? undefined,
+        volume: latestOHLCV?.volume,
+      },
+      calculatedIndicators,
+    };
+
+    // === AI 要約を生成 ===
+    const aiMarketContext = {
+      trend: this.convertTrendForAI(trend),
+      rsi: rsiValue ?? undefined,
+      macd: macdValue ?? undefined,
+      timeframe,
+      additionalIndicators: Object.entries(calculatedIndicators)
+        .filter(([_, v]) => v !== null)
+        .map(([label, value]) => `${label}: ${value?.toFixed(2)}`)
+        .join(', '),
+    };
+
+    const aiSummary = await this.aiService.generateTradeSummary({
+      symbol: trade.symbol,
+      side: trade.side,
+      price: trade.price,
+      quantity: trade.quantity,
+      timestamp: trade.timestamp,
+      marketContext: aiMarketContext,
+    });
+
+    // === 特徴量を抽出 ===
+    const features = this.extractFeaturesWithIndicators(trade, marketContext, calculatedIndicators);
+
+    // === プロファイル設定をスナップショットとして保存 ===
+    const profileConfig = createNoteProfileConfig(profile, profileId);
+    if (userComment) {
+      profileConfig.userComment = userComment;
+    }
+
+    // === ノートを構築 ===
+    const note: TradeNote = {
+      id: uuidv4(),
+      tradeId: trade.id,
+      timestamp: trade.timestamp,
+      symbol: trade.symbol,
+      side: trade.side,
+      entryPrice: trade.price,
+      quantity: trade.quantity,
+      marketContext,
+      aiSummary: aiSummary.summary,
+      features,
+      createdAt: new Date(),
+      status: 'draft',
+      userNotes: userComment,
+    };
+
+    // indicatorConfig は TradeNote 型にはないが、保存時に別途処理
+    // 一旦拡張プロパティとしてセット（保存ロジックで参照）
+    (note as TradeNote & { indicatorConfig?: NoteProfileConfig }).indicatorConfig = profileConfig;
+
+    console.log(`[TradeNoteService] プロファイル "${profile.name}" (${activeConfigs.length}個) を適用してノート生成完了: ${note.id}`);
+    return note;
+  }
+
+  /**
+   * 特徴量なしでノートを生成（プロファイルなし用）
+   */
+  private async generateNoteWithoutFeatures(
+    trade: Trade,
+    timeframe: string,
+    userComment?: string
+  ): Promise<TradeNote> {
+    // AI 要約を生成
+    const aiSummary = await this.aiService.generateTradeSummary({
+      symbol: trade.symbol,
+      side: trade.side,
+      price: trade.price,
+      quantity: trade.quantity,
+      timestamp: trade.timestamp,
+    });
+
+    const marketContext: MarketContext = {
+      timeframe,
+      trend: 'neutral',
+    };
+
+    // プロファイル設定（NONE）
+    const profileConfig = createNoteProfileConfig(null, RESERVED_PROFILE_IDS.NONE);
+    if (userComment) {
+      profileConfig.userComment = userComment;
+    }
+
+    const note: TradeNote = {
+      id: uuidv4(),
+      tradeId: trade.id,
+      timestamp: trade.timestamp,
+      symbol: trade.symbol,
+      side: trade.side,
+      entryPrice: trade.price,
+      quantity: trade.quantity,
+      marketContext,
+      aiSummary: aiSummary.summary,
+      features: [], // 特徴量なし
+      createdAt: new Date(),
+      status: 'draft',
+      userNotes: userComment,
+    };
+
+    (note as TradeNote & { indicatorConfig?: NoteProfileConfig }).indicatorConfig = profileConfig;
+    return note;
+  }
+
+  /**
+   * 12次元特徴量でノートを生成（AIに任せる用）
+   * 
+   * Side-Bと同じ12次元固定特徴量を使用
+   */
+  private async generateNoteWith12DFeatures(
+    trade: Trade,
+    timeframe: string,
+    userComment?: string
+  ): Promise<TradeNote> {
+    // 市場データを取得
+    let ohlcvData = await this.fetchOHLCVData(trade, timeframe);
+    if (ohlcvData.length === 0) {
+      ohlcvData = this.generateMockOHLCV(trade, 50);
+    }
+
+    // 12次元特徴量用のインジケーターを計算
+    const features12D = this.calculate12DFeatures(ohlcvData, trade);
+
+    // 基本インジケーター計算（AI要約用）
+    const rsiValue = features12D.rsi;
+    const trend = features12D.trendDirection > 0 ? 'bullish' : features12D.trendDirection < 0 ? 'bearish' : 'neutral';
+
+    const marketContext: MarketContext = {
+      timeframe,
+      trend,
+      indicators: {
+        rsi: rsiValue,
+        volume: ohlcvData[ohlcvData.length - 1]?.volume,
+      },
+    };
+
+    // AI 要約を生成
+    const aiSummary = await this.aiService.generateTradeSummary({
+      symbol: trade.symbol,
+      side: trade.side,
+      price: trade.price,
+      quantity: trade.quantity,
+      timestamp: trade.timestamp,
+      marketContext: {
+        trend: this.convertTrendForAI(trend),
+        rsi: rsiValue,
+        timeframe,
+      },
+    });
+
+    // プロファイル設定（AI_AUTO）
+    const profileConfig = createNoteProfileConfig(null, RESERVED_PROFILE_IDS.AI_AUTO);
+    if (userComment) {
+      profileConfig.userComment = userComment;
+    }
+
+    const note: TradeNote = {
+      id: uuidv4(),
+      tradeId: trade.id,
+      timestamp: trade.timestamp,
+      symbol: trade.symbol,
+      side: trade.side,
+      entryPrice: trade.price,
+      quantity: trade.quantity,
+      marketContext,
+      aiSummary: aiSummary.summary,
+      features: features12D.vector,
+      createdAt: new Date(),
+      status: 'draft',
+      userNotes: userComment,
+    };
+
+    (note as TradeNote & { indicatorConfig?: NoteProfileConfig }).indicatorConfig = profileConfig;
+    console.log(`[TradeNoteService] AI 12次元特徴量でノート生成完了: ${note.id}`);
+    return note;
+  }
+
+  /**
+   * OHLCVデータを取得
+   */
+  private async fetchOHLCVData(trade: Trade, timeframe: string): Promise<OHLCVData[]> {
+    try {
+      const marketData = await this.marketDataService.getHistoricalData(
+        trade.symbol,
+        timeframe,
+        60
+      );
+      
+      if (marketData.length > 0) {
+        return marketData.map(md => ({
+          timestamp: md.timestamp,
+          open: md.open,
+          high: md.high,
+          low: md.low,
+          close: md.close,
+          volume: md.volume,
+        }));
+      }
+    } catch (error) {
+      console.warn('[TradeNoteService] 市場データ取得失敗:', error);
+    }
+    return [];
+  }
+
+  /**
+   * インジケーターを計算
+   */
+  private calculateIndicators(
+    configs: IndicatorConfig[],
+    ohlcvData: OHLCVData[]
+  ): Record<string, number | null> {
+    const result: Record<string, number | null> = {};
+    
+    for (const config of configs) {
+      try {
+        const calcResult = indicatorService.calculate(
+          config.indicatorId,
+          ohlcvData,
+          config.params
+        );
+        const latestValue = indicatorService.extractLatestValue(calcResult);
+        result[config.label || config.indicatorId] = latestValue;
+      } catch (error) {
+        console.warn(`[TradeNoteService] インジケーター計算失敗 (${config.indicatorId}):`, error);
+        result[config.label || config.indicatorId] = null;
+      }
+    }
+    
+    return result;
+  }
+
+  /**
+   * 12次元特徴量を計算（Side-Bと同じロジック）
+   */
+  private calculate12DFeatures(ohlcvData: OHLCVData[], trade: Trade): {
+    vector: number[];
+    rsi: number;
+    trendDirection: number;
+  } {
+    // デフォルト値（データ不足時）
+    if (ohlcvData.length < 26) {
+      return {
+        vector: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        rsi: 50,
+        trendDirection: 0,
+      };
+    }
+
+    // RSI(14) を計算
+    let rsi = 50;
+    try {
+      const rsiResult = indicatorService.calculate('rsi', ohlcvData, { period: 14 });
+      const rsiValue = indicatorService.extractLatestValue(rsiResult);
+      if (rsiValue !== null) rsi = rsiValue;
+    } catch { /* デフォルト値を使用 */ }
+
+    // MACD を計算
+    let macdHistogram = 0;
+    let macdCrossover = 0;
+    try {
+      const macdResult = indicatorService.calculate('macd', ohlcvData, {
+        fastPeriod: 12,
+        slowPeriod: 26,
+        signalPeriod: 9,
+      });
+      if (macdResult && typeof macdResult === 'object' && 'histogram' in macdResult) {
+        const hist = (macdResult as { histogram: number[] }).histogram;
+        if (hist.length > 0) {
+          macdHistogram = hist[hist.length - 1] || 0;
+          if (hist.length > 1) {
+            const prev = hist[hist.length - 2] || 0;
+            macdCrossover = macdHistogram > 0 && prev <= 0 ? 1 : macdHistogram < 0 && prev >= 0 ? -1 : 0;
+          }
+        }
+      }
+    } catch { /* デフォルト値を使用 */ }
+
+    // BB を計算
+    let bbPosition = 0.5;
+    let bbWidth = 0;
+    try {
+      const bbResult = indicatorService.calculate('bb', ohlcvData, { period: 20 });
+      if (bbResult && typeof bbResult === 'object' && 'upper' in bbResult && 'middle' in bbResult && 'lower' in bbResult) {
+        const bb = bbResult as unknown as { upper: number[]; middle: number[]; lower: number[] };
+        const latestClose = ohlcvData[ohlcvData.length - 1].close;
+        const upper = bb.upper[bb.upper.length - 1];
+        const lower = bb.lower[bb.lower.length - 1];
+        const middle = bb.middle[bb.middle.length - 1];
+        if (upper && lower && upper !== lower) {
+          bbPosition = (latestClose - lower) / (upper - lower);
+          bbWidth = (upper - lower) / middle;
+        }
+      }
+    } catch { /* デフォルト値を使用 */ }
+
+    // SMA でトレンド判定
+    let trendDirection = 0;
+    let trendStrength = 0;
+    let trendAlignment = 0;
+    try {
+      const sma20Result = indicatorService.calculate('sma', ohlcvData, { period: 20 });
+      const sma50Result = indicatorService.calculate('sma', ohlcvData, { period: 50 });
+      const sma20 = indicatorService.extractLatestValue(sma20Result);
+      const sma50 = indicatorService.extractLatestValue(sma50Result);
+      const latestClose = ohlcvData[ohlcvData.length - 1].close;
+      
+      if (sma20 && sma50) {
+        trendDirection = latestClose > sma20 ? 1 : latestClose < sma20 ? -1 : 0;
+        trendStrength = Math.abs(latestClose - sma20) / sma20;
+        trendAlignment = sma20 > sma50 ? 1 : sma20 < sma50 ? -1 : 0;
+      }
+    } catch { /* デフォルト値を使用 */ }
+
+    // RSI ゾーン
+    const rsiZone = rsi > 70 ? 1 : rsi < 30 ? -1 : 0;
+    const rsiNormalized = rsi / 100;
+
+    // ローソク足構造
+    const latestBar = ohlcvData[ohlcvData.length - 1];
+    const candleBody = Math.abs(latestBar.close - latestBar.open) / (latestBar.high - latestBar.low || 1);
+    const candleDirection = latestBar.close > latestBar.open ? 1 : latestBar.close < latestBar.open ? -1 : 0;
+
+    // セッションフラグ（簡易版: 時刻に基づく）
+    const hour = new Date(latestBar.timestamp).getUTCHours();
+    const sessionFlag = hour >= 13 && hour < 22 ? 1 : hour >= 22 || hour < 8 ? 0.5 : 0; // NY, Asia, Other
+
+    // 12次元ベクトル
+    const vector = [
+      trendDirection,      // 0: トレンド方向
+      trendStrength,       // 1: トレンド強度
+      trendAlignment,      // 2: トレンド整合
+      macdHistogram,       // 3: MACDヒストグラム
+      macdCrossover,       // 4: MACDクロス
+      rsiNormalized,       // 5: RSI値（0-1正規化）
+      rsiZone,             // 6: RSIゾーン
+      bbPosition,          // 7: BB位置
+      bbWidth,             // 8: BB幅
+      candleBody,          // 9: ローソク足実体比率
+      candleDirection,     // 10: ローソク足方向
+      sessionFlag,         // 11: セッションフラグ
+    ];
+
+    return { vector, rsi, trendDirection };
   }
 
   /**

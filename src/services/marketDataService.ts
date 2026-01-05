@@ -307,18 +307,21 @@ export class MarketDataService {
    * @returns シミュレートされた市場データ
    */
   private generateSimulatedData(symbol: string, timeframe: string): MarketData {
-    // シンボルに応じたベース価格を設定
+    // シンボルに応じたベース価格を設定（2026年1月時点の実勢レート）
+    // ※金(XAU/USD)は2024-2025年の上昇で4300ドル台に達している
     const basePrices: Record<string, number> = {
-      'BTC/USD': 50000,
-      'ETH/USD': 3000,
-      'EUR/USD': 1.08,
-      'USD/JPY': 150,
-      'AAPL': 180,
-      'GOOGL': 140,
+      'BTC/USD': 95000,   // ビットコイン
+      'ETH/USD': 3400,    // イーサリアム
+      'EUR/USD': 1.03,    // ユーロドル
+      'USD/JPY': 157,     // ドル円
+      'GBP/USD': 1.24,    // ポンドドル
+      'XAU/USD': 4325,    // ゴールド（2026年1月実勢：金価格上昇後）
+      'AAPL': 240,        // Apple
+      'GOOGL': 195,       // Google
     };
     
     const basePrice = basePrices[symbol] || 100;
-    const variance = basePrice * 0.02; // 2% 変動幅
+    const variance = basePrice * 0.002; // 0.2% 変動幅（テスト用に狭く）
     
     const open = basePrice + (Math.random() - 0.5) * variance;
     const close = open + (Math.random() - 0.5) * variance;
@@ -458,5 +461,78 @@ export class MarketDataService {
       'MSFT',
       'AMZN',
     ];
+  }
+
+  /**
+   * 直近の1分足OHLCVデータを取得
+   * 
+   * 目的: Side-B の1時間ごと検証で使用
+   * 1時間に1回、直近60本（=1時間分）の1分足を取得して
+   * 高安値ベースでエントリー/決済判定を行う
+   * 
+   * @param symbol - 銘柄シンボル（例: 'XAU/USD', 'EUR/USD'）
+   * @param count - 取得する本数（デフォルト: 60 = 1時間分）
+   * @returns 1分足OHLCVデータ配列（時系列順: 古い → 新しい）
+   * 
+   * API コスト:
+   * - Twelve Data 無料プラン: 800回/日, 8回/分
+   * - 1コール = 1ペアの60本 → 30ペアまで無料運用可能
+   */
+  async getRecentMinuteOHLCV(
+    symbol: string,
+    count: number = 60
+  ): Promise<MarketData[]> {
+    // API が設定されていない場合はシミュレーションデータを返す
+    if (!this.isApiConfigured()) {
+      console.warn('市場 API が設定されていません。シミュレーションデータを使用します。');
+      return this.generateHistoricalSimulatedData(symbol, '1m', count);
+    }
+
+    try {
+      // 1分足を指定本数取得
+      const url = `${this.apiUrl}/time_series?symbol=${encodeURIComponent(symbol)}&interval=1min&outputsize=${count}&apikey=${this.apiKey}`;
+      
+      console.log(`[MarketDataService] 1分足取得: ${symbol} × ${count}本`);
+      
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        throw new Error(`API レスポンスエラー: ${response.status}`);
+      }
+      
+      const data = (await response.json()) as TwelveDataTimeSeriesResponse;
+      
+      // API エラーチェック
+      if (data.status === 'error' || data.code) {
+        throw new Error(data.message || 'Twelve Data API エラー');
+      }
+      
+      if (!data.values || data.values.length === 0) {
+        console.warn(`${symbol} の1分足データが取得できません。シミュレーションデータを使用します。`);
+        return this.generateHistoricalSimulatedData(symbol, '1m', count);
+      }
+
+      console.log(`[MarketDataService] 取得成功: ${data.values.length}本`);
+      
+      // API レスポンスを MarketData 形式に変換（時系列順に並べ替え: 古い → 新しい）
+      const marketDataArray: MarketData[] = data.values.map(bar => {
+        const marketData: MarketData = {
+          symbol: data.meta?.symbol || symbol,
+          timestamp: new Date(bar.datetime),
+          timeframe: '1m',
+          open: parseFloat(bar.open),
+          high: parseFloat(bar.high),
+          low: parseFloat(bar.low),
+          close: parseFloat(bar.close),
+          volume: parseFloat(bar.volume) || 0,
+        };
+        return marketData;
+      }).reverse(); // 古い順に並べ替え
+      
+      return marketDataArray;
+    } catch (error) {
+      console.error('1分足データ取得エラー:', error);
+      return this.generateHistoricalSimulatedData(symbol, '1m', count);
+    }
   }
 }

@@ -25,3 +25,24 @@ export {
   // 特徴量型
   type FeatureSnapshot,
 } from './indicatorService';
+
+// 正規化サービス（リアルタイム類似度計算用）
+export {
+  IndicatorNormalizationService,
+  indicatorNormalizationService,
+  // 型定義
+  type IndicatorCategory,
+  type NormalizationConfig,
+  type NormalizationInput,
+  type NormalizedValue,
+  // スキーマ
+  IndicatorCategorySchema,
+  NormalizationConfigSchema,
+  NormalizationInputSchema,
+  NormalizedValueSchema,
+  // 定数
+  INDICATOR_CONFIGS,
+  // ユーティリティ
+  calculateStatistics,
+  calculateZScore,
+} from './indicatorNormalizationService';

@@ -8,6 +8,15 @@
 import { Router, Request, Response } from 'express';
 import { backtestController } from '../controllers/backtestController';
 import { progressStore } from '../services/backtest/progressStore';
+import { validateBody, validateParams, validateQuery } from '../middleware/validateRequest';
+import {
+  BacktestRunIdParamSchema,
+  BacktestNoteIdParamSchema,
+  BacktestJobIdParamSchema,
+  CheckCoverageRequestSchema,
+  ExecuteBacktestRequestSchema,
+  GetBacktestHistoryQuerySchema,
+} from '../schemas/api/backtest';
 
 const router = Router();
 
@@ -35,7 +44,11 @@ const router = Router();
  *   }
  * }
  */
-router.post('/check-coverage', backtestController.checkCoverage);
+router.post(
+  '/check-coverage',
+  validateBody(CheckCoverageRequestSchema),
+  backtestController.checkCoverage
+);
 
 /**
  * POST /api/backtest/execute
@@ -60,7 +73,11 @@ router.post('/check-coverage', backtestController.checkCoverage);
  *   "runId": "uuid"
  * }
  */
-router.post('/execute', backtestController.execute);
+router.post(
+  '/execute',
+  validateBody(ExecuteBacktestRequestSchema),
+  backtestController.execute
+);
 
 /**
  * GET /api/backtest/:runId
@@ -84,7 +101,11 @@ router.post('/execute', backtestController.execute);
  *   "events": [...]
  * }
  */
-router.get('/:runId', backtestController.getResult);
+router.get(
+  '/:runId',
+  validateParams(BacktestRunIdParamSchema),
+  backtestController.getResult
+);
 
 /**
  * GET /api/backtest/history/:noteId
@@ -98,7 +119,12 @@ router.get('/:runId', backtestController.getResult);
  *   "history": [...]
  * }
  */
-router.get('/history/:noteId', backtestController.getHistory);
+router.get(
+  '/history/:noteId',
+  validateParams(BacktestNoteIdParamSchema),
+  validateQuery(GetBacktestHistoryQuerySchema),
+  backtestController.getHistory
+);
 
 /**
  * GET /api/backtest/progress/:jobId
@@ -108,47 +134,51 @@ router.get('/history/:noteId', backtestController.getHistory);
  * - event: progress
  * - data: { status, processedCandles, totalCandles, progressPercent, ohlcvData, indicators, tradeMarkers }
  */
-router.get('/progress/:jobId', (req: Request, res: Response) => {
-  const { jobId } = req.params;
+router.get(
+  '/progress/:jobId',
+  validateParams(BacktestJobIdParamSchema),
+  (req: Request, res: Response) => {
+    const { jobId } = req.params;
   
-  // SSEヘッダー設定
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); // Nginx対応
+    // SSEヘッダー設定
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // Nginx対応
   
-  // 初期状態を送信
-  const initialState = progressStore.getProgress(jobId);
-  if (initialState) {
-    res.write(`event: progress\n`);
-    res.write(`data: ${JSON.stringify(initialState)}\n\n`);
-  } else {
-    // ジョブが見つからない場合
-    res.write(`event: error\n`);
-    res.write(`data: ${JSON.stringify({ error: 'Job not found', jobId })}\n\n`);
+    // 初期状態を送信
+    const initialState = progressStore.getProgress(jobId);
+    if (initialState) {
+      res.write(`event: progress\n`);
+      res.write(`data: ${JSON.stringify(initialState)}\n\n`);
+    } else {
+      // ジョブが見つからない場合
+      res.write(`event: error\n`);
+      res.write(`data: ${JSON.stringify({ error: 'Job not found', jobId })}\n\n`);
+    }
+  
+    // 進捗更新をリッスン
+    const onProgress = (state: unknown) => {
+      res.write(`event: progress\n`);
+      res.write(`data: ${JSON.stringify(state)}\n\n`);
+    };
+  
+    progressStore.on(`progress:${jobId}`, onProgress);
+  
+    // 接続終了時のクリーンアップ
+    req.on('close', () => {
+      progressStore.off(`progress:${jobId}`, onProgress);
+    });
+  
+    // Keep-alive（30秒ごとにコメント送信）
+    const keepAliveInterval = setInterval(() => {
+      res.write(`: keep-alive\n\n`);
+    }, 30000);
+  
+    req.on('close', () => {
+      clearInterval(keepAliveInterval);
+    });
   }
-  
-  // 進捗更新をリッスン
-  const onProgress = (state: unknown) => {
-    res.write(`event: progress\n`);
-    res.write(`data: ${JSON.stringify(state)}\n\n`);
-  };
-  
-  progressStore.on(`progress:${jobId}`, onProgress);
-  
-  // 接続終了時のクリーンアップ
-  req.on('close', () => {
-    progressStore.off(`progress:${jobId}`, onProgress);
-  });
-  
-  // Keep-alive（30秒ごとにコメント送信）
-  const keepAliveInterval = setInterval(() => {
-    res.write(`: keep-alive\n\n`);
-  }, 30000);
-  
-  req.on('close', () => {
-    clearInterval(keepAliveInterval);
-  });
-});
+);
 
 export default router;

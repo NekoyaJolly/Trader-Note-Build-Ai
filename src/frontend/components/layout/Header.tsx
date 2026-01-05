@@ -3,12 +3,16 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import NotificationBell from "@/components/NotificationBell";
+import SideToggle from "./SideToggle";
 import { fetchUnreadNotificationCount } from "@/lib/api";
 
 /**
  * アプリ共通ヘッダー
  * 
- * レイアウト: [ハンバーガーメニュー] [アプリタイトル] ... [通知ベル]
+ * レイアウト: [ハンバーガーメニュー] [アプリタイトル + Side切替] ... [通知ベル]
+ * 
+ * Side-A: 人間用取引支援（従来機能）
+ * Side-B: AI用取引プラン生成（新機能）
  * 
  * @see docs/phase12/UI_DESIGN_GUIDE.md
  */
@@ -43,7 +47,7 @@ export default function Header({ isSidebarOpen, onToggleSidebar }: HeaderProps) 
   return (
     <header className="sticky top-0 z-30 w-full border-b border-slate-700 bg-slate-900/95 backdrop-blur-sm">
       <div className="flex items-center justify-between px-3 sm:px-4 py-2 sm:py-3">
-        {/* 左側: ハンバーガーメニュー + アプリタイトル */}
+        {/* 左側: ハンバーガーメニュー + アプリタイトル + Side切替 */}
         <div className="flex items-center gap-2 sm:gap-3">
           {/* サイドバートグルボタン（ハンバーガーメニュー） */}
           {onToggleSidebar && (
@@ -67,9 +71,14 @@ export default function Header({ isSidebarOpen, onToggleSidebar }: HeaderProps) 
           )}
           
           {/* アプリタイトル */}
-          <Link href="/" className="flex items-center">
+          <Link href="/" className="flex items-center mr-2 sm:mr-3">
             <span className="text-base sm:text-lg md:text-xl font-bold neon-text">TradeAssist</span>
           </Link>
+
+          {/* Side切替トグル */}
+          <div className="border-l border-slate-600 pl-2 sm:pl-3">
+            <SideToggle />
+          </div>
         </div>
 
         {/* 右側: 通知ベル */}

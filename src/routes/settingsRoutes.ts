@@ -11,6 +11,8 @@
 
 import { Router } from 'express';
 import { userSettingsService, UserSettings } from '../services/userSettingsService';
+import { validateBody } from '../middleware/validateRequest';
+import { UpdateSettingsRequestSchema } from '../schemas/api/settings';
 
 const router = Router();
 
@@ -44,44 +46,31 @@ router.get('/', async (_req, res) => {
  *   timeframes?: { primary?, secondary? },
  *   display?: { darkMode?, compactView?, showAiSuggestions? }
  * }
+ * 
+ * バリデーション: Zodスキーマで自動実行
  */
-router.put('/', async (req, res) => {
-  try {
-    const updates = req.body as Partial<UserSettings>;
-    
-    // バリデーション
-    if (updates.notification?.scoreThreshold !== undefined) {
-      if (updates.notification.scoreThreshold < 0 || updates.notification.scoreThreshold > 100) {
-        return res.status(400).json({
-          success: false,
-          error: 'scoreThreshold は 0-100 の範囲で指定してください',
-        });
-      }
+router.put(
+  '/',
+  validateBody(UpdateSettingsRequestSchema),
+  async (req, res) => {
+    try {
+      const updates = req.body as Partial<UserSettings>;
+      
+      const savedSettings = await userSettingsService.saveSettings(updates);
+      res.json({
+        success: true,
+        data: savedSettings,
+        message: '設定を保存しました',
+      });
+    } catch (error) {
+      console.error('[SettingsRoutes] 設定保存エラー:', error);
+      res.status(500).json({
+        success: false,
+        error: '設定の保存に失敗しました',
+      });
     }
-    
-    if (updates.notification?.maxPerDay !== undefined) {
-      if (updates.notification.maxPerDay < 1 || updates.notification.maxPerDay > 100) {
-        return res.status(400).json({
-          success: false,
-          error: 'maxPerDay は 1-100 の範囲で指定してください',
-        });
-      }
-    }
-    
-    const savedSettings = await userSettingsService.saveSettings(updates);
-    res.json({
-      success: true,
-      data: savedSettings,
-      message: '設定を保存しました',
-    });
-  } catch (error) {
-    console.error('[SettingsRoutes] 設定保存エラー:', error);
-    res.status(500).json({
-      success: false,
-      error: '設定の保存に失敗しました',
-    });
   }
-});
+);
 
 /**
  * POST /api/settings/reset

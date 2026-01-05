@@ -1067,3 +1067,310 @@ enum NotificationSkipReason {
   /// 優先度が低い（同一シンボル内で優先度負け）
   lower_priority
 }
+
+// ============================================================
+// Side-B: TradeAssistant-AI
+// ============================================================
+
+/// 市場リサーチ（AI生成の中間データ）
+/// Research AIが生成し、キャッシュとしてDBに保存
+/// 
+/// 設計変更（シンプル化）:
+/// - Research AIは12次元特徴量のみ出力
+/// - トレンド解釈、価格レベルはPlan AIの責務
+model MarketResearch {
+  id               String   @id @default(uuid()) @db.Uuid
+  /// 対象シンボル（例: XAUUSD）
+  symbol           String
+  /// 分析時間軸（multi: マルチタイムフレーム）
+  timeframe        String   @default("multi")
+
+  // ===========================================
+  // Research AIの出力（シンプル化）
+  // ===========================================
+  
+  /// 12次元特徴量ベクトル（JSONB）
+  /// Research AIの唯一の出力
+  featureVector    Json
+
+  /// OHLCVスナップショット（JSONB）
+  /// Plan AI呼び出し時に参照するための価格データキャッシュ
+  /// 旧名: rawIndicators
+  ohlcvSnapshot    Json?
+
+  // ===========================================
+  // メタ情報
+  // ===========================================
+  
+  /// 使用AIモデル（例: gpt-4o-mini）
+  aiModel          String
+  /// トークン使用量
+  tokenUsage       Int?
+
+  // 有効期限管理
+  /// 有効期限（デフォルト4時間後）
+  expiresAt        DateTime @db.Timestamptz(6)
+  /// 作成日時
+  createdAt        DateTime @default(now()) @db.Timestamptz(6)
+
+  // リレーション
+  tradePlans       AITradePlan[]
+
+  @@index([symbol], map: "idx_market_research_symbol")
+  @@index([createdAt(sort: Desc)], map: "idx_market_research_created")
+  @@index([expiresAt], map: "idx_market_research_expires")
+}
+
+/// AIトレードプラン（Plan AIが生成）
+model AITradePlan {
+  id                 String   @id @default(uuid()) @db.Uuid
+  /// 参照するリサーチID
+  researchId         String   @db.Uuid
+  /// 対象日（YYYY-MM-DD）
+  targetDate         DateTime @db.Date
+  /// 対象シンボル
+  symbol             String
+
+  // 市場分析
+  /// 市場分析結果（JSONB: regime, trendDirection, volatility, keyLevels, summary）
+  marketAnalysis     Json
+  /// トレードシナリオ配列（JSONB）
+  scenarios          Json
+
+  // メタ情報
+  /// 全体信頼度（0-100）
+  overallConfidence  Int?
+  /// 警告事項
+  warnings           String[]
+  /// 使用AIモデル（例: gpt-4o）
+  aiModel            String?
+  /// トークン使用量
+  tokenUsage         Int?
+
+  /// 作成日時
+  createdAt          DateTime @default(now()) @db.Timestamptz(6)
+
+  // リレーション
+  research           MarketResearch @relation(fields: [researchId], references: [id])
+  virtualTrades      VirtualTrade[]
+  aiNotes            AITradeNote[]
+
+  @@unique([targetDate, symbol], map: "uq_ai_trade_plan_date_symbol")
+  @@index([targetDate], map: "idx_ai_trade_plan_date")
+  @@index([symbol], map: "idx_ai_trade_plan_symbol")
+}
+
+/// 仮想トレード（Phase B用）
+/// AIプランに基づく仮想的なトレード実行記録
+model VirtualTrade {
+  id             String             @id @default(uuid()) @db.Uuid
+  /// 参照するプランID
+  planId         String             @db.Uuid
+  /// シナリオID（プラン内のシナリオを特定）
+  scenarioId     String
+  /// 対象シンボル
+  symbol         String
+
+  // ポジション情報
+  /// 方向（long/short）
+  direction      String
+  /// ステータス
+  status         VirtualTradeStatus @default(pending)
+
+  // エントリー
+  /// 予定エントリー価格
+  plannedEntry   Decimal            @db.Decimal(18, 8)
+  /// 実際のエントリー価格
+  actualEntry    Decimal?           @db.Decimal(18, 8)
+  /// エントリー日時
+  enteredAt      DateTime?          @db.Timestamptz(6)
+
+  // 決済
+  /// SL価格
+  stopLoss       Decimal            @db.Decimal(18, 8)
+  /// TP価格
+  takeProfit     Decimal            @db.Decimal(18, 8)
+  /// 決済価格
+  exitPrice      Decimal?           @db.Decimal(18, 8)
+  /// 決済日時
+  exitedAt       DateTime?          @db.Timestamptz(6)
+  /// 決済理由
+  exitReason     String?
+
+  // 結果
+  /// 損益（pips）
+  pnlPips        Decimal?           @db.Decimal(18, 8)
+  /// 損益（金額、仮想）
+  pnlAmount      Decimal?           @db.Decimal(18, 8)
+
+  /// 作成日時
+  createdAt      DateTime           @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt      DateTime           @updatedAt @db.Timestamptz(6)
+
+  // リレーション
+  plan           AITradePlan        @relation(fields: [planId], references: [id])
+  aiNote         AITradeNote?
+
+  @@index([planId], map: "idx_virtual_trade_plan")
+  @@index([status], map: "idx_virtual_trade_status")
+  @@index([symbol], map: "idx_virtual_trade_symbol")
+}
+
+/// 仮想トレードステータス
+enum VirtualTradeStatus {
+  /// 待機中（エントリー条件待ち）
+  pending
+  /// オープン（ポジション保有中）
+  open
+  /// クローズ（決済済み）
+  closed
+  /// キャンセル（条件未達でキャンセル）
+  cancelled
+  /// 期限切れ
+  expired
+  /// 無効化（無効化条件に該当）
+  invalidated
+}
+
+/// 仮想ポートフォリオ（Phase B用）
+/// AIの仮想トレード統計を管理
+model VirtualPortfolio {
+  id                   String   @id @default(uuid()) @db.Uuid
+  /// 名前（例: "Default", "Conservative"）
+  name                 String   @default("Default")
+  
+  // 資金管理
+  /// 初期仮想資金
+  initialBalance       Decimal  @db.Decimal(18, 2) @default(100000)
+  /// 現在の仮想残高
+  currentBalance       Decimal  @db.Decimal(18, 2) @default(100000)
+
+  // 統計情報（JSON）
+  /// 統計サマリー（totalTrades, winRate, profitFactor, maxDrawdown等）
+  stats                Json     @default("{}")
+
+  // 設定
+  /// 同時保有上限
+  maxOpenPositions     Int      @default(3)
+  /// 1トレードあたりのリスク率（%）
+  riskPercentPerTrade  Decimal  @db.Decimal(5, 2) @default(1.0)
+  /// スプレッド考慮フラグ
+  enableSpread         Boolean  @default(false)
+  /// 想定スプレッド（pips）
+  spreadPips           Decimal  @db.Decimal(5, 2) @default(2.0)
+
+  /// 作成日時
+  createdAt            DateTime @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt            DateTime @updatedAt @db.Timestamptz(6)
+
+  @@index([name], map: "idx_virtual_portfolio_name")
+}
+
+/// AIトレードノート（Phase C）
+/// 仮想トレードの結果をAIが自動分析して記録
+model AITradeNote {
+  id              String      @id @default(uuid()) @db.Uuid
+  /// 仮想トレードID
+  virtualTradeId  String      @unique @db.Uuid
+  /// 元のプランID
+  planId          String      @db.Uuid
+
+  // 基本情報
+  /// 日付（YYYY-MM-DD）
+  date            DateTime    @db.Date
+  /// シンボル
+  symbol          String
+  /// 方向（long/short）
+  direction       String
+
+  // 結果
+  /// 勝敗（win/loss/breakeven）
+  outcome         String
+  /// 損益（pips）
+  pnlPips         Decimal     @db.Decimal(10, 2)
+  /// 損益（%）
+  pnlPercentage   Decimal     @db.Decimal(10, 4)
+  /// 実際のRR比
+  rrActual        Decimal     @db.Decimal(5, 2)
+  /// 保有時間（分）
+  holdingDuration Int
+
+  // 分析（JSONB）
+  /// エントリー分析
+  entryAnalysis   Json
+  /// 決済分析
+  exitAnalysis    Json
+  /// プラン評価
+  planEvaluation  Json
+  /// 市場振り返り
+  marketReview    Json
+  /// 学び
+  learnings       Json
+  /// 類似パターン
+  similarPatterns Json?
+
+  /// 使用したAIモデル
+  aiModel         String
+
+  /// 作成日時
+  createdAt       DateTime    @default(now()) @db.Timestamptz(6)
+
+  // リレーション
+  virtualTrade    VirtualTrade @relation(fields: [virtualTradeId], references: [id])
+  plan            AITradePlan  @relation(fields: [planId], references: [id])
+
+  @@index([date], map: "idx_ai_trade_note_date")
+  @@index([outcome], map: "idx_ai_trade_note_outcome")
+  @@index([symbol], map: "idx_ai_trade_note_symbol")
+}
+
+/// AIノートサマリー（期間集計）
+model AINoteSummary {
+  id            String   @id @default(uuid()) @db.Uuid
+  /// 期間タイプ（daily/weekly/monthly）
+  period        String
+  /// 開始日
+  startDate     DateTime @db.Date
+  /// 終了日
+  endDate       DateTime @db.Date
+
+  // 統計・分析・総括（JSONB）
+  /// 統計データ
+  statistics    Json
+  /// 分析結果
+  analysis      Json
+  /// 総括
+  summary       Json
+
+  /// 作成日時
+  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([period, startDate, endDate], map: "uq_ai_note_summary_period")
+  @@index([period, startDate], map: "idx_ai_note_summary_period")
+}
+
+/// cTrader OAuth トークン
+/// Side-A リアルタイム通知用の認証情報を管理
+model CTraderToken {
+  id              String   @id @default(uuid()) @db.Uuid
+  /// cTrader アカウントID（複数アカウント対応用）
+  accountId       String   @unique
+  /// アクセストークン（暗号化推奨）
+  accessToken     String
+  /// リフレッシュトークン（暗号化推奨）
+  refreshToken    String
+  /// アクセストークン有効期限
+  expiresAt       DateTime @db.Timestamptz(6)
+  /// トークンスコープ
+  scope           String?
+  /// 最終接続日時
+  lastConnectedAt DateTime? @db.Timestamptz(6)
+  /// 作成日時
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt       DateTime @updatedAt @db.Timestamptz(6)
+
+  @@index([expiresAt], map: "idx_ctrader_token_expires")
+}

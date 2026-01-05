@@ -26,8 +26,10 @@ import {
 } from './revaluationJobService';
 import { featureService } from './featureService';
 import { ohlcvRepository } from '../backend/repositories/ohlcvRepository';
+import { AISummaryService, TradeDataForSummary } from './aiSummaryService';
 
 const prisma = new PrismaClient();
+const aiSummaryService = new AISummaryService();
 
 /**
  * ワーカー処理関数のマッピング
@@ -44,6 +46,8 @@ const jobProcessors: Record<
 
 /**
  * ノート再生成処理
+ * 
+ * 特徴量の再計算とmarketContextの更新を行う
  */
 async function processNoteRegenerate(
   job: Job<RevaluationJobData, RevaluationJobResult>
@@ -84,8 +88,26 @@ async function processNoteRegenerate(
     // 各ノートを処理
     for (const note of notes) {
       try {
-        // TODO: 実際のノート再生成ロジックを実装
-        // 現時点では特徴量の再計算のみ
+        // 特徴量の再計算
+        const ohlcvData = await ohlcvRepository.findManyAsOHLCVData({
+          symbol: note.symbol,
+          timeframe: note.timeframe || '1h',
+          limit: 100,
+          orderBy: 'desc',
+        });
+
+        if (ohlcvData.length >= 20) {
+          // データを時系列順に並べ替え
+          ohlcvData.reverse();
+
+          // 特徴量を更新
+          await featureService.updateNoteFeatures({
+            noteId: note.id,
+            ohlcvData,
+            timeframe: note.timeframe || '1h',
+          });
+        }
+
         result.successCount++;
       } catch (error) {
         result.failedCount++;
@@ -207,6 +229,9 @@ async function processFeatureRecalculate(
 
 /**
  * AI サマリー再生成処理
+ * 
+ * TradeNoteに紐づくAIサマリーを再生成する
+ * 市場コンテキストを含めてAISummaryServiceを呼び出す
  */
 async function processAISummaryRegenerate(
   job: Job<RevaluationJobData, RevaluationJobResult>
@@ -244,8 +269,62 @@ async function processAISummaryRegenerate(
 
     for (const note of notes) {
       try {
-        // TODO: AI サマリー再生成ロジックを実装
-        // openaiService.generateSummary(note) を呼び出す
+        // ノートからトレードデータを構築
+        const trade = note.trade;
+        if (!trade) {
+          result.errors?.push(`Note ${note.id}: 関連トレードが見つかりません`);
+          result.failedCount++;
+          continue;
+        }
+
+        // marketContextからトレンド情報を抽出
+        const marketContext = note.marketContext as { trend?: string } | null;
+        const trendValue = marketContext?.trend;
+        const trend: 'uptrend' | 'downtrend' | 'neutral' | undefined = 
+          trendValue === 'uptrend' || trendValue === 'downtrend' || trendValue === 'neutral'
+            ? trendValue
+            : undefined;
+
+        // TradeDataForSummary形式に変換
+        // TradeNoteの情報を使用（noteにentryPrice等がある）
+        const tradeData: TradeDataForSummary = {
+          symbol: note.symbol,
+          side: (note.side?.toLowerCase() === 'sell' ? 'sell' : 'buy'),
+          price: note.entryPrice?.toNumber() ?? 0,
+          quantity: trade.quantity?.toNumber() ?? 1,
+          timestamp: trade.timestamp ?? new Date(),
+          marketContext: {
+            trend,
+            timeframe: note.timeframe ?? undefined,
+          },
+        };
+
+        // AI サマリーを生成
+        const summaryResult = await aiSummaryService.generateTradeSummary(tradeData);
+
+        // 既存のAIサマリーを更新または新規作成
+        if (note.aiSummary) {
+          await prisma.aISummary.update({
+            where: { id: note.aiSummary.id },
+            data: {
+              summary: summaryResult.summary,
+              model: summaryResult.model ?? 'gpt-4o-mini',
+              promptTokens: summaryResult.promptTokens ?? 0,
+              completionTokens: summaryResult.completionTokens ?? 0,
+            },
+          });
+        } else {
+          await prisma.aISummary.create({
+            data: {
+              noteId: note.id,
+              summary: summaryResult.summary,
+              model: summaryResult.model ?? 'gpt-4o-mini',
+              promptTokens: summaryResult.promptTokens ?? 0,
+              completionTokens: summaryResult.completionTokens ?? 0,
+            },
+          });
+        }
+
         result.successCount++;
       } catch (error) {
         result.failedCount++;

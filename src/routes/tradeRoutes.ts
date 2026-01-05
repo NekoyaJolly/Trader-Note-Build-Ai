@@ -1,5 +1,18 @@
 import { Router } from 'express';
 import { TradeController } from '../controllers/tradeController';
+import { validateBody, validateQuery, validateParams } from '../middleware/validateRequest';
+import {
+  UploadCSVTextRequestSchema,
+  NoteIdParamSchema,
+  GetNotesQuerySchema,
+  UpdateNoteRequestSchema,
+  UpdatePriorityRequestSchema,
+  SetEnabledRequestSchema,
+  SetPausedUntilRequestSchema,
+  PerformanceRankingQuerySchema,
+  BulkPerformanceRequestSchema,
+  PerformanceReportQuerySchema,
+} from '../schemas/api/trade';
 
 const router = Router();
 const tradeController = new TradeController();
@@ -14,13 +27,21 @@ router.post('/import/csv', tradeController.importCSV);
  * POST /api/trades/import/upload-text
  * クライアントから受け取った CSV テキストを保存して取り込み、Draft ノートを生成
  */
-router.post('/import/upload-text', tradeController.uploadCSVText);
+router.post(
+  '/import/upload-text',
+  validateBody(UploadCSVTextRequestSchema),
+  tradeController.uploadCSVText
+);
 
 /**
  * GET /api/trades/notes
  * Get all trade notes (クエリパラメータで status フィルタ可能)
  */
-router.get('/notes', tradeController.getAllNotes);
+router.get(
+  '/notes',
+  validateQuery(GetNotesQuerySchema),
+  tradeController.getAllNotes
+);
 
 /**
  * GET /api/trades/notes/status-counts
@@ -32,31 +53,52 @@ router.get('/notes/status-counts', tradeController.getStatusCounts);
  * GET /api/trades/notes/:id
  * Get specific trade note
  */
-router.get('/notes/:id', tradeController.getNoteById);
+router.get(
+  '/notes/:id',
+  validateParams(NoteIdParamSchema),
+  tradeController.getNoteById
+);
 
 /**
  * PUT /api/trades/notes/:id
  * ノートの内容を更新（AI 要約、ユーザーメモ、タグ）
  */
-router.put('/notes/:id', tradeController.updateNote);
+router.put(
+  '/notes/:id',
+  validateParams(NoteIdParamSchema),
+  validateBody(UpdateNoteRequestSchema),
+  tradeController.updateNote
+);
 
 /**
  * POST /api/trades/notes/:id/approve
  * ノートを承認する（マッチング対象になる）
  */
-router.post('/notes/:id/approve', tradeController.approveNote);
+router.post(
+  '/notes/:id/approve',
+  validateParams(NoteIdParamSchema),
+  tradeController.approveNote
+);
 
 /**
  * POST /api/trades/notes/:id/reject
  * ノートを非承認にする（マッチング対象外、アーカイブ扱い）
  */
-router.post('/notes/:id/reject', tradeController.rejectNote);
+router.post(
+  '/notes/:id/reject',
+  validateParams(NoteIdParamSchema),
+  tradeController.rejectNote
+);
 
 /**
  * POST /api/trades/notes/:id/revert-to-draft
  * ノートを下書き状態に戻す
  */
-router.post('/notes/:id/revert-to-draft', tradeController.revertToDraft);
+router.post(
+  '/notes/:id/revert-to-draft',
+  validateParams(NoteIdParamSchema),
+  tradeController.revertToDraft
+);
 
 // ============================================
 // フェーズ8: ノート優先度/有効無効管理
@@ -66,19 +108,34 @@ router.post('/notes/:id/revert-to-draft', tradeController.revertToDraft);
  * PATCH /api/trades/notes/:id/priority
  * ノートの優先度を更新（1-10）
  */
-router.patch('/notes/:id/priority', tradeController.updatePriority);
+router.patch(
+  '/notes/:id/priority',
+  validateParams(NoteIdParamSchema),
+  validateBody(UpdatePriorityRequestSchema),
+  tradeController.updatePriority
+);
 
 /**
  * PATCH /api/trades/notes/:id/enabled
  * ノートの有効/無効を切り替え
  */
-router.patch('/notes/:id/enabled', tradeController.setEnabled);
+router.patch(
+  '/notes/:id/enabled',
+  validateParams(NoteIdParamSchema),
+  validateBody(SetEnabledRequestSchema),
+  tradeController.setEnabled
+);
 
 /**
  * PATCH /api/trades/notes/:id/pause
  * ノートを一時停止（指定日時まで無効）
  */
-router.patch('/notes/:id/pause', tradeController.setPausedUntil);
+router.patch(
+  '/notes/:id/pause',
+  validateParams(NoteIdParamSchema),
+  validateBody(SetPausedUntilRequestSchema),
+  tradeController.setPausedUntil
+);
 
 // ============================================
 // フェーズ9: ノートパフォーマンス
@@ -94,7 +151,11 @@ router.patch('/notes/:id/pause', tradeController.setPausedUntil);
  * - to: 集計終了日時（ISO 8601）
  * - timeframe: 時間足で絞り込み
  */
-router.get('/notes/performance/ranking', tradeController.getPerformanceRanking);
+router.get(
+  '/notes/performance/ranking',
+  validateQuery(PerformanceRankingQuerySchema),
+  tradeController.getPerformanceRanking
+);
 
 /**
  * POST /api/trades/notes/performance/bulk
@@ -105,7 +166,11 @@ router.get('/notes/performance/ranking', tradeController.getPerformanceRanking);
  * - from?: 集計開始日時
  * - to?: 集計終了日時
  */
-router.post('/notes/performance/bulk', tradeController.getBulkPerformanceSummary);
+router.post(
+  '/notes/performance/bulk',
+  validateBody(BulkPerformanceRequestSchema),
+  tradeController.getBulkPerformanceSummary
+);
 
 /**
  * GET /api/trades/notes/:id/performance
@@ -117,6 +182,11 @@ router.post('/notes/performance/bulk', tradeController.getBulkPerformanceSummary
  * - timeframe: 時間足で絞り込み
  * - weakThreshold: 弱いパターン検出閾値（0.0〜1.0）
  */
-router.get('/notes/:id/performance', tradeController.getPerformanceReport);
+router.get(
+  '/notes/:id/performance',
+  validateParams(NoteIdParamSchema),
+  validateQuery(PerformanceReportQuerySchema),
+  tradeController.getPerformanceReport
+);
 
 export default router;
