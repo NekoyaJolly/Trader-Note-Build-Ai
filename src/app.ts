@@ -18,6 +18,7 @@ import ohlcvRoutes from './backend/api/ohlcvRoutes';
 import profileRoutes from './routes/profileRoutes';
 import { sideBRoutes } from './side-b/routes';
 import cronRoutes from './routes/cronRoutes';
+import ctraderAuthRoutes from './backend/api/ctraderAuthRoutes';
 import { MatchingScheduler } from './utils/scheduler';
 import { getSideBScheduler } from './side-b/jobs/sideBScheduler';
 
@@ -101,6 +102,9 @@ class App {
     // API routes
     // 認証ルート（認証不要）
     this.app.use('/api/auth', authRoutes);
+    
+    // cTrader OAuth 認証ルート
+    this.app.use('/api/auth/ctrader', ctraderAuthRoutes);
     
     // ウォッチリスト（認証必須）
     this.app.use('/api/watchlist', watchlistRoutes);

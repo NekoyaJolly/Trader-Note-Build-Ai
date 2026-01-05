@@ -1350,3 +1350,27 @@ model AINoteSummary {
   @@unique([period, startDate, endDate], map: "uq_ai_note_summary_period")
   @@index([period, startDate], map: "idx_ai_note_summary_period")
 }
+
+/// cTrader OAuth トークン
+/// Side-A リアルタイム通知用の認証情報を管理
+model CTraderToken {
+  id              String   @id @default(uuid()) @db.Uuid
+  /// cTrader アカウントID（複数アカウント対応用）
+  accountId       String   @unique
+  /// アクセストークン（暗号化推奨）
+  accessToken     String
+  /// リフレッシュトークン（暗号化推奨）
+  refreshToken    String
+  /// アクセストークン有効期限
+  expiresAt       DateTime @db.Timestamptz(6)
+  /// トークンスコープ
+  scope           String?
+  /// 最終接続日時
+  lastConnectedAt DateTime? @db.Timestamptz(6)
+  /// 作成日時
+  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt       DateTime @updatedAt @db.Timestamptz(6)
+
+  @@index([expiresAt], map: "idx_ctrader_token_expires")
+}
