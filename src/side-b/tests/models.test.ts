@@ -69,8 +69,8 @@ describe('Side-B Models', () => {
         resistanceProximity: 70,
       };
 
-      // バリデーションはエラーを投げる（クランプではない）
-      expect(() => validateFeatureVector(vectorWithNegative)).toThrow('Invalid trendStrength');
+      // バリデーションはエラーを投げる（Zodエラー）
+      expect(() => validateFeatureVector(vectorWithNegative)).toThrow();
     });
 
     it('範囲外の値（100超）はエラー', () => {
@@ -89,8 +89,8 @@ describe('Side-B Models', () => {
         resistanceProximity: 70,
       };
 
-      // バリデーションはエラーを投げる（クランプではない）
-      expect(() => validateFeatureVector(vectorWithOver100)).toThrow('Invalid trendStrength');
+      // バリデーションはエラーを投げる（Zodエラー）
+      expect(() => validateFeatureVector(vectorWithOver100)).toThrow();
     });
   });
 

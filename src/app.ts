@@ -15,6 +15,7 @@ import authRoutes from './routes/authRoutes';
 import watchlistRoutes from './routes/watchlistRoutes';
 import pushRoutes from './routes/pushRoutes';
 import ohlcvRoutes from './backend/api/ohlcvRoutes';
+import profileRoutes from './routes/profileRoutes';
 import { sideBRoutes } from './side-b/routes';
 import cronRoutes from './routes/cronRoutes';
 import { MatchingScheduler } from './utils/scheduler';
@@ -113,6 +114,7 @@ class App {
     this.app.use('/api/notifications', notificationRoutes);
     this.app.use('/api/orders', orderRoutes);
     this.app.use('/api/indicators', indicatorRoutes);
+    this.app.use('/api/profiles', profileRoutes);
     this.app.use('/api/backtest', backtestRoutes);
     this.app.use('/api/settings', settingsRoutes);
     this.app.use('/api/bars', barLocatorRoutes);

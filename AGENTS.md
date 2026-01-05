@@ -126,6 +126,7 @@ npm run dev
 | **Backend** | Node.js + Express + TypeScript |
 | **Frontend** | Next.js 15+ (App Router) + TypeScript |
 | **Database** | PostgreSQL + Prisma ORM |
+| **Validation** | Zod（ランタイムバリデーション必須） |
 | **AI** | OpenAI API（軽量モデル優先） |
 | **Market Data** | Twelve Data API |
 | **Notification** | Web Push (web-push) |
@@ -158,10 +159,55 @@ npm run dev
 ❌ **禁止**
 - `any` 型の使用
 - `unknown` 型の使用（明確な理由＋ユーザー許可がある場合のみ例外）
+- 手動if文によるバリデーション（Zodを使用すること）
 
-✅ **推奨**
+✅ **必須**
 - 適切な型定義
-- Zod などによるランタイムバリデーション
+- **Zodスキーマによるランタイムバリデーション**
+- APIリクエスト/レスポンスは `src/schemas/` のZodスキーマを使用
+- 外部API（OpenAI, Twelve Data等）のレスポンスはZodでパース
+- AI出力は必ずZodで検証
+
+### Zodスキーマ配置
+
+```
+src/schemas/
+├── common.ts      # 共通スキーマ（日付、ページネーション等）
+├── api/           # APIエンドポイント別スキーマ
+│   ├── trade.ts
+│   ├── note.ts
+│   ├── profile.ts
+│   └── sideB.ts
+└── external/      # 外部APIレスポンススキーマ
+    ├── twelveData.ts
+    └── openai.ts
+```
+
+### Zodスキーマの書き方
+
+```typescript
+// src/schemas/api/profile.ts
+import { z } from 'zod';
+
+// リクエストスキーマ
+export const CreateProfileRequestSchema = z.object({
+  name: z.string().min(1, 'プロファイル名は必須です'),
+  description: z.string().optional(),
+  indicators: z.array(IndicatorConfigSchema),
+});
+
+// 型はスキーマから推論
+export type CreateProfileRequest = z.infer<typeof CreateProfileRequestSchema>;
+
+// ルートでの使用例
+router.post('/', async (req, res) => {
+  const result = CreateProfileRequestSchema.safeParse(req.body);
+  if (!result.success) {
+    return res.status(400).json({ error: result.error.format() });
+  }
+  const data = result.data; // 型安全
+});
+```
 
 ### 3. 環境変数ルール
 

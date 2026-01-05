@@ -27,7 +27,28 @@ import {
   Area,
 } from "recharts";
 
-// インジケーターデータポイントの型定義
+// ========================================
+// Recharts 用型定義
+// ========================================
+
+/** ツールチップのペイロードエントリ */
+interface TooltipPayloadEntry {
+  name: string;
+  value: number | string;
+  color: string;
+}
+
+/** ツールチップのプロパティ */
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: TooltipPayloadEntry[];
+  label?: string;
+}
+
+// ========================================
+// インジケーターデータポイント型定義
+// ========================================
+
 export interface RSIDataPoint {
   timestamp: string;
   value: number;
@@ -92,14 +113,15 @@ const CHART_COLORS = {
 
 /**
  * カスタムツールチップコンポーネント
+ * Recharts ツールチップ用のカスタムレンダラー
  */
-function CustomTooltip({ active, payload, label }: any) {
+function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
   if (!active || !payload || payload.length === 0) return null;
 
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-lg p-3 shadow-lg">
       <p className="text-xs text-gray-400 mb-1">{label}</p>
-      {payload.map((entry: any, index: number) => (
+      {payload.map((entry: TooltipPayloadEntry, index: number) => (
         <p key={index} className="text-sm font-medium" style={{ color: entry.color }}>
           {entry.name}: {typeof entry.value === "number" ? entry.value.toFixed(2) : entry.value}
         </p>

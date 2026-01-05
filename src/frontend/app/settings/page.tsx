@@ -403,6 +403,47 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
+      {/* インジケータープロファイル */}
+      <Card>
+        <CardHeader>
+          <CardTitle>インジケータープロファイル</CardTitle>
+          <CardDescription>
+            CSVインポート時に適用するインジケーターの組み合わせを管理
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="p-4 bg-slate-900/50 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-medium text-white">プロファイル管理</h4>
+                <p className="text-xs text-gray-500 mt-1">
+                  複数のインジケーター設定を保存して、インポート時に選択できます
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.location.href = "/settings/profiles"}
+              >
+                管理画面へ →
+              </Button>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <div className="p-3 bg-slate-800/50 rounded-lg">
+              <span className="text-lg">🤖</span>
+              <h5 className="text-white font-medium mt-1">AIに任せる</h5>
+              <p className="text-gray-500 mt-0.5">12次元特徴量を自動計算</p>
+            </div>
+            <div className="p-3 bg-slate-800/50 rounded-lg">
+              <span className="text-lg">📊</span>
+              <h5 className="text-white font-medium mt-1">プロファイルなし</h5>
+              <p className="text-gray-500 mt-0.5">OHLCVデータのみ保存</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* データ管理 */}
       <Card>
         <CardHeader>

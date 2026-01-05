@@ -15,19 +15,43 @@ applyTo: "src/side-b/**/*.ts,src/frontend/app/side-b/**/*.tsx"
 ### 必須
 - コメントは日本語で記述
 - `any` / `unknown` 型は使用禁止
-- Zodスキーマでランタイムバリデーション
+- **Zodスキーマでランタイムバリデーション（必須）**
+  - スキーマは `src/schemas/api/sideB.ts` に定義
+  - 型は `z.infer<>` で生成
 - エラーハンドリングは明示的に
 
 ### AIサービス実装時
 - Research AI: `gpt-4o-mini` を使用
 - Plan AI: `gpt-4o` を使用
-- AI出力は必ずZodでパース
+- **AI出力は必ずZodでパース**（`src/schemas/external/openai.ts` のスキーマを使用）
 - 失敗時は最大3回リトライ
 
 ### リポジトリ実装時
 - Prisma Client を使用
 - トランザクションは適切に使用
 - 期限切れキャッシュの扱いを考慮
+
+---
+
+## Zodスキーマ参照先
+
+Side-B用スキーマは以下で定義:
+- `src/schemas/api/sideB.ts` - リクエスト/レスポンススキーマ
+- `src/schemas/external/openai.ts` - OpenAI APIレスポンス
+
+```typescript
+// 使用例
+import { 
+  CreateResearchRequestSchema,
+  TradePlanAIOutputSchema,
+} from '@/schemas/api/sideB';
+
+// バリデーション
+const result = CreateResearchRequestSchema.safeParse(req.body);
+if (!result.success) {
+  return res.status(400).json({ error: result.error.format() });
+}
+```
 
 ---
 

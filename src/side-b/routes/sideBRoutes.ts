@@ -49,6 +49,33 @@
 
 import { Router } from 'express';
 import { sideBController } from '../controllers';
+import { validateBody, validateQuery, validateParams } from '../../middleware/validateRequest';
+import {
+  // リサーチ
+  GenerateResearchRequestSchema,
+  ListResearchQuerySchema,
+  // プラン
+  GeneratePlanRequestSchema,
+  ListPlansQuerySchema,
+  GetPlanByIdQuerySchema,
+  // パイプライン
+  RunPipelineBodyRequestSchema,
+  // 仮想トレード
+  CreateVirtualTradeRequestSchema,
+  ListVirtualTradesQuerySchema,
+  CloseVirtualTradeRequestSchema,
+  // ポートフォリオ
+  UpdatePortfolioSettingsRequestSchema,
+  // AIノート
+  ListAINotesQuerySchema,
+  ListAINoteSummariesQuerySchema,
+  GenerateAINoteSummaryRequestSchema,
+  // スケジューラー
+  UpdateSchedulerConfigRequestSchema,
+  // URLパラメータ
+  IdParamSchema,
+  SymbolParamSchema,
+} from '../../schemas/api/sideB';
 
 const router = Router();
 
@@ -63,11 +90,15 @@ const router = Router();
  * Body:
  * - symbol: string (必須)
  * - timeframe?: string
- * - ohlcvData: Array<{timestamp, open, high, low, close, volume?}> (必須)
+ * - ohlcvData?: Array<{timestamp, open, high, low, close, volume?}> (省略時は自動取得)
  * - indicators?: object
  * - forceRefresh?: boolean (キャッシュ無視)
  */
-router.post('/research', sideBController.generateResearch);
+router.post(
+  '/research',
+  validateBody(GenerateResearchRequestSchema),
+  sideBController.generateResearch
+);
 
 /**
  * GET /api/side-b/research
@@ -79,19 +110,31 @@ router.post('/research', sideBController.generateResearch);
  * - limit?: number
  * - offset?: number
  */
-router.get('/research', sideBController.listResearch);
+router.get(
+  '/research',
+  validateQuery(ListResearchQuerySchema),
+  sideBController.listResearch
+);
 
 /**
  * GET /api/side-b/research/valid/:symbol
  * 有効なリサーチを取得（キャッシュチェック用）
  */
-router.get('/research/valid/:symbol', sideBController.getValidResearch);
+router.get(
+  '/research/valid/:symbol',
+  validateParams(SymbolParamSchema),
+  sideBController.getValidResearch
+);
 
 /**
  * GET /api/side-b/research/:id
  * リサーチを取得
  */
-router.get('/research/:id', sideBController.getResearchById);
+router.get(
+  '/research/:id',
+  validateParams(IdParamSchema),
+  sideBController.getResearchById
+);
 
 // ===========================================
 // プラン
@@ -109,7 +152,11 @@ router.get('/research/:id', sideBController.getResearchById);
  * - ohlcvData?: Array (researchIdがない場合必須)
  * - indicators?: object
  */
-router.post('/plans', sideBController.generatePlan);
+router.post(
+  '/plans',
+  validateBody(GeneratePlanRequestSchema),
+  sideBController.generatePlan
+);
 
 /**
  * GET /api/side-b/plans
@@ -123,13 +170,21 @@ router.post('/plans', sideBController.generatePlan);
  * - limit?: number
  * - offset?: number
  */
-router.get('/plans', sideBController.listPlans);
+router.get(
+  '/plans',
+  validateQuery(ListPlansQuerySchema),
+  sideBController.listPlans
+);
 
 /**
  * GET /api/side-b/plans/today/:symbol
  * 今日のプランを取得
  */
-router.get('/plans/today/:symbol', sideBController.getTodayPlan);
+router.get(
+  '/plans/today/:symbol',
+  validateParams(SymbolParamSchema),
+  sideBController.getTodayPlan
+);
 
 /**
  * GET /api/side-b/plans/:id
@@ -138,7 +193,12 @@ router.get('/plans/today/:symbol', sideBController.getTodayPlan);
  * Query:
  * - withResearch?: boolean (リサーチ情報も含める)
  */
-router.get('/plans/:id', sideBController.getPlanById);
+router.get(
+  '/plans/:id',
+  validateParams(IdParamSchema),
+  validateQuery(GetPlanByIdQuerySchema),
+  sideBController.getPlanById
+);
 
 // ===========================================
 // パイプライン
@@ -150,12 +210,16 @@ router.get('/plans/:id', sideBController.getPlanById);
  * 
  * Body:
  * - symbol: string (必須)
- * - ohlcvData: Array (必須)
+ * - ohlcvData?: Array (省略時は自動取得)
  * - indicators?: object
  * - userPreferences?: object
  * - forceRefresh?: boolean
  */
-router.post('/pipeline', sideBController.runPipeline);
+router.post(
+  '/pipeline',
+  validateBody(RunPipelineBodyRequestSchema),
+  sideBController.runPipeline
+);
 
 // ===========================================
 // 管理
@@ -179,7 +243,11 @@ router.post('/cleanup', sideBController.cleanup);
  * - planId: string (必須)
  * - scenarioId?: string (指定しない場合は最初のシナリオ)
  */
-router.post('/trades', sideBController.createVirtualTrade);
+router.post(
+  '/trades',
+  validateBody(CreateVirtualTradeRequestSchema),
+  sideBController.createVirtualTrade
+);
 
 /**
  * GET /api/side-b/trades
@@ -191,13 +259,21 @@ router.post('/trades', sideBController.createVirtualTrade);
  * - symbol?: string
  * - limit?: number
  */
-router.get('/trades', sideBController.listVirtualTrades);
+router.get(
+  '/trades',
+  validateQuery(ListVirtualTradesQuerySchema),
+  sideBController.listVirtualTrades
+);
 
 /**
  * GET /api/side-b/trades/:id
  * 仮想トレード詳細を取得
  */
-router.get('/trades/:id', sideBController.getVirtualTradeById);
+router.get(
+  '/trades/:id',
+  validateParams(IdParamSchema),
+  sideBController.getVirtualTradeById
+);
 
 /**
  * POST /api/side-b/trades/:id/close
@@ -208,13 +284,22 @@ router.get('/trades/:id', sideBController.getVirtualTradeById);
  * - reason?: string (manual, invalidation)
  * - note?: string
  */
-router.post('/trades/:id/close', sideBController.closeVirtualTrade);
+router.post(
+  '/trades/:id/close',
+  validateParams(IdParamSchema),
+  validateBody(CloseVirtualTradeRequestSchema),
+  sideBController.closeVirtualTrade
+);
 
 /**
  * POST /api/side-b/trades/:id/cancel
  * 待機中の仮想トレードをキャンセル
  */
-router.post('/trades/:id/cancel', sideBController.cancelVirtualTrade);
+router.post(
+  '/trades/:id/cancel',
+  validateParams(IdParamSchema),
+  sideBController.cancelVirtualTrade
+);
 
 // ===========================================
 // ポートフォリオ（Phase B）
@@ -236,7 +321,11 @@ router.get('/portfolio', sideBController.getPortfolio);
  * - enableSpread?: boolean
  * - spreadPips?: number
  */
-router.put('/portfolio/settings', sideBController.updatePortfolioSettings);
+router.put(
+  '/portfolio/settings',
+  validateBody(UpdatePortfolioSettingsRequestSchema),
+  sideBController.updatePortfolioSettings
+);
 
 // ===========================================
 // AIトレードノート（Phase C）
@@ -254,7 +343,11 @@ router.put('/portfolio/settings', sideBController.updatePortfolioSettings);
  * - limit?: number (default: 20)
  * - offset?: number (default: 0)
  */
-router.get('/ai-notes', sideBController.listAINotes);
+router.get(
+  '/ai-notes',
+  validateQuery(ListAINotesQuerySchema),
+  sideBController.listAINotes
+);
 
 /**
  * GET /api/side-b/ai-notes/summaries
@@ -265,7 +358,11 @@ router.get('/ai-notes', sideBController.listAINotes);
  * - limit?: number
  * - offset?: number
  */
-router.get('/ai-notes/summaries', sideBController.listAINoteSummaries);
+router.get(
+  '/ai-notes/summaries',
+  validateQuery(ListAINoteSummariesQuerySchema),
+  sideBController.listAINoteSummaries
+);
 
 /**
  * POST /api/side-b/ai-notes/summaries/generate
@@ -276,13 +373,21 @@ router.get('/ai-notes/summaries', sideBController.listAINoteSummaries);
  * - startDate: string (YYYY-MM-DD, 必須)
  * - endDate: string (YYYY-MM-DD, 必須)
  */
-router.post('/ai-notes/summaries/generate', sideBController.generateAINoteSummary);
+router.post(
+  '/ai-notes/summaries/generate',
+  validateBody(GenerateAINoteSummaryRequestSchema),
+  sideBController.generateAINoteSummary
+);
 
 /**
  * GET /api/side-b/ai-notes/:id
  * AIノート詳細を取得
  */
-router.get('/ai-notes/:id', sideBController.getAINoteById);
+router.get(
+  '/ai-notes/:id',
+  validateParams(IdParamSchema),
+  sideBController.getAINoteById
+);
 
 // ===========================================
 // スケジューラー（Phase D）
@@ -318,7 +423,11 @@ router.post('/scheduler/stop', sideBController.stopScheduler);
  * - dailyPlanTimeUTC?: string
  * - autoGenerateNote?: boolean
  */
-router.put('/scheduler/config', sideBController.updateSchedulerConfig);
+router.put(
+  '/scheduler/config',
+  validateBody(UpdateSchedulerConfigRequestSchema),
+  sideBController.updateSchedulerConfig
+);
 
 /**
  * POST /api/side-b/scheduler/run-daily-plan
@@ -331,5 +440,86 @@ router.post('/scheduler/run-daily-plan', sideBController.runDailyPlanNow);
  * 監視を手動実行
  */
 router.post('/scheduler/run-monitor', sideBController.runMonitorNow);
+
+// ===========================================
+// 比較分析（Phase D）
+// ===========================================
+
+/**
+ * GET /api/side-b/comparison
+ * 人間vsAIの比較分析を取得
+ * 
+ * Query:
+ * - period?: 'week' | 'month' | 'quarter' | 'year' | 'all'
+ * - symbol?: string
+ */
+router.get('/comparison', sideBController.getComparison);
+
+/**
+ * GET /api/side-b/comparison/dashboard
+ * 比較ダッシュボードデータを取得（サマリー + 時系列 + 最近のトレード）
+ * 
+ * Query:
+ * - period?: 'week' | 'month' | 'quarter' | 'year' | 'all'
+ * - symbol?: string
+ */
+router.get('/comparison/dashboard', sideBController.getComparisonDashboardData);
+
+// ===========================================
+// サマリー（週次/月次）
+// ===========================================
+
+/**
+ * GET /api/side-b/summaries
+ * 生成済みサマリー一覧を取得
+ * 
+ * Query:
+ * - period?: 'weekly' | 'monthly'
+ * - limit?: number
+ * - offset?: number
+ */
+router.get('/summaries', sideBController.listSummaries);
+
+/**
+ * POST /api/side-b/summaries/generate
+ * サマリーを手動生成
+ * 
+ * Body:
+ * - period: 'weekly' | 'monthly' (必須)
+ * - startDate?: string (YYYY-MM-DD)
+ * - endDate?: string (YYYY-MM-DD)
+ */
+router.post('/summaries/generate', sideBController.generateSummary);
+
+/**
+ * GET /api/side-b/summaries/scheduler
+ * サマリースケジューラー設定を取得
+ */
+router.get('/summaries/scheduler', sideBController.getSummarySchedulerConfig);
+
+/**
+ * PUT /api/side-b/summaries/scheduler
+ * サマリースケジューラー設定を更新
+ * 
+ * Body:
+ * - weeklyEnabled?: boolean
+ * - monthlyEnabled?: boolean
+ * - weeklyCronExpression?: string (cron形式)
+ * - monthlyCronExpression?: string (cron形式)
+ * - notifyOnGeneration?: boolean
+ */
+router.put('/summaries/scheduler', sideBController.updateSummarySchedulerConfig);
+
+/**
+ * POST /api/side-b/summaries/scheduler/start
+ * サマリースケジューラーを開始
+ */
+router.post('/summaries/scheduler/start', sideBController.startSummaryScheduler);
+
+/**
+ * POST /api/side-b/summaries/scheduler/stop
+ * サマリースケジューラーを停止
+ */
+router.post('/summaries/scheduler/stop', sideBController.stopSummaryScheduler);
 
 export default router;

@@ -37,6 +37,9 @@ import {
   closeTradeManually,
   cancelPendingTrade,
   getPortfolioSummary,
+  getComparisonAnalysis,
+  getComparisonDashboard,
+  type ComparisonPeriod,
 } from '../services';
 import * as aiNoteService from '../services/aiNoteService';
 import {
@@ -881,6 +884,224 @@ export class SideBController {
     } catch (error) {
       console.error('[SideBController] runMonitorNow error:', error);
       res.status(500).json({ error: '監視実行に失敗しました' });
+    }
+  };
+
+  // ===========================================
+  // 比較分析（Phase D）
+  // ===========================================
+
+  /**
+   * GET /api/side-b/comparison
+   * 人間vsAIの比較分析を取得
+   */
+  getComparison = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { period, symbol } = req.query;
+
+      // 期間のバリデーション
+      const validPeriods = ['week', 'month', 'quarter', 'year', 'all'];
+      const periodFilter: ComparisonPeriod = period && validPeriods.includes(period as string)
+        ? (period as ComparisonPeriod)
+        : 'month';
+
+      const result = await getComparisonAnalysis(
+        periodFilter,
+        symbol as string | undefined
+      );
+
+      res.json({
+        success: true,
+        comparison: result,
+      });
+    } catch (error) {
+      console.error('[SideBController] getComparison error:', error);
+      res.status(500).json({ error: '比較分析の取得に失敗しました' });
+    }
+  };
+
+  /**
+   * GET /api/side-b/comparison/dashboard
+   * 比較ダッシュボードデータを取得
+   */
+  getComparisonDashboardData = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { period, symbol } = req.query;
+
+      // 期間のバリデーション
+      const validPeriods = ['week', 'month', 'quarter', 'year', 'all'];
+      const periodFilter: ComparisonPeriod = period && validPeriods.includes(period as string)
+        ? (period as ComparisonPeriod)
+        : 'month';
+
+      const dashboard = await getComparisonDashboard(
+        periodFilter,
+        symbol as string | undefined
+      );
+
+      res.json({
+        success: true,
+        ...dashboard,
+      });
+    } catch (error) {
+      console.error('[SideBController] getComparisonDashboard error:', error);
+      res.status(500).json({ error: '比較ダッシュボードの取得に失敗しました' });
+    }
+  };
+
+  // ===========================================
+  // サマリースケジューラー（週次/月次）
+  // ===========================================
+
+  /**
+   * GET /api/side-b/summaries
+   * 生成済みサマリー一覧を取得
+   */
+  listSummaries = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { summarySchedulerService } = await import('../services');
+      
+      const period = req.query.period as 'weekly' | 'monthly' | undefined;
+      const limit = parseInt(req.query.limit as string) || 10;
+      const offset = parseInt(req.query.offset as string) || 0;
+
+      const summaries = await summarySchedulerService.listSummaries({
+        period,
+        limit,
+        offset,
+      });
+
+      res.json({
+        success: true,
+        summaries,
+        total: summaries.length,
+      });
+    } catch (error) {
+      console.error('[SideBController] listSummaries error:', error);
+      res.status(500).json({ error: 'サマリー一覧の取得に失敗しました' });
+    }
+  };
+
+  /**
+   * POST /api/side-b/summaries/generate
+   * 週次または月次サマリーを手動生成
+   */
+  generateSummary = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { summarySchedulerService } = await import('../services');
+      
+      const { period, startDate, endDate } = req.body;
+
+      // バリデーション
+      if (!period || !['weekly', 'monthly'].includes(period)) {
+        res.status(400).json({ error: 'period は weekly または monthly を指定してください' });
+        return;
+      }
+
+      let summary;
+      if (startDate && endDate) {
+        // 指定期間でサマリーを生成
+        summary = await summarySchedulerService.generateSummary(
+          period,
+          new Date(startDate),
+          new Date(endDate)
+        );
+      } else {
+        // デフォルト期間でサマリーを生成
+        summary = period === 'weekly'
+          ? await summarySchedulerService.generateWeeklySummary()
+          : await summarySchedulerService.generateMonthlySummary();
+      }
+
+      res.json({
+        success: true,
+        summary,
+      });
+    } catch (error) {
+      console.error('[SideBController] generateSummary error:', error);
+      res.status(500).json({ error: 'サマリー生成に失敗しました' });
+    }
+  };
+
+  /**
+   * GET /api/side-b/summaries/scheduler
+   * サマリースケジューラー設定を取得
+   */
+  getSummarySchedulerConfig = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const { summarySchedulerService } = await import('../services');
+      
+      const config = summarySchedulerService.getConfig();
+
+      res.json({
+        success: true,
+        config,
+      });
+    } catch (error) {
+      console.error('[SideBController] getSummarySchedulerConfig error:', error);
+      res.status(500).json({ error: 'スケジューラー設定の取得に失敗しました' });
+    }
+  };
+
+  /**
+   * PUT /api/side-b/summaries/scheduler
+   * サマリースケジューラー設定を更新
+   */
+  updateSummarySchedulerConfig = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { summarySchedulerService } = await import('../services');
+      
+      summarySchedulerService.updateConfig(req.body);
+      const config = summarySchedulerService.getConfig();
+
+      res.json({
+        success: true,
+        config,
+        message: 'スケジューラー設定を更新しました',
+      });
+    } catch (error) {
+      console.error('[SideBController] updateSummarySchedulerConfig error:', error);
+      res.status(500).json({ error: 'スケジューラー設定の更新に失敗しました' });
+    }
+  };
+
+  /**
+   * POST /api/side-b/summaries/scheduler/start
+   * サマリースケジューラーを開始
+   */
+  startSummaryScheduler = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const { summarySchedulerService } = await import('../services');
+      
+      summarySchedulerService.start();
+
+      res.json({
+        success: true,
+        message: 'サマリースケジューラーを開始しました',
+      });
+    } catch (error) {
+      console.error('[SideBController] startSummaryScheduler error:', error);
+      res.status(500).json({ error: 'スケジューラー開始に失敗しました' });
+    }
+  };
+
+  /**
+   * POST /api/side-b/summaries/scheduler/stop
+   * サマリースケジューラーを停止
+   */
+  stopSummaryScheduler = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const { summarySchedulerService } = await import('../services');
+      
+      summarySchedulerService.stop();
+
+      res.json({
+        success: true,
+        message: 'サマリースケジューラーを停止しました',
+      });
+    } catch (error) {
+      console.error('[SideBController] stopSummaryScheduler error:', error);
+      res.status(500).json({ error: 'スケジューラー停止に失敗しました' });
     }
   };
 }

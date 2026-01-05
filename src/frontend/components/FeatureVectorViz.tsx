@@ -22,6 +22,37 @@ import {
   Legend,
 } from "recharts";
 
+// ========================================
+// Recharts 用型定義
+// ========================================
+
+/** ツールチップのペイロードエントリ */
+interface TooltipPayloadEntry {
+  name: string;
+  value: number;
+  color: string;
+  payload: FeatureDataPoint;
+}
+
+/** ツールチップのプロパティ */
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: TooltipPayloadEntry[];
+}
+
+/** 軸ティックのプロパティ（Recharts が注入するため全てオプショナル） */
+interface CustomAxisTickProps {
+  payload?: { value: string };
+  x?: number;
+  y?: number;
+  cx?: number;
+  cy?: number;
+}
+
+// ========================================
+// 特徴量データ型定義
+// ========================================
+
 // 特徴量データポイントの型定義
 export interface FeatureDataPoint {
   /** 特徴量名 */
@@ -64,7 +95,7 @@ const CHART_COLORS = {
 /**
  * カスタムツールチップコンポーネント
  */
-function CustomTooltip({ active, payload }: any) {
+function CustomTooltip({ active, payload }: CustomTooltipProps) {
   if (!active || !payload || payload.length === 0) return null;
 
   const data = payload[0].payload;
@@ -72,7 +103,7 @@ function CustomTooltip({ active, payload }: any) {
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-lg p-3 shadow-lg">
       <p className="text-sm font-medium text-white mb-2">{data.feature}</p>
-      {payload.map((entry: any, index: number) => (
+      {payload.map((entry: TooltipPayloadEntry, index: number) => (
         <p key={index} className="text-xs" style={{ color: entry.color }}>
           {entry.name}: {entry.value.toFixed(1)}
         </p>
@@ -83,8 +114,12 @@ function CustomTooltip({ active, payload }: any) {
 
 /**
  * カスタム軸ラベルコンポーネント
+ * Recharts PolarAngleAxis 用のカスタムティックレンダラー
  */
-function CustomAxisTick({ payload, x, y, cx, cy }: any) {
+function CustomAxisTick({ payload, x = 0, y = 0, cx = 0, cy = 0 }: CustomAxisTickProps) {
+  // payload が undefined の場合は何も描画しない
+  if (!payload) return null;
+  
   // ラベルの位置調整
   const radius = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
   const angle = Math.atan2(y - cy, x - cx);

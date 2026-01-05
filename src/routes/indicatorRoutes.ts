@@ -16,6 +16,13 @@
 import { Router, Request, Response } from 'express';
 import { indicatorSettingsService, SaveIndicatorConfigRequest } from '../services/indicatorSettingsService';
 import { INDICATOR_METADATA, IndicatorId, IndicatorCategory } from '../models/indicatorConfig';
+import { validateBody, validateParams, validateQuery } from '../middleware/validateRequest';
+import {
+  IndicatorIdParamSchema,
+  SaveIndicatorSettingsRequestSchema,
+  ToggleIndicatorRequestSchema,
+  GetMetadataQuerySchema,
+} from '../schemas/api/indicator';
 
 // ルーター作成
 const router = Router();
@@ -57,66 +64,65 @@ router.get('/settings', async (_req: Request, res: Response) => {
  *   label?: string
  * }
  */
-router.post('/settings', async (req: Request, res: Response) => {
-  try {
-    const { indicatorId, params, enabled, label } = req.body as SaveIndicatorConfigRequest;
+router.post(
+  '/settings',
+  validateBody(SaveIndicatorSettingsRequestSchema),
+  async (req: Request, res: Response) => {
+    try {
+      const { indicatorId, params, enabled, label } = req.body as SaveIndicatorConfigRequest;
 
-    // バリデーション
-    if (!indicatorId) {
-      return res.status(400).json({
+      // メタデータの存在確認
+      const metadata = INDICATOR_METADATA.find(m => m.id === indicatorId);
+      if (!metadata) {
+        return res.status(400).json({
+          success: false,
+          error: `不明なインジケーター: ${indicatorId}`,
+        });
+      }
+
+      const config = await indicatorSettingsService.upsertIndicatorConfig({
+        indicatorId: indicatorId as IndicatorId,
+        params: params || metadata.defaultParams,
+        enabled,
+        label,
+      });
+
+      res.json({
+        success: true,
+        data: config,
+        message: `${metadata.displayName} を保存しました`,
+      });
+    } catch (error) {
+      console.error('インジケーター設定保存エラー:', error);
+      res.status(500).json({
         success: false,
-        error: 'indicatorId は必須です',
+        error: error instanceof Error ? error.message : 'インジケーター設定の保存に失敗しました',
       });
     }
-
-    // メタデータの存在確認
-    const metadata = INDICATOR_METADATA.find(m => m.id === indicatorId);
-    if (!metadata) {
-      return res.status(400).json({
-        success: false,
-        error: `不明なインジケーター: ${indicatorId}`,
-      });
-    }
-
-    const config = await indicatorSettingsService.upsertIndicatorConfig({
-      indicatorId: indicatorId as IndicatorId,
-      params: params || metadata.defaultParams,
-      enabled,
-      label,
-    });
-
-    res.json({
-      success: true,
-      data: config,
-      message: `${metadata.displayName} を保存しました`,
-    });
-  } catch (error) {
-    console.error('インジケーター設定保存エラー:', error);
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'インジケーター設定の保存に失敗しました',
-    });
   }
-});
+);
 
 /**
  * DELETE /api/indicators/settings/:indicatorId
  * インジケーター設定を削除
  */
-router.delete('/settings/:indicatorId', async (req: Request, res: Response) => {
-  try {
-    const { indicatorId } = req.params;
+router.delete(
+  '/settings/:indicatorId',
+  validateParams(IndicatorIdParamSchema),
+  async (req: Request, res: Response) => {
+    try {
+      const { indicatorId } = req.params;
 
-    // メタデータの存在確認
-    const metadata = INDICATOR_METADATA.find(m => m.id === indicatorId);
-    if (!metadata) {
-      return res.status(400).json({
-        success: false,
-        error: `不明なインジケーター: ${indicatorId}`,
-      });
-    }
+      // メタデータの存在確認
+      const metadata = INDICATOR_METADATA.find(m => m.id === indicatorId);
+      if (!metadata) {
+        return res.status(400).json({
+          success: false,
+          error: `不明なインジケーター: ${indicatorId}`,
+        });
+      }
 
-    await indicatorSettingsService.removeIndicatorConfig(indicatorId as IndicatorId);
+      await indicatorSettingsService.removeIndicatorConfig(indicatorId as IndicatorId);
 
     res.json({
       success: true,
@@ -137,32 +143,30 @@ router.delete('/settings/:indicatorId', async (req: Request, res: Response) => {
  * 
  * Body: { enabled: boolean }
  */
-router.patch('/settings/:indicatorId/toggle', async (req: Request, res: Response) => {
-  try {
-    const { indicatorId } = req.params;
-    const { enabled } = req.body;
+router.patch(
+  '/settings/:indicatorId/toggle',
+  validateParams(IndicatorIdParamSchema),
+  validateBody(ToggleIndicatorRequestSchema),
+  async (req: Request, res: Response) => {
+    try {
+      const { indicatorId } = req.params;
+      const { enabled } = req.body;
 
-    if (typeof enabled !== 'boolean') {
-      return res.status(400).json({
+      await indicatorSettingsService.toggleIndicatorConfig(indicatorId as IndicatorId, enabled);
+
+      res.json({
+        success: true,
+        message: `インジケーターを${enabled ? '有効' : '無効'}にしました`,
+      });
+    } catch (error) {
+      console.error('インジケータートグルエラー:', error);
+      res.status(500).json({
         success: false,
-        error: 'enabled は boolean 型が必要です',
+        error: 'インジケーターの切り替えに失敗しました',
       });
     }
-
-    await indicatorSettingsService.toggleIndicatorConfig(indicatorId as IndicatorId, enabled);
-
-    res.json({
-      success: true,
-      message: `インジケーターを${enabled ? '有効' : '無効'}にしました`,
-    });
-  } catch (error) {
-    console.error('インジケータートグルエラー:', error);
-    res.status(500).json({
-      success: false,
-      error: 'インジケーターの切り替えに失敗しました',
-    });
   }
-});
+);
 
 /**
  * GET /api/indicators/metadata
@@ -171,32 +175,36 @@ router.patch('/settings/:indicatorId/toggle', async (req: Request, res: Response
  * Query:
  * - category?: 'momentum' | 'trend' | 'volatility' | 'volume'
  */
-router.get('/metadata', async (req: Request, res: Response) => {
-  try {
-    const { category } = req.query;
+router.get(
+  '/metadata',
+  validateQuery(GetMetadataQuerySchema),
+  async (req: Request, res: Response) => {
+    try {
+      const { category } = req.query;
 
-    let indicators = [...INDICATOR_METADATA];
+      let indicators = [...INDICATOR_METADATA];
 
-    // カテゴリでフィルタリング
-    if (category && typeof category === 'string') {
-      indicators = indicators.filter(m => m.category === category as IndicatorCategory);
+      // カテゴリでフィルタリング
+      if (category && typeof category === 'string') {
+        indicators = indicators.filter(m => m.category === category as IndicatorCategory);
+      }
+
+      res.json({
+        success: true,
+        data: {
+          indicators,
+          categories: ['momentum', 'trend', 'volatility', 'volume'],
+        },
+      });
+    } catch (error) {
+      console.error('メタデータ取得エラー:', error);
+      res.status(500).json({
+        success: false,
+        error: 'メタデータの取得に失敗しました',
+      });
     }
-
-    res.json({
-      success: true,
-      data: {
-        indicators,
-        categories: ['momentum', 'trend', 'volatility', 'volume'],
-      },
-    });
-  } catch (error) {
-    console.error('メタデータ取得エラー:', error);
-    res.status(500).json({
-      success: false,
-      error: 'メタデータの取得に失敗しました',
-    });
   }
-});
+);
 
 /**
  * POST /api/indicators/settings/reset

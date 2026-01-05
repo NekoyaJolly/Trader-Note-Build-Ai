@@ -1,5 +1,13 @@
 import { Router } from 'express';
 import { NotificationController } from '../controllers/notificationController';
+import { validateBody, validateParams, validateQuery } from '../middleware/validateRequest';
+import {
+  NotificationIdParamSchema,
+  GetNotificationsQuerySchema,
+  CheckNotificationRequestSchema,
+  GetNotificationLogsQuerySchema,
+  NotificationLogIdParamSchema,
+} from '../schemas/api/notification';
 
 const router = Router();
 const notificationController = new NotificationController();
@@ -12,7 +20,11 @@ const notificationController = new NotificationController();
  * GET /api/notifications
  * すべての通知を取得（オプション: unreadOnly=true で未読のみ）
  */
-router.get('/', notificationController.getNotifications);
+router.get(
+  '/',
+  validateQuery(GetNotificationsQuerySchema),
+  notificationController.getNotifications
+);
 
 /**
  * GET /api/notifications/unread-count
@@ -32,19 +44,31 @@ router.put('/read-all', notificationController.markAllAsRead);
  * GET /api/notifications/:id
  * 通知の詳細を取得
  */
-router.get('/:id', notificationController.getNotificationById);
+router.get(
+  '/:id',
+  validateParams(NotificationIdParamSchema),
+  notificationController.getNotificationById
+);
 
 /**
  * PUT /api/notifications/:id/read
  * 通知を既読にマーク
  */
-router.put('/:id/read', notificationController.markAsRead);
+router.put(
+  '/:id/read',
+  validateParams(NotificationIdParamSchema),
+  notificationController.markAsRead
+);
 
 /**
  * DELETE /api/notifications/:id
  * 通知を削除
  */
-router.delete('/:id', notificationController.deleteNotification);
+router.delete(
+  '/:id',
+  validateParams(NotificationIdParamSchema),
+  notificationController.deleteNotification
+);
 
 /**
  * DELETE /api/notifications
@@ -66,7 +90,11 @@ router.delete('/', notificationController.clearAll);
  *   "channel": "in_app" | "push" | "webhook"  // オプション
  * }
  */
-router.post('/check', notificationController.checkAndNotify);
+router.post(
+  '/check',
+  validateBody(CheckNotificationRequestSchema),
+  notificationController.checkAndNotify
+);
 
 /**
  * GET /api/notifications/logs
@@ -78,18 +106,30 @@ router.post('/check', notificationController.checkAndNotify);
  * - status?: 'sent' | 'skipped' | 'failed'
  * - limit?: number
  */
-router.get('/logs', notificationController.getNotificationLogs);
+router.get(
+  '/logs',
+  validateQuery(GetNotificationLogsQuerySchema),
+  notificationController.getNotificationLogs
+);
 
 /**
  * GET /api/notifications/logs/:id
  * 通知ログを ID で取得
  */
-router.get('/logs/:id', notificationController.getNotificationLogById);
+router.get(
+  '/logs/:id',
+  validateParams(NotificationLogIdParamSchema),
+  notificationController.getNotificationLogById
+);
 
 /**
  * DELETE /api/notifications/logs/:id
  * 通知ログを削除
  */
-router.delete('/logs/:id', notificationController.deleteNotificationLog);
+router.delete(
+  '/logs/:id',
+  validateParams(NotificationLogIdParamSchema),
+  notificationController.deleteNotificationLog
+);
 
 export default router;

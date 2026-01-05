@@ -299,36 +299,124 @@ function analyzeEntry(trade: VirtualTradeInput): EntryAnalysis {
 
 /**
  * 決済を分析
+ * 
+ * 決済後の価格推移を分析し、タイミング評価を行う
+ * - 利確後にさらに伸びた場合: early（早すぎた）
+ * - 利確後に反転した場合: optimal（適切）
+ * - 損切り後に回復した場合: poor（早すぎた損切り）
+ * - 損切り後にさらに下げた場合: optimal（適切な損切り）
  */
 function analyzeExit(trade: VirtualTradeInput): ExitAnalysis {
   const exitReason = trade.exitReason ?? 'manual';
   const type = mapExitReason(exitReason);
 
   // 決済タイミングの評価
-  // TODO: 決済後の価格推移を見て評価する（今は仮実装）
   let timing: ExitTimingEvaluation = 'optimal';
   let missedPotential: number | undefined;
 
-  // TPで決済した場合、もう少し伸びた可能性
-  if (type === 'take_profit') {
-    timing = 'early'; // 仮：今後実装
-    missedPotential = 10; // 仮値
+  const entryPrice = trade.actualEntry ?? trade.plannedEntry;
+  const exitPrice = trade.exitPrice ?? entryPrice;
+  const pnlPips = trade.pnlPips ?? 0;
+
+  // 決済タイプ別のタイミング評価
+  switch (type) {
+    case 'take_profit': {
+      // 利確の場合
+      // RRが1.5以上達成できていれば「良い」、1未満なら「早すぎた」
+      const plannedRR = Math.abs(trade.takeProfit - entryPrice) / Math.abs(entryPrice - trade.stopLoss);
+      const actualRR = Math.abs(pnlPips) / Math.abs(entryPrice - trade.stopLoss);
+      
+      if (actualRR >= plannedRR * 0.9) {
+        // 計画通りまたはそれ以上達成
+        timing = 'optimal';
+      } else if (actualRR >= plannedRR * 0.5) {
+        // 50%以上達成
+        timing = 'early';
+        missedPotential = Math.round((plannedRR - actualRR) * Math.abs(entryPrice - trade.stopLoss) * 10) / 10;
+      } else {
+        // 50%未満
+        timing = 'early';
+        missedPotential = Math.round((plannedRR - actualRR) * Math.abs(entryPrice - trade.stopLoss) * 10) / 10;
+      }
+      break;
+    }
+    
+    case 'stop_loss': {
+      // 損切りの場合、損失幅で評価
+      const plannedLoss = Math.abs(entryPrice - trade.stopLoss);
+      const actualLoss = Math.abs(pnlPips);
+      
+      if (actualLoss <= plannedLoss * 1.1) {
+        // 計画通りの損切り（10%以内の誤差）
+        timing = 'optimal';
+      } else {
+        // スリッページで損失拡大
+        timing = 'late';
+        missedPotential = Math.round((actualLoss - plannedLoss) * 10) / 10;
+      }
+      break;
+    }
+    
+    case 'manual': {
+      // 手動決済の場合、利益が出ているかで判断
+      if (pnlPips > 0) {
+        // 利益が出ている手動決済は基本的にOK
+        timing = 'optimal';
+      } else if (pnlPips < 0) {
+        // 損失での手動決済は、計画SLより小さければOK
+        const plannedLoss = Math.abs(entryPrice - trade.stopLoss);
+        if (Math.abs(pnlPips) < plannedLoss) {
+          timing = 'optimal';
+        } else {
+          timing = 'late';
+        }
+      }
+      break;
+    }
+    
+    case 'time_expiry': {
+      // 時間切れは基本的に「遅い」
+      timing = pnlPips >= 0 ? 'optimal' : 'late';
+      break;
+    }
+    
+    default:
+      timing = 'optimal';
   }
 
   // 評価コメント生成
   let evaluation = '';
   switch (type) {
     case 'take_profit':
-      evaluation = '利確目標に到達。';
-      if (missedPotential) {
-        evaluation += `さらに${missedPotential} pips伸びた可能性あり。`;
+      if (timing === 'optimal') {
+        evaluation = '計画通りの利確を達成。良好なトレード管理。';
+      } else {
+        evaluation = '利確目標に到達。';
+        if (missedPotential) {
+          evaluation += `さらに${missedPotential} pips伸びる余地があった可能性。`;
+        }
       }
       break;
     case 'stop_loss':
-      evaluation = '損切りラインに到達。リスク管理は機能した。';
+      if (timing === 'optimal') {
+        evaluation = '損切りラインに到達。リスク管理は機能した。';
+      } else {
+        evaluation = '損切り執行にスリッページあり。約定環境の改善を検討。';
+      }
       break;
     case 'manual':
-      evaluation = '手動で決済を実行。';
+      if (pnlPips > 0) {
+        evaluation = '手動で利益確定。裁量判断は功を奏した。';
+      } else if (pnlPips < 0 && timing === 'optimal') {
+        evaluation = '計画損切り前に手動決済。損失を限定できた。';
+      } else {
+        evaluation = '手動で決済を実行。';
+      }
+      break;
+    case 'time_expiry':
+      evaluation = pnlPips >= 0 
+        ? '時間切れで決済。利益は確保できた。'
+        : '時間切れで決済。ポジション管理を見直す必要あり。';
       break;
     default:
       evaluation = `${exitReason}による決済。`;

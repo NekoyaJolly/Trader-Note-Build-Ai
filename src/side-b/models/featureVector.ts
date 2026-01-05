@@ -7,77 +7,85 @@
  * これにより人間とAIの市場認識を同じ基準で比較可能。
  */
 
+import { z } from 'zod';
+
 // ===========================================
-// 型定義
+// Zodスキーマ定義
+// ===========================================
+
+/**
+ * 0-100 のスコア値スキーマ
+ */
+const ScoreSchema = z.number().min(0).max(100);
+
+/**
+ * 12次元特徴量ベクトルのZodスキーマ
+ */
+export const FeatureVector12DSchema = z.object({
+  // トレンド系（4次元）
+  /** トレンドの強さ - ADX等から算出（0=トレンドなし, 100=非常に強いトレンド） */
+  trendStrength: ScoreSchema,
+  /** トレンド方向 - 価格とMA200の乖離率（0=強い下降, 50=横ばい, 100=強い上昇） */
+  trendDirection: ScoreSchema,
+  /** MA配列の整列度 - 短期>中期>長期なら100、逆なら0 */
+  maAlignment: ScoreSchema,
+  /** MA群に対する価格位置 - MA群の上なら高スコア */
+  pricePosition: ScoreSchema,
+
+  // モメンタム系（3次元）
+  /** RSIレベル - RSI値そのまま（0-100） */
+  rsiLevel: ScoreSchema,
+  /** MACDモメンタム - ヒストグラムの強さを正規化 */
+  macdMomentum: ScoreSchema,
+  /** ダイバージェンス検出 - 価格とオシレーターの乖離（0=なし, 100=強いダイバージェンス） */
+  momentumDivergence: ScoreSchema,
+
+  // ボラティリティ系（3次元）
+  /** ボラティリティレベル - ATRを過去平均比で正規化 */
+  volatilityLevel: ScoreSchema,
+  /** ボリンジャーバンド幅 - バンド幅を正規化 */
+  bbWidth: ScoreSchema,
+  /** ボラティリティ傾向 - 拡大傾向なら高スコア（0=縮小中, 100=急拡大中） */
+  volatilityTrend: ScoreSchema,
+
+  // 価格構造系（2次元）
+  /** サポートへの近さ - 最寄りサポートへの距離を正規化（100=直近） */
+  supportProximity: ScoreSchema,
+  /** レジスタンスへの近さ - 最寄りレジスタンスへの距離を正規化（100=直近） */
+  resistanceProximity: ScoreSchema,
+});
+
+// ===========================================
+// 型定義（Zodスキーマから推論）
 // ===========================================
 
 /**
  * 12次元特徴量ベクトル
  */
-export interface FeatureVector12D {
-  // トレンド系（4次元）
-  /** トレンドの強さ - ADX等から算出（0=トレンドなし, 100=非常に強いトレンド） */
-  trendStrength: number;
-  /** トレンド方向 - 価格とMA200の乖離率（0=強い下降, 50=横ばい, 100=強い上昇） */
-  trendDirection: number;
-  /** MA配列の整列度 - 短期>中期>長期なら100、逆なら0 */
-  maAlignment: number;
-  /** MA群に対する価格位置 - MA群の上なら高スコア */
-  pricePosition: number;
-
-  // モメンタム系（3次元）
-  /** RSIレベル - RSI値そのまま（0-100） */
-  rsiLevel: number;
-  /** MACDモメンタム - ヒストグラムの強さを正規化 */
-  macdMomentum: number;
-  /** ダイバージェンス検出 - 価格とオシレーターの乖離（0=なし, 100=強いダイバージェンス） */
-  momentumDivergence: number;
-
-  // ボラティリティ系（3次元）
-  /** ボラティリティレベル - ATRを過去平均比で正規化 */
-  volatilityLevel: number;
-  /** ボリンジャーバンド幅 - バンド幅を正規化 */
-  bbWidth: number;
-  /** ボラティリティ傾向 - 拡大傾向なら高スコア（0=縮小中, 100=急拡大中） */
-  volatilityTrend: number;
-
-  // 価格構造系（2次元）
-  /** サポートへの近さ - 最寄りサポートへの距離を正規化（100=直近） */
-  supportProximity: number;
-  /** レジスタンスへの近さ - 最寄りレジスタンスへの距離を正規化（100=直近） */
-  resistanceProximity: number;
-}
+export type FeatureVector12D = z.infer<typeof FeatureVector12DSchema>;
 
 // ===========================================
-// バリデーション
+// バリデーション（Zodスキーマ使用）
 // ===========================================
-
-/**
- * 0-100の範囲かチェック
- */
-function isValidScore(value: number): boolean {
-  return typeof value === 'number' && value >= 0 && value <= 100;
-}
 
 /**
  * 12次元特徴量のバリデーション
+ * Zodスキーマによる型安全なバリデーション
+ * 
+ * @throws ZodError バリデーションエラー時
  */
 export function validateFeatureVector(data: unknown): FeatureVector12D {
-  const vector = data as Record<string, unknown>;
-  const keys: (keyof FeatureVector12D)[] = [
-    'trendStrength', 'trendDirection', 'maAlignment', 'pricePosition',
-    'rsiLevel', 'macdMomentum', 'momentumDivergence',
-    'volatilityLevel', 'bbWidth', 'volatilityTrend',
-    'supportProximity', 'resistanceProximity',
-  ];
+  return FeatureVector12DSchema.parse(data);
+}
 
-  for (const key of keys) {
-    if (!isValidScore(vector[key] as number)) {
-      throw new Error(`Invalid ${key}: must be number 0-100`);
-    }
-  }
-
-  return vector as unknown as FeatureVector12D;
+/**
+ * 12次元特徴量の安全なバリデーション（例外を投げない）
+ * 
+ * @returns 成功時はデータ、失敗時はnull
+ */
+export function safeValidateFeatureVector(data: unknown): FeatureVector12D | null {
+  const result = FeatureVector12DSchema.safeParse(data);
+  return result.success ? result.data : null;
 }
 
 // ===========================================

@@ -48,3 +48,23 @@ export {
   type ExitVerificationResult,
   type TradeVerificationResult,
 } from './tradeVerificationService';
+
+// Phase D: 比較分析
+export {
+  getComparisonAnalysis,
+  getTimeSeriesData,
+  getComparisonDashboard,
+  type ComparisonPeriod,
+  type PerformanceStats,
+  type ComparisonResult,
+  type TimeSeriesData,
+  type ComparisonDashboardData,
+} from './comparisonService';
+
+// Phase D: サマリー生成スケジューラー
+export {
+  summarySchedulerService,
+  type SchedulerSummaryPeriod,
+  type GeneratedSummary,
+  type SchedulerConfig,
+} from './summarySchedulerService';
