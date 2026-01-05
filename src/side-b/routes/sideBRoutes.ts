@@ -35,6 +35,14 @@
  * - GET    /api/side-b/ai-notes/summaries - サマリー一覧
  * - POST   /api/side-b/ai-notes/summaries/generate - サマリー生成
  * 
+ * スケジューラー (Phase D):
+ * - GET    /api/side-b/scheduler/status   - スケジューラー状態取得
+ * - POST   /api/side-b/scheduler/start    - スケジューラー開始
+ * - POST   /api/side-b/scheduler/stop     - スケジューラー停止
+ * - PUT    /api/side-b/scheduler/config   - スケジューラー設定更新
+ * - POST   /api/side-b/scheduler/run-daily-plan - 日次プラン手動実行
+ * - POST   /api/side-b/scheduler/run-monitor - 監視手動実行
+ * 
  * 管理:
  * - POST   /api/side-b/cleanup            - 期限切れデータ削除
  */
@@ -275,5 +283,53 @@ router.post('/ai-notes/summaries/generate', sideBController.generateAINoteSummar
  * AIノート詳細を取得
  */
 router.get('/ai-notes/:id', sideBController.getAINoteById);
+
+// ===========================================
+// スケジューラー（Phase D）
+// ===========================================
+
+/**
+ * GET /api/side-b/scheduler/status
+ * スケジューラーの状態を取得
+ */
+router.get('/scheduler/status', sideBController.getSchedulerStatus);
+
+/**
+ * POST /api/side-b/scheduler/start
+ * スケジューラーを開始
+ */
+router.post('/scheduler/start', sideBController.startScheduler);
+
+/**
+ * POST /api/side-b/scheduler/stop
+ * スケジューラーを停止
+ */
+router.post('/scheduler/stop', sideBController.stopScheduler);
+
+/**
+ * PUT /api/side-b/scheduler/config
+ * スケジューラー設定を更新
+ * 
+ * Body:
+ * - enabled?: boolean
+ * - symbols?: string[]
+ * - timeframe?: string
+ * - monitorIntervalMs?: number
+ * - dailyPlanTimeUTC?: string
+ * - autoGenerateNote?: boolean
+ */
+router.put('/scheduler/config', sideBController.updateSchedulerConfig);
+
+/**
+ * POST /api/side-b/scheduler/run-daily-plan
+ * 日次プランを手動実行
+ */
+router.post('/scheduler/run-daily-plan', sideBController.runDailyPlanNow);
+
+/**
+ * POST /api/side-b/scheduler/run-monitor
+ * 監視を手動実行
+ */
+router.post('/scheduler/run-monitor', sideBController.runMonitorNow);
 
 export default router;

@@ -111,16 +111,37 @@ export async function createTradeFromPlan(
     interface ScenarioData {
       id: string;
       direction: TradeDirection;
-      entry: { triggerPrice: number; condition: string };
+      entry: { price: number; condition: string };
       stopLoss: { price: number };
       takeProfit: { price: number };
     }
+    
+    // シナリオ存在チェック
+    if (!scenarios || scenarios.length === 0) {
+      return { success: false, error: "プランにシナリオがありません" };
+    }
+    
     const scenario = scenarioId
       ? (scenarios as ScenarioData[]).find((s) => s.id === scenarioId)
       : (scenarios as ScenarioData[])[0]; // デフォルトは最初のシナリオ
     
     if (!scenario) {
       return { success: false, error: "シナリオが見つかりません" };
+    }
+    
+    // シナリオフィールドのバリデーション
+    const entryPrice = scenario.entry?.price;
+    const slPrice = scenario.stopLoss?.price;
+    const tpPrice = scenario.takeProfit?.price;
+    
+    if (entryPrice == null || isNaN(entryPrice)) {
+      return { success: false, error: `エントリー価格が無効です: ${JSON.stringify(scenario.entry)}` };
+    }
+    if (slPrice == null || isNaN(slPrice)) {
+      return { success: false, error: `ストップロス価格が無効です: ${JSON.stringify(scenario.stopLoss)}` };
+    }
+    if (tpPrice == null || isNaN(tpPrice)) {
+      return { success: false, error: `テイクプロフィット価格が無効です: ${JSON.stringify(scenario.takeProfit)}` };
     }
     
     // ポートフォリオを取得してオープン上限チェック
@@ -137,10 +158,10 @@ export async function createTradeFromPlan(
       scenarioId: scenario.id,
       symbol: plan.symbol,
       direction: scenario.direction,
-      plannedEntry: scenario.entry.triggerPrice,
-      stopLoss: scenario.stopLoss.price,
-      takeProfit: scenario.takeProfit.price,
-      entryCondition: scenario.entry.condition,
+      plannedEntry: entryPrice,
+      stopLoss: slPrice,
+      takeProfit: tpPrice,
+      entryCondition: scenario.entry.condition ?? "",
     };
     
     const trade = await createVirtualTrade(input);

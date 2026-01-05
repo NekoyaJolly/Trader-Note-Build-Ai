@@ -35,3 +35,16 @@ export {
   refreshPortfolioStats,
   getPortfolioSummary,
 } from './virtualTradeService';
+
+// 高安値ベース検証
+export {
+  verifyEntryCondition,
+  verifyExitCondition,
+  verifyTradeState,
+  sortOHLCVChronological,
+  summarizeVerificationResult,
+  type MinuteOHLCV,
+  type EntryVerificationResult,
+  type ExitVerificationResult,
+  type TradeVerificationResult,
+} from './tradeVerificationService';

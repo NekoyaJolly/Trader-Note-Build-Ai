@@ -16,7 +16,9 @@ import watchlistRoutes from './routes/watchlistRoutes';
 import pushRoutes from './routes/pushRoutes';
 import ohlcvRoutes from './backend/api/ohlcvRoutes';
 import { sideBRoutes } from './side-b/routes';
+import cronRoutes from './routes/cronRoutes';
 import { MatchingScheduler } from './utils/scheduler';
+import { getSideBScheduler } from './side-b/jobs/sideBScheduler';
 
 /**
  * TradeAssist Application
@@ -119,6 +121,9 @@ class App {
     
     // Side-B: AI トレードプラン生成
     this.app.use('/api/side-b', sideBRoutes);
+    
+    // Cron エンドポイント（Railway/Vercel Cron用）
+    this.app.use('/api/cron', cronRoutes);
 
     // グローバルエラーハンドラー: ルート内で発生した例外をキャッチしてサーバーを維持
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -192,6 +197,19 @@ class App {
           console.log('スケジューラーはCRON_ENABLEDがtrueの時のみ起動（現在は無効）');
         }
       }
+
+      // Side-B スケジューラー起動: SIDE_B_SCHEDULER_ENABLED が true の場合のみ自動開始
+      // 理由: AI取引は明示的に有効化する必要があるため、デフォルト無効
+      const sideBEnabled = process.env.SIDE_B_SCHEDULER_ENABLED === 'true';
+      if (sideBEnabled) {
+        console.log('Side-B スケジューラーを自動開始します...');
+        const sideBScheduler = getSideBScheduler({ enabled: true });
+        sideBScheduler.start();
+      } else {
+        if (!config.server.isProduction) {
+          console.log('Side-B スケジューラーはSIDE_B_SCHEDULER_ENABLEDがtrueの時のみ自動起動（UIから手動起動可能）');
+        }
+      }
     });
   }
 
@@ -200,6 +218,11 @@ class App {
    */
   public stop(): void {
     this.scheduler.stop();
+    
+    // Side-B スケジューラー停止
+    const sideBScheduler = getSideBScheduler();
+    sideBScheduler.stop();
+    
     if (this.server) {
       this.server.close(() => {
         console.log('HTTPサーバーを正常に停止しました');

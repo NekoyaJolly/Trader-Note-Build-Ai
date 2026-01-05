@@ -30,6 +30,8 @@ export interface VirtualTradeRecord {
   enteredAt: Date | null;
   stopLoss: number;
   takeProfit: number;
+  /** リスクリワード比（計算値） */
+  riskRewardRatio: number | null;
   exitPrice: number | null;
   exitedAt: Date | null;
   exitReason: string | null;
@@ -320,6 +322,15 @@ function toVirtualTradeRecord(trade: {
   createdAt: Date;
   updatedAt: Date;
 }): VirtualTradeRecord {
+  const plannedEntry = trade.plannedEntry.toNumber();
+  const stopLoss = trade.stopLoss.toNumber();
+  const takeProfit = trade.takeProfit.toNumber();
+  
+  // リスクリワード比を計算（リスク = |エントリー - SL|, リワード = |TP - エントリー|）
+  const risk = Math.abs(plannedEntry - stopLoss);
+  const reward = Math.abs(takeProfit - plannedEntry);
+  const riskRewardRatio = risk > 0 ? reward / risk : null;
+  
   return {
     id: trade.id,
     planId: trade.planId,
@@ -327,11 +338,12 @@ function toVirtualTradeRecord(trade: {
     symbol: trade.symbol,
     direction: trade.direction,
     status: trade.status,
-    plannedEntry: trade.plannedEntry.toNumber(),
+    plannedEntry,
     actualEntry: trade.actualEntry?.toNumber() ?? null,
     enteredAt: trade.enteredAt,
-    stopLoss: trade.stopLoss.toNumber(),
-    takeProfit: trade.takeProfit.toNumber(),
+    stopLoss,
+    takeProfit,
+    riskRewardRatio,
     exitPrice: trade.exitPrice?.toNumber() ?? null,
     exitedAt: trade.exitedAt,
     exitReason: trade.exitReason,

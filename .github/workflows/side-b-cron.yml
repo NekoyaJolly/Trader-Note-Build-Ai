@@ -1,0 +1,124 @@
+# Side-B 自動化 Cron ワークフロー
+#
+# 目的: Railway/Vercel Cronの代替としてGitHub Actionsで
+#       Side-Bの自動化タスクを定期実行する
+#
+# スケジュール:
+#   - 日次プラン生成: 毎日 00:00 UTC（09:00 JST）
+#   - 監視実行: 毎時 0分
+#
+# 必要なシークレット:
+#   - CRON_SECRET: Cron認証用秘密鍵
+#   - RAILWAY_API_URL: Railway API URL（例: https://trader-note-api.up.railway.app）
+
+name: Side-B Automation Cron
+
+on:
+  schedule:
+    # 日次プラン生成: 毎日 00:00 UTC（09:00 JST）
+    - cron: '0 0 * * *'
+    # 監視実行: 毎時 0分
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    inputs:
+      task:
+        description: '実行するタスク'
+        required: true
+        default: 'monitor'
+        type: choice
+        options:
+          - daily-plan
+          - monitor
+          - health
+
+env:
+  RAILWAY_API_URL: ${{ secrets.RAILWAY_API_URL || 'https://trader-note-api.up.railway.app' }}
+
+jobs:
+  daily-plan:
+    name: 日次プラン生成
+    runs-on: ubuntu-latest
+    # 00:00 UTC のスケジュール、または手動実行で daily-plan を選択した場合
+    if: |
+      (github.event_name == 'schedule' && github.event.schedule == '0 0 * * *') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'daily-plan')
+    steps:
+      - name: 日次プラン生成を実行
+        run: |
+          echo "🚀 日次プラン生成を開始..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X GET \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            "${{ env.RAILWAY_API_URL }}/api/cron/side-b/daily-plan")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          
+          echo "Response: $BODY"
+          echo "HTTP Code: $HTTP_CODE"
+          
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "✅ 日次プラン生成が成功しました"
+          else
+            echo "❌ 日次プラン生成が失敗しました"
+            exit 1
+          fi
+
+  monitor:
+    name: 監視実行
+    runs-on: ubuntu-latest
+    # 毎時スケジュール（00:00 UTC以外）、または手動実行で monitor を選択した場合
+    if: |
+      (github.event_name == 'schedule' && github.event.schedule == '0 * * * *') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'monitor')
+    steps:
+      - name: 監視を実行
+        run: |
+          echo "🔍 監視実行を開始..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X GET \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            "${{ env.RAILWAY_API_URL }}/api/cron/side-b/monitor")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          
+          echo "Response: $BODY"
+          echo "HTTP Code: $HTTP_CODE"
+          
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "✅ 監視実行が成功しました"
+          else
+            echo "❌ 監視実行が失敗しました"
+            exit 1
+          fi
+
+  health-check:
+    name: ヘルスチェック
+    runs-on: ubuntu-latest
+    # 手動実行で health を選択した場合のみ
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'health'
+    steps:
+      - name: ヘルスチェックを実行
+        run: |
+          echo "🏥 ヘルスチェックを開始..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X GET \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            "${{ env.RAILWAY_API_URL }}/api/cron/health")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          
+          echo "Response: $BODY"
+          echo "HTTP Code: $HTTP_CODE"
+          
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "✅ ヘルスチェックが成功しました"
+          else
+            echo "❌ ヘルスチェックが失敗しました"
+            exit 1
+          fi

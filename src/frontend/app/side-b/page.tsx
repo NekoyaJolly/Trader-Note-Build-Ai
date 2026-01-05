@@ -53,6 +53,14 @@ const phases = [
     gradient: "from-cyan-500 to-blue-600",
     href: "/side-b/ai-notes",
   },
+  {
+    id: "settings",
+    icon: "⚙️",
+    label: "Settings",
+    status: "ready", // Phase D スケジューラー設定
+    gradient: "from-slate-500 to-slate-600",
+    href: "/side-b/settings",
+  },
 ];
 
 // チャットメッセージ型

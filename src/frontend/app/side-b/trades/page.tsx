@@ -47,7 +47,7 @@ interface VirtualTrade {
   actualEntry: number | null;
   stopLoss: number;
   takeProfit: number;
-  riskRewardRatio: number;
+  riskRewardRatio: number | null;
   positionSize: number;
   status: TradeStatus;
   entryTime: string | null;
@@ -57,7 +57,7 @@ interface VirtualTrade {
   pnlPips: number | null;
   pnlAmount: number | null;
   pnlPercentage: number | null;
-  expiresAt: string;
+  expiresAt?: string;
   notes: string | null;
   createdAt: string;
   updatedAt: string;
@@ -127,8 +127,9 @@ const exitReasonToJapanese = (reason: ExitReason | null): string => {
   return map[reason];
 };
 
-// 数値をフォーマット
-const formatNumber = (value: number, decimals: number = 2): string => {
+// 数値をフォーマット（null/undefined対応）
+const formatNumber = (value: number | null | undefined, decimals: number = 2): string => {
+  if (value == null || isNaN(value)) return "-";
   return value.toLocaleString("ja-JP", {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
@@ -490,9 +491,11 @@ export default function TradesPage() {
                         <span className="text-white ml-1">1:{formatNumber(trade.riskRewardRatio, 1)}</span>
                       </div>
                     </div>
-                    <div className="mt-2 text-xs text-gray-500">
-                      有効期限: {new Date(trade.expiresAt).toLocaleString("ja-JP")}
-                    </div>
+                    {trade.expiresAt && (
+                      <div className="mt-2 text-xs text-gray-500">
+                        有効期限: {new Date(trade.expiresAt).toLocaleString("ja-JP")}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

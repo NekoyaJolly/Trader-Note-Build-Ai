@@ -45,6 +45,7 @@ import {
 } from '../repositories';
 import type { ExitReason, UpdatePortfolioSettings } from '../models';
 import { MarketDataService } from '../../services/marketDataService';
+import { getSideBScheduler, type SideBSchedulerConfig } from '../jobs/sideBScheduler';
 
 // MarketDataService インスタンス（OHLCV自動取得用）
 const marketDataService = new MarketDataService();
@@ -768,6 +769,118 @@ export class SideBController {
     } catch (error) {
       console.error('[SideBController] generateAINoteSummary error:', error);
       res.status(500).json({ error: 'サマリー生成に失敗しました' });
+    }
+  };
+
+  // ===========================================
+  // スケジューラー関連
+  // ===========================================
+
+  /**
+   * GET /api/side-b/scheduler/status
+   * スケジューラーの状態を取得
+   */
+  getSchedulerStatus = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const scheduler = getSideBScheduler();
+      const status = scheduler.getStatus();
+      res.json({ success: true, ...status });
+    } catch (error) {
+      console.error('[SideBController] getSchedulerStatus error:', error);
+      res.status(500).json({ error: 'スケジューラー状態の取得に失敗しました' });
+    }
+  };
+
+  /**
+   * POST /api/side-b/scheduler/start
+   * スケジューラーを開始
+   */
+  startScheduler = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const scheduler = getSideBScheduler();
+      scheduler.updateConfig({ enabled: true });
+      scheduler.start();
+      
+      const status = scheduler.getStatus();
+      res.json({ success: true, message: 'スケジューラーを開始しました', ...status });
+    } catch (error) {
+      console.error('[SideBController] startScheduler error:', error);
+      res.status(500).json({ error: 'スケジューラーの開始に失敗しました' });
+    }
+  };
+
+  /**
+   * POST /api/side-b/scheduler/stop
+   * スケジューラーを停止
+   */
+  stopScheduler = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const scheduler = getSideBScheduler();
+      scheduler.stop();
+      scheduler.updateConfig({ enabled: false });
+      
+      const status = scheduler.getStatus();
+      res.json({ success: true, message: 'スケジューラーを停止しました', ...status });
+    } catch (error) {
+      console.error('[SideBController] stopScheduler error:', error);
+      res.status(500).json({ error: 'スケジューラーの停止に失敗しました' });
+    }
+  };
+
+  /**
+   * PUT /api/side-b/scheduler/config
+   * スケジューラー設定を更新
+   */
+  updateSchedulerConfig = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { enabled, symbols, timeframe, monitorIntervalMs, dailyPlanTimeUTC, autoGenerateNote } = req.body;
+
+      const newConfig: Partial<SideBSchedulerConfig> = {};
+      if (typeof enabled === 'boolean') newConfig.enabled = enabled;
+      if (Array.isArray(symbols)) newConfig.symbols = symbols;
+      if (typeof timeframe === 'string') newConfig.timeframe = timeframe;
+      if (typeof monitorIntervalMs === 'number') newConfig.monitorIntervalMs = monitorIntervalMs;
+      if (typeof dailyPlanTimeUTC === 'string') newConfig.dailyPlanTimeUTC = dailyPlanTimeUTC;
+      if (typeof autoGenerateNote === 'boolean') newConfig.autoGenerateNote = autoGenerateNote;
+
+      const scheduler = getSideBScheduler();
+      scheduler.updateConfig(newConfig);
+      
+      const status = scheduler.getStatus();
+      res.json({ success: true, message: '設定を更新しました', ...status });
+    } catch (error) {
+      console.error('[SideBController] updateSchedulerConfig error:', error);
+      res.status(500).json({ error: 'スケジューラー設定の更新に失敗しました' });
+    }
+  };
+
+  /**
+   * POST /api/side-b/scheduler/run-daily-plan
+   * 日次プランを手動実行
+   */
+  runDailyPlanNow = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const scheduler = getSideBScheduler();
+      const result = await scheduler.runDailyPlanNow();
+      res.json({ success: result.success, message: result.message, data: result.data });
+    } catch (error) {
+      console.error('[SideBController] runDailyPlanNow error:', error);
+      res.status(500).json({ error: '日次プラン実行に失敗しました' });
+    }
+  };
+
+  /**
+   * POST /api/side-b/scheduler/run-monitor
+   * 監視を手動実行
+   */
+  runMonitorNow = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const scheduler = getSideBScheduler();
+      const result = await scheduler.runMonitorNow();
+      res.json({ success: result.success, message: result.message, data: result.data });
+    } catch (error) {
+      console.error('[SideBController] runMonitorNow error:', error);
+      res.status(500).json({ error: '監視実行に失敗しました' });
     }
   };
 }
