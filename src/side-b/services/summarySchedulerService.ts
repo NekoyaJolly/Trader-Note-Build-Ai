@@ -180,10 +180,22 @@ function generateRecommendation(
 // サマリー生成サービス
 // ========================================
 
+/**
+ * スケジューラー状態
+ */
+export interface SummarySchedulerStatus {
+  isRunning: boolean;
+  config: SchedulerConfig;
+  lastWeeklyRun?: Date;
+  lastMonthlyRun?: Date;
+}
+
 class SummarySchedulerService {
   private weeklyTask: cron.ScheduledTask | null = null;
   private monthlyTask: cron.ScheduledTask | null = null;
   private config: SchedulerConfig;
+  private lastWeeklyRun?: Date;
+  private lastMonthlyRun?: Date;
 
   constructor() {
     this.config = SchedulerConfigSchema.parse({});
@@ -254,11 +266,25 @@ class SummarySchedulerService {
   }
 
   /**
+   * スケジューラーの現在の状態を取得
+   */
+  getStatus(): SummarySchedulerStatus {
+    return {
+      isRunning: this.weeklyTask !== null || this.monthlyTask !== null,
+      config: this.config,
+      lastWeeklyRun: this.lastWeeklyRun,
+      lastMonthlyRun: this.lastMonthlyRun,
+    };
+  }
+
+  /**
    * 週次サマリーを生成
    */
   async generateWeeklySummary(): Promise<GeneratedSummary> {
     const { startDate, endDate } = getWeeklyPeriod();
-    return this.generateSummary('weekly', startDate, endDate);
+    const summary = await this.generateSummary('weekly', startDate, endDate);
+    this.lastWeeklyRun = new Date();
+    return summary;
   }
 
   /**
@@ -266,7 +292,9 @@ class SummarySchedulerService {
    */
   async generateMonthlySummary(): Promise<GeneratedSummary> {
     const { startDate, endDate } = getMonthlyPeriod();
-    return this.generateSummary('monthly', startDate, endDate);
+    const summary = await this.generateSummary('monthly', startDate, endDate);
+    this.lastMonthlyRun = new Date();
+    return summary;
   }
 
   /**

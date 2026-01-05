@@ -67,4 +67,14 @@ export {
   type SchedulerSummaryPeriod,
   type GeneratedSummary,
   type SchedulerConfig,
+  type SummarySchedulerStatus,
 } from './summarySchedulerService';
+
+// データクリーンアップ
+export {
+  executeCleanup,
+  getStorageStats,
+  dataCleanupService,
+  type CleanupConfig,
+  type CleanupResult,
+} from './dataCleanupService';

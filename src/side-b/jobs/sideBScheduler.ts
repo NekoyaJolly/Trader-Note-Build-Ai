@@ -13,11 +13,19 @@
  *    - pending → open → closed の状態遷移
  *    - 決済時にAI Note自動生成
  * 
+ * 3. 週次/月次サマリー自動生成
+ *    - 週次: 毎週土曜 UTC 22:00（NY市場閉場）
+ *    - 月次: 毎月1日 UTC 00:00
+ * 
+ * 4. 期限切れトレード自動キャンセル
+ *    - validUntilを過ぎたpendingトレードを自動キャンセル
+ * 
  * 設計思想:
  * - 高安値ベース検証: 終値のみより正確な約定判定
  * - 1時間間隔: API コスト最適化（25回/日/ペア、無料枠の3%）
  * - FX市場は平日24時間稼働、土日休場
  * - 米国サマータイム対応
+ * - **人間の介在なしに完全自動運用可能**
  * 
  * @see docs/side-b/TradeAssistant-AI.md
  */
@@ -27,6 +35,7 @@ import {
   monitorEntryConditions,
   monitorPositions,
   createTradeFromPlan,
+  expirePendingTrades,
   type MonitoringResult,
 } from '../services/virtualTradeService';
 import {
@@ -36,6 +45,8 @@ import {
   type TradeVerificationResult,
 } from '../services/tradeVerificationService';
 import { generateNoteFromTrade } from '../services/aiNoteService';
+import { summarySchedulerService } from '../services/summarySchedulerService';
+import { executeCleanup, type CleanupConfig } from '../services/dataCleanupService';
 import * as aiNoteRepository from '../repositories/aiNoteRepository';
 import {
   planRepository,
@@ -68,6 +79,16 @@ export interface SideBSchedulerConfig {
   dailyPlanTimeUTC: string;
   /** 決済時にNote自動生成するか */
   autoGenerateNote: boolean;
+  /** 週次/月次サマリーの自動生成を有効にするか */
+  autoSummary: boolean;
+  /** 期限切れトレードの自動キャンセルを有効にするか */
+  autoExpireTrades: boolean;
+  /** 古いデータの自動クリーンアップを有効にするか */
+  autoCleanup: boolean;
+  /** プランの保持日数（デフォルト: 30日） */
+  planRetentionDays: number;
+  /** 完了トレードの保持日数（デフォルト: 90日） */
+  tradeRetentionDays: number;
 }
 
 /**
@@ -85,6 +106,11 @@ const DEFAULT_CONFIG: SideBSchedulerConfig = {
   monitorIntervalMs: 60 * 60 * 1000,  // 1時間間隔（高安値ベース検証）
   dailyPlanTimeUTC: '00:00',  // UTC 00:00 = JST 09:00
   autoGenerateNote: true,
+  autoSummary: true,          // 週次/月次サマリー自動生成
+  autoExpireTrades: true,     // 期限切れ自動キャンセル
+  autoCleanup: true,          // 古いデータ自動クリーンアップ
+  planRetentionDays: 30,      // プランは30日保持
+  tradeRetentionDays: 90,     // 完了トレードは90日保持
 };
 
 /**
@@ -116,6 +142,20 @@ export interface SchedulerStatus {
   lastMonitorRun?: Date;
   marketStatus: MarketStatusInfo;
   errors: string[];
+  /** サマリースケジューラーの状態 */
+  summaryScheduler: {
+    isRunning: boolean;
+    weeklyEnabled: boolean;
+    monthlyEnabled: boolean;
+    lastWeeklyRun?: Date;
+    lastMonthlyRun?: Date;
+  };
+  /** 自動化機能の状態 */
+  automation: {
+    autoExpireTrades: boolean;
+    autoCleanup: boolean;
+    autoSummary: boolean;
+  };
 }
 
 // ===========================================
@@ -164,6 +204,9 @@ export class SideBScheduler {
     this.log(`  時間足: ${this.config.timeframe}`);
     this.log(`  監視間隔: ${this.config.monitorIntervalMs / 1000}秒`);
     this.log(`  日次プラン生成: ${this.config.dailyPlanTimeUTC} UTC`);
+    this.log(`  Note自動生成: ${this.config.autoGenerateNote ? '有効' : '無効'}`);
+    this.log(`  サマリー自動生成: ${this.config.autoSummary ? '有効' : '無効'}`);
+    this.log(`  期限切れ自動キャンセル: ${this.config.autoExpireTrades ? '有効' : '無効'}`);
     
     // 市場状態をログ
     const marketInfo = getMarketStatusJST();
@@ -174,6 +217,15 @@ export class SideBScheduler {
     
     // 日次プランジョブを開始
     this.startDailyPlanJob();
+
+    // 週次/月次サマリースケジューラーを連動起動
+    if (this.config.autoSummary) {
+      this.log('週次/月次サマリースケジューラーを連動起動します');
+      summarySchedulerService.start({
+        weeklyEnabled: true,
+        monthlyEnabled: true,
+      });
+    }
 
     this.isRunning = true;
     this.log('Side-Bスケジューラーが開始されました');
@@ -195,6 +247,11 @@ export class SideBScheduler {
     if (this.dailyPlanIntervalId) {
       clearInterval(this.dailyPlanIntervalId);
       this.dailyPlanIntervalId = undefined;
+    }
+
+    // サマリースケジューラーも連動停止
+    if (this.config.autoSummary) {
+      summarySchedulerService.stop();
     }
 
     this.isRunning = false;
@@ -223,6 +280,9 @@ export class SideBScheduler {
    * 現在の状態を取得
    */
   getStatus(): SchedulerStatus {
+    // サマリースケジューラーの状態を取得
+    const summaryStatus = summarySchedulerService.getStatus();
+
     return {
       isRunning: this.isRunning,
       config: this.config,
@@ -230,6 +290,18 @@ export class SideBScheduler {
       lastMonitorRun: this.lastMonitorRun,
       marketStatus: getMarketStatusJST(),
       errors: [...this.errors].slice(-10),  // 直近10件
+      summaryScheduler: {
+        isRunning: summaryStatus.isRunning,
+        weeklyEnabled: summaryStatus.config.weeklyEnabled,
+        monthlyEnabled: summaryStatus.config.monthlyEnabled,
+        lastWeeklyRun: summaryStatus.lastWeeklyRun,
+        lastMonthlyRun: summaryStatus.lastMonthlyRun,
+      },
+      automation: {
+        autoExpireTrades: this.config.autoExpireTrades,
+        autoCleanup: this.config.autoCleanup,
+        autoSummary: this.config.autoSummary,
+      },
     };
   }
 
@@ -346,8 +418,23 @@ export class SideBScheduler {
       processed: 0,
       entries: 0,
       exits: 0,
+      expired: 0,
       errors: [] as string[],
     };
+
+    // 期限切れトレードの自動キャンセル（autoExpireTradesが有効な場合）
+    if (this.config.autoExpireTrades) {
+      try {
+        const expiredCount = await expirePendingTrades();
+        results.expired = expiredCount;
+        if (expiredCount > 0) {
+          this.log(`期限切れトレードを ${expiredCount} 件キャンセルしました`);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '不明なエラー';
+        results.errors.push(`期限切れ処理: ${message}`);
+      }
+    }
 
     try {
       // 各シンボルについて処理
@@ -459,7 +546,16 @@ export class SideBScheduler {
         await this.generateNotesForClosedTrades();
       }
 
-      const message = `監視完了: 処理 ${results.processed}件, エントリー ${results.entries}件, 決済 ${results.exits}件`;
+      // 監視結果のサマリーメッセージを構築
+      const summaryParts = [
+        `処理 ${results.processed}件`,
+        `エントリー ${results.entries}件`,
+        `決済 ${results.exits}件`,
+      ];
+      if (results.expired > 0) {
+        summaryParts.push(`期限切れキャンセル ${results.expired}件`);
+      }
+      const message = `監視完了: ${summaryParts.join(', ')}`;
       this.log(message);
 
       if (results.errors.length > 0) {
@@ -558,6 +654,34 @@ export class SideBScheduler {
         const message = error instanceof Error ? error.message : '不明なエラー';
         this.addError(`[${symbol}] 日次プラン失敗: ${message}`);
         results.push({ symbol, success: false, error: message });
+      }
+    }
+
+    // 日次クリーンアップを実行（autoCleanupが有効な場合）
+    if (this.config.autoCleanup) {
+      try {
+        this.log('日次クリーンアップを実行中...');
+        const cleanupConfig: Partial<CleanupConfig> = {
+          cleanupExpiredResearch: true,
+          cleanupOldPlans: true,
+          planRetentionDays: this.config.planRetentionDays,
+          cleanupOldTrades: true,
+          tradeRetentionDays: this.config.tradeRetentionDays,
+        };
+        const cleanupResult = await executeCleanup(cleanupConfig);
+        
+        // 何か削除された場合のみログ出力
+        const totalDeleted = cleanupResult.expiredResearchCount 
+          + cleanupResult.oldPlansCount 
+          + cleanupResult.oldTradesCount;
+        if (totalDeleted > 0) {
+          this.log(`クリーンアップ完了: リサーチ ${cleanupResult.expiredResearchCount}件, ` +
+                   `プラン ${cleanupResult.oldPlansCount}件, ` +
+                   `トレード ${cleanupResult.oldTradesCount}件 削除`);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '不明なエラー';
+        this.addError(`クリーンアップエラー: ${message}`);
       }
     }
 
