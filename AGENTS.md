@@ -380,7 +380,8 @@ npm test -- --testTimeout=30000
 ## 補足情報
 
 ### 現在のテスト状況
-- 全テスト: 395/404 passing（2026/01/04 時点）
+- 全テスト: 566 テスト（541 パス、25 失敗 - cTrader 審査待ち）
+- 最終確認: 2026/01/06
 
 ### 主要ポート
 - Backend: 3100
@@ -392,9 +393,17 @@ npm test -- --testTimeout=30000
 - Express設定: [src/app.ts](src/app.ts)
 - DBスキーマ: [prisma/schema.prisma](prisma/schema.prisma)
 - フロントエンド: [src/frontend/](src/frontend/)
+- cTrader認証: [src/backend/services/ctrader/ctraderAuthService.ts](src/backend/services/ctrader/ctraderAuthService.ts)
+- リアルタイムワーカー: [scripts/run-realtime-worker.ts](scripts/run-realtime-worker.ts)
+
+### リアルタイム通知関連（Phase 2 完了）
+- `CTraderProvider`: cTrader WebSocket 接続
+- `RollingWindowService`: Tick→OHLCV 集約
+- `RealtimeSimilarityService`: リアルタイム類似度チェック
+- 詳細: [docs/realtime_similarity_notification_architecture.md](docs/realtime_similarity_notification_architecture.md)
 
 ---
 
-> **最終更新**: 2026/01/04  
+> **最終更新**: 2026/01/06  
 > **このファイルを信頼し、情報が不足している場合のみ追加の検索を行うこと。**
 

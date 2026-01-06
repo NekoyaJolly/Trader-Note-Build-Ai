@@ -17,10 +17,11 @@ TradeAssist は、トレード履歴を自動的に構造化したトレード�
 - ノートは「評価の主語」として設計（NoteEvaluator アーキテクチャ）
 
 ### 2. リアルタイム市場マッチング（Real-Time Market Matching）
-- 15分 / 1時間足のリアルタイム市場データ取得
+- **cTrader Open API（WebSocket/Tick）** によるリアルタイムデータ取得
+- 60秒ローリングウィンドウで Tick → OHLCV 集約
 - **NoteEvaluator 経由**でノートと現在市場を比較評価
 - 12次元コサイン類似度 + ルールベースチェック
-- 閾値超過時に通知発火
+- 閾値超過時に通知発火（24時間上限30件）
 
 ### 3. スマート通知（Smart Notifications）
 - プッシュ通知 / アプリ内通知
@@ -50,7 +51,9 @@ cp .env.example .env
 
 # Edit .env with your configuration
 # - AI_API_KEY: Your AI service API key (OpenAI, etc.)
-# - MARKET_API_KEY: Your market data API key
+# - MARKET_API_KEY: Your market data API key (Twelve Data)
+# - CTRADER_CLIENT_ID: cTrader Open API クライアントID
+# - CTRADER_CLIENT_SECRET: cTrader Open API シークレット
 # - PUSH_NOTIFICATION_KEY: Your push notification service key
 # - DATABASE_URL: PostgreSQL 接続文字列（例: postgresql://postgres:postgres@localhost:5432/tradeassist）
 
@@ -98,7 +101,7 @@ npm run dev
 ```
 
 * Backend: http://localhost:3100 (環境変数 `BACKEND_PORT` で変更可)
-* Frontend: http://localhost:3001 (デフォルト)
+* Frontend: http://localhost:3102 (デフォルト)
 
 ### Production Mode
 
@@ -374,10 +377,14 @@ Edit `.env` to configure:
 - `AI_API_KEY`: Your AI service API key
 - `AI_MODEL`: AI model to use (default: gpt-5-mini)
 - `AI_BASE_URL`: AI API base URL (default: https://api.openai.com/v1)
-- `MARKET_API_URL`: Market data API URL
-- `MARKET_API_KEY`: Market data API key
+- `MARKET_API_URL`: Market data API URL (Twelve Data)
+- `MARKET_API_KEY`: Market data API key (Twelve Data)
+- `CTRADER_CLIENT_ID`: cTrader Open API クライアントID
+- `CTRADER_CLIENT_SECRET`: cTrader Open API シークレット
+- `CTRADER_REDIRECT_URI`: OAuth コールバック URL
 - `MATCH_THRESHOLD`: Match score threshold (0-1, default: 0.75)
 - `CHECK_INTERVAL_MINUTES`: Matching check interval (default: 15)
+- `DAILY_NOTIFICATION_LIMIT`: 24時間あたりの通知上限（default: 30）
 - `CRON_ENABLED`: Enable scheduler (default: true)
 - `PUSH_NOTIFICATION_KEY`: Push notification service key
 
@@ -422,7 +429,7 @@ npm test -- src/services/__tests__/featureVectorService.test.ts
 npm test -- --coverage
 ```
 
-現在のテスト数: **365 テスト** 全パス
+現在のテスト数: **566 テスト**（541 パス、25 失敗 - cTrader 関連は審査待ち）
 
 ## Contributing
 

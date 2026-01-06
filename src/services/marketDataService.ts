@@ -78,6 +78,46 @@ export class MarketDataService {
   }
 
   /**
+   * シンボルを Twelve Data 形式に変換
+   * 
+   * 例:
+   * - BTCUSDT → BTC/USD
+   * - ETHUSDT → ETH/USD
+   * - XAUUSD → XAU/USD
+   * - EUR/USD → EUR/USD（そのまま）
+   * 
+   * @param symbol - 入力シンボル
+   * @returns Twelve Data 形式のシンボル
+   */
+  private normalizeSymbolForTwelveData(symbol: string): string {
+    // すでに / が含まれている場合はそのまま返す
+    if (symbol.includes('/')) {
+      return symbol;
+    }
+
+    // USDT ペアを USD に変換（例: BTCUSDT → BTC/USD）
+    if (symbol.endsWith('USDT')) {
+      const base = symbol.slice(0, -4);
+      return `${base}/USD`;
+    }
+
+    // USD ペアに / を挿入（例: XAUUSD → XAU/USD, EURUSD → EUR/USD）
+    if (symbol.endsWith('USD')) {
+      const base = symbol.slice(0, -3);
+      return `${base}/USD`;
+    }
+
+    // JPY ペアに / を挿入（例: USDJPY → USD/JPY）
+    if (symbol.endsWith('JPY')) {
+      const base = symbol.slice(0, -3);
+      return `${base}/JPY`;
+    }
+
+    // その他はそのまま返す（株式シンボルなど）
+    return symbol;
+  }
+
+  /**
    * API が設定されているか確認
    */
   isApiConfigured(): boolean {
@@ -126,9 +166,12 @@ export class MarketDataService {
     }
 
     try {
+      // シンボルを Twelve Data 形式に変換（例: ETHUSDT → ETH/USD）
+      const normalizedSymbol = this.normalizeSymbolForTwelveData(symbol);
+      
       // Twelve Data API で直近のローソク足を取得
       const interval = this.convertTimeframe(timeframe);
-      const url = `${this.apiUrl}/time_series?symbol=${encodeURIComponent(symbol)}&interval=${interval}&outputsize=1&apikey=${this.apiKey}`;
+      const url = `${this.apiUrl}/time_series?symbol=${encodeURIComponent(normalizedSymbol)}&interval=${interval}&outputsize=1&apikey=${this.apiKey}`;
       
       const response = await fetch(url);
       
@@ -363,8 +406,11 @@ export class MarketDataService {
     }
 
     try {
+      // シンボルを Twelve Data 形式に変換（例: ETHUSDT → ETH/USD）
+      const normalizedSymbol = this.normalizeSymbolForTwelveData(symbol);
+      
       const interval = this.convertTimeframe(timeframe);
-      const url = `${this.apiUrl}/time_series?symbol=${encodeURIComponent(symbol)}&interval=${interval}&outputsize=${limit}&apikey=${this.apiKey}`;
+      const url = `${this.apiUrl}/time_series?symbol=${encodeURIComponent(normalizedSymbol)}&interval=${interval}&outputsize=${limit}&apikey=${this.apiKey}`;
       
       const response = await fetch(url);
       
