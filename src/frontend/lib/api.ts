@@ -120,18 +120,29 @@ export async function markAllNotificationsAsRead(): Promise<void> {
  * GET /api/notifications/unread-count
  */
 export async function fetchUnreadNotificationCount(): Promise<number> {
-  const response = await fetch(`${API_BASE_URL}/api/notifications/unread-count`, {
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    // エラー時は0を返す（UIが壊れないように）
-    console.error(`未読数取得エラー: ${response.status} ${response.statusText}`);
+  // SSR時はスキップ（サーバーサイドではwindowが存在しない）
+  if (typeof window === "undefined") {
     return 0;
   }
 
-  const payload = await response.json();
-  return payload?.data?.unreadCount ?? 0;
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/notifications/unread-count`, {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      // エラー時は0を返す（UIが壊れないように）
+      console.error(`未読数取得エラー: ${response.status} ${response.statusText}`);
+      return 0;
+    }
+
+    const payload = await response.json();
+    return payload?.data?.unreadCount ?? 0;
+  } catch (error) {
+    // ネットワークエラー等の場合も0を返す
+    console.error("未読通知数の取得に失敗:", error);
+    return 0;
+  }
 }
 
 /**
@@ -447,20 +458,31 @@ export async function fetchIndicatorMetadata(category?: string): Promise<{
   indicators: IndicatorMetadata[];
   categories: string[];
 }> {
-  const url = category
-    ? `${API_BASE_URL}/api/indicators/metadata?category=${category}`
-    : `${API_BASE_URL}/api/indicators/metadata`;
-  
-  const response = await fetch(url, {
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    throw new Error(
-      `メタデータの取得に失敗しました: ${response.status} ${response.statusText}`
-    );
+  // SSR時はスキップ（サーバーサイドではwindowが存在しない）
+  if (typeof window === "undefined") {
+    return { indicators: [], categories: [] };
   }
-  const payload = await response.json();
-  return payload.data;
+
+  try {
+    const url = category
+      ? `${API_BASE_URL}/api/indicators/metadata?category=${category}`
+      : `${API_BASE_URL}/api/indicators/metadata`;
+    
+    const response = await fetch(url, {
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new Error(
+        `メタデータの取得に失敗しました: ${response.status} ${response.statusText}`
+      );
+    }
+    const payload = await response.json();
+    return payload.data;
+  } catch (error) {
+    // ネットワークエラー等の場合は空を返す
+    console.error("インジケーターメタデータの取得に失敗:", error);
+    return { indicators: [], categories: [] };
+  }
 }
 
 /**

@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Footer from "@/components/layout/Footer";
 import AppShell from "@/components/layout/AppShell";
+import { NekoAssistantProvider } from "@/components/characters";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -37,12 +38,14 @@ export default function RootLayout({
         </div>
 
         {/* アプリシェル（ヘッダー + サイドバー + メインコンテンツ） */}
-        <AppShell>
-          {/* メインコンテンツ領域 */}
-          <main className="relative z-10 min-h-screen px-3 sm:px-4 md:px-8 py-4 sm:py-6">{children}</main>
-          {/* 共通フッター */}
-          <Footer />
-        </AppShell>
+        <NekoAssistantProvider>
+          <AppShell>
+            {/* メインコンテンツ領域 */}
+            <main className="relative z-10 min-h-screen px-3 sm:px-4 md:px-8 py-4 sm:py-6">{children}</main>
+            {/* 共通フッター */}
+            <Footer />
+          </AppShell>
+        </NekoAssistantProvider>
       </body>
     </html>
   );

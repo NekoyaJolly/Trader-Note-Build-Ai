@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { Neko } from "@/components/characters";
+import type { NekoState } from "@/types/neko";
 
 /**
  * 初回オンボーディングコンポーネント
@@ -13,11 +15,20 @@ import { Button } from "@/components/ui/Button";
 export default function OnboardingIntro() {
   const router = useRouter();
   const [shouldShow, setShouldShow] = useState(false);
+  const [nekoState, setNekoState] = useState<NekoState>('idle');
+  const [nekoMessage, setNekoMessage] = useState('');
 
   useEffect(() => {
     try {
       const flag = localStorage.getItem("hasOnboarded");
       setShouldShow(!flag);
+      // オンボーディング表示時にNekoが挨拶
+      if (!flag) {
+        setTimeout(() => {
+          setNekoState('speaking');
+          setNekoMessage('はじめまして！\nボクはNekoだよ！\n一緒にトレードを記録しよう！');
+        }, 500);
+      }
     } catch {
       // localStorage 未対応環境でも安全に非表示とする
       setShouldShow(false);
@@ -25,17 +36,25 @@ export default function OnboardingIntro() {
   }, []);
 
   const handleTryNow = () => {
-    try {
-      localStorage.setItem("hasOnboarded", "true");
-    } catch {}
-    router.push("/import");
+    setNekoState('success');
+    setNekoMessage('やったー！\n一緒に頑張ろうね！');
+    setTimeout(() => {
+      try {
+        localStorage.setItem("hasOnboarded", "true");
+      } catch {}
+      router.push("/import");
+    }, 1000);
   };
 
   const handleLater = () => {
-    try {
-      localStorage.setItem("hasOnboarded", "true");
-    } catch {}
-    setShouldShow(false);
+    setNekoState('idle');
+    setNekoMessage('わかった！\nいつでも待ってるよ〜');
+    setTimeout(() => {
+      try {
+        localStorage.setItem("hasOnboarded", "true");
+      } catch {}
+      setShouldShow(false);
+    }, 1000);
   };
 
   if (!shouldShow) return null;
@@ -44,7 +63,18 @@ export default function OnboardingIntro() {
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center px-4">
       <Card className="max-w-xl w-full">
         <CardHeader>
-          <CardTitle>TradeAssist へようこそ</CardTitle>
+          <CardTitle className="flex items-center gap-4">
+            {/* Nekoキャラクター */}
+            <div className="flex-shrink-0">
+              <Neko 
+                state={nekoState} 
+                size={100} 
+                message={nekoMessage}
+                bubblePosition="right"
+              />
+            </div>
+            <span>TradeAssist へようこそ</span>
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-4 text-gray-900">
