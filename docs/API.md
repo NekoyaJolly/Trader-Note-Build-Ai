@@ -21,10 +21,14 @@ http://localhost:3100
 | `AI_API_KEY` | AI サービス API キー | （空文字） |
 | `AI_MODEL` | AI モデル名 | `gpt-5-mini` |
 | `AI_BASE_URL` | AI API ベース URL | `https://api.openai.com/v1` |
-| `MARKET_API_URL` | 市場データ API URL | （空文字） |
-| `MARKET_API_KEY` | 市場データ API キー | （空文字） |
+| `MARKET_API_URL` | 市場データ API URL（Twelve Data） | （空文字） |
+| `MARKET_API_KEY` | 市場データ API キー（Twelve Data） | （空文字） |
+| `CTRADER_CLIENT_ID` | cTrader Open API クライアント ID | （空文字） |
+| `CTRADER_CLIENT_SECRET` | cTrader Open API シークレット | （空文字） |
+| `CTRADER_REDIRECT_URI` | OAuth コールバック URL | Vercel 本番 URL |
 | `MATCH_THRESHOLD` | 一致判定しきい値 | `0.75` |
 | `CHECK_INTERVAL_MINUTES` | 定期マッチング間隔（分） | `15` |
+| `DAILY_NOTIFICATION_LIMIT` | 24時間あたりの通知上限 | `30` |
 | `CRON_ENABLED` | スケジューラ有効化フラグ | `true` |
 | `PUSH_NOTIFICATION_KEY` | プッシュ通知サービスキー | （空文字） |
 
@@ -43,6 +47,78 @@ http://localhost:3100
   "status": "ok",
   "timestamp": "2025-12-21T11:18:38.099Z",
   "schedulerRunning": true
+}
+```
+
+---
+
+### cTrader OAuth 認証
+
+#### GET /api/auth/ctrader/url
+cTrader OAuth 認証 URL を取得します。
+
+**応答:**
+```json
+{
+  "url": "https://openapi.ctrader.com/apps/auth?client_id=xxx&redirect_uri=xxx&scope=accounts"
+}
+```
+
+---
+
+#### POST /api/auth/ctrader/exchange
+認可コードをアクセストークンに交換します。
+
+**リクエストボディ:**
+```json
+{
+  "code": "authorization_code_from_callback"
+}
+```
+
+**応答:**
+```json
+{
+  "success": true,
+  "expiresAt": "2026-01-07T12:00:00.000Z"
+}
+```
+
+---
+
+#### GET /api/auth/ctrader/status
+cTrader 接続状態を確認します。
+
+**応答:**
+```json
+{
+  "connected": true,
+  "expiresAt": "2026-01-07T12:00:00.000Z"
+}
+```
+
+---
+
+#### POST /api/auth/ctrader/refresh
+アクセストークンをリフレッシュします。
+
+**応答:**
+```json
+{
+  "success": true,
+  "expiresAt": "2026-01-08T12:00:00.000Z"
+}
+```
+
+---
+
+#### DELETE /api/auth/ctrader
+cTrader 接続を解除します（トークン削除）。
+
+**応答:**
+```json
+{
+  "success": true
 }
 ```
 

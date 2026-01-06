@@ -17,6 +17,35 @@
 
 ---
 
+## 市場データソース
+
+### Side-A: リアルタイム通知
+
+- **cTrader Open API（WebSocket / Tick）** を使用
+- OAuth 2.0 認証（ユーザーの cTrader ID で認証）
+- 60秒ローリングウィンドウで Tick → OHLCV 集約
+- 遅延: 1〜3秒（最大5秒）
+
+### Side-B: バックテスト / 日次バッチ
+
+- **Twelve Data REST API（無料枠）** を使用
+- 800回/日、8回/分の制限内で運用
+
+### 抽象化レイヤー
+
+```typescript
+interface IMarketDataProvider {
+  getOHLCV(symbol: string, interval: string, limit?: number): Promise<OHLCVBar[]>;
+  subscribeToTicks?(symbols: string[], callback: (tick: TickData) => void): void;
+}
+```
+
+実装:
+- `TwelveDataProvider` - Side-B用（REST）
+- `CTraderProvider` - Side-A用（WebSocket）
+
+---
+
 ## NoteEvaluator アーキテクチャ（正式仕様）
 
 ### 設計思想
@@ -315,6 +344,27 @@ Manual Execution on Exchange (NO AUTO-TRADE)
 - Fetch real-time market data
 - Calculate technical indicators (RSI, MACD)
 - Determine market trends
+
+**CTraderProvider** (Side-A リアルタイム)
+- cTrader Open API WebSocket 接続
+- OAuth 2.0 認証（CTraderAuthService 経由）
+- 複数シンボル Tick 購読
+- 自動再接続 / エラーハンドリング
+
+**CTraderAuthService**
+- OAuth トークン交換・リフレッシュ
+- CTraderToken テーブルへの永続化
+- トークン期限管理
+
+**RollingWindowService**
+- 60秒ローリングウィンドウ管理
+- Tick → OHLCV 集約
+- シンボル別バッファ
+
+**RealtimeSimilarityService**
+- リアルタイム類似度チェック
+- ノート評価 → 通知トリガー
+- 24時間上限制御
 
 **MatchingService**
 - Compare historical notes with current market
