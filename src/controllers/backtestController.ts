@@ -9,6 +9,7 @@
  */
 
 import { Request, Response } from 'express';
+import { getValidatedQuery } from '../middleware/validateRequest';
 import { BacktestService, BacktestParams, BacktestSummary } from '../services/backtestService';
 import { checkDataCoverage, CoverageCheckResult } from '../backend/services/strategyBacktestService';
 
@@ -115,7 +116,8 @@ export class BacktestController {
   getHistory = async (req: Request, res: Response): Promise<void> => {
     try {
       const { noteId } = req.params;
-      const limit = parseInt(req.query.limit as string) || 10;
+      const { limit: limitStr } = getValidatedQuery<{ limit?: string }>(res);
+      const limit = parseInt(limitStr || '') || 10;
 
       if (!noteId) {
         res.status(400).json({ error: 'noteId は必須です' });

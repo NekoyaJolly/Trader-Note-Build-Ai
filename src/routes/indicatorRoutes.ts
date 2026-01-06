@@ -16,7 +16,7 @@
 import { Router, Request, Response } from 'express';
 import { indicatorSettingsService, SaveIndicatorConfigRequest } from '../services/indicatorSettingsService';
 import { INDICATOR_METADATA, IndicatorId, IndicatorCategory } from '../models/indicatorConfig';
-import { validateBody, validateParams, validateQuery } from '../middleware/validateRequest';
+import { validateBody, validateParams, validateQuery, getValidatedQuery } from '../middleware/validateRequest';
 import {
   IndicatorIdParamSchema,
   SaveIndicatorSettingsRequestSchema,
@@ -180,7 +180,7 @@ router.get(
   validateQuery(GetMetadataQuerySchema),
   async (req: Request, res: Response) => {
     try {
-      const { category } = req.query;
+      const { category } = getValidatedQuery<{ category?: string }>(res);
 
       let indicators = [...INDICATOR_METADATA];
 

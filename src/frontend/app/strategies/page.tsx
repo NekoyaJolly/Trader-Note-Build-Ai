@@ -13,6 +13,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { fetchStrategies, deleteStrategy, updateStrategyStatus, duplicateStrategy } from "@/lib/api";
 import type { Strategy, StrategyStatus } from "@/types/strategy";
+import { NeonButton } from "@/components/ui/NeonButton";
 
 // ============================================
 // サブコンポーネント: ストラテジーカード
@@ -251,50 +252,69 @@ export default function StrategiesPage() {
 
   return (
     <div className="max-w-6xl mx-auto">
-      {/* ヘッダー */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
-              <div>
-                <h1 className="text-2xl font-bold text-gray-200">ストラテジー</h1>
-                <p className="text-gray-400 text-sm">
-                  インジケーター条件を組み合わせたエントリー戦略を管理
-                </p>
-              </div>
-              <Link
-                href="/strategies/new"
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors flex items-center gap-2 w-fit"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                新規作成
-              </Link>
-            </div>
+      {/* ヘッダー + フィルタータブ（1行） */}
+      <div className="flex items-center justify-between gap-2 mb-6">
+        <h1 className="text-base sm:text-lg font-bold text-white whitespace-nowrap flex items-center gap-1.5">
+          <span>📈</span>
+          <span>ストラテジー</span>
+        </h1>
+        <div className="flex items-center gap-2">
+          <div className="flex gap-2">
+            <NeonButton
+              onClick={() => setStatusFilter("all")}
+              color="purple"
+              size="sm"
+              variant={statusFilter === "all" ? "outline" : "ghost"}
+              className="w-16 sm:w-[72px] justify-center text-xs"
+            >
+              All
+            </NeonButton>
+            <NeonButton
+              onClick={() => setStatusFilter("draft")}
+              color="orange"
+              size="sm"
+              variant={statusFilter === "draft" ? "outline" : "ghost"}
+              className="w-16 sm:w-[72px] justify-center text-xs"
+            >
+              Draft
+            </NeonButton>
+            <NeonButton
+              onClick={() => setStatusFilter("active")}
+              color="green"
+              size="sm"
+              variant={statusFilter === "active" ? "outline" : "ghost"}
+              className="w-16 sm:w-[72px] justify-center text-xs"
+            >
+              Active
+            </NeonButton>
+            <NeonButton
+              onClick={() => setStatusFilter("archived")}
+              color="slate"
+              size="sm"
+              variant={statusFilter === "archived" ? "outline" : "ghost"}
+              className="w-16 sm:w-[72px] justify-center text-xs"
+            >
+              Archive
+            </NeonButton>
+          </div>
+        </div>
+      </div>
 
-            {/* フィルター・検索 */}
-            <div className="flex flex-col sm:flex-row gap-4 mb-6">
-              {/* 検索 */}
-              <div className="flex-1">
-                <input
-                  type="text"
-                  placeholder="名前、説明、シンボル、タグで検索..."
-                  className="w-full px-4 py-2 rounded-lg bg-slate-800 text-gray-200 border border-slate-700 focus:border-blue-500 focus:outline-none"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-              </div>
-
-              {/* ステータスフィルター */}
-              <select
-                className="px-4 py-2 rounded-lg bg-slate-800 text-gray-200 border border-slate-700 focus:border-blue-500 focus:outline-none"
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as StrategyStatus | "all")}
-              >
-                <option value="all">すべてのステータス</option>
-                <option value="active">アクティブ</option>
-                <option value="draft">下書き</option>
-                <option value="archived">アーカイブ</option>
-              </select>
-            </div>
+      {/* 検索 + 新規作成 */}
+      <div className="flex flex-col sm:flex-row gap-4 mb-6">
+        <div className="flex-1">
+          <input
+            type="text"
+            placeholder="名前、説明、シンボル、タグで検索..."
+            className="w-full px-4 py-2 rounded-lg bg-slate-800/50 text-gray-200 border border-slate-700 focus:border-purple-500 focus:outline-none"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+        <NeonButton href="/strategies/new" color="purple" size="md" icon="➕">
+          新規作成
+        </NeonButton>
+      </div>
 
             {/* コンテンツ */}
             {isLoading ? (
@@ -320,12 +340,9 @@ export default function StrategiesPage() {
                     : "ストラテジーがまだ登録されていません"}
                 </div>
                 {!searchQuery && (
-                  <Link
-                    href="/strategies/new"
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
-                  >
+                  <NeonButton href="/strategies/new" color="purple" size="md" icon="✨">
                     最初のストラテジーを作成
-                  </Link>
+                  </NeonButton>
                 )}
               </div>
             ) : (

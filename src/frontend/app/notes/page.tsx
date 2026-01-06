@@ -18,7 +18,7 @@ import { fetchNotes, fetchNoteStatusCounts } from "@/lib/api";
 import type { NoteListItem, NoteStatus, NoteStatusCounts, NoteSummary } from "@/types/note";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/Alert";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { Button } from "@/components/ui/Button";
+import { NeonButton } from "@/components/ui/NeonButton";
 import { Badge } from "@/components/ui/Badge";
 import EmptyState from "@/components/EmptyState";
 
@@ -116,56 +116,50 @@ export default function NotesPage() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      {/* ヘッダー */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4">
-        <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-white">📊 トレードノート</h1>
-        <Button asChild size="sm" className="bg-gradient-to-r from-pink-500 to-violet-500 hover:opacity-90 w-fit">
-          <Link href="/import">+ インポート</Link>
-        </Button>
-      </div>
-
-      {/* ステータスフィルタタブ */}
-      <div className="flex flex-wrap gap-1.5 sm:gap-2">
-        <button
-          onClick={() => setStatusFilter("all")}
-          className={`px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-            statusFilter === "all"
-              ? "bg-gradient-to-r from-pink-500 to-violet-500 text-white"
-              : "bg-slate-700/50 text-gray-400 hover:text-white hover:bg-slate-700"
-          }`}
-        >
-          全件 {statusCounts && <span className="ml-1 opacity-75">({statusCounts.total})</span>}
-        </button>
-        <button
-          onClick={() => setStatusFilter("draft")}
-          className={`px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-            statusFilter === "draft"
-              ? "bg-yellow-600/30 text-yellow-400 border border-yellow-600/50"
-              : "bg-slate-700/50 text-gray-400 hover:text-yellow-400 hover:bg-slate-700"
-          }`}
-        >
-          下書き {statusCounts && <span className="ml-1 opacity-75">({statusCounts.draft})</span>}
-        </button>
-        <button
-          onClick={() => setStatusFilter("active")}
-          className={`px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-            statusFilter === "active"
-              ? "bg-green-600/30 text-green-400 border border-green-600/50"
-              : "bg-slate-700/50 text-gray-400 hover:text-green-400 hover:bg-slate-700"
-          }`}
-        >
-          承認済 {statusCounts && <span className="ml-1 opacity-75">({statusCounts.active})</span>}
-        </button>
-        <button
-          onClick={() => setStatusFilter("archived")}
-          className={`px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${
-            statusFilter === "archived"
-              ? "bg-red-600/30 text-red-400 border border-red-600/50"
-              : "bg-slate-700/50 text-gray-400 hover:text-red-400 hover:bg-slate-700"
-          }`}
-        >
-          アーカイブ {statusCounts && <span className="ml-1 opacity-75">({statusCounts.archived})</span>}
-        </button>
+      {/* ヘッダー + フィルタタブ（1行） */}
+      <div className="flex items-center justify-between gap-2 pb-1">
+        <h1 className="text-base sm:text-lg font-bold text-white whitespace-nowrap flex items-center gap-1.5">
+          <span>📊</span>
+          <span>トレードノート</span>
+        </h1>
+        <div className="flex gap-2">
+          <NeonButton
+            onClick={() => setStatusFilter("all")}
+            color="blue"
+            size="sm"
+            variant={statusFilter === "all" ? "outline" : "ghost"}
+            className="w-16 sm:w-[72px] justify-center text-xs"
+          >
+            All
+          </NeonButton>
+          <NeonButton
+            onClick={() => setStatusFilter("draft")}
+            color="orange"
+            size="sm"
+            variant={statusFilter === "draft" ? "outline" : "ghost"}
+            className="w-16 sm:w-[72px] justify-center text-xs"
+          >
+            Draft
+          </NeonButton>
+          <NeonButton
+            onClick={() => setStatusFilter("active")}
+            color="green"
+            size="sm"
+            variant={statusFilter === "active" ? "outline" : "ghost"}
+            className="w-16 sm:w-[72px] justify-center text-xs"
+          >
+            Active
+          </NeonButton>
+          <NeonButton
+            onClick={() => setStatusFilter("archived")}
+            color="slate"
+            size="sm"
+            variant={statusFilter === "archived" ? "outline" : "ghost"}
+            className="w-16 sm:w-[72px] justify-center text-xs"
+          >
+            Archive
+          </NeonButton>
+        </div>
       </div>
 
       {/* Empty 状態 */}
@@ -181,7 +175,7 @@ export default function NotesPage() {
             ? "トレードデータをインポートすると、ここにノートが表示されます。"
             : "フィルタを変更するか、ノートの状態を変更してください。"
           }
-          actionLink={statusFilter === "all" ? { label: "CSVをインポート", href: "/import" } : undefined}
+          actionLink={{ label: "CSVをインポート", href: "/import" }}
         />
       ) : (
         // 一覧表示（テーブル）
@@ -213,9 +207,9 @@ export default function NotesPage() {
                       {getStatusBadge(note.status ?? "draft")}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <Button size="sm" asChild className="bg-gradient-to-r from-pink-500 to-violet-500 hover:opacity-90">
-                        <Link href={`/notes/${note.id}`}>詳細</Link>
-                      </Button>
+                      <NeonButton href={`/notes/${note.id}`} color="blue" size="sm">
+                        詳細
+                      </NeonButton>
                     </td>
                   </tr>
                 ))}

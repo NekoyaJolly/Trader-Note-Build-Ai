@@ -23,6 +23,7 @@
  */
 
 import { Request, Response } from 'express';
+import { getValidatedQuery } from '../../middleware/validateRequest';
 import {
   aiOrchestrator,
   researchRepository,
@@ -158,7 +159,12 @@ export class SideBController {
    */
   listResearch = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { symbol, validOnly, limit, offset } = req.query;
+      const { symbol, validOnly, limit, offset } = getValidatedQuery<{
+        symbol?: string;
+        validOnly?: string;
+        limit?: string;
+        offset?: string;
+      }>(res);
 
       const researches = await researchRepository.findMany({
         symbol: symbol as string | undefined,
@@ -302,7 +308,7 @@ export class SideBController {
   getPlanById = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const { withResearch } = req.query;
+      const { withResearch } = getValidatedQuery<{ withResearch?: string }>(res);
 
       let plan;
       if (withResearch === 'true') {
@@ -329,7 +335,14 @@ export class SideBController {
    */
   listPlans = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { symbol, targetDate, fromDate, toDate, limit, offset } = req.query;
+      const { symbol, targetDate, fromDate, toDate, limit, offset } = getValidatedQuery<{
+        symbol?: string;
+        targetDate?: string;
+        fromDate?: string;
+        toDate?: string;
+        limit?: string;
+        offset?: string;
+      }>(res);
 
       const plans = await planRepository.findMany({
         symbol: symbol as string | undefined,
@@ -504,7 +517,12 @@ export class SideBController {
    */
   listVirtualTrades = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { status, planId, symbol, limit } = req.query;
+      const { status, planId, symbol, limit } = getValidatedQuery<{
+        status?: string;
+        planId?: string;
+        symbol?: string;
+        limit?: string;
+      }>(res);
 
       // statusをVirtualTradeStatus型にキャスト（バリデーション省略）
       const validStatuses = ['pending', 'open', 'closed', 'expired', 'cancelled', 'invalidated'];
@@ -660,7 +678,14 @@ export class SideBController {
    */
   listAINotes = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { from, to, outcome, symbol, limit, offset } = req.query;
+      const { from, to, outcome, symbol, limit, offset } = getValidatedQuery<{
+        from?: string;
+        to?: string;
+        outcome?: string;
+        symbol?: string;
+        limit?: string;
+        offset?: string;
+      }>(res);
 
       // outcomeのバリデーション
       const validOutcomes = ['win', 'loss', 'breakeven'];
@@ -717,7 +742,11 @@ export class SideBController {
    */
   listAINoteSummaries = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { period, limit, offset } = req.query;
+      const { period, limit, offset } = getValidatedQuery<{
+        period?: string;
+        limit?: string;
+        offset?: string;
+      }>(res);
 
       // periodのバリデーション
       const validPeriods = ['daily', 'weekly', 'monthly'];
@@ -897,7 +926,7 @@ export class SideBController {
    */
   getComparison = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { period, symbol } = req.query;
+      const { period, symbol } = getValidatedQuery<{ period?: string; symbol?: string }>(res);
 
       // 期間のバリデーション
       const validPeriods = ['week', 'month', 'quarter', 'year', 'all'];
@@ -926,7 +955,7 @@ export class SideBController {
    */
   getComparisonDashboardData = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { period, symbol } = req.query;
+      const { period, symbol } = getValidatedQuery<{ period?: string; symbol?: string }>(res);
 
       // 期間のバリデーション
       const validPeriods = ['week', 'month', 'quarter', 'year', 'all'];
@@ -961,9 +990,14 @@ export class SideBController {
     try {
       const { summarySchedulerService } = await import('../services');
       
-      const period = req.query.period as 'weekly' | 'monthly' | undefined;
-      const limit = parseInt(req.query.limit as string) || 10;
-      const offset = parseInt(req.query.offset as string) || 0;
+      const { period: periodStr, limit: limitStr, offset: offsetStr } = getValidatedQuery<{
+        period?: string;
+        limit?: string;
+        offset?: string;
+      }>(res);
+      const period = periodStr as 'weekly' | 'monthly' | undefined;
+      const limit = parseInt(limitStr || '') || 10;
+      const offset = parseInt(offsetStr || '') || 0;
 
       const summaries = await summarySchedulerService.listSummaries({
         period,

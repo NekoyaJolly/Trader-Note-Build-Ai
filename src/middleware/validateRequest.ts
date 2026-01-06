@@ -1,15 +1,53 @@
 /**
- * Zod バリデーションミドルウェア
+ * Zod バリデーションミドルウェア（Express 5 対応版）
  * 
  * 目的: Expressルートでのリクエストバリデーションを簡素化
+ * 
+ * Express 5 では req.query / req.params が読み取り専用のため、
+ * バリデーション済みデータは res.locals に格納します。
+ * 
  * 使用例:
- *   router.post('/', validateBody(CreateProfileRequestSchema), handler);
+ *   // ルート定義
  *   router.get('/', validateQuery(GetNotesQuerySchema), handler);
+ *   
+ *   // ハンドラー内でのアクセス
+ *   const query = getValidatedQuery<GetNotesQuery>(res);
  */
 
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { formatZodError } from '../schemas/common';
+
+// ========================================
+// res.locals のキー定義
+// ========================================
+
+const VALIDATED_QUERY_KEY = 'validatedQuery';
+const VALIDATED_PARAMS_KEY = 'validatedParams';
+
+// ========================================
+// 型安全なアクセサー関数
+// ========================================
+
+/**
+ * バリデーション済みクエリパラメータを取得
+ * validateQuery ミドルウェア通過後に使用
+ */
+export function getValidatedQuery<T>(res: Response): T {
+  return res.locals[VALIDATED_QUERY_KEY] as T;
+}
+
+/**
+ * バリデーション済みURLパラメータを取得
+ * validateParams ミドルウェア通過後に使用
+ */
+export function getValidatedParams<T>(res: Response): T {
+  return res.locals[VALIDATED_PARAMS_KEY] as T;
+}
+
+// ========================================
+// バリデーションミドルウェア
+// ========================================
 
 /**
  * リクエストボディのバリデーションミドルウェア
@@ -34,7 +72,7 @@ export function validateBody<T>(schema: z.ZodSchema<T>) {
       return;
     }
     
-    // パース済みデータでreq.bodyを置換（型変換済み）
+    // req.body は Express 5 でも書き換え可能
     req.body = result.data;
     next();
   };
@@ -43,8 +81,10 @@ export function validateBody<T>(schema: z.ZodSchema<T>) {
 /**
  * クエリパラメータのバリデーションミドルウェア
  * 
- * バリデーション成功時: req.query にパース済みデータをセット
+ * バリデーション成功時: res.locals.validatedQuery にパース済みデータをセット
  * バリデーション失敗時: 400エラーを返却
+ * 
+ * 取得方法: getValidatedQuery<T>(res)
  */
 export function validateQuery<T>(schema: z.ZodSchema<T>) {
   return (req: Request, res: Response, next: NextFunction): void => {
@@ -63,9 +103,8 @@ export function validateQuery<T>(schema: z.ZodSchema<T>) {
       return;
     }
     
-    // パース済みデータでreq.queryを置換
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (req.query as any) = result.data;
+    // Express 5: res.locals に格納（req.query は読み取り専用）
+    res.locals[VALIDATED_QUERY_KEY] = result.data;
     next();
   };
 }
@@ -73,8 +112,10 @@ export function validateQuery<T>(schema: z.ZodSchema<T>) {
 /**
  * URLパラメータのバリデーションミドルウェア
  * 
- * バリデーション成功時: req.params にパース済みデータをセット
+ * バリデーション成功時: res.locals.validatedParams にパース済みデータをセット
  * バリデーション失敗時: 400エラーを返却
+ * 
+ * 取得方法: getValidatedParams<T>(res)
  */
 export function validateParams<T>(schema: z.ZodSchema<T>) {
   return (req: Request, res: Response, next: NextFunction): void => {
@@ -93,8 +134,8 @@ export function validateParams<T>(schema: z.ZodSchema<T>) {
       return;
     }
     
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (req.params as any) = result.data;
+    // Express 5: res.locals に格納（req.params は読み取り専用）
+    res.locals[VALIDATED_PARAMS_KEY] = result.data;
     next();
   };
 }
@@ -137,8 +178,7 @@ export function validateRequest<
           details: formatZodError(result.error),
         });
       } else {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (req.query as any) = result.data;
+        res.locals[VALIDATED_QUERY_KEY] = result.data;
       }
     }
     
@@ -151,8 +191,7 @@ export function validateRequest<
           details: formatZodError(result.error),
         });
       } else {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (req.params as any) = result.data;
+        res.locals[VALIDATED_PARAMS_KEY] = result.data;
       }
     }
     

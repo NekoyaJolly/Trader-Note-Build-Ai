@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { getValidatedQuery } from '../middleware/validateRequest';
 import { MatchingService } from '../services/matchingService';
 import { NotificationService } from '../services/notificationService';
 import { TradeNoteService } from '../services/tradeNoteService';
@@ -77,7 +78,12 @@ export class MatchingController {
    */
   getMatchHistory = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { symbol, limit, offset, minScore } = req.query;
+      const { symbol, limit, offset, minScore } = getValidatedQuery<{
+        symbol?: string;
+        limit?: string;
+        offset?: string;
+        minScore?: string;
+      }>(res);
 
       const matches = await this.matchingService.getMatchHistory({
         symbol: symbol as string | undefined,

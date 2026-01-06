@@ -70,6 +70,10 @@ export const INDICATOR_BOUND_TYPE: Record<IndicatorId, IndicatorBoundType> = {
   kc: 'unbounded',          // 価格ベース
   psar: 'unbounded',        // 価格ベース
   ichimoku: 'unbounded',    // 価格ベース
+  // === 追加インジケーター ===
+  adx: 'bounded',           // 0-100
+  supertrend: 'unbounded',  // 価格ベース
+  pivot: 'unbounded',       // 価格ベース
 };
 
 /**
@@ -259,6 +263,9 @@ function getIndicatorDisplayName(indicatorId: IndicatorId): string {
     kc: 'ケルトナーチャネル',
     psar: 'Parabolic SAR',
     ichimoku: '一目均衡表',
+    adx: 'ADX',
+    supertrend: 'Supertrend',
+    pivot: 'Pivot Points',
   };
 
   return displayNames[indicatorId] || indicatorId;

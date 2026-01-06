@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { getValidatedQuery } from '../middleware/validateRequest';
 import { NotificationService } from '../services/notificationService';
 import { NotificationLogRepository } from '../backend/repositories/notificationLogRepository';
 import { MatchingService } from '../services/matchingService';
@@ -105,8 +106,9 @@ export class NotificationController {
   getNotifications = async (req: Request, res: Response): Promise<void> => {
     try {
       // NotificationService が扱うファイルストアの通知を取得し、UI で必要な形へ変換する
-      const unreadOnly = req.query.unreadOnly === 'true';
-      const notifications = await this.notificationService.getNotifications(unreadOnly);
+      const { unreadOnly } = getValidatedQuery<{ unreadOnly?: string }>(res);
+      const isUnreadOnly = unreadOnly === 'true';
+      const notifications = await this.notificationService.getNotifications(isUnreadOnly);
       const result = notifications
         .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
         .map((n) => this.buildListItem(n));
@@ -328,8 +330,13 @@ export class NotificationController {
    */
   getNotificationLogs = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { symbol, noteId, status, limit } = req.query;
-      const limitNum = parseInt(limit as string) || 50;
+      const { symbol, noteId, status, limit } = getValidatedQuery<{
+        symbol?: string;
+        noteId?: string;
+        status?: string;
+        limit?: string;
+      }>(res);
+      const limitNum = parseInt(limit || '') || 50;
 
       let logs;
 

@@ -3,9 +3,11 @@
 /**
  * サイドバーナビゲーションコンポーネント
  * 
- * デスクトップ画面で表示される固定サイドバー
- * プロジェクト内の全ページへの遷移を提供
- * インジケーター設定機能を含む
+ * アコーディオン式カテゴリ分け:
+ * - Side-A: トレードノート関連
+ * - Side-B: AI アシスタント関連
+ * - Strategies: 戦略・分析ツール
+ * - Settings: アプリ設定
  * 
  * @see docs/phase12/UI_DESIGN_GUIDE.md
  */
@@ -13,6 +15,26 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect, useCallback } from "react";
+import {
+  Home,
+  FileText,
+  Upload,
+  Bell,
+  Bot,
+  Brain,
+  TrendingUp,
+  Target,
+  Activity,
+  BarChart3,
+  Database,
+  Settings,
+  ChevronDown,
+  X,
+  Sparkles,
+  Plus,
+  User,
+  type LucideIcon,
+} from "lucide-react";
 import IndicatorConfigModal from "@/components/IndicatorConfigModal";
 import { 
   fetchIndicatorSettings, 
@@ -26,200 +48,204 @@ import type {
   IndicatorParams,
   IndicatorId,
   IndicatorCategory,
-  CATEGORY_INFO,
 } from "@/types/indicator";
 
-// ナビゲーションアイテムの型定義
+// ============================================
+// 型定義
+// ============================================
+
+/** ナビゲーションアイテム */
 interface NavItem {
   href: string;
   label: string;
-  icon: React.ReactNode;
-  description?: string;
+  icon: LucideIcon;
+  color?: string;
   children?: NavItem[];
 }
 
-// SVGアイコンコンポーネント
-const HomeIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-  </svg>
-);
+/** カテゴリ定義 */
+interface NavCategory {
+  id: string;
+  label: string;
+  color: string;
+  items: NavItem[];
+  defaultOpen?: boolean;
+}
 
-const NoteIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-  </svg>
-);
+// ============================================
+// ナビゲーション構造定義
+// ============================================
 
-const NotificationIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-  </svg>
-);
+const navCategories: NavCategory[] = [
+  {
+    id: "side-a",
+    label: "Side-A",
+    color: "cyan",
+    defaultOpen: true,
+    items: [
+      {
+        href: "/",
+        label: "ホーム",
+        icon: Home,
+        color: "cyan",
+      },
+      {
+        href: "/notes",
+        label: "トレードノート",
+        icon: FileText,
+        color: "cyan",
+        children: [
+          { href: "/notes", label: "一覧", icon: FileText, color: "cyan" },
+          { href: "/import", label: "インポート", icon: Upload, color: "cyan" },
+          { href: "/notifications", label: "通知", icon: Bell, color: "cyan" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "side-b",
+    label: "Side-B",
+    color: "purple",
+    defaultOpen: false,
+    items: [
+      {
+        href: "/side-b",
+        label: "AIダッシュボード",
+        icon: Bot,
+        color: "purple",
+        children: [
+          { href: "/side-b", label: "ダッシュボード", icon: Bot, color: "purple" },
+          { href: "/side-b/ai-notes", label: "AIノート", icon: Brain, color: "purple" },
+          { href: "/side-b/trades", label: "仮想トレード", icon: TrendingUp, color: "purple" },
+          { href: "/side-b/strategies", label: "AI戦略", icon: Sparkles, color: "purple" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "strategies",
+    label: "Strategies",
+    color: "green",
+    defaultOpen: false,
+    items: [
+      {
+        href: "/strategies",
+        label: "ストラテジー",
+        icon: Target,
+        color: "green",
+        children: [
+          { href: "/strategies", label: "一覧", icon: Target, color: "green" },
+          { href: "/strategies/new", label: "新規作成", icon: Plus, color: "green" },
+          { href: "#indicators", label: "インジケーター", icon: Activity, color: "green" },
+        ],
+      },
+      {
+        href: "/backtest",
+        label: "バックテスト",
+        icon: BarChart3,
+        color: "green",
+      },
+      {
+        href: "/data-presets",
+        label: "ヒストリカルデータ",
+        icon: Database,
+        color: "green",
+      },
+    ],
+  },
+  {
+    id: "settings",
+    label: "Settings",
+    color: "slate",
+    defaultOpen: false,
+    items: [
+      {
+        href: "/settings",
+        label: "設定",
+        icon: Settings,
+        color: "slate",
+        children: [
+          { href: "/settings", label: "アプリ設定", icon: Settings, color: "slate" },
+          { href: "/settings/profiles", label: "プロファイル", icon: User, color: "slate" },
+        ],
+      },
+    ],
+  },
+];
 
-const ImportIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-  </svg>
-);
+// カテゴリ別のネオンカラー設定
+const CATEGORY_COLORS: Record<string, {
+  bg: string;
+  border: string;
+  text: string;
+  textHover: string;
+  glow: string;
+}> = {
+  cyan: {
+    bg: "from-cyan-500/20 to-blue-500/20",
+    border: "border-cyan-500/40",
+    text: "text-cyan-400",
+    textHover: "group-hover:text-cyan-300",
+    glow: "shadow-[0_0_10px_rgba(6,182,212,0.3)]",
+  },
+  purple: {
+    bg: "from-purple-500/20 to-pink-500/20",
+    border: "border-purple-500/40",
+    text: "text-purple-400",
+    textHover: "group-hover:text-purple-300",
+    glow: "shadow-[0_0_10px_rgba(168,85,247,0.3)]",
+  },
+  green: {
+    bg: "from-green-500/20 to-emerald-500/20",
+    border: "border-green-500/40",
+    text: "text-green-400",
+    textHover: "group-hover:text-green-300",
+    glow: "shadow-[0_0_10px_rgba(34,197,94,0.3)]",
+  },
+  slate: {
+    bg: "from-slate-500/20 to-gray-500/20",
+    border: "border-slate-500/40",
+    text: "text-slate-400",
+    textHover: "group-hover:text-slate-300",
+    glow: "shadow-[0_0_10px_rgba(100,116,139,0.3)]",
+  },
+};
 
-const SettingsIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-  </svg>
-);
-
-const OnboardingIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-  </svg>
-);
-
-const ChartIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-  </svg>
-);
-
-const SearchIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-  </svg>
-);
-
-const ChevronIcon = ({ isOpen }: { isOpen: boolean }) => (
-  <svg 
-    className={`w-4 h-4 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} 
-    fill="none" 
-    stroke="currentColor" 
-    viewBox="0 0 24 24"
-  >
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-  </svg>
-);
-
-// インジケーターアイコン
-const IndicatorIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
-  </svg>
-);
-
-// カテゴリ情報
-const CATEGORY_DISPLAY: Record<IndicatorCategory, { label: string; color: string }> = {
+// インジケーターカテゴリ表示
+const INDICATOR_CATEGORY_DISPLAY: Record<IndicatorCategory, { label: string; color: string }> = {
   momentum: { label: 'モメンタム', color: 'text-blue-400' },
   trend: { label: 'トレンド', color: 'text-green-400' },
   volatility: { label: 'ボラティリティ', color: 'text-yellow-400' },
   volume: { label: '出来高', color: 'text-purple-400' },
 };
 
-// ナビゲーション構造定義
-const navItems: NavItem[] = [
-  {
-    href: "/",
-    label: "ホーム",
-    icon: <HomeIcon />,
-    description: "ダッシュボード",
-  },
-  {
-    href: "/notes",
-    label: "トレードノート",
-    icon: <NoteIcon />,
-    description: "ノート一覧・管理",
-    children: [
-      {
-        href: "/notes",
-        label: "ノート一覧",
-        icon: <NoteIcon />,
-      },
-      {
-        href: "/import",
-        label: "インポート",
-        icon: <ImportIcon />,
-        description: "CSVからトレードを取り込み",
-      },
-      {
-        href: "/backtest",
-        label: "バックテスト",
-        icon: <ChartIcon />,
-        description: "ノートの優位性を検証",
-      },
-    ],
-  },
-  {
-    href: "/notifications",
-    label: "通知",
-    icon: <NotificationIcon />,
-    description: "マッチング通知",
-  },
-  {
-    href: "/strategies",
-    label: "ストラテジー",
-    icon: <ChartIcon />,
-    description: "エントリー戦略管理",
-  },
-  {
-    href: "/data-presets",
-    label: "データプリセット",
-    icon: <ImportIcon />,
-    description: "ヒストリカルデータ管理",
-  },
-  {
-    href: "/settings",
-    label: "設定",
-    icon: <SettingsIcon />,
-    description: "アプリ設定",
-  },
-  {
-    href: "/onboarding",
-    label: "オンボーディング",
-    icon: <OnboardingIcon />,
-    description: "初期設定ウィザード",
-  },
-];
+// ============================================
+// サイドバーコンポーネント
+// ============================================
 
-// サイドバーの状態を管理するコンテキスト用
 interface SidebarProps {
-  /** サイドバー表示状態 */
   isOpen?: boolean;
-  /** サイドバーを閉じるコールバック */
   onClose?: () => void;
 }
 
-/**
- * サイドバーナビゲーション（オーバーレイ式）
- * ハンバーガーメニューから展開、ナビ選択で自動閉じ
- */
 export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
-  // ナビゲーション選択時にサイドバーを閉じる
-  const handleNavClick = () => {
-    if (onClose) {
-      onClose();
-    }
-  };
-
   const pathname = usePathname();
+  
+  // カテゴリの展開状態
+  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    navCategories.forEach(cat => {
+      initial[cat.id] = cat.defaultOpen ?? false;
+    });
+    return initial;
+  });
+
+  // 子メニューの展開状態
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({
-    "/notes": true, // デフォルトで展開
+    "/notes": false,
   });
 
-  // カテゴリアコーディオンの状態
-  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({
-    main: true,      // メインメニューはデフォルト展開
-    tools: false,    // 分析ツール
-    utility: false,  // ユーティリティ
-  });
-
-  // カテゴリの展開/折りたたみトグル
-  const toggleCategory = (category: string) => {
-    setExpandedCategories(prev => ({
-      ...prev,
-      [category]: !prev[category],
-    }));
-  };
-
-  // インジケーター関連の状態
+  // インジケーター関連
   const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false);
   const [indicators, setIndicators] = useState<IndicatorMetadata[]>([]);
   const [activeConfigs, setActiveConfigs] = useState<IndicatorConfig[]>([]);
@@ -244,22 +270,29 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
     }
   }, []);
 
-  // 初回ロード
   useEffect(() => {
     loadIndicatorData();
   }, [loadIndicatorData]);
 
-  // インジケーターがアクティブか判定
+  // アクティブ判定
+  const isActive = (href: string) => {
+    if (href === "/" || href.startsWith("#")) {
+      return pathname === href || pathname === "/";
+    }
+    return pathname === href || pathname?.startsWith(href + "/");
+  };
+
+  // インジケーターがアクティブか
   const isIndicatorActive = (indicatorId: IndicatorId): boolean => {
     return activeConfigs.some(c => c.indicatorId === indicatorId);
   };
 
-  // 指定インジケーターの設定を取得
+  // 既存のコンフィグを取得
   const getExistingConfig = (indicatorId: IndicatorId): IndicatorConfig | undefined => {
     return activeConfigs.find(c => c.indicatorId === indicatorId);
   };
 
-  // インジケーター保存ハンドラ
+  // インジケーター保存
   const handleSaveIndicator = async (params: IndicatorParams) => {
     if (!selectedIndicator) return;
     try {
@@ -277,7 +310,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
     }
   };
 
-  // インジケーター削除ハンドラ
+  // インジケーター削除
   const handleDeleteIndicator = async () => {
     if (!selectedIndicator) return;
     try {
@@ -291,12 +324,12 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
     }
   };
 
-  // アクティブ判定
-  const isActive = (href: string) => {
-    if (href === "/") {
-      return pathname === "/";
-    }
-    return pathname === href || pathname?.startsWith(href + "/");
+  // カテゴリ展開トグル
+  const toggleCategory = (categoryId: string) => {
+    setExpandedCategories(prev => ({
+      ...prev,
+      [categoryId]: !prev[categoryId],
+    }));
   };
 
   // 子メニュー展開トグル
@@ -307,272 +340,273 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
     }));
   };
 
+  // ナビクリック時にサイドバーを閉じる
+  const handleNavClick = () => {
+    onClose?.();
+  };
+
   // ナビアイテムのレンダリング
-  const renderNavItem = (item: NavItem, depth = 0) => {
+  const renderNavItem = (item: NavItem, categoryColor: string, depth = 0) => {
     const active = isActive(item.href);
     const hasChildren = item.children && item.children.length > 0;
     const isExpanded = expandedMenus[item.href];
+    const colors = CATEGORY_COLORS[item.color || categoryColor];
+    const Icon = item.icon;
 
-    // 子メニューのいずれかがアクティブか
-    const isChildActive = hasChildren && item.children?.some(child => isActive(child.href));
+    // インジケーターは特別処理
+    if (item.href === "#indicators") {
+      const isCompact = depth > 0;
+      return (
+        <div key={item.href} className="w-full">
+          <button
+            onClick={() => setIndicatorMenuOpen(!indicatorMenuOpen)}
+            className={`
+              w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg
+              ${isCompact ? "text-xs" : "text-sm"} font-medium transition-all duration-200 group
+              ${indicatorMenuOpen || activeConfigs.length > 0
+                ? `bg-gradient-to-r ${colors.bg} text-white border ${colors.border} ${colors.glow}`
+                : "text-gray-400 hover:bg-slate-700/50 hover:text-white"
+              }
+            `}
+          >
+            <div className="flex items-center gap-2">
+              <Icon 
+                className={`w-4 h-4 ${indicatorMenuOpen || activeConfigs.length > 0 ? colors.text : `text-gray-500 ${colors.textHover}`}`}
+                strokeWidth={1.5}
+              />
+              <span className="flex items-center gap-2">
+                インジケーター
+                {activeConfigs.length > 0 && (
+                  <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-green-500/30 text-green-300">
+                    {activeConfigs.length}
+                  </span>
+                )}
+              </span>
+            </div>
+            <ChevronDown 
+              className={`w-4 h-4 transition-transform duration-200 ${indicatorMenuOpen ? "rotate-180" : ""}`}
+              strokeWidth={1.5}
+            />
+          </button>
 
-    return (
-      <div key={item.href} className="w-full">
-        {hasChildren ? (
-          // 子メニューを持つ場合はボタン
-          <>
+          {/* インジケーター一覧 */}
+          {indicatorMenuOpen && (
+            <div className="mt-1 ml-4 border-l border-slate-700 pl-2 space-y-1 max-h-48 overflow-y-auto">
+              {isLoading ? (
+                <p className="text-xs text-gray-500 px-3 py-2">読み込み中...</p>
+              ) : (
+                (['trend', 'momentum', 'volatility', 'volume'] as IndicatorCategory[]).map(category => {
+                  const categoryIndicators = indicators.filter(i => i.category === category);
+                  if (categoryIndicators.length === 0) return null;
+                  
+                  return (
+                    <div key={category} className="mb-2">
+                      <p className={`px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${INDICATOR_CATEGORY_DISPLAY[category].color}`}>
+                        {INDICATOR_CATEGORY_DISPLAY[category].label}
+                      </p>
+                      {categoryIndicators.map(indicator => {
+                        const isActiveInd = isIndicatorActive(indicator.id);
+                        const config = getExistingConfig(indicator.id);
+                        
+                        return (
+                          <button
+                            key={indicator.id}
+                            onClick={() => {
+                              setSelectedIndicator(indicator);
+                              setIsModalOpen(true);
+                            }}
+                            className={`
+                              w-full flex items-center justify-between px-2 py-1 rounded
+                              text-xs transition-all duration-200
+                              ${isActiveInd
+                                ? "text-white bg-slate-700/50"
+                                : "text-gray-400 hover:text-white hover:bg-slate-700/30"
+                              }
+                            `}
+                          >
+                            <span className="truncate">
+                              {config?.label || indicator.displayName}
+                            </span>
+                            {isActiveInd && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // 子メニューを持つ場合
+    if (hasChildren) {
+      const isChildActive = item.children?.some(child => isActive(child.href));
+      
+      return (
+        <div key={item.href} className="w-full">
+          <div className="flex items-center">
+            <Link
+              href={item.href}
+              onClick={handleNavClick}
+              className={`
+                flex-1 flex items-center gap-2 px-3 py-2 rounded-l-lg
+                text-sm font-medium transition-all duration-200 group
+                ${active || isChildActive
+                  ? `bg-gradient-to-r ${colors.bg} text-white border-l border-y ${colors.border} ${colors.glow}`
+                  : "text-gray-400 hover:bg-slate-700/50 hover:text-white"
+                }
+              `}
+            >
+              <Icon 
+                className={`w-4 h-4 ${active || isChildActive ? colors.text : `text-gray-500 ${colors.textHover}`}`}
+                strokeWidth={1.5}
+              />
+              <span>{item.label}</span>
+            </Link>
             <button
               onClick={() => toggleMenu(item.href)}
               className={`
-                w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg
-                text-sm font-medium transition-smooth group
+                px-2 py-2 rounded-r-lg transition-all duration-200
                 ${active || isChildActive
-                  ? "bg-gradient-to-r from-pink-500/20 to-violet-500/20 text-white border border-pink-500/30"
-                  : "text-gray-300 hover:bg-slate-700/50 hover:text-white"
+                  ? `bg-gradient-to-r ${colors.bg} text-white border-r border-y ${colors.border}`
+                  : "text-gray-400 hover:bg-slate-700/50 hover:text-white"
                 }
-                ${depth > 0 ? "pl-10" : ""}
               `}
             >
-              <div className="flex items-center gap-3">
-                <span className={`${active || isChildActive ? "text-pink-400" : "text-gray-400 group-hover:text-gray-300"}`}>
-                  {item.icon}
-                </span>
-                <span>{item.label}</span>
-              </div>
-              <ChevronIcon isOpen={isExpanded || false} />
+              <ChevronDown 
+                className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
+                strokeWidth={1.5}
+              />
             </button>
-            
-            {/* 子メニュー */}
-            {isExpanded && (
-              <div className="mt-1 ml-4 border-l border-slate-700 pl-2 space-y-1">
-                {item.children?.map(child => renderNavItem(child, depth + 1))}
-              </div>
-            )}
-          </>
-        ) : (
-          // 単独リンク - クリック時にサイドバーを閉じる
-          <Link
-            href={item.href}
-            onClick={handleNavClick}
-            className={`
-              flex items-center gap-3 px-3 py-2.5 rounded-lg
-              text-sm font-medium transition-smooth group
-              ${active
-                ? "bg-gradient-to-r from-pink-500/20 to-violet-500/20 text-white border border-pink-500/30"
-                : "text-gray-300 hover:bg-slate-700/50 hover:text-white"
-              }
-              ${depth > 0 ? "pl-6" : ""}
-            `}
-          >
-            <span className={`${active ? "text-pink-400" : "text-gray-400 group-hover:text-gray-300"}`}>
-              {item.icon}
-            </span>
-            <div className="flex flex-col">
-              <span>{item.label}</span>
-              {item.description && depth === 0 && (
-                <span className="text-xs text-gray-500">{item.description}</span>
-              )}
+          </div>
+          
+          {isExpanded && (
+            <div className="mt-1 ml-4 border-l border-slate-700 pl-2 space-y-1">
+              {item.children?.map(child => renderNavItem(child, categoryColor, depth + 1))}
             </div>
-            
-            {/* アクティブインジケーター */}
-            {active && (
-              <div className="absolute left-0 w-1 h-8 bg-gradient-to-b from-pink-500 to-violet-500 rounded-r-full" />
-            )}
-          </Link>
-        )}
-      </div>
+          )}
+        </div>
+      );
+    }
+
+    // 単独リンク
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        onClick={handleNavClick}
+        className={`
+          flex items-center gap-2 px-3 py-2 rounded-lg
+          text-sm font-medium transition-all duration-200 group
+          ${active
+            ? `bg-gradient-to-r ${colors.bg} text-white border ${colors.border} ${colors.glow}`
+            : "text-gray-400 hover:bg-slate-700/50 hover:text-white"
+          }
+          ${depth > 0 ? "text-xs" : ""}
+        `}
+      >
+        <Icon 
+          className={`w-4 h-4 ${active ? colors.text : `text-gray-500 ${colors.textHover}`}`}
+          strokeWidth={1.5}
+        />
+        <span>{item.label}</span>
+      </Link>
     );
   };
 
   return (
     <>
-      {/* オーバーレイ背景（サイドバー展開時） */}
+      {/* オーバーレイ */}
       {isOpen && (
         <div 
-          className="fixed inset-0 bg-black/50 z-40 transition-opacity duration-300"
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 transition-opacity duration-300"
           onClick={onClose}
           aria-hidden="true"
         />
       )}
 
-      {/* サイドバーパネル */}
+      {/* サイドバー */}
       <aside 
         className={`
           fixed top-0 left-0 z-50
-          h-screen w-72 sm:w-80
-          bg-slate-900 
-          transform transition-transform duration-300 ease-in-out
+          h-screen w-72
+          bg-slate-900/95 backdrop-blur-md border-r border-slate-700/50
+          transform transition-transform duration-300 ease-out
           ${isOpen ? "translate-x-0" : "-translate-x-full"}
         `}
       >
-        {/* ヘッダー部分（閉じるボタン） */}
-        <div className="flex items-center justify-between p-3 sm:p-4">
-          <span className="text-lg sm:text-xl font-bold neon-text">メニュー</span>
+        {/* ヘッダー */}
+        <div className="flex items-center justify-between p-4 border-b border-slate-700/50">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-purple-500 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+              <span className="text-white text-sm font-bold">T</span>
+            </div>
+            <span className="text-lg font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
+              TradeAssist
+            </span>
+          </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700 transition-all"
-            aria-label="メニューを閉じる"
+            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700/50 transition-all"
+            aria-label="閉じる"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <X className="w-5 h-5" strokeWidth={1.5} />
           </button>
         </div>
 
         {/* ナビゲーション */}
-        <nav className="flex-1 overflow-y-auto py-2 px-3 space-y-2">
-          {/* メインメニュー */}
-          <div className="space-y-1">
-            <button
-              onClick={() => toggleCategory('main')}
-              className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider hover:text-gray-300 transition-colors"
-            >
-              <span>メインメニュー</span>
-              <ChevronIcon isOpen={expandedCategories.main} />
-            </button>
-            {expandedCategories.main && (
-              <div className="space-y-1">
-                {navItems.slice(0, 4).map(item => renderNavItem(item))}
-              </div>
-            )}
-          </div>
-
-          {/* 分析ツール */}
-          <div className="pt-2 mt-2 border-t border-slate-700 space-y-1">
-            <button
-              onClick={() => toggleCategory('tools')}
-              className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider hover:text-gray-300 transition-colors"
-            >
-              <span className="flex items-center gap-2">
-                分析ツール
-                {activeConfigs.length > 0 && (
-                  <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-cyan-500/30 text-cyan-300">
-                    {activeConfigs.length}
-                  </span>
+        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-2">
+          {navCategories.map(category => {
+            const colors = CATEGORY_COLORS[category.color];
+            const isExpanded = expandedCategories[category.id];
+            
+            return (
+              <div key={category.id} className="space-y-1">
+                {/* カテゴリヘッダー */}
+                <button
+                  onClick={() => toggleCategory(category.id)}
+                  className={`
+                    w-full flex items-center justify-between px-3 py-2 rounded-lg
+                    text-xs font-semibold uppercase tracking-wider
+                    transition-all duration-200 border
+                    ${isExpanded 
+                      ? `${colors.text} bg-gradient-to-r ${colors.bg} ${colors.border} ${colors.glow}` 
+                      : `text-gray-400 border-slate-700/50 bg-slate-800/30 hover:bg-slate-700/50 hover:${colors.text} shadow-[0_0_8px_rgba(100,116,139,0.15)]`
+                    }
+                  `}
+                >
+                  <span>{category.label}</span>
+                  <ChevronDown 
+                    className={`w-3.5 h-3.5 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
+                    strokeWidth={2}
+                  />
+                </button>
+                
+                {/* カテゴリアイテム */}
+                {isExpanded && (
+                  <div className="space-y-1 pl-1">
+                    {category.items.map(item => renderNavItem(item, category.color))}
+                  </div>
                 )}
-              </span>
-              <ChevronIcon isOpen={expandedCategories.tools} />
-            </button>
-            {expandedCategories.tools && (
-              <>
-                {/* インジケーターボタン */}
-                <div className="w-full">
-                  <button
-                    onClick={() => setIndicatorMenuOpen(!indicatorMenuOpen)}
-                    className={`
-                      w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg
-                      text-sm font-medium transition-smooth group
-                      ${indicatorMenuOpen || activeConfigs.length > 0
-                        ? "bg-gradient-to-r from-cyan-500/20 to-blue-500/20 text-white border border-cyan-500/30"
-                        : "text-gray-300 hover:bg-slate-700/50 hover:text-white"
-                      }
-                    `}
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className={`${indicatorMenuOpen || activeConfigs.length > 0 ? "text-cyan-400" : "text-gray-400 group-hover:text-gray-300"}`}>
-                        <IndicatorIcon />
-                      </span>
-                      <span className="flex items-center gap-2">
-                        インジケーター
-                        {activeConfigs.length > 0 && (
-                          <span className="px-1.5 py-0.5 text-xs rounded-full bg-cyan-500/30 text-cyan-300">
-                            {activeConfigs.length}
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                    <ChevronIcon isOpen={indicatorMenuOpen} />
-                  </button>
-
-                  {/* インジケーター一覧メニュー */}
-                  {indicatorMenuOpen && (
-                    <div className="mt-1 ml-4 border-l border-slate-700 pl-2 space-y-1 max-h-64 overflow-y-auto">
-                      {isLoading ? (
-                        <p className="text-xs text-gray-500 px-3 py-2">読み込み中...</p>
-                      ) : (
-                        // カテゴリ別に表示
-                        (['trend', 'momentum', 'volatility', 'volume'] as IndicatorCategory[]).map(category => {
-                          const categoryIndicators = indicators.filter(i => i.category === category);
-                          if (categoryIndicators.length === 0) return null;
-                          
-                          return (
-                            <div key={category} className="mb-2">
-                              <p className={`px-3 py-1 text-[10px] font-semibold uppercase tracking-wider ${CATEGORY_DISPLAY[category].color}`}>
-                                {CATEGORY_DISPLAY[category].label}
-                              </p>
-                              {categoryIndicators.map(indicator => {
-                                const isActive = isIndicatorActive(indicator.id);
-                                const config = getExistingConfig(indicator.id);
-                                
-                                return (
-                                  <button
-                                    key={indicator.id}
-                                    onClick={() => {
-                                      setSelectedIndicator(indicator);
-                                      setIsModalOpen(true);
-                                    }}
-                                    className={`
-                                      w-full flex items-center justify-between px-3 py-1.5 rounded-md
-                                      text-xs transition-all duration-200
-                                      ${isActive
-                                        ? "text-white bg-slate-700/50"
-                                        : "text-gray-400 hover:text-white hover:bg-slate-700/30"
-                                      }
-                                    `}
-                                  >
-                                    <span className="truncate">
-                                      {config?.label || indicator.displayName}
-                                    </span>
-                                    {isActive && (
-                                      <span 
-                                        className="w-2 h-2 rounded-full flex-shrink-0"
-                                        style={{
-                                          background: 'linear-gradient(90deg, #06b6d4, #3b82f6)',
-                                          boxShadow: '0 0 8px #06b6d4, 0 0 16px rgba(6, 182, 212, 0.5)',
-                                          animation: 'neon-pulse 2s ease-in-out infinite',
-                                        }}
-                                      />
-                                    )}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* ユーティリティ */}
-          <div className="pt-2 mt-2 border-t border-slate-700 space-y-1">
-            <button
-              onClick={() => toggleCategory('utility')}
-              className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider hover:text-gray-300 transition-colors"
-            >
-              <span>ユーティリティ</span>
-              <ChevronIcon isOpen={expandedCategories.utility} />
-            </button>
-            {expandedCategories.utility && (
-              <div className="space-y-1">
-                {navItems.slice(4).map(item => renderNavItem(item))}
               </div>
-            )}
-          </div>
+            );
+          })}
         </nav>
 
-        {/* フッター情報 */}
-        <div className="p-4 border-t border-slate-700">
+        {/* フッター */}
+        <div className="p-4 border-t border-slate-700/50">
           <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-r from-pink-500 to-violet-500 flex items-center justify-center">
-              <span className="text-white text-sm font-bold">T</span>
+            <div className="w-8 h-8 rounded-full bg-gradient-to-r from-cyan-500 to-purple-500 flex items-center justify-center">
+              <span className="text-white text-xs font-bold">T</span>
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-white truncate">Trader</p>
-              <p className="text-xs text-gray-400 truncate">MVP Version</p>
+              <p className="text-[10px] text-gray-500">MVP Version</p>
             </div>
           </div>
         </div>
@@ -591,18 +625,6 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           onDelete={isIndicatorActive(selectedIndicator.id) ? handleDeleteIndicator : undefined}
         />
       )}
-
-      {/* ネオンアニメーション用のスタイル */}
-      <style jsx>{`
-        @keyframes neon-pulse {
-          0%, 100% {
-            box-shadow: 0 0 8px #06b6d4, 0 0 16px rgba(6, 182, 212, 0.5);
-          }
-          50% {
-            box-shadow: 0 0 12px #06b6d4, 0 0 24px rgba(6, 182, 212, 0.7);
-          }
-        }
-      `}</style>
     </>
   );
 }

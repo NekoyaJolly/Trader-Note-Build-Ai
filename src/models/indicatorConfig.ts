@@ -21,7 +21,7 @@
  * - volatility: ボラティリティ系（ATR, BB, KC 等）
  * - volume: 出来高系（OBV, VWAP, CMF 等）
  */
-export type IndicatorCategory = 'momentum' | 'trend' | 'volatility' | 'volume';
+export type IndicatorCategory = 'momentum' | 'trend' | 'volatility' | 'volume' | 'support_resistance';
 
 /**
  * サポートするインジケーター ID
@@ -51,7 +51,11 @@ export type IndicatorId =
   | 'tema'          // Triple Exponential Moving Average
   | 'kc'            // Keltner Channel
   | 'psar'          // Parabolic SAR
-  | 'ichimoku';     // Ichimoku Cloud
+  | 'ichimoku'      // Ichimoku Cloud
+  // 追加（3種）
+  | 'adx'           // Average Directional Index
+  | 'pivot'         // Pivot Points
+  | 'supertrend';   // Supertrend
 
 /**
  * インジケーターメタデータ
@@ -113,6 +117,10 @@ export interface IndicatorParams {
   basePeriod?: number;        // 基準線期間
   spanBPeriod?: number;       // 先行スパンB期間
   displacement?: number;      // 遅行スパン
+  // Supertrend用
+  multiplier?: number;        // ATR乗数
+  // Pivot用
+  pivotType?: 'standard' | 'fibonacci' | 'camarilla';  // 計算方式
 }
 
 /**
@@ -324,6 +332,31 @@ export const INDICATOR_METADATA: readonly IndicatorMetadata[] = [
     description: '一定期間の買い圧力・売り圧力を測定',
     defaultParams: { period: 20 },
     paramConstraints: { minPeriod: 1, maxPeriod: 100 },
+  },
+  // === 追加インジケーター ===
+  {
+    id: 'adx',
+    displayName: 'ADX（平均方向性指数）',
+    category: 'trend',
+    description: 'トレンドの強さを測定。25以上でトレンドあり',
+    defaultParams: { period: 14 },
+    paramConstraints: { minPeriod: 5, maxPeriod: 50 },
+  },
+  {
+    id: 'supertrend',
+    displayName: 'Supertrend',
+    category: 'trend',
+    description: 'ATRベースのトレンドフォロー指標',
+    defaultParams: { period: 10, multiplier: 3.0 },
+    paramConstraints: { minPeriod: 5, maxPeriod: 50 },
+  },
+  {
+    id: 'pivot',
+    displayName: 'Pivot Points',
+    category: 'support_resistance',
+    description: '前日の高値・安値・終値からサポート/レジスタンスを計算',
+    defaultParams: { pivotType: 'standard' },
+    paramConstraints: {},
   },
 ] as const;
 

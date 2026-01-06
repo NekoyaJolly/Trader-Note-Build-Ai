@@ -1,10 +1,10 @@
 /**
- * ストラテジー詳細ページ
+ * ストラテジー詳細ページ（編集モード統合版）
  * 
  * 目的:
  * - ストラテジーの詳細情報を表示
+ * - インライン編集モードで直接編集
  * - バージョン履歴の閲覧
- * - 編集・削除・バックテストへのナビゲーション
  */
 
 "use client";
@@ -17,8 +17,13 @@ import {
   deleteStrategy,
   updateStrategyStatus,
   duplicateStrategy,
+  updateStrategy,
+  fetchIndicatorMetadata,
 } from "@/lib/api";
-import type { Strategy, StrategyStatus, ConditionGroup, IndicatorCondition } from "@/types/strategy";
+import type { Strategy, StrategyStatus, ConditionGroup, IndicatorCondition, ExitSettings, TradeSide, SupportedSymbol, EntryTiming, UpdateStrategyRequest } from "@/types/strategy";
+import type { IndicatorMetadata } from "@/types/indicator";
+import ConditionBuilder from "@/components/strategy/ConditionBuilder";
+import { NeonButton } from "@/components/ui/NeonButton";
 
 // ============================================
 // 条件表示用サブコンポーネント
@@ -205,6 +210,15 @@ function ActionMenu({ strategy, onStatusChange, onDuplicate, onDelete }: ActionM
 }
 
 // ============================================
+// 定数
+// ============================================
+
+const SUPPORTED_SYMBOLS: SupportedSymbol[] = [
+  'USDJPY', 'EURJPY', 'GBPJPY', 'AUDJPY',
+  'EURUSD', 'GBPUSD', 'AUDUSD', 'XAUUSD',
+];
+
+// ============================================
 // メインコンポーネント
 // ============================================
 
@@ -216,6 +230,22 @@ export default function StrategyDetailPage() {
   const [strategy, setStrategy] = useState<Strategy | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // 編集モード状態
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [indicatorMetadata, setIndicatorMetadata] = useState<IndicatorMetadata[]>([]);
+  
+  // 編集用フォーム状態
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editSymbol, setEditSymbol] = useState<SupportedSymbol>("USDJPY");
+  const [editSide, setEditSide] = useState<TradeSide>("buy");
+  const [editEntryConditions, setEditEntryConditions] = useState<ConditionGroup | null>(null);
+  const [editExitSettings, setEditExitSettings] = useState<ExitSettings | null>(null);
+  const [editTags, setEditTags] = useState<string[]>([]);
+  const [editTagInput, setEditTagInput] = useState("");
+  const [changeNote, setChangeNote] = useState("");
 
   // ストラテジー取得
   useEffect(() => {
@@ -233,6 +263,85 @@ export default function StrategyDetailPage() {
     };
     loadStrategy();
   }, [strategyId]);
+
+  // インジケーターメタデータ取得（編集モード用）
+  useEffect(() => {
+    const loadMetadata = async () => {
+      try {
+        const data = await fetchIndicatorMetadata();
+        setIndicatorMetadata(data.indicators);
+      } catch (err) {
+        console.error("インジケーターメタデータの取得に失敗:", err);
+      }
+    };
+    loadMetadata();
+  }, []);
+
+  // 編集モード開始
+  const startEditMode = () => {
+    if (!strategy) return;
+    setEditName(strategy.name);
+    setEditDescription(strategy.description || "");
+    setEditSymbol(strategy.symbol as SupportedSymbol);
+    setEditSide(strategy.side);
+    setEditEntryConditions(strategy.currentVersion?.entryConditions as ConditionGroup || null);
+    setEditExitSettings(strategy.currentVersion?.exitSettings as ExitSettings || null);
+    setEditTags(strategy.tags || []);
+    setChangeNote("");
+    setIsEditMode(true);
+  };
+
+  // 編集モードキャンセル
+  const cancelEditMode = () => {
+    setIsEditMode(false);
+    setChangeNote("");
+  };
+
+  // 保存処理
+  const handleSave = async () => {
+    if (!strategy || !editEntryConditions || !editExitSettings) return;
+    
+    if (!editName.trim()) {
+      alert("ストラテジー名を入力してください");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const request: UpdateStrategyRequest = {
+        name: editName.trim(),
+        description: editDescription.trim() || undefined,
+        symbol: editSymbol,
+        side: editSide,
+        entryConditions: editEntryConditions,
+        exitSettings: editExitSettings,
+        tags: editTags,
+        changeNote: changeNote.trim() || undefined,
+      };
+      const updated = await updateStrategy(strategy.id, request);
+      setStrategy(updated);
+      setIsEditMode(false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "保存に失敗しました";
+      alert(message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // タグ追加
+  const handleAddTag = () => {
+    const trimmed = editTagInput.trim();
+    if (trimmed && !editTags.includes(trimmed)) {
+      setEditTags([...editTags, trimmed]);
+      setEditTagInput("");
+    }
+  };
+
+  // タグ削除
+  const handleRemoveTag = (tagToRemove: string) => {
+    setEditTags(editTags.filter(t => t !== tagToRemove));
+  };
 
   // 削除処理
   const handleDelete = async () => {
@@ -321,7 +430,9 @@ export default function StrategyDetailPage() {
         <ol className="flex items-center gap-1.5 text-xs text-gray-500">
           <li><Link href="/strategies" className="hover:text-cyan-400 transition-colors">ストラテジー</Link></li>
           <li>/</li>
-          <li className="text-gray-300 truncate max-w-[150px] sm:max-w-[200px]">{strategy.name}</li>
+          <li className="text-gray-300 truncate max-w-[150px] sm:max-w-[200px]">
+            {isEditMode ? "編集中" : strategy.name}
+          </li>
         </ol>
       </nav>
 
@@ -329,87 +440,251 @@ export default function StrategyDetailPage() {
       <div className="card-surface p-3 sm:p-4 mb-3 sm:mb-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
-            {/* タイトル行 */}
-            <div className="flex items-center gap-2 mb-1">
-              <h1 className="text-base sm:text-lg font-bold text-white truncate">{strategy.name}</h1>
-              <span className={`px-1.5 py-0.5 text-[10px] rounded border ${statusConfig[strategy.status].color} ${statusConfig[strategy.status].glow}`}>
-                {statusConfig[strategy.status].label}
-              </span>
-            </div>
-            {/* サブ情報 */}
-            <div className="flex items-center gap-2 text-xs text-gray-400">
-              <span className="font-mono text-cyan-400">{strategy.symbol}</span>
-              <span className={strategy.side === "buy" ? "text-green-400" : "text-red-400"}>
-                {strategy.side === "buy" ? "買い" : "売り"}
-              </span>
-              {currentVersion && (
-                <span className="text-gray-500">v{currentVersion.versionNumber}</span>
-              )}
-            </div>
+            {isEditMode ? (
+              /* 編集モード: 名前 + シンボル + サイドを1行に */
+              <div className="flex items-center gap-2 flex-wrap">
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="flex-1 min-w-[120px] text-sm font-bold bg-slate-800/50 text-white rounded px-2 py-0.5 border border-slate-600 focus:border-purple-500 focus:outline-none"
+                  placeholder="ストラテジー名"
+                />
+                <select
+                  value={editSymbol}
+                  onChange={(e) => setEditSymbol(e.target.value as SupportedSymbol)}
+                  className="px-1.5 py-0.5 text-[10px] rounded bg-slate-800/50 text-cyan-400 border border-slate-600 focus:border-purple-500 focus:outline-none"
+                >
+                  {SUPPORTED_SYMBOLS.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+                <select
+                  value={editSide}
+                  onChange={(e) => setEditSide(e.target.value as TradeSide)}
+                  className={`px-1.5 py-0.5 text-[10px] rounded bg-slate-800/50 border border-slate-600 focus:border-purple-500 focus:outline-none ${editSide === 'buy' ? 'text-green-400' : 'text-red-400'}`}
+                >
+                  <option value="buy">買い</option>
+                  <option value="sell">売り</option>
+                </select>
+              </div>
+            ) : (
+              /* 表示モード: タイトル行 */
+              <>
+                <div className="flex items-center gap-2 mb-1">
+                  <h1 className="text-base sm:text-lg font-bold text-white truncate">{strategy.name}</h1>
+                  <span className={`px-1.5 py-0.5 text-[10px] rounded border ${statusConfig[strategy.status].color} ${statusConfig[strategy.status].glow}`}>
+                    {statusConfig[strategy.status].label}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-gray-400">
+                  <span className="font-mono text-cyan-400">{strategy.symbol}</span>
+                  <span className={strategy.side === "buy" ? "text-green-400" : "text-red-400"}>
+                    {strategy.side === "buy" ? "買い" : "売り"}
+                  </span>
+                  {currentVersion && (
+                    <span className="text-gray-500">v{currentVersion.versionNumber}</span>
+                  )}
+                </div>
+              </>
+            )}
           </div>
 
-          {/* アクションメニュー */}
-          <ActionMenu
-            strategy={strategy}
-            onStatusChange={handleStatusChange}
-            onDuplicate={handleDuplicate}
-            onDelete={handleDelete}
-          />
+          {/* アクションメニュー（表示モードのみ） */}
+          {!isEditMode && (
+            <ActionMenu
+              strategy={strategy}
+              onStatusChange={handleStatusChange}
+              onDuplicate={handleDuplicate}
+              onDelete={handleDelete}
+            />
+          )}
         </div>
 
-        {/* 説明（あれば） */}
-        {strategy.description && (
-          <p className="mt-2 text-xs text-gray-400 line-clamp-2">{strategy.description}</p>
-        )}
-
-        {/* タグ（あれば） */}
-        {strategy.tags && strategy.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-2">
-            {strategy.tags.map((tag) => (
-              <span key={tag} className="px-1.5 py-0.5 bg-slate-700/50 text-[10px] text-gray-400 rounded">
-                {tag}
-              </span>
-            ))}
+        {/* 説明 + タグ（編集モード: 1行にまとめる） */}
+        {isEditMode ? (
+          <div className="flex gap-2 mt-2">
+            <input
+              type="text"
+              value={editDescription}
+              onChange={(e) => setEditDescription(e.target.value)}
+              className="flex-1 px-2 py-0.5 text-[10px] bg-slate-800/50 text-gray-300 rounded border border-slate-600 focus:border-purple-500 focus:outline-none"
+              placeholder="説明（任意）"
+            />
+            <div className="flex items-center gap-1">
+              {editTags.slice(0, 3).map((tag) => (
+                <span key={tag} className="px-1 py-0.5 bg-slate-700/50 text-[10px] text-gray-400 rounded flex items-center gap-0.5">
+                  {tag}
+                  <button onClick={() => handleRemoveTag(tag)} className="text-red-400 hover:text-red-300 text-[8px]">×</button>
+                </span>
+              ))}
+              {editTags.length > 3 && <span className="text-[10px] text-gray-500">+{editTags.length - 3}</span>}
+              <input
+                type="text"
+                value={editTagInput}
+                onChange={(e) => setEditTagInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAddTag())}
+                className="w-16 px-1 py-0.5 text-[10px] bg-slate-800/50 text-gray-300 rounded border border-slate-600 focus:border-purple-500 focus:outline-none"
+                placeholder="+タグ"
+              />
+            </div>
           </div>
+        ) : (
+          <>
+            {strategy.description && (
+              <p className="mt-2 text-xs text-gray-400 line-clamp-2">{strategy.description}</p>
+            )}
+            {strategy.tags && strategy.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {strategy.tags.map((tag) => (
+                  <span key={tag} className="px-1.5 py-0.5 bg-slate-700/50 text-[10px] text-gray-400 rounded">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 
-      {/* クイックアクション */}
+      {/* クイックアクション / 編集モードボタン */}
       <div className="flex gap-2 mb-3 sm:mb-4">
-        <Link
-          href={`/strategies/${strategy.id}/backtest`}
-          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs rounded-lg bg-gradient-to-r from-purple-600/20 to-cyan-600/20 border border-purple-500/30 text-purple-300 hover:border-purple-400/50 hover:text-purple-200 transition-all"
-        >
-          <span>📊</span>
-          <span>バックテスト</span>
-        </Link>
-        <Link
-          href={`/strategies/${strategy.id}/edit`}
-          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs rounded-lg bg-gradient-to-r from-cyan-600/20 to-blue-600/20 border border-cyan-500/30 text-cyan-300 hover:border-cyan-400/50 hover:text-cyan-200 transition-all"
-        >
-          <span>✏️</span>
-          <span>編集</span>
-        </Link>
+        {isEditMode ? (
+          <>
+            <NeonButton
+              onClick={handleSave}
+              color="green"
+              size="sm"
+              disabled={isSaving}
+              className="flex-1"
+            >
+              {isSaving ? "保存中..." : "💾 保存"}
+            </NeonButton>
+            <NeonButton
+              onClick={cancelEditMode}
+              color="slate"
+              size="sm"
+              variant="outline"
+              className="flex-1"
+            >
+              キャンセル
+            </NeonButton>
+          </>
+        ) : (
+          <>
+            <Link
+              href={`/strategies/${strategy.id}/backtest`}
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs rounded-lg bg-gradient-to-r from-purple-600/20 to-cyan-600/20 border border-purple-500/30 text-purple-300 hover:border-purple-400/50 hover:text-purple-200 transition-all"
+            >
+              <span>📊</span>
+              <span>バックテスト</span>
+            </Link>
+            <button
+              onClick={startEditMode}
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs rounded-lg bg-gradient-to-r from-cyan-600/20 to-blue-600/20 border border-cyan-500/30 text-cyan-300 hover:border-cyan-400/50 hover:text-cyan-200 transition-all"
+            >
+              <span>✏️</span>
+              <span>編集</span>
+            </button>
+          </>
+        )}
       </div>
 
       {/* エントリー条件 */}
-      {currentVersion && (
-        <div className="card-surface p-3 sm:p-4 mb-3 sm:mb-4">
-          <h2 className="text-xs font-semibold text-gray-300 mb-2 flex items-center gap-1.5">
-            <span className="text-cyan-400">▸</span>
-            エントリー条件
-          </h2>
+      <div className="card-surface p-3 sm:p-4 mb-3 sm:mb-4">
+        <h2 className="text-xs font-semibold text-gray-300 mb-2 flex items-center gap-1.5">
+          <span className="text-cyan-400">▸</span>
+          エントリー条件
+        </h2>
+        {isEditMode && editEntryConditions ? (
+          <ConditionBuilder
+            value={editEntryConditions}
+            onChange={setEditEntryConditions}
+            indicatorMetadata={indicatorMetadata}
+            compact={true}
+          />
+        ) : currentVersion ? (
           <ConditionGroupDisplay group={currentVersion.entryConditions as ConditionGroup} />
-        </div>
-      )}
+        ) : (
+          <p className="text-xs text-gray-500">条件が設定されていません</p>
+        )}
+      </div>
 
       {/* イグジット設定 */}
-      {exitSettings && (
-        <div className="card-surface p-3 sm:p-4 mb-3 sm:mb-4">
-          <h2 className="text-xs font-semibold text-gray-300 mb-2 flex items-center gap-1.5">
-            <span className="text-cyan-400">▸</span>
-            イグジット設定
-          </h2>
+      <div className="card-surface p-3 sm:p-4 mb-3 sm:mb-4">
+        <h2 className="text-xs font-semibold text-gray-300 mb-2 flex items-center gap-1.5">
+          <span className="text-cyan-400">▸</span>
+          イグジット設定
+        </h2>
+        {isEditMode && editExitSettings ? (
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-slate-700/30 px-2 py-1 rounded text-center">
+              <div className="text-[10px] text-gray-500">TP</div>
+              <div className="flex items-center gap-0.5 justify-center">
+                <input
+                  type="number"
+                  value={editExitSettings.takeProfit.value}
+                  onChange={(e) => setEditExitSettings({
+                    ...editExitSettings,
+                    takeProfit: { ...editExitSettings.takeProfit, value: parseFloat(e.target.value) || 0 }
+                  })}
+                  className="w-12 px-1 py-0.5 text-xs bg-slate-800/50 text-green-400 rounded border border-slate-600 focus:border-green-500 focus:outline-none text-center"
+                  step="0.1"
+                />
+                <select
+                  value={editExitSettings.takeProfit.unit}
+                  onChange={(e) => setEditExitSettings({
+                    ...editExitSettings,
+                    takeProfit: { ...editExitSettings.takeProfit, unit: e.target.value as 'percent' | 'pips' }
+                  })}
+                  className="px-0.5 py-0.5 text-[10px] bg-slate-800/50 text-gray-400 rounded border border-slate-600"
+                >
+                  <option value="percent">%</option>
+                  <option value="pips">p</option>
+                </select>
+              </div>
+            </div>
+            <div className="bg-slate-700/30 px-2 py-1 rounded text-center">
+              <div className="text-[10px] text-gray-500">SL</div>
+              <div className="flex items-center gap-0.5 justify-center">
+                <input
+                  type="number"
+                  value={editExitSettings.stopLoss.value}
+                  onChange={(e) => setEditExitSettings({
+                    ...editExitSettings,
+                    stopLoss: { ...editExitSettings.stopLoss, value: parseFloat(e.target.value) || 0 }
+                  })}
+                  className="w-12 px-1 py-0.5 text-xs bg-slate-800/50 text-red-400 rounded border border-slate-600 focus:border-red-500 focus:outline-none text-center"
+                  step="0.1"
+                />
+                <select
+                  value={editExitSettings.stopLoss.unit}
+                  onChange={(e) => setEditExitSettings({
+                    ...editExitSettings,
+                    stopLoss: { ...editExitSettings.stopLoss, unit: e.target.value as 'percent' | 'pips' }
+                  })}
+                  className="px-0.5 py-0.5 text-[10px] bg-slate-800/50 text-gray-400 rounded border border-slate-600"
+                >
+                  <option value="percent">%</option>
+                  <option value="pips">p</option>
+                </select>
+              </div>
+            </div>
+            <div className="bg-slate-700/30 px-2 py-1 rounded text-center">
+              <div className="text-[10px] text-gray-500">保有</div>
+              <input
+                type="number"
+                value={editExitSettings.maxHoldingMinutes || ""}
+                onChange={(e) => setEditExitSettings({
+                  ...editExitSettings,
+                  maxHoldingMinutes: e.target.value ? parseInt(e.target.value) : undefined
+                })}
+                className="w-full px-1 py-0.5 text-xs bg-slate-800/50 text-gray-300 rounded border border-slate-600 focus:border-purple-500 focus:outline-none"
+                placeholder="∞"
+              />
+            </div>
+          </div>
+        ) : exitSettings ? (
           <div className="grid grid-cols-3 gap-2">
             <div className="bg-slate-700/30 px-2 py-1.5 rounded text-center">
               <div className="text-[10px] text-gray-500">TP</div>
@@ -430,11 +705,30 @@ export default function StrategyDetailPage() {
               </div>
             </div>
           </div>
+        ) : (
+          <p className="text-xs text-gray-500">設定されていません</p>
+        )}
+      </div>
+
+      {/* 編集モード: 変更メモ */}
+      {isEditMode && (
+        <div className="card-surface p-3 sm:p-4 mb-3 sm:mb-4">
+          <h2 className="text-xs font-semibold text-gray-300 mb-2 flex items-center gap-1.5">
+            <span className="text-cyan-400">▸</span>
+            変更メモ（任意）
+          </h2>
+          <input
+            type="text"
+            value={changeNote}
+            onChange={(e) => setChangeNote(e.target.value)}
+            className="w-full px-2 py-1 text-xs bg-slate-800/50 text-gray-300 rounded border border-slate-600 focus:border-purple-500 focus:outline-none"
+            placeholder="この変更について一言..."
+          />
         </div>
       )}
 
-      {/* バージョン履歴 */}
-      {strategy.versions && strategy.versions.length > 0 && (
+      {/* バージョン履歴（表示モードのみ） */}
+      {!isEditMode && strategy.versions && strategy.versions.length > 0 && (
         <div className="card-surface p-3 sm:p-4 mb-3 sm:mb-4">
           <h2 className="text-xs font-semibold text-gray-300 mb-2 flex items-center gap-1.5">
             <span className="text-cyan-400">▸</span>
@@ -471,13 +765,15 @@ export default function StrategyDetailPage() {
         </div>
       )}
 
-      {/* メタ情報 */}
-      <div className="card-surface p-3 sm:p-4">
-        <div className="flex items-center justify-between text-[10px] text-gray-500">
-          <span>作成: {formatDateTime(strategy.createdAt)}</span>
-          <span>更新: {formatDateTime(strategy.updatedAt)}</span>
+      {/* メタ情報（表示モードのみ） */}
+      {!isEditMode && (
+        <div className="card-surface p-3 sm:p-4">
+          <div className="flex items-center justify-between text-[10px] text-gray-500">
+            <span>作成: {formatDateTime(strategy.createdAt)}</span>
+            <span>更新: {formatDateTime(strategy.updatedAt)}</span>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -12,6 +12,15 @@ export type { TrendDirection } from './TrendBadge';
 export { default as DecisionModeBadge } from './DecisionModeBadge';
 export type { DecisionMode } from './DecisionModeBadge';
 
+// チャートコンポーネント
+export { default as CandlestickChart } from './CandlestickChart';
+export type {
+  OHLCVDataPoint,
+  IndicatorLineConfig,
+  ChartMarker,
+  CandlestickChartProps,
+} from './CandlestickChart';
+
 // 市場・マッチング関連
 export { default as MarketSnapshotView } from './MarketSnapshotView';
 export { default as MatchReasonVisualizer } from './MatchReasonVisualizer';

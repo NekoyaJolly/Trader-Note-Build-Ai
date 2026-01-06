@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { getValidatedQuery } from '../middleware/validateRequest';
 import { TradeImportService } from '../services/tradeImportService';
 import path from 'path';
 import { config } from '../config';
@@ -244,7 +245,7 @@ export class TradeController {
    * ?status=active / ?status=draft / ?status=archived
    */
   getAllNotes = async (req: Request, res: Response): Promise<void> => {
-    const statusParam = req.query.status as string | undefined;
+    const { status: statusParam } = getValidatedQuery<{ status?: string }>(res);
     
     let notes;
     if (statusParam && ['draft', 'active', 'archived'].includes(statusParam)) {
@@ -494,7 +495,12 @@ export class TradeController {
   getPerformanceReport = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const { from, to, timeframe, weakThreshold } = req.query;
+      const { from, to, timeframe, weakThreshold } = getValidatedQuery<{
+        from?: string;
+        to?: string;
+        timeframe?: string;
+        weakThreshold?: string;
+      }>(res);
 
       // オプション構築
       const options: PerformanceReportOptions = {};
@@ -557,7 +563,12 @@ export class TradeController {
    */
   getPerformanceRanking = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { limit, from, to, timeframe } = req.query;
+      const { limit, from, to, timeframe } = getValidatedQuery<{
+        limit?: string;
+        from?: string;
+        to?: string;
+        timeframe?: string;
+      }>(res);
 
       // オプション構築
       const options: PerformanceReportOptions = {};
