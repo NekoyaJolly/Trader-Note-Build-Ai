@@ -2,7 +2,7 @@ name: Security & Quality Checks
 
 on:
   pull_request:
-    branches: [main, develop]
+    branches: [main]
   schedule:
     # 毎日午前 2 時に実行
     - cron: '0 2 * * *'

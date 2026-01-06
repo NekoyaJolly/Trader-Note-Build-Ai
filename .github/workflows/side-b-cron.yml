@@ -32,7 +32,7 @@ on:
           - health
 
 env:
-  RAILWAY_API_URL: ${{ secrets.RAILWAY_API_URL || 'https://trader-note-api.up.railway.app' }}
+  RAILWAY_API_URL: ${{ secrets.RAILWAY_API_URL || 'https://trader-note-build-ai-production.up.railway.app' }}
 
 jobs:
   daily-plan:
