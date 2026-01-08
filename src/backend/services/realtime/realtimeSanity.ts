@@ -79,9 +79,11 @@ export function filterBarsByReferencePrice<T extends PriceBarLike>(
     const lowDev = Math.abs(bar.low - referencePrice) / referencePrice;
 
     return (
-      closeDev <= deviationThreshold &&
-      highDev <= deviationThreshold &&
-      lowDev <= deviationThreshold
+      // 境界値(ちょうど50%乖離など)が混入するとスケール汚染が連鎖しやすいので、
+      // フィルタ側は「厳密に未満(<)」で残す
+      closeDev < deviationThreshold &&
+      highDev < deviationThreshold &&
+      lowDev < deviationThreshold
     );
   });
 }

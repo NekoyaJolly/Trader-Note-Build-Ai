@@ -198,6 +198,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const indicatorSeriesRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
   const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  const lastFitCountRef = useRef<number>(0);
 
   const [isLoading, setIsLoading] = useState(true);
 
@@ -210,6 +211,12 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       chartRef.current.remove();
       chartRef.current = null;
     }
+    // 参照もリセット（削除済みの series に setData しないため）
+    candlestickSeriesRef.current = null;
+    volumeSeriesRef.current = null;
+    indicatorSeriesRef.current.clear();
+    markersPluginRef.current = null;
+    lastFitCountRef.current = 0;
 
     // チャート作成
     const chart = createChart(chartContainerRef.current, {
@@ -264,24 +271,9 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     const markersPlugin = createSeriesMarkers(candlestickSer, []);
     markersPluginRef.current = markersPlugin;
 
-    // ボリュームシリーズ追加（有効なボリュームがある場合のみ）
-    const hasVolume = ohlcvData.some((d) => d.volume !== undefined && d.volume > 0);
-    if (hasVolume) {
-      const volumeSer = chart.addSeries(HistogramSeries, {
-        color: "#26a69a",
-        priceFormat: {
-          type: "volume",
-        },
-        priceScaleId: "volume",
-      });
-      volumeSer.priceScale().applyOptions({
-        scaleMargins: {
-          top: 0.8,
-          bottom: 0,
-        },
-      });
-      volumeSeriesRef.current = volumeSer;
-    }
+    // ボリュームシリーズは初期化では作らない
+    // 理由: リアルタイム更新で ohlcvData が頻繁に変わるため、初期化をデータ依存にしない
+    // 必要になったタイミングで data 更新側で遅延生成する
 
     // リサイズハンドラ
     const handleResize = () => {
@@ -302,8 +294,12 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
         chartRef.current.remove();
         chartRef.current = null;
       }
+      candlestickSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+      indicatorSeriesRef.current.clear();
+      markersPluginRef.current = null;
     };
-  }, [height, ohlcvData]);
+  }, [height]);
 
   // データ更新
   useEffect(() => {
@@ -314,14 +310,42 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     candlestickSeriesRef.current.setData(candleData);
 
     // ボリュームデータをセット
-    if (volumeSeriesRef.current) {
-      const volumeData = toVolumeData(ohlcvData);
-      volumeSeriesRef.current.setData(volumeData);
+    const volumeData = toVolumeData(ohlcvData);
+    if (volumeData.length > 0) {
+      // 初回のみ遅延生成
+      if (!volumeSeriesRef.current && chartRef.current) {
+        const volumeSer = chartRef.current.addSeries(HistogramSeries, {
+          color: "#26a69a",
+          priceFormat: {
+            type: "volume",
+          },
+          priceScaleId: "volume",
+          visible: true,
+        });
+        volumeSer.priceScale().applyOptions({
+          scaleMargins: {
+            top: 0.8,
+            bottom: 0,
+          },
+        });
+        volumeSeriesRef.current = volumeSer;
+      }
+      volumeSeriesRef.current?.applyOptions({ visible: true });
+      volumeSeriesRef.current?.setData(volumeData);
+    } else {
+      // ボリュームが無い場合は非表示（チャート領域を余計に使わない）
+      if (volumeSeriesRef.current) {
+        volumeSeriesRef.current.setData([]);
+        volumeSeriesRef.current.applyOptions({ visible: false });
+      }
     }
 
     // 表示範囲を調整
-    if (chartRef.current) {
+    // リアルタイムでは毎tick fitContent すると重くなり更新が追従しないため、
+    // データ本数が増えた時（新バー追加）にだけ実行する
+    if (chartRef.current && candleData.length !== lastFitCountRef.current) {
       chartRef.current.timeScale().fitContent();
+      lastFitCountRef.current = candleData.length;
     }
   }, [ohlcvData]);
 
