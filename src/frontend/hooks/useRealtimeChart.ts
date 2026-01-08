@@ -115,7 +115,7 @@ export function useRealtimeChart(
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const eventSourceRef = useRef<AbortController | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3100';
 
   /**
@@ -153,106 +153,67 @@ export function useRealtimeChart(
         throw new Error(subscribeData.error || '購読に失敗しました');
       }
 
-      // 3. SSE ストリームに接続（fetch ベース）
-      console.log('[useRealtimeChart] SSE 接続開始...');
-      
-      const abortController = new AbortController();
-      eventSourceRef.current = abortController;
+      // 3. SSE ストリームに接続
+      const eventSource = new EventSource(`${apiBase}/api/realtime/stream/${symbol}?timeframe=${timeframe}`);
+      eventSourceRef.current = eventSource;
 
-      const sseUrl = `${apiBase}/api/realtime/stream/${symbol}?timeframe=${timeframe}`;
-      
-      fetch(sseUrl, {
-        method: 'GET',
-        headers: {
-          'Accept': 'text/event-stream',
-        },
-        signal: abortController.signal,
-      }).then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`SSE 接続失敗: ${response.status}`);
-        }
-        
+      eventSource.onopen = () => {
         console.log('[useRealtimeChart] SSE 接続成功');
         setStatus('connected');
         setIsLoading(false);
+      };
 
-        const reader = response.body?.getReader();
-        if (!reader) {
-          throw new Error('ReadableStream not supported');
-        }
-
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          let eventType = '';
-          let eventData = '';
-
-          for (const line of lines) {
-            if (line.startsWith('event: ')) {
-              eventType = line.slice(7).trim();
-            } else if (line.startsWith('data: ')) {
-              eventData = line.slice(6);
-            } else if (line === '' && eventData) {
-              // イベント処理
-              try {
-                const data = JSON.parse(eventData);
-                
-                switch (eventType) {
-                  case 'connected':
-                    console.log('[useRealtimeChart] SSE connected:', data);
-                    break;
-                  case 'init':
-                    console.log('[useRealtimeChart] 初期データ受信:', data.bars?.length, 'バー');
-                    setBars(data.bars || []);
-                    setPendingBar(data.pendingBar || null);
-                    break;
-                  case 'tick':
-                    setLatestTick(data);
-                    break;
-                  case 'bar':
-                    console.log('[useRealtimeChart] バー確定:', data.timestamp);
-                    setBars(prev => {
-                      const exists = prev.some(b => b.timestamp === data.timestamp);
-                      if (exists) return prev;
-                      const newBars = [...prev, data];
-                      return newBars.slice(-60);
-                    });
-                    break;
-                  case 'pendingBar':
-                    setPendingBar(data);
-                    break;
-                  case 'status':
-                    setStatus(data.status);
-                    break;
-                  case 'heartbeat':
-                    // 接続維持確認
-                    break;
-                }
-              } catch (parseError) {
-                console.error('[useRealtimeChart] JSON パースエラー:', parseError);
-              }
-              eventType = '';
-              eventData = '';
-            }
-          }
-        }
-      }).catch((err) => {
-        if (err.name === 'AbortError') {
-          console.log('[useRealtimeChart] SSE 接続がキャンセルされました');
-          return;
-        }
-        console.error('[useRealtimeChart] SSE エラー:', err);
+      eventSource.onerror = (e) => {
+        console.error('[useRealtimeChart] SSE エラー:', e);
         setStatus('error');
-        setError(err.message || 'SSE 接続エラー');
+        setError('SSE 接続エラー');
         setIsLoading(false);
+      };
+
+      // 初期データ受信
+      eventSource.addEventListener('init', (e) => {
+        const data = JSON.parse(e.data);
+        console.log('[useRealtimeChart] 初期データ受信:', data.bars?.length, 'バー');
+        setBars(data.bars || []);
+        setPendingBar(data.pendingBar || null);
+        setStatus(data.status || 'connected');
+      });
+
+      // Tick 受信
+      eventSource.addEventListener('tick', (e) => {
+        const tick = JSON.parse(e.data);
+        setLatestTick(tick);
+      });
+
+      // バー確定
+      eventSource.addEventListener('bar', (e) => {
+        const bar = JSON.parse(e.data);
+        console.log('[useRealtimeChart] バー確定:', bar.timestamp);
+        setBars(prev => {
+          // 重複を避けて追加
+          const exists = prev.some(b => b.timestamp === bar.timestamp);
+          if (exists) return prev;
+          // 最新60本を保持
+          const newBars = [...prev, bar];
+          return newBars.slice(-60);
+        });
+      });
+
+      // 進行中バー更新
+      eventSource.addEventListener('pendingBar', (e) => {
+        const bar = JSON.parse(e.data);
+        setPendingBar(bar);
+      });
+
+      // 接続状態変更
+      eventSource.addEventListener('status', (e) => {
+        const data = JSON.parse(e.data);
+        setStatus(data.status);
+      });
+
+      // ハートビート
+      eventSource.addEventListener('heartbeat', () => {
+        // 接続維持確認
       });
 
     } catch (err) {
@@ -268,7 +229,7 @@ export function useRealtimeChart(
    */
   const disconnect = useCallback(() => {
     if (eventSourceRef.current) {
-      eventSourceRef.current.abort();
+      eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
     setStatus('disconnected');
