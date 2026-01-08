@@ -91,11 +91,23 @@ export interface UseRealtimeChartResult {
   subscribe: (symbols: string[]) => Promise<void>;
 }
 
+/**
+ * フックのオプション
+ */
+export interface UseRealtimeChartOptions {
+  /** 時間足（秒） */
+  timeframe?: number;
+}
+
 // ========================================
 // カスタムフック
 // ========================================
 
-export function useRealtimeChart(symbol: string): UseRealtimeChartResult {
+export function useRealtimeChart(
+  symbol: string,
+  options: UseRealtimeChartOptions = {}
+): UseRealtimeChartResult {
+  const { timeframe = 10 } = options;
   const [bars, setBars] = useState<OHLCVBar[]>([]);
   const [pendingBar, setPendingBar] = useState<PendingBar | null>(null);
   const [latestTick, setLatestTick] = useState<TickData | null>(null);
@@ -120,7 +132,7 @@ export function useRealtimeChart(symbol: string): UseRealtimeChartResult {
 
     try {
       // 1. まず cTrader に接続
-      const connectRes = await fetch(`${apiBase}/api/realtime/connect`, {
+      const connectRes = await fetch(`${apiBase}/api/realtime/connect?timeframe=${timeframe}`, {
         method: 'POST',
       });
       const connectData = await connectRes.json();
@@ -133,7 +145,7 @@ export function useRealtimeChart(symbol: string): UseRealtimeChartResult {
       const subscribeRes = await fetch(`${apiBase}/api/realtime/subscribe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbols: [symbol] }),
+        body: JSON.stringify({ symbols: [symbol], timeframe }),
       });
       const subscribeData = await subscribeRes.json();
 
@@ -142,7 +154,7 @@ export function useRealtimeChart(symbol: string): UseRealtimeChartResult {
       }
 
       // 3. SSE ストリームに接続
-      const eventSource = new EventSource(`${apiBase}/api/realtime/stream/${symbol}`);
+      const eventSource = new EventSource(`${apiBase}/api/realtime/stream/${symbol}?timeframe=${timeframe}`);
       eventSourceRef.current = eventSource;
 
       eventSource.onopen = () => {
@@ -210,7 +222,7 @@ export function useRealtimeChart(symbol: string): UseRealtimeChartResult {
       setStatus('error');
       setIsLoading(false);
     }
-  }, [apiBase, symbol]);
+  }, [apiBase, symbol, timeframe]);
 
   /**
    * 切断
@@ -245,13 +257,13 @@ export function useRealtimeChart(symbol: string): UseRealtimeChartResult {
   }, [apiBase]);
 
   /**
-   * シンボル変更時に再接続
+   * シンボルまたは時間足変更時に再接続
    */
   useEffect(() => {
     return () => {
       disconnect();
     };
-  }, [symbol, disconnect]);
+  }, [symbol, timeframe, disconnect]);
 
   return {
     bars,

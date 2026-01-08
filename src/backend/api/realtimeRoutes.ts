@@ -25,19 +25,26 @@ import { TickDataInput, OHLCVBarInput } from '../services/realtime/realtimeTickS
 const router = Router();
 const prisma = new PrismaClient();
 
-// オーケストレーターのシングルトン
-let orchestrator: CTraderRealtimeOrchestrator | null = null;
+// 時間足ごとのオーケストレーター
+const orchestrators: Map<number, CTraderRealtimeOrchestrator> = new Map();
 
 /**
- * オーケストレーターを取得（遅延初期化）
+ * オーケストレーターを取得（時間足ごとに管理）
  */
-function getOrchestrator(): CTraderRealtimeOrchestrator {
-  if (!orchestrator) {
-    orchestrator = getCTraderRealtimeOrchestrator(prisma, {
-      barIntervalSeconds: 10, // 10秒足
-    });
+function getOrchestrator(barIntervalSeconds: number = 10): CTraderRealtimeOrchestrator {
+  let orch = orchestrators.get(barIntervalSeconds);
+  if (!orch) {
+    orch = getCTraderRealtimeOrchestrator(prisma, { barIntervalSeconds });
+    orchestrators.set(barIntervalSeconds, orch);
   }
-  return orchestrator;
+  return orch;
+}
+
+/**
+ * デフォルトのオーケストレーターを取得
+ */
+function getDefaultOrchestrator(): CTraderRealtimeOrchestrator {
+  return getOrchestrator(10);
 }
 
 // ========================================
@@ -46,6 +53,7 @@ function getOrchestrator(): CTraderRealtimeOrchestrator {
 
 const SubscribeRequestSchema = z.object({
   symbols: z.array(z.string()).min(1, '最低1つのシンボルが必要です'),
+  timeframe: z.number().optional().default(10), // 秒単位の時間足
 });
 
 const UnsubscribeRequestSchema = z.object({
@@ -62,7 +70,7 @@ const UnsubscribeRequestSchema = z.object({
  */
 router.get('/status', async (_req: Request, res: Response) => {
   try {
-    const orch = getOrchestrator();
+    const orch = getDefaultOrchestrator();
     const status = orch.getStatus();
     const subscribedSymbols = orch.getSubscribedSymbols();
 
@@ -87,9 +95,10 @@ router.get('/status', async (_req: Request, res: Response) => {
  * POST /api/realtime/connect
  * cTrader に接続
  */
-router.post('/connect', async (_req: Request, res: Response) => {
+router.post('/connect', async (req: Request, res: Response) => {
   try {
-    const orch = getOrchestrator();
+    const timeframe = parseInt(req.query.timeframe as string) || 10;
+    const orch = getOrchestrator(timeframe);
     const success = await orch.connect();
 
     res.json({
@@ -112,9 +121,10 @@ router.post('/connect', async (_req: Request, res: Response) => {
  * POST /api/realtime/disconnect
  * cTrader から切断
  */
-router.post('/disconnect', async (_req: Request, res: Response) => {
+router.post('/disconnect', async (req: Request, res: Response) => {
   try {
-    const orch = getOrchestrator();
+    const timeframe = parseInt(req.query.timeframe as string) || 10;
+    const orch = getOrchestrator(timeframe);
     await orch.disconnect();
 
     res.json({
@@ -147,7 +157,8 @@ router.post('/subscribe', async (req: Request, res: Response) => {
       });
     }
 
-    const orch = getOrchestrator();
+    const { symbols, timeframe } = result.data;
+    const orch = getOrchestrator(timeframe);
     
     // 未接続なら接続
     if (orch.getStatus() !== 'connected') {
@@ -160,13 +171,14 @@ router.post('/subscribe', async (req: Request, res: Response) => {
       }
     }
 
-    await orch.subscribe(result.data.symbols);
+    await orch.subscribe(symbols);
 
     return res.json({
       success: true,
       data: {
         subscribedSymbols: orch.getSubscribedSymbols(),
-        message: `${result.data.symbols.join(', ')} を購読開始`,
+        timeframe,
+        message: `${symbols.join(', ')} を購読開始（${timeframe}秒足）`,
       },
     });
   } catch (error) {
@@ -192,7 +204,8 @@ router.post('/unsubscribe', async (req: Request, res: Response) => {
       });
     }
 
-    const orch = getOrchestrator();
+    const timeframe = parseInt(req.query.timeframe as string) || 10;
+    const orch = getOrchestrator(timeframe);
     await orch.unsubscribe(result.data.symbols);
 
     return res.json({
@@ -219,8 +232,9 @@ router.get('/bars/:symbol', async (req: Request, res: Response) => {
   try {
     const { symbol } = req.params;
     const limit = parseInt(req.query.limit as string) || 60;
+    const timeframe = parseInt(req.query.timeframe as string) || 10;
 
-    const orch = getOrchestrator();
+    const orch = getOrchestrator(timeframe);
     const bars = await orch.getRecentBars(symbol, limit);
     const pendingBar = orch.getPendingBar(symbol);
 
@@ -228,6 +242,7 @@ router.get('/bars/:symbol', async (req: Request, res: Response) => {
       success: true,
       data: {
         symbol,
+        timeframe,
         bars,
         pendingBar,
         count: bars.length,
@@ -245,9 +260,11 @@ router.get('/bars/:symbol', async (req: Request, res: Response) => {
 /**
  * GET /api/realtime/stream/:symbol
  * SSE ストリーム（リアルタイムデータ配信）
+ * クエリパラメータ: timeframe (秒)
  */
 router.get('/stream/:symbol', async (req: Request, res: Response) => {
   const { symbol } = req.params;
+  const timeframe = parseInt(req.query.timeframe as string) || 10;
 
   // SSE ヘッダー設定
   res.setHeader('Content-Type', 'text/event-stream');
@@ -256,9 +273,9 @@ router.get('/stream/:symbol', async (req: Request, res: Response) => {
   res.setHeader('X-Accel-Buffering', 'no'); // nginx バッファリング無効化
   res.flushHeaders();
 
-  console.log(`[RealtimeAPI] SSE 接続開始: ${symbol}`);
+  console.log(`[RealtimeAPI] SSE 接続開始: ${symbol} (${timeframe}秒足)`);
 
-  const orch = getOrchestrator();
+  const orch = getOrchestrator(timeframe);
 
   // 初期データを送信
   const sendInitialData = async () => {

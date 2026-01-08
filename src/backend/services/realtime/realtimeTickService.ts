@@ -430,22 +430,38 @@ export class RealtimeTickService extends EventEmitter {
   }
 }
 
-// シングルトンインスタンス
-let realtimeTickServiceInstance: RealtimeTickService | null = null;
+// 時間足ごとのインスタンス管理
+const tickServiceInstances: Map<number, RealtimeTickService> = new Map();
+let defaultTickPrisma: PrismaClient | null = null;
 
 /**
- * RealtimeTickService のシングルトンを取得
+ * RealtimeTickService を取得（時間足ごとに管理）
  */
 export function getRealtimeTickService(
   prisma?: PrismaClient,
   config?: Partial<RealtimeTickServiceConfig>
 ): RealtimeTickService {
-  if (!realtimeTickServiceInstance) {
-    if (!prisma) {
-      throw new Error('RealtimeTickService の初期化には PrismaClient が必要です');
-    }
-    realtimeTickServiceInstance = new RealtimeTickService(prisma, config);
+  // PrismaClient を保存
+  if (prisma) {
+    defaultTickPrisma = prisma;
   }
-  return realtimeTickServiceInstance;
+
+  const barInterval = config?.barIntervalSeconds || 10;
+
+  // 既存インスタンスがあれば返す
+  let instance = tickServiceInstances.get(barInterval);
+  if (instance) {
+    return instance;
+  }
+
+  // 新規作成
+  const p = prisma || defaultTickPrisma;
+  if (!p) {
+    throw new Error('RealtimeTickService の初期化には PrismaClient が必要です');
+  }
+
+  instance = new RealtimeTickService(p, config);
+  tickServiceInstances.set(barInterval, instance);
+  return instance;
 }
 

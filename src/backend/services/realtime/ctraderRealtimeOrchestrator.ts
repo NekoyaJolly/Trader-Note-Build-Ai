@@ -383,22 +383,41 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
   }
 }
 
-// シングルトンインスタンス
-let orchestratorInstance: CTraderRealtimeOrchestrator | null = null;
+// 時間足ごとのインスタンス管理
+const orchestratorInstances: Map<number, CTraderRealtimeOrchestrator> = new Map();
+let defaultPrisma: PrismaClient | null = null;
 
 /**
- * CTraderRealtimeOrchestrator のシングルトンを取得
+ * CTraderRealtimeOrchestrator を取得（時間足ごとに管理）
+ * 
+ * @param prisma - PrismaClient（初回のみ必要）
+ * @param config - 設定（barIntervalSeconds で時間足を指定）
  */
 export function getCTraderRealtimeOrchestrator(
   prisma?: PrismaClient,
   config?: Partial<OrchestratorConfig>
 ): CTraderRealtimeOrchestrator {
-  if (!orchestratorInstance) {
-    if (!prisma) {
-      throw new Error('CTraderRealtimeOrchestrator の初期化には PrismaClient が必要です');
-    }
-    orchestratorInstance = new CTraderRealtimeOrchestrator(prisma, config);
+  // PrismaClient を保存
+  if (prisma) {
+    defaultPrisma = prisma;
   }
-  return orchestratorInstance;
+
+  const barInterval = config?.barIntervalSeconds || 10;
+
+  // 既存インスタンスがあれば返す
+  let instance = orchestratorInstances.get(barInterval);
+  if (instance) {
+    return instance;
+  }
+
+  // 新規作成
+  const p = prisma || defaultPrisma;
+  if (!p) {
+    throw new Error('CTraderRealtimeOrchestrator の初期化には PrismaClient が必要です');
+  }
+
+  instance = new CTraderRealtimeOrchestrator(p, config);
+  orchestratorInstances.set(barInterval, instance);
+  return instance;
 }
 

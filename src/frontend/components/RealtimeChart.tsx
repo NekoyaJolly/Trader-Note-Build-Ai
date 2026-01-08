@@ -13,7 +13,7 @@
  * - 接続状態インジケーター
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useRealtimeChart, OHLCVBar, PendingBar, ConnectionStatus } from '@/hooks/useRealtimeChart';
 import { CandlestickChart, OHLCVDataPoint } from './CandlestickChart';
 
@@ -28,7 +28,20 @@ interface RealtimeChartProps {
   height?: number;
   /** 自動接続するか */
   autoConnect?: boolean;
+  /** 初期時間足（秒） */
+  initialTimeframe?: number;
+  /** 時間足変更時のコールバック */
+  onTimeframeChange?: (timeframe: number) => void;
 }
+
+// 時間足オプション
+const TIMEFRAME_OPTIONS = [
+  { value: 5, label: '5秒' },
+  { value: 10, label: '10秒' },
+  { value: 30, label: '30秒' },
+  { value: 60, label: '1分' },
+  { value: 300, label: '5分' },
+];
 
 // ========================================
 // サブコンポーネント
@@ -124,7 +137,11 @@ function PricePanel({
 export function RealtimeChart({ 
   symbol, 
   height = 400,
+  initialTimeframe = 10,
+  onTimeframeChange,
 }: RealtimeChartProps) {
+  const [timeframe, setTimeframe] = useState(initialTimeframe);
+
   const {
     bars,
     pendingBar,
@@ -135,7 +152,22 @@ export function RealtimeChart({
     isLoading,
     connect,
     disconnect,
-  } = useRealtimeChart(symbol);
+  } = useRealtimeChart(symbol, { timeframe });
+
+  // 時間足変更ハンドラ
+  const handleTimeframeChange = (newTimeframe: number) => {
+    if (isConnected) {
+      disconnect();
+    }
+    setTimeframe(newTimeframe);
+    onTimeframeChange?.(newTimeframe);
+  };
+
+  // 時間足のラベルを取得
+  const getTimeframeLabel = (tf: number) => {
+    const option = TIMEFRAME_OPTIONS.find(o => o.value === tf);
+    return option?.label || `${tf}秒`;
+  };
 
   // チャートデータを変換（確定バー + 進行中バー）
   const chartData: OHLCVDataPoint[] = useMemo(() => {
@@ -173,7 +205,22 @@ export function RealtimeChart({
       <div className="bg-gray-800 px-4 py-3 flex items-center justify-between border-b border-gray-700">
         <div className="flex items-center gap-3">
           <h3 className="text-lg font-semibold text-white">{symbol}</h3>
-          <span className="text-gray-400 text-sm">10秒足 リアルタイム</span>
+          
+          {/* 時間足選択 */}
+          <select
+            value={timeframe}
+            onChange={(e) => handleTimeframeChange(parseInt(e.target.value))}
+            disabled={isConnected}
+            className={`bg-gray-700 text-white text-sm rounded px-2 py-1 border border-gray-600 ${
+              isConnected ? 'opacity-50 cursor-not-allowed' : 'hover:border-gray-500'
+            }`}
+          >
+            {TIMEFRAME_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}足</option>
+            ))}
+          </select>
+          
+          <span className="text-gray-400 text-sm">リアルタイム</span>
           <StatusBadge status={status} />
         </div>
 
@@ -258,7 +305,7 @@ export function RealtimeChart({
 
             {/* 統計情報 */}
             <div className="text-xs text-gray-500 flex justify-between">
-              <span>確定バー: {bars.length}本</span>
+              <span>確定バー: {bars.length}本 | 時間足: {getTimeframeLabel(timeframe)}</span>
               <span>データソース: cTrader WebSocket</span>
             </div>
           </div>
