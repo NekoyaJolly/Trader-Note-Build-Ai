@@ -306,32 +306,41 @@ router.get('/stream/:symbol', async (req: Request, res: Response) => {
 
   const orch = getOrchestrator(timeframe);
 
+  // SSE メッセージ送信ヘルパー（即座にフラッシュ）
+  const sendSSE = (event: string, data: unknown) => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+    // Node.js の場合、write 後にフラッシュが必要な場合がある
+    if (typeof (res as unknown as { flush?: () => void }).flush === 'function') {
+      (res as unknown as { flush: () => void }).flush();
+    }
+  };
+
   // 初期データを送信
   const sendInitialData = async () => {
     try {
       const bars = await orch.getRecentBars(symbol, 60);
       const pendingBar = orch.getPendingBar(symbol);
-
-      res.write(`event: init\n`);
-      res.write(`data: ${JSON.stringify({ bars, pendingBar, status: orch.getStatus() })}\n\n`);
+      console.log(`[RealtimeAPI] 初期データ送信: ${bars.length} バー, status=${orch.getStatus()}`);
+      sendSSE('init', { bars, pendingBar, status: orch.getStatus() });
     } catch (error) {
       console.error('[RealtimeAPI] 初期データ送信エラー:', error);
+      // エラー時も空のデータを送信
+      sendSSE('init', { bars: [], pendingBar: null, status: 'error' });
     }
   };
 
   // Tick イベントハンドラ
   const onTick = (tick: TickDataInput) => {
     if (tick.symbol === symbol || symbol === 'all') {
-      res.write(`event: tick\n`);
-      res.write(`data: ${JSON.stringify(tick)}\n\n`);
+      sendSSE('tick', tick);
     }
   };
 
   // バー確定イベントハンドラ
   const onBar = (bar: OHLCVBarInput) => {
     if (bar.symbol === symbol || symbol === 'all') {
-      res.write(`event: bar\n`);
-      res.write(`data: ${JSON.stringify(bar)}\n\n`);
+      sendSSE('bar', bar);
     }
   };
 
@@ -339,15 +348,13 @@ router.get('/stream/:symbol', async (req: Request, res: Response) => {
   const onPendingBar = (bar: unknown) => {
     const pendingBar = bar as { symbol: string };
     if (pendingBar.symbol === symbol || symbol === 'all') {
-      res.write(`event: pendingBar\n`);
-      res.write(`data: ${JSON.stringify(bar)}\n\n`);
+      sendSSE('pendingBar', bar);
     }
   };
 
   // 接続状態変更ハンドラ
   const onStatusChange = (status: ConnectionStatus) => {
-    res.write(`event: status\n`);
-    res.write(`data: ${JSON.stringify({ status })}\n\n`);
+    sendSSE('status', { status });
   };
 
   // イベントリスナー登録
@@ -359,10 +366,9 @@ router.get('/stream/:symbol', async (req: Request, res: Response) => {
   // 初期データ送信
   await sendInitialData();
 
-  // 接続維持のためのハートビート
+  // 接続維持のためのハートビート（30秒ごと）
   const heartbeat = setInterval(() => {
-    res.write(`event: heartbeat\n`);
-    res.write(`data: ${JSON.stringify({ timestamp: Date.now() })}\n\n`);
+    sendSSE('heartbeat', { timestamp: Date.now() });
   }, 30000);
 
   // クライアント切断時のクリーンアップ

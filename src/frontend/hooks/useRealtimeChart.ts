@@ -158,10 +158,12 @@ export function useRealtimeChart(
       }
 
       // 3. SSE ストリームに接続（EventSourcePolyfill を使用して CORS 対応）
+      // ローカル環境では withCredentials は不要
+      const isLocalhost = apiBase.includes('localhost');
       const eventSource = new EventSourcePolyfill(
         `${apiBase}/api/realtime/stream/${symbol}?timeframe=${timeframe}`,
         {
-          withCredentials: true,
+          withCredentials: !isLocalhost, // 本番環境のみ credentials を使用
           heartbeatTimeout: 120000, // 2分のハートビートタイムアウト
         }
       );
@@ -171,13 +173,32 @@ export function useRealtimeChart(
         console.log('[useRealtimeChart] SSE 接続成功');
         setStatus('connected');
         setIsLoading(false);
+        setError(null); // エラーをクリア
       };
 
       eventSource.onerror = (e) => {
-        console.error('[useRealtimeChart] SSE エラー:', e);
-        setStatus('error');
-        setError('SSE 接続エラー');
-        setIsLoading(false);
+        // EventSource の readyState を確認
+        // 0 = CONNECTING, 1 = OPEN, 2 = CLOSED
+        const readyState = eventSource.readyState;
+        console.error('[useRealtimeChart] SSE エラー:', {
+          readyState,
+          event: e,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          status: (e as any)?.status,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          message: (e as any)?.message,
+        });
+        
+        // readyState が CONNECTING (0) の場合は再接続を試みている可能性がある
+        // readyState が CLOSED (2) の場合のみエラー扱い
+        if (readyState === 2) {
+          setStatus('error');
+          setError('SSE 接続が切断されました');
+          setIsLoading(false);
+        } else if (readyState === 0) {
+          // 接続中のエラーは一時的なものの可能性があるのでログのみ
+          console.log('[useRealtimeChart] SSE 再接続中...');
+        }
       };
 
       // SSE カスタムイベント用のヘルパー関数
