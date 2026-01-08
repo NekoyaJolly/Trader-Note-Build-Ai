@@ -102,38 +102,62 @@ function toChartTime(timestamp: number): UTCTimestamp {
 
 /**
  * OHLCVデータをローソク足データに変換
+ * - 時間順にソート
+ * - 重複タイムスタンプは最新のデータで上書き（Map使用）
  */
 function toCandlestickData(ohlcv: OHLCVDataPoint[]): CandlestickData<Time>[] {
-  return ohlcv.map((d) => ({
-    time: toChartTime(d.timestamp),
-    open: d.open,
-    high: d.high,
-    low: d.low,
-    close: d.close,
-  }));
+  // 重複を排除（同じ時間のデータは後のデータで上書き）
+  const uniqueMap = new Map<number, CandlestickData<Time>>();
+  
+  for (const d of ohlcv) {
+    const time = toChartTime(d.timestamp);
+    uniqueMap.set(time as number, {
+      time,
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+    });
+  }
+  
+  // 時間順にソートして返す
+  return Array.from(uniqueMap.values()).sort((a, b) => (a.time as number) - (b.time as number));
 }
 
 /**
  * インジケーターデータをラインデータに変換
+ * - 時間順にソート、重複排除
  */
 function toLineData(data: { timestamp: number; value: number }[]): LineData<Time>[] {
-  return data.map((d) => ({
-    time: toChartTime(d.timestamp),
-    value: d.value,
-  }));
+  const uniqueMap = new Map<number, LineData<Time>>();
+  
+  for (const d of data) {
+    const time = toChartTime(d.timestamp);
+    uniqueMap.set(time as number, { time, value: d.value });
+  }
+  
+  return Array.from(uniqueMap.values()).sort((a, b) => (a.time as number) - (b.time as number));
 }
 
 /**
  * ボリュームデータをヒストグラムデータに変換
+ * - 時間順にソート、重複排除
  */
 function toVolumeData(ohlcv: OHLCVDataPoint[]): HistogramData<Time>[] {
-  return ohlcv
-    .filter((d) => d.volume !== undefined)
-    .map((d) => ({
-      time: toChartTime(d.timestamp),
-      value: d.volume!,
+  const uniqueMap = new Map<number, HistogramData<Time>>();
+  
+  for (const d of ohlcv) {
+    // volumeがundefinedまたは0の場合はスキップ（チャートに0が表示されるのを防ぐ）
+    if (d.volume === undefined || d.volume === 0) continue;
+    const time = toChartTime(d.timestamp);
+    uniqueMap.set(time as number, {
+      time,
+      value: d.volume,
       color: d.close >= d.open ? "rgba(34, 197, 94, 0.5)" : "rgba(239, 68, 68, 0.5)",
-    }));
+    });
+  }
+  
+  return Array.from(uniqueMap.values()).sort((a, b) => (a.time as number) - (b.time as number));
 }
 
 // ========================================
@@ -217,7 +241,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       timeScale: {
         borderColor: CHART_THEME.borderColor,
         timeVisible: true,
-        secondsVisible: false,
+        secondsVisible: true, // 秒足チャートのため秒も表示
       },
       rightPriceScale: {
         borderColor: CHART_THEME.borderColor,
@@ -240,8 +264,8 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     const markersPlugin = createSeriesMarkers(candlestickSer, []);
     markersPluginRef.current = markersPlugin;
 
-    // ボリュームシリーズ追加（オプション）
-    const hasVolume = ohlcvData.some((d) => d.volume !== undefined);
+    // ボリュームシリーズ追加（有効なボリュームがある場合のみ）
+    const hasVolume = ohlcvData.some((d) => d.volume !== undefined && d.volume > 0);
     if (hasVolume) {
       const volumeSer = chart.addSeries(HistogramSeries, {
         color: "#26a69a",

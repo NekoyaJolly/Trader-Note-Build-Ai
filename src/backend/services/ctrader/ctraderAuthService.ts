@@ -22,13 +22,19 @@ import { config } from '../../../config';
 
 /**
  * トークンレスポンス（cTrader API）
+ * 注意: cTrader API は snake_case と camelCase の両方を返す
+ * token_type は返さず、tokenType のみ返す場合がある
  */
 export const CTraderTokenResponseSchema = z.object({
   access_token: z.string(),
   refresh_token: z.string(),
   expires_in: z.number(),
-  token_type: z.string(),
+  // token_type は返されない場合があるため optional に
+  token_type: z.string().optional(),
+  tokenType: z.string().optional(),
   scope: z.string().optional(),
+  // errorCode は null で返されることがある
+  errorCode: z.string().nullable().optional(),
 });
 
 export type CTraderTokenResponse = z.infer<typeof CTraderTokenResponseSchema>;
@@ -77,7 +83,9 @@ export class CTraderAuthService {
       client_id: config.ctrader.clientId,
       redirect_uri: config.ctrader.redirectUri,
       response_type: 'code',
-      scope: 'accounts trading',
+      // 注意: trading スコープは cTrader アプリで有効化が必要
+      // 現在は accounts のみで認証（取引履歴・ポジション読み取り）
+      scope: 'accounts',
     });
     
     if (state) {
@@ -110,13 +118,27 @@ export class CTraderAuthService {
     
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('[cTraderAuth] トークン交換失敗:', {
+        status: response.status,
+        error: errorText,
+        tokenUrl: config.ctrader.tokenUrl,
+        redirectUri: config.ctrader.redirectUri,
+      });
       throw new Error(`cTrader トークン交換エラー: ${response.status} ${errorText}`);
     }
     
-    const json = await response.json();
+    const json: unknown = await response.json();
+    const jsonObj = json as Record<string, unknown>;
+    console.log('[cTraderAuth] トークンレスポンス受信:', {
+      hasAccessToken: !!jsonObj.access_token,
+      hasRefreshToken: !!jsonObj.refresh_token,
+      expiresIn: jsonObj.expires_in,
+    });
+    
     const result = CTraderTokenResponseSchema.safeParse(json);
     
     if (!result.success) {
+      console.error('[cTraderAuth] レスポンスパースエラー:', jsonObj);
       throw new Error(`cTrader レスポンスパースエラー: ${result.error.message}`);
     }
     
@@ -245,6 +267,52 @@ export class CTraderAuthService {
       connected: tokens.length > 0,
       accounts: tokens,
     };
+  }
+  
+  /**
+   * 有効なトークンを取得（最初のアカウント）
+   * 
+   * @returns トークン情報（存在しない場合は null）
+   */
+  async getValidToken(): Promise<StoredToken | null> {
+    const token = await this.prisma.cTraderToken.findFirst({
+      orderBy: { createdAt: 'desc' },
+    });
+    
+    if (!token) {
+      return null;
+    }
+    
+    // 有効期限の5分前に更新
+    const refreshBuffer = 5 * 60 * 1000;
+    if (token.expiresAt.getTime() - refreshBuffer < Date.now()) {
+      try {
+        return await this.refreshAccessToken(token.accountId);
+      } catch (error) {
+        console.error('[CTraderAuth] トークン更新エラー:', error);
+        return null;
+      }
+    }
+    
+    return {
+      accountId: token.accountId,
+      accessToken: token.accessToken,
+      refreshToken: token.refreshToken,
+      expiresAt: token.expiresAt,
+      scope: token.scope,
+    };
+  }
+  
+  /**
+   * 最終接続日時を更新
+   * 
+   * @param accountId - アカウントID
+   */
+  async updateLastConnected(accountId: string): Promise<void> {
+    await this.prisma.cTraderToken.update({
+      where: { accountId },
+      data: { lastConnectedAt: new Date() },
+    });
   }
   
   /**

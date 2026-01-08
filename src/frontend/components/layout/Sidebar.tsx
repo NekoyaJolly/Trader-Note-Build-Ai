@@ -33,6 +33,7 @@ import {
   Sparkles,
   Plus,
   User,
+  LineChart,
   type LucideIcon,
 } from "lucide-react";
 import IndicatorConfigModal from "@/components/IndicatorConfigModal";
@@ -138,6 +139,12 @@ const navCategories: NavCategory[] = [
           { href: "/strategies/new", label: "新規作成", icon: Plus, color: "green" },
           { href: "#indicators", label: "インジケーター", icon: Activity, color: "green" },
         ],
+      },
+      {
+        href: "/market-analysis",
+        label: "マーケット分析",
+        icon: LineChart,
+        color: "green",
       },
       {
         href: "/backtest",
