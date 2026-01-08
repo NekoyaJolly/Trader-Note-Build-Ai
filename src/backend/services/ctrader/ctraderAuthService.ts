@@ -22,13 +22,19 @@ import { config } from '../../../config';
 
 /**
  * トークンレスポンス（cTrader API）
+ * 注意: cTrader API は snake_case と camelCase の両方を返す
+ * token_type は返さず、tokenType のみ返す場合がある
  */
 export const CTraderTokenResponseSchema = z.object({
   access_token: z.string(),
   refresh_token: z.string(),
   expires_in: z.number(),
-  token_type: z.string(),
+  // token_type は返されない場合があるため optional に
+  token_type: z.string().optional(),
+  tokenType: z.string().optional(),
   scope: z.string().optional(),
+  // errorCode は null で返されることがある
+  errorCode: z.string().nullable().optional(),
 });
 
 export type CTraderTokenResponse = z.infer<typeof CTraderTokenResponseSchema>;
@@ -77,7 +83,9 @@ export class CTraderAuthService {
       client_id: config.ctrader.clientId,
       redirect_uri: config.ctrader.redirectUri,
       response_type: 'code',
-      scope: 'accounts trading',
+      // 注意: trading スコープは cTrader アプリで有効化が必要
+      // 現在は accounts のみで認証（取引履歴・ポジション読み取り）
+      scope: 'accounts',
     });
     
     if (state) {
