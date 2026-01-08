@@ -33,10 +33,11 @@ describe('realtimeSanity', () => {
 
   test('filterBarsByReferencePrice: 参照価格から乖離したバーを除外できる', () => {
     const reference = 4600;
-    const bars = [bar(4601), bar(4599), bar(7000), bar(4_600_000)];
+    const bars = [bar(4601), bar(4599), bar(7000), bar(2300), bar(4_600_000)];
 
     // 50% 許容なので 7000 は除外（4600→7000 は約52%）
     // 4,600,000 は当然除外
+    // 2300 は「ちょうど50%」なので境界値として除外（スケール汚染の連鎖防止）
     const filtered = filterBarsByReferencePrice(bars, reference, 0.5);
     expect(filtered.map((b) => b.close)).toEqual([4601, 4599]);
   });

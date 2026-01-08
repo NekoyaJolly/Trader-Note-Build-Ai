@@ -29,11 +29,12 @@ import { filterBarsByReferencePrice } from './realtimeSanity';
 export const TickDataSchema = z.object({
   symbol: z.string(),
   timestamp: z.date(),
-  bid: z.number(),
-  ask: z.number(),
-  mid: z.number(),
-  spread: z.number(),
-  volume: z.number().optional(),
+  // NaN/Infinity を弾く（数値として破綻したTickを永続化しない）
+  bid: z.number().finite(),
+  ask: z.number().finite(),
+  mid: z.number().finite(),
+  spread: z.number().finite(),
+  volume: z.number().finite().optional(),
 });
 
 export type TickDataInput = z.infer<typeof TickDataSchema>;
@@ -45,11 +46,11 @@ export const OHLCVBarSchema = z.object({
   symbol: z.string(),
   timeframe: z.string(),
   timestamp: z.date(),
-  open: z.number(),
-  high: z.number(),
-  low: z.number(),
-  close: z.number(),
-  volume: z.number(),
+  open: z.number().finite(),
+  high: z.number().finite(),
+  low: z.number().finite(),
+  close: z.number().finite(),
+  volume: z.number().finite(),
   tickCount: z.number(),
 });
 
@@ -99,6 +100,23 @@ const DEFAULT_CONFIG: RealtimeTickServiceConfig = {
 const MIN_BARS_FOR_ANOMALY_DETECTION = 3;
 /** 異常値判定の乖離閾値（中央値からの乖離率 0.5 = 50%） */
 const ANOMALY_DEVIATION_THRESHOLD = 0.5;
+/** Tick レベルの異常値判定（バー生成の毒化防止のため、バーより厳しめにする） */
+const TICK_ANOMALY_DEVIATION_THRESHOLD = 0.3;
+
+type LastGoodPrice = {
+  mid: number;
+  timestampMs: number;
+};
+
+type AnomalyLogState = {
+  lastLoggedAtMs: number;
+  suppressedCount: number;
+  lastSample?: {
+    tickMid: number;
+    referenceMid: number;
+    deviation: number;
+  };
+};
 
 // ========================================
 // RealtimeTickService クラス
@@ -109,6 +127,8 @@ export class RealtimeTickService extends EventEmitter {
   private config: RealtimeTickServiceConfig;
   private pendingBars: Map<string, PendingBar> = new Map();
   private tickBuffer: TickDataInput[] = [];
+  private lastGoodPriceBySymbol: Map<string, LastGoodPrice> = new Map();
+  private anomalyLogBySymbol: Map<string, AnomalyLogState> = new Map();
   private flushTimer: NodeJS.Timeout | null = null;
   private barTimer: NodeJS.Timeout | null = null;
   private isRunning = false;
@@ -187,6 +207,11 @@ export class RealtimeTickService extends EventEmitter {
 
     const validTick = result.data;
 
+    // 0. Tick の異常値判定（ここで落とさないと、永続化/バー更新が汚染される）
+    if (this.isAnomalousTick(validTick)) {
+      return;
+    }
+
     // 1. Tick イベントを発火（リアルタイム配信用）
     this.emit('tick', validTick);
 
@@ -200,6 +225,12 @@ export class RealtimeTickService extends EventEmitter {
 
     // 3. 進行中バーを更新
     this.updatePendingBar(validTick);
+
+    // 4. 最終的に受理した価格として保持（次のTick異常判定の参照用）
+    this.lastGoodPriceBySymbol.set(validTick.symbol, {
+      mid: validTick.mid,
+      timestampMs: validTick.timestamp.getTime(),
+    });
   }
 
   /**
@@ -264,7 +295,8 @@ export class RealtimeTickService extends EventEmitter {
       const lowDeviation = Math.abs(Number(bar.low) - medianClose) / medianClose;
       const highDeviation = Math.abs(Number(bar.high) - medianClose) / medianClose;
       
-      if (lowDeviation > ANOMALY_DEVIATION_THRESHOLD || highDeviation > ANOMALY_DEVIATION_THRESHOLD) {
+      // 境界値(ちょうど50%乖離など)も異常として扱う
+      if (lowDeviation >= ANOMALY_DEVIATION_THRESHOLD || highDeviation >= ANOMALY_DEVIATION_THRESHOLD) {
         anomalousIds.push(bar.id);
       }
     }
@@ -302,15 +334,6 @@ export class RealtimeTickService extends EventEmitter {
     const barStartTime = new Date(barStartMs);
 
     let pending = this.pendingBars.get(key);
-
-    // 異常値チェック: 既存バーがある場合、価格が50%以上乖離していたらスキップ
-    if (pending && tick.mid > 0) {
-      const deviation = Math.abs(tick.mid - pending.close) / pending.close;
-      if (deviation > 0.5) {
-        console.warn(`[RealtimeTickService] 異常値検出: ${tick.symbol} tick=${tick.mid} vs bar=${pending.close} (乖離率=${(deviation * 100).toFixed(1)}%)`);
-        return; // 異常値はスキップ
-      }
-    }
 
     // 新しいバーを開始するか判定
     if (!pending || pending.startTime.getTime() !== barStartTime.getTime()) {
@@ -526,7 +549,8 @@ export class RealtimeTickService extends EventEmitter {
       const lowDeviation = Math.abs(bar.low - medianClose) / medianClose;
       const highDeviation = Math.abs(bar.high - medianClose) / medianClose;
       
-      if (lowDeviation > ANOMALY_DEVIATION_THRESHOLD || highDeviation > ANOMALY_DEVIATION_THRESHOLD) {
+      // 境界値(ちょうど50%乖離など)も異常として扱う
+      if (lowDeviation >= ANOMALY_DEVIATION_THRESHOLD || highDeviation >= ANOMALY_DEVIATION_THRESHOLD) {
         excludedCount++;
         return false;
       }
@@ -554,6 +578,73 @@ export class RealtimeTickService extends EventEmitter {
     }
     // 奇数長: 中央の値
     return sorted[mid];
+  }
+
+  /**
+   * Tick が異常値か判定
+   *
+   * 方針:
+   * - pendingBar の close と lastGood(mid) の両方を参照候補にし、Tick から最も近い参照を採用
+   * - それでも乖離が閾値以上なら、永続化/バー更新を行わず破棄する（汚染防止）
+   * - ログはスパムにならないように抑制（一定間隔で集約）
+   */
+  private isAnomalousTick(tick: TickDataInput): boolean {
+    if (!(Number.isFinite(tick.mid) && tick.mid > 0)) return true;
+
+    const timeframe = `${this.config.barIntervalSeconds}s`;
+    const key = `${tick.symbol}:${timeframe}`;
+    const pending = this.pendingBars.get(key);
+    const pendingRef = pending?.close;
+
+    const lastGood = this.lastGoodPriceBySymbol.get(tick.symbol);
+    const lastGoodRef = lastGood?.mid;
+
+    const refs: number[] = [];
+    if (pendingRef !== undefined && Number.isFinite(pendingRef) && pendingRef > 0) refs.push(pendingRef);
+    if (lastGoodRef !== undefined && Number.isFinite(lastGoodRef) && lastGoodRef > 0) refs.push(lastGoodRef);
+
+    // 参照が無い場合（初回など）は受理する
+    if (refs.length === 0) return false;
+
+    const deviationFrom = (ref: number) => Math.abs(tick.mid - ref) / ref;
+    const bestRef = refs.reduce((best, cur) => (deviationFrom(cur) < deviationFrom(best) ? cur : best), refs[0]);
+    const deviation = deviationFrom(bestRef);
+
+    // 境界値も落とす（>=）
+    if (deviation >= TICK_ANOMALY_DEVIATION_THRESHOLD) {
+      this.logAnomalousTick(tick.symbol, tick.mid, bestRef, deviation);
+      return true;
+    }
+
+    return false;
+  }
+
+  private logAnomalousTick(symbol: string, tickMid: number, referenceMid: number, deviation: number): void {
+    const now = Date.now();
+    const state = this.anomalyLogBySymbol.get(symbol) ?? {
+      lastLoggedAtMs: 0,
+      suppressedCount: 0,
+    };
+
+    state.lastSample = { tickMid, referenceMid, deviation };
+
+    // 5秒以内の連続ログは抑制してカウントだけ積む
+    if (now - state.lastLoggedAtMs < 5000) {
+      state.suppressedCount++;
+      this.anomalyLogBySymbol.set(symbol, state);
+      return;
+    }
+
+    const suppressed = state.suppressedCount;
+    state.lastLoggedAtMs = now;
+    state.suppressedCount = 0;
+    this.anomalyLogBySymbol.set(symbol, state);
+
+    const suffix = suppressed > 0 ? `（直近5秒で ${suppressed} 件の異常Tickログを抑制）` : '';
+    console.warn(
+      `[RealtimeTickService] 異常Tickを破棄: ${symbol} tick=${tickMid.toFixed(5)} ` +
+      `ref=${referenceMid.toFixed(5)} 乖離率=${(deviation * 100).toFixed(1)}% ${suffix}`
+    );
   }
 
   /**
