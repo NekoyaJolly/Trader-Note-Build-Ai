@@ -96,13 +96,10 @@ router.get('/status', async (_req: Request, res: Response) => {
  * cTrader に接続
  */
 router.post('/connect', async (req: Request, res: Response) => {
-  console.log('[RealtimeAPI] POST /connect 受信');
   try {
     const timeframe = parseInt(req.query.timeframe as string) || 10;
-    console.log(`[RealtimeAPI] cTrader 接続開始 (${timeframe}秒足)`);
     const orch = getOrchestrator(timeframe);
     const success = await orch.connect();
-    console.log(`[RealtimeAPI] cTrader 接続結果: ${success ? '成功' : '失敗'}`);
 
     res.json({
       success,
@@ -269,24 +266,14 @@ router.get('/stream/:symbol', async (req: Request, res: Response) => {
   const { symbol } = req.params;
   const timeframe = parseInt(req.query.timeframe as string) || 10;
 
-  console.log(`[RealtimeAPI] SSE 接続リクエスト: ${symbol} (${timeframe}秒足)`);
-
-  // SSE ヘッダー設定（CORS 対応）
+  // SSE ヘッダー設定
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no'); // nginx バッファリング無効化
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
-  // 即座にフラッシュ
   res.flushHeaders();
-  
-  // 接続確認メッセージを送信
-  res.write(`event: connected\n`);
-  res.write(`data: ${JSON.stringify({ message: 'SSE connected', symbol, timeframe })}\n\n`);
 
-  console.log(`[RealtimeAPI] SSE 接続確立: ${symbol} (${timeframe}秒足)`);
+  console.log(`[RealtimeAPI] SSE 接続開始: ${symbol} (${timeframe}秒足)`);
 
   const orch = getOrchestrator(timeframe);
 
