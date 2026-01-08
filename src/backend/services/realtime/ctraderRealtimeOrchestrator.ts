@@ -15,6 +15,7 @@ import { PrismaClient } from '@prisma/client';
 import { EventEmitter } from 'events';
 import { CTraderAuthService } from '../ctrader/ctraderAuthService';
 import { RealtimeTickService, getRealtimeTickService, TickDataInput, OHLCVBarInput } from './realtimeTickService';
+import { getCloseStats, looksLikeMisScaledBars } from './realtimeSanity';
 import { config } from '../../../config';
 
 // cTrader Layer ライブラリ（型定義なし）
@@ -335,16 +336,35 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
   async getRecentBars(symbol: string, limit: number = 60): Promise<OHLCVBarInput[]> {
     // まずTickServiceから取得を試みる（リアルタイムで蓄積したデータ）
     const timeframe = `${this.config.barIntervalSeconds}s`;
-    const tickBars = await this.tickService.getRecentBars(symbol, timeframe, limit);
+    const pending = this.tickService.getPendingBar(symbol, timeframe);
+    const referencePrice = pending?.close;
+    const tickBars = await this.tickService.getRecentBars(symbol, timeframe, limit, referencePrice);
     
     // 十分なデータがあればそれを返す
-    if (tickBars.length >= 10) {
+    if (tickBars.length >= 10 && !looksLikeMisScaledBars(tickBars)) {
       return tickBars;
     }
     
     // 接続されていなければ空配列
     if (!this.connection || !this.ctidTraderAccountId) {
       return tickBars;
+    }
+
+    // DB側が怪しい場合はログしておく（スケール汚染の可能性）
+    if (tickBars.length > 0) {
+      const stats = getCloseStats(tickBars);
+      if (looksLikeMisScaledBars(tickBars)) {
+        console.warn(
+          `[CTraderOrchestrator] DBバーが価格スケール異常の可能性: ${symbol} ${timeframe} ` +
+          `close(median=${stats.median.toFixed(5)}, min=${stats.min.toFixed(5)}, max=${stats.max.toFixed(5)}) ` +
+          `→ Trendbar にフォールバックします`
+        );
+      } else if (tickBars.length < 10) {
+        console.log(
+          `[CTraderOrchestrator] DBバー不足: ${symbol} ${timeframe} ${tickBars.length}本 ` +
+          `→ Trendbar で補完します`
+        );
+      }
     }
     
     // cTrader API から過去データを取得
@@ -490,11 +510,23 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
       // 常に 100000 (10^5) で除算する（digitsに関係なく）
       const PRICE_DIVISOR = 100000;
       
-      const rawBid = data.bid;
-      const rawAsk = data.ask;
+      // bid/ask は number の想定だが、ライブラリ都合で string 等の可能性もあるため Number() で正規化
+      const rawBid = data.bid !== undefined ? Number(data.bid) : undefined;
+      const rawAsk = data.ask !== undefined ? Number(data.ask) : undefined;
       
       // bid または ask が存在しない場合はスキップ
       if (rawBid === undefined && rawAsk === undefined) {
+        return;
+      }
+      
+      // 数値変換に失敗した場合はスキップ（NaN を弾く）
+      if (
+        (rawBid !== undefined && !Number.isFinite(rawBid)) ||
+        (rawAsk !== undefined && !Number.isFinite(rawAsk))
+      ) {
+        console.warn(
+          `[CTraderOrchestrator] Tick 価格の数値変換に失敗: ${symbol} rawBid=${String(data.bid)} rawAsk=${String(data.ask)}`
+        );
         return;
       }
 
@@ -504,7 +536,13 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
       
       // デバッグログ（最初の数回のみ）
       if (this.tickLogCount < 5) {
-        console.log(`[CTraderOrchestrator] Tick: ${symbol} raw=(${rawBid}/${rawAsk}) → bid=${bid.toFixed(digits)} ask=${ask.toFixed(digits)}`);
+        const ts = Number(data.timestamp) || Date.now();
+        console.log(
+          `[CTraderOrchestrator] Tick: ${symbol} (symbolId=${symbolId} digits=${digits} pipPos=${symbolInfo.pipPosition}) ` +
+          `raw=(${rawBid}/${rawAsk}) divisor=${PRICE_DIVISOR} ` +
+          `→ bid=${bid.toFixed(digits)} ask=${ask.toFixed(digits)} mid=${(((bid + ask) / 2)).toFixed(digits)} ` +
+          `ts=${new Date(ts).toISOString()}`
+        );
         this.tickLogCount++;
       }
       

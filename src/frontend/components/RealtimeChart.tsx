@@ -137,7 +137,8 @@ function PricePanel({
 export function RealtimeChart({ 
   symbol, 
   height = 400,
-  initialTimeframe = 10,
+  // cTrader Trendbar API を使う都合上、デフォルトは 1分足（60秒）に合わせる
+  initialTimeframe = 60,
   onTimeframeChange,
 }: RealtimeChartProps) {
   const [timeframe, setTimeframe] = useState(initialTimeframe);

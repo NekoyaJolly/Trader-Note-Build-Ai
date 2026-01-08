@@ -65,16 +65,16 @@ cTrader WebSocket から Tick データを受信し、リアルタイムでロ�
 ### ~~問題 2: チャートにローソク足が表示されない~~（解決済み）
 
 - **症状**: Tick 数はカウントされるが、チャートにローソク足が1本も表示されない
-- **原因**: cTrader API が返す価格が pipettes（整数）形式で、変換されていなかった
-- **解決策**: シンボルの `digits` 情報を取得し、`price / 10^digits` で正しく変換
+- **原因**: cTrader Open API が返す価格が整数形式（pipettes）で、UI が期待する実数価格に変換されていなかった
+- **解決策**: **常に 100000 で除算**し、実数価格に変換する（`digits` は表示用で、除算係数には使わない）
 
 ### ~~問題 3: 価格が異常な値~~（解決済み）
 
 - **症状**: 価格帯が 0.07〜-0.06 のような意味不明な値
-- **原因**: cTrader API は価格を pipettes（整数）で返す。例: XAUUSD (digits=2) では 262350 → 2623.50
-- **解決策**: 
-  - `subscribe()` 時にシンボルの `digits` 情報をキャッシュ
-  - Tick 受信時に `symbolId` からシンボル情報を取得し、`10^digits` で除算
+- **原因**: 価格のスケールを誤って二重変換した／`digits` ベースの変換を適用してしまい、シンボルによって桁がズレた
+- **解決策**:
+  - Tick/Trendbar の価格は **1/100000 of unit of a price** 形式のため、**常に 100000 で除算**する
+  - `digits` は `toFixed()` 等の表示にのみ使用する
 
 ### ~~問題 4: 時間軸が正しくない~~（解決済み）
 
@@ -95,9 +95,10 @@ cTrader WebSocket から Tick データを受信し、リアルタイムでロ�
 - Tick 受信時に `symbolId` からシンボル情報を逆引きし、正しく価格変換
 
 ```typescript
-// pipettes から実際の価格に変換
-const divisor = Math.pow(10, digits);
-const bid = rawBid / divisor;
+// cTrader Open API: bid/ask は "1/100000 of unit of a price"
+// 例: 460000000 → 4600.0（XAUUSD 2026年1月の価格帯）
+const PRICE_DIVISOR = 100000;
+const bid = rawBid / PRICE_DIVISOR;
 ```
 
 ### チャート表示の修正

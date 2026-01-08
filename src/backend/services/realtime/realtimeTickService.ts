@@ -17,6 +17,7 @@
 import { PrismaClient } from '@prisma/client';
 import { EventEmitter } from 'events';
 import { z } from 'zod';
+import { filterBarsByReferencePrice } from './realtimeSanity';
 
 // ========================================
 // 型定義
@@ -474,7 +475,12 @@ export class RealtimeTickService extends EventEmitter {
    * 最新の OHLCV データを取得（UI 初期表示用）
    * 異常値（lowが他のバーから50%以上乖離）はフィルタリング
    */
-  async getRecentBars(symbol: string, timeframe: string, limit: number = 60): Promise<OHLCVBarInput[]> {
+  async getRecentBars(
+    symbol: string,
+    timeframe: string,
+    limit: number = 60,
+    referencePrice?: number
+  ): Promise<OHLCVBarInput[]> {
     const bars = await this.prisma.realtimeOHLCV.findMany({
       where: { symbol, timeframe },
       orderBy: { timestamp: 'desc' },
@@ -493,7 +499,14 @@ export class RealtimeTickService extends EventEmitter {
       tickCount: b.tickCount,
     })).reverse();
 
-    // 異常値フィルタリング: 中央値から50%以上乖離したバーを除外
+    // 参照価格がある場合（= 直近Tick/進行中バーが取れている）:
+    // DBの汚染（スケール違い）を避けるため、参照価格に近いバーだけを返す
+    // ※ ここで0件になった場合は、上位（Orchestrator）が Trendbar にフォールバックできる
+    if (referencePrice !== undefined && Number.isFinite(referencePrice) && referencePrice > 0) {
+      return filterBarsByReferencePrice(mappedBars, referencePrice, ANOMALY_DEVIATION_THRESHOLD);
+    }
+
+    // 参照価格がない場合は、従来通り中央値ベースで異常値を除外
     return this.filterAnomalousBars(mappedBars);
   }
 
