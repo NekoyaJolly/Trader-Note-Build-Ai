@@ -111,11 +111,39 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private ctidTraderAccountId: number | null = null;
   private tickLogCount = 0;
+  // 直近の正常価格（片側欠損Tickの補完/検証に使用）
+  private lastGoodMidBySymbol: Map<string, { mid: number; timestampMs: number }> = new Map();
+  // ログのスパム防止（異常Tickスキップ用）
+  private tickSkipLogBySymbol: Map<string, { lastLoggedAtMs: number; suppressedCount: number }> = new Map();
   
   // シンボル情報のキャッシュ（価格変換用）
   private symbolInfoCache: Map<number, { symbolName: string; digits: number; pipPosition: number }> = new Map();
   // シンボル名 → symbolId のマッピング
   private symbolNameToId: Map<string, number> = new Map();
+
+  /**
+   * 異常Tickスキップのログをスパムしないためのヘルパー
+   */
+  private logSkippedTick(symbol: string, mid: number, referenceMid: number | undefined, reason: string): void {
+    const now = Date.now();
+    const state = this.tickSkipLogBySymbol.get(symbol) ?? { lastLoggedAtMs: 0, suppressedCount: 0 };
+
+    // 5秒以内の連続ログは抑制
+    if (now - state.lastLoggedAtMs < 5000) {
+      state.suppressedCount++;
+      this.tickSkipLogBySymbol.set(symbol, state);
+      return;
+    }
+
+    const suppressed = state.suppressedCount;
+    state.lastLoggedAtMs = now;
+    state.suppressedCount = 0;
+    this.tickSkipLogBySymbol.set(symbol, state);
+
+    const refText = referenceMid !== undefined && Number.isFinite(referenceMid) ? referenceMid.toFixed(5) : 'N/A';
+    const suffix = suppressed > 0 ? `（直近5秒で ${suppressed} 件のスキップログを抑制）` : '';
+    console.warn(`[CTraderOrchestrator] Tickをスキップ: ${symbol} mid=${mid.toFixed(5)} ref=${refText} ${reason} ${suffix}`);
+  }
 
   constructor(prisma: PrismaClient, config: Partial<OrchestratorConfig> = {}) {
     super();
@@ -248,6 +276,8 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
 
     await this.tickService.stop();
     this.subscribedSymbols.clear();
+    this.lastGoodMidBySymbol.clear();
+    this.tickSkipLogBySymbol.clear();
     this.setStatus('disconnected');
     console.log('[CTraderOrchestrator] 切断完了');
   }
@@ -511,18 +541,19 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
       const PRICE_DIVISOR = 100000;
       
       // bid/ask は number の想定だが、ライブラリ都合で string 等の可能性もあるため Number() で正規化
-      const rawBid = data.bid !== undefined ? Number(data.bid) : undefined;
-      const rawAsk = data.ask !== undefined ? Number(data.ask) : undefined;
+      // さらに、cTrader/ライブラリ都合で「未更新」を 0 として送ってくるケースがあるため、0 は欠損扱いにする
+      const rawBid0 = data.bid !== undefined ? Number(data.bid) : undefined;
+      const rawAsk0 = data.ask !== undefined ? Number(data.ask) : undefined;
       
       // bid または ask が存在しない場合はスキップ
-      if (rawBid === undefined && rawAsk === undefined) {
+      if (rawBid0 === undefined && rawAsk0 === undefined) {
         return;
       }
       
       // 数値変換に失敗した場合はスキップ（NaN を弾く）
       if (
-        (rawBid !== undefined && !Number.isFinite(rawBid)) ||
-        (rawAsk !== undefined && !Number.isFinite(rawAsk))
+        (rawBid0 !== undefined && !Number.isFinite(rawBid0)) ||
+        (rawAsk0 !== undefined && !Number.isFinite(rawAsk0))
       ) {
         console.warn(
           `[CTraderOrchestrator] Tick 価格の数値変換に失敗: ${symbol} rawBid=${String(data.bid)} rawAsk=${String(data.ask)}`
@@ -530,17 +561,67 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
         return;
       }
 
+      // 0（または 0 以下）は価格として不正なので欠損扱いにする
+      const rawBid = rawBid0 !== undefined && rawBid0 > 0 ? rawBid0 : undefined;
+      const rawAsk = rawAsk0 !== undefined && rawAsk0 > 0 ? rawAsk0 : undefined;
+
+      // 両方欠損ならスキップ
+      if (rawBid === undefined && rawAsk === undefined) {
+        return;
+      }
+
+      // sessionClose は「直近終値」相当の参照値として使える（価格スケール汚染の初期防止）
+      const rawSessionClose0 = data.sessionClose !== undefined ? Number(data.sessionClose) : undefined;
+      const rawSessionClose = rawSessionClose0 !== undefined && Number.isFinite(rawSessionClose0) && rawSessionClose0 > 0
+        ? rawSessionClose0
+        : undefined;
+      const sessionCloseMid = rawSessionClose !== undefined ? rawSessionClose / PRICE_DIVISOR : undefined;
+
       // 価格変換: raw / 100000
-      const bid = rawBid !== undefined ? rawBid / PRICE_DIVISOR : (rawAsk !== undefined ? rawAsk / PRICE_DIVISOR : 0);
-      const ask = rawAsk !== undefined ? rawAsk / PRICE_DIVISOR : (rawBid !== undefined ? rawBid / PRICE_DIVISOR : 0);
+      // 片側が欠損の場合は、もう片側で補完して「半値(mid=(x+0)/2)」が発生しないようにする
+      const bid = rawBid !== undefined ? rawBid / PRICE_DIVISOR : (rawAsk as number) / PRICE_DIVISOR;
+      const ask = rawAsk !== undefined ? rawAsk / PRICE_DIVISOR : (rawBid as number) / PRICE_DIVISOR;
+
+      // 念のためスプレッドが負になる場合は補正（欠損補完や一時的な逆転を吸収）
+      const safeBid = Math.min(bid, ask);
+      const safeAsk = Math.max(bid, ask);
+      const mid = (safeBid + safeAsk) / 2;
+
+      // 片側欠損（補完Tick）かどうか
+      const isSynthetic = rawBid === undefined || rawAsk === undefined;
+
+      // 参照価格（優先: 直近の正常Tick、無ければ sessionClose）
+      const lastGood = this.lastGoodMidBySymbol.get(symbol)?.mid;
+      const referenceMid = lastGood ?? sessionCloseMid;
+
+      // 初回で参照が無い補完Tickは受理しない（ここで受理すると誤値がバーに入って連鎖する）
+      if (isSynthetic && referenceMid === undefined) {
+        this.logSkippedTick(symbol, mid, referenceMid, '片側欠損Tick（参照価格未確立のためスキップ）');
+        return;
+      }
+
+      // 参照価格がある場合、大きすぎる乖離は受理しない（初期汚染/突発0混入を防止）
+      if (referenceMid !== undefined && Number.isFinite(referenceMid) && referenceMid > 0) {
+        const deviation = Math.abs(mid - referenceMid) / referenceMid;
+        // 30%以上のジャンプは、今回の用途（XAUUSD/FX短期）では異常として扱う
+        if (deviation >= 0.3) {
+          this.logSkippedTick(
+            symbol,
+            mid,
+            referenceMid,
+            `異常値っぽいTickをスキップ（乖離率=${(deviation * 100).toFixed(1)}%）`
+          );
+          return;
+        }
+      }
       
       // デバッグログ（最初の数回のみ）
       if (this.tickLogCount < 5) {
         const ts = Number(data.timestamp) || Date.now();
         console.log(
           `[CTraderOrchestrator] Tick: ${symbol} (symbolId=${symbolId} digits=${digits} pipPos=${symbolInfo.pipPosition}) ` +
-          `raw=(${rawBid}/${rawAsk}) divisor=${PRICE_DIVISOR} ` +
-          `→ bid=${bid.toFixed(digits)} ask=${ask.toFixed(digits)} mid=${(((bid + ask) / 2)).toFixed(digits)} ` +
+          `raw=(${rawBid0}/${rawAsk0}) divisor=${PRICE_DIVISOR} ` +
+          `→ bid=${safeBid.toFixed(digits)} ask=${safeAsk.toFixed(digits)} mid=${mid.toFixed(digits)} ` +
           `ts=${new Date(ts).toISOString()}`
         );
         this.tickLogCount++;
@@ -549,15 +630,20 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
       const tick: TickDataInput = {
         symbol,
         timestamp: new Date(Number(data.timestamp) || Date.now()),
-        bid,
-        ask,
-        mid: (bid + ask) / 2,
-        spread: ask - bid,
+        bid: safeBid,
+        ask: safeAsk,
+        mid,
+        spread: safeAsk - safeBid,
       };
 
       this.tickService.processTick(tick).catch(err => {
         console.error('[CTraderOrchestrator] Tick 処理エラー:', err);
       });
+
+      // 正常Tick（両側揃っている）のみを参照価格として更新する
+      if (!isSynthetic && Number.isFinite(mid) && mid > 0) {
+        this.lastGoodMidBySymbol.set(symbol, { mid, timestampMs: tick.timestamp.getTime() });
+      }
     });
 
     // 切断イベント

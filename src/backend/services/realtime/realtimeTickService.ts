@@ -30,10 +30,10 @@ export const TickDataSchema = z.object({
   symbol: z.string(),
   timestamp: z.date(),
   // NaN/Infinity を弾く（数値として破綻したTickを永続化しない）
-  bid: z.number().finite(),
-  ask: z.number().finite(),
-  mid: z.number().finite(),
-  spread: z.number().finite(),
+  bid: z.number().finite().positive(),
+  ask: z.number().finite().positive(),
+  mid: z.number().finite().positive(),
+  spread: z.number().finite().nonnegative(),
   volume: z.number().finite().optional(),
 });
 
@@ -69,6 +69,11 @@ interface PendingBar {
   volume: number;
   tickCount: number;
   startTime: Date;
+  // バーの最後に受理したTick（bar-close tick 永続化用）
+  lastTickAt: Date;
+  lastBid: number;
+  lastAsk: number;
+  lastSpread: number;
 }
 
 /**
@@ -81,6 +86,8 @@ interface RealtimeTickServiceConfig {
   minTicksPerBar: number;
   /** Tick 永続化を有効にするか */
   persistTicks: boolean;
+  /** バー確定時のTick（そのバーの最後に受理したTick）だけを永続化するか */
+  persistBarCloseTick: boolean;
   /** OHLCV 永続化を有効にするか */
   persistOHLCV: boolean;
   /** バッチ保存のサイズ */
@@ -90,7 +97,10 @@ interface RealtimeTickServiceConfig {
 const DEFAULT_CONFIG: RealtimeTickServiceConfig = {
   barIntervalSeconds: 60, // 1分足（デフォルト）
   minTicksPerBar: 1,
-  persistTicks: true,
+  // Tick 全量保存はDB肥大化しやすいのでデフォルトOFF
+  // バックテスト用途（1m以上）なら RealtimeOHLCV を主に使い、必要なら bar-close tick を保存する
+  persistTicks: false,
+  persistBarCloseTick: true,
   persistOHLCV: true,
   tickBatchSize: 100,
 };
@@ -137,6 +147,12 @@ export class RealtimeTickService extends EventEmitter {
     super();
     this.prisma = prisma;
     this.config = { ...DEFAULT_CONFIG, ...config };
+
+    // 全量Tick保存（persistTicks=true）の場合、bar-close tick も同時に保存すると二重化しやすい。
+    // 明示指定が無い限りは bar-close tick をOFFに寄せる。
+    if (config.persistTicks === true && config.persistBarCloseTick === undefined) {
+      this.config.persistBarCloseTick = false;
+    }
   }
 
   /**
@@ -152,6 +168,7 @@ export class RealtimeTickService extends EventEmitter {
     console.log('[RealtimeTickService] サービス開始:', {
       barInterval: `${this.config.barIntervalSeconds}秒`,
       persistTicks: this.config.persistTicks,
+      persistBarCloseTick: this.config.persistBarCloseTick,
       persistOHLCV: this.config.persistOHLCV,
     });
 
@@ -353,6 +370,11 @@ export class RealtimeTickService extends EventEmitter {
         volume: tick.volume || 0,
         tickCount: 1,
         startTime: barStartTime,
+        // bar-close tick 永続化用
+        lastTickAt: tick.timestamp,
+        lastBid: tick.bid,
+        lastAsk: tick.ask,
+        lastSpread: tick.spread,
       };
       this.pendingBars.set(key, pending);
     } else {
@@ -362,6 +384,11 @@ export class RealtimeTickService extends EventEmitter {
       pending.close = tick.mid;
       pending.volume += tick.volume || 0;
       pending.tickCount++;
+      // bar-close tick 永続化用（最後のTickで上書き）
+      pending.lastTickAt = tick.timestamp;
+      pending.lastBid = tick.bid;
+      pending.lastAsk = tick.ask;
+      pending.lastSpread = tick.spread;
     }
 
     // 進行中バーイベントを発火
@@ -430,6 +457,27 @@ export class RealtimeTickService extends EventEmitter {
         });
       } catch (error) {
         console.error('[RealtimeTickService] OHLCV 永続化エラー:', error);
+      }
+    }
+
+    // バー確定時のTick（そのバーの最後に受理したTick）を永続化
+    // バックテスト用途で「1分以上の粒度で価格系列があれば十分」な場合は、全量Tickよりこちらが軽量
+    if (this.config.persistBarCloseTick) {
+      try {
+        await this.prisma.tickData.create({
+          data: {
+            symbol: pending.symbol,
+            timestamp: pending.lastTickAt,
+            bid: pending.lastBid,
+            ask: pending.lastAsk,
+            mid: pending.close,
+            spread: pending.lastSpread,
+            volume: undefined,
+            source: 'ctrader_bar_close',
+          },
+        });
+      } catch (error) {
+        console.error('[RealtimeTickService] bar-close Tick 永続化エラー:', error);
       }
     }
   }
