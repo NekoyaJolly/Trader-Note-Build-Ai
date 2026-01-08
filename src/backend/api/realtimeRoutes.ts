@@ -225,6 +225,67 @@ router.post('/unsubscribe', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/realtime/clear-bars/:symbol
+ * 異常バーをクリア（メモリ+DB）
+ */
+router.post('/clear-bars/:symbol', async (req: Request, res: Response) => {
+  try {
+    const { symbol } = req.params;
+    const timeframe = parseInt(req.query.timeframe as string) || 60;
+
+    const orch = getOrchestrator(timeframe);
+    
+    // 1. メモリの進行中バーをクリア
+    orch.clearPendingBar(symbol);
+    
+    // 2. DBから異常バーを削除
+    const deletedCount = await orch.deleteAnomalousBars(symbol);
+
+    return res.json({
+      success: true,
+      data: {
+        symbol,
+        timeframe,
+        deletedCount,
+        message: `メモリバーをクリアし、${deletedCount}件の異常バーをDBから削除しました`,
+      },
+    });
+  } catch (error) {
+    console.error('[RealtimeAPI] バークリアエラー:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'バーのクリアに失敗しました',
+    });
+  }
+});
+
+/**
+ * POST /api/realtime/clear-all-bars
+ * 全ての異常バーをクリア
+ */
+router.post('/clear-all-bars', async (_req: Request, res: Response) => {
+  try {
+    // 全時間足のオーケストレーターの進行中バーをクリア
+    for (const orch of orchestrators.values()) {
+      orch.clearAllPendingBars();
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        message: '全ての進行中バーをクリアしました',
+      },
+    });
+  } catch (error) {
+    console.error('[RealtimeAPI] 全バークリアエラー:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'バーのクリアに失敗しました',
+    });
+  }
+});
+
+/**
  * GET /api/realtime/bars/:symbol
  * 最新の OHLCV バーを取得
  */

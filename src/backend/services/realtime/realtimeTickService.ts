@@ -210,6 +210,75 @@ export class RealtimeTickService extends EventEmitter {
     return Array.from(this.pendingBars.values());
   }
 
+  /**
+   * 特定シンボルの進行中バーをクリア
+   */
+  clearPendingBar(symbol: string, timeframe: string): void {
+    const key = `${symbol}:${timeframe}`;
+    if (this.pendingBars.has(key)) {
+      console.log(`[RealtimeTickService] 進行中バーをクリア: ${key}`);
+      this.pendingBars.delete(key);
+    }
+  }
+
+  /**
+   * 全ての進行中バーをクリア
+   */
+  clearAllPendingBars(): void {
+    const count = this.pendingBars.size;
+    this.pendingBars.clear();
+    console.log(`[RealtimeTickService] ${count}件の進行中バーをクリア`);
+  }
+
+  /**
+   * DBに保存された異常バーを削除
+   * 中央値から50%以上乖離したバーを削除
+   */
+  async deleteAnomalousBarsFromDB(symbol: string, timeframe: string): Promise<number> {
+    // まず現在のバーを取得
+    const bars = await this.prisma.realtimeOHLCV.findMany({
+      where: { symbol, timeframe },
+      orderBy: { timestamp: 'desc' },
+      take: 100,
+    });
+
+    if (bars.length < 3) {
+      console.log(`[RealtimeTickService] バー数不足でスキップ: ${bars.length}本`);
+      return 0;
+    }
+
+    // close価格の中央値を計算
+    const sortedBars = [...bars].sort((a, b) => Number(a.close) - Number(b.close));
+    const medianClose = Number(sortedBars[Math.floor(sortedBars.length / 2)].close);
+
+    // 異常値のIDを収集
+    const anomalousIds: string[] = [];
+    for (const bar of bars) {
+      const lowDeviation = Math.abs(Number(bar.low) - medianClose) / medianClose;
+      const highDeviation = Math.abs(Number(bar.high) - medianClose) / medianClose;
+      
+      if (lowDeviation > 0.5 || highDeviation > 0.5) {
+        anomalousIds.push(bar.id);
+        console.warn(`[RealtimeTickService] 異常バーを削除対象: id=${bar.id} low=${Number(bar.low)} high=${Number(bar.high)} (中央値=${medianClose.toFixed(2)})`);
+      }
+    }
+
+    if (anomalousIds.length === 0) {
+      console.log(`[RealtimeTickService] 異常バーなし: ${symbol} ${timeframe}`);
+      return 0;
+    }
+
+    // 異常バーを削除
+    const result = await this.prisma.realtimeOHLCV.deleteMany({
+      where: {
+        id: { in: anomalousIds },
+      },
+    });
+
+    console.log(`[RealtimeTickService] ${result.count}件の異常バーを削除: ${symbol} ${timeframe}`);
+    return result.count;
+  }
+
   // ========================================
   // 内部メソッド
   // ========================================
@@ -398,6 +467,7 @@ export class RealtimeTickService extends EventEmitter {
 
   /**
    * 最新の OHLCV データを取得（UI 初期表示用）
+   * 異常値（lowが他のバーから50%以上乖離）はフィルタリング
    */
   async getRecentBars(symbol: string, timeframe: string, limit: number = 60): Promise<OHLCVBarInput[]> {
     const bars = await this.prisma.realtimeOHLCV.findMany({
@@ -406,7 +476,7 @@ export class RealtimeTickService extends EventEmitter {
       take: limit,
     });
 
-    return bars.map(b => ({
+    const mappedBars = bars.map(b => ({
       symbol: b.symbol,
       timeframe: b.timeframe,
       timestamp: b.timestamp,
@@ -417,6 +487,35 @@ export class RealtimeTickService extends EventEmitter {
       volume: Number(b.volume),
       tickCount: b.tickCount,
     })).reverse();
+
+    // 異常値フィルタリング: 中央値から50%以上乖離したバーを除外
+    return this.filterAnomalousBars(mappedBars);
+  }
+
+  /**
+   * 異常値のバーをフィルタリング
+   * 中央値から50%以上乖離したlow/highを持つバーを除外
+   */
+  private filterAnomalousBars(bars: OHLCVBarInput[]): OHLCVBarInput[] {
+    if (bars.length < 3) return bars;
+
+    // close価格の中央値を計算
+    const sortedCloses = [...bars].sort((a, b) => a.close - b.close);
+    const medianClose = sortedCloses[Math.floor(sortedCloses.length / 2)].close;
+
+    // 中央値から50%以上乖離したバーを除外
+    const filtered = bars.filter(bar => {
+      const lowDeviation = Math.abs(bar.low - medianClose) / medianClose;
+      const highDeviation = Math.abs(bar.high - medianClose) / medianClose;
+      
+      if (lowDeviation > 0.5 || highDeviation > 0.5) {
+        console.warn(`[RealtimeTickService] 異常値バーを除外: ${bar.symbol} timestamp=${bar.timestamp instanceof Date ? bar.timestamp.toISOString() : bar.timestamp} low=${bar.low} high=${bar.high} (中央値=${medianClose.toFixed(2)})`);
+        return false;
+      }
+      return true;
+    });
+
+    return filtered;
   }
 
   /**

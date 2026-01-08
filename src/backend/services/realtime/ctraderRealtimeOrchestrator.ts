@@ -421,6 +421,29 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
     return this.tickService.getPendingBar(symbol, timeframe);
   }
 
+  /**
+   * 進行中バーをクリア
+   */
+  clearPendingBar(symbol: string): void {
+    const timeframe = `${this.config.barIntervalSeconds}s`;
+    this.tickService.clearPendingBar(symbol, timeframe);
+  }
+
+  /**
+   * 全ての進行中バーをクリア
+   */
+  clearAllPendingBars(): void {
+    this.tickService.clearAllPendingBars();
+  }
+
+  /**
+   * DBから異常バーを削除
+   */
+  async deleteAnomalousBars(symbol: string): Promise<number> {
+    const timeframe = `${this.config.barIntervalSeconds}s`;
+    return this.tickService.deleteAnomalousBarsFromDB(symbol, timeframe);
+  }
+
   // ========================================
   // 内部メソッド
   // ========================================
