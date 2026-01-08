@@ -1374,3 +1374,151 @@ model CTraderToken {
 
   @@index([expiresAt], map: "idx_ctrader_token_expires")
 }
+
+// ============================================================
+// ストラテジー横断分析（Phase Next）
+// ============================================================
+
+/// ストラテジー比較セッション
+/// 複数ストラテジーの比較分析を管理
+model StrategyComparisonSession {
+  id           String   @id @default(uuid()) @db.Uuid
+  /// セッション名（例: "2025年Q4比較"）
+  name         String
+  /// 比較対象ストラテジーID配列
+  strategyIds  String[] @default([])
+  /// 分析期間開始日
+  startDate    DateTime @db.Date
+  /// 分析期間終了日
+  endDate      DateTime @db.Date
+  /// 時間足
+  timeframe    String   @default("1h")
+  /// 作成日時
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt    DateTime @updatedAt @db.Timestamptz(6)
+
+  // リレーション
+  results       StrategyComparisonResult[]
+  correlations  StrategyCorrelation[]
+  optimizations PortfolioOptimization[]
+
+  @@index([createdAt(sort: Desc)], map: "idx_comparison_session_created")
+}
+
+/// ストラテジー比較結果
+/// 各ストラテジーの期間別パフォーマンス
+model StrategyComparisonResult {
+  id           String  @id @default(uuid()) @db.Uuid
+  /// セッションID
+  sessionId    String  @db.Uuid
+  /// ストラテジーID
+  strategyId   String  @db.Uuid
+
+  // パフォーマンス指標
+  /// トレード数
+  totalTrades  Int
+  /// 勝率（0-1）
+  winRate      Float
+  /// プロフィットファクター
+  profitFactor Float?
+  /// 純損益
+  netProfit    Decimal @db.Decimal(18, 8)
+  /// 最大ドローダウン
+  maxDrawdown  Decimal @db.Decimal(18, 8)
+  /// シャープレシオ（年率換算）
+  sharpeRatio  Float?
+  /// ソルティノレシオ（下方リスクのみ考慮）
+  sortinoRatio Float?
+  /// カルマーレシオ（年間リターン/最大DD）
+  calmarRatio  Float?
+
+  // 時系列データ（JSONB）
+  /// 日次リターン配列
+  dailyReturns Json?
+  /// エクイティカーブ（{date, equity}[]）
+  equityCurve  Json?
+
+  /// 作成日時
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+
+  // リレーション
+  session      StrategyComparisonSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, strategyId], map: "uq_comparison_result_session_strategy")
+  @@index([sessionId], map: "idx_comparison_result_session")
+}
+
+/// ストラテジー相関
+/// ストラテジーペア間の相関係数
+model StrategyCorrelation {
+  id          String @id @default(uuid()) @db.Uuid
+  /// セッションID
+  sessionId   String @db.Uuid
+  /// ストラテジーA ID
+  strategyAId String @db.Uuid
+  /// ストラテジーB ID
+  strategyBId String @db.Uuid
+
+  // 相関指標
+  /// ピアソン相関係数（-1〜1）
+  pearsonCorr Float
+  /// スピアマン順位相関係数
+  spearmanCorr Float?
+  /// 同時勝率（両方勝つ確率）
+  coWinRate   Float?
+  /// 同時負け率（両方負ける確率）
+  coLossRate  Float?
+
+  /// 作成日時
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+
+  // リレーション
+  session     StrategyComparisonSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, strategyAId, strategyBId], map: "uq_correlation_session_pair")
+  @@index([sessionId], map: "idx_correlation_session")
+}
+
+/// ポートフォリオ最適化結果
+model PortfolioOptimization {
+  id             String @id @default(uuid()) @db.Uuid
+  /// セッションID
+  sessionId      String @db.Uuid
+  /// 最適化手法
+  method         OptimizationMethod
+
+  // 最適化結果
+  /// 各ストラテジーの配分比率（JSONB: {strategyId: weight}[]）
+  weights        Json
+  /// 期待リターン（年率）
+  expectedReturn Float
+  /// 期待リスク（標準偏差、年率）
+  expectedRisk   Float
+  /// シャープレシオ
+  sharpeRatio    Float?
+  /// 効率的フロンティア（JSONB: {risk, return}[]）
+  efficientFrontier Json?
+
+  /// 作成日時
+  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+
+  // リレーション
+  session        StrategyComparisonSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId], map: "idx_optimization_session")
+}
+
+/// ポートフォリオ最適化手法
+enum OptimizationMethod {
+  /// 平均分散最適化（マーコビッツ）
+  mean_variance
+  /// リスクパリティ（等リスク寄与）
+  risk_parity
+  /// 等ウェイト
+  equal_weight
+  /// 最小分散
+  minimum_variance
+  /// 最大シャープレシオ
+  max_sharpe
+}

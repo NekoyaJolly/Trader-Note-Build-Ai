@@ -22,6 +22,7 @@ import {
   TradeDataForSummary,
   AISummaryResult,
 } from './aiSummaryService';
+import { OpenAIChatCompletionResponseSchema } from '../schemas/external/openai';
 
 const indicatorService = new IndicatorService();
 
@@ -44,7 +45,7 @@ export interface ExtendedTradeData extends TradeDataForSummary {
 /**
  * テンプレート種別
  */
-type TemplateType = 
+type TemplateType =
   | 'trend_follow_buy'    // 順張り買い
   | 'trend_follow_sell'   // 順張り売り
   | 'counter_trend_buy'   // 逆張り買い
@@ -106,7 +107,7 @@ export class EnhancedAISummaryService {
       } catch (error) {
         lastError = error as Error;
         console.warn(`AI 要約生成リトライ (${attempt}/${this.maxRetries}):`, error);
-        
+
         if (attempt < this.maxRetries) {
           // 指数バックオフ
           await this.sleep(1000 * Math.pow(2, attempt - 1));
@@ -127,7 +128,7 @@ export class EnhancedAISummaryService {
    */
   private buildMarketContextFromSnapshot(snapshot: FeatureSnapshot): TradeDataForSummary['marketContext'] {
     const trend = indicatorService.determineTrend(snapshot);
-    
+
     // MACD ヒストグラムの最新値を取得
     let macdValue: number | undefined;
     if (snapshot.macd?.histogram && snapshot.macd.histogram.length > 0) {
@@ -150,7 +151,7 @@ export class EnhancedAISummaryService {
     snapshot: FeatureSnapshot
   ): ExtendedTradeData['estimatedMode'] {
     const trend = indicatorService.determineTrend(snapshot);
-    
+
     // 買いの場合
     if (side === 'buy') {
       if (trend === 'uptrend') {
@@ -159,7 +160,7 @@ export class EnhancedAISummaryService {
         return 'counter_trend';  // 下降トレンドで買い = 逆張り
       }
     }
-    
+
     // 売りの場合
     if (side === 'sell') {
       if (trend === 'downtrend') {
@@ -168,7 +169,7 @@ export class EnhancedAISummaryService {
         return 'counter_trend';  // 上昇トレンドで売り = 逆張り
       }
     }
-    
+
     return 'neutral';
   }
 
@@ -177,43 +178,43 @@ export class EnhancedAISummaryService {
    */
   private generateDetailedTemplateSummary(tradeData: ExtendedTradeData): string {
     const { symbol, side, price, quantity, timestamp, marketContext, estimatedMode, similarTrades, featureSnapshot } = tradeData;
-    
+
     const sideLabel = side === 'buy' ? '買い' : '売り';
     const dateStr = timestamp.toLocaleDateString('ja-JP');
     const timeStr = timestamp.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
-    
+
     // テンプレート種別を決定
     const templateType = this.getTemplateType(side, marketContext?.trend, estimatedMode);
-    
+
     // 基本情報
     let summary = `【${dateStr} ${timeStr}】${symbol} ${sideLabel}エントリー\n`;
     summary += `価格: ${price.toLocaleString()}, 数量: ${quantity}\n\n`;
-    
+
     // テンプレート別のコメント
     summary += this.getTemplateComment(templateType, marketContext);
-    
+
     // インジケーター情報
     if (featureSnapshot || marketContext) {
       summary += '\n\n【市場状況】\n';
-      
+
       const rsi = featureSnapshot?.rsi ?? marketContext?.rsi;
       if (rsi !== undefined) {
         const rsiComment = rsi > 70 ? '（買われすぎ）' : rsi < 30 ? '（売られすぎ）' : '';
         summary += `・RSI: ${rsi.toFixed(1)}${rsiComment}\n`;
       }
-      
+
       if (featureSnapshot?.sma !== undefined) {
         const priceVsSma = featureSnapshot.close > featureSnapshot.sma ? '上' : '下';
         summary += `・SMA${featureSnapshot.timeframe || ''}: ${priceVsSma}に位置\n`;
       }
-      
+
       const macd = featureSnapshot?.macd?.histogram?.[featureSnapshot.macd.histogram.length - 1] ?? marketContext?.macd;
       if (macd !== undefined) {
         const macdSignal = macd > 0 ? 'プラス圏' : 'マイナス圏';
         summary += `・MACD: ${macdSignal}\n`;
       }
     }
-    
+
     // 類似トレード情報
     if (similarTrades && similarTrades.count > 0) {
       summary += '\n\n【過去の類似トレード】\n';
@@ -222,7 +223,7 @@ export class EnhancedAISummaryService {
         summary += `・勝率: ${(similarTrades.winRate * 100).toFixed(1)}%\n`;
       }
     }
-    
+
     return summary;
   }
 
@@ -253,24 +254,24 @@ export class EnhancedAISummaryService {
     switch (templateType) {
       case 'trend_follow_buy':
         return '【判断】上昇トレンドに乗る順張りエントリー。トレンド継続を想定。\n' +
-               '損切りラインと利確目標を事前に設定し、トレーリングストップの検討を推奨。';
-      
+          '損切りラインと利確目標を事前に設定し、トレーリングストップの検討を推奨。';
+
       case 'trend_follow_sell':
         return '【判断】下降トレンドに乗る順張りショートエントリー。下落継続を想定。\n' +
-               '反発リスクに注意し、損切りラインを明確に設定。';
-      
+          '反発リスクに注意し、損切りラインを明確に設定。';
+
       case 'counter_trend_buy':
         return '【判断】下降トレンド中の逆張り買いエントリー。反発を狙う。\n' +
-               '売られすぎからの反発を期待。損切りを浅めに設定し、リスク管理を徹底。';
-      
+          '売られすぎからの反発を期待。損切りを浅めに設定し、リスク管理を徹底。';
+
       case 'counter_trend_sell':
         return '【判断】上昇トレンド中の逆張り売りエントリー。調整を狙う。\n' +
-               '買われすぎからの調整を期待。上昇継続リスクに注意。';
-      
+          '買われすぎからの調整を期待。上昇継続リスクに注意。';
+
       case 'neutral':
       default:
         return '【判断】明確なトレンドがない状況でのエントリー。\n' +
-               'レンジ内の動きを想定し、上下のサポート/レジスタンスに注目。';
+          'レンジ内の動きを想定し、上下のサポート/レジスタンスに注目。';
     }
   }
 
@@ -279,7 +280,7 @@ export class EnhancedAISummaryService {
    */
   private async callEnhancedAIAPI(tradeData: ExtendedTradeData): Promise<AISummaryResult> {
     const prompt = this.buildEnhancedPrompt(tradeData);
-    
+
     const response = await fetch(`${this.baseURL}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -307,10 +308,19 @@ export class EnhancedAISummaryService {
       throw new Error(`AI API エラー: ${response.status} ${response.statusText}`);
     }
 
-    const data = await response.json() as any;
-    
+    const rawData = await response.json();
+
+    // Zodスキーマで型安全にパース
+    const parseResult = OpenAIChatCompletionResponseSchema.safeParse(rawData);
+
+    if (!parseResult.success) {
+      throw new Error(`OpenAI レスポンスパースエラー: ${parseResult.error.message}`);
+    }
+
+    const data = parseResult.data;
+
     return {
-      summary: data.choices[0].message.content.trim(),
+      summary: data.choices[0]?.message?.content?.trim() || '',
       promptTokens: data.usage?.prompt_tokens,
       completionTokens: data.usage?.completion_tokens,
       model: data.model,
@@ -322,29 +332,29 @@ export class EnhancedAISummaryService {
    */
   private buildEnhancedPrompt(tradeData: ExtendedTradeData): string {
     const { symbol, side, price, quantity, timestamp, marketContext, estimatedMode, featureSnapshot, similarTrades } = tradeData;
-    
+
     const sideLabel = side === 'buy' ? '買い' : '売り';
     const dateStr = timestamp.toLocaleString('ja-JP');
-    
+
     let prompt = '以下のトレード情報から、判断の背景と市場状況を含めた要約を生成してください。\n\n';
-    
+
     prompt += `【基本情報】\n`;
     prompt += `銘柄: ${symbol}, 売買: ${sideLabel}, 価格: ${price}, 数量: ${quantity}\n`;
     prompt += `日時: ${dateStr}\n`;
-    
+
     if (estimatedMode) {
-      const modeLabel = 
+      const modeLabel =
         estimatedMode === 'trend_follow' ? '順張り' :
-        estimatedMode === 'counter_trend' ? '逆張り' : 'ニュートラル';
+          estimatedMode === 'counter_trend' ? '逆張り' : 'ニュートラル';
       prompt += `推定判断モード: ${modeLabel}\n`;
     }
-    
+
     if (marketContext) {
       prompt += `\n【市場状況】\n`;
       if (marketContext.trend) {
-        const trendLabel = 
+        const trendLabel =
           marketContext.trend === 'uptrend' ? '上昇トレンド' :
-          marketContext.trend === 'downtrend' ? '下降トレンド' : '横ばい';
+            marketContext.trend === 'downtrend' ? '下降トレンド' : '横ばい';
         prompt += `トレンド: ${trendLabel}\n`;
       }
       if (marketContext.rsi !== undefined) {
@@ -354,7 +364,7 @@ export class EnhancedAISummaryService {
         prompt += `MACD: ${marketContext.macd.toFixed(2)}\n`;
       }
     }
-    
+
     if (similarTrades && similarTrades.count > 0) {
       prompt += `\n【過去類似トレード】\n`;
       prompt += `件数: ${similarTrades.count}件`;
@@ -363,12 +373,12 @@ export class EnhancedAISummaryService {
       }
       prompt += '\n';
     }
-    
+
     prompt += '\n【要件】\n';
     prompt += '- 日本語5行以内で簡潔に\n';
     prompt += '- 判断の根拠を明記\n';
     prompt += '- リスク管理の観点を含める\n';
-    
+
     return prompt;
   }
 

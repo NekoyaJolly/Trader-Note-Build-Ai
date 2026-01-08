@@ -5,8 +5,8 @@ import { indicatorSettingsService } from './indicatorSettingsService';
 import { getIndicatorProfileService } from './indicatorProfileService';
 import { indicatorService, OHLCVData } from './indicators';
 import { IndicatorConfig } from '../models/indicatorConfig';
-import { 
-  RESERVED_PROFILE_IDS, 
+import {
+  RESERVED_PROFILE_IDS,
   isReservedProfileId,
   NoteProfileConfig,
   createNoteProfileConfig,
@@ -65,7 +65,7 @@ export class TradeNoteService {
     this.notesPath = path.join(process.cwd(), config.paths.notes);
     this.repository = new TradeNoteRepository();
     this.storageMode = storageMode;
-    
+
     // FSモードまたはhybridモードの場合のみディレクトリを作成
     if (this.storageMode === 'fs' || this.storageMode === 'hybrid') {
       this.ensureNotesDirectory();
@@ -169,7 +169,7 @@ export class TradeNoteService {
   ): Promise<TradeNote> {
     // === ユーザー設定のインジケーターを取得 ===
     const activeConfigs = await indicatorSettingsService.getActiveConfigs();
-    
+
     // インジケーター設定がない場合は従来の generateNote にフォールバック
     if (activeConfigs.length === 0) {
       console.log('[TradeNoteService] ユーザー設定インジケーターなし、デフォルト処理を使用');
@@ -184,7 +184,7 @@ export class TradeNoteService {
         timeframe,
         60 // 前後1時間のデータを取得
       );
-      
+
       if (marketData.length > 0) {
         ohlcvData = marketData.map(md => ({
           timestamp: md.timestamp,
@@ -206,7 +206,7 @@ export class TradeNoteService {
 
     // === ユーザー設定のインジケーターを計算 ===
     const calculatedIndicators: Record<string, number | null> = {};
-    
+
     for (const indicatorConfig of activeConfigs) {
       try {
         // IndicatorService.calculate() を使用して型安全に計算
@@ -215,7 +215,7 @@ export class TradeNoteService {
           ohlcvData,
           indicatorConfig.params
         );
-        
+
         // extractLatestValue() で最新値を取得
         const latestValue = indicatorService.extractLatestValue(result);
         calculatedIndicators[indicatorConfig.label || indicatorConfig.indicatorId] = latestValue;
@@ -228,7 +228,7 @@ export class TradeNoteService {
     // === 基本インジケーター値の抽出（後方互換性） ===
     const rsiValue = this.extractIndicatorValue(calculatedIndicators, 'RSI');
     const macdValue = this.extractIndicatorValue(calculatedIndicators, 'MACD');
-    
+
     // === トレンドの判定 ===
     const trend = this.determineTrend(calculatedIndicators, ohlcvData);
 
@@ -328,7 +328,7 @@ export class TradeNoteService {
     // === ユーザー定義プロファイルの場合 ===
     const profileService = getIndicatorProfileService();
     const profile = await profileService.getProfileById(profileId);
-    
+
     if (!profile) {
       console.warn(`[TradeNoteService] プロファイルが見つかりません: ${profileId}、デフォルト処理を使用`);
       return this.generateNoteWithUserIndicators(trade, timeframe);
@@ -336,7 +336,7 @@ export class TradeNoteService {
 
     // プロファイルのインジケーター設定を使用
     const activeConfigs = profile.indicators.filter(i => i.enabled);
-    
+
     if (activeConfigs.length === 0) {
       console.log('[TradeNoteService] プロファイルにインジケーターがありません、OHLCVのみで生成');
       return this.generateNoteWithoutFeatures(trade, timeframe, userComment);
@@ -354,7 +354,7 @@ export class TradeNoteService {
     // === 基本インジケーター値の抽出（後方互換性） ===
     const rsiValue = this.extractIndicatorValue(calculatedIndicators, 'RSI');
     const macdValue = this.extractIndicatorValue(calculatedIndicators, 'MACD');
-    
+
     // === トレンドの判定 ===
     const trend = this.determineTrend(calculatedIndicators, ohlcvData);
 
@@ -557,7 +557,7 @@ export class TradeNoteService {
         timeframe,
         60
       );
-      
+
       if (marketData.length > 0) {
         return marketData.map(md => ({
           timestamp: md.timestamp,
@@ -582,7 +582,7 @@ export class TradeNoteService {
     ohlcvData: OHLCVData[]
   ): Record<string, number | null> {
     const result: Record<string, number | null> = {};
-    
+
     for (const config of configs) {
       try {
         const calcResult = indicatorService.calculate(
@@ -597,7 +597,7 @@ export class TradeNoteService {
         result[config.label || config.indicatorId] = null;
       }
     }
-    
+
     return result;
   }
 
@@ -675,7 +675,7 @@ export class TradeNoteService {
       const sma20 = indicatorService.extractLatestValue(sma20Result);
       const sma50 = indicatorService.extractLatestValue(sma50Result);
       const latestClose = ohlcvData[ohlcvData.length - 1].close;
-      
+
       if (sma20 && sma50) {
         trendDirection = latestClose > sma20 ? 1 : latestClose < sma20 ? -1 : 0;
         trendStrength = Math.abs(latestClose - sma20) / sma20;
@@ -722,14 +722,14 @@ export class TradeNoteService {
     const data: OHLCVData[] = [];
     const basePrice = trade.price;
     const baseTime = trade.timestamp.getTime();
-    
+
     for (let i = count; i > 0; i--) {
       const variation = (Math.random() - 0.5) * basePrice * 0.02;
       const open = basePrice + variation;
       const close = basePrice + (Math.random() - 0.5) * basePrice * 0.02;
       const high = Math.max(open, close) + Math.random() * basePrice * 0.01;
       const low = Math.min(open, close) - Math.random() * basePrice * 0.01;
-      
+
       data.push({
         timestamp: new Date(baseTime - i * 15 * 60 * 1000), // 15分足
         open,
@@ -739,7 +739,7 @@ export class TradeNoteService {
         volume: 1000 + Math.random() * 9000,
       });
     }
-    
+
     return data;
   }
 
@@ -771,7 +771,7 @@ export class TradeNoteService {
       if (rsi > 60) return 'bullish';
       if (rsi < 40) return 'bearish';
     }
-    
+
     // SMA によるトレンド判定（価格が SMA より上なら強気）
     const sma = this.extractIndicatorValue(calculatedIndicators, 'SMA');
     if (sma !== null && ohlcvData.length > 0) {
@@ -779,7 +779,7 @@ export class TradeNoteService {
       if (latestClose > sma * 1.01) return 'bullish';
       if (latestClose < sma * 0.99) return 'bearish';
     }
-    
+
     return 'neutral';
   }
 
@@ -803,9 +803,9 @@ export class TradeNoteService {
     features.push(marketContext.indicators?.volume ?? 0);
 
     // トレンドの数値エンコーディング
-    const trendValue = 
+    const trendValue =
       marketContext.trend === 'bullish' ? 1 :
-      marketContext.trend === 'bearish' ? -1 : 0;
+        marketContext.trend === 'bearish' ? -1 : 0;
     features.push(trendValue);
 
     // 売買方向のエンコーディング
@@ -815,7 +815,7 @@ export class TradeNoteService {
     // 一貫した順序を維持するためにソートしてから追加
     const sortedIndicators = Object.entries(calculatedIndicators)
       .sort(([a], [b]) => a.localeCompare(b));
-    
+
     for (const [_, value] of sortedIndicators) {
       features.push(value ?? 0);
     }
@@ -848,15 +848,15 @@ export class TradeNoteService {
    */
   async saveNote(note: TradeNote): Promise<string> {
     let savedNoteId = note.id;
-    
+
     if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
       savedNoteId = await this.saveNoteToDb(note);
     }
-    
+
     if (this.storageMode === 'fs' || this.storageMode === 'hybrid') {
       await this.saveNoteToFs(note);
     }
-    
+
     return savedNoteId;
   }
 
@@ -867,18 +867,18 @@ export class TradeNoteService {
   private async saveNoteToDb(note: TradeNote): Promise<string> {
     // 既存のノートを確認
     const existing = await this.repository.findByTradeId(note.tradeId);
-    
+
     if (existing) {
       // 既存ノートの更新
       await this.repository.updateUserContent(existing.id, {
         userNotes: note.userNotes,
         tags: note.tags,
         // MarketContext を Prisma 互換 JSON に変換
-        marketContext: note.marketContext 
-          ? toMarketContextJson(note.marketContext) 
+        marketContext: note.marketContext
+          ? toMarketContextJson(note.marketContext)
           : undefined,
       });
-      
+
       // ステータスの更新
       if (note.status === 'active' && existing.status !== 'active') {
         await this.repository.approve(existing.id);
@@ -887,7 +887,7 @@ export class TradeNoteService {
       } else if (note.status === 'draft' && existing.status !== 'draft') {
         await this.repository.revertToDraft(existing.id);
       }
-      
+
       // 本番環境ではデバッグログを抑制
       if (process.env.NODE_ENV !== 'production') {
         console.log(`[DB] Updated trade note: ${existing.id}`);
@@ -899,10 +899,10 @@ export class TradeNoteService {
       // status は小文字で保存（Prisma NoteStatus enumは 'draft' | 'active' | 'archived'）
       const statusValue = (note.status || 'draft').toLowerCase();
       // 型安全に NoteStatus enum に変換
-      const validStatus: PrismaNoteStatus = 
+      const validStatus: PrismaNoteStatus =
         statusValue === 'active' ? 'active' :
-        statusValue === 'archived' ? 'archived' : 'draft';
-      
+          statusValue === 'archived' ? 'archived' : 'draft';
+
       const created = await this.repository.createWithSummary(
         {
           tradeId: note.tradeId,
@@ -913,8 +913,8 @@ export class TradeNoteService {
           timeframe: note.marketContext?.timeframe || '15m',
           status: validStatus,
           // MarketContext を Prisma 互換 JSON に変換
-          marketContext: note.marketContext 
-            ? toMarketContextJson(note.marketContext) 
+          marketContext: note.marketContext
+            ? toMarketContextJson(note.marketContext)
             : undefined,
           userNotes: note.userNotes,
           tags: note.tags,
@@ -923,7 +923,7 @@ export class TradeNoteService {
           summary: note.aiSummary || '',
         }
       );
-      
+
       // 本番環境ではデバッグログを抑制
       if (process.env.NODE_ENV !== 'production') {
         console.log(`[DB] Created trade note: ${created.id}`);
@@ -938,7 +938,7 @@ export class TradeNoteService {
   private async saveNoteToFs(note: TradeNote): Promise<void> {
     const filename = `${note.id}.json`;
     const filepath = path.join(this.notesPath, filename);
-    
+
     fs.writeFileSync(filepath, JSON.stringify(note, null, 2));
     // 本番環境ではデバッグログを抑制
     if (process.env.NODE_ENV !== 'production') {
@@ -955,7 +955,7 @@ export class TradeNoteService {
     if (this.storageMode === 'db') {
       return this.loadAllNotesFromDb();
     }
-    
+
     if (this.storageMode === 'hybrid') {
       // DB優先で取得、なければFSにフォールバック
       const dbNotes = await this.loadAllNotesFromDb();
@@ -965,7 +965,7 @@ export class TradeNoteService {
       console.log('[Hybrid] DB empty, falling back to FS');
       return this.loadAllNotesFromFs();
     }
-    
+
     return this.loadAllNotesFromFs();
   }
 
@@ -982,13 +982,13 @@ export class TradeNoteService {
    */
   private async loadAllNotesFromFs(): Promise<TradeNote[]> {
     const notes: TradeNote[] = [];
-    
+
     if (!fs.existsSync(this.notesPath)) {
       return notes;
     }
 
     const files = fs.readdirSync(this.notesPath);
-    
+
     for (const file of files) {
       if (file.endsWith('.json')) {
         const filepath = path.join(this.notesPath, file);
@@ -1013,7 +1013,7 @@ export class TradeNoteService {
     if (this.storageMode === 'db') {
       return this.getNoteByIdFromDb(noteId);
     }
-    
+
     if (this.storageMode === 'hybrid') {
       const dbNote = await this.getNoteByIdFromDb(noteId);
       if (dbNote) {
@@ -1022,7 +1022,7 @@ export class TradeNoteService {
       console.log(`[Hybrid] Note ${noteId} not found in DB, falling back to FS`);
       return this.getNoteByIdFromFs(noteId);
     }
-    
+
     return this.getNoteByIdFromFs(noteId);
   }
 
@@ -1042,7 +1042,7 @@ export class TradeNoteService {
    */
   private async getNoteByIdFromFs(noteId: string): Promise<TradeNote | null> {
     const filepath = path.join(this.notesPath, `${noteId}.json`);
-    
+
     if (!fs.existsSync(filepath)) {
       return null;
     }
@@ -1051,7 +1051,7 @@ export class TradeNoteService {
     const note = JSON.parse(content);
     note.timestamp = new Date(note.timestamp);
     note.createdAt = new Date(note.createdAt);
-    
+
     return note;
   }
 
@@ -1075,7 +1075,7 @@ export class TradeNoteService {
         trend: 'neutral',
       };
     }
-    
+
     return {
       id: dbNote.id,
       tradeId: dbNote.tradeId,
@@ -1125,9 +1125,9 @@ export class TradeNoteService {
     }
 
     // トレンドの数値エンコーディング: bullish=1, neutral=0, bearish=-1
-    const trendValue = 
+    const trendValue =
       marketContext?.trend === 'bullish' ? 1 :
-      marketContext?.trend === 'bearish' ? -1 : 0;
+        marketContext?.trend === 'bearish' ? -1 : 0;
     features.push(trendValue);
 
     // 売買方向のエンコーディング: buy=1, sell=-1
@@ -1158,7 +1158,7 @@ export class TradeNoteService {
       const dbNotes = await this.repository.findApproved();
       return dbNotes.map(n => this.convertDbNoteToTradeNote(n));
     }
-    
+
     const allNotes = await this.loadAllNotes();
     return allNotes.filter(note => note.status === 'active');
   }
@@ -1178,10 +1178,22 @@ export class TradeNoteService {
       const dbNotes = await this.repository.findActiveForMatching();
       return dbNotes.map(n => this.convertDbNoteToTradeNote(n));
     }
-    
+
     // ファイルモードでは enabled, pausedUntil, priority がないため active のみフィルタ
     const allNotes = await this.loadAllNotes();
     return allNotes.filter(note => note.status === 'active');
+  }
+
+  /**
+   * マッチング対象の有効ノートをPrisma型で取得する（DB専用）
+   * 
+   * matchingServiceがNoteEvaluatorを生成するために使用。
+   * FS型への変換をスキップして効率化。
+   * 
+   * @returns PrismaのTradeNoteレコード配列
+   */
+  async loadActiveNotesForMatchingAsPrisma(): Promise<TradeNoteWithSummary[]> {
+    return this.repository.findActiveForMatching();
   }
 
   /**
@@ -1200,7 +1212,7 @@ export class TradeNoteService {
       });
       return dbNotes.map(n => this.convertDbNoteToTradeNote(n));
     }
-    
+
     const allNotes = await this.loadAllNotes();
     return allNotes.filter(note => note.status === status);
   }
@@ -1220,14 +1232,14 @@ export class TradeNoteService {
       if (!updated) {
         throw new Error(`ノートが見つかりませんでした: ${noteId}`);
       }
-      
+
       // hybridモードの場合、FSも更新
       if (this.storageMode === 'hybrid') {
         await this.saveNoteToFs(updated);
       }
       return updated;
     }
-    
+
     // FSモード（レガシー）
     const note = await this.getNoteById(noteId);
     if (!note) {
@@ -1261,14 +1273,14 @@ export class TradeNoteService {
       if (!updated) {
         throw new Error(`ノートが見つかりませんでした: ${noteId}`);
       }
-      
+
       // hybridモードの場合、FSも更新
       if (this.storageMode === 'hybrid') {
         await this.saveNoteToFs(updated);
       }
       return updated;
     }
-    
+
     // FSモード（レガシー）
     const note = await this.getNoteById(noteId);
     if (!note) {
@@ -1301,14 +1313,14 @@ export class TradeNoteService {
       if (!updated) {
         throw new Error(`ノートが見つかりませんでした: ${noteId}`);
       }
-      
+
       // hybridモードの場合、FSも更新
       if (this.storageMode === 'hybrid') {
         await this.saveNoteToFs(updated);
       }
       return updated;
     }
-    
+
     // FSモード（レガシー）
     const note = await this.getNoteById(noteId);
     if (!note) {
@@ -1345,14 +1357,14 @@ export class TradeNoteService {
       if (!updated) {
         throw new Error(`ノートが見つかりませんでした: ${noteId}`);
       }
-      
+
       // hybridモードの場合、FSも更新
       if (this.storageMode === 'hybrid') {
         await this.saveNoteToFs(updated);
       }
       return updated;
     }
-    
+
     // FSモード（レガシー）
     const note = await this.getNoteById(noteId);
     if (!note) {
@@ -1392,7 +1404,7 @@ export class TradeNoteService {
         archived: 0,
         total: 0,
       };
-      
+
       for (const { status, count } of statusCounts) {
         const statusLower = status.toLowerCase();
         if (statusLower === 'draft') {
@@ -1404,10 +1416,10 @@ export class TradeNoteService {
         }
         counts.total += count;
       }
-      
+
       return counts;
     }
-    
+
     // FSモード（レガシー）
     const allNotes = await this.loadAllNotes();
     const counts = {

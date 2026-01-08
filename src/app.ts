@@ -11,6 +11,8 @@ import backtestRoutes from './routes/backtestRoutes';
 import settingsRoutes from './routes/settingsRoutes';
 import barLocatorRoutes from './controllers/barLocatorController';
 import strategyRoutes from './backend/api/strategyRoutes';
+import strategyComparisonRoutes from './backend/api/strategyComparisonRoutes';
+import patternAnalysisRoutes from './backend/api/patternAnalysisRoutes';
 import authRoutes from './routes/authRoutes';
 import watchlistRoutes from './routes/watchlistRoutes';
 import pushRoutes from './routes/pushRoutes';
@@ -19,6 +21,7 @@ import profileRoutes from './routes/profileRoutes';
 import { sideBRoutes } from './side-b/routes';
 import cronRoutes from './routes/cronRoutes';
 import ctraderAuthRoutes from './backend/api/ctraderAuthRoutes';
+import marketAnalysisRoutes from './routes/marketAnalysisRoutes';
 import { MatchingScheduler } from './utils/scheduler';
 import { getSideBScheduler } from './side-b/jobs/sideBScheduler';
 
@@ -60,7 +63,7 @@ class App {
       origin: (origin, callback) => {
         // origin が undefined の場合（same-origin リクエスト）は許可
         if (!origin) return callback(null, true);
-        
+
         // 許可リストに含まれるか、ワイルドカードにマッチするかをチェック
         const isAllowed = allowedOrigins.some(allowed => {
           if (allowed.includes('*')) {
@@ -81,7 +84,7 @@ class App {
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization'],
     }));
-    
+
     this.app.use(express.json());
     this.app.use(express.urlencoded({ extended: true }));
   }
@@ -102,16 +105,16 @@ class App {
     // API routes
     // 認証ルート（認証不要）
     this.app.use('/api/auth', authRoutes);
-    
+
     // cTrader OAuth 認証ルート
     this.app.use('/api/auth/ctrader', ctraderAuthRoutes);
-    
+
     // ウォッチリスト（認証必須）
     this.app.use('/api/watchlist', watchlistRoutes);
-    
+
     // Push通知（認証必須、一部認証不要）
     this.app.use('/api/push', pushRoutes);
-    
+
     // データルート
     this.app.use('/api/trades', tradeRoutes);
     this.app.use('/api/matching', matchingRoutes);
@@ -123,11 +126,16 @@ class App {
     this.app.use('/api/settings', settingsRoutes);
     this.app.use('/api/bars', barLocatorRoutes);
     this.app.use('/api/strategies', strategyRoutes);
+    this.app.use('/api/strategy-comparison', strategyComparisonRoutes);
+    this.app.use('/api/pattern-analysis', patternAnalysisRoutes);
     this.app.use('/api/ohlcv', ohlcvRoutes);
-    
+
     // Side-B: AI トレードプラン生成
     this.app.use('/api/side-b', sideBRoutes);
-    
+
+    // マーケット分析（OHLCV + 12次元特徴量）
+    this.app.use('/api/market-analysis', marketAnalysisRoutes);
+
     // Cron エンドポイント（Railway/Vercel Cron用）
     this.app.use('/api/cron', cronRoutes);
 
@@ -141,7 +149,7 @@ class App {
       console.error('Error:', err.message);
       console.error('Stack:', err.stack);
       console.error('═══════════════════════════════════════');
-      
+
       res.status(500).json({
         error: 'Internal Server Error',
         message: config.server.isProduction ? 'サーバーエラーが発生しました' : err.message,
@@ -224,11 +232,11 @@ class App {
    */
   public stop(): void {
     this.scheduler.stop();
-    
+
     // Side-B スケジューラー停止
     const sideBScheduler = getSideBScheduler();
     sideBScheduler.stop();
-    
+
     if (this.server) {
       this.server.close(() => {
         console.log('HTTPサーバーを正常に停止しました');

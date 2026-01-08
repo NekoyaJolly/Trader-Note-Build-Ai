@@ -67,13 +67,13 @@ const LEGACY_INDICATOR_SPECS: IndicatorSpec[] = [
 export class LegacyNoteEvaluator implements NoteEvaluator {
   readonly noteId: string;
   readonly symbol: string;
-  
+
   /** ノートに保存されている特徴量ベクトル（12次元） */
   private readonly noteVector: number[];
-  
+
   /** 発火閾値 */
   private readonly threshold: number;
-  
+
   /**
    * コンストラクタ
    * 
@@ -86,7 +86,7 @@ export class LegacyNoteEvaluator implements NoteEvaluator {
     this.noteVector = note.featureVector ?? [];
     this.threshold = threshold;
   }
-  
+
   /**
    * レガシー12次元で必要なインジケーター仕様を返す
    * 
@@ -95,7 +95,7 @@ export class LegacyNoteEvaluator implements NoteEvaluator {
   requiredIndicators(): IndicatorSpec[] {
     return LEGACY_INDICATOR_SPECS;
   }
-  
+
   /**
    * 市場スナップショットから12次元特徴量ベクトルを構築
    * 
@@ -115,10 +115,10 @@ export class LegacyNoteEvaluator implements NoteEvaluator {
       indicators: this.convertSnapshotToIndicatorData(snapshot),
       timestamp: snapshot.timestamp,
     };
-    
+
     return generateFeatureVector(input);
   }
-  
+
   /**
    * 2つのベクトル間のコサイン類似度を計算
    * 
@@ -129,14 +129,14 @@ export class LegacyNoteEvaluator implements NoteEvaluator {
   similarity(vectorA: number[], vectorB: number[]): number {
     return cosineSimilarity(vectorA, vectorB);
   }
-  
+
   /**
    * 類似度が閾値を超えているか判定
    */
   isTriggered(similarity: number): boolean {
     return similarity >= this.threshold;
   }
-  
+
   /**
    * 閾値設定を取得
    */
@@ -147,7 +147,7 @@ export class LegacyNoteEvaluator implements NoteEvaluator {
       weak: SIMILARITY_THRESHOLDS.WEAK,
     };
   }
-  
+
   /**
    * 市場スナップショットを使ってノートを評価
    * 
@@ -160,12 +160,12 @@ export class LegacyNoteEvaluator implements NoteEvaluator {
     const marketVector = this.buildFeatureVector(snapshot);
     const sim = this.similarity(vector, marketVector);
     const thresholds = this.getThresholds();
-    
+
     // 使用したインジケーターラベルを収集
     const usedIndicators = this.requiredIndicators()
       .filter(spec => spec.required)
       .map(spec => this.formatIndicatorLabel(spec));
-    
+
     return {
       noteId: this.noteId,
       similarity: sim,
@@ -180,44 +180,44 @@ export class LegacyNoteEvaluator implements NoteEvaluator {
       },
     };
   }
-  
+
   // ============================================================================
   // プライベートメソッド
   // ============================================================================
-  
+
   /**
    * MarketSnapshot のインジケーター値を IndicatorData 形式に変換
    */
   private convertSnapshotToIndicatorData(snapshot: MarketSnapshot): IndicatorData {
     const ind = snapshot.indicators;
-    
+
     return {
       // RSI
       rsi: ind['RSI(14)'] ?? ind['rsi'] ?? undefined,
       rsiZone: this.determineRsiZone(ind['RSI(14)'] ?? ind['rsi']),
-      
+
       // MACD
       macdLine: ind['MACD_line'] ?? ind['macdLine'] ?? undefined,
       macdSignal: ind['MACD_signal'] ?? ind['macdSignal'] ?? undefined,
       macdHistogram: ind['MACD_histogram'] ?? ind['macdHistogram'] ?? undefined,
-      
+
       // SMA/EMA
       sma: ind['SMA(20)'] ?? ind['sma'] ?? undefined,
       ema: ind['EMA(20)'] ?? ind['ema'] ?? undefined,
-      
+
       // ボリンジャーバンド
       bbUpper: ind['BB_upper'] ?? ind['bbUpper'] ?? undefined,
       bbMiddle: ind['BB_middle'] ?? ind['bbMiddle'] ?? undefined,
       bbLower: ind['BB_lower'] ?? ind['bbLower'] ?? undefined,
-      
+
       // ATR
       atr: ind['ATR(14)'] ?? ind['atr'] ?? undefined,
-      
+
       // 終値
       close: snapshot.ohlcv.close,
     };
   }
-  
+
   /**
    * RSI 値からゾーンを判定
    */
@@ -227,7 +227,7 @@ export class LegacyNoteEvaluator implements NoteEvaluator {
     if (rsi <= 30) return 'oversold';
     return 'neutral';
   }
-  
+
   /**
    * インジケーター仕様からラベルを生成
    */
@@ -251,10 +251,10 @@ export class LegacyNoteEvaluator implements NoteEvaluator {
 export class UserIndicatorNoteEvaluator implements NoteEvaluator {
   readonly noteId: string;
   readonly symbol: string;
-  
+
   private readonly config: NoteIndicatorConfig;
   private readonly noteVector: number[];
-  
+
   constructor(
     note: PrismaTradeNote,
     config: NoteIndicatorConfig,
@@ -265,7 +265,7 @@ export class UserIndicatorNoteEvaluator implements NoteEvaluator {
     this.config = config;
     this.noteVector = noteVector;
   }
-  
+
   /**
    * ノート固有のインジケーター仕様を返す
    */
@@ -278,7 +278,7 @@ export class UserIndicatorNoteEvaluator implements NoteEvaluator {
         required: true,
       }));
   }
-  
+
   /**
    * 市場スナップショットからノート固有の特徴量ベクトルを構築
    * 
@@ -286,21 +286,21 @@ export class UserIndicatorNoteEvaluator implements NoteEvaluator {
    */
   buildFeatureVector(snapshot: MarketSnapshot): number[] {
     const vector: number[] = [];
-    
+
     for (const config of this.config.indicators) {
       if (!config.enabled) continue;
-      
+
       // インジケーターラベルを生成
       const label = config.label ?? this.formatLabel(config);
       const value = snapshot.indicators[label];
-      
+
       // 値が取得できない場合は 0 を使用（要改善: missing indicator tracking）
       vector.push(value ?? 0);
     }
-    
+
     return vector;
   }
-  
+
   /**
    * 設定された方式で類似度を計算
    */
@@ -315,14 +315,14 @@ export class UserIndicatorNoteEvaluator implements NoteEvaluator {
         return cosineSimilarity(vectorA, vectorB);
     }
   }
-  
+
   /**
    * 発火条件を判定
    */
   isTriggered(similarity: number): boolean {
     return similarity >= this.config.threshold;
   }
-  
+
   /**
    * 閾値設定を取得
    */
@@ -334,7 +334,7 @@ export class UserIndicatorNoteEvaluator implements NoteEvaluator {
       weak: Math.max(this.config.threshold - 0.1, 0.0),
     };
   }
-  
+
   /**
    * 市場スナップショットを使ってノートを評価
    */
@@ -343,17 +343,17 @@ export class UserIndicatorNoteEvaluator implements NoteEvaluator {
     const marketVector = this.buildFeatureVector(snapshot);
     const sim = this.similarity(vector, marketVector);
     const thresholds = this.getThresholds();
-    
+
     // 使用したインジケーターラベルを収集
     const usedIndicators = this.config.indicators
       .filter(c => c.enabled)
       .map(c => c.label ?? this.formatLabel(c));
-    
+
     // 不足インジケーターを検出
     const missingIndicators = usedIndicators.filter(
       label => snapshot.indicators[label] == null
     );
-    
+
     return {
       noteId: this.noteId,
       similarity: sim,
@@ -369,46 +369,46 @@ export class UserIndicatorNoteEvaluator implements NoteEvaluator {
       },
     };
   }
-  
+
   // ============================================================================
   // プライベートメソッド
   // ============================================================================
-  
+
   private formatLabel(config: IndicatorConfig): string {
     const period = config.params.period ?? config.params.fastPeriod ?? config.params.kPeriod;
     return period
       ? `${config.indicatorId.toUpperCase()}(${period})`
       : config.indicatorId.toUpperCase();
   }
-  
+
   /**
    * ユークリッド距離ベースの類似度（0-1 正規化）
    */
   private euclideanSimilarity(vecA: number[], vecB: number[]): number {
     if (vecA.length !== vecB.length || vecA.length === 0) return 0;
-    
+
     let sumSquared = 0;
     for (let i = 0; i < vecA.length; i++) {
       const diff = (vecA[i] ?? 0) - (vecB[i] ?? 0);
       sumSquared += diff * diff;
     }
-    
+
     const distance = Math.sqrt(sumSquared);
     // 距離を0-1の類似度に変換（距離が大きいほど類似度が低い）
     return 1 / (1 + distance);
   }
-  
+
   /**
    * マンハッタン距離ベースの類似度（0-1 正規化）
    */
   private manhattanSimilarity(vecA: number[], vecB: number[]): number {
     if (vecA.length !== vecB.length || vecA.length === 0) return 0;
-    
+
     let sum = 0;
     for (let i = 0; i < vecA.length; i++) {
       sum += Math.abs((vecA[i] ?? 0) - (vecB[i] ?? 0));
     }
-    
+
     // 距離を0-1の類似度に変換
     return 1 / (1 + sum);
   }
@@ -431,13 +431,13 @@ export function createNoteEvaluator(note: PrismaTradeNote): NoteEvaluator {
   // indicatorConfig が設定されているか確認
   if (note.indicatorConfig) {
     const config = note.indicatorConfig as unknown as NoteIndicatorConfig;
-    
+
     // バージョンチェック（将来のマイグレーション用）
     if (config.version && config.indicators && config.threshold) {
       return new UserIndicatorNoteEvaluator(note, config, note.featureVector ?? []);
     }
   }
-  
+
   // レガシーモード（12次元固定）
   return new LegacyNoteEvaluator(note);
 }
@@ -450,16 +450,16 @@ export function createNoteEvaluator(note: PrismaTradeNote): NoteEvaluator {
  */
 export function createNoteEvaluators(notes: PrismaTradeNote[]): Map<string, NoteEvaluator> {
   const evaluators = new Map<string, NoteEvaluator>();
-  
+
   for (const note of notes) {
     evaluators.set(note.id, createNoteEvaluator(note));
   }
-  
+
   return evaluators;
 }
 
 // ============================================================================
-// FS型 TradeNote 用アダプター
+// FS型 TradeNote 用アダプター (非推奨 - DB統一後は削除予定)
 // ============================================================================
 
 import { TradeNote as FSTradeNote, MarketData } from '../models/types';
@@ -467,8 +467,8 @@ import { TradeNote as FSTradeNote, MarketData } from '../models/types';
 /**
  * FS型 TradeNote から NoteEvaluator を生成する
  * 
- * matchingService が tradeNoteService (FS型) を使用しているため、
- * このファクトリ関数で互換性を維持する。
+ * @deprecated DB統一により不要。テストコードで使用中のため残存。
+ * 代わりに createNoteEvaluator (Prisma型) を使用してください。
  * 
  * @param note FS型のTradeNote（data/notes/*.json）
  * @returns NoteEvaluator インスタンス
@@ -477,7 +477,7 @@ export function createNoteEvaluatorFromFSNote(note: FSTradeNote): NoteEvaluator 
   // FS型 → Prisma型の必要フィールドのみを変換
   // LegacyNoteEvaluator が使用するのは id, symbol, featureVector のみ
   const { Decimal } = require('@prisma/client/runtime/library');
-  
+
   const pseudoPrismaNote: PrismaTradeNote = {
     id: note.id,
     symbol: note.symbol,
@@ -502,7 +502,7 @@ export function createNoteEvaluatorFromFSNote(note: FSTradeNote): NoteEvaluator 
     enabled: true, // デフォルト有効
     pausedUntil: null, // 停止なし
   };
-  
+
   return new LegacyNoteEvaluator(pseudoPrismaNote);
 }
 
@@ -514,11 +514,11 @@ export function createNoteEvaluatorFromFSNote(note: FSTradeNote): NoteEvaluator 
  */
 export function createNoteEvaluatorsFromFSNotes(notes: FSTradeNote[]): Map<string, NoteEvaluator> {
   const evaluators = new Map<string, NoteEvaluator>();
-  
+
   for (const note of notes) {
     evaluators.set(note.id, createNoteEvaluatorFromFSNote(note));
   }
-  
+
   return evaluators;
 }
 
@@ -534,7 +534,7 @@ export function createNoteEvaluatorsFromFSNotes(notes: FSTradeNote[]): Map<strin
 export function convertMarketDataToSnapshot(market: MarketData): MarketSnapshot {
   // インジケーター値を Record<string, number | null> に変換
   const indicators: Record<string, number | null> = {};
-  
+
   if (market.indicators) {
     // 基本インジケーターを変換
     if (market.indicators.rsi !== undefined) {
@@ -546,7 +546,7 @@ export function convertMarketDataToSnapshot(market: MarketData): MarketSnapshot 
       indicators['macdHistogram'] = market.indicators.macd;
     }
   }
-  
+
   // 拡張インジケーター（市場データに含まれる場合）
   const extendedIndicators = market.indicators as Record<string, unknown> | undefined;
   if (extendedIndicators) {
@@ -556,7 +556,7 @@ export function convertMarketDataToSnapshot(market: MarketData): MarketSnapshot 
       }
     }
   }
-  
+
   return {
     symbol: market.symbol,
     timestamp: market.timestamp,

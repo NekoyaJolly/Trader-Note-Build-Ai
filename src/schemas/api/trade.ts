@@ -5,10 +5,10 @@
  */
 
 import { z } from 'zod';
-import { 
-  UUIDSchema, 
-  DateSchema, 
-  SymbolSchema, 
+import {
+  UUIDSchema,
+  DateSchema,
+  SymbolSchema,
   TimeframeSchema,
   DirectionSchema,
   PriceSchema,
@@ -197,8 +197,11 @@ export type GetOHLCVRequest = z.infer<typeof GetOHLCVRequestSchema>;
  * CSVアップロードリクエスト
  */
 export const UploadCSVTextRequestSchema = z.object({
+  filename: z.string().min(1, 'ファイル名は必須です'),
   csvText: z.string().min(1, 'CSVデータは必須です'),
   profileId: z.string().optional().default('__AI_AUTO__'),
+  applyMode: z.enum(['bulk', 'individual']).optional().default('bulk'),
+  userComment: z.string().optional(),
 });
 
 export type UploadCSVTextRequest = z.infer<typeof UploadCSVTextRequestSchema>;

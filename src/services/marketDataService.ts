@@ -152,48 +152,46 @@ export class MarketDataService {
    * @returns 市場データ
    * 
    * エラーハンドリング:
-   * - API 未設定: シミュレーションデータを返す
-   * - API エラー: シミュレーションデータにフォールバック
+   * - API 未設定: エラーを投げる
+   * - API エラー: エラーを投げる
    */
   async getCurrentMarketData(
     symbol: string,
     timeframe: string = '15m'
   ): Promise<MarketData> {
-    // API が設定されていない場合はシミュレーションデータを返す
+    // API が設定されていない場合はエラー
     if (!this.isApiConfigured()) {
-      console.warn('市場 API が設定されていません。シミュレーションデータを使用します。');
-      return this.generateSimulatedData(symbol, timeframe);
+      throw new Error('市場APIが設定されていません。.envのAPI_URLとMARKET_API_KEYを確認してください。');
     }
 
     try {
       // シンボルを Twelve Data 形式に変換（例: ETHUSDT → ETH/USD）
       const normalizedSymbol = this.normalizeSymbolForTwelveData(symbol);
-      
+
       // Twelve Data API で直近のローソク足を取得
       const interval = this.convertTimeframe(timeframe);
       const url = `${this.apiUrl}/time_series?symbol=${encodeURIComponent(normalizedSymbol)}&interval=${interval}&outputsize=1&apikey=${this.apiKey}`;
-      
+
       const response = await fetch(url);
-      
+
       if (!response.ok) {
         throw new Error(`API レスポンスエラー: ${response.status}`);
       }
-      
+
       const data = (await response.json()) as TwelveDataTimeSeriesResponse;
-      
+
       // API エラーチェック
       if (data.status === 'error' || data.code) {
         throw new Error(data.message || 'Twelve Data API エラー');
       }
-      
-      // 値が取得できない場合はフォールバック
+
+      // 値が取得できない場合はエラー
       if (!data.values || data.values.length === 0) {
-        console.warn(`${symbol} のデータが取得できません。シミュレーションデータを使用します。`);
-        return this.generateSimulatedData(symbol, timeframe);
+        throw new Error(`${symbol} のデータが取得できませんでした。シンボルが正しいか確認してください。`);
       }
-      
+
       const latestBar = data.values[0];
-      
+
       const marketData: MarketData = {
         symbol: data.meta?.symbol || symbol,
         timestamp: new Date(latestBar.datetime),
@@ -207,12 +205,12 @@ export class MarketDataService {
 
       // インジケーターを計算
       this.calculateIndicators(marketData);
-      
+
       return marketData;
     } catch (error) {
       console.error('市場データ取得エラー:', error);
-      // エラー時はシミュレーションデータにフォールバック
-      return this.generateSimulatedData(symbol, timeframe);
+      // エラーをそのまま投げる
+      throw error;
     }
   }
 
@@ -293,9 +291,9 @@ export class MarketDataService {
   ): Promise<MarketData> {
     // 履歴データを取得（インジケーター計算に必要な本数）
     const historicalData = await this.getHistoricalData(symbol, timeframe, 50);
-    
+
     if (historicalData.length === 0) {
-      return this.generateSimulatedData(symbol, timeframe);
+      throw new Error(`${symbol} の履歴データを取得できませんでした。`);
     }
 
     // 最新のデータを MarketData 形式に変換
@@ -343,51 +341,6 @@ export class MarketDataService {
   }
 
   /**
-   * テスト用シミュレーションデータを生成
-   * 
-   * @param symbol - 銘柄シンボル
-   * @param timeframe - 時間足
-   * @returns シミュレートされた市場データ
-   */
-  private generateSimulatedData(symbol: string, timeframe: string): MarketData {
-    // シンボルに応じたベース価格を設定（2026年1月時点の実勢レート）
-    // ※金(XAU/USD)は2024-2025年の上昇で4300ドル台に達している
-    const basePrices: Record<string, number> = {
-      'BTC/USD': 95000,   // ビットコイン
-      'ETH/USD': 3400,    // イーサリアム
-      'EUR/USD': 1.03,    // ユーロドル
-      'USD/JPY': 157,     // ドル円
-      'GBP/USD': 1.24,    // ポンドドル
-      'XAU/USD': 4325,    // ゴールド（2026年1月実勢：金価格上昇後）
-      'AAPL': 240,        // Apple
-      'GOOGL': 195,       // Google
-    };
-    
-    const basePrice = basePrices[symbol] || 100;
-    const variance = basePrice * 0.002; // 0.2% 変動幅（テスト用に狭く）
-    
-    const open = basePrice + (Math.random() - 0.5) * variance;
-    const close = open + (Math.random() - 0.5) * variance;
-    const high = Math.max(open, close) + Math.random() * variance * 0.5;
-    const low = Math.min(open, close) - Math.random() * variance * 0.5;
-    const volume = Math.random() * 1000000;
-
-    const data: MarketData = {
-      symbol,
-      timestamp: new Date(),
-      timeframe,
-      open,
-      high,
-      low,
-      close,
-      volume,
-    };
-
-    this.calculateIndicators(data);
-    return data;
-  }
-
-  /**
    * 履歴市場データを取得
    * 
    * @param symbol - 銘柄シンボル
@@ -400,36 +353,35 @@ export class MarketDataService {
     timeframe: string,
     limit: number = 100
   ): Promise<MarketData[]> {
-    // API が設定されていない場合はシミュレーションデータを返す
+    // API が設定されていない場合はエラー
     if (!this.isApiConfigured()) {
-      return this.generateHistoricalSimulatedData(symbol, timeframe, limit);
+      throw new Error('市場APIが設定されていません。.envのAPI_URLとMARKET_API_KEYを確認してください。');
     }
 
     try {
       // シンボルを Twelve Data 形式に変換（例: ETHUSDT → ETH/USD）
       const normalizedSymbol = this.normalizeSymbolForTwelveData(symbol);
-      
+
       const interval = this.convertTimeframe(timeframe);
       const url = `${this.apiUrl}/time_series?symbol=${encodeURIComponent(normalizedSymbol)}&interval=${interval}&outputsize=${limit}&apikey=${this.apiKey}`;
-      
+
       const response = await fetch(url);
-      
+
       if (!response.ok) {
         throw new Error(`API レスポンスエラー: ${response.status}`);
       }
-      
+
       const data = (await response.json()) as TwelveDataTimeSeriesResponse;
-      
+
       // API エラーチェック
       if (data.status === 'error' || data.code) {
         throw new Error(data.message || 'Twelve Data API エラー');
       }
-      
+
       if (!data.values || data.values.length === 0) {
-        console.warn(`${symbol} の履歴データが取得できません。シミュレーションデータを使用します。`);
-        return this.generateHistoricalSimulatedData(symbol, timeframe, limit);
+        throw new Error(`${symbol} の履歴データが取得できませんでした。シンボルが正しいか確認してください。`);
       }
-      
+
       // API レスポンスを MarketData 形式に変換（時系列順に並べ替え）
       const marketDataArray: MarketData[] = data.values.map(bar => {
         const marketData: MarketData = {
@@ -444,49 +396,12 @@ export class MarketDataService {
         };
         return marketData;
       }).reverse(); // 古い順に並べ替え
-      
+
       return marketDataArray;
     } catch (error) {
       console.error('履歴データ取得エラー:', error);
-      return this.generateHistoricalSimulatedData(symbol, timeframe, limit);
+      throw error;
     }
-  }
-
-  /**
-   * 履歴シミュレーションデータを生成
-   * 
-   * @param symbol - 銘柄シンボル
-   * @param timeframe - 時間足
-   * @param limit - 生成件数
-   * @returns シミュレートされた市場データ配列
-   */
-  private generateHistoricalSimulatedData(
-    symbol: string,
-    timeframe: string,
-    limit: number
-  ): MarketData[] {
-    const data: MarketData[] = [];
-    
-    // 時間足に応じた間隔（ミリ秒）
-    const intervalMs: Record<string, number> = {
-      '1m': 60 * 1000,
-      '5m': 5 * 60 * 1000,
-      '15m': 15 * 60 * 1000,
-      '30m': 30 * 60 * 1000,
-      '1h': 60 * 60 * 1000,
-      '4h': 4 * 60 * 60 * 1000,
-      '1d': 24 * 60 * 60 * 1000,
-    };
-    
-    const interval = intervalMs[timeframe] || 15 * 60 * 1000;
-    
-    for (let i = limit - 1; i >= 0; i--) {
-      const marketData = this.generateSimulatedData(symbol, timeframe);
-      marketData.timestamp = new Date(Date.now() - i * interval);
-      data.push(marketData);
-    }
-    
-    return data;
   }
 
   /**
@@ -528,38 +443,36 @@ export class MarketDataService {
     symbol: string,
     count: number = 60
   ): Promise<MarketData[]> {
-    // API が設定されていない場合はシミュレーションデータを返す
+    // API が設定されていない場合はエラー
     if (!this.isApiConfigured()) {
-      console.warn('市場 API が設定されていません。シミュレーションデータを使用します。');
-      return this.generateHistoricalSimulatedData(symbol, '1m', count);
+      throw new Error('市場APIが設定されていません。.envのAPI_URLとMARKET_API_KEYを確認してください。');
     }
 
     try {
       // 1分足を指定本数取得
       const url = `${this.apiUrl}/time_series?symbol=${encodeURIComponent(symbol)}&interval=1min&outputsize=${count}&apikey=${this.apiKey}`;
-      
+
       console.log(`[MarketDataService] 1分足取得: ${symbol} × ${count}本`);
-      
+
       const response = await fetch(url);
-      
+
       if (!response.ok) {
         throw new Error(`API レスポンスエラー: ${response.status}`);
       }
-      
+
       const data = (await response.json()) as TwelveDataTimeSeriesResponse;
-      
+
       // API エラーチェック
       if (data.status === 'error' || data.code) {
         throw new Error(data.message || 'Twelve Data API エラー');
       }
-      
+
       if (!data.values || data.values.length === 0) {
-        console.warn(`${symbol} の1分足データが取得できません。シミュレーションデータを使用します。`);
-        return this.generateHistoricalSimulatedData(symbol, '1m', count);
+        throw new Error(`${symbol} の1分足データが取得できませんでした。シンボルが正しいか確認してください。`);
       }
 
       console.log(`[MarketDataService] 取得成功: ${data.values.length}本`);
-      
+
       // API レスポンスを MarketData 形式に変換（時系列順に並べ替え: 古い → 新しい）
       const marketDataArray: MarketData[] = data.values.map(bar => {
         const marketData: MarketData = {
@@ -574,11 +487,11 @@ export class MarketDataService {
         };
         return marketData;
       }).reverse(); // 古い順に並べ替え
-      
+
       return marketDataArray;
     } catch (error) {
       console.error('1分足データ取得エラー:', error);
-      return this.generateHistoricalSimulatedData(symbol, '1m', count);
+      throw error;
     }
   }
 }

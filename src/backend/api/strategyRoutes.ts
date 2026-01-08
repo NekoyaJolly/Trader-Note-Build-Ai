@@ -321,14 +321,14 @@ router.put('/:id', async (req: Request, res: Response) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
     console.error('[StrategyRoutes] 更新エラー:', message);
-    
+
     if (message.includes('見つかりません')) {
       return res.status(404).json({
         success: false,
         error: message,
       });
     }
-    
+
     res.status(400).json({
       success: false,
       error: message,
@@ -352,14 +352,14 @@ router.delete('/:id', async (req: Request, res: Response) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
     console.error('[StrategyRoutes] 削除エラー:', message);
-    
+
     if (message.includes('見つかりません')) {
       return res.status(404).json({
         success: false,
         error: message,
       });
     }
-    
+
     res.status(500).json({
       success: false,
       error: message,
@@ -392,14 +392,14 @@ router.put('/:id/status', async (req: Request, res: Response) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
     console.error('[StrategyRoutes] ステータス更新エラー:', message);
-    
+
     if (message.includes('見つかりません')) {
       return res.status(404).json({
         success: false,
         error: message,
       });
     }
-    
+
     res.status(500).json({
       success: false,
       error: message,
@@ -432,14 +432,14 @@ router.post('/:id/duplicate', async (req: Request, res: Response) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
     console.error('[StrategyRoutes] 複製エラー:', message);
-    
+
     if (message.includes('見つかりません')) {
       return res.status(404).json({
         success: false,
         error: message,
       });
     }
-    
+
     res.status(400).json({
       success: false,
       error: message,
@@ -547,14 +547,14 @@ router.post('/:id/backtest', async (req: Request, res: Response) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
     console.error('[StrategyRoutes] バックテスト実行エラー:', message);
-    
+
     if (message.includes('見つかりません')) {
       return res.status(404).json({
         success: false,
         error: message,
       });
     }
-    
+
     res.status(500).json({
       success: false,
       error: message,
@@ -1392,7 +1392,7 @@ router.post('/:id/montecarlo', async (req: Request, res: Response) => {
       const result = targetBacktest.result;
       const totalTrades = result.winCount + result.lossCount + result.timeoutCount;
       console.log(`[StrategyRoutes] 比較対象バックテスト: ${totalTrades}トレード, 勝率${result.winRate}%, PF${result.profitFactor}`);
-      
+
       params.actualStrategy = {
         totalTrades,
         winningTrades: result.winCount,
@@ -1606,19 +1606,19 @@ router.get('/:id/versions/compare', async (req: Request, res: Response) => {
     const versionsWithBacktest = comparisonData.filter(v => v.backtest !== null);
     const summary = versionsWithBacktest.length > 0 ? {
       bestWinRate: {
-        versionNumber: versionsWithBacktest.reduce((best, v) => 
+        versionNumber: versionsWithBacktest.reduce((best, v) =>
           (v.backtest?.metrics.winRate ?? 0) > (best.backtest?.metrics.winRate ?? 0) ? v : best
         ).versionNumber,
         value: Math.max(...versionsWithBacktest.map(v => v.backtest?.metrics.winRate ?? 0)),
       },
       bestProfitFactor: {
-        versionNumber: versionsWithBacktest.reduce((best, v) => 
+        versionNumber: versionsWithBacktest.reduce((best, v) =>
           (v.backtest?.metrics.profitFactor ?? 0) > (best.backtest?.metrics.profitFactor ?? 0) ? v : best
         ).versionNumber,
         value: Math.max(...versionsWithBacktest.map(v => v.backtest?.metrics.profitFactor ?? 0)),
       },
       bestExpectancy: {
-        versionNumber: versionsWithBacktest.reduce((best, v) => 
+        versionNumber: versionsWithBacktest.reduce((best, v) =>
           (v.backtest?.metrics.expectancy ?? 0) > (best.backtest?.metrics.expectancy ?? 0) ? v : best
         ).versionNumber,
         value: Math.max(...versionsWithBacktest.map(v => v.backtest?.metrics.expectancy ?? 0)),
@@ -1626,9 +1626,9 @@ router.get('/:id/versions/compare', async (req: Request, res: Response) => {
       lowestDrawdown: {
         versionNumber: versionsWithBacktest
           .filter(v => v.backtest?.metrics.maxDrawdown !== null)
-          .reduce((best, v) => 
+          .reduce((best, v) =>
             (v.backtest?.metrics.maxDrawdown ?? Infinity) < (best.backtest?.metrics.maxDrawdown ?? Infinity) ? v : best
-          , versionsWithBacktest[0]).versionNumber,
+            , versionsWithBacktest[0]).versionNumber,
         value: Math.min(...versionsWithBacktest
           .filter(v => v.backtest?.metrics.maxDrawdown !== null)
           .map(v => v.backtest?.metrics.maxDrawdown ?? Infinity)),
@@ -1668,7 +1668,7 @@ router.get('/:id/versions/compare', async (req: Request, res: Response) => {
 router.get('/:id/backtest/:runId/filter-analysis', async (req: Request, res: Response) => {
   try {
     const { id, runId } = req.params;
-    
+
     // バックテスト結果を取得
     const backtestResult = await getBacktestResult(runId);
     if (!backtestResult) {
@@ -1677,35 +1677,35 @@ router.get('/:id/backtest/:runId/filter-analysis', async (req: Request, res: Res
         error: 'バックテスト結果が見つかりません',
       });
     }
-    
+
     // OHLCVデータを再取得（分析用）
     // 注: 本来はバックテスト時のデータをキャッシュすべきだが、MVP版では再取得
     const { fetchHistoricalData } = await import('../services/strategyBacktestService');
     const strategy = await prisma.strategy.findUnique({
       where: { id },
     });
-    
+
     if (!strategy) {
       return res.status(404).json({
         success: false,
         error: 'ストラテジーが見つかりません',
       });
     }
-    
+
     const ohlcvData = await fetchHistoricalData(
       strategy.symbol,
       '1m' as BacktestTimeframe, // 分析用に1分足
       new Date(backtestResult.startDate),
       new Date(backtestResult.endDate)
     );
-    
+
     // フィルター分析実行
     const analysisResult = analyzeFilters({
       trades: backtestResult.trades,
       ohlcvData,
       timeframe: backtestResult.timeframe as '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d',
     });
-    
+
     res.json({
       success: true,
       data: analysisResult,
@@ -1734,21 +1734,21 @@ router.post('/:id/backtest/:runId/filter-verify', async (req: Request, res: Resp
   try {
     const { id, runId } = req.params;
     const { filters } = req.body as { filters: FilterCondition[] };
-    
+
     if (!filters || !Array.isArray(filters)) {
       return res.status(400).json({
         success: false,
         error: 'フィルター条件を指定してください',
       });
     }
-    
+
     if (filters.length === 0 || filters.length > 5) {
       return res.status(400).json({
         success: false,
         error: 'フィルターは1〜5個まで選択してください',
       });
     }
-    
+
     // バックテスト結果を取得
     const backtestResult = await getBacktestResult(runId);
     if (!backtestResult) {
@@ -1757,27 +1757,27 @@ router.post('/:id/backtest/:runId/filter-verify', async (req: Request, res: Resp
         error: 'バックテスト結果が見つかりません',
       });
     }
-    
+
     // OHLCVデータを再取得
     const { fetchHistoricalData } = await import('../services/strategyBacktestService');
     const strategy = await prisma.strategy.findUnique({
       where: { id },
     });
-    
+
     if (!strategy) {
       return res.status(404).json({
         success: false,
         error: 'ストラテジーが見つかりません',
       });
     }
-    
+
     const ohlcvData = await fetchHistoricalData(
       strategy.symbol,
       '1m' as BacktestTimeframe,
       new Date(backtestResult.startDate),
       new Date(backtestResult.endDate)
     );
-    
+
     // フィルター検証実行
     const verifyResult = verifyFilters({
       trades: backtestResult.trades,
@@ -1786,7 +1786,7 @@ router.post('/:id/backtest/:runId/filter-verify', async (req: Request, res: Resp
       filters,
       initialCapital: 1000000, // デフォルト
     });
-    
+
     res.json({
       success: true,
       data: verifyResult,
@@ -1821,4 +1821,104 @@ router.get('/filters/indicators', async (_req: Request, res: Response) => {
   }
 });
 
+// ============================================
+// OHLCVデータ取得エンドポイント
+// Phase 1: バックテストデータ取得フロー改善
+// ============================================
+
+/**
+ * POST /api/strategies/ohlcv/fetch-and-cache
+ * 不足しているOHLCVデータをAPIから取得してDBにキャッシュ
+ * 
+ * Request Body:
+ * - symbol: string (シンボル、例: 'USDJPY', 'XAUUSD')
+ * - timeframe: string (時間足、例: '15m', '1h')
+ * - startDate: string (開始日、ISO形式)
+ * - endDate: string (終了日、ISO形式)
+ */
+router.post('/ohlcv/fetch-and-cache', async (req: Request, res: Response) => {
+  try {
+    const { symbol, timeframe, startDate, endDate } = req.body;
+
+    // バリデーション
+    if (!symbol) {
+      return res.status(400).json({
+        success: false,
+        error: 'シンボルは必須です',
+      });
+    }
+    if (!timeframe) {
+      return res.status(400).json({
+        success: false,
+        error: '時間足は必須です',
+      });
+    }
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        error: '開始日と終了日は必須です',
+      });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({
+        success: false,
+        error: '日付の形式が不正です',
+      });
+    }
+
+    if (start >= end) {
+      return res.status(400).json({
+        success: false,
+        error: '開始日は終了日より前である必要があります',
+      });
+    }
+
+    // 期間制限（最大365日）
+    const MAX_DAYS = 365;
+    const diffDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    if (diffDays > MAX_DAYS) {
+      return res.status(400).json({
+        success: false,
+        error: `データ取得期間は最大${MAX_DAYS}日までです（指定: ${diffDays}日）`,
+      });
+    }
+
+    console.log(`[StrategyRoutes] OHLCVデータ取得開始: ${symbol}/${timeframe}, ${startDate} ~ ${endDate}`);
+
+    // OHLCVデータ取得・キャッシュサービスを呼び出し
+    const { fetchAndCacheOhlcv } = await import('../services/fetchAndCacheOhlcv');
+    const result = await fetchAndCacheOhlcv(symbol, timeframe, start, end);
+
+    if (!result.success) {
+      console.error(`[StrategyRoutes] OHLCVデータ取得失敗: ${result.error}`);
+      return res.status(500).json({
+        success: false,
+        error: result.error,
+      });
+    }
+
+    console.log(`[StrategyRoutes] OHLCVデータ取得完了: ${result.cachedCount}件キャッシュ`);
+
+    res.json({
+      success: true,
+      data: {
+        cachedCount: result.cachedCount,
+        details: result.details,
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] OHLCVデータ取得エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
 export default router;
+

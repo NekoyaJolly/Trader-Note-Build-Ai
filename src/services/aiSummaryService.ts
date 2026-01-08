@@ -15,6 +15,10 @@
  */
 
 import { config } from '../config';
+import {
+  OpenAIChatCompletionResponseSchema,
+  OpenAIUsageSchema,
+} from '../schemas/external/openai';
 
 /**
  * トレードデータの構造化入力
@@ -88,14 +92,14 @@ export class AISummaryService {
     try {
       // トークン効率的なプロンプトを構築
       const prompt = this.buildJapanesePrompt(tradeData);
-      
+
       // AI API を呼び出して要約を生成
       const result = await this.callAIAPI(prompt);
-      
+
       return result;
     } catch (error) {
       console.error('AI 要約生成エラー:', error);
-      
+
       // エラー時は基本要約にフォールバック
       return {
         summary: this.generateBasicSummary(tradeData),
@@ -117,17 +121,17 @@ export class AISummaryService {
    */
   private buildJapanesePrompt(tradeData: TradeDataForSummary): string {
     const { symbol, side, price, quantity, timestamp, marketContext } = tradeData;
-    
+
     // 売買区分を日本語に変換
     const sideLabel = side === 'buy' ? '買い' : '売り';
-    
+
     // 日時をフォーマット
-    const dateStr = timestamp.toLocaleString('ja-JP', { 
-      year: 'numeric', 
-      month: '2-digit', 
-      day: '2-digit', 
-      hour: '2-digit', 
-      minute: '2-digit' 
+    const dateStr = timestamp.toLocaleString('ja-JP', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
     });
 
     // トークン効率的なプロンプト (構造化データのみ)
@@ -138,36 +142,36 @@ export class AISummaryService {
     prompt += `- 価格: ${price}\n`;
     prompt += `- 数量: ${quantity}\n`;
     prompt += `- 日時: ${dateStr}\n`;
-    
+
     // 市場コンテキストがあれば追加
     if (marketContext) {
       prompt += '\n【市場状況】\n';
-      
+
       if (marketContext.trend) {
-        const trendLabel = 
+        const trendLabel =
           marketContext.trend === 'uptrend' ? '上昇トレンド' :
-          marketContext.trend === 'downtrend' ? '下降トレンド' : '横ばい';
+            marketContext.trend === 'downtrend' ? '下降トレンド' : '横ばい';
         prompt += `- トレンド: ${trendLabel}\n`;
       }
-      
+
       if (marketContext.rsi !== undefined) {
         prompt += `- RSI: ${marketContext.rsi.toFixed(1)}\n`;
       }
-      
+
       if (marketContext.macd !== undefined) {
         prompt += `- MACD: ${marketContext.macd.toFixed(2)}\n`;
       }
-      
+
       if (marketContext.timeframe) {
         prompt += `- 時間軸: ${marketContext.timeframe}\n`;
       }
     }
-    
+
     prompt += '\n【要件】\n';
     prompt += '- 日本語で記述すること\n';
     prompt += '- トレードの背景・市場状況・判断根拠を含めること\n';
     prompt += '- 冗長な表現は避け、簡潔に記述すること\n';
-    
+
     return prompt;
   }
 
@@ -231,24 +235,41 @@ export class AISummaryService {
       throw new Error(`AI API エラー: ${response.status} ${response.statusText}`);
     }
 
-    const data = await response.json() as any;
-    
+    const rawData = await response.json();
+
     // デバッグ: レスポンス構造を確認
     if (process.env.NODE_ENV !== 'production') {
-      console.log('AI API レスポンス:', JSON.stringify(data, null, 2));
+      console.log('AI API レスポンス:', JSON.stringify(rawData, null, 2));
     }
-    
-    // GPT-5 シリーズのレスポンス構造に対応
-    const content = data.choices?.[0]?.message?.content || 
-                   data.output_text ||  // 新しい形式の可能性
-                   '';
-    
-    return {
-      summary: content.trim(),
-      promptTokens: data.usage?.prompt_tokens,
-      completionTokens: data.usage?.completion_tokens,
-      model: data.model,
-    };
+
+    // Zodスキーマで型安全にパース
+    const parseResult = OpenAIChatCompletionResponseSchema.safeParse(rawData);
+
+    if (parseResult.success) {
+      // Chat Completions形式
+      const data = parseResult.data;
+      const content = data.choices[0]?.message?.content || '';
+
+      return {
+        summary: content.trim(),
+        promptTokens: data.usage?.prompt_tokens,
+        completionTokens: data.usage?.completion_tokens,
+        model: data.model,
+      };
+    }
+
+    // GPT-5 Responses API形式のフォールバック（スキーマが異なる場合）
+    const legacyData = rawData as { output_text?: string; usage?: { prompt_tokens?: number; completion_tokens?: number }; model?: string };
+    if (legacyData.output_text) {
+      return {
+        summary: legacyData.output_text.trim(),
+        promptTokens: legacyData.usage?.prompt_tokens,
+        completionTokens: legacyData.usage?.completion_tokens,
+        model: legacyData.model,
+      };
+    }
+
+    throw new Error('AI APIレスポンス形式が不明です');
   }
 
   /**
@@ -264,19 +285,19 @@ export class AISummaryService {
    */
   private generateBasicSummary(tradeData: TradeDataForSummary): string {
     const { symbol, side, price, quantity, timestamp, marketContext } = tradeData;
-    
+
     const sideLabel = side === 'buy' ? '買い' : '売り';
     const dateStr = timestamp.toLocaleDateString('ja-JP');
-    
+
     let summary = `${dateStr} に ${symbol} を ${sideLabel} (価格: ${price}, 数量: ${quantity})`;
-    
+
     if (marketContext?.trend) {
-      const trendLabel = 
+      const trendLabel =
         marketContext.trend === 'uptrend' ? '上昇トレンド' :
-        marketContext.trend === 'downtrend' ? '下降トレンド' : '横ばい';
+          marketContext.trend === 'downtrend' ? '下降トレンド' : '横ばい';
       summary += `。市場は${trendLabel}。`;
     }
-    
+
     return summary;
   }
 }

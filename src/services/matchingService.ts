@@ -7,20 +7,21 @@ import { MatchResultDTO } from '../domain/matching/MatchResultDTO';
 import { MatchResultRepository } from '../backend/repositories/matchResultRepository';
 import { MarketSnapshotRepository } from '../backend/repositories/marketSnapshotRepository';
 import { EvaluationLogRepository } from '../backend/repositories/evaluationLogRepository';
-import { 
+import {
   SimultaneousHitControlService,
   MatchHit,
 } from './notification/simultaneousHitControlService';
-import { 
-  normalizeIndicators, 
+import {
+  normalizeIndicators,
   DEFAULT_ANOMALY_THRESHOLD,
-  NormalizedIndicators 
+  NormalizedIndicators
 } from '../utils/indicatorNormalizer';
 import {
-  createNoteEvaluatorFromFSNote,
+  createNoteEvaluator,
   convertMarketDataToSnapshot,
 } from './legacyNoteEvaluatorAdapter';
 import { NoteEvaluator, EvaluationResult } from '../domain/noteEvaluator';
+import { TradeNote as PrismaTradeNote } from '@prisma/client';
 
 /**
  * マッチングサービス
@@ -64,11 +65,12 @@ export class MatchingService {
    * - NoteEvaluator.evaluate() に市場スナップショットを渡す
    * - Service は類似度を直接計算しない
    * 
-   * フェーズ8: loadActiveNotesForMatching を使用し、enabled/pausedUntil をフィルタ
+   * フェーズ8: loadActiveNotesForMatchingAsPrisma を使用し、enabled/pausedUntil をフィルタ
+   * DB統一: Prisma型を直接使用（FS型への変換をスキップ）
    */
   async checkForMatches(): Promise<MatchResultDTO[]> {
-    // 有効なノートのみを取得（フェーズ8: enabled=true, pausedUntil 考慮）
-    const notes = await this.noteService.loadActiveNotesForMatching();
+    // 有効なノートのみを取得（Prisma型で直接取得）
+    const notes = await this.noteService.loadActiveNotesForMatchingAsPrisma();
     const matches: MatchResultDTO[] = [];
 
     // マッチング対象がない場合は早期リターン
@@ -78,16 +80,16 @@ export class MatchingService {
     }
 
     // ノートをシンボル別にグループ化
-    const notesBySymbol = this.groupNotesBySymbol(notes);
+    const notesBySymbol = this.groupNotesBySymbolPrisma(notes);
 
     for (const [symbol, symbolNotes] of notesBySymbol.entries()) {
       try {
         // 現在の市場データを取得（インジケーター計算付き）
         const currentMarket = await this.marketDataService.getCurrentMarketDataWithIndicators(symbol);
-        
+
         // MarketData → MarketSnapshot に変換（NoteEvaluator用）
         const snapshot = convertMarketDataToSnapshot(currentMarket);
-        
+
         // MarketSnapshot を DB に保存
         let marketSnapshotId: string | undefined;
         try {
@@ -103,15 +105,15 @@ export class MatchingService {
         } catch (snapshotError) {
           console.warn('MarketSnapshot 保存をスキップ:', snapshotError);
         }
-        
+
         // 各ノートに対して NoteEvaluator で評価
         for (const note of symbolNotes) {
-          // ノートから NoteEvaluator を生成
-          const evaluator = createNoteEvaluatorFromFSNote(note);
-          
+          // ノートから NoteEvaluator を生成（Prisma型を直接使用）
+          const evaluator = createNoteEvaluator(note);
+
           // NoteEvaluator.evaluate() で評価（Service は類似度を直接計算しない）
           const evalResult = evaluator.evaluate(snapshot);
-          
+
           // ★ EvaluationLog を記録（triggered=false も含む、勝率計算の分母となる）
           // marketSnapshotId が取得できている場合のみ記録
           if (marketSnapshotId) {
@@ -128,14 +130,14 @@ export class MatchingService {
               console.warn('[MatchingService] EvaluationLog 記録をスキップ:', logError);
             }
           }
-          
+
           // 追加のルールベースチェック（トレンド・価格帯）
-          const trendMatched = this.checkTrendMatch(note, currentMarket);
-          const priceRangeMatched = this.checkPriceRange(note, currentMarket);
-          
+          const trendMatched = this.checkTrendMatchPrisma(note, currentMarket);
+          const priceRangeMatched = this.checkPriceRangePrisma(note, currentMarket);
+
           // 補正スコア（評価結果のsimilarityをベースに補正）
           const adjustedScore = this.applyRuleAdjustment(evalResult.similarity, trendMatched, priceRangeMatched);
-          
+
           // 理由を生成
           const reasons = this.generateMatchReasonsFromEvaluation(
             evalResult,
@@ -143,14 +145,14 @@ export class MatchingService {
             trendMatched,
             priceRangeMatched
           );
-          
+
           // NoteEvaluator の閾値で発火判定
           const isMatch = evaluator.isTriggered(adjustedScore);
-          
+
           // 無界インジケーターの異常値チェック（マッチした場合のみ警告を生成）
           let warnings: string[] = [];
           if (isMatch) {
-            warnings = this.checkIndicatorAnomalies(note, currentMarket);
+            warnings = this.checkIndicatorAnomaliesPrisma(note, currentMarket);
           }
 
           if (isMatch) {
@@ -217,7 +219,7 @@ export class MatchingService {
   }> {
     // 1. 全マッチを取得
     const allMatches = await this.checkForMatches();
-    
+
     if (allMatches.length === 0) {
       return {
         toNotify: [],
@@ -383,7 +385,7 @@ export class MatchingService {
   private checkTrendMatch(note: TradeNote, market: MarketData): boolean {
     const noteTrend = note.marketContext.trend;
     const currentTrend = market.indicators?.trend;
-    
+
     return noteTrend === currentTrend;
   }
 
@@ -429,10 +431,93 @@ export class MatchingService {
 
     // ノートの過去インジケーター値を取得
     const historicalIndicators: Record<string, number | undefined>[] = [];
-    
+
     if (note.marketContext && typeof note.marketContext === 'object') {
       const noteIndicators: Record<string, number | undefined> = {};
       for (const [key, value] of Object.entries(note.marketContext)) {
+        if (typeof value === 'number') {
+          noteIndicators[key] = value;
+        }
+      }
+      if (Object.keys(noteIndicators).length > 0) {
+        historicalIndicators.push(noteIndicators);
+      }
+    }
+
+    if (historicalIndicators.length === 0) {
+      return [];
+    }
+
+    const result: NormalizedIndicators = normalizeIndicators(
+      currentIndicators,
+      historicalIndicators,
+      DEFAULT_ANOMALY_THRESHOLD
+    );
+
+    return result.warnings;
+  }
+
+  // ============================================================================
+  // Prisma型用ヘルパーメソッド (DB統一対応)
+  // ============================================================================
+
+  /**
+   * Prisma型ノートをシンボル別にグループ化
+   */
+  private groupNotesBySymbolPrisma(notes: PrismaTradeNote[]): Map<string, PrismaTradeNote[]> {
+    const grouped = new Map<string, PrismaTradeNote[]>();
+
+    for (const note of notes) {
+      const existing = grouped.get(note.symbol) || [];
+      existing.push(note);
+      grouped.set(note.symbol, existing);
+    }
+
+    return grouped;
+  }
+
+  /**
+   * Prisma型ノートでトレンド一致をチェック
+   */
+  private checkTrendMatchPrisma(note: PrismaTradeNote, market: MarketData): boolean {
+    // Prisma の marketContext は JsonValue 型なので型安全に取得
+    const marketContext = note.marketContext as Record<string, unknown> | null;
+    const noteTrend = marketContext?.trend as string | undefined;
+    const currentTrend = market.indicators?.trend;
+
+    return noteTrend === currentTrend;
+  }
+
+  /**
+   * Prisma型ノートで価格が過去ノートの価格帯内かチェック（5%以内）
+   */
+  private checkPriceRangePrisma(note: PrismaTradeNote, market: MarketData): boolean {
+    const entryPrice = Number(note.entryPrice);
+    const priceDeviation = Math.abs(market.close - entryPrice) / entryPrice;
+    return priceDeviation < 0.05;
+  }
+
+  /**
+   * Prisma型ノートで無界インジケーターの異常値をチェック
+   */
+  private checkIndicatorAnomaliesPrisma(note: PrismaTradeNote, market: MarketData): string[] {
+    // 現在の市場インジケーター値を抽出
+    const currentIndicators: Record<string, number | undefined> = {};
+    if (market.indicators) {
+      for (const [key, value] of Object.entries(market.indicators)) {
+        if (typeof value === 'number') {
+          currentIndicators[key] = value;
+        }
+      }
+    }
+
+    // Prisma型の marketContext からインジケーター値を取得
+    const historicalIndicators: Record<string, number | undefined>[] = [];
+    const marketContext = note.marketContext as Record<string, unknown> | null;
+
+    if (marketContext && typeof marketContext === 'object') {
+      const noteIndicators: Record<string, number | undefined> = {};
+      for (const [key, value] of Object.entries(marketContext)) {
         if (typeof value === 'number') {
           noteIndicators[key] = value;
         }

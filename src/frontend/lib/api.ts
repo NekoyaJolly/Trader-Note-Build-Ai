@@ -149,19 +149,19 @@ export interface FetchNotesParams {
  */
 export async function fetchNotes(params?: NoteStatus | FetchNotesParams): Promise<{ notes: NoteSummary[] }> {
   const url = new URL(`${API_BASE_URL}/api/trades/notes`);
-  
+
   // 後方互換性: string が渡された場合は status として扱う
   const normalizedParams: FetchNotesParams = typeof params === 'string'
     ? { status: params }
     : params || {};
-  
+
   if (normalizedParams.status) {
     url.searchParams.set("status", normalizedParams.status);
   }
   if (normalizedParams.limit) {
     url.searchParams.set("limit", String(normalizedParams.limit));
   }
-  
+
   const response = await fetch(url.toString(), {
     cache: "no-store",
   });
@@ -450,7 +450,7 @@ export async function fetchIndicatorMetadata(category?: string): Promise<{
   const url = category
     ? `${API_BASE_URL}/api/indicators/metadata?category=${category}`
     : `${API_BASE_URL}/api/indicators/metadata`;
-  
+
   const response = await fetch(url, {
     cache: "no-store",
   });
@@ -748,11 +748,11 @@ export async function fetchStrategies(
   status?: StrategyStatus
 ): Promise<Strategy[]> {
   const url = new URL(`${API_BASE_URL}/api/strategies`);
-  
+
   if (status) {
     url.searchParams.set("status", status);
   }
-  
+
   const response = await fetch(url.toString(), {
     cache: "no-store",
   });
@@ -1371,7 +1371,7 @@ export interface AlertLog {
  */
 export async function fetchStrategyAlert(strategyId: string): Promise<StrategyAlert | null> {
   const response = await fetch(`${API_BASE_URL}/api/strategies/${strategyId}/alerts`);
-  
+
   if (!response.ok) {
     throw new Error('アラート設定の取得に失敗しました');
   }
@@ -1862,9 +1862,9 @@ export async function fetchVersionComparison(
 // ============================================
 
 /** 分析対象インジケーター */
-export type AnalysisIndicator = 
-  | 'SMA_20' 
-  | 'SMA_50' 
+export type AnalysisIndicator =
+  | 'SMA_20'
+  | 'SMA_50'
   | 'SMA_200'
   | 'EMA_20'
   | 'EMA_50'
@@ -2089,7 +2089,7 @@ export async function fetchNotePerformance(
   } = {}
 ): Promise<NotePerformanceReport | null> {
   const params = new URLSearchParams();
-  
+
   if (options.from) {
     params.set('from', options.from.toISOString());
   }
@@ -2132,7 +2132,7 @@ export async function fetchNoteRanking(options: {
   timeframe?: string;
 } = {}): Promise<NoteRankingEntry[]> {
   const params = new URLSearchParams();
-  
+
   if (options.limit) {
     params.set('limit', options.limit.toString());
   }
@@ -2209,6 +2209,72 @@ export async function checkBacktestDataCoverage(
 
   const payload = await response.json();
   return payload.data;
+}
+
+/**
+ * OHLCVデータ取得・キャッシュ結果
+ */
+export interface FetchOhlcvResult {
+  success: boolean;
+  cachedCount: number;
+  details?: {
+    symbol: string;
+    timeframe: string;
+    startDate: string;
+    endDate: string;
+    fetchedCount: number;
+  };
+  error?: string;
+}
+
+/**
+ * 不足しているOHLCVデータをAPIから取得してDBにキャッシュ
+ * POST /api/strategies/ohlcv/fetch-and-cache
+ * 
+ * Rate Limit: 8リクエスト/分（Twelve Data無料枠）
+ * 長期間のデータ取得には時間がかかる場合があります。
+ * 
+ * @param symbol - シンボル（例: "USDJPY", "XAUUSD"）
+ * @param timeframe - 時間足（例: "15m", "1h"）
+ * @param startDate - 開始日時
+ * @param endDate - 終了日時
+ * @returns 取得・キャッシュ結果
+ */
+export async function fetchAndCacheOhlcvData(
+  symbol: string,
+  timeframe: string,
+  startDate: string,
+  endDate: string
+): Promise<FetchOhlcvResult> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/ohlcv/fetch-and-cache`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        symbol,
+        timeframe,
+        startDate,
+        endDate,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    return {
+      success: false,
+      cachedCount: 0,
+      error: error.error || "OHLCVデータの取得に失敗しました",
+    };
+  }
+
+  const payload = await response.json();
+  return {
+    success: true,
+    cachedCount: payload.data.cachedCount,
+    details: payload.data.details,
+  };
 }
 
 // ========================================
@@ -2410,4 +2476,381 @@ export async function setDefaultProfile(id: string): Promise<void> {
     const error = await response.json().catch(() => ({}));
     throw new Error(error.error || "デフォルト設定に失敗しました");
   }
+}
+
+// ============================================
+// ストラテジー横断分析 API
+// ============================================
+
+/** ストラテジー別パフォーマンス */
+export interface StrategyPerformance {
+  strategyId: string;
+  strategyName: string;
+  symbol: string;
+  side: 'buy' | 'sell';
+  totalTrades: number;
+  winRate: number;
+  profitFactor: number | null;
+  netProfit: number;
+  maxDrawdown: number;
+  sharpeRatio: number | null;
+  sortinoRatio: number | null;
+  calmarRatio: number | null;
+  dailyReturns: number[];
+  equityCurve: { date: string; equity: number }[];
+}
+
+/** 相関マトリクス */
+export interface CorrelationMatrix {
+  strategyIds: string[];
+  strategyNames: string[];
+  pearson: number[][];
+  spearman: number[][];
+  coWinRate: number[][];
+  coLossRate: number[][];
+}
+
+/** 比較サマリー */
+export interface ComparisonSummary {
+  bestWinRate: { strategyId: string; strategyName: string; value: number };
+  bestProfitFactor: { strategyId: string; strategyName: string; value: number };
+  lowestDrawdown: { strategyId: string; strategyName: string; value: number };
+  bestSharpe: { strategyId: string; strategyName: string; value: number };
+  recommendations: string[];
+}
+
+/** 比較セッション */
+export interface ComparisonSession {
+  id: string;
+  name: string;
+  strategyIds: string[];
+  startDate: string;
+  endDate: string;
+  timeframe: string;
+  results: StrategyPerformance[];
+  correlations: CorrelationMatrix;
+  summary: ComparisonSummary;
+  createdAt: string;
+}
+
+/** 比較セッション作成リクエスト */
+export interface CreateComparisonRequest {
+  name: string;
+  strategyIds: string[];
+  startDate: string;
+  endDate: string;
+  timeframe?: string;
+}
+
+/** 最適化手法 */
+export type OptimizationMethod =
+  | 'mean_variance'
+  | 'risk_parity'
+  | 'equal_weight'
+  | 'minimum_variance'
+  | 'max_sharpe';
+
+/** 最適化リクエスト */
+export interface OptimizeRequest {
+  method: OptimizationMethod;
+  riskFreeRate?: number;
+}
+
+/** 最適化結果 */
+export interface OptimizationResult {
+  method: OptimizationMethod;
+  weights: { strategyId: string; strategyName: string; weight: number }[];
+  expectedReturn: number;
+  expectedRisk: number;
+  sharpeRatio: number | null;
+  efficientFrontier: { risk: number; return: number }[] | null;
+}
+
+/**
+ * 比較セッション一覧を取得
+ * GET /api/strategy-comparison
+ */
+export async function fetchComparisonSessions(
+  limit: number = 20,
+  offset: number = 0
+): Promise<{ sessions: ComparisonSession[]; total: number }> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategy-comparison?limit=${limit}&offset=${offset}`,
+    { cache: "no-store" }
+  );
+  if (!response.ok) {
+    throw new Error(
+      `比較セッション一覧の取得に失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * 比較セッションを作成
+ * POST /api/strategy-comparison
+ */
+export async function createComparisonSession(
+  request: CreateComparisonRequest
+): Promise<ComparisonSession> {
+  const response = await fetch(`${API_BASE_URL}/api/strategy-comparison`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "比較セッションの作成に失敗しました");
+  }
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * 比較セッション詳細を取得
+ * GET /api/strategy-comparison/:id
+ */
+export async function fetchComparisonSession(
+  id: string
+): Promise<ComparisonSession | null> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategy-comparison/${encodeURIComponent(id)}`,
+    { cache: "no-store" }
+  );
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(
+      `比較セッションの取得に失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * 比較セッションを削除
+ * DELETE /api/strategy-comparison/:id
+ */
+export async function deleteComparisonSession(id: string): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategy-comparison/${encodeURIComponent(id)}`,
+    { method: "DELETE" }
+  );
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "比較セッションの削除に失敗しました");
+  }
+}
+
+/**
+ * ポートフォリオ最適化を実行
+ * POST /api/strategy-comparison/:id/optimize
+ */
+export async function runPortfolioOptimization(
+  sessionId: string,
+  request: OptimizeRequest
+): Promise<OptimizationResult> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategy-comparison/${encodeURIComponent(sessionId)}/optimize`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    }
+  );
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "ポートフォリオ最適化に失敗しました");
+  }
+  const payload = await response.json();
+  return payload.data;
+}
+
+// ============================================
+// パターン分析 API
+// ============================================
+
+/** 12次元特徴量 */
+export interface FeatureVector {
+  trendStrength: number;
+  trendDirection: number;
+  maAlignment: number;
+  pricePosition: number;
+  rsiLevel: number;
+  macdMomentum: number;
+  momentumDivergence: number;
+  volatilityLevel: number;
+  bbWidth: number;
+  volatilityTrend: number;
+  supportProximity: number;
+  resistanceProximity: number;
+}
+
+/** 勝ちパターン */
+export interface WinningPattern {
+  id: string;
+  name: string;
+  featureVector: FeatureVector;
+  winRate: number;
+  profitFactor: number;
+  tradeCount: number;
+  description?: string;
+}
+
+/** パターンマッチ結果 */
+export interface PatternMatch {
+  patternId: string;
+  patternName: string;
+  similarity: number;
+  matchedDimensions: string[];
+  divergentDimensions: string[];
+}
+
+/** エントリー推奨度 */
+export type Recommendation = 'strong' | 'moderate' | 'weak' | 'avoid';
+
+/** パターン分析結果 */
+export interface PatternAnalysisResult {
+  overallScore: number;
+  recommendation: Recommendation;
+  confidence: number;
+  patternMatches: PatternMatch[];
+  reasons: string[];
+  risks: string[];
+  suggestedAction: string;
+  tokenUsage: number;
+  model: string;
+  analyzedAt: string;
+}
+
+/** 異常検知結果 */
+export interface AnomalyDetectionResult {
+  anomalyScore: number;
+  isAnomaly: boolean;
+  anomalyType: 'volatility_spike' | 'trend_reversal' | 'volume_anomaly' | 'pattern_break' | 'none';
+  anomalousDimensions: string[];
+  explanation: string;
+  suggestedAction: string;
+  tokenUsage: number;
+  model: string;
+  analyzedAt: string;
+}
+
+/**
+ * パターン分析を実行
+ * POST /api/pattern-analysis/analyze
+ */
+export async function analyzePattern(request: {
+  symbol: string;
+  currentFeatures: FeatureVector;
+  winningPatterns: WinningPattern[];
+  side: 'buy' | 'sell';
+  context?: {
+    recentPrice?: number;
+    recentHigh?: number;
+    recentLow?: number;
+    timeframe?: string;
+  };
+}): Promise<PatternAnalysisResult> {
+  const response = await fetch(`${API_BASE_URL}/api/pattern-analysis/analyze`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "パターン分析に失敗しました");
+  }
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * ストラテジーに対してパターン分析を実行
+ * POST /api/pattern-analysis/analyze-strategy
+ */
+export async function analyzeStrategyPattern(request: {
+  strategyId: string;
+  currentFeatures: FeatureVector;
+  context?: {
+    recentPrice?: number;
+    timeframe?: string;
+  };
+}): Promise<{
+  strategy: { id: string; name: string; symbol: string; side: string };
+  patternsCompared: number;
+  analysis: PatternAnalysisResult;
+}> {
+  const response = await fetch(`${API_BASE_URL}/api/pattern-analysis/analyze-strategy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "ストラテジー分析に失敗しました");
+  }
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * 異常検知を実行
+ * POST /api/pattern-analysis/anomaly
+ */
+export async function detectAnomaly(request: {
+  symbol: string;
+  currentFeatures: FeatureVector;
+  normalPatterns: FeatureVector[];
+  context?: {
+    recentPrice?: number;
+    timeframe?: string;
+  };
+}): Promise<AnomalyDetectionResult> {
+  const response = await fetch(`${API_BASE_URL}/api/pattern-analysis/anomaly`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "異常検知に失敗しました");
+  }
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
+ * ストラテジーの勝ちパターンを取得
+ * GET /api/pattern-analysis/patterns/:strategyId
+ */
+export async function fetchWinningPatterns(
+  strategyId: string,
+  options?: { minWinRate?: number; limit?: number }
+): Promise<{
+  strategyId: string;
+  strategyName: string;
+  patterns: WinningPattern[];
+  totalPatterns: number;
+}> {
+  const params = new URLSearchParams();
+  if (options?.minWinRate !== undefined) {
+    params.set("minWinRate", options.minWinRate.toString());
+  }
+  if (options?.limit !== undefined) {
+    params.set("limit", options.limit.toString());
+  }
+  
+  const url = `${API_BASE_URL}/api/pattern-analysis/patterns/${encodeURIComponent(strategyId)}?${params}`;
+  const response = await fetch(url, { cache: "no-store" });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "勝ちパターンの取得に失敗しました");
+  }
+  const payload = await response.json();
+  return payload.data;
 }

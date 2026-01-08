@@ -311,6 +311,9 @@ export default function StrategiesPage() {
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
+        <NeonButton href="/strategies/comparison" color="cyan" size="md" icon="📊">
+          横断分析
+        </NeonButton>
         <NeonButton href="/strategies/new" color="purple" size="md" icon="➕">
           新規作成
         </NeonButton>
