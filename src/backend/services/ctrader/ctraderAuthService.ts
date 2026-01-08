@@ -270,6 +270,52 @@ export class CTraderAuthService {
   }
   
   /**
+   * 有効なトークンを取得（最初のアカウント）
+   * 
+   * @returns トークン情報（存在しない場合は null）
+   */
+  async getValidToken(): Promise<StoredToken | null> {
+    const token = await this.prisma.cTraderToken.findFirst({
+      orderBy: { createdAt: 'desc' },
+    });
+    
+    if (!token) {
+      return null;
+    }
+    
+    // 有効期限の5分前に更新
+    const refreshBuffer = 5 * 60 * 1000;
+    if (token.expiresAt.getTime() - refreshBuffer < Date.now()) {
+      try {
+        return await this.refreshAccessToken(token.accountId);
+      } catch (error) {
+        console.error('[CTraderAuth] トークン更新エラー:', error);
+        return null;
+      }
+    }
+    
+    return {
+      accountId: token.accountId,
+      accessToken: token.accessToken,
+      refreshToken: token.refreshToken,
+      expiresAt: token.expiresAt,
+      scope: token.scope,
+    };
+  }
+  
+  /**
+   * 最終接続日時を更新
+   * 
+   * @param accountId - アカウントID
+   */
+  async updateLastConnected(accountId: string): Promise<void> {
+    await this.prisma.cTraderToken.update({
+      where: { accountId },
+      data: { lastConnectedAt: new Date() },
+    });
+  }
+  
+  /**
    * 接続を解除（トークン削除）
    * 
    * @param accountId - アカウントID

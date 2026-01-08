@@ -7,10 +7,12 @@
  * - XAUUSDなどのOHLCVデータをリアルタイム取得
  * - ローソク足チャート表示
  * - 12次元特徴量でマーケット状態を可視化
+ * - cTrader WebSocket によるリアルタイムチャート
  */
 
 import React, { useState, useCallback } from 'react';
 import { CandlestickChart, OHLCVDataPoint } from '@/components/CandlestickChart';
+import { RealtimeChart } from '@/components/RealtimeChart';
 
 // 12次元特徴量の詳細型
 interface FeatureDetail {
@@ -90,8 +92,12 @@ function getFeatureColor(value: number, index: number): string {
     return 'bg-yellow-500';
 }
 
+// 表示モード
+type ViewMode = 'realtime' | 'analysis';
+
 export default function MarketAnalysisPage() {
     const [selectedSymbol, setSelectedSymbol] = useState('XAUUSD');
+    const [viewMode, setViewMode] = useState<ViewMode>('realtime');
     const [analysisData, setAnalysisData] = useState<MarketAnalysisData | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -160,18 +166,47 @@ export default function MarketAnalysisPage() {
                     </select>
                 </div>
 
+                {/* 表示モード切替 */}
+                <div>
+                    <label className="block text-sm text-gray-400 mb-1">表示モード</label>
+                    <div className="flex rounded-lg overflow-hidden">
+                        <button
+                            onClick={() => setViewMode('realtime')}
+                            className={`px-4 py-2 text-sm font-medium transition ${
+                                viewMode === 'realtime'
+                                    ? 'bg-green-600 text-white'
+                                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                            }`}
+                        >
+                            📡 リアルタイム
+                        </button>
+                        <button
+                            onClick={() => setViewMode('analysis')}
+                            className={`px-4 py-2 text-sm font-medium transition ${
+                                viewMode === 'analysis'
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                            }`}
+                        >
+                            📊 分析
+                        </button>
+                    </div>
+                </div>
+
                 <div className="flex-1" />
 
-                <button
-                    onClick={fetchAnalysis}
-                    disabled={loading}
-                    className={`px-6 py-2 rounded-lg font-semibold transition ${loading
-                        ? 'bg-gray-600 cursor-not-allowed'
-                        : 'bg-blue-600 hover:bg-blue-700'
-                        }`}
-                >
-                    {loading ? '取得中...' : '📥 データ取得'}
-                </button>
+                {viewMode === 'analysis' && (
+                    <button
+                        onClick={fetchAnalysis}
+                        disabled={loading}
+                        className={`px-6 py-2 rounded-lg font-semibold transition ${loading
+                            ? 'bg-gray-600 cursor-not-allowed'
+                            : 'bg-blue-600 hover:bg-blue-700'
+                            }`}
+                    >
+                        {loading ? '取得中...' : '📥 データ取得'}
+                    </button>
+                )}
             </div>
 
             {/* エラー表示 */}
@@ -181,8 +216,31 @@ export default function MarketAnalysisPage() {
                 </div>
             )}
 
-            {/* メインコンテンツ */}
-            {analysisData && (
+            {/* リアルタイムモード */}
+            {viewMode === 'realtime' && (
+                <div className="mb-6">
+                    <RealtimeChart
+                        symbol={selectedSymbol}
+                        height={500}
+                    />
+                    <div className="mt-4 bg-gray-800 rounded-lg p-4">
+                        <h3 className="text-lg font-semibold mb-2">📡 cTrader リアルタイムチャート</h3>
+                        <p className="text-gray-400 text-sm">
+                            cTrader Open API WebSocket から Tick データをリアルタイム受信し、10秒足のローソク足チャートを生成しています。
+                            データは自動的に DB に永続化され、チャートはリアルタイムで更新されます。
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                            <span className="px-2 py-1 bg-gray-700 rounded text-xs text-gray-300">WebSocket 接続</span>
+                            <span className="px-2 py-1 bg-gray-700 rounded text-xs text-gray-300">Tick データ永続化</span>
+                            <span className="px-2 py-1 bg-gray-700 rounded text-xs text-gray-300">10秒足 OHLCV 変換</span>
+                            <span className="px-2 py-1 bg-gray-700 rounded text-xs text-gray-300">SSE リアルタイム配信</span>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 分析モード - メインコンテンツ */}
+            {viewMode === 'analysis' && analysisData && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     {/* 左カラム: チャート */}
                     <div className="lg:col-span-2">
@@ -300,8 +358,8 @@ export default function MarketAnalysisPage() {
                 </div>
             )}
 
-            {/* 初期表示 */}
-            {!analysisData && !loading && !error && (
+            {/* 分析モード - 初期表示 */}
+            {viewMode === 'analysis' && !analysisData && !loading && !error && (
                 <div className="text-center py-20">
                     <div className="text-6xl mb-4">📊</div>
                     <p className="text-gray-400 text-lg">

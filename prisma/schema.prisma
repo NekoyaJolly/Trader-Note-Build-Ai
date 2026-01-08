@@ -1376,6 +1376,67 @@ model CTraderToken {
 }
 
 // ============================================================
+// リアルタイム Tick データ
+// ============================================================
+
+/// Tick データ（cTrader WebSocket から受信）
+/// リアルタイムチャート用の最小単位データ
+/// 高頻度書き込み対象のため、TimescaleDB ハイパーテーブル化推奨
+model TickData {
+  id        String   @id @default(uuid()) @db.Uuid
+  /// シンボル（例: XAUUSD, USDJPY）
+  symbol    String
+  /// Tick 受信時刻（ミリ秒精度）
+  timestamp DateTime @db.Timestamptz(6)
+  /// Bid 価格
+  bid       Decimal  @db.Decimal(18, 8)
+  /// Ask 価格
+  ask       Decimal  @db.Decimal(18, 8)
+  /// Mid 価格（(bid + ask) / 2）
+  mid       Decimal  @db.Decimal(18, 8)
+  /// スプレッド（ask - bid）
+  spread    Decimal  @db.Decimal(18, 8)
+  /// 出来高（Tick 単位、cTrader から取得可能な場合）
+  volume    Decimal? @db.Decimal(18, 8)
+  /// データソース（ctrader, simulated 等）
+  source    String   @default("ctrader")
+  /// 作成日時
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([symbol, timestamp], map: "idx_tick_symbol_timestamp")
+  @@index([timestamp], map: "idx_tick_timestamp")
+}
+
+/// リアルタイム OHLCV バー（Tick から生成）
+/// RollingWindowService で集約された確定バー
+model RealtimeOHLCV {
+  id        String   @id @default(uuid()) @db.Uuid
+  /// シンボル
+  symbol    String
+  /// 時間足（1s, 5s, 10s, 30s, 1m 等）
+  timeframe String
+  /// バー開始時刻
+  timestamp DateTime @db.Timestamptz(6)
+  /// 始値
+  open      Decimal  @db.Decimal(18, 8)
+  /// 高値
+  high      Decimal  @db.Decimal(18, 8)
+  /// 安値
+  low       Decimal  @db.Decimal(18, 8)
+  /// 終値
+  close     Decimal  @db.Decimal(18, 8)
+  /// 出来高
+  volume    Decimal  @db.Decimal(18, 8)
+  /// Tick 数（このバーに含まれる Tick の数）
+  tickCount Int      @default(0)
+  /// 作成日時
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([symbol, timeframe, timestamp], map: "uq_realtime_ohlcv")
+  @@index([symbol, timeframe, timestamp], map: "idx_realtime_ohlcv_symbol_tf_ts")
+}
+
+// ============================================================
 // ストラテジー横断分析（Phase Next）
 // ============================================================
 
