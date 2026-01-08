@@ -305,9 +305,7 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
       // symbolId からシンボル名を解決（簡略化: 購読中のシンボルを使用）
       const symbol = Array.from(this.subscribedSymbols)[0] || 'UNKNOWN';
       
-      // cTrader API は bid/ask を pipettes 形式（整数）で返す
-      // XAUUSD の場合: 実際の価格 * 100 (例: 2650.50 → 265050)
-      // 通貨ペアの場合: 実際の価格 * 100000 (例: 1.08500 → 108500)
+      // cTrader API の bid/ask をそのまま使用
       const rawBid = event.bid;
       const rawAsk = event.ask;
       
@@ -316,23 +314,13 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
         return;
       }
 
-      // シンボルに応じた変換係数を決定
-      // XAUUSD, XAGUSD などの貴金属は小数点2桁
-      // 通貨ペアは小数点5桁（JPY ペアは3桁）
-      let divisor = 100000; // デフォルト: 通貨ペア
-      if (symbol.startsWith('XAU') || symbol.startsWith('XAG')) {
-        divisor = 100; // 貴金属
-      } else if (symbol.includes('JPY')) {
-        divisor = 1000; // JPY ペア
-      }
-
-      const bid = (rawBid || rawAsk || 0) / divisor;
-      const ask = (rawAsk || rawBid || 0) / divisor;
+      // そのまま使用（cTrader Layer ライブラリが変換済み）
+      const bid = rawBid || rawAsk || 0;
+      const ask = rawAsk || rawBid || 0;
       
       // デバッグログ（最初の数回のみ）
-      if (!this.tickLogCount) this.tickLogCount = 0;
       if (this.tickLogCount < 5) {
-        console.log(`[CTraderOrchestrator] Tick: ${symbol} raw=${rawBid}/${rawAsk} → bid=${bid} ask=${ask}`);
+        console.log(`[CTraderOrchestrator] Tick: ${symbol} bid=${bid} ask=${ask}`);
         this.tickLogCount++;
       }
       
