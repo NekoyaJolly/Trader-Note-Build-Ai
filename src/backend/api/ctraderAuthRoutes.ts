@@ -100,24 +100,27 @@ router.post('/exchange', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('トークン交換エラー:', error);
     
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    
     // エラー種別に応じたレスポンス
     if (error instanceof Error) {
       if (error.message.includes('400')) {
         return res.status(400).json({
           error: '認可コードが無効または期限切れです',
-          details: error.message,
+          details: errorMessage,
         });
       }
       if (error.message.includes('401')) {
         return res.status(401).json({
           error: 'cTrader API 認証に失敗しました',
-          details: error.message,
+          details: errorMessage,
         });
       }
     }
     
     return res.status(500).json({
       error: 'トークン交換に失敗しました',
+      details: errorMessage,
     });
   }
 });

@@ -110,13 +110,26 @@ export class CTraderAuthService {
     
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('[cTraderAuth] トークン交換失敗:', {
+        status: response.status,
+        error: errorText,
+        tokenUrl: config.ctrader.tokenUrl,
+        redirectUri: config.ctrader.redirectUri,
+      });
       throw new Error(`cTrader トークン交換エラー: ${response.status} ${errorText}`);
     }
     
     const json = await response.json();
+    console.log('[cTraderAuth] トークンレスポンス受信:', {
+      hasAccessToken: !!json.access_token,
+      hasRefreshToken: !!json.refresh_token,
+      expiresIn: json.expires_in,
+    });
+    
     const result = CTraderTokenResponseSchema.safeParse(json);
     
     if (!result.success) {
+      console.error('[cTraderAuth] レスポンスパースエラー:', json);
       throw new Error(`cTrader レスポンスパースエラー: ${result.error.message}`);
     }
     
