@@ -69,7 +69,7 @@ export default function StrategyComparisonPage() {
         fetchComparisonSessions(20, 0),
       ]);
       
-      setStrategies(strategiesRes.strategies);
+      setStrategies(strategiesRes);
       setSessions(sessionsRes.sessions);
       
       // デフォルト日付を設定（過去90日）
