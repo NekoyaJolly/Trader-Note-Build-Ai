@@ -17,6 +17,7 @@
 import { PrismaClient } from '@prisma/client';
 import { EventEmitter } from 'events';
 import { z } from 'zod';
+import { filterBarsByReferencePrice } from './realtimeSanity';
 
 // ========================================
 // 型定義
@@ -92,6 +93,12 @@ const DEFAULT_CONFIG: RealtimeTickServiceConfig = {
   persistOHLCV: true,
   tickBatchSize: 100,
 };
+
+// 異常値検出の定数
+/** 異常値判定の最小バー数（これ未満ではフィルタリングしない） */
+const MIN_BARS_FOR_ANOMALY_DETECTION = 3;
+/** 異常値判定の乖離閾値（中央値からの乖離率 0.5 = 50%） */
+const ANOMALY_DEVIATION_THRESHOLD = 0.5;
 
 // ========================================
 // RealtimeTickService クラス
@@ -208,6 +215,74 @@ export class RealtimeTickService extends EventEmitter {
    */
   getAllPendingBars(): PendingBar[] {
     return Array.from(this.pendingBars.values());
+  }
+
+  /**
+   * 特定シンボルの進行中バーをクリア
+   */
+  clearPendingBar(symbol: string, timeframe: string): void {
+    const key = `${symbol}:${timeframe}`;
+    if (this.pendingBars.has(key)) {
+      console.log(`[RealtimeTickService] 進行中バーをクリア: ${key}`);
+      this.pendingBars.delete(key);
+    }
+  }
+
+  /**
+   * 全ての進行中バーをクリア
+   */
+  clearAllPendingBars(): void {
+    const count = this.pendingBars.size;
+    this.pendingBars.clear();
+    console.log(`[RealtimeTickService] ${count}件の進行中バーをクリア`);
+  }
+
+  /**
+   * DBに保存された異常バーを削除
+   * 中央値から指定閾値（50%）以上乖離したバーを削除
+   */
+  async deleteAnomalousBarsFromDB(symbol: string, timeframe: string): Promise<number> {
+    // まず現在のバーを取得
+    const bars = await this.prisma.realtimeOHLCV.findMany({
+      where: { symbol, timeframe },
+      orderBy: { timestamp: 'desc' },
+      take: 100,
+    });
+
+    if (bars.length < MIN_BARS_FOR_ANOMALY_DETECTION) {
+      console.log(`[RealtimeTickService] バー数不足でスキップ: ${bars.length}本`);
+      return 0;
+    }
+
+    // close価格の中央値を計算（偶数長の場合は2つの中央値の平均）
+    const sortedBars = [...bars].sort((a, b) => Number(a.close) - Number(b.close));
+    const medianClose = this.calculateMedian(sortedBars.map(b => Number(b.close)));
+
+    // 異常値のIDを収集
+    const anomalousIds: string[] = [];
+    for (const bar of bars) {
+      const lowDeviation = Math.abs(Number(bar.low) - medianClose) / medianClose;
+      const highDeviation = Math.abs(Number(bar.high) - medianClose) / medianClose;
+      
+      if (lowDeviation > ANOMALY_DEVIATION_THRESHOLD || highDeviation > ANOMALY_DEVIATION_THRESHOLD) {
+        anomalousIds.push(bar.id);
+      }
+    }
+
+    if (anomalousIds.length === 0) {
+      console.log(`[RealtimeTickService] 異常バーなし: ${symbol} ${timeframe}`);
+      return 0;
+    }
+
+    // 異常バーを削除
+    const result = await this.prisma.realtimeOHLCV.deleteMany({
+      where: {
+        id: { in: anomalousIds },
+      },
+    });
+
+    console.log(`[RealtimeTickService] ${result.count}件の異常バーを削除: ${symbol} ${timeframe} (中央値=${medianClose.toFixed(2)})`);
+    return result.count;
   }
 
   // ========================================
@@ -398,15 +473,21 @@ export class RealtimeTickService extends EventEmitter {
 
   /**
    * 最新の OHLCV データを取得（UI 初期表示用）
+   * 異常値（lowが他のバーから50%以上乖離）はフィルタリング
    */
-  async getRecentBars(symbol: string, timeframe: string, limit: number = 60): Promise<OHLCVBarInput[]> {
+  async getRecentBars(
+    symbol: string,
+    timeframe: string,
+    limit: number = 60,
+    referencePrice?: number
+  ): Promise<OHLCVBarInput[]> {
     const bars = await this.prisma.realtimeOHLCV.findMany({
       where: { symbol, timeframe },
       orderBy: { timestamp: 'desc' },
       take: limit,
     });
 
-    return bars.map(b => ({
+    const mappedBars = bars.map(b => ({
       symbol: b.symbol,
       timeframe: b.timeframe,
       timestamp: b.timestamp,
@@ -417,6 +498,62 @@ export class RealtimeTickService extends EventEmitter {
       volume: Number(b.volume),
       tickCount: b.tickCount,
     })).reverse();
+
+    // 参照価格がある場合（= 直近Tick/進行中バーが取れている）:
+    // DBの汚染（スケール違い）を避けるため、参照価格に近いバーだけを返す
+    // ※ ここで0件になった場合は、上位（Orchestrator）が Trendbar にフォールバックできる
+    if (referencePrice !== undefined && Number.isFinite(referencePrice) && referencePrice > 0) {
+      return filterBarsByReferencePrice(mappedBars, referencePrice, ANOMALY_DEVIATION_THRESHOLD);
+    }
+
+    // 参照価格がない場合は、従来通り中央値ベースで異常値を除外
+    return this.filterAnomalousBars(mappedBars);
+  }
+
+  /**
+   * 異常値のバーをフィルタリング
+   * 中央値から指定閾値（50%）以上乖離したlow/highを持つバーを除外
+   */
+  private filterAnomalousBars(bars: OHLCVBarInput[]): OHLCVBarInput[] {
+    if (bars.length < MIN_BARS_FOR_ANOMALY_DETECTION) return bars;
+
+    // close価格の中央値を計算（偶数長の場合は2つの中央値の平均）
+    const medianClose = this.calculateMedian(bars.map(b => b.close));
+
+    // 中央値から閾値以上乖離したバーを除外
+    let excludedCount = 0;
+    const filtered = bars.filter(bar => {
+      const lowDeviation = Math.abs(bar.low - medianClose) / medianClose;
+      const highDeviation = Math.abs(bar.high - medianClose) / medianClose;
+      
+      if (lowDeviation > ANOMALY_DEVIATION_THRESHOLD || highDeviation > ANOMALY_DEVIATION_THRESHOLD) {
+        excludedCount++;
+        return false;
+      }
+      return true;
+    });
+
+    // 除外されたバーがあればまとめてログ出力
+    if (excludedCount > 0) {
+      console.warn(`[RealtimeTickService] ${excludedCount}件の異常値バーを除外 (中央値=${medianClose.toFixed(2)})`);
+    }
+
+    return filtered;
+  }
+
+  /**
+   * 中央値を計算（偶数長の場合は2つの中央値の平均）
+   */
+  private calculateMedian(values: number[]): number {
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    
+    if (sorted.length % 2 === 0) {
+      // 偶数長: 2つの中央値の平均
+      return (sorted[mid - 1] + sorted[mid]) / 2;
+    }
+    // 奇数長: 中央の値
+    return sorted[mid];
   }
 
   /**
