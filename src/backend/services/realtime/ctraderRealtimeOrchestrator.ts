@@ -51,8 +51,45 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
   maxReconnectAttempts: 10,
   reconnectBaseDelay: 1000,
   heartbeatInterval: 25000,
-  barIntervalSeconds: 10,
+  barIntervalSeconds: 60, // 1分足がデフォルト
 };
+
+// cTrader API の時間足定数（ProtoOATrendbarPeriod）
+const TRENDBAR_PERIOD = {
+  M1: 1,   // 1分
+  M2: 2,   // 2分
+  M3: 3,   // 3分
+  M4: 4,   // 4分
+  M5: 5,   // 5分
+  M10: 6,  // 10分
+  M15: 7,  // 15分
+  M30: 8,  // 30分
+  H1: 9,   // 1時間
+  H4: 10,  // 4時間
+  H12: 11, // 12時間
+  D1: 12,  // 1日
+} as const;
+
+/**
+ * 秒数からcTrader APIの時間足定数に変換
+ */
+function secondsToTrendbarPeriod(seconds: number): number {
+  switch (seconds) {
+    case 60: return TRENDBAR_PERIOD.M1;
+    case 120: return TRENDBAR_PERIOD.M2;
+    case 180: return TRENDBAR_PERIOD.M3;
+    case 240: return TRENDBAR_PERIOD.M4;
+    case 300: return TRENDBAR_PERIOD.M5;
+    case 600: return TRENDBAR_PERIOD.M10;
+    case 900: return TRENDBAR_PERIOD.M15;
+    case 1800: return TRENDBAR_PERIOD.M30;
+    case 3600: return TRENDBAR_PERIOD.H1;
+    case 14400: return TRENDBAR_PERIOD.H4;
+    case 43200: return TRENDBAR_PERIOD.H12;
+    case 86400: return TRENDBAR_PERIOD.D1;
+    default: return TRENDBAR_PERIOD.M1; // デフォルトは1分
+  }
+}
 
 // ========================================
 // CTraderRealtimeOrchestrator クラス
@@ -293,11 +330,87 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
   }
 
   /**
-   * 最新の OHLCV バーを取得
+   * 最新の OHLCV バーを取得（cTrader API から取得）
    */
   async getRecentBars(symbol: string, limit: number = 60): Promise<OHLCVBarInput[]> {
+    // まずTickServiceから取得を試みる（リアルタイムで蓄積したデータ）
     const timeframe = `${this.config.barIntervalSeconds}s`;
-    return this.tickService.getRecentBars(symbol, timeframe, limit);
+    const tickBars = await this.tickService.getRecentBars(symbol, timeframe, limit);
+    
+    // 十分なデータがあればそれを返す
+    if (tickBars.length >= 10) {
+      return tickBars;
+    }
+    
+    // 接続されていなければ空配列
+    if (!this.connection || !this.ctidTraderAccountId) {
+      return tickBars;
+    }
+    
+    // cTrader API から過去データを取得
+    try {
+      const symbolId = this.symbolNameToId.get(symbol);
+      if (!symbolId) {
+        console.warn(`[CTraderOrchestrator] シンボルIDが見つかりません: ${symbol}`);
+        return tickBars;
+      }
+      
+      const period = secondsToTrendbarPeriod(this.config.barIntervalSeconds);
+      const toTimestamp = Date.now();
+      const fromTimestamp = toTimestamp - (limit * this.config.barIntervalSeconds * 1000);
+      
+      const res = await this.connection.sendCommand('ProtoOAGetTrendbarsReq', {
+        ctidTraderAccountId: this.ctidTraderAccountId,
+        symbolId,
+        period,
+        fromTimestamp,
+        toTimestamp,
+      });
+      
+      // cTrader Open API 仕様:
+      // Trendbar の価格データも "1/100000 of unit of a price" 形式
+      // low: int64 - Low price
+      // deltaOpen: open = low + deltaOpen
+      // deltaClose: close = low + deltaClose  
+      // deltaHigh: high = low + deltaHigh
+      const PRICE_DIVISOR = 100000;
+      
+      // デバッグ: 生データを確認
+      if (res.trendbar && res.trendbar.length > 0) {
+        const sample = res.trendbar[0];
+        const sampleLow = Number(sample.low) / PRICE_DIVISOR;
+        console.log(`[CTraderOrchestrator] Trendbar生データ: low=${sample.low}(=${sampleLow}), deltaOpen=${sample.deltaOpen}, deltaHigh=${sample.deltaHigh}, deltaClose=${sample.deltaClose}`);
+      }
+      
+      const symbolInfo = this.symbolInfoCache.get(symbolId);
+      const digits = symbolInfo?.digits || 2; // 表示用のdigits
+      
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const bars: OHLCVBarInput[] = (res.trendbar || []).map((bar: any) => {
+        const low = Number(bar.low) / PRICE_DIVISOR;
+        const open = (Number(bar.low) + Number(bar.deltaOpen)) / PRICE_DIVISOR;
+        const high = (Number(bar.low) + Number(bar.deltaHigh)) / PRICE_DIVISOR;
+        const close = (Number(bar.low) + Number(bar.deltaClose)) / PRICE_DIVISOR;
+        
+        return {
+          symbol,
+          timeframe,
+          timestamp: new Date(Number(bar.utcTimestampInMinutes) * 60000).toISOString(),
+          open,
+          high,
+          low,
+          close,
+          volume: Number(bar.volume) || 0,
+          tickCount: 0,
+        };
+      });
+      
+      console.log(`[CTraderOrchestrator] cTrader API から ${bars.length} 本のバーを取得`);
+      return bars;
+    } catch (error) {
+      console.error('[CTraderOrchestrator] 過去データ取得エラー:', error);
+      return tickBars;
+    }
   }
 
   /**
@@ -320,43 +433,61 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
   private setupEventHandlers(): void {
     if (!this.connection) return;
 
+    console.log('[CTraderOrchestrator] イベントハンドラを設定中...');
+
     // Tick イベント
+    // ctrader-layer は CTraderLayerEvent オブジェクトを渡す
+    // 実際のデータは event.descriptor に格納されている
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.connection.on('ProtoOASpotEvent', (event: any) => {
+      // CTraderLayerEvent の descriptor プロパティからデータを取得
+      const data = event?.descriptor || event || {};
+      
+      // デバッグログ（最初の数回のみ）
+      if (this.tickLogCount < 5) {
+        console.log(`[CTraderOrchestrator] SpotEvent descriptor: ${JSON.stringify(data).slice(0, 500)}`);
+      }
+      
       // symbolId からシンボル情報を取得
-      const symbolId = event.symbolId;
+      const symbolId = data.symbolId;
       const symbolInfo = this.symbolInfoCache.get(symbolId);
       
-      // シンボル情報がない場合はフォールバック
-      const symbol = symbolInfo?.symbolName || Array.from(this.subscribedSymbols)[0] || 'UNKNOWN';
-      const digits = symbolInfo?.digits || 5;
+      // シンボル情報がない場合はスキップ（シンボル名不明のため）
+      if (!symbolInfo) {
+        console.warn(`[CTraderOrchestrator] symbolId=${symbolId} のシンボル情報が見つかりません。スキップします。cache keys: [${Array.from(this.symbolInfoCache.keys()).join(', ')}]`);
+        return;
+      }
       
-      // cTrader API の bid/ask は pipettes（整数）で返される
-      // digits に基づいて実際の価格に変換
-      const rawBid = event.bid;
-      const rawAsk = event.ask;
+      const symbol = symbolInfo.symbolName;
+      const digits = symbolInfo.digits;
+      
+      // cTrader Open API 仕様:
+      // bid/ask は "Specified in 1/100000 of unit of a price"
+      // 例: 123000 means 1.23, 53423782 means 534.23782
+      // 常に 100000 (10^5) で除算する（digitsに関係なく）
+      const PRICE_DIVISOR = 100000;
+      
+      const rawBid = data.bid;
+      const rawAsk = data.ask;
       
       // bid または ask が存在しない場合はスキップ
       if (rawBid === undefined && rawAsk === undefined) {
         return;
       }
 
-      // pipettes から実際の価格に変換
-      // 例: XAUUSD (digits=2) の場合、262350 → 2623.50
-      // 例: EURUSD (digits=5) の場合、108234 → 1.08234
-      const divisor = Math.pow(10, digits);
-      const bid = rawBid !== undefined ? rawBid / divisor : (rawAsk !== undefined ? rawAsk / divisor : 0);
-      const ask = rawAsk !== undefined ? rawAsk / divisor : (rawBid !== undefined ? rawBid / divisor : 0);
+      // 価格変換: raw / 100000
+      const bid = rawBid !== undefined ? rawBid / PRICE_DIVISOR : (rawAsk !== undefined ? rawAsk / PRICE_DIVISOR : 0);
+      const ask = rawAsk !== undefined ? rawAsk / PRICE_DIVISOR : (rawBid !== undefined ? rawBid / PRICE_DIVISOR : 0);
       
       // デバッグログ（最初の数回のみ）
-      if (this.tickLogCount < 10) {
-        console.log(`[CTraderOrchestrator] Tick: ${symbol} raw=(${rawBid}/${rawAsk}) digits=${digits} → bid=${bid.toFixed(digits)} ask=${ask.toFixed(digits)}`);
+      if (this.tickLogCount < 5) {
+        console.log(`[CTraderOrchestrator] Tick: ${symbol} raw=(${rawBid}/${rawAsk}) → bid=${bid.toFixed(digits)} ask=${ask.toFixed(digits)}`);
         this.tickLogCount++;
       }
       
       const tick: TickDataInput = {
         symbol,
-        timestamp: new Date(Number(event.timestamp) || Date.now()),
+        timestamp: new Date(Number(data.timestamp) || Date.now()),
         bid,
         ask,
         mid: (bid + ask) / 2,
@@ -448,7 +579,7 @@ export function getCTraderRealtimeOrchestrator(
     defaultPrisma = prisma;
   }
 
-  const barInterval = config?.barIntervalSeconds || 10;
+  const barInterval = config?.barIntervalSeconds || 60;
 
   // 既存インスタンスがあれば返す
   let instance = orchestratorInstances.get(barInterval);

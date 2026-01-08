@@ -31,7 +31,7 @@ const orchestrators: Map<number, CTraderRealtimeOrchestrator> = new Map();
 /**
  * オーケストレーターを取得（時間足ごとに管理）
  */
-function getOrchestrator(barIntervalSeconds: number = 10): CTraderRealtimeOrchestrator {
+function getOrchestrator(barIntervalSeconds: number = 60): CTraderRealtimeOrchestrator {
   let orch = orchestrators.get(barIntervalSeconds);
   if (!orch) {
     orch = getCTraderRealtimeOrchestrator(prisma, { barIntervalSeconds });
@@ -44,7 +44,7 @@ function getOrchestrator(barIntervalSeconds: number = 10): CTraderRealtimeOrches
  * デフォルトのオーケストレーターを取得
  */
 function getDefaultOrchestrator(): CTraderRealtimeOrchestrator {
-  return getOrchestrator(10);
+  return getOrchestrator(60);
 }
 
 // ========================================
@@ -53,7 +53,7 @@ function getDefaultOrchestrator(): CTraderRealtimeOrchestrator {
 
 const SubscribeRequestSchema = z.object({
   symbols: z.array(z.string()).min(1, '最低1つのシンボルが必要です'),
-  timeframe: z.number().optional().default(10), // 秒単位の時間足
+  timeframe: z.number().optional().default(60), // 秒単位の時間足
 });
 
 const UnsubscribeRequestSchema = z.object({
@@ -97,7 +97,7 @@ router.get('/status', async (_req: Request, res: Response) => {
  */
 router.post('/connect', async (req: Request, res: Response) => {
   try {
-    const timeframe = parseInt(req.query.timeframe as string) || 10;
+    const timeframe = parseInt(req.query.timeframe as string) || 60;
     const orch = getOrchestrator(timeframe);
     const success = await orch.connect();
 
@@ -123,7 +123,7 @@ router.post('/connect', async (req: Request, res: Response) => {
  */
 router.post('/disconnect', async (req: Request, res: Response) => {
   try {
-    const timeframe = parseInt(req.query.timeframe as string) || 10;
+    const timeframe = parseInt(req.query.timeframe as string) || 60;
     const orch = getOrchestrator(timeframe);
     await orch.disconnect();
 
@@ -204,7 +204,7 @@ router.post('/unsubscribe', async (req: Request, res: Response) => {
       });
     }
 
-    const timeframe = parseInt(req.query.timeframe as string) || 10;
+    const timeframe = parseInt(req.query.timeframe as string) || 60;
     const orch = getOrchestrator(timeframe);
     await orch.unsubscribe(result.data.symbols);
 
@@ -232,7 +232,7 @@ router.get('/bars/:symbol', async (req: Request, res: Response) => {
   try {
     const { symbol } = req.params;
     const limit = parseInt(req.query.limit as string) || 60;
-    const timeframe = parseInt(req.query.timeframe as string) || 10;
+    const timeframe = parseInt(req.query.timeframe as string) || 60;
 
     const orch = getOrchestrator(timeframe);
     const bars = await orch.getRecentBars(symbol, limit);
@@ -264,7 +264,7 @@ router.get('/bars/:symbol', async (req: Request, res: Response) => {
  */
 router.get('/stream/:symbol', async (req: Request, res: Response) => {
   const { symbol } = req.params;
-  const timeframe = parseInt(req.query.timeframe as string) || 10;
+  const timeframe = parseInt(req.query.timeframe as string) || 60;
 
   // リクエスト元のオリジンを取得
   const origin = req.headers.origin;

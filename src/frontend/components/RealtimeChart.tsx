@@ -34,13 +34,13 @@ interface RealtimeChartProps {
   onTimeframeChange?: (timeframe: number) => void;
 }
 
-// 時間足オプション
+// 時間足オプション（1分足以上のみ - cTrader APIでサポート）
 const TIMEFRAME_OPTIONS = [
-  { value: 5, label: '5秒' },
-  { value: 10, label: '10秒' },
-  { value: 30, label: '30秒' },
   { value: 60, label: '1分' },
   { value: 300, label: '5分' },
+  { value: 900, label: '15分' },
+  { value: 1800, label: '30分' },
+  { value: 3600, label: '1時間' },
 ];
 
 // ========================================
@@ -170,30 +170,41 @@ export function RealtimeChart({
   };
 
   // チャートデータを変換（確定バー + 進行中バー）
+  // 重複排除: pendingBar と確定バーが同じタイムスタンプの場合は pendingBar を優先
   const chartData: OHLCVDataPoint[] = useMemo(() => {
-    const data: OHLCVDataPoint[] = bars.map(bar => ({
-      timestamp: new Date(bar.timestamp).getTime(),
-      open: bar.open,
-      high: bar.high,
-      low: bar.low,
-      close: bar.close,
-      volume: bar.volume,
-    }));
+    // Map を使って重複を排除（同じタイムスタンプは後のデータで上書き）
+    const dataMap = new Map<number, OHLCVDataPoint>();
+    
+    // 確定バーを追加
+    for (const bar of bars) {
+      const timestamp = new Date(bar.timestamp).getTime();
+      dataMap.set(timestamp, {
+        timestamp,
+        open: bar.open,
+        high: bar.high,
+        low: bar.low,
+        close: bar.close,
+        // volumeはそのまま使用（0の場合はチャートで非表示）
+        volume: bar.volume,
+      });
+    }
 
-    // 進行中バーを追加（点滅効果用にフラグを追加）
+    // 進行中バーを追加（同じタイムスタンプがあれば上書き）
     if (pendingBar) {
-      data.push({
-        timestamp: new Date(pendingBar.startTime).getTime(),
+      const timestamp = new Date(pendingBar.startTime).getTime();
+      dataMap.set(timestamp, {
+        timestamp,
         open: pendingBar.open,
         high: pendingBar.high,
         low: pendingBar.low,
         close: pendingBar.close,
+        // 進行中バーのボリュームは不明（後でTrendbarから取得）
         volume: pendingBar.volume,
-        // isPending: true // CandlestickChart が対応していれば
       });
     }
 
-    return data;
+    // 時間順にソートして配列に変換
+    return Array.from(dataMap.values()).sort((a, b) => a.timestamp - b.timestamp);
   }, [bars, pendingBar]);
 
   // 最新の確定バーを取得

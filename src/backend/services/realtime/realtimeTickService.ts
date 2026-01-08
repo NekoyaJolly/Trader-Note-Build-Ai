@@ -86,7 +86,7 @@ interface RealtimeTickServiceConfig {
 }
 
 const DEFAULT_CONFIG: RealtimeTickServiceConfig = {
-  barIntervalSeconds: 10, // 10秒足
+  barIntervalSeconds: 60, // 1分足（デフォルト）
   minTicksPerBar: 1,
   persistTicks: true,
   persistOHLCV: true,
@@ -228,6 +228,15 @@ export class RealtimeTickService extends EventEmitter {
 
     let pending = this.pendingBars.get(key);
 
+    // 異常値チェック: 既存バーがある場合、価格が50%以上乖離していたらスキップ
+    if (pending && tick.mid > 0) {
+      const deviation = Math.abs(tick.mid - pending.close) / pending.close;
+      if (deviation > 0.5) {
+        console.warn(`[RealtimeTickService] 異常値検出: ${tick.symbol} tick=${tick.mid} vs bar=${pending.close} (乖離率=${(deviation * 100).toFixed(1)}%)`);
+        return; // 異常値はスキップ
+      }
+    }
+
     // 新しいバーを開始するか判定
     if (!pending || pending.startTime.getTime() !== barStartTime.getTime()) {
       // 既存のバーがあれば確定
@@ -279,6 +288,8 @@ export class RealtimeTickService extends EventEmitter {
       high: pending.high,
       low: pending.low,
       close: pending.close,
+      // cTrader SpotEvent にはボリュームがないため、0のまま
+      // 正確なボリュームは Trendbar API から後で補填する
       volume: pending.volume,
       tickCount: pending.tickCount,
     };
@@ -446,7 +457,7 @@ export function getRealtimeTickService(
     defaultTickPrisma = prisma;
   }
 
-  const barInterval = config?.barIntervalSeconds || 10;
+  const barInterval = config?.barIntervalSeconds || 60;
 
   // 既存インスタンスがあれば返す
   let instance = tickServiceInstances.get(barInterval);

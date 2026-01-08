@@ -108,7 +108,7 @@ export function useRealtimeChart(
   symbol: string,
   options: UseRealtimeChartOptions = {}
 ): UseRealtimeChartResult {
-  const { timeframe = 10 } = options;
+  const { timeframe = 60 } = options;
   const [bars, setBars] = useState<OHLCVBar[]>([]);
   const [pendingBar, setPendingBar] = useState<PendingBar | null>(null);
   const [latestTick, setLatestTick] = useState<TickData | null>(null);
@@ -180,24 +180,20 @@ export function useRealtimeChart(
         // EventSource の readyState を確認
         // 0 = CONNECTING, 1 = OPEN, 2 = CLOSED
         const readyState = eventSource.readyState;
-        console.error('[useRealtimeChart] SSE エラー:', {
-          readyState,
-          event: e,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          status: (e as any)?.status,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          message: (e as any)?.message,
-        });
         
         // readyState が CONNECTING (0) の場合は再接続を試みている可能性がある
         // readyState が CLOSED (2) の場合のみエラー扱い
         if (readyState === 2) {
+          console.warn('[useRealtimeChart] SSE 接続が切断されました');
           setStatus('error');
           setError('SSE 接続が切断されました');
           setIsLoading(false);
         } else if (readyState === 0) {
           // 接続中のエラーは一時的なものの可能性があるのでログのみ
-          console.log('[useRealtimeChart] SSE 再接続中...');
+          console.log('[useRealtimeChart] SSE 再接続中...', { readyState });
+        } else {
+          // その他のケース（readyState === 1 でエラーなど）
+          console.warn('[useRealtimeChart] SSE 警告:', { readyState });
         }
       };
 
