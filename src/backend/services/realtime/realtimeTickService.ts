@@ -93,6 +93,12 @@ const DEFAULT_CONFIG: RealtimeTickServiceConfig = {
   tickBatchSize: 100,
 };
 
+// 異常値検出の定数
+/** 異常値判定の最小バー数（これ未満ではフィルタリングしない） */
+const MIN_BARS_FOR_ANOMALY_DETECTION = 3;
+/** 異常値判定の乖離閾値（中央値からの乖離率 0.5 = 50%） */
+const ANOMALY_DEVIATION_THRESHOLD = 0.5;
+
 // ========================================
 // RealtimeTickService クラス
 // ========================================
@@ -232,7 +238,7 @@ export class RealtimeTickService extends EventEmitter {
 
   /**
    * DBに保存された異常バーを削除
-   * 中央値から50%以上乖離したバーを削除
+   * 中央値から指定閾値（50%）以上乖離したバーを削除
    */
   async deleteAnomalousBarsFromDB(symbol: string, timeframe: string): Promise<number> {
     // まず現在のバーを取得
@@ -242,14 +248,14 @@ export class RealtimeTickService extends EventEmitter {
       take: 100,
     });
 
-    if (bars.length < 3) {
+    if (bars.length < MIN_BARS_FOR_ANOMALY_DETECTION) {
       console.log(`[RealtimeTickService] バー数不足でスキップ: ${bars.length}本`);
       return 0;
     }
 
-    // close価格の中央値を計算
+    // close価格の中央値を計算（偶数長の場合は2つの中央値の平均）
     const sortedBars = [...bars].sort((a, b) => Number(a.close) - Number(b.close));
-    const medianClose = Number(sortedBars[Math.floor(sortedBars.length / 2)].close);
+    const medianClose = this.calculateMedian(sortedBars.map(b => Number(b.close)));
 
     // 異常値のIDを収集
     const anomalousIds: string[] = [];
@@ -257,9 +263,8 @@ export class RealtimeTickService extends EventEmitter {
       const lowDeviation = Math.abs(Number(bar.low) - medianClose) / medianClose;
       const highDeviation = Math.abs(Number(bar.high) - medianClose) / medianClose;
       
-      if (lowDeviation > 0.5 || highDeviation > 0.5) {
+      if (lowDeviation > ANOMALY_DEVIATION_THRESHOLD || highDeviation > ANOMALY_DEVIATION_THRESHOLD) {
         anomalousIds.push(bar.id);
-        console.warn(`[RealtimeTickService] 異常バーを削除対象: id=${bar.id} low=${Number(bar.low)} high=${Number(bar.high)} (中央値=${medianClose.toFixed(2)})`);
       }
     }
 
@@ -275,7 +280,7 @@ export class RealtimeTickService extends EventEmitter {
       },
     });
 
-    console.log(`[RealtimeTickService] ${result.count}件の異常バーを削除: ${symbol} ${timeframe}`);
+    console.log(`[RealtimeTickService] ${result.count}件の異常バーを削除: ${symbol} ${timeframe} (中央値=${medianClose.toFixed(2)})`);
     return result.count;
   }
 
@@ -494,28 +499,48 @@ export class RealtimeTickService extends EventEmitter {
 
   /**
    * 異常値のバーをフィルタリング
-   * 中央値から50%以上乖離したlow/highを持つバーを除外
+   * 中央値から指定閾値（50%）以上乖離したlow/highを持つバーを除外
    */
   private filterAnomalousBars(bars: OHLCVBarInput[]): OHLCVBarInput[] {
-    if (bars.length < 3) return bars;
+    if (bars.length < MIN_BARS_FOR_ANOMALY_DETECTION) return bars;
 
-    // close価格の中央値を計算
-    const sortedCloses = [...bars].sort((a, b) => a.close - b.close);
-    const medianClose = sortedCloses[Math.floor(sortedCloses.length / 2)].close;
+    // close価格の中央値を計算（偶数長の場合は2つの中央値の平均）
+    const medianClose = this.calculateMedian(bars.map(b => b.close));
 
-    // 中央値から50%以上乖離したバーを除外
+    // 中央値から閾値以上乖離したバーを除外
+    let excludedCount = 0;
     const filtered = bars.filter(bar => {
       const lowDeviation = Math.abs(bar.low - medianClose) / medianClose;
       const highDeviation = Math.abs(bar.high - medianClose) / medianClose;
       
-      if (lowDeviation > 0.5 || highDeviation > 0.5) {
-        console.warn(`[RealtimeTickService] 異常値バーを除外: ${bar.symbol} timestamp=${bar.timestamp instanceof Date ? bar.timestamp.toISOString() : bar.timestamp} low=${bar.low} high=${bar.high} (中央値=${medianClose.toFixed(2)})`);
+      if (lowDeviation > ANOMALY_DEVIATION_THRESHOLD || highDeviation > ANOMALY_DEVIATION_THRESHOLD) {
+        excludedCount++;
         return false;
       }
       return true;
     });
 
+    // 除外されたバーがあればまとめてログ出力
+    if (excludedCount > 0) {
+      console.warn(`[RealtimeTickService] ${excludedCount}件の異常値バーを除外 (中央値=${medianClose.toFixed(2)})`);
+    }
+
     return filtered;
+  }
+
+  /**
+   * 中央値を計算（偶数長の場合は2つの中央値の平均）
+   */
+  private calculateMedian(values: number[]): number {
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    
+    if (sorted.length % 2 === 0) {
+      // 偶数長: 2つの中央値の平均
+      return (sorted[mid - 1] + sorted[mid]) / 2;
+    }
+    // 奇数長: 中央の値
+    return sorted[mid];
   }
 
   /**
