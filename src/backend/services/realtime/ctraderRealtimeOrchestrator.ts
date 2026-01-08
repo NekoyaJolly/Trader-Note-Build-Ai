@@ -72,6 +72,7 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private ctidTraderAccountId: number | null = null;
+  private tickLogCount = 0;
 
   constructor(prisma: PrismaClient, config: Partial<OrchestratorConfig> = {}) {
     super();
@@ -302,19 +303,46 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.connection.on('ProtoOASpotEvent', (event: any) => {
       // symbolId からシンボル名を解決（簡略化: 購読中のシンボルを使用）
-      // 実際の実装では symbolId → symbol のマッピングが必要
       const symbol = Array.from(this.subscribedSymbols)[0] || 'UNKNOWN';
       
-      const bid = event.bid || 0;
-      const ask = event.ask || 0;
+      // cTrader API は bid/ask を pipettes 形式（整数）で返す
+      // XAUUSD の場合: 実際の価格 * 100 (例: 2650.50 → 265050)
+      // 通貨ペアの場合: 実際の価格 * 100000 (例: 1.08500 → 108500)
+      const rawBid = event.bid;
+      const rawAsk = event.ask;
+      
+      // bid または ask が存在しない場合はスキップ
+      if (rawBid === undefined && rawAsk === undefined) {
+        return;
+      }
+
+      // シンボルに応じた変換係数を決定
+      // XAUUSD, XAGUSD などの貴金属は小数点2桁
+      // 通貨ペアは小数点5桁（JPY ペアは3桁）
+      let divisor = 100000; // デフォルト: 通貨ペア
+      if (symbol.startsWith('XAU') || symbol.startsWith('XAG')) {
+        divisor = 100; // 貴金属
+      } else if (symbol.includes('JPY')) {
+        divisor = 1000; // JPY ペア
+      }
+
+      const bid = (rawBid || rawAsk || 0) / divisor;
+      const ask = (rawAsk || rawBid || 0) / divisor;
+      
+      // デバッグログ（最初の数回のみ）
+      if (!this.tickLogCount) this.tickLogCount = 0;
+      if (this.tickLogCount < 5) {
+        console.log(`[CTraderOrchestrator] Tick: ${symbol} raw=${rawBid}/${rawAsk} → bid=${bid} ask=${ask}`);
+        this.tickLogCount++;
+      }
       
       const tick: TickDataInput = {
         symbol,
         timestamp: new Date(event.timestamp || Date.now()),
-        bid: bid / 100000, // cTrader は整数で返すため変換
-        ask: ask / 100000,
-        mid: (bid + ask) / 2 / 100000,
-        spread: (ask - bid) / 100000,
+        bid,
+        ask,
+        mid: (bid + ask) / 2,
+        spread: ask - bid,
       };
 
       this.tickService.processTick(tick).catch(err => {
