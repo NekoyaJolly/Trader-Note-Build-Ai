@@ -46,9 +46,9 @@ export const config = {
   ctrader: {
     clientId: process.env.CTRADER_CLIENT_ID || '',
     clientSecret: process.env.CTRADER_CLIENT_SECRET || '',
-    // OAuth エンドポイント
-    authUrl: 'https://openapi.ctrader.com/apps/auth',
-    tokenUrl: 'https://openapi.ctrader.com/apps/token',
+    // OAuth エンドポイント（connect.spotware.com を使用）
+    authUrl: 'https://connect.spotware.com/apps/auth',
+    tokenUrl: 'https://connect.spotware.com/apps/token',
     // WebSocket エンドポイント
     wsUrl: 'wss://live.ctraderapi.com',
     wsDemoUrl: 'wss://demo.ctraderapi.com',
