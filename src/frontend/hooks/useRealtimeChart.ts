@@ -12,6 +12,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { EventSourcePolyfill } from 'event-source-polyfill';
 
 // ========================================
 // 型定義
@@ -115,7 +116,8 @@ export function useRealtimeChart(
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const eventSourceRef = useRef<EventSource | null>(null);
+  // EventSourcePolyfill の型を定義（withCredentials 対応）
+  const eventSourceRef = useRef<EventSourcePolyfill | null>(null);
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3100';
 
   /**
@@ -134,6 +136,7 @@ export function useRealtimeChart(
       // 1. まず cTrader に接続
       const connectRes = await fetch(`${apiBase}/api/realtime/connect?timeframe=${timeframe}`, {
         method: 'POST',
+        credentials: 'include',
       });
       const connectData = await connectRes.json();
 
@@ -146,6 +149,7 @@ export function useRealtimeChart(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbols: [symbol], timeframe }),
+        credentials: 'include',
       });
       const subscribeData = await subscribeRes.json();
 
@@ -153,8 +157,14 @@ export function useRealtimeChart(
         throw new Error(subscribeData.error || '購読に失敗しました');
       }
 
-      // 3. SSE ストリームに接続
-      const eventSource = new EventSource(`${apiBase}/api/realtime/stream/${symbol}?timeframe=${timeframe}`);
+      // 3. SSE ストリームに接続（EventSourcePolyfill を使用して CORS 対応）
+      const eventSource = new EventSourcePolyfill(
+        `${apiBase}/api/realtime/stream/${symbol}?timeframe=${timeframe}`,
+        {
+          withCredentials: true,
+          heartbeatTimeout: 120000, // 2分のハートビートタイムアウト
+        }
+      );
       eventSourceRef.current = eventSource;
 
       eventSource.onopen = () => {
@@ -170,24 +180,34 @@ export function useRealtimeChart(
         setIsLoading(false);
       };
 
+      // SSE カスタムイベント用のヘルパー関数
+      // EventSourcePolyfill の addEventListener でカスタムイベントを処理
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const addSSEListener = (eventType: string, handler: (data: string) => void) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (eventSource as any).addEventListener(eventType, (e: { data: string }) => {
+          handler(e.data);
+        });
+      };
+
       // 初期データ受信
-      eventSource.addEventListener('init', (e) => {
-        const data = JSON.parse(e.data);
-        console.log('[useRealtimeChart] 初期データ受信:', data.bars?.length, 'バー');
-        setBars(data.bars || []);
-        setPendingBar(data.pendingBar || null);
-        setStatus(data.status || 'connected');
+      addSSEListener('init', (data) => {
+        const parsed = JSON.parse(data);
+        console.log('[useRealtimeChart] 初期データ受信:', parsed.bars?.length, 'バー');
+        setBars(parsed.bars || []);
+        setPendingBar(parsed.pendingBar || null);
+        setStatus(parsed.status || 'connected');
       });
 
       // Tick 受信
-      eventSource.addEventListener('tick', (e) => {
-        const tick = JSON.parse(e.data);
+      addSSEListener('tick', (data) => {
+        const tick = JSON.parse(data);
         setLatestTick(tick);
       });
 
       // バー確定
-      eventSource.addEventListener('bar', (e) => {
-        const bar = JSON.parse(e.data);
+      addSSEListener('bar', (data) => {
+        const bar = JSON.parse(data);
         console.log('[useRealtimeChart] バー確定:', bar.timestamp);
         setBars(prev => {
           // 重複を避けて追加
@@ -200,19 +220,19 @@ export function useRealtimeChart(
       });
 
       // 進行中バー更新
-      eventSource.addEventListener('pendingBar', (e) => {
-        const bar = JSON.parse(e.data);
+      addSSEListener('pendingBar', (data) => {
+        const bar = JSON.parse(data);
         setPendingBar(bar);
       });
 
       // 接続状態変更
-      eventSource.addEventListener('status', (e) => {
-        const data = JSON.parse(e.data);
-        setStatus(data.status);
+      addSSEListener('status', (data) => {
+        const parsed = JSON.parse(data);
+        setStatus(parsed.status);
       });
 
       // ハートビート
-      eventSource.addEventListener('heartbeat', () => {
+      addSSEListener('heartbeat', () => {
         // 接続維持確認
       });
 

@@ -266,11 +266,40 @@ router.get('/stream/:symbol', async (req: Request, res: Response) => {
   const { symbol } = req.params;
   const timeframe = parseInt(req.query.timeframe as string) || 10;
 
+  // リクエスト元のオリジンを取得
+  const origin = req.headers.origin;
+  
+  // 許可するオリジン一覧
+  const allowedOrigins = [
+    'http://localhost:3000',
+    'http://localhost:3102',
+    'https://trader-note-build-ai.vercel.app',
+  ];
+  
+  // ワイルドカードパターン（Vercel プレビュー用）
+  const wildcardPatterns = [
+    /^https:\/\/trader-note-build-ai-.*-nekoya258\.vercel\.app$/,
+    /^https:\/\/trader-note-build-.*-nekoya258\.vercel\.app$/,
+  ];
+  
+  // オリジンが許可されているか確認
+  const isAllowed = origin && (
+    allowedOrigins.includes(origin) ||
+    wildcardPatterns.some(pattern => pattern.test(origin))
+  );
+
   // SSE ヘッダー設定
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no'); // nginx バッファリング無効化
+  
+  // CORS ヘッダーを SSE に明示的に追加
+  if (isAllowed && origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  
   res.flushHeaders();
 
   console.log(`[RealtimeAPI] SSE 接続開始: ${symbol} (${timeframe}秒足)`);

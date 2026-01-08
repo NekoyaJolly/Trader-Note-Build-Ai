@@ -73,6 +73,11 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private ctidTraderAccountId: number | null = null;
   private tickLogCount = 0;
+  
+  // シンボル情報のキャッシュ（価格変換用）
+  private symbolInfoCache: Map<number, { symbolName: string; digits: number; pipPosition: number }> = new Map();
+  // シンボル名 → symbolId のマッピング
+  private symbolNameToId: Map<string, number> = new Map();
 
   constructor(prisma: PrismaClient, config: Partial<OrchestratorConfig> = {}) {
     super();
@@ -228,7 +233,8 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
           ctidTraderAccountId: this.ctidTraderAccountId,
         });
 
-        const symbolInfo = symbolsRes.symbol?.find((s: { symbolName: string }) => 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const symbolInfo = symbolsRes.symbol?.find((s: any) => 
           s.symbolName === symbol || s.symbolName === symbol.replace('/', '')
         );
 
@@ -236,6 +242,21 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
           console.warn(`[CTraderOrchestrator] シンボルが見つかりません: ${symbol}`);
           continue;
         }
+
+        // シンボル情報をキャッシュ（価格変換用）
+        // digits: 価格の小数点以下桁数
+        // pipPosition: pip の位置（例: XAUUSD は 2）
+        const digits = symbolInfo.digits || 5;
+        const pipPosition = symbolInfo.pipPosition || digits - 1;
+        
+        this.symbolInfoCache.set(symbolInfo.symbolId, {
+          symbolName: symbol,
+          digits,
+          pipPosition,
+        });
+        this.symbolNameToId.set(symbol, symbolInfo.symbolId);
+        
+        console.log(`[CTraderOrchestrator] シンボル情報: ${symbol} ID=${symbolInfo.symbolId} digits=${digits} pipPosition=${pipPosition}`);
 
         // Tick 購読
         await this.connection.sendCommand('ProtoOASubscribeSpotsReq', {
@@ -302,10 +323,16 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
     // Tick イベント
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.connection.on('ProtoOASpotEvent', (event: any) => {
-      // symbolId からシンボル名を解決（簡略化: 購読中のシンボルを使用）
-      const symbol = Array.from(this.subscribedSymbols)[0] || 'UNKNOWN';
+      // symbolId からシンボル情報を取得
+      const symbolId = event.symbolId;
+      const symbolInfo = this.symbolInfoCache.get(symbolId);
       
-      // cTrader API の bid/ask をそのまま使用
+      // シンボル情報がない場合はフォールバック
+      const symbol = symbolInfo?.symbolName || Array.from(this.subscribedSymbols)[0] || 'UNKNOWN';
+      const digits = symbolInfo?.digits || 5;
+      
+      // cTrader API の bid/ask は pipettes（整数）で返される
+      // digits に基づいて実際の価格に変換
       const rawBid = event.bid;
       const rawAsk = event.ask;
       
@@ -314,19 +341,22 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
         return;
       }
 
-      // そのまま使用（cTrader Layer ライブラリが変換済み）
-      const bid = rawBid || rawAsk || 0;
-      const ask = rawAsk || rawBid || 0;
+      // pipettes から実際の価格に変換
+      // 例: XAUUSD (digits=2) の場合、262350 → 2623.50
+      // 例: EURUSD (digits=5) の場合、108234 → 1.08234
+      const divisor = Math.pow(10, digits);
+      const bid = rawBid !== undefined ? rawBid / divisor : (rawAsk !== undefined ? rawAsk / divisor : 0);
+      const ask = rawAsk !== undefined ? rawAsk / divisor : (rawBid !== undefined ? rawBid / divisor : 0);
       
       // デバッグログ（最初の数回のみ）
-      if (this.tickLogCount < 5) {
-        console.log(`[CTraderOrchestrator] Tick: ${symbol} bid=${bid} ask=${ask}`);
+      if (this.tickLogCount < 10) {
+        console.log(`[CTraderOrchestrator] Tick: ${symbol} raw=(${rawBid}/${rawAsk}) digits=${digits} → bid=${bid.toFixed(digits)} ask=${ask.toFixed(digits)}`);
         this.tickLogCount++;
       }
       
       const tick: TickDataInput = {
         symbol,
-        timestamp: new Date(event.timestamp || Date.now()),
+        timestamp: new Date(Number(event.timestamp) || Date.now()),
         bid,
         ask,
         mid: (bid + ask) / 2,

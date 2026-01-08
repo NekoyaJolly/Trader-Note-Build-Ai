@@ -217,7 +217,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       timeScale: {
         borderColor: CHART_THEME.borderColor,
         timeVisible: true,
-        secondsVisible: false,
+        secondsVisible: true, // 秒足チャートのため秒も表示
       },
       rightPriceScale: {
         borderColor: CHART_THEME.borderColor,
