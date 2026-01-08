@@ -119,17 +119,18 @@ export class CTraderAuthService {
       throw new Error(`cTrader トークン交換エラー: ${response.status} ${errorText}`);
     }
     
-    const json = await response.json();
+    const json: unknown = await response.json();
+    const jsonObj = json as Record<string, unknown>;
     console.log('[cTraderAuth] トークンレスポンス受信:', {
-      hasAccessToken: !!json.access_token,
-      hasRefreshToken: !!json.refresh_token,
-      expiresIn: json.expires_in,
+      hasAccessToken: !!jsonObj.access_token,
+      hasRefreshToken: !!jsonObj.refresh_token,
+      expiresIn: jsonObj.expires_in,
     });
     
     const result = CTraderTokenResponseSchema.safeParse(json);
     
     if (!result.success) {
-      console.error('[cTraderAuth] レスポンスパースエラー:', json);
+      console.error('[cTraderAuth] レスポンスパースエラー:', jsonObj);
       throw new Error(`cTrader レスポンスパースエラー: ${result.error.message}`);
     }
     
