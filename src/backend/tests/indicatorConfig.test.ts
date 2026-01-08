@@ -19,8 +19,8 @@ import {
 
 describe('IndicatorConfig', () => {
   describe('INDICATOR_METADATA', () => {
-    it('20種類のインジケーターが定義されていること', () => {
-      expect(INDICATOR_METADATA.length).toBe(20);
+    it('23種類のインジケーターが定義されていること', () => {
+      expect(INDICATOR_METADATA.length).toBe(23);
     });
 
     it('全てのインジケーターに必須フィールドがあること', () => {

@@ -14,6 +14,7 @@ const mockNotificationLogRepository = {
   hasRecentDuplicate: jest.fn<() => Promise<boolean>>(),
   checkCooldown: jest.fn<() => Promise<{ isInCooldown: boolean; lastNotificationTime?: Date; cooldownUntil?: Date }>>(),
   upsertLog: jest.fn<() => Promise<{ id: string }>>(),
+  countRecentNotifications: jest.fn<() => Promise<number>>(),
 };
 
 // テスト用の入力データを生成
@@ -42,6 +43,7 @@ describe('NotificationTriggerService - 拡張テスト', () => {
     mockNotificationLogRepository.hasRecentDuplicate.mockResolvedValue(false);
     mockNotificationLogRepository.checkCooldown.mockResolvedValue({ isInCooldown: false });
     mockNotificationLogRepository.upsertLog.mockResolvedValue({ id: 'log_123' });
+    mockNotificationLogRepository.countRecentNotifications.mockResolvedValue(0);
     
     // モックリポジトリを使用してサービスを初期化
     triggerService = new NotificationTriggerService(mockNotificationLogRepository as unknown as NotificationLogRepository);
