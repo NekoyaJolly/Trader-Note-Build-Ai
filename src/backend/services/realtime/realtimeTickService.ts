@@ -113,6 +113,71 @@ const ANOMALY_DEVIATION_THRESHOLD = 0.5;
 /** Tick レベルの異常値判定（バー生成の毒化防止のため、バーより厳しめにする） */
 const TICK_ANOMALY_DEVIATION_THRESHOLD = 0.3;
 
+type NormalizedTickStatus = 'ok' | 'fixed' | 'drop';
+
+export type NormalizedTickResult =
+  | { status: 'ok' | 'fixed'; tick: TickDataInput; reference?: number }
+  | { status: 'drop'; reference?: number; deviation?: number };
+
+/**
+ * 片側のみ異常値の Tick を正しい側で補正する純粋関数
+ * - 参照価格に対して bid/ask/mid の乖離率を計算し、片側だけが大きくズレている場合は正常側で上書きする
+ * - 両側が異常値なら drop
+ */
+export function normalizeTickWithReference(
+  tick: TickDataInput,
+  referencePrice: number | null,
+  deviationThreshold: number = TICK_ANOMALY_DEVIATION_THRESHOLD
+): NormalizedTickResult {
+  if (referencePrice === null || !Number.isFinite(referencePrice) || referencePrice <= 0) {
+    return { status: 'ok', tick };
+  }
+
+  const calcDev = (value: number) => Math.abs(value - referencePrice) / referencePrice;
+  const bidDev = calcDev(tick.bid);
+  const askDev = calcDev(tick.ask);
+  const midDev = calcDev(tick.mid);
+
+  // 両側が閾値以上に乖離している場合は破棄する
+  if (bidDev >= deviationThreshold && askDev >= deviationThreshold) {
+    return { status: 'drop', reference: referencePrice, deviation: Math.min(bidDev, askDev) };
+  }
+
+  // ask が正常で bid が異常 → ask で上書き
+  if (bidDev >= deviationThreshold && askDev < deviationThreshold) {
+    const corrected = {
+      ...tick,
+      bid: tick.ask,
+      ask: tick.ask,
+      mid: tick.ask,
+      spread: 0,
+    };
+    return { status: 'fixed', tick: corrected, reference: referencePrice };
+  }
+
+  // bid が正常で ask が異常 → bid で上書き
+  if (askDev >= deviationThreshold && bidDev < deviationThreshold) {
+    const corrected = {
+      ...tick,
+      bid: tick.bid,
+      ask: tick.bid,
+      mid: tick.bid,
+      spread: 0,
+    };
+    return { status: 'fixed', tick: corrected, reference: referencePrice };
+  }
+
+  // 両側は正常だが mid だけズレている場合は平均で補正
+  if (midDev >= deviationThreshold) {
+    const recomputedMid = (tick.bid + tick.ask) / 2;
+    const recomputedSpread = Math.max(0, tick.ask - tick.bid);
+    const corrected = { ...tick, mid: recomputedMid, spread: recomputedSpread };
+    return { status: 'fixed', tick: corrected, reference: referencePrice };
+  }
+
+  return { status: 'ok', tick, reference: referencePrice };
+}
+
 type LastGoodPrice = {
   mid: number;
   timestampMs: number;
@@ -224,29 +289,36 @@ export class RealtimeTickService extends EventEmitter {
 
     const validTick = result.data;
 
-    // 0. Tick の異常値判定（ここで落とさないと、永続化/バー更新が汚染される）
-    if (this.isAnomalousTick(validTick)) {
+    // 0. 片側異常の補正 / 両側異常のドロップ
+    const normalized = this.normalizeTick(validTick);
+    if (normalized.status === 'drop') {
+      return;
+    }
+    const normalizedTick = normalized.tick;
+
+    // 1. Tick の異常値判定（ここで落とさないと、永続化/バー更新が汚染される）
+    if (this.isAnomalousTick(normalizedTick, normalized.reference)) {
       return;
     }
 
-    // 1. Tick イベントを発火（リアルタイム配信用）
-    this.emit('tick', validTick);
+    // 2. Tick イベントを発火（リアルタイム配信用）
+    this.emit('tick', normalizedTick);
 
-    // 2. Tick バッファに追加（永続化用）
+    // 3. Tick バッファに追加（永続化用）
     if (this.config.persistTicks) {
-      this.tickBuffer.push(validTick);
+      this.tickBuffer.push(normalizedTick);
       if (this.tickBuffer.length >= this.config.tickBatchSize) {
         await this.flushTickBuffer();
       }
     }
 
-    // 3. 進行中バーを更新
-    this.updatePendingBar(validTick);
+    // 4. 進行中バーを更新
+    this.updatePendingBar(normalizedTick);
 
-    // 4. 最終的に受理した価格として保持（次のTick異常判定の参照用）
-    this.lastGoodPriceBySymbol.set(validTick.symbol, {
-      mid: validTick.mid,
-      timestampMs: validTick.timestamp.getTime(),
+    // 5. 最終的に受理した価格として保持（次のTick異常判定の参照用）
+    this.lastGoodPriceBySymbol.set(normalizedTick.symbol, {
+      mid: normalizedTick.mid,
+      timestampMs: normalizedTick.timestamp.getTime(),
     });
   }
 
@@ -337,6 +409,56 @@ export class RealtimeTickService extends EventEmitter {
   // ========================================
   // 内部メソッド
   // ========================================
+
+  /**
+   * 参照価格を取得（pendingBar と lastGood のうち Tick に最も近いもの）
+   */
+  private getReferencePrice(tick: TickDataInput): number | null {
+    const timeframe = `${this.config.barIntervalSeconds}s`;
+    const key = `${tick.symbol}:${timeframe}`;
+    const pending = this.pendingBars.get(key);
+    const pendingRef = pending?.close;
+
+    const lastGood = this.lastGoodPriceBySymbol.get(tick.symbol);
+    const lastGoodRef = lastGood?.mid;
+
+    const refs: number[] = [];
+    if (pendingRef !== undefined && Number.isFinite(pendingRef) && pendingRef > 0) refs.push(pendingRef);
+    if (lastGoodRef !== undefined && Number.isFinite(lastGoodRef) && lastGoodRef > 0) refs.push(lastGoodRef);
+
+    if (refs.length === 0) return null;
+
+    const deviationFrom = (ref: number) => Math.abs(tick.mid - ref) / ref;
+    return refs.reduce((best, cur) => (deviationFrom(cur) < deviationFrom(best) ? cur : best), refs[0]);
+  }
+
+  /**
+   * Tick を正規化（片側だけスケールが崩れているケースを救済）
+   */
+  private normalizeTick(tick: TickDataInput): NormalizedTickResult {
+    const reference = this.getReferencePrice(tick);
+    const result = normalizeTickWithReference(tick, reference, TICK_ANOMALY_DEVIATION_THRESHOLD);
+
+    if (result.status === 'drop') {
+      if (reference !== null) {
+        const deviations = [tick.bid, tick.ask, tick.mid].map(v => Math.abs(v - reference) / reference);
+        const deviation = Math.max(...deviations);
+        this.logAnomalousTick(tick.symbol, tick.mid, reference, deviation);
+      }
+      return { status: 'drop', reference: reference ?? undefined, deviation: result.deviation };
+    }
+
+    if (result.status === 'fixed') {
+      const refLabel = reference ? reference.toFixed(5) : 'n/a';
+      console.warn(
+        `[RealtimeTickService] 片側異常Tickを補正: ${tick.symbol} ` +
+        `ref=${refLabel} bid=${tick.bid.toFixed(5)} ask=${tick.ask.toFixed(5)} -> ` +
+        `bid=${result.tick.bid.toFixed(5)} ask=${result.tick.ask.toFixed(5)} mid=${result.tick.mid.toFixed(5)}`
+      );
+    }
+
+    return { status: result.status as NormalizedTickStatus, tick: result.tick, reference: reference ?? undefined };
+  }
 
   /**
    * 進行中バーを更新
@@ -636,27 +758,15 @@ export class RealtimeTickService extends EventEmitter {
    * - それでも乖離が閾値以上なら、永続化/バー更新を行わず破棄する（汚染防止）
    * - ログはスパムにならないように抑制（一定間隔で集約）
    */
-  private isAnomalousTick(tick: TickDataInput): boolean {
+  private isAnomalousTick(tick: TickDataInput, normalizedReference?: number | null): boolean {
     if (!(Number.isFinite(tick.mid) && tick.mid > 0)) return true;
 
-    const timeframe = `${this.config.barIntervalSeconds}s`;
-    const key = `${tick.symbol}:${timeframe}`;
-    const pending = this.pendingBars.get(key);
-    const pendingRef = pending?.close;
-
-    const lastGood = this.lastGoodPriceBySymbol.get(tick.symbol);
-    const lastGoodRef = lastGood?.mid;
-
-    const refs: number[] = [];
-    if (pendingRef !== undefined && Number.isFinite(pendingRef) && pendingRef > 0) refs.push(pendingRef);
-    if (lastGoodRef !== undefined && Number.isFinite(lastGoodRef) && lastGoodRef > 0) refs.push(lastGoodRef);
+    const bestRef = normalizedReference ?? this.getReferencePrice(tick);
 
     // 参照が無い場合（初回など）は受理する
-    if (refs.length === 0) return false;
+    if (bestRef === null) return false;
 
-    const deviationFrom = (ref: number) => Math.abs(tick.mid - ref) / ref;
-    const bestRef = refs.reduce((best, cur) => (deviationFrom(cur) < deviationFrom(best) ? cur : best), refs[0]);
-    const deviation = deviationFrom(bestRef);
+    const deviation = Math.abs(tick.mid - bestRef) / bestRef;
 
     // 境界値も落とす（>=）
     if (deviation >= TICK_ANOMALY_DEVIATION_THRESHOLD) {

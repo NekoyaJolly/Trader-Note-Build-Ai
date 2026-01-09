@@ -9,9 +9,10 @@
  *
  * 使用ライブラリ: lightweight-charts v5.x (TradingView)
  */
+
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   createChart,
   IChartApi,
@@ -27,6 +28,7 @@ import {
   LineSeries,
   HistogramSeries,
   LineWidth,
+  LineStyle,
   createSeriesMarkers,
   ISeriesMarkersPluginApi,
 } from "lightweight-charts";
@@ -65,6 +67,28 @@ export interface ChartMarker {
   text?: string;
 }
 
+/** 手動描画ライン */
+export type DrawnLine =
+  | {
+      id: string;
+      type: "horizontal";
+      price: number;
+      startTime: number;
+      endTime: number;
+      color?: string;
+      lineWidth?: number;
+    }
+  | {
+      id: string;
+      type: "trend";
+      startTime: number;
+      endTime: number;
+      startPrice: number;
+      endPrice: number;
+      color?: string;
+      lineWidth?: number;
+    };
+
 /** チャートのプロパティ */
 export interface CandlestickChartProps {
   /** OHLCVデータ */
@@ -87,6 +111,14 @@ export interface CandlestickChartProps {
   enableRealtime?: boolean;
   /** 新しいデータが来た時のコールバック */
   onNewData?: (data: OHLCVDataPoint) => void;
+  /** ライン描画モード */
+  drawingMode?: "none" | "horizontal" | "trend";
+  /** 既存の手動ライン */
+  drawnLines?: DrawnLine[];
+  /** ライン描画完了時 */
+  onCompleteLine?: (line: DrawnLine) => void;
+  /** 描画モード終了通知 */
+  onExitDrawing?: () => void;
 }
 
 // ========================================
@@ -176,6 +208,11 @@ const CHART_THEME = {
   crosshairColor: "#71717a",
 };
 
+// 手動ラインのデフォルトスタイル
+const DEFAULT_LINE_COLOR = "#fbbf24";
+const DEFAULT_LINE_WIDTH: LineWidth = 2 as LineWidth;
+const GUIDE_LINE_COLOR = "rgba(251, 191, 36, 0.6)";
+
 // ========================================
 // メインコンポーネント
 // ========================================
@@ -190,6 +227,10 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   symbol = "",
   timeframe = "",
   enableRealtime = false,
+  drawingMode = "none",
+  drawnLines = [],
+  onCompleteLine,
+  onExitDrawing,
 }) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -197,8 +238,12 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const indicatorSeriesRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
+  const drawnLineSeriesRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
+  const guideLineSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const lastFitCountRef = useRef<number>(0);
+  const draftPointRef = useRef<{ time: number; price: number } | null>(null);
+  const isDraggingRef = useRef<boolean>(false);
 
   const [isLoading, setIsLoading] = useState(true);
 
@@ -215,6 +260,8 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     candlestickSeriesRef.current = null;
     volumeSeriesRef.current = null;
     indicatorSeriesRef.current.clear();
+    drawnLineSeriesRef.current.clear();
+    guideLineSeriesRef.current = null;
     markersPluginRef.current = null;
     lastFitCountRef.current = 0;
 
@@ -248,7 +295,8 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       timeScale: {
         borderColor: CHART_THEME.borderColor,
         timeVisible: true,
-        secondsVisible: true, // 秒足チャートのため秒も表示
+        secondsVisible: true,
+        timeZone: "utc", // UTC 基準で統一
       },
       rightPriceScale: {
         borderColor: CHART_THEME.borderColor,
@@ -257,6 +305,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
     chartRef.current = chart;
 
+    drawnLineSeriesRef.current.clear();
     // ローソク足シリーズ追加（v5 API: addSeries(CandlestickSeries, options)）
     const candlestickSer = chart.addSeries(CandlestickSeries, {
       upColor: CHART_THEME.upColor,
@@ -297,6 +346,9 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       candlestickSeriesRef.current = null;
       volumeSeriesRef.current = null;
       indicatorSeriesRef.current.clear();
+      if (guideLineSeriesRef.current) {
+        chartRef.current?.removeSeries(guideLineSeriesRef.current);
+      }
       markersPluginRef.current = null;
     };
   }, [height]);
@@ -348,6 +400,297 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       lastFitCountRef.current = candleData.length;
     }
   }, [ohlcvData]);
+
+  // 手動ラインの描画・更新
+  useEffect(() => {
+    if (!chartRef.current) return;
+
+    // 既存ラインを一旦削除
+    drawnLineSeriesRef.current.forEach((series) => {
+      chartRef.current?.removeSeries(series);
+    });
+    drawnLineSeriesRef.current.clear();
+
+    const fallbackColor = DEFAULT_LINE_COLOR; // デフォルトは黄系
+
+    const ensureEndpoints = (line: DrawnLine): { points: LineData<Time>[] } => {
+      if (line.type === "horizontal") {
+        const start = toChartTime(line.startTime);
+        const end = toChartTime(line.endTime);
+        const sorted: LineData<Time>[] = [
+          { time: start, value: line.price },
+          { time: end, value: line.price },
+        ].sort((a, b) => (a.time as number) - (b.time as number));
+        if (sorted[0].time === sorted[1].time) {
+          // time が同一だと lightweight-charts が例外を投げるため終点を +1 秒補正
+          sorted[1] = { ...sorted[1], time: ((sorted[1].time as number) + 1) as Time };
+        }
+        return { points: sorted };
+      }
+      const start = toChartTime(line.startTime);
+      const end = toChartTime(line.endTime);
+      const sorted: LineData<Time>[] = [
+        { time: start, value: line.startPrice },
+        { time: end, value: line.endPrice },
+      ].sort((a, b) => (a.time as number) - (b.time as number));
+      if (sorted[0].time === sorted[1].time) {
+        // 始点と終点が同一なら終点だけ +1 秒にずらす
+        sorted[1] = { ...sorted[1], time: ((sorted[1].time as number) + 1) as Time };
+      }
+      return { points: sorted };
+    };
+
+    drawnLines.forEach((line) => {
+      const { points } = ensureEndpoints(line);
+      const series = chartRef.current!.addSeries(LineSeries, {
+        color: line.color || fallbackColor,
+        lineWidth: (line.lineWidth ?? DEFAULT_LINE_WIDTH) as LineWidth,
+        title: line.type === "horizontal" ? "水平線" : "トレンドライン",
+        priceLineVisible: false,
+      });
+      series.setData(points);
+      drawnLineSeriesRef.current.set(line.id, series);
+    });
+  }, [drawnLines]);
+
+  // 描画モード解除時に下書きをクリア
+  useEffect(() => {
+    if (drawingMode === "none") {
+      draftPointRef.current = null;
+      if (guideLineSeriesRef.current) {
+        chartRef.current?.removeSeries(guideLineSeriesRef.current);
+        guideLineSeriesRef.current = null;
+      }
+        isDraggingRef.current = false;
+    }
+  }, [drawingMode]);
+
+  // 描画モード中はドラッグパンのみ抑止し、ホイールズーム/スクロールは維持
+  useEffect(() => {
+    if (!chartRef.current) return;
+    const disableDrag = drawingMode !== "none";
+    chartRef.current.applyOptions({
+      handleScroll: {
+        mouseWheel: true,
+        pressedMouseMove: !disableDrag,
+        vertTouchDrag: !disableDrag,
+        horzTouchDrag: !disableDrag,
+      },
+      handleScale: {
+        mouseWheel: true,
+        axisPressedMouseMove: !disableDrag,
+        pinch: true,
+      },
+    });
+  }, [drawingMode]);
+
+  // プレビューラインをクリア
+  const clearGuideLine = useCallback(() => {
+    if (guideLineSeriesRef.current && chartRef.current) {
+      chartRef.current.removeSeries(guideLineSeriesRef.current);
+      guideLineSeriesRef.current = null;
+    }
+  }, []);
+
+  // プレビューラインを更新
+  const updateGuideLine = useCallback(
+    (points: LineData<Time>[]) => {
+      if (!chartRef.current) return;
+      if (!guideLineSeriesRef.current) {
+        guideLineSeriesRef.current = chartRef.current.addSeries(LineSeries, {
+          color: GUIDE_LINE_COLOR,
+          lineStyle: LineStyle.Dashed,
+          lineWidth: 1 as LineWidth,
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false,
+          title: "draft-line",
+        });
+      }
+        const sorted = [...points].sort((a, b) => (a.time as number) - (b.time as number));
+        if (sorted.length === 2 && sorted[0].time === sorted[1].time) {
+          sorted[1] = { ...sorted[1], time: ((sorted[1].time as number) + 1) as Time };
+        }
+        guideLineSeriesRef.current.setData(sorted);
+    },
+    []
+  );
+
+  const getRangeForHorizontal = useCallback(() => {
+    const timestamps = ohlcvData.map((d) => d.timestamp).sort((a, b) => a - b);
+    const startTime = timestamps[0] ?? Date.now();
+    const endTime = timestamps[timestamps.length - 1] ?? startTime;
+    return { startTime, endTime };
+  }, [ohlcvData]);
+
+  // 描画用オーバーレイのクリック処理
+  const handleOverlayClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (drawingMode === "none") return;
+      if (!chartRef.current || !candlestickSeriesRef.current) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      const time = chartRef.current.timeScale().coordinateToTime(x);
+      const price = candlestickSeriesRef.current.coordinateToPrice(y);
+
+      if (time === null || price === null) return;
+
+      const point = { time: (time as number) * 1000, price };
+      draftPointRef.current = point;
+      isDraggingRef.current = true;
+
+      if (drawingMode === "horizontal") {
+        // 押下開始位置でプレビューを出す（離した位置で確定）
+        const { startTime, endTime } = getRangeForHorizontal();
+        updateGuideLine([
+          { time: toChartTime(startTime), value: point.price },
+          { time: toChartTime(endTime), value: point.price },
+        ]);
+        return;
+      }
+
+      // トレンドラインは押下点を始点として保持
+      updateGuideLine([
+        { time: toChartTime(point.time), value: point.price },
+        { time: toChartTime(point.time), value: point.price },
+      ]);
+    },
+    [drawingMode, getRangeForHorizontal, updateGuideLine]
+  );
+
+  const handleOverlayMouseUp = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (drawingMode === "none") return;
+      if (!chartRef.current || !candlestickSeriesRef.current) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      const time = chartRef.current.timeScale().coordinateToTime(x);
+      const price = candlestickSeriesRef.current.coordinateToPrice(y);
+
+      if (time === null || price === null) {
+        clearGuideLine();
+        draftPointRef.current = null;
+        isDraggingRef.current = false;
+        return;
+      }
+
+      const point = { time: (time as number) * 1000, price };
+
+      // 水平線: マウスアップ位置の価格で確定
+      if (drawingMode === "horizontal") {
+        const { startTime, endTime } = getRangeForHorizontal();
+        const line: DrawnLine = {
+          id: `line-${Date.now()}`,
+          type: "horizontal",
+          price: point.price,
+          startTime,
+          endTime,
+          color: DEFAULT_LINE_COLOR,
+          lineWidth: DEFAULT_LINE_WIDTH,
+        };
+        onCompleteLine?.(line);
+        onExitDrawing?.();
+        clearGuideLine();
+        draftPointRef.current = null;
+        isDraggingRef.current = false;
+        return;
+      }
+
+      // トレンドライン: 始点が無ければスキップ
+      if (!draftPointRef.current) {
+        clearGuideLine();
+        isDraggingRef.current = false;
+        return;
+      }
+
+      const start = draftPointRef.current;
+      const end = point;
+      draftPointRef.current = null;
+
+      const line: DrawnLine = {
+        id: `line-${Date.now()}`,
+        type: "trend",
+        startTime: start.time,
+        endTime: end.time,
+        startPrice: start.price,
+        endPrice: end.price,
+        color: DEFAULT_LINE_COLOR,
+        lineWidth: DEFAULT_LINE_WIDTH,
+      };
+      onCompleteLine?.(line);
+      onExitDrawing?.();
+      clearGuideLine();
+      isDraggingRef.current = false;
+    },
+    [clearGuideLine, drawingMode, getRangeForHorizontal, onCompleteLine, onExitDrawing]
+  );
+
+  // 描画用オーバーレイのマウス移動処理（ガイドライン）
+  const handleOverlayMouseMove = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (drawingMode === "none") return;
+      if (!chartRef.current || !candlestickSeriesRef.current) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      const time = chartRef.current.timeScale().coordinateToTime(x);
+      const price = candlestickSeriesRef.current.coordinateToPrice(y);
+
+      if (time === null || price === null) {
+        clearGuideLine();
+        return;
+      }
+
+      const point = { time: (time as number) * 1000, price };
+
+      if (drawingMode === "horizontal") {
+        const { startTime, endTime } = getRangeForHorizontal();
+        updateGuideLine([
+          { time: toChartTime(startTime), value: point.price },
+          { time: toChartTime(endTime), value: point.price },
+        ]);
+        return;
+      }
+
+      if (drawingMode === "trend" && draftPointRef.current) {
+        updateGuideLine([
+          { time: toChartTime(draftPointRef.current.time), value: draftPointRef.current.price },
+          { time: toChartTime(point.time), value: point.price },
+        ]);
+        return;
+      }
+
+      clearGuideLine();
+    },
+    [candlestickSeriesRef, chartRef, clearGuideLine, drawingMode, getRangeForHorizontal, updateGuideLine]
+  );
+
+  const handleOverlayMouseLeave = useCallback(() => {
+    clearGuideLine();
+  }, [clearGuideLine]);
+
+  const handleOverlayContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (drawingMode === "none") return;
+    e.preventDefault();
+    e.stopPropagation();
+  }, [drawingMode]);
 
   // インジケーターの描画
   useEffect(() => {
@@ -438,12 +781,28 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
         </div>
       )}
 
-      {/* チャートコンテナ */}
-      <div
-        ref={chartContainerRef}
-        className="w-full rounded-lg overflow-hidden border border-zinc-800"
-        style={{ height: `${height}px` }}
-      />
+      {/* チャートコンテナ + 描画オーバーレイ */}
+      <div className="relative">
+        <div
+          ref={chartContainerRef}
+          className="w-full rounded-lg overflow-hidden border border-zinc-800"
+          style={{ height: `${height}px` }}
+        />
+        <div
+          className="absolute inset-0"
+          onMouseDown={handleOverlayClick}
+          onMouseUp={handleOverlayMouseUp}
+          onMouseMove={handleOverlayMouseMove}
+          onMouseLeave={handleOverlayMouseLeave}
+          onContextMenu={handleOverlayContextMenu}
+          style={{
+            pointerEvents: drawingMode === "none" ? "none" : "auto",
+            cursor: drawingMode === "none" ? "default" : "crosshair",
+            zIndex: 10,
+            touchAction: "none",
+          }}
+        />
+      </div>
 
       {/* ローディング表示 */}
       {isLoading && (
