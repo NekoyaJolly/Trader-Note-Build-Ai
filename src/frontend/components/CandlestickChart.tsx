@@ -296,7 +296,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
         borderColor: CHART_THEME.borderColor,
         timeVisible: true,
         secondsVisible: true,
-        timeZone: "utc", // UTC 基準で統一
+        // v5 の TimeScaleOptions に timeZone が無いため削除（データ側で UTC に正規化済み）
       },
       rightPriceScale: {
         borderColor: CHART_THEME.borderColor,
