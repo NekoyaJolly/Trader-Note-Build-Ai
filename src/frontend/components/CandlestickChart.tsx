@@ -191,6 +191,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const indicatorSeriesRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
+  const guideLineSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const lastFitCountRef = useRef<number>(0);
 
@@ -209,6 +210,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     candlestickSeriesRef.current = null;
     volumeSeriesRef.current = null;
     indicatorSeriesRef.current.clear();
+    guideLineSeriesRef.current = null;
     markersPluginRef.current = null;
     lastFitCountRef.current = 0;
 
@@ -295,6 +297,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       candlestickSeriesRef.current = null;
       volumeSeriesRef.current = null;
       indicatorSeriesRef.current.clear();
+      guideLineSeriesRef.current = null;
       markersPluginRef.current = null;
     };
   }, [height]);
