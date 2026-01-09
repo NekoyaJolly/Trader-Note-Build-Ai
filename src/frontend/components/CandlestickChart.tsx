@@ -106,9 +106,8 @@ function toChartTime(timestamp: number): UTCTimestamp {
  * - 重複タイムスタンプは最新のデータで上書き（Map使用）
  */
 function toCandlestickData(ohlcv: OHLCVDataPoint[]): CandlestickData<Time>[] {
-  // 重複を排除（同じ時間のデータは後のデータで上書き）
   const uniqueMap = new Map<number, CandlestickData<Time>>();
-  
+
   for (const d of ohlcv) {
     const time = toChartTime(d.timestamp);
     uniqueMap.set(time as number, {
@@ -119,15 +118,10 @@ function toCandlestickData(ohlcv: OHLCVDataPoint[]): CandlestickData<Time>[] {
       close: d.close,
     });
   }
-  
-  // 時間順にソートして返す
+
   return Array.from(uniqueMap.values()).sort((a, b) => (a.time as number) - (b.time as number));
 }
 
-/**
- * インジケーターデータをラインデータに変換
- * - 時間順にソート、重複排除
- */
 function toLineData(data: { timestamp: number; value: number }[]): LineData<Time>[] {
   const uniqueMap = new Map<number, LineData<Time>>();
   
@@ -290,10 +284,14 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
     return () => {
       window.removeEventListener("resize", handleResize);
-      if (chartRef.current) {
-        chartRef.current.remove();
-        chartRef.current = null;
+      const chartInstance = chartRef.current;
+      if (chartInstance && guideLineSeriesRef.current) {
+        chartInstance.removeSeries(guideLineSeriesRef.current);
       }
+      if (chartInstance) {
+        chartInstance.remove();
+      }
+      chartRef.current = null;
       candlestickSeriesRef.current = null;
       volumeSeriesRef.current = null;
       indicatorSeriesRef.current.clear();
@@ -355,7 +353,9 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
     // 既存のインジケーターシリーズをクリア
     indicatorSeriesRef.current.forEach((series) => {
-      chartRef.current?.removeSeries(series);
+      if (chartRef.current) {
+        chartRef.current.removeSeries(series);
+      }
     });
     indicatorSeriesRef.current.clear();
 

@@ -28,7 +28,7 @@ import {
   BarChart3,
   Database,
   Settings,
-  ChevronDown,
+  ChevronRight,
   X,
   Sparkles,
   Plus,
@@ -77,6 +77,15 @@ interface NavCategory {
 // ナビゲーション構造定義
 // ============================================
 
+const topNavItems: NavItem[] = [
+  {
+    href: "/",
+    label: "HOME",
+    icon: Home,
+    color: "cyan",
+  },
+];
+
 const navCategories: NavCategory[] = [
   {
     id: "side-a",
@@ -84,12 +93,6 @@ const navCategories: NavCategory[] = [
     color: "cyan",
     defaultOpen: true,
     items: [
-      {
-        href: "/",
-        label: "ホーム",
-        icon: Home,
-        color: "cyan",
-      },
       {
         href: "/notes",
         label: "トレードノート",
@@ -390,8 +393,8 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
                 )}
               </span>
             </div>
-            <ChevronDown 
-              className={`w-4 h-4 transition-transform duration-200 ${indicatorMenuOpen ? "rotate-180" : ""}`}
+            <ChevronRight 
+              className={`w-4 h-4 transition-transform duration-200 ${indicatorMenuOpen ? "rotate-90" : ""}`}
               strokeWidth={1.5}
             />
           </button>
@@ -456,16 +459,18 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
       
       return (
         <div key={item.href} className="w-full">
-          <div className="flex items-center">
+          <div
+            className="flex items-stretch rounded-lg border border-slate-700/60 bg-slate-800/50 overflow-hidden"
+          >
             <Link
               href={item.href}
               onClick={handleNavClick}
               className={`
-                flex-1 flex items-center gap-2 px-3 py-2 rounded-l-lg
+                flex-1 flex items-center gap-2 px-3 py-2
                 text-sm font-medium transition-all duration-200 group
                 ${active || isChildActive
-                  ? `bg-gradient-to-r ${colors.bg} text-white border-l border-y ${colors.border} ${colors.glow}`
-                  : "text-gray-400 hover:bg-slate-700/50 hover:text-white"
+                  ? "text-white bg-slate-800/80"
+                  : "text-gray-400 hover:bg-slate-800/60 hover:text-white"
                 }
               `}
             >
@@ -478,15 +483,15 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
             <button
               onClick={() => toggleMenu(item.href)}
               className={`
-                px-2 py-2 rounded-r-lg transition-all duration-200
+                px-2 py-2 flex items-center justify-center transition-all duration-200
                 ${active || isChildActive
-                  ? `bg-gradient-to-r ${colors.bg} text-white border-r border-y ${colors.border}`
-                  : "text-gray-400 hover:bg-slate-700/50 hover:text-white"
+                  ? "text-white bg-slate-800/80"
+                  : "text-gray-400 hover:bg-slate-800/60 hover:text-white"
                 }
               `}
             >
-              <ChevronDown 
-                className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
+              <ChevronRight 
+                className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
                 strokeWidth={1.5}
               />
             </button>
@@ -542,6 +547,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         className={`
           fixed top-0 left-0 z-50
           h-screen w-72
+          flex flex-col
           bg-slate-900/95 backdrop-blur-md border-r border-slate-700/50
           transform transition-transform duration-300 ease-out
           ${isOpen ? "translate-x-0" : "-translate-x-full"}
@@ -568,6 +574,34 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
 
         {/* ナビゲーション */}
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-2">
+          {/* トップレベル（HOME） */}
+          {topNavItems.map(item => {
+            const active = isActive(item.href);
+            const colors = CATEGORY_COLORS[item.color || "cyan"];
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={handleNavClick}
+                className={`
+                  flex items-center gap-2 px-3 py-2 rounded-lg
+                  text-sm font-medium transition-all duration-200 group
+                  ${active
+                    ? `bg-gradient-to-r ${colors.bg} text-white border ${colors.border} ${colors.glow}`
+                    : "text-gray-200 hover:bg-slate-800/50 hover:text-white"
+                  }
+                `}
+              >
+                <Icon 
+                  className={`w-4 h-4 ${active ? colors.text : "text-gray-400"}`}
+                  strokeWidth={1.5}
+                />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+
           {navCategories.map(category => {
             const colors = CATEGORY_COLORS[category.color];
             const isExpanded = expandedCategories[category.id];
@@ -588,8 +622,8 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
                   `}
                 >
                   <span>{category.label}</span>
-                  <ChevronDown 
-                    className={`w-3.5 h-3.5 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
+                  <ChevronRight 
+                    className={`w-3.5 h-3.5 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
                     strokeWidth={2}
                   />
                 </button>
