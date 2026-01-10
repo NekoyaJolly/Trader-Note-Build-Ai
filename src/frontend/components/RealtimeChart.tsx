@@ -104,7 +104,11 @@ const PricePanel = ({ bar, dailyHigh, dailyLow, previousClose }: PricePanelProps
   const timeLabel = new Date(timestamp).toLocaleTimeString('ja-JP', { hour12: false });
 
   const dayChange = previousClose != null ? bar.close - previousClose : null;
-  const dayChangePercent = previousClose && previousClose !== 0 ? (dayChange / previousClose) * 100 : null;
+  // previousClose と dayChange が共に有効な場合のみ騰落率を算出
+  const dayChangePercent =
+    previousClose != null && previousClose !== 0 && dayChange != null
+      ? (dayChange / previousClose) * 100
+      : null;
   const changeColor = dayChange != null ? (dayChange >= 0 ? 'text-green-400' : 'text-red-400') : 'text-gray-400';
   const formatNullable = (val: number | null) => (val == null ? '-' : val.toFixed(2));
   const dayChangePercentLabel = dayChangePercent == null
