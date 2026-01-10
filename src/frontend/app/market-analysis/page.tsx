@@ -13,6 +13,7 @@
 import React, { useState, useCallback } from 'react';
 import { CandlestickChart, OHLCVDataPoint } from '@/components/CandlestickChart';
 import { RealtimeChart } from '@/components/RealtimeChart';
+import { NeonButton } from '@/components/ui/NeonButton';
 
 // 12次元特徴量の詳細型
 interface FeatureDetail {
@@ -102,6 +103,12 @@ export default function MarketAnalysisPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
+    const handleSymbolChange = useCallback((symbol: string) => {
+        setSelectedSymbol(symbol);
+        setAnalysisData(null);
+        setError(null);
+    }, []);
+
     // データ取得
     const fetchAnalysis = useCallback(async () => {
         setLoading(true);
@@ -142,229 +149,228 @@ export default function MarketAnalysisPage() {
     })) || [];
 
     return (
-        <div className="min-h-screen bg-gray-900 text-white p-6">
-            {/* ヘッダー */}
-            <div className="mb-6">
-                <h1 className="text-3xl font-bold mb-2">📊 マーケット分析</h1>
-                <p className="text-gray-400">
-                    リアルタイムOHLCVデータと12次元特徴量による市場状態分析
-                </p>
+        <div className="min-h-screen bg-gray-900 text-white p-6 space-y-4">
+            <div className="flex items-center justify-between">
+                <h1 className="text-3xl font-bold">
+                    {viewMode === 'realtime' ? '📡 リアルタイムチャート' : '📊 マーケット分析'}
+                </h1>
             </div>
 
-            {/* コントロールパネル */}
-            <div className="bg-gray-800 rounded-lg p-4 mb-6 flex flex-wrap gap-4 items-center">
-                <div>
-                    <label className="block text-sm text-gray-400 mb-1">シンボル</label>
-                    <select
-                        value={selectedSymbol}
-                        onChange={(e) => setSelectedSymbol(e.target.value)}
-                        className="bg-gray-700 text-white rounded px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                        {SYMBOLS.map(s => (
-                            <option key={s.value} value={s.value}>{s.label}</option>
-                        ))}
-                    </select>
-                </div>
-
-                {/* 表示モード切替 */}
-                <div>
-                    <label className="block text-sm text-gray-400 mb-1">表示モード</label>
-                    <div className="flex rounded-lg overflow-hidden">
-                        <button
-                            onClick={() => setViewMode('realtime')}
-                            className={`px-4 py-2 text-sm font-medium transition ${
-                                viewMode === 'realtime'
-                                    ? 'bg-green-600 text-white'
-                                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                            }`}
-                        >
-                            📡 リアルタイム
-                        </button>
-                        <button
+            <div className={viewMode === 'analysis' ? 'hidden' : ''}>
+                <RealtimeChart
+                    symbol={selectedSymbol}
+                    height={500}
+                    onSymbolChange={handleSymbolChange}
+                    rightAction={
+                        <NeonButton
+                            color="cyan"
+                            size="sm"
+                            variant="outline"
                             onClick={() => setViewMode('analysis')}
-                            className={`px-4 py-2 text-sm font-medium transition ${
-                                viewMode === 'analysis'
-                                    ? 'bg-blue-600 text-white'
-                                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                            }`}
+                            icon="📊"
+                            className="whitespace-nowrap"
                         >
-                            📊 分析
-                        </button>
-                    </div>
-                </div>
-
-                <div className="flex-1" />
-
-                {viewMode === 'analysis' && (
-                    <button
-                        onClick={fetchAnalysis}
-                        disabled={loading}
-                        className={`px-6 py-2 rounded-lg font-semibold transition ${loading
-                            ? 'bg-gray-600 cursor-not-allowed'
-                            : 'bg-blue-600 hover:bg-blue-700'
-                            }`}
-                    >
-                        {loading ? '取得中...' : '📥 データ取得'}
-                    </button>
-                )}
+                            分析 →
+                        </NeonButton>
+                    }
+                />
             </div>
 
-            {/* エラー表示 */}
-            {error && (
-                <div className="bg-red-900/50 border border-red-500 rounded-lg p-4 mb-6">
-                    <p className="text-red-300">⚠️ {error}</p>
-                </div>
-            )}
+            {viewMode === 'analysis' && (
+                <div className="bg-gray-900 rounded-lg border border-gray-800 shadow-xl overflow-hidden">
+                    <div className="bg-gray-800 px-3 py-2 flex items-center gap-3 border-b border-gray-700">
+                        <select
+                            value={selectedSymbol}
+                            onChange={(e) => handleSymbolChange(e.target.value)}
+                            className="bg-gray-700 text-white text-xs rounded px-3 py-1 border border-gray-600 hover:border-gray-500 font-semibold"
+                        >
+                            {SYMBOLS.map((s) => (
+                                <option key={s.value} value={s.value}>{s.label}</option>
+                            ))}
+                        </select>
+                        <span className="text-xs text-gray-400">1分足</span>
+                        {analysisData && (
+                            <span className="text-xs text-gray-500">{analysisData.meta.dataPoints}本</span>
+                        )}
+                        {analysisData && (
+                            <span className="text-xs text-gray-400">
+                                {new Date(analysisData.timestamp).toLocaleString('ja-JP')}
+                            </span>
+                        )}
 
-            {/* リアルタイムモード */}
-            {viewMode === 'realtime' && (
-                <div className="mb-6">
-                    <RealtimeChart
-                        symbol={selectedSymbol}
-                        height={500}
-                    />
-                    <div className="mt-4 bg-gray-800 rounded-lg p-4">
-                        <h3 className="text-lg font-semibold mb-2">📡 cTrader リアルタイムチャート</h3>
-                        <p className="text-gray-400 text-sm">
-                            cTrader Open API WebSocket から Tick データをリアルタイム受信し、10秒足のローソク足チャートを生成しています。
-                            データは自動的に DB に永続化され、チャートはリアルタイムで更新されます。
-                        </p>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                            <span className="px-2 py-1 bg-gray-700 rounded text-xs text-gray-300">WebSocket 接続</span>
-                            <span className="px-2 py-1 bg-gray-700 rounded text-xs text-gray-300">Tick データ永続化</span>
-                            <span className="px-2 py-1 bg-gray-700 rounded text-xs text-gray-300">10秒足 OHLCV 変換</span>
-                            <span className="px-2 py-1 bg-gray-700 rounded text-xs text-gray-300">SSE リアルタイム配信</span>
-                        </div>
-                    </div>
-                </div>
-            )}
+                        <div className="flex-1" />
 
-            {/* 分析モード - メインコンテンツ */}
-            {viewMode === 'analysis' && analysisData && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* 左カラム: チャート */}
-                    <div className="lg:col-span-2">
-                        <div className="bg-gray-800 rounded-lg p-4">
-                            <div className="flex justify-between items-center mb-4">
-                                <h2 className="text-xl font-semibold">
-                                    {analysisData.symbol} - 1分足 ({analysisData.meta.dataPoints}本)
-                                </h2>
-                                <span className="text-gray-400 text-sm">
-                                    {new Date(analysisData.timestamp).toLocaleString('ja-JP')}
-                                </span>
-                            </div>
-
-                            <div className="h-[400px]">
-                                <CandlestickChart
-                                    ohlcvData={chartData}
-                                    height={380}
-                                />
-                            </div>
-
-                            {/* 価格情報 */}
-                            <div className="mt-4 grid grid-cols-4 gap-4 text-center">
-                                <div className="bg-gray-700 rounded p-2">
-                                    <div className="text-gray-400 text-xs">始値</div>
-                                    <div className="font-mono">{analysisData.latestPrice.open.toFixed(2)}</div>
-                                </div>
-                                <div className="bg-gray-700 rounded p-2">
-                                    <div className="text-gray-400 text-xs">高値</div>
-                                    <div className="font-mono text-green-400">{analysisData.latestPrice.high.toFixed(2)}</div>
-                                </div>
-                                <div className="bg-gray-700 rounded p-2">
-                                    <div className="text-gray-400 text-xs">安値</div>
-                                    <div className="font-mono text-red-400">{analysisData.latestPrice.low.toFixed(2)}</div>
-                                </div>
-                                <div className="bg-gray-700 rounded p-2">
-                                    <div className="text-gray-400 text-xs">終値</div>
-                                    <div className="font-mono">{analysisData.latestPrice.close.toFixed(2)}</div>
-                                </div>
-                            </div>
+                        <div className="flex items-center gap-2">
+                            <NeonButton
+                                color="purple"
+                                size="sm"
+                                onClick={fetchAnalysis}
+                                disabled={loading}
+                                icon="📥"
+                                className="whitespace-nowrap"
+                            >
+                                {loading ? '取得中...' : 'データ取得'}
+                            </NeonButton>
+                            <NeonButton
+                                color="cyan"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setViewMode('realtime')}
+                                icon="📡"
+                                className="whitespace-nowrap"
+                            >
+                                市場 →
+                            </NeonButton>
                         </div>
                     </div>
 
-                    {/* 右カラム: 特徴量 */}
-                    <div className="space-y-6">
-                        {/* 市場状態 */}
-                        <div className="bg-gray-800 rounded-lg p-4">
-                            <h2 className="text-xl font-semibold mb-3">🎯 市場状態</h2>
-                            <div className="text-2xl font-bold text-center py-4 bg-gray-700 rounded-lg">
-                                {analysisData.marketCondition}
+                    <div className="p-4 space-y-4">
+                        {error && (
+                            <div className="bg-red-900/50 border border-red-500 rounded-lg p-4">
+                                <p className="text-red-300">⚠️ {error}</p>
                             </div>
-                        </div>
+                        )}
 
-                        {/* インジケーター */}
-                        <div className="bg-gray-800 rounded-lg p-4">
-                            <h2 className="text-xl font-semibold mb-3">📈 インジケーター</h2>
-                            <div className="space-y-2">
-                                <div className="flex justify-between">
-                                    <span className="text-gray-400">RSI(14)</span>
-                                    <span className={`font-mono ${analysisData.indicators.rsi >= 70 ? 'text-red-400' :
-                                        analysisData.indicators.rsi <= 30 ? 'text-green-400' : ''
-                                        }`}>
-                                        {analysisData.indicators.rsi.toFixed(1)}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between">
-                                    <span className="text-gray-400">MACDヒスト</span>
-                                    <span className={`font-mono ${analysisData.indicators.macdHistogram > 0 ? 'text-green-400' : 'text-red-400'
-                                        }`}>
-                                        {analysisData.indicators.macdHistogram.toFixed(4)}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between">
-                                    <span className="text-gray-400">SMA(20)</span>
-                                    <span className="font-mono">{analysisData.indicators.sma20.toFixed(2)}</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* 12次元特徴量 */}
-                        <div className="bg-gray-800 rounded-lg p-4">
-                            <h2 className="text-xl font-semibold mb-3">🧬 12次元特徴量</h2>
-                            <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                                {analysisData.featureVector.detailed.map((feature) => (
-                                    <div key={feature.index} className="bg-gray-700 rounded p-2">
-                                        <div className="flex justify-between items-center mb-1">
-                                            <span className="text-sm flex items-center gap-1">
-                                                {feature.name}
-                                                <span
-                                                    className="text-gray-400 cursor-help relative group"
-                                                    title={feature.description}
-                                                >
-                                                    ⓘ
-                                                    {/* ツールチップ */}
-                                                    <span className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-2 py-1 bg-gray-900 text-gray-200 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 shadow-lg border border-gray-600">
-                                                        {feature.description}
-                                                    </span>
-                                                </span>
+                        {analysisData && (
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                {/* 左カラム: チャート */}
+                                <div className="lg:col-span-2">
+                                    <div className="bg-gray-900 rounded-lg overflow-hidden">
+                                        {/* コンパクトヘッダー（1行） */}
+                                        <div className="bg-gray-800 px-3 py-2 flex items-center gap-3 border-b border-gray-700">
+                                            {/* シンボル表示 */}
+                                            <span className="text-xs font-semibold text-white">{analysisData.symbol}</span>
+                                            
+                                            {/* 時間足表示 */}
+                                            <span className="text-xs text-gray-400">1分足</span>
+                                            
+                                            {/* データポイント数 */}
+                                            <span className="text-xs text-gray-500">{analysisData.meta.dataPoints}本</span>
+                                            
+                                            <div className="flex-1" />
+                                            
+                                            {/* タイムスタンプ */}
+                                            <span className="text-xs text-gray-400">
+                                                {new Date(analysisData.timestamp).toLocaleString('ja-JP')}
                                             </span>
-                                            <span className="font-mono text-sm">{feature.displayValue}</span>
                                         </div>
-                                        <div className="w-full bg-gray-600 rounded-full h-2">
-                                            <div
-                                                className={`h-2 rounded-full ${getFeatureColor(feature.value, feature.index)}`}
-                                                style={{
-                                                    width: `${Math.abs(feature.value) * 100}%`,
-                                                    marginLeft: feature.index === 0 && feature.value < 0 ? 'auto' : 0,
-                                                }}
-                                            />
+
+                                        {/* チャート */}
+                                        <div className="p-0.5">
+                                            <div className="h-[400px]">
+                                                <CandlestickChart
+                                                    ohlcvData={chartData}
+                                                    height={380}
+                                                />
+                                            </div>
+                                        </div>
+
+                                        {/* 価格情報 */}
+                                        <div className="px-2 pb-2 grid grid-cols-4 gap-2 text-center">
+                                            <div className="bg-gray-800/50 rounded p-2 border border-gray-700/50">
+                                                <div className="text-gray-500 text-xs">始値</div>
+                                                <div className="font-mono text-xs">{analysisData.latestPrice.open.toFixed(2)}</div>
+                                            </div>
+                                            <div className="bg-gray-800/50 rounded p-2 border border-gray-700/50">
+                                                <div className="text-gray-500 text-xs">高値</div>
+                                                <div className="font-mono text-green-400 text-xs">{analysisData.latestPrice.high.toFixed(2)}</div>
+                                            </div>
+                                            <div className="bg-gray-800/50 rounded p-2 border border-gray-700/50">
+                                                <div className="text-gray-500 text-xs">安値</div>
+                                                <div className="font-mono text-red-400 text-xs">{analysisData.latestPrice.low.toFixed(2)}</div>
+                                            </div>
+                                            <div className="bg-gray-800/50 rounded p-2 border border-gray-700/50">
+                                                <div className="text-gray-500 text-xs">終値</div>
+                                                <div className="font-mono text-xs">{analysisData.latestPrice.close.toFixed(2)}</div>
+                                            </div>
                                         </div>
                                     </div>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
+                                </div>
 
-            {/* 分析モード - 初期表示 */}
-            {viewMode === 'analysis' && !analysisData && !loading && !error && (
-                <div className="text-center py-20">
-                    <div className="text-6xl mb-4">📊</div>
-                    <p className="text-gray-400 text-lg">
-                        シンボルを選択して「データ取得」ボタンをクリックしてください
-                    </p>
+                                {/* 右カラム: 特徴量 */}
+                                <div className="space-y-6">
+                                    {/* 市場状態 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h2 className="text-xl font-semibold mb-3">🎯 市場状態</h2>
+                                        <div className="text-2xl font-bold text-center py-4 bg-gray-700 rounded-lg">
+                                            {analysisData.marketCondition}
+                                        </div>
+                                    </div>
+
+                                    {/* インジケーター */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h2 className="text-xl font-semibold mb-3">📈 インジケーター</h2>
+                                        <div className="space-y-2">
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-400">RSI(14)</span>
+                                                <span className={`font-mono ${analysisData.indicators.rsi >= 70 ? 'text-red-400' :
+                                                    analysisData.indicators.rsi <= 30 ? 'text-green-400' : ''
+                                                    }`}>
+                                                    {analysisData.indicators.rsi.toFixed(1)}
+                                                </span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-400">MACDヒスト</span>
+                                                <span className={`font-mono ${analysisData.indicators.macdHistogram > 0 ? 'text-green-400' : 'text-red-400'
+                                                    }`}>
+                                                    {analysisData.indicators.macdHistogram.toFixed(4)}
+                                                </span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-400">SMA(20)</span>
+                                                <span className="font-mono">{analysisData.indicators.sma20.toFixed(2)}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* 12次元特徴量 */}
+                                    <div className="bg-gray-800 rounded-lg p-4">
+                                        <h2 className="text-xl font-semibold mb-3">🧬 12次元特徴量</h2>
+                                        <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                                            {analysisData.featureVector.detailed.map((feature) => (
+                                                <div key={feature.index} className="bg-gray-700 rounded p-2">
+                                                    <div className="flex justify-between items-center mb-1">
+                                                        <span className="text-sm flex items-center gap-1">
+                                                            {feature.name}
+                                                            <span
+                                                                className="text-gray-400 cursor-help relative group"
+                                                                title={feature.description}
+                                                            >
+                                                                ⓘ
+                                                                {/* ツールチップ */}
+                                                                <span className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-2 py-1 bg-gray-900 text-gray-200 text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 shadow-lg border border-gray-600">
+                                                                    {feature.description}
+                                                                </span>
+                                                            </span>
+                                                        </span>
+                                                        <span className="font-mono text-sm">{feature.displayValue}</span>
+                                                    </div>
+                                                    <div className="w-full bg-gray-600 rounded-full h-2">
+                                                        <div
+                                                            className={`h-2 rounded-full ${getFeatureColor(feature.value, feature.index)}`}
+                                                            style={{
+                                                                width: `${Math.abs(feature.value) * 100}%`,
+                                                                marginLeft: feature.index === 0 && feature.value < 0 ? 'auto' : 0,
+                                                            }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {!analysisData && !loading && !error && (
+                            <div className="text-center py-16">
+                                <div className="text-6xl mb-4">📊</div>
+                                <p className="text-gray-400 text-lg">
+                                    シンボルを選択して「データ取得」ボタンをクリックしてください
+                                </p>
+                            </div>
+                        )}
+                    </div>
                 </div>
             )}
         </div>

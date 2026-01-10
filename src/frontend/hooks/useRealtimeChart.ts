@@ -11,7 +11,7 @@
  * - 接続状態の監視
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { EventSourcePolyfill } from 'event-source-polyfill';
 
 // ========================================
@@ -84,12 +84,16 @@ export interface UseRealtimeChartResult {
   isConnected: boolean;
   /** ローディング中か */
   isLoading: boolean;
+  /** 市場が閉まっている可能性があるか（5分以上Tick未受信） */
+  isMarketClosed: boolean;
   /** 接続開始 */
   connect: () => Promise<void>;
   /** 切断 */
   disconnect: () => void;
   /** シンボル購読 */
   subscribe: (symbols: string[]) => Promise<void>;
+  /** 自動接続を有効化するフラグ（初期表示・復帰時に使用） */
+  setAutoConnectEnabled: (enabled: boolean) => void;
 }
 
 /**
@@ -98,7 +102,72 @@ export interface UseRealtimeChartResult {
 export interface UseRealtimeChartOptions {
   /** 時間足（秒） */
   timeframe?: number;
+  /** コンポーネントのアンマウントでも接続を維持するか */
+  persistConnection?: boolean;
+  /** マウント時に自動接続するか */
+  autoConnect?: boolean;
 }
+
+// ========================================
+// 共有ステート（ページ跨ぎの接続維持用）
+// ========================================
+
+interface SharedState {
+  bars: OHLCVBar[];
+  pendingBar: PendingBar | null;
+  latestTick: TickData | null;
+  status: ConnectionStatus;
+  error: string | null;
+  isLoading: boolean;
+  isMarketClosed: boolean;
+  lastTickTime: number | null;
+  symbol: string | null;
+  timeframe: number;
+  autoConnectEnabled: boolean;
+}
+
+let sharedEventSource: EventSourcePolyfill | null = null;
+let sharedState: SharedState = {
+  bars: [],
+  pendingBar: null,
+  latestTick: null,
+  status: 'disconnected',
+  error: null,
+  isLoading: false,
+  isMarketClosed: false,
+  lastTickTime: null,
+  symbol: null,
+  timeframe: 60,
+  autoConnectEnabled: false,
+};
+
+type Subscriber = (snapshot: SharedState) => void;
+const subscribers = new Set<Subscriber>();
+
+const emitSharedState = () => {
+  const snapshot = { ...sharedState };
+  subscribers.forEach((cb) => cb(snapshot));
+};
+
+const disconnectShared = () => {
+  if (sharedEventSource) {
+    sharedEventSource.close();
+    sharedEventSource = null;
+  }
+  sharedState = {
+    ...sharedState,
+    bars: [],
+    pendingBar: null,
+    latestTick: null,
+    status: 'disconnected',
+    error: null,
+    isLoading: false,
+    isMarketClosed: false,
+    lastTickTime: null,
+    symbol: null,
+  };
+  emitSharedState();
+};
 
 // ========================================
 // カスタムフック
@@ -108,29 +177,43 @@ export function useRealtimeChart(
   symbol: string,
   options: UseRealtimeChartOptions = {}
 ): UseRealtimeChartResult {
-  const { timeframe = 60 } = options;
-  const [bars, setBars] = useState<OHLCVBar[]>([]);
-  const [pendingBar, setPendingBar] = useState<PendingBar | null>(null);
-  const [latestTick, setLatestTick] = useState<TickData | null>(null);
-  const [status, setStatus] = useState<ConnectionStatus>('disconnected');
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const { timeframe = 60, persistConnection = false, autoConnect = false } = options;
+  const [bars, setBars] = useState<OHLCVBar[]>(sharedState.bars);
+  const [pendingBar, setPendingBar] = useState<PendingBar | null>(sharedState.pendingBar);
+  const [latestTick, setLatestTick] = useState<TickData | null>(sharedState.latestTick);
+  const [status, setStatus] = useState<ConnectionStatus>(sharedState.status);
+  const [error, setError] = useState<string | null>(sharedState.error);
+  const [isLoading, setIsLoading] = useState(sharedState.isLoading);
+  const [isMarketClosed, setIsMarketClosed] = useState(sharedState.isMarketClosed);
+  const [, setRenderTick] = useState(0); // 強制再レンダー用
 
-  // EventSourcePolyfill の型を定義（withCredentials 対応）
-  const eventSourceRef = useRef<EventSourcePolyfill | null>(null);
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3100';
 
   /**
    * SSE 接続を開始
    */
   const connect = useCallback(async () => {
-    if (eventSourceRef.current) {
-      console.log('[useRealtimeChart] 既に接続中です');
-      return;
+    if (sharedEventSource) {
+      // 同じシンボル・時間足ならそのまま利用
+      if (sharedState.symbol === symbol && sharedState.timeframe === timeframe) {
+        console.log('[useRealtimeChart] 既に接続中です（共有接続）');
+        sharedState = { ...sharedState, isLoading: false, status: 'connected' };
+        emitSharedState();
+        return;
+      }
+      // 異なる場合は切断して張り直し
+      disconnectShared();
     }
 
-    setIsLoading(true);
-    setError(null);
+    sharedState = {
+      ...sharedState,
+      isLoading: true,
+      error: null,
+      status: 'connecting',
+      symbol,
+      timeframe,
+    };
+    emitSharedState();
 
     try {
       // 1. まず cTrader に接続
@@ -167,13 +250,12 @@ export function useRealtimeChart(
           heartbeatTimeout: 120000, // 2分のハートビートタイムアウト
         }
       );
-      eventSourceRef.current = eventSource;
+      sharedEventSource = eventSource;
 
       eventSource.onopen = () => {
         console.log('[useRealtimeChart] SSE 接続成功');
-        setStatus('connected');
-        setIsLoading(false);
-        setError(null); // エラーをクリア
+        sharedState = { ...sharedState, status: 'connected', isLoading: false, error: null };
+        emitSharedState();
       };
 
       eventSource.onerror = (e) => {
@@ -185,9 +267,13 @@ export function useRealtimeChart(
         // readyState が CLOSED (2) の場合のみエラー扱い
         if (readyState === 2) {
           console.warn('[useRealtimeChart] SSE 接続が切断されました');
-          setStatus('error');
-          setError('SSE 接続が切断されました');
-          setIsLoading(false);
+          sharedState = {
+            ...sharedState,
+            status: 'error',
+            error: 'SSE 接続が切断されました',
+            isLoading: false,
+          };
+          emitSharedState();
         } else if (readyState === 0) {
           // 接続中のエラーは一時的なものの可能性があるのでログのみ
           console.log('[useRealtimeChart] SSE 再接続中...', { readyState });
@@ -211,41 +297,51 @@ export function useRealtimeChart(
       addSSEListener('init', (data) => {
         const parsed = JSON.parse(data);
         console.log('[useRealtimeChart] 初期データ受信:', parsed.bars?.length, 'バー');
-        setBars(parsed.bars || []);
-        setPendingBar(parsed.pendingBar || null);
-        setStatus(parsed.status || 'connected');
+        sharedState = {
+          ...sharedState,
+          bars: parsed.bars || [],
+          pendingBar: parsed.pendingBar || null,
+          status: parsed.status || 'connected',
+        };
+        emitSharedState();
       });
 
       // Tick 受信
       addSSEListener('tick', (data) => {
         const tick = JSON.parse(data);
-        setLatestTick(tick);
+        sharedState = {
+          ...sharedState,
+          latestTick: tick,
+          lastTickTime: Date.now(),
+          isMarketClosed: false,
+        };
+        emitSharedState();
       });
 
       // バー確定
       addSSEListener('bar', (data) => {
         const bar = JSON.parse(data);
         console.log('[useRealtimeChart] バー確定:', bar.timestamp);
-        setBars(prev => {
-          // 重複を避けて追加
-          const exists = prev.some(b => b.timestamp === bar.timestamp);
-          if (exists) return prev;
-          // 最新60本を保持
-          const newBars = [...prev, bar];
-          return newBars.slice(-60);
-        });
+        const exists = sharedState.bars.some((b) => b.timestamp === bar.timestamp);
+        if (!exists) {
+          const newBars = [...sharedState.bars, bar].slice(-60);
+          sharedState = { ...sharedState, bars: newBars };
+          emitSharedState();
+        }
       });
 
       // 進行中バー更新
       addSSEListener('pendingBar', (data) => {
         const bar = JSON.parse(data);
-        setPendingBar(bar);
+        sharedState = { ...sharedState, pendingBar: bar };
+        emitSharedState();
       });
 
       // 接続状態変更
       addSSEListener('status', (data) => {
         const parsed = JSON.parse(data);
-        setStatus(parsed.status);
+        sharedState = { ...sharedState, status: parsed.status };
+        emitSharedState();
       });
 
       // ハートビート
@@ -255,9 +351,13 @@ export function useRealtimeChart(
 
     } catch (err) {
       console.error('[useRealtimeChart] 接続エラー:', err);
-      setError(err instanceof Error ? err.message : '接続エラー');
-      setStatus('error');
-      setIsLoading(false);
+      sharedState = {
+        ...sharedState,
+        error: err instanceof Error ? err.message : '接続エラー',
+        status: 'error',
+        isLoading: false,
+      };
+      emitSharedState();
     }
   }, [apiBase, symbol, timeframe]);
 
@@ -265,11 +365,7 @@ export function useRealtimeChart(
    * 切断
    */
   const disconnect = useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
-    setStatus('disconnected');
+    disconnectShared();
     console.log('[useRealtimeChart] 切断しました');
   }, []);
 
@@ -294,13 +390,89 @@ export function useRealtimeChart(
   }, [apiBase]);
 
   /**
+   * 自動接続フラグを共有ステートに設定
+   */
+  const setAutoConnectEnabled = useCallback((enabled: boolean) => {
+    sharedState = { ...sharedState, autoConnectEnabled: enabled };
+    emitSharedState();
+  }, []);
+
+  /**
+   * オプションから自動接続フラグを初期設定
+   */
+  useEffect(() => {
+    if (autoConnect) {
+      setAutoConnectEnabled(true);
+    }
+  }, [autoConnect, setAutoConnectEnabled]);
+
+  /**
    * シンボルまたは時間足変更時に再接続
    */
   useEffect(() => {
     return () => {
-      disconnect();
+      // persistConnection が false の場合のみクリーンアップ
+      if (!persistConnection) {
+        disconnect();
+      }
     };
-  }, [symbol, timeframe, disconnect]);
+  }, [symbol, timeframe, disconnect, persistConnection]);
+
+  /**
+   * 市場クローズ検出（5分以上Tickが来ていない場合）
+   */
+  useEffect(() => {
+    if (status !== 'connected') {
+      setIsMarketClosed(false);
+      return;
+    }
+
+    const checkInterval = setInterval(() => {
+      const lastTickTime = sharedState.lastTickTime;
+      if (lastTickTime) {
+        const elapsed = Date.now() - lastTickTime;
+        const MARKET_CLOSE_THRESHOLD = 5 * 60 * 1000; // 5分
+        setIsMarketClosed(elapsed > MARKET_CLOSE_THRESHOLD);
+      }
+    }, 10000); // 10秒ごとにチェック
+
+    return () => clearInterval(checkInterval);
+  }, [status]);
+
+  // 共有ステート購読
+  useEffect(() => {
+    const handleUpdate: Subscriber = (snapshot) => {
+      setBars(snapshot.bars);
+      setPendingBar(snapshot.pendingBar);
+      setLatestTick(snapshot.latestTick);
+      setStatus(snapshot.status);
+      setError(snapshot.error);
+      setIsLoading(snapshot.isLoading);
+      setIsMarketClosed(snapshot.isMarketClosed);
+      // autoConnectEnabledがtrueになった場合にマウント直後でも反映させるためのレンダートリガ
+      setRenderTick((v) => v + 1);
+    };
+
+    subscribers.add(handleUpdate);
+    // 初期同期
+    handleUpdate(sharedState);
+
+    return () => {
+      subscribers.delete(handleUpdate);
+      if (!persistConnection && subscribers.size === 0) {
+        disconnectShared();
+      }
+    };
+  }, [persistConnection]);
+
+  // 初期マウント/復帰時の自動接続
+  useEffect(() => {
+    // すでに接続中なら何もしない
+    if (sharedState.status === 'connected') return;
+    if (autoConnect || sharedState.autoConnectEnabled) {
+      void connect();
+    }
+  }, [autoConnect, connect]);
 
   return {
     bars,
@@ -310,9 +482,11 @@ export function useRealtimeChart(
     error,
     isConnected: status === 'connected',
     isLoading,
+    isMarketClosed,
     connect,
     disconnect,
     subscribe,
+    setAutoConnectEnabled,
   };
 }
 

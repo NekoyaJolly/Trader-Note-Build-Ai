@@ -13,7 +13,7 @@
  * - 接続状態インジケーター
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { ReactNode, useEffect, useMemo, useState } from 'react';
 import { useRealtimeChart, OHLCVBar, PendingBar, ConnectionStatus } from '@/hooks/useRealtimeChart';
 import { CandlestickChart, DrawnLine, OHLCVDataPoint } from './CandlestickChart';
 
@@ -32,9 +32,21 @@ interface RealtimeChartProps {
   initialTimeframe?: number;
   /** 時間足変更時のコールバック */
   onTimeframeChange?: (timeframe: number) => void;
+  /** シンボル変更時のコールバック */
+  onSymbolChange?: (symbol: string) => void;
   /** ライン保存状況の通知（マルチチャート連携用） */
   onLinesChange?: (lines: DrawnLine[]) => void;
+  /** 右側アクションの表示スロット（表示モード切替などを想定） */
+  rightAction?: ReactNode;
 }
+
+// シンボル選択肢
+const SYMBOL_OPTIONS = [
+  { value: 'XAUUSD', label: 'XAU/USD' },
+  { value: 'EURUSD', label: 'EUR/USD' },
+  { value: 'USDJPY', label: 'USD/JPY' },
+  { value: 'GBPUSD', label: 'GBP/USD' },
+];
 
 // 時間足オプション（1分足以上のみ - cTrader APIでサポート）
 const TIMEFRAME_OPTIONS = [
@@ -52,7 +64,9 @@ const LINE_WIDTH_OPTIONS = [1, 2, 3, 4];
 
 interface PricePanelProps {
   bar: PendingBar | OHLCVBar | null;
-  isPending?: boolean;
+  dailyHigh: number | null;
+  dailyLow: number | null;
+  previousClose: number | null;
 }
 
 // 接続状態バッジ
@@ -77,7 +91,7 @@ const StatusBadge = ({ status }: { status: ConnectionStatus }) => {
 };
 
 // 価格パネル
-const PricePanel = ({ bar, isPending = false }: PricePanelProps) => {
+const PricePanel = ({ bar, dailyHigh, dailyLow, previousClose }: PricePanelProps) => {
   if (!bar) {
     return (
       <div className="bg-gray-800 rounded-lg p-3 text-sm text-gray-500 border border-gray-700">
@@ -86,50 +100,55 @@ const PricePanel = ({ bar, isPending = false }: PricePanelProps) => {
     );
   }
 
-  const priceChange = bar.close - bar.open;
-  const priceChangePercent = bar.open !== 0 ? (priceChange / bar.open) * 100 : 0;
-  const isPositive = priceChange >= 0;
   const timestamp = 'startTime' in bar ? bar.startTime : bar.timestamp;
-  const timeLabel = new Date(timestamp).toLocaleTimeString('ja-JP');
+  const timeLabel = new Date(timestamp).toLocaleTimeString('ja-JP', { hour12: false });
+
+  const dayChange = previousClose != null ? bar.close - previousClose : null;
+  const dayChangePercent = previousClose && previousClose !== 0 ? (dayChange / previousClose) * 100 : null;
+  const changeColor = dayChange != null ? (dayChange >= 0 ? 'text-green-400' : 'text-red-400') : 'text-gray-400';
+  const formatNullable = (val: number | null) => (val == null ? '-' : val.toFixed(2));
+  const dayChangePercentLabel = dayChangePercent == null
+    ? '--%'
+    : `${dayChangePercent >= 0 ? '+' : ''}${dayChangePercent.toFixed(2)}%`;
 
   return (
-    <div className="bg-gray-800 rounded-lg p-3 border border-gray-700">
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-white font-semibold">{isPending ? '進行中バー' : '最新バー'}</span>
-          <span className="text-xs text-gray-400">{timeLabel}</span>
-        </div>
-        <span className="text-xs text-gray-400">Tick: {bar.tickCount}</span>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2 text-sm">
-        <div>
-          <div className="text-gray-400 text-xs">現在価格</div>
-          <div className={`text-2xl font-mono font-bold ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
-            {bar.close.toFixed(2)}
-          </div>
-          <div className={`text-sm ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
-            {isPositive ? '+' : ''}{priceChange.toFixed(2)} ({isPositive ? '+' : ''}{priceChangePercent.toFixed(2)}%)
-          </div>
+    <div className="bg-gray-800 rounded-lg p-2">
+      <div className="flex flex-nowrap items-center gap-1.5 text-sm overflow-x-auto">
+        <div className="flex-none w-[90px] bg-gray-900/60 rounded px-2 py-1">
+          <div className="text-[10px] text-gray-400 whitespace-nowrap">現在価格</div>
+          <div className="text-base font-mono font-bold text-green-400 leading-tight whitespace-nowrap">{bar.close.toFixed(2)}</div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 text-sm">
-          <div>
-            <div className="text-gray-400 text-xs">始値</div>
-            <div className="font-mono">{bar.open.toFixed(2)}</div>
+        <div className="flex-none w-[90px] bg-gray-900/60 rounded px-2 py-1">
+          <div className="text-[10px] text-gray-400 whitespace-nowrap">時刻</div>
+          <div className="font-mono text-xs text-gray-200 leading-tight whitespace-nowrap">{timeLabel}</div>
+        </div>
+
+        <div className="flex-none w-[90px] bg-gray-900/60 rounded px-2 py-1">
+          <div className="text-[10px] text-gray-400 whitespace-nowrap">前日比（{dayChangePercentLabel}）</div>
+          <div className={`font-mono text-xs ${changeColor} leading-tight whitespace-nowrap`}>
+            {dayChange == null ? '-' : `${dayChange >= 0 ? '+' : ''}${dayChange.toFixed(2)}`}
           </div>
-          <div>
-            <div className="text-gray-400 text-xs">高値</div>
-            <div className="font-mono text-green-400">{bar.high.toFixed(2)}</div>
-          </div>
-          <div>
-            <div className="text-gray-400 text-xs">安値</div>
-            <div className="font-mono text-red-400">{bar.low.toFixed(2)}</div>
-          </div>
-          <div>
-            <div className="text-gray-400 text-xs">Tick数</div>
-            <div className="font-mono">{bar.tickCount}</div>
-          </div>
+        </div>
+
+        <div className="flex-none w-[90px] bg-gray-900/60 rounded px-2 py-1">
+          <div className="text-[10px] text-gray-400 whitespace-nowrap">高値</div>
+          <div className="font-mono text-xs text-green-400 leading-tight whitespace-nowrap">{bar.high.toFixed(2)}</div>
+        </div>
+
+        <div className="flex-none w-[90px] bg-gray-900/60 rounded px-2 py-1">
+          <div className="text-[10px] text-gray-400 whitespace-nowrap">安値</div>
+          <div className="font-mono text-xs text-red-400 leading-tight whitespace-nowrap">{bar.low.toFixed(2)}</div>
+        </div>
+
+        <div className="flex-none w-[90px] bg-gray-900/60 rounded px-2 py-1">
+          <div className="text-[10px] text-gray-400 whitespace-nowrap">当日高値</div>
+          <div className="font-mono text-xs text-green-300 leading-tight whitespace-nowrap">{formatNullable(dailyHigh)}</div>
+        </div>
+
+        <div className="flex-none w-[90px] bg-gray-900/60 rounded px-2 py-1">
+          <div className="text-[10px] text-gray-400 whitespace-nowrap">当日安値</div>
+          <div className="font-mono text-xs text-red-300 leading-tight whitespace-nowrap">{formatNullable(dailyLow)}</div>
         </div>
       </div>
     </div>
@@ -146,11 +165,14 @@ export function RealtimeChart({
   // cTrader Trendbar API を使う都合上、デフォルトは 1分足（60秒）に合わせる
   initialTimeframe = 60,
   onTimeframeChange,
+  onSymbolChange,
   onLinesChange,
+  rightAction,
 }: RealtimeChartProps) {
   const [timeframe, setTimeframe] = useState(initialTimeframe);
   const [drawingMode, setDrawingMode] = useState<'none' | 'horizontal' | 'trend'>('none');
   const [drawnLines, setDrawnLines] = useState<DrawnLine[]>([]);
+  const [hasEverConnected, setHasEverConnected] = useState(false);
 
   // シンボル・時間足ごとのローカルストレージキー
   const storageKey = useMemo(() => `chart-lines-${symbol}-${timeframe}`, [symbol, timeframe]);
@@ -183,9 +205,16 @@ export function RealtimeChart({
     error,
     isConnected,
     isLoading,
+    isMarketClosed,
     connect,
     disconnect,
-  } = useRealtimeChart(symbol, { timeframe });
+  } = useRealtimeChart(symbol, { timeframe, persistConnection: true });
+
+  useEffect(() => {
+    if (isConnected) {
+      setHasEverConnected(true);
+    }
+  }, [isConnected]);
 
   // 時間足変更ハンドラ
   const handleTimeframeChange = (newTimeframe: number) => {
@@ -195,6 +224,15 @@ export function RealtimeChart({
     setTimeframe(newTimeframe);
     setDrawingMode('none');
     onTimeframeChange?.(newTimeframe);
+  };
+
+  // シンボル変更ハンドラ
+  const handleSymbolChange = (newSymbol: string) => {
+    if (isConnected) {
+      disconnect();
+    }
+    setDrawingMode('none');
+    onSymbolChange?.(newSymbol);
   };
 
   // 手動ラインの保存
@@ -294,65 +332,114 @@ export function RealtimeChart({
   // 最新の確定バーを取得
   const latestBar = bars.length > 0 ? bars[bars.length - 1] : null;
 
+  const { dailyHigh, dailyLow, previousClose } = useMemo(() => {
+    if (!latestBar) return { dailyHigh: null, dailyLow: null, previousClose: null };
+    const latestTs = new Date('startTime' in latestBar ? latestBar.startTime : latestBar.timestamp);
+    const dayStart = new Date(latestTs);
+    dayStart.setHours(0, 0, 0, 0);
+
+    const sameDayBars = bars.filter((barItem) => {
+      const ts = new Date('startTime' in barItem ? barItem.startTime : barItem.timestamp);
+      return ts >= dayStart && ts <= latestTs &&
+        ts.getFullYear() === latestTs.getFullYear() &&
+        ts.getMonth() === latestTs.getMonth() &&
+        ts.getDate() === latestTs.getDate();
+    });
+
+    const dailyHighVal = sameDayBars.length > 0 ? Math.max(...sameDayBars.map((b) => b.high)) : null;
+    const dailyLowVal = sameDayBars.length > 0 ? Math.min(...sameDayBars.map((b) => b.low)) : null;
+
+    const previousDayBars = bars.filter((barItem) => {
+      const ts = new Date('startTime' in barItem ? barItem.startTime : barItem.timestamp);
+      return ts < dayStart;
+    });
+    const previousCloseVal = previousDayBars.length > 0 ? previousDayBars[previousDayBars.length - 1].close : null;
+
+    return { dailyHigh: dailyHighVal, dailyLow: dailyLowVal, previousClose: previousCloseVal };
+  }, [bars, latestBar]);
+
   const drawingLabel = drawingMode === 'horizontal' ? '水平線' : drawingMode === 'trend' ? 'トレンドライン' : 'オフ';
 
   return (
     <div className="bg-gray-900 rounded-lg overflow-hidden">
-      {/* ヘッダー */}
-      <div className="bg-gray-800 px-4 py-3 flex items-center justify-between border-b border-gray-700">
-        <div className="flex items-center gap-3">
-          <h3 className="text-lg font-semibold text-white">{symbol}</h3>
+      {/* コンパクトヘッダー（1行） */}
+      <div className="bg-gray-800 px-3 py-2 flex items-center gap-3 border-b border-gray-700">
+        {/* シンボル選択 */}
+        <select
+          value={symbol}
+          onChange={(e) => handleSymbolChange(e.target.value)}
+          disabled={isConnected}
+          className={`bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 font-semibold ${
+            isConnected ? 'opacity-50 cursor-not-allowed' : 'hover:border-gray-500'
+          }`}
+        >
+          {SYMBOL_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
 
-          {/* 時間足選択 */}
-          <select
-            value={timeframe}
-            onChange={(e) => handleTimeframeChange(parseInt(e.target.value, 10))}
-            disabled={isConnected}
-            className={`bg-gray-700 text-white text-sm rounded px-2 py-1 border border-gray-600 ${
-              isConnected ? 'opacity-50 cursor-not-allowed' : 'hover:border-gray-500'
-            }`}
-          >
-            {TIMEFRAME_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}足
-              </option>
-            ))}
-          </select>
+        {/* 時間足選択 */}
+        <select
+          value={timeframe}
+          onChange={(e) => handleTimeframeChange(parseInt(e.target.value, 10))}
+          disabled={isConnected}
+          className={`bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 ${
+            isConnected ? 'opacity-50 cursor-not-allowed' : 'hover:border-gray-500'
+          }`}
+        >
+          {TIMEFRAME_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
 
-          <span className="text-gray-400 text-sm">リアルタイム</span>
-          <StatusBadge status={status} />
-        </div>
+        {/* 水平線ボタン */}
+        <button
+          onClick={() => setDrawingMode(drawingMode === 'horizontal' ? 'none' : 'horizontal')}
+          className={`p-1.5 text-xs rounded transition ${
+            drawingMode === 'horizontal' ? 'bg-yellow-600 text-black' : 'bg-gray-700 text-gray-200 hover:bg-gray-600'
+          }`}
+          title="水平線"
+        >
+          ↔︎
+        </button>
+
+        {/* トレンドラインボタン */}
+        <button
+          onClick={() => setDrawingMode(drawingMode === 'trend' ? 'none' : 'trend')}
+          className={`p-1.5 text-xs rounded transition ${
+            drawingMode === 'trend' ? 'bg-yellow-600 text-black' : 'bg-gray-700 text-gray-200 hover:bg-gray-600'
+          }`}
+          title="トレンドライン"
+        >
+          ↗︎
+        </button>
+
+        {/* クリアボタン */}
+        <button
+          onClick={handleClearLines}
+          className="px-2 py-1 text-xs rounded bg-gray-700 text-gray-200 hover:bg-gray-600"
+        >
+          クリア
+        </button>
+
+        <div className="flex-1" />
 
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 bg-gray-800 px-2 py-1 rounded border border-gray-700">
-            <button
-              onClick={() => setDrawingMode(drawingMode === 'horizontal' ? 'none' : 'horizontal')}
-              className={`px-2 py-1 text-xs rounded transition ${
-                drawingMode === 'horizontal' ? 'bg-yellow-600 text-black' : 'bg-gray-700 text-gray-200 hover:bg-gray-600'
-              }`}
-            >
-              水平線
-            </button>
-            <button
-              onClick={() => setDrawingMode(drawingMode === 'trend' ? 'none' : 'trend')}
-              className={`px-2 py-1 text-xs rounded transition ${
-                drawingMode === 'trend' ? 'bg-yellow-600 text-black' : 'bg-gray-700 text-gray-200 hover:bg-gray-600'
-              }`}
-            >
-              トレンドライン
-            </button>
-            <button
-              onClick={handleClearLines}
-              className="px-2 py-1 text-xs rounded bg-gray-700 text-gray-200 hover:bg-gray-600"
-            >
-              クリア
-            </button>
-          </div>
+          {/* ステータス */}
+          <StatusBadge status={status} />
 
+          {/* 接続/切断ボタン */}
           {isConnected ? (
             <button
-              onClick={disconnect}
-              className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-sm rounded transition"
+              onClick={() => {
+                setHasEverConnected(false);
+                disconnect();
+              }}
+              className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition"
             >
               切断
             </button>
@@ -360,12 +447,19 @@ export function RealtimeChart({
             <button
               onClick={connect}
               disabled={isLoading}
-              className={`px-3 py-1 text-white text-sm rounded transition ${
+              className={`px-3 py-1 text-white text-xs rounded transition ${
                 isLoading ? 'bg-gray-600 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'
               }`}
             >
               {isLoading ? '接続中...' : '接続'}
             </button>
+          )}
+
+          {/* 表示モード切替などの追加アクション */}
+          {rightAction && (
+            <div className="ml-1">
+              {rightAction}
+            </div>
           )}
         </div>
       </div>
@@ -377,20 +471,27 @@ export function RealtimeChart({
         </div>
       )}
 
-      {/* メインコンテンツ */}
-      <div className="p-4 space-y-4">
-        {/* 描画モードインフォ（常時表示） */}
-        <div className="bg-amber-900/30 border border-amber-500/50 text-amber-100 text-xs px-3 py-2 rounded flex items-center justify-between">
-          <span>描画モード: {drawingLabel}</span>
-          <span className="text-amber-200">左ドラッグで線を確定、ホイール操作は通常通り</span>
+      {/* 市場クローズ警告 */}
+      {isConnected && isMarketClosed && (
+        <div className="bg-yellow-900/50 border-b border-yellow-500 px-4 py-2">
+          <p className="text-yellow-300 text-sm">
+            ℹ️ 市場が閉まっている可能性があります（5分以上新しいデータが受信されていません）
+          </p>
         </div>
+      )}
 
-        {isConnected || bars.length > 0 ? (
-          <div className="space-y-4">
+      {/* メインコンテンツ */}
+      <div className="p-0.5 space-y-2">
+        {hasEverConnected || isConnected || bars.length > 0 ? (
+          <div className="space-y-2">
             {/* 情報パネル（価格） */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <PricePanel bar={pendingBar} isPending />
-              <PricePanel bar={latestBar} />
+            <div className="px-2">
+              <PricePanel
+                bar={latestBar}
+                dailyHigh={dailyHigh}
+                dailyLow={dailyLow}
+                previousClose={previousClose}
+              />
             </div>
 
             {/* チャート */}
@@ -406,51 +507,40 @@ export function RealtimeChart({
             </div>
 
             {/* 描画情報（手動ライン編集） */}
-            <div className="bg-gray-800 border border-gray-700 rounded-lg p-3">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-white font-semibold">描画情報</span>
-                  <span className="text-xs text-gray-400">シンボル×時間足ごとに保存</span>
-                </div>
-                <span className="text-xs text-gray-500">色・太さ変更や個別削除が可能</span>
-              </div>
+            <div className="bg-gray-800/50 border border-gray-700/50 rounded-lg p-2">
               {drawnLines.length === 0 ? (
-                <p className="text-xs text-gray-500">まだラインがありません。ヘッダーの描画モードをオンにして作成してください。</p>
+                <p className="text-xs text-gray-500 text-center">描画ライン無し</p>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   {drawnLines.map((line, idx) => (
                     <div
                       key={line.id}
-                      className="flex flex-wrap items-center gap-2 text-xs text-gray-100 bg-gray-900/60 rounded px-2 py-1 border border-gray-700/60"
+                      className="flex items-center gap-2 text-xs text-gray-100 bg-gray-900/60 rounded px-2 py-1 border border-gray-700/60"
                     >
-                      <span className="px-2 py-1 rounded bg-gray-700 text-gray-200">
-                        {line.type === 'horizontal' ? '水平線' : 'トレンド'} {idx + 1}
+                      <span className="px-1.5 py-0.5 rounded bg-gray-700 text-gray-200">
+                        {line.type === 'horizontal' ? '水平' : 'トレンド'} {idx + 1}
                       </span>
-                      <label className="flex items-center gap-1">
-                        <span className="text-gray-400">色</span>
-                        <input
-                          type="color"
-                          value={line.color ?? DEFAULT_LINE_COLOR}
-                          onChange={(e) => handleUpdateLine(line.id, { color: e.target.value })}
-                          className="w-9 h-9 rounded border border-gray-600 bg-gray-900 cursor-pointer"
-                        />
-                      </label>
-                      <label className="flex items-center gap-2">
-                        <span className="text-gray-400">太さ</span>
-                        <input
-                          type="range"
-                          min={Math.min(...LINE_WIDTH_OPTIONS)}
-                          max={Math.max(...LINE_WIDTH_OPTIONS)}
-                          step={1}
-                          value={line.lineWidth ?? DEFAULT_LINE_WIDTH}
-                          onChange={(e) => handleUpdateLine(line.id, { lineWidth: Number(e.target.value) })}
-                          className="accent-yellow-400"
-                        />
-                        <span className="text-gray-300">{(line.lineWidth ?? DEFAULT_LINE_WIDTH)}px</span>
-                      </label>
+                      <input
+                        type="color"
+                        value={line.color ?? DEFAULT_LINE_COLOR}
+                        onChange={(e) => handleUpdateLine(line.id, { color: e.target.value })}
+                        className="w-7 h-7 rounded border border-gray-600 bg-gray-900 cursor-pointer"
+                        title="色"
+                      />
+                      <input
+                        type="range"
+                        min={Math.min(...LINE_WIDTH_OPTIONS)}
+                        max={Math.max(...LINE_WIDTH_OPTIONS)}
+                        step={1}
+                        value={line.lineWidth ?? DEFAULT_LINE_WIDTH}
+                        onChange={(e) => handleUpdateLine(line.id, { lineWidth: Number(e.target.value) })}
+                        className="accent-yellow-400 w-16"
+                        title="太さ"
+                      />
+                      <span className="text-gray-400 text-xs">{(line.lineWidth ?? DEFAULT_LINE_WIDTH)}px</span>
                       <button
                         onClick={() => handleDeleteLine(line.id)}
-                        className="ml-auto px-2 py-1 text-xs rounded bg-red-700 text-white hover:bg-red-800"
+                        className="ml-auto px-1.5 py-0.5 text-xs rounded bg-red-700 text-white hover:bg-red-800"
                       >
                         削除
                       </button>
@@ -462,52 +552,46 @@ export function RealtimeChart({
 
             {/* Tick 情報 */}
             {latestTick && (
-              <div className="bg-gray-800 rounded-lg p-3 text-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-400">最新 Tick</span>
-                  <span className="text-gray-400 text-xs">{new Date(latestTick.timestamp).toLocaleTimeString('ja-JP')}</span>
+              <div className="bg-gray-800/50 rounded-lg p-2 text-xs border border-gray-700/50">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-gray-400">最新Tick</span>
+                  <span className="text-gray-500 text-xs">{new Date(latestTick.timestamp).toLocaleTimeString('ja-JP')}</span>
                 </div>
-                <div className="grid grid-cols-4 gap-4 mt-2">
+                <div className="grid grid-cols-4 gap-2">
                   <div>
-                    <span className="text-gray-400 text-xs">Bid</span>
-                    <div className="font-mono text-red-400">{latestTick.bid.toFixed(5)}</div>
+                    <span className="text-gray-500 text-xs">Bid</span>
+                    <div className="font-mono text-red-400 text-xs">{latestTick.bid.toFixed(5)}</div>
                   </div>
                   <div>
-                    <span className="text-gray-400 text-xs">Ask</span>
-                    <div className="font-mono text-green-400">{latestTick.ask.toFixed(5)}</div>
+                    <span className="text-gray-500 text-xs">Ask</span>
+                    <div className="font-mono text-green-400 text-xs">{latestTick.ask.toFixed(5)}</div>
                   </div>
                   <div>
-                    <span className="text-gray-400 text-xs">Mid</span>
-                    <div className="font-mono">{latestTick.mid.toFixed(5)}</div>
+                    <span className="text-gray-500 text-xs">Mid</span>
+                    <div className="font-mono text-xs">{latestTick.mid.toFixed(5)}</div>
                   </div>
                   <div>
-                    <span className="text-gray-400 text-xs">Spread</span>
-                    <div className="font-mono text-yellow-400">{(latestTick.spread * 10000).toFixed(1)} pips</div>
+                    <span className="text-gray-500 text-xs">Spread</span>
+                    <div className="font-mono text-yellow-400 text-xs">{(latestTick.spread * 10000).toFixed(1)}p</div>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* 統計情報 */}
-            <div className="text-xs text-gray-500 flex justify-between">
-              <span>確定バー: {bars.length}本 | 時間足: {getTimeframeLabel(timeframe)}</span>
-              <span>データソース: cTrader WebSocket</span>
-            </div>
           </div>
         ) : (
           // 未接続時の表示
-          <div className="flex flex-col items-center justify-center py-20 text-gray-400">
-            <div className="text-6xl mb-4">📡</div>
-            <p className="text-lg mb-2">リアルタイムデータ未接続</p>
-            <p className="text-sm mb-4">「接続」ボタンをクリックして cTrader WebSocket に接続してください</p>
+          <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+            <div className="text-5xl mb-3">📡</div>
+            <p className="text-sm mb-3">未接続</p>
             <button
               onClick={connect}
               disabled={isLoading}
-              className={`px-6 py-2 rounded-lg font-semibold transition ${
-                isLoading ? 'bg-gray-600 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white'
+              className={`px-4 py-1.5 rounded-lg text-sm transition ${
+                isLoading ? 'bg-gray-600 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 text-white'
               }`}
             >
-              {isLoading ? '接続中...' : '🔌 接続開始'}
+              {isLoading ? '接続中...' : '接続開始'}
             </button>
           </div>
         )}
