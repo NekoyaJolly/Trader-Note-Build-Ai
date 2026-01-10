@@ -186,6 +186,21 @@ function toVolumeData(ohlcv: OHLCVDataPoint[]): HistogramData<Time>[] {
   return Array.from(uniqueMap.values()).sort((a, b) => (a.time as number) - (b.time as number));
 }
 
+/**
+ * lightweight-charts の Time 型を秒単位のUTCタイムスタンプに正規化
+ */
+function timeToSeconds(time: Time): number {
+  if (typeof time === "number") {
+    return time;
+  }
+  if (typeof time === "string") {
+    const parsed = Date.parse(time);
+    return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : 0;
+  }
+  const date = Date.UTC(time.year, time.month - 1, time.day, 0, 0, 0);
+  return Math.floor(date / 1000);
+}
+
 // ========================================
 // Neon Dark テーマカラー
 // ========================================
@@ -238,8 +253,10 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const lastFitCountRef = useRef<number>(0);
   const draftPointRef = useRef<{ time: number; price: number } | null>(null);
   const isDraggingRef = useRef<boolean>(false);
+  const ohlcvMapRef = useRef<Map<number, OHLCVDataPoint>>(new Map());
 
   const [isLoading, setIsLoading] = useState(true);
+  const [activeBar, setActiveBar] = useState<OHLCVDataPoint | null>(null);
 
   // チャートの初期化
   useEffect(() => {
@@ -318,14 +335,39 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     // 理由: リアルタイム更新で ohlcvData が頻繁に変わるため、初期化をデータ依存にしない
     // 必要になったタイミングで data 更新側で遅延生成する
 
+    // 画面幅に応じてバー間隔や文字サイズを調整する
+    const applyResponsiveOptions = () => {
+      if (!chartRef.current) return;
+      const width = chartContainerRef.current?.clientWidth ?? window.innerWidth;
+      const isMobile = width < 768;
+      chartRef.current.applyOptions({
+        layout: {
+          fontSize: isMobile ? 11 : 12,
+        },
+        timeScale: {
+          barSpacing: isMobile ? 12 : 8,
+          rightOffset: isMobile ? 6 : 2,
+          minBarSpacing: isMobile ? 3 : 1,
+        },
+        rightPriceScale: {
+          scaleMargins: isMobile
+            ? { top: 0.18, bottom: 0.12 }
+            : { top: 0.1, bottom: 0.05 },
+        },
+      });
+    };
+
     // リサイズハンドラ
     const handleResize = () => {
       if (chartContainerRef.current && chartRef.current) {
         chartRef.current.applyOptions({
           width: chartContainerRef.current.clientWidth,
         });
+        applyResponsiveOptions();
       }
     };
+
+    applyResponsiveOptions();
 
     window.addEventListener("resize", handleResize);
 
@@ -396,6 +438,15 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       chartRef.current.timeScale().fitContent();
       lastFitCountRef.current = candleData.length;
     }
+  }, [ohlcvData]);
+
+  // クロスヘアヒット用の高速参照マップを更新
+  useEffect(() => {
+    const map = new Map<number, OHLCVDataPoint>();
+    ohlcvData.forEach((d) => {
+      map.set(Math.floor(d.timestamp / 1000), d);
+    });
+    ohlcvMapRef.current = map;
   }, [ohlcvData]);
 
   // 手動ラインの描画・更新
@@ -689,6 +740,23 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     e.stopPropagation();
   }, [drawingMode]);
 
+  // クロスヘア移動でタップ位置のOHLCをモバイルに表示する
+  useEffect(() => {
+    if (!chartRef.current) return;
+    const handler: Parameters<IChartApi["subscribeCrosshairMove"]>[0] = (param) => {
+      if (!param || !param.time) {
+        setActiveBar(null);
+        return;
+      }
+      const timeSec = timeToSeconds(param.time);
+      const hit = ohlcvMapRef.current.get(timeSec);
+      setActiveBar(hit ?? null);
+    };
+
+    chartRef.current.subscribeCrosshairMove(handler);
+    return () => chartRef.current?.unsubscribeCrosshairMove(handler);
+  }, [ohlcvData]);
+
   // インジケーターの描画
   useEffect(() => {
     if (!chartRef.current) return;
@@ -755,6 +823,8 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     markersPluginRef.current.setMarkers(chartMarkers);
   }, [markers]);
 
+  const fallbackBar = activeBar ?? (ohlcvData.length > 0 ? ohlcvData[ohlcvData.length - 1] : null);
+
   return (
     <div className={`relative ${className}`}>
       {/* ヘッダー */}
@@ -802,6 +872,42 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           }}
         />
       </div>
+
+        {/* モバイル用タップツールチップ（クロスヘア／タップで更新） */}
+        {fallbackBar && (
+          <div className="mt-2 md:hidden rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-[11px]">
+            <div className="flex items-center justify-between">
+              <span className="text-zinc-400">
+                {new Date(fallbackBar.timestamp).toLocaleTimeString('ja-JP', { hour12: false })}
+              </span>
+              <span
+                className={`font-mono font-semibold ${
+                  fallbackBar.close >= fallbackBar.open ? 'text-green-400' : 'text-red-400'
+                }`}
+              >
+                {fallbackBar.close.toFixed(2)}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 mt-1">
+              <div className="flex items-center justify-between text-zinc-400">
+                <span>始値</span>
+                <span className="font-mono text-zinc-200">{fallbackBar.open.toFixed(2)}</span>
+              </div>
+              <div className="flex items-center justify-between text-zinc-400">
+                <span>終値</span>
+                <span className="font-mono text-zinc-200">{fallbackBar.close.toFixed(2)}</span>
+              </div>
+              <div className="flex items-center justify-between text-zinc-400">
+                <span>高値</span>
+                <span className="font-mono text-green-300">{fallbackBar.high.toFixed(2)}</span>
+              </div>
+              <div className="flex items-center justify-between text-zinc-400">
+                <span>安値</span>
+                <span className="font-mono text-red-300">{fallbackBar.low.toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+        )}
 
       {/* ローディング表示 */}
       {isLoading && (

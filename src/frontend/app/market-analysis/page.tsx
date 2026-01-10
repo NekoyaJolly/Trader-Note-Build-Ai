@@ -150,9 +150,10 @@ export default function MarketAnalysisPage() {
 
     return (
         <div className="min-h-screen bg-gray-900 text-white p-6 space-y-4">
-            <div className="flex items-center justify-between">
-                <h1 className="text-3xl font-bold">
-                    {viewMode === 'realtime' ? '📡 リアルタイムチャート' : '📊 マーケット分析'}
+            <div className="hidden md:flex items-center justify-between">
+                <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-2">
+                    <span className="hidden md:inline">{viewMode === 'realtime' ? '📡' : '📊'}</span>
+                    <span>{viewMode === 'realtime' ? 'リアルタイムチャート' : 'マーケット分析'}</span>
                 </h1>
             </div>
 
