@@ -1,445 +1,264 @@
 # TradeAssist
 
-TradeAssist は、トレード履歴を自動的に構造化したトレードノートとして生成し、リアルタイム市場データとマッチングさせることで、実行可能なインサイトを提供する**ノート主体のインテリジェント取引支援システム**です。
+**TradeAssist** は、トレード履歴を自動的に構造化したノートに変換し、リアルタイム市場データとマッチングさせて通知する **取引支援システム** です。
 
-## コンセプト
+- **自動売買なし** - 人間の判断支援に徹する
+- **2つのサブシステム** - Side-A（人間用）と Side-B（AI用）で運用
 
-> **「過去の自分のトレードを"定義済みの知識資産（ノート）"へ変換し、現在市場と照合して"再現可能な優位性"を通知・発注導線で即実行できる状態にする」**
+---
 
-自動売買は一切行いません。判断の質を高める支援ツールとして設計されています。
+## 🧩 機能概要
 
-## Core Features
+### Side-A: TradeAssist（人間主体）
 
-### 1. ノート自動生成（Automatic Trade Note Generation）
-- CSV / Exchange API からのトレード履歴インポート
-- 12次元特徴量ベクトルによる市場状況の構造化
-- AI によるトレードサマリー自動生成
-- ノートは「評価の主語」として設計（NoteEvaluator アーキテクチャ）
+**トレード履歴をノート化→リアルタイムマッチング→通知**
 
-### 2. リアルタイム市場マッチング（Real-Time Market Matching）
-- **cTrader Open API（WebSocket/Tick）** によるリアルタイムデータ取得
-- 60秒ローリングウィンドウで Tick → OHLCV 集約
-- **NoteEvaluator 経由**でノートと現在市場を比較評価
-- 12次元コサイン類似度 + ルールベースチェック
-- 閾値超過時に通知発火（24時間上限30件）
+- 📥 CSV/cTrader API からトレード履歴をインポート
+- 📝 自動でトレードノート化（12次元特徴量 + AI要約）
+- 🔔 市場がノートの条件に合致したら通知
+- 📊 バックテスト（Walk-Forward分析対応）
+- 🎯 戦略管理（複数ストラテジーの作成・検証）
 
-### 3. スマート通知（Smart Notifications）
-- プッシュ通知 / アプリ内通知
-- 既読・未読管理
-- 冪等性・クールダウン・重複抑制による再通知防止
+### Side-B: TradeAssistant-AI（AI主体）
 
-### 4. 発注支援 UI（Order Support UI）
-- マッチしたノートから注文プリセット生成
-- 価格・数量のサジェスト表示
-- **自動発注なし** - すべての注文にユーザー確認が必要
+**AI が毎日のトレードプランを生成→仮想実行→自己分析**
 
-### 5. バックテスト機能（Backtest）
-- 過去データでのノート有効性検証
-- NoteEvaluator 経由での統一評価
-- 戦略別パフォーマンス分析
+- 🤖 毎朝 AI がその日のトレードプラン生成
+- 💭 仮想的にトレード実行・監視
+- 📚 結果を自動分析してノート化
+- 🔄 Side-A ノートとの比較分析
 
-## Installation
+---
 
-### Backend
+## 🚀 クイックスタート
+
+### 前提条件
+
+- Node.js 22+
+- PostgreSQL 14+
+- npm または yarn
+
+### 1. インストール
 
 ```bash
-# Install dependencies
+# リポジトリをクローン
+git clone https://github.com/NekoyaJolly/Trader-Note-Build-Ai.git
+cd Trader-Note-Build-Ai
+
+# Backend 依存関係インストール
 npm install
 
-# Copy environment configuration
+# Frontend 依存関係インストール
+cd src/frontend
+npm install
+cd ../..
+```
+
+### 2. 環境変数設定
+
+```bash
+# .env.example をコピー
 cp .env.example .env
+```
 
-# Edit .env with your configuration
-# - AI_API_KEY: Your AI service API key (OpenAI, etc.)
-# - MARKET_API_KEY: Your market data API key (Twelve Data)
-# - CTRADER_CLIENT_ID: cTrader Open API クライアントID
-# - CTRADER_CLIENT_SECRET: cTrader Open API シークレット
-# - PUSH_NOTIFICATION_KEY: Your push notification service key
-# - DATABASE_URL: PostgreSQL 接続文字列（例: postgresql://postgres:postgres@localhost:5432/tradeassist）
+**.env の設定項目**:
 
-# Prisma クライアントと初期マイグレーションを適用
+```env
+DATABASE_URL=
+BACKEND_PORT=
+NODE_ENV=
+
+AI_API_KEY=
+AI_MODEL=
+AI_BASE_URL=
+
+MARKET_API_URL=
+MARKET_API_KEY=
+
+CTRADER_CLIENT_ID=
+CTRADER_CLIENT_SECRET=
+CTRADER_REDIRECT_URI=
+
+MATCH_THRESHOLD=
+CHECK_INTERVAL_MINUTES=
+DAILY_NOTIFICATION_LIMIT=
+
+CRON_ENABLED=
+SAVE_EVALUATION_DIAGNOSTICS=
+
+VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
+VAPID_SUBJECT=
+```
+
+詳細は `.env.example` を参照。
+
+### 3. データベースセットアップ
+
+```bash
+# Prisma クライアント生成
 npm run prisma:generate
+
+# マイグレーション実行
 npm run prisma:migrate
 ```
 
-### Frontend (Phase5 UI)
+### 4. 開発サーバー起動
 
 ```bash
-# フロントエンドディレクトリに移動
-cd src/frontend
-
-# 依存関係インストール
-npm install
-
-# 環境変数設定
-cp .env.example .env.local
-
-# .env.local を編集してバックエンド URL を設定
-# NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
-```
-
-## Usage
-
-### Development Mode
-
-#### Backend のみ起動
-
-```bash
-npm run dev:backend
-```
-
-#### Frontend のみ起動
-
-```bash
-npm run dev:frontend
-```
-
-#### Backend + Frontend 同時起動
-
-```bash
+# Backend + Frontend 同時起動
 npm run dev
 ```
 
-* Backend: http://localhost:3100 (環境変数 `BACKEND_PORT` で変更可)
-* Frontend: http://localhost:3102 (デフォルト)
+- Backend: http://localhost:3100
+- Frontend: http://localhost:3102
 
-### Production Mode
-
+**個別起動**:
 ```bash
-# Build the project
-npm run build
+# Backend のみ
+npm run dev:backend
 
-# Start the server
-npm start
+# Frontend のみ
+npm run dev:frontend
 ```
 
-## API Endpoints
+### 5. cTrader 認証（リアルタイム通知を使う場合）
 
-### Trade Import & Notes
+1. cTrader Open API で OAuth アプリケーションを登録
+2. `CTRADER_CLIENT_ID` / `CTRADER_CLIENT_SECRET` を設定
+3. ブラウザで http://localhost:3102/onboarding にアクセス
+4. cTrader 認証フローを完了
 
-**Import trades from CSV（ノート自動生成）**
-```
-POST /api/trades/import/csv
-Body: { "filename": "sample_trades.csv" }
-Response: { 
-  "success": true, 
-  "tradesImported": 5, 
-  "tradesSkipped": 0,
-  "importErrors": [],
-  "insertedIds": ["uuid-1", "uuid-2", ...],
-  "notesGenerated": 5,
-  "noteIds": ["note-uuid-1", "note-uuid-2", ...]
-}
-```
+---
 
-**Upload CSV text（クライアントからCSVを送信）**
-```
-POST /api/trades/import/upload-text
-Body: { 
-  "filename": "my_trades.csv", 
-  "csvText": "timestamp,symbol,side,...\n..." 
-}
-Response: { 
-  "success": true, 
-  "tradesImported": 1, 
-  "noteIds": ["note-uuid-1"]
-}
-```
+## 📖 主要コマンド
 
-**Get all trade notes**
-```
-GET /api/trades/notes
-```
+### 開発
 
-**Get specific trade note**
-```
-GET /api/trades/notes/:id
-```
+| コマンド | 説明 |
+|----------|------|
+| `npm run dev` | Backend + Frontend 同時起動 |
+| `npm run dev:backend` | Backend のみ起動 (port 3100) |
+| `npm run dev:frontend` | Frontend のみ起動 (port 3102) |
+| `npm run kill:ports` | 3100/3102 ポートをクリーンアップ |
 
-### Matching
+### ビルド
 
-**Manually trigger match check**
-```
-POST /api/matching/check
-```
+| コマンド | 説明 |
+|----------|------|
+| `npm run build` | Backend + Frontend ビルド |
+| `npm run build:backend` | Backend のみビルド |
+| `npm run build:frontend` | Frontend のみビルド |
+| `npm start` | 本番サーバー起動 |
 
-**Get match history（DBから取得）**
-```
-GET /api/matching/history?symbol=BTCUSDT&limit=50
-Response: {
-  "success": true,
-  "count": 2,
-  "matches": [
-    {
-      "id": "uuid",
-      "noteId": "note-uuid",
-      "symbol": "BTCUSDT",
-      "matchScore": 0.85,
-      "threshold": 0.75,
-      "trendMatched": true,
-      "priceRangeMatched": true,
-      "reasons": [...],
-      "evaluatedAt": "2025-12-27T01:27:30Z"
-    }
-  ]
-}
-```
+### Prisma
 
-### Notifications
+| コマンド | 説明 |
+|----------|------|
+| `npm run prisma:generate` | Prisma クライアント生成 |
+| `npm run prisma:migrate` | マイグレーション実行 |
+| `npm run prisma:format` | schema.prisma フォーマット |
 
-**Get all notifications**
-```
-GET /api/notifications?unreadOnly=true
-```
+### テスト
 
-**Check and notify（再通知防止適用）**
-```
-POST /api/notifications/check
-※ 現在の実装ではリクエストボディは無視され、サーバ側で最新のマッチングを再実行します。
+| コマンド | 説明 |
+|----------|------|
+| `npm test` | 全テスト実行 |
+| `npm test -- --coverage` | カバレッジ付きテスト |
 
-Response: { 
-  "processed": 5,
-  "notified": 2,
-  "skipped": 3,
-  "shouldNotify": true,
-  "results": [
-    { "noteId": "uuid", "shouldNotify": true, "status": "sent" },
-    { "noteId": "uuid", "shouldNotify": false, "status": "skipped", "skipReason": "クールダウン中" }
-  ]
-}
-```
+---
 
-**Get notification logs**
-```
-GET /api/notifications/logs?symbol=BTCUSDT&limit=50
-```
+## 📡 API ドキュメント
 
-**Mark notification as read**
-```
-PUT /api/notifications/:id/read
-```
+詳細な API 仕様は [docs/API.md](docs/API.md) を参照してください。
 
-**Mark all as read**
-```
-PUT /api/notifications/read-all
-```
+主な機能:
+- トレード履歴のインポート・ノート自動生成
+- リアルタイムマッチング判定
+- 通知管理
+- バックテスト実行
 
-**Delete notification**
-```
-DELETE /api/notifications/:id
-```
+---
 
-### Orders
-
-**Generate order preset**
-```
-GET /api/orders/preset/:noteId
-```
-
-**Get order confirmation**
-```
-POST /api/orders/confirmation
-Body: {
-  "symbol": "BTCUSDT",
-  "side": "buy",
-  "price": 42500,
-  "quantity": 0.1
-}
-```
-
-### Health Check
-
-**Check server status**
-```
-GET /health
-```
-
-### Backtest
-
-**バックテスト実行**
-```
-POST /api/backtest
-Body: {
-  "noteId": "uuid",        // 対象ノートID
-  "symbol": "BTCUSDT",     // シンボル（省略可、ノートのsymbolを使用）
-  "from": "2024-01-01",    // 開始日（省略可）
-  "to": "2024-12-31",      // 終了日（省略可）
-  "limit": 100             // 最大データ件数（省略可）
-}
-Response: {
-  "success": true,
-  "results": [...],       // 評価結果配列
-  "summary": {
-    "totalEvaluations": 100,
-    "triggeredCount": 15,
-    "averageSimilarity": 0.68
-  }
-}
-```
-
-**バックテスト履歴取得**
-```
-GET /api/backtest/results?noteId=uuid&limit=50
-```
-
-## Architecture
-
-### NoteEvaluator アーキテクチャ
-
-TradeAssist は「ノート主体」の設計を採用しています。
+## 📂 プロジェクト構造
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      NoteEvaluator                       │
-│  ノートを「評価の主語」として扱う抽象インターフェース     │
-├─────────────────────────────────────────────────────────┤
-│  getRequiredIndicators(): IndicatorSpec[]               │
-│  buildEntryVector(snapshot): number[]                    │
-│  evaluate(snapshot): EvaluationResult                    │
-└─────────────────────────────────────────────────────────┘
-         ▲                              ▲
-         │                              │
-┌────────┴────────┐           ┌────────┴────────┐
-│ LegacyAdapter   │           │ UserIndicator   │
-│ (12次元固定)    │           │ (可変次元)      │
-└─────────────────┘           └─────────────────┘
+/
+├── AGENTS.md              # AI エージェント向け開発ガイド（最優先）
+├── README.md              # 本ファイル
+├── NOTE.md                # ノート定義の正規リファレンス
+├── package.json           # npm スクリプト・依存関係
+├── tsconfig.json          # TypeScript 設定
+├── prisma/
+│   └── schema.prisma      # DB スキーマ定義
+├── src/
+│   ├── index.ts           # エントリーポイント
+│   ├── app.ts             # Express アプリ設定
+│   ├── backend/           # Side-A バックエンド
+│   │   ├── api/           # cTrader / OHLCV / Pattern 等
+│   │   ├── services/      # ビジネスロジック
+│   │   └── tests/         # テストファイル
+│   ├── controllers/       # リクエストハンドラ
+│   ├── services/          # 共通サービス
+│   ├── models/            # 型定義・スキーマ
+│   ├── domain/            # ドメインロジック（NoteEvaluator等）
+│   ├── infrastructure/    # 外部接続（DB, API）
+│   ├── routes/            # Express ルート定義
+│   ├── middleware/        # Express ミドルウェア
+│   ├── schemas/           # Zod バリデーションスキーマ
+│   ├── utils/             # ユーティリティ
+│   ├── config/            # 設定ファイル
+│   ├── frontend/          # Next.js フロントエンド
+│   │   ├── app/           # App Router ページ
+│   │   ├── components/    # React コンポーネント
+│   │   └── lib/           # フロント共通ロジック
+│   └── side-b/            # Side-B 実装
+│       ├── controllers/   # Side-B API コントローラー
+│       ├── services/      # Research AI / Plan AI / VirtualTrading
+│       ├── repositories/  # DB アクセス層
+│       ├── orchestrator/  # 日次バッチオーケストレーター
+│       ├── models/        # Side-B 型定義
+│       ├── routes/        # Side-B ルート
+│       └── tests/         # Side-B テスト
+├── docs/
+│   ├── ARCHITECTURE.md    # アーキテクチャ詳細仕様
+│   ├── API.md             # API仕様
+│   ├── side-b/            # Side-B 設計ドキュメント
+│   │   ├── TradeAssistant-AI.md
+│   │   ├── phase-a-trade-plan.md
+│   │   ├── phase-b-virtual-trading.md
+│   │   ├── phase-c-ai-trade-note.md
+│   │   └── phase-d-integration.md
+│   └── phase{N}/          # 各フェーズの設計資料
+├── indicators/            # インジケーター概念定義
+├── scripts/               # 運用スクリプト
+│   ├── run-daily-batch.ts      # Side-B 日次バッチ
+│   ├── run-realtime-worker.ts  # Side-A リアルタイムワーカー
+│   ├── run-ohlcv-ingest.ts     # OHLCV データ取込
+│   └── test-*.ts               # 各種テストスクリプト
+└── data/                  # ローカルデータ（Git管理外推奨）
+    ├── trades/            # CSVインポート用
+    ├── notes/             # ノートJSON
+    └── ohlcv/             # OHLCVデータ
 ```
 
-**設計原則:**
-- Service は類似度を直接計算しない
-- Service は閾値を知らない
-- Service は `NoteEvaluator.evaluate()` を呼ぶだけ
-- EntryVector 構築はノート側の責務
+---
 
-### Services
+## 📚 ドキュメント
 
-- **TradeImportService**: CSV/API からのトレードデータ取込（自動ノート生成呼び出し）
-- **TradeNoteService**: 構造化トレードノートの生成・管理（FS 保存、MarketDataService 経由でインジケーター取得）
-- **AISummaryService**: AI によるトレードサマリー生成
-- **MarketDataService**: リアルタイム市場データ取得（indicatorService 経由で RSI/MACD/BB/SMA/EMA 計算）
-- **FeatureVectorService**: 12次元特徴量ベクトルの生成・比較
-- **NoteEvaluatorAdapter**: NoteEvaluator インターフェースの実装（Legacy/UserIndicator）
-- **MatchingService**: NoteEvaluator 経由でノートと現在市場を評価（MatchResult を DB 永続化）
-- **BacktestService**: NoteEvaluator 経由で過去データ評価
-- **NotificationService**: 通知管理（プッシュ & アプリ内、FS 保存）
-- **NotificationTriggerService**: 通知判定・冪等性・クールダウン・重複抑制（NotificationLog を DB 永続化）
+- [AGENTS.md](AGENTS.md) - 開発者向けガイド
+- [NOTE.md](NOTE.md) - ノート定義の仕様
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - アーキテクチャ詳細
+- [docs/API.md](docs/API.md) - API仕様
 
-### 12次元特徴量ベクトル
+Side-B関連:
+- [docs/side-b/TradeAssistant-AI.md](docs/side-b/TradeAssistant-AI.md)
+- [docs/side-b/phase-a-trade-plan.md](docs/side-b/phase-a-trade-plan.md)
+- [docs/side-b/phase-b-virtual-trading.md](docs/side-b/phase-b-virtual-trading.md)
+- [docs/side-b/phase-c-ai-trade-note.md](docs/side-b/phase-c-ai-trade-note.md)
 
-市場状況を数値化するための統一ベクトル形式：
+---
 
-```
-[0]  RSI(14) 正規化値
-[1]  MACD ヒストグラム正規化値
-[2]  MACD シグナルクロス状態
-[3]  BB 位置（%B）
-[4]  BB バンド幅正規化値
-[5]  SMA(20) 乖離率
-[6]  EMA(12) 乖離率
-[7]  価格変化率（直近N本）
-[8]  出来高変化率
-[9]  トレンド方向（-1/0/1）
-[10] ボラティリティ正規化値
-[11] モメンタム複合指標
-```
-
-### Matching Algorithm
-
-1. **特徴量抽出**: NoteEvaluator がノートと市場から特徴量ベクトルを構築
-2. **コサイン類似度**: 12次元ベクトル間の類似度計算（NaN/Infinity 防御付き）
-3. **ルールベースチェック**: トレンド一致・価格範囲の追加検証
-4. **スコア統合**: 類似度 + トレンド + 価格範囲 → 最終スコア（重み: 0.6 / 0.3 / 0.1）
-5. **閾値フィルタ**: 設定閾値超過時のみ通知発火
-6. **通知抑制**: 冪等性（noteId×snapshotId×channel）、クールダウン（1時間）、重複抑制（5秒）
-
-### Scheduler
-
-The matching scheduler runs automatically at configured intervals (default: 15 minutes) to:
-- Check all stored trade notes against current market conditions
-- Generate match scores for each symbol
-- Send notifications for matches above threshold
-
-## CSV Format
-
-Place CSV files in `data/trades/` directory with the following format:
-
-```csv
-timestamp,symbol,side,price,quantity,fee,exchange
-2024-01-15T10:30:00Z,BTCUSDT,buy,42500.00,0.1,4.25,Binance
-```
-
-## Configuration
-
-Edit `.env` to configure:
-
-- `BACKEND_PORT` / `PORT`: Server port (default: 3100)
-- `DATABASE_URL`: PostgreSQL connection string (required)
-- `AI_API_KEY`: Your AI service API key
-- `AI_MODEL`: AI model to use (default: gpt-5-mini)
-- `AI_BASE_URL`: AI API base URL (default: https://api.openai.com/v1)
-- `MARKET_API_URL`: Market data API URL (Twelve Data)
-- `MARKET_API_KEY`: Market data API key (Twelve Data)
-- `CTRADER_CLIENT_ID`: cTrader Open API クライアントID
-- `CTRADER_CLIENT_SECRET`: cTrader Open API シークレット
-- `CTRADER_REDIRECT_URI`: OAuth コールバック URL
-- `MATCH_THRESHOLD`: Match score threshold (0-1, default: 0.75)
-- `CHECK_INTERVAL_MINUTES`: Matching check interval (default: 15)
-- `DAILY_NOTIFICATION_LIMIT`: 24時間あたりの通知上限（default: 30）
-- `CRON_ENABLED`: Enable scheduler (default: true)
-- `PUSH_NOTIFICATION_KEY`: Push notification service key
-
-## Web UI
-
-TradeAssist は統合された Web UI を提供しています。
-
-### 実装画面
-
-| パス | 機能 |
-|------|------|
-| `/` | ホーム画面（システム概要、ナビゲーション） |
-| `/onboarding` | 初回セットアップウィザード |
-| `/import` | CSV インポート画面 |
-| `/notes` | ノート一覧 |
-| `/notes/:id` | ノート詳細（特徴量・サマリー・バックテスト） |
-| `/notifications` | 通知一覧（未読/既読管理） |
-| `/notifications/:id` | 通知詳細（判定理由可視化） |
-| `/backtest` | バックテスト実行・結果表示 |
-| `/orders` | 注文プリセット・確認 |
-| `/settings` | ユーザー設定（閾値・インジケーター） |
-| `/strategies` | 戦略管理 |
-
-### 設計原則
-
-* **判断はユーザーが行う**: 自動売買は一切行いません
-* **UI は説明責任を果たす**: 判定理由を完全可視化
-* **「当たる」より「納得できる」**: 理解可能な通知を優先
-
-詳細は [src/frontend/README.md](src/frontend/README.md) を参照。
-
-## Testing
-
-```bash
-# 全テスト実行
-npm test
-
-# 特定ファイルのみ
-npm test -- src/services/__tests__/featureVectorService.test.ts
-
-# カバレッジ付き
-npm test -- --coverage
-```
-
-現在のテスト数: **566 テスト**（541 パス、25 失敗 - cTrader 関連は審査待ち）
-
-## Contributing
-
-開発ガイドラインは [AGENTS.md](AGENTS.md) を参照してください。
-
-主なルール:
-- すべてのコメントは**日本語**で記述
-- テスト未実装の変更は未完了扱い
-- 新規ライブラリ追加時は人間確認必須
-
-## License
+## ⚖️ ライセンス
 
 ISC

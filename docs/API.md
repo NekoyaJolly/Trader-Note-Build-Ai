@@ -19,7 +19,7 @@ http://localhost:3100
 | `BACKEND_PORT` / `PORT` | バックエンドサーバーのポート | `3100` |
 | `DATABASE_URL` | PostgreSQL 接続文字列 | （必須） |
 | `AI_API_KEY` | AI サービス API キー | （空文字） |
-| `AI_MODEL` | AI モデル名 | `gpt-5-mini` |
+| `AI_MODEL` | AI モデル名 | `gpt-4o-mini` |
 | `AI_BASE_URL` | AI API ベース URL | `https://api.openai.com/v1` |
 | `MARKET_API_URL` | 市場データ API URL（Twelve Data） | （空文字） |
 | `MARKET_API_KEY` | 市場データ API キー（Twelve Data） | （空文字） |
@@ -45,7 +45,7 @@ http://localhost:3100
 ```json
 {
   "status": "ok",
-  "timestamp": "2025-12-21T11:18:38.099Z",
+  "timestamp": "2024-01-01T00:00:00.000Z",
   "schedulerRunning": true
 }
 ```
@@ -60,7 +60,7 @@ cTrader OAuth 認証 URL を取得します。
 **応答:**
 ```json
 {
-  "url": "https://openapi.ctrader.com/apps/auth?client_id=xxx&redirect_uri=xxx&scope=accounts"
+  "url": "string"
 }
 ```
 
@@ -72,7 +72,7 @@ cTrader OAuth 認証 URL を取得します。
 **リクエストボディ:**
 ```json
 {
-  "code": "authorization_code_from_callback"
+  "code": "string"
 }
 ```
 
@@ -80,7 +80,7 @@ cTrader OAuth 認証 URL を取得します。
 ```json
 {
   "success": true,
-  "expiresAt": "2026-01-07T12:00:00.000Z"
+  "expiresAt": "2024-01-01T00:00:00.000Z"
 }
 ```
 
@@ -93,7 +93,7 @@ cTrader 接続状態を確認します。
 ```json
 {
   "connected": true,
-  "expiresAt": "2026-01-07T12:00:00.000Z"
+  "expiresAt": "2024-01-01T00:00:00.000Z"
 }
 ```
 
@@ -106,7 +106,7 @@ cTrader 接続状態を確認します。
 ```json
 {
   "success": true,
-  "expiresAt": "2026-01-08T12:00:00.000Z"
+  "expiresAt": "<expiration_timestamp>"
 }
 ```
 
@@ -132,7 +132,7 @@ cTrader 接続を解除します（トークン削除）。
 **リクエストボディ:**
 ```json
 {
-  "filename": "sample_trades.csv"
+  "filename": "string"
 }
 ```
 
@@ -143,9 +143,9 @@ cTrader 接続を解除します（トークン削除）。
   "tradesImported": 5,
   "tradesSkipped": 0,
   "importErrors": [],
-  "insertedIds": ["uuid-1", "uuid-2", "..."],
+  "insertedIds": ["uuid", "uuid"],
   "notesGenerated": 5,
-  "noteIds": ["note-uuid-1", "note-uuid-2", "..."]
+  "noteIds": ["uuid", "uuid"]
 }
 ```
 
@@ -157,8 +157,8 @@ cTrader 接続を解除します（トークン削除）。
 **リクエストボディ:**
 ```json
 {
-  "filename": "my_trades.csv",
-  "csvText": "timestamp,symbol,side,price,quantity,fee,exchange\n2024-01-15T10:30:00Z,BTCUSDT,buy,42500.00,0.1,4.25,Binance"
+  "filename": "string",
+  "csvText": "timestamp,symbol,side,price,quantity,fee,exchange\n2024-01-01T00:00:00Z,string,string,number,number,number,string"
 }
 ```
 
@@ -169,9 +169,9 @@ cTrader 接続を解除します（トークン削除）。
   "tradesImported": 1,
   "tradesSkipped": 0,
   "importErrors": [],
-  "insertedIds": ["uuid-1"],
+  "insertedIds": ["uuid"],
   "notesGenerated": 1,
-  "noteIds": ["note-uuid-1"]
+  "noteIds": ["uuid"]
 }
 ```
 
@@ -189,13 +189,13 @@ cTrader 接続を解除します（トークン削除）。
   "notes": [
     {
       "id": "uuid",
-      "tradeId": "trade-uuid",
-      "symbol": "BTCUSDT",
-      "side": "buy",
-      "timestamp": "2024-01-15T10:30:00.000Z",
-      "aiSummary": "RSI が売られすぎ水準...",
+      "tradeId": "uuid",
+      "symbol": "string",
+      "side": "string",
+      "timestamp": "2024-01-01T00:00:00.000Z",
+      "aiSummary": "string",
       "status": "draft",
-      "createdAt": "2024-01-15T10:35:00.000Z"
+      "createdAt": "2024-01-01T00:00:00.000Z"
     }
   ]
 }
@@ -225,17 +225,17 @@ ID で特定のトレードノートを取得します。
 ```json
 {
   "id": "uuid",
-  "tradeId": "trade-uuid",
-  "symbol": "BTCUSDT",
-  "side": "buy",
-  "timestamp": "2024-01-15T10:30:00.000Z",
+  "tradeId": "uuid",
+  "symbol": "string",
+  "side": "string",
+  "timestamp": "2024-01-01T00:00:00.000Z",
   "entryConditions": "...",
   "exitConditions": "...",
-  "aiSummary": "RSI が売られすぎ水準...",
+  "aiSummary": "string",
   "status": "draft",
-  "createdAt": "2024-01-15T10:35:00.000Z",
-  "userNotes": "ユーザーによる追記",
-  "tags": ["レンジ相場", "RSI反転"]
+  "createdAt": "2024-01-01T00:00:00.000Z",
+  "userNotes": "string",
+  "tags": ["string"]
 }
 ```
 
@@ -247,9 +247,9 @@ ID で特定のトレードノートを取得します。
 **リクエストボディ:**
 ```json
 {
-  "aiSummary": "更新されたAI要約",
-  "userNotes": "ユーザーによる追記メモ",
-  "tags": ["レンジ相場", "RSI反転"]
+  "aiSummary": "string",
+  "userNotes": "string",
+  "tags": ["string"]
 }
 ```
 
@@ -259,10 +259,10 @@ ID で特定のトレードノートを取得します。
   "success": true,
   "note": {
     "id": "uuid",
-    "aiSummary": "更新されたAI要約",
-    "userNotes": "ユーザーによる追記メモ",
-    "tags": ["レンジ相場", "RSI反転"],
-    "lastEditedAt": "2024-01-15T12:00:00.000Z"
+    "aiSummary": "string",
+    "userNotes": "string",
+    "tags": ["string"],
+    "lastEditedAt": "2024-01-01T00:00:00.000Z"
   }
 }
 ```
@@ -280,7 +280,7 @@ ID で特定のトレードノートを取得します。
   "note": {
     "id": "uuid",
     "status": "approved",
-    "approvedAt": "2024-01-15T12:00:00.000Z"
+    "approvedAt": "2024-01-01T00:00:00.000Z"
   }
 }
 ```
@@ -305,7 +305,7 @@ ID で特定のトレードノートを取得します。
   "note": {
     "id": "uuid",
     "status": "rejected",
-    "rejectedAt": "2024-01-15T12:00:00.000Z"
+    "rejectedAt": "2024-01-01T00:00:00.000Z"
   }
 }
 ```
@@ -362,16 +362,16 @@ ID で特定のトレードノートを取得します。
   "matches": [
     {
       "id": "uuid",
-      "noteId": "note-uuid",
-      "symbol": "BTCUSDT",
+      "noteId": "uuid",
+      "symbol": "string",
       "matchScore": 0.85,
       "threshold": 0.75,
       "trendMatched": true,
       "priceRangeMatched": true,
-      "reasons": [...],
-      "evaluatedAt": "2025-12-27T01:27:30Z",
-      "createdAt": "2025-12-27T01:27:30Z",
-      "marketSnapshotId": "snapshot-uuid"
+      "reasons": ["string"],
+      "evaluatedAt": "2024-01-01T00:00:00.000Z",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "marketSnapshotId": "uuid"
     }
   ]
 }
@@ -404,12 +404,12 @@ ID で特定のトレードノートを取得します。
 {
   "id": "uuid",
   "matchResultId": "uuid",
-  "sentAt": "2025-12-27T01:27:38Z",
+  "sentAt": "2024-01-01T00:00:00.000Z",
   "channel": "in_app",
   "isRead": false,
-  "matchResult": { "score": 0.82, "evaluatedAt": "2025-12-27T01:27:30Z" },
-  "tradeNote": { "id": "note-uuid", "symbol": "BTCUSDT", "side": "BUY", "timeframe": "15m" },
-  "reasonSummary": "スコア: 0.820"
+  "matchResult": { "score": 0.82, "evaluatedAt": "2024-01-01T00:00:00.000Z" },
+  "tradeNote": { "id": "uuid", "symbol": "string", "side": "string", "timeframe": "string" },
+  "reasonSummary": "string"
 }
 ```
 
@@ -466,13 +466,13 @@ ID で特定のトレードノートを取得します。
       "noteId": "uuid",
       "shouldNotify": true,
       "status": "sent",
-      "notificationLogId": "log-uuid"
+      "notificationLogId": "uuid"
     },
     {
       "noteId": "uuid",
       "shouldNotify": false,
       "status": "skipped",
-      "skipReason": "クールダウン中"
+      "skipReason": "string"
     }
   ]
 }
@@ -500,13 +500,13 @@ ID で特定のトレードノートを取得します。
       "id": "uuid",
       "noteId": "uuid",
       "marketSnapshotId": "uuid",
-      "symbol": "BTCUSDT",
+      "symbol": "string",
       "score": 0.85,
       "channel": "in_app",
       "status": "sent",
-      "reasonSummary": "スコア: 0.850｜トレンド一致 ｜ 価格レンジ一致",
-      "sentAt": "2025-12-27T01:27:38Z",
-      "createdAt": "2025-12-27T01:27:38Z"
+      "reasonSummary": "string",
+      "sentAt": "2024-01-01T00:00:00.000Z",
+      "createdAt": "2024-01-01T00:00:00.000Z"
     }
   ]
 }
@@ -535,11 +535,11 @@ ID で特定のトレードノートを取得します。
 ```json
 {
   "preset": {
-    "symbol": "BTCUSDT",
-    "side": "buy",
+    "symbol": "string",
+    "side": "string",
     "suggestedPrice": 42500.00,
     "suggestedQuantity": 0.1,
-    "basedOnNoteId": "note-uuid",
+    "basedOnNoteId": "uuid",
     "confidence": 0.8
   }
 }
@@ -555,8 +555,8 @@ ID で特定のトレードノートを取得します。
 **リクエストボディ:**
 ```json
 {
-  "symbol": "BTCUSDT",
-  "side": "buy",
+  "symbol": "string",
+  "side": "string",
   "price": 42500,
   "quantity": 0.1
 }
@@ -566,8 +566,8 @@ ID で特定のトレードノートを取得します。
 ```json
 {
   "confirmation": {
-    "symbol": "BTCUSDT",
-    "side": "buy",
+    "symbol": "string",
+    "side": "string",
     "price": 42500,
     "quantity": 0.1,
     "estimatedCost": 4250,
