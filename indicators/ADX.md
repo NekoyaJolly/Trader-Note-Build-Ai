@@ -129,6 +129,7 @@ function calculateADX(data: OHLCData[], period: number = 14): ADXResult[] {
   let smoothedMinusDM = minusDM.slice(0, period).reduce((a, b) => a + b, 0);
 
   const dxValues: number[] = [];
+  let smoothedDX: number | null = null; // ADX用Wilder's Smoothing
 
   for (let i = period; i < tr.length; i++) {
     // Wilder's Smoothing
@@ -146,11 +147,17 @@ function calculateADX(data: OHLCData[], period: number = 14): ADXResult[] {
     dxValues.push(dx);
 
     // Step 6: ADX（DXのWilder's Smoothing）
-    if (dxValues.length >= period) {
-      const adx = dxValues.slice(-period).reduce((a, b) => a + b, 0) / period;
+    if (dxValues.length === period) {
+      // 初回: DX値のSMA
+      smoothedDX = dxValues.reduce((a, b) => a + b, 0) / period;
+    } else if (dxValues.length > period) {
+      // 2回目以降: Wilder's Smoothing
+      smoothedDX = smoothedDX! - (smoothedDX! / period) + dx;
+    }
 
+    if (smoothedDX !== null) {
       result.push({
-        adx,
+        adx: smoothedDX,
         plusDI,
         minusDI,
         dx,

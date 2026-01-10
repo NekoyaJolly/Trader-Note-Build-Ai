@@ -11,6 +11,108 @@
 ## 1. インジケーター概要
 - 価格の上昇幅と下落幅の相対強度を 0〜100 のスケールで示すモメンタム系オシレーター
 - 標準期間は 14。本プロジェクトでは終値ベースで算出し、期間変更はユーザー設定として許可する
+- 計算方式: Wilder's Smoothing（RMA: Running Moving Average）を使用した平滑化
+
+### 計算式（詳細仕様）
+
+#### Step 1: 上昇幅と下落幅の分離
+
+各期間において、終値の変化を上昇幅（gain）と下落幅（loss）に分離：
+
+```
+if close > previousClose:
+  gain = close - previousClose
+  loss = 0
+else if close < previousClose:
+  gain = 0
+  loss = previousClose - close
+else:
+  gain = 0
+  loss = 0
+```
+
+#### Step 2: 平均の計算（Wilder's Smoothing = RMA）
+
+**初回（最初のN期間）:**
+```
+avgGain = sum(gains[1..N]) / N
+avgLoss = sum(losses[1..N]) / N
+```
+
+**2回目以降:**
+```
+avgGain = (prevAvgGain × (N-1) + currentGain) / N
+avgLoss = (prevAvgLoss × (N-1) + currentLoss) / N
+```
+
+この計算方式により、新しい値の影響が徐々に反映される平滑化効果が得られる。
+
+#### Step 3: RSI計算
+
+```
+RS = avgGain / avgLoss
+RSI = 100 - (100 / (1 + RS))
+
+※ 特殊ケース:
+  - avgLoss = 0 の場合: RSI = 100
+  - avgGain = 0 の場合: RSI = 0
+```
+
+### TypeScript実装例
+
+```typescript
+function calculateRSI(closes: number[], period: number = 14): number[] {
+  const rsi: number[] = [];
+  const gains: number[] = [];
+  const losses: number[] = [];
+
+  // Step 1: 上昇幅・下落幅の計算
+  for (let i = 1; i < closes.length; i++) {
+    const change = closes[i] - closes[i - 1];
+    gains.push(change > 0 ? change : 0);
+    losses.push(change < 0 ? -change : 0);
+  }
+
+  // データ不足チェック
+  if (gains.length < period) {
+    return []; // 期間不足の場合は空配列を返す
+  }
+
+  // Step 2: 初回平均（SMA）
+  let avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  let avgLoss = losses.slice(0, period).reduce((a, b) => a + b, 0) / period;
+
+  // 初回RSI
+  const rs0 = avgLoss === 0 ? 100 : avgGain / avgLoss;
+  rsi.push(100 - 100 / (1 + rs0));
+
+  // Step 3: 以降はWilder's Smoothing（RMA）
+  for (let i = period; i < gains.length; i++) {
+    avgGain = (avgGain * (period - 1) + gains[i]) / period;
+    avgLoss = (avgLoss * (period - 1) + losses[i]) / period;
+    
+    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+    rsi.push(100 - 100 / (1 + rs));
+  }
+
+  return rsi;
+}
+```
+
+### 計算上の重要ポイント
+
+1. **Wilder's Smoothing の特性**: 
+   - 初回のみSMA（単純移動平均）を使用
+   - 2回目以降はRMA（ランニング移動平均）で平滑化
+   - この方式により、過去の影響が指数関数的に減衰
+
+2. **ゼロ除算対策**:
+   - avgLoss = 0 の場合、RSI = 100（完全な上昇局面）
+   - avgGain = 0 の場合、RSI = 0（完全な下落局面）
+
+3. **初期データ期間**:
+   - 最低でも期間N+1本のデータが必要
+   - N本目まではRSI値が計算できない
 
 ## 2. 想定トレーダーペルソナ
 - 短期の逆張り転換を狙う裁量トレーダー（経験 1〜3 年、リスク許容度: 中）
