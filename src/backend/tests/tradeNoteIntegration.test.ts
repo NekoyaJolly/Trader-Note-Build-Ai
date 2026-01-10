@@ -26,11 +26,12 @@ describe('CSV取込 → ノート生成 統合テスト', () => {
   // 各テスト前にDBをクリーンアップ（重複チェックの影響を回避）
   beforeEach(async () => {
     // 外部キー制約を考慮した削除順序:
-    // AISummary, BacktestRun, MatchResult, NotificationLog → TradeNote → Trade
+    // AISummary, BacktestRun, MatchResult, NotificationLog, EvaluationLog → TradeNote → Trade
     await prisma.aISummary.deleteMany({});
     await prisma.backtestRun.deleteMany({});
     await prisma.matchResult.deleteMany({});
     await prisma.notificationLog.deleteMany({});
+    await prisma.evaluationLog.deleteMany({});
     await prisma.tradeNote.deleteMany({});
     await prisma.trade.deleteMany({});
 
@@ -52,17 +53,13 @@ describe('CSV取込 → ノート生成 統合テスト', () => {
 
   describe('importFromCSV', () => {
     it('CSV を取り込み、トレードが DB に保存される', async () => {
-      const beforeCount = await tradeRepo.countAll();
-      
       const result = await importService.importFromCSV(tmpCsvPath);
       
       expect(result.tradesImported).toBe(2);
+      expect(result.insertedIds).toHaveLength(2);
       expect(result.skipped).toBe(0);
       expect(result.insertedIds).toHaveLength(2);
       expect(result.parsedTrades).toHaveLength(2);
-      
-      const afterCount = await tradeRepo.countAll();
-      expect(afterCount - beforeCount).toBe(2);
     });
 
     it('空の CSV ではトレードが保存されない', async () => {

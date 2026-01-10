@@ -338,12 +338,12 @@ export function RealtimeChart({
 
   const { dailyHigh, dailyLow, previousClose } = useMemo(() => {
     if (!latestBar) return { dailyHigh: null, dailyLow: null, previousClose: null };
-    const latestTs = new Date('startTime' in latestBar ? latestBar.startTime : latestBar.timestamp);
+    const latestTs = new Date(latestBar.timestamp);
     const dayStart = new Date(latestTs);
     dayStart.setHours(0, 0, 0, 0);
 
     const sameDayBars = bars.filter((barItem) => {
-      const ts = new Date('startTime' in barItem ? barItem.startTime : barItem.timestamp);
+      const ts = new Date(barItem.timestamp);
       return ts >= dayStart && ts <= latestTs &&
         ts.getFullYear() === latestTs.getFullYear() &&
         ts.getMonth() === latestTs.getMonth() &&
@@ -354,7 +354,7 @@ export function RealtimeChart({
     const dailyLowVal = sameDayBars.length > 0 ? Math.min(...sameDayBars.map((b) => b.low)) : null;
 
     const previousDayBars = bars.filter((barItem) => {
-      const ts = new Date('startTime' in barItem ? barItem.startTime : barItem.timestamp);
+      const ts = new Date(barItem.timestamp);
       return ts < dayStart;
     });
     const previousCloseVal = previousDayBars.length > 0 ? previousDayBars[previousDayBars.length - 1].close : null;
