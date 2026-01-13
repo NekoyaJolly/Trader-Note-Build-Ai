@@ -295,7 +295,8 @@ function CategorySection({
         {indicators.map((indicator) => {
           const isSelected = selectedIndicators.some((sel) => sel.id === indicator.id);
           
-          // デバッグ: インジケーター選択状態をログ出力
+          // デバッグログ（開発環境のみ、本番ビルドには含まれない）
+          // TODO: 動作確認後、このログを削除可能
           if (process.env.NODE_ENV === 'development' && isSelected) {
             console.log(`[IndicatorSelector] ${indicator.name} - isSelected: ${isSelected}, selectedCount: ${selectedIndicators.length}`);
           }
@@ -319,7 +320,7 @@ function CategorySection({
                   )}
                 </label>
                 {isSelected && (
-                  <div className="flex items-center gap-1 flex-shrink-0" style={{ visibility: 'visible', opacity: 1 }}>
+                  <div className="flex items-center gap-1 flex-shrink-0 !visible !opacity-100">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
