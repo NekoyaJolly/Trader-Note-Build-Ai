@@ -514,6 +514,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   }, [drawingMode]);
 
   // 描画モード中はドラッグパンのみ抑止し、ホイールズーム/スクロールは維持
+  // インジケーターが追加された後も、チャートのスクロール/ズームを有効に保つ
   useEffect(() => {
     if (!chartRef.current) return;
     const disableDrag = drawingMode !== "none";
@@ -529,8 +530,10 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
         axisPressedMouseMove: !disableDrag,
         pinch: true,
       },
+      // インジケーターがマウスイベントをキャプチャしないようにする
+      // メインシリーズ（ローソク足）が常にイベントを受け取るようにする
     });
-  }, [drawingMode]);
+  }, [drawingMode, indicators.length]); // indicatorsが変更された時も再設定
 
   // プレビューラインをクリア
   const clearGuideLine = useCallback(() => {
@@ -770,8 +773,15 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     indicatorSeriesRef.current.clear();
 
     // 新しいインジケーターを追加
+    // デバッグモード時のみログ出力（頻繁なログを避ける）
+    if (process.env.NODE_ENV === 'development' && indicators.length > 0) {
+      console.log('[CandlestickChart] インジケーター描画開始:', { indicatorCount: indicators.length });
+    }
     indicators.forEach((indicator) => {
-      if (indicator.data.length === 0) return;
+      if (indicator.data.length === 0) {
+        console.warn('[CandlestickChart] データが空のインジケーターをスキップ:', indicator.id);
+        return;
+      }
 
       // メインチャートに重ねるインジケーター
       if (indicator.pane === "main") {
@@ -779,8 +789,14 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           color: indicator.color,
           lineWidth: (indicator.lineWidth || 2) as LineWidth,
           title: indicator.name,
+          lastValueVisible: false, // 最後の値を表示しない（フォーカス問題を回避）
+          priceLineVisible: false, // 価格ラインを非表示
+          crosshairMarkerVisible: false, // クロスヘアマーカーを非表示（フォーカス問題を回避）
         });
-        lineSer.setData(toLineData(indicator.data));
+        const lineData = toLineData(indicator.data);
+        lineSer.setData(lineData);
+        // インジケーターシリーズがマウスイベントをキャプチャしないようにする
+        // 注意: lightweight-chartsには直接的な方法がないため、チャートのhandleScroll/handleScale設定で対応
         indicatorSeriesRef.current.set(indicator.id, lineSer);
       }
       // サブチャート用インジケーター（別のpriceScaleを使用）
@@ -790,6 +806,9 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           lineWidth: (indicator.lineWidth || 2) as LineWidth,
           title: indicator.name,
           priceScaleId: indicator.id,
+          lastValueVisible: false, // 最後の値を表示しない（フォーカス問題を回避）
+          priceLineVisible: false, // 価格ラインを非表示
+          crosshairMarkerVisible: false, // クロスヘアマーカーを非表示（フォーカス問題を回避）
         });
         lineSer.priceScale().applyOptions({
           scaleMargins: {
@@ -797,10 +816,15 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
             bottom: 0.1,
           },
         });
-        lineSer.setData(toLineData(indicator.data));
+        const lineData = toLineData(indicator.data);
+        lineSer.setData(lineData);
         indicatorSeriesRef.current.set(indicator.id, lineSer);
       }
     });
+    // デバッグモード時のみログ出力
+    if (process.env.NODE_ENV === 'development' && indicators.length > 0) {
+      console.log('[CandlestickChart] インジケーター描画完了:', { count: indicators.length });
+    }
   }, [indicators]);
 
   // マーカーの描画

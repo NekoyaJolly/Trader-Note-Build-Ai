@@ -221,10 +221,18 @@ export function useRealtimeChart(
         method: 'POST',
         credentials: 'include',
       });
+      
+      if (!connectRes.ok) {
+        const errorText = await connectRes.text();
+        throw new Error(`接続リクエストが失敗しました: ${connectRes.status} ${connectRes.statusText} - ${errorText}`);
+      }
+      
       const connectData = await connectRes.json();
 
       if (!connectData.success) {
-        throw new Error(connectData.error || '接続に失敗しました');
+        const errorMessage = connectData.error || connectData.message || '接続に失敗しました';
+        console.error('[useRealtimeChart] 接続エラー詳細:', connectData);
+        throw new Error(errorMessage);
       }
 
       // 2. シンボルを購読

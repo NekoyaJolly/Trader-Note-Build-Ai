@@ -27,6 +27,82 @@ const { CTraderConnection } = require('@reiryoku/ctrader-layer');
 // ========================================
 
 /**
+ * CTraderConnection の型定義（@reiryoku/ctrader-layer は型定義がないため）
+ */
+interface CTraderConnectionType {
+  open(): Promise<void>;
+  close(): Promise<void>;
+  sendCommand(command: string, params: Record<string, unknown>): Promise<unknown>;
+  sendHeartbeat(): void;
+  on(event: string, handler: (...args: unknown[]) => void): void;
+  off(event: string, handler: (...args: unknown[]) => void): void;
+}
+
+/**
+ * cTrader シンボル情報
+ */
+interface CTraderSymbolInfo {
+  symbolId: number;
+  symbolName: string;
+  digits?: number;
+  pipPosition?: number;
+}
+
+/**
+ * cTrader トレンドバー
+ */
+interface CTraderTrendbar {
+  low: string | number;
+  deltaOpen: string | number;
+  deltaHigh: string | number;
+  deltaClose: string | number;
+  volume?: string | number;
+  utcTimestampInMinutes?: number;
+}
+
+/**
+ * cTrader Spot Event
+ */
+interface CTraderSpotEvent {
+  symbolId?: number;
+  bid?: number;
+  ask?: number;
+  timestamp?: number;
+  sessionClose?: number;
+  descriptor?: CTraderSpotEvent;
+}
+
+/**
+ * cTrader アカウント情報
+ */
+interface CTraderAccount {
+  ctidTraderAccountId: number;
+  isLive: boolean;
+  traderLogin?: number;
+}
+
+/**
+ * cTrader API レスポンス（アカウント一覧）
+ */
+interface CTraderAccountListResponse {
+  ctidTraderAccount?: CTraderAccount[];
+}
+
+/**
+ * cTrader API レスポンス（シンボル一覧）
+ */
+interface CTraderSymbolsListResponse {
+  symbol?: CTraderSymbolInfo[];
+}
+
+/**
+ * cTrader API レスポンス（トレンドバー）
+ */
+interface CTraderTrendbarsResponse {
+  trendbar?: CTraderTrendbar[];
+}
+
+/**
  * 接続状態
  */
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'authenticating' | 'connected' | 'error';
@@ -102,8 +178,7 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
   private tickService: RealtimeTickService;
   private config: OrchestratorConfig;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private connection: any = null;
+  private connection: CTraderConnectionType | null = null;
   private status: ConnectionStatus = 'disconnected';
   private subscribedSymbols: Set<string> = new Set();
   private reconnectAttempts = 0;
@@ -194,28 +269,33 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
 
       console.log('[CTraderOrchestrator] トークン取得成功');
 
-      // 2. WebSocket 接続
+      // 2. まずLive環境で接続を試みる（アカウント情報を取得するため）
+      // アカウントがDemoの場合は、後でDemo環境に再接続する
+      let connectionHost = 'live.ctraderapi.com';
+      let isLiveEnvironment = true;
+
+      // 2-1. Live環境でWebSocket接続
       this.connection = new CTraderConnection({
-        host: 'live.ctraderapi.com',
+        host: connectionHost,
         port: 5035,
-      });
+      }) as CTraderConnectionType;
 
       await this.connection.open();
-      console.log('[CTraderOrchestrator] WebSocket 接続成功');
+      console.log('[CTraderOrchestrator] WebSocket 接続成功 (Live環境)');
 
       this.setStatus('authenticating');
 
-      // 3. アプリケーション認証
+      // 2-2. アプリケーション認証
       await this.connection.sendCommand('ProtoOAApplicationAuthReq', {
         clientId: config.ctrader.clientId,
         clientSecret: config.ctrader.clientSecret,
       });
       console.log('[CTraderOrchestrator] アプリケーション認証成功');
 
-      // 4. アカウント一覧を取得
+      // 2-3. アカウント一覧を取得して環境を確認
       const accountListRes = await this.connection.sendCommand('ProtoOAGetAccountListByAccessTokenReq', {
         accessToken: token.accessToken,
-      });
+      }) as CTraderAccountListResponse;
 
       const accounts = accountListRes.ctidTraderAccount || [];
       if (accounts.length === 0) {
@@ -223,8 +303,37 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
       }
 
       // 最初のアカウントを使用
-      this.ctidTraderAccountId = accounts[0].ctidTraderAccountId;
-      console.log('[CTraderOrchestrator] アカウント取得:', this.ctidTraderAccountId);
+      const selectedAccount = accounts[0];
+      this.ctidTraderAccountId = selectedAccount.ctidTraderAccountId;
+      isLiveEnvironment = selectedAccount.isLive === true;
+
+      console.log('[CTraderOrchestrator] アカウント取得:', {
+        ctidTraderAccountId: this.ctidTraderAccountId,
+        isLive: isLiveEnvironment,
+        traderLogin: selectedAccount.traderLogin,
+      });
+
+      // 2-4. アカウントがDemo環境の場合は、Demo環境に再接続
+      if (!isLiveEnvironment) {
+        console.log('[CTraderOrchestrator] Demoアカウントを検出。Demo環境に再接続します...');
+        await this.connection.close();
+        connectionHost = 'demo.ctraderapi.com';
+        
+        this.connection = new CTraderConnection({
+          host: connectionHost,
+          port: 5035,
+        }) as CTraderConnectionType;
+
+        await this.connection.open();
+        console.log('[CTraderOrchestrator] WebSocket 接続成功 (Demo環境)');
+
+        // Demo環境でもアプリケーション認証が必要
+        await this.connection.sendCommand('ProtoOAApplicationAuthReq', {
+          clientId: config.ctrader.clientId,
+          clientSecret: config.ctrader.clientSecret,
+        });
+        console.log('[CTraderOrchestrator] アプリケーション認証成功 (Demo環境)');
+      }
 
       // 5. アカウント認証
       await this.connection.sendCommand('ProtoOAAccountAuthReq', {
@@ -299,10 +408,10 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
         // シンボル情報を取得
         const symbolsRes = await this.connection.sendCommand('ProtoOASymbolsListReq', {
           ctidTraderAccountId: this.ctidTraderAccountId,
-        });
+        }) as CTraderSymbolsListResponse;
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const symbolInfo = symbolsRes.symbol?.find((s: any) => 
+        const symbols = (symbolsRes.symbol || []) as CTraderSymbolInfo[];
+        const symbolInfo = symbols.find((s) => 
           s.symbolName === symbol || s.symbolName === symbol.replace('/', '')
         );
 
@@ -415,7 +524,7 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
         period,
         fromTimestamp,
         toTimestamp,
-      });
+      }) as CTraderTrendbarsResponse;
       
       // cTrader Open API 仕様:
       // Trendbar の価格データも "1/100000 of unit of a price" 形式
@@ -435,8 +544,8 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
       const symbolInfo = this.symbolInfoCache.get(symbolId);
       const digits = symbolInfo?.digits || 2; // 表示用のdigits
       
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const bars: OHLCVBarInput[] = (res.trendbar || []).map((bar: any) => {
+      const trendbars = (res.trendbar || []) as CTraderTrendbar[];
+      const bars: OHLCVBarInput[] = trendbars.map((bar) => {
         const low = Number(bar.low) / PRICE_DIVISOR;
         const open = (Number(bar.low) + Number(bar.deltaOpen)) / PRICE_DIVISOR;
         const high = (Number(bar.low) + Number(bar.deltaHigh)) / PRICE_DIVISOR;
@@ -445,7 +554,7 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
         return {
           symbol,
           timeframe,
-          timestamp: new Date(Number(bar.utcTimestampInMinutes) * 60000).toISOString(),
+          timestamp: new Date(Number(bar.utcTimestampInMinutes) * 60000),
           open,
           high,
           low,
@@ -511,10 +620,16 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
     // Tick イベント
     // ctrader-layer は CTraderLayerEvent オブジェクトを渡す
     // 実際のデータは event.descriptor に格納されている
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.connection.on('ProtoOASpotEvent', (event: any) => {
+    this.connection.on('ProtoOASpotEvent', (...args: unknown[]) => {
+      // 型ガード: イベントデータを取得
+      const rawEvent = args[0];
+      if (!rawEvent || typeof rawEvent !== 'object') {
+        return;
+      }
+      
       // CTraderLayerEvent の descriptor プロパティからデータを取得
-      const data = event?.descriptor || event || {};
+      const event = rawEvent as CTraderSpotEvent | { descriptor?: CTraderSpotEvent };
+      const data = (event?.descriptor || event || {}) as CTraderSpotEvent;
       
       // デバッグログ（最初の数回のみ）
       if (this.tickLogCount < 5) {
@@ -523,6 +638,12 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
       
       // symbolId からシンボル情報を取得
       const symbolId = data.symbolId;
+      
+      // symbolId が存在しない場合はスキップ
+      if (symbolId === undefined) {
+        return;
+      }
+      
       const symbolInfo = this.symbolInfoCache.get(symbolId);
       
       // シンボル情報がない場合はスキップ（シンボル名不明のため）
@@ -654,8 +775,13 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
     });
 
     // エラーイベント
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.connection.on('error', (error: any) => {
+    this.connection.on('error', (...args: unknown[]) => {
+      const rawError = args[0];
+      const error = rawError instanceof Error 
+        ? rawError 
+        : (typeof rawError === 'object' && rawError !== null 
+          ? rawError as { message?: string; code?: string }
+          : new Error(String(rawError)));
       console.error('[CTraderOrchestrator] WebSocket エラー:', error);
       this.setStatus('error');
     });

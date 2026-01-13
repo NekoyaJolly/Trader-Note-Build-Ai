@@ -48,6 +48,42 @@ function getDefaultOrchestrator(): CTraderRealtimeOrchestrator {
 }
 
 // ========================================
+// CORS ヘルパー
+// ========================================
+
+/**
+ * CORSヘッダーを設定するヘルパー関数
+ */
+function setCorsHeaders(req: Request, res: Response): void {
+  const origin = req.headers.origin;
+  
+  // 許可するオリジン一覧
+  const allowedOrigins = [
+    'http://localhost:3000',
+    'http://localhost:3102',
+    'https://trader-note-build-ai.vercel.app',
+  ];
+  
+  // ワイルドカードパターン（Vercel プレビュー用）
+  const wildcardPatterns = [
+    /^https:\/\/trader-note-build-ai-.*-nekoya258\.vercel\.app$/,
+    /^https:\/\/trader-note-build-.*-nekoya258\.vercel\.app$/,
+  ];
+  
+  // オリジンが許可されているか確認
+  const isAllowed = origin && (
+    allowedOrigins.includes(origin) ||
+    wildcardPatterns.some(pattern => pattern.test(origin))
+  );
+  
+  // CORS ヘッダーを設定
+  if (isAllowed && origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+}
+
+// ========================================
 // スキーマ定義
 // ========================================
 
@@ -68,7 +104,9 @@ const UnsubscribeRequestSchema = z.object({
  * GET /api/realtime/status
  * 接続状態を取得
  */
-router.get('/status', async (_req: Request, res: Response) => {
+router.get('/status', async (req: Request, res: Response) => {
+  setCorsHeaders(req, res);
+  
   try {
     const orch = getDefaultOrchestrator();
     const status = orch.getStatus();
@@ -96,6 +134,8 @@ router.get('/status', async (_req: Request, res: Response) => {
  * cTrader に接続
  */
 router.post('/connect', async (req: Request, res: Response) => {
+  setCorsHeaders(req, res);
+  
   try {
     const timeframe = parseInt(req.query.timeframe as string) || 60;
     const orch = getOrchestrator(timeframe);
@@ -122,6 +162,8 @@ router.post('/connect', async (req: Request, res: Response) => {
  * cTrader から切断
  */
 router.post('/disconnect', async (req: Request, res: Response) => {
+  setCorsHeaders(req, res);
+  
   try {
     const timeframe = parseInt(req.query.timeframe as string) || 60;
     const orch = getOrchestrator(timeframe);
@@ -148,6 +190,8 @@ router.post('/disconnect', async (req: Request, res: Response) => {
  * シンボルを購読
  */
 router.post('/subscribe', async (req: Request, res: Response) => {
+  setCorsHeaders(req, res);
+  
   try {
     const result = SubscribeRequestSchema.safeParse(req.body);
     if (!result.success) {
@@ -195,6 +239,8 @@ router.post('/subscribe', async (req: Request, res: Response) => {
  * 購読解除
  */
 router.post('/unsubscribe', async (req: Request, res: Response) => {
+  setCorsHeaders(req, res);
+  
   try {
     const result = UnsubscribeRequestSchema.safeParse(req.body);
     if (!result.success) {
@@ -290,6 +336,8 @@ router.post('/clear-all-bars', async (_req: Request, res: Response) => {
  * 最新の OHLCV バーを取得
  */
 router.get('/bars/:symbol', async (req: Request, res: Response) => {
+  setCorsHeaders(req, res);
+  
   try {
     const { symbol } = req.params;
     const limit = parseInt(req.query.limit as string) || 60;
@@ -327,39 +375,14 @@ router.get('/stream/:symbol', async (req: Request, res: Response) => {
   const { symbol } = req.params;
   const timeframe = parseInt(req.query.timeframe as string) || 60;
 
-  // リクエスト元のオリジンを取得
-  const origin = req.headers.origin;
-  
-  // 許可するオリジン一覧
-  const allowedOrigins = [
-    'http://localhost:3000',
-    'http://localhost:3102',
-    'https://trader-note-build-ai.vercel.app',
-  ];
-  
-  // ワイルドカードパターン（Vercel プレビュー用）
-  const wildcardPatterns = [
-    /^https:\/\/trader-note-build-ai-.*-nekoya258\.vercel\.app$/,
-    /^https:\/\/trader-note-build-.*-nekoya258\.vercel\.app$/,
-  ];
-  
-  // オリジンが許可されているか確認
-  const isAllowed = origin && (
-    allowedOrigins.includes(origin) ||
-    wildcardPatterns.some(pattern => pattern.test(origin))
-  );
-
   // SSE ヘッダー設定
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no'); // nginx バッファリング無効化
   
-  // CORS ヘッダーを SSE に明示的に追加
-  if (isAllowed && origin) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
+  // CORS ヘッダーを設定
+  setCorsHeaders(req, res);
   
   res.flushHeaders();
 

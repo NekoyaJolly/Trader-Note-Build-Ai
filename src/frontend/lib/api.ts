@@ -420,6 +420,7 @@ import type {
   IndicatorConfig,
   SaveIndicatorConfigRequest,
   IndicatorId,
+  ParamConstraints,
 } from "@/types/indicator";
 
 /**
@@ -442,6 +443,8 @@ export async function fetchIndicatorSettings(): Promise<UserIndicatorSettings> {
 /**
  * インジケーターメタデータを取得
  * GET /api/indicators/metadata
+ * 
+ * 注意: APIが利用できない場合は、フロントエンドの定義を使用
  */
 export async function fetchIndicatorMetadata(category?: string): Promise<{
   indicators: IndicatorMetadata[];
@@ -451,16 +454,45 @@ export async function fetchIndicatorMetadata(category?: string): Promise<{
     ? `${API_BASE_URL}/api/indicators/metadata?category=${category}`
     : `${API_BASE_URL}/api/indicators/metadata`;
 
-  const response = await fetch(url, {
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    throw new Error(
-      `メタデータの取得に失敗しました: ${response.status} ${response.statusText}`
-    );
+  try {
+    const response = await fetch(url, {
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      throw new Error(
+        `メタデータの取得に失敗しました: ${response.status} ${response.statusText}`
+      );
+    }
+    const payload = await response.json();
+    return payload.data;
+  } catch (error) {
+    // APIが利用できない場合は、フロントエンドの定義を使用
+    console.warn('[fetchIndicatorMetadata] APIエラー、フロントエンド定義を使用:', error);
+    const { INDICATOR_DEFINITIONS, getAllCategories } = await import('@/lib/indicatorDefinitions');
+    
+    let indicators = INDICATOR_DEFINITIONS.map(def => ({
+      id: def.id,
+      name: def.name,
+      category: def.category,
+      description: def.description || '',
+      defaultParams: def.defaultParams,
+      paramDescriptions: def.paramDescriptions,
+      paramConstraints: {} as ParamConstraints, // フロントエンド定義には制約情報がないため空オブジェクト
+    }));
+
+    // カテゴリでフィルタリング
+    if (category) {
+      indicators = indicators.filter(ind => ind.category === category);
+    }
+
+    return {
+      indicators: indicators.map(ind => ({
+        ...ind,
+        displayName: ind.name, // IndicatorDefinitionのnameをdisplayNameとしてマッピング
+      })) as IndicatorMetadata[],
+      categories: getAllCategories(),
+    };
   }
-  const payload = await response.json();
-  return payload.data;
 }
 
 /**

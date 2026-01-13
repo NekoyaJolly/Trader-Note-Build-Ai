@@ -267,14 +267,41 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const loadIndicatorData = useCallback(async () => {
     try {
       setIsLoading(true);
-      const [metadataRes, settingsRes] = await Promise.all([
+      const [metadataRes, settingsRes] = await Promise.allSettled([
         fetchIndicatorMetadata(),
         fetchIndicatorSettings(),
       ]);
-      setIndicators(metadataRes.indicators);
-      setActiveConfigs(settingsRes.activeSet.configs.filter(c => c.enabled));
+      
+      // メタデータの処理（成功時のみ）
+      if (metadataRes.status === 'fulfilled') {
+        setIndicators(metadataRes.value.indicators);
+      } else {
+        console.warn('インジケーターメタデータの取得に失敗（フロントエンド定義を使用）:', metadataRes.reason);
+        // フロントエンド定義を使用
+        const { INDICATOR_DEFINITIONS } = await import('@/lib/indicatorDefinitions');
+        setIndicators(INDICATOR_DEFINITIONS.map(def => ({
+          id: def.id,
+          name: def.name,
+          category: def.category,
+          description: def.description || '',
+          defaultParams: def.defaultParams,
+          paramDescriptions: def.paramDescriptions,
+          paramConstraints: {} as any,
+        })) as any);
+      }
+      
+      // 設定の処理（成功時のみ）
+      if (settingsRes.status === 'fulfilled') {
+        setActiveConfigs(settingsRes.value.activeSet.configs.filter(c => c.enabled));
+      } else {
+        console.warn('インジケーター設定の取得に失敗:', settingsRes.reason);
+        setActiveConfigs([]);
+      }
     } catch (error) {
       console.error('インジケーター設定の読み込みエラー:', error);
+      // エラーが発生してもUIは表示できるようにする
+      setIndicators([]);
+      setActiveConfigs([]);
     } finally {
       setIsLoading(false);
     }

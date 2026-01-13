@@ -12,9 +12,11 @@
  * - 接続状態インジケーター
  */
 
-import React, { ReactNode, useEffect, useMemo, useState } from "react";
+import React, { ReactNode, useEffect, useMemo, useState, useCallback } from "react";
 import { useRealtimeChart, OHLCVBar, PendingBar, ConnectionStatus } from "@/hooks/useRealtimeChart";
-import { CandlestickChart, DrawnLine, OHLCVDataPoint } from "./CandlestickChart";
+import { CandlestickChart, DrawnLine, OHLCVDataPoint, IndicatorLineConfig } from "./CandlestickChart";
+import { IndicatorSelector, SelectedIndicator } from "./IndicatorSelector";
+import { indicatorToChartConfigs } from "@/lib/chartIndicators";
 
 interface RealtimeChartProps {
 	symbol: string;
@@ -144,6 +146,7 @@ export function RealtimeChart({
 	const [drawingMode, setDrawingMode] = useState<"none" | "horizontal" | "trend">("none");
 	const [drawnLines, setDrawnLines] = useState<DrawnLine[]>([]);
 	const [hasEverConnected, setHasEverConnected] = useState(false);
+	const [selectedIndicators, setSelectedIndicators] = useState<SelectedIndicator[]>([]);
 
 	const storageKey = useMemo(() => `chart-lines-${symbol}-${timeframe}`, [symbol, timeframe]);
 
@@ -255,6 +258,37 @@ export function RealtimeChart({
 		return Array.from(dataMap.values()).sort((a, b) => a.timestamp - b.timestamp);
 	}, [bars, pendingBar]);
 
+	// 選択されたインジケーターを計算
+	const indicatorConfigs: IndicatorLineConfig[] = useMemo(() => {
+		if (chartData.length === 0 || selectedIndicators.length === 0) {
+			// デバッグモード時のみログ出力（頻繁なログを避ける）
+			if (process.env.NODE_ENV === 'development' && selectedIndicators.length > 0) {
+				console.log('[RealtimeChart] インジケーター計算スキップ（データ不足）:', { chartDataLength: chartData.length, selectedIndicatorsLength: selectedIndicators.length });
+			}
+			return [];
+		}
+
+		const configs: IndicatorLineConfig[] = [];
+		for (const selected of selectedIndicators) {
+			try {
+				const indicatorConfigs = indicatorToChartConfigs(
+					selected.id,
+					chartData,
+					selected.params,
+					selected.displaySettings
+				);
+				configs.push(...indicatorConfigs);
+			} catch (error) {
+				console.error(`[RealtimeChart] インジケーター計算エラー (${selected.id}):`, error);
+			}
+		}
+		// デバッグモード時のみ詳細ログ
+		if (process.env.NODE_ENV === 'development' && configs.length > 0) {
+			console.log('[RealtimeChart] インジケーター計算完了:', { selectedCount: selectedIndicators.length, configCount: configs.length });
+		}
+		return configs;
+	}, [chartData, selectedIndicators]);
+
 	const latestBar = bars.length > 0 ? bars[bars.length - 1] : null;
 
 	const { dailyHigh, dailyLow, previousClose } = useMemo(() => {
@@ -284,6 +318,7 @@ export function RealtimeChart({
 
 	return (
 		<div className="bg-gray-900 rounded-lg overflow-hidden">
+			{/* デスクトップ用ヘッダー */}
 			<div className="bg-gray-800 px-3 py-2 hidden md:flex items-center gap-3 border-b border-gray-700">
 				<select value={symbol} onChange={(e) => handleSymbolChange(e.target.value)} disabled={isConnected} className={`bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 font-semibold ${isConnected ? "opacity-50 cursor-not-allowed" : "hover:border-gray-500"}`}>
 					{SYMBOL_OPTIONS.map((opt) => (
@@ -315,6 +350,12 @@ export function RealtimeChart({
 
 				<div className="flex-1" />
 
+				<IndicatorSelector
+					selectedIndicators={selectedIndicators}
+					onSelectionChange={setSelectedIndicators}
+					compact={true}
+				/>
+
 				<div className="flex items-center gap-2">
 					<StatusBadge status={status} />
 
@@ -338,6 +379,15 @@ export function RealtimeChart({
 				</div>
 			</div>
 
+			{/* モバイル用インジケーターセレクター（下部固定） */}
+			<div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-gray-800 border-t border-gray-700 shadow-lg max-h-[50vh] overflow-y-auto">
+				<IndicatorSelector
+					selectedIndicators={selectedIndicators}
+					onSelectionChange={setSelectedIndicators}
+					compact={true}
+				/>
+			</div>
+
 			{error && (
 				<div className="bg-red-900/50 border-b border-red-500 px-4 py-2">
 					<p className="text-red-300 text-sm">⚠️ {error}</p>
@@ -357,10 +407,11 @@ export function RealtimeChart({
 							<PricePanel bar={latestBar} dailyHigh={dailyHigh} dailyLow={dailyLow} previousClose={previousClose} />
 						</div>
 
-						<div className="relative">
+						<div className="relative" style={{ marginBottom: '60px' }}>
 							<CandlestickChart
 								ohlcvData={chartData}
 								height={height}
+								indicators={indicatorConfigs}
 								drawingMode={drawingMode}
 								drawnLines={drawnLines}
 								onCompleteLine={handleCompleteLine}

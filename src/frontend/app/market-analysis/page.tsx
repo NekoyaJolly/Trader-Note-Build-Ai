@@ -10,10 +10,12 @@
  * - cTrader WebSocket によるリアルタイムチャート
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { CandlestickChart, OHLCVDataPoint } from '@/components/CandlestickChart';
 import { RealtimeChart } from '@/components/RealtimeChart';
 import { NeonButton } from '@/components/ui/NeonButton';
+import { IndicatorSelector, SelectedIndicator } from '@/components/IndicatorSelector';
+import { indicatorToChartConfigs } from '@/lib/chartIndicators';
 
 // 12次元特徴量の詳細型
 interface FeatureDetail {
@@ -102,6 +104,7 @@ export default function MarketAnalysisPage() {
     const [analysisData, setAnalysisData] = useState<MarketAnalysisData | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [selectedIndicators, setSelectedIndicators] = useState<SelectedIndicator[]>([]);
 
     const handleSymbolChange = useCallback((symbol: string) => {
         setSelectedSymbol(symbol);
@@ -147,6 +150,29 @@ export default function MarketAnalysisPage() {
         close: d.close,
         volume: d.volume,
     })) || [];
+
+    // 選択されたインジケーターを計算
+    const indicatorConfigs = useMemo(() => {
+        if (chartData.length === 0 || selectedIndicators.length === 0) {
+            return [];
+        }
+
+        const configs = [];
+        for (const selected of selectedIndicators) {
+            try {
+                const indicatorConfigs = indicatorToChartConfigs(
+                    selected.id,
+                    chartData,
+                    selected.params,
+                    selected.displaySettings
+                );
+                configs.push(...indicatorConfigs);
+            } catch (error) {
+                console.warn(`[MarketAnalysis] インジケーター計算エラー (${selected.id}):`, error);
+            }
+        }
+        return configs;
+    }, [chartData, selectedIndicators]);
 
     return (
         <div className="min-h-screen bg-gray-900 text-white p-6 space-y-4">
@@ -249,6 +275,13 @@ export default function MarketAnalysisPage() {
                                             <span className="text-xs text-gray-500">{analysisData.meta.dataPoints}本</span>
                                             
                                             <div className="flex-1" />
+
+                                            {/* インジケーター選択 */}
+                                            <IndicatorSelector
+                                                selectedIndicators={selectedIndicators}
+                                                onSelectionChange={setSelectedIndicators}
+                                                compact={true}
+                                            />
                                             
                                             {/* タイムスタンプ */}
                                             <span className="text-xs text-gray-400">
@@ -262,6 +295,7 @@ export default function MarketAnalysisPage() {
                                                 <CandlestickChart
                                                     ohlcvData={chartData}
                                                     height={380}
+                                                    indicators={indicatorConfigs}
                                                 />
                                             </div>
                                         </div>
