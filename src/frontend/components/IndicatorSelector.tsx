@@ -310,36 +310,34 @@ function CategorySection({
                 >
                   {indicator.name}
                 </label>
-                <div className="ml-auto flex-shrink-0">
-                  {isSelected && (
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                          onEdit(indicator.id);
-                        }}
-                        className="text-lg text-cyan-400 hover:text-cyan-300 px-2 py-1 rounded hover:bg-cyan-500/20 transition-all flex-shrink-0"
-                        title="設定"
-                        type="button"
-                      >
-                        ⚙️
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                          onRemove(indicator.id);
-                        }}
-                        className="text-sm text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-red-500/20 transition-all flex-shrink-0"
-                        title="削除"
-                        type="button"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  )}
-                </div>
+                {isSelected && (
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        onEdit(indicator.id);
+                      }}
+                      className="text-lg text-cyan-400 hover:text-cyan-300 px-2 py-1 rounded hover:bg-cyan-500/20 transition-all flex-shrink-0"
+                      title="設定"
+                      type="button"
+                    >
+                      ⚙️
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        onRemove(indicator.id);
+                      }}
+                      className="text-sm text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-red-500/20 transition-all flex-shrink-0"
+                      title="削除"
+                      type="button"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           );
