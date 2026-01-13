@@ -294,16 +294,10 @@ function CategorySection({
       <div className="space-y-1">
         {indicators.map((indicator) => {
           const isSelected = selectedIndicators.some((sel) => sel.id === indicator.id);
-          
-          // デバッグログ（開発環境のみ、本番ビルドには含まれない）
-          // TODO: 動作確認後、このログを削除可能
-          if (process.env.NODE_ENV === 'development' && isSelected) {
-            console.log(`[IndicatorSelector] Selected indicator: ${indicator.name}, selectedCount: ${selectedIndicators.length}`);
-          }
 
           return (
             <div key={indicator.id} className="group/item hover:bg-gray-700/30 rounded px-1 py-0.5 transition-colors">
-              <div className="flex items-center gap-2 w-full">
+              <div className="flex items-center gap-2 w-full overflow-hidden">
                 <input
                   type="checkbox"
                   checked={isSelected}
@@ -311,7 +305,7 @@ function CategorySection({
                   className="w-4 h-4 text-cyan-500 bg-gray-700 border-gray-600 rounded focus:ring-cyan-500 flex-shrink-0"
                 />
                 <label
-                  className="text-sm text-gray-300 cursor-pointer flex-1 min-w-0"
+                  className="text-sm text-gray-300 cursor-pointer truncate min-w-0"
                   onClick={() => onToggle(indicator.id)}
                 >
                   <span className="truncate block">{indicator.name}</span>
@@ -319,34 +313,36 @@ function CategorySection({
                     <span className="text-xs text-gray-500 truncate hidden sm:block">({indicator.description})</span>
                   )}
                 </label>
-                {isSelected && (
-                  <div className="flex items-center gap-1 flex-shrink-0 !opacity-100">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        onEdit(indicator.id);
-                      }}
-                      className="text-lg text-cyan-400 hover:text-cyan-300 px-2 py-1 rounded hover:bg-cyan-500/20 transition-all flex-shrink-0"
-                      title="設定"
-                      type="button"
-                    >
-                      ⚙️
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        onRemove(indicator.id);
-                      }}
-                      className="text-sm text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-red-500/20 transition-all flex-shrink-0"
-                      title="削除"
-                      type="button"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                )}
+                <div className="ml-auto flex-shrink-0">
+                  {isSelected && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          onEdit(indicator.id);
+                        }}
+                        className="text-lg text-cyan-400 hover:text-cyan-300 px-2 py-1 rounded hover:bg-cyan-500/20 transition-all flex-shrink-0"
+                        title="設定"
+                        type="button"
+                      >
+                        ⚙️
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          onRemove(indicator.id);
+                        }}
+                        className="text-sm text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-red-500/20 transition-all flex-shrink-0"
+                        title="削除"
+                        type="button"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           );
