@@ -20,8 +20,9 @@ const iconSizes = [
   { size: 180, name: 'apple-icon-180x180.png', dir: 'public' },
   { size: 192, name: 'icon-192x192.png', dir: 'public' },
   { size: 512, name: 'icon-512x512.png', dir: 'public' },
-  // appディレクトリ用
-  { size: 32, name: 'icon.png', dir: 'app' },
+  // appディレクトリ用（Next.jsが自動認識）
+  // icon.pngは96x96以上推奨（高解像度ディスプレイ対応）
+  { size: 96, name: 'icon.png', dir: 'app' },
   { size: 180, name: 'apple-icon.png', dir: 'app' },
 ];
 
@@ -50,8 +51,8 @@ async function generateIcons() {
     try {
       await sharp(sourceImage)
         .resize(icon.size, icon.size, {
-          fit: 'contain',
-          background: { r: 0, g: 0, b: 0, alpha: 0 }, // 透明背景を保持
+          fit: 'cover', // 画像を正方形にフィット（上下をクロップ）
+          position: 'center', // 中央を基準にクロップ
         })
         .png()
         .toFile(outputPath);
@@ -69,8 +70,8 @@ async function generateIcons() {
   const faviconPng = path.join(outputDirs.app, 'favicon.png');
   await sharp(sourceImage)
     .resize(32, 32, {
-      fit: 'contain',
-      background: { r: 0, g: 0, b: 0, alpha: 0 },
+      fit: 'cover', // 画像を正方形にフィット（上下をクロップ）
+      position: 'center', // 中央を基準にクロップ
     })
     .png()
     .toFile(faviconPng);
