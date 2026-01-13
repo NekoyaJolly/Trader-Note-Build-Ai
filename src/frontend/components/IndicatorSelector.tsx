@@ -308,10 +308,7 @@ function CategorySection({
                   className="text-sm text-gray-300 cursor-pointer truncate min-w-0"
                   onClick={() => onToggle(indicator.id)}
                 >
-                  <span className="truncate block">{indicator.name}</span>
-                  {indicator.description && (
-                    <span className="text-xs text-gray-500 truncate hidden sm:block">({indicator.description})</span>
-                  )}
+                  {indicator.name}
                 </label>
                 <div className="ml-auto flex-shrink-0">
                   {isSelected && (
