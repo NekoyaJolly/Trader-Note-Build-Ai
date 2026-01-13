@@ -298,7 +298,7 @@ function CategorySection({
           // デバッグログ（開発環境のみ、本番ビルドには含まれない）
           // TODO: 動作確認後、このログを削除可能
           if (process.env.NODE_ENV === 'development' && isSelected) {
-            console.log(`[IndicatorSelector] ${indicator.name} - isSelected: ${isSelected}, selectedCount: ${selectedIndicators.length}`);
+            console.log(`[IndicatorSelector] Selected indicator: ${indicator.name}, selectedCount: ${selectedIndicators.length}`);
           }
 
           return (
@@ -311,7 +311,7 @@ function CategorySection({
                   className="w-4 h-4 text-cyan-500 bg-gray-700 border-gray-600 rounded focus:ring-cyan-500 flex-shrink-0"
                 />
                 <label
-                  className="text-sm text-gray-300 cursor-pointer flex-1 min-w-0 max-w-full overflow-hidden"
+                  className="text-sm text-gray-300 cursor-pointer flex-1 min-w-0"
                   onClick={() => onToggle(indicator.id)}
                 >
                   <span className="truncate block">{indicator.name}</span>
@@ -320,7 +320,7 @@ function CategorySection({
                   )}
                 </label>
                 {isSelected && (
-                  <div className="flex items-center gap-1 flex-shrink-0 !visible !opacity-100">
+                  <div className="flex items-center gap-1 flex-shrink-0 !opacity-100">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
