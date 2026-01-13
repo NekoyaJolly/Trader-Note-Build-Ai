@@ -295,6 +295,10 @@ function CategorySection({
         {indicators.map((indicator) => {
           const isSelected = selectedIndicators.some((sel) => sel.id === indicator.id);
           
+          // デバッグ: インジケーター選択状態をログ出力
+          if (process.env.NODE_ENV === 'development' && isSelected) {
+            console.log(`[IndicatorSelector] ${indicator.name} - isSelected: ${isSelected}, selectedCount: ${selectedIndicators.length}`);
+          }
 
           return (
             <div key={indicator.id} className="group/item hover:bg-gray-700/30 rounded px-1 py-0.5 transition-colors">
@@ -306,7 +310,7 @@ function CategorySection({
                   className="w-4 h-4 text-cyan-500 bg-gray-700 border-gray-600 rounded focus:ring-cyan-500 flex-shrink-0"
                 />
                 <label
-                  className="text-sm text-gray-300 cursor-pointer flex-1 min-w-0"
+                  className="text-sm text-gray-300 cursor-pointer flex-1 min-w-0 max-w-full overflow-hidden"
                   onClick={() => onToggle(indicator.id)}
                 >
                   <span className="truncate block">{indicator.name}</span>
@@ -315,7 +319,7 @@ function CategorySection({
                   )}
                 </label>
                 {isSelected && (
-                  <div className="flex items-center gap-1 flex-shrink-0 opacity-100 group-hover/item:opacity-100">
+                  <div className="flex items-center gap-1 flex-shrink-0" style={{ visibility: 'visible', opacity: 1 }}>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
