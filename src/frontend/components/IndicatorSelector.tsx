@@ -295,6 +295,11 @@ function CategorySection({
         {indicators.map((indicator) => {
           const isSelected = selectedIndicators.some((sel) => sel.id === indicator.id);
           
+          // デバッグログ（開発環境のみ、本番ビルドには含まれない）
+          // TODO: 動作確認後、このログを削除可能
+          if (process.env.NODE_ENV === 'development' && isSelected) {
+            console.log(`[IndicatorSelector] Selected indicator: ${indicator.name}, selectedCount: ${selectedIndicators.length}`);
+          }
 
           return (
             <div key={indicator.id} className="group/item hover:bg-gray-700/30 rounded px-1 py-0.5 transition-colors">
@@ -315,7 +320,7 @@ function CategorySection({
                   )}
                 </label>
                 {isSelected && (
-                  <div className="flex items-center gap-1 flex-shrink-0 opacity-100 group-hover/item:opacity-100">
+                  <div className="flex items-center gap-1 flex-shrink-0 !opacity-100">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
