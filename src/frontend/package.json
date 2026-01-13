@@ -6,7 +6,8 @@
     "dev": "next dev -p 3102",
     "build": "next build",
     "start": "next start -p 3102",
-    "lint": "eslint"
+    "lint": "eslint",
+    "generate-icons": "tsx scripts/generate-icons.ts"
   },
   "dependencies": {
     "@radix-ui/react-progress": "^1.1.8",
@@ -31,6 +32,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
+    "sharp": "^0.34.5",
     "tailwindcss": "^4",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5"
