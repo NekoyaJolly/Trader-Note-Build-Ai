@@ -50,6 +50,7 @@ class App {
    * Initialize middlewares
    */
   private initializeMiddlewares(): void {
+    console.log('[App] CORS設定を初期化中...');
     // CORS設定: 本番環境のVercelからのアクセスを許可
     // Vercel ドメイン一覧:
     //   - trader-note-build-ai.vercel.app (本番)
@@ -91,17 +92,21 @@ class App {
       allowedHeaders: ['Content-Type', 'Authorization'],
     }));
 
+    console.log('[App] JSON パーサーを設定中...');
     this.app.use(express.json());
     this.app.use(express.urlencoded({ extended: true }));
     
     // Cookie パーサー（cTrader認証のJWT Cookie用）
+    console.log('[App] Cookie パーサーを設定中...');
     this.app.use(cookieParser());
+    console.log('[App] ミドルウェア初期化完了');
   }
 
   /**
    * Initialize routes
    */
   private initializeRoutes(): void {
+    console.log('[App] ルート初期化開始...');
     // Health check
     this.app.get('/health', (req: Request, res: Response) => {
       res.json({

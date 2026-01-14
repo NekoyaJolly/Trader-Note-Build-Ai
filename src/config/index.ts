@@ -7,10 +7,27 @@ dotenv.config();
  * 環境変数から設定値を取得し、型安全に提供する
  * 注意: DATABASE_URL は Prisma が直接参照するため、ここでの定義は参考用
  */
+
+console.log('[Config] 環境変数をロード中...');
+console.log('[Config] NODE_ENV:', process.env.NODE_ENV);
+console.log('[Config] PORT:', process.env.PORT);
+console.log('[Config] BACKEND_PORT:', process.env.BACKEND_PORT);
+console.log('[Config] DATABASE_URL 存在:', !!process.env.DATABASE_URL);
+console.log('[Config] DATABASE_URL（最初の50文字）:', process.env.DATABASE_URL?.substring(0, 50) + '...');
+
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
-  throw new Error('DATABASE_URL is required');
+  console.error('[Config] ❌ DATABASE_URL が設定されていません');
+  console.error('[Config] 利用可能な環境変数:');
+  Object.keys(process.env)
+    .filter(key => !key.includes('npm_') && !key.includes('TERM'))
+    .forEach(key => {
+      console.error(`  ${key}: ${process.env[key]?.substring(0, 50) || '(empty)'}${process.env[key] && process.env[key]!.length > 50 ? '...' : ''}`);
+    });
+  throw new Error('DATABASE_URL is required but not found in environment variables');
 }
+
+console.log('[Config] ✅ 設定ロード成功');
 
 export const config = {
   server: {
