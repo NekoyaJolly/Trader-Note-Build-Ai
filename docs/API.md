@@ -692,4 +692,10 @@ Side-A（TradeNote）と Side-B（AITradeNote）を横断して類似ノート�
 }
 ```
 
+**備考:**
+- このAPIは手動呼び出し用
+- **Cron監視では自動実行**: `CronSimilarityService` が `CrossSimilarityService` を内部的に利用
+- 類似度閾値はデフォルト85%（Cron監視）、手動では50%
+- 詳細は `docs/ARCHITECTURE.md` の「Cron監視の類似度チェック」を参照
+
 ---

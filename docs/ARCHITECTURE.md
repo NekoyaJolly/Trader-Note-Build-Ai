@@ -528,6 +528,225 @@ PUSH_NOTIFICATION_KEY=<key>
 }
 ```
 
+---
+
+## Cron監視の類似度チェック（Side-B）
+
+### 概要
+
+Cron監視ジョブにおいて、AIトレードノート（AITradeNote）および人間トレードノート（TradeNote）との類似度をチェックし、閾値を超えた場合に自動通知を送信する機能。
+
+### アーキテクチャ
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Cron監視フロー（1時間ごと）                      │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+        ┌─────────────────────────────────────┐
+        │  1. 市場開場チェック                    │
+        │     - 休場時はスキップ                  │
+        └─────────────────────────────────────┘
+                              ↓
+        ┌─────────────────────────────────────┐
+        │  2. 市場データ取得（1分足60本）         │
+        │     - MarketDataService              │
+        │     - Twelve Data API                │
+        └─────────────────────────────────────┘
+                              ↓
+        ┌─────────────────────────────────────┐
+        │  3. エントリー/決済判定               │
+        │     - pending → open                 │
+        │     - open → closed                  │
+        └─────────────────────────────────────┘
+                              ↓
+        ┌─────────────────────────────────────┐
+        │  4. AIノート類似度チェック ★NEW        │
+        │     - cronSimilarityService          │
+        └─────────────────────────────────────┘
+                              ↓
+        ┌─────────────────────────────────────┐
+        │  4.1. 特徴量ベクトル生成              │
+        │     - OHLCV → IndicatorService       │
+        │     - 12次元特徴量                    │
+        └─────────────────────────────────────┘
+                              ↓
+        ┌─────────────────────────────────────┐
+        │  4.2. 横断類似検索                    │
+        │     - CrossSimilarityService         │
+        │     - TradeNote + AITradeNote        │
+        │     - コサイン類似度計算               │
+        └─────────────────────────────────────┘
+                              ↓
+        ┌─────────────────────────────────────┐
+        │  4.3. 閾値判定（デフォルト85%）        │
+        │     - 類似度 >= threshold             │
+        │     - topK件まで取得                  │
+        └─────────────────────────────────────┘
+                              ↓
+        ┌─────────────────────────────────────┐
+        │  4.4. 通知トリガー                    │
+        │     - NotificationTriggerService     │
+        │     - 冪等性チェック                  │
+        │     - クールダウン検査                │
+        │     - 24時間上限チェック              │
+        └─────────────────────────────────────┘
+                              ↓
+        ┌─────────────────────────────────────┐
+        │  5. 通知送信                          │
+        │     - in-app / Push / webhook        │
+        │     - NotificationLog記録            │
+        └─────────────────────────────────────┘
+```
+
+### 主要コンポーネント
+
+#### CronSimilarityService
+
+**責務:**
+- Cron監視における類似度チェックの統括
+- OHLCVデータから特徴量ベクトル生成
+- 横断検索の実行と結果フィルタリング
+- 通知トリガーとの連携
+
+**設定:**
+```typescript
+{
+  similarityThreshold: 0.85,    // 類似度閾値（0-1）
+  topK: 5,                       // 取得する類似ノートの最大件数
+  minSimilarity: 0.5,            // 検索対象の最小類似度
+  searchTradeNotes: true,        // TradeNoteを検索
+  searchAITradeNotes: true,      // AITradeNoteを検索
+  notificationChannel: 'in_app', // 通知チャネル
+  debug: false,                  // デバッグモード
+}
+```
+
+**主要メソッド:**
+```typescript
+// 単一シンボルの類似度チェック
+async checkSimilarityAndNotify(input: SimilarityCheckInput): Promise<SimilarityCheckResult>
+
+// 複数シンボルの一括チェック
+async checkMultipleSymbols(inputs: SimilarityCheckInput[]): Promise<SimilarityCheckResult[]>
+```
+
+#### CrossSimilarityService（再利用）
+
+Side-A/Side-Bを横断した類似ノート検索を提供。
+
+**責務:**
+- TradeNoteとAITradeNoteの統合検索
+- 特徴量ベクトルからのコサイン類似度計算
+- 類似度スコアによる統一ソート
+
+#### NotificationTriggerService（再利用）
+
+通知判定・送信・履歴管理を担当。
+
+**責務:**
+- スコア閾値判定
+- 冪等性チェック（同一条件の重複通知防止）
+- クールダウン検査（同一ノートの再通知抑制）
+- 24時間上限チェック（過負荷防止）
+- NotificationLog永続化
+
+### SideBScheduler統合
+
+**設定:**
+```typescript
+{
+  autoSimilarityCheck: true,     // 類似度チェック自動実行
+  similarityThreshold: 0.85,     // 類似度閾値
+}
+```
+
+**executeMonitorJob フロー:**
+1. 市場開場チェック
+2. 期限切れトレード自動キャンセル
+3. 各シンボルについて:
+   - 1分足60本取得
+   - pending/openトレード検証
+   - **AIノート類似度チェック（autoSimilarityCheck=trueの場合）**
+4. Note自動生成（決済があった場合）
+5. サマリーログ出力
+
+**監視結果:**
+```typescript
+{
+  processed: 10,           // 処理トレード件数
+  entries: 2,              // エントリー件数
+  exits: 1,                // 決済件数
+  expired: 0,              // 期限切れキャンセル件数
+  similarityChecks: 3,     // ★類似度チェック件数
+  notificationsSent: 1,    // ★通知送信件数
+  errors: [],
+}
+```
+
+### 通知抑制メカニズム
+
+**1. スコア閾値**
+- デフォルト: 75%（環境変数 `NOTIFY_THRESHOLD`）
+- 類似度チェック閾値とは独立（通常85%）
+
+**2. 冪等性チェック**
+- キー: `noteId × marketSnapshotId × channel`
+- 同一条件での重複通知を防止
+
+**3. クールダウン**
+- デフォルト: 1時間（環境変数 `NOTIFICATION_COOLDOWN_MS`）
+- 同一ノートへの再通知を時間制限
+
+**4. 重複抑制**
+- 5秒以内の同一条件通知を抑止
+
+**5. 24時間上限**
+- デフォルト: 30件（環境変数 `DAILY_NOTIFICATION_LIMIT`）
+- リアルタイム通知の過負荷防止
+
+### パフォーマンス最適化
+
+**1. APIコスト削減**
+- 既存の市場データ取得を再利用（追加コストなし）
+- 1時間ごとの実行（過度な頻度を回避）
+
+**2. 検索効率化**
+- `minSimilarity`で事前フィルタ（デフォルト50%）
+- `topK`で取得件数制限（デフォルト5件）
+- コサイン類似度による高速計算
+
+**3. エラー耐性**
+- 類似度チェック失敗時も監視ジョブ全体は継続
+- シンボル単位でのエラー隔離
+
+### 設定例
+
+**高精度モード（閾値90%）:**
+```typescript
+{
+  autoSimilarityCheck: true,
+  similarityThreshold: 0.90,
+}
+```
+
+**多通知モード（閾値70%）:**
+```typescript
+{
+  autoSimilarityCheck: true,
+  similarityThreshold: 0.70,
+}
+```
+
+**無効化:**
+```typescript
+{
+  autoSimilarityCheck: false,
+}
+```
+
+---
+
 ## Testing Strategy
 
 ### Manual Testing
