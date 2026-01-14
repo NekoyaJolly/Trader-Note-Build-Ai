@@ -9,12 +9,12 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { WebPushService } from '../backend/services/webPushService';
 import { requireAuth } from '../middleware/authMiddleware';
+import { getPrismaClient } from '../infrastructure/prismaClient';
 
 const router = Router();
-const prisma = new PrismaClient();
+const prisma = getPrismaClient();
 const webPushService = new WebPushService(prisma);
 
 /**

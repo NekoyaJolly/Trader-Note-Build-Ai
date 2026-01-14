@@ -13,7 +13,7 @@
  */
 
 import { Queue, Job, QueueEvents } from 'bullmq';
-import { PrismaClient, RevaluationJobType, RevaluationJobStatus } from '@prisma/client';
+import { RevaluationJobType, RevaluationJobStatus } from '@prisma/client';
 import {
   QUEUE_NAMES,
   JOB_PRIORITIES,
@@ -21,8 +21,9 @@ import {
   getQueueOptions,
   isRedisAvailable,
 } from '../config/queueConfig';
+import { getPrismaClient } from '../infrastructure/prismaClient';
 
-const prisma = new PrismaClient();
+const prisma = getPrismaClient();
 
 /**
  * ジョブデータの型定義

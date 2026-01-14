@@ -14,12 +14,14 @@
 
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { PrismaClient } from '@prisma/client';
 import { CTraderAuthService, ExchangeCodeRequestSchema } from '../services/ctrader/ctraderAuthService';
 import { sessionService } from '../services/auth/sessionService';
+import { getPrismaClient } from '../../infrastructure/prismaClient';
 
 const router = Router();
-const prisma = new PrismaClient();
+
+// Prismaクライアントをシングルトンから取得
+const prisma = getPrismaClient();
 const authService = new CTraderAuthService(prisma);
 
 // ========================================
