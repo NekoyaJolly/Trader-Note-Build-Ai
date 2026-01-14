@@ -36,10 +36,14 @@ class App {
   private server: Server | null = null;
 
   constructor() {
+    console.log('[App] コンストラクタ開始');
     this.app = express();
     this.scheduler = new MatchingScheduler();
+    console.log('[App] ミドルウェアを初期化中...');
     this.initializeMiddlewares();
+    console.log('[App] ルートを初期化中...');
     this.initializeRoutes();
+    console.log('[App] コンストラクタ完了');
   }
 
   /**
@@ -176,60 +180,90 @@ class App {
   public start(): void {
     const port = config.server.port;
 
+    console.log('═══════════════════════════════════════');
+    console.log('  TradeAssist Server Starting');
+    console.log('═══════════════════════════════════════');
+    console.log(`  PORT env: ${process.env.PORT}`);
+    console.log(`  BACKEND_PORT env: ${process.env.BACKEND_PORT}`);
+    console.log(`  Resolved port: ${port}`);
+    console.log(`  NODE_ENV: ${process.env.NODE_ENV}`);
+    console.log('═══════════════════════════════════════');
+
     // サーバーインスタンスを保持してイベントループを維持
-    this.server = this.app.listen(port, () => {
-      console.log('═══════════════════════════════════════');
-      console.log('  TradeAssist Server');
-      console.log('═══════════════════════════════════════');
-      console.log(`  Environment: ${config.server.env}`);
-      console.log(`  Server running on port: ${port}`);
-      console.log(`  Match threshold: ${config.matching.threshold}`);
-      console.log(`  Check interval: ${config.matching.checkIntervalMinutes} minutes`);
-      console.log('═══════════════════════════════════════');
-      console.log('\nAvailable endpoints:');
-      console.log('  GET  /health');
-      console.log('  GET  /api/auth/me');
-      console.log('  POST /api/auth/logout');
-      console.log('  POST /api/trades/import/csv');
-      console.log('  POST /api/trades/import/upload-text');
-      console.log('  GET  /api/trades/notes');
-      console.log('  GET  /api/trades/notes/:id');
-      console.log('  POST /api/trades/notes/:id/approve');
-      console.log('  POST /api/matching/check');
-      console.log('  GET  /api/matching/history');
-      console.log('  GET  /api/notifications');
-      console.log('  PUT  /api/notifications/:id/read');
-      console.log('  GET  /api/orders/preset/:noteId');
-      console.log('  POST /api/orders/confirmation');
-      console.log('  POST /api/bars/locate');
-      console.log('  GET  /api/bars/locate/:symbol/:timestamp/:timeframe');
-      console.log('═══════════════════════════════════════\n');
+    try {
+      this.server = this.app.listen(port, '0.0.0.0', () => {
+        console.log('═══════════════════════════════════════');
+        console.log('  TradeAssist Server STARTED');
+        console.log('═══════════════════════════════════════');
+        console.log(`  Environment: ${config.server.env}`);
+        console.log(`  Server running on port: ${port}`);
+        console.log(`  Match threshold: ${config.matching.threshold}`);
+        console.log(`  Check interval: ${config.matching.checkIntervalMinutes} minutes`);
+        console.log('═══════════════════════════════════════');
+        console.log('\nAvailable endpoints:');
+        console.log('  GET  /health');
+        console.log('  GET  /api/auth/me');
+        console.log('  POST /api/auth/logout');
+        console.log('  POST /api/trades/import/csv');
+        console.log('  POST /api/trades/import/upload-text');
+        console.log('  GET  /api/trades/notes');
+        console.log('  GET  /api/trades/notes/:id');
+        console.log('  POST /api/trades/notes/:id/approve');
+        console.log('  POST /api/matching/check');
+        console.log('  GET  /api/matching/history');
+        console.log('  GET  /api/notifications');
+        console.log('  PUT  /api/notifications/:id/read');
+        console.log('  GET  /api/orders/preset/:noteId');
+        console.log('  POST /api/orders/confirmation');
+        console.log('  POST /api/bars/locate');
+        console.log('  GET  /api/bars/locate/:symbol/:timestamp/:timeframe');
+        console.log('═══════════════════════════════════════\n');
 
-      // スケジューラー起動: 本番運用ルールに従い、CRON_ENABLED が true の場合のみ起動
-      // 理由: 開発環境では通知ファイルの更新が再起動ループの原因となるため、デフォルト無効化
-      const cronEnabled = process.env.CRON_ENABLED === 'true';
-      if (cronEnabled) {
-        this.scheduler.start();
-      } else {
-        // 本番環境ではデバッグログを抑制
-        if (!config.server.isProduction) {
-          console.log('スケジューラーはCRON_ENABLEDがtrueの時のみ起動（現在は無効）');
+        // スケジューラー起動: 本番運用ルールに従い、CRON_ENABLED が true の場合のみ起動
+        // 理由: 開発環境では通知ファイルの更新が再起動ループの原因となるため、デフォルト無効化
+        const cronEnabled = process.env.CRON_ENABLED === 'true';
+        if (cronEnabled) {
+          this.scheduler.start();
+        } else {
+          // 本番環境ではデバッグログを抑制
+          if (!config.server.isProduction) {
+            console.log('スケジューラーはCRON_ENABLEDがtrueの時のみ起動（現在は無効）');
+          }
         }
-      }
 
-      // Side-B スケジューラー起動: SIDE_B_SCHEDULER_ENABLED が true の場合のみ自動開始
-      // 理由: AI取引は明示的に有効化する必要があるため、デフォルト無効
-      const sideBEnabled = process.env.SIDE_B_SCHEDULER_ENABLED === 'true';
-      if (sideBEnabled) {
-        console.log('Side-B スケジューラーを自動開始します...');
-        const sideBScheduler = getSideBScheduler({ enabled: true });
-        sideBScheduler.start();
-      } else {
-        if (!config.server.isProduction) {
-          console.log('Side-B スケジューラーはSIDE_B_SCHEDULER_ENABLEDがtrueの時のみ自動起動（UIから手動起動可能）');
+        // Side-B スケジューラー起動: SIDE_B_SCHEDULER_ENABLED が true の場合のみ自動開始
+        // 理由: AI取引は明示的に有効化する必要があるため、デフォルト無効
+        const sideBEnabled = process.env.SIDE_B_SCHEDULER_ENABLED === 'true';
+        if (sideBEnabled) {
+          console.log('Side-B スケジューラーを自動開始します...');
+          const sideBScheduler = getSideBScheduler({ enabled: true });
+          sideBScheduler.start();
+        } else {
+          if (!config.server.isProduction) {
+            console.log('Side-B スケジューラーはSIDE_B_SCHEDULER_ENABLEDがtrueの時のみ自動起動（UIから手動起動可能）');
+          }
         }
-      }
-    });
+      });
+
+      this.server.on('error', (error: NodeJS.ErrnoException) => {
+        console.error('═══════════════════════════════════════');
+        console.error('  サーバー起動エラー');
+        console.error('═══════════════════════════════════════');
+        console.error('Error code:', error.code);
+        console.error('Error message:', error.message);
+        console.error('Port:', port);
+        console.error('Stack:', error.stack);
+        console.error('═══════════════════════════════════════');
+        process.exit(1);
+      });
+    } catch (error) {
+      console.error('═══════════════════════════════════════');
+      console.error('  listen() 呼び出しエラー');
+      console.error('═══════════════════════════════════════');
+      console.error('Error:', error);
+      console.error('═══════════════════════════════════════');
+      process.exit(1);
+    }
   }
 
   /**
