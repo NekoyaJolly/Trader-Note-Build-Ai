@@ -78,10 +78,36 @@ export default function AccountsPage() {
     }
   };
 
-  // プライマリアカウント切り替え（バックエンドAPIが必要）
+  // プライマリアカウント切り替え
   const handleSetPrimary = async (accountId: string) => {
-    // TODO: バックエンドにプライマリアカウント変更APIを実装
-    alert(`プライマリアカウント切り替え機能は未実装です。\n選択: ${accountId}`);
+    if (!confirm(`アカウント ${accountId} をプライマリアカウントに設定しますか？`)) {
+      return;
+    }
+
+    setError(null);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/ctrader/primary`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ accountId }),
+      });
+
+      if (response.ok) {
+        // ユーザー情報を再取得してプライマリアカウントを更新
+        await refreshUser();
+        alert('プライマリアカウントを変更しました');
+      } else {
+        const data = await response.json();
+        setError(data.error || 'プライマリアカウントの変更に失敗しました');
+      }
+    } catch (err) {
+      console.error('プライマリアカウント変更エラー:', err);
+      setError('プライマリアカウントの変更に失敗しました');
+    }
   };
 
   // 有効期限切れチェック

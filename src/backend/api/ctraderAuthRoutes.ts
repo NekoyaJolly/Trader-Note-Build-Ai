@@ -213,10 +213,82 @@ router.delete('/ctrader', async (req: Request, res: Response) => {
 });
 
 /**
+ * PUT /api/auth/ctrader/primary
+ *
+ * プライマリアカウントを変更
+ *
+ * Body: { accountId: string }
+ */
+router.put('/ctrader/primary', async (req: Request, res: Response) => {
+  try {
+    // JWT からユーザーIDを取得
+    let token = req.cookies?.auth_token;
+
+    if (!token) {
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.substring(7);
+      }
+    }
+
+    if (!token) {
+      return res.status(401).json({
+        error: '認証が必要です',
+      });
+    }
+
+    const payload = sessionService.verifyToken(token);
+
+    const bodyResult = DisconnectRequestSchema.safeParse(req.body);
+
+    if (!bodyResult.success) {
+      return res.status(400).json({
+        error: 'accountId は必須です',
+        details: bodyResult.error.format(),
+      });
+    }
+
+    const { accountId } = bodyResult.data;
+
+    // 指定されたアカウントがユーザーのものかを確認
+    const tokenRecord = await prisma.cTraderToken.findFirst({
+      where: {
+        userId: payload.userId,
+        accountId,
+      },
+    });
+
+    if (!tokenRecord) {
+      return res.status(404).json({
+        error: '指定されたアカウントが見つかりません',
+      });
+    }
+
+    // ユーザーのプライマリアカウントを更新
+    await prisma.user.update({
+      where: { id: payload.userId },
+      data: { primaryAccountId: accountId },
+    });
+
+    console.log(`プライマリアカウント変更: ユーザー ${payload.userId}, アカウント ${accountId}`);
+
+    return res.json({
+      success: true,
+      message: `アカウント ${accountId} をプライマリアカウントに設定しました`,
+    });
+  } catch (error) {
+    console.error('プライマリアカウント変更エラー:', error);
+    return res.status(500).json({
+      error: 'プライマリアカウントの変更に失敗しました',
+    });
+  }
+});
+
+/**
  * POST /api/auth/ctrader/refresh
- * 
+ *
  * アクセストークンを手動更新
- * 
+ *
  * Body: { accountId: string }
  */
 router.post('/ctrader/refresh', async (req: Request, res: Response) => {

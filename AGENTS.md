@@ -476,6 +476,7 @@ npm test -- --testTimeout=30000
 - **主要エンドポイント**:
   - `GET /api/auth/ctrader/url` - OAuth 認証URLを取得
   - `POST /api/auth/ctrader/callback` - 認証コールバック処理
+  - `PUT /api/auth/ctrader/primary` - プライマリアカウント変更
   - `GET /api/auth/me` - ログインユーザー情報取得
   - `POST /api/auth/logout` - ログアウト
 

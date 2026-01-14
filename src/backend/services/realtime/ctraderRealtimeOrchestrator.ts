@@ -185,6 +185,7 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private ctidTraderAccountId: number | null = null;
+  private currentUserId: string | null = null; // 再接続用にuserIdを保存
   private tickLogCount = 0;
   // 直近の正常価格（片側欠損Tickの補完/検証に使用）
   private lastGoodMidBySymbol: Map<string, { mid: number; timestampMs: number }> = new Map();
@@ -251,20 +252,33 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
 
   /**
    * cTrader に接続してリアルタイムデータ受信を開始
+   *
+   * @param userId - 接続するユーザーID
    */
-  async connect(): Promise<boolean> {
+  async connect(userId: string): Promise<boolean> {
     if (this.status === 'connected' || this.status === 'connecting') {
       console.log('[CTraderOrchestrator] 既に接続中または接続済みです');
       return this.status === 'connected';
     }
 
+    // 再接続用に userId を保存
+    this.currentUserId = userId;
     this.setStatus('connecting');
 
     try {
-      // 1. トークンを取得
-      const token = await this.authService.getValidToken();
+      // 1. userId から CTraderToken を取得
+      const token = await this.prisma.cTraderToken.findFirst({
+        where: { userId },
+        orderBy: { lastConnectedAt: 'desc' },
+      });
+
       if (!token) {
-        throw new Error('有効な cTrader トークンがありません。認証が必要です。');
+        throw new Error('cTraderトークンが見つかりません。認証が必要です。');
+      }
+
+      // トークンの有効性をチェック
+      if (new Date(token.expiresAt) < new Date()) {
+        throw new Error('cTraderトークンの有効期限が切れています。再認証が必要です。');
       }
 
       console.log('[CTraderOrchestrator] トークン取得成功');
@@ -355,7 +369,10 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
       this.reconnectAttempts = 0;
 
       // 最終接続日時を更新
-      await this.authService.updateLastConnected(token.accountId);
+      await this.prisma.cTraderToken.updateMany({
+        where: { accountId: token.accountId },
+        data: { lastConnectedAt: new Date() },
+      });
 
       console.log('[CTraderOrchestrator] 接続完了');
       return true;
@@ -815,9 +832,14 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectAttempts++;
-      this.connect().catch(err => {
-        console.error('[CTraderOrchestrator] 再接続エラー:', err);
-      });
+      // 保存された userId を使用して再接続
+      if (this.currentUserId) {
+        this.connect(this.currentUserId).catch(err => {
+          console.error('[CTraderOrchestrator] 再接続エラー:', err);
+        });
+      } else {
+        console.error('[CTraderOrchestrator] 再接続失敗: userId が保存されていません');
+      }
     }, delay);
   }
 

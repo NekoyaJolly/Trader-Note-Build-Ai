@@ -8,7 +8,24 @@ http://localhost:3100
 > **注意**: デフォルトポートは `3100` です。`BACKEND_PORT` または `PORT` 環境変数で変更可能です。
 
 ## 認証
-現在、認証は不要です。本番環境では JWT または API キー認証を実装してください。
+
+**cTrader OAuth 2.0 認証** を使用します。
+
+### 認証フロー
+
+1. `GET /api/auth/ctrader/url` で認証URLを取得
+2. ユーザーを cTrader OAuth ページにリダイレクト
+3. cTrader で認可後、`POST /api/auth/ctrader/callback` でトークン交換
+4. JWT Cookie が発行され、認証完了
+
+### JWT 認証
+
+認証後の API リクエストでは、以下のいずれかで JWT を送信：
+
+- **Cookie**: `auth_token`（推奨）
+- **Authorization ヘッダー**: `Bearer <token>`
+
+### 認証エンドポイント
 
 ---
 
@@ -119,6 +136,67 @@ cTrader 接続を解除します（トークン削除）。
 ```json
 {
   "success": true
+}
+```
+
+---
+
+#### PUT /api/auth/ctrader/primary
+プライマリアカウントを変更します。
+
+**リクエストボディ:**
+```json
+{
+  "accountId": "string"
+}
+```
+
+**応答:**
+```json
+{
+  "success": true,
+  "message": "アカウント XXX をプライマリアカウントに設定しました"
+}
+```
+
+---
+
+#### GET /api/auth/me
+現在のユーザー情報を取得します。
+
+**応答:**
+```json
+{
+  "success": true,
+  "user": {
+    "id": "string",
+    "primaryAccountId": "string",
+    "displayName": "string",
+    "email": "string",
+    "role": "user|admin",
+    "active": true,
+    "lastLoginAt": "2024-01-01T00:00:00.000Z",
+    "ctraderAccounts": [
+      {
+        "accountId": "string",
+        "expiresAt": "2024-01-01T00:00:00.000Z",
+        "lastConnectedAt": "2024-01-01T00:00:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+---
+
+#### POST /api/auth/logout
+ログアウトします（Cookie削除）。
+
+**応答:**
+```json
+{
+  "success": true,
+  "message": "ログアウトしました"
 }
 ```
 

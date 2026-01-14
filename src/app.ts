@@ -188,11 +188,8 @@ class App {
       console.log('═══════════════════════════════════════');
       console.log('\nAvailable endpoints:');
       console.log('  GET  /health');
-      console.log('  POST /api/auth/register');
-      console.log('  POST /api/auth/login');
-      console.log('  POST /api/auth/refresh');
-      console.log('  POST /api/auth/logout');
       console.log('  GET  /api/auth/me');
+      console.log('  POST /api/auth/logout');
       console.log('  POST /api/trades/import/csv');
       console.log('  POST /api/trades/import/upload-text');
       console.log('  GET  /api/trades/notes');

@@ -7,7 +7,7 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
-import { ProtectedRoute } from '../ProtectedRoute';
+import { ProtectedRoute } from '../auth/ProtectedRoute';
 
 // 認証不要なパス（公開ページ）
 const PUBLIC_PATHS = [

@@ -64,6 +64,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    */
   const fetchUser = async (): Promise<User | null> => {
     try {
+      console.log('[AuthContext] ユーザー情報取得開始');
       const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
         method: 'GET',
         credentials: 'include', // Cookie を送信
@@ -72,11 +73,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         },
       });
 
+      console.log('[AuthContext] /api/auth/me レスポンス:', response.status, response.statusText);
+
       if (response.ok) {
         const data = await response.json();
+        console.log('[AuthContext] ユーザー情報取得成功:', data.user);
         return data.user;
       }
 
+      const errorText = await response.text();
+      console.log('[AuthContext] ユーザー情報取得失敗:', response.status, errorText);
       return null;
     } catch (error) {
       console.error('[AuthContext] ユーザー情報取得エラー:', error);
@@ -89,9 +95,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    */
   useEffect(() => {
     const init = async () => {
-      const userData = await fetchUser();
-      setUser(userData);
-      setLoading(false);
+      try {
+        const userData = await fetchUser();
+        setUser(userData);
+      } catch (error) {
+        console.error('[AuthContext] 初期化エラー:', error);
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
     };
 
     init();

@@ -15,10 +15,11 @@
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import { 
-  getCTraderRealtimeOrchestrator, 
+import { requireAuth } from '../../middleware/authMiddleware';
+import {
+  getCTraderRealtimeOrchestrator,
   CTraderRealtimeOrchestrator,
-  ConnectionStatus 
+  ConnectionStatus
 } from '../services/realtime/ctraderRealtimeOrchestrator';
 import { TickDataInput, OHLCVBarInput } from '../services/realtime/realtimeTickService';
 
@@ -133,13 +134,14 @@ router.get('/status', async (req: Request, res: Response) => {
  * POST /api/realtime/connect
  * cTrader に接続
  */
-router.post('/connect', async (req: Request, res: Response) => {
+router.post('/connect', requireAuth, async (req: Request, res: Response) => {
   setCorsHeaders(req, res);
-  
+
   try {
+    const userId = req.user!.userId;
     const timeframe = parseInt(req.query.timeframe as string) || 60;
     const orch = getOrchestrator(timeframe);
-    const success = await orch.connect();
+    const success = await orch.connect(userId);
 
     res.json({
       success,
@@ -189,7 +191,7 @@ router.post('/disconnect', async (req: Request, res: Response) => {
  * POST /api/realtime/subscribe
  * シンボルを購読
  */
-router.post('/subscribe', async (req: Request, res: Response) => {
+router.post('/subscribe', requireAuth, async (req: Request, res: Response) => {
   setCorsHeaders(req, res);
   
   try {
@@ -202,11 +204,12 @@ router.post('/subscribe', async (req: Request, res: Response) => {
     }
 
     const { symbols, timeframe } = result.data;
+    const userId = req.user!.userId;
     const orch = getOrchestrator(timeframe);
-    
+
     // 未接続なら接続
     if (orch.getStatus() !== 'connected') {
-      const connected = await orch.connect();
+      const connected = await orch.connect(userId);
       if (!connected) {
         return res.status(503).json({
           success: false,
