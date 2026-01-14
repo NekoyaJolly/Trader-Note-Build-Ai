@@ -23,6 +23,7 @@ import cronRoutes from './routes/cronRoutes';
 import ctraderAuthRoutes from './backend/api/ctraderAuthRoutes';
 import marketAnalysisRoutes from './routes/marketAnalysisRoutes';
 import realtimeRoutes from './backend/api/realtimeRoutes';
+import similarityRoutes from './routes/similarityRoutes';
 import { MatchingScheduler } from './utils/scheduler';
 import { getSideBScheduler } from './side-b/jobs/sideBScheduler';
 
@@ -139,6 +140,9 @@ class App {
 
     // リアルタイムデータ配信（cTrader WebSocket → SSE）
     this.app.use('/api/realtime', realtimeRoutes);
+
+    // 横断類似ノート検索（Side-A/Side-B統合）
+    this.app.use('/api/similarity', similarityRoutes);
 
     // Cron エンドポイント（Railway/Vercel Cron用）
     this.app.use('/api/cron', cronRoutes);
