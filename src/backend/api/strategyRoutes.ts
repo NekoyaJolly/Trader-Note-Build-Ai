@@ -18,6 +18,7 @@
 import { Router, Request, Response } from 'express';
 import { EventEmitter } from 'events';
 import { StrategyStatus, TradeSide } from '@prisma/client';
+import { getStringParam, getOptionalStringParam, getNumberParam } from '../../utils/requestHelpers';
 import {
   listStrategies,
   getStrategy,
@@ -127,10 +128,10 @@ router.get('/', async (req: Request, res: Response) => {
     const { status, symbol, limit, offset } = req.query;
 
     const strategies = await listStrategies({
-      status: status as StrategyStatus | undefined,
-      symbol: symbol as string | undefined,
-      limit: limit ? parseInt(limit as string, 10) : undefined,
-      offset: offset ? parseInt(offset as string, 10) : undefined,
+      status: getOptionalStringParam(status) as StrategyStatus | undefined,
+      symbol: getOptionalStringParam(symbol),
+      limit: getNumberParam(limit),
+      offset: getNumberParam(offset),
     });
 
     res.json({
@@ -154,7 +155,7 @@ router.get('/', async (req: Request, res: Response) => {
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const strategy = await getStrategy(id);
+    const strategy = await getStrategy(getStringParam(id));
 
     if (!strategy) {
       return res.status(404).json({
@@ -184,7 +185,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.get('/:id/versions/:versionNumber', async (req: Request, res: Response) => {
   try {
     const { id, versionNumber } = req.params;
-    const version = await getStrategyVersion(id, parseInt(versionNumber, 10));
+    const version = await getStrategyVersion(getStringParam(id), parseInt(getStringParam(versionNumber), 10));
 
     if (!version) {
       return res.status(404).json({
