@@ -15,6 +15,7 @@ import { FeatureService } from './featureService';
 import { IndicatorService, OHLCVData } from './indicators/indicatorService';
 import { calculateCosineSimilarity } from './featureVectorService';
 import * as aiNoteRepository from '../side-b/repositories/aiNoteRepository';
+import type { AITradeNote } from '../side-b/models';
 import type { SimilarNoteItem, NoteType } from '../schemas/api/similarity';
 
 const prisma = new PrismaClient();
@@ -92,24 +93,24 @@ export class CrossSimilarityService {
       aiTradeNotesMatched: 0,
     };
 
-    // 並列検索
-    const [tradeNoteResults, aiTradeNoteResults] = await Promise.all([
+    // 並列検索（統計情報付き）
+    const [tradeNoteSearchResult, aiTradeNoteSearchResult] = await Promise.all([
       searchTradeNotes
-        ? this.searchTradeNotes(queryVector, symbol, minSimilarity)
-        : Promise.resolve([]),
+        ? this.searchTradeNotesWithStats(queryVector, symbol, minSimilarity)
+        : Promise.resolve({ results: [], totalSearched: 0 }),
       searchAITradeNotes
-        ? this.searchAITradeNotes(queryVector, symbol, minSimilarity)
-        : Promise.resolve([]),
+        ? this.searchAITradeNotesWithStats(queryVector, symbol, minSimilarity)
+        : Promise.resolve({ results: [], totalSearched: 0 }),
     ]);
 
     // 統計を更新
-    stats.tradeNotesSearched = tradeNoteResults.length;
-    stats.aiTradeNotesSearched = aiTradeNoteResults.length;
-    stats.tradeNotesMatched = tradeNoteResults.filter(r => r.similarity >= minSimilarity).length;
-    stats.aiTradeNotesMatched = aiTradeNoteResults.filter(r => r.similarity >= minSimilarity).length;
+    stats.tradeNotesSearched = tradeNoteSearchResult.totalSearched;
+    stats.aiTradeNotesSearched = aiTradeNoteSearchResult.totalSearched;
+    stats.tradeNotesMatched = tradeNoteSearchResult.results.length;
+    stats.aiTradeNotesMatched = aiTradeNoteSearchResult.results.length;
 
     // 結果をマージしてソート
-    const allResults = [...tradeNoteResults, ...aiTradeNoteResults];
+    const allResults = [...tradeNoteSearchResult.results, ...aiTradeNoteSearchResult.results];
     const sortedResults = allResults
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, topK);
@@ -145,15 +146,15 @@ export class CrossSimilarityService {
   }
 
   /**
-   * TradeNote（Side-A）を検索
+   * TradeNote（Side-A）を検索（統計情報付き）
    */
-  private async searchTradeNotes(
+  private async searchTradeNotesWithStats(
     queryVector: number[],
     symbol?: string,
     minSimilarity: number = 0.5
-  ): Promise<SimilarNoteItem[]> {
+  ): Promise<{ results: SimilarNoteItem[]; totalSearched: number }> {
     // 特徴量ベクトルを持つノートを取得
-    const whereClause: any = {
+    const whereClause: { featureVector: { isEmpty: boolean }; symbol?: string } = {
       featureVector: {
         isEmpty: false,
       },
@@ -168,6 +169,8 @@ export class CrossSimilarityService {
         trade: true,
       },
     });
+
+    const totalSearched = notes.length;
 
     // 類似度を計算
     const results: SimilarNoteItem[] = [];
@@ -198,22 +201,22 @@ export class CrossSimilarityService {
       }
     }
 
-    return results;
+    return { results, totalSearched };
   }
 
   /**
-   * AITradeNote（Side-B）を検索
+   * AITradeNote（Side-B）を検索（統計情報付き）
    */
-  private async searchAITradeNotes(
+  private async searchAITradeNotesWithStats(
     queryVector: number[],
     symbol?: string,
     minSimilarity: number = 0.5
-  ): Promise<SimilarNoteItem[]> {
+  ): Promise<{ results: SimilarNoteItem[]; totalSearched: number }> {
     // AITradeNoteはfeatureVectorを持たないため、簡易特徴量を抽出
     // 将来的には AITradeNote にも featureVector を保存する想定
     
     // 検索条件を構築
-    const options: any = {
+    const options: { limit: number; symbol?: string } = {
       limit: 100, // 一旦多めに取得してフィルタ
     };
     if (symbol) {
@@ -221,6 +224,7 @@ export class CrossSimilarityService {
     }
 
     const { notes } = await aiNoteRepository.findAITradeNotes(options);
+    const totalSearched = notes.length;
 
     // 類似度を計算
     const results: SimilarNoteItem[] = [];
@@ -251,7 +255,7 @@ export class CrossSimilarityService {
       }
     }
 
-    return results;
+    return { results, totalSearched };
   }
 
   /**
@@ -260,7 +264,7 @@ export class CrossSimilarityService {
    * AITradeNote は現状 featureVector を持たないため、
    * result/entryAnalysis/exitAnalysis などから簡易ベクトルを生成
    */
-  private extractAITradeNoteFeatures(note: any): number[] {
+  private extractAITradeNoteFeatures(note: AITradeNote): number[] {
     // 12次元ベクトルに変換（TradeNote と次元を合わせる）
     // 値は 0-1 の範囲に正規化
     
