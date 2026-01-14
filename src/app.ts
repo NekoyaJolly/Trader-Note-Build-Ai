@@ -14,7 +14,6 @@ import barLocatorRoutes from './controllers/barLocatorController';
 import strategyRoutes from './backend/api/strategyRoutes';
 import strategyComparisonRoutes from './backend/api/strategyComparisonRoutes';
 import patternAnalysisRoutes from './backend/api/patternAnalysisRoutes';
-import authRoutes from './routes/authRoutes';
 import watchlistRoutes from './routes/watchlistRoutes';
 import pushRoutes from './routes/pushRoutes';
 import ohlcvRoutes from './backend/api/ohlcvRoutes';
@@ -109,11 +108,8 @@ class App {
     });
 
     // API routes
-    // 認証ルート（認証不要）
-    this.app.use('/api/auth', authRoutes);
-
-    // cTrader OAuth 認証ルート
-    this.app.use('/api/auth/ctrader', ctraderAuthRoutes);
+    // cTrader OAuth 認証ルート（認証不要）
+    this.app.use('/api/auth', ctraderAuthRoutes);
 
     // ウォッチリスト（認証必須）
     this.app.use('/api/watchlist', watchlistRoutes);

@@ -5,9 +5,11 @@
  * 
  * エンドポイント:
  * - GET  /api/auth/ctrader/url     - 認証URL を取得
- * - POST /api/auth/ctrader/exchange - 認可コードをトークンに交換
+ * - POST /api/auth/ctrader/callback - 認可コードをトークンに交換
  * - GET  /api/auth/ctrader/status  - 接続状態を取得
  * - DELETE /api/auth/ctrader       - 接続を解除
+ * - GET  /api/auth/me              - ログインユーザー情報取得
+ * - POST /api/auth/logout          - ログアウト
  */
 
 import { Router, Request, Response } from 'express';
@@ -42,7 +44,7 @@ const DisconnectRequestSchema = z.object({
  * 認証URL を生成して返す
  * クライアントはこの URL にリダイレクトしてユーザー認証を開始
  */
-router.get('/url', async (req: Request, res: Response) => {
+router.get('/ctrader/url', async (req: Request, res: Response) => {
   try {
     const queryResult = GetAuthUrlQuerySchema.safeParse(req.query);
     
@@ -81,7 +83,7 @@ router.get('/url', async (req: Request, res: Response) => {
  * 
  * Body: { code: string }
  */
-router.post('/callback', async (req: Request, res: Response) => {
+router.post('/ctrader/callback', async (req: Request, res: Response) => {
   try {
     const bodyResult = ExchangeCodeRequestSchema.safeParse(req.body);
     
@@ -148,7 +150,7 @@ router.post('/callback', async (req: Request, res: Response) => {
  * 
  * cTrader 接続状態を取得
  */
-router.get('/status', async (_req: Request, res: Response) => {
+router.get('/ctrader/status', async (_req: Request, res: Response) => {
   try {
     const status = await authService.getConnectionStatus();
     
@@ -176,7 +178,7 @@ router.get('/status', async (_req: Request, res: Response) => {
  * 
  * Body: { accountId: string } または空（全解除）
  */
-router.delete('/', async (req: Request, res: Response) => {
+router.delete('/ctrader', async (req: Request, res: Response) => {
   try {
     const bodyResult = DisconnectRequestSchema.safeParse(req.body);
     
@@ -217,7 +219,7 @@ router.delete('/', async (req: Request, res: Response) => {
  * 
  * Body: { accountId: string }
  */
-router.post('/refresh', async (req: Request, res: Response) => {
+router.post('/ctrader/refresh', async (req: Request, res: Response) => {
   try {
     const bodyResult = DisconnectRequestSchema.safeParse(req.body);
     

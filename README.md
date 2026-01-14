@@ -126,12 +126,38 @@ npm run dev:backend
 npm run dev:frontend
 ```
 
-### 5. cTrader 認証（リアルタイム通知を使う場合）
+### 5. cTrader 認証（必須）
 
-1. cTrader Open API で OAuth アプリケーションを登録
-2. `CTRADER_CLIENT_ID` / `CTRADER_CLIENT_SECRET` を設定
-3. ブラウザで http://localhost:3102/onboarding にアクセス
-4. cTrader 認証フローを完了
+**TradeAssist は cTrader OAuth 認証のみをサポートします**
+
+1. **cTrader Open API でアプリケーションを登録**
+   - [cTrader Open API Console](https://openapi.ctrader.com/) にアクセス
+   - 新しいアプリケーションを作成
+   - Redirect URI に `http://localhost:3102/auth/ctrader/callback` を設定
+
+2. **環境変数を設定**
+   ```env
+   CTRADER_CLIENT_ID=your_client_id
+   CTRADER_CLIENT_SECRET=your_client_secret
+   CTRADER_REDIRECT_URI=http://localhost:3102/auth/ctrader/callback
+   JWT_SECRET=your-strong-secret-key-minimum-32-characters
+   ```
+
+3. **ログイン**
+   - ブラウザで http://localhost:3102/login にアクセス
+   - 「cTraderでログイン」ボタンをクリック
+   - cTrader の認証画面で許可
+   - 自動的にダッシュボードにリダイレクト
+
+4. **複数アカウント管理（オプション）**
+   - 設定画面 → アカウント管理
+   - 複数の cTrader アカウントを追加可能
+   - プライマリアカウントを切り替え可能
+
+**注意**:
+- 従来の email/password 認証は廃止されました
+- すべてのユーザーは cTrader アカウントでログインする必要があります
+- JWT トークンは Cookie に保存され、7日間有効です
 
 ---
 
