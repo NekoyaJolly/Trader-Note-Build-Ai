@@ -98,8 +98,8 @@ export class SessionService {
   setTokenCookie(res: Response, token: string): void {
     res.cookie('auth_token', token, {
       httpOnly: true, // XSS 対策
-      secure: process.env.NODE_ENV === 'production', // 本番環境では HTTPS のみ
-      sameSite: 'lax', // CSRF 対策
+      secure: true, // HTTPS のみで送信（クロスドメイン Cookie 対応）
+      sameSite: 'none', // クロスサイトリクエストで Cookie を送信（Vercel → Railway）
       maxAge: ACCESS_TOKEN_EXPIRES_IN_SECONDS * 1000, // ミリ秒
       path: '/',
     });
@@ -113,8 +113,8 @@ export class SessionService {
   clearTokenCookie(res: Response): void {
     res.clearCookie('auth_token', {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: true, // HTTPS のみで送信
+      sameSite: 'none', // クロスサイトリクエストに対応
       path: '/',
     });
   }
