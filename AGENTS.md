@@ -464,7 +464,20 @@ npm test -- --testTimeout=30000
 - DBスキーマ: [prisma/schema.prisma](prisma/schema.prisma)
 - フロントエンド: [src/frontend/](src/frontend/)
 - cTrader認証: [src/backend/services/ctrader/ctraderAuthService.ts](src/backend/services/ctrader/ctraderAuthService.ts)
+- セッション管理: [src/backend/services/auth/sessionService.ts](src/backend/services/auth/sessionService.ts)
+- 認証コンテキスト: [src/frontend/contexts/AuthContext.tsx](src/frontend/contexts/AuthContext.tsx)
 - リアルタイムワーカー: [scripts/run-realtime-worker.ts](scripts/run-realtime-worker.ts)
+
+### 認証システム（cTrader OAuth 統合）
+- **認証方式**: cTrader OAuth 2.0（email/password 認証は廃止）
+- **セッション管理**: JWT（Cookie ベース、7日間有効）
+- **マルチアカウント対応**: 複数 cTrader アカウントを1ユーザーに紐付け可能
+- **ProtectedRoute**: 全ページに認証を適用（`/login`, `/auth/*` を除く）
+- **主要エンドポイント**:
+  - `GET /api/auth/ctrader/url` - OAuth 認証URLを取得
+  - `POST /api/auth/ctrader/callback` - 認証コールバック処理
+  - `GET /api/auth/me` - ログインユーザー情報取得
+  - `POST /api/auth/logout` - ログアウト
 
 ### リアルタイム通知関連（Phase 2 完了）
 - `CTraderProvider`: cTrader WebSocket 接続
