@@ -47,6 +47,7 @@ import {
 import { generateNoteFromTrade } from '../services/aiNoteService';
 import { summarySchedulerService } from '../services/summarySchedulerService';
 import { executeCleanup, type CleanupConfig } from '../services/dataCleanupService';
+import { CronSimilarityService } from '../services/cronSimilarityService';
 import * as aiNoteRepository from '../repositories/aiNoteRepository';
 import {
   planRepository,
@@ -58,6 +59,7 @@ import { calculatePnL, type CloseVirtualTradeInput, type TradeDirection, type Ex
 import { AIOrchestrator } from '../orchestrator/aiOrchestrator';
 import { MarketDataService } from '../../services/marketDataService';
 import { config } from '../../config';
+import type { OHLCVData } from '../../services/indicators/indicatorService';
 
 // ===========================================
 // 型定義
@@ -89,6 +91,10 @@ export interface SideBSchedulerConfig {
   planRetentionDays: number;
   /** 完了トレードの保持日数（デフォルト: 90日） */
   tradeRetentionDays: number;
+  /** AIノート類似度チェックを有効にするか */
+  autoSimilarityCheck: boolean;
+  /** 類似度チェックの閾値（0-1） */
+  similarityThreshold: number;
 }
 
 /**
@@ -111,6 +117,8 @@ const DEFAULT_CONFIG: SideBSchedulerConfig = {
   autoCleanup: true,          // 古いデータ自動クリーンアップ
   planRetentionDays: 30,      // プランは30日保持
   tradeRetentionDays: 90,     // 完了トレードは90日保持
+  autoSimilarityCheck: true,  // AIノート類似度チェック自動実行
+  similarityThreshold: 0.85,  // 類似度閾値（85%以上で通知）
 };
 
 /**
@@ -155,6 +163,7 @@ export interface SchedulerStatus {
     autoExpireTrades: boolean;
     autoCleanup: boolean;
     autoSummary: boolean;
+    autoSimilarityCheck: boolean;
   };
 }
 
@@ -175,6 +184,7 @@ export class SideBScheduler {
   // サービス
   private orchestrator: AIOrchestrator;
   private marketDataService: MarketDataService;
+  private cronSimilarityService: CronSimilarityService;
 
   constructor(configOverride?: Partial<SideBSchedulerConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...configOverride };
@@ -183,6 +193,10 @@ export class SideBScheduler {
     // サービス初期化
     this.orchestrator = new AIOrchestrator();
     this.marketDataService = new MarketDataService();
+    this.cronSimilarityService = new CronSimilarityService({
+      similarityThreshold: this.config.similarityThreshold,
+      debug: !this.isProduction,
+    });
   }
 
   /**
@@ -207,6 +221,7 @@ export class SideBScheduler {
     this.log(`  Note自動生成: ${this.config.autoGenerateNote ? '有効' : '無効'}`);
     this.log(`  サマリー自動生成: ${this.config.autoSummary ? '有効' : '無効'}`);
     this.log(`  期限切れ自動キャンセル: ${this.config.autoExpireTrades ? '有効' : '無効'}`);
+    this.log(`  類似度チェック: ${this.config.autoSimilarityCheck ? '有効' : '無効'} (閾値: ${this.config.similarityThreshold})`);
     
     // 市場状態をログ
     const marketInfo = getMarketStatusJST();
@@ -301,6 +316,7 @@ export class SideBScheduler {
         autoExpireTrades: this.config.autoExpireTrades,
         autoCleanup: this.config.autoCleanup,
         autoSummary: this.config.autoSummary,
+        autoSimilarityCheck: this.config.autoSimilarityCheck,
       },
     };
   }
@@ -419,6 +435,8 @@ export class SideBScheduler {
       entries: 0,
       exits: 0,
       expired: 0,
+      similarityChecks: 0,
+      notificationsSent: 0,
       errors: [] as string[],
     };
 
@@ -535,6 +553,38 @@ export class SideBScheduler {
             }
           }
 
+          // AIノート類似度チェック（autoSimilarityCheckが有効な場合）
+          if (this.config.autoSimilarityCheck) {
+            try {
+              // OHLCVData形式に変換（indicatorServiceが期待する型）
+              const ohlcvForSimilarity: OHLCVData[] = minuteData.map(d => ({
+                timestamp: d.timestamp,
+                open: d.open,
+                high: d.high,
+                low: d.low,
+                close: d.close,
+                volume: d.volume,
+              }));
+
+              const similarityResult = await this.cronSimilarityService.checkSimilarityAndNotify({
+                symbol,
+                ohlcvData: ohlcvForSimilarity,
+                timeframe: this.config.timeframe,
+              });
+
+              results.similarityChecks++;
+              results.notificationsSent += similarityResult.notificationsSent;
+
+              if (similarityResult.similarNotesFound > 0) {
+                this.log(`[${symbol}] 類似ノート検出: ${similarityResult.similarNotesFound}件, 通知送信: ${similarityResult.notificationsSent}件`);
+              }
+            } catch (error) {
+              const message = error instanceof Error ? error.message : '不明なエラー';
+              results.errors.push(`${symbol} 類似度チェック: ${message}`);
+              this.log(`[${symbol}] 類似度チェックエラー: ${message}`);
+            }
+          }
+
         } catch (error) {
           const message = error instanceof Error ? error.message : '不明なエラー';
           results.errors.push(`${symbol}: ${message}`);
@@ -554,6 +604,10 @@ export class SideBScheduler {
       ];
       if (results.expired > 0) {
         summaryParts.push(`期限切れキャンセル ${results.expired}件`);
+      }
+      if (this.config.autoSimilarityCheck && results.similarityChecks > 0) {
+        summaryParts.push(`類似度チェック ${results.similarityChecks}件`);
+        summaryParts.push(`通知送信 ${results.notificationsSent}件`);
       }
       const message = `監視完了: ${summaryParts.join(', ')}`;
       this.log(message);
