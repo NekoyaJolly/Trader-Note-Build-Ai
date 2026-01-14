@@ -237,73 +237,6 @@ export class CTraderAuthService {
   }
   
   /**
-   * 認可コードをトークンに交換
-   * 
-   * @param code - 認可コード（Callback から取得）
-   * @returns トークン情報
-   */
-  async exchangeCode(code: string): Promise<StoredToken> {
-    const response = await fetch(config.ctrader.tokenUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        client_id: config.ctrader.clientId,
-        client_secret: config.ctrader.clientSecret,
-        redirect_uri: config.ctrader.redirectUri,
-      }).toString(),
-    });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[cTraderAuth] トークン交換失敗:', {
-        status: response.status,
-        error: errorText,
-        tokenUrl: config.ctrader.tokenUrl,
-        redirectUri: config.ctrader.redirectUri,
-      });
-      throw new Error(`cTrader トークン交換エラー: ${response.status} ${errorText}`);
-    }
-    
-    const json: unknown = await response.json();
-    const jsonObj = json as Record<string, unknown>;
-    console.log('[cTraderAuth] トークンレスポンス受信:', {
-      hasAccessToken: !!jsonObj.access_token,
-      hasRefreshToken: !!jsonObj.refresh_token,
-      expiresIn: jsonObj.expires_in,
-    });
-    
-    const result = CTraderTokenResponseSchema.safeParse(json);
-    
-    if (!result.success) {
-      console.error('[cTraderAuth] レスポンスパースエラー:', jsonObj);
-      throw new Error(`cTrader レスポンスパースエラー: ${result.error.message}`);
-    }
-    
-    const tokenData = result.data;
-    const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000);
-    
-    // アカウントIDを取得（アクセストークンから）
-    // 注意: cTrader API ではトークンからアカウントIDを取得する追加APIコールが必要
-    // ここでは一時的に 'default' を使用し、後で実際のアカウントIDに更新
-    const accountId = await this.fetchAccountId(tokenData.access_token);
-    
-    // DB に保存
-    const savedToken = await this.saveToken({
-      accountId,
-      accessToken: tokenData.access_token,
-      refreshToken: tokenData.refresh_token,
-      expiresAt,
-      scope: tokenData.scope || null,
-    });
-    
-    return savedToken;
-  }
-  
-  /**
    * リフレッシュトークンでアクセストークンを更新
    * 
    * @param accountId - アカウントID
@@ -346,13 +279,15 @@ export class CTraderAuthService {
     const tokenData = result.data;
     const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000);
     
-    // DB を更新
-    const savedToken = await this.saveToken({
-      accountId,
-      accessToken: tokenData.access_token,
-      refreshToken: tokenData.refresh_token,
-      expiresAt,
-      scope: tokenData.scope || null,
+    // DB を更新（既存トークンを更新）
+    const savedToken = await this.prisma.cTraderToken.update({
+      where: { accountId },
+      data: {
+        accessToken: tokenData.access_token,
+        refreshToken: tokenData.refresh_token,
+        expiresAt,
+        scope: tokenData.scope || null,
+      },
     });
     
     return savedToken;
@@ -489,41 +424,5 @@ export class CTraderAuthService {
     // 一時的にデフォルト値を返す
     // 実際の実装では ProtoOAGetAccountListReq を送信してアカウントIDを取得
     return `ctrader_${Date.now()}`;
-  }
-  
-  /**
-   * トークンを DB に保存
-   */
-  private async saveToken(token: {
-    accountId: string;
-    accessToken: string;
-    refreshToken: string;
-    expiresAt: Date;
-    scope: string | null;
-  }): Promise<StoredToken> {
-    const saved = await this.prisma.cTraderToken.upsert({
-      where: { accountId: token.accountId },
-      create: {
-        accountId: token.accountId,
-        accessToken: token.accessToken,
-        refreshToken: token.refreshToken,
-        expiresAt: token.expiresAt,
-        scope: token.scope,
-      },
-      update: {
-        accessToken: token.accessToken,
-        refreshToken: token.refreshToken,
-        expiresAt: token.expiresAt,
-        scope: token.scope,
-      },
-    });
-    
-    return {
-      accountId: saved.accountId,
-      accessToken: saved.accessToken,
-      refreshToken: saved.refreshToken,
-      expiresAt: saved.expiresAt,
-      scope: saved.scope,
-    };
   }
 }
