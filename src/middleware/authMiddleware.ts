@@ -1,5 +1,5 @@
 /**
- * 認証ミドルウェア
+ * 認証ミドルウェア（cTrader OAuth 専用）
  *
  * JWTトークンを検証し、認証済みユーザー情報をリクエストに付加
  * 保護されたルートへのアクセスを制御
@@ -7,55 +7,59 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { PrismaClient, UserRole } from '@prisma/client';
-import { AuthService, TokenPayload } from '../backend/services/authService';
+import { sessionService, SessionPayload } from '../backend/services/auth/sessionService';
 
 // Express のリクエスト型を拡張して user プロパティを追加
 declare global {
   namespace Express {
     interface Request {
-      user?: TokenPayload;
+      user?: SessionPayload;
     }
   }
 }
 
 // Prisma クライアントのシングルトン
 const prisma = new PrismaClient();
-const authService = new AuthService(prisma);
 
 /**
  * 認証必須ミドルウェア
  *
- * Authorization ヘッダーから Bearer トークンを取得し検証
+ * Cookie または Authorization ヘッダーから JWT を取得し検証
  * 認証成功時は req.user にユーザー情報を設定
  * 認証失敗時は 401 エラーを返す
  */
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  const authHeader = req.headers.authorization;
+  // Cookie または Authorization ヘッダーから JWT を取得
+  let token = req.cookies?.auth_token;
+  
+  if (!token) {
+    const authHeader = req.headers.authorization;
+    
+    // Authorization ヘッダーの存在チェック
+    if (!authHeader) {
+      res.status(401).json({
+        success: false,
+        error: '認証が必要です。ログインしてください。',
+      });
+      return;
+    }
 
-  // Authorization ヘッダーの存在チェック
-  if (!authHeader) {
-    res.status(401).json({
-      success: false,
-      error: '認証が必要です。Authorization ヘッダーを設定してください。',
-    });
-    return;
+    // Bearer トークン形式のチェック
+    const parts = authHeader.split(' ');
+    if (parts.length !== 2 || parts[0] !== 'Bearer') {
+      res.status(401).json({
+        success: false,
+        error: '無効な Authorization ヘッダー形式です。Bearer <token> の形式で設定してください。',
+      });
+      return;
+    }
+
+    token = parts[1];
   }
-
-  // Bearer トークン形式のチェック
-  const parts = authHeader.split(' ');
-  if (parts.length !== 2 || parts[0] !== 'Bearer') {
-    res.status(401).json({
-      success: false,
-      error: '無効な Authorization ヘッダー形式です。Bearer <token> の形式で設定してください。',
-    });
-    return;
-  }
-
-  const token = parts[1];
 
   try {
     // トークンを検証
-    const payload = authService.verifyAccessToken(token);
+    const payload = sessionService.verifyToken(token);
 
     // リクエストにユーザー情報を付加
     req.user = payload;
@@ -78,25 +82,30 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
  * 認証状態に応じて挙動を変えたいルートで使用
  */
 export function optionalAuth(req: Request, res: Response, next: NextFunction): void {
-  const authHeader = req.headers.authorization;
+  // Cookie または Authorization ヘッダーから JWT を取得
+  let token = req.cookies?.auth_token;
+  
+  if (!token) {
+    const authHeader = req.headers.authorization;
 
-  // Authorization ヘッダーがない場合はそのまま次へ
-  if (!authHeader) {
-    next();
-    return;
+    // Authorization ヘッダーがない場合はそのまま次へ
+    if (!authHeader) {
+      next();
+      return;
+    }
+
+    const parts = authHeader.split(' ');
+    if (parts.length !== 2 || parts[0] !== 'Bearer') {
+      // 形式が不正でも、オプショナルなのでエラーにしない
+      next();
+      return;
+    }
+
+    token = parts[1];
   }
-
-  const parts = authHeader.split(' ');
-  if (parts.length !== 2 || parts[0] !== 'Bearer') {
-    // 形式が不正でも、オプショナルなのでエラーにしない
-    next();
-    return;
-  }
-
-  const token = parts[1];
 
   try {
-    const payload = authService.verifyAccessToken(token);
+    const payload = sessionService.verifyToken(token);
     req.user = payload;
   } catch {
     // トークンが無効でも、オプショナルなのでエラーにしない
