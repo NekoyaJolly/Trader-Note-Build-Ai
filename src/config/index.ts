@@ -13,22 +13,41 @@ console.log('[Config] NODE_ENV:', process.env.NODE_ENV);
 console.log('[Config] PORT:', process.env.PORT);
 console.log('[Config] BACKEND_PORT:', process.env.BACKEND_PORT);
 console.log('[Config] DATABASE_URL 存在:', !!process.env.DATABASE_URL);
+console.log('[Config] process.env のキー数:', Object.keys(process.env).length);
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
   console.error('═══════════════════════════════════════');
-  console.error('  DATABASE_URL 環境変数エラー');
+  console.error('  ⚠️ DATABASE_URL が見つかりません');
   console.error('═══════════════════════════════════════');
-  console.error('DATABASE_URL が設定されていません。');
   console.error('');
-  console.error('利用可能な環境変数:');
+  console.error('設定されている環境変数:');
   const envKeys = Object.keys(process.env)
     .filter(key => !key.includes('npm_') && !key.includes('TERM') && !key.includes('PATH'))
     .sort();
-  envKeys.forEach(key => {
-    const value = process.env[key] || '';
-    const displayValue = value.length > 60 ? value.substring(0, 60) + '...' : value;
-    console.error(`  ${key}=${displayValue}`);
+  
+  if (envKeys.length === 0) {
+    console.error('  ❌ 環境変数が全く設定されていません（.env ファイル読み込み失敗？）');
+  } else {
+    envKeys.forEach(key => {
+      const value = process.env[key] || '';
+      const displayValue = value.length > 60 ? value.substring(0, 60) + '...' : value;
+      console.error(`  ${key}=${displayValue}`);
+    });
+  }
+  console.error('');
+  console.error('必須環境変数チェックリスト:');
+  const requiredVars = [
+    'DATABASE_URL',
+    'NODE_ENV',
+    'JWT_SECRET',
+    'JWT_REFRESH_SECRET',
+    'AI_API_KEY',
+    'MARKET_API_KEY',
+  ];
+  requiredVars.forEach(varName => {
+    const isSet = !!process.env[varName];
+    console.error(`  ${isSet ? '✅' : '❌'} ${varName}`);
   });
   console.error('═══════════════════════════════════════');
   throw new Error('DATABASE_URL is required but not found in environment variables');
@@ -37,15 +56,15 @@ if (!databaseUrl) {
 // DATABASE_URL が参照変数のままになっていないかチェック
 if (databaseUrl.includes('${{')) {
   console.error('═══════════════════════════════════════');
-  console.error('  DATABASE_URL 展開エラー');
+  console.error('  ⚠️ DATABASE_URL が参照変数形式のまま');
   console.error('═══════════════════════════════════════');
-  console.error('DATABASE_URL が Railway の参照変数形式のままです:');
+  console.error('DATABASE_URL が Railway の参照変数形式です:');
   console.error(`  ${databaseUrl}`);
   console.error('');
   console.error('修正方法:');
   console.error('1. Railway ダッシュボードを開く');
   console.error('2. PostgreSQL サービスの Variables タブで DATABASE_URL をコピー');
-  console.error('3. Node.js サービスの Variables で DATABASE_URL を直接設定');
+  console.error('3. Node.js サービスの Variables で DATABASE_URL を直接設定（参照ではなく実値）');
   console.error('═══════════════════════════════════════');
   throw new Error('DATABASE_URL contains unexpanded Railway variable reference');
 }
@@ -53,6 +72,8 @@ if (databaseUrl.includes('${{')) {
 console.log('[Config] DATABASE_URL（プロトコル）:', databaseUrl.split('://')[0]);
 console.log('[Config] DATABASE_URL（ホスト）:', databaseUrl.split('@')[1]?.split('/')[0] || 'unknown');
 console.log('[Config] ✅ 設定ロード成功');
+console.log('[Config] NODE_ENV:', process.env.NODE_ENV === 'production' ? '本番' : '開発');
+console.log('[Config] サーバーポート:', process.env.BACKEND_PORT || process.env.PORT || '3100');
 
 export const config = {
   server: {
