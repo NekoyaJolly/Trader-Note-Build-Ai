@@ -74,7 +74,7 @@ export const SimilarNoteItemSchema = z.object({
   pnl: z.number().optional(),
   
   // 追加メタデータ
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 /**
