@@ -24,6 +24,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3
  */
 function CallbackHandler() {
   const router = useRouter();
+  const { setUser } = useAuth();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<'processing' | 'success' | 'error'>('processing');
   const [message, setMessage] = useState('cTrader 認証を処理中...');
@@ -70,6 +71,9 @@ function CallbackHandler() {
         const data = await response.json();
 
         if (response.ok && data.success) {
+          // バックエンドから返されたユーザー情報をセット
+          setUser(data.user);
+          
           setStatus('success');
           setMessage(data.isNewUser ? 'アカウントを作成しました！' : 'ログインに成功しました！');
           setTimeout(() => {
