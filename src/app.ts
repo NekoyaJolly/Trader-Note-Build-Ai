@@ -107,76 +107,124 @@ class App {
    */
   private initializeRoutes(): void {
     console.log('[App] ルート初期化開始...');
-    // Health check
-    this.app.get('/health', (req: Request, res: Response) => {
-      res.json({
-        status: 'ok',
-        timestamp: new Date().toISOString(),
-        schedulerRunning: this.scheduler.isSchedulerRunning(),
+    
+    try {
+      // Health check
+      console.log('[App] /health エンドポイントを登録中...');
+      this.app.get('/health', (req: Request, res: Response) => {
+        res.json({
+          status: 'ok',
+          timestamp: new Date().toISOString(),
+          schedulerRunning: this.scheduler.isSchedulerRunning(),
+        });
       });
-    });
 
-    // API routes
-    // cTrader OAuth 認証ルート（認証不要）
-    this.app.use('/api/auth', ctraderAuthRoutes);
+      // API routes
+      // cTrader OAuth 認証ルート（認証不要）
+      console.log('[App] /api/auth ルートを登録中...');
+      this.app.use('/api/auth', ctraderAuthRoutes);
 
-    // ウォッチリスト（認証必須）
-    this.app.use('/api/watchlist', watchlistRoutes);
+      // ウォッチリスト（認証必須）
+      console.log('[App] /api/watchlist ルートを登録中...');
+      this.app.use('/api/watchlist', watchlistRoutes);
 
-    // Push通知（認証必須、一部認証不要）
-    this.app.use('/api/push', pushRoutes);
+      // Push通知（認証必須、一部認証不要）
+      console.log('[App] /api/push ルートを登録中...');
+      this.app.use('/api/push', pushRoutes);
 
-    // データルート
-    this.app.use('/api/trades', tradeRoutes);
-    this.app.use('/api/matching', matchingRoutes);
-    this.app.use('/api/notifications', notificationRoutes);
-    this.app.use('/api/orders', orderRoutes);
-    this.app.use('/api/indicators', indicatorRoutes);
-    this.app.use('/api/profiles', profileRoutes);
-    this.app.use('/api/backtest', backtestRoutes);
-    this.app.use('/api/settings', settingsRoutes);
-    this.app.use('/api/bars', barLocatorRoutes);
-    this.app.use('/api/strategies', strategyRoutes);
-    this.app.use('/api/strategy-comparison', strategyComparisonRoutes);
-    this.app.use('/api/pattern-analysis', patternAnalysisRoutes);
-    this.app.use('/api/ohlcv', ohlcvRoutes);
+      // データルート
+      console.log('[App] /api/trades ルートを登録中...');
+      this.app.use('/api/trades', tradeRoutes);
+      
+      console.log('[App] /api/matching ルートを登録中...');
+      this.app.use('/api/matching', matchingRoutes);
+      
+      console.log('[App] /api/notifications ルートを登録中...');
+      this.app.use('/api/notifications', notificationRoutes);
+      
+      console.log('[App] /api/orders ルートを登録中...');
+      this.app.use('/api/orders', orderRoutes);
+      
+      console.log('[App] /api/indicators ルートを登録中...');
+      this.app.use('/api/indicators', indicatorRoutes);
+      
+      console.log('[App] /api/profiles ルートを登録中...');
+      this.app.use('/api/profiles', profileRoutes);
+      
+      console.log('[App] /api/backtest ルートを登録中...');
+      this.app.use('/api/backtest', backtestRoutes);
+      
+      console.log('[App] /api/settings ルートを登録中...');
+      this.app.use('/api/settings', settingsRoutes);
+      
+      console.log('[App] /api/bars ルートを登録中...');
+      this.app.use('/api/bars', barLocatorRoutes);
+      
+      console.log('[App] /api/strategies ルートを登録中...');
+      this.app.use('/api/strategies', strategyRoutes);
+      
+      console.log('[App] /api/strategy-comparison ルートを登録中...');
+      this.app.use('/api/strategy-comparison', strategyComparisonRoutes);
+      
+      console.log('[App] /api/pattern-analysis ルートを登録中...');
+      this.app.use('/api/pattern-analysis', patternAnalysisRoutes);
+      
+      console.log('[App] /api/ohlcv ルートを登録中...');
+      this.app.use('/api/ohlcv', ohlcvRoutes);
 
-    // Side-B: AI トレードプラン生成
-    this.app.use('/api/side-b', sideBRoutes);
+      // Side-B: AI トレードプラン生成
+      console.log('[App] /api/side-b ルートを登録中...');
+      this.app.use('/api/side-b', sideBRoutes);
 
-    // マーケット分析（OHLCV + 12次元特徴量）
-    this.app.use('/api/market-analysis', marketAnalysisRoutes);
+      // マーケット分析（OHLCV + 12次元特徴量）
+      console.log('[App] /api/market-analysis ルートを登録中...');
+      this.app.use('/api/market-analysis', marketAnalysisRoutes);
 
-    // リアルタイムデータ配信（cTrader WebSocket → SSE）
-    this.app.use('/api/realtime', realtimeRoutes);
+      // リアルタイムデータ配信（cTrader WebSocket → SSE）
+      console.log('[App] /api/realtime ルートを登録中...');
+      this.app.use('/api/realtime', realtimeRoutes);
 
-    // 横断類似ノート検索（Side-A/Side-B統合）
-    this.app.use('/api/similarity', similarityRoutes);
+      // 横断類似ノート検索（Side-A/Side-B統合）
+      console.log('[App] /api/similarity ルートを登録中...');
+      this.app.use('/api/similarity', similarityRoutes);
 
-    // Cron エンドポイント（Railway/Vercel Cron用）
-    this.app.use('/api/cron', cronRoutes);
+      // Cron エンドポイント（Railway/Vercel Cron用）
+      console.log('[App] /api/cron ルートを登録中...');
+      this.app.use('/api/cron', cronRoutes);
 
-    // グローバルエラーハンドラー: ルート内で発生した例外をキャッチしてサーバーを維持
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    this.app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
-      console.error('═══════════════════════════════════════');
-      console.error('  Express エラーハンドラーがエラーをキャッチしました');
-      console.error('═══════════════════════════════════════');
-      console.error('URL:', req.method, req.url);
-      console.error('Error:', err.message);
-      console.error('Stack:', err.stack);
-      console.error('═══════════════════════════════════════');
+      console.log('[App] エラーハンドラーを登録中...');
+      // グローバルエラーハンドラー: ルート内で発生した例外をキャッチしてサーバーを維持
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      this.app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
+        console.error('═══════════════════════════════════════');
+        console.error('  Express エラーハンドラーがエラーをキャッチしました');
+        console.error('═══════════════════════════════════════');
+        console.error('URL:', req.method, req.url);
+        console.error('Error:', err.message);
+        console.error('Stack:', err.stack);
+        console.error('═══════════════════════════════════════');
 
-      res.status(500).json({
-        error: 'Internal Server Error',
-        message: config.server.isProduction ? 'サーバーエラーが発生しました' : err.message,
+        res.status(500).json({
+          error: 'Internal Server Error',
+          message: config.server.isProduction ? 'サーバーエラーが発生しました' : err.message,
+        });
       });
-    });
 
-    // 404 handler
-    this.app.use((req: Request, res: Response) => {
-      res.status(404).json({ error: 'Route not found' });
-    });
+      // 404 handler
+      console.log('[App] 404 ハンドラーを登録中...');
+      this.app.use((req: Request, res: Response) => {
+        res.status(404).json({ error: 'Route not found' });
+      });
+
+      console.log('[App] ✅ ルート初期化完了');
+    } catch (error) {
+      console.error('═══════════════════════════════════════');
+      console.error('  ルート初期化中にエラーが発生しました');
+      console.error('═══════════════════════════════════════');
+      console.error('Error:', error);
+      console.error('═══════════════════════════════════════');
+      throw error;
+    }
   }
 
   /**
