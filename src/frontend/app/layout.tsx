@@ -1,18 +1,11 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Footer from "@/components/layout/Footer";
 import AppShell from "@/components/layout/AppShell";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+// システムフォントを使用（Google Fontsの代わり）
+// Railway環境などでGoogle Fontsが取得できない場合のフォールバック
+const fontVariables = "--font-geist-sans --font-geist-mono";
 
 export const metadata: Metadata = {
   title: "TradeAssist",
@@ -37,7 +30,10 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-slate-900`}
+        className="antialiased bg-slate-900 font-sans"
+        style={{
+          fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+        }}
       >
         {/* 背景のネオン光源（全ページ共通） */}
         <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">

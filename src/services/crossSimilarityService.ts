@@ -183,16 +183,21 @@ export class CrossSimilarityService {
       const distance = this.calculateEuclideanDistance(queryVector, note.featureVector);
 
       if (similarity >= minSimilarity) {
+        // TradeNoteの場合、sideを direction に変換（buy -> long, sell -> short）
+        const direction: 'long' | 'short' | undefined = 
+          note.side === 'buy' ? 'long' : note.side === 'sell' ? 'short' : undefined;
+        
         results.push({
           noteId: note.id,
           noteType: 'tradeNote' as NoteType,
           similarity,
           distance,
           symbol: note.symbol,
-          date: note.entryTime.toISOString().split('T')[0],
-          direction: note.trade?.direction as 'long' | 'short' | undefined,
-          outcome: note.outcome || undefined,
-          pnl: note.trade?.pnl?.toNumber() || undefined,
+          date: note.trade.timestamp.toISOString().split('T')[0],
+          direction,
+          // TradeNoteにはoutcome/pnlフィールドが存在しないためundefined
+          outcome: undefined,
+          pnl: undefined,
           metadata: {
             tradeId: note.tradeId,
             timeframe: note.timeframe,
