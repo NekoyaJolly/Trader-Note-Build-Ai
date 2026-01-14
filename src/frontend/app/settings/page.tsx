@@ -444,6 +444,35 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
+      {/* cTrader アカウント管理 */}
+      <Card>
+        <CardHeader>
+          <CardTitle>cTrader アカウント管理</CardTitle>
+          <CardDescription>
+            複数のcTraderアカウントを管理
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="p-4 bg-slate-900/50 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-medium text-white">アカウント一覧</h4>
+                <p className="text-xs text-gray-500 mt-1">
+                  接続済みアカウントの確認・追加・削除ができます
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.location.href = "/settings/accounts"}
+              >
+                管理画面へ →
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* データ管理 */}
       <Card>
         <CardHeader>
