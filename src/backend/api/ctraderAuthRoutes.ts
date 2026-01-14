@@ -14,6 +14,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { PrismaClient } from '@prisma/client';
 import { CTraderAuthService, ExchangeCodeRequestSchema } from '../services/ctrader/ctraderAuthService';
+import { sessionService } from '../services/auth/sessionService';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -68,14 +69,19 @@ router.get('/url', async (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/auth/ctrader/exchange
+ * POST /api/auth/ctrader/callback
  * 
- * 認可コードをアクセストークンに交換
- * Vercel Callback から呼び出される
+ * cTrader OAuth コールバック処理（認可コードをトークンに交換 + ユーザー自動作成 + ログイン）
+ * 
+ * フロー:
+ * 1. code を受け取る
+ * 2. exchangeCodeAndLogin で User 作成/取得 + CTraderToken 保存 + JWT 発行
+ * 3. JWT を Cookie に設定
+ * 4. フロントエンドに成功レスポンス（フロントで /dashboard にリダイレクト）
  * 
  * Body: { code: string }
  */
-router.post('/exchange', async (req: Request, res: Response) => {
+router.post('/callback', async (req: Request, res: Response) => {
   try {
     const bodyResult = ExchangeCodeRequestSchema.safeParse(req.body);
     
@@ -87,18 +93,30 @@ router.post('/exchange', async (req: Request, res: Response) => {
     }
     
     const { code } = bodyResult.data;
-    const token = await authService.exchangeCode(code);
+    const authResult = await authService.exchangeCodeAndLogin(code);
     
-    console.log(`cTrader 連携成功: アカウント ${token.accountId}`);
+    // JWT を Cookie に設定
+    sessionService.setTokenCookie(res, authResult.jwt);
+    
+    console.log(`cTrader ログイン成功: ユーザー ${authResult.user.id}, アカウント ${authResult.token.accountId}`);
     
     return res.json({
       success: true,
-      accountId: token.accountId,
-      expiresAt: token.expiresAt.toISOString(),
-      message: 'cTrader 連携が完了しました',
+      user: {
+        id: authResult.user.id,
+        primaryAccountId: authResult.user.primaryAccountId,
+        displayName: authResult.user.displayName,
+        email: authResult.user.email,
+        role: authResult.user.role,
+      },
+      accountId: authResult.token.accountId,
+      isNewUser: authResult.isNewUser,
+      message: authResult.isNewUser 
+        ? 'アカウントを作成し、cTrader 連携が完了しました'
+        : 'cTrader 連携が完了しました',
     });
   } catch (error) {
-    console.error('トークン交換エラー:', error);
+    console.error('cTrader ログインエラー:', error);
     
     const errorMessage = error instanceof Error ? error.message : String(error);
     
@@ -119,7 +137,7 @@ router.post('/exchange', async (req: Request, res: Response) => {
     }
     
     return res.status(500).json({
-      error: 'トークン交換に失敗しました',
+      error: 'ログインに失敗しました',
       details: errorMessage,
     });
   }
@@ -225,6 +243,96 @@ router.post('/refresh', async (req: Request, res: Response) => {
     console.error('トークン更新エラー:', error);
     return res.status(500).json({
       error: 'トークン更新に失敗しました',
+    });
+  }
+});
+
+/**
+ * GET /api/auth/me
+ * 
+ * 現在のユーザー情報を取得（JWT検証）
+ * Cookie または Authorization ヘッダーから JWT を取得
+ */
+router.get('/me', async (req: Request, res: Response) => {
+  try {
+    // Cookie または Authorization ヘッダーから JWT を取得
+    let token = req.cookies?.auth_token;
+    
+    if (!token) {
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.substring(7);
+      }
+    }
+    
+    if (!token) {
+      return res.status(401).json({
+        error: '認証が必要です',
+      });
+    }
+    
+    // JWT を検証
+    const payload = sessionService.verifyToken(token);
+    
+    // ユーザー情報を取得
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      include: {
+        ctraderTokens: {
+          select: {
+            accountId: true,
+            expiresAt: true,
+            lastConnectedAt: true,
+          },
+        },
+      },
+    });
+    
+    if (!user) {
+      return res.status(404).json({
+        error: 'ユーザーが見つかりません',
+      });
+    }
+    
+    return res.json({
+      success: true,
+      user: {
+        id: user.id,
+        primaryAccountId: user.primaryAccountId,
+        displayName: user.displayName,
+        email: user.email,
+        role: user.role,
+        active: user.active,
+        lastLoginAt: user.lastLoginAt,
+        ctraderAccounts: user.ctraderTokens,
+      },
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'ユーザー情報の取得に失敗しました';
+    return res.status(401).json({
+      error: errorMessage,
+    });
+  }
+});
+
+/**
+ * POST /api/auth/logout
+ * 
+ * ログアウト（Cookie削除）
+ */
+router.post('/logout', async (_req: Request, res: Response) => {
+  try {
+    // Cookie を削除
+    sessionService.clearTokenCookie(res);
+    
+    return res.json({
+      success: true,
+      message: 'ログアウトしました',
+    });
+  } catch (error) {
+    console.error('ログアウトエラー:', error);
+    return res.status(500).json({
+      error: 'ログアウトに失敗しました',
     });
   }
 });

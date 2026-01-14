@@ -7,31 +7,30 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// ユーザー（JWT認証用）
+/// ユーザー（cTrader OAuth 認証用）
 model User {
   id                String             @id @default(uuid()) @db.Uuid
-  /// メールアドレス（ログインID）
-  email             String             @unique
-  /// ハッシュ化されたパスワード（bcrypt）
-  passwordHash      String
-  /// ユーザー名（表示用）
+  /// プライマリcTraderアカウントID（初回ログイン時に設定）
+  primaryAccountId  String             @unique
+  /// 表示名（cTrader から取得、またはユーザーが設定）
   displayName       String?
+  /// メールアドレス（cTrader から取得、任意）
+  email             String?
   /// ロール
   role              UserRole           @default(user)
   /// アカウント有効フラグ
   active            Boolean            @default(true)
-  /// リフレッシュトークン（ローテーション用）
-  refreshToken      String?
   /// 最終ログイン日時
   lastLoginAt       DateTime?          @db.Timestamptz(6)
   /// 作成日時
   createdAt         DateTime           @default(now()) @db.Timestamptz(6)
   /// 更新日時
   updatedAt         DateTime           @updatedAt @db.Timestamptz(6)
+  ctraderTokens     CTraderToken[]     @relation("UserCTraderTokens")
   pushSubscriptions PushSubscription[] @relation("UserPushSubscriptions")
   watchlists        Watchlist[]
 
-  @@index([email], map: "idx_user_email")
+  @@index([primaryAccountId], map: "idx_user_primary_account")
   @@index([active], map: "idx_user_active")
 }
 
@@ -1352,26 +1351,30 @@ model AINoteSummary {
 }
 
 /// cTrader OAuth トークン
-/// Side-A リアルタイム通知用の認証情報を管理
+/// ユーザーのcTraderアカウント情報を管理（1ユーザー : N アカウント）
 model CTraderToken {
-  id              String   @id @default(uuid()) @db.Uuid
+  id              String    @id @default(uuid()) @db.Uuid
+  /// ユーザーID（外部キー）
+  userId          String    @db.Uuid
   /// cTrader アカウントID（複数アカウント対応用）
-  accountId       String   @unique
+  accountId       String    @unique
   /// アクセストークン（暗号化推奨）
   accessToken     String
   /// リフレッシュトークン（暗号化推奨）
   refreshToken    String
   /// アクセストークン有効期限
-  expiresAt       DateTime @db.Timestamptz(6)
+  expiresAt       DateTime  @db.Timestamptz(6)
   /// トークンスコープ
   scope           String?
   /// 最終接続日時
   lastConnectedAt DateTime? @db.Timestamptz(6)
   /// 作成日時
-  createdAt       DateTime @default(now()) @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @db.Timestamptz(6)
   /// 更新日時
-  updatedAt       DateTime @updatedAt @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(6)
+  user            User      @relation("UserCTraderTokens", fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId], map: "idx_ctradertoken_userid")
   @@index([expiresAt], map: "idx_ctrader_token_expires")
 }
 

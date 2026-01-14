@@ -13,8 +13,9 @@
  */
 
 import { z } from 'zod';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, User, CTraderToken } from '@prisma/client';
 import { config } from '../../../config';
+import { sessionService, CreateSessionPayload } from '../auth/sessionService';
 
 // ========================================
 // Zod スキーマ
@@ -61,6 +62,16 @@ export const StoredTokenSchema = z.object({
 
 export type StoredToken = z.infer<typeof StoredTokenSchema>;
 
+/**
+ * 認証結果
+ */
+export interface AuthResult {
+  user: User;
+  token: CTraderToken;
+  jwt: string;
+  isNewUser: boolean;
+}
+
 // ========================================
 // cTrader 認証サービス
 // ========================================
@@ -93,6 +104,136 @@ export class CTraderAuthService {
     }
     
     return `${config.ctrader.authUrl}?${params.toString()}`;
+  }
+  
+  /**
+   * 認可コードをトークンに交換し、ユーザーを自動作成・ログイン
+   * 
+   * フロー:
+   * 1. code → token 交換
+   * 2. cTrader API でアカウント情報取得
+   * 3. accountId で既存ユーザー検索
+   * 4. なければ User 新規作成
+   * 5. CTraderToken 保存（userId 紐付け）
+   * 6. JWT 発行
+   * 
+   * @param code - 認可コード（Callback から取得）
+   * @returns 認証結果（user, token, jwt, isNewUser）
+   */
+  async exchangeCodeAndLogin(code: string): Promise<AuthResult> {
+    // 1. code → token 交換
+    const response = await fetch(config.ctrader.tokenUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        client_id: config.ctrader.clientId,
+        client_secret: config.ctrader.clientSecret,
+        redirect_uri: config.ctrader.redirectUri,
+      }).toString(),
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[cTraderAuth] トークン交換失敗:', {
+        status: response.status,
+        error: errorText,
+        tokenUrl: config.ctrader.tokenUrl,
+        redirectUri: config.ctrader.redirectUri,
+      });
+      throw new Error(`cTrader トークン交換エラー: ${response.status} ${errorText}`);
+    }
+    
+    const json: unknown = await response.json();
+    const jsonObj = json as Record<string, unknown>;
+    console.log('[cTraderAuth] トークンレスポンス受信:', {
+      hasAccessToken: !!jsonObj.access_token,
+      hasRefreshToken: !!jsonObj.refresh_token,
+      expiresIn: jsonObj.expires_in,
+    });
+    
+    const result = CTraderTokenResponseSchema.safeParse(json);
+    
+    if (!result.success) {
+      console.error('[cTraderAuth] レスポンスパースエラー:', jsonObj);
+      throw new Error(`cTrader レスポンスパースエラー: ${result.error.message}`);
+    }
+    
+    const tokenData = result.data;
+    const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000);
+    
+    // 2. アカウントIDを取得（アクセストークンから）
+    const accountId = await this.fetchAccountId(tokenData.access_token);
+    
+    // 3. 既存ユーザーを検索（primaryAccountId で検索）
+    let user = await this.prisma.user.findUnique({
+      where: { primaryAccountId: accountId },
+    });
+    
+    let isNewUser = false;
+    
+    // 4. ユーザーが存在しない場合は新規作成
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          primaryAccountId: accountId,
+          displayName: `cTrader User ${accountId.substring(0, 8)}`,
+          email: null,
+          role: 'user',
+          active: true,
+          lastLoginAt: new Date(),
+        },
+      });
+      isNewUser = true;
+      console.log('[cTraderAuth] 新規ユーザー作成:', user.id, accountId);
+    } else {
+      // 既存ユーザーの最終ログイン日時を更新
+      user = await this.prisma.user.update({
+        where: { id: user.id },
+        data: { lastLoginAt: new Date() },
+      });
+      console.log('[cTraderAuth] 既存ユーザーでログイン:', user.id, accountId);
+    }
+    
+    // 5. CTraderToken を保存（userId 紐付け）
+    const token = await this.prisma.cTraderToken.upsert({
+      where: { accountId },
+      create: {
+        userId: user.id,
+        accountId,
+        accessToken: tokenData.access_token,
+        refreshToken: tokenData.refresh_token,
+        expiresAt,
+        scope: tokenData.scope || null,
+      },
+      update: {
+        accessToken: tokenData.access_token,
+        refreshToken: tokenData.refresh_token,
+        expiresAt,
+        scope: tokenData.scope || null,
+      },
+    });
+    
+    // 6. JWT を発行
+    const sessionPayload: CreateSessionPayload = {
+      userId: user.id,
+      primaryAccountId: user.primaryAccountId,
+      email: user.email || null,
+      displayName: user.displayName || null,
+      role: user.role,
+    };
+    
+    const jwt = sessionService.generateToken(sessionPayload);
+    
+    return {
+      user,
+      token,
+      jwt,
+      isNewUser,
+    };
   }
   
   /**

@@ -1,6 +1,7 @@
 import express, { Application, Request, Response, NextFunction } from 'express';
 import { Server } from 'http';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import { config } from './config';
 import tradeRoutes from './routes/tradeRoutes';
 import matchingRoutes from './routes/matchingRoutes';
@@ -89,6 +90,9 @@ class App {
 
     this.app.use(express.json());
     this.app.use(express.urlencoded({ extended: true }));
+    
+    // Cookie パーサー（cTrader認証のJWT Cookie用）
+    this.app.use(cookieParser());
   }
 
   /**

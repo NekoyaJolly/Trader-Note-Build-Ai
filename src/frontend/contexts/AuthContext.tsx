@@ -1,0 +1,181 @@
+/**
+ * 認証コンテキスト（cTrader OAuth 統合認証）
+ * 
+ * JWT ベースのセッション管理を提供
+ * - ログイン状態の管理
+ * - ユーザー情報の取得
+ * - ログアウト機能
+ */
+
+'use client';
+
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+
+// API ベースURL（環境変数から取得）
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3100';
+
+// ========================================
+// 型定義
+// ========================================
+
+interface CTraderAccount {
+  accountId: string;
+  expiresAt: string;
+  lastConnectedAt: string | null;
+}
+
+interface User {
+  id: string;
+  primaryAccountId: string;
+  displayName: string | null;
+  email: string | null;
+  role: 'user' | 'admin';
+  active: boolean;
+  lastLoginAt: string | null;
+  ctraderAccounts: CTraderAccount[];
+}
+
+interface AuthContextValue {
+  user: User | null;
+  loading: boolean;
+  login: (redirectTo?: string) => void;
+  logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
+}
+
+// ========================================
+// コンテキスト作成
+// ========================================
+
+const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+// ========================================
+// AuthProvider コンポーネント
+// ========================================
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+
+  /**
+   * ユーザー情報を取得
+   */
+  const fetchUser = async (): Promise<User | null> => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+        method: 'GET',
+        credentials: 'include', // Cookie を送信
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return data.user;
+      }
+
+      return null;
+    } catch (error) {
+      console.error('[AuthContext] ユーザー情報取得エラー:', error);
+      return null;
+    }
+  };
+
+  /**
+   * 初回ロード時にユーザー情報を取得
+   */
+  useEffect(() => {
+    const init = async () => {
+      const userData = await fetchUser();
+      setUser(userData);
+      setLoading(false);
+    };
+
+    init();
+  }, []);
+
+  /**
+   * ユーザー情報を再取得
+   */
+  const refreshUser = async () => {
+    const userData = await fetchUser();
+    setUser(userData);
+  };
+
+  /**
+   * cTrader OAuth ログインを開始
+   * 
+   * @param redirectTo - ログイン後のリダイレクト先（任意）
+   */
+  const login = async (redirectTo?: string) => {
+    try {
+      // バックエンドから認証URLを取得
+      const response = await fetch(`${API_BASE_URL}/api/auth/ctrader/url`, {
+        method: 'GET',
+        credentials: 'include',
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        
+        // state パラメータにリダイレクト先を含める（任意）
+        const authUrl = redirectTo 
+          ? `${data.authUrl}&state=${encodeURIComponent(redirectTo)}`
+          : data.authUrl;
+        
+        // cTrader 認証画面にリダイレクト
+        window.location.href = authUrl;
+      } else {
+        console.error('[AuthContext] 認証URL取得エラー:', await response.text());
+      }
+    } catch (error) {
+      console.error('[AuthContext] ログインエラー:', error);
+    }
+  };
+
+  /**
+   * ログアウト
+   */
+  const logout = async () => {
+    try {
+      await fetch(`${API_BASE_URL}/api/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+
+      setUser(null);
+      router.push('/login');
+    } catch (error) {
+      console.error('[AuthContext] ログアウトエラー:', error);
+    }
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, loading, login, logout, refreshUser }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+// ========================================
+// useAuth フック
+// ========================================
+
+/**
+ * 認証コンテキストを使用するためのフック
+ * 
+ * @returns 認証コンテキストの値
+ * @throws AuthProvider 外で使用された場合
+ */
+export function useAuth(): AuthContextValue {
+  const context = useContext(AuthContext);
+  
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  
+  return context;
+}
