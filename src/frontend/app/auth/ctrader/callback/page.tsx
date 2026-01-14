@@ -58,11 +58,12 @@ function CallbackHandler() {
 
       try {
         // Railway API に code を送信してトークン交換
-        const response = await fetch(`${API_BASE_URL}/api/auth/ctrader/exchange`, {
+        const response = await fetch(`${API_BASE_URL}/api/auth/ctrader/callback`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
+          credentials: 'include', // Cookie を受け取る
           body: JSON.stringify({ code }),
         });
 
@@ -70,19 +71,19 @@ function CallbackHandler() {
 
         if (response.ok && data.success) {
           setStatus('success');
-          setMessage('cTrader 連携が完了しました！');
+          setMessage(data.isNewUser ? 'アカウントを作成しました！' : 'ログインに成功しました！');
           setTimeout(() => {
-            router.push(`/settings?ctrader=connected&account=${encodeURIComponent(data.accountId)}`);
+            router.push('/'); // ダッシュボードにリダイレクト
           }, 1500);
         } else {
-          throw new Error(data.error || 'トークン交換に失敗しました');
+          throw new Error(data.error || 'ログインに失敗しました');
         }
       } catch (err) {
-        console.error('トークン交換エラー:', err);
+        console.error('ログインエラー:', err);
         setStatus('error');
         setMessage(err instanceof Error ? err.message : 'エラーが発生しました');
         setTimeout(() => {
-          router.push('/settings?ctrader=error');
+          router.push('/login?error=callback_failed');
         }, 2000);
       }
     };
