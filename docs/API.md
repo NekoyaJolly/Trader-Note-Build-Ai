@@ -595,3 +595,101 @@ ID で特定のトレードノートを取得します。
 - 全ノートを現在の市場状況と照合
 - しきい値を超えた一致に対して通知を生成
 - 再通知防止ルールを適用
+
+---
+
+## 横断類似ノート検索
+
+### POST /api/similarity/search-cross
+
+Side-A（TradeNote）と Side-B（AITradeNote）を横断して類似ノートを検索します。
+
+**リクエストボディ:**
+
+```json
+{
+  // OHLCV データ（特徴量自動抽出） または featureVector のいずれかが必須
+  "ohlcvData": [
+    {
+      "timestamp": "2024-01-01T00:00:00Z",
+      "open": 100.5,
+      "high": 101.2,
+      "low": 100.1,
+      "close": 100.8,
+      "volume": 1500
+    }
+  ],
+  
+  // または 12次元特徴ベクトルを直接指定
+  "featureVector": [0.5, 0.6, 0.7, 0.4, 0.5, 0.6, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
+  
+  // オプション
+  "symbol": "EURUSD",              // シンボルフィルタ（省略可）
+  "topK": 10,                      // 取得件数（デフォルト: 10）
+  "minSimilarity": 0.5,            // 最小類似度 0-1（デフォルト: 0.5）
+  "searchTradeNotes": true,        // TradeNote を検索（デフォルト: true）
+  "searchAITradeNotes": true       // AITradeNote を検索（デフォルト: true）
+}
+```
+
+**応答:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "results": [
+      {
+        "noteId": "uuid",
+        "noteType": "tradeNote",        // "tradeNote" または "aiTradeNote"
+        "similarity": 0.85,              // コサイン類似度（0-1）
+        "distance": 0.42,                // ユークリッド距離
+        "symbol": "EURUSD",
+        "date": "2024-01-01",
+        "direction": "long",             // "long" または "short"
+        "outcome": "win",                // 成績（省略可）
+        "pnl": 50.5,                     // 損益（省略可）
+        "metadata": {                    // 追加メタデータ
+          "tradeId": "uuid",
+          "timeframe": "1h"
+        }
+      }
+    ],
+    "totalCount": 5,
+    "searchStats": {
+      "tradeNotesSearched": 100,
+      "aiTradeNotesSearched": 50,
+      "tradeNotesMatched": 3,
+      "aiTradeNotesMatched": 2
+    }
+  }
+}
+```
+
+**エラーレスポンス:**
+
+```json
+{
+  "success": false,
+  "error": "エラーメッセージ",
+  "details": {}
+}
+```
+
+---
+
+### GET /api/similarity/health
+
+類似検索サービスのヘルスチェック。
+
+**応答:**
+
+```json
+{
+  "status": "ok",
+  "service": "cross-similarity-search",
+  "timestamp": "2024-01-01T00:00:00.000Z"
+}
+```
+
+---
