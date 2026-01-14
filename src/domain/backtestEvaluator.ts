@@ -1,94 +1,78 @@
 /**
- * バックテスト統合評価器インターフェース
+ * BacktestEvaluator 統合インターフェース
  * 
- * 設計方針:
- * - 共通インターフェースは最小限にシンプルに
- * - ユーザー定義の表現力: ハイブリッド（条件判定/類似度）
- * - AI学習との親和性: AI学習時は特徴量変換必須
- * - バックテスト精度: 条件判定（完全一致）or 類似度判定を選択可能
+ * 目的:
+ * - 条件判定（完全一致）と類似度判定（特徴量ベース）を統一的に扱う
+ * - BacktestEngine が評価方式を意識せずに使用可能にする
  * 
- * 核心概念:
- * - 条件判定 = 類似度100% と等価
- * - ユーザー定義はデフォルトで条件判定（完全一致）
- * - 抽象化したい時に特徴量変換して類似度判定に切替
+ * 設計思想:
+ * - 市場は「入力」
+ * - 評価器は「判定ロジック」
+ * - 条件判定 = 類似度100%（完全一致）
+ * - 類似度判定 = 閾値でのマッチ（抽象化）
  * 
  * @see docs/DESIGN_PHILOSOPHY.md
  */
+
+import { MarketSnapshot } from './noteEvaluator';
+
+// ============================================================================
+// 評価モード
+// ============================================================================
+
+/**
+ * 評価モード
+ * - exact: 条件判定（完全一致 = 100% or 0%）
+ * - similarity: 類似度判定（0〜100%）
+ */
+export type EvaluationMode = 'exact' | 'similarity';
 
 // ============================================================================
 // 共通型定義
 // ============================================================================
 
 /**
- * 市場スナップショット
- * バックテスト/リアルタイム評価で使用する市場データ
- */
-export interface MarketSnapshot {
-  /** シンボル */
-  symbol: string;
-  /** タイムスタンプ */
-  timestamp: Date;
-  /** 時間足 */
-  timeframe: string;
-  /** OHLCV */
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-  /** インジケーター値（キー: "RSI(14)", "SMA(20)" 等） */
-  indicators: Record<string, number | null>;
-}
-
-/**
- * 評価モード
- * - exact: 条件判定（完全一致 = 類似度100%相当）
- * - similarity: 類似度判定（閾値でマッチ）
- */
-export type EvaluationMode = 'exact' | 'similarity';
-
-/**
  * エントリー評価結果
  */
-export interface EntryEvaluationResult {
+export interface EntryResult {
   /** エントリーすべきか */
   shouldEnter: boolean;
-  /** エントリー方向 */
+  /** トレード方向 */
   direction: 'long' | 'short';
-  /** 
-   * 信頼度スコア（0.0〜1.0）
-   * - exact モード: 1.0（条件成立）or 0.0（条件不成立）
-   * - similarity モード: 類似度スコア
-   */
-  confidence: number;
+  /** 信頼度/類似度スコア（0.0〜1.0） */
+  score: number;
   /** 評価モード */
-  evaluationMode: EvaluationMode;
-  /** 評価に使用したインジケーター */
+  mode: EvaluationMode;
+  /** 使用したインジケーター */
   usedIndicators: string[];
-  /** 追加情報 */
+  /** メタデータ（デバッグ用） */
   metadata?: {
-    /** similarity モード: 類似度レベル */
-    similarityLevel?: 'strong' | 'medium' | 'weak' | 'none';
-    /** exact モード: 成立した条件 */
+    /** 条件判定の場合: マッチした条件 */
     matchedConditions?: string[];
+    /** 類似度判定の場合: 類似度レベル */
+    similarityLevel?: 'strong' | 'medium' | 'weak' | 'none';
+    /** ベクトル情報 */
+    vectors?: {
+      note: number[];
+      market: number[];
+    };
   };
 }
 
 /**
  * エグジット評価結果
  */
-export interface ExitEvaluationResult {
+export interface ExitResult {
   /** エグジットすべきか */
   shouldExit: boolean;
   /** エグジット理由 */
   reason: 'take_profit' | 'stop_loss' | 'timeout' | 'condition' | 'trailing_stop' | 'none';
   /** エグジット価格 */
   exitPrice: number;
-  /** 追加情報 */
+  /** メタデータ */
   metadata?: {
     holdingMinutes?: number;
-    distanceToTp?: number;
-    distanceToSl?: number;
+    pnlPercent?: number;
   };
 }
 
@@ -116,33 +100,27 @@ export interface Position {
 }
 
 // ============================================================================
-// BacktestEvaluator インターフェース（シンプルに保つ）
+// BacktestEvaluator インターフェース
 // ============================================================================
 
 /**
  * バックテスト評価器インターフェース
  * 
- * 設計: 共通インターフェースは最小限に
- * - evaluateEntry(): エントリー判定
- * - evaluateExit(): エグジット判定
- * 
- * 内部で評価方式（exact/similarity）を切り替える
+ * シンプルさを重視し、必要最小限のメソッドのみ定義。
+ * 評価方式（条件判定/類似度）は実装クラス内部で処理。
  * 
  * @example
  * ```typescript
- * // ノート用（条件判定 or 類似度、ノート設定による）
- * const noteEvaluator = createNoteBacktestEvaluator(note);
+ * // 条件判定モード（ユーザー定義）
+ * const exactEvaluator = createExactEvaluator(note);
  * 
- * // 戦略用（条件判定）
- * const strategyEvaluator = createStrategyBacktestEvaluator(strategy);
+ * // 類似度モード（AI/抽象化）
+ * const similarityEvaluator = createSimilarityEvaluator(note);
  * 
  * // BacktestEngine は同じインターフェースで使用
- * for (const candle of ohlcvData) {
- *   const snapshot = toSnapshot(candle);
- *   const entry = evaluator.evaluateEntry(snapshot);
- *   if (entry.shouldEnter) {
- *     // エントリー処理
- *   }
+ * const result = evaluator.evaluateEntry(snapshot);
+ * if (result.shouldEnter) {
+ *   // エントリー処理
  * }
  * ```
  */
@@ -153,11 +131,8 @@ export interface BacktestEvaluator {
   /** 対象シンボル */
   readonly symbol: string;
   
-  /** 評価器の種類 */
-  readonly type: 'note' | 'strategy';
-  
   /** 評価モード */
-  readonly evaluationMode: EvaluationMode;
+  readonly mode: EvaluationMode;
   
   /** トレード方向（固定の場合） */
   readonly direction: 'long' | 'short' | 'both';
@@ -165,52 +140,55 @@ export interface BacktestEvaluator {
   /**
    * エントリー条件を評価
    * 
-   * - exact モード: 条件成立で confidence=1.0
-   * - similarity モード: 類似度スコアを confidence に
+   * - exact モード: 条件判定（100% or 0%）
+   * - similarity モード: 類似度計算（0〜100%）
+   * 
+   * @param snapshot 市場スナップショット
+   * @returns エントリー評価結果
    */
-  evaluateEntry(snapshot: MarketSnapshot): EntryEvaluationResult;
+  evaluateEntry(snapshot: MarketSnapshot): EntryResult;
 
   /**
    * エグジット条件を評価
    * 
-   * 共通: TP/SL/タイムアウト判定
-   * + 評価器固有のエグジット条件
+   * TP/SL/タイムアウトの共通ロジック + 評価器固有の条件
+   * 
+   * @param snapshot 市場スナップショット
+   * @param position ポジション情報
+   * @param settings エグジット設定
+   * @returns エグジット評価結果
    */
   evaluateExit(
     snapshot: MarketSnapshot,
     position: Position,
-    exitSettings: ExitSettings,
-  ): ExitEvaluationResult;
+    settings: ExitSettings,
+  ): ExitResult;
 }
 
 // ============================================================================
-// ヘルパー: 共通エグジット判定
+// ヘルパー関数
 // ============================================================================
 
 /**
- * 共通のTP/SL/タイムアウト判定
+ * 共通のエグジット判定（TP/SL/タイムアウト）
  * 
- * BacktestEvaluator.evaluateExit() 内で使用
+ * BacktestEvaluator の evaluateExit 内で使用可能。
  */
-export function checkBasicExitConditions(
+export function checkBasicExit(
   snapshot: MarketSnapshot,
   position: Position,
-  exitSettings: ExitSettings,
-  pipValue: number = 0.0001, // USD系デフォルト、JPY系は0.01
-): ExitEvaluationResult {
+  settings: ExitSettings,
+): ExitResult {
   const { direction, entryPrice, entryTime } = position;
-  const currentPrice = snapshot.close;
+  const currentPrice = snapshot.ohlcv.close;
   const holdingMinutes = (snapshot.timestamp.getTime() - entryTime.getTime()) / 60000;
 
   // TP/SL価格を計算
-  const tpDistance = calculateDistance(exitSettings.takeProfit, entryPrice, pipValue);
-  const slDistance = calculateDistance(exitSettings.stopLoss, entryPrice, pipValue);
-  
-  const tpPrice = direction === 'long' ? entryPrice + tpDistance : entryPrice - tpDistance;
-  const slPrice = direction === 'long' ? entryPrice - slDistance : entryPrice + slDistance;
+  const tpPrice = calculateExitPrice(entryPrice, settings.takeProfit, direction, 'tp', snapshot.symbol);
+  const slPrice = calculateExitPrice(entryPrice, settings.stopLoss, direction, 'sl', snapshot.symbol);
 
   // タイムアウト判定
-  if (exitSettings.maxHoldingMinutes && holdingMinutes >= exitSettings.maxHoldingMinutes) {
+  if (settings.maxHoldingMinutes && holdingMinutes >= settings.maxHoldingMinutes) {
     return {
       shouldExit: true,
       reason: 'timeout',
@@ -219,21 +197,23 @@ export function checkBasicExitConditions(
     };
   }
 
+  const { high, low } = snapshot.ohlcv;
+
   // ロングの場合
   if (direction === 'long') {
-    if (snapshot.high >= tpPrice) {
+    if (high >= tpPrice) {
       return { shouldExit: true, reason: 'take_profit', exitPrice: tpPrice };
     }
-    if (snapshot.low <= slPrice) {
+    if (low <= slPrice) {
       return { shouldExit: true, reason: 'stop_loss', exitPrice: slPrice };
     }
   }
   // ショートの場合
   else {
-    if (snapshot.low <= tpPrice) {
+    if (low <= tpPrice) {
       return { shouldExit: true, reason: 'take_profit', exitPrice: tpPrice };
     }
-    if (snapshot.high >= slPrice) {
+    if (high >= slPrice) {
       return { shouldExit: true, reason: 'stop_loss', exitPrice: slPrice };
     }
   }
@@ -242,42 +222,61 @@ export function checkBasicExitConditions(
     shouldExit: false,
     reason: 'none',
     exitPrice: currentPrice,
-    metadata: {
-      holdingMinutes,
-      distanceToTp: Math.abs(tpPrice - currentPrice),
-      distanceToSl: Math.abs(slPrice - currentPrice),
-    },
+    metadata: { holdingMinutes },
   };
 }
 
 /**
- * 距離を計算
+ * エグジット価格を計算
  */
-function calculateDistance(
-  target: { value: number; unit: 'percent' | 'pips' | 'price' },
+function calculateExitPrice(
   entryPrice: number,
-  pipValue: number,
+  target: { value: number; unit: 'percent' | 'pips' | 'price' },
+  direction: 'long' | 'short',
+  type: 'tp' | 'sl',
+  symbol: string,
 ): number {
-  switch (target.unit) {
-    case 'percent':
-      return entryPrice * (target.value / 100);
-    case 'pips':
-      return target.value * pipValue;
-    case 'price':
-      return Math.abs(target.value - entryPrice);
-    default:
-      return 0;
+  if (target.unit === 'price') {
+    return target.value;
+  }
+
+  let distance: number;
+  if (target.unit === 'percent') {
+    distance = entryPrice * (target.value / 100);
+  } else {
+    // pips → 価格変動に変換
+    const pipValue = symbol.includes('JPY') ? 0.01 : 0.0001;
+    distance = target.value * pipValue;
+  }
+
+  if (direction === 'long') {
+    return type === 'tp' ? entryPrice + distance : entryPrice - distance;
+  } else {
+    return type === 'tp' ? entryPrice - distance : entryPrice + distance;
   }
 }
 
 // ============================================================================
-// 型ガード
+// ファクトリ関数の型定義
 // ============================================================================
 
-export function isExactMode(evaluator: BacktestEvaluator): boolean {
-  return evaluator.evaluationMode === 'exact';
-}
+/**
+ * 条件判定用 Evaluator を生成
+ */
+export type ExactEvaluatorFactory = (config: {
+  id: string;
+  symbol: string;
+  direction: 'long' | 'short';
+  conditions: unknown; // IndicatorCondition[] or ConditionGroup
+}) => BacktestEvaluator;
 
-export function isSimilarityMode(evaluator: BacktestEvaluator): boolean {
-  return evaluator.evaluationMode === 'similarity';
-}
+/**
+ * 類似度判定用 Evaluator を生成
+ */
+export type SimilarityEvaluatorFactory = (config: {
+  id: string;
+  symbol: string;
+  direction: 'long' | 'short';
+  featureVector: number[];
+  threshold: number;
+}) => BacktestEvaluator;
