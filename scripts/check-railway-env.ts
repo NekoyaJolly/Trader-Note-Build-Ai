@@ -74,7 +74,11 @@ requiredVars.forEach(({ key, description }) => {
   
   if (isSet) {
     const value = loadedEnv[key];
-    const displayValue = value.length > 40 ? value.substring(0, 40) + '...' : value;
+    // シークレット値は隠す
+    const isSensitive = ['SECRET', 'KEY', 'URL', 'PASSWORD'].some(sensitive => key.toUpperCase().includes(sensitive));
+    const displayValue = isSensitive 
+      ? value.substring(0, 8) + '****' + value.substring(value.length - 4)
+      : value.length > 40 ? value.substring(0, 40) + '...' : value;
     console.log(`${status} ${key.padEnd(25)} = ${displayValue}`);
     setCount++;
   } else {

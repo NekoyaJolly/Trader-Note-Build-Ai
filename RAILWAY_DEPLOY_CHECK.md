@@ -7,32 +7,35 @@ https://railway.app/project/[your-project-id]/service/[your-service-id]
 ### 必須環境変数（全て設定されているか確認）：
 
 ```
-DATABASE_URL=postgresql://postgres:YJtRQLNgBFxGopFxRHMCZURURdxIwWrN@switchyard.proxy.rlwy.net:32154/railway?sslmode=require
+DATABASE_URL=postgresql://postgres:****@switchyard.proxy.rlwy.net:32154/railway?sslmode=require
 
 NODE_ENV=production
 
-JWT_SECRET=4OqCYL8AHR/9jGFrV/YPNyNw6R4xFdQZUYod5ZigbY4=
-JWT_REFRESH_SECRET=CzxjTBRlDUgQf+DXhnF2/FyUGSUZhRR+e69ikgH5CH4=
+JWT_SECRET=****
+JWT_REFRESH_SECRET=****
 
-AI_API_KEY=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
+AI_API_KEY=sk-****
 AI_MODEL=gpt-5-mini
 
 MARKET_API_URL=https://api.twelvedata.com
-MARKET_API_KEY=29bcf8b5b4a347ca9b7024796af7cd3e
-TWELVE_DATA_API_KEY=29bcf8b5b4a347ca9b7024796af7cd3e
+MARKET_API_KEY=****
+TWELVE_DATA_API_KEY=****
 
-VAPID_PUBLIC_KEY=BLu1-CLYTs3lQusgFRphvfDdpikHindH17HAFgjXH-xHgS14HonP9XOTrC1AmCb1gr-SChxnW4XqUq6saHrsqI4
-VAPID_PRIVATE_KEY=EFZs_-q5Df_RgOm6lCqOpPe7jBnJZC6ch0z_wx4r_MI
+VAPID_PUBLIC_KEY=****
+VAPID_PRIVATE_KEY=****
 VAPID_SUBJECT=mailto:admin@tradeassist.local
 
-CTRADER_CLIENT_ID=20178_vRM8hQu39iKOkBe8MMcYhS1KZQPRLbf3yRYU9BDY3gSuU9m92C
-CTRADER_CLIENT_SECRET=5sd8gT5lt125qh7JZbxd6ccdSVTf91bzvkkVRiu7orbOiZAK5F
+CTRADER_CLIENT_ID=****
+CTRADER_CLIENT_SECRET=****
 
 CRON_ENABLED=false
 SIDE_B_SCHEDULER_ENABLED=false
 ```
 
-**重要**: `PORT` は Railway が自動設定するので設定不要
+**重要**: 
+- `PORT` は Railway が自動設定するので設定不要
+- 実際のシークレット値は `.env` ファイルから取得し、Railway Variables に設定してください
+- パスワードやキーをドキュメントに記載しないこと
 
 ## 2. Railway ビルドコマンド確認
 

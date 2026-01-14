@@ -38,55 +38,34 @@ https://railway.app → プロジェクト → **Deployments** → 最新デプ�
 
 以下の環境変数が **全て** 設定されているか確認：
 
-```bash
-# データベース（必須）
-DATABASE_URL=postgresql://postgres:YJtRQLNgBFxGopFxRHMCZURURdxIwWrN@switchyard.proxy.rlwy.net:32154/railway?sslmode=require
+**必須環境変数リスト**（実際の値は `.env` ファイルから取得）：
 
-# 環境設定（必須）
-NODE_ENV=production
+- [ ] `DATABASE_URL` （PostgreSQL 接続文字列）
+- [ ] `NODE_ENV` = `production`
+- [ ] `JWT_SECRET` （JWT 署名鍵）
+- [ ] `JWT_REFRESH_SECRET` （JWT リフレッシュ鍵）
+- [ ] `AI_API_KEY` （OpenAI API キー）
+- [ ] `AI_MODEL` = `gpt-5-mini`
+- [ ] `MARKET_API_URL` = `https://api.twelvedata.com`
+- [ ] `MARKET_API_KEY` （Twelve Data API キー）
+- [ ] `TWELVE_DATA_API_KEY` （Twelve Data API キー）
+- [ ] `VAPID_PUBLIC_KEY` （Web Push 公開鍵）
+- [ ] `VAPID_PRIVATE_KEY` （Web Push 秘密鍵）
+- [ ] `VAPID_SUBJECT` = `mailto:admin@tradeassist.local`
+- [ ] `CTRADER_CLIENT_ID` （cTrader クライアント ID）
+- [ ] `CTRADER_CLIENT_SECRET` （cTrader クライアント秘密鍵）
 
-# JWT（必須）
-JWT_SECRET=4OqCYL8AHR/9jGFrV/YPNyNw6R4xFdQZUYod5ZigbY4=
-JWT_REFRESH_SECRET=CzxjTBRlDUgQf+DXhnF2/FyUGSUZhRR+e69ikgH5CH4=
-
-# AI（必須）
-AI_API_KEY=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
-AI_MODEL=gpt-5-mini
-
-# 市場データ（必須）
-MARKET_API_URL=https://api.twelvedata.com
-MARKET_API_KEY=29bcf8b5b4a347ca9b7024796af7cd3e
-TWELVE_DATA_API_KEY=29bcf8b5b4a347ca9b7024796af7cd3e
-
-# Web Push（必須）
-VAPID_PUBLIC_KEY=BLu1-CLYTs3lQusgFRphvfDdpikHindH17HAFgjXH-xHgS14HonP9XOTrC1AmCb1gr-SChxnW4XqUq6saHrsqI4
-VAPID_PRIVATE_KEY=EFZs_-q5Df_RgOm6lCqOpPe7jBnJZC6ch0z_wx4r_MI
-VAPID_SUBJECT=mailto:admin@tradeassist.local
-
-# cTrader OAuth（必須）
-CTRADER_CLIENT_ID=20178_vRM8hQu39iKOkBe8MMcYhS1KZQPRLbf3yRYU9BDY3gSuU9m92C
-CTRADER_CLIENT_SECRET=5sd8gT5lt125qh7JZbxd6ccdSVTf91bzvkkVRiu7orbOiZAK5F
-
-# スケジューラー（任意）
-CRON_ENABLED=false
-SIDE_B_SCHEDULER_ENABLED=false
-```
-
-**注意**: `PORT` は Railway が自動設定するので **設定しない**
+**⚠️ セキュリティ注意**: 
+- パスワードやキーを公開リポジトリに記載しないこと
+- `.env` ファイルから取得した実際の値を Railway に設定
+- Git コミット前に `git log` でシークレットが含まれていないか確認
 
 ### 3. ビルド設定確認
 
 **Settings** → **Build**
 
-**Build Command:**
-```
-npm install && npm run build:backend
-```
-
-**Start Command:**
-```
-node dist/index.js
-```
+- **Build Command**: `npm install && npm run build:backend`
+- **Start Command**: `node dist/index.js`
 
 ### 4. Railway サービス設定
 
@@ -159,13 +138,12 @@ curl https://trader-note-build-ai-production.up.railway.app/health
 
 以下の情報を共有してください：
 
-1. **Deploy Logs のエラー部分**（コピペ）
-2. **環境変数リスト**（値は隠してOK、キー名のみ）
+1. **Deploy Logs のエラー部分**（コピペ、シークレット除外）
+2. **環境変数リスト**（キー名のみ、値は非表示）
 3. **Build Command と Start Command**
-4. **DATABASE_URL の形式**（`postgresql://...` の部分のみ、パスワードは `****`）
 
 ---
 
-**最終コミット**: `0a6ee23` (fix: Railway デプロイ設定追加)  
-**現在の状態**: Railway 502 エラー（原因調査中）  
+**最終コミット**: 確認中
+**現在の状態**: Railway 502 エラー（原因調査中）
 **次の作業**: Railway ダッシュボードでデプロイログ確認
