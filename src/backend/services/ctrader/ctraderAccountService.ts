@@ -14,24 +14,71 @@
  */
 
 import { EventEmitter } from 'events';
-import { CTraderProvider } from '../../../infrastructure/market/CTraderProvider';
+import { z } from 'zod';
+import { CTraderProvider, CTraderMessageType } from '../../../infrastructure/market/CTraderProvider';
 import { 
-  AccountInfo, 
-  Position, 
-  PositionUpdate,
-  CTraderReconcileResponse,
-  CTraderPosition,
-  CTraderExecutionEvent,
-} from './types/trading';
+  AccountInfoResponseSchema,
+  PositionResponseSchema,
+} from '../../../schemas/api/trading';
+import type {
+  AccountInfoResponse,
+  PositionResponse,
+} from '../../../schemas/api/trading';
 
-// cTrader メッセージタイプ定義
-const PROTO_OA_RECONCILE_REQ = 2124;
-const PROTO_OA_EXECUTION_EVENT = 2126;
+// ========================================
+// cTrader API レスポンス用Zodスキーマ
+// ========================================
+
+/**
+ * cTrader TradeData スキーマ
+ */
+const CTraderTradeDataSchema = z.object({
+  tradeSide: z.number(),  // 1: BUY, 2: SELL
+  volume: z.number(),     // cent単位
+});
+
+/**
+ * cTrader ポジション情報スキーマ
+ */
+const CTraderPositionSchema = z.object({
+  positionId: z.number(),
+  symbolName: z.string().optional(),
+  tradeData: CTraderTradeDataSchema.optional(),
+  price: z.number(),
+  currentPrice: z.number().optional(),
+  swap: z.number(),         // cent単位
+  commission: z.number(),   // cent単位
+  grossProfit: z.number(),  // cent単位
+  pips: z.number().optional(),
+  takeProfit: z.number().optional(),
+  stopLoss: z.number().optional(),
+  utcLastUpdateTimestamp: z.number(),
+  comment: z.string().optional(),
+});
+
+/**
+ * cTrader ProtoOAReconcileRes スキーマ
+ */
+const CTraderReconcileResponseSchema = z.object({
+  ctidTraderAccountId: z.number(),
+  balance: z.number(),        // cent単位
+  equity: z.number().optional(),        // cent単位
+  margin: z.number().optional(),        // cent単位
+  freeMargin: z.number().optional(),    // cent単位
+  marginLevel: z.number().optional(),   // パーセント
+  currency: z.string().optional(),
+  isLive: z.boolean().optional(),
+  leverage: z.number().optional(),
+  position: z.array(CTraderPositionSchema).optional(),
+});
+
+type CTraderPosition = z.infer<typeof CTraderPositionSchema>;
+type CTraderReconcileResponse = z.infer<typeof CTraderReconcileResponseSchema>;
 
 export class CTraderAccountService extends EventEmitter {
   private provider: CTraderProvider;
   private accountId: string;
-  private positions: Map<string, Position> = new Map();
+  private positions: Map<string, PositionResponse> = new Map();
 
   constructor(provider: CTraderProvider, accountId: string) {
     super();
@@ -44,13 +91,22 @@ export class CTraderAccountService extends EventEmitter {
    * 
    * @returns 口座残高・証拠金情報
    */
-  async getAccountInfo(): Promise<AccountInfo> {
+  async getAccountInfo(): Promise<AccountInfoResponse> {
     // CTraderProvider経由でProtoOAReconcileReqを送信
-    const response = await this.provider.sendCommand('ProtoOAReconcileReq', {
+    const rawResponse = await this.provider.sendCommand('ProtoOAReconcileReq', {
       ctidTraderAccountId: parseInt(this.accountId, 10),
-    }) as CTraderReconcileResponse;
+    });
 
-    return {
+    // Zodバリデーション
+    const result = CTraderReconcileResponseSchema.safeParse(rawResponse);
+    if (!result.success) {
+      console.error('[CTraderAccountService] レスポンスバリデーションエラー:', result.error);
+      throw new Error('cTrader API レスポンスの形式が不正です');
+    }
+
+    const response = result.data;
+
+    const accountInfo: AccountInfoResponse = {
       accountId: this.accountId,
       ctidTraderAccountId: response.ctidTraderAccountId,
       balance: response.balance / 100, // centから変換
@@ -62,6 +118,9 @@ export class CTraderAccountService extends EventEmitter {
       isLive: response.isLive ?? false,
       leverage: response.leverage ?? 100,
     };
+
+    // レスポンススキーマでバリデーション
+    return AccountInfoResponseSchema.parse(accountInfo);
   }
 
   /**
@@ -69,12 +128,20 @@ export class CTraderAccountService extends EventEmitter {
    * 
    * @returns ポジション配列
    */
-  async getPositions(): Promise<Position[]> {
-    const response = await this.provider.sendCommand('ProtoOAReconcileReq', {
+  async getPositions(): Promise<PositionResponse[]> {
+    const rawResponse = await this.provider.sendCommand('ProtoOAReconcileReq', {
       ctidTraderAccountId: parseInt(this.accountId, 10),
-    }) as CTraderReconcileResponse;
+    });
 
-    const positions: Position[] = [];
+    // Zodバリデーション
+    const result = CTraderReconcileResponseSchema.safeParse(rawResponse);
+    if (!result.success) {
+      console.error('[CTraderAccountService] レスポンスバリデーションエラー:', result.error);
+      throw new Error('cTrader API レスポンスの形式が不正です');
+    }
+
+    const response = result.data;
+    const positions: PositionResponse[] = [];
     
     for (const pos of response.position || []) {
       const position = this.parsePosition(pos);
@@ -88,13 +155,15 @@ export class CTraderAccountService extends EventEmitter {
   /**
    * ポジション更新イベントを購読
    * 
-   * executionEvent イベントをリッスンし、ポジション変更を検知
+   * 注意: CTraderProvider が EventEmitter ではないため、
+   * executionEvent のハンドリングは今後の拡張課題。
+   * 現時点ではポーリングによる定期更新を推奨。
    */
   subscribeToUpdates(): void {
-    // CTraderProvider は EventEmitter ではないため、
-    // 直接 executionEvent をハンドルする実装は今後追加予定
-    // 現時点ではプレースホルダー
-    console.log('[CTraderAccountService] ポジション更新購読を開始');
+    // プレースホルダー実装
+    // 今後、CTraderProviderをEventEmitterに拡張するか、
+    // ポーリングによる定期更新で対応
+    console.log('[CTraderAccountService] ポジション更新購読を開始（プレースホルダー）');
   }
 
   /**
@@ -114,8 +183,8 @@ export class CTraderAccountService extends EventEmitter {
    * @param data - cTrader API レスポンス
    * @returns パース済みポジション情報
    */
-  private parsePosition(data: CTraderPosition): Position {
-    return {
+  private parsePosition(data: CTraderPosition): PositionResponse {
+    const position: PositionResponse = {
       positionId: data.positionId.toString(),
       symbol: data.symbolName || 'UNKNOWN',
       side: data.tradeData?.tradeSide === 1 ? 'BUY' : 'SELL',
@@ -128,40 +197,11 @@ export class CTraderAccountService extends EventEmitter {
       commission: data.commission / 100,
       takeProfit: data.takeProfit,
       stopLoss: data.stopLoss,
-      openTime: new Date(data.utcLastUpdateTimestamp),
+      openTime: new Date(data.utcLastUpdateTimestamp).toISOString(),
       comment: data.comment,
     };
-  }
 
-  /**
-   * ExecutionEventを処理してポジション更新を通知
-   * 
-   * @param event - cTrader ExecutionEvent
-   */
-  private handleExecutionEvent(event: CTraderExecutionEvent): void {
-    const update: PositionUpdate = {
-      type: this.getUpdateType(event.executionType),
-      position: this.parsePosition(event.position),
-      timestamp: new Date(event.utcLastUpdateTimestamp),
-    };
-
-    // ポジション更新イベントを発火
-    this.emit('positionUpdate', update);
-  }
-
-  /**
-   * executionTypeからポジション更新種別を判定
-   * 
-   * @param executionType - cTrader executionType
-   * @returns 更新種別
-   */
-  private getUpdateType(executionType: number): 'OPEN' | 'MODIFY' | 'CLOSE' {
-    // cTrader executionType から変換
-    // 2: ORDER_FILLED (新規ポジション)
-    // 3: ORDER_CANCELLED (決済)
-    // その他: 変更
-    if (executionType === 2) return 'OPEN';
-    if (executionType === 3) return 'CLOSE';
-    return 'MODIFY';
+    // レスポンススキーマでバリデーション
+    return PositionResponseSchema.parse(position);
   }
 }

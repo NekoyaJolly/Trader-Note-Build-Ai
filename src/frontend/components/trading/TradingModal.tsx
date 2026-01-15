@@ -22,7 +22,7 @@ interface TradingModalProps {
 }
 
 export function TradingModal({ isOpen, onClose }: TradingModalProps) {
-  const { accountInfo, positions, loading, error } = useTradingAccount();
+  const { accountInfo, positions, loading, error } = useTradingAccount(isOpen);
 
   // ESCキーで閉じる
   useEffect(() => {

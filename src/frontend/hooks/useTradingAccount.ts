@@ -14,55 +14,25 @@
  * ```
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-
-// ========================================
-// 型定義
-// ========================================
-
-interface AccountInfo {
-  accountId: string;
-  ctidTraderAccountId: number;
-  balance: number;
-  equity: number;
-  margin: number;
-  freeMargin: number;
-  marginLevel: number;
-  currency: string;
-  isLive: boolean;
-  leverage: number;
-}
-
-interface Position {
-  positionId: string;
-  symbol: string;
-  side: 'BUY' | 'SELL';
-  volume: number;
-  entryPrice: number;
-  currentPrice: number;
-  profitLoss: number;
-  profitLossPips: number;
-  swap: number;
-  commission: number;
-  takeProfit?: number;
-  stopLoss?: number;
-  openTime: string;
-  comment?: string;
-}
-
-interface PositionUpdate {
-  type: 'OPEN' | 'MODIFY' | 'CLOSE';
-  position: Position;
-  timestamp: string;
-}
+import { useState, useEffect, useRef } from 'react';
+import type { 
+  AccountInfoResponse, 
+  PositionResponse, 
+  PositionUpdateEvent 
+} from '@/schemas/api/trading';
+import { 
+  AccountInfoResponseSchema,
+  PositionsResponseSchema,
+  PositionUpdateEventSchema
+} from '@/schemas/api/trading';
 
 // ========================================
 // カスタムフック
 // ========================================
 
-export function useTradingAccount() {
-  const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null);
-  const [positions, setPositions] = useState<Position[]>([]);
+export function useTradingAccount(enabled: boolean = true) {
+  const [accountInfo, setAccountInfo] = useState<AccountInfoResponse | null>(null);
+  const [positions, setPositions] = useState<PositionResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -70,53 +40,72 @@ export function useTradingAccount() {
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3100';
 
   /**
-   * 口座情報を取得
-   */
-  const fetchAccountInfo = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_BASE}/api/trading/account`, {
-        credentials: 'include',
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        setAccountInfo(data.data);
-      } else {
-        setError(data.error);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '口座情報の取得に失敗しました');
-    }
-  }, [API_BASE]);
-
-  /**
-   * ポジション一覧を取得
-   */
-  const fetchPositions = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_BASE}/api/trading/positions`, {
-        credentials: 'include',
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        setPositions(data.data);
-      } else {
-        setError(data.error);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'ポジション情報の取得に失敗しました');
-    } finally {
-      setLoading(false);
-    }
-  }, [API_BASE]);
-
-  /**
    * 初回データ取得とSSE接続
    */
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
+
+    /**
+     * 口座情報を取得
+     */
+    const fetchAccountInfo = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/trading/account`, {
+          credentials: 'include',
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          // Zodバリデーション
+          const result = AccountInfoResponseSchema.safeParse(data.data);
+          if (result.success) {
+            setAccountInfo(result.data);
+          } else {
+            console.error('[useTradingAccount] 口座情報バリデーションエラー:', result.error);
+            setError('口座情報の形式が不正です');
+          }
+        } else {
+          setError(data.error);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '口座情報の取得に失敗しました');
+      }
+    };
+
+    /**
+     * ポジション一覧を取得
+     */
+    const fetchPositions = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/trading/positions`, {
+          credentials: 'include',
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          // Zodバリデーション
+          const result = PositionsResponseSchema.safeParse(data.data);
+          if (result.success) {
+            setPositions(result.data);
+          } else {
+            console.error('[useTradingAccount] ポジションバリデーションエラー:', result.error);
+            setError('ポジション情報の形式が不正です');
+          }
+        } else {
+          setError(data.error);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'ポジション情報の取得に失敗しました');
+      } finally {
+        setLoading(false);
+      }
+    };
+
     fetchAccountInfo();
     fetchPositions();
 
@@ -127,7 +116,16 @@ export function useTradingAccount() {
 
     eventSource.onmessage = (event) => {
       try {
-        const update: PositionUpdate = JSON.parse(event.data);
+        const parsedData = JSON.parse(event.data);
+        
+        // Zodバリデーション
+        const result = PositionUpdateEventSchema.safeParse(parsedData);
+        if (!result.success) {
+          console.error('[useTradingAccount] SSEバリデーションエラー:', result.error);
+          return;
+        }
+
+        const update = result.data;
         
         if (update.type === 'OPEN') {
           // 新規ポジション追加
@@ -167,16 +165,46 @@ export function useTradingAccount() {
         eventSourceRef.current = null;
       }
     };
-  }, [API_BASE, fetchAccountInfo, fetchPositions]);
+  }, [enabled, API_BASE]);
 
   /**
    * 手動リフレッシュ
    */
-  const refetch = useCallback(() => {
+  const refetch = async () => {
+    if (!enabled) return;
+    
     setLoading(true);
-    fetchAccountInfo();
-    fetchPositions();
-  }, [fetchAccountInfo, fetchPositions]);
+    
+    try {
+      // 口座情報を取得
+      const accountResponse = await fetch(`${API_BASE}/api/trading/account`, {
+        credentials: 'include',
+      });
+      const accountData = await accountResponse.json();
+      if (accountData.success) {
+        const result = AccountInfoResponseSchema.safeParse(accountData.data);
+        if (result.success) {
+          setAccountInfo(result.data);
+        }
+      }
+
+      // ポジション一覧を取得
+      const positionsResponse = await fetch(`${API_BASE}/api/trading/positions`, {
+        credentials: 'include',
+      });
+      const positionsData = await positionsResponse.json();
+      if (positionsData.success) {
+        const result = PositionsResponseSchema.safeParse(positionsData.data);
+        if (result.success) {
+          setPositions(result.data);
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'データの再取得に失敗しました');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return {
     accountInfo,
