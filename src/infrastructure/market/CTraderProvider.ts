@@ -54,6 +54,9 @@ export const CTraderMessageType = {
   PROTO_OA_UNSUBSCRIBE_SPOTS_REQ: 2126,
   PROTO_OA_UNSUBSCRIBE_SPOTS_RES: 2127,
   PROTO_OA_SPOT_EVENT: 2128,
+  PROTO_OA_RECONCILE_REQ: 2118,
+  PROTO_OA_RECONCILE_RES: 2119,
+  PROTO_OA_EXECUTION_EVENT: 2126,
   PROTO_OA_ERROR_RES: 2142,
   HEARTBEAT_EVENT: 51,
 } as const;
@@ -432,5 +435,31 @@ export class CTraderProvider extends BaseMarketDataProvider {
 
   private stopHeartbeat(): void {
     if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
+  }
+
+  // ========================================
+  // パブリックコマンド送信API（口座情報取得用）
+  // ========================================
+
+  /**
+   * cTrader コマンドを送信（口座情報・ポジション取得用）
+   * 
+   * @param command - コマンド名（例: 'ProtoOAReconcileReq'）
+   * @param payload - ペイロード
+   * @returns レスポンス
+   */
+  async sendCommand(command: string, payload: Record<string, unknown>): Promise<unknown> {
+    // コマンド名からメッセージタイプを解決
+    const messageTypeMap: Record<string, number> = {
+      'ProtoOAReconcileReq': CTraderMessageType.PROTO_OA_RECONCILE_REQ,
+    };
+
+    const payloadType = messageTypeMap[command];
+    if (!payloadType) {
+      throw new Error(`[cTrader] 未知のコマンド: ${command}`);
+    }
+
+    const message = { payloadType, payload };
+    return this.sendRequest(message);
   }
 }

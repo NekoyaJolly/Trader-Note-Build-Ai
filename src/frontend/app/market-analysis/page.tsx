@@ -8,6 +8,7 @@
  * - ローソク足チャート表示
  * - 12次元特徴量でマーケット状態を可視化
  * - cTrader WebSocket によるリアルタイムチャート
+ * - トレード情報モーダル表示
  */
 
 import React, { useState, useCallback, useMemo } from 'react';
@@ -16,6 +17,7 @@ import { RealtimeChart } from '@/components/RealtimeChart';
 import { NeonButton } from '@/components/ui/NeonButton';
 import { IndicatorSelector, SelectedIndicator } from '@/components/IndicatorSelector';
 import { indicatorToChartConfigs } from '@/lib/chartIndicators';
+import { TradingModal } from '@/components/trading/TradingModal';
 
 // 12次元特徴量の詳細型
 interface FeatureDetail {
@@ -105,6 +107,7 @@ export default function MarketAnalysisPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [selectedIndicators, setSelectedIndicators] = useState<SelectedIndicator[]>([]);
+    const [isTradingModalOpen, setIsTradingModalOpen] = useState(false);
 
     const handleSymbolChange = useCallback((symbol: string) => {
         setSelectedSymbol(symbol);
@@ -408,6 +411,23 @@ export default function MarketAnalysisPage() {
                     </div>
                 </div>
             )}
+
+            {/* トレードモーダル */}
+            <TradingModal 
+                isOpen={isTradingModalOpen} 
+                onClose={() => setIsTradingModalOpen(false)} 
+            />
+
+            {/* トレード情報表示ボタン（フローティング） */}
+            <button
+                onClick={() => setIsTradingModalOpen(true)}
+                className="fixed bottom-6 right-6 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-full shadow-lg flex items-center gap-2 transition-all hover:scale-105 z-40"
+            >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                </svg>
+                トレード情報
+            </button>
         </div>
     );
 }
