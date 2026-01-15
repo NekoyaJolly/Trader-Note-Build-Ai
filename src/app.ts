@@ -21,6 +21,7 @@ import profileRoutes from './routes/profileRoutes';
 import { sideBRoutes } from './side-b/routes';
 import cronRoutes from './routes/cronRoutes';
 import ctraderAuthRoutes from './backend/api/ctraderAuthRoutes';
+import tradingRoutes from './backend/api/tradingRoutes';
 import marketAnalysisRoutes from './routes/marketAnalysisRoutes';
 import realtimeRoutes from './backend/api/realtimeRoutes';
 import similarityRoutes from './routes/similarityRoutes';
@@ -123,6 +124,10 @@ class App {
       // cTrader OAuth 認証ルート（認証不要）
       console.log('[App] /api/auth ルートを登録中...');
       this.app.use('/api/auth', ctraderAuthRoutes);
+
+      // トレーディングルート（認証必須）
+      console.log('[App] /api/trading ルートを登録中...');
+      this.app.use('/api/trading', tradingRoutes);
 
       // ウォッチリスト（認証必須）
       console.log('[App] /api/watchlist ルートを登録中...');
