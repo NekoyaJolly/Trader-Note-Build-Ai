@@ -28,7 +28,7 @@ const prisma = getPrismaClient();
  */
 router.get('/account', requireAuth, async (req: Request, res: Response) => {
   try {
-    const userId = req.user!.id;
+    const userId = req.user!.userId;
     const primaryAccountId = req.user!.primaryAccountId;
 
     console.log('[TradingRoutes] 口座情報取得開始:', { userId, primaryAccountId });
@@ -83,7 +83,7 @@ router.get('/account', requireAuth, async (req: Request, res: Response) => {
  */
 router.get('/positions', requireAuth, async (req: Request, res: Response) => {
   try {
-    const userId = req.user!.id;
+    const userId = req.user!.userId;
     const primaryAccountId = req.user!.primaryAccountId;
 
     console.log('[TradingRoutes] ポジション取得開始:', { userId, primaryAccountId });
@@ -149,7 +149,7 @@ router.get('/stream', requireAuth, async (req: Request, res: Response) => {
   });
 
   try {
-    const userId = req.user!.id;
+    const userId = req.user!.userId;
     const primaryAccountId = req.user!.primaryAccountId;
 
     console.log('[TradingRoutes] SSEストリーム開始:', { userId, primaryAccountId });
