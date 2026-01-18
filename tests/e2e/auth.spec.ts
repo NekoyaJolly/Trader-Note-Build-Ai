@@ -10,7 +10,8 @@ test.describe('認証フロー', () => {
     await page.goto('/');
     
     // ログインページの基本要素確認
-    await expect(page.locator('h1, h2')).toContainText(/ログイン|TradeAssist/i);
+    // getByRoleを使用してstrict mode違反を回避しつつ、見出しテキストも検証
+    await expect(page.getByRole('heading', { name: /ログイン|TradeAssist/i })).toContainText(/ログイン|TradeAssist/i);
   });
 
   test('未認証でダッシュボードにアクセスするとログインにリダイレクト', async ({ page }) => {
