@@ -1,0 +1,749 @@
+{
+  "config": {
+    "configFile": "/home/runner/work/Trader-Note-Build-Ai/Trader-Note-Build-Ai/playwright.config.ts",
+    "rootDir": "/home/runner/work/Trader-Note-Build-Ai/Trader-Note-Build-Ai/tests/e2e",
+    "forbidOnly": true,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {},
+    "preserveOutput": "always",
+    "reporter": [
+      [
+        "html",
+        {
+          "outputFolder": "playwright-report"
+        }
+      ],
+      [
+        "json",
+        {
+          "outputFile": "test-results.json"
+        }
+      ],
+      [
+        "junit",
+        {
+          "outputFile": "test-results.xml"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "quiet": false,
+    "projects": [
+      {
+        "outputDir": "/home/runner/work/Trader-Note-Build-Ai/Trader-Note-Build-Ai/test-results",
+        "repeatEach": 1,
+        "retries": 2,
+        "metadata": {},
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "/home/runner/work/Trader-Note-Build-Ai/Trader-Note-Build-Ai/tests/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.57.0",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "auth.spec.ts",
+      "file": "auth.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "認証フロー",
+          "file": "auth.spec.ts",
+          "line": 8,
+          "column": 6,
+          "specs": [
+            {
+              "title": "ログインページが表示される",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "d748ac400d08b85935ef-e6115e86705669dea95f",
+              "file": "auth.spec.ts",
+              "line": 9,
+              "column": 7
+            },
+            {
+              "title": "未認証でダッシュボードにアクセスするとログインにリダイレクト",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "d748ac400d08b85935ef-b42c583d0b44b4beae53",
+              "file": "auth.spec.ts",
+              "line": 16,
+              "column": 7
+            },
+            {
+              "title": "cTrader OAuth認証フロー（統合テスト用）",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "skip",
+                      "location": {
+                        "file": "/home/runner/work/Trader-Note-Build-Ai/Trader-Note-Build-Ai/tests/e2e/auth.spec.ts",
+                        "line": 24,
+                        "column": 8
+                      }
+                    }
+                  ],
+                  "expectedStatus": "skipped",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "d748ac400d08b85935ef-ddfd67a35968dced5b67",
+              "file": "auth.spec.ts",
+              "line": 24,
+              "column": 8
+            },
+            {
+              "title": "ログアウト機能（統合テスト用）",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "d748ac400d08b85935ef-de2846cef7ea8cc51f03",
+              "file": "auth.spec.ts",
+              "line": 34,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "dashboard.spec.ts",
+      "file": "dashboard.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "ダッシュボード",
+          "file": "dashboard.spec.ts",
+          "line": 7,
+          "column": 6,
+          "specs": [
+            {
+              "title": "ダッシュボードページが表示される",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "90cda532ab82d274b30b-dc4b2f8a66a5d560a99e",
+              "file": "dashboard.spec.ts",
+              "line": 19,
+              "column": 7
+            },
+            {
+              "title": "主要セクションが表示される",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "90cda532ab82d274b30b-7bde6eebc358bf569a3f",
+              "file": "dashboard.spec.ts",
+              "line": 27,
+              "column": 7
+            },
+            {
+              "title": "チャートCanvasが表示される",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "90cda532ab82d274b30b-3bdfbf70489c5532038f",
+              "file": "dashboard.spec.ts",
+              "line": 42,
+              "column": 7
+            },
+            {
+              "title": "リアルタイムデータ更新（UI要素の存在確認）",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "90cda532ab82d274b30b-da1939e054ad78b18dd5",
+              "file": "dashboard.spec.ts",
+              "line": 55,
+              "column": 7
+            },
+            {
+              "title": "ナビゲーションメニューが機能する",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "90cda532ab82d274b30b-a46e3504dfea8a6e6ab2",
+              "file": "dashboard.spec.ts",
+              "line": 68,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "market-data.spec.ts",
+      "file": "market-data.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "市場データ一致判定",
+          "file": "market-data.spec.ts",
+          "line": 7,
+          "column": 6,
+          "specs": [
+            {
+              "title": "市場データページが表示される",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "ca5e7230c158b9eb2f3c-d9cd4360f4968b1f2bfa",
+              "file": "market-data.spec.ts",
+              "line": 18,
+              "column": 7
+            },
+            {
+              "title": "リアルタイム価格表示の確認",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "ca5e7230c158b9eb2f3c-ae943ed33efb7d941de5",
+              "file": "market-data.spec.ts",
+              "line": 25,
+              "column": 7
+            },
+            {
+              "title": "チャート上の市場データ表示",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "ca5e7230c158b9eb2f3c-cb1860c18fb7ec232b88",
+              "file": "market-data.spec.ts",
+              "line": 42,
+              "column": 7
+            },
+            {
+              "title": "一致判定結果の表示確認",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "ca5e7230c158b9eb2f3c-f452d66871b597ba5d59",
+              "file": "market-data.spec.ts",
+              "line": 56,
+              "column": 7
+            },
+            {
+              "title": "類似度スコアの表示確認",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "ca5e7230c158b9eb2f3c-64115598058e4693dfaf",
+              "file": "market-data.spec.ts",
+              "line": 73,
+              "column": 7
+            },
+            {
+              "title": "市場データAPIの接続状態確認",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "ca5e7230c158b9eb2f3c-10bc571f1739826a0ffd",
+              "file": "market-data.spec.ts",
+              "line": 89,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "notifications.spec.ts",
+      "file": "notifications.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "通知機能",
+          "file": "notifications.spec.ts",
+          "line": 7,
+          "column": 6,
+          "specs": [
+            {
+              "title": "通知ページが表示される",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "be7d0958780d1a4666e5-d278b8f6e687cee5fac6",
+              "file": "notifications.spec.ts",
+              "line": 18,
+              "column": 7
+            },
+            {
+              "title": "通知履歴の表示確認",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "be7d0958780d1a4666e5-ac9671aade39e29e1c3c",
+              "file": "notifications.spec.ts",
+              "line": 25,
+              "column": 7
+            },
+            {
+              "title": "通知設定ページへのアクセス",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "be7d0958780d1a4666e5-f5f054e2ed9600771991",
+              "file": "notifications.spec.ts",
+              "line": 42,
+              "column": 7
+            },
+            {
+              "title": "通知許可リクエストボタンの存在確認",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "be7d0958780d1a4666e5-9ff15e03b803015717a7",
+              "file": "notifications.spec.ts",
+              "line": 49,
+              "column": 7
+            },
+            {
+              "title": "通知アイコンの表示確認",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "be7d0958780d1a4666e5-254dd5f374f0a5d6b52a",
+              "file": "notifications.spec.ts",
+              "line": 68,
+              "column": 7
+            },
+            {
+              "title": "未読通知バッジの表示確認",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "be7d0958780d1a4666e5-20557de960669cb064fa",
+              "file": "notifications.spec.ts",
+              "line": 87,
+              "column": 7
+            },
+            {
+              "title": "通知履歴のフィルタリング機能",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "be7d0958780d1a4666e5-a7247c6808846bd8805e",
+              "file": "notifications.spec.ts",
+              "line": 106,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "trade-notes.spec.ts",
+      "file": "trade-notes.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "トレードノート機能",
+          "file": "trade-notes.spec.ts",
+          "line": 7,
+          "column": 6,
+          "specs": [
+            {
+              "title": "ノート一覧ページが表示される",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "a4d4683202da1f9dc5a1-d93679730e5623f0cb89",
+              "file": "trade-notes.spec.ts",
+              "line": 18,
+              "column": 7
+            },
+            {
+              "title": "新規トレードノート作成フローにアクセス",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "a4d4683202da1f9dc5a1-30a70947eb0174bf658a",
+              "file": "trade-notes.spec.ts",
+              "line": 26,
+              "column": 7
+            },
+            {
+              "title": "トレードノートフォーム要素の確認",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "a4d4683202da1f9dc5a1-5d1281a3c187fecc9bf3",
+              "file": "trade-notes.spec.ts",
+              "line": 47,
+              "column": 7
+            },
+            {
+              "title": "ノート一覧の表示確認",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "a4d4683202da1f9dc5a1-fb93d210044aea32d94f",
+              "file": "trade-notes.spec.ts",
+              "line": 61,
+              "column": 7
+            },
+            {
+              "title": "ノート編集ボタンの存在確認",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "a4d4683202da1f9dc5a1-32c0454a9566b3e9da0e",
+              "file": "trade-notes.spec.ts",
+              "line": 78,
+              "column": 7
+            },
+            {
+              "title": "ノート削除ボタンの存在確認",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "a4d4683202da1f9dc5a1-5c28c753059bb877f29a",
+              "file": "trade-notes.spec.ts",
+              "line": 94,
+              "column": 7
+            },
+            {
+              "title": "フィルタリング機能の存在確認",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "results": [],
+                  "status": "skipped"
+                }
+              ],
+              "id": "a4d4683202da1f9dc5a1-1c01ecd6b639d18e4091",
+              "file": "trade-notes.spec.ts",
+              "line": 110,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-01-18T09:46:16.684Z",
+    "duration": 205.32399999999996,
+    "expected": 0,
+    "skipped": 29,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

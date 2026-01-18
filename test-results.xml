@@ -1,0 +1,132 @@
+<testsuites id="" name="" tests="29" failures="0" skipped="29" errors="0" time="0.20532399999999995">
+<testsuite name="auth.spec.ts" timestamp="2026-01-18T09:46:16.889Z" hostname="chromium" tests="4" failures="0" skipped="4" time="0" errors="0">
+<testcase name="認証フロー › ログインページが表示される" classname="auth.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="認証フロー › 未認証でダッシュボードにアクセスするとログインにリダイレクト" classname="auth.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="認証フロー › cTrader OAuth認証フロー（統合テスト用）" classname="auth.spec.ts" time="0">
+<properties>
+<property name="skip" value="">
+</property>
+</properties>
+<skipped>
+</skipped>
+</testcase>
+<testcase name="認証フロー › ログアウト機能（統合テスト用）" classname="auth.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="dashboard.spec.ts" timestamp="2026-01-18T09:46:16.889Z" hostname="chromium" tests="5" failures="0" skipped="5" time="0" errors="0">
+<testcase name="ダッシュボード › ダッシュボードページが表示される" classname="dashboard.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="ダッシュボード › 主要セクションが表示される" classname="dashboard.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="ダッシュボード › チャートCanvasが表示される" classname="dashboard.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="ダッシュボード › リアルタイムデータ更新（UI要素の存在確認）" classname="dashboard.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="ダッシュボード › ナビゲーションメニューが機能する" classname="dashboard.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="market-data.spec.ts" timestamp="2026-01-18T09:46:16.889Z" hostname="chromium" tests="6" failures="0" skipped="6" time="0" errors="0">
+<testcase name="市場データ一致判定 › 市場データページが表示される" classname="market-data.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="市場データ一致判定 › リアルタイム価格表示の確認" classname="market-data.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="市場データ一致判定 › チャート上の市場データ表示" classname="market-data.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="市場データ一致判定 › 一致判定結果の表示確認" classname="market-data.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="市場データ一致判定 › 類似度スコアの表示確認" classname="market-data.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="市場データ一致判定 › 市場データAPIの接続状態確認" classname="market-data.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="notifications.spec.ts" timestamp="2026-01-18T09:46:16.889Z" hostname="chromium" tests="7" failures="0" skipped="7" time="0" errors="0">
+<testcase name="通知機能 › 通知ページが表示される" classname="notifications.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="通知機能 › 通知履歴の表示確認" classname="notifications.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="通知機能 › 通知設定ページへのアクセス" classname="notifications.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="通知機能 › 通知許可リクエストボタンの存在確認" classname="notifications.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="通知機能 › 通知アイコンの表示確認" classname="notifications.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="通知機能 › 未読通知バッジの表示確認" classname="notifications.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="通知機能 › 通知履歴のフィルタリング機能" classname="notifications.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+<testsuite name="trade-notes.spec.ts" timestamp="2026-01-18T09:46:16.889Z" hostname="chromium" tests="7" failures="0" skipped="7" time="0" errors="0">
+<testcase name="トレードノート機能 › ノート一覧ページが表示される" classname="trade-notes.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="トレードノート機能 › 新規トレードノート作成フローにアクセス" classname="trade-notes.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="トレードノート機能 › トレードノートフォーム要素の確認" classname="trade-notes.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="トレードノート機能 › ノート一覧の表示確認" classname="trade-notes.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="トレードノート機能 › ノート編集ボタンの存在確認" classname="trade-notes.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="トレードノート機能 › ノート削除ボタンの存在確認" classname="trade-notes.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+<testcase name="トレードノート機能 › フィルタリング機能の存在確認" classname="trade-notes.spec.ts" time="0">
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+</testsuites>

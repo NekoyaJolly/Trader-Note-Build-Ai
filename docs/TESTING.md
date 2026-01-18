@@ -77,7 +77,15 @@ HEADLESS=false npm run test:e2e
 
 # 特定のブラウザで実行
 npx playwright test --project=chromium
+
+# サーバーが既に起動している場合（webServer自動起動をスキップ）
+SKIP_WEBSERVER=1 npm run test:e2e
 ```
+
+**注意**: 
+- デフォルトでは、Playwrightが自動的に開発サーバーを起動します
+- サーバーを手動で起動している場合は `SKIP_WEBSERVER=1` を使用してください
+- CI環境では必要な環境変数が自動的に設定されます
 
 ### 3. AI駆動テスト
 
@@ -227,6 +235,24 @@ ls playwright-report/screenshots/
 # 環境変数確認
 echo $OPENAI_API_KEY
 echo $ANTHROPIC_API_KEY
+```
+
+#### Q: webServerが起動しない / タイムアウトする
+
+Playwrightは自動的に開発サーバーを起動しようとしますが、環境変数が不足している場合や依存関係が不足している場合に失敗します。
+
+```bash
+# 解決策1: 必要な環境変数を設定
+cp .env.example .env
+# .env を編集して DATABASE_URL, JWT_SECRET などを設定
+
+# 解決策2: サーバーを手動で起動してからテスト実行
+npm run dev  # 別ターミナルで実行
+SKIP_WEBSERVER=1 npm run test:e2e  # テスト実行
+
+# 解決策3: データベースをセットアップ
+npm run prisma:generate
+npm run prisma:migrate
 ```
 
 #### Q: データベース接続エラー

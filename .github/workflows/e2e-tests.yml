@@ -63,7 +63,12 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tradeassist_test
           BACKEND_PORT: 3100
+          PORT: 3100
           NODE_ENV: test
+          JWT_SECRET: test-jwt-secret-for-e2e-testing-only
+          JWT_REFRESH_SECRET: test-refresh-secret-for-e2e-testing-only
+          CRON_ENABLED: false
+          SIDE_B_SCHEDULER_ENABLED: false
         run: npm run test:e2e
 
       - name: Playwright レポートをアップロード

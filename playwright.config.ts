@@ -30,10 +30,13 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:3102',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120000,
-  },
+  // webServerはCI環境またはSKIP_WEBSERVERが設定されていない場合のみ起動
+  ...(process.env.SKIP_WEBSERVER ? {} : {
+    webServer: {
+      command: 'npm run dev',
+      url: 'http://localhost:3102',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120000,
+    },
+  }),
 });
