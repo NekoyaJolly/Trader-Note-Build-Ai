@@ -27,7 +27,7 @@ TradeAssistアプリケーションに、Playwright + AI（GPT-4/Claude）を組
   },
   "devDependencies": {
     "@playwright/test": "^1.40.0",
-    "openai": "^4.20.0",
+    "openai": "^6.16.0",
     "@anthropic-ai/sdk": "^0.9.0",
     "tsx": "^4.7.0"
   }
