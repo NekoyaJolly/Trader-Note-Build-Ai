@@ -209,8 +209,15 @@ npm run dev:frontend
 
 | コマンド | 説明 |
 |----------|------|
-| `npm test` | 全テスト実行 |
+| `npm test` | 全ユニットテスト実行 (Jest) |
 | `npm test -- --coverage` | カバレッジ付きテスト |
+| `npm run test:e2e` | E2Eテスト実行 (Playwright) |
+| `npm run test:e2e:ui` | PlaywrightのUIモード |
+| `npm run test:e2e:debug` | Playwrightデバッグモード |
+| `npm run test:e2e:report` | テストレポート表示 |
+| `npm run test:ai` | AI駆動テスト実行 |
+
+**詳細**: [docs/TESTING.md](docs/TESTING.md) を参照
 
 ---
 
@@ -269,6 +276,7 @@ npm run dev:frontend
 ├── docs/
 │   ├── ARCHITECTURE.md    # アーキテクチャ詳細仕様
 │   ├── API.md             # API仕様
+│   ├── TESTING.md         # テスト戦略とE2Eテスト
 │   ├── side-b/            # Side-B 設計ドキュメント
 │   │   ├── TradeAssistant-AI.md
 │   │   ├── phase-a-trade-plan.md
@@ -276,6 +284,18 @@ npm run dev:frontend
 │   │   ├── phase-c-ai-trade-note.md
 │   │   └── phase-d-integration.md
 │   └── phase{N}/          # 各フェーズの設計資料
+├── tests/
+│   ├── e2e/               # Playwright E2Eテスト
+│   │   ├── auth.spec.ts
+│   │   ├── dashboard.spec.ts
+│   │   ├── trade-notes.spec.ts
+│   │   ├── market-data.spec.ts
+│   │   └── notifications.spec.ts
+│   ├── ai-orchestrator/   # AI駆動テスト
+│   │   ├── ai-test-runner.ts
+│   │   └── claude-computer-use.ts
+│   └── fixtures/          # テストデータ
+│       └── test-data.ts
 ├── indicators/            # インジケーター概念定義
 ├── scripts/               # 運用スクリプト
 │   ├── run-daily-batch.ts      # Side-B 日次バッチ
@@ -296,6 +316,7 @@ npm run dev:frontend
 - [NOTE.md](NOTE.md) - ノート定義の仕様
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - アーキテクチャ詳細
 - [docs/API.md](docs/API.md) - API仕様
+- [docs/TESTING.md](docs/TESTING.md) - テスト戦略とE2Eテスト
 
 Side-B関連:
 - [docs/side-b/TradeAssistant-AI.md](docs/side-b/TradeAssistant-AI.md)
