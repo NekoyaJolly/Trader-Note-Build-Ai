@@ -322,7 +322,8 @@ export class TradeNormalizationService {
     if (jpMatch) {
       const [, year, month, day, hour = '0', minute = '0', second = '0'] = jpMatch;
       // JST (UTC+9) として解釈し UTC に変換
-      const jstDate = new Date(
+      // Date.UTC を使ってUTC時刻を作成し、9時間を足してJSTとして扱う
+      const utcTime = Date.UTC(
         parseInt(year),
         parseInt(month) - 1,
         parseInt(day),
@@ -330,8 +331,8 @@ export class TradeNormalizationService {
         parseInt(minute),
         parseInt(second)
       );
-      // JST → UTC（-9時間）
-      return new Date(jstDate.getTime() - 9 * 60 * 60 * 1000);
+      // JSTからUTCへの変換: JST時刻 - 9時間 = UTC時刻
+      return new Date(utcTime - 9 * 60 * 60 * 1000);
     }
 
     throw new Error(`Unable to parse timestamp: ${timestamp}`);
