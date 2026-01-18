@@ -101,10 +101,21 @@ ${testInstructions}
       console.log(`\n${result.success ? '✅' : '❌'} テスト${result.success ? '成功' : '失敗'}`);
       console.log(`最終状態: ${result.finalState}`);
 
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('❌ エラー:', error);
       result.success = false;
-      result.finalState = `エラー: ${error}`;
+      if (error instanceof Error) {
+        const stackInfo = error.stack ? `\nスタックトレース:\n${error.stack}` : '';
+        result.finalState = `エラー (${error.name}): ${error.message}${stackInfo}`;
+      } else {
+        let serialized = '';
+        try {
+          serialized = JSON.stringify(error);
+        } catch {
+          serialized = String(error);
+        }
+        result.finalState = `エラー (不明な型): ${serialized}`;
+      }
     }
 
     return result;
