@@ -29,3 +29,10 @@ Thumbs.db
 *.swo
 .vercel
 .env*.local
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+test-videos/
+tests/ai-orchestrator/test-scenarios.json

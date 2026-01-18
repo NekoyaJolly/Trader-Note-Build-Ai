@@ -1,0 +1,185 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # 毎日午前3時（JST）に実行
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+    inputs:
+      run_ai_tests:
+        description: 'Run AI-driven tests'
+        required: false
+        default: 'false'
+
+jobs:
+  playwright-tests:
+    name: Playwright E2E Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tradeassist_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Node.js セットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 依存関係をインストール
+        run: |
+          npm ci
+          cd src/frontend && npm ci && cd ../..
+
+      - name: Playwright をインストール
+        run: npx playwright install --with-deps chromium
+
+      - name: データベースセットアップ
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tradeassist_test
+        run: |
+          npm run prisma:generate
+          npm run prisma:migrate
+
+      - name: E2E テスト実行
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tradeassist_test
+          BACKEND_PORT: 3100
+          NODE_ENV: test
+        run: npm run test:e2e
+
+      - name: Playwright レポートをアップロード
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
+
+      - name: テスト動画をアップロード
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-videos
+          path: test-videos/
+          retention-days: 7
+
+      - name: テスト結果をアップロード
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            test-results.json
+            test-results.xml
+          retention-days: 30
+
+  ai-tests:
+    name: AI-Driven Tests
+    runs-on: ubuntu-latest
+    # スケジュール実行または手動実行時のみAIテストを実行
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_ai_tests == 'true')
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tradeassist_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Node.js セットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 依存関係をインストール
+        run: |
+          npm ci
+          cd src/frontend && npm ci && cd ../..
+
+      - name: Playwright をインストール
+        run: npx playwright install --with-deps chromium
+
+      - name: データベースセットアップ
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tradeassist_test
+        run: |
+          npm run prisma:generate
+          npm run prisma:migrate
+
+      - name: AI駆動テスト実行
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tradeassist_test
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BACKEND_PORT: 3100
+          NODE_ENV: test
+        run: npm run test:ai
+
+      - name: AIテストレポートをアップロード
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-test-report
+          path: playwright-report/ai-test-report.json
+          retention-days: 90
+
+      - name: テストシナリオをアップロード
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-scenarios
+          path: tests/ai-orchestrator/test-scenarios.json
+          retention-days: 90
+
+  notify-results:
+    name: テスト結果通知
+    runs-on: ubuntu-latest
+    needs: [playwright-tests]
+    if: always()
+    
+    steps:
+      - name: テスト結果サマリー
+        run: |
+          echo "## E2Eテスト実行結果 📊" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- ブランチ: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- コミット: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 実行者: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.playwright-tests.result }}" == "success" ]; then
+            echo "✅ Playwright E2Eテスト: 成功" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Playwright E2Eテスト: 失敗" >> $GITHUB_STEP_SUMMARY
+          fi
