@@ -29,3 +29,11 @@ Thumbs.db
 *.swo
 .vercel
 .env*.local
+
+# Playwright test artifacts
+test-results/
+playwright-report/
+test-videos/
+test-results.json
+test-results.xml
+.playwright-mcp/

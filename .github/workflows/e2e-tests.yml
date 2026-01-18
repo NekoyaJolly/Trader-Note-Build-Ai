@@ -1,0 +1,123 @@
+name: E2E Tests
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  e2e-tests:
+    name: Playwright E2E Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      # PostgreSQL テスト用
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tradeassist_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Node.js セットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 依存関係をインストール
+        run: |
+          npm ci
+          cd src/frontend && npm ci && cd ../..
+
+      - name: Playwright をインストール
+        run: npx playwright install --with-deps chromium
+
+      - name: データベースセットアップ
+        run: |
+          npm run prisma:generate
+          npm run prisma:migrate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tradeassist_test
+
+      - name: E2E テスト実行
+        run: npm run test:e2e
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tradeassist_test
+          BACKEND_PORT: 3100
+          PORT: 3100
+          NODE_ENV: test
+          JWT_SECRET: test-jwt-secret-for-e2e-testing-only
+          JWT_REFRESH_SECRET: test-refresh-secret-for-e2e-testing-only
+          CRON_ENABLED: false
+          SIDE_B_SCHEDULER_ENABLED: false
+
+      - name: Playwright レポートをアップロード
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
+
+      - name: テスト動画をアップロード
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-videos
+          path: test-videos/
+          retention-days: 7
+
+      - name: テスト結果をアップロード
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            test-results.json
+            test-results.xml
+          retention-days: 30
+
+  # AI駆動テスト（将来実装予定）
+  ai-driven-tests:
+    name: AI-Driven Tests
+    runs-on: ubuntu-latest
+    if: false  # 現時点では無効化
+    steps:
+      - name: プレースホルダー
+        run: echo "AI-driven tests will be implemented in the future"
+
+  # テスト結果通知
+  test-results-notification:
+    name: テスト結果通知
+    runs-on: ubuntu-latest
+    needs: [e2e-tests]
+    if: always()
+    steps:
+      - name: テスト結果サマリー
+        run: |
+          echo "================================"
+          echo "E2E テスト結果"
+          echo "================================"
+          echo "Playwright E2E: ${{ needs.e2e-tests.result }}"
+          echo ""
+          if [ "${{ needs.e2e-tests.result }}" == "success" ]; then
+            echo "✅ すべてのE2Eテストが合格しました"
+          else
+            echo "❌ E2Eテストに失敗がありました"
+            echo "詳細はアーティファクトを確認してください"
+          fi
