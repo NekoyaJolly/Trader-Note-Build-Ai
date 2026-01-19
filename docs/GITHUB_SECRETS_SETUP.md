@@ -68,6 +68,88 @@ gh secret list
 
 ---
 
+## ⚠️ シークレット未設定時の動作
+
+### GitHub Actions でシークレットが設定されていない場合
+
+シークレットが未設定の場合、以下のような問題が発生します：
+
+#### 1. **必須シークレット（テスト実行に必須）**
+
+以下のシークレットが未設定の場合、**テストは失敗します**：
+
+| シークレット | 未設定時の影響 |
+|-------------|---------------|
+| `TEST_DB_USER` | DATABASE_URL が不正な形式になり、Prisma セットアップが失敗 |
+| `TEST_DB_PASSWORD` | DATABASE_URL が不正な形式になり、Prisma セットアップが失敗 |
+| `TEST_DB_NAME` | DATABASE_URL が不正な形式になり、Prisma セットアップが失敗 |
+| `JWT_SECRET` | 認証機能のテストが失敗（JWT トークン生成・検証エラー） |
+| `JWT_REFRESH_SECRET` | リフレッシュトークン関連のテストが失敗 |
+
+**エラー例**:
+```
+Error: Invalid `prisma.user.findMany()` invocation:
+  Invalid connection string
+```
+
+#### 2. **オプションシークレット（一部機能のみ影響）**
+
+以下のシークレットが未設定の場合、**該当機能を使用するテストのみ失敗します**：
+
+| シークレット | 未設定時の影響 |
+|-------------|---------------|
+| `AI_API_KEY` | AI 関連機能（トレードノート生成等）のテストがスキップまたは失敗 |
+| `MARKET_API_KEY` | 市場データ取得のテストがスキップまたは失敗 |
+| `TWELVE_DATA_API_KEY` | Twelve Data API 使用のテストがスキップまたは失敗 |
+| `VAPID_PUBLIC_KEY` | Web Push 通知機能のテストがスキップまたは失敗 |
+| `VAPID_PRIVATE_KEY` | Web Push 通知機能のテストがスキップまたは失敗 |
+| `VAPID_SUBJECT` | Web Push 通知機能のテストがスキップまたは失敗 |
+| `CTRADER_CLIENT_ID` | cTrader 連携機能のテストがスキップまたは失敗 |
+| `CTRADER_CLIENT_SECRET` | cTrader 連携機能のテストがスキップまたは失敗 |
+
+**エラー例**:
+```
+Error: AI_API_KEY is not defined
+Error: Cannot connect to market data API
+```
+
+#### 3. **GitHub Actions での確認方法**
+
+シークレットが未設定の場合、GitHub Actions のログに以下のような表示が出ます：
+
+```bash
+# シークレットが未設定の場合（空文字列として展開される）
+DATABASE_URL: postgresql://://localhost:5432/
+                         ↑↑ ユーザー名とパスワードが空
+```
+
+### 推奨される対応
+
+1. **まず自動設定スクリプトを実行**
+   ```bash
+   ./scripts/setup-github-secrets.sh
+   ```
+   これで必須シークレット（DB、JWT、VAPID）が自動設定されます。
+
+2. **API キーは段階的に設定**
+   - 最初は必須シークレットのみでテスト実行
+   - AI 機能を使う場合は `AI_API_KEY` を追加
+   - 市場データ機能を使う場合は `MARKET_API_KEY` を追加
+   - cTrader 連携を使う場合は `CTRADER_*` を追加
+
+3. **テスト実行前に確認**
+   ```bash
+   gh secret list
+   ```
+   最低限、以下が設定されているか確認：
+   - ✅ TEST_DB_USER
+   - ✅ TEST_DB_PASSWORD
+   - ✅ TEST_DB_NAME
+   - ✅ JWT_SECRET
+   - ✅ JWT_REFRESH_SECRET
+
+---
+
 ## 🛠️ 手動設定（GUIを使用）
 
 スクリプトを使用しない場合は、以下の手順でGUIから設定できます：

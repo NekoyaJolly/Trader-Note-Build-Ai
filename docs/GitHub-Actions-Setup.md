@@ -147,6 +147,10 @@ CI/CD テストに必要なシークレット（データベース認証情報�
 ./scripts/setup-github-secrets.sh
 ```
 
+**⚠️ 重要**: シークレットが未設定の場合、CI/CD テストは失敗します。
+- **必須シークレット**: TEST_DB_*, JWT_* （自動設定スクリプトで設定可能）
+- **オプションシークレット**: AI_API_KEY, MARKET_API_KEY 等（手動設定が必要）
+
 **手動設定（本番デプロイ用）**:
 `Settings` → `Secrets and variables` → `Actions` で以下を追加：
 
