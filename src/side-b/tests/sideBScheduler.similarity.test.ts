@@ -320,7 +320,8 @@ describe('SideBScheduler 類似度チェック統合', () => {
 
   describe('データ取得失敗時', () => {
     it('そのシンボルの類似度チェックをスキップする', async () => {
-      mockMarketDataService.getRecentMinuteOHLCV.mockResolvedValue(null);
+      // 型エラー修正: nullではなく空配列を返すようにモック
+      mockMarketDataService.getRecentMinuteOHLCV.mockResolvedValue([]);
 
       const result = await (scheduler as any).executeMonitorJob();
 

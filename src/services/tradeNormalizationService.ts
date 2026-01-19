@@ -317,12 +317,14 @@ export class TradeNormalizationService {
     }
 
     // 日本語形式（例: 2024/01/15 10:30:00）
+    // JST (UTC+9) として解釈し UTC に変換
     const jpPattern = /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})[\s]?(\d{1,2})?:?(\d{1,2})?:?(\d{1,2})?$/;
     const jpMatch = trimmed.match(jpPattern);
     if (jpMatch) {
       const [, year, month, day, hour = '0', minute = '0', second = '0'] = jpMatch;
-      // JST (UTC+9) として解釈し UTC に変換
-      const jstDate = new Date(
+      // Date.UTC を使用して UTC タイムスタンプを生成し、そこから JST オフセット（9時間）を引く
+      // 例: 2024/01/15 19:30:00 JST は UTC で 2024-01-15T10:30:00Z
+      const utcTimestamp = Date.UTC(
         parseInt(year),
         parseInt(month) - 1,
         parseInt(day),
@@ -330,8 +332,8 @@ export class TradeNormalizationService {
         parseInt(minute),
         parseInt(second)
       );
-      // JST → UTC（-9時間）
-      return new Date(jstDate.getTime() - 9 * 60 * 60 * 1000);
+      // JST (UTC+9) なので -9時間して UTC に変換
+      return new Date(utcTimestamp - 9 * 60 * 60 * 1000);
     }
 
     throw new Error(`Unable to parse timestamp: ${timestamp}`);
