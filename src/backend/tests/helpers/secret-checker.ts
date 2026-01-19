@@ -8,9 +8,21 @@
  */
 
 /**
- * 必須シークレットの存在チェック
+ * シークレット存在チェックの戻り値型
  */
-export const checkRequiredSecrets = () => {
+export type SecretCheckResult = {
+  hasAiApiKey: boolean;
+  hasMarketApiKey: boolean;
+  hasCtraderClientId: boolean;
+  hasCtraderClientSecret: boolean;
+};
+
+/**
+ * 必須シークレットの存在チェック
+ * 
+ * @returns シークレットの存在状態を示すオブジェクト
+ */
+export const checkRequiredSecrets = (): SecretCheckResult => {
   return {
     hasAiApiKey: !!process.env.AI_API_KEY,
     hasMarketApiKey: !!process.env.MARKET_API_KEY,
@@ -21,8 +33,11 @@ export const checkRequiredSecrets = () => {
 
 /**
  * cTraderの両方のシークレットが揃っているかチェック
+ * 
+ * @returns true: CTRADER_CLIENT_ID と CTRADER_CLIENT_SECRET が両方設定されている場合
+ *          false: 上記のいずれか、または両方が未設定の場合
  */
-export const hasCtraderCredentials = () => {
+export const hasCtraderCredentials = (): boolean => {
   const secrets = checkRequiredSecrets();
   return secrets.hasCtraderClientId && secrets.hasCtraderClientSecret;
 };
@@ -34,7 +49,7 @@ export const hasCtraderCredentials = () => {
  * @returns true: 最小限モード（料金発生APIは基本テストのみ）
  *          false: フルテストモード（全テスト実行）
  */
-export const isMinimalTestMode = () => {
+export const isMinimalTestMode = (): boolean => {
   // CI環境で、かつPRやpush時は最小限モード
   // 環境変数 RUN_FULL_PAID_API_TESTS=true の場合のみフルテスト
   return process.env.CI === 'true' && 

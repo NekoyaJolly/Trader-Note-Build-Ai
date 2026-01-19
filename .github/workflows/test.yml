@@ -16,6 +16,11 @@ on:
           - 'false'
           - 'true'
 
+# 共通環境変数を定義
+env:
+  NODE_ENV: test
+  CI: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -58,8 +63,6 @@ jobs:
       - name: Run tests (Minimal mode for paid APIs)
         if: github.event_name != 'workflow_dispatch' || github.event.inputs.run_full_tests != 'true'
         env:
-          NODE_ENV: test
-          CI: true
           DATABASE_URL: postgresql://${{ secrets.TEST_DB_USER || 'postgres' }}:${{ secrets.TEST_DB_PASSWORD || 'postgres' }}@localhost:5432/${{ secrets.TEST_DB_NAME || 'trader_note_test' }}
           TEST_DB_NAME: ${{ secrets.TEST_DB_NAME || 'trader_note_test' }}
           TEST_DB_USER: ${{ secrets.TEST_DB_USER || 'postgres' }}
@@ -70,19 +73,18 @@ jobs:
           VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
-          AI_API_KEY: ${{ secrets.AI_API_KEY || '' }}
-          MARKET_API_KEY: ${{ secrets.MARKET_API_KEY || '' }}
-          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY || '' }}
-          CTRADER_CLIENT_ID: ${{ secrets.CTRADER_CLIENT_ID || '' }}
-          CTRADER_CLIENT_SECRET: ${{ secrets.CTRADER_CLIENT_SECRET || '' }}
+          # 料金発生APIキー: 未設定の場合は環境変数自体を設定しない（空文字列を避ける）
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          MARKET_API_KEY: ${{ secrets.MARKET_API_KEY }}
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+          CTRADER_CLIENT_ID: ${{ secrets.CTRADER_CLIENT_ID }}
+          CTRADER_CLIENT_SECRET: ${{ secrets.CTRADER_CLIENT_SECRET }}
           RUN_FULL_PAID_API_TESTS: 'false'
         run: npm test -- --passWithNoTests
       
       - name: Run FULL tests (paid APIs included)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_full_tests == 'true'
         env:
-          NODE_ENV: test
-          CI: true
           DATABASE_URL: postgresql://${{ secrets.TEST_DB_USER || 'postgres' }}:${{ secrets.TEST_DB_PASSWORD || 'postgres' }}@localhost:5432/${{ secrets.TEST_DB_NAME || 'trader_note_test' }}
           TEST_DB_NAME: ${{ secrets.TEST_DB_NAME || 'trader_note_test' }}
           TEST_DB_USER: ${{ secrets.TEST_DB_USER || 'postgres' }}
@@ -93,6 +95,7 @@ jobs:
           VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+          # 料金発生APIキー: フルモードでは全て設定
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           MARKET_API_KEY: ${{ secrets.MARKET_API_KEY }}
           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
@@ -115,6 +118,7 @@ jobs:
           
           echo ""
           
+          # GitHub Actions のシークレットは未設定時は空文字列として評価される
           if [ -n "${{ secrets.AI_API_KEY }}" ]; then
             if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.run_full_tests }}" = "true" ]; then
               echo "✅ AI_API_KEY configured - Full tests executed (multiple API calls)"
