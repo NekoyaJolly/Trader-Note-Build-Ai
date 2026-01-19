@@ -138,6 +138,16 @@
 
 ### ステップ 1: GitHub Secrets 設定
 
+**📝 テスト用シークレットの自動設定**: 
+CI/CD テストに必要なシークレット（データベース認証情報、JWT、VAPID など）は、専用のスクリプトで自動設定できます。
+詳細は **[docs/GITHUB_SECRETS_SETUP.md](GITHUB_SECRETS_SETUP.md)** を参照してください。
+
+```bash
+# リポジトリのルートで実行
+./scripts/setup-github-secrets.sh
+```
+
+**手動設定（本番デプロイ用）**:
 `Settings` → `Secrets and variables` → `Actions` で以下を追加：
 
 #### Railway 用
@@ -338,5 +348,7 @@ GitHub Apps → Slack で設定可能：
 - [README.md](../README.md) - プロジェクト概要
 - [AGENTS.md](../AGENTS.md) - AI エージェント指示書
 - [docs/API.md](../docs/API.md) - API ドキュメント
+- [docs/GITHUB_SECRETS_SETUP.md](GITHUB_SECRETS_SETUP.md) - GitHub Secrets 自動設定ガイド
 - [scripts/local-e2e-test.sh](../scripts/local-e2e-test.sh) - ローカル E2E テスト
 - [scripts/production-e2e-test.sh](../scripts/production-e2e-test.sh) - 本番 E2E テスト
+- [scripts/setup-github-secrets.sh](../scripts/setup-github-secrets.sh) - GitHub Secrets 設定スクリプト
