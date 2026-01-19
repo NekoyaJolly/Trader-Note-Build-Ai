@@ -2,9 +2,13 @@
  * MarketIngestService のテスト
  * 対象: 15m/60m の丸め処理と upsert 冪等性
  * ルール: コメントは日本語、DB スナップショットの状態を直接確認
+ * 
+ * 注意: このテストは市場データAPIを使用するため、
+ * MARKET_API_KEY が未設定の場合はスキップされます
  */
 import { MarketIngestService } from '../../backend/services/ingest/marketIngestService';
 import { MarketSnapshotRepository } from '../../backend/repositories/marketSnapshotRepository';
+import { checkRequiredSecrets, isMinimalTestMode } from './helpers/secret-checker';
 
 // 分単位の丸めチェックを行うヘルパー
 function isValidBucket(date: Date, timeframe: '15m' | '60m'): boolean {
@@ -17,11 +21,18 @@ function isValidBucket(date: Date, timeframe: '15m' | '60m'): boolean {
   return minutes % 15 === 0 && seconds === 0 && ms === 0;
 }
 
-describe('MarketIngestService', () => {
+const secrets = checkRequiredSecrets();
+const minimalMode = isMinimalTestMode();
+
+// MARKET_API_KEY が設定されている場合のみテストを実行
+const describeOrSkip = secrets.hasMarketApiKey ? describe : describe.skip;
+
+describeOrSkip('MarketIngestService', () => {
   const service = new MarketIngestService();
   const repo = new MarketSnapshotRepository();
   const symbol = 'BTCUSDT';
 
+  // 最小限モードでは基本的なテストのみ実行
   test('15m/60m の丸めが正しく保存される', async () => {
     // 1回の ingest で 15m と 60m が保存される
     await service.ingestSymbol(symbol);
@@ -37,7 +48,10 @@ describe('MarketIngestService', () => {
     expect(isValidBucket(latest60!.fetchedAt, '60m')).toBe(true);
   });
 
-  test('upsert の冪等性: 同一バケットで重複挿入されない', async () => {
+  // 拡張テスト: フルテストモードのみ実行（追加のAPI呼び出し）
+  const testOrSkip = minimalMode ? test.skip : test;
+  
+  testOrSkip('upsert の冪等性: 同一バケットで重複挿入されない', async () => {
     // 同一時間足内に 2 回呼び出しても件数が増えない（15m/60m 各1件のまま）
     await service.ingestSymbol(symbol);
     await service.ingestSymbol(symbol);
