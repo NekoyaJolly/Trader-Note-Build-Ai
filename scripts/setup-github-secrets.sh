@@ -39,6 +39,8 @@ echo ""
 
 echo "📦 テスト用データベースシークレットを設定中..."
 
+# 注意: これらの認証情報は、GitHub Actions の一時的な CI 環境専用です。
+# 本番環境や永続的な環境では使用しないでください。
 gh secret set TEST_DB_USER --body "postgres"
 echo "  ✓ TEST_DB_USER"
 
@@ -84,13 +86,27 @@ if command -v npx &> /dev/null; then
             gh secret set VAPID_PRIVATE_KEY --body "$VAPID_PRIVATE"
             echo "  ✓ VAPID_PRIVATE_KEY (自動生成)"
         else
-            echo "  ⚠️  VAPID キー生成失敗（手動設定が必要）"
+            echo "  ❌ VAPID キー生成に失敗しました。"
+            echo "     web-push のインストールやネットワーク設定を確認し、再度スクリプトを実行するか、"
+            echo "     手動で VAPID_PUBLIC_KEY と VAPID_PRIVATE_KEY を生成して、以下のように設定してください:"
+            echo "       gh secret set VAPID_PUBLIC_KEY --body \"YOUR-VAPID-PUBLIC-KEY\""
+            echo "       gh secret set VAPID_PRIVATE_KEY --body \"YOUR-VAPID-PRIVATE-KEY\""
+            exit 1
         fi
     else
-        echo "  ⚠️  VAPID キー生成失敗（手動設定が必要）"
+        echo "  ❌ VAPID キー生成に失敗しました。"
+        echo "     web-push のインストールやネットワーク設定を確認し、再度スクリプトを実行するか、"
+        echo "     手動で VAPID_PUBLIC_KEY と VAPID_PRIVATE_KEY を生成して、以下のように設定してください:"
+        echo "       gh secret set VAPID_PUBLIC_KEY --body \"YOUR-VAPID-PUBLIC-KEY\""
+        echo "       gh secret set VAPID_PRIVATE_KEY --body \"YOUR-VAPID-PRIVATE-KEY\""
+        exit 1
     fi
 else
-    echo "  ⚠️  npx が見つかりません（VAPID キーは手動設定が必要）"
+    echo "  ❌ npx が見つかりません。Node.js と npm をインストールし、npx コマンドを使用可能にしてください。"
+    echo "     その後、web-push を用いて VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY を生成し、次のように設定してください:"
+    echo "       gh secret set VAPID_PUBLIC_KEY --body \"YOUR-VAPID-PUBLIC-KEY\""
+    echo "       gh secret set VAPID_PRIVATE_KEY --body \"YOUR-VAPID-PRIVATE-KEY\""
+    exit 1
 fi
 
 echo ""
