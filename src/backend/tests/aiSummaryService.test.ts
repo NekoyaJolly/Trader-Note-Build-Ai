@@ -7,6 +7,9 @@
  * - API キーは環境で設定される（開発環境では常に存在）
  * - API 呼び出しはテストすべきではない（外部依存、不安定）
  * - フォールバック要約の生成ロジックが重要
+ * 
+ * 注意: このテストはAI APIを実際に呼び出さず、フォールバック機能のみをテストします。
+ * AI_API_KEY が未設定でもテストは実行されます（スキップされません）。
  */
 
 import { AISummaryService, TradeDataForSummary } from '../../services/aiSummaryService';

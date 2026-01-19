@@ -15,6 +15,7 @@ const config: Config = {
     '**/side-b/tests/**/*.test.ts',  // Side-B テスト追加
   ],
   setupFiles: ['<rootDir>/jest.setup.ts'],
+  globalSetup: '<rootDir>/src/backend/tests/setup/global-setup.ts',
   moduleFileExtensions: ['ts', 'js', 'json'],
   verbose: true,
   testTimeout: 30000, // 30秒（デフォルト5秒から延長）

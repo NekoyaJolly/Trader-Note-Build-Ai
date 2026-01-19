@@ -1,0 +1,146 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:  # 手動トリガーを有効化
+    inputs:
+      run_full_tests:
+        description: 'Run full paid API tests (costs money)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+# 共通環境変数を定義
+env:
+  NODE_ENV: test
+  CI: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: ${{ secrets.TEST_DB_NAME || 'trader_note_test' }}
+          POSTGRES_USER: ${{ secrets.TEST_DB_USER || 'postgres' }}
+          POSTGRES_PASSWORD: ${{ secrets.TEST_DB_PASSWORD || 'postgres' }}
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Setup test environment
+        env:
+          DATABASE_URL: postgresql://${{ secrets.TEST_DB_USER || 'postgres' }}:${{ secrets.TEST_DB_PASSWORD || 'postgres' }}@localhost:5432/${{ secrets.TEST_DB_NAME || 'trader_note_test' }}
+        run: |
+          echo "Setting up test environment..."
+          npx prisma generate || true
+          npx prisma migrate deploy || true
+      
+      - name: Run tests (Minimal mode for paid APIs)
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.run_full_tests != 'true'
+        env:
+          DATABASE_URL: postgresql://${{ secrets.TEST_DB_USER || 'postgres' }}:${{ secrets.TEST_DB_PASSWORD || 'postgres' }}@localhost:5432/${{ secrets.TEST_DB_NAME || 'trader_note_test' }}
+          TEST_DB_NAME: ${{ secrets.TEST_DB_NAME || 'trader_note_test' }}
+          TEST_DB_USER: ${{ secrets.TEST_DB_USER || 'postgres' }}
+          TEST_DB_PASSWORD: ${{ secrets.TEST_DB_PASSWORD || 'postgres' }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+          # 料金発生APIキー: 未設定の場合は環境変数自体を設定しない（空文字列を避ける）
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          MARKET_API_KEY: ${{ secrets.MARKET_API_KEY }}
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+          CTRADER_CLIENT_ID: ${{ secrets.CTRADER_CLIENT_ID }}
+          CTRADER_CLIENT_SECRET: ${{ secrets.CTRADER_CLIENT_SECRET }}
+          RUN_FULL_PAID_API_TESTS: 'false'
+        run: npm test -- --passWithNoTests
+      
+      - name: Run FULL tests (paid APIs included)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_full_tests == 'true'
+        env:
+          DATABASE_URL: postgresql://${{ secrets.TEST_DB_USER || 'postgres' }}:${{ secrets.TEST_DB_PASSWORD || 'postgres' }}@localhost:5432/${{ secrets.TEST_DB_NAME || 'trader_note_test' }}
+          TEST_DB_NAME: ${{ secrets.TEST_DB_NAME || 'trader_note_test' }}
+          TEST_DB_USER: ${{ secrets.TEST_DB_USER || 'postgres' }}
+          TEST_DB_PASSWORD: ${{ secrets.TEST_DB_PASSWORD || 'postgres' }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+          # 料金発生APIキー: フルモードでは全て設定
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          MARKET_API_KEY: ${{ secrets.MARKET_API_KEY }}
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+          CTRADER_CLIENT_ID: ${{ secrets.CTRADER_CLIENT_ID }}
+          CTRADER_CLIENT_SECRET: ${{ secrets.CTRADER_CLIENT_SECRET }}
+          RUN_FULL_PAID_API_TESTS: 'true'
+        run: npm test -- --passWithNoTests
+      
+      - name: Report test execution mode
+        if: always()
+        run: |
+          echo "📊 Test Execution Summary:"
+          echo ""
+          
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.run_full_tests }}" = "true" ]; then
+            echo "🚀 Test Mode: FULL (all paid API tests executed)"
+          else
+            echo "💰 Test Mode: Minimal (cost optimization - basic tests only)"
+          fi
+          
+          echo ""
+          
+          # GitHub Actions のシークレットは未設定時は空文字列として評価される
+          if [ -n "${{ secrets.AI_API_KEY }}" ]; then
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.run_full_tests }}" = "true" ]; then
+              echo "✅ AI_API_KEY configured - Full tests executed (multiple API calls)"
+            else
+              echo "✅ AI_API_KEY configured - Basic tests executed (minimal API calls)"
+            fi
+          else
+            echo "⚠️  AI_API_KEY not set - AI tests skipped"
+          fi
+          
+          if [ -n "${{ secrets.MARKET_API_KEY }}" ]; then
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.run_full_tests }}" = "true" ]; then
+              echo "✅ MARKET_API_KEY configured - Full tests executed (multiple API calls)"
+            else
+              echo "✅ MARKET_API_KEY configured - Basic tests executed (minimal API calls)"
+            fi
+          else
+            echo "⚠️  MARKET_API_KEY not set - Market Data tests skipped"
+          fi
+          
+          if [ -n "${{ secrets.CTRADER_CLIENT_ID }}" ] && [ -n "${{ secrets.CTRADER_CLIENT_SECRET }}" ]; then
+            echo "✅ cTrader credentials configured - Full tests executed (no cost limit)"
+          else
+            echo "⚠️  cTrader credentials not set - cTrader tests skipped"
+          fi
