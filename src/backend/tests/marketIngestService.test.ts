@@ -5,6 +5,10 @@
  */
 import { MarketIngestService } from '../../backend/services/ingest/marketIngestService';
 import { MarketSnapshotRepository } from '../../backend/repositories/marketSnapshotRepository';
+import { MarketDataService } from '../../services/marketDataService';
+
+// MarketDataService をモック
+jest.mock('../../services/marketDataService');
 
 // 分単位の丸めチェックを行うヘルパー
 function isValidBucket(date: Date, timeframe: '15m' | '60m'): boolean {
@@ -18,9 +22,42 @@ function isValidBucket(date: Date, timeframe: '15m' | '60m'): boolean {
 }
 
 describe('MarketIngestService', () => {
-  const service = new MarketIngestService();
   const repo = new MarketSnapshotRepository();
   const symbol = 'BTCUSDT';
+  let service: MarketIngestService;
+  let mockMarketDataService: jest.Mocked<MarketDataService>;
+
+  beforeEach(() => {
+    // モックされた MarketDataService インスタンスを作成
+    mockMarketDataService = new MarketDataService() as jest.Mocked<MarketDataService>;
+    
+    // getCurrentMarketData メソッドをモック
+    mockMarketDataService.getCurrentMarketData = jest.fn().mockImplementation((symbol: string, timeframe: string) => {
+      // モックデータを返す
+      const now = new Date();
+      return Promise.resolve({
+        symbol,
+        timestamp: now,
+        timeframe,
+        open: 100,
+        high: 105,
+        low: 95,
+        close: 102,
+        volume: 1000,
+        indicators: {},
+      });
+    });
+
+    // サービスインスタンスを作成
+    service = new MarketIngestService();
+    
+    // プライベートフィールドにモックを注入
+    (service as any).marketDataService = mockMarketDataService;
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
 
   test('15m/60m の丸めが正しく保存される', async () => {
     // 1回の ingest で 15m と 60m が保存される

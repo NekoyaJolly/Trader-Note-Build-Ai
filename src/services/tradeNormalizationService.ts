@@ -310,19 +310,15 @@ export class TradeNormalizationService {
     // 文字列の場合
     const trimmed = String(timestamp).trim();
     
-    // ISO 8601 形式
-    const isoDate = new Date(trimmed);
-    if (!isNaN(isoDate.getTime())) {
-      return isoDate;
-    }
-
-    // 日本語形式（例: 2024/01/15 10:30:00）
+    // 日本語形式（例: 2024/01/15 10:30:00）を先にチェック
+    // new Date() が幅広い形式を受け入れてしまうため、特定の形式を先に処理
     const jpPattern = /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})[\s]?(\d{1,2})?:?(\d{1,2})?:?(\d{1,2})?$/;
     const jpMatch = trimmed.match(jpPattern);
     if (jpMatch) {
       const [, year, month, day, hour = '0', minute = '0', second = '0'] = jpMatch;
       // JST (UTC+9) として解釈し UTC に変換
-      const jstDate = new Date(
+      // Date.UTC を使ってUTC時刻を作成し、9時間を足してJSTとして扱う
+      const utcTime = Date.UTC(
         parseInt(year),
         parseInt(month) - 1,
         parseInt(day),
@@ -330,8 +326,14 @@ export class TradeNormalizationService {
         parseInt(minute),
         parseInt(second)
       );
-      // JST → UTC（-9時間）
-      return new Date(jstDate.getTime() - 9 * 60 * 60 * 1000);
+      // JSTからUTCへの変換: JST時刻 - 9時間 = UTC時刻
+      return new Date(utcTime - 9 * 60 * 60 * 1000);
+    }
+    
+    // ISO 8601 形式
+    const isoDate = new Date(trimmed);
+    if (!isNaN(isoDate.getTime())) {
+      return isoDate;
     }
 
     throw new Error(`Unable to parse timestamp: ${timestamp}`);

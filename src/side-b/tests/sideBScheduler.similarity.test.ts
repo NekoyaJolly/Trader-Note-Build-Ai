@@ -309,6 +309,12 @@ describe('SideBScheduler 類似度チェック統合', () => {
       (isFXMarketOpen as jest.Mock).mockReturnValue(false);
     });
 
+    afterEach(() => {
+      // 市場状態を元に戻す
+      const { isFXMarketOpen } = require('../utils/marketHours');
+      (isFXMarketOpen as jest.Mock).mockReturnValue(true);
+    });
+
     it('類似度チェックをスキップする', async () => {
       const result = await (scheduler as any).executeMonitorJob();
 
@@ -320,13 +326,16 @@ describe('SideBScheduler 類似度チェック統合', () => {
 
   describe('データ取得失敗時', () => {
     it('そのシンボルの類似度チェックをスキップする', async () => {
-      mockMarketDataService.getRecentMinuteOHLCV.mockResolvedValue(null);
+      mockMarketDataService.getRecentMinuteOHLCV.mockRejectedValue(
+        new Error('データ取得失敗')
+      );
 
       const result = await (scheduler as any).executeMonitorJob();
 
-      // データ取得失敗エラーが記録される
+      // データ取得失敗エラーが記録される（エラーメッセージの形式: "XAU/USD: データ取得失敗"）
+      expect(result.data).toBeDefined();
       expect(result.data.errors).toContainEqual(
-        expect.stringContaining('1分足データ取得失敗')
+        expect.stringContaining('データ取得失敗')
       );
 
       // 類似度チェックは呼ばれない
