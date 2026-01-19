@@ -320,12 +320,17 @@ describe('SideBScheduler 類似度チェック統合', () => {
 
   describe('データ取得失敗時', () => {
     it('そのシンボルの類似度チェックをスキップする', async () => {
+      // 前のテストで市場が閉じている状態になっているため、市場を開く
+      const { isFXMarketOpen } = require('../utils/marketHours');
+      (isFXMarketOpen as jest.Mock).mockReturnValue(true);
+      
       // 型エラー修正: nullではなく空配列を返すようにモック
       mockMarketDataService.getRecentMinuteOHLCV.mockResolvedValue([]);
 
       const result = await (scheduler as any).executeMonitorJob();
 
       // データ取得失敗エラーが記録される
+      expect(result.data).toBeDefined();
       expect(result.data.errors).toContainEqual(
         expect.stringContaining('1分足データ取得失敗')
       );
