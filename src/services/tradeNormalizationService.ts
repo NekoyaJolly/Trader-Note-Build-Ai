@@ -310,13 +310,7 @@ export class TradeNormalizationService {
     // 文字列の場合
     const trimmed = String(timestamp).trim();
     
-    // ISO 8601 形式
-    const isoDate = new Date(trimmed);
-    if (!isNaN(isoDate.getTime())) {
-      return isoDate;
-    }
-
-    // 日本語形式（例: 2024/01/15 10:30:00）
+    // 日本語形式（例: 2024/01/15 10:30:00）を先にチェック
     // JST (UTC+9) として解釈し UTC に変換
     const jpPattern = /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})[\s]?(\d{1,2})?:?(\d{1,2})?:?(\d{1,2})?$/;
     const jpMatch = trimmed.match(jpPattern);
@@ -334,6 +328,12 @@ export class TradeNormalizationService {
       );
       // JST (UTC+9) なので -9時間して UTC に変換
       return new Date(utcTimestamp - 9 * 60 * 60 * 1000);
+    }
+
+    // ISO 8601 形式（日本語形式にマッチしなかった場合のみ）
+    const isoDate = new Date(trimmed);
+    if (!isNaN(isoDate.getTime())) {
+      return isoDate;
     }
 
     throw new Error(`Unable to parse timestamp: ${timestamp}`);
