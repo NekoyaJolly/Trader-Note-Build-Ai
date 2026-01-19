@@ -24,9 +24,9 @@ jobs:
       postgres:
         image: postgres:15
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: tradeassist_test
+          POSTGRES_USER: ${{ secrets.TEST_DB_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.TEST_DB_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.TEST_DB_NAME }}
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -55,19 +55,28 @@ jobs:
 
       - name: データベースセットアップ
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tradeassist_test
+          DATABASE_URL: postgresql://${{ secrets.TEST_DB_USER }}:${{ secrets.TEST_DB_PASSWORD }}@localhost:5432/${{ secrets.TEST_DB_NAME }}
         run: |
           npm run prisma:generate
           npx prisma migrate deploy
 
       - name: E2E テスト実行
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tradeassist_test
+          DATABASE_URL: postgresql://${{ secrets.TEST_DB_USER }}:${{ secrets.TEST_DB_PASSWORD }}@localhost:5432/${{ secrets.TEST_DB_NAME }}
           BACKEND_PORT: 3100
           PORT: 3100
           NODE_ENV: test
-          JWT_SECRET: test-jwt-secret-for-e2e-testing-only
-          JWT_REFRESH_SECRET: test-refresh-secret-for-e2e-testing-only
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_MODEL: gpt-4o-mini
+          MARKET_API_KEY: ${{ secrets.MARKET_API_KEY }}
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+          CTRADER_CLIENT_ID: ${{ secrets.CTRADER_CLIENT_ID }}
+          CTRADER_CLIENT_SECRET: ${{ secrets.CTRADER_CLIENT_SECRET }}
           CRON_ENABLED: false
           SIDE_B_SCHEDULER_ENABLED: false
         run: npm run test:e2e
@@ -108,9 +117,9 @@ jobs:
       postgres:
         image: postgres:15
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: tradeassist_test
+          POSTGRES_USER: ${{ secrets.TEST_DB_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.TEST_DB_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.TEST_DB_NAME }}
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -139,18 +148,20 @@ jobs:
 
       - name: データベースセットアップ
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tradeassist_test
+          DATABASE_URL: postgresql://${{ secrets.TEST_DB_USER }}:${{ secrets.TEST_DB_PASSWORD }}@localhost:5432/${{ secrets.TEST_DB_NAME }}
         run: |
           npm run prisma:generate
           npx prisma migrate deploy
 
       - name: AI駆動テスト実行
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tradeassist_test
+          DATABASE_URL: postgresql://${{ secrets.TEST_DB_USER }}:${{ secrets.TEST_DB_PASSWORD }}@localhost:5432/${{ secrets.TEST_DB_NAME }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           BACKEND_PORT: 3100
           NODE_ENV: test
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
         run: npm run test:ai
 
       - name: AIテストレポートをアップロード
