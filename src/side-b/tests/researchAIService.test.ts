@@ -4,6 +4,10 @@
  * モック戦略:
  * - AI API呼び出しをモック
  * - 正常系/エラー系の両方をテスト
+ * 
+ * 注意: このテストはAI APIを実際に呼び出さず、fetch をモックします。
+ * AI_API_KEY が未設定でもテストは実行されます（スキップされません）。
+ * 料金は一切発生しません。
  */
 
 import { ResearchAIService, OHLCVData } from '../services/researchAIService';

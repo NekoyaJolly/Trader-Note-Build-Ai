@@ -4,6 +4,10 @@
  * モック戦略:
  * - AI API呼び出しをモック
  * - FeatureVector + OHLCVSnapshot からの解釈テスト
+ * 
+ * 注意: このテストはAI APIを実際に呼び出さず、fetch をモックします。
+ * AI_API_KEY が未設定でもテストは実行されます（スキップされません）。
+ * 料金は一切発生しません。
  */
 
 import { PlanAIService, PlanAIInput } from '../services/planAIService';
