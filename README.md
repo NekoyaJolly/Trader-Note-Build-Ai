@@ -219,6 +219,75 @@ npm run dev:frontend
 
 **詳細**: [docs/TESTING.md](docs/TESTING.md) を参照
 
+#### テスト環境のセットアップ
+
+##### テストモードについて
+
+**最小限テストモード（デフォルト）**
+
+料金が発生するAPI（AI_API_KEY, MARKET_API_KEY）は最小限のテストのみ実行します。
+- **AI API**: 基本的な1回のリクエストのみ
+- **Market Data API**: 単一銘柄の価格取得のみ
+- **cTrader API**: 全テスト実行（料金なし）
+
+**フルテストモード**
+
+全てのテストを実行します（料金発生に注意）。
+GitHub Actionsで手動実行する場合のみ使用してください。
+
+##### 必須シークレット
+
+以下は全ての環境で必須：
+- `TEST_DB_NAME` - テスト用データベース名
+- `TEST_DB_USER` - データベースユーザー
+- `TEST_DB_PASSWORD` - データベースパスワード
+- `JWT_SECRET` - JWT署名用シークレット
+- `JWT_REFRESH_SECRET` - リフレッシュトークン用シークレット
+- `CRON_SECRET` - Cron API認証用シークレット
+- `VAPID_PUBLIC_KEY` - Web Push公開鍵
+- `VAPID_PRIVATE_KEY` - Web Push秘密鍵
+- `VAPID_SUBJECT` - Web Push送信者情報
+
+##### オプショナルシークレット（未設定時はテストスキップ）
+
+- `AI_API_KEY` - AI API キー（料金発生 - 最小限テスト）
+- `MARKET_API_KEY` - 市場データ API キー（料金発生 - 最小限テスト）
+- `TWELVE_DATA_API_KEY` - Twelve Data API キー（料金発生 - 最小限テスト）
+- `CTRADER_CLIENT_ID` - cTrader クライアント ID（料金なし - 全テスト）
+- `CTRADER_CLIENT_SECRET` - cTrader シークレット（料金なし - 全テスト）
+
+##### ローカル環境でのテスト実行
+
+`.env.test` ファイルを作成：
+
+```bash
+# 必須
+TEST_DB_NAME=trader_note_test
+TEST_DB_USER=postgres
+TEST_DB_PASSWORD=your_password
+JWT_SECRET=your_jwt_secret
+JWT_REFRESH_SECRET=your_refresh_secret
+CRON_SECRET=your_cron_secret
+VAPID_PUBLIC_KEY=your_vapid_public_key
+VAPID_PRIVATE_KEY=your_vapid_private_key
+VAPID_SUBJECT=mailto:your@email.com
+
+# オプショナル（設定すると該当テストが実行される）
+AI_API_KEY=your_ai_api_key
+MARKET_API_KEY=your_market_api_key
+TWELVE_DATA_API_KEY=your_twelve_data_key
+CTRADER_CLIENT_ID=your_ctrader_id
+CTRADER_CLIENT_SECRET=your_ctrader_secret
+
+# フルテストを実行する場合のみ（ローカル環境では不要）
+# RUN_FULL_PAID_API_TESTS=true
+```
+
+テスト実行：
+```bash
+npm test
+```
+
 ---
 
 ## 📡 API ドキュメント
