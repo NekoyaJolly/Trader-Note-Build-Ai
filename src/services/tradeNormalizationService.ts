@@ -310,19 +310,17 @@ export class TradeNormalizationService {
     // 文字列の場合
     const trimmed = String(timestamp).trim();
     
-    // ISO 8601 形式
-    const isoDate = new Date(trimmed);
-    if (!isNaN(isoDate.getTime())) {
-      return isoDate;
-    }
-
-    // 日本語形式（例: 2024/01/15 10:30:00）
+    // 日本語形式（例: 2024/01/15 10:30:00 または 2024-01-15 10:30:00）を先にチェック
+    // 注: スラッシュ区切りだけでなくハイフン区切りの YYYY-MM-DD 形式も日本語形式として扱い、JST → UTC 変換を行う
+    // ISO 8601 形式（例: 2024-01-15T19:30:00Z など T と Z を含む文字列）は後続の処理（new Date(...)）で解釈する
     const jpPattern = /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})[\s]?(\d{1,2})?:?(\d{1,2})?:?(\d{1,2})?$/;
     const jpMatch = trimmed.match(jpPattern);
     if (jpMatch) {
       const [, year, month, day, hour = '0', minute = '0', second = '0'] = jpMatch;
-      // JST (UTC+9) として解釈し UTC に変換
-      const jstDate = new Date(
+      // 入力された時刻値（年月日時分秒）を UTC 座標系のタイムスタンプとして生成
+      // 実際は JST 時刻なので、JST (UTC+9) から UTC への変換のため 9 時間減算
+      // 例: 2024/01/15 19:30:00 JST は UTC で 2024-01-15T10:30:00Z
+      const utcTimestamp = Date.UTC(
         parseInt(year),
         parseInt(month) - 1,
         parseInt(day),
@@ -330,8 +328,13 @@ export class TradeNormalizationService {
         parseInt(minute),
         parseInt(second)
       );
-      // JST → UTC（-9時間）
-      return new Date(jstDate.getTime() - 9 * 60 * 60 * 1000);
+      return new Date(utcTimestamp - 9 * 60 * 60 * 1000);
+    }
+
+    // ISO 8601 形式（日本語形式にマッチしなかった場合のみ）
+    const isoDate = new Date(trimmed);
+    if (!isNaN(isoDate.getTime())) {
+      return isoDate;
     }
 
     throw new Error(`Unable to parse timestamp: ${timestamp}`);

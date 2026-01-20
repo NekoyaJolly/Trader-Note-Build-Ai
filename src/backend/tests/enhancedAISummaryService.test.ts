@@ -20,9 +20,20 @@ import { FeatureSnapshot } from '../../services/indicators/indicatorService';
 
 describe('EnhancedAISummaryService', () => {
   let service: EnhancedAISummaryService;
+  let originalApiKey: string | undefined;
 
   beforeAll(() => {
+    // テンプレートテストのために AI_API_KEY を一時的に無効化
+    originalApiKey = process.env.AI_API_KEY;
+    delete process.env.AI_API_KEY;
     service = new EnhancedAISummaryService();
+  });
+
+  afterAll(() => {
+    // 元の API キーを復元
+    if (originalApiKey) {
+      process.env.AI_API_KEY = originalApiKey;
+    }
   });
 
   describe('テンプレートフォールバック', () => {
