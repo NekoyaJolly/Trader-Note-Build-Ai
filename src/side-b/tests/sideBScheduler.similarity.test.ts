@@ -125,6 +125,10 @@ describe('SideBScheduler 類似度チェック統合', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
+    // デフォルトでは市場は開いている状態にリセット
+    const { isFXMarketOpen } = require('../utils/marketHours');
+    (isFXMarketOpen as jest.Mock).mockReturnValue(true);
+
     // MarketDataService のモック
     mockMarketDataService = new MarketDataService() as jest.Mocked<MarketDataService>;
     mockMarketDataService.getRecentMinuteOHLCV = jest
@@ -320,10 +324,6 @@ describe('SideBScheduler 類似度チェック統合', () => {
 
   describe('データ取得失敗時', () => {
     it('そのシンボルの類似度チェックをスキップする', async () => {
-      // 前のテストで市場が閉じている状態になっているため、市場を開く
-      const { isFXMarketOpen } = require('../utils/marketHours');
-      (isFXMarketOpen as jest.Mock).mockReturnValue(true);
-      
       // 型エラー修正: nullではなく空配列を返すようにモック
       mockMarketDataService.getRecentMinuteOHLCV.mockResolvedValue([]);
 
