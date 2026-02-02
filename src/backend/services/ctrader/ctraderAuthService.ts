@@ -416,13 +416,132 @@ export class CTraderAuthService {
   /**
    * アクセストークンからアカウントIDを取得
    * 
-   * 注意: cTrader Open API では別途 API コールが必要
-   * 実装は cTrader API ドキュメントを参照
+   * cTrader Open API の ProtoOAGetAccountListByAccessTokenReq コマンドを使用して
+   * 実際のアカウント情報を取得し、ctidTraderAccountId を返す
+   * 
+   * @param accessToken - アクセストークン
+   * @returns cTrader アカウントID（ctidTraderAccountId）
    */
   private async fetchAccountId(accessToken: string): Promise<string> {
-    // TODO: cTrader API でアカウント情報を取得
-    // 一時的にデフォルト値を返す
-    // 実際の実装では ProtoOAGetAccountListReq を送信してアカウントIDを取得
-    return `ctrader_${Date.now()}`;
+    // cTrader Layer ライブラリを使用してアカウント情報を取得
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { CTraderConnection } = require('@reiryoku/ctrader-layer');
+
+    // WebSocket型定義
+    interface CTraderConnectionType {
+      open(): Promise<void>;
+      close(): Promise<void>;
+      sendCommand(command: string, params: Record<string, unknown>): Promise<unknown>;
+    }
+
+    interface CTraderAccount {
+      ctidTraderAccountId: number;
+      isLive: boolean;
+      traderLogin?: number;
+    }
+
+    interface CTraderAccountListResponse {
+      ctidTraderAccount?: CTraderAccount[];
+    }
+
+    let connection: CTraderConnectionType | null = null;
+
+    try {
+      // 1. Live環境でWebSocket接続を試行
+      connection = new CTraderConnection({
+        host: 'live.ctraderapi.com',
+        port: 5035,
+      }) as CTraderConnectionType;
+
+      await connection.open();
+      console.log('[CTraderAuth] WebSocket 接続成功 (Live環境)');
+
+      // 2. アプリケーション認証
+      await connection.sendCommand('ProtoOAApplicationAuthReq', {
+        clientId: config.ctrader.clientId,
+        clientSecret: config.ctrader.clientSecret,
+      });
+      console.log('[CTraderAuth] アプリケーション認証成功');
+
+      // 3. アカウント一覧を取得
+      const accountListRes = await connection.sendCommand('ProtoOAGetAccountListByAccessTokenReq', {
+        accessToken,
+      }) as CTraderAccountListResponse;
+
+      const accounts = accountListRes.ctidTraderAccount || [];
+      if (accounts.length === 0) {
+        throw new Error('cTrader アカウントが見つかりません');
+      }
+
+      // 4. 最初のアカウントのIDを返す
+      const selectedAccount = accounts[0];
+      const accountId = selectedAccount.ctidTraderAccountId.toString();
+      
+      console.log('[CTraderAuth] アカウント取得成功:', {
+        accountId,
+        isLive: selectedAccount.isLive,
+        traderLogin: selectedAccount.traderLogin,
+      });
+
+      return accountId;
+
+    } catch (error) {
+      // Live環境で失敗した場合、Demo環境を試行
+      console.warn('[CTraderAuth] Live環境でアカウント取得失敗。Demo環境を試行します:', error);
+
+      try {
+        if (connection) {
+          await connection.close();
+        }
+
+        connection = new CTraderConnection({
+          host: 'demo.ctraderapi.com',
+          port: 5035,
+        }) as CTraderConnectionType;
+
+        await connection.open();
+        console.log('[CTraderAuth] WebSocket 接続成功 (Demo環境)');
+
+        await connection.sendCommand('ProtoOAApplicationAuthReq', {
+          clientId: config.ctrader.clientId,
+          clientSecret: config.ctrader.clientSecret,
+        });
+        console.log('[CTraderAuth] アプリケーション認証成功 (Demo環境)');
+
+        const accountListRes = await connection.sendCommand('ProtoOAGetAccountListByAccessTokenReq', {
+          accessToken,
+        }) as CTraderAccountListResponse;
+
+        const accounts = accountListRes.ctidTraderAccount || [];
+        if (accounts.length === 0) {
+          throw new Error('cTrader アカウントが見つかりません (Demo環境)');
+        }
+
+        const selectedAccount = accounts[0];
+        const accountId = selectedAccount.ctidTraderAccountId.toString();
+
+        console.log('[CTraderAuth] アカウント取得成功 (Demo環境):', {
+          accountId,
+          isLive: selectedAccount.isLive,
+          traderLogin: selectedAccount.traderLogin,
+        });
+
+        return accountId;
+
+      } catch (demoError) {
+        console.error('[CTraderAuth] Demo環境でもアカウント取得失敗:', demoError);
+        throw new Error(`cTrader アカウント情報の取得に失敗しました: ${demoError instanceof Error ? demoError.message : '不明なエラー'}`);
+      }
+    } finally {
+      // 接続をクリーンアップ
+      if (connection) {
+        try {
+          await connection.close();
+          console.log('[CTraderAuth] WebSocket 接続をクローズしました');
+        } catch (closeError) {
+          console.warn('[CTraderAuth] WebSocket クローズ時のエラー:', closeError);
+        }
+      }
+    }
   }
 }
