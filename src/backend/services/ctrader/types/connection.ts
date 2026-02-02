@@ -17,9 +17,9 @@ export interface CTraderConnectionType {
   open(): Promise<void>;
   close(): Promise<void>;
   sendCommand(command: string, params: Record<string, unknown>): Promise<unknown>;
-  sendHeartbeat?(): void;
-  on?(event: string, handler: (...args: unknown[]) => void): void;
-  off?(event: string, handler: (...args: unknown[]) => void): void;
+  sendHeartbeat(): void;
+  on(event: string, handler: (...args: unknown[]) => void): void;
+  off(event: string, handler: (...args: unknown[]) => void): void;
 }
 
 /**

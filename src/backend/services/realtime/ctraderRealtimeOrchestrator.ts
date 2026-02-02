@@ -604,10 +604,13 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
       throw new Error('[CTraderOrchestrator] 接続が確立されていません');
     }
 
+    // 接続が確実に存在することをTypeScriptに伝える
+    const connection = this.connection;
+
     // Tick イベント
     // ctrader-layer は CTraderLayerEvent オブジェクトを渡す
     // 実際のデータは event.descriptor に格納されている
-    this.connection.on('ProtoOASpotEvent', (...args: unknown[]) => {
+    connection.on('ProtoOASpotEvent', (...args: unknown[]) => {
       // 型ガード: イベントデータを取得
       const rawEvent = args[0];
       if (!rawEvent || typeof rawEvent !== 'object') {
@@ -615,8 +618,8 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
       }
       
       // CTraderLayerEvent の descriptor プロパティからデータを取得
-      const event = rawEvent as CTraderSpotEvent | { descriptor?: CTraderSpotEvent };
-      const data = (event?.descriptor || event || {}) as CTraderSpotEvent;
+      const eventWithDescriptor = rawEvent as { descriptor?: CTraderSpotEvent };
+      const data = (eventWithDescriptor.descriptor || rawEvent) as CTraderSpotEvent;
       
       // デバッグログ（最初の数回のみ）
       if (this.tickLogCount < 5) {
@@ -754,15 +757,15 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
       }
     });
 
-    // 切断イベント（この時点でconnectionは確実に存在）
-    this.connection.on('close', () => {
+    // 切断イベント
+    connection.on('close', () => {
       console.log('[CTraderOrchestrator] 接続が切断されました');
       this.setStatus('disconnected');
       this.scheduleReconnect();
     });
 
-    // エラーイベント（この時点でconnectionは確実に存在）
-    this.connection.on('error', (...args: unknown[]) => {
+    // エラーイベント
+    connection.on('error', (...args: unknown[]) => {
       const rawError = args[0];
       const error = rawError instanceof Error 
         ? rawError 
