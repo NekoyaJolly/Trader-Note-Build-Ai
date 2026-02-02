@@ -12,6 +12,8 @@
 /**
  * CTraderConnection の型定義
  * @reiryoku/ctrader-layer は型定義がないため独自に定義
+ * 
+ * 注意: 実際のライブラリは `off` の代わりに `removeEventListener` を使用します
  */
 export interface CTraderConnectionType {
   open(): Promise<void>;
@@ -19,7 +21,10 @@ export interface CTraderConnectionType {
   sendCommand(command: string, params: Record<string, unknown>): Promise<unknown>;
   sendHeartbeat(): void;
   on(event: string, handler: (...args: unknown[]) => void): void;
-  off(event: string, handler: (...args: unknown[]) => void): void;
+  // 実際のライブラリは `off` を持たず、`removeEventListener` を使用
+  removeEventListener?(event: string, handler: (...args: unknown[]) => void): void;
+  // 後方互換性のため、off もオプショナルで定義
+  off?(event: string, handler: (...args: unknown[]) => void): void;
 }
 
 /**
