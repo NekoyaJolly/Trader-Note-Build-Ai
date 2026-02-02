@@ -17,36 +17,16 @@ import { CTraderAuthService } from '../ctrader/ctraderAuthService';
 import { RealtimeTickService, getRealtimeTickService, TickDataInput, OHLCVBarInput } from './realtimeTickService';
 import { getCloseStats, looksLikeMisScaledBars } from './realtimeSanity';
 import { config } from '../../../config';
+import { CTraderConnectionType, CTraderSymbolInfo } from '../ctrader/types/connection';
 
 // cTrader Layer ライブラリ（型定義なし）
+// @reiryoku/ctrader-layer は型定義がないため、型定義は types/connection.ts で提供
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { CTraderConnection } = require('@reiryoku/ctrader-layer');
 
 // ========================================
 // 型定義
 // ========================================
-
-/**
- * CTraderConnection の型定義（@reiryoku/ctrader-layer は型定義がないため）
- */
-interface CTraderConnectionType {
-  open(): Promise<void>;
-  close(): Promise<void>;
-  sendCommand(command: string, params: Record<string, unknown>): Promise<unknown>;
-  sendHeartbeat(): void;
-  on(event: string, handler: (...args: unknown[]) => void): void;
-  off(event: string, handler: (...args: unknown[]) => void): void;
-}
-
-/**
- * cTrader シンボル情報
- */
-interface CTraderSymbolInfo {
-  symbolId: number;
-  symbolName: string;
-  digits?: number;
-  pipPosition?: number;
-}
 
 /**
  * cTrader トレンドバー
@@ -285,13 +265,13 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
 
       // 2. まずLive環境で接続を試みる（アカウント情報を取得するため）
       // アカウントがDemoの場合は、後でDemo環境に再接続する
-      let connectionHost = 'live.ctraderapi.com';
+      let connectionHost = config.ctrader.wsLiveHost || 'live.ctraderapi.com';
       let isLiveEnvironment = true;
 
       // 2-1. Live環境でWebSocket接続
       this.connection = new CTraderConnection({
         host: connectionHost,
-        port: 5035,
+        port: config.ctrader.wsPort || 5035,
       }) as CTraderConnectionType;
 
       await this.connection.open();
@@ -331,11 +311,11 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
       if (!isLiveEnvironment) {
         console.log('[CTraderOrchestrator] Demoアカウントを検出。Demo環境に再接続します...');
         await this.connection.close();
-        connectionHost = 'demo.ctraderapi.com';
+        connectionHost = config.ctrader.wsDemoHost || 'demo.ctraderapi.com';
         
         this.connection = new CTraderConnection({
           host: connectionHost,
-          port: 5035,
+          port: config.ctrader.wsPort || 5035,
         }) as CTraderConnectionType;
 
         await this.connection.open();
