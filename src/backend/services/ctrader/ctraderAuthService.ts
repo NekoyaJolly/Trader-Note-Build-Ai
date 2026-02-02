@@ -16,6 +16,13 @@ import { z } from 'zod';
 import { PrismaClient, User, CTraderToken } from '@prisma/client';
 import { config } from '../../../config';
 import { sessionService, CreateSessionPayload } from '../auth/sessionService';
+import { CTraderConnectionType } from './types/connection';
+import { CTraderAccountListResponseSchema } from '../../../schemas/external/ctrader';
+
+// cTrader Layer ライブラリを使用してアカウント情報を取得
+// @reiryoku/ctrader-layer は型定義がないため、型定義は types/connection.ts で提供
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { CTraderConnection } = require('@reiryoku/ctrader-layer');
 
 // ========================================
 // Zod スキーマ
@@ -423,34 +430,14 @@ export class CTraderAuthService {
    * @returns cTrader アカウントID（ctidTraderAccountId）
    */
   private async fetchAccountId(accessToken: string): Promise<string> {
-    // cTrader Layer ライブラリを使用してアカウント情報を取得
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { CTraderConnection } = require('@reiryoku/ctrader-layer');
-
-    // WebSocket型定義
-    interface CTraderConnectionType {
-      open(): Promise<void>;
-      close(): Promise<void>;
-      sendCommand(command: string, params: Record<string, unknown>): Promise<unknown>;
-    }
-
-    interface CTraderAccount {
-      ctidTraderAccountId: number;
-      isLive: boolean;
-      traderLogin?: number;
-    }
-
-    interface CTraderAccountListResponse {
-      ctidTraderAccount?: CTraderAccount[];
-    }
-
     let connection: CTraderConnectionType | null = null;
+    let liveError: Error | null = null;
 
     try {
       // 1. Live環境でWebSocket接続を試行
       connection = new CTraderConnection({
-        host: 'live.ctraderapi.com',
-        port: 5035,
+        host: config.ctrader.wsLiveHost || 'live.ctraderapi.com',
+        port: config.ctrader.wsPort || 5035,
       }) as CTraderConnectionType;
 
       await connection.open();
@@ -461,23 +448,30 @@ export class CTraderAuthService {
         clientId: config.ctrader.clientId,
         clientSecret: config.ctrader.clientSecret,
       });
-      console.log('[CTraderAuth] アプリケーション認証成功');
+      console.log('[CTraderAuth] アプリケーション認証成功 (Live環境)');
 
-      // 3. アカウント一覧を取得
-      const accountListRes = await connection.sendCommand('ProtoOAGetAccountListByAccessTokenReq', {
+      // 3. アカウント一覧を取得してZodでバリデーション
+      const accountListRaw = await connection.sendCommand('ProtoOAGetAccountListByAccessTokenReq', {
         accessToken,
-      }) as CTraderAccountListResponse;
+      });
 
+      const parseResult = CTraderAccountListResponseSchema.safeParse(accountListRaw);
+      if (!parseResult.success) {
+        console.error('[CTraderAuth] APIレスポンスのバリデーションエラー:', parseResult.error.format());
+        throw new Error(`cTrader APIレスポンスが不正です: ${parseResult.error.message}`);
+      }
+
+      const accountListRes = parseResult.data;
       const accounts = accountListRes.ctidTraderAccount || [];
       if (accounts.length === 0) {
-        throw new Error('cTrader アカウントが見つかりません');
+        throw new Error('cTrader アカウントが見つかりません (Live環境)');
       }
 
       // 4. 最初のアカウントのIDを返す
       const selectedAccount = accounts[0];
       const accountId = selectedAccount.ctidTraderAccountId.toString();
       
-      console.log('[CTraderAuth] アカウント取得成功:', {
+      console.log('[CTraderAuth] アカウント取得成功 (Live環境):', {
         accountId,
         isLive: selectedAccount.isLive,
         traderLogin: selectedAccount.traderLogin,
@@ -486,17 +480,32 @@ export class CTraderAuthService {
       return accountId;
 
     } catch (error) {
+      // Live環境のエラー情報を保存
+      liveError = error instanceof Error ? error : new Error(String(error));
+      
       // Live環境で失敗した場合、Demo環境を試行
-      console.warn('[CTraderAuth] Live環境でアカウント取得失敗。Demo環境を試行します:', error);
+      console.warn('[CTraderAuth] Live環境でアカウント取得失敗。Demo環境を試行します');
+      console.warn('[CTraderAuth] Live環境エラー詳細:', {
+        message: liveError.message,
+        name: liveError.name,
+      });
+
+      // Live環境の接続をクリーンアップ
+      if (connection) {
+        try {
+          await connection.close();
+          console.log('[CTraderAuth] Live環境の接続をクローズしました');
+        } catch (closeError) {
+          console.warn('[CTraderAuth] Live環境の接続クローズに失敗:', closeError);
+        }
+        connection = null;
+      }
 
       try {
-        if (connection) {
-          await connection.close();
-        }
-
+        // Demo環境で接続
         connection = new CTraderConnection({
-          host: 'demo.ctraderapi.com',
-          port: 5035,
+          host: config.ctrader.wsDemoHost || 'demo.ctraderapi.com',
+          port: config.ctrader.wsPort || 5035,
         }) as CTraderConnectionType;
 
         await connection.open();
@@ -508,10 +517,18 @@ export class CTraderAuthService {
         });
         console.log('[CTraderAuth] アプリケーション認証成功 (Demo環境)');
 
-        const accountListRes = await connection.sendCommand('ProtoOAGetAccountListByAccessTokenReq', {
+        // アカウント一覧を取得してZodでバリデーション
+        const accountListRaw = await connection.sendCommand('ProtoOAGetAccountListByAccessTokenReq', {
           accessToken,
-        }) as CTraderAccountListResponse;
+        });
 
+        const parseResult = CTraderAccountListResponseSchema.safeParse(accountListRaw);
+        if (!parseResult.success) {
+          console.error('[CTraderAuth] APIレスポンスのバリデーションエラー (Demo):', parseResult.error.format());
+          throw new Error(`cTrader APIレスポンスが不正です (Demo): ${parseResult.error.message}`);
+        }
+
+        const accountListRes = parseResult.data;
         const accounts = accountListRes.ctidTraderAccount || [];
         if (accounts.length === 0) {
           throw new Error('cTrader アカウントが見つかりません (Demo環境)');
@@ -530,7 +547,14 @@ export class CTraderAuthService {
 
       } catch (demoError) {
         console.error('[CTraderAuth] Demo環境でもアカウント取得失敗:', demoError);
-        throw new Error(`cTrader アカウント情報の取得に失敗しました: ${demoError instanceof Error ? demoError.message : '不明なエラー'}`);
+        console.error('[CTraderAuth] Live環境のエラー:', liveError?.message);
+        console.error('[CTraderAuth] Demo環境のエラー:', demoError instanceof Error ? demoError.message : '不明なエラー');
+        
+        throw new Error(
+          `cTrader アカウント情報の取得に失敗しました。` +
+          `Live環境: ${liveError?.message}、` +
+          `Demo環境: ${demoError instanceof Error ? demoError.message : '不明なエラー'}`
+        );
       }
     } finally {
       // 接続をクリーンアップ
