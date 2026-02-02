@@ -600,6 +600,10 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
 
     console.log('[CTraderOrchestrator] イベントハンドラを設定中...');
 
+    if (!this.connection) {
+      throw new Error('[CTraderOrchestrator] 接続が確立されていません');
+    }
+
     // Tick イベント
     // ctrader-layer は CTraderLayerEvent オブジェクトを渡す
     // 実際のデータは event.descriptor に格納されている
@@ -750,14 +754,14 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
       }
     });
 
-    // 切断イベント
+    // 切断イベント（この時点でconnectionは確実に存在）
     this.connection.on('close', () => {
       console.log('[CTraderOrchestrator] 接続が切断されました');
       this.setStatus('disconnected');
       this.scheduleReconnect();
     });
 
-    // エラーイベント
+    // エラーイベント（この時点でconnectionは確実に存在）
     this.connection.on('error', (...args: unknown[]) => {
       const rawError = args[0];
       const error = rawError instanceof Error 
@@ -774,7 +778,7 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
     this.heartbeatTimer = setInterval(() => {
       if (this.connection) {
         try {
-          this.connection.sendHeartbeat();
+          this.connection.sendHeartbeat?.();
         } catch (error) {
           console.error('[CTraderOrchestrator] ハートビートエラー:', error);
         }

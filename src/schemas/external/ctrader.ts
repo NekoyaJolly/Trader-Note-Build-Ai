@@ -36,13 +36,12 @@ export const CTraderSymbolInfoSchema = z.object({
 /**
  * cTrader スポット価格イベントスキーマ
  */
-export const CTraderSpotEventSchema: z.ZodType<CTraderSpotEvent> = z.object({
+export const CTraderSpotEventSchema = z.object({
   symbolId: z.number().int().optional(),
   bid: z.number().optional(),
   ask: z.number().optional(),
   timestamp: z.number().int().optional(),
   sessionClose: z.number().optional(),
-  descriptor: z.lazy(() => CTraderSpotEventSchema).optional(),
 });
 
 // 型推論用のエクスポート
