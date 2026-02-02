@@ -11,7 +11,7 @@ import { z } from 'zod';
  * cTrader アカウント情報スキーマ
  */
 export const CTraderAccountSchema = z.object({
-  ctidTraderAccountId: z.number().int().positive(),
+  ctidTraderAccountId: z.number().int().nonnegative(),
   isLive: z.boolean(),
   traderLogin: z.number().int().optional(),
 });
@@ -27,7 +27,7 @@ export const CTraderAccountListResponseSchema = z.object({
  * cTrader シンボル情報スキーマ
  */
 export const CTraderSymbolInfoSchema = z.object({
-  symbolId: z.number().int().positive(),
+  symbolId: z.number().int().nonnegative(),
   symbolName: z.string(),
   digits: z.number().int().optional(),
   pipPosition: z.number().int().optional(),
@@ -36,11 +36,13 @@ export const CTraderSymbolInfoSchema = z.object({
 /**
  * cTrader スポット価格イベントスキーマ
  */
-export const CTraderSpotEventSchema = z.object({
+export const CTraderSpotEventSchema: z.ZodType<CTraderSpotEvent> = z.object({
   symbolId: z.number().int().optional(),
   bid: z.number().optional(),
   ask: z.number().optional(),
   timestamp: z.number().int().optional(),
+  sessionClose: z.number().optional(),
+  descriptor: z.lazy(() => CTraderSpotEventSchema).optional(),
 });
 
 // 型推論用のエクスポート

@@ -12,7 +12,8 @@
 
 import { PrismaClient } from '@prisma/client';
 import { config } from '../src/config';
-import { CTraderConnectionType, CTraderAccount, CTraderSymbolInfo, CTraderSpotEvent } from '../src/backend/services/ctrader/types/connection';
+import { CTraderConnectionType } from '../src/backend/services/ctrader/types/connection';
+import { CTraderAccount, CTraderSymbolInfo } from '../src/schemas/external/ctrader';
 
 // @reiryoku/ctrader-layer を使用
 // @reiryoku/ctrader-layer は型定義がないため、型定義は types/connection.ts で提供
@@ -90,8 +91,8 @@ async function testConnection(accessToken: string): Promise<void> {
     // Demo環境: demo.ctraderapi.com:5035
     // Live環境: live.ctraderapi.com:5035
     connection = new CTraderConnection({
-      host: config.ctrader.wsLiveHost || 'live.ctraderapi.com',
-      port: config.ctrader.wsPort || 5035,
+      host: config.ctrader.wsLiveHost,
+      port: config.ctrader.wsPort,
     }) as CTraderConnectionType;
 
     // 接続開始

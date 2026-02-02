@@ -436,8 +436,8 @@ export class CTraderAuthService {
     try {
       // 1. Live環境でWebSocket接続を試行
       connection = new CTraderConnection({
-        host: config.ctrader.wsLiveHost || 'live.ctraderapi.com',
-        port: config.ctrader.wsPort || 5035,
+        host: config.ctrader.wsLiveHost,
+        port: config.ctrader.wsPort,
       }) as CTraderConnectionType;
 
       await connection.open();
@@ -504,8 +504,8 @@ export class CTraderAuthService {
       try {
         // Demo環境で接続
         connection = new CTraderConnection({
-          host: config.ctrader.wsDemoHost || 'demo.ctraderapi.com',
-          port: config.ctrader.wsPort || 5035,
+          host: config.ctrader.wsDemoHost,
+          port: config.ctrader.wsPort,
         }) as CTraderConnectionType;
 
         await connection.open();

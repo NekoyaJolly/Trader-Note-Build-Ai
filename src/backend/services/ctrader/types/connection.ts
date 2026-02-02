@@ -3,6 +3,10 @@
  * 
  * @reiryoku/ctrader-layer パッケージには型定義がないため、
  * プロジェクト内で共通の型定義を提供する
+ * 
+ * 注意: cTrader APIレスポンスの型定義は src/schemas/external/ctrader.ts で
+ * Zodスキーマから生成されています。このファイルには、WebSocket接続に固有の
+ * 型定義のみを含めてください。
  */
 
 /**
@@ -16,42 +20,6 @@ export interface CTraderConnectionType {
   sendHeartbeat?(): void;
   on?(event: string, handler: (...args: unknown[]) => void): void;
   off?(event: string, handler: (...args: unknown[]) => void): void;
-}
-
-/**
- * cTrader アカウント情報
- */
-export interface CTraderAccount {
-  ctidTraderAccountId: number;
-  isLive: boolean;
-  traderLogin?: number;
-}
-
-/**
- * cTrader アカウント一覧レスポンス
- */
-export interface CTraderAccountListResponse {
-  ctidTraderAccount?: CTraderAccount[];
-}
-
-/**
- * cTrader シンボル情報
- */
-export interface CTraderSymbolInfo {
-  symbolId: number;
-  symbolName: string;
-  digits?: number;
-  pipPosition?: number;
-}
-
-/**
- * cTrader スポット価格イベント
- */
-export interface CTraderSpotEvent {
-  symbolId?: number;
-  bid?: number;
-  ask?: number;
-  timestamp?: number;
 }
 
 /**
