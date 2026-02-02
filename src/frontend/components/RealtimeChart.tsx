@@ -45,6 +45,13 @@ const TIMEFRAME_OPTIONS = [
 	{ value: 14400, label: "4時間" },
 ];
 
+const DATA_COUNT_OPTIONS = [
+	{ value: 60, label: "60本" },
+	{ value: 120, label: "120本" },
+	{ value: 180, label: "180本" },
+	{ value: 240, label: "240本" },
+];
+
 const DEFAULT_LINE_COLOR = "#fbbf24";
 const DEFAULT_LINE_WIDTH = 2;
 const LINE_WIDTH_OPTIONS = [1, 2, 3, 4];
@@ -143,6 +150,7 @@ export function RealtimeChart({
 	rightAction,
 }: RealtimeChartProps) {
 	const [timeframe, setTimeframe] = useState(initialTimeframe);
+	const [dataCount, setDataCount] = useState(60); // データ本数
 	const [drawingMode, setDrawingMode] = useState<"none" | "horizontal" | "trend">("none");
 	const [drawnLines, setDrawnLines] = useState<DrawnLine[]>([]);
 	const [hasEverConnected, setHasEverConnected] = useState(false);
@@ -177,21 +185,35 @@ export function RealtimeChart({
 		}
 	}, [isConnected]);
 
-	const handleTimeframeChange = (newTimeframe: number) => {
-		if (isConnected) {
+	const handleTimeframeChange = async (newTimeframe: number) => {
+		const wasConnected = isConnected;
+		if (wasConnected) {
 			disconnect();
 		}
 		setTimeframe(newTimeframe);
 		setDrawingMode("none");
 		onTimeframeChange?.(newTimeframe);
+		// 接続中だった場合は自動再接続
+		if (wasConnected) {
+			setTimeout(() => {
+				void connect();
+			}, 500); // 少し待ってから再接続
+		}
 	};
 
-	const handleSymbolChange = (newSymbol: string) => {
-		if (isConnected) {
+	const handleSymbolChange = async (newSymbol: string) => {
+		const wasConnected = isConnected;
+		if (wasConnected) {
 			disconnect();
 		}
 		setDrawingMode("none");
 		onSymbolChange?.(newSymbol);
+		// 接続中だった場合は自動再接続
+		if (wasConnected) {
+			setTimeout(() => {
+				void connect();
+			}, 500); // 少し待ってから再接続
+		}
 	};
 
 	const persistLines = (lines: DrawnLine[]) => {
@@ -320,7 +342,7 @@ export function RealtimeChart({
 		<div className="bg-gray-900 rounded-lg overflow-hidden">
 			{/* デスクトップ用ヘッダー */}
 			<div className="bg-gray-800 px-3 py-2 hidden md:flex items-center gap-3 border-b border-gray-700">
-				<select value={symbol} onChange={(e) => handleSymbolChange(e.target.value)} disabled={isConnected} className={`bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 font-semibold ${isConnected ? "opacity-50 cursor-not-allowed" : "hover:border-gray-500"}`}>
+				<select value={symbol} onChange={(e) => handleSymbolChange(e.target.value)} className="bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 font-semibold hover:border-gray-500">
 					{SYMBOL_OPTIONS.map((opt) => (
 						<option key={opt.value} value={opt.value}>
 							{opt.label}
@@ -328,8 +350,16 @@ export function RealtimeChart({
 					))}
 				</select>
 
-				<select value={timeframe} onChange={(e) => handleTimeframeChange(parseInt(e.target.value, 10))} disabled={isConnected} className={`bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 ${isConnected ? "opacity-50 cursor-not-allowed" : "hover:border-gray-500"}`}>
+				<select value={timeframe} onChange={(e) => handleTimeframeChange(parseInt(e.target.value, 10))} className="bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 hover:border-gray-500">
 					{TIMEFRAME_OPTIONS.map((opt) => (
+						<option key={opt.value} value={opt.value}>
+							{opt.label}
+						</option>
+					))}
+				</select>
+
+				<select value={dataCount} onChange={(e) => setDataCount(parseInt(e.target.value, 10))} className="bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 hover:border-gray-500">
+					{DATA_COUNT_OPTIONS.map((opt) => (
 						<option key={opt.value} value={opt.value}>
 							{opt.label}
 						</option>
@@ -488,7 +518,7 @@ export function RealtimeChart({
 
 			<div className="md:hidden sticky bottom-0 z-20 bg-gray-900 border-t border-gray-800 px-3 py-2 space-y-2">
 				<div className="flex items-center gap-2">
-					<select value={symbol} onChange={(e) => handleSymbolChange(e.target.value)} disabled={isConnected} className={`bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700 flex-1 min-w-0 ${isConnected ? "opacity-50 cursor-not-allowed" : "hover:border-gray-600"}`}>
+					<select value={symbol} onChange={(e) => handleSymbolChange(e.target.value)} className="bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700 flex-1 min-w-0 hover:border-gray-600">
 						{SYMBOL_OPTIONS.map((opt) => (
 							<option key={opt.value} value={opt.value}>
 								{opt.label}
@@ -496,8 +526,16 @@ export function RealtimeChart({
 						))}
 					</select>
 
-					<select value={timeframe} onChange={(e) => handleTimeframeChange(parseInt(e.target.value, 10))} disabled={isConnected} className={`bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700 w-24 ${isConnected ? "opacity-50 cursor-not-allowed" : "hover:border-gray-600"}`}>
+					<select value={timeframe} onChange={(e) => handleTimeframeChange(parseInt(e.target.value, 10))} className="bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700 w-20 hover:border-gray-600">
 						{TIMEFRAME_OPTIONS.map((opt) => (
+							<option key={opt.value} value={opt.value}>
+								{opt.label}
+							</option>
+						))}
+					</select>
+
+					<select value={dataCount} onChange={(e) => setDataCount(parseInt(e.target.value, 10))} className="bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700 w-20 hover:border-gray-600">
+						{DATA_COUNT_OPTIONS.map((opt) => (
 							<option key={opt.value} value={opt.value}>
 								{opt.label}
 							</option>

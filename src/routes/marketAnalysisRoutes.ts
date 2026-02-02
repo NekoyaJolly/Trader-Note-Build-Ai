@@ -112,29 +112,16 @@ router.get('/:symbol', async (req: Request, res: Response) => {
     // OHLCVデータを取得
     let ohlcvData: OHLCVData[];
 
-    if (timeframe === '1m') {
-      // 1分足の場合は専用メソッドを使用
-      const marketData = await marketDataService.getRecentMinuteOHLCV(normalizedSymbol, count);
-      ohlcvData = marketData.map(d => ({
-        timestamp: d.timestamp,
-        open: d.open,
-        high: d.high,
-        low: d.low,
-        close: d.close,
-        volume: d.volume,
-      }));
-    } else {
-      // その他の時間足
-      const marketData = await marketDataService.getHistoricalData(normalizedSymbol, timeframe, count);
-      ohlcvData = marketData.map(d => ({
-        timestamp: d.timestamp,
-        open: d.open,
-        high: d.high,
-        low: d.low,
-        close: d.close,
-        volume: d.volume,
-      }));
-    }
+    // すべての時間足に対応（1m専用メソッドは廃止）
+    const marketData = await marketDataService.getHistoricalData(normalizedSymbol, timeframe, count);
+    ohlcvData = marketData.map(d => ({
+      timestamp: d.timestamp,
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+      volume: d.volume,
+    }));
 
     if (ohlcvData.length === 0) {
       return res.status(404).json({

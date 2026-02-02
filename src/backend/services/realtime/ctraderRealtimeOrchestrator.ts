@@ -17,36 +17,23 @@ import { CTraderAuthService } from '../ctrader/ctraderAuthService';
 import { RealtimeTickService, getRealtimeTickService, TickDataInput, OHLCVBarInput } from './realtimeTickService';
 import { getCloseStats, looksLikeMisScaledBars } from './realtimeSanity';
 import { config } from '../../../config';
+import { CTraderConnectionType } from '../ctrader/types/connection';
+import { 
+  CTraderAccount,
+  CTraderAccountListResponse,
+  CTraderAccountListResponseSchema,
+  CTraderSymbolInfo,
+  CTraderSpotEvent,
+} from '../../../schemas/external/ctrader';
 
 // cTrader Layer ライブラリ（型定義なし）
+// @reiryoku/ctrader-layer は型定義がないため、型定義は types/connection.ts で提供
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { CTraderConnection } = require('@reiryoku/ctrader-layer');
 
 // ========================================
 // 型定義
 // ========================================
-
-/**
- * CTraderConnection の型定義（@reiryoku/ctrader-layer は型定義がないため）
- */
-interface CTraderConnectionType {
-  open(): Promise<void>;
-  close(): Promise<void>;
-  sendCommand(command: string, params: Record<string, unknown>): Promise<unknown>;
-  sendHeartbeat(): void;
-  on(event: string, handler: (...args: unknown[]) => void): void;
-  off(event: string, handler: (...args: unknown[]) => void): void;
-}
-
-/**
- * cTrader シンボル情報
- */
-interface CTraderSymbolInfo {
-  symbolId: number;
-  symbolName: string;
-  digits?: number;
-  pipPosition?: number;
-}
 
 /**
  * cTrader トレンドバー
@@ -58,34 +45,6 @@ interface CTraderTrendbar {
   deltaClose: string | number;
   volume?: string | number;
   utcTimestampInMinutes?: number;
-}
-
-/**
- * cTrader Spot Event
- */
-interface CTraderSpotEvent {
-  symbolId?: number;
-  bid?: number;
-  ask?: number;
-  timestamp?: number;
-  sessionClose?: number;
-  descriptor?: CTraderSpotEvent;
-}
-
-/**
- * cTrader アカウント情報
- */
-interface CTraderAccount {
-  ctidTraderAccountId: number;
-  isLive: boolean;
-  traderLogin?: number;
-}
-
-/**
- * cTrader API レスポンス（アカウント一覧）
- */
-interface CTraderAccountListResponse {
-  ctidTraderAccount?: CTraderAccount[];
 }
 
 /**
@@ -285,13 +244,13 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
 
       // 2. まずLive環境で接続を試みる（アカウント情報を取得するため）
       // アカウントがDemoの場合は、後でDemo環境に再接続する
-      let connectionHost = 'live.ctraderapi.com';
+      let connectionHost = config.ctrader.wsLiveHost;
       let isLiveEnvironment = true;
 
       // 2-1. Live環境でWebSocket接続
       this.connection = new CTraderConnection({
         host: connectionHost,
-        port: 5035,
+        port: config.ctrader.wsPort,
       }) as CTraderConnectionType;
 
       await this.connection.open();
@@ -306,11 +265,18 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
       });
       console.log('[CTraderOrchestrator] アプリケーション認証成功');
 
-      // 2-3. アカウント一覧を取得して環境を確認
-      const accountListRes = await this.connection.sendCommand('ProtoOAGetAccountListByAccessTokenReq', {
+      // 2-3. アカウント一覧を取得して環境を確認（Zodバリデーション付き）
+      const accountListRaw = await this.connection.sendCommand('ProtoOAGetAccountListByAccessTokenReq', {
         accessToken: token.accessToken,
-      }) as CTraderAccountListResponse;
+      });
 
+      const parseResult = CTraderAccountListResponseSchema.safeParse(accountListRaw);
+      if (!parseResult.success) {
+        console.error('[CTraderOrchestrator] APIレスポンスのバリデーションエラー:', parseResult.error.format());
+        throw new Error(`cTrader APIレスポンスが不正です: ${parseResult.error.message}`);
+      }
+
+      const accountListRes = parseResult.data;
       const accounts = accountListRes.ctidTraderAccount || [];
       if (accounts.length === 0) {
         throw new Error('cTrader アカウントが見つかりません');
@@ -331,11 +297,11 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
       if (!isLiveEnvironment) {
         console.log('[CTraderOrchestrator] Demoアカウントを検出。Demo環境に再接続します...');
         await this.connection.close();
-        connectionHost = 'demo.ctraderapi.com';
+        connectionHost = config.ctrader.wsDemoHost;
         
         this.connection = new CTraderConnection({
           host: connectionHost,
-          port: 5035,
+          port: config.ctrader.wsPort,
         }) as CTraderConnectionType;
 
         await this.connection.open();

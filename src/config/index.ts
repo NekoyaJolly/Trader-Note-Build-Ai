@@ -117,6 +117,10 @@ export const config = {
     // WebSocket エンドポイント
     wsUrl: 'wss://live.ctraderapi.com',
     wsDemoUrl: 'wss://demo.ctraderapi.com',
+    // WebSocket接続設定（ホストとポート）
+    wsLiveHost: process.env.CTRADER_WS_LIVE_HOST || 'live.ctraderapi.com',
+    wsDemoHost: process.env.CTRADER_WS_DEMO_HOST || 'demo.ctraderapi.com',
+    wsPort: parseInt(process.env.CTRADER_WS_PORT || '5035', 10),
     // Redirect URI（Vercel）
     redirectUri: process.env.CTRADER_REDIRECT_URI || 'https://trader-note-build-ai.vercel.app/auth/ctrader/callback',
   },

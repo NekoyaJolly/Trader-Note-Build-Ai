@@ -75,6 +75,27 @@ const SYMBOLS = [
     { value: 'GBPUSD', label: 'GBP/USD' },
 ];
 
+// 時間足選択肢
+const TIMEFRAMES = [
+    { value: '1m', label: '1分' },
+    { value: '5m', label: '5分' },
+    { value: '15m', label: '15分' },
+    { value: '30m', label: '30分' },
+    { value: '1h', label: '1時間' },
+    { value: '4h', label: '4時間' },
+    { value: '1d', label: '1日' },
+    { value: '1w', label: '1週' },
+];
+
+// データ本数選択肢
+const DATA_COUNTS = [
+    { value: 60, label: '60本' },
+    { value: 120, label: '120本' },
+    { value: 240, label: '240本' },
+    { value: 500, label: '500本' },
+    { value: 1000, label: '1000本' },
+];
+
 // 特徴量の色分け
 function getFeatureColor(value: number, index: number): string {
     // RSI系（5, 6）は反転表示（高い = 買われすぎで注意）
@@ -102,6 +123,8 @@ type ViewMode = 'realtime' | 'analysis';
 
 export default function MarketAnalysisPage() {
     const [selectedSymbol, setSelectedSymbol] = useState('XAUUSD');
+    const [selectedTimeframe, setSelectedTimeframe] = useState('1m');
+    const [selectedDataCount, setSelectedDataCount] = useState(60);
     const [viewMode, setViewMode] = useState<ViewMode>('realtime');
     const [analysisData, setAnalysisData] = useState<MarketAnalysisData | null>(null);
     const [loading, setLoading] = useState(false);
@@ -123,7 +146,7 @@ export default function MarketAnalysisPage() {
         try {
             const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3100';
             const response = await fetch(
-                `${apiBase}/api/market-analysis/${selectedSymbol}?timeframe=1m&count=60`
+                `${apiBase}/api/market-analysis/${selectedSymbol}?timeframe=${selectedTimeframe}&count=${selectedDataCount}`
             );
 
             if (!response.ok) {
@@ -142,7 +165,7 @@ export default function MarketAnalysisPage() {
         } finally {
             setLoading(false);
         }
-    }, [selectedSymbol]);
+    }, [selectedSymbol, selectedTimeframe, selectedDataCount]);
 
     // OHLCVデータをチャート用に変換
     const chartData: OHLCVDataPoint[] = analysisData?.ohlcv.map(d => ({
@@ -218,7 +241,24 @@ export default function MarketAnalysisPage() {
                                 <option key={s.value} value={s.value}>{s.label}</option>
                             ))}
                         </select>
-                        <span className="text-xs text-gray-400">1分足</span>
+                        <select
+                            value={selectedTimeframe}
+                            onChange={(e) => setSelectedTimeframe(e.target.value)}
+                            className="bg-gray-700 text-white text-xs rounded px-3 py-1 border border-gray-600 hover:border-gray-500"
+                        >
+                            {TIMEFRAMES.map((tf) => (
+                                <option key={tf.value} value={tf.value}>{tf.label}</option>
+                            ))}
+                        </select>
+                        <select
+                            value={selectedDataCount}
+                            onChange={(e) => setSelectedDataCount(parseInt(e.target.value, 10))}
+                            className="bg-gray-700 text-white text-xs rounded px-3 py-1 border border-gray-600 hover:border-gray-500"
+                        >
+                            {DATA_COUNTS.map((dc) => (
+                                <option key={dc.value} value={dc.value}>{dc.label}</option>
+                            ))}
+                        </select>
                         {analysisData && (
                             <span className="text-xs text-gray-500">{analysisData.meta.dataPoints}本</span>
                         )}
@@ -272,7 +312,7 @@ export default function MarketAnalysisPage() {
                                             <span className="text-xs font-semibold text-white">{analysisData.symbol}</span>
                                             
                                             {/* 時間足表示 */}
-                                            <span className="text-xs text-gray-400">1分足</span>
+                                            <span className="text-xs text-gray-400">{TIMEFRAMES.find(tf => tf.value === selectedTimeframe)?.label || selectedTimeframe}</span>
                                             
                                             {/* データポイント数 */}
                                             <span className="text-xs text-gray-500">{analysisData.meta.dataPoints}本</span>

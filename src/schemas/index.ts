@@ -28,3 +28,4 @@ export * from './api/order';
 // ========================================
 export * from './external/twelveData';
 export * from './external/openai';
+export * from './external/ctrader';
