@@ -12,31 +12,15 @@
 
 import { PrismaClient } from '@prisma/client';
 import { config } from '../src/config';
+import { CTraderConnectionType } from '../src/backend/services/ctrader/types/connection';
+import { CTraderAccount, CTraderSymbolInfo } from '../src/schemas/external/ctrader';
 
 // @reiryoku/ctrader-layer を使用
+// @reiryoku/ctrader-layer は型定義がないため、型定義は types/connection.ts で提供
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { CTraderConnection } = require('@reiryoku/ctrader-layer');
 
 const prisma = new PrismaClient();
-
-// 型定義
-interface CTraderAccount {
-  ctidTraderAccountId: number;
-  isLive: boolean;
-  traderLogin: number;
-}
-
-interface CTraderSymbol {
-  symbolId: number;
-  symbolName: string;
-}
-
-interface CTraderSpotEvent {
-  symbolId?: number;
-  bid?: number;
-  ask?: number;
-  timestamp?: number;
-}
 
 async function main(): Promise<void> {
   console.log('='.repeat(60));
@@ -107,9 +91,9 @@ async function testConnection(accessToken: string): Promise<void> {
     // Demo環境: demo.ctraderapi.com:5035
     // Live環境: live.ctraderapi.com:5035
     connection = new CTraderConnection({
-      host: 'live.ctraderapi.com',
-      port: 5035,
-    });
+      host: config.ctrader.wsLiveHost,
+      port: config.ctrader.wsPort,
+    }) as CTraderConnectionType;
 
     // 接続開始
     console.log('\n📡 WebSocket接続中...');
@@ -163,11 +147,11 @@ async function testConnection(accessToken: string): Promise<void> {
           ctidTraderAccountId: account.ctidTraderAccountId,
         });
         
-        const symbols: CTraderSymbol[] = symbolsResponse?.symbol || [];
+        const symbols: CTraderSymbolInfo[] = symbolsResponse?.symbol || [];
         console.log(`✅ シンボル数: ${symbols.length}`);
         
         // XAUUSD を探す
-        const xauusd = symbols.find((s: CTraderSymbol) => 
+        const xauusd = symbols.find((s: CTraderSymbolInfo) => 
           s.symbolName?.includes('XAUUSD') || s.symbolName?.includes('XAU/USD') || s.symbolName?.includes('GOLD')
         );
         
@@ -203,7 +187,7 @@ async function testConnection(accessToken: string): Promise<void> {
         } else {
           // 最初の10シンボルを表示
           console.log('\n  最初の10シンボル:');
-          symbols.slice(0, 10).forEach((s: CTraderSymbol) => {
+          symbols.slice(0, 10).forEach((s: CTraderSymbolInfo) => {
             console.log(`    - ${s.symbolName} (ID: ${s.symbolId})`);
           });
         }
