@@ -1,0 +1,23 @@
+{
+  "name": "gemini-drive-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "build/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node build/index.js",
+    "watch": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.0",
+    "@modelcontextprotocol/sdk": "^1.2.0",
+    "dotenv": "^16.4.5",
+    "googleapis": "^140.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}
