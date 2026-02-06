@@ -126,12 +126,12 @@ jobs:
             echo "$RCLONE_CONF" | base64 --decode > ~/.config/rclone/rclone.conf
           elif [ -n "$RCLONE_SERVICE_ACCOUNT_JSON" ]; then
             echo "$RCLONE_SERVICE_ACCOUNT_JSON" > "$GITHUB_WORKSPACE/gdrive-sa.json"
-            cat > ~/.config/rclone/rclone.conf << 'EOF'
-[gdrive]
-type = drive
-scope = drive
-service_account_file = gdrive-sa.json
-EOF
+            printf "%s\n" \
+              "[gdrive]" \
+              "type = drive" \
+              "scope = drive" \
+              "service_account_file = gdrive-sa.json" \
+              > ~/.config/rclone/rclone.conf
           else
             echo "❌ RCLONE_CONF も RCLONE_SERVICE_ACCOUNT_JSON も未設定です"
             exit 1
