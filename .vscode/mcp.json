@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "gemini-drive-mcp": {
+      "command": "node",
+      "args": ["build/index.js"],
+      "cwd": "${workspaceFolder}/tools/gemini-drive-mcp"
+    }
+  }
+}
