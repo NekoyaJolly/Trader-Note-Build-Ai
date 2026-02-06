@@ -1,0 +1,150 @@
+name: Sync to Google Drive (rclone)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  sync-to-drive:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install repomix
+        run: npm install -g repomix
+
+      - name: Create domain files (NotebookLM Ready)
+        run: |
+          mkdir -p dist_notebook
+          
+          # 1. トレード管理 (Trade Management)
+          npx repomix \
+            --include "prisma/schema.prisma,src/backend/api/trades/**,src/backend/services/trade/**,src/controllers/trade/**,src/models/trade/**,src/frontend/app/trades/**,src/frontend/components/trades/**" \
+            --output dist_notebook/Domain_TradeManagement.md \
+            --style markdown
+          echo "# Domain: トレード管理 (Trade Management)" | cat - dist_notebook/Domain_TradeManagement.md > tmp && mv tmp dist_notebook/Domain_TradeManagement.md
+
+          # 2. トレードノート (Trade Notes)
+          npx repomix \
+            --include "NOTE.md,prisma/schema.prisma,src/backend/api/notes/**,src/backend/services/note/**,src/controllers/note/**,src/models/note/**,src/domain/note/**,src/frontend/app/notes/**,src/frontend/components/notes/**" \
+            --output dist_notebook/Domain_TradeNotes.md \
+            --style markdown
+          echo "# Domain: トレードノート (Trade Notes)" | cat - dist_notebook/Domain_TradeNotes.md > tmp && mv tmp dist_notebook/Domain_TradeNotes.md
+
+          # 3. プロファイル・インジケーター (Profile & Indicators)
+          npx repomix \
+            --include "prisma/schema.prisma,indicators/**,src/backend/api/profiles/**,src/backend/services/profile/**,src/controllers/profile/**,src/models/profile/**,src/frontend/app/profiles/**,src/frontend/components/profiles/**,src/domain/indicators/**" \
+            --output dist_notebook/Domain_ProfileIndicators.md \
+            --style markdown
+          echo "# Domain: プロファイル・インジケーター (Profile & Indicators)" | cat - dist_notebook/Domain_ProfileIndicators.md > tmp && mv tmp dist_notebook/Domain_ProfileIndicators.md
+
+          # 4. リアルタイム処理 (Realtime Processing)
+          npx repomix \
+            --include "docs/realtime_similarity_notification_architecture.md,src/backend/services/realtime/**,src/backend/services/notification/**,src/infrastructure/websocket/**,scripts/run-realtime-worker.ts,src/frontend/contexts/CTraderProvider.tsx" \
+            --output dist_notebook/Domain_Realtime.md \
+            --style markdown
+          echo "# Domain: リアルタイム処理 (Realtime Processing)" | cat - dist_notebook/Domain_Realtime.md > tmp && mv tmp dist_notebook/Domain_Realtime.md
+
+          # 5. 認証・セッション (Auth & Session)
+          npx repomix \
+            --include "prisma/schema.prisma,src/backend/services/auth/**,src/backend/services/ctrader/**,src/controllers/auth/**,src/middleware/auth/**,src/frontend/contexts/AuthContext.tsx,src/frontend/app/auth/**,src/frontend/app/login/**" \
+            --output dist_notebook/Domain_Auth.md \
+            --style markdown
+          echo "# Domain: 認証・セッション (Auth & Session)" | cat - dist_notebook/Domain_Auth.md > tmp && mv tmp dist_notebook/Domain_Auth.md
+
+          # 6. Side-B AI (計画中)
+          npx repomix \
+            --include "docs/side-b/**,src/side-b/**,src/frontend/app/side-b/**,.github/instructions/side-b.instructions.md" \
+            --output dist_notebook/Domain_SideB_AI.md \
+            --style markdown
+          echo "# Domain: Side-B AI (AI Trade Assistant)" | cat - dist_notebook/Domain_SideB_AI.md > tmp && mv tmp dist_notebook/Domain_SideB_AI.md
+
+          # 7. インフラストラクチャ (Infrastructure)
+          npx repomix \
+            --include "prisma/schema.prisma,src/infrastructure/**,src/backend/services/market/**,src/config/**" \
+            --output dist_notebook/Domain_Infrastructure.md \
+            --style markdown
+          echo "# Domain: インフラストラクチャ (Infrastructure)" | cat - dist_notebook/Domain_Infrastructure.md > tmp && mv tmp dist_notebook/Domain_Infrastructure.md
+
+          # 8. 共通・ユーティリティ (Common & Utils)
+          npx repomix \
+            --include "src/utils/**,src/middleware/**,src/models/common/**,src/schemas/**,src/frontend/components/common/**,src/frontend/lib/**" \
+            --output dist_notebook/Domain_Common.md \
+            --style markdown
+          echo "# Domain: 共通・ユーティリティ (Common & Utils)" | cat - dist_notebook/Domain_Common.md > tmp && mv tmp dist_notebook/Domain_Common.md
+
+          # 9. DBスキーマ単独 (Database Schema)
+          npx repomix \
+            --include "prisma/schema.prisma,prisma/migrations/**/*.sql" \
+            --output dist_notebook/Schema_Database.md \
+            --style markdown
+          echo "# Database Schema (Prisma)" | cat - dist_notebook/Schema_Database.md > tmp && mv tmp dist_notebook/Schema_Database.md
+
+          # 10. アーキテクチャドキュメント (Architecture Docs)
+          npx repomix \
+            --include "AGENTS.md,NOTE.md,README.md,docs/ARCHITECTURE.md,docs/API.md,docs/MATCHING_ALGORITHM.md,docs/DESIGN_PHILOSOPHY.md,docs/realtime_similarity_notification_architecture.md" \
+            --output dist_notebook/Architecture_Documentation.md \
+            --style markdown
+          echo "# アーキテクチャドキュメント (Architecture Documentation)" | cat - dist_notebook/Architecture_Documentation.md > tmp && mv tmp dist_notebook/Architecture_Documentation.md
+
+          # 11. テスト (Tests)
+          npx repomix \
+            --include "src/backend/tests/**,jest.config.ts,jest.setup.ts" \
+            --output dist_notebook/Domain_Tests.md \
+            --style markdown
+          echo "# Domain: テスト (Tests)" | cat - dist_notebook/Domain_Tests.md > tmp && mv tmp dist_notebook/Domain_Tests.md
+
+          echo "✅ Domain files generated:"
+          ls -lh dist_notebook/
+
+      - name: Setup rclone
+        uses: AnimMouse/setup-rclone@v1
+        with:
+          version: latest
+
+      - name: Sync to Google Drive
+        env:
+          RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
+          RCLONE_SERVICE_ACCOUNT_JSON: ${{ secrets.RCLONE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+        run: |
+          # rclone.confを作成（2方式に対応）
+          # 1) RCLONE_CONF: base64エンコード済みのrclone.conf
+          # 2) RCLONE_SERVICE_ACCOUNT_JSON: サービスアカウントJSON（生の文字列）
+          mkdir -p ~/.config/rclone
+
+          if [ -n "$RCLONE_CONF" ]; then
+            echo "$RCLONE_CONF" | base64 --decode > ~/.config/rclone/rclone.conf
+          elif [ -n "$RCLONE_SERVICE_ACCOUNT_JSON" ]; then
+            echo "$RCLONE_SERVICE_ACCOUNT_JSON" > "$GITHUB_WORKSPACE/gdrive-sa.json"
+            cat > ~/.config/rclone/rclone.conf << 'EOF'
+[gdrive]
+type = drive
+scope = drive
+service_account_file = gdrive-sa.json
+EOF
+          else
+            echo "❌ RCLONE_CONF も RCLONE_SERVICE_ACCOUNT_JSON も未設定です"
+            exit 1
+          fi
+          
+          echo "🚀 Starting sync to folder ID: $GOOGLE_DRIVE_FOLDER_ID"
+          
+          # Google Driveへ同期
+          rclone sync dist_notebook gdrive: \
+            --drive-root-folder-id "$GOOGLE_DRIVE_FOLDER_ID" \
+            --checksum \
+            --delete-excluded \
+            --transfers=8 \
+            --verbose
+            
+          echo "🎉 Sync complete!"
