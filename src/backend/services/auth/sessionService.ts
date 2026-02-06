@@ -14,6 +14,9 @@ if (!JWT_SECRET || JWT_SECRET === 'development-secret-change-in-production') {
   console.warn('[SessionService] 警告: JWT_SECRET が設定されていません。本番環境では必ず設定してください。');
 }
 
+// 本番環境かどうかを判定
+const isProduction = process.env.NODE_ENV === 'production';
+
 // トークンの有効期限
 const ACCESS_TOKEN_EXPIRES_IN = '7d'; // アクセストークン: 7日（cTrader連携なので長め）
 const ACCESS_TOKEN_EXPIRES_IN_SECONDS = 7 * 24 * 60 * 60; // 7日（秒）
@@ -96,13 +99,23 @@ export class SessionService {
    * @param token - JWTトークン
    */
   setTokenCookie(res: Response, token: string): void {
-    res.cookie('auth_token', token, {
+    // 開発環境では secure: false, sameSite: 'lax'
+    // 本番環境では secure: true, sameSite: 'none'（クロスドメイン対応）
+    const cookieOptions = {
       httpOnly: true, // XSS 対策
-      secure: true, // HTTPS のみで送信（クロスドメイン Cookie 対応）
-      sameSite: 'none', // クロスサイトリクエストで Cookie を送信（Vercel → Railway）
+      secure: isProduction, // 本番環境のみ HTTPS 必須
+      sameSite: (isProduction ? 'none' : 'lax') as 'none' | 'lax',
       maxAge: ACCESS_TOKEN_EXPIRES_IN_SECONDS * 1000, // ミリ秒
       path: '/',
+    };
+
+    console.log('[SessionService] Cookie設定:', {
+      secure: cookieOptions.secure,
+      sameSite: cookieOptions.sameSite,
+      environment: isProduction ? '本番' : '開発',
     });
+
+    res.cookie('auth_token', token, cookieOptions);
   }
 
   /**
@@ -113,8 +126,8 @@ export class SessionService {
   clearTokenCookie(res: Response): void {
     res.clearCookie('auth_token', {
       httpOnly: true,
-      secure: true, // HTTPS のみで送信
-      sameSite: 'none', // クロスサイトリクエストに対応
+      secure: isProduction, // 本番環境のみ HTTPS 必須
+      sameSite: (isProduction ? 'none' : 'lax') as 'none' | 'lax',
       path: '/',
     });
   }

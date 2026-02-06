@@ -2,6 +2,31 @@
 
 All notable changes to TradeAssist MVP will be documented in this file.
 
+## [1.0.0-fix-oauth-cookie] - 2026-02-06
+
+### 修正 - cTrader OAuth認証時のCookie設定バグ
+
+#### 問題
+- cTraderアカウント選択・ログインまでは成功するが、アプリにリダイレクト時にログインエラーが発生
+- Cookie設定が環境に関わらず常に `secure: true`, `sameSite: 'none'` となっていた
+- 開発環境（localhost, HTTP）ではブラウザがCookieを送信しない問題
+
+#### 修正内容
+- **sessionService.ts**: 環境変数 `NODE_ENV` に基づいてCookie設定を動的に変更
+  - 開発環境: `secure: false`, `sameSite: 'lax'`
+  - 本番環境: `secure: true`, `sameSite: 'none'`（クロスドメイン対応）
+- **ctraderAuthRoutes.ts**: デバッグログを強化（コールバック・認証エンドポイント）
+- **callback/page.tsx**: フロントエンドのデバッグログ追加
+
+#### 影響範囲
+- ✅ 開発環境でのOAuth認証が正常に動作
+- ✅ 本番環境でのクロスドメイン認証も維持
+- ✅ セキュリティレベルは維持（本番では引き続き secure: true）
+
+詳細: [docs/fixes/oauth-cookie-fix-2026-02-06.md](docs/fixes/oauth-cookie-fix-2026-02-06.md)
+
+---
+
 ## [1.0.0-phase14-ui] - 2025-01-XX
 
 ### 変更 - レイアウト大改修（サイドバー・ヘッダー統合）
