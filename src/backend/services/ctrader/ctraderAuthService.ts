@@ -173,7 +173,18 @@ export class CTraderAuthService {
     const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000);
     
     // 2. アカウントIDを取得（アクセストークンから）
-    const accountId = await this.fetchAccountId(tokenData.access_token);
+    console.log('[cTraderAuth] アカウントID取得開始...');
+    let accountId: string;
+    try {
+      accountId = await this.fetchAccountId(tokenData.access_token);
+      console.log('[cTraderAuth] アカウントID取得成功:', accountId);
+    } catch (error) {
+      console.error('[cTraderAuth] アカウントID取得エラー:', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      throw error;
+    }
     
     // 3. 既存ユーザーを検索（primaryAccountId で検索）
     let user = await this.prisma.user.findUnique({
@@ -435,6 +446,11 @@ export class CTraderAuthService {
 
     try {
       // 1. Live環境でWebSocket接続を試行
+      console.log('[CTraderAuth] WebSocket接続開始 (Live環境):', {
+        host: config.ctrader.wsLiveHost,
+        port: config.ctrader.wsPort,
+      });
+      
       connection = new CTraderConnection({
         host: config.ctrader.wsLiveHost,
         port: config.ctrader.wsPort,
@@ -444,6 +460,7 @@ export class CTraderAuthService {
       console.log('[CTraderAuth] WebSocket 接続成功 (Live環境)');
 
       // 2. アプリケーション認証
+      console.log('[CTraderAuth] アプリケーション認証開始 (Live環境)');
       await connection.sendCommand('ProtoOAApplicationAuthReq', {
         clientId: config.ctrader.clientId,
         clientSecret: config.ctrader.clientSecret,
@@ -451,6 +468,7 @@ export class CTraderAuthService {
       console.log('[CTraderAuth] アプリケーション認証成功 (Live環境)');
 
       // 3. アカウント一覧を取得してZodでバリデーション
+      console.log('[CTraderAuth] アカウント一覧取得開始 (Live環境)');
       const accountListRaw = await connection.sendCommand('ProtoOAGetAccountListByAccessTokenReq', {
         accessToken,
       });
@@ -488,6 +506,7 @@ export class CTraderAuthService {
       console.warn('[CTraderAuth] Live環境エラー詳細:', {
         message: liveError.message,
         name: liveError.name,
+        stack: liveError.stack,
       });
 
       // Live環境の接続をクリーンアップ
@@ -503,6 +522,11 @@ export class CTraderAuthService {
 
       try {
         // Demo環境で接続
+        console.log('[CTraderAuth] WebSocket接続開始 (Demo環境):', {
+          host: config.ctrader.wsDemoHost,
+          port: config.ctrader.wsPort,
+        });
+        
         connection = new CTraderConnection({
           host: config.ctrader.wsDemoHost,
           port: config.ctrader.wsPort,
@@ -511,6 +535,7 @@ export class CTraderAuthService {
         await connection.open();
         console.log('[CTraderAuth] WebSocket 接続成功 (Demo環境)');
 
+        console.log('[CTraderAuth] アプリケーション認証開始 (Demo環境)');
         await connection.sendCommand('ProtoOAApplicationAuthReq', {
           clientId: config.ctrader.clientId,
           clientSecret: config.ctrader.clientSecret,
@@ -518,6 +543,7 @@ export class CTraderAuthService {
         console.log('[CTraderAuth] アプリケーション認証成功 (Demo環境)');
 
         // アカウント一覧を取得してZodでバリデーション
+        console.log('[CTraderAuth] アカウント一覧取得開始 (Demo環境)');
         const accountListRaw = await connection.sendCommand('ProtoOAGetAccountListByAccessTokenReq', {
           accessToken,
         });
@@ -546,7 +572,11 @@ export class CTraderAuthService {
         return accountId;
 
       } catch (demoError) {
-        console.error('[CTraderAuth] Demo環境でもアカウント取得失敗:', demoError);
+        console.error('[CTraderAuth] Demo環境でもアカウント取得失敗:', {
+          error: demoError,
+          message: demoError instanceof Error ? demoError.message : '不明なエラー',
+          stack: demoError instanceof Error ? demoError.stack : undefined,
+        });
         console.error('[CTraderAuth] Live環境のエラー:', liveError?.message);
         console.error('[CTraderAuth] Demo環境のエラー:', demoError instanceof Error ? demoError.message : '不明なエラー');
         
