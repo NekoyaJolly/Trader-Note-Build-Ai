@@ -60,6 +60,11 @@ function CallbackHandler() {
 
       try {
         // Railway API に code を送信してトークン交換
+        console.log('[Callback] トークン交換開始:', {
+          apiUrl: `${API_BASE_URL}/api/auth/ctrader/callback`,
+          codeLength: code.length,
+        });
+
         const response = await fetch(`${API_BASE_URL}/api/auth/ctrader/callback`, {
           method: 'POST',
           headers: {
@@ -69,7 +74,21 @@ function CallbackHandler() {
           body: JSON.stringify({ code }),
         });
 
+        console.log('[Callback] APIレスポンス:', {
+          status: response.status,
+          statusText: response.statusText,
+          headers: {
+            contentType: response.headers.get('content-type'),
+            setCookie: response.headers.get('set-cookie'),
+          },
+        });
+
         const data = await response.json();
+        console.log('[Callback] レスポンスデータ:', {
+          success: data.success,
+          hasUser: !!data.user,
+          error: data.error,
+        });
 
         if (response.ok && data.success) {
           // バックエンドから返されたユーザー情報をセット
@@ -77,6 +96,8 @@ function CallbackHandler() {
           
           setStatus('success');
           setMessage(data.isNewUser ? 'アカウントを作成しました！' : 'ログインに成功しました！');
+          
+          console.log('[Callback] ログイン成功、リダイレクト中...');
           setTimeout(() => {
             router.push('/'); // ダッシュボードにリダイレクト
           }, 1500);
@@ -84,7 +105,7 @@ function CallbackHandler() {
           throw new Error(data.error || 'ログインに失敗しました');
         }
       } catch (err) {
-        console.error('ログインエラー:', err);
+        console.error('[Callback] ログインエラー:', err);
         setStatus('error');
         setMessage(err instanceof Error ? err.message : 'エラーが発生しました');
         setTimeout(() => {

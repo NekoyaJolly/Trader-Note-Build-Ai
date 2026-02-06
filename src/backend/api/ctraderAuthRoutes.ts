@@ -87,9 +87,20 @@ router.get('/ctrader/url', async (req: Request, res: Response) => {
  */
 router.post('/ctrader/callback', async (req: Request, res: Response) => {
   try {
+    console.log('[cTraderAuth] コールバック処理開始:', {
+      hasCode: !!req.body?.code,
+      codeLength: req.body?.code?.length,
+      headers: {
+        origin: req.headers.origin,
+        referer: req.headers.referer,
+        userAgent: req.headers['user-agent'],
+      },
+    });
+
     const bodyResult = ExchangeCodeRequestSchema.safeParse(req.body);
     
     if (!bodyResult.success) {
+      console.error('[cTraderAuth] リクエストバリデーションエラー:', bodyResult.error.format());
       return res.status(400).json({
         error: 'リクエストが不正です',
         details: bodyResult.error.format(),
@@ -97,12 +108,14 @@ router.post('/ctrader/callback', async (req: Request, res: Response) => {
     }
     
     const { code } = bodyResult.data;
+    console.log('[cTraderAuth] 認可コード受信:', code.substring(0, 10) + '...');
+    
     const authResult = await authService.exchangeCodeAndLogin(code);
     
     // JWT を Cookie に設定
     sessionService.setTokenCookie(res, authResult.jwt);
     
-    console.log(`cTrader ログイン成功: ユーザー ${authResult.user.id}, アカウント ${authResult.token.accountId}`);
+    console.log(`[cTraderAuth] ログイン成功: ユーザー ${authResult.user.id}, アカウント ${authResult.token.accountId}`);
     
     return res.json({
       success: true,
@@ -120,7 +133,13 @@ router.post('/ctrader/callback', async (req: Request, res: Response) => {
         : 'cTrader 連携が完了しました',
     });
   } catch (error) {
-    console.error('cTrader ログインエラー:', error);
+    console.error('[cTraderAuth] ログインエラー詳細:', {
+      error: error instanceof Error ? {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+      } : error,
+    });
     
     const errorMessage = error instanceof Error ? error.message : String(error);
     
@@ -334,14 +353,24 @@ router.get('/me', async (req: Request, res: Response) => {
     // Cookie または Authorization ヘッダーから JWT を取得
     let token = req.cookies?.auth_token;
     
+    console.log('[cTraderAuth] /me エンドポイント:', {
+      hasCookie: !!token,
+      hasAuthHeader: !!req.headers.authorization,
+      cookieKeys: Object.keys(req.cookies || {}),
+    });
+
     if (!token) {
       const authHeader = req.headers.authorization;
       if (authHeader && authHeader.startsWith('Bearer ')) {
         token = authHeader.substring(7);
+        console.log('[cTraderAuth] Authorization ヘッダーからトークン取得');
       }
+    } else {
+      console.log('[cTraderAuth] Cookie からトークン取得');
     }
     
     if (!token) {
+      console.warn('[cTraderAuth] トークンが見つかりません');
       return res.status(401).json({
         error: '認証が必要です',
       });
@@ -349,6 +378,7 @@ router.get('/me', async (req: Request, res: Response) => {
     
     // JWT を検証
     const payload = sessionService.verifyToken(token);
+    console.log('[cTraderAuth] JWT検証成功:', { userId: payload.userId });
     
     // ユーザー情報を取得
     const user = await prisma.user.findUnique({
@@ -365,11 +395,18 @@ router.get('/me', async (req: Request, res: Response) => {
     });
     
     if (!user) {
+      console.error('[cTraderAuth] ユーザーが見つかりません:', payload.userId);
       return res.status(404).json({
         error: 'ユーザーが見つかりません',
       });
     }
     
+    console.log('[cTraderAuth] ユーザー情報取得成功:', {
+      userId: user.id,
+      primaryAccountId: user.primaryAccountId,
+      accountsCount: user.ctraderTokens.length,
+    });
+
     return res.json({
       success: true,
       user: {
@@ -384,6 +421,12 @@ router.get('/me', async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
+    console.error('[cTraderAuth] /me エラー:', {
+      error: error instanceof Error ? {
+        name: error.name,
+        message: error.message,
+      } : error,
+    });
     const errorMessage = error instanceof Error ? error.message : 'ユーザー情報の取得に失敗しました';
     return res.status(401).json({
       error: errorMessage,
