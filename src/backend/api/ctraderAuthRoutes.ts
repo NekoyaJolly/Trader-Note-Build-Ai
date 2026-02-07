@@ -49,17 +49,17 @@ const DisconnectRequestSchema = z.object({
 router.get('/ctrader/url', async (req: Request, res: Response) => {
   try {
     const queryResult = GetAuthUrlQuerySchema.safeParse(req.query);
-    
+
     if (!queryResult.success) {
       return res.status(400).json({
         error: 'パラメータが不正です',
         details: queryResult.error.format(),
       });
     }
-    
+
     const { state } = queryResult.data;
     const authUrl = authService.generateAuthUrl(state);
-    
+
     return res.json({
       authUrl,
       message: 'このURL にリダイレクトして cTrader 認証を開始してください',
@@ -98,7 +98,7 @@ router.post('/ctrader/callback', async (req: Request, res: Response) => {
     });
 
     const bodyResult = ExchangeCodeRequestSchema.safeParse(req.body);
-    
+
     if (!bodyResult.success) {
       console.error('[cTraderAuth] リクエストバリデーションエラー:', bodyResult.error.format());
       return res.status(400).json({
@@ -106,17 +106,17 @@ router.post('/ctrader/callback', async (req: Request, res: Response) => {
         details: bodyResult.error.format(),
       });
     }
-    
+
     const { code } = bodyResult.data;
     console.log('[cTraderAuth] 認可コード受信:', code.substring(0, 10) + '...');
-    
+
     const authResult = await authService.exchangeCodeAndLogin(code);
-    
+
     // JWT を Cookie に設定
     sessionService.setTokenCookie(res, authResult.jwt);
-    
+
     console.log(`[cTraderAuth] ログイン成功: ユーザー ${authResult.user.id}, アカウント ${authResult.token.accountId}`);
-    
+
     return res.json({
       success: true,
       user: {
@@ -126,9 +126,12 @@ router.post('/ctrader/callback', async (req: Request, res: Response) => {
         email: authResult.user.email,
         role: authResult.user.role,
       },
+      // JWT トークンをレスポンスボディにも含める（クロスオリジン環境用）
+      // Cookie が使えない環境（開発環境等）でも Authorization ヘッダーで認証可能
+      token: authResult.jwt,
       accountId: authResult.token.accountId,
       isNewUser: authResult.isNewUser,
-      message: authResult.isNewUser 
+      message: authResult.isNewUser
         ? 'アカウントを作成し、cTrader 連携が完了しました'
         : 'cTrader 連携が完了しました',
     });
@@ -140,9 +143,9 @@ router.post('/ctrader/callback', async (req: Request, res: Response) => {
         stack: error.stack,
       } : error,
     });
-    
+
     const errorMessage = error instanceof Error ? error.message : String(error);
-    
+
     // エラー種別に応じたレスポンス
     if (error instanceof Error) {
       if (error.message.includes('400')) {
@@ -158,7 +161,7 @@ router.post('/ctrader/callback', async (req: Request, res: Response) => {
         });
       }
     }
-    
+
     return res.status(500).json({
       error: 'ログインに失敗しました',
       details: errorMessage,
@@ -174,7 +177,7 @@ router.post('/ctrader/callback', async (req: Request, res: Response) => {
 router.get('/ctrader/status', async (_req: Request, res: Response) => {
   try {
     const status = await authService.getConnectionStatus();
-    
+
     return res.json({
       connected: status.connected,
       accounts: status.accounts.map((acc: { accountId: string; expiresAt: Date; lastConnectedAt: Date | null }) => ({
@@ -202,14 +205,14 @@ router.get('/ctrader/status', async (_req: Request, res: Response) => {
 router.delete('/ctrader', async (req: Request, res: Response) => {
   try {
     const bodyResult = DisconnectRequestSchema.safeParse(req.body);
-    
+
     if (bodyResult.success) {
       // 特定アカウントの接続解除
       const { accountId } = bodyResult.data;
       await authService.disconnect(accountId);
-      
+
       console.log(`cTrader 接続解除: アカウント ${accountId}`);
-      
+
       return res.json({
         success: true,
         message: `アカウント ${accountId} の接続を解除しました`,
@@ -217,9 +220,9 @@ router.delete('/ctrader', async (req: Request, res: Response) => {
     } else {
       // 全接続解除
       await authService.disconnectAll();
-      
+
       console.log('cTrader 全接続解除');
-      
+
       return res.json({
         success: true,
         message: 'すべての cTrader 接続を解除しました',
@@ -315,19 +318,19 @@ router.put('/ctrader/primary', async (req: Request, res: Response) => {
 router.post('/ctrader/refresh', async (req: Request, res: Response) => {
   try {
     const bodyResult = DisconnectRequestSchema.safeParse(req.body);
-    
+
     if (!bodyResult.success) {
       return res.status(400).json({
         error: 'accountId は必須です',
         details: bodyResult.error.format(),
       });
     }
-    
+
     const { accountId } = bodyResult.data;
     const token = await authService.refreshAccessToken(accountId);
-    
+
     console.log(`cTrader トークン更新: アカウント ${accountId}`);
-    
+
     return res.json({
       success: true,
       accountId: token.accountId,
@@ -352,7 +355,7 @@ router.get('/me', async (req: Request, res: Response) => {
   try {
     // Cookie または Authorization ヘッダーから JWT を取得
     let token = req.cookies?.auth_token;
-    
+
     console.log('[cTraderAuth] /me エンドポイント:', {
       hasCookie: !!token,
       hasAuthHeader: !!req.headers.authorization,
@@ -368,18 +371,18 @@ router.get('/me', async (req: Request, res: Response) => {
     } else {
       console.log('[cTraderAuth] Cookie からトークン取得');
     }
-    
+
     if (!token) {
       console.warn('[cTraderAuth] トークンが見つかりません');
       return res.status(401).json({
         error: '認証が必要です',
       });
     }
-    
+
     // JWT を検証
     const payload = sessionService.verifyToken(token);
     console.log('[cTraderAuth] JWT検証成功:', { userId: payload.userId });
-    
+
     // ユーザー情報を取得
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
@@ -393,14 +396,14 @@ router.get('/me', async (req: Request, res: Response) => {
         },
       },
     });
-    
+
     if (!user) {
       console.error('[cTraderAuth] ユーザーが見つかりません:', payload.userId);
       return res.status(404).json({
         error: 'ユーザーが見つかりません',
       });
     }
-    
+
     console.log('[cTraderAuth] ユーザー情報取得成功:', {
       userId: user.id,
       primaryAccountId: user.primaryAccountId,
@@ -443,7 +446,7 @@ router.post('/logout', async (_req: Request, res: Response) => {
   try {
     // Cookie を削除
     sessionService.clearTokenCookie(res);
-    
+
     return res.json({
       success: true,
       message: 'ログアウトしました',

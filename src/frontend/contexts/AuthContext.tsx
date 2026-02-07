@@ -43,6 +43,8 @@ interface AuthContextValue {
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   setUser: (user: User | null) => void;
+  /** JWT トークンを localStorage に保存（クロスオリジン環境用） */
+  saveToken: (token: string) => void;
 }
 
 // ========================================
@@ -55,10 +57,35 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 // AuthProvider コンポーネント
 // ========================================
 
+// localStorage のキー名
+const AUTH_TOKEN_KEY = 'auth_token';
+
+/** localStorage から JWT トークンを取得 */
+function getStoredToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return localStorage.getItem(AUTH_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+
+  /**
+   * JWT トークンを localStorage に保存
+   */
+  const saveToken = (token: string) => {
+    try {
+      localStorage.setItem(AUTH_TOKEN_KEY, token);
+      console.log('[AuthContext] トークンを localStorage に保存しました');
+    } catch (error) {
+      console.error('[AuthContext] トークン保存エラー:', error);
+    }
+  };
 
   /**
    * ユーザー情報を取得
@@ -66,12 +93,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchUser = async (): Promise<User | null> => {
     try {
       console.log('[AuthContext] ユーザー情報取得開始');
+      // Cookie に加えて、localStorage の JWT トークンも Authorization ヘッダーで送信
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      const storedToken = getStoredToken();
+      if (storedToken) {
+        headers['Authorization'] = `Bearer ${storedToken}`;
+      }
       const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
         method: 'GET',
-        credentials: 'include', // Cookie を送信
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        credentials: 'include', // Cookie も送信（本番環境用）
+        headers,
       });
 
       console.log('[AuthContext] /api/auth/me レスポンス:', response.status, response.statusText);
@@ -133,12 +166,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (response.ok) {
         const data = await response.json();
-        
+
         // state パラメータにリダイレクト先を含める（任意）
-        const authUrl = redirectTo 
+        const authUrl = redirectTo
           ? `${data.authUrl}&state=${encodeURIComponent(redirectTo)}`
           : data.authUrl;
-        
+
         // cTrader 認証画面にリダイレクト
         window.location.href = authUrl;
       } else {
@@ -154,10 +187,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    */
   const logout = async () => {
     try {
+      const headers: Record<string, string> = {};
+      const storedToken = getStoredToken();
+      if (storedToken) {
+        headers['Authorization'] = `Bearer ${storedToken}`;
+      }
       await fetch(`${API_BASE_URL}/api/auth/logout`, {
         method: 'POST',
         credentials: 'include',
+        headers,
       });
+
+      // localStorage のトークンもクリア
+      try {
+        localStorage.removeItem(AUTH_TOKEN_KEY);
+      } catch { /* ignore */ }
 
       setUser(null);
       router.push('/login');
@@ -167,7 +211,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, refreshUser, setUser }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, refreshUser, setUser, saveToken }}>
       {children}
     </AuthContext.Provider>
   );
@@ -185,10 +229,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
  */
 export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext);
-  
+
   if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
-  
+
   return context;
 }

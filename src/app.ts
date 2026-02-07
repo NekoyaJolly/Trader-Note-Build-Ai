@@ -91,12 +91,13 @@ class App {
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization'],
+      exposedHeaders: ['Set-Cookie'],
     }));
 
     console.log('[App] JSON パーサーを設定中...');
     this.app.use(express.json());
     this.app.use(express.urlencoded({ extended: true }));
-    
+
     // Cookie パーサー（cTrader認証のJWT Cookie用）
     console.log('[App] Cookie パーサーを設定中...');
     this.app.use(cookieParser());
@@ -108,7 +109,7 @@ class App {
    */
   private initializeRoutes(): void {
     console.log('[App] ルート初期化開始...');
-    
+
     try {
       // Health check
       console.log('[App] /health エンドポイントを登録中...');
@@ -140,40 +141,40 @@ class App {
       // データルート
       console.log('[App] /api/trades ルートを登録中...');
       this.app.use('/api/trades', tradeRoutes);
-      
+
       console.log('[App] /api/matching ルートを登録中...');
       this.app.use('/api/matching', matchingRoutes);
-      
+
       console.log('[App] /api/notifications ルートを登録中...');
       this.app.use('/api/notifications', notificationRoutes);
-      
+
       console.log('[App] /api/orders ルートを登録中...');
       this.app.use('/api/orders', orderRoutes);
-      
+
       console.log('[App] /api/indicators ルートを登録中...');
       this.app.use('/api/indicators', indicatorRoutes);
-      
+
       console.log('[App] /api/profiles ルートを登録中...');
       this.app.use('/api/profiles', profileRoutes);
-      
+
       console.log('[App] /api/backtest ルートを登録中...');
       this.app.use('/api/backtest', backtestRoutes);
-      
+
       console.log('[App] /api/settings ルートを登録中...');
       this.app.use('/api/settings', settingsRoutes);
-      
+
       console.log('[App] /api/bars ルートを登録中...');
       this.app.use('/api/bars', barLocatorRoutes);
-      
+
       console.log('[App] /api/strategies ルートを登録中...');
       this.app.use('/api/strategies', strategyRoutes);
-      
+
       console.log('[App] /api/strategy-comparison ルートを登録中...');
       this.app.use('/api/strategy-comparison', strategyComparisonRoutes);
-      
+
       console.log('[App] /api/pattern-analysis ルートを登録中...');
       this.app.use('/api/pattern-analysis', patternAnalysisRoutes);
-      
+
       console.log('[App] /api/ohlcv ルートを登録中...');
       this.app.use('/api/ohlcv', ohlcvRoutes);
 

@@ -25,7 +25,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3
  */
 function CallbackHandler() {
   const router = useRouter();
-  const { setUser } = useAuth();
+  const { setUser, saveToken } = useAuth();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<'processing' | 'success' | 'error'>('processing');
   const [message, setMessage] = useState('cTrader 認証を処理中...');
@@ -91,12 +91,18 @@ function CallbackHandler() {
         });
 
         if (response.ok && data.success) {
+          // JWT トークンを localStorage に保存（クロスオリジン Cookie 問題の回避策）
+          if (data.token) {
+            saveToken(data.token);
+            console.log('[Callback] JWT トークンを localStorage に保存しました');
+          }
+
           // バックエンドから返されたユーザー情報をセット
           setUser(data.user);
-          
+
           setStatus('success');
           setMessage(data.isNewUser ? 'アカウントを作成しました！' : 'ログインに成功しました！');
-          
+
           console.log('[Callback] ログイン成功、リダイレクト中...');
           setTimeout(() => {
             router.push('/'); // ダッシュボードにリダイレクト
@@ -115,7 +121,7 @@ function CallbackHandler() {
     };
 
     handleCallback();
-  }, [searchParams, router]);
+  }, [searchParams, router, setUser, saveToken]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-900">
