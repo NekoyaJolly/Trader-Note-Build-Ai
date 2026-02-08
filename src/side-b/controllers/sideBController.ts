@@ -80,9 +80,9 @@ export class SideBController {
       // OHLCVデータが提供されていない場合は自動取得
       if (!ohlcvData || !Array.isArray(ohlcvData) || ohlcvData.length === 0) {
         console.log(`[SideBController] ohlcvData未提供のため、${symbol}/${timeframe} のデータを自動取得します`);
-        
+
         const historicalData = await marketDataService.getHistoricalData(symbol, timeframe, 100);
-        
+
         if (!historicalData || historicalData.length === 0) {
           res.status(500).json({ error: '市場データの取得に失敗しました' });
           return;
@@ -96,7 +96,7 @@ export class SideBController {
           close: d.close,
           volume: d.volume,
         }));
-        
+
         console.log(`[SideBController] ${parsedOhlcv.length}件のOHLCVデータを取得しました`);
       } else {
         // OHLCVデータの変換（timestampをDateに）
@@ -202,16 +202,16 @@ export class SideBController {
       const research = await researchRepository.findValidBySymbol(symbol);
 
       if (!research) {
-        res.status(404).json({ 
-          success: false, 
+        res.status(404).json({
+          success: false,
           message: '有効なリサーチがありません',
           cached: false,
         });
         return;
       }
 
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         research,
         cached: true,
       });
@@ -248,9 +248,9 @@ export class SideBController {
       if (!researchId) {
         if (!ohlcvData || !Array.isArray(ohlcvData) || ohlcvData.length === 0) {
           console.log(`[SideBController] ohlcvData未提供のため、${symbol}/${timeframe} のデータを自動取得します`);
-          
+
           const historicalData = await marketDataService.getHistoricalData(symbol, timeframe, 100);
-          
+
           if (!historicalData || historicalData.length === 0) {
             res.status(500).json({ error: '市場データの取得に失敗しました' });
             return;
@@ -264,7 +264,7 @@ export class SideBController {
             close: d.close,
             volume: d.volume,
           }));
-          
+
           console.log(`[SideBController] ${parsedOhlcv.length}件のOHLCVデータを取得しました`);
         } else {
           // OHLCVデータの変換
@@ -383,8 +383,8 @@ export class SideBController {
       const plan = await planRepository.findTodayBySymbol(symbol);
 
       if (!plan) {
-        res.status(404).json({ 
-          success: false, 
+        res.status(404).json({
+          success: false,
           message: '今日のプランがありません',
         });
         return;
@@ -435,7 +435,7 @@ export class SideBController {
       });
 
       if (!result.success) {
-        res.status(500).json({ 
+        res.status(500).json({
           error: result.error,
           research: result.research,  // リサーチは成功している可能性
         });
@@ -832,7 +832,7 @@ export class SideBController {
       const scheduler = getSideBScheduler();
       scheduler.updateConfig({ enabled: true });
       scheduler.start();
-      
+
       const status = scheduler.getStatus();
       res.json({ success: true, message: 'スケジューラーを開始しました', ...status });
     } catch (error) {
@@ -850,7 +850,7 @@ export class SideBController {
       const scheduler = getSideBScheduler();
       scheduler.stop();
       scheduler.updateConfig({ enabled: false });
-      
+
       const status = scheduler.getStatus();
       res.json({ success: true, message: 'スケジューラーを停止しました', ...status });
     } catch (error) {
@@ -877,7 +877,7 @@ export class SideBController {
 
       const scheduler = getSideBScheduler();
       scheduler.updateConfig(newConfig);
-      
+
       const status = scheduler.getStatus();
       res.json({ success: true, message: '設定を更新しました', ...status });
     } catch (error) {
@@ -926,7 +926,7 @@ export class SideBController {
    */
   getComparison = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { period, symbol } = getValidatedQuery<{ period?: string; symbol?: string }>(res);
+      const { period, symbol } = req.query as { period?: string; symbol?: string };
 
       // 期間のバリデーション
       const validPeriods = ['week', 'month', 'quarter', 'year', 'all'];
@@ -955,7 +955,7 @@ export class SideBController {
    */
   getComparisonDashboardData = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { period, symbol } = getValidatedQuery<{ period?: string; symbol?: string }>(res);
+      const { period, symbol } = req.query as { period?: string; symbol?: string };
 
       // 期間のバリデーション
       const validPeriods = ['week', 'month', 'quarter', 'year', 'all'];
@@ -989,7 +989,7 @@ export class SideBController {
   listSummaries = async (req: Request, res: Response): Promise<void> => {
     try {
       const { summarySchedulerService } = await import('../services');
-      
+
       const { period: periodStr, limit: limitStr, offset: offsetStr } = getValidatedQuery<{
         period?: string;
         limit?: string;
@@ -1023,7 +1023,7 @@ export class SideBController {
   generateSummary = async (req: Request, res: Response): Promise<void> => {
     try {
       const { summarySchedulerService } = await import('../services');
-      
+
       const { period, startDate, endDate } = req.body;
 
       // バリデーション
@@ -1064,7 +1064,7 @@ export class SideBController {
   getSummarySchedulerConfig = async (_req: Request, res: Response): Promise<void> => {
     try {
       const { summarySchedulerService } = await import('../services');
-      
+
       const config = summarySchedulerService.getConfig();
 
       res.json({
@@ -1084,7 +1084,7 @@ export class SideBController {
   updateSummarySchedulerConfig = async (req: Request, res: Response): Promise<void> => {
     try {
       const { summarySchedulerService } = await import('../services');
-      
+
       summarySchedulerService.updateConfig(req.body);
       const config = summarySchedulerService.getConfig();
 
@@ -1106,7 +1106,7 @@ export class SideBController {
   startSummaryScheduler = async (_req: Request, res: Response): Promise<void> => {
     try {
       const { summarySchedulerService } = await import('../services');
-      
+
       summarySchedulerService.start();
 
       res.json({
@@ -1126,7 +1126,7 @@ export class SideBController {
   stopSummaryScheduler = async (_req: Request, res: Response): Promise<void> => {
     try {
       const { summarySchedulerService } = await import('../services');
-      
+
       summarySchedulerService.stop();
 
       res.json({

@@ -469,7 +469,7 @@ export async function fetchIndicatorMetadata(category?: string): Promise<{
     // APIが利用できない場合は、フロントエンドの定義を使用
     console.warn('[fetchIndicatorMetadata] APIエラー、フロントエンド定義を使用:', error);
     const { INDICATOR_DEFINITIONS, getAllCategories } = await import('@/lib/indicatorDefinitions');
-    
+
     let indicators = INDICATOR_DEFINITIONS.map(def => ({
       id: def.id,
       name: def.name,
@@ -2417,7 +2417,7 @@ export async function fetchProfiles(): Promise<IndicatorProfile[]> {
     );
   }
   const payload = await response.json();
-  return payload.data.profiles;
+  return payload.data || [];
 }
 
 /**
@@ -2875,10 +2875,10 @@ export async function fetchWinningPatterns(
   if (options?.limit !== undefined) {
     params.set("limit", options.limit.toString());
   }
-  
+
   const url = `${API_BASE_URL}/api/pattern-analysis/patterns/${encodeURIComponent(strategyId)}?${params}`;
   const response = await fetch(url, { cache: "no-store" });
-  
+
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw new Error(error.error || "勝ちパターンの取得に失敗しました");

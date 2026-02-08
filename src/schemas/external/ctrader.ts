@@ -11,9 +11,9 @@ import { z } from 'zod';
  * cTrader アカウント情報スキーマ
  */
 export const CTraderAccountSchema = z.object({
-  ctidTraderAccountId: z.number().int().nonnegative(),
+  ctidTraderAccountId: z.coerce.number().int().nonnegative(),
   isLive: z.boolean(),
-  traderLogin: z.number().int().optional(),
+  traderLogin: z.coerce.number().int().optional(),
 });
 
 /**

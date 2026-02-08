@@ -70,24 +70,24 @@ export interface ChartMarker {
 /** 手動描画ライン */
 export type DrawnLine =
   | {
-      id: string;
-      type: "horizontal";
-      price: number;
-      startTime: number;
-      endTime: number;
-      color?: string;
-      lineWidth?: number;
-    }
+    id: string;
+    type: "horizontal";
+    price: number;
+    startTime: number;
+    endTime: number;
+    color?: string;
+    lineWidth?: number;
+  }
   | {
-      id: string;
-      type: "trend";
-      startTime: number;
-      endTime: number;
-      startPrice: number;
-      endPrice: number;
-      color?: string;
-      lineWidth?: number;
-    };
+    id: string;
+    type: "trend";
+    startTime: number;
+    endTime: number;
+    startPrice: number;
+    endPrice: number;
+    color?: string;
+    lineWidth?: number;
+  };
 
 /** チャートのプロパティ */
 export interface CandlestickChartProps {
@@ -156,12 +156,12 @@ function toCandlestickData(ohlcv: OHLCVDataPoint[]): CandlestickData<Time>[] {
 
 function toLineData(data: { timestamp: number; value: number }[]): LineData<Time>[] {
   const uniqueMap = new Map<number, LineData<Time>>();
-  
+
   for (const d of data) {
     const time = toChartTime(d.timestamp);
     uniqueMap.set(time as number, { time, value: d.value });
   }
-  
+
   return Array.from(uniqueMap.values()).sort((a, b) => (a.time as number) - (b.time as number));
 }
 
@@ -171,7 +171,7 @@ function toLineData(data: { timestamp: number; value: number }[]): LineData<Time
  */
 function toVolumeData(ohlcv: OHLCVDataPoint[]): HistogramData<Time>[] {
   const uniqueMap = new Map<number, HistogramData<Time>>();
-  
+
   for (const d of ohlcv) {
     // volumeがundefinedまたは0の場合はスキップ（チャートに0が表示されるのを防ぐ）
     if (d.volume === undefined || d.volume === 0) continue;
@@ -182,7 +182,7 @@ function toVolumeData(ohlcv: OHLCVDataPoint[]): HistogramData<Time>[] {
       color: d.close >= d.open ? "rgba(34, 197, 94, 0.5)" : "rgba(239, 68, 68, 0.5)",
     });
   }
-  
+
   return Array.from(uniqueMap.values()).sort((a, b) => (a.time as number) - (b.time as number));
 }
 
@@ -311,6 +311,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       },
       rightPriceScale: {
         borderColor: CHART_THEME.borderColor,
+        entireTextOnly: true,
       },
     });
 
@@ -323,7 +324,9 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       downColor: CHART_THEME.downColor,
       wickUpColor: CHART_THEME.wickUpColor,
       wickDownColor: CHART_THEME.wickDownColor,
-      borderVisible: false,
+      borderVisible: true,
+      borderUpColor: CHART_THEME.upColor,
+      borderDownColor: CHART_THEME.downColor,
     });
     candlestickSeriesRef.current = candlestickSer;
 
@@ -395,6 +398,36 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   // データ更新
   useEffect(() => {
     if (!candlestickSeriesRef.current || ohlcvData.length === 0) return;
+
+    // データの価格レンジに基づいて precision と minMove を自動計算
+    const allPrices = ohlcvData.flatMap(d => [d.open, d.high, d.low, d.close]);
+    const maxPrice = Math.max(...allPrices);
+    const minPrice = Math.min(...allPrices);
+    const priceRange = maxPrice - minPrice;
+
+    // 価格レンジが狭い場合はより多くの小数桁を表示
+    let precision = 2;
+    let minMove = 0.01;
+    if (priceRange < 0.001) {
+      precision = 6; minMove = 0.000001;
+    } else if (priceRange < 0.01) {
+      precision = 5; minMove = 0.00001;
+    } else if (priceRange < 0.1) {
+      precision = 4; minMove = 0.0001;
+    } else if (priceRange < 1) {
+      precision = 3; minMove = 0.001;
+    } else if (priceRange < 10) {
+      precision = 2; minMove = 0.01;
+    }
+
+    // ローソク足の priceFormat を更新
+    candlestickSeriesRef.current.applyOptions({
+      priceFormat: {
+        type: 'price',
+        precision,
+        minMove,
+      },
+    });
 
     // ローソク足データをセット
     const candleData = toCandlestickData(ohlcvData);
@@ -509,7 +542,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
         chartRef.current?.removeSeries(guideLineSeriesRef.current);
         guideLineSeriesRef.current = null;
       }
-        isDraggingRef.current = false;
+      isDraggingRef.current = false;
     }
   }, [drawingMode]);
 
@@ -558,11 +591,11 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           title: "draft-line",
         });
       }
-        const sorted = [...points].sort((a, b) => (a.time as number) - (b.time as number));
-        if (sorted.length === 2 && sorted[0].time === sorted[1].time) {
-          sorted[1] = { ...sorted[1], time: ((sorted[1].time as number) + 1) as Time };
-        }
-        guideLineSeriesRef.current.setData(sorted);
+      const sorted = [...points].sort((a, b) => (a.time as number) - (b.time as number));
+      if (sorted.length === 2 && sorted[0].time === sorted[1].time) {
+        sorted[1] = { ...sorted[1], time: ((sorted[1].time as number) + 1) as Time };
+      }
+      guideLineSeriesRef.current.setData(sorted);
     },
     []
   );
@@ -897,41 +930,40 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
         />
       </div>
 
-        {/* モバイル用タップツールチップ（クロスヘア／タップで更新） */}
-        {fallbackBar && (
-          <div className="mt-2 md:hidden rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-[11px]">
-            <div className="flex items-center justify-between">
-              <span className="text-zinc-400">
-                {new Date(fallbackBar.timestamp).toLocaleTimeString('ja-JP', { hour12: false })}
-              </span>
-              <span
-                className={`font-mono font-semibold ${
-                  fallbackBar.close >= fallbackBar.open ? 'text-green-400' : 'text-red-400'
+      {/* モバイル用タップツールチップ（クロスヘア／タップで更新） */}
+      {fallbackBar && (
+        <div className="mt-2 md:hidden rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-[11px]">
+          <div className="flex items-center justify-between">
+            <span className="text-zinc-400">
+              {new Date(fallbackBar.timestamp).toLocaleTimeString('ja-JP', { hour12: false })}
+            </span>
+            <span
+              className={`font-mono font-semibold ${fallbackBar.close >= fallbackBar.open ? 'text-green-400' : 'text-red-400'
                 }`}
-              >
-                {fallbackBar.close.toFixed(2)}
-              </span>
+            >
+              {fallbackBar.close.toFixed(2)}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 mt-1">
+            <div className="flex items-center justify-between text-zinc-400">
+              <span>始値</span>
+              <span className="font-mono text-zinc-200">{fallbackBar.open.toFixed(2)}</span>
             </div>
-            <div className="grid grid-cols-2 gap-2 mt-1">
-              <div className="flex items-center justify-between text-zinc-400">
-                <span>始値</span>
-                <span className="font-mono text-zinc-200">{fallbackBar.open.toFixed(2)}</span>
-              </div>
-              <div className="flex items-center justify-between text-zinc-400">
-                <span>終値</span>
-                <span className="font-mono text-zinc-200">{fallbackBar.close.toFixed(2)}</span>
-              </div>
-              <div className="flex items-center justify-between text-zinc-400">
-                <span>高値</span>
-                <span className="font-mono text-green-300">{fallbackBar.high.toFixed(2)}</span>
-              </div>
-              <div className="flex items-center justify-between text-zinc-400">
-                <span>安値</span>
-                <span className="font-mono text-red-300">{fallbackBar.low.toFixed(2)}</span>
-              </div>
+            <div className="flex items-center justify-between text-zinc-400">
+              <span>終値</span>
+              <span className="font-mono text-zinc-200">{fallbackBar.close.toFixed(2)}</span>
+            </div>
+            <div className="flex items-center justify-between text-zinc-400">
+              <span>高値</span>
+              <span className="font-mono text-green-300">{fallbackBar.high.toFixed(2)}</span>
+            </div>
+            <div className="flex items-center justify-between text-zinc-400">
+              <span>安値</span>
+              <span className="font-mono text-red-300">{fallbackBar.low.toFixed(2)}</span>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
       {/* ローディング表示 */}
       {isLoading && (

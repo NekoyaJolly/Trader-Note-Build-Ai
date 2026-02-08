@@ -11,13 +11,14 @@
  * - トレード情報モーダル表示
  */
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { CandlestickChart, OHLCVDataPoint } from '@/components/CandlestickChart';
 import { RealtimeChart } from '@/components/RealtimeChart';
 import { NeonButton } from '@/components/ui/NeonButton';
 import { IndicatorSelector, SelectedIndicator } from '@/components/IndicatorSelector';
 import { indicatorToChartConfigs } from '@/lib/chartIndicators';
 import { TradingModal } from '@/components/trading/TradingModal';
+import { DataPresetModal, DataPreset } from '@/components/DataPresetModal';
 
 // 12次元特徴量の詳細型
 interface FeatureDetail {
@@ -132,6 +133,13 @@ export default function MarketAnalysisPage() {
     const [selectedIndicators, setSelectedIndicators] = useState<SelectedIndicator[]>([]);
     const [isTradingModalOpen, setIsTradingModalOpen] = useState(false);
 
+    // データプリセット、モーダル、過去データステート
+    const [isPresetModalOpen, setIsPresetModalOpen] = useState(false);
+    const [selectedPreset, setSelectedPreset] = useState<DataPreset | null>(null);
+    const [historicalData, setHistoricalData] = useState<OHLCVDataPoint[]>([]);
+    const [historicalLoading, setHistoricalLoading] = useState(false);
+    const [dataSource, setDataSource] = useState<'api' | 'preset'>('api');
+
     const handleSymbolChange = useCallback((symbol: string) => {
         setSelectedSymbol(symbol);
         setAnalysisData(null);
@@ -144,7 +152,7 @@ export default function MarketAnalysisPage() {
         setError(null);
 
         try {
-            const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3100';
+            const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3100';
             const response = await fetch(
                 `${apiBase}/api/market-analysis/${selectedSymbol}?timeframe=${selectedTimeframe}&count=${selectedDataCount}`
             );
@@ -167,6 +175,13 @@ export default function MarketAnalysisPage() {
         }
     }, [selectedSymbol, selectedTimeframe, selectedDataCount]);
 
+    // 分析タブに切り替えた時に自動取得
+    useEffect(() => {
+        if (viewMode === 'analysis' && !analysisData && !loading) {
+            void fetchAnalysis();
+        }
+    }, [viewMode, analysisData, loading, fetchAnalysis]);
+
     // OHLCVデータをチャート用に変換
     const chartData: OHLCVDataPoint[] = analysisData?.ohlcv.map(d => ({
         timestamp: new Date(d.timestamp).getTime(),
@@ -176,6 +191,50 @@ export default function MarketAnalysisPage() {
         close: d.close,
         volume: d.volume,
     })) || [];
+
+    // プリセット選択時のDBデータ取得
+    const handleSelectPreset = useCallback(async (preset: DataPreset) => {
+        setSelectedPreset(preset);
+        setIsPresetModalOpen(false);
+        setDataSource('preset');
+        setHistoricalLoading(true);
+        try {
+            const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3100';
+            const res = await fetch(
+                `${apiBase}/api/ohlcv/candles?symbol=${encodeURIComponent(preset.symbol)}&timeframe=${encodeURIComponent(preset.timeframe)}&limit=500`
+            );
+            if (!res.ok) throw new Error(`APIエラー: ${res.status}`);
+            const result = await res.json();
+            if (!result.success) throw new Error(result.error || 'データ取得失敗');
+
+            const ohlcv: OHLCVDataPoint[] = result.data.map(
+                (d: { timestamp: string; open: number; high: number; low: number; close: number; volume: number }) => ({
+                    timestamp: new Date(d.timestamp).getTime(),
+                    open: d.open,
+                    high: d.high,
+                    low: d.low,
+                    close: d.close,
+                    volume: d.volume,
+                })
+            );
+            setHistoricalData(ohlcv);
+            setError(null);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '過去データの取得に失敗しました');
+        } finally {
+            setHistoricalLoading(false);
+        }
+    }, []);
+
+    // データソース切替: APIに戻す
+    const switchToApiData = useCallback(() => {
+        setDataSource('api');
+        setSelectedPreset(null);
+        setHistoricalData([]);
+    }, []);
+
+    // 表示用チャートデータ（データソースに応じて切替）
+    const displayChartData = dataSource === 'preset' ? historicalData : chartData;
 
     // 選択されたインジケーターを計算
     const indicatorConfigs = useMemo(() => {
@@ -271,6 +330,36 @@ export default function MarketAnalysisPage() {
                         <div className="flex-1" />
 
                         <div className="flex items-center gap-2">
+                            {/* データソース切替 */}
+                            {dataSource === 'preset' && selectedPreset ? (
+                                <div className="flex items-center gap-1">
+                                    <span className="text-xs text-amber-400 bg-amber-400/10 px-2 py-1 rounded">
+                                        📂 {selectedPreset.symbol} / {selectedPreset.timeframe}
+                                    </span>
+                                    <button
+                                        onClick={switchToApiData}
+                                        className="text-xs text-gray-400 hover:text-white px-1.5 py-1 rounded hover:bg-gray-600 transition"
+                                        title="ライブデータに切替"
+                                    >
+                                        ✕
+                                    </button>
+                                </div>
+                            ) : (
+                                <span className="text-xs text-green-400 bg-green-400/10 px-2 py-1 rounded">
+                                    📡 ライブ
+                                </span>
+                            )}
+
+                            <NeonButton
+                                color="orange"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setIsPresetModalOpen(true)}
+                                icon="📊"
+                                className="whitespace-nowrap"
+                            >
+                                データ管理
+                            </NeonButton>
                             <NeonButton
                                 color="purple"
                                 size="sm"
@@ -310,13 +399,13 @@ export default function MarketAnalysisPage() {
                                         <div className="bg-gray-800 px-3 py-2 flex items-center gap-3 border-b border-gray-700">
                                             {/* シンボル表示 */}
                                             <span className="text-xs font-semibold text-white">{analysisData.symbol}</span>
-                                            
+
                                             {/* 時間足表示 */}
                                             <span className="text-xs text-gray-400">{TIMEFRAMES.find(tf => tf.value === selectedTimeframe)?.label || selectedTimeframe}</span>
-                                            
+
                                             {/* データポイント数 */}
                                             <span className="text-xs text-gray-500">{analysisData.meta.dataPoints}本</span>
-                                            
+
                                             <div className="flex-1" />
 
                                             {/* インジケーター選択 */}
@@ -325,7 +414,7 @@ export default function MarketAnalysisPage() {
                                                 onSelectionChange={setSelectedIndicators}
                                                 compact={true}
                                             />
-                                            
+
                                             {/* タイムスタンプ */}
                                             <span className="text-xs text-gray-400">
                                                 {new Date(analysisData.timestamp).toLocaleString('ja-JP')}
@@ -336,7 +425,7 @@ export default function MarketAnalysisPage() {
                                         <div className="p-0.5">
                                             <div className="h-[400px]">
                                                 <CandlestickChart
-                                                    ohlcvData={chartData}
+                                                    ohlcvData={displayChartData}
                                                     height={380}
                                                     indicators={indicatorConfigs}
                                                 />
@@ -440,22 +529,40 @@ export default function MarketAnalysisPage() {
                             </div>
                         )}
 
-                        {!analysisData && !loading && !error && (
+                        {!analysisData && !loading && !error && dataSource === 'api' && (
                             <div className="text-center py-16">
                                 <div className="text-6xl mb-4">📊</div>
-                                <p className="text-gray-400 text-lg">
+                                <p className="text-gray-400 text-lg mb-4">
                                     シンボルを選択して「データ取得」ボタンをクリックしてください
                                 </p>
+                                <p className="text-gray-500 text-sm">
+                                    または「📊 データ管理」から保存済みの過去データを選択できます
+                                </p>
+                            </div>
+                        )}
+
+                        {/* 過去データ読み込み中 */}
+                        {historicalLoading && (
+                            <div className="text-center py-16">
+                                <div className="text-5xl mb-3 animate-pulse">📊</div>
+                                <p className="text-gray-400 text-sm">過去データを読み込み中...</p>
                             </div>
                         )}
                     </div>
                 </div>
             )}
 
+            {/* データプリセットモーダル */}
+            <DataPresetModal
+                isOpen={isPresetModalOpen}
+                onClose={() => setIsPresetModalOpen(false)}
+                onSelectPreset={handleSelectPreset}
+            />
+
             {/* トレードモーダル */}
-            <TradingModal 
-                isOpen={isTradingModalOpen} 
-                onClose={() => setIsTradingModalOpen(false)} 
+            <TradingModal
+                isOpen={isTradingModalOpen}
+                onClose={() => setIsTradingModalOpen(false)}
             />
 
             {/* トレード情報表示ボタン（フローティング） */}

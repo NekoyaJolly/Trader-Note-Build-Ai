@@ -15,6 +15,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { ohlcvImportService } from '../services/ohlcvImportService';
+import { ohlcvRepository } from '../repositories/ohlcvRepository';
 
 const router = Router();
 
@@ -70,7 +71,7 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
   console.log('[OHLCV Import] Content-Type:', req.headers['content-type']);
   console.log('[OHLCV Import] File:', req.file ? req.file.originalname : 'なし');
   console.log('[OHLCV Import] Body:', req.body);
-  
+
   try {
     if (!req.file) {
       console.log('[OHLCV Import] エラー: ファイルがありません');
@@ -225,6 +226,67 @@ router.delete('/presets/:id', async (req: Request, res: Response) => {
     res.status(statusCode).json({
       success: false,
       error: error instanceof Error ? error.message : 'プリセット削除に失敗しました',
+    });
+  }
+});
+
+/**
+ * GET /api/ohlcv/candles
+ * DB に保存された OHLCV キャンドルデータを取得
+ * 
+ * Query Parameters:
+ *   - symbol: シンボル（必須）
+ *   - timeframe: 時間足（必須）
+ *   - limit: 取得件数（任意、デフォルト: 200）
+ * 
+ * Response:
+ *   - 200: { success: true, data: OHLCVCandle[] }
+ */
+router.get('/candles', async (req: Request, res: Response) => {
+  try {
+    const { symbol, timeframe, limit } = req.query;
+
+    if (!symbol || !timeframe) {
+      res.status(400).json({
+        success: false,
+        error: '必須パラメータが不足しています: symbol, timeframe',
+      });
+      return;
+    }
+
+    const maxRecords = Math.min(parseInt(limit as string) || 200, 1000);
+
+    const candles = await ohlcvRepository.findMany({
+      symbol: symbol as string,
+      timeframe: timeframe as string,
+      limit: maxRecords,
+      orderBy: 'desc',
+    });
+
+    // 時系列順（古い→新しい）に並び替え
+    candles.reverse();
+
+    res.json({
+      success: true,
+      data: candles.map(c => ({
+        timestamp: c.timestamp.toISOString(),
+        open: Number(c.open),
+        high: Number(c.high),
+        low: Number(c.low),
+        close: Number(c.close),
+        volume: Number(c.volume),
+      })),
+      meta: {
+        symbol,
+        timeframe,
+        count: candles.length,
+      },
+    });
+  } catch (error) {
+    console.error('[OHLCV Candles Error]', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'キャンドルデータの取得に失敗しました',
     });
   }
 });

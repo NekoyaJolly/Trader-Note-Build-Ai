@@ -13,11 +13,11 @@
 
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 
-// Railway バックエンドの URL
+// バックエンドの URL
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3100';
 
 /**
@@ -29,9 +29,17 @@ function CallbackHandler() {
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<'processing' | 'success' | 'error'>('processing');
   const [message, setMessage] = useState('cTrader 認証を処理中...');
+  // React Strict Mode での二重実行を防止
+  const isProcessingRef = useRef(false);
 
   useEffect(() => {
     const handleCallback = async () => {
+      // 既に処理中なら重複実行しない（OAuth code は一度限り有効）
+      if (isProcessingRef.current) {
+        console.log('[Callback] 既に処理中のためスキップ');
+        return;
+      }
+      isProcessingRef.current = true;
       // URL パラメータから code と state を取得
       const code = searchParams.get('code');
       const error = searchParams.get('error');

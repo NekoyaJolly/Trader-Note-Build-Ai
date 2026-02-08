@@ -12,11 +12,12 @@
  * - 接続状態インジケーター
  */
 
-import React, { ReactNode, useEffect, useMemo, useState, useCallback } from "react";
+import React, { ReactNode, useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useRealtimeChart, OHLCVBar, PendingBar, ConnectionStatus } from "@/hooks/useRealtimeChart";
 import { CandlestickChart, DrawnLine, OHLCVDataPoint, IndicatorLineConfig } from "./CandlestickChart";
 import { IndicatorSelector, SelectedIndicator } from "./IndicatorSelector";
 import { indicatorToChartConfigs } from "@/lib/chartIndicators";
+import { getMarketStatus, MarketStatus } from "@/lib/marketHours";
 
 interface RealtimeChartProps {
 	symbol: string;
@@ -55,6 +56,18 @@ const DATA_COUNT_OPTIONS = [
 const DEFAULT_LINE_COLOR = "#fbbf24";
 const DEFAULT_LINE_WIDTH = 2;
 const LINE_WIDTH_OPTIONS = [1, 2, 3, 4];
+
+// 時間足（秒）を API パラメータ形式に変換
+const TIMEFRAME_TO_API: Record<number, string> = {
+	60: '1m',
+	300: '5m',
+	900: '15m',
+	1800: '30m',
+	3600: '1h',
+	14400: '4h',
+};
+
+const FALLBACK_REFRESH_INTERVAL = 30000; // 30秒
 
 interface PricePanelProps {
 	bar: PendingBar | OHLCVBar | null;
@@ -156,6 +169,24 @@ export function RealtimeChart({
 	const [hasEverConnected, setHasEverConnected] = useState(false);
 	const [selectedIndicators, setSelectedIndicators] = useState<SelectedIndicator[]>([]);
 
+	// 市場時間判定ステート
+	const [marketStatus, setMarketStatus] = useState<MarketStatus>(() => getMarketStatus());
+
+	// 市場時間を定期チェック（1分間隔）
+	useEffect(() => {
+		const checkMarket = () => setMarketStatus(getMarketStatus());
+		const timer = setInterval(checkMarket, 60000);
+		return () => clearInterval(timer);
+	}, []);
+
+	// Twelve Data API フォールバック用ステート
+	const [fallbackData, setFallbackData] = useState<OHLCVDataPoint[]>([]);
+	const [fallbackLoading, setFallbackLoading] = useState(false);
+	const [fallbackError, setFallbackError] = useState<string | null>(null);
+	const fallbackTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+	const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3100';
+
 	const storageKey = useMemo(() => `chart-lines-${symbol}-${timeframe}`, [symbol, timeframe]);
 
 	useEffect(() => {
@@ -184,6 +215,77 @@ export function RealtimeChart({
 			setHasEverConnected(true);
 		}
 	}, [isConnected]);
+
+	// ============================================
+	// Twelve Data API フォールバック
+	// cTrader 未接続時に REST API から OHLCV データを取得
+	// ============================================
+	const fetchFallbackData = useCallback(async () => {
+		const apiTimeframe = TIMEFRAME_TO_API[timeframe] || '1m';
+		setFallbackLoading(true);
+		setFallbackError(null);
+		try {
+			const res = await fetch(
+				`${apiBase}/api/market-analysis/${symbol}?timeframe=${apiTimeframe}&count=${dataCount}`
+			);
+			if (!res.ok) throw new Error(`APIエラー: ${res.status}`);
+			const result = await res.json();
+			if (!result.success) throw new Error(result.error || 'データ取得に失敗');
+
+			const ohlcv: OHLCVDataPoint[] = (result.data.ohlcv || []).map(
+				(d: { timestamp: string; open: number; high: number; low: number; close: number; volume: number }) => ({
+					timestamp: new Date(d.timestamp).getTime(),
+					open: d.open,
+					high: d.high,
+					low: d.low,
+					close: d.close,
+					volume: d.volume,
+				})
+			);
+			setFallbackData(ohlcv);
+		} catch (err) {
+			setFallbackError(err instanceof Error ? err.message : 'フォールバックデータ取得失敗');
+		} finally {
+			setFallbackLoading(false);
+		}
+	}, [apiBase, symbol, timeframe, dataCount]);
+
+	// cTrader 未接続 & 市場開場中にフォールバックデータを取得 & 定期リフレッシュ
+	useEffect(() => {
+		// cTrader 接続中の場合はフォールバック不要
+		if (isConnected || hasEverConnected) {
+			if (fallbackTimerRef.current) {
+				clearInterval(fallbackTimerRef.current);
+				fallbackTimerRef.current = null;
+			}
+			return;
+		}
+
+		// 市場閉場中はフォールバック取得しない
+		if (!marketStatus.isOpen) {
+			if (fallbackTimerRef.current) {
+				clearInterval(fallbackTimerRef.current);
+				fallbackTimerRef.current = null;
+			}
+			setFallbackData([]);
+			return;
+		}
+
+		// 初回取得
+		void fetchFallbackData();
+
+		// 定期リフレッシュ（30秒間隔）
+		fallbackTimerRef.current = setInterval(() => {
+			void fetchFallbackData();
+		}, FALLBACK_REFRESH_INTERVAL);
+
+		return () => {
+			if (fallbackTimerRef.current) {
+				clearInterval(fallbackTimerRef.current);
+				fallbackTimerRef.current = null;
+			}
+		};
+	}, [isConnected, hasEverConnected, fetchFallbackData, marketStatus.isOpen]);
 
 	const handleTimeframeChange = async (newTimeframe: number) => {
 		const wasConnected = isConnected;
@@ -267,18 +369,26 @@ export function RealtimeChart({
 	const chartData: OHLCVDataPoint[] = useMemo(() => {
 		const dataMap = new Map<number, OHLCVDataPoint>();
 
-		for (const bar of bars) {
-			const timestamp = new Date(bar.timestamp).getTime();
-			dataMap.set(timestamp, { timestamp, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume });
-		}
+		// cTrader 接続中のデータを優先
+		if (bars.length > 0) {
+			for (const bar of bars) {
+				const timestamp = new Date(bar.timestamp).getTime();
+				dataMap.set(timestamp, { timestamp, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume });
+			}
 
-		if (pendingBar) {
-			const timestamp = new Date(pendingBar.startTime).getTime();
-			dataMap.set(timestamp, { timestamp, open: pendingBar.open, high: pendingBar.high, low: pendingBar.low, close: pendingBar.close, volume: pendingBar.volume });
+			if (pendingBar) {
+				const timestamp = new Date(pendingBar.startTime).getTime();
+				dataMap.set(timestamp, { timestamp, open: pendingBar.open, high: pendingBar.high, low: pendingBar.low, close: pendingBar.close, volume: pendingBar.volume });
+			}
+		} else if (fallbackData.length > 0) {
+			// フォールバックデータを使用
+			for (const d of fallbackData) {
+				dataMap.set(d.timestamp, d);
+			}
 		}
 
 		return Array.from(dataMap.values()).sort((a, b) => a.timestamp - b.timestamp);
-	}, [bars, pendingBar]);
+	}, [bars, pendingBar, fallbackData]);
 
 	// 選択されたインジケーターを計算
 	const indicatorConfigs: IndicatorLineConfig[] = useMemo(() => {
@@ -311,30 +421,47 @@ export function RealtimeChart({
 		return configs;
 	}, [chartData, selectedIndicators]);
 
+	// latestBar: cTrader バーがあればそれを使い、なければ fallback チャートデータの最後の要素を使う
 	const latestBar = bars.length > 0 ? bars[bars.length - 1] : null;
+	const latestFallbackBar = chartData.length > 0 ? chartData[chartData.length - 1] : null;
+
+	// PricePanel に渡す疑似バー（cTrader 未接続時）
+	const pricePanelBar = latestBar ?? (latestFallbackBar ? {
+		symbol,
+		timeframe: String(timeframe),
+		timestamp: new Date(latestFallbackBar.timestamp).toISOString(),
+		open: latestFallbackBar.open,
+		high: latestFallbackBar.high,
+		low: latestFallbackBar.low,
+		close: latestFallbackBar.close,
+		volume: latestFallbackBar.volume,
+		tickCount: 0,
+	} as OHLCVBar : null);
 
 	const { dailyHigh, dailyLow, previousClose } = useMemo(() => {
-		if (!latestBar) return { dailyHigh: null, dailyLow: null, previousClose: null };
-		const latestTs = new Date(latestBar.timestamp);
+		// chartData を使って計算（cTrader・フォールバックどちらでも動く）
+		if (chartData.length === 0) return { dailyHigh: null, dailyLow: null, previousClose: null };
+		const lastPoint = chartData[chartData.length - 1];
+		const latestTs = new Date(lastPoint.timestamp);
 		const dayStart = new Date(latestTs);
 		dayStart.setHours(0, 0, 0, 0);
 
-		const sameDayBars = bars.filter((barItem) => {
-			const ts = new Date(barItem.timestamp);
-			return ts >= dayStart && ts <= latestTs && ts.getFullYear() === latestTs.getFullYear() && ts.getMonth() === latestTs.getMonth() && ts.getDate() === latestTs.getDate();
+		const sameDayPoints = chartData.filter((d) => {
+			const ts = new Date(d.timestamp);
+			return ts >= dayStart && ts <= latestTs;
 		});
 
-		const dailyHighVal = sameDayBars.length > 0 ? Math.max(...sameDayBars.map((b) => b.high)) : null;
-		const dailyLowVal = sameDayBars.length > 0 ? Math.min(...sameDayBars.map((b) => b.low)) : null;
+		const dailyHighVal = sameDayPoints.length > 0 ? Math.max(...sameDayPoints.map((d) => d.high)) : null;
+		const dailyLowVal = sameDayPoints.length > 0 ? Math.min(...sameDayPoints.map((d) => d.low)) : null;
 
-		const previousDayBars = bars.filter((barItem) => {
-			const ts = new Date(barItem.timestamp);
+		const previousDayPoints = chartData.filter((d) => {
+			const ts = new Date(d.timestamp);
 			return ts < dayStart;
 		});
-		const previousCloseVal = previousDayBars.length > 0 ? previousDayBars[previousDayBars.length - 1].close : null;
+		const previousCloseVal = previousDayPoints.length > 0 ? previousDayPoints[previousDayPoints.length - 1].close : null;
 
 		return { dailyHigh: dailyHighVal, dailyLow: dailyLowVal, previousClose: previousCloseVal };
-	}, [bars, latestBar]);
+	}, [chartData]);
 
 	const drawingLabel = drawingMode === "horizontal" ? "水平線" : drawingMode === "trend" ? "トレンドライン" : "オフ";
 
@@ -431,10 +558,20 @@ export function RealtimeChart({
 			)}
 
 			<div className="p-0.5 space-y-2">
-				{hasEverConnected || isConnected || bars.length > 0 ? (
+				{hasEverConnected || isConnected || bars.length > 0 || chartData.length > 0 ? (
 					<div className="space-y-2">
+						{/* フォールバックモード表示 */}
+						{!isConnected && !hasEverConnected && fallbackData.length > 0 && (
+							<div className="bg-blue-900/30 border-b border-blue-500/50 px-4 py-1.5 flex items-center justify-between">
+								<p className="text-blue-300 text-xs">📊 REST APIからデータを表示中（30秒ごとに自動更新）</p>
+								<button onClick={connect} disabled={isLoading} className={`px-3 py-1 text-white text-xs rounded transition ${isLoading ? "bg-gray-600 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"}`}>
+									{isLoading ? "接続中..." : "リアルタイム接続"}
+								</button>
+							</div>
+						)}
+
 						<div className="px-2">
-							<PricePanel bar={latestBar} dailyHigh={dailyHigh} dailyLow={dailyLow} previousClose={previousClose} />
+							<PricePanel bar={pricePanelBar} dailyHigh={dailyHigh} dailyLow={dailyLow} previousClose={previousClose} />
 						</div>
 
 						<div className="relative" style={{ marginBottom: '60px' }}>
@@ -505,13 +642,44 @@ export function RealtimeChart({
 							</div>
 						)}
 					</div>
+				) : !marketStatus.isOpen && !isConnected ? (
+					/* 市場閉場中の専用表示 */
+					<div className="flex flex-col items-center justify-center py-16 text-gray-400">
+						<div className="text-6xl mb-4">🌙</div>
+						<h3 className="text-xl font-semibold text-gray-200 mb-2">市場は閉場しています</h3>
+						<p className="text-sm text-gray-400 mb-1">{marketStatus.message}</p>
+						{marketStatus.currentSession === null && marketStatus.nextOpenTime && (
+							<p className="text-xs text-gray-500 mt-2">Forex市場は平日のみ取引可能です</p>
+						)}
+						<div className="mt-6 px-4 py-3 bg-gray-800/60 rounded-lg border border-gray-700/50 text-center">
+							<p className="text-xs text-gray-500 mb-1">分析タブでは保存済みの過去データで分析可能です</p>
+							<p className="text-xs text-gray-600">「分析 →」ボタンから切り替えてください</p>
+						</div>
+					</div>
 				) : (
 					<div className="flex flex-col items-center justify-center py-16 text-gray-400">
-						<div className="text-5xl mb-3">📡</div>
-						<p className="text-sm mb-3">未接続</p>
-						<button onClick={connect} disabled={isLoading} className={`px-4 py-1.5 rounded-lg text-sm transition ${isLoading ? "bg-gray-600 cursor-not-allowed" : "bg-green-600 hover:bg-green-700 text-white"}`}>
-							{isLoading ? "接続中..." : "接続開始"}
-						</button>
+						{fallbackLoading ? (
+							<>
+								<div className="text-5xl mb-3 animate-pulse">📊</div>
+								<p className="text-sm">データを取得中...</p>
+							</>
+						) : fallbackError ? (
+							<>
+								<div className="text-5xl mb-3">⚠️</div>
+								<p className="text-sm mb-2 text-red-400">{fallbackError}</p>
+								<button onClick={fetchFallbackData} className="px-4 py-1.5 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white transition">
+									再試行
+								</button>
+							</>
+						) : (
+							<>
+								<div className="text-5xl mb-3">📡</div>
+								<p className="text-sm mb-3">未接続</p>
+								<button onClick={connect} disabled={isLoading} className={`px-4 py-1.5 rounded-lg text-sm transition ${isLoading ? "bg-gray-600 cursor-not-allowed" : "bg-green-600 hover:bg-green-700 text-white"}`}>
+									{isLoading ? "接続中..." : "接続開始"}
+								</button>
+							</>
+						)}
 					</div>
 				)}
 			</div>
