@@ -1,7 +1,6 @@
 # Side-B 自動化 Cron ワークフロー
 #
-# 目的: Railway/Vercel Cronの代替としてGitHub Actionsで
-#       Side-Bの自動化タスクを定期実行する
+# 目的: GitHub Actionsで Side-Bの自動化タスクを定期実行する
 #
 # スケジュール:
 #   - 日次プラン生成: 毎日 00:00 UTC（09:00 JST）
@@ -9,7 +8,7 @@
 #
 # 必要なシークレット:
 #   - CRON_SECRET: Cron認証用秘密鍵
-#   - RAILWAY_API_URL: Railway API URL（例: https://trader-note-api.up.railway.app）
+#   - GCP_API_URL: GCP Cloud Run API URL（例: https://trader-note-571157808050.asia-northeast1.run.app）
 
 name: Side-B Automation Cron
 
@@ -32,7 +31,7 @@ on:
           - health
 
 env:
-  RAILWAY_API_URL: ${{ secrets.RAILWAY_API_URL || 'https://trader-note-api.up.railway.app' }}
+  GCP_API_URL: ${{ secrets.GCP_API_URL || 'https://trader-note-571157808050.asia-northeast1.run.app' }}
 
 jobs:
   daily-plan:
@@ -50,7 +49,7 @@ jobs:
             -X GET \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json" \
-            "${{ env.RAILWAY_API_URL }}/api/cron/side-b/daily-plan")
+            "${{ env.GCP_API_URL }}/api/cron/side-b/daily-plan")
           
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
           BODY=$(echo "$RESPONSE" | sed '$d')
@@ -80,7 +79,7 @@ jobs:
             -X GET \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json" \
-            "${{ env.RAILWAY_API_URL }}/api/cron/side-b/monitor")
+            "${{ env.GCP_API_URL }}/api/cron/side-b/monitor")
           
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
           BODY=$(echo "$RESPONSE" | sed '$d')
@@ -108,7 +107,7 @@ jobs:
             -X GET \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json" \
-            "${{ env.RAILWAY_API_URL }}/api/cron/health")
+            "${{ env.GCP_API_URL }}/api/cron/health")
           
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
           BODY=$(echo "$RESPONSE" | sed '$d')
@@ -122,3 +121,4 @@ jobs:
             echo "❌ ヘルスチェックが失敗しました"
             exit 1
           fi
+

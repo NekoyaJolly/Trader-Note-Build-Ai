@@ -1,16 +1,17 @@
 #!/bin/bash
 
 # 本番 E2E テストスクリプト
-# 目的: 本番環境（Railway + Vercel）で API → DB → UI フローが正常に動作することを検証
+# 目的: 本番環境（GCP Cloud Run + Vercel）で API → DB → UI フローが正常に動作することを検証
 #
 # 実行手順:
-# 1. Railway と Vercel にデプロイ済みであることを確認
+# 1. GCP Cloud Run と Vercel にデプロイ済みであることを確認
 # 2. 環境変数 PRODUCTION_API_URL, PRODUCTION_UI_URL を設定
 # 3. bash scripts/production-e2e-test.sh
 
 # 設定
-PRODUCTION_API_URL="${PRODUCTION_API_URL:-https://trader-note-api.up.railway.app}"
+PRODUCTION_API_URL="${PRODUCTION_API_URL:-https://trader-note-571157808050.asia-northeast1.run.app}"
 PRODUCTION_UI_URL="${PRODUCTION_UI_URL:-https://trader-note-build-ai.vercel.app}"
+
 
 # カラー出力
 RED='\033[0;31m'

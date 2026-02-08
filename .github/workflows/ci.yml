@@ -209,9 +209,9 @@ jobs:
         run: |
           echo "✅ CI/CD パイプライン完了"
           echo "📦 本番デプロイ準備完了"
-          echo "🚀 Railway & Vercel へのデプロイが可能です"
+          echo "🚀 GCP Cloud Run & Vercel へのデプロイが可能です"
           echo ""
           echo "次のステップ:"
-          echo "1. Railway API サービスにプッシュ"
+          echo "1. GCP Cloud Run にバックエンドをデプロイ"
           echo "2. Vercel フロントエンドにデプロイ"
           echo "3. 本番 E2E テスト実行"
