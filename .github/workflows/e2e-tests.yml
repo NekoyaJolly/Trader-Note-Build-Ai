@@ -19,21 +19,6 @@ jobs:
   playwright-tests:
     name: Playwright E2E Tests
     runs-on: ubuntu-latest
-    
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_USER: ${{ secrets.TEST_DB_USER }}
-          POSTGRES_PASSWORD: ${{ secrets.TEST_DB_PASSWORD }}
-          POSTGRES_DB: ${{ secrets.TEST_DB_NAME }}
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
 
     steps:
       - name: リポジトリをチェックアウト
@@ -42,27 +27,28 @@ jobs:
       - name: Node.js セットアップ
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
-      - name: 依存関係をインストール
-        run: |
-          npm ci
-          cd src/frontend && npm ci && cd ../..
+      - name: 依存関係をインストール（ルート）
+        run: npm ci
+
+      - name: 依存関係をインストール（フロントエンド）
+        run: cd src/frontend && npm ci
 
       - name: Playwright をインストール
         run: npx playwright install --with-deps chromium
 
-      - name: データベースセットアップ
+      - name: Prisma セットアップ
+        run: npx prisma generate
         env:
-          DATABASE_URL: postgresql://${{ secrets.TEST_DB_USER }}:${{ secrets.TEST_DB_PASSWORD }}@localhost:5432/${{ secrets.TEST_DB_NAME }}
-        run: |
-          npm run prisma:generate
-          npx prisma migrate deploy
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-      - name: E2E テスト実行
+      - name: バックエンドサーバー起動（バックグラウンド）
+        run: npm run dev:backend > /tmp/backend.log 2>&1 &
         env:
-          DATABASE_URL: postgresql://${{ secrets.TEST_DB_USER }}:${{ secrets.TEST_DB_PASSWORD }}@localhost:5432/${{ secrets.TEST_DB_NAME }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
           BACKEND_PORT: 3100
           PORT: 3100
           NODE_ENV: test
@@ -77,8 +63,48 @@ jobs:
           VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
           CTRADER_CLIENT_ID: ${{ secrets.CTRADER_CLIENT_ID }}
           CTRADER_CLIENT_SECRET: ${{ secrets.CTRADER_CLIENT_SECRET }}
-          CRON_ENABLED: false
-          SIDE_B_SCHEDULER_ENABLED: false
+          CRON_ENABLED: 'false'
+          SIDE_B_SCHEDULER_ENABLED: 'false'
+
+      - name: バックエンド起動待機（最大60秒）
+        run: |
+          for i in {1..60}; do
+            if curl -s http://localhost:3100/health > /dev/null 2>&1; then
+              echo "✅ バックエンド起動確認: OK"
+              exit 0
+            fi
+            echo "待機中... ($i/60)"
+            sleep 1
+          done
+          echo "❌ バックエンド起動タイムアウト"
+          echo "=== バックエンドログ ==="
+          cat /tmp/backend.log
+          exit 1
+
+      - name: フロントエンドサーバー起動（バックグラウンド）
+        run: cd src/frontend && npm run dev > /tmp/frontend.log 2>&1 &
+        env:
+          NODE_ENV: test
+
+      - name: フロントエンド起動待機（最大60秒）
+        run: |
+          for i in {1..60}; do
+            if curl -s http://localhost:3102 > /dev/null 2>&1; then
+              echo "✅ フロントエンド起動確認: OK"
+              exit 0
+            fi
+            echo "待機中... ($i/60)"
+            sleep 1
+          done
+          echo "❌ フロントエンド起動タイムアウト"
+          echo "=== フロントエンドログ ==="
+          cat /tmp/frontend.log
+          exit 1
+
+      - name: E2E テスト実行
+        env:
+          SKIP_WEBSERVER: 'true'
+          NODE_ENV: test
         run: npm run test:e2e
 
       - name: Playwright レポートをアップロード
@@ -112,21 +138,6 @@ jobs:
     runs-on: ubuntu-latest
     # スケジュール実行または手動実行時のみAIテストを実行
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_ai_tests == 'true')
-    
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_USER: ${{ secrets.TEST_DB_USER }}
-          POSTGRES_PASSWORD: ${{ secrets.TEST_DB_PASSWORD }}
-          POSTGRES_DB: ${{ secrets.TEST_DB_NAME }}
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
 
     steps:
       - name: リポジトリをチェックアウト
@@ -135,7 +146,7 @@ jobs:
       - name: Node.js セットアップ
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: 依存関係をインストール
@@ -146,16 +157,15 @@ jobs:
       - name: Playwright をインストール
         run: npx playwright install --with-deps chromium
 
-      - name: データベースセットアップ
+      - name: Prisma セットアップ
+        run: npx prisma generate
         env:
-          DATABASE_URL: postgresql://${{ secrets.TEST_DB_USER }}:${{ secrets.TEST_DB_PASSWORD }}@localhost:5432/${{ secrets.TEST_DB_NAME }}
-        run: |
-          npm run prisma:generate
-          npx prisma migrate deploy
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       - name: AI駆動テスト実行
         env:
-          DATABASE_URL: postgresql://${{ secrets.TEST_DB_USER }}:${{ secrets.TEST_DB_PASSWORD }}@localhost:5432/${{ secrets.TEST_DB_NAME }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           BACKEND_PORT: 3100

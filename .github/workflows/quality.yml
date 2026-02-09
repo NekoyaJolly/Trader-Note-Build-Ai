@@ -19,7 +19,7 @@ jobs:
       - name: Node.js セットアップ
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'
           cache: 'npm'
 
       - name: npm audit でセキュリティチェック
@@ -32,7 +32,7 @@ jobs:
           echo "⚠️ セキュリティ脆弱性が検出されました"
           echo "詳細は npm audit の出力を確認してください"
 
-  # コード品質チェック
+  # コード品質チェック（Supabase 接続）
   code-quality:
     name: Code Quality Analysis
     runs-on: ubuntu-latest
@@ -43,11 +43,16 @@ jobs:
       - name: Node.js セットアップ
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '22'
           cache: 'npm'
 
       - name: 依存関係をインストール
         run: npm ci
+
+      - name: Prisma セットアップ
+        run: npx prisma generate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       - name: TypeScript 複雑度チェック
         run: |
@@ -58,6 +63,11 @@ jobs:
       - name: テストカバレッジ確認
         run: npm test -- --coverage --passWithNoTests 2>&1 | grep -E "(PASS|FAIL|%)"
         continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          NODE_ENV: test
+          CI: true
 
   # 環境変数チェック
   env-validation:

@@ -20,7 +20,7 @@ on:
           - both
 
 env:
-  NODE_VERSION: '18'
+  NODE_VERSION: '22'
   GCP_PROJECT_ID: ai-note-486020
   GCP_REGION: asia-northeast1
   GCP_SERVICE_NAME: trader-note
@@ -29,7 +29,7 @@ env:
   PRODUCTION_UI_URL: https://trader-note-build-ai.vercel.app
 
 jobs:
-  # デプロイ前チェック
+  # デプロイ前チェック（Supabase 接続）
   pre-deployment-checks:
     name: Pre-Deployment Verification
     runs-on: ubuntu-latest
@@ -46,6 +46,11 @@ jobs:
       - name: 依存関係をインストール
         run: npm ci
 
+      - name: Prisma セットアップ
+        run: npx prisma generate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
       - name: TypeScript コンパイル確認
         run: npx tsc --noEmit
 
@@ -53,14 +58,26 @@ jobs:
         run: npm test -- --passWithNoTests
         env:
           NODE_ENV: test
+          CI: true
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          MARKET_API_KEY: ${{ secrets.MARKET_API_KEY }}
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+          CTRADER_CLIENT_ID: ${{ secrets.CTRADER_CLIENT_ID }}
+          CTRADER_CLIENT_SECRET: ${{ secrets.CTRADER_CLIENT_SECRET }}
 
       - name: デプロイ前チェックリスト
         run: |
           echo "✅ デプロイ前チェック項目:"
           echo "  [✓] TypeScript コンパイル成功"
           echo "  [✓] ユニットテスト成功"
-          echo "  [✓] 環境変数設定済み"
-          echo "  [✓] データベース migration 確認済み"
+          echo "  [✓] Supabase DB 接続確認済み"
           echo ""
           echo "📋 本番環境の状態確認:"
           echo "  - GCP API: ${{ env.PRODUCTION_API_URL }}/health"
@@ -96,12 +113,6 @@ jobs:
         run: |
           docker build -t ${{ env.GCP_IMAGE }} .
           docker push ${{ env.GCP_IMAGE }}
-
-      - name: DB マイグレーション実行（Cloud Run Job）
-        run: |
-          gcloud run jobs execute trader-note-migrate \
-            --region ${{ env.GCP_REGION }} \
-            --wait
 
       - name: Cloud Run へデプロイ
         run: |

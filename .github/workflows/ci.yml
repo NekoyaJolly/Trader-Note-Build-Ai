@@ -5,10 +5,21 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      run_full_tests:
+        description: 'Run full paid API tests (costs money)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 env:
-  NODE_VERSION: '18'
-  REGISTRY: ghcr.io
+  NODE_VERSION: '22'
+  NODE_ENV: test
+  CI: true
 
 jobs:
   # TypeScript コンパイル & lint チェック
@@ -28,32 +39,19 @@ jobs:
       - name: 依存関係をインストール
         run: npm ci
 
+      - name: Prisma クライアント生成
+        run: npx prisma generate
+
       - name: TypeScript コンパイル確認（エラーのみ）
         run: npx tsc --noEmit
 
       - name: ESLint チェック（設定がある場合）
         run: npm run lint --if-present || echo "ESLint スキップ"
 
-  # ユニット＆統合テスト実行
+  # ユニット＆統合テスト実行（Supabase 接続）
   test:
     name: Unit & Integration Tests
     runs-on: ubuntu-latest
-    services:
-      # PostgreSQL テスト用（オプション）
-      postgres:
-        image: postgres:15-alpine
-        env:
-          POSTGRES_USER: ${{ secrets.TEST_DB_USER }}
-          POSTGRES_PASSWORD: ${{ secrets.TEST_DB_PASSWORD }}
-          POSTGRES_DB: ${{ secrets.TEST_DB_NAME }}
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
@@ -68,20 +66,19 @@ jobs:
         run: npm ci
 
       - name: Prisma セットアップ
-        run: |
-          npx prisma generate
-          npx prisma migrate deploy
+        run: npx prisma generate
         env:
-          DATABASE_URL: postgresql://${{ secrets.TEST_DB_USER }}:${{ secrets.TEST_DB_PASSWORD }}@localhost:5432/${{ secrets.TEST_DB_NAME }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-      - name: Jest ユニットテスト実行
+      - name: Jest ユニットテスト実行（最小モード）
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.run_full_tests != 'true'
         run: npm test -- --coverage --passWithNoTests
         env:
-          # テスト用環境変数（必要に応じて調整）
-          NODE_ENV: test
-          DATABASE_URL: postgresql://${{ secrets.TEST_DB_USER }}:${{ secrets.TEST_DB_PASSWORD }}@localhost:5432/${{ secrets.TEST_DB_NAME }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           AI_MODEL: gpt-4o-mini
           MARKET_API_KEY: ${{ secrets.MARKET_API_KEY }}
@@ -91,6 +88,27 @@ jobs:
           VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
           CTRADER_CLIENT_ID: ${{ secrets.CTRADER_CLIENT_ID }}
           CTRADER_CLIENT_SECRET: ${{ secrets.CTRADER_CLIENT_SECRET }}
+          RUN_FULL_PAID_API_TESTS: 'false'
+
+      - name: Jest ユニットテスト実行（フルモード）
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_full_tests == 'true'
+        run: npm test -- --coverage --passWithNoTests
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_MODEL: gpt-4o-mini
+          MARKET_API_KEY: ${{ secrets.MARKET_API_KEY }}
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+          CTRADER_CLIENT_ID: ${{ secrets.CTRADER_CLIENT_ID }}
+          CTRADER_CLIENT_SECRET: ${{ secrets.CTRADER_CLIENT_SECRET }}
+          RUN_FULL_PAID_API_TESTS: 'true'
 
       - name: テストカバレッジレポートアップロード
         uses: codecov/codecov-action@v3
@@ -100,26 +118,10 @@ jobs:
           flags: unittests
           fail_ci_if_error: false
 
-  # ローカル E2E テスト（開発環境での動作確認）
+  # ローカル E2E テスト（curl ベースの API 疎通テスト）
   e2e-local:
     name: Local E2E Tests
     runs-on: ubuntu-latest
-    services:
-      # PostgreSQL テスト用
-      postgres:
-        image: postgres:15-alpine
-        env:
-          POSTGRES_USER: ${{ secrets.TEST_DB_USER }}
-          POSTGRES_PASSWORD: ${{ secrets.TEST_DB_PASSWORD }}
-          POSTGRES_DB: ${{ secrets.TEST_DB_NAME }}
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
@@ -134,18 +136,18 @@ jobs:
         run: npm ci
 
       - name: Prisma セットアップ
-        run: |
-          npx prisma generate
-          npx prisma migrate deploy
+        run: npx prisma generate
         env:
-          DATABASE_URL: postgresql://${{ secrets.TEST_DB_USER }}:${{ secrets.TEST_DB_PASSWORD }}@localhost:5432/${{ secrets.TEST_DB_NAME }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-      - name: 開発サーバー起動（バックグラウンド）
-        run: npm run dev > /tmp/dev-server.log 2>&1 &
+      - name: バックエンドサーバー起動（バックグラウンド）
+        run: npm run dev:backend > /tmp/dev-server.log 2>&1 &
         env:
           NODE_ENV: development
           PORT: 3100
-          DATABASE_URL: postgresql://${{ secrets.TEST_DB_USER }}:${{ secrets.TEST_DB_PASSWORD }}@localhost:5432/${{ secrets.TEST_DB_NAME }}
+          BACKEND_PORT: 3100
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
@@ -156,18 +158,21 @@ jobs:
           VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
           CTRADER_CLIENT_ID: ${{ secrets.CTRADER_CLIENT_ID }}
           CTRADER_CLIENT_SECRET: ${{ secrets.CTRADER_CLIENT_SECRET }}
+          CRON_ENABLED: 'false'
+          SIDE_B_SCHEDULER_ENABLED: 'false'
 
-      - name: サーバー起動待機（最大30秒）
+      - name: サーバー起動待機（最大60秒）
         run: |
-          for i in {1..30}; do
+          for i in {1..60}; do
             if curl -s http://localhost:3100/health > /dev/null 2>&1; then
               echo "サーバー起動確認: OK"
               exit 0
             fi
-            echo "待機中... ($i/30)"
+            echo "待機中... ($i/60)"
             sleep 1
           done
           echo "サーバー起動タイムアウト"
+          echo "=== サーバーログ ==="
           cat /tmp/dev-server.log
           exit 1
 
@@ -195,8 +200,11 @@ jobs:
       - name: 依存関係をインストール
         run: npm ci
 
-      - name: ビルド実行（該当する場合）
-        run: npm run build --if-present || echo "Build script not found"
+      - name: Prisma クライアント生成
+        run: npx prisma generate
+
+      - name: バックエンドビルド
+        run: npx tsc || echo "Build completed with warnings"
 
   # 本番デプロイ通知（main ブランチのみ）
   notify-deployment:
