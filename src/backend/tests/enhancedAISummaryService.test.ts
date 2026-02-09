@@ -17,15 +17,20 @@ import {
   ExtendedTradeData,
 } from '../../services/enhancedAISummaryService';
 import { FeatureSnapshot } from '../../services/indicators/indicatorService';
+import { config } from '../../config';
 
 describe('EnhancedAISummaryService', () => {
   let service: EnhancedAISummaryService;
   let originalApiKey: string | undefined;
+  let originalConfigApiKey: string;
 
   beforeAll(() => {
     // テンプレートテストのために AI_API_KEY を一時的に無効化
+    // config モジュールはモジュールロード時にキャッシュするため、両方リセットが必要
     originalApiKey = process.env.AI_API_KEY;
+    originalConfigApiKey = config.ai.apiKey;
     delete process.env.AI_API_KEY;
+    config.ai.apiKey = '';
     service = new EnhancedAISummaryService();
   });
 
@@ -34,6 +39,7 @@ describe('EnhancedAISummaryService', () => {
     if (originalApiKey) {
       process.env.AI_API_KEY = originalApiKey;
     }
+    config.ai.apiKey = originalConfigApiKey;
   });
 
   describe('テンプレートフォールバック', () => {

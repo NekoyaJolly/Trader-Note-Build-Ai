@@ -32,8 +32,10 @@ describeOrSkip('MarketIngestService', () => {
   const repo = new MarketSnapshotRepository();
   const symbol = 'BTCUSDT';
 
-  // 最小限モードでは基本的なテストのみ実行
-  test('15m/60m の丸めが正しく保存される', async () => {
+  // 最小限モードでは外部API呼び出しテストをスキップ（レートリミット回避）
+  const apiTestOrSkip = minimalMode ? test.skip : test;
+
+  apiTestOrSkip('15m/60m の丸めが正しく保存される', async () => {
     // 1回の ingest で 15m と 60m が保存される
     await service.ingestSymbol(symbol);
 
@@ -50,7 +52,7 @@ describeOrSkip('MarketIngestService', () => {
 
   // 拡張テスト: フルテストモードのみ実行（追加のAPI呼び出し）
   const testOrSkip = minimalMode ? test.skip : test;
-  
+
   testOrSkip('upsert の冪等性: 同一バケットで重複挿入されない', async () => {
     // 同一時間足内に 2 回呼び出しても件数が増えない（15m/60m 各1件のまま）
     await service.ingestSymbol(symbol);
