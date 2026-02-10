@@ -29,66 +29,13 @@ env:
   PRODUCTION_UI_URL: https://trader-note-build-ai.vercel.app
 
 jobs:
-  # デプロイ前チェック（Supabase 接続）
-  pre-deployment-checks:
-    name: Pre-Deployment Verification
-    runs-on: ubuntu-latest
-    steps:
-      - name: リポジトリをチェックアウト
-        uses: actions/checkout@v4
-
-      - name: Node.js セットアップ
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: 依存関係をインストール
-        run: npm ci
-
-      - name: Prisma セットアップ
-        run: npx prisma generate
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-
-      - name: TypeScript コンパイル確認
-        run: npx tsc --noEmit
-
-      - name: ユニットテスト実行
-        run: npm test -- --passWithNoTests
-        env:
-          NODE_ENV: test
-          CI: true
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DIRECT_URL: ${{ secrets.DIRECT_URL }}
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
-          AI_API_KEY: ${{ secrets.AI_API_KEY }}
-          MARKET_API_KEY: ${{ secrets.MARKET_API_KEY }}
-          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
-          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
-          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
-          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
-          CTRADER_CLIENT_ID: ${{ secrets.CTRADER_CLIENT_ID }}
-          CTRADER_CLIENT_SECRET: ${{ secrets.CTRADER_CLIENT_SECRET }}
-
-      - name: デプロイ前チェックリスト
-        run: |
-          echo "✅ デプロイ前チェック項目:"
-          echo "  [✓] TypeScript コンパイル成功"
-          echo "  [✓] ユニットテスト成功"
-          echo "  [✓] Supabase DB 接続確認済み"
-          echo ""
-          echo "📋 本番環境の状態確認:"
-          echo "  - GCP API: ${{ env.PRODUCTION_API_URL }}/health"
-          echo "  - Vercel UI: ${{ env.PRODUCTION_UI_URL }}"
-
-  # GCP Cloud Run（API）へのデプロイ
+  # ── 1. GCP Cloud Run（API）へのデプロイ ──
   deploy-gcp:
     name: Deploy API to GCP Cloud Run
     runs-on: ubuntu-latest
-    needs: pre-deployment-checks
-    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.environment == 'gcp-api' || github.event.inputs.environment == 'both'))
     environment:
       name: production
       url: ${{ env.PRODUCTION_API_URL }}
@@ -134,20 +81,13 @@ jobs:
           echo "❌ API の起動確認がタイムアウトしました"
           exit 1
 
-      - name: デプロイ成功通知
-        if: success()
-        run: 'echo "✅ GCP Cloud Run API デプロイ完了: $(date)"'
-
-      - name: デプロイ失敗通知
-        if: failure()
-        run: 'echo "❌ GCP Cloud Run API デプロイ失敗: $(date)"'
-
-  # Vercel（UI）へのデプロイ
+  # ── 2. Vercel（UI）へのデプロイ ──
   deploy-vercel:
     name: Deploy UI to Vercel
     runs-on: ubuntu-latest
-    needs: pre-deployment-checks
-    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.environment == 'vercel-ui' || github.event.inputs.environment == 'both'))
     environment:
       name: production
       url: ${{ env.PRODUCTION_UI_URL }}
@@ -172,20 +112,17 @@ jobs:
           vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
           production: true
 
-      - name: デプロイ成功通知
-        if: success()
-        run: 'echo "✅ Vercel UI デプロイ完了: $(date)"'
-
-      - name: デプロイ失敗通知
-        if: failure()
-        run: 'echo "❌ Vercel UI デプロイ失敗: $(date)"'
-
-  # 本番 E2E テスト
+  # ── 3. 本番 E2E テスト ──
   e2e-production:
     name: Production E2E Tests
     runs-on: ubuntu-latest
     needs: [deploy-gcp, deploy-vercel]
-    if: success()
+    # GCP と Vercel の両方が成功した場合、またはどちらかがスキップで残りが成功した場合
+    if: |
+      always() &&
+      (needs.deploy-gcp.result == 'success' || needs.deploy-gcp.result == 'skipped') &&
+      (needs.deploy-vercel.result == 'success' || needs.deploy-vercel.result == 'skipped') &&
+      !(needs.deploy-gcp.result == 'skipped' && needs.deploy-vercel.result == 'skipped')
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
@@ -197,43 +134,21 @@ jobs:
           PRODUCTION_UI_URL: ${{ env.PRODUCTION_UI_URL }}
           WAIT_TIME: 2
 
-      - name: E2E テスト成功通知
-        if: success()
-        run: |
-          echo "✅ 本番 E2E テスト完了"
-          echo "🎉 本番デプロイ成功！"
-
-      - name: E2E テスト失敗時のロールバック計画
-        if: failure()
-        run: |
-          echo "❌ 本番 E2E テスト失敗"
-          echo "ロールバックの必要性を評価してください"
-          echo "詳細は GitHub Actions ログを確認"
-
-  # デプロイ完了通知
-  deployment-summary:
-    name: Deployment Summary
-    runs-on: ubuntu-latest
-    needs: [e2e-production]
-    if: success()
-    steps:
       - name: デプロイ完了サマリー
+        if: success()
         run: |
           echo "================================"
           echo "🚀 本番デプロイ完了"
           echo "================================"
           echo ""
-          echo "デプロイ内容:"
-          echo "  ✅ API: GCP Cloud Run"
-          echo "  ✅ UI: Vercel"
+          echo "  ✅ API: ${{ env.PRODUCTION_API_URL }}"
+          echo "  ✅ UI: ${{ env.PRODUCTION_UI_URL }}"
           echo "  ✅ DB: Supabase"
           echo "  ✅ E2E テスト: 合格"
-          echo ""
-          echo "リンク:"
-          echo "  🔗 API: ${{ env.PRODUCTION_API_URL }}"
-          echo "  🔗 UI: ${{ env.PRODUCTION_UI_URL }}"
-          echo ""
-          echo "次のステップ:"
-          echo "  1. 本番環境で動作確認"
-          echo "  2. ユーザーへの通知"
-          echo "  3. 運用ログの確認"
+
+      - name: E2E テスト失敗時の通知
+        if: failure()
+        run: |
+          echo "❌ 本番 E2E テスト失敗"
+          echo "ロールバックの必要性を評価してください"
+          echo "詳細は GitHub Actions ログを確認"

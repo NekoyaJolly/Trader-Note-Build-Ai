@@ -1,14 +1,25 @@
-name: CI/CD Pipeline
+name: CI Pipeline
 
 on:
   push:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  schedule:
+    # 毎日 18:00 UTC（03:00 JST）にセキュリティ監査を実行
+    - cron: '0 18 * * *'
   workflow_dispatch:
     inputs:
       run_full_tests:
         description: 'Run full paid API tests (costs money)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      run_ai_tests:
+        description: 'Run AI-driven tests'
         required: false
         default: 'false'
         type: choice
@@ -22,9 +33,9 @@ env:
   CI: true
 
 jobs:
-  # TypeScript コンパイル & lint チェック
-  lint-and-build:
-    name: TypeScript Lint & Build
+  # ── 1. Lint & TypeScript コンパイルチェック ──
+  lint-and-typecheck:
+    name: Lint & TypeCheck
     runs-on: ubuntu-latest
     steps:
       - name: リポジトリをチェックアウト
@@ -42,14 +53,14 @@ jobs:
       - name: Prisma クライアント生成
         run: npx prisma generate
 
-      - name: TypeScript コンパイル確認（エラーのみ）
+      - name: TypeScript コンパイル確認
         run: npx tsc --noEmit
 
-      - name: ESLint チェック（設定がある場合）
+      - name: ESLint チェック
         run: npm run lint --if-present || echo "ESLint スキップ"
 
-  # ユニット＆統合テスト実行（Supabase 接続）
-  test:
+  # ── 2. ユニット & 統合テスト ──
+  unit-tests:
     name: Unit & Integration Tests
     runs-on: ubuntu-latest
     steps:
@@ -70,8 +81,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-      - name: Jest ユニットテスト実行（最小モード）
-        if: github.event_name != 'workflow_dispatch' || github.event.inputs.run_full_tests != 'true'
+      - name: Jest テスト実行
         run: npm test -- --coverage --passWithNoTests
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -88,27 +98,7 @@ jobs:
           VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
           CTRADER_CLIENT_ID: ${{ secrets.CTRADER_CLIENT_ID }}
           CTRADER_CLIENT_SECRET: ${{ secrets.CTRADER_CLIENT_SECRET }}
-          RUN_FULL_PAID_API_TESTS: 'false'
-
-      - name: Jest ユニットテスト実行（フルモード）
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_full_tests == 'true'
-        run: npm test -- --coverage --passWithNoTests
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DIRECT_URL: ${{ secrets.DIRECT_URL }}
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          AI_API_KEY: ${{ secrets.AI_API_KEY }}
-          AI_MODEL: gpt-4o-mini
-          MARKET_API_KEY: ${{ secrets.MARKET_API_KEY }}
-          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
-          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
-          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
-          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
-          CTRADER_CLIENT_ID: ${{ secrets.CTRADER_CLIENT_ID }}
-          CTRADER_CLIENT_SECRET: ${{ secrets.CTRADER_CLIENT_SECRET }}
-          RUN_FULL_PAID_API_TESTS: 'true'
+          RUN_FULL_PAID_API_TESTS: ${{ github.event.inputs.run_full_tests || 'false' }}
 
       - name: テストカバレッジレポートアップロード
         uses: codecov/codecov-action@v3
@@ -118,10 +108,11 @@ jobs:
           flags: unittests
           fail_ci_if_error: false
 
-  # ローカル E2E テスト（curl ベースの API 疎通テスト）
-  e2e-local:
-    name: Local E2E Tests
+  # ── 3. E2E テスト（Playwright） ──
+  e2e-tests:
+    name: E2E Tests (Playwright)
     runs-on: ubuntu-latest
+    needs: [lint-and-typecheck, unit-tests]
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
@@ -132,16 +123,22 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
-      - name: 依存関係をインストール
+      - name: 依存関係をインストール（ルート）
         run: npm ci
+
+      - name: 依存関係をインストール（フロントエンド）
+        run: cd src/frontend && npm ci
+
+      - name: Playwright をインストール
+        run: npx playwright install --with-deps chromium
 
       - name: Prisma セットアップ
         run: npx prisma generate
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-      - name: バックエンドサーバー起動（バックグラウンド）
-        run: npm run dev:backend > /tmp/dev-server.log 2>&1 &
+      - name: バックエンドサーバー起動
+        run: npm run dev:backend > /tmp/backend.log 2>&1 &
         env:
           NODE_ENV: development
           PORT: 3100
@@ -151,6 +148,7 @@ jobs:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_MODEL: gpt-4o-mini
           MARKET_API_KEY: ${{ secrets.MARKET_API_KEY }}
           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
           VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
@@ -161,32 +159,90 @@ jobs:
           CRON_ENABLED: 'false'
           SIDE_B_SCHEDULER_ENABLED: 'false'
 
-      - name: サーバー起動待機（最大60秒）
+      - name: バックエンド起動待機（最大60秒）
         run: |
           for i in {1..60}; do
             if curl -s http://localhost:3100/health > /dev/null 2>&1; then
-              echo "サーバー起動確認: OK"
+              echo "✅ バックエンド起動確認: OK"
               exit 0
             fi
             echo "待機中... ($i/60)"
             sleep 1
           done
-          echo "サーバー起動タイムアウト"
-          echo "=== サーバーログ ==="
-          cat /tmp/dev-server.log
+          echo "❌ バックエンド起動タイムアウト"
+          echo "=== バックエンドログ ==="
+          cat /tmp/backend.log
           exit 1
 
-      - name: ローカル E2E テスト実行
-        run: bash scripts/local-e2e-test.sh
+      - name: フロントエンドサーバー起動
+        run: cd src/frontend && npm run dev > /tmp/frontend.log 2>&1 &
         env:
-          API_URL: http://localhost:3100
-          WAIT_TIME: 1
+          NODE_ENV: test
 
-  # ビルド成功確認
-  build:
-    name: Build Verification
+      - name: フロントエンド起動待機（最大60秒）
+        run: |
+          for i in {1..60}; do
+            if curl -s http://localhost:3102 > /dev/null 2>&1; then
+              echo "✅ フロントエンド起動確認: OK"
+              exit 0
+            fi
+            echo "待機中... ($i/60)"
+            sleep 1
+          done
+          echo "❌ フロントエンド起動タイムアウト"
+          echo "=== フロントエンドログ ==="
+          cat /tmp/frontend.log
+          exit 1
+
+      - name: Playwright E2E テスト実行
+        run: npm run test:e2e
+        env:
+          SKIP_WEBSERVER: 'true'
+          NODE_ENV: test
+
+      - name: Playwright レポートをアップロード
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
+
+      - name: テスト動画をアップロード
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-videos
+          path: test-videos/
+          retention-days: 7
+
+  # ── 4. セキュリティ監査 ──
+  security-audit:
+    name: Security Audit
     runs-on: ubuntu-latest
-    needs: [lint-and-build, test]
+    # PR またはスケジュール実行時のみ
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule'
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Node.js セットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: npm audit でセキュリティチェック
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
+
+  # ── 5. AI-Driven テスト（手動 or スケジュール限定） ──
+  ai-tests:
+    name: AI-Driven Tests
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_ai_tests == 'true')
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
@@ -198,28 +254,34 @@ jobs:
           cache: 'npm'
 
       - name: 依存関係をインストール
-        run: npm ci
-
-      - name: Prisma クライアント生成
-        run: npx prisma generate
-
-      - name: バックエンドビルド
-        run: npx tsc || echo "Build completed with warnings"
-
-  # 本番デプロイ通知（main ブランチのみ）
-  notify-deployment:
-    name: Notify Deployment Readiness
-    runs-on: ubuntu-latest
-    needs: [lint-and-build, test, e2e-local, build]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    steps:
-      - name: デプロイ準備完了ログ
         run: |
-          echo "✅ CI/CD パイプライン完了"
-          echo "📦 本番デプロイ準備完了"
-          echo "🚀 GCP Cloud Run & Vercel へのデプロイが可能です"
-          echo ""
-          echo "次のステップ:"
-          echo "1. GCP Cloud Run にバックエンドをデプロイ"
-          echo "2. Vercel フロントエンドにデプロイ"
-          echo "3. 本番 E2E テスト実行"
+          npm ci
+          cd src/frontend && npm ci && cd ../..
+
+      - name: Playwright をインストール
+        run: npx playwright install --with-deps chromium
+
+      - name: Prisma セットアップ
+        run: npx prisma generate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: AI駆動テスト実行
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BACKEND_PORT: 3100
+          NODE_ENV: test
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+        run: npm run test:ai
+
+      - name: AIテストレポートをアップロード
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-test-report
+          path: playwright-report/ai-test-report.json
+          retention-days: 90
