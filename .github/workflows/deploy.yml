@@ -69,13 +69,65 @@ jobs:
           echo "❌ API の起動確認がタイムアウトしました"
           exit 1
 
-  # ── 2. 本番 E2E テスト ──
+  # ── 2. DBマイグレーション（prisma/ 変更時のみ） ──
+  run-migration:
+    name: Run DB Migration (if needed)
+    runs-on: ubuntu-latest
+    needs: [deploy-gcp]
+    outputs:
+      migration_ran: ${{ steps.check.outputs.should_migrate }}
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: prisma/ ディレクトリの変更を検知
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "手動実行: マイグレーションを実行します"
+            echo "should_migrate=true" >> $GITHUB_OUTPUT
+          else
+            CHANGED=$(git diff HEAD~1 --name-only -- prisma/ | wc -l | tr -d ' ')
+            if [ "$CHANGED" -gt "0" ]; then
+              echo "✅ prisma/ に変更あり ($CHANGED ファイル): マイグレーションを実行します"
+              git diff HEAD~1 --name-only -- prisma/
+              echo "should_migrate=true" >> $GITHUB_OUTPUT
+            else
+              echo "⏭️ prisma/ に変更なし: マイグレーションをスキップします"
+              echo "should_migrate=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: GCP 認証
+        if: steps.check.outputs.should_migrate == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: gcloud CLI セットアップ
+        if: steps.check.outputs.should_migrate == 'true'
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Cloud Run マイグレーションジョブを実行
+        if: steps.check.outputs.should_migrate == 'true'
+        run: |
+          echo "🔄 マイグレーションジョブを実行中..."
+          gcloud run jobs execute trader-note-migrate \
+            --region ${{ env.GCP_REGION }} \
+            --wait
+          echo "✅ マイグレーション完了"
+
+  # ── 3. 本番 E2E テスト ──
   # Vercel は GitHub 連携で main push 時に自動デプロイされるため、
   # GCP デプロイ完了後に両方のエンドポイントをテストする
   e2e-production:
     name: Production E2E Tests
     runs-on: ubuntu-latest
-    needs: [deploy-gcp]
+    needs: [deploy-gcp, run-migration]
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
