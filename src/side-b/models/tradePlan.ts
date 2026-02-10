@@ -40,6 +40,22 @@ export interface KeyLevels {
   strongSupport: number[];
 }
 
+/**
+ * マクロ環境判定（Plan AIが生成）
+ */
+export interface MacroAssessment {
+  /** リスクセンチメント */
+  riskSentiment: 'risk_on' | 'neutral' | 'risk_off';
+  /** ボラティリティ環境 */
+  volatilityRegime: 'low' | 'normal' | 'elevated' | 'crisis';
+  /** イールドカーブシグナル */
+  yieldCurveSignal: 'normal' | 'flattening' | 'inverted';
+  /** マクロ環境の要約 */
+  macroSummary: string;
+  /** トレードへの影響 */
+  tradingImpact: string;
+}
+
 // ===========================================
 // 型定義
 // ===========================================
@@ -136,6 +152,19 @@ export interface PlanMarketAnalysis {
   summary: string;
   /** 追加考察 */
   additionalInsights?: string[];
+  /** マクロ環境判定（マクロデータ提供時のみ） */
+  macroAssessment?: MacroAssessment;
+  /** MTF分析（上位足データ提供時のみ） */
+  mtfAnalysis?: {
+    /** 上位足タイムフレーム */
+    higherTFTimeframe: string;
+    /** 上位足バイアス */
+    higherTFBias: 'long' | 'short' | 'neutral';
+    /** 上位足と執行足の整合性 */
+    alignment: 'aligned' | 'conflicting' | 'neutral';
+    /** MTF分析の補足 */
+    note: string;
+  };
 }
 
 /**
@@ -220,7 +249,7 @@ export function validatePlanAIOutput(data: unknown): PlanAIOutput {
   }
 
   const ma = obj.marketAnalysis as Record<string, unknown>;
-  
+
   // レジームのバリデーション
   if (!VALID_REGIMES.includes(ma.regime as MarketRegime)) {
     throw new Error(`Invalid regime: ${ma.regime}`);

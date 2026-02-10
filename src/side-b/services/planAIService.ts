@@ -27,7 +27,15 @@ import {
 } from '../models';
 import { OHLCVSnapshot } from '../models/marketResearch';
 import { MarketResearchWithTypes } from '../repositories';
-import { CORE_TRADING_RULES, getPlanIndicatorContext } from '../knowledge';
+import {
+  CORE_TRADING_RULES,
+  getPlanIndicatorContext,
+  MACRO_ENVIRONMENT_RULES,
+  getMacroContext,
+  MTF_ANALYSIS_RULES,
+  getMTFContext,
+} from '../knowledge';
+import type { MacroEnvironmentData, HigherTimeframeContext } from '../knowledge';
 
 // ===========================================
 // 型定義
@@ -40,6 +48,8 @@ export interface PlanAIInput {
   research: MarketResearchWithTypes;
   targetDate: string;
   userPreferences?: UserTradingPreferences;
+  macroData?: MacroEnvironmentData;
+  higherTF?: HigherTimeframeContext;
 }
 
 /**
@@ -127,7 +137,7 @@ export class PlanAIService {
    * プロンプトを構築（解釈・戦略立案を含む）
    */
   private buildPrompt(input: PlanAIInput): string {
-    const { research, targetDate, userPreferences } = input;
+    const { research, targetDate, userPreferences, macroData, higherTF } = input;
     const fv = research.featureVector;
     const snapshot = research.ohlcvSnapshot;
 
@@ -199,7 +209,14 @@ ${userPreferences ? `
       "strongSupport": [<価格>]
     },
     "summary": "<日本語100文字以内の市場分析サマリー>",
-    "additionalInsights": ["<追加の洞察1>", "<追加の洞察2>"]
+    "additionalInsights": ["<追加の洞察1>", "<追加の洞察2>"],
+    "macroAssessment": {
+      "riskSentiment": "<risk_on|neutral|risk_off>",
+      "volatilityRegime": "<low|normal|elevated|crisis>",
+      "yieldCurveSignal": "<normal|flattening|inverted>",
+      "macroSummary": "<マクロ環境の要約（日本語50文字以内）>",
+      "tradingImpact": "<このマクロ環境がトレードに与える影響（日本語100文字以内）>"
+    }
   },
   "scenarios": [
     {
@@ -238,7 +255,9 @@ ${userPreferences ? `
 - primaryは必ず1つ
 - RR比は最低1.5以上を推奨
 - 価格レベルは直近高値/安値を参考に
-- 日本語で記述${getPlanIndicatorContext(fv as unknown as Record<string, number>)}`;
+- 日本語で記述
+- マクロデータが提供されている場合はmacroAssessmentを必ず含める
+- MTFデータが提供されている場合はmtfAnalysisを必ず含める${getPlanIndicatorContext(fv as unknown as Record<string, number>)}${getMacroContext(macroData)}${getMTFContext(higherTF, fv.trendDirection)}`;
   }
 
   /**
@@ -261,10 +280,14 @@ ${userPreferences ? `
 
 ${CORE_TRADING_RULES}
 
+${MACRO_ENVIRONMENT_RULES}
+
+${MTF_ANALYSIS_RULES}
+
 あなたの役割:
 1. 数値データから市場レジームを判定
 2. 価格データから重要なサポート/レジスタンスを特定
-3. 具体的なトレードシナリオを1-3個提案
+3. マクロ環境・MTF分析を考慮した上で、具体的なトレードシナリオを1-3個提案
 
 重要: 必ず有効なJSONのみを出力してください。説明文は不要です。`,
           },

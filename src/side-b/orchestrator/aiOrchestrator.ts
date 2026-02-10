@@ -41,6 +41,8 @@ import {
   GeneratePlanResponse,
   AITradeScenario,
 } from '../models';
+import { buildHigherTFContext } from '../knowledge';
+import type { HigherTimeframeContext } from '../knowledge';
 
 // ===========================================
 // 型定義
@@ -67,6 +69,12 @@ export interface OrchestratorPlanRequest {
   userPreferences?: UserTradingPreferences;
   ohlcvData?: { timestamp: Date; open: number; high: number; low: number; close: number; volume?: number }[];
   indicators?: Record<string, unknown>;
+  /** 上位足データ（MTF分析用、オプショナル） */
+  higherTFData?: {
+    timeframe: string;
+    ohlcvData: { timestamp: Date; open: number; high: number; low: number; close: number; volume?: number }[];
+    indicators?: Record<string, unknown>;
+  };
 }
 
 /**
@@ -179,7 +187,7 @@ export class AIOrchestrator {
    * 4. DB保存
    */
   async generatePlan(request: OrchestratorPlanRequest): Promise<OrchestratorResult<AITradePlanWithTypes>> {
-    const { symbol, targetDate, researchId, userPreferences, ohlcvData, indicators } = request;
+    const { symbol, targetDate, researchId, userPreferences, ohlcvData, indicators, higherTFData } = request;
 
     // 対象日の決定
     const date = targetDate ? new Date(targetDate) : new Date();
@@ -243,12 +251,34 @@ export class AIOrchestrator {
         researchTokens = researchResult.tokenUsage || 0;
       }
 
-      // 3. Plan AI 呼び出し
+      // 3. 上位足Research（MTF分析）
+      let higherTFContext: HigherTimeframeContext | undefined;
+      if (higherTFData) {
+        console.log(`[Orchestrator] 上位足Research AI 呼び出し: ${higherTFData.timeframe}`);
+        try {
+          const htfResult = await this.researchAI.generateResearch({
+            symbol,
+            timeframe: higherTFData.timeframe,
+            ohlcvData: higherTFData.ohlcvData,
+            indicators: higherTFData.indicators as ResearchAIInput['indicators'],
+          });
+          higherTFContext = buildHigherTFContext(
+            higherTFData.timeframe,
+            htfResult.output.featureVector,
+          );
+          console.log(`[Orchestrator] 上位足バイアス: ${higherTFContext.bias}`);
+        } catch (htfError) {
+          console.warn(`[Orchestrator] 上位足Research失敗（単一TFで継続）:`, htfError);
+        }
+      }
+
+      // 4. Plan AI 呼び出し
       console.log(`[Orchestrator] Plan AI 呼び出し`);
       const planInput: PlanAIInput = {
         research,
         targetDate: dateStr,
         userPreferences,
+        higherTF: higherTFContext,
       };
 
       const planResult = await this.planAI.generatePlan(planInput);
