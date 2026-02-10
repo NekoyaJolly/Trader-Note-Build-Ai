@@ -27,6 +27,7 @@ import {
 } from '../models';
 import { OHLCVSnapshot } from '../models/marketResearch';
 import { MarketResearchWithTypes } from '../repositories';
+import { CORE_TRADING_RULES, getPlanIndicatorContext } from '../knowledge';
 
 // ===========================================
 // 型定義
@@ -87,10 +88,10 @@ export class PlanAIService {
     try {
       const prompt = this.buildPrompt(input);
       const result = await this.callAI(prompt);
-      
+
       // バリデーション
       const validated = validatePlanAIOutput(result.content);
-      
+
       return {
         output: validated,
         tokenUsage: result.tokenUsage,
@@ -98,7 +99,7 @@ export class PlanAIService {
       };
     } catch (error) {
       console.error('[PlanAI] エラー:', error);
-      
+
       // リトライ（最大2回）
       for (let i = 0; i < 2; i++) {
         try {
@@ -106,7 +107,7 @@ export class PlanAIService {
           const prompt = this.buildPrompt(input);
           const result = await this.callAI(prompt);
           const validated = validatePlanAIOutput(result.content);
-          
+
           return {
             output: validated,
             tokenUsage: result.tokenUsage,
@@ -116,7 +117,7 @@ export class PlanAIService {
           console.error(`[PlanAI] リトライ ${i + 1} 失敗:`, retryError);
         }
       }
-      
+
       // 全リトライ失敗時はフォールバック
       return this.generateFallbackResult(input.research);
     }
@@ -237,7 +238,7 @@ ${userPreferences ? `
 - primaryは必ず1つ
 - RR比は最低1.5以上を推奨
 - 価格レベルは直近高値/安値を参考に
-- 日本語で記述`;
+- 日本語で記述${getPlanIndicatorContext(fv as unknown as Record<string, number>)}`;
   }
 
   /**
@@ -257,6 +258,8 @@ ${userPreferences ? `
             role: 'system',
             content: `あなたは経験豊富なトレーダー兼市場アナリストです。
 12次元特徴量（数値データ）と価格データから、市場状況を解釈し、実践的なトレードプランを生成してください。
+
+${CORE_TRADING_RULES}
 
 あなたの役割:
 1. 数値データから市場レジームを判定
