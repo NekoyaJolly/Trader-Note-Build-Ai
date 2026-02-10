@@ -97,7 +97,7 @@ const DEFAULT_RECONNECT_CONFIG: ReconnectConfig = {
 
 export class CTraderProvider extends BaseMarketDataProvider {
   readonly name: ProviderType = 'ctrader';
-  
+
   private ws: WebSocketType | null = null;
   private authService: CTraderAuthService;
   private accountId: string;
@@ -134,15 +134,50 @@ export class CTraderProvider extends BaseMarketDataProvider {
   async getHistoricalData(
     symbol: string,
     timeframe: Timeframe,
-    _limit: number
+    limit: number
   ): Promise<MarketDataResult> {
-    return {
-      symbol: this.normalizeSymbol(symbol),
-      timeframe,
-      bars: [],
-      provider: this.name,
-      fetchedAt: new Date(),
-    };
+    const normalizedSymbol = this.normalizeSymbol(symbol);
+
+    try {
+      // CTraderDataService を使ってヒストリカルデータを取得
+      const { CTraderDataService } = await import('../../backend/services/ctrader/ctraderDataService');
+      const { PrismaClient } = await import('@prisma/client');
+      const prisma = new PrismaClient();
+      const dataService = new CTraderDataService(
+        new (await import('../../backend/services/ctrader/ctraderAuthService')).CTraderAuthService(prisma)
+      );
+
+      if (!dataService.isConfigured()) {
+        console.warn('[cTrader] API未設定: 空のデータを返します');
+        return { symbol: normalizedSymbol, timeframe, bars: [], provider: this.name, fetchedAt: new Date() };
+      }
+
+      const bars = await dataService.fetchTrendbars(this.accountId, symbol, timeframe, limit);
+
+      return {
+        symbol: normalizedSymbol,
+        timeframe,
+        bars: bars.map(b => ({
+          timestamp: b.timestamp,
+          open: b.open,
+          high: b.high,
+          low: b.low,
+          close: b.close,
+          volume: b.volume,
+        })),
+        provider: this.name,
+        fetchedAt: new Date(),
+      };
+    } catch (error) {
+      console.error('[cTrader] ヒストリカルデータ取得エラー:', error);
+      return {
+        symbol: normalizedSymbol,
+        timeframe,
+        bars: [],
+        provider: this.name,
+        fetchedAt: new Date(),
+      };
+    }
   }
 
   async getCurrentPrice(_symbol: string, _timeframe: Timeframe): Promise<OHLCVBar | null> {

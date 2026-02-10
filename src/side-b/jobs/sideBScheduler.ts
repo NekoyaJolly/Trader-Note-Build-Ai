@@ -58,8 +58,10 @@ import {
 import { calculatePnL, type CloseVirtualTradeInput, type TradeDirection, type ExitReason } from '../models';
 import { AIOrchestrator } from '../orchestrator/aiOrchestrator';
 import { MarketDataService } from '../../services/marketDataService';
+import { CTraderAuthService } from '../../backend/services/ctrader/ctraderAuthService';
 import { config } from '../../config';
 import type { OHLCVData } from '../../services/indicators/indicatorService';
+import { PrismaClient } from '@prisma/client';
 
 // ===========================================
 // 型定義
@@ -73,10 +75,14 @@ export interface SideBSchedulerConfig {
   enabled: boolean;
   /** 監視対象シンボル */
   symbols: string[];
-  /** 分析する時間足 */
+  /** 分析する時間足（執行足） */
   timeframe: string;
+  /** 上位足の時間足（MTF分析用） */
+  higherTimeframe: string;
   /** 監視間隔（ミリ秒） */
   monitorIntervalMs: number;
+  /** プラン生成間隔（時間）- 0=日次のみ */
+  planIntervalHours: number;
   /** 日次プラン生成時刻（UTC時間、例: "00:00"） */
   dailyPlanTimeUTC: string;
   /** 決済時にNote自動生成するか */
@@ -95,6 +101,8 @@ export interface SideBSchedulerConfig {
   autoSimilarityCheck: boolean;
   /** 類似度チェックの閾値（0-1） */
   similarityThreshold: number;
+  /** cTrader アカウントID（cTraderデータソース有効化用） */
+  ctraderAccountId?: string;
 }
 
 /**
@@ -109,8 +117,10 @@ const DEFAULT_CONFIG: SideBSchedulerConfig = {
   enabled: false,  // デフォルトは無効
   symbols: ['XAU/USD'],
   timeframe: '15m',
+  higherTimeframe: '4h',      // MTF上位足: 4時間足
   monitorIntervalMs: 60 * 60 * 1000,  // 1時間間隔（高安値ベース検証）
-  dailyPlanTimeUTC: '00:00',  // UTC 00:00 = JST 09:00
+  planIntervalHours: 4,       // 4時間ごとにプラン再生成
+  dailyPlanTimeUTC: '00:00',  // UTC 00:00 = JST 09:00（初回プラン）
   autoGenerateNote: true,
   autoSummary: true,          // 週次/月次サマリー自動生成
   autoExpireTrades: true,     // 期限切れ自動キャンセル
@@ -175,28 +185,68 @@ export class SideBScheduler {
   private config: SideBSchedulerConfig;
   private isRunning: boolean = false;
   private monitorIntervalId?: NodeJS.Timeout;
-  private dailyPlanIntervalId?: NodeJS.Timeout;
-  private lastDailyPlanRun?: Date;
+  private planIntervalId?: NodeJS.Timeout;
+  private lastPlanRun: Map<string, Date> = new Map();
   private lastMonitorRun?: Date;
+  private lastCleanupRun?: Date;
   private errors: string[] = [];
   private readonly isProduction: boolean;
-  
+
   // サービス
   private orchestrator: AIOrchestrator;
   private marketDataService: MarketDataService;
   private cronSimilarityService: CronSimilarityService;
+  private prisma: PrismaClient;
 
   constructor(configOverride?: Partial<SideBSchedulerConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...configOverride };
     this.isProduction = process.env.NODE_ENV === 'production';
-    
+
     // サービス初期化
+    this.prisma = new PrismaClient();
     this.orchestrator = new AIOrchestrator();
     this.marketDataService = new MarketDataService();
     this.cronSimilarityService = new CronSimilarityService({
       similarityThreshold: this.config.similarityThreshold,
       debug: !this.isProduction,
     });
+  }
+
+  /**
+   * cTrader データソースを自動検出・設定
+   * 
+   * 優先順位:
+   * 1. config.ctraderAccountId（手動指定）
+   * 2. CTraderToken テーブルから最新のトークンを自動検出
+   * 
+   * cTrader認証済みユーザーがいれば自動的にcTrader優先データ取得が有効になる
+   */
+  private async initCTraderDataSource(): Promise<void> {
+    try {
+      let accountId = this.config.ctraderAccountId;
+
+      // 手動指定がない場合、DBから自動検出
+      if (!accountId) {
+        const latestToken = await this.prisma.cTraderToken.findFirst({
+          orderBy: { updatedAt: 'desc' },
+          select: { accountId: true },
+        });
+
+        if (latestToken) {
+          accountId = latestToken.accountId;
+          this.log(`cTrader アカウント自動検出: ${accountId}`);
+        } else {
+          this.log('cTrader トークン未登録 → Twelve Dataのみ使用');
+          return;
+        }
+      }
+
+      const authService = new CTraderAuthService(this.prisma);
+      this.marketDataService.configureCTrader(accountId, authService);
+      this.log('cTrader データソースを有効化しました');
+    } catch (error) {
+      this.log(`cTrader データソース設定エラー（Twelve Dataで続行）: ${error}`);
+    }
   }
 
   /**
@@ -213,25 +263,40 @@ export class SideBScheduler {
       return;
     }
 
+    // cTrader データソースを自動検出してから起動
+    this.initCTraderDataSource().then(() => {
+      this.startInternal();
+    }).catch((err) => {
+      this.log(`cTrader初期化エラー（Twelve Dataで続行）: ${err}`);
+      this.startInternal();
+    });
+  }
+
+  /**
+   * 内部起動処理（cTrader初期化後に呼ばれる）
+   */
+  private startInternal(): void {
+
     this.log('Side-Bスケジューラーを開始します');
     this.log(`  対象シンボル: ${this.config.symbols.join(', ')}`);
-    this.log(`  時間足: ${this.config.timeframe}`);
+    this.log(`  執行足: ${this.config.timeframe} / 上位足: ${this.config.higherTimeframe}`);
     this.log(`  監視間隔: ${this.config.monitorIntervalMs / 1000}秒`);
-    this.log(`  日次プラン生成: ${this.config.dailyPlanTimeUTC} UTC`);
+    this.log(`  プラン生成間隔: ${this.config.planIntervalHours}時間ごと`);
+    this.log(`  cTrader: ${this.marketDataService.isCTraderAvailable() ? '有効' : '無効（Twelve Data使用）'}`);
     this.log(`  Note自動生成: ${this.config.autoGenerateNote ? '有効' : '無効'}`);
     this.log(`  サマリー自動生成: ${this.config.autoSummary ? '有効' : '無効'}`);
     this.log(`  期限切れ自動キャンセル: ${this.config.autoExpireTrades ? '有効' : '無効'}`);
     this.log(`  類似度チェック: ${this.config.autoSimilarityCheck ? '有効' : '無効'} (閾値: ${this.config.similarityThreshold})`);
-    
+
     // 市場状態をログ
     const marketInfo = getMarketStatusJST();
     this.log(`  市場状態: ${marketInfo.message}`);
 
-    // 監視ジョブを開始（1分間隔）
+    // 監視ジョブを開始
     this.startMonitorJob();
-    
-    // 日次プランジョブを開始
-    this.startDailyPlanJob();
+
+    // 定期プランジョブを開始
+    this.startPlanJob();
 
     // 週次/月次サマリースケジューラーを連動起動
     if (this.config.autoSummary) {
@@ -259,9 +324,9 @@ export class SideBScheduler {
       this.monitorIntervalId = undefined;
     }
 
-    if (this.dailyPlanIntervalId) {
-      clearInterval(this.dailyPlanIntervalId);
-      this.dailyPlanIntervalId = undefined;
+    if (this.planIntervalId) {
+      clearInterval(this.planIntervalId);
+      this.planIntervalId = undefined;
     }
 
     // サマリースケジューラーも連動停止
@@ -278,14 +343,14 @@ export class SideBScheduler {
    */
   updateConfig(newConfig: Partial<SideBSchedulerConfig>): void {
     const wasRunning = this.isRunning;
-    
+
     if (wasRunning) {
       this.stop();
     }
-    
+
     this.config = { ...this.config, ...newConfig };
     this.log('Side-Bスケジューラー設定を更新しました');
-    
+
     if (wasRunning && this.config.enabled) {
       this.start();
     }
@@ -298,13 +363,19 @@ export class SideBScheduler {
     // サマリースケジューラーの状態を取得
     const summaryStatus = summarySchedulerService.getStatus();
 
+    // 最新のプラン実行日時を特定
+    let latestPlanRun: Date | undefined;
+    for (const [, date] of this.lastPlanRun) {
+      if (!latestPlanRun || date > latestPlanRun) latestPlanRun = date;
+    }
+
     return {
       isRunning: this.isRunning,
       config: this.config,
-      lastDailyPlanRun: this.lastDailyPlanRun,
+      lastDailyPlanRun: latestPlanRun,
       lastMonitorRun: this.lastMonitorRun,
       marketStatus: getMarketStatusJST(),
-      errors: [...this.errors].slice(-10),  // 直近10件
+      errors: [...this.errors].slice(-10),
       summaryScheduler: {
         isRunning: summaryStatus.isRunning,
         weeklyEnabled: summaryStatus.config.weeklyEnabled,
@@ -325,7 +396,7 @@ export class SideBScheduler {
    * 手動で日次プラン生成を実行
    */
   async runDailyPlanNow(): Promise<JobResult> {
-    return this.executeDailyPlanJob();
+    return this.executePlanJob();
   }
 
   /**
@@ -357,56 +428,58 @@ export class SideBScheduler {
   }
 
   /**
-   * 日次プランジョブを開始
+   * 定期プランジョブを開始
    * 
-   * 1時間ごとにチェックし、指定時刻かつ市場開始時に実行
+   * planIntervalHours ごとにプラン再生成（デフォルト: 4時間）
+   * 市場閉場中はスキップ
    */
-  private startDailyPlanJob(): void {
-    // 1時間ごとにチェック
-    const checkIntervalMs = 60 * 60 * 1000;
-    
-    this.dailyPlanIntervalId = setInterval(() => {
-      this.checkAndExecuteDailyPlan().catch((err) => {
-        this.addError(`日次プランチェックエラー: ${err}`);
+  private startPlanJob(): void {
+    const checkIntervalMs = 60 * 60 * 1000; // 1時間ごとにチェック
+
+    this.planIntervalId = setInterval(() => {
+      this.checkAndExecutePlan().catch((err) => {
+        this.addError(`プランチェックエラー: ${err}`);
       });
     }, checkIntervalMs);
 
     // 開始時にも即時チェック
-    this.checkAndExecuteDailyPlan().catch((err) => {
-      this.addError(`日次プラン初回チェックエラー: ${err}`);
+    this.checkAndExecutePlan().catch((err) => {
+      this.addError(`プラン初回チェックエラー: ${err}`);
     });
   }
 
   /**
-   * 日次プラン実行タイミングをチェック
+   * プラン実行タイミングをチェック
+   * 
+   * planIntervalHours が 0 の場合は日次のみ（従来動作）
+   * それ以外は N 時間ごとに再実行
    */
-  private async checkAndExecuteDailyPlan(): Promise<void> {
+  private async checkAndExecutePlan(): Promise<void> {
     const now = new Date();
-    const [targetHour] = this.config.dailyPlanTimeUTC.split(':').map(Number);
-    const currentHourUTC = now.getUTCHours();
-
-    // 指定時刻でない場合はスキップ
-    if (currentHourUTC !== targetHour) {
-      return;
-    }
-
-    // 今日既に実行済みならスキップ
-    if (this.lastDailyPlanRun) {
-      const lastRunDate = this.lastDailyPlanRun.toDateString();
-      const todayDate = now.toDateString();
-      if (lastRunDate === todayDate) {
-        return;
-      }
-    }
 
     // 市場が閉まっている場合はスキップ
     if (!isFXMarketOpen(now)) {
-      this.log('市場が閉まっているため日次プラン生成をスキップします');
       return;
     }
 
-    // 日次プランを実行
-    await this.executeDailyPlanJob();
+    const intervalHours = this.config.planIntervalHours || 24;
+    const intervalMs = intervalHours * 60 * 60 * 1000;
+
+    // 各シンボルについて最終実行からの経過を確認
+    let shouldRun = false;
+    for (const symbol of this.config.symbols) {
+      const lastRun = this.lastPlanRun.get(symbol);
+      if (!lastRun || (now.getTime() - lastRun.getTime()) >= intervalMs) {
+        shouldRun = true;
+        break;
+      }
+    }
+
+    if (!shouldRun) {
+      return;
+    }
+
+    await this.executePlanJob();
   }
 
   /**
@@ -429,7 +502,7 @@ export class SideBScheduler {
 
     this.lastMonitorRun = new Date();
     this.log('1時間ごと検証を開始します（高安値ベース）');
-    
+
     const results = {
       processed: 0,
       entries: 0,
@@ -460,7 +533,7 @@ export class SideBScheduler {
         try {
           // 1分足60本を取得（1時間分）
           const minuteData = await this.marketDataService.getRecentMinuteOHLCV(symbol, 60);
-          
+
           if (!minuteData || minuteData.length === 0) {
             results.errors.push(`${symbol}: 1分足データ取得失敗`);
             continue;
@@ -640,41 +713,83 @@ export class SideBScheduler {
     exitTime?: Date,
   ): Promise<void> {
     const pnl = calculatePnL(direction, entryPrice, exitPrice);
-    
+
     const input: CloseVirtualTradeInput = {
       exitPrice,
       exitReason,
       note: `高安値ベース検証により ${exitReason === 'stop_loss' ? 'SL' : 'TP'} 到達を検出`,
     };
-    
+
     await closeTrade(tradeId, input, pnl.pips, pnl.amount);
     this.log(`決済完了: ${tradeId} (${exitReason}, ${pnl.pips > 0 ? '+' : ''}${pnl.pips.toFixed(1)} pips)`);
   }
 
   /**
-   * 日次プランジョブを実行
+   * プラン生成ジョブを実行（4時間ごと / MTF対応）
+   * 
+   * 1. 執行足OHLCV取得（cTrader優先 → Twelve Dataフォールバック）
+   * 2. 上位足OHLCV取得（MTF分析用）
+   * 3. Orchestrator に higherTFData を渡してプラン生成
+   * 4. Trade作成（pending）
    */
-  private async executeDailyPlanJob(): Promise<JobResult> {
-    this.lastDailyPlanRun = new Date();
-    this.log('日次プラン生成を開始します');
+  private async executePlanJob(): Promise<JobResult> {
+    const intervalLabel = this.config.planIntervalHours
+      ? `${this.config.planIntervalHours}時間ごと`
+      : '日次';
+    this.log(`${intervalLabel}プラン生成を開始します`);
 
     const results: { symbol: string; success: boolean; error?: string }[] = [];
 
     for (const symbol of this.config.symbols) {
       try {
-        // 1. OHLCVデータ取得（getHistoricalDataを使用）
-        this.log(`[${symbol}] OHLCVデータを取得中...`);
+        // 最終実行チェック（間隔内なら該シンボルはスキップ）
+        const lastRun = this.lastPlanRun.get(symbol);
+        const intervalMs = (this.config.planIntervalHours || 24) * 60 * 60 * 1000;
+        if (lastRun && (Date.now() - lastRun.getTime()) < intervalMs) {
+          this.log(`[${symbol}] 間隔内のためスキップ（最終: ${lastRun.toISOString()}）`);
+          continue;
+        }
+
+        // 1. 執行足OHLCVデータ取得
+        this.log(`[${symbol}] 執行足(${this.config.timeframe})OHLCV取得中...`);
         const ohlcvData = await this.marketDataService.getHistoricalData(
           symbol,
           this.config.timeframe,
-          100,  // 100本分
+          100,
         );
 
         if (!ohlcvData || ohlcvData.length === 0) {
-          throw new Error('OHLCVデータの取得に失敗');
+          throw new Error('執行足OHLCVデータの取得に失敗');
         }
 
-        // 2. オーケストレーターを使ってプラン生成（Research → Plan を一括処理）
+        // 2. 上位足OHLCVデータ取得（MTF分析用）
+        let higherTFData: { timeframe: string; ohlcvData: { timestamp: Date; open: number; high: number; low: number; close: number; volume?: number }[] } | undefined;
+        try {
+          this.log(`[${symbol}] 上位足(${this.config.higherTimeframe})OHLCV取得中...`);
+          const htfOhlcv = await this.marketDataService.getHistoricalData(
+            symbol,
+            this.config.higherTimeframe,
+            100,
+          );
+          if (htfOhlcv && htfOhlcv.length > 0) {
+            higherTFData = {
+              timeframe: this.config.higherTimeframe,
+              ohlcvData: htfOhlcv.map(d => ({
+                timestamp: new Date(d.timestamp),
+                open: d.open,
+                high: d.high,
+                low: d.low,
+                close: d.close,
+                volume: d.volume,
+              })),
+            };
+            this.log(`[${symbol}] 上位足 ${htfOhlcv.length}本取得成功`);
+          }
+        } catch (htfError) {
+          this.log(`[${symbol}] 上位足取得失敗（単一TFで続行）: ${htfError}`);
+        }
+
+        // 3. オーケストレーターでプラン生成（Research → Plan + MTF）
         this.log(`[${symbol}] AI分析を実行中...`);
         const planResult = await this.orchestrator.generatePlan({
           symbol,
@@ -687,13 +802,14 @@ export class SideBScheduler {
             close: d.close,
             volume: d.volume,
           })),
+          higherTFData,
         });
 
         if (!planResult.success || !planResult.data) {
           throw new Error(planResult.error || 'プラン生成に失敗');
         }
 
-        // 3. Tradeを作成（pending状態）
+        // 4. Tradeを作成（pending状態）
         this.log(`[${symbol}] 仮想トレードを作成中...`);
         const tradeResult = await createTradeFromPlan(planResult.data.id);
 
@@ -701,46 +817,52 @@ export class SideBScheduler {
           throw new Error(tradeResult.error || 'トレード作成に失敗');
         }
 
-        this.log(`[${symbol}] 日次プラン完了: Trade ID ${tradeResult.trade?.id}`);
+        this.lastPlanRun.set(symbol, new Date());
+        this.log(`[${symbol}] プラン完了: Trade ID ${tradeResult.trade?.id}`);
         results.push({ symbol, success: true });
 
       } catch (error) {
         const message = error instanceof Error ? error.message : '不明なエラー';
-        this.addError(`[${symbol}] 日次プラン失敗: ${message}`);
+        this.addError(`[${symbol}] プラン失敗: ${message}`);
         results.push({ symbol, success: false, error: message });
       }
     }
 
-    // 日次クリーンアップを実行（autoCleanupが有効な場合）
+    // クリーンアップ（1日に1回、最初のプラン実行時のみ）
     if (this.config.autoCleanup) {
-      try {
-        this.log('日次クリーンアップを実行中...');
-        const cleanupConfig: Partial<CleanupConfig> = {
-          cleanupExpiredResearch: true,
-          cleanupOldPlans: true,
-          planRetentionDays: this.config.planRetentionDays,
-          cleanupOldTrades: true,
-          tradeRetentionDays: this.config.tradeRetentionDays,
-        };
-        const cleanupResult = await executeCleanup(cleanupConfig);
-        
-        // 何か削除された場合のみログ出力
-        const totalDeleted = cleanupResult.expiredResearchCount 
-          + cleanupResult.oldPlansCount 
-          + cleanupResult.oldTradesCount;
-        if (totalDeleted > 0) {
-          this.log(`クリーンアップ完了: リサーチ ${cleanupResult.expiredResearchCount}件, ` +
-                   `プラン ${cleanupResult.oldPlansCount}件, ` +
-                   `トレード ${cleanupResult.oldTradesCount}件 削除`);
+      const anyFirstRun = results.some(r => r.success);
+      const cleanupDue = !this.lastCleanupRun
+        || (Date.now() - this.lastCleanupRun.getTime()) > 24 * 60 * 60 * 1000;
+      if (anyFirstRun && cleanupDue) {
+        try {
+          this.log('クリーンアップを実行中...');
+          const cleanupConfig: Partial<CleanupConfig> = {
+            cleanupExpiredResearch: true,
+            cleanupOldPlans: true,
+            planRetentionDays: this.config.planRetentionDays,
+            cleanupOldTrades: true,
+            tradeRetentionDays: this.config.tradeRetentionDays,
+          };
+          const cleanupResult = await executeCleanup(cleanupConfig);
+          this.lastCleanupRun = new Date();
+
+          const totalDeleted = cleanupResult.expiredResearchCount
+            + cleanupResult.oldPlansCount
+            + cleanupResult.oldTradesCount;
+          if (totalDeleted > 0) {
+            this.log(`クリーンアップ完了: リサーチ ${cleanupResult.expiredResearchCount}件, ` +
+              `プラン ${cleanupResult.oldPlansCount}件, ` +
+              `トレード ${cleanupResult.oldTradesCount}件 削除`);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : '不明なエラー';
+          this.addError(`クリーンアップエラー: ${message}`);
         }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : '不明なエラー';
-        this.addError(`クリーンアップエラー: ${message}`);
       }
     }
 
     const successCount = results.filter((r) => r.success).length;
-    const message = `日次プラン生成完了: ${successCount}/${results.length} シンボル成功`;
+    const message = `${intervalLabel}プラン生成完了: ${successCount}/${results.length} シンボル成功`;
     this.log(message);
 
     return {
@@ -776,7 +898,7 @@ export class SideBScheduler {
         }
 
         this.log(`[Note生成] Trade ${trade.id} のNoteを生成中...`);
-        
+
         try {
           // tradeとplanを正しい形式で渡す
           await generateNoteFromTrade(
@@ -835,7 +957,7 @@ export class SideBScheduler {
     const timestamp = new Date().toISOString();
     this.errors.push(`${timestamp}: ${message}`);
     console.error(`[SideBScheduler] ${message}`);
-    
+
     // エラーは最大100件まで保持
     if (this.errors.length > 100) {
       this.errors = this.errors.slice(-100);
