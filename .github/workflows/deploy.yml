@@ -1,14 +1,10 @@
 name: Production Deployment
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI Pipeline"]
     branches: [main]
-    paths:
-      - 'src/**'
-      - 'prisma/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'Dockerfile'
+    types: [completed]
   workflow_dispatch:
 
 env:
@@ -24,6 +20,10 @@ jobs:
   deploy-gcp:
     name: Deploy API to GCP Cloud Run
     runs-on: ubuntu-latest
+    # CI 成功時のみ実行（手動実行時はスキップなし）
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     environment:
       name: production
       url: ${{ env.PRODUCTION_API_URL }}
