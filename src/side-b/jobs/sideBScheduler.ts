@@ -62,6 +62,7 @@ import { CTraderAuthService } from '../../backend/services/ctrader/ctraderAuthSe
 import { config } from '../../config';
 import type { OHLCVData } from '../../services/indicators/indicatorService';
 import { PrismaClient } from '@prisma/client';
+import { ohlcvRepository } from '../../backend/repositories/ohlcvRepository';
 
 // ===========================================
 // 型定義
@@ -762,6 +763,30 @@ export class SideBScheduler {
           throw new Error('執行足OHLCVデータの取得に失敗');
         }
 
+        // 1b. 執行足OHLCVをDBに永続化（バックテスト・ストラテジー分析で再利用）
+        try {
+          const normalizedSymbol = symbol.replace('/', '');
+          const source = this.marketDataService.isCTraderAvailable() ? 'ctrader' : 'twelvedata';
+          const insertCount = await ohlcvRepository.bulkInsert(
+            ohlcvData.map(d => ({
+              symbol: normalizedSymbol,
+              timeframe: this.config.timeframe,
+              timestamp: new Date(d.timestamp),
+              open: d.open,
+              high: d.high,
+              low: d.low,
+              close: d.close,
+              volume: d.volume ?? 0,
+              source,
+            }))
+          );
+          if (insertCount > 0) {
+            this.log(`[${symbol}] 執行足 ${insertCount}本をDBに保存`);
+          }
+        } catch (persistError) {
+          this.log(`[${symbol}] 執行足DB保存エラー（AI処理は続行）: ${persistError}`);
+        }
+
         // 2. 上位足OHLCVデータ取得（MTF分析用）
         let higherTFData: { timeframe: string; ohlcvData: { timestamp: Date; open: number; high: number; low: number; close: number; volume?: number }[] } | undefined;
         try {
@@ -784,6 +809,30 @@ export class SideBScheduler {
               })),
             };
             this.log(`[${symbol}] 上位足 ${htfOhlcv.length}本取得成功`);
+
+            // 2b. 上位足OHLCVもDBに永続化
+            try {
+              const normalizedSymbol = symbol.replace('/', '');
+              const source = this.marketDataService.isCTraderAvailable() ? 'ctrader' : 'twelvedata';
+              const insertCount = await ohlcvRepository.bulkInsert(
+                htfOhlcv.map(d => ({
+                  symbol: normalizedSymbol,
+                  timeframe: this.config.higherTimeframe,
+                  timestamp: new Date(d.timestamp),
+                  open: d.open,
+                  high: d.high,
+                  low: d.low,
+                  close: d.close,
+                  volume: d.volume ?? 0,
+                  source,
+                }))
+              );
+              if (insertCount > 0) {
+                this.log(`[${symbol}] 上位足 ${insertCount}本をDBに保存`);
+              }
+            } catch (persistError) {
+              this.log(`[${symbol}] 上位足DB保存エラー（AI処理は続行）: ${persistError}`);
+            }
           }
         } catch (htfError) {
           this.log(`[${symbol}] 上位足取得失敗（単一TFで続行）: ${htfError}`);

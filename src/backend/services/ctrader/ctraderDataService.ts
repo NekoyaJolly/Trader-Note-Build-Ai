@@ -333,17 +333,19 @@ export class CTraderDataService {
 
         return trendbars
             .map(bar => {
-                const lowRaw = bar.low;
-                const openRaw = lowRaw + (bar.deltaOpen || 0);
-                const highRaw = lowRaw + (bar.deltaHigh || 0);
-                const closeRaw = lowRaw + (bar.deltaClose || 0);
+                // cTrader API はすべての数値フィールドを文字列で返すため、
+                // 明示的に Number() でキャストしないと + 演算子が文字列連結になる
+                const lowRaw = Number(bar.low);
+                const openRaw = lowRaw + Number(bar.deltaOpen || 0);
+                const highRaw = lowRaw + Number(bar.deltaHigh || 0);
+                const closeRaw = lowRaw + Number(bar.deltaClose || 0);
 
                 // タイムスタンプの解決
                 let timestamp: Date;
                 if (bar.utcTimestampInMinutes) {
-                    timestamp = new Date(bar.utcTimestampInMinutes * 60 * 1000);
+                    timestamp = new Date(Number(bar.utcTimestampInMinutes) * 60 * 1000);
                 } else if (bar.timestamp) {
-                    timestamp = new Date(bar.timestamp);
+                    timestamp = new Date(Number(bar.timestamp));
                 } else {
                     timestamp = new Date();
                 }
@@ -354,7 +356,7 @@ export class CTraderDataService {
                     high: parseFloat((highRaw / divisor).toFixed(digits)),
                     low: parseFloat((lowRaw / divisor).toFixed(digits)),
                     close: parseFloat((closeRaw / divisor).toFixed(digits)),
-                    volume: bar.volume || 0,
+                    volume: Number(bar.volume || 0),
                 };
             })
             .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
