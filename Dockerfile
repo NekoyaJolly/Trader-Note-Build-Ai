@@ -27,6 +27,9 @@ RUN npm run build:frontend
 FROM node:22-alpine
 WORKDIR /app
 
+# 本番環境として動作させる（Next.js 統合ハンドラーの登録に必要）
+ENV NODE_ENV=production
+
 # ビルド成果物をコピー
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist

@@ -92,25 +92,19 @@
 
 ```
 ┌─────────────────────────────────────────┐
-│         Vercel (フロントエンド)          │
-│  https://trader-note-build-ai.vercel.app │
-└─────────────────┬───────────────────────┘
-                  │ API コール
-                  ▼
-┌─────────────────────────────────────────┐
-│    Cloud Run Service (バックエンド)      │
+│  Cloud Run Service (FE + BE 統合)       │
 │ https://trader-note-...run.app          │
-│  - Express API サーバー                  │
+│  - Express API サーバー (/api/*)         │
+│  - Next.js standalone (UI: /*)           │
 │  - Node.js 22 Alpine                     │
 │  - Prisma Client 6.19.2                  │
+│  - NODE_ENV=production                   │
 └─────────────────┬───────────────────────┘
-                  │ Unix Socket
+                  │ Supabase Connection Pooler
                   ▼
 ┌─────────────────────────────────────────┐
-│       Cloud SQL PostgreSQL 15           │
-│  trader-note-postgres                   │
-│  - Database: tradeassist                │
-│  - User: tradeassist_user               │
+│       Supabase PostgreSQL               │
+│  - Database: postgres                    │
 └─────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────┐
@@ -215,34 +209,15 @@ gcloud run services update trader-note --region asia-northeast1 --update-secrets
 
 ## 🎯 次のステップ
 
-### 1. Vercel フロントエンドの環境変数設定
+### 1. cTrader OAuth Redirect URI 更新
 
-Vercel の環境変数に以下を設定:
-
-```bash
-NEXT_PUBLIC_API_URL=https://trader-note-571157808050.asia-northeast1.run.app
-```
-
-### 2. CORS 設定の確認
-
-[src/app.ts](src/app.ts) の `allowedOrigins` に Vercel URL が含まれているか確認:
-
-```typescript
-const allowedOrigins = [
-  'https://trader-note-build-ai.vercel.app',
-  // ...
-];
-```
-
-### 3. cTrader OAuth Redirect URI 更新
-
-cTrader アプリ設定で Redirect URI を更新:
+cTrader アプリ設定で Redirect URI を Cloud Run URL に更新:
 
 ```
-https://trader-note-build-ai.vercel.app/auth/ctrader/callback
+https://trader-note-571157808050.asia-northeast1.run.app/auth/ctrader/callback
 ```
 
-### 4. モニタリング設定
+### 2. モニタリング設定
 
 - Cloud Monitoring でアラート設定
 - Error Reporting の有効化
@@ -261,8 +236,8 @@ https://trader-note-build-ai.vercel.app/auth/ctrader/callback
 - Cloud Run Job で分離実行
 
 ### フロントエンド
-- GCP には含めない
-- Vercel で独立してデプロイ
+- Cloud Run で Next.js standalone として統合ホスティング
+- `NODE_ENV=production` が必須（Dockerfile および Cloud Run で設定）
 
 ---
 

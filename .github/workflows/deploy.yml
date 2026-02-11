@@ -54,7 +54,8 @@ jobs:
           gcloud run deploy ${{ env.GCP_SERVICE_NAME }} \
             --image ${{ env.GCP_IMAGE }} \
             --region ${{ env.GCP_REGION }} \
-            --platform managed
+            --platform managed \
+            --update-env-vars NODE_ENV=production
 
       - name: デプロイ後の動作確認（最大5分待機）
         run: |
