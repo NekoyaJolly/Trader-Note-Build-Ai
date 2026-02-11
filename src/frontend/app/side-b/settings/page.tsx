@@ -15,10 +15,8 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 
-// APIベースURL
-const API_BASE = (typeof window !== "undefined" && process.env.NEXT_PUBLIC_API_BASE_URL) 
-  ? process.env.NEXT_PUBLIC_API_BASE_URL + "/api/side-b"
-  : "http://localhost:3100/api/side-b";
+// APIベースURL（同一オリジン: 相対パス）
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "") + "/api/side-b";
 
 // スケジューラー設定型
 interface SchedulerConfig {
@@ -226,15 +224,14 @@ export default function SettingsPage() {
               🔧 自動実行設定
             </h1>
           </div>
-          
+
           {/* 市場状態 */}
           <div className="flex items-center gap-3">
             <span className="text-sm text-slate-400">市場:</span>
-            <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-              status?.marketStatus?.isOpen 
-                ? "bg-green-500/20 text-green-400 border border-green-500/30" 
+            <span className={`px-3 py-1 rounded-full text-sm font-medium ${status?.marketStatus?.isOpen
+                ? "bg-green-500/20 text-green-400 border border-green-500/30"
                 : "bg-red-500/20 text-red-400 border border-red-500/30"
-            }`}>
+              }`}>
               {status?.marketStatus?.message || "不明"}
             </span>
           </div>
@@ -255,7 +252,7 @@ export default function SettingsPage() {
             <span>📡</span>
             スケジューラー状態
           </h2>
-          
+
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             {/* 実行状態 */}
             <div className="bg-slate-800/50 rounded-lg p-4 text-center">
@@ -264,27 +261,27 @@ export default function SettingsPage() {
                 {status?.isRunning ? "🟢 実行中" : "⏸️ 停止中"}
               </div>
             </div>
-            
+
             {/* 最終日次プラン実行 */}
             <div className="bg-slate-800/50 rounded-lg p-4 text-center">
               <div className="text-sm text-slate-400 mb-1">最終プラン生成</div>
               <div className="text-sm">
-                {status?.lastDailyPlanRun 
+                {status?.lastDailyPlanRun
                   ? new Date(status.lastDailyPlanRun).toLocaleString("ja-JP")
                   : "未実行"}
               </div>
             </div>
-            
+
             {/* 最終監視実行 */}
             <div className="bg-slate-800/50 rounded-lg p-4 text-center">
               <div className="text-sm text-slate-400 mb-1">最終監視実行</div>
               <div className="text-sm">
-                {status?.lastMonitorRun 
+                {status?.lastMonitorRun
                   ? new Date(status.lastMonitorRun).toLocaleString("ja-JP")
                   : "未実行"}
               </div>
             </div>
-            
+
             {/* エラー数 */}
             <div className="bg-slate-800/50 rounded-lg p-4 text-center">
               <div className="text-sm text-slate-400 mb-1">直近エラー</div>
@@ -346,11 +343,10 @@ export default function SettingsPage() {
                   <button
                     key={s.value}
                     onClick={() => toggleSymbol(s.value)}
-                    className={`px-4 py-2 rounded-lg border transition-all ${
-                      editConfig.symbols.includes(s.value)
+                    className={`px-4 py-2 rounded-lg border transition-all ${editConfig.symbols.includes(s.value)
                         ? "bg-purple-600 border-purple-500 text-white"
                         : "bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600"
-                    }`}
+                      }`}
                   >
                     {s.label}
                   </button>
@@ -366,11 +362,10 @@ export default function SettingsPage() {
                   <button
                     key={tf.value}
                     onClick={() => setEditConfig({ ...editConfig, timeframe: tf.value })}
-                    className={`px-4 py-2 rounded-lg border transition-all ${
-                      editConfig.timeframe === tf.value
+                    className={`px-4 py-2 rounded-lg border transition-all ${editConfig.timeframe === tf.value
                         ? "bg-purple-600 border-purple-500 text-white"
                         : "bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600"
-                    }`}
+                      }`}
                   >
                     {tf.label}
                   </button>
@@ -441,7 +436,7 @@ export default function SettingsPage() {
             <span>🚀</span>
             手動実行
           </h2>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <button
               onClick={handleRunDailyPlan}
@@ -451,7 +446,7 @@ export default function SettingsPage() {
               <div className="text-lg mb-1">📋 日次プラン生成</div>
               <div className="text-sm text-slate-300">Research → Plan → Trade を一括実行</div>
             </button>
-            
+
             <button
               onClick={handleRunMonitor}
               disabled={running}

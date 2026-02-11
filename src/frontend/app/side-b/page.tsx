@@ -71,19 +71,17 @@ interface ChatMessage {
   data?: unknown; // API レスポンスデータ（オプション）
 }
 
-// APIベースURL
-const API_BASE = (typeof window !== "undefined" && process.env.NEXT_PUBLIC_API_BASE_URL) 
-  ? process.env.NEXT_PUBLIC_API_BASE_URL + "/api/side-b"
-  : "http://localhost:3100/api/side-b";
+// APIベースURL（同一オリジン: 相対パス）
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "") + "/api/side-b";
 
 // ユーザー入力からシンボルと意図を解析
-function parseUserIntent(message: string): { 
-  intent: "research" | "plan" | "unknown"; 
+function parseUserIntent(message: string): {
+  intent: "research" | "plan" | "unknown";
   symbol: string | null;
   timeframe: string;
 } {
   const msg = message.toLowerCase();
-  
+
   // シンボル検出（よく使われる通貨ペアや商品）
   const symbolPatterns = [
     /xauusd|gold|ゴールド|金/i,
@@ -91,16 +89,16 @@ function parseUserIntent(message: string): {
     /usdjpy|usd\/jpy|ドル円/i,
     /gbpusd|gbp\/usd|ポンドドル/i,
   ];
-  
+
   let symbol: string | null = null;
   if (symbolPatterns[0].test(msg)) symbol = "XAU/USD";
   else if (symbolPatterns[1].test(msg)) symbol = "EUR/USD";
   else if (symbolPatterns[2].test(msg)) symbol = "USD/JPY";
   else if (symbolPatterns[3].test(msg)) symbol = "GBP/USD";
-  
+
   // デフォルトシンボル（指定がない場合）
   if (!symbol) symbol = "XAU/USD";
-  
+
   // 時間足検出
   let timeframe = "15m";
   if (/1h|1時間|hourly/i.test(msg)) timeframe = "1h";
@@ -108,7 +106,7 @@ function parseUserIntent(message: string): {
   else if (/5m|5分/i.test(msg)) timeframe = "5m";
   else if (/30m|30分/i.test(msg)) timeframe = "30m";
   else if (/daily|日足|1d/i.test(msg)) timeframe = "1d";
-  
+
   // 意図検出
   let intent: "research" | "plan" | "unknown" = "unknown";
   if (/research|リサーチ|分析|調査|市場|マーケット/i.test(msg)) {
@@ -119,7 +117,7 @@ function parseUserIntent(message: string): {
     // シンボルが含まれていればリサーチと推定
     intent = "research";
   }
-  
+
   return { intent, symbol, timeframe };
 }
 
@@ -159,7 +157,7 @@ export default function SideBDashboard() {
     try {
       // ユーザー意図を解析
       const { intent, symbol, timeframe } = parseUserIntent(userInput);
-      
+
       let aiResponse: ChatMessage;
 
       if (intent === "research") {
@@ -169,9 +167,9 @@ export default function SideBDashboard() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ symbol, timeframe }),
         });
-        
+
         const data = await response.json();
-        
+
         if (!response.ok) {
           throw new Error(data.error || "リサーチ生成に失敗しました");
         }
@@ -187,14 +185,14 @@ export default function SideBDashboard() {
           `• レジスタンス: ${research?.keyLevels?.resistance?.join(", ") || "N/A"}\n\n` +
           `📝 **サマリー**: ${research?.summary || "リサーチ完了"}\n\n` +
           `次のステップ: 「${symbol}のプランを作成」と入力してください。`;
-        
+
         aiResponse = {
           role: "ai",
           content,
           timestamp: new Date(),
           data: research,
         };
-        
+
       } else if (intent === "plan") {
         // Plan API 呼び出し
         const response = await fetch(`${API_BASE}/plans`, {
@@ -202,9 +200,9 @@ export default function SideBDashboard() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ symbol, timeframe }),
         });
-        
+
         const data = await response.json();
-        
+
         if (!response.ok) {
           throw new Error(data.error || "プラン生成に失敗しました");
         }
@@ -221,14 +219,14 @@ export default function SideBDashboard() {
           `📊 **確信度**: ${scenario?.confidence || "N/A"}%\n` +
           `📝 **根拠**: ${scenario?.reasoning || "プラン生成完了"}\n\n` +
           `次のステップ: Trade タブで仮想トレードを作成できます。`;
-        
+
         aiResponse = {
           role: "ai",
           content,
           timestamp: new Date(),
           data: plan,
         };
-        
+
       } else {
         // 不明な意図
         aiResponse = {
@@ -240,7 +238,7 @@ export default function SideBDashboard() {
           timestamp: new Date(),
         };
       }
-      
+
       setMessages((prev) => [...prev, aiResponse]);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "エラーが発生しました";
@@ -319,9 +317,8 @@ export default function SideBDashboard() {
             return (
               <button
                 key={phase.id}
-                className={`transition-all duration-300 ${
-                  phase.status === "planned" ? "opacity-50 cursor-not-allowed" : "hover:scale-110"
-                }`}
+                className={`transition-all duration-300 ${phase.status === "planned" ? "opacity-50 cursor-not-allowed" : "hover:scale-110"
+                  }`}
                 disabled={phase.status === "planned"}
                 title={phase.label}
               >
@@ -354,11 +351,10 @@ export default function SideBDashboard() {
                 className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 <div
-                  className={`max-w-[85%] rounded-2xl px-4 py-3 ${
-                    msg.role === "user"
+                  className={`max-w-[85%] rounded-2xl px-4 py-3 ${msg.role === "user"
                       ? "bg-purple-600 text-white"
                       : "bg-slate-700 text-gray-200"
-                  }`}
+                    }`}
                 >
                   <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                   <p className="text-[10px] mt-1 opacity-60">

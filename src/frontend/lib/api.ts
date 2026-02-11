@@ -11,10 +11,11 @@ import type { NoteListItem, NoteDetail, NoteUpdatePayload, NoteStatusCounts, Not
 
 /**
  * バックエンド API のベース URL
- * 環境変数から取得、デフォルトは localhost:3100
+ * 環境変数から取得。未設定時は空文字列（同一オリジン＝相対パス）
+ * ローカル開発時は .env で NEXT_PUBLIC_API_BASE_URL=http://localhost:3100 を設定
  */
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3100";
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
 /**
  * 類似度閾値の定数（12次元統一ベクトル + コサイン類似度）

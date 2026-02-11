@@ -14,7 +14,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3100';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 
 interface CTraderAccount {
   accountId: string;
@@ -186,11 +186,10 @@ export default function AccountsPage() {
               return (
                 <div
                   key={account.accountId}
-                  className={`border rounded-lg p-4 ${
-                    isPrimary
+                  className={`border rounded-lg p-4 ${isPrimary
                       ? 'border-blue-500 bg-blue-900/20'
                       : 'border-gray-700 bg-gray-900/50'
-                  }`}
+                    }`}
                 >
                   <div className="flex justify-between items-start">
                     <div className="flex-1">
@@ -233,11 +232,10 @@ export default function AccountsPage() {
                       <button
                         onClick={() => handleDeleteAccount(account.accountId)}
                         disabled={deletingAccountId === account.accountId || isPrimary}
-                        className={`text-sm font-semibold px-3 py-1 rounded transition ${
-                          isPrimary
+                        className={`text-sm font-semibold px-3 py-1 rounded transition ${isPrimary
                             ? 'text-gray-600 cursor-not-allowed'
                             : 'text-red-400 hover:text-red-300 border border-red-400 hover:border-red-300'
-                        }`}
+                          }`}
                         title={isPrimary ? 'プライマリアカウントは削除できません' : ''}
                       >
                         {deletingAccountId === account.accountId ? '削除中...' : '削除'}

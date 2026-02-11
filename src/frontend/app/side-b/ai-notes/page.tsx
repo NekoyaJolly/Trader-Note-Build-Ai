@@ -241,8 +241,8 @@ export default function AINotesPage() {
   const [activeTab, setActiveTab] = useState<"notes" | "summaries">("notes");
   const [generatingSummary, setGeneratingSummary] = useState(false);
 
-  // API ベース URL（環境変数から取得し、/api パスを追加）
-  const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3100") + "/api";
+  // API ベース URL（同一オリジン: 相対パス）
+  const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "") + "/api";
 
   // データ取得
   const fetchData = useCallback(async () => {
@@ -421,21 +421,19 @@ export default function AINotesPage() {
         <div className="flex border-b border-slate-700">
           <button
             onClick={() => setActiveTab("notes")}
-            className={`px-6 py-3 font-medium transition-colors ${
-              activeTab === "notes"
+            className={`px-6 py-3 font-medium transition-colors ${activeTab === "notes"
                 ? "text-cyan-400 border-b-2 border-cyan-400"
                 : "text-slate-400 hover:text-white"
-            }`}
+              }`}
           >
             📝 ノート一覧 ({notes.length})
           </button>
           <button
             onClick={() => setActiveTab("summaries")}
-            className={`px-6 py-3 font-medium transition-colors ${
-              activeTab === "summaries"
+            className={`px-6 py-3 font-medium transition-colors ${activeTab === "summaries"
                 ? "text-cyan-400 border-b-2 border-cyan-400"
                 : "text-slate-400 hover:text-white"
-            }`}
+              }`}
           >
             📊 サマリー ({summaries.length})
           </button>
@@ -458,9 +456,8 @@ export default function AINotesPage() {
                 {notes.map((note) => (
                   <div
                     key={note.id}
-                    className={`bg-slate-800/50 border border-slate-700 rounded-xl p-4 cursor-pointer hover:border-cyan-500/50 transition-colors ${
-                      selectedNote?.id === note.id ? "border-cyan-500" : ""
-                    }`}
+                    className={`bg-slate-800/50 border border-slate-700 rounded-xl p-4 cursor-pointer hover:border-cyan-500/50 transition-colors ${selectedNote?.id === note.id ? "border-cyan-500" : ""
+                      }`}
                     onClick={() => setSelectedNote(selectedNote?.id === note.id ? null : note)}
                   >
                     {/* ノートヘッダー */}

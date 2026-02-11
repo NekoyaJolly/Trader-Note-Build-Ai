@@ -185,7 +185,7 @@ export function RealtimeChart({
 	const [fallbackError, setFallbackError] = useState<string | null>(null);
 	const fallbackTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-	const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3100';
+	const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 
 	const storageKey = useMemo(() => `chart-lines-${symbol}-${timeframe}`, [symbol, timeframe]);
 

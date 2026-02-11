@@ -187,7 +187,7 @@ export function useRealtimeChart(
   const [isMarketClosed, setIsMarketClosed] = useState(sharedState.isMarketClosed);
   const [, setRenderTick] = useState(0); // 強制再レンダー用
 
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3100';
+  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 
   /**
    * SSE 接続を開始
@@ -221,12 +221,12 @@ export function useRealtimeChart(
         method: 'POST',
         credentials: 'include',
       });
-      
+
       if (!connectRes.ok) {
         const errorText = await connectRes.text();
         throw new Error(`接続リクエストが失敗しました: ${connectRes.status} ${connectRes.statusText} - ${errorText}`);
       }
-      
+
       const connectData = await connectRes.json();
 
       if (!connectData.success) {
@@ -270,7 +270,7 @@ export function useRealtimeChart(
         // EventSource の readyState を確認
         // 0 = CONNECTING, 1 = OPEN, 2 = CLOSED
         const readyState = eventSource.readyState;
-        
+
         // readyState が CONNECTING (0) の場合は再接続を試みている可能性がある
         // readyState が CLOSED (2) の場合のみエラー扱い
         if (readyState === 2) {

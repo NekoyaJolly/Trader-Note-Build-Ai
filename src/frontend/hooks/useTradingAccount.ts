@@ -15,12 +15,12 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import type { 
-  AccountInfoResponse, 
-  PositionResponse, 
-  PositionUpdateEvent 
+import type {
+  AccountInfoResponse,
+  PositionResponse,
+  PositionUpdateEvent
 } from '@/schemas/api/trading';
-import { 
+import {
   AccountInfoResponseSchema,
   PositionsResponseSchema,
   PositionUpdateEventSchema
@@ -37,7 +37,7 @@ export function useTradingAccount(enabled: boolean = true) {
   const [error, setError] = useState<string | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3100';
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
 
   /**
    * 初回データ取得とSSE接続
@@ -117,7 +117,7 @@ export function useTradingAccount(enabled: boolean = true) {
     eventSource.onmessage = (event) => {
       try {
         const parsedData = JSON.parse(event.data);
-        
+
         // Zodバリデーション
         const result = PositionUpdateEventSchema.safeParse(parsedData);
         if (!result.success) {
@@ -126,19 +126,19 @@ export function useTradingAccount(enabled: boolean = true) {
         }
 
         const update = result.data;
-        
+
         if (update.type === 'OPEN') {
           // 新規ポジション追加
           setPositions((prev) => [...prev, update.position]);
         } else if (update.type === 'CLOSE') {
           // ポジション削除
-          setPositions((prev) => 
+          setPositions((prev) =>
             prev.filter((p) => p.positionId !== update.position.positionId)
           );
         } else if (update.type === 'MODIFY') {
           // ポジション更新
           setPositions((prev) =>
-            prev.map((p) => 
+            prev.map((p) =>
               p.positionId === update.position.positionId ? update.position : p
             )
           );
@@ -172,9 +172,9 @@ export function useTradingAccount(enabled: boolean = true) {
    */
   const refetch = async () => {
     if (!enabled) return;
-    
+
     setLoading(true);
-    
+
     try {
       // 口座情報を取得
       const accountResponse = await fetch(`${API_BASE}/api/trading/account`, {

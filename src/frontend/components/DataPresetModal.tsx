@@ -49,7 +49,7 @@ interface DataPresetModalProps {
 // API 関数
 // ============================================
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3100';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 
 async function fetchPresets(): Promise<DataPreset[]> {
     const response = await fetch(`${API_BASE_URL}/api/ohlcv/presets`, {

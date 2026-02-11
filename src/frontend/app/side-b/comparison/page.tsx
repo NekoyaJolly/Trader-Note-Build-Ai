@@ -100,7 +100,7 @@ const outcomeLabels: Record<string, string> = {
 
 // ===== APIクライアント =====
 
-const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3100") + "/api/side-b";
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "") + "/api/side-b";
 
 async function fetchDashboard(period: ComparisonPeriod, symbol?: string): Promise<DashboardData> {
   const params = new URLSearchParams({ period });
@@ -134,7 +134,7 @@ function StatsCard({
         <span className="text-2xl">{icon}</span>
         <h3 className={`text-lg font-bold ${colorClass}`}>{title}</h3>
       </div>
-      
+
       <div className="grid grid-cols-2 gap-4">
         <div>
           <p className="text-xs text-gray-500">トレード数</p>
@@ -185,8 +185,8 @@ function StatsCard({
 }
 
 /** 比較サマリーカード */
-function ComparisonSummaryCard({ comparison, alignmentRate }: { 
-  comparison: ComparisonResult["comparison"]; 
+function ComparisonSummaryCard({ comparison, alignmentRate }: {
+  comparison: ComparisonResult["comparison"];
   alignmentRate: number;
 }) {
   const winnerLabel = {
@@ -222,7 +222,7 @@ function ComparisonSummaryCard({ comparison, alignmentRate }: {
         <div>
           <p className="text-xs text-gray-500">PF差</p>
           <p className={`text-lg font-bold ${(comparison.profitFactorDiff ?? 0) > 0 ? "text-purple-400" : (comparison.profitFactorDiff ?? 0) < 0 ? "text-cyan-400" : "text-gray-400"}`}>
-            {comparison.profitFactorDiff !== null 
+            {comparison.profitFactorDiff !== null
               ? `${comparison.profitFactorDiff > 0 ? "+" : ""}${comparison.profitFactorDiff.toFixed(2)}`
               : "-"}
           </p>
@@ -236,7 +236,7 @@ function ComparisonSummaryCard({ comparison, alignmentRate }: {
         <p className="text-xs text-gray-500 mb-1">判断一致率</p>
         <div className="flex items-center gap-2">
           <div className="flex-1 bg-slate-700 rounded-full h-2">
-            <div 
+            <div
               className="bg-gradient-to-r from-purple-500 to-cyan-500 h-2 rounded-full transition-all"
               style={{ width: `${alignmentRate}%` }}
             />
@@ -288,7 +288,7 @@ function TimeSeriesChart({ data }: { data: TimeSeriesData[] }) {
   return (
     <div className="card-surface rounded-xl p-4 sm:p-6">
       <h3 className="text-lg font-bold text-white mb-4">📈 累計PnL推移</h3>
-      
+
       <div className="relative h-48">
         {/* Y軸 */}
         <div className="absolute left-0 top-0 bottom-0 w-12 flex flex-col justify-between text-xs text-gray-500">
@@ -296,17 +296,17 @@ function TimeSeriesChart({ data }: { data: TimeSeriesData[] }) {
           <span>{((maxPnL + minPnL) / 2).toFixed(0)}</span>
           <span>{minPnL.toFixed(0)}</span>
         </div>
-        
+
         {/* グラフエリア */}
         <div className="ml-14 h-full relative">
           {/* ゼロライン */}
           {minPnL < 0 && (
-            <div 
+            <div
               className="absolute left-0 right-0 border-t border-slate-600"
               style={{ top: `${((maxPnL - 0) / range) * 100}%` }}
             />
           )}
-          
+
           {/* SVGライン */}
           <svg className="w-full h-full" viewBox={`0 0 ${cumulativeData.length * 20} 100`} preserveAspectRatio="none">
             {/* 人間ライン */}
@@ -314,7 +314,7 @@ function TimeSeriesChart({ data }: { data: TimeSeriesData[] }) {
               fill="none"
               stroke="rgb(192, 132, 252)"
               strokeWidth="2"
-              points={cumulativeData.map((d, i) => 
+              points={cumulativeData.map((d, i) =>
                 `${i * 20 + 10},${100 - ((d.humanCumulative - minPnL) / range) * 100}`
               ).join(' ')}
             />
@@ -323,7 +323,7 @@ function TimeSeriesChart({ data }: { data: TimeSeriesData[] }) {
               fill="none"
               stroke="rgb(34, 211, 238)"
               strokeWidth="2"
-              points={cumulativeData.map((d, i) => 
+              points={cumulativeData.map((d, i) =>
                 `${i * 20 + 10},${100 - ((d.aiCumulative - minPnL) / range) * 100}`
               ).join(' ')}
             />
@@ -351,7 +351,7 @@ function RecentTradesTable({ human, ai }: { human: RecentTrade[]; ai: RecentTrad
   return (
     <div className="card-surface rounded-xl p-4 sm:p-6">
       <h3 className="text-lg font-bold text-white mb-4">🔄 最近のトレード</h3>
-      
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* 人間のトレード */}
         <div>
@@ -474,11 +474,10 @@ export default function ComparisonDashboardPage() {
             <button
               key={p}
               onClick={() => setPeriod(p)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                period === p
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${period === p
                   ? "bg-gradient-to-r from-purple-500 to-cyan-500 text-white"
                   : "bg-slate-700/50 text-gray-400 hover:text-white hover:bg-slate-700"
-              }`}
+                }`}
             >
               {periodLabels[p]}
             </button>
@@ -539,16 +538,16 @@ export default function ComparisonDashboardPage() {
         )}
 
         {/* データなし */}
-        {!isLoading && !error && data && 
-          data.summary.human.totalTrades === 0 && 
+        {!isLoading && !error && data &&
+          data.summary.human.totalTrades === 0 &&
           data.summary.ai.totalTrades === 0 && (
-          <div className="text-center py-20">
-            <p className="text-gray-500 text-lg">比較データがありません</p>
-            <p className="text-gray-600 text-sm mt-2">
-              トレードノートを作成するか、AIトレードを実行してください
-            </p>
-          </div>
-        )}
+            <div className="text-center py-20">
+              <p className="text-gray-500 text-lg">比較データがありません</p>
+              <p className="text-gray-600 text-sm mt-2">
+                トレードノートを作成するか、AIトレードを実行してください
+              </p>
+            </div>
+          )}
       </main>
     </div>
   );

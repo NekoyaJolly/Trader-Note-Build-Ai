@@ -53,9 +53,21 @@ try {
   log('App インスタンスを作成中...');
   application = new App();
   log('App インスタンス作成完了、サーバーを起動中...');
-  application.start();
-  log('サーバー起動処理が完了しました');
-  log('✅ TradeAssist アプリケーション起動成功');
+  // start() は async（Next.js 初期化を含む）
+  application.start().then(() => {
+    log('サーバー起動処理が完了しました');
+    log('✅ TradeAssist アプリケーション起動成功');
+  }).catch((err: unknown) => {
+    logError('═══════════════════════════════════════');
+    logError('  アプリケーション起動エラー (async)');
+    logError('═══════════════════════════════════════');
+    logError(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    if (err instanceof Error) {
+      logError(`Stack: ${err.stack}`);
+    }
+    logError('═══════════════════════════════════════');
+    process.exit(1);
+  });
 } catch (err) {
   logError('═══════════════════════════════════════');
   logError('  アプリケーション起動エラー');

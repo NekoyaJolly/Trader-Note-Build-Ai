@@ -13,6 +13,8 @@ import type { NextConfig } from "next";
  * 現在は PWA 機能を無効化し、手動の Service Worker で対応
  */
 const nextConfig: NextConfig = {
+  // GCP Cloud Run デプロイ用: standalone 出力で node_modules 不要の自己完結型ビルド
+  output: 'standalone',
   // Turbopack を明示的に有効化（空の設定でもOK）
   // これにより webpack 設定との競合警告を抑制
   turbopack: {},

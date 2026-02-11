@@ -30,7 +30,10 @@ WORKDIR /app
 # ビルド成果物をコピー
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/src/frontend/.next ./src/frontend/.next
+# Next.js standalone出力: .next/standalone に自己完結型サーバーが含まれる
+# .next/static は standalone に含まれないため別途コピー
+COPY --from=builder /app/src/frontend/.next/standalone ./src/frontend/.next/standalone
+COPY --from=builder /app/src/frontend/.next/static ./src/frontend/.next/static
 COPY --from=builder /app/src/frontend/public ./src/frontend/public
 COPY --from=builder /app/prisma ./prisma
 COPY package*.json ./

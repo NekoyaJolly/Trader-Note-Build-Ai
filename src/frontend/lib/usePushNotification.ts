@@ -12,7 +12,7 @@
 import { useState, useEffect, useCallback } from "react";
 
 // バックエンドの API URL
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3100";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
 /**
  * Push 通知の状態

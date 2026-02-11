@@ -152,7 +152,7 @@ export default function MarketAnalysisPage() {
         setError(null);
 
         try {
-            const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3100';
+            const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
             const response = await fetch(
                 `${apiBase}/api/market-analysis/${selectedSymbol}?timeframe=${selectedTimeframe}&count=${selectedDataCount}`
             );
@@ -199,7 +199,7 @@ export default function MarketAnalysisPage() {
         setDataSource('preset');
         setHistoricalLoading(true);
         try {
-            const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3100';
+            const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
             const res = await fetch(
                 `${apiBase}/api/ohlcv/candles?symbol=${encodeURIComponent(preset.symbol)}&timeframe=${encodeURIComponent(preset.timeframe)}&limit=500`
             );

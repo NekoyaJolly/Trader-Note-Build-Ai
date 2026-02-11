@@ -7,7 +7,7 @@ import { Progress } from "@/components/ui/Progress";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/Alert";
 import { fetchProfileOptions, ProfileOption } from "@/lib/api";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3100";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
 /**
  * 履歴インポート導線ページ
@@ -62,8 +62,8 @@ export default function ImportPage() {
     const resp = await fetch(`${API_BASE_URL}/api/trades/import/upload-text`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        filename, 
+      body: JSON.stringify({
+        filename,
         csvText,
         profileId: selectedProfileId,
         applyMode,
@@ -161,7 +161,7 @@ export default function ImportPage() {
           {file && (
             <div className="space-y-4 p-4 bg-slate-800/50 rounded-lg border border-slate-700/50">
               <h3 className="text-sm font-medium text-white">インジケーター設定</h3>
-              
+
               {/* プロファイル選択 */}
               <div>
                 <label className="block text-xs text-gray-400 mb-2">
@@ -199,29 +199,27 @@ export default function ImportPage() {
                   <button
                     type="button"
                     onClick={() => setApplyMode("bulk")}
-                    className={`flex-1 px-3 py-2 rounded-lg text-sm transition-colors ${
-                      applyMode === "bulk"
+                    className={`flex-1 px-3 py-2 rounded-lg text-sm transition-colors ${applyMode === "bulk"
                         ? "bg-violet-500/20 border border-violet-500 text-white"
                         : "bg-slate-700/50 border border-slate-600 text-gray-400 hover:border-slate-500"
-                    }`}
+                      }`}
                   >
                     一括適用
                   </button>
                   <button
                     type="button"
                     onClick={() => setApplyMode("individual")}
-                    className={`flex-1 px-3 py-2 rounded-lg text-sm transition-colors ${
-                      applyMode === "individual"
+                    className={`flex-1 px-3 py-2 rounded-lg text-sm transition-colors ${applyMode === "individual"
                         ? "bg-violet-500/20 border border-violet-500 text-white"
                         : "bg-slate-700/50 border border-slate-600 text-gray-400 hover:border-slate-500"
-                    }`}
+                      }`}
                   >
                     個別選択
                   </button>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
-                  {applyMode === "bulk" 
-                    ? "全てのトレードに同じプロファイルを適用" 
+                  {applyMode === "bulk"
+                    ? "全てのトレードに同じプロファイルを適用"
                     : "ノート作成後に各ノートで個別にプロファイルを選択"}
                 </p>
               </div>
@@ -254,9 +252,9 @@ export default function ImportPage() {
 
           {/* アクションボタン */}
           <div className="flex items-center justify-center gap-2 sm:gap-3">
-            <Button 
-              onClick={handleUpload} 
-              disabled={!file || isUploading} 
+            <Button
+              onClick={handleUpload}
+              disabled={!file || isUploading}
               size="sm"
               className="bg-gradient-to-r from-pink-500 to-violet-500 hover:opacity-90"
             >

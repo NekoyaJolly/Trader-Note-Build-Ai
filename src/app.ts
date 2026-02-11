@@ -1,5 +1,6 @@
 import express, { Application, Request, Response, NextFunction } from 'express';
-import { Server } from 'http';
+import { Server, IncomingMessage, ServerResponse } from 'http';
+import path from 'path';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { config } from './config';
@@ -35,6 +36,7 @@ class App {
   public app: Application;
   private scheduler: MatchingScheduler;
   private server: Server | null = null;
+  private nextHandler: ((req: IncomingMessage, res: ServerResponse) => void) | null = null;
 
   constructor() {
     console.log('[App] コンストラクタ開始');
@@ -42,8 +44,7 @@ class App {
     this.scheduler = new MatchingScheduler();
     console.log('[App] ミドルウェアを初期化中...');
     this.initializeMiddlewares();
-    console.log('[App] ルートを初期化中...');
-    this.initializeRoutes();
+    // ルート初期化は start() で行う（Next.js ハンドラーの準備を待つため）
     console.log('[App] コンストラクタ完了');
   }
 
@@ -52,19 +53,11 @@ class App {
    */
   private initializeMiddlewares(): void {
     console.log('[App] CORS設定を初期化中...');
-    // CORS設定: 本番環境のVercelからのアクセスを許可
-    // Vercel ドメイン一覧:
-    //   - trader-note-build-ai.vercel.app (本番)
-    //   - trader-note-build-ai-git-main-nekoya258.vercel.app (main ブランチプレビュー)
-    //   - trader-note-build-XXXX-nekoya258.vercel.app (コミットプレビュー)
+    // CORS設定: 本番環境では同一オリジン（Cloud Run 統合）のため localhost のみ許可
+    // 開発環境では FE dev server (3102) と BE (3100) が別ポートで動作
     const allowedOrigins = [
       'http://localhost:3000',
       'http://localhost:3102',
-      // 本番ドメイン
-      'https://trader-note-build-ai.vercel.app',
-      // Git ブランチ / コミットプレビュー（nekoya258 ユーザー）
-      'https://trader-note-build-ai-*-nekoya258.vercel.app',
-      'https://trader-note-build-*-nekoya258.vercel.app',
     ];
 
     this.app.use(cors({
@@ -72,18 +65,12 @@ class App {
         // origin が undefined の場合（same-origin リクエスト）は許可
         if (!origin) return callback(null, true);
 
-        // 許可リストに含まれるか、ワイルドカードにマッチするかをチェック
-        const isAllowed = allowedOrigins.some(allowed => {
-          if (allowed.includes('*')) {
-            const regex = new RegExp('^' + allowed.replace(/\*/g, '.*') + '$');
-            return regex.test(origin);
-          }
-          return allowed === origin;
-        });
+        const isAllowed = allowedOrigins.some(allowed => allowed === origin);
 
         if (isAllowed) {
           callback(null, true);
         } else {
+          // 本番環境では同一オリジンなので CORS は不要だが、念のためログ
           console.warn(`CORS blocked origin: ${origin}`);
           callback(new Error('Not allowed by CORS'));
         }
@@ -111,6 +98,22 @@ class App {
     console.log('[App] ルート初期化開始...');
 
     try {
+      // 本番環境: Next.js 静的ファイルを Express で配信
+      if (config.server.isProduction) {
+        const frontendDir = path.join(process.cwd(), 'src/frontend');
+        console.log('[App] Next.js 静的ファイルを配信設定中...');
+        // _next/static/* → ハッシュ付き JS/CSS バンドル（長期キャッシュ可能）
+        this.app.use('/_next/static', express.static(
+          path.join(frontendDir, '.next/static'),
+          { maxAge: '365d', immutable: true }
+        ));
+        // public/* → favicon, manifest, アイコン等
+        this.app.use(express.static(
+          path.join(frontendDir, 'public'),
+          { maxAge: '1d' }
+        ));
+      }
+
       // Health check
       console.log('[App] /health エンドポイントを登録中...');
       this.app.get('/health', (req: Request, res: Response) => {
@@ -194,7 +197,7 @@ class App {
       console.log('[App] /api/similarity ルートを登録中...');
       this.app.use('/api/similarity', similarityRoutes);
 
-      // Cron エンドポイント（Railway/Vercel Cron用）
+      // Cron エンドポイント（Cloud Run Cron用）
       console.log('[App] /api/cron ルートを登録中...');
       this.app.use('/api/cron', cronRoutes);
 
@@ -216,11 +219,20 @@ class App {
         });
       });
 
-      // 404 handler
-      console.log('[App] 404 ハンドラーを登録中...');
-      this.app.use((req: Request, res: Response) => {
-        res.status(404).json({ error: 'Route not found' });
-      });
+      // Next.js キャッチオール or 404: 本番では Next.js がFEリクエストを処理
+      if (config.server.isProduction && this.nextHandler) {
+        console.log('[App] Next.js キャッチオールハンドラーを登録中...');
+        const handler = this.nextHandler;
+        this.app.all('*', (req: Request, res: Response) => {
+          handler(req, res);
+        });
+      } else {
+        // 開発環境: FE は別ポートの Next.js dev server が担当
+        console.log('[App] 404 ハンドラーを登録中...');
+        this.app.use((req: Request, res: Response) => {
+          res.status(404).json({ error: 'Route not found' });
+        });
+      }
 
       console.log('[App] ✅ ルート初期化完了');
     } catch (error) {
@@ -234,9 +246,53 @@ class App {
   }
 
   /**
+   * Next.js standalone サーバーを初期化（本番環境のみ）
+   * standalone 出力の next/dist/server/next-server を直接ロードし、
+   * Express のキャッチオールハンドラーとして使う
+   */
+  private async initializeNextJs(): Promise<void> {
+    if (!config.server.isProduction) {
+      console.log('[App] 開発環境: Next.js は別プロセスで動作（port 3102）');
+      return;
+    }
+
+    console.log('[App] Next.js standalone サーバーを初期化中...');
+    try {
+      // standalone 出力に含まれる NextServer を動的ロード
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const NextServer = require('next/dist/server/next-server').default;
+      const nextDir = path.join(process.cwd(), 'src/frontend/.next');
+
+      const nextApp = new NextServer({
+        dir: path.join(process.cwd(), 'src/frontend'),
+        dev: false,
+        conf: {
+          distDir: '.next',
+        },
+      });
+
+      this.nextHandler = nextApp.getRequestHandler();
+      await nextApp.prepare();
+      console.log('[App] ✅ Next.js standalone サーバー初期化完了');
+      console.log(`[App]   distDir: ${nextDir}`);
+    } catch (error) {
+      console.error('[App] ⚠️ Next.js 初期化に失敗しました（APIのみで動作を継続）');
+      console.error('[App] Error:', error);
+      // Next.js が起動できなくても API は動作し続ける
+    }
+  }
+
+  /**
    * Start the application
    */
-  public start(): void {
+  public async start(): Promise<void> {
+    // 本番環境: Next.js を先に初期化
+    await this.initializeNextJs();
+
+    // Next.js 初期化後にルートを登録（キャッチオールハンドラーの有無が決まる）
+    console.log('[App] ルートを初期化中...');
+    this.initializeRoutes();
+
     const port = config.server.port;
 
     console.log('═══════════════════════════════════════');
@@ -246,6 +302,7 @@ class App {
     console.log(`  BACKEND_PORT env: ${process.env.BACKEND_PORT}`);
     console.log(`  Resolved port: ${port}`);
     console.log(`  NODE_ENV: ${process.env.NODE_ENV}`);
+    console.log(`  Next.js: ${this.nextHandler ? 'integrated' : 'not available'}`);
     console.log('═══════════════════════════════════════');
 
     // サーバーインスタンスを保持してイベントループを維持
