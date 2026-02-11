@@ -122,8 +122,8 @@ jobs:
           echo "✅ マイグレーション完了"
 
   # ── 3. 本番 E2E テスト ──
-  # Vercel は GitHub 連携で main push 時に自動デプロイされるため、
-  # GCP デプロイ完了後に両方のエンドポイントをテストする
+  # GCP Cloud Run で API + FE を統合ホスティング
+  # デプロイ完了後に E2E テストを実行する
   e2e-production:
     name: Production E2E Tests
     runs-on: ubuntu-latest
@@ -132,15 +132,18 @@ jobs:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
 
-      - name: Vercel デプロイ完了を待機（30秒）
+      - name: GCP Cloud Run UI 到達確認
         run: |
-          echo "⏳ Vercel の自動デプロイ完了を待機中..."
-          sleep 30
-          if curl -s -f ${{ env.PRODUCTION_UI_URL }} > /dev/null 2>&1; then
-            echo "✅ Vercel UI 到達確認: OK"
-          else
-            echo "⚠️ Vercel UI に到達できませんが、E2E テストを続行します"
-          fi
+          echo "⏳ Cloud Run の UI 到達確認中..."
+          for i in {1..6}; do
+            if curl -s -f ${{ env.PRODUCTION_UI_URL }} > /dev/null 2>&1; then
+              echo "✅ UI 到達確認: OK"
+              exit 0
+            fi
+            echo "待機中... ($i/6)"
+            sleep 10
+          done
+          echo "⚠️ UI に到達できませんが、E2E テストを続行します"
 
       - name: 本番 E2E テスト実行
         run: bash scripts/production-e2e-test.sh
@@ -157,8 +160,8 @@ jobs:
           echo "================================"
           echo ""
           echo "  ✅ API: ${{ env.PRODUCTION_API_URL }}"
-          echo "  ✅ UI: ${{ env.PRODUCTION_UI_URL }} (Vercel 自動デプロイ)"
-          echo "  ✅ DB: Supabase"
+          echo "  ✅ UI:  ${{ env.PRODUCTION_UI_URL }} (Cloud Run 統合)"
+          echo "  ✅ DB:  Supabase"
           echo "  ✅ E2E テスト: 合格"
 
       - name: E2E テスト失敗時の通知
