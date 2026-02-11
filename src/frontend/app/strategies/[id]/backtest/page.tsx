@@ -25,6 +25,7 @@ import {
   verifyFilters,
   checkBacktestDataCoverage,
   fetchAndCacheOhlcvData,
+  DataFetchProgress,
   BacktestHistoryItem,
   WalkForwardResult,
   FilterAnalysisResult,
@@ -153,7 +154,7 @@ function TradeResultTable({ trades }: { trades: BacktestTradeEvent[] }) {
               </td>
               <td className={`px-3 py-2 text-right font-medium ${trade.pnlPercent >= 0 ? "text-green-400" : "text-red-400"
                 }`}>
-                {trade.pnlPercent >= 0 ? "+" : ""}{(trade.pnlPercent * 100).toFixed(2)}%
+                {trade.pnlPercent >= 0 ? "+" : ""}{trade.pnlPercent.toFixed(2)}%
               </td>
             </tr>
           ))}
@@ -286,6 +287,7 @@ export default function StrategyBacktestPage() {
   const [showCoverageDialog, setShowCoverageDialog] = useState(false);
   const [checkingCoverage, setCheckingCoverage] = useState(false);
   const [fetchingOhlcv, setFetchingOhlcv] = useState(false);
+  const [fetchProgress, setFetchProgress] = useState<DataFetchProgress | null>(null);
 
   /** デフォルト開始日（3ヶ月前）を取得 */
   function getDefaultStartDate(): string {
@@ -560,34 +562,32 @@ export default function StrategyBacktestPage() {
               </div>
               {fetchingOhlcv ? (
                 <div className="bg-cyan-600/20 border border-cyan-500/50 rounded p-3 text-sm">
-                  <div className="flex items-center gap-2 text-cyan-400">
+                  <div className="flex items-center gap-2 text-cyan-400 mb-2">
                     <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                        fill="none"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      />
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                     </svg>
-                    <span>APIからデータを取得中...</span>
+                    <span>{fetchProgress?.progress.message || 'APIからデータを取得中...'}</span>
                   </div>
-                  <p className="text-xs text-gray-400 mt-2">
-                    Rate Limit: 8リクエスト/分のため、時間がかかる場合があります。
-                  </p>
+                  {/* プログレスバー */}
+                  <div className="w-full bg-slate-700 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-gradient-to-r from-cyan-500 to-blue-500 h-full rounded-full transition-all duration-500 ease-out"
+                      style={{ width: `${fetchProgress?.progress.percent ?? 0}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between mt-1">
+                    <span className="text-xs text-gray-400">
+                      {fetchProgress?.progress.source ? `ソース: ${fetchProgress.progress.source}` : ''}
+                    </span>
+                    <span className="text-xs text-cyan-400 font-medium">
+                      {fetchProgress?.progress.percent ?? 0}%
+                    </span>
+                  </div>
                 </div>
               ) : (
                 <p className="text-sm text-gray-400">
-                  「APIからデータ取得」で不足データを自動取得できます。
-                  <br />
-                  <span className="text-xs">(Twelve Data無料枠: 8リクエスト/分)</span>
+                  「APIからデータ取得」で不足データを自動取得できます（cTrader優先）。
                 </p>
               )}
             </div>
@@ -597,12 +597,14 @@ export default function StrategyBacktestPage() {
                   if (!strategy) return;
                   try {
                     setFetchingOhlcv(true);
+                    setFetchProgress(null);
                     setError(null);
                     const result = await fetchAndCacheOhlcvData(
                       strategy.symbol,
                       backtestParams.stage1Timeframe,
                       backtestParams.startDate,
-                      backtestParams.endDate
+                      backtestParams.endDate,
+                      (progress) => setFetchProgress(progress)
                     );
                     if (!result.success) {
                       setError(result.error || "データ取得に失敗しました");
@@ -610,12 +612,14 @@ export default function StrategyBacktestPage() {
                     }
                     // 取得成功後、バックテスト実行
                     setShowCoverageDialog(false);
+                    setFetchProgress(null);
                     await executeBacktest();
                   } catch (err) {
                     const message = err instanceof Error ? err.message : "データ取得に失敗しました";
                     setError(message);
                   } finally {
                     setFetchingOhlcv(false);
+                    setFetchProgress(null);
                   }
                 }}
                 disabled={fetchingOhlcv}
@@ -817,6 +821,55 @@ export default function StrategyBacktestPage() {
                   "バックテスト実行"
                 )}
               </button>
+
+              {/* 事前データ取得ボタン */}
+              <button
+                onClick={async () => {
+                  if (!strategy) return;
+                  try {
+                    setFetchingOhlcv(true);
+                    setFetchProgress(null);
+                    setError(null);
+                    const result = await fetchAndCacheOhlcvData(
+                      strategy.symbol,
+                      backtestParams.stage1Timeframe,
+                      backtestParams.startDate,
+                      backtestParams.endDate,
+                      (progress) => setFetchProgress(progress)
+                    );
+                    if (!result.success) {
+                      setError(result.error || "データ取得に失敗しました");
+                    }
+                  } catch (err) {
+                    const message = err instanceof Error ? err.message : "データ取得に失敗しました";
+                    setError(message);
+                  } finally {
+                    setFetchingOhlcv(false);
+                    setFetchProgress(null);
+                  }
+                }}
+                disabled={running || checkingCoverage || fetchingOhlcv}
+                className="w-full py-1.5 rounded text-xs font-medium transition-all border border-slate-600/50 text-gray-300 hover:bg-slate-700/50 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                📥 事前データ取得
+              </button>
+
+              {/* 事前取得の進捗バー */}
+              {fetchingOhlcv && fetchProgress && (
+                <div className="bg-slate-700/50 rounded p-2 text-xs space-y-1">
+                  <div className="text-gray-300 truncate">{fetchProgress.progress.message}</div>
+                  <div className="w-full bg-slate-600 rounded-full h-1.5 overflow-hidden">
+                    <div
+                      className="bg-gradient-to-r from-cyan-500 to-blue-500 h-full rounded-full transition-all duration-500 ease-out"
+                      style={{ width: `${fetchProgress.progress.percent}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-gray-500">
+                    <span>{fetchProgress.progress.source || ''}</span>
+                    <span>{fetchProgress.progress.percent}%</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* バックテスト履歴 */}

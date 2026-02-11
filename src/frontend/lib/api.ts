@@ -2260,54 +2260,145 @@ export interface FetchOhlcvResult {
   error?: string;
 }
 
+/** データフェッチ進捗 */
+export interface DataFetchProgress {
+  status: 'running' | 'completed' | 'error';
+  progress: {
+    current: number;
+    total: number;
+    message: string;
+    source: string;
+    percent: number;
+  };
+  result?: {
+    success: boolean;
+    cachedCount: number;
+    source?: string;
+    error?: string;
+  };
+}
+
 /**
- * 不足しているOHLCVデータをAPIから取得してDBにキャッシュ
+ * OHLCVデータ取得ジョブを開始（バックグラウンド実行）
  * POST /api/strategies/ohlcv/fetch-and-cache
  * 
- * Rate Limit: 8リクエスト/分（Twelve Data無料枠）
- * 長期間のデータ取得には時間がかかる場合があります。
- * 
- * @param symbol - シンボル（例: "USDJPY", "XAUUSD"）
- * @param timeframe - 時間足（例: "15m", "1h"）
- * @param startDate - 開始日時
- * @param endDate - 終了日時
- * @returns 取得・キャッシュ結果
+ * @returns jobId
  */
-export async function fetchAndCacheOhlcvData(
+export async function startOhlcvFetchJob(
   symbol: string,
   timeframe: string,
   startDate: string,
   endDate: string
-): Promise<FetchOhlcvResult> {
+): Promise<{ jobId: string }> {
   const response = await fetch(
     `${API_BASE_URL}/api/strategies/ohlcv/fetch-and-cache`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        symbol,
-        timeframe,
-        startDate,
-        endDate,
-      }),
+      body: JSON.stringify({ symbol, timeframe, startDate, endDate }),
     }
   );
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    return {
-      success: false,
-      cachedCount: 0,
-      error: error.error || "OHLCVデータの取得に失敗しました",
-    };
+    throw new Error(error.error || "OHLCVデータ取得ジョブの開始に失敗しました");
   }
 
   const payload = await response.json();
-  return {
-    success: true,
-    cachedCount: payload.data.cachedCount,
-    details: payload.data.details,
+  return { jobId: payload.data.jobId };
+}
+
+/**
+ * OHLCVデータ取得の進捗をSSEで購読
+ * GET /api/strategies/ohlcv/fetch-progress/:jobId
+ * 
+ * @param jobId - ジョブID
+ * @param onProgress - 進捗コールバック
+ * @returns EventSource（呼び出し元でclose()すること）
+ */
+export function subscribeOhlcvFetchProgress(
+  jobId: string,
+  onProgress: (progress: DataFetchProgress) => void,
+  onError?: (error: Event) => void
+): EventSource {
+  const es = new EventSource(
+    `${API_BASE_URL}/api/strategies/ohlcv/fetch-progress/${jobId}`
+  );
+
+  es.onmessage = (event) => {
+    try {
+      const data: DataFetchProgress = JSON.parse(event.data);
+      onProgress(data);
+
+      // 完了・エラー時は自動的に閉じる
+      if (data.status !== 'running') {
+        es.close();
+      }
+    } catch {
+      console.warn('[subscribeOhlcvFetchProgress] パースエラー:', event.data);
+    }
   };
+
+  es.onerror = (error) => {
+    onError?.(error);
+    es.close();
+  };
+
+  return es;
+}
+
+/**
+ * OHLCVデータ取得（バックグラウンド実行 + 進捗コールバック）
+ * ジョブ開始 → SSE購読 → 完了まで待つ
+ */
+export async function fetchAndCacheOhlcvData(
+  symbol: string,
+  timeframe: string,
+  startDate: string,
+  endDate: string,
+  onProgress?: (progress: DataFetchProgress) => void
+): Promise<FetchOhlcvResult> {
+  // 1. ジョブ開始
+  const { jobId } = await startOhlcvFetchJob(symbol, timeframe, startDate, endDate);
+
+  // 2. SSEで完了を待つ
+  return new Promise<FetchOhlcvResult>((resolve) => {
+    const es = subscribeOhlcvFetchProgress(
+      jobId,
+      (data) => {
+        onProgress?.(data);
+        if (data.status === 'completed') {
+          resolve({
+            success: true,
+            cachedCount: data.result?.cachedCount ?? 0,
+          });
+        } else if (data.status === 'error') {
+          resolve({
+            success: false,
+            cachedCount: 0,
+            error: data.result?.error ?? 'データ取得に失敗しました',
+          });
+        }
+      },
+      () => {
+        resolve({
+          success: false,
+          cachedCount: 0,
+          error: 'データ取得の接続が切断されました',
+        });
+      }
+    );
+
+    // タイムアウト（10分）
+    setTimeout(() => {
+      es.close();
+      resolve({
+        success: false,
+        cachedCount: 0,
+        error: 'データ取得がタイムアウトしました（10分）',
+      });
+    }, 10 * 60 * 1000);
+  });
 }
 
 // ========================================
