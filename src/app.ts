@@ -259,8 +259,13 @@ class App {
     console.log('[App] Next.js standalone サーバーを初期化中...');
     try {
       // standalone 出力に含まれる NextServer を動的ロード
+      // ルートの node_modules には next がないため、standalone の node_modules から直接参照
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const NextServer = require('next/dist/server/next-server').default;
+      const standalonNextPath = path.join(
+        process.cwd(),
+        'src/frontend/.next/standalone/src/frontend/node_modules/next/dist/server/next-server'
+      );
+      const NextServer = require(standalonNextPath).default;
       const nextDir = path.join(process.cwd(), 'src/frontend/.next');
 
       const nextApp = new NextServer({

@@ -115,6 +115,28 @@ test_endpoint "BarLocator (GET - 無効パラメータ)" "GET" "/api/bars/locate
 echo ""
 
 # =========================================
+# フロントエンド配信テスト
+# =========================================
+echo -e "${YELLOW}[6] フロントエンド配信テスト${NC}"
+echo ""
+
+# UI URL にアクセスして HTML が返ることを確認
+echo -n "テスト: フロントエンド HTML 配信 ... "
+UI_RESPONSE=$(curl -s -w "\n%{http_code}" "$PRODUCTION_UI_URL/" 2>&1)
+UI_STATUS=$(echo "$UI_RESPONSE" | tail -1)
+UI_BODY=$(echo "$UI_RESPONSE" | sed '$d')
+
+if [ "$UI_STATUS" = "200" ] && echo "$UI_BODY" | grep -q "</html>"; then
+  echo -e "${GREEN}✓ (HTTP $UI_STATUS, HTML確認)${NC}"
+  ((TESTS_PASSED++))
+else
+  echo -e "${RED}✗ (HTTP $UI_STATUS, HTMLなし - Next.js初期化失敗の可能性)${NC}"
+  ((TESTS_FAILED++))
+fi
+
+echo ""
+
+# =========================================
 # テスト結果サマリー
 # =========================================
 echo -e "${YELLOW}================================${NC}"
