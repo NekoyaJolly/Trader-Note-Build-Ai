@@ -36,10 +36,10 @@ COPY --from=builder /app/dist ./dist
 # Next.js standalone 資産を /app/frontend に集約
 # standalone 内の深い階層 (src/frontend) の中身をフラットに配置
 COPY --from=builder /app/src/frontend/.next/standalone/src/frontend ./frontend
-# standalone が生成する root node_modules をコピー
-COPY --from=builder /app/src/frontend/.next/standalone/node_modules ./node_modules
-# バックエンド node_modules を上書きマージ（共通化）
+# バックエンド node_modules を先にコピー（ベースレイヤー）
 COPY --from=builder /app/node_modules ./node_modules
+# standalone の Next.js ランタイム node_modules を上書きマージ（Next.js サーバー依存を優先）
+COPY --from=builder /app/src/frontend/.next/standalone/node_modules ./node_modules
 # static / public は standalone に含まれないため手動配置
 COPY --from=builder /app/src/frontend/.next/static ./frontend/.next/static
 COPY --from=builder /app/src/frontend/public ./frontend/public

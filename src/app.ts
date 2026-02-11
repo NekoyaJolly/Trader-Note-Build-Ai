@@ -258,10 +258,23 @@ class App {
 
     console.log('[App] Next.js standalone サーバーを初期化中...');
     try {
+      // 診断ログ: ファイルシステムの状態を確認
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const fs = require('fs');
+      const frontendDir = path.join(process.cwd(), 'frontend');
+      console.log(`[App]   cwd: ${process.cwd()}`);
+      console.log(`[App]   frontend dir exists: ${fs.existsSync(frontendDir)}`);
+      console.log(`[App]   frontend/.next exists: ${fs.existsSync(path.join(frontendDir, '.next'))}`);
+      try {
+        const nextModulePath = require.resolve('next/dist/server/next-server');
+        console.log(`[App]   next module path: ${nextModulePath}`);
+      } catch (e) {
+        console.error('[App]   ⚠️ next/dist/server/next-server が見つかりません:', (e as Error).message);
+      }
+
       // node_modules は /app/node_modules に統合済みのため通常の require で解決
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const NextServer = require('next/dist/server/next-server').default;
-      const frontendDir = path.join(process.cwd(), 'frontend');
 
       const nextApp = new NextServer({
         dir: frontendDir,
