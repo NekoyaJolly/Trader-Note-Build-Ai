@@ -1,0 +1,26 @@
+# Dependencies
+node_modules
+npm-debug.log
+
+# Environment variables (重要: これを含めないと本番でローカル設定が使われて事故る)
+.env
+.env.*
+!.env.example
+
+# Next.js build output (コンテナ内で再ビルドする)
+.next
+src/frontend/.next
+
+# Git
+.git
+.gitignore
+
+# Build output
+dist
+coverage
+
+# Docs & misc
+*.md
+docs/
+.agent/
+.gemini/

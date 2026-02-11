@@ -1,6 +1,7 @@
 import express, { Application, Request, Response, NextFunction } from 'express';
 import { Server, IncomingMessage, ServerResponse } from 'http';
 import path from 'path';
+import fs from 'fs';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { config } from './config';
@@ -258,28 +259,39 @@ class App {
 
     console.log('[App] Next.js standalone サーバーを初期化中...');
     try {
-      // 診断ログ: ファイルシステムの状態を確認
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const fs = require('fs');
+      // 1. パスの定義
       const frontendDir = path.join(process.cwd(), 'frontend');
       console.log(`[App]   cwd: ${process.cwd()}`);
       console.log(`[App]   frontend dir exists: ${fs.existsSync(frontendDir)}`);
       console.log(`[App]   frontend/.next exists: ${fs.existsSync(path.join(frontendDir, '.next'))}`);
-      try {
-        const nextModulePath = require.resolve('next/dist/server/next-server');
-        console.log(`[App]   next module path: ${nextModulePath}`);
-      } catch (e) {
-        console.error('[App]   ⚠️ next/dist/server/next-server が見つかりません:', (e as Error).message);
-      }
 
-      // node_modules は /app/node_modules に統合済みのため通常の require で解決
+      // 2. NextServer クラスのロード
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const NextServer = require('next/dist/server/next-server').default;
 
+      // 3. 設定ファイルのロード (required-server-files.json)
+      // Next.js 16 では conf に完全な設定が必要（runtimeServerDeploymentId 等）
+      let nextConfig: Record<string, unknown> = {};
+      const configPath = path.join(frontendDir, '.next/required-server-files.json');
+
+      if (fs.existsSync(configPath)) {
+        try {
+          const serverFiles = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+          nextConfig = serverFiles.config || {};
+          console.log('[App]   required-server-files.json をロードしました');
+        } catch (e) {
+          console.error('[App]   ⚠️ 設定ファイルのパースに失敗:', e);
+        }
+      } else {
+        console.warn(`[App]   ⚠️ 設定ファイルが見つかりません: ${configPath}`);
+      }
+
+      // 4. NextServer インスタンス化 (conf に完全な設定を渡す)
       const nextApp = new NextServer({
         dir: frontendDir,
         dev: false,
         conf: {
+          ...nextConfig,
           distDir: '.next',
         },
       });

@@ -46,6 +46,8 @@ COPY --from=builder /app/dist ./dist
 # ── フロントエンド: standalone の中身を /app/frontend に展開 ──
 # standalone 出力: .next/standalone/src/frontend/* → /app/frontend/
 COPY --from=builder /app/src/frontend/.next/standalone/src/frontend ./frontend
+# Next.js 16 の設定ファイル（runtimeServerDeploymentId 等を含む）
+COPY --from=builder /app/src/frontend/.next/required-server-files.json ./frontend/.next/required-server-files.json
 # static と public は standalone に含まれないため手動配置
 COPY --from=builder /app/src/frontend/.next/static ./frontend/.next/static
 COPY --from=builder /app/src/frontend/public ./frontend/public
