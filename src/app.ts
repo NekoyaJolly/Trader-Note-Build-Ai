@@ -100,7 +100,7 @@ class App {
     try {
       // 本番環境: Next.js 静的ファイルを Express で配信
       if (config.server.isProduction) {
-        const frontendDir = path.join(process.cwd(), 'src/frontend');
+        const frontendDir = path.join(process.cwd(), 'frontend');
         console.log('[App] Next.js 静的ファイルを配信設定中...');
         // _next/static/* → ハッシュ付き JS/CSS バンドル（長期キャッシュ可能）
         this.app.use('/_next/static', express.static(
@@ -258,18 +258,13 @@ class App {
 
     console.log('[App] Next.js standalone サーバーを初期化中...');
     try {
-      // standalone 出力に含まれる NextServer を動的ロード
-      // ルートの node_modules には next がないため、standalone の node_modules から直接参照
+      // node_modules は /app/node_modules に統合済みのため通常の require で解決
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const standalonNextPath = path.join(
-        process.cwd(),
-        'src/frontend/.next/standalone/src/frontend/node_modules/next/dist/server/next-server'
-      );
-      const NextServer = require(standalonNextPath).default;
-      const nextDir = path.join(process.cwd(), 'src/frontend/.next');
+      const NextServer = require('next/dist/server/next-server').default;
+      const frontendDir = path.join(process.cwd(), 'frontend');
 
       const nextApp = new NextServer({
-        dir: path.join(process.cwd(), 'src/frontend'),
+        dir: frontendDir,
         dev: false,
         conf: {
           distDir: '.next',
@@ -279,7 +274,7 @@ class App {
       this.nextHandler = nextApp.getRequestHandler();
       await nextApp.prepare();
       console.log('[App] ✅ Next.js standalone サーバー初期化完了');
-      console.log(`[App]   distDir: ${nextDir}`);
+      console.log(`[App]   dir: ${frontendDir}`);
     } catch (error) {
       console.error('[App] ⚠️ Next.js 初期化に失敗しました（APIのみで動作を継続）');
       console.error('[App] Error:', error);

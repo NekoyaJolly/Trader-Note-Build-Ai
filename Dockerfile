@@ -31,13 +31,18 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 # ビルド成果物をコピー
-COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
-# Next.js standalone出力: .next/standalone に自己完結型サーバーが含まれる
-# .next/static は standalone に含まれないため別途コピー
-COPY --from=builder /app/src/frontend/.next/standalone ./src/frontend/.next/standalone
-COPY --from=builder /app/src/frontend/.next/static ./src/frontend/.next/static
-COPY --from=builder /app/src/frontend/public ./src/frontend/public
+
+# Next.js standalone 資産を /app/frontend に集約
+# standalone 内の深い階層 (src/frontend) の中身をフラットに配置
+COPY --from=builder /app/src/frontend/.next/standalone/src/frontend ./frontend
+# standalone が生成する root node_modules をコピー
+COPY --from=builder /app/src/frontend/.next/standalone/node_modules ./node_modules
+# バックエンド node_modules を上書きマージ（共通化）
+COPY --from=builder /app/node_modules ./node_modules
+# static / public は standalone に含まれないため手動配置
+COPY --from=builder /app/src/frontend/.next/static ./frontend/.next/static
+COPY --from=builder /app/src/frontend/public ./frontend/public
 COPY --from=builder /app/prisma ./prisma
 COPY package*.json ./
 
