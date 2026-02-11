@@ -13,7 +13,7 @@ env:
   GCP_SERVICE_NAME: trader-note
   GCP_IMAGE: gcr.io/ai-note-486020/trader-note:latest
   PRODUCTION_API_URL: https://trader-note-571157808050.asia-northeast1.run.app
-  PRODUCTION_UI_URL: https://trader-note-build-ai.vercel.app
+  PRODUCTION_UI_URL: https://trader-note-571157808050.asia-northeast1.run.app
 
 jobs:
   # ── 1. GCP Cloud Run（API）へのデプロイ ──

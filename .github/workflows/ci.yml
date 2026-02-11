@@ -178,6 +178,7 @@ jobs:
         run: cd src/frontend && npm run dev > /tmp/frontend.log 2>&1 &
         env:
           NODE_ENV: test
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:3100
 
       - name: フロントエンド起動待機（最大60秒）
         run: |
