@@ -69,27 +69,6 @@ jobs:
           echo "❌ API の起動確認がタイムアウトしました"
           exit 1
 
-  # ── 2. Vercel（FE）へのデプロイ ──
-  deploy-vercel:
-    name: Deploy Frontend to Vercel
-    runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
-    steps:
-      - name: リポジトリをチェックアウト
-        uses: actions/checkout@v4
-
-      - name: Vercel CLI をインストール
-        run: npm install -g vercel@latest
-
-      - name: Vercel にデプロイ（本番）
-        run: |
-          cd src/frontend
-          vercel deploy --prod --yes --token=${{ secrets.VERCEL_TOKEN }}
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
   # ── 3. DBマイグレーション（prisma/ 変更時のみ） ──
   run-migration:
@@ -147,7 +126,7 @@ jobs:
   e2e-production:
     name: Production E2E Tests
     runs-on: ubuntu-latest
-    needs: [deploy-gcp, deploy-vercel, run-migration]
+    needs: [deploy-gcp, run-migration]
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
