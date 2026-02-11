@@ -13,7 +13,6 @@ env:
   GCP_SERVICE_NAME: trader-note
   GCP_IMAGE: gcr.io/ai-note-486020/trader-note:latest
   PRODUCTION_API_URL: https://trader-note-571157808050.asia-northeast1.run.app
-  PRODUCTION_UI_URL: https://trader-note-571157808050.asia-northeast1.run.app
 
 jobs:
   # ── 1. GCP Cloud Run（API）へのデプロイ ──
@@ -70,7 +69,29 @@ jobs:
           echo "❌ API の起動確認がタイムアウトしました"
           exit 1
 
-  # ── 2. DBマイグレーション（prisma/ 変更時のみ） ──
+  # ── 2. Vercel（FE）へのデプロイ ──
+  deploy-vercel:
+    name: Deploy Frontend to Vercel
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Vercel CLI をインストール
+        run: npm install -g vercel@latest
+
+      - name: Vercel にデプロイ（本番）
+        run: |
+          cd src/frontend
+          vercel deploy --prod --yes --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+  # ── 3. DBマイグレーション（prisma/ 変更時のみ） ──
   run-migration:
     name: Run DB Migration (if needed)
     runs-on: ubuntu-latest
@@ -122,35 +143,32 @@ jobs:
             --wait
           echo "✅ マイグレーション完了"
 
-  # ── 3. 本番 E2E テスト ──
-  # GCP Cloud Run で API + FE を統合ホスティング
-  # デプロイ完了後に E2E テストを実行する
+  # ── 4. 本番 E2E テスト ──
   e2e-production:
     name: Production E2E Tests
     runs-on: ubuntu-latest
-    needs: [deploy-gcp, run-migration]
+    needs: [deploy-gcp, deploy-vercel, run-migration]
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
 
-      - name: GCP Cloud Run UI 到達確認
+      - name: API ヘルスチェック
         run: |
-          echo "⏳ Cloud Run の UI 到達確認中..."
+          echo "⏳ API の到達確認中..."
           for i in {1..6}; do
-            if curl -s -f ${{ env.PRODUCTION_UI_URL }} > /dev/null 2>&1; then
-              echo "✅ UI 到達確認: OK"
+            if curl -s -f ${{ env.PRODUCTION_API_URL }}/health > /dev/null 2>&1; then
+              echo "✅ API 到達確認: OK"
               exit 0
             fi
             echo "待機中... ($i/6)"
             sleep 10
           done
-          echo "⚠️ UI に到達できませんが、E2E テストを続行します"
+          echo "⚠️ API に到達できませんが、E2E テストを続行します"
 
       - name: 本番 E2E テスト実行
         run: bash scripts/production-e2e-test.sh
         env:
           PRODUCTION_API_URL: ${{ env.PRODUCTION_API_URL }}
-          PRODUCTION_UI_URL: ${{ env.PRODUCTION_UI_URL }}
           WAIT_TIME: 2
 
       - name: デプロイ完了サマリー
@@ -160,8 +178,8 @@ jobs:
           echo "🚀 本番デプロイ完了"
           echo "================================"
           echo ""
-          echo "  ✅ API: ${{ env.PRODUCTION_API_URL }}"
-          echo "  ✅ UI:  ${{ env.PRODUCTION_UI_URL }} (Cloud Run 統合)"
+          echo "  ✅ API: ${{ env.PRODUCTION_API_URL }} (GCP Cloud Run)"
+          echo "  ✅ UI:  Vercel (自動デプロイ)"
           echo "  ✅ DB:  Supabase"
           echo "  ✅ E2E テスト: 合格"
 

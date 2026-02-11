@@ -37,7 +37,7 @@ export function useTradingAccount(enabled: boolean = true) {
   const [error, setError] = useState<string | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
+  const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 
   /**
    * 初回データ取得とSSE接続

@@ -1,7 +1,5 @@
 import express, { Application, Request, Response, NextFunction } from 'express';
-import { Server, IncomingMessage, ServerResponse } from 'http';
-import path from 'path';
-import fs from 'fs';
+import { Server } from 'http';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { config } from './config';
@@ -37,7 +35,6 @@ class App {
   public app: Application;
   private scheduler: MatchingScheduler;
   private server: Server | null = null;
-  private nextHandler: ((req: IncomingMessage, res: ServerResponse) => void) | null = null;
 
   constructor() {
     console.log('[App] コンストラクタ開始');
@@ -99,21 +96,6 @@ class App {
     console.log('[App] ルート初期化開始...');
 
     try {
-      // 本番環境: Next.js 静的ファイルを Express で配信
-      if (config.server.isProduction) {
-        const frontendDir = path.join(process.cwd(), 'frontend');
-        console.log('[App] Next.js 静的ファイルを配信設定中...');
-        // _next/static/* → ハッシュ付き JS/CSS バンドル（長期キャッシュ可能）
-        this.app.use('/_next/static', express.static(
-          path.join(frontendDir, '.next/static'),
-          { maxAge: '365d', immutable: true }
-        ));
-        // public/* → favicon, manifest, アイコン等
-        this.app.use(express.static(
-          path.join(frontendDir, 'public'),
-          { maxAge: '1d' }
-        ));
-      }
 
       // Health check
       console.log('[App] /health エンドポイントを登録中...');
@@ -220,20 +202,11 @@ class App {
         });
       });
 
-      // Next.js キャッチオール or 404: 本番では Next.js がFEリクエストを処理
-      if (config.server.isProduction && this.nextHandler) {
-        console.log('[App] Next.js キャッチオールハンドラーを登録中...');
-        const handler = this.nextHandler;
-        this.app.all('*', (req: Request, res: Response) => {
-          handler(req, res);
-        });
-      } else {
-        // 開発環境: FE は別ポートの Next.js dev server が担当
-        console.log('[App] 404 ハンドラーを登録中...');
-        this.app.use((req: Request, res: Response) => {
-          res.status(404).json({ error: 'Route not found' });
-        });
-      }
+      // 404 ハンドラー: FE は Vercel で別途ホスティング
+      console.log('[App] 404 ハンドラーを登録中...');
+      this.app.use((req: Request, res: Response) => {
+        res.status(404).json({ error: 'Route not found' });
+      });
 
       console.log('[App] ✅ ルート初期化完了');
     } catch (error) {
@@ -246,75 +219,13 @@ class App {
     }
   }
 
-  /**
-   * Next.js standalone サーバーを初期化（本番環境のみ）
-   * standalone 出力の next/dist/server/next-server を直接ロードし、
-   * Express のキャッチオールハンドラーとして使う
-   */
-  private async initializeNextJs(): Promise<void> {
-    if (!config.server.isProduction) {
-      console.log('[App] 開発環境: Next.js は別プロセスで動作（port 3102）');
-      return;
-    }
 
-    console.log('[App] Next.js standalone サーバーを初期化中...');
-    try {
-      // 1. パスの定義
-      const frontendDir = path.join(process.cwd(), 'frontend');
-      console.log(`[App]   cwd: ${process.cwd()}`);
-      console.log(`[App]   frontend dir exists: ${fs.existsSync(frontendDir)}`);
-      console.log(`[App]   frontend/.next exists: ${fs.existsSync(path.join(frontendDir, '.next'))}`);
-
-      // 2. NextServer クラスのロード
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const NextServer = require('next/dist/server/next-server').default;
-
-      // 3. 設定ファイルのロード (required-server-files.json)
-      // Next.js 16 では conf に完全な設定が必要（runtimeServerDeploymentId 等）
-      let nextConfig: Record<string, unknown> = {};
-      const configPath = path.join(frontendDir, '.next/required-server-files.json');
-
-      if (fs.existsSync(configPath)) {
-        try {
-          const serverFiles = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-          nextConfig = serverFiles.config || {};
-          console.log('[App]   required-server-files.json をロードしました');
-        } catch (e) {
-          console.error('[App]   ⚠️ 設定ファイルのパースに失敗:', e);
-        }
-      } else {
-        console.warn(`[App]   ⚠️ 設定ファイルが見つかりません: ${configPath}`);
-      }
-
-      // 4. NextServer インスタンス化 (conf に完全な設定を渡す)
-      const nextApp = new NextServer({
-        dir: frontendDir,
-        dev: false,
-        conf: {
-          ...nextConfig,
-          distDir: '.next',
-        },
-      });
-
-      this.nextHandler = nextApp.getRequestHandler();
-      await nextApp.prepare();
-      console.log('[App] ✅ Next.js standalone サーバー初期化完了');
-      console.log(`[App]   dir: ${frontendDir}`);
-    } catch (error) {
-      console.error('[App] ⚠️ Next.js 初期化に失敗しました（APIのみで動作を継続）');
-      console.error('[App] Error:', error);
-      // Next.js が起動できなくても API は動作し続ける
-    }
-  }
 
   /**
    * Start the application
    */
   public async start(): Promise<void> {
-    // 本番環境: Next.js を先に初期化
-    await this.initializeNextJs();
-
-    // Next.js 初期化後にルートを登録（キャッチオールハンドラーの有無が決まる）
+    // ルートを初期化
     console.log('[App] ルートを初期化中...');
     this.initializeRoutes();
 
@@ -327,7 +238,7 @@ class App {
     console.log(`  BACKEND_PORT env: ${process.env.BACKEND_PORT}`);
     console.log(`  Resolved port: ${port}`);
     console.log(`  NODE_ENV: ${process.env.NODE_ENV}`);
-    console.log(`  Next.js: ${this.nextHandler ? 'integrated' : 'not available'}`);
+    console.log(`  Mode: API-only (FE is hosted on Vercel)`);
     console.log('═══════════════════════════════════════');
 
     // サーバーインスタンスを保持してイベントループを維持
