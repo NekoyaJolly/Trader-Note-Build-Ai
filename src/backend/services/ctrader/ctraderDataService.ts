@@ -134,6 +134,42 @@ export class CTraderDataService {
     }
 
     /**
+     * 利用可能なシンボル一覧を取得
+     * cTrader APIの ProtoOASymbolsListReq を使用
+     */
+    async getAvailableSymbols(accountId: string): Promise<{ symbolName: string; symbolId: number }[]> {
+        const connection = await this.connectAndAuth(accountId);
+
+        const cacheKey = accountId;
+        let symbolList = this.symbolListCache.get(cacheKey);
+
+        if (!symbolList) {
+            console.log('[cTraderData] シンボルリスト取得中...');
+            const response = await connection.sendCommand('ProtoOASymbolsListReq', {
+                ctidTraderAccountId: parseInt(accountId, 10),
+                includeArchivedSymbols: false,
+            });
+
+            const rawResponse = response as { symbol?: Array<{ symbolId: number; symbolName: string; digits?: number }> };
+            const symbols = rawResponse?.symbol || [];
+
+            symbolList = symbols.map(s => ({
+                symbolId: s.symbolId,
+                symbolName: s.symbolName,
+                digits: s.digits ?? 5,
+            }));
+
+            this.symbolListCache.set(cacheKey, symbolList);
+            console.log(`[cTraderData] ${symbolList.length}シンボルをキャッシュ`);
+        }
+
+        return symbolList.map(s => ({
+            symbolName: s.symbolName,
+            symbolId: s.symbolId,
+        }));
+    }
+
+    /**
      * OHLCV ヒストリカルデータを取得
      *
      * @param accountId - cTrader アカウントID

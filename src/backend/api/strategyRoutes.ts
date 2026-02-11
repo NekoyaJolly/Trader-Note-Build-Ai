@@ -518,7 +518,7 @@ router.post('/:id/backtest', async (req: Request, res: Response) => {
     }
 
     // タイムフレームのバリデーション
-    const validTimeframes = ['15m', '30m', '1h', '4h', '1d'];
+    const validTimeframes = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
     if (!validTimeframes.includes(stage1Timeframe)) {
       return res.status(400).json({
         success: false,
@@ -1816,6 +1816,57 @@ router.get('/filters/indicators', async (_req: Request, res: Response) => {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+// ============================================
+// シンボル一覧エンドポイント
+// cTrader APIから利用可能なシンボルを取得
+// ============================================
+
+/**
+ * GET /api/strategies/symbols
+ * cTraderアカウントで利用可能なシンボル一覧を取得
+ */
+router.get('/symbols', async (_req: Request, res: Response) => {
+  try {
+    const { PrismaClient } = await import('@prisma/client');
+    const prisma = new PrismaClient();
+
+    // cTraderアカウント取得
+    const ctraderToken = await prisma.cTraderToken.findFirst({
+      orderBy: { lastConnectedAt: 'desc' },
+    });
+
+    if (!ctraderToken) {
+      return res.status(503).json({
+        success: false,
+        error: 'cTraderアカウントが未登録です。設定からcTrader連携を行ってください。',
+      });
+    }
+
+    const { CTraderAuthService } = await import('../services/ctrader/ctraderAuthService');
+    const { CTraderDataService } = await import('../services/ctrader/ctraderDataService');
+
+    const authService = new CTraderAuthService(prisma);
+    const dataService = new CTraderDataService(authService);
+
+    const symbols = await dataService.getAvailableSymbols(ctraderToken.accountId);
+
+    // アルファベット順にソート
+    symbols.sort((a, b) => a.symbolName.localeCompare(b.symbolName));
+
+    res.json({
+      success: true,
+      data: symbols,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] シンボル一覧取得エラー:', message);
     res.status(500).json({
       success: false,
       error: message,

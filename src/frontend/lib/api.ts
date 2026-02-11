@@ -953,11 +953,12 @@ export async function duplicateStrategy(id: string): Promise<Strategy> {
 export interface BacktestRequestParams {
   startDate: string;
   endDate: string;
-  stage1Timeframe: "15m" | "30m" | "1h" | "4h" | "1d";
+  stage1Timeframe: "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "1d";
   enableStage2: boolean;
   initialCapital: number;
-  lotSize: number; // 固定ロット数（通貨量）
-  leverage: number; // レバレッジ（1〜1000倍）
+  lotSize: number;
+  leverage: number;
+  symbol?: string;
 }
 
 /**
@@ -2242,6 +2243,29 @@ export async function checkBacktestDataCoverage(
 
   const payload = await response.json();
   return payload.data;
+}
+
+/**
+ * 利用可能なシンボル一覧を取得
+ * GET /api/strategies/symbols
+ */
+export async function fetchAvailableSymbols(): Promise<{ symbolName: string; symbolId: number }[]> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/strategies/symbols`, {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      console.warn("[fetchAvailableSymbols] API Error:", response.status);
+      return [];
+    }
+
+    const payload = await response.json();
+    return payload.data || [];
+  } catch (error) {
+    console.warn("[fetchAvailableSymbols] Failed:", error);
+    return [];
+  }
 }
 
 /**

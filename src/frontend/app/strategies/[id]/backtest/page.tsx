@@ -26,6 +26,7 @@ import {
   checkBacktestDataCoverage,
   fetchAndCacheOhlcvData,
   DataFetchProgress,
+  fetchAvailableSymbols,
   BacktestHistoryItem,
   WalkForwardResult,
   FilterAnalysisResult,
@@ -47,11 +48,12 @@ import PatternAnalysisPanel from "@/components/strategy/PatternAnalysisPanel";
 interface BacktestParams {
   startDate: string;
   endDate: string;
-  stage1Timeframe: "15m" | "30m" | "1h" | "4h" | "1d";
+  stage1Timeframe: "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "1d";
   enableStage2: boolean;
   initialCapital: number;
-  lotSize: number; // 固定ロット数（通貨量、例: 10000 = 1万通貨）
-  leverage: number; // レバレッジ（1〜1000倍）
+  lotSize: number;
+  leverage: number;
+  symbol: string;
 }
 
 // BacktestHistoryItemはlib/api.tsからインポート
@@ -241,9 +243,15 @@ export default function StrategyBacktestPage() {
     stage1Timeframe: "1h",
     enableStage2: false,
     initialCapital: 1000000,
-    lotSize: 10000, // デフォルト1万通貨
-    leverage: 25, // デフォルト25倍
+    lotSize: 10000,
+    leverage: 25,
+    symbol: "",
   });
+
+  // シンボル一覧
+  const [availableSymbols, setAvailableSymbols] = useState<{ symbolName: string; symbolId: number }[]>([]);
+  const [symbolSearch, setSymbolSearch] = useState("");
+  const [showSymbolDropdown, setShowSymbolDropdown] = useState(false);
 
   // バックテスト結果
   const [result, setResult] = useState<BacktestResult | null>(null);
@@ -315,6 +323,13 @@ export default function StrategyBacktestPage() {
       const strategyData = await fetchStrategy(strategyId);
       setStrategy(strategyData);
 
+      // シンボル初期値をストラテジーから設定
+      setBacktestParams(prev => ({
+        ...prev,
+        symbol: prev.symbol || strategyData.symbol || '',
+      }));
+      setSymbolSearch(strategyData.symbol || '');
+
       // バックテスト履歴を取得
       const historyData = await fetchStrategyBacktestHistory(strategyId);
       setHistory(historyData);
@@ -339,6 +354,15 @@ export default function StrategyBacktestPage() {
     loadData();
   }, [loadData]);
 
+  // シンボル一覧を取得
+  useEffect(() => {
+    fetchAvailableSymbols().then(symbols => {
+      if (symbols.length > 0) {
+        setAvailableSymbols(symbols);
+      }
+    });
+  }, []);
+
   // ============================================
   // イベントハンドラ
   // ============================================
@@ -361,7 +385,7 @@ export default function StrategyBacktestPage() {
 
       // カバレッジチェック実行
       const coverage = await checkBacktestDataCoverage(
-        strategy.symbol,
+        backtestParams.symbol || strategy.symbol,
         backtestParams.stage1Timeframe,
         backtestParams.startDate,
         backtestParams.endDate
@@ -399,6 +423,7 @@ export default function StrategyBacktestPage() {
         initialCapital: backtestParams.initialCapital,
         lotSize: backtestParams.lotSize,
         leverage: backtestParams.leverage,
+        symbol: backtestParams.symbol || strategy?.symbol,
       });
 
       setResult(resultData);
@@ -600,7 +625,7 @@ export default function StrategyBacktestPage() {
                     setFetchProgress(null);
                     setError(null);
                     const result = await fetchAndCacheOhlcvData(
-                      strategy.symbol,
+                      backtestParams.symbol || strategy.symbol,
                       backtestParams.stage1Timeframe,
                       backtestParams.startDate,
                       backtestParams.endDate,
@@ -664,6 +689,61 @@ export default function StrategyBacktestPage() {
                 実行パラメータ
               </h2>
 
+              {/* シンボル選択 */}
+              <div className="mb-3 relative">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs text-gray-400">シンボル</label>
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={symbolSearch}
+                    onChange={(e) => {
+                      setSymbolSearch(e.target.value);
+                      setShowSymbolDropdown(true);
+                    }}
+                    onFocus={() => setShowSymbolDropdown(true)}
+                    onBlur={() => setTimeout(() => setShowSymbolDropdown(false), 200)}
+                    placeholder="例: USDJPY, XAUUSD"
+                    className="w-full bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                  />
+                  {showSymbolDropdown && availableSymbols.length > 0 && (
+                    <div className="absolute z-50 w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                      {availableSymbols
+                        .filter(s => !symbolSearch || s.symbolName.toUpperCase().includes(symbolSearch.toUpperCase()))
+                        .slice(0, 50)
+                        .map(s => (
+                          <button
+                            key={s.symbolId}
+                            type="button"
+                            className="w-full text-left px-3 py-1.5 text-sm text-gray-300 hover:bg-slate-700 hover:text-white transition-colors"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              setSymbolSearch(s.symbolName);
+                              handleParamChange('symbol', s.symbolName);
+                              setShowSymbolDropdown(false);
+                            }}
+                          >
+                            {s.symbolName}
+                          </button>
+                        ))}
+                      {availableSymbols.filter(s => !symbolSearch || s.symbolName.toUpperCase().includes(symbolSearch.toUpperCase())).length === 0 && (
+                        <div className="px-3 py-2 text-xs text-gray-500">該当なし</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {symbolSearch && symbolSearch !== backtestParams.symbol && (
+                  <button
+                    type="button"
+                    onClick={() => handleParamChange('symbol', symbolSearch)}
+                    className="mt-1 text-xs text-cyan-400 hover:text-cyan-300"
+                  >
+                    「{symbolSearch}」を使用
+                  </button>
+                )}
+              </div>
+
               {/* 期間設定 */}
               <div className="grid grid-cols-2 gap-2 mb-3">
                 <div>
@@ -699,6 +779,8 @@ export default function StrategyBacktestPage() {
                     onChange={(e) => handleParamChange("stage1Timeframe", e.target.value)}
                     className="bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
                   >
+                    <option value="1m">1分</option>
+                    <option value="5m">5分</option>
                     <option value="15m">15分</option>
                     <option value="30m">30分</option>
                     <option value="1h">1時間</option>
@@ -831,7 +913,7 @@ export default function StrategyBacktestPage() {
                     setFetchProgress(null);
                     setError(null);
                     const result = await fetchAndCacheOhlcvData(
-                      strategy.symbol,
+                      backtestParams.symbol || strategy?.symbol || '',
                       backtestParams.stage1Timeframe,
                       backtestParams.startDate,
                       backtestParams.endDate,
