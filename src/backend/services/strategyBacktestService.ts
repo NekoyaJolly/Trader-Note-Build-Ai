@@ -31,6 +31,7 @@ import {
 import { MarketDataService } from '../../services/marketDataService';
 import { CTraderDataService } from './ctrader/ctraderDataService';
 import { CTraderAuthService } from './ctrader/ctraderAuthService';
+import { OHLCVRepository } from '../repositories/ohlcvRepository';
 
 // 計算関数を再エクスポート（後方互換性のため）
 export { calculatePnl, calculateSummary, createEmptySummary };
@@ -486,36 +487,21 @@ async function cacheOhlcvData(
   data: OHLCV[]
 ): Promise<void> {
   try {
-    // 重複を避けるため upsert を使用
-    for (const candle of data) {
-      await prisma.oHLCVCandle.upsert({
-        where: {
-          symbol_timeframe_timestamp: {
-            symbol,
-            timeframe,
-            timestamp: candle.timestamp,
-          },
-        },
-        update: {
-          open: candle.open,
-          high: candle.high,
-          low: candle.low,
-          close: candle.close,
-          volume: candle.volume,
-        },
-        create: {
-          symbol,
-          timeframe,
-          timestamp: candle.timestamp,
-          open: candle.open,
-          high: candle.high,
-          low: candle.low,
-          close: candle.close,
-          volume: candle.volume,
-        },
-      });
-    }
-    console.log(`[cacheOhlcvData] ${data.length}件のデータをキャッシュ: ${symbol}/${timeframe}`);
+    // OHLCVRepository.bulkInsert() で一括挿入（createMany + skipDuplicates + バッチ処理）
+    const repo = new OHLCVRepository();
+    const insertData = data.map(candle => ({
+      symbol,
+      timeframe,
+      timestamp: candle.timestamp,
+      open: candle.open,
+      high: candle.high,
+      low: candle.low,
+      close: candle.close,
+      volume: candle.volume,
+      source: 'api',
+    }));
+    const insertedCount = await repo.bulkInsert(insertData);
+    console.log(`[cacheOhlcvData] ${insertedCount}/${data.length}件のデータをキャッシュ: ${symbol}/${timeframe}`);
   } catch (error) {
     // キャッシュ失敗はワーニングのみ（メイン処理は継続）
     console.warn(`[cacheOhlcvData] キャッシュ保存エラー:`, error);
