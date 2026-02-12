@@ -34,18 +34,20 @@ import {
   Plus,
   User,
   LineChart,
+  LogOut,
   type LucideIcon,
 } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 import IndicatorConfigModal from "@/components/IndicatorConfigModal";
-import { 
-  fetchIndicatorSettings, 
-  fetchIndicatorMetadata, 
+import {
+  fetchIndicatorSettings,
+  fetchIndicatorMetadata,
   saveIndicatorConfig,
   deleteIndicatorConfig,
 } from "@/lib/api";
-import type { 
-  IndicatorMetadata, 
-  IndicatorConfig, 
+import type {
+  IndicatorMetadata,
+  IndicatorConfig,
   IndicatorParams,
   IndicatorId,
   IndicatorCategory,
@@ -240,7 +242,8 @@ interface SidebarProps {
 
 export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname();
-  
+  const { user, logout } = useAuth();
+
   // カテゴリの展開状態
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};
@@ -271,7 +274,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         fetchIndicatorMetadata(),
         fetchIndicatorSettings(),
       ]);
-      
+
       // メタデータの処理（成功時のみ）
       if (metadataRes.status === 'fulfilled') {
         setIndicators(metadataRes.value.indicators);
@@ -289,7 +292,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           paramConstraints: {} as any,
         })) as any);
       }
-      
+
       // 設定の処理（成功時のみ）
       if (settingsRes.status === 'fulfilled') {
         setActiveConfigs(settingsRes.value.activeSet.configs.filter(c => c.enabled));
@@ -407,7 +410,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
             `}
           >
             <div className="flex items-center gap-2">
-              <Icon 
+              <Icon
                 className={`w-4 h-4 ${indicatorMenuOpen || activeConfigs.length > 0 ? colors.text : `text-gray-500 ${colors.textHover}`}`}
                 strokeWidth={1.5}
               />
@@ -420,7 +423,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
                 )}
               </span>
             </div>
-            <ChevronRight 
+            <ChevronRight
               className={`w-4 h-4 transition-transform duration-200 ${indicatorMenuOpen ? "rotate-90" : ""}`}
               strokeWidth={1.5}
             />
@@ -435,7 +438,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
                 (['trend', 'momentum', 'volatility', 'volume'] as IndicatorCategory[]).map(category => {
                   const categoryIndicators = indicators.filter(i => i.category === category);
                   if (categoryIndicators.length === 0) return null;
-                  
+
                   return (
                     <div key={category} className="mb-2">
                       <p className={`px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${INDICATOR_CATEGORY_DISPLAY[category].color}`}>
@@ -444,7 +447,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
                       {categoryIndicators.map(indicator => {
                         const isActiveInd = isIndicatorActive(indicator.id);
                         const config = getExistingConfig(indicator.id);
-                        
+
                         return (
                           <button
                             key={indicator.id}
@@ -483,7 +486,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
     // 子メニューを持つ場合
     if (hasChildren) {
       const isChildActive = item.children?.some(child => isActive(child.href));
-      
+
       return (
         <div key={item.href} className="w-full">
           <div
@@ -501,7 +504,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
                 }
               `}
             >
-              <Icon 
+              <Icon
                 className={`w-4 h-4 ${active || isChildActive ? colors.text : `text-gray-500 ${colors.textHover}`}`}
                 strokeWidth={1.5}
               />
@@ -517,13 +520,13 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
                 }
               `}
             >
-              <ChevronRight 
+              <ChevronRight
                 className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
                 strokeWidth={1.5}
               />
             </button>
           </div>
-          
+
           {isExpanded && (
             <div className="mt-1 ml-4 border-l border-slate-700 pl-2 space-y-1">
               {item.children?.map(child => renderNavItem(child, categoryColor, depth + 1))}
@@ -549,7 +552,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           ${depth > 0 ? "text-xs" : ""}
         `}
       >
-        <Icon 
+        <Icon
           className={`w-4 h-4 ${active ? colors.text : `text-gray-500 ${colors.textHover}`}`}
           strokeWidth={1.5}
         />
@@ -562,7 +565,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
     <>
       {/* オーバーレイ */}
       {isOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 transition-opacity duration-300"
           onClick={onClose}
           aria-hidden="true"
@@ -570,7 +573,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
       )}
 
       {/* サイドバー */}
-      <aside 
+      <aside
         className={`
           fixed top-0 left-0 z-50
           h-screen w-72
@@ -620,7 +623,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
                   }
                 `}
               >
-                <Icon 
+                <Icon
                   className={`w-4 h-4 ${active ? colors.text : "text-gray-400"}`}
                   strokeWidth={1.5}
                 />
@@ -632,7 +635,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           {navCategories.map(category => {
             const colors = CATEGORY_COLORS[category.color];
             const isExpanded = expandedCategories[category.id];
-            
+
             return (
               <div key={category.id} className="space-y-1">
                 {/* カテゴリヘッダー */}
@@ -642,19 +645,19 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
                     w-full flex items-center justify-between px-3 py-2 rounded-lg
                     text-xs font-semibold uppercase tracking-wider
                     transition-all duration-200 border
-                    ${isExpanded 
-                      ? `${colors.text} bg-gradient-to-r ${colors.bg} ${colors.border} ${colors.glow}` 
+                    ${isExpanded
+                      ? `${colors.text} bg-gradient-to-r ${colors.bg} ${colors.border} ${colors.glow}`
                       : `text-gray-400 border-slate-700/50 bg-slate-800/30 hover:bg-slate-700/50 hover:${colors.text} shadow-[0_0_8px_rgba(100,116,139,0.15)]`
                     }
                   `}
                 >
                   <span>{category.label}</span>
-                  <ChevronRight 
+                  <ChevronRight
                     className={`w-3.5 h-3.5 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
                     strokeWidth={2}
                   />
                 </button>
-                
+
                 {/* カテゴリアイテム */}
                 {isExpanded && (
                   <div className="space-y-1 pl-1">
@@ -666,17 +669,31 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           })}
         </nav>
 
-        {/* フッター */}
-        <div className="p-4 border-t border-slate-700/50">
+        {/* フッター: ユーザー情報 + ログアウト */}
+        <div className="p-4 border-t border-slate-700/50 space-y-2">
           <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50">
             <div className="w-8 h-8 rounded-full bg-gradient-to-r from-cyan-500 to-purple-500 flex items-center justify-center">
-              <span className="text-white text-xs font-bold">T</span>
+              <span className="text-white text-xs font-bold">
+                {(user?.displayName || 'T').charAt(0).toUpperCase()}
+              </span>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-white truncate">Trader</p>
-              <p className="text-[10px] text-gray-500">MVP Version</p>
+              <p className="text-sm font-medium text-white truncate">{user?.displayName || 'Trader'}</p>
+              <p className="text-[10px] text-gray-500">{user?.email || 'cTrader Account'}</p>
             </div>
           </div>
+          {user && (
+            <button
+              onClick={async () => {
+                onClose?.();
+                await logout();
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-all duration-200 group"
+            >
+              <LogOut className="w-4 h-4 text-red-500 group-hover:text-red-400" strokeWidth={1.5} />
+              <span>ログアウト</span>
+            </button>
+          )}
         </div>
       </aside>
 
