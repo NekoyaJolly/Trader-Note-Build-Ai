@@ -566,7 +566,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
       {/* オーバーレイ */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 transition-opacity duration-300"
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 transition-opacity duration-300 animate-fade-in"
           onClick={onClose}
           aria-hidden="true"
         />
@@ -578,15 +578,15 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           fixed top-0 left-0 z-50
           h-screen w-72
           flex flex-col
-          bg-slate-900/95 backdrop-blur-md border-r border-slate-700/50
-          transform transition-transform duration-300 ease-out
+          glass-strong border-r border-slate-700/30
+          transform transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]
           ${isOpen ? "translate-x-0" : "-translate-x-full"}
         `}
       >
         {/* ヘッダー */}
-        <div className="flex items-center justify-between p-4 border-b border-slate-700/50">
+        <div className="flex items-center justify-between p-4 border-b border-slate-700/30">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-purple-500 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-purple-500 flex items-center justify-center shadow-lg shadow-cyan-500/30 animate-pulse-glow">
               <span className="text-white text-sm font-bold">T</span>
             </div>
             <span className="text-lg font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
@@ -595,7 +595,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700/50 transition-all"
+            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700/50 transition-all duration-200 press-scale"
             aria-label="閉じる"
           >
             <X className="w-5 h-5" strokeWidth={1.5} />
@@ -603,7 +603,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         </div>
 
         {/* ナビゲーション */}
-        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-2">
+        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-2 scrollbar-thin">
           {/* トップレベル（HOME） */}
           {topNavItems.map(item => {
             const active = isActive(item.href);
@@ -670,9 +670,9 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         </nav>
 
         {/* フッター: ユーザー情報 + ログアウト */}
-        <div className="p-4 border-t border-slate-700/50 space-y-2">
-          <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/50">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-r from-cyan-500 to-purple-500 flex items-center justify-center">
+        <div className="p-4 border-t border-slate-700/30 space-y-2">
+          <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl glass-surface group hover:border-slate-600/60 transition-all duration-200">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-r from-cyan-500 to-purple-500 flex items-center justify-center shadow-md shadow-cyan-500/20">
               <span className="text-white text-xs font-bold">
                 {(user?.displayName || 'T').charAt(0).toUpperCase()}
               </span>
@@ -688,7 +688,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
                 onClose?.();
                 await logout();
               }}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-all duration-200 group"
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-all duration-200 group press-scale"
             >
               <LogOut className="w-4 h-4 text-red-500 group-hover:text-red-400" strokeWidth={1.5} />
               <span>ログアウト</span>
