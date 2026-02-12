@@ -51,11 +51,14 @@ class App {
    */
   private initializeMiddlewares(): void {
     console.log('[App] CORS設定を初期化中...');
-    // CORS設定: 本番環境では同一オリジン（Cloud Run 統合）のため localhost のみ許可
-    // 開発環境では FE dev server (3102) と BE (3100) が別ポートで動作
+    // CORS設定: 開発環境と Vercel デプロイの両方を許可
+    // 本番 Cloud Run 統合の同一オリジンリクエストは origin=undefined で自動許可
     const allowedOrigins = [
       'http://localhost:3000',
       'http://localhost:3102',
+      'https://trader-note-build-ai.vercel.app',
+      // 環境変数で追加オリジンを指定可能（カンマ区切り）
+      ...(process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()).filter(Boolean) || []),
     ];
 
     this.app.use(cors({
