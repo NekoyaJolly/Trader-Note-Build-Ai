@@ -25,7 +25,7 @@ if (!databaseUrl) {
   const envKeys = Object.keys(process.env)
     .filter(key => !key.includes('npm_') && !key.includes('TERM') && !key.includes('PATH'))
     .sort();
-  
+
   if (envKeys.length === 0) {
     console.error('  ❌ 環境変数が全く設定されていません（.env ファイル読み込み失敗？）');
   } else {
@@ -105,12 +105,12 @@ export const config = {
   notification: {
     pushKey: process.env.PUSH_NOTIFICATION_KEY || '',
     // 本番環境ではDBモード、開発環境ではFSモード（環境変数で上書き可能）
-    storageMode: (process.env.NOTIFICATION_STORAGE_MODE || 
+    storageMode: (process.env.NOTIFICATION_STORAGE_MODE ||
       (process.env.NODE_ENV === 'production' ? 'db' : 'fs')) as 'db' | 'fs',
   },
   ctrader: {
-    clientId: process.env.CTRADER_CLIENT_ID || '',
-    clientSecret: process.env.CTRADER_CLIENT_SECRET || '',
+    clientId: (process.env.CTRADER_CLIENT_ID || '').trim(),
+    clientSecret: (process.env.CTRADER_CLIENT_SECRET || '').trim(),
     // OAuth エンドポイント（connect.spotware.com を使用）
     authUrl: 'https://connect.spotware.com/apps/auth',
     tokenUrl: 'https://connect.spotware.com/apps/token',
