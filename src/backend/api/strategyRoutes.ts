@@ -181,10 +181,7 @@ router.get('/filters/indicators', async (_req: Request, res: Response) => {
  */
 router.get('/symbols', async (_req: Request, res: Response) => {
   try {
-    const { PrismaClient } = await import('@prisma/client');
-    const prisma = new PrismaClient();
-
-    // cTraderアカウント取得
+    // cTraderアカウント取得（モジュールレベルのprismaインスタンスを使用）
     const ctraderToken = await prisma.cTraderToken.findFirst({
       orderBy: { lastConnectedAt: 'desc' },
     });
