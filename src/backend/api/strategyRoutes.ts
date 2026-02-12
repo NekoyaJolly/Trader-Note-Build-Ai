@@ -209,7 +209,11 @@ router.get('/symbols', async (_req: Request, res: Response) => {
       data: symbols,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    const message = error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : JSON.stringify(error) || '不明なエラーが発生しました';
     console.error('[StrategyRoutes] シンボル一覧取得エラー:', message);
     res.status(500).json({
       success: false,
