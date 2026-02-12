@@ -149,6 +149,278 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+
+/**
+ * GET /api/filters/indicators
+ * 利用可能なフィルターインジケーター一覧
+ */
+router.get('/filters/indicators', async (_req: Request, res: Response) => {
+  try {
+    const indicators = getAvailableFilterIndicators();
+    res.json({
+      success: true,
+      data: indicators,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+// ============================================
+// シンボル一覧エンドポイント
+// cTrader APIから利用可能なシンボルを取得
+// ============================================
+
+/**
+ * GET /api/strategies/symbols
+ * cTraderアカウントで利用可能なシンボル一覧を取得
+ */
+router.get('/symbols', async (_req: Request, res: Response) => {
+  try {
+    const { PrismaClient } = await import('@prisma/client');
+    const prisma = new PrismaClient();
+
+    // cTraderアカウント取得
+    const ctraderToken = await prisma.cTraderToken.findFirst({
+      orderBy: { lastConnectedAt: 'desc' },
+    });
+
+    if (!ctraderToken) {
+      return res.status(503).json({
+        success: false,
+        error: 'cTraderアカウントが未登録です。設定からcTrader連携を行ってください。',
+      });
+    }
+
+    const { CTraderAuthService } = await import('../services/ctrader/ctraderAuthService');
+    const { CTraderDataService } = await import('../services/ctrader/ctraderDataService');
+
+    const authService = new CTraderAuthService(prisma);
+    const dataService = new CTraderDataService(authService);
+
+    const symbols = await dataService.getAvailableSymbols(ctraderToken.accountId);
+
+    // アルファベット順にソート
+    symbols.sort((a, b) => a.symbolName.localeCompare(b.symbolName));
+
+    res.json({
+      success: true,
+      data: symbols,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] シンボル一覧取得エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+// ============================================
+// OHLCVデータ取得エンドポイント
+// バックグラウンド実行 + SSE進捗ストリーミング
+// ============================================
+
+
+/** データフェッチジョブの進捗管理 */
+interface DataFetchJob {
+  jobId: string;
+  status: 'running' | 'completed' | 'error';
+  progress: {
+    current: number;
+    total: number;
+    message: string;
+    source: string;
+    percent: number;
+  };
+  result?: {
+    success: boolean;
+    cachedCount: number;
+    source?: string;
+    error?: string;
+  };
+  startedAt: Date;
+}
+
+const dataFetchEmitter = new EventEmitter();
+const dataFetchJobs = new Map<string, DataFetchJob>();
+
+// 定期クリーンアップ（30分以上前のジョブ）
+setInterval(() => {
+  const now = Date.now();
+  for (const [jobId, job] of dataFetchJobs.entries()) {
+    if (now - job.startedAt.getTime() > 30 * 60 * 1000) {
+      dataFetchJobs.delete(jobId);
+      dataFetchEmitter.removeAllListeners(`progress:${jobId}`);
+    }
+  }
+}, 5 * 60 * 1000);
+
+/**
+ * POST /api/strategies/ohlcv/fetch-and-cache
+ * OHLCVデータ取得をバックグラウンドで開始し、jobIdを返す
+ * 
+ * Request Body:
+ * - symbol: string
+ * - timeframe: string
+ * - startDate: string (ISO形式)
+ * - endDate: string (ISO形式)
+ * 
+ * Response: { success: true, data: { jobId } }
+ */
+router.post('/ohlcv/fetch-and-cache', async (req: Request, res: Response) => {
+  try {
+    const { symbol, timeframe, startDate, endDate } = req.body;
+
+    // バリデーション
+    if (!symbol) {
+      return res.status(400).json({ success: false, error: 'シンボルは必須です' });
+    }
+    if (!timeframe) {
+      return res.status(400).json({ success: false, error: '時間足は必須です' });
+    }
+    if (!startDate || !endDate) {
+      return res.status(400).json({ success: false, error: '開始日と終了日は必須です' });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({ success: false, error: '日付の形式が不正です' });
+    }
+    if (start >= end) {
+      return res.status(400).json({ success: false, error: '開始日は終了日より前である必要があります' });
+    }
+
+    // 期間制限（最大730日 = 2年）
+    const MAX_DAYS = 730;
+    const diffDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    if (diffDays > MAX_DAYS) {
+      return res.status(400).json({
+        success: false,
+        error: `データ取得期間は最大${MAX_DAYS}日までです（指定: ${diffDays}日）`,
+      });
+    }
+
+    // ジョブを作成
+    const jobId = uuidv4();
+    const job: DataFetchJob = {
+      jobId,
+      status: 'running',
+      progress: { current: 0, total: 1, message: '取得準備中...', source: '', percent: 0 },
+      startedAt: new Date(),
+    };
+    dataFetchJobs.set(jobId, job);
+
+    console.log(`[StrategyRoutes] OHLCVデータ取得ジョブ開始: jobId=${jobId}, ${symbol}/${timeframe}`);
+
+    // バックグラウンドで実行（レスポンスは即返す）
+    (async () => {
+      try {
+        const { fetchAndCacheOhlcv } = await import('../services/fetchAndCacheOhlcv');
+        const result = await fetchAndCacheOhlcv(symbol, timeframe, start, end, (progress) => {
+          // 進捗をジョブに保存 → SSEに配信
+          job.progress = progress;
+          dataFetchEmitter.emit(`progress:${jobId}`, job);
+        });
+
+        job.status = result.success ? 'completed' : 'error';
+        job.result = {
+          success: result.success,
+          cachedCount: result.cachedCount,
+          source: result.source,
+          error: result.error,
+        };
+        job.progress.percent = 100;
+        job.progress.message = result.success
+          ? `完了: ${result.cachedCount}件キャッシュ (${result.source})`
+          : `エラー: ${result.error}`;
+        dataFetchEmitter.emit(`progress:${jobId}`, job);
+
+      } catch (error) {
+        job.status = 'error';
+        job.result = {
+          success: false,
+          cachedCount: 0,
+          error: error instanceof Error ? error.message : '不明なエラー',
+        };
+        job.progress.message = `エラー: ${job.result.error}`;
+        dataFetchEmitter.emit(`progress:${jobId}`, job);
+      }
+    })();
+
+    // jobIdを即返す
+    res.status(202).json({
+      success: true,
+      data: { jobId },
+    });
+
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] OHLCVデータ取得エラー:', message);
+    res.status(500).json({ success: false, error: message });
+  }
+});
+
+/**
+ * GET /api/strategies/ohlcv/fetch-progress/:jobId
+ * OHLCVデータ取得の進捗をSSEでストリーミング
+ */
+router.get('/ohlcv/fetch-progress/:jobId', (req: Request, res: Response) => {
+  const { jobId } = req.params;
+  const job = dataFetchJobs.get(jobId);
+
+  if (!job) {
+    return res.status(404).json({ success: false, error: 'ジョブが見つかりません' });
+  }
+
+  // SSEヘッダー
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.flushHeaders();
+
+  // 現在の状態を即送信
+  const sendProgress = (j: DataFetchJob) => {
+    res.write(`data: ${JSON.stringify({
+      status: j.status,
+      progress: j.progress,
+      result: j.result,
+    })}\n\n`);
+  };
+
+  sendProgress(job);
+
+  // 既に完了している場合はすぐ閉じる
+  if (job.status !== 'running') {
+    res.end();
+    return;
+  }
+
+  // 進捗更新をリスナー
+  const onProgress = (updatedJob: DataFetchJob) => {
+    sendProgress(updatedJob);
+    if (updatedJob.status !== 'running') {
+      // 完了・エラー時は接続を閉じる
+      res.end();
+      dataFetchEmitter.off(`progress:${jobId}`, onProgress);
+    }
+  };
+
+  dataFetchEmitter.on(`progress:${jobId}`, onProgress);
+
+  // クライアント切断時のクリーンアップ
+  req.on('close', () => {
+    dataFetchEmitter.off(`progress:${jobId}`, onProgress);
+  });
+});
 /**
  * GET /api/strategies/:id
  * ストラテジー詳細を取得
@@ -1811,276 +2083,5 @@ router.post('/:id/backtest/:runId/filter-verify', async (req: Request, res: Resp
   }
 });
 
-/**
- * GET /api/filters/indicators
- * 利用可能なフィルターインジケーター一覧
- */
-router.get('/filters/indicators', async (_req: Request, res: Response) => {
-  try {
-    const indicators = getAvailableFilterIndicators();
-    res.json({
-      success: true,
-      data: indicators,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
-    res.status(500).json({
-      success: false,
-      error: message,
-    });
-  }
-});
-
-// ============================================
-// シンボル一覧エンドポイント
-// cTrader APIから利用可能なシンボルを取得
-// ============================================
-
-/**
- * GET /api/strategies/symbols
- * cTraderアカウントで利用可能なシンボル一覧を取得
- */
-router.get('/symbols', async (_req: Request, res: Response) => {
-  try {
-    const { PrismaClient } = await import('@prisma/client');
-    const prisma = new PrismaClient();
-
-    // cTraderアカウント取得
-    const ctraderToken = await prisma.cTraderToken.findFirst({
-      orderBy: { lastConnectedAt: 'desc' },
-    });
-
-    if (!ctraderToken) {
-      return res.status(503).json({
-        success: false,
-        error: 'cTraderアカウントが未登録です。設定からcTrader連携を行ってください。',
-      });
-    }
-
-    const { CTraderAuthService } = await import('../services/ctrader/ctraderAuthService');
-    const { CTraderDataService } = await import('../services/ctrader/ctraderDataService');
-
-    const authService = new CTraderAuthService(prisma);
-    const dataService = new CTraderDataService(authService);
-
-    const symbols = await dataService.getAvailableSymbols(ctraderToken.accountId);
-
-    // アルファベット順にソート
-    symbols.sort((a, b) => a.symbolName.localeCompare(b.symbolName));
-
-    res.json({
-      success: true,
-      data: symbols,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
-    console.error('[StrategyRoutes] シンボル一覧取得エラー:', message);
-    res.status(500).json({
-      success: false,
-      error: message,
-    });
-  }
-});
-
-// ============================================
-// OHLCVデータ取得エンドポイント
-// バックグラウンド実行 + SSE進捗ストリーミング
-// ============================================
-
-
-/** データフェッチジョブの進捗管理 */
-interface DataFetchJob {
-  jobId: string;
-  status: 'running' | 'completed' | 'error';
-  progress: {
-    current: number;
-    total: number;
-    message: string;
-    source: string;
-    percent: number;
-  };
-  result?: {
-    success: boolean;
-    cachedCount: number;
-    source?: string;
-    error?: string;
-  };
-  startedAt: Date;
-}
-
-const dataFetchEmitter = new EventEmitter();
-const dataFetchJobs = new Map<string, DataFetchJob>();
-
-// 定期クリーンアップ（30分以上前のジョブ）
-setInterval(() => {
-  const now = Date.now();
-  for (const [jobId, job] of dataFetchJobs.entries()) {
-    if (now - job.startedAt.getTime() > 30 * 60 * 1000) {
-      dataFetchJobs.delete(jobId);
-      dataFetchEmitter.removeAllListeners(`progress:${jobId}`);
-    }
-  }
-}, 5 * 60 * 1000);
-
-/**
- * POST /api/strategies/ohlcv/fetch-and-cache
- * OHLCVデータ取得をバックグラウンドで開始し、jobIdを返す
- * 
- * Request Body:
- * - symbol: string
- * - timeframe: string
- * - startDate: string (ISO形式)
- * - endDate: string (ISO形式)
- * 
- * Response: { success: true, data: { jobId } }
- */
-router.post('/ohlcv/fetch-and-cache', async (req: Request, res: Response) => {
-  try {
-    const { symbol, timeframe, startDate, endDate } = req.body;
-
-    // バリデーション
-    if (!symbol) {
-      return res.status(400).json({ success: false, error: 'シンボルは必須です' });
-    }
-    if (!timeframe) {
-      return res.status(400).json({ success: false, error: '時間足は必須です' });
-    }
-    if (!startDate || !endDate) {
-      return res.status(400).json({ success: false, error: '開始日と終了日は必須です' });
-    }
-
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-      return res.status(400).json({ success: false, error: '日付の形式が不正です' });
-    }
-    if (start >= end) {
-      return res.status(400).json({ success: false, error: '開始日は終了日より前である必要があります' });
-    }
-
-    // 期間制限（最大730日 = 2年）
-    const MAX_DAYS = 730;
-    const diffDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-    if (diffDays > MAX_DAYS) {
-      return res.status(400).json({
-        success: false,
-        error: `データ取得期間は最大${MAX_DAYS}日までです（指定: ${diffDays}日）`,
-      });
-    }
-
-    // ジョブを作成
-    const jobId = uuidv4();
-    const job: DataFetchJob = {
-      jobId,
-      status: 'running',
-      progress: { current: 0, total: 1, message: '取得準備中...', source: '', percent: 0 },
-      startedAt: new Date(),
-    };
-    dataFetchJobs.set(jobId, job);
-
-    console.log(`[StrategyRoutes] OHLCVデータ取得ジョブ開始: jobId=${jobId}, ${symbol}/${timeframe}`);
-
-    // バックグラウンドで実行（レスポンスは即返す）
-    (async () => {
-      try {
-        const { fetchAndCacheOhlcv } = await import('../services/fetchAndCacheOhlcv');
-        const result = await fetchAndCacheOhlcv(symbol, timeframe, start, end, (progress) => {
-          // 進捗をジョブに保存 → SSEに配信
-          job.progress = progress;
-          dataFetchEmitter.emit(`progress:${jobId}`, job);
-        });
-
-        job.status = result.success ? 'completed' : 'error';
-        job.result = {
-          success: result.success,
-          cachedCount: result.cachedCount,
-          source: result.source,
-          error: result.error,
-        };
-        job.progress.percent = 100;
-        job.progress.message = result.success
-          ? `完了: ${result.cachedCount}件キャッシュ (${result.source})`
-          : `エラー: ${result.error}`;
-        dataFetchEmitter.emit(`progress:${jobId}`, job);
-
-      } catch (error) {
-        job.status = 'error';
-        job.result = {
-          success: false,
-          cachedCount: 0,
-          error: error instanceof Error ? error.message : '不明なエラー',
-        };
-        job.progress.message = `エラー: ${job.result.error}`;
-        dataFetchEmitter.emit(`progress:${jobId}`, job);
-      }
-    })();
-
-    // jobIdを即返す
-    res.status(202).json({
-      success: true,
-      data: { jobId },
-    });
-
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
-    console.error('[StrategyRoutes] OHLCVデータ取得エラー:', message);
-    res.status(500).json({ success: false, error: message });
-  }
-});
-
-/**
- * GET /api/strategies/ohlcv/fetch-progress/:jobId
- * OHLCVデータ取得の進捗をSSEでストリーミング
- */
-router.get('/ohlcv/fetch-progress/:jobId', (req: Request, res: Response) => {
-  const { jobId } = req.params;
-  const job = dataFetchJobs.get(jobId);
-
-  if (!job) {
-    return res.status(404).json({ success: false, error: 'ジョブが見つかりません' });
-  }
-
-  // SSEヘッダー
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.flushHeaders();
-
-  // 現在の状態を即送信
-  const sendProgress = (j: DataFetchJob) => {
-    res.write(`data: ${JSON.stringify({
-      status: j.status,
-      progress: j.progress,
-      result: j.result,
-    })}\n\n`);
-  };
-
-  sendProgress(job);
-
-  // 既に完了している場合はすぐ閉じる
-  if (job.status !== 'running') {
-    res.end();
-    return;
-  }
-
-  // 進捗更新をリスナー
-  const onProgress = (updatedJob: DataFetchJob) => {
-    sendProgress(updatedJob);
-    if (updatedJob.status !== 'running') {
-      // 完了・エラー時は接続を閉じる
-      res.end();
-      dataFetchEmitter.off(`progress:${jobId}`, onProgress);
-    }
-  };
-
-  dataFetchEmitter.on(`progress:${jobId}`, onProgress);
-
-  // クライアント切断時のクリーンアップ
-  req.on('close', () => {
-    dataFetchEmitter.off(`progress:${jobId}`, onProgress);
-  });
-});
 
 export default router;
