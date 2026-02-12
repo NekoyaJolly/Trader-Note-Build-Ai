@@ -32,6 +32,7 @@ import { MarketDataService } from '../../services/marketDataService';
 import { CTraderDataService } from './ctrader/ctraderDataService';
 import { CTraderAuthService } from './ctrader/ctraderAuthService';
 import { OHLCVRepository } from '../repositories/ohlcvRepository';
+import { calculateLotSize, slValueToPips, calculateUsedMargin } from './positionSizeCalculator';
 
 // 計算関数を再エクスポート（後方互換性のため）
 export { calculatePnl, calculateSummary, createEmptySummary };
@@ -71,6 +72,9 @@ export interface ExitSettings {
 /** バックテスト実行ソース（どこから実行されたか） */
 export type BacktestSource = 'manual' | 'walkforward' | 'montecarlo';
 
+/** ロットモード */
+export type LotMode = 'fixed' | 'variable';
+
 /** バックテスト実行リクエスト */
 export interface BacktestRequest {
   strategyId: string;
@@ -81,8 +85,26 @@ export interface BacktestRequest {
   initialCapital: number;
   lotSize: number; // 固定ロット数（通貨量、例: 10000 = 1万通貨）
   leverage: number; // レバレッジ（1〜1000倍）
+  /** ロットモード（デフォルト: 'fixed'） */
+  lotMode?: LotMode;
+  /** リスク割合 % (lotMode='variable' 時) */
+  riskPercent?: number;
+  /** リスク固定金額 (lotMode='variable' 時) */
+  riskAmount?: number;
+  /** 同時ポジション上限 (1〜15、デフォルト: 1) */
+  maxPositions?: number;
   /** 実行ソース（省略時は 'manual'）*/
   source?: BacktestSource;
+}
+
+/** 保有中のポジション（チケット方式） */
+interface OpenPosition {
+  ticketId: string;
+  entryPrice: number;
+  entryTime: string;
+  entryIndex: number;
+  lotSize: number;
+  side: TradeSide;
 }
 
 // BacktestTradeEventはbacktestCalculations.tsから再エクスポート
@@ -653,11 +675,15 @@ async function executeBacktestStage(
 
   const trades: BacktestTradeEvent[] = [];
 
-  // ポジション状態
-  let inPosition = false;
-  let entryPrice = 0;
-  let entryTime = '';
-  let entryIndex = 0;
+  // ポジション管理（チケット方式）
+  const openPositions = new Map<string, OpenPosition>();
+  const lotMode = request.lotMode || 'fixed';
+  const maxPositions = Math.min(Math.max(request.maxPositions || 1, 1), 15);
+
+  // SL を pips に変換（可変ロット計算用）
+  // ※ エントリー価格がまだ不明なので、data の中央値を暫定使用
+  //    実際の計算はエントリー時に行う
+  const symbol = strategy.symbol;
 
   // 資金残高追跡（破産判定用）
   let currentCapital = request.initialCapital;
@@ -676,64 +702,134 @@ async function executeBacktestStage(
     ctx.currentIndex = i;
     const bar = data[i];
 
-    if (!inPosition) {
-      // エントリー条件をチェック
-      const shouldEnter = await evaluateConditionGroup(ctx, entryConditions);
-
-      if (shouldEnter) {
-        // 次足始値でエントリー
-        if (i + 1 < data.length) {
-          inPosition = true;
-          entryPrice = data[i + 1].open;
-          entryTime = data[i + 1].timestamp.toISOString();
-          entryIndex = i + 1;
-        }
-      }
-    } else {
-      // イグジット判定
+    // ============ Phase 1: 既存ポジションのイグジット判定 ============
+    const closedTickets: string[] = [];
+    for (const [ticketId, pos] of openPositions) {
       const exitResult = checkExit(
         bar,
-        entryPrice,
-        strategy.side as TradeSide,
+        pos.entryPrice,
+        pos.side,
         exitSettings,
-        i - entryIndex,
+        i - pos.entryIndex,
         timeframe
       );
 
       if (exitResult.shouldExit) {
-        // 固定ロット数で損益計算（シンプル）
-        // lotSize = 通貨量（例: 10000 = 1万通貨）
-        // pnl = 価格差 × ロット数
         const pnl = calculatePnl(
-          strategy.side as TradeSide,
-          entryPrice,
+          pos.side,
+          pos.entryPrice,
           exitResult.exitPrice,
-          request.lotSize
+          pos.lotSize
         );
 
-        // 必要証拠金 = ロット数 × エントリー価格 / レバレッジ
-        const requiredMargin = (request.lotSize * entryPrice) / request.leverage;
+        const requiredMargin = (pos.lotSize * pos.entryPrice) / request.leverage;
 
         trades.push({
           eventId: uuidv4(),
-          entryTime,
-          entryPrice,
+          entryTime: pos.entryTime,
+          entryPrice: pos.entryPrice,
           exitTime: bar.timestamp.toISOString(),
           exitPrice: exitResult.exitPrice,
-          side: strategy.side as TradeSide,
-          lotSize: request.lotSize,
+          side: pos.side,
+          lotSize: pos.lotSize,
           pnl,
-          // pnlPercentは必要証拠金に対する利益率
-          pnlPercent: (pnl / requiredMargin) * 100,
+          pnlPercent: requiredMargin > 0 ? (pnl / requiredMargin) * 100 : 0,
           exitReason: exitResult.reason,
         });
 
-        // 資金残高を更新（破産判定用）
         currentCapital += pnl;
-
-        inPosition = false;
+        closedTickets.push(ticketId);
       }
     }
+    // クローズ済みチケットを削除
+    for (const ticketId of closedTickets) {
+      openPositions.delete(ticketId);
+    }
+
+    // ============ Phase 2: 新規エントリー判定 ============
+    if (openPositions.size < maxPositions) {
+      const shouldEnter = await evaluateConditionGroup(ctx, entryConditions);
+
+      if (shouldEnter && i + 1 < data.length) {
+        const nextBar = data[i + 1];
+        const entryPrice = nextBar.open;
+
+        // ロットサイズ決定
+        let tradeLotSize: number;
+        if (lotMode === 'variable') {
+          // リスクベース計算
+          const slPips = slValueToPips(
+            exitSettings.stopLoss.value,
+            exitSettings.stopLoss.unit,
+            entryPrice,
+            symbol
+          );
+          const result = calculateLotSize({
+            capital: currentCapital,
+            riskPercent: request.riskPercent,
+            riskAmount: request.riskAmount,
+            slPips,
+            symbol,
+            leverage: request.leverage,
+            entryPrice,
+          });
+          tradeLotSize = result.lotSize;
+        } else {
+          tradeLotSize = request.lotSize;
+        }
+
+        // ロットが0以下ならスキップ
+        if (tradeLotSize <= 0) {
+          continue;
+        }
+
+        // 証拠金チェック
+        const requiredMargin = (tradeLotSize * entryPrice) / request.leverage;
+        const usedMargin = calculateUsedMargin(openPositions as Map<string, { entryPrice: number; lotSize: number }>, request.leverage);
+        if (usedMargin + requiredMargin > currentCapital) {
+          // 証拠金不足 → エントリースキップ
+          continue;
+        }
+
+        const ticketId = uuidv4();
+        openPositions.set(ticketId, {
+          ticketId,
+          entryPrice,
+          entryTime: nextBar.timestamp.toISOString(),
+          entryIndex: i + 1,
+          lotSize: tradeLotSize,
+          side: strategy.side as TradeSide,
+        });
+      }
+    }
+  }
+
+  // 未クローズポジションを最終バーの終値で強制決済
+  if (openPositions.size > 0 && data.length > 0) {
+    const lastBar = data[data.length - 1];
+    for (const [, pos] of openPositions) {
+      const pnl = calculatePnl(
+        pos.side,
+        pos.entryPrice,
+        lastBar.close,
+        pos.lotSize
+      );
+      const requiredMargin = (pos.lotSize * pos.entryPrice) / request.leverage;
+      trades.push({
+        eventId: uuidv4(),
+        entryTime: pos.entryTime,
+        entryPrice: pos.entryPrice,
+        exitTime: lastBar.timestamp.toISOString(),
+        exitPrice: lastBar.close,
+        side: pos.side,
+        lotSize: pos.lotSize,
+        pnl,
+        pnlPercent: requiredMargin > 0 ? (pnl / requiredMargin) * 100 : 0,
+        exitReason: 'timeout',
+      });
+      currentCapital += pnl;
+    }
+    openPositions.clear();
   }
 
   // サマリーを計算（破産フラグも含める）

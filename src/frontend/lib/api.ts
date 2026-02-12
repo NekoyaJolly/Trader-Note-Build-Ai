@@ -959,6 +959,14 @@ export interface BacktestRequestParams {
   lotSize: number;
   leverage: number;
   symbol?: string;
+  /** ロットモード（デフォルト: 'fixed'） */
+  lotMode?: 'fixed' | 'variable';
+  /** リスク割合 % (lotMode='variable' 時) */
+  riskPercent?: number;
+  /** リスク固定金額 (lotMode='variable' 時) */
+  riskAmount?: number;
+  /** 同時ポジション上限 (1〜15、デフォルト: 1) */
+  maxPositions?: number;
 }
 
 /**

@@ -473,6 +473,10 @@ router.post('/:id/backtest', async (req: Request, res: Response) => {
       initialCapital = 1000000,
       lotSize = 10000, // デフォルト1万通貨
       leverage = 25, // デフォルト25倍
+      lotMode = 'fixed',
+      riskPercent,
+      riskAmount,
+      maxPositions = 1,
     } = req.body;
 
     // 必須フィールドのバリデーション
@@ -526,7 +530,7 @@ router.post('/:id/backtest', async (req: Request, res: Response) => {
       });
     }
 
-    console.log(`[StrategyRoutes] バックテスト開始: strategyId=${id}, period=${startDate} ~ ${endDate}`);
+    console.log(`[StrategyRoutes] バックテスト開始: strategyId=${id}, period=${startDate} ~ ${endDate}, lotMode=${lotMode}, maxPositions=${maxPositions}`);
 
     // バックテストを実行（日付は文字列形式で渡す）
     const result = await runBacktest({
@@ -538,6 +542,10 @@ router.post('/:id/backtest', async (req: Request, res: Response) => {
       initialCapital,
       lotSize,
       leverage,
+      lotMode,
+      riskPercent,
+      riskAmount,
+      maxPositions: Math.min(Math.max(maxPositions, 1), 15),
     });
 
     console.log(`[StrategyRoutes] バックテスト完了: runId=${result.id}, trades=${result.summary.totalTrades}`);

@@ -54,6 +54,11 @@ interface BacktestParams {
   lotSize: number;
   leverage: number;
   symbol: string;
+  lotMode: 'fixed' | 'variable';
+  riskPercent: number;
+  riskAmount: number;
+  riskType: 'percent' | 'amount';
+  maxPositions: number;
 }
 
 // BacktestHistoryItemはlib/api.tsからインポート
@@ -246,6 +251,11 @@ export default function StrategyBacktestPage() {
     lotSize: 10000,
     leverage: 25,
     symbol: "",
+    lotMode: 'fixed',
+    riskPercent: 2,
+    riskAmount: 20000,
+    riskType: 'percent',
+    maxPositions: 1,
   });
 
   // シンボル一覧
@@ -424,6 +434,10 @@ export default function StrategyBacktestPage() {
         lotSize: backtestParams.lotSize,
         leverage: backtestParams.leverage,
         symbol: backtestParams.symbol || strategy?.symbol,
+        lotMode: backtestParams.lotMode,
+        riskPercent: backtestParams.lotMode === 'variable' && backtestParams.riskType === 'percent' ? backtestParams.riskPercent : undefined,
+        riskAmount: backtestParams.lotMode === 'variable' && backtestParams.riskType === 'amount' ? backtestParams.riskAmount : undefined,
+        maxPositions: backtestParams.maxPositions,
       });
 
       setResult(resultData);
@@ -820,20 +834,6 @@ export default function StrategyBacktestPage() {
                   </div>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <label className="text-xs text-gray-400">ロット数</label>
-                  <div className="flex gap-1">
-                    <input
-                      type="number"
-                      step="1000"
-                      min="1000"
-                      value={backtestParams.lotSize}
-                      onChange={(e) => handleParamChange("lotSize", parseInt(e.target.value) || 1000)}
-                      className="w-24 bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1 text-sm text-white text-right focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
-                    />
-                    <span className="text-xs text-gray-500 self-center">通貨</span>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between gap-2">
                   <label className="text-xs text-gray-400">レバレッジ</label>
                   <div className="flex gap-1">
                     <input
@@ -847,6 +847,123 @@ export default function StrategyBacktestPage() {
                     />
                     <span className="text-xs text-gray-500 self-center">倍</span>
                   </div>
+                </div>
+
+                {/* ロットモード切り替え */}
+                <div className="pt-1 border-t border-slate-600/30">
+                  <label className="text-xs text-gray-400 block mb-1.5">ロットモード</label>
+                  <div className="flex gap-2 mb-2">
+                    <button
+                      type="button"
+                      onClick={() => handleParamChange('lotMode', 'fixed')}
+                      className={`flex-1 px-2 py-1 rounded text-xs font-medium transition-colors ${backtestParams.lotMode === 'fixed'
+                          ? 'bg-cyan-600/30 text-cyan-400 border border-cyan-500/50'
+                          : 'bg-slate-700/50 text-gray-400 border border-slate-600/50 hover:bg-slate-600/50'
+                        }`}
+                    >
+                      固定ロット
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleParamChange('lotMode', 'variable')}
+                      className={`flex-1 px-2 py-1 rounded text-xs font-medium transition-colors ${backtestParams.lotMode === 'variable'
+                          ? 'bg-cyan-600/30 text-cyan-400 border border-cyan-500/50'
+                          : 'bg-slate-700/50 text-gray-400 border border-slate-600/50 hover:bg-slate-600/50'
+                        }`}
+                    >
+                      リスク計算
+                    </button>
+                  </div>
+
+                  {backtestParams.lotMode === 'fixed' ? (
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-xs text-gray-400">ロット数</label>
+                      <div className="flex gap-1">
+                        <input
+                          type="number"
+                          step="1000"
+                          min="1000"
+                          value={backtestParams.lotSize}
+                          onChange={(e) => handleParamChange("lotSize", parseInt(e.target.value) || 1000)}
+                          className="w-24 bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1 text-sm text-white text-right focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                        />
+                        <span className="text-xs text-gray-500 self-center">通貨</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {/* リスクタイプ切り替え */}
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleParamChange('riskType', 'percent')}
+                          className={`flex-1 px-2 py-0.5 rounded text-xs transition-colors ${backtestParams.riskType === 'percent'
+                              ? 'bg-amber-600/30 text-amber-400 border border-amber-500/50'
+                              : 'bg-slate-700/50 text-gray-500 border border-slate-600/50'
+                            }`}
+                        >
+                          割合(%)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleParamChange('riskType', 'amount')}
+                          className={`flex-1 px-2 py-0.5 rounded text-xs transition-colors ${backtestParams.riskType === 'amount'
+                              ? 'bg-amber-600/30 text-amber-400 border border-amber-500/50'
+                              : 'bg-slate-700/50 text-gray-500 border border-slate-600/50'
+                            }`}
+                        >
+                          固定金額
+                        </button>
+                      </div>
+                      {backtestParams.riskType === 'percent' ? (
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="text-xs text-gray-400">リスク</label>
+                          <div className="flex gap-1">
+                            <input
+                              type="number"
+                              step="0.5"
+                              min="0.1"
+                              max="100"
+                              value={backtestParams.riskPercent}
+                              onChange={(e) => handleParamChange("riskPercent", parseFloat(e.target.value) || 0.1)}
+                              className="w-16 bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1 text-sm text-white text-right focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                            />
+                            <span className="text-xs text-gray-500 self-center">%</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="text-xs text-gray-400">リスク額</label>
+                          <div className="flex gap-1">
+                            <input
+                              type="number"
+                              step="1000"
+                              min="1000"
+                              value={backtestParams.riskAmount}
+                              onChange={(e) => handleParamChange("riskAmount", parseInt(e.target.value) || 1000)}
+                              className="w-24 bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1 text-sm text-white text-right focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                            />
+                            <span className="text-xs text-gray-500 self-center">JPY</span>
+                          </div>
+                        </div>
+                      )}
+                      <p className="text-xs text-gray-500">※ SL設定からロットサイズを自動計算</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* 同時ポジション上限 */}
+                <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-600/30">
+                  <label className="text-xs text-gray-400">同時ポジション</label>
+                  <select
+                    value={backtestParams.maxPositions}
+                    onChange={(e) => handleParamChange('maxPositions', parseInt(e.target.value))}
+                    className="bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                  >
+                    {[1, 2, 3, 4, 5, 7, 10, 15].map(n => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
