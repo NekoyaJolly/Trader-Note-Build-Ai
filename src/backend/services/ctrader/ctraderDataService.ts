@@ -170,6 +170,25 @@ export class CTraderDataService {
     }
 
     /**
+     * シンボルの digits（小数桁数）を取得
+     * digits から pipValue を導出可能: pipValue = 10^-(digits-1)
+     *
+     * @param accountId - cTrader アカウントID
+     * @param symbol - シンボル名 (例: 'USDJPY', 'EURUSD')
+     * @returns digits（取得できない場合は null）
+     */
+    async getSymbolDigits(accountId: string, symbol: string): Promise<number | null> {
+        try {
+            const connection = await this.connectAndAuth(accountId);
+            const symbolInfo = await this.resolveSymbolId(connection, accountId, symbol);
+            return symbolInfo.digits;
+        } catch (error) {
+            console.warn(`[cTraderData] digits 取得失敗: ${symbol}`, error);
+            return null;
+        }
+    }
+
+    /**
      * OHLCV ヒストリカルデータを取得
      *
      * @param accountId - cTrader アカウントID

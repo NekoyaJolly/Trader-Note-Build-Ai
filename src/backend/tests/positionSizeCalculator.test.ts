@@ -5,9 +5,28 @@
 import {
     calculateLotSize,
     getPipValue,
+    pipValueFromDigits,
     slValueToPips,
     calculateUsedMargin,
 } from '../services/positionSizeCalculator';
+
+describe('pipValueFromDigits', () => {
+    it('digits=5 → 0.0001 (EURUSD)', () => {
+        expect(pipValueFromDigits(5)).toBeCloseTo(0.0001);
+    });
+
+    it('digits=3 → 0.01 (USDJPY)', () => {
+        expect(pipValueFromDigits(3)).toBeCloseTo(0.01);
+    });
+
+    it('digits=2 → 0.1 (XAUUSD)', () => {
+        expect(pipValueFromDigits(2)).toBeCloseTo(0.1);
+    });
+
+    it('digits=1 → 1.0', () => {
+        expect(pipValueFromDigits(1)).toBeCloseTo(1.0);
+    });
+});
 
 describe('getPipValue', () => {
     it('JPYペアは0.01を返す', () => {
@@ -35,6 +54,19 @@ describe('getPipValue', () => {
     it('大文字小文字を問わない', () => {
         expect(getPipValue('usdjpy')).toBe(0.01);
         expect(getPipValue('EurUsd')).toBe(0.0001);
+    });
+
+    it('digitsが渡された場合は動的計算が優先される', () => {
+        // digits=3 → 0.01（USDJPYと同じだが動的に算出）
+        expect(getPipValue('EURUSD', 3)).toBeCloseTo(0.01);
+        // digits=5 → 0.0001（ハードコードと同じ結果だが動的）
+        expect(getPipValue('EURUSD', 5)).toBeCloseTo(0.0001);
+        // digits=2のXAUUSD
+        expect(getPipValue('XAUUSD', 2)).toBeCloseTo(0.1);
+    });
+
+    it('digits=0はフォールバックを使用', () => {
+        expect(getPipValue('USDJPY', 0)).toBe(0.01);
     });
 });
 

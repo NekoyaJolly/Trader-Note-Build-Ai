@@ -685,6 +685,27 @@ async function executeBacktestStage(
   //    実際の計算はエントリー時に行う
   const symbol = strategy.symbol;
 
+  // cTrader API からシンボルの digits を動的取得
+  // digits が取れれば pipValue = 10^-(digits-1) で正確な値を使用
+  // 取れなければ getPipValue() のハードコードフォールバック
+  let symbolDigits: number | undefined;
+  if (ctraderDataService.isConfigured()) {
+    try {
+      const ctraderToken = await prisma.cTraderToken.findFirst({
+        orderBy: { lastConnectedAt: 'desc' },
+      });
+      if (ctraderToken) {
+        const digits = await ctraderDataService.getSymbolDigits(ctraderToken.accountId, symbol);
+        if (digits !== null) {
+          symbolDigits = digits;
+          console.log(`[executeBacktestStage] cTrader digits 取得: ${symbol} → digits=${digits}, pipValue=${Math.pow(10, -(digits - 1))}`);
+        }
+      }
+    } catch (error) {
+      console.warn(`[executeBacktestStage] cTrader digits 取得失敗、フォールバック使用: ${symbol}`, error);
+    }
+  }
+
   // 資金残高追跡（破産判定用）
   let currentCapital = request.initialCapital;
   const bankruptcyThreshold = request.initialCapital * 0.5; // 50%を下回ったら破産
@@ -762,7 +783,8 @@ async function executeBacktestStage(
             exitSettings.stopLoss.value,
             exitSettings.stopLoss.unit,
             entryPrice,
-            symbol
+            symbol,
+            symbolDigits
           );
           const result = calculateLotSize({
             capital: currentCapital,
@@ -772,6 +794,7 @@ async function executeBacktestStage(
             symbol,
             leverage: request.leverage,
             entryPrice,
+            digits: symbolDigits,
           });
           tradeLotSize = result.lotSize;
         } else {

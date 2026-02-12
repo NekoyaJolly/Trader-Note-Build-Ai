@@ -32,6 +32,8 @@ export interface LotSizeInput {
     leverage: number;
     /** エントリー価格 */
     entryPrice: number;
+    /** cTrader から取得した digits（優先使用、なければ getPipValue フォールバック） */
+    digits?: number;
 }
 
 /** ロットサイズ計算結果 */
@@ -51,22 +53,40 @@ export interface LotSizeResult {
 }
 
 // ============================================
-// Pip Value テーブル
+// Pip Value
 // ============================================
 
 /**
- * 通貨ペアに対応する pip value を取得
+ * cTrader の digits（小数桁数）から pip value を導出
  * 
- * 標準的な pip 定義:
- * - JPYペア: 1 pip = 0.01  (例: USDJPY 150.123 → 小数第2位)
- * - USDペア: 1 pip = 0.0001 (例: EURUSD 1.08765 → 小数第4位)
- * - XAUUSD:  1 pip = 0.1    (例: 2345.12 → 小数第1位)
- * - XAGUSD:  1 pip = 0.01   (例: 28.123 → 小数第2位)
+ * FX の慣習: pip = 小数桁の「1つ手前」の最小単位
+ *   digits=5 (EURUSD 1.08765) → pipValue = 10^-(5-1) = 0.0001
+ *   digits=3 (USDJPY 150.123)  → pipValue = 10^-(3-1) = 0.01
+ *   digits=2 (XAUUSD 2345.12)  → pipValue = 10^-(2-1) = 0.1
  * 
- * @param symbol - 通貨ペア名
+ * @param digits - cTrader から取得した小数桁数
  * @returns pip value
  */
-export function getPipValue(symbol: string): number {
+export function pipValueFromDigits(digits: number): number {
+    return Math.pow(10, -(digits - 1));
+}
+
+/**
+ * 通貨ペアに対応する pip value を取得（フォールバック用ハードコード）
+ * 
+ * cTrader から digits が取得できない場合に使用
+ * 
+ * @param symbol - 通貨ペア名
+ * @param digits - cTrader digits（あれば優先使用）
+ * @returns pip value
+ */
+export function getPipValue(symbol: string, digits?: number): number {
+    // digits が渡された場合は動的計算（cTrader API 由来）
+    if (digits !== undefined && digits > 0) {
+        return pipValueFromDigits(digits);
+    }
+
+    // フォールバック: ハードコードテーブル
     const s = symbol.toUpperCase();
 
     // 貴金属
@@ -102,13 +122,13 @@ export function calculateLotSize(input: LotSizeInput): LotSizeResult {
 
     // バリデーション
     if (capital <= 0) {
-        return createZeroResult(symbol);
+        return createZeroResult(symbol, input.digits);
     }
     if (slPips <= 0) {
-        return createZeroResult(symbol);
+        return createZeroResult(symbol, input.digits);
     }
     if (entryPrice <= 0) {
-        return createZeroResult(symbol);
+        return createZeroResult(symbol, input.digits);
     }
 
     // 1. リスク金額を決定
@@ -125,8 +145,8 @@ export function calculateLotSize(input: LotSizeInput): LotSizeResult {
     // リスク金額は資金を超えない
     riskAmount = Math.min(riskAmount, capital);
 
-    // 2. pip value を取得
-    const pipValue = getPipValue(symbol);
+    // 2. pip value を取得（digits が渡されていれば動的計算）
+    const pipValue = getPipValue(symbol, input.digits);
 
     // 3. 基本ロットサイズ = リスク金額 / (SL pips × pip value)
     //    これは「SLにヒットした場合の損失がちょうどリスク金額になるロット」
@@ -162,7 +182,8 @@ export function slValueToPips(
     slValue: number,
     slUnit: 'percent' | 'pips',
     entryPrice: number,
-    symbol: string
+    symbol: string,
+    digits?: number
 ): number {
     if (slUnit === 'pips') {
         return slValue;
@@ -171,7 +192,7 @@ export function slValueToPips(
     // percent → pips 変換
     // SL幅（価格差）= エントリー価格 × SL% / 100
     // SL（pips）= SL幅 / pip value
-    const pipValue = getPipValue(symbol);
+    const pipValue = getPipValue(symbol, digits);
     const slPriceDiff = entryPrice * slValue / 100;
     return slPriceDiff / pipValue;
 }
@@ -199,13 +220,13 @@ export function calculateUsedMargin(
 // ============================================
 
 /** ゼロ結果を生成 */
-function createZeroResult(symbol: string): LotSizeResult {
+function createZeroResult(symbol: string, digits?: number): LotSizeResult {
     return {
         lotSize: 0,
         calculatedLotSize: 0,
         maxLotByMargin: 0,
         riskAmount: 0,
-        pipValue: getPipValue(symbol),
+        pipValue: getPipValue(symbol, digits),
         isMarginConstrained: false,
     };
 }
