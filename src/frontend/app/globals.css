@@ -40,7 +40,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
@@ -48,7 +48,150 @@
 body {
   background: var(--bg-dark);
   color: var(--text-primary);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ====================================
+   Keyframe Animations
+   ==================================== */
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 8px rgba(236, 72, 153, 0.3), 0 0 16px rgba(139, 92, 246, 0.15); }
+  50% { box-shadow: 0 0 16px rgba(236, 72, 153, 0.5), 0 0 32px rgba(139, 92, 246, 0.25); }
+}
+
+@keyframes gradientFlow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* ====================================
+   Animation Utilities
+   ==================================== */
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out both;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-slide-down {
+  animation: slideDown 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.08) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 2s ease-in-out infinite;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-gradient-flow {
+  background-size: 200% 200%;
+  animation: gradientFlow 3s ease infinite;
+}
+
+/* Staggered animation delays for children */
+.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 60ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 120ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 180ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 240ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 300ms; }
+
+/* ====================================
+   Glassmorphism
+   ==================================== */
+
+.glass {
+  background: rgba(15, 23, 42, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.glass-strong {
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.glass-surface {
+  background: rgba(30, 41, 59, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(51, 65, 85, 0.5);
+}
+
+/* ====================================
+   Custom Scrollbar
+   ==================================== */
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.3) transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.3);
+  border-radius: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.5);
 }
 
 /* ====================================
@@ -82,7 +225,6 @@ body {
    Score Gauge
    ==================================== */
 
-/* SVG グラデーション定義用のスタイル */
 .score-gauge-ring {
   stroke-linecap: round;
   transition: stroke-dashoffset 0.5s ease-out;
@@ -99,16 +241,30 @@ body {
   border-radius: 12px;
 }
 
+/* Press feedback for interactive elements */
+.press-scale {
+  transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.press-scale:active {
+  transform: scale(0.97);
+}
+
+/* Gradient border line (for headers/dividers) */
+.gradient-line {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--neon-start), var(--neon-end), transparent);
+  opacity: 0.5;
+}
+
 /* ====================================
    Mobile Responsive Utilities
    ==================================== */
 
-/* モバイル用テキスト省略 */
 .mobile-truncate {
   @apply truncate;
 }
 
-/* モバイル用の行制限 */
 .line-clamp-mobile-1 {
   display: -webkit-box;
   -webkit-line-clamp: 1;
@@ -117,7 +273,6 @@ body {
   overflow: hidden;
 }
 
-/* モバイル向けフォントサイズ微調整 */
 @media (max-width: 640px) {
   .card-surface {
     border-radius: 8px;
@@ -146,7 +301,6 @@ body {
    Badge Variants
    ==================================== */
 
-/* トレンドバッジ */
 .badge-trend-up {
   background: rgba(34, 197, 94, 0.2);
   color: #4ADE80;
@@ -162,7 +316,6 @@ body {
   color: #9CA3AF;
 }
 
-/* 判断モードバッジ */
 .badge-decision-trend {
   background: rgba(59, 130, 246, 0.2);
   color: #60A5FA;

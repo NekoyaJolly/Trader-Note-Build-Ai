@@ -2,6 +2,7 @@
  * 空状態コンポーネント
  * 
  * データがない場合や初期状態を表示する共通コンポーネント
+ * フローティングアニメーション + シマーCTAボタン
  * 
  * @see docs/phase12/UI_DESIGN_GUIDE.md
  */
@@ -66,9 +67,9 @@ export default function EmptyState({
   actionLink,
 }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
-      {/* アイコン */}
-      <div className="mb-4 opacity-60">
+    <div className="flex flex-col items-center justify-center py-12 px-4 text-center animate-fade-in">
+      {/* アイコン（フローティング） */}
+      <div className="mb-4 opacity-60 animate-float">
         {icon || <DefaultIcon />}
       </div>
 
@@ -89,13 +90,16 @@ export default function EmptyState({
         <button
           onClick={action.onClick}
           className="
-            px-4 py-2 rounded-lg font-medium text-sm
+            relative overflow-hidden
+            px-5 py-2.5 rounded-xl font-medium text-sm
             bg-gradient-to-r from-pink-500 to-violet-500
             text-white
-            hover:opacity-90 transition-opacity
+            hover:opacity-90 transition-all duration-200 press-scale
+            shadow-lg shadow-pink-500/20
           "
         >
-          {action.label}
+          <span className="relative z-10">{action.label}</span>
+          <div className="absolute inset-0 animate-shimmer" />
         </button>
       )}
 
@@ -104,15 +108,19 @@ export default function EmptyState({
         <a
           href={actionLink.href}
           className="
-            px-4 py-2 rounded-lg font-medium text-sm
+            relative overflow-hidden
+            px-5 py-2.5 rounded-xl font-medium text-sm
             bg-gradient-to-r from-pink-500 to-violet-500
             text-white
-            hover:opacity-90 transition-opacity
+            hover:opacity-90 transition-all duration-200 press-scale
+            shadow-lg shadow-pink-500/20
           "
         >
-          {actionLink.label}
+          <span className="relative z-10">{actionLink.label}</span>
+          <div className="absolute inset-0 animate-shimmer" />
         </a>
       )}
     </div>
   );
 }
+

@@ -5,6 +5,7 @@
  * - ダッシュボード用の統計カード表示
  * - 数値、トレンド、アイコン表示
  * - ダークモード対応 (Neon Dark テーマ)
+ * - フェードインアニメーション
  */
 "use client";
 
@@ -116,8 +117,8 @@ export default function StatCard({
     <div
       className={`
         card-surface rounded-xl p-3 sm:p-4 border ${styles.border}
-        transition-all duration-300
-        ${isClickable ? "cursor-pointer hover:border-slate-600 hover:shadow-[0_0_20px_rgba(139,92,246,0.15)]" : ""}
+        transition-all duration-300 animate-slide-up
+        ${isClickable ? "cursor-pointer hover:border-slate-600 hover:shadow-[0_0_20px_rgba(139,92,246,0.15)] press-scale" : ""}
         ${className}
       `}
       onClick={onClick}
@@ -136,27 +137,26 @@ export default function StatCard({
               <span className="text-xs sm:text-sm text-gray-500">{unit}</span>
             )}
           </div>
-          
+
           {/* トレンド表示 */}
           {trend && (
             <div className="flex items-center gap-1 mt-2">
               <TrendIcon direction={trend} />
               {trendValue && (
-                <span className={`text-sm ${
-                  trend === "up" ? "text-green-400" :
-                  trend === "down" ? "text-red-400" :
-                  "text-gray-400"
-                }`}>
+                <span className={`text-sm ${trend === "up" ? "text-green-400" :
+                    trend === "down" ? "text-red-400" :
+                      "text-gray-400"
+                  }`}>
                   {trendValue}
                 </span>
               )}
             </div>
           )}
         </div>
-        
+
         {/* 右側: アイコン */}
         {icon && (
-          <div className={`p-2 sm:p-3 rounded-lg ${styles.iconBg}`}>
+          <div className={`p-2 sm:p-3 rounded-lg ${styles.iconBg} transition-transform duration-300 hover:scale-105`}>
             {icon}
           </div>
         )}
@@ -164,3 +164,4 @@ export default function StatCard({
     </div>
   );
 }
+

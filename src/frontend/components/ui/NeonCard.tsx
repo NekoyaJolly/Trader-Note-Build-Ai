@@ -5,6 +5,7 @@
  * 
  * D+C+A スタイル: グラスモーフィズム + アイコングロー + ホバー時グローイングボーダー
  * アイコン + タイトルの1行構成
+ * シマーエフェクト + プレスフィードバック
  */
 
 import Link from 'next/link';
@@ -51,13 +52,15 @@ export function NeonCard({
   // カード内部コンテンツ
   const cardContent = (
     <>
+      {/* シマーエフェクト（ホバー時） */}
+      <div className="absolute inset-0 rounded-[10px] opacity-0 group-hover:opacity-100 transition-opacity duration-500 animate-shimmer pointer-events-none" />
       {/* カード本体 */}
       <div className="relative rounded-[10px] py-3.5 px-4 bg-slate-900/95 backdrop-blur-md
                       group-hover:bg-slate-900/80 transition-all duration-300">
         <div className="flex items-center">
           {/* アイコン（グロー付き） */}
-          <span 
-            className="text-xl transition-all duration-300 flex-shrink-0"
+          <span
+            className="text-xl transition-all duration-300 flex-shrink-0 group-hover:scale-110"
             style={{
               filter: `drop-shadow(0 0 8px rgba(${glowConfig.rgb}, 0.6))`,
             }}
@@ -75,11 +78,11 @@ export function NeonCard({
   // 共通のラッパースタイル
   const wrapperClassName = `group relative block rounded-xl p-[2px]
     bg-white/10 hover:bg-gradient-to-br ${glowConfig.gradient}
-    transition-all duration-300 ${className}`;
+    transition-all duration-300 press-scale ${className}`;
 
   // ホバー時のグロー効果
   const handleMouseEnter = (e: React.MouseEvent<HTMLElement>) => {
-    e.currentTarget.style.boxShadow = `0 0 25px rgba(${glowConfig.rgb}, 0.5)`;
+    e.currentTarget.style.boxShadow = `0 0 25px rgba(${glowConfig.rgb}, 0.4)`;
   };
   const handleMouseLeave = (e: React.MouseEvent<HTMLElement>) => {
     e.currentTarget.style.boxShadow = `0 0 0px rgba(${glowConfig.rgb}, 0)`;
@@ -114,3 +117,4 @@ export function NeonCard({
 }
 
 export default NeonCard;
+

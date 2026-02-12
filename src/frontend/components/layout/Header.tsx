@@ -45,7 +45,7 @@ export default function Header({ isSidebarOpen, onToggleSidebar }: HeaderProps) 
   }, []);
 
   return (
-    <header className="sticky top-0 z-30 w-full border-b border-slate-700 bg-slate-900/95 backdrop-blur-sm">
+    <header className="sticky top-0 z-30 w-full glass-strong">
       <div className="flex items-center justify-between px-3 sm:px-4 py-2 sm:py-3">
         {/* 左側: ハンバーガーメニュー + アプリタイトル + Side切替 */}
         <div className="flex items-center gap-2 sm:gap-3">
@@ -53,7 +53,7 @@ export default function Header({ isSidebarOpen, onToggleSidebar }: HeaderProps) 
           {onToggleSidebar && (
             <button
               onClick={onToggleSidebar}
-              className="p-1.5 sm:p-2 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700 transition-all"
+              className="p-1.5 sm:p-2 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700/60 transition-all duration-200 press-scale"
               aria-label={isSidebarOpen ? "メニューを閉じる" : "メニューを開く"}
             >
               {isSidebarOpen ? (
@@ -69,14 +69,14 @@ export default function Header({ isSidebarOpen, onToggleSidebar }: HeaderProps) 
               )}
             </button>
           )}
-          
+
           {/* アプリタイトル */}
-          <Link href="/" className="flex items-center mr-2 sm:mr-3">
-            <span className="text-base sm:text-lg md:text-xl font-bold neon-text">TradeAssist</span>
+          <Link href="/" className="flex items-center mr-2 sm:mr-3 group">
+            <span className="text-base sm:text-lg md:text-xl font-bold neon-text transition-all duration-300 group-hover:drop-shadow-[0_0_8px_rgba(236,72,153,0.5)]">TradeAssist</span>
           </Link>
 
           {/* Side切替トグル */}
-          <div className="border-l border-slate-600 pl-2 sm:pl-3">
+          <div className="border-l border-slate-600/50 pl-2 sm:pl-3">
             <SideToggle />
           </div>
         </div>
@@ -84,6 +84,9 @@ export default function Header({ isSidebarOpen, onToggleSidebar }: HeaderProps) 
         {/* 右側: 通知ベル */}
         <NotificationBell unreadCount={unreadCount} />
       </div>
+      {/* グラデーションライン */}
+      <div className="gradient-line" />
     </header>
   );
 }
+
