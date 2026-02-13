@@ -3,10 +3,10 @@
  *
  * 機能:
  * - ローソク足チャート上にエントリー/イグジットマーカーを表示
- * - 選択トレードの TP/SL ラインを描画
+ * - 選択トレードの TP/SL ラインを #No 付きで描画
  * - トレードナビゲーション（前/次）
  * - トレード詳細パネル
- * - ストラテジーインジケーターの同時表示
+ * - ストラテジーで使用したインジケーターを自動描画
  */
 
 "use client";
@@ -19,7 +19,15 @@ import CandlestickChart, {
     type IndicatorLineConfig,
 } from "./CandlestickChart";
 import { fetchOhlcvCandles } from "@/lib/api";
-import type { BacktestTradeEvent, Strategy, BacktestResult } from "@/types/strategy";
+import { indicatorToChartConfigs } from "@/lib/chartIndicators";
+import type {
+    BacktestTradeEvent,
+    Strategy,
+    BacktestResult,
+    ConditionGroup,
+    IndicatorCondition,
+} from "@/types/strategy";
+import type { IndicatorId, IndicatorParams } from "@/types/indicator";
 
 // ========================================
 // 型定義
@@ -28,8 +36,15 @@ import type { BacktestTradeEvent, Strategy, BacktestResult } from "@/types/strat
 interface BacktestChartTabProps {
     /** バックテスト結果 */
     result: BacktestResult;
-    /** ストラテジー情報（インジケーター表示用） */
+    /** ストラテジー情報（インジケーター・TP/SL表示用） */
     strategy: Strategy;
+}
+
+/** ストラテジーから抽出されたインジケーター情報 */
+interface ExtractedIndicator {
+    indicatorId: IndicatorId;
+    params: IndicatorParams;
+    key: string; // 一意キー (indicatorId + params の組み合わせ)
 }
 
 // ========================================
@@ -60,7 +75,6 @@ const EXIT_REASON_LABELS: Record<string, string> = {
 // ========================================
 
 function formatPrice(price: number, symbol: string): string {
-    // JPYペアは小数3桁、それ以外は5桁
     const isJpy = symbol.includes("JPY");
     return price.toFixed(isJpy ? 3 : 5);
 }
@@ -83,6 +97,56 @@ function getExitColor(reason: string): string {
         case "signal": return COLORS.signalExit;
         default: return COLORS.timeoutExit;
     }
+}
+
+// ========================================
+// ストラテジー条件からインジケーターを抽出
+// ========================================
+
+function extractIndicatorsFromConditions(
+    conditions: ConditionGroup
+): ExtractedIndicator[] {
+    const seen = new Set<string>();
+    const result: ExtractedIndicator[] = [];
+
+    function visit(node: ConditionGroup | IndicatorCondition) {
+        // ConditionGroup の場合は再帰
+        if ("conditions" in node) {
+            for (const child of node.conditions) {
+                visit(child as ConditionGroup | IndicatorCondition);
+            }
+            return;
+        }
+
+        // IndicatorCondition の場合
+        const cond = node as IndicatorCondition;
+        const key = `${cond.indicatorId}:${JSON.stringify(cond.params)}`;
+        if (!seen.has(key)) {
+            seen.add(key);
+            result.push({
+                indicatorId: cond.indicatorId,
+                params: cond.params,
+                key,
+            });
+        }
+
+        // 比較対象が別のインジケーターの場合も抽出
+        if (cond.compareTarget?.type === "indicator") {
+            const target = cond.compareTarget;
+            const targetKey = `${target.indicatorId}:${JSON.stringify(target.params)}`;
+            if (!seen.has(targetKey)) {
+                seen.add(targetKey);
+                result.push({
+                    indicatorId: target.indicatorId,
+                    params: target.params,
+                    key: targetKey,
+                });
+            }
+        }
+    }
+
+    visit(conditions);
+    return result;
 }
 
 // ========================================
@@ -115,7 +179,9 @@ function tradesToMarkers(
             position: trade.side === "buy" ? "aboveBar" : "belowBar",
             color: isSelected ? COLORS.selected : getExitColor(trade.exitReason),
             shape: "circle",
-            text: isSelected ? `Exit ${trade.pnl >= 0 ? "+" : ""}${trade.pnl.toFixed(2)}` : "",
+            text: isSelected
+                ? `#${idx + 1} Exit ${trade.pnl >= 0 ? "+" : ""}${trade.pnl.toFixed(2)}`
+                : `#${idx + 1}`,
         });
     });
 
@@ -125,86 +191,95 @@ function tradesToMarkers(
 }
 
 // ========================================
-// 選択トレード → TP/SL ライン
+// トレード → TP/SL ライン（#No 付き）
 // ========================================
 
-function tradeToTpSlLines(
-    trade: BacktestTradeEvent,
-    strategy: Strategy
+function tradesToTpSlLines(
+    trades: BacktestTradeEvent[],
+    strategy: Strategy,
+    selectedIndex: number | null
 ): DrawnLine[] {
     const lines: DrawnLine[] = [];
-    const entryTs = new Date(trade.entryTime).getTime();
-    const exitTs = new Date(trade.exitTime).getTime();
-
-    // TP/SL prices are calculated from strategy exit settings
     const exitSettings = strategy.currentVersion?.exitSettings;
     if (!exitSettings) return lines;
 
     const tp = exitSettings.takeProfit;
     const sl = exitSettings.stopLoss;
 
-    // Calculate TP price
-    let tpPrice: number | null = null;
-    let slPrice: number | null = null;
+    // 選択中のトレードのみ TP/SL を表示（全体表示のときは非表示）
+    const indicesToShow = selectedIndex !== null ? [selectedIndex] : [];
 
-    if (tp.unit === "percent") {
-        const factor = tp.value / 100;
-        tpPrice = trade.side === "buy"
-            ? trade.entryPrice * (1 + factor)
-            : trade.entryPrice * (1 - factor);
-    } else if (tp.unit === "pips") {
-        const pipValue = strategy.symbol.includes("JPY") ? 0.01 : 0.0001;
-        tpPrice = trade.side === "buy"
-            ? trade.entryPrice + tp.value * pipValue
-            : trade.entryPrice - tp.value * pipValue;
-    }
+    indicesToShow.forEach((idx) => {
+        const trade = trades[idx];
+        if (!trade) return;
 
-    if (sl.unit === "percent") {
-        const factor = sl.value / 100;
-        slPrice = trade.side === "buy"
-            ? trade.entryPrice * (1 - factor)
-            : trade.entryPrice * (1 + factor);
-    } else if (sl.unit === "pips") {
-        const pipValue = strategy.symbol.includes("JPY") ? 0.01 : 0.0001;
-        slPrice = trade.side === "buy"
-            ? trade.entryPrice - sl.value * pipValue
-            : trade.entryPrice + sl.value * pipValue;
-    }
+        const entryTs = new Date(trade.entryTime).getTime();
+        const exitTs = new Date(trade.exitTime).getTime();
+        const no = idx + 1;
 
-    // Entry price line
-    lines.push({
-        id: `entry-${trade.eventId}`,
-        type: "horizontal" as const,
-        price: trade.entryPrice,
-        startTime: entryTs,
-        endTime: exitTs,
-        color: "#60a5fa",  // blue
-        lineWidth: 1,
+        // TP price
+        let tpPrice: number | null = null;
+        let slPrice: number | null = null;
+
+        if (tp.unit === "percent") {
+            const factor = tp.value / 100;
+            tpPrice = trade.side === "buy"
+                ? trade.entryPrice * (1 + factor)
+                : trade.entryPrice * (1 - factor);
+        } else if (tp.unit === "pips") {
+            const pipValue = strategy.symbol.includes("JPY") ? 0.01 : 0.0001;
+            tpPrice = trade.side === "buy"
+                ? trade.entryPrice + tp.value * pipValue
+                : trade.entryPrice - tp.value * pipValue;
+        }
+
+        if (sl.unit === "percent") {
+            const factor = sl.value / 100;
+            slPrice = trade.side === "buy"
+                ? trade.entryPrice * (1 - factor)
+                : trade.entryPrice * (1 + factor);
+        } else if (sl.unit === "pips") {
+            const pipValue = strategy.symbol.includes("JPY") ? 0.01 : 0.0001;
+            slPrice = trade.side === "buy"
+                ? trade.entryPrice - sl.value * pipValue
+                : trade.entryPrice + sl.value * pipValue;
+        }
+
+        // Entry price line
+        lines.push({
+            id: `entry-${no}`,
+            type: "horizontal" as const,
+            price: trade.entryPrice,
+            startTime: entryTs,
+            endTime: exitTs,
+            color: "#60a5fa",  // blue
+            lineWidth: 1,
+        });
+
+        if (tpPrice !== null) {
+            lines.push({
+                id: `tp-${no}`,
+                type: "horizontal" as const,
+                price: tpPrice,
+                startTime: entryTs,
+                endTime: exitTs,
+                color: COLORS.tp,
+                lineWidth: 1,
+            });
+        }
+
+        if (slPrice !== null) {
+            lines.push({
+                id: `sl-${no}`,
+                type: "horizontal" as const,
+                price: slPrice,
+                startTime: entryTs,
+                endTime: exitTs,
+                color: COLORS.sl,
+                lineWidth: 1,
+            });
+        }
     });
-
-    if (tpPrice !== null) {
-        lines.push({
-            id: `tp-${trade.eventId}`,
-            type: "horizontal" as const,
-            price: tpPrice,
-            startTime: entryTs,
-            endTime: exitTs,
-            color: COLORS.tp,
-            lineWidth: 1,
-        });
-    }
-
-    if (slPrice !== null) {
-        lines.push({
-            id: `sl-${trade.eventId}`,
-            type: "horizontal" as const,
-            price: slPrice,
-            startTime: entryTs,
-            endTime: exitTs,
-            color: COLORS.sl,
-            lineWidth: 1,
-        });
-    }
 
     return lines;
 }
@@ -218,9 +293,17 @@ export default function BacktestChartTab({ result, strategy }: BacktestChartTabP
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [selectedTradeIndex, setSelectedTradeIndex] = useState<number | null>(null);
+    const [showIndicators, setShowIndicators] = useState(true);
 
     const trades = result.trades;
     const symbol = strategy.symbol;
+
+    // ストラテジーで使用されたインジケーターを抽出
+    const strategyIndicators = useMemo(() => {
+        const conditions = strategy.currentVersion?.entryConditions;
+        if (!conditions) return [];
+        return extractIndicatorsFromConditions(conditions);
+    }, [strategy]);
 
     // OHLCV データ取得
     useEffect(() => {
@@ -231,10 +314,8 @@ export default function BacktestChartTab({ result, strategy }: BacktestChartTabP
             setError(null);
 
             try {
-                // シンボル名変換: USDJPY → USD/JPY (API が "/" 形式を使っている場合に対応)
-                const apiSymbol = symbol;
                 const data = await fetchOhlcvCandles({
-                    symbol: apiSymbol,
+                    symbol,
                     timeframe: result.timeframe,
                     startDate: result.startDate,
                     endDate: result.endDate,
@@ -242,7 +323,6 @@ export default function BacktestChartTab({ result, strategy }: BacktestChartTabP
 
                 if (!cancelled) {
                     setOhlcvData(data);
-                    // 最初のトレードを選択
                     if (trades.length > 0) {
                         setSelectedTradeIndex(0);
                     }
@@ -268,11 +348,31 @@ export default function BacktestChartTab({ result, strategy }: BacktestChartTabP
         [trades, selectedTradeIndex]
     );
 
-    // 選択中トレードの TP/SL ライン
-    const drawnLines = useMemo<DrawnLine[]>(() => {
-        if (selectedTradeIndex === null || selectedTradeIndex >= trades.length) return [];
-        return tradeToTpSlLines(trades[selectedTradeIndex], strategy);
-    }, [selectedTradeIndex, trades, strategy]);
+    // 選択中トレードの TP/SL ライン（#No 付き）
+    const drawnLines = useMemo<DrawnLine[]>(
+        () => tradesToTpSlLines(trades, strategy, selectedTradeIndex),
+        [trades, strategy, selectedTradeIndex]
+    );
+
+    // ストラテジーインジケーターをチャート用に計算
+    const indicators = useMemo<IndicatorLineConfig[]>(() => {
+        if (!showIndicators || ohlcvData.length === 0 || strategyIndicators.length === 0) return [];
+
+        const configs: IndicatorLineConfig[] = [];
+        for (const ind of strategyIndicators) {
+            try {
+                const paramsObj: Record<string, number> = {};
+                for (const [k, v] of Object.entries(ind.params)) {
+                    if (typeof v === "number") paramsObj[k] = v;
+                }
+                const chartConfigs = indicatorToChartConfigs(ind.indicatorId, ohlcvData, paramsObj);
+                configs.push(...chartConfigs);
+            } catch (err) {
+                console.warn(`[BacktestChartTab] インジケーター計算エラー (${ind.indicatorId}):`, err);
+            }
+        }
+        return configs;
+    }, [showIndicators, ohlcvData, strategyIndicators]);
 
     // ナビゲーション
     const goToTrade = useCallback((index: number) => {
@@ -292,6 +392,12 @@ export default function BacktestChartTab({ result, strategy }: BacktestChartTabP
 
     // 選択中のトレード
     const selectedTrade = selectedTradeIndex !== null ? trades[selectedTradeIndex] : null;
+
+    // 選択中トレードのエントリータイムスタンプ（チャートスクロール用）
+    const focusTimestamp = useMemo(() => {
+        if (!selectedTrade) return null;
+        return new Date(selectedTrade.entryTime).getTime();
+    }, [selectedTrade]);
 
     // ========================================
     // レンダリング
@@ -318,12 +424,8 @@ export default function BacktestChartTab({ result, strategy }: BacktestChartTabP
     if (ohlcvData.length === 0) {
         return (
             <div className="bg-slate-800/50 rounded-lg p-6 text-center">
-                <p className="text-gray-400 text-sm">
-                    この期間のOHLCVデータがありません。
-                </p>
-                <p className="text-gray-500 text-xs mt-1">
-                    バックテスト実行時にデータが取得されている必要があります。
-                </p>
+                <p className="text-gray-400 text-sm">この期間のOHLCVデータがありません。</p>
+                <p className="text-gray-500 text-xs mt-1">バックテスト実行時にデータが取得されている必要があります。</p>
             </div>
         );
     }
@@ -340,6 +442,19 @@ export default function BacktestChartTab({ result, strategy }: BacktestChartTabP
                 </div>
 
                 <div className="flex items-center gap-1">
+                    {/* インジケーター表示トグル */}
+                    {strategyIndicators.length > 0 && (
+                        <button
+                            onClick={() => setShowIndicators(!showIndicators)}
+                            className={`px-2 py-1 text-xs font-medium rounded transition-colors mr-2
+                ${showIndicators
+                                    ? "bg-purple-600/50 text-purple-300 border border-purple-500/50"
+                                    : "bg-slate-700 text-gray-400 hover:bg-slate-600"}`}
+                        >
+                            📈 {showIndicators ? "ON" : "OFF"} ({strategyIndicators.length})
+                        </button>
+                    )}
+
                     <button
                         onClick={goPrev}
                         disabled={selectedTradeIndex === null || selectedTradeIndex <= 0}
@@ -375,10 +490,12 @@ export default function BacktestChartTab({ result, strategy }: BacktestChartTabP
                 ohlcvData={ohlcvData}
                 markers={markers}
                 drawnLines={drawnLines}
+                indicators={indicators}
                 height={500}
                 symbol={symbol}
                 timeframe={result.timeframe}
                 title="バックテスト結果"
+                focusTimestamp={focusTimestamp}
             />
 
             {/* 凡例 */}
@@ -407,6 +524,11 @@ export default function BacktestChartTab({ result, strategy }: BacktestChartTabP
                     <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: COLORS.signalExit }} />
                     Signal
                 </span>
+                {showIndicators && strategyIndicators.length > 0 && (
+                    <span className="flex items-center gap-1 ml-2 text-purple-400">
+                        📈 ストラテジーインジケーター表示中
+                    </span>
+                )}
             </div>
 
             {/* 選択中トレード詳細 */}
@@ -447,8 +569,8 @@ export default function BacktestChartTab({ result, strategy }: BacktestChartTabP
                         <div>
                             <span className="text-gray-500">決済理由</span>
                             <p className={`font-medium ${selectedTrade.exitReason === "take_profit" ? "text-green-400" :
-                                    selectedTrade.exitReason === "stop_loss" ? "text-red-400" :
-                                        "text-yellow-400"
+                                selectedTrade.exitReason === "stop_loss" ? "text-red-400" :
+                                    "text-yellow-400"
                                 }`}>
                                 {EXIT_REASON_LABELS[selectedTrade.exitReason] || selectedTrade.exitReason}
                             </p>
@@ -489,8 +611,8 @@ export default function BacktestChartTab({ result, strategy }: BacktestChartTabP
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <span className={`text-[10px] px-1 rounded ${trade.exitReason === "take_profit" ? "bg-green-900/30 text-green-400" :
-                                            trade.exitReason === "stop_loss" ? "bg-red-900/30 text-red-400" :
-                                                "bg-yellow-900/30 text-yellow-400"
+                                        trade.exitReason === "stop_loss" ? "bg-red-900/30 text-red-400" :
+                                            "bg-yellow-900/30 text-yellow-400"
                                         }`}>
                                         {EXIT_REASON_LABELS[trade.exitReason]?.slice(0, 2) || "?"}
                                     </span>

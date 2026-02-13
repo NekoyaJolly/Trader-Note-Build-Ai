@@ -119,6 +119,8 @@ export interface CandlestickChartProps {
   onCompleteLine?: (line: DrawnLine) => void;
   /** 描画モード終了通知 */
   onExitDrawing?: () => void;
+  /** 指定タイムスタンプ(ms)にフォーカス（トレード選択時のスクロール用） */
+  focusTimestamp?: number | null;
 }
 
 // ========================================
@@ -240,6 +242,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   drawnLines = [],
   onCompleteLine,
   onExitDrawing,
+  focusTimestamp,
 }) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -879,6 +882,27 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
     markersPluginRef.current.setMarkers(chartMarkers);
   }, [markers]);
+
+  // focusTimestamp が変更されたときにチャートをスクロール
+  useEffect(() => {
+    if (!chartRef.current || focusTimestamp == null) return;
+    const ts = toChartTime(focusTimestamp) as Time;
+    const timeScale = chartRef.current.timeScale();
+    // フォーカス地点を中心に前後50本分の範囲を表示
+    const barSpacing = 50;
+    const from = (focusTimestamp / 1000 - barSpacing * 300) as UTCTimestamp;
+    const to = (focusTimestamp / 1000 + barSpacing * 300) as UTCTimestamp;
+    timeScale.setVisibleRange({ from: from as Time, to: to as Time });
+    // 少し遅延してさらに正確にスクロール
+    setTimeout(() => {
+      try {
+        timeScale.scrollToPosition(-20, false);
+        // setVisibleRange で十分なので追加のスクロールは不要な場合もある
+      } catch {
+        // ignore
+      }
+    }, 50);
+  }, [focusTimestamp]);
 
   const fallbackBar = activeBar ?? (ohlcvData.length > 0 ? ohlcvData[ohlcvData.length - 1] : null);
 
