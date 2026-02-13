@@ -1,34 +1,36 @@
 /**
  * MarketResearch リポジトリ
  * 
- * 目的: Research AIが生成した市場リサーチの永続化
+ * 目的: Market Analyst AIが生成した市場分析の永続化
  * 
- * 設計変更（シンプル化）:
- * - Research AIの出力は12次元特徴量のみ
- * - OHLCVスナップショットも保存（Plan AI用）
- * - トレンド解釈、価格レベルはPlan AIの責務
+ * 設計変更（自律AI対応）:
+ * - featureVector JSON列に MarketAnalysis 全体を保存
+ * - 後方互換: 旧12次元データも読み取り可能
+ * - OHLCVスナップショットも保存（Strategy Thinker用）
  * 
  * 責務:
- * - リサーチの作成・読み取り
+ * - 分析の作成・読み取り
  * - キャッシュ有効期限の管理
- * - 期限切れリサーチの削除
+ * - 期限切れ分析の削除
  */
 
 import { PrismaClient, MarketResearch, Prisma } from '@prisma/client';
 import { prisma } from '../../backend/db/client';
-import { FeatureVector12D, OHLCVSnapshot } from '../models';
+import { FeatureVector12D, OHLCVSnapshot, type MarketAnalysis, safeValidateMarketAnalysis, analysisToLegacyFeatureVector, safeValidateFeatureVector, createEmptyFeatureVector } from '../models';
 
 // ===========================================
 // 型定義
 // ===========================================
 
 /**
- * リサーチ作成用の入力データ（シンプル化）
+ * リサーチ作成用の入力データ
  */
 export interface CreateResearchInput {
   symbol: string;
   timeframe?: string;
   featureVector: FeatureVector12D;
+  /** 新: リッチ分析データ */
+  marketAnalysis?: MarketAnalysis;
   ohlcvSnapshot?: OHLCVSnapshot;
   aiModel: string;
   tokenUsage?: number;
@@ -46,13 +48,15 @@ export interface FindResearchOptions {
 }
 
 /**
- * DBから取得したリサーチをアプリ型に変換した型（シンプル化）
+ * DBから取得したリサーチをアプリ型に変換した型
  */
 export interface MarketResearchWithTypes {
   id: string;
   symbol: string;
   timeframe: string;
   featureVector: FeatureVector12D;
+  /** 新: リッチ分析データ（旧データにはundefined） */
+  marketAnalysis?: MarketAnalysis;
   ohlcvSnapshot?: OHLCVSnapshot;
   aiModel: string;
   tokenUsage: number | null;
@@ -72,18 +76,23 @@ export class ResearchRepository {
   }
 
   /**
-   * リサーチを作成（シンプル化）
+   * リサーチを作成
    * 
-   * DBスキーマも更新済み:
-   * - 不要カラム削除（regime, trend等はPlan AIの責務）
-   * - rawIndicators → ohlcvSnapshot にリネーム
+   * featureVector列にMarketAnalysis全体を保存（JSON型なので自由に拡張可能）
+   * 後方互換のためlegacy featureVectorも混在可能
    */
   async create(input: CreateResearchInput): Promise<MarketResearchWithTypes> {
+    // MarketAnalysis が提供されていれば、それをfeatureVector列に保存
+    // （DB列名は変えずに中身をリッチ化）
+    const featureVectorData = input.marketAnalysis
+      ? { ...input.marketAnalysis, _version: 2 }  // v2マーカー
+      : input.featureVector;
+
     const research = await this.prisma.marketResearch.create({
       data: {
         symbol: input.symbol,
         timeframe: input.timeframe || 'multi',
-        featureVector: input.featureVector as unknown as Prisma.InputJsonValue,
+        featureVector: featureVectorData as unknown as Prisma.InputJsonValue,
         ohlcvSnapshot: input.ohlcvSnapshot as unknown as Prisma.InputJsonValue,
         aiModel: input.aiModel,
         tokenUsage: input.tokenUsage,
@@ -197,14 +206,40 @@ export class ResearchRepository {
   // ===========================================
 
   /**
-   * DBのリサーチをアプリ型に変換（シンプル化）
+   * DBのリサーチをアプリ型に変換
+   * 
+   * v1 (旧): featureVector列に12次元データ → featureVectorとして返す
+   * v2 (新): featureVector列にMarketAnalysis → marketAnalysisとfeatureVector両方を返す
    */
   private toTypedResearch(research: MarketResearch): MarketResearchWithTypes {
+    const rawData = research.featureVector as unknown as Record<string, unknown>;
+
+    // v2チェック: _version === 2 なら MarketAnalysis
+    const isV2 = rawData && rawData._version === 2;
+
+    let featureVector: FeatureVector12D;
+    let marketAnalysis: MarketAnalysis | undefined;
+
+    if (isV2) {
+      // v2: featureVector列から MarketAnalysis を取り出す
+      const { _version, ...analysisData } = rawData;
+      marketAnalysis = safeValidateMarketAnalysis(analysisData) || undefined;
+      // legacy互換用の featureVector を生成
+      featureVector = marketAnalysis
+        ? analysisToLegacyFeatureVector(marketAnalysis)
+        : createEmptyFeatureVector();
+    } else {
+      // v1: 旧12次元データ — ランタイムバリデーションで不正データを防止
+      const validated = safeValidateFeatureVector(rawData);
+      featureVector = validated ?? createEmptyFeatureVector();
+    }
+
     return {
       id: research.id,
       symbol: research.symbol,
       timeframe: research.timeframe,
-      featureVector: research.featureVector as unknown as FeatureVector12D,
+      featureVector,
+      marketAnalysis,
       ohlcvSnapshot: research.ohlcvSnapshot as unknown as OHLCVSnapshot | undefined,
       aiModel: research.aiModel,
       tokenUsage: research.tokenUsage,

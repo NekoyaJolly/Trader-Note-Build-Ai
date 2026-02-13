@@ -72,6 +72,9 @@ import {
   GenerateAINoteSummaryRequestSchema,
   // スケジューラー
   UpdateSchedulerConfigRequestSchema,
+  // PDCAエージェント
+  StartAgentRequestSchema,
+  ThinkingLogQuerySchema,
   // URLパラメータ
   IdParamSchema,
   SymbolParamSchema,
@@ -440,6 +443,45 @@ router.post('/scheduler/run-daily-plan', sideBController.runDailyPlanNow);
  * 監視を手動実行
  */
 router.post('/scheduler/run-monitor', sideBController.runMonitorNow);
+
+// ===========================================
+// PDCA Loop（Phase 2: 自律エージェント）
+// ===========================================
+
+/**
+ * GET /api/side-b/agent/status
+ * PDCAループの状態を取得
+ */
+router.get('/agent/status', sideBController.getAgentStatus);
+
+/**
+ * POST /api/side-b/agent/start
+ * PDCAループを開始（スケジューラーも連動起動）
+ */
+router.post(
+  '/agent/start',
+  validateBody(StartAgentRequestSchema),
+  sideBController.startAgent
+);
+
+/**
+ * POST /api/side-b/agent/stop
+ * PDCAループを停止
+ */
+router.post('/agent/stop', sideBController.stopAgent);
+
+/**
+ * GET /api/side-b/agent/thinking-log
+ * 思考ログを取得
+ *
+ * Query:
+ * - limit?: number (default: 50)
+ */
+router.get(
+  '/agent/thinking-log',
+  validateQuery(ThinkingLogQuerySchema),
+  sideBController.getThinkingLog
+);
 
 // ===========================================
 // 比較分析（Phase D）

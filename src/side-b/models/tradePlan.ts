@@ -255,10 +255,10 @@ export function validatePlanAIOutput(data: unknown): PlanAIOutput {
     throw new Error(`Invalid regime: ${ma.regime}`);
   }
 
-  // シナリオ数のバリデーション
+  // シナリオ数のバリデーション（0 = ノートレード推奨も有効）
   const scenarios = obj.scenarios as unknown[];
-  if (scenarios.length < 1 || scenarios.length > 3) {
-    throw new Error('scenarios must have 1-3 items');
+  if (scenarios.length > 3) {
+    throw new Error('scenarios must have 0-3 items');
   }
 
   // 信頼度のバリデーション

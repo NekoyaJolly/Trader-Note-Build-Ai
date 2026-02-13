@@ -783,3 +783,28 @@ export const ListSummariesResponseSchema = z.object({
 });
 
 export type ListSummariesResponse = z.infer<typeof ListSummariesResponseSchema>;
+
+// ===========================================
+// PDCA Agent（Phase 2: 自律エージェント）
+// ===========================================
+
+/**
+ * POST /api/side-b/agent/start のリクエストボディ
+ */
+export const StartAgentRequestSchema = z.object({
+  symbols: z.array(SymbolSchema).optional(),
+  normalIntervalMs: z.number().int().min(60000).optional(),   // 最低1分
+  activeIntervalMs: z.number().int().min(30000).optional(),   // 最低30秒
+  positionIntervalMs: z.number().int().min(10000).optional(), // 最低10秒
+});
+
+export type StartAgentRequest = z.infer<typeof StartAgentRequestSchema>;
+
+/**
+ * GET /api/side-b/agent/thinking-log のクエリ
+ */
+export const ThinkingLogQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).optional().default(50),
+});
+
+export type ThinkingLogQuery = z.infer<typeof ThinkingLogQuerySchema>;

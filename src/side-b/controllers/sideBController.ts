@@ -50,6 +50,7 @@ import {
 import type { ExitReason, UpdatePortfolioSettings } from '../models';
 import { MarketDataService } from '../../services/marketDataService';
 import { getSideBScheduler, type SideBSchedulerConfig } from '../jobs/sideBScheduler';
+import { pdcaLoop } from '../agent';
 
 // MarketDataService インスタンス（OHLCV自動取得用）
 const marketDataService = new MarketDataService();
@@ -914,6 +915,82 @@ export class SideBController {
     } catch (error) {
       console.error('[SideBController] runMonitorNow error:', error);
       res.status(500).json({ error: '監視実行に失敗しました' });
+    }
+  };
+
+  // ===========================================
+  // PDCA Loop (Phase 2: 自律エージェント)
+  // ===========================================
+
+  /**
+   * GET /api/side-b/agent/status
+   * PDCAループの状態を取得
+   */
+  getAgentStatus = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const status = pdcaLoop.getStatus();
+      res.json(status);
+    } catch (error) {
+      console.error('[SideBController] getAgentStatus error:', error);
+      res.status(500).json({ error: 'エージェント状態の取得に失敗しました' });
+    }
+  };
+
+  /**
+   * POST /api/side-b/agent/start
+   * PDCAループを開始
+   */
+  startAgent = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { symbols, normalIntervalMs, activeIntervalMs, positionIntervalMs } = req.body;
+      // PDCAループを開始（設定はオプション）
+      const configOverride: Record<string, unknown> = { enabled: true };
+      if (symbols) configOverride.symbols = symbols;
+      if (normalIntervalMs) configOverride.normalIntervalMs = normalIntervalMs;
+      if (activeIntervalMs) configOverride.activeIntervalMs = activeIntervalMs;
+      if (positionIntervalMs) configOverride.positionIntervalMs = positionIntervalMs;
+
+      // 既存のスケジューラーも連動起動
+      const scheduler = getSideBScheduler();
+      scheduler.updateConfig({ enabled: true });
+      scheduler.start();
+
+      pdcaLoop.start();
+      const status = pdcaLoop.getStatus();
+      res.json({ success: true, message: 'PDCAループを開始しました', status });
+    } catch (error) {
+      console.error('[SideBController] startAgent error:', error);
+      res.status(500).json({ error: 'PDCAループの開始に失敗しました' });
+    }
+  };
+
+  /**
+   * POST /api/side-b/agent/stop
+   * PDCAループを停止
+   */
+  stopAgent = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      pdcaLoop.stop();
+      const status = pdcaLoop.getStatus();
+      res.json({ success: true, message: 'PDCAループを停止しました', status });
+    } catch (error) {
+      console.error('[SideBController] stopAgent error:', error);
+      res.status(500).json({ error: 'PDCAループの停止に失敗しました' });
+    }
+  };
+
+  /**
+   * GET /api/side-b/agent/thinking-log
+   * 思考ログを取得
+   */
+  getThinkingLog = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 50;
+      const log = pdcaLoop.getThinkingLog(limit);
+      res.json({ log, count: log.length });
+    } catch (error) {
+      console.error('[SideBController] getThinkingLog error:', error);
+      res.status(500).json({ error: '思考ログの取得に失敗しました' });
     }
   };
 

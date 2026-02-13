@@ -61,6 +61,7 @@ import { MarketDataService } from '../../services/marketDataService';
 import { CTraderAuthService } from '../../backend/services/ctrader/ctraderAuthService';
 import { config } from '../../config';
 import type { OHLCVData } from '../../services/indicators/indicatorService';
+import { pdcaLoop } from '../agent';
 import { PrismaClient } from '@prisma/client';
 import { ohlcvRepository } from '../../backend/repositories/ohlcvRepository';
 
@@ -587,6 +588,7 @@ export class SideBScheduler {
                   verificationResult.exit.exitPrice!,
                   verificationResult.exit.exitReason!,
                   trade.direction as TradeDirection,
+                  symbol,
                   verificationResult.exit.exitTime,
                 );
                 results.exits++;
@@ -621,6 +623,7 @@ export class SideBScheduler {
                 verificationResult.exit.exitPrice!,
                 verificationResult.exit.exitReason!,
                 trade.direction as TradeDirection,
+                symbol,
                 verificationResult.exit.exitTime,
               );
               results.exits++;
@@ -711,6 +714,7 @@ export class SideBScheduler {
     exitPrice: number,
     exitReason: ExitReason,
     direction: TradeDirection,
+    symbol: string,
     exitTime?: Date,
   ): Promise<void> {
     const pnl = calculatePnL(direction, entryPrice, exitPrice);
@@ -723,6 +727,23 @@ export class SideBScheduler {
 
     await closeTrade(tradeId, input, pnl.pips, pnl.amount);
     this.log(`決済完了: ${tradeId} (${exitReason}, ${pnl.pips > 0 ? '+' : ''}${pnl.pips.toFixed(1)} pips)`);
+
+    // PDCAループに通知
+    try {
+      pdcaLoop.notifyTradeCompleted({
+        id: tradeId,
+        symbol,
+        direction,
+        entryPrice,
+        exitPrice,
+        pnlPips: pnl.pips,
+        outcome: pnl.pips > 0 ? 'win' : pnl.pips < 0 ? 'loss' : 'breakeven',
+        exitReason,
+        strategyRationale: `${exitReason}による決済`,
+        tradedAt: exitTime ?? new Date(),
+        closedAt: exitTime ?? new Date(),
+      });
+    } catch { /* PDCAループ未起動時は無視 */ }
   }
 
   /**
@@ -869,6 +890,22 @@ export class SideBScheduler {
         this.lastPlanRun.set(symbol, new Date());
         this.log(`[${symbol}] プラン完了: Trade ID ${tradeResult.trade?.id}`);
         results.push({ symbol, success: true });
+
+        // PDCAループに戦略完了を通知
+        try {
+          const planData = planResult.data;
+          if (planData?.scenarios && planData.scenarios.length > 0) {
+            pdcaLoop.notifyStrategyComplete(
+              symbol,
+              planData.scenarios.map((s) => ({
+                name: s.name,
+                direction: s.direction,
+                entryPrice: s.entry.price,
+                confidence: s.confidence,
+              }))
+            );
+          }
+        } catch { /* PDCAループ未起動時は無視 */ }
 
       } catch (error) {
         const message = error instanceof Error ? error.message : '不明なエラー';

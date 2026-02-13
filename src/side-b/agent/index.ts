@@ -14,3 +14,22 @@ export {
     type AgentStep,
     type ToolCallRecord,
 } from './agentLoop';
+
+// 自律トレーディングAI（Phase 1-2 新規）
+export {
+    AgentMemory,
+    agentMemory,
+    type AgentState,
+    type AgentMemoryState,
+    type TradeResultSummary,
+    type ActivePosition,
+    type TodayStrategyContext,
+} from './agentMemory';
+
+export {
+    PDCALoop,
+    pdcaLoop,
+    type PDCALoopConfig,
+    type PDCATickResult,
+    type ThinkingLogEntry,
+} from './pdcaLoop';
