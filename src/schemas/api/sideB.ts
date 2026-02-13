@@ -6,10 +6,10 @@
  */
 
 import { z } from 'zod';
-import { 
-  UUIDSchema, 
-  DateSchema, 
-  SymbolSchema, 
+import {
+  UUIDSchema,
+  DateSchema,
+  SymbolSchema,
   TimeframeSchema,
   DirectionSchema,
   PriceSchema,
@@ -86,6 +86,7 @@ export const GeneratePlanRequestSchema = z.object({
   ohlcvData: OHLCVArraySchema.optional(),  // researchIdがない場合に必要
   indicators: z.record(z.string(), z.unknown()).optional(),
   timeframe: TimeframeSchema.optional().default('15m'),
+  forceRefresh: z.boolean().optional().default(false),
 });
 
 export type GeneratePlanRequest = z.infer<typeof GeneratePlanRequestSchema>;
