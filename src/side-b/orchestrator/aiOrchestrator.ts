@@ -69,6 +69,7 @@ export interface OrchestratorPlanRequest {
   userPreferences?: UserTradingPreferences;
   ohlcvData?: { timestamp: Date; open: number; high: number; low: number; close: number; volume?: number }[];
   indicators?: Record<string, unknown>;
+  forceRefresh?: boolean;
   /** 上位足データ（MTF分析用、オプショナル） */
   higherTFData?: {
     timeframe: string;
@@ -187,26 +188,28 @@ export class AIOrchestrator {
    * 4. DB保存
    */
   async generatePlan(request: OrchestratorPlanRequest): Promise<OrchestratorResult<AITradePlanWithTypes>> {
-    const { symbol, targetDate, researchId, userPreferences, ohlcvData, indicators, higherTFData } = request;
+    const { symbol, targetDate, researchId, userPreferences, ohlcvData, indicators, higherTFData, forceRefresh = false } = request;
 
     // 対象日の決定
     const date = targetDate ? new Date(targetDate) : new Date();
     date.setHours(0, 0, 0, 0);
     const dateStr = date.toISOString().split('T')[0];
 
-    console.log(`[Orchestrator] プラン生成開始: ${symbol} / ${dateStr}`);
+    console.log(`[Orchestrator] プラン生成開始: ${symbol} / ${dateStr} (forceRefresh=${forceRefresh})`);
 
     try {
-      // 1. 既存プランチェック
-      const existingPlan = await this.planRepo.findByDateAndSymbol(date, symbol);
-      if (existingPlan) {
-        console.log(`[Orchestrator] 既存プラン発見: ${existingPlan.id}`);
-        return {
-          success: true,
-          data: existingPlan,
-          cached: true,
-          tokenUsage: 0,
-        };
+      // 1. 既存プランチェック（forceRefreshの場合はスキップ）
+      if (!forceRefresh) {
+        const existingPlan = await this.planRepo.findByDateAndSymbol(date, symbol);
+        if (existingPlan) {
+          console.log(`[Orchestrator] 既存プラン発見: ${existingPlan.id}`);
+          return {
+            success: true,
+            data: existingPlan,
+            cached: true,
+            tokenUsage: 0,
+          };
+        }
       }
 
       // 2. リサーチ取得または生成

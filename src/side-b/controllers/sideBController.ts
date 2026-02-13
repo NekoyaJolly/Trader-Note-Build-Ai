@@ -234,7 +234,7 @@ export class SideBController {
    */
   generatePlan = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { symbol, targetDate, researchId, userPreferences, ohlcvData, indicators, timeframe = '15m' } = req.body;
+      const { symbol, targetDate, researchId, userPreferences, ohlcvData, indicators, timeframe = '15m', forceRefresh } = req.body;
 
       // バリデーション
       if (!symbol) {
@@ -282,6 +282,7 @@ export class SideBController {
         userPreferences,
         ohlcvData: parsedOhlcv,
         indicators,
+        forceRefresh: forceRefresh || false,
       });
 
       if (!result.success) {
