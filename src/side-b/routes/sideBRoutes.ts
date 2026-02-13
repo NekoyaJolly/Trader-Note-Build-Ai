@@ -72,6 +72,9 @@ import {
   GenerateAINoteSummaryRequestSchema,
   // スケジューラー
   UpdateSchedulerConfigRequestSchema,
+  // PDCAエージェント
+  StartAgentRequestSchema,
+  ThinkingLogQuerySchema,
   // URLパラメータ
   IdParamSchema,
   SymbolParamSchema,
@@ -455,7 +458,11 @@ router.get('/agent/status', sideBController.getAgentStatus);
  * POST /api/side-b/agent/start
  * PDCAループを開始（スケジューラーも連動起動）
  */
-router.post('/agent/start', sideBController.startAgent);
+router.post(
+  '/agent/start',
+  validateBody(StartAgentRequestSchema),
+  sideBController.startAgent
+);
 
 /**
  * POST /api/side-b/agent/stop
@@ -470,7 +477,11 @@ router.post('/agent/stop', sideBController.stopAgent);
  * Query:
  * - limit?: number (default: 50)
  */
-router.get('/agent/thinking-log', sideBController.getThinkingLog);
+router.get(
+  '/agent/thinking-log',
+  validateQuery(ThinkingLogQuerySchema),
+  sideBController.getThinkingLog
+);
 
 // ===========================================
 // 比較分析（Phase D）

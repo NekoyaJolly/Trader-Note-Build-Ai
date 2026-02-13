@@ -588,6 +588,7 @@ export class SideBScheduler {
                   verificationResult.exit.exitPrice!,
                   verificationResult.exit.exitReason!,
                   trade.direction as TradeDirection,
+                  symbol,
                   verificationResult.exit.exitTime,
                 );
                 results.exits++;
@@ -622,6 +623,7 @@ export class SideBScheduler {
                 verificationResult.exit.exitPrice!,
                 verificationResult.exit.exitReason!,
                 trade.direction as TradeDirection,
+                symbol,
                 verificationResult.exit.exitTime,
               );
               results.exits++;
@@ -712,6 +714,7 @@ export class SideBScheduler {
     exitPrice: number,
     exitReason: ExitReason,
     direction: TradeDirection,
+    symbol: string,
     exitTime?: Date,
   ): Promise<void> {
     const pnl = calculatePnL(direction, entryPrice, exitPrice);
@@ -729,7 +732,7 @@ export class SideBScheduler {
     try {
       pdcaLoop.notifyTradeCompleted({
         id: tradeId,
-        symbol: 'N/A', // tradeオブジェクトからは取得できないため
+        symbol,
         direction,
         entryPrice,
         exitPrice,
@@ -737,8 +740,8 @@ export class SideBScheduler {
         outcome: pnl.pips > 0 ? 'win' : pnl.pips < 0 ? 'loss' : 'breakeven',
         exitReason,
         strategyRationale: `${exitReason}による決済`,
-        tradedAt: new Date(),
-        closedAt: new Date(),
+        tradedAt: exitTime ?? new Date(),
+        closedAt: exitTime ?? new Date(),
       });
     } catch { /* PDCAループ未起動時は無視 */ }
   }
@@ -891,14 +894,14 @@ export class SideBScheduler {
         // PDCAループに戦略完了を通知
         try {
           const planData = planResult.data;
-          if (planData?.scenarios) {
+          if (planData?.scenarios && planData.scenarios.length > 0) {
             pdcaLoop.notifyStrategyComplete(
               symbol,
-              (planData.scenarios as any[]).map((s: any) => ({
-                name: s.name || 'シナリオ',
-                direction: s.direction || 'long',
-                entryPrice: s.entry?.price || 0,
-                confidence: s.confidence || 50,
+              planData.scenarios.map((s) => ({
+                name: s.name,
+                direction: s.direction,
+                entryPrice: s.entry.price,
+                confidence: s.confidence,
               }))
             );
           }

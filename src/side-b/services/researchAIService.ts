@@ -116,7 +116,7 @@ export class ResearchAIService {
       console.log(`[MarketAnalyst] ${input.symbol} 分析完了: ${marketAnalysis.regime} / ${marketAnalysis.direction} / 信頼度${marketAnalysis.confidence}%`);
 
       return {
-        output: { featureVector: legacyFeatureVector as any },
+        output: { featureVector: legacyFeatureVector },
         marketAnalysis,
         ohlcvSnapshot,
         expiresAt: calculateExpiryDate(4),
@@ -136,7 +136,7 @@ export class ResearchAIService {
           const legacyFeatureVector = analysisToLegacyFeatureVector(marketAnalysis);
 
           return {
-            output: { featureVector: legacyFeatureVector as any },
+            output: { featureVector: legacyFeatureVector },
             marketAnalysis,
             ohlcvSnapshot,
             expiresAt: calculateExpiryDate(4),
@@ -185,7 +185,11 @@ export class ResearchAIService {
 
     // 価格レンジ（直近の高安値）
     const rangeSize = snapshot.recentHigh - snapshot.recentLow;
-    const currentPosition = ((snapshot.latestPrice - snapshot.recentLow) / rangeSize * 100).toFixed(1);
+    // rangeSize が 0（高値=安値）の場合は 0 除算を避けるため、現在位置を 50% に固定する
+    const currentPosition =
+      rangeSize === 0
+        ? '50.0'
+        : ((snapshot.latestPrice - snapshot.recentLow) / rangeSize * 100).toFixed(1);
 
     return `# 市場分析リクエスト
 

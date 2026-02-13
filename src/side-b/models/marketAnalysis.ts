@@ -15,6 +15,7 @@
  */
 
 import { z } from 'zod';
+import type { FeatureVector12D } from './featureVector';
 
 // ===========================================
 // Zodスキーマ定義
@@ -165,24 +166,24 @@ export function summarizeMarketAnalysis(analysis: MarketAnalysis): string {
 /**
  * MarketAnalysis を旧フォーマット FeatureVector12D に変換（後方互換）
  */
-export function analysisToLegacyFeatureVector(analysis: MarketAnalysis): Record<string, number> {
+export function analysisToLegacyFeatureVector(analysis: MarketAnalysis): FeatureVector12D {
     const dirScore = analysis.direction === 'bullish' ? 70 :
         analysis.direction === 'bearish' ? 30 : 50;
     const volScore = analysis.volatility === 'high' ? 80 :
         analysis.volatility === 'low' ? 20 : 50;
 
     return {
-        trendStrength: analysis.quickScores.trendStrength,
+        trendStrength: Math.round(Math.min(100, Math.max(0, analysis.quickScores.trendStrength))),
         trendDirection: dirScore,
-        maAlignment: analysis.quickScores.trendStrength, // 近似
+        maAlignment: Math.round(Math.min(100, Math.max(0, analysis.quickScores.trendStrength))),
         pricePosition: 50,
-        rsiLevel: analysis.quickScores.momentum,
-        macdMomentum: analysis.quickScores.momentum,
+        rsiLevel: Math.round(Math.min(100, Math.max(0, analysis.quickScores.momentum))),
+        macdMomentum: Math.round(Math.min(100, Math.max(0, analysis.quickScores.momentum))),
         momentumDivergence: 0,
         volatilityLevel: volScore,
-        bbWidth: analysis.quickScores.volatility,
-        volatilityTrend: analysis.quickScores.volatility,
-        supportProximity: analysis.quickScores.supportProximity,
-        resistanceProximity: analysis.quickScores.resistanceProximity,
+        bbWidth: Math.round(Math.min(100, Math.max(0, analysis.quickScores.volatility))),
+        volatilityTrend: Math.round(Math.min(100, Math.max(0, analysis.quickScores.volatility))),
+        supportProximity: Math.round(Math.min(100, Math.max(0, analysis.quickScores.supportProximity))),
+        resistanceProximity: Math.round(Math.min(100, Math.max(0, analysis.quickScores.resistanceProximity))),
     };
 }

@@ -26,6 +26,7 @@ export {
 export {
   type FeatureVector12D,
   validateFeatureVector,
+  safeValidateFeatureVector,
   featureVectorToArray,
   calculateCosineSimilarity,
   createEmptyFeatureVector,

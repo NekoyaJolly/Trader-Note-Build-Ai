@@ -32,7 +32,7 @@ import {
     type TodayStrategyContext,
 } from './agentMemory';
 import type { MarketAnalysis } from '../models/marketAnalysis';
-import { isFXMarketOpen, getMarketStatusJST } from '../utils/marketHours';
+import { isFXMarketOpen } from '../utils/marketHours';
 
 // ===========================================
 // 型定義
@@ -68,11 +68,17 @@ const DEFAULT_PDCA_CONFIG: PDCALoopConfig = {
 /**
  * PDCA ティック結果（1サイクルの実行結果）
  */
+export interface PDCATickDetails {
+    positions?: Array<{ symbol: string; direction: string; pnlPips: number }>;
+    winRate?: number;
+    totalTrades?: number;
+}
+
 export interface PDCATickResult {
     state: AgentState;
     action: string;
     nextCheckMs: number;
-    details?: Record<string, unknown>;
+    details?: PDCATickDetails;
 }
 
 /**
@@ -84,7 +90,7 @@ export interface ThinkingLogEntry {
     state: AgentState;
     action: string;
     reasoning?: string;
-    data?: Record<string, unknown>;
+    data?: PDCATickDetails;
 }
 
 // ===========================================
@@ -501,7 +507,7 @@ export class PDCALoop {
     /**
      * 思考ログを追加
      */
-    private addThinkingLog(state: AgentState, action: string, reasoning?: string, data?: Record<string, unknown>): void {
+    private addThinkingLog(state: AgentState, action: string, reasoning?: string, data?: PDCATickDetails): void {
         const entry: ThinkingLogEntry = {
             timestamp: new Date(),
             cycle: this.memory.getCycleCount(),

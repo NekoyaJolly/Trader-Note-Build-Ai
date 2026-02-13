@@ -9,7 +9,7 @@
  * - AIが「なぜこのエントリーか」「何を監視すべきか」を明確に思考
  * - 自律エージェントが監視ループで使える構造化出力
  * 
- * 使用モデル: Gemini 2.0 Flash（環境変数から取得）
+ * 使用モデル: 環境変数 AI_MODEL / AI_BASE_URL から取得（OpenAI互換 API）
  */
 
 import { config } from '../../config';
@@ -278,7 +278,7 @@ ${lessonsContext}
 - primaryは最大1つ
 - confidence 30未満のシナリオは出さない
 - 日本語で記述
-- 有効なJSONのみを出力${getPlanIndicatorContext(fv as unknown as Record<string, number>)}${getMacroContext(macroData)}${getMTFContext(higherTF, fv.trendDirection)}`;
+- 有効なJSONのみを出力${getPlanIndicatorContext(fv as Record<string, number>)}${getMacroContext(macroData)}${getMTFContext(higherTF, fv.trendDirection)}`;
   }
 
   /**

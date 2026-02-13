@@ -155,7 +155,7 @@ export class AIOrchestrator {
         symbol,
         timeframe,
         featureVector: aiResult.output.featureVector,
-        marketAnalysis: (aiResult as any).marketAnalysis,
+        marketAnalysis: aiResult.marketAnalysis,
         ohlcvSnapshot: aiResult.ohlcvSnapshot,
         aiModel: aiResult.model,
         tokenUsage: aiResult.tokenUsage,

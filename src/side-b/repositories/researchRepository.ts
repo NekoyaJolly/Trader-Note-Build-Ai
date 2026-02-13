@@ -16,7 +16,7 @@
 
 import { PrismaClient, MarketResearch, Prisma } from '@prisma/client';
 import { prisma } from '../../backend/db/client';
-import { FeatureVector12D, OHLCVSnapshot, type MarketAnalysis, safeValidateMarketAnalysis, analysisToLegacyFeatureVector } from '../models';
+import { FeatureVector12D, OHLCVSnapshot, type MarketAnalysis, safeValidateMarketAnalysis, analysisToLegacyFeatureVector, safeValidateFeatureVector, createEmptyFeatureVector } from '../models';
 
 // ===========================================
 // 型定義
@@ -226,11 +226,12 @@ export class ResearchRepository {
       marketAnalysis = safeValidateMarketAnalysis(analysisData) || undefined;
       // legacy互換用の featureVector を生成
       featureVector = marketAnalysis
-        ? analysisToLegacyFeatureVector(marketAnalysis) as unknown as FeatureVector12D
-        : { trendStrength: 50, trendDirection: 50, maAlignment: 50, pricePosition: 50, rsiLevel: 50, macdMomentum: 50, momentumDivergence: 0, volatilityLevel: 50, bbWidth: 50, volatilityTrend: 50, supportProximity: 50, resistanceProximity: 50 };
+        ? analysisToLegacyFeatureVector(marketAnalysis)
+        : createEmptyFeatureVector();
     } else {
-      // v1: 旧12次元データそのまま
-      featureVector = rawData as unknown as FeatureVector12D;
+      // v1: 旧12次元データ — ランタイムバリデーションで不正データを防止
+      const validated = safeValidateFeatureVector(rawData);
+      featureVector = validated ?? createEmptyFeatureVector();
     }
 
     return {
