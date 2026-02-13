@@ -389,13 +389,19 @@ export default function StrategyBacktestPage() {
   const handleRunBacktestWithCoverageCheck = async () => {
     if (!strategy) return;
 
+    const symbol = backtestParams.symbol || strategy.symbol || '';
+    if (!symbol.trim()) {
+      setError('シンボルを選択してください');
+      return;
+    }
+
     try {
       setCheckingCoverage(true);
       setError(null);
 
       // カバレッジチェック実行
       const coverage = await checkBacktestDataCoverage(
-        backtestParams.symbol || strategy.symbol,
+        symbol,
         backtestParams.stage1Timeframe,
         backtestParams.startDate,
         backtestParams.endDate

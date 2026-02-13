@@ -85,6 +85,8 @@ export interface BacktestRequest {
   initialCapital: number;
   lotSize: number; // 固定ロット数（通貨量、例: 10000 = 1万通貨）
   leverage: number; // レバレッジ（1〜1000倍）
+  /** シンボル（省略時はストラテジーのシンボルを使用） */
+  symbol?: string;
   /** ロットモード（デフォルト: 'fixed'） */
   lotMode?: LotMode;
   /** リスク割合 % (lotMode='variable' 時) */
@@ -565,10 +567,17 @@ export async function runBacktest(request: BacktestRequest): Promise<BacktestRes
       throw new Error('ストラテジーが見つかりません');
     }
 
+    // 使用するシンボル（リクエストで指定されていれば上書き）
+    const effectiveSymbol = (request.symbol?.trim() || strategy.symbol) as string;
+    if (!effectiveSymbol) {
+      throw new Error('シンボルが指定されていません');
+    }
+
     // Stage1: 高速スキャン（15m以上の時間足）
     const stage1Result = await executeBacktestStage(
       strategy,
       request,
+      effectiveSymbol,
       'stage1',
       request.stage1Timeframe
     );
@@ -579,6 +588,7 @@ export async function runBacktest(request: BacktestRequest): Promise<BacktestRes
       const stage2Result = await executeBacktestStage(
         strategy,
         request,
+        effectiveSymbol,
         'stage2',
         '1m'
       );
@@ -601,7 +611,7 @@ export async function runBacktest(request: BacktestRequest): Promise<BacktestRes
     await saveBacktestResult(
       backtestResult,
       strategy.currentVersion.id,
-      strategy.symbol,
+      effectiveSymbol,
       request.source || 'manual'
     );
 
@@ -633,12 +643,13 @@ export async function runBacktest(request: BacktestRequest): Promise<BacktestRes
 async function executeBacktestStage(
   strategy: StrategyDetail,
   request: BacktestRequest,
+  symbol: string,
   stage: BacktestStage,
   timeframe: BacktestTimeframe
 ): Promise<Omit<BacktestResult, 'id' | 'strategyId' | 'versionNumber' | 'executedAt' | 'startDate' | 'endDate' | 'status'>> {
   // ヒストリカルデータを取得
   const data = await fetchHistoricalData(
-    strategy.symbol,
+    symbol,
     timeframe,
     new Date(request.startDate),
     new Date(request.endDate),

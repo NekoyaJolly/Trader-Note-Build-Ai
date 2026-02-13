@@ -38,8 +38,15 @@ export type BacktestJobIdParam = z.infer<typeof BacktestJobIdParamSchema>;
 export const CheckCoverageRequestSchema = z.object({
   symbol: z.string().min(1, 'シンボルは必須です'),
   timeframe: z.string().min(1, '時間足は必須です'),
-  startDate: z.string().datetime('有効なISO8601日付を指定してください'),
-  endDate: z.string().datetime('有効なISO8601日付を指定してください'),
+  // 日付のみ (YYYY-MM-DD) および ISO8601 の両方を受け付ける（フロントは date input で日付のみ送信）
+  startDate: z.string().min(1, '開始日は必須です').refine(
+    (s) => !isNaN(new Date(s).getTime()),
+    { message: '有効な日付を指定してください' }
+  ),
+  endDate: z.string().min(1, '終了日は必須です').refine(
+    (s) => !isNaN(new Date(s).getTime()),
+    { message: '有効な日付を指定してください' }
+  ),
 });
 
 export type CheckCoverageRequest = z.infer<typeof CheckCoverageRequestSchema>;

@@ -761,6 +761,7 @@ router.post('/:id/backtest', async (req: Request, res: Response) => {
       initialCapital = 1000000,
       lotSize = 10000, // デフォルト1万通貨
       leverage = 25, // デフォルト25倍
+      symbol,
       lotMode = 'fixed',
       riskPercent,
       riskAmount,
@@ -830,6 +831,7 @@ router.post('/:id/backtest', async (req: Request, res: Response) => {
       initialCapital,
       lotSize,
       leverage,
+      symbol: symbol?.trim() || undefined,
       lotMode,
       riskPercent,
       riskAmount,

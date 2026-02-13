@@ -987,8 +987,12 @@ export async function runStrategyBacktest(
   );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.error || "バックテストの実行に失敗しました");
+    const err = await response.json().catch(() => ({})) as { error?: string; details?: string; issues?: Array<{ path: string; message: string }>; validationErrors?: Array<{ location: string; details: string }> };
+    const details = err.issues?.map((i) => (i.path ? `${i.path}: ` : '') + i.message).join('; ')
+      || err.validationErrors?.map((e) => e.details).join('; ')
+      || err.details;
+    const msg = err.error || "バックテストの実行に失敗しました";
+    throw new Error(details ? `${msg}: ${details}` : msg);
   }
 
   const payload = await response.json();
@@ -2245,8 +2249,10 @@ export async function checkBacktestDataCoverage(
   );
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.error || "カバレッジチェックに失敗しました");
+    const err = await response.json().catch(() => ({})) as { error?: string; details?: string; issues?: Array<{ path: string; message: string }> };
+    const details = err.issues?.map((i) => (i.path ? `${i.path}: ` : '') + i.message).join('; ') || err.details;
+    const msg = err.error || "カバレッジチェックに失敗しました";
+    throw new Error(details ? `${msg}: ${details}` : msg);
   }
 
   const payload = await response.json();
