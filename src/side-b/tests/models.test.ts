@@ -182,13 +182,15 @@ describe('Side-B Models', () => {
       expect(() => validatePlanAIOutput(invalidOutput)).toThrow('Invalid regime');
     });
 
-    it('シナリオが0個はエラー', () => {
-      const invalidOutput = {
+    it('シナリオが0個はノートレード推奨として有効', () => {
+      const noTradeOutput = {
         ...validPlanOutput,
         scenarios: [],
       };
 
-      expect(() => validatePlanAIOutput(invalidOutput)).toThrow('scenarios must have 1-3 items');
+      // 0個 = ノートレード推奨（Phase 1 で仕様変更: 0-3 を許容）
+      const result = validatePlanAIOutput(noTradeOutput);
+      expect(result.scenarios).toHaveLength(0);
     });
 
     it('シナリオが4個以上はエラー', () => {
@@ -198,7 +200,7 @@ describe('Side-B Models', () => {
         scenarios: [scenario, scenario, scenario, scenario],
       };
 
-      expect(() => validatePlanAIOutput(invalidOutput)).toThrow('scenarios must have 1-3 items');
+      expect(() => validatePlanAIOutput(invalidOutput)).toThrow('scenarios must have 0-3 items');
     });
 
     it('overallConfidenceが範囲外はエラー', () => {
@@ -218,10 +220,10 @@ describe('Side-B Models', () => {
     it('デフォルトで4時間後を返す', () => {
       const now = new Date();
       const expiry = calculateExpiryDate();
-      
+
       const diff = expiry.getTime() - now.getTime();
       const hours = diff / (1000 * 60 * 60);
-      
+
       // 4時間前後であることを確認（実行時間の誤差を許容）
       expect(hours).toBeGreaterThan(3.9);
       expect(hours).toBeLessThan(4.1);
@@ -230,10 +232,10 @@ describe('Side-B Models', () => {
     it('指定時間後を返す', () => {
       const now = new Date();
       const expiry = calculateExpiryDate(2);
-      
+
       const diff = expiry.getTime() - now.getTime();
       const hours = diff / (1000 * 60 * 60);
-      
+
       expect(hours).toBeGreaterThan(1.9);
       expect(hours).toBeLessThan(2.1);
     });
@@ -289,7 +291,7 @@ describe('Side-B Models', () => {
   describe('createEmptyFeatureVector', () => {
     it('すべて50の特徴量を作成', () => {
       const empty = createEmptyFeatureVector();
-      
+
       expect(empty.trendStrength).toBe(50);
       expect(empty.trendDirection).toBe(50);
       expect(empty.rsiLevel).toBe(50);
