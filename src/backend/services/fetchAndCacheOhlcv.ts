@@ -289,6 +289,18 @@ async function fetchFromCTrader(
 
         const cachedCount = await batchUpsertOhlcv(symbol, timeframe, allData);
 
+        // 保存検証: DBから実データを取得できるか確認
+        const minTs = allData.reduce((a, d) => (d.timestamp < a ? d.timestamp : a), allData[0].timestamp);
+        const maxTs = allData.reduce((a, d) => (d.timestamp > a ? d.timestamp : a), allData[0].timestamp);
+        const verification = await verifyOhlcvSaved(symbol, timeframe, cachedCount, minTs, maxTs);
+        if (!verification.verified) {
+            return {
+                success: false,
+                cachedCount: 0,
+                error: `cTrader: 保存後の検証失敗（取得${verification.fetchedCount}件）`,
+            };
+        }
+
         // 完了通知
         onProgress?.({
             current: chunks.length,
@@ -400,6 +412,18 @@ async function fetchFromTwelveData(
 
         const cachedCount = await batchUpsertOhlcv(symbol, timeframe, allData);
 
+        // 保存検証: DBから実データを取得できるか確認
+        const minTs = allData.reduce((a, d) => (d.timestamp < a ? d.timestamp : a), allData[0].timestamp);
+        const maxTs = allData.reduce((a, d) => (d.timestamp > a ? d.timestamp : a), allData[0].timestamp);
+        const verification = await verifyOhlcvSaved(symbol, timeframe, cachedCount, minTs, maxTs);
+        if (!verification.verified) {
+            return {
+                success: false,
+                cachedCount: 0,
+                error: `Twelve Data: 保存後の検証失敗（取得${verification.fetchedCount}件）`,
+            };
+        }
+
         onProgress?.({
             current: 1,
             total: 1,
@@ -452,51 +476,146 @@ async function fetchFromTwelveData(
 // DB バッチ保存
 // ========================================
 
+/**
+ * 並列数（1=直列、5=5本並列など）
+ * 環境変数 UPSERT_PARALLEL_SIZE で上書き可能（検証用）
+ *
+ * 検証結果: ローカルで 100 並列まで成功。本番では 100 で接続枯渇。15 で安定運用。
+ */
+function getUpsertParallelSize(): number {
+    const v = process.env.UPSERT_PARALLEL_SIZE;
+    if (v !== undefined) {
+        const n = parseInt(v, 10);
+        if (!isNaN(n) && n >= 1) return n;
+    }
+    return 15; // 本番運用: 5000本で約10秒想定
+}
+
 async function batchUpsertOhlcv(
     symbol: string,
     timeframe: string,
     data: Array<{ timestamp: Date; open: number; high: number; low: number; close: number; volume: number }>
 ): Promise<number> {
+    const parallelSize = getUpsertParallelSize();
     let cachedCount = 0;
-    const BATCH_SIZE = 100;
 
-    for (let i = 0; i < data.length; i += BATCH_SIZE) {
-        const batch = data.slice(i, i + BATCH_SIZE);
-        await Promise.all(
-            batch.map(candle =>
-                prisma.oHLCVCandle.upsert({
-                    where: {
-                        symbol_timeframe_timestamp: {
-                            symbol,
-                            timeframe,
-                            timestamp: candle.timestamp,
-                        },
-                    },
-                    update: {
-                        open: candle.open,
-                        high: candle.high,
-                        low: candle.low,
-                        close: candle.close,
-                        volume: candle.volume,
-                    },
-                    create: {
+    if (parallelSize <= 1) {
+        // 直列: 1本ずつ保存（接続数最小）
+        for (const candle of data) {
+            await prisma.oHLCVCandle.upsert({
+                where: {
+                    symbol_timeframe_timestamp: {
                         symbol,
                         timeframe,
                         timestamp: candle.timestamp,
-                        open: candle.open,
-                        high: candle.high,
-                        low: candle.low,
-                        close: candle.close,
-                        volume: candle.volume,
                     },
-                })
-            )
-        );
-        cachedCount += batch.length;
+                },
+                update: {
+                    open: candle.open,
+                    high: candle.high,
+                    low: candle.low,
+                    close: candle.close,
+                    volume: candle.volume,
+                },
+                create: {
+                    symbol,
+                    timeframe,
+                    timestamp: candle.timestamp,
+                    open: candle.open,
+                    high: candle.high,
+                    low: candle.low,
+                    close: candle.close,
+                    volume: candle.volume,
+                },
+            });
+            cachedCount++;
+        }
+    } else {
+        // 並列: parallelSize 本ずつ
+        for (let i = 0; i < data.length; i += parallelSize) {
+            const batch = data.slice(i, i + parallelSize);
+            await Promise.all(
+                batch.map(candle =>
+                    prisma.oHLCVCandle.upsert({
+                        where: {
+                            symbol_timeframe_timestamp: {
+                                symbol,
+                                timeframe,
+                                timestamp: candle.timestamp,
+                            },
+                        },
+                        update: {
+                            open: candle.open,
+                            high: candle.high,
+                            low: candle.low,
+                            close: candle.close,
+                            volume: candle.volume,
+                        },
+                        create: {
+                            symbol,
+                            timeframe,
+                            timestamp: candle.timestamp,
+                            open: candle.open,
+                            high: candle.high,
+                            low: candle.low,
+                            close: candle.close,
+                            volume: candle.volume,
+                        },
+                    })
+                )
+            );
+            cachedCount += batch.length;
+        }
     }
 
-    console.log(`[batchUpsertOhlcv] ${cachedCount}件保存完了: ${symbol}/${timeframe}`);
+    console.log(`[batchUpsertOhlcv] ${cachedCount}件保存完了: ${symbol}/${timeframe} (並列数=${parallelSize})`);
     return cachedCount;
+}
+
+/**
+ * DBに保存した実データを取得できるか検証
+ * 保存後に呼び出し、実際にSELECTして確認する
+ */
+async function verifyOhlcvSaved(
+    symbol: string,
+    timeframe: string,
+    savedCount: number,
+    minTimestamp: Date,
+    maxTimestamp: Date
+): Promise<{ verified: boolean; fetchedCount: number; error?: string }> {
+    try {
+        const fetched = await prisma.oHLCVCandle.findMany({
+            where: {
+                symbol,
+                timeframe,
+                timestamp: {
+                    gte: minTimestamp,
+                    lte: maxTimestamp,
+                },
+            },
+            orderBy: { timestamp: 'asc' },
+        });
+
+        const fetchedCount = fetched.length;
+        const verified = fetchedCount > 0 && fetchedCount >= Math.min(savedCount, 1);
+
+        if (verified) {
+            console.log(
+                `[verifyOhlcvSaved] ✅ 検証OK: ${symbol}/${timeframe} 保存${savedCount}件→取得${fetchedCount}件 ` +
+                `(サンプル: ${fetched[0]?.timestamp.toISOString()} O=${fetched[0]?.open} C=${fetched[0]?.close})`
+            );
+        } else {
+            console.warn(
+                `[verifyOhlcvSaved] ⚠ 検証NG: ${symbol}/${timeframe} 保存${savedCount}件 に対し 取得${fetchedCount}件`
+            );
+        }
+
+        return { verified, fetchedCount };
+    } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(`[verifyOhlcvSaved] 検証エラー:`, msg);
+        return { verified: false, fetchedCount: 0, error: msg };
+    }
 }
 
 // ========================================
