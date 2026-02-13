@@ -11,13 +11,26 @@ import Link from "next/link";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "") + "/api/side-b";
 
+// ThinkingLog の data フィールドで使用する JSON ライクな再帰型
+type ThinkingLogEntryDataValue =
+    | string
+    | number
+    | boolean
+    | null
+    | ThinkingLogEntryDataValue[]
+    | { [key: string]: ThinkingLogEntryDataValue };
+
+type ThinkingLogEntryData = {
+    [key: string]: ThinkingLogEntryDataValue;
+};
+
 interface ThinkingLogEntry {
     timestamp: string;
     cycle: number;
     state: string;
     action: string;
     reasoning: string;
-    data?: Record<string, unknown>;
+    data?: ThinkingLogEntryData;
 }
 
 interface LessonsData {
@@ -41,6 +54,18 @@ const stateColors: Record<string, string> = {
     REVISING_STRATEGY: "text-orange-400 bg-orange-500/20",
 };
 
+/**
+ * レスポンスを安全にパースするヘルパー
+ */
+async function safeFetchJson<T>(res: Response): Promise<T | null> {
+    if (!res.ok) return null;
+    try {
+        return (await res.json()) as T;
+    } catch {
+        return null;
+    }
+}
+
 export default function AgentDetailPage() {
     const [thinkingLog, setThinkingLog] = useState<ThinkingLogEntry[]>([]);
     const [lessonsData, setLessonsData] = useState<LessonsData | null>(null);
@@ -54,12 +79,17 @@ export default function AgentDetailPage() {
                 fetch(`${API_BASE}/agent/lessons`),
             ]);
 
-            if (logRes.status === "fulfilled" && logRes.value.ok) {
-                const data = await logRes.value.json();
-                setThinkingLog(data.log || []);
+            if (logRes.status === "fulfilled") {
+                const data = await safeFetchJson<{ log: ThinkingLogEntry[]; count: number }>(logRes.value);
+                if (data) {
+                    setThinkingLog(data.log || []);
+                }
             }
-            if (lessonsRes.status === "fulfilled" && lessonsRes.value.ok) {
-                setLessonsData(await lessonsRes.value.json());
+            if (lessonsRes.status === "fulfilled") {
+                const data = await safeFetchJson<LessonsData>(lessonsRes.value);
+                if (data) {
+                    setLessonsData(data);
+                }
             }
         } catch (err) {
             console.error("[Agent] fetch error:", err);

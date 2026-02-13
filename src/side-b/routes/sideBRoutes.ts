@@ -75,6 +75,7 @@ import {
   // PDCAエージェント
   StartAgentRequestSchema,
   ThinkingLogQuerySchema,
+  ReflectionsQuerySchema,
   // URLパラメータ
   IdParamSchema,
   SymbolParamSchema,
@@ -490,7 +491,11 @@ router.get(
  * Query:
  * - limit?: number (default: 10)
  */
-router.get('/agent/reflections', sideBController.getReflections);
+router.get(
+  '/agent/reflections',
+  validateQuery(ReflectionsQuerySchema),
+  sideBController.getReflections
+);
 
 /**
  * GET /api/side-b/agent/lessons

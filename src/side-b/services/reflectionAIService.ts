@@ -17,44 +17,26 @@
  * 使用モデル: 環境変数 AI_MODEL / AI_BASE_URL から取得（OpenAI互換 API）
  */
 
-import { z } from 'zod';
 import { config } from '../../config';
 import type { TradeResultSummary, TodayStrategyContext } from '../agent/agentMemory';
+import {
+    ReflectionOutputSchema,
+    type ReflectionOutput,
+} from '../../schemas/api/sideB';
 
 // ===========================================
 // 型定義
 // ===========================================
 
 /**
- * 振り返り結果の Zod スキーマ
+ * 振り返り結果の Zod スキーマおよび関連する出力型は
+ * `src/schemas/api/sideB.ts` に集約して定義する。
+ *
+ * - ReflectionOutputSchema
+ * - ReflectionOutput
+ *
+ * このサービスでは共通スキーマから import して利用する。
  */
-const ReflectionOutputSchema = z.object({
-    /** 勝敗の原因分析 */
-    outcomeAnalysis: z.string(),
-
-    /** エントリー判断の評価 */
-    entryEvaluation: z.object({
-        rating: z.enum(['excellent', 'good', 'neutral', 'poor', 'bad']),
-        comment: z.string(),
-    }),
-
-    /** 決済判断の評価 */
-    exitEvaluation: z.object({
-        rating: z.enum(['excellent', 'good', 'neutral', 'poor', 'bad']),
-        comment: z.string(),
-    }),
-
-    /** 次回に活かすべき学び（1-3件） */
-    lessons: z.array(z.string()).min(1).max(3),
-
-    /** 戦略修正の提案（任意） */
-    strategyAdjustment: z.string().optional(),
-
-    /** 総合スコア（0-100: 100=完璧なトレード） */
-    overallScore: z.number().min(0).max(100),
-});
-
-export type ReflectionOutput = z.infer<typeof ReflectionOutputSchema>;
 
 /**
  * Reflection AI への入力
@@ -86,6 +68,9 @@ export interface ReflectionResult {
 // サービスクラス
 // ===========================================
 
+/** 最大リトライ回数 */
+const MAX_RETRY_ATTEMPTS = 3;
+
 export class ReflectionAIService {
     private apiKey: string;
     private model: string;
@@ -106,33 +91,21 @@ export class ReflectionAIService {
             return this.generateFallback(input.trade);
         }
 
-        try {
-            const prompt = this.buildPrompt(input);
-            const result = await this.callAI(prompt);
+        const prompt = this.buildPrompt(input);
+        let lastError: unknown;
 
-            // バリデーション
-            const parsed = ReflectionOutputSchema.parse(result.content);
-
-            const summary = this.buildSummary(parsed, input.trade);
-
-            console.log(`[ReflectionAI] ${input.trade.symbol} 振り返り完了: スコア${parsed.overallScore} / ${parsed.lessons.length}件の学び`);
-
-            return {
-                output: parsed,
-                summary,
-                tokenUsage: result.tokenUsage,
-                model: result.model,
-            };
-        } catch (error) {
-            console.error('[ReflectionAI] エラー:', error);
-
-            // 1回リトライ
+        for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
             try {
-                console.log('[ReflectionAI] リトライ中...');
-                const prompt = this.buildPrompt(input);
                 const result = await this.callAI(prompt);
+
+                // バリデーション
                 const parsed = ReflectionOutputSchema.parse(result.content);
+
                 const summary = this.buildSummary(parsed, input.trade);
+
+                console.log(
+                    `[ReflectionAI] ${input.trade.symbol} 振り返り完了 (試行${attempt}/${MAX_RETRY_ATTEMPTS}): スコア${parsed.overallScore} / ${parsed.lessons.length}件の学び`,
+                );
 
                 return {
                     output: parsed,
@@ -140,12 +113,30 @@ export class ReflectionAIService {
                     tokenUsage: result.tokenUsage,
                     model: result.model,
                 };
-            } catch (retryError) {
-                console.error('[ReflectionAI] リトライ失敗:', retryError);
-            }
+            } catch (error) {
+                lastError = error;
+                console.error(`[ReflectionAI] エラー（試行${attempt}/${MAX_RETRY_ATTEMPTS}）:`, error);
 
-            return this.generateFallback(input.trade);
+                // 最大試行回数未満の場合は指数バックオフで待機してリトライ
+                if (attempt < MAX_RETRY_ATTEMPTS) {
+                    const delayMs = 500 * 2 ** (attempt - 1);
+                    console.log(`[ReflectionAI] ${delayMs}ms 待機後にリトライします...`);
+                    await this.sleep(delayMs);
+                }
+            }
         }
+
+        console.error('[ReflectionAI] 最大リトライ回数に達しました。フォールバックを返します。最後のエラー:', lastError);
+        return this.generateFallback(input.trade);
+    }
+
+    /**
+     * 指定ミリ秒だけ待機するユーティリティ
+     */
+    private async sleep(ms: number): Promise<void> {
+        return new Promise((resolve) => {
+            setTimeout(resolve, ms);
+        });
     }
 
     // --- プロンプト構築 ---

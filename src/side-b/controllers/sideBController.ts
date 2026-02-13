@@ -1000,7 +1000,8 @@ export class SideBController {
    */
   getReflections = async (req: Request, res: Response): Promise<void> => {
     try {
-      const limit = parseInt(req.query.limit as string) || 10;
+      // limit は ReflectionsQuerySchema で min(1)/max(50)/default(10) バリデーション済み
+      const limit = Number(req.query.limit) || 10;
       const results = agentMemory.getRecentResults();
       const reflections = results
         .filter(r => r.reflection)

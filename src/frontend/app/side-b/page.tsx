@@ -1,11 +1,11 @@
 /**
- * Side-B: AI Agent Dashboard
+ * Side-B: AI エージェントダッシュボード
  *
- * 自律型トレーディング AI のダッシュボード
- * - エージェント状態・サイクル・勝率
- * - 思考ログ（リアルタイム更新）
- * - 現在の戦略
- * - トレード結果 + 学び
+ * 自律型トレーディングAI の操作・監視画面
+ * - エージェント状態（Start/Stop）・サイクル数・勝率
+ * - 思考ログ（リアルタイム自動更新）
+ * - 現在の戦略・オープンポジション
+ * - トレード結果 + AI振り返り
  *
  * @see docs/side-b/TradeAssistant-AI.md
  */
@@ -22,20 +22,6 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "") + "/api/side-b";
 const REFRESH_INTERVAL = 15_000;
 
 // --- 型定義 ---
-
-interface AgentStatus {
-  isRunning: boolean;
-  state: string;
-  cycleCount: number;
-  watchSymbols: string[];
-  memory: {
-    currentState: string;
-    recentTradeResults: TradeResult[];
-    openPositions: OpenPosition[];
-    lessons: string[];
-    cycleCount: number;
-  };
-}
 
 interface TradeResult {
   id: string;
@@ -57,6 +43,20 @@ interface OpenPosition {
   direction: "long" | "short";
   entryPrice: number;
   currentPnlPips: number;
+}
+
+interface AgentStatus {
+  isRunning: boolean;
+  state: string;
+  cycleCount: number;
+  watchSymbols: string[];
+  memory: {
+    currentState: string;
+    recentTradeResults: TradeResult[];
+    openPositions: OpenPosition[];
+    lessons: string[];
+    cycleCount: number;
+  };
 }
 
 interface ThinkingLogEntry {
@@ -92,6 +92,19 @@ const navLinks = [
   { icon: "⚙️", label: "Settings", href: "/side-b/settings" },
 ];
 
+/**
+ * レスポンスを安全にパースするヘルパー
+ * HTTPエラーまたはJSON parse 失敗時は null を返す
+ */
+async function safeFetchJson<T>(res: Response): Promise<T | null> {
+  if (!res.ok) return null;
+  try {
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
 export default function SideBDashboard() {
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [thinkingLog, setThinkingLog] = useState<ThinkingLogEntry[]>([]);
@@ -111,19 +124,46 @@ export default function SideBDashboard() {
         fetch(`${API_BASE}/agent/lessons`),
       ]);
 
-      if (statusRes.status === "fulfilled" && statusRes.value.ok) {
-        setStatus(await statusRes.value.json());
-      }
-      if (logRes.status === "fulfilled" && logRes.value.ok) {
-        const data = await logRes.value.json();
-        setThinkingLog(data.log || []);
-      }
-      if (lessonsRes.status === "fulfilled" && lessonsRes.value.ok) {
-        const data = await lessonsRes.value.json();
-        setLessons(data.lessons || []);
+      let hasError = false;
+
+      if (statusRes.status === "fulfilled") {
+        const data = await safeFetchJson<AgentStatus>(statusRes.value);
+        if (data) {
+          setStatus(data);
+        } else {
+          hasError = true;
+        }
+      } else {
+        hasError = true;
       }
 
-      setError(null);
+      if (logRes.status === "fulfilled") {
+        const data = await safeFetchJson<{ log: ThinkingLogEntry[]; count: number }>(logRes.value);
+        if (data) {
+          setThinkingLog(data.log || []);
+        } else {
+          hasError = true;
+        }
+      } else {
+        hasError = true;
+      }
+
+      if (lessonsRes.status === "fulfilled") {
+        const data = await safeFetchJson<{ lessons: string[] }>(lessonsRes.value);
+        if (data) {
+          setLessons(data.lessons || []);
+        } else {
+          hasError = true;
+        }
+      } else {
+        hasError = true;
+      }
+
+      if (hasError) {
+        setError("データの一部の取得に失敗しました");
+      } else {
+        setError(null);
+      }
     } catch (err) {
       setError("データ取得に失敗しました");
       console.error("[Dashboard] fetch error:", err);

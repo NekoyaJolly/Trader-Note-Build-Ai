@@ -808,3 +808,120 @@ export const ThinkingLogQuerySchema = z.object({
 });
 
 export type ThinkingLogQuery = z.infer<typeof ThinkingLogQuerySchema>;
+
+/**
+ * GET /api/side-b/agent/reflections のクエリ
+ */
+export const ReflectionsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).optional().default(10),
+});
+
+export type ReflectionsQuery = z.infer<typeof ReflectionsQuerySchema>;
+
+// ===========================================
+// Reflection AI（Phase 3: 振り返り AI）
+// ===========================================
+
+/**
+ * Reflection AI の出力スキーマ
+ */
+export const ReflectionOutputSchema = z.object({
+  /** 勝敗の原因分析 */
+  outcomeAnalysis: z.string(),
+
+  /** エントリー判断の評価 */
+  entryEvaluation: z.object({
+    rating: z.enum(['excellent', 'good', 'neutral', 'poor', 'bad']),
+    comment: z.string(),
+  }),
+
+  /** 決済判断の評価 */
+  exitEvaluation: z.object({
+    rating: z.enum(['excellent', 'good', 'neutral', 'poor', 'bad']),
+    comment: z.string(),
+  }),
+
+  /** 次回に活かすべき学び（1-3件） */
+  lessons: z.array(z.string()).min(1).max(3),
+
+  /** 戦略修正の提案（任意） */
+  strategyAdjustment: z.string().optional(),
+
+  /** 総合スコア（0-100: 100=完璧なトレード） */
+  overallScore: z.number().min(0).max(100),
+});
+
+export type ReflectionOutput = z.infer<typeof ReflectionOutputSchema>;
+
+// ===========================================
+// API レスポンススキーマ（Phase 3-4: フロントバリデーション用）
+// ===========================================
+
+/**
+ * GET /api/side-b/agent/status レスポンス
+ */
+export const AgentStatusResponseSchema = z.object({
+  isRunning: z.boolean(),
+  state: z.string(),
+  cycleCount: z.number(),
+  watchSymbols: z.array(z.string()),
+  memory: z.object({
+    currentState: z.string(),
+    recentTradeResults: z.array(z.object({
+      id: z.string(),
+      symbol: z.string(),
+      direction: z.enum(['long', 'short']),
+      entryPrice: z.number(),
+      exitPrice: z.number(),
+      pnlPips: z.number(),
+      outcome: z.enum(['win', 'loss', 'breakeven']),
+      exitReason: z.string(),
+      reflection: z.string().optional(),
+      tradedAt: z.string(),
+      closedAt: z.string(),
+    })),
+    openPositions: z.array(z.object({
+      tradeId: z.string(),
+      symbol: z.string(),
+      direction: z.enum(['long', 'short']),
+      entryPrice: z.number(),
+      currentPnlPips: z.number(),
+    })),
+    lessons: z.array(z.string()),
+    cycleCount: z.number(),
+  }),
+});
+
+export type AgentStatusResponse = z.infer<typeof AgentStatusResponseSchema>;
+
+/**
+ * GET /api/side-b/agent/thinking-log レスポンス
+ */
+export const ThinkingLogResponseSchema = z.object({
+  log: z.array(z.object({
+    timestamp: z.string(),
+    cycle: z.number(),
+    state: z.string(),
+    action: z.string(),
+    reasoning: z.string(),
+  })),
+  count: z.number(),
+});
+
+export type ThinkingLogResponse = z.infer<typeof ThinkingLogResponseSchema>;
+
+/**
+ * GET /api/side-b/agent/lessons レスポンス
+ */
+export const LessonsResponseSchema = z.object({
+  lessons: z.array(z.string()),
+  count: z.number(),
+  stats: z.object({
+    winRate: z.number(),
+    totalTrades: z.number(),
+    wins: z.number(),
+    losses: z.number(),
+  }),
+});
+
+export type LessonsResponse = z.infer<typeof LessonsResponseSchema>;
