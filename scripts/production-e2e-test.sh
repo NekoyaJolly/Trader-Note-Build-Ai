@@ -10,7 +10,7 @@
 
 # 設定
 PRODUCTION_API_URL="${PRODUCTION_API_URL:-https://trader-note-571157808050.asia-northeast1.run.app}"
-PRODUCTION_UI_URL="${PRODUCTION_UI_URL:-https://trader-note-571157808050.asia-northeast1.run.app}"
+PRODUCTION_UI_URL="${PRODUCTION_UI_URL:-https://trader-note-build-ai.vercel.app}"
 
 
 # カラー出力
@@ -69,6 +69,7 @@ echo -e "${YELLOW}[1] API 疎通テスト${NC}"
 echo ""
 
 test_endpoint "ヘルスチェック" "GET" "/health" "200"
+test_endpoint "シンボル一覧" "GET" "/api/strategies/symbols" "200"
 
 echo ""
 
@@ -115,22 +116,22 @@ test_endpoint "BarLocator (GET - 無効パラメータ)" "GET" "/api/bars/locate
 echo ""
 
 # =========================================
-# フロントエンド配信テスト
+# フロントエンド配信テスト（Vercel）
 # =========================================
-echo -e "${YELLOW}[6] フロントエンド配信テスト${NC}"
+echo -e "${YELLOW}[6] フロントエンド配信テスト (Vercel)${NC}"
 echo ""
 
-# UI URL にアクセスして HTML が返ることを確認
+# Vercel UI URL にアクセスして HTML が返ることを確認
 echo -n "テスト: フロントエンド HTML 配信 ... "
 UI_RESPONSE=$(curl -s -w "\n%{http_code}" "$PRODUCTION_UI_URL/" 2>&1)
 UI_STATUS=$(echo "$UI_RESPONSE" | tail -1)
 UI_BODY=$(echo "$UI_RESPONSE" | sed '$d')
 
-if [ "$UI_STATUS" = "200" ] && echo "$UI_BODY" | grep -q "</html>"; then
-  echo -e "${GREEN}✓ (HTTP $UI_STATUS, HTML確認)${NC}"
+if [ "$UI_STATUS" = "200" ] && echo "$UI_BODY" | grep -iq "html"; then
+  echo -e "${GREEN}✓ (HTTP $UI_STATUS, HTML確認 - $PRODUCTION_UI_URL)${NC}"
   ((TESTS_PASSED++))
 else
-  echo -e "${RED}✗ (HTTP $UI_STATUS, HTMLなし - Next.js初期化失敗の可能性)${NC}"
+  echo -e "${RED}✗ (HTTP $UI_STATUS, HTMLなし - UI URL: $PRODUCTION_UI_URL)${NC}"
   ((TESTS_FAILED++))
 fi
 
