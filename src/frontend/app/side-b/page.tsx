@@ -174,16 +174,36 @@ export default function SideBDashboard() {
           throw new Error(data.error || "リサーチ生成に失敗しました");
         }
 
-        // リサーチ結果をフォーマット
+        // リサーチ結果をフォーマット（featureVector → 人間可読テキスト）
         const research = data.research;
+        const fv = research?.featureVector;
+        const snap = research?.ohlcvSnapshot;
+
+        // featureVectorの解釈
+        const trendDir = fv?.trendDirection > 60 ? "上昇 📈" : fv?.trendDirection < 40 ? "下降 📉" : "横ばい ➡️";
+        const trendStr = fv?.trendStrength > 60 ? "強い" : fv?.trendStrength < 40 ? "弱い" : "中程度";
+        const volatility = fv?.volatilityLevel > 60 ? "高ボラ ⚡" : fv?.volatilityLevel < 40 ? "低ボラ 🔇" : "通常";
+        const rsi = fv?.rsiLevel ?? 0;
+        const rsiLabel = rsi > 70 ? "買われすぎ ⚠️" : rsi < 30 ? "売られすぎ ⚠️" : "中立";
+        const macdLabel = fv?.macdMomentum > 60 ? "強気" : fv?.macdMomentum < 40 ? "弱気" : "中立";
+        const supportNearby = fv?.supportProximity > 70 ? "近い ⚡" : fv?.supportProximity > 40 ? "中距離" : "遠い";
+        const resistNearby = fv?.resistanceProximity > 70 ? "近い ⚡" : fv?.resistanceProximity > 40 ? "中距離" : "遠い";
+        const decimals = snap?.latestPrice > 100 ? 2 : 5;
+
         const content = `🔬 **${symbol} マーケットリサーチ**\n\n` +
-          `📊 **市場状況**: ${research?.analysis?.marketCondition || "分析中"}\n` +
-          `📈 **トレンド**: ${research?.analysis?.trend || "不明"}\n` +
-          `💪 **強度**: ${research?.analysis?.strength || "N/A"}\n\n` +
-          `🎯 **主要レベル**:\n` +
-          `• サポート: ${research?.keyLevels?.support?.join(", ") || "N/A"}\n` +
-          `• レジスタンス: ${research?.keyLevels?.resistance?.join(", ") || "N/A"}\n\n` +
-          `📝 **サマリー**: ${research?.summary || "リサーチ完了"}\n\n` +
+          `📊 **市場状況**: ${trendStr}${trendDir}トレンド\n` +
+          `💪 **トレンド強度**: ${fv?.trendStrength?.toFixed(0) ?? "?"}/100 (${trendStr})\n` +
+          `📈 **トレンド方向**: ${fv?.trendDirection?.toFixed(0) ?? "?"}/100 (${trendDir})\n\n` +
+          `🔄 **モメンタム**:\n` +
+          `• RSI: ${rsi.toFixed(0)} (${rsiLabel})\n` +
+          `• MACD: ${fv?.macdMomentum?.toFixed(0) ?? "?"}/100 (${macdLabel})\n\n` +
+          `📐 **ボラティリティ**: ${fv?.volatilityLevel?.toFixed(0) ?? "?"}/100 (${volatility})\n\n` +
+          `🎯 **価格構造**:\n` +
+          `• サポート距離: ${fv?.supportProximity?.toFixed(0) ?? "?"}/100 (${supportNearby})\n` +
+          `• レジスタンス距離: ${fv?.resistanceProximity?.toFixed(0) ?? "?"}/100 (${resistNearby})\n` +
+          (snap ? `• 直近価格: ${snap.latestPrice?.toFixed(decimals)}\n` : "") +
+          (snap ? `• レンジ: ${snap.recentLow?.toFixed(decimals)} - ${snap.recentHigh?.toFixed(decimals)}\n` : "") +
+          `\n📝 **サマリー**: ${trendStr}${trendDir}、RSI=${rsi.toFixed(0)}、ボラ=${volatility}\n\n` +
           `次のステップ: 「${symbol}のプランを作成」と入力してください。`;
 
         aiResponse = {
@@ -352,8 +372,8 @@ export default function SideBDashboard() {
               >
                 <div
                   className={`max-w-[85%] rounded-2xl px-4 py-3 ${msg.role === "user"
-                      ? "bg-purple-600 text-white"
-                      : "bg-slate-700 text-gray-200"
+                    ? "bg-purple-600 text-white"
+                    : "bg-slate-700 text-gray-200"
                     }`}
                 >
                   <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
