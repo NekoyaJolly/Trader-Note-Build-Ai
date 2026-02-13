@@ -199,7 +199,28 @@ export class MarketDataService {
     symbol: string,
     timeframe: string = '15m'
   ): Promise<MarketData> {
-    // API が設定されていない場合はエラー
+    // 1. cTrader 利用可能なら優先
+    if (this.isCTraderAvailable()) {
+      try {
+        console.log(`[MarketDataService] cTrader優先: ${symbol} ${timeframe} ×1`);
+        const bars = await this.ctraderDataService!.fetchTrendbars(
+          this.ctraderAccountId!,
+          symbol,
+          timeframe,
+          1,
+        );
+        if (bars.length > 0) {
+          const marketData = this.convertCTraderBars(bars, symbol, timeframe)[0];
+          this.calculateIndicators(marketData);
+          return marketData;
+        }
+        console.warn(`[MarketDataService] cTraderから空データ → Twelve Dataにフォールバック`);
+      } catch (error) {
+        console.warn(`[MarketDataService] cTraderエラー → Twelve Dataにフォールバック:`, error);
+      }
+    }
+
+    // 2. Twelve Data フォールバック
     if (!this.isApiConfigured()) {
       throw new Error('市場APIが設定されていません。.envのAPI_URLとMARKET_API_KEYを確認してください。');
     }
