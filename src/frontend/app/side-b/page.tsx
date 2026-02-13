@@ -1,432 +1,493 @@
 /**
- * Side-B: AI取引プランダッシュボード
- * 
- * TradeAssistant-AI の入り口ページ
- * - AIによる日次取引プラン生成
- * - 仮想トレード実行・記録
- * - AI用トレードノートによる学習ループ
- * 
- * デザイン方針:
- * - AI主体のため、AIの意思表示エリア（チャット風）がメイン
- * - フェーズカードはアイコンサイズで横並び
- * 
+ * Side-B: AI Agent Dashboard
+ *
+ * 自律型トレーディング AI のダッシュボード
+ * - エージェント状態・サイクル・勝率
+ * - 思考ログ（リアルタイム更新）
+ * - 現在の戦略
+ * - トレード結果 + 学び
+ *
  * @see docs/side-b/TradeAssistant-AI.md
  */
 
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 
-// フェーズ定義
-// status: ready = 実装済み, planned = 開発中
-const phases = [
-  {
-    id: "research",
-    icon: "🔬",
-    label: "Research",
-    status: "ready",
-    gradient: "from-purple-500 to-violet-600",
-    href: null, // チャットから実行
-  },
-  {
-    id: "plan",
-    icon: "📋",
-    label: "Plan",
-    status: "ready",
-    gradient: "from-indigo-500 to-purple-600",
-    href: null, // チャットから実行
-  },
-  {
-    id: "trade",
-    icon: "📊",
-    label: "Trade",
-    status: "ready", // Phase B 実装完了！
-    gradient: "from-blue-500 to-indigo-600",
-    href: "/side-b/trades",
-  },
-  {
-    id: "note",
-    icon: "📝",
-    label: "Note",
-    status: "ready", // Phase C 実装完了！
-    gradient: "from-cyan-500 to-blue-600",
-    href: "/side-b/ai-notes",
-  },
-  {
-    id: "settings",
-    icon: "⚙️",
-    label: "Settings",
-    status: "ready", // Phase D スケジューラー設定
-    gradient: "from-slate-500 to-slate-600",
-    href: "/side-b/settings",
-  },
-];
-
-// チャットメッセージ型
-interface ChatMessage {
-  role: "ai" | "user";
-  content: string;
-  timestamp: Date;
-  data?: unknown; // API レスポンスデータ（オプション）
-}
-
-// APIベースURL（同一オリジン: 相対パス）
+// APIベースURL
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "") + "/api/side-b";
 
-// ユーザー入力からシンボルと意図を解析
-function parseUserIntent(message: string): {
-  intent: "research" | "plan" | "unknown";
-  symbol: string | null;
-  timeframe: string;
-} {
-  const msg = message.toLowerCase();
+// 自動更新間隔（ミリ秒）
+const REFRESH_INTERVAL = 15_000;
 
-  // シンボル検出（よく使われる通貨ペアや商品）
-  const symbolPatterns = [
-    /xauusd|gold|ゴールド|金/i,
-    /eurusd|eur\/usd|ユーロドル/i,
-    /usdjpy|usd\/jpy|ドル円/i,
-    /gbpusd|gbp\/usd|ポンドドル/i,
-  ];
+// --- 型定義 ---
 
-  let symbol: string | null = null;
-  if (symbolPatterns[0].test(msg)) symbol = "XAU/USD";
-  else if (symbolPatterns[1].test(msg)) symbol = "EUR/USD";
-  else if (symbolPatterns[2].test(msg)) symbol = "USD/JPY";
-  else if (symbolPatterns[3].test(msg)) symbol = "GBP/USD";
-
-  // デフォルトシンボル（指定がない場合）
-  if (!symbol) symbol = "XAU/USD";
-
-  // 時間足検出
-  let timeframe = "15m";
-  if (/1h|1時間|hourly/i.test(msg)) timeframe = "1h";
-  else if (/4h|4時間/i.test(msg)) timeframe = "4h";
-  else if (/5m|5分/i.test(msg)) timeframe = "5m";
-  else if (/30m|30分/i.test(msg)) timeframe = "30m";
-  else if (/daily|日足|1d/i.test(msg)) timeframe = "1d";
-
-  // 意図検出
-  let intent: "research" | "plan" | "unknown" = "unknown";
-  if (/research|リサーチ|分析|調査|市場|マーケット/i.test(msg)) {
-    intent = "research";
-  } else if (/plan|プラン|計画|戦略|エントリー|トレード/i.test(msg)) {
-    intent = "plan";
-  } else if (/xauusd|eurusd|usdjpy|gbpusd|gold|ゴールド|ドル|ユーロ|ポンド/i.test(msg)) {
-    // シンボルが含まれていればリサーチと推定
-    intent = "research";
-  }
-
-  return { intent, symbol, timeframe };
+interface AgentStatus {
+  isRunning: boolean;
+  state: string;
+  cycleCount: number;
+  watchSymbols: string[];
+  memory: {
+    currentState: string;
+    recentTradeResults: TradeResult[];
+    openPositions: OpenPosition[];
+    lessons: string[];
+    cycleCount: number;
+  };
 }
 
+interface TradeResult {
+  id: string;
+  symbol: string;
+  direction: "long" | "short";
+  entryPrice: number;
+  exitPrice: number;
+  pnlPips: number;
+  outcome: "win" | "loss" | "breakeven";
+  exitReason: string;
+  reflection?: string;
+  tradedAt: string;
+  closedAt: string;
+}
+
+interface OpenPosition {
+  tradeId: string;
+  symbol: string;
+  direction: "long" | "short";
+  entryPrice: number;
+  currentPnlPips: number;
+}
+
+interface ThinkingLogEntry {
+  timestamp: string;
+  cycle: number;
+  state: string;
+  action: string;
+  reasoning: string;
+}
+
+// --- ステート色マッピング ---
+
+const stateConfig: Record<string, { color: string; bg: string; label: string; icon: string }> = {
+  IDLE: { color: "text-gray-400", bg: "bg-gray-500/20", label: "待機中", icon: "⏸" },
+  SESSION_OPEN: { color: "text-yellow-400", bg: "bg-yellow-500/20", label: "戦略立案中", icon: "🧠" },
+  MONITORING: { color: "text-green-400", bg: "bg-green-500/20", label: "監視中", icon: "👁" },
+  EVALUATING_ENTRY: { color: "text-blue-400", bg: "bg-blue-500/20", label: "エントリー評価", icon: "🎯" },
+  MANAGING_POSITION: { color: "text-purple-400", bg: "bg-purple-500/20", label: "ポジション管理", icon: "📊" },
+  REFLECTING: { color: "text-cyan-400", bg: "bg-cyan-500/20", label: "振り返り中", icon: "🔄" },
+  REVISING_STRATEGY: { color: "text-orange-400", bg: "bg-orange-500/20", label: "戦略修正", icon: "📝" },
+};
+
+function getStateDisplay(state: string) {
+  return stateConfig[state] || { color: "text-gray-400", bg: "bg-gray-500/20", label: state, icon: "❓" };
+}
+
+// --- ナビリンク ---
+
+const navLinks = [
+  { icon: "📊", label: "Trades", href: "/side-b/trades" },
+  { icon: "📝", label: "AI Notes", href: "/side-b/ai-notes" },
+  { icon: "🔍", label: "Comparison", href: "/side-b/comparison" },
+  { icon: "⚙️", label: "Settings", href: "/side-b/settings" },
+];
+
 export default function SideBDashboard() {
-  // チャット状態
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      role: "ai",
-      content: "TradeAssistant-AI です。市場分析と取引プラン生成の準備ができています。\n\n現在利用可能な機能:\n• 🔬 Market Research（市場リサーチ）\n• 📋 Trade Plan Generation（取引プラン生成）\n\nどのような分析をお手伝いしましょうか？",
-      timestamp: new Date(),
-    },
-  ]);
-  const [inputValue, setInputValue] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState<AgentStatus | null>(null);
+  const [thinkingLog, setThinkingLog] = useState<ThinkingLogEntry[]>([]);
+  const [lessons, setLessons] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isStarting, setIsStarting] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // メッセージ追加時に自動スクロール
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  // --- データ取得 ---
 
-  // メッセージ送信ハンドラ
-  const handleSend = async () => {
-    if (!inputValue.trim()) return;
-
-    const userMessage: ChatMessage = {
-      role: "user",
-      content: inputValue,
-      timestamp: new Date(),
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
-    const userInput = inputValue;
-    setInputValue("");
-    setIsTyping(true);
-
+  const fetchData = useCallback(async () => {
     try {
-      // ユーザー意図を解析
-      const { intent, symbol, timeframe } = parseUserIntent(userInput);
+      const [statusRes, logRes, lessonsRes] = await Promise.allSettled([
+        fetch(`${API_BASE}/agent/status`),
+        fetch(`${API_BASE}/agent/thinking-log?limit=20`),
+        fetch(`${API_BASE}/agent/lessons`),
+      ]);
 
-      let aiResponse: ChatMessage;
-
-      if (intent === "research") {
-        // Research API 呼び出し
-        const response = await fetch(`${API_BASE}/research`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ symbol, timeframe }),
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.error || "リサーチ生成に失敗しました");
-        }
-
-        // リサーチ結果をフォーマット（featureVector → 人間可読テキスト）
-        const research = data.research;
-        const fv = research?.featureVector;
-        const snap = research?.ohlcvSnapshot;
-
-        // featureVectorの解釈
-        const trendDir = fv?.trendDirection > 60 ? "上昇 📈" : fv?.trendDirection < 40 ? "下降 📉" : "横ばい ➡️";
-        const trendStr = fv?.trendStrength > 60 ? "強い" : fv?.trendStrength < 40 ? "弱い" : "中程度";
-        const volatility = fv?.volatilityLevel > 60 ? "高ボラ ⚡" : fv?.volatilityLevel < 40 ? "低ボラ 🔇" : "通常";
-        const rsi = fv?.rsiLevel ?? 0;
-        const rsiLabel = rsi > 70 ? "買われすぎ ⚠️" : rsi < 30 ? "売られすぎ ⚠️" : "中立";
-        const macdLabel = fv?.macdMomentum > 60 ? "強気" : fv?.macdMomentum < 40 ? "弱気" : "中立";
-        const supportNearby = fv?.supportProximity > 70 ? "近い ⚡" : fv?.supportProximity > 40 ? "中距離" : "遠い";
-        const resistNearby = fv?.resistanceProximity > 70 ? "近い ⚡" : fv?.resistanceProximity > 40 ? "中距離" : "遠い";
-        const decimals = snap?.latestPrice > 100 ? 2 : 5;
-
-        const content = `🔬 **${symbol} マーケットリサーチ**\n\n` +
-          `📊 **市場状況**: ${trendStr}${trendDir}トレンド\n` +
-          `💪 **トレンド強度**: ${fv?.trendStrength?.toFixed(0) ?? "?"}/100 (${trendStr})\n` +
-          `📈 **トレンド方向**: ${fv?.trendDirection?.toFixed(0) ?? "?"}/100 (${trendDir})\n\n` +
-          `🔄 **モメンタム**:\n` +
-          `• RSI: ${rsi.toFixed(0)} (${rsiLabel})\n` +
-          `• MACD: ${fv?.macdMomentum?.toFixed(0) ?? "?"}/100 (${macdLabel})\n\n` +
-          `📐 **ボラティリティ**: ${fv?.volatilityLevel?.toFixed(0) ?? "?"}/100 (${volatility})\n\n` +
-          `🎯 **価格構造**:\n` +
-          `• サポート距離: ${fv?.supportProximity?.toFixed(0) ?? "?"}/100 (${supportNearby})\n` +
-          `• レジスタンス距離: ${fv?.resistanceProximity?.toFixed(0) ?? "?"}/100 (${resistNearby})\n` +
-          (snap ? `• 直近価格: ${snap.latestPrice?.toFixed(decimals)}\n` : "") +
-          (snap ? `• レンジ: ${snap.recentLow?.toFixed(decimals)} - ${snap.recentHigh?.toFixed(decimals)}\n` : "") +
-          `\n📝 **サマリー**: ${trendStr}${trendDir}、RSI=${rsi.toFixed(0)}、ボラ=${volatility}\n\n` +
-          `次のステップ: 「${symbol}のプランを作成」と入力してください。`;
-
-        aiResponse = {
-          role: "ai",
-          content,
-          timestamp: new Date(),
-          data: research,
-        };
-
-      } else if (intent === "plan") {
-        // Plan API 呼び出し
-        const response = await fetch(`${API_BASE}/plans`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ symbol, timeframe }),
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.error || "プラン生成に失敗しました");
-        }
-
-        // プラン結果をフォーマット
-        const plan = data.plan;
-        const scenario = plan?.scenarios?.[0];
-        const content = `📋 **${symbol} トレードプラン**\n\n` +
-          `🎯 **推奨シナリオ**: ${scenario?.direction?.toUpperCase() || "N/A"}\n` +
-          `📍 **エントリー**: ${scenario?.entry?.price || "N/A"}\n` +
-          `🛡️ **ストップ**: ${scenario?.stopLoss?.price || "N/A"}\n` +
-          `🎁 **ターゲット**: ${scenario?.takeProfit?.[0]?.price || "N/A"}\n` +
-          `⚖️ **リスクリワード**: ${scenario?.riskReward || "N/A"}\n\n` +
-          `📊 **確信度**: ${scenario?.confidence || "N/A"}%\n` +
-          `📝 **根拠**: ${scenario?.reasoning || "プラン生成完了"}\n\n` +
-          `次のステップ: Trade タブで仮想トレードを作成できます。`;
-
-        aiResponse = {
-          role: "ai",
-          content,
-          timestamp: new Date(),
-          data: plan,
-        };
-
-      } else {
-        // 不明な意図
-        aiResponse = {
-          role: "ai",
-          content: "ご質問ありがとうございます。\n\n以下のコマンドをお試しください:\n\n" +
-            "🔬 **リサーチ**: 「XAUUSDの市場分析」「ゴールドをリサーチ」\n" +
-            "📋 **プラン**: 「XAUUSDのプランを作成」「ゴールドのエントリー戦略」\n\n" +
-            "対応シンボル: XAU/USD, EUR/USD, USD/JPY, GBP/USD",
-          timestamp: new Date(),
-        };
+      if (statusRes.status === "fulfilled" && statusRes.value.ok) {
+        setStatus(await statusRes.value.json());
+      }
+      if (logRes.status === "fulfilled" && logRes.value.ok) {
+        const data = await logRes.value.json();
+        setThinkingLog(data.log || []);
+      }
+      if (lessonsRes.status === "fulfilled" && lessonsRes.value.ok) {
+        const data = await lessonsRes.value.json();
+        setLessons(data.lessons || []);
       }
 
-      setMessages((prev) => [...prev, aiResponse]);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "エラーが発生しました";
-      const aiResponse: ChatMessage = {
-        role: "ai",
-        content: `⚠️ エラーが発生しました:\n${errorMessage}\n\nしばらく待ってから再度お試しください。`,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, aiResponse]);
+      setError(null);
+    } catch (err) {
+      setError("データ取得に失敗しました");
+      console.error("[Dashboard] fetch error:", err);
     } finally {
-      setIsTyping(false);
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, REFRESH_INTERVAL);
+    return () => clearInterval(interval);
+  }, [fetchData]);
+
+  // --- エージェント制御 ---
+
+  const startAgent = async () => {
+    setIsStarting(true);
+    try {
+      const res = await fetch(`${API_BASE}/agent/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (res.ok) {
+        await fetchData();
+      }
+    } catch (err) {
+      console.error("[Dashboard] start error:", err);
+    } finally {
+      setIsStarting(false);
     }
   };
 
-  // Enterキーで送信
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
+  const stopAgent = async () => {
+    setIsStopping(true);
+    try {
+      const res = await fetch(`${API_BASE}/agent/stop`, { method: "POST" });
+      if (res.ok) {
+        await fetchData();
+      }
+    } catch (err) {
+      console.error("[Dashboard] stop error:", err);
+    } finally {
+      setIsStopping(false);
     }
   };
+
+  // --- 計算 ---
+
+  const recentResults = status?.memory?.recentTradeResults || [];
+  const winCount = recentResults.filter((r) => r.outcome === "win").length;
+  const lossCount = recentResults.filter((r) => r.outcome === "loss").length;
+  const winRate = recentResults.length > 0 ? Math.round((winCount / recentResults.length) * 100) : 0;
+  const totalPnl = recentResults.reduce((acc, r) => acc + r.pnlPips, 0);
+  const agentState = status?.memory?.currentState || "IDLE";
+  const stateDisplay = getStateDisplay(agentState);
+  const isRunning = status?.isRunning || false;
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-gray-400">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen">
-      <main className="max-w-4xl w-full mx-auto px-3 sm:px-4 md:px-6 py-6 sm:py-8 md:py-12">
-        {/* ヘッダー */}
-        <div className="text-center mb-6 sm:mb-8">
-          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-2 sm:mb-4">
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-cyan-400">
-              TradeAssistant-AI
-            </span>
-          </h1>
-          <p className="text-xs sm:text-sm md:text-lg text-gray-400">
-            AI主導の市場分析・取引プラン生成
-          </p>
+      <main className="max-w-6xl w-full mx-auto px-3 sm:px-4 md:px-6 py-6 sm:py-8">
+        {/* ===== ヘッダー ===== */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold text-white">
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-cyan-400">
+                TradeAssistant-AI
+              </span>
+            </h1>
+            <p className="text-sm text-gray-400 mt-1">
+              自律型トレーディングAI ダッシュボード
+            </p>
+          </div>
+
+          {/* ナビゲーション */}
+          <div className="flex items-center gap-2">
+            {navLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-white hover:bg-slate-700/50 transition-colors"
+              >
+                <span>{link.icon}</span>
+                <span className="hidden sm:inline">{link.label}</span>
+              </Link>
+            ))}
+          </div>
         </div>
 
-        {/* フェーズアイコン（横並び） */}
-        <div className="flex justify-center gap-3 sm:gap-4 md:gap-6 mb-6 sm:mb-8">
-          {phases.map((phase) => {
-            // リンク先がある場合はLinkコンポーネントを使用
-            const PhaseIcon = (
-              <div className="relative group">
-                {/* アイコン */}
-                <div
-                  className={`w-10 h-10 sm:w-12 sm:h-12 md:w-14 md:h-14 bg-gradient-to-br ${phase.gradient} rounded-lg flex items-center justify-center text-white text-lg sm:text-xl md:text-2xl shadow-lg`}
-                >
-                  {phase.icon}
-                </div>
-                {/* ラベル */}
-                <span className="block text-[10px] sm:text-xs text-gray-400 mt-1 text-center">
-                  {phase.label}
+        {/* ===== ステータスバー ===== */}
+        <div className="card-surface rounded-xl p-4 sm:p-5 mb-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            {/* 左: 状態 + コントロール */}
+            <div className="flex items-center gap-4">
+              {/* 状態インジケータ */}
+              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${stateDisplay.bg}`}>
+                <span className="text-lg">{stateDisplay.icon}</span>
+                <span className={`text-sm font-medium ${stateDisplay.color}`}>
+                  {stateDisplay.label}
                 </span>
-                {/* ステータスバッジ */}
-                {phase.status === "ready" && (
-                  <span className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-slate-900" />
+                {isRunning && (
+                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
                 )}
               </div>
-            );
 
-            // リンクがある場合
-            if (phase.href) {
-              return (
-                <Link
-                  key={phase.id}
-                  href={phase.href}
-                  className="transition-all duration-300 hover:scale-110"
-                  title={phase.label}
+              {/* Start/Stop ボタン */}
+              {!isRunning ? (
+                <button
+                  onClick={startAgent}
+                  disabled={isStarting}
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-gradient-to-r from-green-500 to-emerald-600 text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-all"
                 >
-                  {PhaseIcon}
-                </Link>
-              );
-            }
+                  {isStarting ? (
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    "▶"
+                  )}
+                  <span>{isStarting ? "起動中..." : "Start"}</span>
+                </button>
+              ) : (
+                <button
+                  onClick={stopAgent}
+                  disabled={isStopping}
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-gradient-to-r from-red-500 to-rose-600 text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-all"
+                >
+                  {isStopping ? (
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    "⏹"
+                  )}
+                  <span>{isStopping ? "停止中..." : "Stop"}</span>
+                </button>
+              )}
+            </div>
 
-            // リンクがない場合（planned または チャットから実行）
-            return (
-              <button
-                key={phase.id}
-                className={`transition-all duration-300 ${phase.status === "planned" ? "opacity-50 cursor-not-allowed" : "hover:scale-110"
-                  }`}
-                disabled={phase.status === "planned"}
-                title={phase.label}
-              >
-                {PhaseIcon}
-              </button>
-            );
-          })}
+            {/* 右: メトリクス */}
+            <div className="flex items-center gap-4 sm:gap-6">
+              <div className="text-center">
+                <p className="text-xs text-gray-500">サイクル</p>
+                <p className="text-lg font-bold text-white">#{status?.memory?.cycleCount || 0}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-xs text-gray-500">勝率</p>
+                <p className={`text-lg font-bold ${winRate >= 50 ? "text-green-400" : winRate > 0 ? "text-red-400" : "text-gray-400"}`}>
+                  {winRate}%
+                </p>
+              </div>
+              <div className="text-center">
+                <p className="text-xs text-gray-500">損益</p>
+                <p className={`text-lg font-bold ${totalPnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  {totalPnl >= 0 ? "+" : ""}{totalPnl.toFixed(1)}
+                </p>
+              </div>
+              <div className="text-center">
+                <p className="text-xs text-gray-500">W / L</p>
+                <p className="text-lg font-bold text-white">
+                  <span className="text-green-400">{winCount}</span>
+                  <span className="text-gray-500"> / </span>
+                  <span className="text-red-400">{lossCount}</span>
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* 監視シンボル */}
+          {status?.watchSymbols && status.watchSymbols.length > 0 && (
+            <div className="flex items-center gap-2 mt-3 pt-3 border-t border-slate-700/50">
+              <span className="text-xs text-gray-500">監視中:</span>
+              {status.watchSymbols.map((s) => (
+                <span
+                  key={s}
+                  className="px-2 py-0.5 rounded-md bg-slate-700/50 text-xs text-gray-300 font-mono"
+                >
+                  {s}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {error && (
+            <div className="mt-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30">
+              <p className="text-xs text-red-400">{error}</p>
+            </div>
+          )}
         </div>
 
-        {/* AIチャットエリア（カード3枚分の高さ） */}
-        <div className="card-surface rounded-xl overflow-hidden" style={{ minHeight: "420px" }}>
-          {/* チャットヘッダー */}
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-700 bg-slate-800/50">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-cyan-500 flex items-center justify-center">
-              <span className="text-white text-sm">🤖</span>
+        {/* ===== メインコンテンツ (2カラム) ===== */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+          {/* 左: 思考ログ */}
+          <div className="card-surface rounded-xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50">
+              <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+                <span>🧠</span> 思考ログ
+              </h2>
+              <span className="text-xs text-gray-500">{thinkingLog.length}件</span>
             </div>
-            <div>
-              <p className="text-sm font-medium text-white">TradeAssistant-AI</p>
-              <p className="text-xs text-gray-400">
-                {isTyping ? "入力中..." : "オンライン"}
-              </p>
-            </div>
-          </div>
-
-          {/* メッセージエリア */}
-          <div className="h-72 sm:h-80 overflow-y-auto px-4 py-4 space-y-4">
-            {messages.map((msg, idx) => (
-              <div
-                key={idx}
-                className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                <div
-                  className={`max-w-[85%] rounded-2xl px-4 py-3 ${msg.role === "user"
-                    ? "bg-purple-600 text-white"
-                    : "bg-slate-700 text-gray-200"
-                    }`}
-                >
-                  <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                  <p className="text-[10px] mt-1 opacity-60">
-                    {msg.timestamp.toLocaleTimeString("ja-JP", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
+            <div className="h-80 sm:h-96 overflow-y-auto">
+              {thinkingLog.length === 0 ? (
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-sm text-gray-500">
+                    {isRunning ? "ログを待っています..." : "エージェントを起動してください"}
                   </p>
                 </div>
-              </div>
-            ))}
-            {isTyping && (
-              <div className="flex justify-start">
-                <div className="bg-slate-700 rounded-2xl px-4 py-3">
-                  <div className="flex gap-1">
-                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
-                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0.1s" }} />
-                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0.2s" }} />
-                  </div>
+              ) : (
+                <div className="divide-y divide-slate-700/30">
+                  {thinkingLog.map((entry, idx) => {
+                    const entryState = getStateDisplay(entry.state);
+                    return (
+                      <div key={idx} className="px-4 py-3 hover:bg-slate-700/20 transition-colors">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${entryState.bg} ${entryState.color}`}>
+                            {entryState.icon} {entryState.label}
+                          </span>
+                          <span className="text-[10px] text-gray-500">
+                            #{entry.cycle} • {new Date(entry.timestamp).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                        </div>
+                        <p className="text-sm text-white font-medium">{entry.action}</p>
+                        {entry.reasoning && (
+                          <p className="text-xs text-gray-400 mt-1 line-clamp-2">{entry.reasoning}</p>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* 入力エリア */}
-          <div className="px-4 py-3 border-t border-slate-700 bg-slate-800/30">
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="メッセージを入力..."
-                className="flex-1 bg-slate-700 text-white text-sm rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500 placeholder-gray-400"
-              />
-              <button
-                onClick={handleSend}
-                disabled={!inputValue.trim() || isTyping}
-                className="w-10 h-10 rounded-full bg-gradient-to-r from-purple-500 to-cyan-500 text-white flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed hover:scale-105 transition-transform"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                </svg>
-              </button>
+              )}
             </div>
           </div>
+
+          {/* 右: 現在の戦略 + オープンポジション */}
+          <div className="card-surface rounded-xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50">
+              <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+                <span>📋</span> ポジション & 戦略
+              </h2>
+            </div>
+            <div className="h-80 sm:h-96 overflow-y-auto">
+              {/* オープンポジション */}
+              {(status?.memory?.openPositions?.length ?? 0) > 0 && (
+                <div className="px-4 py-3 border-b border-slate-700/30">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">
+                    オープンポジション
+                  </p>
+                  {status?.memory?.openPositions?.map((pos) => (
+                    <div
+                      key={pos.tradeId}
+                      className="flex items-center justify-between py-2 px-3 rounded-lg bg-slate-700/30 mb-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs font-bold ${pos.direction === "long" ? "text-green-400" : "text-red-400"}`}>
+                          {pos.direction === "long" ? "▲ LONG" : "▼ SHORT"}
+                        </span>
+                        <span className="text-sm text-white font-mono">{pos.symbol}</span>
+                      </div>
+                      <div className="text-right">
+                        <p className={`text-sm font-bold ${pos.currentPnlPips >= 0 ? "text-green-400" : "text-red-400"}`}>
+                          {pos.currentPnlPips >= 0 ? "+" : ""}{pos.currentPnlPips.toFixed(1)} pips
+                        </p>
+                        <p className="text-[10px] text-gray-500">@{pos.entryPrice}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 学び */}
+              <div className="px-4 py-3">
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">
+                  💡 AIの学び ({lessons.length})
+                </p>
+                {lessons.length === 0 ? (
+                  <p className="text-xs text-gray-500">まだ学びがありません</p>
+                ) : (
+                  <div className="space-y-2">
+                    {lessons.slice(-5).reverse().map((lesson, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-start gap-2 px-3 py-2 rounded-lg bg-cyan-500/5 border border-cyan-500/10"
+                      >
+                        <span className="text-cyan-400 text-xs mt-0.5">•</span>
+                        <p className="text-xs text-gray-300">{lesson}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ===== 最近のトレード結果 ===== */}
+        <div className="card-surface rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50">
+            <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+              <span>📈</span> 最近のトレード結果
+            </h2>
+            <Link
+              href="/side-b/trades"
+              className="text-xs text-purple-400 hover:text-purple-300 transition-colors"
+            >
+              すべて表示 →
+            </Link>
+          </div>
+          {recentResults.length === 0 ? (
+            <div className="px-4 py-8 text-center">
+              <p className="text-sm text-gray-500">まだトレード結果がありません</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-700/30">
+              {recentResults.slice(0, 5).map((result) => (
+                <div key={result.id} className="px-4 py-3 hover:bg-slate-700/20 transition-colors">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className="text-lg">
+                        {result.outcome === "win" ? "✅" : result.outcome === "loss" ? "❌" : "➖"}
+                      </span>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-mono text-white">{result.symbol}</span>
+                          <span className={`text-xs font-bold ${result.direction === "long" ? "text-green-400" : "text-red-400"}`}>
+                            {result.direction === "long" ? "▲" : "▼"} {result.direction.toUpperCase()}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-gray-500">
+                          {new Date(result.tradedAt).toLocaleDateString("ja-JP", { month: "2-digit", day: "2-digit" })}
+                          {" "}{result.exitReason}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className={`text-sm font-bold ${result.pnlPips >= 0 ? "text-green-400" : "text-red-400"}`}>
+                        {result.pnlPips >= 0 ? "+" : ""}{result.pnlPips.toFixed(1)} pips
+                      </p>
+                    </div>
+                  </div>
+                  {result.reflection && (
+                    <div className="mt-2 ml-9 px-3 py-2 rounded-lg bg-slate-700/30">
+                      <p className="text-xs text-gray-400">{result.reflection}</p>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* フッター */}
-        <div className="text-center mt-6 sm:mt-8 text-xs sm:text-sm text-gray-500">
-          <p>TradeAssistant-AI • Side-B</p>
+        <div className="text-center mt-6 text-xs text-gray-500">
+          <p>
+            TradeAssistant-AI • 自動更新 {REFRESH_INTERVAL / 1000}秒
+            <span className="ml-2 inline-block w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+          </p>
         </div>
       </main>
     </div>

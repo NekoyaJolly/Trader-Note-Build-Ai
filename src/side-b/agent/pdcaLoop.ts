@@ -33,6 +33,7 @@ import {
 } from './agentMemory';
 import type { MarketAnalysis } from '../models/marketAnalysis';
 import { isFXMarketOpen } from '../utils/marketHours';
+import { reflectionAI } from '../services/reflectionAIService';
 
 // ===========================================
 // 型定義
@@ -353,21 +354,47 @@ export class PDCALoop {
 
     /**
      * REFLECTING — 振り返り
-     * 直近のトレード結果を分析し、学びを記録
+     * Reflection AI を呼び出し、トレード結果を分析し、学びを記録
      */
-    private handleReflecting(): PDCATickResult {
+    private async handleReflecting(): Promise<PDCATickResult> {
         const results = this.memory.getRecentResults();
         const winRate = this.memory.getWinRate();
 
-        // 学びの自動生成（Phase 3で: Reflection AI が詳細分析）
+        // 最新のトレード結果に対して Reflection AI を実行
         const lastResult = results[0];
         if (lastResult && !lastResult.reflection) {
-            // 簡易反省（Phase 3で本格的なReflection AIに置き換え）
-            const simpleReflection = lastResult.outcome === 'loss'
-                ? `${lastResult.symbol} ${lastResult.direction} で ${lastResult.pnlPips.toFixed(1)}pips の損失。${lastResult.exitReason}による決済。`
-                : `${lastResult.symbol} ${lastResult.direction} で ${lastResult.pnlPips.toFixed(1)}pips の利益。戦略通りの展開。`;
+            try {
+                // 当日の戦略コンテキストを取得
+                const strategyContext = this.memory.getTodayStrategy(lastResult.symbol);
+                const existingLessons = this.memory.getLessons();
 
-            lastResult.reflection = simpleReflection;
+                const reflection = await reflectionAI.reflect({
+                    trade: lastResult,
+                    strategyContext,
+                    existingLessons,
+                });
+
+                // 振り返りをトレード結果に保存
+                lastResult.reflection = reflection.summary;
+
+                // 学びを AgentMemory に追加
+                for (const lesson of reflection.output.lessons) {
+                    this.memory.addLesson(lesson);
+                }
+
+                this.addThinkingLog('REFLECTING',
+                    `Reflection AI 完了: スコア${reflection.output.overallScore} / ${reflection.output.lessons.length}件の学び`,
+                    `${reflection.output.outcomeAnalysis} | エントリー:${reflection.output.entryEvaluation.rating} | 決済:${reflection.output.exitEvaluation.rating}`);
+
+                this.log(`  Reflection: スコア${reflection.output.overallScore} | ${reflection.output.lessons.join(' / ')}`);
+            } catch (error) {
+                console.error('[PDCALoop] Reflection AI エラー:', error);
+                // フォールバック: 簡易振り返り
+                const simpleReflection = lastResult.outcome === 'loss'
+                    ? `${lastResult.symbol} ${lastResult.direction} で ${lastResult.pnlPips.toFixed(1)}pips の損失。${lastResult.exitReason}による決済。`
+                    : `${lastResult.symbol} ${lastResult.direction} で ${lastResult.pnlPips.toFixed(1)}pips の利益。戦略通りの展開。`;
+                lastResult.reflection = simpleReflection;
+            }
         }
 
         this.addThinkingLog('MONITORING', `振り返り完了 — 勝率: ${winRate.toFixed(0)}%`,

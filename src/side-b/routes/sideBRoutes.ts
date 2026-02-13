@@ -483,6 +483,21 @@ router.get(
   sideBController.getThinkingLog
 );
 
+/**
+ * GET /api/side-b/agent/reflections
+ * 直近のトレード振り返りを取得
+ *
+ * Query:
+ * - limit?: number (default: 10)
+ */
+router.get('/agent/reflections', sideBController.getReflections);
+
+/**
+ * GET /api/side-b/agent/lessons
+ * 学習メモを取得
+ */
+router.get('/agent/lessons', sideBController.getLessons);
+
 // ===========================================
 // 比較分析（Phase D）
 // ===========================================

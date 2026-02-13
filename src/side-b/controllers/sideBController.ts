@@ -50,7 +50,7 @@ import {
 import type { ExitReason, UpdatePortfolioSettings } from '../models';
 import { MarketDataService } from '../../services/marketDataService';
 import { getSideBScheduler, type SideBSchedulerConfig } from '../jobs/sideBScheduler';
-import { pdcaLoop } from '../agent';
+import { pdcaLoop, agentMemory } from '../agent';
 
 // MarketDataService インスタンス（OHLCV自動取得用）
 const marketDataService = new MarketDataService();
@@ -991,6 +991,61 @@ export class SideBController {
     } catch (error) {
       console.error('[SideBController] getThinkingLog error:', error);
       res.status(500).json({ error: '思考ログの取得に失敗しました' });
+    }
+  };
+
+  /**
+   * GET /api/side-b/agent/reflections
+   * 直近のトレード振り返りを取得
+   */
+  getReflections = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 10;
+      const results = agentMemory.getRecentResults();
+      const reflections = results
+        .filter(r => r.reflection)
+        .slice(0, limit)
+        .map(r => ({
+          tradeId: r.id,
+          symbol: r.symbol,
+          direction: r.direction,
+          pnlPips: r.pnlPips,
+          outcome: r.outcome,
+          reflection: r.reflection,
+          tradedAt: r.tradedAt,
+          closedAt: r.closedAt,
+        }));
+
+      res.json({ reflections, count: reflections.length });
+    } catch (error) {
+      console.error('[SideBController] getReflections error:', error);
+      res.status(500).json({ error: '振り返りの取得に失敗しました' });
+    }
+  };
+
+  /**
+   * GET /api/side-b/agent/lessons
+   * 学習メモを取得
+   */
+  getLessons = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const lessons = agentMemory.getLessons();
+      const winRate = agentMemory.getWinRate();
+      const recentResults = agentMemory.getRecentResults();
+
+      res.json({
+        lessons,
+        count: lessons.length,
+        stats: {
+          winRate,
+          totalTrades: recentResults.length,
+          wins: recentResults.filter(r => r.outcome === 'win').length,
+          losses: recentResults.filter(r => r.outcome === 'loss').length,
+        },
+      });
+    } catch (error) {
+      console.error('[SideBController] getLessons error:', error);
+      res.status(500).json({ error: '学習メモの取得に失敗しました' });
     }
   };
 
