@@ -182,7 +182,12 @@ router.get('/filters/indicators', async (_req: Request, res: Response) => {
 router.get('/symbols', async (_req: Request, res: Response) => {
   try {
     // cTraderアカウント取得（モジュールレベルのprismaインスタンスを使用）
+    // 注意: レガシーエントリ (accountId が "ctrader_" プレフィックス) を除外
+    // parseInt で NaN/0 になり、cTrader API が CH_CTID_TRADER_ACCOUNT_NOT_FOUND を返すため
     const ctraderToken = await prisma.cTraderToken.findFirst({
+      where: {
+        NOT: { accountId: { startsWith: 'ctrader_' } },
+      },
       orderBy: { lastConnectedAt: 'desc' },
     });
 
@@ -190,6 +195,16 @@ router.get('/symbols', async (_req: Request, res: Response) => {
       return res.status(503).json({
         success: false,
         error: 'cTraderアカウントが未登録です。設定からcTrader連携を行ってください。',
+      });
+    }
+
+    // accountIdが有効な数値であることを確認
+    const numericAccountId = parseInt(ctraderToken.accountId, 10);
+    if (isNaN(numericAccountId) || numericAccountId <= 0) {
+      console.error('[StrategyRoutes] 無効なaccountId:', ctraderToken.accountId);
+      return res.status(503).json({
+        success: false,
+        error: `無効なcTraderアカウントID: ${ctraderToken.accountId}。再ログインしてください。`,
       });
     }
 
