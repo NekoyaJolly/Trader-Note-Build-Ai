@@ -911,11 +911,46 @@ export const ThinkingLogResponseSchema = z.object({
 export type ThinkingLogResponse = z.infer<typeof ThinkingLogResponseSchema>;
 
 /**
+ * 個別の学び
+ */
+export const LessonEntrySchema = z.object({
+  text: z.string(),
+  symbol: z.string(),
+  tradeId: z.string().optional(),
+  addedAt: z.string(),
+});
+
+export type LessonEntry = z.infer<typeof LessonEntrySchema>;
+
+/**
+ * 確信ルール（繰り返し出現した学び）
+ */
+export const ConsolidatedLessonSchema = z.object({
+  text: z.string(),
+  symbol: z.string(),
+  count: z.number(),
+  firstSeen: z.string(),
+  lastSeen: z.string(),
+  sourceTexts: z.array(z.string()),
+});
+
+export type ConsolidatedLessonType = z.infer<typeof ConsolidatedLessonSchema>;
+
+/**
+ * シンボル別学習データ
+ */
+export const SymbolLessonsSchema = z.object({
+  entries: z.array(LessonEntrySchema),
+  consolidated: z.array(ConsolidatedLessonSchema),
+});
+
+/**
  * GET /api/side-b/agent/lessons レスポンス
  */
 export const LessonsResponseSchema = z.object({
-  lessons: z.array(z.string()),
-  count: z.number(),
+  lessonsBySymbol: z.record(z.string(), SymbolLessonsSchema),
+  totalEntries: z.number(),
+  totalConsolidated: z.number(),
   stats: z.object({
     winRate: z.number(),
     totalTrades: z.number(),

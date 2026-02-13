@@ -24,6 +24,9 @@ export {
     type TradeResultSummary,
     type ActivePosition,
     type TodayStrategyContext,
+    type LessonEntry,
+    type ConsolidatedLesson,
+    type SymbolLessons,
 } from './agentMemory';
 
 export {

@@ -54,7 +54,9 @@ interface AgentStatus {
     currentState: string;
     recentTradeResults: TradeResult[];
     openPositions: OpenPosition[];
-    lessons: string[];
+    lessonsBySymbol: Record<string, { entries: Array<{ text: string }>; consolidated: Array<{ text: string; count: number }> }>;
+    totalEntries: number;
+    totalConsolidated: number;
     cycleCount: number;
   };
 }
@@ -149,9 +151,21 @@ export default function SideBDashboard() {
       }
 
       if (lessonsRes.status === "fulfilled") {
-        const data = await safeFetchJson<{ lessons: string[] }>(lessonsRes.value);
-        if (data) {
-          setLessons(data.lessons || []);
+        const data = await safeFetchJson<{
+          lessonsBySymbol: Record<string, { entries: Array<{ text: string }>; consolidated: Array<{ text: string; count: number }> }>;
+        }>(lessonsRes.value);
+        if (data && data.lessonsBySymbol) {
+          // 新構造からフラットなリストに変換（確信ルール優先）
+          const flatLessons: string[] = [];
+          for (const sl of Object.values(data.lessonsBySymbol)) {
+            for (const c of sl.consolidated) {
+              flatLessons.push(`📌 ${c.text} (${c.count}回確認)`);
+            }
+            for (const e of sl.entries) {
+              flatLessons.push(e.text);
+            }
+          }
+          setLessons(flatLessons);
         } else {
           hasError = true;
         }

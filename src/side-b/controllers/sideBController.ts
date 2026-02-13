@@ -1030,13 +1030,40 @@ export class SideBController {
    */
   getLessons = async (_req: Request, res: Response): Promise<void> => {
     try {
-      const lessons = agentMemory.getLessons();
+      const lessonsBySymbolMap = agentMemory.getAllLessonsBySymbol();
+      const stats = agentMemory.getLessonStats();
       const winRate = agentMemory.getWinRate();
       const recentResults = agentMemory.getRecentResults();
 
+      // Map を plain object に変換（JSON シリアライズ用）
+      const lessonsBySymbol: Record<string, {
+        entries: Array<{ text: string; symbol: string; tradeId?: string; addedAt: string }>;
+        consolidated: Array<{ text: string; symbol: string; count: number; firstSeen: string; lastSeen: string; sourceTexts: string[] }>;
+      }> = {};
+
+      for (const [symbol, sl] of lessonsBySymbolMap) {
+        lessonsBySymbol[symbol] = {
+          entries: sl.entries.map(e => ({
+            text: e.text,
+            symbol: e.symbol,
+            tradeId: e.tradeId,
+            addedAt: e.addedAt.toISOString(),
+          })),
+          consolidated: sl.consolidated.map(c => ({
+            text: c.text,
+            symbol: c.symbol,
+            count: c.count,
+            firstSeen: c.firstSeen.toISOString(),
+            lastSeen: c.lastSeen.toISOString(),
+            sourceTexts: c.sourceTexts,
+          })),
+        };
+      }
+
       res.json({
-        lessons,
-        count: lessons.length,
+        lessonsBySymbol,
+        totalEntries: stats.totalEntries,
+        totalConsolidated: stats.totalConsolidated,
         stats: {
           winRate,
           totalTrades: recentResults.length,

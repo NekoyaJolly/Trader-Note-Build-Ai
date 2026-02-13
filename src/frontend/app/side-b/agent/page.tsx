@@ -33,9 +33,31 @@ interface ThinkingLogEntry {
     data?: ThinkingLogEntryData;
 }
 
-interface LessonsData {
-    lessons: string[];
+interface LessonEntryData {
+    text: string;
+    symbol: string;
+    tradeId?: string;
+    addedAt: string;
+}
+
+interface ConsolidatedLessonData {
+    text: string;
+    symbol: string;
     count: number;
+    firstSeen: string;
+    lastSeen: string;
+    sourceTexts: string[];
+}
+
+interface SymbolLessonsData {
+    entries: LessonEntryData[];
+    consolidated: ConsolidatedLessonData[];
+}
+
+interface LessonsData {
+    lessonsBySymbol: Record<string, SymbolLessonsData>;
+    totalEntries: number;
+    totalConsolidated: number;
     stats: {
         winRate: number;
         totalTrades: number;
@@ -151,22 +173,41 @@ export default function AgentDetailPage() {
                     </div>
                 )}
 
-                {/* 学び一覧 */}
-                {lessonsData && lessonsData.lessons.length > 0 && (
+                {/* 学び一覧（シンボル別） */}
+                {lessonsData && (lessonsData.totalConsolidated > 0 || lessonsData.totalEntries > 0) && (
                     <div className="card-surface rounded-xl overflow-hidden mb-6">
                         <div className="px-4 py-3 border-b border-slate-700/50">
                             <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-                                <span>💡</span> AI の学び ({lessonsData.count})
+                                <span>💡</span> AI の学び (📌{lessonsData.totalConsolidated} / 📝{lessonsData.totalEntries})
                             </h2>
                         </div>
-                        <div className="px-4 py-3 space-y-2 max-h-60 overflow-y-auto">
-                            {lessonsData.lessons.map((lesson, idx) => (
-                                <div
-                                    key={idx}
-                                    className="flex items-start gap-2 px-3 py-2 rounded-lg bg-cyan-500/5 border border-cyan-500/10"
-                                >
-                                    <span className="text-cyan-400 text-xs mt-0.5 shrink-0">{idx + 1}.</span>
-                                    <p className="text-xs text-gray-300">{lesson}</p>
+                        <div className="px-4 py-3 space-y-4 max-h-80 overflow-y-auto">
+                            {Object.entries(lessonsData.lessonsBySymbol).map(([symbol, sl]) => (
+                                <div key={symbol}>
+                                    <p className="text-xs font-bold text-purple-400 mb-2">{symbol}</p>
+                                    {/* 確信ルール */}
+                                    {sl.consolidated.map((c, idx) => (
+                                        <div
+                                            key={`c-${idx}`}
+                                            className="flex items-start gap-2 px-3 py-2 mb-1 rounded-lg bg-amber-500/10 border border-amber-500/20"
+                                        >
+                                            <span className="text-amber-400 text-xs mt-0.5 shrink-0">📌</span>
+                                            <div>
+                                                <p className="text-xs text-amber-200 font-medium">{c.text}</p>
+                                                <p className="text-[10px] text-gray-500">{c.count}回確認</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {/* 通常の学び */}
+                                    {sl.entries.slice(-5).map((e, idx) => (
+                                        <div
+                                            key={`e-${idx}`}
+                                            className="flex items-start gap-2 px-3 py-2 mb-1 rounded-lg bg-cyan-500/5 border border-cyan-500/10"
+                                        >
+                                            <span className="text-cyan-400 text-xs mt-0.5 shrink-0">📝</span>
+                                            <p className="text-xs text-gray-300">{e.text}</p>
+                                        </div>
+                                    ))}
                                 </div>
                             ))}
                         </div>

@@ -379,7 +379,7 @@ export class PDCALoop {
 
                 // 学びを AgentMemory に追加
                 for (const lesson of reflection.output.lessons) {
-                    this.memory.addLesson(lesson);
+                    await this.memory.addLesson(lesson, lastResult.symbol, lastResult.id);
                 }
 
                 this.addThinkingLog('REFLECTING',

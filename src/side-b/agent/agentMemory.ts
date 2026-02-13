@@ -6,11 +6,13 @@
  * 設計思想:
  * - 直近のトレード結果を保持（メモリ内 + DB）
  * - 今日の戦略コンテキストを保持
- * - 学習メモ（lessons）を蓄積し、次のPDCAサイクルで参照
+ * - 学習メモ（lessons）をシンボル別に蓄積し、次のPDCAサイクルで参照
+ * - 繰り返し出現する学びは「確信ルール」として永続保存
  * - PDCA循環の「Act」フェーズで更新される
  */
 
 import type { MarketAnalysis } from '../models/marketAnalysis';
+import { lessonSimilarityService } from '../services/lessonSimilarityService';
 
 // ===========================================
 // 型定義
@@ -77,6 +79,49 @@ export type AgentState =
     | 'REFLECTING'          // トレード完了 → 振り返り
     | 'REVISING_STRATEGY';  // 市場変化 → 戦略修正
 
+// ===========================================
+// 学習メモ型定義
+// ===========================================
+
+/** 個別の学び */
+export interface LessonEntry {
+    /** 学びのテキスト */
+    text: string;
+    /** 対象シンボル */
+    symbol: string;
+    /** 元トレードID */
+    tradeId?: string;
+    /** 追加日時 */
+    addedAt: Date;
+}
+
+/** 確信ルール（繰り返し出現した学び） */
+export interface ConsolidatedLesson {
+    /** 統合された代表テキスト */
+    text: string;
+    /** 対象シンボル（'*' = 銘柄横断） */
+    symbol: string;
+    /** 出現回数 */
+    count: number;
+    /** 初回出現日時 */
+    firstSeen: Date;
+    /** 最新出現日時 */
+    lastSeen: Date;
+    /** 統合前の元テキスト群 */
+    sourceTexts: string[];
+}
+
+/** シンボル別学習ストア */
+export interface SymbolLessons {
+    /** 通常の学び（max 30, FIFO） */
+    entries: LessonEntry[];
+    /** 確信ルール（消えない） */
+    consolidated: ConsolidatedLesson[];
+}
+
+/** シンボル別 entries の最大件数 */
+const MAX_ENTRIES_PER_SYMBOL = 30;
+
 /**
  * エージェントメモリ（メイン型）
  */
@@ -96,8 +141,8 @@ export interface AgentMemoryState {
     /** 今日の戦略コンテキスト（シンボルごと） */
     todayStrategies: Map<string, TodayStrategyContext>;
 
-    /** 学習メモ（AIが自分で書く） */
-    lessons: string[];
+    /** 学習メモ — シンボル別管理 */
+    lessonsBySymbol: Map<string, SymbolLessons>;
 
     /** PDCAサイクルカウンター */
     cycleCount: number;
@@ -123,7 +168,7 @@ export class AgentMemory {
             recentTradeResults: [],
             openPositions: [],
             todayStrategies: new Map(),
-            lessons: [],
+            lessonsBySymbol: new Map(),
             cycleCount: 0,
         };
     }
@@ -207,18 +252,144 @@ export class AgentMemory {
         this.state.todayStrategies.clear();
     }
 
-    // --- 学習メモ ---
+    // --- 学習メモ（シンボル別管理） ---
 
-    addLesson(lesson: string): void {
-        this.state.lessons.push(lesson);
-        if (this.state.lessons.length > 20) {
-            this.state.lessons = this.state.lessons.slice(-20); // 最新20件を保持
+    /**
+     * シンボル別の SymbolLessons を取得（なければ初期化）
+     */
+    private getOrCreateSymbolLessons(symbol: string): SymbolLessons {
+        let sl = this.state.lessonsBySymbol.get(symbol);
+        if (!sl) {
+            sl = { entries: [], consolidated: [] };
+            this.state.lessonsBySymbol.set(symbol, sl);
         }
-        console.log(`[AgentMemory] 学習メモ追加: ${lesson}`);
+        return sl;
     }
 
+    /**
+     * 学びを追加（シンボル別 + AI類似判定 + 確信ルール昇格）
+     * 
+     * @param lesson - 学びのテキスト
+     * @param symbol - 対象シンボル
+     * @param tradeId - 元トレードID（任意）
+     */
+    async addLesson(lesson: string, symbol: string, tradeId?: string): Promise<void> {
+        const sl = this.getOrCreateSymbolLessons(symbol);
+        const now = new Date();
+
+        // 1. 既存の entries + consolidated テキストと類似判定
+        const allExistingTexts = [
+            ...sl.entries.map(e => e.text),
+            ...sl.consolidated.map(c => c.text),
+        ];
+
+        try {
+            const similarResult = await lessonSimilarityService.findSimilar(lesson, allExistingTexts);
+
+            if (similarResult) {
+                const entriesCount = sl.entries.length;
+
+                if (similarResult.index < entriesCount) {
+                    // entries 内の既存レッスンと類似 → 確信ルールに昇格
+                    const matchedEntry = sl.entries[similarResult.index];
+                    const mergedText = similarResult.mergedText || lesson;
+
+                    sl.consolidated.push({
+                        text: mergedText,
+                        symbol,
+                        count: 2,
+                        firstSeen: matchedEntry.addedAt,
+                        lastSeen: now,
+                        sourceTexts: [matchedEntry.text, lesson],
+                    });
+
+                    // 元の entry を削除（consolidated に移動したため）
+                    sl.entries.splice(similarResult.index, 1);
+
+                    console.log(`[AgentMemory] 📌 確信ルール昇格 [${symbol}]: "${mergedText}" (類似度${similarResult.similarity}%)`);
+                    return;
+                } else {
+                    // consolidated 内の既存ルールと類似 → カウント増加
+                    const consolidatedIndex = similarResult.index - entriesCount;
+                    const existing = sl.consolidated[consolidatedIndex];
+
+                    existing.count++;
+                    existing.lastSeen = now;
+                    existing.sourceTexts.push(lesson);
+                    // 統合テキストが提供されていれば更新
+                    if (similarResult.mergedText) {
+                        existing.text = similarResult.mergedText;
+                    }
+
+                    console.log(`[AgentMemory] 📌 確信ルール強化 [${symbol}]: "${existing.text}" (${existing.count}回目, 類似度${similarResult.similarity}%)`);
+                    return;
+                }
+            }
+        } catch (error) {
+            console.warn('[AgentMemory] 類似判定エラー（通常追加にフォールバック）:', error);
+        }
+
+        // 2. 類似なし → 通常の entry として追加
+        sl.entries.push({
+            text: lesson,
+            symbol,
+            tradeId,
+            addedAt: now,
+        });
+
+        // 3. FIFO: max 30 件を超えたら古いものから削除
+        if (sl.entries.length > MAX_ENTRIES_PER_SYMBOL) {
+            sl.entries = sl.entries.slice(-MAX_ENTRIES_PER_SYMBOL);
+        }
+
+        console.log(`[AgentMemory] 📝 学習メモ追加 [${symbol}]: "${lesson}" (${sl.entries.length}/${MAX_ENTRIES_PER_SYMBOL})`);
+    }
+
+    /**
+     * 全シンボル横断で lessons テキストを返す（後方互換）
+     */
     getLessons(): string[] {
-        return this.state.lessons;
+        const allLessons: string[] = [];
+        for (const [, sl] of this.state.lessonsBySymbol) {
+            for (const c of sl.consolidated) {
+                allLessons.push(`📌 ${c.text}`);
+            }
+            for (const e of sl.entries) {
+                allLessons.push(e.text);
+            }
+        }
+        return allLessons;
+    }
+
+    /**
+     * 特定シンボルの学びを取得
+     */
+    getLessonsForSymbol(symbol: string): SymbolLessons {
+        return this.getOrCreateSymbolLessons(symbol);
+    }
+
+    /**
+     * 全シンボルの学習データを取得（API用）
+     */
+    getAllLessonsBySymbol(): Map<string, SymbolLessons> {
+        return this.state.lessonsBySymbol;
+    }
+
+    /**
+     * 学習統計を取得
+     */
+    getLessonStats(): { totalEntries: number; totalConsolidated: number; symbolCount: number } {
+        let totalEntries = 0;
+        let totalConsolidated = 0;
+        for (const [, sl] of this.state.lessonsBySymbol) {
+            totalEntries += sl.entries.length;
+            totalConsolidated += sl.consolidated.length;
+        }
+        return {
+            totalEntries,
+            totalConsolidated,
+            symbolCount: this.state.lessonsBySymbol.size,
+        };
     }
 
     // --- サイクル管理 ---
@@ -244,19 +415,49 @@ export class AgentMemory {
 
     /**
      * Strategy Thinker に渡す学習メモを取得
-     * 直近の失敗からの学びを抽出
+     * 
+     * 優先順位:
+     * 1. 📌 そのシンボルの確信ルール（consolidated）← 最優先
+     * 2. 📝 そのシンボルの直近 entries（最新 10 件）
+     * 3. 💡 他シンボルの確信ルール（クロスシンボル学習）
+     * 4. 💬 直近の負けトレードの振り返り
      */
-    getLessonsForStrategy(): string[] {
-        const lessons = [...this.state.lessons];
+    getLessonsForStrategy(symbol?: string): string[] {
+        const lessons: string[] = [];
+        const targetSymbol = symbol || this.state.watchSymbols[0] || 'XAUUSD';
+        const targetSL = this.state.lessonsBySymbol.get(targetSymbol);
 
-        // 直近の負けトレードからも学びを追加
+        // 1. そのシンボルの確信ルール
+        if (targetSL) {
+            for (const c of targetSL.consolidated) {
+                lessons.push(`📌 [確信ルール/${c.symbol}] ${c.text} (${c.count}回確認)`);
+            }
+        }
+
+        // 2. そのシンボルの直近 entries（最新 10 件）
+        if (targetSL) {
+            const recentEntries = targetSL.entries.slice(-10);
+            for (const e of recentEntries) {
+                lessons.push(`📝 [${e.symbol}] ${e.text}`);
+            }
+        }
+
+        // 3. 他シンボルの確信ルール（クロスシンボル学習）
+        for (const [sym, sl] of this.state.lessonsBySymbol) {
+            if (sym === targetSymbol) continue;
+            for (const c of sl.consolidated) {
+                lessons.push(`💡 [他銘柄/${c.symbol}] ${c.text} (${c.count}回確認)`);
+            }
+        }
+
+        // 4. 直近の負けトレードからの学び
         const recentLosses = this.state.recentTradeResults
             .filter(r => r.outcome === 'loss')
             .slice(0, 3);
 
         for (const loss of recentLosses) {
             if (loss.reflection) {
-                lessons.push(`[直近の損失] ${loss.symbol}: ${loss.reflection}`);
+                lessons.push(`💬 [直近の損失/${loss.symbol}] ${loss.reflection}`);
             }
         }
 
