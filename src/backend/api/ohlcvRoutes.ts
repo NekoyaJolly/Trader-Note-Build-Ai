@@ -244,7 +244,7 @@ router.delete('/presets/:id', async (req: Request, res: Response) => {
  */
 router.get('/candles', async (req: Request, res: Response) => {
   try {
-    const { symbol, timeframe, limit } = req.query;
+    const { symbol, timeframe, limit, startDate, endDate } = req.query;
 
     if (!symbol || !timeframe) {
       res.status(400).json({
@@ -254,17 +254,39 @@ router.get('/candles', async (req: Request, res: Response) => {
       return;
     }
 
-    const maxRecords = Math.min(parseInt(limit as string) || 200, 1000);
+    // 期間指定がある場合は limit を緩和（バックテストチャート用）
+    const hasDateRange = startDate && endDate;
+    const maxRecords = hasDateRange
+      ? Math.min(parseInt(limit as string) || 10000, 10000)
+      : Math.min(parseInt(limit as string) || 200, 1000);
 
-    const candles = await ohlcvRepository.findMany({
+    const filter: Parameters<typeof ohlcvRepository.findMany>[0] = {
       symbol: symbol as string,
       timeframe: timeframe as string,
       limit: maxRecords,
-      orderBy: 'desc',
-    });
+      orderBy: hasDateRange ? 'asc' : 'desc',
+    };
 
-    // 時系列順（古い→新しい）に並び替え
-    candles.reverse();
+    // 期間フィルター
+    if (startDate) {
+      const start = new Date(startDate as string);
+      if (!isNaN(start.getTime())) {
+        filter.startTime = start;
+      }
+    }
+    if (endDate) {
+      const end = new Date(endDate as string);
+      if (!isNaN(end.getTime())) {
+        filter.endTime = end;
+      }
+    }
+
+    const candles = await ohlcvRepository.findMany(filter);
+
+    // 時系列順（古い→新しい）に並び替え（descで取得した場合のみ）
+    if (!hasDateRange) {
+      candles.reverse();
+    }
 
     res.json({
       success: true,

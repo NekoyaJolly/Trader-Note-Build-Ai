@@ -38,6 +38,7 @@ import type { Strategy, BacktestResult, BacktestTradeEvent } from "@/types/strat
 import { MonteCarloTab } from "@/components/MonteCarloTab";
 import { NoteBacktestTab } from "@/components/NoteBacktestTab";
 import PatternAnalysisPanel from "@/components/strategy/PatternAnalysisPanel";
+import BacktestChartTab from "@/components/BacktestChartTab";
 
 // ============================================
 // 型定義
@@ -272,7 +273,7 @@ export default function StrategyBacktestPage() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"summary" | "trades" | "history" | "walkforward" | "filter" | "montecarlo" | "notebacktest" | "pattern">("summary");
+  const [activeTab, setActiveTab] = useState<"summary" | "trades" | "chart" | "history" | "walkforward" | "filter" | "montecarlo" | "notebacktest" | "pattern">("summary");
 
   // ウォークフォワードテストステート
   const [walkForwardParams, setWalkForwardParams] = useState({
@@ -862,8 +863,8 @@ export default function StrategyBacktestPage() {
                       type="button"
                       onClick={() => handleParamChange('lotMode', 'fixed')}
                       className={`flex-1 px-2 py-1 rounded text-xs font-medium transition-colors ${backtestParams.lotMode === 'fixed'
-                          ? 'bg-cyan-600/30 text-cyan-400 border border-cyan-500/50'
-                          : 'bg-slate-700/50 text-gray-400 border border-slate-600/50 hover:bg-slate-600/50'
+                        ? 'bg-cyan-600/30 text-cyan-400 border border-cyan-500/50'
+                        : 'bg-slate-700/50 text-gray-400 border border-slate-600/50 hover:bg-slate-600/50'
                         }`}
                     >
                       固定ロット
@@ -872,8 +873,8 @@ export default function StrategyBacktestPage() {
                       type="button"
                       onClick={() => handleParamChange('lotMode', 'variable')}
                       className={`flex-1 px-2 py-1 rounded text-xs font-medium transition-colors ${backtestParams.lotMode === 'variable'
-                          ? 'bg-cyan-600/30 text-cyan-400 border border-cyan-500/50'
-                          : 'bg-slate-700/50 text-gray-400 border border-slate-600/50 hover:bg-slate-600/50'
+                        ? 'bg-cyan-600/30 text-cyan-400 border border-cyan-500/50'
+                        : 'bg-slate-700/50 text-gray-400 border border-slate-600/50 hover:bg-slate-600/50'
                         }`}
                     >
                       リスク計算
@@ -903,8 +904,8 @@ export default function StrategyBacktestPage() {
                           type="button"
                           onClick={() => handleParamChange('riskType', 'percent')}
                           className={`flex-1 px-2 py-0.5 rounded text-xs transition-colors ${backtestParams.riskType === 'percent'
-                              ? 'bg-amber-600/30 text-amber-400 border border-amber-500/50'
-                              : 'bg-slate-700/50 text-gray-500 border border-slate-600/50'
+                            ? 'bg-amber-600/30 text-amber-400 border border-amber-500/50'
+                            : 'bg-slate-700/50 text-gray-500 border border-slate-600/50'
                             }`}
                         >
                           割合(%)
@@ -913,8 +914,8 @@ export default function StrategyBacktestPage() {
                           type="button"
                           onClick={() => handleParamChange('riskType', 'amount')}
                           className={`flex-1 px-2 py-0.5 rounded text-xs transition-colors ${backtestParams.riskType === 'amount'
-                              ? 'bg-amber-600/30 text-amber-400 border border-amber-500/50'
-                              : 'bg-slate-700/50 text-gray-500 border border-slate-600/50'
+                            ? 'bg-amber-600/30 text-amber-400 border border-amber-500/50'
+                            : 'bg-slate-700/50 text-gray-500 border border-slate-600/50'
                             }`}
                         >
                           固定金額
@@ -1112,6 +1113,15 @@ export default function StrategyBacktestPage() {
                         }`}
                     >
                       トレード ({result.trades.length})
+                    </button>
+                    <button
+                      onClick={() => setActiveTab("chart")}
+                      className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${activeTab === "chart"
+                        ? "text-emerald-400 border-b-2 border-emerald-400"
+                        : "text-gray-400 hover:text-gray-200"
+                        }`}
+                    >
+                      📊 チャート
                     </button>
                     <button
                       onClick={() => setActiveTab("filter")}
@@ -1881,6 +1891,14 @@ export default function StrategyBacktestPage() {
                       strategyName={strategy.name}
                       symbol={strategy.symbol}
                       side={strategy.side}
+                    />
+                  )}
+
+                  {/* チャート可視化タブ */}
+                  {activeTab === "chart" && strategy && (
+                    <BacktestChartTab
+                      result={result}
+                      strategy={strategy}
                     />
                   )}
                 </div>

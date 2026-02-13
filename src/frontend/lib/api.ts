@@ -2439,6 +2439,52 @@ export async function fetchAndCacheOhlcvData(
 }
 
 // ========================================
+// OHLCV チャートデータ取得 API
+// ========================================
+
+/**
+ * バックテストチャート用 OHLCV データ取得
+ * GET /api/ohlcv/candles?symbol=...&timeframe=...&startDate=...&endDate=...
+ * 
+ * @param params - 取得パラメータ
+ * @returns OHLCVデータ配列（timestamp は ms 単位）
+ */
+export async function fetchOhlcvCandles(params: {
+  symbol: string;
+  timeframe: string;
+  startDate: string;
+  endDate: string;
+}): Promise<{ timestamp: number; open: number; high: number; low: number; close: number; volume: number }[]> {
+  const searchParams = new URLSearchParams({
+    symbol: params.symbol,
+    timeframe: params.timeframe,
+    startDate: params.startDate,
+    endDate: params.endDate,
+  });
+
+  const response = await fetch(
+    `${API_BASE_URL}/api/ohlcv/candles?${searchParams.toString()}`,
+    { cache: "no-store" }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "OHLCVデータの取得に失敗しました");
+  }
+
+  const payload = await response.json();
+  // API returns ISO string timestamps, convert to ms for CandlestickChart
+  return (payload.data || []).map((c: { timestamp: string; open: number; high: number; low: number; close: number; volume: number }) => ({
+    timestamp: new Date(c.timestamp).getTime(),
+    open: c.open,
+    high: c.high,
+    low: c.low,
+    close: c.close,
+    volume: c.volume,
+  }));
+}
+
+// ========================================
 // インジケータープロファイル API
 // ========================================
 
