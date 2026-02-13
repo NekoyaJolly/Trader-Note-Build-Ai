@@ -85,8 +85,8 @@ export class ResearchAIService {
 
   constructor() {
     this.apiKey = process.env.AI_API_KEY || '';
-    this.model = 'gpt-4o-mini';  // Research AIはコスト最適化のため軽量モデル
-    this.baseURL = config.ai.baseURL || 'https://api.openai.com/v1';
+    this.model = process.env.AI_MODEL || 'gpt-4o-mini';
+    this.baseURL = process.env.AI_BASE_URL || config.ai.baseURL || 'https://api.openai.com/v1';
   }
 
   /**
