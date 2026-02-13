@@ -198,7 +198,7 @@ export class AIOrchestrator {
     console.log(`[Orchestrator] プラン生成開始: ${symbol} / ${dateStr} (forceRefresh=${forceRefresh})`);
 
     try {
-      // 1. 既存プランチェック（forceRefreshの場合はスキップ）
+      // 1. 既存プランチェック（forceRefreshの場合は削除して再生成）
       if (!forceRefresh) {
         const existingPlan = await this.planRepo.findByDateAndSymbol(date, symbol);
         if (existingPlan) {
@@ -209,6 +209,13 @@ export class AIOrchestrator {
             cached: true,
             tokenUsage: 0,
           };
+        }
+      } else {
+        // forceRefresh: 既存プランを削除して再生成
+        const existingPlan = await this.planRepo.findByDateAndSymbol(date, symbol);
+        if (existingPlan) {
+          console.log(`[Orchestrator] forceRefresh: 既存プラン削除: ${existingPlan.id}`);
+          await this.planRepo.delete(existingPlan.id);
         }
       }
 
