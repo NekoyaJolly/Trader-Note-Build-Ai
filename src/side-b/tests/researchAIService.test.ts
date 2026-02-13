@@ -17,7 +17,7 @@ global.fetch = jest.fn();
 
 describe('ResearchAIService', () => {
   let service: ResearchAIService;
-  
+
   const mockOhlcvData: OHLCVData[] = [
     { timestamp: new Date('2026-01-01T00:00:00Z'), open: 100, high: 105, low: 99, close: 103 },
     { timestamp: new Date('2026-01-01T00:15:00Z'), open: 103, high: 108, low: 102, close: 106 },
@@ -37,24 +37,33 @@ describe('ResearchAIService', () => {
 
   describe('generateResearch', () => {
     it('正常なAI応答を処理できる', async () => {
+      // MarketAnalysis 形式のモック（analysisToLegacyFeatureVector でfeatureVectorに変換される）
       const mockResponse = {
         choices: [{
           message: {
             content: JSON.stringify({
-              featureVector: {
+              regime: 'weak_uptrend',
+              direction: 'bullish',
+              volatility: 'medium',
+              confidence: 75,
+              quickScores: {
                 trendStrength: 70,
-                trendDirection: 80,
-                maAlignment: 60,
-                pricePosition: 55,
-                rsiLevel: 65,
-                macdMomentum: 50,
-                momentumDivergence: 20,
-                volatilityLevel: 45,
-                bbWidth: 40,
-                volatilityTrend: 55,
+                momentum: 65,
+                volatility: 45,
                 supportProximity: 30,
                 resistanceProximity: 70,
               },
+              reasoning: {
+                trendAnalysis: 'テストトレンド分析',
+                momentumAnalysis: 'テストモメンタム分析',
+                volatilityAnalysis: 'テストボラティリティ分析',
+                keyObservation: 'テスト観察',
+                riskFactors: ['テストリスク1'],
+              },
+              keyLevels: [
+                { price: 100, type: 'support', strength: 'strong', basis: 'テストサポート' },
+                { price: 110, type: 'resistance', strength: 'moderate', basis: 'テストレジスタンス' },
+              ],
             }),
           },
         }],
@@ -72,6 +81,7 @@ describe('ResearchAIService', () => {
         ohlcvData: mockOhlcvData,
       });
 
+      // analysisToLegacyFeatureVector は quickScores.trendStrength をそのまま使う
       expect(result.output.featureVector.trendStrength).toBe(70);
       expect(result.tokenUsage).toBe(500);
       expect(result.model).toBe('gpt-4o-mini');
@@ -133,20 +143,28 @@ describe('ResearchAIService', () => {
         choices: [{
           message: {
             content: JSON.stringify({
-              featureVector: {
+              regime: 'weak_uptrend',
+              direction: 'bullish',
+              volatility: 'medium',
+              confidence: 75,
+              quickScores: {
                 trendStrength: 70,
-                trendDirection: 80,
-                maAlignment: 60,
-                pricePosition: 55,
-                rsiLevel: 65,
-                macdMomentum: 50,
-                momentumDivergence: 20,
-                volatilityLevel: 45,
-                bbWidth: 40,
-                volatilityTrend: 55,
+                momentum: 65,
+                volatility: 45,
                 supportProximity: 30,
                 resistanceProximity: 70,
               },
+              reasoning: {
+                trendAnalysis: 'テスト',
+                momentumAnalysis: 'テスト',
+                volatilityAnalysis: 'テスト',
+                keyObservation: 'テスト',
+                riskFactors: ['テスト'],
+              },
+              keyLevels: [
+                { price: 100, type: 'support', strength: 'strong', basis: 'テスト' },
+                { price: 110, type: 'resistance', strength: 'moderate', basis: 'テスト' },
+              ],
             }),
           },
         }],
