@@ -17,10 +17,10 @@ export default function OnboardingIntro() {
   useEffect(() => {
     try {
       const flag = localStorage.getItem("hasOnboarded");
-      setShouldShow(!flag);
+      const next = !flag;
+      queueMicrotask(() => setShouldShow(next));
     } catch {
-      // localStorage 未対応環境でも安全に非表示とする
-      setShouldShow(false);
+      queueMicrotask(() => setShouldShow(false));
     }
   }, []);
 

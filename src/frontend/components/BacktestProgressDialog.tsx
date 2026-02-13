@@ -244,14 +244,14 @@ export function BacktestProgressDialog({
     return `${mins}分${secs}秒`;
   };
   
-  // インジケーターデータをrecharts用に変換
+  // インジケーターデータをrecharts用に変換（React Compiler 推論に合わせて progress を依存に）
   const getIndicatorChartData = useCallback((indicatorName: string) => {
     if (!progress?.indicators[indicatorName]) return [];
     return progress.indicators[indicatorName].map((v) => ({
       timestamp: new Date(v.timestamp).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }),
       value: v.value,
     }));
-  }, [progress?.indicators]);
+  }, [progress]);
   
   // 利用可能なインジケーター一覧を取得
   const availableIndicators = progress ? Object.keys(progress.indicators) : [];

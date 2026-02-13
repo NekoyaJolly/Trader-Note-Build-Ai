@@ -374,7 +374,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
     window.addEventListener("resize", handleResize);
 
-    setIsLoading(false);
+    queueMicrotask(() => setIsLoading(false));
 
     return () => {
       window.removeEventListener("resize", handleResize);

@@ -28,9 +28,9 @@ export default function AppShell({ children }: AppShellProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  // クライアントサイドでのみ初期化
+  // クライアントサイドでのみ初期化（非同期で setState して react-hooks ルール準拠）
   useEffect(() => {
-    setMounted(true);
+    queueMicrotask(() => setMounted(true));
   }, []);
 
   // サイドバートグル

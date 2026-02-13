@@ -49,6 +49,7 @@ import type {
   IndicatorMetadata,
   IndicatorConfig,
   IndicatorParams,
+  ParamConstraints,
   IndicatorId,
   IndicatorCategory,
 } from "@/types/indicator";
@@ -284,13 +285,12 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         const { INDICATOR_DEFINITIONS } = await import('@/lib/indicatorDefinitions');
         setIndicators(INDICATOR_DEFINITIONS.map(def => ({
           id: def.id,
-          name: def.name,
-          category: def.category,
+          displayName: def.name,
+          category: def.category as IndicatorCategory,
           description: def.description || '',
           defaultParams: def.defaultParams,
-          paramDescriptions: def.paramDescriptions,
-          paramConstraints: {} as any,
-        })) as any);
+          paramConstraints: {} as ParamConstraints,
+        })) as IndicatorMetadata[]);
       }
 
       // 設定の処理（成功時のみ）

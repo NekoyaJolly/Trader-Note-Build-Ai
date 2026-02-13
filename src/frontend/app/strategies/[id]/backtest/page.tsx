@@ -32,10 +32,9 @@ import {
   FilterAnalysisResult,
   FilterVerifyResult,
   FilterCondition,
-  AnalysisIndicator,
   CoverageCheckResult,
 } from "@/lib/api";
-import type { Strategy, BacktestResult, BacktestResultSummary, BacktestTradeEvent } from "@/types/strategy";
+import type { Strategy, BacktestResult, BacktestTradeEvent } from "@/types/strategy";
 import { MonteCarloTab } from "@/components/MonteCarloTab";
 import { NoteBacktestTab } from "@/components/NoteBacktestTab";
 import PatternAnalysisPanel from "@/components/strategy/PatternAnalysisPanel";

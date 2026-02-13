@@ -694,7 +694,7 @@ async function executeBacktestStage(
   // SL を pips に変換（可変ロット計算用）
   // ※ エントリー価格がまだ不明なので、data の中央値を暫定使用
   //    実際の計算はエントリー時に行う
-  const symbol = strategy.symbol;
+  // symbol は引数で渡される（リクエスト指定 or ストラテジー）
 
   // cTrader API からシンボルの digits を動的取得
   // digits が取れれば pipValue = 10^-(digits-1) で正確な値を使用

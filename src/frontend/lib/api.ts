@@ -7,7 +7,7 @@ import type {
   NotificationListItem,
   NotificationDetail,
 } from "@/types/notification";
-import type { NoteListItem, NoteDetail, NoteUpdatePayload, NoteStatusCounts, NoteStatus, NoteSummary } from "@/types/note";
+import type { NoteDetail, NoteUpdatePayload, NoteStatusCounts, NoteStatus, NoteSummary } from "@/types/note";
 
 /**
  * バックエンド API のベース URL
@@ -765,7 +765,6 @@ export async function fetchBacktestHistory(
 
 import type {
   Strategy,
-  StrategySummary,
   CreateStrategyRequest,
   UpdateStrategyRequest,
   StrategyStatus,

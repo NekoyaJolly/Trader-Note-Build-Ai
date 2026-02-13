@@ -262,18 +262,16 @@ function TimeSeriesChart({ data }: { data: TimeSeriesData[] }) {
     );
   }
 
-  // 累計PnLを計算
-  let humanCumulative = 0;
-  let aiCumulative = 0;
-  const cumulativeData = data.map(d => {
-    humanCumulative += d.humanPnL;
-    aiCumulative += d.aiPnL;
-    return {
-      ...d,
-      humanCumulative,
-      aiCumulative,
-    };
-  });
+  // 累計PnLを計算（イミュータブルに reduce で算出）
+  const cumulativeData = data.reduce<Array<typeof data[0] & { humanCumulative: number; aiCumulative: number }>>(
+    (acc, d) => {
+      const last = acc[acc.length - 1];
+      const humanCumulative = (last?.humanCumulative ?? 0) + d.humanPnL;
+      const aiCumulative = (last?.aiCumulative ?? 0) + d.aiPnL;
+      return [...acc, { ...d, humanCumulative, aiCumulative }];
+    },
+    []
+  );
 
   const maxPnL = Math.max(
     ...cumulativeData.map(d => Math.max(d.humanCumulative, d.aiCumulative)),
