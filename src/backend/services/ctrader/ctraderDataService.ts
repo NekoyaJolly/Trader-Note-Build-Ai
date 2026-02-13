@@ -307,8 +307,13 @@ export class CTraderDataService {
                 return connection;
 
             } catch (error) {
-                lastError = error instanceof Error ? error : new Error(String(error));
-                console.warn(`[cTraderData] ${env.label}環境で接続失敗:`, lastError.message);
+                const errorMsg = error instanceof Error
+                    ? error.message
+                    : typeof error === 'string'
+                        ? error
+                        : JSON.stringify(error);
+                lastError = error instanceof Error ? error : new Error(errorMsg);
+                console.warn(`[cTraderData] ${env.label}環境で接続失敗:`, errorMsg);
             }
         }
 
