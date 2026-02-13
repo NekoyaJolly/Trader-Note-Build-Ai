@@ -82,8 +82,8 @@ export class PlanAIService {
 
   constructor() {
     this.apiKey = process.env.AI_API_KEY || '';
-    this.model = 'gpt-4o';  // Plan AIは高品質モデル
-    this.baseURL = config.ai.baseURL || 'https://api.openai.com/v1';
+    this.model = process.env.AI_MODEL || 'gpt-4o';
+    this.baseURL = process.env.AI_BASE_URL || config.ai.baseURL || 'https://api.openai.com/v1';
   }
 
   /**
