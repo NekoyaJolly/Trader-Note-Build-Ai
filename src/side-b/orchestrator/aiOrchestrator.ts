@@ -150,11 +150,12 @@ export class AIOrchestrator {
 
       const aiResult = await this.researchAI.generateResearch(aiInput);
 
-      // 3. DB保存（シンプル化）
+      // 3. DB保存（MarketAnalysis 対応）
       const saved = await this.researchRepo.create({
         symbol,
         timeframe,
         featureVector: aiResult.output.featureVector,
+        marketAnalysis: (aiResult as any).marketAnalysis,
         ohlcvSnapshot: aiResult.ohlcvSnapshot,
         aiModel: aiResult.model,
         tokenUsage: aiResult.tokenUsage,

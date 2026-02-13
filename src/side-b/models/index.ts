@@ -4,11 +4,25 @@
  * すべての型定義・バリデーション関数をここから re-export する。
  * 
  * 設計思想:
- * - Research AI: 数値変換器（12次元特徴量のみ）
- * - Plan AI: 解釈・戦略立案（レジーム、価格レベル、シナリオ）
+ * - Market Analyst AI: 市場を「読む」— リッチ分析+推論テキスト
+ * - Strategy Thinker AI: 戦略を「考える」— 条件付きエントリー戦略
+ * - PDCA循環ループで自律的にトレード
  */
 
-// 12次元特徴量
+// 市場分析（新: リッチ分析）
+export {
+  type MarketAnalysis,
+  type MarketRegimeType,
+  type KeyLevel,
+  type MarketReasoning,
+  validateMarketAnalysis,
+  safeValidateMarketAnalysis,
+  regimeToJapaneseV2,
+  summarizeMarketAnalysis,
+  analysisToLegacyFeatureVector,
+} from './marketAnalysis';
+
+// 12次元特徴量（レガシー互換）
 export {
   type FeatureVector12D,
   validateFeatureVector,

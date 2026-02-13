@@ -61,6 +61,7 @@ import { MarketDataService } from '../../services/marketDataService';
 import { CTraderAuthService } from '../../backend/services/ctrader/ctraderAuthService';
 import { config } from '../../config';
 import type { OHLCVData } from '../../services/indicators/indicatorService';
+import { pdcaLoop } from '../agent';
 import { PrismaClient } from '@prisma/client';
 import { ohlcvRepository } from '../../backend/repositories/ohlcvRepository';
 
@@ -723,6 +724,23 @@ export class SideBScheduler {
 
     await closeTrade(tradeId, input, pnl.pips, pnl.amount);
     this.log(`決済完了: ${tradeId} (${exitReason}, ${pnl.pips > 0 ? '+' : ''}${pnl.pips.toFixed(1)} pips)`);
+
+    // PDCAループに通知
+    try {
+      pdcaLoop.notifyTradeCompleted({
+        id: tradeId,
+        symbol: 'N/A', // tradeオブジェクトからは取得できないため
+        direction,
+        entryPrice,
+        exitPrice,
+        pnlPips: pnl.pips,
+        outcome: pnl.pips > 0 ? 'win' : pnl.pips < 0 ? 'loss' : 'breakeven',
+        exitReason,
+        strategyRationale: `${exitReason}による決済`,
+        tradedAt: new Date(),
+        closedAt: new Date(),
+      });
+    } catch { /* PDCAループ未起動時は無視 */ }
   }
 
   /**
@@ -869,6 +887,22 @@ export class SideBScheduler {
         this.lastPlanRun.set(symbol, new Date());
         this.log(`[${symbol}] プラン完了: Trade ID ${tradeResult.trade?.id}`);
         results.push({ symbol, success: true });
+
+        // PDCAループに戦略完了を通知
+        try {
+          const planData = planResult.data;
+          if (planData?.scenarios) {
+            pdcaLoop.notifyStrategyComplete(
+              symbol,
+              (planData.scenarios as any[]).map((s: any) => ({
+                name: s.name || 'シナリオ',
+                direction: s.direction || 'long',
+                entryPrice: s.entry?.price || 0,
+                confidence: s.confidence || 50,
+              }))
+            );
+          }
+        } catch { /* PDCAループ未起動時は無視 */ }
 
       } catch (error) {
         const message = error instanceof Error ? error.message : '不明なエラー';

@@ -1,24 +1,25 @@
 /**
- * Research AI サービス
+ * Market Analyst AI サービス（旧 Research AI）
  * 
- * 目的: 市場データを12次元特徴量に変換する「数値変換器」
+ * 目的: 市場データを分析し、リッチな市場分析レポートを生成
  * 
  * 設計思想:
- * - OHLCVデータから12次元特徴量のみを算出
- * - 解釈（トレンド判断、価格レベル）はPlan AIに委ねる
- * - gpt-4o-miniの能力範囲内に収めたシンプルなタスク
+ * - 旧: OHLCVデータ → 12次元数値ベクトル（解釈なし）
+ * - 新: OHLCVデータ + インジケーター → 構造化分析 + 推論テキスト
+ * - AIが市場を「読む」— トレンド、サポレジ、リスク要因を判断
+ * - 出力は人間が読んでも理解でき、Strategy Thinker が使える
  * 
- * 使用モデル: gpt-4o-mini（コスト最適化）
+ * 使用モデル: Gemini 2.0 Flash（環境変数から取得）
  */
 
 import { config } from '../../config';
 import {
-  FeatureVector12D,
-  ResearchAIOutput,
-  validateResearchAIOutput,
-  calculateExpiryDate,
-} from '../models';
-import { OHLCVSnapshot } from '../models/marketResearch';
+  type MarketAnalysis,
+  validateMarketAnalysis,
+  analysisToLegacyFeatureVector,
+} from '../models/marketAnalysis';
+import type { ResearchAIOutput } from '../models/marketResearch';
+import { OHLCVSnapshot, calculateExpiryDate } from '../models/marketResearch';
 import { CORE_TRADING_RULES, getRelevantIndicatorContext } from '../knowledge';
 
 // ===========================================
@@ -26,7 +27,7 @@ import { CORE_TRADING_RULES, getRelevantIndicatorContext } from '../knowledge';
 // ===========================================
 
 /**
- * Research AI への入力データ
+ * Market Analyst への入力データ
  */
 export interface ResearchAIInput {
   symbol: string;
@@ -64,10 +65,12 @@ export interface IndicatorData {
 }
 
 /**
- * Research AI の結果
+ * Market Analyst の結果
  */
 export interface ResearchAIResult {
   output: ResearchAIOutput;
+  /** 新しいリッチ分析データ */
+  marketAnalysis: MarketAnalysis;
   ohlcvSnapshot: OHLCVSnapshot;
   expiresAt: Date;
   tokenUsage: number;
@@ -90,14 +93,13 @@ export class ResearchAIService {
   }
 
   /**
-   * 市場リサーチを生成
+   * 市場分析を生成
    */
   async generateResearch(input: ResearchAIInput): Promise<ResearchAIResult> {
-    // OHLCVスナップショットを事前計算
     const ohlcvSnapshot = this.createOHLCVSnapshot(input.ohlcvData);
 
     if (!this.apiKey) {
-      console.warn('[ResearchAI] APIキーが設定されていません。ダミーデータを返します。');
+      console.warn('[MarketAnalyst] APIキーが設定されていません。フォールバックデータを返します。');
       return this.generateFallbackResult(input.symbol, ohlcvSnapshot);
     }
 
@@ -105,46 +107,53 @@ export class ResearchAIService {
       const prompt = this.buildPrompt(input, ohlcvSnapshot);
       const result = await this.callAI(prompt);
 
-      // バリデーション
-      const validated = validateResearchAIOutput(result.content);
+      // MarketAnalysis のバリデーション
+      const marketAnalysis = validateMarketAnalysis(result.content);
+
+      // 後方互換: featureVector を MarketAnalysis から生成
+      const legacyFeatureVector = analysisToLegacyFeatureVector(marketAnalysis);
+
+      console.log(`[MarketAnalyst] ${input.symbol} 分析完了: ${marketAnalysis.regime} / ${marketAnalysis.direction} / 信頼度${marketAnalysis.confidence}%`);
 
       return {
-        output: validated,
+        output: { featureVector: legacyFeatureVector as any },
+        marketAnalysis,
         ohlcvSnapshot,
-        expiresAt: calculateExpiryDate(4),  // 4時間有効
+        expiresAt: calculateExpiryDate(4),
         tokenUsage: result.tokenUsage,
         model: result.model,
       };
     } catch (error) {
-      console.error('[ResearchAI] エラー:', error);
+      console.error('[MarketAnalyst] エラー:', error);
 
-      // リトライ（最大3回）
+      // リトライ（最大2回）
       for (let i = 0; i < 2; i++) {
         try {
-          console.log(`[ResearchAI] リトライ ${i + 1}/2`);
+          console.log(`[MarketAnalyst] リトライ ${i + 1}/2`);
           const prompt = this.buildPrompt(input, ohlcvSnapshot);
           const result = await this.callAI(prompt);
-          const validated = validateResearchAIOutput(result.content);
+          const marketAnalysis = validateMarketAnalysis(result.content);
+          const legacyFeatureVector = analysisToLegacyFeatureVector(marketAnalysis);
 
           return {
-            output: validated,
+            output: { featureVector: legacyFeatureVector as any },
+            marketAnalysis,
             ohlcvSnapshot,
             expiresAt: calculateExpiryDate(4),
             tokenUsage: result.tokenUsage,
             model: result.model,
           };
         } catch (retryError) {
-          console.error(`[ResearchAI] リトライ ${i + 1} 失敗:`, retryError);
+          console.error(`[MarketAnalyst] リトライ ${i + 1} 失敗:`, retryError);
         }
       }
 
-      // 全リトライ失敗時はフォールバック
       return this.generateFallbackResult(input.symbol, ohlcvSnapshot);
     }
   }
 
   /**
-   * OHLCVスナップショットを作成（Plan AI用）
+   * OHLCVスナップショットを作成
    */
   private createOHLCVSnapshot(ohlcvData: OHLCVData[]): OHLCVSnapshot {
     const recentData = ohlcvData.slice(-100);
@@ -164,12 +173,25 @@ export class ResearchAIService {
   }
 
   /**
-   * プロンプトを構築（シンプル化: 12次元特徴量のみ）
+   * プロンプトを構築 — 市場を「読む」ためのリッチな分析指示
    */
   private buildPrompt(input: ResearchAIInput, snapshot: OHLCVSnapshot): string {
-    const { symbol, indicators } = input;
+    const { symbol, ohlcvData, indicators } = input;
 
-    return `# 12次元特徴量算出リクエスト
+    // 直近のOHLCVを要約
+    const recentBars = ohlcvData.slice(-20).map(d =>
+      `${new Date(d.timestamp).toISOString().slice(5, 16)} O:${d.open.toFixed(2)} H:${d.high.toFixed(2)} L:${d.low.toFixed(2)} C:${d.close.toFixed(2)}`
+    ).join('\n');
+
+    // 価格レンジ（直近の高安値）
+    const rangeSize = snapshot.recentHigh - snapshot.recentLow;
+    const currentPosition = ((snapshot.latestPrice - snapshot.recentLow) / rangeSize * 100).toFixed(1);
+
+    return `# 市場分析リクエスト
+
+## あなたの役割
+あなたは経験豊富なFXトレーダーです。以下のデータを分析し、市場の状態を正確に把握してください。
+再現性のあるトレード判断の基盤となる分析を提供してください。
 
 ## 対象
 - シンボル: ${symbol}
@@ -179,45 +201,79 @@ export class ResearchAIService {
 - 現在値: ${snapshot.latestPrice}
 - 直近高値: ${snapshot.recentHigh}
 - 直近安値: ${snapshot.recentLow}
-- 直近終値(10本): ${snapshot.recentCloses.join(', ')}
+- レンジ内位置: ${currentPosition}%（0%=安値、100%=高値）
+- 直近終値(10本): ${snapshot.recentCloses.map(c => c.toFixed(2)).join(', ')}
+
+## 直近20本の値動き
+${recentBars}
 
 ## テクニカル指標
 ${indicators ? `
 - RSI: ${indicators.rsi ?? 'N/A'}
-- MACD: ${indicators.macd ? `${indicators.macd.value} (シグナル: ${indicators.macd.signal})` : 'N/A'}
-- SMA20: ${indicators.sma20 ?? 'N/A'}
-- SMA50: ${indicators.sma50 ?? 'N/A'}
-- SMA200: ${indicators.sma200 ?? 'N/A'}
-- ATR: ${indicators.atr ?? 'N/A'}
-- BB上: ${indicators.bbUpper ?? 'N/A'}, BB下: ${indicators.bbLower ?? 'N/A'}
-` : '事前計算なし（OHLCVから推定してください）'}
+- MACD: ${indicators.macd ? `${indicators.macd.value.toFixed(4)} (シグナル: ${indicators.macd.signal.toFixed(4)}, ヒストグラム: ${indicators.macd.histogram.toFixed(4)})` : 'N/A'}
+- SMA20: ${indicators.sma20?.toFixed(2) ?? 'N/A'}
+- SMA50: ${indicators.sma50?.toFixed(2) ?? 'N/A'}
+- SMA200: ${indicators.sma200?.toFixed(2) ?? 'N/A'}
+- EMA20: ${indicators.ema20?.toFixed(2) ?? 'N/A'}
+- ATR: ${indicators.atr?.toFixed(2) ?? 'N/A'}
+- BB上限: ${indicators.bbUpper?.toFixed(2) ?? 'N/A'}, BB下限: ${indicators.bbLower?.toFixed(2) ?? 'N/A'}, BB中央: ${indicators.bbMiddle?.toFixed(2) ?? 'N/A'}
+` : 'テクニカル指標は事前計算なし。OHLCVデータから推定してください。'}
 
-## タスク
-上記のデータから12次元特徴量を算出してください。
-各値は0-100の正規化スコアです。
+## 分析タスク
+
+以下の3つの観点で分析してください:
+
+### 1. 市場環境の把握
+- 今の相場は何をしているか？（トレンド/レンジ/ブレイクアウト等）
+- その判断の根拠は？
+
+### 2. キーレベルの特定
+- 機能しているサポート/レジスタンスレベルはどこか？
+- 各レベルの強度と根拠は？
+
+### 3. リスク要因
+- 現在の市場で注意すべきことは何か？
 
 ## 出力形式（JSON）
 
 \`\`\`json
 {
-  "featureVector": {
-    "trendStrength": <0-100: トレンド強度（ADX相当）>,
-    "trendDirection": <0-100: 0=強い下降, 50=横ばい, 100=強い上昇>,
-    "maAlignment": <0-100: MA配列の整列度>,
-    "pricePosition": <0-100: MA群に対する価格位置>,
-    "rsiLevel": <0-100: RSI値>,
-    "macdMomentum": <0-100: MACDモメンタム>,
-    "momentumDivergence": <0-100: ダイバージェンス強度>,
-    "volatilityLevel": <0-100: ボラティリティレベル>,
-    "bbWidth": <0-100: ボリンジャーバンド幅>,
-    "volatilityTrend": <0-100: ボラ傾向（拡大方向なら高い）>,
-    "supportProximity": <0-100: サポートへの近さ>,
-    "resistanceProximity": <0-100: レジスタンスへの近さ>
+  "regime": "strong_uptrend" | "weak_uptrend" | "range" | "weak_downtrend" | "strong_downtrend" | "breakout" | "choppy",
+  "direction": "bullish" | "bearish" | "neutral",
+  "volatility": "high" | "medium" | "low",
+  "confidence": <0-100>,
+  "keyLevels": [
+    {
+      "price": <数値>,
+      "type": "support" | "resistance",
+      "strength": "strong" | "moderate" | "weak",
+      "basis": "<このレベルの根拠>"
+    }
+  ],
+  "reasoning": {
+    "trendAnalysis": "<トレンドの判断根拠を1-2文で>",
+    "momentumAnalysis": "<モメンタムの状態を1-2文で>",
+    "volatilityAnalysis": "<ボラティリティの見通しを1-2文で>",
+    "keyObservation": "<最も重要な観察ポイント>",
+    "riskFactors": ["<リスク1>", "<リスク2>"]
+  },
+  "quickScores": {
+    "trendStrength": <0-100>,
+    "momentum": <0-100>,
+    "volatility": <0-100>,
+    "supportProximity": <0-100: 100=サポート直近>,
+    "resistanceProximity": <0-100: 100=レジスタンス直近>
   }
 }
 \`\`\`
 
-重要: featureVectorのみを出力してください。解釈や説明は不要です。${getRelevantIndicatorContext(indicators as unknown as Record<string, unknown>)}`;
+重要:
+- keyLevelsは最低2個、最大8個。重要度の高い順に。
+- reasoningは簡潔だが根拠のある文章で（「〜だから」「〜のため」のように理由を明記）。
+- confidence はデータの質と分析の確実性に基づいて正直に。
+- 有効なJSONのみを出力してください。
+
+${getRelevantIndicatorContext(indicators as unknown as Record<string, unknown>)}`;
   }
 
   /**
@@ -235,15 +291,16 @@ ${indicators ? `
         messages: [
           {
             role: 'system',
-            content: `あなたは市場データを数値化する専門家です。与えられたOHLCVデータとテクニカル指標から、12次元特徴量を算出してください。
+            content: `あなたは経験豊富なFXテクニカルアナリストです。
+与えられた市場データを分析し、構造化された市場分析レポートを生成してください。
 
 ${CORE_TRADING_RULES}
 
-重要: 
-- 必ず有効なJSONのみを出力してください
-- featureVectorオブジェクトのみを出力
-- 解釈や説明文は不要
-- 各値は0-100の整数`,
+重要:
+- 再現性のある分析を心がけてください（同じデータなら同じ結論）
+- 不確実な場合は confidence を低く設定し、理由をriskFactorsに明記
+- サポート/レジスタンスは実際の価格反転ポイントやMA等の融合点を根拠に
+- 必ず有効なJSONのみを出力してください`,
           },
           {
             role: 'user',
@@ -251,8 +308,8 @@ ${CORE_TRADING_RULES}
           },
         ],
         response_format: { type: 'json_object' },
-        temperature: 0.2,  // 数値変換なのでより決定的に
-        max_tokens: 600,   // コンテキスト増加のためバッファ確保
+        temperature: 0.3,
+        max_tokens: 2000,
       }),
     });
 
@@ -272,7 +329,6 @@ ${CORE_TRADING_RULES}
       throw new Error('AI APIからの応答が空です');
     }
 
-    // JSONパース
     const parsed = JSON.parse(content);
 
     return {
@@ -286,30 +342,50 @@ ${CORE_TRADING_RULES}
    * フォールバック結果を生成（API失敗時）
    */
   private generateFallbackResult(symbol: string, ohlcvSnapshot: OHLCVSnapshot): ResearchAIResult {
-    // 中立的な特徴量（すべて50）
-    const fallbackOutput: ResearchAIOutput = {
-      featureVector: {
+    const fallbackAnalysis: MarketAnalysis = {
+      regime: 'range',
+      direction: 'neutral',
+      volatility: 'medium',
+      confidence: 0,
+      keyLevels: [
+        {
+          price: ohlcvSnapshot.recentHigh,
+          type: 'resistance',
+          strength: 'moderate',
+          basis: '直近高値（フォールバック）',
+        },
+        {
+          price: ohlcvSnapshot.recentLow,
+          type: 'support',
+          strength: 'moderate',
+          basis: '直近安値（フォールバック）',
+        },
+      ],
+      reasoning: {
+        trendAnalysis: 'AI分析に失敗したため判断不可。',
+        momentumAnalysis: 'AI分析に失敗したため判断不可。',
+        volatilityAnalysis: 'AI分析に失敗したため判断不可。',
+        keyObservation: 'フォールバックデータのため、実際の市場分析ではありません。',
+        riskFactors: ['AI分析失敗 — このデータに基づいたトレードは推奨しません'],
+      },
+      quickScores: {
         trendStrength: 50,
-        trendDirection: 50,
-        maAlignment: 50,
-        pricePosition: 50,
-        rsiLevel: 50,
-        macdMomentum: 50,
-        momentumDivergence: 0,
-        volatilityLevel: 50,
-        bbWidth: 50,
-        volatilityTrend: 50,
+        momentum: 50,
+        volatility: 50,
         supportProximity: 50,
         resistanceProximity: 50,
       },
     };
 
-    console.warn(`[ResearchAI] ${symbol}: フォールバックデータを使用`);
+    const legacyFeatureVector = analysisToLegacyFeatureVector(fallbackAnalysis);
+
+    console.warn(`[MarketAnalyst] ${symbol}: フォールバックデータを使用`);
 
     return {
-      output: fallbackOutput,
+      output: { featureVector: legacyFeatureVector as any },
+      marketAnalysis: fallbackAnalysis,
       ohlcvSnapshot,
-      expiresAt: calculateExpiryDate(1),  // フォールバックは1時間のみ有効
+      expiresAt: calculateExpiryDate(1),
       tokenUsage: 0,
       model: 'fallback',
     };
