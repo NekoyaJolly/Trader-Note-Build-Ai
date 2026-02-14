@@ -825,7 +825,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           color: indicator.color,
           lineWidth: (indicator.lineWidth || 2) as LineWidth,
           title: indicator.name,
-          lastValueVisible: false, // 最後の値を表示しない（フォーカス問題を回避）
+          lastValueVisible: true, // 右端に動的な計算値を表示
           priceLineVisible: false, // 価格ラインを非表示
           crosshairMarkerVisible: false, // クロスヘアマーカーを非表示（フォーカス問題を回避）
         });
@@ -842,7 +842,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           lineWidth: (indicator.lineWidth || 2) as LineWidth,
           title: indicator.name,
           priceScaleId: indicator.id,
-          lastValueVisible: false, // 最後の値を表示しない（フォーカス問題を回避）
+          lastValueVisible: true, // 右端に動的な計算値を表示
           priceLineVisible: false, // 価格ラインを非表示
           crosshairMarkerVisible: false, // クロスヘアマーカーを非表示（フォーカス問題を回避）
         });
@@ -884,25 +884,44 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   }, [markers]);
 
   // focusTimestamp が変更されたときにチャートをスクロール
+  const focusTimestampRef = useRef<number | null | undefined>(undefined);
   useEffect(() => {
     if (!chartRef.current || focusTimestamp == null) return;
-    const ts = toChartTime(focusTimestamp) as Time;
-    const timeScale = chartRef.current.timeScale();
-    // フォーカス地点を中心に前後50本分の範囲を表示
-    const barSpacing = 50;
-    const from = (focusTimestamp / 1000 - barSpacing * 300) as UTCTimestamp;
-    const to = (focusTimestamp / 1000 + barSpacing * 300) as UTCTimestamp;
-    timeScale.setVisibleRange({ from: from as Time, to: to as Time });
-    // 少し遅延してさらに正確にスクロール
-    setTimeout(() => {
+    // 同じタイムスタンプが連続で来た場合はスキップ
+    if (focusTimestampRef.current === focusTimestamp) return;
+    focusTimestampRef.current = focusTimestamp;
+
+    const chart = chartRef.current;
+    const focusSec = Math.floor(focusTimestamp / 1000) as UTCTimestamp;
+
+    // 表示範囲: フォーカス地点の少し前から少し後を表示
+    // 前に20%、後ろに80%の比率で表示（エントリー地点が左寄りに見える）
+    const visibleBars = 80; // 表示するバー数目安
+    // timeframe に応じた秒数を推定
+    const tfSeconds = (() => {
+      const tf = ohlcvData.length >= 2
+        ? (ohlcvData[1].timestamp - ohlcvData[0].timestamp) / 1000
+        : 3600; // fallback 1h
+      return Math.max(tf, 60);
+    })();
+    const rangeBefore = Math.floor(visibleBars * 0.2) * tfSeconds;
+    const rangeAfter = Math.floor(visibleBars * 0.8) * tfSeconds;
+
+    const from = (focusSec - rangeBefore) as UTCTimestamp;
+    const to = (focusSec + rangeAfter) as UTCTimestamp;
+
+    // requestAnimationFrame で他の effect (drawnLines, markers) の後に実行
+    requestAnimationFrame(() => {
       try {
-        timeScale.scrollToPosition(-20, false);
-        // setVisibleRange で十分なので追加のスクロールは不要な場合もある
+        chart.timeScale().setVisibleRange({
+          from: from as Time,
+          to: to as Time,
+        });
       } catch {
-        // ignore
+        // range が不正な場合は無視
       }
-    }, 50);
-  }, [focusTimestamp]);
+    });
+  }, [focusTimestamp, ohlcvData]);
 
   const fallbackBar = activeBar ?? (ohlcvData.length > 0 ? ohlcvData[ohlcvData.length - 1] : null);
 
