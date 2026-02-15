@@ -118,6 +118,8 @@ interface SymbolInfo {
     symbolId: number;
     symbolName: string;
     digits: number;
+    /** 1ロットあたりの通貨数（cTrader: lotSize） */
+    contractSize: number;
 }
 
 // ========================================
@@ -150,13 +152,15 @@ export class CTraderDataService {
                 includeArchivedSymbols: false,
             });
 
-            const rawResponse = response as { symbol?: Array<{ symbolId: number; symbolName: string; digits?: number }> };
+            const rawResponse = response as { symbol?: Array<{ symbolId: number; symbolName: string; digits?: number; lotSize?: number }> };
             const symbols = rawResponse?.symbol || [];
 
             symbolList = symbols.map(s => ({
                 symbolId: s.symbolId,
                 symbolName: s.symbolName,
                 digits: s.digits ?? 5,
+                // lotSize がない場合のフォールバック（FXの一般的な contractSize）
+                contractSize: s.lotSize ?? 100000,
             }));
 
             this.symbolListCache.set(cacheKey, symbolList);
@@ -184,6 +188,24 @@ export class CTraderDataService {
             return symbolInfo.digits;
         } catch (error) {
             console.warn(`[cTraderData] digits 取得失敗: ${symbol}`, error);
+            return null;
+        }
+    }
+
+    /**
+     * シンボルの ContractSize（1ロットあたりの通貨数）を取得
+     * 
+     * 注意:
+     * - cTrader の SymbolsList では lotSize として返ることが多い
+     * - 取得できない場合は null（呼び出し側でフォールバックする）
+     */
+    async getSymbolContractSize(accountId: string, symbol: string): Promise<number | null> {
+        try {
+            const connection = await this.connectAndAuth(accountId);
+            const symbolInfo = await this.resolveSymbolId(connection, accountId, symbol);
+            return symbolInfo.contractSize;
+        } catch (error) {
+            console.warn(`[cTraderData] contractSize 取得失敗: ${symbol}`, error);
             return null;
         }
     }
@@ -436,13 +458,14 @@ export class CTraderDataService {
                 includeArchivedSymbols: false,
             });
 
-            const rawResponse = response as { symbol?: Array<{ symbolId: number; symbolName: string; digits?: number }> };
+            const rawResponse = response as { symbol?: Array<{ symbolId: number; symbolName: string; digits?: number; lotSize?: number }> };
             const symbols = rawResponse?.symbol || [];
 
             symbolList = symbols.map(s => ({
                 symbolId: s.symbolId,
                 symbolName: s.symbolName,
                 digits: s.digits ?? 5,
+                contractSize: s.lotSize ?? 100000,
             }));
 
             this.symbolListCache.set(cacheKey, symbolList);

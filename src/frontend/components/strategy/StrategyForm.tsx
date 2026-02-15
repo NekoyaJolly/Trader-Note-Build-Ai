@@ -17,7 +17,7 @@ import type {
   UpdateStrategyRequest,
   ConditionGroup,
   ExitSettings,
-  TradeSide,
+  StrategyDirection,
   SupportedSymbol,
   EntryTiming,
   SUPPORTED_SYMBOLS,
@@ -106,7 +106,7 @@ export default function StrategyForm({
   const [symbol, setSymbol] = useState<SupportedSymbol>(
     (strategy?.symbol as SupportedSymbol) || "USDJPY"
   );
-  const [side, setSide] = useState<TradeSide>(strategy?.side || "buy");
+  const [side, setSide] = useState<StrategyDirection>(strategy?.side || "buy");
   const [entryConditions, setEntryConditions] = useState<ConditionGroup>(
     (strategy?.currentVersion?.entryConditions as ConditionGroup) || createDefaultConditionGroup()
   );
@@ -295,6 +295,17 @@ export default function StrategyForm({
               >
                 売り (Short)
               </button>
+              <button
+                type="button"
+                className={`flex-1 px-4 py-2 rounded-lg border transition-colors ${
+                  side === "both"
+                    ? "bg-amber-600 border-amber-500 text-white"
+                    : "bg-slate-700 border-slate-600 text-gray-400 hover:border-amber-500"
+                }`}
+                onClick={() => setSide("both")}
+              >
+                両建て (Both)
+              </button>
             </div>
           </div>
 
@@ -460,9 +471,10 @@ export default function StrategyForm({
             onChange={(e) => setEntryTiming(e.target.value as EntryTiming)}
           >
             <option value="next_open">次足始値</option>
+            <option value="current_close">現足終値（現足エントリー）</option>
           </select>
           <p className="text-xs text-gray-500 mt-1">
-            条件成立後、次のローソク足の始値でエントリーします
+            条件成立後のエントリー価格の扱いを指定します（バックテストは近似）
           </p>
         </div>
       </div>

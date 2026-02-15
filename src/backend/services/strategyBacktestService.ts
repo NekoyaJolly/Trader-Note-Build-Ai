@@ -30,8 +30,9 @@ import {
 } from './strategyConditionEvaluator';
 import { CTraderDataService } from './ctrader/ctraderDataService';
 import { CTraderAuthService } from './ctrader/ctraderAuthService';
-import { calculateLotSize, slValueToPips, calculateUsedMargin } from './positionSizeCalculator';
+import { calculateLotSize, slValueToPips, getPipValue } from './positionSizeCalculator';
 import { fetchAndCacheOhlcv } from './fetchAndCacheOhlcv';
+import { fetchIndicatorSeriesByStrategyVersion } from './analysisEngineClient';
 
 // 計算関数を再エクスポート（後方互換性のため）
 export { calculatePnl, calculateSummary, createEmptySummary };
@@ -80,7 +81,9 @@ export interface BacktestRequest {
   stage1Timeframe: BacktestTimeframe;
   runStage2: boolean;
   initialCapital: number;
-  lotSize: number; // 固定ロット数（通貨量、例: 10000 = 1万通貨）
+  lotSize: number; // 固定ロット入力（lotSizeUnit により解釈が変わる）
+  /** 固定ロット入力の単位（デフォルト: currency=通貨数） */
+  lotSizeUnit?: 'currency' | 'lots';
   leverage: number; // レバレッジ（1〜1000倍）
   /** シンボル（省略時はストラテジーのシンボルを使用） */
   symbol?: string;
@@ -104,6 +107,10 @@ interface OpenPosition {
   entryIndex: number;
   lotSize: number;
   side: TradeSide;
+  /** エントリー時点の有効証拠金（%利確/損切の基準） */
+  entryEquity: number;
+  /** エントリー時点の必要証拠金（%損益表示の基準にも使用） */
+  entryRequiredMargin: number;
 }
 
 // BacktestTradeEventはbacktestCalculations.tsから再エクスポート
@@ -512,16 +519,45 @@ async function executeBacktestStage(
     throw new Error('ヒストリカルデータが取得できませんでした');
   }
 
+  const entryConditions = strategy.currentVersion!.entryConditions as ConditionGroup;
+  const exitSettings = strategy.currentVersion!.exitSettings as ExitSettings;
+
+  // analysis-engine（Python）から指標系列を一括取得
+  // 理由: Node 側での指標計算を廃止し、pandas-ta を正とする
+  const startDate = new Date(request.startDate);
+  const endDate = new Date(request.endDate);
+  let indicatorSeries: Awaited<ReturnType<typeof fetchIndicatorSeriesByStrategyVersion>>;
+  try {
+    indicatorSeries = await fetchIndicatorSeriesByStrategyVersion({
+      strategyId: strategy.id,
+      versionId: strategy.currentVersion!.id,
+      symbol,
+      timeframe,
+      startDate,
+      endDate,
+      // 将来の条件ビルダ拡張に備えて pattern も取得可能（現時点では未使用）
+      patterns: [],
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `analysis-engine に接続できません。Docker Compose で analysis-engine を起動しているか、ANALYSIS_ENGINE_URL を確認してください。詳細: ${message}`
+    );
+  }
+
+  const indicatorCache = new Map<string, number[]>();
+  for (const [key, values] of Object.entries(indicatorSeries.series)) {
+    // null（欠損）は NaN に寄せて evaluator 側で undefined 扱いにする
+    indicatorCache.set(key, values.map(v => (v === null ? Number.NaN : v)));
+  }
+
   // 評価コンテキストを初期化
   const ctx: EvaluationContext = {
     data,
     currentIndex: 0,
-    indicatorCache: new Map(),
+    indicatorCache,
     strategy,
   };
-
-  const entryConditions = strategy.currentVersion!.entryConditions as ConditionGroup;
-  const exitSettings = strategy.currentVersion!.exitSettings as ExitSettings;
 
   // エントリー条件のバリデーション
   if (!entryConditions || !entryConditions.conditions || entryConditions.conditions.length === 0) {
@@ -552,6 +588,7 @@ async function executeBacktestStage(
   // digits が取れれば pipValue = 10^-(digits-1) で正確な値を使用
   // 取れなければ getPipValue() のハードコードフォールバック
   let symbolDigits: number | undefined;
+  let symbolContractSize: number | undefined;
   if (ctraderDataService.isConfigured()) {
     try {
       const ctraderToken = await prisma.cTraderToken.findFirst({
@@ -562,6 +599,12 @@ async function executeBacktestStage(
         if (digits !== null) {
           symbolDigits = digits;
           console.log(`[executeBacktestStage] cTrader digits 取得: ${symbol} → digits=${digits}, pipValue=${Math.pow(10, -(digits - 1))}`);
+        }
+
+        const contractSize = await ctraderDataService.getSymbolContractSize(ctraderToken.accountId, symbol);
+        if (contractSize !== null) {
+          symbolContractSize = contractSize;
+          console.log(`[executeBacktestStage] cTrader contractSize 取得: ${symbol} → contractSize=${contractSize}`);
         }
       }
     } catch (error) {
@@ -595,7 +638,13 @@ async function executeBacktestStage(
         pos.side,
         exitSettings,
         i - pos.entryIndex,
-        timeframe
+        timeframe,
+        {
+          lotSize: pos.lotSize,
+          entryEquity: pos.entryEquity,
+          symbol,
+          digits: symbolDigits,
+        }
       );
 
       if (exitResult.shouldExit) {
@@ -606,7 +655,7 @@ async function executeBacktestStage(
           pos.lotSize
         );
 
-        const requiredMargin = (pos.lotSize * pos.entryPrice) / request.leverage;
+        const requiredMargin = pos.entryRequiredMargin;
 
         trades.push({
           eventId: uuidv4(),
@@ -634,9 +683,21 @@ async function executeBacktestStage(
     if (openPositions.size < maxPositions) {
       const shouldEnter = await evaluateConditionGroup(ctx, entryConditions);
 
-      if (shouldEnter && i + 1 < data.length) {
-        const nextBar = data[i + 1];
-        const entryPrice = nextBar.open;
+      if (shouldEnter) {
+        const entryTiming = (strategy.currentVersion?.entryTiming || 'next_open').toLowerCase();
+
+        // 現足エントリー: 条件成立した「その足」でエントリー
+        // - current_close: 終値でエントリー（実装上の近似）
+        // - それ以外は next_open（従来互換）
+        const isCurrentBarEntry = entryTiming === 'current_close' || entryTiming === 'current_bar' || entryTiming === 'current';
+
+        if (!isCurrentBarEntry && i + 1 >= data.length) {
+          continue;
+        }
+
+        const entryBar = isCurrentBarEntry ? bar : data[i + 1];
+        const entryPrice = isCurrentBarEntry ? bar.close : entryBar.open;
+        const entryIndex = isCurrentBarEntry ? i : i + 1;
 
         // ロットサイズ決定
         let tradeLotSize: number;
@@ -661,7 +722,15 @@ async function executeBacktestStage(
           });
           tradeLotSize = result.lotSize;
         } else {
-          tradeLotSize = request.lotSize;
+          // 固定ロット:
+          // - currency: そのまま通貨数
+          // - lots: ロット数 × contractSize（1ロットあたり通貨数）
+          if ((request.lotSizeUnit || 'currency') === 'lots') {
+            const contractSize = symbolContractSize ?? 100000;
+            tradeLotSize = request.lotSize * contractSize;
+          } else {
+            tradeLotSize = request.lotSize;
+          }
         }
 
         // ロットが0以下ならスキップ
@@ -670,21 +739,33 @@ async function executeBacktestStage(
         }
 
         // 証拠金チェック
-        const requiredMargin = (tradeLotSize * entryPrice) / request.leverage;
-        const usedMargin = calculateUsedMargin(openPositions as Map<string, { entryPrice: number; lotSize: number }>, request.leverage);
+        // 必要証拠金 = (現在価格 × 通貨数) / レバレッジ
+        const requiredMargin = (entryPrice * tradeLotSize) / request.leverage;
+
+        // 使用中証拠金も「現在価格（近似: 現在足の終値）」ベースで再計算
+        let usedMargin = 0;
+        for (const [, pos] of openPositions) {
+          usedMargin += (bar.close * pos.lotSize) / request.leverage;
+        }
+
         if (usedMargin + requiredMargin > currentCapital) {
           // 証拠金不足 → エントリースキップ
           continue;
         }
 
         const ticketId = uuidv4();
+        // direction=both の場合、現時点のバックテストは片側のみを実行（暫定: buy）
+        // 理由: 条件JSONに「買い用/売り用」を分ける仕様が未導入のため
+        const entrySide: TradeSide = (strategy.side === 'both' ? 'buy' : strategy.side) as TradeSide;
         openPositions.set(ticketId, {
           ticketId,
           entryPrice,
-          entryTime: nextBar.timestamp.toISOString(),
-          entryIndex: i + 1,
+          entryTime: entryBar.timestamp.toISOString(),
+          entryIndex,
           lotSize: tradeLotSize,
-          side: strategy.side as TradeSide,
+          side: entrySide,
+          entryEquity: currentCapital,
+          entryRequiredMargin: requiredMargin,
         });
       }
     }
@@ -700,7 +781,7 @@ async function executeBacktestStage(
         lastBar.close,
         pos.lotSize
       );
-      const requiredMargin = (pos.lotSize * pos.entryPrice) / request.leverage;
+      const requiredMargin = pos.entryRequiredMargin;
       trades.push({
         eventId: uuidv4(),
         entryTime: pos.entryTime,
@@ -744,7 +825,17 @@ function checkExit(
   side: TradeSide,
   exitSettings: ExitSettings,
   barsHeld: number,
-  timeframe: BacktestTimeframe
+  timeframe: BacktestTimeframe,
+  basis: {
+    /** ポジション数量（通貨数） */
+    lotSize: number;
+    /** %利確/損切の基準（エントリー時の有効証拠金） */
+    entryEquity: number;
+    /** pipValue フォールバック用のシンボル */
+    symbol: string;
+    /** cTrader digits（あれば優先） */
+    digits?: number;
+  }
 ): { shouldExit: boolean; exitPrice: number; reason: 'take_profit' | 'stop_loss' | 'timeout' | 'signal' } {
   const intervalMinutes = getIntervalMinutes(timeframe);
   const minutesHeld = barsHeld * intervalMinutes;
@@ -753,21 +844,25 @@ function checkExit(
   let tpPrice: number;
   let slPrice: number;
 
+  // % の場合: 「価格変動率」ではなく「損益額（entryEquity 基準）」として扱う
+  // 例: takeProfit=1% → entryEquity の 1% 分の利益が出たら利確
   if (exitSettings.takeProfit.unit === 'percent') {
-    const tpDiff = entryPrice * (exitSettings.takeProfit.value / 100);
+    const targetProfit = basis.entryEquity * (exitSettings.takeProfit.value / 100);
+    const tpDiff = basis.lotSize > 0 ? targetProfit / basis.lotSize : 0;
     tpPrice = side === 'buy' ? entryPrice + tpDiff : entryPrice - tpDiff;
   } else {
-    // Pips（0.01円または0.0001ドルとして計算）
-    const pipValue = entryPrice > 50 ? 0.01 : 0.0001;
+    // Pips: digits を参照して動的化（10 pips などが通貨ごとに正しい値幅になる）
+    const pipValue = getPipValue(basis.symbol, basis.digits);
     const tpDiff = exitSettings.takeProfit.value * pipValue;
     tpPrice = side === 'buy' ? entryPrice + tpDiff : entryPrice - tpDiff;
   }
 
   if (exitSettings.stopLoss.unit === 'percent') {
-    const slDiff = entryPrice * (exitSettings.stopLoss.value / 100);
+    const targetLoss = basis.entryEquity * (exitSettings.stopLoss.value / 100);
+    const slDiff = basis.lotSize > 0 ? targetLoss / basis.lotSize : 0;
     slPrice = side === 'buy' ? entryPrice - slDiff : entryPrice + slDiff;
   } else {
-    const pipValue = entryPrice > 50 ? 0.01 : 0.0001;
+    const pipValue = getPipValue(basis.symbol, basis.digits);
     const slDiff = exitSettings.stopLoss.value * pipValue;
     slPrice = side === 'buy' ? entryPrice - slDiff : entryPrice + slDiff;
   }
@@ -919,7 +1014,8 @@ export async function getBacktestResult(runId: string): Promise<BacktestResult |
   if (!run) return null;
 
   // トレードイベントを先に構築
-  const side = run.strategy.side as TradeSide;
+  // direction=both は現時点では片側のみ表示（暫定: buy）
+  const side: TradeSide = (run.strategy.side === 'both' ? 'buy' : run.strategy.side) as TradeSide;
   const trades: BacktestTradeEvent[] = run.events.map(e => {
     const entryPrice = e.entryPrice.toNumber();
     const exitPrice = e.exitPrice?.toNumber() || 0;
@@ -1006,7 +1102,7 @@ export async function getBacktestHistory(
 
   return runs.map(run => {
     // トレードイベントを構築
-    const side = run.strategy.side as TradeSide;
+    const side: TradeSide = (run.strategy.side === 'both' ? 'buy' : run.strategy.side) as TradeSide;
     const trades: BacktestTradeEvent[] = run.events.map(e => {
       const entryPrice = e.entryPrice.toNumber();
       const exitPrice = e.exitPrice?.toNumber() || 0;

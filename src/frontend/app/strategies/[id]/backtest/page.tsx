@@ -52,6 +52,7 @@ interface BacktestParams {
   enableStage2: boolean;
   initialCapital: number;
   lotSize: number;
+  lotSizeUnit: 'currency' | 'lots';
   leverage: number;
   symbol: string;
   lotMode: 'fixed' | 'variable';
@@ -249,6 +250,7 @@ export default function StrategyBacktestPage() {
     enableStage2: false,
     initialCapital: 1000000,
     lotSize: 10000,
+    lotSizeUnit: 'currency',
     leverage: 25,
     symbol: "",
     lotMode: 'fixed',
@@ -438,6 +440,7 @@ export default function StrategyBacktestPage() {
         enableStage2: backtestParams.enableStage2,
         initialCapital: backtestParams.initialCapital,
         lotSize: backtestParams.lotSize,
+        lotSizeUnit: backtestParams.lotSizeUnit,
         leverage: backtestParams.leverage,
         symbol: backtestParams.symbol || strategy?.symbol,
         lotMode: backtestParams.lotMode,
@@ -882,19 +885,60 @@ export default function StrategyBacktestPage() {
                   </div>
 
                   {backtestParams.lotMode === 'fixed' ? (
-                    <div className="flex items-center justify-between gap-2">
-                      <label className="text-xs text-gray-400">ロット数</label>
-                      <div className="flex gap-1">
-                        <input
-                          type="number"
-                          step="1000"
-                          min="1000"
-                          value={backtestParams.lotSize}
-                          onChange={(e) => handleParamChange("lotSize", parseInt(e.target.value) || 1000)}
-                          className="w-24 bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1 text-sm text-white text-right focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
-                        />
-                        <span className="text-xs text-gray-500 self-center">通貨</span>
+                    <div className="space-y-2">
+                      {/* 固定ロット入力単位 */}
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-xs text-gray-400">固定ロット単位</label>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleParamChange('lotSizeUnit', 'currency')}
+                            className={`px-2 py-0.5 rounded text-xs transition-colors ${backtestParams.lotSizeUnit === 'currency'
+                              ? 'bg-slate-600/60 text-white border border-slate-500/60'
+                              : 'bg-slate-700/40 text-gray-400 border border-slate-600/40 hover:bg-slate-600/40'
+                              }`}
+                          >
+                            通貨数
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleParamChange('lotSizeUnit', 'lots')}
+                            className={`px-2 py-0.5 rounded text-xs transition-colors ${backtestParams.lotSizeUnit === 'lots'
+                              ? 'bg-amber-600/30 text-amber-300 border border-amber-500/50'
+                              : 'bg-slate-700/40 text-gray-400 border border-slate-600/40 hover:bg-slate-600/40'
+                              }`}
+                          >
+                            ロット
+                          </button>
+                        </div>
                       </div>
+
+                      {/* 固定ロット値 */}
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-xs text-gray-400">{backtestParams.lotSizeUnit === 'lots' ? 'ロット数' : '通貨数'}</label>
+                        <div className="flex gap-1">
+                          <input
+                            type="number"
+                            step={backtestParams.lotSizeUnit === 'lots' ? '0.01' : '1000'}
+                            min={backtestParams.lotSizeUnit === 'lots' ? '0.01' : '1000'}
+                            value={backtestParams.lotSize}
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              const v = backtestParams.lotSizeUnit === 'lots'
+                                ? (parseFloat(raw) || 0.01)
+                                : (parseInt(raw, 10) || 1000);
+                              handleParamChange('lotSize', v);
+                            }}
+                            className="w-24 bg-slate-700/50 border border-slate-600/50 rounded px-2 py-1 text-sm text-white text-right focus:outline-none focus:ring-1 focus:ring-cyan-500/50"
+                          />
+                          <span className="text-xs text-gray-500 self-center">{backtestParams.lotSizeUnit === 'lots' ? 'lot' : '通貨'}</span>
+                        </div>
+                      </div>
+                      {backtestParams.lotSizeUnit === 'lots' && (
+                        <p className="text-[10px] text-gray-500">
+                          ※ 実際の通貨数はブローカーの ContractSize（1ロットあたり通貨数）で自動変換
+                        </p>
+                      )}
                     </div>
                   ) : (
                     <div className="space-y-2">

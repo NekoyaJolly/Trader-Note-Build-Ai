@@ -18,7 +18,8 @@
 import { Router, Request, Response } from 'express';
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
-import { StrategyStatus, TradeSide } from '@prisma/client';
+import { StrategyStatus, StrategyDirection } from '@prisma/client';
+import { z } from 'zod';
 import { getStringParam, getOptionalStringParam, getNumberParam } from '../../utils/requestHelpers';
 import {
   listStrategies,
@@ -29,6 +30,7 @@ import {
   deleteStrategy,
   updateStrategyStatus,
   duplicateStrategy,
+  rollbackStrategyVersion,
 } from '../services/strategyService';
 import {
   runBacktest,
@@ -79,6 +81,50 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 const router = Router();
+
+// ============================================
+// Zod バリデーション（追加/変更したエンドポイント向け）
+// ============================================
+
+// ロールバック
+const RollbackParamsSchema = z.object({
+  id: z.string().uuid('有効なストラテジーID（UUID）を指定してください'),
+  versionNumber: z.coerce.number().int('versionNumber は整数で指定してください').min(1, 'versionNumber は 1 以上で指定してください'),
+});
+
+const RollbackBodySchema = z
+  .object({
+    changeNote: z.string().max(200, 'changeNote は200文字以内で指定してください').optional(),
+  })
+  .strict();
+
+// バックテスト
+const BacktestParamsSchema = z.object({
+  id: z.string().uuid('有効なストラテジーID（UUID）を指定してください'),
+});
+
+const BacktestBodySchema = z
+  .object({
+    // フロントは date input で YYYY-MM-DD を送る可能性があるため、datetime() は使わない
+    startDate: z.string().min(1, '開始日は必須です').refine((s) => !Number.isNaN(new Date(s).getTime()), {
+      message: '開始日は有効な日付を指定してください',
+    }),
+    endDate: z.string().min(1, '終了日は必須です').refine((s) => !Number.isNaN(new Date(s).getTime()), {
+      message: '終了日は有効な日付を指定してください',
+    }),
+    stage1Timeframe: z.enum(['1m', '5m', '15m', '30m', '1h', '4h', '1d']).default('1h'),
+    enableStage2: z.boolean().default(true),
+    initialCapital: z.number().positive('初期資金は正の数で指定してください').default(1_000_000),
+    lotSize: z.number().positive('固定ロットは正の数で指定してください').default(10_000),
+    lotSizeUnit: z.enum(['currency', 'lots']).default('currency'),
+    leverage: z.number().min(1, 'レバレッジは 1 以上で指定してください').max(1000, 'レバレッジは最大 1000 です').default(25),
+    symbol: z.string().min(1).optional(),
+    lotMode: z.enum(['fixed', 'variable']).default('fixed'),
+    riskPercent: z.number().min(0).max(100).optional(),
+    riskAmount: z.number().min(0).optional(),
+    maxPositions: z.coerce.number().int('maxPositions は整数で指定してください').min(1).max(15).default(1),
+  })
+  .strict();
 
 // ============================================
 // SSE アラート配信用イベントエミッター
@@ -498,6 +544,56 @@ router.get('/:id/versions/:versionNumber', async (req: Request, res: Response) =
 });
 
 /**
+ * PUT /api/strategies/:id/rollback/:versionNumber
+ * 指定バージョンへロールバック（復元）
+ * 
+ * 注意:
+ * - 履歴を残すため、ロールバック操作も新バージョンとして保存される
+ */
+router.put('/:id/rollback/:versionNumber', async (req: Request, res: Response) => {
+  try {
+    const paramsParsed = RollbackParamsSchema.safeParse(req.params);
+    if (!paramsParsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'バリデーションエラー',
+        details: paramsParsed.error.format(),
+      });
+    }
+
+    const bodyParsed = RollbackBodySchema.safeParse(req.body ?? {});
+    if (!bodyParsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'バリデーションエラー',
+        details: bodyParsed.error.format(),
+      });
+    }
+
+    const { id, versionNumber } = paramsParsed.data;
+    const { changeNote } = bodyParsed.data;
+
+    const strategy = await rollbackStrategyVersion({
+      strategyId: id,
+      versionNumber,
+      changeNote,
+    });
+
+    res.json({
+      success: true,
+      data: strategy,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
+    console.error('[StrategyRoutes] ロールバックエラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+    });
+  }
+});
+
+/**
  * POST /api/strategies
  * ストラテジーを新規作成
  */
@@ -550,7 +646,7 @@ router.post('/', async (req: Request, res: Response) => {
       name,
       description,
       symbol,
-      side: side as TradeSide,
+      side: side as StrategyDirection,
       entryConditions,
       exitSettings,
       entryTiming,
@@ -595,7 +691,7 @@ router.put('/:id', async (req: Request, res: Response) => {
       name,
       description,
       symbol,
-      side: side as TradeSide | undefined,
+      side: side as StrategyDirection | undefined,
       entryConditions,
       exitSettings,
       entryTiming,
@@ -747,63 +843,53 @@ router.post('/:id/duplicate', async (req: Request, res: Response) => {
  * - stage1Timeframe: '15m' | '30m' | '1h' | '4h' | '1d' (デフォルト: '1h')
  * - enableStage2: boolean (Stage2精密検証を有効化、デフォルト: true)
  * - initialCapital: number (初期資金、デフォルト: 1000000)
- * - lotSize: number (ロット数・通貨量、デフォルト: 10000 = 1万通貨)
+ * - lotSize: number (固定ロット入力)
+ * - lotSizeUnit: 'currency' | 'lots'（デフォルト: 'currency'）
  * - leverage: number (レバレッジ、デフォルト: 25、最大1000)
  */
 router.post('/:id/backtest', async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const paramsParsed = BacktestParamsSchema.safeParse(req.params);
+    if (!paramsParsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'バリデーションエラー',
+        details: paramsParsed.error.format(),
+      });
+    }
+
+    const bodyParsed = BacktestBodySchema.safeParse(req.body ?? {});
+    if (!bodyParsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'バリデーションエラー',
+        details: bodyParsed.error.format(),
+      });
+    }
+
+    const { id } = paramsParsed.data;
     const {
       startDate,
       endDate,
-      stage1Timeframe = '1h',
-      enableStage2 = true,
-      initialCapital = 1000000,
-      lotSize = 10000, // デフォルト1万通貨
-      leverage = 25, // デフォルト25倍
+      stage1Timeframe,
+      enableStage2,
+      initialCapital,
+      lotSize,
+      lotSizeUnit,
+      leverage,
       symbol,
-      lotMode = 'fixed',
+      lotMode,
       riskPercent,
       riskAmount,
-      maxPositions = 1,
-    } = req.body;
+      maxPositions,
+    } = bodyParsed.data;
 
-    // 必須フィールドのバリデーション
-    if (!startDate) {
-      return res.status(400).json({
-        success: false,
-        error: '開始日は必須です',
-      });
-    }
-    if (!endDate) {
-      return res.status(400).json({
-        success: false,
-        error: '終了日は必須です',
-      });
-    }
-
-    // 日付の妥当性チェック
     const start = new Date(startDate);
     const end = new Date(endDate);
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-      return res.status(400).json({
-        success: false,
-        error: '日付の形式が不正です',
-      });
-    }
     if (start >= end) {
       return res.status(400).json({
         success: false,
         error: '開始日は終了日より前である必要があります',
-      });
-    }
-
-    // タイムフレームのバリデーション
-    const validTimeframes = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
-    if (!validTimeframes.includes(stage1Timeframe)) {
-      return res.status(400).json({
-        success: false,
-        error: `タイムフレームは ${validTimeframes.join(', ')} のいずれかを指定してください`,
       });
     }
 
@@ -814,10 +900,11 @@ router.post('/:id/backtest', async (req: Request, res: Response) => {
       strategyId: id,
       startDate: start.toISOString(),
       endDate: end.toISOString(),
-      stage1Timeframe: stage1Timeframe as '15m' | '30m' | '1h' | '4h' | '1d',
+      stage1Timeframe: stage1Timeframe as BacktestTimeframe,
       runStage2: enableStage2,
       initialCapital,
       lotSize,
+      lotSizeUnit,
       leverage,
       symbol: symbol?.trim() || undefined,
       lotMode,

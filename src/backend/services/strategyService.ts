@@ -7,7 +7,7 @@
  * - 条件の検証
  */
 
-import { PrismaClient, StrategyStatus, TradeSide } from '@prisma/client';
+import { PrismaClient, StrategyStatus, StrategyDirection } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 
 const prisma = new PrismaClient();
@@ -23,7 +23,7 @@ export interface CreateStrategyInput {
   name: string;
   description?: string;
   symbol: string;
-  side: TradeSide;
+  side: StrategyDirection;
   entryConditions: object; // ConditionGroup JSON
   exitSettings: object;    // ExitSettings JSON
   entryTiming?: string;
@@ -37,7 +37,7 @@ export interface UpdateStrategyInput {
   name?: string;
   description?: string;
   symbol?: string;
-  side?: TradeSide;
+  side?: StrategyDirection;
   entryConditions?: object;
   exitSettings?: object;
   entryTiming?: string;
@@ -63,7 +63,7 @@ export interface StrategySummary {
   id: string;
   name: string;
   symbol: string;
-  side: TradeSide;
+  side: StrategyDirection;
   status: StrategyStatus;
   versionCount: number;
   createdAt: Date;
@@ -79,7 +79,7 @@ export interface StrategyDetail {
   name: string;
   description: string | null;
   symbol: string;
-  side: TradeSide;
+  side: StrategyDirection;
   status: StrategyStatus;
   currentVersionId: string | null;
   tags: string[];
@@ -228,6 +228,72 @@ export async function getStrategyVersion(strategyId: string, versionNumber: numb
 }
 
 /**
+ * 指定バージョンへロールバック（復元）する
+ * 
+ * 仕様:
+ * - 既存の履歴を壊さないため、ロールバック操作も「新バージョン」として保存する
+ * - StrategyVersion に symbol/side が保存されている場合はそれも復元対象に含める
+ */
+export async function rollbackStrategyVersion(params: {
+  strategyId: string;
+  versionNumber: number;
+  changeNote?: string;
+}): Promise<StrategyDetail> {
+  const { strategyId, versionNumber, changeNote } = params;
+
+  const strategy = await prisma.strategy.findUnique({
+    where: { id: strategyId },
+    include: {
+      versions: { orderBy: { versionNumber: 'desc' }, take: 1 },
+    },
+  });
+  if (!strategy) {
+    throw new Error('ストラテジーが見つかりません');
+  }
+
+  const target = await prisma.strategyVersion.findFirst({
+    where: { strategyId, versionNumber },
+  });
+  if (!target) {
+    throw new Error(`指定バージョンが見つかりません: v${versionNumber}`);
+  }
+
+  const latestVersionNumber = strategy.versions[0]?.versionNumber ?? 0;
+  const newVersionNumber = latestVersionNumber + 1;
+
+  const rollbackSymbol = target.symbol ?? strategy.symbol;
+  const rollbackSide = target.side ?? strategy.side;
+
+  await prisma.$transaction(async (tx) => {
+    const newVersion = await tx.strategyVersion.create({
+      data: {
+        strategyId,
+        versionNumber: newVersionNumber,
+        symbol: rollbackSymbol,
+        side: rollbackSide,
+        entryConditions: target.entryConditions as object,
+        exitSettings: target.exitSettings as object,
+        entryTiming: target.entryTiming,
+        changeNote: changeNote?.trim() || `ロールバック: v${versionNumber} → v${newVersionNumber}`,
+      },
+    });
+
+    await tx.strategy.update({
+      where: { id: strategyId },
+      data: {
+        symbol: rollbackSymbol,
+        side: rollbackSide,
+        currentVersionId: newVersion.id,
+      },
+    });
+  });
+
+  const detail = await getStrategy(strategyId);
+  if (!detail) throw new Error('ロールバック後のストラテジー取得に失敗しました');
+  return detail;
+}
+
+/**
  * ストラテジーを作成
  */
 export async function createStrategy(input: CreateStrategyInput): Promise<StrategyDetail> {
@@ -238,8 +304,8 @@ export async function createStrategy(input: CreateStrategyInput): Promise<Strate
   if (!SUPPORTED_SYMBOLS.includes(input.symbol)) {
     throw new Error(`対応していないシンボルです: ${input.symbol}`);
   }
-  if (!['buy', 'sell'].includes(input.side)) {
-    throw new Error('売買方向は buy または sell を指定してください');
+  if (!['buy', 'sell', 'both'].includes(input.side)) {
+    throw new Error('売買方向は buy / sell / both を指定してください');
   }
 
   // トランザクションで作成
@@ -261,6 +327,8 @@ export async function createStrategy(input: CreateStrategyInput): Promise<Strate
       data: {
         strategyId: strategy.id,
         versionNumber: 1,
+        symbol: input.symbol,
+        side: input.side,
         entryConditions: input.entryConditions,
         exitSettings: input.exitSettings,
         entryTiming: input.entryTiming || 'next_open',
@@ -306,8 +374,8 @@ export async function updateStrategy(id: string, input: UpdateStrategyInput): Pr
   if (input.symbol && !SUPPORTED_SYMBOLS.includes(input.symbol)) {
     throw new Error(`対応していないシンボルです: ${input.symbol}`);
   }
-  if (input.side && !['buy', 'sell'].includes(input.side)) {
-    throw new Error('売買方向は buy または sell を指定してください');
+  if (input.side && !['buy', 'sell', 'both'].includes(input.side)) {
+    throw new Error('売買方向は buy / sell / both を指定してください');
   }
 
   const latestVersion = existing.versions[0];
@@ -320,7 +388,7 @@ export async function updateStrategy(id: string, input: UpdateStrategyInput): Pr
       name?: string;
       description?: string | null;
       symbol?: string;
-      side?: TradeSide;
+      side?: StrategyDirection;
       status?: StrategyStatus;
       tags?: string[];
       currentVersionId?: string;
@@ -341,6 +409,9 @@ export async function updateStrategy(id: string, input: UpdateStrategyInput): Pr
         data: {
           strategyId: id,
           versionNumber: newVersionNumber,
+          // 変更履歴として symbol/side も保持（ロールバック用途）
+          symbol: input.symbol ?? existing.symbol,
+          side: input.side ?? existing.side,
           entryConditions: input.entryConditions || (latestVersion.entryConditions as object),
           exitSettings: input.exitSettings || (latestVersion.exitSettings as object),
           entryTiming: input.entryTiming || latestVersion.entryTiming,
