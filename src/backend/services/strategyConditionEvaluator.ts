@@ -7,8 +7,8 @@
  * - DRY 原則に従った実装
  */
 
-import { rsi, sma, ema, macd, bb } from 'indicatorts';
 import { StrategyDetail } from './strategyService';
+import { makeIndicatorCacheKey } from './analysisEngineClient';
 
 // ============================================
 // 型定義
@@ -18,7 +18,19 @@ import { StrategyDetail } from './strategyService';
 export type LogicalOperator = 'AND' | 'OR' | 'NOT' | 'IF_THEN' | 'SEQUENCE';
 
 /** 比較演算子 */
-export type ComparisonOperator = '<' | '<=' | '=' | '>=' | '>' | 'cross_above' | 'cross_below';
+export type ComparisonOperator =
+  | '<'
+  | '<='
+  | '='
+  | '>='
+  | '>'
+  | 'cross_above'
+  | 'cross_below'
+  // UI/保存形式の拡張（後方互換）
+  | 'GC'
+  | 'DC'
+  | 'Touch'
+  | 'touch';
 
 /** インジケーター条件 */
 export interface IndicatorCondition {
@@ -100,86 +112,21 @@ export async function getIndicatorValue(
   params: Record<string, number>,
   field: string
 ): Promise<number | undefined> {
-  const cacheKey = `${indicatorId}_${JSON.stringify(params)}_${field}`;
+  const cacheKey = makeIndicatorCacheKey(indicatorId, params, field);
   
+  // 原則: インジケーター計算は analysis-engine（Python / pandas-ta）に委譲する。
+  // ここでは「キャッシュに存在する値のみ」を参照する。
   if (!ctx.indicatorCache.has(cacheKey)) {
-    // OHLCVデータからインジケーター計算
-    const closes = ctx.data.map(d => d.close);
-    
-    try {
-      let values: number[] = [];
-      
-      // インジケーターIDに応じて適切な関数を呼び出す
-      switch (indicatorId.toLowerCase()) {
-        case 'rsi': {
-          const period = params?.period || 14;
-          const result = rsi(closes, { period });
-          values = Array.isArray(result) ? result : [];
-          break;
-        }
-        case 'sma': {
-          const period = params?.period || 20;
-          const result = sma(closes, { period });
-          values = Array.isArray(result) ? result : [];
-          break;
-        }
-        case 'ema': {
-          const period = params?.period || 20;
-          const result = ema(closes, { period });
-          values = Array.isArray(result) ? result : [];
-          break;
-        }
-        case 'macd': {
-          const fastPeriod = params?.fastPeriod || 12;
-          const slowPeriod = params?.slowPeriod || 26;
-          const signalPeriod = params?.signalPeriod || 9;
-          const result = macd(closes, { fast: fastPeriod, slow: slowPeriod, signal: signalPeriod });
-          // MACDの場合はfield指定に応じて適切な配列を使用
-          if (field === 'signal' && result.signalLine) {
-            values = result.signalLine;
-          } else if (field === 'histogram') {
-            // histogram = macdLine - signalLine
-            // 両方の配列が同じ長さであることを確認し、undefined 値を適切に処理
-            if (result.macdLine && result.signalLine) {
-              values = result.macdLine.map((m, i) => {
-                const signal = result.signalLine[i];
-                // 両方の値が存在する場合のみ計算、そうでなければ 0
-                return (m !== undefined && signal !== undefined) ? m - signal : 0;
-              });
-            }
-          } else if (result.macdLine) {
-            values = result.macdLine;
-          }
-          break;
-        }
-        case 'bb':
-        case 'bollinger': {
-          const period = params?.period || 20;
-          const result = bb(closes, { period });
-          // BBの場合はfield指定に応じて適切な配列を使用
-          if (field === 'upper' && result.upper) {
-            values = result.upper;
-          } else if (field === 'lower' && result.lower) {
-            values = result.lower;
-          } else if (result.middle) {
-            values = result.middle;
-          }
-          break;
-        }
-        default:
-          console.warn(`[ConditionEvaluator] 未対応のインジケーター: ${indicatorId}`);
-          return undefined;
-      }
-      
-      ctx.indicatorCache.set(cacheKey, values);
-    } catch (error) {
-      console.error(`[ConditionEvaluator] インジケーター計算エラー: ${indicatorId}`, error);
-      return undefined;
-    }
+    console.warn(`[ConditionEvaluator] インジケーター値がキャッシュに存在しません（analysis-engine 未取得の可能性）: ${cacheKey}`);
+    return undefined;
   }
   
   const cached = ctx.indicatorCache.get(cacheKey);
-  return cached ? cached[ctx.currentIndex] : undefined;
+  if (!cached) return undefined;
+
+  const value = cached[ctx.currentIndex];
+  // pandas-ta の計算初期は欠損が発生しやすい（NaN）ため、undefined に寄せる
+  return Number.isFinite(value) ? value : undefined;
 }
 
 /**
@@ -221,12 +168,31 @@ function compareValues(
   prevLeft?: number,
   prevRight?: number
 ): boolean {
-  switch (operator) {
+  // 後方互換: UI/保存形式の別名を正規化
+  const normalized: ComparisonOperator = operator === 'GC'
+    ? 'cross_above'
+    : operator === 'DC'
+      ? 'cross_below'
+      : operator;
+
+  switch (normalized) {
     case '<': return left < right;
     case '<=': return left <= right;
     case '=': return Math.abs(left - right) < 0.0001;
     case '>=': return left >= right;
     case '>': return left > right;
+    case 'Touch':
+    case 'touch': {
+      // Touch: 「近接（許容誤差内）」または「同一足で接触/反転」を許容
+      // ※ 実データは小数点誤差があるため epsilon を持たせる
+      const eps = 1e-6;
+      if (Math.abs(left - right) <= eps) return true;
+      if (prevLeft === undefined || prevRight === undefined) return false;
+      const prevDiff = prevLeft - prevRight;
+      const currDiff = left - right;
+      // 符号が変わった/ゼロに近づいた場合を Touch とみなす
+      return (prevDiff === 0) || (currDiff === 0) || (prevDiff > 0 && currDiff < 0) || (prevDiff < 0 && currDiff > 0);
+    }
     case 'cross_above':
       // 前回は下、今回は上
       if (prevLeft === undefined || prevRight === undefined) return false;
@@ -282,8 +248,18 @@ export async function evaluateCondition(
   // クロス判定用の前回値を取得
   let prevLeft: number | undefined;
   let prevRight: number | undefined;
-  
-  if (condition.operator === 'cross_above' || condition.operator === 'cross_below') {
+
+  const needsPrev = [
+    'cross_above',
+    'cross_below',
+    // 後方互換/拡張
+    'GC',
+    'DC',
+    'Touch',
+    'touch',
+  ].includes(condition.operator);
+
+  if (needsPrev) {
     if (ctx.currentIndex > 0) {
       const prevCtx = { ...ctx, currentIndex: ctx.currentIndex - 1 };
       prevLeft = await getIndicatorValue(prevCtx, condition.indicatorId, condition.params, condition.field);

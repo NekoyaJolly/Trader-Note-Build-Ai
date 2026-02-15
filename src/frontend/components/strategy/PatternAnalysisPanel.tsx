@@ -19,6 +19,7 @@ import {
   type AnomalyDetectionResult,
   type WinningPattern,
 } from "@/lib/api";
+import type { StrategyDirection } from "@/types/strategy";
 
 // ============================================
 // 型定義
@@ -28,7 +29,7 @@ interface PatternAnalysisPanelProps {
   strategyId: string;
   strategyName: string;
   symbol: string;
-  side: "buy" | "sell";
+  side: StrategyDirection;
   /** 現在の12次元特徴量（外部から渡す場合） */
   currentFeatures?: FeatureVector;
 }

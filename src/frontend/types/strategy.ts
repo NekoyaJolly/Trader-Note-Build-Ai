@@ -66,7 +66,10 @@ export type ComparisonOperator =
   | '>='          // 以上
   | '>'           // より大きい
   | 'cross_above' // 上抜け（クロスアップ）
-  | 'cross_below'; // 下抜け（クロスダウン）
+  | 'cross_below' // 下抜け（クロスダウン）
+  | 'GC'          // ゴールデンクロス（上抜けの別名）
+  | 'DC'          // デッドクロス（下抜けの別名）
+  | 'Touch';      // タッチ（接触/近接）
 
 /**
  * 比較演算子の表示情報
@@ -79,6 +82,9 @@ export const COMPARISON_OPERATOR_INFO: Record<ComparisonOperator, { label: strin
   '>': { label: '>', description: 'より大きい' },
   'cross_above': { label: '↑クロス', description: '上抜け' },
   'cross_below': { label: '↓クロス', description: '下抜け' },
+  GC: { label: 'GC', description: 'ゴールデンクロス（上抜け）' },
+  DC: { label: 'DC', description: 'デッドクロス（下抜け）' },
+  Touch: { label: 'Touch', description: '接触（近接/反転を含む）' },
 };
 
 /**
@@ -257,8 +263,9 @@ export function isConditionGroup(
 /**
  * エントリータイミング
  */
-export type EntryTiming = 'next_open'; // 次足始値（Phase A デフォルト）
-// Phase B以降: 'current_close' | 'm1_price' を追加予定
+export type EntryTiming =
+  | 'next_open'     // 次足始値（デフォルト）
+  | 'current_close'; // 現足終値（現足エントリーの近似）
 
 /**
  * TP/SL の単位
@@ -288,7 +295,13 @@ export interface ExitSettings {
 // ============================================
 
 /**
- * トレード方向
+ * トレード方向（ストラテジー用）
+ * - BOTH は「両建て許容」を意味する（現時点のバックテストは暫定で片側のみ実行）
+ */
+export type StrategyDirection = 'buy' | 'sell' | 'both';
+
+/**
+ * トレード方向（バックテスト/イベント用）
  */
 export type TradeSide = 'buy' | 'sell';
 
@@ -330,7 +343,7 @@ export interface Strategy {
   /** 対象シンボル */
   symbol: SupportedSymbol;
   /** トレード方向 */
-  side: TradeSide;
+  side: StrategyDirection;
   /** ステータス */
   status: StrategyStatus;
   /** 現在のバージョンID */
@@ -358,7 +371,7 @@ export interface CreateStrategyRequest {
   name: string;
   description?: string;
   symbol: SupportedSymbol;
-  side: TradeSide;
+  side: StrategyDirection;
   entryConditions: ConditionGroup;
   exitSettings: ExitSettings;
   entryTiming?: EntryTiming;
@@ -372,7 +385,7 @@ export interface UpdateStrategyRequest {
   name?: string;
   description?: string;
   symbol?: SupportedSymbol;
-  side?: TradeSide;
+  side?: StrategyDirection;
   entryConditions?: ConditionGroup;
   exitSettings?: ExitSettings;
   entryTiming?: EntryTiming;
@@ -388,7 +401,7 @@ export interface StrategySummary {
   id: string;
   name: string;
   symbol: SupportedSymbol;
-  side: TradeSide;
+  side: StrategyDirection;
   status: StrategyStatus;
   versionCount: number;
   createdAt: string;

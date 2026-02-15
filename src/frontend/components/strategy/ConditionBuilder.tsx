@@ -145,6 +145,9 @@ const _COMPARISON_OPERATOR_INFO: Record<ComparisonOperator, { label: string; des
   '>': { label: '>', description: 'より大きい' },
   'cross_above': { label: '↑クロス', description: '上抜け' },
   'cross_below': { label: '↓クロス', description: '下抜け' },
+  GC: { label: 'GC', description: 'ゴールデンクロス（上抜け）' },
+  DC: { label: 'DC', description: 'デッドクロス（下抜け）' },
+  Touch: { label: 'Touch', description: '接触（近接/反転を含む）' },
 };
 
 const _LOGICAL_OPERATOR_INFO: Record<LogicalOperator, { label: string; description: string }> = {

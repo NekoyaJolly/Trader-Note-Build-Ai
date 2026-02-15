@@ -18,9 +18,10 @@ import {
   updateStrategyStatus,
   duplicateStrategy,
   updateStrategy,
+  rollbackStrategyVersion,
   fetchIndicatorMetadata,
 } from "@/lib/api";
-import type { Strategy, StrategyStatus, ConditionGroup, IndicatorCondition, ExitSettings, TradeSide, SupportedSymbol, EntryTiming, UpdateStrategyRequest } from "@/types/strategy";
+import type { Strategy, StrategyStatus, ConditionGroup, IndicatorCondition, ExitSettings, StrategyDirection, SupportedSymbol, EntryTiming, UpdateStrategyRequest } from "@/types/strategy";
 import type { IndicatorMetadata } from "@/types/indicator";
 import ConditionBuilder from "@/components/strategy/ConditionBuilder";
 import { NeonButton } from "@/components/ui/NeonButton";
@@ -36,8 +37,16 @@ function ConditionDisplay({ condition }: { condition: IndicatorCondition }) {
     upper: ".上", middle: ".中", lower: ".下",
   };
   const operatorLabels: Record<string, string> = {
-    ">": "＞", "<": "＜", ">=": "≧", "<=": "≦", "==": "＝",
-    "cross_above": "↑上抜け", "cross_below": "↓下抜け",
+    ">": "＞",
+    "<": "＜",
+    ">=": "≧",
+    "<=": "≦",
+    "=": "＝",
+    "cross_above": "↑上抜け",
+    "cross_below": "↓下抜け",
+    GC: "GC（上抜け）",
+    DC: "DC（下抜け）",
+    Touch: "Touch（接触）",
   };
 
   let compareTargetDisplay = "";
@@ -240,7 +249,7 @@ export default function StrategyDetailPage() {
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editSymbol, setEditSymbol] = useState<SupportedSymbol>("USDJPY");
-  const [editSide, setEditSide] = useState<TradeSide>("buy");
+  const [editSide, setEditSide] = useState<StrategyDirection>("buy");
   const [editEntryConditions, setEditEntryConditions] = useState<ConditionGroup | null>(null);
   const [editExitSettings, setEditExitSettings] = useState<ExitSettings | null>(null);
   const [editTags, setEditTags] = useState<string[]>([]);
@@ -323,6 +332,25 @@ export default function StrategyDetailPage() {
       setIsEditMode(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : "保存に失敗しました";
+      alert(message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // バージョンをロールバック（表示モード専用）
+  const handleRollback = async (versionNumber: number) => {
+    if (!strategy) return;
+    if (!confirm(`v${versionNumber} にロールバックしますか？（履歴として新バージョンが作成されます）`)) {
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const updated = await rollbackStrategyVersion(strategy.id, versionNumber);
+      setStrategy(updated);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'ロールバックに失敗しました';
       alert(message);
     } finally {
       setIsSaving(false);
@@ -461,11 +489,12 @@ export default function StrategyDetailPage() {
                 </select>
                 <select
                   value={editSide}
-                  onChange={(e) => setEditSide(e.target.value as TradeSide)}
-                  className={`px-1.5 py-0.5 text-[10px] rounded bg-slate-800/50 border border-slate-600 focus:border-purple-500 focus:outline-none ${editSide === 'buy' ? 'text-green-400' : 'text-red-400'}`}
+                  onChange={(e) => setEditSide(e.target.value as StrategyDirection)}
+                  className={`px-1.5 py-0.5 text-[10px] rounded bg-slate-800/50 border border-slate-600 focus:border-purple-500 focus:outline-none ${editSide === 'buy' ? 'text-green-400' : editSide === 'sell' ? 'text-red-400' : 'text-amber-400'}`}
                 >
                   <option value="buy">買い</option>
                   <option value="sell">売り</option>
+                  <option value="both">両建て</option>
                 </select>
               </div>
             ) : (
@@ -479,8 +508,8 @@ export default function StrategyDetailPage() {
                 </div>
                 <div className="flex items-center gap-2 text-xs text-gray-400">
                   <span className="font-mono text-cyan-400">{strategy.symbol}</span>
-                  <span className={strategy.side === "buy" ? "text-green-400" : "text-red-400"}>
-                    {strategy.side === "buy" ? "買い" : "売り"}
+                  <span className={strategy.side === "buy" ? "text-green-400" : strategy.side === "sell" ? "text-red-400" : "text-amber-400"}>
+                    {strategy.side === "buy" ? "買い" : strategy.side === "sell" ? "売り" : "両建て"}
                   </span>
                   {currentVersion && (
                     <span className="text-gray-500">v{currentVersion.versionNumber}</span>
@@ -751,9 +780,20 @@ export default function StrategyDetailPage() {
                     <span className="text-gray-400 truncate">{version.changeNote}</span>
                   )}
                 </div>
-                {version.versionNumber === currentVersion?.versionNumber && (
-                  <span className="px-1.5 py-0.5 bg-cyan-500/20 text-[10px] text-cyan-400 rounded">現在</span>
-                )}
+                <div className="flex items-center gap-2">
+                  {version.versionNumber === currentVersion?.versionNumber ? (
+                    <span className="px-1.5 py-0.5 bg-cyan-500/20 text-[10px] text-cyan-400 rounded">現在</span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleRollback(version.versionNumber)}
+                      className="px-2 py-0.5 text-[10px] rounded bg-slate-800/50 border border-slate-600 text-gray-300 hover:border-cyan-500/50 hover:text-cyan-300 transition-colors"
+                      disabled={isSaving}
+                    >
+                      復元
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
             {strategy.versions.length > 5 && (

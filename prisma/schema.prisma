@@ -556,8 +556,8 @@ model Strategy {
   description      String?
   /// 対象シンボル（USDJPY, EURUSD, XAUUSD 等）
   symbol           String
-  /// トレード方向（buy/sell）
-  side             TradeSide
+  /// トレード方向（buy/sell/both）
+  side             StrategyDirection
   /// ステータス
   status           StrategyStatus        @default(draft)
   /// 現在のバージョン ID
@@ -588,6 +588,10 @@ model StrategyVersion {
   strategyId      String   @db.Uuid
   /// バージョン番号（1, 2, 3...）
   versionNumber   Int
+  /// 対象シンボル（変更履歴として保持、ロールバック用）
+  symbol          String?
+  /// トレード方向（変更履歴として保持、ロールバック用）
+  side            StrategyDirection?
   /// エントリー条件（JSON: ConditionGroup）
   entryConditions Json
   /// イグジット設定（JSON: ExitSettings）
@@ -920,6 +924,13 @@ enum NoteStatus {
 enum TradeSide {
   buy
   sell
+}
+
+/// ストラテジー用の方向（両建てを許容）
+enum StrategyDirection {
+  buy
+  sell
+  both
 }
 
 enum NotificationStatus {

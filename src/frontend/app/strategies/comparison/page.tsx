@@ -22,6 +22,7 @@ import {
   type OptimizationMethod,
   type OptimizationResult,
 } from "@/lib/api";
+import type { StrategyDirection } from "@/types/strategy";
 
 // ============================================
 // 型定義
@@ -31,7 +32,7 @@ interface Strategy {
   id: string;
   name: string;
   symbol: string;
-  side: "buy" | "sell";
+  side: StrategyDirection;
   status: string;
 }
 

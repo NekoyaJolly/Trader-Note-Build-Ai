@@ -7,7 +7,7 @@
  * - 入力バリデーションの検証
  */
 
-import { PrismaClient, StrategyStatus, TradeSide } from '@prisma/client';
+import { PrismaClient, StrategyStatus, StrategyDirection } from '@prisma/client';
 import {
   listStrategies,
   getStrategy,
@@ -45,9 +45,10 @@ jest.mock('@prisma/client', () => {
       active: 'active',
       archived: 'archived',
     },
-    TradeSide: {
+    StrategyDirection: {
       buy: 'buy',
       sell: 'sell',
+      both: 'both',
     },
   };
 });
@@ -64,7 +65,7 @@ describe('strategyService', () => {
     name: 'テスト戦略',
     description: 'RSI逆張り戦略',
     symbol: 'USDJPY',
-    side: 'buy' as TradeSide,
+    side: 'buy' as StrategyDirection,
     status: 'draft' as StrategyStatus,
     currentVersionId: 'version-1',
     tags: ['逆張り', 'RSI'],
@@ -103,7 +104,7 @@ describe('strategyService', () => {
     name: 'テスト戦略',
     description: 'RSI逆張り戦略',
     symbol: 'USDJPY',
-    side: 'buy' as TradeSide,
+    side: 'buy' as StrategyDirection,
     entryConditions: mockVersion.entryConditions,
     exitSettings: mockVersion.exitSettings,
     tags: ['逆張り', 'RSI'],
@@ -246,10 +247,10 @@ describe('strategyService', () => {
     });
 
     it('売買方向が不正な場合はエラーになること', async () => {
-      const invalidInput = { ...validCreateInput, side: 'invalid' as TradeSide };
+      const invalidInput = { ...validCreateInput, side: 'invalid' as StrategyDirection };
 
-      await expect(createStrategy(invalidInput)).rejects.toThrow(
-        '売買方向は buy または sell を指定してください'
+        await expect(createStrategy(invalidInput)).rejects.toThrow(
+        '売買方向は buy / sell / both を指定してください'
       );
     });
   });

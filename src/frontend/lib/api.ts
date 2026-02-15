@@ -843,6 +843,33 @@ export async function fetchStrategyVersion(
 }
 
 /**
+ * ストラテジーを指定バージョンへロールバック
+ * PUT /api/strategies/:id/rollback/:versionNumber
+ */
+export async function rollbackStrategyVersion(
+  strategyId: string,
+  versionNumber: number,
+  changeNote?: string
+): Promise<Strategy> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/strategies/${strategyId}/rollback/${versionNumber}`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ changeNote }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || 'ストラテジーのロールバックに失敗しました');
+  }
+
+  const payload = await response.json();
+  return payload.data;
+}
+
+/**
  * ストラテジーを作成
  * POST /api/strategies
  */
@@ -956,6 +983,8 @@ export interface BacktestRequestParams {
   enableStage2: boolean;
   initialCapital: number;
   lotSize: number;
+  /** 固定ロット入力の単位（デフォルト: 'currency'） */
+  lotSizeUnit?: 'currency' | 'lots';
   leverage: number;
   symbol?: string;
   /** ロットモード（デフォルト: 'fixed'） */

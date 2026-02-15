@@ -1,0 +1,28 @@
+services:
+  db:
+    image: timescale/timescaledb:2.14.2-pg16
+    container_name: tradeassist-db
+    environment:
+      POSTGRES_USER: tradeassist
+      POSTGRES_PASSWORD: tradeassist
+      POSTGRES_DB: tradeassist
+    ports:
+      - "5432:5432"
+    volumes:
+      - tradeassist-db-data:/var/lib/postgresql/data
+      - ./docker/db-init:/docker-entrypoint-initdb.d:ro
+
+  analysis-engine:
+    build:
+      context: ./analysis-engine
+    container_name: tradeassist-analysis-engine
+    environment:
+      # Read-Only 用ユーザー（docker/db-init で作成）
+      ANALYSIS_DATABASE_URL: postgresql+psycopg2://analysis_ro:analysis_ro@db:5432/tradeassist
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+
+volumes:
+  tradeassist-db-data:
