@@ -12,13 +12,82 @@ env:
   GCP_REGION: asia-northeast1
   GCP_SERVICE_NAME: trader-note
   GCP_IMAGE: gcr.io/ai-note-486020/trader-note:latest
+  GCP_ANALYSIS_SERVICE_NAME: trader-note-analysis-engine
+  GCP_ANALYSIS_IMAGE: gcr.io/ai-note-486020/trader-note-analysis-engine:latest
   PRODUCTION_API_URL: https://trader-note-571157808050.asia-northeast1.run.app
 
 jobs:
+  # ── 0. analysis-engine（Python）を Cloud Run にデプロイ ──
+  deploy-analysis-engine:
+    name: Deploy analysis-engine (Python) to GCP Cloud Run
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    outputs:
+      analysis_url: ${{ steps.outputs.outputs.analysis_url }}
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: GCP 認証
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: gcloud CLI セットアップ
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Docker 認証設定
+        run: gcloud auth configure-docker --quiet
+
+      - name: コンテナイメージをビルド＆プッシュ（analysis-engine）
+        run: |
+          docker build -t ${{ env.GCP_ANALYSIS_IMAGE }} ./analysis-engine
+          docker push ${{ env.GCP_ANALYSIS_IMAGE }}
+
+      - name: Cloud Run へデプロイ（analysis-engine）
+        run: |
+          gcloud run deploy ${{ env.GCP_ANALYSIS_SERVICE_NAME }} \
+            --image ${{ env.GCP_ANALYSIS_IMAGE }} \
+            --region ${{ env.GCP_REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --update-env-vars NODE_ENV=production \
+            --update-secrets ANALYSIS_DATABASE_URL=ANALYSIS_DATABASE_URL:latest
+
+      - name: analysis-engine のURLを取得
+        id: outputs
+        run: |
+          URL=$(gcloud run services describe ${{ env.GCP_ANALYSIS_SERVICE_NAME }} \
+            --region ${{ env.GCP_REGION }} \
+            --format='value(status.url)')
+          echo "analysis_url=$URL" >> $GITHUB_OUTPUT
+          echo "analysis-engine url: $URL"
+
+      - name: analysis-engine ヘルスチェック（最大5分待機）
+        run: |
+          URL=$(gcloud run services describe ${{ env.GCP_ANALYSIS_SERVICE_NAME }} \
+            --region ${{ env.GCP_REGION }} \
+            --format='value(status.url)')
+          for i in {1..30}; do
+            echo "確認中... ($i/30) url=$URL"
+            if curl -s -f "$URL/health" > /dev/null 2>&1; then
+              echo "✅ analysis-engine が正常に起動しました"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "❌ analysis-engine の起動確認がタイムアウトしました"
+          exit 1
+
   # ── 1. GCP Cloud Run（API）へのデプロイ ──
   deploy-gcp:
     name: Deploy API to GCP Cloud Run
     runs-on: ubuntu-latest
+    needs: [deploy-analysis-engine]
     # CI 成功時のみ実行（手動実行時はスキップなし）
     if: >-
       github.event_name == 'workflow_dispatch' ||
@@ -54,7 +123,7 @@ jobs:
             --image ${{ env.GCP_IMAGE }} \
             --region ${{ env.GCP_REGION }} \
             --platform managed \
-            --update-env-vars NODE_ENV=production \
+            --update-env-vars NODE_ENV=production,ANALYSIS_ENGINE_URL=${{ needs.deploy-analysis-engine.outputs.analysis_url }} \
             --update-secrets AI_API_KEY=AI_API_KEY:latest,AI_MODEL=AI_MODEL:latest,AI_BASE_URL=AI_BASE_URL:latest
 
       - name: デプロイ後の動作確認（最大5分待機）
