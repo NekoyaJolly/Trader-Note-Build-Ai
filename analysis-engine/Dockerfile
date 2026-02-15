@@ -13,9 +13,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 
 ENV PYTHONUNBUFFERED=1
-ENV ANALYSIS_ENGINE_HOST=0.0.0.0
-ENV ANALYSIS_ENGINE_PORT=8000
 
-EXPOSE 8000
+# Cloud Run は PORT 環境変数で待受ポートを渡す（デフォルト: 8080）
+# ローカル/Docker Compose では明示しなくても動くようにフォールバックを持たせる
+EXPOSE 8080
 
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
