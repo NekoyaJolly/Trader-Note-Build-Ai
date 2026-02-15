@@ -36,7 +36,7 @@ async function main(): Promise<void> {
 
   console.log('[smoke-backtest] runId=', result.id);
   console.log('[smoke-backtest] totalTrades=', result.summary.totalTrades);
-  console.log('[smoke-backtest] totalPnl=', result.summary.totalPnl);
+  console.log('[smoke-backtest] netProfit=', result.summary.netProfit);
   console.log('[smoke-backtest] winRate=', result.summary.winRate);
 }
 

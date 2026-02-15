@@ -249,8 +249,8 @@ describe('strategyService', () => {
     it('売買方向が不正な場合はエラーになること', async () => {
       const invalidInput = { ...validCreateInput, side: 'invalid' as StrategyDirection };
 
-      await expect(createStrategy(invalidInput)).rejects.toThrow(
-        '売買方向は buy または sell を指定してください'
+        await expect(createStrategy(invalidInput)).rejects.toThrow(
+        '売買方向は buy / sell / both を指定してください'
       );
     });
   });

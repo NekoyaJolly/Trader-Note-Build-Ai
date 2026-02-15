@@ -16,6 +16,7 @@ import {
   ConditionGroup,
   OHLCV,
 } from '../services/strategyConditionEvaluator';
+import { makeIndicatorCacheKey } from '../services/analysisEngineClient';
 
 // モックストラテジー
 const mockStrategy = {
@@ -62,81 +63,89 @@ describe('StrategyConditionEvaluator', () => {
   });
 
   describe('getIndicatorValue', () => {
-    test('RSI を計算してキャッシュする', async () => {
-      // 100本の価格データを生成（RSI計算には最低14本必要）
-      const mockData: OHLCV[] = [];
-      let price = 150.0;
-      for (let i = 0; i < 100; i++) {
-        price += (Math.random() - 0.5) * 2;
-        mockData.push({
-          timestamp: new Date(`2024-01-01T${String(i).padStart(2, '0')}:00:00Z`),
-          open: price - 0.1,
-          high: price + 0.2,
-          low: price - 0.2,
-          close: price,
-          volume: 1000,
-        });
-      }
-
-      const ctx: EvaluationContext = {
-        data: mockData,
-        currentIndex: 50,
-        indicatorCache: new Map(),
-        strategy: mockStrategy,
-      };
-
-      const rsiValue = await getIndicatorValue(ctx, 'rsi', { period: 14 }, 'value');
-
-      // RSI は 0〜100 の範囲内にあるべき
-      expect(rsiValue).toBeDefined();
-      expect(rsiValue!).toBeGreaterThanOrEqual(0);
-      expect(rsiValue!).toBeLessThanOrEqual(100);
-
-      // キャッシュに保存されているはず
-      expect(ctx.indicatorCache.size).toBeGreaterThan(0);
-    });
-
-    test('SMA を計算してキャッシュする', async () => {
-      const mockData: OHLCV[] = [];
-      for (let i = 0; i < 50; i++) {
-        mockData.push({
-          timestamp: new Date(`2024-01-01T${String(i).padStart(2, '0')}:00:00Z`),
+    test('キャッシュに存在しない場合は undefined を返す（Node 側で計算しない）', async () => {
+      const mockData: OHLCV[] = [
+        {
+          timestamp: new Date('2024-01-01T00:00:00Z'),
           open: 150.0,
           high: 151.0,
           low: 149.0,
-          close: 150.0 + i * 0.1,
+          close: 150.5,
           volume: 1000,
-        });
-      }
+        },
+      ];
 
       const ctx: EvaluationContext = {
         data: mockData,
-        currentIndex: 30,
+        currentIndex: 0,
         indicatorCache: new Map(),
         strategy: mockStrategy,
       };
 
-      const smaValue = await getIndicatorValue(ctx, 'sma', { period: 20 }, 'value');
+      const value = await getIndicatorValue(ctx, 'rsi', { period: 14 }, 'value');
+      expect(value).toBeUndefined();
+      expect(ctx.indicatorCache.size).toBe(0);
+    });
 
-      expect(smaValue).toBeDefined();
-      expect(smaValue!).toBeGreaterThan(150.0);
-      expect(smaValue!).toBeLessThan(155.0);
+    test('キャッシュに存在する場合はその値を返す', async () => {
+      const mockData: OHLCV[] = Array.from({ length: 3 }).map((_, i) => ({
+        timestamp: new Date(`2024-01-01T0${i}:00:00Z`),
+        open: 150.0,
+        high: 151.0,
+        low: 149.0,
+        close: 150.0,
+        volume: 1000,
+      }));
+
+      const ctx: EvaluationContext = {
+        data: mockData,
+        currentIndex: 1,
+        indicatorCache: new Map(),
+        strategy: mockStrategy,
+      };
+
+      const key = makeIndicatorCacheKey('rsi', { period: 14 }, 'value');
+      ctx.indicatorCache.set(key, [10, 20, 30]);
+
+      const value = await getIndicatorValue(ctx, 'rsi', { period: 14 }, 'value');
+      expect(value).toBe(20);
+    });
+
+    test('キャッシュ値が NaN の場合は undefined に寄せる', async () => {
+      const mockData: OHLCV[] = Array.from({ length: 2 }).map((_, i) => ({
+        timestamp: new Date(`2024-01-01T0${i}:00:00Z`),
+        open: 150.0,
+        high: 151.0,
+        low: 149.0,
+        close: 150.0,
+        volume: 1000,
+      }));
+
+      const ctx: EvaluationContext = {
+        data: mockData,
+        currentIndex: 1,
+        indicatorCache: new Map(),
+        strategy: mockStrategy,
+      };
+
+      const key = makeIndicatorCacheKey('sma', { period: 20 }, 'value');
+      ctx.indicatorCache.set(key, [Number.NaN, Number.NaN]);
+
+      const value = await getIndicatorValue(ctx, 'sma', { period: 20 }, 'value');
+      expect(value).toBeUndefined();
     });
   });
 
   describe('evaluateCondition', () => {
     test('固定値との比較: RSI < 30', async () => {
-      // RSI が低い状態を作るため、下降トレンドのデータを生成
       const mockData: OHLCV[] = [];
-      let price = 160.0;
       for (let i = 0; i < 100; i++) {
-        price -= 0.5; // 継続的な下降
         mockData.push({
           timestamp: new Date(`2024-01-01T${String(i).padStart(2, '0')}:00:00Z`),
-          open: price + 0.2,
-          high: price + 0.3,
-          low: price - 0.1,
-          close: price,
+          open: 150,
+          high: 151,
+          low: 149,
+          close: 150,
           volume: 1000,
         });
       }
@@ -147,6 +156,10 @@ describe('StrategyConditionEvaluator', () => {
         indicatorCache: new Map(),
         strategy: mockStrategy,
       };
+
+      // analysis-engine から取得済みの想定で、RSI をキャッシュに投入
+      const key = makeIndicatorCacheKey('rsi', { period: 14 }, 'value');
+      ctx.indicatorCache.set(key, Array.from({ length: 100 }).map(() => 20));
 
       const condition: IndicatorCondition = {
         conditionId: 'c1',
@@ -162,7 +175,6 @@ describe('StrategyConditionEvaluator', () => {
 
       const result = await evaluateCondition(ctx, condition);
 
-      // 強い下降トレンドなので RSI < 30 のはず
       expect(result).toBe(true);
     });
 
@@ -192,6 +204,10 @@ describe('StrategyConditionEvaluator', () => {
         strategy: mockStrategy,
       };
 
+      // SMA をキャッシュに投入（急落後でも SMA が高い想定）
+      const key = makeIndicatorCacheKey('sma', { period: 20 }, 'value');
+      ctx.indicatorCache.set(key, Array.from({ length: 50 }).map(() => 155));
+
       const condition: IndicatorCondition = {
         conditionId: 'c2',
         indicatorId: 'sma',
@@ -206,19 +222,15 @@ describe('StrategyConditionEvaluator', () => {
 
       const result = await evaluateCondition(ctx, condition);
 
-      // 急落後なので SMA > 現在価格 のはず
       expect(result).toBe(true);
     });
   });
 
   describe('evaluateConditionGroup', () => {
     test('AND 演算子: すべての条件が真の場合', async () => {
-      // RSI が 30〜70 の範囲に収まるよう、上下に変動するデータを生成
-      // 価格が一定範囲内で推移すると RSI は中央値付近（50前後）に収束する
       const mockData: OHLCV[] = [];
       for (let i = 0; i < 50; i++) {
-        // sin波で価格を変動させる（150を中心に ±2 の範囲）
-        const price = 150.0 + Math.sin(i * 0.3) * 2;
+        const price = 150.0;
         mockData.push({
           timestamp: new Date(`2024-01-01T${String(i).padStart(2, '0')}:00:00Z`),
           open: price - 0.5,
@@ -235,6 +247,10 @@ describe('StrategyConditionEvaluator', () => {
         indicatorCache: new Map(),
         strategy: mockStrategy,
       };
+
+      // RSI が 50 付近にある想定
+      const key = makeIndicatorCacheKey('rsi', { period: 14 }, 'value');
+      ctx.indicatorCache.set(key, Array.from({ length: 50 }).map(() => 50));
 
       const group: ConditionGroup = {
         groupId: 'g1',
@@ -261,7 +277,6 @@ describe('StrategyConditionEvaluator', () => {
 
       const result = await evaluateConditionGroup(ctx, group);
 
-      // 変動するデータなので RSI は 30〜70 の範囲内のはず
       expect(result).toBe(true);
     });
 
@@ -284,6 +299,14 @@ describe('StrategyConditionEvaluator', () => {
         indicatorCache: new Map(),
         strategy: mockStrategy,
       };
+
+      // RSI は 50（<30 は偽）
+      const rsiKey = makeIndicatorCacheKey('rsi', { period: 14 }, 'value');
+      ctx.indicatorCache.set(rsiKey, Array.from({ length: 50 }).map(() => 50));
+
+      // SMA は 150（=150 は真）
+      const smaKey = makeIndicatorCacheKey('sma', { period: 20 }, 'value');
+      ctx.indicatorCache.set(smaKey, Array.from({ length: 50 }).map(() => 150));
 
       const group: ConditionGroup = {
         groupId: 'g2',
@@ -310,7 +333,6 @@ describe('StrategyConditionEvaluator', () => {
 
       const result = await evaluateConditionGroup(ctx, group);
 
-      // SMA ≈ 150.0 なので OR の片方が真
       expect(result).toBe(true);
     });
 
@@ -334,6 +356,10 @@ describe('StrategyConditionEvaluator', () => {
         strategy: mockStrategy,
       };
 
+      // RSI は 50（<30 は偽）→ NOT で真
+      const key = makeIndicatorCacheKey('rsi', { period: 14 }, 'value');
+      ctx.indicatorCache.set(key, Array.from({ length: 50 }).map(() => 50));
+
       const group: ConditionGroup = {
         groupId: 'g3',
         operator: 'NOT',
@@ -351,7 +377,6 @@ describe('StrategyConditionEvaluator', () => {
 
       const result = await evaluateConditionGroup(ctx, group);
 
-      // フラットな価格なので RSI < 30 は偽、NOT で真
       expect(result).toBe(true);
     });
   });
