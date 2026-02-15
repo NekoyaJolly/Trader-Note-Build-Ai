@@ -1,5 +1,5 @@
 /**
- * Railway PostgreSQL 接続テストスクリプト
+ * PostgreSQL 接続テストスクリプト
  */
 import { config } from 'dotenv';
 import { getPrismaClient } from '../src/infrastructure/prismaClient';
@@ -8,9 +8,9 @@ config();
 
 async function testConnection() {
   console.log('='.repeat(60));
-  console.log('Railway PostgreSQL 接続テスト開始');
+  console.log('PostgreSQL 接続テスト開始');
   console.log('='.repeat(60));
-  
+
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     console.error('❌ DATABASE_URL が設定されていません');
@@ -43,7 +43,7 @@ async function testConnection() {
     console.log('='.repeat(60));
     console.log('✅ すべての接続テストに成功しました');
     console.log('='.repeat(60));
-    
+
     process.exit(0);
   } catch (error) {
     console.error('');

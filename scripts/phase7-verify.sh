@@ -1,6 +1,6 @@
 #!/bin/bash
 # Phase 7 本番環境デプロイ後の疎通確認スクリプト
-# 使用方法: ./scripts/phase7-verify.sh <RAILWAY_API_URL> <VERCEL_UI_URL>
+# 使用方法: ./scripts/phase7-verify.sh <API_URL> <UI_URL>
 
 set -e
 
@@ -24,7 +24,7 @@ if [ -z "${API_URL}" ] || [ -z "${UI_URL}" ]; then
   echo "${RED}エラー: API_URL と UI_URL を指定してください${NC}"
   echo ""
   echo "使用方法:"
-  echo "  ./scripts/phase7-verify.sh https://api-url.railway.app https://ui-url.vercel.app"
+  echo "  ./scripts/phase7-verify.sh https://api-url.example.com https://ui-url.example.com"
   echo ""
   exit 1
 fi

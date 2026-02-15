@@ -1,7 +1,7 @@
 /**
  * Cronエンドポイント
  * 
- * 目的: Railway/Vercel Cronから呼び出される自動実行エンドポイント
+ * 目的: 外部Cronサービスから呼び出される自動実行エンドポイント
  * 
  * エンドポイント:
  * - GET /api/cron/side-b/daily-plan - 日次プラン生成（毎朝）
@@ -52,10 +52,10 @@ router.get('/health', (_req: Request, res: Response) => {
  */
 router.get('/side-b/daily-plan', async (_req: Request, res: Response) => {
   const startTime = Date.now();
-  
+
   try {
     console.log('[Cron] 日次プラン生成を開始します');
-    
+
     // 市場開場チェック
     if (!isFXMarketOpen()) {
       const marketStatus = getMarketStatusJST();
@@ -69,13 +69,13 @@ router.get('/side-b/daily-plan', async (_req: Request, res: Response) => {
       });
       return;
     }
-    
+
     // スケジューラーから日次プランを実行
     const scheduler = getSideBScheduler();
     const result = await scheduler.runDailyPlanNow();
-    
+
     console.log('[Cron] 日次プラン生成完了:', result.message);
-    
+
     res.json({
       success: result.success,
       message: result.message,
@@ -107,10 +107,10 @@ router.get('/side-b/daily-plan', async (_req: Request, res: Response) => {
  */
 router.get('/side-b/monitor', async (_req: Request, res: Response) => {
   const startTime = Date.now();
-  
+
   try {
     console.log('[Cron] 監視実行を開始します');
-    
+
     // 市場開場チェック
     if (!isFXMarketOpen()) {
       const marketStatus = getMarketStatusJST();
@@ -124,13 +124,13 @@ router.get('/side-b/monitor', async (_req: Request, res: Response) => {
       });
       return;
     }
-    
+
     // スケジューラーから監視を実行
     const scheduler = getSideBScheduler();
     const result = await scheduler.runMonitorNow();
-    
+
     console.log('[Cron] 監視実行完了:', result.message);
-    
+
     res.json({
       success: result.success,
       message: result.message,

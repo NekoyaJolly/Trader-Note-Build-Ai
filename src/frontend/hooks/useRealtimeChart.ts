@@ -293,12 +293,10 @@ export function useRealtimeChart(
 
       // SSE カスタムイベント用のヘルパー関数
       // EventSourcePolyfill の addEventListener でカスタムイベントを処理
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const addSSEListener = (eventType: string, handler: (data: string) => void) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (eventSource as any).addEventListener(eventType, (e: { data: string }) => {
+        (eventSource as EventSource).addEventListener(eventType, ((e: MessageEvent) => {
           handler(e.data);
-        });
+        }) as EventListener);
       };
 
       // 初期データ受信

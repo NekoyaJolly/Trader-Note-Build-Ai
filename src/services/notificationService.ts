@@ -1,4 +1,4 @@
-import { Notification } from '../models/types';
+import { Notification, MarketData, TradeNote as FSTradeNote } from '../models/types';
 import { v4 as uuidv4 } from 'uuid';
 import { MatchResultDTO } from '../domain/matching/MatchResultDTO';
 import { NotificationRepository } from '../domain/notification/NotificationRepository';
@@ -106,10 +106,10 @@ export class NotificationService {
           matchScore: match.matchScore,
           threshold: config.matching.threshold,
           isMatch: true,
-          currentMarket: match.marketSnapshot as any,
-          historicalNote: note,
+          currentMarket: match.marketSnapshot as unknown as MarketData,
+          historicalNote: note as unknown as FSTradeNote,
           timestamp: match.evaluatedAt,
-        } as any,
+        },
         timestamp: new Date(),
         read: false,
       };

@@ -1,5 +1,5 @@
 /**
- * Railway Cron などから日次バッチを起動するスクリプト
+ * 外部 Cron などから日次バッチを起動するスクリプト
  * 手順: CSV 取込 → ノート生成 → 市場スナップショット → 一致判定 → 通知
  * 実行例:
  *   DAILY_CSV_PATH="data/trades/sample_trades.csv" npx ts-node scripts/run-daily-batch.ts

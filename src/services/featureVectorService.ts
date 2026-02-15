@@ -59,13 +59,13 @@ export interface IndicatorData {
   rsi?: number;
   rsiDirection?: 'rising' | 'falling' | 'flat';
   rsiZone?: 'overbought' | 'oversold' | 'neutral';
-  
+
   // MACD 関連
   macdLine?: number;
   macdSignal?: number;
   macdHistogram?: number;
   macdCrossover?: 'bullish' | 'bearish' | 'none';
-  
+
   // SMA/EMA 関連
   sma?: number;
   ema?: number;
@@ -73,18 +73,18 @@ export interface IndicatorData {
   emaSlope?: 'up' | 'down' | 'flat';
   priceVsSma?: 'above' | 'below' | 'at';
   priceVsEma?: 'above' | 'below' | 'at';
-  
+
   // ボリンジャーバンド関連
   bbUpper?: number;
   bbMiddle?: number;
   bbLower?: number;
   bbPosition?: number;      // %B (0-1 範囲、上限超え/下限割れあり)
   bbWidth?: number;         // バンド幅（相対値）
-  
+
   // ATR 関連
   atr?: number;
   atrRelative?: number;     // 価格に対する相対値
-  
+
   // 終値（正規化用）
   close?: number;
 }
@@ -180,37 +180,37 @@ export const DIMENSION_INDEX = {
  */
 export function generateFeatureVector(input: FeatureGenerationInput): FeatureVector12D {
   const { ohlcv, indicators, timestamp } = input;
-  
+
   // ローソク足パターンを計算
   const candle = calculateCandlePattern(ohlcv);
-  
+
   // 各次元を計算
   const vector: FeatureVector12D = [
     // === トレンド系 (0-2) ===
     calculateTrendDirection(indicators),
     calculateTrendStrength(indicators),
     calculateTrendAlignment(indicators),
-    
+
     // === モメンタム系 (3-4) ===
     calculateMacdHistogram(indicators),
     calculateMacdCrossover(indicators),
-    
+
     // === 過熱度系 (5-6) ===
     calculateRsiValue(indicators),
     calculateRsiZone(indicators),
-    
+
     // === ボラティリティ系 (7-8) ===
     calculateBbPosition(indicators),
     calculateBbWidth(indicators),
-    
+
     // === ローソク足構造 (9-10) ===
     candle.bodyRatio,
     calculateCandleDirectionValue(candle),
-    
+
     // === 時間軸 (11) ===
     calculateSessionFlag(timestamp),
   ];
-  
+
   return vector;
 }
 
@@ -233,7 +233,7 @@ export function generateFeatureVectorFromIndicators(
     upperWickRatio: 0.25,
     lowerWickRatio: 0.25,
   };
-  
+
   return [
     calculateTrendDirection(indicators),
     calculateTrendStrength(indicators),
@@ -262,23 +262,23 @@ function calculateTrendDirection(ind: IndicatorData): number {
   // SMA と EMA の傾きを組み合わせ
   let score = 0;
   let count = 0;
-  
+
   if (ind.smaSlope) {
     score += ind.smaSlope === 'up' ? 1 : ind.smaSlope === 'down' ? -1 : 0;
     count++;
   }
-  
+
   if (ind.emaSlope) {
     score += ind.emaSlope === 'up' ? 1 : ind.emaSlope === 'down' ? -1 : 0;
     count++;
   }
-  
+
   // 価格位置も考慮
   if (ind.priceVsSma) {
     score += ind.priceVsSma === 'above' ? 0.5 : ind.priceVsSma === 'below' ? -0.5 : 0;
     count++;
   }
-  
+
   // -1 〜 1 の範囲に正規化
   return count > 0 ? Math.max(-1, Math.min(1, score / count)) : 0;
 }
@@ -293,13 +293,13 @@ function calculateTrendStrength(ind: IndicatorData): number {
     // ATR が大きいほどトレンドが強い傾向
     return Math.min(1, ind.atrRelative * 5);
   }
-  
+
   // SMA/EMA の価格乖離から推定
   if (ind.sma !== undefined && ind.close !== undefined && ind.close > 0) {
     const deviation = Math.abs(ind.close - ind.sma) / ind.close;
     return Math.min(1, deviation * 10);
   }
-  
+
   return 0.5; // デフォルト
 }
 
@@ -309,7 +309,7 @@ function calculateTrendStrength(ind: IndicatorData): number {
  */
 function calculateTrendAlignment(ind: IndicatorData): number {
   let alignment = 0;
-  
+
   // SMA と EMA の整合性
   if (ind.smaSlope && ind.emaSlope) {
     if (ind.smaSlope === ind.emaSlope) {
@@ -320,7 +320,7 @@ function calculateTrendAlignment(ind: IndicatorData): number {
   } else {
     alignment += 0.25; // データ不足時はニュートラル
   }
-  
+
   // 価格位置との整合性
   if (ind.priceVsSma && ind.priceVsEma) {
     if (ind.priceVsSma === ind.priceVsEma) {
@@ -331,7 +331,7 @@ function calculateTrendAlignment(ind: IndicatorData): number {
   } else {
     alignment += 0.25;
   }
-  
+
   return alignment;
 }
 
@@ -341,7 +341,7 @@ function calculateTrendAlignment(ind: IndicatorData): number {
  */
 function calculateMacdHistogram(ind: IndicatorData): number {
   if (ind.macdHistogram === undefined) return 0;
-  
+
   // tanh で -1 〜 1 に正規化（スケール調整）
   return Math.tanh(ind.macdHistogram / 50);
 }
@@ -352,7 +352,7 @@ function calculateMacdHistogram(ind: IndicatorData): number {
  */
 function calculateMacdCrossover(ind: IndicatorData): number {
   if (ind.macdCrossover === undefined) return 0.5;
-  
+
   switch (ind.macdCrossover) {
     case 'bullish': return 1;
     case 'bearish': return 0;
@@ -367,7 +367,7 @@ function calculateMacdCrossover(ind: IndicatorData): number {
  */
 function calculateRsiValue(ind: IndicatorData): number {
   if (ind.rsi === undefined) return 0.5;
-  
+
   // 0-100 を 0-1 に正規化
   return Math.max(0, Math.min(1, ind.rsi / 100));
 }
@@ -386,7 +386,7 @@ function calculateRsiZone(ind: IndicatorData): number {
     }
     return 0.5;
   }
-  
+
   switch (ind.rsiZone) {
     case 'overbought': return 1;
     case 'oversold': return 0;
@@ -404,7 +404,7 @@ function calculateBbPosition(ind: IndicatorData): number {
     // 既に計算済みの %B を使用
     return Math.max(0, Math.min(1, ind.bbPosition));
   }
-  
+
   // BB 値から計算
   if (ind.bbUpper !== undefined && ind.bbLower !== undefined && ind.close !== undefined) {
     const width = ind.bbUpper - ind.bbLower;
@@ -413,7 +413,7 @@ function calculateBbPosition(ind: IndicatorData): number {
       return Math.max(0, Math.min(1, position));
     }
   }
-  
+
   return 0.5;
 }
 
@@ -426,13 +426,13 @@ function calculateBbWidth(ind: IndicatorData): number {
     // 0-1 に正規化（5% を最大と仮定）
     return Math.min(1, ind.bbWidth / 0.05);
   }
-  
+
   // BB 値から計算
   if (ind.bbUpper !== undefined && ind.bbLower !== undefined && ind.bbMiddle !== undefined && ind.bbMiddle > 0) {
     const width = (ind.bbUpper - ind.bbLower) / ind.bbMiddle;
     return Math.min(1, width / 0.05);
   }
-  
+
   return 0.5;
 }
 
@@ -442,7 +442,7 @@ function calculateBbWidth(ind: IndicatorData): number {
 function calculateCandlePattern(ohlcv: OHLCV): CandlePattern {
   const { open, high, low, close } = ohlcv;
   const range = high - low;
-  
+
   if (range === 0) {
     return {
       bodyRatio: 0,
@@ -451,10 +451,10 @@ function calculateCandlePattern(ohlcv: OHLCV): CandlePattern {
       lowerWickRatio: 0,
     };
   }
-  
+
   const body = Math.abs(close - open);
   const bodyRatio = body / range;
-  
+
   // 方向判定
   let direction: CandlePattern['direction'];
   if (bodyRatio < 0.1) {
@@ -464,11 +464,11 @@ function calculateCandlePattern(ohlcv: OHLCV): CandlePattern {
   } else {
     direction = 'bearish';
   }
-  
+
   // ヒゲ計算
   const upperWick = high - Math.max(open, close);
   const lowerWick = Math.min(open, close) - low;
-  
+
   return {
     bodyRatio,
     direction,
@@ -496,18 +496,18 @@ function calculateCandleDirectionValue(candle: CandlePattern): number {
  */
 function calculateSessionFlag(timestamp?: Date): number {
   if (!timestamp) return 0.5;
-  
+
   const hour = timestamp.getUTCHours();
-  
+
   // 東京セッション（0:00-9:00 UTC = 9:00-18:00 JST）
   if (hour >= 0 && hour < 9) return 0.2;
-  
+
   // ロンドンセッション（7:00-16:00 UTC）
   if (hour >= 7 && hour < 16) return 0.5;
-  
+
   // NYセッション（13:00-22:00 UTC）
   if (hour >= 13 && hour < 22) return 0.8;
-  
+
   return 0.5;
 }
 
@@ -528,22 +528,22 @@ export function calculateCosineSimilarity(vecA: number[], vecB: number[]): numbe
     console.warn(`ベクトル次元数が一致しません: ${vecA.length} vs ${vecB.length}`);
     return 0;
   }
-  
+
   let dotProduct = 0;
   let normA = 0;
   let normB = 0;
-  
+
   for (let i = 0; i < vecA.length; i++) {
     dotProduct += vecA[i] * vecB[i];
     normA += vecA[i] * vecA[i];
     normB += vecB[i] * vecB[i];
   }
-  
+
   const denominator = Math.sqrt(normA) * Math.sqrt(normB);
   if (denominator === 0) {
     return 0;
   }
-  
+
   return dotProduct / denominator;
 }
 
@@ -559,7 +559,7 @@ export function calculateSimilarityWithBreakdown(
   vecB: number[]
 ): SimilarityResult {
   const similarity = calculateCosineSimilarity(vecA, vecB);
-  
+
   // マッチ強度を判定
   let matchStrength: SimilarityResult['matchStrength'];
   if (similarity >= SIMILARITY_THRESHOLDS.STRONG) {
@@ -571,10 +571,10 @@ export function calculateSimilarityWithBreakdown(
   } else {
     matchStrength = 'none';
   }
-  
+
   // 次元別寄与度を計算
   const breakdown = calculateDimensionBreakdown(vecA, vecB);
-  
+
   return {
     similarity,
     matchStrength,
@@ -595,7 +595,7 @@ function calculateDimensionBreakdown(vecA: number[], vecB: number[]): DimensionB
     candle: [9, 10],
     time: [11],
   };
-  
+
   const result: DimensionBreakdown = {
     trend: { value: 0, contribution: 0 },
     momentum: { value: 0, contribution: 0 },
@@ -604,22 +604,22 @@ function calculateDimensionBreakdown(vecA: number[], vecB: number[]): DimensionB
     candle: { value: 0, contribution: 0 },
     time: { value: 0, contribution: 0 },
   };
-  
+
   // 全体の類似度
   const totalSim = calculateCosineSimilarity(vecA, vecB);
-  
+
   // 各カテゴリの部分類似度を計算
   for (const [category, indices] of Object.entries(categories)) {
     const partA = indices.map(i => vecA[i] ?? 0);
     const partB = indices.map(i => vecB[i] ?? 0);
     const partSim = calculateCosineSimilarity(partA, partB);
-    
-    (result as any)[category] = {
+
+    result[category as keyof DimensionBreakdown] = {
       value: partSim,
       contribution: totalSim > 0 ? (partSim / totalSim) * (indices.length / VECTOR_DIMENSION) : 0,
     };
   }
-  
+
   return result;
 }
 
@@ -673,7 +673,7 @@ export function convertLegacyVector(
     0.5, 0.5,     // ローソク足
     0.5,          // 時間軸
   ];
-  
+
   switch (format) {
     case '7d':
       // 旧7次元: [priceChange, volume, rsi, macd, trend, volatility, timeFlag]
@@ -686,7 +686,7 @@ export function convertLegacyVector(
         result[11] = oldVector[6] ?? 0.5;        // timeFlag
       }
       break;
-      
+
     case '8d':
       // 旧8次元: [RSI, SMA位置, EMA位置, MACDヒスト, BB位置, Stoch%K, ATR相対, OBV方向]
       if (oldVector.length >= 8) {
@@ -698,7 +698,7 @@ export function convertLegacyVector(
         result[8] = oldVector[6] ?? 0.5;                     // ATR → bbWidth（近似）
       }
       break;
-      
+
     case '18d':
       // 旧18次元: StrategyNote 形式
       // [0-2] RSI, [3-6] MACD, [7-9] BB, [10-13] SMA, [14-17] EMA
@@ -715,7 +715,7 @@ export function convertLegacyVector(
       }
       break;
   }
-  
+
   return result;
 }
 

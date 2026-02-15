@@ -164,7 +164,7 @@ export async function checkDataCoverage(
   startDate: Date,
   endDate: Date
 ): Promise<CoverageCheckResult> {
-  // プリセットの存在確認
+  // プリセットの存在確認（表示用）
   const preset = await prisma.dataPreset.findUnique({
     where: {
       symbol_timeframe: {
@@ -174,8 +174,8 @@ export async function checkDataCoverage(
     },
   });
 
-  // DB 内のデータ件数をカウント（要求期間内）
-  const dataCount = await prisma.oHLCVCandle.count({
+  // DB 内のデータ件数 + 最古/最新タイムスタンプ（要求期間内）を取得
+  const stats = await prisma.oHLCVCandle.aggregate({
     where: {
       symbol,
       timeframe,
@@ -184,74 +184,60 @@ export async function checkDataCoverage(
         lte: endDate,
       },
     },
+    _count: { _all: true },
+    _min: { timestamp: true },
+    _max: { timestamp: true },
   });
 
-  // プリセットがない場合
-  if (!preset) {
-    // プリセットがない場合は旧ロジック（24時間連続の期待値）
-    const intervalMinutes = getIntervalMinutes(timeframe);
-    const diffMs = endDate.getTime() - startDate.getTime();
-    const expectedCount = Math.ceil(diffMs / (intervalMinutes * 60 * 1000));
-    const coverageRatio = expectedCount > 0 ? dataCount / expectedCount : 0;
+  const dataCount = stats._count._all;
+  const minTs = stats._min.timestamp;
+  const maxTs = stats._max.timestamp;
 
+  // 期待バー数（表示用）: 休場・ブローカー休止を正確に推定できないため、単純な概算に留める
+  const intervalMinutes = getIntervalMinutes(timeframe);
+  const diffMs = endDate.getTime() - startDate.getTime();
+  const expectedCount = diffMs > 0
+    ? Math.max(0, Math.ceil(diffMs / (intervalMinutes * 60 * 1000)))
+    : 0;
+
+  if (dataCount === 0 || !minTs || !maxTs) {
     return {
       hasCoverage: false,
-      presetExists: false,
+      presetExists: !!preset,
       dataCount,
       expectedCount,
       missingStart: startDate,
       missingEnd: endDate,
-      coverageRatio,
+      coverageRatio: 0,
     };
   }
 
-  // プリセットの期間と要求期間を比較
-  const presetStart = preset.startDate.getTime();
-  const presetEnd = preset.endDate.getTime();
-  const reqStart = startDate.getTime();
-  const reqEnd = endDate.getTime();
+  // coversStart/coversEnd 判定（バックテスト実行時の fetchHistoricalData と同じ考え方）
+  // 理由: プリセットの start/end が古いままでも、実データが期間をカバーしていれば警告を出さないため
+  const toleranceMs = intervalMinutes * 60 * 1000 * 3; // 3バー分の許容誤差
+  const coversStart = minTs.getTime() <= startDate.getTime() + toleranceMs;
+  const coversEnd = maxTs.getTime() >= endDate.getTime() - toleranceMs;
 
-  // 期待バー数の計算:
-  // プリセットの実データ密度（recordCount / プリセット期間）を使用して
-  // 要求期間の期待値を算出する
-  const presetDurationMs = presetEnd - presetStart;
-  const requestDurationMs = Math.min(reqEnd, presetEnd) - Math.max(reqStart, presetStart);
-
-  // 要求期間がプリセット期間と重なっている部分の期待値を計算
-  let expectedCount: number;
-  if (requestDurationMs > 0 && presetDurationMs > 0) {
-    // 実データの密度から期待値を算出（休場日も自動的に考慮される）
-    const dataPerMs = preset.recordCount / presetDurationMs;
-    expectedCount = Math.round(dataPerMs * requestDurationMs);
-  } else {
-    // 重なりがない場合
-    expectedCount = 0;
-  }
-
-  // カバレッジ率を計算
-  const coverageRatio = expectedCount > 0 ? Math.min(dataCount / expectedCount, 1.0) : 0;
-
-  // 不足期間の判定
   let missingStart: Date | undefined;
   let missingEnd: Date | undefined;
 
-  if (reqStart < presetStart) {
+  if (!coversStart) {
     missingStart = startDate;
-    missingEnd = new Date(Math.min(presetStart, reqEnd));
+    missingEnd = new Date(Math.min(minTs.getTime(), endDate.getTime()));
   }
-  if (reqEnd > presetEnd) {
+  if (!coversEnd) {
     if (!missingStart) {
-      missingStart = new Date(Math.max(presetEnd, reqStart));
+      missingStart = new Date(Math.max(maxTs.getTime(), startDate.getTime()));
     }
     missingEnd = endDate;
   }
 
-  // 95% 以上のカバレッジがあり、期間外への要求がなければ十分とみなす
-  const hasCoverage = coverageRatio >= 0.95 && !missingStart;
+  const hasCoverage = coversStart && coversEnd;
+  const coverageRatio = expectedCount > 0 ? Math.min(dataCount / expectedCount, 1.0) : 0;
 
   return {
     hasCoverage,
-    presetExists: true,
+    presetExists: !!preset,
     dataCount,
     expectedCount,
     missingStart,

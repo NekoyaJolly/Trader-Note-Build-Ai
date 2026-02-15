@@ -69,7 +69,7 @@ export class FeatureService {
 
     // 特徴量スナップショットを生成
     const snapshot = indicatorService.generateFeatureSnapshot(ohlcvData, tf);
-    
+
     // 類似検索用の特徴量ベクトルを生成
     const vector = indicatorService.generateFeatureVector(snapshot);
 
@@ -77,7 +77,7 @@ export class FeatureService {
     return prisma.tradeNote.update({
       where: { id: noteId },
       data: {
-        indicators: snapshot as any,  // Prisma JSON 型に変換
+        indicators: snapshot as unknown as Prisma.InputJsonValue,
         featureVector: vector,
         timeframe: tf,
         updatedAt: new Date(),
@@ -266,7 +266,7 @@ export class FeatureService {
     const filtered = allSimilar.filter(result => {
       const indicators = result.note.indicators as unknown as FeatureSnapshot;
       if (!indicators) return false;
-      
+
       // インジケータからトレンドを判定
       const noteTrend = indicatorService.determineTrend(indicators);
       return noteTrend === trendFilter;
@@ -306,7 +306,7 @@ export class FeatureService {
     featureVectorDimension: number | null;
   }> {
     const totalNotes = await prisma.tradeNote.count();
-    
+
     const notesWithFeatures = await prisma.tradeNote.count({
       where: {
         featureVector: {

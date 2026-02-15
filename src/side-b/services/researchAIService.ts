@@ -386,7 +386,7 @@ ${CORE_TRADING_RULES}
     console.warn(`[MarketAnalyst] ${symbol}: フォールバックデータを使用`);
 
     return {
-      output: { featureVector: legacyFeatureVector as any },
+      output: { featureVector: legacyFeatureVector },
       marketAnalysis: fallbackAnalysis,
       ohlcvSnapshot,
       expiresAt: calculateExpiryDate(1),

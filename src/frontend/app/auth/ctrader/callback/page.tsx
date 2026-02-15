@@ -1,12 +1,12 @@
 /**
  * cTrader OAuth Callback ページ
  * 
- * 目的: cTrader からの認証コールバックを処理し、Railway に code を転送
+ * 目的: cTrader からの認証コールバックを処理し、バックエンド API に code を転送
  * 
  * フロー:
  * 1. cTrader が ?code=xxx&state=yyy で リダイレクト
  * 2. このページで code を取得
- * 3. Railway API /api/auth/ctrader/exchange に POST
+ * 3. バックエンド API /api/auth/ctrader/exchange に POST
  * 4. 成功したら /settings?ctrader=connected にリダイレクト
  * 5. 失敗したら /settings?ctrader=error にリダイレクト
  */
@@ -67,7 +67,7 @@ function CallbackHandler() {
       }
 
       try {
-        // Railway API に code を送信してトークン交換
+        // バックエンド API に code を送信してトークン交換
         console.log('[Callback] トークン交換開始:', {
           apiUrl: `${API_BASE_URL}/api/auth/ctrader/callback`,
           codeLength: code.length,

@@ -4,7 +4,7 @@ import { NotificationService } from '../services/notificationService';
 import { NotificationLogRepository } from '../backend/repositories/notificationLogRepository';
 import { MatchingService } from '../services/matchingService';
 import { NotificationTriggerService } from '../services/notification/notificationTriggerService';
-import { Prisma } from '@prisma/client';
+import { Prisma, NotificationLogStatus } from '@prisma/client';
 
 /**
  * 一致判定理由の詳細構造（Phase 3: 説明責任）
@@ -253,7 +253,7 @@ export class NotificationController {
     try {
       // 1. マッチング判定を実行
       const matches = await this.matchingService.checkForMatches();
-      
+
       const results: Array<{
         noteId: string;
         shouldNotify: boolean;
@@ -261,7 +261,7 @@ export class NotificationController {
         skipReason?: string;
         notificationLogId?: string;
       }> = [];
-      
+
       let notifiedCount = 0;
       let skippedCount = 0;
 
@@ -346,7 +346,7 @@ export class NotificationController {
         logs = await this.notificationLogRepository.getLogsByNoteId(noteId as string, limitNum);
       } else if (status) {
         logs = await this.notificationLogRepository.getLogsByStatus(
-          status as any,
+          status as NotificationLogStatus,
           limitNum
         );
       } else {
@@ -489,11 +489,11 @@ export class NotificationController {
    */
   private extractReasons(reasons: Prisma.JsonValue | undefined): DetailedMatchReason[] {
     if (!reasons) return this.getDefaultReasons();
-    
+
     // すでに詳細形式（detailedReasons）がある場合
     if (typeof reasons === 'object' && reasons !== null) {
       const obj = reasons as Record<string, unknown>;
-      
+
       // 新形式: detailedReasons 配列が存在する場合
       if (Array.isArray(obj.detailedReasons)) {
         return obj.detailedReasons.map((r: unknown) => {
@@ -516,20 +516,20 @@ export class NotificationController {
         const breakdown = obj.breakdown as Record<string, number>;
         return this.convertBreakdownToDetailedReasons(explanations, breakdown);
       }
-      
+
       // 旧形式: explanations のみの場合
       if (Array.isArray(obj.explanations)) {
         const explanations = obj.explanations.filter((r): r is string => typeof r === 'string');
         return this.convertStringsToDetailedReasons(explanations);
       }
     }
-    
+
     // 文字列配列の場合（最も古い形式）
     if (Array.isArray(reasons)) {
       const strings = reasons.filter((r): r is string => typeof r === 'string');
       return this.convertStringsToDetailedReasons(strings);
     }
-    
+
     return this.getDefaultReasons();
   }
 

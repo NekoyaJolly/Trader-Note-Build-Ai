@@ -4,7 +4,7 @@
  * OHLCV 日次インジェストスクリプト
  *
  * ウォッチリストに登録されたシンボルのOHLCVデータを取得し、DBに蓄積
- * Railway Cron または手動で実行
+ * 外部 Cron または手動で実行
  *
  * 使用方法:
  *   npx ts-node scripts/run-ohlcv-ingest.ts [--output-size=100] [--prune] [--prune-days=180]

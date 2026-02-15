@@ -1,6 +1,6 @@
 import App from './app';
 
-// 標準出力をフラッシュするヘルパー（Railway ログ遅延対策）
+// 標準出力をフラッシュするヘルパー
 const log = (message: string) => {
   console.log(message);
 };

@@ -127,7 +127,7 @@ router.get('/locate/:symbol/:timestamp/:timeframe', async (req: Request, res: Re
       decodeURIComponent(symbol),
       targetDate,
       timeframe,
-      modeStr as any
+      modeStr as 'exact' | 'nearest' | 'auto'
     );
 
     // レスポンス

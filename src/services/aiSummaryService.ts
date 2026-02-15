@@ -187,9 +187,10 @@ export class AISummaryService {
    * - temperature を 0.3 に設定 (安定した出力)
    */
   private async callAIAPI(prompt: string): Promise<AISummaryResult> {
-    // 開発環境では実際の API 呼び出しをスキップ可能
-    if (process.env.NODE_ENV === 'development' && !this.apiKey.startsWith('sk-')) {
-      console.log('AI API 呼び出し (シミュレーション)');
+    // 開発環境でのコスト事故を避けたい場合のみ、明示フラグでシミュレーションする
+    // 注意: Gemini の API キーは AIza... の形式が多く、sk- 判定だと常にシミュレーションになってしまう。
+    if (process.env.NODE_ENV === 'development' && process.env.AI_API_SIMULATE === 'true') {
+      console.log('AI API 呼び出し (シミュレーション: AI_API_SIMULATE=true)');
       return {
         summary: this.generateBasicSummary({
           symbol: 'TEST',

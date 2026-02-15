@@ -21,7 +21,7 @@ import {
   convertMarketDataToSnapshot,
 } from './legacyNoteEvaluatorAdapter';
 import { NoteEvaluator, EvaluationResult } from '../domain/noteEvaluator';
-import { TradeNote as PrismaTradeNote } from '@prisma/client';
+import { TradeNote as PrismaTradeNote, MatchResult, MarketSnapshot } from '@prisma/client';
 
 /**
  * マッチングサービス
@@ -363,7 +363,7 @@ export class MatchingService {
         id: r.id,
         matchScore: r.score,
         historicalNoteId: r.noteId,
-        marketSnapshot: (r as any).marketSnapshot || {},
+        marketSnapshot: (r as MatchResult & { marketSnapshot?: MarketSnapshot }).marketSnapshot || {},
         marketSnapshotId: r.marketSnapshotId,
         symbol: r.symbol,
         threshold: r.threshold,

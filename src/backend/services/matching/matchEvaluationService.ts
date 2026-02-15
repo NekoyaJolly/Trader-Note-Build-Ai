@@ -64,7 +64,7 @@ export class RuleBasedMatchEvaluator {
    * TradeNote.featureVector と同じスケールになるよう、Phase2 の FeatureExtractor と揃えた計算を行う。
    */
   buildMarketFeatureVector(snapshot: MarketSnapshot): number[] {
-    const indicators = (snapshot.indicators as any) || {};
+    const indicators = (snapshot.indicators as Record<string, unknown>) || {};
 
     // Decimal を number に丸める
     const close = this.toNumber(snapshot.close);
@@ -85,13 +85,13 @@ export class RuleBasedMatchEvaluator {
     const macd = this.normalizeMACD(this.toOptionalNumber(indicators.macd));
 
     // トレンドは指標があればそれを優先、なければ価格変化率から推定
-    const trend = this.extractTrend(indicators.trend, priceChange);
+    const trend = this.extractTrend(indicators.trend as string | number | null | undefined, priceChange);
 
     // ボラティリティは価格変化率の絶対値で近似
     const volatility = Math.abs(priceChange);
 
     // 市場時間フラグ（オープン/クローズ付近なら 1）
-    const timeFlag = this.extractTimeFlag(indicators.marketHours);
+    const timeFlag = this.extractTimeFlag(indicators.marketHours as { isNearOpen?: boolean; isNearClose?: boolean } | null | undefined);
 
     return [
       priceChange,

@@ -58,15 +58,15 @@ if (databaseUrl.includes('${{')) {
   console.error('═══════════════════════════════════════');
   console.error('  ⚠️ DATABASE_URL が参照変数形式のまま');
   console.error('═══════════════════════════════════════');
-  console.error('DATABASE_URL が Railway の参照変数形式です:');
+  console.error('DATABASE_URL が未展開の参照変数形式です:');
   console.error(`  ${databaseUrl}`);
   console.error('');
   console.error('修正方法:');
-  console.error('1. Railway ダッシュボードを開く');
-  console.error('2. PostgreSQL サービスの Variables タブで DATABASE_URL をコピー');
-  console.error('3. Node.js サービスの Variables で DATABASE_URL を直接設定（参照ではなく実値）');
+  console.error('1. デプロイ先の環境変数設定画面を開く');
+  console.error('2. PostgreSQL の DATABASE_URL を直接コピー');
+  console.error('3. DATABASE_URL を直接設定（参照ではなく実値）');
   console.error('═══════════════════════════════════════');
-  throw new Error('DATABASE_URL contains unexpanded Railway variable reference');
+  throw new Error('DATABASE_URL contains unexpanded variable reference');
 }
 
 console.log('[Config] DATABASE_URL（プロトコル）:', databaseUrl.split('://')[0]);
@@ -89,8 +89,11 @@ export const config = {
   },
   ai: {
     apiKey: process.env.AI_API_KEY || '',
-    model: process.env.AI_MODEL || 'gpt-5-mini',
-    baseURL: process.env.AI_BASE_URL || 'https://api.openai.com/v1',
+    // 既定値は Gemini（OpenAI互換エンドポイント）に寄せる。
+    // 理由: 本プロジェクトでは AI_BASE_URL / AI_MODEL を差し替えるだけで
+    //      Gemini / OpenAI どちらにも切り替えられる設計になっているため。
+    model: process.env.AI_MODEL || 'gemini-3-flash-preview',
+    baseURL: process.env.AI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai',
   },
   market: {
     // Twelve Data API のデフォルトURL を設定

@@ -161,7 +161,7 @@ if [ $TESTS_FAILED -eq 0 ]; then
   echo ""
   echo "次のステップ:"
   echo "1. GitHub Actions CI/CD の設定"
-  echo "2. 本番環境（Railway + Vercel）へのデプロイ"
+  echo "2. 本番環境へのデプロイ"
   exit 0
 else
   echo -e "${RED}❌ $TESTS_FAILED 個のテストが失敗しました${NC}"

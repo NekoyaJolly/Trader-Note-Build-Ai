@@ -1,7 +1,7 @@
 /**
  * cTrader 認証フロー動作確認スクリプト
  * 
- * 目的: 取得した code をローカルの Railway API に送信してDB保存をテスト
+ * 目的: 取得した code をローカルのバックエンド API に送信してDB保存をテスト
  * 
  * 使用方法:
  *   1. 認証URLにアクセスして code を取得
@@ -57,7 +57,7 @@ async function showAuthUrl(): Promise<void> {
   console.log('  2. リダイレクト先URLの ?code=xxx から code を取得');
   console.log('  3. 以下のコマンドを実行:');
   console.log('');
-  
+
   // 認証URL生成
   const authUrl = `${config.ctrader.authUrl}?` + new URLSearchParams({
     client_id: config.ctrader.clientId,
@@ -65,7 +65,7 @@ async function showAuthUrl(): Promise<void> {
     response_type: 'code',
     scope: 'accounts trading',
   }).toString();
-  
+
   console.log(`  🔗 認証URL:\n     ${authUrl}`);
   console.log('');
   console.log('  📝 コマンド:');
@@ -77,7 +77,7 @@ async function showAuthUrl(): Promise<void> {
   console.log('  CTRADER_TEST_REFRESH_TOKEN=xxx \\');
   console.log('  npx ts-node scripts/test-ctrader-auth-flow.ts');
   console.log('');
-  
+
   // 現在のDB状態を確認
   await checkDbStatus();
 }
@@ -89,7 +89,7 @@ async function exchangeCodeViaApi(): Promise<void> {
   console.log('\n🔄 API経由でトークン交換中...');
   console.log(`  API: ${API_BASE_URL}/api/auth/ctrader/exchange`);
   console.log(`  Code: ${AUTH_CODE.substring(0, 10)}...`);
-  
+
   try {
     const response = await fetch(`${API_BASE_URL}/api/auth/ctrader/exchange`, {
       method: 'POST',
@@ -98,7 +98,7 @@ async function exchangeCodeViaApi(): Promise<void> {
       },
       body: JSON.stringify({ code: AUTH_CODE }),
     });
-    
+
     const data = await response.json() as {
       success?: boolean;
       accountId?: string;
@@ -106,7 +106,7 @@ async function exchangeCodeViaApi(): Promise<void> {
       error?: string;
       details?: string;
     };
-    
+
     if (response.ok && data.success) {
       console.log('\n✅ トークン交換成功！');
       console.log(`  アカウントID: ${data.accountId}`);
@@ -121,7 +121,7 @@ async function exchangeCodeViaApi(): Promise<void> {
     console.log('  ヒント: バックエンドが起動しているか確認してください');
     console.log('         npm run dev:backend');
   }
-  
+
   // DB状態確認
   await checkDbStatus();
 }
@@ -131,11 +131,11 @@ async function exchangeCodeViaApi(): Promise<void> {
  */
 async function saveTokenToDb(): Promise<void> {
   console.log('\n💾 トークンをDBに保存中...');
-  
+
   // 有効期限を30日後に設定
   const expiresAt = new Date(Date.now() + 2628000 * 1000);
   const accountId = `ctrader_manual_${Date.now()}`;
-  
+
   try {
     const saved = await prisma.cTraderToken.upsert({
       where: { accountId },
@@ -153,14 +153,14 @@ async function saveTokenToDb(): Promise<void> {
         scope: 'accounts trading',
       },
     });
-    
+
     console.log('\n✅ トークン保存成功！');
     console.log(`  アカウントID: ${saved.accountId}`);
     console.log(`  有効期限: ${saved.expiresAt.toISOString()}`);
   } catch (error) {
     console.log('\n❌ DB保存エラー:', error);
   }
-  
+
   // DB状態確認
   await checkDbStatus();
 }
@@ -170,7 +170,7 @@ async function saveTokenToDb(): Promise<void> {
  */
 async function checkDbStatus(): Promise<void> {
   console.log('\n📊 DB内のcTraderトークン:');
-  
+
   try {
     const tokens = await prisma.cTraderToken.findMany({
       select: {
@@ -181,7 +181,7 @@ async function checkDbStatus(): Promise<void> {
       },
       orderBy: { createdAt: 'desc' },
     });
-    
+
     if (tokens.length === 0) {
       console.log('  （トークンなし）');
     } else {

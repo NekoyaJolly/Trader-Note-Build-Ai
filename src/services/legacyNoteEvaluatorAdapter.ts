@@ -36,7 +36,7 @@ import {
 } from './featureVectorService';
 
 import { IndicatorId, IndicatorParams, IndicatorConfig } from '../models/indicatorConfig';
-import { TradeNote as PrismaTradeNote } from '@prisma/client';
+import { TradeNote as PrismaTradeNote, TradeSide, NoteStatus, Prisma } from '@prisma/client';
 
 // ============================================================================
 // 型定義
@@ -483,14 +483,14 @@ export function createNoteEvaluatorFromFSNote(note: FSTradeNote): NoteEvaluator 
     symbol: note.symbol,
     featureVector: note.features,
     tradeId: note.tradeId,
-    side: note.side.toUpperCase() as any,
+    side: note.side as TradeSide,
     entryPrice: new Decimal(note.entryPrice),
     indicators: note.marketContext.indicators ?? null,
     timeframe: note.marketContext.timeframe ?? null,
-    marketContext: note.marketContext as any,
+    marketContext: note.marketContext as unknown as Prisma.JsonValue,
     userNotes: note.userNotes ?? null,
     tags: note.tags ?? [],
-    status: note.status.toUpperCase() as any,
+    status: note.status as NoteStatus,
     activatedAt: note.activatedAt ?? null,
     archivedAt: note.archivedAt ?? null,
     lastEditedAt: note.lastEditedAt ?? null,

@@ -1,7 +1,7 @@
 /**
  * cTrader 認証 API ルート
  * 
- * 目的: cTrader OAuth フローの Railway 側エンドポイント
+ * 目的: cTrader OAuth フローのバックエンド側エンドポイント
  * 
  * エンドポイント:
  * - GET  /api/auth/ctrader/url     - 認証URL を取得
