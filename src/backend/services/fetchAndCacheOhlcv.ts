@@ -16,6 +16,8 @@ import { PrismaClient } from '@prisma/client';
 import { MarketDataService } from '../../services/marketDataService';
 import { CTraderDataService } from './ctrader/ctraderDataService';
 import { CTraderAuthService } from './ctrader/ctraderAuthService';
+import { config } from '../../config';
+import { parseTwelveDataTimeSeries } from '../../schemas/external/twelveData';
 
 const prisma = new PrismaClient();
 const marketDataService = new MarketDataService();
@@ -25,6 +27,13 @@ const ctraderDataService = new CTraderDataService(ctraderAuthService);
 // Twelve Data Rate Limit: 8リクエスト/分 = 最低7.5秒間隔
 const MIN_REQUEST_INTERVAL_MS = 8000;
 let lastApiRequestTime = 0;
+
+// ========================================
+// 定数
+// ========================================
+
+/** cTrader / Twelve Data の1リクエスト最大本数（上限） */
+const MAX_BARS_PER_REQUEST = 5000;
 
 // ========================================
 // 型定義
@@ -122,6 +131,35 @@ function splitDateRange(startDate: Date, endDate: Date, maxTimespanMs: number): 
     return chunks;
 }
 
+/**
+ * Twelve Data の interval へ変換（必要最小限）
+ *
+ * 注意: Twelve Data は '15m' ではなく '15min' 形式。
+ */
+function toTwelveDataInterval(timeframe: string): string {
+    const map: Record<string, string> = {
+        '1m': '1min',
+        '5m': '5min',
+        '15m': '15min',
+        '30m': '30min',
+        '1h': '1h',
+        '4h': '4h',
+        '1d': '1day',
+        '1w': '1week',
+    };
+    return map[timeframe] || timeframe;
+}
+
+/**
+ * Twelve Data の start_date/end_date 用の文字列（UTC）
+ * Twelve Data は 'YYYY-MM-DD' または 'YYYY-MM-DD HH:mm:ss' を許容する想定。
+ */
+function formatUtcForTwelveData(dt: Date): string {
+    // 例: 2026-02-15 00:00:00
+    const iso = dt.toISOString();
+    return iso.replace('T', ' ').replace('Z', '').slice(0, 19);
+}
+
 // ========================================
 // メイン関数
 // ========================================
@@ -203,14 +241,24 @@ async function fetchFromCTrader(
             return { success: false, cachedCount: 0, error: 'cTraderアカウント未登録' };
         }
 
-        // 分割サイズを決定
-        const maxTimespanMs = CTRADER_MAX_TIMESPAN_MS[timeframe];
-        if (!maxTimespanMs) {
+        // 分割サイズを決定（cTraderの最大期間制限 + 1リクエスト最大本数(5000) の両方を満たす）
+        const maxTimespanMsByApi = CTRADER_MAX_TIMESPAN_MS[timeframe];
+        if (!maxTimespanMsByApi) {
             return { success: false, cachedCount: 0, error: `cTrader: 未対応の時間足 ${timeframe}` };
         }
 
+        const intervalMinutes = getIntervalMinutes(timeframe);
+        // 5000本上限から逆算した最大期間（少し余裕を持たせる）
+        const maxTimespanMsByBars = Math.floor(
+            MAX_BARS_PER_REQUEST * intervalMinutes * 60 * 1000 * 0.98
+        );
+        const effectiveMaxTimespanMs = Math.min(maxTimespanMsByApi, maxTimespanMsByBars);
+        if (effectiveMaxTimespanMs <= 0) {
+            return { success: false, cachedCount: 0, error: `cTrader: チャンクサイズ計算に失敗しました (${symbol}/${timeframe})` };
+        }
+
         // 期間を分割
-        const chunks = splitDateRange(startDate, endDate, maxTimespanMs);
+        const chunks = splitDateRange(startDate, endDate, effectiveMaxTimespanMs);
         console.log(
             `[fetchFromCTrader] ${symbol}/${timeframe}: ${chunks.length}チャンクに分割 ` +
             `(${startDate.toISOString()} ~ ${endDate.toISOString()})`
@@ -235,16 +283,17 @@ async function fetchFromCTrader(
             });
 
             // 期待バー数を計算
-            const intervalMinutes = getIntervalMinutes(timeframe);
             const chunkDiffMs = chunk.end.getTime() - chunk.start.getTime();
             const expectedBars = Math.ceil(chunkDiffMs / (intervalMinutes * 60 * 1000));
 
             try {
-                const bars = await ctraderDataService.fetchTrendbars(
+                const bars = await ctraderDataService.fetchTrendbarsInRange(
                     ctraderToken.accountId,
                     symbol,
                     timeframe,
-                    Math.min(expectedBars + 50, 5000)
+                    chunk.start,
+                    chunk.end,
+                    Math.min(expectedBars + 50, MAX_BARS_PER_REQUEST)
                 );
 
                 // 期間内のデータのみフィルタ
@@ -355,43 +404,83 @@ async function fetchFromTwelveData(
         });
 
         // Twelve Data は5000件上限のため、必要に応じて分割
-        const MAX_BARS = 5000;
+        const MAX_BARS = MAX_BARS_PER_REQUEST;
         const allData: Array<{
             timestamp: Date; open: number; high: number;
             low: number; close: number; volume: number;
         }> = [];
 
-        if (expectedCandles > MAX_BARS) {
-            const chunks = Math.ceil(expectedCandles / MAX_BARS);
-            const chunkDurationMs = diffMs / chunks;
+        if (!config.market.apiUrl || !config.market.apiKey) {
+            return { success: false, cachedCount: 0, error: 'Twelve Data: API設定が不完全です（API_URL / MARKET_API_KEY）' };
+        }
 
-            for (let i = 0; i < chunks; i++) {
-                if (i > 0) await waitForRateLimit();
+        const interval = toTwelveDataInterval(timeframe);
+        const normalizedSymbol = symbol.includes('/') ? symbol : symbol;
+
+        const fetchChunk = async (chunkStart: Date, chunkEnd: Date, outputsize: number): Promise<void> => {
+            await waitForRateLimit();
+
+            const url = new URL(`${config.market.apiUrl}/time_series`);
+            url.searchParams.set('symbol', normalizedSymbol);
+            url.searchParams.set('interval', interval);
+            url.searchParams.set('outputsize', String(outputsize));
+            url.searchParams.set('start_date', formatUtcForTwelveData(chunkStart));
+            url.searchParams.set('end_date', formatUtcForTwelveData(chunkEnd));
+            url.searchParams.set('apikey', config.market.apiKey);
+
+            const response = await fetch(url.toString());
+            if (!response.ok) {
+                throw new Error(`Twelve Data API レスポンスエラー: ${response.status}`);
+            }
+
+            const json = await response.json();
+            const parsed = parseTwelveDataTimeSeries(json);
+            const values = parsed.values;
+
+            // values は新しい→古い のことがあるため、timestampで整列して扱う
+            const filtered = values
+                .map((bar) => ({
+                    timestamp: new Date(bar.datetime),
+                    open: bar.open,
+                    high: bar.high,
+                    low: bar.low,
+                    close: bar.close,
+                    volume: bar.volume ?? 0,
+                }))
+                .filter((bar) => bar.timestamp >= chunkStart && bar.timestamp <= chunkEnd)
+                .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+
+            allData.push(...filtered);
+        };
+
+        if (expectedCandles > MAX_BARS) {
+            // 5000本上限から逆算して、期間を分割（等分割ではなく「本数上限」を優先）
+            const maxChunkMsByBars = Math.floor(MAX_BARS * intervalMinutes * 60 * 1000 * 0.98);
+            const chunks = splitDateRange(startDate, endDate, maxChunkMsByBars);
+
+            for (let i = 0; i < chunks.length; i++) {
 
                 onProgress?.({
                     current: i,
-                    total: chunks,
-                    message: `Twelve Data API: チャンク ${i + 1}/${chunks} 取得中...`,
+                    total: chunks.length,
+                    message: `Twelve Data API: チャンク ${i + 1}/${chunks.length} 取得中...`,
                     source: 'twelvedata',
-                    percent: Math.round((i / chunks) * 80) + 10,
+                    percent: Math.round((i / chunks.length) * 80) + 10,
                 });
 
-                const chunkStart = new Date(startDate.getTime() + i * chunkDurationMs);
-                const chunkEnd = new Date(Math.min(startDate.getTime() + (i + 1) * chunkDurationMs, endDate.getTime()));
-
-                const chunkData = await marketDataService.getHistoricalData(symbol, timeframe, MAX_BARS);
-                const filtered = chunkData.filter(
-                    bar => bar.timestamp >= chunkStart && bar.timestamp <= chunkEnd
-                );
-                allData.push(...filtered);
+                const chunkStart = chunks[i].start;
+                const chunkEnd = chunks[i].end;
+                await fetchChunk(chunkStart, chunkEnd, MAX_BARS);
             }
         } else {
-            await waitForRateLimit();
-            const apiData = await marketDataService.getHistoricalData(symbol, timeframe, expectedCandles + 50);
-            const filtered = apiData.filter(
-                bar => bar.timestamp >= startDate && bar.timestamp <= endDate
-            );
-            allData.push(...filtered);
+            onProgress?.({
+                current: 0,
+                total: 1,
+                message: `Twelve Data API: 期間指定で取得中...`,
+                source: 'twelvedata',
+                percent: 30,
+            });
+            await fetchChunk(startDate, endDate, Math.min(expectedCandles + 50, MAX_BARS));
         }
 
         if (allData.length === 0) {

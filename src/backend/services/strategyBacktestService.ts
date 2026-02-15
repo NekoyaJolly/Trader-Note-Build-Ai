@@ -28,11 +28,10 @@ import {
   LogicalOperator,
   ComparisonOperator,
 } from './strategyConditionEvaluator';
-import { MarketDataService } from '../../services/marketDataService';
 import { CTraderDataService } from './ctrader/ctraderDataService';
 import { CTraderAuthService } from './ctrader/ctraderAuthService';
-import { OHLCVRepository } from '../repositories/ohlcvRepository';
 import { calculateLotSize, slValueToPips, calculateUsedMargin } from './positionSizeCalculator';
+import { fetchAndCacheOhlcv } from './fetchAndCacheOhlcv';
 
 // 計算関数を再エクスポート（後方互換性のため）
 export { calculatePnl, calculateSummary, createEmptySummary };
@@ -43,8 +42,6 @@ export { evaluateCondition, evaluateConditionGroup };
 export type { EvaluationContext, ConditionGroup, IndicatorCondition, OHLCV };
 
 const prisma = new PrismaClient();
-// 市場データサービスのインスタンス（Twelve Data API 連携用）
-const marketDataService = new MarketDataService();
 // cTrader サービスのインスタンス
 const ctraderAuthService = new CTraderAuthService(prisma);
 const ctraderDataService = new CTraderDataService(ctraderAuthService);
@@ -342,24 +339,29 @@ export async function fetchHistoricalData(
 
   // 3. API取得（forceApiFetch=true の場合のみ）
   if (forceApiFetch) {
-    const apiFetched = await fetchFromApis(symbol, timeframe, startDate, endDate);
+    try {
+      // fetchAndCacheOhlcv は「指定期間」を分割取得し、DBにupsertしてDataPresetも更新する
+      const cacheResult = await fetchAndCacheOhlcv(symbol, timeframe, startDate, endDate);
+      if (!cacheResult.success) {
+        console.warn(`[fetchHistoricalData] API取得(キャッシュ)失敗: ${cacheResult.error}`);
+      }
+    } catch (error) {
+      console.warn(`[fetchHistoricalData] API取得(キャッシュ)中に例外:`, error);
+    }
 
-    if (apiFetched) {
-      // API取得分をDBにキャッシュ（upsert で重複回避）
-      await cacheOhlcvData(symbol, timeframe, apiFetched);
+    // 取得後、DBから再取得（upsert 済みなのでDBが正）
+    const mergedData = await prisma.oHLCVCandle.findMany({
+      where: {
+        symbol,
+        timeframe,
+        timestamp: { gte: startDate, lte: endDate },
+      },
+      orderBy: { timestamp: 'asc' },
+    });
 
-      // キャッシュ + API 取得分をマージして再取得（upsert 済みなのでDBから一括取得が確実）
-      const mergedData = await prisma.oHLCVCandle.findMany({
-        where: {
-          symbol,
-          timeframe,
-          timestamp: { gte: startDate, lte: endDate },
-        },
-        orderBy: { timestamp: 'asc' },
-      });
-
+    if (mergedData.length > 0) {
       console.log(
-        `[fetchHistoricalData] API取得+キャッシュマージ完了: ${symbol}/${timeframe}, ${mergedData.length}件`
+        `[fetchHistoricalData] API取得+キャッシュ反映後: ${symbol}/${timeframe}, ${mergedData.length}件`
       );
       return mergedData.map((c) => ({
         timestamp: c.timestamp,
@@ -371,9 +373,7 @@ export async function fetchHistoricalData(
       }));
     }
   } else {
-    console.log(
-      `[fetchHistoricalData] forceApiFetch=false のため API をスキップ: ${symbol}/${timeframe}`
-    );
+    console.log(`[fetchHistoricalData] forceApiFetch=false のため API をスキップ: ${symbol}/${timeframe}`);
   }
 
   // 4. 既存データのみ返却（モックデータは使用しない）
@@ -396,140 +396,6 @@ export async function fetchHistoricalData(
     `APIデータ取得を有効にするか、「データプリセット」からインポートしてください`
   );
   return [];
-}
-
-/**
- * cTrader / Twelve Data API からデータを取得する内部ヘルパー
- *
- * @returns 取得した OHLCV データ（取得失敗時は null）
- */
-async function fetchFromApis(
-  symbol: string,
-  timeframe: BacktestTimeframe,
-  startDate: Date,
-  endDate: Date,
-): Promise<OHLCV[] | null> {
-  // cTrader API（優先：無料、自分のアカウント）
-  if (ctraderDataService.isConfigured()) {
-    try {
-      const ctraderToken = await prisma.cTraderToken.findFirst({
-        orderBy: { lastConnectedAt: 'desc' },
-      });
-
-      if (ctraderToken) {
-        // 期間から概算バー数を算出（API の count パラメータ用、多めに取る）
-        const intervalMinutes = getIntervalMinutes(timeframe);
-        const diffMs = endDate.getTime() - startDate.getTime();
-        const estimatedBars = Math.ceil(diffMs / (intervalMinutes * 60 * 1000));
-
-        console.log(
-          `[fetchFromApis] cTrader API から取得: ${symbol}/${timeframe}, 推定=${estimatedBars}件`
-        );
-
-        const bars = await ctraderDataService.fetchTrendbars(
-          ctraderToken.accountId,
-          symbol,
-          timeframe,
-          Math.min(estimatedBars + 100, 5000)
-        );
-
-        if (bars.length > 0) {
-          const ohlcvData: OHLCV[] = bars
-            .filter((bar) => bar.timestamp >= startDate && bar.timestamp <= endDate)
-            .map((bar) => ({
-              timestamp: bar.timestamp,
-              open: bar.open,
-              high: bar.high,
-              low: bar.low,
-              close: bar.close,
-              volume: bar.volume,
-            }));
-
-          console.log(
-            `[fetchFromApis] cTrader 取得成功: ${symbol}/${timeframe}, ${ohlcvData.length}件`
-          );
-          return ohlcvData;
-        }
-      } else {
-        console.log(`[fetchFromApis] cTrader アカウント未登録、次のソースへ`);
-      }
-    } catch (error) {
-      console.warn(`[fetchFromApis] cTrader API エラー、Twelve Data にフォールバック:`, error);
-    }
-  }
-
-  // Twelve Data API（フォールバック：無料枠制限あり）
-  if (marketDataService.isApiConfigured()) {
-    try {
-      const intervalMinutes = getIntervalMinutes(timeframe);
-      const diffMs = endDate.getTime() - startDate.getTime();
-      const estimatedBars = Math.ceil(diffMs / (intervalMinutes * 60 * 1000));
-
-      console.log(
-        `[fetchFromApis] Twelve Data API から取得: ${symbol}/${timeframe}, 推定=${estimatedBars}件`
-      );
-
-      const apiLimit = Math.min(estimatedBars + 100, 5000);
-      const apiData = await marketDataService.getHistoricalData(symbol, timeframe, apiLimit);
-
-      if (apiData.length > 0) {
-        const ohlcvData: OHLCV[] = apiData
-          .filter((bar) => bar.timestamp >= startDate && bar.timestamp <= endDate)
-          .map((bar) => ({
-            timestamp: bar.timestamp,
-            open: bar.open,
-            high: bar.high,
-            low: bar.low,
-            close: bar.close,
-            volume: bar.volume,
-          }));
-
-        console.log(
-          `[fetchFromApis] Twelve Data 取得成功: ${symbol}/${timeframe}, ${ohlcvData.length}件`
-        );
-        return ohlcvData;
-      }
-    } catch (error) {
-      console.warn(`[fetchFromApis] Twelve Data API エラー:`, error);
-    }
-  }
-
-  console.warn(`[fetchFromApis] 全APIソースからの取得に失敗: ${symbol}/${timeframe}`);
-  return null;
-}
-
-/**
- * OHLCV データをデータベースにキャッシュ
- * 
- * @param symbol - シンボル
- * @param timeframe - 時間足
- * @param data - OHLCV データ
- */
-async function cacheOhlcvData(
-  symbol: string,
-  timeframe: string,
-  data: OHLCV[]
-): Promise<void> {
-  try {
-    // OHLCVRepository.bulkInsert() で一括挿入（createMany + skipDuplicates + バッチ処理）
-    const repo = new OHLCVRepository();
-    const insertData = data.map(candle => ({
-      symbol,
-      timeframe,
-      timestamp: candle.timestamp,
-      open: candle.open,
-      high: candle.high,
-      low: candle.low,
-      close: candle.close,
-      volume: candle.volume,
-      source: 'api',
-    }));
-    const insertedCount = await repo.bulkInsert(insertData);
-    console.log(`[cacheOhlcvData] ${insertedCount}/${data.length}件のデータをキャッシュ: ${symbol}/${timeframe}`);
-  } catch (error) {
-    // キャッシュ失敗はワーニングのみ（メイン処理は継続）
-    console.warn(`[cacheOhlcvData] キャッシュ保存エラー:`, error);
-  }
 }
 
 /**

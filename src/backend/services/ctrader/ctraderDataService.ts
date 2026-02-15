@@ -258,6 +258,96 @@ export class CTraderDataService {
     }
 
     /**
+     * OHLCV ヒストリカルデータを「指定期間」で取得
+     *
+     * 重要: cTrader API は period ごとに取得可能な最大期間があるため、
+     * 呼び出し元で事前にチャンク分割してから使用すること。
+     *
+     * @param accountId - cTrader アカウントID
+     * @param symbol - シンボル（例: 'XAU/USD', 'XAUUSD'）
+     * @param timeframe - 時間足（例: '15m', '4h', '1d'）
+     * @param from - 取得開始（UTC）
+     * @param to - 取得終了（UTC）
+     * @param count - 取得本数上限（API上限: 5000）
+     * @returns OHLCV バー配列（時系列順: 古い→新しい）
+     */
+    async fetchTrendbarsInRange(
+        accountId: string,
+        symbol: string,
+        timeframe: string,
+        from: Date,
+        to: Date,
+        count: number = 5000,
+    ): Promise<OHLCVBarResult[]> {
+        const period = TIMEFRAME_TO_PERIOD[timeframe];
+        if (period === undefined) {
+            throw new Error(`[cTraderData] 未対応の時間足: ${timeframe}`);
+        }
+
+        const fromTimestamp = from.getTime();
+        const toTimestamp = to.getTime();
+        if (!Number.isFinite(fromTimestamp) || !Number.isFinite(toTimestamp)) {
+            throw new Error('[cTraderData] from/to が不正です（Date変換に失敗）');
+        }
+        if (toTimestamp <= fromTimestamp) {
+            throw new Error('[cTraderData] to は from より後の日時を指定してください');
+        }
+
+        const maxTimespan = MAX_TIMESPAN_MS[period];
+        if (toTimestamp - fromTimestamp > maxTimespan) {
+            throw new Error(
+                `[cTraderData] 取得期間が上限を超過: ${timeframe} は最大${Math.round(maxTimespan / (24 * 60 * 60 * 1000))}日まで（指定=${Math.round((toTimestamp - fromTimestamp) / (24 * 60 * 60 * 1000))}日）`
+            );
+        }
+
+        let connection: CTraderConnectionType | null = null;
+
+        try {
+            // 1. 接続 & 認証
+            connection = await this.connectAndAuth(accountId);
+
+            // 2. シンボルID解決
+            const symbolInfo = await this.resolveSymbolId(connection, accountId, symbol);
+            console.log(`[cTraderData] シンボル解決: ${symbol} → ID=${symbolInfo.symbolId}, digits=${symbolInfo.digits}`);
+
+            // 3. ProtoOAGetTrendbarsReq 送信（指定期間）
+            const safeCount = Math.min(Math.max(Math.trunc(count), 1), 5000);
+            console.log(
+                `[cTraderData] Trendbar取得(期間指定): ${symbol} ${timeframe} count=${safeCount} ` +
+                `from=${new Date(fromTimestamp).toISOString()} to=${new Date(toTimestamp).toISOString()}`
+            );
+
+            const response = await connection.sendCommand('ProtoOAGetTrendbarsReq', {
+                ctidTraderAccountId: parseInt(accountId, 10),
+                symbolId: symbolInfo.symbolId,
+                period,
+                fromTimestamp,
+                toTimestamp,
+                count: safeCount,
+            });
+
+            // 4. レスポンスをパース・変換
+            const rawResponse = response as { trendbar?: CTraderTrendbar[] };
+            const trendbars = rawResponse?.trendbar || [];
+
+            if (trendbars.length === 0) {
+                console.warn(`[cTraderData] Trendbarが空: ${symbol} ${timeframe} (期間指定)`);
+                return [];
+            }
+
+            // 5. 相対値→絶対価格に変換
+            const bars = this.convertTrendbars(trendbars, symbolInfo.digits);
+            console.log(`[cTraderData] ${bars.length}本のOHLCVを取得(期間指定): ${symbol} ${timeframe}`);
+
+            return bars;
+        } finally {
+            if (connection) {
+                try { await connection.close(); } catch { /* ignore */ }
+            }
+        }
+    }
+
+    /**
      * 利用可能か確認
      */
     isConfigured(): boolean {
