@@ -548,7 +548,22 @@ async function executeBacktestStage(
   const indicatorCache = new Map<string, number[]>();
   for (const [key, values] of Object.entries(indicatorSeries.series)) {
     // null（欠損）は NaN に寄せて evaluator 側で undefined 扱いにする
-    indicatorCache.set(key, values.map(v => (v === null ? Number.NaN : v)));
+    const mappedValues = values.map(v => (v === null ? Number.NaN : v));
+
+    // Python 側のキーを正規化して格納（Python float "14.0" → JS int "14" 互換）
+    // 理由: Python は JSON で数値を float (14.0) として出力し、Node は int (14) として出力する。
+    //        evaluateCondition → getIndicatorValue は makeIndicatorCacheKey で Node 形式のキーを生成するため、
+    //        Python 形式のキーのままではキャッシュルックアップが常に失敗し 0 トレードになる。
+    const normalizedKey = key.replace(
+      /(\d+)\.0(?=[,}])/g,
+      '$1'
+    );
+    indicatorCache.set(normalizedKey, mappedValues);
+
+    // 元のキー（Python形式）でもセットしておく（安全策: 他のコードパスからの参照用）
+    if (normalizedKey !== key) {
+      indicatorCache.set(key, mappedValues);
+    }
   }
 
   // 評価コンテキストを初期化
