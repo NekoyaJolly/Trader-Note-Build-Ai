@@ -75,16 +75,16 @@ export type ComparisonOperator =
  * 比較演算子の表示情報
  */
 export const COMPARISON_OPERATOR_INFO: Record<ComparisonOperator, { label: string; description: string }> = {
-  '<': { label: '<', description: 'より小さい' },
-  '<=': { label: '≤', description: '以下' },
-  '=': { label: '=', description: '等しい' },
-  '>=': { label: '≥', description: '以上' },
-  '>': { label: '>', description: 'より大きい' },
-  'cross_above': { label: '↑クロス', description: '上抜け' },
-  'cross_below': { label: '↓クロス', description: '下抜け' },
-  GC: { label: 'GC', description: 'ゴールデンクロス（上抜け）' },
-  DC: { label: 'DC', description: 'デッドクロス（下抜け）' },
-  Touch: { label: 'Touch', description: '接触（近接/反転を含む）' },
+  '<': { label: 'より小さい', description: '左辺が右辺より小さい' },
+  '<=': { label: '以下', description: '左辺が右辺以下' },
+  '=': { label: '等しい', description: '左辺と右辺が等しい（誤差許容あり）' },
+  '>=': { label: '以上', description: '左辺が右辺以上' },
+  '>': { label: 'より大きい', description: '左辺が右辺より大きい' },
+  'cross_above': { label: '上抜け', description: '前回は下、今回は上（クロスアップ）' },
+  'cross_below': { label: '下抜け', description: '前回は上、今回は下（クロスダウン）' },
+  GC: { label: 'ゴールデンクロス', description: '上抜け（別名）' },
+  DC: { label: 'デッドクロス', description: '下抜け（別名）' },
+  Touch: { label: 'タッチ（接触）', description: '近接/接触/反転を含む' },
 };
 
 /**

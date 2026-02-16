@@ -28,6 +28,9 @@ def compute_indicator_series(df: pd.DataFrame, indicator_id: str, params: Dict[s
     ind = indicator_id.lower()
 
     close = df["close"]
+    high = df["high"]
+    low = df["low"]
+    volume = df["volume"]
 
     series: pd.Series
 
@@ -92,6 +95,150 @@ def compute_indicator_series(df: pd.DataFrame, indicator_id: str, params: Dict[s
                         out = pd.Series([np.nan] * len(df))
             else:
                 out = bb_df[mid_col] if mid_col else pd.Series([np.nan] * len(df))
+    elif ind == "atr":
+        length = int(params.get("period", params.get("length", 14)))
+        out = ta.atr(high=high, low=low, close=close, length=length)
+    elif ind in ("stochastic", "stoch"):
+        k = int(params.get("kPeriod", params.get("k", 14)))
+        d = int(params.get("dPeriod", params.get("d", 3)))
+        stoch_df = ta.stoch(high=high, low=low, close=close, k=k, d=d)
+        if stoch_df is None or stoch_df.empty:
+            out = pd.Series([np.nan] * len(df))
+        else:
+            cols = list(stoch_df.columns)
+            k_col = next((c for c in cols if c.startswith("STOCHk_")), None)
+            d_col = next((c for c in cols if c.startswith("STOCHd_")), None)
+            if field == "d" and d_col:
+                out = stoch_df[d_col]
+            else:
+                out = stoch_df[k_col] if k_col else pd.Series([np.nan] * len(df))
+    elif ind == "obv":
+        out = ta.obv(close=close, volume=volume)
+    elif ind == "vwap":
+        # pandas-ta vwap は HLCC/anchor 等もあるが、まずは基本形で統一
+        out = ta.vwap(high=high, low=low, close=close, volume=volume)
+    elif ind in ("williamsr", "willr"):
+        length = int(params.get("period", params.get("length", 14)))
+        out = ta.willr(high=high, low=low, close=close, length=length)
+    elif ind == "cci":
+        length = int(params.get("period", params.get("length", 20)))
+        out = ta.cci(high=high, low=low, close=close, length=length)
+    elif ind == "aroon":
+        length = int(params.get("period", params.get("length", 25)))
+        aroon_df = ta.aroon(high=high, low=low, length=length)
+        if aroon_df is None or aroon_df.empty:
+            out = pd.Series([np.nan] * len(df))
+        else:
+            cols = list(aroon_df.columns)
+            osc_col = next((c for c in cols if "AROONOSC" in c), None)
+            up_col = next((c for c in cols if "AROONU" in c), None)
+            dn_col = next((c for c in cols if "AROOND" in c), None)
+            if osc_col:
+                out = aroon_df[osc_col]
+            elif up_col and dn_col:
+                out = aroon_df[up_col] - aroon_df[dn_col]
+            else:
+                out = pd.Series([np.nan] * len(df))
+    elif ind == "roc":
+        length = int(params.get("period", params.get("length", 12)))
+        out = ta.roc(close=close, length=length)
+    elif ind == "mfi":
+        length = int(params.get("period", params.get("length", 14)))
+        out = ta.mfi(high=high, low=low, close=close, volume=volume, length=length)
+    elif ind == "cmf":
+        length = int(params.get("period", params.get("length", 20)))
+        out = ta.cmf(high=high, low=low, close=close, volume=volume, length=length)
+    elif ind == "dema":
+        length = int(params.get("period", params.get("length", 20)))
+        out = ta.dema(close=close, length=length)
+    elif ind == "tema":
+        length = int(params.get("period", params.get("length", 20)))
+        out = ta.tema(close=close, length=length)
+    elif ind == "kc":
+        length = int(params.get("period", params.get("length", 20)))
+        kc_df = ta.kc(high=high, low=low, close=close, length=length, scalar=float(params.get("multiplier", 2)))
+        if kc_df is None or kc_df.empty:
+            out = pd.Series([np.nan] * len(df))
+        else:
+            cols = list(kc_df.columns)
+            lower_col = next((c for c in cols if c.startswith("KCL_")), None)
+            mid_col = next((c for c in cols if c.startswith("KCB_")), None)
+            upper_col = next((c for c in cols if c.startswith("KCU_")), None)
+
+            if field == "upper" and upper_col:
+                out = kc_df[upper_col]
+            elif field == "lower" and lower_col:
+                out = kc_df[lower_col]
+            else:
+                out = kc_df[mid_col] if mid_col else pd.Series([np.nan] * len(df))
+    elif ind == "psar":
+        step = float(params.get("step", params.get("af", 0.02)))
+        max_step = float(params.get("maxStep", params.get("max_af", 0.2)))
+        try:
+            psar_df = ta.psar(high=high, low=low, close=close, af=step, max_af=max_step)
+        except TypeError:
+            psar_df = ta.psar(high=high, low=low, af=step, max_af=max_step)
+
+        if psar_df is None or psar_df.empty:
+            out = pd.Series([np.nan] * len(df))
+        else:
+            cols = list(psar_df.columns)
+            long_col = next((c for c in cols if c.startswith("PSARl_")), None)
+            short_col = next((c for c in cols if c.startswith("PSARs_")), None)
+            if long_col and short_col:
+                out = psar_df[long_col].combine_first(psar_df[short_col])
+            elif long_col:
+                out = psar_df[long_col]
+            elif short_col:
+                out = psar_df[short_col]
+            else:
+                out = pd.Series([np.nan] * len(df))
+    elif ind == "ichimoku":
+        tenkan = int(params.get("conversionPeriod", params.get("tenkan", 9)))
+        kijun = int(params.get("basePeriod", params.get("kijun", 26)))
+        senkou = int(params.get("spanBPeriod", params.get("senkou", 52)))
+
+        ichi = ta.ichimoku(high=high, low=low, close=close, tenkan=tenkan, kijun=kijun, senkou=senkou)
+        frames: List[pd.DataFrame] = []
+        if isinstance(ichi, tuple) or isinstance(ichi, list):
+            for part in ichi:
+                if isinstance(part, pd.DataFrame):
+                    frames.append(part)
+                elif isinstance(part, pd.Series):
+                    frames.append(part.to_frame())
+        elif isinstance(ichi, pd.DataFrame):
+            frames.append(ichi)
+        elif isinstance(ichi, pd.Series):
+            frames.append(ichi.to_frame())
+
+        if not frames:
+            out = pd.Series([np.nan] * len(df))
+        else:
+            ichi_df = pd.concat(frames, axis=1)
+            cols = list(ichi_df.columns)
+
+            def pick(prefix: str) -> Optional[str]:
+                return next((c for c in cols if c.startswith(prefix)), None)
+
+            tenkan_col = pick("ITS_")
+            kijun_col = pick("IKS_")
+            senkou_a_col = pick("ISA_")
+            senkou_b_col = pick("ISB_")
+            chikou_col = pick("ICS_")
+
+            if field == "tenkan" and tenkan_col:
+                out = ichi_df[tenkan_col]
+            elif field == "kijun" and kijun_col:
+                out = ichi_df[kijun_col]
+            elif field == "senkouA" and senkou_a_col:
+                out = ichi_df[senkou_a_col]
+            elif field == "senkouB" and senkou_b_col:
+                out = ichi_df[senkou_b_col]
+            elif field == "chikou" and chikou_col:
+                out = ichi_df[chikou_col]
+            else:
+                # 未指定/不明フィールドは転換線に寄せる
+                out = ichi_df[tenkan_col] if tenkan_col else pd.Series([np.nan] * len(df))
     else:
         raise ValueError(f"未対応のインジケーターです: {indicator_id}")
 

@@ -9,7 +9,16 @@
 
 "use client";
 
-import React, { useState, useCallback, useEffect } from "react";
+import React from "react";
+import {
+  COMPARISON_OPERATOR_INFO,
+  createDefaultCondition,
+  FIELD_LABELS,
+  generateGroupId,
+  INDICATOR_FIELDS,
+  isIndicatorCondition,
+  LOGICAL_OPERATOR_INFO,
+} from "@/types/strategy";
 import type {
   IndicatorCondition,
   ConditionGroup,
@@ -17,15 +26,6 @@ import type {
   ComparisonOperator,
   IndicatorField,
   CompareTarget,
-  isIndicatorCondition,
-  isConditionGroup,
-  generateConditionId,
-  generateGroupId,
-  createDefaultCondition,
-  INDICATOR_FIELDS,
-  FIELD_LABELS,
-  COMPARISON_OPERATOR_INFO,
-  LOGICAL_OPERATOR_INFO,
 } from "@/types/strategy";
 import type { IndicatorId, IndicatorParams, IndicatorMetadata } from "@/types/indicator";
 
@@ -64,98 +64,29 @@ interface SingleConditionProps {
 }
 
 // ============================================
-// ユーティリティ関数（型ファイルからインポートできない場合のフォールバック）
+// 表示用ラベル
 // ============================================
 
-const _generateConditionId = (): string => {
-  return `cond_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+const _PARAM_LABELS: Partial<Record<keyof IndicatorParams, string>> = {
+  period: '期間',
+  fastPeriod: '短期',
+  slowPeriod: '長期',
+  signalPeriod: 'シグナル',
+  kPeriod: '%K期間',
+  dPeriod: '%D期間',
+  step: 'ステップ',
+  maxStep: '最大ステップ',
+  conversionPeriod: '転換',
+  basePeriod: '基準',
+  spanBPeriod: 'スパンB',
+  displacement: '遅行',
 };
 
-const _generateGroupId = (): string => {
-  return `group_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-};
-
-const _createDefaultCondition = (): IndicatorCondition => ({
-  conditionId: _generateConditionId(),
-  indicatorId: 'rsi',
-  params: { period: 14 },
-  field: 'value',
-  operator: '<',
-  compareTarget: { type: 'fixed', value: 30 },
-});
-
-const _isIndicatorCondition = (
-  condition: IndicatorCondition | ConditionGroup
-): condition is IndicatorCondition => {
-  return 'indicatorId' in condition;
-};
-
-const _isConditionGroup = (
-  condition: IndicatorCondition | ConditionGroup
-): condition is ConditionGroup => {
-  return 'conditions' in condition;
-};
-
-// インジケーターごとの利用可能フィールド
-const _INDICATOR_FIELDS: Record<IndicatorId, IndicatorField[]> = {
-  rsi: ['value'],
-  sma: ['value'],
-  ema: ['value'],
-  macd: ['macd', 'signal', 'histogram'],
-  bb: ['upper', 'middle', 'lower'],
-  atr: ['value'],
-  stochastic: ['k', 'd'],
-  obv: ['value'],
-  vwap: ['value'],
-  williamsR: ['value'],
-  cci: ['value'],
-  aroon: ['value'],
-  roc: ['value'],
-  mfi: ['value'],
-  cmf: ['value'],
-  dema: ['value'],
-  tema: ['value'],
-  kc: ['upper', 'middle', 'lower'],
-  psar: ['value'],
-  ichimoku: ['tenkan', 'kijun', 'senkouA', 'senkouB', 'chikou'],
-};
-
-const _FIELD_LABELS: Record<IndicatorField, string> = {
-  value: '値',
-  macd: 'MACD線',
-  signal: 'シグナル線',
-  histogram: 'ヒストグラム',
-  upper: '上バンド',
-  middle: '中央線',
-  lower: '下バンド',
-  k: '%K',
-  d: '%D',
-  tenkan: '転換線',
-  kijun: '基準線',
-  senkouA: '先行スパンA',
-  senkouB: '先行スパンB',
-  chikou: '遅行スパン',
-};
-
-const _COMPARISON_OPERATOR_INFO: Record<ComparisonOperator, { label: string; description: string }> = {
-  '<': { label: '<', description: 'より小さい' },
-  '<=': { label: '≤', description: '以下' },
-  '=': { label: '=', description: '等しい' },
-  '>=': { label: '≥', description: '以上' },
-  '>': { label: '>', description: 'より大きい' },
-  'cross_above': { label: '↑クロス', description: '上抜け' },
-  'cross_below': { label: '↓クロス', description: '下抜け' },
-  GC: { label: 'GC', description: 'ゴールデンクロス（上抜け）' },
-  DC: { label: 'DC', description: 'デッドクロス（下抜け）' },
-  Touch: { label: 'Touch', description: '接触（近接/反転を含む）' },
-};
-
-const _LOGICAL_OPERATOR_INFO: Record<LogicalOperator, { label: string; description: string }> = {
-  AND: { label: 'かつ', description: 'すべての条件を満たす' },
-  OR: { label: 'または', description: 'いずれかの条件を満たす' },
-  NOT: { label: '〜でない', description: '条件を満たさない' },
-  IF_THEN: { label: 'IF→THEN', description: 'IF条件成立後にTHEN条件を評価' },
-  SEQUENCE: { label: '順序', description: '条件が順番に成立する' },
+const _PRICE_TYPE_INFO: Record<'open' | 'high' | 'low' | 'close', string> = {
+  open: '始値',
+  high: '高値',
+  low: '安値',
+  close: '終値',
 };
 
 // ============================================
@@ -172,8 +103,17 @@ function SingleCondition({
   compact = false,
 }: SingleConditionProps) {
   // 選択中のインジケーターで利用可能なフィールドを取得
-  const availableFields = _INDICATOR_FIELDS[condition.indicatorId] || ['value'];
+  const availableFields = INDICATOR_FIELDS[condition.indicatorId] || ['value'];
   const selectedIndicator = indicatorMetadata.find(m => m.id === condition.indicatorId);
+  const leftParamKeys = Object.keys(selectedIndicator?.defaultParams ?? {}) as Array<keyof IndicatorParams>;
+  const indicatorTarget = condition.compareTarget.type === 'indicator' ? condition.compareTarget : null;
+  const indicatorTargetMeta = indicatorTarget
+    ? indicatorMetadata.find(m => m.id === indicatorTarget.indicatorId)
+    : undefined;
+  const indicatorTargetParamKeys = Object.keys(indicatorTargetMeta?.defaultParams ?? {}) as Array<keyof IndicatorParams>;
+  const indicatorTargetFields: IndicatorField[] = indicatorTarget
+    ? (INDICATOR_FIELDS[indicatorTarget.indicatorId] || ['value'])
+    : ['value'];
 
   // コンパクトモードのスタイル
   const baseSelectClass = compact
@@ -186,7 +126,7 @@ function SingleCondition({
   // インジケーター変更時
   const handleIndicatorChange = (indicatorId: IndicatorId) => {
     const meta = indicatorMetadata.find(m => m.id === indicatorId);
-    const fields = _INDICATOR_FIELDS[indicatorId] || ['value'];
+    const fields = INDICATOR_FIELDS[indicatorId] || ['value'];
     onChange({
       ...condition,
       indicatorId,
@@ -213,6 +153,65 @@ function SingleCondition({
     }
   };
 
+  const handleCompareTargetTypeChange = (type: CompareTarget['type']) => {
+    if (type === 'fixed') {
+      onChange({
+        ...condition,
+        compareTarget: { type: 'fixed', value: 0 },
+      });
+      return;
+    }
+
+    if (type === 'price') {
+      onChange({
+        ...condition,
+        compareTarget: { type: 'price', priceType: 'close' },
+      });
+      return;
+    }
+
+    const fallbackIndicatorId = indicatorMetadata[0]?.id ?? condition.indicatorId;
+    const meta = indicatorMetadata.find(m => m.id === fallbackIndicatorId);
+    const fields = INDICATOR_FIELDS[fallbackIndicatorId] || ['value'];
+
+    onChange({
+      ...condition,
+      compareTarget: {
+        type: 'indicator',
+        indicatorId: fallbackIndicatorId,
+        params: meta?.defaultParams || { period: 14 },
+        field: fields[0],
+      },
+    });
+  };
+
+  const handleCompareTargetIndicatorChange = (indicatorId: IndicatorId) => {
+    if (condition.compareTarget.type !== 'indicator') return;
+    const meta = indicatorMetadata.find(m => m.id === indicatorId);
+    const fields = INDICATOR_FIELDS[indicatorId] || ['value'];
+
+    onChange({
+      ...condition,
+      compareTarget: {
+        ...condition.compareTarget,
+        indicatorId,
+        params: meta?.defaultParams || { period: 14 },
+        field: fields[0],
+      },
+    });
+  };
+
+  const handleCompareTargetParamChange = (key: keyof IndicatorParams, value: number) => {
+    if (condition.compareTarget.type !== 'indicator') return;
+    onChange({
+      ...condition,
+      compareTarget: {
+        ...condition.compareTarget,
+        params: { ...condition.compareTarget.params, [key]: value },
+      },
+    });
+  };
+
   return (
     <div className={`flex flex-wrap items-center gap-${compact ? '1' : '2'} ${compact ? 'p-2' : 'p-3'} bg-slate-800 rounded-lg border border-slate-700`}>
       {/* インジケーター選択 */}
@@ -229,21 +228,34 @@ function SingleCondition({
         ))}
       </select>
 
-      {/* 期間パラメータ（該当する場合） */}
-      {selectedIndicator?.defaultParams?.period !== undefined && (
-        <div className="flex items-center gap-0.5">
-          {!compact && <span className="text-xs text-gray-400">期間</span>}
-          <input
-            type="number"
-            className={`${compact ? 'w-10' : 'w-16'} ${baseInputClass}`}
-            value={condition.params.period || 14}
-            onChange={(e) => handleParamChange('period', parseInt(e.target.value, 10))}
-            min={1}
-            max={500}
-            disabled={readOnly}
-          />
+      {/* パラメータ（インジケーター計算用。比較演算子の対象ではない） */}
+      {leftParamKeys.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          {leftParamKeys.map((key) => (
+            <div key={String(key)} className="flex items-center gap-0.5">
+              {!compact && (
+                <span className="text-xs text-gray-400">
+                  {_PARAM_LABELS[key] ?? String(key)}
+                </span>
+              )}
+              <input
+                type="number"
+                className={`${compact ? 'w-10' : 'w-16'} ${baseInputClass}`}
+                value={(condition.params[key] ?? selectedIndicator?.defaultParams?.[key] ?? 0) as number}
+                onChange={(e) => {
+                  const next = Number(e.target.value);
+                  handleParamChange(key, Number.isFinite(next) ? next : 0);
+                }}
+                step="any"
+                disabled={readOnly}
+              />
+            </div>
+          ))}
         </div>
       )}
+
+      {/* 「〜の」 */}
+      <span className="text-xs text-gray-500">の</span>
 
       {/* フィールド選択（複数出力があるインジケーターの場合） */}
       {availableFields.length > 1 && (
@@ -255,10 +267,136 @@ function SingleCondition({
         >
           {availableFields.map((field) => (
             <option key={field} value={field}>
-              {_FIELD_LABELS[field]}
+              {FIELD_LABELS[field]}
             </option>
           ))}
         </select>
+      )}
+
+      {availableFields.length <= 1 && (
+        <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-300`}>
+          {FIELD_LABELS[condition.field] ?? '値'}
+        </span>
+      )}
+
+      <span className="text-xs text-gray-500">が</span>
+
+      {/* 比較対象タイプ */}
+      <select
+        className={baseSelectClass}
+        value={condition.compareTarget.type}
+        onChange={(e) => handleCompareTargetTypeChange(e.target.value as CompareTarget['type'])}
+        disabled={readOnly}
+        title="比較対象"
+      >
+        <option value="fixed">定数</option>
+        <option value="price">価格</option>
+        <option value="indicator">別指標</option>
+      </select>
+
+      {/* 比較対象: 固定値 */}
+      {condition.compareTarget.type === 'fixed' && (
+        <input
+          type="number"
+          className={`${compact ? 'w-14' : 'w-20'} ${baseInputClass}`}
+          value={condition.compareTarget.value}
+          onChange={(e) => handleCompareValueChange(Number(e.target.value))}
+          step="any"
+          disabled={readOnly}
+        />
+      )}
+
+      {/* 比較対象: 価格 */}
+      {condition.compareTarget.type === 'price' && (
+        <select
+          className={baseSelectClass}
+          value={condition.compareTarget.priceType}
+          onChange={(e) =>
+            onChange({
+              ...condition,
+              compareTarget: { type: 'price', priceType: e.target.value as 'open' | 'high' | 'low' | 'close' },
+            })
+          }
+          disabled={readOnly}
+        >
+          {Object.entries(_PRICE_TYPE_INFO).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      )}
+
+      {/* 比較対象: 別インジケーター */}
+      {indicatorTarget && (
+        <>
+          <select
+            className={`${baseSelectClass} ${compact ? 'min-w-[70px]' : 'min-w-[110px]'}`}
+            value={indicatorTarget.indicatorId}
+            onChange={(e) => handleCompareTargetIndicatorChange(e.target.value as IndicatorId)}
+            disabled={readOnly}
+          >
+            {indicatorMetadata.map((meta) => (
+              <option key={meta.id} value={meta.id}>
+                {meta.displayName}
+              </option>
+            ))}
+          </select>
+
+          {indicatorTargetParamKeys.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              {indicatorTargetParamKeys.map((key) => (
+                <div key={String(key)} className="flex items-center gap-0.5">
+                  {!compact && (
+                    <span className="text-xs text-gray-400">
+                      {_PARAM_LABELS[key] ?? String(key)}
+                    </span>
+                  )}
+                  <input
+                    type="number"
+                    className={`${compact ? 'w-10' : 'w-16'} ${baseInputClass}`}
+                    value={(indicatorTarget.params[key] ?? indicatorTargetMeta?.defaultParams?.[key] ?? 0) as number}
+                    onChange={(e) => {
+                      const next = Number(e.target.value);
+                      handleCompareTargetParamChange(key, Number.isFinite(next) ? next : 0);
+                    }}
+                    step="any"
+                    disabled={readOnly}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {indicatorTargetFields.length > 1 && (
+            <select
+              className={baseSelectClass}
+              value={indicatorTarget.field}
+              onChange={(e) =>
+                onChange({
+                  ...condition,
+                  compareTarget: {
+                    ...indicatorTarget,
+                    field: e.target.value as IndicatorField,
+                  },
+                })
+              }
+              disabled={readOnly}
+            >
+              {indicatorTargetFields.map((field) => (
+                <option key={field} value={field}>
+                  {FIELD_LABELS[field]}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {indicatorTargetFields.length <= 1 && (
+            <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-300`}>
+              {FIELD_LABELS[indicatorTarget.field] ?? '値'}
+            </span>
+          )}
+        </>
       )}
 
       {/* 比較演算子 */}
@@ -268,24 +406,12 @@ function SingleCondition({
         onChange={(e) => onChange({ ...condition, operator: e.target.value as ComparisonOperator })}
         disabled={readOnly}
       >
-        {Object.entries(_COMPARISON_OPERATOR_INFO).map(([op, info]) => (
+        {Object.entries(COMPARISON_OPERATOR_INFO).map(([op, info]) => (
           <option key={op} value={op}>
             {info.label}
           </option>
         ))}
       </select>
-
-      {/* 比較対象の値 */}
-      {condition.compareTarget.type === 'fixed' && (
-        <input
-          type="number"
-          className={`${compact ? 'w-14' : 'w-20'} ${baseInputClass}`}
-          value={condition.compareTarget.value}
-          onChange={(e) => handleCompareValueChange(parseFloat(e.target.value))}
-          step="any"
-          disabled={readOnly}
-        />
-      )}
 
       {/* 削除ボタン */}
       {!readOnly && canRemove && (
@@ -331,7 +457,7 @@ function ConditionGroupComponent({
   const handleAddCondition = () => {
     onChange({
       ...group,
-      conditions: [...group.conditions, _createDefaultCondition()],
+      conditions: [...group.conditions, createDefaultCondition()],
     });
   };
 
@@ -342,9 +468,9 @@ function ConditionGroupComponent({
       conditions: [
         ...group.conditions,
         {
-          groupId: _generateGroupId(),
+          groupId: generateGroupId(),
           operator: 'AND' as LogicalOperator,
-          conditions: [_createDefaultCondition()],
+          conditions: [createDefaultCondition()],
         },
       ],
     });
@@ -383,7 +509,7 @@ function ConditionGroupComponent({
             onChange={(e) => handleOperatorChange(e.target.value as LogicalOperator)}
             disabled={readOnly}
           >
-            {Object.entries(_LOGICAL_OPERATOR_INFO).map(([op, info]) => (
+            {Object.entries(LOGICAL_OPERATOR_INFO).map(([op, info]) => (
               <option key={op} value={op}>
                 {compact ? info.label : `${info.label}（${info.description}）`}
               </option>
@@ -414,7 +540,7 @@ function ConditionGroupComponent({
       {/* 条件一覧 */}
       <div className={`space-y-${compact ? '1' : '2'}`}>
         {group.conditions.map((condition, index) => (
-          <React.Fragment key={_isIndicatorCondition(condition) ? condition.conditionId : (condition as ConditionGroup).groupId}>
+          <React.Fragment key={isIndicatorCondition(condition) ? condition.conditionId : (condition as ConditionGroup).groupId}>
             {/* 論理演算子の区切り */}
             {index > 0 && (
               <div className={`flex items-center justify-center ${compact ? 'py-0.5' : 'py-1'}`}>
@@ -423,13 +549,13 @@ function ConditionGroupComponent({
                   group.operator === 'OR' ? 'bg-green-900/50 text-green-300' :
                   'bg-orange-900/50 text-orange-300'
                 }`}>
-                  {_LOGICAL_OPERATOR_INFO[group.operator].label}
+                  {LOGICAL_OPERATOR_INFO[group.operator].label}
                 </span>
               </div>
             )}
 
             {/* 単一条件またはサブグループ */}
-            {_isIndicatorCondition(condition) ? (
+            {isIndicatorCondition(condition) ? (
               <SingleCondition
                 condition={condition}
                 onChange={(updated) => handleConditionChange(index, updated)}

@@ -21,6 +21,11 @@ import {
   rollbackStrategyVersion,
   fetchIndicatorMetadata,
 } from "@/lib/api";
+import {
+  COMPARISON_OPERATOR_INFO,
+  FIELD_LABELS,
+  LOGICAL_OPERATOR_INFO,
+} from "@/types/strategy";
 import type { Strategy, StrategyStatus, ConditionGroup, IndicatorCondition, ExitSettings, StrategyDirection, SupportedSymbol, EntryTiming, UpdateStrategyRequest } from "@/types/strategy";
 import type { IndicatorMetadata } from "@/types/indicator";
 import ConditionBuilder from "@/components/strategy/ConditionBuilder";
@@ -33,20 +38,20 @@ import { NeonButton } from "@/components/ui/NeonButton";
 /** 単一条件を表示（コンパクト版） */
 function ConditionDisplay({ condition }: { condition: IndicatorCondition }) {
   const fieldLabels: Record<string, string> = {
-    value: "", macd: ".MACD", signal: ".Sig", histogram: ".Hist",
-    upper: ".上", middle: ".中", lower: ".下",
-  };
-  const operatorLabels: Record<string, string> = {
-    ">": "＞",
-    "<": "＜",
-    ">=": "≧",
-    "<=": "≦",
-    "=": "＝",
-    "cross_above": "↑上抜け",
-    "cross_below": "↓下抜け",
-    GC: "GC（上抜け）",
-    DC: "DC（下抜け）",
-    Touch: "Touch（接触）",
+    value: "",
+    macd: ".MACD",
+    signal: ".Sig",
+    histogram: ".Hist",
+    upper: ".上",
+    middle: ".中",
+    lower: ".下",
+    k: ".%K",
+    d: ".%D",
+    tenkan: ".転換",
+    kijun: ".基準",
+    senkouA: ".先A",
+    senkouB: ".先B",
+    chikou: ".遅行",
   };
 
   let compareTargetDisplay = "";
@@ -63,13 +68,14 @@ function ConditionDisplay({ condition }: { condition: IndicatorCondition }) {
 
   const field = condition.field !== "value" ? fieldLabels[condition.field] || `.${condition.field}` : "";
   const params = condition.params ? `(${Object.values(condition.params).join(",")})` : "";
+  const operatorLabel = COMPARISON_OPERATOR_INFO[condition.operator]?.label || condition.operator;
 
   return (
     <span className="inline-flex items-center gap-1 text-xs">
       <span className="text-cyan-400">{condition.indicatorId.toUpperCase()}</span>
       <span className="text-gray-500">{params}</span>
       <span className="text-purple-400">{field}</span>
-      <span className="text-yellow-400 mx-0.5">{operatorLabels[condition.operator] || condition.operator}</span>
+      <span className="text-yellow-400 mx-0.5">{operatorLabel}</span>
       <span className="text-green-400">{compareTargetDisplay}</span>
     </span>
   );
@@ -77,7 +83,7 @@ function ConditionDisplay({ condition }: { condition: IndicatorCondition }) {
 
 /** 条件グループを再帰的に表示（コンパクト版） */
 function ConditionGroupDisplay({ group, depth = 0 }: { group: ConditionGroup; depth?: number }) {
-  const operatorLabel = group.operator === "AND" ? "かつ" : group.operator === "OR" ? "または" : "NOT";
+  const operatorLabel = LOGICAL_OPERATOR_INFO[group.operator]?.label || group.operator;
   const operatorColor = group.operator === "AND" ? "text-blue-400" : group.operator === "OR" ? "text-orange-400" : "text-red-400";
 
   return (
