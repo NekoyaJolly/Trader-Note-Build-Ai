@@ -570,11 +570,14 @@ function generateFixedSampleData(count: number): OHLCV[] {
       continue;
     }
     if (i === 222) {
-      // ピンバー（下ヒゲ）
+      // ピンバー（上ヒゲ）
+      // 目的: ショート側の教材になりやすい形（上ヒゲ長 + 下ヒゲ短）を確実に作る。
+      // 定義（本ファイル/analysis-engine と同一）:
+      // - 上ヒゲ >= 3*実体 かつ 下ヒゲ <= 0.5*実体
       const c = close;
-      const o = c - 0.03;
-      high = c + 0.05;
-      low = c - 1.4;
+      const o = c + 0.03; // 実体を小さく（body=0.03）
+      high = o + 1.37; // 上ヒゲを十分長く
+      low = c - 0.01; // 下ヒゲを短く
       pushBar(o, c, high, low);
       price = c;
       continue;
@@ -608,7 +611,7 @@ export function EntryPreviewMiniChart({
 
   const [entryIndices, setEntryIndices] = useState<number[]>([]);
 
-  const { indicatorCache, patternCache } = useMemo(() => {
+  const { indicatorCache, patternCache, warmupBars } = useMemo(() => {
     // 条件から必要な指標specを抽出（左辺＋右辺indicator）
     const specs = new Map<string, { indicatorId: string; params: Record<string, number>; field: string }>();
 
@@ -654,8 +657,59 @@ export function EntryPreviewMiniChart({
       cache.set(key, series);
     }
 
+    const estimateLookback = (indicatorId: string, params: Record<string, number>): number => {
+      const id = indicatorId.toLowerCase();
+
+      const pick = (keys: string[], fallback: number): number => {
+        for (const k of keys) {
+          const v = params[k];
+          if (typeof v === "number" && Number.isFinite(v) && v > 0) return Math.floor(v);
+        }
+        return fallback;
+      };
+
+      if (id === "sma" || id === "ema" || id === "rsi" || id === "atr" || id === "cci" || id === "roc" || id === "mfi" || id === "cmf" || id === "dema" || id === "tema") {
+        return pick(["period", "length"], 20);
+      }
+      if (id === "bb" || id === "bollinger" || id === "bbands" || id === "kc") {
+        return pick(["period", "length"], 20);
+      }
+      if (id === "stochastic" || id === "stoch") {
+        return Math.max(pick(["kPeriod", "k"], 14), pick(["dPeriod", "d"], 3));
+      }
+      if (id === "macd") {
+        const fast = pick(["fastPeriod", "fast"], 12);
+        const slow = pick(["slowPeriod", "slow"], 26);
+        const signal = pick(["signalPeriod", "signal"], 9);
+        return Math.max(slow, fast) + signal;
+      }
+      if (id === "aroon") {
+        return pick(["period", "length"], 25);
+      }
+      if (id === "psar") {
+        // PSAR は厳密には期間で決まらないが、初期安定化のため最低限の本数を要求
+        return 30;
+      }
+      if (id === "ichimoku") {
+        return Math.max(pick(["spanBPeriod", "senkou"], 52), pick(["basePeriod", "kijun"], 26));
+      }
+      if (id === "vwap" || id === "obv" || id === "willr") {
+        return pick(["period", "length"], 20);
+      }
+
+      return 50;
+    };
+
+    let maxLookback = 50;
+    for (const spec of specs.values()) {
+      maxLookback = Math.max(maxLookback, estimateLookback(spec.indicatorId, spec.params));
+    }
+
+    // 余裕を少し足してから判定開始（移動平均の安定化）
+    const warmup = Math.min(sampleData.length - 1, Math.max(30, maxLookback + 10));
+
     const patterns = computeCandlestickPatterns(sampleData);
-    return { indicatorCache: cache, patternCache: patterns };
+    return { indicatorCache: cache, patternCache: patterns, warmupBars: warmup };
   }, [debouncedConditions, sampleData]);
 
   useEffect(() => {
@@ -668,15 +722,14 @@ export function EntryPreviewMiniChart({
       patternCache,
     };
 
-    // 指標のウォームアップ（EMA200等）を考慮して前半をスキップ
-    const warmup = 210;
-    for (let i = warmup; i < sampleData.length; i++) {
+    // 指標のウォームアップ（条件に応じて）を考慮して前半をスキップ
+    for (let i = warmupBars; i < sampleData.length; i++) {
       ctx.currentIndex = i;
       const hit = evalGroup(ctx, debouncedConditions);
       if (hit) indices.push(i);
     }
     setEntryIndices(indices);
-  }, [debouncedConditions, indicatorCache, patternCache, sampleData]);
+  }, [debouncedConditions, indicatorCache, patternCache, sampleData, warmupBars]);
 
   const ohlcvData: OHLCVDataPoint[] = useMemo(() => {
     return sampleData.map((d) => ({
