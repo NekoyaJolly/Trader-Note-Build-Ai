@@ -673,17 +673,14 @@ export function EntryPreviewMiniChart({
     setEntryIndices(indices);
   }, [debouncedConditions, indicatorCache, patternCache, sampleData]);
 
-  // 描画負荷と視認性のバランスのため、表示は最大 180 本に間引く
-  const renderStride = sampleData.length > 180 ? Math.ceil(sampleData.length / 180) : 1;
+  // 300本を「豆粒」にしないため、横スクロール可能なチャートとして表示する
   const renderIndices = useMemo(() => {
     const idx: number[] = [];
-    for (let i = 0; i < sampleData.length; i += renderStride) idx.push(i);
-    // 最後のバーは必ず含める
-    if (idx[idx.length - 1] !== sampleData.length - 1) idx.push(sampleData.length - 1);
+    for (let i = 0; i < sampleData.length; i++) idx.push(i);
     return idx;
-  }, [renderStride, sampleData.length]);
+  }, [sampleData.length]);
 
-  const renderData = useMemo(() => renderIndices.map((i) => sampleData[i]!), [renderIndices, sampleData]);
+  const renderData = useMemo(() => sampleData, [sampleData]);
 
   const priceMinMax = useMemo(() => {
     const lows = renderData.map((d) => d.low);
@@ -694,8 +691,14 @@ export function EntryPreviewMiniChart({
     return { min, max, range };
   }, [renderData]);
 
+  // 横幅（px相当）: 1本あたりのピクセルを確保してスクロールで見せる
+  const viewWidth = useMemo(() => {
+    const pxPerBar = 6; // 300本でも視認できる最低ライン
+    return Math.max(1000, renderData.length * pxPerBar);
+  }, [renderData.length]);
+
   const toXY = (indexInRender: number, price: number) => {
-    const w = 1000;
+    const w = viewWidth;
     const h = height;
     const x = (indexInRender / Math.max(renderData.length - 1, 1)) * w;
     const y = h - ((price - priceMinMax.min) / priceMinMax.range) * (h - 10) - 5;
@@ -703,12 +706,12 @@ export function EntryPreviewMiniChart({
   };
 
   const candleWidth = useMemo(() => {
-    const w = 1000;
+    const w = viewWidth;
     const n = Math.max(renderData.length, 1);
     const gap = 1;
     const raw = w / n;
     return Math.max(2, Math.min(8, raw - gap));
-  }, [renderData.length]);
+  }, [renderData.length, viewWidth]);
 
   const overlayIndicatorKeys = useMemo(() => {
     // プレビューで計算済みのうち、価格スケールで重ねられるものだけを表示
@@ -737,7 +740,7 @@ export function EntryPreviewMiniChart({
       const d = pts.map((p) => `${p.x},${p.y}`).join(" ");
       return { key, colorClass: colors[idx % colors.length]!, points: d };
     });
-  }, [indicatorCache, overlayIndicatorKeys, renderIndices, renderData.length, height, priceMinMax.min, priceMinMax.range]);
+  }, [indicatorCache, overlayIndicatorKeys, renderIndices, renderData.length, height, priceMinMax.min, priceMinMax.range, viewWidth]);
 
   return (
     <div className="bg-slate-900/40 rounded-lg border border-slate-700 p-3">
@@ -751,11 +754,26 @@ export function EntryPreviewMiniChart({
         </div>
       </div>
 
-      <div className="w-full overflow-hidden rounded bg-slate-950/40 border border-slate-800">
-        <svg viewBox={`0 0 1000 ${height}`} className="w-full" style={{ height }}>
+      <div className="w-full overflow-x-auto overflow-y-hidden rounded bg-slate-950/40 border border-slate-800">
+        <svg
+          viewBox={`0 0 ${viewWidth} ${height}`}
+          className="block"
+          style={{ width: `${viewWidth}px`, height }}
+        >
+          {/* 縦スケール（最低限: 上下の価格） */}
+          <text x={6} y={12} className="fill-slate-400" fontSize="10">
+            {priceMinMax.max.toFixed(2)}
+          </text>
+          <text x={6} y={height - 4} className="fill-slate-400" fontSize="10">
+            {priceMinMax.min.toFixed(2)}
+          </text>
+
+          {/* ガイドライン */}
+          <line x1={0} x2={viewWidth} y1={12} y2={12} className="text-slate-800" stroke="currentColor" strokeWidth={1} opacity={0.7} />
+          <line x1={0} x2={viewWidth} y1={height - 6} y2={height - 6} className="text-slate-800" stroke="currentColor" strokeWidth={1} opacity={0.7} />
           {/* ローソク足 */}
           {renderData.map((bar, ri) => {
-            const x = (ri / Math.max(renderData.length - 1, 1)) * 1000;
+            const x = (ri / Math.max(renderData.length - 1, 1)) * viewWidth;
             const openP = toXY(ri, bar.open);
             const closeP = toXY(ri, bar.close);
             const highP = toXY(ri, bar.high);
@@ -810,9 +828,7 @@ export function EntryPreviewMiniChart({
 
           {/* エントリーマーカー */}
           {entryIndices.map((i) => {
-            // 表示に合わせて最近傍のrender indexへ寄せる
-            const nearestRi = Math.round(i / renderStride);
-            const ri = Math.max(0, Math.min(nearestRi, renderData.length - 1));
+            const ri = i;
             const bar = renderData[ri];
             if (!bar) return null;
             const p = toXY(ri, bar.high);
