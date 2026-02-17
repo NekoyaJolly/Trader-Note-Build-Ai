@@ -673,22 +673,71 @@ export function EntryPreviewMiniChart({
     setEntryIndices(indices);
   }, [debouncedConditions, indicatorCache, patternCache, sampleData]);
 
-  const closes = useMemo(() => sampleData.map((d) => d.close), [sampleData]);
-  const min = Math.min(...closes);
-  const max = Math.max(...closes);
-  const range = Math.max(max - min, 1e-6);
+  // 描画負荷と視認性のバランスのため、表示は最大 180 本に間引く
+  const renderStride = sampleData.length > 180 ? Math.ceil(sampleData.length / 180) : 1;
+  const renderIndices = useMemo(() => {
+    const idx: number[] = [];
+    for (let i = 0; i < sampleData.length; i += renderStride) idx.push(i);
+    // 最後のバーは必ず含める
+    if (idx[idx.length - 1] !== sampleData.length - 1) idx.push(sampleData.length - 1);
+    return idx;
+  }, [renderStride, sampleData.length]);
 
-  const points = useMemo(() => {
+  const renderData = useMemo(() => renderIndices.map((i) => sampleData[i]!), [renderIndices, sampleData]);
+
+  const priceMinMax = useMemo(() => {
+    const lows = renderData.map((d) => d.low);
+    const highs = renderData.map((d) => d.high);
+    const min = Math.min(...lows);
+    const max = Math.max(...highs);
+    const range = Math.max(max - min, 1e-6);
+    return { min, max, range };
+  }, [renderData]);
+
+  const toXY = (indexInRender: number, price: number) => {
     const w = 1000;
     const h = height;
-    return closes.map((c, i) => {
-      const x = (i / (closes.length - 1)) * w;
-      const y = h - ((c - min) / range) * (h - 10) - 5;
-      return { x, y };
-    });
-  }, [closes, height, min, range]);
+    const x = (indexInRender / Math.max(renderData.length - 1, 1)) * w;
+    const y = h - ((price - priceMinMax.min) / priceMinMax.range) * (h - 10) - 5;
+    return { x, y };
+  };
 
-  const polyline = useMemo(() => points.map((p) => `${p.x},${p.y}`).join(" "), [points]);
+  const candleWidth = useMemo(() => {
+    const w = 1000;
+    const n = Math.max(renderData.length, 1);
+    const gap = 1;
+    const raw = w / n;
+    return Math.max(2, Math.min(8, raw - gap));
+  }, [renderData.length]);
+
+  const overlayIndicatorKeys = useMemo(() => {
+    // プレビューで計算済みのうち、価格スケールで重ねられるものだけを表示
+    const keys: string[] = [];
+    for (const key of indicatorCache.keys()) {
+      // cacheKey 形式: id_params_field
+      const id = key.split("_")[0] ?? "";
+      if (["ema", "sma", "vwap", "bb", "kc", "psar"].includes(id)) {
+        keys.push(key);
+      }
+    }
+    return keys.slice(0, 3); // まずは最大3本まで（見た目が崩れやすいので制限）
+  }, [indicatorCache]);
+
+  const overlayPolylines = useMemo(() => {
+    const colors = ["text-cyan-400", "text-purple-400", "text-amber-300"];
+    return overlayIndicatorKeys.map((key, idx) => {
+      const series = indicatorCache.get(key) ?? [];
+      const pts: Array<{ x: number; y: number }> = [];
+      for (let ri = 0; ri < renderIndices.length; ri++) {
+        const i = renderIndices[ri]!;
+        const v = series[i];
+        if (v === undefined || !Number.isFinite(v)) continue;
+        pts.push(toXY(ri, v));
+      }
+      const d = pts.map((p) => `${p.x},${p.y}`).join(" ");
+      return { key, colorClass: colors[idx % colors.length]!, points: d };
+    });
+  }, [indicatorCache, overlayIndicatorKeys, renderIndices, renderData.length, height, priceMinMax.min, priceMinMax.range]);
 
   return (
     <div className="bg-slate-900/40 rounded-lg border border-slate-700 p-3">
@@ -704,34 +753,89 @@ export function EntryPreviewMiniChart({
 
       <div className="w-full overflow-hidden rounded bg-slate-950/40 border border-slate-800">
         <svg viewBox={`0 0 1000 ${height}`} className="w-full" style={{ height }}>
-          <polyline
-            points={polyline}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            className="text-slate-300"
-          />
+          {/* ローソク足 */}
+          {renderData.map((bar, ri) => {
+            const x = (ri / Math.max(renderData.length - 1, 1)) * 1000;
+            const openP = toXY(ri, bar.open);
+            const closeP = toXY(ri, bar.close);
+            const highP = toXY(ri, bar.high);
+            const lowP = toXY(ri, bar.low);
 
+            const up = bar.close >= bar.open;
+            const bodyTop = Math.min(openP.y, closeP.y);
+            const bodyBottom = Math.max(openP.y, closeP.y);
+            const bodyH = Math.max(1.5, bodyBottom - bodyTop);
+
+            return (
+              <g key={bar.timestamp}>
+                {/* wick */}
+                <line
+                  x1={x}
+                  x2={x}
+                  y1={highP.y}
+                  y2={lowP.y}
+                  className="text-slate-500"
+                  stroke="currentColor"
+                  strokeWidth={1}
+                  opacity={0.8}
+                />
+                {/* body */}
+                <rect
+                  x={x - candleWidth / 2}
+                  y={bodyTop}
+                  width={candleWidth}
+                  height={bodyH}
+                  className={up ? "text-green-400" : "text-red-400"}
+                  fill="currentColor"
+                  opacity={0.35}
+                  stroke="currentColor"
+                  strokeWidth={1}
+                />
+              </g>
+            );
+          })}
+
+          {/* 指標オーバーレイ（価格スケールのものだけ） */}
+          {overlayPolylines.map((p) => (
+            <polyline
+              key={p.key}
+              points={p.points}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              className={p.colorClass}
+              opacity={0.9}
+            />
+          ))}
+
+          {/* エントリーマーカー */}
           {entryIndices.map((i) => {
-            const p = points[i];
-            if (!p) return null;
+            // 表示に合わせて最近傍のrender indexへ寄せる
+            const nearestRi = Math.round(i / renderStride);
+            const ri = Math.max(0, Math.min(nearestRi, renderData.length - 1));
+            const bar = renderData[ri];
+            if (!bar) return null;
+            const p = toXY(ri, bar.high);
             return (
               <circle
-                key={i}
+                key={`e_${i}`}
                 cx={p.x}
-                cy={p.y}
+                cy={p.y - 3}
                 r={4}
                 className="text-green-400"
                 fill="currentColor"
-                opacity={0.9}
+                opacity={0.95}
               />
             );
           })}
         </svg>
       </div>
 
-      <div className="mt-2 text-[11px] text-gray-500">
-        条件を変更すると、上のミニチャートに「成立バー」が緑点で表示されます（デバウンス更新）。
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-gray-500">
+        <div>条件を変更すると「成立バー」が緑点で表示されます（デバウンス更新）。</div>
+        {overlayIndicatorKeys.length > 0 && (
+          <div className="text-gray-400">表示中の指標: {overlayIndicatorKeys.map((k) => k.split('_')[0]?.toUpperCase()).join(', ')}</div>
+        )}
       </div>
     </div>
   );
