@@ -705,7 +705,9 @@ function ConditionGroupComponent({
         {
           groupId: generateGroupId(),
           operator: 'AND' as LogicalOperator,
-          conditions: [createDefaultCondition()],
+          // 追加直後に親と同じデフォルト条件が増えると「自由度がない」印象になるため、空で作る
+          // 必要な条件/パターンはこのグループ内でユーザーが追加する
+          conditions: [],
         },
       ],
     });
@@ -744,38 +746,10 @@ function ConditionGroupComponent({
       {/* グループヘッダー */}
       <div className={`flex items-center justify-between ${compact ? 'mb-2' : 'mb-3'}`}>
         <div className="flex items-center gap-2">
-          <select
-            className={`${compact ? 'px-1.5 py-0.5 text-xs' : 'px-3 py-1.5 text-sm'} rounded bg-slate-700 text-gray-200 border border-slate-600 font-medium`}
-            value={group.operator}
-            onChange={(e) => handleOperatorChange(e.target.value as LogicalOperator)}
-            disabled={readOnly}
-          >
-            {Object.entries(LOGICAL_OPERATOR_INFO).map(([op, info]) => (
-              <option key={op} value={op}>
-                {compact ? info.label : `${info.label}（${info.description}）`}
-              </option>
-            ))}
-          </select>
           {!compact && (
             <span className="text-xs text-gray-500">
               {depth === 0 ? 'エントリー条件' : `グループ ${depth}`}
             </span>
-          )}
-
-          {group.operator === 'SEQUENCE' && (
-            <div className="flex items-center gap-1">
-              {!compact && <span className="text-xs text-gray-400">最大間隔</span>}
-              <input
-                type="number"
-                className={`${compact ? 'w-12 px-1 py-0.5' : 'w-16 px-2 py-1.5'} rounded bg-slate-700 text-gray-200 border border-slate-600 text-sm`}
-                value={group.maxBarsBetweenSteps ?? 10}
-                onChange={(e) => handleMaxBarsBetweenStepsChange(parseInt(e.target.value, 10))}
-                min={1}
-                max={500}
-                disabled={readOnly}
-              />
-              {!compact && <span className="text-xs text-gray-500">バー</span>}
-            </div>
           )}
         </div>
 
@@ -805,7 +779,9 @@ function ConditionGroupComponent({
                   group.operator === 'AND' ? 'bg-blue-900/50 text-blue-300' :
                   group.operator === 'OR' ? 'bg-green-900/50 text-green-300' :
                   'bg-orange-900/50 text-orange-300'
-                }`}>
+                }`}
+                title={`このグループ内の結合: ${LOGICAL_OPERATOR_INFO[group.operator].description}`}
+                >
                   {LOGICAL_OPERATOR_INFO[group.operator].label}
                 </span>
               </div>
@@ -848,7 +824,38 @@ function ConditionGroupComponent({
 
       {/* 追加ボタン */}
       {!readOnly && (
-        <div className={`flex gap-2 ${compact ? 'mt-2 pt-2' : 'mt-3 pt-3'} border-t border-slate-700`}>
+        <div className={`${compact ? 'mt-2 pt-2' : 'mt-3 pt-3'} border-t border-slate-700`}>
+          <div className={`flex flex-wrap items-center gap-2 ${compact ? 'mb-2' : 'mb-3'}`}>
+            <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-400`}>このグループの論理条件</span>
+            <select
+              className={`${compact ? 'px-1.5 py-0.5 text-xs' : 'px-3 py-1.5 text-sm'} rounded bg-slate-700 text-gray-200 border border-slate-600 font-medium`}
+              value={group.operator}
+              onChange={(e) => handleOperatorChange(e.target.value as LogicalOperator)}
+            >
+              {Object.entries(LOGICAL_OPERATOR_INFO).map(([op, info]) => (
+                <option key={op} value={op}>
+                  {compact ? info.label : `${info.label}（${info.description}）`}
+                </option>
+              ))}
+            </select>
+
+            {group.operator === 'SEQUENCE' && (
+              <div className="flex items-center gap-1">
+                {!compact && <span className="text-xs text-gray-400">最大間隔</span>}
+                <input
+                  type="number"
+                  className={`${compact ? 'w-12 px-1 py-0.5' : 'w-16 px-2 py-1.5'} rounded bg-slate-700 text-gray-200 border border-slate-600 text-sm`}
+                  value={group.maxBarsBetweenSteps ?? 10}
+                  onChange={(e) => handleMaxBarsBetweenStepsChange(parseInt(e.target.value, 10))}
+                  min={1}
+                  max={500}
+                />
+                {!compact && <span className="text-xs text-gray-500">バー</span>}
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-2">
           <button
             type="button"
             onClick={handleAddCondition}
@@ -883,7 +890,8 @@ function ConditionGroupComponent({
               {compact ? '+グループ' : 'グループを追加'}
             </button>
           )}
-        </div>
+            </div>
+          </div>
       )}
     </div>
   );
