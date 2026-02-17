@@ -547,5 +547,73 @@ describe('StrategyConditionEvaluator', () => {
 
       expect(await evaluateConditionGroup(ctx, group)).toBe(true);
     });
+
+    test('パターン条件: pinbar_bear（上ヒゲピンバー）が出現した（is_true）', async () => {
+      const mockData: OHLCV[] = Array.from({ length: 3 }).map((_, i) => ({
+        timestamp: new Date(`2024-01-01T0${i}:00:00Z`),
+        open: 100,
+        high: 101,
+        low: 99,
+        close: 100,
+        volume: 1000,
+      }));
+
+      const ctx: EvaluationContext = {
+        data: mockData,
+        currentIndex: 1,
+        indicatorCache: new Map(),
+        patternCache: new Map([['pinbar_bear', [false, true, false]]]),
+        strategy: mockStrategy,
+      };
+
+      const pattern: PatternCondition = {
+        conditionId: 'p2',
+        type: 'pattern',
+        patternId: 'pinbar_bear',
+        operator: 'is_true',
+      };
+
+      const group: ConditionGroup = {
+        groupId: 'g-pattern-2',
+        operator: 'AND',
+        conditions: [pattern],
+      };
+
+      expect(await evaluateConditionGroup(ctx, group)).toBe(true);
+    });
+
+    test('パターン条件: hammer_bull（陽線ハンマー）が出現した（is_true）', async () => {
+      const mockData: OHLCV[] = Array.from({ length: 3 }).map((_, i) => ({
+        timestamp: new Date(`2024-01-01T0${i}:00:00Z`),
+        open: 100,
+        high: 101,
+        low: 99,
+        close: 100,
+        volume: 1000,
+      }));
+
+      const ctx: EvaluationContext = {
+        data: mockData,
+        currentIndex: 1,
+        indicatorCache: new Map(),
+        patternCache: new Map([['hammer_bull', [false, true, false]]]),
+        strategy: mockStrategy,
+      };
+
+      const pattern: PatternCondition = {
+        conditionId: 'p3',
+        type: 'pattern',
+        patternId: 'hammer_bull',
+        operator: 'is_true',
+      };
+
+      const group: ConditionGroup = {
+        groupId: 'g-pattern-3',
+        operator: 'AND',
+        conditions: [pattern],
+      };
+
+      expect(await evaluateConditionGroup(ctx, group)).toBe(true);
+    });
   });
 });

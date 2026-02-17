@@ -572,7 +572,11 @@ async function executeBacktestStage(
   const patternCache = new Map<CandlePatternId, boolean[]>();
   const allowedPatternIds: readonly CandlePatternId[] = [
     'pinbar',
+    'pinbar_bull',
+    'pinbar_bear',
     'hammer',
+    'hammer_bull',
+    'hammer_bear',
     'shooting_star',
     'engulfing_bull',
     'engulfing_bear',

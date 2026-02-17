@@ -37,7 +37,11 @@ export type ComparisonOperator =
 /** ローソク足パターンID */
 export type CandlePatternId =
   | 'pinbar'
+  | 'pinbar_bull'
+  | 'pinbar_bear'
   | 'hammer'
+  | 'hammer_bull'
+  | 'hammer_bear'
   | 'shooting_star'
   | 'engulfing_bull'
   | 'engulfing_bear'

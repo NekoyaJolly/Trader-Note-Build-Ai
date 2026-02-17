@@ -21,7 +21,11 @@ class IndicatorSpec(BaseModel):
 
 PatternName = Literal[
     "pinbar",
+    "pinbar_bull",
+    "pinbar_bear",
     "hammer",
+    "hammer_bull",
+    "hammer_bear",
     "shooting_star",
     "engulfing_bull",
     "engulfing_bear",

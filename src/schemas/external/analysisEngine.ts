@@ -26,7 +26,11 @@ export const AnalysisEngineIndicatorSeriesRequestSchema = z.object({
     .array(
       z.enum([
         'pinbar',
+        'pinbar_bull',
+        'pinbar_bear',
         'hammer',
+        'hammer_bull',
+        'hammer_bear',
         'shooting_star',
         'engulfing_bull',
         'engulfing_bear',
@@ -55,7 +59,11 @@ export const AnalysisEngineIndicatorSeriesByVersionRequestSchema = z.object({
     .array(
       z.enum([
         'pinbar',
+        'pinbar_bull',
+        'pinbar_bear',
         'hammer',
+        'hammer_bull',
+        'hammer_bear',
         'shooting_star',
         'engulfing_bull',
         'engulfing_bear',

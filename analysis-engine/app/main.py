@@ -99,7 +99,11 @@ def indicator_series(req: IndicatorSeriesRequest) -> IndicatorSeriesResponse:
         p in req.patterns
         for p in [
             "pinbar",
+            "pinbar_bull",
+            "pinbar_bear",
             "hammer",
+            "hammer_bull",
+            "hammer_bear",
             "shooting_star",
             "engulfing_bull",
             "engulfing_bear",
@@ -108,8 +112,8 @@ def indicator_series(req: IndicatorSeriesRequest) -> IndicatorSeriesResponse:
             "thrust_bear",
         ]
     ):
-        # 既存互換: pinbar は従来キー（pinbar_bull/bear）も返す
-        if "pinbar" in req.patterns:
+        # pinbar は bull/bear を含めて返す（互換: pinbar も同時に返る）
+        if any(p in req.patterns for p in ["pinbar", "pinbar_bull", "pinbar_bear"]):
             patterns.update(compute_pinbar_flags(df))
         patterns.update(compute_candlestick_pattern_flags(df))
     if "bb_bandwidth" in req.patterns:

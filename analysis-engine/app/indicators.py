@@ -317,6 +317,9 @@ def compute_candlestick_pattern_flags(df: pd.DataFrame) -> Dict[str, List[bool]]
 
     # ハンマー系（カラカサ/トンカチ）: 下ヒゲ長 + 上ヒゲ短
     hammer = rng_ok & (lower >= 2.0 * body) & (upper <= 0.5 * body)
+    # 強弱（実体の陰陽）で分割（文脈トレンドはまだ見ない）
+    hammer_bull = hammer & (c > o)
+    hammer_bear = hammer & (c < o)
 
     # 上ヒゲ系（シューティングスター）: 上ヒゲ長 + 下ヒゲ短
     shooting_star = rng_ok & (upper >= 2.0 * body) & (lower <= 0.5 * body)
@@ -361,6 +364,8 @@ def compute_candlestick_pattern_flags(df: pd.DataFrame) -> Dict[str, List[bool]]
     return {
         "pinbar": pinbar_like.astype(bool).tolist(),
         "hammer": hammer.astype(bool).tolist(),
+        "hammer_bull": hammer_bull.astype(bool).tolist(),
+        "hammer_bear": hammer_bear.astype(bool).tolist(),
         "shooting_star": shooting_star.astype(bool).tolist(),
         "engulfing_bull": engulf_bull.astype(bool).tolist(),
         "engulfing_bear": engulf_bear.astype(bool).tolist(),

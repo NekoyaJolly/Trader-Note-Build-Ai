@@ -9,7 +9,7 @@
 
 "use client";
 
-import React from "react";
+import React, { useMemo } from "react";
 import {
   COMPARISON_OPERATOR_INFO,
   createDefaultCondition,
@@ -110,8 +110,12 @@ const _PRICE_TYPE_INFO: Record<'open' | 'high' | 'low' | 'close', string> = {
 };
 
 const _CANDLE_PATTERN_INFO: Record<CandlePatternId, string> = {
-  pinbar: 'ピンバー',
+  pinbar: 'ピンバー（上下どちらでも）',
+  pinbar_bull: 'ピンバー（下ヒゲ）',
+  pinbar_bear: 'ピンバー（上ヒゲ）',
   hammer: 'カラカサ/トンカチ（ハンマー系）',
+  hammer_bull: 'トンカチ寄り（陽線ハンマー）',
+  hammer_bear: 'カラカサ寄り（陰線ハンマー）',
   shooting_star: 'シューティングスター（上ヒゲ）',
   engulfing_bull: '包み足（強気）',
   engulfing_bear: '包み足（弱気）',
@@ -478,6 +482,32 @@ function SinglePatternCondition({
     ? "px-1 py-0.5 rounded bg-slate-700 text-gray-200 border border-slate-600 text-xs"
     : "px-2 py-1.5 rounded bg-slate-700 text-gray-200 border border-slate-600 text-sm";
 
+  const criteriaText = useMemo(() => {
+    // 実装（analysis-engine / プレビュー）と同一の基準を表示して、条件作成時の違和感を減らす
+    // 注意: トレンド文脈（上昇/下降）までは現状見ない
+    const id = condition.patternId;
+
+    if (id === 'pinbar' || id === 'pinbar_bull' || id === 'pinbar_bear') {
+      return '基準: 長いヒゲ ≥ 3×実体 かつ 反対ヒゲ ≤ 0.5×実体（実体0は除外）';
+    }
+    if (id === 'hammer' || id === 'hammer_bull' || id === 'hammer_bear') {
+      return '基準: 下ヒゲ ≥ 2×実体 かつ 上ヒゲ ≤ 0.5×実体（文脈トレンドは未考慮）';
+    }
+    if (id === 'shooting_star') {
+      return '基準: 上ヒゲ ≥ 2×実体 かつ 下ヒゲ ≤ 0.5×実体（文脈トレンドは未考慮）';
+    }
+    if (id === 'doji') {
+      return '基準: 実体 ≤ レンジの10%（レンジ=high-low）';
+    }
+    if (id === 'thrust_bull' || id === 'thrust_bear') {
+      return '基準: 実体 ≥ レンジの70%（実体が大きい足）';
+    }
+    if (id === 'engulfing_bull' || id === 'engulfing_bear') {
+      return '基準: 前足の実体を現足の実体が包む（簡易）';
+    }
+    return null;
+  }, [condition.patternId]);
+
   return (
     <div className={`flex flex-wrap items-center gap-${compact ? '1' : '2'} ${compact ? 'p-2' : 'p-3'} bg-slate-800 rounded-lg border border-slate-700`}>
       <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-400`}>パターン</span>
@@ -519,6 +549,12 @@ function SinglePatternCondition({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
+      )}
+
+      {criteriaText && (
+        <div className="w-full mt-1 text-[11px] text-gray-400">
+          {criteriaText}
+        </div>
       )}
     </div>
   );
@@ -603,6 +639,7 @@ function ConditionGroupComponent({
   const handleOperatorChange = (operator: LogicalOperator) => {
     onChange({ ...group, operator });
   };
+
 
   const handleMaxBarsBetweenStepsChange = (value: number) => {
     const next = Number.isFinite(value) ? Math.max(1, Math.min(value, 500)) : 10;

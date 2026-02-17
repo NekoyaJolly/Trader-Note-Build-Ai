@@ -68,6 +68,8 @@ export async function fetchIndicatorSeries(params: {
   patterns?: Array<
     | 'pinbar'
     | 'hammer'
+    | 'hammer_bull'
+    | 'hammer_bear'
     | 'shooting_star'
     | 'engulfing_bull'
     | 'engulfing_bear'
@@ -75,6 +77,8 @@ export async function fetchIndicatorSeries(params: {
     | 'thrust_bull'
     | 'thrust_bear'
     | 'bb_bandwidth'
+    | 'pinbar_bull'
+    | 'pinbar_bear'
   >;
   bbBandwidthWindow?: number;
   bbBandwidthThreshold?: number;

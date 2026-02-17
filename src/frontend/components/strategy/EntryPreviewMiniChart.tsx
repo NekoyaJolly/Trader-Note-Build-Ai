@@ -441,7 +441,11 @@ function computeCandlestickPatterns(data: OHLCV[]): Map<CandlePatternId, boolean
   const out = new Map<CandlePatternId, boolean[]>();
   const ids: CandlePatternId[] = [
     "pinbar",
+    "pinbar_bull",
+    "pinbar_bear",
     "hammer",
+    "hammer_bull",
+    "hammer_bear",
     "shooting_star",
     "engulfing_bull",
     "engulfing_bear",
@@ -459,8 +463,14 @@ function computeCandlestickPatterns(data: OHLCV[]): Map<CandlePatternId, boolean
     const upper = bar.high - Math.max(bar.open, bar.close);
     const lower = Math.min(bar.open, bar.close) - bar.low;
 
-    const pinbar = ((lower >= 3 * body) && (upper <= 0.5 * body)) || ((upper >= 3 * body) && (lower <= 0.5 * body));
+    // Python 側と定義を揃える（body==0 は除外）
+    const bodyOk = body > 0;
+    const pinbarBull = bodyOk && (lower >= 3 * body) && (upper <= 0.5 * body);
+    const pinbarBear = bodyOk && (upper >= 3 * body) && (lower <= 0.5 * body);
+    const pinbar = pinbarBull || pinbarBear;
     const hammer = (lower >= 2 * body) && (upper <= 0.5 * body);
+    const hammerBull = hammer && (bar.close > bar.open);
+    const hammerBear = hammer && (bar.close < bar.open);
     const shooting = (upper >= 2 * body) && (lower <= 0.5 * body);
     const doji = body <= 0.1 * range;
     const thrust = body >= 0.7 * range;
@@ -468,7 +478,11 @@ function computeCandlestickPatterns(data: OHLCV[]): Map<CandlePatternId, boolean
     const thrustBear = thrust && bar.close < bar.open;
 
     out.get("pinbar")![i] = !!pinbar;
+    out.get("pinbar_bull")![i] = !!pinbarBull;
+    out.get("pinbar_bear")![i] = !!pinbarBear;
     out.get("hammer")![i] = !!hammer;
+    out.get("hammer_bull")![i] = !!hammerBull;
+    out.get("hammer_bear")![i] = !!hammerBear;
     out.get("shooting_star")![i] = !!shooting;
     out.get("doji")![i] = !!doji;
     out.get("thrust_bull")![i] = !!thrustBull;
