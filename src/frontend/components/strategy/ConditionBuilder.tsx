@@ -535,7 +535,10 @@ function SinglePatternCondition({
       onChange({ ...condition, patternId: 'hammer' });
       return;
     }
-    // other は現状維持（無理に変えない）
+    if (group === 'other') {
+      // other を選んだのに詳細が出ないのはUXが悪いので、other系の代表に切り替える
+      onChange({ ...condition, patternId: 'shooting_star' });
+    }
   };
 
   const pinbarDetailOptions: Array<{ id: CandlePatternId; label: string }> = [

@@ -87,8 +87,8 @@ export const COMPARISON_OPERATOR_INFO: Record<ComparisonOperator, { label: strin
   GC: { label: 'ゴールデンクロス', description: '上抜け（別名）' },
   DC: { label: 'デッドクロス', description: '下抜け（別名）' },
   Touch: { label: 'タッチ（旧）', description: '旧形式: 近接/接触/反転を含む（後方互換）' },
-  touch_close: { label: '終値でタッチ', description: '終値ベースの一致/近接（基本はclose）' },
-  touch_wick: { label: 'ヒゲでタッチ', description: '当該バーの high-low に到達（価格が線に触れるイメージ）' },
+  touch_close: { label: 'タッチ（終値）', description: '終値がライン（例: MA）に一致/近接したら成立' },
+  touch_wick: { label: 'タッチ（ヒゲ）', description: '当該バーの high-low がライン（例: MA）に到達したら成立' },
 };
 
 // ============================================
