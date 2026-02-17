@@ -13,6 +13,11 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import CandlestickChart, {
+  ChartMarker,
+  IndicatorLineConfig,
+  OHLCVDataPoint,
+} from "@/components/CandlestickChart";
 import type {
   CandlePatternId,
   ComparisonOperator,
@@ -593,7 +598,7 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 
 export function EntryPreviewMiniChart({
   entryConditions,
-  height = 140,
+  height = 260,
 }: {
   entryConditions: ConditionGroup;
   height?: number;
@@ -673,74 +678,95 @@ export function EntryPreviewMiniChart({
     setEntryIndices(indices);
   }, [debouncedConditions, indicatorCache, patternCache, sampleData]);
 
-  // 300本を「豆粒」にしないため、横スクロール可能なチャートとして表示する
-  const renderIndices = useMemo(() => {
-    const idx: number[] = [];
-    for (let i = 0; i < sampleData.length; i++) idx.push(i);
-    return idx;
-  }, [sampleData.length]);
-
-  const renderData = useMemo(() => sampleData, [sampleData]);
-
-  const priceMinMax = useMemo(() => {
-    const lows = renderData.map((d) => d.low);
-    const highs = renderData.map((d) => d.high);
-    const min = Math.min(...lows);
-    const max = Math.max(...highs);
-    const range = Math.max(max - min, 1e-6);
-    return { min, max, range };
-  }, [renderData]);
-
-  // 横幅（px相当）: 1本あたりのピクセルを確保してスクロールで見せる
-  const viewWidth = useMemo(() => {
-    const pxPerBar = 6; // 300本でも視認できる最低ライン
-    return Math.max(1000, renderData.length * pxPerBar);
-  }, [renderData.length]);
-
-  const toXY = (indexInRender: number, price: number) => {
-    const w = viewWidth;
-    const h = height;
-    const x = (indexInRender / Math.max(renderData.length - 1, 1)) * w;
-    const y = h - ((price - priceMinMax.min) / priceMinMax.range) * (h - 10) - 5;
-    return { x, y };
-  };
-
-  const candleWidth = useMemo(() => {
-    const w = viewWidth;
-    const n = Math.max(renderData.length, 1);
-    const gap = 1;
-    const raw = w / n;
-    return Math.max(2, Math.min(8, raw - gap));
-  }, [renderData.length, viewWidth]);
+  const ohlcvData: OHLCVDataPoint[] = useMemo(() => {
+    return sampleData.map((d) => ({
+      timestamp: Date.parse(d.timestamp),
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+      volume: d.volume,
+    }));
+  }, [sampleData]);
 
   const overlayIndicatorKeys = useMemo(() => {
     // プレビューで計算済みのうち、価格スケールで重ねられるものだけを表示
     const keys: string[] = [];
     for (const key of indicatorCache.keys()) {
-      // cacheKey 形式: id_params_field
       const id = key.split("_")[0] ?? "";
       if (["ema", "sma", "vwap", "bb", "kc", "psar"].includes(id)) {
         keys.push(key);
       }
     }
-    return keys.slice(0, 3); // まずは最大3本まで（見た目が崩れやすいので制限）
+    return keys.slice(0, 3);
   }, [indicatorCache]);
 
-  const overlayPolylines = useMemo(() => {
-    const colors = ["text-cyan-400", "text-purple-400", "text-amber-300"];
-    return overlayIndicatorKeys.map((key, idx) => {
-      const series = indicatorCache.get(key) ?? [];
-      const pts: Array<{ x: number; y: number }> = [];
-      for (let ri = 0; ri < renderIndices.length; ri++) {
-        const i = renderIndices[ri]!;
+  const indicatorLines: IndicatorLineConfig[] = useMemo(() => {
+    // 既存で使っている色のみ（新規の色を増やさない）
+    const palette = ["#06b6d4", "#8b5cf6", "#f59e0b"];
+
+    const lines: IndicatorLineConfig[] = [];
+    for (let idx = 0; idx < overlayIndicatorKeys.length; idx++) {
+      const key = overlayIndicatorKeys[idx]!;
+      const series = indicatorCache.get(key);
+      if (!series) continue;
+
+      const [rawId, rawParams, rawField] = key.split("_");
+      const indicatorId = rawId ?? "";
+      const field = rawField ?? "value";
+
+      let name = indicatorId.toUpperCase();
+      if (rawParams) {
+        try {
+          const params = JSON.parse(rawParams) as Record<string, number>;
+          const values = Object.values(params);
+          if (values.length > 0) name = `${name}(${values.join(",")})`;
+        } catch {
+          // 失敗時は最小表示
+        }
+      }
+      if (field !== "value") name = `${name}.${field}`;
+
+      const data: { timestamp: number; value: number }[] = [];
+      for (let i = 0; i < ohlcvData.length; i++) {
         const v = series[i];
         if (v === undefined || !Number.isFinite(v)) continue;
-        pts.push(toXY(ri, v));
+        data.push({ timestamp: ohlcvData[i]!.timestamp, value: v });
       }
-      const d = pts.map((p) => `${p.x},${p.y}`).join(" ");
-      return { key, colorClass: colors[idx % colors.length]!, points: d };
-    });
-  }, [indicatorCache, overlayIndicatorKeys, renderIndices, renderData.length, height, priceMinMax.min, priceMinMax.range, viewWidth]);
+
+      lines.push({
+        id: key,
+        name,
+        data,
+        color: palette[idx % palette.length]!,
+        lineWidth: 2,
+        pane: "main",
+      });
+    }
+
+    return lines;
+  }, [indicatorCache, ohlcvData, overlayIndicatorKeys]);
+
+  const markers: ChartMarker[] = useMemo(() => {
+    const out: ChartMarker[] = [];
+    for (const i of entryIndices) {
+      const bar = ohlcvData[i];
+      if (!bar) continue;
+      out.push({
+        timestamp: bar.timestamp,
+        position: "aboveBar",
+        color: "#22c55e",
+        shape: "circle",
+      });
+    }
+    return out;
+  }, [entryIndices, ohlcvData]);
+
+  const focusTimestamp = useMemo(() => {
+    const idx = entryIndices[0] ?? 222;
+    const bar = ohlcvData[Math.max(0, Math.min(idx, ohlcvData.length - 1))];
+    return bar?.timestamp ?? null;
+  }, [entryIndices, ohlcvData]);
 
   return (
     <div className="bg-slate-900/40 rounded-lg border border-slate-700 p-3">
@@ -754,97 +780,14 @@ export function EntryPreviewMiniChart({
         </div>
       </div>
 
-      <div className="w-full overflow-x-auto overflow-y-hidden rounded bg-slate-950/40 border border-slate-800">
-        <svg
-          viewBox={`0 0 ${viewWidth} ${height}`}
-          className="block"
-          style={{ width: `${viewWidth}px`, height }}
-        >
-          {/* 縦スケール（最低限: 上下の価格） */}
-          <text x={6} y={12} className="fill-slate-400" fontSize="10">
-            {priceMinMax.max.toFixed(2)}
-          </text>
-          <text x={6} y={height - 4} className="fill-slate-400" fontSize="10">
-            {priceMinMax.min.toFixed(2)}
-          </text>
-
-          {/* ガイドライン */}
-          <line x1={0} x2={viewWidth} y1={12} y2={12} className="text-slate-800" stroke="currentColor" strokeWidth={1} opacity={0.7} />
-          <line x1={0} x2={viewWidth} y1={height - 6} y2={height - 6} className="text-slate-800" stroke="currentColor" strokeWidth={1} opacity={0.7} />
-          {/* ローソク足 */}
-          {renderData.map((bar, ri) => {
-            const x = (ri / Math.max(renderData.length - 1, 1)) * viewWidth;
-            const openP = toXY(ri, bar.open);
-            const closeP = toXY(ri, bar.close);
-            const highP = toXY(ri, bar.high);
-            const lowP = toXY(ri, bar.low);
-
-            const up = bar.close >= bar.open;
-            const bodyTop = Math.min(openP.y, closeP.y);
-            const bodyBottom = Math.max(openP.y, closeP.y);
-            const bodyH = Math.max(1.5, bodyBottom - bodyTop);
-
-            return (
-              <g key={bar.timestamp}>
-                {/* wick */}
-                <line
-                  x1={x}
-                  x2={x}
-                  y1={highP.y}
-                  y2={lowP.y}
-                  className="text-slate-500"
-                  stroke="currentColor"
-                  strokeWidth={1}
-                  opacity={0.8}
-                />
-                {/* body */}
-                <rect
-                  x={x - candleWidth / 2}
-                  y={bodyTop}
-                  width={candleWidth}
-                  height={bodyH}
-                  className={up ? "text-green-400" : "text-red-400"}
-                  fill="currentColor"
-                  opacity={0.35}
-                  stroke="currentColor"
-                  strokeWidth={1}
-                />
-              </g>
-            );
-          })}
-
-          {/* 指標オーバーレイ（価格スケールのものだけ） */}
-          {overlayPolylines.map((p) => (
-            <polyline
-              key={p.key}
-              points={p.points}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              className={p.colorClass}
-              opacity={0.9}
-            />
-          ))}
-
-          {/* エントリーマーカー */}
-          {entryIndices.map((i) => {
-            const ri = i;
-            const bar = renderData[ri];
-            if (!bar) return null;
-            const p = toXY(ri, bar.high);
-            return (
-              <circle
-                key={`e_${i}`}
-                cx={p.x}
-                cy={p.y - 3}
-                r={4}
-                className="text-green-400"
-                fill="currentColor"
-                opacity={0.95}
-              />
-            );
-          })}
-        </svg>
+      <div className="rounded bg-slate-950/40 border border-slate-800">
+        <CandlestickChart
+          ohlcvData={ohlcvData}
+          indicators={indicatorLines}
+          markers={markers}
+          height={height}
+          focusTimestamp={focusTimestamp}
+        />
       </div>
 
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-gray-500">
