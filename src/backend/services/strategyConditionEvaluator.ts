@@ -26,11 +26,26 @@ export type ComparisonOperator =
   | '>'
   | 'cross_above'
   | 'cross_below'
+  | 'touch_close'
+  | 'touch_wick'
   // UI/保存形式の拡張（後方互換）
   | 'GC'
   | 'DC'
   | 'Touch'
   | 'touch';
+
+/** ローソク足パターンID */
+export type CandlePatternId =
+  | 'pinbar'
+  | 'hammer'
+  | 'shooting_star'
+  | 'engulfing_bull'
+  | 'engulfing_bear'
+  | 'doji'
+  | 'thrust_bull'
+  | 'thrust_bear';
+
+export type PatternOperator = 'is_true' | 'is_false';
 
 /** インジケーター条件 */
 export interface IndicatorCondition {
@@ -49,17 +64,25 @@ export interface IndicatorCondition {
   };
 }
 
+/** ローソク足パターン条件 */
+export interface PatternCondition {
+  conditionId: string;
+  type: 'pattern';
+  patternId: CandlePatternId;
+  operator: PatternOperator;
+}
+
 /** 条件グループ */
 export interface ConditionGroup {
   groupId: string;
   operator: LogicalOperator;
-  conditions: (IndicatorCondition | ConditionGroup)[];
+  conditions: (IndicatorCondition | PatternCondition | ConditionGroup)[];
   // IF-THEN専用
-  ifCondition?: ConditionGroup | IndicatorCondition;
-  thenCondition?: ConditionGroup | IndicatorCondition;
+  ifCondition?: ConditionGroup | IndicatorCondition | PatternCondition;
+  thenCondition?: ConditionGroup | IndicatorCondition | PatternCondition;
   maxBarsToWait?: number;
   // SEQUENCE専用
-  sequence?: (ConditionGroup | IndicatorCondition)[];
+  sequence?: (ConditionGroup | IndicatorCondition | PatternCondition)[];
   maxBarsBetweenSteps?: number;
 }
 
@@ -78,6 +101,7 @@ export interface EvaluationContext {
   data: OHLCV[];
   currentIndex: number;
   indicatorCache: Map<string, number[]>;
+  patternCache?: Map<CandlePatternId, boolean[]>;
   strategy: StrategyDetail;
   // IF-THEN用の状態管理
   ifThenState?: {
@@ -181,6 +205,11 @@ function compareValues(
     case '=': return Math.abs(left - right) < 0.0001;
     case '>=': return left >= right;
     case '>': return left > right;
+    case 'touch_close': {
+      // 終値タッチ: 値の一致/近接のみ（クロスは cross_* に任せる）
+      const eps = 1e-6;
+      return Math.abs(left - right) <= eps;
+    }
     case 'Touch':
     case 'touch': {
       // Touch: 「近接（許容誤差内）」または「同一足で接触/反転」を許容
@@ -245,6 +274,17 @@ export async function evaluateCondition(
     rightValue = getPriceValue(ctx, condition.compareTarget.priceType || 'close');
   }
   
+  // 特殊: ヒゲタッチは「当該バーの high-low 到達」を使う（価格が線に触れるイメージ）
+  if (condition.operator === 'touch_wick') {
+    // 左辺（指標/数値）が、当該バーのレンジに入っているか
+    const bar = ctx.data[ctx.currentIndex];
+    const inRange = bar.low <= leftValue && leftValue <= bar.high;
+
+    // 右辺が価格の場合は「価格が線に触れた」をこの判定に寄せる
+    // 右辺が固定値/別指標の場合でも、ユーザー意図は「線（左辺）にレートが当たる」なので inRange を優先する
+    return inRange;
+  }
+
   // クロス判定用の前回値を取得
   let prevLeft: number | undefined;
   let prevRight: number | undefined;
@@ -280,6 +320,18 @@ export async function evaluateCondition(
   }
   
   return compareValues(leftValue, rightValue, condition.operator, prevLeft, prevRight);
+}
+
+/** パターン条件を評価 */
+export async function evaluatePatternCondition(
+  ctx: EvaluationContext,
+  condition: PatternCondition
+): Promise<boolean> {
+  const series = ctx.patternCache?.get(condition.patternId);
+  if (!series) return false;
+
+  const flag = series[ctx.currentIndex] ?? false;
+  return condition.operator === 'is_false' ? !flag : !!flag;
 }
 
 /**
@@ -325,6 +377,8 @@ export async function evaluateConditionGroup(
     let result: boolean;
     if ('indicatorId' in item) {
       result = await evaluateCondition(ctx, item as IndicatorCondition);
+    } else if ((item as { type?: string }).type === 'pattern') {
+      result = await evaluatePatternCondition(ctx, item as PatternCondition);
     } else {
       result = await evaluateConditionGroup(ctx, item as ConditionGroup);
     }

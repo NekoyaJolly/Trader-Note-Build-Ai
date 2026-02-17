@@ -13,6 +13,7 @@ import {
   getPriceValue,
   EvaluationContext,
   IndicatorCondition,
+  PatternCondition,
   ConditionGroup,
   OHLCV,
 } from '../services/strategyConditionEvaluator';
@@ -224,6 +225,76 @@ describe('StrategyConditionEvaluator', () => {
 
       expect(result).toBe(true);
     });
+
+    test('終値タッチ: SMA が close に一致（touch_close）', async () => {
+      const mockData: OHLCV[] = [
+        {
+          timestamp: new Date('2024-01-01T00:00:00Z'),
+          open: 150.0,
+          high: 151.0,
+          low: 149.0,
+          close: 150.0,
+          volume: 1000,
+        },
+      ];
+
+      const ctx: EvaluationContext = {
+        data: mockData,
+        currentIndex: 0,
+        indicatorCache: new Map(),
+        strategy: mockStrategy,
+      };
+
+      const key = makeIndicatorCacheKey('sma', { period: 20 }, 'value');
+      ctx.indicatorCache.set(key, [150.0]);
+
+      const condition: IndicatorCondition = {
+        conditionId: 'touch-close-1',
+        indicatorId: 'sma',
+        params: { period: 20 },
+        field: 'value',
+        operator: 'touch_close',
+        compareTarget: { type: 'price', priceType: 'close' },
+      };
+
+      const result = await evaluateCondition(ctx, condition);
+      expect(result).toBe(true);
+    });
+
+    test('ヒゲタッチ: レートレンジが SMA を含む（touch_wick）', async () => {
+      const mockData: OHLCV[] = [
+        {
+          timestamp: new Date('2024-01-01T00:00:00Z'),
+          open: 150.5,
+          high: 151.0,
+          low: 149.0,
+          close: 150.2,
+          volume: 1000,
+        },
+      ];
+
+      const ctx: EvaluationContext = {
+        data: mockData,
+        currentIndex: 0,
+        indicatorCache: new Map(),
+        strategy: mockStrategy,
+      };
+
+      const key = makeIndicatorCacheKey('sma', { period: 20 }, 'value');
+      ctx.indicatorCache.set(key, [150.0]);
+
+      const condition: IndicatorCondition = {
+        conditionId: 'touch-wick-1',
+        indicatorId: 'sma',
+        params: { period: 20 },
+        field: 'value',
+        operator: 'touch_wick',
+        compareTarget: { type: 'price', priceType: 'close' },
+      };
+
+      const result = await evaluateCondition(ctx, condition);
+      expect(result).toBe(true);
+    });
   });
 
   describe('evaluateConditionGroup', () => {
@@ -378,6 +449,103 @@ describe('StrategyConditionEvaluator', () => {
       const result = await evaluateConditionGroup(ctx, group);
 
       expect(result).toBe(true);
+    });
+
+    test('SEQUENCE: ステップ順に成立（状態ベース、間隔制限あり）', async () => {
+      const mockData: OHLCV[] = Array.from({ length: 20 }).map((_, i) => ({
+        timestamp: new Date(`2024-01-01T${String(i).padStart(2, '0')}:00:00Z`),
+        open: 100,
+        high: 101,
+        low: 99,
+        close: 100,
+        volume: 1000,
+      }));
+
+      const ctx: EvaluationContext = {
+        data: mockData,
+        currentIndex: 0,
+        indicatorCache: new Map(),
+        strategy: mockStrategy,
+      };
+
+      const keyA = makeIndicatorCacheKey('sma', { period: 20 }, 'value');
+      // step1 は index>=10 で true（left=1、right=0）
+      ctx.indicatorCache.set(keyA, mockData.map((_, i) => (i >= 10 ? 1 : -1)));
+
+      const step1: IndicatorCondition = {
+        conditionId: 'seq-step-1',
+        indicatorId: 'sma',
+        params: { period: 20 },
+        field: 'value',
+        operator: '>',
+        compareTarget: { type: 'fixed', value: 0 },
+      };
+
+      const keyB = makeIndicatorCacheKey('ema', { period: 20 }, 'value');
+      // step2 は index==11 だけ true
+      ctx.indicatorCache.set(keyB, mockData.map((_, i) => (i === 11 ? 1 : -1)));
+
+      const step2: IndicatorCondition = {
+        conditionId: 'seq-step-2',
+        indicatorId: 'ema',
+        params: { period: 20 },
+        field: 'value',
+        operator: '>',
+        compareTarget: { type: 'fixed', value: 0 },
+      };
+
+      const group: ConditionGroup = {
+        groupId: 'seq-1',
+        operator: 'SEQUENCE',
+        conditions: [step1, step2],
+        maxBarsBetweenSteps: 2,
+      };
+
+      // index=9: step1 false
+      ctx.currentIndex = 9;
+      expect(await evaluateConditionGroup(ctx, group)).toBe(false);
+
+      // index=10: step1 true（step進行）
+      ctx.currentIndex = 10;
+      expect(await evaluateConditionGroup(ctx, group)).toBe(false);
+
+      // index=11: step2 true（完了）
+      ctx.currentIndex = 11;
+      expect(await evaluateConditionGroup(ctx, group)).toBe(true);
+    });
+
+    test('パターン条件: hammer が出現した（is_true）', async () => {
+      const mockData: OHLCV[] = Array.from({ length: 3 }).map((_, i) => ({
+        timestamp: new Date(`2024-01-01T0${i}:00:00Z`),
+        open: 100,
+        high: 101,
+        low: 99,
+        close: 100,
+        volume: 1000,
+      }));
+
+      const ctx: EvaluationContext = {
+        data: mockData,
+        currentIndex: 1,
+        indicatorCache: new Map(),
+        patternCache: new Map([['hammer', [false, true, false]]]),
+        strategy: mockStrategy,
+      };
+
+      const pattern: PatternCondition = {
+        conditionId: 'p1',
+        type: 'pattern',
+        patternId: 'hammer',
+        operator: 'is_true',
+      };
+
+      const group: ConditionGroup = {
+        groupId: 'g-pattern',
+        operator: 'AND',
+        conditions: [pattern],
+      };
+
+      expect(await evaluateConditionGroup(ctx, group)).toBe(true);
     });
   });
 });

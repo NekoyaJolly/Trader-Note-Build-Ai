@@ -19,6 +19,19 @@ class IndicatorSpec(BaseModel):
     field: str = Field(..., description="例: value, signal, histogram, upper, lower, middle, bandwidth")
 
 
+PatternName = Literal[
+    "pinbar",
+    "hammer",
+    "shooting_star",
+    "engulfing_bull",
+    "engulfing_bear",
+    "doji",
+    "thrust_bull",
+    "thrust_bear",
+    "bb_bandwidth",
+]
+
+
 class IndicatorSeriesRequest(BaseModel):
     symbol: str
     timeframe: str
@@ -27,7 +40,7 @@ class IndicatorSeriesRequest(BaseModel):
     indicators: List[IndicatorSpec] = Field(default_factory=list)
 
     # パターン判定の要求（必要なものだけ計算して返す）
-    patterns: List[Literal["pinbar", "bb_bandwidth"]] = Field(default_factory=list)
+    patterns: List[PatternName] = Field(default_factory=list)
 
     # BB Bandwidth 判定パラメータ
     bbBandwidthWindow: int = Field(20, ge=2, le=500)
@@ -47,7 +60,7 @@ class IndicatorSeriesByVersionRequest(BaseModel):
     startDate: datetime
     endDate: datetime
 
-    patterns: List[Literal["pinbar", "bb_bandwidth"]] = Field(default_factory=list)
+    patterns: List[PatternName] = Field(default_factory=list)
     bbBandwidthWindow: int = Field(20, ge=2, le=500)
     bbBandwidthThreshold: float = Field(0.2, ge=0.0, le=10.0)
 

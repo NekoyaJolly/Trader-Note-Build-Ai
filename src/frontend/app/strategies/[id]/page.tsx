@@ -25,8 +25,10 @@ import {
   COMPARISON_OPERATOR_INFO,
   FIELD_LABELS,
   LOGICAL_OPERATOR_INFO,
+  isIndicatorCondition,
+  isPatternCondition,
 } from "@/types/strategy";
-import type { Strategy, StrategyStatus, ConditionGroup, IndicatorCondition, ExitSettings, StrategyDirection, SupportedSymbol, EntryTiming, UpdateStrategyRequest } from "@/types/strategy";
+import type { Strategy, StrategyStatus, ConditionGroup, IndicatorCondition, PatternCondition, ExitSettings, StrategyDirection, SupportedSymbol, EntryTiming, UpdateStrategyRequest, CandlePatternId, PatternOperator } from "@/types/strategy";
 import type { IndicatorMetadata } from "@/types/indicator";
 import ConditionBuilder from "@/components/strategy/ConditionBuilder";
 import { NeonButton } from "@/components/ui/NeonButton";
@@ -81,6 +83,32 @@ function ConditionDisplay({ condition }: { condition: IndicatorCondition }) {
   );
 }
 
+function PatternConditionDisplay({ condition }: { condition: PatternCondition }) {
+  const patternLabels: Record<CandlePatternId, string> = {
+    pinbar: 'ピンバー',
+    hammer: 'カラカサ/トンカチ',
+    shooting_star: 'シューティングスター',
+    engulfing_bull: '包み足（強気）',
+    engulfing_bear: '包み足（弱気）',
+    doji: 'ドージ',
+    thrust_bull: 'スラスト（陽線）',
+    thrust_bear: 'スラスト（陰線）',
+  };
+
+  const opLabels: Record<PatternOperator, string> = {
+    is_true: '出現した',
+    is_false: '出現していない',
+  };
+
+  return (
+    <span className="inline-flex items-center gap-1 text-xs">
+      <span className="text-purple-300">パターン</span>
+      <span className="text-cyan-400">{patternLabels[condition.patternId] ?? condition.patternId}</span>
+      <span className="text-yellow-400 mx-0.5">{opLabels[condition.operator] ?? condition.operator}</span>
+    </span>
+  );
+}
+
 /** 条件グループを再帰的に表示（コンパクト版） */
 function ConditionGroupDisplay({ group, depth = 0 }: { group: ConditionGroup; depth?: number }) {
   const operatorLabel = LOGICAL_OPERATOR_INFO[group.operator]?.label || group.operator;
@@ -91,9 +119,13 @@ function ConditionGroupDisplay({ group, depth = 0 }: { group: ConditionGroup; de
       <div className="space-y-1">
         {group.conditions.map((item, index) => (
           <div key={index} className="flex flex-wrap items-center gap-1">
-            {"conditionId" in item ? (
+            {isIndicatorCondition(item) ? (
               <div className="bg-slate-700/50 px-2 py-1 rounded">
                 <ConditionDisplay condition={item as IndicatorCondition} />
+              </div>
+            ) : isPatternCondition(item) ? (
+              <div className="bg-slate-700/50 px-2 py-1 rounded">
+                <PatternConditionDisplay condition={item as PatternCondition} />
               </div>
             ) : (
               <ConditionGroupDisplay group={item as ConditionGroup} depth={depth + 1} />

@@ -22,7 +22,21 @@ export const AnalysisEngineIndicatorSeriesRequestSchema = z.object({
   startDate: z.string().datetime(),
   endDate: z.string().datetime(),
   indicators: z.array(AnalysisEngineIndicatorSpecSchema).default([]),
-  patterns: z.array(z.enum(['pinbar', 'bb_bandwidth'])).default([]),
+  patterns: z
+    .array(
+      z.enum([
+        'pinbar',
+        'hammer',
+        'shooting_star',
+        'engulfing_bull',
+        'engulfing_bear',
+        'doji',
+        'thrust_bull',
+        'thrust_bear',
+        'bb_bandwidth',
+      ])
+    )
+    .default([]),
   bbBandwidthWindow: z.number().int().min(2).max(500).default(20),
   bbBandwidthThreshold: z.number().min(0).max(10).default(0.2),
 });
@@ -37,7 +51,21 @@ export const AnalysisEngineIndicatorSeriesByVersionRequestSchema = z.object({
   timeframe: z.string().min(1),
   startDate: z.string().datetime(),
   endDate: z.string().datetime(),
-  patterns: z.array(z.enum(['pinbar', 'bb_bandwidth'])).default([]),
+  patterns: z
+    .array(
+      z.enum([
+        'pinbar',
+        'hammer',
+        'shooting_star',
+        'engulfing_bull',
+        'engulfing_bear',
+        'doji',
+        'thrust_bull',
+        'thrust_bear',
+        'bb_bandwidth',
+      ])
+    )
+    .default([]),
   bbBandwidthWindow: z.number().int().min(2).max(500).default(20),
   bbBandwidthThreshold: z.number().min(0).max(10).default(0.2),
 });

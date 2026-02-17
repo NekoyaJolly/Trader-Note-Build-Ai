@@ -27,6 +27,7 @@ import {
   OHLCV,
   LogicalOperator,
   ComparisonOperator,
+  CandlePatternId,
 } from './strategyConditionEvaluator';
 import { CTraderDataService } from './ctrader/ctraderDataService';
 import { CTraderAuthService } from './ctrader/ctraderAuthService';
@@ -566,11 +567,32 @@ async function executeBacktestStage(
     }
   }
 
+  // patterns（bool系列）を evaluator が使えるように格納
+  // 注意: analysis-engine は patterns を任意計算にしているため、未指定の場合は空
+  const patternCache = new Map<CandlePatternId, boolean[]>();
+  const allowedPatternIds: readonly CandlePatternId[] = [
+    'pinbar',
+    'hammer',
+    'shooting_star',
+    'engulfing_bull',
+    'engulfing_bear',
+    'doji',
+    'thrust_bull',
+    'thrust_bear',
+  ] as const;
+
+  for (const [patternId, flags] of Object.entries(indicatorSeries.patterns ?? {})) {
+    if ((allowedPatternIds as readonly string[]).includes(patternId)) {
+      patternCache.set(patternId as CandlePatternId, flags);
+    }
+  }
+
   // 評価コンテキストを初期化
   const ctx: EvaluationContext = {
     data,
     currentIndex: 0,
     indicatorCache,
+    patternCache,
     strategy,
   };
 

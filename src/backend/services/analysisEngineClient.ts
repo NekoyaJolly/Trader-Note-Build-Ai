@@ -65,7 +65,17 @@ export async function fetchIndicatorSeries(params: {
   startDate: Date;
   endDate: Date;
   indicators: AnalysisEngineIndicatorSpec[];
-  patterns?: Array<'pinbar' | 'bb_bandwidth'>;
+  patterns?: Array<
+    | 'pinbar'
+    | 'hammer'
+    | 'shooting_star'
+    | 'engulfing_bull'
+    | 'engulfing_bear'
+    | 'doji'
+    | 'thrust_bull'
+    | 'thrust_bear'
+    | 'bb_bandwidth'
+  >;
   bbBandwidthWindow?: number;
   bbBandwidthThreshold?: number;
 }): Promise<AnalysisEngineIndicatorSeriesResponse> {
@@ -107,7 +117,17 @@ export async function fetchIndicatorSeriesByStrategyVersion(params: {
   timeframe: string;
   startDate: Date;
   endDate: Date;
-  patterns?: Array<'pinbar' | 'bb_bandwidth'>;
+  patterns?: Array<
+    | 'pinbar'
+    | 'hammer'
+    | 'shooting_star'
+    | 'engulfing_bull'
+    | 'engulfing_bear'
+    | 'doji'
+    | 'thrust_bull'
+    | 'thrust_bear'
+    | 'bb_bandwidth'
+  >;
   bbBandwidthWindow?: number;
   bbBandwidthThreshold?: number;
 }): Promise<AnalysisEngineIndicatorSeriesResponse> {

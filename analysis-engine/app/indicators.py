@@ -287,6 +287,89 @@ def compute_pinbar_flags(df: pd.DataFrame) -> Dict[str, List[bool]]:
     }
 
 
+def compute_candlestick_pattern_flags(df: pd.DataFrame) -> Dict[str, List[bool]]:
+    """ローソク足パターンをまとめて判定して返す。
+
+    目的:
+    - UI/バックテストで「パターンが出現した」を条件として扱えるようにする
+    - MT5 のような裁量的トリガーの土台を作る
+
+    注意:
+    - ここでの判定は「形状」を中心に簡易化している
+    - トレンド文脈（上昇/下降）までは現時点では見ない
+    """
+
+    o = df["open"].to_numpy(dtype=float)
+    h = df["high"].to_numpy(dtype=float)
+    l = df["low"].to_numpy(dtype=float)
+    c = df["close"].to_numpy(dtype=float)
+
+    body = np.abs(c - o)
+    rng = np.maximum(h - l, 0.0)
+    upper = h - np.maximum(o, c)
+    lower = np.minimum(o, c) - l
+
+    # ゼロレンジは除外
+    rng_ok = rng > 0
+
+    # ピンバー系（既存定義とほぼ同等だが、ここでは別名も返す）
+    pinbar_like = rng_ok & (((lower >= 3.0 * body) & (upper <= 0.5 * body)) | ((upper >= 3.0 * body) & (lower <= 0.5 * body)))
+
+    # ハンマー系（カラカサ/トンカチ）: 下ヒゲ長 + 上ヒゲ短
+    hammer = rng_ok & (lower >= 2.0 * body) & (upper <= 0.5 * body)
+
+    # 上ヒゲ系（シューティングスター）: 上ヒゲ長 + 下ヒゲ短
+    shooting_star = rng_ok & (upper >= 2.0 * body) & (lower <= 0.5 * body)
+
+    # ドージ: 実体がレンジに対して極小
+    doji = rng_ok & (body <= 0.1 * rng)
+
+    # スラスト（強い実体）: 実体がレンジの大部分を占める
+    thrust = rng_ok & (body >= 0.7 * rng)
+    thrust_bull = thrust & (c > o)
+    thrust_bear = thrust & (c < o)
+
+    # 包み足（Engulfing）: 前足の実体を現在足の実体が包む
+    # prev: i-1, curr: i
+    prev_o = np.roll(o, 1)
+    prev_c = np.roll(c, 1)
+    prev_is_bear = prev_c < prev_o
+    prev_is_bull = prev_c > prev_o
+
+    curr_is_bull = c > o
+    curr_is_bear = c < o
+
+    # 先頭は無効
+    valid_prev = np.arange(len(o)) > 0
+
+    engulf_bull = (
+        valid_prev
+        & prev_is_bear
+        & curr_is_bull
+        & (o <= prev_c)
+        & (c >= prev_o)
+    )
+
+    engulf_bear = (
+        valid_prev
+        & prev_is_bull
+        & curr_is_bear
+        & (o >= prev_c)
+        & (c <= prev_o)
+    )
+
+    return {
+        "pinbar": pinbar_like.astype(bool).tolist(),
+        "hammer": hammer.astype(bool).tolist(),
+        "shooting_star": shooting_star.astype(bool).tolist(),
+        "engulfing_bull": engulf_bull.astype(bool).tolist(),
+        "engulfing_bear": engulf_bear.astype(bool).tolist(),
+        "doji": doji.astype(bool).tolist(),
+        "thrust_bull": thrust_bull.astype(bool).tolist(),
+        "thrust_bear": thrust_bear.astype(bool).tolist(),
+    }
+
+
 def compute_bb_bandwidth_flags(
     df: pd.DataFrame,
     window: int,

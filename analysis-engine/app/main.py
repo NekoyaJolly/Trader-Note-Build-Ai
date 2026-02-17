@@ -10,6 +10,7 @@ from sqlalchemy import text
 from app.db import create_db_engine, load_db_config
 from app.indicators import (
     compute_bb_bandwidth_flags,
+    compute_candlestick_pattern_flags,
     compute_indicator_series,
     compute_pinbar_flags,
 )
@@ -94,8 +95,23 @@ def indicator_series(req: IndicatorSeriesRequest) -> IndicatorSeriesResponse:
         series[key] = values
 
     patterns: Dict[str, List[bool]] = {}
-    if "pinbar" in req.patterns:
-        patterns.update(compute_pinbar_flags(df))
+    if any(
+        p in req.patterns
+        for p in [
+            "pinbar",
+            "hammer",
+            "shooting_star",
+            "engulfing_bull",
+            "engulfing_bear",
+            "doji",
+            "thrust_bull",
+            "thrust_bear",
+        ]
+    ):
+        # 既存互換: pinbar は従来キー（pinbar_bull/bear）も返す
+        if "pinbar" in req.patterns:
+            patterns.update(compute_pinbar_flags(df))
+        patterns.update(compute_candlestick_pattern_flags(df))
     if "bb_bandwidth" in req.patterns:
         patterns.update(
             compute_bb_bandwidth_flags(
@@ -114,7 +130,7 @@ def indicator_series(req: IndicatorSeriesRequest) -> IndicatorSeriesResponse:
     )
 
 
-def _collect_indicator_specs_from_condition_group(group: object) -> list[dict]:
+def _collect_indicator_specs_from_condition_group(group: object) -> tuple[list[dict], list[str]]:
     """StrategyVersion.entryConditions（JSON）から必要指標を抽出。
 
     期待フォーマット:
@@ -122,6 +138,7 @@ def _collect_indicator_specs_from_condition_group(group: object) -> list[dict]:
     """
 
     specs_by_key: dict[str, dict] = {}
+    patterns: set[str] = set()
 
     import json
     from collections.abc import Mapping
@@ -131,17 +148,24 @@ def _collect_indicator_specs_from_condition_group(group: object) -> list[dict]:
         try:
             group = json.loads(group)
         except Exception:
-            return []
+            return [], []
 
     # それ以外（psycopg2 の JSON ラッパー等）も文字列化して救済する
     if not isinstance(group, Mapping):
         try:
             group = json.loads(str(group))
         except Exception:
-            return []
+            return [], []
 
     def visit(node: object) -> None:
         if not isinstance(node, Mapping):
+            return
+
+        # パターン条件
+        if node.get("type") == "pattern":
+            pid = node.get("patternId")
+            if isinstance(pid, str):
+                patterns.add(pid)
             return
 
         # グループ
@@ -178,7 +202,7 @@ def _collect_indicator_specs_from_condition_group(group: object) -> list[dict]:
                 specs_by_key[rkey] = {"indicatorId": rid, "params": rparams, "field": rfield}
 
     visit(group)
-    return list(specs_by_key.values())
+    return list(specs_by_key.values()), sorted(patterns)
 
 
 @app.post("/v1/indicator-series/by-version", response_model=IndicatorSeriesResponse)
@@ -211,7 +235,8 @@ def indicator_series_by_version(req: IndicatorSeriesByVersionRequest) -> Indicat
         )
 
     entry_conditions = row.get("entryConditions")
-    specs = _collect_indicator_specs_from_condition_group(entry_conditions)
+    specs, patterns_from_conditions = _collect_indicator_specs_from_condition_group(entry_conditions)
+    merged_patterns = list(dict.fromkeys([*req.patterns, *patterns_from_conditions]))
 
     # 2) 通常の計算処理へ合流
     series_req = IndicatorSeriesRequest(
@@ -220,7 +245,7 @@ def indicator_series_by_version(req: IndicatorSeriesByVersionRequest) -> Indicat
         startDate=req.startDate,
         endDate=req.endDate,
         indicators=specs,
-        patterns=req.patterns,
+        patterns=merged_patterns,
         bbBandwidthWindow=req.bbBandwidthWindow,
         bbBandwidthThreshold=req.bbBandwidthThreshold,
     )

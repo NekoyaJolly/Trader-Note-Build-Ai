@@ -69,7 +69,9 @@ export type ComparisonOperator =
   | 'cross_below' // 下抜け（クロスダウン）
   | 'GC'          // ゴールデンクロス（上抜けの別名）
   | 'DC'          // デッドクロス（下抜けの別名）
-  | 'Touch';      // タッチ（接触/近接）
+  | 'Touch'       // タッチ（接触/近接） - 旧形式（後方互換）
+  | 'touch_close' // 終値タッチ（終値ベースの近接/一致）
+  | 'touch_wick'; // ヒゲタッチ（当該バーの high-low の範囲到達）
 
 /**
  * 比較演算子の表示情報
@@ -84,8 +86,33 @@ export const COMPARISON_OPERATOR_INFO: Record<ComparisonOperator, { label: strin
   'cross_below': { label: '下抜け', description: '前回は上、今回は下（クロスダウン）' },
   GC: { label: 'ゴールデンクロス', description: '上抜け（別名）' },
   DC: { label: 'デッドクロス', description: '下抜け（別名）' },
-  Touch: { label: 'タッチ（接触）', description: '近接/接触/反転を含む' },
+  Touch: { label: 'タッチ（旧）', description: '旧形式: 近接/接触/反転を含む（後方互換）' },
+  touch_close: { label: '終値でタッチ', description: '終値ベースの一致/近接（基本はclose）' },
+  touch_wick: { label: 'ヒゲでタッチ', description: '当該バーの high-low に到達（価格が線に触れるイメージ）' },
 };
+
+// ============================================
+// ローソク足パターン条件（バックテスト強化）
+// ============================================
+
+export type CandlePatternId =
+  | 'pinbar'
+  | 'hammer'
+  | 'shooting_star'
+  | 'engulfing_bull'
+  | 'engulfing_bear'
+  | 'doji'
+  | 'thrust_bull'
+  | 'thrust_bear';
+
+export type PatternOperator = 'is_true' | 'is_false';
+
+export interface PatternCondition {
+  conditionId: string;
+  type: 'pattern';
+  patternId: CandlePatternId;
+  operator: PatternOperator;
+}
 
 /**
  * 論理演算子の表示情報
@@ -235,23 +262,37 @@ export interface ConditionGroup {
   /** 論理演算子 */
   operator: LogicalOperator;
   /** 子要素（条件 or サブグループ） */
-  conditions: (IndicatorCondition | ConditionGroup)[];
+  conditions: (IndicatorCondition | PatternCondition | ConditionGroup)[];
+
+  /** SEQUENCE専用: 各ステップ間の最大バー数（未指定なら evaluator 側のデフォルト） */
+  maxBarsBetweenSteps?: number;
+
+  /** IF-THEN専用（将来拡張） */
+  ifCondition?: ConditionGroup | IndicatorCondition | PatternCondition;
+  thenCondition?: ConditionGroup | IndicatorCondition | PatternCondition;
+  maxBarsToWait?: number;
 }
 
 /**
  * 条件がIndicatorConditionかどうかを判定する型ガード
  */
 export function isIndicatorCondition(
-  condition: IndicatorCondition | ConditionGroup
+  condition: IndicatorCondition | PatternCondition | ConditionGroup
 ): condition is IndicatorCondition {
   return 'indicatorId' in condition;
+}
+
+export function isPatternCondition(
+  condition: IndicatorCondition | PatternCondition | ConditionGroup
+): condition is PatternCondition {
+  return 'type' in condition && (condition as { type?: string }).type === 'pattern';
 }
 
 /**
  * 条件がConditionGroupかどうかを判定する型ガード
  */
 export function isConditionGroup(
-  condition: IndicatorCondition | ConditionGroup
+  condition: IndicatorCondition | PatternCondition | ConditionGroup
 ): condition is ConditionGroup {
   return 'conditions' in condition;
 }
