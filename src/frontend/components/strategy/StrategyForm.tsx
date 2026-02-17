@@ -11,6 +11,7 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import ConditionBuilder from "./ConditionBuilder";
+import { EntryPreviewMiniChart } from "./EntryPreviewMiniChart";
 import type {
   Strategy,
   CreateStrategyRequest,
@@ -370,6 +371,10 @@ export default function StrategyForm({
           onChange={setEntryConditions}
           indicatorMetadata={indicatorMetadata}
         />
+
+        <div className="mt-4">
+          <EntryPreviewMiniChart entryConditions={entryConditions} />
+        </div>
       </div>
 
       {/* イグジット設定 */}
