@@ -110,12 +110,12 @@ const _PRICE_TYPE_INFO: Record<'open' | 'high' | 'low' | 'close', string> = {
 };
 
 const _CANDLE_PATTERN_INFO: Record<CandlePatternId, string> = {
-  pinbar: 'ピンバー（上下どちらでも）',
-  pinbar_bull: 'ピンバー（下ヒゲ）',
-  pinbar_bear: 'ピンバー（上ヒゲ）',
-  hammer: 'カラカサ/トンカチ（ハンマー系）',
-  hammer_bull: 'トンカチ寄り（陽線ハンマー）',
-  hammer_bear: 'カラカサ寄り（陰線ハンマー）',
+  pinbar: 'スパイク（上下どちらでも）',
+  pinbar_bear: 'スパイクハイ（上ヒゲ）',
+  pinbar_bull: 'スパイクロー（下ヒゲ）',
+  hammer: 'ハンマー（下ヒゲ）',
+  hammer_bull: 'ハンマー（陽線）',
+  hammer_bear: 'ハンマー（陰線）',
   shooting_star: 'シューティングスター（上ヒゲ）',
   engulfing_bull: '包み足（強気）',
   engulfing_bear: '包み足（弱気）',
@@ -487,8 +487,14 @@ function SinglePatternCondition({
     // 注意: トレンド文脈（上昇/下降）までは現状見ない
     const id = condition.patternId;
 
-    if (id === 'pinbar' || id === 'pinbar_bull' || id === 'pinbar_bear') {
+    if (id === 'pinbar') {
       return '基準: 長いヒゲ ≥ 3×実体 かつ 反対ヒゲ ≤ 0.5×実体（実体0は除外）';
+    }
+    if (id === 'pinbar_bear') {
+      return '基準: 上ヒゲ ≥ 3×実体 かつ 下ヒゲ ≤ 0.5×実体（実体0は除外）';
+    }
+    if (id === 'pinbar_bull') {
+      return '基準: 下ヒゲ ≥ 3×実体 かつ 上ヒゲ ≤ 0.5×実体（実体0は除外）';
     }
     if (id === 'hammer' || id === 'hammer_bull' || id === 'hammer_bear') {
       return '基準: 下ヒゲ ≥ 2×実体 かつ 上ヒゲ ≤ 0.5×実体（文脈トレンドは未考慮）';
@@ -508,22 +514,103 @@ function SinglePatternCondition({
     return null;
   }, [condition.patternId]);
 
+  type PatternGroup = 'pinbar' | 'hammer' | 'other';
+
+  const groupOf = (id: CandlePatternId): PatternGroup => {
+    if (id === 'pinbar' || id === 'pinbar_bull' || id === 'pinbar_bear') return 'pinbar';
+    if (id === 'hammer' || id === 'hammer_bull' || id === 'hammer_bear') return 'hammer';
+    return 'other';
+  };
+
+  const currentGroup = groupOf(condition.patternId);
+
+  const setGroup = (group: PatternGroup) => {
+    // 意味ベースの選択に合わせて、内部のpatternIdをデフォルトに寄せる
+    if (group === 'pinbar') {
+      // まずは「上下どちらでも」で開始（詳細でスパイクハイ/ローを選べる）
+      onChange({ ...condition, patternId: 'pinbar' });
+      return;
+    }
+    if (group === 'hammer') {
+      onChange({ ...condition, patternId: 'hammer' });
+      return;
+    }
+    // other は現状維持（無理に変えない）
+  };
+
+  const pinbarDetailOptions: Array<{ id: CandlePatternId; label: string }> = [
+    { id: 'pinbar', label: '上下どちらでも' },
+    { id: 'pinbar_bear', label: 'スパイクハイ（上ヒゲ）' },
+    { id: 'pinbar_bull', label: 'スパイクロー（下ヒゲ）' },
+  ];
+
+  const hammerDetailOptions: Array<{ id: CandlePatternId; label: string }> = [
+    { id: 'hammer', label: 'どちらでも' },
+    { id: 'hammer_bull', label: '陽線' },
+    { id: 'hammer_bear', label: '陰線' },
+  ];
+
   return (
     <div className={`flex flex-wrap items-center gap-${compact ? '1' : '2'} ${compact ? 'p-2' : 'p-3'} bg-slate-800 rounded-lg border border-slate-700`}>
       <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-400`}>パターン</span>
 
       <select
         className={`${baseSelectClass} ${compact ? 'min-w-[120px]' : 'min-w-[220px]'}`}
-        value={condition.patternId}
-        onChange={(e) => onChange({ ...condition, patternId: e.target.value as CandlePatternId })}
+        value={currentGroup}
+        onChange={(e) => setGroup(e.target.value as PatternGroup)}
         disabled={readOnly}
       >
-        {Object.entries(_CANDLE_PATTERN_INFO).map(([id, label]) => (
-          <option key={id} value={id}>
-            {label}
-          </option>
-        ))}
+        <option value="pinbar">ピンバー</option>
+        <option value="hammer">ハンマー</option>
+        <option value="other">その他（詳細）</option>
       </select>
+
+      {currentGroup === 'pinbar' && (
+        <select
+          className={baseSelectClass}
+          value={condition.patternId}
+          onChange={(e) => onChange({ ...condition, patternId: e.target.value as CandlePatternId })}
+          disabled={readOnly}
+        >
+          {pinbarDetailOptions.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      )}
+
+      {currentGroup === 'hammer' && (
+        <select
+          className={baseSelectClass}
+          value={condition.patternId}
+          onChange={(e) => onChange({ ...condition, patternId: e.target.value as CandlePatternId })}
+          disabled={readOnly}
+        >
+          {hammerDetailOptions.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      )}
+
+      {currentGroup === 'other' && (
+        <select
+          className={baseSelectClass}
+          value={condition.patternId}
+          onChange={(e) => onChange({ ...condition, patternId: e.target.value as CandlePatternId })}
+          disabled={readOnly}
+        >
+          {Object.entries(_CANDLE_PATTERN_INFO)
+            .filter(([id]) => groupOf(id as CandlePatternId) === 'other')
+            .map(([id, label]) => (
+              <option key={id} value={id}>
+                {label}
+              </option>
+            ))}
+        </select>
+      )}
 
       <select
         className={baseSelectClass}

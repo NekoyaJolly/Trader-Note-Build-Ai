@@ -85,12 +85,12 @@ function ConditionDisplay({ condition }: { condition: IndicatorCondition }) {
 
 function PatternConditionDisplay({ condition }: { condition: PatternCondition }) {
   const patternLabels: Record<CandlePatternId, string> = {
-    pinbar: 'ピンバー（上下どちらでも）',
-    pinbar_bull: 'ピンバー（下ヒゲ）',
-    pinbar_bear: 'ピンバー（上ヒゲ）',
-    hammer: 'カラカサ/トンカチ',
-    hammer_bull: 'トンカチ寄り（陽線ハンマー）',
-    hammer_bear: 'カラカサ寄り（陰線ハンマー）',
+    pinbar: 'スパイク（上下どちらでも）',
+    pinbar_bear: 'スパイクハイ（上ヒゲ）',
+    pinbar_bull: 'スパイクロー（下ヒゲ）',
+    hammer: 'ハンマー（下ヒゲ）',
+    hammer_bull: 'ハンマー（陽線）',
+    hammer_bear: 'ハンマー（陰線）',
     shooting_star: 'シューティングスター',
     engulfing_bull: '包み足（強気）',
     engulfing_bear: '包み足（弱気）',
