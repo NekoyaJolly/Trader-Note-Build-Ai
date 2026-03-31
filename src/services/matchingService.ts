@@ -22,6 +22,9 @@ import {
 } from './legacyNoteEvaluatorAdapter';
 import { NoteEvaluator, EvaluationResult } from '../domain/noteEvaluator';
 import { TradeNote as PrismaTradeNote, MatchResult, MarketSnapshot } from '@prisma/client';
+import { SideBMatchingAdapter } from './sideBMatchingAdapter';
+import { SideBNoteMatchingData } from '../domain/matching/sideBNoteEvaluator';
+import { NotificationTriggerService } from './notification/notificationTriggerService';
 
 /**
  * マッチングサービス
@@ -43,6 +46,8 @@ export class MatchingService {
   private marketSnapshotRepository: MarketSnapshotRepository;
   private evaluationLogRepository: EvaluationLogRepository;
   private simultaneousHitControl: SimultaneousHitControlService;
+  private sideBAdapter: SideBMatchingAdapter;
+  private notificationTriggerService: NotificationTriggerService;
 
   constructor() {
     this.marketDataService = new MarketDataService();
@@ -51,6 +56,8 @@ export class MatchingService {
     this.marketSnapshotRepository = new MarketSnapshotRepository();
     this.evaluationLogRepository = new EvaluationLogRepository();
     this.simultaneousHitControl = new SimultaneousHitControlService();
+    this.sideBAdapter = new SideBMatchingAdapter();
+    this.notificationTriggerService = new NotificationTriggerService();
   }
 
   /**
@@ -538,5 +545,282 @@ export class MatchingService {
     );
 
     return result.warnings;
+  }
+
+  // ============================================================================
+  // Side-B マッチング統合
+  // ============================================================================
+
+  /**
+   * Side-B 勝ちパターンノートのマッチングチェック
+   *
+   * AITradeNote (outcome='win') を SideBNoteEvaluator で現在の市場と照合し、
+   * 類似度が閾値を超えた場合に MatchResultDTO を返す。
+   *
+   * Side-A の checkForMatches() と同じ MatchResultDTO 形式で返すため、
+   * 通知パイプラインに統一的に流せる。
+   */
+  async checkForSideBMatches(): Promise<MatchResultDTO[]> {
+    const matches: MatchResultDTO[] = [];
+
+    try {
+      // 1. 勝ちパターンの Evaluator をロード
+      const evaluatorsBySymbol = await this.sideBAdapter.loadWinningNoteEvaluators(['win']);
+
+      if (evaluatorsBySymbol.size === 0) {
+        console.log('[MatchingService] Side-B 勝ちパターンがありません。スキップ。');
+        return matches;
+      }
+
+      // 2. シンボルごとに市場データを取得して評価
+      for (const [symbol, evaluatorEntries] of evaluatorsBySymbol.entries()) {
+        try {
+          const currentMarket = await this.marketDataService.getCurrentMarketDataWithIndicators(symbol);
+          const snapshot = convertMarketDataToSnapshot(currentMarket);
+
+          // MarketSnapshot を DB に保存
+          let marketSnapshotId: string | undefined;
+          try {
+            const savedSnapshot = await this.marketSnapshotRepository.upsertSnapshot({
+              symbol: currentMarket.symbol,
+              timeframe: currentMarket.timeframe,
+              close: currentMarket.close,
+              volume: currentMarket.volume,
+              indicators: currentMarket.indicators || {},
+              fetchedAt: currentMarket.timestamp,
+            });
+            marketSnapshotId = savedSnapshot.id;
+          } catch (snapshotError) {
+            console.warn('[MatchingService] Side-B MarketSnapshot 保存スキップ:', snapshotError);
+          }
+
+          // 3. 各 Evaluator で評価
+          for (const { evaluator, data } of evaluatorEntries) {
+            const evalResult = evaluator.evaluate(snapshot);
+
+            // EvaluationLog を記録
+            if (marketSnapshotId) {
+              try {
+                await this.evaluationLogRepository.upsertLog({
+                  noteId: `sideb:${evaluator.noteId}`,
+                  marketSnapshotId,
+                  symbol,
+                  timeframe: currentMarket.timeframe,
+                  evaluationResult: evalResult,
+                });
+              } catch (logError) {
+                console.warn('[MatchingService] Side-B EvaluationLog 記録スキップ:', logError);
+              }
+            }
+
+            // Side-B 用の補正: 方向一致ボーナス
+            const directionBonus = this.checkDirectionAlignment(data, currentMarket) ? 0.1 : 0;
+            const adjustedScore = Math.min(evalResult.similarity + directionBonus, 1.0);
+
+            const isMatch = evaluator.isTriggered(adjustedScore);
+
+            if (isMatch) {
+              const matchId = uuidv4();
+              const evaluatedAt = new Date();
+              const threshold = evaluator.getThresholds().weak;
+
+              // MatchResult を DB に永続化
+              if (marketSnapshotId) {
+                try {
+                  await this.matchResultRepository.upsertByNoteAndSnapshot({
+                    noteId: `sideb:${evaluator.noteId}`,
+                    marketSnapshotId,
+                    symbol,
+                    score: adjustedScore,
+                    threshold,
+                    trendMatched: true,  // Side-B は条件ベクトルに含む
+                    priceRangeMatched: false,
+                    reasons: this.generateSideBMatchReasons(evalResult, data, adjustedScore),
+                    evaluatedAt,
+                  });
+                } catch (persistError) {
+                  console.warn('[MatchingService] Side-B MatchResult 永続化スキップ:', persistError);
+                }
+              }
+
+              matches.push({
+                id: matchId,
+                matchScore: adjustedScore,
+                historicalNoteId: `sideb:${evaluator.noteId}`,
+                marketSnapshot: currentMarket,
+                marketSnapshotId,
+                symbol,
+                threshold,
+                trendMatched: true,
+                priceRangeMatched: false,
+                reasons: this.generateSideBMatchReasons(evalResult, data, adjustedScore),
+                warnings: [],
+                evaluatedAt,
+              });
+            }
+          }
+        } catch (error) {
+          console.error(`[MatchingService] Side-B ${symbol} マッチチェックエラー:`, error);
+        }
+      }
+    } catch (error) {
+      console.error('[MatchingService] Side-B マッチング全体エラー:', error);
+    }
+
+    return matches;
+  }
+
+  /**
+   * Side-A + Side-B 統合マッチングチェック
+   *
+   * 両方のノートソースからマッチを収集し、統一された MatchResultDTO[] を返す。
+   * 通知パイプラインは checkForMatchesWithControl() から統一的に呼ばれる。
+   */
+  async checkForAllMatches(): Promise<MatchResultDTO[]> {
+    // Side-A と Side-B を並行実行
+    const [sideAMatches, sideBMatches] = await Promise.all([
+      this.checkForMatches(),
+      this.checkForSideBMatches(),
+    ]);
+
+    console.log(
+      `[MatchingService] 統合マッチ結果: Side-A=${sideAMatches.length}, Side-B=${sideBMatches.length}`
+    );
+
+    return [...sideAMatches, ...sideBMatches];
+  }
+
+  /**
+   * 統合マッチング + 同時ヒット制御 + 通知パイプライン
+   *
+   * Side-A & Side-B の全マッチを収集 → 同時ヒット制御 → 通知判定 → 送信
+   */
+  async runMatchingPipeline(): Promise<{
+    totalMatches: number;
+    notified: number;
+    skipped: number;
+    errors: string[];
+  }> {
+    const errors: string[] = [];
+    let notifiedCount = 0;
+    let skippedCount = 0;
+
+    try {
+      // 1. 統合マッチング（Side-A + Side-B）
+      const allMatches = await this.checkForAllMatches();
+
+      if (allMatches.length === 0) {
+        console.log('[MatchingPipeline] マッチなし。パイプライン終了。');
+        return { totalMatches: 0, notified: 0, skipped: 0, errors: [] };
+      }
+
+      // 2. 同時ヒット制御
+      const hits: MatchHit[] = await Promise.all(
+        allMatches.map(async (match) => {
+          const priority = match.historicalNoteId.startsWith('sideb:')
+            ? 5  // Side-B はデフォルト優先度
+            : await this.getNotePriority(match.historicalNoteId);
+          return {
+            noteId: match.historicalNoteId,
+            symbol: match.symbol || '',
+            similarity: match.matchScore,
+            marketSnapshotId: match.marketSnapshotId || '',
+            priority,
+            matchedAt: match.evaluatedAt,
+          };
+        })
+      );
+
+      const controlResult = await this.simultaneousHitControl.control(hits);
+      const toNotifyNoteIds = new Set(controlResult.toNotify.map(h => h.noteId));
+
+      // 3. 通知判定 & 送信
+      for (const match of allMatches) {
+        if (!toNotifyNoteIds.has(match.historicalNoteId)) {
+          skippedCount++;
+          continue;
+        }
+
+        try {
+          const triggerResult = await this.notificationTriggerService.evaluateWithPersistence({
+            matchScore: match.matchScore,
+            historicalNoteId: match.historicalNoteId,
+            marketSnapshot: match.marketSnapshot,
+            marketSnapshotId: match.marketSnapshotId,
+            symbol: match.symbol,
+            channel: 'in_app',
+          });
+
+          if (triggerResult.shouldNotify) {
+            notifiedCount++;
+            console.log(
+              `[MatchingPipeline] 通知送信: noteId=${match.historicalNoteId}, ` +
+              `symbol=${match.symbol}, score=${match.matchScore.toFixed(3)}`
+            );
+          } else {
+            skippedCount++;
+            console.log(
+              `[MatchingPipeline] 通知スキップ: noteId=${match.historicalNoteId}, ` +
+              `reason=${triggerResult.skipReason}`
+            );
+          }
+        } catch (notifyError) {
+          const errMsg = `通知エラー: noteId=${match.historicalNoteId}, ${notifyError}`;
+          errors.push(errMsg);
+          console.error(`[MatchingPipeline] ${errMsg}`);
+        }
+      }
+
+      // 4. スキップログ
+      if (controlResult.toSkip.length > 0) {
+        await this.simultaneousHitControl.logSkippedHits(
+          controlResult.toSkip,
+          allMatches.length,
+          'max_simultaneous'
+        );
+      }
+
+      return {
+        totalMatches: allMatches.length,
+        notified: notifiedCount,
+        skipped: skippedCount,
+        errors,
+      };
+    } catch (error) {
+      const errMsg = `パイプライン全体エラー: ${error}`;
+      errors.push(errMsg);
+      console.error(`[MatchingPipeline] ${errMsg}`);
+      return { totalMatches: 0, notified: 0, skipped: 0, errors };
+    }
+  }
+
+  /**
+   * Side-B ノートの方向とマーケットトレンドの一致をチェック
+   */
+  private checkDirectionAlignment(data: SideBNoteMatchingData, market: MarketData): boolean {
+    const trend = market.indicators?.trend as string | undefined;
+    if (!trend) return false;
+
+    if (data.direction === 'long' && (trend === 'up' || trend === 'bullish')) return true;
+    if (data.direction === 'short' && (trend === 'down' || trend === 'bearish')) return true;
+    return false;
+  }
+
+  /**
+   * Side-B マッチの理由テキストを生成
+   */
+  private generateSideBMatchReasons(
+    evalResult: EvaluationResult,
+    data: SideBNoteMatchingData,
+    adjustedScore: number
+  ): string[] {
+    const reasons: string[] = [];
+    reasons.push(`[Side-B] 勝ちパターン一致: ${(adjustedScore * 100).toFixed(1)}%`);
+    reasons.push(`パターン: ${data.direction} / ${data.marketAnalysis.regime} / ${data.marketAnalysis.volatility}vol`);
+    reasons.push(`過去実績: +${data.pnlPips}pips (RR ${data.rrActual})`);
+    if (evalResult.level === 'strong') {
+      reasons.push('★ 非常に高い類似度');
+    }
+    return reasons;
   }
 }
