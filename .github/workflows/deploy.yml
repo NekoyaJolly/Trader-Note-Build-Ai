@@ -238,3 +238,70 @@ jobs:
           echo "❌ 本番 E2E テスト失敗"
           echo "ロールバックの必要性を評価してください"
           echo "詳細は GitHub Actions ログを確認"
+
+  # ── 5. Cloud Scheduler セットアップ（マッチングパイプライン 15分cron） ──
+  setup-scheduler:
+    name: Setup Cloud Scheduler (Matching Pipeline)
+    runs-on: ubuntu-latest
+    needs: [e2e-production]
+    steps:
+      - name: GCP 認証
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: gcloud CLI セットアップ
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: CRON_SECRET を取得
+        id: cron-secret
+        run: |
+          SECRET=$(gcloud secrets versions access latest --secret=CRON_SECRET --project=${{ env.GCP_PROJECT_ID }} 2>/dev/null || echo "")
+          if [ -z "$SECRET" ]; then
+            echo "⚠️ CRON_SECRET が取得できません。Scheduler セットアップをスキップします。"
+            echo "has_secret=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_secret=true" >> $GITHUB_OUTPUT
+            echo "::add-mask::$SECRET"
+            echo "value=$SECRET" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Cloud Scheduler ジョブを作成/更新（マッチングパイプライン 15分）
+        if: steps.cron-secret.outputs.has_secret == 'true'
+        run: |
+          JOB_NAME="matching-pipeline-15min"
+          SCHEDULE="*/15 * * * *"
+          URI="${{ env.PRODUCTION_API_URL }}/api/cron/matching-pipeline"
+          SECRET="${{ steps.cron-secret.outputs.value }}"
+
+          # 既存ジョブがあるか確認
+          if gcloud scheduler jobs describe "$JOB_NAME" \
+            --location=${{ env.GCP_REGION }} \
+            --project=${{ env.GCP_PROJECT_ID }} > /dev/null 2>&1; then
+            echo "📝 既存ジョブを更新: $JOB_NAME"
+            gcloud scheduler jobs update http "$JOB_NAME" \
+              --location=${{ env.GCP_REGION }} \
+              --project=${{ env.GCP_PROJECT_ID }} \
+              --schedule="$SCHEDULE" \
+              --uri="$URI" \
+              --http-method=GET \
+              --headers="Authorization=Bearer $SECRET" \
+              --time-zone="Asia/Tokyo" \
+              --description="マッチングパイプライン Side-A+B 統合（15分間隔）" \
+              --attempt-deadline=300s
+          else
+            echo "🆕 新規ジョブを作成: $JOB_NAME"
+            gcloud scheduler jobs create http "$JOB_NAME" \
+              --location=${{ env.GCP_REGION }} \
+              --project=${{ env.GCP_PROJECT_ID }} \
+              --schedule="$SCHEDULE" \
+              --uri="$URI" \
+              --http-method=GET \
+              --headers="Authorization=Bearer $SECRET" \
+              --time-zone="Asia/Tokyo" \
+              --description="マッチングパイプライン Side-A+B 統合（15分間隔）" \
+              --attempt-deadline=300s
+          fi
+          echo "✅ Cloud Scheduler セットアップ完了: $JOB_NAME ($SCHEDULE)"
