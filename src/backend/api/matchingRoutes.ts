@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { MatchingController } from '../controllers/matchingController';
-import { validateQuery } from '../middleware/validateRequest';
-import { GetMatchHistoryQuerySchema } from '../schemas/api/matching';
+import { validateQuery } from '../../middleware/validateRequest';
+import { GetMatchHistoryQuerySchema } from '../../schemas/api/matching';
 
 const router = Router();
 const matchingController = new MatchingController();

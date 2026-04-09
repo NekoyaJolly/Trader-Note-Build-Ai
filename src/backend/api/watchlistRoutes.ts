@@ -10,8 +10,8 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { requireAuth } from '../middleware/authMiddleware';
-import { getPrismaClient } from '../infrastructure/prismaClient';
+import { requireAuth } from '../../middleware/authMiddleware';
+import { getPrismaClient } from '../../infrastructure/prismaClient';
 
 const router = Router();
 const prisma = getPrismaClient();

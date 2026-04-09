@@ -15,10 +15,10 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { cronAuth } from '../middleware/cronAuth';
-import { getSideBScheduler } from '../side-b/jobs/sideBScheduler';
-import { isFXMarketOpen, getMarketStatusJST } from '../side-b/utils/marketHours';
-import { MatchingService } from '../services/matchingService';
+import { cronAuth } from '../../middleware/cronAuth';
+import { getSideBScheduler } from '../../side-b/jobs/sideBScheduler';
+import { isFXMarketOpen, getMarketStatusJST } from '../../side-b/utils/marketHours';
+import { MatchingService } from '../../services/matchingService';
 
 const router = Router();
 

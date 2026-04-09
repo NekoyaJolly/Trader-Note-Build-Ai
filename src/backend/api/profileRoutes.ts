@@ -17,14 +17,14 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { getIndicatorProfileService } from '../services/indicatorProfileService';
-import { isReservedProfileId } from '../models/indicatorProfile';
-import { validateBody, validateParams } from '../middleware/validateRequest';
+import { getIndicatorProfileService } from '../../services/indicatorProfileService';
+import { isReservedProfileId } from '../../models/indicatorProfile';
+import { validateBody, validateParams } from '../../middleware/validateRequest';
 import {
   CreateProfileRequestSchema,
   UpdateProfileRequestSchema,
-} from '../schemas/api/profile';
-import { UUIDSchema } from '../schemas/common';
+} from '../../schemas/api/profile';
+import { UUIDSchema } from '../../schemas/common';
 import { z } from 'zod';
 
 const router = Router();

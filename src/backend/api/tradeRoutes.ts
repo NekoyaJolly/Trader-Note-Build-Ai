@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { TradeController } from '../controllers/tradeController';
-import { validateBody, validateQuery, validateParams } from '../middleware/validateRequest';
+import { validateBody, validateQuery, validateParams } from '../../middleware/validateRequest';
 import {
   UploadCSVTextRequestSchema,
   NoteIdParamSchema,
@@ -12,7 +12,7 @@ import {
   PerformanceRankingQuerySchema,
   BulkPerformanceRequestSchema,
   PerformanceReportQuerySchema,
-} from '../schemas/api/trade';
+} from '../../schemas/api/trade';
 
 const router = Router();
 const tradeController = new TradeController();

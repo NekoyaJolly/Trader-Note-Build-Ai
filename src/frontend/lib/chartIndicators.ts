@@ -1122,6 +1122,8 @@ export function rsiToChartConfig(
     color: displaySettings?.color || INDICATOR_COLORS.rsi,
     lineWidth: displaySettings?.lineWidth || 2,
     pane: 'sub',
+    paneGroup: 'rsi',
+    scaleRange: { min: 0, max: 100 },
   };
 }
 
@@ -1143,6 +1145,7 @@ export function macdToChartConfigs(
       data: macdResult.macd,
       color: INDICATOR_COLORS.macd,
       pane: 'sub',
+      paneGroup: 'macd',
     },
     {
       id: 'macd-signal',
@@ -1150,6 +1153,18 @@ export function macdToChartConfigs(
       data: macdResult.signal,
       color: INDICATOR_COLORS.macdSignal,
       pane: 'sub',
+      paneGroup: 'macd',
+    },
+    {
+      id: 'macd-histogram',
+      name: 'Histogram',
+      data: macdResult.histogram,
+      color: INDICATOR_COLORS.macdHistogram,
+      pane: 'sub',
+      paneGroup: 'macd',
+      seriesType: 'histogram',
+      histogramPositiveColor: 'rgba(34, 197, 94, 0.8)',
+      histogramNegativeColor: 'rgba(239, 68, 68, 0.8)',
     },
   ];
 }
@@ -1172,6 +1187,8 @@ export function bbToChartConfigs(
       color: INDICATOR_COLORS.bbUpper,
       lineWidth: 1,
       pane: 'main',
+      fillToId: 'bb-lower',
+      fillColor: 'rgba(99, 102, 241, 0.1)',
     },
     {
       id: 'bb-middle',
@@ -1190,6 +1207,27 @@ export function bbToChartConfigs(
       pane: 'main',
     },
   ];
+}
+
+function createReferenceLine(
+  id: string,
+  name: string,
+  ohlcvData: OHLCVDataPoint[],
+  value: number,
+  paneGroup: string,
+  color = 'rgba(148, 163, 184, 0.7)'
+): IndicatorLineConfig {
+  return {
+    id,
+    name,
+    data: ohlcvData.map((d) => ({ timestamp: d.timestamp, value })),
+    color,
+    lineWidth: 1,
+    lineStyle: 'dashed',
+    pane: 'sub',
+    paneGroup,
+    isReferenceLine: true,
+  };
 }
 
 /**
@@ -1282,6 +1320,11 @@ export function indicatorToChartConfigs(
         break;
       case 'rsi':
         configs.push(rsiToChartConfig(data, params.period || 14, undefined, finalDisplay));
+        configs.push(
+          createReferenceLine('rsi-ref-70', 'RSI 70', data, 70, 'rsi'),
+          createReferenceLine('rsi-ref-50', 'RSI 50', data, 50, 'rsi'),
+          createReferenceLine('rsi-ref-30', 'RSI 30', data, 30, 'rsi')
+        );
         break;
       case 'macd':
         configs.push(...macdToChartConfigs(
@@ -1300,6 +1343,8 @@ export function indicatorToChartConfigs(
             data: stoch.k,
             color: INDICATOR_COLORS.stochastic,
             pane: 'sub',
+            paneGroup: 'stochastic',
+            scaleRange: { min: 0, max: 100 },
           },
           {
             id: 'stoch-d',
@@ -1307,7 +1352,14 @@ export function indicatorToChartConfigs(
             data: stoch.d,
             color: INDICATOR_COLORS.macdSignal,
             pane: 'sub',
+            paneGroup: 'stochastic',
+            scaleRange: { min: 0, max: 100 },
           }
+        );
+        configs.push(
+          createReferenceLine('stoch-ref-80', 'Stoch 80', data, 80, 'stochastic'),
+          createReferenceLine('stoch-ref-50', 'Stoch 50', data, 50, 'stochastic'),
+          createReferenceLine('stoch-ref-20', 'Stoch 20', data, 20, 'stochastic')
         );
         break;
       }
@@ -1318,7 +1370,14 @@ export function indicatorToChartConfigs(
           data: calculateWilliamsR(data, params.period || 14),
           color: INDICATOR_COLORS.williamsR,
           pane: 'sub',
+          paneGroup: 'williams',
+          scaleRange: { min: -100, max: 0 },
         });
+        configs.push(
+          createReferenceLine('williams-ref-20', 'Williams -20', data, -20, 'williams'),
+          createReferenceLine('williams-ref-50', 'Williams -50', data, -50, 'williams'),
+          createReferenceLine('williams-ref-80', 'Williams -80', data, -80, 'williams')
+        );
         break;
       case 'cci':
         configs.push({
@@ -1429,6 +1488,32 @@ export function indicatorToChartConfigs(
             data: ichimoku.kijun,
             color: INDICATOR_COLORS.macdSignal,
             pane: 'main',
+          },
+          {
+            id: 'ichimoku-senkou-a',
+            name: 'Senkou A',
+            data: ichimoku.senkouA,
+            color: '#22c55e',
+            pane: 'main',
+            shiftBars: 26,
+            fillToId: 'ichimoku-senkou-b',
+            fillColor: 'rgba(139, 92, 246, 0.12)',
+          },
+          {
+            id: 'ichimoku-senkou-b',
+            name: 'Senkou B',
+            data: ichimoku.senkouB,
+            color: '#ef4444',
+            pane: 'main',
+            shiftBars: 26,
+          },
+          {
+            id: 'ichimoku-chikou',
+            name: 'Chikou',
+            data: ichimoku.chikou,
+            color: '#60a5fa',
+            pane: 'main',
+            shiftBars: -26,
           }
         );
         break;
@@ -1494,7 +1579,14 @@ export function indicatorToChartConfigs(
           data: calculateMFI(data, params.period || 14),
           color: INDICATOR_COLORS.mfi,
           pane: 'sub',
+          paneGroup: 'mfi',
+          scaleRange: { min: 0, max: 100 },
         });
+        configs.push(
+          createReferenceLine('mfi-ref-80', 'MFI 80', data, 80, 'mfi'),
+          createReferenceLine('mfi-ref-50', 'MFI 50', data, 50, 'mfi'),
+          createReferenceLine('mfi-ref-20', 'MFI 20', data, 20, 'mfi')
+        );
         break;
       case 'cmf':
         configs.push({

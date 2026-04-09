@@ -75,10 +75,32 @@ const CTraderReconcileResponseSchema = z.object({
 type CTraderPosition = z.infer<typeof CTraderPositionSchema>;
 type CTraderReconcileResponse = z.infer<typeof CTraderReconcileResponseSchema>;
 
+interface SubscribeToUpdatesOptions {
+  intervalMs?: number;
+}
+
+interface CreateOrderInput {
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  volume: number;
+  takeProfit?: number;
+  stopLoss?: number;
+  comment?: string;
+}
+
+interface UpdateOrderInput {
+  takeProfit?: number;
+  stopLoss?: number;
+  volume?: number;
+  comment?: string;
+}
+
 export class CTraderAccountService extends EventEmitter {
   private provider: CTraderProvider;
   private accountId: string;
   private positions: Map<string, PositionResponse> = new Map();
+  private pollingTimer: NodeJS.Timeout | null = null;
+  private isPolling = false;
 
   constructor(provider: CTraderProvider, accountId: string) {
     super();
@@ -160,17 +182,95 @@ export class CTraderAccountService extends EventEmitter {
    * 現時点ではポーリングによる定期更新を推奨。
    */
   subscribeToUpdates(): void {
-    // プレースホルダー実装
-    // 今後、CTraderProviderをEventEmitterに拡張するか、
-    // ポーリングによる定期更新で対応
-    console.log('[CTraderAccountService] ポジション更新購読を開始（プレースホルダー）');
+    this.startPollingUpdates({ intervalMs: 5000 });
   }
 
   /**
    * 購読解除
    */
   unsubscribeFromUpdates(): void {
+    if (this.pollingTimer) {
+      clearInterval(this.pollingTimer);
+      this.pollingTimer = null;
+    }
+    this.isPolling = false;
     console.log('[CTraderAccountService] ポジション更新購読を解除');
+  }
+
+  /**
+   * 新規注文を作成
+   */
+  async createOrder(input: CreateOrderInput): Promise<void> {
+    const payload: Record<string, unknown> = {
+      ctidTraderAccountId: parseInt(this.accountId, 10),
+      symbolId: this.resolveSymbolId(input.symbol),
+      orderType: 1, // 1: MARKET
+      tradeSide: input.side === 'BUY' ? 1 : 2,
+      volume: this.normalizeVolume(input.volume),
+    };
+
+    if (input.takeProfit !== undefined) {
+      payload.takeProfit = input.takeProfit;
+    }
+    if (input.stopLoss !== undefined) {
+      payload.stopLoss = input.stopLoss;
+    }
+    if (input.comment) {
+      payload.comment = input.comment;
+    }
+
+    await this.provider.sendCommand('ProtoOANewOrderReq', payload);
+  }
+
+  /**
+   * 既存注文を更新
+   */
+  async updateOrder(orderId: string, input: UpdateOrderInput): Promise<void> {
+    const payload: Record<string, unknown> = {
+      ctidTraderAccountId: parseInt(this.accountId, 10),
+      orderId: parseInt(orderId, 10),
+    };
+
+    if (input.takeProfit !== undefined) {
+      payload.takeProfit = input.takeProfit;
+    }
+    if (input.stopLoss !== undefined) {
+      payload.stopLoss = input.stopLoss;
+    }
+    if (input.volume !== undefined) {
+      payload.volume = this.normalizeVolume(input.volume);
+    }
+    if (input.comment !== undefined) {
+      payload.comment = input.comment;
+    }
+
+    await this.provider.sendCommand('ProtoOAAmendOrderReq', payload);
+  }
+
+  /**
+   * 注文をキャンセル
+   */
+  async cancelOrder(orderId: string): Promise<void> {
+    await this.provider.sendCommand('ProtoOACancelOrderReq', {
+      ctidTraderAccountId: parseInt(this.accountId, 10),
+      orderId: parseInt(orderId, 10),
+    });
+  }
+
+  /**
+   * ポジションを決済
+   */
+  async closePosition(positionId: string, volume?: number): Promise<void> {
+    const payload: Record<string, unknown> = {
+      ctidTraderAccountId: parseInt(this.accountId, 10),
+      positionId: parseInt(positionId, 10),
+    };
+
+    if (volume !== undefined) {
+      payload.volume = this.normalizeVolume(volume);
+    }
+
+    await this.provider.sendCommand('ProtoOAClosePositionReq', payload);
   }
 
   // ========================================
@@ -203,5 +303,105 @@ export class CTraderAccountService extends EventEmitter {
 
     // レスポンススキーマでバリデーション
     return PositionResponseSchema.parse(position);
+  }
+
+  private startPollingUpdates(options: SubscribeToUpdatesOptions): void {
+    const intervalMs = options.intervalMs ?? 5000;
+    if (this.pollingTimer) {
+      clearInterval(this.pollingTimer);
+      this.pollingTimer = null;
+    }
+
+    // 初回スナップショットを作成してから定期監視を開始
+    void this.getPositions()
+      .then((initialPositions) => {
+        this.positions = new Map(initialPositions.map((position) => [position.positionId, position]));
+      })
+      .catch((error) => {
+        console.error('[CTraderAccountService] 初回ポジション取得に失敗:', error);
+      });
+
+    this.pollingTimer = setInterval(() => {
+      void this.pollOnce();
+    }, intervalMs);
+  }
+
+  private async pollOnce(): Promise<void> {
+    if (this.isPolling) {
+      return;
+    }
+
+    this.isPolling = true;
+    try {
+      const previous = new Map(this.positions);
+      const latestPositions = await this.getPositions();
+      const latest = new Map(latestPositions.map((position) => [position.positionId, position]));
+
+      for (const [positionId, position] of latest.entries()) {
+        const prev = previous.get(positionId);
+        if (!prev) {
+          this.emit('positionUpdate', {
+            type: 'OPEN',
+            position,
+            timestamp: new Date().toISOString(),
+          });
+          continue;
+        }
+
+        if (!this.isSamePosition(prev, position)) {
+          this.emit('positionUpdate', {
+            type: 'MODIFY',
+            position,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+
+      for (const [positionId, position] of previous.entries()) {
+        if (!latest.has(positionId)) {
+          this.emit('positionUpdate', {
+            type: 'CLOSE',
+            position,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+    } catch (error) {
+      console.error('[CTraderAccountService] ポーリング更新エラー:', error);
+      this.emit('error', error);
+    } finally {
+      this.isPolling = false;
+    }
+  }
+
+  private isSamePosition(before: PositionResponse, after: PositionResponse): boolean {
+    return (
+      before.currentPrice === after.currentPrice &&
+      before.profitLoss === after.profitLoss &&
+      before.profitLossPips === after.profitLossPips &&
+      before.takeProfit === after.takeProfit &&
+      before.stopLoss === after.stopLoss &&
+      before.volume === after.volume
+    );
+  }
+
+  private normalizeVolume(volumeLot: number): number {
+    return Math.round(volumeLot * 100);
+  }
+
+  private resolveSymbolId(symbol: string): number {
+    const normalized = symbol.replace('/', '').toUpperCase();
+    const symbolIdMap: Record<string, number> = {
+      XAUUSD: 1,
+      EURUSD: 2,
+      USDJPY: 3,
+      GBPUSD: 4,
+    };
+
+    const symbolId = symbolIdMap[normalized];
+    if (!symbolId) {
+      throw new Error(`未対応のシンボルです: ${symbol}`);
+    }
+    return symbolId;
   }
 }

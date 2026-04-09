@@ -47,7 +47,7 @@ Side-A（手動トレードノート）と Side-B（AIトレードアシスタ�
 
 - **プロジェクトID**: rmsylwmqxyeqgplysqoa
 - **テーブル数**: 47（うち27は空テーブル = 今後のフェーズ用）
-- **RLS**: 現在全テーブルで無効（技術的負債 D1）
+- **RLS**: 全テーブルで有効（2026-04-09 適用済み。ポリシーなし = anon/authenticated はデフォルト拒否、service_role はバイパス）
 - **接続**: pgBouncer Transaction Mode (ポート6543)
 
 ## CI/CD パイプライン
@@ -75,7 +75,8 @@ src/
 ├── side-b/           # AI自動売買: agent, PDCA loop, scheduler
 ├── services/         # 共通サービス（matching, notification, realtime）
 ├── domain/           # ドメインロジック（matching/, notification/）
-├── routes/           # Express ルート（13モジュール + cronRoutes）
+├── backend/api/      # Express ルート（21モジュール、全ルート統一配置）
+├── backend/controllers/ # コントローラー（ルートから参照）
 ├── models/           # TypeScript 型定義
 └── config/           # 設定
 analysis-engine/      # Python FastAPI
@@ -114,9 +115,11 @@ docs/                 # アーキテクチャドキュメント
 | `docs/supabase_pooler_setup.md` | DB接続設定 |
 | `docs/GCP_PRISMA_BEST_PRACTICES.md` | Prisma + GCP のベストプラクティス |
 
-## 技術的負債（上位）
+## 技術的負債（残存）
 
-1. 全テーブル RLS 無効（D1, 32pt）
-2. 27空テーブル（D2, 25pt）
-3. ルート分散: `src/routes/` と `src/backend/api/` の二重管理（A2, 24pt）
-4. 30+ 環境変数の整理不足（I2, 28pt）
+1. 27空テーブル（D2, 25pt）— 未使用フェーズのテーブル。実害なし、後回しOK
+2. 30+ 環境変数の整理不足（I2, 28pt）
+
+### 解消済み（2026-04-09）
+- ~~全テーブル RLS 無効（D1, 32pt）~~ → 全48テーブルで RLS 有効化済み
+- ~~ルート分散（A2, 24pt）~~ → `src/backend/api/` に統一済み

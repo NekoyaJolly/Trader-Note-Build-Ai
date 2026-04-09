@@ -7,8 +7,8 @@
 
 import { Router, Request, Response } from 'express';
 import { backtestController } from '../controllers/backtestController';
-import { progressStore } from '../services/backtest/progressStore';
-import { validateBody, validateParams, validateQuery } from '../middleware/validateRequest';
+import { progressStore } from '../../services/backtest/progressStore';
+import { validateBody, validateParams, validateQuery } from '../../middleware/validateRequest';
 import {
   BacktestRunIdParamSchema,
   BacktestNoteIdParamSchema,
@@ -16,7 +16,7 @@ import {
   CheckCoverageRequestSchema,
   ExecuteBacktestRequestSchema,
   GetBacktestHistoryQuerySchema,
-} from '../schemas/api/backtest';
+} from '../../schemas/api/backtest';
 
 const router = Router();
 

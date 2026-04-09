@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
-import { getValidatedQuery } from '../middleware/validateRequest';
-import { MatchingService } from '../services/matchingService';
-import { NotificationService } from '../services/notificationService';
-import { TradeNoteService } from '../services/tradeNoteService';
+import { getValidatedQuery } from '../../middleware/validateRequest';
+import { MatchingService } from '../../services/matchingService';
+import { NotificationService } from '../../services/notificationService';
+import { TradeNoteService } from '../../services/tradeNoteService';
 
 /**
  * マッチングコントローラー

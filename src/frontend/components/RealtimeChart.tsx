@@ -14,10 +14,14 @@
 
 import React, { ReactNode, useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useRealtimeChart, OHLCVBar, PendingBar, ConnectionStatus } from "@/hooks/useRealtimeChart";
-import { CandlestickChart, DrawnLine, OHLCVDataPoint, IndicatorLineConfig } from "./CandlestickChart";
+import { DrawnLine, OHLCVDataPoint, IndicatorLineConfig, PositionOverlay } from "./CandlestickChart";
 import { IndicatorSelector, SelectedIndicator } from "./IndicatorSelector";
 import { indicatorToChartConfigs } from "@/lib/chartIndicators";
 import { getMarketStatus, MarketStatus } from "@/lib/marketHours";
+import { useTradingAccount } from "@/hooks/useTradingAccount";
+import { OrderPanel } from "@/components/chart/OrderPanel";
+import { ChartPaneContainer } from "@/components/chart/ChartPaneContainer";
+import { DrawingMode } from "@/components/chart/DrawingOverlay";
 
 interface RealtimeChartProps {
 	symbol: string;
@@ -164,7 +168,7 @@ export function RealtimeChart({
 }: RealtimeChartProps) {
 	const [timeframe, setTimeframe] = useState(initialTimeframe);
 	const [dataCount, setDataCount] = useState(60); // データ本数
-	const [drawingMode, setDrawingMode] = useState<"none" | "horizontal" | "trend">("none");
+	const [drawingMode, setDrawingMode] = useState<DrawingMode>("none");
 	const [drawnLines, setDrawnLines] = useState<DrawnLine[]>([]);
 	const [hasEverConnected, setHasEverConnected] = useState(false);
 	const [selectedIndicators, setSelectedIndicators] = useState<SelectedIndicator[]>([]);
@@ -191,24 +195,52 @@ export function RealtimeChart({
 
 	useEffect(() => {
 		if (typeof window === "undefined") return;
-		const raw = window.localStorage.getItem(storageKey);
-		if (!raw) {
-			setDrawnLines([]);
-			onLinesChange?.([]);
-			return;
-		}
-		try {
-			const parsed = JSON.parse(raw) as DrawnLine[];
-			setDrawnLines(parsed);
-			onLinesChange?.(parsed);
-		} catch (e) {
-			console.error("手動ラインの読み込みに失敗しました", e);
-			setDrawnLines([]);
-			onLinesChange?.([]);
-		}
-	}, [onLinesChange, storageKey]);
+		let isCancelled = false;
+		const loadLines = async () => {
+			try {
+				const res = await fetch(
+					`${apiBase}/api/chart-drawings?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(String(timeframe))}`,
+					{ credentials: "include" }
+				);
+				if (!res.ok) {
+					throw new Error(`HTTP ${res.status}`);
+				}
+				const result = await res.json() as { success: boolean; data?: { lines?: DrawnLine[] } };
+				if (isCancelled) return;
+				if (result.success && result.data?.lines) {
+					setDrawnLines(result.data.lines);
+					onLinesChange?.(result.data.lines);
+					window.localStorage.setItem(storageKey, JSON.stringify(result.data.lines));
+					return;
+				}
+			} catch {
+				// API失敗時はローカルキャッシュへフォールバック
+			}
+
+			const raw = window.localStorage.getItem(storageKey);
+			if (!raw) {
+				setDrawnLines([]);
+				onLinesChange?.([]);
+				return;
+			}
+			try {
+				const parsed = JSON.parse(raw) as DrawnLine[];
+				setDrawnLines(parsed);
+				onLinesChange?.(parsed);
+			} catch (e) {
+				console.error("手動ラインの読み込みに失敗しました", e);
+				setDrawnLines([]);
+				onLinesChange?.([]);
+			}
+		};
+		void loadLines();
+		return () => {
+			isCancelled = true;
+		};
+	}, [apiBase, onLinesChange, storageKey, symbol, timeframe]);
 
 	const { bars, pendingBar, latestTick, status, error, isConnected, isLoading, isMarketClosed, connect, disconnect } = useRealtimeChart(symbol, { timeframe, persistConnection: true });
+	const { positions: tradingPositions, refetch: refetchTrading } = useTradingAccount(true);
 
 	useEffect(() => {
 		if (isConnected) {
@@ -324,9 +356,23 @@ export function RealtimeChart({
 		if (typeof window === "undefined") return;
 		if (lines.length === 0) {
 			window.localStorage.removeItem(storageKey);
-			return;
+		} else {
+			window.localStorage.setItem(storageKey, JSON.stringify(lines));
 		}
-		window.localStorage.setItem(storageKey, JSON.stringify(lines));
+		void fetch(`${apiBase}/api/chart-drawings/sync`, {
+			method: "PUT",
+			headers: {
+				"Content-Type": "application/json",
+			},
+			credentials: "include",
+			body: JSON.stringify({
+				symbol,
+				timeframe: String(timeframe),
+				lines,
+			}),
+		}).catch(() => {
+			// ネットワークエラー時はローカル保存を優先
+		});
 	};
 
 	const handleCompleteLine = (line: DrawnLine) => {
@@ -344,7 +390,13 @@ export function RealtimeChart({
 			if (line.type === "horizontal" && "price" in payload) {
 				return { ...line, ...payload, ...baseUpdate } as typeof line;
 			}
-			if (line.type === "trend" && ("startPrice" in payload || "endPrice" in payload)) {
+			if (
+				(line.type === "trend" || line.type === "rectangle" || line.type === "fibonacci") &&
+				("startPrice" in payload || "endPrice" in payload || "startTime" in payload || "endTime" in payload)
+			) {
+				return { ...line, ...payload, ...baseUpdate } as typeof line;
+			}
+			if (line.type === "text" && ("text" in payload || "time" in payload || "price" in payload)) {
 				return { ...line, ...payload, ...baseUpdate } as typeof line;
 			}
 			return { ...line, ...baseUpdate };
@@ -463,7 +515,35 @@ export function RealtimeChart({
 		return { dailyHigh: dailyHighVal, dailyLow: dailyLowVal, previousClose: previousCloseVal };
 	}, [chartData]);
 
-	const drawingLabel = drawingMode === "horizontal" ? "水平線" : drawingMode === "trend" ? "トレンドライン" : "オフ";
+	const drawingLabel = drawingMode === "horizontal"
+		? "水平線"
+		: drawingMode === "trend"
+			? "トレンドライン"
+			: drawingMode === "rectangle"
+				? "矩形"
+				: drawingMode === "fibonacci"
+					? "フィボナッチ"
+					: drawingMode === "text"
+						? "テキスト"
+						: "オフ";
+
+	const symbolPositions = useMemo(
+		() => tradingPositions.filter((position) => position.symbol.replace('/', '').toUpperCase() === symbol.replace('/', '').toUpperCase()),
+		[tradingPositions, symbol]
+	);
+
+	const positionOverlays: PositionOverlay[] = useMemo(
+		() =>
+			symbolPositions.map((position) => ({
+				positionId: position.positionId,
+				side: position.side,
+				entryPrice: position.entryPrice,
+				takeProfit: position.takeProfit,
+				stopLoss: position.stopLoss,
+				profitLoss: position.profitLoss,
+			})),
+		[symbolPositions]
+	);
 
 	return (
 		<div className="bg-gray-900 rounded-lg overflow-hidden">
@@ -499,6 +579,15 @@ export function RealtimeChart({
 
 				<button onClick={() => setDrawingMode(drawingMode === "trend" ? "none" : "trend")} className={`p-1.5 text-xs rounded transition ${drawingMode === "trend" ? "bg-yellow-600 text-black" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} title="トレンドライン">
 					↗︎
+				</button>
+				<button onClick={() => setDrawingMode(drawingMode === "rectangle" ? "none" : "rectangle")} className={`p-1.5 text-xs rounded transition ${drawingMode === "rectangle" ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} title="矩形">
+					▭
+				</button>
+				<button onClick={() => setDrawingMode(drawingMode === "fibonacci" ? "none" : "fibonacci")} className={`p-1.5 text-xs rounded transition ${drawingMode === "fibonacci" ? "bg-purple-600 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} title="フィボナッチ">
+					F
+				</button>
+				<button onClick={() => setDrawingMode(drawingMode === "text" ? "none" : "text")} className={`p-1.5 text-xs rounded transition ${drawingMode === "text" ? "bg-indigo-600 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} title="テキスト">
+					T
 				</button>
 
 				<button onClick={handleClearLines} className="px-2 py-1 text-xs rounded bg-gray-700 text-gray-200 hover:bg-gray-600">
@@ -575,15 +664,60 @@ export function RealtimeChart({
 						</div>
 
 						<div className="relative" style={{ marginBottom: '60px' }}>
-							<CandlestickChart
+							<ChartPaneContainer
 								ohlcvData={chartData}
 								height={height}
 								indicators={indicatorConfigs}
 								drawingMode={drawingMode}
 								drawnLines={drawnLines}
+								positionOverlays={positionOverlays}
 								onCompleteLine={handleCompleteLine}
+								onUpdateLine={handleUpdateLine}
+								onDeleteLine={handleDeleteLine}
 								onExitDrawing={handleExitDrawing}
 							/>
+						</div>
+
+						<OrderPanel
+							symbol={symbol}
+							disabled={!marketStatus.isOpen}
+							onOrderPlaced={() => {
+								void refetchTrading();
+							}}
+						/>
+
+						<div className="bg-gray-800/50 border border-gray-700/50 rounded-lg p-2">
+							<div className="flex items-center justify-between mb-2">
+								<p className="text-xs text-gray-300">保有ポジション（{symbol}）</p>
+								<button
+									onClick={() => {
+										void refetchTrading();
+									}}
+									className="text-xs px-2 py-1 rounded bg-gray-700 text-gray-200 hover:bg-gray-600"
+								>
+									更新
+								</button>
+							</div>
+							{symbolPositions.length === 0 ? (
+								<p className="text-xs text-gray-500">このシンボルの保有ポジションはありません</p>
+							) : (
+								<div className="space-y-1.5">
+									{symbolPositions.map((position) => (
+										<div key={position.positionId} className="flex items-center gap-2 text-xs text-gray-100 bg-gray-900/60 rounded px-2 py-1 border border-gray-700/60">
+											<span className={`px-1.5 py-0.5 rounded ${position.side === "BUY" ? "bg-green-600/30 text-green-300" : "bg-red-600/30 text-red-300"}`}>
+												{position.side}
+											</span>
+											<span className="text-gray-300">Entry {position.entryPrice.toFixed(2)}</span>
+											{position.takeProfit !== undefined && <span className="text-green-300">TP {position.takeProfit.toFixed(2)}</span>}
+											{position.stopLoss !== undefined && <span className="text-red-300">SL {position.stopLoss.toFixed(2)}</span>}
+											<span className={`ml-auto font-mono ${position.profitLoss >= 0 ? "text-green-400" : "text-red-400"}`}>
+												{position.profitLoss >= 0 ? "+" : ""}
+												{position.profitLoss.toFixed(2)}
+											</span>
+										</div>
+									))}
+								</div>
+							)}
 						</div>
 
 						<div className="bg-gray-800/50 border border-gray-700/50 rounded-lg p-2">
@@ -593,7 +727,17 @@ export function RealtimeChart({
 								<div className="space-y-1.5">
 									{drawnLines.map((line, idx) => (
 										<div key={line.id} className="flex items-center gap-2 text-xs text-gray-100 bg-gray-900/60 rounded px-2 py-1 border border-gray-700/60">
-											<span className="px-1.5 py-0.5 rounded bg-gray-700 text-gray-200">{line.type === "horizontal" ? "水平" : "トレンド"} {idx + 1}</span>
+											<span className="px-1.5 py-0.5 rounded bg-gray-700 text-gray-200">
+												{line.type === "horizontal"
+													? "水平"
+													: line.type === "trend"
+														? "トレンド"
+														: line.type === "rectangle"
+															? "矩形"
+															: line.type === "fibonacci"
+																? "Fib"
+																: "テキスト"} {idx + 1}
+											</span>
 											<input type="color" value={line.color ?? DEFAULT_LINE_COLOR} onChange={(e) => handleUpdateLine(line.id, { color: e.target.value })} className="w-7 h-7 rounded border border-gray-600 bg-gray-900 cursor-pointer" title="色" />
 											<input
 												type="range"
@@ -738,6 +882,15 @@ export function RealtimeChart({
 						</button>
 						<button onClick={() => setDrawingMode(drawingMode === "trend" ? "none" : "trend")} className={`px-2 py-1 rounded text-[11px] ${drawingMode === "trend" ? "bg-yellow-600 text-black" : "bg-gray-800 text-gray-200"}`}>
 							トレンド
+						</button>
+						<button onClick={() => setDrawingMode(drawingMode === "rectangle" ? "none" : "rectangle")} className={`px-2 py-1 rounded text-[11px] ${drawingMode === "rectangle" ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-200"}`}>
+							矩形
+						</button>
+						<button onClick={() => setDrawingMode(drawingMode === "fibonacci" ? "none" : "fibonacci")} className={`px-2 py-1 rounded text-[11px] ${drawingMode === "fibonacci" ? "bg-purple-600 text-white" : "bg-gray-800 text-gray-200"}`}>
+							Fib
+						</button>
+						<button onClick={() => setDrawingMode(drawingMode === "text" ? "none" : "text")} className={`px-2 py-1 rounded text-[11px] ${drawingMode === "text" ? "bg-indigo-600 text-white" : "bg-gray-800 text-gray-200"}`}>
+							Text
 						</button>
 						<button onClick={handleClearLines} className="px-2 py-1 rounded text-[11px] bg-gray-800 text-gray-200">
 							クリア

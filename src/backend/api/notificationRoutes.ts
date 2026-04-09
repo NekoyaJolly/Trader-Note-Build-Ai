@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import { NotificationController } from '../controllers/notificationController';
-import { validateBody, validateParams, validateQuery } from '../middleware/validateRequest';
+import { validateBody, validateParams, validateQuery } from '../../middleware/validateRequest';
 import {
   NotificationIdParamSchema,
   GetNotificationsQuerySchema,
   CheckNotificationRequestSchema,
   GetNotificationLogsQuerySchema,
   NotificationLogIdParamSchema,
-} from '../schemas/api/notification';
+} from '../../schemas/api/notification';
 
 const router = Router();
 const notificationController = new NotificationController();

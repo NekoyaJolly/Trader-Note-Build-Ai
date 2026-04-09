@@ -10,9 +10,9 @@
  */
 
 import { Router } from 'express';
-import { userSettingsService, UserSettings } from '../services/userSettingsService';
-import { validateBody } from '../middleware/validateRequest';
-import { UpdateSettingsRequestSchema } from '../schemas/api/settings';
+import { userSettingsService, UserSettings } from '../../services/userSettingsService';
+import { validateBody } from '../../middleware/validateRequest';
+import { UpdateSettingsRequestSchema } from '../../schemas/api/settings';
 
 const router = Router();
 

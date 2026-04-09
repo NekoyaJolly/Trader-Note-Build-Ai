@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
-import { getValidatedQuery } from '../middleware/validateRequest';
-import { NotificationService } from '../services/notificationService';
-import { NotificationLogRepository } from '../backend/repositories/notificationLogRepository';
-import { MatchingService } from '../services/matchingService';
-import { NotificationTriggerService } from '../services/notification/notificationTriggerService';
+import { getValidatedQuery } from '../../middleware/validateRequest';
+import { NotificationService } from '../../services/notificationService';
+import { NotificationLogRepository } from '../repositories/notificationLogRepository';
+import { MatchingService } from '../../services/matchingService';
+import { NotificationTriggerService } from '../../services/notification/notificationTriggerService';
 import { Prisma, NotificationLogStatus } from '@prisma/client';
 
 /**

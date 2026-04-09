@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
-import { OrderPreset } from '../models/types';
-import { TradeNoteService } from '../services/tradeNoteService';
-import { MarketDataService } from '../services/marketDataService';
+import { OrderPreset } from '../../models/types';
+import { TradeNoteService } from '../../services/tradeNoteService';
+import { MarketDataService } from '../../services/marketDataService';
 
 export class OrderController {
   private noteService: TradeNoteService;

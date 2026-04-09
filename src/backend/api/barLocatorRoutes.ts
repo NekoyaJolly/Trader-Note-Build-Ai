@@ -9,7 +9,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { barLocator } from '../services/barLocatorService';
+import { barLocator } from '../../services/barLocatorService';
 
 const router = Router();
 

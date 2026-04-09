@@ -61,6 +61,27 @@ model Watchlist {
   @@index([active], map: "idx_watchlist_active")
 }
 
+/// チャート描画データ（ユーザー×シンボル×時間足）
+/// ライン編集のデバイス間同期に使用
+model ChartDrawing {
+  id        String   @id @default(uuid()) @db.Uuid
+  /// ユーザー ID
+  userId    String   @db.Uuid
+  /// シンボル（例: XAUUSD）
+  symbol    String
+  /// 時間足（秒ベース文字列）
+  timeframe String
+  /// 描画ライン配列（JSON）
+  lines     Json
+  /// 作成日時
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  @@unique([userId, symbol, timeframe], map: "uq_chart_drawing_user_symbol_timeframe")
+  @@index([userId, updatedAt], map: "idx_chart_drawing_user_updated")
+}
+
 model Trade {
   id        String     @id @default(uuid()) @db.Uuid
   timestamp DateTime   @db.Timestamptz(6)

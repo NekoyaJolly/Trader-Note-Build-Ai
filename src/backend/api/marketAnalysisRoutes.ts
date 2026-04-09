@@ -10,13 +10,13 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { MarketDataService } from '../services/marketDataService';
-import { indicatorService, OHLCVData } from '../services/indicators';
+import { MarketDataService } from '../../services/marketDataService';
+import { indicatorService, OHLCVData } from '../../services/indicators';
 import {
   generateFeatureVector,
   FeatureVector12D,
   DIMENSION_INDEX,
-} from '../services/featureVectorService';
+} from '../../services/featureVectorService';
 
 const router = Router();
 const marketDataService = new MarketDataService();

@@ -54,6 +54,16 @@ export interface IndicatorLineConfig {
   data: { timestamp: number; value: number }[];
   color: string;
   lineWidth?: number;
+  lineStyle?: "solid" | "dashed";
+  seriesType?: "line" | "histogram";
+  histogramPositiveColor?: string;
+  histogramNegativeColor?: string;
+  paneGroup?: string;
+  scaleRange?: { min: number; max: number };
+  isReferenceLine?: boolean;
+  fillToId?: string;
+  fillColor?: string;
+  shiftBars?: number;
   // メインチャートに重ねるか、サブチャートに表示するか
   pane: "main" | "sub";
 }
@@ -87,7 +97,46 @@ export type DrawnLine =
     endPrice: number;
     color?: string;
     lineWidth?: number;
+  }
+  | {
+    id: string;
+    type: "rectangle";
+    startTime: number;
+    endTime: number;
+    startPrice: number;
+    endPrice: number;
+    color?: string;
+    lineWidth?: number;
+  }
+  | {
+    id: string;
+    type: "fibonacci";
+    startTime: number;
+    endTime: number;
+    startPrice: number;
+    endPrice: number;
+    color?: string;
+    lineWidth?: number;
+  }
+  | {
+    id: string;
+    type: "text";
+    time: number;
+    price: number;
+    text: string;
+    color?: string;
+    lineWidth?: number;
   };
+
+/** チャート上のポジションオーバーレイ */
+export interface PositionOverlay {
+  positionId: string;
+  side: "BUY" | "SELL";
+  entryPrice: number;
+  takeProfit?: number;
+  stopLoss?: number;
+  profitLoss?: number;
+}
 
 /** チャートのプロパティ */
 export interface CandlestickChartProps {
@@ -115,6 +164,8 @@ export interface CandlestickChartProps {
   drawingMode?: "none" | "horizontal" | "trend";
   /** 既存の手動ライン */
   drawnLines?: DrawnLine[];
+  /** 保有ポジションの水平線表示 */
+  positionOverlays?: PositionOverlay[];
   /** ライン描画完了時 */
   onCompleteLine?: (line: DrawnLine) => void;
   /** 描画モード終了通知 */
@@ -240,6 +291,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   enableRealtime = false,
   drawingMode = "none",
   drawnLines = [],
+  positionOverlays = [],
   onCompleteLine,
   onExitDrawing,
   focusTimestamp,
@@ -249,8 +301,9 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
   // v5 では ISeriesApi の型パラメータが変わった
   const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
-  const indicatorSeriesRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
+  const indicatorSeriesRef = useRef<Map<string, ISeriesApi<"Line"> | ISeriesApi<"Histogram">>>(new Map());
   const drawnLineSeriesRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
+  const positionOverlaySeriesRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
   const guideLineSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const lastFitCountRef = useRef<number>(0);
@@ -275,6 +328,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
     volumeSeriesRef.current = null;
     indicatorSeriesRef.current.clear();
     drawnLineSeriesRef.current.clear();
+    positionOverlaySeriesRef.current.clear();
     guideLineSeriesRef.current = null;
     markersPluginRef.current = null;
     lastFitCountRef.current = 0;
@@ -393,6 +447,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       volumeSeriesRef.current = null;
       indicatorSeriesRef.current.clear();
       drawnLineSeriesRef.current.clear();
+      positionOverlaySeriesRef.current.clear();
       guideLineSeriesRef.current = null;
       markersPluginRef.current = null;
     };
@@ -511,11 +566,26 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
         }
         return { points: sorted };
       }
+      if (line.type === "text") {
+        const time = toChartTime(line.time);
+        return {
+          points: [
+            { time, value: line.price },
+            { time: ((time as number) + 1) as Time, value: line.price },
+          ],
+        };
+      }
       const start = toChartTime(line.startTime);
       const end = toChartTime(line.endTime);
+      const startPrice = line.type === "trend" || line.type === "rectangle" || line.type === "fibonacci"
+        ? line.startPrice
+        : 0;
+      const endPrice = line.type === "trend" || line.type === "rectangle" || line.type === "fibonacci"
+        ? line.endPrice
+        : startPrice;
       const sorted: LineData<Time>[] = [
-        { time: start, value: line.startPrice },
-        { time: end, value: line.endPrice },
+        { time: start, value: startPrice },
+        { time: end, value: endPrice },
       ].sort((a, b) => (a.time as number) - (b.time as number));
       if (sorted[0].time === sorted[1].time) {
         // 始点と終点が同一なら終点だけ +1 秒にずらす
@@ -529,13 +599,103 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       const series = chartRef.current!.addSeries(LineSeries, {
         color: line.color || fallbackColor,
         lineWidth: (line.lineWidth ?? DEFAULT_LINE_WIDTH) as LineWidth,
-        title: line.type === "horizontal" ? "水平線" : "トレンドライン",
+        title:
+          line.type === "horizontal"
+            ? "水平線"
+            : line.type === "trend"
+              ? "トレンドライン"
+              : line.type === "rectangle"
+                ? "矩形"
+                : line.type === "fibonacci"
+                  ? "フィボナッチ"
+                  : "テキスト",
         priceLineVisible: false,
       });
       series.setData(points);
       drawnLineSeriesRef.current.set(line.id, series);
     });
   }, [drawnLines]);
+
+  // ポジションオーバーレイの描画・更新
+  useEffect(() => {
+    if (!chartRef.current) return;
+
+    positionOverlaySeriesRef.current.forEach((series) => {
+      chartRef.current?.removeSeries(series);
+    });
+    positionOverlaySeriesRef.current.clear();
+
+    if (positionOverlays.length === 0 || ohlcvData.length === 0) {
+      return;
+    }
+
+    const timestamps = ohlcvData.map((d) => d.timestamp).sort((a, b) => a - b);
+    const startTime = timestamps[0] ?? Date.now();
+    const endTime = timestamps[timestamps.length - 1] ?? startTime;
+
+    const createHorizontalSeries = (
+      id: string,
+      price: number,
+      color: string,
+      title: string,
+      lineStyle: LineStyle,
+      lineWidth: LineWidth
+    ) => {
+      if (!chartRef.current) return;
+      const series = chartRef.current.addSeries(LineSeries, {
+        color,
+        lineStyle,
+        lineWidth,
+        title,
+        priceLineVisible: false,
+        crosshairMarkerVisible: false,
+      });
+      series.setData([
+        { time: toChartTime(startTime), value: price },
+        { time: toChartTime(endTime), value: price },
+      ]);
+      positionOverlaySeriesRef.current.set(id, series);
+    };
+
+    for (const overlay of positionOverlays) {
+      const sideColor = overlay.side === "BUY" ? "#22c55e" : "#ef4444";
+      const pnlLabel =
+        overlay.profitLoss === undefined
+          ? ""
+          : ` (${overlay.profitLoss >= 0 ? "+" : ""}${overlay.profitLoss.toFixed(2)})`;
+
+      createHorizontalSeries(
+        `entry-${overlay.positionId}`,
+        overlay.entryPrice,
+        sideColor,
+        `${overlay.side} Entry${pnlLabel}`,
+        LineStyle.Solid,
+        2 as LineWidth
+      );
+
+      if (overlay.takeProfit !== undefined) {
+        createHorizontalSeries(
+          `tp-${overlay.positionId}`,
+          overlay.takeProfit,
+          "rgba(34, 197, 94, 0.8)",
+          "TP",
+          LineStyle.Dashed,
+          1 as LineWidth
+        );
+      }
+
+      if (overlay.stopLoss !== undefined) {
+        createHorizontalSeries(
+          `sl-${overlay.positionId}`,
+          overlay.stopLoss,
+          "rgba(239, 68, 68, 0.8)",
+          "SL",
+          LineStyle.Dashed,
+          1 as LineWidth
+        );
+      }
+    }
+  }, [ohlcvData, positionOverlays]);
 
   // 描画モード解除時に下書きをクリア
   useEffect(() => {
@@ -819,12 +979,43 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
         return;
       }
 
+      if (indicator.seriesType === "histogram") {
+        const histogramSeries = chartRef.current!.addSeries(HistogramSeries, {
+          title: indicator.name,
+          priceScaleId: indicator.pane === "main" ? "right" : indicator.id,
+          priceLineVisible: false,
+          lastValueVisible: true,
+          base: 0,
+        });
+        histogramSeries.setData(
+          indicator.data.map((d) => ({
+            time: toChartTime(d.timestamp),
+            value: d.value,
+            color:
+              d.value >= 0
+                ? indicator.histogramPositiveColor ?? "rgba(34, 197, 94, 0.8)"
+                : indicator.histogramNegativeColor ?? "rgba(239, 68, 68, 0.8)",
+          }))
+        );
+        if (indicator.pane === "sub") {
+          histogramSeries.priceScale().applyOptions({
+            scaleMargins: {
+              top: 0.7,
+              bottom: 0.1,
+            },
+          });
+        }
+        indicatorSeriesRef.current.set(indicator.id, histogramSeries);
+        return;
+      }
+
       // メインチャートに重ねるインジケーター
       if (indicator.pane === "main") {
         const lineSer = chartRef.current!.addSeries(LineSeries, {
           color: indicator.color,
           lineWidth: (indicator.lineWidth || 2) as LineWidth,
           title: indicator.name,
+          lineStyle: indicator.lineStyle === "dashed" ? LineStyle.Dashed : LineStyle.Solid,
           lastValueVisible: true, // 右端に動的な計算値を表示
           priceLineVisible: false, // 価格ラインを非表示
           crosshairMarkerVisible: false, // クロスヘアマーカーを非表示（フォーカス問題を回避）
@@ -841,6 +1032,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           color: indicator.color,
           lineWidth: (indicator.lineWidth || 2) as LineWidth,
           title: indicator.name,
+          lineStyle: indicator.lineStyle === "dashed" ? LineStyle.Dashed : LineStyle.Solid,
           priceScaleId: indicator.id,
           lastValueVisible: true, // 右端に動的な計算値を表示
           priceLineVisible: false, // 価格ラインを非表示

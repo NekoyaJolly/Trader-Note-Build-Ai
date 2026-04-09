@@ -5,6 +5,10 @@
  * - GET /api/trading/account - 口座情報取得
  * - GET /api/trading/positions - ポジション一覧取得
  * - GET /api/trading/stream - SSEストリーミング
+ * - POST /api/trading/orders - 新規注文
+ * - PUT /api/trading/orders/:id - 注文変更
+ * - DELETE /api/trading/orders/:id - 注文キャンセル
+ * - POST /api/trading/positions/:id/close - ポジション決済
  */
 
 import { z } from 'zod';
@@ -77,3 +81,49 @@ export const PositionUpdateEventSchema = z.object({
 });
 
 export type PositionUpdateEvent = z.infer<typeof PositionUpdateEventSchema>;
+
+/**
+ * 新規注文リクエスト
+ */
+export const CreateOrderRequestSchema = z.object({
+  symbol: z.string().min(1, 'シンボルは必須です'),
+  side: z.enum(['BUY', 'SELL']),
+  volume: z.number().positive('ロット数は0より大きい必要があります'),
+  takeProfit: z.number().positive().optional(),
+  stopLoss: z.number().positive().optional(),
+  comment: z.string().max(128).optional(),
+});
+
+export type CreateOrderRequest = z.infer<typeof CreateOrderRequestSchema>;
+
+/**
+ * 注文更新リクエスト
+ */
+export const UpdateOrderRequestSchema = z.object({
+  takeProfit: z.number().positive().optional(),
+  stopLoss: z.number().positive().optional(),
+  volume: z.number().positive().optional(),
+  comment: z.string().max(128).optional(),
+});
+
+export type UpdateOrderRequest = z.infer<typeof UpdateOrderRequestSchema>;
+
+/**
+ * ポジション決済リクエスト
+ */
+export const ClosePositionRequestSchema = z.object({
+  volume: z.number().positive().optional(),
+});
+
+export type ClosePositionRequest = z.infer<typeof ClosePositionRequestSchema>;
+
+/**
+ * 注文APIレスポンス
+ */
+export const TradingOrderResponseSchema = z.object({
+  success: z.boolean(),
+  action: z.enum(['CREATE', 'UPDATE', 'CANCEL', 'CLOSE']),
+  requestId: z.string().optional(),
+});
+
+export type TradingOrderResponse = z.infer<typeof TradingOrderResponseSchema>;

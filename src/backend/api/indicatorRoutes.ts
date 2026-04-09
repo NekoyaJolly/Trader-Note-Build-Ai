@@ -14,15 +14,15 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { indicatorSettingsService, SaveIndicatorConfigRequest } from '../services/indicatorSettingsService';
-import { INDICATOR_METADATA, IndicatorId, IndicatorCategory } from '../models/indicatorConfig';
-import { validateBody, validateParams, validateQuery, getValidatedQuery } from '../middleware/validateRequest';
+import { indicatorSettingsService, SaveIndicatorConfigRequest } from '../../services/indicatorSettingsService';
+import { INDICATOR_METADATA, IndicatorId, IndicatorCategory } from '../../models/indicatorConfig';
+import { validateBody, validateParams, validateQuery, getValidatedQuery } from '../../middleware/validateRequest';
 import {
   IndicatorIdParamSchema,
   SaveIndicatorSettingsRequestSchema,
   ToggleIndicatorRequestSchema,
   GetMetadataQuerySchema,
-} from '../schemas/api/indicator';
+} from '../../schemas/api/indicator';
 
 // ルーター作成
 const router = Router();

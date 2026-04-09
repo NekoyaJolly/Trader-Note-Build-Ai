@@ -49,6 +49,10 @@ export const CTraderMessageType = {
   PROTO_OA_APPLICATION_AUTH_RES: 2101,
   PROTO_OA_ACCOUNT_AUTH_REQ: 2102,
   PROTO_OA_ACCOUNT_AUTH_RES: 2103,
+  PROTO_OA_NEW_ORDER_REQ: 2106,
+  PROTO_OA_AMEND_ORDER_REQ: 2107,
+  PROTO_OA_CANCEL_ORDER_REQ: 2108,
+  PROTO_OA_CLOSE_POSITION_REQ: 2109,
   PROTO_OA_SUBSCRIBE_SPOTS_REQ: 2124,
   PROTO_OA_SUBSCRIBE_SPOTS_RES: 2125,
   PROTO_OA_UNSUBSCRIBE_SPOTS_REQ: 2126,
@@ -487,6 +491,10 @@ export class CTraderProvider extends BaseMarketDataProvider {
     // コマンド名からメッセージタイプを解決
     const messageTypeMap: Record<string, number> = {
       'ProtoOAReconcileReq': CTraderMessageType.PROTO_OA_RECONCILE_REQ,
+      'ProtoOANewOrderReq': CTraderMessageType.PROTO_OA_NEW_ORDER_REQ,
+      'ProtoOAAmendOrderReq': CTraderMessageType.PROTO_OA_AMEND_ORDER_REQ,
+      'ProtoOACancelOrderReq': CTraderMessageType.PROTO_OA_CANCEL_ORDER_REQ,
+      'ProtoOAClosePositionReq': CTraderMessageType.PROTO_OA_CLOSE_POSITION_REQ,
     };
 
     const payloadType = messageTypeMap[command];

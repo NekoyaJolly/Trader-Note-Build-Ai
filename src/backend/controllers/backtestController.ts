@@ -9,9 +9,9 @@
  */
 
 import { Request, Response } from 'express';
-import { getValidatedQuery } from '../middleware/validateRequest';
-import { BacktestService, BacktestParams, BacktestSummary } from '../services/backtestService';
-import { checkDataCoverage, CoverageCheckResult } from '../backend/services/strategyBacktestService';
+import { getValidatedQuery } from '../../middleware/validateRequest';
+import { BacktestService, BacktestParams, BacktestSummary } from '../../services/backtestService';
+import { checkDataCoverage, CoverageCheckResult } from '../services/strategyBacktestService';
 
 /**
  * バックテスト実行リクエストボディ

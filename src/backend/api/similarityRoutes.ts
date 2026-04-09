@@ -5,13 +5,13 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { crossSimilarityService } from '../services/crossSimilarityService';
+import { crossSimilarityService } from '../../services/crossSimilarityService';
 import {
   CrossSimilaritySearchRequestSchema,
   CrossSimilaritySearchResponseSchema,
   ErrorResponseSchema,
   type CrossSimilaritySearchRequest,
-} from '../schemas/api/similarity';
+} from '../../schemas/api/similarity';
 
 const router = Router();
 

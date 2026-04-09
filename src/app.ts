@@ -3,28 +3,29 @@ import { Server } from 'http';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { config } from './config';
-import tradeRoutes from './routes/tradeRoutes';
-import matchingRoutes from './routes/matchingRoutes';
-import notificationRoutes from './routes/notificationRoutes';
-import orderRoutes from './routes/orderRoutes';
-import indicatorRoutes from './routes/indicatorRoutes';
-import backtestRoutes from './routes/backtestRoutes';
-import settingsRoutes from './routes/settingsRoutes';
-import barLocatorRoutes from './controllers/barLocatorController';
+import tradeRoutes from './backend/api/tradeRoutes';
+import matchingRoutes from './backend/api/matchingRoutes';
+import notificationRoutes from './backend/api/notificationRoutes';
+import orderRoutes from './backend/api/orderRoutes';
+import indicatorRoutes from './backend/api/indicatorRoutes';
+import backtestRoutes from './backend/api/backtestRoutes';
+import settingsRoutes from './backend/api/settingsRoutes';
+import barLocatorRoutes from './backend/api/barLocatorRoutes';
 import strategyRoutes from './backend/api/strategyRoutes';
 import strategyComparisonRoutes from './backend/api/strategyComparisonRoutes';
 import patternAnalysisRoutes from './backend/api/patternAnalysisRoutes';
-import watchlistRoutes from './routes/watchlistRoutes';
-import pushRoutes from './routes/pushRoutes';
+import watchlistRoutes from './backend/api/watchlistRoutes';
+import pushRoutes from './backend/api/pushRoutes';
 import ohlcvRoutes from './backend/api/ohlcvRoutes';
-import profileRoutes from './routes/profileRoutes';
+import profileRoutes from './backend/api/profileRoutes';
 import { sideBRoutes } from './side-b/routes';
-import cronRoutes from './routes/cronRoutes';
+import cronRoutes from './backend/api/cronRoutes';
 import ctraderAuthRoutes from './backend/api/ctraderAuthRoutes';
 import tradingRoutes from './backend/api/tradingRoutes';
-import marketAnalysisRoutes from './routes/marketAnalysisRoutes';
+import chartDrawingsRoutes from './backend/api/chartDrawingsRoutes';
+import marketAnalysisRoutes from './backend/api/marketAnalysisRoutes';
 import realtimeRoutes from './backend/api/realtimeRoutes';
-import similarityRoutes from './routes/similarityRoutes';
+import similarityRoutes from './backend/api/similarityRoutes';
 import { MatchingScheduler } from './utils/scheduler';
 import { getSideBScheduler } from './side-b/jobs/sideBScheduler';
 
@@ -118,6 +119,10 @@ class App {
       // トレーディングルート（認証必須）
       console.log('[App] /api/trading ルートを登録中...');
       this.app.use('/api/trading', tradingRoutes);
+
+      // チャート描画データ同期（認証必須）
+      console.log('[App] /api/chart-drawings ルートを登録中...');
+      this.app.use('/api/chart-drawings', chartDrawingsRoutes);
 
       // ウォッチリスト（認証必須）
       console.log('[App] /api/watchlist ルートを登録中...');

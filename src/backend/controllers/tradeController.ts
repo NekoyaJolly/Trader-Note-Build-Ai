@@ -1,16 +1,16 @@
 import { Request, Response } from 'express';
-import { getValidatedQuery } from '../middleware/validateRequest';
-import { TradeImportService } from '../services/tradeImportService';
+import { getValidatedQuery } from '../../middleware/validateRequest';
+import { TradeImportService } from '../../services/tradeImportService';
 import path from 'path';
-import { config } from '../config';
+import { config } from '../../config';
 import fs from 'fs';
-import { TradeRepository } from '../backend/repositories/tradeRepository';
-import { TradeNoteService, NoteUpdatePayload } from '../services/tradeNoteService';
-import { NoteStatus } from '../models/types';
+import { TradeRepository } from '../repositories/tradeRepository';
+import { TradeNoteService, NoteUpdatePayload } from '../../services/tradeNoteService';
+import { NoteStatus } from '../../models/types';
 import { Trade as DbTrade, Prisma } from '@prisma/client';
-import { FeatureService } from '../services/featureService';
-import { SIMILARITY_THRESHOLDS } from '../services/featureVectorService';
-import { NotePerformanceService, PerformanceReportOptions } from '../services/performance';
+import { FeatureService } from '../../services/featureService';
+import { SIMILARITY_THRESHOLDS } from '../../services/featureVectorService';
+import { NotePerformanceService, PerformanceReportOptions } from '../../services/performance';
 
 /**
  * トレードデータの共通型
