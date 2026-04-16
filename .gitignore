@@ -15,6 +15,7 @@ data/trades/*.csv
 !data/trades/sample_trades.csv
 data/notes/*.json
 data/notifications.json
+data/ohlcv/*.csv
 
 # Logs
 *.log
@@ -28,6 +29,7 @@ Thumbs.db
 .vscode/
 !.vscode/mcp.json
 .idea/
+.cursor/
 *.swp
 *.swo
 .vercel
