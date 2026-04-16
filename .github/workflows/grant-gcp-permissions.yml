@@ -1,0 +1,75 @@
+name: Grant GCP Permissions to SA
+
+# GitHub Actions 用サービスアカウントに必要な GCP 権限を付与する
+# 手動実行専用: Actions → 「Grant GCP Permissions to SA」 → Run workflow
+#
+# 背景:
+# - deploy.yml の setup-scheduler ステップが PERMISSION_DENIED で失敗する
+# - 原因: cloud-run-trader-note@ SA に cloudscheduler.jobs.create がない
+# - 修正: roles/cloudscheduler.admin を付与する
+#
+# 注意:
+# - SA 自身が自分に IAM 権限を付与するには roles/resourcemanager.projectIamAdmin 相当が必要
+# - 権限不足で失敗した場合は Cloud Shell で手動実行するコマンドをログに出力する
+
+on:
+  workflow_dispatch:
+
+env:
+  GCP_PROJECT_ID: ai-note-486020
+  GCP_SA_EMAIL: cloud-run-trader-note@ai-note-486020.iam.gserviceaccount.com
+
+jobs:
+  grant-permissions:
+    name: Grant Cloud Scheduler Admin role
+    runs-on: ubuntu-latest
+    steps:
+      - name: GCP 認証
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: gcloud CLI セットアップ
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Cloud Scheduler Admin ロール付与を試行
+        id: grant
+        continue-on-error: true
+        run: |
+          set +e
+          gcloud projects add-iam-policy-binding "${GCP_PROJECT_ID}" \
+            --member="serviceAccount:${GCP_SA_EMAIL}" \
+            --role="roles/cloudscheduler.admin" \
+            --condition=None
+          RESULT=$?
+          set -e
+          echo "exit_code=$RESULT" >> $GITHUB_OUTPUT
+          exit $RESULT
+
+      - name: 失敗時の手動対応案内
+        if: steps.grant.outcome == 'failure'
+        run: |
+          echo "::error::権限付与に失敗しました。SA 自身に IAM 変更権限がない可能性があります。"
+          echo ""
+          echo "================================================================"
+          echo "📋 対応手順: Cloud Shell で以下を実行してください"
+          echo "================================================================"
+          echo ""
+          echo "# Cloud Shell を開く: https://console.cloud.google.com/?project=${GCP_PROJECT_ID}&cloudshell=true"
+          echo ""
+          echo "gcloud projects add-iam-policy-binding ${GCP_PROJECT_ID} \\"
+          echo "  --member=\"serviceAccount:${GCP_SA_EMAIL}\" \\"
+          echo "  --role=\"roles/cloudscheduler.admin\" \\"
+          echo "  --condition=None"
+          echo ""
+          echo "完了後、deploy.yml を再実行すれば Cloud Scheduler が自動セットアップされます"
+          echo "================================================================"
+          exit 1
+
+      - name: 成功メッセージ
+        if: steps.grant.outcome == 'success'
+        run: |
+          echo "✅ roles/cloudscheduler.admin を付与しました"
+          echo "次回の deploy.yml 実行で setup-scheduler ステップが成功するはずです"
