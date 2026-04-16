@@ -5,11 +5,20 @@ import path from 'path';
 
 /**
  * AIテストオーケストレーター
- * 目的: GPT-4を使用してUIを解析し、自動的にテストシナリオを生成・実行
- * 注意: OpenAI APIを使用するため課金が発生します
+ * 目的: プロジェクト共通のAI設定（AI_API_KEY + AI_BASE_URL）でUIを解析し、
+ *       自動的にテストシナリオを生成・実行する
+ * 構成:
+ *   AI_API_KEY  — Gemini / OpenAI 互換プロバイダのAPIキー
+ *   AI_BASE_URL — OpenAI互換エンドポイント（未指定でOpenAI公式を使用）
+ *   AI_MODEL    — 使用モデル名（未指定で gemini-2.0-flash-exp）
  */
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI({
+  apiKey: process.env.AI_API_KEY,
+  baseURL: process.env.AI_BASE_URL,
+});
+
+const AI_MODEL = process.env.AI_MODEL || 'gemini-2.0-flash-exp';
 
 interface TestScenario {
   name: string;
@@ -69,7 +78,7 @@ export class AITestOrchestrator {
     console.log(`\n🤖 AIがテストシナリオを生成中: ${feature}`);
     
     const response = await openai.chat.completions.create({
-      model: "gpt-4-turbo-preview",
+      model: AI_MODEL,
       messages: [{
         role: "system",
         content: `あなたはTradeAssist（取引ノート管理システム）の専門QAエンジニアです。
@@ -137,7 +146,7 @@ TradeAssistの主要機能:
     const bodyText = await this.page.locator('body').textContent() || '';
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4-vision-preview",
+      model: AI_MODEL,
       messages: [{
         role: "user",
         content: [
@@ -190,7 +199,7 @@ await page.waitForSelector('[data-testid="dashboard"]');`
     const bodyText = await this.page.locator('body').textContent() || '';
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4-vision-preview",
+      model: AI_MODEL,
       messages: [{
         role: "user",
         content: [
