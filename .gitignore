@@ -30,6 +30,9 @@ Thumbs.db
 !.vscode/mcp.json
 .idea/
 .cursor/
+
+# Claude Code runtime files
+.claude/scheduled_tasks.lock
 *.swp
 *.swo
 .vercel
