@@ -18,14 +18,16 @@
 
 以下の全てを満たす:
 
-- [ ] `Lens` インターフェースが `src/side-b/lenses/types.ts` に定義されている
-- [ ] `CurrentAnalysisLens` クラスが実装され、既存の MarketAnalysis の結果をラップして返す
-- [ ] `TimeSessionLens` クラスが実装され、主要市場セッションの状態を返す
-- [ ] `LensAggregator` が実装され、全登録レンズを並列実行して統合結果を返す
-- [ ] `AITradeNote` スキーマに `lensSnapshot` フィールドが追加されている(オプショナル)
-- [ ] 既存のトレードフロー(Research → Plan → Trade → Reflection)が従来通り動作する
-- [ ] 新レンズのユニットテストが書かれている(決定性テスト含む)
-- [ ] 既存のテストが全て通る
+- [x] `Lens` インターフェースが `src/side-b/lenses/types.ts` に定義されている
+- [x] `CurrentAnalysisLens` クラスが実装され、既存の MarketAnalysis の結果をラップして返す
+- [x] `TimeSessionLens` クラスが実装され、主要市場セッションの状態を返す
+- [x] `LensAggregator` が実装され、全登録レンズを並列実行して統合結果を返す
+- [x] `AITradeNote` スキーマに `lensSnapshot` フィールドが追加されている(オプショナル)
+- [x] 既存のトレードフロー(Research → Plan → Trade → Reflection)が従来通り動作する（PDCA 配線は Phase 3 のため、Phase 1 完了時点で既存パイプは無変更）
+- [x] 新レンズのユニットテストが書かれている(決定性テスト含む)
+- [x] 既存のテストが全て通る（aiTradeNote 45/45, lenses 28/28）
+
+**Phase 1 完了**: 2026-04-17 実装・コミット済み。コミット履歴は `git log --oneline --grep="Phase 1"`。
 
 ---
 
