@@ -124,29 +124,44 @@ export interface SimilarPattern {
  */
 export interface AITradeNote {
   id: string;
-  
+
   // 関連ID
   virtualTradeId: string;
   planId: string;
-  
+
   // 基本情報
   date: string;  // YYYY-MM-DD
   symbol: string;
   direction: 'long' | 'short';
-  
+
   // 結果
   result: TradeResult;
-  
+
   // 分析
   entryAnalysis: EntryAnalysis;
   exitAnalysis: ExitAnalysis;
   planEvaluation: PlanEvaluation;
   marketReview: MarketReview;
   learnings: Learnings;
-  
+
   // 類似パターン
   similarPatterns?: SimilarPattern[];
-  
+
+  /**
+   * レンズ特徴量スナップショット（Phase 1: 並列レンズ基盤）
+   *
+   * トレード時点での全レンズ出力。SerializedLensFeatureSnapshot と同じ
+   * 構造だが、永続化層（Prisma Json?）との互換性のためにここでは
+   * プレーンな型のみで表現する。
+   *
+   * 既存ノートは undefined のまま読み込めるよう optional。
+   */
+  lensSnapshot?: {
+    timestamp: string;
+    features: Record<string, Record<string, number | string | boolean>>;
+    totalComputeDurationMs?: number;
+  };
+
   // メタ情報
   aiModel: string;
   createdAt: Date;
@@ -168,6 +183,7 @@ export interface CreateAITradeNoteInput {
   marketReview: MarketReview;
   learnings: Learnings;
   similarPatterns?: SimilarPattern[];
+  lensSnapshot?: AITradeNote['lensSnapshot'];
   aiModel: string;
 }
 
