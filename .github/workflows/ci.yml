@@ -81,6 +81,13 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
+      - name: Prisma マイグレーション適用（テスト前）
+        # 新規マイグレーションを含む PR でテストDBにカラム不足が出るのを防ぐ
+        # 既に適用済みのマイグレーションは no-op
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
       - name: Jest テスト実行
         run: npm test -- --coverage --passWithNoTests
         env:
