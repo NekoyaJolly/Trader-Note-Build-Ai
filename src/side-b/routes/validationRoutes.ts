@@ -8,7 +8,9 @@
  *   GET  /                            - 一覧（フィルタ/検索/ソート/ページネーション）  [Phase 4d]
  *   GET  /pending-validation          - screening_passed 一覧                         [Phase 4c]
  *   POST /:id/validate                - 手動で本格検証                                [Phase 4c]
+ *   GET  /:id                         - 個別仮説取得                                  [Phase 4d]
  *   GET  /:id/validation-status       - 現在のステータス・レポート                    [Phase 4c]
+ *   GET  /:id/validation-history      - 検証履歴エントリ配列                          [Phase 4d]
  */
 
 import { Router } from 'express';
@@ -21,6 +23,8 @@ router.get('/', validationController.listHypotheses);
 router.get('/pending-validation', validationController.listPendingValidation);
 
 router.post('/:id/validate', validationController.validate);
+router.get('/:id', validationController.getHypothesis);
 router.get('/:id/validation-status', validationController.getValidationStatus);
+router.get('/:id/validation-history', validationController.getValidationHistory);
 
 export { router as validationRoutes };

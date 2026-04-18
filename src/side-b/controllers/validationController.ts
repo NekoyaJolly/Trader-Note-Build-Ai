@@ -2,17 +2,21 @@
  * Phase 4c/4d: 仮説検証 API コントローラー
  *
  * エンドポイント:
- * - GET  /api/side-b/hypotheses                 (Phase 4d Step 3)
+ * - GET  /api/side-b/hypotheses                         (Phase 4d Step 3)
  *     仮説一覧をフィルタ・検索・ソート・ページネーションで取得
- * - POST /api/side-b/hypotheses/:id/validate    (Phase 4c)
+ * - GET  /api/side-b/hypotheses/:id                     (Phase 4d Step 4)
+ *     個別仮説を取得
+ * - GET  /api/side-b/hypotheses/:id/validation-history  (Phase 4d Step 4)
+ *     screening / full_validation の検証履歴エントリ配列
+ * - POST /api/side-b/hypotheses/:id/validate            (Phase 4c)
  *     手動で本格検証（StrategistAgent.validate）を走らせる
- * - GET  /api/side-b/hypotheses/:id/validation-status  (Phase 4c)
+ * - GET  /api/side-b/hypotheses/:id/validation-status   (Phase 4c)
  *     仮説の現在の検証ステータスとレポートを返す
- * - GET  /api/side-b/hypotheses/pending-validation     (Phase 4c)
+ * - GET  /api/side-b/hypotheses/pending-validation      (Phase 4c)
  *     screening_passed 状態の仮説一覧（検証待ち）を返す
  *
  * @see docs/design/phase_4c_specification.md §4.13
- * @see docs/design/phase_4d_specification.md §4.2
+ * @see docs/design/phase_4d_specification.md §4.2 §4.3
  */
 
 import type { Request, Response } from 'express';
@@ -29,7 +33,36 @@ import {
     type EdgeStatus,
     type EdgeCategory,
     type EdgeSource,
+    type ScreeningResult,
+    type ConsolidatedValidationReport,
 } from '../models/edgeHypothesis';
+
+// ===========================================
+// Phase 4d: validation-history のエントリ型
+// ===========================================
+
+/**
+ * 仮説の検証履歴エントリ。
+ *
+ * 現在の EdgeHypothesis には screeningResult と fullValidationReport が
+ * それぞれ最大 1 件しか格納されないため実質は 0〜2 件の配列だが、
+ * UI 側は配列走査で扱うことで Phase 5+ の履歴化拡張に備える。
+ */
+export type ValidationHistoryEntry =
+    | {
+        type: 'screening';
+        /** ISO8601 */
+        executedAt: string;
+        passed: boolean;
+        result: ScreeningResult;
+    }
+    | {
+        type: 'full_validation';
+        /** ISO8601 */
+        executedAt: string;
+        passed: boolean;
+        report: ConsolidatedValidationReport;
+    };
 
 // クエリパラメーター解釈用の小ユーティリティ群
 // ===========================================
@@ -172,6 +205,99 @@ export class ValidationController {
                 return;
             }
             console.error('[ValidationController] validate 失敗:', err);
+            res.status(500).json({ success: false, error: message });
+        }
+    };
+
+    /**
+     * GET /api/side-b/hypotheses/:id
+     *
+     * 個別仮説の取得。詳細ページ（仕様書 §4.3）で使用。
+     * レスポンスは `{ success, hypothesis }` の形式で、EdgeHypothesis を
+     * そのまま返す（Date は JSON 化で ISO8601 文字列になる）。
+     */
+    getHypothesis = async (req: Request, res: Response): Promise<void> => {
+        const { id } = req.params;
+        if (!id) {
+            res.status(400).json({ error: 'id は必須です' });
+            return;
+        }
+        try {
+            const hypothesis = await this.edgeLedger.get(id);
+            if (!hypothesis) {
+                res.status(404).json({
+                    success: false,
+                    error: `Hypothesis not found: ${id}`,
+                });
+                return;
+            }
+            res.json({ success: true, hypothesis });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error('[ValidationController] getHypothesis 失敗:', err);
+            res.status(500).json({ success: false, error: message });
+        }
+    };
+
+    /**
+     * GET /api/side-b/hypotheses/:id/validation-history
+     *
+     * 仮説に対して記録されている検証履歴を新しい順で返す。
+     *
+     * 現在の情報源:
+     *   - screeningResult (Phase 4b 縮小版、1 仮説 1 件)
+     *   - fullValidationReport (Phase 4c で書き込み、実データは
+     *     StrategistAgent.validate が実行された後のみ存在)
+     *
+     * 将来 Phase 5+ で複数スクリーニング履歴や複数フル検証履歴を持つように
+     * なった際は、ここを配列走査に変える前提で拡張可能な形にしている。
+     */
+    getValidationHistory = async (req: Request, res: Response): Promise<void> => {
+        const { id } = req.params;
+        if (!id) {
+            res.status(400).json({ error: 'id は必須です' });
+            return;
+        }
+        try {
+            const hypothesis = await this.edgeLedger.get(id);
+            if (!hypothesis) {
+                res.status(404).json({
+                    success: false,
+                    error: `Hypothesis not found: ${id}`,
+                });
+                return;
+            }
+
+            const history: ValidationHistoryEntry[] = [];
+
+            if (hypothesis.screeningResult) {
+                history.push({
+                    type: 'screening',
+                    executedAt: hypothesis.screeningResult.executedAt,
+                    passed: hypothesis.screeningResult.passed,
+                    result: hypothesis.screeningResult,
+                });
+            }
+
+            if (hypothesis.fullValidationReport) {
+                history.push({
+                    type: 'full_validation',
+                    executedAt: hypothesis.fullValidationReport.completedAt,
+                    passed: hypothesis.fullValidationReport.allPassed,
+                    report: hypothesis.fullValidationReport,
+                });
+            }
+
+            // 新しい順にソート
+            history.sort(
+                (a, b) =>
+                    new Date(b.executedAt).getTime() - new Date(a.executedAt).getTime(),
+            );
+
+            res.json({ success: true, history });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error('[ValidationController] getValidationHistory 失敗:', err);
             res.status(500).json({ success: false, error: message });
         }
     };

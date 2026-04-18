@@ -440,3 +440,182 @@ describe('ValidationController.listHypotheses', () => {
         expect((res.body as { success: boolean }).success).toBe(false);
     });
 });
+
+// ===========================================
+// Phase 4d Step 4: getHypothesis / getValidationHistory
+// ===========================================
+
+describe('ValidationController.getHypothesis', () => {
+    it('存在する仮説を `{ success, hypothesis }` 形式で返す', async () => {
+        const hyp = makeHypothesis({ id: 'hyp-detail-1' });
+        const ledger = {
+            get: jest.fn().mockResolvedValue(hyp),
+            findByStatus: jest.fn(),
+        };
+        const strategist = { validate: jest.fn() };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ctrl = new ValidationController(ledger as any, strategist as any);
+        const { req, res } = makeReqRes({ id: 'hyp-detail-1' });
+
+        await ctrl.getHypothesis(req, res);
+
+        expect(res.statusCode).toBe(200);
+        const body = res.body as { success: boolean; hypothesis: EdgeHypothesis };
+        expect(body.success).toBe(true);
+        expect(body.hypothesis.id).toBe('hyp-detail-1');
+        expect(ledger.get).toHaveBeenCalledWith('hyp-detail-1');
+    });
+
+    it('存在しない仮説は 404', async () => {
+        const ledger = {
+            get: jest.fn().mockResolvedValue(null),
+            findByStatus: jest.fn(),
+        };
+        const strategist = { validate: jest.fn() };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ctrl = new ValidationController(ledger as any, strategist as any);
+        const { req, res } = makeReqRes({ id: 'hyp-missing' });
+
+        await ctrl.getHypothesis(req, res);
+        expect(res.statusCode).toBe(404);
+        expect((res.body as { success: boolean }).success).toBe(false);
+    });
+
+    it('id が欠落していれば 400', async () => {
+        const ledger = { get: jest.fn(), findByStatus: jest.fn() };
+        const strategist = { validate: jest.fn() };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ctrl = new ValidationController(ledger as any, strategist as any);
+        const { req, res } = makeReqRes({});
+
+        await ctrl.getHypothesis(req, res);
+        expect(res.statusCode).toBe(400);
+        expect(ledger.get).not.toHaveBeenCalled();
+    });
+
+    it('ledger が throw したら 500', async () => {
+        const ledger = {
+            get: jest.fn().mockRejectedValue(new Error('db error')),
+            findByStatus: jest.fn(),
+        };
+        const strategist = { validate: jest.fn() };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ctrl = new ValidationController(ledger as any, strategist as any);
+        const { req, res } = makeReqRes({ id: 'hyp-1' });
+
+        await ctrl.getHypothesis(req, res);
+        expect(res.statusCode).toBe(500);
+    });
+});
+
+describe('ValidationController.getValidationHistory', () => {
+    it('screeningResult のみがある場合、screening エントリ 1 件だけを返す', async () => {
+        const hyp = makeHypothesis({
+            screeningResult: {
+                executedAt: '2026-01-15T10:00:00Z',
+                tradeNoteId: 'note-1',
+                passed: true,
+                metrics: { pf: 1.8, winRate: 0.55, tradeCount: 30 },
+            },
+        });
+        const ledger = {
+            get: jest.fn().mockResolvedValue(hyp),
+            findByStatus: jest.fn(),
+        };
+        const strategist = { validate: jest.fn() };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ctrl = new ValidationController(ledger as any, strategist as any);
+        const { req, res } = makeReqRes({ id: 'hyp-api-1' });
+
+        await ctrl.getValidationHistory(req, res);
+
+        expect(res.statusCode).toBe(200);
+        const body = res.body as { success: boolean; history: Array<Record<string, unknown>> };
+        expect(body.success).toBe(true);
+        expect(body.history).toHaveLength(1);
+        expect(body.history[0].type).toBe('screening');
+        expect(body.history[0].passed).toBe(true);
+        expect(body.history[0].executedAt).toBe('2026-01-15T10:00:00Z');
+    });
+
+    it('screeningResult も fullValidationReport も無ければ history は空配列', async () => {
+        const hyp = makeHypothesis();
+        const ledger = {
+            get: jest.fn().mockResolvedValue(hyp),
+            findByStatus: jest.fn(),
+        };
+        const strategist = { validate: jest.fn() };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ctrl = new ValidationController(ledger as any, strategist as any);
+        const { req, res } = makeReqRes({ id: 'hyp-api-1' });
+
+        await ctrl.getValidationHistory(req, res);
+
+        expect(res.statusCode).toBe(200);
+        const body = res.body as { history: unknown[] };
+        expect(body.history).toEqual([]);
+    });
+
+    it('両方ある場合は full_validation / screening を新しい順に並べる', async () => {
+        const hyp = makeHypothesis({
+            screeningResult: {
+                executedAt: '2026-01-15T10:00:00Z',
+                tradeNoteId: 'note-1',
+                passed: true,
+                metrics: { pf: 1.8, winRate: 0.55, tradeCount: 30 },
+            },
+            fullValidationReport: {
+                hypothesisId: 'hyp-api-1',
+                periodUsed: { start: '2025-01-01', end: '2025-12-31' },
+                allPassed: false,
+                passedCount: 3,
+                totalCount: 4,
+                startedAt: '2026-02-01T00:00:00Z',
+                completedAt: '2026-02-01T00:00:10Z',
+                totalDurationMs: 10000,
+                errors: [],
+            },
+        });
+        const ledger = {
+            get: jest.fn().mockResolvedValue(hyp),
+            findByStatus: jest.fn(),
+        };
+        const strategist = { validate: jest.fn() };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ctrl = new ValidationController(ledger as any, strategist as any);
+        const { req, res } = makeReqRes({ id: 'hyp-api-1' });
+
+        await ctrl.getValidationHistory(req, res);
+
+        const body = res.body as { history: Array<{ type: string; executedAt: string }> };
+        expect(body.history).toHaveLength(2);
+        // completedAt が screening.executedAt より新しいので full_validation が先
+        expect(body.history[0].type).toBe('full_validation');
+        expect(body.history[1].type).toBe('screening');
+    });
+
+    it('存在しない仮説は 404', async () => {
+        const ledger = {
+            get: jest.fn().mockResolvedValue(null),
+            findByStatus: jest.fn(),
+        };
+        const strategist = { validate: jest.fn() };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ctrl = new ValidationController(ledger as any, strategist as any);
+        const { req, res } = makeReqRes({ id: 'hyp-missing' });
+
+        await ctrl.getValidationHistory(req, res);
+        expect(res.statusCode).toBe(404);
+    });
+
+    it('id が欠落していれば 400', async () => {
+        const ledger = { get: jest.fn(), findByStatus: jest.fn() };
+        const strategist = { validate: jest.fn() };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ctrl = new ValidationController(ledger as any, strategist as any);
+        const { req, res } = makeReqRes({});
+
+        await ctrl.getValidationHistory(req, res);
+        expect(res.statusCode).toBe(400);
+    });
+});
