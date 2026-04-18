@@ -15,17 +15,27 @@ import {
 } from '../knowledge';
 
 describe('indicatorKnowledge', () => {
-    describe('CORE_TRADING_RULES', () => {
-        it('インジケーター優先順位ルールが含まれる', () => {
-            expect(CORE_TRADING_RULES).toContain('SMA/EMA');
-            expect(CORE_TRADING_RULES).toContain('ADX');
-            expect(CORE_TRADING_RULES).toContain('RSI');
-            expect(CORE_TRADING_RULES).toContain('MACD');
+    describe('CORE_TRADING_RULES (Phase 2 判断品質メタルール)', () => {
+        it('旧「インジケーター優先順位」文言が削除されている', () => {
+            // Phase 2 で意図的に撤廃された項目
+            expect(CORE_TRADING_RULES).not.toContain('インジケーター優先順位');
+            expect(CORE_TRADING_RULES).not.toContain('最優先。大局の方向を決定');
         });
 
-        it('禁止事項が含まれる', () => {
-            expect(CORE_TRADING_RULES).toContain('単独判断禁止');
-            expect(CORE_TRADING_RULES).toContain('矛盾時は見送り');
+        it('判断品質メタルールのコア項目が含まれる', () => {
+            expect(CORE_TRADING_RULES).toContain('単独判断の禁止');
+            expect(CORE_TRADING_RULES).toContain('最低2系統');
+            expect(CORE_TRADING_RULES).toContain('採用理由の明示義務');
+            expect(CORE_TRADING_RULES).toContain('オッカムの剃刀');
+            expect(CORE_TRADING_RULES).toContain('矛盾の取り扱い');
+            expect(CORE_TRADING_RULES).toContain('多重検定問題');
+            expect(CORE_TRADING_RULES).toContain('エントリーしない');
+        });
+
+        it('禁止事項（方向性を示さない系）が含まれる', () => {
+            expect(CORE_TRADING_RULES).toContain('ADX');
+            expect(CORE_TRADING_RULES).toContain('ATR');
+            expect(CORE_TRADING_RULES).toContain('N=1は棄却');
         });
 
         it('12次元特徴量の説明が含まれる', () => {

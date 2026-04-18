@@ -19,14 +19,14 @@
 
 以下の全てを満たす:
 
-- [ ] 各エージェントのシステムプロンプトが `src/side-b/prompts/*.md` に外部ファイル化されている
-- [ ] `CORE_TRADING_RULES` の「インジケーター優先順位」が撤廃され、「判断品質メタルール」に置き換わっている
-- [ ] Strategy Thinker が「仮説 → 反証 → 戦略化」の3ステップで動作する
-- [ ] 新エージェント `DevilsAdvocateAgent` が実装され、Strategy Thinker の出力を叩く
-- [ ] PDCA ループに Devil's Advocate 呼び出しが組み込まれている
-- [ ] Strategy Thinker の出力に `indicatorsUsed` / `indicatorsIgnored` / `patternLabel` / `multipleTestingDefense` フィールドが追加されている
-- [ ] 既存のテストが全て通る
-- [ ] 新ロジックにユニットテストが追加されている
+- [x] 各エージェントのシステムプロンプトが `src/side-b/prompts/*.md` に外部ファイル化されている
+- [x] `CORE_TRADING_RULES` の「インジケーター優先順位」が撤廃され、「判断品質メタルール」に置き換わっている
+- [x] Strategy Thinker が「仮説 → 反証 → 戦略化」の3ステップで動作する
+- [x] 新エージェント `DevilsAdvocateAgent` が実装され、Strategy Thinker の出力を叩く
+- [x] PDCA ループに Devil's Advocate 呼び出しが組み込まれている（実装場所: `aiOrchestrator.ts` の Plan AI 呼び出し直後。pdcaLoop.ts は状態機械のみで planAI を直接呼ばないため、実際の呼び出し元である orchestrator に配置。PDCA サイクルの一部として機能する）
+- [x] Strategy Thinker の出力に `indicatorsUsed` / `indicatorsIgnored` / `patternLabel` / `multipleTestingDefense` フィールドが追加されている
+- [x] 既存のテストが全て通る（Side-B 全 292 テスト passing）
+- [x] 新ロジックにユニットテストが追加されている（loader.test.ts 7件 + devilsAdvocate.test.ts 12件）
 
 ---
 

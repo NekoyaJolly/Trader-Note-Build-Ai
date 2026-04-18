@@ -132,6 +132,49 @@ export interface AITradeScenario {
 
   // 無効化条件
   invalidationConditions: string[];
+
+  // --- Phase 2: 判断品質メタフィールド（オプショナル、後方互換） ---
+  /** 採用したインジケーター/レンズ名の配列 */
+  indicatorsUsed?: string[];
+  /** 意図的に使わなかった主要インジケーター/レンズ名の配列 */
+  indicatorsIgnored?: string[];
+  /** indicatorsUsed を選んだ理由 */
+  reasonForSelection?: string;
+  /** indicatorsIgnored を使わなかった理由 */
+  reasonForIgnoring?: string;
+  /** 判断を表す人間語ラベル (例: "レンジ下限反発") */
+  patternLabel?: string;
+  /** 多重検定問題に対する弁明（この判断が偶然ではない理由） */
+  multipleTestingDefense?: string;
+  /** Devil's Advocate による警告（pdca / orchestrator が付与） */
+  warnings?: string[];
+}
+
+// ===========================================
+// Phase 2: 仮説 & 自己反証
+// ===========================================
+
+/**
+ * Strategy Thinker が生成する仮説
+ */
+export interface StrategyHypothesis {
+  id: string;
+  /** 仮説の命題（もし〜なら〜） */
+  statement: string;
+  /** なぜその偏りが存在するかの市場構造からの説明 */
+  reasoning: string;
+  /** 期待される価格挙動の方向と大きさ */
+  expectedBehavior: string;
+}
+
+/**
+ * 仮説に対する自己反証
+ */
+export interface HypothesisRefutation {
+  /** 対象の仮説ID */
+  hypothesisId: string;
+  /** 仮説が成立しない具体シナリオ（最低2つ） */
+  counterScenarios: string[];
 }
 
 /**
@@ -226,6 +269,12 @@ export interface PlanAIOutput {
   scenarios: Omit<AITradeScenario, 'id'>[];
   overallConfidence: number;
   warnings: string[];
+
+  // --- Phase 2: 3ステップ思考の痕跡（オプショナル） ---
+  /** Strategy Thinker のステップ1（仮説生成）の出力 */
+  hypotheses?: StrategyHypothesis[];
+  /** Strategy Thinker のステップ2（自己反証）の出力 */
+  selfRefutation?: HypothesisRefutation[];
 }
 
 // ===========================================
@@ -278,11 +327,50 @@ export function validatePlanAIOutput(data: unknown): PlanAIOutput {
     }
   }
 
+  // --- Phase 2: 追加フィールドのバリデーション（全てオプショナル） ---
+  let hypotheses: StrategyHypothesis[] | undefined;
+  if (obj.hypotheses !== undefined) {
+    if (!Array.isArray(obj.hypotheses)) {
+      throw new Error('hypotheses must be an array');
+    }
+    hypotheses = (obj.hypotheses as unknown[]).map((h) => {
+      const hh = h as Record<string, unknown>;
+      if (typeof hh.id !== 'string' || typeof hh.statement !== 'string') {
+        throw new Error('Hypothesis missing required fields (id, statement)');
+      }
+      return {
+        id: hh.id,
+        statement: hh.statement,
+        reasoning: typeof hh.reasoning === 'string' ? hh.reasoning : '',
+        expectedBehavior: typeof hh.expectedBehavior === 'string' ? hh.expectedBehavior : '',
+      };
+    });
+  }
+
+  let selfRefutation: HypothesisRefutation[] | undefined;
+  if (obj.selfRefutation !== undefined) {
+    if (!Array.isArray(obj.selfRefutation)) {
+      throw new Error('selfRefutation must be an array');
+    }
+    selfRefutation = (obj.selfRefutation as unknown[]).map((r) => {
+      const rr = r as Record<string, unknown>;
+      if (typeof rr.hypothesisId !== 'string' || !Array.isArray(rr.counterScenarios)) {
+        throw new Error('Refutation missing required fields (hypothesisId, counterScenarios)');
+      }
+      return {
+        hypothesisId: rr.hypothesisId,
+        counterScenarios: (rr.counterScenarios as unknown[]).map(String),
+      };
+    });
+  }
+
   return {
     marketAnalysis: ma as unknown as PlanMarketAnalysis,
     scenarios: scenarios as Omit<AITradeScenario, 'id'>[],
     overallConfidence,
     warnings: (obj.warnings as string[]) || [],
+    ...(hypotheses !== undefined ? { hypotheses } : {}),
+    ...(selfRefutation !== undefined ? { selfRefutation } : {}),
   };
 }
 
