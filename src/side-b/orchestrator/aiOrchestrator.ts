@@ -43,6 +43,20 @@ import {
 } from '../models';
 import { buildHigherTFContext } from '../knowledge';
 import type { HigherTimeframeContext } from '../knowledge';
+import { DevilsAdvocateAgent, devilsAdvocateAgent } from '../agents/DevilsAdvocateAgent';
+import {
+  defaultLensAggregator,
+  registerDefaultLenses,
+  serializeLensSnapshot,
+  type LensFeatureSnapshot,
+} from '../lenses';
+import { agentMemory } from '../agent/agentMemory';
+import { edgeLedger } from '../ledger';
+import {
+  HypothesisGeneratorAgent,
+  hypothesisGeneratorAgent,
+} from '../agents/HypothesisGeneratorAgent';
+import type { EdgeHypothesis } from '../models/edgeHypothesis';
 
 // ===========================================
 // 型定義
@@ -98,17 +112,23 @@ export class AIOrchestrator {
   private planAI: PlanAIService;
   private researchRepo: ResearchRepository;
   private planRepo: PlanRepository;
+  private devilsAdvocate: DevilsAdvocateAgent;
+  private hypothesisGenerator: HypothesisGeneratorAgent;
 
   constructor(
     researchAI?: ResearchAIService,
     planAI?: PlanAIService,
     researchRepo?: ResearchRepository,
-    planRepo?: PlanRepository
+    planRepo?: PlanRepository,
+    devilsAdvocate?: DevilsAdvocateAgent,
+    hypothesisGenerator?: HypothesisGeneratorAgent,
   ) {
     this.researchAI = researchAI || researchAIService;
     this.planAI = planAI || planAIService;
     this.researchRepo = researchRepo || researchRepository;
     this.planRepo = planRepo || planRepository;
+    this.devilsAdvocate = devilsAdvocate || devilsAdvocateAgent;
+    this.hypothesisGenerator = hypothesisGenerator || hypothesisGeneratorAgent;
   }
 
   /**
@@ -283,13 +303,78 @@ export class AIOrchestrator {
         }
       }
 
-      // 4. Plan AI 呼び出し
-      console.log(`[Orchestrator] Plan AI 呼び出し`);
+      // 4a. 並列レンズ計算（Phase 3）— Strategy Thinker 呼び出し前に実行
+      registerDefaultLenses();
+      let lensSnapshot: LensFeatureSnapshot | undefined;
+      try {
+        lensSnapshot = await defaultLensAggregator.computeAll({
+          symbol,
+          timeframe: '15m',
+          timestamp: new Date(),
+          ohlcvBars: ohlcvData, // researchId 経由時は undefined の可能性あり（レンズ側で unclear/unknown を返す）
+          existingAnalysis: research.marketAnalysis,
+        });
+        console.log(`[Orchestrator] レンズ計算完了: ${lensSnapshot.features.size}個 / ${lensSnapshot.totalComputeDurationMs}ms`);
+        // Reflection 用に AgentMemory へ保存
+        agentMemory.setCurrentLensSnapshot(symbol, lensSnapshot);
+      } catch (lensError) {
+        console.warn(`[Orchestrator] レンズ計算失敗（戦略生成は続行）:`, lensError);
+      }
+
+      // 4b. 候補仮説を集める（Phase 4a: EdgeLedger マッチ + HypothesisGenerator 新規）
+      let candidateHypotheses: EdgeHypothesis[] = [];
+      let hypothesisGeneratorTokens = 0;
+      if (lensSnapshot) {
+        try {
+          const matched = await edgeLedger.findMatching(symbol, lensSnapshot, {
+            statuses: ['confirmed', 'testing', 'unverified'],
+          });
+          console.log(`[Orchestrator] 既存マッチ仮説: ${matched.length}個`);
+
+          // マッチが少ない時だけ新規候補を生成（LLMコスト制御）
+          if (matched.length < 3) {
+            const genResult = await this.hypothesisGenerator.generate({
+              symbol,
+              timeframe: '15m',
+              lensSnapshot,
+              existingHypotheses: matched,
+            });
+            hypothesisGeneratorTokens = genResult.tokenUsage;
+            const createInputs = this.hypothesisGenerator.toCreateInputs(
+              genResult.output,
+              {
+                symbol,
+                timeframe: '15m',
+                lensSnapshot,
+                existingHypotheses: matched,
+              },
+            );
+            for (const ci of createInputs) {
+              try {
+                const created = await edgeLedger.create(ci);
+                matched.push(created);
+              } catch (err) {
+                console.warn('[Orchestrator] EdgeLedger.create 失敗:', err);
+              }
+            }
+            console.log(`[Orchestrator] 新規仮説登録: ${createInputs.length}個`);
+          }
+
+          candidateHypotheses = matched;
+        } catch (err) {
+          console.warn('[Orchestrator] 候補仮説収集失敗（戦略生成は続行）:', err);
+        }
+      }
+
+      // 4c. Plan AI 呼び出し
+      console.log(`[Orchestrator] Plan AI 呼び出し (候補仮説: ${candidateHypotheses.length}個)`);
       const planInput: PlanAIInput = {
         research,
         targetDate: dateStr,
         userPreferences,
         higherTF: higherTFContext,
+        lensSnapshot,
+        candidateHypotheses,
       };
 
       const planResult = await this.planAI.generatePlan(planInput);
@@ -300,7 +385,33 @@ export class AIOrchestrator {
         id: `${symbol}-${dateStr}-${index + 1}`,
       }));
 
-      // 4. DB保存（Plan AIが解釈を含む新設計）
+      // 5. Devil's Advocate で各シナリオをレビュー（Phase 2）
+      //    abandon 判定なら confidence を 20 に抑え、warnings に追加する。
+      //    代替戦略は提案させない（反証専任）。
+      let devilsAdvocateTokens = 0;
+      const aggregatedWarnings: string[] = [...(planResult.output.warnings ?? [])];
+      for (const scenario of scenariosWithId) {
+        try {
+          const critique = await this.devilsAdvocate.critique(scenario, planResult.output.marketAnalysis);
+          devilsAdvocateTokens += critique.tokenUsage;
+
+          if (critique.output.recommendation.action === 'abandon') {
+            scenario.confidence = Math.min(scenario.confidence, 20);
+            const warn = `Devil's Advocate: ${critique.output.recommendation.rationale}`;
+            scenario.warnings = [...(scenario.warnings ?? []), warn];
+            aggregatedWarnings.push(`[${scenario.name}] ${warn}`);
+            console.log(`[Orchestrator] Devil's Advocate abandon: ${scenario.name}`);
+          } else if (critique.output.recommendation.action === 'modify') {
+            const warn = `Devil's Advocate(modify): ${critique.output.recommendation.rationale}`;
+            scenario.warnings = [...(scenario.warnings ?? []), warn];
+            console.log(`[Orchestrator] Devil's Advocate modify: ${scenario.name}`);
+          }
+        } catch (daError) {
+          console.warn(`[Orchestrator] Devil's Advocate 失敗（スキップ）:`, daError);
+        }
+      }
+
+      // 6. DB保存（Plan AIが解釈を含む新設計）
       const saved = await this.planRepo.create({
         researchId: research.id,
         targetDate: date,
@@ -308,9 +419,9 @@ export class AIOrchestrator {
         marketAnalysis: planResult.output.marketAnalysis,
         scenarios: scenariosWithId,
         overallConfidence: planResult.output.overallConfidence,
-        warnings: planResult.output.warnings,
+        warnings: aggregatedWarnings,
         aiModel: planResult.model,
-        tokenUsage: planResult.tokenUsage,
+        tokenUsage: planResult.tokenUsage + devilsAdvocateTokens,
       });
 
       console.log(`[Orchestrator] プラン保存完了: ${saved.id}`);
@@ -319,7 +430,11 @@ export class AIOrchestrator {
         success: true,
         data: saved,
         cached: false,
-        tokenUsage: researchTokens + planResult.tokenUsage,
+        tokenUsage:
+          researchTokens +
+          planResult.tokenUsage +
+          devilsAdvocateTokens +
+          hypothesisGeneratorTokens,
       };
     } catch (error) {
       console.error(`[Orchestrator] プラン生成エラー:`, error);

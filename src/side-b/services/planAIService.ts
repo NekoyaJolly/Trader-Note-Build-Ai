@@ -28,6 +28,9 @@ import {
   getMTFContext,
 } from '../knowledge';
 import type { MacroEnvironmentData, HigherTimeframeContext } from '../knowledge';
+import { loadPrompt } from '../prompts/loader';
+import type { LensFeatureSnapshot } from '../lenses';
+import type { EdgeHypothesis } from '../models/edgeHypothesis';
 
 // ===========================================
 // 型定義
@@ -44,6 +47,16 @@ export interface PlanAIInput {
   higherTF?: HigherTimeframeContext;
   /** エージェントの過去の学び（Phase 3で活用） */
   agentLessons?: string[];
+  /**
+   * 並列レンズ出力（Phase 3 で導入）
+   * Strategy Thinker のユーザープロンプトに注入される。
+   */
+  lensSnapshot?: LensFeatureSnapshot;
+  /**
+   * EdgeLedger + HypothesisGenerator から提示される候補仮説（Phase 4a）
+   * Strategy Thinker はこの中から選択・戦略化する。
+   */
+  candidateHypotheses?: EdgeHypothesis[];
 }
 
 /**
@@ -127,10 +140,12 @@ export class PlanAIService {
    * プロンプトを構築 — MarketAnalysis ベースの戦略思考
    */
   private buildPrompt(input: PlanAIInput): string {
-    const { research, targetDate, userPreferences, macroData, higherTF, agentLessons } = input;
+    const { research, targetDate, userPreferences, macroData, higherTF, agentLessons, lensSnapshot, candidateHypotheses } = input;
     const fv = research.featureVector;
     const snapshot = research.ohlcvSnapshot;
     const analysis = research.marketAnalysis;
+    const lensContext = this.buildLensContext(lensSnapshot);
+    const candidateContext = this.buildCandidateHypothesesContext(candidateHypotheses);
 
     // MarketAnalysis がある場合のリッチコンテキスト
     const analysisContext = analysis ? `
@@ -176,11 +191,7 @@ ${agentLessons.map((l, i) => `${i + 1}. ${l}`).join('\n')}
 
     return `# トレード戦略立案リクエスト
 
-## あなたの役割
-あなたは自律型トレーディングAIの「戦略思考」担当です。
-Market Analyst の分析結果に基づいて、**再現性のある**トレード戦略を立案してください。
-
-重要: あなたの戦略は自動実行されます。条件を明確に、曖昧さなく定義してください。
+システムプロンプトに記載した**3ステップ（仮説生成 → 自己反証 → 戦略化）**で思考し、指定のJSON形式で出力してください。
 
 ## 対象日: ${targetDate}
 ## シンボル: ${research.symbol}
@@ -205,86 +216,88 @@ ${userPreferences ? `
 
 ${lessonsContext}
 
-## 戦略立案のルール
+${lensContext}
 
-### 再現性の原則
-- 「なぜこのエントリーか」を必ず明記（rationale）
-- 「いつこの戦略が無効になるか」を必ず明記（invalidationConditions）
-- 感覚的判断ではなく、テクニカル根拠に基づく
+${candidateContext}
 
-### エントリー条件
-- 「価格が〇〇に到達し、かつRSIが〇〇以下の場合」のように、具体的な条件を記述
-- 自動監視で判定可能な条件にすること
+## このリクエストに関する注意
+- エントリー条件は自動監視で判定可能な具体的条件にすること
+- 戦略化で採用したシナリオには必ず indicatorsUsed / indicatorsIgnored / reasonForSelection / reasonForIgnoring / patternLabel / multipleTestingDefense を埋めること
+- シナリオは 0〜3個（条件が揃わなければ 0個 = ノートレード推奨）
+- 有効な JSON のみを出力${getPlanIndicatorContext(fv as Record<string, number>)}${getMacroContext(macroData)}${getMTFContext(higherTF, fv.trendDirection)}`;
+  }
 
-### リスク管理
-- SLは必ずテクニカル根拠のある場所に
-- RR比は最低1.5以上を推奨
-- 「エントリーしない」という判断も正しい
+  /**
+   * EdgeLedger / HypothesisGenerator から提示された候補仮説を
+   * ユーザープロンプトに整形する。空なら空文字列を返す。
+   */
+  private buildCandidateHypothesesContext(
+    candidates?: readonly EdgeHypothesis[],
+  ): string {
+    if (!candidates || candidates.length === 0) return '';
 
-## 出力形式（JSON）
-
-\`\`\`json
-{
-  "marketAnalysis": {
-    "regime": "<strong_uptrend|uptrend|range|downtrend|strong_downtrend|volatile>",
-    "regimeConfidence": <0-100>,
-    "trendDirection": "<up|down|sideways>",
-    "volatility": "<low|medium|high>",
-    "keyLevels": {
-      "strongResistance": [<価格>],
-      "resistance": [<価格>],
-      "support": [<価格>],
-      "strongSupport": [<価格>]
-    },
-    "summary": "<日本語100文字以内の市場分析サマリー>",
-    "additionalInsights": ["<追加の洞察>"]
-  },
-  "scenarios": [
-    {
-      "name": "<シナリオ名（日本語）>",
-      "direction": "<long|short>",
-      "priority": "<primary|secondary|alternative>",
-      "entry": {
-        "type": "<limit|market|stop>",
-        "price": <エントリー価格>,
-        "condition": "<エントリー条件（具体的に。例: RSIが35を下回り、BB下限に接触した場合）>",
-        "triggerIndicators": ["RSI", "BB"]
-      },
-      "stopLoss": {
-        "price": <SL価格>,
-        "pips": <SL pips>,
-        "reason": "<SL設定根拠>"
-      },
-      "takeProfit": {
-        "price": <TP価格>,
-        "pips": <TP pips>,
-        "reason": "<TP設定根拠>"
-      },
-      "riskReward": <RR比>,
-      "confidence": <0-100>,
-      "rationale": "<この戦略の論理的根拠（なぜこの方向、このレベルか）100-200文字>",
-      "invalidationConditions": [
-        "<無効化条件（例: 価格がSMA200を下回った場合）>"
-      ]
+    const sections: string[] = ['## 候補仮説（EdgeLedger + HypothesisGenerator）'];
+    for (const h of candidates) {
+      sections.push(
+        `### ${h.id} [${h.status}, ${h.category}, ${h.expectedDirection}]`,
+        `- ${h.statement}`,
+      );
+      if (h.observationCount > 0) {
+        const decided = h.winCount + h.lossCount;
+        const winRate = decided > 0 ? ((h.winCount / decided) * 100).toFixed(1) : 'n/a';
+        sections.push(
+          `- 観測: ${h.observationCount}回 (勝${h.winCount}/負${h.lossCount}/引${h.breakevenCount}, 勝率${winRate}%, 累計${h.totalPnlPips.toFixed(1)}pips)`,
+        );
+      }
+      if (h.conditions && h.conditions.length > 0) {
+        sections.push('- 成立条件:');
+        for (const c of h.conditions) {
+          sections.push(`  - ${c.lensName}.${c.featureKey} ${c.op} ${JSON.stringify(c.value)}`);
+        }
+      }
     }
-  ],
-  "overallConfidence": <0-100>,
-  "warnings": ["<注意事項>"]
-}
-\`\`\`
 
-## 重要な制約
-- シナリオは0-3個（条件が悪ければ0個 = ノートレード推奨）
-- primaryは最大1つ
-- confidence 30未満のシナリオは出さない
-- 日本語で記述
-- 有効なJSONのみを出力${getPlanIndicatorContext(fv as Record<string, number>)}${getMacroContext(macroData)}${getMTFContext(higherTF, fv.trendDirection)}`;
+    sections.push(
+      `\nあなたはこれらの候補から**選択・戦略化**することに集中してください。新規仮説の生成は不要です（他のエージェントの責務）。`,
+      `選んだ ID は selectedHypothesisId に、棄却した ID は rejectedCandidateIds に明記してください。`,
+    );
+
+    return sections.join('\n');
+  }
+
+  /**
+   * 並列レンズ出力をユーザープロンプトに注入する形に整形する。
+   * snapshot が空 or 未指定の場合は空文字列を返す。
+   */
+  private buildLensContext(snapshot?: LensFeatureSnapshot): string {
+    if (!snapshot || snapshot.features.size === 0) return '';
+
+    const sections: string[] = ['## 並列レンズ観測結果'];
+    for (const [lensName, feature] of snapshot.features.entries()) {
+      sections.push(`### ${lensName} (v${feature.lensVersion}, confidence=${feature.confidence ?? 'n/a'})`);
+      for (const [key, value] of Object.entries(feature.features)) {
+        sections.push(`- ${key}: ${JSON.stringify(value)}`);
+      }
+    }
+
+    sections.push(
+      `\nこれらは独立した複数の観測レンズの出力です。どのレンズを重視するかはあなたが判断してください。`,
+      `ただし、採用した/しなかったレンズとその理由は indicatorsUsed / indicatorsIgnored / reasonForSelection / reasonForIgnoring に明記してください。`,
+    );
+
+    return sections.join('\n');
   }
 
   /**
    * AI APIを呼び出し
    */
   private async callAI(prompt: string): Promise<{ content: unknown; tokenUsage: number; model: string }> {
+    const systemPrompt = loadPrompt('strategy_thinker', {
+      CORE_TRADING_RULES,
+      MACRO_ENVIRONMENT_RULES,
+      MTF_ANALYSIS_RULES,
+    });
+
     const response = await fetch(`${this.baseURL}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -296,23 +309,7 @@ ${lessonsContext}
         messages: [
           {
             role: 'system',
-            content: `あなたは自律型トレーディングAIの戦略立案エンジンです。
-Market Analystの分析結果を基に、再現性のあるトレード戦略を立案してください。
-
-${CORE_TRADING_RULES}
-
-${MACRO_ENVIRONMENT_RULES}
-
-${MTF_ANALYSIS_RULES}
-
-あなたの戦略の特徴:
-1. 再現性 — 同じ条件なら同じ判断をする
-2. 条件明確 — 自動監視で判定できる具体的な条件
-3. リスク管理 — 常にSL/TPの根拠を明記
-4. 学習反映 — 過去の失敗から学んだことを反映
-5. 見送り判断 — 条件が悪ければシナリオ0個もあり
-
-重要: 必ず有効なJSONのみを出力してください。`,
+            content: systemPrompt,
           },
           {
             role: 'user',
@@ -321,7 +318,7 @@ ${MTF_ANALYSIS_RULES}
         ],
         response_format: { type: 'json_object' },
         temperature: 0.4,
-        max_tokens: 3000,
+        max_tokens: 3500,
       }),
     });
 
