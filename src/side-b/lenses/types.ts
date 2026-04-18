@@ -12,6 +12,7 @@
 
 import type { MarketAnalysis } from '../models/marketAnalysis';
 import type { OHLCVSnapshot } from '../models/marketResearch';
+import type { OHLCVBar } from './utils/pivotDetection';
 
 /**
  * レンズへの入力データ
@@ -26,8 +27,14 @@ export interface LensInput {
   timeframe: string;
   /** 分析対象時刻（UTC） */
   timestamp: Date;
-  /** OHLCV スナップショット（あれば） */
+  /** OHLCV 要約スナップショット（Phase 1 基本レンズ用） */
   ohlcv?: OHLCVSnapshot;
+  /**
+   * OHLCV バー列（Phase 3 で追加）
+   * ピボット検出・BB幅パーセンタイル等、バー単位の計算が必要なレンズはここを参照する。
+   * 既存レンズ（CurrentAnalysis / TimeSession）は無視して問題ない。
+   */
+  ohlcvBars?: readonly OHLCVBar[];
   /** 事前計算済みインジケーター値（あれば） */
   indicators?: Record<string, number>;
   /** 既存の MarketAnalysis 結果（渡されていれば再計算不要） */

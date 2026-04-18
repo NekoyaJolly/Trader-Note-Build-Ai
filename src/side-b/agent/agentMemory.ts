@@ -12,6 +12,7 @@
  */
 
 import type { MarketAnalysis } from '../models/marketAnalysis';
+import type { LensFeatureSnapshot } from '../lenses';
 import { lessonSimilarityService } from '../services/lessonSimilarityService';
 
 // ===========================================
@@ -141,6 +142,9 @@ export interface AgentMemoryState {
     /** 今日の戦略コンテキスト（シンボルごと） */
     todayStrategies: Map<string, TodayStrategyContext>;
 
+    /** 直近のレンズスナップショット（Phase 3: Reflection 用。シンボルごと） */
+    currentLensSnapshots: Map<string, LensFeatureSnapshot>;
+
     /** 学習メモ — シンボル別管理 */
     lessonsBySymbol: Map<string, SymbolLessons>;
 
@@ -168,6 +172,7 @@ export class AgentMemory {
             recentTradeResults: [],
             openPositions: [],
             todayStrategies: new Map(),
+            currentLensSnapshots: new Map(),
             lessonsBySymbol: new Map(),
             cycleCount: 0,
         };
@@ -250,6 +255,27 @@ export class AgentMemory {
 
     clearTodayStrategies(): void {
         this.state.todayStrategies.clear();
+    }
+
+    // --- レンズスナップショット（Phase 3） ---
+
+    /**
+     * シンボル別に直近のレンズスナップショットを保存する。
+     * Plan 生成時 → Reflection 時までのブリッジとして使う。
+     */
+    setCurrentLensSnapshot(symbol: string, snapshot: LensFeatureSnapshot): void {
+        this.state.currentLensSnapshots.set(symbol, snapshot);
+    }
+
+    /**
+     * 指定シンボルの直近レンズスナップショットを取得する。
+     */
+    getCurrentLensSnapshot(symbol: string): LensFeatureSnapshot | undefined {
+        return this.state.currentLensSnapshots.get(symbol);
+    }
+
+    clearCurrentLensSnapshot(symbol: string): void {
+        this.state.currentLensSnapshots.delete(symbol);
     }
 
     // --- 学習メモ（シンボル別管理） ---

@@ -23,14 +23,14 @@
 
 以下の全てを満たす:
 
-- [ ] `DowTheoryLens` が実装され、ピボット検出・高値安値判定・トレンド状態を出力する
-- [ ] `VolatilityRegimeLens` が実装され、BB幅パーセンタイル・ATR変化率・状態ラベルを出力する
-- [ ] 両レンズが `defaultLensAggregator` に登録されている
-- [ ] PDCA ループで、Strategy Thinker 呼び出し前に全レンズが計算される
-- [ ] Strategy Thinker のユーザープロンプトに、レンズ出力のサマリーが注入される
-- [ ] AITradeNote の `lensSnapshot` に両レンズ出力が記録される
-- [ ] 各レンズに決定性テスト・境界値テストが追加されている
-- [ ] 既存テストが全て通る
+- [x] `DowTheoryLens` が実装され、ピボット検出・高値安値判定・トレンド状態を出力する
+- [x] `VolatilityRegimeLens` が実装され、BB幅パーセンタイル・ATR変化率・状態ラベルを出力する
+- [x] 両レンズが `defaultLensAggregator` に登録されている（`registerDefaultLenses()` 内）
+- [x] PDCA パイプラインで、Strategy Thinker 呼び出し前に全レンズが計算される（実装場所: `aiOrchestrator.ts`。pdcaLoop.ts は状態機械で実呼び出しを行わないため、Plan AI を実際に呼ぶオーケストレーターに配置）
+- [x] Strategy Thinker のユーザープロンプトに、レンズ出力のサマリーが注入される（`planAIService.buildLensContext()`）
+- [x] AITradeNote の `lensSnapshot` に両レンズ出力が記録される（orchestrator → agentMemory → scheduler → aiNoteService のパイプ）
+- [x] 各レンズに決定性テスト・境界値テストが追加されている
+- [x] 既存テストが全て通る（Side-B 全 314 テスト passing）
 
 ---
 

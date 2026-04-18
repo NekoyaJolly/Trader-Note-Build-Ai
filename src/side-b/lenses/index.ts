@@ -20,17 +20,24 @@ export {
 
 export { CurrentAnalysisLens } from './CurrentAnalysisLens';
 export { TimeSessionLens } from './TimeSessionLens';
+export { DowTheoryLens } from './DowTheoryLens';
+export { VolatilityRegimeLens } from './VolatilityRegimeLens';
+export type { OHLCVBar, Pivot } from './utils/pivotDetection';
 
 import { defaultLensAggregator } from './LensAggregator';
 import { CurrentAnalysisLens } from './CurrentAnalysisLens';
 import { TimeSessionLens } from './TimeSessionLens';
+import { DowTheoryLens } from './DowTheoryLens';
+import { VolatilityRegimeLens } from './VolatilityRegimeLens';
 
 /**
- * defaultLensAggregator に Phase 1 の基本レンズを登録する
+ * defaultLensAggregator に基本レンズを登録する
  *
  * 冪等に呼び出せる（既に登録済みなら何もしない）。
  * テスト環境でも副作用を最小化するため、インポート時自動登録はしない。
- * PDCA ループへの配線は Phase 3 で行うため、呼び出し自体も当面は任意。
+ *
+ * Phase 1: current_analysis / time_session
+ * Phase 3: dow_theory / volatility_regime
  */
 export function registerDefaultLenses(): void {
   const registered = new Set(defaultLensAggregator.getRegisteredLenses());
@@ -39,5 +46,11 @@ export function registerDefaultLenses(): void {
   }
   if (!registered.has('time_session')) {
     defaultLensAggregator.register(new TimeSessionLens());
+  }
+  if (!registered.has('dow_theory')) {
+    defaultLensAggregator.register(new DowTheoryLens());
+  }
+  if (!registered.has('volatility_regime')) {
+    defaultLensAggregator.register(new VolatilityRegimeLens());
   }
 }
