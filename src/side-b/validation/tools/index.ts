@@ -24,3 +24,9 @@ export {
     buyAndHoldTool,
     type BuyAndHoldToolConfig,
 } from './BuyAndHoldTool';
+
+export {
+    WalkForwardTool,
+    walkForwardTool,
+    type WalkForwardToolConfig,
+} from './WalkForwardTool';
