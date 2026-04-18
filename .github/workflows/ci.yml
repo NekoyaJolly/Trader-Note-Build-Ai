@@ -66,9 +66,6 @@ jobs:
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
-        with:
-          # 直前コミットとの差分で migration 変更を検出するため
-          fetch-depth: 2
 
       - name: Node.js セットアップ
         uses: actions/setup-node@v4
@@ -84,22 +81,45 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-      - name: migration 変更を検出（push 時のみ）
-        id: migrations_changed
+      # ---- Phase 4d Step 5: マイグレーション状態を自己検出して適用 ----
+      #
+      # 以前は `git diff HEAD^..HEAD` で migration 変更を検出していたが、
+      # 複数コミット push で migration を含むコミットが HEAD でない場合や、
+      # 以前の push で deploy がスキップされた場合に取りこぼしが発生し、
+      # 一度追従漏れすると永久に追いつかない問題があった
+      # (実際 Phase 4b〜4c の 4 migration が未適用のまま Phase 4d push で fail)。
+      #
+      # 新ロジック: `prisma migrate status` で未適用有無を判定し、
+      # あれば自動的に `migrate deploy` を走らせる。この方式は自己回復的で、
+      # 検出漏れが発生しても次の push で必ず追いつく。
+      #
+      # push 時のみ実行する制約は維持する理由:
+      #   - schedule / PR では DB 書き込み権限を発動させない
+      #   - 元コミット 8a18500 で明文化された運用方針を踏襲
+      - name: 未適用マイグレーションを検出（push 時のみ）
+        id: migrate_check
         if: github.event_name == 'push'
         run: |
-          if git diff --name-only HEAD^ HEAD 2>/dev/null | grep -q '^prisma/migrations/'; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "✅ 新しい migration ファイルを検出、migrate deploy を実行します"
+          set +e
+          npx prisma migrate status
+          code=$?
+          set -e
+          if [ $code -eq 0 ]; then
+            echo "pending=false" >> "$GITHUB_OUTPUT"
+            echo "✅ マイグレーションは最新、deploy をスキップ"
+          elif [ $code -eq 1 ]; then
+            echo "pending=true" >> "$GITHUB_OUTPUT"
+            echo "⚠️ 未適用マイグレーションを検出、deploy を実行します"
           else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "ℹ️ migration ファイルに変更なし、migrate deploy をスキップ"
+            echo "❌ prisma migrate status が予期しない exit code $code で失敗"
+            exit $code
           fi
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
 
-      - name: Prisma マイグレーション適用（push + migration 変更時のみ）
-        # 条件: push イベント AND prisma/migrations/ が変更されている
-        # schedule / PR / 通常コード変更では実行しない = 本番DBへの不要な書き込みを防ぐ
-        if: steps.migrations_changed.outputs.changed == 'true'
+      - name: Prisma マイグレーション適用（未適用あり時のみ）
+        if: steps.migrate_check.outputs.pending == 'true'
         run: npx prisma migrate deploy
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
