@@ -19,16 +19,20 @@
 
 以下の全てを満たす:
 
-- [ ] `EdgeHypothesis` 型とそのスキーマが定義されている
-- [ ] `EdgeLedger` クラスが実装され、仮説の CRUD とステータス管理ができる
-- [ ] `HypothesisGeneratorAgent` が実装され、独立した仮説生成ができる
-- [ ] `EdgeValidatorAgent` が実装され、strategyBacktestService を使って仮説を検証できる
-- [ ] `DiscoveryAgent` が実装され、週次でレンズ有効性レポートを出力できる
-- [ ] `ReflectionAIService` が EdgeLedger に書き込むよう改修されている
-- [ ] PDCA ループに新エージェント群が統合されている
-- [ ] スケジューラーに DiscoveryAgent の週次実行が登録されている
-- [ ] 既存テストが全て通る
-- [ ] 新エージェント各々にユニットテストがある
+**Phase 4a（データ層 + 仮説探索）**
+
+- [x] `EdgeHypothesis` 型とそのスキーマが定義されている（model + Prisma + migration）
+- [x] `EdgeLedger` クラスが実装され、仮説の CRUD とステータス管理ができる
+- [x] `HypothesisGeneratorAgent` が実装され、独立した仮説生成ができる
+- [ ] `EdgeValidatorAgent` が実装され、strategyBacktestService を使って仮説を検証できる ← **Phase 4b に保留**（backtestService が noteId 依存で仮説条件を直接評価できないため、仮説レベル backtester 層の設計が必要）
+- [x] `DiscoveryAgent` が実装され、週次でレンズ有効性レポートを出力できる
+- [x] `ReflectionAIService` が EdgeLedger に書き込むよう改修されている（実装場所: `aiNoteService.generateNoteFromTrade` 内で findMatching + recordObservation。ReflectionAI 本体は lensSnapshot を持たないため、構造的に実行可能なノート生成時点に配置）
+- [x] PDCA パイプラインに新エージェント群が統合されている（実装場所: `aiOrchestrator.generatePlan`。HypothesisGenerator → EdgeLedger → candidateHypotheses → planAI）
+- [x] スケジューラーに DiscoveryAgent の週次実行が登録されている（1時間ごとにチェック、7日経過で実行）
+- [x] 既存テストが全て通る（Side-B 全 367 テスト passing）
+- [x] 新エージェント各々にユニットテストがある（conditionMatcher, statusManager, discoveryStats, hypothesisGenerator, discoveryAgent）
+
+**Phase 4b（エッジ検証）に保留**: EdgeValidatorAgent、昇格判定呼び出し、日次バリデーター実行。`StatusManager.canPromoteToConfirmed` と `EdgeLedger.markConfirmed` は実装済み（呼び出し側を 4b で配線）。
 
 ---
 

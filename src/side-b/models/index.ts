@@ -106,6 +106,32 @@ export {
   calculateRiskAmount as calculatePortfolioRiskAmount,
 } from './virtualPortfolio';
 
+// エッジ仮説（Phase 4a + 4b）
+export {
+  type EdgeCategory,
+  type EdgeStatus,
+  type EdgeSource,
+  type ConditionOp,
+  type MachineReadableCondition,
+  type BacktestSummary,
+  type WalkForwardSummary,
+  type EdgeHypothesis,
+  type CreateEdgeHypothesisInput,
+  // Phase 4b
+  type StopLossSpec,
+  type TakeProfitSpec,
+  type DefaultRiskManagement,
+  DEFAULT_RISK_MANAGEMENT,
+  EDGE_CATEGORIES,
+  EDGE_STATUSES,
+  EDGE_SOURCES,
+  isEdgeCategory,
+  isEdgeStatus,
+  isEdgeSource,
+  isConditionOp,
+  validateCondition,
+} from './edgeHypothesis';
+
 // AIトレードノート（Phase C）
 export {
   // 列挙型
