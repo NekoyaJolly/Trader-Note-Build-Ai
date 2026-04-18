@@ -357,3 +357,48 @@ export interface ApiErrorResponse {
   success: false;
   error: string;
 }
+
+// ===========================================
+// Phase 4d: 仮説一覧 API
+// ===========================================
+
+/**
+ * 一覧ソートキー。
+ *
+ * NOTE: 仕様書 §4.2 の「確信度順」は EdgeHypothesis 本体に confidence スコアが
+ * 存在しないため Phase 4d MVP では未実装。future work として 'confidence' を
+ * 追加する前提で enum 設計は拡張可能にしてある（バックエンド
+ * `EdgeFindSortKey` と一致）。
+ */
+export type HypothesisListSortKey = "newest" | "oldest" | "observation";
+
+/**
+ * GET /api/side-b/hypotheses のクエリパラメーター。
+ * 全て任意。`symbol` / `status` / `category` / `source` はマルチ選択可。
+ */
+export interface HypothesisListParams {
+  statuses?: EdgeStatus[];
+  categories?: EdgeCategory[];
+  sources?: EdgeSource[];
+  symbols?: string[];
+  search?: string;
+  sortBy?: HypothesisListSortKey;
+  /** 1-based。既定 1 */
+  page?: number;
+  /** 既定 20、上限 100 (超えたらバックエンドで clamp される) */
+  limit?: number;
+}
+
+/**
+ * GET /api/side-b/hypotheses のレスポンス。
+ */
+export interface HypothesisListResponse {
+  success: true;
+  /** フィルタ適用後の総件数（ページネーション前） */
+  total: number;
+  /** 実際に採用された page（バックエンド側で正規化済み） */
+  page: number;
+  /** 実際に採用された limit（clamp 済み） */
+  limit: number;
+  hypotheses: EdgeHypothesis[];
+}

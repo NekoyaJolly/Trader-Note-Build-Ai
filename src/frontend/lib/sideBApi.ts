@@ -6,12 +6,12 @@
  * バックエンド追加 + 本ファイル拡張する (Phase 4c 補完として追加実装許可済)。
  *
  * 実装済みエンドポイント:
+ *   GET  /api/side-b/hypotheses                    [Phase 4d Step 3 で追加]
  *   GET  /api/side-b/hypotheses/pending-validation
  *   GET  /api/side-b/hypotheses/:id/validation-status
  *   POST /api/side-b/hypotheses/:id/validate
  *
- * 未実装 (Step 2 以降で追加):
- *   GET  /api/side-b/hypotheses?filters...
+ * 未実装 (Step 4 以降で追加):
  *   GET  /api/side-b/hypotheses/:id
  *   GET  /api/side-b/hypotheses/testing
  *   GET  /api/side-b/hypotheses/recently-validated
@@ -27,6 +27,8 @@ import type {
   ValidateResponse,
   ValidationStatusResponse,
   HypothesisListItem,
+  HypothesisListParams,
+  HypothesisListResponse,
 } from "@/types/sideB";
 
 // ===========================================
@@ -124,8 +126,54 @@ async function request<T>(
 }
 
 // ===========================================
+// クエリビルダ
+// ===========================================
+
+/**
+ * URLSearchParams 組み立て。
+ * - 配列フィールドはカンマ区切りの単一キーで送る（バックエンドは両形式対応）
+ * - undefined / 空配列 / 空文字は送信しない
+ */
+function buildListQuery(params: HypothesisListParams): string {
+    const sp = new URLSearchParams();
+
+    const appendArray = (key: string, values?: readonly string[]) => {
+        if (!values || values.length === 0) return;
+        sp.set(key, values.join(","));
+    };
+
+    appendArray("status", params.statuses);
+    appendArray("category", params.categories);
+    appendArray("source", params.sources);
+    appendArray("symbol", params.symbols);
+
+    if (params.search && params.search.trim()) {
+        sp.set("search", params.search);
+    }
+    if (params.sortBy) sp.set("sortBy", params.sortBy);
+    if (typeof params.page === "number") sp.set("page", String(params.page));
+    if (typeof params.limit === "number") sp.set("limit", String(params.limit));
+
+    const s = sp.toString();
+    return s ? `?${s}` : "";
+}
+
+// ===========================================
 // エンドポイント別メソッド
 // ===========================================
+
+/**
+ * GET /api/side-b/hypotheses
+ *
+ * フィルタ・検索・ソート・ページネーション付きの仮説一覧取得。
+ * 仕様書 §4.2 の一覧画面用。
+ */
+async function listHypotheses(
+    params: HypothesisListParams = {},
+): Promise<HypothesisListResponse> {
+    const query = buildListQuery(params);
+    return request<HypothesisListResponse>(`/hypotheses${query}`);
+}
 
 /**
  * GET /api/side-b/hypotheses/pending-validation
@@ -178,9 +226,13 @@ async function triggerValidation(
 // ===========================================
 
 export const sideBApi = {
+  listHypotheses,
   getPendingValidation,
   getValidationStatus,
   triggerValidation,
 };
+
+/** 外部テスト向け: クエリ組み立てのみ検証できるよう内部 util を露出 */
+export const __test = { buildListQuery };
 
 export type SideBApi = typeof sideBApi;
