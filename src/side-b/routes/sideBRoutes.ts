@@ -49,6 +49,7 @@
 
 import { Router } from 'express';
 import { sideBController } from '../controllers';
+import { validationRoutes } from './validationRoutes';
 import { validateBody, validateQuery, validateParams } from '../../middleware/validateRequest';
 import {
   // リサーチ
@@ -82,6 +83,14 @@ import {
 } from '../../schemas/api/sideB';
 
 const router = Router();
+
+// ===========================================
+// 仮説検証 (Phase 4c)
+// /api/side-b/hypotheses/pending-validation
+// /api/side-b/hypotheses/:id/validate (POST)
+// /api/side-b/hypotheses/:id/validation-status (GET)
+// ===========================================
+router.use('/hypotheses', validationRoutes);
 
 // ===========================================
 // リサーチ

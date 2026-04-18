@@ -47,6 +47,7 @@ import {
 import { generateNoteFromTrade } from '../services/aiNoteService';
 import { agentMemory } from '../agent/agentMemory';
 import { discoveryAgent } from '../agents/DiscoveryAgent';
+import { strategistAgent } from '../agents/StrategistAgent';
 import { screeningOrchestrator } from '../bridge';
 import { edgeLedger } from '../ledger';
 import { findAITradeNotesInPeriod } from '../repositories/aiNoteRepository';
@@ -112,6 +113,10 @@ export interface SideBSchedulerConfig {
   autoScreening: boolean;
   /** 1回のスクリーニングジョブで処理する最大仮説数（コスト管理） */
   screeningMaxPerRun: number;
+  /** Phase 4c: 日次フル検証（screening_passed 仮説の本格検証）を有効にするか */
+  autoFullValidation: boolean;
+  /** 1回のフル検証ジョブで処理する最大仮説数（Python 起動 + LLM コスト管理） */
+  fullValidationMaxPerRun: number;
   /** cTrader アカウントID（cTraderデータソース有効化用） */
   ctraderAccountId?: string;
 }
@@ -142,6 +147,8 @@ const DEFAULT_CONFIG: SideBSchedulerConfig = {
   similarityThreshold: 0.85,  // 類似度閾値（85%以上で通知）
   autoScreening: true,        // Phase 4b: 日次スクリーニング自動実行
   screeningMaxPerRun: 10,     // 1回の実行で最大10件
+  autoFullValidation: true,   // Phase 4c: 日次フル検証自動実行
+  fullValidationMaxPerRun: 5, // Python + LLM のコストを考慮して控えめに
 };
 
 /**
@@ -201,11 +208,13 @@ export class SideBScheduler {
   private planIntervalId?: NodeJS.Timeout;
   private discoveryIntervalId?: NodeJS.Timeout;
   private screeningIntervalId?: NodeJS.Timeout;
+  private fullValidationIntervalId?: NodeJS.Timeout;
   private lastPlanRun: Map<string, Date> = new Map();
   private lastMonitorRun?: Date;
   private lastCleanupRun?: Date;
   private lastDiscoveryRun?: Date;
   private lastScreeningRun?: Date;
+  private lastFullValidationRun?: Date;
   private errors: string[] = [];
   private readonly isProduction: boolean;
 
@@ -323,6 +332,11 @@ export class SideBScheduler {
       this.startScreeningJob();
     }
 
+    // 日次フル検証ジョブを開始（Phase 4c）
+    if (this.config.autoFullValidation) {
+      this.startFullValidationJob();
+    }
+
     // 週次/月次サマリースケジューラーを連動起動
     if (this.config.autoSummary) {
       this.log('週次/月次サマリースケジューラーを連動起動します');
@@ -362,6 +376,11 @@ export class SideBScheduler {
     if (this.screeningIntervalId) {
       clearInterval(this.screeningIntervalId);
       this.screeningIntervalId = undefined;
+    }
+
+    if (this.fullValidationIntervalId) {
+      clearInterval(this.fullValidationIntervalId);
+      this.fullValidationIntervalId = undefined;
     }
 
     // サマリースケジューラーも連動停止
@@ -588,6 +607,98 @@ export class SideBScheduler {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.addError(`[Screening] 仮説取得失敗: ${message}`);
+    }
+
+    return summary;
+  }
+
+  /**
+   * Phase 4c: 日次フル検証ジョブを開始
+   *
+   * 1時間ごとにチェックし、前回実行から 24 時間以上経過していたら
+   * screening_passed 仮説を最大 fullValidationMaxPerRun 件ピックして
+   * StrategistAgent.validate で confirmed / rejected に遷移させる。
+   */
+  private startFullValidationJob(): void {
+    const checkIntervalMs = 60 * 60 * 1000;
+    const dailyMs = 24 * 60 * 60 * 1000;
+
+    this.fullValidationIntervalId = setInterval(() => {
+      const now = Date.now();
+      if (
+        !this.lastFullValidationRun ||
+        now - this.lastFullValidationRun.getTime() >= dailyMs
+      ) {
+        this.runFullValidationNow().catch((err) => {
+          this.addError(`フル検証ジョブエラー: ${err}`);
+        });
+      }
+    }, checkIntervalMs);
+
+    // 起動時の初回実行
+    this.runFullValidationNow().catch((err) => {
+      this.addError(`フル検証初回実行エラー: ${err}`);
+    });
+  }
+
+  /**
+   * Phase 4c: 本格検証を手動実行
+   *
+   * screening_passed 仮説を最大 fullValidationMaxPerRun 件取り出し、
+   * StrategistAgent.validate で順次評価する。Python 起動 + LLM コストを
+   * 抑えるため各仮説間にクールダウンを挟む（10秒）。
+   */
+  async runFullValidationNow(): Promise<{
+    processed: number;
+    confirmed: number;
+    rejected: number;
+    notTestable: number;
+    errors: number;
+  }> {
+    const limit = Math.max(1, this.config.fullValidationMaxPerRun);
+    this.log(`[FullValidation] 本格検証を開始 (上限 ${limit}件)`);
+
+    const summary = { processed: 0, confirmed: 0, rejected: 0, notTestable: 0, errors: 0 };
+
+    try {
+      const targets = await edgeLedger.findByStatus('screening_passed');
+      const limited = targets.slice(0, limit);
+      this.log(`[FullValidation] 対象仮説: ${limited.length}件`);
+
+      for (let i = 0; i < limited.length; i++) {
+        const hyp = limited[i];
+        summary.processed++;
+        try {
+          const verdict = await strategistAgent.validate(hyp.id);
+          if (verdict.verdict === 'confirmed') {
+            summary.confirmed++;
+            this.log(`[FullValidation] confirmed: ${hyp.id}`);
+          } else if (verdict.verdict === 'rejected') {
+            summary.rejected++;
+            this.log(`[FullValidation] rejected: ${hyp.id} reasons=[${verdict.baseCriteriaReasons.join(', ')}]`);
+          } else {
+            summary.notTestable++;
+            this.log(`[FullValidation] ${verdict.verdict}: ${hyp.id}`);
+          }
+        } catch (err) {
+          summary.errors++;
+          const message = err instanceof Error ? err.message : String(err);
+          this.addError(`[FullValidation] ${hyp.id} 失敗: ${message}`);
+        }
+
+        // クールダウン（Python コンテナ / LLM API 保護）。最後は不要
+        if (i < limited.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 10000));
+        }
+      }
+
+      this.lastFullValidationRun = new Date();
+      this.log(
+        `[FullValidation] 完了: processed=${summary.processed} confirmed=${summary.confirmed} rejected=${summary.rejected} not_testable=${summary.notTestable} errors=${summary.errors}`,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.addError(`[FullValidation] 対象取得失敗: ${message}`);
     }
 
     return summary;
