@@ -45,6 +45,11 @@ import {
   type TradeVerificationResult,
 } from '../services/tradeVerificationService';
 import { generateNoteFromTrade } from '../services/aiNoteService';
+import { agentMemory } from '../agent/agentMemory';
+import { discoveryAgent } from '../agents/DiscoveryAgent';
+import { screeningOrchestrator } from '../bridge';
+import { edgeLedger } from '../ledger';
+import { findAITradeNotesInPeriod } from '../repositories/aiNoteRepository';
 import { summarySchedulerService } from '../services/summarySchedulerService';
 import { executeCleanup, type CleanupConfig } from '../services/dataCleanupService';
 import { CronSimilarityService } from '../services/cronSimilarityService';
@@ -103,6 +108,10 @@ export interface SideBSchedulerConfig {
   autoSimilarityCheck: boolean;
   /** 類似度チェックの閾値（0-1） */
   similarityThreshold: number;
+  /** Phase 4b 縮小版: 日次スクリーニング（unverified 仮説の事前評価）を有効にするか */
+  autoScreening: boolean;
+  /** 1回のスクリーニングジョブで処理する最大仮説数（コスト管理） */
+  screeningMaxPerRun: number;
   /** cTrader アカウントID（cTraderデータソース有効化用） */
   ctraderAccountId?: string;
 }
@@ -131,6 +140,8 @@ const DEFAULT_CONFIG: SideBSchedulerConfig = {
   tradeRetentionDays: 90,     // 完了トレードは90日保持
   autoSimilarityCheck: true,  // AIノート類似度チェック自動実行
   similarityThreshold: 0.85,  // 類似度閾値（85%以上で通知）
+  autoScreening: true,        // Phase 4b: 日次スクリーニング自動実行
+  screeningMaxPerRun: 10,     // 1回の実行で最大10件
 };
 
 /**
@@ -188,9 +199,13 @@ export class SideBScheduler {
   private isRunning: boolean = false;
   private monitorIntervalId?: NodeJS.Timeout;
   private planIntervalId?: NodeJS.Timeout;
+  private discoveryIntervalId?: NodeJS.Timeout;
+  private screeningIntervalId?: NodeJS.Timeout;
   private lastPlanRun: Map<string, Date> = new Map();
   private lastMonitorRun?: Date;
   private lastCleanupRun?: Date;
+  private lastDiscoveryRun?: Date;
+  private lastScreeningRun?: Date;
   private errors: string[] = [];
   private readonly isProduction: boolean;
 
@@ -300,6 +315,14 @@ export class SideBScheduler {
     // 定期プランジョブを開始
     this.startPlanJob();
 
+    // 週次 DiscoveryAgent ジョブを開始（Phase 4a）
+    this.startDiscoveryJob();
+
+    // 日次スクリーニングジョブを開始（Phase 4b 縮小版）
+    if (this.config.autoScreening) {
+      this.startScreeningJob();
+    }
+
     // 週次/月次サマリースケジューラーを連動起動
     if (this.config.autoSummary) {
       this.log('週次/月次サマリースケジューラーを連動起動します');
@@ -329,6 +352,16 @@ export class SideBScheduler {
     if (this.planIntervalId) {
       clearInterval(this.planIntervalId);
       this.planIntervalId = undefined;
+    }
+
+    if (this.discoveryIntervalId) {
+      clearInterval(this.discoveryIntervalId);
+      this.discoveryIntervalId = undefined;
+    }
+
+    if (this.screeningIntervalId) {
+      clearInterval(this.screeningIntervalId);
+      this.screeningIntervalId = undefined;
     }
 
     // サマリースケジューラーも連動停止
@@ -431,7 +464,7 @@ export class SideBScheduler {
 
   /**
    * 定期プランジョブを開始
-   * 
+   *
    * planIntervalHours ごとにプラン再生成（デフォルト: 4時間）
    * 市場閉場中はスキップ
    */
@@ -448,6 +481,150 @@ export class SideBScheduler {
     this.checkAndExecutePlan().catch((err) => {
       this.addError(`プラン初回チェックエラー: ${err}`);
     });
+  }
+
+  /**
+   * 週次 DiscoveryAgent ジョブを開始（Phase 4a）
+   *
+   * 1時間ごとにチェックし、前回実行から7日以上経過していたら実行する。
+   * 過去7日分の AITradeNote を集計して EdgeLedger に新仮説を登録。
+   */
+  private startDiscoveryJob(): void {
+    const checkIntervalMs = 60 * 60 * 1000;
+    const weeklyMs = 7 * 24 * 60 * 60 * 1000;
+
+    this.discoveryIntervalId = setInterval(() => {
+      const now = Date.now();
+      if (
+        !this.lastDiscoveryRun ||
+        now - this.lastDiscoveryRun.getTime() >= weeklyMs
+      ) {
+        this.runDiscoveryNow().catch((err) => {
+          this.addError(`Discoveryジョブエラー: ${err}`);
+        });
+      }
+    }, checkIntervalMs);
+  }
+
+  /**
+   * Phase 4b 縮小版: 日次スクリーニングジョブを開始
+   *
+   * 1時間ごとにチェックし、前回実行から24時間以上経過していたら
+   * unverified 仮説を最大 `screeningMaxPerRun` 件取り出してスクリーニングする。
+   */
+  private startScreeningJob(): void {
+    const checkIntervalMs = 60 * 60 * 1000;
+    const dailyMs = 24 * 60 * 60 * 1000;
+
+    this.screeningIntervalId = setInterval(() => {
+      const now = Date.now();
+      if (
+        !this.lastScreeningRun ||
+        now - this.lastScreeningRun.getTime() >= dailyMs
+      ) {
+        this.runScreeningNow().catch((err) => {
+          this.addError(`スクリーニングジョブエラー: ${err}`);
+        });
+      }
+    }, checkIntervalMs);
+
+    // 起動時の即時チェック（初回運用時のためのジャンプスタート）
+    this.runScreeningNow().catch((err) => {
+      this.addError(`スクリーニング初回実行エラー: ${err}`);
+    });
+  }
+
+  /**
+   * Phase 4b 縮小版: スクリーニングを手動実行
+   *
+   * unverified 仮説を最大 `screeningMaxPerRun` 件取り出し、
+   * ScreeningOrchestrator.runScreening で順次評価する。
+   * 各仮説の失敗は他仮説に影響させない（best-effort）。
+   */
+  async runScreeningNow(): Promise<{
+    processed: number;
+    passed: number;
+    rejected: number;
+    notTestable: number;
+    errors: number;
+  }> {
+    const limit = Math.max(1, this.config.screeningMaxPerRun);
+    this.log(`[Screening] 事前スクリーニングを開始 (上限 ${limit}件)`);
+
+    const summary = { processed: 0, passed: 0, rejected: 0, notTestable: 0, errors: 0 };
+
+    try {
+      const unverified = await edgeLedger.findByStatus('unverified');
+      const targets = unverified.slice(0, limit);
+      this.log(`[Screening] 対象仮説: ${targets.length}件`);
+
+      for (const hyp of targets) {
+        summary.processed++;
+        try {
+          const symbol = hyp.symbols[0];
+          const lensSnapshot = symbol ? agentMemory.getCurrentLensSnapshot(symbol) : undefined;
+          const result = await screeningOrchestrator.runScreening(hyp.id, {
+            lensSnapshot,
+          });
+
+          if (result.verdict === 'screening_passed') {
+            summary.passed++;
+            this.log(`[Screening] passed: ${hyp.id} pf=${result.metrics.pf.toFixed(3)} winRate=${result.metrics.winRate.toFixed(3)} trades=${result.metrics.tradeCount}`);
+          } else if (result.verdict === 'rejected') {
+            summary.rejected++;
+            this.log(`[Screening] rejected: ${hyp.id} reasons=[${result.reasons.join(', ')}]`);
+          } else {
+            summary.notTestable++;
+            this.log(`[Screening] not_testable: ${hyp.id} reason=${result.reason}`);
+          }
+        } catch (err) {
+          summary.errors++;
+          const message = err instanceof Error ? err.message : String(err);
+          this.addError(`[Screening] ${hyp.id} 失敗: ${message}`);
+        }
+      }
+      this.lastScreeningRun = new Date();
+      this.log(`[Screening] 完了: processed=${summary.processed} passed=${summary.passed} rejected=${summary.rejected} not_testable=${summary.notTestable} errors=${summary.errors}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.addError(`[Screening] 仮説取得失敗: ${message}`);
+    }
+
+    return summary;
+  }
+
+  /**
+   * DiscoveryAgent を手動実行（外部 API / デバッグ用）
+   */
+  async runDiscoveryNow(): Promise<void> {
+    const periodEnd = new Date();
+    const periodStart = new Date(periodEnd.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    this.log(
+      `[Discovery] 週次エッジ分析を実行: ${periodStart.toISOString()} 〜 ${periodEnd.toISOString()}`,
+    );
+
+    try {
+      const notes = await findAITradeNotesInPeriod(
+        periodStart.toISOString().split('T')[0],
+        periodEnd.toISOString().split('T')[0],
+      );
+      this.log(`[Discovery] 対象ノート数: ${notes.length}`);
+
+      if (notes.length === 0) {
+        this.log('[Discovery] 分析対象ノートなし。スキップします。');
+        this.lastDiscoveryRun = new Date();
+        return;
+      }
+
+      const report = await discoveryAgent.analyze(notes, periodStart, periodEnd);
+      this.log(
+        `[Discovery] 完了: 新規仮説 ${report.newHypotheses.length}個 / レンズ ${report.lensInsights.length}件 / tokens ${report.tokenUsage}`,
+      );
+      this.lastDiscoveryRun = new Date();
+    } catch (err) {
+      this.addError(`[Discovery] 失敗: ${err instanceof Error ? err.message : err}`);
+    }
   }
 
   /**
@@ -986,6 +1163,9 @@ export class SideBScheduler {
         this.log(`[Note生成] Trade ${trade.id} のNoteを生成中...`);
 
         try {
+          // Phase 3: Plan 時点で AgentMemory に保存したレンズスナップショットを取得
+          const lensSnapshot = agentMemory.getCurrentLensSnapshot(trade.symbol);
+
           // tradeとplanを正しい形式で渡す
           await generateNoteFromTrade(
             {
@@ -1013,9 +1193,10 @@ export class SideBScheduler {
                 direction: s.direction,
                 priority: s.priority || 'primary',
               })) || [],
-            }
+            },
+            lensSnapshot,
           );
-          this.log(`[Note生成] Trade ${trade.id} のNote生成完了`);
+          this.log(`[Note生成] Trade ${trade.id} のNote生成完了${lensSnapshot ? ' (lensSnapshot付き)' : ''}`);
         } catch (error) {
           const message = error instanceof Error ? error.message : '不明なエラー';
           this.addError(`[Note生成] Trade ${trade.id} 失敗: ${message}`);

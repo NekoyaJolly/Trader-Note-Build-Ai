@@ -37,6 +37,9 @@ import {
   calculateStatisticsFromNotes,
 } from '../models';
 import * as aiNoteRepository from '../repositories/aiNoteRepository';
+import { serializeLensSnapshot, type LensFeatureSnapshot } from '../lenses';
+import { edgeLedger } from '../ledger';
+import { materializationService } from '../bridge';
 
 // ===== 設定 =====
 
@@ -99,7 +102,8 @@ interface GenerateNoteResult {
  */
 export async function generateNoteFromTrade(
   trade: VirtualTradeInput,
-  plan: PlanInput
+  plan: PlanInput,
+  lensSnapshot?: LensFeatureSnapshot,
 ): Promise<GenerateNoteResult> {
   // 決済されていない場合はエラー
   if (!trade.exitPrice || !trade.exitedAt || !trade.enteredAt) {
@@ -125,6 +129,30 @@ export async function generateNoteFromTrade(
   // 類似パターンを検索
   const similarPatterns = await findSimilarPatterns(trade, result);
 
+  // レンズスナップショットを AITradeNote 形式に変換（Phase 3）
+  let lensSnapshotForNote: CreateAITradeNoteInput['lensSnapshot'];
+  if (lensSnapshot) {
+    const serialized = serializeLensSnapshot(lensSnapshot);
+    lensSnapshotForNote = {
+      timestamp: serialized.timestamp,
+      features: serialized.features,
+      totalComputeDurationMs: serialized.totalComputeDurationMs,
+    };
+  }
+
+  // Phase 4a: トレード時点で成立していた仮説を EdgeLedger から抽出
+  let matchedHypothesisIds: string[] = [];
+  if (lensSnapshot) {
+    try {
+      const matched = await edgeLedger.findMatching(trade.symbol, lensSnapshot, {
+        statuses: ['confirmed', 'testing', 'unverified'],
+      });
+      matchedHypothesisIds = matched.map((h) => h.id);
+    } catch (err) {
+      console.warn('[aiNoteService] EdgeLedger.findMatching 失敗:', err);
+    }
+  }
+
   // ノート入力を作成
   const input: CreateAITradeNoteInput = {
     virtualTradeId: trade.id,
@@ -139,11 +167,48 @@ export async function generateNoteFromTrade(
     marketReview,
     learnings,
     similarPatterns: similarPatterns.length > 0 ? similarPatterns : undefined,
+    lensSnapshot: lensSnapshotForNote,
+    relatedHypothesisIds: matchedHypothesisIds.length > 0 ? matchedHypothesisIds : undefined,
     aiModel: AI_MODEL,
   };
 
   // ノートを保存
   const note = await aiNoteRepository.createAITradeNote(input);
+
+  // Phase 4b ブリッジ層: Side-A TradeNote を同時生成（best-effort）
+  //   失敗時は AITradeNote 作成は成功扱いのまま継続し、warning ログのみ残す。
+  if (trade.enteredAt) {
+    const entryPrice = trade.actualEntry ?? trade.plannedEntry;
+    try {
+      const tradeNoteId = await materializationService.materializeFromVirtualTrade({
+        symbol: trade.symbol,
+        side: trade.direction,
+        entryPrice,
+        enteredAt: trade.enteredAt,
+      });
+      await aiNoteRepository.updateAITradeNoteTradeNoteId(note.id, tradeNoteId);
+      note.tradeNoteId = tradeNoteId;
+    } catch (err) {
+      console.warn('[aiNoteService] TradeNote 同時生成失敗 (継続):', err);
+    }
+  }
+
+  // Phase 4a: 成立仮説に対して観測結果を反映（failure は warnings に留めてノート作成は成功扱い）
+  for (const hypothesisId of matchedHypothesisIds) {
+    try {
+      await edgeLedger.recordObservation(hypothesisId, {
+        outcome: result.outcome,
+        pnlPips: result.pnlPips,
+        rr: result.riskRewardActual,
+        noteId: note.id,
+      });
+    } catch (err) {
+      console.warn(
+        `[aiNoteService] EdgeLedger.recordObservation 失敗 (hypothesis=${hypothesisId}):`,
+        err,
+      );
+    }
+  }
 
   return {
     note,

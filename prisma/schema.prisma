@@ -1346,6 +1346,10 @@ model AITradeNote {
   /// レンズ特徴量スナップショット（Phase 1: 並列レンズ基盤）
   /// トレード時点での全レンズ出力を SerializedLensFeatureSnapshot 形式で保持
   lensSnapshot    Json?
+  /// 関連するエッジ仮説ID（Phase 4a: ReflectionAI が recordObservation した仮説）
+  relatedHypothesisIds String[] @default([])
+  /// 対応する Side-A TradeNote の ID（Phase 4b: ブリッジ層で同時生成）
+  tradeNoteId          String?  @db.Uuid
 
   /// 使用したAIモデル
   aiModel         String
@@ -1622,4 +1626,93 @@ enum OptimizationMethod {
   minimum_variance
   /// 最大シャープレシオ
   max_sharpe
+}
+
+// ============================================================
+// Side-B Phase 4a: エッジ台帳（EdgeHypothesis / EdgeLedger）
+// ============================================================
+
+/// 検証可能な仮説の台帳エントリ
+///
+/// 設計思想:
+/// - LLM が構造発見で出した仮説を、機械判定可能な条件付きで保存する
+/// - status: unverified → testing → confirmed / rejected / stale
+/// - 昇格判定（Phase 4b の EdgeValidator）は次フェーズで実装
+/// - 観測実績は累積し、劣化を検出する
+model EdgeHypothesis {
+  id                 String    @id @default(uuid()) @db.Uuid
+
+  // 記述
+  /// 人間可読の仮説文
+  statement          String
+  /// カテゴリ（time/level/event/correlation/positioning/volatility/structure/other）
+  category           String
+  /// 機械判定条件（MachineReadableCondition[] を JSONB で保存）
+  conditions         Json
+  /// 期待される方向（long/short/either）
+  expectedDirection  String
+
+  // ライフサイクル
+  /// ステータス（unverified/testing/confirmed/stale/rejected）
+  status             String    @default("unverified")
+  /// ステータス変更日時
+  statusUpdatedAt    DateTime  @default(now()) @db.Timestamptz(6)
+  /// ステータス変更の直近理由（rejected/stale時に記録）
+  statusNote         String?
+
+  // 対象
+  /// 適用対象シンボル
+  symbols            String[]  @default([])
+  /// 適用対象時間足
+  timeframes         String[]  @default([])
+
+  // 実績
+  observationCount   Int       @default(0)
+  winCount           Int       @default(0)
+  lossCount          Int       @default(0)
+  breakevenCount     Int       @default(0)
+  /// 累計 pnl pips
+  totalPnlPips       Decimal   @default(0) @db.Decimal(12, 2)
+  /// 平均 RR 比
+  avgRR              Decimal   @default(0) @db.Decimal(6, 3)
+
+  // 検証履歴（Phase 4b で EdgeValidator が埋める）
+  backtestResults    Json?
+  walkForwardResults Json?
+
+  // メタデータ
+  /// 生成元（ai_generated/reflection/user_input/backtest/discovery）
+  source             String
+  /// レンズごとの重要度推定（0-1）
+  lensRelevance      Json?
+
+  // Phase 4b: ブリッジ層
+  /// デフォルトのリスク管理設定（DefaultRiskManagement 形式）
+  defaultRiskManagement Json?
+  /// この仮説から materialize された Side-A TradeNote の ID 群
+  materializedTradeNoteIds String[] @default([])
+  /// 無効化条件（MachineReadableCondition[] 形式）
+  invalidationConditions Json?
+  /// confirmed 昇格時の LLM 解釈テキスト
+  confirmationNote String?
+  /// Phase 4b 縮小版: 直近のスクリーニング結果（ScreeningResult 形式）
+  screeningResult Json?
+
+  // タイムスタンプ
+  firstObservedAt    DateTime  @default(now()) @db.Timestamptz(6)
+  lastObservedAt     DateTime  @default(now()) @db.Timestamptz(6)
+  lastTestedAt       DateTime? @db.Timestamptz(6)
+  createdAt          DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime  @updatedAt
+
+  // 関連
+  /// 派生元の親仮説ID
+  parentIds          String[]  @default([])
+  /// 関連する AITradeNote ID
+  relatedNoteIds     String[]  @default([])
+
+  @@index([status], map: "idx_edge_hypothesis_status")
+  @@index([category], map: "idx_edge_hypothesis_category")
+  @@index([source], map: "idx_edge_hypothesis_source")
+  @@index([createdAt(sort: Desc)], map: "idx_edge_hypothesis_created")
 }

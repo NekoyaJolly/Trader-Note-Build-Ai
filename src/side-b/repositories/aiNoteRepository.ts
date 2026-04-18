@@ -42,14 +42,34 @@ export async function createAITradeNote(
       planEvaluation: input.planEvaluation as unknown as Prisma.InputJsonValue,
       marketReview: input.marketReview as unknown as Prisma.InputJsonValue,
       learnings: input.learnings as unknown as Prisma.InputJsonValue,
-      similarPatterns: input.similarPatterns 
-        ? input.similarPatterns as unknown as Prisma.InputJsonValue 
+      similarPatterns: input.similarPatterns
+        ? input.similarPatterns as unknown as Prisma.InputJsonValue
         : undefined,
+      lensSnapshot: input.lensSnapshot
+        ? input.lensSnapshot as unknown as Prisma.InputJsonValue
+        : undefined,
+      relatedHypothesisIds: input.relatedHypothesisIds ?? [],
+      tradeNoteId: input.tradeNoteId,
       aiModel: input.aiModel,
     },
   });
 
   return mapPrismaToAITradeNote(note);
+}
+
+/**
+ * AIトレードノートの tradeNoteId（Side-A TradeNote 同時生成）を後から設定する
+ *
+ * Phase 4b ブリッジ層: materialize 成功後の best-effort 更新で呼ばれる。
+ */
+export async function updateAITradeNoteTradeNoteId(
+  id: string,
+  tradeNoteId: string
+): Promise<void> {
+  await prisma.aITradeNote.update({
+    where: { id },
+    data: { tradeNoteId },
+  });
 }
 
 /**
@@ -342,6 +362,9 @@ function mapPrismaToAITradeNote(note: NonNullable<PrismaAITradeNote>): AITradeNo
     marketReview: note.marketReview as unknown as AITradeNote['marketReview'],
     learnings: note.learnings as unknown as AITradeNote['learnings'],
     similarPatterns: note.similarPatterns as unknown as AITradeNote['similarPatterns'],
+    lensSnapshot: note.lensSnapshot as unknown as AITradeNote['lensSnapshot'],
+    relatedHypothesisIds: note.relatedHypothesisIds ?? [],
+    tradeNoteId: note.tradeNoteId ?? undefined,
     aiModel: note.aiModel,
     createdAt: note.createdAt,
   };
