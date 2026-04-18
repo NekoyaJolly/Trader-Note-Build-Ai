@@ -162,6 +162,19 @@ export interface AITradeNote {
     totalComputeDurationMs?: number;
   };
 
+  /**
+   * このトレード時点で成立していたエッジ仮説ID（Phase 4a）
+   * EdgeLedger.findMatching で抽出された仮説。ReflectionAI が recordObservation
+   * で実績を反映する。
+   */
+  relatedHypothesisIds?: string[];
+
+  /**
+   * 対応する Side-A TradeNote の ID（Phase 4b）
+   * aiNoteService.generateNoteFromTrade 内で同時生成された TradeNote との紐付け
+   */
+  tradeNoteId?: string;
+
   // メタ情報
   aiModel: string;
   createdAt: Date;
@@ -184,6 +197,8 @@ export interface CreateAITradeNoteInput {
   learnings: Learnings;
   similarPatterns?: SimilarPattern[];
   lensSnapshot?: AITradeNote['lensSnapshot'];
+  relatedHypothesisIds?: string[];
+  tradeNoteId?: string;
   aiModel: string;
 }
 
