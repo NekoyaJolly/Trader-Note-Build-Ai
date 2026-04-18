@@ -12,7 +12,12 @@
  * @see docs/design/phase_4_specification.md セクション4.3
  */
 
-import type { EdgeHypothesis, ScreeningMetrics } from '../models/edgeHypothesis';
+import type {
+    EdgeHypothesis,
+    ScreeningMetrics,
+    ConsolidatedValidationReport,
+} from '../models/edgeHypothesis';
+import { VALIDATION_THRESHOLDS } from '../config/validationThresholds';
 
 /** CLAUDE.md で規定された昇格基準（勝手に緩めない） */
 export const PROMOTION_THRESHOLDS = Object.freeze({
@@ -170,6 +175,72 @@ export class StatusManager {
             reasons.push(
                 `勝率不足: ${(normalizedWinRate * 100).toFixed(1)}% <= ${(SCREENING_THRESHOLDS.minWinRate * 100).toFixed(1)}%`,
             );
+        }
+
+        return { ok: reasons.length === 0, reasons };
+    }
+
+    /**
+     * Phase 4c: 4ツール統合レポートに基づく confirmed 昇格判定。
+     *
+     * Phase 4b 縮小版の `canPromoteToScreeningPassed` を通過した仮説に対し、
+     * BacktesterAgent が算出した ConsolidatedValidationReport を評価する。
+     *
+     * 判定基準（全て true で ok=true）:
+     *   1. screening が passed
+     *   2. walkForward が実行され passed（overfitScore < 0.3 相当）
+     *   3. monteCarlo が実行され passed（下側5%PnL > 0 相当）
+     *   4. buyAndHold が実行され passed（BH 比 +0.5% 以上相当）
+     *   5. スクリーニング時のトレード数が最低 `MIN_TRADE_COUNT` 以上
+     *
+     * 各ツールの passed 判定そのものは個別ツール内で行う（ここでは
+     * 「走ったか」「通ったか」だけをチェックする）。
+     */
+    canPromoteToConfirmedFull(
+        _hyp: EdgeHypothesis,
+        report: ConsolidatedValidationReport,
+    ): PromoteCheck {
+        const reasons: string[] = [];
+
+        // 1. screening
+        if (!report.screening) {
+            reasons.push('スクリーニング未実施');
+        } else if (!report.screening.passed) {
+            reasons.push('事前スクリーニング未通過');
+        }
+
+        // 2. walkForward
+        if (!report.walkForward) {
+            reasons.push('WalkForward 未実施 or 実行失敗');
+        } else if (!report.walkForward.passed) {
+            const m = report.walkForward.metrics;
+            const score = typeof m.overfitScore === 'number' ? m.overfitScore.toFixed(3) : String(m.overfitScore ?? 'N/A');
+            reasons.push(`過学習スコア超過: ${score}`);
+        }
+
+        // 3. monteCarlo
+        if (!report.monteCarlo) {
+            reasons.push('MonteCarlo 未実施 or 実行失敗');
+        } else if (!report.monteCarlo.passed) {
+            const m = report.monteCarlo.metrics;
+            const p5 = typeof m.p5FinalPnl === 'number' ? m.p5FinalPnl.toFixed(2) : String(m.p5FinalPnl ?? 'N/A');
+            reasons.push(`MonteCarlo 下側5%PnL マイナス: ${p5}`);
+        }
+
+        // 4. buyAndHold
+        if (!report.buyAndHold) {
+            reasons.push('BuyAndHold 未実施 or 実行失敗');
+        } else if (!report.buyAndHold.passed) {
+            const m = report.buyAndHold.metrics;
+            const op = typeof m.outperformance === 'number' ? (m.outperformance * 100).toFixed(2) + '%' : String(m.outperformance ?? 'N/A');
+            reasons.push(`BuyAndHold を上回れず: ${op}`);
+        }
+
+        // 5. 最低トレード数（screening の metrics.tradeCount を参照）
+        const screeningTradeCount = report.screening?.metrics?.tradeCount;
+        const tradeCount = typeof screeningTradeCount === 'number' ? screeningTradeCount : 0;
+        if (tradeCount < VALIDATION_THRESHOLDS.common.minTradeCount) {
+            reasons.push(`トレード数不足: ${tradeCount} < ${VALIDATION_THRESHOLDS.common.minTradeCount}`);
         }
 
         return { ok: reasons.length === 0, reasons };

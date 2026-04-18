@@ -27,6 +27,7 @@ import type {
     WalkForwardSummary,
     CreateEdgeHypothesisInput,
     ScreeningResult,
+    ConsolidatedValidationReport,
 } from '../models/edgeHypothesis';
 import type { LensFeatureSnapshot } from '../lenses';
 import { evaluateConditions } from './conditionMatcher';
@@ -86,6 +87,12 @@ export class EdgeLedger {
                 screeningResult: input.screeningResult
                     ? (input.screeningResult as unknown as Prisma.InputJsonValue)
                     : undefined,
+                fullValidationReport: input.fullValidationReport
+                    ? (input.fullValidationReport as unknown as Prisma.InputJsonValue)
+                    : undefined,
+                confirmationInterpretation: input.confirmationInterpretation,
+                rejectionInterpretation: input.rejectionInterpretation,
+                actionableInsights: input.actionableInsights ?? [],
             },
         });
         return mapPrismaToEdgeHypothesis(created);
@@ -145,6 +152,18 @@ export class EdgeLedger {
         if (patch.confirmationNote !== undefined) data.confirmationNote = patch.confirmationNote;
         if (patch.screeningResult !== undefined) {
             data.screeningResult = patch.screeningResult as unknown as Prisma.InputJsonValue;
+        }
+        if (patch.fullValidationReport !== undefined) {
+            data.fullValidationReport = patch.fullValidationReport as unknown as Prisma.InputJsonValue;
+        }
+        if (patch.confirmationInterpretation !== undefined) {
+            data.confirmationInterpretation = patch.confirmationInterpretation;
+        }
+        if (patch.rejectionInterpretation !== undefined) {
+            data.rejectionInterpretation = patch.rejectionInterpretation;
+        }
+        if (patch.actionableInsights !== undefined) {
+            data.actionableInsights = { set: patch.actionableInsights };
         }
 
         const updated = await prisma.edgeHypothesis.update({
@@ -308,6 +327,59 @@ export class EdgeLedger {
                 status: 'not_testable',
                 statusUpdatedAt: new Date(),
                 statusNote: reason,
+            },
+        });
+    }
+
+    /**
+     * Phase 4c: 本格検証通過として confirmed に昇格
+     *
+     * ConsolidatedValidationReport をそのまま fullValidationReport に保存し、
+     * LLM 解釈と改善提案も一緒に記録する。
+     */
+    async markConfirmedFull(
+        id: string,
+        report: ConsolidatedValidationReport,
+        interpretation?: string,
+        actionableInsights?: string[],
+    ): Promise<void> {
+        await prisma.edgeHypothesis.update({
+            where: { id },
+            data: {
+                status: 'confirmed',
+                statusUpdatedAt: new Date(),
+                fullValidationReport: report as unknown as Prisma.InputJsonValue,
+                confirmationInterpretation: interpretation,
+                actionableInsights: actionableInsights
+                    ? { set: actionableInsights }
+                    : undefined,
+                lastTestedAt: new Date(),
+            },
+        });
+    }
+
+    /**
+     * Phase 4c: 本格検証で rejected。レポートと理由を記録する。
+     */
+    async markRejectedFull(
+        id: string,
+        reason: string,
+        report: ConsolidatedValidationReport,
+        interpretation?: string,
+        actionableInsights?: string[],
+    ): Promise<void> {
+        await prisma.edgeHypothesis.update({
+            where: { id },
+            data: {
+                status: 'rejected',
+                statusUpdatedAt: new Date(),
+                statusNote: reason,
+                fullValidationReport: report as unknown as Prisma.InputJsonValue,
+                rejectionInterpretation: interpretation,
+                actionableInsights: actionableInsights
+                    ? { set: actionableInsights }
+                    : undefined,
+                lastTestedAt: new Date(),
             },
         });
     }
@@ -523,6 +595,13 @@ function mapPrismaToEdgeHypothesis(row: NonNullable<PrismaEdge>): EdgeHypothesis
         screeningResult: row.screeningResult
             ? (row.screeningResult as unknown as ScreeningResult)
             : undefined,
+        // Phase 4c
+        fullValidationReport: row.fullValidationReport
+            ? (row.fullValidationReport as unknown as ConsolidatedValidationReport)
+            : undefined,
+        confirmationInterpretation: row.confirmationInterpretation ?? undefined,
+        rejectionInterpretation: row.rejectionInterpretation ?? undefined,
+        actionableInsights: row.actionableInsights ?? [],
     };
 }
 

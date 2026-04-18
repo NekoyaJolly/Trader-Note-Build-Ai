@@ -165,6 +165,15 @@ export const DEFAULT_RISK_MANAGEMENT: DefaultRiskManagement = {
 };
 
 // ===========================================
+// Phase 4c: ConsolidatedValidationReport（再エクスポート）
+// ===========================================
+
+// 本格検証レポート型は validation 層に定義。EdgeHypothesis が field として
+// 参照するため型のみ再エクスポートする（循環参照を避けるため type-only import）。
+export type { ConsolidatedValidationReport } from '../validation/reports';
+import type { ConsolidatedValidationReport } from '../validation/reports';
+
+// ===========================================
 // Phase 4b 縮小版: screeningResult
 // ===========================================
 
@@ -269,6 +278,16 @@ export interface EdgeHypothesis {
      * 複数回スクリーニングされても最新のものだけを保持する（履歴は Phase 4c 以降で検討）。
      */
     screeningResult?: ScreeningResult;
+
+    // --- Phase 4c: 本格検証レポート ---
+    /** 4ツール統合の検証レポート（StrategistAgent の判定に利用） */
+    fullValidationReport?: ConsolidatedValidationReport;
+    /** confirmed 時の LLM 解釈（StrategistAgent が生成） */
+    confirmationInterpretation?: string;
+    /** rejected 時の LLM 解釈（StrategistAgent が生成） */
+    rejectionInterpretation?: string;
+    /** LLM による改善提案（任意） */
+    actionableInsights?: string[];
 }
 
 // ===========================================

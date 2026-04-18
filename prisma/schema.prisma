@@ -1698,6 +1698,16 @@ model EdgeHypothesis {
   /// Phase 4b 縮小版: 直近のスクリーニング結果（ScreeningResult 形式）
   screeningResult Json?
 
+  // Phase 4c: 本格検証レポート
+  /// 4ツール統合の検証レポート（ConsolidatedValidationReport 形式）
+  fullValidationReport Json?
+  /// confirmed 時の LLM 解釈
+  confirmationInterpretation String?
+  /// rejected 時の LLM 解釈
+  rejectionInterpretation String?
+  /// LLM による改善提案
+  actionableInsights String[] @default([])
+
   // タイムスタンプ
   firstObservedAt    DateTime  @default(now()) @db.Timestamptz(6)
   lastObservedAt     DateTime  @default(now()) @db.Timestamptz(6)
