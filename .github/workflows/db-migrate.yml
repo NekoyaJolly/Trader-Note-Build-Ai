@@ -1,0 +1,94 @@
+name: DB Migration (Manual)
+
+# 手動トリガー専用。CI が `ci.yml` の検出ロジックで取りこぼした場合や、
+# 現状把握のための読み取り専用確認（status）に使う。
+#
+# 使い方:
+#   GitHub → Actions → "DB Migration (Manual)" → Run workflow
+#     action: "status"  → 読み取り専用。未適用マイグレーションを一覧するだけ。
+#     action: "deploy"  → `prisma migrate deploy` を実行。保留なしなら no-op。
+#
+# 実装上の注意:
+#   - `secrets.DATABASE_URL` / `secrets.DIRECT_URL` を利用。
+#     ci.yml と同じ secrets を参照するため、「CI が触っているのと同じ DB」に対して
+#     状態確認と修復が行える。
+#   - deploy 後に必ず status を再実行して追従確認する。
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: '実行アクション'
+        required: true
+        type: choice
+        options:
+          - status
+          - deploy
+        default: status
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  migrate:
+    name: Prisma Migrate (${{ github.event.inputs.action }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Node.js セットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 依存関係をインストール
+        run: npm ci
+
+      - name: Prisma クライアント生成
+        run: npx prisma generate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      # ---- secrets 存在確認 ----
+      - name: secrets 存在確認
+        run: |
+          # secret 値そのものは GitHub Actions がマスクするが、
+          # 抽出した部分文字列はマスクされない可能性があるので URL から切り出す処理はしない。
+          # prisma migrate status は接続先 DB 名を出力するので、そこで接続先を確認できる。
+          if [ -z "${DATABASE_URL}" ]; then
+            echo "❌ secrets.DATABASE_URL が未設定です"
+            exit 1
+          fi
+          if [ -z "${DIRECT_URL}" ]; then
+            echo "❌ secrets.DIRECT_URL が未設定です"
+            exit 1
+          fi
+          echo "✅ DATABASE_URL / DIRECT_URL 両方セット済み"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+
+      # ---- status: 読み取り専用の現状確認 ----
+      - name: Prisma migrate status
+        if: github.event.inputs.action == 'status'
+        run: npx prisma migrate status
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+
+      # ---- deploy: 保留マイグレーションを適用 ----
+      - name: Prisma migrate deploy
+        if: github.event.inputs.action == 'deploy'
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+
+      - name: deploy 後の status 確認
+        if: github.event.inputs.action == 'deploy'
+        run: npx prisma migrate status
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
