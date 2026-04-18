@@ -1,0 +1,4 @@
+# Phase 4c Step B: PythonBridge 基盤のみ。
+# WalkForwardTool が必要とする vectorbt / numpy / pandas 等は Step C で追加する。
+
+pytest>=8.2,<9.0

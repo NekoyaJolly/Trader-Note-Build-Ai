@@ -1,0 +1,10 @@
+# shared/ の JSON 入出力ファイル（テスト実行時に生成）
+shared/*.json
+shared/input-*
+shared/output-*
+
+# Python 成果物
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/

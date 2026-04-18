@@ -1,0 +1,34 @@
+# Phase 4c: Side-B 検証ツール用 Python コンテナ
+#
+# 使い方:
+#   (プロジェクトルートから)
+#   docker compose -f python/docker-compose.yml up -d
+#
+# 停止:
+#   docker compose -f python/docker-compose.yml down
+#
+# 本番デプロイは Phase 4c の対象外（ローカル Docker で完結）。
+
+services:
+  python_validator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: side_b_python_validator:latest
+    container_name: side_b_python_validator
+    # TS 側と JSON を受け渡すための共有ボリューム
+    volumes:
+      - ./shared:/app/shared
+    networks:
+      - side_b_network
+    # 初回起動時の健全性確認（ping.py を 30 秒毎に実行）
+    healthcheck:
+      test: ["CMD", "python", "/app/ping.py"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+networks:
+  side_b_network:
+    driver: bridge
