@@ -214,7 +214,7 @@ export class HypothesisGeneratorAgent {
         this.model =
             cfg?.model !== undefined
                 ? cfg.model
-                : process.env.AI_MODEL || config.ai.model || 'gpt-4o';
+                : process.env.AI_MODEL || config.ai.model;
     }
 
     /**

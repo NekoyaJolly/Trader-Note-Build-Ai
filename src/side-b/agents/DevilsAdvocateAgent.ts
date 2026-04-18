@@ -144,7 +144,7 @@ export class DevilsAdvocateAgent {
             : (process.env.AI_BASE_URL || config.ai.baseURL || 'https://api.openai.com/v1');
         this.model = cfg?.model !== undefined
             ? cfg.model
-            : (process.env.AI_MODEL || config.ai.model || 'gpt-4o');
+            : (process.env.AI_MODEL || config.ai.model);
     }
 
     /**

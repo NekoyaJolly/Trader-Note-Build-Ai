@@ -89,7 +89,7 @@ export class PlanAIService {
 
   constructor() {
     this.apiKey = process.env.AI_API_KEY || '';
-    this.model = process.env.AI_MODEL || 'gpt-4o';
+    this.model = process.env.AI_MODEL || config.ai.model;
     this.baseURL = process.env.AI_BASE_URL || config.ai.baseURL || 'https://api.openai.com/v1';
   }
 

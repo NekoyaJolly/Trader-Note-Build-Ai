@@ -42,6 +42,8 @@ interface SimilarityRequest {
 // サービスクラス
 // ===========================================
 
+import { config } from '../../config';
+
 export class LessonSimilarityService {
     private apiKey: string;
     private model: string;
@@ -49,7 +51,7 @@ export class LessonSimilarityService {
 
     constructor() {
         this.apiKey = process.env.AI_API_KEY || '';
-        this.model = process.env.AI_MODEL || 'gpt-4o-mini';
+        this.model = process.env.AI_MODEL || config.ai.model;
         this.baseURL = process.env.AI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai';
     }
 

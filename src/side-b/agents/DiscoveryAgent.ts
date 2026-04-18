@@ -214,7 +214,7 @@ export class DiscoveryAgent {
         this.model =
             cfg?.model !== undefined
                 ? cfg.model
-                : process.env.AI_MODEL || config.ai.model || 'gpt-4o';
+                : process.env.AI_MODEL || config.ai.model;
         this.maxNotes = cfg?.maxNotes ?? 1000;
         this.minSeparationScore = cfg?.minSeparationScore ?? 0.3;
         this.topFeatureCount = cfg?.topFeatureCount ?? 10;

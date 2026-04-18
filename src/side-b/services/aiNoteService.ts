@@ -40,11 +40,16 @@ import * as aiNoteRepository from '../repositories/aiNoteRepository';
 import { serializeLensSnapshot, type LensFeatureSnapshot } from '../lenses';
 import { edgeLedger } from '../ledger';
 import { materializationService } from '../bridge';
+import { config } from '../../config';
 
 // ===== 設定 =====
 
-// 使用するAIモデル
-const AI_MODEL = 'gpt-4o-mini';
+// 使用するAIモデル（config.ai.model = env AI_MODEL、既定 Gemini）
+// ノートに保存する aiModel ラベル用。aiNoteService 自体は LLM を直接
+// 呼ばないが、どのモデルで周辺処理が動いているかを記録する目印となる。
+function currentAIModel(): string {
+  return config.ai.model;
+}
 
 // 類似度の閾値（この値以上なら類似パターンとして登録）
 const SIMILARITY_THRESHOLD = 70;
@@ -169,7 +174,7 @@ export async function generateNoteFromTrade(
     similarPatterns: similarPatterns.length > 0 ? similarPatterns : undefined,
     lensSnapshot: lensSnapshotForNote,
     relatedHypothesisIds: matchedHypothesisIds.length > 0 ? matchedHypothesisIds : undefined,
-    aiModel: AI_MODEL,
+    aiModel: currentAIModel(),
   };
 
   // ノートを保存
