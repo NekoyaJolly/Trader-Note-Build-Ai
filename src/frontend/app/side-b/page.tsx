@@ -88,6 +88,7 @@ function getStateDisplay(state: string) {
 // --- ナビリンク ---
 
 const navLinks = [
+  { icon: "📋", label: "Hypotheses", href: "/side-b/hypotheses" },
   { icon: "📊", label: "Trades", href: "/side-b/trades" },
   { icon: "📝", label: "AI Notes", href: "/side-b/ai-notes" },
   { icon: "🔍", label: "Comparison", href: "/side-b/comparison" },
