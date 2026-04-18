@@ -6,13 +6,14 @@
  * バックエンド追加 + 本ファイル拡張する (Phase 4c 補完として追加実装許可済)。
  *
  * 実装済みエンドポイント:
- *   GET  /api/side-b/hypotheses                    [Phase 4d Step 3 で追加]
+ *   GET  /api/side-b/hypotheses                         [Phase 4d Step 3 で追加]
+ *   GET  /api/side-b/hypotheses/:id                     [Phase 4d Step 4 で追加]
+ *   GET  /api/side-b/hypotheses/:id/validation-history  [Phase 4d Step 4 で追加]
  *   GET  /api/side-b/hypotheses/pending-validation
  *   GET  /api/side-b/hypotheses/:id/validation-status
  *   POST /api/side-b/hypotheses/:id/validate
  *
- * 未実装 (Step 4 以降で追加):
- *   GET  /api/side-b/hypotheses/:id
+ * 未実装 (Step 5 以降で追加):
  *   GET  /api/side-b/hypotheses/testing
  *   GET  /api/side-b/hypotheses/recently-validated
  *   POST /api/side-b/hypotheses/batch-validate
@@ -29,6 +30,10 @@ import type {
   HypothesisListItem,
   HypothesisListParams,
   HypothesisListResponse,
+  HypothesisDetailResponse,
+  ValidationHistoryResponse,
+  EdgeHypothesis,
+  ValidationHistoryEntry,
 } from "@/types/sideB";
 
 // ===========================================
@@ -176,6 +181,43 @@ async function listHypotheses(
 }
 
 /**
+ * GET /api/side-b/hypotheses/:id
+ *
+ * 個別仮説の取得（詳細画面 §4.3）。未発見は 404 → SideBApiError(status=404)。
+ */
+async function getHypothesis(hypothesisId: string): Promise<EdgeHypothesis> {
+    if (!hypothesisId) {
+        throw new SideBApiError("hypothesisId は必須です", 400, "/hypotheses/:id");
+    }
+    const res = await request<HypothesisDetailResponse>(
+        `/hypotheses/${encodeURIComponent(hypothesisId)}`,
+    );
+    return res.hypothesis;
+}
+
+/**
+ * GET /api/side-b/hypotheses/:id/validation-history
+ *
+ * 検証履歴エントリ配列を新しい順で返す。
+ * 実データが揃っていない段階では 0 件 or screening 1 件になることが多い。
+ */
+async function getValidationHistory(
+    hypothesisId: string,
+): Promise<ValidationHistoryEntry[]> {
+    if (!hypothesisId) {
+        throw new SideBApiError(
+            "hypothesisId は必須です",
+            400,
+            "/hypotheses/:id/validation-history",
+        );
+    }
+    const res = await request<ValidationHistoryResponse>(
+        `/hypotheses/${encodeURIComponent(hypothesisId)}/validation-history`,
+    );
+    return res.history;
+}
+
+/**
  * GET /api/side-b/hypotheses/pending-validation
  *
  * screening_passed な仮説（検証待ち）一覧を取得する。
@@ -227,6 +269,8 @@ async function triggerValidation(
 
 export const sideBApi = {
   listHypotheses,
+  getHypothesis,
+  getValidationHistory,
   getPendingValidation,
   getValidationStatus,
   triggerValidation,

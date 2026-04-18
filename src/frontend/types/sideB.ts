@@ -402,3 +402,49 @@ export interface HypothesisListResponse {
   limit: number;
   hypotheses: EdgeHypothesis[];
 }
+
+/**
+ * GET /api/side-b/hypotheses/:id のレスポンス。
+ */
+export interface HypothesisDetailResponse {
+  success: true;
+  hypothesis: EdgeHypothesis;
+}
+
+// ===========================================
+// Phase 4d: 検証履歴 API
+// ===========================================
+
+/**
+ * 仮説の検証履歴エントリ（バックエンド ValidationHistoryEntry と同一）。
+ *
+ * 現状の情報源:
+ *   - 'screening': screeningResult (Phase 4b 縮小版、1 件まで)
+ *   - 'full_validation': fullValidationReport (Phase 4c、実データは運用後)
+ *
+ * UI は配列として扱い、0 件 / 1 件 / 2 件のいずれでも表示破綻しない設計。
+ */
+export type ValidationHistoryEntry =
+  | {
+    type: "screening";
+    /** ISO8601 */
+    executedAt: string;
+    passed: boolean;
+    result: ScreeningResult;
+  }
+  | {
+    type: "full_validation";
+    /** ISO8601 */
+    executedAt: string;
+    passed: boolean;
+    report: ConsolidatedValidationReport;
+  };
+
+/**
+ * GET /api/side-b/hypotheses/:id/validation-history のレスポンス。
+ * 新しい順にソート済み。
+ */
+export interface ValidationHistoryResponse {
+  success: true;
+  history: ValidationHistoryEntry[];
+}
