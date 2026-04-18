@@ -36,6 +36,49 @@ import type { EdgeLedgerStats, ObservationInput } from './types';
 type PrismaEdge = Awaited<ReturnType<typeof prisma.edgeHypothesis.findFirst>> & object;
 
 // ===========================================
+// Phase 4d: find() 用の型
+// ===========================================
+
+/**
+ * ソートキー。
+ *
+ * NOTE: 仕様書 §4.2 には「確信度順」も挙がっているが、EdgeHypothesis 本体に
+ * confidence スコアが存在しないため、Phase 4d MVP では意図的に未実装とする。
+ * 将来的に overallConfidenceScore 等のスコア設計が決まった段階で
+ * 'confidence' を追加する。
+ */
+export type EdgeFindSortKey = 'newest' | 'oldest' | 'observation';
+
+export interface EdgeFindOptions {
+    /** status のマルチ選択（OR 結合）。未指定時は全ステータス。 */
+    statuses?: EdgeStatus[];
+    /** category のマルチ選択（OR 結合）。 */
+    categories?: EdgeCategory[];
+    /** source のマルチ選択（OR 結合）。 */
+    sources?: EdgeSource[];
+    /** symbols のマルチ選択（仮説が指定シンボルのいずれかを持てばヒット）。 */
+    symbols?: string[];
+    /** statement への大文字小文字無視の部分一致。 */
+    search?: string;
+    /** ソート順。既定は 'newest'。 */
+    sortBy?: EdgeFindSortKey;
+    /** 1-based ページ番号。既定 1。 */
+    page?: number;
+    /** 1 ページ当たりの件数。既定 20、上限 100。 */
+    limit?: number;
+}
+
+export interface EdgeFindResult {
+    hypotheses: EdgeHypothesis[];
+    /** フィルタ適用後の総件数（ページネーション前） */
+    total: number;
+    /** 実際に使われた page（正規化済み） */
+    page: number;
+    /** 実際に使われた limit（clamp 済み） */
+    limit: number;
+}
+
+// ===========================================
 // EdgeLedger 本体
 // ===========================================
 
@@ -201,6 +244,73 @@ export class EdgeLedger {
             orderBy: { createdAt: 'desc' },
         });
         return rows.map(mapPrismaToEdgeHypothesis);
+    }
+
+    /**
+     * Phase 4d: 汎用検索（フィルタ・検索・ソート・ページネーション）。
+     *
+     * 既存の findByStatus / findByCategory / findBySymbol は破壊的に置き換えず
+     * 共存させる（呼び出し側を壊さないため）。本メソッドは UI の一覧画面用に
+     * 複数フィルタを AND 結合する。
+     *
+     * 未実装項目 (意図的):
+     *   - sortBy: 'confidence' は未対応（EdgeHypothesis に confidence スコアが
+     *     無いため運用後に定義を詰める。実装時は EdgeFindSortKey に追加）。
+     *
+     * @see docs/design/phase_4d_specification.md §4.2
+     */
+    async find(options: EdgeFindOptions = {}): Promise<EdgeFindResult> {
+        const page = Math.max(1, options.page ?? 1);
+        const limit = Math.max(1, Math.min(100, options.limit ?? 20));
+        const skip = (page - 1) * limit;
+
+        const where: Prisma.EdgeHypothesisWhereInput = {};
+
+        if (options.statuses && options.statuses.length > 0) {
+            where.status = { in: options.statuses };
+        }
+        if (options.categories && options.categories.length > 0) {
+            where.category = { in: options.categories };
+        }
+        if (options.sources && options.sources.length > 0) {
+            where.source = { in: options.sources };
+        }
+        if (options.symbols && options.symbols.length > 0) {
+            where.symbols = { hasSome: options.symbols };
+        }
+        const trimmedSearch = options.search?.trim();
+        if (trimmedSearch) {
+            where.statement = { contains: trimmedSearch, mode: 'insensitive' };
+        }
+
+        const orderBy = EdgeLedger.resolveOrderBy(options.sortBy ?? 'newest');
+
+        const [total, rows] = await Promise.all([
+            prisma.edgeHypothesis.count({ where }),
+            prisma.edgeHypothesis.findMany({ where, orderBy, skip, take: limit }),
+        ]);
+
+        return {
+            hypotheses: rows.map(mapPrismaToEdgeHypothesis),
+            total,
+            page,
+            limit,
+        };
+    }
+
+    /** find() のソートキー → Prisma orderBy 変換。他の呼び出し元で使いたければ class static で露出させる。 */
+    private static resolveOrderBy(
+        sortBy: EdgeFindSortKey,
+    ): Prisma.EdgeHypothesisOrderByWithRelationInput {
+        switch (sortBy) {
+            case 'oldest':
+                return { createdAt: 'asc' };
+            case 'observation':
+                return { observationCount: 'desc' };
+            case 'newest':
+            default:
+                return { createdAt: 'desc' };
+        }
     }
 
     /**

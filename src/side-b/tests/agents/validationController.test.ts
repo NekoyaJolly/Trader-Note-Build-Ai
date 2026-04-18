@@ -37,8 +37,11 @@ function makeHypothesis(overrides?: Partial<EdgeHypothesis>): EdgeHypothesis {
     };
 }
 
-function makeReqRes(params: Record<string, string> = {}) {
-    const req = { params } as unknown as Request;
+function makeReqRes(
+    params: Record<string, string> = {},
+    query: Record<string, unknown> = {},
+) {
+    const req = { params, query } as unknown as Request;
     const res: Partial<Response> & { statusCode: number; body: unknown } = {
         statusCode: 200,
         body: undefined,
@@ -246,5 +249,194 @@ describe('ValidationController.listPendingValidation', () => {
 
         await ctrl.listPendingValidation(req, res);
         expect(res.statusCode).toBe(500);
+    });
+});
+
+// ===========================================
+// Phase 4d Step 3: listHypotheses
+// ===========================================
+
+describe('ValidationController.listHypotheses', () => {
+    function buildController(findResult: {
+        hypotheses?: EdgeHypothesis[];
+        total?: number;
+        page?: number;
+        limit?: number;
+    } = {}) {
+        const findMock = jest.fn().mockResolvedValue({
+            hypotheses: findResult.hypotheses ?? [],
+            total: findResult.total ?? 0,
+            page: findResult.page ?? 1,
+            limit: findResult.limit ?? 20,
+        });
+        const ledger = { get: jest.fn(), findByStatus: jest.fn(), find: findMock };
+        const strategist = { validate: jest.fn() };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ctrl = new ValidationController(ledger as any, strategist as any);
+        return { ctrl, ledger, findMock, strategist };
+    }
+
+    it('クエリ無しで既定フィルタ (全件、newest、page=1、limit=20) を渡す', async () => {
+        const { ctrl, findMock } = buildController();
+        const { req, res } = makeReqRes({}, {});
+
+        await ctrl.listHypotheses(req, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(findMock).toHaveBeenCalledWith({
+            statuses: undefined,
+            categories: undefined,
+            sources: undefined,
+            symbols: undefined,
+            search: undefined,
+            sortBy: 'newest',
+            page: 1,
+            limit: 20,
+        });
+        const body = res.body as Record<string, unknown>;
+        expect(body.success).toBe(true);
+        expect(body.total).toBe(0);
+        expect(body.page).toBe(1);
+        expect(body.limit).toBe(20);
+    });
+
+    it('カンマ区切りの status を配列に分解し、未知値は無視する', async () => {
+        const { ctrl, findMock } = buildController();
+        const { req, res } = makeReqRes({}, {
+            status: 'confirmed,rejected,bogus,screening_passed',
+        });
+
+        await ctrl.listHypotheses(req, res);
+
+        expect(findMock).toHaveBeenCalledWith(expect.objectContaining({
+            statuses: ['confirmed', 'rejected', 'screening_passed'],
+        }));
+    });
+
+    it('配列形式の status でも正しく受け取れる', async () => {
+        const { ctrl, findMock } = buildController();
+        const { req, res } = makeReqRes({}, { status: ['confirmed', 'testing'] });
+
+        await ctrl.listHypotheses(req, res);
+
+        expect(findMock).toHaveBeenCalledWith(expect.objectContaining({
+            statuses: ['confirmed', 'testing'],
+        }));
+    });
+
+    it('全て未知 status が指定された場合は undefined になる（= 全件）', async () => {
+        const { ctrl, findMock } = buildController();
+        const { req, res } = makeReqRes({}, { status: 'bogus,unknown' });
+
+        await ctrl.listHypotheses(req, res);
+
+        expect(findMock).toHaveBeenCalledWith(expect.objectContaining({
+            statuses: undefined,
+        }));
+    });
+
+    it('category / source / symbol / search がそのまま渡る', async () => {
+        const { ctrl, findMock } = buildController();
+        const { req, res } = makeReqRes({}, {
+            category: 'time,volatility',
+            source: 'ai_generated',
+            symbol: 'XAU/USD,EUR/USD',
+            search: '  ロンドン  ',
+        });
+
+        await ctrl.listHypotheses(req, res);
+
+        expect(findMock).toHaveBeenCalledWith(expect.objectContaining({
+            categories: ['time', 'volatility'],
+            sources: ['ai_generated'],
+            symbols: ['XAU/USD', 'EUR/USD'],
+            search: '  ロンドン  ', // trim は find 側の責務
+        }));
+    });
+
+    it('sortBy は許可値のみ採用、それ以外は newest にフォールバック', async () => {
+        const { ctrl, findMock } = buildController();
+
+        for (const [input, expected] of [
+            ['newest', 'newest'],
+            ['oldest', 'oldest'],
+            ['observation', 'observation'],
+            ['confidence', 'newest'], // 未実装キー
+            ['garbage', 'newest'],
+        ] as const) {
+            findMock.mockClear();
+            const { req, res } = makeReqRes({}, { sortBy: input });
+            await ctrl.listHypotheses(req, res);
+            expect(findMock).toHaveBeenCalledWith(expect.objectContaining({ sortBy: expected }));
+        }
+    });
+
+    it('page / limit を数値に変換、不正値は既定値', async () => {
+        const { ctrl, findMock } = buildController();
+
+        findMock.mockClear();
+        const { req: r1, res: s1 } = makeReqRes({}, { page: '3', limit: '50' });
+        await ctrl.listHypotheses(r1, s1);
+        expect(findMock).toHaveBeenCalledWith(expect.objectContaining({ page: 3, limit: 50 }));
+
+        findMock.mockClear();
+        const { req: r2, res: s2 } = makeReqRes({}, { page: 'abc', limit: '-5' });
+        await ctrl.listHypotheses(r2, s2);
+        expect(findMock).toHaveBeenCalledWith(expect.objectContaining({ page: 1, limit: 20 }));
+    });
+
+    it('ledger が正常終了時はレスポンスに hypotheses / total / page / limit が含まれる', async () => {
+        const hyp = {
+            id: 'h1',
+            statement: 'test',
+            category: 'time',
+            conditions: [],
+            expectedDirection: 'long',
+            status: 'confirmed',
+            statusUpdatedAt: new Date(),
+            symbols: ['XAU/USD'],
+            timeframes: ['15m'],
+            observationCount: 5,
+            winCount: 3,
+            lossCount: 2,
+            breakevenCount: 0,
+            totalPnlPips: 100,
+            avgRR: 1.5,
+            source: 'ai_generated',
+            firstObservedAt: new Date(),
+            lastObservedAt: new Date(),
+            createdAt: new Date(),
+            updatedAt: new Date(),
+        } as unknown as EdgeHypothesis;
+
+        const { ctrl } = buildController({
+            hypotheses: [hyp],
+            total: 1,
+            page: 1,
+            limit: 20,
+        });
+        const { req, res } = makeReqRes({}, {});
+
+        await ctrl.listHypotheses(req, res);
+
+        expect(res.statusCode).toBe(200);
+        const body = res.body as { hypotheses: EdgeHypothesis[]; total: number; page: number; limit: number };
+        expect(body.hypotheses).toHaveLength(1);
+        expect(body.total).toBe(1);
+        expect(body.page).toBe(1);
+        expect(body.limit).toBe(20);
+    });
+
+    it('find が throw したら 500', async () => {
+        const findMock = jest.fn().mockRejectedValue(new Error('db error'));
+        const ledger = { get: jest.fn(), findByStatus: jest.fn(), find: findMock };
+        const strategist = { validate: jest.fn() };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ctrl = new ValidationController(ledger as any, strategist as any);
+        const { req, res } = makeReqRes({}, {});
+
+        await ctrl.listHypotheses(req, res);
+        expect(res.statusCode).toBe(500);
+        expect((res.body as { success: boolean }).success).toBe(false);
     });
 });
