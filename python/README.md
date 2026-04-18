@@ -44,24 +44,32 @@ TS から `docker exec side_b_python_validator python <script> <input.json> <out
 
 ## ライブラリ選定（Phase 4c での意思決定）
 
-### 現状（Step B）
-最小構成。依存は `pytest` のみ。
+### 採用: **Python 標準ライブラリのみ（stdlib 完結）**
 
-### Step C で採用予定
-**第一候補: vectorbt**（要検証）
+Step C 着手時に `walk_forward.py` の要件を精査した結果、本プロジェクトの
+Walk-Forward は「Side-A が確定させたトレードイベント列を時間軸で分割して
+IS/OOS 勝率・PF を比較する」だけで足り、vectorbt / backtrader / backtesting.py
+が提供する OHLCV → シグナル → トレード生成のパイプライン機能は不要と判断した。
+
+依存は `pytest` のみ（テスト用途）。本番パスは stdlib 完結。
 
 選定理由:
-- NumPy ベースで高速
-- 研究用途での実績
-- ウォークフォワード検証の sliding window 処理が書きやすい
-- アクティブメンテナンス
+- 真の Walk-Forward（各窓で最適化パラメーター再学習）は不要。
+  Side-B の仮説には再学習対象のパラメーターが無いため。
+- stdlib 完結にすることで Docker イメージが軽量、起動も高速（numba JIT 待ち無し）
+- numba / llvmlite 等の M1/M2 Mac でのビルド問題を回避
+- メンテナンス対象コードが最小（`walk_forward.py` は 200 行弱）
 
-リスク / 代替:
-- 依存が重い（numba 等）。M1/M2 Mac で numba のビルドに時間がかかるケース報告あり
-- 上記で問題が出る場合は **backtesting.py**（軽量・Pure Python・単純 API）に切替える
+将来拡張時の候補:
+- モンテカルロを TS から Python へ移したい場合: `numpy` 追加で対応可能
+- 条件再評価を Python 側でしたい場合: `backtesting.py`（軽量 Pure Python）を検討
 
-Step C 着手時に実際にインストール・導入してから最終判断し、この README に
-採用ライブラリとバージョン、選定経緯を追記する。
+### 実装の前提（重要）
+
+本実装は Side-A のバックテスト結果（固定条件・固定 SL/TP）を時間窓で
+パーティショニングする「**時間的安定性テスト**」に相当する。詳細は
+`walk_forward/walk_forward.py` の docstring および
+`docs/design/phase_4c_specification.md` §4.5 参照。
 
 ## 本番デプロイについて
 
