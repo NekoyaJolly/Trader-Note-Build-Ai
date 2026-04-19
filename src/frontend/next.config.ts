@@ -1,4 +1,13 @@
 import type { NextConfig } from "next";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+/**
+ * このファイルがあるディレクトリ＝Next アプリのルート（src/frontend）
+ * リポジトリ直下にも package-lock があると Turbopack が誤ったルートを推定し、
+ * Vercel / CI でビルドが不安定になるため root を固定する。
+ */
+const turbopackRoot = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * Next.js 設定
@@ -13,9 +22,9 @@ import type { NextConfig } from "next";
  * 現在は PWA 機能を無効化し、手動の Service Worker で対応
  */
 const nextConfig: NextConfig = {
-  // Turbopack を明示的に有効化（空の設定でもOK）
-  // これにより webpack 設定との競合警告を抑制
-  turbopack: {},
+  turbopack: {
+    root: turbopackRoot,
+  },
 };
 
 export default nextConfig;
