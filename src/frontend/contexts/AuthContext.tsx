@@ -182,13 +182,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const body = await response.text();
         console.error("[AuthContext] 認証URL取得エラー:", response.status, body);
         // 404 で HTML が返る場合はまだ Next に届いている。localhost では既定で :3100 を使うため、バックエンド未起動の可能性が高い。
+        // ユーザーには固定文言のみ表示し、詳細なレスポンス本文は console に限定する
         if (typeof window !== "undefined") {
           const hint =
             response.status === 404
-              ? "\n\n【よくある原因】API（Express :3100）が起動していないか、URL が誤っています。npm run dev または npm run dev:backend を実行してください。\n（localhost では NEXT_PUBLIC_API_BASE_URL 未設定でも http://localhost:3100 を既定で使います）\ncTrader: docs/cTrader-localhost-cheatsheet.md"
-              : "";
+              ? "\n\n【よくある原因】フロントがバックエンドに届いていません。src/frontend/.env.local に NEXT_PUBLIC_API_BASE_URL=http://localhost:3100 を設定し、API（npm run dev:backend 等）を起動してください。\nまた cTrader アプリの Redirect URI にローカル用（例: http://localhost:3102/auth/ctrader/callback）を登録し、ルート .env の CTRADER_REDIRECT_URI と一致させてください。"
+              : "\n\nバックエンドが起動しているか、NEXT_PUBLIC_API_BASE_URL が正しいか確認してください。";
           window.alert(
-            `認証URLの取得に失敗しました（HTTP ${response.status}）。${hint}\n\n${body.slice(0, 300)}`,
+            `認証URLの取得に失敗しました（HTTP ${response.status}）。${hint}\n\n詳細はブラウザの開発者コンソールを確認してください。`,
           );
         }
       }

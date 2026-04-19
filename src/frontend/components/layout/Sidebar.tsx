@@ -367,9 +367,15 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
     const cats = isSideBWorkspace ? sideBNavCategories : sideANavCategories;
 
     const isActiveHref = (href: string) => {
-      if (href === "/" || href.startsWith("#")) {
-        return pathname === href || pathname === "/";
+      if (href === "/") {
+        return pathname === "/";
       }
+
+      // ハッシュのみの疑似リンクは pathname ベースのアクティブ判定対象外
+      if (href.startsWith("#")) {
+        return false;
+      }
+
       return pathname === href || pathname.startsWith(`${href}/`);
     };
 
