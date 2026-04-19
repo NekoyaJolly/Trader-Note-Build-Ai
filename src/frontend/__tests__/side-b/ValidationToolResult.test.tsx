@@ -108,10 +108,10 @@ describe("ValidationToolResult", () => {
                 })}
             />,
         );
-        const isCell = screen.getByTestId
-            ? document.querySelector('[data-metric-key="avgInSampleWinRate"]')
-            : null;
-        expect(isCell?.textContent).toBe("58.0%");
+        const cell = document.querySelector(
+            '[data-metric-key="avgInSampleWinRate"]',
+        );
+        expect(cell?.textContent).toBe("58.0%");
     });
 
     it("overfitScore は小数3桁表示", () => {

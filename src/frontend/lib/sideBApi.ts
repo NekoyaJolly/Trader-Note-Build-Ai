@@ -13,11 +13,14 @@
  *   GET  /api/side-b/hypotheses/:id/validation-status
  *   POST /api/side-b/hypotheses/:id/validate
  *
- * 未実装 (Step 5 以降で追加):
+ * Step 5/6 で追加済み:
  *   GET  /api/side-b/hypotheses/testing
  *   GET  /api/side-b/hypotheses/recently-validated
  *   POST /api/side-b/hypotheses/batch-validate
- *   GET  /api/side-b/stats/*
+ *   GET  /api/side-b/hypotheses/recent-confirmed
+ *   GET  /api/side-b/hypotheses/recent-rejected
+ *   GET  /api/side-b/stats/overview, time-series, by-category, validation-activity
+ *   GET  /api/side-b/discovery/latest
  *   GET  /api/side-b/system/health
  *
  * @see docs/design/phase_4d_specification.md §4.7
@@ -34,6 +37,16 @@ import type {
   ValidationHistoryResponse,
   EdgeHypothesis,
   ValidationHistoryEntry,
+  HypothesesTestingResponse,
+  RecentlyValidatedResponse,
+  BatchValidateResponse,
+  StatsOverviewResponse,
+  StatsTimeSeriesResponse,
+  StatsByCategoryResponse,
+  StatsValidationActivityResponse,
+  RecentHypothesesResponse,
+  DiscoveryLatestResponse,
+  SystemHealthResponse,
 } from "@/types/sideB";
 
 // ===========================================
@@ -263,6 +276,79 @@ async function triggerValidation(
   );
 }
 
+async function getTestingHypotheses(): Promise<EdgeHypothesis[]> {
+  const res = await request<HypothesesTestingResponse>("/hypotheses/testing");
+  return res.hypotheses;
+}
+
+async function getRecentlyValidated(hours = 24): Promise<EdgeHypothesis[]> {
+  const sp = new URLSearchParams();
+  if (hours !== 24) sp.set("hours", String(hours));
+  const q = sp.toString();
+  const res = await request<RecentlyValidatedResponse>(
+    `/hypotheses/recently-validated${q ? `?${q}` : ""}`,
+  );
+  return res.hypotheses;
+}
+
+async function batchValidate(ids: string[]): Promise<BatchValidateResponse> {
+  if (!ids.length) {
+    throw new SideBApiError("ids は1件以上必要です", 400, "/batch-validate");
+  }
+  return request<BatchValidateResponse>("/hypotheses/batch-validate", {
+    method: "POST",
+    body: JSON.stringify({ ids: ids.slice(0, 10) }),
+  });
+}
+
+async function getRecentConfirmed(limit = 5): Promise<EdgeHypothesis[]> {
+  const res = await request<RecentHypothesesResponse>(
+    `/hypotheses/recent-confirmed?limit=${encodeURIComponent(String(limit))}`,
+  );
+  return res.hypotheses;
+}
+
+async function getRecentRejected(limit = 5): Promise<EdgeHypothesis[]> {
+  const res = await request<RecentHypothesesResponse>(
+    `/hypotheses/recent-rejected?limit=${encodeURIComponent(String(limit))}`,
+  );
+  return res.hypotheses;
+}
+
+async function getOverviewStats(): Promise<StatsOverviewResponse> {
+  return request<StatsOverviewResponse>("/stats/overview");
+}
+
+async function getTimeSeriesStats(
+  period: "daily" | "monthly" = "monthly",
+  limit = 12,
+): Promise<StatsTimeSeriesResponse> {
+  const sp = new URLSearchParams();
+  sp.set("period", period);
+  sp.set("limit", String(limit));
+  return request<StatsTimeSeriesResponse>(`/stats/time-series?${sp.toString()}`);
+}
+
+async function getCategoryStats(): Promise<StatsByCategoryResponse> {
+  return request<StatsByCategoryResponse>("/stats/by-category");
+}
+
+async function getValidationActivity(days = 30): Promise<StatsValidationActivityResponse> {
+  const sp = new URLSearchParams();
+  sp.set("days", String(days));
+  return request<StatsValidationActivityResponse>(
+    `/stats/validation-activity?${sp.toString()}`,
+  );
+}
+
+async function getLatestDiscovery(): Promise<DiscoveryLatestResponse> {
+  return request<DiscoveryLatestResponse>("/discovery/latest");
+}
+
+async function getSystemHealth(): Promise<SystemHealthResponse> {
+  return request<SystemHealthResponse>("/system/health");
+}
+
 // ===========================================
 // export
 // ===========================================
@@ -274,6 +360,17 @@ export const sideBApi = {
   getPendingValidation,
   getValidationStatus,
   triggerValidation,
+  getTestingHypotheses,
+  getRecentlyValidated,
+  batchValidate,
+  getRecentConfirmed,
+  getRecentRejected,
+  getOverviewStats,
+  getTimeSeriesStats,
+  getCategoryStats,
+  getValidationActivity,
+  getLatestDiscovery,
+  getSystemHealth,
 };
 
 /** 外部テスト向け: クエリ組み立てのみ検証できるよう内部 util を露出 */

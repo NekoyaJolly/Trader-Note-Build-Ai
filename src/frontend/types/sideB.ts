@@ -448,3 +448,99 @@ export interface ValidationHistoryResponse {
   success: true;
   history: ValidationHistoryEntry[];
 }
+
+// ===========================================
+// Phase 4d Step 5: 検証画面 API
+// ===========================================
+
+/** GET /hypotheses/testing */
+export interface HypothesesTestingResponse {
+  success: true;
+  total: number;
+  hypotheses: EdgeHypothesis[];
+}
+
+/** GET /hypotheses/recently-validated */
+export interface RecentlyValidatedResponse {
+  success: true;
+  hours: number;
+  total: number;
+  hypotheses: EdgeHypothesis[];
+}
+
+export type BatchValidateItemResult =
+  | { hypothesisId: string; ok: true; verdict: string }
+  | { hypothesisId: string; ok: false; error: string };
+
+/** POST /hypotheses/batch-validate */
+export interface BatchValidateResponse {
+  success: true;
+  results: BatchValidateItemResult[];
+}
+
+// ===========================================
+// Phase 4d Step 6: ダッシュボード API
+// ===========================================
+
+/** GET /stats/overview */
+export interface StatsOverviewResponse {
+  success: true;
+  totalHypotheses: number;
+  byStatus: Record<EdgeStatus, number>;
+  confirmedCount: number;
+  newHypothesesThisWeek: number;
+  confirmedThisWeek: number;
+  confirmedPrevWeek: number;
+  confirmedGrowthRate: number | null;
+  lastValidationCompletedAt: string | null;
+  recentValidationSuccessRate: number | null;
+}
+
+/** GET /stats/time-series */
+export interface StatsTimeSeriesResponse {
+  success: true;
+  period: "daily" | "monthly";
+  points: Array<{ periodStart: string; confirmedCount: number }>;
+}
+
+/** GET /stats/by-category */
+export interface StatsByCategoryResponse {
+  success: true;
+  categories: Array<{ category: string; confirmedCount: number }>;
+}
+
+/** GET /stats/validation-activity */
+export interface StatsValidationActivityResponse {
+  success: true;
+  days: number;
+  points: Array<{ date: string; count: number }>;
+}
+
+/** GET /hypotheses/recent-confirmed | recent-rejected */
+export interface RecentHypothesesResponse {
+  success: true;
+  total: number;
+  hypotheses: EdgeHypothesis[];
+}
+
+/** GET /discovery/latest */
+export interface DiscoveryLatestResponse {
+  success: true;
+  hasWeeklyReport: boolean;
+  message: string;
+  newHypothesesFromDiscovery7d: number;
+  sampleHypotheses: Array<{
+    id: string;
+    statement: string;
+    status: string;
+    createdAt: string;
+  }>;
+}
+
+/** GET /system/health */
+export interface SystemHealthResponse {
+  success: true;
+  database: "ok" | "error";
+  pythonValidator: "ok" | "error";
+  checkedAt: string;
+}

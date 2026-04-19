@@ -51,14 +51,23 @@ Side-B の UI はこの原則を特に強く適用する。仮説検証の各段
 - `/strategies` 戦略
 - その他
 
-### 0.3 新設する Side-B UI 領域
+### 0.3 Side-B UI 領域（実装との役割分担・2026-04 改定）
+
+**方針（プロジェクト決定）**
+
+- `/side-b` は **既存の AI エージェント操作・監視画面** を正とする（`src/frontend/app/side-b/page.tsx`）。Phase 4d ではこの画面を「4カードのランディング」に差し替えない。
+- 旧仕様書 §4.1 にあった **「4カード + 現状サマリー」** は **`/side-b/dashboard` に移管** する（Step 6 で実装）。`/side-b/dashboard` は **台帳・検証の統計・俯瞰専用** とし、エージェント画面とは役割を分離する。
+- Phase 4d の想定外として、以下は **既存機能として共存** する（本フェーズの完了条件には含めないが、ナビから辿れるようにする）:
+  - `/side-b/agent`, `/side-b/ai-notes`, `/side-b/comparison`, `/side-b/trades`, `/side-b/settings` など
+
+**本フェーズで新設・完成させるルート（Phase 4d コア）**
 
 ```
-/side-b                      新設、Side-B のランディング
-/side-b/hypotheses           仮説一覧(台帳の可視化)
-/side-b/hypotheses/[id]      仮説詳細(検証履歴、結果可視化)
-/side-b/validation           検証画面(手動トリガー、進行中一覧)
-/side-b/dashboard            ダッシュボード(台帳メトリクス、進化状況)
+/side-b                      既存: AI エージェント操作画面（正）
+/side-b/hypotheses           仮説一覧（台帳の可視化）
+/side-b/hypotheses/[id]      仮説詳細（検証履歴、結果可視化）
+/side-b/validation           検証画面（手動トリガー、進行中一覧）※ Step 5
+/side-b/dashboard            台帳ダッシュボード（4カードハブ + KPI/グラフ）※ Step 6
 ```
 
 ---
@@ -79,7 +88,7 @@ Side-B の仮説検証システムをブラウザから完全に操作・観察�
 
 以下の全てを満たす:
 
-- [ ] `/side-b` ランディングページが実装されている
+- [ ] `/side-b` が **AI エージェント操作画面** として利用可能である（既存実装を正とする。旧来の「4カードのみのランディング」は `/side-b/dashboard` 側で満たす）
 - [ ] `/side-b/hypotheses` 仮説一覧画面が実装されている(フィルタ・ソート含む)
 - [ ] `/side-b/hypotheses/[id]` 仮説詳細画面が実装されている
 - [ ] `/side-b/validation` 検証画面が実装されている(手動トリガー可能)
@@ -99,7 +108,7 @@ Side-B の仮説検証システムをブラウザから完全に操作・観察�
 ### 触っていい(新規作成)
 
 **ページ**:
-- `src/frontend/app/side-b/page.tsx` (ランディング)
+- `src/frontend/app/side-b/page.tsx` (既存: AI エージェント画面。Phase 4d では差し替えない)
 - `src/frontend/app/side-b/layout.tsx` (Side-B 共通レイアウト)
 - `src/frontend/app/side-b/hypotheses/page.tsx`
 - `src/frontend/app/side-b/hypotheses/[id]/page.tsx`
@@ -149,31 +158,15 @@ Side-B の仮説検証システムをブラウザから完全に操作・観察�
 
 ## 4. 実装仕様
 
-### 4.1 Side-B ランディングページ
+### 4.1 `/side-b`（AI エージェント画面・既存）
 
 **Route**: `/side-b`
 
-**役割**: Side-B エリアのハブ。4つのサブページへのナビゲーション。
+**役割（改定後）**: 自律型 AI の **起動・監視・思考ログ・トレード結果** など、エージェント運用の中心 UI。詳細は `docs/side-b/TradeAssistant-AI.md` および `src/frontend/app/side-b/page.tsx` を参照。
 
-**構成**:
-```
-Header: "Side-B: AI 自律検証システム"
-Description: 1-2行の簡潔な説明
+**Phase 4d での扱い**: 本画面は **置き換えない**。旧仕様にあった「4カード + サマリー」型のハブ UI は **§4.5 ダッシュボード** に移管する。
 
-4つの NeonCard(グリッドレイアウト):
-  - 仮説一覧 (hypotheses): アイコン 📋, purple
-  - 検証実行 (validation): アイコン ⚙️, cyan
-  - ダッシュボード (dashboard): アイコン 📊, green
-  - 設定 (将来): アイコン ⚙️, slate(現時点ではコミングスーン扱い)
-
-最下部: 現状サマリー
-  - 総仮説数
-  - confirmed 件数
-  - 今週の新規仮説数
-  - 直近検証完了時刻
-```
-
-**使用コンポーネント**: NeonCard, Card, Badge
+**使用コンポーネント**: 既存ページ実装に従う（Neon Dark との整合はレイアウト側で担保）
 
 ### 4.2 仮説一覧画面
 
@@ -331,11 +324,20 @@ GET /api/side-b/hypotheses/:id/validation-status
 
 **Route**: `/side-b/dashboard`
 
-**役割**: 台帳全体の成長・状態を可視化。
+**役割**: 台帳全体の成長・状態を可視化する **統計・俯瞰専用ページ**（`/side-b` エージェント画面とは役割を分離）。
 
 **構成**:
 
 ```
+最上段（旧 §4.1 から移管）: サブページへの NeonCard ハブ（4カード + 必要ならコミングスーン）
+  - 仮説一覧 → /side-b/hypotheses
+  - 検証実行 → /side-b/validation
+  - エージェント操作 → /side-b（既存）
+  - 設定等（将来）: コミングスーン可
+
+  現状サマリー（API 取得、初版は overview 等の集約エンドポイントで十分）
+  - 総仮説数 / confirmed 件数 / 今週の新規仮説数 / 直近検証完了時刻 など
+
 上段: KPI カード(4つ、LedgerStats コンポーネント)
   - 総仮説数
   - confirmed 数(成長率付き)
@@ -378,6 +380,8 @@ GET /api/side-b/system/health
 ```
 
 **注意**: API の一部は Phase 4c では未実装の可能性がある。その場合、Phase 4d 着手時に不足 API をバックエンド実装する必要がある。詳細は 6. 実装順序で。
+
+**API 設計メモ（初版）**: Step 6 のダッシュボード用 API は、フロントの呼び出し回数削減のため **集約レスポンス（例: 概要1本でカード用フィールドをまとめる）** を検討してよい。仕様上の REST パスは §4.5 / §4.7 のリストを正としつつ、実装は段階的にマージ可能。
 
 ### 4.6 新規コンポーネント仕様
 
@@ -565,6 +569,7 @@ export type EdgeSource =
 
 **最小変更**:
 - ヘッダーまたはサイドバーに「Side-B」リンク追加
+- Side-B 配下の実在ルート（例: `/side-b/hypotheses`, `/side-b/comparison`）をサイドバーに登録し、未実装パスへのリンクを置かない
 - 既存のリンク構造を変えない
 
 **見え方**:
@@ -645,13 +650,13 @@ export type EdgeSource =
 ### 5.3 URL 設計
 
 ```
-/side-b                       ランディング
+/side-b                       AI エージェント操作（既存）
 /side-b/hypotheses            一覧
 /side-b/hypotheses?status=... フィルタ付き一覧
 /side-b/hypotheses/[id]       詳細
 /side-b/validation            検証画面
 /side-b/validation?focus=...  特定仮説フォーカス
-/side-b/dashboard             ダッシュボード
+/side-b/dashboard             台帳ダッシュボード（4カードハブ + 統計）
 ```
 
 **URL 設計原則**:
@@ -715,14 +720,13 @@ Claude Code に推奨する実装順序:
 3. ValidationToolResult
 4. LensSnapshotView
 
-### ステップ3: ランディング + 一覧(最小実装)
-1. `/side-b/page.tsx`
-2. `/side-b/hypotheses/page.tsx`
-3. HypothesisFilters
-4. **ここで一度動作確認**
+### ステップ3: 仮説一覧(最小実装)
+1. `/side-b/hypotheses/page.tsx`（`/side-b/page.tsx` は既存エージェント画面のまま）
+2. HypothesisList / HypothesisCard / HypothesisFilters
+3. **ここで一度動作確認**
 
 ### ステップ4: 仮説詳細
-1. `/side-b/hypotheses/[id]/page.tsx`
+1. `/side-b/hypotheses/[id]/page.tsx` + `HypothesisDetail.tsx`
 2. ValidationReport の詳細表示
 
 ### ステップ5: 検証画面
@@ -732,7 +736,7 @@ Claude Code に推奨する実装順序:
 4. Polling 実装
 
 ### ステップ6: ダッシュボード
-1. `/side-b/dashboard/page.tsx`
+1. `/side-b/dashboard/page.tsx`（旧 §4.1 の 4カード + サマリーを含む）
 2. LedgerStats
 3. DashboardCharts
 
@@ -749,7 +753,7 @@ Claude Code に推奨する実装順序:
 
 1. 作成/変更したファイルの一覧
 2. 各画面のスクリーンショット(主要状態ごと):
-   - ランディング
+   - `/side-b` エージェント画面
    - 仮説一覧(データあり、空状態)
    - 仮説詳細(confirmed, rejected, testing)
    - 検証画面(進行中あり、なし)

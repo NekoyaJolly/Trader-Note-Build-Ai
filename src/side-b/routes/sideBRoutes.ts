@@ -49,6 +49,7 @@
 
 import { Router } from 'express';
 import { sideBController } from '../controllers';
+import { ledgerDashboardController } from '../controllers/ledgerDashboardController';
 import { validationRoutes } from './validationRoutes';
 import { validateBody, validateQuery, validateParams } from '../../middleware/validateRequest';
 import {
@@ -91,6 +92,16 @@ const router = Router();
 // /api/side-b/hypotheses/:id/validation-status (GET)
 // ===========================================
 router.use('/hypotheses', validationRoutes);
+
+// ===========================================
+// 台帳ダッシュボード統計・ヘルス (Phase 4d Step 6)
+// ===========================================
+router.get('/stats/overview', ledgerDashboardController.overview);
+router.get('/stats/time-series', ledgerDashboardController.timeSeries);
+router.get('/stats/by-category', ledgerDashboardController.byCategory);
+router.get('/stats/validation-activity', ledgerDashboardController.validationActivity);
+router.get('/discovery/latest', ledgerDashboardController.latestDiscovery);
+router.get('/system/health', ledgerDashboardController.systemHealth);
 
 // ===========================================
 // リサーチ

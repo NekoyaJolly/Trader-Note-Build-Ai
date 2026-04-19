@@ -20,6 +20,7 @@
  */
 
 import type { Request, Response } from 'express';
+import { BatchValidateRequestSchema } from '../../schemas/api/sideB';
 import {
     edgeLedger as defaultEdgeLedger,
     type EdgeLedger,
@@ -369,6 +370,130 @@ export class ValidationController {
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             console.error('[ValidationController] listPendingValidation 失敗:', err);
+            res.status(500).json({ success: false, error: message });
+        }
+    };
+
+    /**
+     * GET /api/side-b/hypotheses/testing
+     *
+     * 本格検証実行中（testing）の仮説一覧。
+     */
+    listTesting = async (_req: Request, res: Response): Promise<void> => {
+        try {
+            const items = await this.edgeLedger.findByStatus('testing');
+            res.json({
+                success: true,
+                total: items.length,
+                hypotheses: items,
+            });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error('[ValidationController] listTesting 失敗:', err);
+            res.status(500).json({ success: false, error: message });
+        }
+    };
+
+    /**
+     * GET /api/side-b/hypotheses/recently-validated?hours=24
+     *
+     * 直近で confirmed / rejected に至った仮説（検証完了の結果一覧）。
+     */
+    listRecentlyValidated = async (req: Request, res: Response): Promise<void> => {
+        const hours = toPositiveInt(req.query.hours, 24);
+        try {
+            const items = await this.edgeLedger.findRecentlyValidated(hours);
+            res.json({
+                success: true,
+                hours,
+                total: items.length,
+                hypotheses: items,
+            });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error('[ValidationController] listRecentlyValidated 失敗:', err);
+            res.status(500).json({ success: false, error: message });
+        }
+    };
+
+    /**
+     * POST /api/side-b/hypotheses/batch-validate
+     *
+     * 複数仮説を順次本格検証（最大 10 件）。長時間かかるためタイムアウトに注意。
+     */
+    batchValidate = async (req: Request, res: Response): Promise<void> => {
+        const parsed = BatchValidateRequestSchema.safeParse(req.body);
+        if (!parsed.success) {
+            const msg = parsed.error.issues.map((i) => i.message).join('; ');
+            res.status(400).json({ success: false, error: msg });
+            return;
+        }
+        const ids = parsed.data.ids;
+        type BatchItemResult =
+            | {
+                  hypothesisId: string;
+                  ok: true;
+                  verdict: string;
+              }
+            | {
+                  hypothesisId: string;
+                  ok: false;
+                  error: string;
+              };
+
+        const results: BatchItemResult[] = [];
+        try {
+            for (const id of ids) {
+                try {
+                    const verdict = await this.strategist.validate(id);
+                    results.push({
+                        hypothesisId: id,
+                        ok: true,
+                        verdict: verdict.verdict,
+                    });
+                } catch (e) {
+                    const message = e instanceof Error ? e.message : String(e);
+                    results.push({
+                        hypothesisId: id,
+                        ok: false,
+                        error: message,
+                    });
+                }
+            }
+            res.json({ success: true, results });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error('[ValidationController] batchValidate 失敗:', err);
+            res.status(500).json({ success: false, error: message });
+        }
+    };
+
+    /**
+     * GET /api/side-b/hypotheses/recent-confirmed?limit=5
+     */
+    listRecentConfirmed = async (req: Request, res: Response): Promise<void> => {
+        const limit = toPositiveInt(req.query.limit, 5);
+        try {
+            const items = await this.edgeLedger.findLatestByStatus('confirmed', limit);
+            res.json({ success: true, total: items.length, hypotheses: items });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error('[ValidationController] listRecentConfirmed 失敗:', err);
+            res.status(500).json({ success: false, error: message });
+        }
+    };
+
+    /**
+     * GET /api/side-b/hypotheses/recent-rejected?limit=5
+     */
+    listRecentRejected = async (req: Request, res: Response): Promise<void> => {
+        const limit = toPositiveInt(req.query.limit, 5);
+        try {
+            const items = await this.edgeLedger.findLatestByStatus('rejected', limit);
+            res.json({ success: true, total: items.length, hypotheses: items });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error('[ValidationController] listRecentRejected 失敗:', err);
             res.status(500).json({ success: false, error: message });
         }
     };

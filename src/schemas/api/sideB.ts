@@ -960,3 +960,21 @@ export const LessonsResponseSchema = z.object({
 });
 
 export type LessonsResponse = z.infer<typeof LessonsResponseSchema>;
+
+// ===========================================
+// Phase 4d: 仮説バッチ検証
+// ===========================================
+
+/**
+ * POST /api/side-b/hypotheses/batch-validate リクエストボディ
+ *
+ * 仕様: 最大 10 件まで（UI と合わせてサーバー側でも強制）
+ */
+export const BatchValidateRequestSchema = z.object({
+  ids: z
+    .array(z.string().uuid('仮説 ID は UUID 形式です'))
+    .min(1, '1件以上指定してください')
+    .max(10, '一度に検証できるのは最大10件です'),
+});
+
+export type BatchValidateRequest = z.infer<typeof BatchValidateRequestSchema>;

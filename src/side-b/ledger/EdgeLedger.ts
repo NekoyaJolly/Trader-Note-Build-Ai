@@ -230,6 +230,40 @@ export class EdgeLedger {
         return rows.map(mapPrismaToEdgeHypothesis);
     }
 
+    /**
+     * Phase 4d: 直近で confirmed / rejected に遷移した仮説（検証完了扱い）。
+     *
+     * @param hours さかのぼる時間（既定 24）
+     */
+    async findRecentlyValidated(hours: number): Promise<EdgeHypothesis[]> {
+        const h = Math.max(1, Math.min(168, hours));
+        const since = new Date(Date.now() - h * 3600 * 1000);
+        const rows = await prisma.edgeHypothesis.findMany({
+            where: {
+                status: { in: ['confirmed', 'rejected'] },
+                statusUpdatedAt: { gte: since },
+            },
+            orderBy: { statusUpdatedAt: 'desc' },
+        });
+        return rows.map(mapPrismaToEdgeHypothesis);
+    }
+
+    /**
+     * Phase 4d: ステータス別に最新 N 件（ダッシュボードの recent リスト用）
+     */
+    async findLatestByStatus(
+        status: 'confirmed' | 'rejected',
+        limit: number,
+    ): Promise<EdgeHypothesis[]> {
+        const take = Math.max(1, Math.min(50, limit));
+        const rows = await prisma.edgeHypothesis.findMany({
+            where: { status },
+            orderBy: { statusUpdatedAt: 'desc' },
+            take,
+        });
+        return rows.map(mapPrismaToEdgeHypothesis);
+    }
+
     async findBySymbol(symbol: string): Promise<EdgeHypothesis[]> {
         const rows = await prisma.edgeHypothesis.findMany({
             where: { symbols: { has: symbol } },
