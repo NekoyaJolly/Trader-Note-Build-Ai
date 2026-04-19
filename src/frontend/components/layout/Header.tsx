@@ -3,13 +3,13 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import NotificationBell from "@/components/NotificationBell";
-import SideToggle from "./SideToggle";
+import WorkspaceTabs from "./WorkspaceTabs";
 import { fetchUnreadNotificationCount } from "@/lib/api";
 
 /**
  * アプリ共通ヘッダー
  * 
- * レイアウト: [ハンバーガーメニュー] [アプリタイトル + Side切替] ... [通知ベル]
+ * レイアウト: [ハンバーガー] [タイトル] [ワークスペースタブ] … [通知]
  * 
  * Side-A: 人間用取引支援（従来機能）
  * Side-B: AI用取引プラン生成（新機能）
@@ -76,9 +76,9 @@ export default function Header({ isSidebarOpen, onToggleSidebar }: HeaderProps) 
             <span className="text-base sm:text-lg md:text-xl font-bold neon-text transition-all duration-300 group-hover:drop-shadow-[0_0_8px_rgba(236,72,153,0.5)]">TradeAssist</span>
           </Link>
 
-          {/* Side切替トグル */}
-          <div className="border-l border-slate-600/50 pl-2 sm:pl-3">
-            <SideToggle />
+          {/* ワークスペースタブ（Side-A / Side-B） */}
+          <div className="border-l border-slate-600/50 pl-2 sm:pl-3 min-w-0">
+            <WorkspaceTabs />
           </div>
         </div>
 

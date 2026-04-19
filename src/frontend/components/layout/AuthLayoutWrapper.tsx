@@ -7,6 +7,7 @@
 
 "use client";
 
+import { Suspense } from "react";
 import { usePathname } from "next/navigation";
 import { ProtectedRoute } from "../auth/ProtectedRoute";
 import AppShell from "./AppShell";
@@ -50,14 +51,26 @@ export function AuthLayoutWrapper({ children }: AuthLayoutWrapperProps) {
   return (
     <>
       <AmbientBackground />
-      <ProtectedRoute>
-        <AppShell>
-          <main className="relative z-10 min-h-screen px-3 sm:px-4 md:px-8 py-4 sm:py-6">
-            {children}
-          </main>
-          <Footer />
-        </AppShell>
-      </ProtectedRoute>
+      {/* ProtectedRoute が useSearchParams を使うため Suspense 必須 */}
+      <Suspense
+        fallback={
+          <div className="relative z-10 min-h-screen flex items-center justify-center">
+            <div className="text-center text-gray-300">
+              <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-blue-500 border-opacity-75 mx-auto mb-4" />
+              <p>読み込み中...</p>
+            </div>
+          </div>
+        }
+      >
+        <ProtectedRoute>
+          <AppShell>
+            <main className="relative z-10 min-h-screen px-3 sm:px-4 md:px-8 py-4 sm:py-6">
+              {children}
+            </main>
+            <Footer />
+          </AppShell>
+        </ProtectedRoute>
+      </Suspense>
     </>
   );
 }

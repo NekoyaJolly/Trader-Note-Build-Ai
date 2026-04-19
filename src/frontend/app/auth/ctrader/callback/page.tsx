@@ -17,7 +17,7 @@ import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { isBrowserLocalDevOrigin } from '@/lib/isLocalDevOrigin';
-import { getPostLoginPath } from '@/lib/postLoginRedirect';
+import { resolvePostLoginRedirect } from '@/lib/postLoginRedirect';
 import { getPublicApiBaseUrl } from '@/lib/publicApiBaseUrl';
 
 /**
@@ -42,6 +42,8 @@ function CallbackHandler() {
       isProcessingRef.current = true;
       // URL パラメータから code と state を取得
       const code = searchParams.get('code');
+      // OAuth state: ログイン開始時に AuthContext が渡した社内パス（未指定時は null）
+      const oauthState = searchParams.get('state');
       const error = searchParams.get('error');
       const errorDescription = searchParams.get('error_description');
 
@@ -119,7 +121,7 @@ function CallbackHandler() {
 
           console.log('[Callback] ログイン成功、リダイレクト中...');
           setTimeout(() => {
-            router.push(getPostLoginPath());
+            router.push(resolvePostLoginRedirect(oauthState));
           }, 1500);
         } else {
           throw new Error(data.error || 'ログインに失敗しました');
@@ -181,7 +183,7 @@ function CallbackHandler() {
         {/* 成功時の説明 */}
         {status === 'success' && (
           <p className="text-gray-500 text-sm mt-4">
-            設定画面にリダイレクトします...
+            次の画面へ移動します...
           </p>
         )}
 

@@ -39,6 +39,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { getWorkspaceSideFromPathname } from "@/lib/workspaceSide";
 import IndicatorConfigModal from "@/components/IndicatorConfigModal";
 import {
   fetchIndicatorSettings,
@@ -86,9 +87,9 @@ const sideATopNav: NavItem[] = [
   { href: "/", label: "Side-A ホーム", icon: Home, color: "cyan" },
 ];
 
-/** Side-B ワークスペース: Side-A へ戻る */
+/** Side-B ワークスペース内の「ホーム」（ヘッダータブで Side-A に切替する） */
 const sideBTopNav: NavItem[] = [
-  { href: "/", label: "Side-A に戻る", icon: Home, color: "cyan" },
+  { href: "/side-b/dashboard", label: "Side-B ホーム", icon: LayoutDashboard, color: "purple" },
 ];
 
 /**
@@ -281,8 +282,8 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { user, logout } = useAuth();
 
-  /** pathname が Side-B 配下なら Side-B 専用メニューのみ表示 */
-  const isSideBWorkspace = Boolean(pathname?.startsWith("/side-b"));
+  /** Side-B 配下なら Side-B 専用メニューのみ（判定は workspaceSide に集約） */
+  const isSideBWorkspace = getWorkspaceSideFromPathname(pathname) === "side-b";
 
   const visibleCategories: NavCategory[] = isSideBWorkspace
     ? sideBNavCategories

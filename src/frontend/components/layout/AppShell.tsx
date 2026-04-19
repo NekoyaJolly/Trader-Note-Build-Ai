@@ -11,6 +11,8 @@
  */
 
 import { useState, useEffect } from "react";
+import { usePathname } from "next/navigation";
+import { writeLastSideAPath } from "@/lib/lastSideAPath";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 
@@ -27,11 +29,17 @@ export default function AppShell({ children }: AppShellProps) {
   // サイドバーの表示状態（モバイル: false=非表示, デスクトップ: false=折りたたみ）
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const pathname = usePathname();
 
   // クライアントサイドでのみ初期化（非同期で setState して react-hooks ルール準拠）
   useEffect(() => {
     queueMicrotask(() => setMounted(true));
   }, []);
+
+  // Side-A ホーム「前回の続き」用: pathname のみ（トースト用クエリ等を保存しない）
+  useEffect(() => {
+    writeLastSideAPath(pathname);
+  }, [pathname]);
 
   // サイドバートグル
   const handleToggleSidebar = () => {

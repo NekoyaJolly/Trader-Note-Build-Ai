@@ -195,7 +195,7 @@ TradeAssist は ChatGPT 内アプリではないため **表示モードやチ�
 
 ### 12.2 レイアウト（`src/frontend/components/layout/`）
 
-`AppShell`, `Sidebar`, `Header`, `Footer`, `BottomNavigation`, `AuthLayoutWrapper`, `SideToggle` など。**ナビの色カテゴリ**（cyan / purple / green / slate）は `Sidebar.tsx` の `CATEGORY_COLORS` に定義。
+`AppShell`, `Sidebar`, `Header`, `Footer`, `BottomNavigation`, `AuthLayoutWrapper`, `WorkspaceTabs` など。**ナビの色カテゴリ**（cyan / purple / green / slate）は `Sidebar.tsx` の `CATEGORY_COLORS` に定義。
 
 ### 12.3 ドメイン別（抜粋）
 
