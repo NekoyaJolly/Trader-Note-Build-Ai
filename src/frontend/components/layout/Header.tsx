@@ -52,8 +52,9 @@ export default function Header({ isSidebarOpen, onToggleSidebar }: HeaderProps) 
           {/* サイドバートグルボタン（ハンバーガーメニュー） */}
           {onToggleSidebar && (
             <button
+              type="button"
               onClick={onToggleSidebar}
-              className="p-1.5 sm:p-2 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700/60 transition-all duration-200 press-scale"
+              className="md:hidden p-1.5 sm:p-2 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700/60 transition-all duration-200 press-scale"
               aria-label={isSidebarOpen ? "メニューを閉じる" : "メニューを開く"}
             >
               {isSidebarOpen ? (

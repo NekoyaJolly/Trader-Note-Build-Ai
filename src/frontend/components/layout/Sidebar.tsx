@@ -3,13 +3,10 @@
 /**
  * サイドバーナビゲーションコンポーネント
  * 
- * アコーディオン式カテゴリ分け:
- * - Side-A: トレードノート関連
- * - Side-B: AI アシスタント関連
- * - Strategies: 戦略・分析ツール
- * - Settings: アプリ設定
- * 
- * @see docs/phase12/UI_DESIGN_GUIDE.md
+ * ワークスペース別: pathname が /side-b のとき Side-B メニューのみ、それ以外は Side-A メニューのみ。
+ * md 以上は常時表示、未満はオーバーレイ。
+ *
+ * @see docs/design/tradeassist_uiux_redesign_plan.md
  */
 
 import Link from "next/link";
@@ -38,6 +35,7 @@ import {
   GitCompare,
   FlaskConical,
   LayoutDashboard,
+  CalendarClock,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -83,19 +81,24 @@ interface NavCategory {
 // ナビゲーション構造定義
 // ============================================
 
-const topNavItems: NavItem[] = [
-  {
-    href: "/",
-    label: "HOME",
-    icon: Home,
-    color: "cyan",
-  },
+/** Side-A ワークスペース: トップの1リンク */
+const sideATopNav: NavItem[] = [
+  { href: "/", label: "Side-A ホーム", icon: Home, color: "cyan" },
 ];
 
-const navCategories: NavCategory[] = [
+/** Side-B ワークスペース: Side-A へ戻る */
+const sideBTopNav: NavItem[] = [
+  { href: "/", label: "Side-A に戻る", icon: Home, color: "cyan" },
+];
+
+/**
+ * Side-A 専用サイドバー（ノート・市場/戦略・設定）
+ * @see docs/design/tradeassist_uiux_redesign_plan.md
+ */
+const sideANavCategories: NavCategory[] = [
   {
     id: "side-a",
-    label: "Side-A",
+    label: "ノート",
     color: "cyan",
     defaultOpen: true,
     items: [
@@ -113,37 +116,20 @@ const navCategories: NavCategory[] = [
     ],
   },
   {
-    id: "side-b",
-    label: "Side-B",
-    color: "purple",
-    defaultOpen: false,
+    id: "tools",
+    label: "市場・戦略",
+    color: "green",
+    defaultOpen: true,
     items: [
       {
-        href: "/side-b",
-        label: "AIダッシュボード",
-        icon: Bot,
-        color: "purple",
-        children: [
-          { href: "/side-b", label: "エージェント", icon: Bot, color: "purple" },
-          { href: "/side-b/hypotheses", label: "仮説一覧", icon: ClipboardList, color: "purple" },
-          { href: "/side-b/validation", label: "検証キュー", icon: FlaskConical, color: "purple" },
-          { href: "/side-b/dashboard", label: "台帳ダッシュボード", icon: LayoutDashboard, color: "purple" },
-          { href: "/side-b/ai-notes", label: "AIノート", icon: Brain, color: "purple" },
-          { href: "/side-b/trades", label: "仮想トレード", icon: TrendingUp, color: "purple" },
-          { href: "/side-b/comparison", label: "比較ダッシュボード", icon: GitCompare, color: "purple" },
-        ],
+        href: "/market-analysis",
+        label: "チャート・市場分析",
+        icon: LineChart,
+        color: "green",
       },
-    ],
-  },
-  {
-    id: "strategies",
-    label: "Strategies",
-    color: "green",
-    defaultOpen: false,
-    items: [
       {
         href: "/strategies",
-        label: "ストラテジー",
+        label: "ストラテジー（ルール）",
         icon: Target,
         color: "green",
         children: [
@@ -151,12 +137,6 @@ const navCategories: NavCategory[] = [
           { href: "/strategies/new", label: "新規作成", icon: Plus, color: "green" },
           { href: "#indicators", label: "インジケーター", icon: Activity, color: "green" },
         ],
-      },
-      {
-        href: "/market-analysis",
-        label: "マーケット分析",
-        icon: LineChart,
-        color: "green",
       },
       {
         href: "/backtest",
@@ -174,7 +154,7 @@ const navCategories: NavCategory[] = [
   },
   {
     id: "settings",
-    label: "Settings",
+    label: "設定",
     color: "slate",
     defaultOpen: false,
     items: [
@@ -191,6 +171,56 @@ const navCategories: NavCategory[] = [
     ],
   },
 ];
+
+/** Side-B 専用サイドバー（台帳・仮説・検証・運転席・設定） */
+const sideBNavCategories: NavCategory[] = [
+  {
+    id: "side-b",
+    label: "AI・台帳",
+    color: "purple",
+    defaultOpen: true,
+    items: [
+      { href: "/side-b/dashboard", label: "台帳ダッシュボード", icon: LayoutDashboard, color: "purple" },
+      { href: "/side-b/hypotheses", label: "仮説一覧", icon: ClipboardList, color: "purple" },
+      { href: "/side-b/validation", label: "検証キュー", icon: FlaskConical, color: "purple" },
+      { href: "/side-b", label: "エージェント（運転席）", icon: Bot, color: "purple" },
+      { href: "/side-b/ai-notes", label: "AIノート", icon: Brain, color: "purple" },
+      { href: "/side-b/trades", label: "仮想トレード", icon: TrendingUp, color: "purple" },
+      { href: "/side-b/comparison", label: "比較ダッシュボード", icon: GitCompare, color: "purple" },
+      { href: "/side-b/settings", label: "AI 自動実行設定", icon: CalendarClock, color: "purple" },
+    ],
+  },
+  {
+    id: "settings",
+    label: "アプリ設定",
+    color: "slate",
+    defaultOpen: false,
+    items: [
+      {
+        href: "/settings",
+        label: "共通設定",
+        icon: Settings,
+        color: "slate",
+        children: [
+          { href: "/settings", label: "アプリ設定", icon: Settings, color: "slate" },
+          { href: "/settings/profiles", label: "プロファイル", icon: User, color: "slate" },
+        ],
+      },
+    ],
+  },
+];
+
+/** カテゴリ内にアクティブな項目があるか */
+function categoryHasActiveItem(
+  items: NavItem[],
+  isActive: (href: string) => boolean,
+): boolean {
+  for (const item of items) {
+    if (isActive(item.href)) return true;
+    if (item.children?.some((c) => isActive(c.href))) return true;
+  }
+  return false;
+}
 
 // カテゴリ別のネオンカラー設定
 const CATEGORY_COLORS: Record<string, {
@@ -251,19 +281,19 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { user, logout } = useAuth();
 
-  // カテゴリの展開状態
-  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>(() => {
-    const initial: Record<string, boolean> = {};
-    navCategories.forEach(cat => {
-      initial[cat.id] = cat.defaultOpen ?? false;
-    });
-    return initial;
-  });
+  /** pathname が Side-B 配下なら Side-B 専用メニューのみ表示 */
+  const isSideBWorkspace = Boolean(pathname?.startsWith("/side-b"));
+
+  const visibleCategories: NavCategory[] = isSideBWorkspace
+    ? sideBNavCategories
+    : sideANavCategories;
+  const topNavItemsForWorkspace = isSideBWorkspace ? sideBTopNav : sideATopNav;
+
+  // カテゴリの展開状態（id は Side-A / Side-B で重複しうるためマウント時に初期化し直す）
+  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
 
   // 子メニューの展開状態
-  const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({
-    "/notes": false,
-  });
+  const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
 
   // インジケーター関連
   const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false);
@@ -319,6 +349,58 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   useEffect(() => {
     loadIndicatorData();
   }, [loadIndicatorData]);
+
+  // ワークスペース切替時にカテゴリ初期展開を同期
+  useEffect(() => {
+    const cats = isSideBWorkspace ? sideBNavCategories : sideANavCategories;
+    const initial: Record<string, boolean> = {};
+    cats.forEach((cat) => {
+      initial[cat.id] = cat.defaultOpen ?? false;
+    });
+    setExpandedCategories(initial);
+  }, [isSideBWorkspace]);
+
+  // アクティブページに応じて親カテゴリ・子メニューを自動展開
+  useEffect(() => {
+    if (!pathname) return;
+
+    const cats = isSideBWorkspace ? sideBNavCategories : sideANavCategories;
+
+    const isActiveHref = (href: string) => {
+      if (href === "/") {
+        return pathname === "/";
+      }
+
+      // ハッシュのみの疑似リンクは pathname ベースのアクティブ判定対象外
+      if (href.startsWith("#")) {
+        return false;
+      }
+
+      return pathname === href || pathname.startsWith(`${href}/`);
+    };
+
+    setExpandedCategories((prev) => {
+      const next = { ...prev };
+      for (const cat of cats) {
+        if (categoryHasActiveItem(cat.items, isActiveHref)) {
+          next[cat.id] = true;
+        }
+      }
+      return next;
+    });
+
+    setExpandedMenus((prev) => {
+      const next = { ...prev };
+      for (const cat of cats) {
+        for (const item of cat.items) {
+          if (item.children?.some((c) => isActiveHref(c.href))) {
+            next[item.href] = true;
+          }
+        }
+      }
+      return next;
+    });
+  }, [pathname, isSideBWorkspace]);
 
   // アクティブ判定
   const isActive = (href: string) => {
@@ -569,24 +651,25 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
 
   return (
     <>
-      {/* オーバーレイ */}
+      {/* オーバーレイ（モバイルのみ） */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 transition-opacity duration-300 animate-fade-in"
+          className="md:hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-40 transition-opacity duration-300 animate-fade-in"
           onClick={onClose}
           aria-hidden="true"
         />
       )}
 
-      {/* サイドバー */}
+      {/* サイドバー: モバイルはオーバーレイ、md 以上は常時表示 */}
       <aside
         className={`
-          fixed top-0 left-0 z-50
-          h-screen w-72
+          fixed md:static top-0 left-0 z-50 md:z-auto
+          h-screen md:h-full md:min-h-0
+          w-72 shrink-0
           flex flex-col
           glass-strong border-r border-slate-700/30
           transform transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]
-          ${isOpen ? "translate-x-0" : "-translate-x-full"}
+          ${isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}
         `}
       >
         {/* ヘッダー */}
@@ -600,8 +683,9 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
             </span>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700/50 transition-all duration-200 press-scale"
+            className="md:hidden p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700/50 transition-all duration-200 press-scale"
             aria-label="閉じる"
           >
             <X className="w-5 h-5" strokeWidth={1.5} />
@@ -609,9 +693,9 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         </div>
 
         {/* ナビゲーション */}
-        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-2 scrollbar-thin">
-          {/* トップレベル（HOME） */}
-          {topNavItems.map(item => {
+        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-2 scrollbar-thin min-h-0">
+          {/* トップレベル（ワークスペース別） */}
+          {topNavItemsForWorkspace.map(item => {
             const active = isActive(item.href);
             const colors = CATEGORY_COLORS[item.color || "cyan"];
             const Icon = item.icon;
@@ -638,7 +722,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
             );
           })}
 
-          {navCategories.map(category => {
+          {visibleCategories.map(category => {
             const colors = CATEGORY_COLORS[category.color];
             const isExpanded = expandedCategories[category.id];
 

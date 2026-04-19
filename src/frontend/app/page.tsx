@@ -15,8 +15,9 @@ import { NeonCard, GlowColor } from "@/components/ui/NeonCard";
 export default function Home() {
   // メニュー定義
   const menuItems: { href: string; icon: string; title: string; color: GlowColor; fullWidth?: boolean }[] = [
+    { href: "/market-analysis", icon: "📈", title: "チャート・市場分析", color: "cyan" },
     { href: "/notes", icon: "📊", title: "トレードノート", color: "blue" },
-    { href: "/strategies", icon: "🎯", title: "ストラテジー", color: "purple" },
+    { href: "/strategies", icon: "🎯", title: "ストラテジー（ルール）", color: "purple" },
     { href: "/import", icon: "📥", title: "トレード取込", color: "green" },
     { href: "/data-presets", icon: "📁", title: "データプリセット", color: "orange" },
     { href: "/settings", icon: "⚙️", title: "設定", color: "slate", fullWidth: true },

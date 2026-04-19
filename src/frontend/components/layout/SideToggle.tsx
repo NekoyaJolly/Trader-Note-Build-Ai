@@ -1,28 +1,21 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useCallback } from "react";
+import { useCallback } from "react";
 
 /**
  * Side-A / Side-B 切り替えトグル
- * 
- * 機能:
- * - 現在のサイドを表示（Side-A または Side-B）
- * - スライダーで切り替え
- * - sessionStorageで最後のページを記憶
- * - ブラウザ閉じたらリセット（sessionStorage）
+ *
+ * 切替時は各ワークスペースのホームへ遷移（tradeassist_uiux_redesign_plan §4-1）
  */
 
 type Side = "side-a" | "side-b";
 
-// 各サイドのデフォルトページ
+// 各サイドのデフォルトページ（切替時は各ワークスペースの「ホーム」へ）
 const DEFAULT_PAGES: Record<Side, string> = {
   "side-a": "/",
-  "side-b": "/side-b",
+  "side-b": "/side-b/dashboard",
 };
-
-// sessionStorageのキー
-const STORAGE_KEY_PREFIX = "lastPage.";
 
 export default function SideToggle() {
   const pathname = usePathname();
@@ -31,23 +24,10 @@ export default function SideToggle() {
   // 現在のサイドを判定
   const currentSide: Side = pathname.startsWith("/side-b") ? "side-b" : "side-a";
 
-  // 現在のページを保存
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      sessionStorage.setItem(`${STORAGE_KEY_PREFIX}${currentSide}`, pathname);
-    }
-  }, [pathname, currentSide]);
-
-  // サイド切り替え処理
+  // サイド切り替え処理 — 正規導線は各 Side のホーム（再設計案 §4-1）
   const switchSide = useCallback((targetSide: Side) => {
     if (targetSide === currentSide) return;
-
-    // 切り替え先の最後のページを取得（なければデフォルト）
-    const lastPage = typeof window !== "undefined"
-      ? sessionStorage.getItem(`${STORAGE_KEY_PREFIX}${targetSide}`) || DEFAULT_PAGES[targetSide]
-      : DEFAULT_PAGES[targetSide];
-
-    router.push(lastPage);
+    router.push(DEFAULT_PAGES[targetSide]);
   }, [currentSide, router]);
 
   // Side-Aの色（青系）、Side-Bの色（紫系）

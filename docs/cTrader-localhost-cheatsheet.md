@@ -18,7 +18,9 @@
 ## 毎回の起動
 
 1. ルートで `npm run dev`（API 3100 + Next 3102）。
-2. （任意）`src/frontend/.env.local` に `NEXT_PUBLIC_API_BASE_URL=http://localhost:3100` があると明示的。**未設定でも localhost 表示中はコード側で :3100 を既定利用**する。
+2. `src/frontend/.env.local` に少なくとも次があること。
+
+   `NEXT_PUBLIC_API_BASE_URL=http://localhost:3100`
 
 3. ブラウザで `http://localhost:3102` からログイン。
 

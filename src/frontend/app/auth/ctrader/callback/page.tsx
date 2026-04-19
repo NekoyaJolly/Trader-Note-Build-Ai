@@ -17,6 +17,7 @@ import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { isBrowserLocalDevOrigin } from '@/lib/isLocalDevOrigin';
+import { getPostLoginPath } from '@/lib/postLoginRedirect';
 import { getPublicApiBaseUrl } from '@/lib/publicApiBaseUrl';
 
 /**
@@ -118,7 +119,7 @@ function CallbackHandler() {
 
           console.log('[Callback] ログイン成功、リダイレクト中...');
           setTimeout(() => {
-            router.push('/'); // ダッシュボードにリダイレクト
+            router.push(getPostLoginPath());
           }, 1500);
         } else {
           throw new Error(data.error || 'ログインに失敗しました');
