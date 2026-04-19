@@ -4,8 +4,8 @@
  * アプリケーションシェルコンポーネント
  * 
  * サイドバーナビゲーションとメインコンテンツエリアを統合するラッパー
- * モバイル: サイドバーはオーバーレイ表示（デフォルト非表示）
- * デスクトップ: サイドバーは固定表示
+ * モバイル: サイドバーはオーバーレイ（ハンバーガーで開閉）
+ * デスクトップ（md 以上）: サイドバーは常時表示、メインと横並び
  * 
  * @see docs/phase12/UI_DESIGN_GUIDE.md
  */
@@ -62,15 +62,15 @@ export default function AppShell({ children }: AppShellProps) {
         onToggleSidebar={handleToggleSidebar} 
       />
 
-      {/* サイドバー（オーバーレイ式） */}
-      <Sidebar 
-        isOpen={isSidebarOpen} 
-        onClose={handleCloseSidebar} 
-      />
-      
-      {/* メインコンテンツエリア */}
-      <div className="flex-1 flex flex-col">
-        {children}
+      {/* md 以上: サイドバー常時 + メインを横並び。未満: サイドバーはオーバーレイのみ */}
+      <div className="flex flex-1 min-h-0 flex-col md:flex-row">
+        <Sidebar 
+          isOpen={isSidebarOpen} 
+          onClose={handleCloseSidebar} 
+        />
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-y-auto">
+          {children}
+        </div>
       </div>
     </div>
   );

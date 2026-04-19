@@ -2,12 +2,8 @@
 
 /**
  * ボトムナビゲーションコンポーネント
- * 
- * モバイル用の固定フッターナビゲーション
- * 4つのメインセクション（ホーム/通知/ノート/設定）へのアクセスを提供
- * グラスモーフィズム + ピル型アクティブインジケーター
- * 
- * @see docs/phase12/UI_DESIGN_GUIDE.md
+ *
+ * モバイル用。左端はチャート（/market-analysis）を固定（再設計案 §3-4）
  */
 
 import Link from "next/link";
@@ -16,11 +12,11 @@ import { usePathname } from "next/navigation";
 // ナビゲーションアイテムの定義
 const navItems = [
   {
-    href: "/",
-    label: "ホーム",
+    href: "/market-analysis",
+    label: "チャート",
     icon: (active: boolean) => (
       <svg className="w-5 h-5" fill={active ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={active ? 0 : 1.5} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={active ? 0 : 1.5} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
       </svg>
     ),
   },
@@ -62,10 +58,11 @@ export default function BottomNavigation() {
 
   // アクティブ判定（完全一致またはプレフィックス一致）
   const isActive = (href: string) => {
-    if (href === "/") {
-      return pathname === "/";
+    if (!pathname) return false;
+    if (href === "/market-analysis") {
+      return pathname === "/market-analysis" || pathname.startsWith("/market-analysis/");
     }
-    return pathname?.startsWith(href);
+    return pathname === href || pathname.startsWith(`${href}/`);
   };
 
   return (

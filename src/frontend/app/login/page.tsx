@@ -10,15 +10,16 @@
 import { useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRouter } from 'next/navigation';
+import { getPostLoginPath } from '@/lib/postLoginRedirect';
 
 export default function LoginPage() {
   const { user, loading, login } = useAuth();
   const router = useRouter();
 
-  // 既にログイン済みの場合はダッシュボードにリダイレクト
+  // 既にログイン済み: getPostLoginPath() で端末別の着地点へ
   useEffect(() => {
     if (!loading && user) {
-      router.push('/');
+      router.push(getPostLoginPath());
     }
   }, [user, loading, router]);
 

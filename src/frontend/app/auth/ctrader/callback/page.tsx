@@ -16,6 +16,7 @@
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { getPostLoginPath } from '@/lib/postLoginRedirect';
 
 // バックエンドの URL
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
@@ -113,7 +114,7 @@ function CallbackHandler() {
 
           console.log('[Callback] ログイン成功、リダイレクト中...');
           setTimeout(() => {
-            router.push('/'); // ダッシュボードにリダイレクト
+            router.push(getPostLoginPath());
           }, 1500);
         } else {
           throw new Error(data.error || 'ログインに失敗しました');

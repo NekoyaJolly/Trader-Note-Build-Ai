@@ -87,12 +87,13 @@ function getStateDisplay(state: string) {
 
 // --- ナビリンク ---
 
+/** サイドバーと役割を揃えた最小ナビ（詳細は Sidebar の Side-B メニュー） */
 const navLinks = [
-  { icon: "📋", label: "Hypotheses", href: "/side-b/hypotheses" },
-  { icon: "📊", label: "Trades", href: "/side-b/trades" },
-  { icon: "📝", label: "AI Notes", href: "/side-b/ai-notes" },
-  { icon: "🔍", label: "Comparison", href: "/side-b/comparison" },
-  { icon: "⚙️", label: "Settings", href: "/side-b/settings" },
+  { icon: "📊", label: "台帳", href: "/side-b/dashboard" },
+  { icon: "📋", label: "仮説", href: "/side-b/hypotheses" },
+  { icon: "🧪", label: "検証", href: "/side-b/validation" },
+  { icon: "🤖", label: "運転席", href: "/side-b" },
+  { icon: "🔍", label: "比較", href: "/side-b/comparison" },
 ];
 
 /**

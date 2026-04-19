@@ -1,44 +1,63 @@
 /**
  * 認証レイアウトラッパー
- * 
- * 特定のパスを除いてすべてのページに認証を要求するラッパー
+ *
+ * - 公開パス: 背景のみ + ページ本体（AppShell・サイドバーなし）
+ * - 保護パス: ProtectedRoute 通過後に AppShell（ヘッダー・サイドバー・フッター）
  */
 
-'use client';
+"use client";
 
-import { usePathname } from 'next/navigation';
-import { ProtectedRoute } from '../auth/ProtectedRoute';
+import { usePathname } from "next/navigation";
+import { ProtectedRoute } from "../auth/ProtectedRoute";
+import AppShell from "./AppShell";
+import Footer from "./Footer";
 
 // 認証不要なパス（公開ページ）
-const PUBLIC_PATHS = [
-  '/login',
-  '/auth/ctrader/callback',
-];
+const PUBLIC_PATHS = ["/login", "/auth/ctrader/callback"];
 
 interface AuthLayoutWrapperProps {
   children: React.ReactNode;
 }
 
-/**
- * 認証レイアウトラッパー
- * 
- * 公開パス以外は ProtectedRoute でラップする
- */
+/** 全ページ共通の背景装飾（ログイン画面でも軽く表示） */
+function AmbientBackground() {
+  return (
+    <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
+      <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-pink-500/10 rounded-full blur-3xl animate-pulse-glow" />
+      <div
+        className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl"
+        style={{ animationDelay: "1s", animation: "pulseGlow 4s ease-in-out infinite" }}
+      />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-cyan-500/5 rounded-full blur-3xl" />
+    </div>
+  );
+}
+
 export function AuthLayoutWrapper({ children }: AuthLayoutWrapperProps) {
   const pathname = usePathname();
-  
-  // 現在のパスが公開パスかどうか判定
-  const isPublicPath = PUBLIC_PATHS.some(path => pathname.startsWith(path));
-  
-  // 公開パスの場合は認証なしでコンテンツを表示
+
+  const isPublicPath = PUBLIC_PATHS.some((path) => pathname.startsWith(path));
+
   if (isPublicPath) {
-    return <>{children}</>;
+    return (
+      <>
+        <AmbientBackground />
+        {children}
+      </>
+    );
   }
-  
-  // それ以外は認証が必要
+
   return (
-    <ProtectedRoute>
-      {children}
-    </ProtectedRoute>
+    <>
+      <AmbientBackground />
+      <ProtectedRoute>
+        <AppShell>
+          <main className="relative z-10 min-h-screen px-3 sm:px-4 md:px-8 py-4 sm:py-6">
+            {children}
+          </main>
+          <Footer />
+        </AppShell>
+      </ProtectedRoute>
+    </>
   );
 }
