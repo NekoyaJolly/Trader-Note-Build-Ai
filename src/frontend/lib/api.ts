@@ -8,14 +8,12 @@ import type {
   NotificationDetail,
 } from "@/types/notification";
 import type { NoteDetail, NoteUpdatePayload, NoteStatusCounts, NoteStatus, NoteSummary } from "@/types/note";
+import { getPublicApiBaseUrl } from "./publicApiBaseUrl";
 
 /**
- * バックエンド API のベース URL
- * 環境変数から取得。未設定時は空文字列（同一オリジン＝相対パス）
- * ローカル開発時は .env で NEXT_PUBLIC_API_BASE_URL=http://localhost:3100 を設定
+ * バックエンド API のベース URL は getPublicApiBaseUrl() で解決する。
+ * 環境変数未設定でも localhost 上では http://localhost:3100 を既定にする。
  */
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
 /**
  * 類似度閾値の定数（12次元統一ベクトル + コサイン類似度）
@@ -41,7 +39,7 @@ export const VECTOR_DIMENSION = 12;
  * GET /api/notifications
  */
 export async function fetchNotifications(): Promise<NotificationListItem[]> {
-  const response = await fetch(`${API_BASE_URL}/api/notifications`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/notifications`, {
     cache: "no-store", // 常に最新データを取得
   });
 
@@ -71,7 +69,7 @@ export async function fetchNotifications(): Promise<NotificationListItem[]> {
 export async function fetchNotificationDetail(
   id: string
 ): Promise<NotificationDetail> {
-  const response = await fetch(`${API_BASE_URL}/api/notifications/${id}`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/notifications/${id}`, {
     cache: "no-store",
   });
 
@@ -89,7 +87,7 @@ export async function fetchNotificationDetail(
  * POST /api/notifications/:id/read
  */
 export async function markNotificationAsRead(id: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/notifications/${id}/read`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/notifications/${id}/read`, {
     method: "PUT",
   });
 
@@ -105,7 +103,7 @@ export async function markNotificationAsRead(id: string): Promise<void> {
  * POST /api/notifications/read-all
  */
 export async function markAllNotificationsAsRead(): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/notifications/read-all`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/notifications/read-all`, {
     method: "PUT",
   });
 
@@ -121,7 +119,7 @@ export async function markAllNotificationsAsRead(): Promise<void> {
  * GET /api/notifications/unread-count
  */
 export async function fetchUnreadNotificationCount(): Promise<number> {
-  const response = await fetch(`${API_BASE_URL}/api/notifications/unread-count`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/notifications/unread-count`, {
     cache: "no-store",
   });
 
@@ -149,7 +147,7 @@ export interface FetchNotesParams {
  * @param params - フィルタ条件（NoteStatus または FetchNotesParams オブジェクト）
  */
 export async function fetchNotes(params?: NoteStatus | FetchNotesParams): Promise<{ notes: NoteSummary[] }> {
-  const url = new URL(`${API_BASE_URL}/api/trades/notes`);
+  const url = new URL(`${getPublicApiBaseUrl()}/api/trades/notes`);
 
   // 後方互換性: string が渡された場合は status として扱う
   const normalizedParams: FetchNotesParams = typeof params === 'string'
@@ -201,7 +199,7 @@ export async function fetchNotes(params?: NoteStatus | FetchNotesParams): Promis
  * Phase1 では 404 が返り得るため、エラー表示を行う。
  */
 export async function fetchNoteDetail(id: string): Promise<NoteDetail> {
-  const response = await fetch(`${API_BASE_URL}/api/trades/notes/${id}`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/trades/notes/${id}`, {
     cache: "no-store",
   });
 
@@ -223,7 +221,7 @@ export async function uploadCsvText(
   filename: string,
   csvText: string
 ): Promise<{ tradesImported: number; noteIds: string[] }> {
-  const response = await fetch(`${API_BASE_URL}/api/trades/import/upload-text`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/trades/import/upload-text`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ filename, csvText }),
@@ -241,7 +239,7 @@ export async function uploadCsvText(
  * POST /api/trades/notes/:id/approve
  */
 export async function approveNote(id: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/trades/notes/${id}/approve`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/trades/notes/${id}/approve`, {
     method: "POST",
   });
   if (!response.ok) {
@@ -256,7 +254,7 @@ export async function approveNote(id: string): Promise<void> {
  * POST /api/trades/notes/:id/reject
  */
 export async function rejectNote(id: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/trades/notes/${id}/reject`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/trades/notes/${id}/reject`, {
     method: "POST",
   });
   if (!response.ok) {
@@ -271,7 +269,7 @@ export async function rejectNote(id: string): Promise<void> {
  * POST /api/trades/notes/:id/revert-to-draft
  */
 export async function revertNoteToDraft(id: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/trades/notes/${id}/revert-to-draft`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/trades/notes/${id}/revert-to-draft`, {
     method: "POST",
   });
   if (!response.ok) {
@@ -286,7 +284,7 @@ export async function revertNoteToDraft(id: string): Promise<void> {
  * PUT /api/trades/notes/:id
  */
 export async function updateNote(id: string, payload: NoteUpdatePayload): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/trades/notes/${id}`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/trades/notes/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -303,7 +301,7 @@ export async function updateNote(id: string, payload: NoteUpdatePayload): Promis
  * GET /api/trades/notes/status-counts
  */
 export async function fetchNoteStatusCounts(): Promise<NoteStatusCounts> {
-  const response = await fetch(`${API_BASE_URL}/api/trades/notes/status-counts`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/trades/notes/status-counts`, {
     cache: "no-store",
   });
   if (!response.ok) {
@@ -319,7 +317,7 @@ export async function fetchNoteStatusCounts(): Promise<NoteStatusCounts> {
  * GET /api/health
  */
 export async function fetchHealth(): Promise<{ status: string }> {
-  const response = await fetch(`${API_BASE_URL}/health`, { cache: "no-store" });
+  const response = await fetch(`${getPublicApiBaseUrl()}/health`, { cache: "no-store" });
   if (!response.ok) {
     throw new Error(
       `ヘルスチェックに失敗しました: ${response.status} ${response.statusText}`
@@ -333,7 +331,7 @@ export async function fetchHealth(): Promise<{ status: string }> {
  * GET /api/daily-status
  */
 export async function fetchDailyStatus(): Promise<{ status: string }> {
-  const response = await fetch(`${API_BASE_URL}/api/daily-status`, { cache: "no-store" });
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/daily-status`, { cache: "no-store" });
   if (!response.ok) {
     throw new Error(
       `日次ステータス取得に失敗しました: ${response.status} ${response.statusText}`
@@ -361,7 +359,7 @@ export interface OrderPreset {
  * 注意: 本システムは自動売買を行いません。参考情報のみを提供します。
  */
 export async function fetchOrderPreset(noteId: string): Promise<{ preset: OrderPreset }> {
-  const response = await fetch(`${API_BASE_URL}/api/orders/preset/${noteId}`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/orders/preset/${noteId}`, {
     cache: "no-store",
   });
   if (!response.ok) {
@@ -398,7 +396,7 @@ export async function fetchOrderConfirmation(params: {
   price: number;
   quantity: number;
 }): Promise<{ confirmation: OrderConfirmation }> {
-  const response = await fetch(`${API_BASE_URL}/api/orders/confirmation`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/orders/confirmation`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
@@ -429,7 +427,7 @@ import type {
  * GET /api/indicators/settings
  */
 export async function fetchIndicatorSettings(): Promise<UserIndicatorSettings> {
-  const response = await fetch(`${API_BASE_URL}/api/indicators/settings`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/indicators/settings`, {
     cache: "no-store",
   });
   if (!response.ok) {
@@ -452,8 +450,8 @@ export async function fetchIndicatorMetadata(category?: string): Promise<{
   categories: string[];
 }> {
   const url = category
-    ? `${API_BASE_URL}/api/indicators/metadata?category=${category}`
-    : `${API_BASE_URL}/api/indicators/metadata`;
+    ? `${getPublicApiBaseUrl()}/api/indicators/metadata?category=${category}`
+    : `${getPublicApiBaseUrl()}/api/indicators/metadata`;
 
   try {
     const response = await fetch(url, {
@@ -503,7 +501,7 @@ export async function fetchIndicatorMetadata(category?: string): Promise<{
 export async function saveIndicatorConfig(
   request: SaveIndicatorConfigRequest
 ): Promise<IndicatorConfig> {
-  const response = await fetch(`${API_BASE_URL}/api/indicators/settings`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/indicators/settings`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
@@ -522,7 +520,7 @@ export async function saveIndicatorConfig(
  */
 export async function deleteIndicatorConfig(indicatorId: IndicatorId): Promise<void> {
   const response = await fetch(
-    `${API_BASE_URL}/api/indicators/settings/${indicatorId}`,
+    `${getPublicApiBaseUrl()}/api/indicators/settings/${indicatorId}`,
     {
       method: "DELETE",
     }
@@ -537,7 +535,7 @@ export async function deleteIndicatorConfig(indicatorId: IndicatorId): Promise<v
  * POST /api/indicators/settings/reset
  */
 export async function resetIndicatorSettings(): Promise<UserIndicatorSettings> {
-  const response = await fetch(`${API_BASE_URL}/api/indicators/settings/reset`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/indicators/settings/reset`, {
     method: "POST",
   });
   if (!response.ok) {
@@ -553,7 +551,7 @@ export async function resetIndicatorSettings(): Promise<UserIndicatorSettings> {
  */
 export async function fetchSetupStatus(): Promise<{ hasCompletedSetup: boolean }> {
   const response = await fetch(
-    `${API_BASE_URL}/api/indicators/settings/setup-status`,
+    `${getPublicApiBaseUrl()}/api/indicators/settings/setup-status`,
     {
       cache: "no-store",
     }
@@ -600,7 +598,7 @@ export interface UserSettings {
  * GET /api/settings
  */
 export async function fetchUserSettings(): Promise<UserSettings> {
-  const response = await fetch(`${API_BASE_URL}/api/settings`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/settings`, {
     cache: "no-store",
   });
   if (!response.ok) {
@@ -615,7 +613,7 @@ export async function fetchUserSettings(): Promise<UserSettings> {
  * PUT /api/settings
  */
 export async function saveUserSettings(settings: Partial<UserSettings>): Promise<UserSettings> {
-  const response = await fetch(`${API_BASE_URL}/api/settings`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/settings`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(settings),
@@ -633,7 +631,7 @@ export async function saveUserSettings(settings: Partial<UserSettings>): Promise
  * POST /api/settings/reset
  */
 export async function resetUserSettings(): Promise<UserSettings> {
-  const response = await fetch(`${API_BASE_URL}/api/settings/reset`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/settings/reset`, {
     method: "POST",
   });
   if (!response.ok) {
@@ -711,7 +709,7 @@ export interface BacktestEventSummary {
 export async function executeBacktest(
   params: BacktestExecuteParams
 ): Promise<{ runId: string }> {
-  const response = await fetch(`${API_BASE_URL}/api/backtest/execute`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/backtest/execute`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
@@ -730,7 +728,7 @@ export async function executeBacktest(
 export async function fetchBacktestResult(
   runId: string
 ): Promise<BacktestSummary | null> {
-  const response = await fetch(`${API_BASE_URL}/api/backtest/${runId}`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/backtest/${runId}`, {
     cache: "no-store",
   });
   if (!response.ok) {
@@ -749,7 +747,7 @@ export async function fetchBacktestResult(
 export async function fetchBacktestHistory(
   noteId: string
 ): Promise<BacktestSummary[]> {
-  const response = await fetch(`${API_BASE_URL}/api/backtest/history/${noteId}`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/backtest/history/${noteId}`, {
     cache: "no-store",
   });
   if (!response.ok) {
@@ -779,7 +777,7 @@ import type {
 export async function fetchStrategies(
   status?: StrategyStatus
 ): Promise<Strategy[]> {
-  const url = new URL(`${API_BASE_URL}/api/strategies`);
+  const url = new URL(`${getPublicApiBaseUrl()}/api/strategies`);
 
   if (status) {
     url.searchParams.set("status", status);
@@ -804,7 +802,7 @@ export async function fetchStrategies(
  * GET /api/strategies/:id
  */
 export async function fetchStrategy(id: string): Promise<Strategy> {
-  const response = await fetch(`${API_BASE_URL}/api/strategies/${id}`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/strategies/${id}`, {
     cache: "no-store",
   });
 
@@ -830,7 +828,7 @@ export async function fetchStrategyVersion(
   versionNumber: number
 ): Promise<StrategyVersion> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/versions/${versionNumber}`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/versions/${versionNumber}`,
     { cache: "no-store" }
   );
 
@@ -852,7 +850,7 @@ export async function rollbackStrategyVersion(
   changeNote?: string
 ): Promise<Strategy> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/rollback/${versionNumber}`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/rollback/${versionNumber}`,
     {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -876,7 +874,7 @@ export async function rollbackStrategyVersion(
 export async function createStrategy(
   request: CreateStrategyRequest
 ): Promise<Strategy> {
-  const response = await fetch(`${API_BASE_URL}/api/strategies`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/strategies`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
@@ -899,7 +897,7 @@ export async function updateStrategy(
   id: string,
   request: UpdateStrategyRequest
 ): Promise<Strategy> {
-  const response = await fetch(`${API_BASE_URL}/api/strategies/${id}`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/strategies/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
@@ -919,7 +917,7 @@ export async function updateStrategy(
  * DELETE /api/strategies/:id
  */
 export async function deleteStrategy(id: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/strategies/${id}`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/strategies/${id}`, {
     method: "DELETE",
   });
 
@@ -937,7 +935,7 @@ export async function updateStrategyStatus(
   id: string,
   status: StrategyStatus
 ): Promise<Strategy> {
-  const response = await fetch(`${API_BASE_URL}/api/strategies/${id}/status`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/strategies/${id}/status`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ status }),
@@ -957,7 +955,7 @@ export async function updateStrategyStatus(
  * POST /api/strategies/:id/duplicate
  */
 export async function duplicateStrategy(id: string): Promise<Strategy> {
-  const response = await fetch(`${API_BASE_URL}/api/strategies/${id}/duplicate`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/strategies/${id}/duplicate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
   });
@@ -1006,7 +1004,7 @@ export async function runStrategyBacktest(
   params: BacktestRequestParams
 ): Promise<BacktestResult> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/backtest`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/backtest`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1041,7 +1039,7 @@ export async function fetchStrategyBacktestHistory(
   }
 
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/backtest/history?${params}`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/backtest/history?${params}`,
     { cache: "no-store" }
   );
 
@@ -1062,7 +1060,7 @@ export async function fetchStrategyBacktestResult(
   runId: string
 ): Promise<BacktestResult> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/backtest/${runId}`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/backtest/${runId}`,
     { cache: "no-store" }
   );
 
@@ -1247,7 +1245,7 @@ export async function fetchStrategyNotes(
   if (params.offset) queryParams.set('offset', params.offset.toString());
 
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/notes?${queryParams}`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/notes?${queryParams}`,
     { cache: 'no-store' }
   );
 
@@ -1267,7 +1265,7 @@ export async function fetchStrategyNoteStats(
   strategyId: string
 ): Promise<StrategyNoteStats> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/notes/stats`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/notes/stats`,
     { cache: 'no-store' }
   );
 
@@ -1288,7 +1286,7 @@ export async function fetchStrategyNoteDetail(
   noteId: string
 ): Promise<StrategyNoteDetail> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/notes/${noteId}`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/notes/${noteId}`,
     { cache: 'no-store' }
   );
 
@@ -1317,7 +1315,7 @@ export async function updateStrategyNoteDetail(
   }
 ): Promise<StrategyNoteDetail> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/notes/${noteId}`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/notes/${noteId}`,
     {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -1343,7 +1341,7 @@ export async function updateStrategyNoteStatus(
   status: StrategyNoteStatus
 ): Promise<StrategyNoteDetail> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/notes/${noteId}/status`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/notes/${noteId}/status`,
     {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -1368,7 +1366,7 @@ export async function deleteStrategyNote(
   noteId: string
 ): Promise<void> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/notes/${noteId}`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/notes/${noteId}`,
     { method: 'DELETE' }
   );
 
@@ -1387,7 +1385,7 @@ export async function createNotesFromBacktest(
   onlyWins: boolean = true
 ): Promise<{ createdCount: number }> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/notes/from-backtest/${runId}`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/notes/from-backtest/${runId}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1444,7 +1442,7 @@ export interface AlertLog {
  * GET /api/strategies/:id/alerts
  */
 export async function fetchStrategyAlert(strategyId: string): Promise<StrategyAlert | null> {
-  const response = await fetch(`${API_BASE_URL}/api/strategies/${strategyId}/alerts`);
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/strategies/${strategyId}/alerts`);
 
   if (!response.ok) {
     throw new Error('アラート設定の取得に失敗しました');
@@ -1468,7 +1466,7 @@ export async function createStrategyAlert(
   }
 ): Promise<StrategyAlert> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/alerts`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/alerts`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1498,7 +1496,7 @@ export async function updateStrategyAlert(
   }
 ): Promise<StrategyAlert> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/alerts`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/alerts`,
     {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -1520,7 +1518,7 @@ export async function updateStrategyAlert(
  */
 export async function deleteStrategyAlert(strategyId: string): Promise<void> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/alerts`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/alerts`,
     { method: 'DELETE' }
   );
 
@@ -1538,7 +1536,7 @@ export async function fetchAlertLogs(
   limit: number = 50
 ): Promise<AlertLog[]> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/alerts/logs?limit=${limit}`
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/alerts/logs?limit=${limit}`
   );
 
   if (!response.ok) {
@@ -1555,7 +1553,7 @@ export async function fetchAlertLogs(
  */
 export async function pauseAlert(strategyId: string): Promise<StrategyAlert> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/alerts/pause`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/alerts/pause`,
     { method: 'PUT' }
   );
 
@@ -1573,7 +1571,7 @@ export async function pauseAlert(strategyId: string): Promise<StrategyAlert> {
  */
 export async function resumeAlert(strategyId: string): Promise<StrategyAlert> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/alerts/resume`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/alerts/resume`,
     { method: 'PUT' }
   );
 
@@ -1657,7 +1655,7 @@ export async function runWalkForwardTest(
   };
 
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/walkforward`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/walkforward`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1682,7 +1680,7 @@ export async function fetchWalkForwardHistory(
   limit: number = 10
 ): Promise<WalkForwardResult[]> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/walkforward/history?limit=${limit}`
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/walkforward/history?limit=${limit}`
   );
 
   if (!response.ok) {
@@ -1702,7 +1700,7 @@ export async function fetchWalkForwardResult(
   runId: string
 ): Promise<WalkForwardResult | null> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/walkforward/${runId}`
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/walkforward/${runId}`
   );
 
   if (response.status === 404) {
@@ -1825,7 +1823,7 @@ export async function runMonteCarloSimulation(
   params: MonteCarloParams
 ): Promise<MonteCarloResult> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/montecarlo`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/montecarlo`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1851,7 +1849,7 @@ export async function fetchMonteCarloHistory(
   limit: number = 10
 ): Promise<MonteCarloHistoryEntry[]> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/montecarlo/history?limit=${limit}`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/montecarlo/history?limit=${limit}`,
     { cache: 'no-store' }
   );
 
@@ -1920,7 +1918,7 @@ export async function fetchVersionComparison(
     : '';
 
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/versions/compare${params}`
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/versions/compare${params}`
   );
 
   if (!response.ok) {
@@ -2016,7 +2014,7 @@ export async function fetchFilterAnalysis(
   runId: string
 ): Promise<FilterAnalysisResult> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/backtest/${runId}/filter-analysis`
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/backtest/${runId}/filter-analysis`
   );
 
   if (!response.ok) {
@@ -2038,7 +2036,7 @@ export async function verifyFilters(
   filters: FilterCondition[]
 ): Promise<FilterVerifyResult> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/${strategyId}/backtest/${runId}/filter-verify`,
+    `${getPublicApiBaseUrl()}/api/strategies/${strategyId}/backtest/${runId}/filter-verify`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2064,7 +2062,7 @@ export async function fetchFilterIndicators(): Promise<{
   name: string;
   description: string;
 }[]> {
-  const response = await fetch(`${API_BASE_URL}/api/strategies/filters/indicators`);
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/strategies/filters/indicators`);
 
   if (!response.ok) {
     throw new Error('フィルターインジケーター一覧の取得に失敗しました');
@@ -2177,7 +2175,7 @@ export async function fetchNotePerformance(
     params.set('weakThreshold', options.weakThreshold.toString());
   }
 
-  const url = `${API_BASE_URL}/api/trades/notes/${noteId}/performance${params.toString() ? '?' + params.toString() : ''}`;
+  const url = `${getPublicApiBaseUrl()}/api/trades/notes/${noteId}/performance${params.toString() ? '?' + params.toString() : ''}`;
   const response = await fetch(url, { cache: 'no-store' });
 
   if (response.status === 404) {
@@ -2220,7 +2218,7 @@ export async function fetchNoteRanking(options: {
     params.set('timeframe', options.timeframe);
   }
 
-  const url = `${API_BASE_URL}/api/trades/notes/performance/ranking${params.toString() ? '?' + params.toString() : ''}`;
+  const url = `${getPublicApiBaseUrl()}/api/trades/notes/performance/ranking${params.toString() ? '?' + params.toString() : ''}`;
   const response = await fetch(url, { cache: 'no-store' });
 
   if (!response.ok) {
@@ -2263,7 +2261,7 @@ export async function checkBacktestDataCoverage(
   endDate: string
 ): Promise<CoverageCheckResult> {
   const response = await fetch(
-    `${API_BASE_URL}/api/backtest/check-coverage`,
+    `${getPublicApiBaseUrl()}/api/backtest/check-coverage`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2293,7 +2291,7 @@ export async function checkBacktestDataCoverage(
  */
 export async function fetchAvailableSymbols(): Promise<{ symbolName: string; symbolId: number }[]> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/strategies/symbols`, {
+    const response = await fetch(`${getPublicApiBaseUrl()}/api/strategies/symbols`, {
       cache: "no-store",
     });
 
@@ -2357,7 +2355,7 @@ export async function startOhlcvFetchJob(
   endDate: string
 ): Promise<{ jobId: string }> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategies/ohlcv/fetch-and-cache`,
+    `${getPublicApiBaseUrl()}/api/strategies/ohlcv/fetch-and-cache`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2388,7 +2386,7 @@ export function subscribeOhlcvFetchProgress(
   onError?: (error: Event) => void
 ): EventSource {
   const es = new EventSource(
-    `${API_BASE_URL}/api/strategies/ohlcv/fetch-progress/${jobId}`
+    `${getPublicApiBaseUrl()}/api/strategies/ohlcv/fetch-progress/${jobId}`
   );
 
   es.onmessage = (event) => {
@@ -2492,7 +2490,7 @@ export async function fetchOhlcvCandles(params: {
   });
 
   const response = await fetch(
-    `${API_BASE_URL}/api/ohlcv/candles?${searchParams.toString()}`,
+    `${getPublicApiBaseUrl()}/api/ohlcv/candles?${searchParams.toString()}`,
     { cache: "no-store" }
   );
 
@@ -2595,7 +2593,7 @@ export interface UpdateProfileRequest {
  * GET /api/profiles/options
  */
 export async function fetchProfileOptions(): Promise<ProfileOption[]> {
-  const response = await fetch(`${API_BASE_URL}/api/profiles/options`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/profiles/options`, {
     cache: "no-store",
   });
   if (!response.ok) {
@@ -2612,7 +2610,7 @@ export async function fetchProfileOptions(): Promise<ProfileOption[]> {
  * GET /api/profiles
  */
 export async function fetchProfiles(): Promise<IndicatorProfile[]> {
-  const response = await fetch(`${API_BASE_URL}/api/profiles`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/profiles`, {
     cache: "no-store",
   });
   if (!response.ok) {
@@ -2629,7 +2627,7 @@ export async function fetchProfiles(): Promise<IndicatorProfile[]> {
  * GET /api/profiles/:id
  */
 export async function fetchProfileById(id: string): Promise<IndicatorProfile | null> {
-  const response = await fetch(`${API_BASE_URL}/api/profiles/${encodeURIComponent(id)}`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/profiles/${encodeURIComponent(id)}`, {
     cache: "no-store",
   });
   if (response.status === 404) {
@@ -2649,7 +2647,7 @@ export async function fetchProfileById(id: string): Promise<IndicatorProfile | n
  * POST /api/profiles
  */
 export async function createProfile(request: CreateProfileRequest): Promise<IndicatorProfile> {
-  const response = await fetch(`${API_BASE_URL}/api/profiles`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/profiles`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
@@ -2670,7 +2668,7 @@ export async function updateProfile(
   id: string,
   request: UpdateProfileRequest
 ): Promise<IndicatorProfile> {
-  const response = await fetch(`${API_BASE_URL}/api/profiles/${encodeURIComponent(id)}`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/profiles/${encodeURIComponent(id)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
@@ -2688,7 +2686,7 @@ export async function updateProfile(
  * DELETE /api/profiles/:id
  */
 export async function deleteProfile(id: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/profiles/${encodeURIComponent(id)}`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/profiles/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
   if (!response.ok) {
@@ -2703,7 +2701,7 @@ export async function deleteProfile(id: string): Promise<void> {
  */
 export async function setDefaultProfile(id: string): Promise<void> {
   const response = await fetch(
-    `${API_BASE_URL}/api/profiles/${encodeURIComponent(id)}/default`,
+    `${getPublicApiBaseUrl()}/api/profiles/${encodeURIComponent(id)}/default`,
     {
       method: "PUT",
     }
@@ -2811,7 +2809,7 @@ export async function fetchComparisonSessions(
   offset: number = 0
 ): Promise<{ sessions: ComparisonSession[]; total: number }> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategy-comparison?limit=${limit}&offset=${offset}`,
+    `${getPublicApiBaseUrl()}/api/strategy-comparison?limit=${limit}&offset=${offset}`,
     { cache: "no-store" }
   );
   if (!response.ok) {
@@ -2830,7 +2828,7 @@ export async function fetchComparisonSessions(
 export async function createComparisonSession(
   request: CreateComparisonRequest
 ): Promise<ComparisonSession> {
-  const response = await fetch(`${API_BASE_URL}/api/strategy-comparison`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/strategy-comparison`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
@@ -2851,7 +2849,7 @@ export async function fetchComparisonSession(
   id: string
 ): Promise<ComparisonSession | null> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategy-comparison/${encodeURIComponent(id)}`,
+    `${getPublicApiBaseUrl()}/api/strategy-comparison/${encodeURIComponent(id)}`,
     { cache: "no-store" }
   );
   if (response.status === 404) {
@@ -2872,7 +2870,7 @@ export async function fetchComparisonSession(
  */
 export async function deleteComparisonSession(id: string): Promise<void> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategy-comparison/${encodeURIComponent(id)}`,
+    `${getPublicApiBaseUrl()}/api/strategy-comparison/${encodeURIComponent(id)}`,
     { method: "DELETE" }
   );
   if (!response.ok) {
@@ -2890,7 +2888,7 @@ export async function runPortfolioOptimization(
   request: OptimizeRequest
 ): Promise<OptimizationResult> {
   const response = await fetch(
-    `${API_BASE_URL}/api/strategy-comparison/${encodeURIComponent(sessionId)}/optimize`,
+    `${getPublicApiBaseUrl()}/api/strategy-comparison/${encodeURIComponent(sessionId)}/optimize`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2991,7 +2989,7 @@ export async function analyzePattern(request: {
     timeframe?: string;
   };
 }): Promise<PatternAnalysisResult> {
-  const response = await fetch(`${API_BASE_URL}/api/pattern-analysis/analyze`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/pattern-analysis/analyze`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
@@ -3020,7 +3018,7 @@ export async function analyzeStrategyPattern(request: {
   patternsCompared: number;
   analysis: PatternAnalysisResult;
 }> {
-  const response = await fetch(`${API_BASE_URL}/api/pattern-analysis/analyze-strategy`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/pattern-analysis/analyze-strategy`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
@@ -3046,7 +3044,7 @@ export async function detectAnomaly(request: {
     timeframe?: string;
   };
 }): Promise<AnomalyDetectionResult> {
-  const response = await fetch(`${API_BASE_URL}/api/pattern-analysis/anomaly`, {
+  const response = await fetch(`${getPublicApiBaseUrl()}/api/pattern-analysis/anomaly`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
@@ -3080,7 +3078,7 @@ export async function fetchWinningPatterns(
     params.set("limit", options.limit.toString());
   }
 
-  const url = `${API_BASE_URL}/api/pattern-analysis/patterns/${encodeURIComponent(strategyId)}?${params}`;
+  const url = `${getPublicApiBaseUrl()}/api/pattern-analysis/patterns/${encodeURIComponent(strategyId)}?${params}`;
   const response = await fetch(url, { cache: "no-store" });
 
   if (!response.ok) {

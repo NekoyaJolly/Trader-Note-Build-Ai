@@ -48,17 +48,11 @@ import type {
   DiscoveryLatestResponse,
   SystemHealthResponse,
 } from "@/types/sideB";
+import { getPublicApiBaseUrl } from "./publicApiBaseUrl";
 
 // ===========================================
 // 基盤
 // ===========================================
-
-/**
- * バックエンド API のベース URL。
- * 既存 api.ts と同じ規約。未設定時は空文字列（同一オリジン相対パス）。
- */
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
-const SIDE_B_BASE = `${API_BASE_URL}/api/side-b`;
 
 /**
  * エラー種別。UI のエラー表示で分岐しやすくするため区別する。
@@ -86,7 +80,7 @@ async function request<T>(
   endpoint: string,
   init?: RequestInit,
 ): Promise<T> {
-  const url = `${SIDE_B_BASE}${endpoint}`;
+  const url = `${getPublicApiBaseUrl()}/api/side-b${endpoint}`;
   let response: Response;
   try {
     response = await fetch(url, {

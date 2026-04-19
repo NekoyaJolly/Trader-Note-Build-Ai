@@ -12,9 +12,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { isBrowserLocalDevOrigin } from '@/lib/isLocalDevOrigin';
-
-// API ベースURL（環境変数から取得）
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
+import { getPublicApiBaseUrl } from '@/lib/publicApiBaseUrl';
 
 // ========================================
 // 型定義
@@ -102,7 +100,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (storedToken) {
         headers['Authorization'] = `Bearer ${storedToken}`;
       }
-      const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+      const response = await fetch(`${getPublicApiBaseUrl()}/api/auth/me`, {
         method: 'GET',
         credentials: 'include', // Cookie も送信（本番環境用）
         headers,
@@ -161,9 +159,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       // バックエンドから認証URLを取得
       const local = isBrowserLocalDevOrigin();
+      const base = getPublicApiBaseUrl();
       const urlPath = local
-        ? `${API_BASE_URL}/api/auth/ctrader/url?redirect_base=${encodeURIComponent(window.location.origin)}`
-        : `${API_BASE_URL}/api/auth/ctrader/url`;
+        ? `${base}/api/auth/ctrader/url?redirect_base=${encodeURIComponent(window.location.origin)}`
+        : `${base}/api/auth/ctrader/url`;
       const response = await fetch(urlPath, {
         method: 'GET',
         credentials: 'include',
@@ -182,11 +181,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         const body = await response.text();
         console.error("[AuthContext] 認証URL取得エラー:", response.status, body);
-        // ローカルで 404 が多い原因: NEXT_PUBLIC_API_BASE_URL 未設定で Next 自身に fetch している
+        // 404 で HTML が返る場合はまだ Next に届いている。localhost では既定で :3100 を使うため、バックエンド未起動の可能性が高い。
         if (typeof window !== "undefined") {
           const hint =
             response.status === 404
-              ? "\n\n【よくある原因】フロントがバックエンドに届いていません。src/frontend/.env.local に NEXT_PUBLIC_API_BASE_URL=http://localhost:3100 を設定し、API（npm run dev:backend 等）を起動してください。\nローカルでは redirect_uri はポートに合わせ自動決定されます。cTrader アプリの Redirect URIs に http://localhost:3102/auth/ctrader/callback（ポート違いならその origin）を1本登録してください。手順: docs/cTrader-localhost-cheatsheet.md"
+              ? "\n\n【よくある原因】API（Express :3100）が起動していないか、URL が誤っています。npm run dev または npm run dev:backend を実行してください。\n（localhost では NEXT_PUBLIC_API_BASE_URL 未設定でも http://localhost:3100 を既定で使います）\ncTrader: docs/cTrader-localhost-cheatsheet.md"
               : "";
           window.alert(
             `認証URLの取得に失敗しました（HTTP ${response.status}）。${hint}\n\n${body.slice(0, 300)}`,
@@ -208,7 +207,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (storedToken) {
         headers['Authorization'] = `Bearer ${storedToken}`;
       }
-      await fetch(`${API_BASE_URL}/api/auth/logout`, {
+      await fetch(`${getPublicApiBaseUrl()}/api/auth/logout`, {
         method: 'POST',
         credentials: 'include',
         headers,
