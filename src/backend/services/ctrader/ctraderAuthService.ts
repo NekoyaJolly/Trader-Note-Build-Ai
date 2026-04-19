@@ -52,6 +52,8 @@ export type CTraderTokenResponse = z.infer<typeof CTraderTokenResponseSchema>;
  */
 export const ExchangeCodeRequestSchema = z.object({
   code: z.string().min(1, 'code は必須です'),
+  /** ローカル開発時のみ。認可時の redirect_uri と完全一致させること。 */
+  redirect_uri: z.string().url().optional(),
 });
 
 export type ExchangeCodeRequest = z.infer<typeof ExchangeCodeRequestSchema>;
@@ -96,10 +98,11 @@ export class CTraderAuthService {
    * @param state - CSRF 防止用の state パラメータ（オプション）
    * @returns 認証URL
    */
-  generateAuthUrl(state?: string): string {
+  generateAuthUrl(state?: string, redirectUriOverride?: string): string {
+    const redirectUri = redirectUriOverride ?? config.ctrader.redirectUri;
     const params = new URLSearchParams({
       client_id: config.ctrader.clientId,
-      redirect_uri: config.ctrader.redirectUri,
+      redirect_uri: redirectUri,
       response_type: 'code',
       // 注意: trading スコープは cTrader アプリで有効化が必要
       // 現在は accounts のみで認証（取引履歴・ポジション読み取り）
@@ -127,7 +130,8 @@ export class CTraderAuthService {
    * @param code - 認可コード（Callback から取得）
    * @returns 認証結果（user, token, jwt, isNewUser）
    */
-  async exchangeCodeAndLogin(code: string): Promise<AuthResult> {
+  async exchangeCodeAndLogin(code: string, redirectUriOverride?: string): Promise<AuthResult> {
+    const redirectUri = redirectUriOverride ?? config.ctrader.redirectUri;
     // 1. code → token 交換
     const response = await fetch(config.ctrader.tokenUrl, {
       method: 'POST',
@@ -139,7 +143,7 @@ export class CTraderAuthService {
         code,
         client_id: config.ctrader.clientId,
         client_secret: config.ctrader.clientSecret,
-        redirect_uri: config.ctrader.redirectUri,
+        redirect_uri: redirectUri,
       }).toString(),
     });
 
@@ -149,7 +153,7 @@ export class CTraderAuthService {
         status: response.status,
         error: errorText,
         tokenUrl: config.ctrader.tokenUrl,
-        redirectUri: config.ctrader.redirectUri,
+        redirectUri,
       });
       throw new Error(`cTrader トークン交換エラー: ${response.status} ${errorText}`);
     }

@@ -60,7 +60,8 @@ gcloud run services update trader-note --region asia-northeast1 --project ai-not
 
 ### 対策 2: CTRADER_REDIRECT_URI の確認
 
-cTrader の Redirect URI と完全一致させる。
+cTrader の Redirect URI と完全一致させる。  
+**ローカル（localhost）**の最短手順は [cTrader-localhost-cheatsheet.md](cTrader-localhost-cheatsheet.md) を参照。
 
 **確認項目：**
 
