@@ -17,6 +17,7 @@ import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { isBrowserLocalDevOrigin } from '@/lib/isLocalDevOrigin';
+import { getPostLoginPath } from '@/lib/postLoginRedirect';
 import { getPublicApiBaseUrl } from '@/lib/publicApiBaseUrl';
 
 /**
