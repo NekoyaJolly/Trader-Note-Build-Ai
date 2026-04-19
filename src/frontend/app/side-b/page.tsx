@@ -14,6 +14,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { getSideBAgentTabStripItems } from "@/lib/navigation/sideBNav";
+import { isNavHrefActive } from "@/lib/navigation/navActive";
 
 // APIベースURL
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "") + "/api/side-b";
@@ -85,17 +88,6 @@ function getStateDisplay(state: string) {
   return stateConfig[state] || { color: "text-gray-400", bg: "bg-gray-500/20", label: state, icon: "❓" };
 }
 
-// --- ナビリンク ---
-
-/** サイドバーと役割を揃えた最小ナビ（詳細は Sidebar の Side-B メニュー） */
-const navLinks = [
-  { icon: "📊", label: "台帳", href: "/side-b/dashboard" },
-  { icon: "📋", label: "仮説", href: "/side-b/hypotheses" },
-  { icon: "🧪", label: "検証", href: "/side-b/validation" },
-  { icon: "🤖", label: "運転席", href: "/side-b" },
-  { icon: "🔍", label: "比較", href: "/side-b/comparison" },
-];
-
 /**
  * レスポンスを安全にパースするヘルパー
  * HTTPエラーまたはJSON parse 失敗時は null を返す
@@ -110,6 +102,8 @@ async function safeFetchJson<T>(res: Response): Promise<T | null> {
 }
 
 export default function SideBDashboard() {
+  const pathname = usePathname();
+  const agentTabNav = getSideBAgentTabStripItems();
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [thinkingLog, setThinkingLog] = useState<ThinkingLogEntry[]>([]);
   const [lessons, setLessons] = useState<string[]>([]);
@@ -266,18 +260,26 @@ export default function SideBDashboard() {
             </p>
           </div>
 
-          {/* ナビゲーション */}
-          <div className="flex items-center gap-2">
-            {navLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-white hover:bg-slate-700/50 transition-colors"
-              >
-                <span>{link.icon}</span>
-                <span className="hidden sm:inline">{link.label}</span>
-              </Link>
-            ))}
+          {/* ナビゲーション（lib/navigation/sideBNav.ts とサイドバー共通定義） */}
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 justify-end">
+            {agentTabNav.map((link) => {
+              const Icon = link.icon;
+              const active = isNavHrefActive(pathname, link.href);
+              return (
+                <Link
+                  key={link.id}
+                  href={link.href}
+                  className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs transition-colors ${
+                    active
+                      ? "text-white bg-slate-700/80 ring-1 ring-purple-500/40"
+                      : "text-gray-400 hover:text-white hover:bg-slate-700/50"
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5 shrink-0 opacity-90" aria-hidden />
+                  <span className="hidden sm:inline">{link.labelTab}</span>
+                </Link>
+              );
+            })}
           </div>
         </div>
 

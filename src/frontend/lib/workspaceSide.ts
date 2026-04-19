@@ -2,6 +2,8 @@
  * Side-A / Side-B ワークスペース判定（ヘッダー・サイドバーで共通利用）
  *
  * 判定ロジックはここに集約し、各所で `pathname.startsWith` を重複させない。
+ * 将来「共通設定」「shared」等が増える場合は `WorkspaceSide` を拡張し、
+ * ここで分岐を追加する（今は二分で十分）。
  *
  * @see docs/design/tradeassist_uiux_redesign_plan.md §4-1（P3）
  */

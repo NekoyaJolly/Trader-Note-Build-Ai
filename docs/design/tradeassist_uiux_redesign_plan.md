@@ -131,6 +131,8 @@
 - ここにハブ機能を持たせすぎない。俯瞰は dashboard、一覧は hypotheses、進行管理は validation に委ねる。
 - ページ上部に Side-B 共通タブを配置する場合は、dashboard / hypotheses / validation / agent / comparison の5本程度に絞る。
 
+**実装（P4 完了時点）**: Side-B のナビは **`lib/navigation/sideBNav.ts` を単一ソース**とする。`Sidebar` の「AI・台帳」ブロックと `app/side-b/page.tsx` 上部タブは同じ `SIDE_B_WORKSPACE_ITEMS` から生成。ラベル・href・順序・運転席タブ表示（`showInAgentTabStrip`）を二重定義しない。アクティブ判定は **`lib/navigation/navActive.ts` の `isNavHrefActive`**（`/side-b` は運転席のみ厳密一致）。
+
 ### 4-6. モバイル導線（実装メモ）
 
 - **認証後リダイレクト**: モバイル幅のみ `router.push('/market-analysis')`。実装候補: `src/frontend/app/login/page.tsx`（`matchMedia` 等、hydration 後のクライアントのみで分岐）。
@@ -143,7 +145,7 @@
 | P1 | AppShell / Sidebar | デスクトップ常時表示、アクティブ親自動展開 | 現在地把握が大幅に改善 |
 | P2 | Home | ワークベンチ化、最近の更新と続きから導線を追加（§4-3 実装済） | 初手の迷いを削減 |
 | P3 | Header / WorkspaceTabs | タブ化、Side別ホーム遷移（§4-1 実装済）、workspaceSide 共通化 | 切替の文脈が明瞭になる |
-| P4 | /side-b | 運転席化、重複ナビの整理 | 役割の衝突を解消 |
+| P4 | /side-b | 運転席化、sideBNav 単一ソース・navActive 共通化（§4-5 実装済） | 役割の衝突を解消 |
 | P5 | 文言・ラベル | 管理用名称からユーザー行動ベース名称へ変更 | 初見理解を補助 |
 | Pm（並行可） | Login / BottomNavigation | モバイルのみログイン後→`/market-analysis`、ボトム左端＝チャート（§3-4・§4-6） | MT系に近い即時チャート体験 |
 
@@ -163,6 +165,8 @@
 - src/frontend/components/layout/WorkspaceTabs.tsx（P3 ワークスペースタブ）
 - src/frontend/lib/workspaceSide.ts（Side 判定の単一ソース）
 - src/frontend/components/layout/Sidebar.tsx
+- src/frontend/lib/navigation/sideBNav.ts（P4 Side-B ナビ）
+- src/frontend/lib/navigation/navActive.ts（アクティブ判定）
 - src/frontend/components/layout/AppShell.tsx
 - src/frontend/app/side-b/page.tsx
 - src/frontend/app/side-b/dashboard/page.tsx

@@ -17,9 +17,6 @@ import {
   FileText,
   Upload,
   Bell,
-  Bot,
-  Brain,
-  TrendingUp,
   Target,
   Activity,
   BarChart3,
@@ -31,15 +28,13 @@ import {
   User,
   LineChart,
   LogOut,
-  ClipboardList,
-  GitCompare,
-  FlaskConical,
   LayoutDashboard,
-  CalendarClock,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { getWorkspaceSideFromPathname } from "@/lib/workspaceSide";
+import { getSideBWorkspaceItemsSorted } from "@/lib/navigation/sideBNav";
+import { isNavHrefActive } from "@/lib/navigation/navActive";
 import IndicatorConfigModal from "@/components/IndicatorConfigModal";
 import {
   fetchIndicatorSettings,
@@ -173,23 +168,19 @@ const sideANavCategories: NavCategory[] = [
   },
 ];
 
-/** Side-B 専用サイドバー（台帳・仮説・検証・運転席・設定） */
+/** Side-B 専用サイドバー（項目は lib/navigation/sideBNav.ts で単一管理） */
 const sideBNavCategories: NavCategory[] = [
   {
     id: "side-b",
     label: "AI・台帳",
     color: "purple",
     defaultOpen: true,
-    items: [
-      { href: "/side-b/dashboard", label: "台帳ダッシュボード", icon: LayoutDashboard, color: "purple" },
-      { href: "/side-b/hypotheses", label: "仮説一覧", icon: ClipboardList, color: "purple" },
-      { href: "/side-b/validation", label: "検証キュー", icon: FlaskConical, color: "purple" },
-      { href: "/side-b", label: "エージェント（運転席）", icon: Bot, color: "purple" },
-      { href: "/side-b/ai-notes", label: "AIノート", icon: Brain, color: "purple" },
-      { href: "/side-b/trades", label: "仮想トレード", icon: TrendingUp, color: "purple" },
-      { href: "/side-b/comparison", label: "比較ダッシュボード", icon: GitCompare, color: "purple" },
-      { href: "/side-b/settings", label: "AI 自動実行設定", icon: CalendarClock, color: "purple" },
-    ],
+    items: getSideBWorkspaceItemsSorted().map((e) => ({
+      href: e.href,
+      label: e.labelSidebar,
+      icon: e.icon,
+      color: "purple",
+    })),
   },
   {
     id: "settings",
@@ -367,18 +358,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
 
     const cats = isSideBWorkspace ? sideBNavCategories : sideANavCategories;
 
-    const isActiveHref = (href: string) => {
-      if (href === "/") {
-        return pathname === "/";
-      }
-
-      // ハッシュのみの疑似リンクは pathname ベースのアクティブ判定対象外
-      if (href.startsWith("#")) {
-        return false;
-      }
-
-      return pathname === href || pathname.startsWith(`${href}/`);
-    };
+    const isActiveHref = (href: string) => isNavHrefActive(pathname, href);
 
     setExpandedCategories((prev) => {
       const next = { ...prev };
@@ -403,13 +383,8 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
     });
   }, [pathname, isSideBWorkspace]);
 
-  // アクティブ判定
-  const isActive = (href: string) => {
-    if (href === "/" || href.startsWith("#")) {
-      return pathname === href || pathname === "/";
-    }
-    return pathname === href || pathname?.startsWith(href + "/");
-  };
+  // アクティブ判定（/side-b 運転席は厳密一致・他は navActive 共通）
+  const isActive = (href: string) => isNavHrefActive(pathname, href);
 
   // インジケーターがアクティブか
   const isIndicatorActive = (indicatorId: IndicatorId): boolean => {
