@@ -16,11 +16,8 @@
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { getPostLoginPath } from '@/lib/postLoginRedirect';
 import { isBrowserLocalDevOrigin } from '@/lib/isLocalDevOrigin';
-
-// バックエンドの URL
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
+import { getPublicApiBaseUrl } from '@/lib/publicApiBaseUrl';
 
 /**
  * Callback 処理コンポーネント（useSearchParams 使用）
@@ -71,7 +68,7 @@ function CallbackHandler() {
       try {
         // バックエンド API に code を送信してトークン交換
         console.log('[Callback] トークン交換開始:', {
-          apiUrl: `${API_BASE_URL}/api/auth/ctrader/callback`,
+          apiUrl: `${getPublicApiBaseUrl()}/api/auth/ctrader/callback`,
           codeLength: code.length,
         });
 
@@ -79,7 +76,7 @@ function CallbackHandler() {
         const callbackRedirectUri = localOAuth
           ? `${window.location.origin}/auth/ctrader/callback`
           : undefined;
-        const response = await fetch(`${API_BASE_URL}/api/auth/ctrader/callback`, {
+        const response = await fetch(`${getPublicApiBaseUrl()}/api/auth/ctrader/callback`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
