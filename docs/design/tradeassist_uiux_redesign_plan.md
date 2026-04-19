@@ -69,12 +69,41 @@
 | ワークスペース切替 | ヘッダーまたはドロワーで Side-A / Side-B を維持 | P3 のタブ型ワークスペース表示と整合させる |
 | トレードオフ | 初回ユーザーがアプリ全体の地図に触れる機会が減る | チャート画面上部の最小導線・オンボーディング1枚などで補う（P2 以降で検討可） |
 
+### 3-5. ログイン後遷移の優先順位（仕様・固定）
+
+**この順番は実装・リファクタ時も変えないこと。**（変える場合は本節とテストを同時更新）
+
+1. **明示パス**（いずれか一方）  
+   - OAuth の `state`（`AuthContext.login(redirectTo)` が付与）  
+   - `/login?next=`（未認証時に `ProtectedRoute` が付与した戻り先）  
+   ※ コールバックでは `state` のみ、`/login` 画面では `next` のみが使われる。同一カテゴリの「明示的遷移意図」であり、**どちらも `state` より `next` を優先するような二重定義はしない**（場面が違うだけ）。
+
+2. **安全性チェック済みの内部パス**  
+   下記「正規化・拒否」を通過した場合のみ 1. を採用。
+
+3. **デバイス別デフォルト** — `getPostLoginPath()`（デスクトップ→`/`、モバイル→`/market-analysis`）
+
+4. **最終フォールバック** — 3 と同じ（明示なし・不正時）。
+
+**禁止**: 3 だけを常に優先して 1 を無視すること。
+
+**正規化・拒否（`next` / `state` 共通）**
+
+- 段階的 `decodeURIComponent`（多重 `%2F%2F...` 等）のあと検証する。  
+- 拒否: `//evil.com`、`http(s)://...`、`javascript:` を含むもの、制御文字、オープンリダイレクトに該当するパターン。  
+- **内部パスでも拒否**: `/login`（およびその配下）、`/auth/ctrader/callback`（およびその配下）— ログインループ・認証ループ防止。  
+- 上記で拒否された場合は 3 へ落とす。
+
+実装の起点: `src/frontend/lib/postLoginRedirect.ts`（`resolvePostLoginRedirect`、`fullyDecodeRedirectInput`、`isRedirectLoopPath`）、`app/auth/ctrader/callback/page.tsx`、`app/login/page.tsx`、`components/auth/ProtectedRoute.tsx`。
+
 ## 4. 画面別再設計案
 
 ### 4-1. Header
 - Side-A / Side-B はタブ型で明示表示する。小さなトグルより、現在地と切替先が明快になる。
 - 切替時のデフォルト遷移先は各Sideのホームとする。前回ページ復帰は「続きから再開」に格下げする。
 - 通知・検索はグローバル機能として右側へ集約する。
+
+**実装（P3 完了時点）**: `components/layout/WorkspaceTabs.tsx`（タブ）+ `lib/workspaceSide.ts`（`getWorkspaceSideFromPathname`）。Side-A タブ →`/`、Side-B タブ →`/side-b/dashboard`。アクティブは pathname が `/side-b` 配下か否かで一意。旧スライダー `SideToggle` は廃止。
 
 ### 4-2. Sidebar
 - デスクトップでは常時表示、タブレット以下では折りたたみまたはオーバーレイにする。
@@ -87,6 +116,8 @@
 | 上段 | 今日の市場要約 / 要確認件数 / 未確認ノート数 | 初手の判断材料を1画面で提示 |
 | 中段 | ノートを書く / 市場を見る / 戦略を確認する | 主要導線を3択程度に圧縮 |
 | 下段 | 最近のノート / AIの新規仮説 / 前回の続き | 再訪時の復帰を速くする |
+
+**実装（P2 完了時点）**: `app/page.tsx` → `components/home/HomeWorkbench.tsx`。上段 KPI は下書きノート数・未読通知・AI 要確認（Side-B 検証待ち件数）・今日の注目（`daily-status` またはフォールバック文言）。中段は主要3導線。下段は「前回の続き」（`localStorage` + `AppShell` で **pathname のみ** 記録・**7 日 TTL**・失敗時は `Promise.allSettled` で他 KPI を維持）と最近のノート一覧。要約 API の強化は後続で可。
 
 ### 4-4. Side-B Dashboard
 | ブロック | 内容 | ねらい |
@@ -110,8 +141,8 @@
 | 優先 | 対象 | 実装内容 | 期待効果 |
 |---|---|---|---|
 | P1 | AppShell / Sidebar | デスクトップ常時表示、アクティブ親自動展開 | 現在地把握が大幅に改善 |
-| P2 | Home | ワークベンチ化、最近の更新と続きから導線を追加 | 初手の迷いを削減 |
-| P3 | Header / SideToggle | タブ化、Side別ホーム遷移、前回復帰を補助機能化 | 切替の文脈が明瞭になる |
+| P2 | Home | ワークベンチ化、最近の更新と続きから導線を追加（§4-3 実装済） | 初手の迷いを削減 |
+| P3 | Header / WorkspaceTabs | タブ化、Side別ホーム遷移（§4-1 実装済）、workspaceSide 共通化 | 切替の文脈が明瞭になる |
 | P4 | /side-b | 運転席化、重複ナビの整理 | 役割の衝突を解消 |
 | P5 | 文言・ラベル | 管理用名称からユーザー行動ベース名称へ変更 | 初見理解を補助 |
 | Pm（並行可） | Login / BottomNavigation | モバイルのみログイン後→`/market-analysis`、ボトム左端＝チャート（§3-4・§4-6） | MT系に近い即時チャート体験 |
@@ -124,9 +155,13 @@
 - **モバイル**: ログイン直後にチャート（`/market-analysis`）が表示され、ボトムナビ左端から常に戻れる。
 
 ## 7. 確認対象ファイル（実装着手の起点）
+- src/frontend/components/home/HomeWorkbench.tsx（P2 ホーム本体）
+- src/frontend/lib/lastSideAPath.ts（前回の続き）
+- src/frontend/lib/postLoginRedirect.ts（ログイン後遷移）
 - src/frontend/app/page.tsx
 - src/frontend/components/layout/Header.tsx
-- src/frontend/components/layout/SideToggle.tsx
+- src/frontend/components/layout/WorkspaceTabs.tsx（P3 ワークスペースタブ）
+- src/frontend/lib/workspaceSide.ts（Side 判定の単一ソース）
 - src/frontend/components/layout/Sidebar.tsx
 - src/frontend/components/layout/AppShell.tsx
 - src/frontend/app/side-b/page.tsx

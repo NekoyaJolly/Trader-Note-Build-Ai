@@ -1,7 +1,7 @@
 'use client';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { useEffect } from 'react';
 
 interface ProtectedRouteProps {
@@ -11,12 +11,16 @@ interface ProtectedRouteProps {
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   useEffect(() => {
     if (!loading && !user) {
-      router.push('/login');
+      const qs = searchParams.toString();
+      const next = `${pathname}${qs ? `?${qs}` : ''}`;
+      router.push(`/login?next=${encodeURIComponent(next)}`);
     }
-  }, [user, loading, router]);
+  }, [user, loading, router, pathname, searchParams]);
 
   if (loading) {
     return (
