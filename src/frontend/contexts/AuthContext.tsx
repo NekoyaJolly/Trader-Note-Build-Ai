@@ -11,6 +11,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { isBrowserLocalDevOrigin } from '@/lib/isLocalDevOrigin';
 
 // API ベースURL（環境変数から取得）
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
@@ -159,7 +160,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (redirectTo?: string) => {
     try {
       // バックエンドから認証URLを取得
-      const response = await fetch(`${API_BASE_URL}/api/auth/ctrader/url`, {
+      const local = isBrowserLocalDevOrigin();
+      const urlPath = local
+        ? `${API_BASE_URL}/api/auth/ctrader/url?redirect_base=${encodeURIComponent(window.location.origin)}`
+        : `${API_BASE_URL}/api/auth/ctrader/url`;
+      const response = await fetch(urlPath, {
         method: 'GET',
         credentials: 'include',
       });
@@ -181,7 +186,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (typeof window !== "undefined") {
           const hint =
             response.status === 404
-              ? "\n\n【よくある原因】フロントがバックエンドに届いていません。src/frontend/.env.local に NEXT_PUBLIC_API_BASE_URL=http://localhost:3100 を設定し、API（npm run dev:backend 等）を起動してください。\nまた cTrader アプリの Redirect URI にローカル用（例: http://localhost:3102/auth/ctrader/callback）を登録し、ルート .env の CTRADER_REDIRECT_URI と一致させてください。"
+              ? "\n\n【よくある原因】フロントがバックエンドに届いていません。src/frontend/.env.local に NEXT_PUBLIC_API_BASE_URL=http://localhost:3100 を設定し、API（npm run dev:backend 等）を起動してください。\nローカルでは redirect_uri はポートに合わせ自動決定されます。cTrader アプリの Redirect URIs に http://localhost:3102/auth/ctrader/callback（ポート違いならその origin）を1本登録してください。手順: docs/cTrader-localhost-cheatsheet.md"
               : "";
           window.alert(
             `認証URLの取得に失敗しました（HTTP ${response.status}）。${hint}\n\n${body.slice(0, 300)}`,

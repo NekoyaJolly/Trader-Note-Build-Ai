@@ -17,6 +17,10 @@ import { z } from 'zod';
 import { CTraderAuthService, ExchangeCodeRequestSchema } from '../services/ctrader/ctraderAuthService';
 import { sessionService } from '../services/auth/sessionService';
 import { getPrismaClient } from '../../infrastructure/prismaClient';
+import {
+  resolveRedirectUriForAuthUrl,
+  resolveRedirectUriForTokenExchange,
+} from '../utils/ctraderRedirectUri';
 
 const router = Router();
 
@@ -30,6 +34,8 @@ const authService = new CTraderAuthService(prisma);
 
 const GetAuthUrlQuerySchema = z.object({
   state: z.string().optional(),
+  /** ローカル時のみ有効。例: http://localhost:3102（パスなし） */
+  redirect_base: z.string().optional(),
 });
 
 const DisconnectRequestSchema = z.object({
@@ -57,8 +63,9 @@ router.get('/ctrader/url', async (req: Request, res: Response) => {
       });
     }
 
-    const { state } = queryResult.data;
-    const authUrl = authService.generateAuthUrl(state);
+    const { state, redirect_base: redirectBase } = queryResult.data;
+    const redirectUri = resolveRedirectUriForAuthUrl(redirectBase);
+    const authUrl = authService.generateAuthUrl(state, redirectUri);
 
     return res.json({
       authUrl,
@@ -107,10 +114,11 @@ router.post('/ctrader/callback', async (req: Request, res: Response) => {
       });
     }
 
-    const { code } = bodyResult.data;
+    const { code, redirect_uri: bodyRedirectUri } = bodyResult.data;
+    const exchangeRedirectUri = resolveRedirectUriForTokenExchange(bodyRedirectUri);
     console.log('[cTraderAuth] 認可コード受信:', code.substring(0, 10) + '...');
 
-    const authResult = await authService.exchangeCodeAndLogin(code);
+    const authResult = await authService.exchangeCodeAndLogin(code, exchangeRedirectUri);
 
     // JWT を Cookie に設定
     sessionService.setTokenCookie(res, authResult.jwt);

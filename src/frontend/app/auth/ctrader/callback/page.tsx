@@ -17,6 +17,7 @@ import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { getPostLoginPath } from '@/lib/postLoginRedirect';
+import { isBrowserLocalDevOrigin } from '@/lib/isLocalDevOrigin';
 
 // バックエンドの URL
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
@@ -74,13 +75,19 @@ function CallbackHandler() {
           codeLength: code.length,
         });
 
+        const localOAuth = isBrowserLocalDevOrigin();
+        const callbackRedirectUri = localOAuth
+          ? `${window.location.origin}/auth/ctrader/callback`
+          : undefined;
         const response = await fetch(`${API_BASE_URL}/api/auth/ctrader/callback`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           credentials: 'include', // Cookie を受け取る
-          body: JSON.stringify({ code }),
+          body: JSON.stringify(
+            callbackRedirectUri ? { code, redirect_uri: callbackRedirectUri } : { code },
+          ),
         });
 
         console.log('[Callback] APIレスポンス:', {
