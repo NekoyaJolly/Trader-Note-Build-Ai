@@ -38,7 +38,10 @@ export type SideBNavEntry = {
   labelTab: string;
   icon: LucideIcon;
   order: number;
-  /** 運転席（/side-b）ページ上部の横並びナビに載せるか（5本程度） */
+  /**
+   * 運転席ページ上部タブに載せるか。
+   * 将来 `placements: ("sidebar"|"agent-tab")[]` 等へ分割する余地あり（現状は boolean で十分）。
+   */
   showInAgentTabStrip: boolean;
 };
 

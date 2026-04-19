@@ -43,11 +43,22 @@ export default function WorkspaceTabs() {
     <nav
       className="flex items-center gap-1 rounded-lg border border-slate-600/40 bg-slate-900/50 p-0.5"
       aria-label="ワークスペース切替"
+      data-testid="workspace-tabs"
     >
-      <Link href={SIDE_A_HOME} className={tabClass("side-a")} aria-current={active === "side-a" ? "page" : undefined}>
+      <Link
+        data-testid="workspace-tab-side-a"
+        href={SIDE_A_HOME}
+        className={tabClass("side-a")}
+        aria-current={active === "side-a" ? "page" : undefined}
+      >
         Side-A
       </Link>
-      <Link href={SIDE_B_HOME} className={tabClass("side-b")} aria-current={active === "side-b" ? "page" : undefined}>
+      <Link
+        data-testid="workspace-tab-side-b"
+        href={SIDE_B_HOME}
+        className={tabClass("side-b")}
+        aria-current={active === "side-b" ? "page" : undefined}
+      >
         Side-B
       </Link>
     </nav>

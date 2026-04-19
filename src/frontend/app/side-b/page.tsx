@@ -268,7 +268,9 @@ export default function SideBDashboard() {
               return (
                 <Link
                   key={link.id}
+                  data-testid={`side-b-agent-tab-${link.id}`}
                   href={link.href}
+                  aria-current={active ? "page" : undefined}
                   className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs transition-colors ${
                     active
                       ? "text-white bg-slate-700/80 ring-1 ring-purple-500/40"
