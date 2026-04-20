@@ -70,6 +70,13 @@ import type { OHLCVData } from '../../services/indicators/indicatorService';
 import { pdcaLoop } from '../agent';
 import { PrismaClient } from '@prisma/client';
 import { ohlcvRepository } from '../../backend/repositories/ohlcvRepository';
+import path from 'path';
+import { CrossoverAgent } from '../agents/CrossoverAgent';
+import { MutationAgent } from '../agents/MutationAgent';
+import { DiversityEnforcer } from '../evolution/DiversityEnforcer';
+import { EvolutionLoop } from '../evolution/EvolutionLoop';
+import { StrategyPopulation } from '../evolution/StrategyPopulation';
+import { DSLBacktestAdapter } from '../strategy_dsl/DSLBacktestAdapter';
 
 // ===========================================
 // 型定義
@@ -117,6 +124,10 @@ export interface SideBSchedulerConfig {
   autoFullValidation: boolean;
   /** 1回のフル検証ジョブで処理する最大仮説数（Python 起動 + LLM コスト管理） */
   fullValidationMaxPerRun: number;
+  /** Phase 5: 日次で戦略 DSL 進化ループを回すか（LLM+BT コスト大） */
+  autoEvolution: boolean;
+  /** 進化ループ対象レジーム（StrategyDSL.regimeTarget と対応） */
+  evolutionRegimes: string[];
   /** cTrader アカウントID（cTraderデータソース有効化用） */
   ctraderAccountId?: string;
 }
@@ -149,6 +160,13 @@ const DEFAULT_CONFIG: SideBSchedulerConfig = {
   screeningMaxPerRun: 10,     // 1回の実行で最大10件
   autoFullValidation: true,   // Phase 4c: 日次フル検証自動実行
   fullValidationMaxPerRun: 5, // Python + LLM のコストを考慮して控えめに
+  autoEvolution: false, // Phase 5: 意図的に無効（有効化時は LLM×複数レジームでコスト注意）
+  evolutionRegimes: [
+    'trending_with_pullback',
+    'breakout',
+    'consolidation',
+    'reversal',
+  ],
 };
 
 /**
@@ -209,12 +227,14 @@ export class SideBScheduler {
   private discoveryIntervalId?: NodeJS.Timeout;
   private screeningIntervalId?: NodeJS.Timeout;
   private fullValidationIntervalId?: NodeJS.Timeout;
+  private evolutionIntervalId?: NodeJS.Timeout;
   private lastPlanRun: Map<string, Date> = new Map();
   private lastMonitorRun?: Date;
   private lastCleanupRun?: Date;
   private lastDiscoveryRun?: Date;
   private lastScreeningRun?: Date;
   private lastFullValidationRun?: Date;
+  private lastEvolutionRun?: Date;
   private errors: string[] = [];
   private readonly isProduction: boolean;
 
@@ -337,6 +357,11 @@ export class SideBScheduler {
       this.startFullValidationJob();
     }
 
+    // Phase 5: 日次進化ループ（戻り間にスリープあり）
+    if (this.config.autoEvolution) {
+      this.startEvolutionJob();
+    }
+
     // 週次/月次サマリースケジューラーを連動起動
     if (this.config.autoSummary) {
       this.log('週次/月次サマリースケジューラーを連動起動します');
@@ -381,6 +406,11 @@ export class SideBScheduler {
     if (this.fullValidationIntervalId) {
       clearInterval(this.fullValidationIntervalId);
       this.fullValidationIntervalId = undefined;
+    }
+
+    if (this.evolutionIntervalId) {
+      clearInterval(this.evolutionIntervalId);
+      this.evolutionIntervalId = undefined;
     }
 
     // サマリースケジューラーも連動停止
@@ -702,6 +732,81 @@ export class SideBScheduler {
     }
 
     return summary;
+  }
+
+  /**
+   * Phase 5: 日次進化ループジョブ（1時間ごとにチェックし 24h ごとに実行）
+   */
+  private startEvolutionJob(): void {
+    const checkIntervalMs = 60 * 60 * 1000;
+    const dailyMs = 24 * 60 * 60 * 1000;
+
+    this.evolutionIntervalId = setInterval(() => {
+      const now = Date.now();
+      if (!this.lastEvolutionRun || now - this.lastEvolutionRun.getTime() >= dailyMs) {
+        this.runEvolutionNow().catch((err) => {
+          this.addError(`進化ループジョブエラー: ${err}`);
+        });
+      }
+    }, checkIntervalMs);
+  }
+
+  /**
+   * Phase 5: 進化ループを手動実行（全レジーム順に 1 世代ずつ、間にスリープ）
+   */
+  async runEvolutionNow(): Promise<{ regimeReports: number; errors: string[] }> {
+    const regimes = this.config.evolutionRegimes?.length
+      ? this.config.evolutionRegimes
+      : DEFAULT_CONFIG.evolutionRegimes;
+    const persistPath = path.join(process.cwd(), 'data', 'evolution', 'strategy-population.json');
+    const population = new StrategyPopulation(persistPath);
+    await population.load();
+
+    const end = new Date();
+    const start = new Date(end.getTime() - 365 * 24 * 60 * 60 * 1000);
+    const defaultPeriod = {
+      start: start.toISOString().slice(0, 10),
+      end: end.toISOString().slice(0, 10),
+    };
+
+    const loop = new EvolutionLoop({
+      population,
+      adapter: new DSLBacktestAdapter(),
+      mutationAgent: new MutationAgent(),
+      crossoverAgent: new CrossoverAgent(),
+      enforcer: new DiversityEnforcer(),
+      edgeLedger,
+      defaultPeriod,
+    });
+
+    const errors: string[] = [];
+    let n = 0;
+    this.log(`[Evolution] 進化ループ開始: ${regimes.length} レジーム, 期間 ${defaultPeriod.start}〜${defaultPeriod.end}`);
+
+    for (let i = 0; i < regimes.length; i++) {
+      const regime = regimes[i]!;
+      try {
+        const report = await loop.runOneGeneration(regime);
+        n++;
+        this.log(
+          `[Evolution] regime=${regime} elites=${report.eliteIds.length} mut=${report.mutantsReceived} cross=${report.crossoversReceived} promoted=${report.promotedToLedger} divBoost=${report.lowDiversityBoost}`,
+        );
+        if (report.errors.length > 0) {
+          errors.push(...report.errors);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`${regime}: ${msg}`);
+        this.addError(`[Evolution] ${regime} 失敗: ${msg}`);
+      }
+      if (i < regimes.length - 1) {
+        await new Promise((r) => setTimeout(r, 30_000));
+      }
+    }
+
+    this.lastEvolutionRun = new Date();
+    this.log(`[Evolution] 進化ループ完了: レジーム処理=${n}件`);
+    return { regimeReports: n, errors };
   }
 
   /**

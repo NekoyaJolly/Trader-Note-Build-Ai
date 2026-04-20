@@ -16,6 +16,7 @@ data/trades/*.csv
 data/notes/*.json
 data/notifications.json
 data/ohlcv/*.csv
+data/evolution/*.json
 
 # Logs
 *.log
