@@ -15,6 +15,7 @@ import { HypothesisCard } from "@/components/side-b/HypothesisCard";
 import { LedgerStats } from "@/components/side-b/LedgerStats";
 import { DashboardCharts } from "@/components/side-b/DashboardCharts";
 import { sideBApi, SideBApiError } from "@/lib/sideBApi";
+import { parseEvolutionStatement } from "@/lib/evolutionStatement";
 import type {
   StatsOverviewResponse,
   StatsTimeSeriesResponse,
@@ -193,8 +194,10 @@ export default function SideBDashboardPage() {
                           href={`/side-b/hypotheses/${s.id}`}
                           className="text-cyan-400 hover:underline"
                         >
-                          {s.statement.slice(0, 48)}
-                          {s.statement.length > 48 ? "…" : ""}
+                          {(() => {
+                            const t = parseEvolutionStatement(s.statement).displayText;
+                            return t.length > 48 ? t.slice(0, 48) + "…" : t;
+                          })()}
                         </Link>
                         <span className="text-gray-600"> ({s.status})</span>
                       </li>

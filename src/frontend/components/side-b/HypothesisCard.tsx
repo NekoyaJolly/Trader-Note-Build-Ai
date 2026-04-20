@@ -30,6 +30,7 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { StatusBadge } from "@/components/side-b/StatusBadge";
 import { cn } from "@/lib/utils";
+import { parseEvolutionStatement } from "@/lib/evolutionStatement";
 import type {
     EdgeCategory,
     EdgeSource,
@@ -151,6 +152,7 @@ export function HypothesisCard({
 }: HypothesisCardProps) {
     const isCompact = variant === "compact";
     const statementLimit = isCompact ? 30 : 60;
+    const parsed = parseEvolutionStatement(hypothesis.statement);
 
     const observationWR = computeObservationWinRate(
         hypothesis.winCount,
@@ -197,6 +199,11 @@ export function HypothesisCard({
                             {SOURCE_LABEL[hypothesis.source]}
                         </span>
                     )}
+                    {parsed.isEvolutionPrefixed && (
+                        <Badge variant="default" className="text-[10px]">
+                            進化由来
+                        </Badge>
+                    )}
                 </div>
 
                 {/* 2行目: statement */}
@@ -206,7 +213,7 @@ export function HypothesisCard({
                         isCompact ? "text-sm" : "text-sm sm:text-base",
                     )}
                 >
-                    {truncate(hypothesis.statement, statementLimit)}
+                    {truncate(parsed.displayText, statementLimit)}
                 </p>
 
                 {/* 3行目: 対象 */}
