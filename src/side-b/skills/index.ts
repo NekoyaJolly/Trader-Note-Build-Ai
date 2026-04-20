@@ -1,0 +1,98 @@
+/**
+ * Side-B スキル集約エクスポート (Phase 5.5)
+ *
+ * エージェントが自律的に呼び出せるスキル群と、その登録レジストリ。
+ *
+ * 使用例:
+ *   import { buildDefaultSkillRegistry } from 'src/side-b/skills';
+ *   const registry = buildDefaultSkillRegistry();
+ *   const tools = registry.toMcpToolDefinitions();  // AgentLoop に渡せる
+ *   const result = await registry.invoke('query_edge_ledger', { statuses: ['unverified'] });
+ *
+ * AgentLoop 統合時は `McpClientManager` の代わりに `SkillRegistry.callAsMcpTool`
+ * を呼ぶ shim を差し込むだけで移行可能(本 MVP では差し込みは行わない)。
+ */
+
+export type {
+  Skill,
+  SkillContext,
+  SkillInvocationContext,
+  SkillResult,
+  SkillError,
+  SkillInputSchema,
+} from './types';
+
+export { SkillRegistry } from './registry';
+
+export {
+  createQueryEdgeLedgerSkill,
+  type QueryEdgeLedgerInput,
+  type QueryEdgeLedgerOutput,
+} from './ledger/queryEdgeLedger';
+export {
+  createGetHypothesisSkill,
+  type GetHypothesisInput,
+  type GetHypothesisOutput,
+} from './ledger/getHypothesis';
+export {
+  createRegisterHypothesisSkill,
+  type RegisterHypothesisInput,
+  type RegisterHypothesisOutput,
+} from './ledger/registerHypothesis';
+export {
+  createRunScreeningSkill,
+  type RunScreeningInput,
+  type RunScreeningOutput,
+} from './validation/runScreening';
+export {
+  createRunFullValidationSkill,
+  type RunFullValidationInput,
+  type RunFullValidationOutput,
+} from './validation/runFullValidation';
+export {
+  createReadRecentNotesSkill,
+  type ReadRecentNotesInput,
+  type ReadRecentNotesOutput,
+} from './notes/readRecentNotes';
+export {
+  createRecordLessonSkill,
+  type RecordLessonInput,
+  type RecordLessonOutput,
+} from './notes/recordLesson';
+export {
+  createComputeLensFeaturesSkill,
+  type ComputeLensFeaturesInput,
+  type ComputeLensFeaturesOutput,
+} from './lens/computeLensFeatures';
+
+import { SkillRegistry } from './registry';
+import { createQueryEdgeLedgerSkill } from './ledger/queryEdgeLedger';
+import { createGetHypothesisSkill } from './ledger/getHypothesis';
+import { createRegisterHypothesisSkill } from './ledger/registerHypothesis';
+import { createRunScreeningSkill } from './validation/runScreening';
+import { createRunFullValidationSkill } from './validation/runFullValidation';
+import { createReadRecentNotesSkill } from './notes/readRecentNotes';
+import { createRecordLessonSkill } from './notes/recordLesson';
+import { createComputeLensFeaturesSkill } from './lens/computeLensFeatures';
+
+/**
+ * MVP の全 8 スキルを登録済み Registry を返す。
+ *
+ * 依存オブジェクトは内部でデフォルト値(シングルトン)を使う。
+ * テストや特殊用途で依存を差し替えたい場合は、個別 factory を直接使って
+ * `new SkillRegistry()` に register() してください。
+ */
+export function buildDefaultSkillRegistry(): SkillRegistry {
+  const registry = new SkillRegistry();
+  registry.registerAll([
+    createQueryEdgeLedgerSkill(),
+    createGetHypothesisSkill(),
+    createRegisterHypothesisSkill(),
+    createRunScreeningSkill(),
+    createRunFullValidationSkill(),
+    createReadRecentNotesSkill(),
+    createRecordLessonSkill(),
+    createComputeLensFeaturesSkill(),
+  ]);
+  return registry;
+}

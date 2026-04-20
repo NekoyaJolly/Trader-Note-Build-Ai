@@ -84,6 +84,27 @@ export type AgentState =
 // 学習メモ型定義
 // ===========================================
 
+/**
+ * 学びの発生源(Phase 5.5 で追加)。
+ * Reflection AI / Strategist Agent からの呼び出しを主に想定。
+ * 将来の日次サマリーシステムで集計軸として利用する。
+ */
+export const LESSON_SOURCES = ['reflection', 'strategist', 'discovery', 'other'] as const;
+export type LessonSource = (typeof LESSON_SOURCES)[number];
+
+/**
+ * 学びに付随するメタデータ(Phase 5.5 で追加)。全フィールドオプショナル。
+ * 記録経路の追跡と、日次サマリーシステムでの集計・クロス参照用。
+ */
+export interface LessonMetadata {
+    /** 発生源(reflection / strategist / discovery / other) */
+    source?: LessonSource;
+    /** 関連する AITradeNote の ID 群 */
+    linkedNoteIds?: string[];
+    /** 関連する EdgeHypothesis の ID 群 */
+    linkedHypothesisIds?: string[];
+}
+
 /** 個別の学び */
 export interface LessonEntry {
     /** 学びのテキスト */
@@ -94,6 +115,8 @@ export interface LessonEntry {
     tradeId?: string;
     /** 追加日時 */
     addedAt: Date;
+    /** 付随メタデータ(Phase 5.5 以降)。後方互換のためオプショナル。 */
+    metadata?: LessonMetadata;
 }
 
 /** 確信ルール（繰り返し出現した学び） */
@@ -294,12 +317,18 @@ export class AgentMemory {
 
     /**
      * 学びを追加（シンボル別 + AI類似判定 + 確信ルール昇格）
-     * 
+     *
      * @param lesson - 学びのテキスト
      * @param symbol - 対象シンボル
      * @param tradeId - 元トレードID（任意）
+     * @param metadata - 付随メタデータ(Phase 5.5 以降、任意)
      */
-    async addLesson(lesson: string, symbol: string, tradeId?: string): Promise<void> {
+    async addLesson(
+        lesson: string,
+        symbol: string,
+        tradeId?: string,
+        metadata?: LessonMetadata,
+    ): Promise<void> {
         const sl = this.getOrCreateSymbolLessons(symbol);
         const now = new Date();
 
@@ -361,6 +390,7 @@ export class AgentMemory {
             symbol,
             tradeId,
             addedAt: now,
+            metadata,
         });
 
         // 3. FIFO: max 30 件を超えたら古いものから削除
