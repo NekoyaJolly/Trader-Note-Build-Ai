@@ -11,6 +11,29 @@ import { isSafeInternalRedirectPath } from "@/lib/postLoginRedirect";
 
 const STORAGE_KEY = "tradeassist:side_a_last_path";
 
+/** アプリに実在しうる Side-A ルートの先頭セグメント（死にリンク表示を減らす） */
+const SIDE_A_CONTINUE_PREFIXES = [
+  "/notes",
+  "/market-analysis",
+  "/strategies",
+  "/import",
+  "/settings",
+  "/backtest",
+  "/notifications",
+  "/data-presets",
+  "/orders",
+  "/onboarding",
+] as const;
+
+/**
+ * 「前回の続き」として表示してよい Side-A パスか（プレフィックス一致）
+ */
+export function isKnownSideAContinueRoute(pathname: string): boolean {
+  return SIDE_A_CONTINUE_PREFIXES.some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`),
+  );
+}
+
 /** 「前回の続き」として使う最大経過日数 */
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -55,6 +78,10 @@ export function readLastSideAPath(): LastSideAPath | null {
     }
     if (!isSafeInternalRedirectPath(parsed.path)) return null;
     if (parsed.path === "/") return null;
+    if (!isKnownSideAContinueRoute(parsed.path)) {
+      localStorage.removeItem(STORAGE_KEY);
+      return null;
+    }
     return { path: parsed.path, savedAt };
   } catch {
     return null;

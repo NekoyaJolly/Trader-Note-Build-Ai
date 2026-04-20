@@ -27,6 +27,7 @@ import type {
     ValidationHistoryEntry,
 } from "@/types/sideB";
 import { cn } from "@/lib/utils";
+import { parseEvolutionStatement } from "@/lib/evolutionStatement";
 
 // ===========================================
 // ラベル
@@ -206,6 +207,11 @@ export function HypothesisDetail({ hypothesisId }: HypothesisDetailProps) {
                             <span className="text-xs text-gray-500">
                                 {SOURCE_LABEL[hypothesis.source]}
                             </span>
+                            {parseEvolutionStatement(hypothesis.statement).isEvolutionPrefixed && (
+                                <Badge variant="default" className="text-[10px]">
+                                    進化由来
+                                </Badge>
+                            )}
                         </div>
                         <div className="text-right text-[11px] text-gray-500">
                             <p>作成: {formatDateTime(hypothesis.createdAt)}</p>
@@ -219,7 +225,7 @@ export function HypothesisDetail({ hypothesisId }: HypothesisDetailProps) {
                         className="text-base text-gray-100 mb-3"
                         data-testid="detail-statement"
                     >
-                        {hypothesis.statement}
+                        {parseEvolutionStatement(hypothesis.statement).displayText}
                     </p>
 
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400 mb-3">

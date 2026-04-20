@@ -200,7 +200,10 @@ export default function HomeWorkbench() {
 
         {/* 前回の続き */}
         {lastPath && (
-          <section className="mb-8 rounded-2xl border border-violet-500/20 bg-violet-950/20 px-4 py-4">
+          <section
+            className="mb-8 rounded-2xl border border-violet-500/20 bg-violet-950/20 px-4 py-4"
+            data-testid="home-last-continue"
+          >
             <h2 className="text-sm font-semibold text-violet-200 mb-2">前回の続き</h2>
             <p className="text-xs text-gray-500 mb-2 truncate" title={lastPath.path}>
               {lastPath.path}
