@@ -769,13 +769,13 @@ export class SideBScheduler {
       end: end.toISOString().slice(0, 10),
     };
 
+    // Phase 5A: EdgeLedger への自動登録は撤廃（候補抽出のみ）
     const loop = new EvolutionLoop({
       population,
       adapter: new DSLBacktestAdapter(),
       mutationAgent: new MutationAgent(),
       crossoverAgent: new CrossoverAgent(),
       enforcer: new DiversityEnforcer(),
-      edgeLedger,
       defaultPeriod,
     });
 
@@ -789,7 +789,7 @@ export class SideBScheduler {
         const report = await loop.runOneGeneration(regime);
         n++;
         this.log(
-          `[Evolution] regime=${regime} elites=${report.eliteIds.length} mut=${report.mutantsReceived} cross=${report.crossoversReceived} promoted=${report.promotedToLedger} divBoost=${report.lowDiversityBoost}`,
+          `[Evolution] regime=${regime} elites=${report.eliteIds.length} mut=${report.mutantsReceived} cross=${report.crossoversReceived} candidates=${report.promotionCandidates.length} divBoost=${report.lowDiversityBoost}`,
         );
         if (report.errors.length > 0) {
           errors.push(...report.errors);

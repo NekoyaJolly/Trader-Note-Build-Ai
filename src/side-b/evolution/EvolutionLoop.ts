@@ -1,19 +1,31 @@
 /**
- * 1 世代分の進化ループ（Phase 5）
+ * 1 世代分の進化ループ（Phase 5A: 候補生成のみ）
+ *
+ * -------------------------------------------------------------------
+ * Phase 5A での方針（重要）
+ *
+ * - TS シミュレーション（`DSLBacktestAdapter` + `dslBacktestSimulation`）
+ *   は **高速スクリーニング** にとどめる。
+ * - **EdgeLedger への自動登録・自動 `confirmed` 昇格は行わない**（完全撤退）。
+ *   confirmed の意味論は「Phase 4c の Python WF/MC/BH を通過したもの」に
+ *   戻す。
+ * - 本ループは代わりに `GenerationReport.promotionCandidates` に
+ *   「Phase 4c に流すべき候補」を出力するだけにする。
+ * - 候補メタには `dslId` と `source: 'evolution'` を **必ず含める**。
+ *   Phase 5B で「昇格候補 → Phase 4c（StrategistAgent/Python）接続」を
+ *   設計する際に、この識別子を手掛かりに使う。
+ * -------------------------------------------------------------------
  *
  * @see docs/design/phase_5_specification.md §4.8
  */
 
 import { randomUUID } from 'crypto';
 
-import type { BacktestSummary, WalkForwardSummary } from '../models/edgeHypothesis';
-import type { EdgeLedger } from '../ledger/EdgeLedger';
 import { CrossoverAgent } from '../agents/CrossoverAgent';
 import { MutationAgent } from '../agents/MutationAgent';
 import type { DSLBacktestAdapter, BacktestPeriod, DslBacktestAggregate } from '../strategy_dsl/DSLBacktestAdapter';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
 import { DiversityEnforcer } from './DiversityEnforcer';
-import { dslToMachineConditions } from './dslEdgeMapper';
 import { scoreFromValidationSummary } from './evolutionScore';
 import {
   MAX_OVERFIT_SCORE,
@@ -28,9 +40,30 @@ export interface EvolutionLoopDeps {
   mutationAgent: MutationAgent;
   crossoverAgent: CrossoverAgent;
   enforcer: DiversityEnforcer;
-  edgeLedger: EdgeLedger;
   /** 既定のバックテスト期間（ISO 日付） */
   defaultPeriod: BacktestPeriod;
+}
+
+/**
+ * 「Phase 4c の精密検証に回すべき」と進化ループが判定した候補のメタ。
+ *
+ * Phase 5A では EdgeLedger に書き込まない（= confirmed にしない）。
+ * Phase 5B で Phase 4c への橋渡しを設計するため、
+ * `dslId` / `source='evolution'` はこの構造に保持しておく。
+ */
+export interface EvolutionPromotionCandidate {
+  /** 戦略 DSL の一意 ID（Phase 5B 接続用の識別子） */
+  dslId: string;
+  /** 由来の識別子（常に 'evolution'。Phase 5B で source として使用） */
+  source: 'evolution';
+  regime: string;
+  symbol: string;
+  timeframe: string;
+  trainPf: number;
+  validationPf: number;
+  overfitScore: number;
+  validationTradeCount: number;
+  description?: string;
 }
 
 export interface GenerationReport {
@@ -41,7 +74,11 @@ export interface GenerationReport {
   mutantsReceived: number;
   crossoversReceived: number;
   addedToPopulation: number;
-  promotedToLedger: number;
+  /**
+   * Phase 4c 接続候補のメタ。
+   * Phase 5A では EdgeLedger に登録しない（本フィールドに残すだけ）。
+   */
+  promotionCandidates: EvolutionPromotionCandidate[];
   lowDiversityBoost: boolean;
   errors: string[];
 }
@@ -68,7 +105,7 @@ function seedStrategy(regime: string): StrategyDSL {
     metadata: {
       createdAt: new Date().toISOString(),
       createdBy: 'initial_random' as const,
-      description: '最小シード戦略（Phase5）',
+      description: '最小シード戦略（Phase5A）',
     },
   };
   return StrategyDSLSchema.parse(raw);
@@ -78,11 +115,13 @@ export class EvolutionLoop {
   constructor(private readonly deps: EvolutionLoopDeps) {}
 
   /**
-   * 1 世代分: 評価 → 選抜 → 淘汰 → 変異・交配 → 多様性 → 昇格候補の台帳登録
+   * 1 世代分: 評価 → 選抜 → 淘汰 → 変異・交配 → 多様性 → 候補抽出
+   *
+   * Phase 5A では「候補抽出」までで止め、EdgeLedger には一切書き込まない。
    */
   async runOneGeneration(regime: string): Promise<GenerationReport> {
     const errors: string[] = [];
-    const { population, adapter, mutationAgent, crossoverAgent, enforcer, edgeLedger } = this.deps;
+    const { population, adapter, mutationAgent, crossoverAgent, enforcer } = this.deps;
     const period = this.deps.defaultPeriod;
 
     let list = population.getByRegime(regime);
@@ -93,8 +132,10 @@ export class EvolutionLoop {
 
     const metrics = new Map<string, DslBacktestAggregate>();
     const scores = new Map<string, number>();
+    const dslById = new Map<string, StrategyDSL>();
 
     for (const strategy of list) {
+      dslById.set(strategy.id, strategy);
       try {
         const agg = await adapter.runBacktest(strategy, {}, period);
         metrics.set(strategy.id, agg);
@@ -141,12 +182,8 @@ export class EvolutionLoop {
       }
     }
 
-    let promoted = 0;
-    try {
-      promoted = await this.promoteEligibleStrategies(elites, metrics, edgeLedger);
-    } catch (e) {
-      errors.push(`promote: ${e instanceof Error ? e.message : String(e)}`);
-    }
+    // Phase 5A: 台帳書き込みはしない。候補メタだけ GenerationReport に載せる。
+    const promotionCandidates = this.extractPromotionCandidates(elites, metrics, dslById);
 
     await population.save().catch(() => undefined);
 
@@ -157,7 +194,7 @@ export class EvolutionLoop {
       mutantsReceived: mutants.length,
       crossoversReceived: crosses.length,
       addedToPopulation: merged.length,
-      promotedToLedger: promoted,
+      promotionCandidates,
       lowDiversityBoost,
       errors,
     };
@@ -165,14 +202,19 @@ export class EvolutionLoop {
   }
 
   /**
-   * 厳格 3 条件を満たすエリートを EdgeLedger に confirmed で登録
+   * 厳格 3 条件（学習 PF / 検証 PF / 過学習）を満たすエリートを
+   * 「Phase 4c に流すべき候補」として抽出する。
+   *
+   * Phase 5A: EdgeLedger への create / markConfirmed は呼ばない。
+   * Phase 5B: ここで抽出したメタを StrategistAgent / Python 検証に渡す
+   *          配線を別途設計する。
    */
-  private async promoteEligibleStrategies(
+  private extractPromotionCandidates(
     elites: StrategyDSL[],
     metrics: Map<string, DslBacktestAggregate>,
-    ledger: EdgeLedger,
-  ): Promise<number> {
-    let n = 0;
+    dslById: Map<string, StrategyDSL>,
+  ): EvolutionPromotionCandidate[] {
+    const out: EvolutionPromotionCandidate[] = [];
     for (const dsl of elites) {
       const agg = metrics.get(dsl.id);
       if (!agg) continue;
@@ -180,48 +222,20 @@ export class EvolutionLoop {
       if (agg.validationPf <= MIN_VALIDATION_PROFIT_FACTOR) continue;
       if (agg.overfitScore >= MAX_OVERFIT_SCORE) continue;
 
-      const wf: WalkForwardSummary = {
+      const fromPop = dslById.get(dsl.id) ?? dsl;
+      out.push({
+        dslId: fromPop.id,
+        source: 'evolution',
+        regime: fromPop.regimeTarget,
+        symbol: fromPop.symbol,
+        timeframe: fromPop.timeframe,
+        trainPf: agg.trainPf,
+        validationPf: agg.validationPf,
         overfitScore: agg.overfitScore,
-        avgInSampleWinRate: agg.train.summary.winRate,
-        avgOutOfSampleWinRate: agg.validation.summary.winRate,
-        runAt: new Date(),
-        avgInSamplePF: agg.trainPf,
-        avgOutOfSamplePF: agg.validationPf,
-        totalTradeCount: agg.validation.summary.totalTrades,
-      };
-
-      const bt: BacktestSummary = {
-        pf: agg.validationPf,
-        winRate: agg.validation.summary.winRate,
-        tradeCount: agg.validation.summary.totalTrades,
-        runAt: new Date(),
-      };
-
-      const created = await ledger.create({
-        statement: `[DSL:${dsl.id}] ${dsl.metadata.description ?? '進化戦略（Phase5）'}`,
-        category: 'structure',
-        conditions: dslToMachineConditions(dsl),
-        expectedDirection: dsl.entry.direction,
-        status: 'unverified',
-        symbols: [dsl.symbol.replace(/\//g, '')],
-        timeframes: [dsl.timeframe],
-        observationCount: 0,
-        winCount: 0,
-        lossCount: 0,
-        breakevenCount: 0,
-        totalPnlPips: 0,
-        avgRR: agg.validation.summary.riskRewardRatio ?? 0,
-        source: 'backtest',
+        validationTradeCount: agg.validation.summary.totalTrades,
+        description: fromPop.metadata.description,
       });
-
-      await ledger.markConfirmed(
-        created.id,
-        bt,
-        wf,
-        `Phase5 進化ループ昇格（dsl=${dsl.id}, regime=${dsl.regimeTarget}）`,
-      );
-      n++;
     }
-    return n;
+    return out;
   }
 }
