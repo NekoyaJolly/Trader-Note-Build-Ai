@@ -12,7 +12,7 @@
  * @see docs/design/phase_4_specification.md セクション4.6
  */
 
-import { config } from '../../config';
+import { config, modelFor } from '../../config';
 import { loadPrompt } from '../prompts/loader';
 import type { AITradeNote } from '../models/aiTradeNote';
 import type {
@@ -214,7 +214,7 @@ export class DiscoveryAgent {
         this.model =
             cfg?.model !== undefined
                 ? cfg.model
-                : process.env.AI_MODEL || config.ai.model;
+                : modelFor('discovery');
         this.maxNotes = cfg?.maxNotes ?? 1000;
         this.minSeparationScore = cfg?.minSeparationScore ?? 0.3;
         this.topFeatureCount = cfg?.topFeatureCount ?? 10;

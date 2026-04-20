@@ -12,7 +12,7 @@
  * @see docs/design/phase_4_specification.md セクション4.4
  */
 
-import { config } from '../../config';
+import { config, modelFor } from '../../config';
 import { loadPrompt } from '../prompts/loader';
 import type { LensFeatureSnapshot } from '../lenses';
 import type {
@@ -214,7 +214,7 @@ export class HypothesisGeneratorAgent {
         this.model =
             cfg?.model !== undefined
                 ? cfg.model
-                : process.env.AI_MODEL || config.ai.model;
+                : modelFor('hypothesis_generator');
     }
 
     /**

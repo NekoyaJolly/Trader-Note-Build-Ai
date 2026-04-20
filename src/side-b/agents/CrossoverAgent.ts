@@ -9,6 +9,7 @@ import { randomUUID } from 'crypto';
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { loadPrompt } from '../prompts/loader';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
+import { modelFor } from '../../config';
 
 async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<T | null> {
   let last: unknown;
@@ -24,7 +25,7 @@ async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<T | null
 }
 
 export class CrossoverAgent {
-  constructor(private readonly ai = new AIProvider()) {}
+  constructor(private readonly ai = new AIProvider({ model: modelFor('crossover') })) {}
 
   /**
    * エリート集合からペアを組み、子個体を生成

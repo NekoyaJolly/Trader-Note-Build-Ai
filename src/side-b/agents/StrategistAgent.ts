@@ -26,6 +26,7 @@ import {
 import { BacktesterAgent } from './BacktesterAgent';
 import { AIProvider } from '../agent/aiProvider';
 import { loadPrompt } from '../prompts/loader';
+import { modelFor } from '../../config';
 
 // ===========================================
 // 型
@@ -67,7 +68,7 @@ export class StrategistAgent {
         private readonly edgeLedger: EdgeLedger = defaultEdgeLedger,
         private readonly backtester: BacktesterAgent = new BacktesterAgent(),
         private readonly statusManager: StatusManager = defaultStatusManager,
-        private readonly ai: AIProvider = new AIProvider(),
+        private readonly ai: AIProvider = new AIProvider({ model: modelFor('strategist') }),
     ) {}
 
     /**

@@ -75,6 +75,24 @@ console.log('[Config] ✅ 設定ロード成功');
 console.log('[Config] NODE_ENV:', process.env.NODE_ENV === 'production' ? '本番' : '開発');
 console.log('[Config] サーバーポート:', process.env.BACKEND_PORT || process.env.PORT || '3100');
 
+/**
+ * LLM を呼び出すエージェント／サービスのキー。
+ * コスト最適化のためエージェントごとに異なるモデルを指定できるよう、
+ * `config.ai.models[key]` から個別モデル名を取得できる。
+ * 未設定の場合はグローバル既定の `config.ai.model` にフォールバックする。
+ */
+export type AIAgentKey =
+  | 'strategist'
+  | 'devils_advocate'
+  | 'discovery'
+  | 'hypothesis_generator'
+  | 'plan'
+  | 'research'
+  | 'reflection'
+  | 'lesson_similarity'
+  | 'mutation'
+  | 'crossover';
+
 export const config = {
   server: {
     // 優先度: BACKEND_PORT > PORT > 3100（env設定がある場合はそちらを優先）
@@ -94,6 +112,21 @@ export const config = {
     //      Gemini / OpenAI どちらにも切り替えられる設計になっているため。
     model: process.env.AI_MODEL || 'gemini-3-flash-preview',
     baseURL: process.env.AI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai',
+    // エージェント別モデルオーバーライド。
+    // 未設定（空文字列）ならグローバルの `ai.model` にフォールバックする。
+    // 参照は `modelFor('<key>')` ヘルパー経由を推奨。
+    models: {
+      strategist: process.env.AI_MODEL_STRATEGIST || '',
+      devils_advocate: process.env.AI_MODEL_DEVILS_ADVOCATE || '',
+      discovery: process.env.AI_MODEL_DISCOVERY || '',
+      hypothesis_generator: process.env.AI_MODEL_HYPOTHESIS_GENERATOR || '',
+      plan: process.env.AI_MODEL_PLAN || '',
+      research: process.env.AI_MODEL_RESEARCH || '',
+      reflection: process.env.AI_MODEL_REFLECTION || '',
+      lesson_similarity: process.env.AI_MODEL_LESSON_SIMILARITY || '',
+      mutation: process.env.AI_MODEL_MUTATION || '',
+      crossover: process.env.AI_MODEL_CROSSOVER || '',
+    } as Record<AIAgentKey, string>,
   },
   market: {
     // Twelve Data API のデフォルトURL を設定
@@ -132,3 +165,17 @@ export const config = {
     notes: './data/notes',
   },
 };
+
+/**
+ * エージェント／サービスに対応するモデル名を返すヘルパー。
+ *
+ * 優先順位:
+ *   1. エージェント別環境変数 `AI_MODEL_<KEY>`（例: `AI_MODEL_STRATEGIST`）
+ *   2. グローバル `AI_MODEL` / `config.ai.model`
+ *
+ * エージェント別の指定を省略すると従来どおりグローバル既定が使われるため
+ * 既存挙動を壊さない。
+ */
+export function modelFor(key: AIAgentKey): string {
+  return config.ai.models[key] || config.ai.model;
+}

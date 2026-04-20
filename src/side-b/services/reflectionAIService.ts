@@ -17,7 +17,7 @@
  * 使用モデル: 環境変数 AI_MODEL / AI_BASE_URL から取得（OpenAI互換 API）
  */
 
-import { config } from '../../config';
+import { config, modelFor } from '../../config';
 import type { TradeResultSummary, TodayStrategyContext } from '../agent/agentMemory';
 import {
     ReflectionOutputSchema,
@@ -78,7 +78,7 @@ export class ReflectionAIService {
 
     constructor() {
         this.apiKey = process.env.AI_API_KEY || '';
-        this.model = process.env.AI_MODEL || config.ai.model;
+        this.model = modelFor('reflection');
         this.baseURL = process.env.AI_BASE_URL || config.ai.baseURL || 'https://api.openai.com/v1';
     }
 

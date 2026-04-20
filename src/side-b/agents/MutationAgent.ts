@@ -9,6 +9,7 @@ import { randomUUID } from 'crypto';
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { loadPrompt } from '../prompts/loader';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
+import { modelFor } from '../../config';
 
 async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<T | null> {
   let last: unknown;
@@ -39,7 +40,7 @@ function parseStrategyArray(content: string): StrategyDSL[] {
 }
 
 export class MutationAgent {
-  constructor(private readonly ai = new AIProvider()) {}
+  constructor(private readonly ai = new AIProvider({ model: modelFor('mutation') })) {}
 
   /**
    * エリート群とスコア説明を渡し、変異個体を生成

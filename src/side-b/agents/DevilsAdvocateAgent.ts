@@ -15,7 +15,7 @@
  *   if (critique.recommendation.action === 'abandon') { ... }
  */
 
-import { config } from '../../config';
+import { config, modelFor } from '../../config';
 import { loadPrompt } from '../prompts/loader';
 import type { AITradeScenario, PlanMarketAnalysis } from '../models';
 
@@ -144,7 +144,7 @@ export class DevilsAdvocateAgent {
             : (process.env.AI_BASE_URL || config.ai.baseURL || 'https://api.openai.com/v1');
         this.model = cfg?.model !== undefined
             ? cfg.model
-            : (process.env.AI_MODEL || config.ai.model);
+            : modelFor('devils_advocate');
     }
 
     /**

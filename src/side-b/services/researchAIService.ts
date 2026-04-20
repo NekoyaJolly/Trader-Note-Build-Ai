@@ -12,7 +12,7 @@
  * 使用モデル: Gemini 2.0 Flash（環境変数から取得）
  */
 
-import { config } from '../../config';
+import { config, modelFor } from '../../config';
 import {
   type MarketAnalysis,
   validateMarketAnalysis,
@@ -88,7 +88,7 @@ export class ResearchAIService {
 
   constructor() {
     this.apiKey = process.env.AI_API_KEY || '';
-    this.model = process.env.AI_MODEL || config.ai.model;
+    this.model = modelFor('research');
     this.baseURL = process.env.AI_BASE_URL || config.ai.baseURL || 'https://api.openai.com/v1';
   }
 
