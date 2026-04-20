@@ -231,14 +231,12 @@ describe('BacktesterAgent.runFullValidation', () => {
             buyAndHold: makeDelayedTool('buy_and_hold', 20),
         };
         const agent = new BacktesterAgent(tools);
-        const t0 = Date.now();
         await agent.runFullValidation(makeHypothesis(goodScreening), 'note-1', period);
-        const total = Date.now() - t0;
 
-        // 並列なら合計時間は最長（30ms）+ オーバーヘッド未満で完了するはず
-        // 直列なら 10+20+30=60ms になる。マージンを取って 55ms 未満を期待
-        expect(total).toBeLessThan(55);
-        // 早い順に完了
+        // 並列実行なら完了が早い順(10ms → 20ms → 30ms)になる。
+        // 直列だと開始順(walk_forward → monte_carlo → buy_and_hold)に並ぶので、
+        // 完了順が遅延昇順と一致することが並列性の決定的な証明になる。
+        // (壁時計の比較は CI 環境依存で flaky になりがちなので使わない)
         expect(executionOrder).toEqual(['monte_carlo', 'buy_and_hold', 'walk_forward']);
     });
 });
