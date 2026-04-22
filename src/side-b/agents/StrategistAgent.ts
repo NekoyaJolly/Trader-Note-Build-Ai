@@ -171,10 +171,13 @@ export class StrategistAgent {
         const systemPrompt = loadPrompt('strategist');
         const userPrompt = this.buildUserPrompt(hyp, report, check);
 
-        const response = await this.ai.chat([
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt },
-        ]);
+        const response = await this.ai.chat(
+            [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt },
+            ],
+            { maxTokens: 4096 },
+        );
 
         return this.parseLLMOutput(response.content);
     }

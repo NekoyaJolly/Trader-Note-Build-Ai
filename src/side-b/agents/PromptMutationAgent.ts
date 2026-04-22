@@ -16,6 +16,7 @@ import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { loadPrompt } from '../prompts/loader';
 import { modelFor } from '../../config';
 import type { PromptVersion } from '../prompts/registry/types';
+import { extractJson } from './llmJsonExtract';
 
 export interface PromptMutationProposal {
   /** 提案バージョン識別子(呼び出し側で suffix 付与してもよい) */
@@ -59,10 +60,19 @@ async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<T | null
   return null;
 }
 
+/**
+ * LLM 応答から改善案配列を抽出する。
+ *
+ * Phase 6 hotfix: `extractJson` 経由で 3 段階 fallback (raw → fence → bracket) を
+ * 使うため、応答本文中に ``` を含むプレーン JSON でも誤マッチせずに parse できる。
+ * parse 不能なら空配列を返す(呼び出し側はフォールバック可)。
+ */
 function parseProposalArray(content: string): PromptMutationProposal[] {
-  const fence = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const body = (fence ? fence[1] : content).trim();
-  const data = JSON.parse(body) as unknown;
+  const extracted = extractJson(content);
+  if (!extracted.ok) {
+    throw new Error(`LLM 応答を JSON として解釈できませんでした: ${extracted.error}`);
+  }
+  const data = extracted.data;
   if (!Array.isArray(data)) {
     throw new Error('応答は JSON 配列である必要があります');
   }
@@ -105,8 +115,7 @@ export class PromptMutationAgent {
           { role: 'system', content: system },
           { role: 'user', content: user },
         ] as ChatMessage[],
-        undefined,
-        0.6,
+        { temperature: 0.6, maxTokens: 4096 },
       ),
     );
     if (!res?.content) return [];

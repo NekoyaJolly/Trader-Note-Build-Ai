@@ -432,7 +432,7 @@ export class DiscoveryAgent {
                 ],
                 response_format: { type: 'json_object' },
                 temperature: 0.5,
-                max_tokens: 3500,
+                max_tokens: 4096,
             }),
         });
 

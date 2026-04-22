@@ -10,6 +10,7 @@ import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { loadPrompt } from '../prompts/loader';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
 import { modelFor } from '../../config';
+import { extractJson } from './llmJsonExtract';
 
 async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<T | null> {
   let last: unknown;
@@ -57,16 +58,14 @@ export class CrossoverAgent {
               { role: 'system', content: system },
               { role: 'user', content: user },
             ] as ChatMessage[],
-            undefined,
-            0.3,
+            { temperature: 0.3, maxTokens: 4096 },
           ),
         );
         if (!res?.content) continue;
         try {
-          const fence = res.content.match(/```(?:json)?\s*([\s\S]*?)```/);
-          const body = (fence ? fence[1] : res.content).trim();
-          const obj = JSON.parse(body) as unknown;
-          const r = StrategyDSLSchema.safeParse(obj);
+          const extracted = extractJson(res.content);
+          if (!extracted.ok) continue;
+          const r = StrategyDSLSchema.safeParse(extracted.data);
           if (!r.success) continue;
           out.push({
             ...r.data,

@@ -153,7 +153,11 @@ export class AgentLoop {
             console.log(`[Agent] Iteration ${iteration}/${this.config.maxIterations}`);
 
             // AI に送信
-            const aiResponse = await this.aiProvider.chat(messages, mcpTools, this.config.temperature);
+            const aiResponse = await this.aiProvider.chat(messages, {
+                tools: mcpTools,
+                temperature: this.config.temperature,
+                maxTokens: 4096,
+            });
 
             totalTokenUsage += aiResponse.tokenUsage;
             model = aiResponse.model;
