@@ -48,11 +48,19 @@ import { planRepository, type AITradePlanWithTypes } from "../repositories";
 
 /**
  * トレード作成結果
+ *
+ * - success=true + trade: 仮想トレードが作成された
+ * - success=true + skipped=true: 「ノートレード判断」の正常スキップ
+ *   (プランは存在するがシナリオ 0 件 = Plan AI がエントリー条件未成立と判定)。
+ *   エラーではないため呼び出し側は skip ログだけ出せばよい。
+ * - success=false + error: 作成失敗(シナリオ不整合 / DB エラー等)
  */
 export interface CreateTradeResult {
   success: boolean;
   trade?: VirtualTradeRecord;
   error?: string;
+  skipped?: boolean;
+  skipReason?: string;
 }
 
 /**
@@ -117,8 +125,14 @@ export async function createTradeFromPlan(
     }
     
     // シナリオ存在チェック
+    // シナリオ 0 件 = Plan AI (StrategyThinker) が「エントリー条件未成立 = ノートレード」と
+    // 判定したケース。これは正常動作なので skipped で返し、呼び出し側でエラー扱いしない。
     if (!scenarios || scenarios.length === 0) {
-      return { success: false, error: "プランにシナリオがありません" };
+      return {
+        success: true,
+        skipped: true,
+        skipReason: "ノートレード判断(シナリオ 0 件)",
+      };
     }
     
     const scenario = scenarioId

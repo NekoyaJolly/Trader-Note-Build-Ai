@@ -1340,7 +1340,15 @@ export class SideBScheduler {
         }
 
         this.lastPlanRun.set(symbol, new Date());
-        this.log(`[${symbol}] プラン完了: Trade ID ${tradeResult.trade?.id}`);
+        // ノートレード判断(シナリオ 0 件)は skipped で来るため、エラーにせず
+        // 正常完了として記録する。trade オブジェクトは存在しない。
+        if (tradeResult.skipped) {
+          this.log(
+            `[${symbol}] プラン完了: ${tradeResult.skipReason ?? 'ノートレード判断'} (Trade 作成はスキップ)`,
+          );
+        } else {
+          this.log(`[${symbol}] プラン完了: Trade ID ${tradeResult.trade?.id}`);
+        }
         results.push({ symbol, success: true });
 
         // PDCAループに戦略完了を通知

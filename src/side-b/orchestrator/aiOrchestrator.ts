@@ -223,10 +223,11 @@ export class AIOrchestrator {
     console.log(`[Orchestrator] プラン生成開始: ${symbol} / ${dateStr} (forceRefresh=${forceRefresh})`);
 
     try {
-      // 1. 既存プランチェック（forceRefreshの場合は削除して再生成）
-      if (!forceRefresh) {
-        const existingPlan = await this.planRepo.findByDateAndSymbol(date, symbol);
-        if (existingPlan) {
+      // 1. 既存プランチェック(hotfix: shouldReuseExistingPlan で判定)
+      const existingPlan = await this.planRepo.findByDateAndSymbol(date, symbol);
+      if (existingPlan) {
+        const decision = decideExistingPlanAction(existingPlan, forceRefresh);
+        if (decision.action === 'reuse') {
           console.log(`[Orchestrator] 既存プラン発見: ${existingPlan.id}`);
           return {
             success: true,
@@ -235,13 +236,8 @@ export class AIOrchestrator {
             tokenUsage: 0,
           };
         }
-      } else {
-        // forceRefresh: 既存プランを削除して再生成
-        const existingPlan = await this.planRepo.findByDateAndSymbol(date, symbol);
-        if (existingPlan) {
-          console.log(`[Orchestrator] forceRefresh: 既存プラン削除: ${existingPlan.id}`);
-          await this.planRepo.delete(existingPlan.id);
-        }
+        console.log(`[Orchestrator] 既存プラン削除 (${decision.reason}): ${existingPlan.id}`);
+        await this.planRepo.delete(existingPlan.id);
       }
 
       // 2. リサーチ取得または生成
@@ -569,6 +565,44 @@ export class AIOrchestrator {
     console.log(`[Orchestrator] 期限切れリサーチ削除: ${deleted}件`);
     return deleted;
   }
+}
+
+// ===========================================
+// 既存プランの扱いを決める純粋関数 (hotfix)
+// ===========================================
+
+/** `decideExistingPlanAction` の判定結果。 */
+export type ExistingPlanDecision =
+  | { action: 'reuse'; reason: 'cache-hit' }
+  | { action: 'delete'; reason: 'forceRefresh' }
+  | { action: 'delete'; reason: 'empty-scenarios' };
+
+/**
+ * 既存プランを再利用するか、削除して再生成するかを判定する。
+ *
+ * ルール:
+ *   - forceRefresh=true          → delete (forceRefresh)
+ *   - scenarios.length === 0     → delete (empty-scenarios / ノートレード判断の空プラン)
+ *   - それ以外(scenarios >= 1)  → reuse  (cache-hit)
+ *
+ * scenarios=0 を削除して再生成する理由:
+ *   「ノートレード判断」は一瞬の相場状況に基づく結果で、時間経過でシナリオが出る可能性がある。
+ *   キャッシュに空プランが残ると 1 日中 createTradeFromPlan が
+ *   「シナリオがありません」で失敗し続ける(昔のバグの原因)。
+ */
+export function decideExistingPlanAction(
+  existingPlan: { scenarios?: unknown } | null | undefined,
+  forceRefresh: boolean,
+): ExistingPlanDecision {
+  if (forceRefresh) {
+    return { action: 'delete', reason: 'forceRefresh' };
+  }
+  const scenarios = existingPlan?.scenarios;
+  const count = Array.isArray(scenarios) ? scenarios.length : 0;
+  if (count === 0) {
+    return { action: 'delete', reason: 'empty-scenarios' };
+  }
+  return { action: 'reuse', reason: 'cache-hit' };
 }
 
 // デフォルトインスタンス
