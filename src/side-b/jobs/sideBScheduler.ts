@@ -77,6 +77,10 @@ import { DiversityEnforcer } from '../evolution/DiversityEnforcer';
 import { EvolutionLoop } from '../evolution/EvolutionLoop';
 import { StrategyPopulation } from '../evolution/StrategyPopulation';
 import { DSLBacktestAdapter } from '../strategy_dsl/DSLBacktestAdapter';
+import {
+  runPromptEvolutionCycle,
+  type PromptEvolutionResult,
+} from '../prompts/registry/promptEvolutionJob';
 
 // ===========================================
 // 型定義
@@ -128,6 +132,8 @@ export interface SideBSchedulerConfig {
   autoEvolution: boolean;
   /** 進化ループ対象レジーム（StrategyDSL.regimeTarget と対応） */
   evolutionRegimes: string[];
+  /** Phase 6: 月次プロンプト進化ジョブを自動トリガーするか(既定 false、手動のみ) */
+  autoTriggerPromptEvolution: boolean;
   /** cTrader アカウントID（cTraderデータソース有効化用） */
   ctraderAccountId?: string;
 }
@@ -167,6 +173,7 @@ const DEFAULT_CONFIG: SideBSchedulerConfig = {
     'consolidation',
     'reversal',
   ],
+  autoTriggerPromptEvolution: false, // Phase 6: 既定は手動のみ(CLI / UI からの明示的トリガー)
 };
 
 /**
@@ -228,6 +235,7 @@ export class SideBScheduler {
   private screeningIntervalId?: NodeJS.Timeout;
   private fullValidationIntervalId?: NodeJS.Timeout;
   private evolutionIntervalId?: NodeJS.Timeout;
+  private promptEvolutionIntervalId?: NodeJS.Timeout;
   private lastPlanRun: Map<string, Date> = new Map();
   private lastMonitorRun?: Date;
   private lastCleanupRun?: Date;
@@ -235,6 +243,7 @@ export class SideBScheduler {
   private lastScreeningRun?: Date;
   private lastFullValidationRun?: Date;
   private lastEvolutionRun?: Date;
+  private lastPromptEvolutionRun?: Date;
   private errors: string[] = [];
   private readonly isProduction: boolean;
 
@@ -362,6 +371,11 @@ export class SideBScheduler {
       this.startEvolutionJob();
     }
 
+    // Phase 6: 月次プロンプト進化ジョブ(既定は無効)
+    if (this.config.autoTriggerPromptEvolution) {
+      this.startPromptEvolutionJob();
+    }
+
     // 週次/月次サマリースケジューラーを連動起動
     if (this.config.autoSummary) {
       this.log('週次/月次サマリースケジューラーを連動起動します');
@@ -411,6 +425,11 @@ export class SideBScheduler {
     if (this.evolutionIntervalId) {
       clearInterval(this.evolutionIntervalId);
       this.evolutionIntervalId = undefined;
+    }
+
+    if (this.promptEvolutionIntervalId) {
+      clearInterval(this.promptEvolutionIntervalId);
+      this.promptEvolutionIntervalId = undefined;
     }
 
     // サマリースケジューラーも連動停止
@@ -749,6 +768,46 @@ export class SideBScheduler {
         });
       }
     }, checkIntervalMs);
+  }
+
+  /**
+   * Phase 6: 月次プロンプト進化ジョブを開始する。
+   * 1 時間ごとにチェックし、最終実行から 30 日経過していたら実行する。
+   * autoTriggerPromptEvolution=false(既定)なら呼ばれない。
+   */
+  private startPromptEvolutionJob(): void {
+    const checkIntervalMs = 60 * 60 * 1000;
+    const monthlyMs = 30 * 24 * 60 * 60 * 1000;
+    this.promptEvolutionIntervalId = setInterval(() => {
+      const now = Date.now();
+      if (
+        !this.lastPromptEvolutionRun ||
+        now - this.lastPromptEvolutionRun.getTime() >= monthlyMs
+      ) {
+        this.runPromptEvolutionNow().catch((err) => {
+          this.addError(`プロンプト進化ジョブエラー: ${err}`);
+        });
+      }
+    }, checkIntervalMs);
+  }
+
+  /**
+   * Phase 6: プロンプト進化を手動実行する。
+   * - 全エージェントの experimental 成績を評価
+   * - 昇格候補のレポートを返す(自動昇格はしない = 人間承認は approveCli.ts 経由)
+   * - 成績不振の experimental は reject
+   * - PromptMutationAgent で新 experimental を 3 件/エージェント 生成
+   */
+  async runPromptEvolutionNow(): Promise<PromptEvolutionResult> {
+    this.log('[PromptEvolution] 月次プロンプト進化を実行');
+    const result = await runPromptEvolutionCycle();
+    this.lastPromptEvolutionRun = new Date();
+    for (const r of result.reports) {
+      this.log(
+        `[PromptEvolution] agent=${r.agentName} new=${r.newExperimentalIds.length} rejected=${r.rejectedIds.length} promotionCandidates=${r.promotionCandidates.length} errors=${r.errors.length}`,
+      );
+    }
+    return result;
   }
 
   /**

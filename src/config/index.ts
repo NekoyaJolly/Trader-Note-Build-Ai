@@ -91,7 +91,13 @@ export type AIAgentKey =
   | 'reflection'
   | 'lesson_similarity'
   | 'mutation'
-  | 'crossover';
+  | 'crossover'
+  // Phase 6: 専門家エージェント / プロンプト進化 / MetaEvolution
+  | 'trend_specialist'
+  | 'oscillator_specialist'
+  | 'volatility_volume_specialist'
+  | 'prompt_mutation'
+  | 'meta_evolution';
 
 export const config = {
   server: {
@@ -126,6 +132,12 @@ export const config = {
       lesson_similarity: process.env.AI_MODEL_LESSON_SIMILARITY || '',
       mutation: process.env.AI_MODEL_MUTATION || '',
       crossover: process.env.AI_MODEL_CROSSOVER || '',
+      // Phase 6: 既定は Sonnet 4.6、MetaEvolutionAgent のみ Opus 4.7
+      trend_specialist: process.env.AI_MODEL_TREND_SPECIALIST || 'claude-sonnet-4-6',
+      oscillator_specialist: process.env.AI_MODEL_OSCILLATOR_SPECIALIST || 'claude-sonnet-4-6',
+      volatility_volume_specialist: process.env.AI_MODEL_VOLATILITY_VOLUME_SPECIALIST || 'claude-sonnet-4-6',
+      prompt_mutation: process.env.AI_MODEL_PROMPT_MUTATION || 'claude-sonnet-4-6',
+      meta_evolution: process.env.AI_MODEL_META_EVOLUTION || 'claude-opus-4-7',
     } as Record<AIAgentKey, string>,
   },
   market: {

@@ -1,0 +1,162 @@
+/**
+ * Phase 6: PromptMutationAgent
+ *
+ * 既存プロンプトから改善案を 3 個生成する専門エージェント。
+ * PromptRegistry への登録(status='experimental')は呼び出し側で行う設計とし、
+ * このエージェント自身は純粋に「提案を作る」責務だけを持つ。
+ *
+ * 設計原則:
+ * - API キー未設定 / 失敗時は空配列を返す(呼び出し側は継続可能)
+ * - JSON パースは 3 回リトライ、失敗後は空配列
+ * - モックプロバイダーでの動作確認可能(constructor injection)
+ * - プロンプトは src/side-b/prompts/prompt_mutation.md から読み込み
+ */
+
+import { AIProvider, type ChatMessage } from '../agent/aiProvider';
+import { loadPrompt } from '../prompts/loader';
+import { modelFor } from '../../config';
+import type { PromptVersion } from '../prompts/registry/types';
+
+export interface PromptMutationProposal {
+  /** 提案バージョン識別子(呼び出し側で suffix 付与してもよい) */
+  version: string;
+  /** 新プロンプト本文 */
+  content: string;
+  /** 変更意図 */
+  notes?: string;
+  /** 期待される改善 */
+  expectedImprovement?: string;
+}
+
+export interface RecentFailure {
+  /** 失敗した入力(サマリでよい) */
+  context: unknown;
+  /** 失敗した出力 / エラー概要 */
+  output: unknown;
+}
+
+export interface ProposeImprovementsInput {
+  agentName: string;
+  currentPrompt: PromptVersion;
+  recentPerformance: {
+    avgScore: number;
+    recentFailures: RecentFailure[];
+  };
+  /** 期待する提案数(既定 3) */
+  count?: number;
+}
+
+async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<T | null> {
+  let last: unknown;
+  for (let i = 0; i < times; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      last = e;
+    }
+  }
+  console.error('[PromptMutationAgent] リトライ尽くし', last);
+  return null;
+}
+
+function parseProposalArray(content: string): PromptMutationProposal[] {
+  const fence = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const body = (fence ? fence[1] : content).trim();
+  const data = JSON.parse(body) as unknown;
+  if (!Array.isArray(data)) {
+    throw new Error('応答は JSON 配列である必要があります');
+  }
+  const out: PromptMutationProposal[] = [];
+  for (const item of data) {
+    if (!item || typeof item !== 'object') continue;
+    const o = item as Record<string, unknown>;
+    if (typeof o.version !== 'string' || typeof o.content !== 'string') continue;
+    if (o.content.trim().length < 50) continue; // 短すぎる改善案は除外
+    out.push({
+      version: o.version,
+      content: o.content,
+      notes: typeof o.notes === 'string' ? o.notes : undefined,
+      expectedImprovement:
+        typeof o.expectedImprovement === 'string' ? o.expectedImprovement : undefined,
+    });
+  }
+  return out;
+}
+
+export class PromptMutationAgent {
+  constructor(
+    private readonly ai: AIProvider = new AIProvider({ model: modelFor('prompt_mutation') }),
+  ) {}
+
+  /**
+   * 改善案プロンプトを生成する。
+   * 失敗時は空配列を返す(握りつぶしではなく、呼び出し側のフォールバックを前提にした設計)。
+   */
+  async proposeImprovements(
+    input: ProposeImprovementsInput,
+  ): Promise<PromptMutationProposal[]> {
+    const count = input.count ?? 3;
+    const system = loadPrompt('prompt_mutation');
+    const user = this.buildUserPrompt(input, count);
+
+    const res = await withRetries(() =>
+      this.ai.chat(
+        [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ] as ChatMessage[],
+        undefined,
+        0.6,
+      ),
+    );
+    if (!res?.content) return [];
+    try {
+      return parseProposalArray(res.content).slice(0, count);
+    } catch (err) {
+      console.error('[PromptMutationAgent] JSON パース失敗:', err);
+      return [];
+    }
+  }
+
+  private buildUserPrompt(input: ProposeImprovementsInput, count: number): string {
+    const failuresDump =
+      input.recentPerformance.recentFailures.length === 0
+        ? '(失敗サンプルなし)'
+        : input.recentPerformance.recentFailures
+            .slice(0, 5)
+            .map(
+              (f, i) =>
+                `### Failure ${i + 1}\n- context: ${safeStringify(f.context)}\n- output: ${safeStringify(f.output)}`,
+            )
+            .join('\n\n');
+
+    return `# プロンプト改善依頼
+
+## 対象エージェント
+- agentName: ${input.agentName}
+- 現行 version: ${input.currentPrompt.version}
+- 現行 avgScore: ${input.recentPerformance.avgScore.toFixed(3)}
+- 現行 usageCount: ${input.currentPrompt.usageCount}
+
+## 現行プロンプト本文
+\`\`\`
+${input.currentPrompt.content}
+\`\`\`
+
+## 直近の失敗サンプル
+${failuresDump}
+
+## 依頼
+上記を踏まえ、**互いに異なる方向性** の改善案プロンプトを ${count} 件、
+指定された JSON 配列形式で返してください。`;
+  }
+}
+
+function safeStringify(v: unknown): string {
+  try {
+    const s = JSON.stringify(v);
+    return s.length > 500 ? s.slice(0, 500) + '…' : s;
+  } catch {
+    return String(v);
+  }
+}

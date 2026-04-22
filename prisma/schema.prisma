@@ -604,9 +604,9 @@ model Strategy {
 /// ストラテジーバージョン（変更履歴）
 /// 保存時に常に新バージョンを作成し、履歴を保持
 model StrategyVersion {
-  id              String   @id @default(uuid()) @db.Uuid
+  id              String             @id @default(uuid()) @db.Uuid
   /// 親ストラテジー ID
-  strategyId      String   @db.Uuid
+  strategyId      String             @db.Uuid
   /// バージョン番号（1, 2, 3...）
   versionNumber   Int
   /// 対象シンボル（変更履歴として保持、ロールバック用）
@@ -618,12 +618,12 @@ model StrategyVersion {
   /// イグジット設定（JSON: ExitSettings）
   exitSettings    Json
   /// エントリータイミング（next_open 等）
-  entryTiming     String   @default("next_open")
+  entryTiming     String             @default("next_open")
   /// 変更理由メモ
   changeNote      String?
   /// 作成日時
-  createdAt       DateTime @default(now()) @db.Timestamptz(6)
-  strategy        Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  createdAt       DateTime           @default(now()) @db.Timestamptz(6)
+  strategy        Strategy           @relation(fields: [strategyId], references: [id], onDelete: Cascade)
 
   @@unique([strategyId, versionNumber], map: "uq_strategyversion_strategy_version")
   @@index([strategyId], map: "idx_strategyversion_strategyid")
@@ -1112,42 +1112,42 @@ enum NotificationSkipReason {
 /// - Research AIは12次元特徴量のみ出力
 /// - トレンド解釈、価格レベルはPlan AIの責務
 model MarketResearch {
-  id               String   @id @default(uuid()) @db.Uuid
+  id        String @id @default(uuid()) @db.Uuid
   /// 対象シンボル（例: XAUUSD）
-  symbol           String
+  symbol    String
   /// 分析時間軸（multi: マルチタイムフレーム）
-  timeframe        String   @default("multi")
+  timeframe String @default("multi")
 
   // ===========================================
   // Research AIの出力（シンプル化）
   // ===========================================
-  
+
   /// 12次元特徴量ベクトル（JSONB）
   /// Research AIの唯一の出力
-  featureVector    Json
+  featureVector Json
 
   /// OHLCVスナップショット（JSONB）
   /// Plan AI呼び出し時に参照するための価格データキャッシュ
   /// 旧名: rawIndicators
-  ohlcvSnapshot    Json?
+  ohlcvSnapshot Json?
 
   // ===========================================
   // メタ情報
   // ===========================================
-  
+
   /// 使用AIモデル（例: gpt-4o-mini）
-  aiModel          String
+  aiModel    String
   /// トークン使用量
-  tokenUsage       Int?
+  tokenUsage Int?
 
   // 有効期限管理
   /// 有効期限（デフォルト4時間後）
-  expiresAt        DateTime @db.Timestamptz(6)
+  expiresAt DateTime @db.Timestamptz(6)
   /// 作成日時
-  createdAt        DateTime @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   // リレーション
-  tradePlans       AITradePlan[]
+  tradePlans AITradePlan[]
 
   @@index([symbol], map: "idx_market_research_symbol")
   @@index([createdAt(sort: Desc)], map: "idx_market_research_created")
@@ -1156,37 +1156,37 @@ model MarketResearch {
 
 /// AIトレードプラン（Plan AIが生成）
 model AITradePlan {
-  id                 String   @id @default(uuid()) @db.Uuid
+  id         String   @id @default(uuid()) @db.Uuid
   /// 参照するリサーチID
-  researchId         String   @db.Uuid
+  researchId String   @db.Uuid
   /// 対象日（YYYY-MM-DD）
-  targetDate         DateTime @db.Date
+  targetDate DateTime @db.Date
   /// 対象シンボル
-  symbol             String
+  symbol     String
 
   // 市場分析
   /// 市場分析結果（JSONB: regime, trendDirection, volatility, keyLevels, summary）
-  marketAnalysis     Json
+  marketAnalysis Json
   /// トレードシナリオ配列（JSONB）
-  scenarios          Json
+  scenarios      Json
 
   // メタ情報
   /// 全体信頼度（0-100）
-  overallConfidence  Int?
+  overallConfidence Int?
   /// 警告事項
-  warnings           String[]
+  warnings          String[]
   /// 使用AIモデル（例: gpt-4o）
-  aiModel            String?
+  aiModel           String?
   /// トークン使用量
-  tokenUsage         Int?
+  tokenUsage        Int?
 
   /// 作成日時
-  createdAt          DateTime @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   // リレーション
-  research           MarketResearch @relation(fields: [researchId], references: [id])
-  virtualTrades      VirtualTrade[]
-  aiNotes            AITradeNote[]
+  research      MarketResearch @relation(fields: [researchId], references: [id])
+  virtualTrades VirtualTrade[]
+  aiNotes       AITradeNote[]
 
   @@unique([targetDate, symbol], map: "uq_ai_trade_plan_date_symbol")
   @@index([targetDate], map: "idx_ai_trade_plan_date")
@@ -1196,54 +1196,54 @@ model AITradePlan {
 /// 仮想トレード（Phase B用）
 /// AIプランに基づく仮想的なトレード実行記録
 model VirtualTrade {
-  id             String             @id @default(uuid()) @db.Uuid
+  id         String @id @default(uuid()) @db.Uuid
   /// 参照するプランID
-  planId         String             @db.Uuid
+  planId     String @db.Uuid
   /// シナリオID（プラン内のシナリオを特定）
-  scenarioId     String
+  scenarioId String
   /// 対象シンボル
-  symbol         String
+  symbol     String
 
   // ポジション情報
   /// 方向（long/short）
-  direction      String
+  direction String
   /// ステータス
-  status         VirtualTradeStatus @default(pending)
+  status    VirtualTradeStatus @default(pending)
 
   // エントリー
   /// 予定エントリー価格
-  plannedEntry   Decimal            @db.Decimal(18, 8)
+  plannedEntry Decimal   @db.Decimal(18, 8)
   /// 実際のエントリー価格
-  actualEntry    Decimal?           @db.Decimal(18, 8)
+  actualEntry  Decimal?  @db.Decimal(18, 8)
   /// エントリー日時
-  enteredAt      DateTime?          @db.Timestamptz(6)
+  enteredAt    DateTime? @db.Timestamptz(6)
 
   // 決済
   /// SL価格
-  stopLoss       Decimal            @db.Decimal(18, 8)
+  stopLoss   Decimal   @db.Decimal(18, 8)
   /// TP価格
-  takeProfit     Decimal            @db.Decimal(18, 8)
+  takeProfit Decimal   @db.Decimal(18, 8)
   /// 決済価格
-  exitPrice      Decimal?           @db.Decimal(18, 8)
+  exitPrice  Decimal?  @db.Decimal(18, 8)
   /// 決済日時
-  exitedAt       DateTime?          @db.Timestamptz(6)
+  exitedAt   DateTime? @db.Timestamptz(6)
   /// 決済理由
-  exitReason     String?
+  exitReason String?
 
   // 結果
   /// 損益（pips）
-  pnlPips        Decimal?           @db.Decimal(18, 8)
+  pnlPips   Decimal? @db.Decimal(18, 8)
   /// 損益（金額、仮想）
-  pnlAmount      Decimal?           @db.Decimal(18, 8)
+  pnlAmount Decimal? @db.Decimal(18, 8)
 
   /// 作成日時
-  createdAt      DateTime           @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
   /// 更新日時
-  updatedAt      DateTime           @updatedAt @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
   // リレーション
-  plan           AITradePlan        @relation(fields: [planId], references: [id])
-  aiNote         AITradeNote?
+  plan   AITradePlan  @relation(fields: [planId], references: [id])
+  aiNote AITradeNote?
 
   @@index([planId], map: "idx_virtual_trade_plan")
   @@index([status], map: "idx_virtual_trade_status")
@@ -1269,34 +1269,34 @@ enum VirtualTradeStatus {
 /// 仮想ポートフォリオ（Phase B用）
 /// AIの仮想トレード統計を管理
 model VirtualPortfolio {
-  id                   String   @id @default(uuid()) @db.Uuid
+  id   String @id @default(uuid()) @db.Uuid
   /// 名前（例: "Default", "Conservative"）
-  name                 String   @default("Default")
-  
+  name String @default("Default")
+
   // 資金管理
   /// 初期仮想資金
-  initialBalance       Decimal  @db.Decimal(18, 2) @default(100000)
+  initialBalance Decimal @default(100000) @db.Decimal(18, 2)
   /// 現在の仮想残高
-  currentBalance       Decimal  @db.Decimal(18, 2) @default(100000)
+  currentBalance Decimal @default(100000) @db.Decimal(18, 2)
 
   // 統計情報（JSON）
   /// 統計サマリー（totalTrades, winRate, profitFactor, maxDrawdown等）
-  stats                Json     @default("{}")
+  stats Json @default("{}")
 
   // 設定
   /// 同時保有上限
-  maxOpenPositions     Int      @default(3)
+  maxOpenPositions    Int     @default(3)
   /// 1トレードあたりのリスク率（%）
-  riskPercentPerTrade  Decimal  @db.Decimal(5, 2) @default(1.0)
+  riskPercentPerTrade Decimal @default(1.0) @db.Decimal(5, 2)
   /// スプレッド考慮フラグ
-  enableSpread         Boolean  @default(false)
+  enableSpread        Boolean @default(false)
   /// 想定スプレッド（pips）
-  spreadPips           Decimal  @db.Decimal(5, 2) @default(2.0)
+  spreadPips          Decimal @default(2.0) @db.Decimal(5, 2)
 
   /// 作成日時
-  createdAt            DateTime @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
   /// 更新日時
-  updatedAt            DateTime @updatedAt @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
   @@index([name], map: "idx_virtual_portfolio_name")
 }
@@ -1304,62 +1304,62 @@ model VirtualPortfolio {
 /// AIトレードノート（Phase C）
 /// 仮想トレードの結果をAIが自動分析して記録
 model AITradeNote {
-  id              String      @id @default(uuid()) @db.Uuid
+  id             String @id @default(uuid()) @db.Uuid
   /// 仮想トレードID
-  virtualTradeId  String      @unique @db.Uuid
+  virtualTradeId String @unique @db.Uuid
   /// 元のプランID
-  planId          String      @db.Uuid
+  planId         String @db.Uuid
 
   // 基本情報
   /// 日付（YYYY-MM-DD）
-  date            DateTime    @db.Date
+  date      DateTime @db.Date
   /// シンボル
-  symbol          String
+  symbol    String
   /// 方向（long/short）
-  direction       String
+  direction String
 
   // 結果
   /// 勝敗（win/loss/breakeven）
   outcome         String
   /// 損益（pips）
-  pnlPips         Decimal     @db.Decimal(10, 2)
+  pnlPips         Decimal @db.Decimal(10, 2)
   /// 損益（%）
-  pnlPercentage   Decimal     @db.Decimal(10, 4)
+  pnlPercentage   Decimal @db.Decimal(10, 4)
   /// 実際のRR比
-  rrActual        Decimal     @db.Decimal(5, 2)
+  rrActual        Decimal @db.Decimal(5, 2)
   /// 保有時間（分）
   holdingDuration Int
 
   // 分析（JSONB）
   /// エントリー分析
-  entryAnalysis   Json
+  entryAnalysis        Json
   /// 決済分析
-  exitAnalysis    Json
+  exitAnalysis         Json
   /// プラン評価
-  planEvaluation  Json
+  planEvaluation       Json
   /// 市場振り返り
-  marketReview    Json
+  marketReview         Json
   /// 学び
-  learnings       Json
+  learnings            Json
   /// 類似パターン
-  similarPatterns Json?
+  similarPatterns      Json?
   /// レンズ特徴量スナップショット（Phase 1: 並列レンズ基盤）
   /// トレード時点での全レンズ出力を SerializedLensFeatureSnapshot 形式で保持
-  lensSnapshot    Json?
+  lensSnapshot         Json?
   /// 関連するエッジ仮説ID（Phase 4a: ReflectionAI が recordObservation した仮説）
   relatedHypothesisIds String[] @default([])
   /// 対応する Side-A TradeNote の ID（Phase 4b: ブリッジ層で同時生成）
   tradeNoteId          String?  @db.Uuid
 
   /// 使用したAIモデル
-  aiModel         String
+  aiModel String
 
   /// 作成日時
-  createdAt       DateTime    @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   // リレーション
-  virtualTrade    VirtualTrade @relation(fields: [virtualTradeId], references: [id])
-  plan            AITradePlan  @relation(fields: [planId], references: [id])
+  virtualTrade VirtualTrade @relation(fields: [virtualTradeId], references: [id])
+  plan         AITradePlan  @relation(fields: [planId], references: [id])
 
   @@index([date], map: "idx_ai_trade_note_date")
   @@index([outcome], map: "idx_ai_trade_note_outcome")
@@ -1368,24 +1368,24 @@ model AITradeNote {
 
 /// AIノートサマリー（期間集計）
 model AINoteSummary {
-  id            String   @id @default(uuid()) @db.Uuid
+  id        String   @id @default(uuid()) @db.Uuid
   /// 期間タイプ（daily/weekly/monthly）
-  period        String
+  period    String
   /// 開始日
-  startDate     DateTime @db.Date
+  startDate DateTime @db.Date
   /// 終了日
-  endDate       DateTime @db.Date
+  endDate   DateTime @db.Date
 
   // 統計・分析・総括（JSONB）
   /// 統計データ
-  statistics    Json
+  statistics Json
   /// 分析結果
-  analysis      Json
+  analysis   Json
   /// 総括
-  summary       Json
+  summary    Json
 
   /// 作成日時
-  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   @@unique([period, startDate, endDate], map: "uq_ai_note_summary_period")
   @@index([period, startDate], map: "idx_ai_note_summary_period")
@@ -1487,21 +1487,21 @@ model RealtimeOHLCV {
 /// ストラテジー比較セッション
 /// 複数ストラテジーの比較分析を管理
 model StrategyComparisonSession {
-  id           String   @id @default(uuid()) @db.Uuid
+  id          String   @id @default(uuid()) @db.Uuid
   /// セッション名（例: "2025年Q4比較"）
-  name         String
+  name        String
   /// 比較対象ストラテジーID配列
-  strategyIds  String[] @default([])
+  strategyIds String[] @default([])
   /// 分析期間開始日
-  startDate    DateTime @db.Date
+  startDate   DateTime @db.Date
   /// 分析期間終了日
-  endDate      DateTime @db.Date
+  endDate     DateTime @db.Date
   /// 時間足
-  timeframe    String   @default("1h")
+  timeframe   String   @default("1h")
   /// 作成日時
-  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
   /// 更新日時
-  updatedAt    DateTime @updatedAt @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
 
   // リレーション
   results       StrategyComparisonResult[]
@@ -1514,11 +1514,11 @@ model StrategyComparisonSession {
 /// ストラテジー比較結果
 /// 各ストラテジーの期間別パフォーマンス
 model StrategyComparisonResult {
-  id           String  @id @default(uuid()) @db.Uuid
+  id         String @id @default(uuid()) @db.Uuid
   /// セッションID
-  sessionId    String  @db.Uuid
+  sessionId  String @db.Uuid
   /// ストラテジーID
-  strategyId   String  @db.Uuid
+  strategyId String @db.Uuid
 
   // パフォーマンス指標
   /// トレード数
@@ -1545,10 +1545,10 @@ model StrategyComparisonResult {
   equityCurve  Json?
 
   /// 作成日時
-  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   // リレーション
-  session      StrategyComparisonSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session StrategyComparisonSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@unique([sessionId, strategyId], map: "uq_comparison_result_session_strategy")
   @@index([sessionId], map: "idx_comparison_result_session")
@@ -1567,19 +1567,19 @@ model StrategyCorrelation {
 
   // 相関指標
   /// ピアソン相関係数（-1〜1）
-  pearsonCorr Float
+  pearsonCorr  Float
   /// スピアマン順位相関係数
   spearmanCorr Float?
   /// 同時勝率（両方勝つ確率）
-  coWinRate   Float?
+  coWinRate    Float?
   /// 同時負け率（両方負ける確率）
-  coLossRate  Float?
+  coLossRate   Float?
 
   /// 作成日時
-  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   // リレーション
-  session     StrategyComparisonSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session StrategyComparisonSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@unique([sessionId, strategyAId, strategyBId], map: "uq_correlation_session_pair")
   @@index([sessionId], map: "idx_correlation_session")
@@ -1587,29 +1587,29 @@ model StrategyCorrelation {
 
 /// ポートフォリオ最適化結果
 model PortfolioOptimization {
-  id             String @id @default(uuid()) @db.Uuid
+  id        String             @id @default(uuid()) @db.Uuid
   /// セッションID
-  sessionId      String @db.Uuid
+  sessionId String             @db.Uuid
   /// 最適化手法
-  method         OptimizationMethod
+  method    OptimizationMethod
 
   // 最適化結果
   /// 各ストラテジーの配分比率（JSONB: {strategyId: weight}[]）
-  weights        Json
+  weights           Json
   /// 期待リターン（年率）
-  expectedReturn Float
+  expectedReturn    Float
   /// 期待リスク（標準偏差、年率）
-  expectedRisk   Float
+  expectedRisk      Float
   /// シャープレシオ
-  sharpeRatio    Float?
+  sharpeRatio       Float?
   /// 効率的フロンティア（JSONB: {risk, return}[]）
   efficientFrontier Json?
 
   /// 作成日時
-  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
 
   // リレーション
-  session        StrategyComparisonSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session StrategyComparisonSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId], map: "idx_optimization_session")
 }
@@ -1640,41 +1640,41 @@ enum OptimizationMethod {
 /// - 昇格判定（Phase 4b の EdgeValidator）は次フェーズで実装
 /// - 観測実績は累積し、劣化を検出する
 model EdgeHypothesis {
-  id                 String    @id @default(uuid()) @db.Uuid
+  id String @id @default(uuid()) @db.Uuid
 
   // 記述
   /// 人間可読の仮説文
-  statement          String
+  statement         String
   /// カテゴリ（time/level/event/correlation/positioning/volatility/structure/other）
-  category           String
+  category          String
   /// 機械判定条件（MachineReadableCondition[] を JSONB で保存）
-  conditions         Json
+  conditions        Json
   /// 期待される方向（long/short/either）
-  expectedDirection  String
+  expectedDirection String
 
   // ライフサイクル
   /// ステータス（unverified/testing/confirmed/stale/rejected）
-  status             String    @default("unverified")
+  status          String   @default("unverified")
   /// ステータス変更日時
-  statusUpdatedAt    DateTime  @default(now()) @db.Timestamptz(6)
+  statusUpdatedAt DateTime @default(now()) @db.Timestamptz(6)
   /// ステータス変更の直近理由（rejected/stale時に記録）
-  statusNote         String?
+  statusNote      String?
 
   // 対象
   /// 適用対象シンボル
-  symbols            String[]  @default([])
+  symbols    String[] @default([])
   /// 適用対象時間足
-  timeframes         String[]  @default([])
+  timeframes String[] @default([])
 
   // 実績
-  observationCount   Int       @default(0)
-  winCount           Int       @default(0)
-  lossCount          Int       @default(0)
-  breakevenCount     Int       @default(0)
+  observationCount Int     @default(0)
+  winCount         Int     @default(0)
+  lossCount        Int     @default(0)
+  breakevenCount   Int     @default(0)
   /// 累計 pnl pips
-  totalPnlPips       Decimal   @default(0) @db.Decimal(12, 2)
+  totalPnlPips     Decimal @default(0) @db.Decimal(12, 2)
   /// 平均 RR 比
-  avgRR              Decimal   @default(0) @db.Decimal(6, 3)
+  avgRR            Decimal @default(0) @db.Decimal(6, 3)
 
   // 検証履歴（Phase 4b で EdgeValidator が埋める）
   backtestResults    Json?
@@ -1682,47 +1682,133 @@ model EdgeHypothesis {
 
   // メタデータ
   /// 生成元（ai_generated/reflection/user_input/backtest/discovery）
-  source             String
+  source        String
   /// レンズごとの重要度推定（0-1）
-  lensRelevance      Json?
+  lensRelevance Json?
 
   // Phase 4b: ブリッジ層
   /// デフォルトのリスク管理設定（DefaultRiskManagement 形式）
-  defaultRiskManagement Json?
+  defaultRiskManagement    Json?
   /// この仮説から materialize された Side-A TradeNote の ID 群
   materializedTradeNoteIds String[] @default([])
   /// 無効化条件（MachineReadableCondition[] 形式）
-  invalidationConditions Json?
+  invalidationConditions   Json?
   /// confirmed 昇格時の LLM 解釈テキスト
-  confirmationNote String?
+  confirmationNote         String?
   /// Phase 4b 縮小版: 直近のスクリーニング結果（ScreeningResult 形式）
-  screeningResult Json?
+  screeningResult          Json?
 
   // Phase 4c: 本格検証レポート
   /// 4ツール統合の検証レポート（ConsolidatedValidationReport 形式）
-  fullValidationReport Json?
+  fullValidationReport       Json?
   /// confirmed 時の LLM 解釈
   confirmationInterpretation String?
   /// rejected 時の LLM 解釈
-  rejectionInterpretation String?
+  rejectionInterpretation    String?
   /// LLM による改善提案
-  actionableInsights String[] @default([])
+  actionableInsights         String[] @default([])
 
   // タイムスタンプ
-  firstObservedAt    DateTime  @default(now()) @db.Timestamptz(6)
-  lastObservedAt     DateTime  @default(now()) @db.Timestamptz(6)
-  lastTestedAt       DateTime? @db.Timestamptz(6)
-  createdAt          DateTime  @default(now()) @db.Timestamptz(6)
-  updatedAt          DateTime  @updatedAt
+  firstObservedAt DateTime  @default(now()) @db.Timestamptz(6)
+  lastObservedAt  DateTime  @default(now()) @db.Timestamptz(6)
+  lastTestedAt    DateTime? @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt
 
   // 関連
   /// 派生元の親仮説ID
-  parentIds          String[]  @default([])
+  parentIds      String[] @default([])
   /// 関連する AITradeNote ID
-  relatedNoteIds     String[]  @default([])
+  relatedNoteIds String[] @default([])
 
   @@index([status], map: "idx_edge_hypothesis_status")
   @@index([category], map: "idx_edge_hypothesis_category")
   @@index([source], map: "idx_edge_hypothesis_source")
   @@index([createdAt(sort: Desc)], map: "idx_edge_hypothesis_created")
+}
+
+/// Phase 6: プロンプトバージョン台帳
+/// 各エージェントのシステムプロンプトをバージョン管理し、
+/// 月次プロンプト進化 / A/B テスト / 人間承認フローの基盤として利用する。
+/// agentName は列挙型で固定しない(将来 MetaEvolutionAgent が新エージェントを追加する前提)。
+model PromptVersion {
+  id              String    @id @default(uuid()) @db.Uuid
+  /// 対象エージェント名(例: 'hypothesis_generator', 'trend_specialist')
+  agentName       String
+  /// セマンティックバージョン or タイムスタンプベースの識別子
+  version         String
+  /// プロンプト本文(マクロプレースホルダー {{CORE_TRADING_RULES}} 等を含むことがある)
+  content         String
+  /// 変異元のプロンプト ID(PromptMutationAgent / MetaEvolutionAgent が設定)
+  parentVersionId String?   @db.Uuid
+  /// 作成者(human/mutation/meta_evolution)
+  createdBy       String
+  /// ステータス(active/experimental/deprecated/rejected)
+  /// active は 1 エージェント 1 件(アプリケーション層で保証)
+  status          String    @default("experimental")
+  /// 実験メモ(変異意図、改善狙いなど)
+  notes           String?
+  /// このプロンプトで呼び出された回数
+  usageCount      Int       @default(0)
+  /// 成功と判定された回数(スコアリング関数の解釈はエージェント依存)
+  successCount    Int       @default(0)
+  /// 直近スコアの単純平均(recordUsage 時に逐次更新)
+  avgScore        Float     @default(0)
+  /// 最後に使用された時刻
+  lastUsedAt      DateTime? @db.Timestamptz(6)
+  /// 人間が承認した時刻(experimental → active 昇格時に記録)
+  approvedAt      DateTime? @db.Timestamptz(6)
+  /// 承認者識別子(CLI ユーザー名など)
+  approvedBy      String?
+  createdAt       DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([agentName, version], map: "uq_prompt_version_agent_version")
+  @@index([agentName, status], map: "idx_prompt_version_agent_status")
+  @@index([status], map: "idx_prompt_version_status")
+  @@index([createdAt(sort: Desc)], map: "idx_prompt_version_created")
+}
+
+/// Phase 6: プロンプト A/B テスト結果
+/// 同一入力を複数バリアントで実行した結果を記録する。
+/// 勝者判定は統計処理(アプリ層)に委ねる。
+model PromptAbTestResult {
+  id              String   @id @default(uuid()) @db.Uuid
+  /// 対象エージェント名
+  agentName       String
+  /// 比較されたバリアント(PromptVersion.id 配列を JSON 保存)
+  variantIds      Json
+  /// 各バリアントの結果(output/score/durationMs/promptVersionId 配列)
+  variantResults  Json
+  /// 勝者バリアントの PromptVersion.id(有意差なしなら null)
+  winnerVersionId String?  @db.Uuid
+  /// 入力ダイジェスト(同一入力かどうかのマーキング用、実体は別管理)
+  inputDigest     String?
+  testedAt        DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([agentName, testedAt(sort: Desc)], map: "idx_prompt_abtest_agent_tested")
+}
+
+/// Phase 6: MetaEvolutionAgent の再編成提案履歴
+/// 手動トリガーで生成された提案と、人間承認 / 実行ログを保持する。
+model AgentRestructureProposal {
+  id              String    @id @default(uuid()) @db.Uuid
+  /// 提案内容(分析結果 + proposals 配列、AgentRestructureProposal 型の JSON)
+  proposal        Json
+  /// LLM が付けた全体確信度(0-1)
+  confidence      Float
+  /// 実行ステータス(pending/approved/rejected/executed)
+  status          String    @default("pending")
+  /// 承認者(CLI ユーザー名など、approved/rejected/executed 時に設定)
+  approvedBy      String?
+  approvedAt      DateTime? @db.Timestamptz(6)
+  /// 実行結果(applied / skipped を含む JSON、executed 時のみ)
+  executionResult Json?
+  executedAt      DateTime? @db.Timestamptz(6)
+  /// 承認メモ
+  approvalNotes   String?
+  proposedAt      DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status, proposedAt(sort: Desc)], map: "idx_agent_restructure_status_proposed")
 }
