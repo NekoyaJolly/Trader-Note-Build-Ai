@@ -1,11 +1,15 @@
 /**
- * Hotfix: aiOrchestrator.decideExistingPlanAction のユニットテスト
+ * Hotfix: decideExistingPlanAction のユニットテスト
  *
  * 空プランキャッシュが 24 時間残り続けて createTradeFromPlan が失敗し続けた
  * 問題の根本修正。forceRefresh と scenarios.length の組み合わせで挙動を検証。
+ *
+ * 重要: 副作用なしの純粋関数ファイル `existingPlanDecision.ts` から import する
+ * ことで、aiOrchestrator 本体の `new AIOrchestrator()` 副作用(Prisma 接続増)を
+ * 避ける。CI の Supabase pool_size=15 を超えないための設計。
  */
 
-import { decideExistingPlanAction } from '../orchestrator/aiOrchestrator';
+import { decideExistingPlanAction } from '../orchestrator/existingPlanDecision';
 
 describe('decideExistingPlanAction', () => {
   it('forceRefresh=true なら、scenarios の数に関わらず delete(forceRefresh)', () => {

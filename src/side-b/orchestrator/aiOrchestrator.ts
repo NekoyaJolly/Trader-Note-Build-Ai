@@ -52,6 +52,7 @@ import {
 } from '../lenses';
 import { agentMemory } from '../agent/agentMemory';
 import { edgeLedger } from '../ledger';
+import { decideExistingPlanAction } from './existingPlanDecision';
 import {
   HypothesisGeneratorAgent,
   hypothesisGeneratorAgent,
@@ -565,44 +566,6 @@ export class AIOrchestrator {
     console.log(`[Orchestrator] 期限切れリサーチ削除: ${deleted}件`);
     return deleted;
   }
-}
-
-// ===========================================
-// 既存プランの扱いを決める純粋関数 (hotfix)
-// ===========================================
-
-/** `decideExistingPlanAction` の判定結果。 */
-export type ExistingPlanDecision =
-  | { action: 'reuse'; reason: 'cache-hit' }
-  | { action: 'delete'; reason: 'forceRefresh' }
-  | { action: 'delete'; reason: 'empty-scenarios' };
-
-/**
- * 既存プランを再利用するか、削除して再生成するかを判定する。
- *
- * ルール:
- *   - forceRefresh=true          → delete (forceRefresh)
- *   - scenarios.length === 0     → delete (empty-scenarios / ノートレード判断の空プラン)
- *   - それ以外(scenarios >= 1)  → reuse  (cache-hit)
- *
- * scenarios=0 を削除して再生成する理由:
- *   「ノートレード判断」は一瞬の相場状況に基づく結果で、時間経過でシナリオが出る可能性がある。
- *   キャッシュに空プランが残ると 1 日中 createTradeFromPlan が
- *   「シナリオがありません」で失敗し続ける(昔のバグの原因)。
- */
-export function decideExistingPlanAction(
-  existingPlan: { scenarios?: unknown } | null | undefined,
-  forceRefresh: boolean,
-): ExistingPlanDecision {
-  if (forceRefresh) {
-    return { action: 'delete', reason: 'forceRefresh' };
-  }
-  const scenarios = existingPlan?.scenarios;
-  const count = Array.isArray(scenarios) ? scenarios.length : 0;
-  if (count === 0) {
-    return { action: 'delete', reason: 'empty-scenarios' };
-  }
-  return { action: 'reuse', reason: 'cache-hit' };
 }
 
 // デフォルトインスタンス
