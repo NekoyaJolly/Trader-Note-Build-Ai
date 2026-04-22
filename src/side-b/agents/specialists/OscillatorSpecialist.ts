@@ -10,10 +10,12 @@ import { modelFor } from '../../../config';
 import type { SpecialistInput, OscillatorAnalysis } from './types';
 import {
   formatLensDump,
-  callLLMForJson,
   clampNumber,
   pickEnum,
+  runSpecialistWithVariant,
 } from './specialistCommon';
+import type { PromptRegistry } from '../../prompts/registry/PromptRegistry';
+import type { RandomGenerator } from '../../prompts/registry/variantSelector';
 
 const OSCILLATOR_RELEVANT_LENSES = ['current_analysis', 'dow_theory'];
 
@@ -27,21 +29,42 @@ const MOMENTUM_STATES = [
 
 const DIVERGENCE_STATES = ['bullish_divergence', 'bearish_divergence', 'none'] as const;
 
+export interface OscillatorSpecialistDeps {
+  registry?: PromptRegistry;
+  rand?: RandomGenerator;
+}
+
 export class OscillatorSpecialist {
   constructor(
     private readonly ai: AIProvider = new AIProvider({
       model: modelFor('oscillator_specialist'),
     }),
+    private readonly deps: OscillatorSpecialistDeps = {},
   ) {}
 
+  /**
+   * Phase 6.6: PromptRegistry + variantSelector 経由でプロンプトを選択し、
+   * experimental は 20% 以下で試行、失敗時 active にフォールバック、
+   * スコアリング結果を recordUsage に書き込む。
+   */
   async analyze(input: SpecialistInput): Promise<OscillatorAnalysis | null> {
-    const system = loadPrompt('specialists/oscillator_specialist');
+    const fallback = loadPrompt('specialists/oscillator_specialist');
     const lensDump = formatLensDump(input.lensSnapshot, OSCILLATOR_RELEVANT_LENSES);
     const user = this.buildUserPrompt(input, lensDump);
 
-    const raw = await callLLMForJson(this.ai, system, user);
-    if (!raw || typeof raw !== 'object') return null;
-    return this.validate(raw as Record<string, unknown>);
+    const result = await runSpecialistWithVariant<OscillatorAnalysis>(this.ai, {
+      agentName: 'oscillator_specialist',
+      userPrompt: user,
+      fallbackSystemPrompt: fallback,
+      scoringInput: input,
+      validate: (raw) => {
+        if (!raw || typeof raw !== 'object') return null;
+        return this.validate(raw as Record<string, unknown>);
+      },
+      registry: this.deps.registry,
+      rand: this.deps.rand,
+    });
+    return result.output;
   }
 
   private buildUserPrompt(input: SpecialistInput, lensDump: string): string {

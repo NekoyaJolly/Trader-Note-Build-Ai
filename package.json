@@ -31,7 +31,8 @@
     "verify:ohlcv-save": "tsx scripts/verify-ohlcv-save-and-verify.ts",
     "verify:ohlcv-parallel-limit": "tsx scripts/verify-ohlcv-parallel-limit.ts",
     "test:ai": "tsx tests/ai-orchestrator/ai-test-runner.ts",
-    "mcp-server": "npx ts-node src/mcp-server/index.ts"
+    "mcp-server": "npx ts-node src/mcp-server/index.ts",
+    "cli:show-scoring": "tsx src/side-b/cli/showRecentScoring.ts"
   },
   "keywords": [],
   "author": "",

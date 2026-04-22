@@ -29,6 +29,10 @@ import {
     validateCondition,
     DEFAULT_RISK_MANAGEMENT,
 } from '../models/edgeHypothesis';
+import { PromptRegistry } from '../prompts/registry/PromptRegistry';
+import { selectVariant, type RandomGenerator } from '../prompts/registry/variantSelector';
+import { getScoringFunction } from '../prompts/abtest/scoringFunctions';
+import type { PromptVersion } from '../prompts/registry/types';
 
 // ===========================================
 // 型定義
@@ -205,12 +209,18 @@ export interface HypothesisGeneratorConfig {
     apiKey?: string;
     baseURL?: string;
     model?: string;
+    /** Phase 6.6: テスト差し替え用の PromptRegistry(省略時はデフォルトを使う)。 */
+    registry?: PromptRegistry;
+    /** Phase 6.6: テスト差し替え用の乱数生成器(省略時は Math.random)。 */
+    rand?: RandomGenerator;
 }
 
 export class HypothesisGeneratorAgent {
     private apiKey: string;
     private baseURL: string;
     private model: string;
+    private readonly registry: PromptRegistry;
+    private readonly rand: RandomGenerator;
 
     constructor(cfg?: HypothesisGeneratorConfig) {
         this.apiKey =
@@ -225,11 +235,21 @@ export class HypothesisGeneratorAgent {
             cfg?.model !== undefined
                 ? cfg.model
                 : modelFor('hypothesis_generator');
+        // Phase 6.6: registry / rand は未指定ならデフォルト(Prisma 本体に繋がる)
+        this.registry = cfg?.registry ?? new PromptRegistry();
+        this.rand = cfg?.rand ?? Math.random;
     }
 
     /**
      * レンズスナップショットと既存仮説から、新規候補を生成する。
      * API キーなしや失敗時は空の hypotheses を返す（呼び出し側は継続可能）。
+     *
+     * Phase 6.6: プロンプトは PromptRegistry + variantSelector で選択
+     *   1. getActive + getExperimental で候補取得(registry 未登録ならファイル loadPrompt に fallback)
+     *   2. selectVariant で確率的選択(experimental は 20% 以下)
+     *   3. 選ばれたプロンプトで LLM 呼び出し
+     *   4. scoringFunctions で即時スコアリング → recordUsage
+     *   5. experimental が失敗したら active で自動再試行
      */
     async generate(input: HypothesisGeneratorInput): Promise<HypothesisGeneratorResult> {
         if (!this.apiKey) {
@@ -241,9 +261,141 @@ export class HypothesisGeneratorAgent {
             return this.emptyResult('lensSnapshot が空');
         }
 
+        const userPrompt = this.buildUserPrompt(input);
+        // Phase 6.6: registry から active / experimental を取得(失敗時は fallback)
+        const { active, experimentals } = await this.loadVariants();
+        const fallbackSystem = loadPrompt('hypothesis_generator');
+
+        // registry に active が無ければ従来通り loadPrompt() で単純実行(後方互換)
+        if (!active) {
+            return this.runSingleWithPrompt(fallbackSystem, userPrompt, input);
+        }
+
+        // 1 回目: variantSelector で選択
+        const selection = selectVariant(active, experimentals, this.rand);
+        const primary = await this.runAndScore(
+            selection.selected.content,
+            userPrompt,
+            input,
+            selection.selected.id,
+        );
+        // recordUsage (primary)
+        await this.safeRecordUsage(selection.selected.id, primary.score, primary.success);
+
+        if (primary.success) {
+            return {
+                output: primary.output,
+                tokenUsage: primary.tokenUsage,
+                model: primary.model,
+            };
+        }
+
+        // experimental 失敗 → active で再試行
+        if (selection.isExperimental) {
+            const fallback = await this.runAndScore(
+                active.content,
+                userPrompt,
+                input,
+                active.id,
+            );
+            await this.safeRecordUsage(active.id, fallback.score, fallback.success);
+            return {
+                output: fallback.output,
+                tokenUsage: fallback.tokenUsage,
+                model: fallback.model,
+            };
+        }
+
+        // active 自体の失敗 → 既存仕様通り空応答
+        return {
+            output: primary.output,
+            tokenUsage: primary.tokenUsage,
+            model: primary.model,
+        };
+    }
+
+    /** registry から variant 候補を取得、失敗時は空で返す。 */
+    private async loadVariants(): Promise<{
+        active: PromptVersion | null;
+        experimentals: PromptVersion[];
+    }> {
         try {
-            const systemPrompt = loadPrompt('hypothesis_generator');
-            const userPrompt = this.buildUserPrompt(input);
+            const active = await this.registry.getActive('hypothesis_generator');
+            if (!active) return { active: null, experimentals: [] };
+            const experimentals = await this.registry.getExperimental('hypothesis_generator');
+            return { active, experimentals };
+        } catch (err) {
+            console.warn(
+                '[HypothesisGenerator] registry 読込失敗、ファイル fallback へ:',
+                err instanceof Error ? err.message : err,
+            );
+            return { active: null, experimentals: [] };
+        }
+    }
+
+    /** recordUsage を try/catch で wrap(DB 失敗でエージェント本体は止めない)。 */
+    private async safeRecordUsage(versionId: string, score: number, success: boolean): Promise<void> {
+        try {
+            await this.registry.recordUsage(versionId, { score, success });
+        } catch (err) {
+            console.warn(
+                `[HypothesisGenerator] recordUsage 失敗 (id=${versionId}):`,
+                err instanceof Error ? err.message : err,
+            );
+        }
+    }
+
+    /**
+     * 指定プロンプトで LLM 呼出 + バリデーション + スコアリング。
+     * 例外は捕捉し、success=false として返す。
+     */
+    private async runAndScore(
+        systemPrompt: string,
+        userPrompt: string,
+        input: HypothesisGeneratorInput,
+        _versionId: string,
+    ): Promise<{
+        output: HypothesisGeneratorOutput;
+        tokenUsage: number;
+        model: string;
+        score: number;
+        success: boolean;
+    }> {
+        try {
+            const raw = await this.callAI(systemPrompt, userPrompt);
+            const validated = validateHypothesisGeneratorOutput(raw.content, input.lensSnapshot);
+            const scoreFn = getScoringFunction('hypothesis_generator');
+            const score = scoreFn ? clamp01(scoreFn(input, validated)) : 1;
+            const success = score >= 0.3 && validated.hypotheses.length > 0;
+            return {
+                output: validated,
+                tokenUsage: raw.tokenUsage,
+                model: raw.model,
+                score,
+                success,
+            };
+        } catch (err) {
+            console.error('[HypothesisGenerator] 生成失敗:', err);
+            return {
+                output: { hypotheses: [], noveltyClaim: '生成失敗' },
+                tokenUsage: 0,
+                model: 'empty',
+                score: 0,
+                success: false,
+            };
+        }
+    }
+
+    /**
+     * registry 不使用の単純実行(fallback 経路、従来互換)。
+     * registry が空 or 接続失敗時に使う。recordUsage は呼ばない。
+     */
+    private async runSingleWithPrompt(
+        systemPrompt: string,
+        userPrompt: string,
+        input: HypothesisGeneratorInput,
+    ): Promise<HypothesisGeneratorResult> {
+        try {
             const raw = await this.callAI(systemPrompt, userPrompt);
             const validated = validateHypothesisGeneratorOutput(raw.content, input.lensSnapshot);
             return {
@@ -430,6 +582,11 @@ ${existingDump}
             model: 'empty',
         };
     }
+}
+
+function clamp01(x: number): number {
+    if (!Number.isFinite(x)) return 0;
+    return Math.max(0, Math.min(1, x));
 }
 
 export const hypothesisGeneratorAgent = new HypothesisGeneratorAgent();
