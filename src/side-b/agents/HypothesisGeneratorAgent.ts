@@ -219,7 +219,13 @@ export class HypothesisGeneratorAgent {
     private apiKey: string;
     private baseURL: string;
     private model: string;
-    private readonly registry: PromptRegistry;
+    /**
+     * registry は遅延生成。コンストラクタで new PromptRegistry() を呼ぶと
+     * module-load 時のデフォルトエクスポート生成で副作用が見えやすいので、
+     * 最初の generate() 呼び出し時まで初期化を遅らせる。テスト時は cfg.registry
+     * を渡せば遅延生成経路には入らない。
+     */
+    private _registry: PromptRegistry | null;
     private readonly rand: RandomGenerator;
 
     constructor(cfg?: HypothesisGeneratorConfig) {
@@ -235,9 +241,16 @@ export class HypothesisGeneratorAgent {
             cfg?.model !== undefined
                 ? cfg.model
                 : modelFor('hypothesis_generator');
-        // Phase 6.6: registry / rand は未指定ならデフォルト(Prisma 本体に繋がる)
-        this.registry = cfg?.registry ?? new PromptRegistry();
+        this._registry = cfg?.registry ?? null;
         this.rand = cfg?.rand ?? Math.random;
+    }
+
+    /** registry の遅延アクセサ。未指定時は初回参照で PromptRegistry を生成。 */
+    private get registry(): PromptRegistry {
+        if (!this._registry) {
+            this._registry = new PromptRegistry();
+        }
+        return this._registry;
     }
 
     /**
@@ -314,23 +327,37 @@ export class HypothesisGeneratorAgent {
         };
     }
 
-    /** registry から variant 候補を取得、失敗時は空で返す。 */
+    /**
+     * registry から variant 候補を取得。
+     * active と experimental を独立した try/catch で扱う:
+     *   - active 失敗 → fallback 経路 (loadPrompt 単純実行) へ
+     *   - experimental 失敗 → active のみで続行
+     */
     private async loadVariants(): Promise<{
         active: PromptVersion | null;
         experimentals: PromptVersion[];
     }> {
+        let active: PromptVersion | null = null;
         try {
-            const active = await this.registry.getActive('hypothesis_generator');
-            if (!active) return { active: null, experimentals: [] };
-            const experimentals = await this.registry.getExperimental('hypothesis_generator');
-            return { active, experimentals };
+            active = await this.registry.getActive('hypothesis_generator');
         } catch (err) {
             console.warn(
-                '[HypothesisGenerator] registry 読込失敗、ファイル fallback へ:',
+                '[HypothesisGenerator] active prompt の registry 読込失敗、ファイル fallback へ:',
                 err instanceof Error ? err.message : err,
             );
             return { active: null, experimentals: [] };
         }
+        if (!active) return { active: null, experimentals: [] };
+        let experimentals: PromptVersion[] = [];
+        try {
+            experimentals = await this.registry.getExperimental('hypothesis_generator');
+        } catch (err) {
+            console.warn(
+                '[HypothesisGenerator] experimental prompt の registry 読込失敗、active のみで続行:',
+                err instanceof Error ? err.message : err,
+            );
+        }
+        return { active, experimentals };
     }
 
     /** recordUsage を try/catch で wrap(DB 失敗でエージェント本体は止めない)。 */

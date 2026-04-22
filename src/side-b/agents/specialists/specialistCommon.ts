@@ -131,18 +131,28 @@ export async function runSpecialistWithVariant<TOutput>(
   const scoreFn = getScoringFunction(options.agentName);
 
   // 1. variant 候補取得
+  //    getActive と getExperimental は独立した try/catch で処理する:
+  //    - active 失敗 → 本当に fallbackSystemPrompt 経路へ (variant 選択できない)
+  //    - experimental 失敗 → active のみで続行 (variant 選択の片方が欠けるだけ)
   let active: PromptVersion | null = null;
   let experimentals: PromptVersion[] = [];
   try {
     active = await registry.getActive(options.agentName);
-    if (active) {
-      experimentals = await registry.getExperimental(options.agentName);
-    }
   } catch (err) {
     console.warn(
-      `[${options.agentName}] registry 読込失敗、fallback 経路へ:`,
+      `[${options.agentName}] active prompt の registry 読込失敗、fallback 経路へ:`,
       err instanceof Error ? err.message : err,
     );
+  }
+  if (active) {
+    try {
+      experimentals = await registry.getExperimental(options.agentName);
+    } catch (err) {
+      console.warn(
+        `[${options.agentName}] experimental prompt の registry 読込失敗、active のみで続行:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
 
   // registry に active が無ければ fallback 単純実行

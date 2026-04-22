@@ -16,8 +16,38 @@
  * このフェーズでは PromptVersion の aggregate 表示のみ(§3.6 MVP スコープ)。
  */
 
-import { PrismaClient } from '@prisma/client';
-import type { PromptVersion } from '../prompts/registry/types';
+import {
+  PrismaClient,
+  type Prisma,
+  type PromptVersion as PrismaPromptVersion,
+} from '@prisma/client';
+import type { PromptVersion, PromptStatus, PromptCreatedBy } from '../prompts/registry/types';
+
+/**
+ * CLI が必要とするカラムだけ select してメモリ / I/O を節約する。
+ * `content` は表示しないので除外(プロンプト本文は大きく、機密も含みうる)。
+ */
+const PROMPT_VERSION_SELECT = {
+  id: true,
+  agentName: true,
+  version: true,
+  parentVersionId: true,
+  createdBy: true,
+  status: true,
+  notes: true,
+  usageCount: true,
+  successCount: true,
+  avgScore: true,
+  lastUsedAt: true,
+  approvedAt: true,
+  approvedBy: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.PromptVersionSelect;
+
+type PromptVersionRow = Prisma.PromptVersionGetPayload<{
+  select: typeof PROMPT_VERSION_SELECT;
+}>;
 
 export interface Args {
   all: boolean;
@@ -43,15 +73,22 @@ export function parseArgs(argv: string[]): Args {
   return out;
 }
 
-function toDomain(row: any): PromptVersion {
+/**
+ * Prisma の select 結果をアプリ層の PromptVersion(content 省略)に変換する。
+ * CLI は content を表示しないため、PromptVersion の必須 `content` には空文字を入れる。
+ * status / createdBy は string 幅だが、PromptRegistry の型(PromptStatus /
+ * PromptCreatedBy)に narrowing しておく(未知値が来たら "experimental" / "human" に
+ * フォールバックして CLI は落とさない)。
+ */
+function toDomain(row: PromptVersionRow): PromptVersion {
   return {
     id: row.id,
     agentName: row.agentName,
     version: row.version,
-    content: row.content,
+    content: '',
     parentVersionId: row.parentVersionId ?? undefined,
-    createdBy: row.createdBy,
-    status: row.status,
+    createdBy: narrowCreatedBy(row.createdBy),
+    status: narrowStatus(row.status),
     notes: row.notes ?? undefined,
     usageCount: row.usageCount,
     successCount: row.successCount,
@@ -63,6 +100,25 @@ function toDomain(row: any): PromptVersion {
     updatedAt: row.updatedAt,
   };
 }
+
+const ALLOWED_STATUSES: PromptStatus[] = ['active', 'experimental', 'deprecated', 'rejected'];
+const ALLOWED_CREATED_BY: PromptCreatedBy[] = ['human', 'mutation', 'meta_evolution'];
+
+function narrowStatus(s: string): PromptStatus {
+  return (ALLOWED_STATUSES as readonly string[]).includes(s)
+    ? (s as PromptStatus)
+    : 'experimental';
+}
+
+function narrowCreatedBy(s: string): PromptCreatedBy {
+  return (ALLOWED_CREATED_BY as readonly string[]).includes(s)
+    ? (s as PromptCreatedBy)
+    : 'human';
+}
+
+// `PrismaPromptVersion` は Prisma 型の export エイリアス。現状未使用だが、
+// 将来 content を含む行を扱う場合の型注釈用に保持する。
+export type { PrismaPromptVersion };
 
 export function formatRow(p: PromptVersion): string {
   const last = p.lastUsedAt ? p.lastUsedAt.toISOString() : '-';
@@ -117,11 +173,14 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv);
   const prisma = new PrismaClient();
   try {
-    const where: any = {};
+    const where: Prisma.PromptVersionWhereInput = {};
     if (!args.all) {
       if (!args.agent) {
         console.error('Usage: --all か --agent <agentName> のいずれかを指定してください');
-        process.exit(1);
+        // finally で prisma.$disconnect が走るよう exitCode + return にする
+        // (process.exit(1) だと $disconnect がスキップされて接続リークする)
+        process.exitCode = 1;
+        return;
       }
       where.agentName = args.agent;
     }
@@ -130,6 +189,7 @@ async function main(): Promise<void> {
       where,
       orderBy: [{ lastUsedAt: 'desc' }, { createdAt: 'desc' }],
       take: args.limit,
+      select: PROMPT_VERSION_SELECT,
     });
     const prompts = rows.map(toDomain);
 
