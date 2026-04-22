@@ -20,7 +20,14 @@ import type {
   RecordUsageInput,
 } from './types';
 
-/** 既定の Prisma シングルトン(テストで差し替え可)。 */
+/**
+ * 既定の Prisma シングルトン(テストで差し替え可)。
+ *
+ * 遅延初期化:
+ *   `new PromptRegistry()` をモジュールロード時に実行しても、`PrismaClient` は
+ *   ここでは生成されない。最初の DB 操作(getActive 等)で初めて生成される。
+ *   そのため DB 設定が不要なユニットテスト / 型チェックでは副作用ゼロ。
+ */
 let defaultPrisma: PrismaClient | null = null;
 
 function getDefaultPrisma(): PrismaClient {

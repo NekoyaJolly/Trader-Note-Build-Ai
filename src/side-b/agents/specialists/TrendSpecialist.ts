@@ -18,34 +18,57 @@ import { modelFor } from '../../../config';
 import type { SpecialistInput, TrendAnalysis } from './types';
 import {
   formatLensDump,
-  callLLMForJson,
   clampNumber,
   pickEnum,
+  runSpecialistWithVariant,
 } from './specialistCommon';
+import type { PromptRegistry } from '../../prompts/registry/PromptRegistry';
+import type { RandomGenerator } from '../../prompts/registry/variantSelector';
 
 const TREND_RELEVANT_LENSES = ['dow_theory', 'current_analysis'];
 
 const TREND_STATES = ['strong_up', 'weak_up', 'ranging', 'weak_down', 'strong_down'] as const;
 const TREND_MATURITIES = ['early', 'middle', 'late'] as const;
 
+export interface TrendSpecialistDeps {
+  registry?: PromptRegistry;
+  rand?: RandomGenerator;
+}
+
 export class TrendSpecialist {
   constructor(
     private readonly ai: AIProvider = new AIProvider({
       model: modelFor('trend_specialist'),
     }),
+    private readonly deps: TrendSpecialistDeps = {},
   ) {}
 
   /**
    * トレンド分析を実行。失敗時は null。
+   *
+   * Phase 6.6: PromptRegistry + variantSelector を経由して active/experimental を
+   * 確率的に選び、スコアリング結果を recordUsage に書き込む。experimental 失敗
+   * 時は active で自動再試行する。registry に active が無い / 読み込み失敗時は
+   * 従来通り loadPrompt() の内容で実行(後方互換)。
    */
   async analyze(input: SpecialistInput): Promise<TrendAnalysis | null> {
-    const system = loadPrompt('specialists/trend_specialist');
+    const fallback = loadPrompt('specialists/trend_specialist');
     const lensDump = formatLensDump(input.lensSnapshot, TREND_RELEVANT_LENSES);
     const user = this.buildUserPrompt(input, lensDump);
 
-    const raw = await callLLMForJson(this.ai, system, user);
-    if (!raw || typeof raw !== 'object') return null;
-    return this.validate(raw as Record<string, unknown>);
+    const result = await runSpecialistWithVariant<TrendAnalysis>(this.ai, {
+      agentName: 'trend_specialist',
+      userPrompt: user,
+      fallbackSystemPrompt: fallback,
+      scoringInput: input,
+      validate: (raw) => {
+        if (!raw || typeof raw !== 'object') return null;
+        return this.validate(raw as Record<string, unknown>);
+      },
+      registry: this.deps.registry,
+      rand: this.deps.rand,
+    });
+    return result.output;
   }
 
   private buildUserPrompt(input: SpecialistInput, lensDump: string): string {
