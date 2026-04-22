@@ -52,6 +52,7 @@ import {
 } from '../lenses';
 import { agentMemory } from '../agent/agentMemory';
 import { edgeLedger } from '../ledger';
+import { decideExistingPlanAction } from './existingPlanDecision';
 import {
   HypothesisGeneratorAgent,
   hypothesisGeneratorAgent,
@@ -223,10 +224,11 @@ export class AIOrchestrator {
     console.log(`[Orchestrator] プラン生成開始: ${symbol} / ${dateStr} (forceRefresh=${forceRefresh})`);
 
     try {
-      // 1. 既存プランチェック（forceRefreshの場合は削除して再生成）
-      if (!forceRefresh) {
-        const existingPlan = await this.planRepo.findByDateAndSymbol(date, symbol);
-        if (existingPlan) {
+      // 1. 既存プランチェック(hotfix: shouldReuseExistingPlan で判定)
+      const existingPlan = await this.planRepo.findByDateAndSymbol(date, symbol);
+      if (existingPlan) {
+        const decision = decideExistingPlanAction(existingPlan, forceRefresh);
+        if (decision.action === 'reuse') {
           console.log(`[Orchestrator] 既存プラン発見: ${existingPlan.id}`);
           return {
             success: true,
@@ -235,13 +237,8 @@ export class AIOrchestrator {
             tokenUsage: 0,
           };
         }
-      } else {
-        // forceRefresh: 既存プランを削除して再生成
-        const existingPlan = await this.planRepo.findByDateAndSymbol(date, symbol);
-        if (existingPlan) {
-          console.log(`[Orchestrator] forceRefresh: 既存プラン削除: ${existingPlan.id}`);
-          await this.planRepo.delete(existingPlan.id);
-        }
+        console.log(`[Orchestrator] 既存プラン削除 (${decision.reason}): ${existingPlan.id}`);
+        await this.planRepo.delete(existingPlan.id);
       }
 
       // 2. リサーチ取得または生成
