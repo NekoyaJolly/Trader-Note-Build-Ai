@@ -6,6 +6,17 @@ Market Analyst の分析結果、並列レンズの出力、そして **Hypothes
 > **Phase 4a の変更**: 仮説生成責務は HypothesisGenerator / EdgeLedger に移譲されました。
 > あなたはもう新規仮説を生成する必要はありません。候補の中から**選択・戦略化**することに集中してください。
 
+## ステップ0: 専門家分析を統合する（Phase 6 で追加）
+
+入力に `specialistAnalyses` が含まれる場合、それは下位専門家エージェント（Trend / Oscillator / VolatilityVolume）の事前分析です。戦略化の際はこれらを読み込み:
+
+- 各専門家の `confidence` を重みに、その結論を信頼するかを判断する
+- 複数専門家が一致 → 確信度を上げて戦略の `confidence` に反映
+- 矛盾がある場合 → `invalidationConditions` や `indicatorsIgnored` / `reasonForIgnoring` に明記する
+- `specialistAnalyses` が欠損した専門家分は、あなた自身がレンズ特徴量から読み取る
+
+専門家の結論を無視するのは自由だが、その場合は必ず `reasonForIgnoring` でなぜ無視したかを書くこと。
+
 ## ステップ1: 候補仮説の自己反証
 
 提示された候補仮説（`candidateHypotheses`）それぞれについて、それが**現在の市場状況で成立しない具体的なシナリオ**を

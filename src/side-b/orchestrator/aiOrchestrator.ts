@@ -57,6 +57,10 @@ import {
   hypothesisGeneratorAgent,
 } from '../agents/HypothesisGeneratorAgent';
 import type { EdgeHypothesis } from '../models/edgeHypothesis';
+import {
+  runAllSpecialists,
+  type SpecialistBundle,
+} from '../agents/specialists';
 
 // ===========================================
 // 型定義
@@ -324,6 +328,12 @@ export class AIOrchestrator {
       // 4b. 候補仮説を集める（Phase 4a: EdgeLedger マッチ + HypothesisGenerator 新規）
       let candidateHypotheses: EdgeHypothesis[] = [];
       let hypothesisGeneratorTokens = 0;
+      /**
+       * Phase 6: 下位専門家 3 体の分析バンドル。HypothesisGenerator と Plan AI
+       * の両方に渡すため、条件分岐の外側で保持する。HypothesisGenerator を実際に
+       * 呼び出すパスに入った時だけ計算する(LLM コスト配慮、§5.3)。
+       */
+      let specialistBundle: SpecialistBundle | undefined;
       if (lensSnapshot) {
         try {
           const matched = await edgeLedger.findMatching(symbol, lensSnapshot, {
@@ -333,11 +343,37 @@ export class AIOrchestrator {
 
           // マッチが少ない時だけ新規候補を生成（LLMコスト制御）
           if (matched.length < 3) {
+            // Phase 6: 3 専門家を並列実行して分析バンドルを作る
+            try {
+              specialistBundle = await runAllSpecialists({
+                symbol,
+                timeframe: '15m',
+                lensSnapshot,
+              });
+              const filled = [
+                specialistBundle.trend && 'trend',
+                specialistBundle.oscillator && 'oscillator',
+                specialistBundle.volatilityVolume && 'volatilityVolume',
+              ].filter(Boolean);
+              console.log(
+                `[Orchestrator] 専門家分析完了: ${filled.length}/3 (${filled.join(',')})`,
+              );
+            } catch (err) {
+              console.warn('[Orchestrator] 専門家分析失敗(仮説生成は続行):', err);
+            }
+
             const genResult = await this.hypothesisGenerator.generate({
               symbol,
               timeframe: '15m',
               lensSnapshot,
               existingHypotheses: matched,
+              specialistAnalyses: specialistBundle
+                ? {
+                    trend: specialistBundle.trend ?? undefined,
+                    oscillator: specialistBundle.oscillator ?? undefined,
+                    volatilityVolume: specialistBundle.volatilityVolume ?? undefined,
+                  }
+                : undefined,
             });
             hypothesisGeneratorTokens = genResult.tokenUsage;
             const createInputs = this.hypothesisGenerator.toCreateInputs(
@@ -375,6 +411,14 @@ export class AIOrchestrator {
         higherTF: higherTFContext,
         lensSnapshot,
         candidateHypotheses,
+        // Phase 6: 専門家バンドルを再利用(この直前のサイクルで計算済みなら)
+        specialistAnalyses: specialistBundle
+          ? {
+              trend: specialistBundle.trend ?? undefined,
+              oscillator: specialistBundle.oscillator ?? undefined,
+              volatilityVolume: specialistBundle.volatilityVolume ?? undefined,
+            }
+          : undefined,
       };
 
       const planResult = await this.planAI.generatePlan(planInput);

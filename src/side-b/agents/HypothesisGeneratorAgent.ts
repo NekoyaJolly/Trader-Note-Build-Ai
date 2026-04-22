@@ -101,6 +101,16 @@ export interface HypothesisGeneratorInput {
     timeframe: string;
     lensSnapshot: LensFeatureSnapshot;
     existingHypotheses: EdgeHypothesis[];
+    /**
+     * Phase 6: 下位専門家エージェントによる事前分析(任意)。
+     * 渡された場合はプロンプトの ステップ0 で統合する。
+     * 渡されない場合、従来通りレンズ特徴量だけを参照する(後方互換)。
+     */
+    specialistAnalyses?: {
+        trend?: unknown;
+        oscillator?: unknown;
+        volatilityVolume?: unknown;
+    };
 }
 
 export interface HypothesisGeneratorResult {
@@ -303,6 +313,8 @@ export class HypothesisGeneratorAgent {
                       .map((h) => `- [${h.status}] ${h.statement}`)
                       .join('\n');
 
+        const specialistsDump = this.formatSpecialistAnalyses(input.specialistAnalyses);
+
         return `# 仮説生成リクエスト
 
 ## 対象
@@ -311,12 +323,38 @@ export class HypothesisGeneratorAgent {
 
 ## 現在のレンズスナップショット
 ${lensDump.join('\n')}
-
+${specialistsDump}
 ## 既存仮説リスト（重複回避）
 ${existingDump}
 
 上記の既存仮説と**意味的に異なる**新規仮説を最大3個生成してください。
 新規性がなければ 0 個で構いません。`;
+    }
+
+    /**
+     * Phase 6: specialistAnalyses のダンプをプロンプト向けに整形する。
+     * 未指定時は空文字を返し、プロンプト本文に影響を与えない(後方互換)。
+     */
+    private formatSpecialistAnalyses(
+        specialistAnalyses?: HypothesisGeneratorInput['specialistAnalyses'],
+    ): string {
+        if (!specialistAnalyses) return '';
+        const entries: string[] = [];
+        if (specialistAnalyses.trend) {
+            entries.push(`### Trend Specialist\n${JSON.stringify(specialistAnalyses.trend, null, 2)}`);
+        }
+        if (specialistAnalyses.oscillator) {
+            entries.push(
+                `### Oscillator Specialist\n${JSON.stringify(specialistAnalyses.oscillator, null, 2)}`,
+            );
+        }
+        if (specialistAnalyses.volatilityVolume) {
+            entries.push(
+                `### Volatility/Volume Specialist\n${JSON.stringify(specialistAnalyses.volatilityVolume, null, 2)}`,
+            );
+        }
+        if (entries.length === 0) return '';
+        return `\n## 下位専門家の分析(統合して使う)\n${entries.join('\n\n')}\n`;
     }
 
     private isDuplicateOfExisting(
