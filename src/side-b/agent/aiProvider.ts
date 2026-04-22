@@ -3,12 +3,15 @@
  *
  * OpenAI互換の Chat Completions API を共通インターフェースとして使い、
  * .env の AI_BASE_URL / AI_MODEL / AI_API_KEY を切り替えるだけで
- * Gemini / OpenAI / Claude 等あらゆるモデルに対応する。
+ * OpenRouter / Gemini / OpenAI / Claude 等あらゆるモデルに対応する。
  *
  * 使い方:
  *   const provider = new AIProvider();
- *   const response = await provider.chat(messages, tools);
+ *   const response = await provider.chat(messages, { maxTokens: 4096 });
  *   // response.toolCalls があればツール実行 → 結果を messages に追加して再送信
+ *
+ * Phase 6 hotfix: chat() の 2 番目以降の引数を ChatOptions オブジェクトに統一
+ * (破壊的変更、旧 (messages, tools?, temperature?) 形式は廃止)
  */
 
 import { config } from '../../config';
@@ -62,6 +65,20 @@ interface OpenAIToolDef {
     };
 }
 
+/**
+ * chat() の呼び出しオプション (Phase 6 hotfix で統一)。
+ *
+ * - `temperature`: サンプリング温度 (既定 0.3)
+ * - `maxTokens`: 生成トークン上限 (既定: プロバイダー既定 = 指定しない)
+ *   Phase 6 系エージェントは JSON 応答が長くなるため 4096 を明示指定推奨
+ * - `tools`: function calling 用の MCP ツール定義
+ */
+export interface ChatOptions {
+    temperature?: number;
+    maxTokens?: number;
+    tools?: McpToolDefinition[];
+}
+
 // ===========================================
 // AI Provider クラス
 // ===========================================
@@ -100,22 +117,31 @@ export class AIProvider {
      * Chat Completions API を呼び出す
      *
      * @param messages メッセージ履歴
-     * @param mcpTools MCPツール定義（省略可）
-     * @param temperature 温度パラメータ（デフォルト: 0.3）
+     * @param options  ChatOptions (temperature / maxTokens / tools)
+     *                 省略時: temperature=0.3, maxTokens=未指定(プロバイダー既定)
      * @returns AI応答（テキスト or ツール呼び出し要求）
+     *
+     * Phase 6 hotfix (破壊的変更): 旧 (messages, mcpTools?, temperature?) の
+     * ポジショナル引数形式は廃止、options オブジェクトに統一
      */
     async chat(
         messages: ChatMessage[],
-        mcpTools?: McpToolDefinition[],
-        temperature = 0.3,
+        options: ChatOptions = {},
     ): Promise<AIResponse> {
+        const temperature = options.temperature ?? 0.3;
         const body: Record<string, unknown> = {
             model: this.model,
             messages,
             temperature,
         };
 
+        // max_tokens は明示指定された時のみ付ける(プロバイダー既定に任せたい場合は省略可)
+        if (options.maxTokens !== undefined) {
+            body.max_tokens = options.maxTokens;
+        }
+
         // ツール定義がある場合のみ追加
+        const mcpTools = options.tools;
         if (mcpTools && mcpTools.length > 0) {
             body.tools = this.convertToolsToOpenAIFormat(mcpTools);
             body.tool_choice = 'auto';

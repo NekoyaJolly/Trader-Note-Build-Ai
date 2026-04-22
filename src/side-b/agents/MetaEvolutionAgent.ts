@@ -18,6 +18,7 @@ import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { loadPrompt } from '../prompts/loader';
 import { modelFor } from '../../config';
 import { PromptRegistry } from '../prompts/registry/PromptRegistry';
+import { extractJson } from './llmJsonExtract';
 
 export interface AgentPerformance {
   agentName: string;
@@ -100,23 +101,14 @@ async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<T | null
   return null;
 }
 
+/**
+ * Phase 6 hotfix: `extractJson` 経由で 3 段階 fallback (raw → fence → bracket) を使う。
+ * 応答が max_tokens で打ち切られ Unterminated string になった場合は null を返す。
+ */
 function parseProposalJson(content: string): AgentRestructureProposal | null {
-  const fence = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const body = (fence ? fence[1] : content).trim();
-  let raw: unknown;
-  try {
-    raw = JSON.parse(body);
-  } catch {
-    const first = body.indexOf('{');
-    const last = body.lastIndexOf('}');
-    if (first < 0 || last <= first) return null;
-    try {
-      raw = JSON.parse(body.slice(first, last + 1));
-    } catch {
-      return null;
-    }
-  }
-  return normalizeProposal(raw);
+  const extracted = extractJson(content);
+  if (!extracted.ok) return null;
+  return normalizeProposal(extracted.data);
 }
 
 function normalizeProposal(raw: unknown): AgentRestructureProposal | null {
@@ -207,8 +199,7 @@ export class MetaEvolutionAgent {
           { role: 'system', content: system },
           { role: 'user', content: user },
         ] as ChatMessage[],
-        undefined,
-        0.4,
+        { temperature: 0.4, maxTokens: 4096 },
       ),
     );
     if (!res?.content) return null;

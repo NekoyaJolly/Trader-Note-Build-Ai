@@ -8,6 +8,7 @@
 
 import type { AIProvider, ChatMessage } from '../../agent/aiProvider';
 import type { LensFeatureSnapshot } from '../../lenses';
+import { extractJson } from '../llmJsonExtract';
 
 export const SPECIALIST_REQUEST_TIMEOUT_MS = 60_000;
 
@@ -48,8 +49,7 @@ export async function callLLMForJson(
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ] as ChatMessage[],
-        undefined,
-        0.3,
+        { temperature: 0.3, maxTokens: 4096 },
       );
       if (!res.content) continue;
       const parsed = parseJsonLoose(res.content);
@@ -64,25 +64,16 @@ export async function callLLMForJson(
   return null;
 }
 
-/** Markdown フェンス付き / 前後に説明が付いた JSON を抜き出してパース。失敗時 null。 */
+/**
+ * Markdown フェンス付き / 前後に説明が付いた JSON を抜き出してパース。失敗時 null。
+ *
+ * Phase 6 hotfix: `extractJson` に統一 (raw → fence → bracket の 3 段階 fallback)。
+ * 応答本文中の ``` 誤マッチを回避、max_tokens 打ち切りの Unterminated string にも
+ * 対応。
+ */
 export function parseJsonLoose(content: string): unknown | null {
-  const fence = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const body = (fence ? fence[1] : content).trim();
-  try {
-    return JSON.parse(body);
-  } catch {
-    // 全体がダメなら最初の { から最後の } までを抜き出して再試行
-    const first = body.indexOf('{');
-    const last = body.lastIndexOf('}');
-    if (first >= 0 && last > first) {
-      try {
-        return JSON.parse(body.slice(first, last + 1));
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  }
+  const extracted = extractJson(content);
+  return extracted.ok ? extracted.data : null;
 }
 
 /** 数値を [min, max] にクランプ。非数値は fallback。 */

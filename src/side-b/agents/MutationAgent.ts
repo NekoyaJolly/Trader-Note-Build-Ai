@@ -10,6 +10,7 @@ import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { loadPrompt } from '../prompts/loader';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
 import { modelFor } from '../../config';
+import { extractJson } from './llmJsonExtract';
 
 async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<T | null> {
   let last: unknown;
@@ -25,9 +26,11 @@ async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<T | null
 }
 
 function parseStrategyArray(content: string): StrategyDSL[] {
-  const fence = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const body = (fence ? fence[1] : content).trim();
-  const data = JSON.parse(body) as unknown;
+  const extracted = extractJson(content);
+  if (!extracted.ok) {
+    throw new Error(`LLM 応答を JSON として解釈できませんでした: ${extracted.error}`);
+  }
+  const data = extracted.data;
   if (!Array.isArray(data)) {
     throw new Error('応答は JSON 配列である必要があります');
   }
@@ -65,8 +68,7 @@ export class MutationAgent {
           { role: 'system', content: system },
           { role: 'user', content: user },
         ] as ChatMessage[],
-        undefined,
-        0.4,
+        { temperature: 0.4, maxTokens: 4096 },
       ),
     );
     if (!res?.content) return [];
@@ -96,8 +98,7 @@ export class MutationAgent {
           { role: 'system', content: system },
           { role: 'user', content: user },
         ] as ChatMessage[],
-        undefined,
-        0.8,
+        { temperature: 0.8, maxTokens: 4096 },
       ),
     );
     if (!res?.content) return [];
