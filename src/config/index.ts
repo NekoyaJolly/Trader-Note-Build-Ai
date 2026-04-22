@@ -113,31 +113,35 @@ export const config = {
   },
   ai: {
     apiKey: process.env.AI_API_KEY || '',
-    // 既定値は Gemini（OpenAI互換エンドポイント）に寄せる。
-    // 理由: 本プロジェクトでは AI_BASE_URL / AI_MODEL を差し替えるだけで
-    //      Gemini / OpenAI どちらにも切り替えられる設計になっているため。
-    model: process.env.AI_MODEL || 'gemini-3-flash-preview',
-    baseURL: process.env.AI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai',
-    // エージェント別モデルオーバーライド。
-    // 未設定（空文字列）ならグローバルの `ai.model` にフォールバックする。
-    // 参照は `modelFor('<key>')` ヘルパー経由を推奨。
+    // Phase 6.5: OpenRouter (https://openrouter.ai/api/v1) を既定プロキシとし、
+    // OpenAI 互換 /chat/completions 1 本で複数プロバイダー(Anthropic / Google / Qwen 等)の
+    // モデルを呼び分ける設計に統一。
+    // 各エージェントは `config.ai.models[<key>]` に明示的なモデル ID を持つ(下記)。
+    // グローバル既定 `config.ai.model` は安全網としてのみ使う(新エージェント追加時の忘れ対策)。
+    model: process.env.AI_MODEL || 'anthropic/claude-sonnet-4.6',
+    baseURL: process.env.AI_BASE_URL || 'https://openrouter.ai/api/v1',
+    // エージェント別モデル既定値(Phase 6.5 確定)。
+    // - 最重要判断(MetaEvolution/Strategist/HypothesisGen/Discovery/DevilsAdvocate) → Opus 4.7
+    // - 中位生成系(Mutation/Crossover/PromptMutation/StrategyThinker/Reflection) → Sonnet 4.6 or Haiku 4.5
+    // - 下位専門家 + 軽量タスク → Gemini 3.1 Flash Lite Preview
+    // 環境変数 `AI_MODEL_<KEY>` で上書き可。
     models: {
-      strategist: process.env.AI_MODEL_STRATEGIST || '',
-      devils_advocate: process.env.AI_MODEL_DEVILS_ADVOCATE || '',
-      discovery: process.env.AI_MODEL_DISCOVERY || '',
-      hypothesis_generator: process.env.AI_MODEL_HYPOTHESIS_GENERATOR || '',
-      plan: process.env.AI_MODEL_PLAN || '',
-      research: process.env.AI_MODEL_RESEARCH || '',
-      reflection: process.env.AI_MODEL_REFLECTION || '',
-      lesson_similarity: process.env.AI_MODEL_LESSON_SIMILARITY || '',
-      mutation: process.env.AI_MODEL_MUTATION || '',
-      crossover: process.env.AI_MODEL_CROSSOVER || '',
-      // Phase 6: 既定は Sonnet 4.6、MetaEvolutionAgent のみ Opus 4.7
-      trend_specialist: process.env.AI_MODEL_TREND_SPECIALIST || 'claude-sonnet-4-6',
-      oscillator_specialist: process.env.AI_MODEL_OSCILLATOR_SPECIALIST || 'claude-sonnet-4-6',
-      volatility_volume_specialist: process.env.AI_MODEL_VOLATILITY_VOLUME_SPECIALIST || 'claude-sonnet-4-6',
-      prompt_mutation: process.env.AI_MODEL_PROMPT_MUTATION || 'claude-sonnet-4-6',
-      meta_evolution: process.env.AI_MODEL_META_EVOLUTION || 'claude-opus-4-7',
+      strategist: process.env.AI_MODEL_STRATEGIST || 'anthropic/claude-opus-4.7',
+      devils_advocate: process.env.AI_MODEL_DEVILS_ADVOCATE || 'anthropic/claude-opus-4.7',
+      discovery: process.env.AI_MODEL_DISCOVERY || 'anthropic/claude-opus-4.7',
+      hypothesis_generator: process.env.AI_MODEL_HYPOTHESIS_GENERATOR || 'anthropic/claude-opus-4.7',
+      plan: process.env.AI_MODEL_PLAN || 'anthropic/claude-sonnet-4.6',
+      research: process.env.AI_MODEL_RESEARCH || 'google/gemini-3.1-flash-lite-preview',
+      reflection: process.env.AI_MODEL_REFLECTION || 'anthropic/claude-haiku-4.5',
+      lesson_similarity: process.env.AI_MODEL_LESSON_SIMILARITY || 'google/gemini-3.1-flash-lite-preview',
+      mutation: process.env.AI_MODEL_MUTATION || 'anthropic/claude-sonnet-4.6',
+      crossover: process.env.AI_MODEL_CROSSOVER || 'anthropic/claude-sonnet-4.6',
+      trend_specialist: process.env.AI_MODEL_TREND_SPECIALIST || 'google/gemini-3.1-flash-lite-preview',
+      oscillator_specialist: process.env.AI_MODEL_OSCILLATOR_SPECIALIST || 'google/gemini-3.1-flash-lite-preview',
+      volatility_volume_specialist:
+        process.env.AI_MODEL_VOLATILITY_VOLUME_SPECIALIST || 'google/gemini-3.1-flash-lite-preview',
+      prompt_mutation: process.env.AI_MODEL_PROMPT_MUTATION || 'anthropic/claude-sonnet-4.6',
+      meta_evolution: process.env.AI_MODEL_META_EVOLUTION || 'anthropic/claude-opus-4.7',
     } as Record<AIAgentKey, string>,
   },
   market: {
@@ -183,10 +187,12 @@ export const config = {
  *
  * 優先順位:
  *   1. エージェント別環境変数 `AI_MODEL_<KEY>`（例: `AI_MODEL_STRATEGIST`）
- *   2. グローバル `AI_MODEL` / `config.ai.model`
+ *   2. `config.ai.models[key]` のハードコード既定値 (Phase 6.5 で全キー設定済み)
+ *   3. グローバル `AI_MODEL` / `config.ai.model` (安全網、通常は使われない)
  *
- * エージェント別の指定を省略すると従来どおりグローバル既定が使われるため
- * 既存挙動を壊さない。
+ * Phase 6.5: 全エージェントが `config.ai.models` に明示的なモデル ID を持つため
+ * 通常は 2 で解決し 3 にはフォールバックしない。3 は将来の新エージェント追加時の
+ * 安全網としてのみ残す。
  */
 export function modelFor(key: AIAgentKey): string {
   return config.ai.models[key] || config.ai.model;
