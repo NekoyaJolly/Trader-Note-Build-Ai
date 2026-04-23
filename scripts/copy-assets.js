@@ -23,12 +23,20 @@ const ROOT = path.resolve(__dirname, '..');
 const SRC = path.join(ROOT, 'src');
 const DIST = path.join(ROOT, 'dist');
 
-/** コピー対象のルール定義。追加したい場合はここに足す。 */
+/**
+ * コピー対象のルール定義。追加したい場合はここに足す。
+ *
+ * `minCount`:
+ *   このルールが必須アセットかを示す最小コピー件数。満たないと
+ *   非 0 終了してビルドを失敗させる(サイレント欠落で本番障害になるのを防ぐ)。
+ *   オプショナルアセットなら 0 を指定する。
+ */
 const COPY_RULES = [
   {
     sourceDir: path.join(SRC, 'side-b', 'prompts'),
     targetDir: path.join(DIST, 'side-b', 'prompts'),
     extensions: ['.md'],
+    minCount: 1,
   },
 ];
 
@@ -52,12 +60,21 @@ function walk(dir, callback) {
 }
 
 let total = 0;
+const errors = [];
 
 for (const rule of COPY_RULES) {
+  let ruleCount = 0;
+
   if (!fs.existsSync(rule.sourceDir)) {
-    console.warn(`[copy-assets] skip: source directory not found ${rule.sourceDir}`);
+    const msg = `source directory not found: ${rule.sourceDir}`;
+    if ((rule.minCount ?? 0) > 0) {
+      errors.push(`[required] ${msg}`);
+    } else {
+      console.warn(`[copy-assets] skip: ${msg}`);
+    }
     continue;
   }
+
   walk(rule.sourceDir, (sourcePath) => {
     const ext = path.extname(sourcePath);
     if (!rule.extensions.includes(ext)) return;
@@ -65,8 +82,26 @@ for (const rule of COPY_RULES) {
     const targetPath = path.join(rule.targetDir, relative);
     ensureDir(path.dirname(targetPath));
     fs.copyFileSync(sourcePath, targetPath);
+    ruleCount++;
     total++;
   });
+
+  if (ruleCount < (rule.minCount ?? 0)) {
+    errors.push(
+      `[required] rule ${rule.sourceDir} copied only ${ruleCount} files (minCount=${rule.minCount})`,
+    );
+  } else {
+    console.log(
+      `[copy-assets] rule ${path.relative(ROOT, rule.sourceDir)}: copied ${ruleCount} files`,
+    );
+  }
 }
 
-console.log(`[copy-assets] copied ${total} files to dist/`);
+// 必須アセットが不足していればビルドを失敗させる(本番のサイレント欠落防止)
+if (errors.length > 0) {
+  console.error('[copy-assets] FAILED: required assets missing');
+  for (const e of errors) console.error(`  - ${e}`);
+  process.exit(1);
+}
+
+console.log(`[copy-assets] done. total ${total} files copied to dist/`);

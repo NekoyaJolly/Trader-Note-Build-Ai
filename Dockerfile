@@ -19,8 +19,10 @@ COPY . .
 RUN npx tsc
 
 # 非 .ts アセット(.md プロンプト等)を dist にコピー
-# loadPrompt() が実行時参照するため dist/side-b/prompts/ に配置する必要がある
-RUN node scripts/copy-assets.js
+# loadPrompt() が実行時参照するため dist/side-b/prompts/ に配置する必要がある。
+# copy-assets.js は minCount 未満なら非 0 終了するので、.dockerignore で
+# プロンプト .md が欠落した場合はここでビルドが失敗し本番へ出ない。
+RUN npm run copy:assets
 
 # ============================================================
 # 実行ステージ
