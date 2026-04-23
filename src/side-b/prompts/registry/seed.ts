@@ -32,6 +32,11 @@ export interface SeedEntry {
 
 /** Phase 6 着手時点で seed 対象となるエージェントの既定リスト。 */
 export const DEFAULT_SEED_ENTRIES: SeedEntry[] = [
+  // Phase 6.7a: グローバルルール(全エージェント共通の前段プロンプト)
+  //   - agentName は __global__ 固定(PromptRegistry.GLOBAL_AGENT_NAME)
+  //   - PromptMutation / MetaEvolution の対象外(安全装置あり)
+  //   - 更新は人間承認フロー経由のみ
+  { agentName: '__global__', file: '__global__.md', notes: 'Phase 6.7a Global Rules' },
   { agentName: 'strategist', file: 'strategist.md', notes: 'Phase 4c StrategistAgent' },
   { agentName: 'devils_advocate', file: 'devils_advocate.md', notes: 'Phase 2 DevilsAdvocate' },
   { agentName: 'discovery', file: 'discovery.md', notes: 'Phase 4a DiscoveryAgent' },
