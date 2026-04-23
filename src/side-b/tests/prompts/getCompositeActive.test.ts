@@ -5,6 +5,7 @@
  * in-memory fake Prisma を注入し、__global__ の有無・マクロ展開・例外経路を確認。
  */
 
+import type { PrismaClient } from '@prisma/client';
 import { PromptRegistry, GLOBAL_AGENT_NAME } from '../../prompts/registry/PromptRegistry';
 
 interface FakeRow {
@@ -26,55 +27,91 @@ interface FakeRow {
   updatedAt: Date;
 }
 
-function makeFakePrisma() {
+interface CreateArgs {
+  data: Partial<FakeRow> & {
+    agentName: string;
+    version: string;
+    content: string;
+    createdBy: string;
+  };
+}
+interface FindFirstArgs { where: { agentName: string; status: string } }
+
+interface FakePromptVersionDelegate {
+  create: jest.Mock<Promise<FakeRow>, [CreateArgs]>;
+  findFirst: jest.Mock<Promise<FakeRow | null>, [FindFirstArgs]>;
+  findMany: jest.Mock<Promise<FakeRow[]>, []>;
+  findUnique: jest.Mock<Promise<null>, []>;
+  findUniqueOrThrow: jest.Mock;
+  update: jest.Mock;
+  updateMany: jest.Mock;
+}
+
+interface FakePrismaStub {
+  promptVersion: FakePromptVersionDelegate;
+  $transaction: jest.Mock<Promise<unknown>, [(tx: FakePrismaStub) => Promise<unknown>]>;
+}
+
+function makeFakePrisma(): { fake: FakePrismaStub; rows: FakeRow[] } {
   const rows: FakeRow[] = [];
   let seq = 0;
-  const fake: any = {
-    promptVersion: {
-      create: jest.fn(async ({ data }: { data: Partial<FakeRow> }) => {
-        seq++;
-        const row: FakeRow = {
-          id: `id-${seq}`,
-          agentName: data.agentName!,
-          version: data.version!,
-          content: data.content!,
-          parentVersionId: data.parentVersionId ?? null,
-          createdBy: data.createdBy!,
-          status: data.status ?? 'experimental',
-          notes: data.notes ?? null,
-          usageCount: 0,
-          successCount: 0,
-          avgScore: 0,
-          lastUsedAt: null,
-          approvedAt: null,
-          approvedBy: null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        };
-        rows.push(row);
-        return { ...row };
-      }),
-      findFirst: jest.fn(async ({ where }: { where: { agentName: string; status: string } }) => {
-        const r = rows.find(
-          (x) => x.agentName === where.agentName && x.status === where.status,
-        );
-        return r ? { ...r } : null;
-      }),
-      findMany: jest.fn(async () => rows.map((r) => ({ ...r }))),
-      findUnique: jest.fn(async () => null),
-      findUniqueOrThrow: jest.fn(),
-      update: jest.fn(),
-      updateMany: jest.fn(),
-    },
+
+  const promptVersion: FakePromptVersionDelegate = {
+    create: jest.fn(async ({ data }: CreateArgs) => {
+      seq++;
+      const row: FakeRow = {
+        id: `id-${seq}`,
+        agentName: data.agentName,
+        version: data.version,
+        content: data.content,
+        parentVersionId: data.parentVersionId ?? null,
+        createdBy: data.createdBy,
+        status: data.status ?? 'experimental',
+        notes: data.notes ?? null,
+        usageCount: 0,
+        successCount: 0,
+        avgScore: 0,
+        lastUsedAt: null,
+        approvedAt: null,
+        approvedBy: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      rows.push(row);
+      return { ...row };
+    }),
+    findFirst: jest.fn(async ({ where }: FindFirstArgs) => {
+      const r = rows.find(
+        (x) => x.agentName === where.agentName && x.status === where.status,
+      );
+      return r ? { ...r } : null;
+    }),
+    findMany: jest.fn(async () => rows.map((r) => ({ ...r }))),
+    findUnique: jest.fn(async () => null),
+    findUniqueOrThrow: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
   };
-  fake.$transaction = jest.fn(async (fn: any) => fn(fake));
+
+  const fake: FakePrismaStub = {
+    promptVersion,
+    $transaction: jest.fn(async (fn) => fn(fake)),
+  };
   return { fake, rows };
+}
+
+/**
+ * 境界 cast: FakePrismaStub は PromptRegistry が使うメソッドを完全型付けしており、
+ * unknown 経由の二重 cast は行わない。
+ */
+function asPrisma(stub: FakePrismaStub): PrismaClient {
+  return stub as unknown as PrismaClient;
 }
 
 describe('PromptRegistry.getCompositeActive', () => {
   it('global + agent の content を "\\n\\n" で連結して返す', async () => {
     const { fake } = makeFakePrisma();
-    const reg = new PromptRegistry(fake as any);
+    const reg = new PromptRegistry(asPrisma(fake));
     await reg.register({
       agentName: GLOBAL_AGENT_NAME,
       version: 'initial',
@@ -95,7 +132,7 @@ describe('PromptRegistry.getCompositeActive', () => {
 
   it('macros を両方の content に適用する', async () => {
     const { fake } = makeFakePrisma();
-    const reg = new PromptRegistry(fake as any);
+    const reg = new PromptRegistry(asPrisma(fake));
     await reg.register({
       agentName: GLOBAL_AGENT_NAME,
       version: 'initial',
@@ -120,7 +157,7 @@ describe('PromptRegistry.getCompositeActive', () => {
 
   it('__global__ が存在しない場合は agent 単独で返す(警告のみ、落ちない)', async () => {
     const { fake } = makeFakePrisma();
-    const reg = new PromptRegistry(fake as any);
+    const reg = new PromptRegistry(asPrisma(fake));
     await reg.register({
       agentName: 'trend_specialist',
       version: 'initial',
@@ -139,7 +176,7 @@ describe('PromptRegistry.getCompositeActive', () => {
 
   it('指定 agent の active が存在しない場合は例外', async () => {
     const { fake } = makeFakePrisma();
-    const reg = new PromptRegistry(fake as any);
+    const reg = new PromptRegistry(asPrisma(fake));
     // __global__ だけあって他は無い状態
     await reg.register({
       agentName: GLOBAL_AGENT_NAME,
@@ -155,7 +192,7 @@ describe('PromptRegistry.getCompositeActive', () => {
 
   it('agentName に __global__ を直接渡すと例外(保守的ガード)', async () => {
     const { fake } = makeFakePrisma();
-    const reg = new PromptRegistry(fake as any);
+    const reg = new PromptRegistry(asPrisma(fake));
     await expect(reg.getCompositeActive(GLOBAL_AGENT_NAME)).rejects.toThrow(
       /通常エージェントとして取得できない/,
     );
