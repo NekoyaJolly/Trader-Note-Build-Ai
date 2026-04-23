@@ -69,6 +69,7 @@ describe('OHLCVRepository', () => {
       const result = await repository.upsert(testData);
 
       expect(result).toBeDefined();
+      if (!result) throw new Error('upsert returned null');
       expect(result.symbol).toBe(TEST_SYMBOL);
       expect(Number(result.open)).toBe(100.0);
       expect(Number(result.high)).toBe(105.0);
@@ -99,6 +100,7 @@ describe('OHLCVRepository', () => {
       };
       const result = await repository.upsert(updatedData);
 
+      if (!result) throw new Error('upsert returned null');
       expect(Number(result.close)).toBe(110.0);
       expect(Number(result.volume)).toBe(2000);
 
