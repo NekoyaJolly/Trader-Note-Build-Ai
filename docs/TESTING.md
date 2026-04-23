@@ -2,11 +2,10 @@
 
 ## 概要
 
-TradeAssistでは、以下の3層のテスト戦略を採用しています:
+TradeAssistでは、以下の2層のテスト戦略を採用しています:
 
 1. **Unit Tests** (Jest) - 個別関数・モジュールのテスト
 2. **E2E Tests** (Playwright) - ブラウザ自動テスト
-3. **AI-Driven Tests** - AIエージェントによる包括的テスト
 
 ## セットアップ
 
@@ -33,10 +32,6 @@ npx playwright install chromium
 ```bash
 # データベース（テスト用）
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/tradeassist_test
-
-# AIテスト用（オプション）
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ## テスト実行
@@ -87,27 +82,11 @@ SKIP_WEBSERVER=1 npm run test:e2e
 - サーバーを手動で起動している場合は `SKIP_WEBSERVER=1` を使用してください
 - CI環境では必要な環境変数が自動的に設定されます
 
-### 3. AI駆動テスト
-
-```bash
-# AIテストオーケストレーター実行
-npm run test:ai
-
-# 環境変数指定
-OPENAI_API_KEY=sk-... npm run test:ai
-
-# ヘッドレスモード無効化（動作を確認）
-HEADLESS=false npm run test:ai
-```
-
 ### レポート確認
 
 ```bash
 # Playwright HTMLレポート表示
 npm run test:e2e:report
-
-# AIテストレポート確認
-cat playwright-report/ai-test-report.json
 
 # テスト動画確認（失敗時のみ生成）
 ls test-videos/
@@ -117,17 +96,17 @@ ls test-videos/
 
 ### 現在のカバレッジ
 
-| 機能 | Unit | E2E | AI |
-|------|------|-----|-----|
-| 認証（cTrader OAuth） | ✅ | ✅ | 🔄 |
-| トレードノート作成・編集・削除 | ✅ | ✅ | 🔄 |
-| ダッシュボード表示 | ✅ | ✅ | 🔄 |
-| 市場データ一致判定 | ✅ | ⚠️ | 🔄 |
-| 通知機能 | ✅ | ⚠️ | 🔄 |
-| チャート操作 | ⚠️ | ⚠️ | 🔄 |
-| プロファイル管理 | ✅ | ⚠️ | 🔄 |
+| 機能 | Unit | E2E |
+|------|------|-----|
+| 認証（cTrader OAuth） | ✅ | ✅ |
+| トレードノート作成・編集・削除 | ✅ | ✅ |
+| ダッシュボード表示 | ✅ | ✅ |
+| 市場データ一致判定 | ✅ | ⚠️ |
+| 通知機能 | ✅ | ⚠️ |
+| チャート操作 | ⚠️ | ⚠️ |
+| プロファイル管理 | ✅ | ⚠️ |
 
-凡例: ✅ 完了 | ⚠️ 部分的 | 🔄 計画中
+凡例: ✅ 完了 | ⚠️ 部分的
 
 ### テストファイル構成
 
@@ -139,10 +118,6 @@ tests/
 │   ├── trade-notes.spec.ts       # トレードノート
 │   ├── market-data.spec.ts       # 市場データ
 │   └── notifications.spec.ts     # 通知機能
-├── ai-orchestrator/              # AIテストオーケストレーター
-│   ├── ai-test-runner.ts         # GPT-4連携
-│   ├── claude-computer-use.ts    # Claude連携
-│   └── test-scenarios.json       # 生成されたシナリオ
 └── fixtures/
     └── test-data.ts              # テストデータ
 ```
@@ -174,20 +149,6 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
-```
-
-#### 2. AI駆動テスト（スケジュール実行）
-
-- **トリガー**: 毎日午前3時（JST）、手動実行
-- **対象**: AIオーケストレーター
-- **実行時間**: 約15-30分
-- **注意**: OpenAI/Anthropic API使用により課金発生
-
-```yaml
-on:
-  schedule:
-    - cron: '0 18 * * *'  # UTC 18:00 = JST 3:00
-  workflow_dispatch:
 ```
 
 ### ローカルでCI環境を再現
@@ -231,18 +192,6 @@ HEADLESS=false npm run test:e2e
 
 # スクリーンショット保存ディレクトリを確認
 ls playwright-report/screenshots/
-```
-
-#### Q: AI APIエラー
-
-- `OPENAI_API_KEY`が正しく設定されているか確認
-- APIレート制限に達していないか確認
-- API残高を確認
-
-```bash
-# 環境変数確認
-echo $OPENAI_API_KEY
-echo $ANTHROPIC_API_KEY
 ```
 
 #### Q: webServerが起動しない / タイムアウトする
@@ -379,73 +328,6 @@ await page.route('**/api/market-data', route => {
 });
 ```
 
-## AI駆動テストの詳細
-
-### AIテストオーケストレーター
-
-**機能:**
-- GPT-4を使用してテストシナリオを自動生成
-- UI画面を解析して次のアクションを決定
-- テスト結果を自動検証
-
-**使用例:**
-
-```typescript
-const orchestrator = new AITestOrchestrator();
-await orchestrator.initialize();
-
-// AIがシナリオを生成
-const scenarios = await orchestrator.generateTestScenarios('ログイン機能');
-
-// シナリオ実行
-for (const scenario of scenarios) {
-  await orchestrator.runScenario(scenario);
-}
-
-// レポート生成
-await orchestrator.generateReport();
-```
-
-### Claude Computer Use
-
-**機能:**
-- Claude 3.5 Sonnetのコンピュータ操作機能を使用
-- 画面を見ながら自動的に操作
-- 人間に近い動作で複雑なフローをテスト
-
-**使用例:**
-
-```typescript
-const agent = new ClaudeComputerUseAgent();
-await agent.initialize('http://localhost:3102');
-
-const result = await agent.runTest(`
-1. ログインする
-2. ダッシュボードを確認
-3. トレードノートを作成
-4. 保存を確認
-`);
-
-console.log('テスト結果:', result.success ? '成功' : '失敗');
-```
-
-### コスト管理
-
-AIテストは課金が発生するため、以下に注意:
-
-- **OpenAI API**:
-  - gpt-4-vision-preview: 約$0.01-0.03/リクエスト
-  - 1シナリオ（5ステップ）: 約$0.10-0.20
-
-- **Anthropic API**:
-  - claude-3-5-sonnet: 約$0.015/1000トークン
-  - 1テスト実行: 約$0.05-0.15
-
-**推奨:**
-- ローカルテストは手動で実行
-- CIでは重要機能のみAIテスト
-- 毎日のスケジュール実行を監視
-
 ## 今後の拡張
 
 - [ ] ビジュアルリグレッションテスト（Percy/Chromatic）
@@ -458,8 +340,6 @@ AIテストは課金が発生するため、以下に注意:
 ## 参考資料
 
 - [Playwright公式ドキュメント](https://playwright.dev/)
-- [OpenAI Vision API](https://platform.openai.com/docs/guides/vision)
-- [Claude Computer Use](https://docs.anthropic.com/claude/docs/computer-use)
 - [Jest公式ドキュメント](https://jestjs.io/)
 
 ## サポート
