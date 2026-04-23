@@ -18,6 +18,10 @@ COPY . .
 # バックエンドビルド（TypeScript → JavaScript）
 RUN npx tsc
 
+# 非 .ts アセット(.md プロンプト等)を dist にコピー
+# loadPrompt() が実行時参照するため dist/side-b/prompts/ に配置する必要がある
+RUN node scripts/copy-assets.js
+
 # ============================================================
 # 実行ステージ
 # ============================================================
