@@ -20,7 +20,7 @@ import {
 } from '../models/marketAnalysis';
 import type { ResearchAIOutput } from '../models/marketResearch';
 import { OHLCVSnapshot, calculateExpiryDate } from '../models/marketResearch';
-import { CORE_TRADING_RULES, getRelevantIndicatorContext } from '../knowledge';
+import { getRelevantIndicatorContext } from '../knowledge';
 
 // ===========================================
 // 型定義
@@ -295,10 +295,8 @@ ${getRelevantIndicatorContext(indicators as unknown as Record<string, unknown>)}
         messages: [
           {
             role: 'system',
-            content: `あなたは経験豊富なFXテクニカルアナリストです。
-与えられた市場データを分析し、構造化された市場分析レポートを生成してください。
-
-${CORE_TRADING_RULES}
+            content: `あなたは市場データからテクニカル特徴量を抽出する分析エンジンです。
+売買判断は行わず、観察事実と構造化された特徴量のみを出力してください。
 
 重要:
 - 再現性のある分析を心がけてください（同じデータなら同じ結論）
