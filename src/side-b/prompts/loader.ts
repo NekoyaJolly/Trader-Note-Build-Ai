@@ -16,11 +16,14 @@ import path from 'path';
 const PROMPTS_DIR = __dirname;
 
 /**
- * Phase 6.7a: グローバルプロンプトファイル名(拡張子なし)。
- * `src/side-b/prompts/__global__.md` に配置。
- * PromptRegistry.GLOBAL_AGENT_NAME と整合する(両方とも "__global__")。
+ * Phase 6.7a: グローバルプロンプト識別子(agentName / ファイル名共通)。
+ *
+ * - ファイル: `src/side-b/prompts/__global__.md`
+ * - Registry: `agentName = '__global__'` で active 管理
+ *
+ * 単一ソースはここ。PromptRegistry は re-export するだけ(循環 import 回避のため)。
  */
-const GLOBAL_PROMPT_NAME = '__global__';
+export const GLOBAL_AGENT_NAME = '__global__';
 
 /**
  * プロンプト内の {{KEY}} プレースホルダーを展開するための辞書。
@@ -86,10 +89,10 @@ export function expandMacros(content: string, macros?: PromptMacros): string {
  */
 export function loadPromptWithGlobal(name: string, macros?: PromptMacros): string {
     const localContent = loadPrompt(name, macros);
-    const globalPath = path.join(PROMPTS_DIR, `${GLOBAL_PROMPT_NAME}.md`);
+    const globalPath = path.join(PROMPTS_DIR, `${GLOBAL_AGENT_NAME}.md`);
     if (!fs.existsSync(globalPath)) {
         console.warn(
-            `[loadPromptWithGlobal] ${GLOBAL_PROMPT_NAME}.md が見つかりません。agent=${name} 単独で返します`,
+            `[loadPromptWithGlobal] ${GLOBAL_AGENT_NAME}.md が見つかりません。agent=${name} 単独で返します`,
         );
         return localContent;
     }
@@ -116,7 +119,7 @@ export function prependGlobalPromptFromFile(
     localContent: string,
     macros?: PromptMacros,
 ): string {
-    const globalPath = path.join(PROMPTS_DIR, `${GLOBAL_PROMPT_NAME}.md`);
+    const globalPath = path.join(PROMPTS_DIR, `${GLOBAL_AGENT_NAME}.md`);
     if (!fs.existsSync(globalPath)) {
         return localContent;
     }

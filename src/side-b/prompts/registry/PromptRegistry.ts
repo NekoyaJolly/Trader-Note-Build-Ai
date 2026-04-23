@@ -19,16 +19,17 @@ import type {
   RegisterPromptInput,
   RecordUsageInput,
 } from './types';
-import { expandMacros, type PromptMacros } from '../loader';
+import { expandMacros, GLOBAL_AGENT_NAME, type PromptMacros } from '../loader';
 
 /**
- * Phase 6.7a: グローバルルール専用の特殊 agentName。
+ * Phase 6.7a: グローバルルール専用の特殊 agentName (`__global__`)。
  *
- * - `__global__` は全エージェント共通のプロンプトで、実エージェントとしては扱わない
- * - PromptMutationAgent / MetaEvolutionAgent は本定数を使って変異・再編成対象から除外する
+ * 単一ソースは `loader.ts`。ここは後方互換のため re-export する。
+ * - 全エージェント共通のプロンプトで、実エージェントとしては扱わない
+ * - PromptMutationAgent / MetaEvolutionAgent は本定数で変異・再編成対象から除外する
  * - seed.ts が initial を投入
  */
-export const GLOBAL_AGENT_NAME = '__global__';
+export { GLOBAL_AGENT_NAME };
 
 /**
  * 既定の Prisma シングルトン(テストで差し替え可)。

@@ -129,15 +129,19 @@ export class OHLCVRepository {
       return 0;
     }
 
-    // Phase 6.7a: 休場日バーを事前にフィルタ(FX シンボルのみ)
-    const filtered = dataList.filter((d) => shouldPersistBar(d.symbol, d.timestamp));
+    // Phase 6.7a: 休場日バーを事前にフィルタ(FX シンボルのみ)。
+    // shouldPersistBar を一度だけ評価し、filter と集計ログで共有する(二重評価回避)。
+    const evaluated = dataList.map((d) => ({
+      data: d,
+      shouldPersist: shouldPersistBar(d.symbol, d.timestamp),
+    }));
+    const filtered = evaluated.filter((e) => e.shouldPersist).map((e) => e.data);
     const skipped = dataList.length - filtered.length;
     if (skipped > 0) {
-      // シンボル別に件数を集計してログ
       const skippedBySymbol = new Map<string, number>();
-      for (const d of dataList) {
-        if (!shouldPersistBar(d.symbol, d.timestamp)) {
-          const key = `${d.symbol}/${d.timeframe}`;
+      for (const e of evaluated) {
+        if (!e.shouldPersist) {
+          const key = `${e.data.symbol}/${e.data.timeframe}`;
           skippedBySymbol.set(key, (skippedBySymbol.get(key) ?? 0) + 1);
         }
       }
@@ -183,10 +187,14 @@ export class OHLCVRepository {
       } catch (error) {
         console.error(`[OHLCVRepository] バッチ挿入エラー:`, error);
         // エラー時はフォールバックとして個別挿入を試行
+        // Phase 6.7a: upsert は休場日バーで null を返しうるため、戻り値を確認してから加算する
+        // (現状は上流 filter 済みだが将来フィルタ順が変わった場合の水増し防止)
         for (const data of batch) {
           try {
-            await this.upsert(data);
-            insertedCount++;
+            const upserted = await this.upsert(data);
+            if (upserted) {
+              insertedCount++;
+            }
           } catch {
             // 個別エラーはスキップ
           }
