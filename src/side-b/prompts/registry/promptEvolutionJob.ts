@@ -11,7 +11,7 @@
  * 手動実行は runPromptEvolutionNow() から。
  */
 
-import { PromptRegistry } from './PromptRegistry';
+import { PromptRegistry, GLOBAL_AGENT_NAME } from './PromptRegistry';
 import type { PromptVersion } from './types';
 import { PromptMutationAgent, type RecentFailure } from '../../agents/PromptMutationAgent';
 
@@ -79,7 +79,9 @@ export async function runPromptEvolutionCycle(
   const makeVersion = options.makeVersion ?? defaultMakeVersion;
   const fetchRecentFailures = options.fetchRecentFailures ?? (async () => []);
 
-  const agentNames = await registry.listAgents();
+  const allAgentNames = await registry.listAgents();
+  // Phase 6.7a: __global__ はグローバルルール専用で進化サイクル対象外
+  const agentNames = allAgentNames.filter((n) => n !== GLOBAL_AGENT_NAME);
   const reports: AgentEvolutionReport[] = [];
 
   for (const agentName of agentNames) {

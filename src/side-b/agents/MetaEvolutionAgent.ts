@@ -17,7 +17,7 @@ import { PrismaClient } from '@prisma/client';
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { loadPrompt } from '../prompts/loader';
 import { modelFor } from '../../config';
-import { PromptRegistry } from '../prompts/registry/PromptRegistry';
+import { PromptRegistry, GLOBAL_AGENT_NAME } from '../prompts/registry/PromptRegistry';
 import { extractJson } from './llmJsonExtract';
 
 export interface AgentPerformance {
@@ -252,6 +252,14 @@ export class MetaEvolutionAgent {
     let remainingAddBudget = Math.max(0, MONTHLY_ADD_LIMIT - addsUsedThisMonth);
 
     for (const p of parsed.proposals ?? []) {
+      // Phase 6.7a: __global__ に関する提案はどの type でも拒否
+      if (p.agentName === GLOBAL_AGENT_NAME) {
+        result.skipped.push({
+          proposal: p,
+          reason: `${GLOBAL_AGENT_NAME} はグローバルルール予約識別子のため自動変更不可`,
+        });
+        continue;
+      }
       if (p.type === 'deprecate') {
         result.skipped.push({
           proposal: p,

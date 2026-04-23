@@ -40,14 +40,26 @@ export function loadPrompt(name: string, macros?: PromptMacros): string {
         throw new Error(`Prompt file not found: ${name} (expected at ${filePath})`);
     }
 
-    let content = fs.readFileSync(filePath, 'utf-8');
+    const content = fs.readFileSync(filePath, 'utf-8');
+    return expandMacros(content, macros);
+}
 
-    if (macros) {
-        for (const [key, value] of Object.entries(macros)) {
-            const placeholder = `{{${key}}}`;
-            content = content.split(placeholder).join(value ?? '');
-        }
+/**
+ * 任意の文字列に対してマクロプレースホルダー `{{KEY}}` を展開する。
+ *
+ * Phase 6.7a: Registry 経由で取得したプロンプト本文など、ファイル読み込みを経ない
+ * コンテンツにもマクロ展開を適用できるよう、展開ロジックを切り出した。
+ *
+ * - `macros` 未指定 or 空 → content をそのまま返す
+ * - 値が undefined のキーは空文字列に置換(プレースホルダーを残さない)
+ * - 展開はキー順の決定論的処理(依存しない前提だが、副次効果として再現性あり)
+ */
+export function expandMacros(content: string, macros?: PromptMacros): string {
+    if (!macros) return content;
+    let out = content;
+    for (const [key, value] of Object.entries(macros)) {
+        const placeholder = `{{${key}}}`;
+        out = out.split(placeholder).join(value ?? '');
     }
-
-    return content;
+    return out;
 }
