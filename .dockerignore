@@ -20,7 +20,12 @@ dist
 coverage
 
 # Docs & misc
+# *.md 全体を除外 → README / ルートドキュメントを減量。
+# ただしランタイム `loadPrompt()` が実行時に読み込む
+# src/side-b/prompts/ 配下の .md は例外として許可しないと
+# Docker ビルドコンテキストから欠落し、本番で "Prompt file not found" になる。
 *.md
+!src/side-b/prompts/**/*.md
 docs/
 .agent/
 .gemini/
