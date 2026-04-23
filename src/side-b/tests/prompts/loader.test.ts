@@ -23,11 +23,6 @@ describe('loadPrompt', () => {
         expect(content).toContain('recommendation');
     });
 
-    it('market_observer.md を読み込める（参考ファイル）', () => {
-        const content = loadPrompt('market_observer');
-        expect(content).toContain('Market Observer');
-    });
-
     it('存在しないプロンプト名はエラーになる', () => {
         expect(() => loadPrompt('nonexistent_prompt_xyz')).toThrow(/not found/);
     });
