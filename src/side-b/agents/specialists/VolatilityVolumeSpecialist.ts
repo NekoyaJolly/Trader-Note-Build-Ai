@@ -6,7 +6,7 @@
  */
 
 import { AIProvider } from '../../agent/aiProvider';
-import { loadPrompt } from '../../prompts/loader';
+import { loadPromptWithGlobal } from '../../prompts/loader';
 import { modelFor } from '../../../config';
 import type { SpecialistInput, VolatilityVolumeAnalysis } from './types';
 import {
@@ -43,7 +43,7 @@ export class VolatilityVolumeSpecialist {
    * スコアリング結果を recordUsage に書き込む。
    */
   async analyze(input: SpecialistInput): Promise<VolatilityVolumeAnalysis | null> {
-    const fallback = loadPrompt('specialists/volatility_volume_specialist');
+    const fallback = loadPromptWithGlobal('specialists/volatility_volume_specialist');
     const lensDump = formatLensDump(input.lensSnapshot, VOLATILITY_RELEVANT_LENSES);
     const user = this.buildUserPrompt(input, lensDump);
 

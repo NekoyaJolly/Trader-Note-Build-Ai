@@ -28,7 +28,7 @@ import {
   getMTFContext,
 } from '../knowledge';
 import type { MacroEnvironmentData, HigherTimeframeContext } from '../knowledge';
-import { loadPrompt } from '../prompts/loader';
+import { loadPromptWithGlobal } from '../prompts/loader';
 import type { LensFeatureSnapshot } from '../lenses';
 import type { EdgeHypothesis } from '../models/edgeHypothesis';
 import { extractJson } from '../agents/llmJsonExtract';
@@ -334,7 +334,7 @@ ${candidateContext}
    * AI APIを呼び出し
    */
   private async callAI(prompt: string): Promise<{ content: unknown; tokenUsage: number; model: string }> {
-    const systemPrompt = loadPrompt('strategy_thinker', {
+    const systemPrompt = loadPromptWithGlobal('strategy_thinker', {
       CORE_TRADING_RULES,
       MACRO_ENVIRONMENT_RULES,
       MTF_ANALYSIS_RULES,

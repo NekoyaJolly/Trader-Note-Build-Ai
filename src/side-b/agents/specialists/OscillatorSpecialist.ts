@@ -5,7 +5,7 @@
  */
 
 import { AIProvider } from '../../agent/aiProvider';
-import { loadPrompt } from '../../prompts/loader';
+import { loadPromptWithGlobal } from '../../prompts/loader';
 import { modelFor } from '../../../config';
 import type { SpecialistInput, OscillatorAnalysis } from './types';
 import {
@@ -48,7 +48,7 @@ export class OscillatorSpecialist {
    * スコアリング結果を recordUsage に書き込む。
    */
   async analyze(input: SpecialistInput): Promise<OscillatorAnalysis | null> {
-    const fallback = loadPrompt('specialists/oscillator_specialist');
+    const fallback = loadPromptWithGlobal('specialists/oscillator_specialist');
     const lensDump = formatLensDump(input.lensSnapshot, OSCILLATOR_RELEVANT_LENSES);
     const user = this.buildUserPrompt(input, lensDump);
 

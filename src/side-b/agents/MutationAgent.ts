@@ -7,7 +7,7 @@
 import { randomUUID } from 'crypto';
 
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
-import { loadPrompt } from '../prompts/loader';
+import { loadPromptWithGlobal } from '../prompts/loader';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
 import { modelFor } from '../../config';
 import { extractJson } from './llmJsonExtract';
@@ -56,7 +56,7 @@ export class MutationAgent {
     if (elites.length === 0) return [];
     const perfLines = elites.map((e) => `- ${e.id}: score=${(scores.get(e.id) ?? 0).toFixed(4)}`);
     const payload = JSON.stringify(elites, null, 2);
-    const system = loadPrompt('mutation');
+    const system = loadPromptWithGlobal('mutation');
     const user =
       `エリート戦略（JSON）:\n${payload}\n\n` +
       `スコア:\n${perfLines.join('\n')}\n\n` +
@@ -87,7 +87,7 @@ export class MutationAgent {
 
   /** 多様性が低いときの探索的変異 */
   async generateDiverse(regime: string, count: number): Promise<StrategyDSL[]> {
-    const system = loadPrompt('mutation');
+    const system = loadPromptWithGlobal('mutation');
     const user =
       `レジーム: ${regime}\n` +
       `既存と重複しないよう、ランダム性の高い戦略を ${count} 件、JSON 配列のみで返してください。`;

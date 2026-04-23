@@ -18,7 +18,6 @@
 
 import { McpClientManager, type McpToolResult } from './mcpClient';
 import { AIProvider, type ChatMessage, type ToolCall } from './aiProvider';
-import { CORE_TRADING_RULES } from '../knowledge';
 
 // ===========================================
 // 型定義
@@ -87,8 +86,6 @@ PDCAサイクル:
 2. Do: 仮想トレード実行
 3. Check: 過去ノートの検索・振り返り
 4. Act: 学びを次の戦略に反映
-
-${CORE_TRADING_RULES}
 
 重要なルール:
 - 必ず市場データを確認してからプランを作成すること

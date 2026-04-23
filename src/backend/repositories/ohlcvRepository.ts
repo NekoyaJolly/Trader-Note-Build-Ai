@@ -13,8 +13,33 @@
 
 import { PrismaClient, OHLCVCandle, Prisma } from '@prisma/client';
 import { OHLCVData } from '../../services/indicators/indicatorService';
+import { isFXMarketOpen } from '../../side-b/utils/marketHours';
 
 const prisma = new PrismaClient();
+
+/**
+ * Phase 6.7a: シンボルが FX/貴金属相場のカレンダーに従うか判定する。
+ *
+ * BTC / ETH など 24/7 で動く暗号通貨は休場日フィルタをスキップする。
+ * 現状運用銘柄(XAU/USD, USDJPY, EUR/USD, AUD/USD 等)は全て FX 扱い。
+ */
+const CRYPTO_PREFIXES = ['BTC', 'ETH', 'XRP', 'LTC', 'BCH', 'DOGE', 'SOL', 'ADA', 'BNB', 'MATIC'];
+
+export function followsFXMarketCalendar(symbol: string): boolean {
+  const normalized = symbol.replace('/', '').toUpperCase();
+  return !CRYPTO_PREFIXES.some((p) => normalized.startsWith(p));
+}
+
+/**
+ * Phase 6.7a: 保存対象のバーが書き込み可能か(FX 市場カレンダーに従うシンボルで、
+ * かつ timestamp が市場開場時刻であるか)を判定する。
+ *
+ * 暗号通貨等 24/7 シンボルは常に true を返す。
+ */
+function shouldPersistBar(symbol: string, timestamp: Date): boolean {
+  if (!followsFXMarketCalendar(symbol)) return true;
+  return isFXMarketOpen(timestamp);
+}
 
 /**
  * OHLCV データ挿入用の型
@@ -49,11 +74,20 @@ export interface OHLCVQueryFilter {
 export class OHLCVRepository {
   /**
    * 単一の OHLCV データを挿入（重複時は更新）
-   * 
+   *
+   * Phase 6.7a: FX 市場カレンダーに従うシンボルで、かつ timestamp が休場時刻の場合は
+   * 保存せず null を返す。暗号通貨等 24/7 シンボルはそのまま保存される。
+   *
    * @param data - 挿入する OHLCV データ
-   * @returns 挿入または更新された OHLCV レコード
+   * @returns 挿入または更新された OHLCV レコード、休場日で弾かれた場合は null
    */
-  async upsert(data: OHLCVInsertData): Promise<OHLCVCandle> {
+  async upsert(data: OHLCVInsertData): Promise<OHLCVCandle | null> {
+    if (!shouldPersistBar(data.symbol, data.timestamp)) {
+      console.warn(
+        `[OHLCVRepository] 休場日バーのため保存スキップ: ${data.symbol} ${data.timeframe} ${data.timestamp.toISOString()}`,
+      );
+      return null;
+    }
     return prisma.oHLCVCandle.upsert({
       where: {
         symbol_timeframe_timestamp: {
@@ -95,6 +129,32 @@ export class OHLCVRepository {
       return 0;
     }
 
+    // Phase 6.7a: 休場日バーを事前にフィルタ(FX シンボルのみ)。
+    // shouldPersistBar を一度だけ評価し、filter と集計ログで共有する(二重評価回避)。
+    const evaluated = dataList.map((d) => ({
+      data: d,
+      shouldPersist: shouldPersistBar(d.symbol, d.timestamp),
+    }));
+    const filtered = evaluated.filter((e) => e.shouldPersist).map((e) => e.data);
+    const skipped = dataList.length - filtered.length;
+    if (skipped > 0) {
+      const skippedBySymbol = new Map<string, number>();
+      for (const e of evaluated) {
+        if (!e.shouldPersist) {
+          const key = `${e.data.symbol}/${e.data.timeframe}`;
+          skippedBySymbol.set(key, (skippedBySymbol.get(key) ?? 0) + 1);
+        }
+      }
+      const detail = Array.from(skippedBySymbol.entries())
+        .map(([k, v]) => `${k}=${v}`)
+        .join(', ');
+      console.warn(`[OHLCVRepository] 休場日バー ${skipped} 本をスキップ (${detail})`);
+    }
+    if (filtered.length === 0) {
+      return 0;
+    }
+    dataList = filtered;
+
     // バッチサイズ: 一度に処理する件数（大量データ対応）
     const BATCH_SIZE = 500;
     let insertedCount = 0;
@@ -127,10 +187,14 @@ export class OHLCVRepository {
       } catch (error) {
         console.error(`[OHLCVRepository] バッチ挿入エラー:`, error);
         // エラー時はフォールバックとして個別挿入を試行
+        // Phase 6.7a: upsert は休場日バーで null を返しうるため、戻り値を確認してから加算する
+        // (現状は上流 filter 済みだが将来フィルタ順が変わった場合の水増し防止)
         for (const data of batch) {
           try {
-            await this.upsert(data);
-            insertedCount++;
+            const upserted = await this.upsert(data);
+            if (upserted) {
+              insertedCount++;
+            }
           } catch {
             // 個別エラーはスキップ
           }

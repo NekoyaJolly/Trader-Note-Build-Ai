@@ -1,417 +1,649 @@
-# フェーズ6 発注仕様書: 高度レンズとプロンプト進化
+# フェーズ6 発注仕様書: プロンプト進化 + 専門家エージェント体制 + 自己再編成の骨格
 
-> **期間目安**: 継続的(各サブフェーズ 2〜4週間)
-> **目的**: エリオット波動簡易レンズ・SMCレンズ等の複雑レンズを追加、プロンプト自体を進化対象にする
-> **前提**: フェーズ1-5 完了(基盤 + エージェント分化 + 進化ループ)
-> **前提読み物**: `docs/design/DESIGN_DOC_autonomous_trading_architecture.md` 全体
+> **期間目安**: 3-5週間
+> **目的**: プロンプト自体を進化対象にしつつ、エージェント構造を下位専門家層 + 中位統合層 + 上位判定層の3階層に再編成。将来の自律再編成のための骨格(MetaEvolutionAgent)も配置する
+> **前提**: Phase 1-5A, 5.5 完了
+> **前提読み物**:
+> - `docs/design/DESIGN_DOC_autonomous_trading_architecture.md`(全体設計)
+> - `docs/design/phase_5_5_specification.md`(スキル基盤、このフェーズで活用)
+
+---
+
+## 0. このフェーズの位置付け
+
+### 0.1 3つの主要要素
+
+このフェーズでは相互に関連する3つの要素を同時に実装する:
+
+1. **プロンプト進化基盤**: エージェントのシステムプロンプトをバージョン管理し、A/B テストで進化させる
+2. **専門家エージェント体制**: 既存の汎用エージェント群を「下位専門家 + 中位統合 + 上位判定」の3階層に再編成
+3. **MetaEvolutionAgent の骨格**: エージェント構成自体を AI が再編成する仕組みの最小実装(手動トリガー、人間承認のみ)
+
+### 0.2 なぜ同時にやるか
+
+プロンプト進化と専門家化は **密接に関連** している:
+
+- 専門家エージェントは各領域に特化したプロンプトを持つ
+- プロンプト進化は専門家ごとに独立して最適化できる
+- 専門家化してからプロンプト進化基盤を作ると、既存プロンプト進化機構の再設計が発生する
+- 一緒にやることで、専門家体制に最適化された進化基盤が作れる
+
+MetaEvolutionAgent も一緒に骨格だけ配置する理由は **将来の自律再編成への扉を最初から開けておくため**。後から追加すると、専門家構造がそれ前提になってない可能性がある。
+
+### 0.3 このフェーズの設計思想(最終形への布石)
+
+**このシステムの真の理想は、人間が専門家エージェントを配置するのではなく、AI 自身が進化ループの過程で「どんな専門家が必要か」を発見し、自律的にエージェント構成を再編成すること** である。
+
+Phase 6 では人間が手動で専門家を配置するが、これは **過渡的措置** である。MetaEvolutionAgent の骨格を置くことで、将来の自動再編成への道筋を確保する。
 
 ---
 
 ## 1. このフェーズのゴール
 
-システムが「考える土台」として持つレンズと、「思考そのもの」としてのプロンプトの両方を拡張する最終段階。ここまでくるとシステムは単なるツールから、**自己改善し続けるエージェント群** に近づく。
+完了時点で以下が成立する:
 
-このフェーズは他と異なり **複数のサブフェーズに分かれる**。並行せず、順次実行する。
-
-- **6.1**: ElliottSimpleLens(エリオット絶対ルール + 確率分布カウント)
-- **6.2**: SMCLens(流動性スイープ、FVG、オーダーブロック)
-- **6.3**: プロンプト進化基盤
-- **6.4**: 複雑レンズの DSL 統合
-- **6.5**: ユーザー設定UI統合(レンズ重み付け)
-
----
-
-## 2. 全体完了条件
-
-全サブフェーズ完了時に以下を満たす:
-
-- [ ] エリオット波動の絶対ルールチェッカーが実装され、違反を検出できる
-- [ ] エリオット波動のカウント候補が確率分布として出力される
-- [ ] SMC の主要概念(流動性スイープ、FVG、オーダーブロック)が機械判定されている
-- [ ] 両レンズが進化ループの戦略 DSL で使用可能である
-- [ ] プロンプトのバージョン管理と A/B テスト基盤がある
-- [ ] プロンプト進化が月次スケジューラーで実行される
-- [ ] UI でユーザーが検索時のレンズ重み付けを選択できる
-- [ ] 既存テスト・機能が全て維持されている
+- 7-8 体のエージェントが3階層に再編成されている(下位専門家、中位統合、上位判定)
+- 各エージェントのプロンプトがバージョン管理されている
+- プロンプトの A/B テストが実行可能
+- プロンプト変異エージェント(PromptMutationAgent)が実装されている
+- 月次スケジューラーでプロンプト進化が実行される
+- MetaEvolutionAgent が手動トリガーで動作し、再編成提案を出力する
+- 人間承認を経て新エージェントが PromptRegistry に追加できる
+- 既存機能(Phase 1-5A, 5.5)は全て維持されている
 
 ---
 
-## サブフェーズ 6.1: ElliottSimpleLens
+## 2. 完了条件
 
-### 6.1.1 ゴール
+### 2.1 プロンプト進化基盤
 
-エリオット波動を「カウント一意決定」ではなく「確率分布 + 絶対ルール違反検出」として扱う形でレンズ化する。主観性を排除し、検証可能性を維持する。
+- [ ] `PromptRegistry` が実装され、プロンプトのバージョン管理ができる
+- [ ] プロンプトが DB または JSON で永続化されている
+- [ ] `ABTestRunner` が実装され、複数バリアントを並行実行できる
+- [ ] `PromptMutationAgent` が実装され、既存プロンプトから改善案を生成できる
+- [ ] 月次スケジューラーでプロンプト進化が実行される
+- [ ] 実験プロンプトの使用率に上限がある(暴走防止)
+- [ ] 人間承認フローが実装されている(最初の数サイクル必須)
 
-### 6.1.2 触るファイル
+### 2.2 専門家エージェント体制
 
-新規:
-- `src/side-b/lenses/ElliottSimpleLens.ts`
-- `src/side-b/lenses/utils/elliottRules.ts`
-- `src/side-b/lenses/utils/fibonacciRatios.ts`
-- `src/side-b/tests/lenses/elliottSimpleLens.test.ts`
+- [ ] 下位専門家層に3体のエージェントが追加されている
+- [ ] 中位統合層(既存 HypothesisGenerator, StrategyThinker)が専門家の意見を統合するよう再定義
+- [ ] 上位判定層(既存 DevilsAdvocate, StrategistAgent)の役割は変更なし
+- [ ] 各専門家が Phase 5.5 の SkillRegistry を使える
+- [ ] エージェント間のメッセージ/データフローが定義されている
 
-### 6.1.3 実装仕様
+### 2.3 MetaEvolutionAgent の骨格
 
-#### 絶対ルールチェッカー
+- [ ] `MetaEvolutionAgent` クラスが実装されている
+- [ ] 既存エージェントのパフォーマンス記録を入力として受け取る
+- [ ] 再編成提案(AgentRestructureProposal)を出力する
+- [ ] 提案は **実行されない**(出力のみ)
+- [ ] 人間承認フロー経由で PromptRegistry に新エージェントを追加できる
+- [ ] 自動スケジューラー統合は **しない**(手動トリガーのみ)
+- [ ] 安全装置(月あたり追加上限、削除は自動化しない)が組み込まれている
 
-エリオット波動の「絶対に満たされる必要があるルール」を機械判定:
+### 2.4 共通
 
-```typescript
-export interface ElliottRuleViolation {
-  rule: 'wave2_overlap_wave1_start' | 'wave3_shortest' | 'wave4_overlap_wave1' | /* etc */;
-  severity: 'strict' | 'guideline';
-  affectedWaves: string[];
-  description: string;
-}
-
-export function checkAbsoluteRules(waveCandidate: WaveLabeling, pivots: Pivot[]): ElliottRuleViolation[];
-```
-
-判定するルール:
-- 第2波の終点が第1波の起点を超えない(strict)
-- 第3波が1/3/5波の中で最短にならない(strict)
-- 第4波が第1波の価格領域に重ならない(原則、guideline)
-- A波・B波・C波の関係性(ABC調整の場合)
-
-#### フィボナッチ尤度計算
-
-```typescript
-/** 波の長さの比率に対するフィボナッチ適合度 */
-export function fibonacciFitness(
-  actualRatio: number,
-  targetRatio: number,
-  tolerance: number = 0.05
-): number {
-  // 正規分布ライクな尤度関数
-  // 完全一致で 1.0、遠ざかるほど減衰
-  const deviation = Math.abs(actualRatio - targetRatio);
-  return Math.exp(-(deviation * deviation) / (2 * tolerance * tolerance));
-}
-
-/** 波動カウントの全体尤度 */
-export function countLikelihood(waveCandidate: WaveLabeling, pivots: Pivot[]): number;
-```
-
-#### ElliottSimpleLens の出力
-
-```typescript
-interface ElliottSimpleLensOutput {
-  // 絶対ルール違反
-  rule_violations_count: number;
-  has_strict_violation: boolean;
-  
-  // カウント候補(最大5個、確率で正規化)
-  candidates: Array<{
-    label: string;  // "推進第3波途中", "調整B波", など
-    probability: number;
-    fibonacciFit: number;
-  }>;
-  
-  // 最有力候補
-  top_candidate_label: string;
-  top_candidate_probability: number;
-  
-  // 補助特徴量
-  fib_fit_score_best: number;  // 最高尤度のカウントの適合度
-  mtf_consistency: number;  // マルチTFで整合するカウントの割合(0-1)
-  
-  // ロバスト性
-  alternative_count: number;  // 尤度上位5個の中で大きく異なるもの
-}
-```
-
-**重要**: このレンズは「カウントを決定しない」。常に確率分布として出力する。どの戦略もこの確率を加重して使う。
-
-### 6.1.4 マルチタイムフレーム統合
-
-オプション機能として、複数タイムフレームでカウントを実行し、整合性スコアを出力:
-- 日足で上位5候補
-- 4時間足で上位5候補
-- 両方で整合するカウントの割合 → `mtf_consistency`
-
-初回実装は単一TFでも可。MTF は 6.1.b として後段に回す。
+- [ ] 既存テストが全て通る
+- [ ] 新ロジックのユニットテストがある
+- [ ] Side-A のコードに変更がない(協業パートナー原則)
+- [ ] 既存エージェント(Phase 1-5A で作ったもの)の破壊的変更がない
 
 ---
 
-## サブフェーズ 6.2: SMCLens
+## 3. 実装仕様
 
-### 6.2.1 ゴール
+### 3.1 プロンプト進化基盤
 
-Smart Money Concepts の主要要素を客観判定可能なレンズとして実装する。これもトレーダー間で用語が統一されていない領域なので、機械判定可能な定義に絞る。
+#### 3.1.1 PromptRegistry
 
-### 6.2.2 実装する特徴量
+`src/side-b/prompts/registry/PromptRegistry.ts`
 
-| キー | 説明 |
-|------|------|
-| `liquidity_sweep_high_recent` | 直近で前回スイングハイを一時的に抜いて戻した動きがあったか |
-| `liquidity_sweep_low_recent` | 直近で前回スイングローを一時的に抜いて戻した動きがあったか |
-| `fvg_bullish_present` | 直近で未充填のブリッシュ FVG が存在するか |
-| `fvg_bearish_present` | 直近で未充填のベアリッシュ FVG が存在するか |
-| `fvg_nearest_distance_pips` | 最も近い未充填 FVG までの距離(pips) |
-| `order_block_bullish_proximity` | 直近のブリッシュ OB までの距離 |
-| `order_block_bearish_proximity` | 直近のベアリッシュ OB までの距離 |
-| `bos_bullish_recent` | 直近で上方へのストラクチャーブレイクがあったか |
-| `bos_bearish_recent` | 直近で下方へのストラクチャーブレイクがあったか |
-| `choch_recent` | 直近で CHOCH(Change of Character)の兆候があったか |
-
-### 6.2.3 判定定義
-
-解釈の揺れを避けるため、各概念に **コード上の厳密定義** を与える:
-
-- **Liquidity Sweep**: 直近N本の価格が過去M本の最高値/最安値を超え、かつ D 本以内に価格がその水準を明確に下回った(上回った)
-- **FVG (Fair Value Gap)**: 連続する3本のローソク足で、中央のローソクが前後のローソクの実体・ヒゲで埋められないギャップを作った状態
-- **Order Block**: 強い推進の直前の最後の反対方向ローソク
-- **BOS (Break of Structure)**: 直近のスイングハイ/ローを実体ベースで明確にブレイクした動き
-
-**重要**: 定義に揺れがある場合は、コード内のコメントで **このレンズの定義** を明示する。他の人が同じ用語で違う意味で使っていても、このレンズはこの定義で一貫する。
-
-### 6.2.4 触るファイル
-
-- `src/side-b/lenses/SMCLens.ts`
-- `src/side-b/lenses/utils/smcDetection.ts` (FVG、OB、スイープ検出ロジック)
-- `src/side-b/tests/lenses/smcLens.test.ts`
-
----
-
-## サブフェーズ 6.3: プロンプト進化基盤
-
-### 6.3.1 ゴール
-
-エージェントのシステムプロンプトを **進化対象** にする。同じタスクに対して異なるプロンプトバリアントの成績を比較し、優れたバリアントを残していく。
-
-### 6.3.2 実装する仕組み
-
-#### PromptRegistry
-
-`src/side-b/prompts/PromptRegistry.ts`
-
-プロンプトのバージョン管理:
+プロンプトのバージョン管理、ステータス管理、使用記録:
 
 ```typescript
 export interface PromptVersion {
   id: string;
-  agentName: string;
-  version: string;
-  content: string;
-  parentVersionId?: string;
+  agentName: string;          // どのエージェント用か
+  version: string;            // セマンティックバージョンまたはタイムスタンプ
+  content: string;            // プロンプト本文
+  parentVersionId?: string;   // 変異元のプロンプト ID
   createdAt: Date;
-  createdBy: 'human' | 'mutation';
+  createdBy: 'human' | 'mutation' | 'meta_evolution';
   
   // 成績追跡
   usageCount: number;
-  successCount: number;  // 該当プロンプトで生成された戦略が confirmed に至った回数
-  avgScore: number;  // 生成された戦略の平均スコア
+  successCount: number;       // このプロンプトで生成された戦略が confirmed に至った回数
+  avgScore: number;           // 生成された戦略の平均スコア
   
-  status: 'active' | 'experimental' | 'deprecated';
+  status: 'active' | 'experimental' | 'deprecated' | 'rejected';
+  
+  // メタデータ
+  notes?: string;             // 変異時の意図、改善狙いなど
 }
 
 export class PromptRegistry {
   async register(prompt: PromptVersion): Promise<void>;
   async getActive(agentName: string): Promise<PromptVersion>;
   async getExperimental(agentName: string): Promise<PromptVersion[]>;
-  async recordUsage(versionId: string, score: number): Promise<void>;
+  async recordUsage(versionId: string, score: number, success: boolean): Promise<void>;
+  async promote(versionId: string): Promise<void>;  // experimental → active
+  async deprecate(versionId: string): Promise<void>; // active → deprecated
+  
+  // 動的エージェント追加対応(MetaEvolutionAgent 用)
+  async registerNewAgent(agentName: string, initialPrompt: PromptVersion): Promise<void>;
+  async listAgents(): Promise<string[]>;  // 現在登録されているエージェント一覧
 }
 ```
 
-#### A/B テストランナー
+**重要設計判断**:
+- `agentName` は **列挙型で固定しない**。動的にエージェントを追加できる設計
+- プロンプトは初期投入時に既存ファイル(`src/side-b/prompts/*.md`)から読み込み
 
-`src/side-b/prompts/ABTestRunner.ts`
+#### 3.1.2 ABTestRunner
 
-- 同じ入力を複数のプロンプトバリアントで並行実行
-- 結果のスコアを比較
-- 統計的有意な差が出たら新しい active を決定
+`src/side-b/prompts/abtest/ABTestRunner.ts`
 
-#### PromptMutationAgent
-
-`src/side-b/agents/PromptMutationAgent.ts`
-
-既存プロンプトを変異させる専門エージェント:
-
-- 現プロンプトと、そのプロンプトで生成された戦略の成績を受け取る
-- LLM に「このプロンプトを改善するには?」と問う
-- 改善案を3-5個生成し、`experimental` として PromptRegistry に登録
-
-### 6.3.3 スケジューラー
-
-月次で以下を実行:
-1. 各エージェントの active プロンプトと実験プロンプト群の成績比較
-2. 実験プロンプトの中で active を明確に上回るものがあれば昇格
-3. PromptMutationAgent で新たな実験プロンプトを3個生成
-
-### 6.3.4 安全装置
-
-プロンプト変異が悪化を引き起こさないよう:
-- 実験プロンプトは全トレードの最大 20% にのみ使用
-- 実験プロンプトの成績が active を明確に下回る場合、即座に中止
-- Human-in-the-loop: 月次の昇格判定は人間承認を必須にする(最初の数サイクル)
-
----
-
-## サブフェーズ 6.4: 複雑レンズの DSL 統合
-
-### 6.4.1 ゴール
-
-エリオット・SMC レンズの特徴量を戦略 JSON DSL で使えるようにし、進化ループでこれらのレンズを活用した戦略が生成できるようにする。
-
-### 6.4.2 作業内容
-
-- `DSLEvaluator` が新レンズの特徴量を評価できるよう拡張
-- `MutationAgent` のプロンプトに「エリオット特徴量、SMC特徴量を使う戦略の例」を追加
-- 新レンズを使った初期戦略テンプレートを追加(例: 「エリオット第3波可能性高 + SMC流動性スイープ後のエントリー」)
-
-### 6.4.3 注意事項
-
-- エリオットは **確率分布** で扱う。「top_candidate_label == '推進第3波'」のような離散判定ではなく、「top_candidate_probability > 0.5」のような確率閾値で条件化する
-- SMC の判定は時間依存性がある(FVGが埋まったかどうかなど)。戦略の有効期間を意識する
-
----
-
-## サブフェーズ 6.5: ユーザー設定UI統合
-
-### 6.5.1 ゴール
-
-設計書でずっと議論してきた「UIでレンズのON/OFFを切り替える」要求に、**検索時重み付けとして** 応える。
-
-### 6.5.2 実装内容
-
-#### レンズモード
-
-事前定義された検索モード:
+同じ入力を複数のプロンプトバリアントで並行実行し、結果を比較:
 
 ```typescript
-export const LensSearchModes = {
-  classical: {
-    name: 'クラシカル',
-    description: '伝統的なテクニカル分析中心',
-    weights: {
-      current_analysis: 1.0,
-      dow_theory: 1.0,
-      volatility_regime: 0.8,
-      time_session: 0.5,
-      elliott_simple: 0.0,
-      smc: 0.0,
-    },
-  },
-  elliott_focused: {
-    name: 'エリオット重視',
-    description: '波動分析を主軸に',
-    weights: {
-      current_analysis: 0.5,
-      dow_theory: 0.8,
-      volatility_regime: 0.5,
-      time_session: 0.3,
-      elliott_simple: 1.0,
-      smc: 0.3,
-    },
-  },
-  smc_focused: {
-    name: 'SMC重視',
-    description: 'スマートマネー概念を主軸に',
-    weights: {
-      current_analysis: 0.3,
-      dow_theory: 0.5,
-      volatility_regime: 0.5,
-      time_session: 0.5,
-      elliott_simple: 0.0,
-      smc: 1.0,
-    },
-  },
-  data_driven: {
-    name: 'データドリブン',
-    description: '全レンズを均等に扱う',
-    weights: { /* 全部 1.0 */ },
-  },
-};
+export interface ABTestResult {
+  agentName: string;
+  testedAt: Date;
+  variants: Array<{
+    promptVersionId: string;
+    output: unknown;
+    score: number;
+    durationMs: number;
+  }>;
+  winner?: string;  // 統計的有意に優れたバリアント(あれば)
+}
+
+export class ABTestRunner {
+  async runTest(
+    agentName: string,
+    input: unknown,
+    variantIds: string[]  // experimental + active を含む
+  ): Promise<ABTestResult>;
+}
 ```
 
-#### EdgeLedger の findMatching の重み付け対応
+**スコアリング**: どうスコアを付けるかは agent によって異なる。スコアリング関数を agent 毎に定義する(例: HypothesisGenerator なら「生成された仮説の confirmed 率」、Strategist なら「判定の一致率」等)。
+
+#### 3.1.3 PromptMutationAgent
+
+`src/side-b/agents/PromptMutationAgent.ts` + `src/side-b/prompts/prompt_mutation.md`
+
+既存プロンプトの改善案を生成する専門エージェント:
 
 ```typescript
-async findMatching(
-  symbol: string, 
-  snapshot: LensFeatureSnapshot,
-  lensWeights?: Record<string, number>
-): Promise<Array<{ hypothesis: EdgeHypothesis; matchScore: number }>>;
+export class PromptMutationAgent {
+  async proposeImprovements(
+    agentName: string,
+    currentPrompt: PromptVersion,
+    recentPerformance: {
+      avgScore: number;
+      recentFailures: Array<{ context: unknown; output: unknown }>;
+    }
+  ): Promise<PromptVersion[]>;  // 改善案を 3-5 個生成
+}
 ```
 
-仮説のマッチングスコア計算時、ユーザーが選択したモードの `lensWeights` を適用。重み 0 のレンズは類似度計算から除外される。
+入力:
+- 現プロンプト
+- そのプロンプトで生成された結果のサンプル
+- 失敗した事例(あれば)
 
-#### UI
+出力:
+- 改善案プロンプト(experimental として PromptRegistry に登録)
+- 各案に「なぜ改善になるか」のメモ
 
-- モード選択ドロップダウン(プリセット)
-- 詳細調整画面(各レンズに 0-1 のスライダー)
-- 現在のモードをユーザープロファイルに保存
+#### 3.1.4 月次スケジューラー
 
-### 6.5.3 重要な設計原則の再確認
+`src/side-b/jobs/sideBScheduler.ts` に追加:
 
-**UI のレンズ重み付けは "表示の見え方" だけに影響する**。以下は絶対に重みで変わらない:
-- 全レンズは常に計算される(記録は一律)
-- エッジ台帳の蓄積は分断されない
-- 進化ループは全レンズを使い続ける
-- 背景で稼働する自動学習も全レンズを使う
+```typescript
+schedule('monthly_prompt_evolution', '0 2 1 * *', async () => {
+  for (const agentName of await promptRegistry.listAgents()) {
+    // 1. 実験プロンプトの成績評価
+    const experimentals = await promptRegistry.getExperimental(agentName);
+    const active = await promptRegistry.getActive(agentName);
+    
+    // 2. 明確に active を上回るものがあれば昇格候補に
+    const winners = evaluateExperimentals(experimentals, active);
+    
+    // 3. 人間承認フロー経由で昇格(最初の数サイクル必須)
+    if (winners.length > 0) {
+      await notifyHumanForApproval(agentName, winners);
+    }
+    
+    // 4. PromptMutationAgent で新実験案を 3 個生成
+    const newProposals = await promptMutationAgent.proposeImprovements(
+      agentName, active, await getRecentPerformance(agentName)
+    );
+    
+    for (const proposal of newProposals) {
+      await promptRegistry.register({ ...proposal, status: 'experimental' });
+    }
+  }
+});
+```
 
-これにより、ユーザーの好みとシステムの学習は独立する。
+#### 3.1.5 安全装置
+
+**実験プロンプトの使用率上限**:
+- 1エージェントあたり、全トレード呼び出しの **20% 以下** に制限
+- 残り 80% は active プロンプトで処理
+
+**実験プロンプトの即時中止**:
+- 実験プロンプトの成績が active を **明確に下回る** 場合、即座に deprecated へ
+- 判定基準: 使用回数20回以上、かつ active の平均スコア × 0.7 を下回る
+
+**人間承認フロー**:
+- 最初の 3 サイクルは必須
+- 4 サイクル目以降、成績が明確に良い場合は自動承認に切り替え可能(ただし明示的な設定変更が必要)
+
+### 3.2 専門家エージェント体制
+
+#### 3.2.1 3階層構造
+
+```
+【上位層】判定エージェント(既存、役割継続)
+  - DevilsAdvocate: 反証
+  - StrategistAgent: 最終判定
+
+【中位層】統合エージェント(既存、役割再定義)
+  - HypothesisGenerator: 下位専門家の意見を統合して仮説生成
+  - StrategyThinker: 下位専門家の意見を統合して戦略化
+
+【下位層】専門家エージェント(新設)★ Phase 6 で追加
+  - TrendSpecialist(トレンド系インジケーター群)
+  - OscillatorSpecialist(オシレーター/モメンタム系)
+  - VolatilityVolumeSpecialist(ボラティリティ/ボリューム系)
+```
+
+#### 3.2.2 各専門家の詳細
+
+**TrendSpecialist**
+
+`src/side-b/agents/specialists/TrendSpecialist.ts` + `src/side-b/prompts/specialists/trend_specialist.md`
+
+- **担当レンズ**: dow_theory, current_analysis(MA関連部分)
+- **担当インジケーター**: SMA, EMA, ADX, トレンドライン
+- **出力**:
+  ```typescript
+  interface TrendAnalysis {
+    trendState: 'strong_up' | 'weak_up' | 'ranging' | 'weak_down' | 'strong_down';
+    trendStrength: number;       // 0-1
+    trendMaturity: 'early' | 'middle' | 'late';
+    keyLevels: { support: number[]; resistance: number[] };
+    interpretation: string;      // 人間語の解釈
+    confidence: number;           // 自分の分析への確信度
+  }
+  ```
+
+**OscillatorSpecialist**
+
+`src/side-b/agents/specialists/OscillatorSpecialist.ts` + `src/side-b/prompts/specialists/oscillator_specialist.md`
+
+- **担当レンズ**: current_analysis(RSI, MACD部分)
+- **担当インジケーター**: RSI, MACD, Stochastic, Williams %R
+- **出力**:
+  ```typescript
+  interface OscillatorAnalysis {
+    momentum: 'overbought' | 'bullish' | 'neutral' | 'bearish' | 'oversold';
+    divergence: 'bullish_divergence' | 'bearish_divergence' | 'none';
+    interpretation: string;
+    confidence: number;
+  }
+  ```
+
+**VolatilityVolumeSpecialist**
+
+`src/side-b/agents/specialists/VolatilityVolumeSpecialist.ts` + `src/side-b/prompts/specialists/volatility_volume_specialist.md`
+
+- **担当レンズ**: volatility_regime, current_analysis(ATR, BB部分)
+- **担当インジケーター**: ATR, Bollinger Bands, ボリューム系(データがあれば)
+- **出力**:
+  ```typescript
+  interface VolatilityVolumeAnalysis {
+    volatilityRegime: 'expansion' | 'normal' | 'contraction';
+    breakoutRisk: 'high' | 'medium' | 'low';
+    volumeSignal: 'unusual_high' | 'normal' | 'unusual_low' | 'no_data';
+    interpretation: string;
+    confidence: number;
+  }
+  ```
+
+#### 3.2.3 統合エージェントの再定義
+
+**HypothesisGenerator の再定義**
+
+既存の `hypothesis_generator.md` プロンプトを更新:
+
+- 入力に「3専門家の分析結果」を追加
+- 「専門家の意見を統合して仮説を生成する」役割に明示化
+- 各専門家の confidence を考慮した統合ロジックをプロンプトで指示
+
+**StrategyThinker の再定義**
+
+同様に `strategy_thinker.md` を更新:
+
+- 専門家の意見を統合して戦略化
+- 専門家間で意見が対立する場合の扱いを明記
+
+#### 3.2.4 スキル基盤との連携
+
+各専門家は Phase 5.5 で作った SkillRegistry を使える:
+
+- TrendSpecialist は `compute_lens_features`(dow_theory 絞り込み)を呼ぶ
+- OscillatorSpecialist も同様(current_analysis 絞り込み)
+- VolatilityVolumeSpecialist も同様(volatility_regime 絞り込み)
+
+これにより、**専門家が自律的に必要なデータを取得する** 動きが実現する。
+
+### 3.3 MetaEvolutionAgent の骨格
+
+#### 3.3.1 目的
+
+将来の自律再編成の最小実装。**提案のみ、実行は人間承認必須**。
+
+#### 3.3.2 実装
+
+`src/side-b/agents/MetaEvolutionAgent.ts` + `src/side-b/prompts/meta_evolution.md`
+
+```typescript
+export interface AgentRestructureProposal {
+  proposedAt: Date;
+  analysis: {
+    currentAgents: string[];          // 現エージェント一覧
+    coverageGaps: string[];           // 分析のカバーが不足している領域
+    underperformers: string[];        // 成績が悪いエージェント名
+  };
+  proposals: Array<{
+    type: 'add' | 'modify' | 'deprecate';
+    agentName: string;
+    role: string;                     // 担当領域
+    reasoning: string;                // なぜこの提案か
+    expectedImprovement: string;      // 期待される改善
+    initialPrompt?: string;           // add の場合、初期プロンプト
+  }>;
+  confidence: number;                 // 提案全体への確信度
+}
+
+export class MetaEvolutionAgent {
+  async propose(input: {
+    recentPerformance: Map<string, AgentPerformance>;
+    recentDiscoveryReports: DiscoveryReport[];
+    recentReflections: ReflectionLesson[];
+  }): Promise<AgentRestructureProposal>;
+  
+  // 実行は別メソッド(人間承認必須)
+  async executeProposal(
+    proposal: AgentRestructureProposal,
+    humanApproval: { approvedBy: string; approvedAt: Date; notes?: string }
+  ): Promise<{ applied: string[]; skipped: string[] }>;
+}
+```
+
+#### 3.3.3 発動条件
+
+- **自動スケジューラー統合: なし**(このフェーズでは絶対にしない)
+- 手動トリガーのみ: `runMetaEvolutionNow()`
+- または UI から明示的に実行
+
+#### 3.3.4 安全装置
+
+**追加制限**:
+- 月あたり新エージェント追加上限: 1体
+- 新エージェントは初期状態で experimental、一定期間後に active 昇格可
+
+**削除制限**:
+- 既存エージェントの削除は **絶対に自動化しない**
+- deprecate への移行も人間判断のみ
+- MetaEvolutionAgent が deprecate 提案を出しても、実行は人間承認必須
+
+**履歴保存**:
+- 全提案を永続化
+- 実行されなかった提案も保存(後で振り返り可能)
+- 実行された提案は「誰が承認したか」も記録
+
+#### 3.3.5 将来の発展余地
+
+このフェーズで実装しないが、設計書に明記する:
+
+- 自動実行モード(運用データが十分蓄積されてから)
+- 複数提案の自動 A/B 評価
+- エージェント間の協調学習
 
 ---
 
-## 3. 全体の注意事項
+## 4. 触っていいファイル / 触ってはいけないファイル
 
-### 3.1 サブフェーズの順序
+### 触っていい(新規作成)
 
-必ずこの順:
-1. 6.1 ElliottSimpleLens
-2. 6.2 SMCLens
-3. 6.3 プロンプト進化基盤
-4. 6.4 DSL 統合
-5. 6.5 UI 統合
+**プロンプト進化基盤**:
+- `src/side-b/prompts/registry/PromptRegistry.ts`
+- `src/side-b/prompts/abtest/ABTestRunner.ts`
+- `src/side-b/agents/PromptMutationAgent.ts`
+- `src/side-b/prompts/prompt_mutation.md`
 
-6.1 と 6.2 は独立しているので順序入れ替え可能だが、 6.3 以降は両方のレンズが動いている前提。
+**専門家エージェント**:
+- `src/side-b/agents/specialists/TrendSpecialist.ts`
+- `src/side-b/agents/specialists/OscillatorSpecialist.ts`
+- `src/side-b/agents/specialists/VolatilityVolumeSpecialist.ts`
+- `src/side-b/prompts/specialists/trend_specialist.md`
+- `src/side-b/prompts/specialists/oscillator_specialist.md`
+- `src/side-b/prompts/specialists/volatility_volume_specialist.md`
 
-### 3.2 品質より慎重さを優先
+**MetaEvolutionAgent**:
+- `src/side-b/agents/MetaEvolutionAgent.ts`
+- `src/side-b/prompts/meta_evolution.md`
 
-このフェーズは複雑度が高い。「とりあえず動く」ではなく「本当に正しく動いているか」を確認しながら進む。エリオット・SMC は誤判定が多発すると、システム全体の信頼性を損なう。
+**テスト**:
+- `src/side-b/tests/prompts/` 以下
+- `src/side-b/tests/agents/specialists/` 以下
+- `src/side-b/tests/agents/metaEvolution.test.ts`
 
-### 3.3 各サブフェーズごとの運用期間
+**DB/永続化**:
+- Prisma マイグレーション(PromptRegistry 用テーブル追加)
+- 必要なら MetaEvolutionAgent の提案履歴用テーブル
 
-各サブフェーズ完了後、**次のサブフェーズに進む前に最低2週間の運用観察期間** を入れる。この期間に:
-- 新レンズの出力が妥当か
-- 既存機能への影響がないか
-- コストが想定内か
-を確認する。
+### 触っていい(改修)
 
-### 3.4 縮退可能にする
+- `src/side-b/prompts/hypothesis_generator.md`: 専門家統合の役割追加
+- `src/side-b/prompts/strategy_thinker.md`: 同上
+- `src/side-b/agents/HypothesisGeneratorAgent.ts`: 入力型に専門家分析結果を追加
+- `src/side-b/agents/StrategyThinker.ts`(実体があれば): 同上
+- `src/side-b/jobs/sideBScheduler.ts`: 月次プロンプト進化ジョブ追加
+- `prisma/schema.prisma`: プロンプト関連テーブル追加
 
-新レンズ・新機能は全て「無効化スイッチ」を持つこと。問題が出たら即座に OFF にできる設計。
+### 触ってはいけない
 
----
-
-## 4. 最終状態の確認
-
-全サブフェーズ完了時、システムは以下を実現している:
-
-- 並列6-8レンズが常時計算されている
-- 7つの専門エージェントが役割分化して動いている
-- エッジ台帳が常時更新・検証されている
-- 戦略集団が自動進化している
-- プロンプト自体も進化している
-- ユーザーは複数の "視点" でシステムを扱える
-- 全ての挙動が検証可能・説明可能
-
-これが「自律型トレーディングAI」の完成形。
-
----
-
-## 5. 完了後の展望(このプロジェクトの範囲外)
-
-フェーズ6完了後に検討に値する拡張:
-- 実トレード統合(本番資金での運用)
-- 複数ブローカーAPI対応
-- マルチシンボル・ポートフォリオ最適化
-- 他のトレーダーとのエッジ共有(コミュニティ機能)
-- エージェントの強化学習による追加改善
-
-これらは全て現在のアーキテクチャの上に乗せられる。**設計の拡張性が、最終的な投資の価値** になる。
+- Phase 1-3 のレンズ実装(既存の動作保持)
+- Phase 4a-4d の成果物全般
+- Phase 5A の進化ループ実装
+- Phase 5.5 の SkillRegistry 実装
+- **Side-A 関連ファイル全般**(協業パートナー原則)
+- 既存の既存エージェント(DevilsAdvocate, ReflectionAI, Discovery, Strategist, Mutation, Crossover)の振る舞いを **破壊的に変更しない**
+- 既存の Prisma テーブル(TradeNote, AITradeNote, EdgeHypothesis 等)
 
 ---
 
-*このフェーズが完了する頃には、設計開始から1年以上経過している可能性がある。継続することが最も重要。*
+## 5. 設計上の注意
+
+### 5.1 このフェーズでやらないこと
+
+- **Elliott Lens / SMC Lens の実装**: Phase 7(SMC), Phase 8(Elliott)で別途
+- **Elliott 専門家 / SMC 専門家**: 上記レンズ実装後に追加
+- **ファンダメンタルズ専門家**: 別フェーズ(Phase 9 想定、ファンダメンタルズ基盤構築を含む)
+- **MetaEvolutionAgent の自動実行**: 手動トリガーのみ、運用観察後に自動化検討
+- **既存エージェントの大規模リファクタ**: HypothesisGenerator/StrategyThinker の入力型追加程度に留める
+
+### 5.2 設計思想の再確認
+
+**なぜ専門家化するか**:
+- 概念が複雑な領域(将来の Elliott, SMC)は専門家が必須
+- 機能グループ(トレンド、ボラ、モメンタム)で専門家化するとエージェント数を抑えつつコンテキストを洗練できる
+- インジケーター個別の専門家化は行わない(粒度が細かすぎ)
+
+**なぜ MetaEvolutionAgent の骨格を今置くか**:
+- 将来の自律再編成への扉を最初から開けておく
+- 専門家構造を MetaEvolutionAgent の観測対象として最初から整える
+- 後から追加すると、既存構造が MetaEvolutionAgent 前提になってない可能性
+
+### 5.3 LLM コスト配慮
+
+このフェーズでエージェント数が 7 → 10 に増える(3専門家 + 1 PromptMutation + 1 MetaEvolution、既存継続 7)。LLM 呼び出しコストが増える。
+
+対策:
+- 専門家は必要な時のみ呼び出す(HypothesisGenerator が呼ぶ時のみ)
+- プロンプト進化の実験使用率は 20% 以下
+- MetaEvolutionAgent は手動トリガーのみ、月1回程度の想定
+
+### 5.4 既存エージェントとの互換性
+
+HypothesisGenerator と StrategyThinker は入力型に専門家分析を **オプショナルで追加**。既存の呼び出しコード(専門家なしでの呼び出し)が動き続ける必要がある。
+
+段階的移行:
+1. まず HypothesisGenerator に専門家入力をオプショナル追加
+2. 呼び出し側で徐々に専門家分析を渡すように更新
+3. 両パスが動作することを確認
+
+### 5.5 将来拡張の扉を開けておく
+
+**動的エージェント追加への対応**:
+- PromptRegistry は `agentName` を列挙型で固定しない
+- エージェント一覧は動的に取得できる(`listAgents()`)
+- 新エージェント追加時の DB スキーマ変更が不要な設計
+
+**エージェント間通信の余地**:
+- 将来エージェント間で直接通信する可能性を考慮
+- 現状は中位統合層が仲介、将来は peer-to-peer も可能な抽象化
+
+---
+
+## 6. 実装順序(推奨)
+
+Claude Code に推奨する実装順序:
+
+### ステップ1: プロンプト進化基盤
+1. PromptRegistry + DB マイグレーション
+2. 既存プロンプトの初期投入(既存 `.md` ファイルから)
+3. ABTestRunner
+4. PromptMutationAgent
+5. 月次スケジューラー統合(実行はしない設定)
+
+### ステップ2: 専門家エージェント
+1. TrendSpecialist 実装
+2. OscillatorSpecialist 実装
+3. VolatilityVolumeSpecialist 実装
+4. 各専門家のユニットテスト
+
+### ステップ3: 既存エージェントの再定義
+1. HypothesisGenerator のプロンプト更新
+2. HypothesisGenerator の入力型拡張
+3. StrategyThinker 同様
+4. 既存呼び出しの互換性確認
+
+### ステップ4: MetaEvolutionAgent
+1. 骨格クラス実装
+2. 提案生成ロジック(LLM 呼び出し)
+3. 実行メソッド(人間承認必須)
+4. 安全装置の組み込み
+
+### ステップ5: 統合と動作確認
+1. エンドツーエンド動作確認
+2. 既存テスト全通過の確認
+3. 新規テストの追加
+
+各ステップ終了時にコミット。
+
+---
+
+## 7. 完了報告時に含めること
+
+1. 作成/変更したファイル一覧
+2. DB マイグレーション差分
+3. プロンプト進化基盤の動作ログ:
+   - 実験プロンプト生成の例
+   - A/B テスト実行の例
+4. 専門家エージェントの動作ログ:
+   - 各専門家の出力サンプル
+   - 統合エージェントが専門家意見をどう統合したか
+5. MetaEvolutionAgent の動作ログ:
+   - 手動トリガーでの提案生成例
+   - 人間承認フローの動作確認
+6. 既存テスト全通過の確認
+7. 新規テストの実行結果
+8. LLM コストの概算(月次プロンプト進化 + 日次の専門家呼び出し)
+9. Phase 7 以降への引き継ぎメモ
+
+---
+
+## 8. レビュー観点
+
+- PromptRegistry が動的エージェント追加に対応しているか(列挙型固定していないか)
+- 実験プロンプトの使用率制限が機能しているか
+- 専門家エージェントが SkillRegistry を介してレンズにアクセスしているか
+- 既存エージェント(HypothesisGenerator 等)の変更が後方互換か
+- MetaEvolutionAgent が自動実行されていないか(手動トリガーのみか)
+- 既存エージェントの削除/deprecate が自動化されていないか
+- 人間承認フローが全ての破壊的変更で必須になっているか
+- Side-A のコードに一切変更がないか
+
+---
+
+## 9. 将来拡張(このフェーズの範囲外)
+
+### 9.1 専門家の追加予定
+
+このフェーズで3専門家を作るが、将来以下を追加する:
+
+- **Phase 7**: SMC Lens 実装、SMC 専門家追加
+- **Phase 8**: Elliott Lens 実装、Elliott 専門家追加
+- **Phase 9(構想)**: ファンダメンタルズ基盤 + ファンダメンタルズ専門家
+  - 経済指標カレンダー
+  - 中央銀行政策スタンス
+  - 地政学・市場センチメント
+
+### 9.2 MetaEvolutionAgent の発展
+
+Phase 6 では骨格のみ。運用観察を経て以下を追加する候補:
+
+- **自動実行モード**: 人間承認なしでの再編成(データが十分蓄積されてから)
+- **複数提案の自動 A/B 評価**
+- **エージェント自動削除**: 長期間使われないエージェントの自動 deprecate
+
+### 9.3 自律再編成の最終形
+
+**このシステムの真の理想**:
+
+AI 自身が進化ループの過程で「どんな専門家が必要か」を発見し、自律的にエージェント構成を再編成する。人間が事前に「トレンド専門家、オシレーター専門家...」と配置するのではなく、データから必要な専門性が自発的に立ち上がる。
+
+Phase 6 時点ではこの自律再編成は実装しない。しかし以下の扉は開けておく:
+
+- PromptRegistry は動的エージェント追加を拒否しない
+- エージェントは自分の担当領域をメタデータで自己記述する(`role`, `expectedImprovement`)
+- 将来、MetaEvolutionAgent がエージェント構成を自動再編成する可能性を想定した設計
+
+Phase 6 完了後の運用で「どの専門家が効いたか」「新しい専門家が必要か」が見えてから、MetaEvolutionAgent の自動化を判断する。
+
+---
+
+## 10. このフェーズの位置付け(設計書全体の中で)
+
+Phase 6 は、Phase 1-5A, 5.5 で築いた基盤の上に **エージェントの自己改善機構** を乗せるフェーズ。
+
+- Phase 1-3 で「観察する土台」(レンズ基盤)を作った
+- Phase 4 系で「エッジを検証する仕組み」(検証パイプライン)を作った
+- Phase 5A で「戦略を進化させる仕組み」(DSL + 進化ループ)を作った
+- Phase 5.5 で「エージェントが使える道具」(スキル基盤)を作った
+- **Phase 6 で「エージェント自身が改善される仕組み」(プロンプト進化 + 専門家体制 + 自己再編成骨格)を作る**
+
+これ以降のフェーズ(Phase 7 以降)は、この上に新しいレンズ/専門家/データソースを追加していく段階になる。
+
+---
+
+*Phase 6 完了時点で、システムは単なる「固定のルールで動くツール」から「自己改善し続けるエージェント群」へと質的に変化する。このフェーズはアーキテクチャ上の転換点である。*

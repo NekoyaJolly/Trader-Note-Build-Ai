@@ -13,10 +13,11 @@
  */
 
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
-import { loadPrompt } from '../prompts/loader';
+import { loadPromptWithGlobal } from '../prompts/loader';
 import { modelFor } from '../../config';
 import type { PromptVersion } from '../prompts/registry/types';
 import { extractJson } from './llmJsonExtract';
+import { GLOBAL_AGENT_NAME } from '../prompts/registry/PromptRegistry';
 
 export interface PromptMutationProposal {
   /** 提案バージョン識別子(呼び出し側で suffix 付与してもよい) */
@@ -101,12 +102,21 @@ export class PromptMutationAgent {
   /**
    * 改善案プロンプトを生成する。
    * 失敗時は空配列を返す(握りつぶしではなく、呼び出し側のフォールバックを前提にした設計)。
+   *
+   * Phase 6.7a: __global__ は変異対象外(安全装置)。
+   * グローバルルールは人間承認フロー経由でのみ更新するため、LLM による自動変異を拒否する。
    */
   async proposeImprovements(
     input: ProposeImprovementsInput,
   ): Promise<PromptMutationProposal[]> {
+    if (input.agentName === GLOBAL_AGENT_NAME) {
+      console.warn(
+        `[PromptMutationAgent] ${GLOBAL_AGENT_NAME} は変異対象外のため空配列を返します`,
+      );
+      return [];
+    }
     const count = input.count ?? 3;
-    const system = loadPrompt('prompt_mutation');
+    const system = loadPromptWithGlobal('prompt_mutation');
     const user = this.buildUserPrompt(input, count);
 
     const res = await withRetries(() =>

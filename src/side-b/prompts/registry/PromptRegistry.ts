@@ -19,6 +19,17 @@ import type {
   RegisterPromptInput,
   RecordUsageInput,
 } from './types';
+import { expandMacros, GLOBAL_AGENT_NAME, type PromptMacros } from '../loader';
+
+/**
+ * Phase 6.7a: グローバルルール専用の特殊 agentName (`__global__`)。
+ *
+ * 単一ソースは `loader.ts`。ここは後方互換のため re-export する。
+ * - 全エージェント共通のプロンプトで、実エージェントとしては扱わない
+ * - PromptMutationAgent / MetaEvolutionAgent は本定数で変異・再編成対象から除外する
+ * - seed.ts が initial を投入
+ */
+export { GLOBAL_AGENT_NAME };
 
 /**
  * 既定の Prisma シングルトン(テストで差し替え可)。
@@ -115,6 +126,47 @@ export class PromptRegistry {
       throw new Error(`No active prompt for agent="${agentName}"`);
     }
     return active;
+  }
+
+  /**
+   * Phase 6.7a: グローバル + エージェント固有プロンプトを合成して返す(C案)。
+   *
+   * 取得内容:
+   *   `${global content(macros 展開後)}\n\n${agent content(macros 展開後)}`
+   *
+   * フォールバック挙動(安全側):
+   *   - `__global__` の active が存在しない → グローバル部分を空文字で合成し、agent content のみ返す
+   *     (seed 未実施のローカル開発/テスト環境で落ちないようにする)
+   *   - 指定 agent の active が存在しない → 例外(従来の getActiveOrThrow と同じ動作)
+   *
+   * マクロ展開:
+   *   global / agent の両方の content に同じ macros 辞書を適用する。
+   *   Registry に保存された content がファイルのマクロプレースホルダーを
+   *   そのまま保持していた場合に、ここで展開する。
+   */
+  async getCompositeActive(
+    agentName: string,
+    macros?: PromptMacros,
+  ): Promise<string> {
+    if (agentName === GLOBAL_AGENT_NAME) {
+      throw new Error(
+        `getCompositeActive: ${GLOBAL_AGENT_NAME} を通常エージェントとして取得できない。getActive を使うこと`,
+      );
+    }
+    const [globalPrompt, localPrompt] = await Promise.all([
+      this.getActive(GLOBAL_AGENT_NAME),
+      this.getActiveOrThrow(agentName),
+    ]);
+
+    const localExpanded = expandMacros(localPrompt.content, macros);
+    if (!globalPrompt) {
+      console.warn(
+        `[PromptRegistry] ${GLOBAL_AGENT_NAME} active が存在しません。agent=${agentName} 単独で返します`,
+      );
+      return localExpanded;
+    }
+    const globalExpanded = expandMacros(globalPrompt.content, macros);
+    return `${globalExpanded}\n\n${localExpanded}`;
   }
 
   /** エージェントの experimental プロンプト一覧。 */

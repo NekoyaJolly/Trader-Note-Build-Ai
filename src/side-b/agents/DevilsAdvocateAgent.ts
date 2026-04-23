@@ -16,7 +16,7 @@
  */
 
 import { config, modelFor } from '../../config';
-import { loadPrompt } from '../prompts/loader';
+import { loadPromptWithGlobal } from '../prompts/loader';
 import type { AITradeScenario, PlanMarketAnalysis } from '../models';
 import { extractJson } from './llmJsonExtract';
 
@@ -164,7 +164,7 @@ export class DevilsAdvocateAgent {
         }
 
         try {
-            const systemPrompt = loadPrompt('devils_advocate');
+            const systemPrompt = loadPromptWithGlobal('devils_advocate');
             const userPrompt = this.buildUserPrompt(scenario, marketContext);
             const raw = await this.callAI(systemPrompt, userPrompt);
             const validated = validateDevilsAdvocateOutput(raw.content);
