@@ -15,7 +15,7 @@
 
 import { PrismaClient } from '@prisma/client';
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
-import { loadPrompt } from '../prompts/loader';
+import { loadPromptWithGlobal } from '../prompts/loader';
 import { modelFor } from '../../config';
 import { PromptRegistry, GLOBAL_AGENT_NAME } from '../prompts/registry/PromptRegistry';
 import { extractJson } from './llmJsonExtract';
@@ -190,7 +190,7 @@ export class MetaEvolutionAgent {
    * 失敗時は null。
    */
   async propose(input: MetaEvolutionInput): Promise<AgentRestructureProposal | null> {
-    const system = loadPrompt('meta_evolution');
+    const system = loadPromptWithGlobal('meta_evolution');
     const user = this.buildUserPrompt(input);
 
     const res = await withRetries(() =>

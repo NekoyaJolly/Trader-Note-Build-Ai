@@ -25,7 +25,7 @@ import {
 } from '../ledger/statusManager';
 import { BacktesterAgent } from './BacktesterAgent';
 import { AIProvider } from '../agent/aiProvider';
-import { loadPrompt } from '../prompts/loader';
+import { loadPromptWithGlobal } from '../prompts/loader';
 import { modelFor } from '../../config';
 
 // ===========================================
@@ -168,7 +168,7 @@ export class StrategistAgent {
         report: ConsolidatedValidationReport,
         check: PromoteCheck,
     ): Promise<{ interpretation: string; actionableInsights: string[] }> {
-        const systemPrompt = loadPrompt('strategist');
+        const systemPrompt = loadPromptWithGlobal('strategist');
         const userPrompt = this.buildUserPrompt(hyp, report, check);
 
         const response = await this.ai.chat(

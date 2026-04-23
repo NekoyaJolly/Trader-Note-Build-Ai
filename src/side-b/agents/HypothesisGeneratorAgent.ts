@@ -13,7 +13,7 @@
  */
 
 import { config, modelFor } from '../../config';
-import { loadPrompt } from '../prompts/loader';
+import { loadPromptWithGlobal, prependGlobalPromptFromFile } from '../prompts/loader';
 import type { LensFeatureSnapshot } from '../lenses';
 import type {
     EdgeHypothesis,
@@ -278,17 +278,20 @@ export class HypothesisGeneratorAgent {
         const userPrompt = this.buildUserPrompt(input);
         // Phase 6.6: registry から active / experimental を取得(失敗時は fallback)
         const { active, experimentals } = await this.loadVariants();
-        const fallbackSystem = loadPrompt('hypothesis_generator');
+        // Phase 6.7a: fallback 経路でも __global__ を合成する
+        const fallbackSystem = loadPromptWithGlobal('hypothesis_generator');
 
-        // registry に active が無ければ従来通り loadPrompt() で単純実行(後方互換)
+        // registry に active が無ければ loadPromptWithGlobal 経路で単純実行(後方互換 + global 合成)
         if (!active) {
             return this.runSingleWithPrompt(fallbackSystem, userPrompt, input);
         }
 
         // 1 回目: variantSelector で選択
         const selection = selectVariant(active, experimentals, this.rand);
+        // Phase 6.7a: 選ばれた content に __global__ を前置してシステムプロンプトを組む
+        const primarySystem = prependGlobalPromptFromFile(selection.selected.content);
         const primary = await this.runAndScore(
-            selection.selected.content,
+            primarySystem,
             userPrompt,
             input,
             selection.selected.id,
@@ -306,8 +309,9 @@ export class HypothesisGeneratorAgent {
 
         // experimental 失敗 → active で再試行
         if (selection.isExperimental) {
+            const activeSystem = prependGlobalPromptFromFile(active.content);
             const fallback = await this.runAndScore(
-                active.content,
+                activeSystem,
                 userPrompt,
                 input,
                 active.id,

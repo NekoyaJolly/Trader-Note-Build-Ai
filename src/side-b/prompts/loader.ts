@@ -16,6 +16,13 @@ import path from 'path';
 const PROMPTS_DIR = __dirname;
 
 /**
+ * Phase 6.7a: グローバルプロンプトファイル名(拡張子なし)。
+ * `src/side-b/prompts/__global__.md` に配置。
+ * PromptRegistry.GLOBAL_AGENT_NAME と整合する(両方とも "__global__")。
+ */
+const GLOBAL_PROMPT_NAME = '__global__';
+
+/**
  * プロンプト内の {{KEY}} プレースホルダーを展開するための辞書。
  * 必要に応じて新しいキーを追加していく。
  */
@@ -62,4 +69,59 @@ export function expandMacros(content: string, macros?: PromptMacros): string {
         out = out.split(placeholder).join(value ?? '');
     }
     return out;
+}
+
+/**
+ * Phase 6.7a: グローバル + エージェント固有プロンプトをファイルから合成する(C 案)。
+ *
+ * 用途: Registry 未接続エージェントの fallback 経路、もしくは Registry 未投入の
+ * ローカル環境/テストで使う。通常の実運用は `PromptRegistry.getCompositeActive`
+ * を経由すること(Registry 側の experimental / active 使い分けと整合する)。
+ *
+ * 挙動:
+ *   - `__global__.md` が存在する → `{global content}\n\n{agent content}` を返す
+ *   - 存在しない → `{agent content}` 単独で返す(警告ログ出力、後方互換)
+ *   - agent ファイルが存在しない → 従来通り例外
+ *   - 両 content に同じ `macros` を展開
+ */
+export function loadPromptWithGlobal(name: string, macros?: PromptMacros): string {
+    const localContent = loadPrompt(name, macros);
+    const globalPath = path.join(PROMPTS_DIR, `${GLOBAL_PROMPT_NAME}.md`);
+    if (!fs.existsSync(globalPath)) {
+        console.warn(
+            `[loadPromptWithGlobal] ${GLOBAL_PROMPT_NAME}.md が見つかりません。agent=${name} 単独で返します`,
+        );
+        return localContent;
+    }
+    const globalRaw = fs.readFileSync(globalPath, 'utf-8');
+    const globalExpanded = expandMacros(globalRaw, macros);
+    return `${globalExpanded}\n\n${localContent}`;
+}
+
+/**
+ * Phase 6.7a: Registry から取得済みの agent content に、ファイルから読んだ
+ * `__global__` を前置する helper。
+ *
+ * 用途: Registry 接続済みエージェント(HypothesisGenerator、3 Specialists 等)が
+ * variantSelector で選んだ experimental/active の content に、グローバルルールを
+ * 合成するとき。PromptRegistry.getCompositeActive とは別経路で、Registry の
+ * `__global__` active が未投入でもファイルから読める fallback を優先する。
+ *
+ * ただし Registry に `__global__` active がある場合はそちらを優先したいので、
+ * 基本的には `PromptRegistry.getCompositeActive` を使うのが正規ルート。
+ * この関数は「variant selection 済みの content を既に手元に持っている」ケース
+ * 向けのユーティリティ。
+ */
+export function prependGlobalPromptFromFile(
+    localContent: string,
+    macros?: PromptMacros,
+): string {
+    const globalPath = path.join(PROMPTS_DIR, `${GLOBAL_PROMPT_NAME}.md`);
+    if (!fs.existsSync(globalPath)) {
+        return localContent;
+    }
+    const globalRaw = fs.readFileSync(globalPath, 'utf-8');
+    const globalExpanded = expandMacros(globalRaw, macros);
+    const localExpanded = expandMacros(localContent, macros);
+    return `${globalExpanded}\n\n${localExpanded}`;
 }

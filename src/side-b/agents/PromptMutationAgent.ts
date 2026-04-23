@@ -13,7 +13,7 @@
  */
 
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
-import { loadPrompt } from '../prompts/loader';
+import { loadPromptWithGlobal } from '../prompts/loader';
 import { modelFor } from '../../config';
 import type { PromptVersion } from '../prompts/registry/types';
 import { extractJson } from './llmJsonExtract';
@@ -116,7 +116,7 @@ export class PromptMutationAgent {
       return [];
     }
     const count = input.count ?? 3;
-    const system = loadPrompt('prompt_mutation');
+    const system = loadPromptWithGlobal('prompt_mutation');
     const user = this.buildUserPrompt(input, count);
 
     const res = await withRetries(() =>

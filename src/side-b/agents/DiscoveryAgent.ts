@@ -13,7 +13,7 @@
  */
 
 import { config, modelFor } from '../../config';
-import { loadPrompt } from '../prompts/loader';
+import { loadPromptWithGlobal } from '../prompts/loader';
 import type { AITradeNote } from '../models/aiTradeNote';
 import { extractJson } from './llmJsonExtract';
 import type {
@@ -253,7 +253,7 @@ export class DiscoveryAgent {
 
         if (topSeparations.length > 0 && this.apiKey) {
             try {
-                const systemPrompt = loadPrompt('discovery');
+                const systemPrompt = loadPromptWithGlobal('discovery');
                 const userPrompt = this.buildUserPrompt(
                     truncated.length,
                     periodStart,
