@@ -33,6 +33,7 @@ import { PromptRegistry } from '../prompts/registry/PromptRegistry';
 import { selectVariant, type RandomGenerator } from '../prompts/registry/variantSelector';
 import { getScoringFunction } from '../prompts/abtest/scoringFunctions';
 import type { PromptVersion } from '../prompts/registry/types';
+import { extractJson } from './llmJsonExtract';
 
 // ===========================================
 // 型定義
@@ -595,8 +596,17 @@ ${existingDump}
             throw new Error('HypothesisGenerator API からの応答が空です');
         }
 
+        // フェンス付き応答 (```json ... ```) や前置き混在に対応
+        // Phase 6 hotfix の extractJson を使う(raw → fence → bracket の 3 段階 fallback)
+        const extracted = extractJson(content);
+        if (!extracted.ok) {
+            throw new Error(
+                `HypothesisGenerator 応答を JSON として解釈できませんでした: ${extracted.error}`,
+            );
+        }
+
         return {
-            content: JSON.parse(content),
+            content: extracted.data,
             tokenUsage: data.usage?.total_tokens || 0,
             model: data.model || this.model,
         };

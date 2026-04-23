@@ -31,6 +31,7 @@ import type { MacroEnvironmentData, HigherTimeframeContext } from '../knowledge'
 import { loadPrompt } from '../prompts/loader';
 import type { LensFeatureSnapshot } from '../lenses';
 import type { EdgeHypothesis } from '../models/edgeHypothesis';
+import { extractJson } from '../agents/llmJsonExtract';
 
 // ===========================================
 // 型定義
@@ -379,7 +380,13 @@ ${candidateContext}
       throw new Error('AI APIからの応答が空です');
     }
 
-    const parsed = JSON.parse(content);
+    // フェンス付き応答 (```json ... ```) や前置き混在に対応するため
+    // Phase 6 hotfix の extractJson を使う(raw → fence → bracket の 3 段階 fallback)
+    const extracted = extractJson(content);
+    if (!extracted.ok) {
+      throw new Error(`AI 応答を JSON として解釈できませんでした: ${extracted.error}`);
+    }
+    const parsed = extracted.data;
 
     return {
       content: parsed,

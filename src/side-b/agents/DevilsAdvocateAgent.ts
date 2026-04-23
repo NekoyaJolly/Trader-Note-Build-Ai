@@ -18,6 +18,7 @@
 import { config, modelFor } from '../../config';
 import { loadPrompt } from '../prompts/loader';
 import type { AITradeScenario, PlanMarketAnalysis } from '../models';
+import { extractJson } from './llmJsonExtract';
 
 // ===========================================
 // 型定義
@@ -238,8 +239,16 @@ ${JSON.stringify(context, null, 2)}
             throw new Error("Devil's Advocate API からの応答が空です");
         }
 
+        // フェンス付き応答 (```json ... ```) や前置き混在に対応
+        const extracted = extractJson(content);
+        if (!extracted.ok) {
+            throw new Error(
+                `Devil's Advocate 応答を JSON として解釈できませんでした: ${extracted.error}`,
+            );
+        }
+
         return {
-            content: JSON.parse(content),
+            content: extracted.data,
             tokenUsage: data.usage?.total_tokens || 0,
             model: data.model || this.model,
         };
