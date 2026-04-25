@@ -110,6 +110,18 @@ export class PDCALoop {
         this.memory = agentMemory;
     }
 
+    /**
+     * 実行設定を更新する。
+     * Start API から enabled/symbols/interval を反映するための最小API。
+     */
+    updateConfig(config: Partial<PDCALoopConfig>): void {
+        this.config = { ...this.config, ...config };
+        if (config.symbols) {
+            this.memory.setWatchSymbols(config.symbols);
+        }
+        this.log('PDCAループ設定を更新しました');
+    }
+
     // --- ライフサイクル ---
 
     /**

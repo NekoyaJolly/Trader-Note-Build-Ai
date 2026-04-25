@@ -50,7 +50,7 @@ import {
 import type { ExitReason, UpdatePortfolioSettings } from '../models';
 import { MarketDataService } from '../../services/marketDataService';
 import { getSideBScheduler, type SideBSchedulerConfig } from '../jobs/sideBScheduler';
-import { pdcaLoop, agentMemory } from '../agent';
+import { pdcaLoop, agentMemory, type PDCALoopConfig } from '../agent';
 
 // MarketDataService インスタンス（OHLCV自動取得用）
 const marketDataService = new MarketDataService();
@@ -947,7 +947,7 @@ export class SideBController {
     try {
       const { symbols, normalIntervalMs, activeIntervalMs, positionIntervalMs } = req.body;
       // PDCAループを開始（設定はオプション）
-      const configOverride: Record<string, unknown> = { enabled: true };
+      const configOverride: Partial<PDCALoopConfig> = { enabled: true };
       if (symbols) configOverride.symbols = symbols;
       if (normalIntervalMs) configOverride.normalIntervalMs = normalIntervalMs;
       if (activeIntervalMs) configOverride.activeIntervalMs = activeIntervalMs;
@@ -958,6 +958,7 @@ export class SideBController {
       scheduler.updateConfig({ enabled: true });
       scheduler.start();
 
+      pdcaLoop.updateConfig(configOverride);
       pdcaLoop.start();
       const status = pdcaLoop.getStatus();
       res.json({ success: true, message: 'PDCAループを開始しました', status });

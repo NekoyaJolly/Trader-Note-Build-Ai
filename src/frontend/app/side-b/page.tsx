@@ -117,9 +117,9 @@ export default function SideBDashboard() {
   const fetchData = useCallback(async () => {
     try {
       const [statusRes, logRes, lessonsRes] = await Promise.allSettled([
-        fetch(`${API_BASE}/agent/status`),
-        fetch(`${API_BASE}/agent/thinking-log?limit=20`),
-        fetch(`${API_BASE}/agent/lessons`),
+        fetch(`${API_BASE}/agent/status`, { cache: "no-store" }),
+        fetch(`${API_BASE}/agent/thinking-log?limit=20`, { cache: "no-store" }),
+        fetch(`${API_BASE}/agent/lessons`, { cache: "no-store" }),
       ]);
 
       let hasError = false;
@@ -196,6 +196,7 @@ export default function SideBDashboard() {
       const res = await fetch(`${API_BASE}/agent/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        cache: "no-store",
         body: JSON.stringify({}),
       });
       if (res.ok) {
@@ -211,7 +212,7 @@ export default function SideBDashboard() {
   const stopAgent = async () => {
     setIsStopping(true);
     try {
-      const res = await fetch(`${API_BASE}/agent/stop`, { method: "POST" });
+      const res = await fetch(`${API_BASE}/agent/stop`, { method: "POST", cache: "no-store" });
       if (res.ok) {
         await fetchData();
       }
