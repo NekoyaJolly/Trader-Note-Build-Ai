@@ -17,7 +17,11 @@ import { PrismaClient } from '@prisma/client';
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { loadPromptWithGlobal } from '../prompts/loader';
 import { modelFor } from '../../config';
-import { PromptRegistry, GLOBAL_AGENT_NAME } from '../prompts/registry/PromptRegistry';
+import {
+  PromptRegistry,
+  GLOBAL_AGENT_NAME,
+  SPECIALIST_COMMON_AGENT_NAME,
+} from '../prompts/registry/PromptRegistry';
 import { extractJson } from './llmJsonExtract';
 
 export interface AgentPerformance {
@@ -252,11 +256,18 @@ export class MetaEvolutionAgent {
     let remainingAddBudget = Math.max(0, MONTHLY_ADD_LIMIT - addsUsedThisMonth);
 
     for (const p of parsed.proposals ?? []) {
-      // Phase 6.7a: __global__ に関する提案はどの type でも拒否
+      // Phase 6.7a/6.7c: グローバル・専門家共通テンプレは自動変更不可
       if (p.agentName === GLOBAL_AGENT_NAME) {
         result.skipped.push({
           proposal: p,
           reason: `${GLOBAL_AGENT_NAME} はグローバルルール予約識別子のため自動変更不可`,
+        });
+        continue;
+      }
+      if (p.agentName === SPECIALIST_COMMON_AGENT_NAME) {
+        result.skipped.push({
+          proposal: p,
+          reason: `${SPECIALIST_COMMON_AGENT_NAME} は専門家共通テンプレ予約のため自動変更不可`,
         });
         continue;
       }

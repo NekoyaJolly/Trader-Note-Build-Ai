@@ -13,7 +13,7 @@
  */
 
 import { config, modelFor } from '../../config';
-import { loadPromptWithGlobal, prependGlobalPromptFromFile } from '../prompts/loader';
+import { loadPromptWithGlobal } from '../prompts/loader';
 import type { LensFeatureSnapshot } from '../lenses';
 import type {
     EdgeHypothesis,
@@ -116,6 +116,10 @@ export interface HypothesisGeneratorInput {
         oscillator?: unknown;
         volatilityVolume?: unknown;
     };
+    /**
+     * Phase 6.7c: Discovery 週次レポート等からの探索ヒント（任意。未指定なら従来通り）
+     */
+    discoveryHints?: unknown;
 }
 
 export interface HypothesisGeneratorResult {
@@ -288,8 +292,10 @@ export class HypothesisGeneratorAgent {
 
         // 1 回目: variantSelector で選択
         const selection = selectVariant(active, experimentals, this.rand);
-        // Phase 6.7a: 選ばれた content に __global__ を前置してシステムプロンプトを組む
-        const primarySystem = prependGlobalPromptFromFile(selection.selected.content);
+        // Phase 6.7a: Registry の `__global__` active と variant content を合成。
+        // テスト/旧モックでは composeGlobalWithContent が未実装の場合があるため、
+        // その場合は選択済み content をそのまま使い、variant 選択の意味を保つ。
+        const primarySystem = await this.composeSelectedPrompt(selection.selected.content);
         const primary = await this.runAndScore(
             primarySystem,
             userPrompt,
@@ -309,7 +315,7 @@ export class HypothesisGeneratorAgent {
 
         // experimental 失敗 → active で再試行
         if (selection.isExperimental) {
-            const activeSystem = prependGlobalPromptFromFile(active.content);
+            const activeSystem = await this.composeSelectedPrompt(active.content);
             const fallback = await this.runAndScore(
                 activeSystem,
                 userPrompt,
@@ -330,6 +336,16 @@ export class HypothesisGeneratorAgent {
             tokenUsage: primary.tokenUsage,
             model: primary.model,
         };
+    }
+
+    private async composeSelectedPrompt(content: string): Promise<string> {
+        const registryLike = this.registry as PromptRegistry & {
+            composeGlobalWithContent?: (localContent: string) => Promise<string>;
+        };
+        if (typeof registryLike.composeGlobalWithContent === 'function') {
+            return registryLike.composeGlobalWithContent(content);
+        }
+        return content;
     }
 
     /**
@@ -498,6 +514,10 @@ export class HypothesisGeneratorAgent {
                       .join('\n');
 
         const specialistsDump = this.formatSpecialistAnalyses(input.specialistAnalyses);
+        const discoveryDump =
+            input.discoveryHints !== undefined && input.discoveryHints !== null
+                ? `\n## Discovery からの示唆 (discoveryHints)\n${JSON.stringify(input.discoveryHints, null, 2)}\n`
+                : '';
 
         return `# 仮説生成リクエスト
 
@@ -507,12 +527,11 @@ export class HypothesisGeneratorAgent {
 
 ## 現在のレンズスナップショット
 ${lensDump.join('\n')}
-${specialistsDump}
+${specialistsDump}${discoveryDump}
 ## 既存仮説リスト（重複回避）
 ${existingDump}
 
-上記の既存仮説と**意味的に異なる**新規仮説を最大3個生成してください。
-新規性がなければ 0 個で構いません。`;
+上記を踏まえ、**バックテストに投げる価値**のある仮説候補を最大3件。重複を避け、\`conditions\` は2〜5個の組み合わせ。極めて稀に「候補ゼロ」もあり得るが、**機械可読な仮説を優先**すること。`;
     }
 
     /**

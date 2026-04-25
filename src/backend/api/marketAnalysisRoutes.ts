@@ -22,8 +22,8 @@ const router = Router();
 const marketDataService = new MarketDataService();
 
 /**
- * シンボルをTwelve Data形式に正規化
- * XAUUSD → XAU/USD, EURUSD → EUR/USD
+ * 表示・URL互換用にスラッシュ区切りへ正規化（例: XAUUSD → XAU/USD）
+ * 履歴取得は cTrader 経由; 内部でブローカー名へ解決される
  */
 function normalizeSymbol(symbol: string): string {
   // すでに / が含まれている場合はそのまま返す
@@ -104,7 +104,6 @@ router.get('/:symbol', async (req: Request, res: Response) => {
     const timeframe = (req.query.timeframe as string) || '1m';
     const count = parseInt(req.query.count as string) || 60;
 
-    // シンボルをTwelve Data形式に正規化（XAUUSD → XAU/USD）
     const normalizedSymbol = normalizeSymbol(symbol);
 
     console.log(`[MarketAnalysis] ${symbol} → ${normalizedSymbol} ${timeframe} × ${count}本 取得開始`);

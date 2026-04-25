@@ -6,66 +6,12 @@ import { CTraderAuthService } from '../backend/services/ctrader/ctraderAuthServi
 
 /**
  * 市場データサービス
- * 
- * 目的: Twelve Data API を使用してリアルタイム市場データを取得
- * 
- * 対応時間足: 1min, 5min, 15min, 30min, 1h, 4h, 1day
- * 
- * 制約:
- * - API レート制限を考慮（無料プランは8回/分）
- * - エラー時はシミュレーションデータにフォールバック
- * 
- * インジケーター計算:
- * - 単一バーではなく履歴データを取得して計算
- * - indicatorService を使用して実際の値を計算
+ *
+ * 目的: **cTrader Open API** を用いてブローカーと同一の価格・足区切りでデータを取得する。
+ *（Twelve Data へのフォールバックは廃止: 正は cTrader に統一）
+ *
+ * 制約: OAuth 済み cTrader 口座が未設定の環境では履歴・現在値は取得できない。
  */
-
-/**
- * Twelve Data API レスポンス型
- */
-interface TwelveDataQuoteResponse {
-  symbol: string;
-  name?: string;
-  exchange?: string;
-  datetime: string;
-  timestamp: number;
-  open: string;
-  high: string;
-  low: string;
-  close: string;
-  volume: string;
-  previous_close?: string;
-  change?: string;
-  percent_change?: string;
-  is_market_open?: boolean;
-  status?: string;
-  code?: number;
-  message?: string;
-}
-
-/**
- * Twelve Data 時系列レスポンス型
- */
-interface TwelveDataTimeSeriesResponse {
-  meta?: {
-    symbol: string;
-    interval: string;
-    currency?: string;
-    exchange?: string;
-    type?: string;
-  };
-  values?: Array<{
-    datetime: string;
-    open: string;
-    high: string;
-    low: string;
-    close: string;
-    volume: string;
-  }>;
-  status?: string;
-  code?: number;
-  message?: string;
-}
 
 /**
  * 市場データサービスクラス
@@ -118,70 +64,10 @@ export class MarketDataService {
   }
 
   /**
-   * シンボルを Twelve Data 形式に変換
-   * 
-   * 例:
-   * - BTCUSDT → BTC/USD
-   * - ETHUSDT → ETH/USD
-   * - XAUUSD → XAU/USD
-   * - EUR/USD → EUR/USD（そのまま）
-   * 
-   * @param symbol - 入力シンボル
-   * @returns Twelve Data 形式のシンボル
-   */
-  private normalizeSymbolForTwelveData(symbol: string): string {
-    // すでに / が含まれている場合はそのまま返す
-    if (symbol.includes('/')) {
-      return symbol;
-    }
-
-    // USDT ペアを USD に変換（例: BTCUSDT → BTC/USD）
-    if (symbol.endsWith('USDT')) {
-      const base = symbol.slice(0, -4);
-      return `${base}/USD`;
-    }
-
-    // USD ペアに / を挿入（例: XAUUSD → XAU/USD, EURUSD → EUR/USD）
-    if (symbol.endsWith('USD')) {
-      const base = symbol.slice(0, -3);
-      return `${base}/USD`;
-    }
-
-    // JPY ペアに / を挿入（例: USDJPY → USD/JPY）
-    if (symbol.endsWith('JPY')) {
-      const base = symbol.slice(0, -3);
-      return `${base}/JPY`;
-    }
-
-    // その他はそのまま返す（株式シンボルなど）
-    return symbol;
-  }
-
-  /**
-   * API が設定されているか確認
+   * 旧 Twelve Data 用。互換のため残す（新規利用は cTrader 前提）
    */
   isApiConfigured(): boolean {
     return !!(this.apiUrl && this.apiKey);
-  }
-
-  /**
-   * 時間足を Twelve Data フォーマットに変換
-   * 
-   * @param timeframe - 内部時間足形式（例: '15m', '1h'）
-   * @returns Twelve Data API 形式（例: '15min', '1h'）
-   */
-  private convertTimeframe(timeframe: string): string {
-    const mapping: Record<string, string> = {
-      '1m': '1min',
-      '5m': '5min',
-      '15m': '15min',
-      '30m': '30min',
-      '1h': '1h',
-      '4h': '4h',
-      '1d': '1day',
-      '1w': '1week',
-    };
-    return mapping[timeframe] || '15min';
   }
 
   /**
@@ -214,65 +100,15 @@ export class MarketDataService {
           this.calculateIndicators(marketData);
           return marketData;
         }
-        console.warn(`[MarketDataService] cTraderから空データ → Twelve Dataにフォールバック`);
+        console.warn(`[MarketDataService] cTrader から空データ: ${symbol} ${timeframe}`);
       } catch (error) {
-        console.warn(`[MarketDataService] cTraderエラー → Twelve Dataにフォールバック:`, error);
+        console.warn(`[MarketDataService] cTrader 取得エラー:`, error);
       }
     }
 
-    // 2. Twelve Data フォールバック
-    if (!this.isApiConfigured()) {
-      throw new Error('市場APIが設定されていません。.envのAPI_URLとMARKET_API_KEYを確認してください。');
-    }
-
-    try {
-      // シンボルを Twelve Data 形式に変換（例: ETHUSDT → ETH/USD）
-      const normalizedSymbol = this.normalizeSymbolForTwelveData(symbol);
-
-      // Twelve Data API で直近のローソク足を取得
-      const interval = this.convertTimeframe(timeframe);
-      const url = `${this.apiUrl}/time_series?symbol=${encodeURIComponent(normalizedSymbol)}&interval=${interval}&outputsize=1&apikey=${this.apiKey}`;
-
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`API レスポンスエラー: ${response.status}`);
-      }
-
-      const data = (await response.json()) as TwelveDataTimeSeriesResponse;
-
-      // API エラーチェック
-      if (data.status === 'error' || data.code) {
-        throw new Error(data.message || 'Twelve Data API エラー');
-      }
-
-      // 値が取得できない場合はエラー
-      if (!data.values || data.values.length === 0) {
-        throw new Error(`${symbol} のデータが取得できませんでした。シンボルが正しいか確認してください。`);
-      }
-
-      const latestBar = data.values[0];
-
-      const marketData: MarketData = {
-        symbol: data.meta?.symbol || symbol,
-        timestamp: new Date(latestBar.datetime),
-        timeframe,
-        open: parseFloat(latestBar.open),
-        high: parseFloat(latestBar.high),
-        low: parseFloat(latestBar.low),
-        close: parseFloat(latestBar.close),
-        volume: parseFloat(latestBar.volume) || 0,
-      };
-
-      // インジケーターを計算
-      this.calculateIndicators(marketData);
-
-      return marketData;
-    } catch (error) {
-      console.error('市場データ取得エラー:', error);
-      // エラーをそのまま投げる
-      throw error;
-    }
+    throw new Error(
+      'cTrader 接続（OAuth 済み口座）が必要です。価格・足区切りは cTrader のみ使用します。'
+    );
   }
 
   /**
@@ -427,65 +263,18 @@ export class MarketDataService {
         if (bars.length > 0) {
           return this.convertCTraderBars(bars, symbol, timeframe);
         }
-        console.warn(`[MarketDataService] cTraderから空データ → Twelve Dataにフォールバック`);
+        console.warn(`[MarketDataService] cTrader から空データ: ${symbol} ${timeframe}`);
+        return [];
       } catch (error) {
-        console.warn(`[MarketDataService] cTraderエラー → Twelve Dataにフォールバック:`, error);
+        console.warn(`[MarketDataService] cTrader 履歴エラー:`, error);
+        return [];
       }
     }
 
-    // 2. Twelve Data フォールバック
-    return this.getHistoricalDataFromTwelveData(symbol, timeframe, limit);
-  }
-
-  /**
-   * Twelve Data から履歴データを取得（内部用）
-   */
-  private async getHistoricalDataFromTwelveData(
-    symbol: string,
-    timeframe: string,
-    limit: number = 100
-  ): Promise<MarketData[]> {
-    if (!this.isApiConfigured()) {
-      throw new Error('市場APIが設定されていません。.envのAPI_URLとMARKET_API_KEYを確認してください。');
-    }
-
-    try {
-      const normalizedSymbol = this.normalizeSymbolForTwelveData(symbol);
-      const interval = this.convertTimeframe(timeframe);
-      const url = `${this.apiUrl}/time_series?symbol=${encodeURIComponent(normalizedSymbol)}&interval=${interval}&outputsize=${limit}&apikey=${this.apiKey}`;
-
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`API レスポンスエラー: ${response.status}`);
-      }
-
-      const data = (await response.json()) as TwelveDataTimeSeriesResponse;
-
-      if (data.status === 'error' || data.code) {
-        throw new Error(data.message || 'Twelve Data API エラー');
-      }
-
-      if (!data.values || data.values.length === 0) {
-        throw new Error(`${symbol} の履歴データが取得できませんでした。`);
-      }
-
-      const marketDataArray: MarketData[] = data.values.map(bar => ({
-        symbol: data.meta?.symbol || symbol,
-        timestamp: new Date(bar.datetime),
-        timeframe,
-        open: parseFloat(bar.open),
-        high: parseFloat(bar.high),
-        low: parseFloat(bar.low),
-        close: parseFloat(bar.close),
-        volume: parseFloat(bar.volume) || 0,
-      })).reverse();
-
-      return marketDataArray;
-    } catch (error) {
-      console.error('履歴データ取得エラー:', error);
-      throw error;
-    }
+    console.warn(
+      '[MarketDataService] cTrader 未設定のため履歴を返しません（cTrader OAuth で接続してください）',
+    );
+    return [];
   }
 
   /**
@@ -519,15 +308,11 @@ export class MarketDataService {
    * @param count - 取得する本数（デフォルト: 60 = 1時間分）
    * @returns 1分足OHLCVデータ配列（時系列順: 古い → 新しい）
    * 
-   * API コスト:
-   * - Twelve Data 無料プラン: 800回/日, 8回/分
-   * - 1コール = 1ペアの60本 → 30ペアまで無料運用可能
    */
   async getRecentMinuteOHLCV(
     symbol: string,
     count: number = 60
   ): Promise<MarketData[]> {
-    // 1. cTrader 利用可能なら優先
     if (this.isCTraderAvailable()) {
       try {
         console.log(`[MarketDataService] cTrader 1分足取得: ${symbol} × ${count}本`);
@@ -540,55 +325,14 @@ export class MarketDataService {
         if (bars.length > 0) {
           return this.convertCTraderBars(bars, symbol, '1m');
         }
-        console.warn(`[MarketDataService] cTrader 1分足空 → Twelve Dataにフォールバック`);
+        console.warn(`[MarketDataService] cTrader 1分足が空: ${symbol}`);
       } catch (error) {
-        console.warn(`[MarketDataService] cTrader 1分足エラー → Twelve Dataへ:`, error);
+        console.warn(`[MarketDataService] cTrader 1分足エラー:`, error);
       }
     }
 
-    // 2. Twelve Data フォールバック
-    if (!this.isApiConfigured()) {
-      throw new Error('市場APIが設定されていません。.envのAPI_URLとMARKET_API_KEYを確認してください。');
-    }
-
-    try {
-      const url = `${this.apiUrl}/time_series?symbol=${encodeURIComponent(symbol)}&interval=1min&outputsize=${count}&apikey=${this.apiKey}`;
-
-      console.log(`[MarketDataService] Twelve Data 1分足取得: ${symbol} × ${count}本`);
-
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`API レスポンスエラー: ${response.status}`);
-      }
-
-      const data = (await response.json()) as TwelveDataTimeSeriesResponse;
-
-      if (data.status === 'error' || data.code) {
-        throw new Error(data.message || 'Twelve Data API エラー');
-      }
-
-      if (!data.values || data.values.length === 0) {
-        throw new Error(`${symbol} の1分足データが取得できませんでした。`);
-      }
-
-      console.log(`[MarketDataService] 取得成功: ${data.values.length}本`);
-
-      const marketDataArray: MarketData[] = data.values.map(bar => ({
-        symbol: data.meta?.symbol || symbol,
-        timestamp: new Date(bar.datetime),
-        timeframe: '1m',
-        open: parseFloat(bar.open),
-        high: parseFloat(bar.high),
-        low: parseFloat(bar.low),
-        close: parseFloat(bar.close),
-        volume: parseFloat(bar.volume) || 0,
-      })).reverse();
-
-      return marketDataArray;
-    } catch (error) {
-      console.error('1分足データ取得エラー:', error);
-      throw error;
-    }
+    throw new Error(
+      'cTrader 接続（OAuth 済み口座）が必要です。1分足は cTrader のみ使用します。'
+    );
   }
 }

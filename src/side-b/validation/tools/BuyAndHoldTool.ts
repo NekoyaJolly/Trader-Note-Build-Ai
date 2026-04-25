@@ -20,10 +20,12 @@ import { backtestService as defaultBacktestService, type BacktestService } from 
 import { OHLCVRepository } from '../../../backend/repositories/ohlcvRepository';
 import { VALIDATION_THRESHOLDS } from '../../config/validationThresholds';
 import type {
+    HypothesisValidationInput,
     ValidationTool,
     ValidationToolInput,
     ValidationToolResult,
 } from './types';
+import { isStrategyValidationInput } from './types';
 
 // ===========================================
 // ヘルパー
@@ -46,7 +48,7 @@ export interface BuyAndHoldToolConfig {
 export class BuyAndHoldTool implements ValidationTool {
     readonly name = 'buy_and_hold';
     readonly implementation = 'native_ts' as const;
-    readonly requiredInputs: (keyof ValidationToolInput)[] = ['hypothesis', 'backtestRunId', 'period'];
+    readonly requiredInputs: readonly string[] = ['kind', 'hypothesis', 'backtestRunId', 'period'];
 
     private readonly minOutperformance: number;
 
@@ -59,8 +61,16 @@ export class BuyAndHoldTool implements ValidationTool {
     }
 
     async execute(input: ValidationToolInput): Promise<ValidationToolResult> {
-        const start = Date.now();
+        if (isStrategyValidationInput(input)) {
+            return this.executeStrategy(input, Date.now());
+        }
+        return this.executeHypothesis(input, Date.now());
+    }
 
+    private async executeHypothesis(
+        input: HypothesisValidationInput,
+        start: number,
+    ): Promise<ValidationToolResult> {
         if (!input.backtestRunId) {
             return this.fail('backtestRunId が未指定（Phase 4b screening 結果が必要）', start);
         }
@@ -147,6 +157,84 @@ export class BuyAndHoldTool implements ValidationTool {
                 tradeCount: summary.setupCount,
                 periodDays,
                 comparisonDirection: direction,
+            },
+            interpretation: passed
+                ? `戦略が BH を +${(outperformance * 100).toFixed(2)}pt 上回る（通過）`
+                : `戦略が BH 対比 ${(outperformance * 100).toFixed(2)}pt で閾値 ${(this.minOutperformance * 100).toFixed(2)}pt 未達`,
+            durationMs: Date.now() - start,
+        };
+    }
+
+    /**
+     * Phase 6.7b: DSLBacktestResult.finalReturn（検証期間）と B&H を比較
+     */
+    private async executeStrategy(
+        input: import('./types').StrategyValidationInput,
+        start: number,
+    ): Promise<ValidationToolResult> {
+        const { strategy, period, dslResult } = input;
+        const symbol = strategy.symbol;
+        const timeframe = strategy.timeframe;
+        if (!symbol || !timeframe) {
+            return this.fail('strategy.symbol / timeframe が空', start);
+        }
+        const normalizedSymbol = normalizeSymbol(symbol);
+        const startDate = new Date(period.start);
+        const endDate = new Date(period.end);
+        if (!Number.isFinite(startDate.getTime()) || !Number.isFinite(endDate.getTime())) {
+            return this.fail(`period が不正: ${period.start} ~ ${period.end}`, start);
+        }
+
+        let firstBar, lastBar;
+        try {
+            [firstBar, lastBar] = await Promise.all([
+                this.ohlcvRepo
+                    .findMany({ symbol: normalizedSymbol, timeframe, startTime: startDate, orderBy: 'asc', limit: 1 })
+                    .then((rows) => rows[0] ?? null),
+                this.ohlcvRepo
+                    .findMany({ symbol: normalizedSymbol, timeframe, endTime: endDate, orderBy: 'desc', limit: 1 })
+                    .then((rows) => rows[0] ?? null),
+            ]);
+        } catch (err) {
+            return this.fail(`OHLCV 取得失敗: ${err instanceof Error ? err.message : String(err)}`, start);
+        }
+
+        if (!firstBar || !lastBar) {
+            return this.fail(
+                `OHLCV データ不足 (symbol=${normalizedSymbol} tf=${timeframe} ${period.start}~${period.end})`,
+                start,
+            );
+        }
+        const startClose = Number(firstBar.close);
+        const endClose = Number(lastBar.close);
+        if (!(startClose > 0)) {
+            return this.fail(`startClose が不正: ${startClose}`, start);
+        }
+        const buyAndHoldReturn = (endClose - startClose) / startClose;
+        const strategyReturn = dslResult.finalReturn;
+        const direction = strategy.entry.direction;
+        const comparableBhReturn = direction === 'short' ? -buyAndHoldReturn : buyAndHoldReturn;
+        const outperformance = strategyReturn - comparableBhReturn;
+        const passed = outperformance > this.minOutperformance;
+        const periodDays = Math.max(
+            1,
+            Math.round((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)),
+        );
+        return {
+            toolName: this.name,
+            success: true,
+            passed,
+            metrics: {
+                buyAndHoldReturn,
+                strategyReturn,
+                outperformance,
+                startClose,
+                endClose,
+                tradeCount: dslResult.events.length,
+                periodDays,
+                comparisonDirection: direction,
+                executionModel: dslResult.executionModel,
+                executionConfigHash: dslResult.executionConfigHash,
             },
             interpretation: passed
                 ? `戦略が BH を +${(outperformance * 100).toFixed(2)}pt 上回る（通過）`

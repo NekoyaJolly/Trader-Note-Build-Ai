@@ -28,7 +28,8 @@ import {
   getMTFContext,
 } from '../knowledge';
 import type { MacroEnvironmentData, HigherTimeframeContext } from '../knowledge';
-import { loadPromptWithGlobal } from '../prompts/loader';
+import { loadPromptWithGlobal, type PromptMacros } from '../prompts/loader';
+import { PromptRegistry } from '../prompts/registry/PromptRegistry';
 import type { LensFeatureSnapshot } from '../lenses';
 import type { EdgeHypothesis } from '../models/edgeHypothesis';
 import { extractJson } from '../agents/llmJsonExtract';
@@ -97,6 +98,7 @@ export class PlanAIService {
   private apiKey: string;
   private model: string;
   private baseURL: string;
+  private resolvedPromptCache?: string;
 
   constructor() {
     this.apiKey = process.env.AI_API_KEY || '';
@@ -333,12 +335,37 @@ ${candidateContext}
   /**
    * AI APIを呼び出し
    */
-  private async callAI(prompt: string): Promise<{ content: unknown; tokenUsage: number; model: string }> {
-    const systemPrompt = loadPromptWithGlobal('strategy_thinker', {
+  /**
+   * Phase 6.7c: 優先して PromptRegistry.getCompositeActive（DB の __global__ + strategy_thinker active）。
+   * 未 seed / DB 不整合時はファイル `loadPromptWithGlobal` にフォールバック。
+   */
+  private async resolveStrategyThinkerSystemPrompt(): Promise<string> {
+    if (process.env.NODE_ENV === 'test' && this.resolvedPromptCache) {
+      return this.resolvedPromptCache;
+    }
+    const macros: PromptMacros = {
       CORE_TRADING_RULES,
       MACRO_ENVIRONMENT_RULES,
       MTF_ANALYSIS_RULES,
-    });
+    };
+    const registry = new PromptRegistry();
+    try {
+      const prompt = await registry.getCompositeActive('strategy_thinker', macros);
+      if (process.env.NODE_ENV === 'test') this.resolvedPromptCache = prompt;
+      return prompt;
+    } catch (err) {
+      console.warn(
+        '[StrategyThinker] Registry 合成に失敗、ファイル fallback:',
+        err instanceof Error ? err.message : err,
+      );
+      const fallback = loadPromptWithGlobal('strategy_thinker', macros);
+      if (process.env.NODE_ENV === 'test') this.resolvedPromptCache = fallback;
+      return fallback;
+    }
+  }
+
+  private async callAI(prompt: string): Promise<{ content: unknown; tokenUsage: number; model: string }> {
+    const systemPrompt = await this.resolveStrategyThinkerSystemPrompt();
 
     const response = await fetch(`${this.baseURL}/chat/completions`, {
       method: 'POST',

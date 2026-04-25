@@ -89,6 +89,13 @@ export class AISummaryService {
       };
     }
 
+    if (process.env.NODE_ENV === 'test' && process.env.AI_API_MOCK !== 'false') {
+      return {
+        summary: this.generateBasicSummary(tradeData),
+        model: 'test-fallback',
+      };
+    }
+
     try {
       // トークン効率的なプロンプトを構築
       const prompt = this.buildJapanesePrompt(tradeData);

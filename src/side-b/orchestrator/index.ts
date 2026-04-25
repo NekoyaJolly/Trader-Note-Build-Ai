@@ -8,4 +8,5 @@ export {
   type OrchestratorResearchRequest,
   type OrchestratorPlanRequest,
   type OrchestratorResult,
+  type AITradePlanWithOptionalBacktest,
 } from './aiOrchestrator';

@@ -40,12 +40,41 @@ export const ConditionGroupSchema: z.ZodType<ConditionGroup> = z.lazy(() =>
   }),
 );
 
-/** エントリー定義 */
-export const EntrySchema = z.object({
+/** 条件木から ohlcv 以外のレンズを列挙（wait_for_trigger 用バリデーション） */
+function collectNonOhlcvLensesInGroup(g: ConditionGroup): string[] {
+  const out: string[] = [];
+  for (const c of g.conditions) {
+    if ('logic' in c) {
+      out.push(...collectNonOhlcvLensesInGroup(c));
+    } else {
+      if (c.lens !== 'ohlcv') {
+        out.push(`${c.lens}.${c.feature}`);
+      }
+    }
+  }
+  return out;
+}
+
+/** 即時エントリー（従来・Phase 5） */
+export const ImmediateEntrySchema = z.object({
+  type: z.literal('immediate').optional(),
   direction: z.enum(['long', 'short']),
   trigger: ConditionGroupSchema,
   orderType: z.enum(['market', 'limit', 'stop']).default('market'),
 });
+
+/** トリガー待ち → 次バー始値（Phase 6.7b） */
+export const WaitForTriggerEntrySchema = z.object({
+  type: z.literal('wait_for_trigger'),
+  direction: z.enum(['long', 'short']),
+  triggerConditions: ConditionGroupSchema,
+  maxWaitBars: z.number().int().min(1),
+  executionType: z.enum(['market', 'limit']),
+  limitPrice: z.number().optional(),
+});
+
+/** エントリー: 従来形と wait_for_trigger の union */
+export const EntrySchema = z.union([WaitForTriggerEntrySchema, ImmediateEntrySchema]);
 
 /** ストップロス定義 */
 export const StopLossSchema = z.union([
@@ -68,6 +97,18 @@ export const ParameterDefSchema = z.object({
   type: z.enum(['int', 'float']),
 });
 
+/** Phase 6.7b: min〜max を step 刻みでスイープ */
+export const ParameterRangeV2Schema = z.object({
+  kind: z.literal('range'),
+  min: z.number(),
+  max: z.number(),
+  step: z.number().positive(),
+  default: z.number(),
+});
+
+/** 1 キーに対するレガシー定義 or 新レンジ */
+export const ParameterFieldSchema = z.union([ParameterDefSchema, ParameterRangeV2Schema]);
+
 /** 戦略DSLルート */
 export const StrategyDSLSchema = z.object({
   id: z.string(),
@@ -79,13 +120,28 @@ export const StrategyDSLSchema = z.object({
   entry: EntrySchema,
   stopLoss: StopLossSchema,
   takeProfit: TakeProfitSchema,
-  parameters: z.record(z.string(), ParameterDefSchema).default({}),
+  parameters: z.record(z.string(), ParameterFieldSchema).default({}),
   metadata: z.object({
     createdAt: z.string(),
     createdBy: z.enum(['initial_random', 'mutation', 'crossover', 'llm_generated']),
     description: z.string().optional(),
   }),
-});
+})
+  .superRefine((val, ctx) => {
+    // Phase 6.7b: wait_for_trigger では BT 可能なレンズのみ（漏洩防止の最低限）
+    const ent = val.entry;
+    if ('type' in ent && ent.type === 'wait_for_trigger') {
+      const bad = collectNonOhlcvLensesInGroup(ent.triggerConditions);
+      for (const feat of bad) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `wait_for_trigger の条件に BT 未対応レンズが含まれる: ${feat}`,
+          path: ['entry', 'triggerConditions'],
+        });
+      }
+    }
+  });
 
 export type StrategyDSL = z.infer<typeof StrategyDSLSchema>;
 export type Condition = z.infer<typeof ConditionSchema>;
+export type ParameterField = z.infer<typeof ParameterFieldSchema>;

@@ -65,3 +65,16 @@
   "confidence": 0.7
 }
 ```
+
+## 境界ケース例
+
+```json
+{
+  "trendState": "ranging",
+  "trendStrength": 0.28,
+  "trendMaturity": "middle",
+  "keyLevels": { "support": [], "resistance": [] },
+  "interpretation": "dow_theory は uptrend 寄りだが、current_analysis の SMA 配列が揃わず ADX も低いため、トレンド専門家としては強い上昇とは判定しない。支持抵抗に使える swing 値も不足しており、判定困難なため confidence を低くする。",
+  "confidence": 0.25
+}
+```

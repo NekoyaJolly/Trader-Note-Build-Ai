@@ -1,5 +1,6 @@
 import { MarketSnapshotRepository } from '../../repositories/marketSnapshotRepository';
 import { MarketDataService } from '../../../services/marketDataService';
+import type { CTraderAuthService } from '../ctrader/ctraderAuthService';
 
 /**
  * 市場データを取得し、15m / 60m 足として保存する Ingest サービス（Phase1 スコープ）
@@ -11,6 +12,13 @@ export class MarketIngestService {
   constructor() {
     this.marketDataService = new MarketDataService();
     this.snapshotRepository = new MarketSnapshotRepository();
+  }
+
+  /**
+   * テスト用: cTrader 口座を MarketDataService に配線する（本番はアプリ起動時と同等の設定を行う）
+   */
+  setTestCTraderConnection(accountId: string, auth: CTraderAuthService): void {
+    this.marketDataService.configureCTrader(accountId, auth);
   }
 
   /**

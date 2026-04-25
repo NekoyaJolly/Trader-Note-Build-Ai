@@ -12,14 +12,12 @@
  * 注: Redis 未接続環境でもテスト可能な設計
  */
 
-import { PrismaClient } from '@prisma/client';
 import {
   RevaluationJobManager,
   revaluationJobManager,
 } from '../../services/revaluationJobService';
 import { isRedisAvailable } from '../../config/queueConfig';
-
-const prisma = new PrismaClient();
+import { prisma } from '../db/client';
 
 describe('RevaluationJobService', () => {
   // リモートDB接続のためタイムアウトを延長
@@ -27,6 +25,12 @@ describe('RevaluationJobService', () => {
 
   // テスト用のジョブ ID を追跡
   const createdJobIds: string[] = [];
+
+  beforeAll(async () => {
+    // 既存 pending ジョブが多いと getPendingJobs(limit) の検証が不安定になるため、
+    // この統合テストではジョブ台帳だけを事前に空にする。
+    await prisma.revaluationJob.deleteMany({});
+  });
 
   afterAll(async () => {
     // テストで作成したジョブを削除
@@ -37,7 +41,6 @@ describe('RevaluationJobService', () => {
         },
       });
     }
-    await prisma.$disconnect();
   });
 
   describe('ジョブ作成', () => {

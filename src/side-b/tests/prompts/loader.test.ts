@@ -20,7 +20,8 @@ describe('loadPrompt', () => {
         expect(content).toContain("Devil's Advocate");
         expect(content).toContain('failureScenarios');
         expect(content).toContain('weakestAssumption');
-        expect(content).toContain('recommendation');
+        expect(content).toContain('btWeaknesses');
+        expect(content).toContain('watchItems');
     });
 
     it('存在しないプロンプト名はエラーになる', () => {

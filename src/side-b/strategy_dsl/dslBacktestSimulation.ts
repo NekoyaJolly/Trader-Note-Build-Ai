@@ -11,8 +11,16 @@
 import { calculatePnl, calculateSummary } from '../../backend/services/backtestCalculations';
 import type { BacktestResultSummary, BacktestTradeEvent, TradeSide } from '../../backend/services/backtestCalculations';
 import type { LensFeature, LensFeatureSnapshot } from '../lenses/types';
+import { collectDslOhlcvFeatureNeeds } from './dslOhlcvFeatureNeeds';
 import { DSLEvaluator } from './DSLEvaluator';
+import type {
+  ExecutionCostSummary,
+  ExecutionDataSource,
+  ExecutionModel,
+  ExecutionSimulationMetadata,
+} from './executionSimulation';
 import type { StrategyDSL } from './schema';
+import { isWaitForTriggerEntry } from './types';
 
 /** ヒストリカル1本（strategyBacktestService.OHLCV と同形） */
 export interface OhlcvBar {
@@ -100,16 +108,23 @@ function computeAtr(high: number[], low: number[], close: number[], period: numb
   return computeSma(tr, period);
 }
 
-function buildFeatureTable(bars: OhlcvBar[]): BarFeatureTable {
-  const n = bars.length;
+function buildFeatureTable(
+  bars: OhlcvBar[],
+  needs: { rsi: boolean; atr: boolean },
+): BarFeatureTable {
   const open = bars.map((b) => b.open);
   const high = bars.map((b) => b.high);
   const low = bars.map((b) => b.low);
   const close = bars.map((b) => b.close);
   const volume = bars.map((b) => b.volume);
-  const rsi = computeRsi(close, 14);
-  const atr = computeAtr(high, low, close, 14);
-  return { open, high, low, close, volume, rsi, atr };
+  const table: BarFeatureTable = { open, high, low, close, volume };
+  if (needs.rsi) {
+    table.rsi = computeRsi(close, 14);
+  }
+  if (needs.atr) {
+    table.atr = computeAtr(high, low, close, 14);
+  }
+  return table;
 }
 
 function snapshotAt(
@@ -205,9 +220,102 @@ function takeProfitDistance(
   return atr * mult;
 }
 
+/** 同バー内に SL/TP 両方が到達した場合の解釈（到達仮定の違い） */
+export type IntraBarExitMode = 'pessimistic' | 'optimistic';
+
+/** 即時エントリー（trigger）の約定タイミング */
+export type ImmediateEntryFill = 'signal_bar_close' | 'next_bar_open';
+
+/**
+ * シミュレーションの仮定（精度・執行モデル）を上書きする。
+ * 未指定時は従来互換: 同バーは SL 優先（悲観）、即時はシグナル足終値、往復スプレッドなし。
+ */
+export interface DslSimulationOptions {
+  initialCapital?: number;
+  lotSize?: number;
+  /** 同バー内の SL/TP 判定順。デフォルト: pessimistic */
+  intraBarExitMode?: IntraBarExitMode;
+  /** 即時 trigger の建値。デフォルト: signal_bar_close */
+  immediateEntryFill?: ImmediateEntryFill;
+  /** 往復を pips 換算で仮定した取引コスト（スプレッド＋手数料の簡易表現）。0 未満は無効 */
+  roundTripCostPips?: number;
+  /**
+   * 往復コストのうち、エントリー足の ATR(14) に比例する分の係数。
+   * 加算額: `roundTripCostAtrMult * ATR[entryIndex] * lotSize`（価格×ロット＝P/L と同次元）
+   * ボラ拡大時のスリッページ・拡大スプを粗く表す。DSL が ATR 未使用でも内部で ATR を計算する。
+   */
+  roundTripCostAtrMult?: number;
+  /** Phase 6.8: 監査用メタデータ（未指定時は legacy_zero_cost として扱う） */
+  executionModel?: ExecutionModel;
+  executionConfigHash?: string;
+  executionDataSource?: ExecutionDataSource;
+}
+
+/**
+ * 同バー内で SL と TP のどちらに触れるか解決（ヒゲのみの順序仮定）
+ */
+function resolveIntraBarExit(
+  side: TradeSide,
+  bar: OhlcvBar,
+  sl: number,
+  tp: number,
+  mode: IntraBarExitMode,
+): { exitPrice: number; reason: 'take_profit' | 'stop_loss' } | null {
+  if (side === 'buy') {
+    const hitSl = bar.low <= sl;
+    const hitTp = bar.high >= tp;
+    if (!hitSl && !hitTp) return null;
+    if (mode === 'pessimistic') {
+      if (hitSl) return { exitPrice: sl, reason: 'stop_loss' };
+      return { exitPrice: tp, reason: 'take_profit' };
+    }
+    if (hitTp) return { exitPrice: tp, reason: 'take_profit' };
+    return { exitPrice: sl, reason: 'stop_loss' };
+  }
+  const hitSl = bar.high >= sl;
+  const hitTp = bar.low <= tp;
+  if (!hitSl && !hitTp) return null;
+  if (mode === 'pessimistic') {
+    if (hitSl) return { exitPrice: sl, reason: 'stop_loss' };
+    return { exitPrice: tp, reason: 'take_profit' };
+  }
+  if (hitTp) return { exitPrice: tp, reason: 'take_profit' };
+  return { exitPrice: sl, reason: 'stop_loss' };
+}
+
+function applyRoundTripPips(
+  rawPnl: number,
+  pipSize: number,
+  lotSize: number,
+  roundTripCostPips: number | undefined,
+): number {
+  if (roundTripCostPips === undefined || roundTripCostPips <= 0) return rawPnl;
+  const c = roundTripCostPips * pipSize * lotSize;
+  return rawPnl - c;
+}
+
+/** pips コスト + エントリー時点 ATR 比例コスト */
+function applyTransactionCosts(
+  rawPnl: number,
+  pipSize: number,
+  lotSize: number,
+  roundTripCostPips: number | undefined,
+  roundTripCostAtrMult: number | undefined,
+  table: BarFeatureTable,
+  entryIndex: number,
+): number {
+  let pnl = applyRoundTripPips(rawPnl, pipSize, lotSize, roundTripCostPips);
+  if (roundTripCostAtrMult === undefined || roundTripCostAtrMult <= 0) return pnl;
+  const atr = table.atr?.[entryIndex];
+  if (atr === undefined || Number.isNaN(atr) || atr <= 0) return pnl;
+  pnl -= roundTripCostAtrMult * atr * lotSize;
+  return pnl;
+}
+
 export interface DslSimulationResult {
   summary: BacktestResultSummary;
   trades: BacktestTradeEvent[];
+  execution: ExecutionSimulationMetadata;
 }
 
 /**
@@ -217,22 +325,53 @@ export function runDslSimulation(
   bars: OhlcvBar[],
   dsl: StrategyDSL,
   paramValues: Record<string, number>,
-  options?: { initialCapital?: number; lotSize?: number },
+  options?: DslSimulationOptions,
 ): DslSimulationResult {
   const evaluator = new DSLEvaluator();
   const initialCapital = options?.initialCapital ?? 10_000;
   const lotSize = options?.lotSize ?? 10_000;
+  const exitMode: IntraBarExitMode = options?.intraBarExitMode ?? 'pessimistic';
+  const immediateFill: ImmediateEntryFill = options?.immediateEntryFill ?? 'signal_bar_close';
+  const roundTripCostPips = options?.roundTripCostPips;
+  const roundTripCostAtrMult = options?.roundTripCostAtrMult;
+  const executionModel: ExecutionModel = options?.executionModel ?? 'legacy_zero_cost';
+  const executionConfigHash = options?.executionConfigHash ?? 'legacy-zero-cost';
+  const executionDataSource: ExecutionDataSource = options?.executionDataSource ?? 'ctrader';
 
-  if (bars.length < 20) {
+  const featureNeeds = collectDslOhlcvFeatureNeeds(dsl);
+  const needAtrForTransactionCost = (roundTripCostAtrMult ?? 0) > 0;
+  const needWarmup =
+    featureNeeds.rsi || featureNeeds.atr || needAtrForTransactionCost;
+  const minLen = needWarmup ? 20 : 2;
+  if (bars.length < minLen) {
     const empty = calculateSummary([], initialCapital);
-    return { summary: empty, trades: [] };
+    return {
+      summary: empty,
+      trades: [],
+      execution: {
+        executionModel,
+        executionConfigHash,
+        dataSource: executionDataSource,
+        costSummary: {
+          model: executionModel,
+          dataSource: executionDataSource,
+          roundTripCostPips: Math.max(0, roundTripCostPips ?? 0),
+          roundTripCostAtrMult: Math.max(0, roundTripCostAtrMult ?? 0),
+          totalCost: 0,
+        },
+      },
+    };
   }
 
-  const table = buildFeatureTable(bars);
+  const table = buildFeatureTable(bars, {
+    rsi: featureNeeds.rsi,
+    atr: featureNeeds.atr || needAtrForTransactionCost,
+  });
   const pipSize = defaultPipSizeForSymbol(dsl.symbol);
   const symbolNorm = dsl.symbol.replace(/\//g, '');
 
   const events: BacktestTradeEvent[] = [];
+  let totalCost = 0;
   let position:
     | {
         side: TradeSide;
@@ -243,38 +382,68 @@ export function runDslSimulation(
       }
     | null = null;
 
-  const startI = 15;
+  // RSI/ATR 未使用時は先頭足から条件評価可能（1 分足の履歴短いケース用）
+  const startI = needWarmup ? 15 : 0;
+  const isWait = isWaitForTriggerEntry(dsl.entry);
+  /** wait_for_trigger: 当バーからの相対。null は未アーム */
+  let waitStart: number | null = null;
+  /** 待機期限超過で打ち切り（その後は新規待機・エントリーしない） */
+  let waitAborted = false;
+  /** 即時 trigger + next_bar_open: シグナル足 index → 次足始値で建てる */
+  let deferredImmediate: { openAtIndex: number; isLong: boolean } | null = null;
 
   for (let i = startI; i < bars.length; i++) {
     const ts = bars[i].timestamp;
     const snap = snapshotAt(symbolNorm, ts, table, i);
 
+    if (!position && deferredImmediate && i === deferredImmediate.openAtIndex) {
+      const e = dsl.entry;
+      if (!('trigger' in e)) {
+        deferredImmediate = null;
+        break;
+      }
+      const j = i;
+      const openPx = bars[j]!.open;
+      const stopDist = stopDistance(dsl, table, j, pipSize, paramValues, evaluator);
+      const tpDist = takeProfitDistance(dsl, stopDist, table, j, pipSize, paramValues, evaluator);
+      if (deferredImmediate.isLong) {
+        position = {
+          side: 'buy',
+          entryIndex: j,
+          entryPrice: openPx,
+          sl: openPx - stopDist,
+          tp: openPx + tpDist,
+        };
+      } else {
+        position = {
+          side: 'sell',
+          entryIndex: j,
+          entryPrice: openPx,
+          sl: openPx + stopDist,
+          tp: openPx - tpDist,
+        };
+      }
+      deferredImmediate = null;
+    }
+
     if (position) {
       const { side, entryPrice, sl, tp, entryIndex } = position;
       const bar = bars[i];
-      let exitPrice: number | null = null;
-      let reason: 'take_profit' | 'stop_loss' | 'signal' = 'signal';
-
-      if (side === 'buy') {
-        if (bar.low <= sl) {
-          exitPrice = sl;
-          reason = 'stop_loss';
-        } else if (bar.high >= tp) {
-          exitPrice = tp;
-          reason = 'take_profit';
-        }
-      } else {
-        if (bar.high >= sl) {
-          exitPrice = sl;
-          reason = 'stop_loss';
-        } else if (bar.low <= tp) {
-          exitPrice = tp;
-          reason = 'take_profit';
-        }
-      }
-
-      if (exitPrice !== null) {
-        const pnl = calculatePnl(side, entryPrice, exitPrice, lotSize);
+      const resolved = resolveIntraBarExit(side, bar, sl, tp, exitMode);
+      if (resolved !== null) {
+        const { exitPrice, reason } = resolved;
+        const rawPnl = calculatePnl(side, entryPrice, exitPrice, lotSize);
+        const pnl = applyTransactionCosts(
+          rawPnl,
+          pipSize,
+          lotSize,
+          roundTripCostPips,
+          roundTripCostAtrMult,
+          table,
+          entryIndex,
+        );
+        const transactionCost = rawPnl - pnl;
+        totalCost += transactionCost;
         events.push({
           eventId: `${dsl.id}-${entryIndex}-${i}`,
           entryTime: bars[entryIndex].timestamp.toISOString(),
@@ -286,38 +455,111 @@ export function runDslSimulation(
           pnl,
           pnlPercent: (pnl / initialCapital) * 100,
           exitReason: reason,
+          indicatorValues: {
+            grossPnl: rawPnl,
+            transactionCost,
+          },
         });
         position = null;
+        if (isWait) {
+          waitStart = null;
+          waitAborted = false;
+        }
       }
     }
 
-    if (!position && i < bars.length - 1) {
-      const entryOk = evaluator.evaluateConditions(dsl.entry.trigger, snap, paramValues);
-      if (entryOk) {
-        const closePx = bars[i].close;
-        const stopDist = stopDistance(dsl, table, i, pipSize, paramValues, evaluator);
-        const tpDist = takeProfitDistance(dsl, stopDist, table, i, pipSize, paramValues, evaluator);
-        if (dsl.entry.direction === 'long') {
+    if (!position && isWait) {
+      if (waitAborted) {
+        continue;
+      }
+      const wEntry = dsl.entry;
+      if (!isWaitForTriggerEntry(wEntry)) {
+        break;
+      }
+      if (waitStart === null) {
+        waitStart = i;
+      }
+      if (i - waitStart! > wEntry.maxWaitBars) {
+        waitAborted = true;
+        continue;
+      }
+      const condOk = evaluator.evaluateConditions(wEntry.triggerConditions, snap, paramValues);
+      if (condOk && i + 1 < bars.length) {
+        const j = i + 1;
+        const openPx = bars[j]!.open;
+        const slIx = j;
+        const stopDist = stopDistance(dsl, table, slIx, pipSize, paramValues, evaluator);
+        const tpDist = takeProfitDistance(dsl, stopDist, table, slIx, pipSize, paramValues, evaluator);
+        if (wEntry.direction === 'long') {
           position = {
             side: 'buy',
-            entryIndex: i,
-            entryPrice: closePx,
-            sl: closePx - stopDist,
-            tp: closePx + tpDist,
+            entryIndex: j,
+            entryPrice: openPx,
+            sl: openPx - stopDist,
+            tp: openPx + tpDist,
           };
         } else {
           position = {
             side: 'sell',
-            entryIndex: i,
-            entryPrice: closePx,
-            sl: closePx + stopDist,
-            tp: closePx - tpDist,
+            entryIndex: j,
+            entryPrice: openPx,
+            sl: openPx + stopDist,
+            tp: openPx - tpDist,
           };
+        }
+        waitStart = null;
+      }
+    } else if (!position && i < bars.length - 1) {
+      const e = dsl.entry;
+      if (!('trigger' in e)) {
+        break;
+      }
+      const entryOk = evaluator.evaluateConditions(e.trigger, snap, paramValues);
+      if (entryOk) {
+        if (immediateFill === 'next_bar_open' && i + 1 < bars.length) {
+          deferredImmediate = { openAtIndex: i + 1, isLong: e.direction === 'long' };
+        } else {
+          const closePx = bars[i]!.close;
+          const stopDist = stopDistance(dsl, table, i, pipSize, paramValues, evaluator);
+          const tpDist = takeProfitDistance(dsl, stopDist, table, i, pipSize, paramValues, evaluator);
+          if (e.direction === 'long') {
+            position = {
+              side: 'buy',
+              entryIndex: i,
+              entryPrice: closePx,
+              sl: closePx - stopDist,
+              tp: closePx + tpDist,
+            };
+          } else {
+            position = {
+              side: 'sell',
+              entryIndex: i,
+              entryPrice: closePx,
+              sl: closePx + stopDist,
+              tp: closePx - tpDist,
+            };
+          }
         }
       }
     }
   }
 
   const summary = calculateSummary(events, initialCapital);
-  return { summary, trades: events };
+  const costSummary: ExecutionCostSummary = {
+    model: executionModel,
+    dataSource: executionDataSource,
+    roundTripCostPips: Math.max(0, roundTripCostPips ?? 0),
+    roundTripCostAtrMult: Math.max(0, roundTripCostAtrMult ?? 0),
+    totalCost,
+  };
+  return {
+    summary,
+    trades: events,
+    execution: {
+      executionModel,
+      executionConfigHash,
+      dataSource: executionDataSource,
+      costSummary,
+    },
+  };
 }

@@ -232,6 +232,9 @@ export class SideBController {
    * 
    * researchIdを指定すると既存リサーチを使用。
    * 指定しない場合、ohlcvDataが必要（省略時は自動取得）。
+   *
+   * レスポンス `plan` には、新規生成かつ即時BTが完走した場合のみ
+   * `strategyBacktest`（Phase 6.7b）が付く。Prisma 保存列には含めない。
    */
   generatePlan = async (req: Request, res: Response): Promise<void> => {
     try {

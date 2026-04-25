@@ -13,7 +13,7 @@ function makeTool(name: string, result: Partial<ValidationToolResult>): Validati
     return {
         name,
         implementation: 'native_ts',
-        requiredInputs: ['hypothesis'],
+        requiredInputs: ['kind', 'hypothesis'],
         execute: jest.fn().mockResolvedValue({
             toolName: name,
             success: true,
@@ -95,7 +95,9 @@ describe('BacktesterAgent.runFullValidation', () => {
 
         for (const tool of [tools.walkForward, tools.monteCarlo, tools.buyAndHold]) {
             expect(tool.execute).toHaveBeenCalledTimes(1);
-            expect(tool.execute.mock.calls[0][0].backtestRunId).toBe('run-abc');
+            const arg = tool.execute.mock.calls[0]![0]!;
+            expect(arg.kind).toBe('hypothesis');
+            expect(arg.backtestRunId).toBe('run-abc');
         }
     });
 
@@ -104,7 +106,7 @@ describe('BacktesterAgent.runFullValidation', () => {
             walkForward: {
                 name: 'walk_forward',
                 implementation: 'python_bridge' as const,
-                requiredInputs: ['hypothesis'] as (keyof import('../../validation/tools/types').ValidationToolInput)[],
+                requiredInputs: ['kind', 'hypothesis'] as const,
                 execute: jest.fn().mockRejectedValue(new Error('Python container down')),
                 isAvailable: jest.fn().mockResolvedValue(false),
             },
@@ -209,7 +211,7 @@ describe('BacktesterAgent.runFullValidation', () => {
             return {
                 name,
                 implementation: 'native_ts',
-                requiredInputs: ['hypothesis'],
+                requiredInputs: ['kind', 'hypothesis'],
                 execute: jest.fn(async () => {
                     await new Promise((r) => setTimeout(r, delayMs));
                     executionOrder.push(name);

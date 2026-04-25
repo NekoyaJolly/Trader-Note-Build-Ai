@@ -142,6 +142,18 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       overfitScore: 0.15,
       train: { summary: makeSummary(20, 0.6, 2.0), trades: [] },
       validation: { summary: makeSummary(10, 0.6, 1.6), trades: [] },
+      execution: {
+        executionModel: 'legacy_zero_cost',
+        executionConfigHash: 'legacy-zero-cost',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'legacy_zero_cost',
+          dataSource: 'ctrader',
+          roundTripCostPips: 0,
+          roundTripCostAtrMult: 0,
+          totalCost: 0,
+        },
+      },
     });
 
     const mutationAgent = new MutationAgent();

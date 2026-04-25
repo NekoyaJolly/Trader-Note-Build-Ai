@@ -32,7 +32,7 @@ import {
 import { CTraderDataService } from './ctrader/ctraderDataService';
 import { CTraderAuthService } from './ctrader/ctraderAuthService';
 import { calculateLotSize, slValueToPips, getPipValue } from './positionSizeCalculator';
-import { fetchAndCacheOhlcv } from './fetchAndCacheOhlcv';
+import { fetchAndCacheOhlcv, isOhlcvRemoteFetchAvailable } from './fetchAndCacheOhlcv';
 import { fetchIndicatorSeriesByStrategyVersion } from './analysisEngineClient';
 
 // 計算関数を再エクスポート（後方互換性のため）
@@ -264,15 +264,16 @@ export async function checkDataCoverage(
  *
  * 優先順位:
  * 1. DB (OHLCVCandle テーブル) からキャッシュ済みデータを取得
- * 2. 不足時: cTrader API から取得（無料、自分のアカウント）
- * 3. 不足時: Twelve Data API から取得（無料枠制限あり）
- * 4. それでも不足: 既存データのみ返却（モックは使用しない）
+ * 2. 不足時: cTrader API から取得（ブローカーと同一の価格・足区切り）
+ * 3. それでも不足: 既存キャッシュのみ返却（モックは使用しない）
  *
  * @param symbol - シンボル
  * @param timeframe - 時間足
  * @param startDate - 開始日
  * @param endDate - 終了日
- * @param forceApiFetch - 不足時に API 取得を強制するか（デフォルト: false）
+ * @param forceApiFetch - 後方互換用。`true` のとき従来どおり遠隔取得を試行。
+ * デフォルト `false` でも、**キャッシュが期間未充足**かつ cTrader（.env + OAuth トークン）が使えるなら
+ * 自動的に補完取得する（以前は常に `forceApiFetch: true` を付けないと DSL 等が遠隔取得できなかった不具合の修正）
  * @returns OHLCV データ配列
  */
 export async function fetchHistoricalData(
@@ -301,11 +302,13 @@ export async function fetchHistoricalData(
   //    期待バー数ではなく、最古/最新のタイムスタンプが要求期間をカバーしているかで判断
   //    （休場日・ブローカー固有の休止はAPIが返さないバー＝存在しないデータなので無視）
   const toleranceMs = intervalMinutes * 60 * 1000 * 3; // 3バー分の許容誤差
+  let coversStart = false;
+  let coversEnd = false;
   if (cachedData.length > 0) {
     const cacheStart = cachedData[0].timestamp.getTime();
     const cacheEnd = cachedData[cachedData.length - 1].timestamp.getTime();
-    const coversStart = cacheStart <= startDate.getTime() + toleranceMs;
-    const coversEnd = cacheEnd >= endDate.getTime() - toleranceMs;
+    coversStart = cacheStart <= startDate.getTime() + toleranceMs;
+    coversEnd = cacheEnd >= endDate.getTime() - toleranceMs;
 
     if (coversStart && coversEnd) {
       console.log(
@@ -331,8 +334,10 @@ export async function fetchHistoricalData(
     console.log(`[fetchHistoricalData] DBキャッシュなし: ${symbol}/${timeframe}`);
   }
 
-  // 3. API取得（forceApiFetch=true の場合のみ）
-  if (forceApiFetch) {
+  // 3. 期間未充足時: cTrader のみで補完（Twelve Data は廃止）
+  const needsRemoteFill = cachedData.length === 0 || !coversStart || !coversEnd;
+  const canRemoteFetch = isOhlcvRemoteFetchAvailable();
+  if (forceApiFetch || (needsRemoteFill && canRemoteFetch)) {
     try {
       // fetchAndCacheOhlcv は「指定期間」を分割取得し、DBにupsertしてDataPresetも更新する
       const cacheResult = await fetchAndCacheOhlcv(symbol, timeframe, startDate, endDate);
@@ -366,8 +371,11 @@ export async function fetchHistoricalData(
         volume: Number(c.volume),
       }));
     }
-  } else {
-    console.log(`[fetchHistoricalData] forceApiFetch=false のため API をスキップ: ${symbol}/${timeframe}`);
+  } else if (needsRemoteFill && !canRemoteFetch) {
+    console.log(
+      `[fetchHistoricalData] cTrader 未設定のため補完取得をスキップ: ${symbol}/${timeframe} ` +
+      `（CTRADER_CLIENT_ID/SECRET および DB の OAuth トークン）`
+    );
   }
 
   // 4. 既存データのみ返却（モックデータは使用しない）

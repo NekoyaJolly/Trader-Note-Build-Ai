@@ -13,7 +13,11 @@ import {
   type AgentRestructureProposal,
 } from '../../agents/MetaEvolutionAgent';
 import { runPromptEvolutionCycle } from '../../prompts/registry/promptEvolutionJob';
-import { PromptRegistry, GLOBAL_AGENT_NAME } from '../../prompts/registry/PromptRegistry';
+import {
+  PromptRegistry,
+  GLOBAL_AGENT_NAME,
+  SPECIALIST_COMMON_AGENT_NAME,
+} from '../../prompts/registry/PromptRegistry';
 import type { AIProvider, AIResponse } from '../../agent/aiProvider';
 
 /**
@@ -232,6 +236,33 @@ describe('PromptMutationAgent.proposeImprovements __global__ ガード', () => {
         agentName: GLOBAL_AGENT_NAME,
         version: 'initial',
         content: '# Global',
+        createdBy: 'human',
+        status: 'active',
+        usageCount: 0,
+        successCount: 0,
+        avgScore: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      recentPerformance: { avgScore: 0, recentFailures: [] },
+      count: 3,
+    });
+    expect(result).toEqual([]);
+    expect(ai.chat).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('agentName === __specialist_common__ も変異対象外(空配列)', async () => {
+    const ai = mockAi('[{"version":"v1","content":"x".repeat(80),"notes":"ok"}]');
+    const agent = new PromptMutationAgent(ai);
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = await agent.proposeImprovements({
+      agentName: SPECIALIST_COMMON_AGENT_NAME,
+      currentPrompt: {
+        id: 's1',
+        agentName: SPECIALIST_COMMON_AGENT_NAME,
+        version: 'initial',
+        content: '# Common',
         createdBy: 'human',
         status: 'active',
         usageCount: 0,

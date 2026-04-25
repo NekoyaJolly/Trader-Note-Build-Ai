@@ -3,11 +3,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * このファイルがあるディレクトリ＝Next アプリのルート（src/frontend）
- * リポジトリ直下にも package-lock があると Turbopack が誤ったルートを推定し、
- * Vercel / CI でビルドが不安定になるため root を固定する。
+ * Vercel は outputFileTracingRoot をリポジトリルートに設定する。
+ * Next.js 16 では outputFileTracingRoot と turbopack.root が一致していないと
+ * Vercel build で警告/失敗要因になるため、Turbopack もリポジトリルートへ合わせる。
  */
-const turbopackRoot = path.dirname(fileURLToPath(import.meta.url));
+const appRoot = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(appRoot, "../..");
 
 /**
  * Next.js 設定
@@ -23,7 +24,7 @@ const turbopackRoot = path.dirname(fileURLToPath(import.meta.url));
  */
 const nextConfig: NextConfig = {
   turbopack: {
-    root: turbopackRoot,
+    root: repoRoot,
   },
 };
 

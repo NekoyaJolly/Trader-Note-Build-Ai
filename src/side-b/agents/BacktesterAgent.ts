@@ -70,6 +70,7 @@ export class BacktesterAgent {
         const screening = toScreeningToolResult(hypothesis.screeningResult);
 
         const input: ValidationToolInput = {
+            kind: 'hypothesis',
             hypothesis,
             tradeNoteId,
             period,

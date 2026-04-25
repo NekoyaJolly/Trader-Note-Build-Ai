@@ -26,6 +26,12 @@ const PROMPTS_DIR = __dirname;
 export const GLOBAL_AGENT_NAME = '__global__';
 
 /**
+ * 専門家3エージェント用共通テンプレの予約名（Registry agentName）。
+ * Phase 6.7c: 未投入時も識別子として使用。`PromptMutation` / `MetaEvolution` の変異対象外。
+ */
+export const SPECIALIST_COMMON_AGENT_NAME = '__specialist_common__';
+
+/**
  * プロンプト内の {{KEY}} プレースホルダーを展開するための辞書。
  * 必要に応じて新しいキーを追加していく。
  */
@@ -99,6 +105,32 @@ export function loadPromptWithGlobal(name: string, macros?: PromptMacros): strin
     const globalRaw = fs.readFileSync(globalPath, 'utf-8');
     const globalExpanded = expandMacros(globalRaw, macros);
     return `${globalExpanded}\n\n${localContent}`;
+}
+
+/**
+ * Phase 6.7c: 専門家エージェント用に
+ * `__global__` + `__specialist_common__` + 専門家固有プロンプトをファイルから合成する。
+ *
+ * Registry 未投入の開発環境でも専門家3本が同じ3層構造で動くための fallback。
+ */
+export function loadSpecialistPromptWithGlobalAndCommon(
+    name: string,
+    macros?: PromptMacros,
+): string {
+    const localContent = loadPrompt(name, macros);
+    const parts: string[] = [];
+    for (const reservedName of [GLOBAL_AGENT_NAME, SPECIALIST_COMMON_AGENT_NAME]) {
+        const filePath = path.join(PROMPTS_DIR, `${reservedName}.md`);
+        if (!fs.existsSync(filePath)) {
+            console.warn(
+                `[loadSpecialistPromptWithGlobalAndCommon] ${reservedName}.md が見つかりません。agent=${name}`,
+            );
+            continue;
+        }
+        parts.push(expandMacros(fs.readFileSync(filePath, 'utf-8'), macros));
+    }
+    parts.push(localContent);
+    return parts.join('\n\n');
 }
 
 /**

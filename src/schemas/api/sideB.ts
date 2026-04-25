@@ -115,6 +115,55 @@ export const GetPlanByIdQuerySchema = z.object({
 export type GetPlanByIdQuery = z.infer<typeof GetPlanByIdQuerySchema>;
 
 // ========================================
+// プラン生成レスポンス（Phase 6.7b: plan.strategyBacktest 任意）
+// ========================================
+
+/**
+ * 検証ツール1件（即時BTの toolResults 用）
+ */
+export const PlanStrategyBacktestToolResultSchema = z.object({
+  toolName: z.string(),
+  success: z.boolean(),
+  passed: z.boolean(),
+  metrics: z.record(z.string(), z.union([z.number(), z.string(), z.boolean()])).optional(),
+  interpretation: z.string().optional(),
+  error: z.string().optional(),
+  durationMs: z.number(),
+});
+
+/**
+ * シナリオ別即時BTサマリー（残りは .passthrough）
+ */
+export const PerScenarioStrategyBacktestSchema = z
+  .object({
+    scenario: z
+      .object({
+        id: z.string(),
+        name: z.string(),
+        direction: z.enum(['long', 'short']),
+      })
+      .passthrough(),
+    passed: z.boolean(),
+    error: z.string().optional(),
+    strategistInterpretation: z.string(),
+    durationMs: z.number(),
+    toolResults: z.array(PlanStrategyBacktestToolResultSchema).optional(),
+  })
+  .passthrough();
+
+/**
+ * `plan.strategyBacktest` ペイロード
+ */
+export const StrategyBacktestRunPayloadSchema = z.object({
+  scenarioResults: z.array(PerScenarioStrategyBacktestSchema),
+  overallPassed: z.boolean(),
+  period: z.object({ start: z.string(), end: z.string() }),
+  totalDurationMs: z.number(),
+});
+
+export type StrategyBacktestRunPayload = z.infer<typeof StrategyBacktestRunPayloadSchema>;
+
+// ========================================
 // パイプラインリクエストスキーマ
 // ========================================
 

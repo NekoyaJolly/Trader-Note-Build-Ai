@@ -16,7 +16,6 @@ import {
 } from '../../prompts/registry/variantSelector';
 import { getScoringFunction } from '../../prompts/abtest/scoringFunctions';
 import type { PromptVersion } from '../../prompts/registry/types';
-import { prependGlobalPromptFromFile } from '../../prompts/loader';
 
 export const SPECIALIST_REQUEST_TIMEOUT_MS = 60_000;
 
@@ -174,8 +173,8 @@ export async function runSpecialistWithVariant<TOutput>(
   const selection = selectVariant(active, experimentals, rand);
 
   // 3. 1 回目の試行 + スコア + recordUsage
-  //    Phase 6.7a: 選ばれた content に __global__ を前置してシステムプロンプトを組む
-  const primarySystem = prependGlobalPromptFromFile(selection.selected.content);
+  //    Phase 6.7a: Registry の `__global__` active + variant の content を合成（DB 正）
+  const primarySystem = await composeSpecialistSystemPrompt(registry, selection.selected.content);
   const primaryOut = await runSingle(ai, primarySystem, options.userPrompt, options.validate);
   const primaryScore = scoreAndSuccess(primaryOut, options.scoringInput, scoreFn);
   await safeRecord(registry, selection.selected.id, primaryScore.score, primaryScore.success, options.agentName);
@@ -194,7 +193,7 @@ export async function runSpecialistWithVariant<TOutput>(
 
   // 4. experimental 失敗時のみ active で再試行
   if (selection.isExperimental) {
-    const activeSystem = prependGlobalPromptFromFile(active.content);
+    const activeSystem = await composeSpecialistSystemPrompt(registry, active.content);
     const fbOut = await runSingle(ai, activeSystem, options.userPrompt, options.validate);
     const fbScore = scoreAndSuccess(fbOut, options.scoringInput, scoreFn);
     await safeRecord(registry, active.id, fbScore.score, fbScore.success, options.agentName);
@@ -244,6 +243,23 @@ async function runSingle<TOutput>(
     console.error('[specialist LLM] 呼出失敗:', err);
     return null;
   }
+}
+
+async function composeSpecialistSystemPrompt(
+  registry: PromptRegistry,
+  content: string,
+): Promise<string> {
+  const maybeSpecialist = registry as {
+    composeSpecialistWithGlobalAndCommon?: (localContent: string) => Promise<string>;
+    composeGlobalWithContent?: (localContent: string) => Promise<string>;
+  };
+  if (typeof maybeSpecialist.composeSpecialistWithGlobalAndCommon === 'function') {
+    return maybeSpecialist.composeSpecialistWithGlobalAndCommon(content);
+  }
+  if (typeof maybeSpecialist.composeGlobalWithContent === 'function') {
+    return maybeSpecialist.composeGlobalWithContent(content);
+  }
+  return content;
 }
 
 function scoreAndSuccess<TOutput>(

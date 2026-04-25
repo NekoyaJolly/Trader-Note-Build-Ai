@@ -19,6 +19,9 @@ const config: Config = {
   moduleFileExtensions: ['ts', 'js', 'json'],
   verbose: true,
   testTimeout: 30000, // 30秒（デフォルト5秒から延長）
+  // Supabase/pgBouncer の session pool は小さいため、CI では Prisma-heavy テストの
+  // 同時接続数を抑える。ローカルは従来通り Jest 既定値。
+  ...(process.env.CI === 'true' ? { maxWorkers: 1 } : {}),
   transform: {
     '^.+\\.ts$': ['ts-jest', {
       tsconfig: 'tsconfig.test.json',

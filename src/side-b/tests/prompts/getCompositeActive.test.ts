@@ -6,6 +6,7 @@
  */
 
 import type { PrismaClient } from '@prisma/client';
+import type { PromptMacros } from '../../prompts/loader';
 import { PromptRegistry, GLOBAL_AGENT_NAME } from '../../prompts/registry/PromptRegistry';
 
 interface FakeRow {
@@ -196,5 +197,21 @@ describe('PromptRegistry.getCompositeActive', () => {
     await expect(reg.getCompositeActive(GLOBAL_AGENT_NAME)).rejects.toThrow(
       /通常エージェントとして取得できない/,
     );
+  });
+
+  it('composeGlobalWithContent は __global__ active と local 本文を合成する', async () => {
+    const { fake } = makeFakePrisma();
+    const reg = new PromptRegistry(asPrisma(fake));
+    await reg.register({
+      agentName: GLOBAL_AGENT_NAME,
+      version: 'initial',
+      content: 'G: {{K}}',
+      createdBy: 'human',
+      status: 'active',
+    });
+    const macros: PromptMacros = { K: 'v' };
+    const out = await reg.composeGlobalWithContent('L: part', macros);
+    expect(out).toContain('G: v');
+    expect(out).toContain('L: part');
   });
 });

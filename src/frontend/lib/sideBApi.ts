@@ -22,6 +22,7 @@
  *   GET  /api/side-b/stats/overview, time-series, by-category, validation-activity
  *   GET  /api/side-b/discovery/latest
  *   GET  /api/side-b/system/health
+ *   POST /api/side-b/plans（即時BT `plan.strategyBacktest`、Phase 6.7b）
  *
  * @see docs/design/phase_4d_specification.md §4.7
  */
@@ -47,6 +48,8 @@ import type {
   RecentHypothesesResponse,
   DiscoveryLatestResponse,
   SystemHealthResponse,
+  GeneratePlanResponse,
+  GeneratePlanRequest,
 } from "@/types/sideB";
 import { getPublicApiBaseUrl } from "./publicApiBaseUrl";
 
@@ -343,6 +346,30 @@ async function getSystemHealth(): Promise<SystemHealthResponse> {
   return request<SystemHealthResponse>("/system/health");
 }
 
+/**
+ * POST /api/side-b/plans
+ *
+ * プラン生成。`forceRefresh: true` で同日キャッシュを上書きし、即時BT（`plan.strategyBacktest`）を含めやすい。
+ */
+async function generatePlan(body: GeneratePlanRequest): Promise<GeneratePlanResponse> {
+  if (!body?.symbol?.trim()) {
+    throw new SideBApiError("symbol は必須です", 400, "/plans");
+  }
+  return request<GeneratePlanResponse>("/plans", {
+    method: "POST",
+    body: JSON.stringify({
+      symbol: body.symbol.trim(),
+      targetDate: body.targetDate,
+      researchId: body.researchId,
+      userPreferences: body.userPreferences,
+      ohlcvData: body.ohlcvData,
+      indicators: body.indicators,
+      timeframe: body.timeframe ?? "15m",
+      forceRefresh: body.forceRefresh ?? false,
+    }),
+  });
+}
+
 // ===========================================
 // export
 // ===========================================
@@ -365,6 +392,7 @@ export const sideBApi = {
   getValidationActivity,
   getLatestDiscovery,
   getSystemHealth,
+  generatePlan,
 };
 
 /** 外部テスト向け: クエリ組み立てのみ検証できるよう内部 util を露出 */

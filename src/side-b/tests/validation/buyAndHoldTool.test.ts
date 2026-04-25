@@ -78,6 +78,7 @@ function makeOhlcvRepo(firstClose: number | null, lastClose: number | null) {
 
 describe('BuyAndHoldTool.execute', () => {
     const input = {
+        kind: 'hypothesis' as const,
         hypothesis: makeHypothesis(),
         tradeNoteId: 'note-1',
         period: { start: '2025-01-01', end: '2025-12-31' },

@@ -13,7 +13,7 @@
  */
 
 import { AIProvider } from '../../agent/aiProvider';
-import { loadPromptWithGlobal } from '../../prompts/loader';
+import { loadSpecialistPromptWithGlobalAndCommon } from '../../prompts/loader';
 import { modelFor } from '../../../config';
 import type { SpecialistInput, TrendAnalysis } from './types';
 import {
@@ -52,7 +52,7 @@ export class TrendSpecialist {
    * 従来通り loadPrompt() の内容で実行(後方互換)。
    */
   async analyze(input: SpecialistInput): Promise<TrendAnalysis | null> {
-    const fallback = loadPromptWithGlobal('specialists/trend_specialist');
+    const fallback = loadSpecialistPromptWithGlobalAndCommon('specialists/trend_specialist');
     const lensDump = formatLensDump(input.lensSnapshot, TREND_RELEVANT_LENSES);
     const user = this.buildUserPrompt(input, lensDump);
 
