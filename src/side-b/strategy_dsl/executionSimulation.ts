@@ -123,6 +123,38 @@ export function createDefaultL2ExecutionConfig(symbol: string): ExecutionSimulat
   };
 }
 
+export interface SpreadBarCostInput {
+  p95Spread: number;
+}
+
+export function createL2ExecutionConfigFromSpreadBars(
+  symbol: string,
+  spreadBars: readonly SpreadBarCostInput[],
+): ExecutionSimulationConfig {
+  if (spreadBars.length === 0) {
+    return createDefaultL2ExecutionConfig(symbol);
+  }
+  const avgP95Spread =
+    spreadBars.reduce((sum, bar) => sum + Math.max(0, bar.p95Spread), 0) / spreadBars.length;
+  const pipSize = (() => {
+    const s = symbol.toUpperCase().replace(/[^A-Z]/g, '');
+    if (s.includes('XAU') || s.includes('GOLD')) return 0.1;
+    if (s.includes('JPY')) return 0.01;
+    return 0.0001;
+  })();
+  const spreadPips = pipSize > 0 ? avgP95Spread / pipSize : DEFAULT_L2_ROUND_TRIP_COST_PIPS;
+  const fallback = getExecutionCostProfile(symbol);
+  return {
+    model: 'bar_l2_v1',
+    dataSource: 'ctrader',
+    intraBarExitMode: 'pessimistic',
+    immediateEntryFill: 'next_bar_open',
+    // tick由来 p95 を優先しつつ、最小でも固定表の半分は残す（手数料/スリッページ分）
+    roundTripCostPips: Math.max(spreadPips, fallback.roundTripCostPips * 0.5),
+    roundTripCostAtrMult: fallback.roundTripCostAtrMult,
+  };
+}
+
 export function normalizeExecutionConfig(
   config?: ExecutionSimulationConfig,
 ): Required<Pick<ExecutionSimulationConfig, 'model' | 'dataSource'>> &

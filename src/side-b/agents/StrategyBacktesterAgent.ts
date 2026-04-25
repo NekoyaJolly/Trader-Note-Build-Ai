@@ -13,6 +13,7 @@ import type { StrategyDSL } from '../strategy_dsl/schema';
 import { defaultParameterValues } from '../strategy_dsl/dslParameterUtils';
 import {
   createDefaultL2ExecutionConfig,
+  createL2ExecutionConfigFromSpreadBars,
   toDslSimulationOptions,
   type ExecutionSimulationConfig,
 } from '../strategy_dsl/executionSimulation';
@@ -23,6 +24,7 @@ import {
   buyAndHoldTool as defaultBuyAndHold,
 } from '../validation/tools';
 import type { ValidationTool, ValidationToolResult } from '../validation/tools/types';
+import { SpreadBarRepository } from '../../backend/repositories/spreadBarRepository';
 
 /** プラン生成から渡す市場コンテキスト */
 export interface StrategyBacktesterMarketContext {
@@ -94,6 +96,7 @@ export class StrategyBacktesterAgent {
       monteCarlo: defaultMonteCarlo,
       buyAndHold: defaultBuyAndHold,
     },
+    private readonly spreadBarRepository: SpreadBarRepository = new SpreadBarRepository(),
   ) {}
 
   /**
@@ -106,9 +109,8 @@ export class StrategyBacktesterAgent {
   ): Promise<StrategyBacktesterRunResult> {
     const tAll = Date.now();
     const period = options.period ?? defaultBacktestPeriod();
-    const simulationOptions = toDslSimulationOptions(
-      options.executionConfig ?? createDefaultL2ExecutionConfig(context.symbol),
-    );
+    const executionConfig = options.executionConfig ?? await this.resolveDefaultExecutionConfig(context, period);
+    const simulationOptions = toDslSimulationOptions(executionConfig);
     const scenarioResults: PerScenarioBacktestResult[] = [];
 
     if (!scenarios.length) {
@@ -215,6 +217,32 @@ export class StrategyBacktesterAgent {
       period,
       totalDurationMs: Date.now() - tAll,
     };
+  }
+
+  private async resolveDefaultExecutionConfig(
+    context: StrategyBacktesterMarketContext,
+    period: { start: string; end: string },
+  ): Promise<ExecutionSimulationConfig> {
+    try {
+      const spreadBars = await this.spreadBarRepository.findMany({
+        symbol: context.symbol,
+        timeframe: context.timeframe,
+        startTime: new Date(period.start),
+        endTime: new Date(period.end),
+      });
+      if (spreadBars.length > 0) {
+        return createL2ExecutionConfigFromSpreadBars(
+          context.symbol,
+          spreadBars.map((bar) => ({ p95Spread: Number(bar.p95Spread) })),
+        );
+      }
+    } catch (error) {
+      console.warn(
+        '[StrategyBacktester] SpreadBar 取得失敗、固定コスト表にフォールバック:',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    return createDefaultL2ExecutionConfig(context.symbol);
   }
 }
 
