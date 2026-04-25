@@ -14,6 +14,7 @@ import type { z } from 'zod';
 import { StrategyDSLSchema, ImmediateEntrySchema } from './schema';
 
 type ImmediateEntryDsl = z.infer<typeof ImmediateEntrySchema>;
+type StrategyDslInput = z.input<typeof StrategyDSLSchema>;
 
 export interface ScenarioToDslContext {
   symbol: string;
@@ -37,29 +38,53 @@ export function scenarioToStrategyDSL(
     throw new Error(`シナリオ ${scenario.id} の entry.price が不正です`);
   }
 
-  const orderType: ImmediateEntryDsl['orderType'] = scenario.entry.type;
-
-  const entryBlock: ImmediateEntryDsl = isLong
-    ? {
-        direction: 'long',
-        trigger: {
-          logic: 'AND',
-          conditions: [
-            { lens: 'ohlcv', feature: 'close', op: '>', value: entryPrice },
-          ],
-        },
-        orderType,
+  const supportedOrderTypes = ['market', 'limit', 'stop'] as const;
+  const entryBlock: StrategyDslInput['entry'] = (() => {
+    if (scenario.entry.type === 'wait_for_trigger') {
+      if (!scenario.entry.triggerConditions) {
+        throw new Error(
+          `シナリオ ${scenario.id} は wait_for_trigger ですが triggerConditions がありません`,
+        );
       }
-    : {
-        direction: 'short',
-        trigger: {
-          logic: 'AND',
-          conditions: [
-            { lens: 'ohlcv', feature: 'close', op: '<', value: entryPrice },
-          ],
-        },
-        orderType,
+      const maxWaitBars = scenario.entry.maxWaitBars;
+      return {
+        type: 'wait_for_trigger',
+        direction: isLong ? 'long' : 'short',
+        triggerConditions: scenario.entry.triggerConditions,
+        maxWaitBars:
+          typeof maxWaitBars === 'number' && Number.isFinite(maxWaitBars) && maxWaitBars > 0
+            ? Math.trunc(maxWaitBars)
+            : 48,
+        executionType: scenario.entry.executionType ?? 'market',
       };
+    }
+
+    if (!supportedOrderTypes.includes(scenario.entry.type)) {
+      throw new Error(`シナリオ ${scenario.id} の entry.type は未対応です: ${scenario.entry.type}`);
+    }
+    const orderType: ImmediateEntryDsl['orderType'] = scenario.entry.type;
+    return isLong
+      ? {
+          direction: 'long',
+          trigger: {
+            logic: 'AND',
+            conditions: [
+              { lens: 'ohlcv', feature: 'close', op: '>', value: entryPrice },
+            ],
+          },
+          orderType,
+        }
+      : {
+          direction: 'short',
+          trigger: {
+            logic: 'AND',
+            conditions: [
+              { lens: 'ohlcv', feature: 'close', op: '<', value: entryPrice },
+            ],
+          },
+          orderType,
+        };
+  })();
 
   const slPips = scenario.stopLoss?.pips;
   const slNum = typeof slPips === 'number' && Number.isFinite(slPips) && slPips > 0 ? slPips : 20;
@@ -68,7 +93,7 @@ export function scenarioToStrategyDSL(
   const tpPipsNum = typeof tpPips === 'number' && Number.isFinite(tpPips) && tpPips > 0 ? tpPips : slNum * 2;
   const rr = tpPipsNum / slNum;
 
-  const raw: Record<string, unknown> = {
+  const raw: StrategyDslInput = {
     id: `${idPrefix ?? 'dsl'}-${scenario.id}`.replace(/[^a-zA-Z0-9-_]/g, '_'),
     generation: 0,
     parentIds: [],

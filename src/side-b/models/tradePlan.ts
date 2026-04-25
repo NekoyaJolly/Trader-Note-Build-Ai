@@ -11,6 +11,8 @@
  * - gpt-4oの高い推論能力を活用
  */
 
+import type { ConditionGroup } from '../strategy_dsl/schema';
+
 // ===========================================
 // Plan AIで生成する型（Researchから移動）
 // ===========================================
@@ -65,13 +67,19 @@ export interface MacroAssessment {
  */
 export interface EntryCondition {
   /** 注文タイプ */
-  type: 'limit' | 'market' | 'stop';
+  type: 'limit' | 'market' | 'stop' | 'wait_for_trigger';
   /** エントリー価格 */
   price: number;
   /** 条件説明（自然言語） */
   condition: string;
   /** トリガーとなる指標 */
   triggerIndicators: string[];
+  /** wait_for_trigger の機械判定条件（任意。通常 entry.type='wait_for_trigger' 時のみ） */
+  triggerConditions?: ConditionGroup;
+  /** wait_for_trigger の最大待機バー数 */
+  maxWaitBars?: number;
+  /** wait_for_trigger 発動後の執行方式 */
+  executionType?: 'market' | 'limit';
 }
 
 /**

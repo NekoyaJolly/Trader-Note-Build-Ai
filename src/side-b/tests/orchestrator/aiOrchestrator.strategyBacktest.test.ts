@@ -137,10 +137,10 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
     findResearch.mockImplementation(async () => mockResearch);
     const findByDate = jest.fn();
     findByDate.mockImplementation(async () => null);
-    const createPlan = jest.fn();
-    createPlan.mockImplementation(async (input: unknown) =>
-      savedPlanFromCreate(input as CreatePlanInput),
-    );
+    const createPlan: jest.MockedFunction<
+      (input: CreatePlanInput) => Promise<AITradePlanWithTypes>
+    > = jest.fn();
+    createPlan.mockImplementation(async (input: CreatePlanInput) => savedPlanFromCreate(input));
     const delPlan = jest.fn();
     delPlan.mockImplementation(async () => undefined);
     const critique = jest.fn();
@@ -205,10 +205,10 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
     findResearch.mockImplementation(async () => mockResearch);
     const findByDate = jest.fn();
     findByDate.mockImplementation(async () => null);
-    const createPlan = jest.fn();
-    createPlan.mockImplementation(async (input: unknown) =>
-      savedPlanFromCreate(input as CreatePlanInput),
-    );
+    const createPlan: jest.MockedFunction<
+      (input: CreatePlanInput) => Promise<AITradePlanWithTypes>
+    > = jest.fn();
+    createPlan.mockImplementation(async (input: CreatePlanInput) => savedPlanFromCreate(input));
     const delPlan = jest.fn();
     delPlan.mockImplementation(async () => undefined);
     const critique = jest.fn();
@@ -254,10 +254,10 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
     findResearch.mockImplementation(async () => mockResearch);
     const findByDate = jest.fn();
     findByDate.mockImplementation(async () => null);
-    const createPlan = jest.fn();
-    createPlan.mockImplementation(async (input: unknown) =>
-      savedPlanFromCreate(input as CreatePlanInput),
-    );
+    const createPlan: jest.MockedFunction<
+      (input: CreatePlanInput) => Promise<AITradePlanWithTypes>
+    > = jest.fn();
+    createPlan.mockImplementation(async (input: CreatePlanInput) => savedPlanFromCreate(input));
     const delPlan = jest.fn();
     delPlan.mockImplementation(async () => undefined);
     const daCritique = jest.fn();

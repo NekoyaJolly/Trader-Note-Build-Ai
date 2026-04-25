@@ -170,7 +170,11 @@ export class StrategyBacktesterAgent {
         this.tools.monteCarlo.execute(input),
         this.tools.buyAndHold.execute(input),
       ]);
-      const labels = ['walkForward', 'monteCarlo', 'buyAndHold'] as const;
+      const toolNames = [
+        this.tools.walkForward.name,
+        this.tools.monteCarlo.name,
+        this.tools.buyAndHold.name,
+      ] as const;
       const toolResults: ValidationToolResult[] = [];
       for (let i = 0; i < settled.length; i++) {
         const s = settled[i]!;
@@ -179,7 +183,7 @@ export class StrategyBacktesterAgent {
         } else {
           const err = s.reason instanceof Error ? s.reason.message : String(s.reason);
           toolResults.push({
-            toolName: labels[i]!,
+            toolName: toolNames[i]!,
             success: false,
             passed: false,
             metrics: {},

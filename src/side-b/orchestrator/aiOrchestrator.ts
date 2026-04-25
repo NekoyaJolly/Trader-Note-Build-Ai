@@ -322,12 +322,13 @@ export class AIOrchestrator {
       }
 
       // 4a. 並列レンズ計算（Phase 3）— Strategy Thinker 呼び出し前に実行
+      const planTimeframe = research.timeframe || '15m';
       registerDefaultLenses();
       let lensSnapshot: LensFeatureSnapshot | undefined;
       try {
         lensSnapshot = await defaultLensAggregator.computeAll({
           symbol,
-          timeframe: '15m',
+          timeframe: planTimeframe,
           timestamp: new Date(),
           ohlcvBars: ohlcvData, // researchId 経由時は undefined の可能性あり（レンズ側で unclear/unknown を返す）
           existingAnalysis: research.marketAnalysis,
@@ -361,7 +362,7 @@ export class AIOrchestrator {
             try {
               specialistBundle = await runAllSpecialists({
                 symbol,
-                timeframe: '15m',
+                timeframe: planTimeframe,
                 lensSnapshot,
               });
               const filled = [
@@ -378,7 +379,7 @@ export class AIOrchestrator {
 
             const genResult = await this.hypothesisGenerator.generate({
               symbol,
-              timeframe: '15m',
+              timeframe: planTimeframe,
               lensSnapshot,
               existingHypotheses: matched,
               specialistAnalyses: specialistBundle
@@ -394,7 +395,7 @@ export class AIOrchestrator {
               genResult.output,
               {
                 symbol,
-                timeframe: '15m',
+                timeframe: planTimeframe,
                 lensSnapshot,
                 existingHypotheses: matched,
               },
@@ -450,7 +451,7 @@ export class AIOrchestrator {
         try {
           strategyBacktest = await this.strategyBacktester.run(scenariosWithId, {
             symbol,
-            timeframe: '15m',
+            timeframe: planTimeframe,
           });
           console.log(
             `[Orchestrator] 戦略BT 完了: ${String(Date.now() - tBt)}ms, overallPassed=${String(

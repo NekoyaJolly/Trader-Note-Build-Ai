@@ -205,9 +205,7 @@ describe('MonteCarloTool.execute', () => {
 
     it('kind=strategy なら dslResult.pnls を直接使う', async () => {
         const pnls30 = Array.from({ length: 30 }, () => 2);
-        const backtest = { getResult: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const tool = new MonteCarloTool(backtest as any, {
+        const tool = new MonteCarloTool(undefined, {
             rng: makeSeededRng(3),
             simulationCount: 50,
         });
@@ -239,7 +237,6 @@ describe('MonteCarloTool.execute', () => {
                 },
             },
         });
-        expect(backtest.getResult).not.toHaveBeenCalled();
         expect(res.success).toBe(true);
         expect(res.metrics.tradeCount).toBe(30);
         expect(res.metrics.executionModel).toBe('bar_l1_v1');

@@ -98,6 +98,7 @@ export class PlanAIService {
   private apiKey: string;
   private model: string;
   private baseURL: string;
+  private resolvedPromptCache?: string;
 
   constructor() {
     this.apiKey = process.env.AI_API_KEY || '';
@@ -339,6 +340,9 @@ ${candidateContext}
    * 未 seed / DB 不整合時はファイル `loadPromptWithGlobal` にフォールバック。
    */
   private async resolveStrategyThinkerSystemPrompt(): Promise<string> {
+    if (process.env.NODE_ENV === 'test' && this.resolvedPromptCache) {
+      return this.resolvedPromptCache;
+    }
     const macros: PromptMacros = {
       CORE_TRADING_RULES,
       MACRO_ENVIRONMENT_RULES,
@@ -346,13 +350,17 @@ ${candidateContext}
     };
     const registry = new PromptRegistry();
     try {
-      return await registry.getCompositeActive('strategy_thinker', macros);
+      const prompt = await registry.getCompositeActive('strategy_thinker', macros);
+      if (process.env.NODE_ENV === 'test') this.resolvedPromptCache = prompt;
+      return prompt;
     } catch (err) {
       console.warn(
         '[StrategyThinker] Registry 合成に失敗、ファイル fallback:',
         err instanceof Error ? err.message : err,
       );
-      return loadPromptWithGlobal('strategy_thinker', macros);
+      const fallback = loadPromptWithGlobal('strategy_thinker', macros);
+      if (process.env.NODE_ENV === 'test') this.resolvedPromptCache = fallback;
+      return fallback;
     }
   }
 

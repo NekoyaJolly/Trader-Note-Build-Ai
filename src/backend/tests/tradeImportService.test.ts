@@ -7,7 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import { TradeImportService } from '../../services/tradeImportService';
 import { TradeRepository } from '../../backend/repositories/tradeRepository';
-import { prisma } from '../../backend/db/client';
+import { cleanupTradeImportRelatedTestData } from './helpers/testDbCleanup';
 
 describe('TradeImportService', () => {
   const service = new TradeImportService();
@@ -15,15 +15,7 @@ describe('TradeImportService', () => {
 
   // 各テスト前にDBをクリーンアップ（重複チェックに影響されないようにする）
   beforeEach(async () => {
-    // 外部キー制約を考慮した削除順序:
-    // AISummary, BacktestRun, MatchResult, NotificationLog, EvaluationLog → TradeNote → Trade
-    await prisma.aISummary.deleteMany({});
-    await prisma.backtestRun.deleteMany({});
-    await prisma.matchResult.deleteMany({});
-    await prisma.notificationLog.deleteMany({});
-    await prisma.evaluationLog.deleteMany({});
-    await prisma.tradeNote.deleteMany({});
-    await prisma.trade.deleteMany({});
+    await cleanupTradeImportRelatedTestData();
   });
 
   test('CSV 正常系: sample_trades.csv を取り込み、5件保存される', async () => {

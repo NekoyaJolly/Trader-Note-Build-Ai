@@ -11,7 +11,7 @@ import { TradeImportService } from '../../services/tradeImportService';
 import { TradeNoteService } from '../../services/tradeNoteService';
 import { TradeRepository } from '../../backend/repositories/tradeRepository';
 import { Trade } from '../../models/types';
-import { prisma } from '../../backend/db/client';
+import { cleanupTradeImportRelatedTestData } from './helpers/testDbCleanup';
 
 describe('CSV取込 → ノート生成 統合テスト', () => {
   const importService = new TradeImportService();
@@ -25,15 +25,7 @@ describe('CSV取込 → ノート生成 統合テスト', () => {
 
   // 各テスト前にDBをクリーンアップ（重複チェックの影響を回避）
   beforeEach(async () => {
-    // 外部キー制約を考慮した削除順序:
-    // AISummary, BacktestRun, MatchResult, NotificationLog, EvaluationLog → TradeNote → Trade
-    await prisma.aISummary.deleteMany({});
-    await prisma.backtestRun.deleteMany({});
-    await prisma.matchResult.deleteMany({});
-    await prisma.notificationLog.deleteMany({});
-    await prisma.evaluationLog.deleteMany({});
-    await prisma.tradeNote.deleteMany({});
-    await prisma.trade.deleteMany({});
+    await cleanupTradeImportRelatedTestData();
 
     // テスト用 CSV を作成
     const csvContent = [

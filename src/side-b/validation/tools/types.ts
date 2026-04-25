@@ -12,6 +12,17 @@ import type { EdgeHypothesis } from '../../models/edgeHypothesis';
 import type { StrategyDSL } from '../../strategy_dsl/schema';
 import type { DSLBacktestResult } from '../../strategy_dsl/DSLBacktestAdapter';
 
+export type ValidationAdditionalParamValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly string[]
+  | readonly number[]
+  | readonly boolean[];
+
+export type ValidationAdditionalParams = Record<string, ValidationAdditionalParamValue>;
+
 // ===========================================
 // ツール共通入力（union）
 // ===========================================
@@ -31,7 +42,7 @@ export interface HypothesisValidationInput {
    */
   backtestRunId?: string;
   /** ツール独自パラメーター */
-  additionalParams?: Record<string, unknown>;
+  additionalParams?: ValidationAdditionalParams;
 }
 
 /** 戦略 DSL + DSL BT 要約（Phase 6.7b。Side-A 非依存） */
@@ -40,7 +51,7 @@ export interface StrategyValidationInput {
   strategy: StrategyDSL;
   dslResult: DSLBacktestResult;
   period: { start: string; end: string };
-  additionalParams?: Record<string, unknown>;
+  additionalParams?: ValidationAdditionalParams;
 }
 
 export type ValidationToolInput = HypothesisValidationInput | StrategyValidationInput;
