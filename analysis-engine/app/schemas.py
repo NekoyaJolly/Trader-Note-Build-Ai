@@ -79,3 +79,30 @@ class IndicatorSeriesResponse(BaseModel):
 
     # パターンは boolean 系
     patterns: Dict[str, List[bool]] = Field(default_factory=dict)
+
+
+class WalkForwardEvent(BaseModel):
+    entryTime: datetime
+    pnl: float
+
+
+class WalkForwardPeriod(BaseModel):
+    start: datetime
+    end: datetime
+
+
+class WalkForwardRequest(BaseModel):
+    events: List[WalkForwardEvent] = Field(default_factory=list)
+    period: WalkForwardPeriod
+    splitCount: int = Field(4, ge=1, le=50)
+
+
+class WalkForwardResponse(BaseModel):
+    overfitScore: float | None
+    avgInSampleWinRate: float | None
+    avgOutOfSampleWinRate: float | None
+    inSamplePF: float | None
+    outOfSamplePF: float | None
+    splitCount: int
+    totalTradeCount: int
+    windowsEvaluated: int

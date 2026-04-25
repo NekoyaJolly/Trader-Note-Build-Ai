@@ -21,8 +21,12 @@ export interface PythonExecutionResult {
 }
 
 export interface PythonBridgeConfig {
+    /** 実行方式。docker_exec はローカル、http は本番 analysis-engine 用 */
+    mode?: 'docker_exec' | 'http';
     /** docker exec 対象のコンテナ名 */
     containerName: string;
+    /** HTTP mode の base URL */
+    baseUrl?: string;
     /** TS ↔ Python 間 JSON 受け渡しディレクトリ（ホスト側絶対パス） */
     sharedDir: string;
     /** 個別リクエストが上書きしない限りのタイムアウト(ms) */

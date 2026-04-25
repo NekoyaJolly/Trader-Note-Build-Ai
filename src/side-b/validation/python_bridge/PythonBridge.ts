@@ -88,6 +88,9 @@ export class PythonBridge {
      * コンテナが起動していて ping が通るかを確認する。
      */
     async healthCheck(): Promise<boolean> {
+        if (this.config.mode === 'http') {
+            return this.healthCheckHttp();
+        }
         try {
             const result = await this.runner(
                 ['exec', this.config.containerName, 'python', '/app/ping.py'],
@@ -109,6 +112,9 @@ export class PythonBridge {
      *   4. 成否にかかわらず両ファイルを削除
      */
     async execute(req: PythonExecutionRequest): Promise<PythonExecutionResult> {
+        if (this.config.mode === 'http') {
+            return this.executeHttp(req);
+        }
         const start = Date.now();
         const runId = randomUUID();
         const inputHost = path.join(this.config.sharedDir, `input-${runId}.json`);
@@ -202,6 +208,71 @@ export class PythonBridge {
         };
     }
 
+    private async healthCheckHttp(): Promise<boolean> {
+        const baseUrl = this.config.baseUrl?.replace(/\/$/, '');
+        if (!baseUrl) return false;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
+        try {
+            const res = await fetch(`${baseUrl}/health`, { signal: controller.signal });
+            if (!res.ok) return false;
+            const body = await res.json() as { status?: string; ok?: boolean };
+            return body.status === 'ok' || body.ok === true;
+        } catch {
+            return false;
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    private async executeHttp(req: PythonExecutionRequest): Promise<PythonExecutionResult> {
+        const start = Date.now();
+        const baseUrl = this.config.baseUrl?.replace(/\/$/, '');
+        if (!baseUrl) {
+            return {
+                success: false,
+                error: 'PYTHON_VALIDATION_URL / ANALYSIS_ENGINE_URL が未設定です',
+                durationMs: Date.now() - start,
+            };
+        }
+        const timeoutMs = req.timeoutMs ?? this.config.defaultTimeoutMs;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const endpoint = req.scriptPath.includes('walk_forward')
+                ? '/v1/walk-forward'
+                : '/v1/execute';
+            const res = await fetch(`${baseUrl}${endpoint}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(req.input),
+                signal: controller.signal,
+            });
+            if (!res.ok) {
+                const text = await res.text();
+                return {
+                    success: false,
+                    error: `HTTP ${res.status}: ${text}`,
+                    durationMs: Date.now() - start,
+                };
+            }
+            const output = await res.json() as Record<string, unknown>;
+            return {
+                success: true,
+                output,
+                durationMs: Date.now() - start,
+            };
+        } catch (err) {
+            return {
+                success: false,
+                error: err instanceof Error ? err.message : String(err),
+                durationMs: Date.now() - start,
+            };
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
     private async safeUnlink(...paths: string[]): Promise<void> {
         await Promise.all(
             paths.map((p) =>
@@ -225,8 +296,11 @@ export class PythonBridge {
  * - PYTHON_BRIDGE_TIMEOUT_MS: 既定タイムアウト（既定 300000 = 5分）
  */
 export function createDefaultPythonBridge(): PythonBridge {
+    const mode = (process.env.PYTHON_VALIDATION_MODE ?? 'docker_exec') as 'docker_exec' | 'http';
     return new PythonBridge({
+        mode,
         containerName: process.env.PYTHON_BRIDGE_CONTAINER ?? 'side_b_python_validator',
+        baseUrl: process.env.PYTHON_VALIDATION_URL ?? process.env.ANALYSIS_ENGINE_URL,
         sharedDir:
             process.env.PYTHON_BRIDGE_SHARED_DIR ??
             path.join(process.cwd(), 'python', 'shared'),

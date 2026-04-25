@@ -18,7 +18,10 @@ from app.schemas import (
     IndicatorSeriesByVersionRequest,
     IndicatorSeriesRequest,
     IndicatorSeriesResponse,
+    WalkForwardRequest,
+    WalkForwardResponse,
 )
+from app.walk_forward import run_walk_forward
 
 app = FastAPI(title="TradeAssist Analysis Engine", version="0.1.0")
 
@@ -29,6 +32,16 @@ engine = create_db_engine(cfg)
 @app.get("/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/v1/walk-forward", response_model=WalkForwardResponse)
+def walk_forward(req: WalkForwardRequest) -> WalkForwardResponse:
+    """Side-B WalkForward 検証。
+
+    Node 側からトレードイベント列を受け取り、時間軸で IS/OOS に分割して
+    過学習スコアと安定性指標を返す。
+    """
+    return run_walk_forward(req)
 
 
 @app.post("/v1/indicator-series", response_model=IndicatorSeriesResponse)
