@@ -31,6 +31,7 @@ Thumbs.db
 !.vscode/mcp.json
 .idea/
 .cursor/
+.firecrawl/
 
 # Claude Code runtime files
 .claude/scheduled_tasks.lock

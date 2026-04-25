@@ -349,6 +349,36 @@ model OHLCVCandle {
   @@index([symbol, timestamp], map: "idx_ohlcv_symbol_timestamp")
 }
 
+/// バックテスト執行シミュ用のスプレッド集計バー
+/// cTrader の BID/ASK tick から avg/max/p95 spread を時間足単位で集計する
+model SpreadBar {
+  id        String   @id @default(uuid()) @db.Uuid
+  /// 銘柄シンボル（例: XAUUSD, EURUSD）
+  symbol    String
+  /// 時間足（例: 1m, 5m, 15m, 1h）
+  timeframe String
+  /// バー開始時刻（UTC）
+  timestamp DateTime @db.Timestamptz(6)
+  /// 平均スプレッド（価格単位）
+  avgSpread Decimal  @db.Decimal(18, 8)
+  /// 最大スプレッド（価格単位）
+  maxSpread Decimal  @db.Decimal(18, 8)
+  /// 95パーセンタイルスプレッド（価格単位）
+  p95Spread Decimal  @db.Decimal(18, 8)
+  /// 集計元tick数
+  tickCount Int      @default(0)
+  /// データソース（ctrader, fixed_fallback 等）
+  source    String   @default("ctrader")
+  /// 作成日時
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  @@unique([symbol, timeframe, timestamp], map: "uq_spreadbar_symbol_timeframe_timestamp")
+  @@index([symbol, timeframe, timestamp], map: "idx_spreadbar_symbol_tf_ts")
+  @@index([symbol, timestamp], map: "idx_spreadbar_symbol_ts")
+}
+
 /// Raw JSON 形式のトレードノート保存
 /// 技術スタック選定シート ⑧ に基づくハイブリッド保存
 model TradeNoteRaw {

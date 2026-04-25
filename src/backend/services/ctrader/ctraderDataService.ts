@@ -13,6 +13,7 @@
  */
 
 import { config } from '../../../config';
+import { splitDateRange } from '../../../utils/dateRangeChunks';
 import { CTraderAuthService } from './ctraderAuthService';
 import { CTraderConnectionType } from './types/connection';
 
@@ -44,6 +45,17 @@ export const CTraderTrendbarPeriod = {
 } as const;
 
 export type CTraderPeriod = typeof CTraderTrendbarPeriod[keyof typeof CTraderTrendbarPeriod];
+
+/** cTrader historical tick quote type（ProtoOAQuoteType） */
+export const CTraderQuoteType = {
+    BID: 1,
+    ASK: 2,
+} as const;
+
+export type CTraderQuoteTypeValue = typeof CTraderQuoteType[keyof typeof CTraderQuoteType];
+
+const MAX_TICK_TIMESPAN_MS = 7 * 24 * 60 * 60 * 1000;
+const CTRADER_PRICE_DIVISOR = 100000;
 
 /**
  * 内部時間足 → cTrader 期間
@@ -111,6 +123,127 @@ export interface OHLCVBarResult {
     low: number;
     close: number;
     volume: number;
+}
+
+export interface CTraderRawTickData {
+    /** 先頭tickは絶対Unix ms、以降は前tickとの差分ms（API仕様） */
+    timestamp: number | string;
+    /** 1/100000 price unit */
+    tick: number | string;
+}
+
+export interface CTraderTickResult {
+    timestamp: Date;
+    price: number;
+    quoteType: 'bid' | 'ask';
+}
+
+export interface CTraderSpreadTick {
+    timestamp: Date;
+    bid: number;
+    ask: number;
+    spread: number;
+}
+
+export interface CTraderSpreadBar {
+    timestamp: Date;
+    avgSpread: number;
+    maxSpread: number;
+    p95Spread: number;
+    tickCount: number;
+}
+
+interface TickFetchResult {
+    ticks: CTraderTickResult[];
+    hasMore: boolean;
+}
+
+export function convertCTraderTicks(
+    ticks: CTraderRawTickData[],
+    digits: number,
+    quoteType: 'bid' | 'ask',
+): CTraderTickResult[] {
+    const out: CTraderTickResult[] = [];
+    let currentTimestamp: number | null = null;
+    for (const raw of ticks) {
+        const tsRaw = Number(raw.timestamp);
+        const priceRaw = Number(raw.tick);
+        if (!Number.isFinite(tsRaw) || !Number.isFinite(priceRaw)) continue;
+        if (currentTimestamp === null || tsRaw > 946684800000) {
+            currentTimestamp = tsRaw;
+        } else {
+            currentTimestamp += tsRaw;
+        }
+        out.push({
+            timestamp: new Date(currentTimestamp),
+            price: parseFloat((priceRaw / CTRADER_PRICE_DIVISOR).toFixed(digits)),
+            quoteType,
+        });
+    }
+    return out.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+}
+
+export function mergeBidAskTicks(
+    bidTicks: CTraderTickResult[],
+    askTicks: CTraderTickResult[],
+    maxSkewMs: number = 1000,
+): CTraderSpreadTick[] {
+    const bids = bidTicks.filter(t => t.quoteType === 'bid').sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    const asks = askTicks.filter(t => t.quoteType === 'ask').sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    const out: CTraderSpreadTick[] = [];
+    let j = 0;
+    for (const bid of bids) {
+        const bidTs = bid.timestamp.getTime();
+        while (j + 1 < asks.length) {
+            const cur = Math.abs(asks[j]!.timestamp.getTime() - bidTs);
+            const next = Math.abs(asks[j + 1]!.timestamp.getTime() - bidTs);
+            if (next > cur) break;
+            j++;
+        }
+        const ask = asks[j];
+        if (!ask) continue;
+        const skew = Math.abs(ask.timestamp.getTime() - bidTs);
+        if (skew > maxSkewMs) continue;
+        const spread = ask.price - bid.price;
+        if (!(spread >= 0)) continue;
+        out.push({
+            timestamp: new Date(Math.max(bidTs, ask.timestamp.getTime())),
+            bid: bid.price,
+            ask: ask.price,
+            spread,
+        });
+    }
+    return out;
+}
+
+export function aggregateSpreadTicks(
+    ticks: CTraderSpreadTick[],
+    timeframeMs: number,
+): CTraderSpreadBar[] {
+    if (!(timeframeMs > 0)) {
+        throw new Error('timeframeMs は正の数である必要があります');
+    }
+    const buckets = new Map<number, number[]>();
+    for (const tick of ticks) {
+        const start = Math.floor(tick.timestamp.getTime() / timeframeMs) * timeframeMs;
+        const arr = buckets.get(start) ?? [];
+        arr.push(tick.spread);
+        buckets.set(start, arr);
+    }
+    return Array.from(buckets.entries())
+        .sort(([a], [b]) => a - b)
+        .map(([timestamp, spreads]) => {
+            const sorted = spreads.slice().sort((a, b) => a - b);
+            const sum = spreads.reduce((acc, v) => acc + v, 0);
+            const p95Index = Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1);
+            return {
+                timestamp: new Date(timestamp),
+                avgSpread: sum / spreads.length,
+                maxSpread: sorted[sorted.length - 1] ?? 0,
+                p95Spread: sorted[p95Index] ?? 0,
+                tickCount: spreads.length,
+            };
+        });
 }
 
 /**
@@ -364,6 +497,152 @@ export class CTraderDataService {
             console.log(`[cTraderData] ${bars.length}本のOHLCVを取得(期間指定): ${symbol} ${timeframe}`);
 
             return bars;
+        } finally {
+            if (connection) {
+                try { await connection.close(); } catch { /* ignore */ }
+            }
+        }
+    }
+
+    /**
+     * cTrader の履歴 tick を取得する（BID/ASK いずれか）。
+     *
+     * Open API 制約: 1リクエストの from/to は最大1週間。
+     * hasMore=true は返却上限超過を意味するため、呼び出し側で期間をさらに細分化する。
+     */
+    async fetchTickDataInRange(
+        accountId: string,
+        symbol: string,
+        quoteType: 'bid' | 'ask',
+        from: Date,
+        to: Date,
+    ): Promise<CTraderTickResult[]> {
+        const result = await this.fetchTickDataInRangeInternal(accountId, symbol, quoteType, from, to);
+        if (result.hasMore) {
+            console.warn(
+                `[cTraderData] tickData hasMore=true: ${symbol} ${quoteType} ` +
+                `${from.toISOString()}〜${to.toISOString()}。fetchTickDataChunked の利用を推奨します。`,
+            );
+        }
+        return result.ticks;
+    }
+
+    /**
+     * cTrader の1週間制限と hasMore に対応して履歴tickをチャンク取得する。
+     */
+    async fetchTickDataChunked(
+        accountId: string,
+        symbol: string,
+        quoteType: 'bid' | 'ask',
+        from: Date,
+        to: Date,
+        options: { maxChunkMs?: number; minChunkMs?: number } = {},
+    ): Promise<CTraderTickResult[]> {
+        const maxChunkMs = Math.min(options.maxChunkMs ?? MAX_TICK_TIMESPAN_MS, MAX_TICK_TIMESPAN_MS);
+        const minChunkMs = Math.max(60 * 60 * 1000, options.minChunkMs ?? 6 * 60 * 60 * 1000);
+        const chunks = splitDateRange(from, to, maxChunkMs);
+        const all: CTraderTickResult[] = [];
+        for (const chunk of chunks) {
+            const ticks = await this.fetchTickDataChunkRecursive(
+                accountId,
+                symbol,
+                quoteType,
+                chunk.start,
+                chunk.end,
+                minChunkMs,
+            );
+            all.push(...ticks);
+        }
+        return all.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    }
+
+    /**
+     * BID/ASK 履歴tickを取得し、spread tick → spread bar に集計する。
+     */
+    async fetchSpreadSeriesInRange(
+        accountId: string,
+        symbol: string,
+        from: Date,
+        to: Date,
+        timeframeMs: number,
+        options: { maxSkewMs?: number; maxChunkMs?: number; minChunkMs?: number } = {},
+    ): Promise<CTraderSpreadBar[]> {
+        const [bidTicks, askTicks] = await Promise.all([
+            this.fetchTickDataChunked(accountId, symbol, 'bid', from, to, {
+                maxChunkMs: options.maxChunkMs,
+                minChunkMs: options.minChunkMs,
+            }),
+            this.fetchTickDataChunked(accountId, symbol, 'ask', from, to, {
+                maxChunkMs: options.maxChunkMs,
+                minChunkMs: options.minChunkMs,
+            }),
+        ]);
+        const spreadTicks = mergeBidAskTicks(bidTicks, askTicks, options.maxSkewMs ?? 1000);
+        return aggregateSpreadTicks(spreadTicks, timeframeMs);
+    }
+
+    private async fetchTickDataChunkRecursive(
+        accountId: string,
+        symbol: string,
+        quoteType: 'bid' | 'ask',
+        from: Date,
+        to: Date,
+        minChunkMs: number,
+    ): Promise<CTraderTickResult[]> {
+        const result = await this.fetchTickDataInRangeInternal(accountId, symbol, quoteType, from, to);
+        if (!result.hasMore) return result.ticks;
+
+        const duration = to.getTime() - from.getTime();
+        if (duration <= minChunkMs) {
+            console.warn(
+                `[cTraderData] tick hasMore=true だが最小チャンクに到達: ${symbol} ${quoteType} ` +
+                `${from.toISOString()}〜${to.toISOString()}。返却分のみ使用します。`,
+            );
+            return result.ticks;
+        }
+
+        const mid = new Date(from.getTime() + Math.floor(duration / 2));
+        const left = await this.fetchTickDataChunkRecursive(accountId, symbol, quoteType, from, mid, minChunkMs);
+        const right = await this.fetchTickDataChunkRecursive(accountId, symbol, quoteType, mid, to, minChunkMs);
+        return [...left, ...right];
+    }
+
+    private async fetchTickDataInRangeInternal(
+        accountId: string,
+        symbol: string,
+        quoteType: 'bid' | 'ask',
+        from: Date,
+        to: Date,
+    ): Promise<TickFetchResult> {
+        const fromTimestamp = from.getTime();
+        const toTimestamp = to.getTime();
+        if (!Number.isFinite(fromTimestamp) || !Number.isFinite(toTimestamp)) {
+            throw new Error('[cTraderData] tick from/to が不正です（Date変換に失敗）');
+        }
+        if (toTimestamp <= fromTimestamp) {
+            throw new Error('[cTraderData] tick to は from より後の日時を指定してください');
+        }
+        if (toTimestamp - fromTimestamp > MAX_TICK_TIMESPAN_MS) {
+            throw new Error('[cTraderData] tick 取得期間は最大1週間です。期間をチャンク分割してください。');
+        }
+
+        let connection: CTraderConnectionType | null = null;
+        try {
+            connection = await this.connectAndAuth(accountId);
+            const symbolInfo = await this.resolveSymbolId(connection, accountId, symbol);
+            const response = await connection.sendCommand('ProtoOAGetTickDataReq', {
+                ctidTraderAccountId: parseInt(accountId, 10),
+                symbolId: symbolInfo.symbolId,
+                type: quoteType === 'bid' ? CTraderQuoteType.BID : CTraderQuoteType.ASK,
+                fromTimestamp,
+                toTimestamp,
+            });
+
+            const rawResponse = response as { tickData?: CTraderRawTickData[]; hasMore?: boolean };
+            return {
+                ticks: convertCTraderTicks(rawResponse.tickData ?? [], symbolInfo.digits, quoteType),
+                hasMore: rawResponse.hasMore === true,
+            };
         } finally {
             if (connection) {
                 try { await connection.close(); } catch { /* ignore */ }

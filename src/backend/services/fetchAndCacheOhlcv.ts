@@ -11,6 +11,7 @@
 import { PrismaClient } from '@prisma/client';
 import { CTraderDataService } from './ctrader/ctraderDataService';
 import { CTraderAuthService } from './ctrader/ctraderAuthService';
+import { splitDateRange } from '../../utils/dateRangeChunks';
 
 const prisma = new PrismaClient();
 const ctraderAuthService = new CTraderAuthService(prisma);
@@ -82,35 +83,6 @@ const CTRADER_MAX_TIMESPAN_MS: Record<string, number> = {
     '1d': 365 * 2 * 24 * 60 * 60 * 1000 * 0.7,  // 2年 → 511日
     '1w': 365 * 5 * 24 * 60 * 60 * 1000 * 0.7,  // 5年 → 3.5年
 };
-
-// ========================================
-// 分割ユーティリティ
-// ========================================
-
-interface DateChunk {
-    start: Date;
-    end: Date;
-}
-
-/**
- * 期間を指定された最大タイムスパンで分割
- */
-function splitDateRange(startDate: Date, endDate: Date, maxTimespanMs: number): DateChunk[] {
-    const chunks: DateChunk[] = [];
-    let current = startDate.getTime();
-    const endMs = endDate.getTime();
-
-    while (current < endMs) {
-        const chunkEnd = Math.min(current + maxTimespanMs, endMs);
-        chunks.push({
-            start: new Date(current),
-            end: new Date(chunkEnd),
-        });
-        current = chunkEnd;
-    }
-
-    return chunks;
-}
 
 // ========================================
 // メイン関数
