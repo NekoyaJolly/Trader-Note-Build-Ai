@@ -31,6 +31,9 @@ export function StrategyBacktestSummary({ backtest, fromCachedPlan }: Props) {
     );
   }
 
+  const firstExecution = backtest.scenarioResults.find((r) => r.dslResult)?.dslResult;
+  const cost = firstExecution?.costSummary;
+
   return (
     <div className="space-y-3 text-sm text-slate-200">
       <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -46,6 +49,25 @@ export function StrategyBacktestSummary({ backtest, fromCachedPlan }: Props) {
           {backtest.period.start} 〜 {backtest.period.end} / {backtest.totalDurationMs}ms
         </span>
       </div>
+      {firstExecution ? (
+        <div className="rounded-lg border border-slate-700/60 bg-slate-900/40 p-2.5 text-xs text-slate-300">
+          <div className="flex flex-wrap gap-2">
+            <span className="font-medium text-slate-200">執行モデル</span>
+            <span>{firstExecution.executionModel ?? "unknown"}</span>
+            <span className="text-slate-500">hash:</span>
+            <span className="font-mono text-slate-400">{firstExecution.executionConfigHash ?? "-"}</span>
+            <span className="text-slate-500">source:</span>
+            <span>{firstExecution.dataSource ?? "ctrader"}</span>
+          </div>
+          {cost ? (
+            <div className="mt-1 flex flex-wrap gap-2 text-slate-500">
+              <span>roundTripCostPips={cost.roundTripCostPips ?? 0}</span>
+              <span>atrMult={cost.roundTripCostAtrMult ?? 0}</span>
+              <span>totalCost={Number(cost.totalCost ?? 0).toFixed(2)}</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <ul className="space-y-2 text-xs">
         {backtest.scenarioResults.map((r) => (
           <li
@@ -65,6 +87,11 @@ export function StrategyBacktestSummary({ backtest, fromCachedPlan }: Props) {
               <p className="text-rose-400 mt-1">{r.error}</p>
             ) : null}
             <p className="text-slate-500 mt-1.5 line-clamp-4 break-words">{r.strategistInterpretation}</p>
+            {r.dslResult?.costSummary ? (
+              <p className="text-slate-600 mt-0.5">
+                {r.dslResult.executionModel} / cost={Number(r.dslResult.costSummary.totalCost ?? 0).toFixed(2)}
+              </p>
+            ) : null}
             <p className="text-slate-600 mt-0.5">{r.durationMs}ms</p>
           </li>
         ))}

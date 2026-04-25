@@ -42,6 +42,15 @@ export interface ExecutionSimulationMetadata {
   costSummary: ExecutionCostSummary;
 }
 
+export interface SymbolExecutionCostProfile {
+  symbol: string;
+  /** 往復の spread + commission + 最小 slippage を pips 換算した保守値 */
+  roundTripCostPips: number;
+  /** ATR 比例の追加スリッページ（初期は控えめ、必要なら銘柄別に拡張） */
+  roundTripCostAtrMult: number;
+  rationale: string;
+}
+
 export const LEGACY_ZERO_COST_EXECUTION: ExecutionSimulationConfig = {
   model: 'legacy_zero_cost',
   dataSource: 'ctrader',
@@ -57,6 +66,62 @@ export const DEFAULT_L1_EXECUTION: ExecutionSimulationConfig = {
   roundTripCostPips: 0,
   roundTripCostAtrMult: 0,
 };
+
+export const DEFAULT_L2_ROUND_TRIP_COST_PIPS = 2.0;
+
+/**
+ * Phase 6.8: 商用最小BT用の固定コスト表。
+ *
+ * cTrader の実 bid/ask 時系列へ移行するまでの保守値。値は「往復」pips。
+ */
+export const SYMBOL_EXECUTION_COST_PROFILES: readonly SymbolExecutionCostProfile[] = [
+  {
+    symbol: 'XAUUSD',
+    roundTripCostPips: 3.0,
+    roundTripCostAtrMult: 0.02,
+    rationale: 'Gold はスプレッド拡大が出やすいため、固定往復3pips + ATR 2%を初期保守値にする',
+  },
+  {
+    symbol: 'EURUSD',
+    roundTripCostPips: 1.2,
+    roundTripCostAtrMult: 0.01,
+    rationale: '主要FXの代表として低めだがゼロではない往復コストを置く',
+  },
+  {
+    symbol: 'USDJPY',
+    roundTripCostPips: 1.5,
+    roundTripCostAtrMult: 0.01,
+    rationale: 'JPYペアの代表として往復1.5pipsを初期保守値にする',
+  },
+] as const;
+
+function normalizeSymbol(symbol: string): string {
+  return symbol.toUpperCase().replace(/[^A-Z]/g, '');
+}
+
+export function getExecutionCostProfile(symbol: string): SymbolExecutionCostProfile {
+  const normalized = normalizeSymbol(symbol);
+  const exact = SYMBOL_EXECUTION_COST_PROFILES.find((p) => normalizeSymbol(p.symbol) === normalized);
+  if (exact) return exact;
+  return {
+    symbol: normalized || 'DEFAULT',
+    roundTripCostPips: DEFAULT_L2_ROUND_TRIP_COST_PIPS,
+    roundTripCostAtrMult: 0.01,
+    rationale: '未定義シンボルのため、保守的な固定往復2pips + ATR 1%を適用',
+  };
+}
+
+export function createDefaultL2ExecutionConfig(symbol: string): ExecutionSimulationConfig {
+  const profile = getExecutionCostProfile(symbol);
+  return {
+    model: 'bar_l2_v1',
+    dataSource: 'ctrader',
+    intraBarExitMode: 'pessimistic',
+    immediateEntryFill: 'next_bar_open',
+    roundTripCostPips: profile.roundTripCostPips,
+    roundTripCostAtrMult: profile.roundTripCostAtrMult,
+  };
+}
 
 export function normalizeExecutionConfig(
   config?: ExecutionSimulationConfig,

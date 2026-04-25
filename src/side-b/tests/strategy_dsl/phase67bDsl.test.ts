@@ -242,4 +242,51 @@ describe('Phase 6.8 execution metadata', () => {
     expect(first.indicatorValues?.grossPnl).toBeGreaterThan(first.pnl);
     expect(first.indicatorValues?.transactionCost).toBeGreaterThan(0);
   });
+
+  it('bar_l2_v1 は建値と決済値そのものを不利方向へ調整する', () => {
+    const start = new Date('2024-01-01T00:00:00Z');
+    const bars = barsUptrend(80, start);
+    const dsl = StrategyDSLSchema.parse({
+      id: 'exec-2',
+      generation: 0,
+      parentIds: [],
+      regimeTarget: 't',
+      symbol: 'EURUSD',
+      timeframe: '1h',
+      entry: {
+        direction: 'long',
+        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }] },
+      },
+      stopLoss: { type: 'fixed_pips', value: 5 },
+      takeProfit: { type: 'rr_ratio', value: 1 },
+      parameters: {},
+      metadata: { createdAt: new Date().toISOString(), createdBy: 'llm_generated' },
+    });
+
+    const zero = runDslSimulation(
+      bars,
+      dsl,
+      {},
+      toDslSimulationOptions({
+        model: 'legacy_zero_cost',
+        dataSource: 'ctrader',
+        roundTripCostPips: 0,
+      }),
+    );
+    const l2 = runDslSimulation(
+      bars,
+      dsl,
+      {},
+      toDslSimulationOptions({
+        model: 'bar_l2_v1',
+        dataSource: 'ctrader',
+        roundTripCostPips: 2,
+      }),
+    );
+    expect(l2.trades.length).toBeGreaterThan(0);
+    expect(zero.trades.length).toBeGreaterThan(0);
+    expect(l2.trades[0]!.entryPrice).toBeGreaterThan(zero.trades[0]!.entryPrice);
+    expect(l2.trades[0]!.exitPrice).toBeLessThan(zero.trades[0]!.exitPrice);
+    expect(l2.trades[0]!.indicatorValues?.grossPnl).toBeGreaterThan(l2.trades[0]!.pnl);
+  });
 });

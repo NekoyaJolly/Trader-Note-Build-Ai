@@ -566,6 +566,21 @@ export interface PerScenarioStrategyBacktestPayload {
   error?: string;
   strategistInterpretation: string;
   durationMs: number;
+  dslResult?: {
+    executionModel?: string;
+    executionConfigHash?: string;
+    dataSource?: string;
+    costSummary?: {
+      model?: string;
+      dataSource?: string;
+      roundTripCostPips?: number;
+      roundTripCostAtrMult?: number;
+      totalCost?: number;
+    };
+    grossPnls?: number[];
+    netPnls?: number[];
+  };
+  toolResults?: ValidationToolResult[];
 }
 
 /**

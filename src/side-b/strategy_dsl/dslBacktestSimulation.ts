@@ -312,6 +312,38 @@ function applyTransactionCosts(
   return pnl;
 }
 
+function halfAdverseExecutionCostDistance(
+  pipSize: number,
+  roundTripCostPips: number | undefined,
+  roundTripCostAtrMult: number | undefined,
+  table: BarFeatureTable,
+  entryIndex: number,
+): number {
+  const pipsCost = Math.max(0, roundTripCostPips ?? 0) * pipSize;
+  const atr = table.atr?.[entryIndex];
+  const atrCost =
+    atr !== undefined && !Number.isNaN(atr) && atr > 0
+      ? Math.max(0, roundTripCostAtrMult ?? 0) * atr
+      : 0;
+  return (pipsCost + atrCost) / 2;
+}
+
+function adjustEntryPrice(
+  side: TradeSide,
+  price: number,
+  halfCostDistance: number,
+): number {
+  return side === 'buy' ? price + halfCostDistance : price - halfCostDistance;
+}
+
+function adjustExitPrice(
+  side: TradeSide,
+  price: number,
+  halfCostDistance: number,
+): number {
+  return side === 'buy' ? price - halfCostDistance : price + halfCostDistance;
+}
+
 export interface DslSimulationResult {
   summary: BacktestResultSummary;
   trades: BacktestTradeEvent[];
@@ -377,6 +409,7 @@ export function runDslSimulation(
         side: TradeSide;
         entryIndex: number;
         entryPrice: number;
+        grossEntryPrice: number;
         sl: number;
         tp: number;
       }
@@ -407,18 +440,38 @@ export function runDslSimulation(
       const stopDist = stopDistance(dsl, table, j, pipSize, paramValues, evaluator);
       const tpDist = takeProfitDistance(dsl, stopDist, table, j, pipSize, paramValues, evaluator);
       if (deferredImmediate.isLong) {
+        const halfCost = executionModel === 'bar_l2_v1'
+          ? halfAdverseExecutionCostDistance(
+              pipSize,
+              roundTripCostPips,
+              roundTripCostAtrMult,
+              table,
+              j,
+            )
+          : 0;
         position = {
           side: 'buy',
           entryIndex: j,
-          entryPrice: openPx,
+          entryPrice: adjustEntryPrice('buy', openPx, halfCost),
+          grossEntryPrice: openPx,
           sl: openPx - stopDist,
           tp: openPx + tpDist,
         };
       } else {
+        const halfCost = executionModel === 'bar_l2_v1'
+          ? halfAdverseExecutionCostDistance(
+              pipSize,
+              roundTripCostPips,
+              roundTripCostAtrMult,
+              table,
+              j,
+            )
+          : 0;
         position = {
           side: 'sell',
           entryIndex: j,
-          entryPrice: openPx,
+          entryPrice: adjustEntryPrice('sell', openPx, halfCost),
+          grossEntryPrice: openPx,
           sl: openPx + stopDist,
           tp: openPx - tpDist,
         };
@@ -427,21 +480,33 @@ export function runDslSimulation(
     }
 
     if (position) {
-      const { side, entryPrice, sl, tp, entryIndex } = position;
+      const { side, entryPrice, grossEntryPrice, sl, tp, entryIndex } = position;
       const bar = bars[i];
       const resolved = resolveIntraBarExit(side, bar, sl, tp, exitMode);
       if (resolved !== null) {
-        const { exitPrice, reason } = resolved;
-        const rawPnl = calculatePnl(side, entryPrice, exitPrice, lotSize);
-        const pnl = applyTransactionCosts(
-          rawPnl,
-          pipSize,
-          lotSize,
-          roundTripCostPips,
-          roundTripCostAtrMult,
-          table,
-          entryIndex,
-        );
+        const { exitPrice: grossExitPrice, reason } = resolved;
+        const halfCost = executionModel === 'bar_l2_v1'
+          ? halfAdverseExecutionCostDistance(
+              pipSize,
+              roundTripCostPips,
+              roundTripCostAtrMult,
+              table,
+              entryIndex,
+            )
+          : 0;
+        const exitPrice = adjustExitPrice(side, grossExitPrice, halfCost);
+        const rawPnl = calculatePnl(side, grossEntryPrice, grossExitPrice, lotSize);
+        const pnl = executionModel === 'bar_l2_v1'
+          ? calculatePnl(side, entryPrice, exitPrice, lotSize)
+          : applyTransactionCosts(
+              rawPnl,
+              pipSize,
+              lotSize,
+              roundTripCostPips,
+              roundTripCostAtrMult,
+              table,
+              entryIndex,
+            );
         const transactionCost = rawPnl - pnl;
         totalCost += transactionCost;
         events.push({
@@ -491,18 +556,38 @@ export function runDslSimulation(
         const stopDist = stopDistance(dsl, table, slIx, pipSize, paramValues, evaluator);
         const tpDist = takeProfitDistance(dsl, stopDist, table, slIx, pipSize, paramValues, evaluator);
         if (wEntry.direction === 'long') {
+          const halfCost = executionModel === 'bar_l2_v1'
+            ? halfAdverseExecutionCostDistance(
+                pipSize,
+                roundTripCostPips,
+                roundTripCostAtrMult,
+                table,
+                j,
+              )
+            : 0;
           position = {
             side: 'buy',
             entryIndex: j,
-            entryPrice: openPx,
+            entryPrice: adjustEntryPrice('buy', openPx, halfCost),
+            grossEntryPrice: openPx,
             sl: openPx - stopDist,
             tp: openPx + tpDist,
           };
         } else {
+          const halfCost = executionModel === 'bar_l2_v1'
+            ? halfAdverseExecutionCostDistance(
+                pipSize,
+                roundTripCostPips,
+                roundTripCostAtrMult,
+                table,
+                j,
+              )
+            : 0;
           position = {
             side: 'sell',
             entryIndex: j,
-            entryPrice: openPx,
+            entryPrice: adjustEntryPrice('sell', openPx, halfCost),
+            grossEntryPrice: openPx,
             sl: openPx + stopDist,
             tp: openPx - tpDist,
           };
@@ -523,18 +608,38 @@ export function runDslSimulation(
           const stopDist = stopDistance(dsl, table, i, pipSize, paramValues, evaluator);
           const tpDist = takeProfitDistance(dsl, stopDist, table, i, pipSize, paramValues, evaluator);
           if (e.direction === 'long') {
+            const halfCost = executionModel === 'bar_l2_v1'
+              ? halfAdverseExecutionCostDistance(
+                  pipSize,
+                  roundTripCostPips,
+                  roundTripCostAtrMult,
+                  table,
+                  i,
+                )
+              : 0;
             position = {
               side: 'buy',
               entryIndex: i,
-              entryPrice: closePx,
+              entryPrice: adjustEntryPrice('buy', closePx, halfCost),
+              grossEntryPrice: closePx,
               sl: closePx - stopDist,
               tp: closePx + tpDist,
             };
           } else {
+            const halfCost = executionModel === 'bar_l2_v1'
+              ? halfAdverseExecutionCostDistance(
+                  pipSize,
+                  roundTripCostPips,
+                  roundTripCostAtrMult,
+                  table,
+                  i,
+                )
+              : 0;
             position = {
               side: 'sell',
               entryIndex: i,
-              entryPrice: closePx,
+              entryPrice: adjustEntryPrice('sell', closePx, halfCost),
+              grossEntryPrice: closePx,
               sl: closePx + stopDist,
               tp: closePx - tpDist,
             };

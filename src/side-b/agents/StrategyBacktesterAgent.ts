@@ -12,7 +12,7 @@ import { DSLBacktestAdapter, toDSLBacktestResult, type DSLBacktestResult } from 
 import type { StrategyDSL } from '../strategy_dsl/schema';
 import { defaultParameterValues } from '../strategy_dsl/dslParameterUtils';
 import {
-  DEFAULT_L1_EXECUTION,
+  createDefaultL2ExecutionConfig,
   toDslSimulationOptions,
   type ExecutionSimulationConfig,
 } from '../strategy_dsl/executionSimulation';
@@ -56,7 +56,7 @@ export interface StrategyBacktesterRunResult {
 export interface StrategyBacktesterOptions {
   /** 省略時: 直近 365 日 */
   period?: { start: string; end: string };
-  /** Phase 6.8: 執行・コスト仮定。省略時は L1 モデル（コスト値は設定側で拡張） */
+  /** Phase 6.8: 執行・コスト仮定。省略時は銘柄別固定表の L2 モデル */
   executionConfig?: ExecutionSimulationConfig;
 }
 
@@ -106,7 +106,9 @@ export class StrategyBacktesterAgent {
   ): Promise<StrategyBacktesterRunResult> {
     const tAll = Date.now();
     const period = options.period ?? defaultBacktestPeriod();
-    const simulationOptions = toDslSimulationOptions(options.executionConfig ?? DEFAULT_L1_EXECUTION);
+    const simulationOptions = toDslSimulationOptions(
+      options.executionConfig ?? createDefaultL2ExecutionConfig(context.symbol),
+    );
     const scenarioResults: PerScenarioBacktestResult[] = [];
 
     if (!scenarios.length) {
