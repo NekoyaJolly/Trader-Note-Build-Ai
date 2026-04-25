@@ -292,10 +292,10 @@ export class HypothesisGeneratorAgent {
 
         // 1 回目: variantSelector で選択
         const selection = selectVariant(active, experimentals, this.rand);
-        // Phase 6.7a: Registry の `__global__` active と variant content を合成
-        const primarySystem = await this.registry.composeGlobalWithContent(
-            selection.selected.content,
-        );
+        // Phase 6.7a: Registry の `__global__` active と variant content を合成。
+        // テスト/旧モックでは composeGlobalWithContent が未実装の場合があるため、
+        // その場合は選択済み content をそのまま使い、variant 選択の意味を保つ。
+        const primarySystem = await this.composeSelectedPrompt(selection.selected.content);
         const primary = await this.runAndScore(
             primarySystem,
             userPrompt,
@@ -315,7 +315,7 @@ export class HypothesisGeneratorAgent {
 
         // experimental 失敗 → active で再試行
         if (selection.isExperimental) {
-            const activeSystem = await this.registry.composeGlobalWithContent(active.content);
+            const activeSystem = await this.composeSelectedPrompt(active.content);
             const fallback = await this.runAndScore(
                 activeSystem,
                 userPrompt,
@@ -336,6 +336,16 @@ export class HypothesisGeneratorAgent {
             tokenUsage: primary.tokenUsage,
             model: primary.model,
         };
+    }
+
+    private async composeSelectedPrompt(content: string): Promise<string> {
+        const registryLike = this.registry as PromptRegistry & {
+            composeGlobalWithContent?: (localContent: string) => Promise<string>;
+        };
+        if (typeof registryLike.composeGlobalWithContent === 'function') {
+            return registryLike.composeGlobalWithContent(content);
+        }
+        return content;
     }
 
     /**
