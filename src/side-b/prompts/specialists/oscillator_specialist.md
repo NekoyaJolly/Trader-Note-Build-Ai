@@ -29,6 +29,19 @@
 }
 ```
 
+## 境界ケース例
+
+RSI が 50 近辺、MACD ヒストグラムが 0 付近、Stochastic も中立の場合は、無理に bullish / bearish を強く出さない。
+
+```json
+{
+  "momentum": "neutral",
+  "divergence": "none",
+  "interpretation": "RSI が 49〜52 の中立圏で推移し、MACD ヒストグラムも 0 付近、Stochastic も 50 近辺のため、モメンタム専門家として方向感は出せない。欠損はないが、明確な買われすぎ/売られすぎも確認できないため confidence を低くする。",
+  "confidence": 0.28
+}
+```
+
 フィールド詳細:
 - `momentum`:
   - RSI > 70 または Stochastic > 80 → overbought

@@ -53,6 +53,8 @@ const TIMEFRAME_TO_PERIOD: Record<string, CTraderPeriod> = {
     '5m': CTraderTrendbarPeriod.M5,
     '15m': CTraderTrendbarPeriod.M15,
     '30m': CTraderTrendbarPeriod.M30,
+    /** アプリ層の 60m 表記。 cTrader トレンドバーは 1h（H1）に対応 */
+    '60m': CTraderTrendbarPeriod.H1,
     '1h': CTraderTrendbarPeriod.H1,
     '4h': CTraderTrendbarPeriod.H4,
     '1d': CTraderTrendbarPeriod.D1,

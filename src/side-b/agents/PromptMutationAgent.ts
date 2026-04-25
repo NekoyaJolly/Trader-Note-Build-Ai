@@ -17,7 +17,10 @@ import { loadPromptWithGlobal } from '../prompts/loader';
 import { modelFor } from '../../config';
 import type { PromptVersion } from '../prompts/registry/types';
 import { extractJson } from './llmJsonExtract';
-import { GLOBAL_AGENT_NAME } from '../prompts/registry/PromptRegistry';
+import {
+  GLOBAL_AGENT_NAME,
+  SPECIALIST_COMMON_AGENT_NAME,
+} from '../prompts/registry/PromptRegistry';
 
 export interface PromptMutationProposal {
   /** 提案バージョン識別子(呼び出し側で suffix 付与してもよい) */
@@ -109,9 +112,12 @@ export class PromptMutationAgent {
   async proposeImprovements(
     input: ProposeImprovementsInput,
   ): Promise<PromptMutationProposal[]> {
-    if (input.agentName === GLOBAL_AGENT_NAME) {
+    if (
+      input.agentName === GLOBAL_AGENT_NAME ||
+      input.agentName === SPECIALIST_COMMON_AGENT_NAME
+    ) {
       console.warn(
-        `[PromptMutationAgent] ${GLOBAL_AGENT_NAME} は変異対象外のため空配列を返します`,
+        `[PromptMutationAgent] ${input.agentName} は変異対象外のため空配列を返します`,
       );
       return [];
     }

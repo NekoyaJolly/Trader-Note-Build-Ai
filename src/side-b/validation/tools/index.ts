@@ -5,9 +5,12 @@
 export type {
     ValidationTool,
     ValidationToolInput,
+    HypothesisValidationInput,
+    StrategyValidationInput,
     ValidationToolResult,
     ValidationToolImplementation,
 } from './types';
+export { isHypothesisValidationInput, isStrategyValidationInput } from './types';
 
 export {
     MonteCarloTool,

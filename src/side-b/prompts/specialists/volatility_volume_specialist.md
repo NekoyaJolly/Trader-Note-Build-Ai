@@ -32,6 +32,20 @@
 }
 ```
 
+## 境界ケース例
+
+normal regime では breakoutRisk を機械的に high にしない。BB幅・ATR変化率・レンジ圧縮の根拠が薄ければ medium/low に落とす。
+
+```json
+{
+  "volatilityRegime": "normal",
+  "breakoutRisk": "medium",
+  "volumeSignal": "no_data",
+  "interpretation": "volatility_regime は normal で、bb_width_percentile も極端な収縮・拡大ではない。ATR も横ばいで、breakoutRisk を high と断定する根拠は弱い。FX のため volume は取得されておらず no_data とする。",
+  "confidence": 0.32
+}
+```
+
 フィールド詳細:
 - `volatilityRegime`:
   - bb_width_percentile が 80% 以上、ATR が急上昇中 → expansion

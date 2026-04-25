@@ -62,10 +62,22 @@ import {
   runAllSpecialists,
   type SpecialistBundle,
 } from '../agents/specialists';
+import {
+  StrategyBacktesterAgent,
+  strategyBacktesterAgent,
+  type StrategyBacktesterRunResult,
+} from '../agents/StrategyBacktesterAgent';
 
 // ===========================================
 // 型定義
 // ===========================================
+
+/**
+ * DB 永続化されたプラン＋直近の戦略 BT 結果（メモリ上のみ。Phase 6.7b）
+ */
+export type AITradePlanWithOptionalBacktest = AITradePlanWithTypes & {
+  strategyBacktest?: StrategyBacktesterRunResult;
+};
 
 /**
  * リサーチ生成リクエスト
@@ -119,6 +131,7 @@ export class AIOrchestrator {
   private planRepo: PlanRepository;
   private devilsAdvocate: DevilsAdvocateAgent;
   private hypothesisGenerator: HypothesisGeneratorAgent;
+  private strategyBacktester: StrategyBacktesterAgent;
 
   constructor(
     researchAI?: ResearchAIService,
@@ -127,6 +140,7 @@ export class AIOrchestrator {
     planRepo?: PlanRepository,
     devilsAdvocate?: DevilsAdvocateAgent,
     hypothesisGenerator?: HypothesisGeneratorAgent,
+    strategyBacktester?: StrategyBacktesterAgent,
   ) {
     this.researchAI = researchAI || researchAIService;
     this.planAI = planAI || planAIService;
@@ -134,6 +148,7 @@ export class AIOrchestrator {
     this.planRepo = planRepo || planRepository;
     this.devilsAdvocate = devilsAdvocate || devilsAdvocateAgent;
     this.hypothesisGenerator = hypothesisGenerator || hypothesisGeneratorAgent;
+    this.strategyBacktester = strategyBacktester || strategyBacktesterAgent;
   }
 
   /**
@@ -213,7 +228,9 @@ export class AIOrchestrator {
    * 3. Plan AI 呼び出し
    * 4. DB保存
    */
-  async generatePlan(request: OrchestratorPlanRequest): Promise<OrchestratorResult<AITradePlanWithTypes>> {
+  async generatePlan(
+    request: OrchestratorPlanRequest,
+  ): Promise<OrchestratorResult<AITradePlanWithOptionalBacktest>> {
     const { symbol, targetDate, researchId, userPreferences, ohlcvData, indicators, higherTFData, forceRefresh = false } = request;
 
     // 対象日の決定
@@ -426,6 +443,25 @@ export class AIOrchestrator {
         id: `${symbol}-${dateStr}-${index + 1}`,
       }));
 
+      // 4d. シナリオを StrategyDSL に落とし即時 BT（Phase 6.7b、Devil's Advocate より前）
+      let strategyBacktest: StrategyBacktesterRunResult | undefined;
+      if (scenariosWithId.length > 0) {
+        const tBt = Date.now();
+        try {
+          strategyBacktest = await this.strategyBacktester.run(scenariosWithId, {
+            symbol,
+            timeframe: '15m',
+          });
+          console.log(
+            `[Orchestrator] 戦略BT 完了: ${String(Date.now() - tBt)}ms, overallPassed=${String(
+              strategyBacktest.overallPassed,
+            )}, scenarios=${String(scenariosWithId.length)}`,
+          );
+        } catch (btErr) {
+          console.warn('[Orchestrator] 戦略BT 全体失敗（DevilsAdvocate へ続行）:', btErr);
+        }
+      }
+
       // 5. Devil's Advocate で各シナリオをレビュー（Phase 2）
       //    abandon 判定なら confidence を 20 に抑え、warnings に追加する。
       //    代替戦略は提案させない（反証専任）。
@@ -469,7 +505,7 @@ export class AIOrchestrator {
 
       return {
         success: true,
-        data: saved,
+        data: { ...saved, strategyBacktest },
         cached: false,
         tokenUsage:
           researchTokens +
@@ -498,7 +534,7 @@ export class AIOrchestrator {
   }): Promise<{
     success: boolean;
     research?: MarketResearchWithTypes;
-    plan?: AITradePlanWithTypes;
+    plan?: AITradePlanWithOptionalBacktest;
     error?: string;
     totalTokenUsage: number;
     researchCached: boolean;

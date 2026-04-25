@@ -17,10 +17,12 @@ import { backtestService as defaultBacktestService, type BacktestService } from 
 import { createDefaultPythonBridge, type PythonBridge } from '../python_bridge';
 import { VALIDATION_THRESHOLDS } from '../../config/validationThresholds';
 import type {
+    HypothesisValidationInput,
     ValidationTool,
     ValidationToolInput,
     ValidationToolResult,
 } from './types';
+import { isStrategyValidationInput } from './types';
 
 // ===========================================
 // Python 出力の契約
@@ -68,11 +70,7 @@ export interface WalkForwardToolConfig {
 export class WalkForwardTool implements ValidationTool {
     readonly name = 'walk_forward';
     readonly implementation = 'python_bridge' as const;
-    readonly requiredInputs: (keyof ValidationToolInput)[] = [
-        'hypothesis',
-        'backtestRunId',
-        'period',
-    ];
+    readonly requiredInputs: readonly string[] = ['kind', 'hypothesis', 'backtestRunId', 'period'];
 
     private readonly splitCount: number;
     private readonly maxOverfitScore: number;
@@ -93,8 +91,22 @@ export class WalkForwardTool implements ValidationTool {
     }
 
     async execute(input: ValidationToolInput): Promise<ValidationToolResult> {
-        const start = Date.now();
+        if (isStrategyValidationInput(input)) {
+            return this.runWalkForwardOnEvents(
+                input.dslResult.events
+                    .filter((e) => typeof e.pnl === 'number' && Number.isFinite(e.pnl))
+                    .map((e) => ({ entryTime: e.entryTime, pnl: e.pnl as number })),
+                input.period,
+                Date.now(),
+            );
+        }
+        return this.executeHypothesis(input, Date.now());
+    }
 
+    private async executeHypothesis(
+        input: HypothesisValidationInput,
+        start: number,
+    ): Promise<ValidationToolResult> {
         if (!input.backtestRunId) {
             return this.fail('backtestRunId が未指定（Phase 4b screening 結果が必要）', start);
         }
@@ -114,6 +126,15 @@ export class WalkForwardTool implements ValidationTool {
             .filter((e) => typeof e.pnl === 'number' && Number.isFinite(e.pnl))
             .map((e) => ({ entryTime: e.entryTime, pnl: e.pnl as number }));
 
+        return this.runWalkForwardOnEvents(events, input.period, start);
+    }
+
+    private async runWalkForwardOnEvents(
+        events: Array<{ entryTime: string; pnl: number }>,
+        period: { start: string; end: string },
+        start: number,
+    ): Promise<ValidationToolResult> {
+
         if (events.length < this.minTradeCount) {
             return {
                 toolName: this.name,
@@ -130,7 +151,7 @@ export class WalkForwardTool implements ValidationTool {
             scriptPath: this.scriptPath,
             input: {
                 events,
-                period: input.period,
+                period,
                 splitCount: this.splitCount,
             },
             timeoutMs: this.timeoutMs,

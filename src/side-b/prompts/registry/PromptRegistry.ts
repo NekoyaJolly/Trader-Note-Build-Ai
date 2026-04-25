@@ -19,7 +19,12 @@ import type {
   RegisterPromptInput,
   RecordUsageInput,
 } from './types';
-import { expandMacros, GLOBAL_AGENT_NAME, type PromptMacros } from '../loader';
+import {
+  expandMacros,
+  GLOBAL_AGENT_NAME,
+  SPECIALIST_COMMON_AGENT_NAME,
+  type PromptMacros,
+} from '../loader';
 
 /**
  * Phase 6.7a: グローバルルール専用の特殊 agentName (`__global__`)。
@@ -29,7 +34,7 @@ import { expandMacros, GLOBAL_AGENT_NAME, type PromptMacros } from '../loader';
  * - PromptMutationAgent / MetaEvolutionAgent は本定数で変異・再編成対象から除外する
  * - seed.ts が initial を投入
  */
-export { GLOBAL_AGENT_NAME };
+export { GLOBAL_AGENT_NAME, SPECIALIST_COMMON_AGENT_NAME };
 
 /**
  * 既定の Prisma シングルトン(テストで差し替え可)。
@@ -167,6 +172,59 @@ export class PromptRegistry {
     }
     const globalExpanded = expandMacros(globalPrompt.content, macros);
     return `${globalExpanded}\n\n${localExpanded}`;
+  }
+
+  /**
+   * Registry 上の `__global__` active と、手元の local 本文（variant で選ばれた
+   * `PromptVersion.content` 等）を `getCompositeActive` と同じルールで合成する。
+   * ファイル `__global__.md` ではなく **DB のグローバル**を正とする（6.7a 完了形）。
+   */
+  async composeGlobalWithContent(
+    localContent: string,
+    macros?: PromptMacros,
+  ): Promise<string> {
+    const globalPrompt = await this.getActive(GLOBAL_AGENT_NAME);
+    const localExpanded = expandMacros(localContent, macros);
+    if (!globalPrompt) {
+      console.warn(
+        `[PromptRegistry] ${GLOBAL_AGENT_NAME} active が存在しません。local のみ返します(composeGlobalWithContent)`,
+      );
+      return localExpanded;
+    }
+    const globalExpanded = expandMacros(globalPrompt.content, macros);
+    return `${globalExpanded}\n\n${localExpanded}`;
+  }
+
+  /**
+   * Phase 6.7c: 専門家3本向けに
+   * `__global__` active + `__specialist_common__` active + variant/local content
+   * を合成する。`__specialist_common__` 未投入時は警告のみで継続する。
+   */
+  async composeSpecialistWithGlobalAndCommon(
+    localContent: string,
+    macros?: PromptMacros,
+  ): Promise<string> {
+    const [globalPrompt, commonPrompt] = await Promise.all([
+      this.getActive(GLOBAL_AGENT_NAME),
+      this.getActive(SPECIALIST_COMMON_AGENT_NAME),
+    ]);
+    const parts: string[] = [];
+    if (globalPrompt) {
+      parts.push(expandMacros(globalPrompt.content, macros));
+    } else {
+      console.warn(
+        `[PromptRegistry] ${GLOBAL_AGENT_NAME} active が存在しません。専門家 local は継続します`,
+      );
+    }
+    if (commonPrompt) {
+      parts.push(expandMacros(commonPrompt.content, macros));
+    } else {
+      console.warn(
+        `[PromptRegistry] ${SPECIALIST_COMMON_AGENT_NAME} active が存在しません。専門家 common なしで継続します`,
+      );
+    }
+    parts.push(expandMacros(localContent, macros));
+    return parts.join('\n\n');
   }
 
   /** エージェントの experimental プロンプト一覧。 */

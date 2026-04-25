@@ -2,15 +2,15 @@
  * MarketIngestService のテスト
  * 対象: 15m/60m の丸め処理と upsert 冪等性
  * ルール: コメントは日本語、DB スナップショットの状態を直接確認
- * 
- * 注意: このテストは市場データAPIを使用するため、
- * MARKET_API_KEY が未設定の場合はスキップされます
+ *
+ * 市場データは **cTrader のみ**（Twelve Data 廃止）。CTRADER_CLIENT_* と DB の OAuth トークンが揃う場合のみ実行。
  */
+import { PrismaClient } from '@prisma/client';
 import { MarketIngestService } from '../../backend/services/ingest/marketIngestService';
 import { MarketSnapshotRepository } from '../../backend/repositories/marketSnapshotRepository';
-import { checkRequiredSecrets, isMinimalTestMode } from './helpers/secret-checker';
+import { CTraderAuthService } from '../../backend/services/ctrader/ctraderAuthService';
+import { hasCtraderCredentials, isMinimalTestMode } from './helpers/secret-checker';
 
-// 分単位の丸めチェックを行うヘルパー
 function isValidBucket(date: Date, timeframe: '15m' | '60m'): boolean {
   const minutes = date.getUTCMinutes();
   const seconds = date.getUTCSeconds();
@@ -21,38 +21,46 @@ function isValidBucket(date: Date, timeframe: '15m' | '60m'): boolean {
   return minutes % 15 === 0 && seconds === 0 && ms === 0;
 }
 
-const secrets = checkRequiredSecrets();
 const minimalMode = isMinimalTestMode();
-
-// MARKET_API_KEY が設定されている場合のみテストを実行
-const describeOrSkip = secrets.hasMarketApiKey ? describe : describe.skip;
-
-function isTwelveDataRateLimitError(error: Error | { message?: string } | null | undefined): boolean {
-  const message = error instanceof Error ? error.message : (error?.message ?? '');
-  return message.includes('run out of API credits') || message.includes('current limit');
-}
+const describeOrSkip = hasCtraderCredentials() ? describe : describe.skip;
 
 describeOrSkip('MarketIngestService', () => {
+  const prisma = new PrismaClient();
   const service = new MarketIngestService();
   const repo = new MarketSnapshotRepository();
-  const symbol = 'BTCUSDT';
+  /** cTrader 口座で取引可能な名前に合わせる。上書き: MARKET_INGEST_TEST_SYMBOL */
+  const symbol = process.env.MARKET_INGEST_TEST_SYMBOL?.trim() || 'XAUUSD';
 
-  // 最小限モードでは外部API呼び出しテストをスキップ（レートリミット回避）
+  let ready = false;
+
+  beforeAll(async () => {
+    if (!hasCtraderCredentials()) {
+      return;
+    }
+    const token = await prisma.cTraderToken.findFirst({
+      orderBy: { lastConnectedAt: 'desc' },
+    });
+    if (!token) {
+      console.warn('⚠️ cTrader OAuth トークンが DB にないため MarketIngest テストをスキップ');
+      return;
+    }
+    const auth = new CTraderAuthService(prisma);
+    service.setTestCTraderConnection(token.accountId, auth);
+    ready = true;
+  });
+
+  afterAll(async () => {
+    await prisma.$disconnect();
+  });
+
   const apiTestOrSkip = minimalMode ? test.skip : test;
 
   apiTestOrSkip('15m/60m の丸めが正しく保存される', async () => {
-    // 1回の ingest で 15m と 60m が保存される
-    try {
-      await service.ingestSymbol(symbol);
-    } catch (error) {
-      const caught = error as Error | { message?: string } | null | undefined;
-      // Twelve Data の分単位レート制限時は環境依存のためスキップ扱い
-      if (isTwelveDataRateLimitError(caught)) {
-        console.warn('⚠️ Twelve Data レート制限のためテストをスキップ');
-        return;
-      }
-      throw caught;
+    if (!ready) {
+      console.warn('⚠️ セットアップ不足のためスキップ');
+      return;
     }
+    await service.ingestSymbol(symbol);
 
     const latest15 = await repo.findLatest(symbol, '15m');
     const latest60 = await repo.findLatest(symbol, '60m');
@@ -60,38 +68,26 @@ describeOrSkip('MarketIngestService', () => {
     expect(latest15).toBeTruthy();
     expect(latest60).toBeTruthy();
 
-    // fetchedAt が時間足の開始時刻に丸められていること
     expect(isValidBucket(latest15!.fetchedAt, '15m')).toBe(true);
     expect(isValidBucket(latest60!.fetchedAt, '60m')).toBe(true);
   });
 
-  // 拡張テスト: フルテストモードのみ実行（追加のAPI呼び出し）
   const testOrSkip = minimalMode ? test.skip : test;
 
   testOrSkip('upsert の冪等性: 同一バケットで重複挿入されない', async () => {
-    // 同一時間足内に 2 回呼び出しても件数が増えない（15m/60m 各1件のまま）
-    try {
-      await service.ingestSymbol(symbol);
-      await service.ingestSymbol(symbol);
-    } catch (error) {
-      const caught = error as Error | { message?: string } | null | undefined;
-      // Twelve Data の分単位レート制限時は環境依存のためスキップ扱い
-      if (isTwelveDataRateLimitError(caught)) {
-        console.warn('⚠️ Twelve Data レート制限のためテストをスキップ');
-        return;
-      }
-      throw caught;
+    if (!ready) {
+      console.warn('⚠️ セットアップ不足のためスキップ');
+      return;
     }
+    await service.ingestSymbol(symbol);
+    await service.ingestSymbol(symbol);
 
-    // 最新のみ確認ではなく、総件数で冪等性を確認したいが、
-    // ここでは findLatest が更新されること、件数増加を起こさない運用を前提とする
     const latest15 = await repo.findLatest(symbol, '15m');
     const latest60 = await repo.findLatest(symbol, '60m');
 
     expect(latest15).toBeTruthy();
     expect(latest60).toBeTruthy();
 
-    // fetchedAt が時間足開始時刻であることを再確認（重複登録が起きていない前提）
     expect(isValidBucket(latest15!.fetchedAt, '15m')).toBe(true);
     expect(isValidBucket(latest60!.fetchedAt, '60m')).toBe(true);
   });

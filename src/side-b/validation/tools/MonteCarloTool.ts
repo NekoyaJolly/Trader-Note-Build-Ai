@@ -15,10 +15,12 @@
 import { backtestService as defaultBacktestService, type BacktestService } from '../../../services/backtestService';
 import { VALIDATION_THRESHOLDS } from '../../config/validationThresholds';
 import type {
+    HypothesisValidationInput,
     ValidationTool,
     ValidationToolInput,
     ValidationToolResult,
 } from './types';
+import { isStrategyValidationInput } from './types';
 
 // ===========================================
 // 確率的ユーティリティ（DI 可能）
@@ -88,7 +90,7 @@ export interface MonteCarloToolConfig {
 export class MonteCarloTool implements ValidationTool {
     readonly name = 'monte_carlo';
     readonly implementation = 'native_ts' as const;
-    readonly requiredInputs: (keyof ValidationToolInput)[] = ['hypothesis', 'backtestRunId'];
+    readonly requiredInputs: readonly string[] = ['kind', 'hypothesis', 'backtestRunId'];
 
     private readonly rng: RandomSource;
     private readonly simulationCount: number;
@@ -106,8 +108,17 @@ export class MonteCarloTool implements ValidationTool {
     }
 
     async execute(input: ValidationToolInput): Promise<ValidationToolResult> {
-        const start = Date.now();
+        if (isStrategyValidationInput(input)) {
+            return this.executeStrategy(input, Date.now());
+        }
+        return this.executeHypothesis(input, Date.now());
+    }
 
+    /** Phase 4c: Side-A runId 経由 */
+    private async executeHypothesis(
+        input: HypothesisValidationInput,
+        start: number,
+    ): Promise<ValidationToolResult> {
         if (!input.backtestRunId) {
             return this.fail('backtestRunId が未指定（Phase 4b screening 結果が必要）', start);
         }
@@ -126,6 +137,19 @@ export class MonteCarloTool implements ValidationTool {
             .map((e) => e.pnl)
             .filter((p): p is number => typeof p === 'number' && Number.isFinite(p));
 
+        return this.runMonteFromPnls(pnls, start);
+    }
+
+    /** Phase 6.7b: DSLBacktestResult の PnL 列を直参照 */
+    private async executeStrategy(
+        input: import('./types').StrategyValidationInput,
+        start: number,
+    ): Promise<ValidationToolResult> {
+        const pnls = input.dslResult.pnls.filter((p) => Number.isFinite(p));
+        return this.runMonteFromPnls(pnls, start);
+    }
+
+    private runMonteFromPnls(pnls: number[], start: number): ValidationToolResult {
         if (pnls.length < this.minTradeCount) {
             return {
                 toolName: this.name,
@@ -182,7 +206,7 @@ export class MonteCarloTool implements ValidationTool {
     }
 
     async isAvailable(): Promise<boolean> {
-        return true; // TS 自前実装のため常に利用可能
+        return true;
     }
 
     private fail(reason: string, start: number): ValidationToolResult {

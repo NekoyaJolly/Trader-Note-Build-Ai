@@ -120,6 +120,7 @@ describe('shuffle', () => {
 
 describe('MonteCarloTool.execute', () => {
     const input = {
+        kind: 'hypothesis' as const,
         hypothesis: makeHypothesis(),
         tradeNoteId: 'note-1',
         period: { start: '2025-01-01', end: '2025-12-31' },
@@ -200,5 +201,34 @@ describe('MonteCarloTool.execute', () => {
         expect(typeof res.metrics.p5FinalPnl).toBe('number');
         expect(typeof res.metrics.p95FinalPnl).toBe('number');
         expect(typeof res.metrics.medianMaxDrawdown).toBe('number');
+    });
+
+    it('kind=strategy なら dslResult.pnls を直接使う', async () => {
+        const pnls30 = Array.from({ length: 30 }, () => 2);
+        const backtest = { getResult: jest.fn() };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const tool = new MonteCarloTool(backtest as any, {
+            rng: makeSeededRng(3),
+            simulationCount: 50,
+        });
+        const res = await tool.execute({
+            kind: 'strategy',
+            strategy: {} as import('../../strategy_dsl/schema').StrategyDSL,
+            period: { start: '2025-01-01', end: '2025-12-31' },
+            dslResult: {
+                dslId: 'd1',
+                period: { start: '2025-01-01', end: '2025-12-31' },
+                pnls: pnls30,
+                events: [],
+                finalReturn: 0.1,
+                overfitScore: 0.1,
+                trainPf: 1.2,
+                validationPf: 1.1,
+                optimizedParams: {},
+            },
+        });
+        expect(backtest.getResult).not.toHaveBeenCalled();
+        expect(res.success).toBe(true);
+        expect(res.metrics.tradeCount).toBe(30);
     });
 });

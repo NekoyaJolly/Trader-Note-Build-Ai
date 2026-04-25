@@ -1,38 +1,34 @@
 /**
  * OHLCVデータ取得・キャッシュサービス
- * 
+ *
  * 目的:
- * - cTrader API（優先）またはTwelve Data APIからOHLCVデータを取得
+ * - **cTrader Open API のみ**（ブローカーと同一の価格・足区切りを正とする）
  * - cTrader APIの時間範囲制限に対応した分割リクエスト
  * - 取得データをDBに永続化（upsert）
  * - 進捗コールバック対応（SSE配信用）
- * 
- * 優先順位:
- * 1. cTrader API（無料、自分のアカウント）
- * 2. Twelve Data API（無料枠制限あり）
  */
 
 import { PrismaClient } from '@prisma/client';
-import { MarketDataService } from '../../services/marketDataService';
 import { CTraderDataService } from './ctrader/ctraderDataService';
 import { CTraderAuthService } from './ctrader/ctraderAuthService';
-import { config } from '../../config';
-import { parseTwelveDataTimeSeries } from '../../schemas/external/twelveData';
 
 const prisma = new PrismaClient();
-const marketDataService = new MarketDataService();
 const ctraderAuthService = new CTraderAuthService(prisma);
 const ctraderDataService = new CTraderDataService(ctraderAuthService);
 
-// Twelve Data Rate Limit: 8リクエスト/分 = 最低7.5秒間隔
-const MIN_REQUEST_INTERVAL_MS = 8000;
-let lastApiRequestTime = 0;
+/**
+ * 期間外データを cTrader から補完取得できるか
+ *（バックテスト・DSL 検証で、キャッシュ未充足時に API を呼ぶ判断に使う）
+ */
+export function isOhlcvRemoteFetchAvailable(): boolean {
+  return ctraderDataService.isConfigured();
+}
 
 // ========================================
 // 定数
 // ========================================
 
-/** cTrader / Twelve Data の1リクエスト最大本数（上限） */
+/** cTrader 1リクエスト最大本数（上限） */
 const MAX_BARS_PER_REQUEST = 5000;
 
 // ========================================
@@ -43,7 +39,7 @@ export interface FetchAndCacheResult {
     success: boolean;
     cachedCount: number;
     error?: string;
-    source?: 'ctrader' | 'twelvedata';
+    source?: 'ctrader';
     details?: {
         symbol: string;
         timeframe: string;
@@ -88,21 +84,6 @@ const CTRADER_MAX_TIMESPAN_MS: Record<string, number> = {
 };
 
 // ========================================
-// Rate Limit
-// ========================================
-
-async function waitForRateLimit(): Promise<void> {
-    const now = Date.now();
-    const elapsed = now - lastApiRequestTime;
-    if (elapsed < MIN_REQUEST_INTERVAL_MS) {
-        const waitTime = MIN_REQUEST_INTERVAL_MS - elapsed;
-        console.log(`[fetchAndCacheOhlcv] Twelve Data Rate Limit待機: ${waitTime}ms`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
-    }
-    lastApiRequestTime = Date.now();
-}
-
-// ========================================
 // 分割ユーティリティ
 // ========================================
 
@@ -131,45 +112,13 @@ function splitDateRange(startDate: Date, endDate: Date, maxTimespanMs: number): 
     return chunks;
 }
 
-/**
- * Twelve Data の interval へ変換（必要最小限）
- *
- * 注意: Twelve Data は '15m' ではなく '15min' 形式。
- */
-function toTwelveDataInterval(timeframe: string): string {
-    const map: Record<string, string> = {
-        '1m': '1min',
-        '5m': '5min',
-        '15m': '15min',
-        '30m': '30min',
-        '1h': '1h',
-        '4h': '4h',
-        '1d': '1day',
-        '1w': '1week',
-    };
-    return map[timeframe] || timeframe;
-}
-
-/**
- * Twelve Data の start_date/end_date 用の文字列（UTC）
- * Twelve Data は 'YYYY-MM-DD' または 'YYYY-MM-DD HH:mm:ss' を許容する想定。
- */
-function formatUtcForTwelveData(dt: Date): string {
-    // 例: 2026-02-15 00:00:00
-    const iso = dt.toISOString();
-    return iso.replace('T', ' ').replace('Z', '').slice(0, 19);
-}
-
 // ========================================
 // メイン関数
 // ========================================
 
 /**
- * OHLCVデータをAPIから取得してDBにキャッシュ
- * 
- * 1. cTrader API で取得（分割対応）
- * 2. cTrader失敗時 → Twelve Data API にフォールバック
- * 
+ * OHLCVデータを cTrader API から取得してDBにキャッシュ
+ *
  * @param symbol - シンボル（例: 'XAUUSD'）
  * @param timeframe - 時間足（例: '1h'）
  * @param startDate - 取得開始日
@@ -184,31 +133,25 @@ export async function fetchAndCacheOhlcv(
     onProgress?: OnProgressCallback
 ): Promise<FetchAndCacheResult> {
     try {
-        // 1. cTrader API で取得を試みる
-        if (ctraderDataService.isConfigured()) {
-            const ctraderResult = await fetchFromCTrader(symbol, timeframe, startDate, endDate, onProgress);
-            if (ctraderResult.success) {
-                await updateDataPresetMetadata(symbol, timeframe);
-                return ctraderResult;
-            }
-            console.warn(`[fetchAndCacheOhlcv] cTrader取得失敗、Twelve Dataにフォールバック: ${ctraderResult.error}`);
+        if (!ctraderDataService.isConfigured()) {
+            return {
+                success: false,
+                cachedCount: 0,
+                error: 'cTrader API が未設定です。.env の CTRADER_CLIENT_ID / CTRADER_CLIENT_SECRET を確認してください。',
+            };
         }
 
-        // 2. Twelve Data API にフォールバック
-        if (marketDataService.isApiConfigured()) {
-            const twelveResult = await fetchFromTwelveData(symbol, timeframe, startDate, endDate, onProgress);
-            if (twelveResult.success) {
-                await updateDataPresetMetadata(symbol, timeframe);
-            }
-            return twelveResult;
+        const ctraderResult = await fetchFromCTrader(symbol, timeframe, startDate, endDate, onProgress);
+        if (ctraderResult.success) {
+            await updateDataPresetMetadata(symbol, timeframe);
+            return ctraderResult;
         }
 
         return {
             success: false,
             cachedCount: 0,
-            error: 'データ取得APIが設定されていません。cTrader接続またはTwelve Data APIキーを設定してください。',
+            error: ctraderResult.error ?? 'cTrader から OHLCV を取得できませんでした（接続・トークン・シンボル名を確認）',
         };
-
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : '不明なエラー';
         console.error(`[fetchAndCacheOhlcv] エラー:`, error);
@@ -376,188 +319,6 @@ async function fetchFromCTrader(
     } catch (error) {
         const msg = error instanceof Error ? error.message : '不明なエラー';
         return { success: false, cachedCount: 0, error: `cTrader エラー: ${msg}` };
-    }
-}
-
-// ========================================
-// Twelve Data API フォールバック
-// ========================================
-
-async function fetchFromTwelveData(
-    symbol: string,
-    timeframe: string,
-    startDate: Date,
-    endDate: Date,
-    onProgress?: OnProgressCallback
-): Promise<FetchAndCacheResult> {
-    try {
-        const intervalMinutes = getIntervalMinutes(timeframe);
-        const diffMs = endDate.getTime() - startDate.getTime();
-        const expectedCandles = Math.ceil(diffMs / (intervalMinutes * 60 * 1000));
-
-        onProgress?.({
-            current: 0,
-            total: 1,
-            message: `Twelve Data API: ${symbol}/${timeframe} 取得中...`,
-            source: 'twelvedata',
-            percent: 10,
-        });
-
-        // Twelve Data は5000件上限のため、必要に応じて分割
-        const MAX_BARS = MAX_BARS_PER_REQUEST;
-        const allData: Array<{
-            timestamp: Date; open: number; high: number;
-            low: number; close: number; volume: number;
-        }> = [];
-
-        if (!config.market.apiUrl || !config.market.apiKey) {
-            return { success: false, cachedCount: 0, error: 'Twelve Data: API設定が不完全です（API_URL / MARKET_API_KEY）' };
-        }
-
-        const interval = toTwelveDataInterval(timeframe);
-        const normalizedSymbol = symbol.includes('/') ? symbol : symbol;
-
-        const fetchChunk = async (chunkStart: Date, chunkEnd: Date, outputsize: number): Promise<void> => {
-            await waitForRateLimit();
-
-            const url = new URL(`${config.market.apiUrl}/time_series`);
-            url.searchParams.set('symbol', normalizedSymbol);
-            url.searchParams.set('interval', interval);
-            url.searchParams.set('outputsize', String(outputsize));
-            url.searchParams.set('start_date', formatUtcForTwelveData(chunkStart));
-            url.searchParams.set('end_date', formatUtcForTwelveData(chunkEnd));
-            url.searchParams.set('apikey', config.market.apiKey);
-
-            const response = await fetch(url.toString());
-            if (!response.ok) {
-                throw new Error(`Twelve Data API レスポンスエラー: ${response.status}`);
-            }
-
-            const json = await response.json();
-            const parsed = parseTwelveDataTimeSeries(json);
-            const values = parsed.values;
-
-            // values は新しい→古い のことがあるため、timestampで整列して扱う
-            const filtered = values
-                .map((bar) => ({
-                    timestamp: new Date(bar.datetime),
-                    open: bar.open,
-                    high: bar.high,
-                    low: bar.low,
-                    close: bar.close,
-                    volume: bar.volume ?? 0,
-                }))
-                .filter((bar) => bar.timestamp >= chunkStart && bar.timestamp <= chunkEnd)
-                .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-
-            allData.push(...filtered);
-        };
-
-        if (expectedCandles > MAX_BARS) {
-            // 5000本上限から逆算して、期間を分割（等分割ではなく「本数上限」を優先）
-            const maxChunkMsByBars = Math.floor(MAX_BARS * intervalMinutes * 60 * 1000 * 0.98);
-            const chunks = splitDateRange(startDate, endDate, maxChunkMsByBars);
-
-            for (let i = 0; i < chunks.length; i++) {
-
-                onProgress?.({
-                    current: i,
-                    total: chunks.length,
-                    message: `Twelve Data API: チャンク ${i + 1}/${chunks.length} 取得中...`,
-                    source: 'twelvedata',
-                    percent: Math.round((i / chunks.length) * 80) + 10,
-                });
-
-                const chunkStart = chunks[i].start;
-                const chunkEnd = chunks[i].end;
-                await fetchChunk(chunkStart, chunkEnd, MAX_BARS);
-            }
-        } else {
-            onProgress?.({
-                current: 0,
-                total: 1,
-                message: `Twelve Data API: 期間指定で取得中...`,
-                source: 'twelvedata',
-                percent: 30,
-            });
-            await fetchChunk(startDate, endDate, Math.min(expectedCandles + 50, MAX_BARS));
-        }
-
-        if (allData.length === 0) {
-            return {
-                success: false,
-                cachedCount: 0,
-                error: `Twelve Data: ${symbol}/${timeframe} のデータが取得できませんでした`,
-            };
-        }
-
-        onProgress?.({
-            current: 1,
-            total: 1,
-            message: `DBに保存中... (${allData.length}件)`,
-            source: 'twelvedata',
-            percent: 90,
-        });
-
-        const cachedCount = await batchUpsertOhlcv(symbol, timeframe, allData);
-
-        // 保存検証: DBから実データを取得できるか確認
-        const minTs = allData.reduce((a, d) => (d.timestamp < a ? d.timestamp : a), allData[0].timestamp);
-        const maxTs = allData.reduce((a, d) => (d.timestamp > a ? d.timestamp : a), allData[0].timestamp);
-        const verification = await verifyOhlcvSaved(symbol, timeframe, cachedCount, minTs, maxTs);
-        if (!verification.verified) {
-            return {
-                success: false,
-                cachedCount: 0,
-                error: `Twelve Data: 保存後の検証失敗（取得${verification.fetchedCount}件）`,
-            };
-        }
-
-        onProgress?.({
-            current: 1,
-            total: 1,
-            message: `完了: ${cachedCount}件キャッシュ`,
-            source: 'twelvedata',
-            percent: 100,
-        });
-
-        return {
-            success: true,
-            cachedCount,
-            source: 'twelvedata',
-            details: {
-                symbol,
-                timeframe,
-                startDate: startDate.toISOString(),
-                endDate: endDate.toISOString(),
-                fetchedCount: allData.length,
-                chunks: 1,
-            },
-        };
-
-    } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : '不明なエラー';
-
-        if (errorMessage.includes('429') || errorMessage.includes('rate limit')) {
-            return {
-                success: false,
-                cachedCount: 0,
-                error: 'Twelve Data: API Rate Limitに達しました。しばらく待ってから再試行してください。',
-            };
-        }
-        if (errorMessage.includes('401') || errorMessage.includes('403')) {
-            return {
-                success: false,
-                cachedCount: 0,
-                error: 'Twelve Data: APIキーが無効または期限切れです。',
-            };
-        }
-
-        return {
-            success: false,
-            cachedCount: 0,
-            error: `Twelve Data エラー: ${errorMessage}`,
-        };
     }
 }
 

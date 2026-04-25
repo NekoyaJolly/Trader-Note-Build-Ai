@@ -12,6 +12,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { sideBApi, SideBApiError } from "@/lib/sideBApi";
+import { StrategyBacktestSummary } from "@/components/side-b/StrategyBacktestSummary";
+import type { GeneratePlanResponse } from "@/types/sideB";
 
 // ===== 型定義 =====
 
@@ -207,6 +210,12 @@ export default function TradesPage() {
   const [activeTab, setActiveTab] = useState<"open" | "history">("open");
   const [closingTradeId, setClosingTradeId] = useState<string | null>(null);
   const [closePrice, setClosePrice] = useState<string>("");
+  // 即時BT付きプラン試行（Phase 6.7b 表示用）
+  const [planTestSymbol, setPlanTestSymbol] = useState("XAUUSD");
+  const [planTestForce, setPlanTestForce] = useState(true);
+  const [planTestLoading, setPlanTestLoading] = useState(false);
+  const [planTestError, setPlanTestError] = useState<string | null>(null);
+  const [lastPlanResult, setLastPlanResult] = useState<GeneratePlanResponse | null>(null);
 
   // データ取得
   const loadData = useCallback(async () => {
@@ -255,6 +264,31 @@ export default function TradesPage() {
       await loadData();
     } catch (err) {
       alert(err instanceof Error ? err.message : "キャンセルに失敗しました");
+    }
+  };
+
+  // 直近のプラン生成＋即時BT（仮想トレード用リサーチと同系統の導線）
+  const runPlanWithBacktest = async () => {
+    setPlanTestLoading(true);
+    setPlanTestError(null);
+    try {
+      const res = await sideBApi.generatePlan({
+        symbol: planTestSymbol.trim() || "XAUUSD",
+        forceRefresh: planTestForce,
+        timeframe: "15m",
+      });
+      setLastPlanResult(res);
+    } catch (e) {
+      setLastPlanResult(null);
+      setPlanTestError(
+        e instanceof SideBApiError
+          ? e.message
+          : e instanceof Error
+            ? e.message
+            : "プラン生成に失敗しました",
+      );
+    } finally {
+      setPlanTestLoading(false);
     }
   };
 
@@ -311,6 +345,70 @@ export default function TradesPage() {
             <p className="text-red-400 text-sm">{error}</p>
           </div>
         )}
+
+        <section
+          className="mb-6 sm:mb-8 card-surface rounded-xl p-4 sm:p-5 border border-slate-700/50"
+          aria-labelledby="plan-bt-heading"
+        >
+          <h2 id="plan-bt-heading" className="text-sm font-semibold text-white flex items-center gap-2 mb-1">
+            <span aria-hidden>📈</span>
+            即時BT付きプラン（試行）
+          </h2>
+          <p className="text-xs text-slate-500 mb-3">
+            POST /api/side-b/plans。プラン行は従来どおり DB に保存され、
+            <code className="text-cyan-400/90 mx-0.5">strategyBacktest</code>
+           （DSL 即時BTの要約）は本レスポンス内のみ同梱され、GET で取得したプラン JSON には含まれません。
+          </p>
+          <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:items-center mb-3">
+            <label className="text-xs text-slate-400 flex items-center gap-2">
+              シンボル
+              <input
+                type="text"
+                value={planTestSymbol}
+                onChange={(e) => setPlanTestSymbol(e.target.value)}
+                className="px-2 py-1 rounded bg-slate-800 border border-slate-600 text-white text-sm w-32 font-mono"
+                placeholder="XAUUSD"
+              />
+            </label>
+            <label className="text-xs text-slate-400 flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={planTestForce}
+                onChange={(e) => setPlanTestForce(e.target.checked)}
+                className="rounded border-slate-600"
+              />
+              同日キャッシュを上書き（即時BTを取りに行く推奨）
+            </label>
+            <button
+              type="button"
+              onClick={runPlanWithBacktest}
+              disabled={planTestLoading}
+              className="px-4 py-2 rounded-lg text-sm font-medium bg-gradient-to-r from-violet-600 to-cyan-600 text-white disabled:opacity-50"
+            >
+              {planTestLoading ? "生成中…" : "プラン＋即時BTを取得"}
+            </button>
+          </div>
+          {planTestError && (
+            <p className="text-xs text-rose-400 mb-2">{planTestError}</p>
+          )}
+          {lastPlanResult && (
+            <div className="mt-2 pt-2 border-t border-slate-700/50 text-xs text-slate-400 space-y-1">
+              <p>
+                プランID: <span className="text-slate-200 font-mono">{lastPlanResult.plan.id}</span>{" "}
+                / 信頼度: {String(lastPlanResult.plan.overallConfidence)} /{" "}
+                {lastPlanResult.cached ? "キャッシュ" : "新規生成"}{" "}
+                {typeof lastPlanResult.tokenUsage === "number" ? ` / tokens ${lastPlanResult.tokenUsage}` : ""}
+              </p>
+              <div className="mt-2">
+                <p className="text-slate-500 mb-1">即時BT（3ツール併用）</p>
+                <StrategyBacktestSummary
+                  backtest={lastPlanResult.plan.strategyBacktest}
+                  fromCachedPlan={!!lastPlanResult.cached}
+                />
+              </div>
+            </div>
+          )}
+        </section>
 
         {/* ポートフォリオサマリー */}
         {portfolio && (

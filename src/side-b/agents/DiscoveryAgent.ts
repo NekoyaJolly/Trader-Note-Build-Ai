@@ -57,6 +57,12 @@ export interface WeeklyDiscoveryReport {
 
     /** 新規登録された仮説（既存と重複しなかったもの） */
     newHypotheses: EdgeHypothesis[];
+    /** Phase 6.7c: HG が読む週次探索ヒント */
+    hintsForHG: Array<{
+        promisingDirection: string;
+        lensFocusAreas: string[];
+        rationale: string;
+    }>;
     /** Phase 4b で promotion 対象として推薦 */
     promotionCandidates: string[];
     /** stale 推薦 */
@@ -72,8 +78,11 @@ export interface WeeklyDiscoveryReport {
 
 interface DiscoveryLLMOutput {
     interpretations: Array<{
-        lensName: string;
-        featureKey: string;
+        lensName?: string;
+        featureKey?: string;
+        lensCombination?: string[];
+        winRateDelta?: number;
+        sampleSize?: number;
         interpretation: string;
     }>;
     newHypotheses: Array<{
@@ -83,6 +92,11 @@ interface DiscoveryLLMOutput {
         reasoning: string;
         conditions: MachineReadableCondition[];
         lensRelevance?: Record<string, number>;
+    }>;
+    hintsForHG: Array<{
+        promisingDirection: string;
+        lensFocusAreas: string[];
+        rationale: string;
     }>;
     weeklyNote: string;
 }
@@ -105,25 +119,24 @@ export function validateDiscoveryOutput(
     }
     const interpretations = (obj.interpretations as unknown[]).map((raw, i) => {
         const r = raw as Record<string, unknown>;
-        if (
-            typeof r.lensName !== 'string' ||
-            typeof r.featureKey !== 'string' ||
-            typeof r.interpretation !== 'string'
-        ) {
+        if (typeof r.interpretation !== 'string') {
             throw new Error(`interpretations[${i}]: missing fields`);
         }
+        const lensCombination = Array.isArray(r.lensCombination)
+            ? r.lensCombination.filter((v): v is string => typeof v === 'string')
+            : undefined;
         return {
-            lensName: r.lensName,
-            featureKey: r.featureKey,
+            ...(typeof r.lensName === 'string' ? { lensName: r.lensName } : {}),
+            ...(typeof r.featureKey === 'string' ? { featureKey: r.featureKey } : {}),
+            ...(lensCombination && lensCombination.length > 0 ? { lensCombination } : {}),
+            ...(typeof r.winRateDelta === 'number' ? { winRateDelta: r.winRateDelta } : {}),
+            ...(typeof r.sampleSize === 'number' ? { sampleSize: r.sampleSize } : {}),
             interpretation: r.interpretation,
         };
     });
 
-    if (!Array.isArray(obj.newHypotheses)) {
-        throw new Error('newHypotheses must be an array');
-    }
-
-    const newHypotheses = (obj.newHypotheses as unknown[]).map((raw, i) => {
+    const rawNewHypotheses = Array.isArray(obj.newHypotheses) ? obj.newHypotheses : [];
+    const newHypotheses = (rawNewHypotheses as unknown[]).map((raw, i) => {
         const h = raw as Record<string, unknown>;
         if (typeof h.statement !== 'string' || h.statement.length < 10) {
             throw new Error(`newHypotheses[${i}]: invalid statement`);
@@ -170,10 +183,33 @@ export function validateDiscoveryOutput(
             ...(lensRelevance ? { lensRelevance } : {}),
         };
     });
+    const rawHints = Array.isArray(obj.hintsForHG) ? obj.hintsForHG : [];
+    const hintsForHG = (rawHints as unknown[]).map((raw, i) => {
+        const h = raw as Record<string, unknown>;
+        if (
+            typeof h.promisingDirection !== 'string' ||
+            !Array.isArray(h.lensFocusAreas) ||
+            typeof h.rationale !== 'string'
+        ) {
+            throw new Error(`hintsForHG[${i}]: missing fields`);
+        }
+        const lensFocusAreas = h.lensFocusAreas.filter((v): v is string => typeof v === 'string');
+        for (const lens of lensFocusAreas) {
+            if (!availableLenses.has(lens)) {
+                throw new Error(`hintsForHG[${i}]: unknown lens "${lens}"`);
+            }
+        }
+        return {
+            promisingDirection: h.promisingDirection,
+            lensFocusAreas,
+            rationale: h.rationale,
+        };
+    });
 
     return {
         interpretations,
         newHypotheses,
+        hintsForHG,
         weeklyNote: typeof obj.weeklyNote === 'string' ? obj.weeklyNote : '',
     };
 }
@@ -246,6 +282,7 @@ export class DiscoveryAgent {
         let llmOutput: DiscoveryLLMOutput = {
             interpretations: [],
             newHypotheses: [],
+            hintsForHG: [],
             weeklyNote: '',
         };
         let tokenUsage = 0;
@@ -312,6 +349,7 @@ export class DiscoveryAgent {
             analyzedTradeCount: truncated.length,
             lensInsights,
             newHypotheses,
+            hintsForHG: llmOutput.hintsForHG,
             promotionCandidates: [], // Phase 4b で EdgeValidator と統合
             staleCandidates: [],
             weeklyNote: llmOutput.weeklyNote,
@@ -366,7 +404,7 @@ export class DiscoveryAgent {
 
         lines.push(
             ``,
-            `上記データを解釈し、interpretations と newHypotheses を JSON で出力してください。`,
+            `上記データを解釈し、interpretations と hintsForHG を JSON で出力してください。`,
         );
 
         return lines.join('\n');
@@ -378,7 +416,12 @@ export class DiscoveryAgent {
     ): WeeklyDiscoveryReport['lensInsights'] {
         const interpMap = new Map<string, string>();
         for (const i of interpretations) {
-            interpMap.set(`${i.lensName}::${i.featureKey}`, i.interpretation);
+            if (i.lensName && i.featureKey) {
+                interpMap.set(`${i.lensName}::${i.featureKey}`, i.interpretation);
+            }
+            for (const lens of i.lensCombination ?? []) {
+                interpMap.set(`${lens}::*`, i.interpretation);
+            }
         }
 
         const grouped = new Map<string, WeeklyDiscoveryReport['lensInsights'][number]>();
@@ -389,7 +432,10 @@ export class DiscoveryAgent {
             grouped.get(s.lensName)!.effectiveFeatures.push({
                 featureKey: s.featureKey,
                 separationScore: s.separationScore,
-                interpretation: interpMap.get(`${s.lensName}::${s.featureKey}`) ?? '',
+                interpretation:
+                    interpMap.get(`${s.lensName}::${s.featureKey}`) ??
+                    interpMap.get(`${s.lensName}::*`) ??
+                    '',
             });
         }
         return Array.from(grouped.values());

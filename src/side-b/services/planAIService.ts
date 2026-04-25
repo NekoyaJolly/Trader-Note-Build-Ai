@@ -28,7 +28,8 @@ import {
   getMTFContext,
 } from '../knowledge';
 import type { MacroEnvironmentData, HigherTimeframeContext } from '../knowledge';
-import { loadPromptWithGlobal } from '../prompts/loader';
+import { loadPromptWithGlobal, type PromptMacros } from '../prompts/loader';
+import { PromptRegistry } from '../prompts/registry/PromptRegistry';
 import type { LensFeatureSnapshot } from '../lenses';
 import type { EdgeHypothesis } from '../models/edgeHypothesis';
 import { extractJson } from '../agents/llmJsonExtract';
@@ -333,12 +334,30 @@ ${candidateContext}
   /**
    * AI APIを呼び出し
    */
-  private async callAI(prompt: string): Promise<{ content: unknown; tokenUsage: number; model: string }> {
-    const systemPrompt = loadPromptWithGlobal('strategy_thinker', {
+  /**
+   * Phase 6.7c: 優先して PromptRegistry.getCompositeActive（DB の __global__ + strategy_thinker active）。
+   * 未 seed / DB 不整合時はファイル `loadPromptWithGlobal` にフォールバック。
+   */
+  private async resolveStrategyThinkerSystemPrompt(): Promise<string> {
+    const macros: PromptMacros = {
       CORE_TRADING_RULES,
       MACRO_ENVIRONMENT_RULES,
       MTF_ANALYSIS_RULES,
-    });
+    };
+    const registry = new PromptRegistry();
+    try {
+      return await registry.getCompositeActive('strategy_thinker', macros);
+    } catch (err) {
+      console.warn(
+        '[StrategyThinker] Registry 合成に失敗、ファイル fallback:',
+        err instanceof Error ? err.message : err,
+      );
+      return loadPromptWithGlobal('strategy_thinker', macros);
+    }
+  }
+
+  private async callAI(prompt: string): Promise<{ content: unknown; tokenUsage: number; model: string }> {
+    const systemPrompt = await this.resolveStrategyThinkerSystemPrompt();
 
     const response = await fetch(`${this.baseURL}/chat/completions`, {
       method: 'POST',

@@ -544,3 +544,53 @@ export interface SystemHealthResponse {
   pythonValidator: "ok" | "error";
   checkedAt: string;
 }
+
+// ===========================================
+// プラン即時BT（Phase 6.7b、POST /api/side-b/plans）
+// ===========================================
+
+/**
+ * オーケストレーターが付与する DSL 即時BT の集計。
+ * バックエンド: `StrategyBacktesterRunResult`（HTTP では JSON）
+ */
+export interface StrategyBacktestRunPayload {
+  scenarioResults: PerScenarioStrategyBacktestPayload[];
+  overallPassed: boolean;
+  period: { start: string; end: string };
+  totalDurationMs: number;
+}
+
+export interface PerScenarioStrategyBacktestPayload {
+  scenario: { id: string; name: string; direction: "long" | "short" };
+  passed: boolean;
+  error?: string;
+  strategistInterpretation: string;
+  durationMs: number;
+}
+
+/**
+ * POST /api/side-b/plans 成功時（plan に strategyBacktest が付くのは新規生成時・シナリオあり時に限る）
+ */
+export interface GeneratePlanResponse {
+  success: true;
+  plan: {
+    id: string;
+    symbol: string;
+    overallConfidence: number;
+    /** 新規生成かつ即時BTが走った場合のみ */
+    strategyBacktest?: StrategyBacktestRunPayload;
+  } & Record<string, unknown>;
+  cached?: boolean;
+  tokenUsage?: number;
+}
+
+export type GeneratePlanRequest = {
+  symbol: string;
+  targetDate?: string;
+  researchId?: string;
+  userPreferences?: Record<string, unknown>;
+  ohlcvData?: unknown[];
+  indicators?: Record<string, unknown>;
+  timeframe?: string;
+  forceRefresh?: boolean;
+};

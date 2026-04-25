@@ -14,7 +14,11 @@
 
 import fs from 'fs';
 import path from 'path';
-import { PromptRegistry, GLOBAL_AGENT_NAME } from './PromptRegistry';
+import {
+  PromptRegistry,
+  GLOBAL_AGENT_NAME,
+  SPECIALIST_COMMON_AGENT_NAME,
+} from './PromptRegistry';
 
 /**
  * seed 対象となるエージェント名と対応するプロンプトファイル。
@@ -37,6 +41,11 @@ export const DEFAULT_SEED_ENTRIES: SeedEntry[] = [
   //   - PromptMutation / MetaEvolution の対象外(安全装置あり)
   //   - 更新は人間承認フロー経由のみ
   { agentName: GLOBAL_AGENT_NAME, file: `${GLOBAL_AGENT_NAME}.md`, notes: 'Phase 6.7a Global Rules' },
+  {
+    agentName: SPECIALIST_COMMON_AGENT_NAME,
+    file: `${SPECIALIST_COMMON_AGENT_NAME}.md`,
+    notes: 'Phase 6.7c Specialist Common Rules',
+  },
   { agentName: 'strategist', file: 'strategist.md', notes: 'Phase 4c StrategistAgent' },
   { agentName: 'devils_advocate', file: 'devils_advocate.md', notes: 'Phase 2 DevilsAdvocate' },
   { agentName: 'discovery', file: 'discovery.md', notes: 'Phase 4a DiscoveryAgent' },

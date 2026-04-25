@@ -177,6 +177,7 @@ GROUP BY symbol, timeframe;
   - `docs/design/phase_6_hotfix_specification.md`
   - `docs/design/phase_6_6_specification.md`
 - **既存基盤**: `docs/design/DESIGN_DOC_autonomous_trading_architecture.md`
+- **本番執行シミュ層(Phase 6.8)**: `docs/design/phase_6.8_execution_simulation_specification.md`（6.7 の即時BT・検証の**執行忠実度**を引き上げる別枠; 6.7 完走後に参照）
 
 ---
 
