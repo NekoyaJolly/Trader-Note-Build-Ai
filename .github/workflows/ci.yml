@@ -51,9 +51,46 @@ jobs:
       - name: ESLint チェック
         run: npm run lint --if-present || echo "ESLint スキップ"
 
-  # ── 2. ユニット & 統合テスト ──
+  # ── 2. ユニットテスト（DB/外部依存なし） ──
   unit-tests:
-    name: Unit & Integration Tests
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Node.js セットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: 依存関係をインストール
+        run: npm ci
+
+      - name: Prisma セットアップ
+        run: npx prisma generate
+
+      - name: Jest ユニットテスト実行
+        run: npm run test:unit -- --coverage --passWithNoTests
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          AI_API_MOCK: 'true'
+          RUN_FULL_PAID_API_TESTS: 'false'
+
+      - name: テストカバレッジレポートアップロード
+        uses: codecov/codecov-action@v3
+        if: always()
+        with:
+          files: ./coverage/coverage-final.json
+          flags: unittests
+          fail_ci_if_error: false
+
+  # ── 3. DB 統合テスト（Supabase/Prisma、低並列） ──
+  db-integration-tests:
+    name: DB Integration Tests
     runs-on: ubuntu-latest
     steps:
       - name: リポジトリをチェックアウト
@@ -73,21 +110,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-      # ---- Phase 4d Step 5: マイグレーション状態を自己検出して適用 ----
-      #
-      # 以前は `git diff HEAD^..HEAD` で migration 変更を検出していたが、
-      # 複数コミット push で migration を含むコミットが HEAD でない場合や、
-      # 以前の push で deploy がスキップされた場合に取りこぼしが発生し、
-      # 一度追従漏れすると永久に追いつかない問題があった
-      # (実際 Phase 4b〜4c の 4 migration が未適用のまま Phase 4d push で fail)。
-      #
-      # 新ロジック: `prisma migrate status` で未適用有無を判定し、
-      # あれば自動的に `migrate deploy` を走らせる。この方式は自己回復的で、
-      # 検出漏れが発生しても次の push で必ず追いつく。
-      #
-      # push 時のみ実行する制約は維持する理由:
-      #   - schedule / PR では DB 書き込み権限を発動させない
-      #   - 元コミット 8a18500 で明文化された運用方針を踏襲
+      # push 時のみ未適用マイグレーションを自己回復的に適用。
       - name: 未適用マイグレーションを検出（push 時のみ）
         id: migrate_check
         if: github.event_name == 'push'
@@ -117,14 +140,15 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
 
-      - name: Jest テスト実行
-        run: npm test -- --coverage --passWithNoTests
+      - name: DB 統合テスト実行（低並列）
+        run: npm run test:integration:db -- --passWithNoTests
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          AI_API_MOCK: 'true'
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           AI_MODEL: gpt-4o-mini
           MARKET_API_KEY: ${{ secrets.MARKET_API_KEY }}
@@ -136,19 +160,11 @@ jobs:
           CTRADER_CLIENT_SECRET: ${{ secrets.CTRADER_CLIENT_SECRET }}
           RUN_FULL_PAID_API_TESTS: ${{ github.event.inputs.run_full_tests || 'false' }}
 
-      - name: テストカバレッジレポートアップロード
-        uses: codecov/codecov-action@v3
-        if: always()
-        with:
-          files: ./coverage/coverage-final.json
-          flags: unittests
-          fail_ci_if_error: false
-
-  # ── 3. E2E テスト（Playwright） ──
+  # ── 4. E2E テスト（Playwright） ──
   e2e-tests:
     name: E2E Tests (Playwright)
     runs-on: ubuntu-latest
-    needs: [lint-and-typecheck, unit-tests]
+    needs: [lint-and-typecheck, unit-tests, db-integration-tests]
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
@@ -253,7 +269,7 @@ jobs:
           path: test-videos/
           retention-days: 7
 
-  # ── 4. セキュリティ監査 ──
+  # ── 5. セキュリティ監査 ──
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
