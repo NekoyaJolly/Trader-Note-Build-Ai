@@ -145,11 +145,18 @@ export class MonteCarloTool implements ValidationTool {
         input: import('./types').StrategyValidationInput,
         start: number,
     ): Promise<ValidationToolResult> {
-        const pnls = input.dslResult.pnls.filter((p) => Number.isFinite(p));
-        return this.runMonteFromPnls(pnls, start);
+        const pnls = input.dslResult.netPnls.filter((p) => Number.isFinite(p));
+        return this.runMonteFromPnls(pnls, start, {
+            executionModel: input.dslResult.executionModel,
+            executionConfigHash: input.dslResult.executionConfigHash,
+        });
     }
 
-    private runMonteFromPnls(pnls: number[], start: number): ValidationToolResult {
+    private runMonteFromPnls(
+        pnls: number[],
+        start: number,
+        executionMetrics: Record<string, string> = {},
+    ): ValidationToolResult {
         if (pnls.length < this.minTradeCount) {
             return {
                 toolName: this.name,
@@ -158,6 +165,7 @@ export class MonteCarloTool implements ValidationTool {
                 metrics: {
                     tradeCount: pnls.length,
                     reason: 'insufficient_trades',
+                    ...executionMetrics,
                 },
                 interpretation: `トレード数不足: ${pnls.length} < ${this.minTradeCount}`,
                 durationMs: Date.now() - start,
@@ -197,6 +205,7 @@ export class MonteCarloTool implements ValidationTool {
                 p95FinalPnl,
                 medianMaxDrawdown,
                 p95MaxDrawdown,
+                ...executionMetrics,
             },
             interpretation: passed
                 ? `下側5%最終PnL=${p5FinalPnl.toFixed(2)} > ${this.p5MinFinalPnl}（下振れでも損失にならない）`

@@ -14,6 +14,7 @@ import {
   type DslSimulationOptions,
   type OhlcvBar,
 } from './dslBacktestSimulation';
+import type { ExecutionSimulationMetadata } from './executionSimulation';
 import type { StrategyDSL } from './schema';
 import {
   defaultParameterValues,
@@ -69,6 +70,8 @@ export interface DslBacktestAggregate {
   trainPf: number;
   /** 検証 PF */
   validationPf: number;
+  /** Phase 6.8: 執行・コスト仮定（検証期間側を代表値として扱う） */
+  execution: ExecutionSimulationMetadata;
 }
 
 /**
@@ -80,6 +83,10 @@ export interface DSLBacktestResult {
   period: BacktestPeriod;
   /** 検証期間の各トレード PnL */
   pnls: number[];
+  /** Phase 6.8: 価格差のみの PnL */
+  grossPnls: number[];
+  /** Phase 6.8: コスト控除後 PnL（pnls と同一） */
+  netPnls: number[];
   /** 検証期間のトレード（WalkForward 等） */
   events: BacktestTradeEvent[];
   /** 検証期間の netProfitRate（相対表現、Side-A 集計に準拠） */
@@ -89,6 +96,11 @@ export interface DSLBacktestResult {
   validationPf: number;
   /** 当該集計に用いた最適化後パラメータ（スイープ時の1組） */
   optimizedParams: Record<string, number>;
+  /** Phase 6.8: 執行・コスト仮定 */
+  executionModel: string;
+  executionConfigHash: string;
+  dataSource: string;
+  costSummary: ExecutionSimulationMetadata['costSummary'];
 }
 
 /**
@@ -100,16 +112,26 @@ export function toDSLBacktestResult(
 ): DSLBacktestResult {
   const ev = aggregate.validation.trades;
   const pnls = ev.map((e) => (typeof e.pnl === 'number' && Number.isFinite(e.pnl) ? e.pnl : 0));
+  const grossPnls = ev.map((e) => {
+    const gross = e.indicatorValues?.grossPnl;
+    return typeof gross === 'number' && Number.isFinite(gross) ? gross : e.pnl;
+  });
   return {
     dslId: aggregate.dslId,
     period: aggregate.period,
     pnls,
+    grossPnls,
+    netPnls: pnls,
     events: ev,
     finalReturn: aggregate.validation.summary.netProfitRate,
     overfitScore: aggregate.overfitScore,
     trainPf: aggregate.trainPf,
     validationPf: aggregate.validationPf,
     optimizedParams: { ...optimizedParams },
+    executionModel: aggregate.execution.executionModel,
+    executionConfigHash: aggregate.execution.executionConfigHash,
+    dataSource: aggregate.execution.dataSource,
+    costSummary: { ...aggregate.execution.costSummary },
   };
 }
 
@@ -168,6 +190,18 @@ export class DSLBacktestAdapter {
         overfitScore: 1,
         trainPf: 0,
         validationPf: 0,
+        execution: {
+          executionModel: simulationOptions?.executionModel ?? 'legacy_zero_cost',
+          executionConfigHash: simulationOptions?.executionConfigHash ?? 'legacy-zero-cost',
+          dataSource: simulationOptions?.executionDataSource ?? 'ctrader',
+          costSummary: {
+            model: simulationOptions?.executionModel ?? 'legacy_zero_cost',
+            dataSource: simulationOptions?.executionDataSource ?? 'ctrader',
+            roundTripCostPips: Math.max(0, simulationOptions?.roundTripCostPips ?? 0),
+            roundTripCostAtrMult: Math.max(0, simulationOptions?.roundTripCostAtrMult ?? 0),
+            totalCost: 0,
+          },
+        },
       };
     }
 
@@ -192,6 +226,7 @@ export class DSLBacktestAdapter {
       overfitScore,
       trainPf,
       validationPf,
+      execution: valResult.execution,
     };
   }
 

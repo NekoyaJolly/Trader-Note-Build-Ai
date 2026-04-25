@@ -11,6 +11,11 @@ import type { AITradeScenario } from '../models/tradePlan';
 import { DSLBacktestAdapter, toDSLBacktestResult, type DSLBacktestResult } from '../strategy_dsl/DSLBacktestAdapter';
 import type { StrategyDSL } from '../strategy_dsl/schema';
 import { defaultParameterValues } from '../strategy_dsl/dslParameterUtils';
+import {
+  DEFAULT_L1_EXECUTION,
+  toDslSimulationOptions,
+  type ExecutionSimulationConfig,
+} from '../strategy_dsl/executionSimulation';
 import { scenarioToStrategyDSL } from '../strategy_dsl/scenarioToStrategyDSL';
 import {
   walkForwardTool as defaultWalkForward,
@@ -51,6 +56,8 @@ export interface StrategyBacktesterRunResult {
 export interface StrategyBacktesterOptions {
   /** 省略時: 直近 365 日 */
   period?: { start: string; end: string };
+  /** Phase 6.8: 執行・コスト仮定。省略時は L1 モデル（コスト値は設定側で拡張） */
+  executionConfig?: ExecutionSimulationConfig;
 }
 
 function defaultBacktestPeriod(): { start: string; end: string } {
@@ -99,6 +106,7 @@ export class StrategyBacktesterAgent {
   ): Promise<StrategyBacktesterRunResult> {
     const tAll = Date.now();
     const period = options.period ?? defaultBacktestPeriod();
+    const simulationOptions = toDslSimulationOptions(options.executionConfig ?? DEFAULT_L1_EXECUTION);
     const scenarioResults: PerScenarioBacktestResult[] = [];
 
     if (!scenarios.length) {
@@ -133,7 +141,7 @@ export class StrategyBacktesterAgent {
       const params = defaultParameterValues(dsl);
       let aggregate;
       try {
-        aggregate = await this.adapter.runBacktest(dsl, params, period);
+        aggregate = await this.adapter.runBacktest(dsl, params, period, simulationOptions);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(`[StrategyBacktester] BT 失敗 scenario=${scenario.id}: ${msg}`);

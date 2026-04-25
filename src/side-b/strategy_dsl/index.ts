@@ -9,5 +9,6 @@ export * from './DSLBacktestAdapter';
 export * from './dslBacktestSimulation';
 export * from './dslBacktestRobustness';
 export * from './dslOhlcvFeatureNeeds';
+export * from './executionSimulation';
 export * from './dslParameterUtils';
 export * from './scenarioToStrategyDSL';

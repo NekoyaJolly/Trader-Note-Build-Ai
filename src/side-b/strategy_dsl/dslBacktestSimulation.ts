@@ -13,6 +13,12 @@ import type { BacktestResultSummary, BacktestTradeEvent, TradeSide } from '../..
 import type { LensFeature, LensFeatureSnapshot } from '../lenses/types';
 import { collectDslOhlcvFeatureNeeds } from './dslOhlcvFeatureNeeds';
 import { DSLEvaluator } from './DSLEvaluator';
+import type {
+  ExecutionCostSummary,
+  ExecutionDataSource,
+  ExecutionModel,
+  ExecutionSimulationMetadata,
+} from './executionSimulation';
 import type { StrategyDSL } from './schema';
 import { isWaitForTriggerEntry } from './types';
 
@@ -239,6 +245,10 @@ export interface DslSimulationOptions {
    * ボラ拡大時のスリッページ・拡大スプを粗く表す。DSL が ATR 未使用でも内部で ATR を計算する。
    */
   roundTripCostAtrMult?: number;
+  /** Phase 6.8: 監査用メタデータ（未指定時は legacy_zero_cost として扱う） */
+  executionModel?: ExecutionModel;
+  executionConfigHash?: string;
+  executionDataSource?: ExecutionDataSource;
 }
 
 /**
@@ -305,6 +315,7 @@ function applyTransactionCosts(
 export interface DslSimulationResult {
   summary: BacktestResultSummary;
   trades: BacktestTradeEvent[];
+  execution: ExecutionSimulationMetadata;
 }
 
 /**
@@ -323,6 +334,9 @@ export function runDslSimulation(
   const immediateFill: ImmediateEntryFill = options?.immediateEntryFill ?? 'signal_bar_close';
   const roundTripCostPips = options?.roundTripCostPips;
   const roundTripCostAtrMult = options?.roundTripCostAtrMult;
+  const executionModel: ExecutionModel = options?.executionModel ?? 'legacy_zero_cost';
+  const executionConfigHash = options?.executionConfigHash ?? 'legacy-zero-cost';
+  const executionDataSource: ExecutionDataSource = options?.executionDataSource ?? 'ctrader';
 
   const featureNeeds = collectDslOhlcvFeatureNeeds(dsl);
   const needAtrForTransactionCost = (roundTripCostAtrMult ?? 0) > 0;
@@ -331,7 +345,22 @@ export function runDslSimulation(
   const minLen = needWarmup ? 20 : 2;
   if (bars.length < minLen) {
     const empty = calculateSummary([], initialCapital);
-    return { summary: empty, trades: [] };
+    return {
+      summary: empty,
+      trades: [],
+      execution: {
+        executionModel,
+        executionConfigHash,
+        dataSource: executionDataSource,
+        costSummary: {
+          model: executionModel,
+          dataSource: executionDataSource,
+          roundTripCostPips: Math.max(0, roundTripCostPips ?? 0),
+          roundTripCostAtrMult: Math.max(0, roundTripCostAtrMult ?? 0),
+          totalCost: 0,
+        },
+      },
+    };
   }
 
   const table = buildFeatureTable(bars, {
@@ -342,6 +371,7 @@ export function runDslSimulation(
   const symbolNorm = dsl.symbol.replace(/\//g, '');
 
   const events: BacktestTradeEvent[] = [];
+  let totalCost = 0;
   let position:
     | {
         side: TradeSide;
@@ -412,6 +442,8 @@ export function runDslSimulation(
           table,
           entryIndex,
         );
+        const transactionCost = rawPnl - pnl;
+        totalCost += transactionCost;
         events.push({
           eventId: `${dsl.id}-${entryIndex}-${i}`,
           entryTime: bars[entryIndex].timestamp.toISOString(),
@@ -423,6 +455,10 @@ export function runDslSimulation(
           pnl,
           pnlPercent: (pnl / initialCapital) * 100,
           exitReason: reason,
+          indicatorValues: {
+            grossPnl: rawPnl,
+            transactionCost,
+          },
         });
         position = null;
         if (isWait) {
@@ -509,5 +545,21 @@ export function runDslSimulation(
   }
 
   const summary = calculateSummary(events, initialCapital);
-  return { summary, trades: events };
+  const costSummary: ExecutionCostSummary = {
+    model: executionModel,
+    dataSource: executionDataSource,
+    roundTripCostPips: Math.max(0, roundTripCostPips ?? 0),
+    roundTripCostAtrMult: Math.max(0, roundTripCostAtrMult ?? 0),
+    totalCost,
+  };
+  return {
+    summary,
+    trades: events,
+    execution: {
+      executionModel,
+      executionConfigHash,
+      dataSource: executionDataSource,
+      costSummary,
+    },
+  };
 }

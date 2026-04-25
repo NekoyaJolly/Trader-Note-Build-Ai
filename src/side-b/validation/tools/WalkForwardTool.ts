@@ -98,6 +98,10 @@ export class WalkForwardTool implements ValidationTool {
                     .map((e) => ({ entryTime: e.entryTime, pnl: e.pnl as number })),
                 input.period,
                 Date.now(),
+                {
+                    executionModel: input.dslResult.executionModel,
+                    executionConfigHash: input.dslResult.executionConfigHash,
+                },
             );
         }
         return this.executeHypothesis(input, Date.now());
@@ -133,6 +137,7 @@ export class WalkForwardTool implements ValidationTool {
         events: Array<{ entryTime: string; pnl: number }>,
         period: { start: string; end: string },
         start: number,
+        executionMetrics: Record<string, string> = {},
     ): Promise<ValidationToolResult> {
 
         if (events.length < this.minTradeCount) {
@@ -140,7 +145,7 @@ export class WalkForwardTool implements ValidationTool {
                 toolName: this.name,
                 success: true,
                 passed: false,
-                metrics: { tradeCount: events.length, reason: 'insufficient_trades' },
+                metrics: { tradeCount: events.length, reason: 'insufficient_trades', ...executionMetrics },
                 interpretation: `トレード数不足: ${events.length} < ${this.minTradeCount}`,
                 durationMs: Date.now() - start,
             };
@@ -177,6 +182,7 @@ export class WalkForwardTool implements ValidationTool {
                     windowsEvaluated: out.windowsEvaluated,
                     splitCount: out.splitCount,
                     reason: 'insufficient_windows',
+                    ...executionMetrics,
                 },
                 interpretation: '有効な IS/OOS 窓が得られなかった（トレード分布が偏りすぎ）',
                 durationMs: Date.now() - start,
@@ -198,6 +204,7 @@ export class WalkForwardTool implements ValidationTool {
                 splitCount: out.splitCount,
                 tradeCount: out.totalTradeCount,
                 windowsEvaluated: out.windowsEvaluated,
+                ...executionMetrics,
             },
             interpretation: passed
                 ? `overfitScore=${out.overfitScore.toFixed(3)} < ${this.maxOverfitScore}（IS/OOS 勝率の乖離が許容内）`

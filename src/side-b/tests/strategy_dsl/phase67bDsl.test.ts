@@ -7,6 +7,7 @@ import { enumerateParameterGrid, MAX_PARAMETER_GRID_COMBINATIONS } from '../../s
 import { runDslSimulation, type OhlcvBar } from '../../strategy_dsl/dslBacktestSimulation';
 import { toDSLBacktestResult } from '../../strategy_dsl/DSLBacktestAdapter';
 import type { DslBacktestAggregate } from '../../strategy_dsl/DSLBacktestAdapter';
+import { toDslSimulationOptions } from '../../strategy_dsl/executionSimulation';
 
 function barsUptrend(n: number, start: Date): OhlcvBar[] {
   const out: OhlcvBar[] = [];
@@ -178,10 +179,67 @@ describe('toDSLBacktestResult', () => {
       overfitScore: 0.1,
       trainPf: 1.2,
       validationPf: 1.1,
+      execution: {
+        executionModel: 'bar_l1_v1',
+        executionConfigHash: 'hash',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'bar_l1_v1',
+          dataSource: 'ctrader',
+          roundTripCostPips: 1,
+          roundTripCostAtrMult: 0,
+          totalCost: 3,
+        },
+      },
     };
     const dto = toDSLBacktestResult(aggregate, { k: 1 });
     expect(dto.pnls).toEqual([25]);
+    expect(dto.grossPnls).toEqual([25]);
+    expect(dto.netPnls).toEqual([25]);
     expect(dto.finalReturn).toBe(0.15);
     expect(dto.optimizedParams).toEqual({ k: 1 });
+    expect(dto.executionModel).toBe('bar_l1_v1');
+    expect(dto.executionConfigHash).toBe('hash');
+  });
+});
+
+describe('Phase 6.8 execution metadata', () => {
+  it('コストありでは netPnl が grossPnl を下回り、設定ハッシュを保持する', () => {
+    const start = new Date('2024-01-01T00:00:00Z');
+    const bars = barsUptrend(80, start);
+    const dsl = StrategyDSLSchema.parse({
+      id: 'exec-1',
+      generation: 0,
+      parentIds: [],
+      regimeTarget: 't',
+      symbol: 'EURUSD',
+      timeframe: '1h',
+      entry: {
+        direction: 'long',
+        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }] },
+      },
+      stopLoss: { type: 'fixed_pips', value: 5 },
+      takeProfit: { type: 'rr_ratio', value: 1 },
+      parameters: {},
+      metadata: { createdAt: new Date().toISOString(), createdBy: 'llm_generated' },
+    });
+
+    const r = runDslSimulation(
+      bars,
+      dsl,
+      {},
+      toDslSimulationOptions({
+        model: 'bar_l1_v1',
+        dataSource: 'ctrader',
+        roundTripCostPips: 2,
+      }),
+    );
+    expect(r.execution.executionModel).toBe('bar_l1_v1');
+    expect(r.execution.executionConfigHash).toHaveLength(16);
+    expect(r.execution.costSummary.totalCost).toBeGreaterThan(0);
+    expect(r.trades.length).toBeGreaterThan(0);
+    const first = r.trades[0]!;
+    expect(first.indicatorValues?.grossPnl).toBeGreaterThan(first.pnl);
+    expect(first.indicatorValues?.transactionCost).toBeGreaterThan(0);
   });
 });

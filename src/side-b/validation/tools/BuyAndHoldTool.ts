@@ -233,6 +233,8 @@ export class BuyAndHoldTool implements ValidationTool {
                 tradeCount: dslResult.events.length,
                 periodDays,
                 comparisonDirection: direction,
+                executionModel: dslResult.executionModel,
+                executionConfigHash: dslResult.executionConfigHash,
             },
             interpretation: passed
                 ? `戦略が BH を +${(outperformance * 100).toFixed(2)}pt 上回る（通過）`

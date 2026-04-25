@@ -49,7 +49,7 @@ import type {
   DiscoveryLatestResponse,
   SystemHealthResponse,
   GeneratePlanResponse,
-  type GeneratePlanRequest,
+  GeneratePlanRequest,
 } from "@/types/sideB";
 import { getPublicApiBaseUrl } from "./publicApiBaseUrl";
 

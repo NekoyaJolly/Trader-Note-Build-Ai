@@ -219,16 +219,29 @@ describe('MonteCarloTool.execute', () => {
                 dslId: 'd1',
                 period: { start: '2025-01-01', end: '2025-12-31' },
                 pnls: pnls30,
+                grossPnls: pnls30,
+                netPnls: pnls30,
                 events: [],
                 finalReturn: 0.1,
                 overfitScore: 0.1,
                 trainPf: 1.2,
                 validationPf: 1.1,
                 optimizedParams: {},
+                executionModel: 'bar_l1_v1',
+                executionConfigHash: 'hash',
+                dataSource: 'ctrader',
+                costSummary: {
+                    model: 'bar_l1_v1',
+                    dataSource: 'ctrader',
+                    roundTripCostPips: 0,
+                    roundTripCostAtrMult: 0,
+                    totalCost: 0,
+                },
             },
         });
         expect(backtest.getResult).not.toHaveBeenCalled();
         expect(res.success).toBe(true);
         expect(res.metrics.tradeCount).toBe(30);
+        expect(res.metrics.executionModel).toBe('bar_l1_v1');
     });
 });
