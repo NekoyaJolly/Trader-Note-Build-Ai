@@ -10,20 +10,42 @@ import {
 } from '../services/ctrader/ctraderDataService';
 
 describe('cTrader tick spread utilities', () => {
-  it('先頭絶対timestamp + 以降差分timestampを価格tickに変換する', () => {
+  it('先頭絶対timestamp + 以降差分timestamp/priceを価格tickに変換する', () => {
     const raw: CTraderRawTickData[] = [
       { timestamp: 1_700_000_000_000, tick: 110000 },
-      { timestamp: 250, tick: 110010 },
-      { timestamp: 250, tick: 110020 },
+      { timestamp: -250, tick: 10 },
+      { timestamp: -250, tick: 10 },
     ];
     const ticks = convertCTraderTicks(raw, 5, 'bid');
     expect(ticks.map(t => t.timestamp.getTime())).toEqual([
+      1_699_999_999_500,
+      1_699_999_999_750,
       1_700_000_000_000,
-      1_700_000_000_250,
-      1_700_000_000_500,
     ]);
-    expect(ticks.map(t => t.price)).toEqual([1.1, 1.1001, 1.1002]);
+    expect(ticks.map(t => t.price)).toEqual([1.1002, 1.1001, 1.1]);
     expect(ticks.every(t => t.quoteType === 'bid')).toBe(true);
+  });
+
+  it('実データ形式に近い negative delta tick でspreadが安定する', () => {
+    const bidRaw: CTraderRawTickData[] = [
+      { timestamp: 1_777_032_299_992, tick: 470_732_000 },
+      { timestamp: -101, tick: 2_000 },
+      { timestamp: -201, tick: 6_000 },
+    ];
+    const askRaw: CTraderRawTickData[] = [
+      { timestamp: 1_777_032_299_992, tick: 470_753_000 },
+      { timestamp: -101, tick: 2_000 },
+      { timestamp: -201, tick: 6_000 },
+    ];
+    const spreads = mergeBidAskTicks(
+      convertCTraderTicks(bidRaw, 5, 'bid'),
+      convertCTraderTicks(askRaw, 5, 'ask'),
+      1,
+    );
+    expect(spreads).toHaveLength(3);
+    for (const s of spreads) {
+      expect(s.spread).toBeCloseTo(0.21);
+    }
   });
 
   it('BID/ASKを近傍timestampでマージしてspreadを作る', () => {

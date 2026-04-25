@@ -31,6 +31,8 @@
     "test:e2e:production:backtest": "tsx scripts/production-backtest-test.ts",
     "verify:ctrader-data": "tsx scripts/verify-ctrader-data-fetch.ts",
     "fetch:ohlcv-range": "tsx scripts/fetch-ohlcv-range.ts",
+    "fetch:spread-bars-range": "tsx scripts/fetch-spread-bars-range.ts",
+    "debug:ctrader-tick-raw": "tsx scripts/debug-ctrader-tick-raw.ts",
     "verify:ctrader-fetch-ui": "tsx scripts/production-verify-ctrader-fetch-ui.ts",
     "verify:ohlcv-save": "tsx scripts/verify-ohlcv-save-and-verify.ts",
     "verify:ohlcv-parallel-limit": "tsx scripts/verify-ohlcv-parallel-limit.ts",

@@ -165,18 +165,22 @@ export function convertCTraderTicks(
 ): CTraderTickResult[] {
     const out: CTraderTickResult[] = [];
     let currentTimestamp: number | null = null;
+    let currentTick: number | null = null;
     for (const raw of ticks) {
         const tsRaw = Number(raw.timestamp);
         const priceRaw = Number(raw.tick);
         if (!Number.isFinite(tsRaw) || !Number.isFinite(priceRaw)) continue;
-        if (currentTimestamp === null || tsRaw > 946684800000) {
+        if (currentTimestamp === null || currentTick === null || tsRaw > 946684800000) {
             currentTimestamp = tsRaw;
+            currentTick = priceRaw;
         } else {
+            // cTrader historical tick は newest first。2件目以降は直前tickとの差分。
             currentTimestamp += tsRaw;
+            currentTick += priceRaw;
         }
         out.push({
             timestamp: new Date(currentTimestamp),
-            price: parseFloat((priceRaw / CTRADER_PRICE_DIVISOR).toFixed(digits)),
+            price: parseFloat((currentTick / CTRADER_PRICE_DIVISOR).toFixed(digits)),
             quoteType,
         });
     }
