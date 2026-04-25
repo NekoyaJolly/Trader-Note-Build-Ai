@@ -98,9 +98,14 @@ function parseProposalArray(content: string): PromptMutationProposal[] {
 }
 
 export class PromptMutationAgent {
-  constructor(
-    private readonly ai: AIProvider = new AIProvider({ model: modelFor('prompt_mutation') }),
-  ) {}
+  private readonly usesInjectedAi: boolean;
+
+  constructor(ai?: AIProvider) {
+    this.ai = ai ?? new AIProvider({ model: modelFor('prompt_mutation') });
+    this.usesInjectedAi = ai !== undefined;
+  }
+
+  private readonly ai: AIProvider;
 
   /**
    * 改善案プロンプトを生成する。
@@ -119,6 +124,13 @@ export class PromptMutationAgent {
       console.warn(
         `[PromptMutationAgent] ${input.agentName} は変異対象外のため空配列を返します`,
       );
+      return [];
+    }
+    if (
+      process.env.NODE_ENV === 'test' &&
+      process.env.AI_API_MOCK !== 'false' &&
+      !this.usesInjectedAi
+    ) {
       return [];
     }
     const count = input.count ?? 3;
