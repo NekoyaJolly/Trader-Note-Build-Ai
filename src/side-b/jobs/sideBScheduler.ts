@@ -57,6 +57,7 @@ import { CronSimilarityService } from '../services/cronSimilarityService';
 import * as aiNoteRepository from '../repositories/aiNoteRepository';
 import {
   planRepository,
+  researchRepository,
   findVirtualTrades,
   updateTradeToOpen,
   closeTrade,
@@ -653,6 +654,9 @@ export class SideBScheduler {
       }
       this.lastScreeningRun = new Date();
       this.log(`[Screening] 完了: processed=${summary.processed} passed=${summary.passed} rejected=${summary.rejected} not_testable=${summary.notTestable} errors=${summary.errors}`);
+      try {
+        pdcaLoop.notifyValidationBatchComplete('screening', summary);
+      } catch { /* PDCAループ未起動時は無視 */ }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.addError(`[Screening] 仮説取得失敗: ${message}`);
@@ -745,6 +749,9 @@ export class SideBScheduler {
       this.log(
         `[FullValidation] 完了: processed=${summary.processed} confirmed=${summary.confirmed} rejected=${summary.rejected} not_testable=${summary.notTestable} errors=${summary.errors}`,
       );
+      try {
+        pdcaLoop.notifyValidationBatchComplete('full_validation', summary);
+      } catch { /* PDCAループ未起動時は無視 */ }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.addError(`[FullValidation] 対象取得失敗: ${message}`);
@@ -1354,7 +1361,13 @@ export class SideBScheduler {
         // PDCAループに戦略完了を通知
         try {
           const planData = planResult.data;
-          if (planData?.scenarios && planData.scenarios.length > 0) {
+          const research = planData?.researchId
+            ? await researchRepository.findById(planData.researchId)
+            : null;
+          if (research?.marketAnalysis) {
+            pdcaLoop.notifyAnalysisComplete(symbol, research.marketAnalysis);
+          }
+          if (planData?.scenarios) {
             pdcaLoop.notifyStrategyComplete(
               symbol,
               planData.scenarios.map((s) => ({

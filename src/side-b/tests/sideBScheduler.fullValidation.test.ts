@@ -23,6 +23,15 @@ jest.mock('../agents/StrategistAgent', () => ({
     },
 }));
 
+jest.mock('../agent', () => ({
+    pdcaLoop: {
+        notifyAnalysisComplete: jest.fn(),
+        notifyStrategyComplete: jest.fn(),
+        notifyTradeCompleted: jest.fn(),
+        notifyValidationBatchComplete: jest.fn(),
+    },
+}));
+
 // 本番のスケジューラー初期化で他重い依存を読みたくないので最小モック
 jest.mock('../utils/marketHours', () => ({
     isFXMarketOpen: jest.fn(() => true),
@@ -72,9 +81,11 @@ jest.mock('../repositories/aiNoteRepository', () => ({
 import { SideBScheduler } from '../jobs/sideBScheduler';
 import { edgeLedger } from '../ledger';
 import { strategistAgent } from '../agents/StrategistAgent';
+import { pdcaLoop } from '../agent';
 
 const mockEdgeLedger = edgeLedger as unknown as { findByStatus: jest.Mock };
 const mockStrategist = strategistAgent as unknown as { validate: jest.Mock };
+const mockPdcaLoop = pdcaLoop as unknown as { notifyValidationBatchComplete: jest.Mock };
 
 function makeHyp(id: string): EdgeHypothesis {
     return {
@@ -156,6 +167,7 @@ describe('SideBScheduler.runFullValidationNow', () => {
             notTestable: 0,
             errors: 0,
         });
+        expect(mockPdcaLoop.notifyValidationBatchComplete).toHaveBeenCalledWith('full_validation', result);
     }, 30000);
 
     it('fullValidationMaxPerRun で上限を適用する', async () => {

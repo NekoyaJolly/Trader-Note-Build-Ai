@@ -50,6 +50,10 @@ import type {
   SystemHealthResponse,
   GeneratePlanResponse,
   GeneratePlanRequest,
+  ListPlansParams,
+  ListPlansResponse,
+  GetPlanResponse,
+  AITradePlanPayload,
 } from "@/types/sideB";
 import { getPublicApiBaseUrl } from "./publicApiBaseUrl";
 
@@ -168,6 +172,19 @@ function buildListQuery(params: HypothesisListParams): string {
     if (params.sortBy) sp.set("sortBy", params.sortBy);
     if (typeof params.page === "number") sp.set("page", String(params.page));
     if (typeof params.limit === "number") sp.set("limit", String(params.limit));
+
+    const s = sp.toString();
+    return s ? `?${s}` : "";
+}
+
+function buildPlanListQuery(params: ListPlansParams): string {
+    const sp = new URLSearchParams();
+    if (params.symbol?.trim()) sp.set("symbol", params.symbol.trim());
+    if (params.targetDate) sp.set("targetDate", params.targetDate);
+    if (params.fromDate) sp.set("fromDate", params.fromDate);
+    if (params.toDate) sp.set("toDate", params.toDate);
+    if (typeof params.limit === "number") sp.set("limit", String(params.limit));
+    if (typeof params.offset === "number") sp.set("offset", String(params.offset));
 
     const s = sp.toString();
     return s ? `?${s}` : "";
@@ -370,6 +387,48 @@ async function generatePlan(body: GeneratePlanRequest): Promise<GeneratePlanResp
   });
 }
 
+/**
+ * GET /api/side-b/plans
+ *
+ * 保存済みの AITradePlan 一覧を取得する。
+ */
+async function listPlans(params: ListPlansParams = {}): Promise<ListPlansResponse> {
+  return request<ListPlansResponse>(`/plans${buildPlanListQuery(params)}`);
+}
+
+/**
+ * GET /api/side-b/plans/:id
+ */
+async function getPlan(planId: string): Promise<AITradePlanPayload> {
+  if (!planId) {
+    throw new SideBApiError("planId は必須です", 400, "/plans/:id");
+  }
+  const res = await request<GetPlanResponse>(
+    `/plans/${encodeURIComponent(planId)}`,
+  );
+  return res.plan;
+}
+
+/**
+ * GET /api/side-b/plans/today/:symbol
+ */
+async function getTodayPlan(symbol: string): Promise<AITradePlanPayload | null> {
+  if (!symbol.trim()) {
+    throw new SideBApiError("symbol は必須です", 400, "/plans/today/:symbol");
+  }
+  try {
+    const res = await request<GetPlanResponse>(
+      `/plans/today/${encodeURIComponent(symbol.trim())}`,
+    );
+    return res.plan;
+  } catch (err) {
+    if (err instanceof SideBApiError && err.status === 404) {
+      return null;
+    }
+    throw err;
+  }
+}
+
 // ===========================================
 // export
 // ===========================================
@@ -393,9 +452,12 @@ export const sideBApi = {
   getLatestDiscovery,
   getSystemHealth,
   generatePlan,
+  listPlans,
+  getPlan,
+  getTodayPlan,
 };
 
 /** 外部テスト向け: クエリ組み立てのみ検証できるよう内部 util を露出 */
-export const __test = { buildListQuery };
+export const __test = { buildListQuery, buildPlanListQuery };
 
 export type SideBApi = typeof sideBApi;

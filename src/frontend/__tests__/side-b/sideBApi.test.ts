@@ -9,9 +9,9 @@
 import { describe, it, expect } from "vitest";
 
 import { __test } from "@/lib/sideBApi";
-import type { HypothesisListParams } from "@/types/sideB";
+import type { HypothesisListParams, ListPlansParams } from "@/types/sideB";
 
-const { buildListQuery } = __test;
+const { buildListQuery, buildPlanListQuery } = __test;
 
 describe("buildListQuery", () => {
     it("空オブジェクトは空文字を返す", () => {
@@ -71,5 +71,34 @@ describe("buildListQuery", () => {
         expect(sp.get("sortBy")).toBe("oldest");
         expect(sp.get("page")).toBe("2");
         expect(sp.get("limit")).toBe("10");
+    });
+});
+
+describe("buildPlanListQuery", () => {
+    it("空オブジェクトは空文字を返す", () => {
+        expect(buildPlanListQuery({})).toBe("");
+    });
+
+    it("保存済みプラン一覧の条件を query に変換する", () => {
+        const params: ListPlansParams = {
+            symbol: " XAUUSD ",
+            fromDate: "2026-04-01",
+            toDate: "2026-04-29",
+            limit: 5,
+            offset: 10,
+        };
+        const q = buildPlanListQuery(params);
+        expect(q.startsWith("?")).toBe(true);
+        const sp = new URLSearchParams(q.slice(1));
+        expect(sp.get("symbol")).toBe("XAUUSD");
+        expect(sp.get("fromDate")).toBe("2026-04-01");
+        expect(sp.get("toDate")).toBe("2026-04-29");
+        expect(sp.get("limit")).toBe("5");
+        expect(sp.get("offset")).toBe("10");
+    });
+
+    it("targetDate 指定を query に含める", () => {
+        const q = buildPlanListQuery({ targetDate: "2026-04-29" });
+        expect(q).toBe("?targetDate=2026-04-29");
     });
 });

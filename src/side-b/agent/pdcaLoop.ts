@@ -262,12 +262,12 @@ export class PDCALoop {
         this.memory.setState('MONITORING');
         this.memory.setLastAnalysis(new Date());
 
-        this.addThinkingLog('MONITORING', '監視モードに移行 — エントリー条件を定期チェック',
-            '戦略立案完了（又は進行中）。監視モードに移行し、エントリー条件の到達をチェックします。');
+        this.addThinkingLog('MONITORING', '監視モードに移行 — 戦略立案ジョブの完了を待機',
+            'PDCAの状態遷移として監視モードへ移行しました。実際の市場分析・戦略立案結果はSide-Bスケジューラーの完了通知で別途記録します。');
 
         return {
             state: 'MONITORING',
-            action: '監視モードに移行',
+            action: '監視モードに移行 — 戦略立案ジョブ待機',
             nextCheckMs: this.config.normalIntervalMs,
         };
     }
@@ -500,9 +500,31 @@ export class PDCALoop {
             existing.lastRevisedAt = new Date();
         }
 
+        const reasoning = scenarios.length > 0
+            ? scenarios.map(s => `${s.direction} @${s.entryPrice} (信頼度${s.confidence}%)`).join(', ')
+            : 'Plan AI はノートレード判断としてシナリオ0件の戦略を保存しました。';
+
         this.addThinkingLog(this.memory.getState(),
             `${symbol} 戦略更新: ${scenarios.length}個のシナリオ`,
-            scenarios.map(s => `${s.direction} @${s.entryPrice} (信頼度${s.confidence}%)`).join(', '));
+            reasoning);
+    }
+
+    /**
+     * 仮説検証バッチ完了を通知（SideBScheduler から呼ばれる）
+     */
+    notifyValidationBatchComplete(
+        kind: 'screening' | 'full_validation',
+        summary: { processed: number; passed?: number; confirmed?: number; rejected: number; notTestable: number; errors: number },
+    ): void {
+        const label = kind === 'screening' ? '事前スクリーニング' : '本格検証';
+        const positiveCount = kind === 'screening'
+            ? summary.passed ?? 0
+            : summary.confirmed ?? 0;
+        const positiveLabel = kind === 'screening' ? '通過' : 'confirmed';
+
+        this.addThinkingLog(this.memory.getState(),
+            `${label}完了: ${summary.processed}件処理`,
+            `${positiveLabel}: ${positiveCount}, rejected: ${summary.rejected}, not_testable: ${summary.notTestable}, errors: ${summary.errors}`);
     }
 
     // --- 情報取得 ---

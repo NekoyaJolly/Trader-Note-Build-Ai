@@ -8,6 +8,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { sideBApi } from "@/lib/sideBApi";
+import type { AITradePlanPayload } from "@/types/sideB";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "") + "/api/side-b";
 
@@ -66,6 +68,11 @@ interface LessonsData {
     };
 }
 
+interface ValidationVisibilityData {
+    pendingCount: number;
+    recentlyValidatedCount: number;
+}
+
 const stateColors: Record<string, string> = {
     IDLE: "text-gray-400 bg-gray-500/20",
     SESSION_OPEN: "text-yellow-400 bg-yellow-500/20",
@@ -75,6 +82,29 @@ const stateColors: Record<string, string> = {
     REFLECTING: "text-cyan-400 bg-cyan-500/20",
     REVISING_STRATEGY: "text-orange-400 bg-orange-500/20",
 };
+
+const directionLabel: Record<"long" | "short", string> = {
+    long: "ロング",
+    short: "ショート",
+};
+
+function formatNumber(value: number | null | undefined, digits: number = 2): string {
+    if (typeof value !== "number" || Number.isNaN(value)) return "-";
+    return value.toLocaleString("ja-JP", {
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits,
+    });
+}
+
+function formatDate(value: string): string {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleDateString("ja-JP", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    });
+}
 
 /**
  * レスポンスを安全にパースするヘルパー
@@ -91,14 +121,19 @@ async function safeFetchJson<T>(res: Response): Promise<T | null> {
 export default function AgentDetailPage() {
     const [thinkingLog, setThinkingLog] = useState<ThinkingLogEntry[]>([]);
     const [lessonsData, setLessonsData] = useState<LessonsData | null>(null);
+    const [recentPlans, setRecentPlans] = useState<AITradePlanPayload[]>([]);
+    const [validationVisibility, setValidationVisibility] = useState<ValidationVisibilityData | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [logLimit, setLogLimit] = useState(50);
 
     const fetchData = useCallback(async () => {
         try {
-            const [logRes, lessonsRes] = await Promise.allSettled([
+            const [logRes, lessonsRes, plansRes, pendingValidationRes, recentlyValidatedRes] = await Promise.allSettled([
                 fetch(`${API_BASE}/agent/thinking-log?limit=${logLimit}`),
                 fetch(`${API_BASE}/agent/lessons`),
+                sideBApi.listPlans({ limit: 5 }),
+                sideBApi.getPendingValidation(),
+                sideBApi.getRecentlyValidated(24),
             ]);
 
             if (logRes.status === "fulfilled") {
@@ -113,6 +148,20 @@ export default function AgentDetailPage() {
                     setLessonsData(data);
                 }
             }
+            if (plansRes.status === "fulfilled") {
+                setRecentPlans(plansRes.value.plans);
+            }
+            const nextValidation: ValidationVisibilityData = {
+                pendingCount: 0,
+                recentlyValidatedCount: 0,
+            };
+            if (pendingValidationRes.status === "fulfilled") {
+                nextValidation.pendingCount = pendingValidationRes.value.length;
+            }
+            if (recentlyValidatedRes.status === "fulfilled") {
+                nextValidation.recentlyValidatedCount = recentlyValidatedRes.value.length;
+            }
+            setValidationVisibility(nextValidation);
         } catch (err) {
             console.error("[Agent] fetch error:", err);
         } finally {
@@ -170,6 +219,131 @@ export default function AgentDetailPage() {
                             <p className="text-xs text-gray-500">負け</p>
                             <p className="text-2xl font-bold text-red-400">{lessonsData.stats.losses}</p>
                         </div>
+                    </div>
+                )}
+
+                {/* 保存済み戦略 */}
+                <div className="card-surface rounded-xl overflow-hidden mb-6">
+                    <div className="px-4 py-3 border-b border-slate-700/50 flex items-center justify-between gap-3">
+                        <div>
+                            <h2 className="text-sm font-semibold text-white">保存済み戦略</h2>
+                            <p className="text-[11px] text-gray-500 mt-0.5">
+                                DBに保存された直近のAITradePlanです。思考ログとは別に、実際の戦略成果物を確認できます。
+                            </p>
+                        </div>
+                        <Link
+                            href="/side-b/trades"
+                            className="text-xs text-purple-400 hover:text-purple-300 transition-colors shrink-0"
+                        >
+                            プラン生成へ
+                        </Link>
+                    </div>
+                    <div className="px-4 py-3 space-y-3">
+                        {recentPlans.length === 0 ? (
+                            <p className="text-sm text-gray-500 text-center py-6">保存済み戦略がありません</p>
+                        ) : (
+                            recentPlans.map((plan) => (
+                                <article
+                                    key={plan.id}
+                                    className="rounded-xl border border-slate-700/60 bg-slate-900/30 p-3"
+                                >
+                                    <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
+                                        <div>
+                                            <p className="text-sm font-semibold text-white">
+                                                {plan.symbol} / {formatDate(plan.targetDate)}
+                                            </p>
+                                            <p className="text-[11px] text-gray-500 font-mono">{plan.id}</p>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-xs text-gray-500">全体信頼度</p>
+                                            <p className="text-sm font-semibold text-cyan-300">
+                                                {plan.overallConfidence ?? "-"}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <p className="text-xs text-gray-300 mb-2">
+                                        {plan.marketAnalysis.summary}
+                                    </p>
+                                    <div className="flex flex-wrap gap-2 text-[11px] text-gray-500 mb-3">
+                                        <span>regime: {plan.marketAnalysis.regime}</span>
+                                        <span>trend: {plan.marketAnalysis.trendDirection}</span>
+                                        <span>vol: {plan.marketAnalysis.volatility}</span>
+                                    </div>
+                                    {plan.scenarios.length === 0 ? (
+                                        <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2">
+                                            <p className="text-xs text-amber-200">
+                                                ノートレード判断: このプランには実行シナリオがありません。
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {plan.scenarios.map((scenario) => (
+                                                <div
+                                                    key={scenario.id}
+                                                    className="rounded-lg border border-slate-700/50 bg-slate-800/40 px-3 py-2"
+                                                >
+                                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                                        <p className="text-xs font-medium text-white">
+                                                            {scenario.name}{" "}
+                                                            <span className="text-gray-500">
+                                                                ({directionLabel[scenario.direction]} / 信頼度{scenario.confidence})
+                                                            </span>
+                                                        </p>
+                                                        <p className="text-[11px] text-gray-500">
+                                                            RR {formatNumber(scenario.riskReward, 2)}
+                                                        </p>
+                                                    </div>
+                                                    <div className="grid grid-cols-3 gap-2 mt-2 text-[11px]">
+                                                        <div>
+                                                            <p className="text-gray-500">Entry</p>
+                                                            <p className="text-gray-200">{formatNumber(scenario.entry.price, 2)}</p>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-gray-500">SL</p>
+                                                            <p className="text-rose-300">{formatNumber(scenario.stopLoss.price, 2)}</p>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-gray-500">TP</p>
+                                                            <p className="text-emerald-300">{formatNumber(scenario.takeProfit.price, 2)}</p>
+                                                        </div>
+                                                    </div>
+                                                    <p className="text-[11px] text-gray-500 mt-2 line-clamp-2">
+                                                        {scenario.rationale}
+                                                    </p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {plan.warnings.length > 0 && (
+                                        <p className="text-[11px] text-amber-300 mt-2">
+                                            警告: {plan.warnings.slice(0, 2).join(" / ")}
+                                        </p>
+                                    )}
+                                </article>
+                            ))
+                        )}
+                    </div>
+                </div>
+
+                {/* 仮説検証の見える化 */}
+                {validationVisibility && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+                        <Link
+                            href="/side-b/validation"
+                            className="card-surface rounded-xl p-4 border border-slate-700/50 hover:border-purple-500/40 transition-colors"
+                        >
+                            <p className="text-xs text-gray-500">本格検証待ち</p>
+                            <p className="text-2xl font-bold text-amber-300">{validationVisibility.pendingCount}</p>
+                            <p className="text-[11px] text-gray-500 mt-1">screening_passed の仮説</p>
+                        </Link>
+                        <Link
+                            href="/side-b/validation"
+                            className="card-surface rounded-xl p-4 border border-slate-700/50 hover:border-purple-500/40 transition-colors"
+                        >
+                            <p className="text-xs text-gray-500">直近24hの検証完了</p>
+                            <p className="text-2xl font-bold text-cyan-300">{validationVisibility.recentlyValidatedCount}</p>
+                            <p className="text-[11px] text-gray-500 mt-1">confirmed / rejected</p>
+                        </Link>
                     </div>
                 )}
 

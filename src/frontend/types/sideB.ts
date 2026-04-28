@@ -549,6 +549,117 @@ export interface SystemHealthResponse {
 // プラン即時BT（Phase 6.7b、POST /api/side-b/plans）
 // ===========================================
 
+export type PlanMarketRegime =
+  | "strong_uptrend"
+  | "uptrend"
+  | "range"
+  | "downtrend"
+  | "strong_downtrend"
+  | "volatile";
+
+export interface PlanKeyLevels {
+  strongResistance: number[];
+  resistance: number[];
+  support: number[];
+  strongSupport: number[];
+}
+
+export interface PlanMarketAnalysisPayload {
+  regime: PlanMarketRegime;
+  regimeConfidence: number;
+  trendDirection: "up" | "down" | "sideways";
+  volatility: "low" | "medium" | "high";
+  keyLevels: PlanKeyLevels;
+  summary: string;
+  additionalInsights?: string[];
+  macroAssessment?: {
+    riskSentiment: "risk_on" | "neutral" | "risk_off";
+    volatilityRegime: "low" | "normal" | "elevated" | "crisis";
+    yieldCurveSignal: "normal" | "flattening" | "inverted";
+    macroSummary: string;
+    tradingImpact: string;
+  };
+  mtfAnalysis?: {
+    higherTFTimeframe: string;
+    higherTFBias: "long" | "short" | "neutral";
+    alignment: "aligned" | "conflicting" | "neutral";
+    note: string;
+  };
+}
+
+export interface AITradeScenarioPayload {
+  id: string;
+  name: string;
+  direction: "long" | "short";
+  priority: "primary" | "secondary" | "alternative";
+  entry: {
+    type: "limit" | "market" | "stop" | "wait_for_trigger";
+    price: number;
+    condition: string;
+    triggerIndicators: string[];
+    maxWaitBars?: number;
+    executionType?: "market" | "limit";
+  };
+  stopLoss: {
+    price: number;
+    pips: number;
+    reason: string;
+  };
+  takeProfit: {
+    price: number;
+    pips: number;
+    reason: string;
+  };
+  riskReward: number;
+  confidence: number;
+  rationale: string;
+  invalidationConditions: string[];
+  indicatorsUsed?: string[];
+  indicatorsIgnored?: string[];
+  reasonForSelection?: string;
+  reasonForIgnoring?: string;
+  patternLabel?: string;
+  multipleTestingDefense?: string;
+  warnings?: string[];
+}
+
+export interface AITradePlanPayload {
+  id: string;
+  researchId: string;
+  targetDate: string;
+  symbol: string;
+  marketAnalysis: PlanMarketAnalysisPayload;
+  scenarios: AITradeScenarioPayload[];
+  overallConfidence: number | null;
+  warnings: string[];
+  aiModel: string | null;
+  tokenUsage: number | null;
+  createdAt: string;
+  strategyBacktest?: StrategyBacktestRunPayload;
+}
+
+export interface ListPlansParams {
+  symbol?: string;
+  targetDate?: string;
+  fromDate?: string;
+  toDate?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ListPlansResponse {
+  success: true;
+  plans: AITradePlanPayload[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface GetPlanResponse {
+  success: true;
+  plan: AITradePlanPayload;
+}
+
 /**
  * オーケストレーターが付与する DSL 即時BT の集計。
  * バックエンド: `StrategyBacktesterRunResult`（HTTP では JSON）
@@ -588,13 +699,7 @@ export interface PerScenarioStrategyBacktestPayload {
  */
 export interface GeneratePlanResponse {
   success: true;
-  plan: {
-    id: string;
-    symbol: string;
-    overallConfidence: number;
-    /** 新規生成かつ即時BTが走った場合のみ */
-    strategyBacktest?: StrategyBacktestRunPayload;
-  } & Record<string, unknown>;
+  plan: AITradePlanPayload;
   cached?: boolean;
   tokenUsage?: number;
 }
