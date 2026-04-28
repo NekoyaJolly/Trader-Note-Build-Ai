@@ -1058,9 +1058,9 @@ export type DebateSideOutput = z.infer<typeof DebateSideOutputSchema>;
 /**
  * 討論のフェーズ分析要素スキーマ
  *
- * preprocess で null/非オブジェクトを空オブジェクトに変換し、
- * 各フィールドは catch で安全なデフォルト値にフォールバックする。
- * これにより phaseAnalysis の要素が不正な場合も TypeError にならない。
+ * preprocess で null/非オブジェクトを空オブジェクトに変換してから内部スキーマを適用する。
+ * これにより、AI が phaseAnalysis の要素を null・数値・文字列で出力した場合でも
+ * TypeError にならず、各フィールドは catch でデフォルト値にフォールバックする。
  */
 export const DebatePhaseAnalysisSchema = z.preprocess(
   (val) => (val !== null && typeof val === 'object' ? val : {}),
