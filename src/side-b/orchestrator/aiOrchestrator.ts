@@ -67,6 +67,11 @@ import {
   strategyBacktesterAgent,
   type StrategyBacktesterRunResult,
 } from '../agents/StrategyBacktesterAgent';
+import {
+  BullBearDebateAgent,
+  bullBearDebateAgent,
+  type BullBearDebateResult,
+} from '../agents/BullBearDebateAgent';
 
 // ===========================================
 // 型定義
@@ -77,6 +82,8 @@ import {
  */
 export type AITradePlanWithOptionalBacktest = AITradePlanWithTypes & {
   strategyBacktest?: StrategyBacktesterRunResult;
+  /** Phase 7: Bull vs Bear 討論結果（メモリ上のみ） */
+  bullBearDebate?: BullBearDebateResult;
 };
 
 /**
@@ -132,6 +139,7 @@ export class AIOrchestrator {
   private devilsAdvocate: DevilsAdvocateAgent;
   private hypothesisGenerator: HypothesisGeneratorAgent;
   private strategyBacktester: StrategyBacktesterAgent;
+  private bullBearDebate: BullBearDebateAgent;
 
   constructor(
     researchAI?: ResearchAIService,
@@ -141,6 +149,7 @@ export class AIOrchestrator {
     devilsAdvocate?: DevilsAdvocateAgent,
     hypothesisGenerator?: HypothesisGeneratorAgent,
     strategyBacktester?: StrategyBacktesterAgent,
+    bullBearDebate?: BullBearDebateAgent,
   ) {
     this.researchAI = researchAI || researchAIService;
     this.planAI = planAI || planAIService;
@@ -149,6 +158,7 @@ export class AIOrchestrator {
     this.devilsAdvocate = devilsAdvocate || devilsAdvocateAgent;
     this.hypothesisGenerator = hypothesisGenerator || hypothesisGeneratorAgent;
     this.strategyBacktester = strategyBacktester || strategyBacktesterAgent;
+    this.bullBearDebate = bullBearDebate || bullBearDebateAgent;
   }
 
   /**
@@ -417,7 +427,35 @@ export class AIOrchestrator {
         }
       }
 
-      // 4c. Plan AI 呼び出し
+      // 4c. Bull vs Bear 討論（Phase 7: Strategy Thinker の意思決定直前）
+      let debateResult: BullBearDebateResult | undefined;
+      let debateTokens = 0;
+      try {
+        const tDebate = Date.now();
+        debateResult = await this.bullBearDebate.debate({
+          symbol,
+          timeframe: planTimeframe,
+          lensSnapshot,
+          candidateHypotheses,
+          specialistAnalyses: specialistBundle
+            ? {
+                trend: specialistBundle.trend ?? undefined,
+                oscillator: specialistBundle.oscillator ?? undefined,
+                volatilityVolume: specialistBundle.volatilityVolume ?? undefined,
+              }
+            : undefined,
+        });
+        debateTokens = debateResult.tokenUsage;
+        console.log(
+          `[Orchestrator] Bull vs Bear 討論完了: ${String(Date.now() - tDebate)}ms, ` +
+          `preferred=${debateResult.output.synthesis.preferredDirection}, ` +
+          `confidence=${String(debateResult.output.synthesis.preferredConfidence)}`,
+        );
+      } catch (debateErr) {
+        console.warn('[Orchestrator] Bull vs Bear 討論失敗（Plan AI へ続行）:', debateErr);
+      }
+
+      // 4d. Plan AI 呼び出し
       console.log(`[Orchestrator] Plan AI 呼び出し (候補仮説: ${candidateHypotheses.length}個)`);
       const planInput: PlanAIInput = {
         research,
@@ -444,7 +482,7 @@ export class AIOrchestrator {
         id: `${symbol}-${dateStr}-${index + 1}`,
       }));
 
-      // 4d. シナリオを StrategyDSL に落とし即時 BT（Phase 6.7b、Devil's Advocate より前）
+      // 4e. シナリオを StrategyDSL に落とし即時 BT（Phase 6.7b、Devil's Advocate より前）
       let strategyBacktest: StrategyBacktesterRunResult | undefined;
       if (scenariosWithId.length > 0) {
         const tBt = Date.now();
@@ -506,13 +544,14 @@ export class AIOrchestrator {
 
       return {
         success: true,
-        data: { ...saved, strategyBacktest },
+        data: { ...saved, strategyBacktest, bullBearDebate: debateResult },
         cached: false,
         tokenUsage:
           researchTokens +
           planResult.tokenUsage +
           devilsAdvocateTokens +
-          hypothesisGeneratorTokens,
+          hypothesisGeneratorTokens +
+          debateTokens,
       };
     } catch (error) {
       console.error(`[Orchestrator] プラン生成エラー:`, error);
