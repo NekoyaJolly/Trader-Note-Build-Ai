@@ -428,31 +428,34 @@ export class AIOrchestrator {
       }
 
       // 4c. Bull vs Bear 討論（Phase 7: Strategy Thinker の意思決定直前）
+      // テスト環境では外部 LLM 呼び出しを防ぐためスキップ（DI でモックを渡さない場合の安全弁）
       let debateResult: BullBearDebateResult | undefined;
       let debateTokens = 0;
-      try {
-        const tDebate = Date.now();
-        debateResult = await this.bullBearDebate.debate({
-          symbol,
-          timeframe: planTimeframe,
-          lensSnapshot,
-          candidateHypotheses,
-          specialistAnalyses: specialistBundle
-            ? {
-                trend: specialistBundle.trend ?? undefined,
-                oscillator: specialistBundle.oscillator ?? undefined,
-                volatilityVolume: specialistBundle.volatilityVolume ?? undefined,
-              }
-            : undefined,
-        });
-        debateTokens = debateResult.tokenUsage;
-        console.log(
-          `[Orchestrator] Bull vs Bear 討論完了: ${String(Date.now() - tDebate)}ms, ` +
-          `preferred=${debateResult.output.synthesis.preferredDirection}, ` +
-          `confidence=${String(debateResult.output.synthesis.preferredConfidence)}`,
-        );
-      } catch (debateErr) {
-        console.warn('[Orchestrator] Bull vs Bear 討論失敗（Plan AI へ続行）:', debateErr);
+      if (process.env.NODE_ENV !== 'test') {
+        try {
+          const tDebate = Date.now();
+          debateResult = await this.bullBearDebate.debate({
+            symbol,
+            timeframe: planTimeframe,
+            lensSnapshot,
+            candidateHypotheses,
+            specialistAnalyses: specialistBundle
+              ? {
+                  trend: specialistBundle.trend ?? undefined,
+                  oscillator: specialistBundle.oscillator ?? undefined,
+                  volatilityVolume: specialistBundle.volatilityVolume ?? undefined,
+                }
+              : undefined,
+          });
+          debateTokens = debateResult.tokenUsage;
+          console.log(
+            `[Orchestrator] Bull vs Bear 討論完了: ${String(Date.now() - tDebate)}ms, ` +
+            `preferred=${debateResult.output.synthesis.preferredDirection}, ` +
+            `confidence=${String(debateResult.output.synthesis.preferredConfidence)}`,
+          );
+        } catch (debateErr) {
+          console.warn('[Orchestrator] Bull vs Bear 討論失敗（Plan AI へ続行）:', debateErr);
+        }
       }
 
       // 4d. Plan AI 呼び出し
@@ -537,7 +540,8 @@ export class AIOrchestrator {
         overallConfidence: planResult.output.overallConfidence,
         warnings: aggregatedWarnings,
         aiModel: planResult.model,
-        tokenUsage: planResult.tokenUsage + devilsAdvocateTokens,
+        // debateTokens を加算してコスト追跡値を API 返却値と揃える
+        tokenUsage: planResult.tokenUsage + devilsAdvocateTokens + debateTokens,
       });
 
       console.log(`[Orchestrator] プラン保存完了: ${saved.id}`);

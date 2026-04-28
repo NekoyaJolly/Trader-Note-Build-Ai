@@ -85,8 +85,18 @@ function mockAIResponse(output: unknown) {
     ok: true,
     json: () =>
       Promise.resolve({
-        choices: [{ message: { content: JSON.stringify(output) } }],
-        usage: { total_tokens: 500 },
+        id: 'chatcmpl-test',
+        object: 'chat.completion',
+        created: 1234567890,
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: JSON.stringify(output) },
+            finish_reason: 'stop',
+            logprobs: null,
+          },
+        ],
+        usage: { prompt_tokens: 100, completion_tokens: 400, total_tokens: 500 },
         model: 'test-model',
       }),
   });
@@ -269,8 +279,18 @@ describe('BullBearDebateAgent.debate', () => {
       ok: true,
       json: () =>
         Promise.resolve({
-          choices: [{ message: { content: fencedContent } }],
-          usage: { total_tokens: 450 },
+          id: 'chatcmpl-test',
+          object: 'chat.completion',
+          created: 1234567890,
+          choices: [
+            {
+              index: 0,
+              message: { role: 'assistant', content: fencedContent },
+              finish_reason: 'stop',
+              logprobs: null,
+            },
+          ],
+          usage: { prompt_tokens: 50, completion_tokens: 400, total_tokens: 450 },
           model: 'test-model',
         }),
     });

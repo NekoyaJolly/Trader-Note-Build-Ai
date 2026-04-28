@@ -11,7 +11,7 @@
  * - 各派の主張には確信度を含める
  * - 出力は構造化された情報（シナリオ、確信度、根拠、合意事項など）
  * - 既存のレンズ分析結果を討論の入力として使う
- * - AIProvider パターンを踏襲（OpenAI 互換 API）
+ * - fetch で OpenAI 互換 API に直接接続し、OpenAIChatCompletionResponseSchema で安全にパース
  *
  * 統合ポイント:
  *   aiOrchestrator.ts の generatePlan() 内、
@@ -23,77 +23,34 @@
 import { config, modelFor } from '../../config';
 import { loadPromptWithGlobal } from '../prompts/loader';
 import { serializeLensSnapshot, type LensFeatureSnapshot } from '../lenses';
-import type { SpecialistBundle } from './specialists/types';
+import type {
+  TrendAnalysis,
+  OscillatorAnalysis,
+  VolatilityVolumeAnalysis,
+} from './specialists/types';
 import type { EdgeHypothesis } from '../models/edgeHypothesis';
 import { extractJson } from './llmJsonExtract';
+import {
+  DebateSideOutputSchema,
+  DebateMarketContextSchema,
+  DebateSynthesisSchema,
+  type DebateSideOutput,
+  type DebatePhaseAnalysis,
+  type DebateSynthesis,
+  type DebateMarketContext,
+  type BullBearDebateOutput,
+} from '../../schemas/api/sideB';
+import {
+  parseOpenAIResponse,
+  OpenAIChatCompletionResponseSchema,
+} from '../../schemas/external/openai';
 
 // ===========================================
-// 型定義
+// 型定義（Zod スキーマから推論、sideB.ts で定義）
 // ===========================================
 
-/** 討論における各派（Bull/Bear）のシナリオ */
-export interface DebateSideOutput {
-  /** ベストシナリオの説明 */
-  scenario: string;
-  /** 確信度（0-100） */
-  confidence: number;
-  /** 根拠の配列 */
-  rationale: string[];
-  /** シナリオが有効になる条件 */
-  keyConditions: string[];
-  /** リスク要因 */
-  risks: string[];
-  /** 時間軸 */
-  timeHorizon: 'short_term' | 'medium_term' | 'both';
-}
-
-/** 統合分析のフェーズ */
-export interface DebatePhaseAnalysis {
-  /** フェーズ名 */
-  phase: string;
-  /** 方向 */
-  direction: 'long' | 'short' | 'wait';
-  /** 有効条件 */
-  condition: string;
-  /** 確信度（0-100） */
-  confidence: number;
-}
-
-/** 討論の統合結果 */
-export interface DebateSynthesis {
-  /** 優勢な方向 */
-  preferredDirection: 'long' | 'short' | 'neutral';
-  /** 優勢方向の確信度 */
-  preferredConfidence: number;
-  /** 統合判断の根拠 */
-  reasoning: string;
-  /** フェーズ別分析 */
-  phaseAnalysis: DebatePhaseAnalysis[];
-  /** 両派の合意事項 */
-  consensusPoints: string[];
-  /** 両派の分岐点 */
-  divergencePoints: string[];
-  /** Strategy Thinker への示唆 */
-  actionableInsight: string;
-}
-
-/** 市場コンテキスト */
-export interface DebateMarketContext {
-  /** 市場状況の要約 */
-  summary: string;
-  /** 優勢なバイアス */
-  dominantBias: 'bullish' | 'bearish' | 'neutral';
-  /** バイアスの強さ（0-100） */
-  biasStrength: number;
-}
-
-/** 討論の全出力 */
-export interface BullBearDebateOutput {
-  marketContext: DebateMarketContext;
-  bull: DebateSideOutput;
-  bear: DebateSideOutput;
-  synthesis: DebateSynthesis;
-}
+// 外部から参照できるように再エクスポート
+export type { DebateSideOutput, DebatePhaseAnalysis, DebateSynthesis, DebateMarketContext, BullBearDebateOutput };
 
 /** 討論実行結果（トークン使用量等のメタ情報付き） */
 export interface BullBearDebateResult {
@@ -108,10 +65,11 @@ export interface BullBearDebateInput {
   timeframe: string;
   lensSnapshot?: LensFeatureSnapshot;
   candidateHypotheses?: EdgeHypothesis[];
+  /** 専門家分析の結果（具体型を使用して型安全を確保） */
   specialistAnalyses?: {
-    trend?: unknown;
-    oscillator?: unknown;
-    volatilityVolume?: unknown;
+    trend?: TrendAnalysis;
+    oscillator?: OscillatorAnalysis;
+    volatilityVolume?: VolatilityVolumeAnalysis;
   };
 }
 
@@ -119,121 +77,53 @@ export interface BullBearDebateInput {
 // バリデーション
 // ===========================================
 
-const VALID_DIRECTIONS = ['long', 'short', 'neutral'] as const;
-const VALID_BIASES = ['bullish', 'bearish', 'neutral'] as const;
-const VALID_TIME_HORIZONS = ['short_term', 'medium_term', 'both'] as const;
-const VALID_PHASE_DIRECTIONS = ['long', 'short', 'wait'] as const;
-
 /**
- * DebateSideOutput をバリデーションする
+ * 各派（bull/bear）の出力を Zod スキーマでバリデーションする。
+ * エラー時はフィールドパスを含むカスタムメッセージで再スローする。
  */
-function validateSideOutput(data: unknown, side: string): DebateSideOutput {
-  if (!data || typeof data !== 'object') {
-    throw new Error(`${side}: must be an object`);
+function parseSideOutput(data: unknown, side: 'bull' | 'bear'): DebateSideOutput {
+  const result = DebateSideOutputSchema.safeParse(data);
+  if (!result.success) {
+    // 最初のエラーのパスを "bull.scenario" などの形式で組み立てて再スロー
+    const issue = result.error.issues[0];
+    const fieldPath = [side, ...issue.path.map(String)].join('.');
+    throw new Error(`${fieldPath}: ${issue.message}`);
   }
-  const obj = data as Record<string, unknown>;
-
-  if (typeof obj.scenario !== 'string' || obj.scenario.length < 5) {
-    throw new Error(`${side}.scenario: must be a non-empty string`);
-  }
-  if (typeof obj.confidence !== 'number' || obj.confidence < 0 || obj.confidence > 100) {
-    throw new Error(`${side}.confidence: must be a number 0-100`);
-  }
-  if (!Array.isArray(obj.rationale) || obj.rationale.length === 0) {
-    throw new Error(`${side}.rationale: must be a non-empty array`);
-  }
-  const rationale = (obj.rationale as unknown[]).map(String);
-
-  const keyConditions = Array.isArray(obj.keyConditions)
-    ? (obj.keyConditions as unknown[]).map(String)
-    : [];
-  const risks = Array.isArray(obj.risks)
-    ? (obj.risks as unknown[]).map(String)
-    : [];
-
-  const timeHorizon = VALID_TIME_HORIZONS.includes(obj.timeHorizon as typeof VALID_TIME_HORIZONS[number])
-    ? (obj.timeHorizon as DebateSideOutput['timeHorizon'])
-    : 'both';
-
-  return {
-    scenario: obj.scenario as string,
-    confidence: obj.confidence as number,
-    rationale,
-    keyConditions,
-    risks,
-    timeHorizon,
-  };
+  return result.data;
 }
 
 /**
- * AI レスポンスを BullBearDebateOutput にバリデーションして変換する
+ * AI レスポンスを BullBearDebateOutput にバリデーションして変換する。
+ *
+ * - null/非オブジェクト、marketContext・synthesis 欠落は throw（必須フィールド）
+ * - bull/bear の scenario/confidence/rationale 不正は Zod エラーとしてフィールドパス付きで throw
+ * - dominantBias・timeHorizon 不正は neutral/'both' にフォールバック
+ * - biasStrength・preferredConfidence は 0-100 にクランプ
+ * - phaseAnalysis 欠落または要素が非オブジェクト（null 等）は空配列/デフォルト値にフォールバック
  */
 export function validateBullBearDebateOutput(data: unknown): BullBearDebateOutput {
+  // 最上位の型チェック
   if (!data || typeof data !== 'object') {
     throw new Error('Bull vs Bear debate output must be an object');
   }
   const obj = data as Record<string, unknown>;
 
-  // marketContext
-  const mc = obj.marketContext as Record<string, unknown> | undefined;
-  if (!mc || typeof mc !== 'object') {
+  // marketContext の存在チェック（Zod は内部フィールドをフォールバックで扱う）
+  if (!obj.marketContext || typeof obj.marketContext !== 'object') {
     throw new Error('marketContext must be an object');
   }
-  const marketContext: DebateMarketContext = {
-    summary: typeof mc.summary === 'string' ? mc.summary : '',
-    dominantBias: VALID_BIASES.includes(mc.dominantBias as typeof VALID_BIASES[number])
-      ? (mc.dominantBias as DebateMarketContext['dominantBias'])
-      : 'neutral',
-    biasStrength: typeof mc.biasStrength === 'number'
-      ? Math.max(0, Math.min(100, mc.biasStrength))
-      : 50,
-  };
 
-  // bull & bear
-  const bull = validateSideOutput(obj.bull, 'bull');
-  const bear = validateSideOutput(obj.bear, 'bear');
-
-  // synthesis
-  const syn = obj.synthesis as Record<string, unknown> | undefined;
-  if (!syn || typeof syn !== 'object') {
+  // synthesis の存在チェック
+  if (!obj.synthesis || typeof obj.synthesis !== 'object') {
     throw new Error('synthesis must be an object');
   }
 
-  const phaseAnalysis: DebatePhaseAnalysis[] = Array.isArray(syn.phaseAnalysis)
-    ? (syn.phaseAnalysis as unknown[]).map((raw, idx) => {
-        const p = raw as Record<string, unknown>;
-        return {
-          phase: typeof p.phase === 'string' ? p.phase : `Phase ${idx + 1}`,
-          direction: VALID_PHASE_DIRECTIONS.includes(p.direction as typeof VALID_PHASE_DIRECTIONS[number])
-            ? (p.direction as DebatePhaseAnalysis['direction'])
-            : 'wait',
-          condition: typeof p.condition === 'string' ? p.condition : '',
-          confidence: typeof p.confidence === 'number'
-            ? Math.max(0, Math.min(100, p.confidence))
-            : 50,
-        };
-      })
-    : [];
-
-  const synthesis: DebateSynthesis = {
-    preferredDirection: VALID_DIRECTIONS.includes(syn.preferredDirection as typeof VALID_DIRECTIONS[number])
-      ? (syn.preferredDirection as DebateSynthesis['preferredDirection'])
-      : 'neutral',
-    preferredConfidence: typeof syn.preferredConfidence === 'number'
-      ? Math.max(0, Math.min(100, syn.preferredConfidence))
-      : 50,
-    reasoning: typeof syn.reasoning === 'string' ? syn.reasoning : '',
-    phaseAnalysis,
-    consensusPoints: Array.isArray(syn.consensusPoints)
-      ? (syn.consensusPoints as unknown[]).map(String)
-      : [],
-    divergencePoints: Array.isArray(syn.divergencePoints)
-      ? (syn.divergencePoints as unknown[]).map(String)
-      : [],
-    actionableInsight: typeof syn.actionableInsight === 'string' ? syn.actionableInsight : '',
+  return {
+    marketContext: DebateMarketContextSchema.parse(obj.marketContext),
+    bull: parseSideOutput(obj.bull, 'bull'),
+    bear: parseSideOutput(obj.bear, 'bear'),
+    synthesis: DebateSynthesisSchema.parse(obj.synthesis),
   };
-
-  return { marketContext, bull, bear, synthesis };
 }
 
 // ===========================================
@@ -384,16 +274,15 @@ export class BullBearDebateAgent {
       throw new Error(`Bull vs Bear Debate API エラー: ${response.status} - ${body}`);
     }
 
-    const data = (await response.json()) as {
-      choices?: { message?: { content?: string } }[];
-      usage?: { total_tokens?: number };
-      model?: string;
-    };
+    const rawData: unknown = await response.json();
 
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) {
-      throw new Error('Bull vs Bear Debate API からの応答が空です');
-    }
+    // OpenAIChatCompletionResponseSchema で安全にパースしてメタ情報を取得
+    const chatResult = OpenAIChatCompletionResponseSchema.safeParse(rawData);
+    const tokenUsage = chatResult.success ? (chatResult.data.usage?.total_tokens ?? 0) : 0;
+    const model = chatResult.success ? chatResult.data.model : this.model;
+
+    // parseOpenAIResponse でコンテンツ文字列を安全に抽出（未知の形式は throw）
+    const content = parseOpenAIResponse(rawData);
 
     const extracted = extractJson(content);
     if (!extracted.ok) {
@@ -404,8 +293,8 @@ export class BullBearDebateAgent {
 
     return {
       content: extracted.data,
-      tokenUsage: data.usage?.total_tokens || 0,
-      model: data.model || this.model,
+      tokenUsage,
+      model,
     };
   }
 
