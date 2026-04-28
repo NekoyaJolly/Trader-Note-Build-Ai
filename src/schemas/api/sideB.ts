@@ -914,6 +914,12 @@ export const AgentStatusResponseSchema = z.object({
   state: z.string(),
   cycleCount: z.number(),
   watchSymbols: z.array(z.string()),
+  startedAt: z.string().datetime().optional(),
+  lastTickAt: z.string().datetime().optional(),
+  nextTickAt: z.string().datetime().optional(),
+  lastAction: z.string().optional(),
+  lastError: z.string().optional(),
+  lastTickDurationMs: z.number().optional(),
   memory: z.object({
     currentState: z.string(),
     recentTradeResults: z.array(z.object({

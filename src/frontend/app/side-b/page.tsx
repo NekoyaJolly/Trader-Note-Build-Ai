@@ -53,6 +53,12 @@ interface AgentStatus {
   state: string;
   cycleCount: number;
   watchSymbols: string[];
+  startedAt?: string;
+  lastTickAt?: string;
+  nextTickAt?: string;
+  lastAction?: string;
+  lastError?: string;
+  lastTickDurationMs?: number;
   memory: {
     currentState: string;
     recentTradeResults: TradeResult[];
@@ -86,6 +92,19 @@ const stateConfig: Record<string, { color: string; bg: string; label: string; ic
 
 function getStateDisplay(state: string) {
   return stateConfig[state] || { color: "text-gray-400", bg: "bg-gray-500/20", label: state, icon: "❓" };
+}
+
+function formatStatusDateTime(value?: string): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString("ja-JP", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }
 
 /**
@@ -375,6 +394,30 @@ export default function SideBDashboard() {
               ))}
             </div>
           )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-700/50 text-xs">
+            <div className="rounded-lg bg-slate-800/50 px-3 py-2">
+              <p className="text-gray-500">最終Tick</p>
+              <p className="text-gray-200 font-mono">{formatStatusDateTime(status?.lastTickAt)}</p>
+              {typeof status?.lastTickDurationMs === "number" && (
+                <p className="text-gray-600 mt-0.5">{status.lastTickDurationMs}ms</p>
+              )}
+            </div>
+            <div className="rounded-lg bg-slate-800/50 px-3 py-2">
+              <p className="text-gray-500">次回予定</p>
+              <p className="text-gray-200 font-mono">{formatStatusDateTime(status?.nextTickAt)}</p>
+              {status?.startedAt && (
+                <p className="text-gray-600 mt-0.5">開始: {formatStatusDateTime(status.startedAt)}</p>
+              )}
+            </div>
+            <div className="rounded-lg bg-slate-800/50 px-3 py-2">
+              <p className="text-gray-500">直近アクション</p>
+              <p className="text-gray-200 line-clamp-2">{status?.lastAction || "—"}</p>
+              {status?.lastError && (
+                <p className="text-red-400 mt-0.5 line-clamp-1">{status.lastError}</p>
+              )}
+            </div>
+          </div>
 
           {error && (
             <div className="mt-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30">

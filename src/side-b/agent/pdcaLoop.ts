@@ -104,6 +104,12 @@ export class PDCALoop {
     private isRunning: boolean = false;
     private timerId?: NodeJS.Timeout;
     private thinkingLog: ThinkingLogEntry[] = [];
+    private startedAt?: Date;
+    private lastTickAt?: Date;
+    private nextTickAt?: Date;
+    private lastAction?: string;
+    private lastError?: string;
+    private lastTickDurationMs?: number;
 
     constructor(config?: Partial<PDCALoopConfig>) {
         this.config = { ...DEFAULT_PDCA_CONFIG, ...config };
@@ -139,6 +145,9 @@ export class PDCALoop {
         }
 
         this.isRunning = true;
+        this.startedAt = new Date();
+        this.lastAction = 'PDCAループを開始しました';
+        this.lastError = undefined;
         this.memory.setWatchSymbols(this.config.symbols);
         this.log('PDCAループを開始します');
         this.log(`  監視シンボル: ${this.config.symbols.join(', ')}`);
@@ -162,6 +171,8 @@ export class PDCALoop {
         }
 
         this.isRunning = false;
+        this.nextTickAt = undefined;
+        this.lastAction = 'PDCAループを停止しました';
         this.memory.setState('IDLE');
         this.log('PDCAループを停止しました');
     }
@@ -505,6 +516,12 @@ export class PDCALoop {
         summary: string;
         config: PDCALoopConfig;
         recentLog: ThinkingLogEntry[];
+        startedAt?: Date;
+        lastTickAt?: Date;
+        nextTickAt?: Date;
+        lastAction?: string;
+        lastError?: string;
+        lastTickDurationMs?: number;
     } {
         return {
             isRunning: this.isRunning,
@@ -512,6 +529,12 @@ export class PDCALoop {
             summary: this.memory.getSummary(),
             config: this.config,
             recentLog: this.thinkingLog.slice(-20),
+            startedAt: this.startedAt,
+            lastTickAt: this.lastTickAt,
+            nextTickAt: this.nextTickAt,
+            lastAction: this.lastAction,
+            lastError: this.lastError,
+            lastTickDurationMs: this.lastTickDurationMs,
         };
     }
 
@@ -530,13 +553,24 @@ export class PDCALoop {
     private scheduleTick(delayMs: number): void {
         if (!this.isRunning) return;
 
+        this.nextTickAt = new Date(Date.now() + delayMs);
         this.timerId = setTimeout(async () => {
+            const started = Date.now();
+            this.nextTickAt = undefined;
             try {
                 const result = await this.tick();
+                this.lastTickAt = new Date();
+                this.lastAction = result.action;
+                this.lastError = undefined;
+                this.lastTickDurationMs = Date.now() - started;
                 this.log(`  → ${result.action} (次回: ${(result.nextCheckMs / 1000).toFixed(0)}秒後)`);
                 this.scheduleTick(result.nextCheckMs);
             } catch (error) {
                 console.error('[PDCALoop] ティックエラー:', error);
+                this.lastTickAt = new Date();
+                this.lastAction = 'ティックエラー';
+                this.lastError = error instanceof Error ? error.message : String(error);
+                this.lastTickDurationMs = Date.now() - started;
                 // エラー時は通常間隔でリトライ
                 this.scheduleTick(this.config.normalIntervalMs);
             }
