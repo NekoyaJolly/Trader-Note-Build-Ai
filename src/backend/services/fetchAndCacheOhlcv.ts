@@ -2,7 +2,8 @@
  * OHLCVデータ取得・キャッシュサービス
  *
  * 目的:
- * - **cTrader Open API のみ**（ブローカーと同一の価格・足区切りを正とする）
+ * - **cTrader Open API 優先**（ブローカーと同一の価格・足区切りを正とする）
+ * - cTrader が使えない/失敗した場合のみ Twelve Data にフォールバック
  * - cTrader APIの時間範囲制限に対応した分割リクエスト
  * - 取得データをDBに永続化（upsert）
  * - 進捗コールバック対応（SSE配信用）
@@ -12,6 +13,8 @@ import { PrismaClient } from '@prisma/client';
 import { CTraderDataService } from './ctrader/ctraderDataService';
 import { CTraderAuthService } from './ctrader/ctraderAuthService';
 import { splitDateRange } from '../../utils/dateRangeChunks';
+import { normalizeCTraderSymbol, toTwelveDataSymbol } from '../../utils/symbolNormalization';
+import { TwelveDataTimeSeriesResponseSchema } from '../../schemas/external/twelveData';
 
 const prisma = new PrismaClient();
 const ctraderAuthService = new CTraderAuthService(prisma);
@@ -40,7 +43,7 @@ export interface FetchAndCacheResult {
     success: boolean;
     cachedCount: number;
     error?: string;
-    source?: 'ctrader';
+    source?: 'ctrader' | 'twelvedata';
     details?: {
         symbol: string;
         timeframe: string;
@@ -105,25 +108,20 @@ export async function fetchAndCacheOhlcv(
     onProgress?: OnProgressCallback
 ): Promise<FetchAndCacheResult> {
     try {
+        const normalizedSymbol = normalizeCTraderSymbol(symbol);
         if (!ctraderDataService.isConfigured()) {
-            return {
-                success: false,
-                cachedCount: 0,
-                error: 'cTrader API が未設定です。.env の CTRADER_CLIENT_ID / CTRADER_CLIENT_SECRET を確認してください。',
-            };
+            console.warn('[fetchAndCacheOhlcv] cTrader API が未設定のため Twelve Data フォールバックを試行します');
+            return await fetchFromTwelveDataFallback(normalizedSymbol, timeframe, startDate, endDate, onProgress);
         }
 
-        const ctraderResult = await fetchFromCTrader(symbol, timeframe, startDate, endDate, onProgress);
+        const ctraderResult = await fetchFromCTrader(normalizedSymbol, timeframe, startDate, endDate, onProgress);
         if (ctraderResult.success) {
-            await updateDataPresetMetadata(symbol, timeframe);
+            await updateDataPresetMetadata(normalizedSymbol, timeframe);
             return ctraderResult;
         }
 
-        return {
-            success: false,
-            cachedCount: 0,
-            error: ctraderResult.error ?? 'cTrader から OHLCV を取得できませんでした（接続・トークン・シンボル名を確認）',
-        };
+        console.warn(`[fetchAndCacheOhlcv] cTrader 取得失敗、Twelve Data フォールバックを試行: ${ctraderResult.error}`);
+        return await fetchFromTwelveDataFallback(normalizedSymbol, timeframe, startDate, endDate, onProgress);
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : '不明なエラー';
         console.error(`[fetchAndCacheOhlcv] エラー:`, error);
@@ -132,6 +130,120 @@ export async function fetchAndCacheOhlcv(
             cachedCount: 0,
             error: `データ取得エラー: ${errorMessage}`,
         };
+    }
+}
+
+async function fetchFromTwelveDataFallback(
+    symbol: string,
+    timeframe: string,
+    startDate: Date,
+    endDate: Date,
+    onProgress?: OnProgressCallback,
+): Promise<FetchAndCacheResult> {
+    const apiKey = process.env.TWELVE_DATA_API_KEY || process.env.MARKET_API_KEY;
+    const apiUrl = process.env.TWELVE_DATA_API_URL || 'https://api.twelvedata.com';
+    if (!apiKey) {
+        return {
+            success: false,
+            cachedCount: 0,
+            error: 'Twelve Data APIキーが未設定です（TWELVE_DATA_API_KEY または MARKET_API_KEY）',
+        };
+    }
+
+    try {
+        onProgress?.({
+            current: 0,
+            total: 1,
+            message: 'Twelve Data フォールバックでOHLCV取得中...',
+            source: 'twelvedata',
+            percent: 10,
+        });
+
+        const intervalMinutes = getIntervalMinutes(timeframe);
+        const expectedBars = Math.ceil((endDate.getTime() - startDate.getTime()) / (intervalMinutes * 60 * 1000));
+        const outputSize = Math.min(Math.max(expectedBars + 50, 1), MAX_BARS_PER_REQUEST);
+        const url = new URL(`${apiUrl}/time_series`);
+        url.searchParams.set('symbol', toTwelveDataSymbol(symbol));
+        url.searchParams.set('interval', toTwelveDataTimeframe(timeframe));
+        url.searchParams.set('start_date', formatTwelveDataDate(startDate));
+        url.searchParams.set('end_date', formatTwelveDataDate(endDate));
+        url.searchParams.set('outputsize', String(outputSize));
+        url.searchParams.set('apikey', apiKey);
+
+        const response = await fetch(url.toString());
+        if (!response.ok) {
+            return {
+                success: false,
+                cachedCount: 0,
+                error: `Twelve Data API エラー: ${response.status} ${response.statusText}`,
+            };
+        }
+
+        const json = await response.json();
+        const parsed = TwelveDataTimeSeriesResponseSchema.safeParse(json);
+        if (!parsed.success) {
+            return {
+                success: false,
+                cachedCount: 0,
+                error: `Twelve Data レスポンスパースエラー: ${parsed.error.message}`,
+            };
+        }
+        if ('code' in parsed.data) {
+            return {
+                success: false,
+                cachedCount: 0,
+                error: `Twelve Data API エラー: ${parsed.data.message}`,
+            };
+        }
+
+        const successData = parsed.data;
+        const allData = successData.values
+            .map((v) => ({
+                timestamp: new Date(v.datetime),
+                open: v.open,
+                high: v.high,
+                low: v.low,
+                close: v.close,
+                volume: v.volume ?? 0,
+            }))
+            .filter((bar) => bar.timestamp >= startDate && bar.timestamp <= endDate)
+            .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+
+        if (allData.length === 0) {
+            return {
+                success: false,
+                cachedCount: 0,
+                error: `Twelve Data: ${symbol}/${timeframe} のデータが取得できませんでした`,
+            };
+        }
+
+        onProgress?.({
+            current: 1,
+            total: 1,
+            message: `Twelve Data取得分をDB保存中... (${allData.length}件)`,
+            source: 'twelvedata',
+            percent: 80,
+        });
+
+        const cachedCount = await batchUpsertOhlcv(symbol, timeframe, allData, 'twelvedata');
+        await updateDataPresetMetadata(symbol, timeframe);
+
+        return {
+            success: true,
+            cachedCount,
+            source: 'twelvedata',
+            details: {
+                symbol,
+                timeframe,
+                startDate: startDate.toISOString(),
+                endDate: endDate.toISOString(),
+                fetchedCount: allData.length,
+                chunks: 1,
+            },
+        };
+    } catch (error) {
+        const msg = error instanceof Error ? error.message : '不明なエラー';
+        return { success: false, cachedCount: 0, error: `Twelve Data フォールバックエラー: ${msg}` };
     }
 }
 
@@ -316,7 +428,8 @@ function getUpsertParallelSize(): number {
 async function batchUpsertOhlcv(
     symbol: string,
     timeframe: string,
-    data: Array<{ timestamp: Date; open: number; high: number; low: number; close: number; volume: number }>
+    data: Array<{ timestamp: Date; open: number; high: number; low: number; close: number; volume: number }>,
+    source: 'ctrader' | 'twelvedata' = 'ctrader',
 ): Promise<number> {
     const parallelSize = getUpsertParallelSize();
     let cachedCount = 0;
@@ -338,6 +451,7 @@ async function batchUpsertOhlcv(
                     low: candle.low,
                     close: candle.close,
                     volume: candle.volume,
+                    source,
                 },
                 create: {
                     symbol,
@@ -348,6 +462,7 @@ async function batchUpsertOhlcv(
                     low: candle.low,
                     close: candle.close,
                     volume: candle.volume,
+                    source,
                 },
             });
             cachedCount++;
@@ -372,6 +487,7 @@ async function batchUpsertOhlcv(
                             low: candle.low,
                             close: candle.close,
                             volume: candle.volume,
+                            source,
                         },
                         create: {
                             symbol,
@@ -382,6 +498,7 @@ async function batchUpsertOhlcv(
                             low: candle.low,
                             close: candle.close,
                             volume: candle.volume,
+                            source,
                         },
                     })
                 )
@@ -424,7 +541,7 @@ async function verifyOhlcvSaved(
         if (verified) {
             console.log(
                 `[verifyOhlcvSaved] ✅ 検証OK: ${symbol}/${timeframe} 保存${savedCount}件→取得${fetchedCount}件 ` +
-                `(サンプル: ${fetched[0]?.timestamp.toISOString()} O=${fetched[0]?.open} C=${fetched[0]?.close})`
+                `(サンプル: ${fetched[0]?.timestamp.toISOString()} O=${String(fetched[0]?.open)} C=${String(fetched[0]?.close)})`
             );
         } else {
             console.warn(
@@ -495,4 +612,22 @@ function getIntervalMinutes(timeframe: string): number {
         '1d': 1440,
     };
     return map[timeframe] || 60;
+}
+
+function toTwelveDataTimeframe(timeframe: string): string {
+    const map: Record<string, string> = {
+        '1m': '1min',
+        '5m': '5min',
+        '15m': '15min',
+        '30m': '30min',
+        '1h': '1h',
+        '4h': '4h',
+        '1d': '1day',
+        '1w': '1week',
+    };
+    return map[timeframe] || timeframe;
+}
+
+function formatTwelveDataDate(date: Date): string {
+    return date.toISOString().replace('T', ' ').slice(0, 19);
 }

@@ -30,6 +30,7 @@ import {
     type MaterializationPath,
     type MaterializeForValidationOptions,
 } from './types';
+import { normalizeCTraderSymbol } from '../../utils/symbolNormalization';
 
 // ===========================================
 // 型
@@ -109,10 +110,11 @@ export class MaterializationService {
         }
 
         // 7. 対象シンボル（仮説の symbols から取得、複数なら最初）
-        const symbol = hypothesis.symbols[0];
-        if (!symbol) {
+        const symbolRaw = hypothesis.symbols[0];
+        if (!symbolRaw) {
             throw new MaterializationError('仮説に symbols が設定されていない');
         }
+        const symbol = normalizeCTraderSymbol(symbolRaw);
         const timeframe = hypothesis.timeframes[0];
 
         // 8. side（expectedDirection 'either' は 'long' を仮置き）
@@ -151,7 +153,7 @@ export class MaterializationService {
         input: MaterializeFromVirtualTradeInput,
     ): Promise<string> {
         const side: TradeSide = input.side === 'short' ? 'sell' : 'buy';
-        const featureVector = input.featureVector ?? new Array(12).fill(0.5);
+        const featureVector = input.featureVector ?? Array<number>(12).fill(0.5);
 
         const { tradeNoteId } = await this.createTradeAndNote({
             symbol: input.symbol,
@@ -325,7 +327,7 @@ export class MaterializationService {
         return v;
     }
 
-    private numOrZero(x: unknown): number {
+    private numOrZero<T>(x: T): number {
         return typeof x === 'number' && Number.isFinite(x) ? x : 0;
     }
 
@@ -377,11 +379,11 @@ export class MaterializationService {
                     entryPrice: args.entryPrice,
                     featureVector: args.featureVector,
                     timeframe: args.timeframe,
-                    indicators: {} as Prisma.InputJsonValue,
+                    indicators: {},
                     indicatorConfig:
                         args.indicatorConfig === undefined || args.indicatorConfig === null
                             ? undefined
-                            : (args.indicatorConfig as Prisma.InputJsonValue),
+                            : args.indicatorConfig,
                     status: 'archived', // Side-A の UI に表示しない（汚染防止）
                     tags: args.hypothesisId
                         ? ['edge_hypothesis_temp', `hyp:${args.hypothesisId}`]
