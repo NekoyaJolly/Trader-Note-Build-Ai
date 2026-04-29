@@ -22,6 +22,7 @@
 
 import { config, modelFor } from '../../config';
 import { loadPromptWithGlobal } from '../prompts/loader';
+import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import { serializeLensSnapshot, type LensFeatureSnapshot } from '../lenses';
 import type {
   TrendAnalysis,
@@ -166,7 +167,7 @@ export class BullBearDebateAgent {
     }
 
     try {
-      const systemPrompt = loadPromptWithGlobal('bull_bear_debate');
+      const systemPrompt = await this.resolveSystemPrompt();
       const userPrompt = this.buildUserPrompt(input);
       const raw = await this.callAI(systemPrompt, userPrompt);
       const validated = validateBullBearDebateOutput(raw.content);
@@ -178,6 +179,22 @@ export class BullBearDebateAgent {
     } catch (error) {
       console.error('[BullBearDebate] 討論失敗:', error);
       return this.fallback('Bull vs Bear 討論の呼び出しに失敗しました。');
+    }
+  }
+
+  /**
+   * Phase 6.7a: PromptRegistry.getCompositeActive で DB の __global__ + bull_bear_debate active を合成。
+   * Registry 未 seed / DB 不整合時は loadPromptWithGlobal にフォールバック。
+   */
+  private async resolveSystemPrompt(): Promise<string> {
+    try {
+      return await promptRegistry.getCompositeActive('bull_bear_debate');
+    } catch (err) {
+      console.warn(
+        '[BullBearDebate] Registry 合成に失敗、ファイル fallback:',
+        err instanceof Error ? err.message : err,
+      );
+      return loadPromptWithGlobal('bull_bear_debate');
     }
   }
 

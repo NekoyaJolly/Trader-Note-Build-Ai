@@ -14,6 +14,7 @@
 
 import { config, modelFor } from '../../config';
 import { loadPromptWithGlobal } from '../prompts/loader';
+import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import type { AITradeNote } from '../models/aiTradeNote';
 import { extractJson } from './llmJsonExtract';
 import type {
@@ -297,7 +298,7 @@ export class DiscoveryAgent {
 
         if (topSeparations.length > 0 && this.apiKey) {
             try {
-                const systemPrompt = loadPromptWithGlobal('discovery');
+                const systemPrompt = await this.resolveSystemPrompt();
                 const userPrompt = this.buildUserPrompt(
                     truncated.length,
                     periodStart,
@@ -466,6 +467,22 @@ export class DiscoveryAgent {
             }
         }
         return false;
+    }
+
+    /**
+     * Phase 6.7a: PromptRegistry.getCompositeActive で DB の __global__ + discovery active を合成。
+     * Registry 未 seed / DB 不整合時は loadPromptWithGlobal にフォールバック。
+     */
+    private async resolveSystemPrompt(): Promise<string> {
+        try {
+            return await promptRegistry.getCompositeActive('discovery');
+        } catch (err) {
+            console.warn(
+                '[DiscoveryAgent] Registry 合成に失敗、ファイル fallback:',
+                err instanceof Error ? err.message : err,
+            );
+            return loadPromptWithGlobal('discovery');
+        }
     }
 
     private async callAI(

@@ -28,6 +28,7 @@ import {
 import { BacktesterAgent } from './BacktesterAgent';
 import { AIProvider } from '../agent/aiProvider';
 import { loadPromptWithGlobal } from '../prompts/loader';
+import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import { modelFor } from '../../config';
 
 // ===========================================
@@ -165,12 +166,28 @@ export class StrategistAgent {
     // LLM 呼び出し（best-effort）
     // ===========================================
 
+    /**
+     * Phase 6.7a: PromptRegistry.getCompositeActive で DB の __global__ + strategist active を合成。
+     * Registry 未 seed / DB 不整合時は loadPromptWithGlobal にフォールバック。
+     */
+    private async resolveSystemPrompt(): Promise<string> {
+        try {
+            return await promptRegistry.getCompositeActive('strategist');
+        } catch (err) {
+            console.warn(
+                '[Strategist] Registry 合成に失敗、ファイル fallback:',
+                err instanceof Error ? err.message : err,
+            );
+            return loadPromptWithGlobal('strategist');
+        }
+    }
+
     private async interpretWithLLM(
         hyp: EdgeHypothesis,
         report: ConsolidatedValidationReport,
         check: PromoteCheck,
     ): Promise<{ interpretation: string; actionableInsights: string[] }> {
-        const systemPrompt = loadPromptWithGlobal('strategist');
+        const systemPrompt = await this.resolveSystemPrompt();
         const userPrompt = this.buildUserPrompt(hyp, report, check);
 
         const response = await this.ai.chat(
