@@ -18,7 +18,6 @@ import type {
 import {
   validatePlanAIOutput,
 } from '../models';
-import type { MarketAnalysis } from '../models/marketAnalysis';
 import type { MarketResearchWithTypes } from '../repositories';
 import {
   CORE_TRADING_RULES,
@@ -34,6 +33,7 @@ import { PromptRegistry } from '../prompts/registry/PromptRegistry';
 import type { LensFeatureSnapshot } from '../lenses';
 import type { EdgeHypothesis } from '../models/edgeHypothesis';
 import { extractJson } from '../agents/llmJsonExtract';
+import type { JsonValue } from '../../utils/jsonValue';
 
 // ===========================================
 // 型定義
@@ -66,9 +66,9 @@ export interface PlanAIInput {
    * 未指定時は従来通りレンズ特徴量だけを参照する(後方互換)。
    */
   specialistAnalyses?: {
-    trend?: unknown;
-    oscillator?: unknown;
-    volatilityVolume?: unknown;
+    trend?: object;
+    oscillator?: object;
+    volatilityVolume?: object;
   };
 }
 
@@ -365,7 +365,7 @@ ${candidateContext}
     }
   }
 
-  private async callAI(prompt: string): Promise<{ content: unknown; tokenUsage: number; model: string }> {
+  private async callAI(prompt: string): Promise<{ content: JsonValue; tokenUsage: number; model: string }> {
     const systemPrompt = await this.resolveStrategyThinkerSystemPrompt();
 
     const response = await fetch(`${this.baseURL}/chat/completions`, {

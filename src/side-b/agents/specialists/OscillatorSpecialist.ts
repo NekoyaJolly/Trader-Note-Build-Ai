@@ -16,6 +16,7 @@ import {
 } from './specialistCommon';
 import type { PromptRegistry } from '../../prompts/registry/PromptRegistry';
 import type { RandomGenerator } from '../../prompts/registry/variantSelector';
+import type { JsonValue } from '../../../utils/jsonValue';
 
 const OSCILLATOR_RELEVANT_LENSES = ['current_analysis', 'dow_theory'];
 
@@ -59,7 +60,7 @@ export class OscillatorSpecialist {
       scoringInput: input,
       validate: (raw) => {
         if (!raw || typeof raw !== 'object') return null;
-        return this.validate(raw as Record<string, unknown>);
+        return this.validate(raw as Record<string, JsonValue | undefined>);
       },
       registry: this.deps.registry,
       rand: this.deps.rand,
@@ -81,7 +82,7 @@ ${lensDump}
 上記を見て、システムプロンプトのスキーマに従った JSON オブジェクトだけを返してください。`;
   }
 
-  private validate(raw: Record<string, unknown>): OscillatorAnalysis {
+  private validate(raw: Record<string, JsonValue | undefined>): OscillatorAnalysis {
     return {
       momentum: pickEnum(raw.momentum, MOMENTUM_STATES, 'neutral'),
       divergence: pickEnum(raw.divergence, DIVERGENCE_STATES, 'none'),

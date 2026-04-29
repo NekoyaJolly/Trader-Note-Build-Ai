@@ -17,6 +17,7 @@
  */
 
 import type { ScoringFunction } from './types';
+import type { JsonValue } from '../../../utils/jsonValue';
 
 /**
  * HypothesisGenerator: 構造バリデーション通過率 + 仮説件数 + 推論長 の合成スコア。
@@ -26,12 +27,12 @@ import type { ScoringFunction } from './types';
  * - lensRelevance を含む仮説の比率でボーナス
  */
 export const hypothesisGeneratorScoreFn: ScoringFunction<
-  unknown,
+  object,
   {
     hypotheses?: Array<{
       statement?: string;
       reasoning?: string;
-      conditions?: unknown[];
+      conditions?: JsonValue[];
       lensRelevance?: Record<string, number>;
     }>;
   }
@@ -68,7 +69,7 @@ function specialistScoreBase(
   },
   requiredFields: string[],
 ): number {
-  const obj = output as Record<string, unknown>;
+  const obj = output as Record<string, JsonValue | undefined>;
   const fieldsFilled =
     requiredFields.filter((k) => obj[k] !== undefined && obj[k] !== null).length /
     requiredFields.length;
@@ -81,7 +82,7 @@ function specialistScoreBase(
 }
 
 export const trendSpecialistScoreFn: ScoringFunction<
-  unknown,
+  object,
   {
     trendState?: string;
     trendStrength?: number;
@@ -101,7 +102,7 @@ export const trendSpecialistScoreFn: ScoringFunction<
   ]);
 
 export const oscillatorSpecialistScoreFn: ScoringFunction<
-  unknown,
+  object,
   {
     momentum?: string;
     divergence?: string;
@@ -112,7 +113,7 @@ export const oscillatorSpecialistScoreFn: ScoringFunction<
   specialistScoreBase(output, ['momentum', 'divergence', 'interpretation', 'confidence']);
 
 export const volatilityVolumeSpecialistScoreFn: ScoringFunction<
-  unknown,
+  object,
   {
     volatilityRegime?: string;
     breakoutRisk?: string;
@@ -130,14 +131,11 @@ export const volatilityVolumeSpecialistScoreFn: ScoringFunction<
   ]);
 
 /** エージェント名 → スコア関数 のマッピング(MVP 実装分のみ)。 */
-export const SCORING_FUNCTIONS: Record<string, ScoringFunction<unknown, unknown>> = {
-  hypothesis_generator: hypothesisGeneratorScoreFn as ScoringFunction<unknown, unknown>,
-  trend_specialist: trendSpecialistScoreFn as ScoringFunction<unknown, unknown>,
-  oscillator_specialist: oscillatorSpecialistScoreFn as ScoringFunction<unknown, unknown>,
-  volatility_volume_specialist: volatilityVolumeSpecialistScoreFn as ScoringFunction<
-    unknown,
-    unknown
-  >,
+export const SCORING_FUNCTIONS: Record<string, ScoringFunction<object, object>> = {
+  hypothesis_generator: hypothesisGeneratorScoreFn,
+  trend_specialist: trendSpecialistScoreFn,
+  oscillator_specialist: oscillatorSpecialistScoreFn,
+  volatility_volume_specialist: volatilityVolumeSpecialistScoreFn,
 };
 
 /**
@@ -146,6 +144,6 @@ export const SCORING_FUNCTIONS: Record<string, ScoringFunction<unknown, unknown>
  */
 export function getScoringFunction(
   agentName: string,
-): ScoringFunction<unknown, unknown> | null {
+): ScoringFunction<object, object> | null {
   return SCORING_FUNCTIONS[agentName] ?? null;
 }

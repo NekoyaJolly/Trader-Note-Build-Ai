@@ -32,6 +32,7 @@ import type {
 import type { LensFeatureSnapshot } from '../lenses';
 import { evaluateConditions } from './conditionMatcher';
 import type { EdgeLedgerStats, ObservationInput } from './types';
+import { fromPrismaJsonValue, toPrismaJsonValue } from '../../utils/prismaJson';
 
 type PrismaEdge = Awaited<ReturnType<typeof prisma.edgeHypothesis.findFirst>> & object;
 
@@ -91,7 +92,7 @@ export class EdgeLedger {
             data: {
                 statement: input.statement,
                 category: input.category,
-                conditions: input.conditions as unknown as Prisma.InputJsonValue,
+                conditions: toPrismaJsonValue(input.conditions),
                 expectedDirection: input.expectedDirection,
                 status: input.status,
                 statusNote: input.statusNote,
@@ -104,14 +105,14 @@ export class EdgeLedger {
                 totalPnlPips: input.totalPnlPips,
                 avgRR: input.avgRR,
                 backtestResults: input.backtestResults
-                    ? (input.backtestResults as unknown as Prisma.InputJsonValue)
+                    ? toPrismaJsonValue(input.backtestResults)
                     : undefined,
                 walkForwardResults: input.walkForwardResults
-                    ? (input.walkForwardResults as unknown as Prisma.InputJsonValue)
+                    ? toPrismaJsonValue(input.walkForwardResults)
                     : undefined,
                 source: input.source,
                 lensRelevance: input.lensRelevance
-                    ? (input.lensRelevance as unknown as Prisma.InputJsonValue)
+                    ? toPrismaJsonValue(input.lensRelevance)
                     : undefined,
                 firstObservedAt: input.firstObservedAt ?? now,
                 lastObservedAt: input.firstObservedAt ?? now,
@@ -120,18 +121,18 @@ export class EdgeLedger {
                 relatedNoteIds: input.relatedNoteIds ?? [],
                 // Phase 4b
                 defaultRiskManagement: input.defaultRiskManagement
-                    ? (input.defaultRiskManagement as unknown as Prisma.InputJsonValue)
+                    ? toPrismaJsonValue(input.defaultRiskManagement)
                     : undefined,
                 materializedTradeNoteIds: input.materializedTradeNoteIds ?? [],
                 invalidationConditions: input.invalidationConditions
-                    ? (input.invalidationConditions as unknown as Prisma.InputJsonValue)
+                    ? toPrismaJsonValue(input.invalidationConditions)
                     : undefined,
                 confirmationNote: input.confirmationNote,
                 screeningResult: input.screeningResult
-                    ? (input.screeningResult as unknown as Prisma.InputJsonValue)
+                    ? toPrismaJsonValue(input.screeningResult)
                     : undefined,
                 fullValidationReport: input.fullValidationReport
-                    ? (input.fullValidationReport as unknown as Prisma.InputJsonValue)
+                    ? toPrismaJsonValue(input.fullValidationReport)
                     : undefined,
                 confirmationInterpretation: input.confirmationInterpretation,
                 rejectionInterpretation: input.rejectionInterpretation,
@@ -152,7 +153,7 @@ export class EdgeLedger {
         if (patch.statement !== undefined) data.statement = patch.statement;
         if (patch.category !== undefined) data.category = patch.category;
         if (patch.conditions !== undefined) {
-            data.conditions = patch.conditions as unknown as Prisma.InputJsonValue;
+            data.conditions = toPrismaJsonValue(patch.conditions);
         }
         if (patch.expectedDirection !== undefined) data.expectedDirection = patch.expectedDirection;
         if (patch.status !== undefined) {
@@ -169,10 +170,10 @@ export class EdgeLedger {
         if (patch.totalPnlPips !== undefined) data.totalPnlPips = patch.totalPnlPips;
         if (patch.avgRR !== undefined) data.avgRR = patch.avgRR;
         if (patch.backtestResults !== undefined) {
-            data.backtestResults = patch.backtestResults as unknown as Prisma.InputJsonValue;
+            data.backtestResults = toPrismaJsonValue(patch.backtestResults);
         }
         if (patch.walkForwardResults !== undefined) {
-            data.walkForwardResults = patch.walkForwardResults as unknown as Prisma.InputJsonValue;
+            data.walkForwardResults = toPrismaJsonValue(patch.walkForwardResults);
         }
         if (patch.source !== undefined) data.source = patch.source;
         if (patch.lensRelevance !== undefined) {
@@ -184,20 +185,20 @@ export class EdgeLedger {
         if (patch.relatedNoteIds !== undefined) data.relatedNoteIds = { set: patch.relatedNoteIds };
         // Phase 4b
         if (patch.defaultRiskManagement !== undefined) {
-            data.defaultRiskManagement = patch.defaultRiskManagement as unknown as Prisma.InputJsonValue;
+            data.defaultRiskManagement = toPrismaJsonValue(patch.defaultRiskManagement);
         }
         if (patch.materializedTradeNoteIds !== undefined) {
             data.materializedTradeNoteIds = { set: patch.materializedTradeNoteIds };
         }
         if (patch.invalidationConditions !== undefined) {
-            data.invalidationConditions = patch.invalidationConditions as unknown as Prisma.InputJsonValue;
+            data.invalidationConditions = toPrismaJsonValue(patch.invalidationConditions);
         }
         if (patch.confirmationNote !== undefined) data.confirmationNote = patch.confirmationNote;
         if (patch.screeningResult !== undefined) {
-            data.screeningResult = patch.screeningResult as unknown as Prisma.InputJsonValue;
+            data.screeningResult = toPrismaJsonValue(patch.screeningResult);
         }
         if (patch.fullValidationReport !== undefined) {
-            data.fullValidationReport = patch.fullValidationReport as unknown as Prisma.InputJsonValue;
+            data.fullValidationReport = toPrismaJsonValue(patch.fullValidationReport);
         }
         if (patch.confirmationInterpretation !== undefined) {
             data.confirmationInterpretation = patch.confirmationInterpretation;
@@ -417,8 +418,8 @@ export class EdgeLedger {
             data: {
                 status: 'confirmed',
                 statusUpdatedAt: new Date(),
-                backtestResults: backtest as unknown as Prisma.InputJsonValue,
-                walkForwardResults: walkForward as unknown as Prisma.InputJsonValue,
+                backtestResults: toPrismaJsonValue(backtest),
+                walkForwardResults: toPrismaJsonValue(walkForward),
                 lastTestedAt: new Date(),
                 confirmationNote: interpretation,
             },
@@ -492,7 +493,7 @@ export class EdgeLedger {
             data: {
                 status: 'confirmed',
                 statusUpdatedAt: new Date(),
-                fullValidationReport: report as unknown as Prisma.InputJsonValue,
+                fullValidationReport: toPrismaJsonValue(report),
                 confirmationInterpretation: interpretation,
                 actionableInsights: actionableInsights
                     ? { set: actionableInsights }
@@ -518,7 +519,7 @@ export class EdgeLedger {
                 status: 'rejected',
                 statusUpdatedAt: new Date(),
                 statusNote: reason,
-                fullValidationReport: report as unknown as Prisma.InputJsonValue,
+                fullValidationReport: toPrismaJsonValue(report),
                 rejectionInterpretation: interpretation,
                 actionableInsights: actionableInsights
                     ? { set: actionableInsights }
@@ -537,7 +538,7 @@ export class EdgeLedger {
             data: {
                 status: 'screening_passed',
                 statusUpdatedAt: new Date(),
-                screeningResult: result as unknown as Prisma.InputJsonValue,
+                screeningResult: toPrismaJsonValue(result),
                 lastTestedAt: new Date(),
                 materializedTradeNoteIds: {
                     set: [result.tradeNoteId],
@@ -565,7 +566,7 @@ export class EdgeLedger {
                 status: 'rejected',
                 statusUpdatedAt: new Date(),
                 statusNote: result.reasons?.join('; '),
-                screeningResult: result as unknown as Prisma.InputJsonValue,
+                screeningResult: toPrismaJsonValue(result),
                 lastTestedAt: new Date(),
                 materializedTradeNoteIds: {
                     set: [result.tradeNoteId],
@@ -703,7 +704,7 @@ function mapPrismaToEdgeHypothesis(row: NonNullable<PrismaEdge>): EdgeHypothesis
         id: row.id,
         statement: row.statement,
         category: row.category as EdgeCategory,
-        conditions: row.conditions as unknown as MachineReadableCondition[],
+        conditions: fromPrismaJsonValue<MachineReadableCondition[]>(row.conditions) ?? [],
         expectedDirection: row.expectedDirection as EdgeHypothesis['expectedDirection'],
         status: row.status as EdgeStatus,
         statusUpdatedAt: row.statusUpdatedAt,
@@ -716,10 +717,10 @@ function mapPrismaToEdgeHypothesis(row: NonNullable<PrismaEdge>): EdgeHypothesis
         breakevenCount: row.breakevenCount,
         totalPnlPips: row.totalPnlPips.toNumber(),
         avgRR: row.avgRR.toNumber(),
-        backtestResults: row.backtestResults as unknown as BacktestSummary | undefined,
-        walkForwardResults: row.walkForwardResults as unknown as WalkForwardSummary | undefined,
+        backtestResults: fromPrismaJsonValue<BacktestSummary>(row.backtestResults),
+        walkForwardResults: fromPrismaJsonValue<WalkForwardSummary>(row.walkForwardResults),
         source: row.source as EdgeSource,
-        lensRelevance: row.lensRelevance as unknown as Record<string, number> | undefined,
+        lensRelevance: fromPrismaJsonValue<Record<string, number>>(row.lensRelevance),
         firstObservedAt: row.firstObservedAt,
         lastObservedAt: row.lastObservedAt,
         lastTestedAt: row.lastTestedAt ?? undefined,
@@ -729,19 +730,19 @@ function mapPrismaToEdgeHypothesis(row: NonNullable<PrismaEdge>): EdgeHypothesis
         relatedNoteIds: row.relatedNoteIds,
         // Phase 4b
         defaultRiskManagement: row.defaultRiskManagement
-            ? (row.defaultRiskManagement as unknown as EdgeHypothesis['defaultRiskManagement'])
+            ? fromPrismaJsonValue<EdgeHypothesis['defaultRiskManagement']>(row.defaultRiskManagement)
             : undefined,
         materializedTradeNoteIds: row.materializedTradeNoteIds ?? [],
         invalidationConditions: row.invalidationConditions
-            ? (row.invalidationConditions as unknown as MachineReadableCondition[])
+            ? fromPrismaJsonValue<MachineReadableCondition[]>(row.invalidationConditions)
             : undefined,
         confirmationNote: row.confirmationNote ?? undefined,
         screeningResult: row.screeningResult
-            ? (row.screeningResult as unknown as ScreeningResult)
+            ? fromPrismaJsonValue<ScreeningResult>(row.screeningResult)
             : undefined,
         // Phase 4c
         fullValidationReport: row.fullValidationReport
-            ? (row.fullValidationReport as unknown as ConsolidatedValidationReport)
+            ? fromPrismaJsonValue<ConsolidatedValidationReport>(row.fullValidationReport)
             : undefined,
         confirmationInterpretation: row.confirmationInterpretation ?? undefined,
         rejectionInterpretation: row.rejectionInterpretation ?? undefined,

@@ -16,6 +16,7 @@ import {
 } from '../../prompts/registry/variantSelector';
 import { getScoringFunction } from '../../prompts/abtest/scoringFunctions';
 import type { PromptVersion } from '../../prompts/registry/types';
+import type { JsonValue } from '../../../utils/jsonValue';
 
 export const SPECIALIST_REQUEST_TIMEOUT_MS = 60_000;
 
@@ -48,7 +49,7 @@ export async function callLLMForJson(
   systemPrompt: string,
   userPrompt: string,
   retries = 3,
-): Promise<unknown | null> {
+): Promise<JsonValue | null> {
   for (let i = 0; i < retries; i++) {
     try {
       const res = await ai.chat(
@@ -78,7 +79,7 @@ export async function callLLMForJson(
  * 応答本文中の ``` 誤マッチを回避、max_tokens 打ち切りの Unterminated string にも
  * 対応。
  */
-export function parseJsonLoose(content: string): unknown | null {
+export function parseJsonLoose(content: string): JsonValue | null {
   const extracted = extractJson(content);
   return extracted.ok ? extracted.data : null;
 }
@@ -96,22 +97,22 @@ export function parseJsonLoose(content: string): unknown | null {
  * registry に active が無い / 読み込み失敗時は fallbackSystemPrompt で単純実行
  * (スコアリングなし、recordUsage なし、従来互換)。
  */
-export interface SpecialistVariantRunOptions<TOutput> {
+export interface SpecialistVariantRunOptions<TOutput extends object> {
   agentName: string;
   userPrompt: string;
   /** registry 未登録時のフォールバックプロンプト(loadPrompt 結果を渡す) */
   fallbackSystemPrompt: string;
   /** スコアリング関数に渡す入力(snapshot など) */
-  scoringInput: unknown;
+  scoringInput: object;
   /** LLM 応答 JSON をバリデートする関数(null なら不合格扱い) */
-  validate: (raw: unknown) => TOutput | null;
+  validate: (raw: JsonValue) => TOutput | null;
   /** PromptRegistry(テスト差し替え可) */
   registry?: PromptRegistry;
   /** 乱数生成器(テスト差し替え可) */
   rand?: RandomGenerator;
 }
 
-export interface SpecialistVariantRunResult<TOutput> {
+export interface SpecialistVariantRunResult<TOutput extends object> {
   output: TOutput | null;
   usedVersionId: string | null;
   wasExperimental: boolean;
@@ -122,7 +123,7 @@ export interface SpecialistVariantRunResult<TOutput> {
   usedFallbackPrompt: boolean;
 }
 
-export async function runSpecialistWithVariant<TOutput>(
+export async function runSpecialistWithVariant<TOutput extends object>(
   ai: AIProvider,
   options: SpecialistVariantRunOptions<TOutput>,
 ): Promise<SpecialistVariantRunResult<TOutput>> {
@@ -221,11 +222,11 @@ export async function runSpecialistWithVariant<TOutput>(
 }
 
 /** 単一プロンプトで LLM 呼出 → JSON 抽出 → バリデート。失敗時 null。 */
-async function runSingle<TOutput>(
+async function runSingle<TOutput extends object>(
   ai: AIProvider,
   systemPrompt: string,
   userPrompt: string,
-  validate: (raw: unknown) => TOutput | null,
+  validate: (raw: JsonValue) => TOutput | null,
 ): Promise<TOutput | null> {
   try {
     const res = await ai.chat(
@@ -262,9 +263,9 @@ async function composeSpecialistSystemPrompt(
   return content;
 }
 
-function scoreAndSuccess<TOutput>(
+function scoreAndSuccess<TOutput extends object>(
   output: TOutput | null,
-  scoringInput: unknown,
+  scoringInput: object,
   scoreFn: ReturnType<typeof getScoringFunction>,
 ): { score: number; success: boolean } {
   if (!output) return { score: 0, success: false };
@@ -291,14 +292,14 @@ async function safeRecord(
 }
 
 /** 数値を [min, max] にクランプ。非数値は fallback。 */
-export function clampNumber(x: unknown, min: number, max: number, fallback: number): number {
+export function clampNumber(x: JsonValue | undefined, min: number, max: number, fallback: number): number {
   if (typeof x !== 'number' || !Number.isFinite(x)) return fallback;
   return Math.max(min, Math.min(max, x));
 }
 
 /** 文字列が与えられた列挙値のいずれかに一致するか。違えば fallback。 */
 export function pickEnum<T extends string>(
-  x: unknown,
+  x: JsonValue | undefined,
   allowed: readonly T[],
   fallback: T,
 ): T {
