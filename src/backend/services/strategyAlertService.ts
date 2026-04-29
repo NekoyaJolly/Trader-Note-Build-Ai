@@ -8,8 +8,9 @@
  * - アプリ内通知 + Web Push 対応
  */
 
-import type { Prisma, StrategyAlert, StrategyAlertLog } from '@prisma/client';
+import type { StrategyAlert, StrategyAlertLog } from '@prisma/client';
 import { PrismaClient, AlertChannel, AlertStatus } from '@prisma/client';
+import type { JsonValue } from '../../utils/jsonValue';
 
 // Prismaクライアントのシングルトンインスタンス
 const prisma = new PrismaClient();
@@ -51,7 +52,7 @@ export interface TriggerAlertRequest {
   /** 一致スコア（0.0〜1.0） */
   matchScore: number;
   /** 条件成立時のインジケーター値 */
-  indicatorValues: Record<string, unknown>;
+  indicatorValues: Record<string, JsonValue | undefined>;
 }
 
 /** アラート発火結果 */
@@ -296,7 +297,7 @@ export async function triggerAlert(request: TriggerAlertRequest): Promise<Trigge
         data: {
           alertId: alert.id,
           matchScore,
-          indicatorValues: indicatorValues as Prisma.InputJsonValue,
+          indicatorValues,
           channel,
           success,
           errorMessage: success ? null : '送信失敗',
@@ -314,7 +315,7 @@ export async function triggerAlert(request: TriggerAlertRequest): Promise<Trigge
         data: {
           alertId: alert.id,
           matchScore,
-          indicatorValues: indicatorValues as Prisma.InputJsonValue,
+          indicatorValues,
           channel,
           success: false,
           errorMessage,
@@ -349,14 +350,14 @@ interface SendNotificationParams {
   strategyName: string;
   symbol: string;
   matchScore: number;
-  indicatorValues: Record<string, unknown>;
+  indicatorValues: Record<string, JsonValue | undefined>;
 }
 
 /**
  * チャネル別の通知送信
  */
 async function sendAlertNotification(params: SendNotificationParams): Promise<boolean> {
-  const { channel, strategyName, symbol, matchScore } = params;
+  const { channel } = params;
 
   switch (channel) {
     case AlertChannel.in_app:
@@ -366,7 +367,7 @@ async function sendAlertNotification(params: SendNotificationParams): Promise<bo
       return await sendWebPushNotification(params);
     
     default:
-      console.warn(`[StrategyAlertService] 未対応のチャネル: ${channel}`);
+      console.warn('[StrategyAlertService] 未対応のチャネル:', channel);
       return false;
   }
 }
@@ -385,10 +386,11 @@ async function sendInAppNotification(params: SendNotificationParams): Promise<bo
     
     const notificationsPath = path.join(process.cwd(), 'data', 'notifications.json');
     
-    let notifications: unknown[] = [];
+    let notifications: JsonValue[] = [];
     try {
       const content = await fs.readFile(notificationsPath, 'utf-8');
-      notifications = JSON.parse(content);
+      const parsed: JsonValue = JSON.parse(content) as JsonValue;
+      notifications = Array.isArray(parsed) ? parsed : [];
     } catch {
       // ファイルが存在しない場合は空配列で開始
       notifications = [];

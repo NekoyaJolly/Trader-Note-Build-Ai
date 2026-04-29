@@ -10,7 +10,6 @@ import type {
   NoteProfileConfig} from '../models/indicatorProfile';
 import {
   RESERVED_PROFILE_IDS,
-  isReservedProfileId,
   createNoteProfileConfig,
 } from '../models/indicatorProfile';
 import { v4 as uuidv4 } from 'uuid';
@@ -18,10 +17,10 @@ import fs from 'fs';
 import path from 'path';
 import { config } from '../config';
 import type { TradeNoteWithSummary} from '../backend/repositories/tradeNoteRepository';
-import { TradeNoteRepository, FindNotesOptions } from '../backend/repositories/tradeNoteRepository';
+import { TradeNoteRepository } from '../backend/repositories/tradeNoteRepository';
 import type { TradeSide, NoteStatus as PrismaNoteStatus} from '@prisma/client';
-import { Prisma } from '@prisma/client';
 import { toMarketContextJson } from '../models/prismaTypes';
+import type { JsonValue } from '../utils/jsonValue';
 
 /**
  * ストレージモード
@@ -608,7 +607,7 @@ export class TradeNoteService {
   /**
    * 12次元特徴量を計算（Side-Bと同じロジック）
    */
-  private calculate12DFeatures(ohlcvData: OHLCVData[], trade: Trade): {
+  private calculate12DFeatures(ohlcvData: OHLCVData[], _trade: Trade): {
     vector: number[];
     rsi: number;
     trendDirection: number;
@@ -657,7 +656,7 @@ export class TradeNoteService {
     try {
       const bbResult = indicatorService.calculate('bb', ohlcvData, { period: 20 });
       if (bbResult && typeof bbResult === 'object' && 'upper' in bbResult && 'middle' in bbResult && 'lower' in bbResult) {
-        const bb = bbResult as unknown as { upper: number[]; middle: number[]; lower: number[] };
+        const bb = bbResult as { upper: number[]; middle: number[]; lower: number[] };
         const latestClose = ohlcvData[ohlcvData.length - 1].close;
         const upper = bb.upper[bb.upper.length - 1];
         const lower = bb.lower[bb.lower.length - 1];
@@ -978,7 +977,7 @@ export class TradeNoteService {
    */
   private async loadAllNotesFromDb(): Promise<TradeNote[]> {
     const dbNotes = await this.repository.findAll(1000, 0);
-    return dbNotes.map(this.convertDbNoteToTradeNote);
+    return dbNotes.map((n) => this.convertDbNoteToTradeNote(n));
   }
 
   /**
@@ -997,7 +996,7 @@ export class TradeNoteService {
       if (file.endsWith('.json')) {
         const filepath = path.join(this.notesPath, file);
         const content = fs.readFileSync(filepath, 'utf-8');
-        const note = JSON.parse(content);
+        const note = JSON.parse(content) as TradeNote;
         // Convert date strings back to Date objects
         note.timestamp = new Date(note.timestamp);
         note.createdAt = new Date(note.createdAt);
@@ -1052,7 +1051,7 @@ export class TradeNoteService {
     }
 
     const content = fs.readFileSync(filepath, 'utf-8');
-    const note = JSON.parse(content);
+    const note = JSON.parse(content) as TradeNote;
     note.timestamp = new Date(note.timestamp);
     note.createdAt = new Date(note.createdAt);
 
@@ -1066,7 +1065,7 @@ export class TradeNoteService {
     // marketContext の型安全な変換
     let marketContext: MarketContext;
     if (dbNote.marketContext && typeof dbNote.marketContext === 'object' && !Array.isArray(dbNote.marketContext)) {
-      const mc = dbNote.marketContext as Record<string, unknown>;
+      const mc = dbNote.marketContext as Record<string, JsonValue | undefined>;
       marketContext = {
         timeframe: (mc.timeframe as string) || dbNote.timeframe || '15m',
         trend: (mc.trend as 'bullish' | 'bearish' | 'neutral') || 'neutral',

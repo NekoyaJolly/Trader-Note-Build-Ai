@@ -14,7 +14,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { EventEmitter } from 'events';
 import { CTraderAuthService } from '../ctrader/ctraderAuthService';
-import type { RealtimeTickService, TickDataInput, OHLCVBarInput } from './realtimeTickService';
+import type { RealtimeTickService, TickDataInput, OHLCVBarInput, PendingBar } from './realtimeTickService';
 import { getRealtimeTickService } from './realtimeTickService';
 import { getCloseStats, looksLikeMisScaledBars } from './realtimeSanity';
 import { config } from '../../../config';
@@ -22,11 +22,7 @@ import type { CTraderConnectionType } from '../ctrader/types/connection';
 import type {
   CTraderSymbolInfo,
   CTraderSpotEvent} from '../../../schemas/external/ctrader';
-import { 
-  CTraderAccount,
-  CTraderAccountListResponse,
-  CTraderAccountListResponseSchema
-} from '../../../schemas/external/ctrader';
+import { CTraderAccountListResponseSchema } from '../../../schemas/external/ctrader';
 
 // cTrader Layer ライブラリ（型定義なし）
 // @reiryoku/ctrader-layer は型定義がないため、型定義は types/connection.ts で提供
@@ -194,7 +190,7 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
     // TickService のイベントを転送
     this.tickService.on('tick', (tick: TickDataInput) => this.emit('tick', tick));
     this.tickService.on('bar', (bar: OHLCVBarInput) => this.emit('bar', bar));
-    this.tickService.on('pendingBar', (bar: unknown) => this.emit('pendingBar', bar));
+    this.tickService.on('pendingBar', (bar: PendingBar) => this.emit('pendingBar', bar));
   }
 
   /**
@@ -526,9 +522,6 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
         console.log(`[CTraderOrchestrator] Trendbar生データ: low=${sample.low}(=${sampleLow}), deltaOpen=${sample.deltaOpen}, deltaHigh=${sample.deltaHigh}, deltaClose=${sample.deltaClose}`);
       }
       
-      const symbolInfo = this.symbolInfoCache.get(symbolId);
-      const digits = symbolInfo?.digits || 2; // 表示用のdigits
-      
       const trendbars = (res.trendbar || []);
       const bars: OHLCVBarInput[] = trendbars.map((bar) => {
         const low = Number(bar.low) / PRICE_DIVISOR;
@@ -560,7 +553,7 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
   /**
    * 進行中のバーを取得
    */
-  getPendingBar(symbol: string): unknown {
+  getPendingBar(symbol: string): PendingBar | undefined {
     const timeframe = `${this.config.barIntervalSeconds}s`;
     return this.tickService.getPendingBar(symbol, timeframe);
   }
@@ -612,9 +605,11 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
     // Tick イベント
     // ctrader-layer は CTraderLayerEvent オブジェクトを渡す
     // 実際のデータは event.descriptor に格納されている
+    // ctrader-layer の .on は unknown 可変長のみ許容するため、先頭要素を狭く解釈する
+    // eslint-disable-next-line no-restricted-syntax
     connection.on('ProtoOASpotEvent', (...args: unknown[]) => {
-      // 型ガード: イベントデータを取得
       const rawEvent = args[0];
+      // 型ガード: イベントデータを取得
       if (!rawEvent || typeof rawEvent !== 'object') {
         return;
       }
@@ -767,6 +762,7 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
     });
 
     // エラーイベント
+    // eslint-disable-next-line no-restricted-syntax
     connection.on('error', (...args: unknown[]) => {
       const rawError = args[0];
       const error = rawError instanceof Error 

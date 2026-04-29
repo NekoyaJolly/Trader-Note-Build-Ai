@@ -18,6 +18,7 @@
 import { config, modelFor } from '../../config';
 import { loadPromptWithGlobal } from '../prompts/loader';
 import type { AITradeScenario, PlanMarketAnalysis } from '../models';
+import type { JsonValue } from '../../utils/jsonValue';
 import { extractJson } from './llmJsonExtract';
 
 // ===========================================
@@ -63,47 +64,60 @@ const VALID_LIKELIHOODS = ['low', 'medium', 'high'] as const;
 /**
  * AI レスポンスを DevilsAdvocateOutput にバリデーションして変換する
  */
-export function validateDevilsAdvocateOutput(data: unknown): DevilsAdvocateOutput {
-    if (!data || typeof data !== 'object') {
+export function validateDevilsAdvocateOutput(data: JsonValue): DevilsAdvocateOutput {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
         throw new Error("Devil's Advocate output must be an object");
     }
-    const obj = data as Record<string, unknown>;
+    const obj = data as Record<string, JsonValue | undefined>;
 
     if (!Array.isArray(obj.failureScenarios)) {
         throw new Error('failureScenarios must be an array');
     }
     const failureScenarios = obj.failureScenarios.map((raw) => {
-        const s = raw as Record<string, unknown>;
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+            throw new Error('failureScenario must be an object');
+        }
+        const s = raw as Record<string, JsonValue | undefined>;
         if (typeof s.description !== 'string' || typeof s.triggerConditions !== 'string') {
             throw new Error('failureScenario missing description/triggerConditions');
         }
-        const likelihood = s.estimatedLikelihood as string;
-        if (!VALID_LIKELIHOODS.includes(likelihood as (typeof VALID_LIKELIHOODS)[number])) {
-            throw new Error(`Invalid estimatedLikelihood: ${likelihood}`);
+        const likelihood = s.estimatedLikelihood;
+        const likelihoodStr = typeof likelihood === 'string' ? likelihood : '';
+        if (!VALID_LIKELIHOODS.includes(likelihoodStr as (typeof VALID_LIKELIHOODS)[number])) {
+            throw new Error(`Invalid estimatedLikelihood: ${likelihoodStr}`);
         }
         return {
             description: s.description,
             triggerConditions: s.triggerConditions,
-            estimatedLikelihood: likelihood as DevilsAdvocateOutput['failureScenarios'][number]['estimatedLikelihood'],
+            estimatedLikelihood: likelihoodStr as DevilsAdvocateOutput['failureScenarios'][number]['estimatedLikelihood'],
         };
     });
 
-    const wa = obj.weakestAssumption as Record<string, unknown> | undefined;
-    if (!wa || typeof wa.description !== 'string' || typeof wa.whyVulnerable !== 'string') {
+    const waRoot = obj.weakestAssumption;
+    if (!waRoot || typeof waRoot !== 'object' || Array.isArray(waRoot)) {
+        throw new Error('weakestAssumption missing or invalid');
+    }
+    const wa = waRoot as Record<string, JsonValue | undefined>;
+    if (typeof wa.description !== 'string' || typeof wa.whyVulnerable !== 'string') {
         throw new Error('weakestAssumption missing required fields');
     }
 
-    const rec = obj.recommendation as Record<string, unknown> | undefined;
-    if (!rec || typeof rec.rationale !== 'string') {
+    const recRoot = obj.recommendation;
+    if (!recRoot || typeof recRoot !== 'object' || Array.isArray(recRoot)) {
+        throw new Error('recommendation missing or invalid');
+    }
+    const rec = recRoot as Record<string, JsonValue | undefined>;
+    if (typeof rec.rationale !== 'string') {
         throw new Error('recommendation missing rationale');
     }
-    const action = rec.action as string;
+    const actionRaw = rec.action;
+    const action = typeof actionRaw === 'string' ? actionRaw : '';
     if (!VALID_ACTIONS.includes(action as (typeof VALID_ACTIONS)[number])) {
         throw new Error(`Invalid recommendation.action: ${action}`);
     }
 
     const suggestedModifications = Array.isArray(rec.suggestedModifications)
-        ? (rec.suggestedModifications as unknown[]).map(String)
+        ? rec.suggestedModifications.filter((x): x is string => typeof x === 'string')
         : undefined;
 
     return {
@@ -204,7 +218,7 @@ ${JSON.stringify(context, null, 2)}
     private async callAI(
         systemPrompt: string,
         userPrompt: string,
-    ): Promise<{ content: unknown; tokenUsage: number; model: string }> {
+    ): Promise<{ content: JsonValue; tokenUsage: number; model: string }> {
         const response = await fetch(`${this.baseURL}/chat/completions`, {
             method: 'POST',
             headers: {

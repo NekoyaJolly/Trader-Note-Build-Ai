@@ -14,10 +14,10 @@
 
 import type { JsonValue } from '../../../utils/jsonValue';
 
-/** 1 バリアントの実行結果。output は任意JSON型。 */
+/** 1 バリアントの実行結果。output は成功時のみ（失敗時は error を参照）。 */
 export interface AbVariantResult<TOutput = JsonValue> {
   promptVersionId: string;
-  output: TOutput;
+  output?: TOutput;
   /** エージェント毎のスコアリング関数が返す 0-1 のスコア */
   score: number;
   durationMs: number;
