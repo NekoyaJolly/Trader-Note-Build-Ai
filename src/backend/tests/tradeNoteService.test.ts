@@ -18,7 +18,7 @@ import path from 'path';
 jest.mock('uuid', () => ({ v4: () => '00000000-0000-4000-8000-000000000000' }));
 
 import { TradeNoteService } from '../../services/tradeNoteService';
-import { Trade } from '../../models/types';
+import type { Trade } from '../../models/types';
 import { config } from '../../config';
 
 describe('TradeNoteService', () => {
@@ -32,7 +32,7 @@ describe('TradeNoteService', () => {
     for (const file of createdFiles) {
       try {
         fs.unlinkSync(file);
-      } catch (_) {
+      } catch {
         // 既に削除済みでも無視
       }
     }

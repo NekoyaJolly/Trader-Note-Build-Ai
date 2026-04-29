@@ -10,8 +10,9 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { FeatureService, FeatureUpdateInput, SimilarNoteResult } from '../../services/featureService';
-import { OHLCVData } from '../../services/indicators/indicatorService';
+import { FeatureService } from '../../services/featureService';
+import type { OHLCVData } from '../../services/indicators/indicatorService';
+import { IndicatorService } from '../../services/indicators/indicatorService';
 
 const prisma = new PrismaClient();
 
@@ -163,11 +164,11 @@ describe('FeatureService', () => {
 
   describe('特徴量ベクトル生成', () => {
     it('OHLCV データから特徴量ベクトルを生成できる', () => {
-      const { IndicatorService } = require('../../services/indicators/indicatorService');
       const indicatorService = new IndicatorService();
       
       const ohlcvData = generateOHLCVData(100, 30);
-      const vector = indicatorService.generateFeatureVector(ohlcvData);
+      const snapshot = indicatorService.generateFeatureSnapshot(ohlcvData, '1h');
+      const vector = indicatorService.generateFeatureVector(snapshot);
       
       // ベクトルは数値配列であること
       expect(Array.isArray(vector)).toBe(true);
@@ -181,7 +182,6 @@ describe('FeatureService', () => {
     });
 
     it('同じデータからは同じベクトルが生成される', () => {
-      const { IndicatorService } = require('../../services/indicators/indicatorService');
       const indicatorService = new IndicatorService();
       
       // 固定データを使用
@@ -198,8 +198,12 @@ describe('FeatureService', () => {
         });
       }
       
-      const vector1 = indicatorService.generateFeatureVector(ohlcvData);
-      const vector2 = indicatorService.generateFeatureVector(ohlcvData);
+      const vector1 = indicatorService.generateFeatureVector(
+        indicatorService.generateFeatureSnapshot(ohlcvData, '1h'),
+      );
+      const vector2 = indicatorService.generateFeatureVector(
+        indicatorService.generateFeatureSnapshot(ohlcvData, '1h'),
+      );
       
       expect(vector1).toEqual(vector2);
     });

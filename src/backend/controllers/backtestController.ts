@@ -11,8 +11,8 @@
 import type { Request, Response } from 'express';
 import { getValidatedQuery } from '../../middleware/validateRequest';
 import type { BacktestParams} from '../../services/backtestService';
-import { BacktestService, BacktestSummary } from '../../services/backtestService';
-import { checkDataCoverage, CoverageCheckResult } from '../services/strategyBacktestService';
+import { BacktestService } from '../../services/backtestService';
+import { checkDataCoverage } from '../services/strategyBacktestService';
 
 /**
  * バックテスト実行リクエストボディ

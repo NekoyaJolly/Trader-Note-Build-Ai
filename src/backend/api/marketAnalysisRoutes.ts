@@ -112,11 +112,9 @@ router.get('/:symbol', async (req: Request, res: Response) => {
     console.log(`[MarketAnalysis] ${symbol} → ${normalizedSymbol} ${timeframe} × ${count}本 取得開始`);
 
     // OHLCVデータを取得
-    let ohlcvData: OHLCVData[];
-
     // すべての時間足に対応（1m専用メソッドは廃止）
     const marketData = await marketDataService.getHistoricalData(normalizedSymbol, timeframe, count);
-    ohlcvData = marketData.map(d => ({
+    const ohlcvData: OHLCVData[] = marketData.map(d => ({
       timestamp: d.timestamp,
       open: d.open,
       high: d.high,
@@ -134,8 +132,6 @@ router.get('/:symbol', async (req: Request, res: Response) => {
 
     // インジケーターを計算
     const closes = ohlcvData.map(d => d.close);
-    const highs = ohlcvData.map(d => d.high);
-    const lows = ohlcvData.map(d => d.low);
 
     // RSI計算（期間14）
     const rsiValues = closes.length >= 15 ? indicatorService.calculateRSI(closes, 14) : [];

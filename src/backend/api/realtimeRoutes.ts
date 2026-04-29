@@ -24,7 +24,18 @@ import type {
 import {
   getCTraderRealtimeOrchestrator
 } from '../services/realtime/ctraderRealtimeOrchestrator';
-import type { TickDataInput, OHLCVBarInput } from '../services/realtime/realtimeTickService';
+import type { TickDataInput, OHLCVBarInput, PendingBar } from '../services/realtime/realtimeTickService';
+import type { JsonValue } from '../../utils/jsonValue';
+
+/** Express の拡張（compression 等で optional flush が付く場合がある） */
+type ResponseWithFlush = Response & { flush?: () => void };
+
+function flushStreamResponse(res: Response): void {
+  const flush = (res as ResponseWithFlush).flush;
+  if (typeof flush === 'function') {
+    flush.call(res);
+  }
+}
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -396,14 +407,22 @@ router.get('/stream/:symbol', async (req: Request, res: Response) => {
 
   const orch = getOrchestrator(timeframe);
 
+type SseDataPayload =
+  | JsonValue
+  | TickDataInput
+  | OHLCVBarInput
+  | PendingBar
+  | {
+      bars: OHLCVBarInput[];
+      pendingBar: PendingBar | undefined;
+      status: ConnectionStatus;
+    };
+
   // SSE メッセージ送信ヘルパー（即座にフラッシュ）
-  const sendSSE = (event: string, data: unknown) => {
+  const sendSSE = (event: string, data: SseDataPayload) => {
     res.write(`event: ${event}\n`);
     res.write(`data: ${JSON.stringify(data)}\n\n`);
-    // Node.js の場合、write 後にフラッシュが必要な場合がある
-    if (typeof (res as unknown as { flush?: () => void }).flush === 'function') {
-      (res as unknown as { flush: () => void }).flush();
-    }
+    flushStreamResponse(res);
   };
 
   // 初期データを送信
@@ -435,9 +454,8 @@ router.get('/stream/:symbol', async (req: Request, res: Response) => {
   };
 
   // 進行中バーイベントハンドラ
-  const onPendingBar = (bar: unknown) => {
-    const pendingBar = bar as { symbol: string };
-    if (pendingBar.symbol === symbol || symbol === 'all') {
+  const onPendingBar = (bar: PendingBar) => {
+    if (bar.symbol === symbol || symbol === 'all') {
       sendSSE('pendingBar', bar);
     }
   };

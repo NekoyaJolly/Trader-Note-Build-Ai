@@ -552,10 +552,14 @@ async function executeBacktestStage(
       patterns: [],
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `analysis-engine に接続できません。Docker Compose で analysis-engine を起動しているか、ANALYSIS_ENGINE_URL を確認してください。詳細: ${message}`
+    const messageText = error instanceof Error ? error.message : String(error);
+    const wrapped = new Error(
+      `analysis-engine に接続できません。Docker Compose で analysis-engine を起動しているか、ANALYSIS_ENGINE_URL を確認してください。詳細: ${messageText}`
     );
+    if (error instanceof Error) {
+      (wrapped as Error & { cause?: Error }).cause = error;
+    }
+    throw wrapped;
   }
 
   const indicatorCache = new Map<string, number[]>();
@@ -922,16 +926,8 @@ function checkExit(
 
   // TP/SL ヒット判定
   // 同一バー内でTP/SL両方ヒットする場合はSL優先（保守的）
-  let tpHit = false;
-  let slHit = false;
-
-  if (side === 'buy') {
-    tpHit = bar.high >= tpPrice;
-    slHit = bar.low <= slPrice;
-  } else {
-    tpHit = bar.low <= tpPrice;
-    slHit = bar.high >= slPrice;
-  }
+  const tpHit = side === 'buy' ? bar.high >= tpPrice : bar.low <= tpPrice;
+  const slHit = side === 'buy' ? bar.low <= slPrice : bar.high >= slPrice;
 
   // 同一バーで両方ヒット → SL優先（保守的判定）
   if (slHit && tpHit) {

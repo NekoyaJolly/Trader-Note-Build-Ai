@@ -14,7 +14,6 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { z } from 'zod';
-import type { OptimizationMethod } from '@prisma/client';
 import type {
   CreateComparisonRequest,
   OptimizeRequest} from '../services/strategyComparisonService';

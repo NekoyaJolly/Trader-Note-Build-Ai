@@ -84,10 +84,14 @@ export class SessionService {
       return result.data;
     } catch (error) {
       if (error instanceof jwt.TokenExpiredError) {
-        throw new Error('トークンの有効期限が切れています');
+        const e = new Error('トークンの有効期限が切れています');
+        (e as Error & { cause?: Error }).cause = error;
+        throw e;
       }
       if (error instanceof jwt.JsonWebTokenError) {
-        throw new Error('無効なトークンです');
+        const e = new Error('無効なトークンです');
+        (e as Error & { cause?: Error }).cause = error;
+        throw e;
       }
       throw error;
     }

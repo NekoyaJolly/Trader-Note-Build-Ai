@@ -3,6 +3,7 @@ import { config } from '../../../config';
 import { TradeNoteRepository } from '../../repositories/tradeNoteRepository';
 import { MarketSnapshotRepository } from '../../repositories/marketSnapshotRepository';
 import { MatchResultRepository } from '../../repositories/matchResultRepository';
+import type { JsonValue } from '../../../utils/jsonValue';
 
 /**
  * 一致判定理由の詳細構造（UI表示用）
@@ -64,11 +65,11 @@ export class RuleBasedMatchEvaluator {
    * TradeNote.featureVector と同じスケールになるよう、Phase2 の FeatureExtractor と揃えた計算を行う。
    */
   buildMarketFeatureVector(snapshot: MarketSnapshot): number[] {
-    const indicators = (snapshot.indicators as Record<string, unknown>) || {};
+    const indicators = (snapshot.indicators as Record<string, JsonValue | undefined>) || {};
 
     // Decimal を number に丸める
-    const close = this.toNumber(snapshot.close);
-    const volume = this.toNumber(snapshot.volume);
+    const close = Number(snapshot.close);
+    const volume = Number(snapshot.volume);
 
     // 前日終値があれば価格変化率を計算、なければ 0 とする
     const previousClose = this.toOptionalNumber(indicators.previousClose);
@@ -85,7 +86,7 @@ export class RuleBasedMatchEvaluator {
     const macd = this.normalizeMACD(this.toOptionalNumber(indicators.macd));
 
     // トレンドは指標があればそれを優先、なければ価格変化率から推定
-    const trend = this.extractTrend(indicators.trend as string | number | null | undefined, priceChange);
+    const trend = this.extractTrend(indicators.trend, priceChange);
 
     // ボラティリティは価格変化率の絶対値で近似
     const volatility = Math.abs(priceChange);
@@ -244,7 +245,7 @@ export class RuleBasedMatchEvaluator {
   /**
    * 値を数値に変換（null/undefinedは0）
    */
-  private toNumber(value: unknown): number {
+  private toNumber(value: JsonValue): number {
     if (value === null || value === undefined) return 0;
     if (typeof value === 'number') return value;
     const num = Number(value);
@@ -254,7 +255,7 @@ export class RuleBasedMatchEvaluator {
   /**
    * 値をオプショナルな数値に変換（null/undefinedはundefined）
    */
-  private toOptionalNumber(value: unknown): number | undefined {
+  private toOptionalNumber(value: JsonValue | undefined): number | undefined {
     if (value === null || value === undefined) return undefined;
     const num = Number(value);
     return Number.isFinite(num) ? num : undefined;
@@ -286,7 +287,7 @@ export class RuleBasedMatchEvaluator {
   /**
    * トレンド値を数値（-1/0/1）に変換
    */
-  private extractTrend(trendValue: string | number | null | undefined, priceChange: number): number {
+  private extractTrend(trendValue: JsonValue | undefined, priceChange: number): number {
     if (trendValue === 'bullish' || trendValue === 'uptrend') return 1;
     if (trendValue === 'bearish' || trendValue === 'downtrend') return -1;
     if (trendValue === 'neutral') return 0;

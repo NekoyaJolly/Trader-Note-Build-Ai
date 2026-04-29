@@ -1,4 +1,5 @@
-import { normalizeTickWithReference, TickDataInput } from '../services/realtime/realtimeTickService';
+import type { TickDataInput } from '../services/realtime/realtimeTickService';
+import { normalizeTickWithReference } from '../services/realtime/realtimeTickService';
 
 describe('normalizeTickWithReference', () => {
   const baseTimestamp = new Date('2024-01-01T00:00:00Z');

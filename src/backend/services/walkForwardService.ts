@@ -19,7 +19,6 @@ import type {
   BacktestTimeframe} from './strategyBacktestService';
 import {
   runBacktest,
-  BacktestResult
 } from './strategyBacktestService';
 
 // Prismaクライアントのシングルトンインスタンス

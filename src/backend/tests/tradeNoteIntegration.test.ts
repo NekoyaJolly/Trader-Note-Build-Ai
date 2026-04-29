@@ -10,14 +10,14 @@ import fs from 'fs';
 import { TradeImportService } from '../../services/tradeImportService';
 import { TradeNoteService } from '../../services/tradeNoteService';
 import { TradeRepository } from '../../backend/repositories/tradeRepository';
-import { Trade } from '../../models/types';
+import type { Trade } from '../../models/types';
 import { cleanupTradeImportRelatedTestData } from './helpers/testDbCleanup';
 
 describe('CSV取込 → ノート生成 統合テスト', () => {
   const importService = new TradeImportService();
   // Phase 8: テストではFSモードを使用（統合テストの互換性維持）
   const noteService = new TradeNoteService('fs');
-  const tradeRepo = new TradeRepository();
+  const _tradeRepo = new TradeRepository();
   
   // テスト用の一時 CSV ファイルパス
   const tmpCsvPath = path.join(process.cwd(), 'data', 'trades', 'test_integration_temp.csv');

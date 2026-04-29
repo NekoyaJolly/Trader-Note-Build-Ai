@@ -15,6 +15,7 @@
 
 import type { Request, Response } from 'express';
 import { Router } from 'express';
+import type { SaveIndicatorConfigRequest } from '../../services/indicatorSettingsService';
 import { indicatorSettingsService } from '../../services/indicatorSettingsService';
 import type { IndicatorId, IndicatorCategory } from '../../models/indicatorConfig';
 import { INDICATOR_METADATA } from '../../models/indicatorConfig';
@@ -84,8 +85,8 @@ router.post(
       }
 
       const config = indicatorSettingsService.upsertIndicatorConfig({
-        indicatorId: indicatorId,
-        params: params || metadata.defaultParams,
+        indicatorId: indicatorId as SaveIndicatorConfigRequest['indicatorId'],
+        params: (params ?? metadata.defaultParams) as SaveIndicatorConfigRequest['params'],
         enabled,
         label,
       });

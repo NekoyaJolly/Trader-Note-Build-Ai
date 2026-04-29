@@ -5,6 +5,7 @@ import { NotificationLogRepository } from '../repositories/notificationLogReposi
 import { MatchingService } from '../../services/matchingService';
 import { NotificationTriggerService } from '../../services/notification/notificationTriggerService';
 import type { Prisma, NotificationLogStatus } from '@prisma/client';
+import type { JsonValue } from '../../utils/jsonValue';
 
 /**
  * 一致判定理由の詳細構造（Phase 3: 説明責任）
@@ -481,6 +482,16 @@ export class NotificationController {
   }
 
   /**
+   * JsonValue を人間可読な理由テキストに（オブジェクトを無理に string 化しない）
+   */
+  private jsonToReasonText(value: JsonValue | undefined, fallback: string): string {
+    if (value === null || value === undefined) return fallback;
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    return fallback;
+  }
+
+  /**
    * JSON 形式の reasons から詳細形式の理由配列を抽出する
    * Phase 3: 説明責任対応 - UI表示用の詳細形式を返す
    * 
@@ -492,20 +503,23 @@ export class NotificationController {
 
     // すでに詳細形式（detailedReasons）がある場合
     if (typeof reasons === 'object' && reasons !== null) {
-      const obj = reasons as Record<string, unknown>;
+      const obj = reasons as Record<string, JsonValue | undefined>;
 
       // 新形式: detailedReasons 配列が存在する場合
       if (Array.isArray(obj.detailedReasons)) {
-        return obj.detailedReasons.map((r: unknown) => {
-          const reason = r as Record<string, unknown>;
+        return obj.detailedReasons.map((r): DetailedMatchReason => {
+          const reason =
+            r !== null && typeof r === 'object' && !Array.isArray(r)
+              ? (r as Record<string, JsonValue | undefined>)
+              : {};
           return {
-            featureName: String(reason.featureName || ''),
+            featureName: this.jsonToReasonText(reason.featureName, ''),
             noteValue: Number(reason.noteValue) || 0,
             currentValue: Number(reason.currentValue) || 0,
             diff: Number(reason.diff) || 0,
             weight: Number(reason.weight) || 0,
             contribution: Number(reason.contribution) || 0,
-            description: String(reason.description || ''),
+            description: this.jsonToReasonText(reason.description, ''),
           };
         });
       }

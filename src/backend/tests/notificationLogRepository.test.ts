@@ -1,5 +1,4 @@
-import { describe, it, expect, beforeEach } from '@jest/globals';
-import { NotificationLogRepository } from '../repositories/notificationLogRepository';
+import { describe, it } from '@jest/globals';
 
 /**
  * NotificationLog Repository テスト
@@ -9,16 +8,6 @@ import { NotificationLogRepository } from '../repositories/notificationLogReposi
  */
 
 describe('NotificationLogRepository', () => {
-  let repository: NotificationLogRepository;
-
-  beforeEach(() => {
-    // テスト用のモック Prisma Client が必要な場合は、ここで設定する
-    // repository = new NotificationLogRepository(mockPrismaClient);
-    
-    // 実際には DB に接続せずテストロジックを確認する場合は、スタブ化する
-    // ここではスキップ（実装時は integration test として実行）
-  });
-
   describe('冪等性チェック (isDuplicate)', () => {
     it('同一 noteId × marketSnapshotId × channel の重複を検出', () => {
       // 実装: isDuplicate メソッドが false → true に遷移することを確認

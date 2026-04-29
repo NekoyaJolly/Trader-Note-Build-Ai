@@ -759,7 +759,7 @@ export class CTraderDataService {
 
         // シンボル検索（名前の部分一致）
         const found = symbolList.find(s => {
-            const name = s.symbolName.replace(/[\/\s]/g, '').toUpperCase();
+            const name = s.symbolName.replace(/[/\s]/g, '').toUpperCase();
             return name === normalizedSymbol.toUpperCase()
                 || name.includes(normalizedSymbol.toUpperCase());
         });

@@ -11,7 +11,7 @@ import { cleanupTradeImportRelatedTestData } from './helpers/testDbCleanup';
 
 describe('TradeImportService', () => {
   const service = new TradeImportService();
-  const repo = new TradeRepository();
+  const _repo = new TradeRepository();
 
   // 各テスト前にDBをクリーンアップ（重複チェックに影響されないようにする）
   beforeEach(async () => {

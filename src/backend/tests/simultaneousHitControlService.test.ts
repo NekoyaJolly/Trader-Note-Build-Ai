@@ -10,11 +10,12 @@
  * - スキップログ記録
  */
 
-import { PrismaClient } from '@prisma/client';
-import {
-  SimultaneousHitControlService,
+import type { PrismaClient } from '@prisma/client';
+import type {
   MatchHit,
-  BatchConfig,
+  BatchConfig} from '../../services/notification/simultaneousHitControlService';
+import {
+  SimultaneousHitControlService
 } from '../../services/notification/simultaneousHitControlService';
 
 // モック用 Prisma クライアント

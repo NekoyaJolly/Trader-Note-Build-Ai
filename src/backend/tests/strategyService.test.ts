@@ -7,7 +7,11 @@
  * - 入力バリデーションの検証
  */
 
-import { PrismaClient, StrategyStatus, StrategyDirection } from '@prisma/client';
+import type { StrategyStatus, StrategyDirection } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import type {
+  CreateStrategyInput,
+  UpdateStrategyInput} from '../services/strategyService';
 import {
   listStrategies,
   getStrategy,
@@ -16,9 +20,7 @@ import {
   updateStrategy,
   deleteStrategy,
   updateStrategyStatus,
-  duplicateStrategy,
-  CreateStrategyInput,
-  UpdateStrategyInput,
+  duplicateStrategy
 } from '../services/strategyService';
 
 // Prismaクライアントをモック
@@ -104,7 +106,7 @@ describe('strategyService', () => {
     name: 'テスト戦略',
     description: 'RSI逆張り戦略',
     symbol: 'USDJPY',
-    side: 'buy' as StrategyDirection,
+    side: 'buy',
     entryConditions: mockVersion.entryConditions,
     exitSettings: mockVersion.exitSettings,
     tags: ['逆張り', 'RSI'],

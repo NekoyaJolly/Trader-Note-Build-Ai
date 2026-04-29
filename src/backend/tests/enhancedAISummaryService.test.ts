@@ -12,11 +12,12 @@
  * AI_API_KEY が未設定でもテストは実行されます（スキップされません）。
  */
 
+import type {
+  ExtendedTradeData} from '../../services/enhancedAISummaryService';
 import {
-  EnhancedAISummaryService,
-  ExtendedTradeData,
+  EnhancedAISummaryService
 } from '../../services/enhancedAISummaryService';
-import { FeatureSnapshot } from '../../services/indicators/indicatorService';
+import type { FeatureSnapshot } from '../../services/indicators/indicatorService';
 import { config } from '../../config';
 
 describe('EnhancedAISummaryService', () => {

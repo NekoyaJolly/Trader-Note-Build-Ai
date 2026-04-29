@@ -5,7 +5,12 @@ import { PrismaClient } from '@prisma/client';
  * - 開発環境: warn, error ログを出力
  * - 本番環境: error のみを出力（ログ量を抑制）
  */
-const globalForPrisma = global as unknown as { prisma?: PrismaClient };
+/** Prisma を開発時のホットリロードで複数生成しないためのグローバル保持 */
+interface GlobalWithPrisma {
+  prisma?: PrismaClient;
+}
+
+const globalForPrisma = globalThis as typeof globalThis & GlobalWithPrisma;
 
 // 本番環境かどうかを判定
 const isProduction = process.env.NODE_ENV === 'production';

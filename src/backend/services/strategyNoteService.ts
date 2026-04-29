@@ -29,7 +29,6 @@ export interface IndicatorValues {
   bb?: BBValue;
   sma?: SMAValue;
   ema?: EMAValue;
-  [key: string]: unknown;
 }
 
 /**
@@ -112,6 +111,8 @@ export interface UpdateStrategyNoteInput {
   status?: StrategyNoteStatus;
   tags?: string[];
   notes?: string;
+  /** draft → active 遷移時に再計算した特徴量ベクトルを保存する場合に指定 */
+  featureVector?: number[];
 }
 
 /**
@@ -433,13 +434,14 @@ export async function updateStrategyNote(
   noteId: string,
   input: UpdateStrategyNoteInput
 ): Promise<StrategyNoteDetail | null> {
-  const { status, tags, notes } = input;
+  const { status, tags, notes, featureVector } = input;
   
   // 更新データを構築
   const updateData: Prisma.StrategyNoteUpdateInput = {};
   if (status !== undefined) updateData.status = status;
   if (tags !== undefined) updateData.tags = tags;
   if (notes !== undefined) updateData.notes = notes;
+  if (featureVector !== undefined) updateData.featureVector = featureVector;
   
   const note = await prisma.strategyNote.update({
     where: { id: noteId },
@@ -498,14 +500,13 @@ export async function changeNoteStatus(
   
   if (!note) return null;
   
-  // draft → active への遷移時は特徴量ベクトルを再計算
-  let featureVector = note.featureVector;
+  const updates: UpdateStrategyNoteInput = { status: newStatus };
   if (note.status === 'draft' && newStatus === 'active') {
     const indicatorValues = note.indicatorValues as IndicatorValues;
-    featureVector = calculateFeatureVector(indicatorValues);
+    updates.featureVector = calculateFeatureVector(indicatorValues);
   }
-  
-  return updateStrategyNote(noteId, { status: newStatus });
+
+  return updateStrategyNote(noteId, updates);
 }
 
 /**

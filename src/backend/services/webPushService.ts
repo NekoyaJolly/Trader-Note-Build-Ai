@@ -8,17 +8,14 @@
  */
 
 import type { PushSubscription as WebPushSubscription} from 'web-push';
-import webpush, { SendResult } from 'web-push';
+import webpush from 'web-push';
 import type { PrismaClient, PushSubscription} from '@prisma/client';
-import { PushLogStatus } from '@prisma/client';
+import type { JsonValue } from '../../utils/jsonValue';
 
 // VAPID 鍵（環境変数から取得）
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:admin@tradeassist.app';
-
-// 最大リトライ回数
-const MAX_RETRY_COUNT = 3;
 
 // 失敗カウントの閾値（これを超えると購読を無効化）
 const MAX_FAILURE_COUNT = 5;
@@ -38,7 +35,7 @@ export interface PushPayload {
   /** クリック時の遷移先URL（任意） */
   url?: string;
   /** 追加データ（任意） */
-  data?: Record<string, unknown>;
+  data?: Record<string, JsonValue | undefined>;
   /** タグ（同一タグの通知は上書き） */
   tag?: string;
   /** 通知ID（DBのNotificationと紐付け） */

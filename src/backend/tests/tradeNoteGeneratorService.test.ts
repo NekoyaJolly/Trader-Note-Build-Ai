@@ -10,9 +10,11 @@
 import { TradeNoteGeneratorService } from '../../services/note-generator/tradeNoteGeneratorService';
 import { TradeNoteRepository } from '../../backend/repositories/tradeNoteRepository';
 import { AISummaryService } from '../../services/aiSummaryService';
-import { FeatureExtractor, MarketContext } from '../../services/note-generator/featureExtractor';
+import type { MarketContext } from '../../services/note-generator/featureExtractor';
+import { FeatureExtractor } from '../../services/note-generator/featureExtractor';
 import { DecisionInferenceService } from '../../services/inference/decisionInferenceService';
-import { Trade, TradeSide, Prisma, NoteStatus } from '@prisma/client';
+import type { Trade, NoteStatus } from '@prisma/client';
+import { TradeSide, Prisma } from '@prisma/client';
 
 // モックを作成
 jest.mock('../../backend/repositories/tradeNoteRepository');

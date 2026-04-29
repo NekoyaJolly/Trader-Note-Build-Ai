@@ -178,7 +178,7 @@ export class EvaluationLogRepository {
    * 条件に基づいて評価ログを検索
    */
   async search(criteria: EvaluationLogSearchCriteria): Promise<EvaluationLog[]> {
-    const where: Record<string, unknown> = {};
+    const where: Prisma.EvaluationLogWhereInput = {};
     
     if (criteria.noteId) {
       where.noteId = criteria.noteId;
@@ -197,10 +197,10 @@ export class EvaluationLogRepository {
     if (criteria.evaluatedFrom || criteria.evaluatedTo) {
       where.evaluatedAt = {};
       if (criteria.evaluatedFrom) {
-        (where.evaluatedAt as Record<string, Date>).gte = criteria.evaluatedFrom;
+        where.evaluatedAt.gte = criteria.evaluatedFrom;
       }
       if (criteria.evaluatedTo) {
-        (where.evaluatedAt as Record<string, Date>).lte = criteria.evaluatedTo;
+        where.evaluatedAt.lte = criteria.evaluatedTo;
       }
     }
 
@@ -296,7 +296,7 @@ export class EvaluationLogRepository {
       limit?: number;
     } = {}
   ): Promise<EvaluationLog[]> {
-    const where: Record<string, unknown> = { triggered: true };
+    const where: Prisma.EvaluationLogWhereInput = { triggered: true };
     
     if (options.noteId) {
       where.noteId = options.noteId;
@@ -307,10 +307,10 @@ export class EvaluationLogRepository {
     if (options.from || options.to) {
       where.evaluatedAt = {};
       if (options.from) {
-        (where.evaluatedAt as Record<string, Date>).gte = options.from;
+        where.evaluatedAt.gte = options.from;
       }
       if (options.to) {
-        (where.evaluatedAt as Record<string, Date>).lte = options.to;
+        where.evaluatedAt.lte = options.to;
       }
     }
 

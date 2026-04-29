@@ -1,5 +1,6 @@
 import { DailyBatchService } from '../../services/dailyBatchService';
-import { Trade, TradeSide } from '@prisma/client';
+import type { Trade} from '@prisma/client';
+import { TradeSide } from '@prisma/client';
 
 // 依存サービスのテスト用モック実装
 class MockTradeImportService {

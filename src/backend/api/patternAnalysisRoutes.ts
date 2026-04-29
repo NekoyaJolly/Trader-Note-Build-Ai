@@ -78,13 +78,6 @@ const AnomalyDetectionRequestSchema = z.object({
   }).optional(),
 });
 
-/** ストラテジーからパターン抽出リクエスト */
-const ExtractPatternsRequestSchema = z.object({
-  strategyId: z.string().uuid(),
-  minWinRate: z.number().min(0).max(1).optional().default(0.5),
-  limit: z.number().min(1).max(20).optional().default(10),
-});
-
 // ============================================
 // エンドポイント
 // ============================================

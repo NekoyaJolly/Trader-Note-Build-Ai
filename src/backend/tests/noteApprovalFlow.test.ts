@@ -7,9 +7,8 @@
  * - マッチングサービスの承認済みフィルタリング
  */
 
-import { TradeNoteService, NoteUpdatePayload } from '../../services/tradeNoteService';
-import { TradeNote, NoteStatus } from '../../models/types';
-import { MatchingService } from '../../services/matchingService';
+import { TradeNoteService } from '../../services/tradeNoteService';
+import type { TradeNote} from '../../models/types';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';

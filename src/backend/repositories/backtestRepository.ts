@@ -288,7 +288,7 @@ export class BacktestRepository {
   /**
    * 失敗したバックテストをマークする
    */
-  async markAsFailed(runId: string, errorMessage?: string): Promise<BacktestRun> {
+  async markAsFailed(runId: string, _errorMessage?: string): Promise<BacktestRun> {
     return await this.prisma.backtestRun.update({
       where: { id: runId },
       data: { status: 'failed' },

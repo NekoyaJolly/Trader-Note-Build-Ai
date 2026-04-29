@@ -20,6 +20,7 @@ import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { getIndicatorProfileService } from '../../services/indicatorProfileService';
 import { isReservedProfileId } from '../../models/indicatorProfile';
+import type { CreateProfileRequest, UpdateProfileRequest } from '../../models/indicatorProfile';
 import { validateBody, validateParams } from '../../middleware/validateRequest';
 import {
   CreateProfileRequestSchema,
@@ -153,7 +154,7 @@ router.post(
       const request = CreateProfileRequestSchema.parse(req.body);
 
       const profileService = getIndicatorProfileService();
-      const profile = profileService.createProfile(request);
+      const profile = profileService.createProfile(request as CreateProfileRequest);
 
       res.status(201).json({
         success: true,
@@ -193,7 +194,7 @@ router.put(
       const request = UpdateProfileRequestSchema.parse(req.body);
 
       const profileService = getIndicatorProfileService();
-      const profile = profileService.updateProfile(id, request);
+      const profile = profileService.updateProfile(id, request as UpdateProfileRequest);
 
       res.json({
         success: true,
