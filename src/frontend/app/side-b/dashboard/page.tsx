@@ -226,7 +226,13 @@ export default function SideBDashboardPage() {
                   Python 検証:{" "}
                   <span
                     className={
-                      health.pythonValidator === "ok" ? "text-emerald-400" : "text-amber-400"
+                      health.pythonValidator === "ok"
+                        ? "text-emerald-400"
+                        : health.pythonValidator === "local_only"
+                          ? "text-sky-400"
+                          : health.pythonValidator === "not_configured"
+                            ? "text-gray-400"
+                            : "text-amber-400"
                     }
                   >
                     {health.pythonValidator}

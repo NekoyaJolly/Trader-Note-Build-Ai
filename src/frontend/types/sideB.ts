@@ -541,7 +541,14 @@ export interface DiscoveryLatestResponse {
 export interface SystemHealthResponse {
   success: true;
   database: "ok" | "error";
-  pythonValidator: "ok" | "error";
+  /**
+   * Phase 6.8b: 4値ステータス
+   * - 'ok'             : 疏通 OK（http モード: 本番 HTTP service、docker_exec モード: ローカルコンテナ）
+   * - 'local_only'     : docker_exec モードで疏通 OK（ローカル専用。本番では使えない）
+   * - 'not_configured' : PYTHON_VALIDATION_MODE が未設定（意図的に無効化）
+   * - 'error'          : 設定はあるが疏通失敗
+   */
+  pythonValidator: "ok" | "local_only" | "not_configured" | "error";
   checkedAt: string;
 }
 

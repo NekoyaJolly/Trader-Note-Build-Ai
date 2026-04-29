@@ -10,7 +10,15 @@
  * - タイムアウト時は子プロセスを SIGKILL し、timedOut=true を返す
  * - Python 側のエラーは非0 exit code + stderr で伝わる想定
  *
+ * Phase 6.8b 追加:
+ * - healthCheck() の戻り値を PythonValidatorStatus に変更。
+ *   'not_configured': PYTHON_VALIDATION_MODE が未設定（本番で意図的に無効化）
+ *   'local_only'    : docker_exec モードで疎通 OK（ローカル専用）
+ *   'ok'            : http モードで疎通 OK（本番 HTTP service）
+ *   'error'         : 疎通失敗
+ *
  * @see docs/design/phase_4c_specification.md §4.3
+ * @see docs/design/phase_6.8b_python_validation_service.md §7, §8
  */
 
 import { spawn } from 'child_process';
@@ -71,6 +79,20 @@ export const defaultDockerRunner: DockerRunner = (
 };
 
 // ===========================================
+// Python 検証ステータス型（Phase 6.8b）
+// ===========================================
+
+/**
+ * Python 検証サービスのヘルスチェック結果。
+ *
+ * - 'ok'             : 疎通 OK（http モード: 本番 HTTP service、docker_exec モード: ローカルコンテナ）
+ * - 'local_only'     : docker_exec モードで疎通 OK（ローカル専用。本番では使えない）
+ * - 'not_configured' : PYTHON_VALIDATION_MODE が未設定（意図的に無効化されている）
+ * - 'error'          : 設定はあるが疎通失敗
+ */
+export type PythonValidatorStatus = 'ok' | 'local_only' | 'not_configured' | 'error';
+
+// ===========================================
 // PythonBridge 本体
 // ===========================================
 
@@ -85,21 +107,43 @@ export class PythonBridge {
     }
 
     /**
+     * Python 検証サービスのヘルスチェック。
+     *
+     * Phase 6.8b: boolean ではなく PythonValidatorStatus を返す。
+     * - PYTHON_VALIDATION_MODE が未設定なら 'not_configured'
+     * - docker_exec モードで疎通 OK なら 'local_only'
+     * - http モードで疎通 OK なら 'ok'
+     * - 疎通失敗なら 'error'
+     */
+    async healthCheckStatus(): Promise<PythonValidatorStatus> {
+        // mode が未設定（環境変数 PYTHON_VALIDATION_MODE が指定されていない）
+        if (!this.config.mode) {
+            return 'not_configured';
+        }
+
+        if (this.config.mode === 'http') {
+            // HTTP モード: baseUrl が未設定なら not_configured
+            if (!this.config.baseUrl) {
+                return 'not_configured';
+            }
+            const ok = await this.healthCheckHttp();
+            return ok ? 'ok' : 'error';
+        }
+
+        // docker_exec モード
+        const ok = await this.healthCheckDockerExec();
+        return ok ? 'local_only' : 'error';
+    }
+
+    /**
      * コンテナが起動していて ping が通るかを確認する。
+     *
+     * @deprecated healthCheckStatus() を使用してください。
+     *   この boolean 版は後方互換のために残しています。
      */
     async healthCheck(): Promise<boolean> {
-        if (this.config.mode === 'http') {
-            return this.healthCheckHttp();
-        }
-        try {
-            const result = await this.runner(
-                ['exec', this.config.containerName, 'python', '/app/ping.py'],
-                5000,
-            );
-            return result.code === 0 && result.stdout.trim() === 'ok';
-        } catch {
-            return false;
-        }
+        const status = await this.healthCheckStatus();
+        return status === 'ok' || status === 'local_only';
     }
 
     /**
@@ -208,6 +252,18 @@ export class PythonBridge {
         };
     }
 
+    private async healthCheckDockerExec(): Promise<boolean> {
+        try {
+            const result = await this.runner(
+                ['exec', this.config.containerName, 'python', '/app/ping.py'],
+                5000,
+            );
+            return result.code === 0 && result.stdout.trim() === 'ok';
+        } catch {
+            return false;
+        }
+    }
+
     private async healthCheckHttp(): Promise<boolean> {
         const baseUrl = this.config.baseUrl?.replace(/\/$/, '');
         if (!baseUrl) return false;
@@ -291,12 +347,19 @@ export class PythonBridge {
 /**
  * 環境変数を反映したデフォルト PythonBridge を生成する。
  *
- * - PYTHON_BRIDGE_CONTAINER: コンテナ名（既定 side_b_python_validator）
- * - PYTHON_BRIDGE_SHARED_DIR: 共有ディレクトリ（既定 <cwd>/python/shared）
- * - PYTHON_BRIDGE_TIMEOUT_MS: 既定タイムアウト（既定 300000 = 5分）
+ * - PYTHON_VALIDATION_MODE    : 'docker_exec'（ローカル）または 'http'（本番）
+ *                               未設定の場合は 'docker_exec' として扱う。
+ *                               ただし healthCheckStatus() は 'not_configured' を返す。
+ * - PYTHON_BRIDGE_CONTAINER   : コンテナ名（既定 side_b_python_validator）
+ * - PYTHON_BRIDGE_SHARED_DIR  : 共有ディレクトリ（既定 <cwd>/python/shared）
+ * - PYTHON_BRIDGE_TIMEOUT_MS  : 既定タイムアウト（既定 300000 = 5分）
+ * - PYTHON_VALIDATION_URL     : HTTP モードの base URL
+ * - ANALYSIS_ENGINE_URL       : HTTP モードの base URL（フォールバック）
  */
 export function createDefaultPythonBridge(): PythonBridge {
-    const mode = (process.env.PYTHON_VALIDATION_MODE ?? 'docker_exec') as 'docker_exec' | 'http';
+    const rawMode = process.env.PYTHON_VALIDATION_MODE;
+    // 環境変数が未設定の場合は undefined のまま渡し、healthCheckStatus() で 'not_configured' を返す
+    const mode = (rawMode as 'docker_exec' | 'http' | undefined) ?? undefined;
     return new PythonBridge({
         mode,
         containerName: process.env.PYTHON_BRIDGE_CONTAINER ?? 'side_b_python_validator',
