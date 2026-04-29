@@ -11,11 +11,12 @@
  * - Python 側のエラーは非0 exit code + stderr で伝わる想定
  *
  * Phase 6.8b 追加:
- * - healthCheck() の戻り値を PythonValidatorStatus に変更。
+ * - healthCheckStatus() を新設。4 値ステータス (PythonValidatorStatus) を返す。
  *   'not_configured': PYTHON_VALIDATION_MODE が未設定（本番で意図的に無効化）
  *   'local_only'    : docker_exec モードで疎通 OK（ローカル専用）
  *   'ok'            : http モードで疎通 OK（本番 HTTP service）
  *   'error'         : 疎通失敗
+ * - healthCheck() は後方互換のため boolean のまま残す（@deprecated）。
  *
  * @see docs/design/phase_4c_specification.md §4.3
  * @see docs/design/phase_6.8b_python_validation_service.md §7, §8
@@ -85,7 +86,7 @@ export const defaultDockerRunner: DockerRunner = (
 /**
  * Python 検証サービスのヘルスチェック結果。
  *
- * - 'ok'             : 疎通 OK（http モード: 本番 HTTP service、docker_exec モード: ローカルコンテナ）
+ * - 'ok'             : http モードで疎通 OK（本番 HTTP service）
  * - 'local_only'     : docker_exec モードで疎通 OK（ローカル専用。本番では使えない）
  * - 'not_configured' : PYTHON_VALIDATION_MODE が未設定（意図的に無効化されている）
  * - 'error'          : 設定はあるが疎通失敗
@@ -348,8 +349,8 @@ export class PythonBridge {
  * 環境変数を反映したデフォルト PythonBridge を生成する。
  *
  * - PYTHON_VALIDATION_MODE    : 'docker_exec'（ローカル）または 'http'（本番）
- *                               未設定の場合は 'docker_exec' として扱う。
- *                               ただし healthCheckStatus() は 'not_configured' を返す。
+ *                               未設定の場合は未設定扱いのまま渡す。
+ *                               その場合、healthCheckStatus() は 'not_configured' を返す。
  * - PYTHON_BRIDGE_CONTAINER   : コンテナ名（既定 side_b_python_validator）
  * - PYTHON_BRIDGE_SHARED_DIR  : 共有ディレクトリ（既定 <cwd>/python/shared）
  * - PYTHON_BRIDGE_TIMEOUT_MS  : 既定タイムアウト（既定 300000 = 5分）
@@ -358,8 +359,19 @@ export class PythonBridge {
  */
 export function createDefaultPythonBridge(): PythonBridge {
     const rawMode = process.env.PYTHON_VALIDATION_MODE;
-    // 環境変数が未設定の場合は undefined のまま渡し、healthCheckStatus() で 'not_configured' を返す
-    const mode = (rawMode as 'docker_exec' | 'http' | undefined) ?? undefined;
+    // 'docker_exec' / 'http' 以外の想定外の値は undefined として扱い、not_configured にフォールバック
+    let mode: 'docker_exec' | 'http' | undefined;
+    if (rawMode === 'docker_exec' || rawMode === 'http') {
+        mode = rawMode;
+    } else {
+        if (rawMode !== undefined && rawMode !== '') {
+            console.warn(
+                `[PythonBridge] PYTHON_VALIDATION_MODE に想定外の値 "${rawMode}" が設定されています。` +
+                `'docker_exec' または 'http' を指定してください。not_configured として扱います。`,
+            );
+        }
+        mode = undefined;
+    }
     return new PythonBridge({
         mode,
         containerName: process.env.PYTHON_BRIDGE_CONTAINER ?? 'side_b_python_validator',
