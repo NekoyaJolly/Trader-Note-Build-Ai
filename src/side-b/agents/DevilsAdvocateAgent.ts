@@ -17,7 +17,7 @@
 
 import { config, modelFor } from '../../config';
 import { loadPromptWithGlobal } from '../prompts/loader';
-import { PromptRegistry } from '../prompts/registry/PromptRegistry';
+import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import type { AITradeScenario, PlanMarketAnalysis } from '../models';
 import type { JsonValue } from '../../utils/jsonValue';
 import { extractJson } from './llmJsonExtract';
@@ -199,9 +199,8 @@ export class DevilsAdvocateAgent {
      * Registry 未 seed / DB 不整合時は loadPromptWithGlobal にフォールバック。
      */
     private async resolveSystemPrompt(): Promise<string> {
-        const registry = new PromptRegistry();
         try {
-            return await registry.getCompositeActive('devils_advocate');
+            return await promptRegistry.getCompositeActive('devils_advocate');
         } catch (err) {
             console.warn(
                 '[DevilsAdvocate] Registry 合成に失敗、ファイル fallback:',

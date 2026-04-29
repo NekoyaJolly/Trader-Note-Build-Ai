@@ -8,7 +8,7 @@ import { randomUUID } from 'crypto';
 
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { loadPromptWithGlobal } from '../prompts/loader';
-import { PromptRegistry } from '../prompts/registry/PromptRegistry';
+import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
 import { modelFor } from '../../config';
 import { extractJson } from './llmJsonExtract';
@@ -51,12 +51,11 @@ export class MutationAgent {
    * Registry 未 seed / DB 不整合時は loadPromptWithGlobal にフォールバック。
    */
   private async resolveSystemPrompt(): Promise<string> {
-    const registry = new PromptRegistry();
     try {
-      return await registry.getCompositeActive('mutation');
+      return await promptRegistry.getCompositeActive('mutation');
     } catch (err) {
       console.warn(
-        '[Mutation] Registry 合成に失敗、ファイル fallback:',
+        '[MutationAgent] Registry 合成に失敗、ファイル fallback:',
         err instanceof Error ? err.message : err,
       );
       return loadPromptWithGlobal('mutation');

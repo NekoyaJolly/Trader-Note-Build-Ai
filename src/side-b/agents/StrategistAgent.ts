@@ -28,7 +28,7 @@ import {
 import { BacktesterAgent } from './BacktesterAgent';
 import { AIProvider } from '../agent/aiProvider';
 import { loadPromptWithGlobal } from '../prompts/loader';
-import { PromptRegistry } from '../prompts/registry/PromptRegistry';
+import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import { modelFor } from '../../config';
 
 // ===========================================
@@ -171,9 +171,8 @@ export class StrategistAgent {
      * Registry 未 seed / DB 不整合時は loadPromptWithGlobal にフォールバック。
      */
     private async resolveSystemPrompt(): Promise<string> {
-        const registry = new PromptRegistry();
         try {
-            return await registry.getCompositeActive('strategist');
+            return await promptRegistry.getCompositeActive('strategist');
         } catch (err) {
             console.warn(
                 '[Strategist] Registry 合成に失敗、ファイル fallback:',

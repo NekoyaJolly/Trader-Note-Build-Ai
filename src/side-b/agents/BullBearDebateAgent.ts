@@ -22,7 +22,7 @@
 
 import { config, modelFor } from '../../config';
 import { loadPromptWithGlobal } from '../prompts/loader';
-import { PromptRegistry } from '../prompts/registry/PromptRegistry';
+import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import { serializeLensSnapshot, type LensFeatureSnapshot } from '../lenses';
 import type {
   TrendAnalysis,
@@ -187,9 +187,8 @@ export class BullBearDebateAgent {
    * Registry 未 seed / DB 不整合時は loadPromptWithGlobal にフォールバック。
    */
   private async resolveSystemPrompt(): Promise<string> {
-    const registry = new PromptRegistry();
     try {
-      return await registry.getCompositeActive('bull_bear_debate');
+      return await promptRegistry.getCompositeActive('bull_bear_debate');
     } catch (err) {
       console.warn(
         '[BullBearDebate] Registry 合成に失敗、ファイル fallback:',

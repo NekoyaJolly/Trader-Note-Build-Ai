@@ -224,7 +224,7 @@ export class MetaEvolutionAgent {
       return await this.registry.getCompositeActive('meta_evolution');
     } catch (err) {
       console.warn(
-        '[MetaEvolution] Registry 合成に失敗、ファイル fallback:',
+        '[MetaEvolutionAgent] Registry 合成に失敗、ファイル fallback:',
         err instanceof Error ? err.message : err,
       );
       return loadPromptWithGlobal('meta_evolution');

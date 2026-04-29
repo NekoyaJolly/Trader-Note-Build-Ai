@@ -20,7 +20,7 @@ import { extractJson } from './llmJsonExtract';
 import {
   GLOBAL_AGENT_NAME,
   SPECIALIST_COMMON_AGENT_NAME,
-  PromptRegistry,
+  promptRegistry,
 } from '../prompts/registry/PromptRegistry';
 
 export interface PromptMutationProposal {
@@ -113,12 +113,11 @@ export class PromptMutationAgent {
    * Registry 未 seed / DB 不整合時は loadPromptWithGlobal にフォールバック。
    */
   private async resolveSystemPrompt(): Promise<string> {
-    const registry = new PromptRegistry();
     try {
-      return await registry.getCompositeActive('prompt_mutation');
+      return await promptRegistry.getCompositeActive('prompt_mutation');
     } catch (err) {
       console.warn(
-        '[PromptMutation] Registry 合成に失敗、ファイル fallback:',
+        '[PromptMutationAgent] Registry 合成に失敗、ファイル fallback:',
         err instanceof Error ? err.message : err,
       );
       return loadPromptWithGlobal('prompt_mutation');
