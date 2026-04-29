@@ -1033,3 +1033,96 @@ export const BatchValidateRequestSchema = z.object({
 });
 
 export type BatchValidateRequest = z.infer<typeof BatchValidateRequestSchema>;
+
+// ===========================================
+// Phase 7: Bull vs Bear 討論出力スキーマ
+// ===========================================
+
+/**
+ * 討論の各派（Bull/Bear）出力スキーマ
+ *
+ * - scenario / confidence / rationale は必須・厳格バリデーション（違反は throw）
+ * - keyConditions / risks / timeHorizon はオプション扱いでフォールバックあり
+ */
+export const DebateSideOutputSchema = z.object({
+  scenario: z.string().min(5),
+  confidence: z.number().min(0).max(100),
+  rationale: z.array(z.string()).min(1),
+  keyConditions: z.array(z.string()).catch([]),
+  risks: z.array(z.string()).catch([]),
+  timeHorizon: z.enum(['short_term', 'medium_term', 'both']).catch('both'),
+});
+
+export type DebateSideOutput = z.infer<typeof DebateSideOutputSchema>;
+
+/**
+ * 討論のフェーズ分析要素スキーマ
+ *
+ * preprocess で null/非オブジェクトを空オブジェクトに変換してから内部スキーマを適用する。
+ * これにより、AI が phaseAnalysis の要素を null・数値・文字列で出力した場合でも
+ * TypeError にならず、各フィールドは catch でデフォルト値にフォールバックする。
+ */
+export const DebatePhaseAnalysisSchema = z.preprocess(
+  (val) => (val !== null && typeof val === 'object' ? val : {}),
+  z.object({
+    phase: z.string().catch(''),
+    direction: z.enum(['long', 'short', 'wait']).catch('wait'),
+    condition: z.string().catch(''),
+    confidence: z
+      .number()
+      .transform((v) => Math.max(0, Math.min(100, v)))
+      .catch(50),
+  }),
+);
+
+export type DebatePhaseAnalysis = z.infer<typeof DebatePhaseAnalysisSchema>;
+
+/**
+ * 市場コンテキストスキーマ
+ *
+ * dominantBias は catch で neutral にフォールバック、
+ * biasStrength は transform で 0-100 にクランプ。
+ */
+export const DebateMarketContextSchema = z.object({
+  summary: z.string().catch(''),
+  dominantBias: z.enum(['bullish', 'bearish', 'neutral']).catch('neutral'),
+  biasStrength: z
+    .number()
+    .transform((v) => Math.max(0, Math.min(100, v)))
+    .catch(50),
+});
+
+export type DebateMarketContext = z.infer<typeof DebateMarketContextSchema>;
+
+/**
+ * 討論統合結果スキーマ
+ *
+ * phaseAnalysis は catch で空配列にフォールバック。
+ * 各確信度は transform でクランプ。
+ */
+export const DebateSynthesisSchema = z.object({
+  preferredDirection: z.enum(['long', 'short', 'neutral']).catch('neutral'),
+  preferredConfidence: z
+    .number()
+    .transform((v) => Math.max(0, Math.min(100, v)))
+    .catch(50),
+  reasoning: z.string().catch(''),
+  phaseAnalysis: z.array(DebatePhaseAnalysisSchema).catch([]),
+  consensusPoints: z.array(z.string()).catch([]),
+  divergencePoints: z.array(z.string()).catch([]),
+  actionableInsight: z.string().catch(''),
+});
+
+export type DebateSynthesis = z.infer<typeof DebateSynthesisSchema>;
+
+/**
+ * Bull vs Bear 討論出力スキーマ（AI 出力のバリデーション用）
+ */
+export const BullBearDebateOutputSchema = z.object({
+  marketContext: DebateMarketContextSchema,
+  bull: DebateSideOutputSchema,
+  bear: DebateSideOutputSchema,
+  synthesis: DebateSynthesisSchema,
+});
+
+export type BullBearDebateOutput = z.infer<typeof BullBearDebateOutputSchema>;

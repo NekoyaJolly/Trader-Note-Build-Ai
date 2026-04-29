@@ -97,7 +97,9 @@ export type AIAgentKey =
   | 'oscillator_specialist'
   | 'volatility_volume_specialist'
   | 'prompt_mutation'
-  | 'meta_evolution';
+  | 'meta_evolution'
+  // Phase 7: Bull vs Bear 討論
+  | 'bull_bear_debate';
 
 export const config = {
   server: {
@@ -142,6 +144,8 @@ export const config = {
         process.env.AI_MODEL_VOLATILITY_VOLUME_SPECIALIST || 'google/gemini-3.1-flash-lite-preview',
       prompt_mutation: process.env.AI_MODEL_PROMPT_MUTATION || 'anthropic/claude-sonnet-4.6',
       meta_evolution: process.env.AI_MODEL_META_EVOLUTION || 'anthropic/claude-opus-4.7',
+      // Phase 7: Bull vs Bear 討論 — 判断品質重視のため Opus
+      bull_bear_debate: process.env.AI_MODEL_BULL_BEAR_DEBATE || 'anthropic/claude-opus-4.7',
     } as Record<AIAgentKey, string>,
   },
   market: {
