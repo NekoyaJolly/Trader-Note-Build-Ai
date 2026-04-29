@@ -40,11 +40,11 @@ export class MatchingScheduler {
     }
     
     // 開始時に即時実行
-    this.runMatchCheck();
+    void this.runMatchCheck();
 
     // 定期的に実行
     this.intervalId = setInterval(() => {
-      this.runMatchCheck();
+      void this.runMatchCheck();
     }, intervalMs);
 
     this.isRunning = true;

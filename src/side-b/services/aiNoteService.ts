@@ -351,14 +351,12 @@ function analyzeEntry(trade: VirtualTradeInput): EntryAnalysis {
   else if (priceVsPlan > 2) timing = 'fair';
 
   // 評価コメント生成
-  let evaluation = '';
-  if (timing === 'good') {
-    evaluation = '計画通りのエントリーを実行できた。';
-  } else if (timing === 'fair') {
-    evaluation = `計画価格から${priceVsPlan} pips乖離したが許容範囲内。`;
-  } else {
-    evaluation = `計画価格から${priceVsPlan} pips乖離。エントリー条件の見直しが必要。`;
-  }
+  const evaluation =
+    timing === 'good'
+      ? '計画通りのエントリーを実行できた。'
+      : timing === 'fair'
+        ? `計画価格から${priceVsPlan} pips乖離したが許容範囲内。`
+        : `計画価格から${priceVsPlan} pips乖離。エントリー条件の見直しが必要。`;
 
   return {
     timing,
@@ -386,7 +384,6 @@ function analyzeExit(trade: VirtualTradeInput): ExitAnalysis {
   let missedPotential: number | undefined;
 
   const entryPrice = trade.actualEntry ?? trade.plannedEntry;
-  const exitPrice = trade.exitPrice ?? entryPrice;
   const pnlPips = trade.pnlPips ?? 0;
 
   // 決済タイプ別のタイミング評価
@@ -456,7 +453,7 @@ function analyzeExit(trade: VirtualTradeInput): ExitAnalysis {
   }
 
   // 評価コメント生成
-  let evaluation = '';
+  let evaluation: string;
   switch (type) {
     case 'take_profit':
       if (timing === 'optimal') {
@@ -521,14 +518,12 @@ function evaluatePlan(trade: VirtualTradeInput, plan: PlanInput): PlanEvaluation
   const levelAccuracy: AccuracyEvaluation = 'accurate'; // 今後詳細実装
 
   // 評価コメント
-  let evaluation = '';
-  if (scenarioAccuracy === 'accurate') {
-    evaluation = 'プランのシナリオが機能した。';
-  } else if (scenarioAccuracy === 'partial') {
-    evaluation = '部分的にシナリオが機能したが、改善の余地あり。';
-  } else {
-    evaluation = 'シナリオの精度に課題あり。前提条件の見直しが必要。';
-  }
+  const evaluation =
+    scenarioAccuracy === 'accurate'
+      ? 'プランのシナリオが機能した。'
+      : scenarioAccuracy === 'partial'
+        ? '部分的にシナリオが機能したが、改善の余地あり。'
+        : 'シナリオの精度に課題あり。前提条件の見直しが必要。';
 
   return {
     scenarioAccuracy,
@@ -601,16 +596,14 @@ function extractLearnings(
   }
 
   // 主要な気づき
-  let keyInsight = '';
-  if (result.outcome === 'win') {
-    keyInsight = result.riskRewardActual >= 1.5
-      ? '良好なRR比でのトレードを実現できた。'
-      : '勝ちトレードだが、RR比の改善余地あり。';
-  } else {
-    keyInsight = actionItems.length > 0
-      ? `改善ポイント: ${actionItems[0]}`
-      : '損失を最小限に抑えられた。';
-  }
+  const keyInsight =
+    result.outcome === 'win'
+      ? result.riskRewardActual >= 1.5
+        ? '良好なRR比でのトレードを実現できた。'
+        : '勝ちトレードだが、RR比の改善余地あり。'
+      : actionItems.length > 0
+        ? `改善ポイント: ${actionItems[0]}`
+        : '損失を最小限に抑えられた。';
 
   return {
     whatWorked,
@@ -752,17 +745,15 @@ function generateAnalysis(notes: AITradeNote[]): SummaryAnalysis {
 function generateSummarySummary(
   notes: AITradeNote[],
   statistics: SummaryStatistics,
-  analysis: SummaryAnalysis
+  _analysis: SummaryAnalysis
 ): SummarySummary {
   // 総合評価
-  let overallAssessment = '';
-  if (statistics.winRate >= 60 && statistics.profitFactor >= 1.5) {
-    overallAssessment = '優秀なパフォーマンス。現在の戦略を継続。';
-  } else if (statistics.winRate >= 50 && statistics.profitFactor >= 1.0) {
-    overallAssessment = '安定したパフォーマンス。微調整で改善可能。';
-  } else {
-    overallAssessment = '改善が必要。戦略の見直しを検討。';
-  }
+  const overallAssessment =
+    statistics.winRate >= 60 && statistics.profitFactor >= 1.5
+      ? '優秀なパフォーマンス。現在の戦略を継続。'
+      : statistics.winRate >= 50 && statistics.profitFactor >= 1.0
+        ? '安定したパフォーマンス。微調整で改善可能。'
+        : '改善が必要。戦略の見直しを検討。';
 
   // 学びを集約
   const keyLearnings: string[] = [];
@@ -777,14 +768,12 @@ function generateSummarySummary(
   recommendations.push(...uniqueActions);
 
   // 次期間の焦点
-  let focusForNext = '';
-  if (statistics.winRate < 50) {
-    focusForNext = 'エントリー精度の向上';
-  } else if (statistics.profitFactor < 1.5) {
-    focusForNext = 'リスクリワード比の改善';
-  } else {
-    focusForNext = '現在の戦略の維持・微調整';
-  }
+  const focusForNext =
+    statistics.winRate < 50
+      ? 'エントリー精度の向上'
+      : statistics.profitFactor < 1.5
+        ? 'リスクリワード比の改善'
+        : '現在の戦略の維持・微調整';
 
   return {
     overallAssessment,

@@ -13,10 +13,12 @@
  * モデル: Opus 4.7(構造再編成は最重要判断)
  */
 
-import { Prisma, PrismaClient } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { loadPromptWithGlobal } from '../prompts/loader';
 import { modelFor } from '../../config';
+import type { JsonValue } from '../../utils/jsonValue';
 import {
   PromptRegistry,
   GLOBAL_AGENT_NAME,
@@ -93,15 +95,15 @@ function getDefaultPrisma(): PrismaClient {
 }
 
 async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<T | null> {
-  let last: unknown;
+  let lastError: Error | undefined;
   for (let i = 0; i < times; i++) {
     try {
       return await fn();
     } catch (e) {
-      last = e;
+      lastError = e instanceof Error ? e : new Error(String(e));
     }
   }
-  console.error('[MetaEvolutionAgent] リトライ尽くし', last);
+  console.error('[MetaEvolutionAgent] リトライ尽くし', lastError);
   return null;
 }
 
@@ -115,10 +117,14 @@ function parseProposalJson(content: string): AgentRestructureProposal | null {
   return normalizeProposal(extracted.data);
 }
 
-function normalizeProposal(raw: unknown): AgentRestructureProposal | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const r = raw as Record<string, unknown>;
-  const analysisRaw = (r.analysis ?? {}) as Record<string, unknown>;
+function normalizeProposal(raw: JsonValue): AgentRestructureProposal | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const r = raw as Record<string, JsonValue | undefined>;
+  const analysisRoot = r.analysis;
+  const analysisRaw =
+    analysisRoot && typeof analysisRoot === 'object' && !Array.isArray(analysisRoot)
+      ? (analysisRoot as Record<string, JsonValue | undefined>)
+      : {};
   const analysis = {
     currentAgents: toStringArray(analysisRaw.currentAgents),
     coverageGaps: toStringArray(analysisRaw.coverageGaps),
@@ -127,8 +133,8 @@ function normalizeProposal(raw: unknown): AgentRestructureProposal | null {
   const proposalsRaw = Array.isArray(r.proposals) ? r.proposals : [];
   const proposals: ProposalItem[] = [];
   for (const p of proposalsRaw) {
-    if (!p || typeof p !== 'object') continue;
-    const pr = p as Record<string, unknown>;
+    if (!p || typeof p !== 'object' || Array.isArray(p)) continue;
+    const pr = p as Record<string, JsonValue | undefined>;
     if (
       typeof pr.type !== 'string' ||
       !['add', 'modify', 'deprecate'].includes(pr.type)
@@ -161,7 +167,7 @@ function normalizeProposal(raw: unknown): AgentRestructureProposal | null {
   };
 }
 
-function toStringArray(x: unknown): string[] {
+function toStringArray(x: JsonValue | undefined): string[] {
   if (!Array.isArray(x)) return [];
   return x.filter((v): v is string => typeof v === 'string');
 }
@@ -267,7 +273,12 @@ export class MetaEvolutionAgent {
         `executeProposal: 既に処理済みの提案です (status=${row.status}, id=${proposalId})`,
       );
     }
-    const parsed = row.proposal as unknown as AgentRestructureProposal;
+    const parsed = normalizeProposal(row.proposal);
+    if (!parsed) {
+      throw new Error(
+        `executeProposal: 保存済み proposal JSON を復元できません (id=${proposalId})`,
+      );
+    }
 
     const result: ExecuteProposalResult = { applied: [], skipped: [] };
 
@@ -331,7 +342,7 @@ export class MetaEvolutionAgent {
         } catch (err) {
           result.skipped.push({
             proposal: p,
-            reason: `registerNewAgent 失敗: ${fmtErr(err)}`,
+            reason: `registerNewAgent 失敗: ${fmtErr(err instanceof Error ? err : new Error(String(err)))}`,
           });
         }
       }
@@ -434,6 +445,6 @@ ${reflectionDump}
   }
 }
 
-function fmtErr(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+function fmtErr(err: Error): string {
+  return err.message;
 }

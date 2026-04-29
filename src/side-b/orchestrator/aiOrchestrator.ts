@@ -16,13 +16,14 @@
  * 4. 結果を返却
  */
 
-import { v4 as uuidv4 } from 'uuid';
 import type {
   ResearchAIService,
   ResearchAIInput,
   PlanAIService,
   PlanAIInput,
-  UserTradingPreferences} from '../services';
+  UserTradingPreferences,
+  IndicatorData,
+} from '../services';
 import {
   researchAIService,
   planAIService
@@ -39,19 +40,14 @@ import {
 import type {
   AITradeScenario} from '../models';
 import {
-  MarketResearch,
-  AITradePlan,
-  GenerateResearchResponse,
-  GeneratePlanResponse
-} from '../models';
-import { buildHigherTFContext } from '../knowledge';
+  buildHigherTFContext
+} from '../knowledge';
 import type { HigherTimeframeContext } from '../knowledge';
 import type { DevilsAdvocateAgent} from '../agents/DevilsAdvocateAgent';
 import { devilsAdvocateAgent } from '../agents/DevilsAdvocateAgent';
 import {
   defaultLensAggregator,
   registerDefaultLenses,
-  serializeLensSnapshot,
   type LensFeatureSnapshot,
 } from '../lenses';
 import { agentMemory } from '../agent/agentMemory';
@@ -92,7 +88,7 @@ export interface OrchestratorResearchRequest {
   symbol: string;
   timeframe?: string;
   ohlcvData: { timestamp: Date; open: number; high: number; low: number; close: number; volume?: number }[];
-  indicators?: Record<string, unknown>;
+  indicators?: IndicatorData;
   forceRefresh?: boolean;
 }
 
@@ -105,13 +101,13 @@ export interface OrchestratorPlanRequest {
   researchId?: string;
   userPreferences?: UserTradingPreferences;
   ohlcvData?: { timestamp: Date; open: number; high: number; low: number; close: number; volume?: number }[];
-  indicators?: Record<string, unknown>;
+  indicators?: IndicatorData;
   forceRefresh?: boolean;
   /** 上位足データ（MTF分析用、オプショナル） */
   higherTFData?: {
     timeframe: string;
     ohlcvData: { timestamp: Date; open: number; high: number; low: number; close: number; volume?: number }[];
-    indicators?: Record<string, unknown>;
+    indicators?: IndicatorData;
   };
 }
 
@@ -266,7 +262,6 @@ export class AIOrchestrator {
 
       // 2. リサーチ取得または生成
       let research: MarketResearchWithTypes | null = null;
-      let researchCached = false;
       let researchTokens = 0;
 
       if (researchId) {
@@ -278,7 +273,6 @@ export class AIOrchestrator {
             error: `Research not found: ${researchId}`,
           };
         }
-        researchCached = true;
       } else {
         // リサーチ生成
         if (!ohlcvData || ohlcvData.length === 0) {
@@ -302,7 +296,6 @@ export class AIOrchestrator {
         }
 
         research = researchResult.data;
-        researchCached = researchResult.cached || false;
         researchTokens = researchResult.tokenUsage || 0;
       }
 
@@ -535,7 +528,7 @@ export class AIOrchestrator {
   async runFullPipeline(request: {
     symbol: string;
     ohlcvData: { timestamp: Date; open: number; high: number; low: number; close: number; volume?: number }[];
-    indicators?: Record<string, unknown>;
+    indicators?: IndicatorData;
     userPreferences?: UserTradingPreferences;
     forceRefresh?: boolean;
   }): Promise<{
