@@ -266,12 +266,14 @@ export class LedgerDashboardController {
                 dbOk = false;
             }
 
-            const pythonValidatorOk = await pythonBridge.healthCheck();
+            // Phase 6.8b: boolean ではなく 4値ステータスで返す
+            // 'ok' | 'local_only' | 'not_configured' | 'error'
+            const pythonValidatorStatus = await pythonBridge.healthCheckStatus();
 
             res.json({
                 success: true,
                 database: dbOk ? 'ok' : 'error',
-                pythonValidator: pythonValidatorOk ? 'ok' : 'error',
+                pythonValidator: pythonValidatorStatus,
                 checkedAt: new Date().toISOString(),
             });
         } catch (err) {

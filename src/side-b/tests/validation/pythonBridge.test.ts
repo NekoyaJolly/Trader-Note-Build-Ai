@@ -186,7 +186,7 @@ describe('PythonBridge (unit, docker runner mocked)', () => {
             timedOut: false,
         }));
         const bridge = new PythonBridge(
-            { containerName: 'test-c', sharedDir, defaultTimeoutMs: 5000 },
+            { mode: 'docker_exec', containerName: 'test-c', sharedDir, defaultTimeoutMs: 5000 },
             runner,
         );
         expect(await bridge.healthCheck()).toBe(true);
@@ -219,6 +219,162 @@ describe('PythonBridge (unit, docker runner mocked)', () => {
         );
         expect(await bridge.healthCheck()).toBe(false);
     });
+
+    // -------------------------------------------------------
+    // Phase 6.8b: healthCheckStatus() のテスト
+    // -------------------------------------------------------
+
+    it('healthCheckStatus: mode 未設定なら not_configured', async () => {
+        const runner: DockerRunner = jest.fn();
+        const bridge = new PythonBridge(
+            // mode を渡さない = undefined
+            { containerName: 'x', sharedDir, defaultTimeoutMs: 5000 },
+            runner,
+        );
+        expect(await bridge.healthCheckStatus()).toBe('not_configured');
+        expect(runner).not.toHaveBeenCalled();
+    });
+
+    it('healthCheckStatus: docker_exec モードで疎通 OK なら local_only', async () => {
+        const runner: DockerRunner = jest.fn(async () => ({
+            code: 0,
+            stdout: 'ok',
+            stderr: '',
+            timedOut: false,
+        }));
+        const bridge = new PythonBridge(
+            { mode: 'docker_exec', containerName: 'test-c', sharedDir, defaultTimeoutMs: 5000 },
+            runner,
+        );
+        expect(await bridge.healthCheckStatus()).toBe('local_only');
+    });
+
+    it('healthCheckStatus: docker_exec モードで疎通失敗なら error', async () => {
+        const runner: DockerRunner = jest.fn(async () => ({
+            code: 1,
+            stdout: '',
+            stderr: 'No such container',
+            timedOut: false,
+        }));
+        const bridge = new PythonBridge(
+            { mode: 'docker_exec', containerName: 'missing', sharedDir, defaultTimeoutMs: 5000 },
+            runner,
+        );
+        expect(await bridge.healthCheckStatus()).toBe('error');
+    });
+
+    it('healthCheckStatus: http モードで baseUrl 未設定なら not_configured', async () => {
+        const runner: DockerRunner = jest.fn();
+        const bridge = new PythonBridge(
+            // baseUrl を渡さない
+            { mode: 'http', containerName: 'x', sharedDir, defaultTimeoutMs: 5000 },
+            runner,
+        );
+        expect(await bridge.healthCheckStatus()).toBe('not_configured');
+        expect(runner).not.toHaveBeenCalled();
+    });
+
+    it('healthCheckStatus: http モードで疎通 OK（res.ok=true, body.status=ok）なら ok', async () => {
+        const runner: DockerRunner = jest.fn();
+        // global.fetch をモックして正常レスポンスを返す
+        const mockFetch = jest.fn(async () => ({
+            ok: true,
+            json: async () => ({ status: 'ok' }),
+        }));
+        const origFetch = global.fetch;
+        global.fetch = mockFetch as unknown as typeof fetch;
+        try {
+            const bridge = new PythonBridge(
+                { mode: 'http', containerName: 'x', baseUrl: 'http://localhost:8000', sharedDir, defaultTimeoutMs: 5000 },
+                runner,
+            );
+            expect(await bridge.healthCheckStatus()).toBe('ok');
+        } finally {
+            global.fetch = origFetch;
+        }
+        expect(runner).not.toHaveBeenCalled();
+    });
+
+    it('healthCheckStatus: http モードで res.ok=false なら error', async () => {
+        const runner: DockerRunner = jest.fn();
+        const mockFetch = jest.fn(async () => ({
+            ok: false,
+            json: async () => ({}),
+        }));
+        const origFetch = global.fetch;
+        global.fetch = mockFetch as unknown as typeof fetch;
+        try {
+            const bridge = new PythonBridge(
+                { mode: 'http', containerName: 'x', baseUrl: 'http://localhost:8000', sharedDir, defaultTimeoutMs: 5000 },
+                runner,
+            );
+            expect(await bridge.healthCheckStatus()).toBe('error');
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+
+    it('healthCheckStatus: http モードで fetch 例外が発生したら error', async () => {
+        const runner: DockerRunner = jest.fn();
+        const mockFetch = jest.fn(async () => {
+            throw new Error('connect ECONNREFUSED');
+        });
+        const origFetch = global.fetch;
+        global.fetch = mockFetch as unknown as typeof fetch;
+        try {
+            const bridge = new PythonBridge(
+                { mode: 'http', containerName: 'x', baseUrl: 'http://localhost:8000', sharedDir, defaultTimeoutMs: 5000 },
+                runner,
+            );
+            expect(await bridge.healthCheckStatus()).toBe('error');
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+
+    it('healthCheckStatus: http モードで res.ok=true でも body.status が異常値なら error', async () => {
+        const runner: DockerRunner = jest.fn();
+        const mockFetch = jest.fn(async () => ({
+            ok: true,
+            json: async () => ({ status: 'degraded' }),
+        }));
+        const origFetch = global.fetch;
+        global.fetch = mockFetch as unknown as typeof fetch;
+        try {
+            const bridge = new PythonBridge(
+                { mode: 'http', containerName: 'x', baseUrl: 'http://localhost:8000', sharedDir, defaultTimeoutMs: 5000 },
+                runner,
+            );
+            expect(await bridge.healthCheckStatus()).toBe('error');
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+
+    it('healthCheck: 後方互換—docker_exec モードで疎通 OK なら true', async () => {
+        const runner: DockerRunner = jest.fn(async () => ({
+            code: 0,
+            stdout: 'ok',
+            stderr: '',
+            timedOut: false,
+        }));
+        const bridge = new PythonBridge(
+            { mode: 'docker_exec', containerName: 'test-c', sharedDir, defaultTimeoutMs: 5000 },
+            runner,
+        );
+        // local_only は true として扱う
+        expect(await bridge.healthCheck()).toBe(true);
+    });
+
+    it('healthCheck: 後方互換—mode 未設定は false', async () => {
+        const runner: DockerRunner = jest.fn();
+        const bridge = new PythonBridge(
+            { containerName: 'x', sharedDir, defaultTimeoutMs: 5000 },
+            runner,
+        );
+        // not_configured は false として扱う
+        expect(await bridge.healthCheck()).toBe(false);
+    });
 });
 
 // ===========================================
@@ -231,6 +387,7 @@ const describeIntegration = integrationEnabled ? describe : describe.skip;
 describeIntegration('PythonBridge (integration with real container)', () => {
     const sharedDir = path.join(process.cwd(), 'python', 'shared');
     const bridge = new PythonBridge({
+        mode: 'docker_exec',
         containerName: 'side_b_python_validator',
         sharedDir,
         defaultTimeoutMs: 10000,
