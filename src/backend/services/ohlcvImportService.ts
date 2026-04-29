@@ -18,11 +18,28 @@
 import fs from 'fs';
 import path from 'path';
 import csv from 'csv-parser';
-import { PrismaClient, Prisma } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import { z } from 'zod';
 import type { OHLCVInsertData } from '../repositories/ohlcvRepository';
 import { OHLCVRepository } from '../repositories/ohlcvRepository';
 
 const prisma = new PrismaClient();
+
+/** csv-parser の行を文字列キー・スカラー値に正規化してから読む */
+const CsvRowRecordSchema = z.record(
+  z.string(),
+  z.union([z.string(), z.number(), z.null(), z.undefined()]),
+);
+
+function pickCsvCell(row: z.infer<typeof CsvRowRecordSchema>, ...keys: string[]): string | undefined {
+  for (const k of keys) {
+    const v = row[k];
+    if (v === undefined || v === null) continue;
+    const s = typeof v === 'string' ? v : String(v);
+    if (s !== '') return s;
+  }
+  return undefined;
+}
 
 /**
  * インポート結果
@@ -230,11 +247,19 @@ export class OHLCVImportService {
     return new Promise((resolve, reject) => {
       fs.createReadStream(filePath)
         .pipe(csv())
-        .on('data', (row) => {
+        .on('data', (rawRow) => {
           lineNumber++;
           try {
+            const rowParsed = CsvRowRecordSchema.safeParse(rawRow);
+            if (!rowParsed.success) {
+              skipped++;
+              errors.push(`行 ${lineNumber}: 行データの形式が不正です`);
+              return;
+            }
+            const row = rowParsed.data;
+
             // time カラムをパース
-            const timeValue = row.time || row.Time || row.TIME || row.timestamp || row.Timestamp;
+            const timeValue = pickCsvCell(row, 'time', 'Time', 'TIME', 'timestamp', 'Timestamp');
             if (!timeValue) {
               skipped++;
               errors.push(`行 ${lineNumber}: time カラムが見つかりません`);
@@ -261,12 +286,12 @@ export class OHLCVImportService {
             }
 
             // OHLC 値をパース
-            const open = parseFloat(row.open || row.Open || row.OPEN);
-            const high = parseFloat(row.high || row.High || row.HIGH);
-            const low = parseFloat(row.low || row.Low || row.LOW);
-            const close = parseFloat(row.close || row.Close || row.CLOSE);
+            const open = parseFloat(pickCsvCell(row, 'open', 'Open', 'OPEN') ?? 'NaN');
+            const high = parseFloat(pickCsvCell(row, 'high', 'High', 'HIGH') ?? 'NaN');
+            const low = parseFloat(pickCsvCell(row, 'low', 'Low', 'LOW') ?? 'NaN');
+            const close = parseFloat(pickCsvCell(row, 'close', 'Close', 'CLOSE') ?? 'NaN');
             // volume は任意（なければ 0）
-            const volume = parseFloat(row.volume || row.Volume || row.VOLUME || '0');
+            const volume = parseFloat(pickCsvCell(row, 'volume', 'Volume', 'VOLUME') ?? '0');
 
             // 数値バリデーション
             if (isNaN(open) || isNaN(high) || isNaN(low) || isNaN(close)) {

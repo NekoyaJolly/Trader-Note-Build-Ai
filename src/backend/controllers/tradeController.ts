@@ -9,11 +9,52 @@ import type { NoteUpdatePayload } from '../../services/tradeNoteService';
 import { TradeNoteService } from '../../services/tradeNoteService';
 import type { NoteStatus } from '../../models/types';
 import type { Prisma } from '@prisma/client';
-import { Trade as DbTrade } from '@prisma/client';
 import { FeatureService } from '../../services/featureService';
-import { SIMILARITY_THRESHOLDS } from '../../services/featureVectorService';
 import type { PerformanceReportOptions } from '../../services/performance';
 import { NotePerformanceService } from '../../services/performance';
+import { z } from 'zod';
+
+const ImportCsvFilenameSchema = z.object({
+  filename: z.string().min(1, 'ファイル名が必要です'),
+}).strict();
+
+const UploadCsvTextBodySchema = z
+  .object({
+    filename: z.string().min(1),
+    csvText: z.string(),
+    profileId: z.string().optional(),
+    applyMode: z.enum(['bulk', 'individual']).optional(),
+    userComment: z.string().optional(),
+  })
+  .strict();
+
+const UpdatePriorityBodySchema = z.object({
+  priority: z.coerce.number().int().min(1).max(10),
+}).strict();
+
+const SetEnabledBodySchema = z.object({
+  enabled: z.boolean(),
+}).strict();
+
+const SetPausedUntilBodySchema = z.object({
+  pausedUntil: z.union([z.string().min(1), z.null()]).optional(),
+}).strict();
+
+const BulkPerformanceBodySchema = z
+  .object({
+    noteIds: z.array(z.string().min(1)).min(1),
+    from: z.string().optional(),
+    to: z.string().optional(),
+    timeframe: z.string().optional(),
+  })
+  .strict();
+
+/** getBulkSummary の値型（Record の unknown 禁止回避用） */
+type BulkPerfSummaryEntry = {
+  triggerRate: number;
+  avgSimilarity: number;
+  totalEvaluations: number;
+};
 
 /**
  * トレードデータの共通型
@@ -53,12 +94,12 @@ export class TradeController {
    */
   importCSV = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { filename } = req.body;
-      
-      if (!filename) {
-        res.status(400).json({ error: 'ファイル名が必要です' });
+      const parsed = ImportCsvFilenameSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({ error: 'ファイル名が必要です', details: parsed.error.format() });
         return;
       }
+      const { filename } = parsed.data;
 
       // ファイル名のバリデーション（パストラバーサル防止）
       if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
@@ -142,27 +183,15 @@ export class TradeController {
   // クライアントから CSV テキストを受け取り、サーバー側でファイル保存→取り込み→Draft ノート生成までを一気通貫で実行する
   uploadCSVText = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { 
-        filename, 
-        csvText, 
-        profileId,
-        applyMode = 'bulk',
-        userComment,
-      } = req.body as { 
-        filename?: string; 
-        csvText?: string; 
-        profileId?: string;
-        applyMode?: 'bulk' | 'individual';
-        userComment?: string;
-      };
-
-      // 入力検証（技術用語を避けたメッセージはフロント側で実施）
-      if (!filename || !csvText) {
-        res.status(400).json({ error: 'CSV ファイル名と内容が必要です' });
+      const parsedBody = UploadCsvTextBodySchema.safeParse(req.body ?? {});
+      if (!parsedBody.success) {
+        res.status(400).json({ error: 'CSV ファイル名と内容が必要です', details: parsedBody.error.format() });
         return;
       }
+      const { filename, csvText, profileId, userComment } = parsedBody.data;
+      // applyMode は将来の bulk / individual 分岐用。現状未使用だがAPI互換のためスキーマでは受け付ける。
 
-      // サーバーの trades ディレクトリに保存（既存ファイルがあれば上書き）
+      // 入力検証（技術用語を避けたメッセージはフロント側で実施）
       const savePath = path.join(process.cwd(), config.paths.trades, filename);
       fs.mkdirSync(path.dirname(savePath), { recursive: true });
       fs.writeFileSync(savePath, csvText, 'utf-8');
@@ -374,15 +403,16 @@ export class TradeController {
   updatePriority = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const { priority } = req.body;
-
-      if (typeof priority !== 'number' || priority < 1 || priority > 10) {
+      const parsed = UpdatePriorityBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
         res.status(400).json({
           success: false,
           error: '優先度は 1-10 の整数で指定してください',
+          details: parsed.error.format(),
         });
         return;
       }
+      const { priority } = parsed.data;
 
       await this.noteService.updateNotePriority(id, priority);
 
@@ -411,15 +441,16 @@ export class TradeController {
   setEnabled = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const { enabled } = req.body;
-
-      if (typeof enabled !== 'boolean') {
+      const parsed = SetEnabledBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
         res.status(400).json({
           success: false,
           error: 'enabled は boolean で指定してください',
+          details: parsed.error.format(),
         });
         return;
       }
+      const { enabled } = parsed.data;
 
       await this.noteService.setNoteEnabled(id, enabled);
 
@@ -448,7 +479,16 @@ export class TradeController {
   setPausedUntil = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const { pausedUntil } = req.body;
+      const parsed = SetPausedUntilBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({
+          success: false,
+          error: 'pausedUntil の形式が不正です',
+          details: parsed.error.format(),
+        });
+        return;
+      }
+      const { pausedUntil } = parsed.data;
 
       let parsedDate: Date | null = null;
       if (pausedUntil !== null && pausedUntil !== undefined) {
@@ -624,19 +664,20 @@ export class TradeController {
    */
   getBulkPerformanceSummary = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { noteIds, from, to, timeframe } = req.body;
-
-      if (!Array.isArray(noteIds) || noteIds.length === 0) {
+      const parsed = BulkPerformanceBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
         res.status(400).json({
           success: false,
           error: 'noteIds は必須です（string 配列）',
+          details: parsed.error.format(),
         });
         return;
       }
+      const { noteIds, from, to, timeframe } = parsed.data;
 
       // オプション構築
       const options: PerformanceReportOptions = {};
-      
+
       if (from) {
         const fromDate = new Date(from);
         if (!isNaN(fromDate.getTime())) {
@@ -656,7 +697,7 @@ export class TradeController {
       const summaryMap = await this.performanceService.getBulkSummary(noteIds, options);
 
       // Map を Object に変換
-      const summaries: Record<string, unknown> = {};
+      const summaries: Record<string, BulkPerfSummaryEntry> = {};
       summaryMap.forEach((value, key) => {
         summaries[key] = value;
       });
