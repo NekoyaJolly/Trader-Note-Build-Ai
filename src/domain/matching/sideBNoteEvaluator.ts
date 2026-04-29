@@ -29,6 +29,7 @@ import {
   getSimilarityLevel,
   DEFAULT_TRIGGER_THRESHOLD,
 } from '../noteEvaluator';
+import type { JsonValue } from '../../utils/jsonValue';
 
 // ============================================================================
 // 型定義
@@ -38,9 +39,9 @@ import {
  * Side-B マーケット分析データ（AITradePlan.marketAnalysis の構造）
  */
 export interface SideBMarketAnalysis {
-  regime: 'range' | 'uptrend' | 'downtrend' | string;
-  volatility: 'low' | 'medium' | 'high' | string;
-  trendDirection: 'sideways' | 'up' | 'down' | string;
+  regime: string;
+  volatility: string;
+  trendDirection: string;
   regimeConfidence: number;  // 0-100
   keyLevels: {
     support: number[];
@@ -73,7 +74,7 @@ export interface SideBNoteMatchingData {
   /** マーケット分析（AITradePlan.marketAnalysis） */
   marketAnalysis: SideBMarketAnalysis;
   /** エントリー分析（AITradeNote.entryAnalysis） */
-  entryAnalysis?: Record<string, unknown>;
+  entryAnalysis?: Record<string, JsonValue | undefined>;
   /** 時間足（ある場合） */
   timeframe?: string;
 }
