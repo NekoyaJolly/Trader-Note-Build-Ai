@@ -13,7 +13,10 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
+import type { IndicatorConfig, IndicatorId } from '../models/indicatorConfig';
+import { INDICATOR_METADATA } from '../models/indicatorConfig';
 import type {
   IndicatorProfile,
   CreateProfileRequest,
@@ -30,6 +33,42 @@ import {
 // 設定ファイルのパス
 const PROFILES_FILE = path.join(process.cwd(), 'data', 'indicator-profiles.json');
 
+const IndicatorIdSchema = z.string().refine(
+  (s): s is IndicatorId => INDICATOR_METADATA.some((m) => m.id === s),
+  { message: '不正な indicatorId です' },
+);
+
+const IndicatorConfigJsonSchema = z.object({
+  configId: z.string(),
+  indicatorId: IndicatorIdSchema,
+  label: z.string().optional(),
+  params: z.record(z.string(), z.union([z.number(), z.undefined()])).default({}),
+  enabled: z.boolean(),
+});
+
+const IndicatorProfileJsonSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  indicators: z.array(IndicatorConfigJsonSchema),
+  isDefault: z.boolean(),
+  createdAt: z.string().min(1),
+  updatedAt: z.string().min(1),
+});
+
+const ProfileStorageJsonSchema = z.object({
+  profiles: z.array(IndicatorProfileJsonSchema),
+  version: z.number(),
+  updatedAt: z.string().min(1),
+});
+
+/** 保存失敗時に元エラーを cause へ載せる（ES2020 未満のためプロパティで付与） */
+function saveErrorWithCause(message: string, error: Error): Error {
+  const e = new Error(message);
+  (e as Error & { cause?: Error }).cause = error;
+  return e;
+}
+
 /**
  * インジケータープロファイルサービスクラス
  */
@@ -37,24 +76,35 @@ export class IndicatorProfileService {
   /**
    * ストレージを読み込む
    */
-  async loadStorage(): Promise<ProfileStorage> {
+  loadStorage(): ProfileStorage {
     try {
       if (!fs.existsSync(PROFILES_FILE)) {
         return createDefaultProfileStorage();
       }
 
       const content = fs.readFileSync(PROFILES_FILE, 'utf-8');
-      const data = JSON.parse(content);
+      const parsed = ProfileStorageJsonSchema.safeParse(JSON.parse(content));
+      if (!parsed.success) {
+        console.error('プロファイル設定の形式エラー:', parsed.error.format());
+        return createDefaultProfileStorage();
+      }
 
-      // 日付の復元
       return {
-        profiles: data.profiles.map((p: IndicatorProfile) => ({
-          ...p,
-          createdAt: new Date(p.createdAt),
-          updatedAt: new Date(p.updatedAt),
-        })),
-        version: data.version,
-        updatedAt: new Date(data.updatedAt),
+        profiles: parsed.data.profiles.map(
+          (p): IndicatorProfile => ({
+            ...p,
+            createdAt: new Date(p.createdAt),
+            updatedAt: new Date(p.updatedAt),
+            indicators: p.indicators.map(
+              (ind): IndicatorConfig => ({
+                ...ind,
+                params: ind.params,
+              }),
+            ),
+          }),
+        ),
+        version: parsed.data.version,
+        updatedAt: new Date(parsed.data.updatedAt),
       };
     } catch (error) {
       console.error('プロファイル設定の読み込みエラー:', error);
@@ -65,7 +115,7 @@ export class IndicatorProfileService {
   /**
    * ストレージを保存
    */
-  async saveStorage(storage: ProfileStorage): Promise<void> {
+  saveStorage(storage: ProfileStorage): void {
     try {
       const dataDir = path.dirname(PROFILES_FILE);
       if (!fs.existsSync(dataDir)) {
@@ -76,44 +126,45 @@ export class IndicatorProfileService {
       fs.writeFileSync(PROFILES_FILE, JSON.stringify(storage, null, 2), 'utf-8');
     } catch (error) {
       console.error('プロファイル設定の保存エラー:', error);
-      throw new Error('プロファイル設定の保存に失敗しました');
+      const cause = error instanceof Error ? error : new Error(String(error));
+      throw saveErrorWithCause('プロファイル設定の保存に失敗しました', cause);
     }
   }
 
   /**
    * 全プロファイルを取得
    */
-  async getAllProfiles(): Promise<IndicatorProfile[]> {
-    const storage = await this.loadStorage();
+  getAllProfiles(): IndicatorProfile[] {
+    const storage = this.loadStorage();
     return storage.profiles;
   }
 
   /**
    * プロファイルをIDで取得
    */
-  async getProfileById(id: string): Promise<IndicatorProfile | null> {
+  getProfileById(id: string): IndicatorProfile | null {
     // 予約IDの場合はnullを返す（特殊処理は呼び出し側で）
     if (isReservedProfileId(id)) {
       return null;
     }
 
-    const storage = await this.loadStorage();
+    const storage = this.loadStorage();
     return storage.profiles.find(p => p.id === id) || null;
   }
 
   /**
    * デフォルトプロファイルを取得
    */
-  async getDefaultProfile(): Promise<IndicatorProfile | null> {
-    const storage = await this.loadStorage();
+  getDefaultProfile(): IndicatorProfile | null {
+    const storage = this.loadStorage();
     return storage.profiles.find(p => p.isDefault) || null;
   }
 
   /**
    * プロファイルを作成
    */
-  async createProfile(request: CreateProfileRequest): Promise<IndicatorProfile> {
-    const storage = await this.loadStorage();
+  createProfile(request: CreateProfileRequest): IndicatorProfile {
+    const storage = this.loadStorage();
 
     // 名前の重複チェック
     if (storage.profiles.some(p => p.name === request.name)) {
@@ -136,7 +187,7 @@ export class IndicatorProfileService {
     }
 
     storage.profiles.push(newProfile);
-    await this.saveStorage(storage);
+    this.saveStorage(storage);
 
     return newProfile;
   }
@@ -144,13 +195,13 @@ export class IndicatorProfileService {
   /**
    * プロファイルを更新
    */
-  async updateProfile(id: string, request: UpdateProfileRequest): Promise<IndicatorProfile> {
+  updateProfile(id: string, request: UpdateProfileRequest): IndicatorProfile {
     // 予約IDは更新不可
     if (isReservedProfileId(id)) {
       throw new Error('特殊プロファイルは更新できません');
     }
 
-    const storage = await this.loadStorage();
+    const storage = this.loadStorage();
     const index = storage.profiles.findIndex(p => p.id === id);
 
     if (index === -1) {
@@ -177,20 +228,20 @@ export class IndicatorProfileService {
     }
     profile.updatedAt = new Date();
 
-    await this.saveStorage(storage);
+    this.saveStorage(storage);
     return profile;
   }
 
   /**
    * プロファイルを削除
    */
-  async deleteProfile(id: string): Promise<void> {
+  deleteProfile(id: string): void {
     // 予約IDは削除不可
     if (isReservedProfileId(id)) {
       throw new Error('特殊プロファイルは削除できません');
     }
 
-    const storage = await this.loadStorage();
+    const storage = this.loadStorage();
     const index = storage.profiles.findIndex(p => p.id === id);
 
     if (index === -1) {
@@ -198,26 +249,26 @@ export class IndicatorProfileService {
     }
 
     storage.profiles.splice(index, 1);
-    await this.saveStorage(storage);
+    this.saveStorage(storage);
   }
 
   /**
    * プロファイル選択オプションを取得（UI用）
-   * 
+   *
    * 特殊オプション（AIに任せる、プロファイルなし）を含む
    */
-  async getProfileOptions(): Promise<ProfileOption[]> {
-    const profiles = await this.getAllProfiles();
+  getProfileOptions(): ProfileOption[] {
+    const profiles = this.getAllProfiles();
     return buildProfileOptions(profiles);
   }
 
   /**
    * デフォルトプロファイルIDを取得
-   * 
+   *
    * デフォルトが設定されていない場合は AI_AUTO を返す
    */
-  async getDefaultProfileId(): Promise<string> {
-    const defaultProfile = await this.getDefaultProfile();
+  getDefaultProfileId(): string {
+    const defaultProfile = this.getDefaultProfile();
     return defaultProfile?.id || RESERVED_PROFILE_IDS.AI_AUTO;
   }
 }

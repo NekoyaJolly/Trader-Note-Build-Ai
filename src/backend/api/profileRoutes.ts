@@ -25,7 +25,6 @@ import {
   CreateProfileRequestSchema,
   UpdateProfileRequestSchema,
 } from '../../schemas/api/profile';
-import { UUIDSchema } from '../../schemas/common';
 import { z } from 'zod';
 
 const router = Router();
@@ -39,10 +38,10 @@ const IdParamSchema = z.object({
  * GET /api/profiles
  * 全プロファイルを取得
  */
-router.get('/', async (_req: Request, res: Response) => {
+router.get('/', (_req: Request, res: Response) => {
   try {
     const profileService = getIndicatorProfileService();
-    const profiles = await profileService.getAllProfiles();
+    const profiles = profileService.getAllProfiles();
 
     res.json({
       success: true,
@@ -63,11 +62,11 @@ router.get('/', async (_req: Request, res: Response) => {
  * 
  * CSVインポートUIのドロップダウンで使用
  */
-router.get('/options', async (_req: Request, res: Response) => {
+router.get('/options', (_req: Request, res: Response) => {
   try {
     const profileService = getIndicatorProfileService();
-    const options = await profileService.getProfileOptions();
-    const defaultId = await profileService.getDefaultProfileId();
+    const options = profileService.getProfileOptions();
+    const defaultId = profileService.getDefaultProfileId();
 
     res.json({
       success: true,
@@ -92,7 +91,7 @@ router.get('/options', async (_req: Request, res: Response) => {
 router.get(
   '/:id',
   validateParams(IdParamSchema),
-  async (req: Request, res: Response) => {
+  (req: Request, res: Response) => {
     try {
       const { id } = req.params;
 
@@ -110,28 +109,29 @@ router.get(
       }
 
       const profileService = getIndicatorProfileService();
-      const profile = await profileService.getProfileById(id);
+      const profile = profileService.getProfileById(id);
 
-    if (!profile) {
-      res.status(404).json({
-        success: false,
-        error: 'プロファイルが見つかりません',
+      if (!profile) {
+        res.status(404).json({
+          success: false,
+          error: 'プロファイルが見つかりません',
+        });
+        return;
+      }
+
+      res.json({
+        success: true,
+        data: profile,
       });
-      return;
+    } catch (error) {
+      console.error('プロファイル取得エラー:', error);
+      res.status(500).json({
+        success: false,
+        error: 'プロファイルの取得に失敗しました',
+      });
     }
-
-    res.json({
-      success: true,
-      data: profile,
-    });
-  } catch (error) {
-    console.error('プロファイル取得エラー:', error);
-    res.status(500).json({
-      success: false,
-      error: 'プロファイルの取得に失敗しました',
-    });
-  }
-});
+  },
+);
 
 /**
  * POST /api/profiles
@@ -148,13 +148,12 @@ router.get(
 router.post(
   '/',
   validateBody(CreateProfileRequestSchema),
-  async (req: Request, res: Response) => {
+  (req: Request, res: Response) => {
     try {
-      // バリデーション済みのデータ
-      const request = req.body;
+      const request = CreateProfileRequestSchema.parse(req.body);
 
       const profileService = getIndicatorProfileService();
-      const profile = await profileService.createProfile(request);
+      const profile = profileService.createProfile(request);
 
       res.status(201).json({
         success: true,
@@ -188,14 +187,13 @@ router.put(
   '/:id',
   validateParams(IdParamSchema),
   validateBody(UpdateProfileRequestSchema),
-  async (req: Request, res: Response) => {
+  (req: Request, res: Response) => {
     try {
       const { id } = req.params;
-      // バリデーション済みのデータ
-      const request = req.body;
+      const request = UpdateProfileRequestSchema.parse(req.body);
 
       const profileService = getIndicatorProfileService();
-      const profile = await profileService.updateProfile(id, request);
+      const profile = profileService.updateProfile(id, request);
 
       res.json({
         success: true,
@@ -220,12 +218,12 @@ router.put(
 router.delete(
   '/:id',
   validateParams(IdParamSchema),
-  async (req: Request, res: Response) => {
+  (req: Request, res: Response) => {
     try {
       const { id } = req.params;
 
       const profileService = getIndicatorProfileService();
-      await profileService.deleteProfile(id);
+      profileService.deleteProfile(id);
 
       res.json({
         success: true,
@@ -249,12 +247,12 @@ router.delete(
 router.put(
   '/:id/default',
   validateParams(IdParamSchema),
-  async (req: Request, res: Response) => {
+  (req: Request, res: Response) => {
     try {
       const { id } = req.params;
 
       const profileService = getIndicatorProfileService();
-      const profile = await profileService.updateProfile(id, { isDefault: true });
+      const profile = profileService.updateProfile(id, { isDefault: true });
 
       res.json({
         success: true,

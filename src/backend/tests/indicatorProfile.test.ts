@@ -12,9 +12,9 @@ import {
   isReservedProfileId,
   buildProfileOptions,
   createNoteProfileConfig,
-  IndicatorProfile,
+  type IndicatorProfile,
 } from '../../models/indicatorProfile';
-import { IndicatorConfig } from '../../models/indicatorConfig';
+import type { IndicatorConfig } from '../../models/indicatorConfig';
 
 // テスト用ファイルパス
 const TEST_PROFILES_FILE = path.join(process.cwd(), 'data', 'indicator-profiles.json');
@@ -143,8 +143,8 @@ describe('IndicatorProfileService', () => {
   });
 
   describe('createProfile', () => {
-    it('プロファイルを作成できる', async () => {
-      const profile = await service.createProfile({
+    it('プロファイルを作成できる', () => {
+      const profile = service.createProfile({
         name: 'テストプロファイル',
         description: 'テスト用',
         indicators: [
@@ -159,20 +159,22 @@ describe('IndicatorProfileService', () => {
       expect(profile.isDefault).toBe(false);
     });
 
-    it('同じ名前のプロファイルは作成できない', async () => {
-      await service.createProfile({
+    it('同じ名前のプロファイルは作成できない', () => {
+      service.createProfile({
         name: '重複テスト',
         indicators: [],
       });
 
-      await expect(service.createProfile({
-        name: '重複テスト',
-        indicators: [],
-      })).rejects.toThrow('同じ名前のプロファイルが既に存在します');
+      expect(() =>
+        service.createProfile({
+          name: '重複テスト',
+          indicators: [],
+        }),
+      ).toThrow('同じ名前のプロファイルが既に存在します');
     });
 
-    it('デフォルトプロファイルを設定できる', async () => {
-      const profile1 = await service.createProfile({
+    it('デフォルトプロファイルを設定できる', () => {
+      const profile1 = service.createProfile({
         name: 'プロファイル1',
         indicators: [],
         isDefault: true,
@@ -181,13 +183,13 @@ describe('IndicatorProfileService', () => {
       expect(profile1.isDefault).toBe(true);
 
       // 2つ目をデフォルトにすると1つ目は解除される
-      await service.createProfile({
+      service.createProfile({
         name: 'プロファイル2',
         indicators: [],
         isDefault: true,
       });
 
-      const profiles = await service.getAllProfiles();
+      const profiles = service.getAllProfiles();
       const defaultProfiles = profiles.filter(p => p.isDefault);
       expect(defaultProfiles).toHaveLength(1);
       expect(defaultProfiles[0].name).toBe('プロファイル2');
@@ -195,36 +197,36 @@ describe('IndicatorProfileService', () => {
   });
 
   describe('getProfileById', () => {
-    it('存在するプロファイルを取得できる', async () => {
-      const created = await service.createProfile({
+    it('存在するプロファイルを取得できる', () => {
+      const created = service.createProfile({
         name: '取得テスト',
         indicators: [],
       });
 
-      const found = await service.getProfileById(created.id);
+      const found = service.getProfileById(created.id);
       expect(found).not.toBeNull();
       expect(found?.name).toBe('取得テスト');
     });
 
-    it('存在しないIDはnullを返す', async () => {
-      const found = await service.getProfileById('non-existent-id');
+    it('存在しないIDはnullを返す', () => {
+      const found = service.getProfileById('non-existent-id');
       expect(found).toBeNull();
     });
 
-    it('予約IDはnullを返す', async () => {
-      const found = await service.getProfileById(RESERVED_PROFILE_IDS.AI_AUTO);
+    it('予約IDはnullを返す', () => {
+      const found = service.getProfileById(RESERVED_PROFILE_IDS.AI_AUTO);
       expect(found).toBeNull();
     });
   });
 
   describe('updateProfile', () => {
-    it('プロファイルを更新できる', async () => {
-      const created = await service.createProfile({
+    it('プロファイルを更新できる', () => {
+      const created = service.createProfile({
         name: '更新前',
         indicators: [],
       });
 
-      const updated = await service.updateProfile(created.id, {
+      const updated = service.updateProfile(created.id, {
         name: '更新後',
         description: '更新しました',
       });
@@ -233,40 +235,43 @@ describe('IndicatorProfileService', () => {
       expect(updated.description).toBe('更新しました');
     });
 
-    it('予約IDは更新できない', async () => {
-      await expect(service.updateProfile(RESERVED_PROFILE_IDS.AI_AUTO, {
-        name: '変更',
-      })).rejects.toThrow('特殊プロファイルは更新できません');
+    it('予約IDは更新できない', () => {
+      expect(() =>
+        service.updateProfile(RESERVED_PROFILE_IDS.AI_AUTO, {
+          name: '変更',
+        }),
+      ).toThrow('特殊プロファイルは更新できません');
     });
   });
 
   describe('deleteProfile', () => {
-    it('プロファイルを削除できる', async () => {
-      const created = await service.createProfile({
+    it('プロファイルを削除できる', () => {
+      const created = service.createProfile({
         name: '削除テスト',
         indicators: [],
       });
 
-      await service.deleteProfile(created.id);
+      service.deleteProfile(created.id);
 
-      const found = await service.getProfileById(created.id);
+      const found = service.getProfileById(created.id);
       expect(found).toBeNull();
     });
 
-    it('予約IDは削除できない', async () => {
-      await expect(service.deleteProfile(RESERVED_PROFILE_IDS.AI_AUTO))
-        .rejects.toThrow('特殊プロファイルは削除できません');
+    it('予約IDは削除できない', () => {
+      expect(() => service.deleteProfile(RESERVED_PROFILE_IDS.AI_AUTO)).toThrow(
+        '特殊プロファイルは削除できません',
+      );
     });
   });
 
   describe('getProfileOptions', () => {
-    it('特殊オプションとユーザープロファイルを返す', async () => {
-      await service.createProfile({
+    it('特殊オプションとユーザープロファイルを返す', () => {
+      service.createProfile({
         name: 'ユーザープロファイル',
         indicators: [],
       });
 
-      const options = await service.getProfileOptions();
+      const options = service.getProfileOptions();
       
       expect(options.length).toBe(3);
       expect(options[0].id).toBe(RESERVED_PROFILE_IDS.AI_AUTO);
@@ -276,19 +281,19 @@ describe('IndicatorProfileService', () => {
   });
 
   describe('getDefaultProfileId', () => {
-    it('デフォルトが設定されていない場合はAI_AUTOを返す', async () => {
-      const defaultId = await service.getDefaultProfileId();
+    it('デフォルトが設定されていない場合はAI_AUTOを返す', () => {
+      const defaultId = service.getDefaultProfileId();
       expect(defaultId).toBe(RESERVED_PROFILE_IDS.AI_AUTO);
     });
 
-    it('デフォルトプロファイルがあればそのIDを返す', async () => {
-      const profile = await service.createProfile({
+    it('デフォルトプロファイルがあればそのIDを返す', () => {
+      const profile = service.createProfile({
         name: 'デフォルト',
         indicators: [],
         isDefault: true,
       });
 
-      const defaultId = await service.getDefaultProfileId();
+      const defaultId = service.getDefaultProfileId();
       expect(defaultId).toBe(profile.id);
     });
   });

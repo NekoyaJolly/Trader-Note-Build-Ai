@@ -171,7 +171,7 @@ export class TradeNoteService {
     timeframe: string = '15m'
   ): Promise<TradeNote> {
     // === ユーザー設定のインジケーターを取得 ===
-    const activeConfigs = await indicatorSettingsService.getActiveConfigs();
+    const activeConfigs = indicatorSettingsService.getActiveConfigs();
 
     // インジケーター設定がない場合は従来の generateNote にフォールバック
     if (activeConfigs.length === 0) {
@@ -330,7 +330,7 @@ export class TradeNoteService {
 
     // === ユーザー定義プロファイルの場合 ===
     const profileService = getIndicatorProfileService();
-    const profile = await profileService.getProfileById(profileId);
+    const profile = profileService.getProfileById(profileId);
 
     if (!profile) {
       console.warn(`[TradeNoteService] プロファイルが見つかりません: ${profileId}、デフォルト処理を使用`);
