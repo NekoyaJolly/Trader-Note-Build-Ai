@@ -215,12 +215,24 @@ export class MetaEvolutionAgent {
   }
 
   /**
-   * 再編成提案を LLM に生成させる。
-   * 永続化は `recordProposal` で別ステップとして行う(純粋性を保つため)。
-   * 失敗時は null。
+   * Phase 6.7a: PromptRegistry.getCompositeActive で DB の __global__ + meta_evolution active を合成。
+   * Registry 未 seed / DB 不整合時は loadPromptWithGlobal にフォールバック。
+   * this.registry はコンストラクタで DI されるため、新規インスタンス不要。
    */
+  private async resolveSystemPrompt(): Promise<string> {
+    try {
+      return await this.registry.getCompositeActive('meta_evolution');
+    } catch (err) {
+      console.warn(
+        '[MetaEvolution] Registry 合成に失敗、ファイル fallback:',
+        err instanceof Error ? err.message : err,
+      );
+      return loadPromptWithGlobal('meta_evolution');
+    }
+  }
+
   async propose(input: MetaEvolutionInput): Promise<AgentRestructureProposal | null> {
-    const system = loadPromptWithGlobal('meta_evolution');
+    const system = await this.resolveSystemPrompt();
     const user = this.buildUserPrompt(input);
 
     const res = await withRetries(() =>

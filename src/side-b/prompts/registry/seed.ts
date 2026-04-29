@@ -11,7 +11,6 @@
  *   npx ts-node src/side-b/prompts/registry/seed.ts
  * もしくは サーバー起動時に一度だけ呼び出す。
  */
-
 import fs from 'fs';
 import path from 'path';
 import {
@@ -77,6 +76,12 @@ export const DEFAULT_SEED_ENTRIES: SeedEntry[] = [
     agentName: 'meta_evolution',
     file: 'meta_evolution.md',
     notes: 'Phase 6 MetaEvolutionAgent',
+  },
+  // Phase 6.7a: BullBearDebateAgent を seed 対象に追加
+  {
+    agentName: 'bull_bear_debate',
+    file: 'bull_bear_debate.md',
+    notes: 'Phase 6.7a BullBearDebateAgent (PR#55 で追加)',
   },
 ];
 
