@@ -1,7 +1,6 @@
 import type { TradeNote, MarketData } from '../models/types';
 import { MarketDataService } from './marketDataService';
 import { TradeNoteService } from './tradeNoteService';
-import { config } from '../config';
 import { v4 as uuidv4 } from 'uuid';
 import type { MatchResultDTO } from '../domain/matching/MatchResultDTO';
 import { MatchResultRepository } from '../backend/repositories/matchResultRepository';
@@ -24,11 +23,11 @@ import {
   convertMarketDataToSnapshot,
 } from './legacyNoteEvaluatorAdapter';
 import type { EvaluationResult } from '../domain/noteEvaluator';
-import { NoteEvaluator } from '../domain/noteEvaluator';
 import type { TradeNote as PrismaTradeNote, MatchResult, MarketSnapshot } from '@prisma/client';
 import { SideBMatchingAdapter } from './sideBMatchingAdapter';
 import type { SideBNoteMatchingData } from '../domain/matching/sideBNoteEvaluator';
 import { NotificationTriggerService } from './notification/notificationTriggerService';
+import type { JsonValue } from '../utils/jsonValue';
 
 /**
  * マッチングサービス
@@ -492,7 +491,7 @@ export class MatchingService {
    */
   private checkTrendMatchPrisma(note: PrismaTradeNote, market: MarketData): boolean {
     // Prisma の marketContext は JsonValue 型なので型安全に取得
-    const marketContext = note.marketContext as Record<string, unknown> | null;
+    const marketContext = note.marketContext as Record<string, JsonValue | undefined> | null;
     const noteTrend = marketContext?.trend as string | undefined;
     const currentTrend = market.indicators?.trend;
 
@@ -524,7 +523,7 @@ export class MatchingService {
 
     // Prisma型の marketContext からインジケーター値を取得
     const historicalIndicators: Record<string, number | undefined>[] = [];
-    const marketContext = note.marketContext as Record<string, unknown> | null;
+    const marketContext = note.marketContext as Record<string, JsonValue | undefined> | null;
 
     if (marketContext && typeof marketContext === 'object') {
       const noteIndicators: Record<string, number | undefined> = {};
@@ -769,7 +768,7 @@ export class MatchingService {
             );
           }
         } catch (notifyError) {
-          const errMsg = `通知エラー: noteId=${match.historicalNoteId}, ${notifyError}`;
+          const errMsg = `通知エラー: noteId=${match.historicalNoteId}, ${notifyError instanceof Error ? notifyError.message : String(notifyError)}`;
           errors.push(errMsg);
           console.error(`[MatchingPipeline] ${errMsg}`);
         }
@@ -791,7 +790,7 @@ export class MatchingService {
         errors,
       };
     } catch (error) {
-      const errMsg = `パイプライン全体エラー: ${error}`;
+      const errMsg = `パイプライン全体エラー: ${error instanceof Error ? error.message : String(error)}`;
       errors.push(errMsg);
       console.error(`[MatchingPipeline] ${errMsg}`);
       return { totalMatches: 0, notified: 0, skipped: 0, errors };

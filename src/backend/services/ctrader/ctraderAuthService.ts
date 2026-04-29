@@ -15,6 +15,7 @@
 import { z } from 'zod';
 import type { PrismaClient, User, CTraderToken } from '@prisma/client';
 import { config } from '../../../config';
+import type { JsonValue } from '../../../utils/jsonValue';
 import type { CreateSessionPayload } from '../auth/sessionService';
 import { sessionService } from '../auth/sessionService';
 import type { CTraderConnectionType } from './types/connection';
@@ -24,6 +25,15 @@ import { CTraderAccountListResponseSchema } from '../../../schemas/external/ctra
 // @reiryoku/ctrader-layer は型定義がないため、型定義は types/connection.ts で提供
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { CTraderConnection } = require('@reiryoku/ctrader-layer');
+
+/** Error.cause を付与する（target ES2020 のため Error コンストラクタ第2引数は使わない） */
+function errorWithCause(message: string, cause?: Error): Error {
+  const e = new Error(message);
+  if (cause !== undefined) {
+    (e as Error & { cause?: Error }).cause = cause;
+  }
+  return e;
+}
 
 // ========================================
 // Zod スキーマ
@@ -159,8 +169,11 @@ export class CTraderAuthService {
       throw new Error(`cTrader トークン交換エラー: ${response.status} ${errorText}`);
     }
 
-    const json: unknown = await response.json();
-    const jsonObj = json as Record<string, unknown>;
+    const json: JsonValue = (await response.json()) as JsonValue;
+    const jsonObj =
+      typeof json === 'object' && json !== null && !Array.isArray(json)
+        ? (json as Record<string, JsonValue | undefined>)
+        : {};
     console.log('[cTraderAuth] トークンレスポンス受信:', {
       hasAccessToken: !!jsonObj.access_token,
       hasRefreshToken: !!jsonObj.refresh_token,
@@ -447,7 +460,7 @@ export class CTraderAuthService {
    */
   private async fetchAccountId(accessToken: string): Promise<string> {
     let connection: CTraderConnectionType | null = null;
-    let liveError: Error | null = null;
+    let liveError: Error | undefined;
 
     try {
       // 1. Live環境でWebSocket接続を試行
@@ -556,13 +569,16 @@ export class CTraderAuthService {
         const parseResult = CTraderAccountListResponseSchema.safeParse(accountListRaw);
         if (!parseResult.success) {
           console.error('[CTraderAuth] APIレスポンスのバリデーションエラー (Demo):', parseResult.error.format());
-          throw new Error(`cTrader APIレスポンスが不正です (Demo): ${parseResult.error.message}`);
+          throw errorWithCause(
+            `cTrader APIレスポンスが不正です (Demo): ${parseResult.error.message}`,
+            parseResult.error,
+          );
         }
 
         const accountListRes = parseResult.data;
         const accounts = accountListRes.ctidTraderAccount || [];
         if (accounts.length === 0) {
-          throw new Error('cTrader アカウントが見つかりません (Demo環境)');
+          throw errorWithCause('cTrader アカウントが見つかりません (Demo環境)', liveError);
         }
 
         const selectedAccount = accounts[0];
@@ -585,10 +601,22 @@ export class CTraderAuthService {
         console.error('[CTraderAuth] Live環境のエラー:', liveError?.message);
         console.error('[CTraderAuth] Demo環境のエラー:', demoError instanceof Error ? demoError.message : '不明なエラー');
 
-        throw new Error(
+        const demoCauseForChain =
+          demoError instanceof Error
+            ? demoError
+            : new Error(
+                typeof demoError === 'object' && demoError !== null
+                  ? JSON.stringify(demoError)
+                  : typeof demoError === 'string'
+                    ? demoError
+                    : String(demoError),
+              );
+
+        throw errorWithCause(
           `cTrader アカウント情報の取得に失敗しました。` +
-          `Live環境: ${liveError?.message}、` +
-          `Demo環境: ${demoError instanceof Error ? demoError.message : '不明なエラー'}`
+            `Live環境: ${liveError?.message ?? '不明なエラー'}、` +
+            `Demo環境: ${demoCauseForChain.message}`,
+          demoCauseForChain,
         );
       }
     } finally {

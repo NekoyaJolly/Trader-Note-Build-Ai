@@ -11,6 +11,8 @@
  * @see docs/design/phase_4_specification.md セクション4.1
  */
 
+import type { JsonValue } from '../../utils/jsonValue';
+
 // ===========================================
 // カテゴリ / ステータス / ソース
 // ===========================================
@@ -306,35 +308,41 @@ export type CreateEdgeHypothesisInput = Omit<
 // バリデーション
 // ===========================================
 
-export function isEdgeCategory(x: unknown): x is EdgeCategory {
+export function isEdgeCategory(x: JsonValue | undefined): x is EdgeCategory {
     return typeof x === 'string' && (EDGE_CATEGORIES as string[]).includes(x);
 }
 
-export function isEdgeStatus(x: unknown): x is EdgeStatus {
+export function isEdgeStatus(x: JsonValue | undefined): x is EdgeStatus {
     return typeof x === 'string' && (EDGE_STATUSES as string[]).includes(x);
 }
 
-export function isEdgeSource(x: unknown): x is EdgeSource {
+export function isEdgeSource(x: JsonValue | undefined): x is EdgeSource {
     return typeof x === 'string' && (EDGE_SOURCES as string[]).includes(x);
 }
 
-export function isConditionOp(x: unknown): x is ConditionOp {
+export function isConditionOp(x: JsonValue | undefined): x is ConditionOp {
     return (
         typeof x === 'string' &&
         ['<', '<=', '>', '>=', '==', '!=', 'between', 'in'].includes(x)
     );
 }
 
-export function validateCondition(c: unknown): MachineReadableCondition {
-    if (!c || typeof c !== 'object') {
+export function validateCondition(c: JsonValue): MachineReadableCondition {
+    if (!c || typeof c !== 'object' || Array.isArray(c)) {
         throw new Error('Condition must be an object');
     }
-    const cc = c as Record<string, unknown>;
+    const cc = c as Record<string, JsonValue | undefined>;
     if (typeof cc.lensName !== 'string' || typeof cc.featureKey !== 'string') {
         throw new Error('Condition missing lensName/featureKey');
     }
     if (!isConditionOp(cc.op)) {
-        throw new Error(`Invalid condition op: ${String(cc.op)}`);
+        const opLabel =
+            cc.op === undefined || cc.op === null
+                ? '(missing)'
+                : typeof cc.op === 'object'
+                  ? JSON.stringify(cc.op)
+                  : String(cc.op);
+        throw new Error(`Invalid condition op: ${opLabel}`);
     }
     if (cc.value === undefined || cc.value === null) {
         throw new Error('Condition.value is required');

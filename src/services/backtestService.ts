@@ -20,15 +20,11 @@
  */
 
 import type { BacktestEvent, BacktestOutcome, BacktestStatus } from '@prisma/client';
-import { BacktestRun, BacktestResult } from '@prisma/client';
-import { Decimal } from '@prisma/client/runtime/library';
 import type { 
   CreateBacktestResultInput,
   CreateBacktestEventInput} from '../backend/repositories/backtestRepository';
 import { 
   BacktestRepository, 
-  CreateBacktestRunInput,
-  BacktestRunWithDetails,
 } from '../backend/repositories/backtestRepository';
 import type { OHLCVQueryFilter } from '../backend/repositories/ohlcvRepository';
 import { OHLCVRepository } from '../backend/repositories/ohlcvRepository';
@@ -447,7 +443,7 @@ export class BacktestService {
   private calculateResult(
     runId: string,
     events: BacktestEvent[],
-    tradingCostPct: number,
+    _tradingCostPct: number,
   ): CreateBacktestResultInput {
     const wins = events.filter(e => e.outcome === 'win');
     const losses = events.filter(e => e.outcome === 'loss');
