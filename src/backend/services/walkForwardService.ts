@@ -14,11 +14,11 @@
  */
 
 import { PrismaClient, BacktestStatus, WalkForwardType } from '@prisma/client';
+import type {
+  BacktestRequest,
+  BacktestTimeframe} from './strategyBacktestService';
 import {
   runBacktest,
-  BacktestRequest,
-  BacktestResult,
-  BacktestTimeframe,
 } from './strategyBacktestService';
 
 // Prismaクライアントのシングルトンインスタンス

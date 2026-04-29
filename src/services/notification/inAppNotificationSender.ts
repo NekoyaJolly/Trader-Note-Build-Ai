@@ -1,5 +1,5 @@
-import { PrismaClient } from '@prisma/client';
-import { NotificationSender, NotificationPayload } from './notificationSender';
+import type { PrismaClient } from '@prisma/client';
+import type { NotificationSender, NotificationPayload } from './notificationSender';
 import { prisma } from '../../backend/db/client';
 
 /**

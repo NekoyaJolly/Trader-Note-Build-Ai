@@ -10,7 +10,8 @@
  * @see NOTE.md - ドメイン仕様
  */
 
-import { Router, Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';

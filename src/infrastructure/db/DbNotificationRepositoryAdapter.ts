@@ -1,7 +1,8 @@
-import { Notification, MatchResult, MarketData, TradeNote } from '../../models/types';
-import { NotificationRepository } from '../../domain/notification/NotificationRepository';
-import { DbNotificationRepository, NotificationWithMatch } from '../../backend/repositories/notificationRepository';
-import { Decimal } from '@prisma/client/runtime/library';
+import type { Notification, MatchResult, MarketData, TradeNote } from '../../models/types';
+import type { NotificationRepository } from '../../domain/notification/NotificationRepository';
+import type { NotificationWithMatch } from '../../backend/repositories/notificationRepository';
+import { DbNotificationRepository } from '../../backend/repositories/notificationRepository';
+import type { Decimal } from '@prisma/client/runtime/library';
 
 /**
  * DbNotificationRepository を NotificationRepository インターフェースに適合させるアダプター

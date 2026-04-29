@@ -2,8 +2,24 @@ import fs from 'fs';
 import path from 'path';
 import csv from 'csv-parser';
 import crypto from 'crypto';
-import { TradeSide } from '@prisma/client';
+import type { TradeSide } from '@prisma/client';
 import { TradeRepository } from '../backend/repositories/tradeRepository';
+import { z } from 'zod';
+
+const CsvRowRecordSchema = z.record(
+  z.string(),
+  z.union([z.string(), z.number(), z.null(), z.undefined()]),
+);
+
+function pickCsvCell(row: z.infer<typeof CsvRowRecordSchema>, ...keys: string[]): string | undefined {
+  for (const k of keys) {
+    const v = row[k];
+    if (v === undefined || v === null) continue;
+    const s = typeof v === 'string' ? v : String(v);
+    if (s !== '') return s;
+  }
+  return undefined;
+}
 
 export class TradeImportService {
   private tradeRepository: TradeRepository;
@@ -90,15 +106,26 @@ export class TradeImportService {
     await new Promise<void>((resolve, reject) => {
       fs.createReadStream(filePath)
         .pipe(csv())
-        .on('data', (row) => {
+        .on('data', (rawRow) => {
           try {
-            const parsedSide = String(row.side || '').toLowerCase();
-            const timestamp = new Date(row.timestamp);
-            const price = parseFloat(row.price);
-            const quantity = parseFloat(row.quantity);
+            const rowParsed = CsvRowRecordSchema.safeParse(rawRow);
+            if (!rowParsed.success) {
+              skipped += 1;
+              errors.push('行データの形式が不正のためスキップ');
+              return;
+            }
+            const row = rowParsed.data;
+            const sideRaw = pickCsvCell(row, 'side') ?? '';
+            const parsedSide = sideRaw.toLowerCase();
+            const tsRaw = pickCsvCell(row, 'timestamp');
+            const timestamp = tsRaw ? new Date(tsRaw) : new Date(NaN);
+            const priceRaw = pickCsvCell(row, 'price');
+            const qtyRaw = pickCsvCell(row, 'quantity');
+            const price = parseFloat(priceRaw ?? 'NaN');
+            const quantity = parseFloat(qtyRaw ?? 'NaN');
 
             // 必須列の欠落をチェック（fee, exchange は任意）
-            const missingColumns = this.requiredHeaders.filter((key) => !(key in row));
+            const missingColumns = this.requiredHeaders.filter((key) => pickCsvCell(row, key) === undefined);
             if (missingColumns.length > 0) {
               skipped += 1;
               errors.push(`必須列欠落: ${missingColumns.join(', ')}`);
@@ -107,7 +134,7 @@ export class TradeImportService {
 
             if (!this.isValidSide(parsedSide)) {
               skipped += 1;
-              errors.push(`side が不正のためスキップ: ${row.side}`);
+              errors.push(`side が不正のためスキップ: ${sideRaw}`);
               return;
             }
 
@@ -123,15 +150,18 @@ export class TradeImportService {
               return;
             }
 
+            const feeRaw = pickCsvCell(row, 'fee');
+            const exchangeRaw = pickCsvCell(row, 'exchange');
+
             trades.push({
               id: crypto.randomUUID(),
               timestamp: new Date(timestamp.toISOString()), // UTC 前提
-              symbol: String(row.symbol || '').toUpperCase(),
-              side: parsedSide as TradeSide,
+              symbol: (pickCsvCell(row, 'symbol') ?? '').toUpperCase(),
+              side: parsedSide,
               price,
               quantity,
-              fee: row.fee ? parseFloat(row.fee) : undefined,
-              exchange: row.exchange || undefined,
+              fee: feeRaw !== undefined ? parseFloat(feeRaw) : undefined,
+              exchange: exchangeRaw,
             });
           } catch (error) {
             skipped += 1;
@@ -149,13 +179,13 @@ export class TradeImportService {
    * API 経由でトレードを取り込む
    * 注意: 現在は未実装（将来の拡張用）
    */
-  async importFromAPI(exchange: string, apiKey: string): Promise<[]> {
+  importFromAPI(exchange: string, _apiKey: string): Promise<never[]> {
     // 将来の API 統合用スタブ
     // 本番環境ではログ出力を抑制
     if (process.env.NODE_ENV !== 'production') {
       console.log(`API import from ${exchange} not yet implemented`);
     }
-    return [];
+    return Promise.resolve([]);
   }
 
   // サイドのバリデーション

@@ -1,5 +1,6 @@
-import express, { Application, Request, Response, NextFunction } from 'express';
-import { Server } from 'http';
+import type { Application, Request, Response, NextFunction } from 'express';
+import express from 'express';
+import type { Server } from 'http';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { config } from './config';
@@ -194,7 +195,7 @@ class App {
 
       console.log('[App] エラーハンドラーを登録中...');
       // グローバルエラーハンドラー: ルート内で発生した例外をキャッチしてサーバーを維持
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+       
       this.app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
         console.error('═══════════════════════════════════════');
         console.error('  Express エラーハンドラーがエラーをキャッチしました');

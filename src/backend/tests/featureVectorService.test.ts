@@ -19,7 +19,6 @@ import {
   createDefaultVector,
   VECTOR_DIMENSION,
   SIMILARITY_THRESHOLDS,
-  type FeatureVector12D,
   type OHLCV,
   type IndicatorData,
   type FeatureGenerationInput,
@@ -84,7 +83,7 @@ describe('featureVectorService', () => {
       
       const vector = generateFeatureVector(input);
       
-      vector.forEach((value, index) => {
+      vector.forEach((value) => {
         expect(typeof value).toBe('number');
         expect(isNaN(value)).toBe(false);
       });

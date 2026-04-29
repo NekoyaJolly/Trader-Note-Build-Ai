@@ -14,7 +14,7 @@
  * 参照: docs/realtime_similarity_notification_architecture.md
  */
 
-import { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 import { EventEmitter } from 'events';
 import { z } from 'zod';
 import { filterBarsByReferencePrice } from './realtimeSanity';
@@ -59,7 +59,7 @@ export type OHLCVBarInput = z.infer<typeof OHLCVBarSchema>;
 /**
  * 進行中のバー（まだ確定していない）
  */
-interface PendingBar {
+export interface PendingBar {
   symbol: string;
   timeframe: string;
   open: number;
@@ -478,7 +478,7 @@ export class RealtimeTickService extends EventEmitter {
     if (!pending || pending.startTime.getTime() !== barStartTime.getTime()) {
       // 既存のバーがあれば確定
       if (pending) {
-        this.completeBar(pending);
+        void this.completeBar(pending);
       }
 
       // 新しいバーを開始
@@ -647,7 +647,7 @@ export class RealtimeTickService extends EventEmitter {
       for (const [key, pending] of this.pendingBars.entries()) {
         const barEndMs = pending.startTime.getTime() + intervalMs;
         if (now >= barEndMs) {
-          this.completeBar(pending);
+          void this.completeBar(pending);
           this.pendingBars.delete(key);
         }
       }

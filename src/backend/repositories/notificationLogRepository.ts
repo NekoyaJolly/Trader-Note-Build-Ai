@@ -1,4 +1,4 @@
-import { NotificationLog, NotificationLogStatus, PrismaClient } from '@prisma/client';
+import type { NotificationLog, NotificationLogStatus, PrismaClient } from '@prisma/client';
 import { prisma } from '../db/client';
 
 /**

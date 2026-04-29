@@ -8,8 +8,8 @@
  */
 
 import { rsi, sma, ema, macd, bb } from 'indicatorts';
-import { BacktestTradeEvent, TradeSide } from './backtestCalculations';
-import { OHLCV, BacktestTimeframe } from './strategyBacktestService';
+import type { BacktestTradeEvent} from './backtestCalculations';
+import type { OHLCV, BacktestTimeframe } from './strategyBacktestService';
 
 // ============================================
 // 型定義
@@ -285,18 +285,11 @@ export function analyzeFilters(request: FilterAnalysisRequest): FilterAnalysisRe
     const significanceScore = Math.abs(difference) / range * 100;
     
     // 推奨条件を生成
-    let suggestedCondition = '';
-    let estimatedImprovement = 0;
-    
-    if (difference > 0) {
-      // 勝ちの方が値が高い → 高い時にエントリー
-      suggestedCondition = `${getDisplayName(indicatorKey)} > ${(winAverage * 0.8 + loseAverage * 0.2).toFixed(2)}`;
-      estimatedImprovement = significanceScore * 0.5;
-    } else {
-      // 勝ちの方が値が低い → 低い時にエントリー
-      suggestedCondition = `${getDisplayName(indicatorKey)} < ${(winAverage * 0.2 + loseAverage * 0.8).toFixed(2)}`;
-      estimatedImprovement = significanceScore * 0.5;
-    }
+    const suggestedCondition =
+      difference > 0
+        ? `${getDisplayName(indicatorKey)} > ${(winAverage * 0.8 + loseAverage * 0.2).toFixed(2)}`
+        : `${getDisplayName(indicatorKey)} < ${(winAverage * 0.2 + loseAverage * 0.8).toFixed(2)}`;
+    const estimatedImprovement = significanceScore * 0.5;
     
     analysisResults.push({
       indicator: indicatorKey,
@@ -366,7 +359,7 @@ export function analyzeFilters(request: FilterAnalysisRequest): FilterAnalysisRe
  * 選択したフィルター（最大5つ）を適用した場合の改善効果をシミュレート
  */
 export function verifyFilters(request: FilterVerifyRequest): FilterVerifyResult {
-  const { trades, ohlcvData, filters, initialCapital } = request;
+  const { trades, ohlcvData, filters } = request;
   
   if (filters.length === 0 || filters.length > 5) {
     throw new Error('フィルターは1〜5個まで選択してください');
@@ -383,7 +376,6 @@ export function verifyFilters(request: FilterVerifyRequest): FilterVerifyResult 
   
   // フィルター適用前の統計
   const beforeWins = trades.filter(t => t.pnl > 0).length;
-  const beforeLosses = trades.filter(t => t.pnl <= 0).length;
   const beforeWinRate = trades.length > 0 ? beforeWins / trades.length : 0;
   const beforeGrossProfit = trades.filter(t => t.pnl > 0).reduce((sum, t) => sum + t.pnl, 0);
   const beforeGrossLoss = Math.abs(trades.filter(t => t.pnl <= 0).reduce((sum, t) => sum + t.pnl, 0));
@@ -417,7 +409,6 @@ export function verifyFilters(request: FilterVerifyRequest): FilterVerifyResult 
   
   // フィルター適用後の統計
   const afterWins = filteredTrades.filter(t => t.pnl > 0).length;
-  const afterLosses = filteredTrades.filter(t => t.pnl <= 0).length;
   const afterWinRate = filteredTrades.length > 0 ? afterWins / filteredTrades.length : 0;
   const afterGrossProfit = filteredTrades.filter(t => t.pnl > 0).reduce((sum, t) => sum + t.pnl, 0);
   const afterGrossLoss = Math.abs(filteredTrades.filter(t => t.pnl <= 0).reduce((sum, t) => sum + t.pnl, 0));

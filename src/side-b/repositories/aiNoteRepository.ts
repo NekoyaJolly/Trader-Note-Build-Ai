@@ -6,9 +6,10 @@
  * @see docs/side-b/phase-c-ai-trade-note.md
  */
 
-import { Prisma } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../../backend/db/client';
-import {
+import { fromPrismaJsonValue, toPrismaJsonValue } from '../../utils/prismaJson';
+import type {
   AITradeNote,
   AINoteSummary,
   CreateAITradeNoteInput,
@@ -37,16 +38,16 @@ export async function createAITradeNote(
       pnlPercentage: input.result.pnlPercentage,
       rrActual: input.result.riskRewardActual,
       holdingDuration: input.result.holdingDuration,
-      entryAnalysis: input.entryAnalysis as unknown as Prisma.InputJsonValue,
-      exitAnalysis: input.exitAnalysis as unknown as Prisma.InputJsonValue,
-      planEvaluation: input.planEvaluation as unknown as Prisma.InputJsonValue,
-      marketReview: input.marketReview as unknown as Prisma.InputJsonValue,
-      learnings: input.learnings as unknown as Prisma.InputJsonValue,
+      entryAnalysis: toPrismaJsonValue(input.entryAnalysis),
+      exitAnalysis: toPrismaJsonValue(input.exitAnalysis),
+      planEvaluation: toPrismaJsonValue(input.planEvaluation),
+      marketReview: toPrismaJsonValue(input.marketReview),
+      learnings: toPrismaJsonValue(input.learnings),
       similarPatterns: input.similarPatterns
-        ? input.similarPatterns as unknown as Prisma.InputJsonValue
+        ? toPrismaJsonValue(input.similarPatterns)
         : undefined,
       lensSnapshot: input.lensSnapshot
-        ? input.lensSnapshot as unknown as Prisma.InputJsonValue
+        ? toPrismaJsonValue(input.lensSnapshot)
         : undefined,
       relatedHypothesisIds: input.relatedHypothesisIds ?? [],
       tradeNoteId: input.tradeNoteId,
@@ -207,9 +208,9 @@ export async function createAINoteSummary(
       period: input.period,
       startDate: new Date(input.startDate),
       endDate: new Date(input.endDate),
-      statistics: input.statistics as unknown as Prisma.InputJsonValue,
-      analysis: input.analysis as unknown as Prisma.InputJsonValue,
-      summary: input.summary as unknown as Prisma.InputJsonValue,
+      statistics: toPrismaJsonValue(input.statistics),
+      analysis: toPrismaJsonValue(input.analysis),
+      summary: toPrismaJsonValue(input.summary),
     },
   });
 
@@ -293,17 +294,17 @@ export async function upsertAINoteSummary(
       },
     },
     update: {
-      statistics: input.statistics as unknown as Prisma.InputJsonValue,
-      analysis: input.analysis as unknown as Prisma.InputJsonValue,
-      summary: input.summary as unknown as Prisma.InputJsonValue,
+      statistics: toPrismaJsonValue(input.statistics),
+      analysis: toPrismaJsonValue(input.analysis),
+      summary: toPrismaJsonValue(input.summary),
     },
     create: {
       period: input.period,
       startDate: new Date(input.startDate),
       endDate: new Date(input.endDate),
-      statistics: input.statistics as unknown as Prisma.InputJsonValue,
-      analysis: input.analysis as unknown as Prisma.InputJsonValue,
-      summary: input.summary as unknown as Prisma.InputJsonValue,
+      statistics: toPrismaJsonValue(input.statistics),
+      analysis: toPrismaJsonValue(input.analysis),
+      summary: toPrismaJsonValue(input.summary),
     },
   });
 
@@ -356,13 +357,13 @@ function mapPrismaToAITradeNote(note: NonNullable<PrismaAITradeNote>): AITradeNo
       riskRewardActual: note.rrActual.toNumber(),
       holdingDuration: note.holdingDuration,
     },
-    entryAnalysis: note.entryAnalysis as unknown as AITradeNote['entryAnalysis'],
-    exitAnalysis: note.exitAnalysis as unknown as AITradeNote['exitAnalysis'],
-    planEvaluation: note.planEvaluation as unknown as AITradeNote['planEvaluation'],
-    marketReview: note.marketReview as unknown as AITradeNote['marketReview'],
-    learnings: note.learnings as unknown as AITradeNote['learnings'],
-    similarPatterns: note.similarPatterns as unknown as AITradeNote['similarPatterns'],
-    lensSnapshot: note.lensSnapshot as unknown as AITradeNote['lensSnapshot'],
+    entryAnalysis: fromPrismaJsonValue<AITradeNote['entryAnalysis']>(note.entryAnalysis) ?? { timing: 'fair', priceVsPlan: 0, marketConditionAtEntry: '', evaluation: '' },
+    exitAnalysis: fromPrismaJsonValue<AITradeNote['exitAnalysis']>(note.exitAnalysis) ?? { type: 'other', timing: 'late', evaluation: '' },
+    planEvaluation: fromPrismaJsonValue<AITradeNote['planEvaluation']>(note.planEvaluation) ?? { scenarioAccuracy: 'inaccurate', levelAccuracy: 'inaccurate', directionCorrect: false, evaluation: '' },
+    marketReview: fromPrismaJsonValue<AITradeNote['marketReview']>(note.marketReview) ?? { regimeActual: '', regimePredicted: '', keyEventsImpact: [], volatilityNote: '' },
+    learnings: fromPrismaJsonValue<AITradeNote['learnings']>(note.learnings) ?? { whatWorked: [], whatDidntWork: [], keyInsight: '', actionItems: [] },
+    similarPatterns: fromPrismaJsonValue<AITradeNote['similarPatterns']>(note.similarPatterns),
+    lensSnapshot: fromPrismaJsonValue<AITradeNote['lensSnapshot']>(note.lensSnapshot),
     relatedHypothesisIds: note.relatedHypothesisIds ?? [],
     tradeNoteId: note.tradeNoteId ?? undefined,
     aiModel: note.aiModel,
@@ -376,9 +377,9 @@ function mapPrismaToAINoteSummary(summary: NonNullable<PrismaAINoteSummary>): AI
     period: summary.period as SummaryPeriod,
     startDate: summary.startDate.toISOString().split('T')[0],
     endDate: summary.endDate.toISOString().split('T')[0],
-    statistics: summary.statistics as unknown as AINoteSummary['statistics'],
-    analysis: summary.analysis as unknown as AINoteSummary['analysis'],
-    summary: summary.summary as unknown as AINoteSummary['summary'],
+    statistics: fromPrismaJsonValue<AINoteSummary['statistics']>(summary.statistics) ?? { totalTrades: 0, winRate: 0, profitFactor: 0, averageWin: 0, averageLoss: 0, largestWin: 0, largestLoss: 0, totalPnl: 0 },
+    analysis: fromPrismaJsonValue<AINoteSummary['analysis']>(summary.analysis) ?? { bestPerformingSetup: '', worstPerformingSetup: '', regimePerformance: [], timeOfDayPerformance: [] },
+    summary: fromPrismaJsonValue<AINoteSummary['summary']>(summary.summary) ?? { overallAssessment: '', keyLearnings: [], recommendations: [], focusForNext: '' },
     createdAt: summary.createdAt,
   };
 }

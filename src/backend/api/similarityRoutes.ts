@@ -4,7 +4,8 @@
  * Side-A/Side-B を横断した類似ノート検索エンドポイント
  */
 
-import { Router, Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
 import { crossSimilarityService } from '../../services/crossSimilarityService';
 import {
   CrossSimilaritySearchRequestSchema,

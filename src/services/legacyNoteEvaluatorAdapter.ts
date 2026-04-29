@@ -15,28 +15,32 @@
  * @see src/services/featureVectorService.ts - レガシー実装
  */
 
-import {
+import type {
   NoteEvaluator,
   IndicatorSpec,
   MarketSnapshot,
   EvaluationResult,
-  NoteIndicatorConfig,
+  NoteIndicatorConfig} from '../domain/noteEvaluator';
+import {
   cosineSimilarity,
   getSimilarityLevel,
-  DEFAULT_THRESHOLDS,
   DEFAULT_TRIGGER_THRESHOLD,
 } from '../domain/noteEvaluator';
 
+import type {
+  FeatureGenerationInput,
+  IndicatorData} from './featureVectorService';
 import {
   generateFeatureVector,
   SIMILARITY_THRESHOLDS,
-  VECTOR_DIMENSION,
-  FeatureGenerationInput,
-  IndicatorData,
+  VECTOR_DIMENSION
 } from './featureVectorService';
 
-import { IndicatorId, IndicatorParams, IndicatorConfig } from '../models/indicatorConfig';
-import { TradeNote as PrismaTradeNote, TradeSide, NoteStatus, Prisma } from '@prisma/client';
+import type { IndicatorConfig } from '../models/indicatorConfig';
+import type { TradeNote as PrismaTradeNote, Prisma } from '@prisma/client';
+import { Decimal } from '@prisma/client/runtime/library';
+import type { TradeNote as FSTradeNote, MarketData } from '../models/types';
+import type { JsonValue } from '../utils/jsonValue';
 
 // ============================================================================
 // 型定義
@@ -418,6 +422,34 @@ export class UserIndicatorNoteEvaluator implements NoteEvaluator {
 // ファクトリ関数
 // ============================================================================
 
+function parseStoredIndicatorConfig(value: Prisma.JsonValue): NoteIndicatorConfig | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const o = value as Record<string, JsonValue | undefined>;
+  if (o.version === undefined || o.version === null || !o.indicators || !o.threshold) return null;
+  if (!Array.isArray(o.indicators)) return null;
+  const simRaw = o.similarityMethod;
+  const similarityMethod: NoteIndicatorConfig['similarityMethod'] =
+    simRaw === 'euclidean' || simRaw === 'manhattan' ? simRaw : 'cosine';
+  return {
+    version: Number(o.version),
+    threshold: Number(o.threshold),
+    indicators: JSON.parse(JSON.stringify(o.indicators)) as IndicatorConfig[],
+    similarityMethod,
+    createdAt:
+      typeof o.createdAt === 'string'
+        ? new Date(o.createdAt)
+        : o.createdAt instanceof Date
+          ? o.createdAt
+          : new Date(),
+    updatedAt:
+      typeof o.updatedAt === 'string'
+        ? new Date(o.updatedAt)
+        : o.updatedAt instanceof Date
+          ? o.updatedAt
+          : new Date(),
+  };
+}
+
 /**
  * ノートから適切な NoteEvaluator を生成する
  * 
@@ -430,10 +462,8 @@ export class UserIndicatorNoteEvaluator implements NoteEvaluator {
 export function createNoteEvaluator(note: PrismaTradeNote): NoteEvaluator {
   // indicatorConfig が設定されているか確認
   if (note.indicatorConfig) {
-    const config = note.indicatorConfig as unknown as NoteIndicatorConfig;
-
-    // バージョンチェック（将来のマイグレーション用）
-    if (config.version && config.indicators && config.threshold) {
+    const config = parseStoredIndicatorConfig(note.indicatorConfig);
+    if (config) {
       return new UserIndicatorNoteEvaluator(note, config, note.featureVector ?? []);
     }
   }
@@ -462,8 +492,6 @@ export function createNoteEvaluators(notes: PrismaTradeNote[]): Map<string, Note
 // FS型 TradeNote 用アダプター (非推奨 - DB統一後は削除予定)
 // ============================================================================
 
-import { TradeNote as FSTradeNote, MarketData } from '../models/types';
-
 /**
  * FS型 TradeNote から NoteEvaluator を生成する
  * 
@@ -476,21 +504,20 @@ import { TradeNote as FSTradeNote, MarketData } from '../models/types';
 export function createNoteEvaluatorFromFSNote(note: FSTradeNote): NoteEvaluator {
   // FS型 → Prisma型の必要フィールドのみを変換
   // LegacyNoteEvaluator が使用するのは id, symbol, featureVector のみ
-  const { Decimal } = require('@prisma/client/runtime/library');
 
   const pseudoPrismaNote: PrismaTradeNote = {
     id: note.id,
     symbol: note.symbol,
     featureVector: note.features,
     tradeId: note.tradeId,
-    side: note.side as TradeSide,
+    side: note.side,
     entryPrice: new Decimal(note.entryPrice),
     indicators: note.marketContext.indicators ?? null,
     timeframe: note.marketContext.timeframe ?? null,
-    marketContext: note.marketContext as unknown as Prisma.JsonValue,
+    marketContext: JSON.parse(JSON.stringify(note.marketContext)) as Prisma.JsonValue,
     userNotes: note.userNotes ?? null,
     tags: note.tags ?? [],
-    status: note.status as NoteStatus,
+    status: note.status,
     activatedAt: note.activatedAt ?? null,
     archivedAt: note.archivedAt ?? null,
     lastEditedAt: note.lastEditedAt ?? null,
@@ -548,7 +575,7 @@ export function convertMarketDataToSnapshot(market: MarketData): MarketSnapshot 
   }
 
   // 拡張インジケーター（市場データに含まれる場合）
-  const extendedIndicators = market.indicators as Record<string, unknown> | undefined;
+  const extendedIndicators = market.indicators;
   if (extendedIndicators) {
     for (const [key, value] of Object.entries(extendedIndicators)) {
       if (typeof value === 'number') {

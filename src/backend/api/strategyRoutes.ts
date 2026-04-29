@@ -15,11 +15,14 @@
  * - GET    /api/strategies/:id/backtest/:runId - バックテスト結果詳細
  */
 
-import { Router, Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
-import { StrategyStatus, StrategyDirection } from '@prisma/client';
+import type { StrategyStatus } from '@prisma/client';
+import { PrismaClient, AlertChannel, StrategyNoteStatus } from '@prisma/client';
 import { z } from 'zod';
+import type { JsonValue, JsonObject } from '../../utils/jsonValue';
 import { getStringParam, getOptionalStringParam, getNumberParam } from '../../utils/requestHelpers';
 import {
   listStrategies,
@@ -35,9 +38,11 @@ import {
 import {
   runBacktest,
   getBacktestResult,
-  getBacktestHistory,
-  BacktestTimeframe,
+  getBacktestHistory
 } from '../services/strategyBacktestService';
+import type {
+  CreateStrategyNoteInput,
+  UpdateStrategyNoteInput} from '../services/strategyNoteService';
 import {
   createStrategyNote,
   listStrategyNotes,
@@ -46,9 +51,7 @@ import {
   deleteStrategyNote,
   changeNoteStatus,
   createNotesFromBacktestRun,
-  getStrategyNoteStats,
-  CreateStrategyNoteInput,
-  UpdateStrategyNoteInput,
+  getStrategyNoteStats
 } from '../services/strategyNoteService';
 import {
   getStrategyAlert,
@@ -65,17 +68,18 @@ import {
   getWalkForwardResult,
   getWalkForwardHistory,
 } from '../services/walkForwardService';
+import type {
+  FilterCondition} from '../services/filterAnalysisService';
 import {
   analyzeFilters,
   verifyFilters,
-  getAvailableFilterIndicators,
-  FilterCondition,
+  getAvailableFilterIndicators
 } from '../services/filterAnalysisService';
+import type {
+  MonteCarloParams} from '../../services/backtest/monteCarloService';
 import {
-  monteCarloService,
-  MonteCarloParams,
+  monteCarloService
 } from '../../services/backtest/monteCarloService';
-import { PrismaClient } from '@prisma/client';
 
 // Prismaクライアント（バージョン比較用）
 const prisma = new PrismaClient();
@@ -126,6 +130,153 @@ const BacktestBodySchema = z
   })
   .strict();
 
+/** JSON 値の再帰スキーマ（req.body 検証用） */
+const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(JsonValueSchema),
+    z.record(z.string(), z.union([JsonValueSchema, z.undefined()])),
+  ]),
+);
+
+const objectJsonField = z.custom<object>(
+  (v) => typeof v === 'object' && v !== null && !Array.isArray(v),
+  { message: 'オブジェクト形式である必要があります' },
+);
+
+const OhlcvFetchBodySchema = z
+  .object({
+    symbol: z.string().min(1),
+    timeframe: z.string().min(1),
+    startDate: z.string().min(1),
+    endDate: z.string().min(1),
+  })
+  .strict();
+
+const CreateStrategyBodySchema = z
+  .object({
+    name: z.string().min(1),
+    description: z.string().optional(),
+    symbol: z.string().min(1),
+    side: z.enum(['buy', 'sell', 'both']),
+    entryConditions: objectJsonField,
+    exitSettings: objectJsonField,
+    entryTiming: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+  })
+  .strict();
+
+const UpdateStrategyBodySchema = z
+  .object({
+    name: z.string().optional(),
+    description: z.string().optional(),
+    symbol: z.string().optional(),
+    side: z.enum(['buy', 'sell', 'both']).optional(),
+    entryConditions: objectJsonField.optional(),
+    exitSettings: objectJsonField.optional(),
+    entryTiming: z.string().optional(),
+    status: z.enum(['draft', 'active', 'archived']).optional(),
+    tags: z.array(z.string()).optional(),
+    changeNote: z.string().optional(),
+  })
+  .strict();
+
+const DuplicateStrategyBodySchema = z.object({ name: z.string().min(1) }).strict();
+
+const StatusUpdateBodySchema = z
+  .object({
+    status: z.enum(['draft', 'active', 'archived']),
+  })
+  .strict();
+
+const CreateStrategyNoteBodySchema = z
+  .object({
+    entryTime: z
+      .string()
+      .min(1)
+      .refine((s) => !Number.isNaN(Date.parse(s)), {
+        message: 'entryTime は有効な日付文字列を指定してください',
+      })
+      .transform((s) => new Date(s)),
+    entryPrice: z.coerce.number(),
+    conditionSnapshot: objectJsonField,
+    indicatorValues: z.record(z.string(), z.union([JsonValueSchema, z.undefined()])),
+    outcome: z.enum(['win', 'loss', 'timeout']),
+    pnl: z.coerce.number().optional(),
+    notes: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+  })
+  .strict();
+
+const UpdateStrategyNoteBodySchema = z
+  .object({
+    status: z.nativeEnum(StrategyNoteStatus).optional(),
+    tags: z.array(z.string()).optional(),
+    notes: z.string().optional(),
+  })
+  .strict();
+
+const NoteStatusChangeBodySchema = z
+  .object({
+    status: z.nativeEnum(StrategyNoteStatus),
+  })
+  .strict();
+
+const FromBacktestNoteBodySchema = z
+  .object({
+    onlyWins: z.boolean().optional().default(true),
+  })
+  .strict();
+
+const AlertUpsertBodySchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    cooldownMinutes: z.number().int().min(1).optional(),
+    channels: z.array(z.nativeEnum(AlertChannel)).optional(),
+    minMatchScore: z.number().min(0).max(1).optional(),
+  })
+  .strict();
+
+const AlertTriggerBodySchema = z
+  .object({
+    matchScore: z.number().min(0).max(1),
+    indicatorValues: z.record(z.string(), z.union([JsonValueSchema, z.undefined()])).optional(),
+  })
+  .strict();
+
+const WalkForwardBodySchema = z
+  .object({
+    startDate: z.string().min(1),
+    endDate: z.string().min(1),
+    splitCount: z.number().int().min(2).max(12).optional(),
+    inSampleDays: z.number().int().min(1).optional(),
+    outOfSampleDays: z.number().int().min(1).optional(),
+    timeframe: z.enum(['1m', '5m', '15m', '30m', '1h', '4h', '1d']).optional(),
+    initialCapital: z.number().positive().optional(),
+    lotSize: z.number().positive().optional(),
+    leverage: z.number().min(1).max(1000).optional(),
+  })
+  .strict();
+
+const MonteCarloBodySchema = z
+  .object({
+    iterations: z.union([z.literal(100), z.literal(500), z.literal(1000)]),
+    startDate: z.string().min(1),
+    endDate: z.string().min(1),
+    timeframe: z.string().min(1).optional(),
+    takeProfit: z.number().optional(),
+    stopLoss: z.number().optional(),
+    maxHoldingMinutes: z.number().int().min(1).optional(),
+    initialCapital: z.number().positive().optional(),
+    lotSize: z.number().positive().optional(),
+    entryProbability: z.number().min(0).max(1).optional(),
+    backtestRunId: z.string().uuid().optional(),
+  })
+  .strict();
+
 // ============================================
 // SSE アラート配信用イベントエミッター
 // ============================================
@@ -140,7 +291,7 @@ interface StrategyAlert {
   message: string;
   score?: number;
   timestamp: Date;
-  metadata?: Record<string, unknown>;
+  metadata?: JsonObject;
 }
 
 /**
@@ -200,7 +351,7 @@ router.get('/', async (req: Request, res: Response) => {
  * GET /api/filters/indicators
  * 利用可能なフィルターインジケーター一覧
  */
-router.get('/filters/indicators', async (_req: Request, res: Response) => {
+router.get('/filters/indicators', (_req: Request, res: Response) => {
   try {
     const indicators = getAvailableFilterIndicators();
     res.json({
@@ -335,20 +486,17 @@ setInterval(() => {
  * 
  * Response: { success: true, data: { jobId } }
  */
-router.post('/ohlcv/fetch-and-cache', async (req: Request, res: Response) => {
+router.post('/ohlcv/fetch-and-cache', (req: Request, res: Response) => {
   try {
-    const { symbol, timeframe, startDate, endDate } = req.body;
-
-    // バリデーション
-    if (!symbol) {
-      return res.status(400).json({ success: false, error: 'シンボルは必須です' });
+    const parsed = OhlcvFetchBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'バリデーションエラー',
+        details: parsed.error.format(),
+      });
     }
-    if (!timeframe) {
-      return res.status(400).json({ success: false, error: '時間足は必須です' });
-    }
-    if (!startDate || !endDate) {
-      return res.status(400).json({ success: false, error: '開始日と終了日は必須です' });
-    }
+    const { symbol, timeframe, startDate, endDate } = parsed.data;
 
     const start = new Date(startDate);
     const end = new Date(endDate);
@@ -383,7 +531,7 @@ router.post('/ohlcv/fetch-and-cache', async (req: Request, res: Response) => {
     console.log(`[StrategyRoutes] OHLCVデータ取得ジョブ開始: jobId=${jobId}, ${symbol}/${timeframe}`);
 
     // バックグラウンドで実行（レスポンスは即返す）
-    (async () => {
+    void (async () => {
       try {
         const { fetchAndCacheOhlcv } = await import('../services/fetchAndCacheOhlcv');
         const result = await fetchAndCacheOhlcv(symbol, timeframe, start, end, (progress) => {
@@ -599,6 +747,14 @@ router.put('/:id/rollback/:versionNumber', async (req: Request, res: Response) =
  */
 router.post('/', async (req: Request, res: Response) => {
   try {
+    const parsed = CreateStrategyBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'バリデーションエラー',
+        details: parsed.error.format(),
+      });
+    }
     const {
       name,
       description,
@@ -608,45 +764,13 @@ router.post('/', async (req: Request, res: Response) => {
       exitSettings,
       entryTiming,
       tags,
-    } = req.body;
-
-    // 必須フィールドのバリデーション
-    if (!name) {
-      return res.status(400).json({
-        success: false,
-        error: 'ストラテジー名は必須です',
-      });
-    }
-    if (!symbol) {
-      return res.status(400).json({
-        success: false,
-        error: 'シンボルは必須です',
-      });
-    }
-    if (!side) {
-      return res.status(400).json({
-        success: false,
-        error: '売買方向は必須です',
-      });
-    }
-    if (!entryConditions) {
-      return res.status(400).json({
-        success: false,
-        error: 'エントリー条件は必須です',
-      });
-    }
-    if (!exitSettings) {
-      return res.status(400).json({
-        success: false,
-        error: 'イグジット設定は必須です',
-      });
-    }
+    } = parsed.data;
 
     const strategy = await createStrategy({
       name,
       description,
       symbol,
-      side: side as StrategyDirection,
+      side,
       entryConditions,
       exitSettings,
       entryTiming,
@@ -674,6 +798,14 @@ router.post('/', async (req: Request, res: Response) => {
 router.put('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const parsed = UpdateStrategyBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'バリデーションエラー',
+        details: parsed.error.format(),
+      });
+    }
     const {
       name,
       description,
@@ -685,17 +817,17 @@ router.put('/:id', async (req: Request, res: Response) => {
       status,
       tags,
       changeNote,
-    } = req.body;
+    } = parsed.data;
 
     const strategy = await updateStrategy(id, {
       name,
       description,
       symbol,
-      side: side as StrategyDirection | undefined,
+      side,
       entryConditions,
       exitSettings,
       entryTiming,
-      status: status as StrategyStatus | undefined,
+      status,
       tags,
       changeNote,
     });
@@ -760,16 +892,17 @@ router.delete('/:id', async (req: Request, res: Response) => {
 router.put('/:id/status', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
-
-    if (!status || !['draft', 'active', 'archived'].includes(status)) {
+    const parsed = StatusUpdateBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
       return res.status(400).json({
         success: false,
-        error: 'ステータスは draft, active, archived のいずれかを指定してください',
+        error: 'バリデーションエラー',
+        details: parsed.error.format(),
       });
     }
+    const { status } = parsed.data;
 
-    const strategy = await updateStrategyStatus(id, status as StrategyStatus);
+    const strategy = await updateStrategyStatus(id, status);
 
     res.json({
       success: true,
@@ -800,14 +933,15 @@ router.put('/:id/status', async (req: Request, res: Response) => {
 router.post('/:id/duplicate', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name } = req.body;
-
-    if (!name) {
+    const parsed = DuplicateStrategyBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
       return res.status(400).json({
         success: false,
-        error: '新しいストラテジー名を指定してください',
+        error: 'バリデーションエラー',
+        details: parsed.error.format(),
       });
     }
+    const { name } = parsed.data;
 
     const strategy = await duplicateStrategy(id, name);
 
@@ -900,7 +1034,7 @@ router.post('/:id/backtest', async (req: Request, res: Response) => {
       strategyId: id,
       startDate: start.toISOString(),
       endDate: end.toISOString(),
-      stage1Timeframe: stage1Timeframe as BacktestTimeframe,
+      stage1Timeframe: stage1Timeframe,
       runStage2: enableStage2,
       initialCapital,
       lotSize,
@@ -1083,8 +1217,16 @@ router.get('/:id/notes/stats', async (req: Request, res: Response) => {
 router.post('/:id/notes', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const parsed = CreateStrategyNoteBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'バリデーションエラー',
+        details: parsed.error.format(),
+      });
+    }
     const input: CreateStrategyNoteInput = {
-      ...req.body,
+      ...parsed.data,
       strategyId: id,
     };
 
@@ -1111,7 +1253,15 @@ router.post('/:id/notes', async (req: Request, res: Response) => {
 router.post('/:id/notes/from-backtest/:runId', async (req: Request, res: Response) => {
   try {
     const { runId } = req.params;
-    const { onlyWins = true } = req.body;
+    const parsed = FromBacktestNoteBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'バリデーションエラー',
+        details: parsed.error.format(),
+      });
+    }
+    const { onlyWins } = parsed.data;
 
     const createdCount = await createNotesFromBacktestRun(runId, onlyWins);
 
@@ -1174,7 +1324,15 @@ router.get('/:id/notes/:noteId', async (req: Request, res: Response) => {
 router.put('/:id/notes/:noteId', async (req: Request, res: Response) => {
   try {
     const { noteId } = req.params;
-    const input: UpdateStrategyNoteInput = req.body;
+    const parsed = UpdateStrategyNoteBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'バリデーションエラー',
+        details: parsed.error.format(),
+      });
+    }
+    const input: UpdateStrategyNoteInput = parsed.data;
 
     const note = await updateStrategyNote(noteId, input);
 
@@ -1206,14 +1364,15 @@ router.put('/:id/notes/:noteId', async (req: Request, res: Response) => {
 router.put('/:id/notes/:noteId/status', async (req: Request, res: Response) => {
   try {
     const { noteId } = req.params;
-    const { status } = req.body;
-
-    if (!['draft', 'active', 'archived'].includes(status)) {
+    const parsed = NoteStatusChangeBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
       return res.status(400).json({
         success: false,
-        error: 'ステータスは draft, active, archived のいずれかです',
+        error: 'バリデーションエラー',
+        details: parsed.error.format(),
       });
     }
+    const { status } = parsed.data;
 
     const note = await changeNoteStatus(noteId, status);
 
@@ -1302,7 +1461,15 @@ router.get('/:id/alerts', async (req: Request, res: Response) => {
 router.post('/:id/alerts', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { enabled, cooldownMinutes, channels, minMatchScore } = req.body;
+    const parsed = AlertUpsertBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'バリデーションエラー',
+        details: parsed.error.format(),
+      });
+    }
+    const { enabled, cooldownMinutes, channels, minMatchScore } = parsed.data;
 
     const alert = await createStrategyAlert({
       strategyId: id,
@@ -1333,7 +1500,15 @@ router.post('/:id/alerts', async (req: Request, res: Response) => {
 router.put('/:id/alerts', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { enabled, cooldownMinutes, channels, minMatchScore } = req.body;
+    const parsed = AlertUpsertBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'バリデーションエラー',
+        details: parsed.error.format(),
+      });
+    }
+    const { enabled, cooldownMinutes, channels, minMatchScore } = parsed.data;
 
     const alert = await updateStrategyAlert(id, {
       enabled,
@@ -1386,19 +1561,20 @@ router.delete('/:id/alerts', async (req: Request, res: Response) => {
 router.post('/:id/alerts/trigger', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { matchScore, indicatorValues } = req.body;
-
-    if (typeof matchScore !== 'number' || matchScore < 0 || matchScore > 1) {
+    const parsed = AlertTriggerBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
       return res.status(400).json({
         success: false,
-        error: 'matchScore は 0.0〜1.0 の数値で指定してください',
+        error: 'バリデーションエラー',
+        details: parsed.error.format(),
       });
     }
+    const { matchScore, indicatorValues } = parsed.data;
 
     const result = await triggerAlert({
       strategyId: id,
       matchScore,
-      indicatorValues: indicatorValues || {},
+      indicatorValues: indicatorValues ?? {},
     });
 
     res.json({
@@ -1470,7 +1646,7 @@ router.get('/:id/alerts/logs', async (req: Request, res: Response) => {
     const { id } = req.params;
     const { limit } = req.query;
 
-    const logs = await getAlertLogs(id, limit ? parseInt(limit as string, 10) : 50);
+    const logs = await getAlertLogs(id, getNumberParam(limit) ?? 50);
 
     res.json({
       success: true,
@@ -1498,7 +1674,7 @@ router.get('/:id/alerts/logs', async (req: Request, res: Response) => {
  * 2. 外部プロセス（バッチ、マーケットマッチング等）から strategyAlertEmitter.emitAlert() を呼び出す
  * 3. 接続中のクライアントにリアルタイムでアラートが配信される
  */
-router.get('/:id/alerts/stream', async (req: Request, res: Response) => {
+router.get('/:id/alerts/stream', (req: Request, res: Response) => {
   const { id } = req.params;
 
   // SSE ヘッダー設定
@@ -1569,6 +1745,14 @@ router.get('/:id/alerts/stream', async (req: Request, res: Response) => {
 router.post('/:id/walkforward', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const parsed = WalkForwardBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'バリデーションエラー',
+        details: parsed.error.format(),
+      });
+    }
     const {
       startDate,
       endDate,
@@ -1579,14 +1763,7 @@ router.post('/:id/walkforward', async (req: Request, res: Response) => {
       initialCapital,
       lotSize,
       leverage,
-    } = req.body;
-
-    if (!startDate || !endDate) {
-      return res.status(400).json({
-        success: false,
-        error: 'startDate と endDate は必須です',
-      });
-    }
+    } = parsed.data;
 
     const result = await runWalkForwardTest({
       strategyId: id,
@@ -1694,6 +1871,14 @@ router.get('/:id/walkforward/:runId', async (req: Request, res: Response) => {
 router.post('/:id/montecarlo', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const parsed = MonteCarloBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'バリデーションエラー',
+        details: parsed.error.format(),
+      });
+    }
     const {
       iterations,
       startDate,
@@ -1705,16 +1890,10 @@ router.post('/:id/montecarlo', async (req: Request, res: Response) => {
       initialCapital,
       lotSize,
       entryProbability,
-      backtestRunId, // 比較対象のバックテストRunIDを追加
-    } = req.body;
+      backtestRunId,
+    } = parsed.data;
 
-    // バリデーション
-    if (!iterations || ![100, 500, 1000].includes(iterations)) {
-      return res.status(400).json({
-        success: false,
-        error: 'iterations は 100, 500, 1000 のいずれかを指定してください',
-      });
-    }
+    const capitalBase = initialCapital ?? 1_000_000;
 
     // ストラテジー取得
     const strategy = await prisma.strategy.findUnique({
@@ -1749,16 +1928,16 @@ router.post('/:id/montecarlo', async (req: Request, res: Response) => {
     // パラメータ構築
     const params: MonteCarloParams = {
       symbol: strategy.symbol,
-      timeframe: timeframe || '15m',
+      timeframe: timeframe ?? '15m',
       startDate: new Date(startDate),
       endDate: new Date(endDate),
       iterations,
-      takeProfit: takeProfit || 2.0,
-      stopLoss: stopLoss || 1.0,
-      maxHoldingMinutes: maxHoldingMinutes || 1440,
-      initialCapital: initialCapital || 1000000,
-      lotSize: lotSize || 10000,
-      entryProbability: entryProbability || 0.05,
+      takeProfit: takeProfit ?? 2.0,
+      stopLoss: stopLoss ?? 1.0,
+      maxHoldingMinutes: maxHoldingMinutes ?? 1440,
+      initialCapital: capitalBase,
+      lotSize: lotSize ?? 10000,
+      entryProbability: entryProbability ?? 0.05,
     };
 
     // 比較対象の結果があれば追加
@@ -1774,9 +1953,9 @@ router.post('/:id/montecarlo', async (req: Request, res: Response) => {
         losingTrades: result.lossCount,
         winRate: result.winRate,
         netProfit: Number(result.totalProfit) - Number(result.totalLoss),
-        netProfitRate: (Number(result.totalProfit) - Number(result.totalLoss)) / (initialCapital || 1000000),
+        netProfitRate: (Number(result.totalProfit) - Number(result.totalLoss)) / capitalBase,
         maxDrawdown: result.maxDrawdown ? Number(result.maxDrawdown) : 0,
-        maxDrawdownRate: result.maxDrawdown ? Number(result.maxDrawdown) / (initialCapital || 1000000) : 0,
+        maxDrawdownRate: result.maxDrawdown ? Number(result.maxDrawdown) / capitalBase : 0,
         profitFactor: result.profitFactor || 0,
         averageWin: result.winCount > 0 ? Number(result.totalProfit) / result.winCount : 0,
         averageLoss: result.lossCount > 0 ? Math.abs(Number(result.totalLoss)) / result.lossCount : 0,
@@ -1795,9 +1974,9 @@ router.post('/:id/montecarlo', async (req: Request, res: Response) => {
       await prisma.monteCarloRun.create({
         data: {
           strategyId: id,
-          backtestRunId: backtestRunId || null,
+          backtestRunId: backtestRunId ?? null,
           iterations,
-          timeframe: timeframe || '15m',
+          timeframe: timeframe ?? '15m',
           expectedWinRate: params.actualStrategy?.winRate || 0,
           expectedProfitFactor: params.actualStrategy?.profitFactor || null,
           simulatedMeanWinRate: result.statistics.winRate.mean,
@@ -2069,7 +2248,7 @@ router.get('/:id/backtest/:runId/filter-analysis', async (req: Request, res: Res
 
     const ohlcvData = await fetchHistoricalData(
       strategy.symbol,
-      '1m' as BacktestTimeframe, // 分析用に1分足
+      '1m', // 分析用に1分足
       new Date(backtestResult.startDate),
       new Date(backtestResult.endDate)
     );
@@ -2078,7 +2257,7 @@ router.get('/:id/backtest/:runId/filter-analysis', async (req: Request, res: Res
     const analysisResult = analyzeFilters({
       trades: backtestResult.trades,
       ohlcvData,
-      timeframe: backtestResult.timeframe as '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d',
+      timeframe: backtestResult.timeframe,
     });
 
     res.json({
@@ -2148,7 +2327,7 @@ router.post('/:id/backtest/:runId/filter-verify', async (req: Request, res: Resp
 
     const ohlcvData = await fetchHistoricalData(
       strategy.symbol,
-      '1m' as BacktestTimeframe,
+      '1m',
       new Date(backtestResult.startDate),
       new Date(backtestResult.endDate)
     );
@@ -2157,7 +2336,7 @@ router.post('/:id/backtest/:runId/filter-verify', async (req: Request, res: Resp
     const verifyResult = verifyFilters({
       trades: backtestResult.trades,
       ohlcvData,
-      timeframe: backtestResult.timeframe as '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d',
+      timeframe: backtestResult.timeframe,
       filters,
       initialCapital: 1000000, // デフォルト
     });

@@ -9,7 +9,8 @@
  * 参照: Phase C 実装計画、インジケーター定義書 Section 12
  */
 
-import { PrismaClient, StrategyNoteStatus, BacktestOutcome, Prisma, StrategyBacktestEvent } from '@prisma/client';
+import type { StrategyNoteStatus, BacktestOutcome, Prisma, StrategyBacktestEvent } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 
 const prisma = new PrismaClient();
@@ -28,7 +29,6 @@ export interface IndicatorValues {
   bb?: BBValue;
   sma?: SMAValue;
   ema?: EMAValue;
-  [key: string]: unknown;
 }
 
 /**
@@ -111,6 +111,8 @@ export interface UpdateStrategyNoteInput {
   status?: StrategyNoteStatus;
   tags?: string[];
   notes?: string;
+  /** draft → active 遷移時に再計算した特徴量ベクトルを保存する場合に指定 */
+  featureVector?: number[];
 }
 
 /**
@@ -320,12 +322,12 @@ export async function createStrategyNote(input: CreateStrategyNoteInput): Promis
       strategyId,
       entryTime,
       entryPrice: new Decimal(entryPrice.toString()),
-      conditionSnapshot: conditionSnapshot as Prisma.JsonObject,
+      conditionSnapshot: conditionSnapshot,
       indicatorValues: indicatorValues as Prisma.JsonObject,
       outcome,
       pnl: pnl ? new Decimal(pnl.toString()) : null,
       notes,
-      status: 'draft' as StrategyNoteStatus,
+      status: 'draft',
       tags,
       featureVector,
     },
@@ -432,13 +434,14 @@ export async function updateStrategyNote(
   noteId: string,
   input: UpdateStrategyNoteInput
 ): Promise<StrategyNoteDetail | null> {
-  const { status, tags, notes } = input;
+  const { status, tags, notes, featureVector } = input;
   
   // 更新データを構築
   const updateData: Prisma.StrategyNoteUpdateInput = {};
   if (status !== undefined) updateData.status = status;
   if (tags !== undefined) updateData.tags = tags;
   if (notes !== undefined) updateData.notes = notes;
+  if (featureVector !== undefined) updateData.featureVector = featureVector;
   
   const note = await prisma.strategyNote.update({
     where: { id: noteId },
@@ -497,14 +500,13 @@ export async function changeNoteStatus(
   
   if (!note) return null;
   
-  // draft → active への遷移時は特徴量ベクトルを再計算
-  let featureVector = note.featureVector;
+  const updates: UpdateStrategyNoteInput = { status: newStatus };
   if (note.status === 'draft' && newStatus === 'active') {
     const indicatorValues = note.indicatorValues as IndicatorValues;
-    featureVector = calculateFeatureVector(indicatorValues);
+    updates.featureVector = calculateFeatureVector(indicatorValues);
   }
-  
-  return updateStrategyNote(noteId, { status: newStatus });
+
+  return updateStrategyNote(noteId, updates);
 }
 
 /**

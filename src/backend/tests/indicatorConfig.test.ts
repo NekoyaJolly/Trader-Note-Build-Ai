@@ -7,14 +7,15 @@
  * - ヘルパー関数
  */
 
+import type {
+  IndicatorConfig,
+  IndicatorId} from '../../models/indicatorConfig';
 import {
   INDICATOR_METADATA,
   getIndicatorMetadata,
   getIndicatorsByCategory,
   createDefaultIndicatorSet,
-  validateIndicatorConfig,
-  IndicatorConfig,
-  IndicatorId,
+  validateIndicatorConfig
 } from '../../models/indicatorConfig';
 
 describe('IndicatorConfig', () => {

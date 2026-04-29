@@ -7,8 +7,10 @@
  * - デフォルト値: 市場コンテキストがない場合のフォールバック
  */
 
-import { FeatureExtractor, MarketContext } from '../../services/note-generator/featureExtractor';
-import { Trade, TradeSide, Prisma } from '@prisma/client';
+import type { MarketContext } from '../../services/note-generator/featureExtractor';
+import { FeatureExtractor } from '../../services/note-generator/featureExtractor';
+import type { Trade} from '@prisma/client';
+import { TradeSide, Prisma } from '@prisma/client';
 
 describe('FeatureExtractor', () => {
   let extractor: FeatureExtractor;

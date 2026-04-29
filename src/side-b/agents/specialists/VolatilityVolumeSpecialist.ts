@@ -17,6 +17,7 @@ import {
 } from './specialistCommon';
 import type { PromptRegistry } from '../../prompts/registry/PromptRegistry';
 import type { RandomGenerator } from '../../prompts/registry/variantSelector';
+import type { JsonValue } from '../../../utils/jsonValue';
 
 const VOLATILITY_RELEVANT_LENSES = ['volatility_regime', 'current_analysis'];
 
@@ -54,7 +55,7 @@ export class VolatilityVolumeSpecialist {
       scoringInput: input,
       validate: (raw) => {
         if (!raw || typeof raw !== 'object') return null;
-        return this.validate(raw as Record<string, unknown>);
+        return this.validate(raw as Record<string, JsonValue | undefined>);
       },
       registry: this.deps.registry,
       rand: this.deps.rand,
@@ -77,7 +78,7 @@ ${lensDump}
 ボリュームデータが得られない場合は volumeSignal に "no_data" を入れてください。`;
   }
 
-  private validate(raw: Record<string, unknown>): VolatilityVolumeAnalysis {
+  private validate(raw: Record<string, JsonValue | undefined>): VolatilityVolumeAnalysis {
     return {
       volatilityRegime: pickEnum(raw.volatilityRegime, VOLATILITY_REGIMES, 'normal'),
       breakoutRisk: pickEnum(raw.breakoutRisk, BREAKOUT_RISKS, 'medium'),

@@ -9,8 +9,9 @@
  * 参照: indicators/*.md の Section 12（類似度計算設定）
  */
 
-import { PrismaClient, StrategyNoteStatus } from '@prisma/client';
-import {
+import type { StrategyNoteStatus } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import type {
   IndicatorValues,
   RSIValue,
   MACDValue,

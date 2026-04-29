@@ -1,4 +1,5 @@
-import { MatchResult, MarketSnapshot, TradeNote, Prisma } from '@prisma/client';
+import type { MatchResult, MarketSnapshot, TradeNote} from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { RuleBasedMatchEvaluator, MatchEvaluationService } from '../services/matching/matchEvaluationService';
 
 // 日本語コメント必須: 判定ロジックの単体テスト

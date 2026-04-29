@@ -13,7 +13,7 @@
  * - ビジネスロジックは含まない (サービス層の責務)
  */
 
-import { 
+import type { 
   PrismaClient, 
   PushSubscription, 
   PushLog,

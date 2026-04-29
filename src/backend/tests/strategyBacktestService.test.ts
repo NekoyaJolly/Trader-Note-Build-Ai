@@ -10,11 +10,12 @@
  * 別途インジケーター計算をモックした統合テストで検証する
  */
 
+import type {
+  BacktestTradeEvent} from '../services/backtestCalculations';
 import {
   calculatePnl,
   calculateSummary,
-  createEmptySummary,
-  BacktestTradeEvent,
+  createEmptySummary
 } from '../services/backtestCalculations';
 
 // ============================================

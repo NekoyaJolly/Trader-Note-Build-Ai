@@ -19,8 +19,8 @@
  */
 
 import { z } from 'zod';
-import { OHLCVBar } from '../../infrastructure/market/IMarketDataProvider';
-import { RollingWindowService, BarCompleteCallback } from './rollingWindowService';
+import type { OHLCVBar } from '../../infrastructure/market/IMarketDataProvider';
+import type { RollingWindowService, BarCompleteCallback } from './rollingWindowService';
 import { calculateCosineSimilarity } from '../featureVectorService';
 
 // ========================================

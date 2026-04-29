@@ -33,6 +33,7 @@ import {
 } from './discoveryStats';
 import type { EdgeLedger } from '../ledger/EdgeLedger';
 import { edgeLedger as defaultLedger } from '../ledger/EdgeLedger';
+import type { JsonValue } from '../../utils/jsonValue';
 
 // ===========================================
 // 型定義
@@ -106,19 +107,19 @@ interface DiscoveryLLMOutput {
 // ===========================================
 
 export function validateDiscoveryOutput(
-    data: unknown,
+    data: JsonValue,
     availableLenses: ReadonlySet<string>,
 ): DiscoveryLLMOutput {
     if (!data || typeof data !== 'object') {
         throw new Error('Discovery output must be an object');
     }
-    const obj = data as Record<string, unknown>;
+    const obj = data as Record<string, JsonValue | undefined>;
 
     if (!Array.isArray(obj.interpretations)) {
         throw new Error('interpretations must be an array');
     }
-    const interpretations = (obj.interpretations as unknown[]).map((raw, i) => {
-        const r = raw as Record<string, unknown>;
+    const interpretations = obj.interpretations.map((raw, i) => {
+        const r = raw as Record<string, JsonValue | undefined>;
         if (typeof r.interpretation !== 'string') {
             throw new Error(`interpretations[${i}]: missing fields`);
         }
@@ -136,8 +137,8 @@ export function validateDiscoveryOutput(
     });
 
     const rawNewHypotheses = Array.isArray(obj.newHypotheses) ? obj.newHypotheses : [];
-    const newHypotheses = (rawNewHypotheses as unknown[]).map((raw, i) => {
-        const h = raw as Record<string, unknown>;
+    const newHypotheses = rawNewHypotheses.map((raw, i) => {
+        const h = raw as Record<string, JsonValue | undefined>;
         if (typeof h.statement !== 'string' || h.statement.length < 10) {
             throw new Error(`newHypotheses[${i}]: invalid statement`);
         }
@@ -157,7 +158,7 @@ export function validateDiscoveryOutput(
         if (!Array.isArray(h.conditions) || h.conditions.length < 2 || h.conditions.length > 5) {
             throw new Error(`newHypotheses[${i}]: conditions must be 2-5`);
         }
-        const conditions = (h.conditions as unknown[]).map(validateCondition);
+        const conditions = h.conditions.map(validateCondition);
         for (const c of conditions) {
             if (!availableLenses.has(c.lensName)) {
                 throw new Error(
@@ -168,24 +169,30 @@ export function validateDiscoveryOutput(
         const lensRelevance =
             h.lensRelevance && typeof h.lensRelevance === 'object'
                 ? Object.fromEntries(
-                      Object.entries(h.lensRelevance as Record<string, unknown>)
+                      Object.entries(h.lensRelevance as Record<string, JsonValue | undefined>)
                           .filter(([, v]) => typeof v === 'number')
                           .map(([k, v]) => [k, Math.max(0, Math.min(1, v as number))]),
                   )
                 : undefined;
 
+        const expectedDirection: 'long' | 'short' | 'either' =
+            h.expectedDirection === 'short'
+                ? 'short'
+                : h.expectedDirection === 'either'
+                  ? 'either'
+                  : 'long';
         return {
-            statement: h.statement as string,
-            category: h.category as EdgeCategory,
-            expectedDirection: h.expectedDirection as 'long' | 'short' | 'either',
-            reasoning: h.reasoning as string,
+            statement: h.statement,
+            category: h.category,
+            expectedDirection,
+            reasoning: h.reasoning,
             conditions,
             ...(lensRelevance ? { lensRelevance } : {}),
         };
     });
     const rawHints = Array.isArray(obj.hintsForHG) ? obj.hintsForHG : [];
-    const hintsForHG = (rawHints as unknown[]).map((raw, i) => {
-        const h = raw as Record<string, unknown>;
+    const hintsForHG = rawHints.map((raw, i) => {
+        const h = raw as Record<string, JsonValue | undefined>;
         if (
             typeof h.promisingDirection !== 'string' ||
             !Array.isArray(h.lensFocusAreas) ||
@@ -464,7 +471,7 @@ export class DiscoveryAgent {
     private async callAI(
         systemPrompt: string,
         userPrompt: string,
-    ): Promise<{ content: unknown; tokenUsage: number; model: string }> {
+    ): Promise<{ content: JsonValue; tokenUsage: number; model: string }> {
         const response = await fetch(`${this.baseURL}/chat/completions`, {
             method: 'POST',
             headers: {

@@ -20,7 +20,9 @@
  *   - 最後の bracket balance 抽出で 会話的な前置き/後置きが混ざるケースにも対応
  */
 
-export type ExtractResult<T = unknown> =
+import type { JsonValue } from '../../utils/jsonValue';
+
+export type ExtractResult<T = JsonValue> =
   | { ok: true; data: T; via: 'raw' | 'fence' | 'bracket' }
   | { ok: false; error: string };
 
@@ -30,7 +32,7 @@ export type ExtractResult<T = unknown> =
  *
  * @param content LLM 応答本文 (trim される)
  */
-export function extractJson<T = unknown>(content: string): ExtractResult<T> {
+export function extractJson<T = JsonValue>(content: string): ExtractResult<T> {
   const trimmed = content.trim();
   if (trimmed.length === 0) {
     return { ok: false, error: '空文字列' };
@@ -82,7 +84,7 @@ export function extractOutermostBrackets(s: string): string | null {
   let openChar = '';
   let closeChar = '';
   for (let i = 0; i < s.length; i++) {
-    const c = s[i]!;
+    const c = s[i];
     if (c === '[') {
       start = i;
       openChar = '[';
@@ -102,7 +104,7 @@ export function extractOutermostBrackets(s: string): string | null {
   let inString = false;
   let escaped = false;
   for (let i = start; i < s.length; i++) {
-    const c = s[i]!;
+    const c = s[i];
     if (inString) {
       if (escaped) {
         escaped = false;

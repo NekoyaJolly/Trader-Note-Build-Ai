@@ -5,8 +5,9 @@
  * Runbook に記載された 13 ケースをカバー
  */
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
-import { NotificationTriggerService, NotificationTriggerInput } from '../../services/notification/notificationTriggerService';
-import { NotificationLogRepository } from '../repositories/notificationLogRepository';
+import type { NotificationTriggerInput } from '../../services/notification/notificationTriggerService';
+import { NotificationTriggerService } from '../../services/notification/notificationTriggerService';
+import type { NotificationLogRepository } from '../repositories/notificationLogRepository';
 
 // NotificationLogRepository のモック
 const mockNotificationLogRepository = {

@@ -12,10 +12,12 @@
  * - 他エージェント分は将来追加
  */
 
-/** 1 バリアントの実行結果。output は任意型。 */
-export interface AbVariantResult<TOutput = unknown> {
+import type { JsonValue } from '../../../utils/jsonValue';
+
+/** 1 バリアントの実行結果。output は成功時のみ（失敗時は error を参照）。 */
+export interface AbVariantResult<TOutput = JsonValue> {
   promptVersionId: string;
-  output: TOutput;
+  output?: TOutput;
   /** エージェント毎のスコアリング関数が返す 0-1 のスコア */
   score: number;
   durationMs: number;
@@ -24,7 +26,7 @@ export interface AbVariantResult<TOutput = unknown> {
 }
 
 /** A/B テスト全体の結果。 */
-export interface AbTestResult<TOutput = unknown> {
+export interface AbTestResult<TOutput = JsonValue> {
   agentName: string;
   testedAt: Date;
   variants: AbVariantResult<TOutput>[];

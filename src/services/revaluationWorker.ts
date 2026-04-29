@@ -11,22 +11,26 @@
  * 参照: 技術スタック選定シート ⑨
  */
 
-import { Worker, Job } from 'bullmq';
-import { PrismaClient, RevaluationJobType, Prisma } from '@prisma/client';
+import type { Job } from 'bullmq';
+import { Worker } from 'bullmq';
+import type { RevaluationJobType, Prisma } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import {
   QUEUE_NAMES,
   getRedisConnection,
   getWorkerOptions,
   isRedisAvailable,
 } from '../config/queueConfig';
-import {
+import type {
   RevaluationJobData,
-  RevaluationJobResult,
+  RevaluationJobResult} from './revaluationJobService';
+import {
   revaluationJobManager,
 } from './revaluationJobService';
 import { featureService } from './featureService';
 import { ohlcvRepository } from '../backend/repositories/ohlcvRepository';
-import { AISummaryService, TradeDataForSummary } from './aiSummaryService';
+import type { TradeDataForSummary } from './aiSummaryService';
+import { AISummaryService } from './aiSummaryService';
 
 const prisma = new PrismaClient();
 const aiSummaryService = new AISummaryService();
@@ -111,7 +115,7 @@ async function processNoteRegenerate(
         result.successCount++;
       } catch (error) {
         result.failedCount++;
-        result.errors?.push(`Note ${note.id}: ${error}`);
+        result.errors?.push(`Note ${note.id}: ${String(error)}`);
       }
 
       result.processedCount++;
@@ -127,7 +131,7 @@ async function processNoteRegenerate(
     });
 
   } catch (error) {
-    result.errors?.push(`Job failed: ${error}`);
+    result.errors?.push(`Job failed: ${String(error)}`);
     await revaluationJobManager.updateJobStatus(jobRecordId, 'failed', {
       errorMessage: String(error),
     });
@@ -202,7 +206,7 @@ async function processFeatureRecalculate(
         }
       } catch (error) {
         result.failedCount++;
-        result.errors?.push(`Note ${note.id}: ${error}`);
+        result.errors?.push(`Note ${note.id}: ${String(error)}`);
       }
 
       result.processedCount++;
@@ -217,7 +221,7 @@ async function processFeatureRecalculate(
     });
 
   } catch (error) {
-    result.errors?.push(`Job failed: ${error}`);
+    result.errors?.push(`Job failed: ${String(error)}`);
     await revaluationJobManager.updateJobStatus(jobRecordId, 'failed', {
       errorMessage: String(error),
     });
@@ -328,7 +332,7 @@ async function processAISummaryRegenerate(
         result.successCount++;
       } catch (error) {
         result.failedCount++;
-        result.errors?.push(`Note ${note.id}: ${error}`);
+        result.errors?.push(`Note ${note.id}: ${String(error)}`);
       }
 
       result.processedCount++;
@@ -343,7 +347,7 @@ async function processAISummaryRegenerate(
     });
 
   } catch (error) {
-    result.errors?.push(`Job failed: ${error}`);
+    result.errors?.push(`Job failed: ${String(error)}`);
     await revaluationJobManager.updateJobStatus(jobRecordId, 'failed', {
       errorMessage: String(error),
     });
@@ -359,7 +363,7 @@ async function processAISummaryRegenerate(
 async function processFullReprocess(
   job: Job<RevaluationJobData, RevaluationJobResult>
 ): Promise<RevaluationJobResult> {
-  const { jobRecordId, targetNoteId, targetSymbol } = job.data;
+  const { jobRecordId } = job.data;
   const result: RevaluationJobResult = {
     processedCount: 0,
     successCount: 0,
@@ -397,7 +401,7 @@ async function processFullReprocess(
     });
 
   } catch (error) {
-    result.errors?.push(`Job failed: ${error}`);
+    result.errors?.push(`Job failed: ${String(error)}`);
     await revaluationJobManager.updateJobStatus(jobRecordId, 'failed', {
       errorMessage: String(error),
     });
@@ -405,6 +409,15 @@ async function processFullReprocess(
   }
 
   return result;
+}
+
+/**
+ * BullMQ Job 相当の最小オブジェクトを Job 型として扱う（同期フォールバック専用）
+ */
+function asRevaluationJob(
+  mock: Pick<Job<RevaluationJobData, RevaluationJobResult>, 'data' | 'updateProgress'>,
+): Job<RevaluationJobData, RevaluationJobResult> {
+  return mock as Job<RevaluationJobData, RevaluationJobResult>;
 }
 
 /**
@@ -421,7 +434,7 @@ export function startWorkers(): Worker[] | null {
   const workers: Worker[] = [];
 
   // 各キューのワーカーを作成
-  for (const [key, queueName] of Object.entries(QUEUE_NAMES)) {
+  for (const [, queueName] of Object.entries(QUEUE_NAMES)) {
     const worker = new Worker<RevaluationJobData, RevaluationJobResult>(
       queueName,
       async (job) => {
@@ -474,7 +487,7 @@ export async function processPendingJobsSync(): Promise<void> {
   console.log(`同期処理対象ジョブ: ${pendingJobs.length} 件`);
 
   for (const jobInfo of pendingJobs) {
-    const mockJob = {
+    const mockJob = asRevaluationJob({
       data: {
         jobRecordId: jobInfo.id,
         jobType: jobInfo.jobType,
@@ -482,7 +495,7 @@ export async function processPendingJobsSync(): Promise<void> {
         targetSymbol: jobInfo.targetSymbol || undefined,
       },
       updateProgress: async () => {},
-    } as unknown as Job<RevaluationJobData, RevaluationJobResult>;
+    });
 
     try {
       const processor = jobProcessors[jobInfo.jobType];

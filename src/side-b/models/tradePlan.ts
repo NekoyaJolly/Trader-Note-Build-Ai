@@ -12,6 +12,7 @@
  */
 
 import type { ConditionGroup } from '../strategy_dsl/schema';
+import type { JsonValue } from '../../utils/jsonValue';
 
 // ===========================================
 // Plan AIで生成する型（Researchから移動）
@@ -297,23 +298,24 @@ const VALID_REGIMES: MarketRegime[] = [
 /**
  * Plan AI出力のバリデーション
  */
-export function validatePlanAIOutput(data: unknown): PlanAIOutput {
-  const obj = data as Record<string, unknown>;
+export function validatePlanAIOutput(data: JsonValue): PlanAIOutput {
+  const obj = data as Record<string, JsonValue | undefined>;
 
   // 必須フィールドの存在チェック
   if (!obj.marketAnalysis || !obj.scenarios || !Array.isArray(obj.scenarios)) {
     throw new Error('Required fields missing in Plan AI output');
   }
 
-  const ma = obj.marketAnalysis as Record<string, unknown>;
+  const ma = obj.marketAnalysis as Record<string, JsonValue | undefined>;
 
   // レジームのバリデーション
   if (!VALID_REGIMES.includes(ma.regime as MarketRegime)) {
-    throw new Error(`Invalid regime: ${ma.regime}`);
+    const regimeText = typeof ma.regime === 'object' ? JSON.stringify(ma.regime) : String(ma.regime);
+    throw new Error(`Invalid regime: ${regimeText}`);
   }
 
   // シナリオ数のバリデーション（0 = ノートレード推奨も有効）
-  const scenarios = obj.scenarios as unknown[];
+  const scenarios = obj.scenarios;
   if (scenarios.length > 3) {
     throw new Error('scenarios must have 0-3 items');
   }
@@ -326,7 +328,7 @@ export function validatePlanAIOutput(data: unknown): PlanAIOutput {
 
   // 各シナリオの基本バリデーション
   for (const scenario of scenarios) {
-    const s = scenario as Record<string, unknown>;
+    const s = scenario as Record<string, JsonValue | undefined>;
     if (!s.name || !s.direction || !s.entry || !s.stopLoss || !s.takeProfit) {
       throw new Error('Scenario missing required fields');
     }
@@ -341,8 +343,8 @@ export function validatePlanAIOutput(data: unknown): PlanAIOutput {
     if (!Array.isArray(obj.hypotheses)) {
       throw new Error('hypotheses must be an array');
     }
-    hypotheses = (obj.hypotheses as unknown[]).map((h) => {
-      const hh = h as Record<string, unknown>;
+    hypotheses = obj.hypotheses.map((h) => {
+      const hh = h as Record<string, JsonValue | undefined>;
       if (typeof hh.id !== 'string' || typeof hh.statement !== 'string') {
         throw new Error('Hypothesis missing required fields (id, statement)');
       }
@@ -360,21 +362,21 @@ export function validatePlanAIOutput(data: unknown): PlanAIOutput {
     if (!Array.isArray(obj.selfRefutation)) {
       throw new Error('selfRefutation must be an array');
     }
-    selfRefutation = (obj.selfRefutation as unknown[]).map((r) => {
-      const rr = r as Record<string, unknown>;
+    selfRefutation = obj.selfRefutation.map((r) => {
+      const rr = r as Record<string, JsonValue | undefined>;
       if (typeof rr.hypothesisId !== 'string' || !Array.isArray(rr.counterScenarios)) {
         throw new Error('Refutation missing required fields (hypothesisId, counterScenarios)');
       }
       return {
         hypothesisId: rr.hypothesisId,
-        counterScenarios: (rr.counterScenarios as unknown[]).map(String),
+        counterScenarios: rr.counterScenarios.map(String),
       };
     });
   }
 
   return {
-    marketAnalysis: ma as unknown as PlanMarketAnalysis,
-    scenarios: scenarios as Omit<AITradeScenario, 'id'>[],
+    marketAnalysis: JSON.parse(JSON.stringify(ma)) as PlanMarketAnalysis,
+    scenarios: JSON.parse(JSON.stringify(scenarios)) as Omit<AITradeScenario, 'id'>[],
     overallConfidence,
     warnings: (obj.warnings as string[]) || [],
     ...(hypotheses !== undefined ? { hypotheses } : {}),

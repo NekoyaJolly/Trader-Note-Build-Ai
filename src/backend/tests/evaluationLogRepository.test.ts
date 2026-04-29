@@ -9,13 +9,15 @@
  * @see docs/ARCHITECTURE.md - NoteEvaluator アーキテクチャ
  */
 
-import { PrismaClient } from '@prisma/client';
-import { 
-  EvaluationLogRepository, 
+import type { PrismaClient } from '@prisma/client';
+import type { 
   EvaluationLogCreateInput,
   NotePerformanceSummary
 } from '../repositories/evaluationLogRepository';
-import { EvaluationResult } from '../../domain/noteEvaluator';
+import { 
+  EvaluationLogRepository
+} from '../repositories/evaluationLogRepository';
+import type { EvaluationResult } from '../../domain/noteEvaluator';
 
 // モック用 Prisma クライアント
 const mockPrismaClient = {

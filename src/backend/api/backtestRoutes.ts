@@ -5,9 +5,10 @@
  * Phase 15: SSE進捗ストリーミング追加
  */
 
-import { Router, Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
 import { backtestController } from '../controllers/backtestController';
-import { progressStore } from '../../services/backtest/progressStore';
+import { progressStore, type ProgressState } from '../../services/backtest/progressStore';
 import { validateBody, validateParams, validateQuery } from '../../middleware/validateRequest';
 import {
   BacktestRunIdParamSchema,
@@ -158,7 +159,7 @@ router.get(
     }
   
     // 進捗更新をリッスン
-    const onProgress = (state: unknown) => {
+    const onProgress = (state: ProgressState) => {
       res.write(`event: progress\n`);
       res.write(`data: ${JSON.stringify(state)}\n\n`);
     };

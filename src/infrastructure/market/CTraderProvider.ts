@@ -15,23 +15,33 @@
  */
 
 import { z } from 'zod';
-import {
-  BaseMarketDataProvider,
+import type {
   TickData,
   OHLCVBar,
   MarketDataResult,
   TickCallback,
   Timeframe,
-  ProviderType,
+  ProviderType} from './IMarketDataProvider';
+import {
+  BaseMarketDataProvider
 } from './IMarketDataProvider';
-import { CTraderAuthService } from '../../backend/services/ctrader/ctraderAuthService';
+import type { CTraderAuthService } from '../../backend/services/ctrader/ctraderAuthService';
 import { config } from '../../config';
+import type { JsonValue } from '../../utils/jsonValue';
+
+type WebSocketMessageData = string | Buffer | ArrayBuffer | Buffer[];
+type WebSocketEventArg = WebSocketMessageData | Error | number | Buffer;
+type CTraderSocketMessage = {
+  payloadType?: number;
+  payload?: JsonValue;
+  clientMsgId?: string;
+};
 
 // WebSocket の型（Node.js 環境用）
 type WebSocketType = {
   OPEN: number;
   readyState: number;
-  on: (event: string, handler: (...args: unknown[]) => void) => void;
+  on: (event: string, handler: (...args: WebSocketEventArg[]) => void) => void;
   send: (data: string) => void;
   close: (code?: number, reason?: string) => void;
   ping: () => void;
@@ -111,7 +121,7 @@ export class CTraderProvider extends BaseMarketDataProvider {
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private symbolIdMap: Map<string, number> = new Map();
   private reverseSymbolIdMap: Map<number, string> = new Map();
-  private pendingRequests: Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }> = new Map();
+  private pendingRequests: Map<number, { resolve: (value: JsonValue | undefined) => void; reject: (error: Error) => void }> = new Map();
   private requestId = 0;
   private tickCallbacks: TickCallback[] = [];
   private subscribedSymbols: Set<string> = new Set();
@@ -200,7 +210,7 @@ export class CTraderProvider extends BaseMarketDataProvider {
     try {
       const accessToken = await this.authService.getValidAccessToken(this.accountId);
       const WebSocket = (await import('ws')).default;
-      this.ws = new WebSocket(config.ctrader.wsUrl) as WebSocketType;
+      this.ws = new WebSocket(config.ctrader.wsUrl);
 
       return new Promise((resolve, reject) => {
         if (!this.ws) {
@@ -221,20 +231,22 @@ export class CTraderProvider extends BaseMarketDataProvider {
             resolve(true);
           } catch (authError) {
             console.error('[cTrader] 認証エラー:', authError);
-            this.setConnectionState('error', authError as Error);
-            reject(authError);
+            const error = authError instanceof Error ? authError : new Error('cTrader 認証エラー');
+            this.setConnectionState('error', error);
+            reject(error);
           }
         });
 
-        this.ws.on('message', (data: unknown) => this.handleMessage(data));
-        this.ws.on('error', (error: unknown) => {
+        this.ws.on('message', (data) => this.handleMessage(data as WebSocketMessageData));
+        this.ws.on('error', (error) => {
           console.error('[cTrader] WebSocket エラー:', error);
-          this.setConnectionState('error', error as Error);
-          reject(error);
+          const err = this.toError(error);
+          this.setConnectionState('error', err);
+          reject(err);
         });
-        this.ws.on('close', (...args: unknown[]) => {
+        this.ws.on('close', (...args) => {
           const [code, reason] = args;
-          console.log(`[cTrader] WebSocket 切断: code=${code}, reason=${String(reason)}`);
+          console.log(`[cTrader] WebSocket 切断: code=${this.eventArgToString(code)}, reason=${this.eventArgToString(reason)}`);
           this.setConnectionState('disconnected');
           this.stopHeartbeat();
           if (this.connectionState !== 'error') {
@@ -375,7 +387,7 @@ export class CTraderProvider extends BaseMarketDataProvider {
   // WebSocket メッセージ処理
   // ========================================
 
-  private sendRequest(message: object): Promise<unknown> {
+  private sendRequest(message: object): Promise<JsonValue | undefined> {
     return new Promise((resolve, reject) => {
       if (!this.ws || this.ws.readyState !== this.ws.OPEN) {
         reject(new Error('[cTrader] WebSocket が接続されていません'));
@@ -394,9 +406,9 @@ export class CTraderProvider extends BaseMarketDataProvider {
     });
   }
 
-  private handleMessage(data: unknown): void {
+  private handleMessage(data: WebSocketMessageData): void {
     try {
-      const message = JSON.parse(String(data));
+      const message = JSON.parse(this.websocketDataToString(data)) as CTraderSocketMessage;
       if (message.payloadType === CTraderMessageType.PROTO_OA_SPOT_EVENT) {
         this.handleSpotEvent(message.payload);
         return;
@@ -419,7 +431,7 @@ export class CTraderProvider extends BaseMarketDataProvider {
     }
   }
 
-  private handleSpotEvent(payload: unknown): void {
+  private handleSpotEvent(payload: JsonValue | undefined): void {
     const result = CTraderSpotEventSchema.safeParse(payload);
     if (!result.success) return;
 
@@ -487,7 +499,7 @@ export class CTraderProvider extends BaseMarketDataProvider {
    * @param payload - ペイロード
    * @returns レスポンス
    */
-  async sendCommand(command: string, payload: Record<string, unknown>): Promise<unknown> {
+  async sendCommand<TPayload extends object>(command: string, payload: TPayload): Promise<JsonValue | undefined> {
     // コマンド名からメッセージタイプを解決
     const messageTypeMap: Record<string, number> = {
       'ProtoOAReconcileReq': CTraderMessageType.PROTO_OA_RECONCILE_REQ,
@@ -504,5 +516,25 @@ export class CTraderProvider extends BaseMarketDataProvider {
 
     const message = { payloadType, payload };
     return this.sendRequest(message);
+  }
+
+  private websocketDataToString(data: WebSocketMessageData): string {
+    if (typeof data === 'string') return data;
+    if (Buffer.isBuffer(data)) return data.toString('utf8');
+    if (Array.isArray(data)) return Buffer.concat(data).toString('utf8');
+    return Buffer.from(data).toString('utf8');
+  }
+
+  private eventArgToString(value: WebSocketEventArg | undefined): string {
+    if (value === undefined) return '';
+    if (typeof value === 'number' || typeof value === 'string') return String(value);
+    if (value instanceof Error) return value.message;
+    if (Buffer.isBuffer(value)) return value.toString('utf8');
+    if (Array.isArray(value)) return Buffer.concat(value).toString('utf8');
+    return Buffer.from(value).toString('utf8');
+  }
+
+  private toError(value: WebSocketEventArg): Error {
+    return value instanceof Error ? value : new Error(this.eventArgToString(value));
   }
 }

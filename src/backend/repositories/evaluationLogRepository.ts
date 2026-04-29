@@ -1,6 +1,7 @@
-import { EvaluationLog, Prisma, PrismaClient } from '@prisma/client';
+import type { EvaluationLog, PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../db/client';
-import { EvaluationResult } from '../../domain/noteEvaluator';
+import type { EvaluationResult } from '../../domain/noteEvaluator';
 
 /**
  * EvaluationLog リポジトリ
@@ -104,7 +105,7 @@ export class EvaluationLogRepository {
     // Prisma の JSON フィールドに null を設定する場合は Prisma.JsonNull を使用
     const diagnosticsData: Prisma.InputJsonValue | typeof Prisma.JsonNull = 
       saveDiagnostics && evaluationResult.diagnostics
-        ? (evaluationResult.diagnostics as Prisma.InputJsonValue)
+        ? (evaluationResult.diagnostics)
         : Prisma.JsonNull;
 
     return this.prisma.evaluationLog.upsert({
@@ -177,7 +178,7 @@ export class EvaluationLogRepository {
    * 条件に基づいて評価ログを検索
    */
   async search(criteria: EvaluationLogSearchCriteria): Promise<EvaluationLog[]> {
-    const where: Record<string, unknown> = {};
+    const where: Prisma.EvaluationLogWhereInput = {};
     
     if (criteria.noteId) {
       where.noteId = criteria.noteId;
@@ -196,10 +197,10 @@ export class EvaluationLogRepository {
     if (criteria.evaluatedFrom || criteria.evaluatedTo) {
       where.evaluatedAt = {};
       if (criteria.evaluatedFrom) {
-        (where.evaluatedAt as Record<string, Date>).gte = criteria.evaluatedFrom;
+        where.evaluatedAt.gte = criteria.evaluatedFrom;
       }
       if (criteria.evaluatedTo) {
-        (where.evaluatedAt as Record<string, Date>).lte = criteria.evaluatedTo;
+        where.evaluatedAt.lte = criteria.evaluatedTo;
       }
     }
 
@@ -295,7 +296,7 @@ export class EvaluationLogRepository {
       limit?: number;
     } = {}
   ): Promise<EvaluationLog[]> {
-    const where: Record<string, unknown> = { triggered: true };
+    const where: Prisma.EvaluationLogWhereInput = { triggered: true };
     
     if (options.noteId) {
       where.noteId = options.noteId;
@@ -306,10 +307,10 @@ export class EvaluationLogRepository {
     if (options.from || options.to) {
       where.evaluatedAt = {};
       if (options.from) {
-        (where.evaluatedAt as Record<string, Date>).gte = options.from;
+        where.evaluatedAt.gte = options.from;
       }
       if (options.to) {
-        (where.evaluatedAt as Record<string, Date>).lte = options.to;
+        where.evaluatedAt.lte = options.to;
       }
     }
 

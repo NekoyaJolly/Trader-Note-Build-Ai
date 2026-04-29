@@ -13,7 +13,7 @@
  */
 
 import { Queue, Job, QueueEvents } from 'bullmq';
-import { RevaluationJobType, RevaluationJobStatus } from '@prisma/client';
+import type { RevaluationJobType, RevaluationJobStatus } from '@prisma/client';
 import {
   QUEUE_NAMES,
   JOB_PRIORITIES,

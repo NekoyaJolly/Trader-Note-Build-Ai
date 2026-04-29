@@ -12,6 +12,7 @@
  */
 
 import { config } from '../../config';
+import type { JsonValue } from '../../utils/jsonValue';
 
 // ===========================================
 // 型定義
@@ -445,7 +446,7 @@ ${this.calculateDeviations(currentFeatures, avgNormal)}
   private async callAI(
     prompt: string,
     systemPrompt: string
-  ): Promise<{ content: unknown; tokenUsage: number; model: string }> {
+  ): Promise<{ content: JsonValue; tokenUsage: number; model: string }> {
     const response = await fetch(`${this.baseURL}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -481,7 +482,7 @@ ${this.calculateDeviations(currentFeatures, avgNormal)}
     }
 
     return {
-      content: JSON.parse(content),
+      content: JSON.parse(content) as JsonValue,
       tokenUsage: data.usage?.total_tokens || 0,
       model: data.model || this.model,
     };
@@ -491,10 +492,10 @@ ${this.calculateDeviations(currentFeatures, avgNormal)}
    * パターン分析レスポンスをパース
    */
   private parsePatternAnalysisResponse(
-    content: unknown,
+    content: JsonValue,
     input: PatternAnalysisInput
   ): Omit<PatternAnalysisResult, 'tokenUsage' | 'model' | 'analyzedAt'> {
-    const data = content as Record<string, unknown>;
+    const data = content as Record<string, JsonValue | undefined>;
 
     // デフォルト値でフォールバック
     const overallScore = typeof data.overallScore === 'number' 
@@ -509,14 +510,30 @@ ${this.calculateDeviations(currentFeatures, avgNormal)}
       ? Math.min(1, Math.max(0, data.confidence))
       : 0.5;
 
-    const patternMatches = Array.isArray(data.patternMatches)
-      ? (data.patternMatches as PatternMatch[]).map((m, i) => ({
-          patternId: m.patternId || input.winningPatterns[i]?.id || `pattern-${i}`,
-          patternName: m.patternName || input.winningPatterns[i]?.name || `パターン${i + 1}`,
-          similarity: typeof m.similarity === 'number' ? m.similarity : 50,
-          matchedDimensions: Array.isArray(m.matchedDimensions) ? m.matchedDimensions : [],
-          divergentDimensions: Array.isArray(m.divergentDimensions) ? m.divergentDimensions : [],
-        }))
+    const patternMatches: PatternMatch[] = Array.isArray(data.patternMatches)
+      ? data.patternMatches.map((raw, i) => {
+          const m =
+            raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+              ? (raw as Record<string, JsonValue | undefined>)
+              : {};
+          const patternIdVal = m.patternId;
+          const patternNameVal = m.patternName;
+          return {
+            patternId:
+              typeof patternIdVal === 'string'
+                ? patternIdVal
+                : input.winningPatterns[i]?.id || `pattern-${i}`,
+            patternName:
+              typeof patternNameVal === 'string'
+                ? patternNameVal
+                : input.winningPatterns[i]?.name || `パターン${i + 1}`,
+            similarity: typeof m.similarity === 'number' ? m.similarity : 50,
+            matchedDimensions: Array.isArray(m.matchedDimensions) ? m.matchedDimensions.filter((x): x is string => typeof x === 'string') : [],
+            divergentDimensions: Array.isArray(m.divergentDimensions)
+              ? m.divergentDimensions.filter((x): x is string => typeof x === 'string')
+              : [],
+          };
+        })
       : [];
 
     const reasons = Array.isArray(data.reasons) ? data.reasons as string[] : ['分析データ不足'];
@@ -540,9 +557,9 @@ ${this.calculateDeviations(currentFeatures, avgNormal)}
    * 異常検知レスポンスをパース
    */
   private parseAnomalyDetectionResponse(
-    content: unknown
+    content: JsonValue
   ): Omit<AnomalyDetectionResult, 'tokenUsage' | 'model' | 'analyzedAt'> {
-    const data = content as Record<string, unknown>;
+    const data = content as Record<string, JsonValue | undefined>;
 
     const anomalyScore = typeof data.anomalyScore === 'number'
       ? Math.min(100, Math.max(0, data.anomalyScore))

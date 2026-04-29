@@ -19,19 +19,18 @@
  * - ノートA（UserIndicator）もノートB（Legacy）も同じフローで評価
  */
 
-import { BacktestRun, BacktestResult, BacktestEvent, BacktestOutcome, BacktestStatus } from '@prisma/client';
-import { Decimal } from '@prisma/client/runtime/library';
+import type { BacktestEvent, BacktestOutcome, BacktestStatus } from '@prisma/client';
+import type { 
+  CreateBacktestResultInput,
+  CreateBacktestEventInput} from '../backend/repositories/backtestRepository';
 import { 
   BacktestRepository, 
-  CreateBacktestRunInput, 
-  CreateBacktestResultInput,
-  CreateBacktestEventInput,
-  BacktestRunWithDetails,
 } from '../backend/repositories/backtestRepository';
-import { OHLCVRepository, OHLCVQueryFilter } from '../backend/repositories/ohlcvRepository';
+import type { OHLCVQueryFilter } from '../backend/repositories/ohlcvRepository';
+import { OHLCVRepository } from '../backend/repositories/ohlcvRepository';
 import { TradeNoteRepository } from '../backend/repositories/tradeNoteRepository';
 import { createNoteEvaluator } from './legacyNoteEvaluatorAdapter';
-import { NoteEvaluator, MarketSnapshot } from '../domain/noteEvaluator';
+import type { NoteEvaluator, MarketSnapshot } from '../domain/noteEvaluator';
 
 /**
  * バックテスト実行パラメータ
@@ -444,7 +443,7 @@ export class BacktestService {
   private calculateResult(
     runId: string,
     events: BacktestEvent[],
-    tradingCostPct: number,
+    _tradingCostPct: number,
   ): CreateBacktestResultInput {
     const wins = events.filter(e => e.outcome === 'win');
     const losses = events.filter(e => e.outcome === 'loss');

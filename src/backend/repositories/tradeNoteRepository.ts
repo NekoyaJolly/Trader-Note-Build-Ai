@@ -14,7 +14,7 @@
  * - ビジネスロジックは含まない (サービス層の責務)
  */
 
-import { PrismaClient, TradeNote, AISummary, TradeSide, NoteStatus, Prisma } from '@prisma/client';
+import type { PrismaClient, TradeNote, AISummary, TradeSide, NoteStatus, Prisma } from '@prisma/client';
 import { prisma } from '../db/client';
 // 注意: JSON フィールドの型変換はアプリケーション層で行う
 // toIndicatorJson(), toMarketContextJson() を使用
@@ -399,9 +399,9 @@ export class TradeNoteRepository {
     if (status) {
       // status は文字列または配列で指定可能
       if (Array.isArray(status)) {
-        where.status = { in: status as NoteStatus[] };
+        where.status = { in: status };
       } else {
-        where.status = status as NoteStatus;
+        where.status = status;
       }
     }
     if (symbol) {

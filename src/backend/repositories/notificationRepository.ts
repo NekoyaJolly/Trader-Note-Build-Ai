@@ -14,14 +14,14 @@
  * - ビジネスロジックは含まない (サービス層の責務)
  */
 
-import { 
+import type { 
   PrismaClient, 
   Notification, 
   NotificationStatus,
   Prisma,
 } from '@prisma/client';
 import { prisma } from '../db/client';
-import { 
+import type { 
   MatchReasons, 
 } from '../../models/prismaTypes';
 
@@ -110,7 +110,7 @@ export class DbNotificationRepository {
           },
         },
       },
-    }) as NotificationWithMatch | null;
+    });
   }
 
   /**
@@ -126,9 +126,9 @@ export class DbNotificationRepository {
     if (status) {
       // status は文字列または配列で指定可能
       if (Array.isArray(status)) {
-        where.status = { in: status as NotificationStatus[] };
+        where.status = { in: status };
       } else {
-        where.status = status as NotificationStatus;
+        where.status = status;
       }
     }
     

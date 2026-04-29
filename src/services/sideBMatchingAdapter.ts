@@ -13,30 +13,18 @@
  */
 
 import { prisma } from '../backend/db/client';
-import {
-  SideBNoteEvaluator,
+import type {
   SideBNoteMatchingData,
-  SideBMarketAnalysis,
+  SideBMarketAnalysis} from '../domain/matching/sideBNoteEvaluator';
+import {
+  SideBNoteEvaluator
 } from '../domain/matching/sideBNoteEvaluator';
-import { NoteEvaluator } from '../domain/noteEvaluator';
+import type { NoteEvaluator } from '../domain/noteEvaluator';
+import type { JsonValue } from '../utils/jsonValue';
 
 // ============================================================================
 // 型定義
 // ============================================================================
-
-interface SideBNoteWithContext {
-  id: string;
-  symbol: string;
-  direction: string;
-  outcome: string;
-  pnlPips: number;
-  rrActual: number;
-  entryAnalysis: Record<string, unknown>;
-  marketReview: Record<string, unknown>;
-  entryPrice: number;
-  marketAnalysis: SideBMarketAnalysis;
-  timeframe: string | null;
-}
 
 // ============================================================================
 // SideBMatchingAdapter
@@ -106,7 +94,7 @@ export class SideBMatchingAdapter {
           rrActual: Number(note.rrActual),
           entryPrice,
           marketAnalysis,
-          entryAnalysis: (note.entryAnalysis as Record<string, unknown>) ?? {},
+          entryAnalysis: this.toJsonRecord(note.entryAnalysis),
           timeframe: undefined, // AITradePlan にはtimeframeフィールドなし
         };
 
@@ -142,37 +130,49 @@ export class SideBMatchingAdapter {
   /**
    * marketAnalysis JSON をパースして型付きオブジェクトに変換
    */
-  private parseMarketAnalysis(raw: unknown): SideBMarketAnalysis | null {
+  private parseMarketAnalysis(raw: JsonValue): SideBMarketAnalysis | null {
     if (!raw || typeof raw !== 'object') return null;
 
-    const data = raw as Record<string, unknown>;
+    const data = raw as Record<string, JsonValue | undefined>;
 
     // 必須フィールドチェック
     if (!data.regime || !data.trendDirection) return null;
 
     return {
-      regime: String(data.regime || 'range'),
-      volatility: String(data.volatility || 'medium'),
-      trendDirection: String(data.trendDirection || 'sideways'),
+      regime: this.asString(data.regime, 'range'),
+      volatility: this.asString(data.volatility, 'medium'),
+      trendDirection: this.asString(data.trendDirection, 'sideways'),
       regimeConfidence: Number(data.regimeConfidence || 50),
       keyLevels: {
-        support: Array.isArray((data.keyLevels as Record<string, unknown>)?.support)
-          ? ((data.keyLevels as Record<string, unknown>).support as number[])
-          : [],
-        resistance: Array.isArray((data.keyLevels as Record<string, unknown>)?.resistance)
-          ? ((data.keyLevels as Record<string, unknown>).resistance as number[])
-          : [],
-        strongSupport: Array.isArray((data.keyLevels as Record<string, unknown>)?.strongSupport)
-          ? ((data.keyLevels as Record<string, unknown>).strongSupport as number[])
-          : [],
-        strongResistance: Array.isArray((data.keyLevels as Record<string, unknown>)?.strongResistance)
-          ? ((data.keyLevels as Record<string, unknown>).strongResistance as number[])
-          : [],
+        support: this.getNumberArray(data.keyLevels, 'support'),
+        resistance: this.getNumberArray(data.keyLevels, 'resistance'),
+        strongSupport: this.getNumberArray(data.keyLevels, 'strongSupport'),
+        strongResistance: this.getNumberArray(data.keyLevels, 'strongResistance'),
       },
       summary: data.summary as string | undefined,
       additionalInsights: Array.isArray(data.additionalInsights)
         ? data.additionalInsights as string[]
         : undefined,
     };
+  }
+
+  private asString(value: JsonValue | undefined, fallback: string): string {
+    return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+      ? String(value)
+      : fallback;
+  }
+
+  private getNumberArray(source: JsonValue | undefined, key: string): number[] {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) return [];
+    const value = source[key];
+    return Array.isArray(value)
+      ? value.filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
+      : [];
+  }
+
+  private toJsonRecord(value: JsonValue): Record<string, JsonValue | undefined> {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? value
+      : {};
   }
 }

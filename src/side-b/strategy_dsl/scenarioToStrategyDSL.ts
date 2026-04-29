@@ -11,7 +11,8 @@
 
 import type { AITradeScenario } from '../models/tradePlan';
 import type { z } from 'zod';
-import { StrategyDSLSchema, ImmediateEntrySchema } from './schema';
+import type { ImmediateEntrySchema } from './schema';
+import { StrategyDSLSchema } from './schema';
 
 type ImmediateEntryDsl = z.infer<typeof ImmediateEntrySchema>;
 type StrategyDslInput = z.input<typeof StrategyDSLSchema>;

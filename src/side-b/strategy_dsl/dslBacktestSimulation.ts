@@ -436,7 +436,7 @@ export function runDslSimulation(
         break;
       }
       const j = i;
-      const openPx = bars[j]!.open;
+      const openPx = bars[j].open;
       const stopDist = stopDistance(dsl, table, j, pipSize, paramValues, evaluator);
       const tpDist = takeProfitDistance(dsl, stopDist, table, j, pipSize, paramValues, evaluator);
       if (deferredImmediate.isLong) {
@@ -544,14 +544,14 @@ export function runDslSimulation(
       if (waitStart === null) {
         waitStart = i;
       }
-      if (i - waitStart! > wEntry.maxWaitBars) {
+      if (i - waitStart > wEntry.maxWaitBars) {
         waitAborted = true;
         continue;
       }
       const condOk = evaluator.evaluateConditions(wEntry.triggerConditions, snap, paramValues);
       if (condOk && i + 1 < bars.length) {
         const j = i + 1;
-        const openPx = bars[j]!.open;
+        const openPx = bars[j].open;
         const slIx = j;
         const stopDist = stopDistance(dsl, table, slIx, pipSize, paramValues, evaluator);
         const tpDist = takeProfitDistance(dsl, stopDist, table, slIx, pipSize, paramValues, evaluator);
@@ -604,7 +604,7 @@ export function runDslSimulation(
         if (immediateFill === 'next_bar_open' && i + 1 < bars.length) {
           deferredImmediate = { openAtIndex: i + 1, isLong: e.direction === 'long' };
         } else {
-          const closePx = bars[i]!.close;
+          const closePx = bars[i].close;
           const stopDist = stopDistance(dsl, table, i, pipSize, paramValues, evaluator);
           const tpDist = takeProfitDistance(dsl, stopDist, table, i, pipSize, paramValues, evaluator);
           if (e.direction === 'long') {

@@ -8,15 +8,14 @@
  * - ファクトリ関数の分岐ロジック検証
  */
 
-import { NoteStatus, TradeSide, Prisma } from '@prisma/client';
-import {
-  NoteEvaluator,
+import type { NoteStatus, TradeSide, Prisma } from '@prisma/client';
+import type {
   NoteIndicatorConfig,
-  MarketSnapshot,
+  MarketSnapshot} from '../../domain/noteEvaluator';
+import {
   cosineSimilarity,
   getSimilarityLevel,
   createDefaultNoteConfig,
-  DEFAULT_THRESHOLDS,
 } from '../../domain/noteEvaluator';
 import {
   LegacyNoteEvaluator,
@@ -424,7 +423,7 @@ describe('NoteEvaluator 統合テスト', () => {
     const evaluator = new LegacyNoteEvaluator(note);
     
     // ノートベクトル同士を比較
-    const result = evaluator.evaluate(createMockSnapshot(), noteVector);
+    evaluator.evaluate(createMockSnapshot(), noteVector);
     
     // 同じベクトルなら類似度は 1.0
     // ただし市場から生成されるベクトルは異なるので、noteVector を直接渡す

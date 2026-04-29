@@ -143,7 +143,7 @@ export async function runPromptEvolutionCycle(
       const failures = await fetchRecentFailures(agentName);
       const proposals = await mutationAgent.proposeImprovements({
         agentName,
-        currentPrompt: active as PromptVersion,
+        currentPrompt: active,
         recentPerformance: {
           avgScore: active.avgScore,
           recentFailures: failures,
@@ -152,7 +152,7 @@ export async function runPromptEvolutionCycle(
       });
 
       for (let i = 0; i < proposals.length; i++) {
-        const p = proposals[i]!;
+        const p = proposals[i];
         try {
           const registered = await registry.register({
             agentName,

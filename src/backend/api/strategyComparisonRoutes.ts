@@ -11,17 +11,18 @@
  * 参照: docs/phase-next/strategy-comparison-analysis.md
  */
 
-import { Router, Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
 import { z } from 'zod';
-import { OptimizationMethod } from '@prisma/client';
+import type {
+  CreateComparisonRequest,
+  OptimizeRequest} from '../services/strategyComparisonService';
 import {
   createComparisonSession,
   getComparisonSession,
   getComparisonSessions,
   deleteComparisonSession,
-  runPortfolioOptimization,
-  CreateComparisonRequest,
-  OptimizeRequest,
+  runPortfolioOptimization
 } from '../services/strategyComparisonService';
 
 const router = Router();
@@ -249,7 +250,7 @@ router.post('/:id/optimize', async (req: Request, res: Response) => {
     }
     
     const request: OptimizeRequest = {
-      method: parseResult.data.method as OptimizationMethod,
+      method: parseResult.data.method,
       riskFreeRate: parseResult.data.riskFreeRate,
     };
     

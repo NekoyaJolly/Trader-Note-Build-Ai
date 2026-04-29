@@ -13,9 +13,12 @@
  * - POST /api/indicators/settings/reset - デフォルトにリセット
  */
 
-import { Router, Request, Response } from 'express';
-import { indicatorSettingsService, SaveIndicatorConfigRequest } from '../../services/indicatorSettingsService';
-import { INDICATOR_METADATA, IndicatorId, IndicatorCategory } from '../../models/indicatorConfig';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
+import type { SaveIndicatorConfigRequest } from '../../services/indicatorSettingsService';
+import { indicatorSettingsService } from '../../services/indicatorSettingsService';
+import type { IndicatorId, IndicatorCategory } from '../../models/indicatorConfig';
+import { INDICATOR_METADATA } from '../../models/indicatorConfig';
 import { validateBody, validateParams, validateQuery, getValidatedQuery } from '../../middleware/validateRequest';
 import {
   IndicatorIdParamSchema,
@@ -31,9 +34,9 @@ const router = Router();
  * GET /api/indicators/settings
  * 現在のインジケーター設定を取得
  */
-router.get('/settings', async (_req: Request, res: Response) => {
+router.get('/settings', (_req: Request, res: Response) => {
   try {
-    const settings = await indicatorSettingsService.loadSettings();
+    const settings = indicatorSettingsService.loadSettings();
     
     res.json({
       success: true,
@@ -67,9 +70,10 @@ router.get('/settings', async (_req: Request, res: Response) => {
 router.post(
   '/settings',
   validateBody(SaveIndicatorSettingsRequestSchema),
-  async (req: Request, res: Response) => {
+  (req: Request, res: Response) => {
     try {
-      const { indicatorId, params, enabled, label } = req.body as SaveIndicatorConfigRequest;
+      const { indicatorId, params, enabled, label } =
+        SaveIndicatorSettingsRequestSchema.parse(req.body);
 
       // メタデータの存在確認
       const metadata = INDICATOR_METADATA.find(m => m.id === indicatorId);
@@ -80,9 +84,9 @@ router.post(
         });
       }
 
-      const config = await indicatorSettingsService.upsertIndicatorConfig({
-        indicatorId: indicatorId as IndicatorId,
-        params: params || metadata.defaultParams,
+      const config = indicatorSettingsService.upsertIndicatorConfig({
+        indicatorId: indicatorId as SaveIndicatorConfigRequest['indicatorId'],
+        params: (params ?? metadata.defaultParams) as SaveIndicatorConfigRequest['params'],
         enabled,
         label,
       });
@@ -109,7 +113,7 @@ router.post(
 router.delete(
   '/settings/:indicatorId',
   validateParams(IndicatorIdParamSchema),
-  async (req: Request, res: Response) => {
+  (req: Request, res: Response) => {
     try {
       const { indicatorId } = req.params;
 
@@ -122,13 +126,13 @@ router.delete(
         });
       }
 
-      await indicatorSettingsService.removeIndicatorConfig(indicatorId as IndicatorId);
+      indicatorSettingsService.removeIndicatorConfig(indicatorId as IndicatorId);
 
-    res.json({
-      success: true,
-      message: `${metadata.displayName} を削除しました`,
-    });
-  } catch (error) {
+      res.json({
+        success: true,
+        message: `${metadata.displayName} を削除しました`,
+      });
+    } catch (error) {
     console.error('インジケーター設定削除エラー:', error);
     res.status(500).json({
       success: false,
@@ -147,12 +151,12 @@ router.patch(
   '/settings/:indicatorId/toggle',
   validateParams(IndicatorIdParamSchema),
   validateBody(ToggleIndicatorRequestSchema),
-  async (req: Request, res: Response) => {
+  (req: Request, res: Response) => {
     try {
       const { indicatorId } = req.params;
-      const { enabled } = req.body;
+      const { enabled } = ToggleIndicatorRequestSchema.parse(req.body);
 
-      await indicatorSettingsService.toggleIndicatorConfig(indicatorId as IndicatorId, enabled);
+      indicatorSettingsService.toggleIndicatorConfig(indicatorId as IndicatorId, enabled);
 
       res.json({
         success: true,
@@ -178,7 +182,7 @@ router.patch(
 router.get(
   '/metadata',
   validateQuery(GetMetadataQuerySchema),
-  async (req: Request, res: Response) => {
+  (req: Request, res: Response) => {
     try {
       const { category } = getValidatedQuery<{ category?: string }>(res);
 
@@ -210,9 +214,9 @@ router.get(
  * POST /api/indicators/settings/reset
  * 設定をデフォルトにリセット
  */
-router.post('/settings/reset', async (_req: Request, res: Response) => {
+router.post('/settings/reset', (_req: Request, res: Response) => {
   try {
-    const settings = await indicatorSettingsService.resetToDefault();
+    const settings = indicatorSettingsService.resetToDefault();
 
     res.json({
       success: true,
@@ -232,9 +236,9 @@ router.post('/settings/reset', async (_req: Request, res: Response) => {
  * GET /api/indicators/settings/setup-status
  * セットアップ状態を取得
  */
-router.get('/settings/setup-status', async (_req: Request, res: Response) => {
+router.get('/settings/setup-status', (_req: Request, res: Response) => {
   try {
-    const hasCompleted = await indicatorSettingsService.hasCompletedSetup();
+    const hasCompleted = indicatorSettingsService.hasCompletedSetup();
 
     res.json({
       success: true,

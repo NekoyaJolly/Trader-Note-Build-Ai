@@ -11,9 +11,10 @@
  *   1. unverified 仮説を取得
  *   2. MaterializationService で TradeNote に materialize
  *      （失敗なら 'not_testable'）
- *   3. Side-A BacktestService.execute + getResult で BT 実行
- *   4. StatusManager.canPromoteToScreeningPassed で判定
- *   5. EdgeLedger.recordScreeningResult でステータス遷移
+ *   3. OHLCVが不足していれば cTrader 優先で補完（失敗時のみ Twelve Data）
+ *   4. Side-A BacktestService.execute + getResult で BT 実行
+ *   5. StatusManager.canPromoteToScreeningPassed で判定
+ *   6. EdgeLedger.recordScreeningResult でステータス遷移
  *
  * 設計原則:
  * - Side-A コードを一切変更しない（backtestService は外部 API として呼び出すのみ）
@@ -24,14 +25,22 @@
  */
 
 import type { LensFeatureSnapshot } from '../lenses';
-import type { EdgeHypothesis, ScreeningResult } from '../models/edgeHypothesis';
-import { EdgeLedger } from '../ledger/EdgeLedger';
+import type { ScreeningResult } from '../models/edgeHypothesis';
+import type { EdgeLedger } from '../ledger/EdgeLedger';
 import { edgeLedger as defaultEdgeLedger } from '../ledger/EdgeLedger';
-import { StatusManager, statusManager as defaultStatusManager } from '../ledger/statusManager';
-import { MaterializationService } from './MaterializationService';
+import type { StatusManager } from '../ledger/statusManager';
+import { statusManager as defaultStatusManager } from '../ledger/statusManager';
+import type { MaterializationService } from './MaterializationService';
 import { materializationService as defaultMaterializationService } from './MaterializationService';
 import { MaterializationError } from './types';
 import { backtestService as defaultBacktestService, type BacktestService } from '../../services/backtestService';
+import type { OHLCVRepository } from '../../backend/repositories/ohlcvRepository';
+import { OHLCVRepository as DefaultOHLCVRepository } from '../../backend/repositories/ohlcvRepository';
+import {
+    fetchAndCacheOhlcv,
+    type FetchAndCacheResult,
+} from '../../backend/services/fetchAndCacheOhlcv';
+import { normalizeCTraderSymbol } from '../../utils/symbolNormalization';
 
 // ===========================================
 // 型
@@ -83,6 +92,13 @@ export class ScreeningOrchestrator {
         private readonly edgeLedger: EdgeLedger = defaultEdgeLedger,
         private readonly statusManager: StatusManager = defaultStatusManager,
         private readonly backtestService: BacktestService = defaultBacktestService,
+        private readonly ohlcvRepo: Pick<OHLCVRepository, 'findManyAsOHLCVData'> = new DefaultOHLCVRepository(),
+        private readonly fetchAndCache: (
+            symbol: string,
+            timeframe: string,
+            startDate: Date,
+            endDate: Date,
+        ) => Promise<FetchAndCacheResult> = fetchAndCacheOhlcv,
     ) {}
 
     /**
@@ -115,8 +131,16 @@ export class ScreeningOrchestrator {
         }
 
         const period = options.period ?? this.determineScreeningPeriod();
+        const periodStart = new Date(period.start);
+        const periodEnd = new Date(period.end);
         const timeframe = hypothesis.timeframes[0] ?? '15m';
         const matchThreshold = options.matchThreshold ?? 0.6;
+        const symbol = normalizeCTraderSymbol(hypothesis.symbols[0] ?? '');
+        if (!symbol) {
+            const reason = '仮説に symbols が設定されていない';
+            await this.edgeLedger.markNotTestable(hypothesisId, reason);
+            return { hypothesisId, verdict: 'not_testable', reason };
+        }
 
         // 1. Materialize
         let materialized;
@@ -135,11 +159,18 @@ export class ScreeningOrchestrator {
 
         const { tradeNoteId, stopLossPercent, takeProfitPercent, maxHoldingMinutes } = materialized;
 
+        const ensure = await this.ensureOhlcvData(symbol, timeframe, periodStart, periodEnd);
+        if (!ensure.ok) {
+            const reason = `OHLCV補完失敗: ${ensure.reason}`;
+            await this.edgeLedger.markNotTestable(hypothesisId, reason);
+            return { hypothesisId, verdict: 'not_testable', reason };
+        }
+
         // 2. Side-A BacktestService で BT 実行
         const runId = await this.backtestService.execute({
             noteId: tradeNoteId,
-            startDate: new Date(period.start),
-            endDate: new Date(period.end),
+            startDate: periodStart,
+            endDate: periodEnd,
             timeframe,
             matchThreshold,
             takeProfit: takeProfitPercent,
@@ -207,6 +238,87 @@ export class ScreeningOrchestrator {
             start: start.toISOString().split('T')[0],
             end: end.toISOString().split('T')[0],
         };
+    }
+
+    /**
+     * Screening BT 前に、DB上のOHLCVが指定期間をカバーしているか確認する。
+     * 足りない場合は cTrader 優先、失敗時のみ Twelve Data フォールバックで補完する。
+     */
+    private async ensureOhlcvData(
+        symbol: string,
+        timeframe: string,
+        startDate: Date,
+        endDate: Date,
+    ): Promise<{ ok: true } | { ok: false; reason: string }> {
+        if (await this.hasOhlcvCoverage(symbol, timeframe, startDate, endDate)) {
+            return { ok: true };
+        }
+
+        const result = await this.fetchAndCache(symbol, timeframe, startDate, endDate);
+        if (!result.success) {
+            return {
+                ok: false,
+                reason: result.error ?? 'cTrader/Twelve Data からOHLCVを取得できませんでした',
+            };
+        }
+
+        if (await this.hasOhlcvCoverage(symbol, timeframe, startDate, endDate)) {
+            return { ok: true };
+        }
+
+        return {
+            ok: false,
+            reason: `補完後もDBに十分なOHLCVがありません（source=${result.source ?? 'unknown'}, cached=${result.cachedCount}）`,
+        };
+    }
+
+    private async hasOhlcvCoverage(
+        symbol: string,
+        timeframe: string,
+        startDate: Date,
+        endDate: Date,
+    ): Promise<boolean> {
+        const [first] = await this.ohlcvRepo.findManyAsOHLCVData({
+            symbol,
+            timeframe,
+            startTime: startDate,
+            endTime: endDate,
+            limit: 1,
+            orderBy: 'asc',
+        });
+        const [last] = await this.ohlcvRepo.findManyAsOHLCVData({
+            symbol,
+            timeframe,
+            startTime: startDate,
+            endTime: endDate,
+            limit: 1,
+            orderBy: 'desc',
+        });
+
+        if (!first || !last) return false;
+
+        const intervalMs = this.timeframeToMs(timeframe);
+        const toleranceMs = intervalMs * 3;
+        const firstTime = first.timestamp instanceof Date
+            ? first.timestamp.getTime()
+            : new Date(first.timestamp).getTime();
+        const lastTime = last.timestamp instanceof Date
+            ? last.timestamp.getTime()
+            : new Date(last.timestamp).getTime();
+
+        return firstTime <= startDate.getTime() + toleranceMs
+            && lastTime >= endDate.getTime() - toleranceMs;
+    }
+
+    private timeframeToMs(timeframe: string): number {
+        const match = timeframe.match(/^(\d+)([mhdw])$/);
+        if (!match) return 60 * 60 * 1000;
+        const value = Number(match[1]);
+        const unit = match[2];
+        if (unit === 'm') return value * 60 * 1000;
+        if (unit === 'h') return value * 60 * 60 * 1000;
+        if (unit === 'd') return value * 24 * 60 * 60 * 1000;
+        return value * 7 * 24 * 60 * 60 * 1000;
     }
 }
 

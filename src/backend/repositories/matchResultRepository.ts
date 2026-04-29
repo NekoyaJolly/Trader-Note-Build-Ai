@@ -1,4 +1,4 @@
-import { MatchResult, PrismaClient, TradeNote, MarketSnapshot, Prisma } from '@prisma/client';
+import type { MatchResult, PrismaClient, TradeNote, MarketSnapshot, Prisma } from '@prisma/client';
 import { prisma } from '../db/client';
 
 /**
@@ -128,7 +128,7 @@ export class MatchResultRepository {
     return this.prisma.matchResult.findMany({
       where: { id: { in: ids } },
       include: { note: true, marketSnapshot: true },
-    }) as Promise<MatchResultWithRelations[]>;
+    });
   }
 
   /**
@@ -172,7 +172,7 @@ export class MatchResultRepository {
     return this.prisma.matchResult.findUnique({
       where: { id },
       include: { note: true, marketSnapshot: true },
-    }) as Promise<MatchResultWithRelations | null>;
+    });
   }
 
   /**

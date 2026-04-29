@@ -13,7 +13,6 @@
  */
 
 import {
-  RevaluationJobManager,
   revaluationJobManager,
 } from '../../services/revaluationJobService';
 import { isRedisAvailable } from '../../config/queueConfig';

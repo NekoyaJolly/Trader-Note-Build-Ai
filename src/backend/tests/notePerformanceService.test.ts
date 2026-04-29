@@ -6,12 +6,6 @@
  */
 
 import { NotePerformanceService } from '../../services/performance/notePerformanceService';
-import {
-  NotePerformanceReport,
-  NoteRankingEntry,
-  HourlyPerformance,
-  MarketCondition,
-} from '../../services/performance/notePerformanceTypes';
 
 // Prisma モック
 const mockPrisma = {

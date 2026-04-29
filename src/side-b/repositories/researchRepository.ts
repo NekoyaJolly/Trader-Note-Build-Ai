@@ -14,9 +14,10 @@
  * - 期限切れ分析の削除
  */
 
-import { PrismaClient, MarketResearch, Prisma } from '@prisma/client';
+import type { PrismaClient, MarketResearch, Prisma } from '@prisma/client';
 import { prisma } from '../../backend/db/client';
-import { FeatureVector12D, OHLCVSnapshot, type MarketAnalysis, safeValidateMarketAnalysis, analysisToLegacyFeatureVector, safeValidateFeatureVector, createEmptyFeatureVector } from '../models';
+import type { FeatureVector12D, OHLCVSnapshot} from '../models';
+import { type MarketAnalysis, safeValidateMarketAnalysis, analysisToLegacyFeatureVector, safeValidateFeatureVector, createEmptyFeatureVector } from '../models';
 
 // ===========================================
 // 型定義
@@ -92,7 +93,7 @@ export class ResearchRepository {
       data: {
         symbol: input.symbol,
         timeframe: input.timeframe || 'multi',
-        featureVector: featureVectorData as unknown as Prisma.InputJsonValue,
+        featureVector: featureVectorData,
         ohlcvSnapshot: input.ohlcvSnapshot as unknown as Prisma.InputJsonValue,
         aiModel: input.aiModel,
         tokenUsage: input.tokenUsage,

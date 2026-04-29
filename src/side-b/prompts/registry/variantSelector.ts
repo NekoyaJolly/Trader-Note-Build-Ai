@@ -78,7 +78,7 @@ export function selectVariant(
     Math.floor(rand() * viable.length),
   );
   return {
-    selected: viable[idx]!,
+    selected: viable[idx],
     isExperimental: true,
     reason: `experimental sampled (viable=${viable.length})`,
   };

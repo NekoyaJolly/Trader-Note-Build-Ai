@@ -17,9 +17,11 @@ import type {
     EdgeHypothesis,
     ConsolidatedValidationReport,
 } from '../models/edgeHypothesis';
-import { EdgeLedger, edgeLedger as defaultEdgeLedger } from '../ledger/EdgeLedger';
+import type { EdgeLedger} from '../ledger/EdgeLedger';
+import { edgeLedger as defaultEdgeLedger } from '../ledger/EdgeLedger';
+import type {
+    StatusManager} from '../ledger/statusManager';
 import {
-    StatusManager,
     statusManager as defaultStatusManager,
     type PromoteCheck,
 } from '../ledger/statusManager';

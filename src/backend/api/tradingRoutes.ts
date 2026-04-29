@@ -11,7 +11,8 @@
  * - POST /api/trading/positions/:id/close - ポジション決済
  */
 
-import { Router, Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
 import { requireAuth } from '../../middleware/authMiddleware';
 import { CTraderAuthService } from '../services/ctrader/ctraderAuthService';
 import { CTraderProvider } from '../../infrastructure/market/CTraderProvider';

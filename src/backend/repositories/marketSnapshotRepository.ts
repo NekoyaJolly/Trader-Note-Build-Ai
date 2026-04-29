@@ -1,4 +1,4 @@
-import { Prisma, MarketSnapshot } from '@prisma/client';
+import type { Prisma, MarketSnapshot } from '@prisma/client';
 import { prisma } from '../db/client';
 
 export interface MarketSnapshotCreateInput {

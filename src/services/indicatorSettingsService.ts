@@ -13,10 +13,12 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import {
+import { z } from 'zod';
+import type {
   IndicatorConfig,
   IndicatorSet,
-  IndicatorId,
+  IndicatorId} from '../models/indicatorConfig';
+import {
   INDICATOR_METADATA,
   createDefaultIndicatorSet,
   validateIndicatorConfig,
@@ -24,6 +26,39 @@ import {
 
 // 設定ファイルのパス
 const SETTINGS_FILE = path.join(process.cwd(), 'data', 'indicator-settings.json');
+
+const IndicatorIdSchema = z.string().refine(
+  (s): s is IndicatorId => INDICATOR_METADATA.some((m) => m.id === s),
+  { message: '不正な indicatorId です' },
+);
+
+const IndicatorConfigJsonSchema = z.object({
+  configId: z.string(),
+  indicatorId: IndicatorIdSchema,
+  label: z.string().optional(),
+  params: z.record(z.string(), z.union([z.number(), z.undefined()])).default({}),
+  enabled: z.boolean(),
+});
+
+const IndicatorSetJsonSchema = z.object({
+  name: z.string(),
+  configs: z.array(IndicatorConfigJsonSchema),
+  createdAt: z.string().min(1),
+  updatedAt: z.string().min(1),
+});
+
+const UserIndicatorSettingsJsonSchema = z.object({
+  activeSet: IndicatorSetJsonSchema,
+  updatedAt: z.string().min(1),
+  hasCompletedSetup: z.boolean().optional(),
+});
+
+/** 保存失敗時に元エラーを cause へ載せる（ES2020 未満のためプロパティで付与） */
+function saveErrorWithCause(message: string, error: Error): Error {
+  const e = new Error(message);
+  (e as Error & { cause?: Error }).cause = error;
+  return e;
+}
 
 /**
  * ユーザーインジケーター設定の型
@@ -55,7 +90,7 @@ export class IndicatorSettingsService {
    * ユーザー設定を読み込む
    * ファイルが存在しない場合はデフォルト設定を返す
    */
-  async loadSettings(): Promise<UserIndicatorSettings> {
+  loadSettings(): UserIndicatorSettings {
     try {
       if (!fs.existsSync(SETTINGS_FILE)) {
         // ファイルが存在しない場合はデフォルト設定を返す
@@ -63,17 +98,26 @@ export class IndicatorSettingsService {
       }
 
       const content = fs.readFileSync(SETTINGS_FILE, 'utf-8');
-      const data = JSON.parse(content);
+      const parsed = UserIndicatorSettingsJsonSchema.safeParse(JSON.parse(content));
+      if (!parsed.success) {
+        console.error('インジケーター設定の形式エラー:', parsed.error.format());
+        return this.createDefaultSettings();
+      }
 
-      // 日付の復元
       return {
         activeSet: {
-          ...data.activeSet,
-          createdAt: new Date(data.activeSet.createdAt),
-          updatedAt: new Date(data.activeSet.updatedAt),
+          ...parsed.data.activeSet,
+          createdAt: new Date(parsed.data.activeSet.createdAt),
+          updatedAt: new Date(parsed.data.activeSet.updatedAt),
+          configs: parsed.data.activeSet.configs.map(
+            (c): IndicatorConfig => ({
+              ...c,
+              params: c.params,
+            }),
+          ),
         },
-        updatedAt: new Date(data.updatedAt),
-        hasCompletedSetup: data.hasCompletedSetup ?? false,
+        updatedAt: new Date(parsed.data.updatedAt),
+        hasCompletedSetup: parsed.data.hasCompletedSetup ?? false,
       };
     } catch (error) {
       console.error('インジケーター設定の読み込みエラー:', error);
@@ -84,7 +128,7 @@ export class IndicatorSettingsService {
   /**
    * ユーザー設定を保存
    */
-  async saveSettings(settings: UserIndicatorSettings): Promise<void> {
+  saveSettings(settings: UserIndicatorSettings): void {
     try {
       // data ディレクトリがなければ作成
       const dataDir = path.dirname(SETTINGS_FILE);
@@ -99,15 +143,16 @@ export class IndicatorSettingsService {
       fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8');
     } catch (error) {
       console.error('インジケーター設定の保存エラー:', error);
-      throw new Error('インジケーター設定の保存に失敗しました');
+      const cause = error instanceof Error ? error : new Error(String(error));
+      throw saveErrorWithCause('インジケーター設定の保存に失敗しました', cause);
     }
   }
 
   /**
    * 単一インジケーターの設定を追加または更新
    */
-  async upsertIndicatorConfig(request: SaveIndicatorConfigRequest): Promise<IndicatorConfig> {
-    const settings = await this.loadSettings();
+  upsertIndicatorConfig(request: SaveIndicatorConfigRequest): IndicatorConfig {
+    const settings = this.loadSettings();
 
     // メタデータを取得
     const metadata = INDICATOR_METADATA.find(m => m.id === request.indicatorId);
@@ -147,59 +192,59 @@ export class IndicatorSettingsService {
     // セットアップ完了フラグを更新
     settings.hasCompletedSetup = true;
 
-    await this.saveSettings(settings);
+    this.saveSettings(settings);
     return newConfig;
   }
 
   /**
    * インジケーター設定を削除（無効化）
    */
-  async removeIndicatorConfig(indicatorId: IndicatorId): Promise<void> {
-    const settings = await this.loadSettings();
+  removeIndicatorConfig(indicatorId: IndicatorId): void {
+    const settings = this.loadSettings();
 
     // 該当インジケーターを削除
     settings.activeSet.configs = settings.activeSet.configs.filter(
       c => c.indicatorId !== indicatorId
     );
 
-    await this.saveSettings(settings);
+    this.saveSettings(settings);
   }
 
   /**
    * インジケーター設定を有効/無効切り替え
    */
-  async toggleIndicatorConfig(indicatorId: IndicatorId, enabled: boolean): Promise<void> {
-    const settings = await this.loadSettings();
+  toggleIndicatorConfig(indicatorId: IndicatorId, enabled: boolean): void {
+    const settings = this.loadSettings();
 
     const config = settings.activeSet.configs.find(c => c.indicatorId === indicatorId);
     if (config) {
       config.enabled = enabled;
-      await this.saveSettings(settings);
+      this.saveSettings(settings);
     }
   }
 
   /**
    * アクティブな（有効化された）インジケーター設定のみ取得
    */
-  async getActiveConfigs(): Promise<IndicatorConfig[]> {
-    const settings = await this.loadSettings();
+  getActiveConfigs(): IndicatorConfig[] {
+    const settings = this.loadSettings();
     return settings.activeSet.configs.filter(c => c.enabled);
   }
 
   /**
    * セットアップが完了しているかチェック
    */
-  async hasCompletedSetup(): Promise<boolean> {
-    const settings = await this.loadSettings();
+  hasCompletedSetup(): boolean {
+    const settings = this.loadSettings();
     return settings.hasCompletedSetup;
   }
 
   /**
    * 設定をリセット（デフォルトに戻す）
    */
-  async resetToDefault(): Promise<UserIndicatorSettings> {
+  resetToDefault(): UserIndicatorSettings {
     const defaultSettings = this.createDefaultSettings();
-    await this.saveSettings(defaultSettings);
+    this.saveSettings(defaultSettings);
     return defaultSettings;
   }
 

@@ -66,8 +66,8 @@ function defaultBacktestPeriod(): { start: string; end: string } {
   const end = new Date();
   const start = new Date(end.getTime() - 365 * 24 * 60 * 60 * 1000);
   return {
-    start: start.toISOString().split('T')[0]!,
-    end: end.toISOString().split('T')[0]!,
+    start: start.toISOString().split('T')[0],
+    end: end.toISOString().split('T')[0],
   };
 }
 
@@ -181,13 +181,13 @@ export class StrategyBacktesterAgent {
       ] as const;
       const toolResults: ValidationToolResult[] = [];
       for (let i = 0; i < settled.length; i++) {
-        const s = settled[i]!;
+        const s = settled[i];
         if (s.status === 'fulfilled') {
           toolResults.push(s.value);
         } else {
           const err = s.reason instanceof Error ? s.reason.message : String(s.reason);
           toolResults.push({
-            toolName: toolNames[i]!,
+            toolName: toolNames[i],
             success: false,
             passed: false,
             metrics: {},

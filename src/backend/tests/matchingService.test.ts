@@ -10,9 +10,9 @@
  * - Service は NoteEvaluator.evaluate() を呼ぶだけ
  * - similarity を直接計算しない
  */
-import { describe, it, expect, beforeEach, jest } from '@jest/globals';
+import { describe, it, expect, beforeEach } from '@jest/globals';
 import { MatchingService } from '../../services/matchingService';
-import { TradeNote, MarketData } from '../../models/types';
+import type { TradeNote, MarketData } from '../../models/types';
 import { 
   createNoteEvaluatorFromFSNote, 
   convertMarketDataToSnapshot 

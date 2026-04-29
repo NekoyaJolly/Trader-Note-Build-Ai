@@ -18,7 +18,7 @@ export class DSLEvaluator {
     const results = group.conditions.map((c) =>
       'logic' in c
         ? this.evaluateConditions(c, snapshot, paramValues)
-        : this.evaluateLeaf(c as Condition, snapshot, paramValues),
+        : this.evaluateLeaf(c, snapshot, paramValues),
     );
     return group.logic === 'AND' ? results.every(Boolean) : results.some(Boolean);
   }

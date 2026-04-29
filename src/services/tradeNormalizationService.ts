@@ -13,8 +13,8 @@
  * - バリデーションエラーは修正方法を明示
  */
 
-import { Trade } from '../models/types';
-import { NormalizedTrade } from '../models/tradeDefinition';
+import type { Trade } from '../models/types';
+import type { NormalizedTrade } from '../models/tradeDefinition';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
@@ -406,8 +406,8 @@ export class TradeNormalizationService {
     const normalizedSide = this.normalizeSide(sideStr);
 
     return {
-      // timestamp は後で normalizeTradeData で Date に変換されるため、一時的に any を使用
-      timestamp: timestampStr ? new Date(timestampStr) : undefined as unknown as Date,
+      // timestamp は文字列が存在する場合のみ Date に変換し、存在しない場合は undefined を返す
+      timestamp: timestampStr ? new Date(timestampStr) : undefined,
       originalTimestamp: timestampStr,
       symbol: normalizedRow['symbol'] || normalizedRow['pair'] || normalizedRow['market'],
       originalSymbol: normalizedRow['symbol'] || normalizedRow['pair'] || normalizedRow['market'],

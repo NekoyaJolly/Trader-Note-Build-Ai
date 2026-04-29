@@ -10,7 +10,8 @@
  * - gpt-4o-miniの能力範囲内に収める
  */
 
-import { FeatureVector12D, validateFeatureVector } from './featureVector';
+import type { FeatureVector12D} from './featureVector';
+import { validateFeatureVector } from './featureVector';
 
 // ===========================================
 // 型定義（シンプル化）

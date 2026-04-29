@@ -50,6 +50,10 @@ interface MockDeps {
         execute: jest.Mock;
         getResult: jest.Mock;
     };
+    ohlcvRepo: {
+        findManyAsOHLCVData: jest.Mock;
+    };
+    fetchAndCache: jest.Mock;
 }
 
 function makeMocks(overrides?: Partial<MockDeps>): MockDeps {
@@ -70,16 +74,29 @@ function makeMocks(overrides?: Partial<MockDeps>): MockDeps {
             getResult: jest.fn(),
             ...(overrides?.backtestService ?? {}),
         },
+        ohlcvRepo: {
+            findManyAsOHLCVData: jest.fn().mockImplementation((filter: { orderBy?: 'asc' | 'desc' }) => {
+                const timestamp = filter.orderBy === 'desc'
+                    ? new Date('2099-01-01T00:00:00Z')
+                    : new Date('2000-01-01T00:00:00Z');
+                return Promise.resolve([{ timestamp, open: 1, high: 1, low: 1, close: 1, volume: 0 }]);
+            }),
+            ...(overrides?.ohlcvRepo ?? {}),
+        },
+        fetchAndCache: jest.fn().mockResolvedValue({ success: true, cachedCount: 0, source: 'ctrader' }),
+        ...(overrides?.fetchAndCache ? { fetchAndCache: overrides.fetchAndCache } : {}),
     };
 }
 
 function makeOrchestrator(deps: MockDeps) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    type ScreeningConstructorArgs = ConstructorParameters<typeof ScreeningOrchestrator>;
     return new ScreeningOrchestrator(
-        deps.materialization as any,
-        deps.edgeLedger as any,
+        deps.materialization as unknown as ScreeningConstructorArgs[0],
+        deps.edgeLedger as unknown as ScreeningConstructorArgs[1],
         new StatusManager(),
-        deps.backtestService as any,
+        deps.backtestService as unknown as ScreeningConstructorArgs[3],
+        deps.ohlcvRepo,
+        deps.fetchAndCache,
     );
 }
 
@@ -250,5 +267,89 @@ describe('ScreeningOrchestrator.runScreening', () => {
         await expect(makeOrchestrator(mocks).runScreening('missing')).rejects.toThrow(
             /not found/,
         );
+    });
+
+    it('OHLCVが不足している場合はBT前にcTrader基準シンボルで補完する', async () => {
+        const hyp = makeHypothesis({ symbols: ['XAU/USD'] });
+        const mocks = makeMocks({
+            ohlcvRepo: {
+                findManyAsOHLCVData: jest.fn()
+                    .mockResolvedValueOnce([])
+                    .mockResolvedValueOnce([])
+                    .mockImplementation((filter: { orderBy?: 'asc' | 'desc' }) => {
+                        const timestamp = filter.orderBy === 'desc'
+                            ? new Date('2099-01-01T00:00:00Z')
+                            : new Date('2000-01-01T00:00:00Z');
+                        return Promise.resolve([{ timestamp, open: 1, high: 1, low: 1, close: 1, volume: 0 }]);
+                    }),
+            },
+        });
+        mocks.edgeLedger.get.mockResolvedValue(hyp);
+        mocks.materialization.materializeForValidation.mockResolvedValue({
+            tradeNoteId: 'note-1',
+            tradeId: 'trade-1',
+            stopLossPercent: 0.5,
+            takeProfitPercent: 1.0,
+            pathUsed: 'legacy',
+        });
+        mocks.backtestService.execute.mockResolvedValue('run-fill');
+        mocks.backtestService.getResult.mockResolvedValue({
+            runId: 'run-fill',
+            status: 'completed',
+            setupCount: 30,
+            winCount: 18,
+            lossCount: 12,
+            timeoutCount: 0,
+            winRate: 0.6,
+            profitFactor: 1.6,
+            totalProfit: 300,
+            totalLoss: 187.5,
+            averagePnL: 3.75,
+            expectancy: 1.5,
+            maxDrawdown: 50,
+            events: [],
+        });
+
+        const result = await makeOrchestrator(mocks).runScreening(hyp.id);
+
+        expect(result.verdict).toBe('screening_passed');
+        expect(mocks.fetchAndCache).toHaveBeenCalledWith(
+            'XAUUSD',
+            '15m',
+            expect.any(Date),
+            expect.any(Date),
+        );
+        expect(mocks.backtestService.execute).toHaveBeenCalled();
+    });
+
+    it('OHLCV補完に失敗した場合はnot_testableとして記録する', async () => {
+        const hyp = makeHypothesis();
+        const mocks = makeMocks({
+            ohlcvRepo: {
+                findManyAsOHLCVData: jest.fn().mockResolvedValue([]),
+            },
+            fetchAndCache: jest.fn().mockResolvedValue({
+                success: false,
+                cachedCount: 0,
+                error: 'cTrader token expired',
+            }),
+        });
+        mocks.edgeLedger.get.mockResolvedValue(hyp);
+        mocks.materialization.materializeForValidation.mockResolvedValue({
+            tradeNoteId: 'note-1',
+            tradeId: 'trade-1',
+            stopLossPercent: 0.5,
+            takeProfitPercent: 1.0,
+            pathUsed: 'legacy',
+        });
+
+        const result = await makeOrchestrator(mocks).runScreening(hyp.id);
+
+        expect(result.verdict).toBe('not_testable');
+        expect(mocks.edgeLedger.markNotTestable).toHaveBeenCalledWith(
+            hyp.id,
+            expect.stringContaining('OHLCV補完失敗'),
+        );
+        expect(mocks.backtestService.execute).not.toHaveBeenCalled();
     });
 });

@@ -8,7 +8,8 @@
  * - POST /api/push/test - テスト通知送信
  */
 
-import { Router, Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
 import { WebPushService } from '../services/webPushService';
 import { requireAuth } from '../../middleware/authMiddleware';
 import { getPrismaClient } from '../../infrastructure/prismaClient';

@@ -249,7 +249,7 @@ export class DSLBacktestAdapter {
 
     const count = Math.max(1, Math.min(sampleCount ?? 8, 32));
     const results: Array<{ params: Record<string, number>; aggregate: DslBacktestAggregate }> = [];
-    const hasV2 = keys.some((k) => isParameterRangeV2(dsl.parameters[k]!));
+    const hasV2 = keys.some((k) => isParameterRangeV2(dsl.parameters[k]));
 
     // Phase 6.7b: 明示 range の全組み合わせ（500 通り超は enumerate 内で例外）
     if (samplingStrategy === 'grid' && hasV2) {
@@ -266,7 +266,7 @@ export class DSLBacktestAdapter {
       for (let i = 0; i < count; i++) {
         const params: Record<string, number> = { ...base };
         for (const k of keys) {
-          const def = dsl.parameters[k]!;
+          const def = dsl.parameters[k];
           if (isParameterRangeV2(def)) {
             const vals = valuesForParameterField(k, def);
             const pick = vals[Math.floor(Math.random() * Math.max(1, vals.length))] ?? def.default;
@@ -286,8 +286,8 @@ export class DSLBacktestAdapter {
 
     // grid レガシー（v2 なし）: 最初の2パラメータを二等分グリッド
     if (keys.length === 1) {
-      const k0 = keys[0]!;
-      const def0 = dsl.parameters[k0]!;
+      const k0 = keys[0];
+      const def0 = dsl.parameters[k0];
       if (!isLegacyParameterDef(def0)) {
         const aggregate = await this.runBacktest(dsl, base, period);
         return [{ params: base, aggregate }];
@@ -304,10 +304,10 @@ export class DSLBacktestAdapter {
       return results;
     }
 
-    const k0 = keys[0]!;
-    const k1 = keys[1]!;
-    const d0 = dsl.parameters[k0]!;
-    const d1 = dsl.parameters[k1]!;
+    const k0 = keys[0];
+    const k1 = keys[1];
+    const d0 = dsl.parameters[k0];
+    const d1 = dsl.parameters[k1];
     if (!isLegacyParameterDef(d0) || !isLegacyParameterDef(d1)) {
       const aggregate = await this.runBacktest(dsl, base, period);
       return [{ params: base, aggregate }];

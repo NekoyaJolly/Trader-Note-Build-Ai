@@ -7,8 +7,8 @@
  * - 条件の検証
  */
 
-import { PrismaClient, StrategyStatus, StrategyDirection } from '@prisma/client';
-import { v4 as uuidv4 } from 'uuid';
+import type { StrategyStatus, StrategyDirection } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -382,7 +382,7 @@ export async function updateStrategy(id: string, input: UpdateStrategyInput): Pr
   const needsNewVersion = input.entryConditions || input.exitSettings || input.entryTiming;
 
   // トランザクションで更新
-  const result = await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx) => {
     // ストラテジー本体を更新
     const updateData: {
       name?: string;

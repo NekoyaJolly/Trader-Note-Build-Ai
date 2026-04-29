@@ -32,17 +32,13 @@
 
 import { isFXMarketOpen, getMarketStatusJST } from '../utils/marketHours';
 import {
-  monitorEntryConditions,
-  monitorPositions,
   createTradeFromPlan,
   expirePendingTrades,
-  type MonitoringResult,
 } from '../services/virtualTradeService';
 import {
   verifyTradeState,
   summarizeVerificationResult,
   type MinuteOHLCV,
-  type TradeVerificationResult,
 } from '../services/tradeVerificationService';
 import { generateNoteFromTrade } from '../services/aiNoteService';
 import { agentMemory } from '../agent/agentMemory';
@@ -66,7 +62,6 @@ import { calculatePnL, type CloseVirtualTradeInput, type TradeDirection, type Ex
 import { AIOrchestrator } from '../orchestrator/aiOrchestrator';
 import { MarketDataService } from '../../services/marketDataService';
 import { CTraderAuthService } from '../../backend/services/ctrader/ctraderAuthService';
-import { config } from '../../config';
 import type { OHLCVData } from '../../services/indicators/indicatorService';
 import { pdcaLoop } from '../agent';
 import { PrismaClient } from '@prisma/client';
@@ -82,6 +77,7 @@ import {
   runPromptEvolutionCycle,
   type PromptEvolutionResult,
 } from '../prompts/registry/promptEvolutionJob';
+import type { JsonValue } from '../../utils/jsonValue';
 
 // ===========================================
 // 型定義
@@ -183,7 +179,7 @@ const DEFAULT_CONFIG: SideBSchedulerConfig = {
 export interface JobResult {
   success: boolean;
   message: string;
-  data?: unknown;
+  data?: JsonValue;
 }
 
 /**
@@ -301,7 +297,7 @@ export class SideBScheduler {
       this.marketDataService.configureCTrader(accountId, authService);
       this.log('cTrader データソースを有効化しました');
     } catch (error) {
-      this.log(`cTrader データソース設定エラー（Twelve Dataで続行）: ${error}`);
+      this.log(`cTrader データソース設定エラー（Twelve Dataで続行）: ${String(error)}`);
     }
   }
 
@@ -850,7 +846,7 @@ export class SideBScheduler {
     this.log(`[Evolution] 進化ループ開始: ${regimes.length} レジーム, 期間 ${defaultPeriod.start}〜${defaultPeriod.end}`);
 
     for (let i = 0; i < regimes.length; i++) {
-      const regime = regimes[i]!;
+      const regime = regimes[i];
       try {
         const report = await loop.runOneGeneration(regime);
         n++;
@@ -905,7 +901,7 @@ export class SideBScheduler {
       );
       this.lastDiscoveryRun = new Date();
     } catch (err) {
-      this.addError(`[Discovery] 失敗: ${err instanceof Error ? err.message : err}`);
+      this.addError(`[Discovery] 失敗: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -1264,7 +1260,7 @@ export class SideBScheduler {
             this.log(`[${symbol}] 執行足 ${insertCount}本をDBに保存`);
           }
         } catch (persistError) {
-          this.log(`[${symbol}] 執行足DB保存エラー（AI処理は続行）: ${persistError}`);
+          this.log(`[${symbol}] 執行足DB保存エラー（AI処理は続行）: ${String(persistError)}`);
         }
 
         // 2. 上位足OHLCVデータ取得（MTF分析用）
@@ -1311,11 +1307,11 @@ export class SideBScheduler {
                 this.log(`[${symbol}] 上位足 ${insertCount}本をDBに保存`);
               }
             } catch (persistError) {
-              this.log(`[${symbol}] 上位足DB保存エラー（AI処理は続行）: ${persistError}`);
+              this.log(`[${symbol}] 上位足DB保存エラー（AI処理は続行）: ${String(persistError)}`);
             }
           }
         } catch (htfError) {
-          this.log(`[${symbol}] 上位足取得失敗（単一TFで続行）: ${htfError}`);
+          this.log(`[${symbol}] 上位足取得失敗（単一TFで続行）: ${String(htfError)}`);
         }
 
         // 3. オーケストレーターでプラン生成（Research → Plan + MTF）

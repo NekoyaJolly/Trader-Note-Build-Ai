@@ -9,15 +9,17 @@
  * 参照: docs/phase-next/ml-pattern-recognition.md
  */
 
-import { Router, Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
 import { z } from 'zod';
 import { PrismaClient } from '@prisma/client';
-import {
-  patternAnalysisService,
+import type {
   PatternAnalysisInput,
   AnomalyDetectionInput,
   FeatureVector,
-  WinningPattern,
+  WinningPattern} from '../services/patternAnalysisService';
+import {
+  patternAnalysisService
 } from '../services/patternAnalysisService';
 
 const router = Router();
@@ -74,13 +76,6 @@ const AnomalyDetectionRequestSchema = z.object({
     recentPrice: z.number().optional(),
     timeframe: z.string().optional(),
   }).optional(),
-});
-
-/** ストラテジーからパターン抽出リクエスト */
-const ExtractPatternsRequestSchema = z.object({
-  strategyId: z.string().uuid(),
-  minWinRate: z.number().min(0).max(1).optional().default(0.5),
-  limit: z.number().min(1).max(20).optional().default(10),
 });
 
 // ============================================

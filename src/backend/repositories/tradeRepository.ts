@@ -1,4 +1,4 @@
-import { Prisma, Trade as PrismaTrade } from '@prisma/client';
+import type { Prisma, Trade as PrismaTrade } from '@prisma/client';
 import { prisma } from '../db/client';
 
 export interface TradeCreateInput {

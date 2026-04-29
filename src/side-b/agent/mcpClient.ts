@@ -128,7 +128,7 @@ export class McpClientManager {
         this.cachedTools = result.tools.map((tool) => ({
             name: tool.name,
             description: tool.description || '',
-            inputSchema: tool.inputSchema as McpToolDefinition['inputSchema'],
+            inputSchema: tool.inputSchema,
         }));
 
         console.log(`[McpClient] Discovered ${this.cachedTools.length} tools: ${this.cachedTools.map((t) => t.name).join(', ')}`);

@@ -12,11 +12,15 @@
  * 重要: Phase3 の判定ロジックが読みやすいよう、分かりやすさを優先する
  */
 
-import { Trade, TradeSide } from '@prisma/client';
+import type { Trade} from '@prisma/client';
+import { TradeSide } from '@prisma/client';
 import { TradeNoteRepository } from '../../backend/repositories/tradeNoteRepository';
-import { AISummaryService, TradeDataForSummary } from '../aiSummaryService';
-import { FeatureExtractor, MarketContext, FeatureVector } from './featureExtractor';
-import { DecisionInferenceService, DecisionInferenceResult } from '../inference/decisionInferenceService';
+import type { TradeDataForSummary } from '../aiSummaryService';
+import { AISummaryService } from '../aiSummaryService';
+import type { MarketContext} from './featureExtractor';
+import { FeatureExtractor, FeatureVector } from './featureExtractor';
+import type { DecisionInferenceResult } from '../inference/decisionInferenceService';
+import { DecisionInferenceService } from '../inference/decisionInferenceService';
 
 /**
  * ノート生成結果
@@ -195,7 +199,7 @@ export class TradeNoteGeneratorService {
   ): TradeDataForSummary {
     return {
       symbol: trade.symbol,
-      side: trade.side as 'buy' | 'sell',
+      side: trade.side,
       price: Number(trade.price),
       quantity: Number(trade.quantity),
       timestamp: trade.timestamp,

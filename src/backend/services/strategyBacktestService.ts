@@ -7,27 +7,31 @@
  * - 損益計算、パフォーマンス指標の算出
  */
 
-import { PrismaClient, BacktestOutcome } from '@prisma/client';
+import type { BacktestOutcome } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
-import { getStrategy, StrategyDetail } from './strategyService';
+import type { StrategyDetail } from './strategyService';
+import { getStrategy } from './strategyService';
+import type {
+  BacktestTradeEvent as BaseBacktestTradeEvent,
+  BacktestResultSummary,
+  TradeSide} from './backtestCalculations';
 import {
   calculatePnl,
   calculateSummary,
-  createEmptySummary,
-  BacktestTradeEvent as BaseBacktestTradeEvent,
-  BacktestResultSummary,
-  TradeSide,
+  createEmptySummary
 } from './backtestCalculations';
-import {
-  evaluateCondition,
-  evaluateConditionGroup,
+import type {
   EvaluationContext,
   ConditionGroup,
   IndicatorCondition,
   OHLCV,
   LogicalOperator,
   ComparisonOperator,
-  CandlePatternId,
+  CandlePatternId} from './strategyConditionEvaluator';
+import {
+  evaluateCondition,
+  evaluateConditionGroup
 } from './strategyConditionEvaluator';
 import { CTraderDataService } from './ctrader/ctraderDataService';
 import { CTraderAuthService } from './ctrader/ctraderAuthService';
@@ -436,7 +440,7 @@ export async function runBacktest(request: BacktestRequest): Promise<BacktestRes
     }
 
     // 使用するシンボル（リクエストで指定されていれば上書き）
-    const effectiveSymbol = (request.symbol?.trim() || strategy.symbol) as string;
+    const effectiveSymbol = (request.symbol?.trim() || strategy.symbol);
     if (!effectiveSymbol) {
       throw new Error('シンボルが指定されていません');
     }
@@ -548,10 +552,14 @@ async function executeBacktestStage(
       patterns: [],
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `analysis-engine に接続できません。Docker Compose で analysis-engine を起動しているか、ANALYSIS_ENGINE_URL を確認してください。詳細: ${message}`
+    const messageText = error instanceof Error ? error.message : String(error);
+    const wrapped = new Error(
+      `analysis-engine に接続できません。Docker Compose で analysis-engine を起動しているか、ANALYSIS_ENGINE_URL を確認してください。詳細: ${messageText}`
     );
+    if (error instanceof Error) {
+      (wrapped as Error & { cause?: Error }).cause = error;
+    }
+    throw wrapped;
   }
 
   const indicatorCache = new Map<string, number[]>();
@@ -805,7 +813,7 @@ async function executeBacktestStage(
         const ticketId = uuidv4();
         // direction=both の場合、現時点のバックテストは片側のみを実行（暫定: buy）
         // 理由: 条件JSONに「買い用/売り用」を分ける仕様が未導入のため
-        const entrySide: TradeSide = (strategy.side === 'both' ? 'buy' : strategy.side) as TradeSide;
+        const entrySide: TradeSide = (strategy.side === 'both' ? 'buy' : strategy.side);
         openPositions.set(ticketId, {
           ticketId,
           entryPrice,
@@ -918,16 +926,8 @@ function checkExit(
 
   // TP/SL ヒット判定
   // 同一バー内でTP/SL両方ヒットする場合はSL優先（保守的）
-  let tpHit = false;
-  let slHit = false;
-
-  if (side === 'buy') {
-    tpHit = bar.high >= tpPrice;
-    slHit = bar.low <= slPrice;
-  } else {
-    tpHit = bar.low <= tpPrice;
-    slHit = bar.high >= slPrice;
-  }
+  const tpHit = side === 'buy' ? bar.high >= tpPrice : bar.low <= tpPrice;
+  const slHit = side === 'buy' ? bar.low <= slPrice : bar.high >= slPrice;
 
   // 同一バーで両方ヒット → SL優先（保守的判定）
   if (slHit && tpHit) {
@@ -1064,7 +1064,7 @@ export async function getBacktestResult(runId: string): Promise<BacktestResult |
 
   // トレードイベントを先に構築
   // direction=both は現時点では片側のみ表示（暫定: buy）
-  const side: TradeSide = (run.strategy.side === 'both' ? 'buy' : run.strategy.side) as TradeSide;
+  const side: TradeSide = (run.strategy.side === 'both' ? 'buy' : run.strategy.side);
   const trades: BacktestTradeEvent[] = run.events.map(e => {
     const entryPrice = e.entryPrice.toNumber();
     const exitPrice = e.exitPrice?.toNumber() || 0;
@@ -1151,7 +1151,7 @@ export async function getBacktestHistory(
 
   return runs.map(run => {
     // トレードイベントを構築
-    const side: TradeSide = (run.strategy.side === 'both' ? 'buy' : run.strategy.side) as TradeSide;
+    const side: TradeSide = (run.strategy.side === 'both' ? 'buy' : run.strategy.side);
     const trades: BacktestTradeEvent[] = run.events.map(e => {
       const entryPrice = e.entryPrice.toNumber();
       const exitPrice = e.exitPrice?.toNumber() || 0;

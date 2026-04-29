@@ -8,10 +8,11 @@
  * - データカバレッジチェック API
  */
 
-import { Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import { getValidatedQuery } from '../../middleware/validateRequest';
-import { BacktestService, BacktestParams, BacktestSummary } from '../../services/backtestService';
-import { checkDataCoverage, CoverageCheckResult } from '../services/strategyBacktestService';
+import type { BacktestParams} from '../../services/backtestService';
+import { BacktestService } from '../../services/backtestService';
+import { checkDataCoverage } from '../services/strategyBacktestService';
 
 /**
  * バックテスト実行リクエストボディ

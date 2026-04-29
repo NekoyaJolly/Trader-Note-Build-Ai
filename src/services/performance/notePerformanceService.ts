@@ -11,9 +11,9 @@
  * @see src/services/performance/notePerformanceTypes.ts
  */
 
-import { PrismaClient, EvaluationLog } from '@prisma/client';
+import type { PrismaClient, EvaluationLog } from '@prisma/client';
 import { prisma } from '../../backend/db/client';
-import {
+import type {
   NotePerformanceReport,
   NoteRankingEntry,
   HourlyPerformance,

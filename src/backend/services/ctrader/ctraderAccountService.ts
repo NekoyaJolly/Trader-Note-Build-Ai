@@ -15,7 +15,7 @@
 
 import { EventEmitter } from 'events';
 import { z } from 'zod';
-import { CTraderProvider, CTraderMessageType } from '../../../infrastructure/market/CTraderProvider';
+import type { CTraderProvider} from '../../../infrastructure/market/CTraderProvider';
 import { 
   AccountInfoResponseSchema,
   PositionResponseSchema,
@@ -24,6 +24,7 @@ import type {
   AccountInfoResponse,
   PositionResponse,
 } from '../../../schemas/api/trading';
+import type { JsonValue } from '../../../utils/jsonValue';
 
 // ========================================
 // cTrader API レスポンス用Zodスキーマ
@@ -73,7 +74,6 @@ const CTraderReconcileResponseSchema = z.object({
 });
 
 type CTraderPosition = z.infer<typeof CTraderPositionSchema>;
-type CTraderReconcileResponse = z.infer<typeof CTraderReconcileResponseSchema>;
 
 interface SubscribeToUpdatesOptions {
   intervalMs?: number;
@@ -201,7 +201,7 @@ export class CTraderAccountService extends EventEmitter {
    * 新規注文を作成
    */
   async createOrder(input: CreateOrderInput): Promise<void> {
-    const payload: Record<string, unknown> = {
+    const payload: Record<string, JsonValue | undefined> = {
       ctidTraderAccountId: parseInt(this.accountId, 10),
       symbolId: this.resolveSymbolId(input.symbol),
       orderType: 1, // 1: MARKET
@@ -226,7 +226,7 @@ export class CTraderAccountService extends EventEmitter {
    * 既存注文を更新
    */
   async updateOrder(orderId: string, input: UpdateOrderInput): Promise<void> {
-    const payload: Record<string, unknown> = {
+    const payload: Record<string, JsonValue | undefined> = {
       ctidTraderAccountId: parseInt(this.accountId, 10),
       orderId: parseInt(orderId, 10),
     };
@@ -261,7 +261,7 @@ export class CTraderAccountService extends EventEmitter {
    * ポジションを決済
    */
   async closePosition(positionId: string, volume?: number): Promise<void> {
-    const payload: Record<string, unknown> = {
+    const payload: Record<string, JsonValue | undefined> = {
       ctidTraderAccountId: parseInt(this.accountId, 10),
       positionId: parseInt(positionId, 10),
     };

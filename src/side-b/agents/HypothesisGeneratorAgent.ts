@@ -34,6 +34,7 @@ import { selectVariant, type RandomGenerator } from '../prompts/registry/variant
 import { getScoringFunction } from '../prompts/abtest/scoringFunctions';
 import type { PromptVersion } from '../prompts/registry/types';
 import { extractJson } from './llmJsonExtract';
+import type { JsonValue } from '../../utils/jsonValue';
 
 // ===========================================
 // 型定義
@@ -64,12 +65,12 @@ const PHASE_4B_ALLOWED_SL_TYPES: StopLossSpec['type'][] = ['atr_multiple'];
  */
 const PHASE_4B_ALLOWED_TP_TYPES: TakeProfitSpec['type'][] = ['atr_multiple', 'rr_ratio'];
 
-function validateRiskManagement(raw: unknown): DefaultRiskManagement | undefined {
+function validateRiskManagement(raw: JsonValue | undefined): DefaultRiskManagement | undefined {
     if (!raw || typeof raw !== 'object') return undefined;
-    const r = raw as Record<string, unknown>;
+    const r = raw as Record<string, JsonValue | undefined>;
 
-    const sl = r.stopLoss as Record<string, unknown> | undefined;
-    const tp = r.takeProfit as Record<string, unknown> | undefined;
+    const sl = r.stopLoss as Record<string, JsonValue | undefined> | undefined;
+    const tp = r.takeProfit as Record<string, JsonValue | undefined> | undefined;
     if (!sl || !tp) return undefined;
 
     // Phase 4b 制限: 許容外の type は無視（呼び出し側で DEFAULT 補完）
@@ -112,14 +113,14 @@ export interface HypothesisGeneratorInput {
      * 渡されない場合、従来通りレンズ特徴量だけを参照する(後方互換)。
      */
     specialistAnalyses?: {
-        trend?: unknown;
-        oscillator?: unknown;
-        volatilityVolume?: unknown;
+        trend?: object;
+        oscillator?: object;
+        volatilityVolume?: object;
     };
     /**
      * Phase 6.7c: Discovery 週次レポート等からの探索ヒント（任意。未指定なら従来通り）
      */
-    discoveryHints?: unknown;
+    discoveryHints?: JsonValue;
 }
 
 export interface HypothesisGeneratorResult {
@@ -133,13 +134,13 @@ export interface HypothesisGeneratorResult {
 // ===========================================
 
 export function validateHypothesisGeneratorOutput(
-    data: unknown,
+    data: JsonValue,
     snapshot: LensFeatureSnapshot,
 ): HypothesisGeneratorOutput {
     if (!data || typeof data !== 'object') {
         throw new Error('HypothesisGenerator output must be an object');
     }
-    const obj = data as Record<string, unknown>;
+    const obj = data as Record<string, JsonValue | undefined>;
 
     if (!Array.isArray(obj.hypotheses)) {
         throw new Error('hypotheses must be an array');
@@ -147,13 +148,14 @@ export function validateHypothesisGeneratorOutput(
 
     const availableLenses = new Set(snapshot.features.keys());
 
-    const hypotheses = (obj.hypotheses as unknown[]).map((raw, idx) => {
-        const h = raw as Record<string, unknown>;
+    const hypotheses = obj.hypotheses.map((raw, idx) => {
+        const h = raw as Record<string, JsonValue | undefined>;
         if (typeof h.statement !== 'string' || h.statement.length < 10) {
             throw new Error(`hypotheses[${idx}]: invalid statement`);
         }
         if (!isEdgeCategory(h.category)) {
-            throw new Error(`hypotheses[${idx}]: invalid category=${String(h.category)}`);
+            const categoryText = typeof h.category === 'object' ? JSON.stringify(h.category) : String(h.category);
+            throw new Error(`hypotheses[${idx}]: invalid category=${categoryText}`);
         }
         if (
             h.expectedDirection !== 'long' &&
@@ -169,7 +171,7 @@ export function validateHypothesisGeneratorOutput(
             throw new Error(`hypotheses[${idx}]: conditions must be 2-5 items`);
         }
 
-        const conditions = (h.conditions as unknown[]).map(validateCondition);
+        const conditions = h.conditions.map(validateCondition);
         // 架空のレンズが指定されていないかチェック
         for (const c of conditions) {
             if (!availableLenses.has(c.lensName)) {
@@ -182,7 +184,7 @@ export function validateHypothesisGeneratorOutput(
         const lensRelevance =
             h.lensRelevance && typeof h.lensRelevance === 'object'
                 ? Object.fromEntries(
-                      Object.entries(h.lensRelevance as Record<string, unknown>)
+                      Object.entries(h.lensRelevance as Record<string, JsonValue | undefined>)
                           .filter(([, v]) => typeof v === 'number')
                           .map(([k, v]) => [k, Math.max(0, Math.min(1, v as number))]),
                   )
@@ -190,11 +192,17 @@ export function validateHypothesisGeneratorOutput(
 
         const defaultRiskManagement = validateRiskManagement(h.defaultRiskManagement);
 
+        const expectedDirection: 'long' | 'short' | 'either' =
+            h.expectedDirection === 'short'
+                ? 'short'
+                : h.expectedDirection === 'either'
+                  ? 'either'
+                  : 'long';
         return {
-            statement: h.statement as string,
-            category: h.category as EdgeCategory,
-            expectedDirection: h.expectedDirection as 'long' | 'short' | 'either',
-            reasoning: h.reasoning as string,
+            statement: h.statement,
+            category: h.category,
+            expectedDirection,
+            reasoning: h.reasoning,
             conditions,
             ...(defaultRiskManagement ? { defaultRiskManagement } : {}),
             ...(lensRelevance ? { lensRelevance } : {}),
@@ -358,7 +366,7 @@ export class HypothesisGeneratorAgent {
         active: PromptVersion | null;
         experimentals: PromptVersion[];
     }> {
-        let active: PromptVersion | null = null;
+        let active: PromptVersion | null;
         try {
             active = await this.registry.getActive('hypothesis_generator');
         } catch (err) {
@@ -584,7 +592,7 @@ ${existingDump}
     private async callAI(
         systemPrompt: string,
         userPrompt: string,
-    ): Promise<{ content: unknown; tokenUsage: number; model: string }> {
+    ): Promise<{ content: JsonValue; tokenUsage: number; model: string }> {
         const response = await fetch(`${this.baseURL}/chat/completions`, {
             method: 'POST',
             headers: {

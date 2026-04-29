@@ -13,7 +13,7 @@ import {
   tradeDefinitionService,
 } from '../../services/tradeDefinitionService';
 import { createDefaultIndicatorSet } from '../../models/indicatorConfig';
-import { Trade } from '../../models/types';
+import type { Trade } from '../../models/types';
 
 describe('TradeDefinitionService', () => {
   let service: TradeDefinitionService;

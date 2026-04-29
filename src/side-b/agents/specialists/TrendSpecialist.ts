@@ -24,6 +24,7 @@ import {
 } from './specialistCommon';
 import type { PromptRegistry } from '../../prompts/registry/PromptRegistry';
 import type { RandomGenerator } from '../../prompts/registry/variantSelector';
+import type { JsonValue } from '../../../utils/jsonValue';
 
 const TREND_RELEVANT_LENSES = ['dow_theory', 'current_analysis'];
 
@@ -63,7 +64,7 @@ export class TrendSpecialist {
       scoringInput: input,
       validate: (raw) => {
         if (!raw || typeof raw !== 'object') return null;
-        return this.validate(raw as Record<string, unknown>);
+        return this.validate(raw as Record<string, JsonValue | undefined>);
       },
       registry: this.deps.registry,
       rand: this.deps.rand,
@@ -85,7 +86,7 @@ ${lensDump}
 上記を見て、システムプロンプトのスキーマに従った JSON オブジェクトだけを返してください。`;
   }
 
-  private validate(raw: Record<string, unknown>): TrendAnalysis {
+  private validate(raw: Record<string, JsonValue | undefined>): TrendAnalysis {
     const trendState = pickEnum(raw.trendState, TREND_STATES, 'ranging');
     const trendStrength = clampNumber(raw.trendStrength, 0, 1, 0);
     const trendMaturity = pickEnum(raw.trendMaturity, TREND_MATURITIES, 'middle');
@@ -106,15 +107,15 @@ ${lensDump}
   }
 }
 
-function extractKeyLevels(raw: unknown): { support: number[]; resistance: number[] } {
+function extractKeyLevels(raw: JsonValue | undefined): { support: number[]; resistance: number[] } {
   if (!raw || typeof raw !== 'object') return { support: [], resistance: [] };
-  const r = raw as Record<string, unknown>;
+  const r = raw as Record<string, JsonValue | undefined>;
   const support = extractNumberArray(r.support);
   const resistance = extractNumberArray(r.resistance);
   return { support, resistance };
 }
 
-function extractNumberArray(x: unknown): number[] {
+function extractNumberArray(x: JsonValue | undefined): number[] {
   if (!Array.isArray(x)) return [];
   return x.filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
 }

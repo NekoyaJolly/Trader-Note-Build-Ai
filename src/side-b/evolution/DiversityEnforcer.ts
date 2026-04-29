@@ -34,8 +34,8 @@ export class DiversityEnforcer {
     const pairs: Array<[string, string]> = [];
     for (let i = 0; i < strategies.length; i++) {
       for (let j = i + 1; j < strategies.length; j++) {
-        if (this.similarity(strategies[i]!, strategies[j]!) >= threshold) {
-          pairs.push([strategies[i]!.id, strategies[j]!.id]);
+        if (this.similarity(strategies[i], strategies[j]) >= threshold) {
+          pairs.push([strategies[i].id, strategies[j].id]);
         }
       }
     }
@@ -49,7 +49,7 @@ export class DiversityEnforcer {
     let n = 0;
     for (let i = 0; i < strategies.length; i++) {
       for (let j = i + 1; j < strategies.length; j++) {
-        sum += this.similarity(strategies[i]!, strategies[j]!);
+        sum += this.similarity(strategies[i], strategies[j]);
         n++;
       }
     }

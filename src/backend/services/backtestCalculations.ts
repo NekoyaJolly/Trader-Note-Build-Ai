@@ -323,29 +323,36 @@ function incompleteBeta(a: number, b: number, x: number): number {
 }
 
 /**
+ * Stirling 近似用係数（モジュール読み込み時に1回だけ Number 化）
+ * 理由: eslint no-loss-of-precision を満たしつつ、gammaLn 呼び出しごとの文字列パースを避ける
+ */
+const GAMMA_LN_COEFFS = [
+  Number('76.18009172947146'),
+  Number('-86.50532032941677'),
+  Number('24.01409824083091'),
+  Number('-1.231739572450155'),
+  Number('0.001208650973866179'),
+  Number('-0.000005395239384953'),
+] as const;
+
+const GAMMA_LN_SER_INIT = Number('1.000000000190015');
+const GAMMA_LN_SQRT_2PI = Number('2.5066282746310005');
+
+/**
  * log(Gamma(x)) の近似（Stirling近似）
  */
 function gammaLn(x: number): number {
-  const coefficients = [
-    76.18009172947146,
-    -86.50532032941677,
-    24.01409824083091,
-    -1.231739572450155,
-    0.001208650973866179,
-    -0.000005395239384953,
-  ];
-  
   let y = x;
   let tmp = x + 5.5;
   tmp -= (x + 0.5) * Math.log(tmp);
-  
-  let ser = 1.000000000190015;
-  for (let j = 0; j < 6; j++) {
+
+  let ser = GAMMA_LN_SER_INIT;
+  for (let j = 0; j < GAMMA_LN_COEFFS.length; j++) {
     y += 1;
-    ser += coefficients[j] / y;
+    ser += GAMMA_LN_COEFFS[j] / y;
   }
-  
-  return -tmp + Math.log(2.5066282746310005 * ser / x);
+
+  return -tmp + Math.log(GAMMA_LN_SQRT_2PI * ser / x);
 }
 
 /**

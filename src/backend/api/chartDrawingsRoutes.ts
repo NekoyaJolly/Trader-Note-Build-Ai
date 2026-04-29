@@ -1,5 +1,6 @@
-import { Router, Request, Response } from "express";
-import { Prisma } from "@prisma/client";
+import type { Request, Response } from "express";
+import { Router } from "express";
+import type { Prisma } from "@prisma/client";
 import { requireAuth } from "../../middleware/authMiddleware";
 import { getPrismaClient } from "../../infrastructure/prismaClient";
 import {

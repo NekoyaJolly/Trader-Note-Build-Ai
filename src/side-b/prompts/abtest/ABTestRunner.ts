@@ -21,6 +21,7 @@ import type {
   ScoringFunction,
   VariantExecutor,
 } from './types';
+import type { JsonValue } from '../../../utils/jsonValue';
 import { PromptRegistry } from '../registry/PromptRegistry';
 
 /** 勝者判定の閾値: 最高スコアが 2 位スコアの 1.15 倍以上なら勝者。 */
@@ -41,7 +42,7 @@ export interface ABTestRunnerOptions {
   persist?: boolean;
 }
 
-export class ABTestRunner<TInput = unknown, TOutput = unknown> {
+export class ABTestRunner<TInput = JsonValue, TOutput = JsonValue> {
   private readonly registry: PromptRegistry;
   private readonly prisma: PrismaClient;
   private readonly persist: boolean;
@@ -103,10 +104,19 @@ export class ABTestRunner<TInput = unknown, TOutput = unknown> {
           const durationMs = Date.now() - start;
           return {
             promptVersionId: v!.id,
-            output: undefined as unknown as TOutput,
             score: 0,
             durationMs,
-            error: err instanceof Error ? err.message : String(err),
+            error: formatCaughtValue(
+              err as
+                | object
+                | string
+                | number
+                | boolean
+                | bigint
+                | symbol
+                | null
+                | undefined,
+            ),
           } satisfies AbVariantResult<TOutput>;
         }
       }),
@@ -117,10 +127,19 @@ export class ABTestRunner<TInput = unknown, TOutput = unknown> {
       // Promise.allSettled 配下のラッパー自体は例外を投げない設計だが念のため
       return {
         promptVersionId: '',
-        output: undefined as unknown as TOutput,
         score: 0,
         durationMs: 0,
-        error: String(s.reason),
+        error: formatCaughtValue(
+          s.reason as
+            | object
+            | string
+            | number
+            | boolean
+            | bigint
+            | symbol
+            | null
+            | undefined,
+        ),
       };
     });
 
@@ -151,26 +170,30 @@ export class ABTestRunner<TInput = unknown, TOutput = unknown> {
     result: AbTestResult<TOutput>,
     input: TInput,
   ): Promise<void> {
+    const inputPayload = JSON.parse(JSON.stringify({ input })) as object;
     const digest = crypto
       .createHash('sha256')
-      .update(safeStringify(input))
+      .update(digestStringify(inputPayload))
       .digest('hex')
       .slice(0, 32);
     await this.prisma.promptAbTestResult.create({
       data: {
         agentName,
         variantIds: result.variants.map((v) => v.promptVersionId),
-        variantResults: result.variants.map((v) => ({
-          promptVersionId: v.promptVersionId,
-          score: v.score,
-          durationMs: v.durationMs,
-          error: v.error,
-          outputDigest: crypto
-            .createHash('sha256')
-            .update(safeStringify(v.output))
-            .digest('hex')
-            .slice(0, 32),
-        })),
+        variantResults: result.variants.map((v) => {
+          const outputPayload = JSON.parse(JSON.stringify({ output: v.output })) as object;
+          return {
+            promptVersionId: v.promptVersionId,
+            score: v.score,
+            durationMs: v.durationMs,
+            error: v.error,
+            outputDigest: crypto
+              .createHash('sha256')
+              .update(digestStringify(outputPayload))
+              .digest('hex')
+              .slice(0, 32),
+          };
+        }),
         winnerVersionId: result.winnerVersionId,
         inputDigest: digest,
       },
@@ -215,12 +238,29 @@ function determineWinner<TOutput>(
   };
 }
 
-function safeStringify(v: unknown): string {
-  if (v === undefined) return 'undefined';
+function formatCaughtValue(
+  value: object | string | number | boolean | bigint | symbol | null | undefined,
+): string {
+  if (value instanceof Error) return value.message;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value);
+  }
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return '[object]';
+    }
+  }
+  return String(value);
+}
+
+function digestStringify(value: object): string {
   try {
-    const s = JSON.stringify(v);
-    return s ?? String(v);
+    return JSON.stringify(value);
   } catch {
-    return String(v);
+    return '[unserializable]';
   }
 }

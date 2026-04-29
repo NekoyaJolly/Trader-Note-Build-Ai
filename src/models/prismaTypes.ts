@@ -15,8 +15,8 @@
  * - 境界でのキャスト関数を提供
  */
 
-import { Prisma, NoteStatus, NotificationStatus } from '@prisma/client';
-import { MarketContext } from './types';
+import type { Prisma} from '@prisma/client';
+import type { MarketContext } from './types';
 
 // === 基本的な JSON 値の型（re-export）===
 
@@ -90,7 +90,7 @@ export interface MatchReasons {
  * MatchReasons を Prisma 互換 JSON に変換
  */
 export function toMatchReasonsJson(reasons: MatchReasons): Prisma.InputJsonValue {
-  const result: Record<string, unknown> = {
+  const result: Record<string, Prisma.InputJsonValue> = {
     messages: reasons.messages,
   };
   if (reasons.breakdown !== undefined && reasons.breakdown !== null) {
@@ -101,7 +101,7 @@ export function toMatchReasonsJson(reasons: MatchReasons): Prisma.InputJsonValue
       totalScore: reasons.breakdown.totalScore,
     };
   }
-  return result as Prisma.InputJsonValue;
+  return result;
 }
 
 // === 通知関連の型 ===
@@ -149,7 +149,7 @@ export interface StoredMarketContext {
  * MarketContext を Prisma 互換 JSON に変換
  */
 export function toMarketContextJson(ctx: MarketContext | StoredMarketContext): Prisma.InputJsonValue {
-  const result: Record<string, unknown> = {
+  const result: Record<string, Prisma.InputJsonValue> = {
     timeframe: ctx.timeframe,
     trend: ctx.trend,
   };
@@ -171,7 +171,7 @@ export function toMarketContextJson(ctx: MarketContext | StoredMarketContext): P
     }
     result.calculatedIndicators = cleanCalc;
   }
-  return result as Prisma.InputJsonValue;
+  return result;
 }
 
 // === 型ガード関数 ===
@@ -179,29 +179,29 @@ export function toMarketContextJson(ctx: MarketContext | StoredMarketContext): P
 /**
  * 値が MatchReasons 型かどうかを判定
  */
-export function isMatchReasons(value: unknown): value is MatchReasons {
+export function isMatchReasons(value: Prisma.JsonValue | MatchReasons | null | undefined): value is MatchReasons {
   if (typeof value !== 'object' || value === null) {
     return false;
   }
-  const obj = value as Record<string, unknown>;
+  const obj = value as Record<string, Prisma.JsonValue | undefined>;
   return Array.isArray(obj.messages);
 }
 
 /**
  * 値が StoredMarketContext 型かどうかを判定
  */
-export function isStoredMarketContext(value: unknown): value is StoredMarketContext {
+export function isStoredMarketContext(value: Prisma.JsonValue | StoredMarketContext | null | undefined): value is StoredMarketContext {
   if (typeof value !== 'object' || value === null) {
     return false;
   }
-  const obj = value as Record<string, unknown>;
+  const obj = value as Record<string, Prisma.JsonValue | undefined>;
   return typeof obj.timeframe === 'string' && typeof obj.trend === 'string';
 }
 
 /**
  * JSON 値を安全に MatchReasons に変換
  */
-export function toMatchReasons(value: unknown): MatchReasons {
+export function toMatchReasons(value: Prisma.JsonValue | MatchReasons | null | undefined): MatchReasons {
   if (isMatchReasons(value)) {
     return value;
   }
@@ -212,7 +212,7 @@ export function toMatchReasons(value: unknown): MatchReasons {
 /**
  * JSON 値を安全に MarketContext に変換
  */
-export function toMarketContext(value: unknown): MarketContext {
+export function toMarketContext(value: Prisma.JsonValue | StoredMarketContext | null | undefined): MarketContext {
   if (isStoredMarketContext(value)) {
     return {
       timeframe: value.timeframe,

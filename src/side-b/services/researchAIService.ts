@@ -18,8 +18,8 @@ import {
   validateMarketAnalysis,
   analysisToLegacyFeatureVector,
 } from '../models/marketAnalysis';
-import type { ResearchAIOutput } from '../models/marketResearch';
-import { OHLCVSnapshot, calculateExpiryDate } from '../models/marketResearch';
+import type { ResearchAIOutput , OHLCVSnapshot} from '../models/marketResearch';
+import { calculateExpiryDate } from '../models/marketResearch';
 import { getRelevantIndicatorContext } from '../knowledge';
 
 // ===========================================

@@ -16,45 +16,46 @@
  * 4. 結果を返却
  */
 
-import { v4 as uuidv4 } from 'uuid';
-import {
+import type {
   ResearchAIService,
-  researchAIService,
   ResearchAIInput,
   PlanAIService,
-  planAIService,
   PlanAIInput,
   UserTradingPreferences,
+  IndicatorData,
 } from '../services';
 import {
+  researchAIService,
+  planAIService
+} from '../services';
+import type {
   ResearchRepository,
-  researchRepository,
   MarketResearchWithTypes,
   PlanRepository,
-  planRepository,
-  AITradePlanWithTypes,
-} from '../repositories';
+  AITradePlanWithTypes} from '../repositories';
 import {
-  MarketResearch,
-  AITradePlan,
-  GenerateResearchResponse,
-  GeneratePlanResponse,
-  AITradeScenario,
-} from '../models';
-import { buildHigherTFContext } from '../knowledge';
+  researchRepository,
+  planRepository
+} from '../repositories';
+import type {
+  AITradeScenario} from '../models';
+import {
+  buildHigherTFContext
+} from '../knowledge';
 import type { HigherTimeframeContext } from '../knowledge';
-import { DevilsAdvocateAgent, devilsAdvocateAgent } from '../agents/DevilsAdvocateAgent';
+import type { DevilsAdvocateAgent} from '../agents/DevilsAdvocateAgent';
+import { devilsAdvocateAgent } from '../agents/DevilsAdvocateAgent';
 import {
   defaultLensAggregator,
   registerDefaultLenses,
-  serializeLensSnapshot,
   type LensFeatureSnapshot,
 } from '../lenses';
 import { agentMemory } from '../agent/agentMemory';
 import { edgeLedger } from '../ledger';
 import { decideExistingPlanAction } from './existingPlanDecision';
+import type {
+  HypothesisGeneratorAgent} from '../agents/HypothesisGeneratorAgent';
 import {
-  HypothesisGeneratorAgent,
   hypothesisGeneratorAgent,
 } from '../agents/HypothesisGeneratorAgent';
 import type { EdgeHypothesis } from '../models/edgeHypothesis';
@@ -62,8 +63,9 @@ import {
   runAllSpecialists,
   type SpecialistBundle,
 } from '../agents/specialists';
+import type {
+  StrategyBacktesterAgent} from '../agents/StrategyBacktesterAgent';
 import {
-  StrategyBacktesterAgent,
   strategyBacktesterAgent,
   type StrategyBacktesterRunResult,
 } from '../agents/StrategyBacktesterAgent';
@@ -86,7 +88,7 @@ export interface OrchestratorResearchRequest {
   symbol: string;
   timeframe?: string;
   ohlcvData: { timestamp: Date; open: number; high: number; low: number; close: number; volume?: number }[];
-  indicators?: Record<string, unknown>;
+  indicators?: IndicatorData;
   forceRefresh?: boolean;
 }
 
@@ -99,13 +101,13 @@ export interface OrchestratorPlanRequest {
   researchId?: string;
   userPreferences?: UserTradingPreferences;
   ohlcvData?: { timestamp: Date; open: number; high: number; low: number; close: number; volume?: number }[];
-  indicators?: Record<string, unknown>;
+  indicators?: IndicatorData;
   forceRefresh?: boolean;
   /** 上位足データ（MTF分析用、オプショナル） */
   higherTFData?: {
     timeframe: string;
     ohlcvData: { timestamp: Date; open: number; high: number; low: number; close: number; volume?: number }[];
-    indicators?: Record<string, unknown>;
+    indicators?: IndicatorData;
   };
 }
 
@@ -185,7 +187,7 @@ export class AIOrchestrator {
         symbol,
         timeframe,
         ohlcvData,
-        indicators: indicators as ResearchAIInput['indicators'],
+        indicators: indicators,
       };
 
       const aiResult = await this.researchAI.generateResearch(aiInput);
@@ -260,7 +262,6 @@ export class AIOrchestrator {
 
       // 2. リサーチ取得または生成
       let research: MarketResearchWithTypes | null = null;
-      let researchCached = false;
       let researchTokens = 0;
 
       if (researchId) {
@@ -272,7 +273,6 @@ export class AIOrchestrator {
             error: `Research not found: ${researchId}`,
           };
         }
-        researchCached = true;
       } else {
         // リサーチ生成
         if (!ohlcvData || ohlcvData.length === 0) {
@@ -296,7 +296,6 @@ export class AIOrchestrator {
         }
 
         research = researchResult.data;
-        researchCached = researchResult.cached || false;
         researchTokens = researchResult.tokenUsage || 0;
       }
 
@@ -309,7 +308,7 @@ export class AIOrchestrator {
             symbol,
             timeframe: higherTFData.timeframe,
             ohlcvData: higherTFData.ohlcvData,
-            indicators: higherTFData.indicators as ResearchAIInput['indicators'],
+            indicators: higherTFData.indicators,
           });
           higherTFContext = buildHigherTFContext(
             higherTFData.timeframe,
@@ -529,7 +528,7 @@ export class AIOrchestrator {
   async runFullPipeline(request: {
     symbol: string;
     ohlcvData: { timestamp: Date; open: number; high: number; low: number; close: number; volume?: number }[];
-    indicators?: Record<string, unknown>;
+    indicators?: IndicatorData;
     userPreferences?: UserTradingPreferences;
     forceRefresh?: boolean;
   }): Promise<{

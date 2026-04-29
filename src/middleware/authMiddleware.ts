@@ -5,9 +5,10 @@
  * 保護されたルートへのアクセスを制御
  */
 
-import { Request, Response, NextFunction } from 'express';
-import { UserRole } from '@prisma/client';
-import { sessionService, SessionPayload } from '../backend/services/auth/sessionService';
+import type { Request, Response, NextFunction } from 'express';
+import type { UserRole } from '@prisma/client';
+import type { SessionPayload } from '../backend/services/auth/sessionService';
+import { sessionService } from '../backend/services/auth/sessionService';
 import { getPrismaClient } from '../infrastructure/prismaClient';
 
 // Express のリクエスト型を拡張して user プロパティを追加

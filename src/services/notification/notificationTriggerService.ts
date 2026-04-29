@@ -1,4 +1,5 @@
-import { NotificationLogRepository, CooldownCheckResult } from '../../backend/repositories/notificationLogRepository';
+import type { CooldownCheckResult } from '../../backend/repositories/notificationLogRepository';
+import { NotificationLogRepository } from '../../backend/repositories/notificationLogRepository';
 
 export interface NotificationTriggerInput {
   matchScore: number;

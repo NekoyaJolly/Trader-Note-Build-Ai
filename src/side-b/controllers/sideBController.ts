@@ -22,14 +22,12 @@
  * - PUT /api/side-b/portfolio/settings - ポートフォリオ設定更新
  */
 
-import { Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import { getValidatedQuery } from '../../middleware/validateRequest';
 import {
   aiOrchestrator,
   researchRepository,
   planRepository,
-  MarketResearchWithTypes,
-  AITradePlanWithTypes,
 } from '..';
 import {
   createTradeFromPlan,
@@ -47,13 +45,168 @@ import {
   getOrCreateDefaultPortfolio,
   updatePortfolioSettings,
 } from '../repositories';
-import type { ExitReason, UpdatePortfolioSettings } from '../models';
+import type { UpdatePortfolioSettings } from '../models';
 import { MarketDataService } from '../../services/marketDataService';
 import { getSideBScheduler, type SideBSchedulerConfig } from '../jobs/sideBScheduler';
 import { pdcaLoop, agentMemory, type PDCALoopConfig } from '../agent';
+import { z } from 'zod';
+import { getNumberParam } from '../../utils/requestHelpers';
+import {
+  SchedulerConfigSchema,
+  SchedulerSummaryPeriodSchema,
+  summarySchedulerService,
+} from '../services/summarySchedulerService';
 
 // MarketDataService インスタンス（OHLCV自動取得用）
 const marketDataService = new MarketDataService();
+
+const IndicatorDataSchema = z
+  .object({
+    rsi: z.number().optional(),
+    macd: z
+      .object({
+        value: z.number(),
+        signal: z.number(),
+        histogram: z.number(),
+      })
+      .optional(),
+    sma20: z.number().optional(),
+    sma50: z.number().optional(),
+    sma200: z.number().optional(),
+    ema20: z.number().optional(),
+    atr: z.number().optional(),
+    bbUpper: z.number().optional(),
+    bbLower: z.number().optional(),
+    bbMiddle: z.number().optional(),
+  })
+  .passthrough();
+
+const OhlcvBarInputSchema = z
+  .object({
+    timestamp: z.string().min(1).refine((s) => !Number.isNaN(Date.parse(s))),
+    open: z.coerce.number(),
+    high: z.coerce.number(),
+    low: z.coerce.number(),
+    close: z.coerce.number(),
+    volume: z.coerce.number().optional(),
+  })
+  .transform((d) => ({
+    ...d,
+    timestamp: new Date(d.timestamp),
+  }));
+
+const GenerateResearchBodySchema = z
+  .object({
+    symbol: z.string().min(1),
+    timeframe: z.string().min(1).default('15m'),
+    ohlcvData: z.array(OhlcvBarInputSchema).optional(),
+    indicators: IndicatorDataSchema.optional(),
+    forceRefresh: z.boolean().optional().default(false),
+  })
+  .strict();
+
+const UserTradingPreferencesSchema = z
+  .object({
+    preferredDirection: z.enum(['long', 'short', 'both']).optional(),
+    maxRiskPips: z.number().optional(),
+    minRiskReward: z.number().optional(),
+    tradingStyle: z.enum(['scalping', 'daytrading', 'swing']).optional(),
+  })
+  .strict();
+
+const GeneratePlanBodySchema = z
+  .object({
+    symbol: z.string().min(1),
+    targetDate: z.string().optional(),
+    researchId: z.string().uuid().optional(),
+    userPreferences: UserTradingPreferencesSchema.optional(),
+    ohlcvData: z.array(OhlcvBarInputSchema).optional(),
+    indicators: IndicatorDataSchema.optional(),
+    timeframe: z.string().min(1).default('15m'),
+    forceRefresh: z.boolean().optional().default(false),
+  })
+  .strict();
+
+const RunPipelineBodySchema = z
+  .object({
+    symbol: z.string().min(1),
+    ohlcvData: z.array(OhlcvBarInputSchema).min(1),
+    indicators: IndicatorDataSchema.optional(),
+    userPreferences: UserTradingPreferencesSchema.optional(),
+    forceRefresh: z.boolean().optional().default(false),
+  })
+  .strict();
+
+const CreateVirtualTradeBodySchema = z
+  .object({
+    planId: z.string().uuid(),
+    scenarioId: z.string().optional(),
+  })
+  .strict();
+
+const ExitReasonSchema = z.enum([
+  'take_profit',
+  'stop_loss',
+  'manual',
+  'invalidation',
+  'end_of_day',
+  'trailing_stop',
+]);
+
+const CloseVirtualTradeBodySchema = z
+  .object({
+    exitPrice: z.coerce.number(),
+    reason: ExitReasonSchema.optional(),
+    note: z.string().optional(),
+  })
+  .strict();
+
+const AiNoteSummaryGenerateSchema = z
+  .object({
+    period: z.enum(['daily', 'weekly', 'monthly']),
+    startDate: z.string().min(1),
+    endDate: z.string().min(1),
+  })
+  .strict();
+
+const SideBSchedulerUpdateSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    symbols: z.array(z.string()).optional(),
+    timeframe: z.string().optional(),
+    monitorIntervalMs: z.number().int().positive().optional(),
+    dailyPlanTimeUTC: z.string().optional(),
+    autoGenerateNote: z.boolean().optional(),
+  })
+  .strict();
+
+const StartAgentBodySchema = z
+  .object({
+    symbols: z.array(z.string()).optional(),
+    normalIntervalMs: z.number().int().positive().optional(),
+    activeIntervalMs: z.number().int().positive().optional(),
+    positionIntervalMs: z.number().int().positive().optional(),
+  })
+  .strict();
+
+const GenerateSideBSummaryBodySchema = z
+  .object({
+    period: SchedulerSummaryPeriodSchema,
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
+  })
+  .strict();
+
+const SummarySchedulerConfigPartialSchema = SchedulerConfigSchema.partial().strict();
+
+const UpdatePortfolioSettingsSchema = z
+  .object({
+    maxOpenPositions: z.number().int().min(1).max(10).optional(),
+    riskPercentPerTrade: z.number().min(0).max(100).optional(),
+    enableSpread: z.boolean().optional(),
+    spreadPips: z.number().min(0).optional(),
+  })
+  .strict();
 
 export class SideBController {
   // ===========================================
@@ -68,18 +221,17 @@ export class SideBController {
    */
   generateResearch = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { symbol, timeframe = '15m', ohlcvData, indicators, forceRefresh } = req.body;
-
-      // バリデーション
-      if (!symbol) {
-        res.status(400).json({ error: 'symbol は必須です' });
+      const parsedBody = GenerateResearchBodySchema.safeParse(req.body ?? {});
+      if (!parsedBody.success) {
+        res.status(400).json({ error: 'リクエストが不正です', details: parsedBody.error.format() });
         return;
       }
+      const { symbol, timeframe, ohlcvData: bodyOhlcv, indicators, forceRefresh } = parsedBody.data;
 
       let parsedOhlcv: Array<{ timestamp: Date; open: number; high: number; low: number; close: number; volume?: number }>;
 
       // OHLCVデータが提供されていない場合は自動取得
-      if (!ohlcvData || !Array.isArray(ohlcvData) || ohlcvData.length === 0) {
+      if (!bodyOhlcv || bodyOhlcv.length === 0) {
         console.log(`[SideBController] ohlcvData未提供のため、${symbol}/${timeframe} のデータを自動取得します`);
 
         const historicalData = await marketDataService.getHistoricalData(symbol, timeframe, 100);
@@ -100,11 +252,7 @@ export class SideBController {
 
         console.log(`[SideBController] ${parsedOhlcv.length}件のOHLCVデータを取得しました`);
       } else {
-        // OHLCVデータの変換（timestampをDateに）
-        parsedOhlcv = ohlcvData.map((d: { timestamp: string | Date; open: number; high: number; low: number; close: number; volume?: number }) => ({
-          ...d,
-          timestamp: new Date(d.timestamp),
-        }));
+        parsedOhlcv = bodyOhlcv;
       }
 
       const result = await aiOrchestrator.generateResearch({
@@ -112,7 +260,7 @@ export class SideBController {
         timeframe,
         ohlcvData: parsedOhlcv,
         indicators,
-        forceRefresh: forceRefresh || false,
+        forceRefresh,
       });
 
       if (!result.success) {
@@ -168,14 +316,14 @@ export class SideBController {
       }>(res);
 
       const researches = await researchRepository.findMany({
-        symbol: symbol as string | undefined,
+        symbol: symbol,
         validOnly: validOnly === 'true',
-        limit: limit ? parseInt(limit as string, 10) : undefined,
-        offset: offset ? parseInt(offset as string, 10) : undefined,
+        limit: limit ? parseInt(limit, 10) : undefined,
+        offset: offset ? parseInt(offset, 10) : undefined,
       });
 
       const total = await researchRepository.count({
-        symbol: symbol as string | undefined,
+        symbol: symbol,
         validOnly: validOnly === 'true',
       });
 
@@ -183,8 +331,8 @@ export class SideBController {
         success: true,
         researches,
         total,
-        limit: limit ? parseInt(limit as string, 10) : 50,
-        offset: offset ? parseInt(offset as string, 10) : 0,
+        limit: limit ? parseInt(limit, 10) : 50,
+        offset: offset ? parseInt(offset, 10) : 0,
       });
     } catch (error) {
       console.error('[SideBController] listResearch error:', error);
@@ -238,19 +386,27 @@ export class SideBController {
    */
   generatePlan = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { symbol, targetDate, researchId, userPreferences, ohlcvData, indicators, timeframe = '15m', forceRefresh } = req.body;
-
-      // バリデーション
-      if (!symbol) {
-        res.status(400).json({ error: 'symbol は必須です' });
+      const parsedBody = GeneratePlanBodySchema.safeParse(req.body ?? {});
+      if (!parsedBody.success) {
+        res.status(400).json({ error: 'リクエストが不正です', details: parsedBody.error.format() });
         return;
       }
+      const {
+        symbol,
+        targetDate,
+        researchId,
+        userPreferences,
+        ohlcvData: bodyOhlcv,
+        indicators,
+        timeframe,
+        forceRefresh,
+      } = parsedBody.data;
 
       let parsedOhlcv: Array<{ timestamp: Date; open: number; high: number; low: number; close: number; volume?: number }> | undefined;
 
       // researchIdがない場合はohlcvDataが必要（自動取得可能）
       if (!researchId) {
-        if (!ohlcvData || !Array.isArray(ohlcvData) || ohlcvData.length === 0) {
+        if (!bodyOhlcv || bodyOhlcv.length === 0) {
           console.log(`[SideBController] ohlcvData未提供のため、${symbol}/${timeframe} のデータを自動取得します`);
 
           const historicalData = await marketDataService.getHistoricalData(symbol, timeframe, 100);
@@ -271,11 +427,7 @@ export class SideBController {
 
           console.log(`[SideBController] ${parsedOhlcv.length}件のOHLCVデータを取得しました`);
         } else {
-          // OHLCVデータの変換
-          parsedOhlcv = ohlcvData.map((d: { timestamp: string | Date; open: number; high: number; low: number; close: number; volume?: number }) => ({
-            ...d,
-            timestamp: new Date(d.timestamp),
-          }));
+          parsedOhlcv = bodyOhlcv;
         }
       }
 
@@ -286,7 +438,7 @@ export class SideBController {
         userPreferences,
         ohlcvData: parsedOhlcv,
         indicators,
-        forceRefresh: forceRefresh || false,
+        forceRefresh,
       });
 
       if (!result.success) {
@@ -350,26 +502,26 @@ export class SideBController {
       }>(res);
 
       const plans = await planRepository.findMany({
-        symbol: symbol as string | undefined,
-        targetDate: targetDate ? new Date(targetDate as string) : undefined,
-        fromDate: fromDate ? new Date(fromDate as string) : undefined,
-        toDate: toDate ? new Date(toDate as string) : undefined,
-        limit: limit ? parseInt(limit as string, 10) : undefined,
-        offset: offset ? parseInt(offset as string, 10) : undefined,
+        symbol: symbol,
+        targetDate: targetDate ? new Date(targetDate) : undefined,
+        fromDate: fromDate ? new Date(fromDate) : undefined,
+        toDate: toDate ? new Date(toDate) : undefined,
+        limit: limit ? parseInt(limit, 10) : undefined,
+        offset: offset ? parseInt(offset, 10) : undefined,
       });
 
       const total = await planRepository.count({
-        symbol: symbol as string | undefined,
-        fromDate: fromDate ? new Date(fromDate as string) : undefined,
-        toDate: toDate ? new Date(toDate as string) : undefined,
+        symbol: symbol,
+        fromDate: fromDate ? new Date(fromDate) : undefined,
+        toDate: toDate ? new Date(toDate) : undefined,
       });
 
       res.json({
         success: true,
         plans,
         total,
-        limit: limit ? parseInt(limit as string, 10) : 50,
-        offset: offset ? parseInt(offset as string, 10) : 0,
+        limit: limit ? parseInt(limit, 10) : 50,
+        offset: offset ? parseInt(offset, 10) : 0,
       });
     } catch (error) {
       console.error('[SideBController] listPlans error:', error);
@@ -412,31 +564,19 @@ export class SideBController {
    */
   runPipeline = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { symbol, ohlcvData, indicators, userPreferences, forceRefresh } = req.body;
-
-      // バリデーション
-      if (!symbol) {
-        res.status(400).json({ error: 'symbol は必須です' });
+      const parsedBody = RunPipelineBodySchema.safeParse(req.body ?? {});
+      if (!parsedBody.success) {
+        res.status(400).json({ error: 'リクエストが不正です', details: parsedBody.error.format() });
         return;
       }
-
-      if (!ohlcvData || !Array.isArray(ohlcvData) || ohlcvData.length === 0) {
-        res.status(400).json({ error: 'ohlcvData は必須です（配列）' });
-        return;
-      }
-
-      // OHLCVデータの変換
-      const parsedOhlcv = ohlcvData.map((d: { timestamp: string | Date; open: number; high: number; low: number; close: number; volume?: number }) => ({
-        ...d,
-        timestamp: new Date(d.timestamp),
-      }));
+      const { symbol, ohlcvData: parsedOhlcv, indicators, userPreferences, forceRefresh } = parsedBody.data;
 
       const result = await aiOrchestrator.runFullPipeline({
         symbol,
         ohlcvData: parsedOhlcv,
         indicators,
         userPreferences,
-        forceRefresh: forceRefresh || false,
+        forceRefresh,
       });
 
       if (!result.success) {
@@ -492,12 +632,12 @@ export class SideBController {
    */
   createVirtualTrade = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { planId, scenarioId } = req.body;
-
-      if (!planId) {
-        res.status(400).json({ error: 'planId は必須です' });
+      const parsedBody = CreateVirtualTradeBodySchema.safeParse(req.body ?? {});
+      if (!parsedBody.success) {
+        res.status(400).json({ error: 'リクエストが不正です', details: parsedBody.error.format() });
         return;
       }
+      const { planId, scenarioId } = parsedBody.data;
 
       const result = await createTradeFromPlan(planId, scenarioId);
 
@@ -531,15 +671,15 @@ export class SideBController {
 
       // statusをVirtualTradeStatus型にキャスト（バリデーション省略）
       const validStatuses = ['pending', 'open', 'closed', 'expired', 'cancelled', 'invalidated'];
-      const statusFilter = status && validStatuses.includes(status as string)
+      const statusFilter = status && validStatuses.includes(status)
         ? status as 'pending' | 'open' | 'closed' | 'expired' | 'cancelled' | 'invalidated'
         : undefined;
 
       const trades = await listTrades({
         status: statusFilter,
-        planId: planId as string | undefined,
-        symbol: symbol as string | undefined,
-        limit: limit ? parseInt(limit as string, 10) : undefined,
+        planId: planId,
+        symbol: symbol,
+        limit: limit ? parseInt(limit, 10) : undefined,
       });
 
       res.json({
@@ -582,17 +722,17 @@ export class SideBController {
   closeVirtualTrade = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const { exitPrice, reason, note } = req.body;
-
-      if (!exitPrice || typeof exitPrice !== 'number') {
-        res.status(400).json({ error: 'exitPrice は必須です（数値）' });
+      const parsedBody = CloseVirtualTradeBodySchema.safeParse(req.body ?? {});
+      if (!parsedBody.success) {
+        res.status(400).json({ error: 'リクエストが不正です', details: parsedBody.error.format() });
         return;
       }
+      const { exitPrice, reason, note } = parsedBody.data;
 
       const trade = await closeTradeManually(
         id,
         exitPrice,
-        (reason as ExitReason) || 'manual',
+        reason ?? 'manual',
         note,
       );
 
@@ -655,13 +795,12 @@ export class SideBController {
    */
   updatePortfolioSettings = async (req: Request, res: Response): Promise<void> => {
     try {
-      const settings: UpdatePortfolioSettings = req.body;
-
-      // 簡易バリデーション
-      if (settings.maxOpenPositions !== undefined && (settings.maxOpenPositions < 1 || settings.maxOpenPositions > 10)) {
-        res.status(400).json({ error: 'maxOpenPositions は 1-10 の範囲です' });
+      const parsedBody = UpdatePortfolioSettingsSchema.safeParse(req.body ?? {});
+      if (!parsedBody.success) {
+        res.status(400).json({ error: 'リクエストが不正です', details: parsedBody.error.format() });
         return;
       }
+      const settings: UpdatePortfolioSettings = parsedBody.data;
 
       const portfolio = await getOrCreateDefaultPortfolio();
       const updated = await updatePortfolioSettings(portfolio.id, settings);
@@ -694,17 +833,17 @@ export class SideBController {
 
       // outcomeのバリデーション
       const validOutcomes = ['win', 'loss', 'breakeven'];
-      const outcomeFilter = outcome && validOutcomes.includes(outcome as string)
+      const outcomeFilter = outcome && validOutcomes.includes(outcome)
         ? outcome as 'win' | 'loss' | 'breakeven'
         : undefined;
 
       const result = await aiNoteService.listNotes({
-        from: from as string | undefined,
-        to: to as string | undefined,
+        from: from,
+        to: to,
         outcome: outcomeFilter,
-        symbol: symbol as string | undefined,
-        limit: limit ? parseInt(limit as string, 10) : 20,
-        offset: offset ? parseInt(offset as string, 10) : 0,
+        symbol: symbol,
+        limit: limit ? parseInt(limit, 10) : 20,
+        offset: offset ? parseInt(offset, 10) : 0,
       });
 
       res.json({
@@ -755,14 +894,14 @@ export class SideBController {
 
       // periodのバリデーション
       const validPeriods = ['daily', 'weekly', 'monthly'];
-      const periodFilter = period && validPeriods.includes(period as string)
+      const periodFilter = period && validPeriods.includes(period)
         ? period as 'daily' | 'weekly' | 'monthly'
         : undefined;
 
       const result = await aiNoteService.listSummaries({
         period: periodFilter,
-        limit: limit ? parseInt(limit as string, 10) : 10,
-        offset: offset ? parseInt(offset as string, 10) : 0,
+        limit: limit ? parseInt(limit, 10) : 10,
+        offset: offset ? parseInt(offset, 10) : 0,
       });
 
       res.json({
@@ -782,25 +921,14 @@ export class SideBController {
    */
   generateAINoteSummary = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { period, startDate, endDate } = req.body;
-
-      // バリデーション
-      const validPeriods = ['daily', 'weekly', 'monthly'];
-      if (!period || !validPeriods.includes(period)) {
-        res.status(400).json({ error: 'period は daily/weekly/monthly のいずれかです' });
+      const parsedBody = AiNoteSummaryGenerateSchema.safeParse(req.body ?? {});
+      if (!parsedBody.success) {
+        res.status(400).json({ error: 'リクエストが不正です', details: parsedBody.error.format() });
         return;
       }
+      const { period, startDate, endDate } = parsedBody.data;
 
-      if (!startDate || !endDate) {
-        res.status(400).json({ error: 'startDate と endDate は必須です' });
-        return;
-      }
-
-      const summary = await aiNoteService.generateSummary(
-        period as 'daily' | 'weekly' | 'monthly',
-        startDate,
-        endDate
-      );
+      const summary = await aiNoteService.generateSummary(period, startDate, endDate);
 
       res.json({ success: true, summary });
     } catch (error) {
@@ -817,7 +945,7 @@ export class SideBController {
    * GET /api/side-b/scheduler/status
    * スケジューラーの状態を取得
    */
-  getSchedulerStatus = async (_req: Request, res: Response): Promise<void> => {
+  getSchedulerStatus = (_req: Request, res: Response): void => {
     try {
       const scheduler = getSideBScheduler();
       const status = scheduler.getStatus();
@@ -832,7 +960,7 @@ export class SideBController {
    * POST /api/side-b/scheduler/start
    * スケジューラーを開始
    */
-  startScheduler = async (_req: Request, res: Response): Promise<void> => {
+  startScheduler = (_req: Request, res: Response): void => {
     try {
       const scheduler = getSideBScheduler();
       scheduler.updateConfig({ enabled: true });
@@ -850,7 +978,7 @@ export class SideBController {
    * POST /api/side-b/scheduler/stop
    * スケジューラーを停止
    */
-  stopScheduler = async (_req: Request, res: Response): Promise<void> => {
+  stopScheduler = (_req: Request, res: Response): void => {
     try {
       const scheduler = getSideBScheduler();
       scheduler.stop();
@@ -868,17 +996,14 @@ export class SideBController {
    * PUT /api/side-b/scheduler/config
    * スケジューラー設定を更新
    */
-  updateSchedulerConfig = async (req: Request, res: Response): Promise<void> => {
+  updateSchedulerConfig = (req: Request, res: Response): void => {
     try {
-      const { enabled, symbols, timeframe, monitorIntervalMs, dailyPlanTimeUTC, autoGenerateNote } = req.body;
-
-      const newConfig: Partial<SideBSchedulerConfig> = {};
-      if (typeof enabled === 'boolean') newConfig.enabled = enabled;
-      if (Array.isArray(symbols)) newConfig.symbols = symbols;
-      if (typeof timeframe === 'string') newConfig.timeframe = timeframe;
-      if (typeof monitorIntervalMs === 'number') newConfig.monitorIntervalMs = monitorIntervalMs;
-      if (typeof dailyPlanTimeUTC === 'string') newConfig.dailyPlanTimeUTC = dailyPlanTimeUTC;
-      if (typeof autoGenerateNote === 'boolean') newConfig.autoGenerateNote = autoGenerateNote;
+      const parsedBody = SideBSchedulerUpdateSchema.safeParse(req.body ?? {});
+      if (!parsedBody.success) {
+        res.status(400).json({ error: 'リクエストが不正です', details: parsedBody.error.format() });
+        return;
+      }
+      const newConfig: Partial<SideBSchedulerConfig> = parsedBody.data;
 
       const scheduler = getSideBScheduler();
       scheduler.updateConfig(newConfig);
@@ -929,7 +1054,7 @@ export class SideBController {
    * GET /api/side-b/agent/status
    * PDCAループの状態を取得
    */
-  getAgentStatus = async (_req: Request, res: Response): Promise<void> => {
+  getAgentStatus = (_req: Request, res: Response): void => {
     try {
       const status = pdcaLoop.getStatus();
       res.json(status);
@@ -943,15 +1068,20 @@ export class SideBController {
    * POST /api/side-b/agent/start
    * PDCAループを開始
    */
-  startAgent = async (req: Request, res: Response): Promise<void> => {
+  startAgent = (req: Request, res: Response): void => {
     try {
-      const { symbols, normalIntervalMs, activeIntervalMs, positionIntervalMs } = req.body;
+      const parsedBody = StartAgentBodySchema.safeParse(req.body ?? {});
+      if (!parsedBody.success) {
+        res.status(400).json({ error: 'リクエストが不正です', details: parsedBody.error.format() });
+        return;
+      }
+      const { symbols, normalIntervalMs, activeIntervalMs, positionIntervalMs } = parsedBody.data;
       // PDCAループを開始（設定はオプション）
       const configOverride: Partial<PDCALoopConfig> = { enabled: true };
-      if (symbols) configOverride.symbols = symbols;
-      if (normalIntervalMs) configOverride.normalIntervalMs = normalIntervalMs;
-      if (activeIntervalMs) configOverride.activeIntervalMs = activeIntervalMs;
-      if (positionIntervalMs) configOverride.positionIntervalMs = positionIntervalMs;
+      if (symbols !== undefined) configOverride.symbols = symbols;
+      if (normalIntervalMs !== undefined) configOverride.normalIntervalMs = normalIntervalMs;
+      if (activeIntervalMs !== undefined) configOverride.activeIntervalMs = activeIntervalMs;
+      if (positionIntervalMs !== undefined) configOverride.positionIntervalMs = positionIntervalMs;
 
       // 既存のスケジューラーも連動起動
       const scheduler = getSideBScheduler();
@@ -972,7 +1102,7 @@ export class SideBController {
    * POST /api/side-b/agent/stop
    * PDCAループを停止
    */
-  stopAgent = async (_req: Request, res: Response): Promise<void> => {
+  stopAgent = (_req: Request, res: Response): void => {
     try {
       pdcaLoop.stop();
       const status = pdcaLoop.getStatus();
@@ -987,9 +1117,9 @@ export class SideBController {
    * GET /api/side-b/agent/thinking-log
    * 思考ログを取得
    */
-  getThinkingLog = async (req: Request, res: Response): Promise<void> => {
+  getThinkingLog = (req: Request, res: Response): void => {
     try {
-      const limit = parseInt(req.query.limit as string) || 50;
+      const limit = getNumberParam(req.query.limit) ?? 50;
       const log = pdcaLoop.getThinkingLog(limit);
       res.json({ log, count: log.length });
     } catch (error) {
@@ -1002,10 +1132,10 @@ export class SideBController {
    * GET /api/side-b/agent/reflections
    * 直近のトレード振り返りを取得
    */
-  getReflections = async (req: Request, res: Response): Promise<void> => {
+  getReflections = (req: Request, res: Response): void => {
     try {
       // limit は ReflectionsQuerySchema で min(1)/max(50)/default(10) バリデーション済み
-      const limit = Number(req.query.limit) || 10;
+      const limit = getNumberParam(req.query.limit) ?? 10;
       const results = agentMemory.getRecentResults();
       const reflections = results
         .filter(r => r.reflection)
@@ -1032,7 +1162,7 @@ export class SideBController {
    * GET /api/side-b/agent/lessons
    * 学習メモを取得
    */
-  getLessons = async (_req: Request, res: Response): Promise<void> => {
+  getLessons = (_req: Request, res: Response): void => {
     try {
       const lessonsBySymbolMap = agentMemory.getAllLessonsBySymbol();
       const stats = agentMemory.getLessonStats();
@@ -1095,13 +1225,13 @@ export class SideBController {
 
       // 期間のバリデーション
       const validPeriods = ['week', 'month', 'quarter', 'year', 'all'];
-      const periodFilter: ComparisonPeriod = period && validPeriods.includes(period as string)
+      const periodFilter: ComparisonPeriod = period && validPeriods.includes(period)
         ? (period as ComparisonPeriod)
         : 'month';
 
       const result = await getComparisonAnalysis(
         periodFilter,
-        symbol as string | undefined
+        symbol
       );
 
       res.json({
@@ -1124,13 +1254,13 @@ export class SideBController {
 
       // 期間のバリデーション
       const validPeriods = ['week', 'month', 'quarter', 'year', 'all'];
-      const periodFilter: ComparisonPeriod = period && validPeriods.includes(period as string)
+      const periodFilter: ComparisonPeriod = period && validPeriods.includes(period)
         ? (period as ComparisonPeriod)
         : 'month';
 
       const dashboard = await getComparisonDashboard(
         periodFilter,
-        symbol as string | undefined
+        symbol
       );
 
       res.json({
@@ -1153,16 +1283,14 @@ export class SideBController {
    */
   listSummaries = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { summarySchedulerService } = await import('../services');
-
       const { period: periodStr, limit: limitStr, offset: offsetStr } = getValidatedQuery<{
         period?: string;
         limit?: string;
         offset?: string;
       }>(res);
       const period = periodStr as 'weekly' | 'monthly' | undefined;
-      const limit = parseInt(limitStr || '') || 10;
-      const offset = parseInt(offsetStr || '') || 0;
+      const limit = parseInt(limitStr || '', 10) || 10;
+      const offset = parseInt(offsetStr || '', 10) || 0;
 
       const summaries = await summarySchedulerService.listSummaries({
         period,
@@ -1187,15 +1315,12 @@ export class SideBController {
    */
   generateSummary = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { summarySchedulerService } = await import('../services');
-
-      const { period, startDate, endDate } = req.body;
-
-      // バリデーション
-      if (!period || !['weekly', 'monthly'].includes(period)) {
-        res.status(400).json({ error: 'period は weekly または monthly を指定してください' });
+      const parsedBody = GenerateSideBSummaryBodySchema.safeParse(req.body ?? {});
+      if (!parsedBody.success) {
+        res.status(400).json({ error: 'リクエストが不正です', details: parsedBody.error.format() });
         return;
       }
+      const { period, startDate, endDate } = parsedBody.data;
 
       let summary;
       if (startDate && endDate) {
@@ -1226,10 +1351,8 @@ export class SideBController {
    * GET /api/side-b/summaries/scheduler
    * サマリースケジューラー設定を取得
    */
-  getSummarySchedulerConfig = async (_req: Request, res: Response): Promise<void> => {
+  getSummarySchedulerConfig = (_req: Request, res: Response): void => {
     try {
-      const { summarySchedulerService } = await import('../services');
-
       const config = summarySchedulerService.getConfig();
 
       res.json({
@@ -1246,11 +1369,15 @@ export class SideBController {
    * PUT /api/side-b/summaries/scheduler
    * サマリースケジューラー設定を更新
    */
-  updateSummarySchedulerConfig = async (req: Request, res: Response): Promise<void> => {
+  updateSummarySchedulerConfig = (req: Request, res: Response): void => {
     try {
-      const { summarySchedulerService } = await import('../services');
+      const parsedBody = SummarySchedulerConfigPartialSchema.safeParse(req.body ?? {});
+      if (!parsedBody.success) {
+        res.status(400).json({ error: 'リクエストが不正です', details: parsedBody.error.format() });
+        return;
+      }
 
-      summarySchedulerService.updateConfig(req.body);
+      summarySchedulerService.updateConfig(parsedBody.data);
       const config = summarySchedulerService.getConfig();
 
       res.json({
@@ -1268,10 +1395,8 @@ export class SideBController {
    * POST /api/side-b/summaries/scheduler/start
    * サマリースケジューラーを開始
    */
-  startSummaryScheduler = async (_req: Request, res: Response): Promise<void> => {
+  startSummaryScheduler = (_req: Request, res: Response): void => {
     try {
-      const { summarySchedulerService } = await import('../services');
-
       summarySchedulerService.start();
 
       res.json({
@@ -1288,10 +1413,8 @@ export class SideBController {
    * POST /api/side-b/summaries/scheduler/stop
    * サマリースケジューラーを停止
    */
-  stopSummaryScheduler = async (_req: Request, res: Response): Promise<void> => {
+  stopSummaryScheduler = (_req: Request, res: Response): void => {
     try {
-      const { summarySchedulerService } = await import('../services');
-
       summarySchedulerService.stop();
 
       res.json({
@@ -1307,4 +1430,3 @@ export class SideBController {
 
 // デフォルトインスタンス
 export const sideBController = new SideBController();
-

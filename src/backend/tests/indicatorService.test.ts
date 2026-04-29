@@ -4,7 +4,8 @@
  * 目的: indicatorService の各計算関数が正しく動作することを検証
  */
 
-import { IndicatorService, OHLCVData, FeatureSnapshot } from '../../services/indicators/indicatorService';
+import type { OHLCVData, FeatureSnapshot } from '../../services/indicators/indicatorService';
+import { IndicatorService } from '../../services/indicators/indicatorService';
 
 describe('IndicatorService', () => {
   let service: IndicatorService;

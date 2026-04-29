@@ -9,7 +9,9 @@
  * 参照: docs/phase-next/strategy-comparison-analysis.md
  */
 
-import { PrismaClient, OptimizationMethod } from '@prisma/client';
+import type { OptimizationMethod } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
+import type { Decimal } from '@prisma/client/runtime/library';
 
 const prisma = new PrismaClient();
 
@@ -233,8 +235,8 @@ export function spearmanCorrelation(x: number[], y: number[]): number {
 function toRanks(values: number[]): number[] {
   const indexed = values.map((v, i) => ({ value: v, index: i }));
   indexed.sort((a, b) => a.value - b.value);
-  
-  const ranks = new Array(values.length);
+
+  const ranks: number[] = Array.from({ length: values.length }, () => 0);
   for (let i = 0; i < indexed.length; i++) {
     ranks[indexed[i].index] = i + 1;
   }
@@ -283,7 +285,7 @@ function calculateCovariance(x: number[], y: number[]): number {
  * 等ウェイト配分
  */
 function equalWeightOptimization(n: number): number[] {
-  return new Array(n).fill(1 / n);
+  return Array.from({ length: n }, () => 1 / n);
 }
 
 /**
@@ -325,7 +327,7 @@ function minimumVarianceOptimization(covarianceMatrix: number[][]): number[] {
   // 3資産以上はグリッドサーチ
   return gridSearchOptimization(
     covarianceMatrix,
-    new Array(n).fill(0), // ダミーのリターン（最小分散では使用しない）
+    Array.from({ length: n }, () => 0), // ダミーのリターン（最小分散では使用しない）
     'min_variance'
   );
 }
@@ -433,30 +435,6 @@ function calculatePortfolioVariance(
  */
 function dotProduct(a: number[], b: number[]): number {
   return a.reduce((sum, val, i) => sum + val * b[i], 0);
-}
-
-/**
- * 効率的フロンティアを計算
- */
-function calculateEfficientFrontier(
-  expectedReturns: number[],
-  covarianceMatrix: number[],
-  points: number = 20
-): { risk: number; return: number }[] {
-  // 簡易実装: 最小分散から最大リターンまでの点を計算
-  const minReturn = Math.min(...expectedReturns);
-  const maxReturn = Math.max(...expectedReturns);
-  
-  const frontier: { risk: number; return: number }[] = [];
-  
-  for (let i = 0; i <= points; i++) {
-    const targetReturn = minReturn + (maxReturn - minReturn) * (i / points);
-    // 各ターゲットリターンに対する最小リスクを計算（簡易版）
-    const risk = Math.sqrt(targetReturn * 0.1); // 仮の計算
-    frontier.push({ risk, return: targetReturn });
-  }
-  
-  return frontier;
 }
 
 // ============================================
@@ -617,7 +595,7 @@ export async function createComparisonSession(
  * 日次リターンを計算
  */
 function calculateDailyReturns(
-  events: { entryTime: Date; pnl: unknown }[]
+  events: { entryTime: Date; pnl: Decimal | null }[]
 ): number[] {
   if (events.length === 0) return [];
   
@@ -639,7 +617,7 @@ function calculateDailyReturns(
  * エクイティカーブを計算
  */
 function calculateEquityCurve(
-  events: { entryTime: Date; pnl: unknown }[]
+  events: { entryTime: Date; pnl: Decimal | null }[]
 ): { date: string; equity: number }[] {
   if (events.length === 0) return [];
   
@@ -908,7 +886,7 @@ export async function runPortfolioOptimization(
     : null;
   
   // 結果をDBに保存
-  const optimization = await prisma.portfolioOptimization.create({
+  await prisma.portfolioOptimization.create({
     data: {
       sessionId,
       method,
@@ -987,10 +965,18 @@ export async function getComparisonSessions(
     
     // 相関マトリクスを再構築
     const n = session.strategyIds.length;
-    const pearson: number[][] = Array(n).fill(null).map(() => Array(n).fill(1));
-    const spearman: number[][] = Array(n).fill(null).map(() => Array(n).fill(1));
-    const coWinRate: number[][] = Array(n).fill(null).map(() => Array(n).fill(1));
-    const coLossRate: number[][] = Array(n).fill(null).map(() => Array(n).fill(1));
+    const pearson: number[][] = Array.from({ length: n }, () =>
+      Array.from({ length: n }, () => 1),
+    );
+    const spearman: number[][] = Array.from({ length: n }, () =>
+      Array.from({ length: n }, () => 1),
+    );
+    const coWinRate: number[][] = Array.from({ length: n }, () =>
+      Array.from({ length: n }, () => 1),
+    );
+    const coLossRate: number[][] = Array.from({ length: n }, () =>
+      Array.from({ length: n }, () => 1),
+    );
     
     for (const corr of session.correlations) {
       const i = session.strategyIds.indexOf(corr.strategyAId);
@@ -1041,8 +1027,6 @@ export async function getComparisonSessions(
 export async function getComparisonSession(
   sessionId: string
 ): Promise<ComparisonSessionResponse | null> {
-  const result = await getComparisonSessions(1, 0);
-  
   // 指定IDのセッションを検索
   const session = await prisma.strategyComparisonSession.findUnique({
     where: { id: sessionId },

@@ -12,11 +12,10 @@
  * AI_API_KEY が未設定でもテストは実行されます（スキップされません）。
  */
 
-import { AISummaryService, TradeDataForSummary } from '../../services/aiSummaryService';
+import type { TradeDataForSummary } from '../../services/aiSummaryService';
+import { AISummaryService } from '../../services/aiSummaryService';
 
 describe('AISummaryService', () => {
-  let service: AISummaryService;
-
   const createMockTradeData = (overrides?: Partial<TradeDataForSummary>): TradeDataForSummary => ({
     symbol: 'BTCUSD',
     side: 'buy',
@@ -24,10 +23,6 @@ describe('AISummaryService', () => {
     quantity: 1.5,
     timestamp: new Date('2025-12-26T10:00:00Z'),
     ...overrides,
-  });
-
-  beforeEach(() => {
-    service = new AISummaryService();
   });
 
   describe('generateTradeSummary - API キーなし時のフォールバック', () => {

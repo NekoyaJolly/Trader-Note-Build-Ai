@@ -11,11 +11,13 @@
  * 参照: 技術スタック選定シート ⑤⑥
  */
 
-import { PrismaClient, TradeNote, Prisma } from '@prisma/client';
-import {
-  IndicatorService,
+import type { TradeNote} from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
+import type {
   OHLCVData,
-  FeatureSnapshot,
+  FeatureSnapshot} from './indicators/indicatorService';
+import {
+  IndicatorService
 } from './indicators/indicatorService';
 import {
   calculateCosineSimilarity,

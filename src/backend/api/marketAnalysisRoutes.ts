@@ -9,12 +9,15 @@
  * - GET /api/market-analysis/:symbol - シンボルのOHLCV + 特徴量を取得
  */
 
-import { Router, Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
 import { MarketDataService } from '../../services/marketDataService';
-import { indicatorService, OHLCVData } from '../../services/indicators';
+import type { OHLCVData } from '../../services/indicators';
+import { indicatorService } from '../../services/indicators';
+import type {
+  FeatureVector12D} from '../../services/featureVectorService';
 import {
   generateFeatureVector,
-  FeatureVector12D,
   DIMENSION_INDEX,
 } from '../../services/featureVectorService';
 
@@ -109,11 +112,9 @@ router.get('/:symbol', async (req: Request, res: Response) => {
     console.log(`[MarketAnalysis] ${symbol} → ${normalizedSymbol} ${timeframe} × ${count}本 取得開始`);
 
     // OHLCVデータを取得
-    let ohlcvData: OHLCVData[];
-
     // すべての時間足に対応（1m専用メソッドは廃止）
     const marketData = await marketDataService.getHistoricalData(normalizedSymbol, timeframe, count);
-    ohlcvData = marketData.map(d => ({
+    const ohlcvData: OHLCVData[] = marketData.map(d => ({
       timestamp: d.timestamp,
       open: d.open,
       high: d.high,
@@ -131,8 +132,6 @@ router.get('/:symbol', async (req: Request, res: Response) => {
 
     // インジケーターを計算
     const closes = ohlcvData.map(d => d.close);
-    const highs = ohlcvData.map(d => d.high);
-    const lows = ohlcvData.map(d => d.low);
 
     // RSI計算（期間14）
     const rsiValues = closes.length >= 15 ? indicatorService.calculateRSI(closes, 14) : [];

@@ -11,10 +11,11 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import {
-  OHLCVRepository,
+import type {
   OHLCVInsertData,
-  OHLCVQueryFilter,
+  OHLCVQueryFilter} from '../../backend/repositories/ohlcvRepository';
+import {
+  OHLCVRepository
 } from '../../backend/repositories/ohlcvRepository';
 
 const prisma = new PrismaClient();

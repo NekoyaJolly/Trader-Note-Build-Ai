@@ -8,11 +8,12 @@
 
 import axios from 'axios';
 import { z } from 'zod';
-import {
+import type {
   AnalysisEngineIndicatorSpec,
+  AnalysisEngineIndicatorSeriesResponse} from '../../schemas/external/analysisEngine';
+import {
   AnalysisEngineIndicatorSeriesByVersionRequestSchema,
   AnalysisEngineIndicatorSeriesRequestSchema,
-  AnalysisEngineIndicatorSeriesResponse,
   AnalysisEngineIndicatorSeriesResponseSchema,
 } from '../../schemas/external/analysisEngine';
 

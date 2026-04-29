@@ -14,8 +14,8 @@
 
 import { config } from '../../../config';
 import { splitDateRange } from '../../../utils/dateRangeChunks';
-import { CTraderAuthService } from './ctraderAuthService';
-import { CTraderConnectionType } from './types/connection';
+import type { CTraderAuthService } from './ctraderAuthService';
+import type { CTraderConnectionType } from './types/connection';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { CTraderConnection } = require('@reiryoku/ctrader-layer');
@@ -199,8 +199,8 @@ export function mergeBidAskTicks(
     for (const bid of bids) {
         const bidTs = bid.timestamp.getTime();
         while (j + 1 < asks.length) {
-            const cur = Math.abs(asks[j]!.timestamp.getTime() - bidTs);
-            const next = Math.abs(asks[j + 1]!.timestamp.getTime() - bidTs);
+            const cur = Math.abs(asks[j].timestamp.getTime() - bidTs);
+            const next = Math.abs(asks[j + 1].timestamp.getTime() - bidTs);
             if (next > cur) break;
             j++;
         }
@@ -759,7 +759,7 @@ export class CTraderDataService {
 
         // シンボル検索（名前の部分一致）
         const found = symbolList.find(s => {
-            const name = s.symbolName.replace(/[\/\s]/g, '').toUpperCase();
+            const name = s.symbolName.replace(/[/\s]/g, '').toUpperCase();
             return name === normalizedSymbol.toUpperCase()
                 || name.includes(normalizedSymbol.toUpperCase());
         });

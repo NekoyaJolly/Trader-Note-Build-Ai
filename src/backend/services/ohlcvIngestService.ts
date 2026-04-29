@@ -222,7 +222,7 @@ export async function ingestOHLCV(
           },
         });
         result.savedCount++;
-      } catch (err) {
+      } catch {
         // 重複キーエラーなどはスキップ
         result.skippedCount++;
       }
