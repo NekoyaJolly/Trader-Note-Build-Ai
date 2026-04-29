@@ -1,22 +1,26 @@
-import { Trade, TradeNote, MarketContext, NoteStatus } from '../models/types';
+import type { Trade, TradeNote, MarketContext, NoteStatus } from '../models/types';
 import { AISummaryService } from './aiSummaryService';
 import { MarketDataService } from './marketDataService';
 import { indicatorSettingsService } from './indicatorSettingsService';
 import { getIndicatorProfileService } from './indicatorProfileService';
-import { indicatorService, OHLCVData } from './indicators';
-import { IndicatorConfig } from '../models/indicatorConfig';
+import type { OHLCVData } from './indicators';
+import { indicatorService } from './indicators';
+import type { IndicatorConfig } from '../models/indicatorConfig';
+import type {
+  NoteProfileConfig} from '../models/indicatorProfile';
 import {
   RESERVED_PROFILE_IDS,
   isReservedProfileId,
-  NoteProfileConfig,
   createNoteProfileConfig,
 } from '../models/indicatorProfile';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
 import { config } from '../config';
-import { TradeNoteRepository, TradeNoteWithSummary, FindNotesOptions } from '../backend/repositories/tradeNoteRepository';
-import { TradeSide, NoteStatus as PrismaNoteStatus, Prisma } from '@prisma/client';
+import type { TradeNoteWithSummary} from '../backend/repositories/tradeNoteRepository';
+import { TradeNoteRepository, FindNotesOptions } from '../backend/repositories/tradeNoteRepository';
+import type { TradeSide, NoteStatus as PrismaNoteStatus} from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { toMarketContextJson } from '../models/prismaTypes';
 
 /**

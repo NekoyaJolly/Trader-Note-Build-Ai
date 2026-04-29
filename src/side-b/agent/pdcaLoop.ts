@@ -24,8 +24,9 @@
  * - AgentMemory: 状態管理と学習のストア
  */
 
+import type {
+    AgentMemory} from './agentMemory';
 import {
-    AgentMemory,
     agentMemory,
     type AgentState,
     type TradeResultSummary,

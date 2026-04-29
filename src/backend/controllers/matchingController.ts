@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import { getValidatedQuery } from '../../middleware/validateRequest';
 import { MatchingService } from '../../services/matchingService';
 import { NotificationService } from '../../services/notificationService';
@@ -86,10 +86,10 @@ export class MatchingController {
       }>(res);
 
       const matches = await this.matchingService.getMatchHistory({
-        symbol: symbol as string | undefined,
-        limit: limit ? parseInt(limit as string, 10) : 50,
-        offset: offset ? parseInt(offset as string, 10) : 0,
-        minScore: minScore ? parseFloat(minScore as string) : undefined,
+        symbol: symbol,
+        limit: limit ? parseInt(limit, 10) : 50,
+        offset: offset ? parseInt(offset, 10) : 0,
+        minScore: minScore ? parseFloat(minScore) : undefined,
       });
 
       res.json({

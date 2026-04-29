@@ -11,19 +11,21 @@
  * - 接続状態の監視・自動再接続
  */
 
-import { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 import { EventEmitter } from 'events';
 import { CTraderAuthService } from '../ctrader/ctraderAuthService';
-import { RealtimeTickService, getRealtimeTickService, TickDataInput, OHLCVBarInput } from './realtimeTickService';
+import type { RealtimeTickService, TickDataInput, OHLCVBarInput } from './realtimeTickService';
+import { getRealtimeTickService } from './realtimeTickService';
 import { getCloseStats, looksLikeMisScaledBars } from './realtimeSanity';
 import { config } from '../../../config';
-import { CTraderConnectionType } from '../ctrader/types/connection';
+import type { CTraderConnectionType } from '../ctrader/types/connection';
+import type {
+  CTraderSymbolInfo,
+  CTraderSpotEvent} from '../../../schemas/external/ctrader';
 import { 
   CTraderAccount,
   CTraderAccountListResponse,
-  CTraderAccountListResponseSchema,
-  CTraderSymbolInfo,
-  CTraderSpotEvent,
+  CTraderAccountListResponseSchema
 } from '../../../schemas/external/ctrader';
 
 // cTrader Layer ライブラリ（型定義なし）
@@ -393,7 +395,7 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
           ctidTraderAccountId: this.ctidTraderAccountId,
         }) as CTraderSymbolsListResponse;
 
-        const symbols = (symbolsRes.symbol || []) as CTraderSymbolInfo[];
+        const symbols = (symbolsRes.symbol || []);
         const symbolInfo = symbols.find((s) => 
           s.symbolName === symbol || s.symbolName === symbol.replace('/', '')
         );
@@ -527,7 +529,7 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
       const symbolInfo = this.symbolInfoCache.get(symbolId);
       const digits = symbolInfo?.digits || 2; // 表示用のdigits
       
-      const trendbars = (res.trendbar || []) as CTraderTrendbar[];
+      const trendbars = (res.trendbar || []);
       const bars: OHLCVBarInput[] = trendbars.map((bar) => {
         const low = Number(bar.low) / PRICE_DIVISOR;
         const open = (Number(bar.low) + Number(bar.deltaOpen)) / PRICE_DIVISOR;

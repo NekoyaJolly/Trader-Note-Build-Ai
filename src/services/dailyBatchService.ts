@@ -1,13 +1,14 @@
-import { Trade } from '@prisma/client';
+import type { Trade } from '@prisma/client';
 import { TradeImportService } from './tradeImportService';
 import { TradeRepository } from '../backend/repositories/tradeRepository';
 import { TradeNoteGeneratorService } from './note-generator/tradeNoteGeneratorService';
 import { MarketIngestService } from '../backend/services/ingest/marketIngestService';
 import { MatchEvaluationService } from '../backend/services/matching/matchEvaluationService';
 import { NotificationTriggerService } from './notification/notificationTriggerService';
-import { MatchResultRepository, MatchResultWithRelations } from '../backend/repositories/matchResultRepository';
+import type { MatchResultWithRelations } from '../backend/repositories/matchResultRepository';
+import { MatchResultRepository } from '../backend/repositories/matchResultRepository';
 import { MarketDataService } from './marketDataService';
-import { MarketContext } from './note-generator/featureExtractor';
+import type { MarketContext } from './note-generator/featureExtractor';
 
 export interface DailyBatchOptions {
   csvFilePath?: string;      // 処理対象の CSV ファイル（省略時はインポートをスキップ）
@@ -128,7 +129,7 @@ export class DailyBatchService {
 
       for (const match of matchesWithRelations) {
         try {
-          const result = await this.notificationTriggerService.evaluateAndNotify(match as MatchResultWithRelations);
+          const result = await this.notificationTriggerService.evaluateAndNotify(match);
           if (result.shouldNotify && result.status === 'sent') {
             report.notificationSummary.sent += 1;
           } else if (result.status === 'skipped') {

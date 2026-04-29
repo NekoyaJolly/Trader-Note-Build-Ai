@@ -176,7 +176,7 @@ export class EdgeLedger {
         }
         if (patch.source !== undefined) data.source = patch.source;
         if (patch.lensRelevance !== undefined) {
-            data.lensRelevance = patch.lensRelevance as unknown as Prisma.InputJsonValue;
+            data.lensRelevance = patch.lensRelevance;
         }
         if (patch.lastObservedAt !== undefined) data.lastObservedAt = patch.lastObservedAt;
         if (patch.lastTestedAt !== undefined) data.lastTestedAt = patch.lastTestedAt;

@@ -18,7 +18,8 @@
  */
 
 import { z } from 'zod';
-import { TickData, OHLCVBar, OHLCVBarSchema } from '../../infrastructure/market/IMarketDataProvider';
+import type { TickData, OHLCVBar} from '../../infrastructure/market/IMarketDataProvider';
+import { OHLCVBarSchema } from '../../infrastructure/market/IMarketDataProvider';
 
 // ========================================
 // 型定義

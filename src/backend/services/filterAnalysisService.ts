@@ -8,8 +8,9 @@
  */
 
 import { rsi, sma, ema, macd, bb } from 'indicatorts';
-import { BacktestTradeEvent, TradeSide } from './backtestCalculations';
-import { OHLCV, BacktestTimeframe } from './strategyBacktestService';
+import type { BacktestTradeEvent} from './backtestCalculations';
+import { TradeSide } from './backtestCalculations';
+import type { OHLCV, BacktestTimeframe } from './strategyBacktestService';
 
 // ============================================
 // 型定義

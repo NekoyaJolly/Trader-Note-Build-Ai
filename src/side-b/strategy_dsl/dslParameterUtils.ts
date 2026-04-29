@@ -57,7 +57,7 @@ export function countParameterGridCombinations(dsl: StrategyDSL): number {
   if (keys.length === 0) return 1;
   let n = 1;
   for (const k of keys) {
-    const vals = valuesForParameterField(k, dsl.parameters[k]!);
+    const vals = valuesForParameterField(k, dsl.parameters[k]);
     const c = Math.max(1, vals.length);
     n *= c;
   }
@@ -78,7 +78,7 @@ export function enumerateParameterGrid(dsl: StrategyDSL): Array<Record<string, n
   if (keys.length === 0) {
     return [{}];
   }
-  const valueLists = keys.map((k) => valuesForParameterField(k, dsl.parameters[k]!));
+  const valueLists = keys.map((k) => valuesForParameterField(k, dsl.parameters[k]));
 
   const out: Array<Record<string, number>> = [];
   const stack: number[] = new Array(keys.length).fill(0);
@@ -86,14 +86,14 @@ export function enumerateParameterGrid(dsl: StrategyDSL): Array<Record<string, n
   for (;;) {
     const row: Record<string, number> = {};
     for (let i = 0; i < keys.length; i++) {
-      const k = keys[i]!;
-      row[k] = valueLists[i]![stack[i]!]!;
+      const k = keys[i];
+      row[k] = valueLists[i][stack[i]]!;
     }
     out.push(row);
     let j = keys.length - 1;
     while (j >= 0) {
-      stack[j]!++;
-      if (stack[j]! < valueLists[j]!.length) break;
+      stack[j]++;
+      if (stack[j] < valueLists[j].length) break;
       stack[j] = 0;
       j--;
     }

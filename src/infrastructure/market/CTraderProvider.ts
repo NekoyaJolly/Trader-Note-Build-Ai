@@ -15,16 +15,17 @@
  */
 
 import { z } from 'zod';
-import {
-  BaseMarketDataProvider,
+import type {
   TickData,
   OHLCVBar,
   MarketDataResult,
   TickCallback,
   Timeframe,
-  ProviderType,
+  ProviderType} from './IMarketDataProvider';
+import {
+  BaseMarketDataProvider
 } from './IMarketDataProvider';
-import { CTraderAuthService } from '../../backend/services/ctrader/ctraderAuthService';
+import type { CTraderAuthService } from '../../backend/services/ctrader/ctraderAuthService';
 import { config } from '../../config';
 
 // WebSocket の型（Node.js 環境用）
@@ -200,7 +201,7 @@ export class CTraderProvider extends BaseMarketDataProvider {
     try {
       const accessToken = await this.authService.getValidAccessToken(this.accountId);
       const WebSocket = (await import('ws')).default;
-      this.ws = new WebSocket(config.ctrader.wsUrl) as WebSocketType;
+      this.ws = new WebSocket(config.ctrader.wsUrl);
 
       return new Promise((resolve, reject) => {
         if (!this.ws) {

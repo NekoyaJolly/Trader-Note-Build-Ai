@@ -13,12 +13,13 @@
  */
 
 import { prisma } from '../backend/db/client';
-import {
-  SideBNoteEvaluator,
+import type {
   SideBNoteMatchingData,
-  SideBMarketAnalysis,
+  SideBMarketAnalysis} from '../domain/matching/sideBNoteEvaluator';
+import {
+  SideBNoteEvaluator
 } from '../domain/matching/sideBNoteEvaluator';
-import { NoteEvaluator } from '../domain/noteEvaluator';
+import type { NoteEvaluator } from '../domain/noteEvaluator';
 
 // ============================================================================
 // 型定義

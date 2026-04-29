@@ -15,7 +15,7 @@
  * @see trader_assist_mvp｜意図の棚卸し - 「ノートを評価の主語に」
  */
 
-import { IndicatorId, IndicatorParams, IndicatorConfig } from '../models/indicatorConfig';
+import type { IndicatorId, IndicatorParams, IndicatorConfig } from '../models/indicatorConfig';
 
 // ============================================================================
 // 基本型定義

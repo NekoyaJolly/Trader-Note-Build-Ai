@@ -19,7 +19,8 @@ import fs from 'fs';
 import path from 'path';
 import csv from 'csv-parser';
 import { PrismaClient, Prisma } from '@prisma/client';
-import { OHLCVRepository, OHLCVInsertData } from '../repositories/ohlcvRepository';
+import type { OHLCVInsertData } from '../repositories/ohlcvRepository';
+import { OHLCVRepository } from '../repositories/ohlcvRepository';
 
 const prisma = new PrismaClient();
 

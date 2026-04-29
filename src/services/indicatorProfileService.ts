@@ -14,13 +14,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import {
+import type {
   IndicatorProfile,
   CreateProfileRequest,
   UpdateProfileRequest,
   ProfileStorage,
+  ProfileOption} from '../models/indicatorProfile';
+import {
   createDefaultProfileStorage,
-  ProfileOption,
   buildProfileOptions,
   RESERVED_PROFILE_IDS,
   isReservedProfileId,

@@ -12,7 +12,8 @@
 
 import { PrismaClient } from '@prisma/client';
 import { FeatureService } from './featureService';
-import { IndicatorService, OHLCVData } from './indicators/indicatorService';
+import type { OHLCVData } from './indicators/indicatorService';
+import { IndicatorService } from './indicators/indicatorService';
 import { calculateCosineSimilarity } from './featureVectorService';
 import * as aiNoteRepository from '../side-b/repositories/aiNoteRepository';
 import type { AITradeNote } from '../side-b/models';
@@ -189,7 +190,7 @@ export class CrossSimilarityService {
         
         results.push({
           noteId: note.id,
-          noteType: 'tradeNote' as NoteType,
+          noteType: 'tradeNote',
           similarity,
           distance,
           symbol: note.symbol,
@@ -243,7 +244,7 @@ export class CrossSimilarityService {
       if (similarity >= minSimilarity) {
         results.push({
           noteId: note.id,
-          noteType: 'aiTradeNote' as NoteType,
+          noteType: 'aiTradeNote',
           similarity,
           distance,
           symbol: note.symbol,

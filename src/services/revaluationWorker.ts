@@ -11,22 +11,26 @@
  * 参照: 技術スタック選定シート ⑨
  */
 
-import { Worker, Job } from 'bullmq';
-import { PrismaClient, RevaluationJobType, Prisma } from '@prisma/client';
+import type { Job } from 'bullmq';
+import { Worker } from 'bullmq';
+import type { RevaluationJobType, Prisma } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import {
   QUEUE_NAMES,
   getRedisConnection,
   getWorkerOptions,
   isRedisAvailable,
 } from '../config/queueConfig';
-import {
+import type {
   RevaluationJobData,
-  RevaluationJobResult,
+  RevaluationJobResult} from './revaluationJobService';
+import {
   revaluationJobManager,
 } from './revaluationJobService';
 import { featureService } from './featureService';
 import { ohlcvRepository } from '../backend/repositories/ohlcvRepository';
-import { AISummaryService, TradeDataForSummary } from './aiSummaryService';
+import type { TradeDataForSummary } from './aiSummaryService';
+import { AISummaryService } from './aiSummaryService';
 
 const prisma = new PrismaClient();
 const aiSummaryService = new AISummaryService();

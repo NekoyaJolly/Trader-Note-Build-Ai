@@ -7,7 +7,8 @@
  * - 条件の検証
  */
 
-import { PrismaClient, StrategyStatus, StrategyDirection } from '@prisma/client';
+import type { StrategyStatus, StrategyDirection } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 
 const prisma = new PrismaClient();

@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { promises as fsp } from 'fs';
-import { Notification } from '../../models/types';
-import { NotificationRepository } from '../../domain/notification/NotificationRepository';
+import type { Notification } from '../../models/types';
+import type { NotificationRepository } from '../../domain/notification/NotificationRepository';
 
 /**
  * JSON ファイルから読み込んだ生データの型

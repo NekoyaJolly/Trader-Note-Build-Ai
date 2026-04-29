@@ -11,8 +11,9 @@
  * 参照: 技術スタック選定シート ③
  */
 
-import { PrismaClient, OHLCVCandle, Prisma } from '@prisma/client';
-import { OHLCVData } from '../../services/indicators/indicatorService';
+import type { OHLCVCandle} from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
+import type { OHLCVData } from '../../services/indicators/indicatorService';
 import { isFXMarketOpen } from '../../side-b/utils/marketHours';
 
 const prisma = new PrismaClient();

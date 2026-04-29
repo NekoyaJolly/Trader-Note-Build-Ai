@@ -7,7 +7,8 @@
  *       Phase3 の判定ロジックが読みやすいよう、明確な特徴量を提供する
  */
 
-import { Trade, Prisma } from '@prisma/client';
+import type { Trade} from '@prisma/client';
+import { Prisma } from '@prisma/client';
 
 /**
  * 特徴量ベクトルの定義（固定長: 7）

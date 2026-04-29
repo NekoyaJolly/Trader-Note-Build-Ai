@@ -13,7 +13,7 @@
  * モデル: Opus 4.7(構造再編成は最重要判断)
  */
 
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { loadPromptWithGlobal } from '../prompts/loader';
 import { modelFor } from '../../config';
@@ -171,6 +171,26 @@ function clamp01(x: number): number {
   return Math.max(0, Math.min(1, x));
 }
 
+function proposalToJson(proposal: AgentRestructureProposal): Prisma.InputJsonObject {
+  return {
+    proposedAt: proposal.proposedAt.toISOString(),
+    analysis: {
+      currentAgents: proposal.analysis.currentAgents,
+      coverageGaps: proposal.analysis.coverageGaps,
+      underperformers: proposal.analysis.underperformers,
+    },
+    proposals: proposal.proposals.map((p) => ({
+      type: p.type,
+      agentName: p.agentName,
+      role: p.role,
+      reasoning: p.reasoning,
+      expectedImprovement: p.expectedImprovement,
+      ...(p.initialPrompt ? { initialPrompt: p.initialPrompt } : {}),
+    })),
+    confidence: proposal.confidence,
+  };
+}
+
 export interface MetaEvolutionAgentOptions {
   ai?: AIProvider;
   prisma?: PrismaClient;
@@ -217,7 +237,7 @@ export class MetaEvolutionAgent {
   async recordProposal(proposal: AgentRestructureProposal): Promise<string> {
     const row = await this.prisma.agentRestructureProposal.create({
       data: {
-        proposal: proposal as unknown as object,
+        proposal: proposalToJson(proposal),
         confidence: proposal.confidence,
         status: 'pending',
       },

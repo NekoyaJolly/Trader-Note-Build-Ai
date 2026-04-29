@@ -7,7 +7,7 @@
  * - DRY 原則に従った実装
  */
 
-import { StrategyDetail } from './strategyService';
+import type { StrategyDetail } from './strategyService';
 import { makeIndicatorCacheKey } from './analysisEngineClient';
 
 // ============================================
@@ -380,7 +380,7 @@ export async function evaluateConditionGroup(
   for (const item of group.conditions) {
     let result: boolean;
     if ('indicatorId' in item) {
-      result = await evaluateCondition(ctx, item as IndicatorCondition);
+      result = await evaluateCondition(ctx, item);
     } else if ((item as { type?: string }).type === 'pattern') {
       result = await evaluatePatternCondition(ctx, item as PatternCondition);
     } else {
@@ -429,7 +429,7 @@ async function evaluateIfThen(
   // IF条件をチェック
   let ifResult: boolean;
   if ('indicatorId' in ifCondition) {
-    ifResult = await evaluateCondition(ctx, ifCondition as IndicatorCondition);
+    ifResult = await evaluateCondition(ctx, ifCondition);
   } else {
     ifResult = await evaluateConditionGroup(ctx, ifCondition as ConditionGroup);
   }
@@ -451,7 +451,7 @@ async function evaluateIfThen(
     
     let thenResult: boolean;
     if ('indicatorId' in thenCondition) {
-      thenResult = await evaluateCondition(ctx, thenCondition as IndicatorCondition);
+      thenResult = await evaluateCondition(ctx, thenCondition);
     } else {
       thenResult = await evaluateConditionGroup(ctx, thenCondition as ConditionGroup);
     }
@@ -511,7 +511,7 @@ async function evaluateSequence(
   let stepResult: boolean;
   
   if ('indicatorId' in currentCondition) {
-    stepResult = await evaluateCondition(ctx, currentCondition as IndicatorCondition);
+    stepResult = await evaluateCondition(ctx, currentCondition);
   } else {
     stepResult = await evaluateConditionGroup(ctx, currentCondition as ConditionGroup);
   }

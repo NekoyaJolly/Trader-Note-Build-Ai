@@ -13,12 +13,13 @@
  */
 
 import { config, modelFor } from '../../config';
+import type {
+  PlanAIOutput} from '../models';
 import {
-  PlanAIOutput,
   validatePlanAIOutput,
 } from '../models';
 import type { MarketAnalysis } from '../models/marketAnalysis';
-import { MarketResearchWithTypes } from '../repositories';
+import type { MarketResearchWithTypes } from '../repositories';
 import {
   CORE_TRADING_RULES,
   getPlanIndicatorContext,
@@ -240,7 +241,7 @@ ${candidateContext}
 - エントリー条件は自動監視で判定可能な具体的条件にすること
 - 戦略化で採用したシナリオには必ず indicatorsUsed / indicatorsIgnored / reasonForSelection / reasonForIgnoring / patternLabel / multipleTestingDefense を埋めること
 - シナリオは 0〜3個（条件が揃わなければ 0個 = ノートレード推奨）
-- 有効な JSON のみを出力${getPlanIndicatorContext(fv as Record<string, number>)}${getMacroContext(macroData)}${getMTFContext(higherTF, fv.trendDirection)}`;
+- 有効な JSON のみを出力${getPlanIndicatorContext(fv)}${getMacroContext(macroData)}${getMTFContext(higherTF, fv.trendDirection)}`;
   }
 
   /**

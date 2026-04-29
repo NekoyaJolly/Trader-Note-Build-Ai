@@ -95,7 +95,7 @@ export class WalkForwardTool implements ValidationTool {
             return this.runWalkForwardOnEvents(
                 input.dslResult.events
                     .filter((e) => typeof e.pnl === 'number' && Number.isFinite(e.pnl))
-                    .map((e) => ({ entryTime: e.entryTime, pnl: e.pnl as number })),
+                    .map((e) => ({ entryTime: e.entryTime, pnl: e.pnl })),
                 input.period,
                 Date.now(),
                 {

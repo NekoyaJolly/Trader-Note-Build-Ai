@@ -1,5 +1,5 @@
-import { Request, Response } from 'express';
-import { OrderPreset } from '../../models/types';
+import type { Request, Response } from 'express';
+import type { OrderPreset } from '../../models/types';
 import { TradeNoteService } from '../../services/tradeNoteService';
 import { MarketDataService } from '../../services/marketDataService';
 

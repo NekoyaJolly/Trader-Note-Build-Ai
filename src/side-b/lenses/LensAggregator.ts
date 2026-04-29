@@ -79,7 +79,7 @@ export class LensAggregator {
       if (result.status === 'fulfilled') {
         features.set(lensName, result.value);
       } else {
-        // eslint-disable-next-line no-console
+         
         console.error(`[LensAggregator] lens "${lensName}" failed:`, result.reason);
       }
     }

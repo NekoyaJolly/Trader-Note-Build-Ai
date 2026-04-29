@@ -13,10 +13,11 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import {
+import type {
   IndicatorConfig,
   IndicatorSet,
-  IndicatorId,
+  IndicatorId} from '../models/indicatorConfig';
+import {
   INDICATOR_METADATA,
   createDefaultIndicatorSet,
   validateIndicatorConfig,

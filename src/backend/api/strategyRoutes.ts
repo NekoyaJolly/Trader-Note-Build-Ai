@@ -15,10 +15,11 @@
  * - GET    /api/strategies/:id/backtest/:runId - バックテスト結果詳細
  */
 
-import { Router, Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
-import { StrategyStatus, StrategyDirection } from '@prisma/client';
+import type { StrategyStatus, StrategyDirection } from '@prisma/client';
 import { z } from 'zod';
 import { getStringParam, getOptionalStringParam, getNumberParam } from '../../utils/requestHelpers';
 import {
@@ -32,12 +33,16 @@ import {
   duplicateStrategy,
   rollbackStrategyVersion,
 } from '../services/strategyService';
+import type {
+  BacktestTimeframe} from '../services/strategyBacktestService';
 import {
   runBacktest,
   getBacktestResult,
-  getBacktestHistory,
-  BacktestTimeframe,
+  getBacktestHistory
 } from '../services/strategyBacktestService';
+import type {
+  CreateStrategyNoteInput,
+  UpdateStrategyNoteInput} from '../services/strategyNoteService';
 import {
   createStrategyNote,
   listStrategyNotes,
@@ -46,9 +51,7 @@ import {
   deleteStrategyNote,
   changeNoteStatus,
   createNotesFromBacktestRun,
-  getStrategyNoteStats,
-  CreateStrategyNoteInput,
-  UpdateStrategyNoteInput,
+  getStrategyNoteStats
 } from '../services/strategyNoteService';
 import {
   getStrategyAlert,
@@ -65,15 +68,17 @@ import {
   getWalkForwardResult,
   getWalkForwardHistory,
 } from '../services/walkForwardService';
+import type {
+  FilterCondition} from '../services/filterAnalysisService';
 import {
   analyzeFilters,
   verifyFilters,
-  getAvailableFilterIndicators,
-  FilterCondition,
+  getAvailableFilterIndicators
 } from '../services/filterAnalysisService';
+import type {
+  MonteCarloParams} from '../../services/backtest/monteCarloService';
 import {
-  monteCarloService,
-  MonteCarloParams,
+  monteCarloService
 } from '../../services/backtest/monteCarloService';
 import { PrismaClient } from '@prisma/client';
 
@@ -900,7 +905,7 @@ router.post('/:id/backtest', async (req: Request, res: Response) => {
       strategyId: id,
       startDate: start.toISOString(),
       endDate: end.toISOString(),
-      stage1Timeframe: stage1Timeframe as BacktestTimeframe,
+      stage1Timeframe: stage1Timeframe,
       runStage2: enableStage2,
       initialCapital,
       lotSize,
@@ -2069,7 +2074,7 @@ router.get('/:id/backtest/:runId/filter-analysis', async (req: Request, res: Res
 
     const ohlcvData = await fetchHistoricalData(
       strategy.symbol,
-      '1m' as BacktestTimeframe, // 分析用に1分足
+      '1m', // 分析用に1分足
       new Date(backtestResult.startDate),
       new Date(backtestResult.endDate)
     );
@@ -2078,7 +2083,7 @@ router.get('/:id/backtest/:runId/filter-analysis', async (req: Request, res: Res
     const analysisResult = analyzeFilters({
       trades: backtestResult.trades,
       ohlcvData,
-      timeframe: backtestResult.timeframe as '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d',
+      timeframe: backtestResult.timeframe,
     });
 
     res.json({
@@ -2148,7 +2153,7 @@ router.post('/:id/backtest/:runId/filter-verify', async (req: Request, res: Resp
 
     const ohlcvData = await fetchHistoricalData(
       strategy.symbol,
-      '1m' as BacktestTimeframe,
+      '1m',
       new Date(backtestResult.startDate),
       new Date(backtestResult.endDate)
     );
@@ -2157,7 +2162,7 @@ router.post('/:id/backtest/:runId/filter-verify', async (req: Request, res: Resp
     const verifyResult = verifyFilters({
       trades: backtestResult.trades,
       ohlcvData,
-      timeframe: backtestResult.timeframe as '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d',
+      timeframe: backtestResult.timeframe,
       filters,
       initialCapital: 1000000, // デフォルト
     });

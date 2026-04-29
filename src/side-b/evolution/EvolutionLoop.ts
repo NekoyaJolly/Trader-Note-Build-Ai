@@ -21,11 +21,11 @@
 
 import { randomUUID } from 'crypto';
 
-import { CrossoverAgent } from '../agents/CrossoverAgent';
-import { MutationAgent } from '../agents/MutationAgent';
+import type { CrossoverAgent } from '../agents/CrossoverAgent';
+import type { MutationAgent } from '../agents/MutationAgent';
 import type { DSLBacktestAdapter, BacktestPeriod, DslBacktestAggregate } from '../strategy_dsl/DSLBacktestAdapter';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
-import { DiversityEnforcer } from './DiversityEnforcer';
+import type { DiversityEnforcer } from './DiversityEnforcer';
 import { scoreFromValidationSummary } from './evolutionScore';
 import {
   MAX_OVERFIT_SCORE,

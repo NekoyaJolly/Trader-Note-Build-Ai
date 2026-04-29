@@ -43,8 +43,8 @@ export class CrossoverAgent {
     outer: for (let i = 0; i < elites.length; i++) {
       for (let j = i + 1; j < elites.length; j++) {
         if (attempts >= pairCount) break outer;
-        const a = elites[i]!;
-        const b = elites[j]!;
+        const a = elites[i];
+        const b = elites[j];
         attempts++;
         const line =
           `親A score=${(scores.get(a.id) ?? 0).toFixed(4)}\n親B score=${(scores.get(b.id) ?? 0).toFixed(4)}`;

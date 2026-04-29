@@ -9,7 +9,8 @@
  * 参照: Phase C 実装計画、インジケーター定義書 Section 12
  */
 
-import { PrismaClient, StrategyNoteStatus, BacktestOutcome, Prisma, StrategyBacktestEvent } from '@prisma/client';
+import type { StrategyNoteStatus, BacktestOutcome, Prisma, StrategyBacktestEvent } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 
 const prisma = new PrismaClient();
@@ -320,12 +321,12 @@ export async function createStrategyNote(input: CreateStrategyNoteInput): Promis
       strategyId,
       entryTime,
       entryPrice: new Decimal(entryPrice.toString()),
-      conditionSnapshot: conditionSnapshot as Prisma.JsonObject,
+      conditionSnapshot: conditionSnapshot,
       indicatorValues: indicatorValues as Prisma.JsonObject,
       outcome,
       pnl: pnl ? new Decimal(pnl.toString()) : null,
       notes,
-      status: 'draft' as StrategyNoteStatus,
+      status: 'draft',
       tags,
       featureVector,
     },

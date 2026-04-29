@@ -15,18 +15,20 @@
  */
 
 import { z } from 'zod';
-import {
-  BaseMarketDataProvider,
+import type {
   OHLCVBar,
   MarketDataResult,
   Timeframe,
+  TickCallback} from './IMarketDataProvider';
+import {
+  BaseMarketDataProvider,
   TimeframeSchema,
-  TickCallback,
   ConnectionState,
 } from './IMarketDataProvider';
+import type {
+  TwelveDataTimeSeriesSuccess} from '../../schemas/external/twelveData';
 import {
-  TwelveDataTimeSeriesResponseSchema,
-  TwelveDataTimeSeriesSuccess,
+  TwelveDataTimeSeriesResponseSchema
 } from '../../schemas/external/twelveData';
 
 // ========================================
@@ -167,7 +169,7 @@ export class TwelveDataProvider extends BaseMarketDataProvider {
     }
     
     // 成功レスポンス
-    const successData = result.data as TwelveDataTimeSeriesSuccess;
+    const successData = result.data;
     
     // OHLCV バーに変換（時系列順: 古い → 新しい）
     const bars: OHLCVBar[] = successData.values

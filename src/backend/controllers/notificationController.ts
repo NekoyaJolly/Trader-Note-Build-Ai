@@ -1,10 +1,10 @@
-import { Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import { getValidatedQuery } from '../../middleware/validateRequest';
 import { NotificationService } from '../../services/notificationService';
 import { NotificationLogRepository } from '../repositories/notificationLogRepository';
 import { MatchingService } from '../../services/matchingService';
 import { NotificationTriggerService } from '../../services/notification/notificationTriggerService';
-import { Prisma, NotificationLogStatus } from '@prisma/client';
+import type { Prisma, NotificationLogStatus } from '@prisma/client';
 
 /**
  * 一致判定理由の詳細構造（Phase 3: 説明責任）
@@ -341,9 +341,9 @@ export class NotificationController {
       let logs;
 
       if (symbol) {
-        logs = await this.notificationLogRepository.getLogsBySymbol(symbol as string, limitNum);
+        logs = await this.notificationLogRepository.getLogsBySymbol(symbol, limitNum);
       } else if (noteId) {
-        logs = await this.notificationLogRepository.getLogsByNoteId(noteId as string, limitNum);
+        logs = await this.notificationLogRepository.getLogsByNoteId(noteId, limitNum);
       } else if (status) {
         logs = await this.notificationLogRepository.getLogsByStatus(
           status as NotificationLogStatus,

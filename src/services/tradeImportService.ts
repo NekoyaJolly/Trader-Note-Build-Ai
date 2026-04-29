@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import csv from 'csv-parser';
 import crypto from 'crypto';
-import { TradeSide } from '@prisma/client';
+import type { TradeSide } from '@prisma/client';
 import { TradeRepository } from '../backend/repositories/tradeRepository';
 
 export class TradeImportService {
@@ -127,7 +127,7 @@ export class TradeImportService {
               id: crypto.randomUUID(),
               timestamp: new Date(timestamp.toISOString()), // UTC 前提
               symbol: String(row.symbol || '').toUpperCase(),
-              side: parsedSide as TradeSide,
+              side: parsedSide,
               price,
               quantity,
               fee: row.fee ? parseFloat(row.fee) : undefined,

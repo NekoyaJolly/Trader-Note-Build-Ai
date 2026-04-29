@@ -14,9 +14,9 @@
  * - 1日1シンボル1プランの制約あり (UQ: targetDate + symbol)
  */
 
-import { PrismaClient, AITradePlan, Prisma } from '@prisma/client';
+import type { PrismaClient, AITradePlan, Prisma } from '@prisma/client';
 import { prisma } from '../../backend/db/client';
-import {
+import type {
   AITradeScenario,
   PlanMarketAnalysis,
 } from '../models';

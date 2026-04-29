@@ -11,7 +11,7 @@
  * - CRON_SECRET: Cronジョブ認証用シークレット（必須）
  */
 
-import { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 
 /**
  * Cronリクエスト認証ミドルウェア

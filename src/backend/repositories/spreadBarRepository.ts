@@ -4,7 +4,8 @@
  * cTrader の BID/ASK tick から作った spread series を、BT 実行時に再利用する。
  */
 
-import { Prisma, PrismaClient, SpreadBar } from '@prisma/client';
+import type { SpreadBar } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 

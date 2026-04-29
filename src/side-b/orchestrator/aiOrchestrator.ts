@@ -17,33 +17,37 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import {
+import type {
   ResearchAIService,
-  researchAIService,
   ResearchAIInput,
   PlanAIService,
-  planAIService,
   PlanAIInput,
-  UserTradingPreferences,
-} from '../services';
+  UserTradingPreferences} from '../services';
 import {
+  researchAIService,
+  planAIService
+} from '../services';
+import type {
   ResearchRepository,
-  researchRepository,
   MarketResearchWithTypes,
   PlanRepository,
-  planRepository,
-  AITradePlanWithTypes,
+  AITradePlanWithTypes} from '../repositories';
+import {
+  researchRepository,
+  planRepository
 } from '../repositories';
+import type {
+  AITradeScenario} from '../models';
 import {
   MarketResearch,
   AITradePlan,
   GenerateResearchResponse,
-  GeneratePlanResponse,
-  AITradeScenario,
+  GeneratePlanResponse
 } from '../models';
 import { buildHigherTFContext } from '../knowledge';
 import type { HigherTimeframeContext } from '../knowledge';
-import { DevilsAdvocateAgent, devilsAdvocateAgent } from '../agents/DevilsAdvocateAgent';
+import type { DevilsAdvocateAgent} from '../agents/DevilsAdvocateAgent';
+import { devilsAdvocateAgent } from '../agents/DevilsAdvocateAgent';
 import {
   defaultLensAggregator,
   registerDefaultLenses,
@@ -53,8 +57,9 @@ import {
 import { agentMemory } from '../agent/agentMemory';
 import { edgeLedger } from '../ledger';
 import { decideExistingPlanAction } from './existingPlanDecision';
+import type {
+  HypothesisGeneratorAgent} from '../agents/HypothesisGeneratorAgent';
 import {
-  HypothesisGeneratorAgent,
   hypothesisGeneratorAgent,
 } from '../agents/HypothesisGeneratorAgent';
 import type { EdgeHypothesis } from '../models/edgeHypothesis';
@@ -62,8 +67,9 @@ import {
   runAllSpecialists,
   type SpecialistBundle,
 } from '../agents/specialists';
+import type {
+  StrategyBacktesterAgent} from '../agents/StrategyBacktesterAgent';
 import {
-  StrategyBacktesterAgent,
   strategyBacktesterAgent,
   type StrategyBacktesterRunResult,
 } from '../agents/StrategyBacktesterAgent';
@@ -185,7 +191,7 @@ export class AIOrchestrator {
         symbol,
         timeframe,
         ohlcvData,
-        indicators: indicators as ResearchAIInput['indicators'],
+        indicators: indicators,
       };
 
       const aiResult = await this.researchAI.generateResearch(aiInput);
@@ -309,7 +315,7 @@ export class AIOrchestrator {
             symbol,
             timeframe: higherTFData.timeframe,
             ohlcvData: higherTFData.ohlcvData,
-            indicators: higherTFData.indicators as ResearchAIInput['indicators'],
+            indicators: higherTFData.indicators,
           });
           higherTFContext = buildHigherTFContext(
             higherTFData.timeframe,

@@ -1,6 +1,6 @@
-import { Trade } from '@prisma/client';
+import type { Trade } from '@prisma/client';
 import { config } from '../../config';
-import { MarketContext } from '../note-generator/featureExtractor';
+import type { MarketContext } from '../note-generator/featureExtractor';
 
 export type InferredMode = 'trend' | 'meanReversion' | 'other';
 

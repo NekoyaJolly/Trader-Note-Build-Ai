@@ -14,7 +14,8 @@
  * @see src/middleware/cronAuth.ts
  */
 
-import { Router, Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
 import { cronAuth } from '../../middleware/cronAuth';
 import { getSideBScheduler } from '../../side-b/jobs/sideBScheduler';
 import { isFXMarketOpen, getMarketStatusJST } from '../../side-b/utils/marketHours';

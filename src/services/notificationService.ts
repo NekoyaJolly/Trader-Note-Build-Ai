@@ -1,7 +1,7 @@
-import { Notification, MarketData, TradeNote as FSTradeNote } from '../models/types';
+import type { Notification, MarketData, TradeNote as FSTradeNote } from '../models/types';
 import { v4 as uuidv4 } from 'uuid';
-import { MatchResultDTO } from '../domain/matching/MatchResultDTO';
-import { NotificationRepository } from '../domain/notification/NotificationRepository';
+import type { MatchResultDTO } from '../domain/matching/MatchResultDTO';
+import type { NotificationRepository } from '../domain/notification/NotificationRepository';
 import { FileNotificationRepository } from '../infrastructure/file/FileNotificationRepository';
 import { DbNotificationRepositoryAdapter } from '../infrastructure/db/DbNotificationRepositoryAdapter';
 import { NotificationTriggerService } from './notification/notificationTriggerService';
@@ -106,8 +106,8 @@ export class NotificationService {
           matchScore: match.matchScore,
           threshold: config.matching.threshold,
           isMatch: true,
-          currentMarket: match.marketSnapshot as unknown as MarketData,
-          historicalNote: note as unknown as FSTradeNote,
+          currentMarket: match.marketSnapshot as MarketData,
+          historicalNote: note,
           timestamp: match.evaluatedAt,
         },
         timestamp: new Date(),

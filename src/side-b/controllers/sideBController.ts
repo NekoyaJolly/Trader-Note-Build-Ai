@@ -22,7 +22,7 @@
  * - PUT /api/side-b/portfolio/settings - ポートフォリオ設定更新
  */
 
-import { Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import { getValidatedQuery } from '../../middleware/validateRequest';
 import {
   aiOrchestrator,
@@ -168,14 +168,14 @@ export class SideBController {
       }>(res);
 
       const researches = await researchRepository.findMany({
-        symbol: symbol as string | undefined,
+        symbol: symbol,
         validOnly: validOnly === 'true',
-        limit: limit ? parseInt(limit as string, 10) : undefined,
-        offset: offset ? parseInt(offset as string, 10) : undefined,
+        limit: limit ? parseInt(limit, 10) : undefined,
+        offset: offset ? parseInt(offset, 10) : undefined,
       });
 
       const total = await researchRepository.count({
-        symbol: symbol as string | undefined,
+        symbol: symbol,
         validOnly: validOnly === 'true',
       });
 
@@ -183,8 +183,8 @@ export class SideBController {
         success: true,
         researches,
         total,
-        limit: limit ? parseInt(limit as string, 10) : 50,
-        offset: offset ? parseInt(offset as string, 10) : 0,
+        limit: limit ? parseInt(limit, 10) : 50,
+        offset: offset ? parseInt(offset, 10) : 0,
       });
     } catch (error) {
       console.error('[SideBController] listResearch error:', error);
@@ -350,26 +350,26 @@ export class SideBController {
       }>(res);
 
       const plans = await planRepository.findMany({
-        symbol: symbol as string | undefined,
-        targetDate: targetDate ? new Date(targetDate as string) : undefined,
-        fromDate: fromDate ? new Date(fromDate as string) : undefined,
-        toDate: toDate ? new Date(toDate as string) : undefined,
-        limit: limit ? parseInt(limit as string, 10) : undefined,
-        offset: offset ? parseInt(offset as string, 10) : undefined,
+        symbol: symbol,
+        targetDate: targetDate ? new Date(targetDate) : undefined,
+        fromDate: fromDate ? new Date(fromDate) : undefined,
+        toDate: toDate ? new Date(toDate) : undefined,
+        limit: limit ? parseInt(limit, 10) : undefined,
+        offset: offset ? parseInt(offset, 10) : undefined,
       });
 
       const total = await planRepository.count({
-        symbol: symbol as string | undefined,
-        fromDate: fromDate ? new Date(fromDate as string) : undefined,
-        toDate: toDate ? new Date(toDate as string) : undefined,
+        symbol: symbol,
+        fromDate: fromDate ? new Date(fromDate) : undefined,
+        toDate: toDate ? new Date(toDate) : undefined,
       });
 
       res.json({
         success: true,
         plans,
         total,
-        limit: limit ? parseInt(limit as string, 10) : 50,
-        offset: offset ? parseInt(offset as string, 10) : 0,
+        limit: limit ? parseInt(limit, 10) : 50,
+        offset: offset ? parseInt(offset, 10) : 0,
       });
     } catch (error) {
       console.error('[SideBController] listPlans error:', error);
@@ -531,15 +531,15 @@ export class SideBController {
 
       // statusをVirtualTradeStatus型にキャスト（バリデーション省略）
       const validStatuses = ['pending', 'open', 'closed', 'expired', 'cancelled', 'invalidated'];
-      const statusFilter = status && validStatuses.includes(status as string)
+      const statusFilter = status && validStatuses.includes(status)
         ? status as 'pending' | 'open' | 'closed' | 'expired' | 'cancelled' | 'invalidated'
         : undefined;
 
       const trades = await listTrades({
         status: statusFilter,
-        planId: planId as string | undefined,
-        symbol: symbol as string | undefined,
-        limit: limit ? parseInt(limit as string, 10) : undefined,
+        planId: planId,
+        symbol: symbol,
+        limit: limit ? parseInt(limit, 10) : undefined,
       });
 
       res.json({
@@ -694,17 +694,17 @@ export class SideBController {
 
       // outcomeのバリデーション
       const validOutcomes = ['win', 'loss', 'breakeven'];
-      const outcomeFilter = outcome && validOutcomes.includes(outcome as string)
+      const outcomeFilter = outcome && validOutcomes.includes(outcome)
         ? outcome as 'win' | 'loss' | 'breakeven'
         : undefined;
 
       const result = await aiNoteService.listNotes({
-        from: from as string | undefined,
-        to: to as string | undefined,
+        from: from,
+        to: to,
         outcome: outcomeFilter,
-        symbol: symbol as string | undefined,
-        limit: limit ? parseInt(limit as string, 10) : 20,
-        offset: offset ? parseInt(offset as string, 10) : 0,
+        symbol: symbol,
+        limit: limit ? parseInt(limit, 10) : 20,
+        offset: offset ? parseInt(offset, 10) : 0,
       });
 
       res.json({
@@ -755,14 +755,14 @@ export class SideBController {
 
       // periodのバリデーション
       const validPeriods = ['daily', 'weekly', 'monthly'];
-      const periodFilter = period && validPeriods.includes(period as string)
+      const periodFilter = period && validPeriods.includes(period)
         ? period as 'daily' | 'weekly' | 'monthly'
         : undefined;
 
       const result = await aiNoteService.listSummaries({
         period: periodFilter,
-        limit: limit ? parseInt(limit as string, 10) : 10,
-        offset: offset ? parseInt(offset as string, 10) : 0,
+        limit: limit ? parseInt(limit, 10) : 10,
+        offset: offset ? parseInt(offset, 10) : 0,
       });
 
       res.json({
@@ -1095,13 +1095,13 @@ export class SideBController {
 
       // 期間のバリデーション
       const validPeriods = ['week', 'month', 'quarter', 'year', 'all'];
-      const periodFilter: ComparisonPeriod = period && validPeriods.includes(period as string)
+      const periodFilter: ComparisonPeriod = period && validPeriods.includes(period)
         ? (period as ComparisonPeriod)
         : 'month';
 
       const result = await getComparisonAnalysis(
         periodFilter,
-        symbol as string | undefined
+        symbol
       );
 
       res.json({
@@ -1124,13 +1124,13 @@ export class SideBController {
 
       // 期間のバリデーション
       const validPeriods = ['week', 'month', 'quarter', 'year', 'all'];
-      const periodFilter: ComparisonPeriod = period && validPeriods.includes(period as string)
+      const periodFilter: ComparisonPeriod = period && validPeriods.includes(period)
         ? (period as ComparisonPeriod)
         : 'month';
 
       const dashboard = await getComparisonDashboard(
         periodFilter,
-        symbol as string | undefined
+        symbol
       );
 
       res.json({

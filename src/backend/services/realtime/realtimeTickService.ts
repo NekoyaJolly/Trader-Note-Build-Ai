@@ -14,7 +14,7 @@
  * 参照: docs/realtime_similarity_notification_architecture.md
  */
 
-import { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 import { EventEmitter } from 'events';
 import { z } from 'zod';
 import { filterBarsByReferencePrice } from './realtimeSanity';

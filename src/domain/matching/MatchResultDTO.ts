@@ -7,7 +7,7 @@
  * - Layer1/2 のファイル保存・通知判定・UI 表示で利用する
  */
 
-import { MatchResult, MarketSnapshot, Prisma } from '@prisma/client';
+import type { MatchResult, MarketSnapshot, Prisma } from '@prisma/client';
 
 /**
  * DB から取得した MatchResult の型（関連テーブル含む）

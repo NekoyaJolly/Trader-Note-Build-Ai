@@ -1,4 +1,4 @@
-import { Notification } from '../../models/types';
+import type { Notification } from '../../models/types';
 
 // Prisma 非依存の通知リポジトリインターフェース
 export interface NotificationRepository {

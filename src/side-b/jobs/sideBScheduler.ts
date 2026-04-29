@@ -850,7 +850,7 @@ export class SideBScheduler {
     this.log(`[Evolution] 進化ループ開始: ${regimes.length} レジーム, 期間 ${defaultPeriod.start}〜${defaultPeriod.end}`);
 
     for (let i = 0; i < regimes.length; i++) {
-      const regime = regimes[i]!;
+      const regime = regimes[i];
       try {
         const report = await loop.runOneGeneration(regime);
         n++;

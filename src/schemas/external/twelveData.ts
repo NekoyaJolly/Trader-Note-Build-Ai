@@ -220,7 +220,7 @@ export function parseTwelveDataTimeSeries(response: unknown): TwelveDataTimeSeri
     throw new Error(`Twelve Data API エラー: ${result.data.message} (code: ${result.data.code})`);
   }
   
-  return result.data as TwelveDataTimeSeriesSuccess;
+  return result.data;
 }
 
 /**
@@ -234,7 +234,7 @@ export function parseTwelveDataPrice(response: unknown): TwelveDataPrice {
   }
   
   if ('code' in result.data && 'status' in result.data && result.data.status === 'error') {
-    throw new Error(`Twelve Data API エラー: ${(result.data as TwelveDataError).message}`);
+    throw new Error(`Twelve Data API エラー: ${(result.data).message}`);
   }
   
   return result.data as TwelveDataPrice;

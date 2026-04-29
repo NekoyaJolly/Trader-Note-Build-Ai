@@ -12,8 +12,8 @@
  * - pgvector 用の特徴量ベクトルを含む
  */
 
-import { Trade } from './types';
-import { IndicatorConfig, IndicatorId } from './indicatorConfig';
+import type { Trade } from './types';
+import type { IndicatorConfig, IndicatorId } from './indicatorConfig';
 
 /**
  * 市場データスナップショット

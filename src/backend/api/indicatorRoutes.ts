@@ -13,9 +13,12 @@
  * - POST /api/indicators/settings/reset - デフォルトにリセット
  */
 
-import { Router, Request, Response } from 'express';
-import { indicatorSettingsService, SaveIndicatorConfigRequest } from '../../services/indicatorSettingsService';
-import { INDICATOR_METADATA, IndicatorId, IndicatorCategory } from '../../models/indicatorConfig';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
+import type { SaveIndicatorConfigRequest } from '../../services/indicatorSettingsService';
+import { indicatorSettingsService } from '../../services/indicatorSettingsService';
+import type { IndicatorId, IndicatorCategory } from '../../models/indicatorConfig';
+import { INDICATOR_METADATA } from '../../models/indicatorConfig';
 import { validateBody, validateParams, validateQuery, getValidatedQuery } from '../../middleware/validateRequest';
 import {
   IndicatorIdParamSchema,
@@ -81,7 +84,7 @@ router.post(
       }
 
       const config = await indicatorSettingsService.upsertIndicatorConfig({
-        indicatorId: indicatorId as IndicatorId,
+        indicatorId: indicatorId,
         params: params || metadata.defaultParams,
         enabled,
         label,

@@ -9,7 +9,8 @@
  * - GET /api/watchlist/active - アクティブなシンボル一覧（OHLCV蓄積用）
  */
 
-import { Router, Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
 import { requireAuth } from '../../middleware/authMiddleware';
 import { getPrismaClient } from '../../infrastructure/prismaClient';
 

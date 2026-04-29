@@ -6,9 +6,9 @@
  * @see docs/side-b/phase-c-ai-trade-note.md
  */
 
-import { Prisma } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../../backend/db/client';
-import {
+import type {
   AITradeNote,
   AINoteSummary,
   CreateAITradeNoteInput,

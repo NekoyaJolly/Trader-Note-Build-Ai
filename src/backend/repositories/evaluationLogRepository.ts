@@ -1,6 +1,7 @@
-import { EvaluationLog, Prisma, PrismaClient } from '@prisma/client';
+import type { EvaluationLog, PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../db/client';
-import { EvaluationResult } from '../../domain/noteEvaluator';
+import type { EvaluationResult } from '../../domain/noteEvaluator';
 
 /**
  * EvaluationLog リポジトリ
@@ -104,7 +105,7 @@ export class EvaluationLogRepository {
     // Prisma の JSON フィールドに null を設定する場合は Prisma.JsonNull を使用
     const diagnosticsData: Prisma.InputJsonValue | typeof Prisma.JsonNull = 
       saveDiagnostics && evaluationResult.diagnostics
-        ? (evaluationResult.diagnostics as Prisma.InputJsonValue)
+        ? (evaluationResult.diagnostics)
         : Prisma.JsonNull;
 
     return this.prisma.evaluationLog.upsert({

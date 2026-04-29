@@ -12,7 +12,8 @@
  * - POST /api/auth/logout          - ログアウト
  */
 
-import { Router, Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
 import { z } from 'zod';
 import { CTraderAuthService, ExchangeCodeRequestSchema } from '../services/ctrader/ctraderAuthService';
 import { sessionService } from '../services/auth/sessionService';

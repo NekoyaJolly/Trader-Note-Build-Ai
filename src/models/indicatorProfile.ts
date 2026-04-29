@@ -12,7 +12,7 @@
  * - 特殊プロファイル（AI_AUTO, NONE）は予約ID
  */
 
-import { IndicatorConfig } from './indicatorConfig';
+import type { IndicatorConfig } from './indicatorConfig';
 
 // ============================================================================
 // 特殊プロファイルID（予約済み）

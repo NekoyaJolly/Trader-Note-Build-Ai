@@ -8,7 +8,8 @@
  * - アプリ内通知 + Web Push 対応
  */
 
-import { PrismaClient, AlertChannel, AlertStatus, StrategyAlert, StrategyAlertLog } from '@prisma/client';
+import type { Prisma, StrategyAlert, StrategyAlertLog } from '@prisma/client';
+import { PrismaClient, AlertChannel, AlertStatus } from '@prisma/client';
 
 // Prismaクライアントのシングルトンインスタンス
 const prisma = new PrismaClient();
@@ -295,7 +296,7 @@ export async function triggerAlert(request: TriggerAlertRequest): Promise<Trigge
         data: {
           alertId: alert.id,
           matchScore,
-          indicatorValues: indicatorValues as object,
+          indicatorValues: indicatorValues as Prisma.InputJsonValue,
           channel,
           success,
           errorMessage: success ? null : '送信失敗',
@@ -313,7 +314,7 @@ export async function triggerAlert(request: TriggerAlertRequest): Promise<Trigge
         data: {
           alertId: alert.id,
           matchScore,
-          indicatorValues: indicatorValues as object,
+          indicatorValues: indicatorValues as Prisma.InputJsonValue,
           channel,
           success: false,
           errorMessage,

@@ -19,11 +19,12 @@
  * @see src/domain/noteEvaluator.ts - NoteEvaluator インターフェース
  */
 
-import {
+import type {
   NoteEvaluator,
   IndicatorSpec,
   MarketSnapshot,
-  EvaluationResult,
+  EvaluationResult} from '../noteEvaluator';
+import {
   cosineSimilarity,
   getSimilarityLevel,
   DEFAULT_TRIGGER_THRESHOLD,

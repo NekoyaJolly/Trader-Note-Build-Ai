@@ -1,16 +1,19 @@
-import { Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import { getValidatedQuery } from '../../middleware/validateRequest';
 import { TradeImportService } from '../../services/tradeImportService';
 import path from 'path';
 import { config } from '../../config';
 import fs from 'fs';
 import { TradeRepository } from '../repositories/tradeRepository';
-import { TradeNoteService, NoteUpdatePayload } from '../../services/tradeNoteService';
-import { NoteStatus } from '../../models/types';
-import { Trade as DbTrade, Prisma } from '@prisma/client';
+import type { NoteUpdatePayload } from '../../services/tradeNoteService';
+import { TradeNoteService } from '../../services/tradeNoteService';
+import type { NoteStatus } from '../../models/types';
+import type { Prisma } from '@prisma/client';
+import { Trade as DbTrade } from '@prisma/client';
 import { FeatureService } from '../../services/featureService';
 import { SIMILARITY_THRESHOLDS } from '../../services/featureVectorService';
-import { NotePerformanceService, PerformanceReportOptions } from '../../services/performance';
+import type { PerformanceReportOptions } from '../../services/performance';
+import { NotePerformanceService } from '../../services/performance';
 
 /**
  * トレードデータの共通型
@@ -177,13 +180,13 @@ export class TradeController {
           id: t.id,
           timestamp: t.timestamp,
           symbol: t.symbol,
-          side: t.side as 'buy' | 'sell',
+          side: t.side,
           price: t.price,
           quantity: t.quantity,
         }));
       } catch {
         // DB 未接続時は parsedTrades を使ってノート生成を継続
-        trades = result.parsedTrades as TradeRecord[];
+        trades = result.parsedTrades;
       }
       const generatedNoteIds: string[] = [];
       for (const t of trades) {
@@ -506,22 +509,22 @@ export class TradeController {
       const options: PerformanceReportOptions = {};
       
       if (from) {
-        const fromDate = new Date(from as string);
+        const fromDate = new Date(from);
         if (!isNaN(fromDate.getTime())) {
           options.from = fromDate;
         }
       }
       if (to) {
-        const toDate = new Date(to as string);
+        const toDate = new Date(to);
         if (!isNaN(toDate.getTime())) {
           options.to = toDate;
         }
       }
       if (timeframe) {
-        options.timeframe = timeframe as string;
+        options.timeframe = timeframe;
       }
       if (weakThreshold) {
-        const threshold = parseFloat(weakThreshold as string);
+        const threshold = parseFloat(weakThreshold);
         if (!isNaN(threshold) && threshold >= 0 && threshold <= 1) {
           options.weakThreshold = threshold;
         }
@@ -574,22 +577,22 @@ export class TradeController {
       const options: PerformanceReportOptions = {};
       
       if (from) {
-        const fromDate = new Date(from as string);
+        const fromDate = new Date(from);
         if (!isNaN(fromDate.getTime())) {
           options.from = fromDate;
         }
       }
       if (to) {
-        const toDate = new Date(to as string);
+        const toDate = new Date(to);
         if (!isNaN(toDate.getTime())) {
           options.to = toDate;
         }
       }
       if (timeframe) {
-        options.timeframe = timeframe as string;
+        options.timeframe = timeframe;
       }
 
-      const limitNum = limit ? parseInt(limit as string, 10) : 20;
+      const limitNum = limit ? parseInt(limit, 10) : 20;
       const ranking = await this.performanceService.getRanking(limitNum, options);
 
       res.json({

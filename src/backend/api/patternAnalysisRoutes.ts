@@ -9,15 +9,17 @@
  * 参照: docs/phase-next/ml-pattern-recognition.md
  */
 
-import { Router, Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
 import { z } from 'zod';
 import { PrismaClient } from '@prisma/client';
-import {
-  patternAnalysisService,
+import type {
   PatternAnalysisInput,
   AnomalyDetectionInput,
   FeatureVector,
-  WinningPattern,
+  WinningPattern} from '../services/patternAnalysisService';
+import {
+  patternAnalysisService
 } from '../services/patternAnalysisService';
 
 const router = Router();

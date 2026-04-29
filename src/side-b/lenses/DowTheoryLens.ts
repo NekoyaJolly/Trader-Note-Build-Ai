@@ -61,8 +61,8 @@ export class DowTheoryLens implements Lens {
                 lensName: this.name,
                 lensVersion: this.version,
                 features: {
-                    trend_state: 'unclear' as TrendState,
-                    trend_phase: 'unknown' as TrendPhase,
+                    trend_state: 'unclear',
+                    trend_phase: 'unknown',
                     pullback_active: false,
                     reason: 'insufficient_data',
                     bars_available: bars?.length ?? 0,

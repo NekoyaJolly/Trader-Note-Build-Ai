@@ -13,10 +13,11 @@
  */
 
 import { z } from 'zod';
-import { PrismaClient, User, CTraderToken } from '@prisma/client';
+import type { PrismaClient, User, CTraderToken } from '@prisma/client';
 import { config } from '../../../config';
-import { sessionService, CreateSessionPayload } from '../auth/sessionService';
-import { CTraderConnectionType } from './types/connection';
+import type { CreateSessionPayload } from '../auth/sessionService';
+import { sessionService } from '../auth/sessionService';
+import type { CTraderConnectionType } from './types/connection';
 import { CTraderAccountListResponseSchema } from '../../../schemas/external/ctrader';
 
 // cTrader Layer ライブラリを使用してアカウント情報を取得

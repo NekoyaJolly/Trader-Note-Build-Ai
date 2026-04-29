@@ -16,7 +16,8 @@
  * - PUT    /api/profiles/:id/default - デフォルト設定
  */
 
-import { Router, Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
 import { getIndicatorProfileService } from '../../services/indicatorProfileService';
 import { isReservedProfileId } from '../../models/indicatorProfile';
 import { validateBody, validateParams } from '../../middleware/validateRequest';

@@ -7,8 +7,10 @@
  * - 失敗時のリトライ・無効化処理
  */
 
-import webpush, { PushSubscription as WebPushSubscription, SendResult } from 'web-push';
-import { PrismaClient, PushSubscription, PushLogStatus } from '@prisma/client';
+import type { PushSubscription as WebPushSubscription} from 'web-push';
+import webpush, { SendResult } from 'web-push';
+import type { PrismaClient, PushSubscription} from '@prisma/client';
+import { PushLogStatus } from '@prisma/client';
 
 // VAPID 鍵（環境変数から取得）
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';

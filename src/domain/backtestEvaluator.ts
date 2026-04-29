@@ -14,7 +14,7 @@
  * @see docs/DESIGN_PHILOSOPHY.md
  */
 
-import { MarketSnapshot } from './noteEvaluator';
+import type { MarketSnapshot } from './noteEvaluator';
 
 // ============================================================================
 // 評価モード

@@ -11,8 +11,8 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { Trade } from '../models/types';
-import {
+import type { Trade } from '../models/types';
+import type {
   TradeDefinition,
   NormalizedTrade,
   MarketSnapshot,
@@ -22,11 +22,14 @@ import {
   TrendDirection,
   TradeDefinitionRequest,
   TradeDefinitionResult,
-  BatchDefinitionResult,
+  BatchDefinitionResult} from '../models/tradeDefinition';
+import {
   DEFAULT_TREND_WEIGHTS,
 } from '../models/tradeDefinition';
-import { IndicatorConfig, IndicatorId } from '../models/indicatorConfig';
-import { indicatorService, OHLCVData } from './indicators';
+import type { IndicatorConfig} from '../models/indicatorConfig';
+import { IndicatorId } from '../models/indicatorConfig';
+import type { OHLCVData } from './indicators';
+import { indicatorService } from './indicators';
 import { MarketDataService } from './marketDataService';
 import { tradeNormalizationService, NormalizationResult } from './tradeNormalizationService';
 import {

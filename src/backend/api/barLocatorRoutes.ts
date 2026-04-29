@@ -8,7 +8,8 @@
  * - GET /api/bars/locate/:symbol/:timestamp/:timeframe
  */
 
-import { Router, Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
 import { barLocator } from '../../services/barLocatorService';
 
 const router = Router();

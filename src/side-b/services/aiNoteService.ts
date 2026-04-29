@@ -10,7 +10,7 @@
  * @see docs/side-b/phase-c-ai-trade-note.md
  */
 
-import {
+import type {
   AITradeNote,
   AINoteSummary,
   CreateAITradeNoteInput,
@@ -30,7 +30,8 @@ import {
   SimilarPattern,
   SummaryStatistics,
   SummaryAnalysis,
-  SummarySummary,
+  SummarySummary} from '../models';
+import {
   determineOutcome,
   calculateHoldingDuration,
   calculateActualRR,

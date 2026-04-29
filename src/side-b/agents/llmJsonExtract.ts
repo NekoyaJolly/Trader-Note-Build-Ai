@@ -82,7 +82,7 @@ export function extractOutermostBrackets(s: string): string | null {
   let openChar = '';
   let closeChar = '';
   for (let i = 0; i < s.length; i++) {
-    const c = s[i]!;
+    const c = s[i];
     if (c === '[') {
       start = i;
       openChar = '[';
@@ -102,7 +102,7 @@ export function extractOutermostBrackets(s: string): string | null {
   let inString = false;
   let escaped = false;
   for (let i = start; i < s.length; i++) {
-    const c = s[i]!;
+    const c = s[i];
     if (inString) {
       if (escaped) {
         escaped = false;

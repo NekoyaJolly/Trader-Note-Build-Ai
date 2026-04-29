@@ -14,7 +14,7 @@
  * - バックテスト用の履歴データ取得
  */
 
-import { OHLCVCandle } from '@prisma/client';
+import type { OHLCVCandle } from '@prisma/client';
 import { ohlcvRepository } from '../backend/repositories/ohlcvRepository';
 
 /**

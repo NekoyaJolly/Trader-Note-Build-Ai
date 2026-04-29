@@ -61,7 +61,7 @@ export class VolatilityRegimeLens implements Lens {
                 lensName: this.name,
                 lensVersion: this.version,
                 features: {
-                    regime_label: 'unknown' as RegimeLabel,
+                    regime_label: 'unknown',
                     reason: 'insufficient_data',
                     bars_available: bars?.length ?? 0,
                     bars_required: minBars,

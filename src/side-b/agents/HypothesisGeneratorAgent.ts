@@ -190,11 +190,17 @@ export function validateHypothesisGeneratorOutput(
 
         const defaultRiskManagement = validateRiskManagement(h.defaultRiskManagement);
 
+        const expectedDirection: 'long' | 'short' | 'either' =
+            h.expectedDirection === 'short'
+                ? 'short'
+                : h.expectedDirection === 'either'
+                  ? 'either'
+                  : 'long';
         return {
-            statement: h.statement as string,
-            category: h.category as EdgeCategory,
-            expectedDirection: h.expectedDirection as 'long' | 'short' | 'either',
-            reasoning: h.reasoning as string,
+            statement: h.statement,
+            category: h.category,
+            expectedDirection,
+            reasoning: h.reasoning,
             conditions,
             ...(defaultRiskManagement ? { defaultRiskManagement } : {}),
             ...(lensRelevance ? { lensRelevance } : {}),

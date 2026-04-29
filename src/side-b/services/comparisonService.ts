@@ -11,7 +11,7 @@
  */
 
 import { prisma } from '../../backend/db/client';
-import { Prisma } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 
 // ===== 型定義 =====
 
@@ -392,7 +392,7 @@ export async function getTimeSeriesData(
     }
     
     dateMap.get(dateKey)!.aiTrades.push({
-      outcome: note.outcome as 'win' | 'loss' | 'breakeven',
+      outcome: note.outcome,
       pnlPips: note.pnlPips.toNumber(),
     });
   }

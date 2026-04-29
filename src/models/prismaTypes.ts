@@ -15,8 +15,9 @@
  * - 境界でのキャスト関数を提供
  */
 
-import { Prisma, NoteStatus, NotificationStatus } from '@prisma/client';
-import { MarketContext } from './types';
+import type { Prisma} from '@prisma/client';
+import { NoteStatus, NotificationStatus } from '@prisma/client';
+import type { MarketContext } from './types';
 
 // === 基本的な JSON 値の型（re-export）===
 

@@ -11,7 +11,7 @@
  * 参照: 技術スタック選定シート ⑨
  */
 
-import { ConnectionOptions, QueueOptions, WorkerOptions } from 'bullmq';
+import type { ConnectionOptions, QueueOptions, WorkerOptions } from 'bullmq';
 
 /**
  * キュー名の定義

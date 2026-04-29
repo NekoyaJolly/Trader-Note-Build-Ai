@@ -21,7 +21,7 @@ function walkGroup(group: ConditionGroup, onLeaf: (c: Condition) => void) {
     if ('logic' in c) {
       walkGroup(c, onLeaf);
     } else {
-      onLeaf(c as Condition);
+      onLeaf(c);
     }
   }
 }

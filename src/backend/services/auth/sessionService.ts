@@ -4,8 +4,9 @@
  * cTrader OAuth 認証後のJWT発行・検証・Cookie管理を担当
  */
 
-import jwt, { JwtPayload, SignOptions } from 'jsonwebtoken';
-import { Response } from 'express';
+import type { JwtPayload, SignOptions } from 'jsonwebtoken';
+import jwt from 'jsonwebtoken';
+import type { CookieOptions, Response } from 'express';
 import { z } from 'zod';
 
 // 環境変数から秘密鍵を取得（必須）
@@ -101,10 +102,10 @@ export class SessionService {
   setTokenCookie(res: Response, token: string): void {
     // 開発環境では secure: false, sameSite: 'lax'
     // 本番環境では secure: true, sameSite: 'none'（クロスドメイン対応）
-    const cookieOptions = {
+    const cookieOptions: CookieOptions = {
       httpOnly: true, // XSS 対策
       secure: isProduction, // 本番環境のみ HTTPS 必須
-      sameSite: (isProduction ? 'none' : 'lax') as 'none' | 'lax',
+      sameSite: (isProduction ? 'none' : 'lax'),
       maxAge: ACCESS_TOKEN_EXPIRES_IN_SECONDS * 1000, // ミリ秒
       path: '/',
     };
@@ -127,7 +128,7 @@ export class SessionService {
     res.clearCookie('auth_token', {
       httpOnly: true,
       secure: isProduction, // 本番環境のみ HTTPS 必須
-      sameSite: (isProduction ? 'none' : 'lax') as 'none' | 'lax',
+      sameSite: (isProduction ? 'none' : 'lax'),
       path: '/',
     });
   }

@@ -13,14 +13,16 @@
  */
 
 import { config } from '../config';
+import type {
+  FeatureSnapshot} from './indicators/indicatorService';
 import {
-  IndicatorService,
-  FeatureSnapshot,
+  IndicatorService
 } from './indicators/indicatorService';
-import {
-  AISummaryService,
+import type {
   TradeDataForSummary,
-  AISummaryResult,
+  AISummaryResult} from './aiSummaryService';
+import {
+  AISummaryService
 } from './aiSummaryService';
 import { OpenAIChatCompletionResponseSchema } from '../schemas/external/openai';
 

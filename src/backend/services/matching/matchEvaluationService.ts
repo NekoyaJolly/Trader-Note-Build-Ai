@@ -1,4 +1,4 @@
-import { MarketSnapshot, TradeNote, MatchResult } from '@prisma/client';
+import type { MarketSnapshot, TradeNote, MatchResult } from '@prisma/client';
 import { config } from '../../../config';
 import { TradeNoteRepository } from '../../repositories/tradeNoteRepository';
 import { MarketSnapshotRepository } from '../../repositories/marketSnapshotRepository';

@@ -15,7 +15,8 @@
 
 import { EventEmitter } from 'events';
 import { z } from 'zod';
-import { CTraderProvider, CTraderMessageType } from '../../../infrastructure/market/CTraderProvider';
+import type { CTraderProvider} from '../../../infrastructure/market/CTraderProvider';
+import { CTraderMessageType } from '../../../infrastructure/market/CTraderProvider';
 import { 
   AccountInfoResponseSchema,
   PositionResponseSchema,

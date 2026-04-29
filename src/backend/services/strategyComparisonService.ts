@@ -9,7 +9,8 @@
  * 参照: docs/phase-next/strategy-comparison-analysis.md
  */
 
-import { PrismaClient, OptimizationMethod } from '@prisma/client';
+import type { OptimizationMethod } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 

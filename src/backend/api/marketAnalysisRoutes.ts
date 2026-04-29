@@ -9,12 +9,15 @@
  * - GET /api/market-analysis/:symbol - シンボルのOHLCV + 特徴量を取得
  */
 
-import { Router, Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
 import { MarketDataService } from '../../services/marketDataService';
-import { indicatorService, OHLCVData } from '../../services/indicators';
+import type { OHLCVData } from '../../services/indicators';
+import { indicatorService } from '../../services/indicators';
+import type {
+  FeatureVector12D} from '../../services/featureVectorService';
 import {
   generateFeatureVector,
-  FeatureVector12D,
   DIMENSION_INDEX,
 } from '../../services/featureVectorService';
 

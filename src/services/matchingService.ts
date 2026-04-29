@@ -1,29 +1,33 @@
-import { TradeNote, MarketData } from '../models/types';
+import type { TradeNote, MarketData } from '../models/types';
 import { MarketDataService } from './marketDataService';
 import { TradeNoteService } from './tradeNoteService';
 import { config } from '../config';
 import { v4 as uuidv4 } from 'uuid';
-import { MatchResultDTO } from '../domain/matching/MatchResultDTO';
+import type { MatchResultDTO } from '../domain/matching/MatchResultDTO';
 import { MatchResultRepository } from '../backend/repositories/matchResultRepository';
 import { MarketSnapshotRepository } from '../backend/repositories/marketSnapshotRepository';
 import { EvaluationLogRepository } from '../backend/repositories/evaluationLogRepository';
+import type {
+  MatchHit} from './notification/simultaneousHitControlService';
 import {
-  SimultaneousHitControlService,
-  MatchHit,
+  SimultaneousHitControlService
 } from './notification/simultaneousHitControlService';
+import type {
+  NormalizedIndicators
+} from '../utils/indicatorNormalizer';
 import {
   normalizeIndicators,
-  DEFAULT_ANOMALY_THRESHOLD,
-  NormalizedIndicators
+  DEFAULT_ANOMALY_THRESHOLD
 } from '../utils/indicatorNormalizer';
 import {
   createNoteEvaluator,
   convertMarketDataToSnapshot,
 } from './legacyNoteEvaluatorAdapter';
-import { NoteEvaluator, EvaluationResult } from '../domain/noteEvaluator';
-import { TradeNote as PrismaTradeNote, MatchResult, MarketSnapshot } from '@prisma/client';
+import type { EvaluationResult } from '../domain/noteEvaluator';
+import { NoteEvaluator } from '../domain/noteEvaluator';
+import type { TradeNote as PrismaTradeNote, MatchResult, MarketSnapshot } from '@prisma/client';
 import { SideBMatchingAdapter } from './sideBMatchingAdapter';
-import { SideBNoteMatchingData } from '../domain/matching/sideBNoteEvaluator';
+import type { SideBNoteMatchingData } from '../domain/matching/sideBNoteEvaluator';
 import { NotificationTriggerService } from './notification/notificationTriggerService';
 
 /**

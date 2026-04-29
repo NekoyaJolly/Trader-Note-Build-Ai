@@ -10,10 +10,10 @@ import { isWaitForTriggerEntry } from '../strategy_dsl/types';
 export function firstLeafCondition(group: ConditionGroup): Condition | null {
   for (const c of group.conditions) {
     if (c && typeof c === 'object' && 'logic' in c) {
-      const inner = firstLeafCondition(c as ConditionGroup);
+      const inner = firstLeafCondition(c);
       if (inner) return inner;
     } else if (c && typeof c === 'object' && 'lens' in c) {
-      return c as Condition;
+      return c;
     }
   }
   return null;

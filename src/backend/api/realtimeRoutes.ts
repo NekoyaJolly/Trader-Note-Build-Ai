@@ -12,16 +12,19 @@
  * - GET /api/realtime/status - 接続状態
  */
 
-import { Router, Request, Response } from 'express';
+import type { Request, Response } from 'express';
+import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { requireAuth } from '../../middleware/authMiddleware';
-import {
-  getCTraderRealtimeOrchestrator,
+import type {
   CTraderRealtimeOrchestrator,
   ConnectionStatus
 } from '../services/realtime/ctraderRealtimeOrchestrator';
-import { TickDataInput, OHLCVBarInput } from '../services/realtime/realtimeTickService';
+import {
+  getCTraderRealtimeOrchestrator
+} from '../services/realtime/ctraderRealtimeOrchestrator';
+import type { TickDataInput, OHLCVBarInput } from '../services/realtime/realtimeTickService';
 
 const router = Router();
 const prisma = new PrismaClient();

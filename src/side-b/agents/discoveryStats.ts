@@ -72,8 +72,8 @@ export function aggregateFeatureValues(
                     split = { wins: [], losses: [] };
                     out.set(key, split);
                 }
-                if (outcome === 'win') split.wins.push(value as number | string | boolean);
-                else split.losses.push(value as number | string | boolean);
+                if (outcome === 'win') split.wins.push(value);
+                else split.losses.push(value);
             }
         }
     }

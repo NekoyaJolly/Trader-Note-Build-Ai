@@ -268,7 +268,7 @@ function scoreAndSuccess<TOutput>(
   scoreFn: ReturnType<typeof getScoringFunction>,
 ): { score: number; success: boolean } {
   if (!output) return { score: 0, success: false };
-  const raw = scoreFn ? scoreFn(scoringInput, output as unknown) : 1;
+  const raw = scoreFn ? scoreFn(scoringInput, output) : 1;
   const score = Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : 0;
   return { score, success: score >= 0.3 };
 }

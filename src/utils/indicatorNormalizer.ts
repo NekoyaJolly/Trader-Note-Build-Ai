@@ -14,7 +14,7 @@
  * 参考: FreqAI/Pairs Trading の正規化手法
  */
 
-import { IndicatorId } from '../models/indicatorConfig';
+import type { IndicatorId } from '../models/indicatorConfig';
 
 /**
  * インジケーターの値域特性
