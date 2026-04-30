@@ -8,6 +8,7 @@
  * - GET /api/cron/side-b/monitor - 監視実行（毎時）
  * - GET /api/cron/side-b/run-screening - 仮説スクリーニング手動実行（PDCA-2 検証用）
  * - GET /api/cron/side-b/run-full-validation - フル検証手動実行（screening_passed → confirmed/rejected）
+ * - POST /api/cron/side-b/reset-not-testable - not_testable 仮説を unverified に戻す救済操作
  * - GET /api/cron/matching-pipeline - マッチング＋通知パイプライン（15分間隔）
  * - GET /api/cron/health - ヘルスチェック
  *
@@ -18,10 +19,12 @@
 
 import type { Request, Response } from 'express';
 import { Router } from 'express';
+import { z } from 'zod';
 import { cronAuth } from '../../middleware/cronAuth';
 import { getSideBScheduler } from '../../side-b/jobs/sideBScheduler';
 import { isFXMarketOpen, getMarketStatusJST } from '../../side-b/utils/marketHours';
 import { MatchingService } from '../../services/matchingService';
+import { edgeLedger } from '../../side-b/ledger';
 
 const router = Router();
 
@@ -215,6 +218,63 @@ router.get('/side-b/run-full-validation', async (_req: Request, res: Response) =
   } catch (error) {
     const message = error instanceof Error ? error.message : '不明なエラー';
     console.error('[Cron] フル検証手動実行エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+      duration: Date.now() - startTime,
+    });
+  }
+});
+
+/**
+ * POST /api/cron/side-b/reset-not-testable
+ * not_testable 仮説を unverified に戻す救済操作(Critical-1.5 フォローアップ)。
+ *
+ * 用途:
+ *   - Critical-1 / 1.5 デプロイ後、過去のバグで倒れた仮説を再 screening 可能にする
+ *   - body の statusNotePrefix を指定すると、該当 statusNote を持つものだけを対象にできる
+ *     例: { "statusNotePrefix": "Materialization失敗" }
+ *   - 省略時は status='not_testable' の全件をリセット
+ *
+ * 認証: cronAuth (CRON_SECRET Bearer)
+ *
+ * これは prod write を伴うため、明示的に POST を要求する。
+ */
+const ResetNotTestableBodySchema = z.object({
+  statusNotePrefix: z.string().min(1).optional(),
+});
+
+router.post('/side-b/reset-not-testable', async (req: Request, res: Response) => {
+  const startTime = Date.now();
+  try {
+    const parsed = ResetNotTestableBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        success: false,
+        error: 'リクエストボディが不正です',
+        details: parsed.error.issues,
+        duration: Date.now() - startTime,
+      });
+      return;
+    }
+    const statusNotePrefix = parsed.data.statusNotePrefix;
+
+    console.log(
+      `[Cron] not_testable リセット開始 (statusNotePrefix=${statusNotePrefix ?? '(全件)'})`,
+    );
+    const count = await edgeLedger.resetNotTestableToUnverified(
+      statusNotePrefix !== undefined ? { statusNotePrefix } : undefined,
+    );
+    console.log(`[Cron] リセット完了: ${count}件`);
+    res.json({
+      success: true,
+      message: `${count}件を unverified に戻しました`,
+      data: { affected: count, statusNotePrefix: statusNotePrefix ?? null },
+      duration: Date.now() - startTime,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラー';
+    console.error('[Cron] リセット失敗:', message);
     res.status(500).json({
       success: false,
       error: message,

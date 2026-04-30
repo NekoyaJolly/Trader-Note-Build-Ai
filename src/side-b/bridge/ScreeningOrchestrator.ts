@@ -31,6 +31,7 @@ import {
     type LensAggregator,
 } from '../lenses';
 import type { OHLCVBar } from '../lenses/utils/pivotDetection';
+import { normalizeTimeframe, DEFAULT_TIMEFRAME } from '../constants/timeframes';
 import type { ScreeningResult } from '../models/edgeHypothesis';
 import type { EdgeLedger } from '../ledger/EdgeLedger';
 import { edgeLedger as defaultEdgeLedger } from '../ledger/EdgeLedger';
@@ -156,9 +157,10 @@ export class ScreeningOrchestrator {
         const periodStart = new Date(period.start);
         const periodEnd = new Date(period.end);
         // Critical-1.5: 過去仮説には timeframes=['multi'] が混入しており、
-        // Twelve Data API がそれを rejecting する。'multi' / 不正値は 15m に倒す。
-        const rawTimeframe = hypothesis.timeframes[0] ?? '15m';
-        const timeframe = this.normalizeTimeframe(rawTimeframe);
+        // Twelve Data API がそれを rejecting する。'multi' / 不正値は既定値に倒す。
+        // 受理リスト・既定値は src/side-b/constants/timeframes.ts に集約。
+        const rawTimeframe = hypothesis.timeframes[0] ?? DEFAULT_TIMEFRAME;
+        const timeframe = normalizeTimeframe(rawTimeframe);
         const matchThreshold = options.matchThreshold ?? 0.6;
         const symbol = normalizeCTraderSymbol(hypothesis.symbols[0] ?? '');
         if (!symbol) {
