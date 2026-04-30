@@ -89,10 +89,12 @@ export class ResearchRepository {
       ? { ...input.marketAnalysis, _version: 2 }  // v2マーカー
       : input.featureVector;
 
+    // Critical-1.5: 'multi' フォールバックは Twelve Data API が rejecting する。
+    // Side-B の既定執行足は 15m なので、未指定時は 15m に倒して下流で安全に扱う。
     const research = await this.prisma.marketResearch.create({
       data: {
         symbol: input.symbol,
-        timeframe: input.timeframe || 'multi',
+        timeframe: input.timeframe || '15m',
         featureVector: featureVectorData,
         ohlcvSnapshot: input.ohlcvSnapshot as unknown as Prisma.InputJsonValue,
         aiModel: input.aiModel,
