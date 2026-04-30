@@ -25,6 +25,12 @@
  */
 
 import type { LensFeatureSnapshot } from '../lenses';
+import {
+    defaultLensAggregator,
+    registerDefaultLenses,
+    type LensAggregator,
+} from '../lenses';
+import type { OHLCVBar } from '../lenses/utils/pivotDetection';
 import type { ScreeningResult } from '../models/edgeHypothesis';
 import type { EdgeLedger } from '../ledger/EdgeLedger';
 import { edgeLedger as defaultEdgeLedger } from '../ledger/EdgeLedger';
@@ -41,6 +47,14 @@ import {
     type FetchAndCacheResult,
 } from '../../backend/services/fetchAndCacheOhlcv';
 import { normalizeCTraderSymbol } from '../../utils/symbolNormalization';
+
+/**
+ * Phase 3 系レンズ(volatility_regime)の必要バー数を満たすための最低本数。
+ * VolatilityRegimeLens の既定設定: indicatorWindow(20) + atrChangeWindow(5) + 1 = 26。
+ * パーセンタイル計算の安定性を考慮し、percentileLookback(100) と合わせて
+ * 余裕を持って 150 本まで遡る。
+ */
+const SCREENING_LENS_LOOKBACK = 150;
 
 // ===========================================
 // 型
@@ -99,7 +113,15 @@ export class ScreeningOrchestrator {
             startDate: Date,
             endDate: Date,
         ) => Promise<FetchAndCacheResult> = fetchAndCacheOhlcv,
-    ) {}
+        private readonly lensAggregator: Pick<LensAggregator, 'computeAll'> = defaultLensAggregator,
+    ) {
+        // ScreeningOrchestrator は agentMemory に依存せず、screening 期間の OHLCV から
+        // 直接 lensSnapshot を生成する(§Critical-1 修正、orchestration_health_report 参照)。
+        // テストで別 aggregator を注入するケースを除き、レンズ未登録の場合は登録する。
+        if (this.lensAggregator === defaultLensAggregator) {
+            registerDefaultLenses();
+        }
+    }
 
     /**
      * 仮説に対して事前スクリーニングを実行する。
@@ -142,11 +164,29 @@ export class ScreeningOrchestrator {
             return { hypothesisId, verdict: 'not_testable', reason };
         }
 
+        // OHLCV を先に補完(materialize で必要な ATR を bars から計算するため)。
+        const ensure = await this.ensureOhlcvData(symbol, timeframe, periodStart, periodEnd);
+        if (!ensure.ok) {
+            const reason = `OHLCV補完失敗: ${ensure.reason}`;
+            await this.edgeLedger.markNotTestable(hypothesisId, reason);
+            return { hypothesisId, verdict: 'not_testable', reason };
+        }
+
+        // screening 専用に fresh な lensSnapshot を計算する。
+        // 呼び出し側が options.lensSnapshot を渡していて、かつ ATR が含まれている場合のみ
+        // それを優先し、それ以外は OHLCV から計算した snapshot を使う。
+        const lensSnapshot = await this.resolveLensSnapshot(
+            symbol,
+            timeframe,
+            periodEnd,
+            options.lensSnapshot,
+        );
+
         // 1. Materialize
         let materialized;
         try {
             materialized = await this.materialization.materializeForValidation(hypothesis, {
-                lensSnapshot: options.lensSnapshot,
+                lensSnapshot,
             });
         } catch (error) {
             if (error instanceof MaterializationError) {
@@ -158,13 +198,6 @@ export class ScreeningOrchestrator {
         }
 
         const { tradeNoteId, stopLossPercent, takeProfitPercent, maxHoldingMinutes } = materialized;
-
-        const ensure = await this.ensureOhlcvData(symbol, timeframe, periodStart, periodEnd);
-        if (!ensure.ok) {
-            const reason = `OHLCV補完失敗: ${ensure.reason}`;
-            await this.edgeLedger.markNotTestable(hypothesisId, reason);
-            return { hypothesisId, verdict: 'not_testable', reason };
-        }
 
         // 2. Side-A BacktestService で BT 実行
         const runId = await this.backtestService.execute({
@@ -238,6 +271,70 @@ export class ScreeningOrchestrator {
             start: start.toISOString().split('T')[0],
             end: end.toISOString().split('T')[0],
         };
+    }
+
+    /**
+     * Materialize に渡す lensSnapshot を決定する。
+     *
+     * 優先順位:
+     *   1. 呼び出し側が渡した snapshot に有効な volatility_regime.atr が入っていればそれを使う
+     *   2. それ以外は screening 期間末尾の OHLCV から fresh に lensSnapshot を計算する
+     *   3. OHLCV が読めない場合は undefined を返し、materialize 側のエラー処理に任せる
+     *
+     * これにより agentMemory.getCurrentLensSnapshot に依存せず、
+     * screening ジョブ単独で ATR を解決できる(§Critical-1 修正)。
+     */
+    private async resolveLensSnapshot(
+        symbol: string,
+        timeframe: string,
+        periodEnd: Date,
+        provided: LensFeatureSnapshot | undefined,
+    ): Promise<LensFeatureSnapshot | undefined> {
+        if (provided) {
+            const vol = provided.features.get('volatility_regime');
+            const atr = vol?.features.atr;
+            if (typeof atr === 'number' && atr > 0) {
+                return provided;
+            }
+        }
+
+        try {
+            const lookbackMs = this.timeframeToMs(timeframe) * SCREENING_LENS_LOOKBACK;
+            const lookbackStart = new Date(periodEnd.getTime() - lookbackMs);
+            const recent = await this.ohlcvRepo.findManyAsOHLCVData({
+                symbol,
+                timeframe,
+                startTime: lookbackStart,
+                endTime: periodEnd,
+                limit: SCREENING_LENS_LOOKBACK,
+                orderBy: 'asc',
+            });
+            if (recent.length === 0) {
+                return provided;
+            }
+            const ohlcvBars: OHLCVBar[] = recent.map((bar) => ({
+                timestamp: bar.timestamp instanceof Date ? bar.timestamp : new Date(bar.timestamp),
+                open: bar.open,
+                high: bar.high,
+                low: bar.low,
+                close: bar.close,
+                volume: bar.volume,
+            }));
+            const fresh = await this.lensAggregator.computeAll({
+                symbol,
+                timeframe,
+                timestamp: ohlcvBars[ohlcvBars.length - 1].timestamp,
+                ohlcvBars,
+            });
+            return fresh;
+        } catch (err) {
+            console.warn(
+                `[ScreeningOrchestrator] fresh lensSnapshot 計算失敗、provided にフォールバック: ${
+                    err instanceof Error ? err.message : String(err)
+                }`,
+            );
+            return provided;
+        }
     }
 
     /**
