@@ -17,6 +17,7 @@
 
 import { config, modelFor } from '../../config';
 import { loadPromptWithGlobal } from '../prompts/loader';
+import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import type { AITradeScenario, PlanMarketAnalysis } from '../models';
 import type { JsonValue } from '../../utils/jsonValue';
 import { extractJson } from './llmJsonExtract';
@@ -178,7 +179,7 @@ export class DevilsAdvocateAgent {
         }
 
         try {
-            const systemPrompt = loadPromptWithGlobal('devils_advocate');
+            const systemPrompt = await this.resolveSystemPrompt();
             const userPrompt = this.buildUserPrompt(scenario, marketContext);
             const raw = await this.callAI(systemPrompt, userPrompt);
             const validated = validateDevilsAdvocateOutput(raw.content);
@@ -190,6 +191,22 @@ export class DevilsAdvocateAgent {
         } catch (error) {
             console.error("[DevilsAdvocate] 批評失敗:", error);
             return this.fallback('Devil\'s Advocate の呼び出しに失敗しました。');
+        }
+    }
+
+    /**
+     * Phase 6.7a: PromptRegistry.getCompositeActive で DB の __global__ + devils_advocate active を合成。
+     * Registry 未 seed / DB 不整合時は loadPromptWithGlobal にフォールバック。
+     */
+    private async resolveSystemPrompt(): Promise<string> {
+        try {
+            return await promptRegistry.getCompositeActive('devils_advocate');
+        } catch (err) {
+            console.warn(
+                '[DevilsAdvocate] Registry 合成に失敗、ファイル fallback:',
+                err instanceof Error ? err.message : err,
+            );
+            return loadPromptWithGlobal('devils_advocate');
         }
     }
 

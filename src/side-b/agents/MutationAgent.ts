@@ -8,6 +8,7 @@ import { randomUUID } from 'crypto';
 
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { loadPromptWithGlobal } from '../prompts/loader';
+import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
 import { modelFor } from '../../config';
 import { extractJson } from './llmJsonExtract';
@@ -46,6 +47,22 @@ export class MutationAgent {
   constructor(private readonly ai = new AIProvider({ model: modelFor('mutation') })) {}
 
   /**
+   * Phase 6.7a: PromptRegistry.getCompositeActive で DB の __global__ + mutation active を合成。
+   * Registry 未 seed / DB 不整合時は loadPromptWithGlobal にフォールバック。
+   */
+  private async resolveSystemPrompt(): Promise<string> {
+    try {
+      return await promptRegistry.getCompositeActive('mutation');
+    } catch (err) {
+      console.warn(
+        '[MutationAgent] Registry 合成に失敗、ファイル fallback:',
+        err instanceof Error ? err.message : err,
+      );
+      return loadPromptWithGlobal('mutation');
+    }
+  }
+
+  /**
    * エリート群とスコア説明を渡し、変異個体を生成
    */
   async generateMutants(
@@ -56,7 +73,7 @@ export class MutationAgent {
     if (elites.length === 0) return [];
     const perfLines = elites.map((e) => `- ${e.id}: score=${(scores.get(e.id) ?? 0).toFixed(4)}`);
     const payload = JSON.stringify(elites, null, 2);
-    const system = loadPromptWithGlobal('mutation');
+    const system = await this.resolveSystemPrompt();
     const user =
       `エリート戦略（JSON）:\n${payload}\n\n` +
       `スコア:\n${perfLines.join('\n')}\n\n` +
@@ -87,7 +104,7 @@ export class MutationAgent {
 
   /** 多様性が低いときの探索的変異 */
   async generateDiverse(regime: string, count: number): Promise<StrategyDSL[]> {
-    const system = loadPromptWithGlobal('mutation');
+    const system = await this.resolveSystemPrompt();
     const user =
       `レジーム: ${regime}\n` +
       `既存と重複しないよう、ランダム性の高い戦略を ${count} 件、JSON 配列のみで返してください。`;

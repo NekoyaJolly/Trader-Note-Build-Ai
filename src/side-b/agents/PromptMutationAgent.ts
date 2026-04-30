@@ -20,6 +20,7 @@ import { extractJson } from './llmJsonExtract';
 import {
   GLOBAL_AGENT_NAME,
   SPECIALIST_COMMON_AGENT_NAME,
+  promptRegistry,
 } from '../prompts/registry/PromptRegistry';
 
 export interface PromptMutationProposal {
@@ -108,6 +109,22 @@ export class PromptMutationAgent {
   private readonly ai: AIProvider;
 
   /**
+   * Phase 6.7a: PromptRegistry.getCompositeActive で DB の __global__ + prompt_mutation active を合成。
+   * Registry 未 seed / DB 不整合時は loadPromptWithGlobal にフォールバック。
+   */
+  private async resolveSystemPrompt(): Promise<string> {
+    try {
+      return await promptRegistry.getCompositeActive('prompt_mutation');
+    } catch (err) {
+      console.warn(
+        '[PromptMutationAgent] Registry 合成に失敗、ファイル fallback:',
+        err instanceof Error ? err.message : err,
+      );
+      return loadPromptWithGlobal('prompt_mutation');
+    }
+  }
+
+  /**
    * 改善案プロンプトを生成する。
    * 失敗時は空配列を返す(握りつぶしではなく、呼び出し側のフォールバックを前提にした設計)。
    *
@@ -134,7 +151,7 @@ export class PromptMutationAgent {
       return [];
     }
     const count = input.count ?? 3;
-    const system = loadPromptWithGlobal('prompt_mutation');
+    const system = await this.resolveSystemPrompt();
     const user = this.buildUserPrompt(input, count);
 
     const res = await withRetries(() =>

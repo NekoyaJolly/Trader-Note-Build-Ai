@@ -8,6 +8,7 @@ import { randomUUID } from 'crypto';
 
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { loadPromptWithGlobal } from '../prompts/loader';
+import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
 import { modelFor } from '../../config';
 import { extractJson } from './llmJsonExtract';
@@ -29,6 +30,22 @@ export class CrossoverAgent {
   constructor(private readonly ai = new AIProvider({ model: modelFor('crossover') })) {}
 
   /**
+   * Phase 6.7a: PromptRegistry.getCompositeActive で DB の __global__ + crossover active を合成。
+   * Registry 未 seed / DB 不整合時は loadPromptWithGlobal にフォールバック。
+   */
+  private async resolveSystemPrompt(): Promise<string> {
+    try {
+      return await promptRegistry.getCompositeActive('crossover');
+    } catch (err) {
+      console.warn(
+        '[CrossoverAgent] Registry 合成に失敗、ファイル fallback:',
+        err instanceof Error ? err.message : err,
+      );
+      return loadPromptWithGlobal('crossover');
+    }
+  }
+
+  /**
    * エリート集合からペアを組み、子個体を生成
    */
   async generateCrossovers(
@@ -38,7 +55,7 @@ export class CrossoverAgent {
   ): Promise<StrategyDSL[]> {
     if (elites.length < 2) return [];
     const out: StrategyDSL[] = [];
-    const system = loadPromptWithGlobal('crossover');
+    const system = await this.resolveSystemPrompt();
     let attempts = 0;
     outer: for (let i = 0; i < elites.length; i++) {
       for (let j = i + 1; j < elites.length; j++) {

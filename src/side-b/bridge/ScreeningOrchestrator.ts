@@ -265,6 +265,21 @@ export class ScreeningOrchestrator {
     }
 
     /**
+     * timeframe 文字列を screening パイプラインで安全な値に正規化する(Critical-1.5)。
+     * 受理する値: 1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w
+     * それ以外('multi' / 空 / 不正値)は既定 15m に倒す。
+     */
+    private normalizeTimeframe(tf: string): string {
+        const allowed = new Set(['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w']);
+        const normalized = tf.trim().toLowerCase();
+        if (allowed.has(normalized)) return normalized;
+        console.warn(
+            `[ScreeningOrchestrator] 不正な timeframe="${tf}" を 15m に正規化しました`,
+        );
+        return '15m';
+    }
+
+    /**
      * スクリーニング対象期間のデフォルト（直近1年）
      * ISO8601 日付文字列を返す。
      */
