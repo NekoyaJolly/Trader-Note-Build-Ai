@@ -171,6 +171,22 @@ export interface AgentMemoryState {
     /** 学習メモ — シンボル別管理 */
     lessonsBySymbol: Map<string, SymbolLessons>;
 
+    /**
+     * Discovery 週次レポートの hintsForHG キャッシュ(Critical-7 配線)。
+     * DiscoveryAgent.analyze の最後に setLatestDiscoveryHints で書き込み、
+     * 次の plan 生成時に orchestrator が参照して HypothesisGenerator に渡す。
+     * Discovery が走るまで undefined。
+     */
+    latestDiscoveryHints?: {
+        hints: Array<{
+            promisingDirection: string;
+            lensFocusAreas: string[];
+            rationale: string;
+        }>;
+        capturedAt: Date;
+        analyzedTradeCount: number;
+    };
+
     /** PDCAサイクルカウンター */
     cycleCount: number;
 
@@ -299,6 +315,43 @@ export class AgentMemory {
 
     clearCurrentLensSnapshot(symbol: string): void {
         this.state.currentLensSnapshots.delete(symbol);
+    }
+
+    // --- Discovery hints キャッシュ(Phase 6.7c / Critical-7) ---
+
+    /**
+     * DiscoveryAgent.analyze 完了時に hintsForHG を保存する。
+     * 直前の Plan 生成サイクルで HG が参照する。
+     */
+    setLatestDiscoveryHints(
+        hints: Array<{
+            promisingDirection: string;
+            lensFocusAreas: string[];
+            rationale: string;
+        }>,
+        analyzedTradeCount: number,
+    ): void {
+        this.state.latestDiscoveryHints = {
+            hints,
+            capturedAt: new Date(),
+            analyzedTradeCount,
+        };
+        console.log(
+            `[AgentMemory] Discovery hints キャッシュ更新: ${hints.length}件 (analyzedTradeCount=${analyzedTradeCount})`,
+        );
+    }
+
+    /**
+     * 直近の Discovery hints を取得する。Discovery が走っていなければ undefined。
+     * orchestrator が plan 生成サイクルで参照する。
+     */
+    getLatestDiscoveryHints(): AgentMemoryState['latestDiscoveryHints'] | undefined {
+        return this.state.latestDiscoveryHints;
+    }
+
+    /** Discovery hints の有効期限切れ等で明示的にクリアする(現状は使わないが保守用)。 */
+    clearLatestDiscoveryHints(): void {
+        this.state.latestDiscoveryHints = undefined;
     }
 
     // --- 学習メモ（シンボル別管理） ---
