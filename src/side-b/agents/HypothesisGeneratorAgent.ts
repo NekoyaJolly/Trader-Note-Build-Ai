@@ -473,6 +473,10 @@ export class HypothesisGeneratorAgent {
         result: HypothesisGeneratorOutput,
         input: HypothesisGeneratorInput,
     ): CreateEdgeHypothesisInput[] {
+        // Critical-1.5: 'multi' / 不正な timeframe を screening 互換の値に正規化する。
+        // 上流で MarketResearch.timeframe が undefined だったケースで 'multi' が伝播していた。
+        const allowedTfs = new Set(['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w']);
+        const normalizedTimeframe = allowedTfs.has(input.timeframe) ? input.timeframe : '15m';
         return result.hypotheses
             .filter((h) => !this.isDuplicateOfExisting(h.statement, input.existingHypotheses))
             .map<CreateEdgeHypothesisInput>((h) => ({
@@ -483,7 +487,7 @@ export class HypothesisGeneratorAgent {
                 status: 'unverified',
                 statusNote: undefined,
                 symbols: [input.symbol],
-                timeframes: [input.timeframe],
+                timeframes: [normalizedTimeframe],
                 observationCount: 0,
                 winCount: 0,
                 lossCount: 0,
