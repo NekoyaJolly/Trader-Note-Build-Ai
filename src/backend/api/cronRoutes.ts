@@ -6,6 +6,8 @@
  * エンドポイント:
  * - GET /api/cron/side-b/daily-plan - 日次プラン生成（毎朝）
  * - GET /api/cron/side-b/monitor - 監視実行（毎時）
+ * - GET /api/cron/side-b/run-screening - 仮説スクリーニング手動実行（PDCA-2 検証用）
+ * - GET /api/cron/side-b/run-full-validation - フル検証手動実行（screening_passed → confirmed/rejected）
  * - GET /api/cron/matching-pipeline - マッチング＋通知パイプライン（15分間隔）
  * - GET /api/cron/health - ヘルスチェック
  *
@@ -143,6 +145,76 @@ router.get('/side-b/monitor', async (_req: Request, res: Response) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : '不明なエラー';
     console.error('[Cron] 監視実行エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+      duration: Date.now() - startTime,
+    });
+  }
+});
+
+/**
+ * GET /api/cron/side-b/run-screening
+ * 仮説スクリーニング手動実行（PDCA-2 検証用 / orchestration_health_report Critical-1 対応）
+ *
+ * 動作:
+ *   - unverified 仮説を最大 screeningMaxPerRun 件取り出して
+ *     ScreeningOrchestrator.runScreening を回す
+ *   - 市場開場チェックなし（screening は OHLCV 取得経由なのでオフライン実行可）
+ *
+ * 用途:
+ *   - Phase 6.7b デプロイ後の動作確認
+ *   - not_testable に倒れた仮説の再検証（仮説ID 指定は Phase 7 以降）
+ */
+router.get('/side-b/run-screening', async (_req: Request, res: Response) => {
+  const startTime = Date.now();
+  try {
+    console.log('[Cron] スクリーニング手動実行を開始します');
+    const scheduler = getSideBScheduler();
+    const summary = await scheduler.runScreeningNow();
+    console.log('[Cron] スクリーニング手動実行完了:', summary);
+    res.json({
+      success: summary.errors === 0,
+      message: `processed=${summary.processed} passed=${summary.passed} rejected=${summary.rejected} not_testable=${summary.notTestable} errors=${summary.errors}`,
+      data: summary,
+      duration: Date.now() - startTime,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラー';
+    console.error('[Cron] スクリーニング手動実行エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+      duration: Date.now() - startTime,
+    });
+  }
+});
+
+/**
+ * GET /api/cron/side-b/run-full-validation
+ * フル検証手動実行（screening_passed → confirmed/rejected）
+ *
+ * 動作:
+ *   - screening_passed 仮説を最大 fullValidationMaxPerRun 件取り出して
+ *     StrategistAgent.validate を回す
+ *   - Python + LLM 起動を伴うため、各仮説間に 10 秒のクールダウンあり
+ */
+router.get('/side-b/run-full-validation', async (_req: Request, res: Response) => {
+  const startTime = Date.now();
+  try {
+    console.log('[Cron] フル検証手動実行を開始します');
+    const scheduler = getSideBScheduler();
+    const summary = await scheduler.runFullValidationNow();
+    console.log('[Cron] フル検証手動実行完了:', summary);
+    res.json({
+      success: summary.errors === 0,
+      message: `processed=${summary.processed} confirmed=${summary.confirmed} rejected=${summary.rejected} not_testable=${summary.notTestable} errors=${summary.errors}`,
+      data: summary,
+      duration: Date.now() - startTime,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラー';
+    console.error('[Cron] フル検証手動実行エラー:', message);
     res.status(500).json({
       success: false,
       error: message,

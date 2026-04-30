@@ -386,6 +386,18 @@ export class AIOrchestrator {
               console.warn('[Orchestrator] 専門家分析失敗(仮説生成は続行):', err);
             }
 
+            // Critical-7: Discovery 週次レポートが残した hintsForHG を AgentMemory から
+            // 取り出して HG に渡す。Discovery が走っていなければ undefined。
+            const cachedDiscovery = agentMemory.getLatestDiscoveryHints();
+            const discoveryHints =
+              cachedDiscovery && cachedDiscovery.hints.length > 0
+                ? {
+                    capturedAt: cachedDiscovery.capturedAt.toISOString(),
+                    analyzedTradeCount: cachedDiscovery.analyzedTradeCount,
+                    hints: cachedDiscovery.hints,
+                  }
+                : undefined;
+
             const genResult = await this.hypothesisGenerator.generate({
               symbol,
               timeframe: planTimeframe,
@@ -398,6 +410,7 @@ export class AIOrchestrator {
                     volatilityVolume: specialistBundle.volatilityVolume ?? undefined,
                   }
                 : undefined,
+              discoveryHints,
             });
             hypothesisGeneratorTokens = genResult.tokenUsage;
             const createInputs = this.hypothesisGenerator.toCreateInputs(

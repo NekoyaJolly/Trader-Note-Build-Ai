@@ -8,6 +8,7 @@ import { DiscoveryAgent, validateDiscoveryOutput } from '../../agents/DiscoveryA
 import type { AITradeNote } from '../../models/aiTradeNote';
 import type { EdgeLedger } from '../../ledger/EdgeLedger';
 import type { EdgeHypothesis, CreateEdgeHypothesisInput } from '../../models/edgeHypothesis';
+import { agentMemory } from '../../agent/agentMemory';
 
 global.fetch = jest.fn();
 
@@ -225,6 +226,42 @@ describe('DiscoveryAgent.analyze', () => {
         expect(stub.created[0].status).toBe('unverified');
         expect(report.weeklyNote).toBe('今週の主要発見');
         expect(report.tokenUsage).toBe(800);
+    });
+
+    it('解析後に hintsForHG を AgentMemory にキャッシュする (Critical-7)', async () => {
+        agentMemory.clearLatestDiscoveryHints();
+        mockFetchWith({
+            interpretations: [],
+            newHypotheses: [],
+            hintsForHG: [
+                {
+                    promisingDirection: 'low_vol_breakout',
+                    lensFocusAreas: ['volatility_regime'],
+                    rationale: 'BB幅が極小のとき後続のブレイクが優位',
+                },
+            ],
+            weeklyNote: '',
+        });
+
+        const notes: AITradeNote[] = [
+            makeNote('win', { volatility_regime: { bb_width_percentile: 10, is_squeeze: true } }),
+            makeNote('win', { volatility_regime: { bb_width_percentile: 12, is_squeeze: true } }),
+            makeNote('win', { volatility_regime: { bb_width_percentile: 15, is_squeeze: true } }),
+            makeNote('loss', { volatility_regime: { bb_width_percentile: 70, is_squeeze: false } }),
+            makeNote('loss', { volatility_regime: { bb_width_percentile: 80, is_squeeze: false } }),
+            makeNote('loss', { volatility_regime: { bb_width_percentile: 75, is_squeeze: false } }),
+        ];
+
+        await agent.analyze(notes, new Date('2026-04-10'), new Date('2026-04-17'));
+
+        const cached = agentMemory.getLatestDiscoveryHints();
+        expect(cached).toBeDefined();
+        expect(cached?.hints).toHaveLength(1);
+        expect(cached?.hints[0].promisingDirection).toBe('low_vol_breakout');
+        expect(cached?.analyzedTradeCount).toBe(notes.length);
+
+        // 後続テストへの影響を避けるためクリア
+        agentMemory.clearLatestDiscoveryHints();
     });
 
     it('LLM 失敗時も統計結果だけ返す', async () => {

@@ -34,6 +34,7 @@ import {
 } from './discoveryStats';
 import type { EdgeLedger } from '../ledger/EdgeLedger';
 import { edgeLedger as defaultLedger } from '../ledger/EdgeLedger';
+import { agentMemory } from '../agent/agentMemory';
 import type { JsonValue } from '../../utils/jsonValue';
 
 // ===========================================
@@ -350,6 +351,11 @@ export class DiscoveryAgent {
 
         // 4. レポート整形
         const lensInsights = this.groupByLens(topSeparations, llmOutput.interpretations);
+
+        // 5. Critical-7: hintsForHG を AgentMemory にキャッシュし、次の plan 生成で
+        //    HypothesisGenerator が参照できるようにする。LLM 失敗等で hints が空の
+        //    場合でも、明示的に空配列でキャッシュを更新して鮮度をリセットする。
+        agentMemory.setLatestDiscoveryHints(llmOutput.hintsForHG, truncated.length);
 
         return {
             periodStart,
