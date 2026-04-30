@@ -18,6 +18,7 @@ import type { PrismaClient, MarketResearch, Prisma } from '@prisma/client';
 import { prisma } from '../../backend/db/client';
 import type { FeatureVector12D, OHLCVSnapshot} from '../models';
 import { type MarketAnalysis, safeValidateMarketAnalysis, analysisToLegacyFeatureVector, safeValidateFeatureVector, createEmptyFeatureVector } from '../models';
+import { DEFAULT_TIMEFRAME } from '../constants/timeframes';
 
 // ===========================================
 // 型定義
@@ -89,12 +90,12 @@ export class ResearchRepository {
       ? { ...input.marketAnalysis, _version: 2 }  // v2マーカー
       : input.featureVector;
 
-    // Critical-1.5: 'multi' フォールバックは Twelve Data API が rejecting する。
-    // Side-B の既定執行足は 15m なので、未指定時は 15m に倒して下流で安全に扱う。
+    // Critical-1.5 / 定数化: 'multi' フォールバックは Twelve Data API が rejecting する。
+    // 既定値は src/side-b/constants/timeframes.ts に集約。ハードコード禁止。
     const research = await this.prisma.marketResearch.create({
       data: {
         symbol: input.symbol,
-        timeframe: input.timeframe || '15m',
+        timeframe: input.timeframe || DEFAULT_TIMEFRAME,
         featureVector: featureVectorData,
         ohlcvSnapshot: input.ohlcvSnapshot as unknown as Prisma.InputJsonValue,
         aiModel: input.aiModel,

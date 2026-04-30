@@ -31,6 +31,7 @@ import {
     type LensAggregator,
 } from '../lenses';
 import type { OHLCVBar } from '../lenses/utils/pivotDetection';
+import { normalizeTimeframe, DEFAULT_TIMEFRAME } from '../constants/timeframes';
 import type { ScreeningResult } from '../models/edgeHypothesis';
 import type { EdgeLedger } from '../ledger/EdgeLedger';
 import { edgeLedger as defaultEdgeLedger } from '../ledger/EdgeLedger';
@@ -156,9 +157,10 @@ export class ScreeningOrchestrator {
         const periodStart = new Date(period.start);
         const periodEnd = new Date(period.end);
         // Critical-1.5: 過去仮説には timeframes=['multi'] が混入しており、
-        // Twelve Data API がそれを rejecting する。'multi' / 不正値は 15m に倒す。
-        const rawTimeframe = hypothesis.timeframes[0] ?? '15m';
-        const timeframe = this.normalizeTimeframe(rawTimeframe);
+        // Twelve Data API がそれを rejecting する。'multi' / 不正値は既定値に倒す。
+        // 受理リスト・既定値は src/side-b/constants/timeframes.ts に集約。
+        const rawTimeframe = hypothesis.timeframes[0] ?? DEFAULT_TIMEFRAME;
+        const timeframe = normalizeTimeframe(rawTimeframe);
         const matchThreshold = options.matchThreshold ?? 0.6;
         const symbol = normalizeCTraderSymbol(hypothesis.symbols[0] ?? '');
         if (!symbol) {
@@ -260,21 +262,6 @@ export class ScreeningOrchestrator {
             backtestRunId: runId,
             reasons: check.reasons,
         };
-    }
-
-    /**
-     * timeframe 文字列を screening パイプラインで安全な値に正規化する(Critical-1.5)。
-     * 受理する値: 1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w
-     * それ以外('multi' / 空 / 不正値)は既定 15m に倒す。
-     */
-    private normalizeTimeframe(tf: string): string {
-        const allowed = new Set(['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w']);
-        const normalized = tf.trim().toLowerCase();
-        if (allowed.has(normalized)) return normalized;
-        console.warn(
-            `[ScreeningOrchestrator] 不正な timeframe="${tf}" を 15m に正規化しました`,
-        );
-        return '15m';
     }
 
     /**

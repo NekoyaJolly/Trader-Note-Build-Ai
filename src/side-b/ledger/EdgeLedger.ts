@@ -477,6 +477,35 @@ export class EdgeLedger {
     }
 
     /**
+     * 救済操作: not_testable 仮説を unverified に戻す(Critical-1.5 フォローアップ)。
+     *
+     * Critical-1 / 1.5 で screening の詰まりを解消した後、過去に同じバグで倒れた
+     * 仮説を再 screening 可能にするための一括リセット。
+     *
+     * 任意で statusNote の前方一致パターンで対象を絞れる(例: "Materialization失敗" のみ)。
+     * 何も指定しなければ status='not_testable' の全件を戻す。
+     *
+     * @returns 影響を受けた件数
+     */
+    async resetNotTestableToUnverified(options?: {
+        statusNotePrefix?: string;
+    }): Promise<number> {
+        const where: Prisma.EdgeHypothesisWhereInput = { status: 'not_testable' };
+        if (options?.statusNotePrefix !== undefined) {
+            where.statusNote = { startsWith: options.statusNotePrefix };
+        }
+        const result = await prisma.edgeHypothesis.updateMany({
+            where,
+            data: {
+                status: 'unverified',
+                statusUpdatedAt: new Date(),
+                statusNote: null,
+            },
+        });
+        return result.count;
+    }
+
+    /**
      * Phase 4c: 本格検証通過として confirmed に昇格
      *
      * ConsolidatedValidationReport をそのまま fullValidationReport に保存し、
