@@ -174,7 +174,12 @@ export class MaterializationService {
     private getAtrFromSnapshot(snapshot?: LensFeatureSnapshot): number | undefined {
         const vol = snapshot?.features.get('volatility_regime');
         const atr = vol?.features.atr;
-        return typeof atr === 'number' && atr > 0 ? atr : undefined;
+        if (typeof atr === 'number' && atr > 0) return atr;
+        // VolatilityRegime が unknown(insufficient_data)を返したケースは
+        // features に atr 自体が含まれない。呼び出し側が原因を判別しやすいよう
+        // ここでは undefined を返すだけにとどめ、エラーメッセージの拡充は
+        // calculateStopLossPercent / calculateTakeProfitPercent 側で行う。
+        return undefined;
     }
 
     private getLatestPriceFromSnapshot(snapshot?: LensFeatureSnapshot): number | undefined {
@@ -198,7 +203,7 @@ export class MaterializationService {
         if (spec.type === 'atr_multiple') {
             if (atr === undefined) {
                 throw new MaterializationError(
-                    'atr_multiple SL を要求されたが ATR が取得できない',
+                    'atr_multiple SL を要求されたが ATR が取得できない (volatility_regime レンズが unknown または lensSnapshot 未提供)',
                 );
             }
             return ((atr * spec.value) / entryPrice) * 100;
@@ -229,7 +234,7 @@ export class MaterializationService {
         if (spec.type === 'atr_multiple') {
             if (atr === undefined) {
                 throw new MaterializationError(
-                    'atr_multiple TP を要求されたが ATR が取得できない',
+                    'atr_multiple TP を要求されたが ATR が取得できない (volatility_regime レンズが unknown または lensSnapshot 未提供)',
                 );
             }
             return ((atr * spec.value) / entryPrice) * 100;

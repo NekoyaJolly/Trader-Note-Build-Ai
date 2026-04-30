@@ -9,6 +9,7 @@ import { ScreeningOrchestrator } from '../../bridge/ScreeningOrchestrator';
 import { MaterializationError } from '../../bridge/types';
 import type { EdgeHypothesis } from '../../models/edgeHypothesis';
 import { StatusManager } from '../../ledger/statusManager';
+import type { LensFeature, LensFeatureSnapshot } from '../../lenses';
 
 function makeHypothesis(overrides?: Partial<EdgeHypothesis>): EdgeHypothesis {
     const base: EdgeHypothesis = {
@@ -54,6 +55,35 @@ interface MockDeps {
         findManyAsOHLCVData: jest.Mock;
     };
     fetchAndCache: jest.Mock;
+    lensAggregator: {
+        computeAll: jest.Mock;
+    };
+}
+
+function makeFreshLensSnapshot(atr = 12.5): LensFeatureSnapshot {
+    const volFeature: LensFeature = {
+        lensName: 'volatility_regime',
+        lensVersion: '1.0.0',
+        features: { atr, bb_width_percentile: 55, regime_label: 'normal', is_squeeze: false, is_expanding: false },
+        computedAt: new Date('2026-04-30T00:00:00Z'),
+        confidence: 0.9,
+    };
+    const caFeature: LensFeature = {
+        lensName: 'current_analysis',
+        lensVersion: '1.0.0',
+        features: { latest_price: 2300, trend_strength: 50, direction: 'long' },
+        computedAt: new Date('2026-04-30T00:00:00Z'),
+        confidence: 0.8,
+    };
+    const features = new Map<string, LensFeature>();
+    features.set('volatility_regime', volFeature);
+    features.set('current_analysis', caFeature);
+    return {
+        timestamp: new Date('2026-04-30T00:00:00Z'),
+        symbol: 'XAUUSD',
+        features,
+        totalComputeDurationMs: 5,
+    };
 }
 
 function makeMocks(overrides?: Partial<MockDeps>): MockDeps {
@@ -84,6 +114,10 @@ function makeMocks(overrides?: Partial<MockDeps>): MockDeps {
             ...(overrides?.ohlcvRepo ?? {}),
         },
         fetchAndCache: jest.fn().mockResolvedValue({ success: true, cachedCount: 0, source: 'ctrader' }),
+        lensAggregator: {
+            computeAll: jest.fn().mockResolvedValue(makeFreshLensSnapshot()),
+            ...(overrides?.lensAggregator ?? {}),
+        },
         ...(overrides?.fetchAndCache ? { fetchAndCache: overrides.fetchAndCache } : {}),
     };
 }
@@ -97,6 +131,7 @@ function makeOrchestrator(deps: MockDeps) {
         deps.backtestService as unknown as ScreeningConstructorArgs[3],
         deps.ohlcvRepo,
         deps.fetchAndCache,
+        deps.lensAggregator,
     );
 }
 
@@ -320,6 +355,139 @@ describe('ScreeningOrchestrator.runScreening', () => {
             expect.any(Date),
         );
         expect(mocks.backtestService.execute).toHaveBeenCalled();
+    });
+
+    it('options.lensSnapshot を渡さなくても OHLCV から fresh な lensSnapshot を計算して materialize に渡す', async () => {
+        const hyp = makeHypothesis();
+        const mocks = makeMocks();
+        mocks.edgeLedger.get.mockResolvedValue(hyp);
+        mocks.materialization.materializeForValidation.mockResolvedValue({
+            tradeNoteId: 'note-fresh',
+            tradeId: 'trade-fresh',
+            stopLossPercent: 0.5,
+            takeProfitPercent: 1.0,
+            pathUsed: 'legacy',
+        });
+        mocks.backtestService.execute.mockResolvedValue('run-fresh');
+        mocks.backtestService.getResult.mockResolvedValue({
+            runId: 'run-fresh',
+            status: 'completed',
+            setupCount: 30,
+            winCount: 18,
+            lossCount: 12,
+            timeoutCount: 0,
+            winRate: 0.6,
+            profitFactor: 1.6,
+            totalProfit: 300,
+            totalLoss: 187.5,
+            averagePnL: 3.75,
+            expectancy: 1.5,
+            maxDrawdown: 50,
+            events: [],
+        });
+
+        const result = await makeOrchestrator(mocks).runScreening(hyp.id);
+
+        expect(result.verdict).toBe('screening_passed');
+        // fresh snapshot 計算が呼ばれたか
+        expect(mocks.lensAggregator.computeAll).toHaveBeenCalledTimes(1);
+        // materialize に snapshot が渡され、その snapshot に ATR が含まれていること
+        const materializeCall = mocks.materialization.materializeForValidation.mock.calls[0];
+        const passedSnapshot: LensFeatureSnapshot | undefined = materializeCall[1]?.lensSnapshot;
+        expect(passedSnapshot).toBeDefined();
+        expect(passedSnapshot?.features.get('volatility_regime')?.features.atr).toBe(12.5);
+    });
+
+    it('options.lensSnapshot に有効な ATR があれば fresh 計算をスキップしてそれを使う', async () => {
+        const hyp = makeHypothesis();
+        const provided = makeFreshLensSnapshot(99.9);
+        const mocks = makeMocks();
+        mocks.edgeLedger.get.mockResolvedValue(hyp);
+        mocks.materialization.materializeForValidation.mockResolvedValue({
+            tradeNoteId: 'note-provided',
+            tradeId: 'trade-provided',
+            stopLossPercent: 0.5,
+            takeProfitPercent: 1.0,
+            pathUsed: 'legacy',
+        });
+        mocks.backtestService.execute.mockResolvedValue('run-provided');
+        mocks.backtestService.getResult.mockResolvedValue({
+            runId: 'run-provided',
+            status: 'completed',
+            setupCount: 30,
+            winCount: 18,
+            lossCount: 12,
+            timeoutCount: 0,
+            winRate: 0.6,
+            profitFactor: 1.6,
+            totalProfit: 300,
+            totalLoss: 187.5,
+            averagePnL: 3.75,
+            expectancy: 1.5,
+            maxDrawdown: 50,
+            events: [],
+        });
+
+        const result = await makeOrchestrator(mocks).runScreening(hyp.id, { lensSnapshot: provided });
+
+        expect(result.verdict).toBe('screening_passed');
+        // 呼ばれてはいけない（既に有効な ATR がある）
+        expect(mocks.lensAggregator.computeAll).not.toHaveBeenCalled();
+        const materializeCall = mocks.materialization.materializeForValidation.mock.calls[0];
+        const passedSnapshot: LensFeatureSnapshot | undefined = materializeCall[1]?.lensSnapshot;
+        expect(passedSnapshot?.features.get('volatility_regime')?.features.atr).toBe(99.9);
+    });
+
+    it('options.lensSnapshot に ATR が無ければ fresh 計算で補完する', async () => {
+        const hyp = makeHypothesis();
+        // ATR が無い snapshot を提供
+        const noAtrFeatures = new Map<string, LensFeature>();
+        noAtrFeatures.set('volatility_regime', {
+            lensName: 'volatility_regime',
+            lensVersion: '1.0.0',
+            features: { regime_label: 'unknown', reason: 'insufficient_data' },
+            computedAt: new Date(),
+        });
+        const incomplete: LensFeatureSnapshot = {
+            timestamp: new Date(),
+            symbol: 'XAUUSD',
+            features: noAtrFeatures,
+            totalComputeDurationMs: 1,
+        };
+        const mocks = makeMocks();
+        mocks.edgeLedger.get.mockResolvedValue(hyp);
+        mocks.materialization.materializeForValidation.mockResolvedValue({
+            tradeNoteId: 'note-recomputed',
+            tradeId: 'trade-recomputed',
+            stopLossPercent: 0.5,
+            takeProfitPercent: 1.0,
+            pathUsed: 'legacy',
+        });
+        mocks.backtestService.execute.mockResolvedValue('run-recompute');
+        mocks.backtestService.getResult.mockResolvedValue({
+            runId: 'run-recompute',
+            status: 'completed',
+            setupCount: 30,
+            winCount: 18,
+            lossCount: 12,
+            timeoutCount: 0,
+            winRate: 0.6,
+            profitFactor: 1.6,
+            totalProfit: 300,
+            totalLoss: 187.5,
+            averagePnL: 3.75,
+            expectancy: 1.5,
+            maxDrawdown: 50,
+            events: [],
+        });
+
+        await makeOrchestrator(mocks).runScreening(hyp.id, { lensSnapshot: incomplete });
+
+        // ATR が無いので fresh 計算が走る
+        expect(mocks.lensAggregator.computeAll).toHaveBeenCalledTimes(1);
+        const materializeCall = mocks.materialization.materializeForValidation.mock.calls[0];
+        const passedSnapshot: LensFeatureSnapshot | undefined = materializeCall[1]?.lensSnapshot;
+        expect(passedSnapshot?.features.get('volatility_regime')?.features.atr).toBe(12.5);
     });
 
     it('OHLCV補完に失敗した場合はnot_testableとして記録する', async () => {
