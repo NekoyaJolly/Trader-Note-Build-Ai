@@ -52,7 +52,7 @@ describe('aggregateBacktestEvents (Critical-9)', () => {
       evt(4, 'timeout', -80),
     ];
 
-    const result = aggregateBacktestEvents('run-1', events, 0);
+    const result = aggregateBacktestEvents('run-1', events);
 
     expect(result.setupCount).toBe(4);
     expect(result.winCount).toBe(2);
@@ -72,7 +72,7 @@ describe('aggregateBacktestEvents (Critical-9)', () => {
       evt(4, 'timeout', -10),
     ];
 
-    const result = aggregateBacktestEvents('run-1', events, 0);
+    const result = aggregateBacktestEvents('run-1', events);
 
     expect(result.setupCount).toBe(4);
     // pnl > 0 は win + 正 timeout の 2 件、pnl < 0 は loss + 負 timeout の 2 件。
@@ -86,7 +86,7 @@ describe('aggregateBacktestEvents (Critical-9)', () => {
   });
 
   it('events が空の場合は全て 0', () => {
-    const result = aggregateBacktestEvents('run-1', [], 0);
+    const result = aggregateBacktestEvents('run-1', []);
 
     expect(result.setupCount).toBe(0);
     expect(result.winCount).toBe(0);
@@ -104,7 +104,7 @@ describe('aggregateBacktestEvents (Critical-9)', () => {
       evt(2, 'loss', -20),
     ];
 
-    const result = aggregateBacktestEvents('run-1', events, 0);
+    const result = aggregateBacktestEvents('run-1', events);
 
     expect(result.winCount).toBe(0);
     expect(result.lossCount).toBe(2);
@@ -119,7 +119,7 @@ describe('aggregateBacktestEvents (Critical-9)', () => {
       evt(2, 'win', 20),
     ];
 
-    const result = aggregateBacktestEvents('run-1', events, 0);
+    const result = aggregateBacktestEvents('run-1', events);
 
     expect(result.winCount).toBe(2);
     expect(result.lossCount).toBe(0);

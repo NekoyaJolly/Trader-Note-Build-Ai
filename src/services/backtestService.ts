@@ -196,7 +196,9 @@ export class BacktestService {
       const events = await this.backtestRepo.findEventsByRunId(run.id);
 
       // 9. 結果を集計
-      const result = this.calculateResult(run.id, events, params.tradingCost || 0);
+      // 注意: tradingCost は events 構築時 (calculatePnL) で既に pnl に反映済みのため、
+      // 集計関数には渡さない。
+      const result = this.calculateResult(run.id, events);
 
       // 10. 結果を保存
       await this.backtestRepo.createResult(result);
@@ -443,9 +445,8 @@ export class BacktestService {
   private calculateResult(
     runId: string,
     events: BacktestEvent[],
-    tradingCostPct: number,
   ): CreateBacktestResultInput {
-    return aggregateBacktestEvents(runId, events, tradingCostPct);
+    return aggregateBacktestEvents(runId, events);
   }
 
   /**
@@ -525,45 +526,41 @@ export const backtestService = new BacktestService();
  *
  * timeoutCount は exitReason='timeout' の純粋カウントで、TP/SL に届かなかった件数の
  * 参考値として残す。winCount/lossCount とは独立軸のため、意味的に重複しうる。
+ *
+ * 注意: 取引コストは events 構築時 (calculatePnL) で既に pnl に反映済みのため、
+ * 本関数では追加で考慮しない。
  */
 export function aggregateBacktestEvents(
   runId: string,
   events: BacktestEvent[],
-  _tradingCostPct: number,
 ): CreateBacktestResultInput {
-  const getPnl = (e: BacktestEvent): number => {
-    if (e.pnl === null || e.pnl === undefined) return 0;
-    return Number(e.pnl);
-  };
-
-  const setupCount = events.length;
-  const winCount = events.filter(e => getPnl(e) > 0).length;
-  const lossCount = events.filter(e => getPnl(e) < 0).length;
-  const timeoutCount = events.filter(e => e.outcome === 'timeout').length;
-
-  const winRate = setupCount > 0 ? winCount / setupCount : 0;
-
-  const totalProfit = events
-    .filter(e => getPnl(e) > 0)
-    .reduce((sum, e) => sum + getPnl(e), 0);
-  const totalLoss = Math.abs(
-    events.filter(e => getPnl(e) < 0).reduce((sum, e) => sum + getPnl(e), 0),
+  // Decimal → number 変換は 1 イベントあたり 1 回のみ実行(以降は pnls を再利用)。
+  const pnls: number[] = events.map(e =>
+    e.pnl === null || e.pnl === undefined ? 0 : Number(e.pnl),
   );
 
-  const profitFactor =
-    totalLoss > 0 ? totalProfit / totalLoss : totalProfit > 0 ? Infinity : 0;
-  const averagePnL =
-    setupCount > 0 ? events.reduce((sum, e) => sum + getPnl(e), 0) / setupCount : 0;
+  const setupCount = events.length;
 
-  const avgWin = winCount > 0 ? totalProfit / winCount : 0;
-  const avgLoss = lossCount > 0 ? totalLoss / lossCount : 0;
-  const expectancy = winRate * avgWin - (1 - winRate) * avgLoss;
-
+  let winCount = 0;
+  let lossCount = 0;
+  let totalProfit = 0;
+  let totalLoss = 0;
+  let totalPnL = 0;
   let maxDrawdown = 0;
   let peak = 0;
   let cumPnL = 0;
-  for (const event of events) {
-    cumPnL += getPnl(event);
+
+  for (const pnl of pnls) {
+    if (pnl > 0) {
+      winCount += 1;
+      totalProfit += pnl;
+    } else if (pnl < 0) {
+      lossCount += 1;
+      totalLoss += -pnl;
+    }
+    totalPnL += pnl;
+
+    cumPnL += pnl;
     if (cumPnL > peak) {
       peak = cumPnL;
     }
@@ -572,6 +569,21 @@ export function aggregateBacktestEvents(
       maxDrawdown = drawdown;
     }
   }
+
+  // timeoutCount は outcome 軸で別途カウント(参考値)。
+  let timeoutCount = 0;
+  for (const e of events) {
+    if (e.outcome === 'timeout') timeoutCount += 1;
+  }
+
+  const winRate = setupCount > 0 ? winCount / setupCount : 0;
+  const profitFactor =
+    totalLoss > 0 ? totalProfit / totalLoss : totalProfit > 0 ? Infinity : 0;
+  const averagePnL = setupCount > 0 ? totalPnL / setupCount : 0;
+
+  const avgWin = winCount > 0 ? totalProfit / winCount : 0;
+  const avgLoss = lossCount > 0 ? totalLoss / lossCount : 0;
+  const expectancy = winRate * avgWin - (1 - winRate) * avgLoss;
 
   return {
     runId,
