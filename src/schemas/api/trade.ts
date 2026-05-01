@@ -10,11 +10,9 @@ import {
   DateSchema,
   SymbolSchema,
   TimeframeSchema,
-  DirectionSchema,
   PriceSchema,
   LotSizeSchema,
   ScoreSchema,
-  NonEmptyStringSchema,
   PaginationSchema,
 } from '../common';
 

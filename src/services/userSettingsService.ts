@@ -107,7 +107,7 @@ export class UserSettingsService {
         timeframes: { ...DEFAULT_SETTINGS.timeframes, ...settings.timeframes },
         display: { ...DEFAULT_SETTINGS.display, ...settings.display },
       };
-    } catch (error) {
+    } catch {
       // ファイルがない場合はデフォルト設定を返す
       console.log('[UserSettingsService] 設定ファイルが見つかりません。デフォルト設定を使用します。');
       return {

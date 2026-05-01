@@ -332,7 +332,7 @@ export async function getComparisonAnalysis(
 export async function getTimeSeriesData(
   period: ComparisonPeriod = 'month',
   symbol?: string,
-  granularity: 'day' | 'week' = 'day'
+  _granularity: 'day' | 'week' = 'day'
 ): Promise<TimeSeriesData[]> {
   const { start, end } = getPeriodDates(period);
 

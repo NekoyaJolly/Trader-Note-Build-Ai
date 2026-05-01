@@ -16,7 +16,6 @@ import {
   GLOBAL_AGENT_NAME,
   SPECIALIST_COMMON_AGENT_NAME,
 } from './PromptRegistry';
-import type { PromptVersion } from './types';
 import { PromptMutationAgent, type RecentFailure } from '../../agents/PromptMutationAgent';
 
 /** 1 エージェント分の進化ジョブ結果。 */

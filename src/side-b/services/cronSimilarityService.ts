@@ -23,7 +23,6 @@ import { z } from 'zod';
 import { crossSimilarityService } from '../../services/crossSimilarityService';
 import { NotificationTriggerService } from '../../services/notification/notificationTriggerService';
 import type { OHLCVData } from '../../services/indicators/indicatorService';
-import type { SimilarNoteItem } from '../../schemas/api/similarity';
 
 // ========================================
 // 型定義
@@ -141,7 +140,7 @@ export class CronSimilarityService {
    */
   async checkSimilarityAndNotify(input: SimilarityCheckInput): Promise<SimilarityCheckResult> {
     const startTime = Date.now();
-    const { symbol, ohlcvData, timeframe } = input;
+    const { symbol, ohlcvData } = input;
 
     if (this.config.debug) {
       console.log(`[CronSimilarity] ${symbol} の類似度チェック開始`);

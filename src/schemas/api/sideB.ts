@@ -11,11 +11,9 @@ import {
   DateSchema,
   SymbolSchema,
   TimeframeSchema,
-  DirectionSchema,
   PriceSchema,
   ScoreSchema,
   NonEmptyStringSchema,
-  PaginationSchema,
   NormalizedValueSchema,
 } from '../common';
 

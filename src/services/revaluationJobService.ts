@@ -12,7 +12,7 @@
  * 参照: 技術スタック選定シート ⑨
  */
 
-import { Queue, Job, QueueEvents } from 'bullmq';
+import { Queue } from 'bullmq';
 import type { RevaluationJobType, RevaluationJobStatus } from '@prisma/client';
 import {
   QUEUE_NAMES,
@@ -85,7 +85,7 @@ export class RevaluationJobManager {
     const options = getQueueOptions();
 
     // 各キューを初期化
-    for (const [key, name] of Object.entries(QUEUE_NAMES)) {
+    for (const [, name] of Object.entries(QUEUE_NAMES)) {
       const queue = new Queue<RevaluationJobData, RevaluationJobResult>(name, {
         connection,
         ...options,

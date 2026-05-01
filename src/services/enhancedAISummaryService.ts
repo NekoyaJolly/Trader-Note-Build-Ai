@@ -251,7 +251,7 @@ export class EnhancedAISummaryService {
    */
   private getTemplateComment(
     templateType: TemplateType,
-    marketContext?: TradeDataForSummary['marketContext']
+    _marketContext?: TradeDataForSummary['marketContext']
   ): string {
     switch (templateType) {
       case 'trend_follow_buy':
@@ -333,7 +333,7 @@ export class EnhancedAISummaryService {
    * 拡張プロンプトを構築
    */
   private buildEnhancedPrompt(tradeData: ExtendedTradeData): string {
-    const { symbol, side, price, quantity, timestamp, marketContext, estimatedMode, featureSnapshot, similarTrades } = tradeData;
+    const { symbol, side, price, quantity, timestamp, marketContext, estimatedMode, similarTrades } = tradeData;
 
     const sideLabel = side === 'buy' ? '買い' : '売り';
     const dateStr = timestamp.toLocaleString('ja-JP');

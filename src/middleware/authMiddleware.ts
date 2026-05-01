@@ -9,7 +9,6 @@ import type { Request, Response, NextFunction } from 'express';
 import type { UserRole } from '@prisma/client';
 import type { SessionPayload } from '../backend/services/auth/sessionService';
 import { sessionService } from '../backend/services/auth/sessionService';
-import { getPrismaClient } from '../infrastructure/prismaClient';
 
 // Express のリクエスト型を拡張して user プロパティを追加
 declare global {
@@ -19,9 +18,6 @@ declare global {
     }
   }
 }
-
-// Prisma クライアントのシングルトン
-const prisma = getPrismaClient();
 
 /**
  * 認証必須ミドルウェア

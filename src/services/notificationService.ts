@@ -1,4 +1,4 @@
-import type { Notification, MarketData, TradeNote as FSTradeNote } from '../models/types';
+import type { Notification, MarketData } from '../models/types';
 import { v4 as uuidv4 } from 'uuid';
 import type { MatchResultDTO } from '../domain/matching/MatchResultDTO';
 import type { NotificationRepository } from '../domain/notification/NotificationRepository';

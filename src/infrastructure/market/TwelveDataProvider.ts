@@ -23,10 +23,7 @@ import type {
 import {
   BaseMarketDataProvider,
   TimeframeSchema,
-  ConnectionState,
 } from './IMarketDataProvider';
-import type {
-  TwelveDataTimeSeriesSuccess} from '../../schemas/external/twelveData';
 import {
   TwelveDataTimeSeriesResponseSchema
 } from '../../schemas/external/twelveData';

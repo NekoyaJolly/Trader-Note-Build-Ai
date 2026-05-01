@@ -8,7 +8,6 @@
  */
 
 import type { Trade} from '@prisma/client';
-import { Prisma } from '@prisma/client';
 
 /**
  * 特徴量ベクトルの定義（固定長: 7）

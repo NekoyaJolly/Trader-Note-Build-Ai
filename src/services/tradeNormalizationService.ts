@@ -175,7 +175,7 @@ export class TradeNormalizationService {
     
     try {
       normalizedTimestamp = this.normalizeTimestamp(rawTrade.timestamp as Date | string | number);
-    } catch (error) {
+    } catch {
       errors.push(`${linePrefix}timestamp の形式が不正です。「${originalTimestamp}」を解析できません。ISO形式（例: 2024-01-15T10:30:00Z）または Unix タイムスタンプを使用してください`);
       return { success: false, errors };
     }

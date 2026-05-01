@@ -214,8 +214,6 @@ export class BarLocator {
     timeframe: string
   ): Promise<{ bar: OHLCVCandle | null; timeDifference: number }> {
     try {
-      const timeframeMs = this.getTimeframeMs(timeframe);
-
       // 目標時刻の前後に検索範囲を設定（前後 1 時間分）
       const searchRangeMs = 60 * 60 * 1000; // 1 時間
       const searchStart = new Date(targetTime.getTime() - searchRangeMs);

@@ -13,7 +13,6 @@
  */
 
 import type { PrismaClient} from '@prisma/client';
-import { TradeNote } from '@prisma/client';
 import { prisma } from '../../backend/db/client';
 
 /**
