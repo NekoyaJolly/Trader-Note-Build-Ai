@@ -210,7 +210,7 @@ const FEATURE_VECTOR_LENGTH = 18;
  * @returns 特徴量ベクトル（数値配列）
  */
 export function calculateFeatureVector(indicatorValues: IndicatorValues): number[] {
-  const vector = new Array(FEATURE_VECTOR_LENGTH).fill(0);
+  const vector: number[] = Array.from({ length: FEATURE_VECTOR_LENGTH }, () => 0);
   
   // RSI
   if (indicatorValues.rsi) {
