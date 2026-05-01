@@ -17,7 +17,6 @@
 import { config } from '../config';
 import {
   OpenAIChatCompletionResponseSchema,
-  OpenAIUsageSchema,
 } from '../schemas/external/openai';
 
 /**

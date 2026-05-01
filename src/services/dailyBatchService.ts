@@ -5,7 +5,6 @@ import { TradeNoteGeneratorService } from './note-generator/tradeNoteGeneratorSe
 import { MarketIngestService } from '../backend/services/ingest/marketIngestService';
 import { MatchEvaluationService } from '../backend/services/matching/matchEvaluationService';
 import { NotificationTriggerService } from './notification/notificationTriggerService';
-import type { MatchResultWithRelations } from '../backend/repositories/matchResultRepository';
 import { MatchResultRepository } from '../backend/repositories/matchResultRepository';
 import { MarketDataService } from './marketDataService';
 import type { MarketContext } from './note-generator/featureExtractor';

@@ -13,12 +13,11 @@
  */
 
 import type { Trade} from '@prisma/client';
-import { TradeSide } from '@prisma/client';
 import { TradeNoteRepository } from '../../backend/repositories/tradeNoteRepository';
 import type { TradeDataForSummary } from '../aiSummaryService';
 import { AISummaryService } from '../aiSummaryService';
 import type { MarketContext} from './featureExtractor';
-import { FeatureExtractor, FeatureVector } from './featureExtractor';
+import { FeatureExtractor } from './featureExtractor';
 import type { DecisionInferenceResult } from '../inference/decisionInferenceService';
 import { DecisionInferenceService } from '../inference/decisionInferenceService';
 

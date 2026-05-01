@@ -19,7 +19,6 @@ import {
   closeTrade,
   expireTrade,
   cancelTrade,
-  invalidateTrade,
   findClosedTradesPnL,
   countOpenTrades,
   type VirtualTradeRecord,
@@ -40,7 +39,7 @@ import {
   type TradeDirection,
   type ExitReason,
 } from "../models";
-import { planRepository, type AITradePlanWithTypes } from "../repositories";
+import { planRepository } from "../repositories";
 
 // ===========================================
 // 型定義

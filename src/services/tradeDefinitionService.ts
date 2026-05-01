@@ -27,14 +27,12 @@ import {
   DEFAULT_TREND_WEIGHTS,
 } from '../models/tradeDefinition';
 import type { IndicatorConfig} from '../models/indicatorConfig';
-import { IndicatorId } from '../models/indicatorConfig';
 import type { OHLCVData } from './indicators';
 import { indicatorService } from './indicators';
 import { MarketDataService } from './marketDataService';
-import { tradeNormalizationService, NormalizationResult } from './tradeNormalizationService';
+import { tradeNormalizationService } from './tradeNormalizationService';
 import {
   generateFeatureVectorFromIndicators,
-  VECTOR_DIMENSION,
   type IndicatorData,
 } from './featureVectorService';
 
@@ -61,7 +59,6 @@ export class TradeDefinitionService {
    * @returns 生成結果
    */
   async generateDefinition(request: TradeDefinitionRequest): Promise<TradeDefinitionResult> {
-    const errors: string[] = [];
     const warnings: string[] = [];
 
     // === トレードの正規化チェック ===

@@ -178,7 +178,7 @@ export class DecisionInferenceService {
     let parsed: ParsedInferenceResult;
     try {
       parsed = JSON.parse(content);
-    } catch (error) {
+    } catch {
       throw new Error('AI 応答の JSON パースに失敗しました');
     }
 

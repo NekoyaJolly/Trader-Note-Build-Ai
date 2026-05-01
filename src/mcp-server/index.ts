@@ -22,8 +22,6 @@ import { MarketDataService } from '../services/marketDataService';
 import { PlanRepository, type CreatePlanInput } from '../side-b/repositories/planRepository';
 import {
     createTradeFromPlan,
-    listTrades,
-    getPortfolioSummary,
 } from '../side-b/services/virtualTradeService';
 import {
     findAITradeNotes,

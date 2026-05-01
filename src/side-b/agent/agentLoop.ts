@@ -17,7 +17,7 @@
  */
 
 import { McpClientManager, type McpToolResult } from './mcpClient';
-import { AIProvider, type ChatMessage, type ToolCall } from './aiProvider';
+import { AIProvider, type ChatMessage } from './aiProvider';
 
 // ===========================================
 // 型定義

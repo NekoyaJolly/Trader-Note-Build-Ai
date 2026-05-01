@@ -217,7 +217,6 @@ export class MonteCarloService {
     const trades: BacktestTradeEvent[] = [];
     let inPosition = false;
     let entryCandle: OHLCVData | null = null;
-    let entryIndex = 0;
     let side: TradeSide = 'buy';
     
     for (let i = 0; i < ohlcvData.length; i++) {
@@ -228,7 +227,6 @@ export class MonteCarloService {
         if (Math.random() < entryProbability) {
           inPosition = true;
           entryCandle = candle;
-          entryIndex = i;
           // ランダムに売買方向を決定
           side = Math.random() < 0.5 ? 'buy' : 'sell';
         }

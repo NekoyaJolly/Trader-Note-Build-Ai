@@ -1,7 +1,7 @@
 import type { MarketData } from '../models/types';
 import { config } from '../config';
 import type { OHLCVData} from './indicators';
-import { indicatorService, FeatureSnapshot } from './indicators';
+import { indicatorService } from './indicators';
 import type { OHLCVBarResult } from '../backend/services/ctrader/ctraderDataService';
 import { CTraderDataService } from '../backend/services/ctrader/ctraderDataService';
 import type { CTraderAuthService } from '../backend/services/ctrader/ctraderAuthService';

@@ -21,7 +21,6 @@ import {
 } from './indicators/indicatorService';
 import {
   calculateCosineSimilarity,
-  SIMILARITY_THRESHOLDS,
 } from './featureVectorService';
 
 const prisma = new PrismaClient();

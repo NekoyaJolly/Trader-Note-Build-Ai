@@ -11,16 +11,14 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { FeatureService } from './featureService';
 import type { OHLCVData } from './indicators/indicatorService';
 import { IndicatorService } from './indicators/indicatorService';
 import { calculateCosineSimilarity } from './featureVectorService';
 import * as aiNoteRepository from '../side-b/repositories/aiNoteRepository';
 import type { AITradeNote } from '../side-b/models';
-import type { SimilarNoteItem, NoteType } from '../schemas/api/similarity';
+import type { SimilarNoteItem } from '../schemas/api/similarity';
 
 const prisma = new PrismaClient();
-const featureService = new FeatureService();
 const indicatorService = new IndicatorService();
 
 /**
