@@ -996,7 +996,10 @@ async function saveBacktestResult(
 
   // 集計結果を保存（StrategyBacktestResult テーブル）
   if (result.status === 'completed') {
-    // トレードごとに利益・損失を分離して集計（netProfitから振り分けない）
+    // Critical-9: winCount/lossCount/totalProfit/totalLoss は全て pnl 符号で統一する。
+    // calculateSummary も pnl > 0 / pnl < 0 で winningTrades/losingTrades を返すので整合。
+    // timeoutCount は exitReason='timeout' の件数（TP/SL に届かなかった件数の参考値）であり、
+    // winCount/lossCount とは独立軸であるため意味的に重複しうる点に注意。
     const totalProfit = result.trades
       .filter(t => t.pnl > 0)
       .reduce((sum, t) => sum + t.pnl, 0);
