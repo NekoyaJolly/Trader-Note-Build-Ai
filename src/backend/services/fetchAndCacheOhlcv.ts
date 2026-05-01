@@ -9,14 +9,13 @@
  * - 進捗コールバック対応（SSE配信用）
  */
 
-import { PrismaClient } from '@prisma/client';
 import { CTraderDataService } from './ctrader/ctraderDataService';
 import { CTraderAuthService } from './ctrader/ctraderAuthService';
 import { splitDateRange } from '../../utils/dateRangeChunks';
 import { normalizeCTraderSymbol, toTwelveDataSymbol } from '../../utils/symbolNormalization';
 import { TwelveDataTimeSeriesResponseSchema } from '../../schemas/external/twelveData';
+import { prisma } from '../db/client';
 
-const prisma = new PrismaClient();
 const ctraderAuthService = new CTraderAuthService(prisma);
 const ctraderDataService = new CTraderDataService(ctraderAuthService);
 

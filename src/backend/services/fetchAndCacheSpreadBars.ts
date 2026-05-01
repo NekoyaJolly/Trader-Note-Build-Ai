@@ -2,12 +2,11 @@
  * Phase 6.8: cTrader tick 由来の spread bar を取得・DBキャッシュする
  */
 
-import { PrismaClient } from '@prisma/client';
 import { CTraderAuthService } from './ctrader/ctraderAuthService';
 import { CTraderDataService } from './ctrader/ctraderDataService';
 import { SpreadBarRepository } from '../repositories/spreadBarRepository';
+import { prisma } from '../db/client';
 
-const prisma = new PrismaClient();
 const ctraderAuthService = new CTraderAuthService(prisma);
 const ctraderDataService = new CTraderDataService(ctraderAuthService);
 const spreadBarRepository = new SpreadBarRepository();

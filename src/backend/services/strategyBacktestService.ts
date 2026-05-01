@@ -8,8 +8,8 @@
  */
 
 import type { BacktestOutcome } from '@prisma/client';
-import { PrismaClient } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
+import { prisma } from '../db/client';
 import type { StrategyDetail } from './strategyService';
 import { getStrategy } from './strategyService';
 import type {
@@ -47,7 +47,6 @@ export type { BacktestResultSummary, TradeSide };
 export { evaluateCondition, evaluateConditionGroup };
 export type { EvaluationContext, ConditionGroup, IndicatorCondition, OHLCV };
 
-const prisma = new PrismaClient();
 // cTrader サービスのインスタンス
 const ctraderAuthService = new CTraderAuthService(prisma);
 const ctraderDataService = new CTraderDataService(ctraderAuthService);

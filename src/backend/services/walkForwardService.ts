@@ -13,16 +13,14 @@
  * 4. 勝率・PFの乖離から過学習スコアを算出
  */
 
-import { PrismaClient, BacktestStatus, WalkForwardType } from '@prisma/client';
+import { BacktestStatus, WalkForwardType } from '@prisma/client';
 import type {
   BacktestRequest,
   BacktestTimeframe} from './strategyBacktestService';
 import {
   runBacktest,
 } from './strategyBacktestService';
-
-// Prismaクライアントのシングルトンインスタンス
-const prisma = new PrismaClient();
+import { prisma } from '../db/client';
 
 // ============================================
 // 型定義

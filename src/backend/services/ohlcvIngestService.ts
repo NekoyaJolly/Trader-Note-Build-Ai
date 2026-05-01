@@ -8,10 +8,8 @@
  * - レート制限対策（bottleneck）
  */
 
-import { PrismaClient } from '@prisma/client';
 import Bottleneck from 'bottleneck';
-
-const prisma = new PrismaClient();
+import { prisma } from '../db/client';
 
 // Twelve Data API のレート制限: 8 req/min（無料プラン）
 // 安全マージンを取って 7 req/min に設定

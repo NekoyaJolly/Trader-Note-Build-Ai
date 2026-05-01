@@ -9,11 +9,9 @@
  */
 
 import type { StrategyAlert, StrategyAlertLog } from '@prisma/client';
-import { PrismaClient, AlertChannel, AlertStatus } from '@prisma/client';
+import { AlertChannel, AlertStatus } from '@prisma/client';
 import type { JsonValue } from '../../utils/jsonValue';
-
-// Prismaクライアントのシングルトンインスタンス
-const prisma = new PrismaClient();
+import { prisma } from '../db/client';
 
 // ============================================
 // 型定義

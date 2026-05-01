@@ -10,7 +10,6 @@
  */
 
 import type { StrategyNoteStatus } from '@prisma/client';
-import { PrismaClient } from '@prisma/client';
 import type {
   IndicatorValues,
   RSIValue,
@@ -23,8 +22,7 @@ import {
   calculateCosineSimilarity,
   SIMILARITY_THRESHOLDS,
 } from '../../services/featureVectorService';
-
-const prisma = new PrismaClient();
+import { prisma } from '../db/client';
 
 // ============================================
 // 型定義
