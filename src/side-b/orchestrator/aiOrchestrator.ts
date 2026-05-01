@@ -70,7 +70,7 @@ import {
   type StrategyBacktesterRunResult,
 } from '../agents/StrategyBacktesterAgent';
 import {
-  BullBearDebateAgent,
+  type BullBearDebateAgent,
   bullBearDebateAgent,
   type BullBearDebateResult,
 } from '../agents/BullBearDebateAgent';

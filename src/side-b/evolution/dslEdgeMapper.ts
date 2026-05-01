@@ -3,7 +3,7 @@
  */
 
 import type { MachineReadableCondition } from '../models/edgeHypothesis';
-import type { Condition, ConditionGroup } from '../strategy_dsl/schema';
+import type { Condition, ConditionGroup, StrategyDSL } from '../strategy_dsl/schema';
 import { isWaitForTriggerEntry } from '../strategy_dsl/types';
 
 /** 再帰グループから最初の葉条件を取得 */
@@ -20,7 +20,7 @@ export function firstLeafCondition(group: ConditionGroup): Condition | null {
 }
 
 /** 代表条件 1 本に落とす（台帳保存用の最小セット） */
-export function dslToMachineConditions(dsl: import('../strategy_dsl/schema').StrategyDSL): MachineReadableCondition[] {
+export function dslToMachineConditions(dsl: StrategyDSL): MachineReadableCondition[] {
   const g = isWaitForTriggerEntry(dsl.entry) ? dsl.entry.triggerConditions : dsl.entry.trigger;
   const leaf = firstLeafCondition(g);
   if (!leaf) {

@@ -16,6 +16,7 @@ import { backtestService as defaultBacktestService, type BacktestService } from 
 import { VALIDATION_THRESHOLDS } from '../../config/validationThresholds';
 import type {
     HypothesisValidationInput,
+    StrategyValidationInput,
     ValidationTool,
     ValidationToolInput,
     ValidationToolResult,
@@ -142,7 +143,7 @@ export class MonteCarloTool implements ValidationTool {
 
     /** Phase 6.7b: DSLBacktestResult の PnL 列を直参照 */
     private async executeStrategy(
-        input: import('./types').StrategyValidationInput,
+        input: StrategyValidationInput,
         start: number,
     ): Promise<ValidationToolResult> {
         const pnls = input.dslResult.netPnls.filter((p) => Number.isFinite(p));

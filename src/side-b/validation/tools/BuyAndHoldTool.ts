@@ -21,6 +21,7 @@ import { OHLCVRepository } from '../../../backend/repositories/ohlcvRepository';
 import { VALIDATION_THRESHOLDS } from '../../config/validationThresholds';
 import type {
     HypothesisValidationInput,
+    StrategyValidationInput,
     ValidationTool,
     ValidationToolInput,
     ValidationToolResult,
@@ -169,7 +170,7 @@ export class BuyAndHoldTool implements ValidationTool {
      * Phase 6.7b: DSLBacktestResult.finalReturn（検証期間）と B&H を比較
      */
     private async executeStrategy(
-        input: import('./types').StrategyValidationInput,
+        input: StrategyValidationInput,
         start: number,
     ): Promise<ValidationToolResult> {
         const { strategy, period, dslResult } = input;
