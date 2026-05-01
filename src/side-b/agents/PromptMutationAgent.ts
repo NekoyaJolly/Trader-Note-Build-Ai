@@ -22,6 +22,7 @@ import {
   SPECIALIST_COMMON_AGENT_NAME,
   promptRegistry,
 } from '../prompts/registry/PromptRegistry';
+import { recordAgentUsage } from './scoringRecorder';
 
 export interface PromptMutationProposal {
   /** 提案バージョン識別子(呼び出し側で suffix 付与してもよい) */
@@ -163,11 +164,18 @@ export class PromptMutationAgent {
         { temperature: 0.6, maxTokens: 4096 },
       ),
     );
-    if (!res?.content) return [];
+    if (!res?.content) {
+      // Critical-3 PR-2: LLM 失敗を score=0 で記録
+      await recordAgentUsage('prompt_mutation', { count }, null);
+      return [];
+    }
     try {
-      return parseProposalArray(res.content).slice(0, count);
+      const out = parseProposalArray(res.content).slice(0, count);
+      await recordAgentUsage('prompt_mutation', { count }, out);
+      return out;
     } catch (err) {
       console.error('[PromptMutationAgent] JSON パース失敗:', err);
+      await recordAgentUsage('prompt_mutation', { count }, null);
       return [];
     }
   }

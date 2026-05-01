@@ -15,6 +15,7 @@
 import { config, modelFor } from '../../config';
 import { loadPromptWithGlobal } from '../prompts/loader';
 import { promptRegistry } from '../prompts/registry/PromptRegistry';
+import { recordAgentUsage } from './scoringRecorder';
 import type { AITradeNote } from '../models/aiTradeNote';
 import { extractJson } from './llmJsonExtract';
 import type {
@@ -296,8 +297,11 @@ export class DiscoveryAgent {
         };
         let tokenUsage = 0;
         let usedModel = 'empty';
+        let llmAttempted = false;
+        let llmSucceeded = false;
 
         if (topSeparations.length > 0 && this.apiKey) {
+            llmAttempted = true;
             try {
                 const systemPrompt = await this.resolveSystemPrompt();
                 const userPrompt = this.buildUserPrompt(
@@ -310,11 +314,17 @@ export class DiscoveryAgent {
                 llmOutput = validateDiscoveryOutput(raw.content, availableLenses);
                 tokenUsage = raw.tokenUsage;
                 usedModel = raw.model;
+                llmSucceeded = true;
             } catch (error) {
                 console.error('[DiscoveryAgent] LLM 解釈失敗:', error);
             }
         } else if (!this.apiKey) {
             console.warn('[DiscoveryAgent] APIキー未設定。統計集計のみ返します。');
+        }
+
+        // Critical-3 PR-2: LLM を実行した場合のみ recordUsage(失敗パスは score=0 で記録)
+        if (llmAttempted) {
+            await recordAgentUsage('discovery', {}, llmSucceeded ? llmOutput : null);
         }
 
         // 3. 新仮説を EdgeLedger に登録（重複は除外）

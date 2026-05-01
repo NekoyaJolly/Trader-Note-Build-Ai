@@ -18,6 +18,7 @@
 import { config, modelFor } from '../../config';
 import { loadPromptWithGlobal } from '../prompts/loader';
 import { promptRegistry } from '../prompts/registry/PromptRegistry';
+import { recordAgentUsage } from './scoringRecorder';
 import type { AITradeScenario, PlanMarketAnalysis } from '../models';
 import type { JsonValue } from '../../utils/jsonValue';
 import { extractJson } from './llmJsonExtract';
@@ -183,6 +184,8 @@ export class DevilsAdvocateAgent {
             const userPrompt = this.buildUserPrompt(scenario, marketContext);
             const raw = await this.callAI(systemPrompt, userPrompt);
             const validated = validateDevilsAdvocateOutput(raw.content);
+            // Critical-3 PR-2: scoring + recordUsage(失敗時は warn のみ)
+            await recordAgentUsage('devils_advocate', {}, validated);
             return {
                 output: validated,
                 tokenUsage: raw.tokenUsage,
@@ -190,6 +193,8 @@ export class DevilsAdvocateAgent {
             };
         } catch (error) {
             console.error("[DevilsAdvocate] 批評失敗:", error);
+            // 失敗パスも recordUsage(score=0) で記録し、プロンプトの失敗率を観測する
+            await recordAgentUsage('devils_advocate', {}, null);
             return this.fallback('Devil\'s Advocate の呼び出しに失敗しました。');
         }
     }

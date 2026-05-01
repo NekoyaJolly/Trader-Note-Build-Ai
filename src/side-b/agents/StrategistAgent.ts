@@ -29,6 +29,7 @@ import { BacktesterAgent } from './BacktesterAgent';
 import { AIProvider } from '../agent/aiProvider';
 import { loadPromptWithGlobal } from '../prompts/loader';
 import { promptRegistry } from '../prompts/registry/PromptRegistry';
+import { recordAgentUsage } from './scoringRecorder';
 import { modelFor } from '../../config';
 
 // ===========================================
@@ -128,6 +129,7 @@ export class StrategistAgent {
             }
         }
 
+        let verdict: PromotionVerdict;
         if (check.ok) {
             await this.edgeLedger.markConfirmedFull(
                 hypothesisId,
@@ -135,8 +137,24 @@ export class StrategistAgent {
                 interpretation,
                 insights,
             );
-            return this.buildVerdict(
+            verdict = this.buildVerdict(
                 'confirmed',
+                hypothesisId,
+                report,
+                check.reasons,
+                interpretation,
+                insights,
+            );
+        } else {
+            await this.edgeLedger.markRejectedFull(
+                hypothesisId,
+                check.reasons.join('; '),
+                report,
+                interpretation,
+                insights,
+            );
+            verdict = this.buildVerdict(
+                'rejected',
                 hypothesisId,
                 report,
                 check.reasons,
@@ -145,21 +163,11 @@ export class StrategistAgent {
             );
         }
 
-        await this.edgeLedger.markRejectedFull(
-            hypothesisId,
-            check.reasons.join('; '),
-            report,
-            interpretation,
-            insights,
-        );
-        return this.buildVerdict(
-            'rejected',
-            hypothesisId,
-            report,
-            check.reasons,
-            interpretation,
-            insights,
-        );
+        // Critical-3 PR-2: LLM を実行した場合のみ recordUsage(skipLLM=true はテスト用)
+        if (!options.skipLLM) {
+            await recordAgentUsage('strategist', {}, verdict);
+        }
+        return verdict;
     }
 
     // ===========================================

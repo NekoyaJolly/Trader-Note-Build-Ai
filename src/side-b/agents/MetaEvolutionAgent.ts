@@ -17,6 +17,7 @@ import type { Prisma } from '@prisma/client';
 import { PrismaClient } from '@prisma/client';
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { loadPromptWithGlobal } from '../prompts/loader';
+import { recordAgentUsage } from './scoringRecorder';
 import { modelFor } from '../../config';
 import type { JsonValue } from '../../utils/jsonValue';
 import {
@@ -244,8 +245,14 @@ export class MetaEvolutionAgent {
         { temperature: 0.4, maxTokens: 4096 },
       ),
     );
-    if (!res?.content) return null;
-    return parseProposalJson(res.content);
+    if (!res?.content) {
+      // Critical-3 PR-2: LLM 失敗を score=0 で記録
+      await recordAgentUsage('meta_evolution', {}, null, this.registry);
+      return null;
+    }
+    const parsed = parseProposalJson(res.content);
+    await recordAgentUsage('meta_evolution', {}, parsed, this.registry);
+    return parsed;
   }
 
   /**

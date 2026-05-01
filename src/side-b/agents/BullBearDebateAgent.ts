@@ -23,6 +23,7 @@
 import { config, modelFor } from '../../config';
 import { loadPromptWithGlobal } from '../prompts/loader';
 import { promptRegistry } from '../prompts/registry/PromptRegistry';
+import { recordAgentUsage } from './scoringRecorder';
 import { serializeLensSnapshot, type LensFeatureSnapshot } from '../lenses';
 import type {
   TrendAnalysis,
@@ -171,6 +172,8 @@ export class BullBearDebateAgent {
       const userPrompt = this.buildUserPrompt(input);
       const raw = await this.callAI(systemPrompt, userPrompt);
       const validated = validateBullBearDebateOutput(raw.content);
+      // Critical-3 PR-2: scoring + recordUsage
+      await recordAgentUsage('bull_bear_debate', {}, validated);
       return {
         output: validated,
         tokenUsage: raw.tokenUsage,
@@ -178,6 +181,8 @@ export class BullBearDebateAgent {
       };
     } catch (error) {
       console.error('[BullBearDebate] 討論失敗:', error);
+      // 失敗パスも score=0 で記録
+      await recordAgentUsage('bull_bear_debate', {}, null);
       return this.fallback('Bull vs Bear 討論の呼び出しに失敗しました。');
     }
   }
