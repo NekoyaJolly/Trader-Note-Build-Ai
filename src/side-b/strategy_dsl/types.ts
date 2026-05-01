@@ -6,7 +6,7 @@
  * @see docs/design/phase_6_7b_bt_layer.md
  */
 
-import type { ParameterField, StrategyDSL } from './schema';
+import type { ConditionGroup, ParameterField, StrategyDSL } from './schema';
 
 // Re-export 供与（schema と二重定義しない）
 export type { ParameterField };
@@ -17,7 +17,7 @@ export type { ParameterField };
  */
 export type ImmediateEntry = {
   direction: 'long' | 'short';
-  trigger: import('./schema').ConditionGroup;
+  trigger: ConditionGroup;
   orderType: 'market' | 'limit' | 'stop';
   type?: 'immediate';
 };
@@ -28,7 +28,7 @@ export type ImmediateEntry = {
 export type WaitForTriggerEntry = {
   type: 'wait_for_trigger';
   direction: 'long' | 'short';
-  triggerConditions: import('./schema').ConditionGroup;
+  triggerConditions: ConditionGroup;
   maxWaitBars: number;
   executionType: 'market' | 'limit';
   limitPrice?: number;
