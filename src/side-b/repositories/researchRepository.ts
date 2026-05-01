@@ -18,7 +18,8 @@ import type { PrismaClient, MarketResearch, Prisma } from '@prisma/client';
 import { prisma } from '../../backend/db/client';
 import type { FeatureVector12D, OHLCVSnapshot} from '../models';
 import { type MarketAnalysis, safeValidateMarketAnalysis, analysisToLegacyFeatureVector, safeValidateFeatureVector, createEmptyFeatureVector } from '../models';
-import { DEFAULT_TIMEFRAME } from '../constants/timeframes';
+import { normalizeTimeframe } from '../constants/timeframes';
+import { toPrismaJsonValue } from '../../utils/prismaJson';
 
 // ===========================================
 // 型定義
@@ -95,9 +96,9 @@ export class ResearchRepository {
     const research = await this.prisma.marketResearch.create({
       data: {
         symbol: input.symbol,
-        timeframe: input.timeframe || DEFAULT_TIMEFRAME,
+        timeframe: normalizeTimeframe(input.timeframe),
         featureVector: featureVectorData,
-        ohlcvSnapshot: input.ohlcvSnapshot as unknown as Prisma.InputJsonValue,
+        ohlcvSnapshot: toPrismaJsonValue(input.ohlcvSnapshot),
         aiModel: input.aiModel,
         tokenUsage: input.tokenUsage,
         expiresAt: input.expiresAt,

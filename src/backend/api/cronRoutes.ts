@@ -25,6 +25,8 @@ import { getSideBScheduler } from '../../side-b/jobs/sideBScheduler';
 import { isFXMarketOpen, getMarketStatusJST } from '../../side-b/utils/marketHours';
 import { MatchingService } from '../../services/matchingService';
 import { edgeLedger } from '../../side-b/ledger';
+import { validateBody } from '../../middleware/validateRequest';
+import { ResetNotTestableBodySchema, type ResetNotTestableBody } from '../../schemas/api/sideB';
 
 const router = Router();
 
@@ -240,24 +242,10 @@ router.get('/side-b/run-full-validation', async (_req: Request, res: Response) =
  *
  * これは prod write を伴うため、明示的に POST を要求する。
  */
-const ResetNotTestableBodySchema = z.object({
-  statusNotePrefix: z.string().min(1).optional(),
-});
-
-router.post('/side-b/reset-not-testable', async (req: Request, res: Response) => {
+router.post('/side-b/reset-not-testable', validateBody(ResetNotTestableBodySchema), async (req: Request, res: Response) => {
   const startTime = Date.now();
   try {
-    const parsed = ResetNotTestableBodySchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      res.status(400).json({
-        success: false,
-        error: 'リクエストボディが不正です',
-        details: parsed.error.issues,
-        duration: Date.now() - startTime,
-      });
-      return;
-    }
-    const statusNotePrefix = parsed.data.statusNotePrefix;
+    const { statusNotePrefix } = req.body as ResetNotTestableBody;
 
     console.log(
       `[Cron] not_testable リセット開始 (statusNotePrefix=${statusNotePrefix ?? '(全件)'})`,
