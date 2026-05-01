@@ -5,9 +5,8 @@
  */
 
 import type { SpreadBar } from '@prisma/client';
-import { Prisma, PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { Prisma } from '@prisma/client';
+import { prisma } from '../db/client';
 
 export interface SpreadBarInsertData {
   symbol: string;

@@ -12,11 +12,10 @@
  */
 
 import type { OHLCVCandle} from '@prisma/client';
-import { PrismaClient, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import type { OHLCVData } from '../../services/indicators/indicatorService';
 import { isFXMarketOpen } from '../../side-b/utils/marketHours';
-
-const prisma = new PrismaClient();
+import { prisma } from '../db/client';
 
 /**
  * Phase 6.7a: シンボルが FX/貴金属相場のカレンダーに従うか判定する。

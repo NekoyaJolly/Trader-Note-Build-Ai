@@ -20,7 +20,8 @@ import { Router } from 'express';
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
 import type { StrategyStatus } from '@prisma/client';
-import { PrismaClient, AlertChannel, StrategyNoteStatus } from '@prisma/client';
+import { AlertChannel, StrategyNoteStatus } from '@prisma/client';
+import { prisma } from '../db/client';
 import { z } from 'zod';
 import type { JsonValue, JsonObject } from '../../utils/jsonValue';
 import { getStringParam, getOptionalStringParam, getNumberParam } from '../../utils/requestHelpers';
@@ -80,9 +81,6 @@ import type {
 import {
   monteCarloService
 } from '../../services/backtest/monteCarloService';
-
-// Prismaクライアント（バージョン比較用）
-const prisma = new PrismaClient();
 
 const router = Router();
 
