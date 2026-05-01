@@ -132,7 +132,10 @@ curl -H "Authorization: Bearer $CRON_SECRET" \
 ## 24h 自動観察を組む場合(Supabase MCP 接続後)
 
 `https://claude.ai/customize/connectors` で **Supabase MCP** を接続する。
-接続情報には Supabase プロジェクト ID `rmsylwmqxyeqgplysqoa` と `service_role` キー(または `anon` で SELECT 専用ロール)を指定。
+接続情報には Supabase プロジェクト ID `rmsylwmqxyeqgplysqoa` と、**原則 read-only の専用キー（anon + RLS で SELECT のみ許可）** を指定してください。
+
+> ⚠️ **セキュリティ注意**: `service_role` キーはすべての RLS をバイパスする最高権限キーです。万一漏洩した場合のデータ被害が甚大なため、通常の観察・分析用途では使用しないこと。  
+> 読み取り専用の anon キー（または SELECT 専用 DB ロール）で要件を満たせない場合のみ、service_role を **最終手段として一時的に** 使用し、作業後は即時無効化 or ローテーションを検討してください。
 
 接続後、以下を Claude Code で `/schedule` 実行:
 

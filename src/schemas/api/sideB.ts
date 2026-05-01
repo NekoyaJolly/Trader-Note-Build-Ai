@@ -1126,3 +1126,20 @@ export const BullBearDebateOutputSchema = z.object({
 });
 
 export type BullBearDebateOutput = z.infer<typeof BullBearDebateOutputSchema>;
+
+// ========================================
+// Cron 操作スキーマ
+// ========================================
+
+/**
+ * POST /api/cron/side-b/reset-not-testable リクエストボディ
+ *
+ * not_testable 仮説を unverified に戻す救済操作。
+ * statusNotePrefix を指定するとプレフィックスが一致する仮説のみリセット、
+ * 省略時は status='not_testable' の全件が対象。
+ */
+export const ResetNotTestableBodySchema = z.object({
+  statusNotePrefix: z.string().min(1).optional(),
+});
+
+export type ResetNotTestableBody = z.infer<typeof ResetNotTestableBodySchema>;

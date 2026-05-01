@@ -99,6 +99,11 @@ PDCA-2 (Phase 4)    : LLM 仮説を BT で検証して台帳に集積  [本日�
 - Cloud Run は CRLF 込みで認証している
 - 現在は `?secret=値%0D%0A` workaround で叩けるが醜い
 
+> ⚠️ **セキュリティ注意**: `?secret=...` をクエリパラメータに載せると、Cloud Run ログ・LB アクセスログ・プロキシログ等に URL が記録されシークレットが露出します。
+> この workaround は **CRON_SECRET クリーンアップ完了までの暫定措置** です。  
+> 使用する場合は curl ターミナルのみに留め、ログを共有しないこと。  
+> **基本は `Authorization: Bearer <secret>` ヘッダ方式** を使用してください。
+
 ### Nekoさん の手作業(5 分)
 
 ```bash
