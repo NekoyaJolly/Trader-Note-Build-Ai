@@ -12,6 +12,7 @@ import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
 import { modelFor } from '../../config';
 import { extractJson } from './llmJsonExtract';
+import { recordAgentUsage } from './scoringRecorder';
 
 async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<T | null> {
   let last: unknown;
@@ -56,6 +57,7 @@ export class CrossoverAgent {
     if (elites.length < 2) return [];
     const out: StrategyDSL[] = [];
     const system = await this.resolveSystemPrompt();
+    let llmAttempted = false;
     let attempts = 0;
     outer: for (let i = 0; i < elites.length; i++) {
       for (let j = i + 1; j < elites.length; j++) {
@@ -63,6 +65,7 @@ export class CrossoverAgent {
         const a = elites[i];
         const b = elites[j];
         attempts++;
+        llmAttempted = true;
         const line =
           `親A score=${(scores.get(a.id) ?? 0).toFixed(4)}\n親B score=${(scores.get(b.id) ?? 0).toFixed(4)}`;
         const user =
@@ -94,6 +97,10 @@ export class CrossoverAgent {
           // skip
         }
       }
+    }
+    // Critical-3 PR-2: LLM を 1 回でも試みた場合のみ recordUsage(全失敗なら null で score=0)
+    if (llmAttempted) {
+      await recordAgentUsage('crossover', { pairCount }, out.length > 0 ? out : null);
     }
     return out;
   }

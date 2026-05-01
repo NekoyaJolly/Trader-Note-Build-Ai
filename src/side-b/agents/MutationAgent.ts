@@ -12,6 +12,7 @@ import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
 import { modelFor } from '../../config';
 import { extractJson } from './llmJsonExtract';
+import { recordAgentUsage } from './scoringRecorder';
 
 async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<T | null> {
   let last: unknown;
@@ -88,16 +89,23 @@ export class MutationAgent {
         { temperature: 0.4, maxTokens: 4096 },
       ),
     );
-    if (!res?.content) return [];
+    if (!res?.content) {
+      // Critical-3 PR-2: LLM 失敗を score=0 で記録
+      await recordAgentUsage('mutation', { count }, null);
+      return [];
+    }
     try {
       const parsed = parseStrategyArray(res.content).slice(0, count);
-      return parsed.map((p) => ({
+      const out = parsed.map((p) => ({
         ...p,
         id: p.id && p.id.length > 0 ? p.id : `mut-${randomUUID()}`,
         generation: Math.max(...elites.map((e) => e.generation), 0) + 1,
         parentIds: elites.map((e) => e.id),
       }));
+      await recordAgentUsage('mutation', { count }, out);
+      return out;
     } catch {
+      await recordAgentUsage('mutation', { count }, null);
       return [];
     }
   }
@@ -118,9 +126,12 @@ export class MutationAgent {
         { temperature: 0.8, maxTokens: 4096 },
       ),
     );
-    if (!res?.content) return [];
+    if (!res?.content) {
+      await recordAgentUsage('mutation', { count }, null);
+      return [];
+    }
     try {
-      return parseStrategyArray(res.content)
+      const out = parseStrategyArray(res.content)
         .slice(0, count)
         .map((p) => ({
           ...p,
@@ -133,7 +144,10 @@ export class MutationAgent {
             createdBy: 'llm_generated' as const,
           },
         }));
+      await recordAgentUsage('mutation', { count }, out);
+      return out;
     } catch {
+      await recordAgentUsage('mutation', { count }, null);
       return [];
     }
   }
