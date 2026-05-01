@@ -227,7 +227,7 @@ export class BacktestService {
    * @param ohlcvData OHLCVデータ配列
    * @param params バックテストパラメータ
    */
-  private async runBacktestLogic(
+  private runBacktestLogic(
     runId: string,
     evaluator: NoteEvaluator,
     noteSide: string,
@@ -330,7 +330,7 @@ export class BacktestService {
       });
     }
 
-    return eventInputs;
+    return Promise.resolve(eventInputs);
   }
 
   /**
@@ -443,71 +443,9 @@ export class BacktestService {
   private calculateResult(
     runId: string,
     events: BacktestEvent[],
-    _tradingCostPct: number,
+    tradingCostPct: number,
   ): CreateBacktestResultInput {
-    const wins = events.filter(e => e.outcome === 'win');
-    const losses = events.filter(e => e.outcome === 'loss');
-    const timeouts = events.filter(e => e.outcome === 'timeout');
-
-    const setupCount = events.length;
-    const winCount = wins.length;
-    const lossCount = losses.length;
-    const timeoutCount = timeouts.length;
-
-    const winRate = setupCount > 0 ? winCount / setupCount : 0;
-
-    // Decimal 型を number に変換するヘルパー
-    const getPnl = (e: BacktestEvent): number => {
-      if (e.pnl === null || e.pnl === undefined) return 0;
-      return Number(e.pnl);
-    };
-
-    const totalProfit = events
-      .filter(e => getPnl(e) > 0)
-      .reduce((sum, e) => sum + getPnl(e), 0);
-    const totalLoss = Math.abs(events
-      .filter(e => getPnl(e) < 0)
-      .reduce((sum, e) => sum + getPnl(e), 0));
-
-    const profitFactor = totalLoss > 0 ? totalProfit / totalLoss : totalProfit > 0 ? Infinity : 0;
-    const averagePnL = setupCount > 0
-      ? events.reduce((sum, e) => sum + getPnl(e), 0) / setupCount
-      : 0;
-
-    // 期待値 = 勝率 × 平均利益 - 敗率 × 平均損失
-    const avgWin = winCount > 0 ? totalProfit / winCount : 0;
-    const avgLoss = lossCount > 0 ? totalLoss / lossCount : 0;
-    const expectancy = winRate * avgWin - (1 - winRate) * avgLoss;
-
-    // 最大ドローダウン計算（簡易版）
-    let maxDrawdown = 0;
-    let peak = 0;
-    let cumPnL = 0;
-    for (const event of events) {
-      cumPnL += getPnl(event);
-      if (cumPnL > peak) {
-        peak = cumPnL;
-      }
-      const drawdown = peak - cumPnL;
-      if (drawdown > maxDrawdown) {
-        maxDrawdown = drawdown;
-      }
-    }
-
-    return {
-      runId,
-      setupCount,
-      winCount,
-      lossCount,
-      timeoutCount,
-      winRate,
-      profitFactor: Number.isFinite(profitFactor) ? profitFactor : undefined,
-      totalProfit,
-      totalLoss,
-      averagePnL,
-      expectancy,
-      maxDrawdown,
-    };
+    return aggregateBacktestEvents(runId, events, tradingCostPct);
   }
 
   /**
@@ -576,3 +514,77 @@ export class BacktestService {
 
 // シングルトンインスタンスをエクスポート
 export const backtestService = new BacktestService();
+
+/**
+ * バックテストイベント配列から集計結果を作る純粋関数。
+ *
+ * Critical-9: winCount/lossCount/totalProfit/totalLoss は全て pnl 符号で統一する。
+ * 旧実装は winCount/lossCount を outcome 軸 ('win'/'loss')、totalProfit/totalLoss を
+ * pnl 軸 (>0/<0) で計算していたため、全 trade が outcome='timeout' で pnl 正負が
+ * 混在すると「winCount=0 / lossCount=0 なのに PF が出る」集計矛盾が発生していた。
+ *
+ * timeoutCount は exitReason='timeout' の純粋カウントで、TP/SL に届かなかった件数の
+ * 参考値として残す。winCount/lossCount とは独立軸のため、意味的に重複しうる。
+ */
+export function aggregateBacktestEvents(
+  runId: string,
+  events: BacktestEvent[],
+  _tradingCostPct: number,
+): CreateBacktestResultInput {
+  const getPnl = (e: BacktestEvent): number => {
+    if (e.pnl === null || e.pnl === undefined) return 0;
+    return Number(e.pnl);
+  };
+
+  const setupCount = events.length;
+  const winCount = events.filter(e => getPnl(e) > 0).length;
+  const lossCount = events.filter(e => getPnl(e) < 0).length;
+  const timeoutCount = events.filter(e => e.outcome === 'timeout').length;
+
+  const winRate = setupCount > 0 ? winCount / setupCount : 0;
+
+  const totalProfit = events
+    .filter(e => getPnl(e) > 0)
+    .reduce((sum, e) => sum + getPnl(e), 0);
+  const totalLoss = Math.abs(
+    events.filter(e => getPnl(e) < 0).reduce((sum, e) => sum + getPnl(e), 0),
+  );
+
+  const profitFactor =
+    totalLoss > 0 ? totalProfit / totalLoss : totalProfit > 0 ? Infinity : 0;
+  const averagePnL =
+    setupCount > 0 ? events.reduce((sum, e) => sum + getPnl(e), 0) / setupCount : 0;
+
+  const avgWin = winCount > 0 ? totalProfit / winCount : 0;
+  const avgLoss = lossCount > 0 ? totalLoss / lossCount : 0;
+  const expectancy = winRate * avgWin - (1 - winRate) * avgLoss;
+
+  let maxDrawdown = 0;
+  let peak = 0;
+  let cumPnL = 0;
+  for (const event of events) {
+    cumPnL += getPnl(event);
+    if (cumPnL > peak) {
+      peak = cumPnL;
+    }
+    const drawdown = peak - cumPnL;
+    if (drawdown > maxDrawdown) {
+      maxDrawdown = drawdown;
+    }
+  }
+
+  return {
+    runId,
+    setupCount,
+    winCount,
+    lossCount,
+    timeoutCount,
+    winRate,
+    profitFactor: Number.isFinite(profitFactor) ? profitFactor : undefined,
+    totalProfit,
+    totalLoss,
+    averagePnL,
+    expectancy,
+    maxDrawdown,
+  };
+}
