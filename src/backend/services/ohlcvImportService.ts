@@ -18,12 +18,10 @@
 import fs from 'fs';
 import path from 'path';
 import csv from 'csv-parser';
-import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import type { OHLCVInsertData } from '../repositories/ohlcvRepository';
 import { OHLCVRepository } from '../repositories/ohlcvRepository';
-
-const prisma = new PrismaClient();
+import { prisma } from '../db/client';
 
 /** csv-parser の行を文字列キー・スカラー値に正規化してから読む */
 const CsvRowRecordSchema = z.record(

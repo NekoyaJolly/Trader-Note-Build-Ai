@@ -10,10 +10,8 @@
  */
 
 import type { OptimizationMethod } from '@prisma/client';
-import { PrismaClient } from '@prisma/client';
 import type { Decimal } from '@prisma/client/runtime/library';
-
-const prisma = new PrismaClient();
+import { prisma } from '../db/client';
 
 // ============================================
 // 型定義
