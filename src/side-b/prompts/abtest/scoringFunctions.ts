@@ -19,7 +19,7 @@
  * - meta_evolution (Critical-3)
  * - bull_bear_debate (Critical-3)
  *
- * 未定義エージェントに対しては undefined が返る。
+ * 未定義エージェントに対しては null が返る(`getScoringFunction` の返り値仕様)。
  *
  * スコアリング原則:
  * - 決定論的である(同じ入出力に対して同じスコア)
@@ -170,11 +170,17 @@ export const strategistScoreFn: ScoringFunction<
   }
 > = (_input, output) => {
   const VALID_VERDICTS = new Set(['confirmed', 'rejected', 'insufficient_data', 'not_testable']);
-  const verdictScore = output?.verdict && VALID_VERDICTS.has(output.verdict) ? 1 : 0;
+  const isValidVerdict =
+    typeof output?.verdict === 'string' && VALID_VERDICTS.has(output.verdict);
+  const verdictScore = isValidVerdict ? 1 : 0;
   const reasons = output?.baseCriteriaReasons ?? [];
-  // confirmed は理由空でも OK、それ以外は >=1 で満点。verdict 不明なら 0。
-  const reasonsScore =
-    output?.verdict === 'confirmed' ? 1 : Math.min(reasons.length, 1);
+  // verdict が不正なら理由を加点しない(verdict と reasons は独立評価しない)。
+  // confirmed は理由空でも OK、それ以外は >=1 で満点。
+  const reasonsScore = !isValidVerdict
+    ? 0
+    : output.verdict === 'confirmed'
+      ? 1
+      : Math.min(reasons.length, 1);
   const interpScore = lengthScore(output?.interpretation, 80);
   const insights = output?.actionableInsights ?? [];
   const insightsScore = Math.min(insights.length / 2, 1);
@@ -358,7 +364,8 @@ export const promptMutationScoreFn: ScoringFunction<
 > = (input, output) => {
   if (!Array.isArray(output) || output.length === 0) return 0;
   const requestedCount = input?.count ?? 3;
-  const countScore = Math.min(output.length / requestedCount, 1);
+  const countScore =
+    requestedCount > 0 ? Math.min(output.length / requestedCount, 1) : 1;
   const contentScore =
     output.filter((p) => (p.content ?? '').length >= 100).length / output.length;
   const metadataScore =

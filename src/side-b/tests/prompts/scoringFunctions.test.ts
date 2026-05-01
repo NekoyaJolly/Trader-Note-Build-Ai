@@ -179,6 +179,22 @@ describe('strategistScoreFn', () => {
     expect(s).toBeCloseTo(0.3, 5);
   });
 
+  it('verdict 不明は reasons があってもゼロ寄り(リグレッション防止)', () => {
+    // verdict が不正なら理由を加点しない(verdict と reasons は独立評価しない)。
+    // 旧実装は verdict 不明でも reasons 1 件で reasonsScore=1 になっていた。
+    const s = strategistScoreFn(
+      {},
+      {
+        verdict: 'wrong',
+        baseCriteriaReasons: ['x'],
+        interpretation: 'x'.repeat(80),
+      },
+    );
+    // verdictScore=0、reasonsScore=0、interpScore=1、insightsScore=0
+    // = 0 + 0 + 0.3 + 0 = 0.3
+    expect(s).toBeCloseTo(0.3, 5);
+  });
+
   it('confirmed は reasons 空でも reasonsScore=1', () => {
     const s = strategistScoreFn(
       {},
