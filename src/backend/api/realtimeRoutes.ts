@@ -14,7 +14,6 @@
 
 import type { Request, Response } from 'express';
 import { Router } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { requireAuth } from '../../middleware/authMiddleware';
 import type {
@@ -26,6 +25,7 @@ import {
 } from '../services/realtime/ctraderRealtimeOrchestrator';
 import type { TickDataInput, OHLCVBarInput, PendingBar } from '../services/realtime/realtimeTickService';
 import type { JsonValue } from '../../utils/jsonValue';
+import { prisma } from '../db/client';
 
 /** Express の拡張（compression 等で optional flush が付く場合がある） */
 type ResponseWithFlush = Response & { flush?: () => void };
@@ -38,7 +38,6 @@ function flushStreamResponse(res: Response): void {
 }
 
 const router = Router();
-const prisma = new PrismaClient();
 
 // 時間足ごとのオーケストレーター
 const orchestrators: Map<number, CTraderRealtimeOrchestrator> = new Map();

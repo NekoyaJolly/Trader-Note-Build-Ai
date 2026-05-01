@@ -12,7 +12,6 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { z } from 'zod';
-import { PrismaClient } from '@prisma/client';
 import type {
   PatternAnalysisInput,
   AnomalyDetectionInput,
@@ -21,9 +20,9 @@ import type {
 import {
   patternAnalysisService
 } from '../services/patternAnalysisService';
+import { prisma } from '../db/client';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 // ============================================
 // Zod スキーマ定義
