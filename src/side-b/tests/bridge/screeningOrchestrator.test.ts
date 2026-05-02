@@ -74,6 +74,7 @@ interface MockDeps {
     runBacktest: jest.Mock<Promise<AnalysisEngineScreeningBacktestResponse>, [AnalysisEngineScreeningBacktestRequest]>;
     ohlcvRepo: {
         findManyAsOHLCVData: jest.Mock;
+        count: jest.Mock;
     };
     fetchAndCache: jest.Mock;
 }
@@ -106,6 +107,9 @@ function makeMocks(overrides?: Partial<MockDeps>): MockDeps {
                     : new Date('2000-01-01T00:00:00Z');
                 return Promise.resolve([{ timestamp, open: 1, high: 1, low: 1, close: 1, volume: 0 }]);
             }),
+            // デフォルトは「期待バー数の 100% を満たす十分な数」を返す。
+            // カバレッジ判定のテストでは override で 0 や 50% を指定する。
+            count: jest.fn().mockResolvedValue(99_999_999),
             ...(overrides?.ohlcvRepo ?? {}),
         },
         fetchAndCache: overrides?.fetchAndCache ?? jest.fn().mockResolvedValue({
@@ -202,11 +206,12 @@ describe('ScreeningOrchestrator.runScreening (Critical-4 段階 1)', () => {
         expect(mocks.edgeLedger.recordScreeningResult).not.toHaveBeenCalled();
     });
 
-    it('OHLCV 補完に失敗した場合は not_testable として記録する', async () => {
+    it('OHLCV カバレッジ 90% 未満で fetchAndCache 失敗時は not_testable + 取得不能の理由', async () => {
         const hyp = makeHypothesis();
         const mocks = makeMocks({
             ohlcvRepo: {
                 findManyAsOHLCVData: jest.fn().mockResolvedValue([]),
+                count: jest.fn().mockResolvedValue(0),
             },
             fetchAndCache: jest.fn().mockResolvedValue({
                 success: false,
@@ -221,31 +226,66 @@ describe('ScreeningOrchestrator.runScreening (Critical-4 段階 1)', () => {
         expect(result.verdict).toBe('not_testable');
         expect(mocks.edgeLedger.markNotTestable).toHaveBeenCalledWith(
             hyp.id,
-            expect.stringContaining('OHLCV補完失敗'),
+            expect.stringContaining('OHLCV 取得不能'),
+        );
+        expect(mocks.runBacktest).not.toHaveBeenCalled();
+    });
+
+    it('OHLCV カバレッジ 90% 未満で fetchAndCache 後も不足なら not_testable + カバレッジ不足の理由', async () => {
+        const hyp = makeHypothesis();
+        // count を「fetch 前=0, fetch 後=不足のまま」で 2 段階返す
+        let callCount = 0;
+        const countMock = jest.fn().mockImplementation(() => {
+            callCount++;
+            return Promise.resolve(callCount === 1 ? 0 : 100); // 1 年 15m なら期待 25028 で 100 は 0.4% 程度
+        });
+        const mocks = makeMocks({
+            ohlcvRepo: {
+                findManyAsOHLCVData: jest.fn().mockResolvedValue([]),
+                count: countMock,
+            },
+            fetchAndCache: jest.fn().mockResolvedValue({
+                success: true,
+                cachedCount: 100,
+                source: 'ctrader',
+            }),
+        });
+        mocks.edgeLedger.get.mockResolvedValue(hyp);
+
+        const result = await makeOrchestrator(mocks).runScreening(hyp.id);
+
+        expect(result.verdict).toBe('not_testable');
+        expect(mocks.edgeLedger.markNotTestable).toHaveBeenCalledWith(
+            hyp.id,
+            expect.stringContaining('OHLCV カバレッジ不足'),
         );
         expect(mocks.runBacktest).not.toHaveBeenCalled();
     });
 
     it('OHLCV 不足時は cTrader 基準シンボルで補完してから BT を回す', async () => {
         const hyp = makeHypothesis({ symbols: ['XAU/USD'] });
+        // 1 回目 (initial) は 0 件、2 回目 (after fetch) は十分な件数
+        let callCount = 0;
+        const countMock = jest.fn().mockImplementation(() => {
+            callCount++;
+            return Promise.resolve(callCount === 1 ? 0 : 99_999_999);
+        });
         const mocks = makeMocks({
             ohlcvRepo: {
-                findManyAsOHLCVData: jest.fn()
-                    .mockResolvedValueOnce([])
-                    .mockResolvedValueOnce([])
-                    .mockImplementation((filter: { orderBy?: 'asc' | 'desc' }) => {
-                        const timestamp = filter.orderBy === 'desc'
-                            ? new Date('2099-01-01T00:00:00Z')
-                            : new Date('2000-01-01T00:00:00Z');
-                        return Promise.resolve([{
-                            timestamp,
-                            open: 1,
-                            high: 1,
-                            low: 1,
-                            close: 1,
-                            volume: 0,
-                        }]);
-                    }),
+                findManyAsOHLCVData: jest.fn().mockImplementation((filter: { orderBy?: 'asc' | 'desc' }) => {
+                    const timestamp = filter.orderBy === 'desc'
+                        ? new Date('2099-01-01T00:00:00Z')
+                        : new Date('2000-01-01T00:00:00Z');
+                    return Promise.resolve([{
+                        timestamp,
+                        open: 1,
+                        high: 1,
+                        low: 1,
+                        close: 1,
+                        volume: 0,
+                    }]);
+                }),
+                count: countMock,
             },
         });
         mocks.edgeLedger.get.mockResolvedValue(hyp);
@@ -343,6 +383,43 @@ describe('ScreeningOrchestrator.runScreening (Critical-4 段階 1)', () => {
         const mocks = makeMocks();
         mocks.edgeLedger.get.mockResolvedValue(null);
         await expect(makeOrchestrator(mocks).runScreening('missing')).rejects.toThrow(/not found/);
+    });
+
+    it('options.period を渡すと analysis-engine へその期間で送信される', async () => {
+        const hyp = makeHypothesis();
+        const mocks = makeMocks();
+        mocks.edgeLedger.get.mockResolvedValue(hyp);
+
+        const period = { start: '2025-06-01', end: '2025-12-31' };
+        await makeOrchestrator(mocks).runScreening(hyp.id, { period });
+
+        expect(mocks.runBacktest).toHaveBeenCalledTimes(1);
+        const btCall = mocks.runBacktest.mock.calls[0][0];
+        expect(btCall.startDate).toBe(new Date('2025-06-01').toISOString());
+        expect(btCall.endDate).toBe(new Date('2025-12-31').toISOString());
+    });
+
+    it('options.period 未指定時は env SCREENING_PERIOD_DAYS で日数を制御できる', async () => {
+        const hyp = makeHypothesis();
+        const mocks = makeMocks();
+        mocks.edgeLedger.get.mockResolvedValue(hyp);
+
+        const original = process.env.SCREENING_PERIOD_DAYS;
+        process.env.SCREENING_PERIOD_DAYS = '180'; // 半年
+        try {
+            await makeOrchestrator(mocks).runScreening(hyp.id);
+        } finally {
+            if (original === undefined) delete process.env.SCREENING_PERIOD_DAYS;
+            else process.env.SCREENING_PERIOD_DAYS = original;
+        }
+
+        const btCall = mocks.runBacktest.mock.calls[0][0];
+        const startMs = new Date(btCall.startDate).getTime();
+        const endMs = new Date(btCall.endDate).getTime();
+        const diffDays = Math.round((endMs - startMs) / (1000 * 60 * 60 * 24));
+        // 月跨ぎで ±1 日のずれは許容
+        expect(diffDays).toBeGreaterThanOrEqual(179);
+        expect(diffDays).toBeLessThanOrEqual(181);
     });
 
     it('永続化された ScreeningBacktestRun に notePayload / summary / trades / equity / engineVersion が積まれる', async () => {

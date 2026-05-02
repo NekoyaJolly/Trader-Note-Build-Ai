@@ -159,23 +159,67 @@ router.get('/side-b/monitor', async (_req: Request, res: Response) => {
 
 /**
  * GET /api/cron/side-b/run-screening
- * 仮説スクリーニング手動実行（PDCA-2 検証用 / orchestration_health_report Critical-1 対応）
+ * 仮説スクリーニング手動実行(PDCA-2 検証用)
  *
  * 動作:
- *   - unverified 仮説を最大 screeningMaxPerRun 件取り出して
- *     ScreeningOrchestrator.runScreening を回す
- *   - 市場開場チェックなし（screening は OHLCV 取得経由なのでオフライン実行可）
+ *   - unverified 仮説を最大 `max` 件取り出して ScreeningOrchestrator.runScreening を回す
+ *   - 市場開場チェックなし(screening は過去 OHLCV を舐める処理でオフライン実行可)
+ *
+ * Query parameters (Critical-4 段階 1.6):
+ *   - start  YYYY-MM-DD 形式の BT 期間開始日 (省略時は env SCREENING_PERIOD_DAYS デフォルト)
+ *   - end    YYYY-MM-DD 形式の BT 期間終了日 (省略時は今日)
+ *   - max    1 回の実行で処理する上限件数 (省略時は config.screeningMaxPerRun)
  *
  * 用途:
- *   - Phase 6.7b デプロイ後の動作確認
- *   - not_testable に倒れた仮説の再検証（仮説ID 指定は Phase 7 以降）
+ *   - 自動 cron 走行時はパラメータなしで env / config 既定値で実行
+ *   - 手動再 screening: 過去の rejected を新閾値で評価したい場合に start/end を指定
+ *   - not_testable に倒れた仮説の再検証
  */
-router.get('/side-b/run-screening', async (_req: Request, res: Response) => {
+router.get('/side-b/run-screening', async (req: Request, res: Response) => {
   const startTime = Date.now();
   try {
-    console.log('[Cron] スクリーニング手動実行を開始します');
+    const startQ = typeof req.query.start === 'string' ? req.query.start.trim() : '';
+    const endQ = typeof req.query.end === 'string' ? req.query.end.trim() : '';
+    const maxQ = typeof req.query.max === 'string' ? parseInt(req.query.max, 10) : NaN;
+
+    // start と end は必ずペアで指定 (片方だけは無効)
+    let period: { start: string; end: string } | undefined;
+    if (startQ && endQ) {
+      // ISO 8601 日付として妥当か簡易チェック
+      const s = new Date(startQ);
+      const e = new Date(endQ);
+      if (!Number.isFinite(s.getTime()) || !Number.isFinite(e.getTime())) {
+        res.status(400).json({
+          success: false,
+          error: 'start / end は YYYY-MM-DD 形式の妥当な日付である必要があります',
+        });
+        return;
+      }
+      if (s.getTime() >= e.getTime()) {
+        res.status(400).json({ success: false, error: 'start は end より前の日付である必要があります' });
+        return;
+      }
+      period = { start: startQ, end: endQ };
+    } else if (startQ || endQ) {
+      res.status(400).json({
+        success: false,
+        error: 'start と end はペアで指定してください (片方だけは無効)',
+      });
+      return;
+    }
+
+    const limit = Number.isFinite(maxQ) && maxQ > 0 ? maxQ : undefined;
+
+    console.log(
+      `[Cron] スクリーニング手動実行を開始します` +
+      (period ? ` period=${period.start}〜${period.end}` : '') +
+      (limit ? ` max=${limit}` : ''),
+    );
     const scheduler = getSideBScheduler();
-    const summary = await scheduler.runScreeningNow();
+    const summary = await scheduler.runScreeningNow({
+      ...(period ? { period } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    });
     console.log('[Cron] スクリーニング手動実行完了:', summary);
     res.json({
       success: summary.errors === 0,

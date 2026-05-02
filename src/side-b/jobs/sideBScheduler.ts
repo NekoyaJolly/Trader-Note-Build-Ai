@@ -600,21 +600,28 @@ export class SideBScheduler {
   }
 
   /**
-   * Phase 4b 縮小版: スクリーニングを手動実行
+   * Phase 4b 縮小版 + Critical-4 段階 1.6: スクリーニングを手動実行
    *
-   * unverified 仮説を最大 `screeningMaxPerRun` 件取り出し、
+   * unverified 仮説を最大 `limit` 件取り出し、
    * ScreeningOrchestrator.runScreening で順次評価する。
    * 各仮説の失敗は他仮説に影響させない（best-effort）。
+   *
+   * @param options.limit  config.screeningMaxPerRun の override (運用側で 1 回分の処理量を絞る)
+   * @param options.period BT 対象期間 override (env SCREENING_PERIOD_DAYS のデフォルトを上書き)
    */
-  async runScreeningNow(): Promise<{
+  async runScreeningNow(options?: {
+    limit?: number;
+    period?: { start: string; end: string };
+  }): Promise<{
     processed: number;
     passed: number;
     rejected: number;
     notTestable: number;
     errors: number;
   }> {
-    const limit = Math.max(1, this.config.screeningMaxPerRun);
-    this.log(`[Screening] 事前スクリーニングを開始 (上限 ${limit}件)`);
+    const limit = Math.max(1, options?.limit ?? this.config.screeningMaxPerRun);
+    const periodLog = options?.period ? ` period=${options.period.start}〜${options.period.end}` : '';
+    this.log(`[Screening] 事前スクリーニングを開始 (上限 ${limit}件)${periodLog}`);
 
     const summary = { processed: 0, passed: 0, rejected: 0, notTestable: 0, errors: 0 };
 
@@ -630,6 +637,7 @@ export class SideBScheduler {
           const lensSnapshot = symbol ? agentMemory.getCurrentLensSnapshot(symbol) : undefined;
           const result = await screeningOrchestrator.runScreening(hyp.id, {
             lensSnapshot,
+            ...(options?.period ? { period: options.period } : {}),
           });
 
           if (result.verdict === 'screening_passed') {
