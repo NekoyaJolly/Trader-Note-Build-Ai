@@ -1,46 +1,36 @@
 /**
- * ScreeningOrchestrator（Phase 4b 縮小版）
+ * ScreeningOrchestrator (Critical-4 段階 1: BT 一本化)
  *
- * EdgeHypothesis に対して、Side-A BacktestService を使った
- * **事前スクリーニング**（粗いフィルタ）を実行する。
+ * EdgeHypothesis に対する事前スクリーニング BT を analysis-engine 経由で実行する。
  *
- * 本格検証（WalkForward / MonteCarlo / BuyAndHold）は Phase 4c で実装される。
- * このフェーズでは `screening_passed` へのステータス昇格までを担う。
+ * 旧経路 (Phase 4b): MaterializationService → TradeNote 生成 → Side-A backtestService.execute
+ *   → BacktestRun テーブルに保存 (BT 系統が複数並列に存在する状態だった)
  *
- * フロー:
- *   1. unverified 仮説を取得
- *   2. MaterializationService で TradeNote に materialize
- *      （失敗なら 'not_testable'）
- *   3. OHLCVが不足していれば cTrader 優先で補完（失敗時のみ Twelve Data）
- *   4. Side-A BacktestService.execute + getResult で BT 実行
- *   5. StatusManager.canPromoteToScreeningPassed で判定
- *   6. EdgeLedger.recordScreeningResult でステータス遷移
+ * 新経路 (本実装): 仮説の defaultRiskManagement / conditions / 指標スペックを
+ *   そのまま `notePayload` として analysis-engine の `/v1/screening-backtest` に POST。
+ *   analysis-engine 内で `backtesting.py` により BT が走り、結果は `ScreeningBacktestRun`
+ *   テーブルに保存される。
  *
  * 設計原則:
- * - Side-A コードを一切変更しない（backtestService は外部 API として呼び出すのみ）
- * - best-effort: 1件の失敗が他仮説の検証を止めない
- * - 決定論的判定: LLM は使わない（判定は SCREENING_THRESHOLDS に従う）
+ * - BT エンジンはアプリ全体で 1 つだけ (analysis-engine + backtesting.py)
+ * - 変換アダプタを作らない (notePayload を素直に渡す、§12.3)
+ * - OHLCV は analysis-engine が DB から直読みするため、Node 側で渡さない
+ * - 決定論的判定 (StatusManager.canPromoteToScreeningPassed)、LLM 不使用
  *
- * @see docs/design/phase_4b_specification.md セクション4.4
+ * @see docs/design/critical_4_bt_unification.md §3 段階 1 / §6 / §11.4 / §12
  */
 
-import type { LensFeatureSnapshot } from '../lenses';
-import {
-    defaultLensAggregator,
-    registerDefaultLenses,
-    type LensAggregator,
-} from '../lenses';
-import type { OHLCVBar } from '../lenses/utils/pivotDetection';
-import { normalizeTimeframe, DEFAULT_TIMEFRAME } from '../constants/timeframes';
 import type { ScreeningResult } from '../models/edgeHypothesis';
+import {
+    DEFAULT_RISK_MANAGEMENT,
+    type EdgeHypothesis,
+    type DefaultRiskManagement,
+} from '../models/edgeHypothesis';
+import type { LensFeatureSnapshot } from '../lenses';
 import type { EdgeLedger } from '../ledger/EdgeLedger';
 import { edgeLedger as defaultEdgeLedger } from '../ledger/EdgeLedger';
 import type { StatusManager } from '../ledger/statusManager';
 import { statusManager as defaultStatusManager } from '../ledger/statusManager';
-import type { MaterializationService } from './MaterializationService';
-import { materializationService as defaultMaterializationService } from './MaterializationService';
-import { MaterializationError } from './types';
-import { backtestService as defaultBacktestService, type BacktestService } from '../../services/backtestService';
 import type { OHLCVRepository } from '../../backend/repositories/ohlcvRepository';
 import { OHLCVRepository as DefaultOHLCVRepository } from '../../backend/repositories/ohlcvRepository';
 import {
@@ -48,47 +38,45 @@ import {
     type FetchAndCacheResult,
 } from '../../backend/services/fetchAndCacheOhlcv';
 import { normalizeCTraderSymbol } from '../../utils/symbolNormalization';
-
-/**
- * Phase 3 系レンズ(volatility_regime)の必要バー数を満たすための最低本数。
- * VolatilityRegimeLens の既定設定: indicatorWindow(20) + atrChangeWindow(5) + 1 = 26。
- * パーセンタイル計算の安定性を考慮し、percentileLookback(100) と合わせて
- * 余裕を持って 150 本まで遡る。
- */
-const SCREENING_LENS_LOOKBACK = 150;
+import { normalizeTimeframe, DEFAULT_TIMEFRAME } from '../constants/timeframes';
+import type { ScreeningBacktestRunRepository } from '../../backend/repositories/screeningBacktestRunRepository';
+import { screeningBacktestRunRepository as defaultScreeningBacktestRepo } from '../../backend/repositories/screeningBacktestRunRepository';
+import { runScreeningBacktest as defaultRunScreeningBacktest } from '../../backend/services/analysisEngineClient';
+import type { ScreeningBacktestNotePayload } from '../../schemas/external/analysisEngine';
 
 // ===========================================
 // 型
 // ===========================================
 
 export interface ScreeningOrchestratorOptions {
-    /** ATR / エントリー価格の取得元レンズスナップショット */
-    lensSnapshot?: LensFeatureSnapshot;
-    /** スクリーニング対象期間（既定: 直近1年） */
+    /** スクリーニング対象期間(既定: 直近1年) */
     period?: { start: string; end: string };
-    /** マッチ閾値（Side-A BT の入力、既定 0.6） TODO(Phase 4c): 外部化 */
-    matchThreshold?: number;
-    /** unverified 以外のステータスに対しても強制実行する（テスト / 再スクリーニング用） */
+    /** unverified 以外のステータスに対しても強制実行する(テスト / 再スクリーニング用) */
     force?: boolean;
+    /**
+     * 旧 API との互換: 段階 1 では analysis-engine が ATR を内部計算するため未使用。
+     * Phase 4b 当時の呼び出し元(skill / scheduler)が渡してくる可能性があるため受けるだけ。
+     */
+    matchThreshold?: number;
+    /** 旧 API との互換: 同上、無視される(scheduler が agentMemory から取得して渡してくる) */
+    lensSnapshot?: LensFeatureSnapshot;
 }
 
 /**
- * スクリーニング1回分の結果（Orchestrator が呼び出し元に返す）
+ * スクリーニング1回分の結果(Orchestrator が呼び出し元に返す)
  */
 export type ScreeningRunResult =
     | {
         hypothesisId: string;
         verdict: 'screening_passed';
-        tradeNoteId: string;
         metrics: ScreeningResult['metrics'];
-        backtestRunId: string;
+        screeningBacktestRunId: string;
     }
     | {
         hypothesisId: string;
         verdict: 'rejected';
-        tradeNoteId: string;
         metrics: ScreeningResult['metrics'];
-        backtestRunId: string;
+        screeningBacktestRunId: string;
         reasons: string[];
     }
     | {
@@ -97,16 +85,22 @@ export type ScreeningRunResult =
         reason: string;
     };
 
+/**
+ * BT を実際に走らせる関数の型 (依存注入用)。
+ * 既定では analysis-engine HTTP API を叩く `runScreeningBacktest`。テストではモックを差し替える。
+ */
+export type RunScreeningBacktestFn = typeof defaultRunScreeningBacktest;
+
 // ===========================================
 // ScreeningOrchestrator 本体
 // ===========================================
 
 export class ScreeningOrchestrator {
     constructor(
-        private readonly materialization: MaterializationService = defaultMaterializationService,
         private readonly edgeLedger: EdgeLedger = defaultEdgeLedger,
         private readonly statusManager: StatusManager = defaultStatusManager,
-        private readonly backtestService: BacktestService = defaultBacktestService,
+        private readonly screeningBacktestRepo: ScreeningBacktestRunRepository = defaultScreeningBacktestRepo,
+        private readonly runBacktest: RunScreeningBacktestFn = defaultRunScreeningBacktest,
         private readonly ohlcvRepo: Pick<OHLCVRepository, 'findManyAsOHLCVData'> = new DefaultOHLCVRepository(),
         private readonly fetchAndCache: (
             symbol: string,
@@ -114,29 +108,14 @@ export class ScreeningOrchestrator {
             startDate: Date,
             endDate: Date,
         ) => Promise<FetchAndCacheResult> = fetchAndCacheOhlcv,
-        private readonly lensAggregator: Pick<LensAggregator, 'computeAll'> = defaultLensAggregator,
-    ) {
-        // ScreeningOrchestrator は agentMemory に依存せず、screening 期間の OHLCV から
-        // 直接 lensSnapshot を生成する(§Critical-1 修正、orchestration_health_report 参照)。
-        // テストで別 aggregator を注入するケースを除き、レンズ未登録の場合は登録する。
-        if (this.lensAggregator === defaultLensAggregator) {
-            registerDefaultLenses();
-        }
-    }
+    ) {}
 
     /**
      * 仮説に対して事前スクリーニングを実行する。
      *
-     * 呼び出し前提:
-     * - hypothesis.status === 'unverified'（force=true で回避可）
-     * - hypothesis.symbols / timeframes が空でない
-     *
      * 例外:
-     * - 仮説が見つからない場合は Error を投げる（スケジューラーは個別にキャッチする）
-     * - Side-A BT 実行で内部例外が起きた場合もそのまま投げる
-     *   （呼び出し側がジョブレベルで個別対応）
-     *
-     * MaterializationError は内部で捕捉し、verdict='not_testable' で返す。
+     * - 仮説が見つからない場合は Error を投げる
+     * - analysis-engine 通信エラーは内部で捕捉し、verdict='not_testable' として返す
      */
     async runScreening(
         hypothesisId: string,
@@ -156,12 +135,10 @@ export class ScreeningOrchestrator {
         const period = options.period ?? this.determineScreeningPeriod();
         const periodStart = new Date(period.start);
         const periodEnd = new Date(period.end);
-        // Critical-1.5: 過去仮説には timeframes=['multi'] が混入しており、
-        // Twelve Data API がそれを rejecting する。'multi' / 不正値は既定値に倒す。
-        // 受理リスト・既定値は src/side-b/constants/timeframes.ts に集約。
+
+        // Critical-1.5: 過去仮説には timeframes=['multi'] が混入している場合があるため正規化
         const rawTimeframe = hypothesis.timeframes[0] ?? DEFAULT_TIMEFRAME;
         const timeframe = normalizeTimeframe(rawTimeframe);
-        const matchThreshold = options.matchThreshold ?? 0.6;
         const symbol = normalizeCTraderSymbol(hypothesis.symbols[0] ?? '');
         if (!symbol) {
             const reason = '仮説に symbols が設定されていない';
@@ -169,7 +146,7 @@ export class ScreeningOrchestrator {
             return { hypothesisId, verdict: 'not_testable', reason };
         }
 
-        // OHLCV を先に補完(materialize で必要な ATR を bars から計算するため)。
+        // OHLCV を analysis-engine 側で読むので、ここでは「カバレッジが足りなければ補完して DB に入れておく」のみ。
         const ensure = await this.ensureOhlcvData(symbol, timeframe, periodStart, periodEnd);
         if (!ensure.ok) {
             const reason = `OHLCV補完失敗: ${ensure.reason}`;
@@ -177,72 +154,61 @@ export class ScreeningOrchestrator {
             return { hypothesisId, verdict: 'not_testable', reason };
         }
 
-        // screening 専用に fresh な lensSnapshot + entryPriceHint を計算する(Critical-1 / 1.6)。
-        // - lensSnapshot は volatility_regime.atr を必ず含むようにする
-        // - entryPriceHint は直近 OHLCV の close から取得し、materialize 側の
-        //   `?? 1.0` フォールバック(SL/TP の % が桁違いになる原因)を防ぐ
-        const { lensSnapshot, entryPriceHint } = await this.resolveScreeningContext(
-            symbol,
-            timeframe,
-            periodEnd,
-            options.lensSnapshot,
-        );
+        // notePayload を構築(変換アダプタは作らない、仮説フィールドをそのまま積む)
+        const notePayload = this.buildNotePayload(hypothesis);
 
-        // 1. Materialize
-        let materialized;
+        // analysis-engine BT 実行
+        let btResponse;
         try {
-            materialized = await this.materialization.materializeForValidation(hypothesis, {
-                lensSnapshot,
-                ...(entryPriceHint !== undefined ? { entryPriceHint } : {}),
+            btResponse = await this.runBacktest({
+                hypothesisId,
+                symbol,
+                timeframe,
+                startDate: periodStart.toISOString(),
+                endDate: periodEnd.toISOString(),
+                notePayload,
+                config: {
+                    initialCapital: 10_000,
+                    leverage: 1,
+                    tradingCost: 0,
+                },
             });
-        } catch (error) {
-            if (error instanceof MaterializationError) {
-                const reason = error.reason;
-                await this.edgeLedger.markNotTestable(hypothesisId, `Materialization失敗: ${reason}`);
-                return { hypothesisId, verdict: 'not_testable', reason };
-            }
-            throw error;
-        }
-
-        const { tradeNoteId, stopLossPercent, takeProfitPercent, maxHoldingMinutes } = materialized;
-
-        // 2. Side-A BacktestService で BT 実行
-        const runId = await this.backtestService.execute({
-            noteId: tradeNoteId,
-            startDate: periodStart,
-            endDate: periodEnd,
-            timeframe,
-            matchThreshold,
-            takeProfit: takeProfitPercent,
-            stopLoss: stopLossPercent,
-            maxHoldingMinutes,
-        });
-
-        // 3. 結果取得
-        const summary = await this.backtestService.getResult(runId);
-        if (!summary) {
-            // runId が取得できたのに結果が無いのは Side-A 側の異常。not_testable 扱い。
-            const reason = `BT 結果取得失敗 (runId=${runId})`;
+        } catch (err) {
+            const reason = `analysis-engine BT 実行失敗: ${
+                err instanceof Error ? err.message : String(err)
+            }`;
             await this.edgeLedger.markNotTestable(hypothesisId, reason);
             return { hypothesisId, verdict: 'not_testable', reason };
         }
 
-        const pf = summary.profitFactor ?? 0;
-        const winRate = summary.winRate; // Side-A は 0-1 で返す
-        const tradeCount = summary.setupCount;
-        const metrics: ScreeningResult['metrics'] = { pf, winRate, tradeCount };
+        // 結果を ScreeningBacktestRun に永続化
+        const persisted = await this.screeningBacktestRepo.create({
+            hypothesisId,
+            symbol,
+            timeframe,
+            periodStart,
+            periodEnd,
+            notePayload,
+            summary: btResponse.summary,
+            trades: btResponse.trades,
+            equity: btResponse.equity ?? null,
+            engineVersion: btResponse.engineVersion,
+        });
 
-        // 4. 判定
+        // メトリクスから判定 (StatusManager は決定論的)
+        const metrics: ScreeningResult['metrics'] = {
+            pf: btResponse.summary.pf,
+            winRate: btResponse.summary.winRate,
+            tradeCount: btResponse.summary.tradeCount,
+        };
         const check = this.statusManager.canPromoteToScreeningPassed(metrics);
 
-        // 5. 記録
         const result: ScreeningResult = {
             executedAt: new Date().toISOString(),
-            tradeNoteId,
             passed: check.ok,
             metrics,
-            reasons: check.ok ? undefined : check.reasons,
-            backtestRunId: runId,
+            ...(check.ok ? {} : { reasons: check.reasons }),
+            screeningBacktestRunId: persisted.id,
         };
 
         await this.edgeLedger.recordScreeningResult(hypothesisId, result);
@@ -251,24 +217,46 @@ export class ScreeningOrchestrator {
             return {
                 hypothesisId,
                 verdict: 'screening_passed',
-                tradeNoteId,
                 metrics,
-                backtestRunId: runId,
+                screeningBacktestRunId: persisted.id,
             };
         }
         return {
             hypothesisId,
             verdict: 'rejected',
-            tradeNoteId,
             metrics,
-            backtestRunId: runId,
+            screeningBacktestRunId: persisted.id,
             reasons: check.reasons,
         };
     }
 
     /**
-     * スクリーニング対象期間のデフォルト（直近1年）
-     * ISO8601 日付文字列を返す。
+     * notePayload を仮説から構築する。
+     *
+     * 「変換アダプタを作らない」(§12.3) 方針に従い、仮説のフィールドをそのまま積む。
+     * Python 側 (analysis-engine/app/backtest.py) で評価する。
+     */
+    private buildNotePayload(hypothesis: EdgeHypothesis): ScreeningBacktestNotePayload {
+        const rm: DefaultRiskManagement =
+            hypothesis.defaultRiskManagement ?? DEFAULT_RISK_MANAGEMENT;
+
+        return {
+            direction: hypothesis.expectedDirection,
+            conditions: hypothesis.conditions.map((c) => ({
+                lensName: c.lensName,
+                featureKey: c.featureKey,
+                op: c.op,
+                value: c.value,
+            })),
+            stopLoss: rm.stopLoss,
+            takeProfit: rm.takeProfit,
+            indicators: [],
+            ...(rm.maxHoldingBars !== undefined ? { maxHoldingBars: rm.maxHoldingBars } : {}),
+        };
+    }
+
+    /**
+     * スクリーニング対象期間のデフォルト(直近1年)
      */
     private determineScreeningPeriod(): { start: string; end: string } {
         const end = new Date();
@@ -281,96 +269,7 @@ export class ScreeningOrchestrator {
     }
 
     /**
-     * Materialize に渡す lensSnapshot と entryPriceHint を決定する(Critical-1 / 1.6)。
-     *
-     * 戻り値:
-     *   - lensSnapshot: volatility_regime.atr を含む新しい snapshot
-     *     (provided に有効 ATR があればそれを優先し、なければ OHLCV から計算)
-     *   - entryPriceHint: 直近 OHLCV bar の close。screening 期間末尾の現実価格を
-     *     materialize の SL/TP % 換算の分母として使う。snapshot だけからは取得できない
-     *     ケース(current_analysis.latest_price 未設定)に対する保険。
-     *
-     * これにより agentMemory.getCurrentLensSnapshot に依存せず、
-     * screening ジョブ単独で ATR と entryPrice を解決できる。
-     */
-    private async resolveScreeningContext(
-        symbol: string,
-        timeframe: string,
-        periodEnd: Date,
-        provided: LensFeatureSnapshot | undefined,
-    ): Promise<{
-        lensSnapshot: LensFeatureSnapshot | undefined;
-        entryPriceHint: number | undefined;
-    }> {
-        // OHLCV 取得を 1 度だけ行い、snapshot 計算と entryPriceHint 抽出の両方に使う。
-        let ohlcvBars: OHLCVBar[] = [];
-        try {
-            const lookbackMs = this.timeframeToMs(timeframe) * SCREENING_LENS_LOOKBACK;
-            const lookbackStart = new Date(periodEnd.getTime() - lookbackMs);
-            const recent = await this.ohlcvRepo.findManyAsOHLCVData({
-                symbol,
-                timeframe,
-                startTime: lookbackStart,
-                endTime: periodEnd,
-                limit: SCREENING_LENS_LOOKBACK,
-                orderBy: 'asc',
-            });
-            ohlcvBars = recent.map((bar) => ({
-                timestamp: bar.timestamp instanceof Date ? bar.timestamp : new Date(bar.timestamp),
-                open: bar.open,
-                high: bar.high,
-                low: bar.low,
-                close: bar.close,
-                volume: bar.volume,
-            }));
-        } catch (err) {
-            console.warn(
-                `[ScreeningOrchestrator] OHLCV 取得失敗、provided にフォールバック: ${
-                    err instanceof Error ? err.message : String(err)
-                }`,
-            );
-        }
-
-        const lastBar = ohlcvBars.length > 0 ? ohlcvBars[ohlcvBars.length - 1] : undefined;
-        const entryPriceHint =
-            lastBar !== undefined && Number.isFinite(lastBar.close) && lastBar.close > 0
-                ? lastBar.close
-                : undefined;
-
-        // provided に有効 ATR があればそれを優先(後方互換)
-        if (provided) {
-            const vol = provided.features.get('volatility_regime');
-            const atr = vol?.features.atr;
-            if (typeof atr === 'number' && atr > 0) {
-                return { lensSnapshot: provided, entryPriceHint };
-            }
-        }
-
-        if (ohlcvBars.length === 0) {
-            return { lensSnapshot: provided, entryPriceHint };
-        }
-
-        try {
-            const fresh = await this.lensAggregator.computeAll({
-                symbol,
-                timeframe,
-                timestamp: ohlcvBars[ohlcvBars.length - 1].timestamp,
-                ohlcvBars,
-            });
-            return { lensSnapshot: fresh, entryPriceHint };
-        } catch (err) {
-            console.warn(
-                `[ScreeningOrchestrator] fresh lensSnapshot 計算失敗、provided にフォールバック: ${
-                    err instanceof Error ? err.message : String(err)
-                }`,
-            );
-            return { lensSnapshot: provided, entryPriceHint };
-        }
-    }
-
-    /**
-     * Screening BT 前に、DB上のOHLCVが指定期間をカバーしているか確認する。
-     * 足りない場合は cTrader 優先、失敗時のみ Twelve Data フォールバックで補完する。
+     * BT 前に DB 上の OHLCV が指定期間をカバーしているか確認し、不足分は補完する。
      */
     private async ensureOhlcvData(
         symbol: string,
@@ -386,7 +285,7 @@ export class ScreeningOrchestrator {
         if (!result.success) {
             return {
                 ok: false,
-                reason: result.error ?? 'cTrader/Twelve Data からOHLCVを取得できませんでした',
+                reason: result.error ?? 'cTrader/Twelve Data から OHLCV を取得できませんでした',
             };
         }
 
@@ -396,7 +295,7 @@ export class ScreeningOrchestrator {
 
         return {
             ok: false,
-            reason: `補完後もDBに十分なOHLCVがありません（source=${result.source ?? 'unknown'}, cached=${result.cachedCount}）`,
+            reason: `補完後も DB に十分な OHLCV がありません (source=${result.source ?? 'unknown'}, cached=${result.cachedCount})`,
         };
     }
 
@@ -451,6 +350,6 @@ export class ScreeningOrchestrator {
 }
 
 /**
- * 既定シングルトン（依存性を注入する場合は new で別インスタンスを作ること）
+ * 既定シングルトン(依存性を注入する場合は new で別インスタンスを作ること)
  */
 export const screeningOrchestrator = new ScreeningOrchestrator();

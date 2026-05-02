@@ -790,6 +790,38 @@ model StrategyBacktestEvent {
   @@index([runId, entryTime], map: "idx_strategybacktestevent_run_entry")
 }
 
+/// Critical-4 段階 1: 仮説スクリーニング BT 実行履歴
+/// analysis-engine 経由で実行された BT 結果を保存する。
+/// EdgeHypothesis.screeningResult.screeningBacktestRunId から参照される。
+/// notePayload は BT 入力スナップショット (entry conditions / SL/TP 仕様 / 指標スペック)。
+model ScreeningBacktestRun {
+  id            String   @id @default(uuid()) @db.Uuid
+  /// EdgeHypothesis.id (Side-B 横断のため外部キーは貼らない)
+  hypothesisId  String   @db.Uuid
+  /// 銘柄シンボル
+  symbol        String
+  /// 時間足
+  timeframe     String
+  /// BT 期間開始
+  periodStart   DateTime @db.Timestamptz(6)
+  /// BT 期間終了
+  periodEnd     DateTime @db.Timestamptz(6)
+  /// BT 入力スナップショット
+  notePayload   Json
+  /// BT 結果サマリー (pf / winRate / tradeCount / maxDD / sharpe / returnPct)
+  summary       Json
+  /// トレード詳細 (各エントリー/エグジットの記録)
+  trades        Json
+  /// equity curve (任意)
+  equity        Json?
+  /// BT エンジン名+バージョン (例: 'analysis-engine/backtesting.py@0.6.5')
+  engineVersion String
+  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([hypothesisId, createdAt(sort: Desc)], map: "idx_screening_bt_hyp_created")
+  @@index([symbol, timeframe], map: "idx_screening_bt_symbol_tf")
+}
+
 /// ストラテジーアラート設定
 /// ストラテジー条件成立時のリアルタイム通知設定
 model StrategyAlert {
