@@ -30,10 +30,10 @@ describe('StatusManager.canPromoteToScreeningPassed (Phase 4b 縮小版)', () =>
         expect(result.reasons).toEqual([]);
     });
 
-    it('PF 不足なら ok=false', () => {
+    it('PF 境界値（minPF ジャスト）は "> 判定" で弾かれる', () => {
         const result = sm.canPromoteToScreeningPassed({
             ...basePassing,
-            pf: SCREENING_THRESHOLDS.minPF,  // 境界値: '>' 判定で弾かれる
+            pf: SCREENING_THRESHOLDS.minPF,
         });
         expect(result.ok).toBe(false);
         expect(result.reasons.some((r) => r.includes('PF不足'))).toBe(true);
@@ -71,16 +71,7 @@ describe('StatusManager.canPromoteToScreeningPassed (Phase 4b 縮小版)', () =>
         expect(result.reasons.some((r) => r.includes('勝率'))).toBe(false);
     });
 
-    it('PF 1.1 ジャストは閾値判定（>）で弾かれる', () => {
-        const result = sm.canPromoteToScreeningPassed({
-            ...basePassing,
-            pf: 1.1,
-        });
-        expect(result.ok).toBe(false);
-        expect(result.reasons.some((r) => r.includes('PF不足'))).toBe(true);
-    });
-
-    it('PF が 1.1 を超えれば（例: 1.15）通過する', () => {
+    it('PF が 1.1 を超えれば（例: 1.15）通過する（暫定緩和後の通過例）', () => {
         const result = sm.canPromoteToScreeningPassed({
             pf: 1.15,
             winRate: 0.30, // 勝率 30% でも通過するようになった
@@ -96,8 +87,9 @@ describe('StatusManager.canPromoteToScreeningPassed (Phase 4b 縮小版)', () =>
             tradeCount: 5,
         });
         expect(result.ok).toBe(false);
-        // 勝率閾値撤廃後は最大 2 件（PF 不足 / トレード数不足）になる
-        expect(result.reasons.length).toBeGreaterThanOrEqual(2);
+        // 勝率閾値撤廃後は PF 不足 / トレード数不足 の 2 件で固定。
+        // 想定外の理由が増えたら回帰として検知できるよう、件数を厳密にチェックする。
+        expect(result.reasons).toHaveLength(2);
         expect(result.reasons.some((r) => r.includes('PF不足'))).toBe(true);
         expect(result.reasons.some((r) => r.includes('トレード数不足'))).toBe(true);
     });
