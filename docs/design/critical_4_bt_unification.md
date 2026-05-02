@@ -30,14 +30,14 @@
 
 ---
 
-## §2 現状の 2 系統 BT 構造
+## §2 現状の 2+1 系統 BT 構造
 
 ### 並列に存在する 2 系統
 
 | 系統 | 場所 | テーブル | 現在の使用状況 |
 |---|---|---|---|
-| **(a) ノート経由 BT** | `services/backtestService.ts:execute()` | `BacktestRun` | ❌ screening が誤って使用中 / 動作不安定の疑い |
-| **(b) 戦略経由 BT(自前 TS)** | `backend/services/strategyBacktestService.ts:runBacktest()` | `StrategyBacktestRun` | ⚠️ `walkForwardService` のみ使用、ほぼ未稼働 |
+| **(a) ノート経由 BT** | `src/services/backtestService.ts:execute()` | `BacktestRun` | ❌ screening が誤って使用中 / 動作不安定の疑い |
+| **(b) 戦略経由 BT(自前 TS)** | `src/backend/services/strategyBacktestService.ts:runBacktest()` | `StrategyBacktestRun` | ⚠️ `walkForwardService` のみ使用、ほぼ未稼働 |
 | **(c) DSL ベース BT(自前 TS)** | `src/side-b/strategy_dsl/dslBacktestSimulation.ts` (21KB) | (DB 永続化なし、メモリ上のみ) | ⚠️ Phase 6.7b で部分実装、`StrategyBacktesterAgent` が呼び出すがメモリ上のみ |
 
 ### Python 側の既存基盤(BT 未実装)
@@ -116,13 +116,13 @@ ScreeningOrchestrator
 **前提**: 段階 1 で screening が依存しなくなっている
 
 **廃止対象**:
-- `services/backtestService.ts:execute / getResult / etc.`
+- `src/services/backtestService.ts:execute / getResult / etc.`
 - `BacktestRun / BacktestResult / BacktestEvent` テーブル(完全廃止 or 履歴保持で deprecate)
 - `BacktestRepository`(関連メソッド削除)
 - `MaterializationService` の TradeNote 生成パス(他で使われていなければ完全廃止)
 
 **確認事項**:
-- `services/backtestService.ts` の他の呼び出し元(grep で全部洗い出して影響範囲確認、本 PR §5 参照)
+- `src/services/backtestService.ts` の他の呼び出し元(grep で全部洗い出して影響範囲確認、本 PR §5 参照)
 - `BacktestRun` テーブルを参照している UI / API / レポート機能の有無
 
 ### 段階 4: 戦略 BT 本体を Python BT ライブラリに切り替え
@@ -137,7 +137,7 @@ ScreeningOrchestrator
 - 改修 `python/requirements.txt`(`backtesting` 追加)
 - 改修 `src/side-b/strategy_dsl/DSLBacktestAdapter.ts`(PythonBridge 経由呼び出しに切り替え、または新規ラッパー)
 - 改修(or 廃止) `src/side-b/strategy_dsl/dslBacktestSimulation.ts`
-- 改修(or 廃止) `backend/services/strategyBacktestService.ts:runBacktest`(WalkForward 用ラッパーに縮小)
+- 改修(or 廃止) `src/backend/services/strategyBacktestService.ts:runBacktest`(WalkForward 用ラッパーに縮小)
 
 **詳細は §7, §8 参照**。
 
@@ -179,7 +179,7 @@ ScreeningOrchestrator
 
 | カテゴリ | 影響 |
 |---|---|
-| 廃止ファイル | `services/backtestService.ts`(全削除) |
+| 廃止ファイル | `src/services/backtestService.ts`(全削除) |
 | 改修ファイル | `BacktestRepository`(削除)、`backtestController` 等の API 層 |
 | DB スキーマ | `BacktestRun / Result / Event` テーブル廃止(マイグレーション要) |
 | UI | 古いノート BT 画面があれば削除(要調査) |
@@ -431,3 +431,152 @@ export class PythonBacktestAdapter {
 ---
 
 *作成: Critical-4 (BT 一本化) 設計議論のたたき台。本 PR マージ後、Nekoさん 判断で段階 1 から実装着手する。*
+
+---
+
+## §11 Copilot レビュー指摘への明確化(後日追記)
+
+PR #77 提出後の Copilot レビュー (7 件) で技術的に重要な指摘があったため、設計の精度を上げる方向で以下に明確化する。
+
+### 11.1 「Critical-4」の番号衝突に関する整理
+
+**指摘**: 既存の診断ドキュメント (`docs/diagnostics/orchestration_health_report.md:339-342` / `docs/diagnostics/post_critical_1567_plan.md:176`) では `Critical-4` は「StrategyBacktesterAgent per-plan 結果永続化」を指す。本 docs もタイトルに `Critical-4` を使っているため番号衝突。
+
+**整理**:
+
+本 docs の **段階 2** が、既存ドキュメントの「Critical-4」と同じ対象(`StrategyBacktesterAgent per-plan 結果永続化`)。本 docs はこれを **包含する形で Critical-4 の範囲を再定義** する。
+
+**新しい構造**(以降の参照は本 docs を正とする):
+
+```
+Critical-4 (BT 一本化) — 本 docs で再定義
+├── Critical-4 §3-1 (旧称: なし) screening 経路を DSL → 戦略 BT に切り替え
+├── Critical-4 §3-2 (旧 Critical-4) StrategyBacktesterAgent per-plan 結果永続化
+├── Critical-4 §3-3 (旧称: なし) ノート側 BT 廃止
+└── Critical-4 §3-4 (旧称: なし) 戦略 BT 本体を Python BT ライブラリに切り替え
+```
+
+旧 Critical-4 (per-plan 永続化のみ) を扱っていたチケット/タスクは、本 docs の **段階 2** として読み替える。
+
+### 11.2 段階 1: `runBacktest` の前提整理
+
+**指摘**: 段階 1 の例で `strategyBacktestService.runBacktest({ strategyId: dsl.id, ... })` と書いたが、実装上 `runBacktest` は DB 上の `Strategy`/`StrategyVersion` が存在する前提で `getStrategy(strategyId)` を呼ぶ。DSL 生成だけで `dsl.id` を渡すと失敗する。
+
+**選択肢の比較**:
+
+| 案 | 内容 | 利点 | 欠点 |
+|---|---|---|---|
+| **(a)** | 仮説 → DSL → 一時的に Strategy/Version を DB 永続化 → `runBacktest` を呼ぶ | 既存 `runBacktest` をそのまま使える、WalkForward 等とも整合 | DB に短命 Strategy が増える、cleanup 必要 |
+| **(b)** | `DSLBacktestAdapter` (Phase 6.7b、DB 不要) を直接呼んで結果を **新規テーブル**(例: `ScreeningBacktestRun`)に保存 | DB Strategy を作らない、軽量 | 永続化テーブル新設、`runBacktest` の WF/MC/BH 経路と統合が別途必要 |
+
+**推奨: (b)**
+
+理由:
+- `DSLBacktestAdapter` は Phase 6.7b で既に DSL から BT 実行可能(DB Strategy 不要)
+- 段階 4 で BT 本体を Python に切り替える際、TS 自前の `runBacktest` は WalkForward 用ラッパーに縮小される予定
+- screening は短命処理なので DB に Strategy を作るのは過剰
+
+**§6.2 改修方針(更新版)**:
+```ts
+// 旧(本 docs §6.2 で示した形、実装不可)
+const result = await this.strategyBacktestService.runBacktest({
+    strategyId: dsl.id, ... // ← getStrategy で失敗する
+});
+
+// 新(現実的な実装)
+const ohlcv = await this.ohlcvRepository.findMany({...});
+const dslResult = await this.dslBacktestAdapter.runBacktestOnBars(dsl, ohlcv, config);
+// dslResult を新規テーブル ScreeningBacktestRun に保存(段階 1 で追加)
+await this.screeningBacktestRepo.save({ hypothesisId, dslResult });
+```
+
+新規テーブル `ScreeningBacktestRun` は段階 1 のスキーマ追加項目とする(Prisma migration 1 件)。
+
+### 11.3 §6.1 `DSLConverter` の表現修正
+
+**指摘**: 「`dslEdgeMapper.dslToMachineConditions` の逆方向」と書いたが、現状の `dslToMachineConditions` は「代表条件 1 本に落とす」用途で **情報を捨てる実装**なので、厳密な逆変換にはならない。
+
+**修正**:
+
+`DSLConverter.convertHypothesisToDSL()` は `dslEdgeMapper` の **逆変換ではなく、新規マッピング関数** とする:
+
+- 入力: `EdgeHypothesis.conditions[]` (`MachineReadableCondition[]`) + `defaultRiskManagement`
+- 出力: `StrategyDSL`(entry / stopLoss / takeProfit / parameters を生成)
+
+`dslEdgeMapper.dslToMachineConditions` は方向が逆 + 情報粒度が違うので参考にしかならない。実装は新規マッピングロジックを起こす。
+
+### 11.4 §6.3 `screeningResult.backtestRunId` 型変更の影響
+
+**指摘**: `screeningResult.backtestRunId` の参照先を `BacktestRun` → `StrategyBacktestRun` に変える際、Side-B の各 validation tool が `backtestService.getResult(backtestRunId)` を呼んでいるため、ID 種別変更の影響あり。
+
+**整理**:
+
+§11.2 の方針 (b) を採用すると、永続化先は **新規テーブル `ScreeningBacktestRun`**(`StrategyBacktestRun` ではない)。これに伴う影響:
+
+- `screeningResult.backtestRunId` のフィールド名/型を整理する必要
+  - 案 1: フィールド名を `screeningBacktestRunId` に変更し、参照先を `ScreeningBacktestRun` に
+  - 案 2: 既存の `backtestRunId` を `ScreeningBacktestRun.id` の参照に切り替え(後方互換は破壊)
+- 下位の validation tools(WalkForward / MonteCarlo / BuyAndHold)が `backtestService.getResult` を呼んでいる箇所も、`ScreeningBacktestRun` の取得経路に切り替える必要あり
+
+**推奨: 案 1**(フィールド名分離)
+
+- `screeningResult.screeningBacktestRunId` (新規) ← 段階 1 で追加
+- `screeningResult.backtestRunId` (旧) ← 段階 3 で廃止と同時に削除
+- 段階 1〜3 の移行期間中は両方並存で安全
+
+下位ツール側は `StrategyValidationInput` (Phase 6.7b で既に存在) を使うパスに統一する。
+
+### 11.5 §8 Python BT スケルトンのキー名整合
+
+**指摘**: `bt = Backtest(df, StrategyClass, **payload['config'])` の `payload['config']` 例で `initialCapital` / `leverage` 等を使ったが、`backtesting.py` の `Backtest` コンストラクタ引数名(`cash` / `commission` / `margin` ...)と一致しないため、そのままだと `TypeError`。
+
+**整理**:
+
+TS→Python の境界に **マッピング層** を置く:
+
+```python
+# python/backtest/backtest.py 内のマッピング関数(例)
+def map_config_to_backtesting_kwargs(config: dict) -> dict:
+    """
+    アプリ独自の config を backtesting.py の Backtest() 引数に変換する。
+
+    config(TS から来る):
+        - initialCapital: 初期資金
+        - leverage: レバレッジ(例: 25)
+        - tradingCost: 片道手数料(%)
+        - spread: スプレッド(pips)
+
+    backtesting.py の Backtest() 引数:
+        - cash: 初期資金 (= initialCapital)
+        - commission: 片道手数料(0.001 = 0.1%) (= tradingCost / 100)
+        - margin: 1 / leverage (= 1 / leverage)
+        - exclusive_orders: 同時1ポジ制限
+    """
+    return {
+        'cash': config['initialCapital'],
+        'commission': config.get('tradingCost', 0) / 100,
+        'margin': 1 / config['leverage'] if config.get('leverage') else 1,
+        'exclusive_orders': True,
+    }
+
+# 呼び出し側
+bt_kwargs = map_config_to_backtesting_kwargs(payload['config'])
+bt = Backtest(df, StrategyClass, **bt_kwargs)
+```
+
+スプレッドは `backtesting.py` 標準引数にないため、`Strategy.next()` 内で約定価格を調整するか、`commission` に組み込む形で対応。
+
+### 11.6 まとめ
+
+§11 で示した明確化により、本 docs §3〜§9 の方針は変わらないが、段階 1 / 段階 4 の **実装ディテールが具体化** された:
+
+- 段階 1: `DSLBacktestAdapter` 経由 + 新規 `ScreeningBacktestRun` テーブル
+- 段階 4: TS→Python 境界に config マッピング層を必須化
+
+§10 残論点に追加:
+- **(5)** 新規テーブル `ScreeningBacktestRun` の Prisma スキーマ設計(段階 1 着手時に決定)
+- **(6)** `screeningResult.backtestRunId` のフィールド名移行手順(段階 1〜3 の移行期間設計)
+
+---
+
+*追記日時: 2026-05-02 朝 / Copilot レビュー指摘 7 件への明確化対応*
