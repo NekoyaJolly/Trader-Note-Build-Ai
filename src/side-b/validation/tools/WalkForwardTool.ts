@@ -142,7 +142,17 @@ export class WalkForwardTool implements ValidationTool {
             .filter((t) => typeof t.pnl === 'number' && Number.isFinite(t.pnl))
             .map((t) => ({ entryTime: t.entryTime, pnl: t.pnl }));
 
-        return this.runWalkForwardOnEvents(events, input.period, start);
+        // Critical-4 段階 1.7: BT で使った期間をそのまま継承する (input.period は使わない)。
+        // 旧経路では date のみの ISO ('2025-05-02') を渡しており、Python 側で tz-naive
+        // datetime にパースされて tz-aware の events.entryTime と TypeError を起こしていた。
+        // ScreeningBacktestRun.periodStart/periodEnd は Date 型 = JS で toISOString すれば
+        // `Z` 付きの完全 ISO 文字列が渡り、Python 側で tz-aware datetime に揃う。
+        const period = {
+            start: run.periodStart.toISOString(),
+            end: run.periodEnd.toISOString(),
+        };
+
+        return this.runWalkForwardOnEvents(events, period, start);
     }
 
     private async runWalkForwardOnEvents(

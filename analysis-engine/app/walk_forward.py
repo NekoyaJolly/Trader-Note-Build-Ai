@@ -1,10 +1,23 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from app.schemas import WalkForwardRequest, WalkForwardResponse
+
+
+def _to_utc(dt: datetime) -> datetime:
+    """tz-naive datetime は UTC として解釈し、tz-aware は UTC に変換する。
+
+    Critical-4 段階 1.7: ScreeningBacktestRun.trades の entryTime は ISO `Z` 付きで
+    tz-aware (UTC) に解釈される一方、period の start/end が date-only ('YYYY-MM-DD')
+    で渡されると Pydantic が tz-naive datetime に解釈し、`<` 比較で TypeError を起こす。
+    本ヘルパーで UTC tz-aware に統一して防御する。
+    """
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def _compute_metrics(pnls: list[float]) -> dict[str, float]:
@@ -33,8 +46,9 @@ def _avg(values: list[float]) -> float | None:
 
 
 def run_walk_forward(req: WalkForwardRequest) -> WalkForwardResponse:
-    start = req.period.start
-    end = req.period.end
+    # tz-aware (UTC) に統一して比較する (段階 1.7 防御)
+    start = _to_utc(req.period.start)
+    end = _to_utc(req.period.end)
     total_sec = (end - start).total_seconds()
     if total_sec <= 0:
         raise ValueError("period.end must be after period.start")
@@ -44,7 +58,7 @@ def run_walk_forward(req: WalkForwardRequest) -> WalkForwardResponse:
     buckets: list[list[float]] = [[] for _ in range(window_count)]
 
     for event in req.events:
-        t: datetime = event.entryTime
+        t: datetime = _to_utc(event.entryTime)
         if t < start or t >= end:
             continue
         idx = int((t - start).total_seconds() // window_sec)
