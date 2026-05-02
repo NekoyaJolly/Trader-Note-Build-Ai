@@ -1141,3 +1141,62 @@ export const ResetNotTestableBodySchema = z.object({
 });
 
 export type ResetNotTestableBody = z.infer<typeof ResetNotTestableBodySchema>;
+
+// ========================================
+// Critical-4 段階 1.6: run-screening のクエリパラメータ
+// ========================================
+
+/**
+ * YYYY-MM-DD 形式の日付文字列を厳密に検証する。
+ *
+ * 単純な `new Date(s)` だと "2025-02-30" のような実在しない日付が "2025-03-02" に
+ * 正規化されてしまうので、ラウンドトリップで一致確認する。
+ */
+const StrictDateStringSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD 形式である必要があります')
+  .refine((s) => {
+    const d = new Date(`${s}T00:00:00Z`);
+    if (Number.isNaN(d.getTime())) return false;
+    // ラウンドトリップで「実在する日付」を担保
+    return d.toISOString().slice(0, 10) === s;
+  }, '存在しない日付です');
+
+/**
+ * GET /api/cron/side-b/run-screening のクエリパラメータ。
+ *
+ * - start / end: BT 期間 (両方ペアまたは両方省略)。省略時は orchestrator のデフォルト
+ *   (env SCREENING_PERIOD_DAYS、既定 365 日) で動く。
+ * - max: 1 回の実行で処理する上限件数。省略時は config.screeningMaxPerRun。
+ */
+export const RunScreeningQuerySchema = z
+  .object({
+    start: StrictDateStringSchema.optional(),
+    end: StrictDateStringSchema.optional(),
+    max: z.coerce.number().int().positive().optional(),
+  })
+  .superRefine((data, ctx) => {
+    const hasStart = data.start !== undefined;
+    const hasEnd = data.end !== undefined;
+    if (hasStart !== hasEnd) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: hasStart ? ['end'] : ['start'],
+        message: 'start と end はペアで指定してください (片方だけは無効)',
+      });
+      return;
+    }
+    if (data.start && data.end) {
+      const s = new Date(`${data.start}T00:00:00Z`).getTime();
+      const e = new Date(`${data.end}T00:00:00Z`).getTime();
+      if (s >= e) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['end'],
+          message: 'start は end より前の日付である必要があります',
+        });
+      }
+    }
+  });
+
+export type RunScreeningQuery = z.infer<typeof RunScreeningQuerySchema>;

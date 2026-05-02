@@ -73,7 +73,6 @@ interface MockDeps {
     };
     runBacktest: jest.Mock<Promise<AnalysisEngineScreeningBacktestResponse>, [AnalysisEngineScreeningBacktestRequest]>;
     ohlcvRepo: {
-        findManyAsOHLCVData: jest.Mock;
         count: jest.Mock;
     };
     fetchAndCache: jest.Mock;
@@ -101,12 +100,6 @@ function makeMocks(overrides?: Partial<MockDeps>): MockDeps {
         },
         runBacktest: (overrides?.runBacktest ?? jest.fn().mockResolvedValue(makeBtResponse())) as MockDeps['runBacktest'],
         ohlcvRepo: {
-            findManyAsOHLCVData: jest.fn().mockImplementation((filter: { orderBy?: 'asc' | 'desc' }) => {
-                const timestamp = filter.orderBy === 'desc'
-                    ? new Date('2099-01-01T00:00:00Z')
-                    : new Date('2000-01-01T00:00:00Z');
-                return Promise.resolve([{ timestamp, open: 1, high: 1, low: 1, close: 1, volume: 0 }]);
-            }),
             // デフォルトは「期待バー数の 100% を満たす十分な数」を返す。
             // カバレッジ判定のテストでは override で 0 や 50% を指定する。
             count: jest.fn().mockResolvedValue(99_999_999),
@@ -210,7 +203,6 @@ describe('ScreeningOrchestrator.runScreening (Critical-4 段階 1)', () => {
         const hyp = makeHypothesis();
         const mocks = makeMocks({
             ohlcvRepo: {
-                findManyAsOHLCVData: jest.fn().mockResolvedValue([]),
                 count: jest.fn().mockResolvedValue(0),
             },
             fetchAndCache: jest.fn().mockResolvedValue({
@@ -241,7 +233,6 @@ describe('ScreeningOrchestrator.runScreening (Critical-4 段階 1)', () => {
         });
         const mocks = makeMocks({
             ohlcvRepo: {
-                findManyAsOHLCVData: jest.fn().mockResolvedValue([]),
                 count: countMock,
             },
             fetchAndCache: jest.fn().mockResolvedValue({
@@ -272,19 +263,6 @@ describe('ScreeningOrchestrator.runScreening (Critical-4 段階 1)', () => {
         });
         const mocks = makeMocks({
             ohlcvRepo: {
-                findManyAsOHLCVData: jest.fn().mockImplementation((filter: { orderBy?: 'asc' | 'desc' }) => {
-                    const timestamp = filter.orderBy === 'desc'
-                        ? new Date('2099-01-01T00:00:00Z')
-                        : new Date('2000-01-01T00:00:00Z');
-                    return Promise.resolve([{
-                        timestamp,
-                        open: 1,
-                        high: 1,
-                        low: 1,
-                        close: 1,
-                        volume: 0,
-                    }]);
-                }),
                 count: countMock,
             },
         });
@@ -397,6 +375,26 @@ describe('ScreeningOrchestrator.runScreening (Critical-4 段階 1)', () => {
         const btCall = mocks.runBacktest.mock.calls[0][0];
         expect(btCall.startDate).toBe(new Date('2025-06-01').toISOString());
         expect(btCall.endDate).toBe(new Date('2025-12-31').toISOString());
+    });
+
+    it('期待バー数が 0 (期間が短すぎ) の場合はカバレッジ判定対象外として通る', async () => {
+        // timeframe=1w で period が 3 日 → 期待バー数 = floor(3d × 5/7 / 7d) = 0
+        const hyp = makeHypothesis({ timeframes: ['1w'] });
+        const mocks = makeMocks({
+            ohlcvRepo: {
+                count: jest.fn().mockResolvedValue(0), // 0 でも expected=0 なので通る
+            },
+        });
+        mocks.edgeLedger.get.mockResolvedValue(hyp);
+
+        const result = await makeOrchestrator(mocks).runScreening(hyp.id, {
+            period: { start: '2026-01-01', end: '2026-01-04' },
+        });
+
+        // カバレッジ判定で弾かれず BT 実行に進むこと
+        // (BT 結果は makeBtResponse() の screening_passed)
+        expect(result.verdict).toBe('screening_passed');
+        expect(mocks.runBacktest).toHaveBeenCalledTimes(1);
     });
 
     it('options.period 未指定時は env SCREENING_PERIOD_DAYS で日数を制御できる', async () => {

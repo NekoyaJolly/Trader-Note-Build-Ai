@@ -24,8 +24,13 @@ import { getSideBScheduler } from '../../side-b/jobs/sideBScheduler';
 import { isFXMarketOpen, getMarketStatusJST } from '../../side-b/utils/marketHours';
 import { MatchingService } from '../../services/matchingService';
 import { edgeLedger } from '../../side-b/ledger';
-import { validateBody } from '../../middleware/validateRequest';
-import { ResetNotTestableBodySchema, type ResetNotTestableBody } from '../../schemas/api/sideB';
+import { validateBody, validateQuery, getValidatedQuery } from '../../middleware/validateRequest';
+import {
+  ResetNotTestableBodySchema,
+  RunScreeningQuerySchema,
+  type ResetNotTestableBody,
+  type RunScreeningQuery,
+} from '../../schemas/api/sideB';
 
 const router = Router();
 
@@ -175,68 +180,45 @@ router.get('/side-b/monitor', async (_req: Request, res: Response) => {
  *   - 手動再 screening: 過去の rejected を新閾値で評価したい場合に start/end を指定
  *   - not_testable に倒れた仮説の再検証
  */
-router.get('/side-b/run-screening', async (req: Request, res: Response) => {
-  const startTime = Date.now();
-  try {
-    const startQ = typeof req.query.start === 'string' ? req.query.start.trim() : '';
-    const endQ = typeof req.query.end === 'string' ? req.query.end.trim() : '';
-    const maxQ = typeof req.query.max === 'string' ? parseInt(req.query.max, 10) : NaN;
+router.get(
+  '/side-b/run-screening',
+  validateQuery(RunScreeningQuerySchema),
+  async (_req: Request, res: Response) => {
+    const startTime = Date.now();
+    try {
+      const query = getValidatedQuery<RunScreeningQuery>(res);
+      const period =
+        query.start && query.end ? { start: query.start, end: query.end } : undefined;
+      const limit = query.max;
 
-    // start と end は必ずペアで指定 (片方だけは無効)
-    let period: { start: string; end: string } | undefined;
-    if (startQ && endQ) {
-      // ISO 8601 日付として妥当か簡易チェック
-      const s = new Date(startQ);
-      const e = new Date(endQ);
-      if (!Number.isFinite(s.getTime()) || !Number.isFinite(e.getTime())) {
-        res.status(400).json({
-          success: false,
-          error: 'start / end は YYYY-MM-DD 形式の妥当な日付である必要があります',
-        });
-        return;
-      }
-      if (s.getTime() >= e.getTime()) {
-        res.status(400).json({ success: false, error: 'start は end より前の日付である必要があります' });
-        return;
-      }
-      period = { start: startQ, end: endQ };
-    } else if (startQ || endQ) {
-      res.status(400).json({
-        success: false,
-        error: 'start と end はペアで指定してください (片方だけは無効)',
+      console.log(
+        `[Cron] スクリーニング手動実行を開始します` +
+          (period ? ` period=${period.start}〜${period.end}` : '') +
+          (limit ? ` max=${limit}` : ''),
+      );
+      const scheduler = getSideBScheduler();
+      const summary = await scheduler.runScreeningNow({
+        ...(period ? { period } : {}),
+        ...(limit !== undefined ? { limit } : {}),
       });
-      return;
+      console.log('[Cron] スクリーニング手動実行完了:', summary);
+      res.json({
+        success: summary.errors === 0,
+        message: `processed=${summary.processed} passed=${summary.passed} rejected=${summary.rejected} not_testable=${summary.notTestable} errors=${summary.errors}`,
+        data: summary,
+        duration: Date.now() - startTime,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '不明なエラー';
+      console.error('[Cron] スクリーニング手動実行エラー:', message);
+      res.status(500).json({
+        success: false,
+        error: message,
+        duration: Date.now() - startTime,
+      });
     }
-
-    const limit = Number.isFinite(maxQ) && maxQ > 0 ? maxQ : undefined;
-
-    console.log(
-      `[Cron] スクリーニング手動実行を開始します` +
-      (period ? ` period=${period.start}〜${period.end}` : '') +
-      (limit ? ` max=${limit}` : ''),
-    );
-    const scheduler = getSideBScheduler();
-    const summary = await scheduler.runScreeningNow({
-      ...(period ? { period } : {}),
-      ...(limit !== undefined ? { limit } : {}),
-    });
-    console.log('[Cron] スクリーニング手動実行完了:', summary);
-    res.json({
-      success: summary.errors === 0,
-      message: `processed=${summary.processed} passed=${summary.passed} rejected=${summary.rejected} not_testable=${summary.notTestable} errors=${summary.errors}`,
-      data: summary,
-      duration: Date.now() - startTime,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '不明なエラー';
-    console.error('[Cron] スクリーニング手動実行エラー:', message);
-    res.status(500).json({
-      success: false,
-      error: message,
-      duration: Date.now() - startTime,
-    });
-  }
-});
+  },
+);
 
 /**
  * GET /api/cron/side-b/run-full-validation

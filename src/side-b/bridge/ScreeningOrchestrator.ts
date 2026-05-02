@@ -101,7 +101,7 @@ export class ScreeningOrchestrator {
         private readonly statusManager: StatusManager = defaultStatusManager,
         private readonly screeningBacktestRepo: ScreeningBacktestRunRepository = defaultScreeningBacktestRepo,
         private readonly runBacktest: RunScreeningBacktestFn = defaultRunScreeningBacktest,
-        private readonly ohlcvRepo: Pick<OHLCVRepository, 'findManyAsOHLCVData' | 'count'> = new DefaultOHLCVRepository(),
+        private readonly ohlcvRepo: Pick<OHLCVRepository, 'count'> = new DefaultOHLCVRepository(),
         private readonly fetchAndCache: (
             symbol: string,
             timeframe: string,
@@ -301,7 +301,14 @@ export class ScreeningOrchestrator {
         return Math.floor((periodMs * ScreeningOrchestrator.FOREX_OPEN_RATIO) / intervalMs);
     }
 
-    /** 指定期間の OHLCV 実バー数 / 期待バー数 / カバレッジ率 を返す */
+    /**
+     * 指定期間の OHLCV 実バー数 / 期待バー数 / カバレッジ率 を返す。
+     *
+     * 期待バー数が 0 (= 期間が短すぎて1バーも収まらない、例: 1w 足で 3 日期間) の場合は
+     * カバレッジ判定対象外として ratio=1 (= 通過扱い) を返す。
+     * 「データ密度ではなく BT そのものが成立しないケース」は backtest.py 側の
+     * 最低バー数チェック (len(df) < 30) で別途弾く。
+     */
     private async coverageStats(
         symbol: string,
         timeframe: string,
@@ -315,7 +322,7 @@ export class ScreeningOrchestrator {
             startTime: startDate,
             endTime: endDate,
         });
-        const ratio = expected > 0 ? actual / expected : 0;
+        const ratio = expected > 0 ? actual / expected : 1;
         return { expected, actual, ratio };
     }
 
