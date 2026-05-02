@@ -73,6 +73,15 @@ export class BuyAndHoldTool implements ValidationTool {
         return this.executeHypothesis(input, Date.now());
     }
 
+    /**
+     * Critical-4 段階 1.7: hypothesis.symbols/timeframes/input.period への直接参照を撤廃し、
+     * ScreeningBacktestRun が実際に BT で使った symbol / timeframe / periodStart / periodEnd を継承する。
+     *
+     * 設計原則(Nekoさん 指示):
+     * - BT で使った足はその後の WF/MC/BH でも継続使用する(再指定しない)
+     * - 過去仮説に残る `timeframes=['multi']` 等の不正値は orchestrator 段で正規化済みなので、
+     *   ここで再正規化する必要はない (run.timeframe は normalizeTimeframe 通過済み)
+     */
     private async executeHypothesis(
         input: HypothesisValidationInput,
         start: number,
@@ -80,48 +89,8 @@ export class BuyAndHoldTool implements ValidationTool {
         if (!input.screeningBacktestRunId) {
             return this.fail('screeningBacktestRunId が未指定 (screening 結果が必要)', start);
         }
-        const symbol = input.hypothesis.symbols[0];
-        const timeframe = input.hypothesis.timeframes[0];
-        if (!symbol || !timeframe) {
-            return this.fail('hypothesis.symbols / timeframes が空', start);
-        }
 
-        // 1. BH: 期間の始値と終値
-        const normalizedSymbol = normalizeSymbol(symbol);
-        const startDate = new Date(input.period.start);
-        const endDate = new Date(input.period.end);
-        if (!Number.isFinite(startDate.getTime()) || !Number.isFinite(endDate.getTime())) {
-            return this.fail(`period が不正: ${input.period.start} ~ ${input.period.end}`, start);
-        }
-
-        let firstBar, lastBar;
-        try {
-            [firstBar, lastBar] = await Promise.all([
-                this.ohlcvRepo
-                    .findMany({ symbol: normalizedSymbol, timeframe, startTime: startDate, orderBy: 'asc', limit: 1 })
-                    .then((rows) => rows[0] ?? null),
-                this.ohlcvRepo
-                    .findMany({ symbol: normalizedSymbol, timeframe, endTime: endDate, orderBy: 'desc', limit: 1 })
-                    .then((rows) => rows[0] ?? null),
-            ]);
-        } catch (err) {
-            return this.fail(`OHLCV 取得失敗: ${err instanceof Error ? err.message : String(err)}`, start);
-        }
-
-        if (!firstBar || !lastBar) {
-            return this.fail(
-                `OHLCV データ不足 (symbol=${normalizedSymbol} tf=${timeframe} ${input.period.start}~${input.period.end})`,
-                start,
-            );
-        }
-        const startClose = Number(firstBar.close);
-        const endClose = Number(lastBar.close);
-        if (!(startClose > 0)) {
-            return this.fail(`startClose が不正: ${startClose}`, start);
-        }
-        const buyAndHoldReturn = (endClose - startClose) / startClose;
-
-        // 2. 戦略リターン: ScreeningBacktestRun の trades から sum(pnl) / startClose
+        // ScreeningBacktestRun を最初に取得 (足/期間の真実の出所)
         let run;
         try {
             run = await this.screeningBacktestRepo.findById(input.screeningBacktestRunId);
@@ -138,14 +107,49 @@ export class BuyAndHoldTool implements ValidationTool {
             );
         }
 
+        // BT で使った足/シンボル/期間をそのまま継承する
+        const symbol = run.symbol;          // orchestrator で normalizeCTraderSymbol 通過済み
+        const timeframe = run.timeframe;    // orchestrator で normalizeTimeframe 通過済み
+        const startDate = run.periodStart;
+        const endDate = run.periodEnd;
+
+        // 1. BH: 期間の始値と終値
+        let firstBar, lastBar;
+        try {
+            [firstBar, lastBar] = await Promise.all([
+                this.ohlcvRepo
+                    .findMany({ symbol, timeframe, startTime: startDate, orderBy: 'asc', limit: 1 })
+                    .then((rows) => rows[0] ?? null),
+                this.ohlcvRepo
+                    .findMany({ symbol, timeframe, endTime: endDate, orderBy: 'desc', limit: 1 })
+                    .then((rows) => rows[0] ?? null),
+            ]);
+        } catch (err) {
+            return this.fail(`OHLCV 取得失敗: ${err instanceof Error ? err.message : String(err)}`, start);
+        }
+
+        if (!firstBar || !lastBar) {
+            return this.fail(
+                `OHLCV データ不足 (symbol=${symbol} tf=${timeframe} ` +
+                    `${startDate.toISOString()}~${endDate.toISOString()})`,
+                start,
+            );
+        }
+        const startClose = Number(firstBar.close);
+        const endClose = Number(lastBar.close);
+        if (!(startClose > 0)) {
+            return this.fail(`startClose が不正: ${startClose}`, start);
+        }
+        const buyAndHoldReturn = (endClose - startClose) / startClose;
+
+        // 2. 戦略リターン: ScreeningBacktestRun.trades の総 PnL / startClose
         const trades = fromPrismaJsonValue<ScreeningBacktestTrade[]>(run.trades) ?? [];
         const totalPnl = trades.reduce((sum, t) => {
             return typeof t.pnl === 'number' && Number.isFinite(t.pnl) ? sum + t.pnl : sum;
         }, 0);
         const strategyReturn = totalPnl / startClose;
 
-        // ショート仮説の場合は BH 逆張りと比較（下落相場で BH は損だが戦略は勝てる想定）
-        // 簡易実装としては、direction='short' の仮説は -bhReturn を基準に比較する。
+        // ショート仮説の場合は BH 逆張りと比較(下落相場で BH は損だが戦略は勝てる想定)
         const direction = input.hypothesis.expectedDirection;
         const comparableBhReturn = direction === 'short' ? -buyAndHoldReturn : buyAndHoldReturn;
 
@@ -172,7 +176,7 @@ export class BuyAndHoldTool implements ValidationTool {
                 comparisonDirection: direction,
             },
             interpretation: passed
-                ? `戦略が BH を +${(outperformance * 100).toFixed(2)}pt 上回る（通過）`
+                ? `戦略が BH を +${(outperformance * 100).toFixed(2)}pt 上回る(通過)`
                 : `戦略が BH 対比 ${(outperformance * 100).toFixed(2)}pt で閾値 ${(this.minOutperformance * 100).toFixed(2)}pt 未達`,
             durationMs: Date.now() - start,
         };
