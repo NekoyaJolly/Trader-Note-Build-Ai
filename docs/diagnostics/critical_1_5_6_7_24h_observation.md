@@ -301,3 +301,92 @@ Critical-9（BT 集計矛盾）は Side-A 系の問題であり、PR #66 で `wi
 
 *生成: Claude Code / Supabase MCP (project: rmsylwmqxyeqgplysqoa) + GitHub MCP*  
 *次回観察推奨: Critical-10 着手後の screening 1 サイクル完了時点*
+
+---
+
+## 11. 2026-05-02 朝の追記 — Nekoさん 判断と Copilot レビュー指摘への訂正
+
+> 本レポートは 2026-05-02 03:30 JST に発火した remote routine が生成した観察結果です。
+> 提出後の Copilot レビューで複数の事実誤認や用語衝突が指摘され、
+> 同朝の Nekoさん 判断で一部の方針も更新されたため、以下に追記でまとめます。
+> 既存セクション §0〜§10 は観察時点の記述として残し、本セクションが上書き的な
+> 解釈を提供します。
+
+### 11.1 Nekoさん の判断(2026-05-02 朝)
+
+#### (1) screening 閾値: 暫定緩和を採用 — 計画書方針を更新
+
+`docs/diagnostics/post_critical_1567_plan.md` には「Critical-8 + 旧 Critical-10 →
+Critical-EvolutionStart 統合、Phase 4b 閾値は据え置き」と明記されていたが、
+本レポートで PDCA-2 が永続的に空回りしている状態が確定したため、最低限 PDCA を
+一巡させる目的で **screening 閾値の暫定緩和を採用**:
+
+- `minPF`: 1.3 → **1.1**(PDCA 動作確認のための一時緩和)
+- `minWinRate`: 0.4 → **撤廃**(RR>=2.0 推奨で運用しているため、勝率は参考値に留める)
+- `minTradeCount`: 20(据え置き)
+
+実装: PR #76 (`fix/screening-threshold-relax`)。一定期間運用してデータが集まったら
+閾値を再評価して戻す前提。**`post_critical_1567_plan.md` 側の同期更新は別 PR で対応する**。
+
+CLAUDE.md 5 条「閾値は設計書で議論される場合のみ変更可」の前提は
+`docs/design/phase_4b_specification.md:594` の「閾値は暫定、運用後調整」記述で満たす。
+
+#### (2) HG プロンプトに ATR 数値ガイドは入れない
+
+調査レポート (PR #75 `docs/diagnostics/critical_10_investigation.md`) で
+「XAU/USD 15m の典型 ATR 100-200pips を HG プロンプトに書く」案 (B) を提案したが、
+時間帯による ATR 値のブレが大きく、平均値を書くと逆に誤誘導になるため **採用しない**。
+
+#### (3) SL/TP 動的決定は固定で継続
+
+戦略ごとに SL/TP の ATR 倍率を「動的に決定する」案も検討したが、バックテストの
+再現性が成立しなくなるため **現状の固定方式(戦略単位で固定)を継続**。
+ATR 自体は時々刻々変動するため、ATR 倍率固定でも市場適応性は維持されている。
+
+#### (4) 資産 1% SL の破産確率モデル — 新規論点として別 Critical で検討
+
+「1 トレードあたり資産の 1% までを最大 SL とする」というポジションサイジング層の
+考え方は、現状のレイヤー(HG defaultRiskManagement / MaterializationService)とは
+別の概念。**Critical-RiskBudget(仮称)として別 Critical で議論**する。
+
+### 11.2 Copilot レビュー指摘の訂正(事実関係)
+
+レポート提出後の Copilot レビュー (10 件) で以下の事実誤認が指摘された:
+
+| 場所 | 指摘 | 訂正 |
+|------|------|------|
+| §0 サマリー | 「全 9 件 PF<1.3 / 勝率<40%」と書いた | §4 で 47.6% / 45.0% は勝率閾値超え。**訂正**: PF<1.3 が 9/9 件、勝率<40% は 7/9 件(2 件は勝率超え、PF 不足のみで rejected) |
+| §2 旧 48 件処理 | 「`deprecated` 状態に移行」と書いた | `EDGE_STATUSES` に `deprecated` は存在しない。**訂正**: `stale` ステータスへの移行、もしくは独自スキーマ追加が必要 |
+| §7 Critical-4 番号衝突 | screening backtest persistence を Critical-4 と紐付けた | 既存 Critical-4 は `StrategyBacktester per-plan 結果永続化` (Phase 6.7b) で別物。**訂正**: screening backtest 永続化は **新規 Critical**(`Critical-ScreeningBTPersistence` 仮称)として切り出す |
+| §7 screening 永続化 | 「別系統で動作している」「別途保存されていない」と書いた | screening も Side-A `BacktestService.execute()` 経由で同じ永続化パスを使う、ただし production で行が欠落。**訂正**: 同じ永続化パス、production の write 経路の不具合 |
+| §8 PrismaClient debt | 「10〜15 箇所、実害なし」と書いた | `side-b/jobs/sideBScheduler.ts` / `side-b/services/summarySchedulerService.ts` / `services/crossSimilarityService.ts` / prompt-registry 等にも残存、過小評価。**訂正**: PR #69/#70 で backend 配下は解決済みだが、**side-b/ + services/ に多数残存**、PR-C/D で対応予定 |
+| §8 閾値変更先 | 「AGENTS.md で確認」と書いた | screening 閾値の実装は `src/side-b/ledger/statusManager.ts`、`AGENTS.md` には定義なし。**訂正**: 実装は `statusManager.ts` の `SCREENING_THRESHOLDS`、設計議論の場は `docs/design/phase_4b_specification.md` |
+| §8 閾値緩和提案 | 計画書「閾値据え置き」と矛盾と指摘 | **§11.1 (1) で Nekoさん 判断により計画書側の方針を更新済み**(PR #76 で実装) |
+
+### 11.3 計画書との整合(後追い対応)
+
+`docs/diagnostics/post_critical_1567_plan.md` は本レポート提出時点では
+「Critical-EvolutionStart 統合 / 閾値据え置き」のままだが、§11.1 (1) の Nekoさん
+判断により方針更新が必要。**別 PR で同期更新**(コードと docs を分けるのが筋):
+
+- `Critical-EvolutionStart` の優先度を下げ、暫定緩和 + 観察を優先する旨を追記
+- 閾値暫定緩和の決定を「設計書 §594 の運用後調整発動」として記録
+
+### 11.4 次のおすすめ Critical 着手の優先度(更新版)
+
+§8 の表は §11.1〜§11.2 を踏まえて以下に更新:
+
+| Priority | Critical | 状態 |
+|----------|---------|------|
+| **着手中** | screening 閾値暫定緩和 | PR #76 で実装中 |
+| **次** | Critical-10 (P1: avgScore 退行原因究明) | PR #75 調査済み、実装着手可 |
+| 次 | Critical-10 (P2: HG プロンプトに観測フィードバック) | P1 結果次第 |
+| 中 | screening backtest 永続化(新規 Critical) | screening_passed 出現後に重要度増 |
+| 中 | Critical-PrismaClient PR-C/D | side-b + services で残存、機械的 |
+| 中 | Critical-3 残スコープの検証 | PR #67/#68 後の自然サイクルで観察中 |
+| 後 | Critical-RiskBudget(仮称、§11.1 (4)) | 新規論点、別議論 |
+| 後 | Critical-EvolutionStart | 暫定緩和の効果観察後に再評価 |
+
+---
+
+*追記日時: 2026-05-02 朝 / Nekoさん 判断 + Copilot レビュー指摘 10 件への対応*
