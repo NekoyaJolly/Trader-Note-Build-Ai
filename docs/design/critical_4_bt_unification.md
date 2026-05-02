@@ -7,26 +7,73 @@
 
 ## §1 役割の再定義(本設計の出発点)
 
-| 概念 | 本来の役割 | BT との関係 |
-|---|---|---|
-| **ノート**(TradeNote / AITradeNote) | 過去トレードの **記録・振り返り** ツール(出発点: 「トレードノートを書く習慣の自動化」) | **無関係**(ノート単体で BT する必要なし) |
-| **ストラテジー**(Strategy / StrategyDSL) | **BT 対象**、戦略の検証可能な表現 | **これが BT の唯一の入口** |
-| **BT** | MT5 デフォルト相当の品質を目指す **アプリの基盤** | ストラテジー側のみ |
-| **仮説**(EdgeHypothesis) | AI が生成する戦略候補 | DSL 化 → 戦略 BT で検証 |
+### ノート = 戦略が書いてある紙(統合概念)
 
-### 経路の整理
+**ノート**は「戦略の永続化された記録」。生成経路は多様:
+
+| 生成経路 | 例 |
+|---|---|
+| 人間トレード履歴から AI 化 | CSV インポート → AI がノート化 |
+| AI 仮想トレードから | aiOrchestrator が生成 → AITradeNote |
+| 人間が考案した戦略から | UI で戦略を入力 → ノート化 |
+| AI 仮説の昇格から | screening_passed → confirmed → ノート化 |
+
+→ 経路は多様だが、**最終的に全部「ノート」概念に統合**(設計書 `DESIGN_DOC_autonomous_trading_architecture.md` のとおり Side-A / Side-B 横断で扱う)。
+
+### ノートができること(2 つ)
 
 ```
-人間トレード CSV → ノート化(振り返り)→ 類似性チェック → ユーザー通知
-                                                     [BT 不要]
-
-仮想トレード生成 → AITradeNote(振り返り)
-                       [BT 不要]
-
-仮説生成(HG)→ DSL 化 → 戦略 BT で screening → screening_passed
-              ↑
-        段階 1 で本来あるべき姿に整える対象
+ノート(本棚にずっとしまわれる)
+  ├── ① マーケット入力との類似性検索 → ユーザー通知
+  │   (出発点機能: 「トレードノートを書く習慣の自動化」)
+  └── ② 自分自身を BT で検証
+        (ノートはストラテジーが書いてある紙なので、BT できて当然・できるべき)
 ```
+
+### BT エンジンは「アプリ全体で 1 つだけ」
+
+| 概念 | 役割 |
+|---|---|
+| **ノート** | 戦略が書いてある紙(永続化された戦略記録)。①類似性検索 + ②BT 検証の対象 |
+| **BT エンジン** | アプリ全体で **1 つだけ存在**。analysis-engine 内の `backtesting.py` で実装 |
+| **仮説**(EdgeHypothesis) | AI が生成する戦略候補(ノートに昇格する手前の中間表現) |
+
+### 「変換」ではなく「ノート schema を BT 入力形式に寄せる」
+
+**従来の発想(誤り)**: ノート(独自形式)→ アダプタで BT 用に変換 → BT エンジン  
+→ 変換ロジックがメンテ負担になる
+
+**正しい発想**: ノートの schema 自体を **BT エンジンが直接食える形に寄せる**  
+→ ノートの数値をそのまま BT に渡せる(変換不要 or 最小限)
+
+### 指標計算の責務分離
+
+- **アプリ側で独自実装しない**(自前 RSI / MACD / etc. は書かない)
+- **計算は Python ライブラリに委ねる**(`pandas` / `pandas_ta` の標準計算が答え)
+- **アプリの責務はノートの記録・類似性検索・通知に集中**
+
+これにより:
+- ノートに格納される数値は `pandas_ta` 等の **標準的な計算結果**
+- BT エンジン (`backtesting.py`) も同じ `pandas` / `numpy` 基盤で動く
+- → ノートの数値をそのまま BT に渡せる(互換性が自動的に成立)
+
+### 経路の整理(更新版)
+
+```
+人間トレード CSV ┐
+AI 仮想トレード ─┼─→ ノート化 ─→ 本棚(統合「ノート」)
+人間考案戦略 ────┤              ↓
+AI 仮説昇格 ─────┘   ① 類似性検索 → 通知
+                     ② BT 検証(数値そのまま analysis-engine に投げる)
+                                 ↓
+                       analysis-engine(GCP デプロイ済みコンテナ)
+                       ├── 指標計算 (pandas/pandas_ta) ← 既存
+                       └── BT (backtesting.py) ← 新規
+                                 ↓
+                       結果をノートに書き戻し(検証履歴の一部)
+```
+
+**Critical-4 の本質**: 並列に存在する複数の BT 系統を廃止し、analysis-engine の 1 つに統一する。指標計算と BT を同じコンテナに寄せ、ノート schema を BT 入力形式に整合させる。
 
 ---
 
@@ -207,51 +254,68 @@ ScreeningOrchestrator
 
 ## §6 段階 1 の実装計画(具体)
 
-### 6.1 新規: `src/side-b/bridge/DSLConverter.ts`
+### 6.1 設計の中核: 「ノート → analysis-engine に直接 POST」
 
-```ts
-export class DSLConverter {
-    /**
-     * EdgeHypothesis から StrategyDSL を生成する。
-     * 既存の dslEdgeMapper.dslToMachineConditions の逆方向。
-     *
-     * 仮説の conditions[] と defaultRiskManagement から、
-     * runBacktest が消費可能な StrategyDSL に変換する。
-     */
-    convertHypothesisToDSL(
-        hypothesis: EdgeHypothesis,
-        period: { start: string; end: string },
-    ): StrategyDSL { /* ... */ }
-}
+**変換アダプタは作らない**。ノートの数値をそのまま analysis-engine に渡す:
+
+```
+ScreeningOrchestrator
+  ↓ (仮説から既存パスでノート相当の情報を生成、もしくは直接 BT 入力に整形)
+  ↓ ノートの数値(OHLCV インデックス、エントリー条件、SL/TP、etc.)
+  ↓
+analysis-engine の BT API (HTTP POST /v1/backtest)
+  ↓ 内部で pandas DataFrame に変換、backtesting.py で実行
+  ↓ 結果を返す
+ScreeningOrchestrator
+  ↓ 結果をノートに書き戻し(検証履歴として永続化)
 ```
 
-### 6.2 改修: `ScreeningOrchestrator`
+### 6.2 ノート schema の整合性確認(段階 1 着手前の前提調査)
+
+ノートの数値が analysis-engine の BT 入力にどれだけ整合しているかを調査する。整合していない部分は schema 修正 PR を別途切る:
+
+- `TradeNote` / `AITradeNote` の数値フィールド一覧
+- `backtesting.py` の `Backtest` クラスが期待する入力形式(OHLCV DataFrame + Strategy クラス)
+- ギャップ: あれば schema 改修 or analysis-engine 側で吸収するアダプタ層
+
+→ §10 残論点 (5) として整理(調査タスク)
+
+### 6.3 改修: `ScreeningOrchestrator`
 
 ```ts
-// 旧
+// 旧(誤った経路、ノート専用 BT を使っていた)
 const materialized = await this.materialization.materializeForValidation(...);
 const runId = await this.backtestService.execute({ noteId: materialized.tradeNoteId, ... });
 const summary = await this.backtestService.getResult(runId);
 
-// 新
-const dsl = this.dslConverter.convertHypothesisToDSL(hypothesis, period);
-const result = await this.strategyBacktestService.runBacktest({
-    strategyId: dsl.id,
-    startDate, endDate, ...
+// 新(唯一の BT エンジンに統一)
+// ノート相当の情報(エントリー条件・SL/TP・OHLCV 範囲・指標)を analysis-engine に POST
+const result = await this.analysisEngineClient.runBacktest({
+    notePayload: this.buildNotePayloadFromHypothesis(hypothesis),
+    period: { start, end },
 });
-const summary = result.summary;
+// 結果を screeningResult として書き戻し
+await this.edgeLedger.recordScreeningResult(hypothesis.id, {
+    backtestRunId: result.runId,
+    metrics: result.summary,
+    ...
+});
 ```
 
-### 6.3 既存仮説の screening 結果との互換性
+`analysisEngineClient` は既存の `analysis-engine` HTTP API の薄いラッパー(指標計算と同じパターン)。
 
-- `screeningResult.backtestRunId` が指す先が `BacktestRun` から `StrategyBacktestRun` に変わる
-- 過去の `screeningResult` は `BacktestRun` の ID(段階 3 で廃止予定)を保持し続ける → **記録としては残るが参照不能**
-- 段階 3 完了後、過去の `screeningResult` を再 screening するか、メタデータで「旧経路」マークを付ける
+### 6.4 既存仮説の screening 結果との互換性
 
-### 6.4 テスト
+- 旧 `screeningResult.backtestRunId` は `BacktestRun` (Side-A note 経由) を指していた
+- 新 `screeningResult.backtestRunId` は analysis-engine 側の BT 結果 ID を指す
+- 移行期間中の互換性:
+  - 過去の `screeningResult` は段階 3 までは旧 BacktestRun を参照可能
+  - 段階 3 で旧 BacktestRun を廃止する際、screeningResult のメタデータに「旧経路」フラグを付与
 
-- 既存 `screeningOrchestrator.test.ts` を新経路に対応
-- 新規 `dslConverter.test.ts` を作成
+### 6.5 テスト
+
+- 既存 `screeningOrchestrator.test.ts` を新経路に対応(`analysisEngineClient` のモック化)
+- analysis-engine 側の BT API を別途テスト(Python 単体 + 統合)
 
 ---
 
@@ -286,96 +350,128 @@ const summary = result.summary;
 
 ---
 
-## §8 段階 4 の実装計画(Python BT 統合)
+## §8 段階 4 の実装計画(analysis-engine への BT 寄せ込み)
 
-### 8.1 Python 側新規実装
+### 8.1 寄せ込み方針(Nekoさん 判断)
+
+GCP に既に **2 つの Python コンテナ**がデプロイされている:
+- `analysis-engine`: 指標計算 (`pandas` / `pandas_ta`) ← 既に本番稼働
+- `python` コンテナ(`python/walk_forward.py` 等): WF 統計分析
+
+**BT を analysis-engine に寄せる**ことで:
+- ✅ GCP デプロイが既に済んでいる → BT も同じコンテナで本番稼働
+- ✅ 指標計算と BT は同じ `pandas` / `numpy` 基盤を共有(依存関係自然)
+- ✅ HTTP API として既に FastAPI で動いている(`src/services/analysisEngineClient.ts` の同パターンで呼べる)
+- ✅ `python/` コンテナは段階的に廃止検討(walk_forward 等を analysis-engine に移管)
+
+### 8.2 analysis-engine 側の追加実装
 
 ```
-python/
-├── backtest/
-│   ├── __init__.py
-│   └── backtest.py          # backtesting.py を呼ぶスクリプト
-└── requirements.txt          # 'backtesting' 追加
+analysis-engine/
+├── app/
+│   ├── (既存) 指標計算 endpoints (pandas_ta)
+│   └── backtest/         ← 新規
+│       ├── __init__.py
+│       ├── routes.py     # FastAPI router: POST /v1/backtest
+│       ├── runner.py     # backtesting.py の Backtest を呼ぶコア
+│       ├── note_to_bt.py # ノート schema → backtesting.py 入力のマッピング
+│       └── models.py     # Pydantic input/output schemas
+└── requirements.txt       # 'backtesting' 追加
 ```
 
-`backtest.py` のスケルトン:
+`runner.py` のスケルトン:
 ```python
 """
-Strategy DSL を受け取って backtesting.py で BT を実行するスクリプト。
-
-入力ペイロード(共有ボリューム経由 JSON):
-{
-    "strategyDSL": { ... },     # StrategyDSL の JSON 表現
-    "ohlcv": [{ "timestamp": ..., "open": ..., ... }, ...],
-    "config": {
-        "initialCapital": 1000000,
-        "leverage": 25,
-        ...
-    }
-}
-
-出力:
-{
-    "trades": [...],
-    "summary": { "pf": ..., "winRate": ..., "tradeCount": ..., ... },
-    "equity": [...]
-}
+ノートの数値を直接受け取り、backtesting.py で BT を実行する。
+変換アダプタは最小限(ノート schema を BT 入力形式に寄せる方針)。
 """
-
-import json, sys
 import pandas as pd
 from backtesting import Backtest, Strategy
 
-# DSL を Strategy クラスに動的展開する関数
-def build_strategy_from_dsl(dsl: dict) -> type[Strategy]: ...
+def map_config_to_backtesting_kwargs(config: dict) -> dict:
+    """
+    アプリ独自の config を backtesting.py の Backtest() 引数にマッピング。
+    backtesting.py の Backtest() 引数:
+      - cash: 初期資金 (= initialCapital)
+      - commission: 片道手数料 (例: 0.001 = 0.1%) (= tradingCost / 100)
+      - margin: 1 / leverage (= 1 / leverage)
+      - exclusive_orders: 同時 1 ポジ制限
+    """
+    return {
+        'cash': config['initialCapital'],
+        'commission': config.get('tradingCost', 0) / 100,
+        'margin': 1 / config['leverage'] if config.get('leverage') else 1,
+        'exclusive_orders': True,
+    }
 
-if __name__ == '__main__':
-    input_path, output_path = sys.argv[1], sys.argv[2]
-    payload = json.load(open(input_path))
-    StrategyClass = build_strategy_from_dsl(payload['strategyDSL'])
-    df = pd.DataFrame(payload['ohlcv']).set_index('timestamp')
-    bt = Backtest(df, StrategyClass, **payload['config'])
+def build_strategy_from_note(note_payload: dict) -> type[Strategy]:
+    """ノートのエントリー条件・SL/TP を Strategy クラスに動的展開"""
+    # entry_conditions, stopLoss, takeProfit を読んで Strategy.next() を構築
+    ...
+
+def run_backtest(note_payload: dict, ohlcv: list[dict], config: dict) -> dict:
+    df = pd.DataFrame(ohlcv).set_index('timestamp')
+    StrategyClass = build_strategy_from_note(note_payload)
+    bt_kwargs = map_config_to_backtesting_kwargs(config)
+    bt = Backtest(df, StrategyClass, **bt_kwargs)
     stats = bt.run()
-    json.dump({
+    return {
         'trades': stats._trades.to_dict('records'),
-        'summary': { ... },
-        'equity': stats._equity_curve['Equity'].tolist()
-    }, open(output_path, 'w'))
+        'summary': { 'pf': ..., 'winRate': ..., 'tradeCount': ... },
+        'equity': stats._equity_curve['Equity'].tolist(),
+    }
 ```
 
-### 8.2 TS 側ラッパー
+`routes.py`:
+```python
+from fastapi import APIRouter
+from .models import BacktestRequest, BacktestResponse
+from .runner import run_backtest
+
+router = APIRouter(prefix='/v1/backtest')
+
+@router.post('', response_model=BacktestResponse)
+async def post_backtest(req: BacktestRequest):
+    return run_backtest(req.notePayload, req.ohlcv, req.config)
+```
+
+### 8.3 TS 側のクライアント(既存 analysisEngineClient と同パターン)
 
 ```ts
-// src/side-b/strategy_dsl/PythonBacktestAdapter.ts (新規)
-export class PythonBacktestAdapter {
-    constructor(private bridge = createDefaultPythonBridge()) {}
-
-    async runBacktest(input: {
-        strategyDSL: StrategyDSL;
-        ohlcv: OHLCVBar[];
-        config: BacktestConfig;
-    }): Promise<DSLBacktestResult> {
-        const result = await this.bridge.execute({
-            scriptPath: 'backtest/backtest.py',
-            payload: input,
-            timeoutMs: 60_000,
-        });
-        return this.parseResult(result);
-    }
+// src/services/analysisEngineClient.ts に追加
+export async function fetchBacktestFromAnalysisEngine(input: {
+    notePayload: NotePayload;
+    ohlcv: OHLCVBar[];
+    config: BacktestConfig;
+}): Promise<BacktestResult> {
+    const url = `${ANALYSIS_ENGINE_URL}/v1/backtest`;
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+    });
+    if (!res.ok) throw new Error(`analysis-engine BT failed: ${res.status}`);
+    return await res.json();
 }
 ```
 
-### 8.3 既存 TS 自前 BT の縮小
+### 8.4 既存 TS 自前 BT の縮小
 
-- `dslBacktestSimulation.ts`: 削除(機能を Python に移行)
-- `DSLBacktestAdapter.ts`: 内部実装を `PythonBacktestAdapter` に切り替え
-- `strategyBacktestService.ts:runBacktest`: WalkForward の IS/OOS 呼び出し用ラッパーに縮小
+- `src/side-b/strategy_dsl/dslBacktestSimulation.ts` (21KB): **削除**(機能を analysis-engine に移行)
+- `src/side-b/strategy_dsl/DSLBacktestAdapter.ts`: 内部実装を `analysisEngineClient.fetchBacktestFromAnalysisEngine` に切り替え、もしくは廃止
+- `src/backend/services/strategyBacktestService.ts:runBacktest`: WalkForward の IS/OOS 呼び出し用ラッパーに縮小、もしくは廃止
 
-### 8.4 検証手順
+### 8.5 `python/` コンテナの今後
 
-1. 既存 TS 自前 BT で算出した PF / 勝率と、Python BT で同じ条件・期間で算出した値を比較
+- `walk_forward.py` 等の補助分析を analysis-engine に移管(別 PR)
+- 移管完了後、`python/` コンテナと `PythonBridge` (docker_exec モード) は廃止検討
+- `PythonBridge` の HTTP モードは analysis-engine 呼び出しに使えるので、ラッパーとしては残せる
+
+### 8.6 検証手順
+
+1. 既存 TS 自前 BT (`dslBacktestSimulation.ts`) で算出した PF / 勝率と、analysis-engine の `backtesting.py` で同じ条件・期間で算出した値を比較
 2. 差分が大きい場合、約定モデルの違いを調査(スリッページ、約定タイミング等)
-3. 単体テスト + 結合テストで網羅
+3. 単体テスト + 結合テスト + analysis-engine 側のエンドポイントテスト
 
 ---
 
@@ -580,3 +676,94 @@ bt = Backtest(df, StrategyClass, **bt_kwargs)
 ---
 
 *追記日時: 2026-05-02 朝 / Copilot レビュー指摘 7 件への明確化対応*
+
+---
+
+## §12 概念修正(2026-05-03 朝): ノートとアーキテクチャ全体の再整理
+
+PR #77 提出後、Nekoさん との対話で **ノート概念の理解と BT インフラの方針が大きく整理された**。本セクションは経緯の記録 + 設計の確定方針として残す。
+本文(§1, §6, §8)はこの方針に合わせて既に書き換え済み。§11 の Copilot 指摘は引き続き有効だが、§6.1 の `DSLConverter` は本概念修正で「変換アダプタを作らない」方針に変わったため、§11.3 の指摘は実装方針の変更で **解消**。
+
+### 12.1 ノートに関する僕の誤解と訂正
+
+**僕(Claude)が誤解していた点**:
+- §1 で「ノートは振り返り専用、BT と無関係」と書いた
+- §6.1 で `DSLConverter`(ノート/仮説 → DSL 変換アダプタ)を新設する設計にした
+
+**Nekoさん の正しい設計方針**:
+- ノート = **戦略が書いてある紙**(永続化された戦略記録)
+- 生成経路は多様(人間トレード履歴、AI 仮想トレード、人間考案戦略、AI 仮説昇格)だが、**最終的に全部「ノート」概念に統合**(設計書 `DESIGN_DOC_autonomous_trading_architecture.md` 通り、Side-A / Side-B 横断)
+- ノートができることは 2 つ:
+  1. マーケット入力との類似性検索 → 通知(出発点機能)
+  2. 自分自身を BT で検証(ストラテジー記録なので **BT できて当然・できるべき**)
+
+→ 「ノートで BT できない」は誤り。ノートは BT できる。ただし「ノート専用 BT」は不要(`services/backtestService.ts` のような並列実装は廃止対象)。
+
+### 12.2 BT エンジンの数(1 つに集約)
+
+**正しい姿**:
+- BT エンジンは **アプリ全体で 1 つだけ存在**
+- 各経路(ノート / 仮説 / 戦略)から、その 1 つを「入力 → 実行 → 結果書き戻し」で使う
+
+**実装場所**: `analysis-engine` (GCP デプロイ済みコンテナ) に集約する(§8 寄せ込み案、§12.4 参照)。
+
+### 12.3 「変換」ではなく「ノート schema を BT 入力形式に寄せる」
+
+**僕が PR #77 で書いた誤った発想**: 変換アダプタ (`DSLConverter`) を作る  
+**Nekoさん の正しい発想**: ノートの schema を **BT エンジンが直接食える形に寄せる**
+
+→ 変換ロジックがメンテ負担になるので作らない。ノートの数値をそのまま `analysis-engine` に POST する。
+
+### 12.4 `analysis-engine` 寄せ込み(BT インフラ統合)
+
+GCP に既に 2 つの Python コンテナがデプロイされているが、**BT は `analysis-engine` に寄せる**:
+
+| 旧方針(PR #77 §8) | 新方針(本セクション + §8 書き換え後) |
+|---|---|
+| `python/backtest/backtest.py` を新規 + `PythonBridge` (docker_exec) | `analysis-engine/app/backtest/` に追加 + HTTP API |
+| Python コンテナを 2 つ運用 | `analysis-engine` 1 つに集約、`python/` は段階廃止検討 |
+| `PythonBridge` で呼び出し | `analysisEngineClient` で HTTP 経由(既存パターン) |
+
+**メリット**:
+- GCP デプロイが既に済んでいる → BT も即本番稼働
+- 指標計算と BT が同じ `pandas` / `numpy` 基盤を共有(依存関係自然、Versioning 楽)
+- HTTP API として既に FastAPI が動いている
+
+### 12.5 指標計算の責務分離(設計原則)
+
+- **アプリ側で独自の数値計算は実装しない**(自前 RSI / MACD / ATR 等を書かない)
+- **計算は `pandas` / `pandas_ta` 等の標準ライブラリに委ねる**
+- ノートに格納される数値は `pandas_ta` 等の標準計算結果
+- BT エンジン (`backtesting.py`) も同じ基盤で動く
+- → ノートの数値をそのまま BT に渡せる(互換性が自動成立)
+
+これは Critical-4 だけでなく、アプリ全体の設計原則として明記する価値あり。
+
+### 12.6 §3 移行戦略(意味の更新)
+
+各段階の意味を概念修正後の方針に合わせて再解釈:
+
+| 段階 | PR #77 当初の表現 | §12 修正後の表現 |
+|---|---|---|
+| 段階 1 | screening 経路を DSL → 戦略 BT に切り替え | screening 経路を **唯一の BT エンジン** (analysis-engine) に切り替え |
+| 段階 2 | StrategyBacktesterAgent per-plan 結果永続化 | (同左) plan 経路でも analysis-engine を使う |
+| 段階 3 | ノート側 BT 廃止 | **「ノート専用 BT」`services/backtestService.ts` の廃止**(ノート概念自体は維持、BT 自体は analysis-engine 経由で残る) |
+| 段階 4 | Python BT ライブラリに切り替え | **analysis-engine への BT 機能追加**(`python/` コンテナではなく `analysis-engine`) |
+
+### 12.7 §11 との関係
+
+- §11.1(Critical-4 番号衝突): 引き続き有効
+- §11.2(`runBacktest` 前提): §6 を `analysis-engine` 経由に書き換えたため、`runBacktest` を直接呼ぶ問題は **解消**(段階 1 では `analysisEngineClient` を使う)
+- §11.3(`DSLConverter` の表現): 概念修正で **`DSLConverter` 自体が削除**されたため、§11.3 の指摘は失効
+- §11.4(`backtestRunId` 型変更): 引き続き有効、`screeningBacktestRunId` 案を採用予定
+- §11.5(Python config マッピング): §8 書き換え後にもマッピング層は必要、引き続き有効
+
+### 12.8 §10 残論点に追加
+
+- **(7)** ノート schema の現状調査: `TradeNote` / `AITradeNote` の数値フィールドが `analysis-engine` の BT 入力 (`backtesting.py`) にどれだけ整合するか。ギャップがあれば schema 改修 PR を別途切る
+- **(8)** `analysis-engine` の BT API 設計: ノート schema をそのまま受ける形にするか、若干の wrapper を置くか
+- **(9)** `python/` コンテナの段階的廃止計画: `walk_forward.py` 等を `analysis-engine` に移管する別 PR の段取り
+
+---
+
+*追記日時: 2026-05-03 朝 / Nekoさん との対話によるノート概念修正と BT インフラ方針確定。本文 §1 / §6 / §8 はこの方針に合わせて書き換え済み。*
