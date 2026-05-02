@@ -106,3 +106,84 @@ class WalkForwardResponse(BaseModel):
     splitCount: int
     totalTradeCount: int
     windowsEvaluated: int
+
+
+# ============================================
+# Critical-4 段階 1: スクリーニング BT
+# ============================================
+
+
+class ScreeningBacktestCondition(BaseModel):
+    """仮説の MachineReadableCondition (Node 側と同形)。
+
+    段階 1 では Python 側でレンズ feature の評価機構を持たないため、
+    実際にはエントリー条件として使われず unsupportedConditions に積まれる。
+    """
+
+    lensName: str
+    featureKey: str
+    op: Literal["<", "<=", ">", ">=", "==", "!=", "between", "in"]
+    value: Any
+
+
+class ScreeningBacktestStopLoss(BaseModel):
+    type: Literal["atr_multiple", "fixed_pips", "swing_point"]
+    value: Optional[float] = None
+    lookbackBars: Optional[int] = None
+
+
+class ScreeningBacktestTakeProfit(BaseModel):
+    type: Literal["rr_ratio", "atr_multiple", "fixed_pips"]
+    value: float
+
+
+class ScreeningBacktestNotePayload(BaseModel):
+    direction: Literal["long", "short", "either"]
+    conditions: List[ScreeningBacktestCondition] = Field(default_factory=list)
+    stopLoss: ScreeningBacktestStopLoss
+    takeProfit: ScreeningBacktestTakeProfit
+    indicators: List[IndicatorSpec] = Field(default_factory=list)
+    maxHoldingBars: Optional[int] = None
+
+
+class ScreeningBacktestConfig(BaseModel):
+    initialCapital: float = Field(default=10_000.0, gt=0)
+    leverage: float = Field(default=1.0, gt=0)
+    tradingCost: float = Field(default=0.0, ge=0)
+
+
+class ScreeningBacktestRequest(BaseModel):
+    hypothesisId: str
+    symbol: str
+    timeframe: str
+    startDate: datetime
+    endDate: datetime
+    notePayload: ScreeningBacktestNotePayload
+    config: ScreeningBacktestConfig = Field(default_factory=ScreeningBacktestConfig)
+
+
+class ScreeningBacktestSummary(BaseModel):
+    pf: float
+    winRate: float
+    tradeCount: int
+    maxDD: Optional[float] = None
+    sharpe: Optional[float] = None
+    returnPct: Optional[float] = None
+
+
+class ScreeningBacktestTrade(BaseModel):
+    entryTime: datetime
+    entryPrice: float
+    exitTime: Optional[datetime] = None
+    exitPrice: Optional[float] = None
+    side: Literal["long", "short"]
+    pnl: float
+    outcome: Literal["win", "loss", "timeout"]
+
+
+class ScreeningBacktestResponse(BaseModel):
+    summary: ScreeningBacktestSummary
+    trades: List[ScreeningBacktestTrade] = Field(default_factory=list)
+    equity: Optional[List[float]] = None
+    engineVersion: str
+    unsupportedConditions: List[str] = Field(default_factory=list)
