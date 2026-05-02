@@ -24,8 +24,13 @@ import { getSideBScheduler } from '../../side-b/jobs/sideBScheduler';
 import { isFXMarketOpen, getMarketStatusJST } from '../../side-b/utils/marketHours';
 import { MatchingService } from '../../services/matchingService';
 import { edgeLedger } from '../../side-b/ledger';
-import { validateBody } from '../../middleware/validateRequest';
-import { ResetNotTestableBodySchema, type ResetNotTestableBody } from '../../schemas/api/sideB';
+import { validateBody, validateQuery, getValidatedQuery } from '../../middleware/validateRequest';
+import {
+  ResetNotTestableBodySchema,
+  RunScreeningQuerySchema,
+  type ResetNotTestableBody,
+  type RunScreeningQuery,
+} from '../../schemas/api/sideB';
 
 const router = Router();
 
@@ -159,40 +164,61 @@ router.get('/side-b/monitor', async (_req: Request, res: Response) => {
 
 /**
  * GET /api/cron/side-b/run-screening
- * 仮説スクリーニング手動実行（PDCA-2 検証用 / orchestration_health_report Critical-1 対応）
+ * 仮説スクリーニング手動実行(PDCA-2 検証用)
  *
  * 動作:
- *   - unverified 仮説を最大 screeningMaxPerRun 件取り出して
- *     ScreeningOrchestrator.runScreening を回す
- *   - 市場開場チェックなし（screening は OHLCV 取得経由なのでオフライン実行可）
+ *   - unverified 仮説を最大 `max` 件取り出して ScreeningOrchestrator.runScreening を回す
+ *   - 市場開場チェックなし(screening は過去 OHLCV を舐める処理でオフライン実行可)
+ *
+ * Query parameters (Critical-4 段階 1.6):
+ *   - start  YYYY-MM-DD 形式の BT 期間開始日 (省略時は env SCREENING_PERIOD_DAYS デフォルト)
+ *   - end    YYYY-MM-DD 形式の BT 期間終了日 (省略時は今日)
+ *   - max    1 回の実行で処理する上限件数 (省略時は config.screeningMaxPerRun)
  *
  * 用途:
- *   - Phase 6.7b デプロイ後の動作確認
- *   - not_testable に倒れた仮説の再検証（仮説ID 指定は Phase 7 以降）
+ *   - 自動 cron 走行時はパラメータなしで env / config 既定値で実行
+ *   - 手動再 screening: 過去の rejected を新閾値で評価したい場合に start/end を指定
+ *   - not_testable に倒れた仮説の再検証
  */
-router.get('/side-b/run-screening', async (_req: Request, res: Response) => {
-  const startTime = Date.now();
-  try {
-    console.log('[Cron] スクリーニング手動実行を開始します');
-    const scheduler = getSideBScheduler();
-    const summary = await scheduler.runScreeningNow();
-    console.log('[Cron] スクリーニング手動実行完了:', summary);
-    res.json({
-      success: summary.errors === 0,
-      message: `processed=${summary.processed} passed=${summary.passed} rejected=${summary.rejected} not_testable=${summary.notTestable} errors=${summary.errors}`,
-      data: summary,
-      duration: Date.now() - startTime,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '不明なエラー';
-    console.error('[Cron] スクリーニング手動実行エラー:', message);
-    res.status(500).json({
-      success: false,
-      error: message,
-      duration: Date.now() - startTime,
-    });
-  }
-});
+router.get(
+  '/side-b/run-screening',
+  validateQuery(RunScreeningQuerySchema),
+  async (_req: Request, res: Response) => {
+    const startTime = Date.now();
+    try {
+      const query = getValidatedQuery<RunScreeningQuery>(res);
+      const period =
+        query.start && query.end ? { start: query.start, end: query.end } : undefined;
+      const limit = query.max;
+
+      console.log(
+        `[Cron] スクリーニング手動実行を開始します` +
+          (period ? ` period=${period.start}〜${period.end}` : '') +
+          (limit ? ` max=${limit}` : ''),
+      );
+      const scheduler = getSideBScheduler();
+      const summary = await scheduler.runScreeningNow({
+        ...(period ? { period } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+      });
+      console.log('[Cron] スクリーニング手動実行完了:', summary);
+      res.json({
+        success: summary.errors === 0,
+        message: `processed=${summary.processed} passed=${summary.passed} rejected=${summary.rejected} not_testable=${summary.notTestable} errors=${summary.errors}`,
+        data: summary,
+        duration: Date.now() - startTime,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '不明なエラー';
+      console.error('[Cron] スクリーニング手動実行エラー:', message);
+      res.status(500).json({
+        success: false,
+        error: message,
+        duration: Date.now() - startTime,
+      });
+    }
+  },
+);
 
 /**
  * GET /api/cron/side-b/run-full-validation

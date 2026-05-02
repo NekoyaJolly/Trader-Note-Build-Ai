@@ -101,7 +101,7 @@ export class ScreeningOrchestrator {
         private readonly statusManager: StatusManager = defaultStatusManager,
         private readonly screeningBacktestRepo: ScreeningBacktestRunRepository = defaultScreeningBacktestRepo,
         private readonly runBacktest: RunScreeningBacktestFn = defaultRunScreeningBacktest,
-        private readonly ohlcvRepo: Pick<OHLCVRepository, 'findManyAsOHLCVData'> = new DefaultOHLCVRepository(),
+        private readonly ohlcvRepo: Pick<OHLCVRepository, 'count'> = new DefaultOHLCVRepository(),
         private readonly fetchAndCache: (
             symbol: string,
             timeframe: string,
@@ -109,6 +109,20 @@ export class ScreeningOrchestrator {
             endDate: Date,
         ) => Promise<FetchAndCacheResult> = fetchAndCacheOhlcv,
     ) {}
+
+    // -----------------------------------------
+    // OHLCV カバレッジ判定 (Critical-4 段階 1.6)
+    //
+    // 旧: period の first/last bar が指定範囲を覆っていれば OK (穴の有無を見ない)。
+    //     forex 週末ギャップ + endDate=現在時刻 で常に NG になる欠陥があった。
+    // 新: 「期間内の期待バー数(forex 5/7 割引)に対し、実バー数が 90% 以上」を OK とする。
+    //     週末や祝日で取れない範囲を最初から期待値から除外しているため、判定が現実に即す。
+    // -----------------------------------------
+
+    /** forex 取引時間ベースの期待バー数 (週末は除外) */
+    private static readonly FOREX_OPEN_RATIO = 5 / 7;
+    /** OHLCV カバレッジの最低許容率 (Nekoさん 判断: 90%) */
+    private static readonly COVERAGE_THRESHOLD = 0.9;
 
     /**
      * 仮説に対して事前スクリーニングを実行する。
@@ -132,7 +146,7 @@ export class ScreeningOrchestrator {
             );
         }
 
-        const period = options.period ?? this.determineScreeningPeriod();
+        const period = options.period ?? this.defaultScreeningPeriod();
         const periodStart = new Date(period.start);
         const periodEnd = new Date(period.end);
 
@@ -256,12 +270,20 @@ export class ScreeningOrchestrator {
     }
 
     /**
-     * スクリーニング対象期間のデフォルト(直近1年)
+     * デフォルトのスクリーニング対象期間。
+     *
+     * 期間日数は `SCREENING_PERIOD_DAYS` 環境変数で運用側が制御する(既定 365)。
+     * orchestrator は内部にハードコード値を持たず、呼び出し側 (cron / skill) からの
+     * 明示的な `options.period` を最優先する設計 (§段階 1.6)。
      */
-    private determineScreeningPeriod(): { start: string; end: string } {
+    private defaultScreeningPeriod(): { start: string; end: string } {
+        const raw = process.env.SCREENING_PERIOD_DAYS;
+        const parsed = raw ? parseInt(raw, 10) : NaN;
+        const days = Number.isFinite(parsed) && parsed > 0 ? parsed : 365;
+
         const end = new Date();
         const start = new Date(end);
-        start.setFullYear(start.getFullYear() - 1);
+        start.setDate(start.getDate() - days);
         return {
             start: start.toISOString().split('T')[0],
             end: end.toISOString().split('T')[0],
@@ -269,7 +291,47 @@ export class ScreeningOrchestrator {
     }
 
     /**
-     * BT 前に DB 上の OHLCV が指定期間をカバーしているか確認し、不足分は補完する。
+     * 指定期間において forex 取引時間ベースで期待される OHLCV バー数を計算する。
+     * 平日のみ取引(土日 closed)= 期間の 5/7 が有効。
+     */
+    private expectedBars(periodStart: Date, periodEnd: Date, timeframe: string): number {
+        const periodMs = Math.max(0, periodEnd.getTime() - periodStart.getTime());
+        const intervalMs = this.timeframeToMs(timeframe);
+        if (intervalMs <= 0) return 0;
+        return Math.floor((periodMs * ScreeningOrchestrator.FOREX_OPEN_RATIO) / intervalMs);
+    }
+
+    /**
+     * 指定期間の OHLCV 実バー数 / 期待バー数 / カバレッジ率 を返す。
+     *
+     * 期待バー数が 0 (= 期間が短すぎて1バーも収まらない、例: 1w 足で 3 日期間) の場合は
+     * カバレッジ判定対象外として ratio=1 (= 通過扱い) を返す。
+     * 「データ密度ではなく BT そのものが成立しないケース」は backtest.py 側の
+     * 最低バー数チェック (len(df) < 30) で別途弾く。
+     */
+    private async coverageStats(
+        symbol: string,
+        timeframe: string,
+        startDate: Date,
+        endDate: Date,
+    ): Promise<{ expected: number; actual: number; ratio: number }> {
+        const expected = this.expectedBars(startDate, endDate, timeframe);
+        const actual = await this.ohlcvRepo.count({
+            symbol,
+            timeframe,
+            startTime: startDate,
+            endTime: endDate,
+        });
+        const ratio = expected > 0 ? actual / expected : 1;
+        return { expected, actual, ratio };
+    }
+
+    /**
+     * BT 前に指定期間の OHLCV カバレッジを確認し、不足していれば cTrader/Twelve Data から補完する。
+     *
+     * カバレッジ判定:
+     *   actual >= expected × 0.9 → OK
+     *   それ未満 → not_testable (理由を具体的に返す)
      */
     private async ensureOhlcvData(
         symbol: string,
@@ -277,7 +339,8 @@ export class ScreeningOrchestrator {
         startDate: Date,
         endDate: Date,
     ): Promise<{ ok: true } | { ok: false; reason: string }> {
-        if (await this.hasOhlcvCoverage(symbol, timeframe, startDate, endDate)) {
+        const initial = await this.coverageStats(symbol, timeframe, startDate, endDate);
+        if (initial.ratio >= ScreeningOrchestrator.COVERAGE_THRESHOLD) {
             return { ok: true };
         }
 
@@ -285,56 +348,67 @@ export class ScreeningOrchestrator {
         if (!result.success) {
             return {
                 ok: false,
-                reason: result.error ?? 'cTrader/Twelve Data から OHLCV を取得できませんでした',
+                reason: this.buildCoverageReason({
+                    symbol,
+                    timeframe,
+                    startDate,
+                    endDate,
+                    stats: initial,
+                    fetchError: result.error,
+                    fetchSource: undefined,
+                    fetchedCount: undefined,
+                }),
             };
         }
 
-        if (await this.hasOhlcvCoverage(symbol, timeframe, startDate, endDate)) {
+        const after = await this.coverageStats(symbol, timeframe, startDate, endDate);
+        if (after.ratio >= ScreeningOrchestrator.COVERAGE_THRESHOLD) {
             return { ok: true };
         }
 
         return {
             ok: false,
-            reason: `補完後も DB に十分な OHLCV がありません (source=${result.source ?? 'unknown'}, cached=${result.cachedCount})`,
+            reason: this.buildCoverageReason({
+                symbol,
+                timeframe,
+                startDate,
+                endDate,
+                stats: after,
+                fetchError: undefined,
+                fetchSource: result.source,
+                fetchedCount: result.cachedCount,
+            }),
         };
     }
 
-    private async hasOhlcvCoverage(
-        symbol: string,
-        timeframe: string,
-        startDate: Date,
-        endDate: Date,
-    ): Promise<boolean> {
-        const [first] = await this.ohlcvRepo.findManyAsOHLCVData({
-            symbol,
-            timeframe,
-            startTime: startDate,
-            endTime: endDate,
-            limit: 1,
-            orderBy: 'asc',
-        });
-        const [last] = await this.ohlcvRepo.findManyAsOHLCVData({
-            symbol,
-            timeframe,
-            startTime: startDate,
-            endTime: endDate,
-            limit: 1,
-            orderBy: 'desc',
-        });
+    /** カバレッジ不足時の人間可読な理由文字列を組み立てる */
+    private buildCoverageReason(args: {
+        symbol: string;
+        timeframe: string;
+        startDate: Date;
+        endDate: Date;
+        stats: { expected: number; actual: number; ratio: number };
+        fetchError: string | undefined;
+        fetchSource: string | undefined;
+        fetchedCount: number | undefined;
+    }): string {
+        const { symbol, timeframe, startDate, endDate, stats, fetchError, fetchSource, fetchedCount } = args;
+        const periodStr = `${startDate.toISOString()} 〜 ${endDate.toISOString()}`;
+        const ratioPct = (stats.ratio * 100).toFixed(1);
+        const thresholdPct = (ScreeningOrchestrator.COVERAGE_THRESHOLD * 100).toFixed(0);
 
-        if (!first || !last) return false;
-
-        const intervalMs = this.timeframeToMs(timeframe);
-        const toleranceMs = intervalMs * 3;
-        const firstTime = first.timestamp instanceof Date
-            ? first.timestamp.getTime()
-            : new Date(first.timestamp).getTime();
-        const lastTime = last.timestamp instanceof Date
-            ? last.timestamp.getTime()
-            : new Date(last.timestamp).getTime();
-
-        return firstTime <= startDate.getTime() + toleranceMs
-            && lastTime >= endDate.getTime() - toleranceMs;
+        if (fetchError) {
+            return (
+                `OHLCV 取得不能: ${fetchError} ` +
+                `(symbol=${symbol} tf=${timeframe} period=${periodStr}, ` +
+                `現状 ${stats.actual}/${stats.expected} 本 ${ratioPct}%、閾値 ${thresholdPct}%)`
+            );
+        }
+        return (
+            `OHLCV カバレッジ不足: ${stats.actual}/${stats.expected} 本 ${ratioPct}% < 閾値 ${thresholdPct}% ` +
+            `(symbol=${symbol} tf=${timeframe} period=${periodStr}, ` +
+            `forex 5/7 期待値ベース、source=${fetchSource ?? 'unknown'}, fetched=${fetchedCount ?? 0})`
+        );
     }
 
     private timeframeToMs(timeframe: string): number {
