@@ -31,13 +31,12 @@ function makeHypothesis(overrides?: Partial<EdgeHypothesis>): EdgeHypothesis {
         lastObservedAt: new Date(),
         createdAt: new Date(),
         updatedAt: new Date(),
-        materializedTradeNoteIds: ['note-1'],
+        materializedTradeNoteIds: [],
         screeningResult: {
             executedAt: new Date().toISOString(),
-            tradeNoteId: 'note-1',
             passed: true,
             metrics: { pf: 1.5, winRate: 0.6, tradeCount: 30 },
-            backtestRunId: 'run-1',
+            screeningBacktestRunId: 'sbt-1',
         },
         ...overrides,
     };
@@ -136,9 +135,15 @@ describe('StrategistAgent.validate', () => {
         await expect(makeAgent(mocks).validate('missing')).rejects.toThrow(/not found/);
     });
 
-    it('materializedTradeNoteIds が空なら verdict=not_testable', async () => {
+    it('screeningBacktestRunId が無ければ verdict=not_testable', async () => {
         const mocks = makeMocks();
-        mocks.ledger.get.mockResolvedValue(makeHypothesis({ materializedTradeNoteIds: [] }));
+        mocks.ledger.get.mockResolvedValue(makeHypothesis({
+            screeningResult: {
+                executedAt: new Date().toISOString(),
+                passed: true,
+                metrics: { pf: 1.5, winRate: 0.6, tradeCount: 30 },
+            },
+        }));
         const verdict = await makeAgent(mocks).validate('hyp-st-1', { skipLLM: true });
         expect(verdict.verdict).toBe('not_testable');
         expect(mocks.ledger.markNotTestable).toHaveBeenCalled();
@@ -303,7 +308,7 @@ describe('StrategistAgent.validate', () => {
 
         expect(mocks.backtester.runFullValidation).toHaveBeenCalledWith(
             expect.any(Object),
-            'note-1',
+            'sbt-1',
             period,
         );
     });

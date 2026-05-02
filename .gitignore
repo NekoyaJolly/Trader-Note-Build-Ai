@@ -48,3 +48,8 @@ playwright-report/
 playwright/.cache/
 test-videos/
 tests/ai-orchestrator/test-scenarios.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo

@@ -200,16 +200,28 @@ export interface ScreeningMetrics {
 export interface ScreeningResult {
     /** ISO8601 文字列 */
     executedAt: string;
-    /** スクリーニングに使われた TradeNote の ID（materialize 結果） */
-    tradeNoteId: string;
+    /**
+     * スクリーニングに使われた TradeNote の ID（旧経路で materialize した場合のみ）。
+     * Critical-4 段階 1 以降の analysis-engine 経路では TradeNote を作らないため
+     * 未設定。段階 3 で旧経路廃止と同時にこのフィールドも削除予定。
+     */
+    tradeNoteId?: string;
     /** スクリーニング通過可否 */
     passed: boolean;
     /** Side-A BT のメトリクス */
     metrics: ScreeningMetrics;
     /** passed=false の場合の棄却理由（配列） */
     reasons?: string[];
-    /** Side-A BT の runId（トレース用、任意） */
+    /**
+     * 旧 Side-A BT (BacktestRun) の runId（トレース用、任意）。
+     * Critical-4 段階 3 で削除予定。
+     */
     backtestRunId?: string;
+    /**
+     * Critical-4 段階 1: analysis-engine 経由 BT 結果 ID。
+     * `ScreeningBacktestRun.id` を参照する。
+     */
+    screeningBacktestRunId?: string;
 }
 
 // ===========================================

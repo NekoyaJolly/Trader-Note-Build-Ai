@@ -54,10 +54,9 @@ function makeHypothesis(screeningResult?: ScreeningResult): EdgeHypothesis {
 
 const goodScreening: ScreeningResult = {
     executedAt: new Date().toISOString(),
-    tradeNoteId: 'note-1',
     passed: true,
     metrics: { pf: 1.5, winRate: 0.6, tradeCount: 30 },
-    backtestRunId: 'run-abc',
+    screeningBacktestRunId: 'sbt-1',
 };
 
 const period = { start: '2025-01-01', end: '2025-12-31' };
@@ -71,7 +70,7 @@ describe('BacktesterAgent.runFullValidation', () => {
         };
         const agent = new BacktesterAgent(tools);
 
-        const report = await agent.runFullValidation(makeHypothesis(goodScreening), 'note-1', period);
+        const report = await agent.runFullValidation(makeHypothesis(goodScreening), 'sbt-1', period);
 
         expect(report.allPassed).toBe(true);
         expect(report.passedCount).toBe(4);
@@ -83,7 +82,7 @@ describe('BacktesterAgent.runFullValidation', () => {
         expect(report.buyAndHold?.passed).toBe(true);
     });
 
-    it('backtestRunId を下位ツールに伝搬する', async () => {
+    it('screeningBacktestRunId を下位ツールに伝搬する', async () => {
         const tools = {
             walkForward: makeTool('walk_forward', { passed: true }),
             monteCarlo: makeTool('monte_carlo', { passed: true }),
@@ -91,13 +90,13 @@ describe('BacktesterAgent.runFullValidation', () => {
         };
         const agent = new BacktesterAgent(tools);
 
-        await agent.runFullValidation(makeHypothesis(goodScreening), 'note-1', period);
+        await agent.runFullValidation(makeHypothesis(goodScreening), 'sbt-1', period);
 
         for (const tool of [tools.walkForward, tools.monteCarlo, tools.buyAndHold]) {
             expect(tool.execute).toHaveBeenCalledTimes(1);
             const arg = tool.execute.mock.calls[0]![0]!;
             expect(arg.kind).toBe('hypothesis');
-            expect(arg.backtestRunId).toBe('run-abc');
+            expect(arg.screeningBacktestRunId).toBe('sbt-1');
         }
     });
 
@@ -115,7 +114,7 @@ describe('BacktesterAgent.runFullValidation', () => {
         };
         const agent = new BacktesterAgent(tools);
 
-        const report = await agent.runFullValidation(makeHypothesis(goodScreening), 'note-1', period);
+        const report = await agent.runFullValidation(makeHypothesis(goodScreening), 'sbt-1', period);
 
         expect(report.walkForward).toBeUndefined();
         expect(report.monteCarlo?.passed).toBe(true);
@@ -138,7 +137,7 @@ describe('BacktesterAgent.runFullValidation', () => {
         };
         const agent = new BacktesterAgent(tools);
 
-        const report = await agent.runFullValidation(makeHypothesis(goodScreening), 'note-1', period);
+        const report = await agent.runFullValidation(makeHypothesis(goodScreening), 'sbt-1', period);
         expect(report.allPassed).toBe(false);
         expect(report.errors.some((e) => e.includes('timeout'))).toBe(true);
     });
@@ -151,7 +150,7 @@ describe('BacktesterAgent.runFullValidation', () => {
         };
         const agent = new BacktesterAgent(tools);
 
-        const report = await agent.runFullValidation(makeHypothesis(goodScreening), 'note-1', period);
+        const report = await agent.runFullValidation(makeHypothesis(goodScreening), 'sbt-1', period);
         expect(report.allPassed).toBe(false);
         expect(report.passedCount).toBe(3);
     });
@@ -197,7 +196,7 @@ describe('BacktesterAgent.runFullValidation', () => {
         };
         const agent = new BacktesterAgent(tools);
 
-        const report = await agent.runFullValidation(makeHypothesis(goodScreening), 'note-1', period);
+        const report = await agent.runFullValidation(makeHypothesis(goodScreening), 'sbt-1', period);
         expect(report.hypothesisId).toBe('hyp-bt-1');
         expect(report.periodUsed).toEqual(period);
         expect(typeof report.startedAt).toBe('string');
@@ -233,7 +232,7 @@ describe('BacktesterAgent.runFullValidation', () => {
             buyAndHold: makeDelayedTool('buy_and_hold', 20),
         };
         const agent = new BacktesterAgent(tools);
-        await agent.runFullValidation(makeHypothesis(goodScreening), 'note-1', period);
+        await agent.runFullValidation(makeHypothesis(goodScreening), 'sbt-1', period);
 
         // 並列実行なら完了が早い順(10ms → 20ms → 30ms)になる。
         // 直列だと開始順(walk_forward → monte_carlo → buy_and_hold)に並ぶので、

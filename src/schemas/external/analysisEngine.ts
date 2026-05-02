@@ -89,3 +89,121 @@ export const AnalysisEngineIndicatorSeriesResponseSchema = z.object({
 });
 
 export type AnalysisEngineIndicatorSeriesResponse = z.infer<typeof AnalysisEngineIndicatorSeriesResponseSchema>;
+
+// ============================================
+// Critical-4 段階 1: スクリーニング BT API
+// ============================================
+
+/**
+ * 仮説の MachineReadableCondition を Python BT で評価可能な形で送る。
+ * 設計方針 (§12.3): 「変換アダプタを作らない」 → そのまま素直に渡す。
+ * Python 側の app/backtest.py で評価する。
+ */
+const ScreeningBacktestConditionSchema = z.object({
+  lensName: z.string(),
+  featureKey: z.string(),
+  op: z.enum(['<', '<=', '>', '>=', '==', '!=', 'between', 'in']),
+  value: z.union([
+    z.number(),
+    z.string(),
+    z.boolean(),
+    z.tuple([z.number(), z.number()]),
+    z.array(z.string()),
+  ]),
+});
+
+const ScreeningBacktestStopLossSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('atr_multiple'), value: z.number().positive() }),
+  z.object({ type: z.literal('fixed_pips'), value: z.number().positive() }),
+  z.object({ type: z.literal('swing_point'), lookbackBars: z.number().int().positive() }),
+]);
+
+const ScreeningBacktestTakeProfitSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('rr_ratio'), value: z.number().positive() }),
+  z.object({ type: z.literal('atr_multiple'), value: z.number().positive() }),
+  z.object({ type: z.literal('fixed_pips'), value: z.number().positive() }),
+]);
+
+/**
+ * BT 入力スナップショット (notePayload)。
+ * 「ノート schema を BT 入力形式に寄せる」(§12.3) ため、仮説側のフィールド名をそのまま使う。
+ */
+export const ScreeningBacktestNotePayloadSchema = z.object({
+  direction: z.enum(['long', 'short', 'either']),
+  conditions: z.array(ScreeningBacktestConditionSchema),
+  stopLoss: ScreeningBacktestStopLossSchema,
+  takeProfit: ScreeningBacktestTakeProfitSchema,
+  /** 指標スペック (Python 側で pandas_ta により計算) */
+  indicators: z.array(AnalysisEngineIndicatorSpecSchema).default([]),
+  /** 保有上限バー数 */
+  maxHoldingBars: z.number().int().positive().optional(),
+});
+
+export type ScreeningBacktestNotePayload = z.infer<typeof ScreeningBacktestNotePayloadSchema>;
+
+export const ScreeningBacktestConfigSchema = z.object({
+  initialCapital: z.number().positive().default(10_000),
+  /** レバレッジ。1 を渡すとレバレッジなし */
+  leverage: z.number().positive().default(1),
+  /** 片道手数料 (%, 例: 0.05 = 0.05%) */
+  tradingCost: z.number().min(0).default(0),
+});
+
+export const AnalysisEngineScreeningBacktestRequestSchema = z.object({
+  hypothesisId: z.string().min(1),
+  symbol: z.string().min(1),
+  timeframe: z.string().min(1),
+  startDate: z.string().datetime(),
+  endDate: z.string().datetime(),
+  notePayload: ScreeningBacktestNotePayloadSchema,
+  config: ScreeningBacktestConfigSchema.optional().default(() => ({
+    initialCapital: 10_000,
+    leverage: 1,
+    tradingCost: 0,
+  })),
+});
+
+export type AnalysisEngineScreeningBacktestRequest = z.infer<
+  typeof AnalysisEngineScreeningBacktestRequestSchema
+>;
+
+export const ScreeningBacktestSummarySchema = z.object({
+  pf: z.number(),
+  winRate: z.number(),
+  tradeCount: z.number().int().nonnegative(),
+  maxDD: z.number().nullable(),
+  sharpe: z.number().nullable(),
+  returnPct: z.number().nullable(),
+});
+
+export type ScreeningBacktestSummary = z.infer<typeof ScreeningBacktestSummarySchema>;
+
+export const ScreeningBacktestTradeSchema = z.object({
+  entryTime: z.string().datetime(),
+  entryPrice: z.number(),
+  exitTime: z.string().datetime().nullable(),
+  exitPrice: z.number().nullable(),
+  side: z.enum(['long', 'short']),
+  pnl: z.number(),
+  outcome: z.enum(['win', 'loss', 'timeout']),
+});
+
+export type ScreeningBacktestTrade = z.infer<typeof ScreeningBacktestTradeSchema>;
+
+export const AnalysisEngineScreeningBacktestResponseSchema = z.object({
+  summary: ScreeningBacktestSummarySchema,
+  trades: z.array(ScreeningBacktestTradeSchema),
+  /** equity curve (省略可、長大なため将来サンプリング検討) */
+  equity: z.array(z.number()).nullable(),
+  /** BT エンジン名+バージョン (例: 'analysis-engine/backtesting.py@0.6.5') */
+  engineVersion: z.string().min(1),
+  /**
+   * 評価できなかった条件 (Python 側で lens 名→指標マッピングできなかったもの)。
+   * 段階 1 では SL/TP のみで BT を進めるためのデバッグ用。
+   */
+  unsupportedConditions: z.array(z.string()).default([]),
+});
+
+export type AnalysisEngineScreeningBacktestResponse = z.infer<
+  typeof AnalysisEngineScreeningBacktestResponseSchema
+>;

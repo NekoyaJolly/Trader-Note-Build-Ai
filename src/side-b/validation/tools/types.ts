@@ -27,20 +27,18 @@ export type ValidationAdditionalParams = Record<string, ValidationAdditionalPara
 // ツール共通入力（union）
 // ===========================================
 
-/** 仮説 + Side-A BacktestRun（従来 Phase 4c） */
+/** 仮説 + ScreeningBacktestRun（Critical-4 段階 1 以降の標準径路） */
 export interface HypothesisValidationInput {
   kind: 'hypothesis';
   /** 検証対象の仮説 */
   hypothesis: EdgeHypothesis;
-  /** Phase 4b でこの仮説から materialize された Side-A TradeNote の ID */
-  tradeNoteId: string;
   /** 検証対象期間（ISO8601 日付） */
   period: { start: string; end: string };
   /**
-   * Phase 4b で走った Side-A BacktestRun の ID（流用して再走を避ける）
-   * MonteCarlo / BuyAndHold / WalkForward（仮説径）の参照先。
+   * Critical-4 段階 1: analysis-engine 経由で実行された ScreeningBacktestRun の ID。
+   * MonteCarlo / BuyAndHold / WalkForward の入力源(trades 配列)を読み込むキー。
    */
-  backtestRunId?: string;
+  screeningBacktestRunId: string;
   /** ツール独自パラメーター */
   additionalParams?: ValidationAdditionalParams;
 }

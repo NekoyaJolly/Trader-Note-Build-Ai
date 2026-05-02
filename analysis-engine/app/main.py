@@ -18,10 +18,13 @@ from app.schemas import (
     IndicatorSeriesByVersionRequest,
     IndicatorSeriesRequest,
     IndicatorSeriesResponse,
+    ScreeningBacktestRequest,
+    ScreeningBacktestResponse,
     WalkForwardRequest,
     WalkForwardResponse,
 )
 from app.walk_forward import run_walk_forward
+from app.backtest import run_screening_backtest
 
 app = FastAPI(title="TradeAssist Analysis Engine", version="0.1.0")
 
@@ -42,6 +45,20 @@ def walk_forward(req: WalkForwardRequest) -> WalkForwardResponse:
     過学習スコアと安定性指標を返す。
     """
     return run_walk_forward(req)
+
+
+@app.post("/v1/screening-backtest", response_model=ScreeningBacktestResponse)
+def screening_backtest(req: ScreeningBacktestRequest) -> ScreeningBacktestResponse:
+    """Critical-4 段階 1: 仮説スクリーニング BT。
+
+    OHLCV を DB から直読みし、notePayload (direction / SL/TP 仕様) で動的に
+    Strategy クラスを生成して backtesting.py で BT を走らせる。
+
+    段階 1 では仮説の `conditions[]` (MachineReadableCondition) は評価しない。
+    レンズ feature 評価機構を Python 側に持たないため、すべて
+    `unsupportedConditions` に積んで「常時エントリー × SL/TP 約定」で BT する。
+    """
+    return run_screening_backtest(engine, req)
 
 
 @app.post("/v1/indicator-series", response_model=IndicatorSeriesResponse)

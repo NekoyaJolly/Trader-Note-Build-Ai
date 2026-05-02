@@ -10,11 +10,16 @@ import axios from 'axios';
 import { z } from 'zod';
 import type {
   AnalysisEngineIndicatorSpec,
-  AnalysisEngineIndicatorSeriesResponse} from '../../schemas/external/analysisEngine';
+  AnalysisEngineIndicatorSeriesResponse,
+  AnalysisEngineScreeningBacktestRequest,
+  AnalysisEngineScreeningBacktestResponse,
+} from '../../schemas/external/analysisEngine';
 import {
   AnalysisEngineIndicatorSeriesByVersionRequestSchema,
   AnalysisEngineIndicatorSeriesRequestSchema,
   AnalysisEngineIndicatorSeriesResponseSchema,
+  AnalysisEngineScreeningBacktestRequestSchema,
+  AnalysisEngineScreeningBacktestResponseSchema,
 } from '../../schemas/external/analysisEngine';
 
 // ============================================
@@ -158,6 +163,36 @@ export async function fetchIndicatorSeriesByStrategyVersion(params: {
   const parsed = AnalysisEngineIndicatorSeriesResponseSchema.safeParse(res.data);
   if (!parsed.success) {
     throw new Error(`analysis-engine レスポンスが不正です: ${parsed.error.message}`);
+  }
+
+  return parsed.data;
+}
+
+/**
+ * Critical-4 段階 1: 仮説スクリーニング BT を analysis-engine に投げる。
+ *
+ * 設計方針 (§12):
+ * - BT エンジンはアプリ全体で 1 つだけ (analysis-engine + backtesting.py)
+ * - 変換アダプタを作らない (notePayload を素直に渡す)
+ * - OHLCV は analysis-engine が DB から直読み
+ *
+ * Python 側のエンドポイント実装は `analysis-engine/app/backtest.py`。
+ */
+export async function runScreeningBacktest(
+  input: AnalysisEngineScreeningBacktestRequest,
+): Promise<AnalysisEngineScreeningBacktestResponse> {
+  const baseUrl = getAnalysisEngineBaseUrl();
+  const payload = AnalysisEngineScreeningBacktestRequestSchema.parse(input);
+
+  const res = await axios.post(`${baseUrl}/v1/screening-backtest`, payload, {
+    // 1 年分の BT は数十秒かかりうるため余裕を持たせる
+    timeout: 180_000,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  const parsed = AnalysisEngineScreeningBacktestResponseSchema.safeParse(res.data);
+  if (!parsed.success) {
+    throw new Error(`analysis-engine BT レスポンスが不正です: ${parsed.error.message}`);
   }
 
   return parsed.data;

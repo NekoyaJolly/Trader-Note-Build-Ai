@@ -16,7 +16,12 @@
  * @see docs/design/phase_4c_specification.md §4.7
  */
 
-import { backtestService as defaultBacktestService, type BacktestService } from '../../../services/backtestService';
+import {
+    screeningBacktestRunRepository as defaultScreeningBacktestRepo,
+    type ScreeningBacktestRunRepository,
+} from '../../../backend/repositories/screeningBacktestRunRepository';
+import type { ScreeningBacktestTrade } from '../../../schemas/external/analysisEngine';
+import { fromPrismaJsonValue } from '../../../utils/prismaJson';
 import { OHLCVRepository } from '../../../backend/repositories/ohlcvRepository';
 import { VALIDATION_THRESHOLDS } from '../../config/validationThresholds';
 import type {
@@ -49,12 +54,12 @@ export interface BuyAndHoldToolConfig {
 export class BuyAndHoldTool implements ValidationTool {
     readonly name = 'buy_and_hold';
     readonly implementation = 'native_ts' as const;
-    readonly requiredInputs: readonly string[] = ['kind', 'hypothesis', 'backtestRunId', 'period'];
+    readonly requiredInputs: readonly string[] = ['kind', 'hypothesis', 'screeningBacktestRunId', 'period'];
 
     private readonly minOutperformance: number;
 
     constructor(
-        private readonly backtestService: BacktestService = defaultBacktestService,
+        private readonly screeningBacktestRepo: ScreeningBacktestRunRepository = defaultScreeningBacktestRepo,
         private readonly ohlcvRepo: OHLCVRepository = new OHLCVRepository(),
         config: BuyAndHoldToolConfig = {},
     ) {
@@ -72,8 +77,8 @@ export class BuyAndHoldTool implements ValidationTool {
         input: HypothesisValidationInput,
         start: number,
     ): Promise<ValidationToolResult> {
-        if (!input.backtestRunId) {
-            return this.fail('backtestRunId が未指定（Phase 4b screening 結果が必要）', start);
+        if (!input.screeningBacktestRunId) {
+            return this.fail('screeningBacktestRunId が未指定 (screening 結果が必要)', start);
         }
         const symbol = input.hypothesis.symbols[0];
         const timeframe = input.hypothesis.timeframes[0];
@@ -116,19 +121,26 @@ export class BuyAndHoldTool implements ValidationTool {
         }
         const buyAndHoldReturn = (endClose - startClose) / startClose;
 
-        // 2. 戦略リターン: BT 結果から sum(event.pnl) / startClose
-        let summary;
+        // 2. 戦略リターン: ScreeningBacktestRun の trades から sum(pnl) / startClose
+        let run;
         try {
-            summary = await this.backtestService.getResult(input.backtestRunId);
+            run = await this.screeningBacktestRepo.findById(input.screeningBacktestRunId);
         } catch (err) {
-            return this.fail(`BT 結果取得失敗: ${err instanceof Error ? err.message : String(err)}`, start);
+            return this.fail(
+                `ScreeningBacktestRun 取得失敗: ${err instanceof Error ? err.message : String(err)}`,
+                start,
+            );
         }
-        if (!summary) {
-            return this.fail(`BT 結果が見つからない (runId=${input.backtestRunId})`, start);
+        if (!run) {
+            return this.fail(
+                `ScreeningBacktestRun が見つからない (id=${input.screeningBacktestRunId})`,
+                start,
+            );
         }
 
-        const totalPnl = summary.events.reduce((sum, e) => {
-            return typeof e.pnl === 'number' && Number.isFinite(e.pnl) ? sum + e.pnl : sum;
+        const trades = fromPrismaJsonValue<ScreeningBacktestTrade[]>(run.trades) ?? [];
+        const totalPnl = trades.reduce((sum, t) => {
+            return typeof t.pnl === 'number' && Number.isFinite(t.pnl) ? sum + t.pnl : sum;
         }, 0);
         const strategyReturn = totalPnl / startClose;
 
@@ -155,7 +167,7 @@ export class BuyAndHoldTool implements ValidationTool {
                 outperformance,
                 startClose,
                 endClose,
-                tradeCount: summary.setupCount,
+                tradeCount: trades.length,
                 periodDays,
                 comparisonDirection: direction,
             },

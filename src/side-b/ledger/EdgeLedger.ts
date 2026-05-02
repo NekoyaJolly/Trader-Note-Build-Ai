@@ -569,9 +569,11 @@ export class EdgeLedger {
                 statusUpdatedAt: new Date(),
                 screeningResult: toPrismaJsonValue(result),
                 lastTestedAt: new Date(),
-                materializedTradeNoteIds: {
-                    set: [result.tradeNoteId],
-                },
+                // Critical-4 段階 1 以降は tradeNoteId が無い (analysis-engine 経路は TradeNote を作らない)。
+                // 旧経路で materialize された場合のみ既存 IDs に追加する。
+                ...(result.tradeNoteId
+                    ? { materializedTradeNoteIds: { set: [result.tradeNoteId] } }
+                    : {}),
             },
         });
     }
@@ -597,9 +599,10 @@ export class EdgeLedger {
                 statusNote: result.reasons?.join('; '),
                 screeningResult: toPrismaJsonValue(result),
                 lastTestedAt: new Date(),
-                materializedTradeNoteIds: {
-                    set: [result.tradeNoteId],
-                },
+                // Critical-4 段階 1 以降は tradeNoteId が無い場合があるためガードする
+                ...(result.tradeNoteId
+                    ? { materializedTradeNoteIds: { set: [result.tradeNoteId] } }
+                    : {}),
             },
         });
     }

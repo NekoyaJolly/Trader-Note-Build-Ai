@@ -80,10 +80,13 @@ export class StrategistAgent {
      * 遷移させて PromotionVerdict を返す。
      *
      * 前提:
-     *   - hypothesis.status === 'screening_passed'（Phase 4b 通過）
-     *   - hypothesis.materializedTradeNoteIds に少なくとも 1 件
+     *   - hypothesis.status === 'screening_passed' (screening 通過)
+     *   - hypothesis.screeningResult.screeningBacktestRunId が設定済み
      *
-     * LLM 失敗は致命的ではない（interpretation=undefined で判定は進む）。
+     * Critical-4 段階 1.5: 旧 `materializedTradeNoteIds[0]` 依存を撤廃し、
+     * `ScreeningBacktestRun.id` 経由で BT 結果を読む経路に切替。
+     *
+     * LLM 失敗は致命的ではない (interpretation=undefined で判定は進む)。
      */
     async validate(
         hypothesisId: string,
@@ -95,9 +98,9 @@ export class StrategistAgent {
         }
 
         const period = options.period ?? this.defaultPeriod();
-        const tradeNoteId = hypothesis.materializedTradeNoteIds?.[0];
-        if (!tradeNoteId) {
-            const reason = 'materializedTradeNoteId が無い（Phase 4b 未通過か、materialize 失敗）';
+        const screeningBacktestRunId = hypothesis.screeningResult?.screeningBacktestRunId;
+        if (!screeningBacktestRunId) {
+            const reason = 'screeningBacktestRunId が無い (screening 未通過か、analysis-engine 経由の BT 実行失敗)';
             await this.edgeLedger.markNotTestable(hypothesisId, reason);
             return this.buildVerdict('not_testable', hypothesisId, undefined, [reason]);
         }
@@ -107,7 +110,7 @@ export class StrategistAgent {
 
         let report: ConsolidatedValidationReport;
         try {
-            report = await this.backtester.runFullValidation(hypothesis, tradeNoteId, period);
+            report = await this.backtester.runFullValidation(hypothesis, screeningBacktestRunId, period);
         } catch (err) {
             const reason = `BacktesterAgent 実行失敗: ${err instanceof Error ? err.message : String(err)}`;
             await this.edgeLedger.markNotTestable(hypothesisId, reason);
