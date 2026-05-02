@@ -33,16 +33,22 @@ export const PROMOTION_THRESHOLDS = Object.freeze({
  * Phase 4b 縮小版: 事前スクリーニング通過基準（暫定値）
  *
  * 本昇格（confirmed）の基準より意図的に緩い粗フィルタ。
- * 明らかな損失戦略 / データ不足 / RR 過小の仮説を弾き、
+ * 明らかな損失戦略 / データ不足の仮説を弾き、
  * Phase 4c の重い検証（WF/MC/BH）に投入する前の絞り込みに使う。
+ *
+ * 2026-05-02 暫定緩和（PR #76、Critical-10 一環）:
+ *   設計書 `docs/design/phase_4b_specification.md:594` の「閾値は暫定、運用後調整」発動。
+ *   24h 観測(PR #74) で screening_passed=0 件、PDCA-2 が永続的に空回りしていたため、
+ *   最低限 PDCA を一巡させる目的で以下を緩和:
+ *     - minPF: 1.3 → 1.1 (PDCA 動作確認のための一時緩和)
+ *     - minWinRate: 0.4 → 撤廃 (RR>=2.0 推奨で運用しているため、勝率は参考値に留める)
+ *   一定期間運用してデータが集まったら、閾値を再評価して戻す前提。
  *
  * TODO(Phase 4c): 環境変数で外部化して運用後に調整できるようにする。
  */
 export const SCREENING_THRESHOLDS = Object.freeze({
-    /** Side-A BT PF 下限（本昇格 1.5 より緩い） */
-    minPF: 1.3,
-    /** 勝率下限（0-1 と 0-100 の両表記を許容） */
-    minWinRate: 0.4,
+    /** Side-A BT PF 下限（本昇格 1.5 より緩い、2026-05-02 に 1.3→1.1 へ暫定緩和） */
+    minPF: 1.1,
     /** 最低トレード数（統計的有意性の最低限） */
     minTradeCount: 20,
 });
@@ -140,10 +146,10 @@ export class StatusManager {
      * Phase 4b 縮小版: 事前スクリーニング通過可否を判定する。
      *
      * 本昇格（confirmed）とは別の粗いフィルタ。Side-A BacktestService の結果
-     * （PF / winRate / tradeCount）に対して `SCREENING_THRESHOLDS` を適用する。
+     * （PF / tradeCount）に対して `SCREENING_THRESHOLDS` を適用する。
      *
-     * winRate は Side-A が 0-1 / 0-100 のどちらで返すか分岐があるため、
-     * 値が 1 より大きければ 100 分率とみなして内部で 0-1 に正規化する。
+     * 2026-05-02 暫定緩和（PR #76）以降、勝率閾値は撤廃。winRate は ScreeningResult
+     * の metrics に参考値として保持されるが、screening 通過判定には使わない。
      *
      * @param metrics Side-A BT の要約メトリクス
      * @returns ok=true の場合のみ `screening_passed` に昇格可能
@@ -164,16 +170,6 @@ export class StatusManager {
         if (metrics.tradeCount < SCREENING_THRESHOLDS.minTradeCount) {
             reasons.push(
                 `トレード数不足: ${metrics.tradeCount} < ${SCREENING_THRESHOLDS.minTradeCount}`,
-            );
-        }
-
-        // win rate (0-1 正規化)
-        const normalizedWinRate = metrics.winRate > 1 ? metrics.winRate / 100 : metrics.winRate;
-        if (!Number.isFinite(normalizedWinRate)) {
-            reasons.push('勝率が不正');
-        } else if (normalizedWinRate <= SCREENING_THRESHOLDS.minWinRate) {
-            reasons.push(
-                `勝率不足: ${(normalizedWinRate * 100).toFixed(1)}% <= ${(SCREENING_THRESHOLDS.minWinRate * 100).toFixed(1)}%`,
             );
         }
 
