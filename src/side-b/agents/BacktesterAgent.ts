@@ -54,15 +54,18 @@ export class BacktesterAgent {
     /**
      * 4ツール統合レポートを生成する。
      *
-     * - screening: hypothesis.screeningResult（Phase 4b 成果物）を流用
+     * - screening: hypothesis.screeningResult(Phase 4b 成果物) を流用
      * - walkForward / monteCarlo / buyAndHold: `Promise.allSettled` で並列
      *
      * 戻り値の allPassed は 4 ツール全通過のときのみ true。screening が
-     * 無い（Phase 4b を通過していない）場合は必ず false。
+     * 無い(screening 未通過)場合は必ず false。
+     *
+     * Critical-4 段階 1.5: 入力源を `ScreeningBacktestRun.id` に切替。
+     * 旧 `tradeNoteId` / `backtestRunId` は撤廃。
      */
     async runFullValidation(
         hypothesis: EdgeHypothesis,
-        tradeNoteId: string,
+        screeningBacktestRunId: string,
         period: { start: string; end: string },
     ): Promise<ConsolidatedValidationReport> {
         const startedAt = new Date();
@@ -72,9 +75,8 @@ export class BacktesterAgent {
         const input: ValidationToolInput = {
             kind: 'hypothesis',
             hypothesis,
-            tradeNoteId,
             period,
-            backtestRunId: hypothesis.screeningResult?.backtestRunId,
+            screeningBacktestRunId,
         };
 
         const settled = await Promise.allSettled([

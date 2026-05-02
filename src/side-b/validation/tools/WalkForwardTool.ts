@@ -13,7 +13,12 @@
  * @see docs/design/phase_4c_specification.md §4.5
  */
 
-import { backtestService as defaultBacktestService, type BacktestService } from '../../../services/backtestService';
+import {
+    screeningBacktestRunRepository as defaultScreeningBacktestRepo,
+    type ScreeningBacktestRunRepository,
+} from '../../../backend/repositories/screeningBacktestRunRepository';
+import type { ScreeningBacktestTrade } from '../../../schemas/external/analysisEngine';
+import { fromPrismaJsonValue } from '../../../utils/prismaJson';
 import { createDefaultPythonBridge, type PythonBridge } from '../python_bridge';
 import { VALIDATION_THRESHOLDS } from '../../config/validationThresholds';
 import type {
@@ -70,7 +75,7 @@ export interface WalkForwardToolConfig {
 export class WalkForwardTool implements ValidationTool {
     readonly name = 'walk_forward';
     readonly implementation = 'python_bridge' as const;
-    readonly requiredInputs: readonly string[] = ['kind', 'hypothesis', 'backtestRunId', 'period'];
+    readonly requiredInputs: readonly string[] = ['kind', 'hypothesis', 'screeningBacktestRunId', 'period'];
 
     private readonly splitCount: number;
     private readonly maxOverfitScore: number;
@@ -80,7 +85,7 @@ export class WalkForwardTool implements ValidationTool {
 
     constructor(
         private readonly pythonBridge: PythonBridge = createDefaultPythonBridge(),
-        private readonly backtestService: BacktestService = defaultBacktestService,
+        private readonly screeningBacktestRepo: ScreeningBacktestRunRepository = defaultScreeningBacktestRepo,
         config: WalkForwardToolConfig = {},
     ) {
         this.splitCount = config.splitCount ?? 4;
@@ -111,24 +116,31 @@ export class WalkForwardTool implements ValidationTool {
         input: HypothesisValidationInput,
         start: number,
     ): Promise<ValidationToolResult> {
-        if (!input.backtestRunId) {
-            return this.fail('backtestRunId が未指定（Phase 4b screening 結果が必要）', start);
+        if (!input.screeningBacktestRunId) {
+            return this.fail('screeningBacktestRunId が未指定 (screening 結果が必要)', start);
         }
 
-        // 1. Side-A BT 結果からイベントを取得
-        let summary;
+        // Critical-4 段階 1: ScreeningBacktestRun から trades を取得
+        let run;
         try {
-            summary = await this.backtestService.getResult(input.backtestRunId);
+            run = await this.screeningBacktestRepo.findById(input.screeningBacktestRunId);
         } catch (err) {
-            return this.fail(`BT 結果取得失敗: ${err instanceof Error ? err.message : String(err)}`, start);
+            return this.fail(
+                `ScreeningBacktestRun 取得失敗: ${err instanceof Error ? err.message : String(err)}`,
+                start,
+            );
         }
-        if (!summary) {
-            return this.fail(`BT 結果が見つからない (runId=${input.backtestRunId})`, start);
+        if (!run) {
+            return this.fail(
+                `ScreeningBacktestRun が見つからない (id=${input.screeningBacktestRunId})`,
+                start,
+            );
         }
 
-        const events = summary.events
-            .filter((e) => typeof e.pnl === 'number' && Number.isFinite(e.pnl))
-            .map((e) => ({ entryTime: e.entryTime, pnl: e.pnl as number }));
+        const trades = fromPrismaJsonValue<ScreeningBacktestTrade[]>(run.trades) ?? [];
+        const events = trades
+            .filter((t) => typeof t.pnl === 'number' && Number.isFinite(t.pnl))
+            .map((t) => ({ entryTime: t.entryTime, pnl: t.pnl }));
 
         return this.runWalkForwardOnEvents(events, input.period, start);
     }

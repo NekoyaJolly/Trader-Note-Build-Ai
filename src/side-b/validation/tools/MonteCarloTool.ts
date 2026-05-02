@@ -12,7 +12,12 @@
  * @see docs/design/phase_4c_specification.md §4.6
  */
 
-import { backtestService as defaultBacktestService, type BacktestService } from '../../../services/backtestService';
+import {
+    screeningBacktestRunRepository as defaultScreeningBacktestRepo,
+    type ScreeningBacktestRunRepository,
+} from '../../../backend/repositories/screeningBacktestRunRepository';
+import type { ScreeningBacktestTrade } from '../../../schemas/external/analysisEngine';
+import { fromPrismaJsonValue } from '../../../utils/prismaJson';
 import { VALIDATION_THRESHOLDS } from '../../config/validationThresholds';
 import type {
     HypothesisValidationInput,
@@ -91,7 +96,7 @@ export interface MonteCarloToolConfig {
 export class MonteCarloTool implements ValidationTool {
     readonly name = 'monte_carlo';
     readonly implementation = 'native_ts' as const;
-    readonly requiredInputs: readonly string[] = ['kind', 'hypothesis', 'backtestRunId'];
+    readonly requiredInputs: readonly string[] = ['kind', 'hypothesis', 'screeningBacktestRunId'];
 
     private readonly rng: RandomSource;
     private readonly simulationCount: number;
@@ -99,7 +104,7 @@ export class MonteCarloTool implements ValidationTool {
     private readonly minTradeCount: number;
 
     constructor(
-        private readonly backtestService: BacktestService = defaultBacktestService,
+        private readonly screeningBacktestRepo: ScreeningBacktestRunRepository = defaultScreeningBacktestRepo,
         config: MonteCarloToolConfig = {},
     ) {
         this.rng = config.rng ?? Math.random;
@@ -115,27 +120,34 @@ export class MonteCarloTool implements ValidationTool {
         return this.executeHypothesis(input, Date.now());
     }
 
-    /** Phase 4c: Side-A runId 経由 */
+    /** Critical-4 段階 1: ScreeningBacktestRun から trades を取得 */
     private async executeHypothesis(
         input: HypothesisValidationInput,
         start: number,
     ): Promise<ValidationToolResult> {
-        if (!input.backtestRunId) {
-            return this.fail('backtestRunId が未指定（Phase 4b screening 結果が必要）', start);
+        if (!input.screeningBacktestRunId) {
+            return this.fail('screeningBacktestRunId が未指定 (screening 結果が必要)', start);
         }
 
-        let summary;
+        let run;
         try {
-            summary = await this.backtestService.getResult(input.backtestRunId);
+            run = await this.screeningBacktestRepo.findById(input.screeningBacktestRunId);
         } catch (err) {
-            return this.fail(`BT 結果取得失敗: ${err instanceof Error ? err.message : String(err)}`, start);
+            return this.fail(
+                `ScreeningBacktestRun 取得失敗: ${err instanceof Error ? err.message : String(err)}`,
+                start,
+            );
         }
-        if (!summary) {
-            return this.fail(`BT 結果が見つからない (runId=${input.backtestRunId})`, start);
+        if (!run) {
+            return this.fail(
+                `ScreeningBacktestRun が見つからない (id=${input.screeningBacktestRunId})`,
+                start,
+            );
         }
 
-        const pnls = summary.events
-            .map((e) => e.pnl)
+        const trades = fromPrismaJsonValue<ScreeningBacktestTrade[]>(run.trades) ?? [];
+        const pnls = trades
+            .map((t) => t.pnl)
             .filter((p): p is number => typeof p === 'number' && Number.isFinite(p));
 
         return this.runMonteFromPnls(pnls, start);

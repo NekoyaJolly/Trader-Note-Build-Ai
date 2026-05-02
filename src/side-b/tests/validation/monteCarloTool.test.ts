@@ -39,32 +39,29 @@ function makeHypothesis(): EdgeHypothesis {
     };
 }
 
-/** 指定 PnL 列を持つ BacktestSummary モックを作る */
-function makeSummary(pnls: number[]) {
+/** 指定 PnL 列を持つ ScreeningBacktestRun レコードのモックを作る */
+function makeRunRecord(pnls: number[]) {
     return {
-        runId: 'run-1',
-        status: 'completed' as const,
-        setupCount: pnls.length,
-        winCount: pnls.filter((p) => p > 0).length,
-        lossCount: pnls.filter((p) => p < 0).length,
-        timeoutCount: 0,
-        winRate: pnls.length > 0 ? pnls.filter((p) => p > 0).length / pnls.length : 0,
-        profitFactor: null,
-        totalProfit: pnls.filter((p) => p > 0).reduce((s, p) => s + p, 0),
-        totalLoss: Math.abs(pnls.filter((p) => p < 0).reduce((s, p) => s + p, 0)),
-        averagePnL: pnls.reduce((s, p) => s + p, 0) / Math.max(pnls.length, 1),
-        expectancy: 0,
-        maxDrawdown: null,
-        events: pnls.map((pnl, i) => ({
+        id: 'sbt-1',
+        hypothesisId: 'hyp-mc-1',
+        symbol: 'XAUUSD',
+        timeframe: '15m',
+        periodStart: new Date('2025-01-01'),
+        periodEnd: new Date('2025-12-31'),
+        notePayload: {} as unknown,
+        summary: { pf: 1.0, winRate: 0.5, tradeCount: pnls.length },
+        trades: pnls.map((pnl, i) => ({
             entryTime: new Date(2026, 0, i + 1).toISOString(),
             entryPrice: 2000,
-            matchScore: 0.8,
             exitTime: new Date(2026, 0, i + 2).toISOString(),
             exitPrice: 2000 + pnl,
-            outcome: (pnl > 0 ? 'win' : 'loss') as 'win' | 'loss',
+            side: 'long' as const,
             pnl,
-            holdingMinutes: 60,
+            outcome: (pnl > 0 ? 'win' : 'loss'),
         })),
+        equity: null,
+        engineVersion: 'analysis-engine/backtesting.py@0.6.5',
+        createdAt: new Date(),
     };
 }
 
@@ -122,50 +119,61 @@ describe('MonteCarloTool.execute', () => {
     const input = {
         kind: 'hypothesis' as const,
         hypothesis: makeHypothesis(),
-        tradeNoteId: 'note-1',
         period: { start: '2025-01-01', end: '2025-12-31' },
-        backtestRunId: 'run-1',
+        screeningBacktestRunId: 'sbt-1',
     };
 
-    it('backtestRunId 未指定なら success=false', async () => {
+    function makeRepo(pnls: number[] | null) {
+        return {
+            findById: jest.fn().mockResolvedValue(pnls === null ? null : makeRunRecord(pnls)),
+            create: jest.fn(),
+            findByHypothesis: jest.fn(),
+        };
+    }
+
+    it('screeningBacktestRunId 未指定なら success=false', async () => {
         const tool = new MonteCarloTool();
-        const res = await tool.execute({ ...input, backtestRunId: undefined });
+        const res = await tool.execute({ ...input, screeningBacktestRunId: '' });
         expect(res.success).toBe(false);
         expect(res.passed).toBe(false);
-        expect(res.error).toContain('backtestRunId');
+        expect(res.error).toContain('screeningBacktestRunId');
     });
 
-    it('BT 結果が null なら success=false', async () => {
-        const backtest = { getResult: jest.fn().mockResolvedValue(null) };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const tool = new MonteCarloTool(backtest as any);
+    it('ScreeningBacktestRun が見つからなければ success=false', async () => {
+        const repo = makeRepo(null);
+        const tool = new MonteCarloTool(
+            repo,
+        );
         const res = await tool.execute(input);
         expect(res.success).toBe(false);
+        expect(res.error).toContain('見つからない');
     });
 
     it('トレード数不足なら passed=false / reason=insufficient_trades', async () => {
-        const backtest = {
-            getResult: jest.fn().mockResolvedValue(makeSummary([10, -5, 3])),
-        };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const tool = new MonteCarloTool(backtest as any, {
-            rng: makeSeededRng(1),
-            simulationCount: 100,
-        });
+        const repo = makeRepo([10, -5, 3]);
+        const tool = new MonteCarloTool(
+            repo,
+            {
+                rng: makeSeededRng(1),
+                simulationCount: 100,
+            },
+        );
         const res = await tool.execute(input);
         expect(res.success).toBe(true);
         expect(res.passed).toBe(false);
         expect(res.metrics.reason).toBe('insufficient_trades');
     });
 
-    it('全トレードが正の PnL なら passed=true（下側5%も正）', async () => {
-        const pnls = Array.from({ length: 30 }, () => 5); // 全部 +5
-        const backtest = { getResult: jest.fn().mockResolvedValue(makeSummary(pnls)) };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const tool = new MonteCarloTool(backtest as any, {
-            rng: makeSeededRng(7),
-            simulationCount: 200,
-        });
+    it('全トレードが正の PnL なら passed=true(下側5%も正)', async () => {
+        const pnls = Array.from({ length: 30 }, () => 5);
+        const repo = makeRepo(pnls);
+        const tool = new MonteCarloTool(
+            repo,
+            {
+                rng: makeSeededRng(7),
+                simulationCount: 200,
+            },
+        );
         const res = await tool.execute(input);
         expect(res.success).toBe(true);
         expect(res.passed).toBe(true);
@@ -174,12 +182,14 @@ describe('MonteCarloTool.execute', () => {
 
     it('全トレードが負の PnL なら passed=false', async () => {
         const pnls = Array.from({ length: 30 }, () => -3);
-        const backtest = { getResult: jest.fn().mockResolvedValue(makeSummary(pnls)) };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const tool = new MonteCarloTool(backtest as any, {
-            rng: makeSeededRng(7),
-            simulationCount: 200,
-        });
+        const repo = makeRepo(pnls);
+        const tool = new MonteCarloTool(
+            repo,
+            {
+                rng: makeSeededRng(7),
+                simulationCount: 200,
+            },
+        );
         const res = await tool.execute(input);
         expect(res.passed).toBe(false);
         expect(res.metrics.p5FinalPnl).toBeLessThan(0);
@@ -187,13 +197,15 @@ describe('MonteCarloTool.execute', () => {
 
     it('metrics に tradeCount / simulationCount / p5 / p95 が入る', async () => {
         const pnls = [10, -5, 8, -3, 6, 12, -7, 2, 4, -1, 9, -2, 5, 7, -4, 11, -6, 3, 8, -3];
-        const pnls30 = [...pnls, ...pnls.slice(0, 10)]; // 30個
-        const backtest = { getResult: jest.fn().mockResolvedValue(makeSummary(pnls30)) };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const tool = new MonteCarloTool(backtest as any, {
-            rng: makeSeededRng(42),
-            simulationCount: 500,
-        });
+        const pnls30 = [...pnls, ...pnls.slice(0, 10)];
+        const repo = makeRepo(pnls30);
+        const tool = new MonteCarloTool(
+            repo,
+            {
+                rng: makeSeededRng(42),
+                simulationCount: 500,
+            },
+        );
         const res = await tool.execute(input);
         expect(res.success).toBe(true);
         expect(res.metrics.tradeCount).toBe(30);

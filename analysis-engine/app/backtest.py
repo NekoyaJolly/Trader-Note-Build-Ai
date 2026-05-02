@@ -150,9 +150,10 @@ def _build_strategy_class(payload: ScreeningBacktestNotePayload) -> type[Strateg
     direction:
       - long  → buy
       - short → sell (sell に SL/TP を渡す)
-      - either → 段階 1 は long にフォールバック
+      - either → 段階 1 では未対応 (run_screening_backtest 側で事前に弾く)。
+                  二重ガードとして next() でも何もしない。
 
-    maxHoldingBars: 指定時はバー数で強制決済。
+    maxHoldingBars: 指定時はバー数で強制決済(outcome='timeout' として記録)。
     """
 
     sl_spec = payload.stopLoss
@@ -189,7 +190,13 @@ def _build_strategy_class(payload: ScreeningBacktestNotePayload) -> type[Strateg
             self._entry_bar: Optional[int] = None
 
         def next(self) -> None:
-            # maxHoldingBars 監視
+            # `either` は段階 1 では未対応 (Copilot レビュー指摘 (3))。
+            # run_screening_backtest 側で事前に弾かれている前提だが、二重ガード。
+            if self._payload_direction == "either":
+                return
+
+            # maxHoldingBars 監視 — 強制クローズの理由は trades 抽出側で
+            # `ExitBar - EntryBar` 差分から判定し outcome='timeout' に分類する。
             if (
                 self.position
                 and self._max_holding_bars is not None
@@ -217,17 +224,13 @@ def _build_strategy_class(payload: ScreeningBacktestNotePayload) -> type[Strateg
             if tp_distance is None or tp_distance <= 0:
                 return
 
-            effective_direction = (
-                "long" if self._payload_direction == "either" else self._payload_direction
-            )
-
-            if effective_direction == "long":
+            if self._payload_direction == "long":
                 sl = entry_price - sl_distance
                 tp = entry_price + tp_distance
                 if sl < entry_price < tp:
                     self.buy(sl=sl, tp=tp)
                     self._entry_bar = len(self.data) - 1
-            else:  # short
+            elif self._payload_direction == "short":
                 sl = entry_price + sl_distance
                 tp = entry_price - tp_distance
                 if tp < entry_price < sl:
@@ -299,11 +302,31 @@ def _summarize_stats(stats) -> ScreeningBacktestSummary:
     )
 
 
-def _extract_trades(stats, max_holding_bars: Optional[int]) -> List[ScreeningBacktestTrade]:
-    """stats._trades (DataFrame) を ScreeningBacktestTrade のリストに変換する。"""
+def _extract_trades(
+    stats,
+    max_holding_bars: Optional[int],
+) -> List[ScreeningBacktestTrade]:
+    """stats._trades (DataFrame) を ScreeningBacktestTrade のリストに変換する。
+
+    outcome の判定 (Copilot 指摘 (4) への対応):
+      - SL/TP に到達せず、maxHoldingBars 経過で強制クローズされたものを `timeout` とする。
+        判定根拠は `ExitBar - EntryBar >= maxHoldingBars`(EntryBar/ExitBar は backtesting.py
+        が trades DataFrame に出力するバーインデックス)。
+      - finalize_trades=True で BT 末端の未決済を強制クローズしたケースも `timeout` 扱い。
+        backtesting.py は最終バーを ExitBar に入れるので、保有期間が長く maxHoldingBars に
+        満たなくても「BT 末まで残ったが未約定」は実質的に時間切れと同義。
+      - 上記以外は PnL 符号で win/loss を決める。
+    """
     trades_df = getattr(stats, "_trades", None)
     if trades_df is None or trades_df.empty:
         return []
+
+    final_bar_index: Optional[int] = None
+    if hasattr(stats, "_equity_curve") and stats._equity_curve is not None:
+        # equity_curve の長さ - 1 が最終バーインデックス
+        ec_len = len(stats._equity_curve)
+        if ec_len > 0:
+            final_bar_index = ec_len - 1
 
     out: List[ScreeningBacktestTrade] = []
     for row in trades_df.to_dict("records"):
@@ -311,17 +334,13 @@ def _extract_trades(stats, max_holding_bars: Optional[int]) -> List[ScreeningBac
         side = "long" if size > 0 else "short"
         pnl = float(row.get("PnL", 0.0))
 
-        bars_held = int(row.get("Duration", 0).days) if hasattr(row.get("Duration", 0), "days") else 0
-        # backtesting.py の Duration は timedelta。バー数換算が難しいため、
-        # maxHoldingBars に到達したかは「PnL 0 近傍 + tag」で粗く判定する代わりに、
-        # 段階 1 では「win/loss/timeout」を pnl 符号で素朴に決める (timeout は強制 close 時の
-        # PnL=0 近傍 を仮置きで分類)。
-        if pnl > 0:
-            outcome = "win"
-        elif pnl < 0:
-            outcome = "loss"
-        else:
-            outcome = "timeout"
+        outcome = _classify_outcome(
+            pnl=pnl,
+            entry_bar=row.get("EntryBar"),
+            exit_bar=row.get("ExitBar"),
+            max_holding_bars=max_holding_bars,
+            final_bar_index=final_bar_index,
+        )
 
         entry_time = row.get("EntryTime")
         exit_time = row.get("ExitTime")
@@ -338,6 +357,43 @@ def _extract_trades(stats, max_holding_bars: Optional[int]) -> List[ScreeningBac
             )
         )
     return out
+
+
+def _classify_outcome(
+    pnl: float,
+    entry_bar,
+    exit_bar,
+    max_holding_bars: Optional[int],
+    final_bar_index: Optional[int],
+) -> str:
+    """個別トレードの outcome を判定する (Copilot 指摘 (4))。
+
+    優先順位:
+      1. EntryBar/ExitBar から保有バー数を計算できる場合:
+         - `held >= max_holding_bars` → timeout
+         - `exit_bar == final_bar_index` (BT 末で finalize_trades により強制 close) → timeout
+      2. 上記が判定不能なら PnL 符号で win/loss を決定する。
+         pnl == 0 のケースは loss 寄りに分類しない (timeout フォールバック)。
+    """
+    try:
+        eb = int(entry_bar) if entry_bar is not None else None
+        xb = int(exit_bar) if exit_bar is not None else None
+    except (TypeError, ValueError):
+        eb = None
+        xb = None
+
+    if eb is not None and xb is not None:
+        held = xb - eb
+        if max_holding_bars is not None and held >= max_holding_bars:
+            return "timeout"
+        if final_bar_index is not None and xb >= final_bar_index:
+            return "timeout"
+
+    if pnl > 0:
+        return "win"
+    if pnl < 0:
+        return "loss"
+    return "timeout"
 
 
 def _ensure_utc(ts) -> datetime:
@@ -365,6 +421,30 @@ def _describe_unsupported_conditions(
     return out
 
 
+def _empty_response(
+    note_payload: ScreeningBacktestNotePayload,
+    extra_unsupported: Optional[List[str]] = None,
+) -> ScreeningBacktestResponse:
+    """0 トレードの結果を返す共通ヘルパー。"""
+    unsupported = _describe_unsupported_conditions(note_payload.conditions)
+    if extra_unsupported:
+        unsupported.extend(extra_unsupported)
+    return ScreeningBacktestResponse(
+        summary=ScreeningBacktestSummary(
+            pf=0.0,
+            winRate=0.0,
+            tradeCount=0,
+            maxDD=None,
+            sharpe=None,
+            returnPct=None,
+        ),
+        trades=[],
+        equity=None,
+        engineVersion=ENGINE_VERSION,
+        unsupportedConditions=unsupported,
+    )
+
+
 # ---------------------------------------------------------------
 # エンドポイントから呼ぶ本体
 # ---------------------------------------------------------------
@@ -378,24 +458,26 @@ def run_screening_backtest(
 
     OHLCV を DB から読み、Strategy クラスを動的生成し、backtesting.py で BT を走らせる。
     結果サマリー / トレード一覧 / equity を返す。
+
+    `expectedDirection='either'` は段階 1 では未対応 (Copilot 指摘 (3))。
+    long/short 両側を試すと screening の判定基準が体系的にバイアスを受けるため、
+    明示的に 0 トレード結果を返し `unsupportedConditions` で理由を伝える。
+    両方向 BT は段階 4 範囲。
     """
+    # (3) `either` direction は未対応として明示的に弾く
+    if req.notePayload.direction == "either":
+        return _empty_response(
+            req.notePayload,
+            extra_unsupported=[
+                "expectedDirection='either' は段階 1 では未対応 "
+                "(long/short 両方向 BT は段階 4 範囲)"
+            ],
+        )
+
     df = _load_ohlcv(engine, req.symbol, req.timeframe, req.startDate, req.endDate)
     if df.empty or len(df) < 30:
         # ATR(14) が安定するまでに最低でも 30 本程度は必要
-        return ScreeningBacktestResponse(
-            summary=ScreeningBacktestSummary(
-                pf=0.0,
-                winRate=0.0,
-                tradeCount=0,
-                maxDD=None,
-                sharpe=None,
-                returnPct=None,
-            ),
-            trades=[],
-            equity=None,
-            engineVersion=ENGINE_VERSION,
-            unsupportedConditions=_describe_unsupported_conditions(req.notePayload.conditions),
-        )
+        return _empty_response(req.notePayload)
 
     StrategyClass = _build_strategy_class(req.notePayload)
     bt_kwargs = _map_config_to_backtesting_kwargs(req.config.model_dump())
