@@ -11,6 +11,7 @@ import { loadPromptWithGlobal } from '../prompts/loader';
 import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
 import { modelFor } from '../../config';
+import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import { extractJson } from './llmJsonExtract';
 import { recordAgentUsage } from './scoringRecorder';
 
@@ -27,7 +28,23 @@ async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<T | null
   return null;
 }
 
-function parseStrategyArray(content: string): StrategyDSL[] {
+/**
+ * 4a.PDCA: Zod 失敗時の最初の `path → message` を 1 行にまとめる (観測ログ用)。
+ */
+function summarizeZodIssues(error: import('zod').ZodError): string {
+  const top = error.issues.slice(0, 3).map((iss) => {
+    const path = iss.path.length > 0 ? iss.path.join('.') : '(root)';
+    return `${path}: ${iss.message}`;
+  });
+  const more = error.issues.length > 3 ? ` …+${error.issues.length - 3} more` : '';
+  return top.join(' | ') + more;
+}
+
+function parseStrategyArray(content: string): {
+  parsed: StrategyDSL[];
+  /** 4a.PDCA: 各 item の Zod 失敗内訳 (parsed と等しい長さなら全件成功) */
+  zodFailures: string[];
+} {
   const extracted = extractJson(content);
   if (!extracted.ok) {
     throw new Error(`LLM 応答を JSON として解釈できませんでした: ${extracted.error}`);
@@ -37,11 +54,16 @@ function parseStrategyArray(content: string): StrategyDSL[] {
     throw new Error('応答は JSON 配列である必要があります');
   }
   const out: StrategyDSL[] = [];
+  const zodFailures: string[] = [];
   for (const item of data) {
     const r = StrategyDSLSchema.safeParse(item);
-    if (r.success) out.push(r.data);
+    if (r.success) {
+      out.push(r.data);
+    } else {
+      zodFailures.push(summarizeZodIssues(r.error));
+    }
   }
-  return out;
+  return { parsed: out, zodFailures };
 }
 
 export class MutationAgent {
@@ -86,17 +108,31 @@ export class MutationAgent {
           { role: 'system', content: system },
           { role: 'user', content: user },
         ] as ChatMessage[],
-        { temperature: 0.4, maxTokens: 4096 },
+        { temperature: 0.4, maxTokens: AI_MAX_TOKENS.HEAVY },
       ),
     );
     if (!res?.content) {
       // Critical-3 PR-2: LLM 失敗を score=0 で記録
+      // 4a.PDCA: silent-empty を観測可能にする (LLM 応答自体が無い / 空のケース)
+      console.warn(
+        `[MutationAgent] generateMutants: LLM 応答に content が無い (res=${res ? 'has-no-content' : 'null'}) — mutants=0`,
+      );
       await recordAgentUsage('mutation', { count }, null);
       return [];
     }
     try {
-      const parsed = parseStrategyArray(res.content).slice(0, count);
-      const out = parsed.map((p) => ({
+      const { parsed, zodFailures } = parseStrategyArray(res.content);
+      if (parsed.length < count) {
+        // 4a.PDCA: 部分成功 / 全失敗を Zod 失敗内訳付きで観測可能に
+        const preview = res.content.slice(0, 1500).replace(/\s+/g, ' ');
+        const failSummary = zodFailures.slice(0, 3).join(' || ');
+        console.warn(
+          `[MutationAgent] generateMutants: parsed=${parsed.length}/${count} (Zod 不適合 ${zodFailures.length} 件)。` +
+            (failSummary ? ` 不適合内訳: ${failSummary}` : '') +
+            ` 応答先頭: ${preview}`,
+        );
+      }
+      const out = parsed.slice(0, count).map((p) => ({
         ...p,
         id: p.id && p.id.length > 0 ? p.id : `mut-${randomUUID()}`,
         generation: Math.max(...elites.map((e) => e.generation), 0) + 1,
@@ -104,7 +140,12 @@ export class MutationAgent {
       }));
       await recordAgentUsage('mutation', { count }, out);
       return out;
-    } catch {
+    } catch (err) {
+      // 4a.PDCA: 旧コードは catch を完全握り潰しで「LLM が JSON を返さなかった」情報が消えていた
+      const preview = (res.content ?? '').slice(0, 1500).replace(/\s+/g, ' ');
+      console.warn(
+        `[MutationAgent] generateMutants: 応答 parse 失敗 (${err instanceof Error ? err.message : String(err)}) — mutants=0。応答先頭: ${preview}`,
+      );
       await recordAgentUsage('mutation', { count }, null);
       return [];
     }
@@ -123,15 +164,28 @@ export class MutationAgent {
           { role: 'system', content: system },
           { role: 'user', content: user },
         ] as ChatMessage[],
-        { temperature: 0.8, maxTokens: 4096 },
+        { temperature: 0.8, maxTokens: AI_MAX_TOKENS.HEAVY },
       ),
     );
     if (!res?.content) {
+      console.warn(
+        `[MutationAgent] generateDiverse: LLM 応答に content が無い (res=${res ? 'has-no-content' : 'null'}) — diverse=0`,
+      );
       await recordAgentUsage('mutation', { count }, null);
       return [];
     }
     try {
-      const out = parseStrategyArray(res.content)
+      const { parsed, zodFailures } = parseStrategyArray(res.content);
+      if (parsed.length < count) {
+        const preview = res.content.slice(0, 1500).replace(/\s+/g, ' ');
+        const failSummary = zodFailures.slice(0, 3).join(' || ');
+        console.warn(
+          `[MutationAgent] generateDiverse: parsed=${parsed.length}/${count} (Zod 不適合 ${zodFailures.length} 件)。` +
+            (failSummary ? ` 不適合内訳: ${failSummary}` : '') +
+            ` 応答先頭: ${preview}`,
+        );
+      }
+      const out = parsed
         .slice(0, count)
         .map((p) => ({
           ...p,
@@ -146,7 +200,11 @@ export class MutationAgent {
         }));
       await recordAgentUsage('mutation', { count }, out);
       return out;
-    } catch {
+    } catch (err) {
+      const preview = (res.content ?? '').slice(0, 1500).replace(/\s+/g, ' ');
+      console.warn(
+        `[MutationAgent] generateDiverse: 応答 parse 失敗 (${err instanceof Error ? err.message : String(err)}) — diverse=0。応答先頭: ${preview}`,
+      );
       await recordAgentUsage('mutation', { count }, null);
       return [];
     }

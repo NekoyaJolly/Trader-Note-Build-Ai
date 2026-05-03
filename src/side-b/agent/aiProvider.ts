@@ -102,6 +102,18 @@ export class AIProvider {
     }
 
     /**
+     * OpenAI の **直エンドポイント** に対して `max_completion_tokens` を使うべきか判定する。
+     *
+     * OpenAI の o 系 / gpt-5 系は `max_tokens` を拒否するため、`api.openai.com` 直の時だけ
+     * 新パラメータ名に切り替える。OpenRouter (`openrouter.ai`) や Gemini OpenAI 互換
+     * (`generativelanguage.googleapis.com`) は引き続き `max_tokens` を受け付ける。
+     */
+    private usesOpenAINewParam(): boolean {
+        // 大文字小文字を吸収しつつ "api.openai.com" を含むかで判定
+        return this.baseURL.toLowerCase().includes('api.openai.com');
+    }
+
+    /**
      * MCPツール定義 → OpenAI function calling 形式に変換
      */
     convertToolsToOpenAIFormat(mcpTools: McpToolDefinition[]): OpenAIToolDef[] {
@@ -138,8 +150,12 @@ export class AIProvider {
         };
 
         // max_tokens は明示指定された時のみ付ける(プロバイダー既定に任せたい場合は省略可)
+        // OpenAI の o 系 / gpt-5 系は `max_tokens` を拒否し `max_completion_tokens` を要求するため、
+        // OpenAI 直エンドポイントの時だけパラメータ名を切り替える。
+        // OpenRouter / Gemini OpenAI 互換 / その他は従来通り `max_tokens`。
         if (options.maxTokens !== undefined) {
-            body.max_tokens = options.maxTokens;
+            const tokenParam = this.usesOpenAINewParam() ? 'max_completion_tokens' : 'max_tokens';
+            body[tokenParam] = options.maxTokens;
         }
 
         // ツール定義がある場合のみ追加

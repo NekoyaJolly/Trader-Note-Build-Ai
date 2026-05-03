@@ -18,6 +18,7 @@
 
 import { McpClientManager, type McpToolResult } from './mcpClient';
 import { AIProvider, type ChatMessage } from './aiProvider';
+import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 
 // ===========================================
 // 型定義
@@ -153,7 +154,7 @@ export class AgentLoop {
             const aiResponse = await this.aiProvider.chat(messages, {
                 tools: mcpTools,
                 temperature: this.config.temperature,
-                maxTokens: 4096,
+                maxTokens: AI_MAX_TOKENS.MEDIUM,
             });
 
             totalTokenUsage += aiResponse.tokenUsage;
