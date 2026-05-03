@@ -310,4 +310,14 @@ describe('parameter type guards (4a-parameters)', () => {
     );
     expect(isSimpleParameterObject(0.5 as never)).toBe(false);
   });
+
+  it('isSimpleParameterObject は value が raw scalar 以外の時は false (型回避経由の不正値を防ぐ)', () => {
+    // 通常 Zod が弾くが、`as never` 等で型を回避した場合の防衛線
+    expect(isSimpleParameterObject({ a: () => 42 } as never)).toBe(false);
+    expect(isSimpleParameterObject({ a: { nested: 1 } } as never)).toBe(false);
+    expect(isSimpleParameterObject({ a: [1, 2, 3] } as never)).toBe(false);
+    expect(isSimpleParameterObject({ a: undefined } as never)).toBe(false);
+    // 全 value が raw scalar なら true
+    expect(isSimpleParameterObject({ a: 1, b: 'x', c: true, d: null })).toBe(true);
+  });
 });

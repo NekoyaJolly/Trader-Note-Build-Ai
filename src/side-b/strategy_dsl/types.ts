@@ -96,13 +96,27 @@ export function isRawParameterValue(v: ParameterField): v is number | string | b
  * raw scalar でも structured 定義でもない、自由形のオブジェクト。
  * 例: `{ min: 0.5, max: 1.0 }` (= range 候補だが kind:'range' タグが無い)。
  * consumer 側では warning + 単一既定値扱いにする (= grid 展開しない)。
+ *
+ * Critical-4 4a-parameters: 戻り型を `Record<string, raw scalar>` で narrow するため、
+ * 全 value が raw scalar (number / string / boolean / null) であることを実値レベルで
+ * 検証する。Zod の SimpleParameterObjectSchema が同条件を強制しているので通常パスでは
+ * 必ず通るが、`as never` 等の型回避経由で値が混入したケースに対して honest なガードを
+ * 提供するため。
  */
-export function isSimpleParameterObject(v: ParameterField): v is Record<string, number | string | boolean | null> {
-  return (
-    typeof v === 'object' &&
-    v !== null &&
-    !Array.isArray(v) &&
-    !isLegacyParameterDef(v) &&
-    !isParameterRangeV2(v)
-  );
+export function isSimpleParameterObject(
+  v: ParameterField,
+): v is Record<string, number | string | boolean | null> {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  if (isLegacyParameterDef(v) || isParameterRangeV2(v)) return false;
+  for (const value of Object.values(v as Record<string, unknown>)) {
+    if (
+      value !== null &&
+      typeof value !== 'number' &&
+      typeof value !== 'string' &&
+      typeof value !== 'boolean'
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
