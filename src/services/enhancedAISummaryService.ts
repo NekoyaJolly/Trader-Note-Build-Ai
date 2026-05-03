@@ -12,7 +12,7 @@
  * 参照: 技術スタック選定シート ⑦
  */
 
-import { config } from '../config';
+import { config, modelFor } from '../config';
 import type {
   FeatureSnapshot} from './indicators/indicatorService';
 import {
@@ -67,7 +67,7 @@ export class EnhancedAISummaryService {
   constructor() {
     this.baseService = new AISummaryService();
     this.apiKey = config.ai.apiKey;
-    this.model = config.ai.model;
+    this.model = modelFor('ai_summary_enhanced');
     this.baseURL = config.ai.baseURL || 'https://api.openai.com/v1';
     this.maxRetries = 3;
   }

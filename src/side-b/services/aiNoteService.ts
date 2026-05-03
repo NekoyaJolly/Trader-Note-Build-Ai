@@ -41,15 +41,15 @@ import * as aiNoteRepository from '../repositories/aiNoteRepository';
 import { serializeLensSnapshot, type LensFeatureSnapshot } from '../lenses';
 import { edgeLedger } from '../ledger';
 import { materializationService } from '../bridge';
-import { config } from '../../config';
+import { modelFor } from '../../config';
 
 // ===== 設定 =====
 
-// 使用するAIモデル（config.ai.model = env AI_MODEL、既定 Gemini）
+// 使用するAIモデル ラベル (`ai_note` キー、env 上書き可: AI_MODEL_AI_NOTE / AI_MODEL_OVERRIDE_ALL)。
 // ノートに保存する aiModel ラベル用。aiNoteService 自体は LLM を直接
 // 呼ばないが、どのモデルで周辺処理が動いているかを記録する目印となる。
 function currentAIModel(): string {
-  return config.ai.model;
+  return modelFor('ai_note');
 }
 
 // 類似度の閾値（この値以上なら類似パターンとして登録）

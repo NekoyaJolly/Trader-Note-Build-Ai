@@ -1,5 +1,5 @@
 import type { Trade } from '@prisma/client';
-import { config } from '../../config';
+import { config, modelFor } from '../../config';
 import type { MarketContext } from '../note-generator/featureExtractor';
 
 export type InferredMode = 'trend' | 'meanReversion' | 'other';
@@ -33,7 +33,7 @@ export class DecisionInferenceService {
 
   constructor() {
     this.apiKey = config.ai.apiKey;
-    this.model = config.ai.model;
+    this.model = modelFor('decision_inference');
     this.baseURL = config.ai.baseURL || 'https://api.openai.com/v1';
   }
 
