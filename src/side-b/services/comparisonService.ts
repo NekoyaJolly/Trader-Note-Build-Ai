@@ -54,6 +54,17 @@ export interface ComparisonResult {
   };
   /** 同日・同シンボルで同方向のトレード一致率 */
   alignmentRate: number;
+  /**
+   * 人間ノートの BT 統計データが取得可能か。
+   *
+   * Critical-4 段階 3b で旧 BacktestRun テーブルが廃止された影響で、現状は常に false。
+   * `human` フィールドは `calculateStats([])` の戻り値 (totalTrades=0 等) が入るが、
+   * 呼び出し側 (summarySchedulerService 等) は本フラグを見て「人間データなしとして扱う」
+   * = DB 永続化で 0 を誤記録しない / LLM 推奨で "人間データなし" として解釈する。
+   *
+   * 段階 4 で analysis-engine 経由の人間ノート BT が実装され次第 true を返すようになる。
+   */
+  humanDataAvailable: boolean;
 }
 
 /** 時系列パフォーマンスデータ */
@@ -209,7 +220,7 @@ export async function getComparisonAnalysis(
 ): Promise<ComparisonResult> {
   const { start, end, label } = getPeriodDates(period);
 
-  // 人間のTradeNoteを取得（バックテスト結果からPnLを参照）
+  // 人間のTradeNoteを取得 (Critical-4 段階 3b: 旧 BT 結果に依存しない)
   const humanNotesWhere: Prisma.TradeNoteWhereInput = {
     status: 'active',
     createdAt: { gte: start, lte: end },
@@ -218,13 +229,6 @@ export async function getComparisonAnalysis(
 
   const humanNotes = await prisma.tradeNote.findMany({
     where: humanNotesWhere,
-    include: {
-      backtestRuns: {
-        include: { result: true },
-        orderBy: { createdAt: 'desc' },
-        take: 1,
-      },
-    },
     orderBy: { createdAt: 'desc' },
   });
 
@@ -239,17 +243,11 @@ export async function getComparisonAnalysis(
     orderBy: { date: 'desc' },
   });
 
-  // 人間のトレードを統計用に変換（バックテスト結果があるものだけ）
-  const humanTrades = humanNotes
-    .filter(n => n.backtestRuns[0]?.result)
-    .map(n => {
-      const result = n.backtestRuns[0].result!;
-      const pnlPips = result.averagePnL.toNumber();
-      return {
-        outcome: determineOutcome(pnlPips),
-        pnlPips,
-      };
-    });
+  // 人間のトレードを統計用に変換
+  // Critical-4 段階 3b: 旧 BT (BacktestRun) を廃止したため、人間ノートの PnL 統計は
+  // 現状取得できない。段階 4 で新経路 (analysis-engine 経由 ScreeningBacktestRun) から
+  // 人間ノートにも BT 結果を紐付け可能になった時点で再構築予定。
+  const humanTrades: Array<{ outcome: string; pnlPips: number }> = [];
 
   // AIのトレードを統計用に変換
   const aiTrades = aiNotes.map(n => ({
@@ -322,6 +320,8 @@ export async function getComparisonAnalysis(
       totalPnLDiff: Math.round(totalPnLDiff * 10) / 10,
       winner,
     },
+    // Critical-4 段階 3b: 旧 BT 廃止により人間ノートの BT 統計は取得不能 (humanTrades は常に空)
+    humanDataAvailable: false,
     alignmentRate,
   };
 }
@@ -343,13 +343,6 @@ export async function getTimeSeriesData(
       createdAt: { gte: start, lte: end },
       ...(symbol && { symbol }),
     },
-    include: {
-      backtestRuns: {
-        include: { result: true },
-        orderBy: { createdAt: 'desc' },
-        take: 1,
-      },
-    },
     orderBy: { createdAt: 'asc' },
   });
 
@@ -368,19 +361,12 @@ export async function getTimeSeriesData(
     aiTrades: Array<{ outcome: string; pnlPips: number }>;
   }>();
 
-  // 人間のデータを集計
+  // 人間のデータの日付エントリを初期化 (Critical-4 段階 3b: 旧 BT 廃止により
+  // PnL 統計は現状空、段階 4 で新経路から再構築予定)
   for (const note of humanNotes) {
     const dateKey = note.createdAt.toISOString().split('T')[0];
     if (!dateMap.has(dateKey)) {
       dateMap.set(dateKey, { humanTrades: [], aiTrades: [] });
-    }
-    
-    if (note.backtestRuns[0]?.result) {
-      const pnlPips = note.backtestRuns[0].result.averagePnL.toNumber();
-      dateMap.get(dateKey)!.humanTrades.push({
-        outcome: determineOutcome(pnlPips),
-        pnlPips,
-      });
     }
   }
 
@@ -448,13 +434,6 @@ export async function getComparisonDashboard(
       createdAt: { gte: start, lte: end },
       ...(symbol && { symbol }),
     },
-    include: {
-      backtestRuns: {
-        include: { result: true },
-        orderBy: { createdAt: 'desc' },
-        take: 1,
-      },
-    },
     orderBy: { createdAt: 'desc' },
     take: 5,
   });
@@ -469,8 +448,8 @@ export async function getComparisonDashboard(
   });
 
   const recentHuman = humanNotes.map(n => {
-    const result = n.backtestRuns[0]?.result;
-    const pnlPips = result?.averagePnL?.toNumber() ?? null;
+    // Critical-4 段階 3b: 旧 BT 廃止により pnlPips は null 固定。段階 4 で再構築予定
+    const pnlPips: number | null = null;
     return {
       id: n.id,
       date: n.createdAt.toISOString().split('T')[0],

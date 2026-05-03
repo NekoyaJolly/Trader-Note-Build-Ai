@@ -38,15 +38,6 @@ export type {
   FindNotificationsOptions,
 } from './notificationRepository';
 
-// === Backtest ===
-export { BacktestRepository, backtestRepository } from './backtestRepository';
-export type { 
-  CreateBacktestRunInput, 
-  CreateBacktestResultInput,
-  CreateBacktestEventInput,
-  BacktestRunWithDetails,
-} from './backtestRepository';
-
 // === Push通知 ===
 export { PushSubscriptionRepository, pushSubscriptionRepository } from './pushSubscriptionRepository';
 export type { 

@@ -39,10 +39,16 @@ export const GeneratedSummarySchema = z.object({
   period: SchedulerSummaryPeriodSchema,
   startDate: z.date(),
   endDate: z.date(),
+  /**
+   * Critical-4 段階 3b 以降: 人間ノートの BT 統計は取得不能 (`comparison.humanDataAvailable=false`)
+   * のため、各フィールドは null 許容。`null` は「データなし」を意味し、Push 通知 / LLM 解釈側で
+   * 「人間データなし」として扱う(0 pips の誤記録を防ぐ)。
+   * 段階 4 で analysis-engine 経由の人間ノート BT 実装後、再び数値が入る予定。
+   */
   humanStats: z.object({
-    totalTrades: z.number(),
-    winRate: z.number(),
-    totalPnL: z.number(),
+    totalTrades: z.number().nullable(),
+    winRate: z.number().nullable(),
+    totalPnL: z.number().nullable(),
     avgRR: z.number().nullable(),
     bestTrade: z.number().nullable(),
     worstTrade: z.number().nullable(),
@@ -56,8 +62,10 @@ export const GeneratedSummarySchema = z.object({
     worstTrade: z.number().nullable(),
   }),
   comparison: z.object({
-    winRateDiff: z.number(),
-    pnlDiff: z.number(),
+    /** 人間データ不在の場合は null (= 比較不可) */
+    winRateDiff: z.number().nullable(),
+    /** 人間データ不在の場合は null */
+    pnlDiff: z.number().nullable(),
     recommendation: z.string(),
   }),
   generatedAt: z.date(),
@@ -135,6 +143,36 @@ function getMonthlyPeriod(): { startDate: Date; endDate: Date } {
  */
 function mapPeriodToComparison(period: SchedulerSummaryPeriod): ComparisonPeriod {
   return period === 'weekly' ? 'week' : 'month';
+}
+
+/**
+ * AI 単独評価ベースの推奨コメント (Critical-4 段階 3b: 人間データ不在時用)
+ *
+ * 人間 vs AI 比較ができない期間 (旧 BT 廃止後 ~ 段階 4 完了まで) の代替コメント。
+ * 段階 4 で人間ノート BT が再構築されたら、本関数は不要になり generateRecommendation のみ
+ * を使う形に戻す予定。
+ */
+function generateAiOnlyRecommendation(
+  aiWinRate: number,
+  aiPnL: number,
+  aiTrades: number,
+): string {
+  if (aiTrades === 0) {
+    return '対象期間に AI トレードがありませんでした。人間トレードの BT 統計は段階 4 以降で再構築予定です。';
+  }
+  const parts: string[] = [];
+  parts.push(
+    `AI: 勝率 ${aiWinRate.toFixed(1)}% / 損益 ${aiPnL >= 0 ? '+' : ''}${aiPnL.toFixed(1)}pips / ${aiTrades} 件`,
+  );
+  if (aiWinRate >= 60 && aiPnL > 0) {
+    parts.push('AI のパフォーマンスは良好です。現在の戦略を継続してください。');
+  } else if (aiWinRate < 40 || aiPnL < 0) {
+    parts.push('AI のパフォーマンス改善の余地があります。エッジ仮説の見直しを推奨します。');
+  } else {
+    parts.push('AI のパフォーマンスは平均的です。');
+  }
+  parts.push('(人間ノートの BT 統計は Critical-4 段階 3b で旧 BT 経路が廃止されたため不在、段階 4 で再構築予定)');
+  return parts.join(' ');
 }
 
 /**
@@ -309,13 +347,46 @@ class SummarySchedulerService {
     const comparisonPeriod = mapPeriodToComparison(period);
     const comparison = await getComparisonAnalysis(comparisonPeriod);
 
-    // 推奨コメントを生成
-    const recommendation = generateRecommendation(
-      comparison.human.winRate,
-      comparison.ai.winRate,
-      comparison.human.totalPnL,
-      comparison.ai.totalPnL
-    );
+    // Critical-4 段階 3b: 旧 BT 廃止により `comparison.humanDataAvailable === false` の間は
+    //   - humanStats を null 群に倒し、Push/Daily Summary 永続化に「0 件 0 pips」を誤記録しない
+    //   - winRateDiff / pnlDiff も比較不可として null
+    //   - recommendation は AI 単独評価 + 人間データ不在の旨を明示
+    // 段階 4 で analysis-engine 経由の人間ノート BT が実装されたら humanDataAvailable=true に戻る。
+    const humanAvailable = comparison.humanDataAvailable;
+
+    const humanStats: GeneratedSummary['humanStats'] = humanAvailable
+      ? {
+          totalTrades: comparison.human.totalTrades,
+          winRate: comparison.human.winRate,
+          totalPnL: comparison.human.totalPnL,
+          avgRR: comparison.human.profitFactor, // PFをRRの代わりに使用
+          bestTrade: comparison.human.maxWin,
+          worstTrade: comparison.human.maxLoss,
+        }
+      : {
+          totalTrades: null,
+          winRate: null,
+          totalPnL: null,
+          avgRR: null,
+          bestTrade: null,
+          worstTrade: null,
+        };
+
+    const recommendation = humanAvailable
+      ? generateRecommendation(
+          comparison.human.winRate,
+          comparison.ai.winRate,
+          comparison.human.totalPnL,
+          comparison.ai.totalPnL,
+        )
+      : generateAiOnlyRecommendation(
+          comparison.ai.winRate,
+          comparison.ai.totalPnL,
+          comparison.ai.totalTrades,
+        );
+
+    const winRateDiff = humanAvailable ? comparison.human.winRate - comparison.ai.winRate : null;
+    const pnlDiff = humanAvailable ? comparison.human.totalPnL - comparison.ai.totalPnL : null;
 
     // サマリーを構築
     const summary: GeneratedSummary = {
@@ -323,14 +394,7 @@ class SummarySchedulerService {
       period,
       startDate,
       endDate,
-      humanStats: {
-        totalTrades: comparison.human.totalTrades,
-        winRate: comparison.human.winRate,
-        totalPnL: comparison.human.totalPnL,
-        avgRR: comparison.human.profitFactor, // PFをRRの代わりに使用
-        bestTrade: comparison.human.maxWin,
-        worstTrade: comparison.human.maxLoss,
-      },
+      humanStats,
       aiStats: {
         totalTrades: comparison.ai.totalTrades,
         winRate: comparison.ai.winRate,
@@ -340,8 +404,8 @@ class SummarySchedulerService {
         worstTrade: comparison.ai.maxLoss,
       },
       comparison: {
-        winRateDiff: comparison.human.winRate - comparison.ai.winRate,
-        pnlDiff: comparison.human.totalPnL - comparison.ai.totalPnL,
+        winRateDiff,
+        pnlDiff,
         recommendation,
       },
       generatedAt: new Date(),
@@ -358,6 +422,20 @@ class SummarySchedulerService {
    * AINoteSummaryモデルを使用
    */
   private async saveSummary(summary: GeneratedSummary): Promise<void> {
+    // Critical-4 段階 3b: humanStats が null 群 (旧 BT 廃止により取得不能) の場合、
+    // 0 として加算すると combinedWinRate が誤った値になるので、AI 単独で集計する。
+    const humanTrades = summary.humanStats.totalTrades ?? 0;
+    const humanWinRate = summary.humanStats.winRate ?? 0;
+    const humanAvailable = summary.humanStats.totalTrades !== null;
+
+    const totalTrades = humanTrades + summary.aiStats.totalTrades;
+    const combinedWinRate = humanAvailable
+      ? totalTrades > 0
+        ? (humanWinRate * humanTrades + summary.aiStats.winRate * summary.aiStats.totalTrades) /
+          totalTrades
+        : 0
+      : summary.aiStats.winRate; // 人間データ不在なら AI 勝率をそのまま使う
+
     await prisma.aINoteSummary.create({
       data: {
         period: summary.period,
@@ -366,12 +444,9 @@ class SummarySchedulerService {
         statistics: {
           humanStats: summary.humanStats,
           aiStats: summary.aiStats,
-          totalTrades: summary.humanStats.totalTrades + summary.aiStats.totalTrades,
-          combinedWinRate: (summary.humanStats.totalTrades + summary.aiStats.totalTrades) > 0
-            ? (summary.humanStats.winRate * summary.humanStats.totalTrades +
-               summary.aiStats.winRate * summary.aiStats.totalTrades) /
-              (summary.humanStats.totalTrades + summary.aiStats.totalTrades)
-            : 0,
+          totalTrades,
+          combinedWinRate,
+          humanDataAvailable: humanAvailable,
         },
         analysis: {
           comparison: summary.comparison,
