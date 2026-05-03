@@ -1,18 +1,40 @@
 /**
- * EvolutionLoop（モックで 1 世代）（Phase 5A）
+ * EvolutionLoop（モックで 1 世代）（Phase 5A / Critical-4 段階 4a.3）
  *
- * Phase 5A では EdgeLedger への自動登録は行わず、
- * 厳格条件を満たしたエリートは `report.promotionCandidates`
- * にメタとして残る（Phase 5B で Phase 4c へ橋渡しする前提）。
+ * Phase 5A では EdgeLedger への自動登録は行わない。
+ * 段階 4a.3: surrogate 厳格 3 条件を通った候補を analysis-engine 正式 BT で再検証し、
+ *   `formalBtPassed === true` のものだけ `promotionCandidates` に残る。
  */
 
 import { CrossoverAgent } from '../../agents/CrossoverAgent';
 import { MutationAgent } from '../../agents/MutationAgent';
 import { DiversityEnforcer } from '../../evolution/DiversityEnforcer';
-import { EvolutionLoop } from '../../evolution/EvolutionLoop';
+import { EvolutionLoop, type RunScreeningBacktestFn } from '../../evolution/EvolutionLoop';
 import { StrategyPopulation } from '../../evolution/StrategyPopulation';
 import { SurrogateFitnessSimulator } from '../../strategy_dsl/SurrogateFitnessSimulator';
 import { StrategyDSLSchema } from '../../strategy_dsl/schema';
+import type { AnalysisEngineScreeningBacktestResponse } from '../../../schemas/external/analysisEngine';
+
+function makeFormalBtResponse(
+  pf: number,
+  winRate: number,
+  tradeCount: number,
+): AnalysisEngineScreeningBacktestResponse {
+  return {
+    summary: {
+      pf,
+      winRate,
+      tradeCount,
+      maxDD: 0.05,
+      sharpe: 1.2,
+      returnPct: 0.1,
+    },
+    trades: [],
+    equity: null,
+    engineVersion: 'analysis-engine/backtesting.py@test',
+    unsupportedConditions: [],
+  };
+}
 
 describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
   it('空集団ならシード後にスコアが付き、レポートが返る（EdgeLedger は呼ばない）', async () => {
@@ -69,6 +91,10 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
     const crossoverAgent = new CrossoverAgent();
     jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
 
+    const runFormalBacktest: RunScreeningBacktestFn = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockResolvedValue(makeFormalBtResponse(2.0, 0.6, 30));
+
     const loop = new EvolutionLoop({
       population: new StrategyPopulation(undefined),
       adapter,
@@ -76,6 +102,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       crossoverAgent,
       enforcer: new DiversityEnforcer(),
       defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      runFormalBacktest,
     });
 
     const report = await loop.runOneGeneration('trending_with_pullback');
@@ -83,10 +110,12 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
     expect(report.eliteIds.length).toBeGreaterThanOrEqual(0);
     expect(report.scores).toBeDefined();
     expect(Array.isArray(report.promotionCandidates)).toBe(true);
-    // Phase 5A: promotionCandidates が報告されたら、メタに dslId と source='evolution' が入る
+    // 段階 4a.3: promotionCandidates に残るものは全て formalBtPassed=true
     for (const c of report.promotionCandidates) {
       expect(typeof c.dslId).toBe('string');
       expect(c.source).toBe('evolution');
+      expect(c.formalBtPassed).toBe(true);
+      expect(c.formalBtMetrics).not.toBeNull();
     }
   });
 
@@ -165,6 +194,10 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
     const population = new StrategyPopulation(undefined);
     population.add('breakout', dsl);
 
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockResolvedValue(makeFormalBtResponse(1.8, 0.55, 35));
+
     const loop = new EvolutionLoop({
       population,
       adapter,
@@ -172,10 +205,12 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       crossoverAgent,
       enforcer: new DiversityEnforcer(),
       defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      runFormalBacktest,
     });
 
     const report = await loop.runOneGeneration('breakout');
 
+    expect(runFormalBacktest).toHaveBeenCalledTimes(1);
     expect(report.promotionCandidates.length).toBeGreaterThanOrEqual(1);
     const cand = report.promotionCandidates.find((c) => c.dslId === 'loop-test-promote');
     expect(cand).toBeDefined();
@@ -184,5 +219,296 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
     expect(cand?.trainPf).toBeCloseTo(2.0);
     expect(cand?.validationPf).toBeCloseTo(1.6);
     expect(cand?.overfitScore).toBeCloseTo(0.15);
+    expect(cand?.formalBtPassed).toBe(true);
+    expect(cand?.formalBtMetrics).toEqual({ pf: 1.8, winRate: 0.55, tradeCount: 35 });
+    expect(cand?.formalBtFailureReason).toBeUndefined();
+  });
+
+  it('段階 4a.3: surrogate を通っても正式 BT が失敗したら昇格候補にならない', async () => {
+    const dsl = StrategyDSLSchema.parse({
+      id: 'loop-test-formal-fail',
+      generation: 0,
+      parentIds: [],
+      regimeTarget: 'breakout',
+      symbol: 'EURUSD',
+      timeframe: '1h',
+      entry: {
+        direction: 'long',
+        trigger: {
+          logic: 'AND',
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+        },
+      },
+      stopLoss: { type: 'fixed_pips', value: 30 },
+      takeProfit: { type: 'rr_ratio', value: 1.5 },
+      parameters: {},
+      metadata: {
+        createdAt: new Date().toISOString(),
+        createdBy: 'initial_random',
+        description: '正式BT失敗テスト',
+      },
+    });
+
+    const adapter = new SurrogateFitnessSimulator();
+    const makeSummary = (totalTrades: number, winRate: number, pf: number) => ({
+      totalTrades,
+      winningTrades: Math.round(totalTrades * winRate),
+      losingTrades: totalTrades - Math.round(totalTrades * winRate),
+      winRate,
+      netProfit: pf * 100,
+      netProfitRate: 0.1,
+      maxDrawdown: 30,
+      maxDrawdownRate: 0.03,
+      profitFactor: pf,
+      averageWin: 15,
+      averageLoss: -10,
+      riskRewardRatio: 1.5,
+      maxConsecutiveWins: 3,
+      maxConsecutiveLosses: 2,
+    });
+    jest.spyOn(adapter, 'evaluateFitness').mockResolvedValue({
+      dslId: 'loop-test-formal-fail',
+      period: { start: '2024-01-01', end: '2024-12-31' },
+      trainPf: 2.0,
+      validationPf: 1.6,
+      overfitScore: 0.15,
+      train: { summary: makeSummary(20, 0.6, 2.0), trades: [] },
+      validation: { summary: makeSummary(10, 0.6, 1.6), trades: [] },
+      execution: {
+        executionModel: 'legacy_zero_cost',
+        executionConfigHash: 'legacy-zero-cost',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'legacy_zero_cost',
+          dataSource: 'ctrader',
+          roundTripCostPips: 0,
+          roundTripCostAtrMult: 0,
+          totalCost: 0,
+        },
+      },
+    });
+
+    const mutationAgent = new MutationAgent();
+    jest.spyOn(mutationAgent, 'generateMutants').mockResolvedValue([]);
+    jest.spyOn(mutationAgent, 'generateDiverse').mockResolvedValue([]);
+    const crossoverAgent = new CrossoverAgent();
+    jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
+
+    const population = new StrategyPopulation(undefined);
+    population.add('breakout', dsl);
+
+    // analysis-engine が例外を投げるケース (HTTP エラー / timeout)
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockRejectedValue(new Error('analysis-engine unreachable'));
+
+    const loop = new EvolutionLoop({
+      population,
+      adapter,
+      mutationAgent,
+      crossoverAgent,
+      enforcer: new DiversityEnforcer(),
+      defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      runFormalBacktest,
+    });
+
+    const report = await loop.runOneGeneration('breakout');
+
+    expect(runFormalBacktest).toHaveBeenCalledTimes(1);
+    // surrogate を通っても正式 BT 失敗で promotionCandidates には残らない
+    expect(report.promotionCandidates).toHaveLength(0);
+    // ただし formalBtVerifiedCandidates には失敗理由付きで残る (運用ログ用)
+    expect(report.formalBtVerifiedCandidates).toHaveLength(1);
+    expect(report.formalBtVerifiedCandidates[0].formalBtPassed).toBe(false);
+    expect(report.formalBtVerifiedCandidates[0].formalBtFailureReason).toMatch(
+      /analysis-engine BT failed/,
+    );
+  });
+
+  it('段階 4a.3: 正式 BT の PF が下限未満なら昇格候補にならない', async () => {
+    const dsl = StrategyDSLSchema.parse({
+      id: 'loop-test-low-pf',
+      generation: 0,
+      parentIds: [],
+      regimeTarget: 'breakout',
+      symbol: 'EURUSD',
+      timeframe: '1h',
+      entry: {
+        direction: 'long',
+        trigger: {
+          logic: 'AND',
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+        },
+      },
+      stopLoss: { type: 'fixed_pips', value: 30 },
+      takeProfit: { type: 'rr_ratio', value: 1.5 },
+      parameters: {},
+      metadata: { createdAt: new Date().toISOString(), createdBy: 'initial_random' },
+    });
+
+    const adapter = new SurrogateFitnessSimulator();
+    const summary = (n: number, w: number, p: number) => ({
+      totalTrades: n,
+      winningTrades: Math.round(n * w),
+      losingTrades: n - Math.round(n * w),
+      winRate: w,
+      netProfit: p * 100,
+      netProfitRate: 0.1,
+      maxDrawdown: 30,
+      maxDrawdownRate: 0.03,
+      profitFactor: p,
+      averageWin: 15,
+      averageLoss: -10,
+      riskRewardRatio: 1.5,
+      maxConsecutiveWins: 3,
+      maxConsecutiveLosses: 2,
+    });
+    jest.spyOn(adapter, 'evaluateFitness').mockResolvedValue({
+      dslId: 'loop-test-low-pf',
+      period: { start: '2024-01-01', end: '2024-12-31' },
+      trainPf: 2.0,
+      validationPf: 1.6,
+      overfitScore: 0.15,
+      train: { summary: summary(20, 0.6, 2.0), trades: [] },
+      validation: { summary: summary(10, 0.6, 1.6), trades: [] },
+      execution: {
+        executionModel: 'legacy_zero_cost',
+        executionConfigHash: 'legacy-zero-cost',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'legacy_zero_cost',
+          dataSource: 'ctrader',
+          roundTripCostPips: 0,
+          roundTripCostAtrMult: 0,
+          totalCost: 0,
+        },
+      },
+    });
+
+    const mutationAgent = new MutationAgent();
+    jest.spyOn(mutationAgent, 'generateMutants').mockResolvedValue([]);
+    jest.spyOn(mutationAgent, 'generateDiverse').mockResolvedValue([]);
+    const crossoverAgent = new CrossoverAgent();
+    jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
+
+    const population = new StrategyPopulation(undefined);
+    population.add('breakout', dsl);
+
+    // 正式 BT は PF=0.8 (< FORMAL_BT_MIN_PF=1.0) を返す
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockResolvedValue(makeFormalBtResponse(0.8, 0.45, 30));
+
+    const loop = new EvolutionLoop({
+      population,
+      adapter,
+      mutationAgent,
+      crossoverAgent,
+      enforcer: new DiversityEnforcer(),
+      defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      runFormalBacktest,
+    });
+
+    const report = await loop.runOneGeneration('breakout');
+
+    expect(report.promotionCandidates).toHaveLength(0);
+  });
+
+  it('段階 4a.3: surrogate 候補数が top K を超える場合、上位 K 件のみ正式 BT に送る', async () => {
+    const dsls = Array.from({ length: 8 }, (_, i) =>
+      StrategyDSLSchema.parse({
+        id: `topk-${i}`,
+        generation: 0,
+        parentIds: [],
+        regimeTarget: 'breakout',
+        symbol: 'EURUSD',
+        timeframe: '1h',
+        entry: {
+          direction: 'long',
+          trigger: {
+            logic: 'AND',
+            conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: i }],
+          },
+        },
+        stopLoss: { type: 'fixed_pips', value: 30 },
+        takeProfit: { type: 'rr_ratio', value: 1.5 },
+        parameters: {},
+        metadata: { createdAt: new Date().toISOString(), createdBy: 'initial_random' },
+      }),
+    );
+
+    const summary = (pf: number) => ({
+      totalTrades: 20,
+      winningTrades: 12,
+      losingTrades: 8,
+      winRate: 0.6,
+      netProfit: 200,
+      netProfitRate: 0.1,
+      maxDrawdown: 30,
+      maxDrawdownRate: 0.03,
+      profitFactor: pf,
+      averageWin: 15,
+      averageLoss: -10,
+      riskRewardRatio: 1.5,
+      maxConsecutiveWins: 3,
+      maxConsecutiveLosses: 2,
+    });
+    const adapter = new SurrogateFitnessSimulator();
+    jest.spyOn(adapter, 'evaluateFitness').mockImplementation(async (s) => {
+      // 全戦略が surrogate 厳格条件を通過するように mock。validation PF を id 順で変える。
+      const idx = parseInt(s.id.replace('topk-', ''), 10);
+      const pf = 1.7 + idx * 0.05;
+      return {
+        dslId: s.id,
+        period: { start: '2024-01-01', end: '2024-12-31' },
+        trainPf: 2.0,
+        validationPf: pf,
+        overfitScore: 0.15,
+        train: { summary: summary(2.0), trades: [] },
+        validation: { summary: summary(pf), trades: [] },
+        execution: {
+          executionModel: 'legacy_zero_cost',
+          executionConfigHash: 'legacy-zero-cost',
+          dataSource: 'ctrader',
+          costSummary: {
+            model: 'legacy_zero_cost',
+            dataSource: 'ctrader',
+            roundTripCostPips: 0,
+            roundTripCostAtrMult: 0,
+            totalCost: 0,
+          },
+        },
+      };
+    });
+
+    const mutationAgent = new MutationAgent();
+    jest.spyOn(mutationAgent, 'generateMutants').mockResolvedValue([]);
+    jest.spyOn(mutationAgent, 'generateDiverse').mockResolvedValue([]);
+    const crossoverAgent = new CrossoverAgent();
+    jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
+
+    const population = new StrategyPopulation(undefined);
+    for (const d of dsls) population.add('breakout', d);
+
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockResolvedValue(makeFormalBtResponse(1.5, 0.55, 30));
+
+    const loop = new EvolutionLoop({
+      population,
+      adapter,
+      mutationAgent,
+      crossoverAgent,
+      enforcer: new DiversityEnforcer(),
+      defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      runFormalBacktest,
+      formalBtTopK: 3,
+    });
+
+    await loop.runOneGeneration('breakout');
+
+    // population getElites は最大 5 個までエリート選抜するため、surrogate 候補は最大 5。
+    // top K=3 で絞った結果として正式 BT は 3 回だけ呼ばれる。
+    expect(runFormalBacktest).toHaveBeenCalledTimes(3);
   });
 });
