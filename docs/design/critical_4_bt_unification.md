@@ -707,12 +707,17 @@ PR #77 提出後、Nekoさん との対話で **ノート概念の理解と BT �
 
 **実装場所**: `analysis-engine` (GCP デプロイ済みコンテナ) に集約する(§8 寄せ込み案、§12.4 参照)。
 
-### 12.3 「変換」ではなく「ノート schema を BT 入力形式に寄せる」
+### 12.3 「変換アダプタを作らない」 — **段階 1.8 で再訂正**
 
-**僕が PR #77 で書いた誤った発想**: 変換アダプタ (`DSLConverter`) を作る  
-**Nekoさん の正しい発想**: ノートの schema を **BT エンジンが直接食える形に寄せる**
+**経緯**:
 
-→ 変換ロジックがメンテ負担になるので作らない。ノートの数値をそのまま `analysis-engine` に POST する。
+| 時期 | 方針 | 根拠 |
+|---|---|---|
+| PR #77 当初 (§6.1) | TS 側に `DSLConverter` を新設して仮説 → DSL に変換 | 既存 DSL 経路に乗せる |
+| §12.3 訂正 (§12 全体) | 変換アダプタを作らず、ノート schema を engine が直接食える形に寄せる | 変換ロジックのメンテ負担を避ける |
+| **§13 / 段階 1.8 で再訂正** | **engine 抽象を間に挟む変換アダプタを作る**(クライアントとエンジン両方を engine 抽象から切り離す) | **エンジンを将来交換するときにクライアント側を一切触らずに済む(サービスを止めずにエンジン入れ替えできる)** |
+
+§13 で本決定の詳細を記述。本 §12.3 の旧文言「変換ロジックがメンテ負担になる」は段階 1〜1.7 の実装で「結局 engine 実装の中にアダプタ相当の処理が混ざっている = 抽象が暗黙化していて将来 engine 交換時の影響範囲が見えない」状態を生んだことが判明し、§13 で明示分離する形に再修正された。
 
 ### 12.4 `analysis-engine` 寄せ込み(BT インフラ統合)
 
@@ -767,3 +772,70 @@ GCP に既に 2 つの Python コンテナがデプロイされているが、**
 ---
 
 *追記日時: 2026-05-03 朝 / Nekoさん との対話によるノート概念修正と BT インフラ方針確定。本文 §1 / §6 / §8 はこの方針に合わせて書き換え済み。*
+
+---
+
+## §13 段階 1.8: BT エンジン抽象アダプタ層の導入(§12.3 の再訂正)
+
+### 13.1 問題提起
+
+§12.3 で「変換アダプタを作らない、ノート schema を engine が直接食える形に寄せる」と決めたが、段階 1〜1.7 の実装で次の歪みが発生した:
+
+- `analysis-engine/app/backtest.py` 内で「ノート schema 解釈」と「`backtesting.py` 固有 API 呼び出し」が混在
+- engine を将来交換する時(`vectorbt` / `backtrader` / 他)に何を直せばいいか不明瞭
+- クライアント (Node) が送る `ScreeningBacktestNotePayload` の形が「ノート」と「engine 期待入力」のどちら寄りか曖昧
+
+### 13.2 Nekoさん 判断 (2026-05-03)
+
+> 「やっぱり変換アダプタを作る形にしようか。そうするとバックテストのエンジンが次別のものに変わっても変換アダプタを変えればいいだけになるからサービスを **止めずに / クライアントをいじらずに** 済む」
+
+= **依存性逆転原則**を明示適用する。クライアントもサービスもエンジンも「engine 抽象」に向かってだけ依存し、具体エンジンは差し替え可能にする。
+
+### 13.3 段階 1.8 で実装した分離構造
+
+```
+analysis-engine/app/backtest/   ← パッケージ化
+├── __init__.py                 ← run_screening_backtest を re-export (外部 API は不変)
+├── engine_protocol.py          ← BTEngine Protocol + BTSpec / BTConfig / BTSummary / BTTrade / BTResult
+│                                  (engine 非依存型、本ファイルだけが「真の境界」)
+├── adapter.py                  ← ノート schema (ScreeningBacktestNotePayload 等) ↔ engine 抽象 の相互変換
+├── runner_backtesting_py.py    ← BTEngine 実装: backtesting.py (kernc/backtesting.py)
+└── runner.py                   ← 司令塔: ノート schema を受けて adapter / engine を組み合わせる
+                                   `_default_engine()` の差し替えだけで実装交換完了
+```
+
+### 13.4 依存方向(依存性逆転の現れ方)
+
+```
+[クライアント (Node)]                    [サービス (analysis-engine FastAPI)]
+        │                                        │
+        ↓                                        ↓
+ScreeningBacktestRequest          runner.py (司令塔)
+        │                                  │
+        │                                  ├─→ adapter.py (両端変換)
+        │                                  │           ↓
+        ↓                                  │     BTSpec / BTConfig (engine 抽象)
+ノート schema (Pydantic)         ─────────┘           ↑
+                                                       │
+                                                runner_backtesting_py.py
+                                                (BTEngine 実装、抽象だけを知る)
+```
+
+- クライアント、サービス司令塔、エンジン実装の **3 者すべてが engine 抽象 (engine_protocol.py) に向かって依存**
+- 抽象自体は誰にも依存しない
+- → 別エンジン (`runner_vectorbt.py` 等) を追加して `runner.py` で選択するだけで、クライアントも adapter も engine_protocol も無修正
+
+### 13.5 触らない約束
+
+- `engine_protocol.py` の型はクライアントの API 表面ではない(API は引き続き `ScreeningBacktestNotePayload` / `ScreeningBacktestResponse`)。クライアント無修正のまま将来の engine 交換を吸収できる
+- `adapter.py` は将来エンジン入力形式が変わっても、ノート schema 自体が変わらない限り無修正
+- 新エンジンを追加する人は `engine_protocol.py` を満たす `runner_<engine>.py` を書き、`runner.py` の `_default_engine()` を切り替えるだけ
+
+### 13.6 段階 2 以降への影響
+
+- 段階 2 (StrategyBacktesterAgent per-plan 永続化): `StrategyDSL` → `ScreeningBacktestNotePayload` (改名予定: `BacktestNotePayload`) のアダプタを TS 側で書く。adapter.py / engine_protocol.py は段階 1.8 の構造のままで済む
+- 段階 4 (条件評価の Python 側実装): `engine_protocol.BTSpec` に `conditions: list[Condition]` を追加するだけで実装側は段階的に対応可能(Strategy.next() 内で条件評価する形)
+
+---
+
+*追記日時: 2026-05-03 / 段階 1.8 リファクタ実装 + Nekoさん との対話による §12.3 再訂正。*
