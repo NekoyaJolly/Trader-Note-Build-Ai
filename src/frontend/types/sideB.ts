@@ -684,7 +684,8 @@ export interface PerScenarioStrategyBacktestPayload {
   error?: string;
   strategistInterpretation: string;
   durationMs: number;
-  dslResult?: {
+  // Critical-4 段階 4a: DSLBacktest → SurrogateFitness にリネーム (進化計算用近似 fitness、正式 BT 結果ではない)
+  surrogateFitnessResult?: {
     executionModel?: string;
     executionConfigHash?: string;
     dataSource?: string;

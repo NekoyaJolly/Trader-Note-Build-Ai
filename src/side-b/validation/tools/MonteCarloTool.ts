@@ -158,10 +158,10 @@ export class MonteCarloTool implements ValidationTool {
         input: StrategyValidationInput,
         start: number,
     ): Promise<ValidationToolResult> {
-        const pnls = input.dslResult.netPnls.filter((p) => Number.isFinite(p));
+        const pnls = input.surrogateFitnessResult.netPnls.filter((p) => Number.isFinite(p));
         return this.runMonteFromPnls(pnls, start, {
-            executionModel: input.dslResult.executionModel,
-            executionConfigHash: input.dslResult.executionConfigHash,
+            executionModel: input.surrogateFitnessResult.executionModel,
+            executionConfigHash: input.surrogateFitnessResult.executionConfigHash,
         });
     }
 

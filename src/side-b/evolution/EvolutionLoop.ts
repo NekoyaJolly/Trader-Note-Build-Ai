@@ -19,7 +19,7 @@
  *   を実装予定。
  * -------------------------------------------------------------------
  *
- * @see docs/design/phase_5_specification.md §4.8
+ * @see docs/design/phase_5a_specification.md (Phase 5A 進化探索基盤)
  * @see docs/design/critical_4_bt_unification.md §13 (BT エンジン抽象 / 段階 4a)
  */
 

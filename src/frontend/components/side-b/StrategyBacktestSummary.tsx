@@ -31,7 +31,7 @@ export function StrategyBacktestSummary({ backtest, fromCachedPlan }: Props) {
     );
   }
 
-  const firstExecution = backtest.scenarioResults.find((r) => r.dslResult)?.dslResult;
+  const firstExecution = backtest.scenarioResults.find((r) => r.surrogateFitnessResult)?.surrogateFitnessResult;
   const cost = firstExecution?.costSummary;
 
   return (
@@ -87,9 +87,9 @@ export function StrategyBacktestSummary({ backtest, fromCachedPlan }: Props) {
               <p className="text-rose-400 mt-1">{r.error}</p>
             ) : null}
             <p className="text-slate-500 mt-1.5 line-clamp-4 break-words">{r.strategistInterpretation}</p>
-            {r.dslResult?.costSummary ? (
+            {r.surrogateFitnessResult?.costSummary ? (
               <p className="text-slate-600 mt-0.5">
-                {r.dslResult.executionModel} / cost={Number(r.dslResult.costSummary.totalCost ?? 0).toFixed(2)}
+                {r.surrogateFitnessResult.executionModel} / cost={Number(r.surrogateFitnessResult.costSummary.totalCost ?? 0).toFixed(2)}
               </p>
             ) : null}
             <p className="text-slate-600 mt-0.5">{r.durationMs}ms</p>
