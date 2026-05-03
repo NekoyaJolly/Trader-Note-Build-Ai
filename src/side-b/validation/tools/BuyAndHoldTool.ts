@@ -183,13 +183,13 @@ export class BuyAndHoldTool implements ValidationTool {
     }
 
     /**
-     * Phase 6.7b: DSLBacktestResult.finalReturn（検証期間）と B&H を比較
+     * Phase 6.7b: SurrogateFitnessResult.finalReturn（検証期間）と B&H を比較
      */
     private async executeStrategy(
         input: StrategyValidationInput,
         start: number,
     ): Promise<ValidationToolResult> {
-        const { strategy, period, dslResult } = input;
+        const { strategy, period, surrogateFitnessResult } = input;
         const symbol = strategy.symbol;
         const timeframe = strategy.timeframe;
         if (!symbol || !timeframe) {
@@ -228,7 +228,7 @@ export class BuyAndHoldTool implements ValidationTool {
             return this.fail(`startClose が不正: ${startClose}`, start);
         }
         const buyAndHoldReturn = (endClose - startClose) / startClose;
-        const strategyReturn = dslResult.finalReturn;
+        const strategyReturn = surrogateFitnessResult.finalReturn;
         const direction = strategy.entry.direction;
         const comparableBhReturn = direction === 'short' ? -buyAndHoldReturn : buyAndHoldReturn;
         const outperformance = strategyReturn - comparableBhReturn;
@@ -247,11 +247,11 @@ export class BuyAndHoldTool implements ValidationTool {
                 outperformance,
                 startClose,
                 endClose,
-                tradeCount: dslResult.events.length,
+                tradeCount: surrogateFitnessResult.events.length,
                 periodDays,
                 comparisonDirection: direction,
-                executionModel: dslResult.executionModel,
-                executionConfigHash: dslResult.executionConfigHash,
+                executionModel: surrogateFitnessResult.executionModel,
+                executionConfigHash: surrogateFitnessResult.executionConfigHash,
             },
             interpretation: passed
                 ? `戦略が BH を +${(outperformance * 100).toFixed(2)}pt 上回る（通過）`

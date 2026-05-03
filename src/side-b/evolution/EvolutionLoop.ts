@@ -1,29 +1,33 @@
 /**
- * 1 世代分の進化ループ（Phase 5A: 候補生成のみ）
+ * 1 世代分の進化ループ (Phase 5A: 候補生成のみ / Critical-4 段階 4a 責務明示)
  *
  * -------------------------------------------------------------------
- * Phase 5A での方針（重要）
+ * 設計方針
  *
- * - TS シミュレーション（`DSLBacktestAdapter` + `dslBacktestSimulation`）
- *   は **高速スクリーニング** にとどめる。
- * - **EdgeLedger への自動登録・自動 `confirmed` 昇格は行わない**（完全撤退）。
- *   confirmed の意味論は「Phase 4c の Python WF/MC/BH を通過したもの」に
- *   戻す。
+ * - 本ループは `SurrogateFitnessSimulator` (= 進化計算用の **近似 fitness 評価**) を
+ *   使って population を高速評価する。これは **正式な BT 結果ではない** (Critical-4 §13)。
+ * - **EdgeLedger への自動登録・自動 `confirmed` 昇格は行わない**。
+ *   confirmed の意味論は「Phase 4c の Python WF/MC/BH を通過したもの」 = analysis-engine
+ *   の正式 BT (ScreeningBacktestRun) を経由した仮説のみ。
  * - 本ループは代わりに `GenerationReport.promotionCandidates` に
- *   「Phase 4c に流すべき候補」を出力するだけにする。
- * - 候補メタには `dslId` と `source: 'evolution'` を **必ず含める**。
- *   Phase 5B で「昇格候補 → Phase 4c（StrategistAgent/Python）接続」を
- *   設計する際に、この識別子を手掛かりに使う。
+ *   「Phase 4c に流すべき候補」を出力するだけにする。候補メタには `dslId` と
+ *   `source: 'evolution'` を **必ず含める**。
+ *
+ * 段階 4a は「リネーム + 責務明示」フェーズ。後続 PR で:
+ *   - 親個体プール戦略 (confirmed 50%, screening_passed 25%, unverified 5-10%)
+ *   - 各世代 top K の analysis-engine 検証ゲート
+ *   を実装予定。
  * -------------------------------------------------------------------
  *
- * @see docs/design/phase_5_specification.md §4.8
+ * @see docs/design/phase_5a_specification.md (Phase 5A 進化探索基盤)
+ * @see docs/design/critical_4_bt_unification.md §13 (BT エンジン抽象 / 段階 4a)
  */
 
 import { randomUUID } from 'crypto';
 
 import type { CrossoverAgent } from '../agents/CrossoverAgent';
 import type { MutationAgent } from '../agents/MutationAgent';
-import type { DSLBacktestAdapter, BacktestPeriod, DslBacktestAggregate } from '../strategy_dsl/DSLBacktestAdapter';
+import type { SurrogateFitnessSimulator, BacktestPeriod, SurrogateFitnessAggregate } from '../strategy_dsl/SurrogateFitnessSimulator';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
 import type { DiversityEnforcer } from './DiversityEnforcer';
 import { scoreFromValidationSummary } from './evolutionScore';
@@ -36,7 +40,7 @@ import type { StrategyPopulation } from './StrategyPopulation';
 
 export interface EvolutionLoopDeps {
   population: StrategyPopulation;
-  adapter: DSLBacktestAdapter;
+  adapter: SurrogateFitnessSimulator;
   mutationAgent: MutationAgent;
   crossoverAgent: CrossoverAgent;
   enforcer: DiversityEnforcer;
@@ -130,14 +134,14 @@ export class EvolutionLoop {
       list = population.getByRegime(regime);
     }
 
-    const metrics = new Map<string, DslBacktestAggregate>();
+    const metrics = new Map<string, SurrogateFitnessAggregate>();
     const scores = new Map<string, number>();
     const dslById = new Map<string, StrategyDSL>();
 
     for (const strategy of list) {
       dslById.set(strategy.id, strategy);
       try {
-        const agg = await adapter.runBacktest(strategy, {}, period);
+        const agg = await adapter.evaluateFitness(strategy, {}, period);
         metrics.set(strategy.id, agg);
         scores.set(strategy.id, scoreFromValidationSummary(agg.validation.summary));
       } catch (e) {
@@ -211,7 +215,7 @@ export class EvolutionLoop {
    */
   private extractPromotionCandidates(
     elites: StrategyDSL[],
-    metrics: Map<string, DslBacktestAggregate>,
+    metrics: Map<string, SurrogateFitnessAggregate>,
     dslById: Map<string, StrategyDSL>,
   ): EvolutionPromotionCandidate[] {
     const out: EvolutionPromotionCandidate[] = [];

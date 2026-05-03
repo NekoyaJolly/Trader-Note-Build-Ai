@@ -1,12 +1,12 @@
 /**
- * Phase 6.7b: ParameterRange グリッド・wait_for_trigger・DSLBacktestResult
+ * Phase 6.7b: ParameterRange グリッド・wait_for_trigger・SurrogateFitnessResult
  */
 
 import { StrategyDSLSchema } from '../../strategy_dsl/schema';
 import { enumerateParameterGrid, MAX_PARAMETER_GRID_COMBINATIONS } from '../../strategy_dsl/dslParameterUtils';
-import { runDslSimulation, type OhlcvBar } from '../../strategy_dsl/dslBacktestSimulation';
-import { toDSLBacktestResult } from '../../strategy_dsl/DSLBacktestAdapter';
-import type { DslBacktestAggregate } from '../../strategy_dsl/DSLBacktestAdapter';
+import { runDslSimulation, type OhlcvBar } from '../../strategy_dsl/surrogateFitnessSimulation';
+import { toSurrogateFitnessResult } from '../../strategy_dsl/SurrogateFitnessSimulator';
+import type { SurrogateFitnessAggregate } from '../../strategy_dsl/SurrogateFitnessSimulator';
 import { toDslSimulationOptions } from '../../strategy_dsl/executionSimulation';
 
 function barsUptrend(n: number, start: Date): OhlcvBar[] {
@@ -138,12 +138,12 @@ describe('wait_for_trigger シミュレーション', () => {
   });
 });
 
-describe('toDSLBacktestResult', () => {
+describe('toSurrogateFitnessResult', () => {
   it('validation の trades から pnls を取る', () => {
-    const aggregate: DslBacktestAggregate = {
+    const aggregate: SurrogateFitnessAggregate = {
       dslId: 'x',
       period: { start: '2024-01-01', end: '2024-12-01' },
-      train: { summary: {} as DslBacktestAggregate['train']['summary'], trades: [] },
+      train: { summary: {} as SurrogateFitnessAggregate['train']['summary'], trades: [] },
       validation: {
         summary: {
           totalTrades: 1,
@@ -192,7 +192,7 @@ describe('toDSLBacktestResult', () => {
         },
       },
     };
-    const dto = toDSLBacktestResult(aggregate, { k: 1 });
+    const dto = toSurrogateFitnessResult(aggregate, { k: 1 });
     expect(dto.pnls).toEqual([25]);
     expect(dto.grossPnls).toEqual([25]);
     expect(dto.netPnls).toEqual([25]);

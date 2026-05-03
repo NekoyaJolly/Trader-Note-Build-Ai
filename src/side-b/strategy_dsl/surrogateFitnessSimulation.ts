@@ -1,11 +1,17 @@
 /**
- * DSL 単純バー走査バックテスト（Phase 5）
+ * SurrogateFitnessSimulation (Critical-4 段階 4a で `dslBacktestSimulation.ts` から改名)
  *
- * 既存 strategyBacktestService は DB 上の Strategy が必須のため、
- * DSL 専用に OHLCV 上で条件評価・約定をシミュレーションする。
+ * **これは進化計算 (EvolutionLoop) 用の近似 fitness 評価であり、正式な BT 結果ではない**。
  *
- * レンズ特徴量は「ohlcv」レンズに open/high/low/close/volume に加え、
- * 事前計算した rsi / atr を載せる。
+ * DSL 戦略を OHLCV バー上で素朴に走査し、条件評価・約定をシミュレーションする。
+ * `SurrogateFitnessSimulator` から呼ばれる内部実装。
+ *
+ * レンズ特徴量は「ohlcv」レンズに open/high/low/close/volume + 事前計算 rsi / atr を載せる。
+ *
+ * **本番採用 / confirmed 昇格 / ユーザー表示** は analysis-engine の結果 (ScreeningBacktestRun)
+ * のみを正とする (Critical-4 設計書 §13)。
+ *
+ * @see docs/design/critical_4_bt_unification.md §13
  */
 
 import { calculatePnl, calculateSummary } from '../../backend/services/backtestCalculations';

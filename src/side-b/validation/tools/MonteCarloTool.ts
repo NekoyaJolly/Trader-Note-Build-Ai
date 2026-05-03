@@ -153,15 +153,15 @@ export class MonteCarloTool implements ValidationTool {
         return this.runMonteFromPnls(pnls, start);
     }
 
-    /** Phase 6.7b: DSLBacktestResult の PnL 列を直参照 */
+    /** Phase 6.7b: SurrogateFitnessResult の PnL 列を直参照 */
     private async executeStrategy(
         input: StrategyValidationInput,
         start: number,
     ): Promise<ValidationToolResult> {
-        const pnls = input.dslResult.netPnls.filter((p) => Number.isFinite(p));
+        const pnls = input.surrogateFitnessResult.netPnls.filter((p) => Number.isFinite(p));
         return this.runMonteFromPnls(pnls, start, {
-            executionModel: input.dslResult.executionModel,
-            executionConfigHash: input.dslResult.executionConfigHash,
+            executionModel: input.surrogateFitnessResult.executionModel,
+            executionConfigHash: input.surrogateFitnessResult.executionConfigHash,
         });
     }
 

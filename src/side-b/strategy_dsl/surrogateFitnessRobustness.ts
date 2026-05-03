@@ -1,19 +1,27 @@
 /**
- * 商用向け: 執行仮定の複数本を束ね、PF の感度帯域を扱う
+ * SurrogateFitnessRobustness (Critical-4 段階 4a で `dslBacktestRobustness.ts` から改名)
  *
- * 単一の最適化 PF に依存せず、悲観〜楽観・固定コスト〜ATR 比例のレンジで
- * 同じ OHLCV・同じ DSL を再現可能に比較する。
+ * **これは進化計算 (EvolutionLoop) 用の近似 fitness のロバストネス分析であり、
+ * 正式な BT 結果ではない**。
+ *
+ * 執行仮定の複数本 (悲観〜楽観・固定コスト〜ATR 比例) を束ねて、PF の感度帯域を見るための
+ * surrogate fitness 評価ヘルパー。`SurrogateFitnessSimulator` から呼ばれる。
+ *
+ * **本番採用 / confirmed 昇格 / ユーザー表示** は analysis-engine の結果 (ScreeningBacktestRun)
+ * のみを正とする (Critical-4 設計書 §13)。本ファイルの値は探索の進化的選択にのみ使用する。
+ *
+ * @see docs/design/critical_4_bt_unification.md §13
  */
 
 import type { BacktestResultSummary } from '../../backend/services/backtestCalculations';
 import { fetchHistoricalData } from '../../backend/services/strategyBacktestService';
 import {
-  DSLBacktestAdapter,
+  SurrogateFitnessSimulator,
   dslTimeframeToBacktestTf,
   type BacktestPeriod,
-  type DslBacktestAggregate,
-} from './DSLBacktestAdapter';
-import type { DslSimulationOptions, OhlcvBar } from './dslBacktestSimulation';
+  type SurrogateFitnessAggregate,
+} from './SurrogateFitnessSimulator';
+import type { DslSimulationOptions, OhlcvBar } from './surrogateFitnessSimulation';
 import type { StrategyDSL } from './schema';
 
 /** 1 本の仮定ラベル付きシナリオ */
@@ -75,10 +83,10 @@ export function defaultCommercialScenarios(): DslRobustnessScenario[] {
 /** 1 シナリオ分の学習/検証集計 */
 export interface DslRobustnessRun {
   scenario: DslRobustnessScenario;
-  aggregate: DslBacktestAggregate;
+  aggregate: SurrogateFitnessAggregate;
 }
 
-export interface DslBacktestRobustnessReport {
+export interface SurrogateFitnessRobustnessReport {
   dslId: string;
   period: BacktestPeriod;
   runs: DslRobustnessRun[];
@@ -99,17 +107,17 @@ function safeFinitePf(s: BacktestResultSummary): number {
 /**
  * 取得済み OHLCV について、各シナリオで学習/検証集計を返す
  */
-export function runDslBacktestRobustnessOnBars(
+export function runSurrogateFitnessRobustnessOnBars(
   dsl: StrategyDSL,
   paramValues: Record<string, number>,
   period: BacktestPeriod,
   bars: OhlcvBar[],
   scenarios: DslRobustnessScenario[] = defaultCommercialScenarios(),
-): DslBacktestRobustnessReport {
-  const adapter = new DSLBacktestAdapter();
+): SurrogateFitnessRobustnessReport {
+  const adapter = new SurrogateFitnessSimulator();
   const runs: DslRobustnessRun[] = scenarios.map((scenario) => ({
     scenario,
-    aggregate: adapter.runBacktestOnBars(dsl, paramValues, period, bars, scenario.options),
+    aggregate: adapter.evaluateFitnessOnBars(dsl, paramValues, period, bars, scenario.options),
   }));
 
   const valPfs = runs.map((r) => safeFinitePf(r.aggregate.validation.summary));
@@ -129,16 +137,16 @@ export function runDslBacktestRobustnessOnBars(
 /**
  * 期間内 OHLCV を fetch してからロバストネス比較（1 本の DSL・複数仮定）
  */
-export async function runDslBacktestRobustness(
+export async function runSurrogateFitnessRobustness(
   dsl: StrategyDSL,
   paramValues: Record<string, number>,
   period: BacktestPeriod,
   scenarios: DslRobustnessScenario[] = defaultCommercialScenarios(),
-): Promise<DslBacktestRobustnessReport> {
+): Promise<SurrogateFitnessRobustnessReport> {
   const symbol = dsl.symbol.replace(/\//g, '');
   const btTf = dslTimeframeToBacktestTf(dsl.timeframe);
   const start = new Date(period.start);
   const end = new Date(period.end);
   const bars = await fetchHistoricalData(symbol, btTf, start, end);
-  return runDslBacktestRobustnessOnBars(dsl, paramValues, period, bars, scenarios);
+  return runSurrogateFitnessRobustnessOnBars(dsl, paramValues, period, bars, scenarios);
 }

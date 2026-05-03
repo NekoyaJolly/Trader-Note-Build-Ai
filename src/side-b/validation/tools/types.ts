@@ -1,16 +1,21 @@
 /**
- * ValidationTool 共通型（Phase 4c + 6.7b 戦略 BT 径路）
+ * ValidationTool 共通型 (Phase 4c + Critical-4 段階 4a)
  *
- * 4ツール＋仮想 screening を共有。
- * `kind: 'hypothesis' | 'strategy'` で Side-A 連携と DSL 直結を切り替える。
+ * 4 ツール + 仮想 screening を共有。`kind: 'hypothesis'` (Critical-4 標準径路) と
+ * `kind: 'strategy'` (進化計算用近似評価径路、次 PR 4a.1 で撤廃予定) を切り替える。
  *
- * @see docs/design/phase_4c_specification.md セクション4.4
+ * `kind: 'strategy'` は `SurrogateFitnessSimulator` の結果 (= 近似 fitness) を直接
+ * 受け取る経路で、正式 BT 結果ではない。本番判定 (confirmed 昇格 / ユーザー表示 /
+ * 永続化) は `kind: 'hypothesis'` 径路 (analysis-engine 経由 ScreeningBacktestRun) のみ。
+ *
+ * @see docs/design/phase_4c_specification.md §4.4
  * @see docs/design/phase_6_7b_bt_layer.md
+ * @see docs/design/critical_4_bt_unification.md §13 (BT エンジン抽象 / 段階 4a)
  */
 
 import type { EdgeHypothesis } from '../../models/edgeHypothesis';
 import type { StrategyDSL } from '../../strategy_dsl/schema';
-import type { DSLBacktestResult } from '../../strategy_dsl/DSLBacktestAdapter';
+import type { SurrogateFitnessResult } from '../../strategy_dsl/SurrogateFitnessSimulator';
 
 export type ValidationAdditionalParamValue =
   | string
@@ -43,11 +48,18 @@ export interface HypothesisValidationInput {
   additionalParams?: ValidationAdditionalParams;
 }
 
-/** 戦略 DSL + DSL BT 要約（Phase 6.7b。Side-A 非依存） */
+/**
+ * 戦略 DSL + 近似 fitness 評価結果 (進化計算径路、Side-A 非依存)
+ *
+ * **本入力は正式 BT 結果ではない**。`SurrogateFitnessSimulator` の結果を持ち、
+ * 進化計算の各世代評価で WF/MC/BH ツールに渡される近似フィードバック用。
+ * 本番判定には使われない。次 PR 4a.1 で撤廃予定。
+ */
 export interface StrategyValidationInput {
   kind: 'strategy';
   strategy: StrategyDSL;
-  dslResult: DSLBacktestResult;
+  /** SurrogateFitnessSimulator が返す近似 fitness 結果 (正式 BT 結果ではない) */
+  surrogateFitnessResult: SurrogateFitnessResult;
   period: { start: string; end: string };
   additionalParams?: ValidationAdditionalParams;
 }

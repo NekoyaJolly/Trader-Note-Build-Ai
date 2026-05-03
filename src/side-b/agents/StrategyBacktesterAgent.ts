@@ -6,10 +6,11 @@
  * その後 WF/MC/BH 3 ツールに `screeningBacktestRunId` を渡して評価する。
  *
  * 設計原則 (§13 / §12):
- * - BT エンジンはアプリ全体で 1 つだけ (analysis-engine + backtesting.py)
+ * - 正式 BT エンジンはアプリ全体で 1 つだけ (analysis-engine + backtesting.py)
  * - DSL → ノート schema 変換は本ファイルが責任 (dslToBacktestNotePayload)
  * - Phase 4c の WF/MC/BH と入力源を統一 (ScreeningBacktestRun.id 経由)
- * - DSLBacktestAdapter (TS 自前 BT) への直接依存を撤廃
+ * - 進化計算用の近似 fitness 評価 (`SurrogateFitnessSimulator`) への直接依存は持たない
+ *   (本ファイルは plan 経路の正式 BT 担当、近似評価は EvolutionLoop の責務)
  *
  * @see docs/design/critical_4_bt_unification.md §13 / 段階 2
  */

@@ -215,7 +215,7 @@ describe('MonteCarloTool.execute', () => {
         expect(typeof res.metrics.medianMaxDrawdown).toBe('number');
     });
 
-    it('kind=strategy なら dslResult.pnls を直接使う', async () => {
+    it('kind=strategy なら surrogateFitnessResult.pnls を直接使う', async () => {
         const pnls30 = Array.from({ length: 30 }, () => 2);
         const tool = new MonteCarloTool(undefined, {
             rng: makeSeededRng(3),
@@ -225,7 +225,7 @@ describe('MonteCarloTool.execute', () => {
             kind: 'strategy',
             strategy: {} as import('../../strategy_dsl/schema').StrategyDSL,
             period: { start: '2025-01-01', end: '2025-12-31' },
-            dslResult: {
+            surrogateFitnessResult: {
                 dslId: 'd1',
                 period: { start: '2025-01-01', end: '2025-12-31' },
                 pnls: pnls30,

@@ -72,7 +72,7 @@ import { MutationAgent } from '../agents/MutationAgent';
 import { DiversityEnforcer } from '../evolution/DiversityEnforcer';
 import { EvolutionLoop } from '../evolution/EvolutionLoop';
 import { StrategyPopulation } from '../evolution/StrategyPopulation';
-import { DSLBacktestAdapter } from '../strategy_dsl/DSLBacktestAdapter';
+import { SurrogateFitnessSimulator } from '../strategy_dsl/SurrogateFitnessSimulator';
 import {
   runPromptEvolutionCycle,
   type PromptEvolutionResult,
@@ -842,7 +842,7 @@ export class SideBScheduler {
     // Phase 5A: EdgeLedger への自動登録は撤廃（候補抽出のみ）
     const loop = new EvolutionLoop({
       population,
-      adapter: new DSLBacktestAdapter(),
+      adapter: new SurrogateFitnessSimulator(),
       mutationAgent: new MutationAgent(),
       crossoverAgent: new CrossoverAgent(),
       enforcer: new DiversityEnforcer(),

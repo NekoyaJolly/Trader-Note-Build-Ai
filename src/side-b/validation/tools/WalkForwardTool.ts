@@ -98,14 +98,14 @@ export class WalkForwardTool implements ValidationTool {
     async execute(input: ValidationToolInput): Promise<ValidationToolResult> {
         if (isStrategyValidationInput(input)) {
             return this.runWalkForwardOnEvents(
-                input.dslResult.events
+                input.surrogateFitnessResult.events
                     .filter((e) => typeof e.pnl === 'number' && Number.isFinite(e.pnl))
                     .map((e) => ({ entryTime: e.entryTime, pnl: e.pnl })),
                 input.period,
                 Date.now(),
                 {
-                    executionModel: input.dslResult.executionModel,
-                    executionConfigHash: input.dslResult.executionConfigHash,
+                    executionModel: input.surrogateFitnessResult.executionModel,
+                    executionConfigHash: input.surrogateFitnessResult.executionConfigHash,
                 },
             );
         }
