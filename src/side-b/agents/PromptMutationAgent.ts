@@ -15,6 +15,7 @@
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { loadPromptWithGlobal } from '../prompts/loader';
 import { modelFor } from '../../config';
+import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import type { PromptVersion } from '../prompts/registry/types';
 import { extractJson } from './llmJsonExtract';
 import {
@@ -161,7 +162,7 @@ export class PromptMutationAgent {
           { role: 'system', content: system },
           { role: 'user', content: user },
         ] as ChatMessage[],
-        { temperature: 0.6, maxTokens: 4096 },
+        { temperature: 0.6, maxTokens: AI_MAX_TOKENS.HEAVY },
       ),
     );
     if (!res?.content) {

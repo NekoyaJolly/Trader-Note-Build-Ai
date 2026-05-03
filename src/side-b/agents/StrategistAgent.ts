@@ -31,6 +31,7 @@ import { loadPromptWithGlobal } from '../prompts/loader';
 import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import { recordAgentUsage } from './scoringRecorder';
 import { modelFor } from '../../config';
+import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 
 // ===========================================
 // 型
@@ -206,7 +207,7 @@ export class StrategistAgent {
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: userPrompt },
             ],
-            { maxTokens: 4096 },
+            { maxTokens: AI_MAX_TOKENS.HEAVY },
         );
 
         return this.parseLLMOutput(response.content);

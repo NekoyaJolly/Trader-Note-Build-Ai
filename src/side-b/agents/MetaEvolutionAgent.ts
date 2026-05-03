@@ -19,6 +19,7 @@ import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { loadPromptWithGlobal } from '../prompts/loader';
 import { recordAgentUsage } from './scoringRecorder';
 import { modelFor } from '../../config';
+import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import type { JsonValue } from '../../utils/jsonValue';
 import {
   PromptRegistry,
@@ -242,7 +243,7 @@ export class MetaEvolutionAgent {
           { role: 'system', content: system },
           { role: 'user', content: user },
         ] as ChatMessage[],
-        { temperature: 0.4, maxTokens: 4096 },
+        { temperature: 0.4, maxTokens: AI_MAX_TOKENS.HEAVY },
       ),
     );
     if (!res?.content) {

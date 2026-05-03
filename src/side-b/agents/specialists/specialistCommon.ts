@@ -17,6 +17,7 @@ import {
 import { getScoringFunction } from '../../prompts/abtest/scoringFunctions';
 import type { PromptVersion } from '../../prompts/registry/types';
 import type { JsonValue } from '../../../utils/jsonValue';
+import { AI_MAX_TOKENS } from '../../../config/aiTokenLimits';
 
 export const SPECIALIST_REQUEST_TIMEOUT_MS = 60_000;
 
@@ -57,7 +58,7 @@ export async function callLLMForJson(
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ] as ChatMessage[],
-        { temperature: 0.3, maxTokens: 4096 },
+        { temperature: 0.3, maxTokens: AI_MAX_TOKENS.MEDIUM },
       );
       if (!res.content) continue;
       const parsed = parseJsonLoose(res.content);
@@ -234,7 +235,7 @@ async function runSingle<TOutput extends object>(
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ] as ChatMessage[],
-      { temperature: 0.3, maxTokens: 4096 },
+      { temperature: 0.3, maxTokens: AI_MAX_TOKENS.MEDIUM },
     );
     if (!res.content) return null;
     const extracted = extractJson(res.content);

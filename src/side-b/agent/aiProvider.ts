@@ -102,6 +102,22 @@ export class AIProvider {
     }
 
     /**
+     * OpenAI の **直エンドポイント** かを判定する。
+     *
+     * OpenAI の o 系 / gpt-5 系は以下の API 仕様変更があるため、`api.openai.com` 直の時だけ
+     * リクエスト形式を切り替える:
+     *   - `max_tokens` を拒否 → `max_completion_tokens` を要求
+     *   - `temperature` 非対応 (デフォルト 1 のみ) → 送信しない
+     *
+     * OpenRouter (`openrouter.ai`) / Gemini OpenAI 互換 (`generativelanguage.googleapis.com`)
+     * は従来形式を受け付けるため切り替えない。
+     */
+    private usesOpenAINewParam(): boolean {
+        // 大文字小文字を吸収しつつ "api.openai.com" を含むかで判定
+        return this.baseURL.toLowerCase().includes('api.openai.com');
+    }
+
+    /**
      * MCPツール定義 → OpenAI function calling 形式に変換
      */
     convertToolsToOpenAIFormat(mcpTools: McpToolDefinition[]): OpenAIToolDef[] {
@@ -130,16 +146,25 @@ export class AIProvider {
         messages: ChatMessage[],
         options: ChatOptions = {},
     ): Promise<AIResponse> {
-        const temperature = options.temperature ?? 0.3;
         const body: Record<string, unknown> = {
             model: this.model,
             messages,
-            temperature,
         };
 
+        // OpenAI の o 系 / gpt-5 系は temperature 非対応 (デフォルト 1 のみ受理)。
+        // 既存 aiSummaryService.ts も同様の対応をしており、ここで揃える。
+        // OpenRouter / Gemini OpenAI 互換 / その他は temperature を尊重。
+        if (!this.usesOpenAINewParam()) {
+            body.temperature = options.temperature ?? 0.3;
+        }
+
         // max_tokens は明示指定された時のみ付ける(プロバイダー既定に任せたい場合は省略可)
+        // OpenAI の o 系 / gpt-5 系は `max_tokens` を拒否し `max_completion_tokens` を要求するため、
+        // OpenAI 直エンドポイントの時だけパラメータ名を切り替える。
+        // OpenRouter / Gemini OpenAI 互換 / その他は従来通り `max_tokens`。
         if (options.maxTokens !== undefined) {
-            body.max_tokens = options.maxTokens;
+            const tokenParam = this.usesOpenAINewParam() ? 'max_completion_tokens' : 'max_tokens';
+            body[tokenParam] = options.maxTokens;
         }
 
         // ツール定義がある場合のみ追加
