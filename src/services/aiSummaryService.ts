@@ -14,7 +14,7 @@
  * - API キーがない場合は基本要約にフォールバック
  */
 
-import { config } from '../config';
+import { config, modelFor } from '../config';
 import {
   OpenAIChatCompletionResponseSchema,
 } from '../schemas/external/openai';
@@ -57,7 +57,7 @@ export class AISummaryService {
   constructor() {
     // テストで環境変数を削除した場合も即時反映するため、毎回 process.env を優先
     this.apiKey = process.env.AI_API_KEY || '';
-    this.model = config.ai.model;
+    this.model = modelFor('ai_summary');
     this.baseURL = config.ai.baseURL || 'https://api.openai.com/v1';
   }
 

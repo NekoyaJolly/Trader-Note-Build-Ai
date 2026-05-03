@@ -99,7 +99,15 @@ export type AIAgentKey =
   | 'prompt_mutation'
   | 'meta_evolution'
   // Phase 7: Bull vs Bear 討論
-  | 'bull_bear_debate';
+  | 'bull_bear_debate'
+  // Side-B AI ノート生成 (aiNoteService) — Gemini 既定の汎用ノート文章生成
+  | 'ai_note'
+  // Side-A AI サマリ (aiSummaryService) — トレード履歴の要約
+  | 'ai_summary'
+  // Side-A 強化版 AI サマリ (enhancedAISummaryService) — マルチモーダル / 拡張プロンプト
+  | 'ai_summary_enhanced'
+  // 推論サービス (decisionInferenceService) — 判断推論の説明生成
+  | 'decision_inference';
 
 export const config = {
   server: {
@@ -146,6 +154,13 @@ export const config = {
       meta_evolution: process.env.AI_MODEL_META_EVOLUTION || 'anthropic/claude-opus-4.7',
       // Phase 7: Bull vs Bear 討論 — 判断品質重視のため Opus
       bull_bear_debate: process.env.AI_MODEL_BULL_BEAR_DEBATE || 'anthropic/claude-opus-4.7',
+      // 軽量サマリ・推論系 — 既定は Gemini Flash Lite (低コスト)
+      ai_note: process.env.AI_MODEL_AI_NOTE || 'google/gemini-3.1-flash-lite-preview',
+      ai_summary: process.env.AI_MODEL_AI_SUMMARY || 'google/gemini-3.1-flash-lite-preview',
+      ai_summary_enhanced:
+        process.env.AI_MODEL_AI_SUMMARY_ENHANCED || 'google/gemini-3.1-flash-lite-preview',
+      decision_inference:
+        process.env.AI_MODEL_DECISION_INFERENCE || 'google/gemini-3.1-flash-lite-preview',
     } as Record<AIAgentKey, string>,
   },
   market: {
@@ -187,17 +202,46 @@ export const config = {
 };
 
 /**
+ * `AI_MODEL_OVERRIDE_ALL` env が有効に設定されていれば trim した値を返す。
+ * 空文字 / 空白のみは未設定扱い。
+ *
+ * `modelFor()` と `AIProvider` の既定モデル解決の両方から呼ばれ、
+ * 「override が効くのは `modelFor()` 経由だけ」という抜けを塞ぐ。
+ */
+function readOverrideAll(): string | null {
+  const raw = process.env.AI_MODEL_OVERRIDE_ALL;
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * `AIProvider` 等が `options.model` 未指定で構築された時のグローバル既定モデル。
+ * `AI_MODEL_OVERRIDE_ALL` を最優先、無ければ `config.ai.model` (= `AI_MODEL` env / ハードコード既定)。
+ */
+export function resolveDefaultModel(): string {
+  return readOverrideAll() ?? config.ai.model;
+}
+
+/**
  * エージェント／サービスに対応するモデル名を返すヘルパー。
  *
- * 優先順位:
- *   1. エージェント別環境変数 `AI_MODEL_<KEY>`（例: `AI_MODEL_STRATEGIST`）
- *   2. `config.ai.models[key]` のハードコード既定値 (Phase 6.5 で全キー設定済み)
- *   3. グローバル `AI_MODEL` / `config.ai.model` (安全網、通常は使われない)
+ * 優先順位 (上から先勝ち):
+ *   1. `AI_MODEL_OVERRIDE_ALL` env (= 全 modelFor() 呼び出しを一括上書き、テスト・コスト切替用)
+ *   2. エージェント別環境変数 `AI_MODEL_<KEY>`（例: `AI_MODEL_STRATEGIST`）
+ *      ※ 上記は config 初期化時に `config.ai.models[key]` へ既に反映済み
+ *   3. `config.ai.models[key]` のハードコード既定値 (Phase 6.5 で全キー設定済み)
+ *   4. グローバル `AI_MODEL` / `config.ai.model` (安全網、通常は使われない)
  *
- * Phase 6.5: 全エージェントが `config.ai.models` に明示的なモデル ID を持つため
- * 通常は 2 で解決し 3 にはフォールバックしない。3 は将来の新エージェント追加時の
- * 安全網としてのみ残す。
+ * 1 を入れる動機: 16+ 個ある `AI_MODEL_<KEY>` を 1 個ずつ書き換えなくても、
+ *   `AI_MODEL_OVERRIDE_ALL=gpt-4o-mini` の 1 行で全エージェントを安いモデルに振れる。
+ *   未設定なら 2〜4 の挙動 (= 既存のまま) を保つので本番設定は完全に非破壊。
+ *
+ * ※ `modelFor()` を経由しない `new AIProvider()` (引数なし) も `resolveDefaultModel()`
+ *    が同じ override を読むため、本当に全 AI 呼び出しが上書きされる。
  */
 export function modelFor(key: AIAgentKey): string {
+  const overrideAll = readOverrideAll();
+  if (overrideAll !== null) return overrideAll;
   return config.ai.models[key] || config.ai.model;
 }
