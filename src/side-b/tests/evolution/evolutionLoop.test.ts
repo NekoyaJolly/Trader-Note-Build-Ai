@@ -9,7 +9,11 @@
 import { CrossoverAgent } from '../../agents/CrossoverAgent';
 import { MutationAgent } from '../../agents/MutationAgent';
 import { DiversityEnforcer } from '../../evolution/DiversityEnforcer';
-import { EvolutionLoop, type RunScreeningBacktestFn } from '../../evolution/EvolutionLoop';
+import {
+  EvolutionLoop,
+  type RunScreeningBacktestFn,
+  type EvolutionBacktestPersister,
+} from '../../evolution/EvolutionLoop';
 import { StrategyPopulation } from '../../evolution/StrategyPopulation';
 import { SurrogateFitnessSimulator } from '../../strategy_dsl/SurrogateFitnessSimulator';
 import { StrategyDSLSchema } from '../../strategy_dsl/schema';
@@ -606,8 +610,14 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         return makeFormalBtResponse(isPass ? 1.5 : 0.5, 0.55, 30);
       });
 
-    const createMany = jest.fn().mockResolvedValue([]);
-    const repo = { create: jest.fn(), createMany, findById: jest.fn(), findByEvolutionRun: jest.fn() };
+    // EvolutionLoop は createMany しか呼ばないため、EvolutionBacktestPersister 型 (Pick<..., 'createMany'>) で受ける。
+    const createMany: jest.MockedFunction<EvolutionBacktestPersister['createMany']> = jest
+      .fn<
+        ReturnType<EvolutionBacktestPersister['createMany']>,
+        Parameters<EvolutionBacktestPersister['createMany']>
+      >()
+      .mockResolvedValue([]);
+    const repoStub: EvolutionBacktestPersister = { createMany };
 
     const loop = new EvolutionLoop({
       population,
@@ -617,8 +627,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       enforcer: new DiversityEnforcer(),
       defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
       runFormalBacktest,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 部分的なモック (テスト用)
-      evolutionBacktestRepo: repo as any,
+      evolutionBacktestRepo: repoStub,
       evolutionRunId: '00000000-0000-0000-0000-000000000001',
     });
 

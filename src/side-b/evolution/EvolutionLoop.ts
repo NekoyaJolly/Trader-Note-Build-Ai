@@ -49,6 +49,13 @@ import {
 } from '../../backend/repositories/evolutionBacktestRunRepository';
 
 /**
+ * EvolutionLoop が repository に求める最小契約 (createMany のみ)。
+ * テストで実 DB を介さない型付きモックを書けるように切り出す。
+ * 既定実装の `EvolutionBacktestRunRepository` はこの形を満たす。
+ */
+export type EvolutionBacktestPersister = Pick<EvolutionBacktestRunRepository, 'createMany'>;
+
+/**
  * analysis-engine の正式 BT を呼ぶ関数 (DI 用)。
  * 既定では `analysisEngineClient.runScreeningBacktest` (HTTP)。テストではモックを差し替える。
  */
@@ -73,11 +80,11 @@ export interface EvolutionLoopDeps {
    */
   formalBtTopK?: number;
   /**
-   * 段階 4a.4: 正式 BT 履歴を永続化する repository。
+   * 段階 4a.4: 正式 BT 履歴を永続化する書き込み口 (createMany のみ要求)。
    * 省略時は EvolutionBacktestRun テーブルへの書き込みクライアント。
-   * テストでは null や mock を渡せる。null を渡すと永続化をスキップする。
+   * `null` を渡すと永続化をスキップする (テスト用 / DB 切り離し運用)。
    */
-  evolutionBacktestRepo?: EvolutionBacktestRunRepository | null;
+  evolutionBacktestRepo?: EvolutionBacktestPersister | null;
   /**
    * 段階 4a.4: 進化ループ実行単位 ID。1 サイクル = 1 evolutionRunId。
    * 省略時は EvolutionLoop インスタンスごとに自動生成 (cron 起動毎に new するため)。
@@ -191,7 +198,7 @@ const FORMAL_BT_MIN_TRADES = VALIDATION_THRESHOLDS.common.minTradeCount;
 export class EvolutionLoop {
   private readonly runFormalBacktest: RunScreeningBacktestFn;
   private readonly formalBtTopK: number;
-  private readonly evolutionBacktestRepo: EvolutionBacktestRunRepository | null;
+  private readonly evolutionBacktestRepo: EvolutionBacktestPersister | null;
   private readonly evolutionRunId: string;
 
   constructor(private readonly deps: EvolutionLoopDeps) {
@@ -275,23 +282,27 @@ export class EvolutionLoop {
       }
     }
 
-    // surrogate 厳格 3 条件を通った candidate を抽出し、surrogate スコア降順で top K に絞る。
+    // surrogate 厳格 3 条件を通った candidate と元 DSL のペアを抽出し、surrogate スコア降順で top K に絞る。
     const surrogateCandidates = this.extractPromotionCandidates(elites, metrics, dslById);
     const ranked = surrogateCandidates
       .slice()
-      .sort((a, b) => (scores.get(b.dslId) ?? -Infinity) - (scores.get(a.dslId) ?? -Infinity))
+      .sort(
+        (a, b) =>
+          (scores.get(b.candidate.dslId) ?? -Infinity) -
+          (scores.get(a.candidate.dslId) ?? -Infinity),
+      )
       .slice(0, this.formalBtTopK);
 
     // 段階 4a.3: top K を analysis-engine 正式 BT で再検証。
     //   - formalBtVerifiedCandidates: 正式 BT を呼んだ全件 (失敗理由付き)、運用ログ用
     //   - promotionCandidates:        formalBtPassed=true のみ、Phase 5B 検証への入力源
-    const verifyResults = await this.verifyCandidatesWithFormalBacktest(ranked, dslById, scores, period);
+    const verifyResults = await this.verifyCandidatesWithFormalBacktest(ranked, scores, period);
     const formalBtVerifiedCandidates = verifyResults.map((r) => r.candidate);
     const promotionCandidates = formalBtVerifiedCandidates.filter((c) => c.formalBtPassed);
 
-    // 段階 4a.4: 正式 BT 履歴を永続化 (passed/failed 全件)。
+    // 段階 4a.4: 正式 BT 履歴を永続化 (passed/failed 全件、DSL 不在分岐は無いので欠損なし)。
     if (this.evolutionBacktestRepo) {
-      await this.persistFormalBtHistory(verifyResults, dslById).catch(() => undefined);
+      await this.persistFormalBtHistory(verifyResults).catch(() => undefined);
     }
 
     await population.save().catch(() => undefined);
@@ -319,13 +330,16 @@ export class EvolutionLoop {
    * 段階 4a.3 から: ここを通過した候補は **正式 BT ゲート (verifyCandidatesWithFormalBacktest)
    * で再検証** され、`formalBtPassed === true` のものだけが `promotionCandidates` に残る。
    * surrogate 単独では絶対に昇格しない。
+   *
+   * 戻り値: `{ candidate, dsl }` ペアの配列。dsl はハッシュ計算 / 永続化で必要なため、
+   * 後段で `dslById.get(...)` を再度引かなくて済むよう一緒に返す。
    */
   private extractPromotionCandidates(
     elites: StrategyDSL[],
     metrics: Map<string, SurrogateFitnessAggregate>,
     dslById: Map<string, StrategyDSL>,
-  ): EvolutionPromotionCandidate[] {
-    const out: EvolutionPromotionCandidate[] = [];
+  ): Array<{ candidate: EvolutionPromotionCandidate; dsl: StrategyDSL }> {
+    const out: Array<{ candidate: EvolutionPromotionCandidate; dsl: StrategyDSL }> = [];
     for (const dsl of elites) {
       const agg = metrics.get(dsl.id);
       if (!agg) continue;
@@ -333,21 +347,26 @@ export class EvolutionLoop {
       if (agg.validationPf <= MIN_VALIDATION_PROFIT_FACTOR) continue;
       if (agg.overfitScore >= MAX_OVERFIT_SCORE) continue;
 
+      // dslById は population.getByRegime(regime) の全要素 + extra を保持しており、
+      // elites もその中から選抜されているため、dslById.get(dsl.id) は必ず非 undefined。
       const fromPop = dslById.get(dsl.id) ?? dsl;
       out.push({
-        dslId: fromPop.id,
-        source: 'evolution',
-        regime: fromPop.regimeTarget,
-        symbol: fromPop.symbol,
-        timeframe: fromPop.timeframe,
-        trainPf: agg.trainPf,
-        validationPf: agg.validationPf,
-        overfitScore: agg.overfitScore,
-        validationTradeCount: agg.validation.summary.totalTrades,
-        description: fromPop.metadata.description,
-        // 正式 BT ゲート前の初期値。verifyCandidatesWithFormalBacktest で必ず上書きされる。
-        formalBtPassed: false,
-        formalBtMetrics: null,
+        candidate: {
+          dslId: fromPop.id,
+          source: 'evolution',
+          regime: fromPop.regimeTarget,
+          symbol: fromPop.symbol,
+          timeframe: fromPop.timeframe,
+          trainPf: agg.trainPf,
+          validationPf: agg.validationPf,
+          overfitScore: agg.overfitScore,
+          validationTradeCount: agg.validation.summary.totalTrades,
+          description: fromPop.metadata.description,
+          // 正式 BT ゲート前の初期値。verifyCandidatesWithFormalBacktest で必ず上書きされる。
+          formalBtPassed: false,
+          formalBtMetrics: null,
+        },
+        dsl: fromPop,
       });
     }
     return out;
@@ -365,31 +384,30 @@ export class EvolutionLoop {
    *
    * BT 期間は surrogate 評価と同じ `period` を使う (validation 期間との整合性は将来課題)。
    *
-   * 段階 4a.4: 永続化のため、戻り値には candidate に加えて engineVersion / surrogateScore を含む。
+   * 段階 4a.4: 入力は `extractPromotionCandidates` が返す `{candidate, dsl}` ペアを直接受け取る
+   *   ため、内部で `dslById` を再 lookup する必要がない (DSL 不在分岐を削除)。
+   *   戻り値には candidate / dsl に加えて engineVersion / surrogateScore を含む (永続化で利用)。
    */
   private async verifyCandidatesWithFormalBacktest(
-    candidates: EvolutionPromotionCandidate[],
-    dslById: Map<string, StrategyDSL>,
+    candidatesWithDsl: Array<{ candidate: EvolutionPromotionCandidate; dsl: StrategyDSL }>,
     scores: Map<string, number>,
     period: BacktestPeriod,
-  ): Promise<Array<{ candidate: EvolutionPromotionCandidate; engineVersion: string; surrogateScore: number }>> {
-    const out: Array<{ candidate: EvolutionPromotionCandidate; engineVersion: string; surrogateScore: number }> = [];
-    for (const cand of candidates) {
+  ): Promise<
+    Array<{
+      candidate: EvolutionPromotionCandidate;
+      dsl: StrategyDSL;
+      engineVersion: string;
+      surrogateScore: number;
+    }>
+  > {
+    const out: Array<{
+      candidate: EvolutionPromotionCandidate;
+      dsl: StrategyDSL;
+      engineVersion: string;
+      surrogateScore: number;
+    }> = [];
+    for (const { candidate: cand, dsl } of candidatesWithDsl) {
       const surrogateScore = scores.get(cand.dslId) ?? 0;
-      const dsl = dslById.get(cand.dslId);
-      if (!dsl) {
-        out.push({
-          candidate: {
-            ...cand,
-            formalBtPassed: false,
-            formalBtMetrics: null,
-            formalBtFailureReason: 'DSL not found in current generation map',
-          },
-          engineVersion: 'unknown',
-          surrogateScore,
-        });
-        continue;
-      }
 
       const resolvedParams = defaultParameterValues(dsl);
       const notePayload = dslToBacktestNotePayload(dsl, resolvedParams);
@@ -422,6 +440,7 @@ export class EvolutionLoop {
               err instanceof Error ? err.message : String(err)
             }`,
           },
+          dsl,
           engineVersion: 'unknown',
           surrogateScore,
         });
@@ -444,6 +463,7 @@ export class EvolutionLoop {
             formalBtMetrics,
             formalBtFailureReason: `tradeCount ${formalBtMetrics.tradeCount} < ${FORMAL_BT_MIN_TRADES}`,
           },
+          dsl,
           engineVersion,
           surrogateScore,
         });
@@ -457,6 +477,7 @@ export class EvolutionLoop {
             formalBtMetrics,
             formalBtFailureReason: `pf ${formalBtMetrics.pf} < ${FORMAL_BT_MIN_PF}`,
           },
+          dsl,
           engineVersion,
           surrogateScore,
         });
@@ -469,6 +490,7 @@ export class EvolutionLoop {
           formalBtPassed: true,
           formalBtMetrics,
         },
+        dsl,
         engineVersion,
         surrogateScore,
       });
@@ -479,37 +501,36 @@ export class EvolutionLoop {
   /**
    * 段階 4a.4: 正式 BT 履歴を `EvolutionBacktestRun` に永続化する。
    *
-   * passed/failed 全件を保存する (運用観察用)。1 件失敗しても他は継続。
+   * passed/failed 全件を保存する (運用観察用)。1 件失敗しても他は継続 (repo 側の挙動)。
    * BT エンジンは現状 analysis-engine 固定のため `engine = 'analysis-engine'`。
+   * `engineVersion` は HTTP 失敗時のみ `'unknown'` (verify 側で埋める)。
    *
-   * `engineVersion` は analysis-engine から返却された値 (例: 'analysis-engine/backtesting.py@0.6.5')。
-   * 失敗ケース (HTTP / DSL not found) はレスポンスがないため `'unknown'` を入れる。
+   * verifyResults は `{ candidate, dsl, engineVersion, surrogateScore }` を直接持つため、
+   * ここでは追加の lookup を行わない (= DSL 不在による行欠損が起こらない)。
    */
   private async persistFormalBtHistory(
-    verifyResults: Array<{ candidate: EvolutionPromotionCandidate; engineVersion: string; surrogateScore: number }>,
-    dslById: Map<string, StrategyDSL>,
+    verifyResults: Array<{
+      candidate: EvolutionPromotionCandidate;
+      dsl: StrategyDSL;
+      engineVersion: string;
+      surrogateScore: number;
+    }>,
   ): Promise<void> {
     if (!this.evolutionBacktestRepo || verifyResults.length === 0) return;
 
-    const rows = verifyResults
-      .map((r) => {
-        const dsl = dslById.get(r.candidate.dslId);
-        if (!dsl) return null;
-        return {
-          evolutionRunId: this.evolutionRunId,
-          generation: dsl.generation,
-          candidateId: r.candidate.dslId,
-          candidateHash: hashStrategyDsl(dsl),
-          dslSnapshot: dsl,
-          surrogateScore: r.surrogateScore,
-          formalBtPassed: r.candidate.formalBtPassed,
-          formalBtMetrics: r.candidate.formalBtMetrics,
-          formalBtFailureReason: r.candidate.formalBtFailureReason ?? null,
-          engine: 'analysis-engine',
-          engineVersion: r.engineVersion,
-        };
-      })
-      .filter((r): r is NonNullable<typeof r> => r !== null);
+    const rows = verifyResults.map((r) => ({
+      evolutionRunId: this.evolutionRunId,
+      generation: r.dsl.generation,
+      candidateId: r.candidate.dslId,
+      candidateHash: hashStrategyDsl(r.dsl),
+      dslSnapshot: r.dsl,
+      surrogateScore: r.surrogateScore,
+      formalBtPassed: r.candidate.formalBtPassed,
+      formalBtMetrics: r.candidate.formalBtMetrics,
+      formalBtFailureReason: r.candidate.formalBtFailureReason ?? null,
+      engine: 'analysis-engine',
+      engineVersion: r.engineVersion,
+    }));
 
     await this.evolutionBacktestRepo.createMany(rows);
   }
@@ -518,15 +539,18 @@ export class EvolutionLoop {
 /**
  * DSL の構造ハッシュ。同一構造の重複検出 / 再評価追跡に使う。
  *
- * `id` / `metadata.createdAt` のような世代ごとに変わるフィールドは除外し、
- * 戦略構造 (entry / stopLoss / takeProfit / parameters / regimeTarget / symbol / timeframe) のみ
- * 安定 JSON 化して SHA-256 を取る。
+ * - `id` / `metadata.createdAt` のような世代ごとに変わるフィールドは除外
+ * - symbol / timeframe は **正規化後** の値でハッシュ化する
+ *   (DSL 生成時点の表記ゆれ "EUR/USD" vs "EURUSD" / "1h" vs "60m" で
+ *    実質同一戦略の hash が分裂するのを防ぐ)
+ * - 残りの戦略構造 (entry / stopLoss / takeProfit / parameters / regimeTarget) は
+ *   Zod schema で型が固定されているため、安定 JSON 化して SHA-256
  */
 function hashStrategyDsl(dsl: StrategyDSL): string {
   const structural = {
     regimeTarget: dsl.regimeTarget,
-    symbol: dsl.symbol,
-    timeframe: dsl.timeframe,
+    symbol: normalizeCTraderSymbol(dsl.symbol),
+    timeframe: normalizeTimeframe(dsl.timeframe),
     entry: dsl.entry,
     stopLoss: dsl.stopLoss,
     takeProfit: dsl.takeProfit,
@@ -536,13 +560,25 @@ function hashStrategyDsl(dsl: StrategyDSL): string {
 }
 
 /**
+ * JSON として表現可能な値の型 (`stableStringify` の入力境界)。
+ * `unknown` を避けて undefined / function / Symbol などの非 JSON 値の混入を型レベルで弾く。
+ */
+type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly JsonValue[]
+  | { readonly [key: string]: JsonValue };
+
+/**
  * キー順固定の安定 JSON 文字列。`JSON.stringify` の挿入順依存を避ける。
  * 同一構造の DSL が常に同じハッシュを生むことを保証する。
  */
-function stableStringify(value: unknown): string {
+function stableStringify(value: JsonValue): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map((v) => stableStringify(v)).join(',')}]`;
-  const obj = value as Record<string, unknown>;
+  const obj = value as { readonly [key: string]: JsonValue };
   const keys = Object.keys(obj).sort();
   return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(',')}}`;
 }
