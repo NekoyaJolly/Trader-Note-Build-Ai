@@ -8,10 +8,10 @@
 import { prisma } from '../../db/client';
 
 export async function cleanupTradeImportRelatedTestData(): Promise<void> {
+  // Critical-4 段階 3b: "BacktestRun" は廃止
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
       "AISummary",
-      "BacktestRun",
       "MatchResult",
       "NotificationLog",
       "EvaluationLog",

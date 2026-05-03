@@ -136,7 +136,6 @@ model TradeNote {
   pausedUntil DateTime? @db.Timestamptz(6)
 
   aiSummary            AISummary?
-  backtestRuns         BacktestRun[]
   evaluationLogs       EvaluationLog[]       @relation("EvaluationLogNote")
   matchResult          MatchResult[]
   notificationLogs     NotificationLog[]     @relation("NotificationLogNote")
@@ -426,101 +425,6 @@ model RevaluationJob {
 
   @@index([status, createdAt], map: "idx_revaluationjob_status_created")
   @@index([jobType, status], map: "idx_revaluationjob_type_status")
-}
-
-/// バックテスト実行条件
-model BacktestRun {
-  id                String          @id @default(uuid()) @db.Uuid
-  /// 対象ノート ID
-  noteId            String          @db.Uuid
-  /// 銘柄シンボル
-  symbol            String
-  /// 時間足（例: 1m, 5m, 15m）
-  timeframe         String
-  /// バックテスト開始日
-  startDate         DateTime        @db.Timestamptz(6)
-  /// バックテスト終了日
-  endDate           DateTime        @db.Timestamptz(6)
-  /// 一致判定しきい値（0.0〜1.0）
-  matchThreshold    Float
-  /// 利確幅（pips/ポイント）
-  takeProfit        Decimal         @db.Decimal(18, 8)
-  /// 損切幅（pips/ポイント）
-  stopLoss          Decimal         @db.Decimal(18, 8)
-  /// 最大保有時間（分）
-  maxHoldingMinutes Int             @default(1440)
-  /// 取引コスト（スプレッド/手数料）
-  tradingCost       Decimal?        @db.Decimal(18, 8)
-  /// 実行状態
-  status            BacktestStatus  @default(pending)
-  /// 作成日時
-  createdAt         DateTime        @default(now()) @db.Timestamptz(6)
-  /// 更新日時
-  updatedAt         DateTime        @updatedAt @db.Timestamptz(6)
-  events            BacktestEvent[]
-  result            BacktestResult?
-  note              TradeNote       @relation(fields: [noteId], references: [id])
-
-  @@index([noteId], map: "idx_backtestrun_noteid")
-  @@index([status, createdAt], map: "idx_backtestrun_status_created")
-}
-
-/// バックテスト集計結果
-model BacktestResult {
-  id           String      @id @default(uuid()) @db.Uuid
-  /// 対応するバックテスト実行 ID
-  runId        String      @unique @db.Uuid
-  /// セットアップ出現回数
-  setupCount   Int
-  /// 勝ちトレード数
-  winCount     Int
-  /// 負けトレード数
-  lossCount    Int
-  /// タイムアウト数
-  timeoutCount Int
-  /// 勝率（0.0〜1.0）
-  winRate      Float
-  /// プロフィットファクター（総利益/総損失）
-  profitFactor Float?
-  /// 総利益
-  totalProfit  Decimal     @db.Decimal(18, 8)
-  /// 総損失
-  totalLoss    Decimal     @db.Decimal(18, 8)
-  /// 平均損益
-  averagePnL   Decimal     @db.Decimal(18, 8)
-  /// 期待値（平均損益 × 勝率 - 平均損失 × 敗率）
-  expectancy   Decimal     @db.Decimal(18, 8)
-  /// 最大ドローダウン
-  maxDrawdown  Decimal?    @db.Decimal(18, 8)
-  /// 計算完了日時
-  completedAt  DateTime    @default(now()) @db.Timestamptz(6)
-  run          BacktestRun @relation(fields: [runId], references: [id])
-}
-
-/// バックテスト個別イベント（各一致場面の結果）
-model BacktestEvent {
-  id         String          @id @default(uuid()) @db.Uuid
-  /// 対応するバックテスト実行 ID
-  runId      String          @db.Uuid
-  /// エントリー時刻
-  entryTime  DateTime        @db.Timestamptz(6)
-  /// エントリー価格
-  entryPrice Decimal         @db.Decimal(18, 8)
-  /// 一致スコア
-  matchScore Float
-  /// 決済時刻
-  exitTime   DateTime?       @db.Timestamptz(6)
-  /// 決済価格
-  exitPrice  Decimal?        @db.Decimal(18, 8)
-  /// 結果（win: 利確到達、loss: 損切到達、timeout: タイムアウト）
-  outcome    BacktestOutcome
-  /// 損益（pips/ポイント）
-  pnl        Decimal?        @db.Decimal(18, 8)
-  /// 作成日時
-  createdAt  DateTime        @default(now()) @db.Timestamptz(6)
-  run        BacktestRun     @relation(fields: [runId], references: [id])
-
-  @@index([runId, entryTime], map: "idx_backtestevent_run_entry")
 }
 
 /// Web Push 購読情報

@@ -1,7 +1,10 @@
 /**
- * ブリッジ層（Phase 4b 縮小版）の再エクスポート
+ * ブリッジ層 (Critical-4 段階 3b 後の縮小版) の再エクスポート
  *
- * Side-B の EdgeHypothesis を Side-A 検証基盤と接続するためのモジュール群。
+ * 旧経路型 (`MaterializationError` / `MaterializationResult` / `MaterializationPath` /
+ * `MaterializeForValidationOptions`) は段階 3b で完全撤去。本 index は新経路の
+ * `MaterializationService.materializeFromVirtualTrade` (VirtualTrade → TradeNote) と
+ * `ScreeningOrchestrator` (analysis-engine 経由 BT) のみ公開する。
  */
 
 export {
@@ -16,10 +19,3 @@ export {
     type ScreeningOrchestratorOptions,
     type ScreeningRunResult,
 } from './ScreeningOrchestrator';
-
-export {
-    MaterializationError,
-    type MaterializationPath,
-    type MaterializationResult,
-    type MaterializeForValidationOptions,
-} from './types';
