@@ -11,7 +11,6 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 // 直接インポートに変更（index.ts経由でのモジュール解決問題を回避）
-import BacktestPanel from "@/components/BacktestPanel";
 import PerformancePanel from "@/components/PerformancePanel";
 
 /**
@@ -466,11 +465,6 @@ export default function NoteDetailPage() {
           </div>
         </CardContent>
       </Card>
-
-      {/* バックテストパネル（承認済みノートのみ表示） */}
-      {currentStatus === "active" && (
-        <BacktestPanel noteId={id} symbol={note.symbol} />
-      )}
 
       {/* パフォーマンスパネル（承認済みノートのみ表示） */}
       {currentStatus === "active" && (

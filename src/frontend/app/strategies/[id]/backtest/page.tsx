@@ -36,7 +36,6 @@ import {
 } from "@/lib/api";
 import type { Strategy, BacktestResult, BacktestTradeEvent } from "@/types/strategy";
 import { MonteCarloTab } from "@/components/MonteCarloTab";
-import { NoteBacktestTab } from "@/components/NoteBacktestTab";
 import PatternAnalysisPanel from "@/components/strategy/PatternAnalysisPanel";
 import BacktestChartTab from "@/components/BacktestChartTab";
 
@@ -275,7 +274,7 @@ export default function StrategyBacktestPage() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"summary" | "trades" | "chart" | "history" | "walkforward" | "filter" | "montecarlo" | "notebacktest" | "pattern">("summary");
+  const [activeTab, setActiveTab] = useState<"summary" | "trades" | "chart" | "history" | "walkforward" | "filter" | "montecarlo" | "pattern">("summary");
 
   // ウォークフォワードテストステート
   const [walkForwardParams, setWalkForwardParams] = useState({
@@ -1195,15 +1194,6 @@ export default function StrategyBacktestPage() {
                       モンテカルロ
                     </button>
                     <button
-                      onClick={() => setActiveTab("notebacktest")}
-                      className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${activeTab === "notebacktest"
-                        ? "text-cyan-400 border-b-2 border-cyan-400"
-                        : "text-gray-400 hover:text-gray-200"
-                        }`}
-                    >
-                      ノート検証
-                    </button>
-                    <button
                       onClick={() => setActiveTab("pattern")}
                       className={`px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${activeTab === "pattern"
                         ? "text-purple-400 border-b-2 border-purple-400"
@@ -1921,11 +1911,6 @@ export default function StrategyBacktestPage() {
                         maxHoldingMinutes: strategy?.currentVersion?.exitSettings?.maxHoldingMinutes || 1440,
                       }}
                     />
-                  )}
-
-                  {/* ノート検証タブ */}
-                  {activeTab === "notebacktest" && strategy && (
-                    <NoteBacktestTab symbol={strategy.symbol} />
                   )}
 
                   {/* AI パターン分析タブ */}
