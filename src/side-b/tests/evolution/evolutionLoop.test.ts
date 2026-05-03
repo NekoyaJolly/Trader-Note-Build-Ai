@@ -317,6 +317,12 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
     expect(runFormalBacktest).toHaveBeenCalledTimes(1);
     // surrogate を通っても正式 BT 失敗で promotionCandidates には残らない
     expect(report.promotionCandidates).toHaveLength(0);
+    // ただし formalBtVerifiedCandidates には失敗理由付きで残る (運用ログ用)
+    expect(report.formalBtVerifiedCandidates).toHaveLength(1);
+    expect(report.formalBtVerifiedCandidates[0].formalBtPassed).toBe(false);
+    expect(report.formalBtVerifiedCandidates[0].formalBtFailureReason).toMatch(
+      /analysis-engine BT failed/,
+    );
   });
 
   it('段階 4a.3: 正式 BT の PF が下限未満なら昇格候補にならない', async () => {

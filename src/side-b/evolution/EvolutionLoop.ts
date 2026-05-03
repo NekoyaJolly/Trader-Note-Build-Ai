@@ -40,6 +40,9 @@ import { runScreeningBacktest as defaultRunScreeningBacktest } from '../../backe
 import { dslToBacktestNotePayload } from '../strategy_dsl/dslToBacktestNotePayload';
 import { defaultParameterValues } from '../strategy_dsl/dslParameterUtils';
 import { VALIDATION_THRESHOLDS } from '../config/validationThresholds';
+import { normalizeCTraderSymbol } from '../../utils/symbolNormalization';
+import { normalizeTimeframe } from '../constants/timeframes';
+import type { AnalysisEngineScreeningBacktestResponse } from '../../schemas/external/analysisEngine';
 
 /**
  * analysis-engine の正式 BT を呼ぶ関数 (DI 用)。
@@ -117,8 +120,14 @@ export interface GenerationReport {
   crossoversReceived: number;
   addedToPopulation: number;
   /**
-   * Phase 4c 接続候補のメタ。
-   * Phase 5A では EdgeLedger に登録しない（本フィールドに残すだけ）。
+   * 段階 4a.3: 正式 BT を **実際に呼び出した** 候補全件 (passed/failed どちらも含む)。
+   * `formalBtFailureReason` を観測したい運用ログ用途のためにここに残す。
+   * Phase 5A では EdgeLedger には書き込まない。
+   */
+  formalBtVerifiedCandidates: EvolutionPromotionCandidate[];
+  /**
+   * 段階 4a.3: 正式 BT を **通過した** 候補のみ (= `formalBtPassed === true`)。
+   * Phase 5B 以降で StrategistAgent / Phase 4c 検証に流す対象はこちら。
    */
   promotionCandidates: EvolutionPromotionCandidate[];
   lowDiversityBoost: boolean;
@@ -250,9 +259,15 @@ export class EvolutionLoop {
       .sort((a, b) => (scores.get(b.dslId) ?? -Infinity) - (scores.get(a.dslId) ?? -Infinity))
       .slice(0, this.formalBtTopK);
 
-    // 段階 4a.3: top K のみ analysis-engine 正式 BT で再検証。formalBtPassed=true のみ残す。
-    const verified = await this.verifyCandidatesWithFormalBacktest(ranked, dslById, period);
-    const promotionCandidates = verified.filter((c) => c.formalBtPassed);
+    // 段階 4a.3: top K を analysis-engine 正式 BT で再検証。
+    //   - formalBtVerifiedCandidates: 正式 BT を呼んだ全件 (失敗理由付き)、運用ログ用
+    //   - promotionCandidates:        formalBtPassed=true のみ、Phase 5B 検証への入力源
+    const formalBtVerifiedCandidates = await this.verifyCandidatesWithFormalBacktest(
+      ranked,
+      dslById,
+      period,
+    );
+    const promotionCandidates = formalBtVerifiedCandidates.filter((c) => c.formalBtPassed);
 
     await population.save().catch(() => undefined);
 
@@ -263,6 +278,7 @@ export class EvolutionLoop {
       mutantsReceived: mutants.length,
       crossoversReceived: crosses.length,
       addedToPopulation: merged.length,
+      formalBtVerifiedCandidates,
       promotionCandidates,
       lowDiversityBoost,
       errors,
@@ -345,14 +361,19 @@ export class EvolutionLoop {
       const resolvedParams = defaultParameterValues(dsl);
       const notePayload = dslToBacktestNotePayload(dsl, resolvedParams);
 
-      let response;
+      // 既存正式 BT 経路 (StrategyBacktesterAgent / ScreeningOrchestrator) と同じ正規化を適用。
+      // 未正規化のまま送ると DB の OHLCV 表記ゆれ (例: 'EUR/USD' vs 'EURUSD') で読み取り失敗する。
+      const symbol = normalizeCTraderSymbol(dsl.symbol);
+      const timeframe = normalizeTimeframe(dsl.timeframe);
+
+      let response: AnalysisEngineScreeningBacktestResponse;
       try {
         response = await this.runFormalBacktest({
           // hypothesisId は analysis-engine 側でトレース文字列として使われるだけ (UUID 強制なし)。
           // 進化候補は EdgeHypothesis を持たないため、dslId を識別子として渡す。
           hypothesisId: dsl.id,
-          symbol: dsl.symbol,
-          timeframe: dsl.timeframe,
+          symbol,
+          timeframe,
           startDate: toIsoDateTime(period.start),
           endDate: toIsoDateTime(period.end),
           notePayload,
@@ -370,16 +391,7 @@ export class EvolutionLoop {
         continue;
       }
 
-      if (!response || !response.summary) {
-        out.push({
-          ...cand,
-          formalBtPassed: false,
-          formalBtMetrics: null,
-          formalBtFailureReason: 'analysis-engine returned empty summary',
-        });
-        continue;
-      }
-
+      // response.summary は Zod 契約で必須、ここに来た時点で存在は保証される。
       const formalBtMetrics: FormalBtMetrics = {
         pf: response.summary.pf,
         winRate: response.summary.winRate,
