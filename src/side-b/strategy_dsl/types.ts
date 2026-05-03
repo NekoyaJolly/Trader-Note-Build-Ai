@@ -43,7 +43,20 @@ export function isWaitForTriggerEntry(
   return 'type' in e && (e as { type?: string }).type === 'wait_for_trigger';
 }
 
-function isFiniteNum(x: unknown): x is number {
+/**
+ * 4a-parameters: ParameterField のオブジェクト経由で property access する際の値型。
+ * リポジトリ規約 (`unknown` 禁止) を満たしつつ、関数 / Array / undefined / 入れ子 object
+ * など実行時に現れうる「JSON 化可能でない」値を含めた最大集合を表現する。
+ *
+ * primitive | null | undefined | object (関数/配列/入れ子オブジェクトを含む)
+ *   ※ object は TypeScript 上で関数も含む (関数は `typeof === 'function'` で個別判定)
+ *   ※ unknown を使わずにこの型を経由することで、property access が `any` に
+ *     落ちず、ESLint の `no-explicit-any` / `no-restricted-syntax(unknown)` の
+ *     両方を満たす。
+ */
+type AnyParamFieldValue = number | string | boolean | null | undefined | object;
+
+function isFiniteNum(x: AnyParamFieldValue): x is number {
   return typeof x === 'number' && Number.isFinite(x);
 }
 
@@ -57,9 +70,15 @@ export function isLegacyParameterDef(
   v: ParameterField,
 ): v is { range: [number, number]; default: number; type: 'int' | 'float' } {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
-  const obj = v as { range?: unknown; default?: unknown; type?: unknown };
+  const obj = v as {
+    range?: AnyParamFieldValue;
+    default?: AnyParamFieldValue;
+    type?: AnyParamFieldValue;
+  };
   if (!Array.isArray(obj.range) || obj.range.length !== 2) return false;
-  if (!isFiniteNum(obj.range[0]) || !isFiniteNum(obj.range[1])) return false;
+  // Array.isArray narrowing は TS lib の癖で any[] になるため、AnyParamFieldValue[] に絞ってから検証
+  const range = obj.range as AnyParamFieldValue[];
+  if (!isFiniteNum(range[0]) || !isFiniteNum(range[1])) return false;
   if (!isFiniteNum(obj.default)) return false;
   return obj.type === 'int' || obj.type === 'float';
 }
@@ -73,7 +92,13 @@ export function isParameterRangeV2(
   v: ParameterField,
 ): v is { kind: 'range'; min: number; max: number; step: number; default: number } {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
-  const obj = v as { kind?: unknown; min?: unknown; max?: unknown; step?: unknown; default?: unknown };
+  const obj = v as {
+    kind?: AnyParamFieldValue;
+    min?: AnyParamFieldValue;
+    max?: AnyParamFieldValue;
+    step?: AnyParamFieldValue;
+    default?: AnyParamFieldValue;
+  };
   if (obj.kind !== 'range') return false;
   return (
     isFiniteNum(obj.min) &&
@@ -96,13 +121,28 @@ export function isRawParameterValue(v: ParameterField): v is number | string | b
  * raw scalar でも structured 定義でもない、自由形のオブジェクト。
  * 例: `{ min: 0.5, max: 1.0 }` (= range 候補だが kind:'range' タグが無い)。
  * consumer 側では warning + 単一既定値扱いにする (= grid 展開しない)。
+ *
+ * Critical-4 4a-parameters: 戻り型を `Record<string, raw scalar>` で narrow するため、
+ * 全 value が raw scalar (number / string / boolean / null) であることを実値レベルで
+ * 検証する。Zod の SimpleParameterObjectSchema が同条件を強制しているので通常パスでは
+ * 必ず通るが、`as never` 等の型回避経由で値が混入したケースに対して honest なガードを
+ * 提供するため。
  */
-export function isSimpleParameterObject(v: ParameterField): v is Record<string, number | string | boolean | null> {
-  return (
-    typeof v === 'object' &&
-    v !== null &&
-    !Array.isArray(v) &&
-    !isLegacyParameterDef(v) &&
-    !isParameterRangeV2(v)
-  );
+export function isSimpleParameterObject(
+  v: ParameterField,
+): v is Record<string, number | string | boolean | null> {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  if (isLegacyParameterDef(v) || isParameterRangeV2(v)) return false;
+  // value 型は AnyParamFieldValue を再利用 (リポジトリ規約により `unknown` を避ける)。
+  // 関数 / 配列 / 入れ子 object は AnyParamFieldValue の `object` 分岐に入り、
+  // 下の typeof 判定で拒否される。
+  const obj = v as Record<string, AnyParamFieldValue>;
+  for (const value of Object.values(obj)) {
+    if (value === null) continue;
+    const t = typeof value;
+    if (t !== 'number' && t !== 'string' && t !== 'boolean') {
+      return false;
+    }
+  }
+  return true;
 }

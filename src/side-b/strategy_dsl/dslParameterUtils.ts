@@ -22,7 +22,9 @@ export const MAX_PARAMETER_GRID_COMBINATIONS = 500;
  *   - legacy / V2 structured  → `.default` を採用
  *   - raw number              → そのまま採用
  *   - raw string/boolean/null → surrogate は数値しか扱わないため skip (warning なし、よくあるパターン)
- *   - simple object           → unsupported、warning ログを 1 度だけ出して skip
+ *   - simple object           → unsupported、該当キーごとに警告ログを出して skip
+ *     (= 1 generation 内で同 DSL が複数キーで該当すれば各キー分ログが出る。
+ *      抑制実装はせず、観測しやすい方向に倒す)
  */
 export function defaultParameterValues(dsl: StrategyDSL): Record<string, number> {
   const out: Record<string, number> = {};
@@ -52,7 +54,7 @@ export function defaultParameterValues(dsl: StrategyDSL): Record<string, number>
  * Critical-4 4a-parameters: raw number は単一値、それ以外の raw / object は空配列。
  *   `enumerateParameterGrid` 側で空配列に対しては grid 展開対象外とする扱いに揃える。
  */
-export function valuesForParameterField(key: string, def: StrategyDSL['parameters'][string]): number[] {
+export function valuesForParameterField(_key: string, def: StrategyDSL['parameters'][string]): number[] {
   if (isLegacyParameterDef(def)) {
     return [def.default];
   }
