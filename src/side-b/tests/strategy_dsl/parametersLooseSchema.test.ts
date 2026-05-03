@@ -14,7 +14,9 @@
 
 import { StrategyDSLSchema } from '../../strategy_dsl/schema';
 import {
+  countParameterGridCombinations,
   defaultParameterValues,
+  enumerateParameterGrid,
   valuesForParameterField,
 } from '../../strategy_dsl/dslParameterUtils';
 import {
@@ -82,10 +84,15 @@ describe('StrategyDSLSchema.parameters 緩和 (4a-parameters)', () => {
     expect(r.success).toBe(true);
   });
 
-  it('JSON でない値 (関数 / undefined) は弾かれる', () => {
-    // undefined は z.union で全分岐が落ちる
-    const r1 = StrategyDSLSchema.safeParse(dslWith({ k: undefined as unknown }));
-    expect(r1.success).toBe(false);
+  it('undefined 値は z.union で全分岐が落ちて弾かれる', () => {
+    const r = StrategyDSLSchema.safeParse(dslWith({ k: undefined as unknown }));
+    expect(r.success).toBe(false);
+  });
+
+  it('関数値も z.union で全分岐が落ちて弾かれる', () => {
+    const fn = (() => 42) as unknown;
+    const r = StrategyDSLSchema.safeParse(dslWith({ k: fn }));
+    expect(r.success).toBe(false);
   });
 });
 
@@ -168,6 +175,110 @@ describe('valuesForParameterField (4a-parameters)', () => {
   it('simple object → 空配列 (grid 対象外)', () => {
     const dsl = StrategyDSLSchema.parse(dslWith({ x: { min: 0.5, max: 1.0 } }));
     expect(valuesForParameterField('x', dsl.parameters.x)).toEqual([]);
+  });
+});
+
+describe('enumerateParameterGrid / countParameterGridCombinations (4a-parameters)', () => {
+  it('grid 対象キーが無ければ [{}] (= base のみ) を返す', () => {
+    const dsl = StrategyDSLSchema.parse(
+      dslWith({ raw1: 'fast', raw2: true, obj: { min: 0.5 } }),
+    );
+    expect(countParameterGridCombinations(dsl)).toBe(1);
+    expect(enumerateParameterGrid(dsl)).toEqual([{}]);
+  });
+
+  it('raw number 単一値は grid 1 通り (key を含む)', () => {
+    const dsl = StrategyDSLSchema.parse(dslWith({ x: 1.5 }));
+    expect(countParameterGridCombinations(dsl)).toBe(1);
+    expect(enumerateParameterGrid(dsl)).toEqual([{ x: 1.5 }]);
+  });
+
+  it('V2 + raw 非数値が混在しても grid 対象は V2 のみ (空配列キーは row に含まない)', () => {
+    const dsl = StrategyDSLSchema.parse(
+      dslWith({
+        sweep: { kind: 'range', min: 1, max: 3, step: 1, default: 2 },
+        ignored: 'fast',
+      }),
+    );
+    expect(countParameterGridCombinations(dsl)).toBe(3);
+    const grid = enumerateParameterGrid(dsl);
+    expect(grid).toEqual([{ sweep: 1 }, { sweep: 2 }, { sweep: 3 }]);
+    // grid row に undefined / "ignored" キーが混入しないことを確認
+    for (const row of grid) {
+      expect(Object.keys(row)).toEqual(['sweep']);
+      expect(Object.values(row).every((v) => Number.isFinite(v))).toBe(true);
+    }
+  });
+
+  it('V2 × V2 のカーテシアン積は対象キーのみで構成される', () => {
+    const dsl = StrategyDSLSchema.parse(
+      dslWith({
+        a: { kind: 'range', min: 1, max: 2, step: 1, default: 1 },
+        b: { kind: 'range', min: 10, max: 20, step: 10, default: 10 },
+      }),
+    );
+    expect(countParameterGridCombinations(dsl)).toBe(4);
+    expect(enumerateParameterGrid(dsl).length).toBe(4);
+  });
+});
+
+describe('isParameterRangeV2 強化 (4a-parameters)', () => {
+  it('kind が "range" でも min/max/step が文字列だと false', () => {
+    const fakeV2 = { kind: 'range', min: '1', max: '5', step: '1', default: '3' } as never;
+    expect(isParameterRangeV2(fakeV2)).toBe(false);
+  });
+
+  it('step が 0 や負数だと false', () => {
+    expect(
+      isParameterRangeV2({ kind: 'range', min: 1, max: 5, step: 0, default: 3 } as never),
+    ).toBe(false);
+    expect(
+      isParameterRangeV2({ kind: 'range', min: 1, max: 5, step: -1, default: 3 } as never),
+    ).toBe(false);
+  });
+
+  it('default が NaN / Infinity だと false', () => {
+    expect(
+      isParameterRangeV2({ kind: 'range', min: 1, max: 5, step: 1, default: NaN } as never),
+    ).toBe(false);
+    expect(
+      isParameterRangeV2({
+        kind: 'range',
+        min: 1,
+        max: 5,
+        step: 1,
+        default: Infinity,
+      } as never),
+    ).toBe(false);
+  });
+
+  it('全フィールドが finite number なら true', () => {
+    expect(
+      isParameterRangeV2({ kind: 'range', min: 1, max: 5, step: 1, default: 3 }),
+    ).toBe(true);
+  });
+});
+
+describe('isLegacyParameterDef 強化 (4a-parameters)', () => {
+  it('range が文字列タプルだと false', () => {
+    const fakeLegacy = { range: ['1', '3'], default: '2', type: 'int' } as never;
+    expect(isLegacyParameterDef(fakeLegacy)).toBe(false);
+  });
+
+  it('default が文字列だと false', () => {
+    expect(
+      isLegacyParameterDef({ range: [1, 3], default: '2', type: 'int' } as never),
+    ).toBe(false);
+  });
+
+  it('type が想定外文字列だと false', () => {
+    expect(
+      isLegacyParameterDef({ range: [1, 3], default: 2, type: 'string' } as never),
+    ).toBe(false);
+  });
+
+  it('正常な structured は true', () => {
+    expect(isLegacyParameterDef({ range: [1, 3], default: 2, type: 'int' })).toBe(true);
   });
 });
 
