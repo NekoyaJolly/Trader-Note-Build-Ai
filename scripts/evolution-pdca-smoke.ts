@@ -11,16 +11,18 @@
  *
  * 使い方:
  *   DATABASE_URL=... ANALYSIS_ENGINE_URL=... \
- *     npx tsx scripts/evolution-pdca-smoke.ts \
- *       --regime breakout --top-k 3 [--seed-strategies 5]
+ *     npx tsx scripts/evolution-pdca-smoke.ts --regime breakout --top-k 3
  *
  * 引数:
  *   --regime         (必須) 対象レジーム名 (例: breakout, trending_with_pullback)
  *   --top-k          (任意, 既定 3) 正式 BT に送る上限
- *   --seed-strategies (任意, 既定 0) 追加で乱数シード戦略を population に投入する数
  *   --period-start   (任意) BT 開始日 (YYYY-MM-DD)、省略時は -365 日
  *   --period-end     (任意) BT 終了日 (YYYY-MM-DD)、省略時は今日
  *   --help           ヘルプ表示
+ *
+ * 終了コード:
+ *   0 = 正常終了 / `--help` 表示
+ *   1 = 引数エラー (必須未指定 / 未知オプション)、または実行時例外
  *
  * 出力:
  *   - evolutionRunId
@@ -52,33 +54,39 @@ loadEnv();
 interface CliArgs {
   regime: string;
   topK: number;
-  seedStrategies: number;
   periodStart: string;
   periodEnd: string;
 }
 
-function parseArgs(argv: readonly string[]): CliArgs | null {
+type ParseResult =
+  | { kind: 'ok'; args: CliArgs }
+  | { kind: 'help' }
+  | { kind: 'error'; message: string };
+
+function parseArgs(argv: readonly string[]): ParseResult {
   const out: Partial<CliArgs> = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--help' || a === '-h') return null;
+    if (a === '--help' || a === '-h') return { kind: 'help' };
     if (a === '--regime') out.regime = argv[++i];
     else if (a === '--top-k') out.topK = parseInt(argv[++i], 10);
-    else if (a === '--seed-strategies') out.seedStrategies = parseInt(argv[++i], 10);
     else if (a === '--period-start') out.periodStart = argv[++i];
     else if (a === '--period-end') out.periodEnd = argv[++i];
+    else return { kind: 'error', message: `unknown argument: ${a}` };
   }
-  if (!out.regime) return null;
+  if (!out.regime) return { kind: 'error', message: '--regime is required' };
 
   const today = new Date();
   const yearAgo = new Date(today.getTime() - 365 * 24 * 60 * 60 * 1000);
 
   return {
-    regime: out.regime,
-    topK: Number.isFinite(out.topK) && out.topK! > 0 ? out.topK! : 3,
-    seedStrategies: Number.isFinite(out.seedStrategies) && out.seedStrategies! > 0 ? out.seedStrategies! : 0,
-    periodStart: out.periodStart ?? yearAgo.toISOString().slice(0, 10),
-    periodEnd: out.periodEnd ?? today.toISOString().slice(0, 10),
+    kind: 'ok',
+    args: {
+      regime: out.regime,
+      topK: Number.isFinite(out.topK) && (out.topK as number) > 0 ? (out.topK as number) : 3,
+      periodStart: out.periodStart ?? yearAgo.toISOString().slice(0, 10),
+      periodEnd: out.periodEnd ?? today.toISOString().slice(0, 10),
+    },
   };
 }
 
@@ -90,7 +98,6 @@ function printHelp(): void {
       'Options:',
       '  --regime           (required) 対象レジーム名',
       '  --top-k            (default 3) 正式 BT に送る上限',
-      '  --seed-strategies  (default 0) 追加投入する乱数シード戦略数',
       '  --period-start     (default -365d) BT 開始日 YYYY-MM-DD',
       '  --period-end       (default today) BT 終了日 YYYY-MM-DD',
       '  -h, --help         このヘルプ',
@@ -99,12 +106,19 @@ function printHelp(): void {
 }
 
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
-  if (!args) {
+  const parsed = parseArgs(process.argv.slice(2));
+  if (parsed.kind === 'help') {
     printHelp();
-    process.exit(args === null ? 0 : 1);
+    process.exit(0);
     return;
   }
+  if (parsed.kind === 'error') {
+    console.error(`[smoke] argument error: ${parsed.message}`);
+    printHelp();
+    process.exit(1);
+    return;
+  }
+  const args = parsed.args;
 
   console.log('[smoke] 引数:', args);
   await prisma.$connect();

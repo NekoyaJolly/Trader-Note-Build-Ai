@@ -110,7 +110,12 @@ export class EvolutionBacktestRunRepository {
    * 用途:
    *  - formalBtPassed=0 件でも、どこで何件落ちたかを 1 クエリで確認できる
    *  - generation 別の通過率を観測 (親個体プール戦略の効果測定の準備)
-   *  - failureReason は文字列なので prefix で分類するロジックは呼び出し側に委ねる
+   *
+   * 集計仕様:
+   *  - failureReason の生文字列は `classifyFailureReason()` で 6 カテゴリに正規化してから
+   *    `failureReasonCounts` にカウント (insufficient_trades / low_pf / analysis_engine_timeout
+   *    / analysis_engine_error / dsl_missing / other / unknown)
+   *  - 別の分類が必要な場合は `findByEvolutionRun()` で生データを取って独自集計する
    */
   async summarizeByEvolutionRun(evolutionRunId: string): Promise<EvolutionRunSummary> {
     const rows = await prisma.evolutionBacktestRun.findMany({
