@@ -202,21 +202,46 @@ export const config = {
 };
 
 /**
+ * `AI_MODEL_OVERRIDE_ALL` env が有効に設定されていれば trim した値を返す。
+ * 空文字 / 空白のみは未設定扱い。
+ *
+ * `modelFor()` と `AIProvider` の既定モデル解決の両方から呼ばれ、
+ * 「override が効くのは `modelFor()` 経由だけ」という抜けを塞ぐ。
+ */
+function readOverrideAll(): string | null {
+  const raw = process.env.AI_MODEL_OVERRIDE_ALL;
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * `AIProvider` 等が `options.model` 未指定で構築された時のグローバル既定モデル。
+ * `AI_MODEL_OVERRIDE_ALL` を最優先、無ければ `config.ai.model` (= `AI_MODEL` env / ハードコード既定)。
+ */
+export function resolveDefaultModel(): string {
+  return readOverrideAll() ?? config.ai.model;
+}
+
+/**
  * エージェント／サービスに対応するモデル名を返すヘルパー。
  *
  * 優先順位 (上から先勝ち):
- *   1. `AI_MODEL_OVERRIDE_ALL` env (= 全エージェントを一括上書き、テスト・コスト切替用)
+ *   1. `AI_MODEL_OVERRIDE_ALL` env (= 全 modelFor() 呼び出しを一括上書き、テスト・コスト切替用)
  *   2. エージェント別環境変数 `AI_MODEL_<KEY>`（例: `AI_MODEL_STRATEGIST`）
  *      ※ 上記は config 初期化時に `config.ai.models[key]` へ既に反映済み
  *   3. `config.ai.models[key]` のハードコード既定値 (Phase 6.5 で全キー設定済み)
  *   4. グローバル `AI_MODEL` / `config.ai.model` (安全網、通常は使われない)
  *
- * 1 を入れる動機: 16 個ある `AI_MODEL_<KEY>` を 1 個ずつ書き換えなくても、
- *   `AI_MODEL_OVERRIDE_ALL=gpt-4o-mini` の 1 行で全 AI 呼び出しを安いモデルに振れる。
+ * 1 を入れる動機: 16+ 個ある `AI_MODEL_<KEY>` を 1 個ずつ書き換えなくても、
+ *   `AI_MODEL_OVERRIDE_ALL=gpt-4o-mini` の 1 行で全エージェントを安いモデルに振れる。
  *   未設定なら 2〜4 の挙動 (= 既存のまま) を保つので本番設定は完全に非破壊。
+ *
+ * ※ `modelFor()` を経由しない `new AIProvider()` (引数なし) も `resolveDefaultModel()`
+ *    が同じ override を読むため、本当に全 AI 呼び出しが上書きされる。
  */
 export function modelFor(key: AIAgentKey): string {
-  const overrideAll = process.env.AI_MODEL_OVERRIDE_ALL;
-  if (overrideAll && overrideAll.trim().length > 0) return overrideAll;
+  const overrideAll = readOverrideAll();
+  if (overrideAll !== null) return overrideAll;
   return config.ai.models[key] || config.ai.model;
 }

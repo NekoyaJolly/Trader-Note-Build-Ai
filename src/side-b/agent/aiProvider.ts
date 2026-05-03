@@ -14,7 +14,7 @@
  * (破壊的変更、旧 (messages, tools?, temperature?) 形式は廃止)
  */
 
-import { config } from '../../config';
+import { config, resolveDefaultModel } from '../../config';
 import type { McpToolDefinition } from './mcpClient';
 
 // ===========================================
@@ -90,7 +90,9 @@ export class AIProvider {
 
     constructor(options?: { apiKey?: string; model?: string; baseURL?: string }) {
         this.apiKey = options?.apiKey || config.ai.apiKey;
-        this.model = options?.model || config.ai.model;
+        // options.model 未指定時は resolveDefaultModel() 経由で AI_MODEL_OVERRIDE_ALL の効果を受ける。
+        // (modelFor() を経由しない new AIProvider() でも一括上書きが効くようにするため)
+        this.model = options?.model || resolveDefaultModel();
         this.baseURL = options?.baseURL || config.ai.baseURL || 'https://api.openai.com/v1';
     }
 
