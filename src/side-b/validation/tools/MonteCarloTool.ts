@@ -21,12 +21,10 @@ import { fromPrismaJsonValue } from '../../../utils/prismaJson';
 import { VALIDATION_THRESHOLDS } from '../../config/validationThresholds';
 import type {
     HypothesisValidationInput,
-    StrategyValidationInput,
     ValidationTool,
     ValidationToolInput,
     ValidationToolResult,
 } from './types';
-import { isStrategyValidationInput } from './types';
 
 // ===========================================
 // 確率的ユーティリティ（DI 可能）
@@ -114,9 +112,6 @@ export class MonteCarloTool implements ValidationTool {
     }
 
     async execute(input: ValidationToolInput): Promise<ValidationToolResult> {
-        if (isStrategyValidationInput(input)) {
-            return this.executeStrategy(input, Date.now());
-        }
         return this.executeHypothesis(input, Date.now());
     }
 
@@ -151,18 +146,6 @@ export class MonteCarloTool implements ValidationTool {
             .filter((p): p is number => typeof p === 'number' && Number.isFinite(p));
 
         return this.runMonteFromPnls(pnls, start);
-    }
-
-    /** Phase 6.7b: SurrogateFitnessResult の PnL 列を直参照 */
-    private async executeStrategy(
-        input: StrategyValidationInput,
-        start: number,
-    ): Promise<ValidationToolResult> {
-        const pnls = input.surrogateFitnessResult.netPnls.filter((p) => Number.isFinite(p));
-        return this.runMonteFromPnls(pnls, start, {
-            executionModel: input.surrogateFitnessResult.executionModel,
-            executionConfigHash: input.surrogateFitnessResult.executionConfigHash,
-        });
     }
 
     private runMonteFromPnls(
