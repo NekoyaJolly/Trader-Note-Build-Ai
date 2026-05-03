@@ -54,6 +54,17 @@ export interface ComparisonResult {
   };
   /** 同日・同シンボルで同方向のトレード一致率 */
   alignmentRate: number;
+  /**
+   * 人間ノートの BT 統計データが取得可能か。
+   *
+   * Critical-4 段階 3b で旧 BacktestRun テーブルが廃止された影響で、現状は常に false。
+   * `human` フィールドは `calculateStats([])` の戻り値 (totalTrades=0 等) が入るが、
+   * 呼び出し側 (summarySchedulerService 等) は本フラグを見て「人間データなしとして扱う」
+   * = DB 永続化で 0 を誤記録しない / LLM 推奨で "人間データなし" として解釈する。
+   *
+   * 段階 4 で analysis-engine 経由の人間ノート BT が実装され次第 true を返すようになる。
+   */
+  humanDataAvailable: boolean;
 }
 
 /** 時系列パフォーマンスデータ */
@@ -309,6 +320,8 @@ export async function getComparisonAnalysis(
       totalPnLDiff: Math.round(totalPnLDiff * 10) / 10,
       winner,
     },
+    // Critical-4 段階 3b: 旧 BT 廃止により人間ノートの BT 統計は取得不能 (humanTrades は常に空)
+    humanDataAvailable: false,
     alignmentRate,
   };
 }
