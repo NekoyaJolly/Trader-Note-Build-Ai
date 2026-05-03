@@ -25,9 +25,6 @@ export type {
 export { default as MarketSnapshotView } from './MarketSnapshotView';
 export { default as MatchReasonVisualizer } from './MatchReasonVisualizer';
 
-// バックテスト
-export { default as BacktestPanel } from './BacktestPanel';
-
 // ナビゲーション・レイアウト
 export { default as NotificationBell } from './NotificationBell';
 export { default as EmptyState } from './EmptyState';
