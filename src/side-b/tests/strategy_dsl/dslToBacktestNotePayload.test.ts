@@ -118,6 +118,46 @@ describe('dslToBacktestNotePayload', () => {
         expect(payload.stopLoss).toEqual({ type: 'swing_point', lookbackBars: 30 });
     });
 
+    it('fixed_pips SL: 解決できない ParamRef でも positive value で fallback (Zod positive() を満たす)', () => {
+        const dsl = makeDsl({
+            stopLoss: { type: 'fixed_pips', value: '$missing' },
+        });
+        const payload = dslToBacktestNotePayload(dsl, {});
+        expect(payload.stopLoss.type).toBe('fixed_pips');
+        // fallback 1.0 で positive 確保
+        expect(payload.stopLoss).toEqual({ type: 'fixed_pips', value: 1.0 });
+    });
+
+    it('SL/TP に 0 や負数が解決される場合も positive で clamp', () => {
+        const dsl = makeDsl({
+            stopLoss: { type: 'atr_multiple', value: '$zero' },
+            takeProfit: { type: 'rr_ratio', value: '$negative' },
+        });
+        const payload = dslToBacktestNotePayload(dsl, { zero: 0, negative: -1.5 });
+        // 0 / 負数 → fallback (atr_multiple→1.5, rr_ratio→2.0)
+        expect(payload.stopLoss).toEqual({ type: 'atr_multiple', value: 1.5 });
+        expect(payload.takeProfit).toEqual({ type: 'rr_ratio', value: 2.0 });
+    });
+
+    it('Condition.value の number 配列 (in 演算子用) は string[] に正規化', () => {
+        const dsl = makeDsl({
+            entry: {
+                direction: 'long',
+                trigger: {
+                    logic: 'AND',
+                    conditions: [
+                        // 3 要素の number[] (tuple ではない、in 演算子相当)
+                        { lens: 'state', feature: 'phase', op: 'in', value: [1, 2, 3] as unknown as string[] },
+                    ],
+                },
+                orderType: 'market',
+            },
+        });
+        const payload = dslToBacktestNotePayload(dsl, {});
+        // analysis-engine の Zod schema は string[] のみ受けるので number → string 化
+        expect(payload.conditions[0].value).toEqual(['1', '2', '3']);
+    });
+
     it('Condition.value が ParamRef の場合も resolve、tuple/array はそのまま', () => {
         const dsl = makeDsl({
             entry: {

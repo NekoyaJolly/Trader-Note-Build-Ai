@@ -20,6 +20,8 @@ import { dslToBacktestNotePayload } from '../strategy_dsl/dslToBacktestNotePaylo
 import type { StrategyDSL } from '../strategy_dsl/schema';
 import { defaultParameterValues } from '../strategy_dsl/dslParameterUtils';
 import { scenarioToStrategyDSL } from '../strategy_dsl/scenarioToStrategyDSL';
+import { normalizeCTraderSymbol } from '../../utils/symbolNormalization';
+import { normalizeTimeframe } from '../constants/timeframes';
 import {
     walkForwardTool as defaultWalkForward,
     monteCarloTool as defaultMonteCarlo,
@@ -198,7 +200,15 @@ export class StrategyBacktesterAgent {
         period: { start: string; end: string },
         startedAt: number,
     ): Promise<PerScenarioBacktestResult> {
-        // 1. シナリオ → DSL 変換
+        // symbol / timeframe を正規化 (ScreeningOrchestrator と同じ慣習)。
+        // ScreeningBacktestRun に保存される値が screening 経路と plan 経路で
+        // 同じ正規化規則を経ていれば、WF/MC/BH ツール側 (run.symbol/timeframe を
+        // 信頼して再正規化しない) でも整合する。
+        const symbol = normalizeCTraderSymbol(context.symbol);
+        const timeframe = normalizeTimeframe(context.timeframe);
+
+        // 1. シナリオ → DSL 変換 (DSL 内部の symbol/timeframe は元値のまま、
+        //    analysis-engine への送信値だけ正規化済みを使う)
         let dsl: StrategyDSL;
         try {
             dsl = scenarioToStrategyDSL(scenario, {
@@ -220,13 +230,13 @@ export class StrategyBacktesterAgent {
         const params = defaultParameterValues(dsl);
         const notePayload = dslToBacktestNotePayload(dsl, params);
 
-        // 3. analysis-engine 経由で BT 実行
+        // 3. analysis-engine 経由で BT 実行 (symbol/timeframe は正規化済みを送る)
         let btResponse;
         try {
             btResponse = await this.runBacktest({
                 hypothesisId: scenario.id,
-                symbol: context.symbol,
-                timeframe: context.timeframe,
+                symbol,
+                timeframe,
                 startDate: new Date(period.start).toISOString(),
                 endDate: new Date(period.end).toISOString(),
                 notePayload,
@@ -246,11 +256,12 @@ export class StrategyBacktesterAgent {
             };
         }
 
-        // 4. ScreeningBacktestRun に永続化
+        // 4. ScreeningBacktestRun に永続化 (正規化済み symbol/timeframe を保存、
+        //    後段ツールが run.symbol/timeframe をそのまま OHLCV クエリに使える前提)
         const persisted = await this.screeningBacktestRepo.create({
             hypothesisId: scenario.id,
-            symbol: context.symbol,
-            timeframe: context.timeframe,
+            symbol,
+            timeframe,
             periodStart: new Date(period.start),
             periodEnd: new Date(period.end),
             notePayload,
@@ -263,7 +274,7 @@ export class StrategyBacktesterAgent {
         // 5. WF/MC/BH を ScreeningBacktestRun.id 経由で実行 (Phase 4c と同じ統一経路)
         const input: HypothesisValidationInput = {
             kind: 'hypothesis',
-            hypothesis: buildHypothesisShape(scenario, dsl, context),
+            hypothesis: buildHypothesisShape(scenario, dsl, { symbol, timeframe }),
             period,
             screeningBacktestRunId: persisted.id,
         };

@@ -90,12 +90,13 @@ function resolveValueLike(
         return raw;
     }
     if (Array.isArray(raw)) {
-        // tuple [number, number] or string[] のいずれか。tuple の数値は ParamRef でないのでそのまま
-        // string[] も Pydantic で受け入れる側が in 演算子用としてそのまま使う
+        // tuple [number, number] (between 演算子用): 両方 number ならそのまま
         if (raw.length === 2 && raw.every((x) => typeof x === 'number')) {
             return raw as [number, number];
         }
-        return raw as string[];
+        // それ以外 (string[] / 混在 / number[] not 2-tuple) は in 演算子用として string[] に正規化
+        // analysis-engine の Zod schema は string[] のみ受け入れる前提、number 要素も String() で文字列化する
+        return raw.map((x) => String(x));
     }
     return raw;
 }
@@ -114,20 +115,40 @@ function resolveNumericValue(
     return fallback;
 }
 
+/**
+ * SL/TP の Zod schema は全 spec で `value: positive()` が必須。
+ * - ParamRef が解決できない / raw が 0 や負数のケースでも positive を満たすよう
+ *   下限 (`MIN_POSITIVE`) で clamp する
+ * - fallback もそれぞれ正の値 (atr_multiple→1.5, fixed_pips→1.0, rr_ratio→2.0)
+ *
+ * 段階 1 では fixed_pips / swing_point は engine 側で未対応のため、これらが渡っても
+ * runner.py の `detect_unsupported_specs` で early-return される。本ファイルは
+ * Zod parse をまず通すために clamp + 正の fallback を必ず保証するのが責務。
+ */
+const MIN_POSITIVE = 0.001;
+
+function clampPositive(value: number, fallback: number): number {
+    if (Number.isFinite(value) && value > 0) return value;
+    return fallback;
+}
+
 function resolveStopLoss(
     spec: StrategyDSL['stopLoss'],
     resolvedParams: Record<string, number>,
 ): BacktestStopLoss {
     if (spec.type === 'atr_multiple') {
-        return { type: 'atr_multiple', value: resolveNumericValue(spec.value, resolvedParams, 1.5) };
+        const raw = resolveNumericValue(spec.value, resolvedParams, 1.5);
+        return { type: 'atr_multiple', value: Math.max(MIN_POSITIVE, clampPositive(raw, 1.5)) };
     }
     if (spec.type === 'fixed_pips') {
-        return { type: 'fixed_pips', value: resolveNumericValue(spec.value, resolvedParams, 0) };
+        const raw = resolveNumericValue(spec.value, resolvedParams, 1.0);
+        return { type: 'fixed_pips', value: Math.max(MIN_POSITIVE, clampPositive(raw, 1.0)) };
     }
-    // swing_point
+    // swing_point: lookbackBars は int positive
+    const rawLb = resolveNumericValue(spec.lookbackBars, resolvedParams, 20);
     return {
         type: 'swing_point',
-        lookbackBars: Math.max(1, Math.round(resolveNumericValue(spec.lookbackBars, resolvedParams, 20))),
+        lookbackBars: Math.max(1, Math.round(clampPositive(rawLb, 20))),
     };
 }
 
@@ -135,12 +156,15 @@ function resolveTakeProfit(
     spec: StrategyDSL['takeProfit'],
     resolvedParams: Record<string, number>,
 ): BacktestTakeProfit {
-    const v = resolveNumericValue(spec.value, resolvedParams, 2.0);
     if (spec.type === 'rr_ratio') {
-        return { type: 'rr_ratio', value: v };
+        const raw = resolveNumericValue(spec.value, resolvedParams, 2.0);
+        return { type: 'rr_ratio', value: Math.max(MIN_POSITIVE, clampPositive(raw, 2.0)) };
     }
     if (spec.type === 'atr_multiple') {
-        return { type: 'atr_multiple', value: v };
+        const raw = resolveNumericValue(spec.value, resolvedParams, 2.0);
+        return { type: 'atr_multiple', value: Math.max(MIN_POSITIVE, clampPositive(raw, 2.0)) };
     }
-    return { type: 'fixed_pips', value: v };
+    // fixed_pips
+    const raw = resolveNumericValue(spec.value, resolvedParams, 1.0);
+    return { type: 'fixed_pips', value: Math.max(MIN_POSITIVE, clampPositive(raw, 1.0)) };
 }
