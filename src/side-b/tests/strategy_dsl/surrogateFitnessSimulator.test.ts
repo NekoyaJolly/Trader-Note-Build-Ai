@@ -1,9 +1,9 @@
 /**
- * DSLBacktestAdapter.runBacktestOnBars の単体テスト（Phase 5）
+ * SurrogateFitnessSimulator.evaluateFitnessOnBars の単体テスト（Phase 5）
  */
 
-import { DSLBacktestAdapter } from '../../strategy_dsl/DSLBacktestAdapter';
-import type { OhlcvBar } from '../../strategy_dsl/dslBacktestSimulation';
+import { SurrogateFitnessSimulator } from '../../strategy_dsl/SurrogateFitnessSimulator';
+import type { OhlcvBar } from '../../strategy_dsl/surrogateFitnessSimulation';
 import { StrategyDSLSchema } from '../../strategy_dsl/schema';
 
 function syntheticUptrendBars(n: number): OhlcvBar[] {
@@ -24,7 +24,7 @@ function syntheticUptrendBars(n: number): OhlcvBar[] {
   return out;
 }
 
-describe('DSLBacktestAdapter.runBacktestOnBars', () => {
+describe('SurrogateFitnessSimulator.evaluateFitnessOnBars', () => {
   it('学習/検証に分割して集計する', () => {
     const dsl = StrategyDSLSchema.parse({
       id: 't-dsl-1',
@@ -50,8 +50,8 @@ describe('DSLBacktestAdapter.runBacktestOnBars', () => {
     });
 
     const bars = syntheticUptrendBars(80);
-    const adapter = new DSLBacktestAdapter();
-    const agg = adapter.runBacktestOnBars(dsl, {}, { start: '2024-01-01', end: '2024-01-10' }, bars);
+    const adapter = new SurrogateFitnessSimulator();
+    const agg = adapter.evaluateFitnessOnBars(dsl, {}, { start: '2024-01-01', end: '2024-01-10' }, bars);
 
     expect(agg.dslId).toBe('t-dsl-1');
     expect(agg.train.summary.totalTrades).toBeGreaterThanOrEqual(0);

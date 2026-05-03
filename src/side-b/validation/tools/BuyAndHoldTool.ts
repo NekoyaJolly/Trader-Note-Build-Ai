@@ -183,7 +183,7 @@ export class BuyAndHoldTool implements ValidationTool {
     }
 
     /**
-     * Phase 6.7b: DSLBacktestResult.finalReturn（検証期間）と B&H を比較
+     * Phase 6.7b: SurrogateFitnessResult.finalReturn（検証期間）と B&H を比較
      */
     private async executeStrategy(
         input: StrategyValidationInput,

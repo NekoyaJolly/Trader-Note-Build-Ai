@@ -4,7 +4,7 @@
 
 import { StrategyDSLSchema } from '../../strategy_dsl/schema';
 import { collectDslOhlcvFeatureNeeds } from '../../strategy_dsl/dslOhlcvFeatureNeeds';
-import { runDslSimulation, type OhlcvBar } from '../../strategy_dsl/dslBacktestSimulation';
+import { runDslSimulation, type OhlcvBar } from '../../strategy_dsl/surrogateFitnessSimulation';
 
 function bar(
   i: number,

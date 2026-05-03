@@ -9,7 +9,7 @@ import type {
   DslSimulationOptions,
   ImmediateEntryFill,
   IntraBarExitMode,
-} from './dslBacktestSimulation';
+} from './surrogateFitnessSimulation';
 
 export type ExecutionModel = 'legacy_zero_cost' | 'bar_l1_v1' | 'bar_l2_v1';
 export type ExecutionDataSource = 'ctrader';

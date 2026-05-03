@@ -9,7 +9,7 @@
  * - BT エンジンはアプリ全体で 1 つだけ (analysis-engine + backtesting.py)
  * - DSL → ノート schema 変換は本ファイルが責任 (dslToBacktestNotePayload)
  * - Phase 4c の WF/MC/BH と入力源を統一 (ScreeningBacktestRun.id 経由)
- * - DSLBacktestAdapter (TS 自前 BT) への直接依存を撤廃
+ * - SurrogateFitnessSimulator (TS 自前 BT) への直接依存を撤廃
  *
  * @see docs/design/critical_4_bt_unification.md §13 / 段階 2
  */

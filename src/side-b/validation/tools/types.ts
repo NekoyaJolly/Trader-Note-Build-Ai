@@ -10,7 +10,7 @@
 
 import type { EdgeHypothesis } from '../../models/edgeHypothesis';
 import type { StrategyDSL } from '../../strategy_dsl/schema';
-import type { DSLBacktestResult } from '../../strategy_dsl/DSLBacktestAdapter';
+import type { SurrogateFitnessResult } from '../../strategy_dsl/SurrogateFitnessSimulator';
 
 export type ValidationAdditionalParamValue =
   | string
@@ -47,7 +47,7 @@ export interface HypothesisValidationInput {
 export interface StrategyValidationInput {
   kind: 'strategy';
   strategy: StrategyDSL;
-  dslResult: DSLBacktestResult;
+  dslResult: SurrogateFitnessResult;
   period: { start: string; end: string };
   additionalParams?: ValidationAdditionalParams;
 }

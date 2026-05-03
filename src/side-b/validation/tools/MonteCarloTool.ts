@@ -153,7 +153,7 @@ export class MonteCarloTool implements ValidationTool {
         return this.runMonteFromPnls(pnls, start);
     }
 
-    /** Phase 6.7b: DSLBacktestResult の PnL 列を直参照 */
+    /** Phase 6.7b: SurrogateFitnessResult の PnL 列を直参照 */
     private async executeStrategy(
         input: StrategyValidationInput,
         start: number,

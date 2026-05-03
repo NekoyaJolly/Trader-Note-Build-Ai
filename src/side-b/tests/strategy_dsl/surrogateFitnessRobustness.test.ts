@@ -3,8 +3,8 @@
  */
 
 import { StrategyDSLSchema } from '../../strategy_dsl/schema';
-import { runDslBacktestRobustnessOnBars, defaultCommercialScenarios } from '../../strategy_dsl/dslBacktestRobustness';
-import { runDslSimulation, type OhlcvBar } from '../../strategy_dsl/dslBacktestSimulation';
+import { runSurrogateFitnessRobustnessOnBars, defaultCommercialScenarios } from '../../strategy_dsl/surrogateFitnessRobustness';
+import { runDslSimulation, type OhlcvBar } from '../../strategy_dsl/surrogateFitnessSimulation';
 
 function trendBars(n: number, start: Date, stepMin: number): OhlcvBar[] {
   const out: OhlcvBar[] = [];
@@ -22,7 +22,7 @@ function trendBars(n: number, start: Date, stepMin: number): OhlcvBar[] {
   return out;
 }
 
-describe('runDslBacktestRobustnessOnBars', () => {
+describe('runSurrogateFitnessRobustnessOnBars', () => {
   it('defaultCommercialScenarios 本数分の run が返る', () => {
     const start = new Date('2024-01-01T00:00:00Z');
     const bars = trendBars(100, start, 60);
@@ -42,7 +42,7 @@ describe('runDslBacktestRobustnessOnBars', () => {
       parameters: {},
       metadata: { createdAt: new Date().toISOString(), createdBy: 'llm_generated' },
     });
-    const report = runDslBacktestRobustnessOnBars(
+    const report = runSurrogateFitnessRobustnessOnBars(
       dsl,
       {},
       { start: '2024-01-01', end: '2024-06-01' },

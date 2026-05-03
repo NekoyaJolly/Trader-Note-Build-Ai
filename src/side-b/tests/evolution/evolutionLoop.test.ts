@@ -11,7 +11,7 @@ import { MutationAgent } from '../../agents/MutationAgent';
 import { DiversityEnforcer } from '../../evolution/DiversityEnforcer';
 import { EvolutionLoop } from '../../evolution/EvolutionLoop';
 import { StrategyPopulation } from '../../evolution/StrategyPopulation';
-import { DSLBacktestAdapter } from '../../strategy_dsl/DSLBacktestAdapter';
+import { SurrogateFitnessSimulator } from '../../strategy_dsl/SurrogateFitnessSimulator';
 import { StrategyDSLSchema } from '../../strategy_dsl/schema';
 
 describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
@@ -48,9 +48,9 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       volume: 1000,
     }));
 
-    const adapter = new DSLBacktestAdapter();
-    jest.spyOn(adapter, 'runBacktest').mockImplementation(async (strategy, _params, _period) => {
-      const agg = adapter.runBacktestOnBars(strategy, {}, { start: '2024-06-01', end: '2024-06-03' }, bars);
+    const adapter = new SurrogateFitnessSimulator();
+    jest.spyOn(adapter, 'evaluateFitness').mockImplementation(async (strategy, _params, _period) => {
+      const agg = adapter.evaluateFitnessOnBars(strategy, {}, { start: '2024-06-01', end: '2024-06-03' }, bars);
       return Promise.resolve(agg);
     });
 
@@ -115,7 +115,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       },
     });
 
-    const adapter = new DSLBacktestAdapter();
+    const adapter = new SurrogateFitnessSimulator();
     const makeSummary = (totalTrades: number, winRate: number, pf: number) => ({
       totalTrades,
       winningTrades: Math.round(totalTrades * winRate),
@@ -134,7 +134,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
     });
 
     // 厳格 3 条件を満たす集計値（学習 PF > 1.5, 検証 PF > 1.3, 過学習 < 0.3）
-    jest.spyOn(adapter, 'runBacktest').mockResolvedValue({
+    jest.spyOn(adapter, 'evaluateFitness').mockResolvedValue({
       dslId: 'loop-test-promote',
       period: { start: '2024-01-01', end: '2024-12-31' },
       trainPf: 2.0,

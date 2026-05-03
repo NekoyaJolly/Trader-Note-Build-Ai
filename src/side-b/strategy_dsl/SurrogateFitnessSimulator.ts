@@ -1,10 +1,18 @@
 /**
- * DSL バックテストの窓口（Phase 5）
+ * SurrogateFitnessSimulator (Critical-4 段階 4a で `DSLBacktestAdapter` から改名)
  *
- * OHLCV を取得して dslBacktestSimulation に渡す。
- * 学習/検証期間分割・パラメータスイープを担当。
+ * **これは進化計算 (EvolutionLoop) 用の近似 fitness 評価であり、正式な BT 結果ではない**。
+ *
+ * - 進化計算の各世代で大量の strategy を高速に評価するための in-memory な代替評価
+ * - 学習 / 検証期間分割・パラメータスイープを担当
+ * - OHLCV を取得して surrogateFitnessSimulation に渡す
+ *
+ * **本番採用 / confirmed 昇格 / ユーザー表示 / 正式な成績保存** は
+ * **analysis-engine の結果 (ScreeningBacktestRun) のみを正** とする (Critical-4 設計書 §13)。
+ * 本ファイルが返す値は探索の進化的選択にのみ使用し、それ単独では仮説を昇格させない。
  *
  * @see docs/design/phase_5_specification.md §4.3
+ * @see docs/design/critical_4_bt_unification.md §13 (BT エンジン抽象アダプタ層 / 段階 4a)
  */
 
 import { fetchHistoricalData, type BacktestTimeframe } from '../../backend/services/strategyBacktestService';
@@ -13,7 +21,7 @@ import {
   runDslSimulation,
   type DslSimulationOptions,
   type OhlcvBar,
-} from './dslBacktestSimulation';
+} from './surrogateFitnessSimulation';
 import type { ExecutionSimulationMetadata } from './executionSimulation';
 import type { StrategyDSL } from './schema';
 import {
@@ -51,7 +59,7 @@ export interface BacktestPeriod {
   end: string;
 }
 
-export interface DslBacktestAggregate {
+export interface SurrogateFitnessAggregate {
   dslId: string;
   period: BacktestPeriod;
   /** 学習期間 */
@@ -78,7 +86,7 @@ export interface DslBacktestAggregate {
  * Side-B 検証ツールに渡す DSL BT 要約（Phase 6.7b）
  * 検証期間（ホールドアウト）のトレードを主に用いる。
  */
-export interface DSLBacktestResult {
+export interface SurrogateFitnessResult {
   dslId: string;
   period: BacktestPeriod;
   /** 検証期間の各トレード PnL */
@@ -106,10 +114,10 @@ export interface DSLBacktestResult {
 /**
  * 集計と最適化パラメータから ValidationTool 向け DTO を生成
  */
-export function toDSLBacktestResult(
-  aggregate: DslBacktestAggregate,
+export function toSurrogateFitnessResult(
+  aggregate: SurrogateFitnessAggregate,
   optimizedParams: Record<string, number>,
-): DSLBacktestResult {
+): SurrogateFitnessResult {
   const ev = aggregate.validation.trades;
   const pnls = ev.map((e) => (typeof e.pnl === 'number' && Number.isFinite(e.pnl) ? e.pnl : 0));
   const grossPnls = ev.map((e) => {
@@ -135,36 +143,36 @@ export function toDSLBacktestResult(
   };
 }
 
-export class DSLBacktestAdapter {
+export class SurrogateFitnessSimulator {
   /**
    * 指定期間の OHLCV でバックテスト。
    * 期間の 70% を学習・30% を検証に分割。
    */
-  async runBacktest(
+  async evaluateFitness(
     dsl: StrategyDSL,
     paramValues: Record<string, number>,
     period: BacktestPeriod,
     simulationOptions?: DslSimulationOptions,
-  ): Promise<DslBacktestAggregate> {
+  ): Promise<SurrogateFitnessAggregate> {
     const symbol = dsl.symbol.replace(/\//g, '');
     const btTf = dslTimeframeToBacktestTf(dsl.timeframe);
     const start = new Date(period.start);
     const end = new Date(period.end);
 
     const bars = await fetchHistoricalData(symbol, btTf, start, end);
-    return this.runBacktestOnBars(dsl, paramValues, period, bars, simulationOptions);
+    return this.evaluateFitnessOnBars(dsl, paramValues, period, bars, simulationOptions);
   }
 
   /**
    * 取得済み OHLCV で集計（テスト用）
    */
-  runBacktestOnBars(
+  evaluateFitnessOnBars(
     dsl: StrategyDSL,
     paramValues: Record<string, number>,
     period: BacktestPeriod,
     bars: OhlcvBar[],
     simulationOptions?: DslSimulationOptions,
-  ): DslBacktestAggregate {
+  ): SurrogateFitnessAggregate {
     if (bars.length < 30) {
       const empty: BacktestResultSummary = {
         totalTrades: 0,
@@ -238,17 +246,17 @@ export class DSLBacktestAdapter {
     period: BacktestPeriod,
     samplingStrategy: 'grid' | 'random' | 'default',
     sampleCount?: number,
-  ): Promise<Array<{ params: Record<string, number>; aggregate: DslBacktestAggregate }>> {
+  ): Promise<Array<{ params: Record<string, number>; aggregate: SurrogateFitnessAggregate }>> {
     const keys = Object.keys(dsl.parameters);
     const base = defaultParameterValues(dsl);
 
     if (samplingStrategy === 'default' || keys.length === 0) {
-      const aggregate = await this.runBacktest(dsl, base, period);
+      const aggregate = await this.evaluateFitness(dsl, base, period);
       return [{ params: base, aggregate }];
     }
 
     const count = Math.max(1, Math.min(sampleCount ?? 8, 32));
-    const results: Array<{ params: Record<string, number>; aggregate: DslBacktestAggregate }> = [];
+    const results: Array<{ params: Record<string, number>; aggregate: SurrogateFitnessAggregate }> = [];
     const hasV2 = keys.some((k) => isParameterRangeV2(dsl.parameters[k]));
 
     // Phase 6.7b: 明示 range の全組み合わせ（500 通り超は enumerate 内で例外）
@@ -256,7 +264,7 @@ export class DSLBacktestAdapter {
       const grid = enumerateParameterGrid(dsl);
       for (const g of grid) {
         const merged = { ...base, ...g };
-        const aggregate = await this.runBacktest(dsl, merged, period);
+        const aggregate = await this.evaluateFitness(dsl, merged, period);
         results.push({ params: merged, aggregate });
       }
       return results;
@@ -278,7 +286,7 @@ export class DSLBacktestAdapter {
             params[k] = v;
           }
         }
-        const aggregate = await this.runBacktest(dsl, params, period);
+        const aggregate = await this.evaluateFitness(dsl, params, period);
         results.push({ params, aggregate });
       }
       return results;
@@ -289,7 +297,7 @@ export class DSLBacktestAdapter {
       const k0 = keys[0];
       const def0 = dsl.parameters[k0];
       if (!isLegacyParameterDef(def0)) {
-        const aggregate = await this.runBacktest(dsl, base, period);
+        const aggregate = await this.evaluateFitness(dsl, base, period);
         return [{ params: base, aggregate }];
       }
       const steps = Math.min(count, 5);
@@ -298,7 +306,7 @@ export class DSLBacktestAdapter {
         const [lo, hi] = def0.range;
         const v = def0.type === 'int' ? Math.round(lo + t * (hi - lo)) : lo + t * (hi - lo);
         const params = { ...base, [k0]: v };
-        const aggregate = await this.runBacktest(dsl, params, period);
+        const aggregate = await this.evaluateFitness(dsl, params, period);
         results.push({ params, aggregate });
       }
       return results;
@@ -309,7 +317,7 @@ export class DSLBacktestAdapter {
     const d0 = dsl.parameters[k0];
     const d1 = dsl.parameters[k1];
     if (!isLegacyParameterDef(d0) || !isLegacyParameterDef(d1)) {
-      const aggregate = await this.runBacktest(dsl, base, period);
+      const aggregate = await this.evaluateFitness(dsl, base, period);
       return [{ params: base, aggregate }];
     }
     const n = Math.min(3, Math.ceil(Math.sqrt(count)));
@@ -324,7 +332,7 @@ export class DSLBacktestAdapter {
           ? Math.round(d1.range[0] + t1 * (d1.range[1] - d1.range[0]))
           : d1.range[0] + t1 * (d1.range[1] - d1.range[0]);
         const params = { ...base, [k0]: v0, [k1]: v1 };
-        const aggregate = await this.runBacktest(dsl, params, period);
+        const aggregate = await this.evaluateFitness(dsl, params, period);
         results.push({ params, aggregate });
       }
     }
