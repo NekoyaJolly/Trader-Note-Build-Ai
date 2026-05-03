@@ -68,7 +68,42 @@ test_endpoint() {
 echo -e "${YELLOW}[1] API 疎通テスト${NC}"
 echo ""
 
-test_endpoint "ヘルスチェック" "GET" "/health" "200"
+# ヘルスチェックは Cloud Run コールドスタートが完了するまで 503 を返すことがあるため、
+# 短いバックオフでリトライしてからテスト判定する。最大 6 回 (= 約 30 秒) 待つ。
+# 後続テストはこれが通った時点でウォーム済み前提のため retry なしで OK。
+#
+# curl の堅さ:
+#   - body と http_code を別ファイルに分けることで、stderr 混入や順序崩れに耐える
+#   - --max-time でハング防止 (10 秒)
+#   - curl の終了コード非 0 (= 接続失敗 / タイムアウト) は HTTP 000 として扱い、リトライ継続
+echo -n "テスト: ヘルスチェック (cold-start 対応リトライ) ... "
+HEALTH_OK=0
+HEALTH_LAST_CODE=""
+HEALTH_LAST_BODY=""
+HEALTH_BODY_FILE=$(mktemp)
+trap 'rm -f "$HEALTH_BODY_FILE"' EXIT
+for attempt in 1 2 3 4 5 6; do
+  HEALTH_LAST_CODE=$(curl -s --max-time 10 -o "$HEALTH_BODY_FILE" -w "%{http_code}" \
+    -X GET "$PRODUCTION_API_URL/health" 2>/dev/null)
+  curl_exit=$?
+  if [ "$curl_exit" -ne 0 ]; then
+    HEALTH_LAST_CODE="000"
+  fi
+  HEALTH_LAST_BODY=$(cat "$HEALTH_BODY_FILE" 2>/dev/null || echo '')
+  if [ "$HEALTH_LAST_CODE" = "200" ]; then
+    HEALTH_OK=1
+    break
+  fi
+  sleep 5
+done
+if [ $HEALTH_OK -eq 1 ]; then
+  echo -e "${GREEN}✓ (HTTP 200, ${attempt}/6 試行で成功)${NC}"
+  ((TESTS_PASSED++))
+else
+  echo -e "${RED}✗ (期待: HTTP 200, 実際: HTTP ${HEALTH_LAST_CODE} after 6 retries)${NC}"
+  echo "レスポンス: $HEALTH_LAST_BODY"
+  ((TESTS_FAILED++))
+fi
 test_endpoint "シンボル一覧" "GET" "/api/strategies/symbols" "200"
 
 echo ""
