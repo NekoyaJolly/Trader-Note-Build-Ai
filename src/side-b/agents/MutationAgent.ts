@@ -15,17 +15,25 @@ import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import { extractJson } from './llmJsonExtract';
 import { recordAgentUsage } from './scoringRecorder';
 
-async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<T | null> {
+/**
+ * 4a.PDCA: API 失敗 (リトライ尽くし) と「応答 content 無し」を区別するため、
+ *   discriminated union で結果を返すよう変更。
+ *   - { ok: true, value }: fn が成功
+ *   - { ok: false, error }: 全リトライ失敗 (HTTP 4xx/5xx, ネットワーク, 認証 等)
+ */
+type RetryResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
+
+async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<RetryResult<T>> {
   let last: unknown;
   for (let i = 0; i < times; i++) {
     try {
-      return await fn();
+      return { ok: true, value: await fn() };
     } catch (e) {
       last = e;
     }
   }
   console.error('[MutationAgent] リトライ尽くし', last);
-  return null;
+  return { ok: false, error: last };
 }
 
 /**
@@ -102,7 +110,7 @@ export class MutationAgent {
       `スコア:\n${perfLines.join('\n')}\n\n` +
       `上記を参考に、異なる変異を含む戦略をちょうど ${count} 件、JSON 配列のみで返してください。`;
 
-    const res = await withRetries(() =>
+    const result = await withRetries(() =>
       this.ai.chat(
         [
           { role: 'system', content: system },
@@ -111,11 +119,21 @@ export class MutationAgent {
         { temperature: 0.4, maxTokens: AI_MAX_TOKENS.HEAVY },
       ),
     );
+    if (!result.ok) {
+      // 4a.PDCA: API 失敗 (HTTP 4xx/5xx / 認証 / ネットワーク) — silent-empty とは区別
+      const reason = result.error instanceof Error ? result.error.message : String(result.error);
+      console.warn(
+        `[MutationAgent] generateMutants: API 失敗 (リトライ尽くし) — mutants=0。理由: ${reason}`,
+      );
+      await recordAgentUsage('mutation', { count }, null);
+      return [];
+    }
+    const res = result.value;
     if (!res?.content) {
       // Critical-3 PR-2: LLM 失敗を score=0 で記録
-      // 4a.PDCA: silent-empty を観測可能にする (LLM 応答自体が無い / 空のケース)
+      // 4a.PDCA: API は 200 だが content が空のケース (応答フォーマット異常 / 拒否応答 等)
       console.warn(
-        `[MutationAgent] generateMutants: LLM 応答に content が無い (res=${res ? 'has-no-content' : 'null'}) — mutants=0`,
+        `[MutationAgent] generateMutants: LLM 応答 content が空 (API は成功) — mutants=0`,
       );
       await recordAgentUsage('mutation', { count }, null);
       return [];
@@ -158,7 +176,7 @@ export class MutationAgent {
       `レジーム: ${regime}\n` +
       `既存と重複しないよう、ランダム性の高い戦略を ${count} 件、JSON 配列のみで返してください。`;
 
-    const res = await withRetries(() =>
+    const result = await withRetries(() =>
       this.ai.chat(
         [
           { role: 'system', content: system },
@@ -167,9 +185,18 @@ export class MutationAgent {
         { temperature: 0.8, maxTokens: AI_MAX_TOKENS.HEAVY },
       ),
     );
+    if (!result.ok) {
+      const reason = result.error instanceof Error ? result.error.message : String(result.error);
+      console.warn(
+        `[MutationAgent] generateDiverse: API 失敗 (リトライ尽くし) — diverse=0。理由: ${reason}`,
+      );
+      await recordAgentUsage('mutation', { count }, null);
+      return [];
+    }
+    const res = result.value;
     if (!res?.content) {
       console.warn(
-        `[MutationAgent] generateDiverse: LLM 応答に content が無い (res=${res ? 'has-no-content' : 'null'}) — diverse=0`,
+        `[MutationAgent] generateDiverse: LLM 応答 content が空 (API は成功) — diverse=0`,
       );
       await recordAgentUsage('mutation', { count }, null);
       return [];

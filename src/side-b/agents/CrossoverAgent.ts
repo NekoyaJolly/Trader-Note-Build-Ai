@@ -15,17 +15,22 @@ import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import { extractJson } from './llmJsonExtract';
 import { recordAgentUsage } from './scoringRecorder';
 
-async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<T | null> {
+/**
+ * 4a.PDCA: API 失敗とパース失敗を分離するため、discriminated union を返す。
+ */
+type RetryResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
+
+async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<RetryResult<T>> {
   let last: unknown;
   for (let i = 0; i < times; i++) {
     try {
-      return await fn();
+      return { ok: true, value: await fn() };
     } catch (e) {
       last = e;
     }
   }
   console.error('[CrossoverAgent] リトライ尽くし', last);
-  return null;
+  return { ok: false, error: last };
 }
 
 export class CrossoverAgent {
@@ -61,8 +66,15 @@ export class CrossoverAgent {
     let llmAttempted = false;
     let attempts = 0;
     // 4a.PDCA: 失敗バケットを集計してループ後に 1 回だけログ (per-iteration ログだとノイズが多いため)
-    const failureBuckets = { noContent: 0, jsonExtract: 0, zodInvalid: 0, other: 0 };
+    const failureBuckets = {
+      apiError: 0, // withRetries 全失敗 (4xx/5xx/ネットワーク)
+      noContent: 0, // API は成功したが content が空
+      jsonExtract: 0,
+      zodInvalid: 0,
+      other: 0,
+    };
     let lastPreview: string | null = null;
+    let lastApiError: string | null = null;
     outer: for (let i = 0; i < elites.length; i++) {
       for (let j = i + 1; j < elites.length; j++) {
         if (attempts >= pairCount) break outer;
@@ -76,7 +88,7 @@ export class CrossoverAgent {
           `${line}\n\n親A:\n${JSON.stringify(a, null, 2)}\n\n親B:\n${JSON.stringify(b, null, 2)}\n\n` +
           `上記2つを交配した「1件」の StrategyDSL だけを JSON オブジェクトで返してください（配列にしない）。`;
 
-        const res = await withRetries(() =>
+        const result = await withRetries(() =>
           this.ai.chat(
             [
               { role: 'system', content: system },
@@ -85,6 +97,12 @@ export class CrossoverAgent {
             { temperature: 0.3, maxTokens: AI_MAX_TOKENS.MEDIUM },
           ),
         );
+        if (!result.ok) {
+          failureBuckets.apiError++;
+          lastApiError = result.error instanceof Error ? result.error.message : String(result.error);
+          continue;
+        }
+        const res = result.value;
         if (!res?.content) {
           failureBuckets.noContent++;
           continue;
@@ -116,8 +134,10 @@ export class CrossoverAgent {
     if (llmAttempted && out.length === 0) {
       console.warn(
         `[CrossoverAgent] generateCrossovers: ${attempts} 試行で 0 件成功。` +
-          `内訳 noContent=${failureBuckets.noContent} jsonExtract=${failureBuckets.jsonExtract} ` +
-          `zodInvalid=${failureBuckets.zodInvalid} other=${failureBuckets.other}` +
+          `内訳 apiError=${failureBuckets.apiError} noContent=${failureBuckets.noContent} ` +
+          `jsonExtract=${failureBuckets.jsonExtract} zodInvalid=${failureBuckets.zodInvalid} ` +
+          `other=${failureBuckets.other}` +
+          (lastApiError ? `。最後の API エラー: ${lastApiError}` : '') +
           (lastPreview ? `。最後の応答先頭: ${lastPreview}` : ''),
       );
     }
