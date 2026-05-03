@@ -142,15 +142,16 @@ def run_screening_backtest(
     """
     engine = bt_engine or _default_engine()
 
-    # (1) `either` direction は段階 1 では未対応として明示的に弾く
-    if req.notePayload.direction == "either":
+    # (1) ノート schema 内に engine 未対応の spec があれば明示的に弾く。
+    #     (direction='either' / SL=fixed_pips/swing_point / TP=fixed_pips など)
+    #     早期 return で 0 trades + unsupportedConditions に理由を返し、
+    #     API 利用者が原因を即把握できるようにする。
+    unsupported_specs = adapter.detect_unsupported_specs(req.notePayload)
+    if unsupported_specs:
         return _empty_response(
             req.notePayload,
             engine_version=engine.version,
-            extra_unsupported=[
-                "expectedDirection='either' は段階 1 では未対応 "
-                "(long/short 両方向 BT は段階 4 範囲)"
-            ],
+            extra_unsupported=unsupported_specs,
         )
 
     # (2) OHLCV 読み込み (engine 非依存形式)

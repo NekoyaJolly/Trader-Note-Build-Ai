@@ -130,3 +130,33 @@ def describe_unsupported_conditions(conditions: List[ScreeningBacktestCondition]
     だけを返す形に拡張する。
     """
     return [f"{c.lensName}.{c.featureKey} {c.op} {c.value!r}" for c in conditions]
+
+
+def detect_unsupported_specs(payload: ScreeningBacktestNotePayload) -> List[str]:
+    """ノート schema 内の SL/TP / direction で、現行エンジンが未対応な spec を検出する。
+
+    現行 BacktestingPyEngine の対応範囲 (段階 1):
+      - direction:  'long' / 'short' のみサポート ('either' は未対応)
+      - stopLoss:   'atr_multiple' のみサポート ('fixed_pips' / 'swing_point' は未対応)
+      - takeProfit: 'rr_ratio' / 'atr_multiple' のみサポート ('fixed_pips' は未対応)
+
+    呼び出し側 (runner.py) は本関数の戻り値が空でなければ BT 実行をスキップして
+    `unsupportedConditions` に理由を載せ、API 利用者が原因を即把握できるようにする。
+
+    将来エンジンが SL/TP の追加 spec をサポートしたら本関数の判定ロジックは
+    engine の能力ベース (engine_protocol に列挙された対応 kind との突合) に移す。
+    """
+    out: List[str] = []
+    if payload.direction == "either":
+        out.append("direction='either' は未対応 (long/short 両方向 BT は段階 4 範囲)")
+    sl_type = payload.stopLoss.type
+    if sl_type in ("fixed_pips", "swing_point"):
+        out.append(
+            f"stopLoss.type='{sl_type}' は未対応 (atr_multiple のみサポート)"
+        )
+    tp_type = payload.takeProfit.type
+    if tp_type == "fixed_pips":
+        out.append(
+            f"takeProfit.type='{tp_type}' は未対応 (rr_ratio / atr_multiple のみサポート)"
+        )
+    return out
