@@ -103,6 +103,101 @@ export class EvolutionBacktestRunRepository {
       take: Math.max(1, Math.min(1000, limit)),
     });
   }
+
+  /**
+   * 段階 4a.PDCA smoke: evolutionRunId 単位で formalBtPassed / failureReason 分布を集計する。
+   *
+   * 用途:
+   *  - formalBtPassed=0 件でも、どこで何件落ちたかを 1 クエリで確認できる
+   *  - generation 別の通過率を観測 (親個体プール戦略の効果測定の準備)
+   *
+   * 集計仕様:
+   *  - failureReason の生文字列は `classifyFailureReason()` で 6 カテゴリに正規化してから
+   *    `failureReasonCounts` にカウント (insufficient_trades / low_pf / analysis_engine_timeout
+   *    / analysis_engine_error / dsl_missing / other / unknown)
+   *  - 別の分類が必要な場合は `findByEvolutionRun()` で生データを取って独自集計する
+   */
+  async summarizeByEvolutionRun(evolutionRunId: string): Promise<EvolutionRunSummary> {
+    const rows = await prisma.evolutionBacktestRun.findMany({
+      where: { evolutionRunId },
+      select: {
+        generation: true,
+        formalBtPassed: true,
+        formalBtFailureReason: true,
+      },
+      orderBy: [{ generation: 'asc' }, { createdAt: 'asc' }],
+    });
+
+    const failureReasonCounts: Record<string, number> = {};
+    const perGeneration = new Map<number, { passed: number; failed: number }>();
+    let passed = 0;
+    let failed = 0;
+
+    for (const r of rows) {
+      const bucket = perGeneration.get(r.generation) ?? { passed: 0, failed: 0 };
+      if (r.formalBtPassed) {
+        passed++;
+        bucket.passed++;
+      } else {
+        failed++;
+        bucket.failed++;
+        const key = classifyFailureReason(r.formalBtFailureReason);
+        failureReasonCounts[key] = (failureReasonCounts[key] ?? 0) + 1;
+      }
+      perGeneration.set(r.generation, bucket);
+    }
+
+    const generations = Array.from(perGeneration.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([generation, counts]) => ({ generation, ...counts }));
+
+    return {
+      evolutionRunId,
+      totalCandidates: rows.length,
+      passed,
+      failed,
+      failureReasonCounts,
+      generations,
+    };
+  }
+}
+
+/** generation 別の集計エントリ */
+export interface EvolutionGenerationSummary {
+  generation: number;
+  passed: number;
+  failed: number;
+}
+
+/** evolutionRun 1 つ分の集計結果 */
+export interface EvolutionRunSummary {
+  evolutionRunId: string;
+  totalCandidates: number;
+  passed: number;
+  failed: number;
+  /** 失敗理由カテゴリ → 件数 (`classifyFailureReason` のラベル) */
+  failureReasonCounts: Record<string, number>;
+  generations: EvolutionGenerationSummary[];
+}
+
+/**
+ * `formalBtFailureReason` 文字列を 6 カテゴリに分類する。
+ *
+ * EvolutionLoop が出す失敗文字列 (例:
+ *   - 'analysis-engine BT failed: timeout of ...'
+ *   - 'tradeCount 5 < 20'
+ *   - 'pf 0.8 < 1'
+ *   - 'DSL not found in current generation map'
+ * ) を集計しやすい固定キーに正規化する。
+ */
+export function classifyFailureReason(reason: string | null): string {
+  if (!reason) return 'unknown';
+  if (reason.startsWith('tradeCount ')) return 'insufficient_trades';
+  if (reason.startsWith('pf ')) return 'low_pf';
+  if (reason.includes('timeout')) return 'analysis_engine_timeout';
+  if (reason.includes('analysis-engine BT failed')) return 'analysis_engine_error';
+  if (reason.includes('DSL not found')) return 'dsl_missing';
+  return 'other';
 }
 
 export const evolutionBacktestRunRepository = new EvolutionBacktestRunRepository();
