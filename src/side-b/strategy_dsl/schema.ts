@@ -90,7 +90,7 @@ export const TakeProfitSchema = z.union([
   z.object({ type: z.literal('atr_multiple'), value: z.union([z.number(), ParamRefSchema]) }),
 ]);
 
-/** パラメーター定義 */
+/** パラメーター定義 (legacy: range + default + type の structured 形式) */
 export const ParameterDefSchema = z.object({
   range: z.tuple([z.number(), z.number()]),
   default: z.number(),
@@ -106,8 +106,41 @@ export const ParameterRangeV2Schema = z.object({
   default: z.number(),
 });
 
-/** 1 キーに対するレガシー定義 or 新レンジ */
-export const ParameterFieldSchema = z.union([ParameterDefSchema, ParameterRangeV2Schema]);
+/**
+ * Critical-4 4a-parameters: LLM が直接出す raw 値も許容する。
+ * MutationAgent / CrossoverAgent は `parameters: { minImpulse: 0.5 }` のような
+ * raw scalar を返すことが多く、structured 定義を強制すると Zod で 9/10 が落ちる。
+ *
+ * 代わりに Zod は「JSON として表現可能な値」までしか見ない。
+ * 意味検証 (= 「`minImpulse` という名前が有効か」「値が想定範囲か」) は
+ *   `dslParameterUtils.ts` / `SurrogateFitnessSimulator.ts` /
+ *   `dslToBacktestNotePayload.ts` 等の **consumer 側** で行う方針。
+ */
+export const ParameterValueSchema = z.union([
+  z.number(),
+  z.string(),
+  z.boolean(),
+  z.null(),
+]);
+
+/** raw 値の浅いオブジェクト (例: `{ min: 0.5, max: 1.0 }` のような自由構造) */
+export const SimpleParameterObjectSchema = z.record(z.string(), ParameterValueSchema);
+
+/**
+ * 1 キーに対する parameter 値の許容形:
+ *   - structured 形式 (legacy ParameterDef / ParameterRangeV2) → そのまま grid 展開対象
+ *   - raw scalar (number / string / boolean / null)            → 単一値として使用
+ *   - 浅いオブジェクト                                           → consumer 側で warning
+ *
+ * Zod 配列の評価順は上記の通り (上から先勝ち)。structured を先に置くことで、
+ * legacy DSL は従来通り評価される。
+ */
+export const ParameterFieldSchema = z.union([
+  ParameterDefSchema,
+  ParameterRangeV2Schema,
+  ParameterValueSchema,
+  SimpleParameterObjectSchema,
+]);
 
 /** 戦略DSLルート */
 export const StrategyDSLSchema = z.object({

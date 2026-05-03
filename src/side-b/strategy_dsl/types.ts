@@ -49,7 +49,7 @@ export function isWaitForTriggerEntry(
 export function isLegacyParameterDef(
   v: ParameterField,
 ): v is { range: [number, number]; default: number; type: 'int' | 'float' } {
-  return 'range' in v && Array.isArray(v.range);
+  return typeof v === 'object' && v !== null && !Array.isArray(v) && 'range' in v && Array.isArray((v as { range: unknown }).range);
 }
 
 /**
@@ -58,5 +58,28 @@ export function isLegacyParameterDef(
 export function isParameterRangeV2(
   v: ParameterField,
 ): v is { kind: 'range'; min: number; max: number; step: number; default: number } {
-  return (v as { kind?: string }).kind === 'range';
+  return typeof v === 'object' && v !== null && !Array.isArray(v) && (v as { kind?: string }).kind === 'range';
+}
+
+/**
+ * Critical-4 4a-parameters: LLM が出した raw scalar (number / string / boolean / null)
+ * structured 定義ではないが、`number` であれば surrogate fitness の単一値として扱える。
+ */
+export function isRawParameterValue(v: ParameterField): v is number | string | boolean | null {
+  return v === null || typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean';
+}
+
+/**
+ * raw scalar でも structured 定義でもない、自由形のオブジェクト。
+ * 例: `{ min: 0.5, max: 1.0 }` (= range 候補だが kind:'range' タグが無い)。
+ * consumer 側では warning + 単一既定値扱いにする (= grid 展開しない)。
+ */
+export function isSimpleParameterObject(v: ParameterField): v is Record<string, number | string | boolean | null> {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    !Array.isArray(v) &&
+    !isLegacyParameterDef(v) &&
+    !isParameterRangeV2(v)
+  );
 }
