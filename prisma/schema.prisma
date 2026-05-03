@@ -726,6 +726,48 @@ model ScreeningBacktestRun {
   @@index([symbol, timeframe], map: "idx_screening_bt_symbol_tf")
 }
 
+/// 進化ループの正式 BT 履歴 (Critical-4 段階 4a.4)
+///
+/// EvolutionLoop top K の analysis-engine 正式 BT 結果を保存する。
+/// ScreeningBacktestRun (= EdgeHypothesis 由来の screening 履歴) とは
+/// 役割を分離するため別テーブル。進化候補は EdgeHypothesis を持たない
+/// ため、識別は generation + candidateId + candidateHash で行う。
+///
+/// 集計用途:
+///   - generation 別の formalBtPassed 率 (親個体プール戦略の効果測定)
+///   - failureReason 別の分布 (どのケースで失敗が多いか)
+///   - 同 candidateHash の再評価追跡 (DSL ハッシュで重複検出)
+model EvolutionBacktestRun {
+  id            String   @id @default(uuid()) @db.Uuid
+  /// 進化ループ実行単位 ID (1 サイクル = 1 evolutionRunId、cron 起動毎に発番)
+  evolutionRunId String  @db.Uuid
+  /// 世代番号 (DSL.generation と同値、0 始まり)
+  generation    Int
+  /// 進化候補の DSL ID (DSL.id と同じ)
+  candidateId   String
+  /// DSL の構造ハッシュ (同一構造の重複検出 / 再評価追跡用)
+  candidateHash String
+  /// DSL スナップショット (validation / debug 用、StrategyDSL JSON 全体)
+  dslSnapshot   Json
+  /// surrogate fitness の合成スコア (= scoreFromValidationSummary 値)
+  surrogateScore Float
+  /// analysis-engine 正式 BT を通過したか
+  formalBtPassed Boolean
+  /// 正式 BT メトリクス (pf / winRate / tradeCount)、analysis-engine 成功時のみ非 null
+  formalBtMetrics Json?
+  /// 失敗時の理由 (HTTP / timeout / PF 未達 / トレード数不足など)、passed=true の場合 null
+  formalBtFailureReason String?
+  /// BT エンジン識別子 (例: 'analysis-engine')
+  engine        String
+  /// BT エンジンバージョン (例: 'backtesting.py@0.6.5')
+  engineVersion String
+  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([evolutionRunId, generation], map: "idx_evolution_bt_run_gen")
+  @@index([candidateHash, createdAt(sort: Desc)], map: "idx_evolution_bt_hash_created")
+  @@index([formalBtPassed, createdAt(sort: Desc)], map: "idx_evolution_bt_passed_created")
+}
+
 /// ストラテジーアラート設定
 /// ストラテジー条件成立時のリアルタイム通知設定
 model StrategyAlert {
