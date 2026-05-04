@@ -160,16 +160,29 @@ interface CandidateInput {
 }
 
 /**
+ * `selectFormalBtCandidatesWithRescue` のオーバーライド可能な policy 値。
+ * 全フィールド optional で、未指定は `formalBtCandidatePolicyV1` を使う。
+ */
+export interface RescueSelectionOverrides {
+  /** normal_pass 上限。EvolutionLoopDeps.formalBtTopK から流す想定 */
+  overallTopK?: number;
+  /** trade_count_rescue で要求する最小 totalTrades (これ未満は rescue 対象外) */
+  minTradesForTradeCountRescue?: number;
+}
+
+/**
  * elites + metrics + scores から正式 BT 候補を rescue lane 込みで選抜する。
  *
  * 戦略:
  *   1. 全候補を kill / normal_pass / その他 に分類
  *   2. normal_pass を surrogate score 降順で `overallTopK` 件取得
+ *      (overrides.overallTopK で外部から差し替え可能)
  *   3. 残り (= rescue 候補プール) から各 lane の上位 1 件を取得:
  *      - near_miss: passedCount=2 のうち surrogate score 上位
  *      - low_drawdown: validation maxDrawdownRate が最小 (低 DD ほど良)
- *      - trade_count: validation totalTrades が最大 (= 検証可能サンプル多)
- *      - novelty: 上記 lane で選ばれていない残りから surrogate score 上位以外をランダム性低めで 1 件
+ *      - trade_count: validation totalTrades が **最低基準を満たす中で** 最大
+ *        (基準未満を救済すると後段の正式 BT で insufficient_trades 即落ちになるため)
+ *      - novelty: 上記 lane で選ばれていない残りから surrogate score 上位以外を 1 件
  *   4. 同一候補 (dsl.id) が複数 lane で選ばれていたら、優先順位の高い route を採用
  *      (normal_pass > near_miss > low_drawdown > trade_count > novelty)
  *
@@ -177,7 +190,10 @@ interface CandidateInput {
  */
 export function selectFormalBtCandidatesWithRescue(
   candidates: CandidateInput[],
+  overrides: RescueSelectionOverrides = {},
 ): { entries: ClassifiedCandidate[]; summary: FormalBtCandidateSummary } {
+  const overallTopK = overrides.overallTopK ?? formalBtCandidatePolicyV1.overallTopK;
+  const minTradesForTradeCountRescue = overrides.minTradesForTradeCountRescue ?? 0;
   // === Step 1: 分類 ===
   const normalPass: ClassifiedCandidate[] = [];
   const nearMiss: ClassifiedCandidate[] = [];
@@ -242,8 +258,9 @@ export function selectFormalBtCandidatesWithRescue(
   let duplicateRemoved = 0;
 
   // 2a. normal_pass top K (score 降順)
+  // overallTopK は overrides で外部から差し替え可 (= EvolutionLoopDeps.formalBtTopK 由来)
   const sortedNormal = normalPass.slice().sort((a, b) => b.score - a.score);
-  for (const c of sortedNormal.slice(0, formalBtCandidatePolicyV1.overallTopK)) {
+  for (const c of sortedNormal.slice(0, overallTopK)) {
     if (!tryAdd(c)) duplicateRemoved++;
   }
 
@@ -273,9 +290,15 @@ export function selectFormalBtCandidatesWithRescue(
     if (!tryAdd(cand)) duplicateRemoved++;
   }
 
-  // 2d. trade_count rescue: nonKill 全体から validation totalTrades 最大のものを 1 件
+  // 2d. trade_count rescue: nonKill 全体から validation totalTrades **最低基準以上** で
+  //     最大のものを 1 件。基準未満を救済すると後段で insufficient_trades で即落ちになり、
+  //     formal BT slot の無駄になるため。
   const sortedByTradeCount = nonKill
     .slice()
+    .filter(
+      (c) =>
+        c.aggregate.validation.summary.totalTrades >= minTradesForTradeCountRescue,
+    )
     .sort(
       (a, b) =>
         b.aggregate.validation.summary.totalTrades -
@@ -286,7 +309,9 @@ export function selectFormalBtCandidatesWithRescue(
       dsl: c.dsl,
       route: 'trade_count_rescue',
       score: c.surrogateScore,
-      reason: `most validation trades=${c.aggregate.validation.summary.totalTrades}`,
+      reason:
+        `most validation trades=${c.aggregate.validation.summary.totalTrades} ` +
+        `(>= min ${minTradesForTradeCountRescue})`,
       aggregate: c.aggregate,
     };
     if (!tryAdd(cand)) duplicateRemoved++;
@@ -294,8 +319,8 @@ export function selectFormalBtCandidatesWithRescue(
 
   // 2e. novelty rescue: 既選定済み以外から最新 dsl id (= 最も新しく生まれた構造) を 1 件
   // v1 は厳密 novelty を計算しない: dsl.id ベースの単純な「未選択候補の中の 1 件」で代替
-  const novelyPool = nonKill.filter((c) => !selected.has(c.dsl.id));
-  for (const c of novelyPool.slice(0, formalBtCandidatePolicyV1.noveltyTopK)) {
+  const noveltyPool = nonKill.filter((c) => !selected.has(c.dsl.id));
+  for (const c of noveltyPool.slice(0, formalBtCandidatePolicyV1.noveltyTopK)) {
     const cand: ClassifiedCandidate = {
       dsl: c.dsl,
       route: 'novelty_rescue',

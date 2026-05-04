@@ -410,7 +410,13 @@ export class EvolutionLoop {
         surrogateScore: scores.get(dsl.id) ?? 0,
       });
     }
-    const { entries, summary } = selectFormalBtCandidatesWithRescue(inputs);
+    // formalBtTopK は overallTopK のオーバーライドとして渡す (= caller が override 可能)。
+    // trade_count_rescue は formal BT 段の minTradeCount 閾値と揃え、後段で
+    // insufficient_trades で即落ちる候補を rescue 段で除外する。
+    const { entries, summary } = selectFormalBtCandidatesWithRescue(inputs, {
+      overallTopK: this.formalBtTopK,
+      minTradesForTradeCountRescue: FORMAL_BT_MIN_TRADES,
+    });
 
     // 既存の `verifyCandidatesWithFormalBacktest` が期待する形に変換 (candidate に route 付与)
     const candidates = entries.map((e) => {

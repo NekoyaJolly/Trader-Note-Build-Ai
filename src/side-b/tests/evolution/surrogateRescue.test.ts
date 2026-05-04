@@ -308,4 +308,68 @@ describe('selectFormalBtCandidatesWithRescue (PR #96 必須テスト)', () => {
     expect(summary.killed).toBe(0);
     expect(summary.fallbackReason).toMatch(/no candidates/);
   });
+
+  it('overrides.overallTopK で normal_pass の上限を差し替えられる (= formalBtTopK 反映)', () => {
+    const inputs = Array.from({ length: 5 }, (_, i) => ({
+      dsl: makeDsl(`np-${i}`),
+      aggregate: makeAgg({}),
+      surrogateScore: 0.9 - i * 0.1,
+    }));
+    const { summary: s3 } = selectFormalBtCandidatesWithRescue(inputs, { overallTopK: 3 });
+    expect(s3.normalPass).toBe(3);
+    const { summary: s2 } = selectFormalBtCandidatesWithRescue(inputs, { overallTopK: 2 });
+    expect(s2.normalPass).toBe(2);
+    const { summary: s5 } = selectFormalBtCandidatesWithRescue(inputs, { overallTopK: 5 });
+    expect(s5.normalPass).toBe(5);
+  });
+
+  it('trade_count_rescue は minTradesForTradeCountRescue 未満を救済しない', () => {
+    // 全候補が minTrade 未満 → trade_count_rescue は 0 件
+    const inputs = [
+      {
+        dsl: makeDsl('low-trades-1'),
+        aggregate: makeAgg({ trainPf: 1.0, validationPf: 1.0, overfitScore: 0.5, totalTrades: 10 }),
+        surrogateScore: 0.4,
+      },
+      {
+        dsl: makeDsl('low-trades-2'),
+        aggregate: makeAgg({ trainPf: 1.0, validationPf: 1.0, overfitScore: 0.5, totalTrades: 5 }),
+        surrogateScore: 0.3,
+      },
+    ];
+    const { summary, entries } = selectFormalBtCandidatesWithRescue(inputs, {
+      minTradesForTradeCountRescue: 20,
+    });
+    expect(summary.tradeCountRescue).toBe(0);
+    expect(entries.find((e) => e.route === 'trade_count_rescue')).toBeUndefined();
+  });
+
+  it('trade_count_rescue は閾値以上の候補のみから最大値を選ぶ', () => {
+    const inputs = [
+      // trades=15: 閾値 20 未満なので除外
+      {
+        dsl: makeDsl('below-threshold'),
+        aggregate: makeAgg({ trainPf: 1.0, validationPf: 1.0, overfitScore: 0.5, totalTrades: 15 }),
+        surrogateScore: 0.5,
+      },
+      // trades=25: 閾値以上の中で最大なら採用
+      {
+        dsl: makeDsl('eligible'),
+        aggregate: makeAgg({ trainPf: 1.0, validationPf: 1.0, overfitScore: 0.5, totalTrades: 25 }),
+        surrogateScore: 0.4,
+      },
+      // trades=22: 閾値以上だが eligible より少ない
+      {
+        dsl: makeDsl('eligible-smaller'),
+        aggregate: makeAgg({ trainPf: 1.0, validationPf: 1.0, overfitScore: 0.5, totalTrades: 22 }),
+        surrogateScore: 0.35,
+      },
+    ];
+    const { entries } = selectFormalBtCandidatesWithRescue(inputs, {
+      minTradesForTradeCountRescue: 20,
+    });
+    const tcr = entries.find((e) => e.route === 'trade_count_rescue');
+    expect(tcr).toBeDefined();
+    expect(tcr!.dsl.id).toBe('eligible'); // below-threshold は除外、eligible-smaller は trades 少
+  });
 });
