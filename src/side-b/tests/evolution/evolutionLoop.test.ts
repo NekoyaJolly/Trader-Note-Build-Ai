@@ -514,11 +514,19 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       formalBtTopK: 3,
     });
 
-    await loop.runOneGeneration('breakout');
+    const report = await loop.runOneGeneration('breakout');
 
-    // population getElites は最大 5 個までエリート選抜するため、surrogate 候補は最大 5。
-    // top K=3 で絞った結果として正式 BT は 3 回だけ呼ばれる。
-    expect(runFormalBacktest).toHaveBeenCalledTimes(3);
+    // PR #96: rescue lane 導入で formalBtTopK の意味が変わった:
+    //   - 旧: 「正式 BT 呼び出し総数」のキャップ
+    //   - 新: rescue policy が overallTopK + 各 lane TopK で独立に候補を選抜
+    //         (この PR では formalBtTopK は無視され formalBtCandidatePolicyV1 が支配)
+    // 全 5 elite が同 metrics で normal_pass する場合、normal_pass=3 (overallTopK) +
+    // novelty_rescue=1 (= top3 に未選抜の 4 番目を拾う) = 計 4 件が正式 BT に送られる。
+    // low_drawdown / trade_count rescue は同候補と重複して dedup される。
+    expect(runFormalBacktest).toHaveBeenCalledTimes(4);
+    expect(report.formalBtCandidateSummary.normalPass).toBe(3);
+    expect(report.formalBtCandidateSummary.noveltyRescue).toBeGreaterThanOrEqual(1);
+    expect(report.formalBtCandidateSummary.killed).toBe(0);
   });
 
   it('段階 4a.4: 正式 BT 結果 (passed/failed 全件) が EvolutionBacktestRun に永続化される', async () => {
