@@ -69,6 +69,15 @@ import {
   type PromotionGateDecision,
   type PromotionGateSummary,
 } from './promotionGatePolicy';
+import {
+  buildRepairAppliedTrace,
+  evaluateRepairOutcome,
+  summarizeRepairOutcomes,
+  type RepairAppliedTrace,
+  type RepairOutcome,
+  type RepairOutcomeBaseline,
+  type RepairOutcomeSummary,
+} from './repairOutcomeTelemetry';
 
 /**
  * EvolutionLoop が repository に求める最小契約。
@@ -227,6 +236,20 @@ export interface GenerationReport {
    */
   formalBtCandidateSummary: FormalBtCandidateSummary;
   /**
+   * PR #102: RepairHint Outcome Telemetry v1 の集計。
+   * 前世代の failed candidate (= baseline) と当世代 mutation child の formal BT 結果を
+   * 比較し、`improved / worsened / unchanged / unknown` を集計する。
+   *
+   * - 観測のみ。candidate の stage / promotion には絶対に影響させない (PR #101 と独立)
+   * - dslId 単位で一意化、同一 child を二重計上しない
+   * - baseline がない / 比較不能な場合は `unknown` (0 補完しない)
+   *
+   * 個別の `RepairOutcome` は `repairOutcomes` に格納される。
+   */
+  repairOutcomeSummary: RepairOutcomeSummary;
+  /** PR #102: child 単位の個別 outcome (debug / smoke 用)。 */
+  repairOutcomes: RepairOutcome[];
+  /**
    * PR #100: FailureReason → RepairHint v1 の集計。
    * 正式 BT で `formalBtPassed=false` の候補のみが対象。失敗が 0 件の世代では
    * `totalFailures=0` で空集計が入る。
@@ -293,17 +316,22 @@ const FORMAL_BT_MIN_PF = 1.0;
 const FORMAL_BT_MIN_TRADES = VALIDATION_THRESHOLDS.common.minTradeCount;
 
 /**
- * PR #100: `runOneGeneration` の任意オプション。
- *   - `repairHintsForMutation`: 前世代の正式 BT 失敗から生成した RepairHint v1 を
- *     mutation の入力文脈として渡す。未指定時は同インスタンスが直前世代で保持した
- *     値 (= `lastRepairHints`) にフォールバックする。
+ * PR #100 / PR #102: `runOneGeneration` の任意オプション。
+ *
+ * - `repairHintsForMutation` (PR #100): 前世代の正式 BT 失敗から生成した RepairHint を
+ *   mutation の入力文脈として渡す。未指定時は同インスタンスが直前世代で保持した
+ *   値 (= `lastRepairHints`) にフォールバック。
+ * - `repairBaselinesForOutcome` (PR #102): 前世代の failed candidate metrics を
+ *   `RepairOutcomeBaseline` として渡す。outcome 判定で「親より改善したか」の比較元になる。
+ *   未指定時は `lastRepairBaselines` にフォールバック。
  *
  * 本番 scheduler が毎回新しい `EvolutionLoop` を作る運用でも、scheduler 側で
- * `report.formalBtVerifiedCandidates[].repairHint` を集めて次回呼び出し時に渡せば
- * 「失敗ヒントを次世代 mutation に渡す」設計目的が成立する。
+ * report から repairHints / baselines を集めて次回呼び出し時に渡せば、
+ * 「修復ヒント・効果測定」の経路が世代をまたいで成立する。
  */
 export interface RunOneGenerationOptions {
   repairHintsForMutation?: RepairHintMap;
+  repairBaselinesForOutcome?: ReadonlyMap<string, RepairOutcomeBaseline>;
 }
 
 export class EvolutionLoop {
@@ -319,6 +347,13 @@ export class EvolutionLoop {
    * を明示注入するのが正規経路。
    */
   private lastRepairHints: RepairHintMap = new Map();
+  /**
+   * PR #102: 同インスタンスで連続世代を回す場合の RepairOutcomeBaseline 保持先。
+   * 前世代の failed candidate metrics を保持し、当世代 mutation child の formal BT 結果と
+   * 比較して outcome を判定する。本番 scheduler では options.repairBaselinesForOutcome を
+   * 明示注入する経路を使う。
+   */
+  private lastRepairBaselines: ReadonlyMap<string, RepairOutcomeBaseline> = new Map();
 
   constructor(private readonly deps: EvolutionLoopDeps) {
     this.runFormalBacktest = deps.runFormalBacktest ?? defaultRunScreeningBacktest;
@@ -410,6 +445,10 @@ export class EvolutionLoop {
     //   どちらも未設定なら従来挙動 (= 修復ヒント無しの mutation)
     const repairHintsForMutation =
       options?.repairHintsForMutation ?? this.lastRepairHints;
+    // PR #102: 前世代の failed candidate metrics を baseline として使う。
+    //   trace 構築時に sourceDslId / route を補完する用途と、後段の outcome 比較で参照する。
+    const repairBaselinesForOutcome =
+      options?.repairBaselinesForOutcome ?? this.lastRepairBaselines;
 
     let mutants: StrategyDSL[] = [];
     let crosses: StrategyDSL[] = [];
@@ -422,6 +461,22 @@ export class EvolutionLoop {
       );
     } catch (e) {
       errors.push(`mutation: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    // PR #102: mutation child ごとに RepairAppliedTrace を構築する。
+    //   - 親 (parentIds) のいずれかが前世代の repairHint を持つ場合のみ trace 化
+    //   - dslId をキーにした generation-local map に保持 (= DSL schema は変更しない)
+    //   - repairHint がない random mutation child は trace 対象外 (= outcome unknown)
+    const repairAppliedTraces = new Map<string, RepairAppliedTrace>();
+    if (repairHintsForMutation.size > 0) {
+      for (const m of mutants) {
+        const t = buildRepairAppliedTrace(
+          m.parentIds ?? [],
+          repairHintsForMutation,
+          repairBaselinesForOutcome,
+        );
+        if (t) repairAppliedTraces.set(m.id, t);
+      }
     }
     try {
       crosses = await crossoverAgent.generateCrossovers(parentDsls, parentScores, 5);
@@ -496,6 +551,59 @@ export class EvolutionLoop {
     }
     this.lastRepairHints = nextRepairHints;
 
+    // PR #102: 当世代の failed candidate metrics を次世代 baseline 用に保存。
+    // outcome 比較時、key は前世代の sourceCandidateId (= 前世代 dslId) になる。
+    const nextRepairBaselines = new Map<string, RepairOutcomeBaseline>();
+    for (const c of formalBtVerifiedCandidates) {
+      if (c.formalBtPassed) continue;
+      const m = c.formalBtMetrics;
+      nextRepairBaselines.set(c.dslId, {
+        candidateId: c.dslId,
+        dslId: c.dslId,
+        failureReason: c.repairHint?.failureReason ?? c.formalBtFailureReason ?? 'other',
+        route: c.route,
+        metrics: m
+          ? {
+              pf: m.pf,
+              tradeCount: m.tradeCount,
+              maxDrawdown: m.maxDrawdown,
+            }
+          : {},
+      });
+    }
+    this.lastRepairBaselines = nextRepairBaselines;
+
+    // PR #102: 当世代 mutation child のうち trace を持つものについて outcome を判定。
+    //   - dslId 単位で一意化 (= 同 child を二重計上しない)
+    //   - trace を持たない child (= 通常 mutation / crossover / noveltySeed) は対象外
+    //   - baseline (前世代の failed metrics) と child formal BT 結果を比較
+    //   - 観測のみ。candidate の stage / promotion には絶対に影響させない
+    const repairOutcomes: RepairOutcome[] = [];
+    const outcomeDslIds = new Set<string>();
+    for (const c of formalBtVerifiedCandidates) {
+      if (outcomeDslIds.has(c.dslId)) continue;
+      const trace = repairAppliedTraces.get(c.dslId);
+      if (!trace) continue;
+      const baseline = repairBaselinesForOutcome.get(trace.sourceCandidateId) ?? null;
+      const outcome = evaluateRepairOutcome(baseline, {
+        candidateId: c.dslId,
+        dslId: c.dslId,
+        route: c.route,
+        repairApplied: trace,
+        metrics: c.formalBtMetrics
+          ? {
+              pf: c.formalBtMetrics.pf,
+              tradeCount: c.formalBtMetrics.tradeCount,
+              maxDrawdown: c.formalBtMetrics.maxDrawdown,
+            }
+          : undefined,
+        failureReason: c.formalBtFailureReason ?? undefined,
+      });
+      repairOutcomes.push(outcome);
+      outcomeDslIds.add(c.dslId);
+    }
+    const repairOutcomeSummary = summarizeRepairOutcomes(repairOutcomes);
+
     // PR #101: PromotionGate v1 — 候補ごとの EvolutionCandidateStage を deterministic に判定。
     //   PR #101 review #2+#5 対応: 候補は dslId 単位で一意化する。優先順位:
     //     1. 正式 BT 検証済 → 最終 stage (validation_candidate / repairable / repair_excluded)
@@ -533,6 +641,8 @@ export class EvolutionLoop {
       repairHintSummary,
       promotionGateSummary,
       promotionGateDecisions,
+      repairOutcomeSummary,
+      repairOutcomes,
     };
     return report;
   }
