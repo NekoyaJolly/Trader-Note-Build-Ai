@@ -6,6 +6,8 @@
 
 import { randomUUID } from 'crypto';
 
+import type { ZodError } from 'zod';
+
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { loadPromptWithGlobal } from '../prompts/loader';
 import { promptRegistry } from '../prompts/registry/PromptRegistry';
@@ -14,22 +16,35 @@ import { modelFor } from '../../config';
 import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import { extractJson } from './llmJsonExtract';
 import { recordAgentUsage } from './scoringRecorder';
+import type { RepairHint } from '../evolution/repairHintPolicy';
+
+/**
+ * PR #100: 親候補 ID → RepairHint の対応表。
+ * `MutationAgent.generateMutants` の optional 引数として渡され、prompt の補助情報になる。
+ *
+ * - 既存呼び出し (= repairHints 未指定) は従来挙動を完全に維持する
+ * - shouldUseForRepairMutation=false の hint は prompt に含めない (mutation 対象外)
+ * - mutation agent には「失敗理由」「target」「変更幅」だけ渡し、修復方針自体は
+ *   deterministic に決まっている (= LLM に推測させない)
+ */
+export type RepairHintMap = ReadonlyMap<string, RepairHint>;
 
 /**
  * 4a.PDCA: API 失敗 (リトライ尽くし) と「応答 content 無し」を区別するため、
  *   discriminated union で結果を返すよう変更。
  *   - { ok: true, value }: fn が成功
  *   - { ok: false, error }: 全リトライ失敗 (HTTP 4xx/5xx, ネットワーク, 認証 等)
+ *   PR #100: lint 厳格化に合わせ `unknown` を排除し、Error に正規化して保持する。
  */
-type RetryResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
+type RetryResult<T> = { ok: true; value: T } | { ok: false; error: Error };
 
 async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<RetryResult<T>> {
-  let last: unknown;
+  let last: Error = new Error('unknown failure');
   for (let i = 0; i < times; i++) {
     try {
       return { ok: true, value: await fn() };
     } catch (e) {
-      last = e;
+      last = e instanceof Error ? e : new Error(String(e));
     }
   }
   console.error('[MutationAgent] リトライ尽くし', last);
@@ -39,7 +54,7 @@ async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<RetryRes
 /**
  * 4a.PDCA: Zod 失敗時の最初の `path → message` を 1 行にまとめる (観測ログ用)。
  */
-function summarizeZodIssues(error: import('zod').ZodError): string {
+function summarizeZodIssues(error: ZodError): string {
   const top = error.issues.slice(0, 3).map((iss) => {
     const path = iss.path.length > 0 ? iss.path.join('.') : '(root)';
     return `${path}: ${iss.message}`;
@@ -95,20 +110,84 @@ export class MutationAgent {
 
   /**
    * エリート群とスコア説明を渡し、変異個体を生成
+   *
+   * PR #100: optional `repairHints` を渡すと、各親 (elite.id) に紐づく failureReason /
+   *   target / 変更幅を prompt に同梱する。`shouldUseForRepairMutation=false` の hint は
+   *   prompt から除外され、mutation 対象外となる。`repairHints` 未指定時は従来挙動を維持。
    */
   async generateMutants(
     elites: StrategyDSL[],
     scores: Map<string, number>,
     count: number,
+    repairHints?: RepairHintMap,
   ): Promise<StrategyDSL[]> {
     if (elites.length === 0) return [];
-    const perfLines = elites.map((e) => `- ${e.id}: score=${(scores.get(e.id) ?? 0).toFixed(4)}`);
-    const payload = JSON.stringify(elites, null, 2);
+
+    // PR #100 review: shouldExcludeFromParentPool=true の親 (= dsl_missing 等の fatal 系) は
+    // payload (= elites JSON) からも完全に除外する。prompt 節から落とすだけでは LLM が
+    // 親 DSL 自体を mutation 材料にしてしまい、設計書 §基本方針.4 に反する。
+    let effectiveElites = elites;
+    let excludedCount = 0;
+    if (repairHints && repairHints.size > 0) {
+      effectiveElites = elites.filter((e) => {
+        const hint = repairHints.get(e.id);
+        if (hint && hint.shouldExcludeFromParentPool) {
+          excludedCount += 1;
+          return false;
+        }
+        return true;
+      });
+      if (excludedCount > 0) {
+        console.log(
+          `[MutationAgent] repairHint除外: fatal 親 ${excludedCount}/${elites.length} 件を mutation 対象から除外`,
+        );
+      }
+    }
+    if (effectiveElites.length === 0) {
+      console.warn(
+        `[MutationAgent] generateMutants: 全親が fatal 除外で空 — mutants=0`,
+      );
+      await recordAgentUsage('mutation', { count }, null);
+      return [];
+    }
+
+    const perfLines = effectiveElites.map(
+      (e) => `- ${e.id}: score=${(scores.get(e.id) ?? 0).toFixed(4)}`,
+    );
+    const payload = JSON.stringify(effectiveElites, null, 2);
     const system = await this.resolveSystemPrompt();
+
+    // PR #100: 親 ID と repairHint を 1:1 で並べる。fatal 系は親から既に除外済み。
+    const repairLines: string[] = [];
+    if (repairHints && repairHints.size > 0) {
+      for (const e of effectiveElites) {
+        const hint = repairHints.get(e.id);
+        if (!hint || !hint.shouldUseForRepairMutation) continue;
+        const targets = hint.actions.map((a) => a.target).join(',');
+        const scope = hint.actions.map((a) => a.allowedChangeScope).join(',');
+        repairLines.push(
+          `- ${e.id}: reason=${hint.failureReason} severity=${hint.severity} ` +
+            `targets=${targets} scope=${scope} guidance=${hint.mutationGuidance}`,
+        );
+      }
+    }
+    const repairSection =
+      repairLines.length > 0
+        ? `\n失敗修復ヒント (前世代の正式 BT 失敗から deterministic 生成):\n${repairLines.join('\n')}\n` +
+          `上記の target を優先して修復し、allowedChangeScope を超える大改変は行わないでください。\n`
+        : '';
+
     const user =
       `エリート戦略（JSON）:\n${payload}\n\n` +
-      `スコア:\n${perfLines.join('\n')}\n\n` +
-      `上記を参考に、異なる変異を含む戦略をちょうど ${count} 件、JSON 配列のみで返してください。`;
+      `スコア:\n${perfLines.join('\n')}\n` +
+      repairSection +
+      `\n上記を参考に、異なる変異を含む戦略をちょうど ${count} 件、JSON 配列のみで返してください。`;
+
+    if (repairLines.length > 0) {
+      console.log(
+        `[MutationAgent] repairHint適用: ${repairLines.length}/${effectiveElites.length} 親に修復ヒントを反映`,
+      );
+    }
 
     const result = await withRetries(() =>
       this.ai.chat(
@@ -153,8 +232,9 @@ export class MutationAgent {
       const out = parsed.slice(0, count).map((p) => ({
         ...p,
         id: p.id && p.id.length > 0 ? p.id : `mut-${randomUUID()}`,
-        generation: Math.max(...elites.map((e) => e.generation), 0) + 1,
-        parentIds: elites.map((e) => e.id),
+        // PR #100 review: fatal 除外後の effectiveElites を親系譜の根拠にする。
+        generation: Math.max(...effectiveElites.map((e) => e.generation), 0) + 1,
+        parentIds: effectiveElites.map((e) => e.id),
       }));
       await recordAgentUsage('mutation', { count }, out);
       return out;

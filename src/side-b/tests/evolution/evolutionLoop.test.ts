@@ -228,7 +228,13 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
     expect(cand?.validationPf).toBeCloseTo(1.6);
     expect(cand?.overfitScore).toBeCloseTo(0.15);
     expect(cand?.formalBtPassed).toBe(true);
-    expect(cand?.formalBtMetrics).toEqual({ pf: 1.8, winRate: 0.55, tradeCount: 35 });
+    // PR #100: maxDrawdown が analysis-engine summary.maxDD から埋まる
+    expect(cand?.formalBtMetrics).toEqual({
+      pf: 1.8,
+      winRate: 0.55,
+      tradeCount: 35,
+      maxDrawdown: 0.05,
+    });
     expect(cand?.formalBtFailureReason).toBeUndefined();
   });
 
@@ -777,5 +783,656 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
     const report = await loop.runOneGeneration('breakout');
     expect(report.promotionCandidates).toHaveLength(1);
     expect(runFormalBacktest).toHaveBeenCalledTimes(1);
+  });
+
+  // =================================================================
+  // PR #100: FailureReason → RepairHint v1 統合テスト
+  // =================================================================
+
+  it('PR #100: 正式 BT 失敗候補に repairHint が付与され、repairHintSummary が生成される', async () => {
+    const dsl = StrategyDSLSchema.parse({
+      id: 'pr100-fail',
+      generation: 0,
+      parentIds: [],
+      regimeTarget: 'breakout',
+      symbol: 'EURUSD',
+      timeframe: '1h',
+      entry: {
+        direction: 'long',
+        trigger: {
+          logic: 'AND',
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+        },
+      },
+      stopLoss: { type: 'fixed_pips', value: 30 },
+      takeProfit: { type: 'rr_ratio', value: 1.5 },
+      parameters: {},
+      metadata: { createdAt: new Date().toISOString(), createdBy: 'initial_random' },
+    });
+
+    const adapter = new SurrogateFitnessSimulator();
+    const summary = (n: number, w: number, p: number) => ({
+      totalTrades: n,
+      winningTrades: Math.round(n * w),
+      losingTrades: n - Math.round(n * w),
+      winRate: w,
+      netProfit: p * 100,
+      netProfitRate: 0.1,
+      maxDrawdown: 30,
+      maxDrawdownRate: 0.03,
+      profitFactor: p,
+      averageWin: 15,
+      averageLoss: -10,
+      riskRewardRatio: 1.5,
+      maxConsecutiveWins: 3,
+      maxConsecutiveLosses: 2,
+    });
+    jest.spyOn(adapter, 'evaluateFitness').mockResolvedValue({
+      dslId: 'pr100-fail',
+      period: { start: '2024-01-01', end: '2024-12-31' },
+      trainPf: 2.0,
+      validationPf: 1.6,
+      overfitScore: 0.15,
+      train: { summary: summary(20, 0.6, 2.0), trades: [] },
+      validation: { summary: summary(10, 0.6, 1.6), trades: [] },
+      execution: {
+        executionModel: 'legacy_zero_cost',
+        executionConfigHash: 'legacy-zero-cost',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'legacy_zero_cost',
+          dataSource: 'ctrader',
+          roundTripCostPips: 0,
+          roundTripCostAtrMult: 0,
+          totalCost: 0,
+        },
+      },
+    });
+
+    const mutationAgent = new MutationAgent();
+    jest.spyOn(mutationAgent, 'generateMutants').mockResolvedValue([]);
+    jest.spyOn(mutationAgent, 'generateDiverse').mockResolvedValue([]);
+    const crossoverAgent = new CrossoverAgent();
+    jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
+
+    const population = new StrategyPopulation(undefined);
+    population.add('breakout', dsl);
+
+    // PF=0.7 < FORMAL_BT_MIN_PF(=1.0) で必ず失敗 + warning に PF<0.8 が記録されることを期待
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockResolvedValue(makeFormalBtResponse(0.7, 0.4, 30));
+
+    const loop = new EvolutionLoop({
+      population,
+      adapter,
+      mutationAgent,
+      crossoverAgent,
+      enforcer: new DiversityEnforcer(),
+      defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
+      runFormalBacktest,
+    });
+
+    const report = await loop.runOneGeneration('breakout');
+
+    expect(report.promotionCandidates).toHaveLength(0);
+    expect(report.formalBtVerifiedCandidates).toHaveLength(1);
+    const failed = report.formalBtVerifiedCandidates[0];
+    expect(failed.formalBtPassed).toBe(false);
+    expect(failed.repairHint).toBeDefined();
+    expect(failed.repairHint?.failureReason).toBe('low_pf');
+    expect(failed.repairHint?.shouldUseForRepairMutation).toBe(true);
+    expect(failed.repairHint?.warnings.some((w) => w.includes('PF'))).toBe(true);
+
+    expect(report.repairHintSummary).toBeDefined();
+    expect(report.repairHintSummary.totalFailures).toBe(1);
+    expect(report.repairHintSummary.repairable).toBe(1);
+    expect(report.repairHintSummary.excluded).toBe(0);
+    expect(report.repairHintSummary.byFailureReason.low_pf).toBe(1);
+    // route 情報も summary に反映される
+    expect(Object.keys(report.repairHintSummary.byRoute)).not.toHaveLength(0);
+  });
+
+  it('PR #100: 全候補が正式 BT 成功なら repairHintSummary は totalFailures=0 で空集計', async () => {
+    const dsl = StrategyDSLSchema.parse({
+      id: 'pr100-pass-only',
+      generation: 0,
+      parentIds: [],
+      regimeTarget: 'breakout',
+      symbol: 'EURUSD',
+      timeframe: '1h',
+      entry: {
+        direction: 'long',
+        trigger: {
+          logic: 'AND',
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+        },
+      },
+      stopLoss: { type: 'fixed_pips', value: 30 },
+      takeProfit: { type: 'rr_ratio', value: 1.5 },
+      parameters: {},
+      metadata: { createdAt: new Date().toISOString(), createdBy: 'initial_random' },
+    });
+
+    const adapter = new SurrogateFitnessSimulator();
+    const summary = (n: number, w: number, p: number) => ({
+      totalTrades: n,
+      winningTrades: Math.round(n * w),
+      losingTrades: n - Math.round(n * w),
+      winRate: w,
+      netProfit: p * 100,
+      netProfitRate: 0.1,
+      maxDrawdown: 30,
+      maxDrawdownRate: 0.03,
+      profitFactor: p,
+      averageWin: 15,
+      averageLoss: -10,
+      riskRewardRatio: 1.5,
+      maxConsecutiveWins: 3,
+      maxConsecutiveLosses: 2,
+    });
+    jest.spyOn(adapter, 'evaluateFitness').mockResolvedValue({
+      dslId: 'pr100-pass-only',
+      period: { start: '2024-01-01', end: '2024-12-31' },
+      trainPf: 2.0,
+      validationPf: 1.6,
+      overfitScore: 0.15,
+      train: { summary: summary(20, 0.6, 2.0), trades: [] },
+      validation: { summary: summary(10, 0.6, 1.6), trades: [] },
+      execution: {
+        executionModel: 'legacy_zero_cost',
+        executionConfigHash: 'legacy-zero-cost',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'legacy_zero_cost',
+          dataSource: 'ctrader',
+          roundTripCostPips: 0,
+          roundTripCostAtrMult: 0,
+          totalCost: 0,
+        },
+      },
+    });
+
+    const mutationAgent = new MutationAgent();
+    jest.spyOn(mutationAgent, 'generateMutants').mockResolvedValue([]);
+    jest.spyOn(mutationAgent, 'generateDiverse').mockResolvedValue([]);
+    const crossoverAgent = new CrossoverAgent();
+    jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
+
+    const population = new StrategyPopulation(undefined);
+    population.add('breakout', dsl);
+
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockResolvedValue(makeFormalBtResponse(1.8, 0.55, 35));
+
+    const loop = new EvolutionLoop({
+      population,
+      adapter,
+      mutationAgent,
+      crossoverAgent,
+      enforcer: new DiversityEnforcer(),
+      defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
+      runFormalBacktest,
+    });
+
+    const report = await loop.runOneGeneration('breakout');
+
+    expect(report.promotionCandidates).toHaveLength(1);
+    // 成功候補には repairHint は付かない
+    for (const c of report.formalBtVerifiedCandidates) {
+      if (c.formalBtPassed) expect(c.repairHint).toBeUndefined();
+    }
+    expect(report.repairHintSummary.totalFailures).toBe(0);
+    expect(report.repairHintSummary.repairable).toBe(0);
+    expect(report.repairHintSummary.excluded).toBe(0);
+    expect(report.repairHintSummary.bySeverity).toEqual({
+      low: 0,
+      medium: 0,
+      high: 0,
+      fatal: 0,
+    });
+  });
+
+  it('PR #100 review: maxDD は formalBtMetrics.maxDrawdown に取り込まれ、RepairHint の risk action を発火させる', async () => {
+    const dsl = StrategyDSLSchema.parse({
+      id: 'pr100-maxdd',
+      generation: 0,
+      parentIds: [],
+      regimeTarget: 'breakout',
+      symbol: 'EURUSD',
+      timeframe: '1h',
+      entry: {
+        direction: 'long',
+        trigger: {
+          logic: 'AND',
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+        },
+      },
+      stopLoss: { type: 'fixed_pips', value: 30 },
+      takeProfit: { type: 'rr_ratio', value: 1.5 },
+      parameters: {},
+      metadata: { createdAt: new Date().toISOString(), createdBy: 'initial_random' },
+    });
+
+    const adapter = new SurrogateFitnessSimulator();
+    const summary = (n: number, w: number, p: number) => ({
+      totalTrades: n,
+      winningTrades: Math.round(n * w),
+      losingTrades: n - Math.round(n * w),
+      winRate: w,
+      netProfit: p * 100,
+      netProfitRate: 0.1,
+      maxDrawdown: 30,
+      maxDrawdownRate: 0.03,
+      profitFactor: p,
+      averageWin: 15,
+      averageLoss: -10,
+      riskRewardRatio: 1.5,
+      maxConsecutiveWins: 3,
+      maxConsecutiveLosses: 2,
+    });
+    jest.spyOn(adapter, 'evaluateFitness').mockResolvedValue({
+      dslId: 'pr100-maxdd',
+      period: { start: '2024-01-01', end: '2024-12-31' },
+      trainPf: 2.0,
+      validationPf: 1.6,
+      overfitScore: 0.15,
+      train: { summary: summary(20, 0.6, 2.0), trades: [] },
+      validation: { summary: summary(10, 0.6, 1.6), trades: [] },
+      execution: {
+        executionModel: 'legacy_zero_cost',
+        executionConfigHash: 'legacy-zero-cost',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'legacy_zero_cost',
+          dataSource: 'ctrader',
+          roundTripCostPips: 0,
+          roundTripCostAtrMult: 0,
+          totalCost: 0,
+        },
+      },
+    });
+
+    const mutationAgent = new MutationAgent();
+    jest.spyOn(mutationAgent, 'generateMutants').mockResolvedValue([]);
+    jest.spyOn(mutationAgent, 'generateDiverse').mockResolvedValue([]);
+    const crossoverAgent = new CrossoverAgent();
+    jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
+
+    const population = new StrategyPopulation(undefined);
+    population.add('breakout', dsl);
+
+    // PF=0.5 < FORMAL_BT_MIN_PF (失敗確定) + maxDD=0.5 (>0.3) で risk action 発火を期待
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockResolvedValue({
+        summary: {
+          pf: 0.5,
+          winRate: 0.4,
+          tradeCount: 30,
+          maxDD: 0.5,
+          sharpe: -0.2,
+          returnPct: -0.1,
+        },
+        trades: [],
+        equity: null,
+        engineVersion: 'analysis-engine/backtesting.py@test',
+        unsupportedConditions: [],
+      });
+
+    const loop = new EvolutionLoop({
+      population,
+      adapter,
+      mutationAgent,
+      crossoverAgent,
+      enforcer: new DiversityEnforcer(),
+      defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
+      runFormalBacktest,
+    });
+
+    const report = await loop.runOneGeneration('breakout');
+
+    expect(report.formalBtVerifiedCandidates).toHaveLength(1);
+    const failed = report.formalBtVerifiedCandidates[0];
+    expect(failed.formalBtPassed).toBe(false);
+    expect(failed.formalBtMetrics?.maxDrawdown).toBeCloseTo(0.5);
+    expect(failed.repairHint?.failureReason).toBe('low_pf');
+    // maxDrawdown > 0.3 で risk action が追加される
+    expect(failed.repairHint?.actions.some((a) => a.target === 'risk')).toBe(true);
+  });
+
+  it('PR #100 review: 1世代目の RepairHint は同インスタンスで 2世代目 mutation に渡る', async () => {
+    const dsl = StrategyDSLSchema.parse({
+      id: 'pr100-multigen',
+      generation: 0,
+      parentIds: [],
+      regimeTarget: 'breakout',
+      symbol: 'EURUSD',
+      timeframe: '1h',
+      entry: {
+        direction: 'long',
+        trigger: {
+          logic: 'AND',
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+        },
+      },
+      stopLoss: { type: 'fixed_pips', value: 30 },
+      takeProfit: { type: 'rr_ratio', value: 1.5 },
+      parameters: {},
+      metadata: { createdAt: new Date().toISOString(), createdBy: 'initial_random' },
+    });
+
+    const adapter = new SurrogateFitnessSimulator();
+    const summary = (n: number, w: number, p: number) => ({
+      totalTrades: n,
+      winningTrades: Math.round(n * w),
+      losingTrades: n - Math.round(n * w),
+      winRate: w,
+      netProfit: p * 100,
+      netProfitRate: 0.1,
+      maxDrawdown: 30,
+      maxDrawdownRate: 0.03,
+      profitFactor: p,
+      averageWin: 15,
+      averageLoss: -10,
+      riskRewardRatio: 1.5,
+      maxConsecutiveWins: 3,
+      maxConsecutiveLosses: 2,
+    });
+    jest.spyOn(adapter, 'evaluateFitness').mockResolvedValue({
+      dslId: 'pr100-multigen',
+      period: { start: '2024-01-01', end: '2024-12-31' },
+      trainPf: 2.0,
+      validationPf: 1.6,
+      overfitScore: 0.15,
+      train: { summary: summary(20, 0.6, 2.0), trades: [] },
+      validation: { summary: summary(10, 0.6, 1.6), trades: [] },
+      execution: {
+        executionModel: 'legacy_zero_cost',
+        executionConfigHash: 'legacy-zero-cost',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'legacy_zero_cost',
+          dataSource: 'ctrader',
+          roundTripCostPips: 0,
+          roundTripCostAtrMult: 0,
+          totalCost: 0,
+        },
+      },
+    });
+
+    const mutationAgent = new MutationAgent();
+    const generateMutantsSpy = jest
+      .spyOn(mutationAgent, 'generateMutants')
+      .mockResolvedValue([]);
+    jest.spyOn(mutationAgent, 'generateDiverse').mockResolvedValue([]);
+    const crossoverAgent = new CrossoverAgent();
+    jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
+
+    const population = new StrategyPopulation(undefined);
+    population.add('breakout', dsl);
+
+    // 1 世代目: 必ず失敗 (PF=0.5) → RepairHint が生成される
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockResolvedValue(makeFormalBtResponse(0.5, 0.4, 30));
+
+    const loop = new EvolutionLoop({
+      population,
+      adapter,
+      mutationAgent,
+      crossoverAgent,
+      enforcer: new DiversityEnforcer(),
+      defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
+      runFormalBacktest,
+    });
+
+    // 1世代目: repairHints 引数も lastRepairHints も空 → 4 引数目は undefined
+    await loop.runOneGeneration('breakout');
+    const firstCall = generateMutantsSpy.mock.calls[0];
+    expect(firstCall[3]).toBeUndefined();
+
+    // 2世代目: 同じインスタンス。1 世代目の RepairHint が lastRepairHints として
+    //   mutation に渡るはず (repairHints?.size > 0)
+    await loop.runOneGeneration('breakout');
+    const secondCall = generateMutantsSpy.mock.calls[1];
+    const passedRepairHints = secondCall[3];
+    expect(passedRepairHints).toBeDefined();
+    expect(passedRepairHints?.size).toBeGreaterThan(0);
+    // 値の中身も期待通り (low_pf)
+    const firstHint = Array.from(passedRepairHints!.values())[0];
+    expect(firstHint?.failureReason).toBe('low_pf');
+  });
+
+  it('PR #100 review: options.repairHintsForMutation で外部から RepairHints を注入できる', async () => {
+    const dsl = StrategyDSLSchema.parse({
+      id: 'pr100-inject',
+      generation: 0,
+      parentIds: [],
+      regimeTarget: 'breakout',
+      symbol: 'EURUSD',
+      timeframe: '1h',
+      entry: {
+        direction: 'long',
+        trigger: {
+          logic: 'AND',
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+        },
+      },
+      stopLoss: { type: 'fixed_pips', value: 30 },
+      takeProfit: { type: 'rr_ratio', value: 1.5 },
+      parameters: {},
+      metadata: { createdAt: new Date().toISOString(), createdBy: 'initial_random' },
+    });
+
+    const adapter = new SurrogateFitnessSimulator();
+    jest.spyOn(adapter, 'evaluateFitness').mockResolvedValue({
+      dslId: 'pr100-inject',
+      period: { start: '2024-01-01', end: '2024-12-31' },
+      trainPf: 2.0,
+      validationPf: 1.6,
+      overfitScore: 0.15,
+      train: {
+        summary: {
+          totalTrades: 20,
+          winningTrades: 12,
+          losingTrades: 8,
+          winRate: 0.6,
+          netProfit: 200,
+          netProfitRate: 0.1,
+          maxDrawdown: 30,
+          maxDrawdownRate: 0.03,
+          profitFactor: 2.0,
+          averageWin: 15,
+          averageLoss: -10,
+          riskRewardRatio: 1.5,
+          maxConsecutiveWins: 3,
+          maxConsecutiveLosses: 2,
+        },
+        trades: [],
+      },
+      validation: {
+        summary: {
+          totalTrades: 10,
+          winningTrades: 6,
+          losingTrades: 4,
+          winRate: 0.6,
+          netProfit: 160,
+          netProfitRate: 0.1,
+          maxDrawdown: 30,
+          maxDrawdownRate: 0.03,
+          profitFactor: 1.6,
+          averageWin: 15,
+          averageLoss: -10,
+          riskRewardRatio: 1.5,
+          maxConsecutiveWins: 3,
+          maxConsecutiveLosses: 2,
+        },
+        trades: [],
+      },
+      execution: {
+        executionModel: 'legacy_zero_cost',
+        executionConfigHash: 'legacy-zero-cost',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'legacy_zero_cost',
+          dataSource: 'ctrader',
+          roundTripCostPips: 0,
+          roundTripCostAtrMult: 0,
+          totalCost: 0,
+        },
+      },
+    });
+
+    const mutationAgent = new MutationAgent();
+    const generateMutantsSpy = jest
+      .spyOn(mutationAgent, 'generateMutants')
+      .mockResolvedValue([]);
+    jest.spyOn(mutationAgent, 'generateDiverse').mockResolvedValue([]);
+    const crossoverAgent = new CrossoverAgent();
+    jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
+
+    const population = new StrategyPopulation(undefined);
+    population.add('breakout', dsl);
+
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockResolvedValue(makeFormalBtResponse(1.5, 0.6, 30));
+
+    const loop = new EvolutionLoop({
+      population,
+      adapter,
+      mutationAgent,
+      crossoverAgent,
+      enforcer: new DiversityEnforcer(),
+      defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
+      runFormalBacktest,
+    });
+
+    // 外部から (= 本番 scheduler 想定) RepairHints を注入
+    const { createRepairHintV1 } = await import('../../evolution/repairHintPolicy');
+    const injected = new Map([
+      [
+        'some-prev-candidate-id',
+        createRepairHintV1({
+          candidateId: 'some-prev-candidate-id',
+          failureReason: 'insufficient_trades',
+          metrics: { tradeCount: 0 },
+        }),
+      ],
+    ]);
+    await loop.runOneGeneration('breakout', { repairHintsForMutation: injected });
+
+    const passed = generateMutantsSpy.mock.calls[0][3];
+    expect(passed).toBeDefined();
+    expect(passed?.size).toBe(1);
+  });
+
+  it('PR #100: analysis-engine 例外失敗候補は analysis_engine_error として repairHint 化される', async () => {
+    const dsl = StrategyDSLSchema.parse({
+      id: 'pr100-engine-error',
+      generation: 0,
+      parentIds: [],
+      regimeTarget: 'breakout',
+      symbol: 'EURUSD',
+      timeframe: '1h',
+      entry: {
+        direction: 'long',
+        trigger: {
+          logic: 'AND',
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+        },
+      },
+      stopLoss: { type: 'fixed_pips', value: 30 },
+      takeProfit: { type: 'rr_ratio', value: 1.5 },
+      parameters: {},
+      metadata: { createdAt: new Date().toISOString(), createdBy: 'initial_random' },
+    });
+
+    const adapter = new SurrogateFitnessSimulator();
+    const summary = (n: number, w: number, p: number) => ({
+      totalTrades: n,
+      winningTrades: Math.round(n * w),
+      losingTrades: n - Math.round(n * w),
+      winRate: w,
+      netProfit: p * 100,
+      netProfitRate: 0.1,
+      maxDrawdown: 30,
+      maxDrawdownRate: 0.03,
+      profitFactor: p,
+      averageWin: 15,
+      averageLoss: -10,
+      riskRewardRatio: 1.5,
+      maxConsecutiveWins: 3,
+      maxConsecutiveLosses: 2,
+    });
+    jest.spyOn(adapter, 'evaluateFitness').mockResolvedValue({
+      dslId: 'pr100-engine-error',
+      period: { start: '2024-01-01', end: '2024-12-31' },
+      trainPf: 2.0,
+      validationPf: 1.6,
+      overfitScore: 0.15,
+      train: { summary: summary(20, 0.6, 2.0), trades: [] },
+      validation: { summary: summary(10, 0.6, 1.6), trades: [] },
+      execution: {
+        executionModel: 'legacy_zero_cost',
+        executionConfigHash: 'legacy-zero-cost',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'legacy_zero_cost',
+          dataSource: 'ctrader',
+          roundTripCostPips: 0,
+          roundTripCostAtrMult: 0,
+          totalCost: 0,
+        },
+      },
+    });
+
+    const mutationAgent = new MutationAgent();
+    jest.spyOn(mutationAgent, 'generateMutants').mockResolvedValue([]);
+    jest.spyOn(mutationAgent, 'generateDiverse').mockResolvedValue([]);
+    const crossoverAgent = new CrossoverAgent();
+    jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
+
+    const population = new StrategyPopulation(undefined);
+    population.add('breakout', dsl);
+
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockRejectedValue(new Error('socket hang up'));
+
+    const loop = new EvolutionLoop({
+      population,
+      adapter,
+      mutationAgent,
+      crossoverAgent,
+      enforcer: new DiversityEnforcer(),
+      defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
+      runFormalBacktest,
+    });
+
+    const report = await loop.runOneGeneration('breakout');
+
+    expect(report.formalBtVerifiedCandidates).toHaveLength(1);
+    const failed = report.formalBtVerifiedCandidates[0];
+    expect(failed.formalBtPassed).toBe(false);
+    expect(failed.repairHint?.failureReason).toBe('analysis_engine_error');
+    expect(failed.repairHint?.severity).toBe('high');
+    expect(failed.repairHint?.actions.some((a) => a.target === 'dsl_shape')).toBe(true);
+    expect(report.repairHintSummary.byFailureReason.analysis_engine_error).toBe(1);
+    expect(report.repairHintSummary.bySeverity.high).toBe(1);
   });
 });

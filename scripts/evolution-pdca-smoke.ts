@@ -189,6 +189,28 @@ async function main(): Promise<void> {
     }
   }
 
+  // PR #100: FailureReason → RepairHint v1 集計 + 失敗候補ごとの short log。
+  // mutation の修復方針が deterministic に観測できることを確認する用途。
+  console.log('\n--- repairHintSummary ---');
+  console.log(JSON.stringify(report.repairHintSummary, null, 2));
+
+  const failedWithHint = report.formalBtVerifiedCandidates.filter(
+    (c) => !c.formalBtPassed && c.repairHint,
+  );
+  if (failedWithHint.length > 0) {
+    console.log('\n--- repairHint per failed candidate ---');
+    for (const c of failedWithHint) {
+      const hint = c.repairHint;
+      if (!hint) continue;
+      const route = c.route ?? 'unknown';
+      const targets = hint.actions.map((a) => a.target).join(',');
+      console.log(
+        `  repairHint candidate=${c.dslId} route=${route} reason=${hint.failureReason} ` +
+          `severity=${hint.severity} target=${targets}`,
+      );
+    }
+  }
+
   // DB から集計を読み戻して表示 (永続化が成功しているかの確認も兼ねる)
   console.log('\n=== EvolutionBacktestRun summary (from DB) ===');
   const summary = await evolutionBacktestRunRepository.summarizeByEvolutionRun(evolutionRunId);

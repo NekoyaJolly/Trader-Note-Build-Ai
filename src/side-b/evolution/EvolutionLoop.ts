@@ -56,6 +56,13 @@ import {
   type FormalBtCandidateSummary,
   type SurrogateRoute,
 } from './surrogateRescuePolicy';
+import {
+  createRepairHintV1,
+  summarizeRepairHints,
+  type RepairHint,
+  type RepairHintSummary,
+} from './repairHintPolicy';
+import type { RepairHintMap } from '../agents/MutationAgent';
 
 /**
  * EvolutionLoop が repository に求める最小契約。
@@ -116,11 +123,16 @@ export interface EvolutionLoopDeps {
 /**
  * 段階 4a.3: 正式 BT (analysis-engine) で得られたメトリクス。
  * surrogate fitness とは別軸で、analysis-engine + backtesting.py が返す値を持つ。
+ *
+ * PR #100: `maxDrawdown` を optional で追加。RepairHint v1 の metrics 補強で
+ *   risk action を発火させるために必要。analysis-engine `summary.maxDD` を埋める。
+ *   既存読み出し側との互換性維持のため optional とする。
  */
 export interface FormalBtMetrics {
   pf: number;
   winRate: number;
   tradeCount: number;
+  maxDrawdown?: number;
 }
 
 /**
@@ -166,6 +178,12 @@ export interface EvolutionPromotionCandidate {
    * 互換性のため optional。PR #96 以降は EvolutionLoop 経路で常に埋まる。
    */
   route?: SurrogateRoute;
+  /**
+   * PR #100: 正式 BT 失敗時に deterministic 生成される RepairHint v1。
+   * `formalBtPassed === false` の候補のみ非 undefined。次世代 mutation の入力文脈に使う。
+   * 候補の評価・昇格・採用を意味しない (= mutation 補助情報)。
+   */
+  repairHint?: RepairHint;
 }
 
 export interface GenerationReport {
@@ -202,6 +220,15 @@ export interface GenerationReport {
    * `normal_pass=0` でも rescue lane で uniqueCandidates>0 を観測できれば成功シグナル。
    */
   formalBtCandidateSummary: FormalBtCandidateSummary;
+  /**
+   * PR #100: FailureReason → RepairHint v1 の集計。
+   * 正式 BT で `formalBtPassed=false` の候補のみが対象。失敗が 0 件の世代では
+   * `totalFailures=0` で空集計が入る。
+   *
+   * 個別の RepairHint は `formalBtVerifiedCandidates[i].repairHint` で参照可能。
+   * これは mutation の補助情報であり、候補の評価・昇格・採用を意味しない。
+   */
+  repairHintSummary: RepairHintSummary;
 }
 
 function seedStrategy(regime: string): StrategyDSL {
@@ -243,12 +270,33 @@ const FORMAL_BT_MIN_PF = 1.0;
 /** 段階 4a.3: 正式 BT の最低トレード数。VALIDATION_THRESHOLDS の共通値を流用。 */
 const FORMAL_BT_MIN_TRADES = VALIDATION_THRESHOLDS.common.minTradeCount;
 
+/**
+ * PR #100: `runOneGeneration` の任意オプション。
+ *   - `repairHintsForMutation`: 前世代の正式 BT 失敗から生成した RepairHint v1 を
+ *     mutation の入力文脈として渡す。未指定時は同インスタンスが直前世代で保持した
+ *     値 (= `lastRepairHints`) にフォールバックする。
+ *
+ * 本番 scheduler が毎回新しい `EvolutionLoop` を作る運用でも、scheduler 側で
+ * `report.formalBtVerifiedCandidates[].repairHint` を集めて次回呼び出し時に渡せば
+ * 「失敗ヒントを次世代 mutation に渡す」設計目的が成立する。
+ */
+export interface RunOneGenerationOptions {
+  repairHintsForMutation?: RepairHintMap;
+}
+
 export class EvolutionLoop {
   private readonly runFormalBacktest: RunScreeningBacktestFn;
   private readonly formalBtTopK: number;
   private readonly evolutionBacktestRepo: EvolutionBacktestPersister | null;
   private readonly evolutionRunId: string;
   private readonly edgeHypothesisLoader: EdgeHypothesisLoader | null;
+  /**
+   * PR #100: 同インスタンスで連続世代を回す場合の repairHints 保持先。
+   * 1 世代目に生成した RepairHint を、2 世代目の mutation に自動的に渡すために使う。
+   * 本番 scheduler が毎回 new する運用では `runOneGeneration({ repairHintsForMutation })`
+   * を明示注入するのが正規経路。
+   */
+  private lastRepairHints: RepairHintMap = new Map();
 
   constructor(private readonly deps: EvolutionLoopDeps) {
     this.runFormalBacktest = deps.runFormalBacktest ?? defaultRunScreeningBacktest;
@@ -272,8 +320,15 @@ export class EvolutionLoop {
    * Phase 5A: EdgeLedger には一切書き込まない。
    * 段階 4a.3: surrogate を通った候補だけ analysis-engine の正式 BT に送り、
    *   `formalBtPassed === true` のもののみ `promotionCandidates` に残る。
+   *
+   * PR #100: `options.repairHintsForMutation` で前世代の RepairHint を渡せる。
+   *   未指定時は同インスタンスが直前世代で生成した `lastRepairHints` を使う。
+   *   末尾で当世代の repairHint を `lastRepairHints` に保存し、次回呼び出しに繋ぐ。
    */
-  async runOneGeneration(regime: string): Promise<GenerationReport> {
+  async runOneGeneration(
+    regime: string,
+    options?: RunOneGenerationOptions,
+  ): Promise<GenerationReport> {
     const errors: string[] = [];
     const { population, adapter, mutationAgent, crossoverAgent, enforcer } = this.deps;
     const period = this.deps.defaultPeriod;
@@ -327,10 +382,22 @@ export class EvolutionLoop {
       }
     }
 
+    // PR #100: 前世代の RepairHint を mutation に渡す。優先順位:
+    //   1. 引数 options.repairHintsForMutation (本番 scheduler 経路: 毎回 new)
+    //   2. インスタンス内部の lastRepairHints (テスト / smoke で同インスタンス連続実行)
+    //   どちらも未設定なら従来挙動 (= 修復ヒント無しの mutation)
+    const repairHintsForMutation =
+      options?.repairHintsForMutation ?? this.lastRepairHints;
+
     let mutants: StrategyDSL[] = [];
     let crosses: StrategyDSL[] = [];
     try {
-      mutants = await mutationAgent.generateMutants(parentDsls, parentScores, 10);
+      mutants = await mutationAgent.generateMutants(
+        parentDsls,
+        parentScores,
+        10,
+        repairHintsForMutation.size > 0 ? repairHintsForMutation : undefined,
+      );
     } catch (e) {
       errors.push(`mutation: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -369,8 +436,43 @@ export class EvolutionLoop {
     //   - formalBtVerifiedCandidates: 正式 BT を呼んだ全件 (失敗理由付き)、運用ログ用
     //   - promotionCandidates:        formalBtPassed=true のみ、Phase 5B 検証への入力源
     const verifyResults = await this.verifyCandidatesWithFormalBacktest(ranked, scores, period);
-    const formalBtVerifiedCandidates = verifyResults.map((r) => r.candidate);
+
+    // PR #100: 失敗候補について FailureReason → RepairHint v1 を deterministic 生成。
+    //   - 個別 hint は candidate.repairHint に格納 (formalBtPassed=false のみ)
+    //   - summary は GenerationReport.repairHintSummary に集約 (smoke / 観測用)
+    //   候補の評価・昇格には一切影響しない (= mutation 補助情報のみ)。
+    const formalBtVerifiedCandidates = verifyResults.map((r) => {
+      if (r.candidate.formalBtPassed) return r.candidate;
+      const hint = createRepairHintV1({
+        candidateId: r.candidate.dslId,
+        dslId: r.candidate.dslId,
+        route: r.candidate.route,
+        failureReason: r.candidate.formalBtFailureReason ?? 'other',
+        metrics: r.candidate.formalBtMetrics
+          ? {
+              pf: r.candidate.formalBtMetrics.pf,
+              tradeCount: r.candidate.formalBtMetrics.tradeCount,
+              // PR #100 review: maxDrawdown 補強を本番経路でも発火させるため。
+              maxDrawdown: r.candidate.formalBtMetrics.maxDrawdown,
+            }
+          : undefined,
+      });
+      return { ...r.candidate, repairHint: hint };
+    });
     const promotionCandidates = formalBtVerifiedCandidates.filter((c) => c.formalBtPassed);
+    const repairHintSummary = summarizeRepairHints(
+      formalBtVerifiedCandidates
+        .filter((c): c is typeof c & { repairHint: RepairHint } => Boolean(c.repairHint))
+        .map((c) => ({ hint: c.repairHint, route: c.route })),
+    );
+
+    // PR #100: 当世代の RepairHint を次世代 mutation 用に内部に保存する。
+    // scheduler が毎回 new する運用では `options.repairHintsForMutation` を明示注入する経路を使うこと。
+    const nextRepairHints = new Map<string, RepairHint>();
+    for (const c of formalBtVerifiedCandidates) {
+      if (c.repairHint) nextRepairHints.set(c.dslId, c.repairHint);
+    }
+    this.lastRepairHints = nextRepairHints;
 
     // 段階 4a.4: 正式 BT 履歴を永続化 (passed/failed 全件、DSL 不在分岐は無いので欠損なし)。
     if (this.evolutionBacktestRepo) {
@@ -392,6 +494,7 @@ export class EvolutionLoop {
       errors,
       parentPoolSummary: parentPoolResult.summary,
       formalBtCandidateSummary: rescueResult.summary,
+      repairHintSummary,
     };
     return report;
   }
@@ -537,10 +640,13 @@ export class EvolutionLoop {
       }
 
       // response.summary は Zod 契約で必須、ここに来た時点で存在は保証される。
+      // PR #100: maxDD を取り込み、RepairHint の risk action 発火条件として下流で利用する。
+      // analysis-engine schema は maxDD を `number | null` で返すため、null は埋めない。
       const formalBtMetrics: FormalBtMetrics = {
         pf: response.summary.pf,
         winRate: response.summary.winRate,
         tradeCount: response.summary.tradeCount,
+        ...(response.summary.maxDD != null ? { maxDrawdown: response.summary.maxDD } : {}),
       };
       const engineVersion = response.engineVersion;
 
