@@ -23,6 +23,7 @@ import {
   MIN_TRAIN_PROFIT_FACTOR,
   MIN_VALIDATION_PROFIT_FACTOR,
 } from './evolutionPromotionThresholds';
+import { scoreNoveltyAgainstSelected } from './behaviorDescriptorLite';
 
 // =================================================================
 // 型定義
@@ -317,18 +318,40 @@ export function selectFormalBtCandidatesWithRescue(
     if (!tryAdd(cand)) duplicateRemoved++;
   }
 
-  // 2e. novelty rescue: 既選定済み以外から最新 dsl id (= 最も新しく生まれた構造) を 1 件
-  // v1 は厳密 novelty を計算しない: dsl.id ベースの単純な「未選択候補の中の 1 件」で代替
+  // 2e. novelty rescue (PR #97): 既選抜候補との構造的な違い (BehaviorDescriptorLite ベース)
+  //     から noveltyScore を計算し、最も「異なる」候補から noveltyTopK 件を採用する。
+  //     - selected が空なら全候補が noveltyScore=1 になる (= 最初に来た候補が選ばれる)
+  //     - 同点の場合は surrogateScore 降順で安定化
   const noveltyPool = nonKill.filter((c) => !selected.has(c.dsl.id));
-  for (const c of noveltyPool.slice(0, formalBtCandidatePolicyV1.noveltyTopK)) {
-    const cand: ClassifiedCandidate = {
-      dsl: c.dsl,
-      route: 'novelty_rescue',
-      score: c.surrogateScore,
-      reason: 'unique dsl.id, not in higher-priority lanes (v1 simple novelty)',
-      aggregate: c.aggregate,
-    };
-    if (!tryAdd(cand)) duplicateRemoved++;
+  if (noveltyPool.length > 0) {
+    const selectedDsls = [...selected.values()].map((s) => s.dsl);
+    const selectedTradeCounts = new Map<string, number>();
+    for (const s of selected.values()) {
+      selectedTradeCounts.set(s.dsl.id, s.aggregate.validation.summary.totalTrades);
+    }
+    const scored = noveltyPool.map((c) => ({
+      input: c,
+      novelty: scoreNoveltyAgainstSelected(c.dsl, selectedDsls, {
+        candidateValidationTradeCount: c.aggregate.validation.summary.totalTrades,
+        selectedValidationTradeCounts: selectedTradeCounts,
+      }),
+    }));
+    scored.sort((a, b) => {
+      if (b.novelty.noveltyScore !== a.novelty.noveltyScore) {
+        return b.novelty.noveltyScore - a.novelty.noveltyScore;
+      }
+      return b.input.surrogateScore - a.input.surrogateScore;
+    });
+    for (const item of scored.slice(0, formalBtCandidatePolicyV1.noveltyTopK)) {
+      const cand: ClassifiedCandidate = {
+        dsl: item.input.dsl,
+        route: 'novelty_rescue',
+        score: item.input.surrogateScore,
+        reason: item.novelty.reason,
+        aggregate: item.input.aggregate,
+      };
+      if (!tryAdd(cand)) duplicateRemoved++;
+    }
   }
 
   // === Step 3: summary 集計 ===

@@ -174,15 +174,17 @@ async function main(): Promise<void> {
   console.log(JSON.stringify(report.formalBtCandidateSummary, null, 2));
 
   // formalBtVerifiedCandidates の各 failureReason を出す (DB に行く前のメモリ上の情報)
+  // PR #97: rescue route 名 (= novelty / low_drawdown / trade_count / near_miss / normal_pass) も併記
   console.log('\n--- formal BT verify (in-memory) ---');
   for (const c of report.formalBtVerifiedCandidates) {
+    const routeStr = c.route ? ` route=${c.route}` : '';
     if (c.formalBtPassed) {
       console.log(
-        `  PASS dslId=${c.dslId} pf=${c.formalBtMetrics?.pf.toFixed(2)} ` +
+        `  PASS dslId=${c.dslId}${routeStr} pf=${c.formalBtMetrics?.pf.toFixed(2)} ` +
           `winRate=${c.formalBtMetrics?.winRate.toFixed(2)} trades=${c.formalBtMetrics?.tradeCount}`,
       );
     } else {
-      console.log(`  FAIL dslId=${c.dslId} reason=${c.formalBtFailureReason ?? '-'}`);
+      console.log(`  FAIL dslId=${c.dslId}${routeStr} reason=${c.formalBtFailureReason ?? '-'}`);
     }
   }
 
