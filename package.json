@@ -41,7 +41,10 @@
     "verify:ohlcv-parallel-limit": "tsx scripts/verify-ohlcv-parallel-limit.ts",
     "mcp-server": "npx ts-node src/mcp-server/index.ts",
     "cli:show-scoring": "tsx src/side-b/cli/showRecentScoring.ts",
-    "prepare": "simple-git-hooks || true"
+    "prepare": "node scripts/install-git-hooks.js"
+  },
+  "engines": {
+    "node": ">=20.17"
   },
   "keywords": [],
   "author": "",
@@ -109,7 +112,7 @@
   },
   "lint-staged": {
     "src/**/*.ts": [
-      "eslint --max-warnings 0"
+      "eslint"
     ]
   }
 }
