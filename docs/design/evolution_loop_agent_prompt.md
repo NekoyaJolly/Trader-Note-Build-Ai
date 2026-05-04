@@ -1,5 +1,26 @@
 # 進化ループ実装エージェント用プロンプト
 
+> **ステータス: ロードマップ文書 (実装スコープ ≠ 本文の全項目)**
+>
+> 本ドキュメントは進化ループの **将来像全体** を記述するロードマップ。実際にどこまで実装したかは PR のリンクを参照する。
+>
+> ### 実装履歴
+>
+> - PR #95 = 親個体プール v1 最小版 (本ドキュメント中の「実装対象 1」のサブセット)
+>   - **実装した source キー**: `formal_bt_passed` / `current_population` / `novelty_seed`
+>   - 本文中の `confirmed: 0.25 / screeningPassed: 0.40 / unverified: 0.10` は **未実装** (= EdgeHypothesis 逆変換層が無いため)。後続 PR #98 で対応予定
+>   - 本文中の「PR#93 = 親個体プール v1」「PR#94 = Archive」等の番号は **執筆時点の希望** であり、実 PR 番号とは一致しない (PR #93 はヘルスチェック修正 / PR #94 は DSL lint 修正で別件マージ済み)
+> - PR #96 以降の予定:
+>   | 想定 PR | 内容 | 状態 |
+>   |---|---|---|
+>   | #96 | Surrogate Rescue Lane (本文「実装対象 3」) | 未着手 |
+>   | #97 | BehaviorDescriptor Lite / Novelty Score (本文「実装対象 2 / 7」) | 未着手 |
+>   | #98 | EdgeHypothesis → StrategyDSL 逆変換 (本文「実装対象 1」の confirmed/screening_passed 部分) | 未着手 |
+>   | #99 | FailureReason → RepairHint v1 (本文「実装対象 4」) | 未着手 |
+>   | #100 | Promotion Gate / EdgeStatus 拡張 (本文「実装対象 5」、migration 要検討) | 未着手 |
+>
+> 本文の `parentPoolPolicy` / `behaviorDescriptor` / `formalBtCandidatePolicy` 等の例コードは **設計意図の記述** であり、最終形ではない。実装側で必要に応じて構造・キー名を調整する。
+
 ## 目的
 
 Trader-Note-Build-Ai の進化ループ実装を、単なる候補生成ではなく、継続的に改善可能な **Quality-Diversity 型の自律進化基盤** として完成させる。

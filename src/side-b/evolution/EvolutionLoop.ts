@@ -261,16 +261,19 @@ export class EvolutionLoop {
     }
 
     const elites = population.getElites(regime, 5, scores);
-    population.removeWorst(regime, 5, scores);
 
     // PR #95: 親個体プール v1 — mutation/crossover の親を 3 系統 (formal_bt_passed /
     // current_population / novelty_seed) のミックスから取得する。
     // - elites (= surrogate 上位、promotion 候補) は `extractPromotionCandidates` で別途使う
     // - 親プール = 「次世代を産むための材料」、elites = 「正式 BT に送る候補」、と役割分離
+    //
+    // 注: `removeWorst()` を **後** に呼ぶ。removeWorst を先にすると初期世代 (population
+    //     1〜5 個体) で current_population が空になり、親プールが novelty_seed に偏る。
     const parentPoolResult = await buildParentPool(regime, 5, scores, {
       population,
       evolutionBacktestRepo: this.evolutionBacktestRepo,
     });
+    population.removeWorst(regime, 5, scores);
     const parentPool = parentPoolResult.entries;
     const parentDsls = parentPool.map((e) => e.dsl);
     // mutation/crossover は score Map を期待するため、parent pool 側のスコアをマージ。

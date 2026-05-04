@@ -202,6 +202,27 @@ describe('buildParentPool (PR #95 親個体プール v1)', () => {
     expect(summary.fallbackApplied).toBe(true);
   });
 
+  it('repo の findRecentFormalBtPassed が例外を投げても世代継続できる (空扱い + warning + fallback)', async () => {
+    repoMock.findRecentFormalBtPassed.mockRejectedValue(new Error('DB connection failed'));
+    const population = new StrategyPopulation(undefined);
+    for (let i = 0; i < 5; i++) population.add('breakout', makeDsl(`pop-${i}`));
+
+    const { entries, summary } = await buildParentPool('breakout', 5, new Map(), {
+      population,
+      evolutionBacktestRepo: repoMock,
+    });
+
+    // 例外は throw されず、formal_bt_passed=0 で fallback 成功
+    expect(summary.totalSelected).toBe(5);
+    expect(summary.selected.formal_bt_passed).toBe(0);
+    expect(summary.fallbackApplied).toBe(true);
+    expect(summary.fallbackReason).toMatch(/repo error: DB connection failed/);
+    expect(entries.length).toBe(5);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('formal_bt_passed のロード失敗'),
+    );
+  });
+
   it('candidateHash 重複は除外して fallback (= 同構造の DSL を 2 重に親に入れない)', async () => {
     // 同じ candidateHash の row を 2 件返す → 1 件しか採用されないことを repo 側で担保するが、
     // 本テストは buildParentPool の挙動を確認する目的。

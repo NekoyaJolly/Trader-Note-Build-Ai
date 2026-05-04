@@ -205,22 +205,37 @@ export async function buildParentPool(
   const fallbackReasons: string[] = [];
 
   // 1. formal_bt_passed
+  // DB 一時障害でも世代ループ全体を落とさないため、ロード失敗は警告 + 空扱いで継続。
+  // (createMany の永続化が `.catch(() => undefined)` で続行する設計と整合)
   let formalBtLoaded: StrategyDSL[] = [];
+  let formalBtLoadError: string | null = null;
   if (deps.evolutionBacktestRepo && requested.formal_bt_passed > 0) {
-    formalBtLoaded = await loadFormalBtPassedParents(
-      deps.evolutionBacktestRepo,
-      requested.formal_bt_passed,
-    );
+    try {
+      formalBtLoaded = await loadFormalBtPassedParents(
+        deps.evolutionBacktestRepo,
+        requested.formal_bt_passed,
+      );
+    } catch (err) {
+      formalBtLoadError = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[parentPool] formal_bt_passed のロード失敗、空扱いで継続: ${formalBtLoadError}`,
+      );
+    }
   }
   for (const dsl of formalBtLoaded.slice(0, requested.formal_bt_passed)) {
     entries.push({ dsl, source: 'formal_bt_passed' });
   }
   const formalBtShortage = requested.formal_bt_passed - formalBtLoaded.length;
   if (formalBtShortage > 0) {
-    fallbackReasons.push(
-      `formal_bt_passed shortage=${formalBtShortage} (` +
-        `${deps.evolutionBacktestRepo ? 'DB に合格履歴不足' : 'repo=null'})`,
-    );
+    let reason: string;
+    if (formalBtLoadError) {
+      reason = `repo error: ${formalBtLoadError}`;
+    } else if (!deps.evolutionBacktestRepo) {
+      reason = 'repo=null';
+    } else {
+      reason = 'DB に合格履歴不足';
+    }
+    fallbackReasons.push(`formal_bt_passed shortage=${formalBtShortage} (${reason})`);
   }
 
   // 2. current_population (formal_bt 不足分も吸収)

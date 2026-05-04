@@ -112,9 +112,17 @@ export class EvolutionBacktestRunRepository {
    * - candidateHash 重複除去 (= 構造的に同じ DSL は 1 件だけ採用)
    *   ハッシュベースの距離は v1 では計算せず単純な完全一致のみ
    * - dslSnapshot は JSON で保存されているため、呼び出し側で StrategyDSLSchema.safeParse する
+   *
+   * dedup 方針:
+   *   `limit` を **ユニーク件数の上限** として扱う。重複が多いと limit 件返らない問題を
+   *   避けるため、内部で `limit * 4` 件まで over-fetch してから dedup → 先頭 `limit` 件で切る。
+   *   重複率が極端に高くて over-fetch でも足りない場合は単に少ない件数を返す
+   *   (= 呼び出し側は不足を受容して fallback 動作する想定 / 完全保証は paging が必要だが v1 では不要)。
    */
   async findRecentFormalBtPassed(limit: number = 50): Promise<EvolutionBacktestRun[]> {
-    const take = Math.max(1, Math.min(500, limit));
+    const requested = Math.max(1, Math.min(500, limit));
+    // ユニーク件数を確保するため 4x まで over-fetch (cap 2000)
+    const take = Math.min(2000, requested * 4);
     const rows = await prisma.evolutionBacktestRun.findMany({
       where: { formalBtPassed: true },
       orderBy: { createdAt: 'desc' },
@@ -127,6 +135,7 @@ export class EvolutionBacktestRunRepository {
       if (seen.has(r.candidateHash)) continue;
       seen.add(r.candidateHash);
       unique.push(r);
+      if (unique.length >= requested) break;
     }
     return unique;
   }
