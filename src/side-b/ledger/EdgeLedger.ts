@@ -223,10 +223,20 @@ export class EdgeLedger {
 
     // --- 検索 ---
 
-    async findByStatus(status: EdgeStatus): Promise<EdgeHypothesis[]> {
+    /**
+     * 指定 status の EdgeHypothesis を最新順で取得する。
+     *
+     * @param limit PR #98 親プール統合で追加された省略可能パラメータ。
+     *              省略時は全件取得 (従来挙動)、指定時は SQL `take` で打ち切り
+     *              (EdgeHypothesis 件数が増えてもメモリ膨張しない)。
+     */
+    async findByStatus(status: EdgeStatus, limit?: number): Promise<EdgeHypothesis[]> {
         const rows = await prisma.edgeHypothesis.findMany({
             where: { status },
             orderBy: { createdAt: 'desc' },
+            ...(typeof limit === 'number' && limit > 0
+                ? { take: Math.min(1000, Math.floor(limit)) }
+                : {}),
         });
         return rows.map(mapPrismaToEdgeHypothesis);
     }

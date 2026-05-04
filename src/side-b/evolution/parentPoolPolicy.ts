@@ -74,7 +74,13 @@ export interface ParentPoolSummary {
     loaded: number;
     /** Zod 等の変換失敗で skip された件数 */
     skipped: number;
-    /** 重複排除で落とされた件数 (同 hypothesis が複数 status から来たケース) */
+    /**
+     * 親プール全体の dsl.id 重複排除件数。
+     * EdgeHypothesis 由来の重複 (= 同 hypothesis が複数 status から来たケース) に加え、
+     * formal_bt_passed / current_population で同 dsl.id が再出現したケースも含む。
+     * EdgeHypothesis 専用の dedup 数だけに絞ると、edge → formal_bt 間の dedup が
+     * 観測不能になるため、敢えて全体カウンタとして扱う。
+     */
     duplicateRemoved: number;
     /** 変換失敗 / 警告ログ (debug 用、最大 10 件) */
     warnings: string[];
@@ -83,10 +89,14 @@ export interface ParentPoolSummary {
 
 /**
  * PR #98 親プール統合用に追加された EdgeHypothesis ロード経路。
- * 既存 `EdgeLedger.findByStatus` をそのまま使えるよう、最小契約を Pick で切る。
+ *
+ * `limit` を必須化することで、EdgeHypothesis 件数が増えても親プール構築時に
+ * 全件メモリ展開しない設計にする (= EdgeLedger 側でも `take` を効かせる前提)。
+ * 値を省略した実装は最大件数キャップで動作するか、interface を満たすラッパで
+ * limit を適用する。
  */
 export interface EdgeHypothesisLoader {
-  findByStatus(status: EdgeStatus): Promise<EdgeHypothesis[]>;
+  findByStatus(status: EdgeStatus, limit: number): Promise<EdgeHypothesis[]>;
 }
 
 export interface BuildParentPoolDeps {
@@ -268,7 +278,9 @@ async function loadEdgeHypothesisParents(
   status: EdgeStatus,
   limit: number,
 ): Promise<{ dsls: StrategyDSL[]; loaded: number; skipped: number; warnings: string[] }> {
-  const rows = await loader.findByStatus(status);
+  // 変換失敗を考慮して 2x over-fetch (上限 cap=200)、loader 側でも limit を効かせる
+  const fetchLimit = Math.min(200, Math.max(limit * 2, 10));
+  const rows = await loader.findByStatus(status, fetchLimit);
   const loaded = rows.length;
   const dsls: StrategyDSL[] = [];
   const warnings: string[] = [];
@@ -368,7 +380,9 @@ export async function buildParentPool(
   }
 
   // === v2 専用: EdgeHypothesis 系を先にロード (優先順位順) ===
-  let edgeConfirmedShortage = 0;
+  // PR #98 Copilot fix #3: shortage は dedup 後の実 added 件数で計算する
+  //   (load 件数 != entries に追加された件数。同 dsl.id が複数 status から来た場合
+  //    dedup で落ちるため、loaded - dedup を fallback に流すのが正しい)
   let edgeScreeningShortage = 0;
   if (hasEdgeLoader && deps.edgeHypothesisLoader) {
     // 1. edge_confirmed
@@ -381,11 +395,15 @@ export async function buildParentPool(
     edgeLoadedTotal += conf.loaded;
     edgeSkippedTotal += conf.skipped;
     edgeWarnings.push(...conf.warnings);
-    tryAddEdge(conf.dsls.slice(0, requested.edge_confirmed), 'edge_confirmed');
-    edgeConfirmedShortage = requested.edge_confirmed - conf.dsls.length;
+    const addedConfirmed = tryAddEdge(
+      conf.dsls.slice(0, requested.edge_confirmed),
+      'edge_confirmed',
+    );
+    const edgeConfirmedShortage = requested.edge_confirmed - addedConfirmed;
     if (edgeConfirmedShortage > 0) {
       fallbackReasons.push(
-        `edge_confirmed shortage=${edgeConfirmedShortage} (loaded=${conf.loaded}, skipped=${conf.skipped})`,
+        `edge_confirmed shortage=${edgeConfirmedShortage} (loaded=${conf.loaded}, ` +
+          `skipped=${conf.skipped}, added=${addedConfirmed})`,
       );
     }
 
@@ -400,11 +418,15 @@ export async function buildParentPool(
     edgeLoadedTotal += screen.loaded;
     edgeSkippedTotal += screen.skipped;
     edgeWarnings.push(...screen.warnings);
-    tryAddEdge(screen.dsls.slice(0, screeningRequest), 'edge_screening_passed');
-    edgeScreeningShortage = screeningRequest - screen.dsls.length;
+    const addedScreening = tryAddEdge(
+      screen.dsls.slice(0, screeningRequest),
+      'edge_screening_passed',
+    );
+    edgeScreeningShortage = screeningRequest - addedScreening;
     if (edgeScreeningShortage > 0) {
       fallbackReasons.push(
-        `edge_screening_passed shortage=${edgeScreeningShortage} (loaded=${screen.loaded}, skipped=${screen.skipped})`,
+        `edge_screening_passed shortage=${edgeScreeningShortage} (loaded=${screen.loaded}, ` +
+          `skipped=${screen.skipped}, added=${addedScreening})`,
       );
     }
   }
@@ -466,6 +488,7 @@ export async function buildParentPool(
   }
 
   // === 5. edge_unverified (低優先) ===
+  // PR #98 Copilot fix #3: shortage は dedup 後の added 件数で計算する
   let edgeUnverifiedShortage = 0;
   if (hasEdgeLoader && deps.edgeHypothesisLoader && requested.edge_unverified > 0) {
     const unv = await loadEdgeHypothesisParentsSafely(
@@ -477,11 +500,12 @@ export async function buildParentPool(
     edgeLoadedTotal += unv.loaded;
     edgeSkippedTotal += unv.skipped;
     edgeWarnings.push(...unv.warnings);
-    const added = tryAddEdge(unv.dsls.slice(0, requested.edge_unverified), 'edge_unverified');
-    edgeUnverifiedShortage = requested.edge_unverified - added;
+    const addedUnverified = tryAddEdge(unv.dsls.slice(0, requested.edge_unverified), 'edge_unverified');
+    edgeUnverifiedShortage = requested.edge_unverified - addedUnverified;
     if (edgeUnverifiedShortage > 0) {
       fallbackReasons.push(
-        `edge_unverified shortage=${edgeUnverifiedShortage} (loaded=${unv.loaded}, skipped=${unv.skipped})`,
+        `edge_unverified shortage=${edgeUnverifiedShortage} (loaded=${unv.loaded}, ` +
+          `skipped=${unv.skipped}, added=${addedUnverified})`,
       );
     }
   }

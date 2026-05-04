@@ -13,6 +13,8 @@
  * @see docs/design/pr_98_edge_hypothesis_to_strategy_dsl_agent_prompt.md
  */
 
+import type { z } from 'zod';
+
 import type { EdgeHypothesis } from '../models/edgeHypothesis';
 import {
   StrategyDSLSchema,
@@ -20,6 +22,16 @@ import {
   type Condition as DSLCondition,
 } from '../strategy_dsl/schema';
 import { normalizeTimeframe } from '../constants/timeframes';
+
+/**
+ * StrategyDSLSchema の **入力型** (Zod parse 前の生オブジェクト形)。
+ * `raw` 変数を `unknown` で受けるとリポジトリ規約 (no-restricted-syntax: unknown) 違反になるため、
+ * 入力型として `z.input<...>` を使うことで:
+ *   - 規約準拠 (`unknown` 不使用)
+ *   - 構築時のフィールド漏れ / 型不整合を TS が捕捉
+ *   - safeParse に渡せる (= z.input は safeParse の引数型と一致)
+ */
+type StrategyDSLInput = z.input<typeof StrategyDSLSchema>;
 
 // =================================================================
 // 型定義
@@ -71,7 +83,7 @@ function mapConditionToDsl(c: EdgeHypothesis['conditions'][number]): DSLConditio
     lens: c.lensName,
     feature: c.featureKey,
     op: c.op,
-    value: c.value as DSLCondition['value'],
+    value: c.value,
   };
 }
 
@@ -163,20 +175,20 @@ export function dslFromHypothesis(hypothesis: EdgeHypothesis): DslFromHypothesis
     `imported from EdgeHypothesis ${hypothesis.id} (status=${hypothesis.status}). ` +
     `original statement: ${hypothesis.statement?.slice(0, 120) ?? ''}`;
 
-  const raw: unknown = {
+  const raw: StrategyDSLInput = {
     id: dslId,
     generation: 0,
-    parentIds: [] as string[],
+    parentIds: [],
     regimeTarget,
     symbol: rawSymbol,
     timeframe,
     entry: {
       direction: hypothesis.expectedDirection,
       trigger: {
-        logic: 'AND' as const,
+        logic: 'AND',
         conditions: dslConditions,
       },
-      orderType: 'market' as const,
+      orderType: 'market',
     },
     stopLoss: rm.stopLoss,
     takeProfit: rm.takeProfit,
@@ -185,7 +197,7 @@ export function dslFromHypothesis(hypothesis: EdgeHypothesis): DslFromHypothesis
       createdAt: new Date().toISOString(),
       // schema enum の都合上 'edge_hypothesis_import' は使えないため 'llm_generated' を採用
       // (= 多くの EdgeHypothesis は LLM 生成由来であり、意味的にも近い)
-      createdBy: 'llm_generated' as const,
+      createdBy: 'llm_generated',
       description,
     },
   };
