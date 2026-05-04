@@ -165,6 +165,10 @@ async function main(): Promise<void> {
     for (const e of report.errors) console.log(`  ${e}`);
   }
 
+  // PR #95: 親個体プール v1 のソース別取得 + fallback 状態
+  console.log('\n--- parentPoolSummary ---');
+  console.log(JSON.stringify(report.parentPoolSummary, null, 2));
+
   // formalBtVerifiedCandidates の各 failureReason を出す (DB に行く前のメモリ上の情報)
   console.log('\n--- formal BT verify (in-memory) ---');
   for (const c of report.formalBtVerifiedCandidates) {

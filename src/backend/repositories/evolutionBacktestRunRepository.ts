@@ -105,6 +105,33 @@ export class EvolutionBacktestRunRepository {
   }
 
   /**
+   * Critical-4 PR #95 (親個体プール v1): formalBtPassed=true の履歴から
+   * 親候補として再利用できる過去候補を取得する。
+   *
+   * - 直近 createdAt 降順 (最新の合格戦略から優先)
+   * - candidateHash 重複除去 (= 構造的に同じ DSL は 1 件だけ採用)
+   *   ハッシュベースの距離は v1 では計算せず単純な完全一致のみ
+   * - dslSnapshot は JSON で保存されているため、呼び出し側で StrategyDSLSchema.safeParse する
+   */
+  async findRecentFormalBtPassed(limit: number = 50): Promise<EvolutionBacktestRun[]> {
+    const take = Math.max(1, Math.min(500, limit));
+    const rows = await prisma.evolutionBacktestRun.findMany({
+      where: { formalBtPassed: true },
+      orderBy: { createdAt: 'desc' },
+      take,
+    });
+    // candidateHash 単位で先勝ち (最新が残る)
+    const seen = new Set<string>();
+    const unique: EvolutionBacktestRun[] = [];
+    for (const r of rows) {
+      if (seen.has(r.candidateHash)) continue;
+      seen.add(r.candidateHash);
+      unique.push(r);
+    }
+    return unique;
+  }
+
+  /**
    * 段階 4a.PDCA smoke: evolutionRunId 単位で formalBtPassed / failureReason 分布を集計する。
    *
    * 用途:
