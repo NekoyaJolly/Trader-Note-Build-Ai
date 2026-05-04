@@ -200,6 +200,26 @@ async function main(): Promise<void> {
   console.log('\n--- promotionGateSummary ---');
   console.log(JSON.stringify(report.promotionGateSummary, null, 2));
 
+  // PR #102: RepairHint Outcome Telemetry v1 集計。
+  // 前世代の failed candidate を baseline として、当世代 mutation child の formal BT 結果と
+  // 比較して improved / worsened / unchanged / unknown を観測する。
+  // 単世代 smoke では trace を持つ child が形成されないため、attempted=0 が通常。
+  console.log('\n--- repairOutcomeSummary ---');
+  console.log(JSON.stringify(report.repairOutcomeSummary, null, 2));
+
+  if (report.repairOutcomes.length > 0) {
+    console.log('\n--- repairOutcome per child ---');
+    for (const o of report.repairOutcomes) {
+      const targets = o.targets.join(',') || '-';
+      const pfDelta = o.deltas.pfDelta !== null ? o.deltas.pfDelta.toFixed(3) : '-';
+      const tcDelta = o.deltas.tradeCountDelta !== null ? `${o.deltas.tradeCountDelta}` : '-';
+      console.log(
+        `  repairOutcome child=${o.childDslId} reason=${o.failureReason} target=${targets} ` +
+          `status=${o.status} pfDelta=${pfDelta} tradeCountDelta=${tcDelta}`,
+      );
+    }
+  }
+
   const failedWithHint = report.formalBtVerifiedCandidates.filter(
     (c) => !c.formalBtPassed && c.repairHint,
   );
