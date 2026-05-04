@@ -156,6 +156,23 @@ describe('extractBehaviorDescriptorLite (PR #97 必須 1〜8)', () => {
 // compareBehaviorDescriptorsLite
 // =================================================================
 
+describe('extractBehaviorDescriptorLite — Copilot fix: timeframe 正規化', () => {
+  it("大文字小文字の違い ('1H' vs '1h') が normalizeTimeframe で吸収される", () => {
+    const a = extractBehaviorDescriptorLite(makeDsl({ timeframe: '1H' }));
+    const b = extractBehaviorDescriptorLite(makeDsl({ timeframe: '1h' }));
+    expect(a.timeframe).toBe(b.timeframe);
+  });
+
+  it("'multi' 等の不正値は normalizeTimeframe の DEFAULT_TIMEFRAME (= '15m') にフォールバックする", () => {
+    // hashStrategyDsl / BT 経路と同じ正規化なので、'multi' は '15m' 固定扱いされる。
+    // 別の戦略が timeframe='multi' / timeframe='15m' で書かれていても、
+    // descriptor 上は同一として扱われる (= novelty 計算で別物扱いにならない)。
+    const multi = extractBehaviorDescriptorLite(makeDsl({ timeframe: 'multi' }));
+    const fifteenMin = extractBehaviorDescriptorLite(makeDsl({ timeframe: '15m' }));
+    expect(multi.timeframe).toBe(fifteenMin.timeframe);
+  });
+});
+
 describe('compareBehaviorDescriptorsLite (PR #97 必須 9〜10)', () => {
   it('9. descriptor 完全一致なら totalSimilarity=1', () => {
     const a = extractBehaviorDescriptorLite(
@@ -169,6 +186,34 @@ describe('compareBehaviorDescriptorsLite (PR #97 必須 9〜10)', () => {
     expect(sim.totalSimilarity).toBe(1);
     expect(sim.regimeSimilarity).toBe(1);
     expect(sim.indicatorSimilarity).toBe(1);
+  });
+
+  it('Copilot fix: stopLossKind / takeProfitKind の違いも similarity に反映される', () => {
+    // 同 riskKind=sl_tp だが具体型が違う → 全体の totalSimilarity が完全一致より低い
+    const a = extractBehaviorDescriptorLite(
+      makeDsl({
+        stopLoss: { type: 'fixed_pips', value: 30 },
+        takeProfit: { type: 'rr_ratio', value: 1.5 },
+      }),
+    );
+    const b = extractBehaviorDescriptorLite(
+      makeDsl({
+        stopLoss: { type: 'fixed_pips', value: 30 },
+        takeProfit: { type: 'fixed_pips', value: 30 }, // TP の type のみ違う
+      }),
+    );
+    const sim = compareBehaviorDescriptorsLite(a, b);
+    expect(sim.takeProfitSimilarity).toBe(0); // 違う
+    expect(sim.totalSimilarity).toBeLessThan(1); // 完全一致ではない
+  });
+
+  it('Copilot fix: tradeFrequencyClass の違いも similarity に反映される', () => {
+    const dsl = makeDsl();
+    const lowFreq = extractBehaviorDescriptorLite(dsl, { validationTradeCount: 5 }); // low
+    const highFreq = extractBehaviorDescriptorLite(dsl, { validationTradeCount: 200 }); // high
+    const sim = compareBehaviorDescriptorsLite(lowFreq, highFreq);
+    expect(sim.tradeFrequencySimilarity).toBe(0);
+    expect(sim.totalSimilarity).toBeLessThan(1);
   });
 
   it('10. descriptor が大きく異なるなら totalSimilarity が低い', () => {

@@ -16,6 +16,7 @@
  */
 
 import type { StrategyDSL } from '../strategy_dsl/schema';
+import { normalizeTimeframe } from '../constants/timeframes';
 
 // =================================================================
 // 型定義
@@ -41,6 +42,12 @@ export interface DescriptorSimilarity {
   exitSimilarity: number;
   indicatorSimilarity: number;
   riskSimilarity: number;
+  /** PR #97 Copilot fix: SL の type 比較 (= riskKind とは独立した粒度) */
+  stopLossSimilarity: number;
+  /** PR #97 Copilot fix: TP の type 比較 */
+  takeProfitSimilarity: number;
+  /** PR #97 Copilot fix: 取引頻度クラス比較 (low/medium/high/unknown) */
+  tradeFrequencySimilarity: number;
   /** 重み付き平均 (0〜1) */
   totalSimilarity: number;
 }
@@ -205,9 +212,15 @@ export function extractBehaviorDescriptorLite(
   // 安定順序のため昇順ソート
   const indicatorKinds = [...indicatorSet].sort();
 
+  // PR #97 Copilot fix: timeframe は Side-B の他経路 (hashStrategyDsl / BT / 永続化) と
+  //   同じく normalizeTimeframe を通す。'1H' → '1h' / 'multi' → '1h' (= 既定) など、
+  //   同一戦略が表記ゆれで別扱いされて novelty 計算がブレる問題を防ぐ。
+  const tfRaw = dsl.timeframe?.length > 0 ? dsl.timeframe : '';
+  const timeframe = tfRaw.length > 0 ? normalizeTimeframe(tfRaw) : 'unknown';
+
   return {
     regimeTarget: dsl.regimeTarget?.length > 0 ? dsl.regimeTarget : 'unknown',
-    timeframe: dsl.timeframe?.length > 0 ? dsl.timeframe : 'unknown',
+    timeframe,
     entryKind: classifyEntryKind(dsl.entry),
     exitKind: classifyExitKind(dsl),
     indicatorKinds,
@@ -243,6 +256,14 @@ function jaccardSimilarity(a: string[], b: string[]): number {
   return union === 0 ? 0.5 : intersection / union;
 }
 
+/**
+ * 各軸の重み。entry / indicator が最重要 (戦略の本体)、その次に regime / exit、
+ * timeframe / risk / SL / TP / tradeFrequency は補助的差分。
+ *
+ * stopLoss / takeProfit / tradeFrequency は riskKind ほど抽象化されておらず、
+ * 例えば `fixed_pips+rr_ratio` と `fixed_pips+fixed_pips` は riskKind が同じ
+ * (sl_tp) でも具体型が違うため、独立軸として比較する。
+ */
 const SIMILARITY_WEIGHTS = {
   regime: 1.0,
   timeframe: 0.8,
@@ -250,18 +271,19 @@ const SIMILARITY_WEIGHTS = {
   exit: 1.0,
   indicator: 1.2,
   risk: 0.8,
+  stopLoss: 0.6,
+  takeProfit: 0.6,
+  tradeFrequency: 0.5,
 } as const;
 
-const SIMILARITY_WEIGHT_TOTAL =
-  SIMILARITY_WEIGHTS.regime +
-  SIMILARITY_WEIGHTS.timeframe +
-  SIMILARITY_WEIGHTS.entry +
-  SIMILARITY_WEIGHTS.exit +
-  SIMILARITY_WEIGHTS.indicator +
-  SIMILARITY_WEIGHTS.risk;
+const SIMILARITY_WEIGHT_TOTAL = Object.values(SIMILARITY_WEIGHTS).reduce((a, b) => a + b, 0);
 
 /**
  * 2 つの descriptor の類似度を計算する。各軸 0〜1、totalSimilarity は重み付き平均。
+ *
+ * PR #97 Copilot fix: 旧版は `stopLossKind` / `takeProfitKind` / `tradeFrequencyClass`
+ *   を抽出していたのに比較に使っておらず、SL/TP の具体型違いや取引頻度差を novelty
+ *   選抜が見逃していた。9 軸全てを similarity に組み込む。
  */
 export function compareBehaviorDescriptorsLite(
   a: BehaviorDescriptorLite,
@@ -273,6 +295,9 @@ export function compareBehaviorDescriptorsLite(
   const exitSim = categoricalSimilarity(a.exitKind, b.exitKind);
   const indicatorSim = jaccardSimilarity(a.indicatorKinds, b.indicatorKinds);
   const riskSim = categoricalSimilarity(a.riskKind, b.riskKind);
+  const stopLossSim = categoricalSimilarity(a.stopLossKind, b.stopLossKind);
+  const takeProfitSim = categoricalSimilarity(a.takeProfitKind, b.takeProfitKind);
+  const tradeFreqSim = categoricalSimilarity(a.tradeFrequencyClass, b.tradeFrequencyClass);
 
   const weightedSum =
     regimeSim * SIMILARITY_WEIGHTS.regime +
@@ -280,7 +305,10 @@ export function compareBehaviorDescriptorsLite(
     entrySim * SIMILARITY_WEIGHTS.entry +
     exitSim * SIMILARITY_WEIGHTS.exit +
     indicatorSim * SIMILARITY_WEIGHTS.indicator +
-    riskSim * SIMILARITY_WEIGHTS.risk;
+    riskSim * SIMILARITY_WEIGHTS.risk +
+    stopLossSim * SIMILARITY_WEIGHTS.stopLoss +
+    takeProfitSim * SIMILARITY_WEIGHTS.takeProfit +
+    tradeFreqSim * SIMILARITY_WEIGHTS.tradeFrequency;
 
   const total = Math.max(0, Math.min(1, weightedSum / SIMILARITY_WEIGHT_TOTAL));
 
@@ -291,6 +319,9 @@ export function compareBehaviorDescriptorsLite(
     exitSimilarity: exitSim,
     indicatorSimilarity: indicatorSim,
     riskSimilarity: riskSim,
+    stopLossSimilarity: stopLossSim,
+    takeProfitSimilarity: takeProfitSim,
+    tradeFrequencySimilarity: tradeFreqSim,
     totalSimilarity: total,
   };
 }
@@ -311,6 +342,9 @@ function summarizeDiffAxes(sim: DescriptorSimilarity): string {
   if (sim.exitSimilarity === 0) diffs.push('exitKind');
   if (sim.indicatorSimilarity < 0.5) diffs.push('indicatorKinds');
   if (sim.riskSimilarity === 0) diffs.push('riskKind');
+  if (sim.stopLossSimilarity === 0) diffs.push('stopLossKind');
+  if (sim.takeProfitSimilarity === 0) diffs.push('takeProfitKind');
+  if (sim.tradeFrequencySimilarity === 0) diffs.push('tradeFrequencyClass');
   return diffs.length > 0 ? diffs.join(',') : 'minor';
 }
 
