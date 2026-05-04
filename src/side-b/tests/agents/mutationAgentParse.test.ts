@@ -13,6 +13,7 @@
 import { MutationAgent } from '../../agents/MutationAgent';
 import type { AIProvider } from '../../agent/aiProvider';
 import { StrategyDSLSchema, type StrategyDSL } from '../../strategy_dsl/schema';
+import { createRepairHintV1 } from '../../evolution/repairHintPolicy';
 
 function mockAi(impl: jest.Mock): AIProvider {
   return {
@@ -136,6 +137,93 @@ describe('MutationAgent silent-empty 観測ログ (4a.PDCA)', () => {
     expect(out).toEqual([]);
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringMatching(/parsed=0\/2/),
+    );
+  });
+});
+
+describe('PR #100: MutationAgent repairHint 統合', () => {
+  let logSpy: jest.SpyInstance;
+  beforeEach(() => {
+    logSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    logSpy.mockRestore();
+    jest.restoreAllMocks();
+  });
+
+  it('repairHint 未指定なら従来挙動 (prompt に修復ヒント節が含まれない)', async () => {
+    const validItem = validDsl('mut-1');
+    const chatMock = jest
+      .fn()
+      .mockResolvedValue({ content: JSON.stringify([validItem]), toolCalls: [] });
+    const agent = new MutationAgent(mockAi(chatMock));
+
+    const out = await agent.generateMutants([eliteSeed], eliteScores, 1);
+    expect(out).toHaveLength(1);
+
+    expect(chatMock).toHaveBeenCalledTimes(1);
+    const messages = chatMock.mock.calls[0][0] as Array<{ role: string; content: string }>;
+    const userContent = messages.find((m) => m.role === 'user')?.content ?? '';
+    expect(userContent).not.toMatch(/失敗修復ヒント/);
+    // repairHint 適用ログも出ない
+    expect(logSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('repairHint適用'),
+    );
+  });
+
+  it('shouldUseForRepairMutation=true の repairHint は user prompt に含まれる + ログが出る', async () => {
+    const validItem = validDsl('mut-1');
+    const chatMock = jest
+      .fn()
+      .mockResolvedValue({ content: JSON.stringify([validItem]), toolCalls: [] });
+    const agent = new MutationAgent(mockAi(chatMock));
+
+    const hint = createRepairHintV1({
+      candidateId: eliteSeed.id,
+      failureReason: 'low_pf',
+      metrics: { pf: 0.7 },
+    });
+    const repairHints = new Map([[eliteSeed.id, hint]]);
+
+    await agent.generateMutants([eliteSeed], eliteScores, 1, repairHints);
+
+    expect(chatMock).toHaveBeenCalledTimes(1);
+    const messages = chatMock.mock.calls[0][0] as Array<{ role: string; content: string }>;
+    const userContent = messages.find((m) => m.role === 'user')?.content ?? '';
+    expect(userContent).toMatch(/失敗修復ヒント/);
+    expect(userContent).toMatch(/reason=low_pf/);
+    expect(userContent).toMatch(/severity=medium/);
+    // ログ確認 (mutation が repair を受け取ったことの観測経路)
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/repairHint適用.*1\/1/),
+    );
+  });
+
+  it('shouldUseForRepairMutation=false (dsl_missing) の hint は prompt から除外される', async () => {
+    const validItem = validDsl('mut-1');
+    const chatMock = jest
+      .fn()
+      .mockResolvedValue({ content: JSON.stringify([validItem]), toolCalls: [] });
+    const agent = new MutationAgent(mockAi(chatMock));
+
+    const hint = createRepairHintV1({
+      candidateId: eliteSeed.id,
+      failureReason: 'dsl_missing',
+    });
+    expect(hint.shouldUseForRepairMutation).toBe(false);
+    const repairHints = new Map([[eliteSeed.id, hint]]);
+
+    await agent.generateMutants([eliteSeed], eliteScores, 1, repairHints);
+
+    const messages = chatMock.mock.calls[0][0] as Array<{ role: string; content: string }>;
+    const userContent = messages.find((m) => m.role === 'user')?.content ?? '';
+    // fatal hint は prompt 節そのものに乗らない (= 修復対象外)
+    expect(userContent).not.toMatch(/失敗修復ヒント/);
+    // 適用ログも 0 件のため出ない
+    expect(logSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('repairHint適用'),
     );
   });
 });

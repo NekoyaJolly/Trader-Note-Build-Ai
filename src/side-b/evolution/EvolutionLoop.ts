@@ -56,6 +56,12 @@ import {
   type FormalBtCandidateSummary,
   type SurrogateRoute,
 } from './surrogateRescuePolicy';
+import {
+  createRepairHintV1,
+  summarizeRepairHints,
+  type RepairHint,
+  type RepairHintSummary,
+} from './repairHintPolicy';
 
 /**
  * EvolutionLoop が repository に求める最小契約。
@@ -166,6 +172,12 @@ export interface EvolutionPromotionCandidate {
    * 互換性のため optional。PR #96 以降は EvolutionLoop 経路で常に埋まる。
    */
   route?: SurrogateRoute;
+  /**
+   * PR #100: 正式 BT 失敗時に deterministic 生成される RepairHint v1。
+   * `formalBtPassed === false` の候補のみ非 undefined。次世代 mutation の入力文脈に使う。
+   * 候補の評価・昇格・採用を意味しない (= mutation 補助情報)。
+   */
+  repairHint?: RepairHint;
 }
 
 export interface GenerationReport {
@@ -202,6 +214,15 @@ export interface GenerationReport {
    * `normal_pass=0` でも rescue lane で uniqueCandidates>0 を観測できれば成功シグナル。
    */
   formalBtCandidateSummary: FormalBtCandidateSummary;
+  /**
+   * PR #100: FailureReason → RepairHint v1 の集計。
+   * 正式 BT で `formalBtPassed=false` の候補のみが対象。失敗が 0 件の世代では
+   * `totalFailures=0` で空集計が入る。
+   *
+   * 個別の RepairHint は `formalBtVerifiedCandidates[i].repairHint` で参照可能。
+   * これは mutation の補助情報であり、候補の評価・昇格・採用を意味しない。
+   */
+  repairHintSummary: RepairHintSummary;
 }
 
 function seedStrategy(regime: string): StrategyDSL {
@@ -369,8 +390,33 @@ export class EvolutionLoop {
     //   - formalBtVerifiedCandidates: 正式 BT を呼んだ全件 (失敗理由付き)、運用ログ用
     //   - promotionCandidates:        formalBtPassed=true のみ、Phase 5B 検証への入力源
     const verifyResults = await this.verifyCandidatesWithFormalBacktest(ranked, scores, period);
-    const formalBtVerifiedCandidates = verifyResults.map((r) => r.candidate);
+
+    // PR #100: 失敗候補について FailureReason → RepairHint v1 を deterministic 生成。
+    //   - 個別 hint は candidate.repairHint に格納 (formalBtPassed=false のみ)
+    //   - summary は GenerationReport.repairHintSummary に集約 (smoke / 観測用)
+    //   候補の評価・昇格には一切影響しない (= mutation 補助情報のみ)。
+    const formalBtVerifiedCandidates = verifyResults.map((r) => {
+      if (r.candidate.formalBtPassed) return r.candidate;
+      const hint = createRepairHintV1({
+        candidateId: r.candidate.dslId,
+        dslId: r.candidate.dslId,
+        route: r.candidate.route,
+        failureReason: r.candidate.formalBtFailureReason ?? 'other',
+        metrics: r.candidate.formalBtMetrics
+          ? {
+              pf: r.candidate.formalBtMetrics.pf,
+              tradeCount: r.candidate.formalBtMetrics.tradeCount,
+            }
+          : undefined,
+      });
+      return { ...r.candidate, repairHint: hint };
+    });
     const promotionCandidates = formalBtVerifiedCandidates.filter((c) => c.formalBtPassed);
+    const repairHintSummary = summarizeRepairHints(
+      formalBtVerifiedCandidates
+        .filter((c): c is typeof c & { repairHint: RepairHint } => Boolean(c.repairHint))
+        .map((c) => ({ hint: c.repairHint, route: c.route })),
+    );
 
     // 段階 4a.4: 正式 BT 履歴を永続化 (passed/failed 全件、DSL 不在分岐は無いので欠損なし)。
     if (this.evolutionBacktestRepo) {
@@ -392,6 +438,7 @@ export class EvolutionLoop {
       errors,
       parentPoolSummary: parentPoolResult.summary,
       formalBtCandidateSummary: rescueResult.summary,
+      repairHintSummary,
     };
     return report;
   }
