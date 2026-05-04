@@ -200,16 +200,69 @@ describe('repairOutcomeTelemetry.evaluateRepairOutcome', () => {
     expect(out.status).toBe('improved');
   });
 
-  it('12. maxDrawdown は小さい方を改善として扱う (other 経路)', () => {
-    const baseline = baselineFor('other', { maxDrawdown: 0.5 });
+  it('12. maxDrawdown は小さい方を改善として扱う (other 経路、percent scale)', () => {
+    // PR #102 review #2: analysis-engine summary.maxDD は百分率 (%)。
+    // 30% → 20% (= -10%pt) は閾値 0.5%pt を超えるので improved。
+    const baseline = baselineFor('other', { maxDrawdown: 30 });
     const out = evaluateRepairOutcome(baseline, {
       candidateId: 'c-dd',
       dslId: 'c-dd',
       repairApplied: trace('other', ['risk']),
-      metrics: { maxDrawdown: 0.2 },
+      metrics: { maxDrawdown: 20 },
     });
     expect(out.status).toBe('improved');
-    expect(out.deltas.maxDrawdownDelta).toBeCloseTo(-0.3, 2);
+    expect(out.deltas.maxDrawdownDelta).toBe(-10);
+  });
+
+  it('12b. maxDrawdown 微差 (< 0.5%pt) は unchanged (PR #102 review #2)', () => {
+    const baseline = baselineFor('other', { maxDrawdown: 30 });
+    const out = evaluateRepairOutcome(baseline, {
+      candidateId: 'c-dd-noise',
+      dslId: 'c-dd-noise',
+      repairApplied: trace('other', ['risk']),
+      metrics: { maxDrawdown: 29.99 }, // -0.01%pt はノイズ扱い
+    });
+    expect(out.status).toBe('unchanged');
+  });
+
+  it('PR #102 review #1: scheduler が生文字列 failureReason を渡しても canonical key で switch される', () => {
+    // baseline.failureReason に formalBtFailureReason の生文字列が来ても
+    // normalizeFailureReason 経由で正しく judgeLowPf に流れることを確認
+    const baseline: RepairOutcomeBaseline = {
+      candidateId: 'src-raw',
+      dslId: 'src-raw',
+      failureReason: 'pf 0.5 < 1', // canonical key ではない生文字列
+      route: 'normal_pass',
+      metrics: { pf: 0.5, tradeCount: 30 },
+    };
+    const out = evaluateRepairOutcome(baseline, {
+      candidateId: 'c-raw',
+      dslId: 'c-raw',
+      repairApplied: trace('low_pf', ['exit']),
+      metrics: { pf: 1.3, tradeCount: 30 },
+    });
+    // 'other' 経路 (= 4 指標総合判定) ではなく low_pf 経路で改善判定される
+    expect(out.failureReason).toBe('low_pf');
+    expect(out.status).toBe('improved');
+    expect(out.reason).toMatch(/pfDelta/);
+  });
+
+  it('PR #102 review #1: tradeCount 系の生文字列も insufficient_trades に正規化される', () => {
+    const baseline: RepairOutcomeBaseline = {
+      candidateId: 'src-tc-raw',
+      dslId: 'src-tc-raw',
+      failureReason: 'tradeCount 5 < 20',
+      route: 'trade_count_rescue',
+      metrics: { tradeCount: 5 },
+    };
+    const out = evaluateRepairOutcome(baseline, {
+      candidateId: 'c-tc-raw',
+      dslId: 'c-tc-raw',
+      repairApplied: trace('insufficient_trades', ['entry']),
+      metrics: { tradeCount: 25 },
+    });
+    expect(out.failureReason).toBe('insufficient_trades');
+    expect(out.status).toBe('improved');
   });
 
   it('repairApplied trace がない child は unknown', () => {

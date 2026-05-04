@@ -19,7 +19,7 @@
  * @see docs/design/pr_102_repair_hint_outcome_telemetry_agent_prompt.md
  */
 
-import type { RepairHint } from './repairHintPolicy';
+import { normalizeFailureReason, type RepairHint } from './repairHintPolicy';
 
 // =================================================================
 // 型定義 (設計書 §型定義)
@@ -109,12 +109,22 @@ export interface RepairOutcomeSummary {
 
 /**
  * 微差を improved / worsened にしないための最小差分閾値。
- * metrics scale が変わったら調整する。
+ *
+ * scale 注意 (PR #102 review #2):
+ * - `pf`: 0-N の絶対比率。0.02 ≈ 「PF 1.10 → 1.12 は unchanged」
+ * - `tradeCount`: 整数件数
+ * - `expectancy`: 1 トレードあたり期待値 (絶対値)、0.0001 程度を最小単位とする
+ * - `maxDrawdown`: **analysis-engine `summary.maxDD` は百分率 (%)** で返る
+ *   (= engine_protocol.BTSummary.max_dd: Optional[float]  # %)。
+ *   よって 0.5 = 0.5%pt が最小単位。0.01 にすると 30%→29.99% を改善扱いしてしまい
+ *   drawdown 由来の outcome がノイズだらけになる。
+ *
+ * 異なる scale (= rate 0-1 等) で metrics を渡す場合は呼び出し側で正規化する。
  */
 export const repairOutcomeThresholds = {
   pfMinDelta: 0.02,
   expectancyMinDelta: 0.0001,
-  maxDrawdownMinDelta: 0.01,
+  maxDrawdownMinDelta: 0.5,
   tradeCountMinDelta: 1,
 } as const;
 
@@ -447,8 +457,13 @@ export function evaluateRepairOutcome(
   if (!baseline) {
     return unknownOutcome(child, null, 'baseline なし');
   }
-  // 統一 reason key (PR #100 の canonical key と同じ)
-  const reason = baseline.failureReason || child.repairApplied.failureReason;
+  // PR #102 review #1: scheduler が外部から baseline を注入するとき、
+  // `baseline.failureReason` には `formalBtFailureReason` の生文字列
+  // (例: "pf 0.5 < 1", "tradeCount 5 < 20") が入る可能性がある。canonical key
+  // (insufficient_trades / low_pf / 等) へ正規化しないと switch が default (= other)
+  // に流れて outcome が誤分類される。
+  const rawReason = baseline.failureReason || child.repairApplied.failureReason;
+  const reason = normalizeFailureReason(rawReason);
 
   // dsl_missing は PR #100 で fatal、本来 mutation 対象外。来た場合は warning + unknown。
   if (reason === 'dsl_missing') {
