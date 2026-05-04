@@ -158,14 +158,24 @@ describe('promotionGatePolicy.decidePromotionGateV1', () => {
     expect(d.reasons).toContain('source_parent_pool');
   });
 
-  it('10b. parent source の各種 (formal_bt_passed / current_population / edge_screening_passed) も parent_eligible', () => {
-    for (const source of ['formal_bt_passed', 'current_population', 'edge_screening_passed']) {
+  it('10b. ParentPoolSource 全 6 系統 (novelty_seed / edge_unverified 含む) が parent_eligible になる', () => {
+    // PR #101 review #1+#4: parentPoolPolicy.ParentPoolSource を全件カバー。
+    // novelty_seed / edge_unverified を漏らすと parentPoolSummary との集計が食い違う。
+    for (const source of [
+      'formal_bt_passed',
+      'current_population',
+      'edge_confirmed',
+      'edge_screening_passed',
+      'edge_unverified',
+      'novelty_seed',
+    ]) {
       const d = decidePromotionGateV1({
         candidateId: `c-${source}`,
         source,
         hasValidDsl: true,
       });
       expect(d.toStage).toBe('parent_eligible');
+      expect(d.reasons).toContain('source_parent_pool');
     }
   });
 

@@ -151,12 +151,16 @@ const RESCUE_ROUTES = new Set<string>([
   'trade_count_rescue',
 ]);
 
+// `parentPoolPolicy.ParentPoolSource` の全 6 系統を網羅する。novelty_seed を
+// 落とすと、親プールが novelty fallback に寄った世代で parentPoolSummary と
+// promotionGateSummary の集計が食い違う (PR #101 review #1)。
 const PARENT_SOURCES = new Set<string>([
   'formal_bt_passed',
   'edge_confirmed',
   'edge_screening_passed',
   'edge_unverified',
   'current_population',
+  'novelty_seed',
 ]);
 
 // =================================================================

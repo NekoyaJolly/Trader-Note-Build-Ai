@@ -1,14 +1,16 @@
-# 実装指示: PR #101 RepairHint Outcome Telemetry v1
+# 実装指示: PR #102 RepairHint Outcome Telemetry v1
 
 ## 位置づけ
 
-この文書は **PR #101 専用の実装指示** である。
+この文書は **PR #102 専用の実装指示** である。
 
 PR #100 では `FailureReason → RepairHint v1` を実装し、正式BT・surrogate・validation の失敗理由から deterministic に `RepairHint` を生成できるようになった。
 
 また、mutation agent に `repairHints` を optional に渡せるようになり、直前世代の `RepairHint` を次世代 mutation に利用できる経路も入った。
 
-PR #101 では、次の問題を扱う。
+PR #101 で `Promotion Gate / EvolutionCandidateStage v1` が実装され、候補状態の整理と `promotionGateSummary` の観測が可能になった。
+
+PR #102 では、次の問題を扱う。
 
 > RepairHint を mutation に渡せるようになったが、その RepairHint が実際に改善へ寄与したかはまだ測れていない。
 
@@ -18,17 +20,14 @@ PR #101 では、次の問題を扱う。
 
 ## Roadmap Note
 
-当初ロードマップでは PR #101 は Promotion Gate / EvolutionCandidateStage 整理の候補だった。
-
-しかし、PR #100 完了後の状態では、先に **RepairHint が実際に効いたかを測る仕組み** が必要である。
-
-そのため、PR #101 では Promotion Gate ではなく、以下を実装する。
+当初ロードマップ通り、本PRは以下の位置づけ。
 
 ```text
-PR #101: RepairHint Outcome Telemetry v1
+#100 FailureReason → RepairHint        (merged)
+#101 Promotion Gate / CandidateStage   (merged)
+#102 RepairHint Outcome Telemetry      ← 本PR
+#103 OOS / Walk-forward
 ```
-
-Promotion Gate / EvolutionCandidateStage は PR #102 または PR #103 以降へ繰り下げる。
 
 ---
 
@@ -80,7 +79,7 @@ RepairHint を使った候補は改善したのか
 
 ### 1. Telemetry に限定する
 
-PR #101 では、観測・集計のみ行う。  
+PR #102 では、観測・集計のみ行う。  
 outcome に基づいて mutation budget や親選抜比率を変える処理は入れない。
 
 ### 2. Deterministic に判定する
@@ -246,7 +245,7 @@ repairApplied?: RepairAppliedTrace;
 2. 無理なら EvolutionLoop 内の generation-local map に保持する
 3. DB永続化はしない
 
-PR #101 では migration をしない。
+PR #102 では migration をしない。
 
 ---
 
@@ -373,7 +372,7 @@ baseline が timeout で、child metrics が存在する
 child も timeout または analysis_engine_error
 ```
 
-PR #101 では、timeout の詳細結果が取れない場合は `unknown` でもよい。
+PR #102 では、timeout の詳細結果が取れない場合は `unknown` でもよい。
 
 #### analysis_engine_error
 
@@ -498,7 +497,7 @@ repairOutcomeSummary を GenerationReport に追加
 
 ### 注意
 
-PR #101 では、outcome 結果をもとに mutation 方針を自動変更しない。  
+PR #102 では、outcome 結果をもとに mutation 方針を自動変更しない。  
 自動制御は PR #102 以降。
 
 ---
@@ -632,7 +631,7 @@ repairOutcome child=<id> reason=low_pf target=exit status=worsened pfDelta=-0.08
 
 ## 完了条件
 
-以下を満たしたら PR #101 完了。
+以下を満たしたら PR #102 完了。
 
 - `repairOutcomeTelemetry.ts` が実装されている
 - RepairHint 適用 trace を子候補と関連付けられる
@@ -712,7 +711,7 @@ set -a && . ./.env && set +a && npx tsx scripts/evolution-pdca-smoke.ts --regime
 
 ## 最重要判断基準
 
-PR #101 の目的は、RepairHint の効果を改善することではない。
+PR #102 の目的は、RepairHint の効果を改善することではない。
 
 目的は、**RepairHint が効いたかどうかを測れるようにすること** である。
 
@@ -738,7 +737,7 @@ PR #101 の目的は、RepairHint の効果を改善することではない。
 3. outcome は昇格判定に使わない
 4. summary で傾向を追えるようにする
 5. DB / status / promotion に触らない
-6. PR #101 のスコープを小さく保つ
+6. PR #102 のスコープを小さく保つ
 
 ---
 

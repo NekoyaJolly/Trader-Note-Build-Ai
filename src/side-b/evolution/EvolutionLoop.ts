@@ -497,12 +497,15 @@ export class EvolutionLoop {
     this.lastRepairHints = nextRepairHints;
 
     // PR #101: PromotionGate v1 — 候補ごとの EvolutionCandidateStage を deterministic に判定。
-    //   - 親プール候補: source ベースで parent_eligible 判定
-    //   - 正式 BT 検証済候補: formalBtPassed / route / repairHint から最終判定
-    //   昇格判定は各候補に対して独立、productionEligible は v1 で常に false。
-    //   既存の parentPool / rescue lane / repairHint 経路は変更しない (= 観測のみ)。
+    //   PR #101 review #2+#5 対応: 候補は dslId 単位で一意化する。優先順位:
+    //     1. 正式 BT 検証済 → 最終 stage (validation_candidate / repairable / repair_excluded)
+    //     2. rescue 選抜済だが BT 未送信 → formal_bt_candidate (top-K で落ちた等)
+    //     3. それ以外の親プール候補 → parent_eligible
+    //   これにより同 dsl が `parent_eligible` と `validation_candidate` に二重計上されず、
+    //   `formal_bt_candidate` stage も本番経路で観測可能になる。
     const promotionGateDecisions = this.buildPromotionGateDecisions(
       parentPoolResult.entries,
+      ranked,
       formalBtVerifiedCandidates,
     );
     const promotionGateSummary = summarizePromotionGateDecisions(promotionGateDecisions);
@@ -535,37 +538,35 @@ export class EvolutionLoop {
   }
 
   /**
-   * PR #101: 親プール候補と正式 BT 検証済候補から PromotionGate 判定を構築する。
+   * PR #101: 親プール候補 / rescue 選抜候補 / 正式 BT 検証済候補から PromotionGate 判定を構築。
    *
-   * - 親プール候補は `source` ベースで `parent_eligible` 判定
-   *   (= 同 dsl が後段で formal_bt_candidate / passed になっても親としての判定はここで保持)
-   * - 正式 BT 検証済候補は `route` / `formalBtPassed` / `repairHint` から最終判定
-   * - 同 dsl が両方に出る場合は両方の decision を残す (観測上、親利用と昇格判定は別軸)
+   * dslId 単位で一意の最終 stage を持つよう、以下の優先順位で重複を排除する。
    *
-   * このメソッドは EvolutionLoop の責務 (= 入力収集 + 判定呼び出し) のみで、
-   * 状態遷移ロジックは `decidePromotionGateV1` 側に集中させる (設計書 §推奨ファイル構成)。
+   *   1. 正式 BT 検証済 (`formalBtVerifiedCandidates`)
+   *      → `validation_candidate` / `repairable` / `repair_excluded` のいずれか
+   *   2. rescue 選抜済だが BT 未送信 (`ranked` − `verified`)
+   *      → `formal_bt_candidate` (= top-K 制限などで実行されなかった候補)
+   *   3. 残りの親プール候補
+   *      → `parent_eligible`
+   *
+   * これにより:
+   *   - 同 dsl が `parent_eligible` と `validation_candidate` に二重計上されない (#2)
+   *   - `formal_bt_candidate` stage が本番経路で観測される (#5)
+   *
+   * 状態遷移ロジック本体は `decidePromotionGateV1` に集中させ、
+   * EvolutionLoop は入力収集と一意化のみ担当する (設計書 §推奨ファイル構成)。
    */
   private buildPromotionGateDecisions(
     parentPool: ReadonlyArray<{ dsl: StrategyDSL; source: string }>,
+    rescueRanked: ReadonlyArray<{ candidate: EvolutionPromotionCandidate; dsl: StrategyDSL }>,
     verified: ReadonlyArray<EvolutionPromotionCandidate>,
   ): PromotionGateDecision[] {
     const decisions: PromotionGateDecision[] = [];
+    const decided = new Set<string>();
 
-    // 親プール候補: 親利用観点での parent_eligible 判定 (= 重複可、後続候補の昇格には影響しない)
-    for (const e of parentPool) {
-      decisions.push(
-        decidePromotionGateV1({
-          candidateId: e.dsl.id,
-          dslId: e.dsl.id,
-          source: e.source,
-          hasValidDsl: true,
-          schemaValidationPassed: true,
-        }),
-      );
-    }
-
-    // 正式 BT 検証済候補: formalBtPassed / route / repairHint から最終判定
+    // (1) 正式 BT 検証済 → 最終 stage で確定
     for (const c of verified) {
+      if (decided.has(c.dslId)) continue;
       decisions.push(
         decidePromotionGateV1({
           candidateId: c.dslId,
@@ -586,6 +587,42 @@ export class EvolutionLoop {
           metrics: c.formalBtMetrics ?? undefined,
         }),
       );
+      decided.add(c.dslId);
+    }
+
+    // (2) rescue 選抜済だが BT 未送信 → formal_bt_candidate
+    //   `formalBtPassed` を渡さない (= 未確定) ため decidePromotionGateV1 の route 分岐に流れる
+    for (const r of rescueRanked) {
+      const id = r.candidate.dslId;
+      if (decided.has(id)) continue;
+      // route='kill' は decidePromotionGateV1 側で rejected に倒れるが、
+      // selectFormalBtCandidatesWithRescue の戻り値には kill が含まれないため通常は来ない。
+      decisions.push(
+        decidePromotionGateV1({
+          candidateId: id,
+          dslId: id,
+          source: r.candidate.source,
+          route: r.candidate.route,
+          hasValidDsl: true,
+          schemaValidationPassed: true,
+        }),
+      );
+      decided.add(id);
+    }
+
+    // (3) 残りの親プール候補 → parent_eligible
+    for (const e of parentPool) {
+      if (decided.has(e.dsl.id)) continue;
+      decisions.push(
+        decidePromotionGateV1({
+          candidateId: e.dsl.id,
+          dslId: e.dsl.id,
+          source: e.source,
+          hasValidDsl: true,
+          schemaValidationPassed: true,
+        }),
+      );
+      decided.add(e.dsl.id);
     }
 
     return decisions;
