@@ -47,13 +47,19 @@ import {
   evolutionBacktestRunRepository as defaultEvolutionBacktestRepo,
   type EvolutionBacktestRunRepository,
 } from '../../backend/repositories/evolutionBacktestRunRepository';
+import { buildParentPool, type ParentPoolSummary } from './parentPoolPolicy';
 
 /**
- * EvolutionLoop が repository に求める最小契約 (createMany のみ)。
+ * EvolutionLoop が repository に求める最小契約。
+ *   - `createMany`: 4a.4 で 1 世代分の formal BT 結果を永続化
+ *   - `findRecentFormalBtPassed`: PR #95 で親個体プールが過去合格戦略を再利用
  * テストで実 DB を介さない型付きモックを書けるように切り出す。
  * 既定実装の `EvolutionBacktestRunRepository` はこの形を満たす。
  */
-export type EvolutionBacktestPersister = Pick<EvolutionBacktestRunRepository, 'createMany'>;
+export type EvolutionBacktestPersister = Pick<
+  EvolutionBacktestRunRepository,
+  'createMany' | 'findRecentFormalBtPassed'
+>;
 
 /**
  * analysis-engine の正式 BT を呼ぶ関数 (DI 用)。
@@ -154,6 +160,13 @@ export interface GenerationReport {
   promotionCandidates: EvolutionPromotionCandidate[];
   lowDiversityBoost: boolean;
   errors: string[];
+  /**
+   * PR #95: 親個体プール v1 のソース別取得件数 + fallback 状態。
+   * mutation/crossover の親選抜が単一ソース (population.getElites) から
+   * 3 系統 (formal_bt_passed / current_population / novelty_seed) のミックスへ
+   * 拡張されたため、観測経路として残す。
+   */
+  parentPoolSummary: ParentPoolSummary;
 }
 
 function seedStrategy(regime: string): StrategyDSL {
@@ -248,17 +261,39 @@ export class EvolutionLoop {
     }
 
     const elites = population.getElites(regime, 5, scores);
+
+    // PR #95: 親個体プール v1 — mutation/crossover の親を 3 系統 (formal_bt_passed /
+    // current_population / novelty_seed) のミックスから取得する。
+    // - elites (= surrogate 上位、promotion 候補) は `extractPromotionCandidates` で別途使う
+    // - 親プール = 「次世代を産むための材料」、elites = 「正式 BT に送る候補」、と役割分離
+    //
+    // 注: `removeWorst()` を **後** に呼ぶ。removeWorst を先にすると初期世代 (population
+    //     1〜5 個体) で current_population が空になり、親プールが novelty_seed に偏る。
+    const parentPoolResult = await buildParentPool(regime, 5, scores, {
+      population,
+      evolutionBacktestRepo: this.evolutionBacktestRepo,
+    });
     population.removeWorst(regime, 5, scores);
+    const parentPool = parentPoolResult.entries;
+    const parentDsls = parentPool.map((e) => e.dsl);
+    // mutation/crossover は score Map を期待するため、parent pool 側のスコアをマージ。
+    // formal_bt_passed / novelty_seed は surrogate score を持たないため 0 を仮置きする。
+    const parentScores = new Map(scores);
+    for (const e of parentPool) {
+      if (!parentScores.has(e.dsl.id)) {
+        parentScores.set(e.dsl.id, e.surrogateScore ?? 0);
+      }
+    }
 
     let mutants: StrategyDSL[] = [];
     let crosses: StrategyDSL[] = [];
     try {
-      mutants = await mutationAgent.generateMutants(elites, scores, 10);
+      mutants = await mutationAgent.generateMutants(parentDsls, parentScores, 10);
     } catch (e) {
       errors.push(`mutation: ${e instanceof Error ? e.message : String(e)}`);
     }
     try {
-      crosses = await crossoverAgent.generateCrossovers(elites, scores, 5);
+      crosses = await crossoverAgent.generateCrossovers(parentDsls, parentScores, 5);
     } catch (e) {
       errors.push(`crossover: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -318,6 +353,7 @@ export class EvolutionLoop {
       promotionCandidates,
       lowDiversityBoost,
       errors,
+      parentPoolSummary: parentPoolResult.summary,
     };
     return report;
   }

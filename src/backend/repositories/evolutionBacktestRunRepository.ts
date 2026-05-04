@@ -105,6 +105,42 @@ export class EvolutionBacktestRunRepository {
   }
 
   /**
+   * Critical-4 PR #95 (親個体プール v1): formalBtPassed=true の履歴から
+   * 親候補として再利用できる過去候補を取得する。
+   *
+   * - 直近 createdAt 降順 (最新の合格戦略から優先)
+   * - candidateHash 重複除去 (= 構造的に同じ DSL は 1 件だけ採用)
+   *   ハッシュベースの距離は v1 では計算せず単純な完全一致のみ
+   * - dslSnapshot は JSON で保存されているため、呼び出し側で StrategyDSLSchema.safeParse する
+   *
+   * dedup 方針:
+   *   `limit` を **ユニーク件数の上限** として扱う。重複が多いと limit 件返らない問題を
+   *   避けるため、内部で `limit * 4` 件まで over-fetch してから dedup → 先頭 `limit` 件で切る。
+   *   重複率が極端に高くて over-fetch でも足りない場合は単に少ない件数を返す
+   *   (= 呼び出し側は不足を受容して fallback 動作する想定 / 完全保証は paging が必要だが v1 では不要)。
+   */
+  async findRecentFormalBtPassed(limit: number = 50): Promise<EvolutionBacktestRun[]> {
+    const requested = Math.max(1, Math.min(500, limit));
+    // ユニーク件数を確保するため 4x まで over-fetch (cap 2000)
+    const take = Math.min(2000, requested * 4);
+    const rows = await prisma.evolutionBacktestRun.findMany({
+      where: { formalBtPassed: true },
+      orderBy: { createdAt: 'desc' },
+      take,
+    });
+    // candidateHash 単位で先勝ち (最新が残る)
+    const seen = new Set<string>();
+    const unique: EvolutionBacktestRun[] = [];
+    for (const r of rows) {
+      if (seen.has(r.candidateHash)) continue;
+      seen.add(r.candidateHash);
+      unique.push(r);
+      if (unique.length >= requested) break;
+    }
+    return unique;
+  }
+
+  /**
    * 段階 4a.PDCA smoke: evolutionRunId 単位で formalBtPassed / failureReason 分布を集計する。
    *
    * 用途:

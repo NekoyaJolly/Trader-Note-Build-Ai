@@ -610,14 +610,22 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         return makeFormalBtResponse(isPass ? 1.5 : 0.5, 0.55, 30);
       });
 
-    // EvolutionLoop は createMany しか呼ばないため、EvolutionBacktestPersister 型 (Pick<..., 'createMany'>) で受ける。
+    // EvolutionLoop は createMany / findRecentFormalBtPassed を呼ぶ。Pick<...> 型でモック化。
     const createMany: jest.MockedFunction<EvolutionBacktestPersister['createMany']> = jest
       .fn<
         ReturnType<EvolutionBacktestPersister['createMany']>,
         Parameters<EvolutionBacktestPersister['createMany']>
       >()
       .mockResolvedValue([]);
-    const repoStub: EvolutionBacktestPersister = { createMany };
+    const findRecentFormalBtPassed: jest.MockedFunction<
+      EvolutionBacktestPersister['findRecentFormalBtPassed']
+    > = jest
+      .fn<
+        ReturnType<EvolutionBacktestPersister['findRecentFormalBtPassed']>,
+        Parameters<EvolutionBacktestPersister['findRecentFormalBtPassed']>
+      >()
+      .mockResolvedValue([]);
+    const repoStub: EvolutionBacktestPersister = { createMany, findRecentFormalBtPassed };
 
     const loop = new EvolutionLoop({
       population,
