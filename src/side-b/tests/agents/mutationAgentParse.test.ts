@@ -215,15 +215,61 @@ describe('PR #100: MutationAgent repairHint 統合', () => {
     expect(hint.shouldUseForRepairMutation).toBe(false);
     const repairHints = new Map([[eliteSeed.id, hint]]);
 
-    await agent.generateMutants([eliteSeed], eliteScores, 1, repairHints);
+    // fatal で唯一の親が除外されるため mutants=0 になる (= 親 DSL 自体が payload に乗らない)
+    const out = await agent.generateMutants([eliteSeed], eliteScores, 1, repairHints);
+    expect(out).toEqual([]);
 
+    // chat 自体が呼ばれない (= 全親 fatal で early return)
+    expect(chatMock).not.toHaveBeenCalled();
+    // 除外ログが出る
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/repairHint除外.*1\/1/),
+    );
+  });
+
+  it('PR #100 review: shouldExcludeFromParentPool=true の親は payload (elites JSON) からも除外される', async () => {
+    // 健全な親 (eliteSeed) と fatal 親 (excluded) の 2 体を渡し、fatal だけが除外されることを確認
+    const fatalElite: StrategyDSL = StrategyDSLSchema.parse({
+      ...(validDsl('elite-fatal') as object),
+      id: 'elite-fatal',
+      metadata: { createdAt: new Date().toISOString(), createdBy: 'initial_random' },
+    });
+    const validItem = validDsl('mut-out');
+    const chatMock = jest
+      .fn()
+      .mockResolvedValue({ content: JSON.stringify([validItem]), toolCalls: [] });
+    const agent = new MutationAgent(mockAi(chatMock));
+
+    const hints = new Map([
+      [
+        fatalElite.id,
+        createRepairHintV1({ candidateId: fatalElite.id, failureReason: 'dsl_missing' }),
+      ],
+      [
+        eliteSeed.id,
+        createRepairHintV1({
+          candidateId: eliteSeed.id,
+          failureReason: 'low_pf',
+          metrics: { pf: 0.7 },
+        }),
+      ],
+    ]);
+    const scores = new Map([
+      ['elite-fatal', 0.4],
+      ['elite-1', 0.5],
+    ]);
+
+    await agent.generateMutants([fatalElite, eliteSeed], scores, 1, hints);
+
+    expect(chatMock).toHaveBeenCalledTimes(1);
     const messages = chatMock.mock.calls[0][0] as Array<{ role: string; content: string }>;
     const userContent = messages.find((m) => m.role === 'user')?.content ?? '';
-    // fatal hint は prompt 節そのものに乗らない (= 修復対象外)
-    expect(userContent).not.toMatch(/失敗修復ヒント/);
-    // 適用ログも 0 件のため出ない
-    expect(logSpy).not.toHaveBeenCalledWith(
-      expect.stringContaining('repairHint適用'),
-    );
+    // fatal 親の id は payload (elites JSON) に乗らない
+    expect(userContent).not.toMatch(/elite-fatal/);
+    // 健全な親は残る
+    expect(userContent).toMatch(/elite-1/);
+    // 除外ログ + 適用ログの両方が出る
+    expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/repairHint除外.*1\/2/));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/repairHint適用.*1\/1/));
   });
 });

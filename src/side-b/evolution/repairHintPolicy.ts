@@ -143,8 +143,15 @@ export function normalizeFailureReason(raw: string | undefined | null): Canonica
   }
 
   // DSL 不在 / 変換失敗系
+  // PR #100 review: "DSL not found in current generation map" 等の本番経路で出る
+  // 自由文字列も dsl_missing に正規化する。other に落とすと fatal で除外すべき候補が
+  // 小変更 mutation の対象になり、設計書 §基本方針.4 に違反する。
   if (
     lower.includes('dsl_missing') ||
+    lower.includes('dsl not found') ||
+    lower.includes('no dsl') ||
+    lower.includes('missing dsl') ||
+    lower.includes('dsl unavailable') ||
     lower.includes('missing_hypothesis_id') ||
     lower.includes('missing_conditions') ||
     lower.includes('schema_validation_failed')

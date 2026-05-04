@@ -144,6 +144,24 @@ describe('repairHintPolicy.createRepairHintV1', () => {
     expect(hint.severity).toBe('high');
   });
 
+  it('PR #100 review: "DSL not found" 系の自由文字列も dsl_missing に落とす (fatal 扱い)', () => {
+    expect(normalizeFailureReason('DSL not found in current generation map')).toBe(
+      'dsl_missing',
+    );
+    expect(normalizeFailureReason('no dsl available for candidate')).toBe('dsl_missing');
+    expect(normalizeFailureReason('missing dsl payload')).toBe('dsl_missing');
+    expect(normalizeFailureReason('dsl unavailable: snapshot deleted')).toBe('dsl_missing');
+
+    const hint = createRepairHintV1({
+      candidateId: 'c-dslmiss',
+      failureReason: 'DSL not found in current generation map',
+    });
+    expect(hint.failureReason).toBe('dsl_missing');
+    expect(hint.severity).toBe('fatal');
+    expect(hint.shouldUseForRepairMutation).toBe(false);
+    expect(hint.shouldExcludeFromParentPool).toBe(true);
+  });
+
   it('maxDrawdown が大きい場合 risk action が追加される', () => {
     const hint = createRepairHintV1({
       candidateId: 'c11',

@@ -122,14 +122,45 @@ export class MutationAgent {
     repairHints?: RepairHintMap,
   ): Promise<StrategyDSL[]> {
     if (elites.length === 0) return [];
-    const perfLines = elites.map((e) => `- ${e.id}: score=${(scores.get(e.id) ?? 0).toFixed(4)}`);
-    const payload = JSON.stringify(elites, null, 2);
+
+    // PR #100 review: shouldExcludeFromParentPool=true の親 (= dsl_missing 等の fatal 系) は
+    // payload (= elites JSON) からも完全に除外する。prompt 節から落とすだけでは LLM が
+    // 親 DSL 自体を mutation 材料にしてしまい、設計書 §基本方針.4 に反する。
+    let effectiveElites = elites;
+    let excludedCount = 0;
+    if (repairHints && repairHints.size > 0) {
+      effectiveElites = elites.filter((e) => {
+        const hint = repairHints.get(e.id);
+        if (hint && hint.shouldExcludeFromParentPool) {
+          excludedCount += 1;
+          return false;
+        }
+        return true;
+      });
+      if (excludedCount > 0) {
+        console.log(
+          `[MutationAgent] repairHint除外: fatal 親 ${excludedCount}/${elites.length} 件を mutation 対象から除外`,
+        );
+      }
+    }
+    if (effectiveElites.length === 0) {
+      console.warn(
+        `[MutationAgent] generateMutants: 全親が fatal 除外で空 — mutants=0`,
+      );
+      await recordAgentUsage('mutation', { count }, null);
+      return [];
+    }
+
+    const perfLines = effectiveElites.map(
+      (e) => `- ${e.id}: score=${(scores.get(e.id) ?? 0).toFixed(4)}`,
+    );
+    const payload = JSON.stringify(effectiveElites, null, 2);
     const system = await this.resolveSystemPrompt();
 
-    // PR #100: 親 ID と repairHint を 1:1 で並べる。fatal 系は除外。
+    // PR #100: 親 ID と repairHint を 1:1 で並べる。fatal 系は親から既に除外済み。
     const repairLines: string[] = [];
     if (repairHints && repairHints.size > 0) {
-      for (const e of elites) {
+      for (const e of effectiveElites) {
         const hint = repairHints.get(e.id);
         if (!hint || !hint.shouldUseForRepairMutation) continue;
         const targets = hint.actions.map((a) => a.target).join(',');
@@ -154,7 +185,7 @@ export class MutationAgent {
 
     if (repairLines.length > 0) {
       console.log(
-        `[MutationAgent] repairHint適用: ${repairLines.length}/${elites.length} 親に修復ヒントを反映`,
+        `[MutationAgent] repairHint適用: ${repairLines.length}/${effectiveElites.length} 親に修復ヒントを反映`,
       );
     }
 
@@ -201,8 +232,9 @@ export class MutationAgent {
       const out = parsed.slice(0, count).map((p) => ({
         ...p,
         id: p.id && p.id.length > 0 ? p.id : `mut-${randomUUID()}`,
-        generation: Math.max(...elites.map((e) => e.generation), 0) + 1,
-        parentIds: elites.map((e) => e.id),
+        // PR #100 review: fatal 除外後の effectiveElites を親系譜の根拠にする。
+        generation: Math.max(...effectiveElites.map((e) => e.generation), 0) + 1,
+        parentIds: effectiveElites.map((e) => e.id),
       }));
       await recordAgentUsage('mutation', { count }, out);
       return out;
