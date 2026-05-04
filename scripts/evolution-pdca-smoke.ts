@@ -169,6 +169,10 @@ async function main(): Promise<void> {
   console.log('\n--- parentPoolSummary ---');
   console.log(JSON.stringify(report.parentPoolSummary, null, 2));
 
+  // PR #96: Surrogate Rescue Lane の選抜結果 (route 別件数 + kill / 重複排除 / fallback)
+  console.log('\n--- formalBtCandidateSummary ---');
+  console.log(JSON.stringify(report.formalBtCandidateSummary, null, 2));
+
   // formalBtVerifiedCandidates の各 failureReason を出す (DB に行く前のメモリ上の情報)
   console.log('\n--- formal BT verify (in-memory) ---');
   for (const c of report.formalBtVerifiedCandidates) {

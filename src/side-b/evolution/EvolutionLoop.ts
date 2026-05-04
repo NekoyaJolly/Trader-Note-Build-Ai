@@ -30,11 +30,9 @@ import type { SurrogateFitnessSimulator, BacktestPeriod, SurrogateFitnessAggrega
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
 import type { DiversityEnforcer } from './DiversityEnforcer';
 import { scoreFromValidationSummary } from './evolutionScore';
-import {
-  MAX_OVERFIT_SCORE,
-  MIN_TRAIN_PROFIT_FACTOR,
-  MIN_VALIDATION_PROFIT_FACTOR,
-} from './evolutionPromotionThresholds';
+// PR #96: 旧 extractPromotionCandidates が直接参照していた閾値は surrogateRescuePolicy
+// (= isNormalPass / isNearMiss) に集約されたため、本ファイルからは import 不要になった。
+// 閾値定義そのものは evolutionPromotionThresholds で一元管理を継続する。
 import type { StrategyPopulation } from './StrategyPopulation';
 import { runScreeningBacktest as defaultRunScreeningBacktest } from '../../backend/services/analysisEngineClient';
 import { dslToBacktestNotePayload } from '../strategy_dsl/dslToBacktestNotePayload';
@@ -48,6 +46,11 @@ import {
   type EvolutionBacktestRunRepository,
 } from '../../backend/repositories/evolutionBacktestRunRepository';
 import { buildParentPool, type ParentPoolSummary } from './parentPoolPolicy';
+import {
+  selectFormalBtCandidatesWithRescue,
+  type FormalBtCandidateSummary,
+  type SurrogateRoute,
+} from './surrogateRescuePolicy';
 
 /**
  * EvolutionLoop が repository に求める最小契約。
@@ -137,6 +140,20 @@ export interface EvolutionPromotionCandidate {
   formalBtMetrics: FormalBtMetrics | null;
   /** 段階 4a.3: 正式 BT 失敗 / null 結果 / PF 未達などの理由 (passed=true の場合 undefined) */
   formalBtFailureReason?: string;
+  /**
+   * PR #96 Surrogate Rescue Lane: 候補が正式 BT に送られた経路。
+   *
+   * - `normal_pass`: surrogate 主要 3 条件をすべて通過 (= 旧来の昇格候補)
+   * - `near_miss_rescue` 等: rescue lane で救済された候補 (= surrogate 通過していない、
+   *   ただし rescue 条件 (惜しい / 低 DD / 取引数十分 / 構造的に新しい) を満たす)
+   *
+   * `normal_pass` 以外は **「正式 BT で確認する価値がある」** という意味でしかなく、
+   * promotion / production 採用とは無関係。`formalBtPassed === true` でも rescue 出身は
+   * Phase 4c 検証で改めて昇格可否を判定する。
+   *
+   * 互換性のため optional。PR #96 以降は EvolutionLoop 経路で常に埋まる。
+   */
+  route?: SurrogateRoute;
 }
 
 export interface GenerationReport {
@@ -167,6 +184,12 @@ export interface GenerationReport {
    * 拡張されたため、観測経路として残す。
    */
   parentPoolSummary: ParentPoolSummary;
+  /**
+   * PR #96: Surrogate Rescue Lane の選抜結果。
+   * route 別件数 / kill 数 / 重複排除 / fallback 状態を 1 オブジェクトに集約。
+   * `normal_pass=0` でも rescue lane で uniqueCandidates>0 を観測できれば成功シグナル。
+   */
+  formalBtCandidateSummary: FormalBtCandidateSummary;
 }
 
 function seedStrategy(regime: string): StrategyDSL {
@@ -317,16 +340,11 @@ export class EvolutionLoop {
       }
     }
 
-    // surrogate 厳格 3 条件を通った candidate と元 DSL のペアを抽出し、surrogate スコア降順で top K に絞る。
-    const surrogateCandidates = this.extractPromotionCandidates(elites, metrics, dslById);
-    const ranked = surrogateCandidates
-      .slice()
-      .sort(
-        (a, b) =>
-          (scores.get(b.candidate.dslId) ?? -Infinity) -
-          (scores.get(a.candidate.dslId) ?? -Infinity),
-      )
-      .slice(0, this.formalBtTopK);
+    // PR #96: Surrogate Rescue Lane — normal_pass / near_miss / low_drawdown /
+    //   trade_count / novelty / kill の 6 分類で正式 BT 候補を選抜する。
+    //   surrogate 閾値は緩和せず、normal_pass=0 の世代でも rescue lane で候補を救済する。
+    const rescueResult = this.buildRescueCandidates(elites, metrics, dslById, scores);
+    const ranked = rescueResult.candidates;
 
     // 段階 4a.3: top K を analysis-engine 正式 BT で再検証。
     //   - formalBtVerifiedCandidates: 正式 BT を呼んだ全件 (失敗理由付き)、運用ログ用
@@ -354,58 +372,74 @@ export class EvolutionLoop {
       lowDiversityBoost,
       errors,
       parentPoolSummary: parentPoolResult.summary,
+      formalBtCandidateSummary: rescueResult.summary,
     };
     return report;
   }
 
   /**
-   * surrogate 厳格 3 条件 (学習 PF / 検証 PF / 過学習) を満たすエリートを
-   * 「正式 BT 候補」として抽出する。
+   * PR #96: surrogate 結果を rescue policy に渡し、正式 BT 候補と summary を得る。
    *
-   * 段階 4a.3 までは: ここでの通過が「最終昇格候補」だった。
-   * 段階 4a.3 から: ここを通過した候補は **正式 BT ゲート (verifyCandidatesWithFormalBacktest)
-   * で再検証** され、`formalBtPassed === true` のものだけが `promotionCandidates` に残る。
-   * surrogate 単独では絶対に昇格しない。
-   *
-   * 戻り値: `{ candidate, dsl }` ペアの配列。dsl はハッシュ計算 / 永続化で必要なため、
-   * 後段で `dslById.get(...)` を再度引かなくて済むよう一緒に返す。
+   * このメソッドは旧 `extractPromotionCandidates` を内部的に置き換える。
+   * 旧メソッドは「3 条件すべてを通過したエリート」だけを正式 BT に送っていたが、
+   * 新ロジックは:
+   *   - normal_pass / near_miss / low_drawdown / trade_count / novelty を 1 つの統一フローで分類
+   *   - kill 対象は除外
+   *   - formalBtTopK が overallTopK + 各 rescue lane TopK の合計と一致しなくても
+   *     重複排除後のユニーク件数で運用 (= 過剰選抜にならない)
+   * を行う。`formalBtTopK` の DI は無視せず、normal_pass の上限として尊重する。
    */
-  private extractPromotionCandidates(
+  private buildRescueCandidates(
     elites: StrategyDSL[],
     metrics: Map<string, SurrogateFitnessAggregate>,
     dslById: Map<string, StrategyDSL>,
-  ): Array<{ candidate: EvolutionPromotionCandidate; dsl: StrategyDSL }> {
-    const out: Array<{ candidate: EvolutionPromotionCandidate; dsl: StrategyDSL }> = [];
+    scores: Map<string, number>,
+  ): {
+    candidates: Array<{ candidate: EvolutionPromotionCandidate; dsl: StrategyDSL }>;
+    summary: FormalBtCandidateSummary;
+  } {
+    // SurrogateFitnessAggregate を持つ elites のみ rescue policy に渡す
+    const inputs = [];
     for (const dsl of elites) {
       const agg = metrics.get(dsl.id);
       if (!agg) continue;
-      if (agg.trainPf <= MIN_TRAIN_PROFIT_FACTOR) continue;
-      if (agg.validationPf <= MIN_VALIDATION_PROFIT_FACTOR) continue;
-      if (agg.overfitScore >= MAX_OVERFIT_SCORE) continue;
-
-      // dslById は population.getByRegime(regime) の全要素 + extra を保持しており、
-      // elites もその中から選抜されているため、dslById.get(dsl.id) は必ず非 undefined。
       const fromPop = dslById.get(dsl.id) ?? dsl;
-      out.push({
-        candidate: {
-          dslId: fromPop.id,
-          source: 'evolution',
-          regime: fromPop.regimeTarget,
-          symbol: fromPop.symbol,
-          timeframe: fromPop.timeframe,
-          trainPf: agg.trainPf,
-          validationPf: agg.validationPf,
-          overfitScore: agg.overfitScore,
-          validationTradeCount: agg.validation.summary.totalTrades,
-          description: fromPop.metadata.description,
-          // 正式 BT ゲート前の初期値。verifyCandidatesWithFormalBacktest で必ず上書きされる。
-          formalBtPassed: false,
-          formalBtMetrics: null,
-        },
+      inputs.push({
         dsl: fromPop,
+        aggregate: agg,
+        surrogateScore: scores.get(dsl.id) ?? 0,
       });
     }
-    return out;
+    // formalBtTopK は overallTopK のオーバーライドとして渡す (= caller が override 可能)。
+    // trade_count_rescue は formal BT 段の minTradeCount 閾値と揃え、後段で
+    // insufficient_trades で即落ちる候補を rescue 段で除外する。
+    const { entries, summary } = selectFormalBtCandidatesWithRescue(inputs, {
+      overallTopK: this.formalBtTopK,
+      minTradesForTradeCountRescue: FORMAL_BT_MIN_TRADES,
+    });
+
+    // 既存の `verifyCandidatesWithFormalBacktest` が期待する形に変換 (candidate に route 付与)
+    const candidates = entries.map((e) => {
+      const candidate: EvolutionPromotionCandidate = {
+        dslId: e.dsl.id,
+        source: 'evolution',
+        regime: e.dsl.regimeTarget,
+        symbol: e.dsl.symbol,
+        timeframe: e.dsl.timeframe,
+        trainPf: e.aggregate.trainPf,
+        validationPf: e.aggregate.validationPf,
+        overfitScore: e.aggregate.overfitScore,
+        validationTradeCount: e.aggregate.validation.summary.totalTrades,
+        description: e.dsl.metadata.description,
+        // 正式 BT ゲート前の初期値。verifyCandidatesWithFormalBacktest で必ず上書きされる。
+        formalBtPassed: false,
+        formalBtMetrics: null,
+        route: e.route,
+      };
+      return { candidate, dsl: e.dsl };
+    });
+
+    return { candidates, summary };
   }
 
   /**
