@@ -207,6 +207,13 @@ async function main(): Promise<void> {
   console.log('\n--- repairOutcomeSummary ---');
   console.log(JSON.stringify(report.repairOutcomeSummary, null, 2));
 
+  // PR #103: OOS / Walk-forward v1 集計。
+  // validation_candidate に上がった候補に対する未知期間評価を観測する。
+  // smoke では oosBacktestRunner を渡していないので status=not_evaluated になる
+  // (= 観測経路は壊れていないことを確認、production 昇格には絶対に使わない)。
+  console.log('\n--- oosValidationSummary ---');
+  console.log(JSON.stringify(report.oosValidationSummary, null, 2));
+
   if (report.repairOutcomes.length > 0) {
     console.log('\n--- repairOutcome per child ---');
     for (const o of report.repairOutcomes) {

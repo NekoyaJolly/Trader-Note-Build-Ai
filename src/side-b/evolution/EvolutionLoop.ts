@@ -78,6 +78,14 @@ import {
   type RepairOutcomeBaseline,
   type RepairOutcomeSummary,
 } from './repairOutcomeTelemetry';
+import {
+  buildOosSplitWindowV1,
+  classifyOosValidationV1,
+  summarizeOosValidationResults,
+  type OosMetrics,
+  type OosValidationResult,
+  type OosValidationSummary,
+} from './oosWalkForwardPolicy';
 
 /**
  * EvolutionLoop が repository に求める最小契約。
@@ -96,6 +104,23 @@ export type EvolutionBacktestPersister = Pick<
  * 既定では `analysisEngineClient.runScreeningBacktest` (HTTP)。テストではモックを差し替える。
  */
 export type RunScreeningBacktestFn = typeof defaultRunScreeningBacktest;
+
+/**
+ * PR #103: OOS / Walk-forward 評価で使う薄い backtest runner (DI)。
+ *
+ * - 引数は最小限 (DSL + start/end の ISO 日付) に揃える
+ * - 戻り値は `OosMetrics` (= 比較用の最小集合)
+ * - 例外は throw、呼び出し側で `oos_engine_error` などに分類する
+ *
+ * 既定では未指定 (= OOS 評価をスキップ、`not_evaluated` として観測)。本番では
+ * `runFormalBacktest` を流用する adapter で wrap して渡す想定。analysis-engine の
+ * 大改修を避けるため、PR #103 では adapter を強制注入しない (= optional)。
+ */
+export type OosBacktestRunnerFn = (args: {
+  dsl: StrategyDSL;
+  startDate: string;
+  endDate: string;
+}) => Promise<OosMetrics>;
 
 export interface EvolutionLoopDeps {
   population: StrategyPopulation;
@@ -133,6 +158,16 @@ export interface EvolutionLoopDeps {
    *   - 値を指定:  そのオブジェクトの `findByStatus` を使う (= モック注入)
    */
   edgeHypothesisLoader?: EdgeHypothesisLoader | null;
+  /**
+   * PR #103: OOS / Walk-forward 評価用の backtest runner (optional)。
+   *   - undefined: OOS 評価をスキップし `not_evaluated` で summary に出す (= v1 既定)
+   *   - 値を指定:  validation_candidate 候補に対して OOS 評価を実行
+   *
+   * 既存 formal BT runner の date range を流用するか、専用 adapter を渡す。
+   * analysis-engine の大改修を避けるため、本番経路でも明示注入されない限り
+   * OOS 評価は走らない (= 観測ゼロでも runOneGeneration は壊れない)。
+   */
+  oosBacktestRunner?: OosBacktestRunnerFn;
 }
 
 /**
@@ -274,6 +309,14 @@ export interface GenerationReport {
    * 件数が多い世代では summary 経由の参照を推奨。
    */
   promotionGateDecisions: PromotionGateDecision[];
+  /**
+   * PR #103: OOS / Walk-forward v1 集計。
+   * `validation_candidate` 候補に対する未知期間評価を観測する (= 観測のみ、production 昇格には使わない)。
+   * `oosBacktestRunner` 未指定なら全候補が `not_evaluated` で集計される。
+   */
+  oosValidationSummary: OosValidationSummary;
+  /** PR #103: 候補ごとの個別 OOS 結果 (debug / smoke 用)。 */
+  oosValidationResults: OosValidationResult[];
 }
 
 function seedStrategy(regime: string): StrategyDSL {
@@ -340,6 +383,7 @@ export class EvolutionLoop {
   private readonly evolutionBacktestRepo: EvolutionBacktestPersister | null;
   private readonly evolutionRunId: string;
   private readonly edgeHypothesisLoader: EdgeHypothesisLoader | null;
+  private readonly oosBacktestRunner: OosBacktestRunnerFn | null;
   /**
    * PR #100: 同インスタンスで連続世代を回す場合の repairHints 保持先。
    * 1 世代目に生成した RepairHint を、2 世代目の mutation に自動的に渡すために使う。
@@ -369,6 +413,8 @@ export class EvolutionLoop {
       deps.edgeHypothesisLoader === null
         ? null
         : (deps.edgeHypothesisLoader ?? defaultEdgeLedger);
+    // PR #103: 既定は null (= OOS 評価スキップ → not_evaluated)。明示注入のみ実行。
+    this.oosBacktestRunner = deps.oosBacktestRunner ?? null;
   }
 
   /**
@@ -618,6 +664,17 @@ export class EvolutionLoop {
     );
     const promotionGateSummary = summarizePromotionGateDecisions(promotionGateDecisions);
 
+    // PR #103: validation_candidate (= PromotionGate で formal BT passed) を OOS 評価対象にする。
+    //   - oosBacktestRunner 未指定なら全候補が `not_evaluated` で集計される
+    //   - 観測のみ。productionEligible / promotionGate には影響させない
+    //   - 時系列順 split を厳守 (= future leakage 防止)
+    const oosValidationResults = await this.evaluateOosForValidationCandidates(
+      promotionGateDecisions,
+      verifyResults,
+      period,
+    );
+    const oosValidationSummary = summarizeOosValidationResults(oosValidationResults);
+
     // 段階 4a.4: 正式 BT 履歴を永続化 (passed/failed 全件、DSL 不在分岐は無いので欠損なし)。
     if (this.evolutionBacktestRepo) {
       await this.persistFormalBtHistory(verifyResults).catch(() => undefined);
@@ -643,8 +700,125 @@ export class EvolutionLoop {
       promotionGateDecisions,
       repairOutcomeSummary,
       repairOutcomes,
+      oosValidationSummary,
+      oosValidationResults,
     };
     return report;
+  }
+
+  /**
+   * PR #103: PromotionGate で `validation_candidate` になった候補を OOS 評価する。
+   *
+   * - `oosBacktestRunner` 未指定なら全候補を `not_evaluated` で返す (= 観測ゼロでも壊れない)
+   * - `oosBacktestRunner` 例外は `oos_engine_error` として記録し、世代を継続する
+   * - 時系列 split は `buildOosSplitWindowV1` (oosRatio=0.2) で構築 (= future leakage 防止)
+   * - baseline は formal BT metrics (= in-sample 結果) を使う。null なら判定は warning + 絶対閾値のみ
+   * - production 昇格・stage 変更には一切使わない (観測値として report に積むだけ)
+   */
+  private async evaluateOosForValidationCandidates(
+    decisions: ReadonlyArray<PromotionGateDecision>,
+    verifyResults: ReadonlyArray<{
+      candidate: EvolutionPromotionCandidate;
+      dsl: StrategyDSL;
+      engineVersion: string;
+      surrogateScore: number;
+    }>,
+    period: BacktestPeriod,
+  ): Promise<OosValidationResult[]> {
+    const validationDecisions = decisions.filter((d) => d.toStage === 'validation_candidate');
+    if (validationDecisions.length === 0) return [];
+
+    const dslById = new Map(verifyResults.map((r) => [r.candidate.dslId, r.dsl] as const));
+    const candById = new Map(
+      verifyResults.map((r) => [r.candidate.dslId, r.candidate] as const),
+    );
+
+    const window = buildOosSplitWindowV1({
+      startDate: period.start,
+      endDate: period.end,
+      oosRatio: 0.2,
+    });
+    // OOS 期間が自明境界 (oosStart === oosEnd) なら全候補を insufficient_oos_data で返す
+    const oosWindowEmpty = window.oosStart === window.oosEnd;
+
+    const results: OosValidationResult[] = [];
+    for (const d of validationDecisions) {
+      const dsl = dslById.get(d.candidateId);
+      const cand = candById.get(d.candidateId);
+      const baselineMetrics: OosMetrics | null = cand?.formalBtMetrics
+        ? {
+            pf: cand.formalBtMetrics.pf,
+            tradeCount: cand.formalBtMetrics.tradeCount,
+            maxDrawdown: cand.formalBtMetrics.maxDrawdown ?? null,
+            expectancy: null, // formal BT 経路では expectancy 取得していない
+            winRate: cand.formalBtMetrics.winRate,
+          }
+        : null;
+      const sourceStage = d.toStage;
+      const route = d.route;
+
+      // 評価不能 (runner 未注入 / OOS 期間ゼロ / DSL 欠損)
+      if (!this.oosBacktestRunner || oosWindowEmpty || !dsl) {
+        results.push({
+          candidateId: d.candidateId,
+          dslId: d.candidateId,
+          sourceStage,
+          route,
+          baselineMetrics,
+          oosMetrics: null,
+          deltas: { pfDelta: null, tradeCountDelta: null, maxDrawdownDelta: null, expectancyDelta: null },
+          status: oosWindowEmpty ? 'insufficient_oos_data' : 'not_evaluated',
+          failureReasons: oosWindowEmpty ? ['insufficient_oos_data'] : [],
+          folds: [],
+          warnings: this.oosBacktestRunner
+            ? []
+            : ['oosBacktestRunner 未注入 — OOS 評価をスキップ'],
+        });
+        continue;
+      }
+
+      let oosMetrics: OosMetrics;
+      const warnings: string[] = [];
+      try {
+        oosMetrics = await this.oosBacktestRunner({
+          dsl,
+          startDate: window.oosStart,
+          endDate: window.oosEnd,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        results.push({
+          candidateId: d.candidateId,
+          dslId: d.candidateId,
+          sourceStage,
+          route,
+          baselineMetrics,
+          oosMetrics: null,
+          deltas: { pfDelta: null, tradeCountDelta: null, maxDrawdownDelta: null, expectancyDelta: null },
+          status: 'unknown',
+          failureReasons: ['oos_engine_error'],
+          folds: [],
+          warnings: [`oosBacktestRunner 例外: ${msg}`],
+        });
+        continue;
+      }
+
+      const judged = classifyOosValidationV1({ baselineMetrics, oosMetrics });
+      results.push({
+        candidateId: d.candidateId,
+        dslId: d.candidateId,
+        sourceStage,
+        route,
+        baselineMetrics,
+        oosMetrics,
+        deltas: judged.deltas,
+        status: judged.status,
+        failureReasons: judged.failureReasons,
+        folds: [], // Walk-forward は v1 では未実装、folds 空で OK (= summarize 関数は単一 OOS で動く)
+        warnings: [...warnings, ...judged.warnings],
+      });
+    }
+    return results;
   }
 
   /**
