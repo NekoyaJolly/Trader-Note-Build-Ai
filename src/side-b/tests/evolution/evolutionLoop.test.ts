@@ -107,6 +107,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       enforcer: new DiversityEnforcer(),
       defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
       evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
       runFormalBacktest,
     });
 
@@ -211,6 +212,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       enforcer: new DiversityEnforcer(),
       defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
       evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
       runFormalBacktest,
     });
 
@@ -316,6 +318,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       enforcer: new DiversityEnforcer(),
       defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
       evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
       runFormalBacktest,
     });
 
@@ -414,6 +417,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       enforcer: new DiversityEnforcer(),
       defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
       evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
       runFormalBacktest,
     });
 
@@ -510,6 +514,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       enforcer: new DiversityEnforcer(),
       defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
       evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
       runFormalBacktest,
       formalBtTopK: 3,
     });
@@ -644,6 +649,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
       runFormalBacktest,
       evolutionBacktestRepo: repoStub,
+      edgeHypothesisLoader: null,
       evolutionRunId: '00000000-0000-0000-0000-000000000001',
     });
 
@@ -763,6 +769,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       enforcer: new DiversityEnforcer(),
       defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
       evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
       runFormalBacktest,
     });
 

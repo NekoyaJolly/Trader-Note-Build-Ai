@@ -45,7 +45,12 @@ import {
   evolutionBacktestRunRepository as defaultEvolutionBacktestRepo,
   type EvolutionBacktestRunRepository,
 } from '../../backend/repositories/evolutionBacktestRunRepository';
-import { buildParentPool, type ParentPoolSummary } from './parentPoolPolicy';
+import {
+  buildParentPool,
+  type EdgeHypothesisLoader,
+  type ParentPoolSummary,
+} from './parentPoolPolicy';
+import { edgeLedger as defaultEdgeLedger } from '../ledger';
 import {
   selectFormalBtCandidatesWithRescue,
   type FormalBtCandidateSummary,
@@ -99,6 +104,13 @@ export interface EvolutionLoopDeps {
    * 省略時は EvolutionLoop インスタンスごとに自動生成 (cron 起動毎に new するため)。
    */
   evolutionRunId?: string;
+  /**
+   * PR #98: 親プール統合用の EdgeHypothesis ロード口。
+   *   - undefined: 既定の `edgeLedger` を使う (= 本番経路)
+   *   - null:      EdgeHypothesis 経路を完全に skip (= v1 互換、テスト用 / DB 切り離し運用)
+   *   - 値を指定:  そのオブジェクトの `findByStatus` を使う (= モック注入)
+   */
+  edgeHypothesisLoader?: EdgeHypothesisLoader | null;
 }
 
 /**
@@ -236,6 +248,7 @@ export class EvolutionLoop {
   private readonly formalBtTopK: number;
   private readonly evolutionBacktestRepo: EvolutionBacktestPersister | null;
   private readonly evolutionRunId: string;
+  private readonly edgeHypothesisLoader: EdgeHypothesisLoader | null;
 
   constructor(private readonly deps: EvolutionLoopDeps) {
     this.runFormalBacktest = deps.runFormalBacktest ?? defaultRunScreeningBacktest;
@@ -246,6 +259,11 @@ export class EvolutionLoop {
         ? null
         : (deps.evolutionBacktestRepo ?? defaultEvolutionBacktestRepo);
     this.evolutionRunId = deps.evolutionRunId ?? randomUUID();
+    // PR #98: edgeHypothesisLoader 同様の挙動 (null 明示で skip、undefined なら既定の edgeLedger)
+    this.edgeHypothesisLoader =
+      deps.edgeHypothesisLoader === null
+        ? null
+        : (deps.edgeHypothesisLoader ?? defaultEdgeLedger);
   }
 
   /**
@@ -295,6 +313,7 @@ export class EvolutionLoop {
     const parentPoolResult = await buildParentPool(regime, 5, scores, {
       population,
       evolutionBacktestRepo: this.evolutionBacktestRepo,
+      edgeHypothesisLoader: this.edgeHypothesisLoader,
     });
     population.removeWorst(regime, 5, scores);
     const parentPool = parentPoolResult.entries;
