@@ -63,6 +63,12 @@ import {
   type RepairHintSummary,
 } from './repairHintPolicy';
 import type { RepairHintMap } from '../agents/MutationAgent';
+import {
+  decidePromotionGateV1,
+  summarizePromotionGateDecisions,
+  type PromotionGateDecision,
+  type PromotionGateSummary,
+} from './promotionGatePolicy';
 
 /**
  * EvolutionLoop が repository に求める最小契約。
@@ -229,6 +235,22 @@ export interface GenerationReport {
    * これは mutation の補助情報であり、候補の評価・昇格・採用を意味しない。
    */
   repairHintSummary: RepairHintSummary;
+  /**
+   * PR #101: PromotionGate v1 の集計。
+   * 候補ごとの `EvolutionCandidateStage` 判定を stage / decision / reason 軸で集計する。
+   *
+   * - rescue は `formal_bt_candidate` までで止まる (= 昇格扱いしない)
+   * - `formal_bt_passed` は `validation_candidate` までで止まる (= production 扱いしない)
+   * - `productionEligible` は v1 では常に 0
+   *
+   * `EdgeStatus` / `StatusManager` には触らない (DB-free in-memory only)。
+   */
+  promotionGateSummary: PromotionGateSummary;
+  /**
+   * PR #101: 候補ごとの個別 PromotionGate 判定。debug / smoke で使う。
+   * 件数が多い世代では summary 経由の参照を推奨。
+   */
+  promotionGateDecisions: PromotionGateDecision[];
 }
 
 function seedStrategy(regime: string): StrategyDSL {
@@ -474,6 +496,17 @@ export class EvolutionLoop {
     }
     this.lastRepairHints = nextRepairHints;
 
+    // PR #101: PromotionGate v1 — 候補ごとの EvolutionCandidateStage を deterministic に判定。
+    //   - 親プール候補: source ベースで parent_eligible 判定
+    //   - 正式 BT 検証済候補: formalBtPassed / route / repairHint から最終判定
+    //   昇格判定は各候補に対して独立、productionEligible は v1 で常に false。
+    //   既存の parentPool / rescue lane / repairHint 経路は変更しない (= 観測のみ)。
+    const promotionGateDecisions = this.buildPromotionGateDecisions(
+      parentPoolResult.entries,
+      formalBtVerifiedCandidates,
+    );
+    const promotionGateSummary = summarizePromotionGateDecisions(promotionGateDecisions);
+
     // 段階 4a.4: 正式 BT 履歴を永続化 (passed/failed 全件、DSL 不在分岐は無いので欠損なし)。
     if (this.evolutionBacktestRepo) {
       await this.persistFormalBtHistory(verifyResults).catch(() => undefined);
@@ -495,8 +528,67 @@ export class EvolutionLoop {
       parentPoolSummary: parentPoolResult.summary,
       formalBtCandidateSummary: rescueResult.summary,
       repairHintSummary,
+      promotionGateSummary,
+      promotionGateDecisions,
     };
     return report;
+  }
+
+  /**
+   * PR #101: 親プール候補と正式 BT 検証済候補から PromotionGate 判定を構築する。
+   *
+   * - 親プール候補は `source` ベースで `parent_eligible` 判定
+   *   (= 同 dsl が後段で formal_bt_candidate / passed になっても親としての判定はここで保持)
+   * - 正式 BT 検証済候補は `route` / `formalBtPassed` / `repairHint` から最終判定
+   * - 同 dsl が両方に出る場合は両方の decision を残す (観測上、親利用と昇格判定は別軸)
+   *
+   * このメソッドは EvolutionLoop の責務 (= 入力収集 + 判定呼び出し) のみで、
+   * 状態遷移ロジックは `decidePromotionGateV1` 側に集中させる (設計書 §推奨ファイル構成)。
+   */
+  private buildPromotionGateDecisions(
+    parentPool: ReadonlyArray<{ dsl: StrategyDSL; source: string }>,
+    verified: ReadonlyArray<EvolutionPromotionCandidate>,
+  ): PromotionGateDecision[] {
+    const decisions: PromotionGateDecision[] = [];
+
+    // 親プール候補: 親利用観点での parent_eligible 判定 (= 重複可、後続候補の昇格には影響しない)
+    for (const e of parentPool) {
+      decisions.push(
+        decidePromotionGateV1({
+          candidateId: e.dsl.id,
+          dslId: e.dsl.id,
+          source: e.source,
+          hasValidDsl: true,
+          schemaValidationPassed: true,
+        }),
+      );
+    }
+
+    // 正式 BT 検証済候補: formalBtPassed / route / repairHint から最終判定
+    for (const c of verified) {
+      decisions.push(
+        decidePromotionGateV1({
+          candidateId: c.dslId,
+          dslId: c.dslId,
+          source: c.source,
+          route: c.route,
+          formalBtPassed: c.formalBtPassed,
+          formalBtFailureReason: c.formalBtFailureReason ?? null,
+          repairHint: c.repairHint
+            ? {
+                shouldUseForRepairMutation: c.repairHint.shouldUseForRepairMutation,
+                shouldExcludeFromParentPool: c.repairHint.shouldExcludeFromParentPool,
+                severity: c.repairHint.severity,
+              }
+            : null,
+          hasValidDsl: true,
+          schemaValidationPassed: true,
+          metrics: c.formalBtMetrics ?? undefined,
+        }),
+      );
+    }
+
+    return decisions;
   }
 
   /**
