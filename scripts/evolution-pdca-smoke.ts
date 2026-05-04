@@ -166,6 +166,7 @@ async function main(): Promise<void> {
   }
 
   // PR #95: 親個体プール v1 のソース別取得 + fallback 状態
+  // PR #98: edge_* ソース統合後は edgeHypothesisConversion 内訳も含む
   console.log('\n--- parentPoolSummary ---');
   console.log(JSON.stringify(report.parentPoolSummary, null, 2));
 
