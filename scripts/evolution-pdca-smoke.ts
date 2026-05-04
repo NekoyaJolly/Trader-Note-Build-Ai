@@ -194,6 +194,12 @@ async function main(): Promise<void> {
   console.log('\n--- repairHintSummary ---');
   console.log(JSON.stringify(report.repairHintSummary, null, 2));
 
+  // PR #101: PromotionGate / EvolutionCandidateStage v1 集計。
+  // rescue / formal_bt_passed / repairable / repair_excluded の状態が混ざらず
+  // 観測できることを確認する用途。productionEligible は v1 では常に 0。
+  console.log('\n--- promotionGateSummary ---');
+  console.log(JSON.stringify(report.promotionGateSummary, null, 2));
+
   const failedWithHint = report.formalBtVerifiedCandidates.filter(
     (c) => !c.formalBtPassed && c.repairHint,
   );
