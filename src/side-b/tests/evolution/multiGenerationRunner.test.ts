@@ -612,14 +612,15 @@ describe('runMultiGenerationEvolutionV1', () => {
   // PR #107: Adaptive Repair / Mutation Budget 接続
   // =================================================================
 
-  it('PR #107-A. adaptiveRepairBudget=true で Generation 1 終了後に decision が 1 件追加される', async () => {
+  it('PR #107-A. adaptiveRepairBudget=true なら各世代終了ごとに decision が 1 件追加され、N 世代で N 件保存される', async () => {
     const runOneGeneration = jest.fn(async () => makeReport());
     const r = await runMultiGenerationEvolutionV1({
       options: { generations: 2, regime: 'breakout', adaptiveRepairBudget: true },
       runOneGeneration,
     });
     expect(r.adaptiveRepairBudgetDecisions).toBeDefined();
-    expect(r.adaptiveRepairBudgetDecisions).toHaveLength(2); // 1 世代終了ごとに 1 decision
+    // 各世代終了後に 1 decision を追加するので、2 世代なら 2 件
+    expect(r.adaptiveRepairBudgetDecisions).toHaveLength(2);
     expect(r.adaptiveRepairBudgetSummary?.enabled).toBe(true);
   });
 

@@ -540,6 +540,118 @@ describe('decideAdaptiveRepairBudgetV1', () => {
 // summary
 // =================================================================
 
+describe('PR #107 Copilot review fixes', () => {
+  it('#1+#2: 強い floor/cap でも standard_mutation を 20%pt 以上に保ったまま合計を 100 に正規化する (= スケール後に floor が再び破れない)', () => {
+    // 他 route が 100 を超えて積まれていても、standard_mutation が 20%pt floor を割らないこと
+    const baseline: MutationBudgetAllocation = {
+      ...defaultMutationBudgetAllocationV1,
+      byRoute: {
+        repair_guided_mutation: 50, // cap=40 を意図的に超過
+        standard_mutation: 0,        // 0%pt → 20%pt floor が必要
+        crossover: 30,
+        novelty_seed: 30,            // noveltyFloor=10 より大きく
+        indicator_augmentation: 10,
+        random_exploration: 10,
+      },
+    };
+    const d = decideAdaptiveRepairBudgetV1({
+      generationIndex: 1,
+      previousReport: makeReport(),
+      baselineAllocation: baseline,
+    });
+    const next = d.nextAllocation.byRoute;
+    expect(next.repair_guided_mutation).toBeLessThanOrEqual(baseline.repairMaxShare);
+    expect(next.standard_mutation).toBeGreaterThanOrEqual(20);
+    expect(next.novelty_seed).toBeGreaterThanOrEqual(baseline.noveltyFloor);
+    // 合計は totalBudget に正規化
+    const sum = Object.values(next).reduce((a, b) => a + b, 0);
+    expect(sum).toBe(baseline.totalBudget);
+    // どの route も 1%pt 未満にならない (= 完全 0 禁止 + 負数化なし)
+    for (const v of Object.values(next)) {
+      expect(v).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('#1: 丸め誤差は standard_mutation で吸収され、key 順や Object.keys の順序に依存しない', () => {
+    // baseline を別 key 順で組んでも結果が変わらない pin
+    const orderA: MutationBudgetAllocation = {
+      ...defaultMutationBudgetAllocationV1,
+      byRoute: {
+        repair_guided_mutation: 21,
+        standard_mutation: 33,
+        crossover: 21,
+        novelty_seed: 16,
+        indicator_augmentation: 4,
+        random_exploration: 5, // 合計 100
+      },
+    };
+    const orderB: MutationBudgetAllocation = {
+      ...defaultMutationBudgetAllocationV1,
+      byRoute: {
+        random_exploration: 5,
+        novelty_seed: 16,
+        crossover: 21,
+        repair_guided_mutation: 21,
+        indicator_augmentation: 4,
+        standard_mutation: 33,
+      },
+    };
+    const dA = decideAdaptiveRepairBudgetV1({
+      generationIndex: 1,
+      previousReport: makeReport(),
+      baselineAllocation: orderA,
+    });
+    const dB = decideAdaptiveRepairBudgetV1({
+      generationIndex: 1,
+      previousReport: makeReport(),
+      baselineAllocation: orderB,
+    });
+    // byRoute は key 順差にかかわらず同 value になる
+    expect(dA.nextAllocation.byRoute).toEqual(dB.nextAllocation.byRoute);
+  });
+
+  it('#3: nextAllocation.warnings は当該 decision で生まれたものだけ (= baseline からの累積を引き継がない)', () => {
+    const baseline: MutationBudgetAllocation = {
+      ...defaultMutationBudgetAllocationV1,
+      warnings: ['old-warning-from-previous-generation'],
+    };
+    const d = decideAdaptiveRepairBudgetV1({
+      generationIndex: 1,
+      previousReport: makeReport(),
+      baselineAllocation: baseline,
+    });
+    expect(d.nextAllocation.warnings).not.toContain('old-warning-from-previous-generation');
+  });
+
+  it('#3: 連鎖 (decision.next を次の baseline にする) で warnings が世代をまたいで蓄積しない', () => {
+    // baseline に floor 違反を仕込み、warning が出ることを確認 → さらにそれを次の baseline にして
+    // もう一度 decide を呼ぶと、warning は最新世代分のみで増殖しない
+    const initBaseline: MutationBudgetAllocation = {
+      ...defaultMutationBudgetAllocationV1,
+      byRoute: {
+        ...defaultMutationBudgetAllocationV1.byRoute,
+        novelty_seed: 5, // floor 違反
+      },
+    };
+    const d1 = decideAdaptiveRepairBudgetV1({
+      generationIndex: 1,
+      previousReport: makeReport(),
+      baselineAllocation: initBaseline,
+    });
+    const w1 = d1.nextAllocation.warnings.length;
+    expect(w1).toBeGreaterThan(0);
+
+    // 次世代: nextAllocation 自体は floor を満たしているので、新たな floor warning は出ないはず
+    const d2 = decideAdaptiveRepairBudgetV1({
+      generationIndex: 2,
+      previousReport: makeReport(),
+      baselineAllocation: d1.nextAllocation,
+    });
+    // 累積 (w1 + w1) になっていないこと: 新世代では floor 違反が無いので warning は 0 件
+    expect(d2.nextAllocation.warnings.length).toBe(0);
+  });
+});
+
 describe('summarizeAdaptiveRepairBudgetDecisionsV1', () => {
   it('boostedRepairTargets / suppressedRepairTargets を baseline 比較で抽出', () => {
     const d1 = decideAdaptiveRepairBudgetV1({

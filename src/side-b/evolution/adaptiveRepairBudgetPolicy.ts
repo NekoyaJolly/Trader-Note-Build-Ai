@@ -227,87 +227,146 @@ function cloneAllocation(a: MutationBudgetAllocation): MutationBudgetAllocation 
  * - novelty_seed + random_exploration >= explorationFloor
  * - standard_mutation >= 20% (= 0 にしない)
  * - どの route も 1%pt 未満にしない (= 完全 0 禁止)
- * - 合計を totalBudget に scaling
+ * - 合計を totalBudget に正規化 — 丸め誤差は **常に standard_mutation で明示吸収** し、
+ *   key-order 依存や負数化を起こさない (PR #107 Copilot review #1)
  *
- * 制約発火時は warnings を積み reasons に bounded_by_floor / bounded_by_cap を返せるよう
- * `boundedReasons` を集めて返す。
+ * 注意 (PR #107 Copilot review #2):
+ *   floor/cap 適用とスケーリング/正規化を 1 パスで行うと、後段の処理が前段の制約を
+ *   再び破る可能性がある (例: standard_mutation に差分を吸収させた結果、再び floor 20 を
+ *   下回る)。本関数では reduce/clamp/normalize の各処理を **fixpoint 反復** にして、
+ *   制約が常に成立した allocation だけを返す。
+ *
+ * 注意 (PR #107 Copilot review #3):
+ *   出力 allocation の `warnings` は本関数内で生成された警告だけを含む。baseline からは
+ *   引き継がない (= 世代をまたいで warnings が累積するのを防ぐ)。
  */
 function applyBudgetGuards(
   alloc: MutationBudgetAllocation,
 ): { allocation: MutationBudgetAllocation; boundedReasons: AdaptiveRepairBudgetDecisionReason[] } {
   const out = cloneAllocation(alloc);
+  // PR #107 Copilot review #3: warnings は当該 guard 適用で生まれたものだけにする。
+  // baseline から `[...a.warnings]` で持ち上がってきたものは破棄する。
+  out.warnings = [];
   const boundedReasons = new Set<AdaptiveRepairBudgetDecisionReason>();
 
-  const minPerRoute = 1;
-  const standardMutationFloor = 20;
+  const MIN_PER_ROUTE = 1;
+  const STANDARD_MUTATION_FLOOR = 20;
+  const MAX_ITERATIONS = 5;
 
-  // 完全 0 禁止
-  for (const k of Object.keys(out.byRoute) as MutationRoute[]) {
-    if (out.byRoute[k] < minPerRoute) {
-      out.warnings.push(`route ${k} を ${out.byRoute[k]}%pt → ${minPerRoute}%pt に floor`);
-      out.byRoute[k] = minPerRoute;
-      boundedReasons.add('bounded_by_floor');
-    }
-  }
-
-  // standard_mutation >= 20%pt
-  if (out.byRoute.standard_mutation < standardMutationFloor) {
-    out.warnings.push(
-      `standard_mutation を ${out.byRoute.standard_mutation}%pt → ${standardMutationFloor}%pt に floor`,
-    );
-    out.byRoute.standard_mutation = standardMutationFloor;
-    boundedReasons.add('bounded_by_floor');
-  }
-
-  // novelty_seed >= noveltyFloor
-  if (out.byRoute.novelty_seed < out.noveltyFloor) {
-    out.warnings.push(
-      `novelty_seed を ${out.byRoute.novelty_seed}%pt → ${out.noveltyFloor}%pt に floor`,
-    );
-    out.byRoute.novelty_seed = out.noveltyFloor;
-    boundedReasons.add('bounded_by_floor');
-  }
-
-  // novelty + random >= explorationFloor (= novelty が満たしてれば OK、足りなければ random で埋める)
-  const explorationCurrent = out.byRoute.novelty_seed + out.byRoute.random_exploration;
-  if (explorationCurrent < out.explorationFloor) {
-    const need = out.explorationFloor - explorationCurrent;
-    out.warnings.push(
-      `exploration (novelty+random) を ${explorationCurrent}%pt → ${out.explorationFloor}%pt に floor (random_exploration +${need})`,
-    );
-    out.byRoute.random_exploration += need;
-    boundedReasons.add('bounded_by_floor');
-  }
-
-  // repair_guided_mutation <= repairMaxShare
-  if (out.byRoute.repair_guided_mutation > out.repairMaxShare) {
-    out.warnings.push(
-      `repair_guided_mutation を ${out.byRoute.repair_guided_mutation}%pt → ${out.repairMaxShare}%pt に cap`,
-    );
-    out.byRoute.repair_guided_mutation = out.repairMaxShare;
-    boundedReasons.add('bounded_by_cap');
-  }
-
-  // 合計を totalBudget に scaling (整数化、丸め誤差は standard_mutation で吸収)
-  const sum = Object.values(out.byRoute).reduce((a, b) => a + b, 0);
-  if (sum > 0 && sum !== out.totalBudget) {
-    const scale = out.totalBudget / sum;
-    let runningSum = 0;
-    const keys = Object.keys(out.byRoute) as MutationRoute[];
-    for (let i = 0; i < keys.length; i += 1) {
-      const k = keys[i];
-      if (i === keys.length - 1) {
-        // 最終 route で丸め吸収
-        out.byRoute[k] = out.totalBudget - runningSum;
-      } else {
-        const scaled = Math.round(out.byRoute[k] * scale);
-        out.byRoute[k] = scaled;
-        runningSum += scaled;
+  /** 「standard_mutation 以外」の合計が cap を超えないように削る (= standard_mutation の
+   *  正規化で 20%pt floor が破れないようにする)。 */
+  const drainOthersUntilStandardFits = (target: number): boolean => {
+    // 削る順序: 影響度の大きい route から。novelty_seed は noveltyFloor を尊重、
+    // 他は MIN_PER_ROUTE まで削れる。
+    const drainOrder: MutationRoute[] = [
+      'repair_guided_mutation',
+      'crossover',
+      'random_exploration',
+      'indicator_augmentation',
+      'novelty_seed',
+    ];
+    let othersSum =
+      drainOrder.reduce((a, k) => a + out.byRoute[k], 0);
+    let need = othersSum - target; // 他 route 合計をこのぶん減らす必要がある
+    if (need <= 0) return false;
+    let drained = false;
+    for (const k of drainOrder) {
+      if (need <= 0) break;
+      const minK = k === 'novelty_seed' ? out.noveltyFloor : MIN_PER_ROUTE;
+      const removable = Math.max(0, out.byRoute[k] - minK);
+      const drain = Math.min(need, removable);
+      if (drain > 0) {
+        out.byRoute[k] -= drain;
+        need -= drain;
+        othersSum -= drain;
+        drained = true;
       }
     }
+    return drained;
+  };
+
+  for (let iter = 0; iter < MAX_ITERATIONS; iter += 1) {
+    let changed = false;
+
+    // (a) 完全 0 禁止
+    for (const k of Object.keys(out.byRoute) as MutationRoute[]) {
+      if (out.byRoute[k] < MIN_PER_ROUTE) {
+        out.warnings.push(`route ${k} を ${out.byRoute[k]}%pt → ${MIN_PER_ROUTE}%pt に floor`);
+        out.byRoute[k] = MIN_PER_ROUTE;
+        boundedReasons.add('bounded_by_floor');
+        changed = true;
+      }
+    }
+
+    // (b) novelty_seed >= noveltyFloor
+    if (out.byRoute.novelty_seed < out.noveltyFloor) {
+      out.warnings.push(
+        `novelty_seed を ${out.byRoute.novelty_seed}%pt → ${out.noveltyFloor}%pt に floor`,
+      );
+      out.byRoute.novelty_seed = out.noveltyFloor;
+      boundedReasons.add('bounded_by_floor');
+      changed = true;
+    }
+
+    // (c) novelty + random >= explorationFloor
+    const explorationCurrent = out.byRoute.novelty_seed + out.byRoute.random_exploration;
+    if (explorationCurrent < out.explorationFloor) {
+      const need = out.explorationFloor - explorationCurrent;
+      out.warnings.push(
+        `exploration (novelty+random) を ${explorationCurrent}%pt → ${out.explorationFloor}%pt に floor (random_exploration +${need})`,
+      );
+      out.byRoute.random_exploration += need;
+      boundedReasons.add('bounded_by_floor');
+      changed = true;
+    }
+
+    // (d) repair_guided_mutation <= repairMaxShare
+    if (out.byRoute.repair_guided_mutation > out.repairMaxShare) {
+      out.warnings.push(
+        `repair_guided_mutation を ${out.byRoute.repair_guided_mutation}%pt → ${out.repairMaxShare}%pt に cap`,
+      );
+      out.byRoute.repair_guided_mutation = out.repairMaxShare;
+      boundedReasons.add('bounded_by_cap');
+      changed = true;
+    }
+
+    // (e) 合計を totalBudget に正規化。丸め誤差は **常に standard_mutation で明示吸収**。
+    //     standard_mutation 以外の route の合計を計算し、残りを standard_mutation に割り当てる。
+    const otherRoutes: MutationRoute[] = [
+      'repair_guided_mutation',
+      'crossover',
+      'novelty_seed',
+      'indicator_augmentation',
+      'random_exploration',
+    ];
+    const otherSum = otherRoutes.reduce((a, k) => a + out.byRoute[k], 0);
+    let newStandard = out.totalBudget - otherSum;
+
+    // standard_mutation が 20%pt floor を割る場合、他 route から削って 20 を確保する。
+    if (newStandard < STANDARD_MUTATION_FLOOR) {
+      // 他 route 合計が `totalBudget - 20` を超えているので、その差分を drain
+      const targetOtherSum = out.totalBudget - STANDARD_MUTATION_FLOOR;
+      const drained = drainOthersUntilStandardFits(targetOtherSum);
+      // drain 後に再計算
+      const otherSum2 = otherRoutes.reduce((a, k) => a + out.byRoute[k], 0);
+      newStandard = out.totalBudget - otherSum2;
+      if (drained || newStandard !== out.byRoute.standard_mutation) {
+        out.warnings.push(
+          `standard_mutation を ${out.byRoute.standard_mutation}%pt → ${newStandard}%pt に正規化 (他 route から ${otherSum - otherSum2}%pt を drain して 20%pt floor を確保)`,
+        );
+        boundedReasons.add('bounded_by_floor');
+      }
+    }
+    if (newStandard !== out.byRoute.standard_mutation) {
+      // 通常の正規化 (= 丸め誤差吸収)。warning を毎回出すと冗長なのでスキップ。
+      out.byRoute.standard_mutation = newStandard;
+      changed = true;
+    }
+
+    if (!changed) break;
   }
 
-  // weight floor / cap
+  // weight floor / cap (allocation 正規化とは独立)
   for (const [target, w] of Object.entries(out.repairTargetWeights)) {
     if (w < adaptiveRepairBudgetThresholdsV1.weightFloor) {
       out.warnings.push(

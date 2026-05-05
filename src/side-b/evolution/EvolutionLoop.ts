@@ -393,7 +393,9 @@ export interface RunOneGenerationOptions {
    * 確保することで、multi-generation runner の adaptive decision を **silent に握り潰さず**
    * 観測できるようにする。
    *
-   * - 値が渡された場合: GenerationReport.warnings にログを 1 行追加 (= "adaptive budget 受領")
+   * - 値が渡された場合: `GenerationReport.errors` に `[info] adaptive mutation budget 受領: ...`
+   *   を 1 行追加 (= 観測ログ。GenerationReport には専用の `warnings` フィールドが無いため
+   *   `errors[]` を info ログ用にも流用)
    * - 未指定: 従来挙動と完全に同等
    */
   mutationBudgetAllocation?: MutationBudgetAllocation;
