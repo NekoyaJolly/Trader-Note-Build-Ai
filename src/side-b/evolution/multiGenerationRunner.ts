@@ -22,6 +22,14 @@ import type { RepairHint } from './repairHintPolicy';
 import type { RepairOutcomeBaseline } from './repairOutcomeTelemetry';
 import type { OosValidationResult } from './oosValidationResultMapper';
 import type { PromotionGateDecision } from './promotionGatePolicy';
+import {
+  decideAdaptiveRepairBudgetV1,
+  defaultMutationBudgetAllocationV1,
+  summarizeAdaptiveRepairBudgetDecisionsV1,
+  type AdaptiveRepairBudgetDecision,
+  type AdaptiveRepairBudgetSummary,
+  type MutationBudgetAllocation,
+} from './adaptiveRepairBudgetPolicy';
 
 // =================================================================
 // 設定
@@ -65,6 +73,15 @@ export interface MultiGenerationRunOptions {
   carryPromotionState?: boolean;
   /** 互換用フラグ (OOS 状態の引き継ぎは v1 では observation のみ)。default true。 */
   carryOosState?: boolean;
+  /**
+   * PR #107: Adaptive Repair / Mutation Budget v1 を有効化するか。default false。
+   * 有効時は世代ごとに前世代 GenerationReport から `decideAdaptiveRepairBudgetV1` で
+   * 次世代の `MutationBudgetAllocation` を deterministic に計算し、`runOneGeneration`
+   * へ optional input として渡す。production_candidate 自動昇格には影響させない。
+   */
+  adaptiveRepairBudget?: boolean;
+  /** PR #107: 初期の MutationBudgetAllocation。未指定なら `defaultMutationBudgetAllocationV1`。 */
+  initialMutationBudgetAllocation?: MutationBudgetAllocation;
 }
 
 /**
@@ -120,6 +137,10 @@ export interface MultiGenerationRunReport {
   trendSummary: MultiGenerationTrendSummary;
   finalState: MultiGenerationRunState;
   warnings: string[];
+  /** PR #107: adaptive 有効時のみ非空。 */
+  adaptiveRepairBudgetDecisions?: AdaptiveRepairBudgetDecision[];
+  /** PR #107: adaptive 有効時のみ非 undefined。 */
+  adaptiveRepairBudgetSummary?: AdaptiveRepairBudgetSummary;
 }
 
 /**
@@ -136,6 +157,12 @@ export interface RunOneGenerationCall {
   /** 観測専用 (v1 では実行に影響させない、将来 PR の adaptive 制御用フック)。 */
   previousPromotionGateDecisions?: PromotionGateDecision[];
   previousOosValidationResults?: OosValidationResult[];
+  /**
+   * PR #107: 次世代に使う mutation / repair の配分 (= Adaptive Repair Budget)。
+   * v1 では実 mutation count への反映は EvolutionLoop / MutationAgent 側に経路が
+   * 整うまで warning ベースの観測経路。runOneGeneration 受け側は optional 受領のみ。
+   */
+  mutationBudgetAllocation?: MutationBudgetAllocation;
 }
 
 export type MultiGenerationRunOneGenerationFn = (
@@ -296,7 +323,16 @@ export async function runMultiGenerationEvolutionV1(input: {
     carryRepairBaselines: input.options.carryRepairBaselines ?? true,
     carryPromotionState: input.options.carryPromotionState ?? true,
     carryOosState: input.options.carryOosState ?? true,
+    adaptiveRepairBudget: input.options.adaptiveRepairBudget ?? false,
   };
+
+  // PR #107: adaptive policy が ON のとき、世代ごとに decideAdaptiveRepairBudgetV1 を
+  // 呼び decision を作る。next allocation を次世代の callArgs.mutationBudgetAllocation に
+  // 注入する。OFF のときは decision/summary を出さない (= 既存動作と同等)。
+  const adaptiveEnabled = opts.adaptiveRepairBudget === true;
+  const adaptiveDecisions: AdaptiveRepairBudgetDecision[] = [];
+  let currentBudgetAllocation: MutationBudgetAllocation =
+    opts.initialMutationBudgetAllocation ?? defaultMutationBudgetAllocationV1;
 
   const trend = emptyTrend(requested);
   const runWarnings: string[] = [];
@@ -343,6 +379,11 @@ export async function runMultiGenerationEvolutionV1(input: {
           ? state.lastOosValidationResults
           : [],
       };
+      // PR #107: adaptive ON のときだけ mutationBudgetAllocation を注入する。
+      // OFF のときは undefined (= 既存挙動と同等、EvolutionLoop は無視可能)。
+      if (adaptiveEnabled) {
+        callArgs.mutationBudgetAllocation = currentBudgetAllocation;
+      }
       report = await input.runOneGeneration(callArgs);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -406,6 +447,21 @@ export async function runMultiGenerationEvolutionV1(input: {
           : [],
         warnings: state.warnings,
       };
+
+      // PR #107: 世代終了後、次世代用の adaptive budget decision を作る。
+      // これは「Generation N の観測 → Generation N+1 の budget」の経路で、
+      // currentBudgetAllocation を bounded に更新するだけ (production 不変)。
+      if (adaptiveEnabled) {
+        const decision = decideAdaptiveRepairBudgetV1({
+          generationIndex: generationIndex + 1,
+          previousReport: report,
+          trendSummary: trend,
+          baselineAllocation: currentBudgetAllocation,
+          enabled: true,
+        });
+        adaptiveDecisions.push(decision);
+        currentBudgetAllocation = decision.nextAllocation;
+      }
     } else if (status === 'failed') {
       trend.generationsFailed += 1;
       if (opts.stopOnGenerationError) {
@@ -445,6 +501,10 @@ export async function runMultiGenerationEvolutionV1(input: {
   trend.stoppedEarly = stoppedEarly;
   trend.stopReason = stopReason;
 
+  const adaptiveSummary = adaptiveEnabled
+    ? summarizeAdaptiveRepairBudgetDecisionsV1(adaptiveDecisions, { enabled: true })
+    : undefined;
+
   return {
     startedAt,
     finishedAt: new Date().toISOString(),
@@ -453,5 +513,7 @@ export async function runMultiGenerationEvolutionV1(input: {
     trendSummary: trend,
     finalState: state,
     warnings: runWarnings,
+    adaptiveRepairBudgetDecisions: adaptiveEnabled ? adaptiveDecisions : undefined,
+    adaptiveRepairBudgetSummary: adaptiveSummary,
   };
 }

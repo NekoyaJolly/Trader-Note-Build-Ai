@@ -97,6 +97,7 @@ import {
   summarizeOosValidationResults,
   type OosValidationSummary,
 } from './oosValidationSummary';
+import type { MutationBudgetAllocation } from './adaptiveRepairBudgetPolicy';
 
 /**
  * EvolutionLoop が repository に求める最小契約。
@@ -383,6 +384,19 @@ const FORMAL_BT_MIN_TRADES = VALIDATION_THRESHOLDS.common.minTradeCount;
 export interface RunOneGenerationOptions {
   repairHintsForMutation?: RepairHintMap;
   repairBaselinesForOutcome?: ReadonlyMap<string, RepairOutcomeBaseline>;
+  /**
+   * PR #107: Adaptive Repair / Mutation Budget v1 の配分情報。
+   *
+   * v1 では実 mutation count / route quota への反映経路は EvolutionLoop / MutationAgent 側に
+   * まだ無いため、**受け取って観測ログに残すだけ** (= 設計書 §代替方針)。本 budget の
+   * 反映は後続 PR (= MutationAgent への route 渡し対応) で行う。受け取り経路を先に
+   * 確保することで、multi-generation runner の adaptive decision を **silent に握り潰さず**
+   * 観測できるようにする。
+   *
+   * - 値が渡された場合: GenerationReport.warnings にログを 1 行追加 (= "adaptive budget 受領")
+   * - 未指定: 従来挙動と完全に同等
+   */
+  mutationBudgetAllocation?: MutationBudgetAllocation;
 }
 
 export class EvolutionLoop {
@@ -443,6 +457,18 @@ export class EvolutionLoop {
     const errors: string[] = [];
     const { population, adapter, mutationAgent, crossoverAgent, enforcer } = this.deps;
     const period = this.deps.defaultPeriod;
+
+    // PR #107: adaptive budget を受領しても、v1 では mutation count / route quota への
+    // 反映経路がまだ無い。silent で握り潰さず errors / warnings に観測ログを 1 行残す。
+    // 実反映は後続 PR (MutationAgent への route quota 渡し対応) で行う。
+    if (options?.mutationBudgetAllocation) {
+      const a = options.mutationBudgetAllocation;
+      errors.push(
+        `[info] adaptive mutation budget 受領: repair=${a.byRoute.repair_guided_mutation}%pt / ` +
+          `novelty=${a.byRoute.novelty_seed}%pt / random=${a.byRoute.random_exploration}%pt ` +
+          `(v1 は観測のみ、実 mutation count への反映は後続 PR)`,
+      );
+    }
 
     let list = population.getByRegime(regime);
     if (list.length === 0) {

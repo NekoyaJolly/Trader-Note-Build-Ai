@@ -607,4 +607,124 @@ describe('runMultiGenerationEvolutionV1', () => {
       expect(g.report?.formalBtCandidateSummary).toBeDefined();
     }
   });
+
+  // =================================================================
+  // PR #107: Adaptive Repair / Mutation Budget 接続
+  // =================================================================
+
+  it('PR #107-A. adaptiveRepairBudget=true で Generation 1 終了後に decision が 1 件追加される', async () => {
+    const runOneGeneration = jest.fn(async () => makeReport());
+    const r = await runMultiGenerationEvolutionV1({
+      options: { generations: 2, regime: 'breakout', adaptiveRepairBudget: true },
+      runOneGeneration,
+    });
+    expect(r.adaptiveRepairBudgetDecisions).toBeDefined();
+    expect(r.adaptiveRepairBudgetDecisions).toHaveLength(2); // 1 世代終了ごとに 1 decision
+    expect(r.adaptiveRepairBudgetSummary?.enabled).toBe(true);
+  });
+
+  it('PR #107-B. Generation N+1 の callArgs.mutationBudgetAllocation が注入される', async () => {
+    const observed: Array<unknown> = [];
+    const runOneGeneration = jest.fn(async (call) => {
+      observed.push(call.mutationBudgetAllocation);
+      return makeReport();
+    });
+    await runMultiGenerationEvolutionV1({
+      options: { generations: 3, regime: 'breakout', adaptiveRepairBudget: true },
+      runOneGeneration,
+    });
+    // 全世代で渡される (初回は initial allocation = default)
+    for (const a of observed) {
+      expect(a).toBeDefined();
+      expect(a).toHaveProperty('totalBudget', 100);
+    }
+  });
+
+  it('PR #107-C. adaptiveRepairBudget=false (default) なら decision/summary は出ない / mutationBudgetAllocation 未注入', async () => {
+    const observed: Array<unknown> = [];
+    const runOneGeneration = jest.fn(async (call) => {
+      observed.push(call.mutationBudgetAllocation);
+      return makeReport();
+    });
+    const r = await runMultiGenerationEvolutionV1({
+      options: { generations: 2, regime: 'breakout' },
+      runOneGeneration,
+    });
+    expect(r.adaptiveRepairBudgetDecisions).toBeUndefined();
+    expect(r.adaptiveRepairBudgetSummary).toBeUndefined();
+    expect(observed.every((a) => a === undefined)).toBe(true);
+  });
+
+  it('PR #107-D. adaptive ON でも trendSummary は壊れない', async () => {
+    const runOneGeneration = jest.fn(async () =>
+      makeReport({ formalBtUniqueCandidates: 3, repairOutcomeImproved: 1 }),
+    );
+    const r = await runMultiGenerationEvolutionV1({
+      options: { generations: 2, regime: 'breakout', adaptiveRepairBudget: true },
+      runOneGeneration,
+    });
+    expect(r.trendSummary.formalBtCandidatesByGeneration).toEqual([3, 3]);
+    expect(r.trendSummary.repairOutcomeImprovedByGeneration).toEqual([1, 1]);
+  });
+
+  it('PR #107-E. adaptive ON でも productionEligibleByGeneration は変わらない (常に 0)', async () => {
+    const runOneGeneration = jest.fn(async () => makeReport({ productionEligible: 0 }));
+    const r = await runMultiGenerationEvolutionV1({
+      options: { generations: 2, regime: 'breakout', adaptiveRepairBudget: true },
+      runOneGeneration,
+    });
+    expect(r.trendSummary.productionEligibleByGeneration.every((v) => v === 0)).toBe(true);
+    expect(r.adaptiveRepairBudgetSummary?.productionEligibleChanged).toBe(false);
+  });
+
+  it('PR #107-F. adaptive OFF でも repairHintsForMutation の carry は壊れない', async () => {
+    const calls: Array<number> = [];
+    const runOneGeneration = jest.fn(async ({ repairHintsForMutation }) => {
+      calls.push(repairHintsForMutation?.size ?? -1);
+      return makeReport({
+        formalBtVerifiedCandidates: [makeFailedCandidateWithHint('c1', repairableHint)],
+      });
+    });
+    await runMultiGenerationEvolutionV1({
+      options: { generations: 2, regime: 'breakout', adaptiveRepairBudget: false },
+      runOneGeneration,
+    });
+    // 初回 0、2 世代目に 1
+    expect(calls[0]).toBe(0);
+    expect(calls[1]).toBe(1);
+  });
+
+  it('PR #107-G. initialMutationBudgetAllocation を渡すと初回がそれになる', async () => {
+    const customInitial = {
+      totalBudget: 100,
+      byRoute: {
+        repair_guided_mutation: 25,
+        standard_mutation: 30,
+        crossover: 20,
+        novelty_seed: 15,
+        indicator_augmentation: 5,
+        random_exploration: 5,
+      },
+      repairTargetWeights: {} as Record<string, number>,
+      explorationFloor: 10,
+      noveltyFloor: 10,
+      repairMaxShare: 40,
+      warnings: [] as string[],
+    };
+    let firstCall: unknown = null;
+    const runOneGeneration = jest.fn(async (call) => {
+      if (firstCall === null) firstCall = call.mutationBudgetAllocation;
+      return makeReport();
+    });
+    await runMultiGenerationEvolutionV1({
+      options: {
+        generations: 2,
+        regime: 'breakout',
+        adaptiveRepairBudget: true,
+        initialMutationBudgetAllocation: customInitial,
+      },
+      runOneGeneration,
+    });
+    expect(firstCall).toEqual(customInitial);
+  });
 });
