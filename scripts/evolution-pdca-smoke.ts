@@ -62,6 +62,8 @@ interface CliArgs {
   periodEnd: string;
   /** PR #106: 複数世代モード。未指定 / 1 は従来単世代経路、2 以上で multi-generation runner を使う。 */
   generations?: number;
+  /** PR #107: Adaptive Repair / Mutation Budget v1 を有効化するか。 */
+  adaptiveRepairBudget?: boolean;
 }
 
 type ParseResult =
@@ -79,6 +81,7 @@ function parseArgs(argv: readonly string[]): ParseResult {
     else if (a === '--period-start') out.periodStart = argv[++i];
     else if (a === '--period-end') out.periodEnd = argv[++i];
     else if (a === '--generations') out.generations = parseInt(argv[++i], 10);
+    else if (a === '--adaptive-repair-budget') out.adaptiveRepairBudget = true;
     else return { kind: 'error', message: `unknown argument: ${a}` };
   }
   if (!out.regime) return { kind: 'error', message: '--regime is required' };
@@ -94,9 +97,10 @@ function parseArgs(argv: readonly string[]): ParseResult {
       periodStart: out.periodStart ?? yearAgo.toISOString().slice(0, 10),
       periodEnd: out.periodEnd ?? today.toISOString().slice(0, 10),
       generations:
-        Number.isFinite(out.generations) && (out.generations as number) > 0
-          ? (out.generations as number)
+        out.generations !== undefined && Number.isFinite(out.generations) && out.generations > 0
+          ? out.generations
           : undefined,
+      adaptiveRepairBudget: out.adaptiveRepairBudget,
     },
   };
 }
@@ -112,6 +116,7 @@ function printHelp(): void {
       '  --period-start     (default -365d) BT 開始日 YYYY-MM-DD',
       '  --period-end       (default today) BT 終了日 YYYY-MM-DD',
       `  --generations      (default 1) 連続実行世代数 (上限 ${MULTI_GENERATION_DEFAULTS.maxGenerations}、超過は clamp)`,
+      '  --adaptive-repair-budget  multi-generation 時のみ。Adaptive Repair / Mutation Budget v1 を有効化',
       '  -h, --help         このヘルプ',
     ].join('\n'),
   );
@@ -250,12 +255,22 @@ async function main(): Promise<void> {
 
   if (useMultiGeneration) {
     const runReport = await runMultiGenerationEvolutionV1({
-      options: { generations: args.generations as number, regime: args.regime },
-      runOneGeneration: async ({ generationIndex, repairHintsForMutation, repairBaselinesForOutcome }) => {
+      options: {
+        generations: args.generations as number,
+        regime: args.regime,
+        adaptiveRepairBudget: args.adaptiveRepairBudget === true,
+      },
+      runOneGeneration: async ({
+        generationIndex,
+        repairHintsForMutation,
+        repairBaselinesForOutcome,
+        mutationBudgetAllocation,
+      }) => {
         const startedAt = Date.now();
         const r = await loop.runOneGeneration(args.regime, {
           repairHintsForMutation,
           repairBaselinesForOutcome,
+          mutationBudgetAllocation,
         });
         const elapsedMs = Date.now() - startedAt;
         printGenerationReport(r, { elapsedMs, label: `Generation ${generationIndex + 1}` });
@@ -264,6 +279,13 @@ async function main(): Promise<void> {
     });
     console.log('\n--- multiGenerationTrendSummary ---');
     console.log(JSON.stringify(runReport.trendSummary, null, 2));
+    if (runReport.adaptiveRepairBudgetSummary) {
+      // PR #107: Adaptive Repair / Mutation Budget v1 の summary。
+      // - validation_confirmed / improved 観測を入力に next-generation の mutation 配分を
+      //   bounded に調整した結果。productionEligibleChanged は不変条件で常に false。
+      console.log('\n--- adaptiveRepairBudgetSummary ---');
+      console.log(JSON.stringify(runReport.adaptiveRepairBudgetSummary, null, 2));
+    }
   } else {
     const startedAt = Date.now();
     const report = await loop.runOneGeneration(args.regime);
