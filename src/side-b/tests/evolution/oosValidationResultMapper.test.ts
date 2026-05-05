@@ -82,6 +82,38 @@ describe('mapAnalysisEngineRobustnessResult', () => {
     expect(r.status).toBe('insufficient_oos_data');
   });
 
+  it('4c. tradeCount=NaN → insufficient_oos_data + warning (PR #105 Copilot review #2)', () => {
+    const r = mapAnalysisEngineRobustnessResult({
+      ...baseInput,
+      baselineMetrics: null,
+      oosMetrics: { pf: 1.5, tradeCount: NaN, maxDrawdown: 10, expectancy: 0.5 },
+      verdict: 'passed', // verdict が passed でも不正値ガードが優先
+    });
+    expect(r.status).toBe('insufficient_oos_data');
+    expect(r.failureReasons).toEqual(['insufficient_oos_data']);
+    expect(r.warnings.some((w) => w.includes('不正値'))).toBe(true);
+  });
+
+  it('4d. tradeCount=Infinity → insufficient_oos_data', () => {
+    const r = mapAnalysisEngineRobustnessResult({
+      ...baseInput,
+      baselineMetrics: null,
+      oosMetrics: { pf: 1.5, tradeCount: Infinity, maxDrawdown: 10, expectancy: 0.5 },
+      verdict: 'passed',
+    });
+    expect(r.status).toBe('insufficient_oos_data');
+  });
+
+  it('4e. tradeCount=負値 → insufficient_oos_data', () => {
+    const r = mapAnalysisEngineRobustnessResult({
+      ...baseInput,
+      baselineMetrics: null,
+      oosMetrics: { pf: 1.5, tradeCount: -3, maxDrawdown: 10, expectancy: 0.5 },
+      verdict: 'passed',
+    });
+    expect(r.status).toBe('insufficient_oos_data');
+  });
+
   it('5. engineError → unknown + oos_engine_error', () => {
     const r = mapAnalysisEngineRobustnessResult({
       ...baseInput,

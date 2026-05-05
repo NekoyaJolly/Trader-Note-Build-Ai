@@ -516,14 +516,45 @@ export function applyOosAwarePromotion(
   decisions: ReadonlyArray<PromotionGateDecision>,
   oosResults: ReadonlyArray<OosAwarePromotionInputResult>,
 ): OosAwarePromotionDecision[] {
-  // OOS 結果を candidateId / dslId で引けるようにする
-  const byCandidate = new Map<string, OosAwarePromotionInputResult>();
+  // PR #105 Copilot review #1: candidateId / dslId のキー名前空間を分離する。
+  // 同一 Map に詰めると、dslId が他候補の candidateId と衝突した場合に
+  // どちらが採用されたかが不明確になり、別候補の OOS 結果を誤参照しうる。
+  // 別 Map で持ち、優先順位は (1) candidateId 一致 (2) dslId 一致 と決定的に固定する。
+  // 同一キーが複数 result に出現した場合 (= 入力側の重複) は最初の登録を採用し、
+  // 後続を当該 decision の warnings に積んで観測可能にする。
+  const byCandidateId = new Map<string, OosAwarePromotionInputResult>();
+  const byDslId = new Map<string, OosAwarePromotionInputResult>();
+  const collisionWarningsByKey = new Map<string, string[]>();
+  const recordCollision = (
+    key: string,
+    namespace: 'candidateId' | 'dslId',
+    incoming: OosAwarePromotionInputResult,
+    existing: OosAwarePromotionInputResult,
+  ): void => {
+    if (incoming === existing) return;
+    const list = collisionWarningsByKey.get(key) ?? [];
+    list.push(
+      `OOS result の ${namespace}=${key} に複数 entry あり、最初の status=${existing.status} を採用 (重複側 status=${incoming.status})`,
+    );
+    collisionWarningsByKey.set(key, list);
+  };
   for (const r of oosResults) {
-    byCandidate.set(r.candidateId, r);
-    if (r.dslId && !byCandidate.has(r.dslId)) byCandidate.set(r.dslId, r);
+    const existingByCand = byCandidateId.get(r.candidateId);
+    if (existingByCand) recordCollision(r.candidateId, 'candidateId', r, existingByCand);
+    else byCandidateId.set(r.candidateId, r);
+
+    if (r.dslId) {
+      const existingByDsl = byDslId.get(r.dslId);
+      if (existingByDsl) recordCollision(r.dslId, 'dslId', r, existingByDsl);
+      else byDslId.set(r.dslId, r);
+    }
   }
 
   return decisions.map((d) => {
+    const collisionWarnings: string[] = [
+      ...(collisionWarningsByKey.get(d.candidateId) ?? []),
+      ...(d.dslId ? collisionWarningsByKey.get(d.dslId) ?? [] : []),
+    ];
     const base: OosAwarePromotionDecision = {
       candidateId: d.candidateId,
       dslId: d.dslId,
@@ -532,7 +563,7 @@ export function applyOosAwarePromotion(
       kind: 'unchanged',
       oosStatus: null,
       oosFailureReasons: [],
-      warnings: [],
+      warnings: [...collisionWarnings],
       productionEligible: false,
     };
 
@@ -541,9 +572,10 @@ export function applyOosAwarePromotion(
       return base;
     }
 
+    // 優先順位: (1) candidateId 一致 → (2) dslId 一致
     const oos =
-      byCandidate.get(d.candidateId) ??
-      (d.dslId ? byCandidate.get(d.dslId) : undefined) ??
+      byCandidateId.get(d.candidateId) ??
+      (d.dslId ? byDslId.get(d.dslId) : undefined) ??
       null;
 
     if (!oos) {
@@ -555,7 +587,9 @@ export function applyOosAwarePromotion(
     }
 
     const oosFailureReasons = oos.failureReasons ? [...oos.failureReasons] : [];
-    const warnings = oos.warnings ? [...oos.warnings] : [];
+    // PR #105 Copilot review #1: OOS 由来の warnings に collision warnings をマージする。
+    // base.warnings は collisionWarnings を初期値として持つので、ここで取り込まないと欠落する。
+    const warnings = [...base.warnings, ...(oos.warnings ?? [])];
 
     switch (oos.status) {
       case 'oos_passed':

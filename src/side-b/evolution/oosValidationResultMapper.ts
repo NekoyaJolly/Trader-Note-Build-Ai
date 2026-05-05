@@ -234,7 +234,35 @@ export function mapAnalysisEngineRobustnessResult(
   }
 
   // (3) データ欠損 / 期間ゼロ
-  if (raw.insufficientOosWindow || !oosMetrics || oosMetrics.tradeCount === null) {
+  // PR #105 Copilot review #2: tradeCount は外部 (analysis-engine) 境界の値なので、
+  // null だけでなく NaN / Infinity / 負値も `insufficient_oos_data` に倒す。
+  // 不正値が verdict 経由で oos_passed / oos_failed に流れると後続判定が壊れるため
+  // 明示的に防御する。
+  const isTradeCountInvalid = (tc: number | null | undefined): boolean => {
+    if (tc === null || tc === undefined) return true;
+    if (typeof tc !== 'number') return true;
+    if (!Number.isFinite(tc)) return true;
+    if (tc < 0) return true;
+    return false;
+  };
+  if (
+    raw.insufficientOosWindow ||
+    !oosMetrics ||
+    isTradeCountInvalid(oosMetrics.tradeCount)
+  ) {
+    const insufficientWarnings = [...warnings];
+    if (
+      oosMetrics &&
+      oosMetrics.tradeCount !== null &&
+      isTradeCountInvalid(oosMetrics.tradeCount)
+    ) {
+      insufficientWarnings.push(
+        `OOS tradeCount=${String(oosMetrics.tradeCount)} は不正値 (NaN / Infinity / 負値) のため insufficient_oos_data に分類`,
+      );
+    }
+    if (!baselineMetrics) {
+      insufficientWarnings.push('baseline metrics なし、観測のみ');
+    }
     return {
       candidateId: raw.candidateId,
       dslId: raw.dslId,
@@ -246,9 +274,7 @@ export function mapAnalysisEngineRobustnessResult(
       status: 'insufficient_oos_data',
       failureReasons: ['insufficient_oos_data'],
       folds,
-      warnings: !baselineMetrics
-        ? [...warnings, 'baseline metrics なし、観測のみ']
-        : warnings,
+      warnings: insufficientWarnings,
     };
   }
 

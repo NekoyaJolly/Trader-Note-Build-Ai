@@ -151,6 +151,41 @@ describe('applyOosAwarePromotion', () => {
     const r = applyOosAwarePromotion(decisions, oos);
     expect(r[0].finalStage).toBe('validation_confirmed');
   });
+
+  it('11. candidateId 一致 と dslId 一致 が衝突したら candidateId を優先する (PR #105 Copilot review #1)', () => {
+    // decision: candidateId='shared', dslId='dsl-x'
+    const decisions = [
+      makeDecision('shared', 'validation_candidate', { dslId: 'dsl-x' }),
+    ];
+    // oosResults:
+    //   r1: candidateId='other', dslId='shared' → decision.candidateId と dslId 名前空間で一致
+    //   r2: candidateId='shared'                → decision.candidateId 一致
+    // 別 Map なら r2 (candidateId 一致) が決定的に採用される
+    const oos = [
+      makeOos('other', 'oos_failed', { dslId: 'shared', failureReasons: ['low_oos_pf'] }),
+      makeOos('shared', 'oos_passed'),
+    ];
+    const r = applyOosAwarePromotion(decisions, oos);
+    expect(r[0].finalStage).toBe('validation_confirmed');
+    expect(r[0].kind).toBe('confirmed_by_oos');
+  });
+
+  it('12. 同一 candidateId の重複登録は最初を採用し、warnings に観測される (PR #105 Copilot review #1)', () => {
+    const decisions = [makeDecision('a', 'validation_candidate')];
+    const oos = [
+      makeOos('a', 'oos_passed'),
+      makeOos('a', 'oos_failed', { failureReasons: ['low_oos_pf'] }),
+    ];
+    const r = applyOosAwarePromotion(decisions, oos);
+    // 最初の oos_passed が採用される
+    expect(r[0].finalStage).toBe('validation_confirmed');
+    // 重複は warning として観測される
+    expect(
+      r[0].warnings.some(
+        (w) => w.includes('複数 entry') && w.includes('candidateId=a'),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe('summarizeOosAwarePromotion', () => {
