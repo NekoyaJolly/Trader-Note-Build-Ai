@@ -30,6 +30,18 @@ import {
   type AdaptiveRepairBudgetSummary,
   type MutationBudgetAllocation,
 } from './adaptiveRepairBudgetPolicy';
+import {
+  buildArchiveCandidatesFromReportV1,
+  createEmptyQualityDiversityArchiveV1,
+  qualityDiversityArchiveDefaultsV1,
+  selectQualityDiversityArchiveParentsV1,
+  summarizeQualityDiversityArchiveV1,
+  updateQualityDiversityArchiveV1,
+  type QualityDiversityArchiveStateV1,
+  type QualityDiversityArchiveSummaryV1,
+  type QualityDiversityArchiveUpdateSummaryV1,
+} from './qualityDiversityArchiveLite';
+import type { StrategyDSL } from '../strategy_dsl/schema';
 
 // =================================================================
 // 設定
@@ -82,6 +94,15 @@ export interface MultiGenerationRunOptions {
   adaptiveRepairBudget?: boolean;
   /** PR #107: 初期の MutationBudgetAllocation。未指定なら `defaultMutationBudgetAllocationV1`。 */
   initialMutationBudgetAllocation?: MutationBudgetAllocation;
+  /**
+   * PR #108: Quality-Diversity Archive Lite v1 を有効化するか。default false。
+   * 有効時は世代ごとに `formalBtVerifiedCandidates` から archive を更新し、
+   * 次世代の `runOneGeneration` に **少量** (default 2 件) の archive elite を
+   * `qualityDiversityArchiveParents` として渡す。production_candidate 自動昇格には影響させない。
+   */
+  qualityDiversityArchive?: boolean;
+  /** PR #108: 各世代に注入する archive parent 数の上限。default 2。 */
+  qualityDiversityArchiveParentLimit?: number;
 }
 
 /**
@@ -141,6 +162,10 @@ export interface MultiGenerationRunReport {
   adaptiveRepairBudgetDecisions?: AdaptiveRepairBudgetDecision[];
   /** PR #107: adaptive 有効時のみ非 undefined。 */
   adaptiveRepairBudgetSummary?: AdaptiveRepairBudgetSummary;
+  /** PR #108: QD archive 有効時のみ非空。 */
+  qualityDiversityArchiveUpdates?: QualityDiversityArchiveUpdateSummaryV1[];
+  /** PR #108: QD archive 有効時のみ非 undefined。 */
+  qualityDiversityArchiveSummary?: QualityDiversityArchiveSummaryV1;
 }
 
 /**
@@ -163,6 +188,12 @@ export interface RunOneGenerationCall {
    * 整うまで warning ベースの観測経路。runOneGeneration 受け側は optional 受領のみ。
    */
   mutationBudgetAllocation?: MutationBudgetAllocation;
+  /**
+   * PR #108: Quality-Diversity Archive から渡される少量の親候補 (StrategyDSL)。
+   * EvolutionLoop は重複 DSL ID を除外して parent pool に少量混合する。未指定 / 空なら
+   * 完全に既存挙動。
+   */
+  qualityDiversityArchiveParents?: StrategyDSL[];
 }
 
 export type MultiGenerationRunOneGenerationFn = (
@@ -324,6 +355,10 @@ export async function runMultiGenerationEvolutionV1(input: {
     carryPromotionState: input.options.carryPromotionState ?? true,
     carryOosState: input.options.carryOosState ?? true,
     adaptiveRepairBudget: input.options.adaptiveRepairBudget ?? false,
+    qualityDiversityArchive: input.options.qualityDiversityArchive ?? false,
+    qualityDiversityArchiveParentLimit:
+      input.options.qualityDiversityArchiveParentLimit ??
+      qualityDiversityArchiveDefaultsV1.defaultParentLimit,
   };
 
   // PR #107: adaptive policy が ON のとき、世代ごとに decideAdaptiveRepairBudgetV1 を
@@ -333,6 +368,17 @@ export async function runMultiGenerationEvolutionV1(input: {
   const adaptiveDecisions: AdaptiveRepairBudgetDecision[] = [];
   let currentBudgetAllocation: MutationBudgetAllocation =
     opts.initialMutationBudgetAllocation ?? defaultMutationBudgetAllocationV1;
+
+  // PR #108: QD archive が ON のとき、archive state を持ち越して世代ごとに更新する。
+  // OFF のときは archive 状態を作らず、callArgs に qualityDiversityArchiveParents を
+  // 渡さない (= 既存挙動と完全互換)。
+  const qdEnabled = opts.qualityDiversityArchive === true;
+  const qdParentLimit =
+    opts.qualityDiversityArchiveParentLimit ??
+    qualityDiversityArchiveDefaultsV1.defaultParentLimit;
+  let qdArchiveState: QualityDiversityArchiveStateV1 = createEmptyQualityDiversityArchiveV1();
+  const qdUpdates: QualityDiversityArchiveUpdateSummaryV1[] = [];
+  let qdTotalSelectedParents = 0;
 
   const trend = emptyTrend(requested);
   const runWarnings: string[] = [];
@@ -383,6 +429,17 @@ export async function runMultiGenerationEvolutionV1(input: {
       // OFF のときは undefined (= 既存挙動と同等、EvolutionLoop は無視可能)。
       if (adaptiveEnabled) {
         callArgs.mutationBudgetAllocation = currentBudgetAllocation;
+      }
+      // PR #108: QD archive ON のとき、archive から少量の parent DSL を選んで注入する。
+      // 初回 generation は archive が空なので空配列 (= 副作用なし)。
+      if (qdEnabled) {
+        const qdParents = selectQualityDiversityArchiveParentsV1(qdArchiveState, {
+          limit: qdParentLimit,
+        });
+        if (qdParents.length > 0) {
+          callArgs.qualityDiversityArchiveParents = qdParents;
+          qdTotalSelectedParents += qdParents.length;
+        }
       }
       report = await input.runOneGeneration(callArgs);
     } catch (e) {
@@ -462,6 +519,24 @@ export async function runMultiGenerationEvolutionV1(input: {
         adaptiveDecisions.push(decision);
         currentBudgetAllocation = decision.nextAllocation;
       }
+
+      // PR #108: 世代終了後、archive を更新する。
+      // formalBtVerifiedCandidates の各 candidate には PR #108 で dsl が同梱されているため、
+      // runner 側で別途 dsl Map を持たなくても archive 構築できる。
+      // input は immutable に扱われ、世代をまたいで archive state が成長する。
+      if (qdEnabled) {
+        const dslById = new Map<string, StrategyDSL>();
+        for (const c of report.formalBtVerifiedCandidates) {
+          if (c.dsl) dslById.set(c.dslId, c.dsl);
+        }
+        const candidates = buildArchiveCandidatesFromReportV1(report, dslById);
+        const upd = updateQualityDiversityArchiveV1(qdArchiveState, {
+          generationIndex,
+          candidates,
+        });
+        qdArchiveState = upd.nextState;
+        qdUpdates.push(upd.updateSummary);
+      }
     } else if (status === 'failed') {
       trend.generationsFailed += 1;
       if (opts.stopOnGenerationError) {
@@ -504,6 +579,12 @@ export async function runMultiGenerationEvolutionV1(input: {
   const adaptiveSummary = adaptiveEnabled
     ? summarizeAdaptiveRepairBudgetDecisionsV1(adaptiveDecisions, { enabled: true })
     : undefined;
+  const qdSummary = qdEnabled
+    ? summarizeQualityDiversityArchiveV1(qdArchiveState, {
+        enabled: true,
+        selectedParents: qdTotalSelectedParents,
+      })
+    : undefined;
 
   return {
     startedAt,
@@ -515,5 +596,7 @@ export async function runMultiGenerationEvolutionV1(input: {
     warnings: runWarnings,
     adaptiveRepairBudgetDecisions: adaptiveEnabled ? adaptiveDecisions : undefined,
     adaptiveRepairBudgetSummary: adaptiveSummary,
+    qualityDiversityArchiveUpdates: qdEnabled ? qdUpdates : undefined,
+    qualityDiversityArchiveSummary: qdSummary,
   };
 }

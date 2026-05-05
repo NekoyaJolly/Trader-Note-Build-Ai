@@ -232,6 +232,12 @@ export interface EvolutionPromotionCandidate {
    * 候補の評価・昇格・採用を意味しない (= mutation 補助情報)。
    */
   repairHint?: RepairHint;
+  /**
+   * PR #108: 候補が指す `StrategyDSL` 本体。Quality-Diversity Archive Lite の archive 構築で
+   * 必要になるため、本番経路では verify 結果と一緒にここに保持する。互換性のため optional。
+   * 既存テスト fixtures は省略可。値の評価軸 (formalBtMetrics 等) には影響させない。
+   */
+  dsl?: StrategyDSL;
 }
 
 export interface GenerationReport {
@@ -399,6 +405,17 @@ export interface RunOneGenerationOptions {
    * - 未指定: 従来挙動と完全に同等
    */
   mutationBudgetAllocation?: MutationBudgetAllocation;
+  /**
+   * PR #108: Quality-Diversity Archive Lite から少量注入される親候補 (StrategyDSL)。
+   *
+   * v1 の挙動:
+   * - 既存の population に **重複 dsl.id を除外して** 追加するだけ。最大 2 件 (= 設計書 §7)
+   * - Surrogate Rescue Lane / formalBtCandidate 選抜には影響させない (= mutation/crossover 親素材)
+   * - `parentPoolSummary` は変えない (= 既存集計を保護)
+   * - `errors[]` に `[info] quality diversity archive parents injected: N` を 1 行追加
+   * - 未指定 / 空: 従来挙動と完全に同等
+   */
+  qualityDiversityArchiveParents?: ReadonlyArray<StrategyDSL>;
 }
 
 export class EvolutionLoop {
@@ -476,6 +493,30 @@ export class EvolutionLoop {
     if (list.length === 0) {
       population.add(regime, seedStrategy(regime));
       list = population.getByRegime(regime);
+    }
+
+    // PR #108: Quality-Diversity Archive Lite からの親候補を少量だけ population に注入する。
+    // - 重複 dsl.id は除外 (= 既存 population に同じ DSL がある場合 skip)
+    // - 最大 2 件 (= 設計書 §7、v1 low-volume diversity injection)
+    // - Surrogate Rescue Lane / formalBtCandidate 選抜には影響させない (mutation/crossover 親素材)
+    // - parentPoolSummary は変えない (既存集計の意味を維持)
+    if (options?.qualityDiversityArchiveParents && options.qualityDiversityArchiveParents.length > 0) {
+      const QD_INJECT_MAX = 2;
+      const existingIds = new Set(list.map((s) => s.id));
+      let injected = 0;
+      for (const archiveDsl of options.qualityDiversityArchiveParents) {
+        if (injected >= QD_INJECT_MAX) break;
+        if (existingIds.has(archiveDsl.id)) continue;
+        population.add(regime, archiveDsl);
+        existingIds.add(archiveDsl.id);
+        injected += 1;
+      }
+      if (injected > 0) {
+        errors.push(
+          `[info] quality diversity archive parents injected: ${injected} (v1 low-volume diversity injection)`,
+        );
+        list = population.getByRegime(regime);
+      }
     }
 
     const metrics = new Map<string, SurrogateFitnessAggregate>();
@@ -601,7 +642,9 @@ export class EvolutionLoop {
     //   - summary は GenerationReport.repairHintSummary に集約 (smoke / 観測用)
     //   候補の評価・昇格には一切影響しない (= mutation 補助情報のみ)。
     const formalBtVerifiedCandidates = verifyResults.map((r) => {
-      if (r.candidate.formalBtPassed) return r.candidate;
+      // PR #108: dsl 本体を candidate に同梱 (= QD archive 構築に必要)。
+      // 既存ロジックの評価軸 (formalBtMetrics 等) には影響させない。
+      if (r.candidate.formalBtPassed) return { ...r.candidate, dsl: r.dsl };
       const hint = createRepairHintV1({
         candidateId: r.candidate.dslId,
         dslId: r.candidate.dslId,
@@ -616,7 +659,7 @@ export class EvolutionLoop {
             }
           : undefined,
       });
-      return { ...r.candidate, repairHint: hint };
+      return { ...r.candidate, dsl: r.dsl, repairHint: hint };
     });
     const promotionCandidates = formalBtVerifiedCandidates.filter((c) => c.formalBtPassed);
     const repairHintSummary = summarizeRepairHints(

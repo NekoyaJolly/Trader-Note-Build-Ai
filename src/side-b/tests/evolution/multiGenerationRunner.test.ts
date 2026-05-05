@@ -32,6 +32,7 @@ import type {
   GenerationReport,
 } from '../../evolution/EvolutionLoop';
 import type { RepairHint } from '../../evolution/repairHintPolicy';
+import { StrategyDSLSchema } from '../../strategy_dsl/schema';
 
 // =================================================================
 // Fixture builder
@@ -234,6 +235,38 @@ function makePassedCandidate(id: string): EvolutionPromotionCandidate {
     formalBtPassed: true,
     formalBtMetrics: { pf: 1.5, winRate: 0.55, tradeCount: 30, maxDrawdown: 8 },
     route: 'normal_pass',
+  };
+}
+
+/** PR #108: QD archive 用に dsl を同梱した passed candidate fixture。 */
+function makePassedCandidateWithDsl(
+  id: string,
+  regime: string,
+): EvolutionPromotionCandidate {
+  const dsl = StrategyDSLSchema.parse({
+    id,
+    generation: 0,
+    parentIds: [],
+    regimeTarget: regime,
+    symbol: 'EURUSD',
+    timeframe: '1h',
+    entry: {
+      direction: 'long',
+      trigger: {
+        logic: 'AND',
+        conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+      },
+      orderType: 'market',
+    },
+    stopLoss: { type: 'fixed_pips', value: 30 },
+    takeProfit: { type: 'rr_ratio', value: 1.5 },
+    parameters: {},
+    metadata: { createdAt: new Date().toISOString(), createdBy: 'initial_random' },
+  });
+  return {
+    ...makePassedCandidate(id),
+    regime,
+    dsl,
   };
 }
 
@@ -727,5 +760,108 @@ describe('runMultiGenerationEvolutionV1', () => {
       runOneGeneration,
     });
     expect(firstCall).toEqual(customInitial);
+  });
+
+  // =================================================================
+  // PR #108: Quality-Diversity Archive Lite 接続
+  // =================================================================
+
+  it('PR #108-A. qualityDiversityArchive=false (default) では summary / updates が undefined', async () => {
+    const calls: Array<unknown> = [];
+    const runOneGeneration = jest.fn(async (call) => {
+      calls.push(call.qualityDiversityArchiveParents);
+      return makeReport();
+    });
+    const r = await runMultiGenerationEvolutionV1({
+      options: { generations: 2, regime: 'breakout' },
+      runOneGeneration,
+    });
+    expect(r.qualityDiversityArchiveSummary).toBeUndefined();
+    expect(r.qualityDiversityArchiveUpdates).toBeUndefined();
+    expect(calls.every((p) => p === undefined)).toBe(true);
+  });
+
+  it('PR #108-B. qualityDiversityArchive=true で各世代後に archive update が出る', async () => {
+    const runOneGeneration = jest.fn(async () =>
+      makeReport({
+        formalBtVerifiedCandidates: [makePassedCandidateWithDsl('a', 'breakout')],
+      }),
+    );
+    const r = await runMultiGenerationEvolutionV1({
+      options: { generations: 2, regime: 'breakout', qualityDiversityArchive: true },
+      runOneGeneration,
+    });
+    expect(r.qualityDiversityArchiveUpdates).toHaveLength(2);
+    expect(r.qualityDiversityArchiveSummary?.enabled).toBe(true);
+    expect(r.qualityDiversityArchiveSummary?.cells).toBeGreaterThan(0);
+  });
+
+  it('PR #108-C. 2 世代目以降に qualityDiversityArchiveParents が runOneGeneration に渡る', async () => {
+    const observedParents: Array<unknown> = [];
+    const runOneGeneration = jest.fn(async (call) => {
+      observedParents.push(call.qualityDiversityArchiveParents);
+      // Generation 1 で archive に入れる候補を返す
+      return makeReport({
+        formalBtVerifiedCandidates: [makePassedCandidateWithDsl('archived-a', 'breakout')],
+      });
+    });
+    await runMultiGenerationEvolutionV1({
+      options: {
+        generations: 2,
+        regime: 'breakout',
+        qualityDiversityArchive: true,
+        qualityDiversityArchiveParentLimit: 2,
+      },
+      runOneGeneration,
+    });
+    // 1 世代目: archive 空なので undefined
+    expect(observedParents[0]).toBeUndefined();
+    // 2 世代目: archive に入った dsl が渡される
+    expect(Array.isArray(observedParents[1])).toBe(true);
+    expect((observedParents[1] as unknown[]).length).toBeGreaterThan(0);
+  });
+
+  it('PR #108-D. archive enabled でも adaptiveRepairBudgetSummary は壊れない (両方有効化可能)', async () => {
+    const runOneGeneration = jest.fn(async () =>
+      makeReport({
+        formalBtVerifiedCandidates: [makePassedCandidateWithDsl('a', 'breakout')],
+      }),
+    );
+    const r = await runMultiGenerationEvolutionV1({
+      options: {
+        generations: 2,
+        regime: 'breakout',
+        adaptiveRepairBudget: true,
+        qualityDiversityArchive: true,
+      },
+      runOneGeneration,
+    });
+    expect(r.adaptiveRepairBudgetSummary?.enabled).toBe(true);
+    expect(r.qualityDiversityArchiveSummary?.enabled).toBe(true);
+  });
+
+  it('PR #108-E. archive enabled でも productionEligibleByGeneration は変わらない (常に 0)', async () => {
+    const runOneGeneration = jest.fn(async () =>
+      makeReport({
+        productionEligible: 0,
+        formalBtVerifiedCandidates: [makePassedCandidateWithDsl('a', 'breakout')],
+      }),
+    );
+    const r = await runMultiGenerationEvolutionV1({
+      options: { generations: 2, regime: 'breakout', qualityDiversityArchive: true },
+      runOneGeneration,
+    });
+    expect(r.trendSummary.productionEligibleByGeneration.every((v) => v === 0)).toBe(true);
+  });
+
+  it('PR #108-F. archive が空でも (= verified candidate なし) 落ちず summary が出る', async () => {
+    const runOneGeneration = jest.fn(async () => makeReport()); // formalBtVerifiedCandidates=[]
+    const r = await runMultiGenerationEvolutionV1({
+      options: { generations: 2, regime: 'breakout', qualityDiversityArchive: true },
+      runOneGeneration,
+    });
+    expect(r.qualityDiversityArchiveSummary).toBeDefined();
+    expect(r.qualityDiversityArchiveSummary?.cells).toBe(0);
+    expect(r.qualityDiversityArchiveSummary?.selectedParents).toBe(0);
   });
 });
