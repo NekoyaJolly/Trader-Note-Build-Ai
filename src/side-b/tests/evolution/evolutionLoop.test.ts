@@ -2132,7 +2132,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
     expect(report.promotionGateSummary.productionEligible).toBe(0);
   });
 
-  it('PR #103: oosBacktestRunner 注入で oos_passed / oos_failed が観測される', async () => {
+  it('PR #105: oosBacktestRunner 注入 + analysis-engine verdict=passed で oos_passed が観測される', async () => {
     const dsl = StrategyDSLSchema.parse({
       id: 'pr103-with-runner',
       generation: 0,
@@ -2205,13 +2205,17 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
       .mockResolvedValue(makeFormalBtResponse(1.8, 0.55, 35));
 
-    // OOS で良好な metrics を返す runner (= oos_passed 期待)
-    // baseline.pf=1.8 (= formal BT 結果) に対して劣化 < maxPfDegradation(=0.25) で通る
+    // PR #105: analysis-engine の verdict を尊重する契約に変更。
+    // adapter は { metrics, verdict } を返し、Evolution 側で再判定しない。
     const oosBacktestRunner = jest.fn().mockResolvedValue({
-      pf: 1.7,
-      tradeCount: 50,
-      maxDrawdown: 10,
-      expectancy: null,
+      metrics: {
+        pf: 1.7,
+        tradeCount: 50,
+        maxDrawdown: 10,
+        expectancy: null,
+      },
+      verdict: 'passed' as const,
+      evaluationKind: 'oos' as const,
     });
 
     const loop = new EvolutionLoop({
@@ -2334,7 +2338,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
     expect(report.oosValidationSummary.unknown).toBe(1);
     expect(report.oosValidationResults[0].status).toBe('unknown');
     expect(report.oosValidationResults[0].failureReasons).toContain('oos_engine_error');
-    expect(report.oosValidationResults[0].warnings[0]).toMatch(/oosBacktestRunner 例外/);
+    expect(report.oosValidationResults[0].warnings[0]).toMatch(/analysis-engine 例外/);
     // 既存 summary は壊れない
     expect(report.promotionGateSummary.byStage.validation_candidate).toBeGreaterThanOrEqual(1);
     expect(report.repairOutcomeSummary).toBeDefined();
@@ -2415,10 +2419,9 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       .mockResolvedValue(makeFormalBtResponse(0.5, 0.4, 30));
 
     const oosBacktestRunner = jest.fn().mockResolvedValue({
-      pf: 1.5,
-      tradeCount: 50,
-      maxDrawdown: 10,
-      expectancy: null,
+      metrics: { pf: 1.5, tradeCount: 50, maxDrawdown: 10, expectancy: null },
+      verdict: 'passed' as const,
+      evaluationKind: 'oos' as const,
     });
 
     const loop = new EvolutionLoop({

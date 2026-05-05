@@ -417,3 +417,233 @@ export function summarizePromotionGateDecisions(
     warnings,
   };
 }
+
+// =================================================================
+// PR #105: OOS-aware Promotion 接続
+// =================================================================
+
+/**
+ * OOS-aware Promotion の最終判定種別。
+ *
+ * - `confirmed_by_oos`: validation_candidate → validation_confirmed (OOS / WF passed)
+ * - `confirmed_by_walk_forward`: validation_candidate → validation_confirmed (WF passed)
+ * - `hold_on_oos_failed`: validation_candidate に留める (OOS / WF failed)
+ * - `hold_on_unknown`: OOS 結果が unknown / engine error
+ * - `hold_on_not_evaluated`: OOS 評価が走っていない / 対象外
+ * - `unchanged`: validation_candidate ではない候補 (= 既存 stage 維持)
+ *
+ * **`rejected` には絶対にしない**。OOS は観測軸であり、PromotionGate v1 の昇格判定を
+ * 取り消す材料には使わない (Addendum §禁止事項)。
+ */
+export type OosAwarePromotionKind =
+  | 'confirmed_by_oos'
+  | 'confirmed_by_walk_forward'
+  | 'hold_on_oos_failed'
+  | 'hold_on_unknown'
+  | 'hold_on_not_evaluated'
+  | 'unchanged';
+
+/** PromotionGateDecision に OOS-aware 判定を重ねた最終結果。 */
+export interface OosAwarePromotionDecision {
+  candidateId: string;
+  dslId?: string;
+  /** PromotionGate 単独で確定した最初の stage (= 入力 decision.toStage) */
+  baseStage: EvolutionCandidateStage;
+  /** OOS-aware 適用後の最終 stage */
+  finalStage: EvolutionCandidateStage;
+  kind: OosAwarePromotionKind;
+  /** OOS 観測結果の status (取り込めなかった場合は null) */
+  oosStatus: string | null;
+  /** OOS 観測由来の失敗理由 (取り込めなかった場合は []) */
+  oosFailureReasons: string[];
+  /** OOS 観測由来の警告 */
+  warnings: string[];
+  /** PR #105 不変条件: production には絶対に上がらない */
+  productionEligible: false;
+}
+
+/** OOS-aware Promotion の集計 (smoke / GenerationReport に出す補助 summary)。 */
+export interface OosAwarePromotionSummary {
+  totalCandidates: number;
+  /** validation_candidate を起点に OOS-aware を適用した件数 */
+  validationCandidatesEvaluated: number;
+  /** validation_confirmed に昇格した件数 (= confirmed_by_oos + confirmed_by_walk_forward) */
+  validationConfirmed: number;
+  /** validation_candidate に hold された件数 (= 全 hold_on_*) */
+  heldOnValidation: number;
+  byKind: Record<OosAwarePromotionKind, number>;
+  /** PR #105 不変条件: 常に 0 */
+  productionEligible: number;
+  warnings: string[];
+}
+
+const ALL_OOS_AWARE_KINDS: OosAwarePromotionKind[] = [
+  'confirmed_by_oos',
+  'confirmed_by_walk_forward',
+  'hold_on_oos_failed',
+  'hold_on_unknown',
+  'hold_on_not_evaluated',
+  'unchanged',
+];
+
+/**
+ * `OosValidationResult` (mapper 出力) の最低限の構造。promotionGatePolicy が
+ * `oosValidationResultMapper` の型に直接依存しないよう構造的に受け取る。
+ */
+export interface OosAwarePromotionInputResult {
+  candidateId: string;
+  dslId?: string;
+  status: string;
+  failureReasons?: ReadonlyArray<string>;
+  warnings?: ReadonlyArray<string>;
+}
+
+/**
+ * PromotionGate 判定 + OOS / Walk-forward 結果を合成し、最終 stage を決める。
+ *
+ * 仕様 (Addendum §PromotionGate 接続テスト):
+ *   1. oos_passed → validation_confirmed
+ *   2. walk_forward_passed → validation_confirmed
+ *   3. oos_failed / walk_forward_failed → hold (= validation_candidate のまま、`rejected` にしない)
+ *   4. unknown / oos_engine_error → hold
+ *   5. not_evaluated → hold
+ *   6. invalid / fatal (= validation_candidate ではない base stage) は OOS passed より優先される
+ *      (= 既存 PromotionGate v1 が rejected / repair_excluded にした候補は OOS で上書きしない)
+ *
+ * **productionEligible は常に false。** OOS-aware で production には絶対に上げない。
+ */
+export function applyOosAwarePromotion(
+  decisions: ReadonlyArray<PromotionGateDecision>,
+  oosResults: ReadonlyArray<OosAwarePromotionInputResult>,
+): OosAwarePromotionDecision[] {
+  // OOS 結果を candidateId / dslId で引けるようにする
+  const byCandidate = new Map<string, OosAwarePromotionInputResult>();
+  for (const r of oosResults) {
+    byCandidate.set(r.candidateId, r);
+    if (r.dslId && !byCandidate.has(r.dslId)) byCandidate.set(r.dslId, r);
+  }
+
+  return decisions.map((d) => {
+    const base: OosAwarePromotionDecision = {
+      candidateId: d.candidateId,
+      dslId: d.dslId,
+      baseStage: d.toStage,
+      finalStage: d.toStage,
+      kind: 'unchanged',
+      oosStatus: null,
+      oosFailureReasons: [],
+      warnings: [],
+      productionEligible: false,
+    };
+
+    // (6) validation_candidate 以外は OOS で上書きしない
+    if (d.toStage !== 'validation_candidate') {
+      return base;
+    }
+
+    const oos =
+      byCandidate.get(d.candidateId) ??
+      (d.dslId ? byCandidate.get(d.dslId) : undefined) ??
+      null;
+
+    if (!oos) {
+      return {
+        ...base,
+        kind: 'hold_on_not_evaluated',
+        oosStatus: null,
+      };
+    }
+
+    const oosFailureReasons = oos.failureReasons ? [...oos.failureReasons] : [];
+    const warnings = oos.warnings ? [...oos.warnings] : [];
+
+    switch (oos.status) {
+      case 'oos_passed':
+        return {
+          ...base,
+          finalStage: 'validation_confirmed',
+          kind: 'confirmed_by_oos',
+          oosStatus: oos.status,
+          oosFailureReasons,
+          warnings,
+        };
+      case 'walk_forward_passed':
+        return {
+          ...base,
+          finalStage: 'validation_confirmed',
+          kind: 'confirmed_by_walk_forward',
+          oosStatus: oos.status,
+          oosFailureReasons,
+          warnings,
+        };
+      case 'oos_failed':
+      case 'walk_forward_failed':
+        return {
+          ...base,
+          kind: 'hold_on_oos_failed',
+          oosStatus: oos.status,
+          oosFailureReasons,
+          warnings,
+        };
+      case 'not_evaluated':
+        return {
+          ...base,
+          kind: 'hold_on_not_evaluated',
+          oosStatus: oos.status,
+          oosFailureReasons,
+          warnings,
+        };
+      case 'insufficient_oos_data':
+      case 'unknown':
+      default:
+        return {
+          ...base,
+          kind: 'hold_on_unknown',
+          oosStatus: oos.status,
+          oosFailureReasons,
+          warnings,
+        };
+    }
+  });
+}
+
+/**
+ * OOS-aware Promotion 判定の集計を返す補助 summary。
+ *
+ * **`promotionGateSummary` (既存) の代替ではない**。
+ * 既存 summary は PromotionGate v1 単独の stage / decision / reason 集計を維持し、
+ * 本 summary は OOS-aware 適用後の遷移結果だけを切り出して観測する。
+ */
+export function summarizeOosAwarePromotion(
+  decisions: ReadonlyArray<OosAwarePromotionDecision>,
+): OosAwarePromotionSummary {
+  const byKind = Object.fromEntries(ALL_OOS_AWARE_KINDS.map((k) => [k, 0])) as Record<
+    OosAwarePromotionKind,
+    number
+  >;
+
+  let validationCandidatesEvaluated = 0;
+  let validationConfirmed = 0;
+  let heldOnValidation = 0;
+  const warnings: string[] = [];
+
+  for (const d of decisions) {
+    byKind[d.kind] += 1;
+    if (d.baseStage === 'validation_candidate') {
+      validationCandidatesEvaluated += 1;
+      if (d.finalStage === 'validation_confirmed') validationConfirmed += 1;
+      else if (d.kind.startsWith('hold_on_')) heldOnValidation += 1;
+    }
+    if (d.warnings.length > 0) for (const w of d.warnings) warnings.push(w);
+  }
+
+  return {
+    totalCandidates: decisions.length,
+    validationCandidatesEvaluated,
+    validationConfirmed,
+    heldOnValidation,
+    byKind,
+    productionEligible: 0,
+    warnings,
+  };
+}
