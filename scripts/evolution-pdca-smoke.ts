@@ -64,6 +64,10 @@ interface CliArgs {
   generations?: number;
   /** PR #107: Adaptive Repair / Mutation Budget v1 を有効化するか。 */
   adaptiveRepairBudget?: boolean;
+  /** PR #108: Quality-Diversity Archive Lite v1 を有効化するか。 */
+  qualityDiversityArchive?: boolean;
+  /** PR #108: 各世代に注入する archive parent 上限。default 2。 */
+  qdParentLimit?: number;
 }
 
 type ParseResult =
@@ -82,6 +86,8 @@ function parseArgs(argv: readonly string[]): ParseResult {
     else if (a === '--period-end') out.periodEnd = argv[++i];
     else if (a === '--generations') out.generations = parseInt(argv[++i], 10);
     else if (a === '--adaptive-repair-budget') out.adaptiveRepairBudget = true;
+    else if (a === '--quality-diversity-archive') out.qualityDiversityArchive = true;
+    else if (a === '--qd-parent-limit') out.qdParentLimit = parseInt(argv[++i], 10);
     else return { kind: 'error', message: `unknown argument: ${a}` };
   }
   if (!out.regime) return { kind: 'error', message: '--regime is required' };
@@ -101,6 +107,13 @@ function parseArgs(argv: readonly string[]): ParseResult {
           ? out.generations
           : undefined,
       adaptiveRepairBudget: out.adaptiveRepairBudget,
+      qualityDiversityArchive: out.qualityDiversityArchive,
+      qdParentLimit:
+        out.qdParentLimit !== undefined &&
+        Number.isFinite(out.qdParentLimit) &&
+        out.qdParentLimit > 0
+          ? out.qdParentLimit
+          : undefined,
     },
   };
 }
@@ -117,6 +130,8 @@ function printHelp(): void {
       '  --period-end       (default today) BT 終了日 YYYY-MM-DD',
       `  --generations      (default 1) 連続実行世代数 (上限 ${MULTI_GENERATION_DEFAULTS.maxGenerations}、超過は clamp)`,
       '  --adaptive-repair-budget  multi-generation 時のみ。Adaptive Repair / Mutation Budget v1 を有効化',
+      '  --quality-diversity-archive  multi-generation 時のみ。Quality-Diversity Archive Lite v1 を有効化',
+      '  --qd-parent-limit  (default 2) archive から各世代へ注入する parent 数の上限',
       '  -h, --help         このヘルプ',
     ].join('\n'),
   );
@@ -259,18 +274,22 @@ async function main(): Promise<void> {
         generations: args.generations as number,
         regime: args.regime,
         adaptiveRepairBudget: args.adaptiveRepairBudget === true,
+        qualityDiversityArchive: args.qualityDiversityArchive === true,
+        qualityDiversityArchiveParentLimit: args.qdParentLimit,
       },
       runOneGeneration: async ({
         generationIndex,
         repairHintsForMutation,
         repairBaselinesForOutcome,
         mutationBudgetAllocation,
+        qualityDiversityArchiveParents,
       }) => {
         const startedAt = Date.now();
         const r = await loop.runOneGeneration(args.regime, {
           repairHintsForMutation,
           repairBaselinesForOutcome,
           mutationBudgetAllocation,
+          qualityDiversityArchiveParents,
         });
         const elapsedMs = Date.now() - startedAt;
         printGenerationReport(r, { elapsedMs, label: `Generation ${generationIndex + 1}` });
@@ -286,7 +305,21 @@ async function main(): Promise<void> {
       console.log('\n--- adaptiveRepairBudgetSummary ---');
       console.log(JSON.stringify(runReport.adaptiveRepairBudgetSummary, null, 2));
     }
+    if (runReport.qualityDiversityArchiveSummary) {
+      // PR #108: Quality-Diversity Archive Lite v1 の summary。
+      // - 行動特性別 cell 単位で品質上位 1 件を保持。世代をまたいで保持し、少量を
+      //   次世代 parent に注入することで多様性 floor を確保。
+      // - 評価エンジンの代替ではなく、Surrogate Rescue Lane と並列。productionEligible は不変。
+      console.log('\n--- qualityDiversityArchiveSummary ---');
+      console.log(JSON.stringify(runReport.qualityDiversityArchiveSummary, null, 2));
+    }
   } else {
+    if (args.qualityDiversityArchive === true || args.adaptiveRepairBudget === true) {
+      console.warn(
+        '[smoke] WARNING: --quality-diversity-archive / --adaptive-repair-budget は ' +
+          'multi-generation (--generations >= 2) でのみ機能します。単世代経路では無視されます。',
+      );
+    }
     const startedAt = Date.now();
     const report = await loop.runOneGeneration(args.regime);
     const elapsedMs = Date.now() - startedAt;

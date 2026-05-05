@@ -2543,4 +2543,195 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
     expect(report.promotionGateSummary.productionEligible).toBe(0);
     expect(report.promotionGateSummary.byStage.production_candidate).toBe(0);
   });
+
+  // =================================================================
+  // PR #108: Quality-Diversity Archive Lite parent injection
+  // =================================================================
+
+  it('PR #108: qualityDiversityArchiveParents 未指定なら従来挙動 + parentPoolSummary 不変', async () => {
+    const dsl = StrategyDSLSchema.parse({
+      id: 'pr108-no-archive',
+      generation: 0,
+      parentIds: [],
+      regimeTarget: 'breakout',
+      symbol: 'EURUSD',
+      timeframe: '1h',
+      entry: {
+        direction: 'long',
+        trigger: {
+          logic: 'AND',
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+        },
+      },
+      stopLoss: { type: 'fixed_pips', value: 30 },
+      takeProfit: { type: 'rr_ratio', value: 1.5 },
+      parameters: {},
+      metadata: { createdAt: new Date().toISOString(), createdBy: 'initial_random' },
+    });
+    const adapter = new SurrogateFitnessSimulator();
+    const summary = (n: number, w: number, p: number) => ({
+      totalTrades: n,
+      winningTrades: Math.round(n * w),
+      losingTrades: n - Math.round(n * w),
+      winRate: w,
+      netProfit: p * 100,
+      netProfitRate: 0.1,
+      maxDrawdown: 30,
+      maxDrawdownRate: 0.03,
+      profitFactor: p,
+      averageWin: 15,
+      averageLoss: -10,
+      riskRewardRatio: 1.5,
+      maxConsecutiveWins: 3,
+      maxConsecutiveLosses: 2,
+    });
+    jest.spyOn(adapter, 'evaluateFitness').mockResolvedValue({
+      dslId: 'pr108-no-archive',
+      period: { start: '2024-01-01', end: '2024-12-31' },
+      trainPf: 2.0,
+      validationPf: 1.6,
+      overfitScore: 0.15,
+      train: { summary: summary(20, 0.6, 2.0), trades: [] },
+      validation: { summary: summary(10, 0.6, 1.6), trades: [] },
+      execution: {
+        executionModel: 'legacy_zero_cost',
+        executionConfigHash: 'legacy-zero-cost',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'legacy_zero_cost',
+          dataSource: 'ctrader',
+          roundTripCostPips: 0,
+          roundTripCostAtrMult: 0,
+          totalCost: 0,
+        },
+      },
+    });
+    const mutationAgent = new MutationAgent();
+    jest.spyOn(mutationAgent, 'generateMutants').mockResolvedValue([]);
+    jest.spyOn(mutationAgent, 'generateDiverse').mockResolvedValue([]);
+    const crossoverAgent = new CrossoverAgent();
+    jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
+    const population = new StrategyPopulation(undefined);
+    population.add('breakout', dsl);
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockResolvedValue(makeFormalBtResponse(1.8, 0.55, 35));
+    const loop = new EvolutionLoop({
+      population,
+      adapter,
+      mutationAgent,
+      crossoverAgent,
+      enforcer: new DiversityEnforcer(),
+      defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
+      runFormalBacktest,
+    });
+    const report = await loop.runOneGeneration('breakout'); // archive parents 未指定
+    expect(report.errors.find((e) => e.includes('quality diversity archive'))).toBeUndefined();
+    expect(report.parentPoolSummary).toBeDefined();
+    expect(report.formalBtCandidateSummary).toBeDefined();
+  });
+
+  it('PR #108: qualityDiversityArchiveParents 指定時に重複 dsl.id を除外して population に注入される', async () => {
+    const dsl = StrategyDSLSchema.parse({
+      id: 'pr108-pop-base',
+      generation: 0,
+      parentIds: [],
+      regimeTarget: 'breakout',
+      symbol: 'EURUSD',
+      timeframe: '1h',
+      entry: {
+        direction: 'long',
+        trigger: {
+          logic: 'AND',
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+        },
+      },
+      stopLoss: { type: 'fixed_pips', value: 30 },
+      takeProfit: { type: 'rr_ratio', value: 1.5 },
+      parameters: {},
+      metadata: { createdAt: new Date().toISOString(), createdBy: 'initial_random' },
+    });
+    const archiveParent = StrategyDSLSchema.parse({
+      ...JSON.parse(JSON.stringify(dsl)),
+      id: 'pr108-archive-1',
+    });
+    const duplicateOfBase = StrategyDSLSchema.parse({
+      ...JSON.parse(JSON.stringify(dsl)),
+      id: 'pr108-pop-base', // 既存と同 id
+    });
+
+    const adapter = new SurrogateFitnessSimulator();
+    const summary = (n: number, w: number, p: number) => ({
+      totalTrades: n,
+      winningTrades: Math.round(n * w),
+      losingTrades: n - Math.round(n * w),
+      winRate: w,
+      netProfit: p * 100,
+      netProfitRate: 0.1,
+      maxDrawdown: 30,
+      maxDrawdownRate: 0.03,
+      profitFactor: p,
+      averageWin: 15,
+      averageLoss: -10,
+      riskRewardRatio: 1.5,
+      maxConsecutiveWins: 3,
+      maxConsecutiveLosses: 2,
+    });
+    jest.spyOn(adapter, 'evaluateFitness').mockImplementation(async (s) => ({
+      dslId: s.id,
+      period: { start: '2024-01-01', end: '2024-12-31' },
+      trainPf: 2.0,
+      validationPf: 1.6,
+      overfitScore: 0.15,
+      train: { summary: summary(20, 0.6, 2.0), trades: [] },
+      validation: { summary: summary(10, 0.6, 1.6), trades: [] },
+      execution: {
+        executionModel: 'legacy_zero_cost',
+        executionConfigHash: 'legacy-zero-cost',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'legacy_zero_cost',
+          dataSource: 'ctrader',
+          roundTripCostPips: 0,
+          roundTripCostAtrMult: 0,
+          totalCost: 0,
+        },
+      },
+    }));
+    const mutationAgent = new MutationAgent();
+    jest.spyOn(mutationAgent, 'generateMutants').mockResolvedValue([]);
+    jest.spyOn(mutationAgent, 'generateDiverse').mockResolvedValue([]);
+    const crossoverAgent = new CrossoverAgent();
+    jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
+    const population = new StrategyPopulation(undefined);
+    population.add('breakout', dsl);
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockResolvedValue(makeFormalBtResponse(1.8, 0.55, 35));
+    const loop = new EvolutionLoop({
+      population,
+      adapter,
+      mutationAgent,
+      crossoverAgent,
+      enforcer: new DiversityEnforcer(),
+      defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
+      runFormalBacktest,
+    });
+    const report = await loop.runOneGeneration('breakout', {
+      qualityDiversityArchiveParents: [archiveParent, duplicateOfBase],
+    });
+    // 重複 id は skip され、archive-1 のみ追加 (= 1 件 injected)
+    // 注: 本世代の population から removeWorst が後段で動くため、注入後の population
+    // 状態は仕様上保証しない。injection log の 1 件 (= duplicate-skip 後の正味注入数)
+    // を pin することで「重複除外 + 注入」が機能することを担保する。
+    const injectionLog = report.errors.find((e) =>
+      e.includes('quality diversity archive parents injected'),
+    );
+    expect(injectionLog).toBeDefined();
+    expect(injectionLog).toContain('1');
+  });
 });
