@@ -5,12 +5,17 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 # ルートの依存関係をインストール
-# `--ignore-scripts`: package.json の `prepare` (= node scripts/install-git-hooks.js)
-# は scripts/ ディレクトリが COPY される前に走ると ENOENT で落ちる。
-# git hook 設置はローカル開発専用 (Cloud Run / CI には .git すら存在しない) のため、
-# Docker ビルドでは lifecycle スクリプト全てをスキップする。
+#
+# `prepare` (= node scripts/install-git-hooks.js) が `npm ci` 中に走るため、
+# 先に scripts/ を COPY しておく必要がある。
+# install-git-hooks.js は `.git` 不在で no-op で抜ける (CI / Docker 想定済み)。
+#
+# 注意: `--ignore-scripts` で全 lifecycle を停止する案は採用しない。bcrypt の
+# ネイティブバイナリ / @prisma/client / @prisma/engines 等の依存側 install フックも
+# 止めてしまうため、コンテナ実行時に require / 初期化が壊れる可能性がある。
 COPY package*.json ./
-RUN npm ci --ignore-scripts
+COPY scripts ./scripts
+RUN npm ci
 
 # Prisma スキーマをコピーして Client 生成
 COPY prisma ./prisma
