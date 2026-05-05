@@ -743,8 +743,12 @@ export class EvolutionLoop {
 
     const results: OosValidationResult[] = [];
     for (const d of validationDecisions) {
-      const dsl = dslById.get(d.candidateId);
-      const cand = candById.get(d.candidateId);
+      // PR #103 review #4: PromotionGateDecision には dslId と candidateId が分離する余地が
+      // あるため、DSL の一意 ID は dslId を優先する (= 将来 candidateId が別 ID に分かれた場合の
+      // 誤マッピング防止)。EvolutionLoop の現在の経路では両者は同値。
+      const dslId = d.dslId ?? d.candidateId;
+      const dsl = dslById.get(dslId) ?? dslById.get(d.candidateId);
+      const cand = candById.get(dslId) ?? candById.get(d.candidateId);
       const baselineMetrics: OosMetrics | null = cand?.formalBtMetrics
         ? {
             pf: cand.formalBtMetrics.pf,
@@ -761,7 +765,7 @@ export class EvolutionLoop {
       if (!this.oosBacktestRunner || oosWindowEmpty || !dsl) {
         results.push({
           candidateId: d.candidateId,
-          dslId: d.candidateId,
+          dslId,
           sourceStage,
           route,
           baselineMetrics,
@@ -789,7 +793,7 @@ export class EvolutionLoop {
         const msg = e instanceof Error ? e.message : String(e);
         results.push({
           candidateId: d.candidateId,
-          dslId: d.candidateId,
+          dslId,
           sourceStage,
           route,
           baselineMetrics,
@@ -806,7 +810,7 @@ export class EvolutionLoop {
       const judged = classifyOosValidationV1({ baselineMetrics, oosMetrics });
       results.push({
         candidateId: d.candidateId,
-        dslId: d.candidateId,
+        dslId,
         sourceStage,
         route,
         baselineMetrics,

@@ -60,6 +60,46 @@ describe('oosWalkForwardPolicy.buildOosSplitWindowV1', () => {
       new Date(w.oosStart).getTime(),
     );
   });
+
+  it('PR #103 review #3: ratio が [0, 1] にクランプされる (負値 / 1 超え)', () => {
+    // 負値はゼロにクランプ → oosDays=0、oosStart === oosEnd === endDate
+    const negative = buildOosSplitWindowV1({
+      startDate: '2024-01-01',
+      endDate: '2024-12-31',
+      oosRatio: -0.5,
+    });
+    expect(negative.oosStart).toBe(negative.oosEnd);
+    expect(negative.oosEnd).toBe('2024-12-31');
+
+    // 1 超は 1 にクランプ → oosDays = totalDays、trainEnd === trainStart
+    const overOne = buildOosSplitWindowV1({
+      startDate: '2024-01-01',
+      endDate: '2024-12-31',
+      oosRatio: 5,
+    });
+    expect(overOne.trainStart).toBe(overOne.trainEnd);
+    expect(overOne.oosStart).toBe('2024-01-01');
+  });
+
+  it('PR #103 review #3: oosRatio + validationRatio > 1 でも valStart は trainStart 以前にならない', () => {
+    const w = buildOosSplitWindowV1({
+      startDate: '2024-01-01',
+      endDate: '2024-12-31',
+      oosRatio: 0.6,
+      validationRatio: 0.7, // 合計 1.3 → validation 側が縮められる
+    });
+    // 時系列順は維持
+    expect(new Date(w.trainStart).getTime()).toBeLessThanOrEqual(new Date(w.trainEnd).getTime());
+    if (w.validationStart && w.validationEnd) {
+      expect(new Date(w.trainStart).getTime()).toBeLessThanOrEqual(
+        new Date(w.validationStart).getTime(),
+      );
+      expect(new Date(w.validationEnd).getTime()).toBeLessThanOrEqual(
+        new Date(w.oosStart).getTime(),
+      );
+    }
+    expect(new Date(w.oosStart).getTime()).toBeLessThanOrEqual(new Date(w.oosEnd).getTime());
+  });
 });
 
 describe('oosWalkForwardPolicy.buildWalkForwardFoldsV1', () => {

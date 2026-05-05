@@ -8,7 +8,8 @@
  *   - OOS は昇格ではない。`oos_passed` でも `productionEligible=true` にしない
  *   - PR #101 PromotionGate と分離。stage 判定ロジックは触らない
  *   - 時系列順を厳守。ランダム分割 / future leakage は禁止
- *   - baseline missing は無理に判定せず `unknown` (0 補完しない)
+ *   - baseline missing は 0 補完しない。`deltas` は全 null のまま、warning を出して
+ *     絶対閾値だけで `oos_passed / oos_failed` を判定する (= 比較不能 ≠ 評価不能)
  *   - v1 は観測優先。完璧な Walk-forward 最適化は作らない
  *
  * スコープ外:
@@ -172,6 +173,12 @@ function diffDays(a: Date, b: Date): number {
  * - 期間が短すぎて oos に最低 1 日割り当てられない場合、`oosStart === oosEnd` の
  *   自明境界を返す (= caller 側で `insufficient_oos_data` として扱える)
  *
+ * 入力ガード (PR #103 review #3):
+ *   - 各 ratio は `[0, 1]` にクランプ (負値 / 1 超は丸める)
+ *   - `oosRatio + validationRatio > 1` の場合は train 期間が消える (= valStart < trainStart に
+ *     なる) ため、`validationRatio` を `1 - oosRatio` に縮める。`oosRatio` を縮めるのではなく
+ *     validation 側を犠牲にする (= OOS は本 PR の主観測軸なので優先)
+ *
  * 禁止: ランダム分割 / future leakage / OOS 期間でのパラメータ再最適化。
  */
 export function buildOosSplitWindowV1(input: {
@@ -183,8 +190,13 @@ export function buildOosSplitWindowV1(input: {
   const start = parseIso(input.startDate);
   const end = parseIso(input.endDate);
   const totalDays = Math.max(0, diffDays(start, end));
-  const oosRatio = input.oosRatio ?? 0.2;
-  const valRatio = input.validationRatio ?? 0;
+
+  // PR #103 review #3: ratio を [0, 1] にクランプ + 合計 ≤ 1 を保証
+  const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
+  const oosRatio = clamp01(input.oosRatio ?? 0.2);
+  const requestedValRatio = clamp01(input.validationRatio ?? 0);
+  // OOS を主観測軸として優先、validation は残り枠に縮める
+  const valRatio = Math.min(requestedValRatio, Math.max(0, 1 - oosRatio));
 
   const oosDays = Math.max(0, Math.floor(totalDays * oosRatio));
   const valDays = Math.max(0, Math.floor(totalDays * valRatio));
@@ -212,7 +224,8 @@ export function buildOosSplitWindowV1(input: {
 /**
  * Walk-forward の time-anchored fold を構築する v1。
  *
- * - 各 fold は `trainEnd < oosStart` を厳守 (= future leakage 防止)
+ * - 各 fold は `trainEnd === oosStart` (= train 期間の直後に OOS 期間、隙間なし)
+ *   train 期間中のデータは OOS には絶対に含まれないため future leakage は発生しない
  * - データ不足で 1 fold も作れない場合は空配列を返す (例外を投げない)
  *
  * PR #103 では fold ごとのパラメータ再最適化はしない (= 同一 DSL を複数 OOS 期間に当てる)。
