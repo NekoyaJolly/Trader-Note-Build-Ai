@@ -214,6 +214,13 @@ async function main(): Promise<void> {
   console.log('\n--- oosValidationSummary ---');
   console.log(JSON.stringify(report.oosValidationSummary, null, 2));
 
+  // PR #105: OOS-aware Promotion 接続の補助 summary。
+  // - validation_candidate を起点に oos_passed → validation_confirmed / oos_failed → hold を観測
+  // - promotionGateSummary の代替ではなく並列 (= 既存 summary の意味は不変)
+  // - productionEligible は不変条件で常に 0
+  console.log('\n--- oosAwarePromotionSummary ---');
+  console.log(JSON.stringify(report.oosAwarePromotionSummary, null, 2));
+
   if (report.repairOutcomes.length > 0) {
     console.log('\n--- repairOutcome per child ---');
     for (const o of report.repairOutcomes) {
