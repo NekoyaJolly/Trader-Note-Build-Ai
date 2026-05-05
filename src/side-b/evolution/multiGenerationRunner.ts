@@ -321,22 +321,28 @@ export async function runMultiGenerationEvolutionV1(input: {
     const entryWarnings: string[] = [];
 
     try {
+      // PR #106 Copilot review #1:
+      // 常に明示的に Map / 配列を渡す。`size>0 のときだけ渡す` にすると、
+      // EvolutionLoop 内部の `options?.repairHintsForMutation ?? this.lastRepairHints`
+      // フォールバック (PR #100 経路) が発火し、carryRepairHints=false や
+      // 「初回は空を明示したい」ケースでも前回実行の hints/baselines が混入する。
+      // 空 Map / 空配列は truthy なので `??` に引っかからず、フォールバックを封じられる。
       const callArgs: RunOneGenerationCall = {
         generationIndex,
         regime: opts.regime,
+        repairHintsForMutation: opts.carryRepairHints
+          ? state.lastRepairHints
+          : new Map<string, RepairHint>(),
+        repairBaselinesForOutcome: opts.carryRepairBaselines
+          ? state.lastRepairBaselines
+          : new Map<string, RepairOutcomeBaseline>(),
+        previousPromotionGateDecisions: opts.carryPromotionState
+          ? state.lastPromotionGateDecisions
+          : [],
+        previousOosValidationResults: opts.carryOosState
+          ? state.lastOosValidationResults
+          : [],
       };
-      if (opts.carryRepairHints && state.lastRepairHints.size > 0) {
-        callArgs.repairHintsForMutation = state.lastRepairHints;
-      }
-      if (opts.carryRepairBaselines && state.lastRepairBaselines.size > 0) {
-        callArgs.repairBaselinesForOutcome = state.lastRepairBaselines;
-      }
-      if (opts.carryPromotionState && state.lastPromotionGateDecisions.length > 0) {
-        callArgs.previousPromotionGateDecisions = state.lastPromotionGateDecisions;
-      }
-      if (opts.carryOosState && state.lastOosValidationResults.length > 0) {
-        callArgs.previousOosValidationResults = state.lastOosValidationResults;
-      }
       report = await input.runOneGeneration(callArgs);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

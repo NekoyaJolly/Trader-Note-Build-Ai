@@ -517,6 +517,68 @@ describe('runMultiGenerationEvolutionV1', () => {
     expect(calls).toEqual([0, 0]); // 2 世代目も 0
   });
 
+  it('19. PR #106 Copilot review: carry が空でも常に明示的に空 Map / 空配列を渡す (= EvolutionLoop の internal lastRepairHints フォールバックを封じる)', async () => {
+    const observed: Array<{
+      hints: unknown;
+      baselines: unknown;
+      promotion: unknown;
+      oos: unknown;
+    }> = [];
+    const runOneGeneration = jest.fn(async (call) => {
+      observed.push({
+        hints: call.repairHintsForMutation,
+        baselines: call.repairBaselinesForOutcome,
+        promotion: call.previousPromotionGateDecisions,
+        oos: call.previousOosValidationResults,
+      });
+      return makeReport();
+    });
+    await runMultiGenerationEvolutionV1({
+      options: {
+        generations: 2,
+        regime: 'breakout',
+        // 全 carry を OFF。EvolutionLoop が options?.x ?? this.lastX に
+        // フォールバックする実装でも、空 Map / 空配列が明示注入されているため
+        // 内部 state からの引き継ぎが起きない。
+        carryRepairHints: false,
+        carryRepairBaselines: false,
+        carryPromotionState: false,
+        carryOosState: false,
+      },
+      runOneGeneration,
+    });
+    for (const o of observed) {
+      // undefined では困る (= ?? フォールバック発火)
+      expect(o.hints).toBeInstanceOf(Map);
+      expect((o.hints as Map<unknown, unknown>).size).toBe(0);
+      expect(o.baselines).toBeInstanceOf(Map);
+      expect((o.baselines as Map<unknown, unknown>).size).toBe(0);
+      expect(Array.isArray(o.promotion)).toBe(true);
+      expect((o.promotion as unknown[]).length).toBe(0);
+      expect(Array.isArray(o.oos)).toBe(true);
+      expect((o.oos as unknown[]).length).toBe(0);
+    }
+  });
+
+  it('20. PR #106 Copilot review: carry=true (default) でも常に明示的に渡される (初回も空 Map、undefined にならない)', async () => {
+    const observed: Array<{ hints: unknown; baselines: unknown }> = [];
+    const runOneGeneration = jest.fn(async (call) => {
+      observed.push({
+        hints: call.repairHintsForMutation,
+        baselines: call.repairBaselinesForOutcome,
+      });
+      return makeReport();
+    });
+    await runMultiGenerationEvolutionV1({
+      options: { generations: 2, regime: 'breakout' }, // carry* 既定 (true)
+      runOneGeneration,
+    });
+    // 初回も「空 Map が明示的に渡る」(= undefined ではない)
+    expect(observed[0].hints).toBeInstanceOf(Map);
+    expect((observed[0].hints as Map<unknown, unknown>).size).toBe(0);
+    expect(observed[0].baselines).toBeInstanceOf(Map);
+  });
+
   it('17. maxConsecutiveNoImprovement で連続無改善時に早期停止', async () => {
     const runOneGeneration = jest.fn(async () => makeReport()); // 何も improved/confirmed なし
     const r = await runMultiGenerationEvolutionV1({
