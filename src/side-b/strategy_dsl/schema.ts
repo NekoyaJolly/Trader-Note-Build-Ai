@@ -12,20 +12,94 @@ export const OpSchema = z.enum(['<', '<=', '>', '>=', '==', '!=', 'between', 'in
 /** パラメーター参照("$p1" のような記法) */
 export const ParamRefSchema = z.string().regex(/^\$[a-z][a-z0-9_]*$/);
 
-/** 条件式(レンズ特徴量と値の比較) */
-export const ConditionSchema = z.object({
+/**
+ * 条件式の値型 (literal / ParamRef / range / set)。
+ * 後方互換のため Phase 5 既存の表現は全て継続して通す。
+ */
+export const ConditionValueSchema = z.union([
+  z.number(),
+  z.string(),
+  z.boolean(),
+  ParamRefSchema,
+  z.tuple([z.number(), z.number()]),
+  z.array(z.union([z.number(), z.string()])),
+]);
+
+/**
+ * Indicator パラメータ (PR #116a で追加)。
+ *
+ * 動的パラメータを持つ feature (ema, sma, rsi, macd 等) の場合、period や
+ * fastPeriod などをここに格納する。snapshot key はこれを安定 JSON に正規化して
+ * `lens.feature(stable_params)` で一意特定する (`buildSnapshotKey` 参照)。
+ *
+ * v1 では数値パラメータのみ受け付ける。pivot.pivotType のような string は
+ * 必要になった時点で拡張する (PR #118+ 想定)。
+ *
+ * PR #116a Copilot review #2: `z.number()` だけだと `Infinity` / `NaN` が通って
+ * 後段の `formatStableNumber` (snapshotKey 構築) で例外になる。`finite()` で
+ * parse 時点で弾く (= invalid 入力は DSL Schema レベルで早期検出)。
+ */
+export const ConditionParamsSchema = z.record(z.string(), z.number().finite());
+export type ConditionParams = z.infer<typeof ConditionParamsSchema>;
+
+/**
+ * Indicator operand (PR #116a で追加)。
+ *
+ * `value` の代わりに比較対象として「別の indicator series」を指定するための型。
+ * 例えば `close > ema(20)` は `compareTarget: { lens: 'ohlcv', feature: 'ema', params: { period: 20 } }`
+ * で表現する。
+ *
+ * 評価器側の対応は PR #116b (TS surrogate) / PR #116c (Python) で順次行うため、
+ * v1 (= PR #116a) では schema レベルで受け入れ可能にするのみ。既存評価器は
+ * compareTarget を持つ leaf を評価できないので、入力 DSL に出てくると
+ * `false` 扱いになる (= 既存挙動と同じ「対応していない条件は false」)。
+ */
+export const IndicatorOperandSchema = z.object({
   lens: z.string(),
   feature: z.string(),
-  op: OpSchema,
-  value: z.union([
-    z.number(),
-    z.string(),
-    z.boolean(),
-    ParamRefSchema,
-    z.tuple([z.number(), z.number()]),
-    z.array(z.union([z.number(), z.string()])),
-  ]),
+  params: ConditionParamsSchema.optional(),
 });
+export type IndicatorOperand = z.infer<typeof IndicatorOperandSchema>;
+
+/**
+ * 条件式 (レンズ特徴量と値の比較)。
+ *
+ * v1 (= PR #116a 以前): `value` で literal / ParamRef / range / set と比較
+ * v2 (= PR #116a 以降):
+ *   - `params` で動的 indicator パラメータを指定 (snapshot key の正規化用)
+ *   - `compareTarget` で別 indicator series との比較が可能 (value の排他的代替)
+ *
+ * 後方互換: `params` / `compareTarget` 双方 optional。既存 DSL は無変更で通る。
+ *
+ * superRefine 制約:
+ *   - `value` と `compareTarget` はちょうど一方だけ指定する (排他、両方 / どちらも無し は不可)
+ */
+export const ConditionSchema = z
+  .object({
+    lens: z.string(),
+    feature: z.string(),
+    op: OpSchema,
+    value: ConditionValueSchema.optional(),
+    params: ConditionParamsSchema.optional(),
+    compareTarget: IndicatorOperandSchema.optional(),
+  })
+  .superRefine((val, ctx) => {
+    const hasValue = val.value !== undefined;
+    const hasTarget = val.compareTarget !== undefined;
+    if (!hasValue && !hasTarget) {
+      ctx.addIssue({
+        code: 'custom',
+        message: '条件式は value または compareTarget のどちらかを指定する必要がある',
+      });
+      return;
+    }
+    if (hasValue && hasTarget) {
+      ctx.addIssue({
+        code: 'custom',
+        message: '条件式に value と compareTarget を同時指定することはできない (排他)',
+      });
+    }
+  });
 
 /** 条件グループ(AND/OR) */
 export type ConditionGroup = {
