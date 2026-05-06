@@ -140,12 +140,33 @@ describe('defaultOosBacktestRunner', () => {
     const call = mockedRun.mock.calls[0]?.[0];
     expect(call?.symbol).toBe('EURUSD');
     expect(call?.timeframe).toBe('1h');
-    // ISO datetime に正規化される (= datetime のまま渡す)
-    expect(call?.startDate).toMatch(/T00:00:00/);
-    expect(call?.endDate).toMatch(/T00:00:00/);
+    // ISO datetime に正規化される (= Z 付き RFC3339)
+    expect(call?.startDate).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(call?.endDate).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
   });
 
-  it('6. 既定 thresholds (minOosPf=1.0 / minOosTrades=20 / maxOosDrawdown=30) を渡す', async () => {
+  it('6. PR #110 Copilot #1: T 付き TZ なし datetime も Z 付き UTC ISO に正規化される', async () => {
+    mockedRun.mockResolvedValue({
+      metrics: { pf: 1.0, tradeCount: 10, maxDrawdown: 5, expectancy: null, winRate: 0.5 },
+      verdict: 'unknown',
+      failureReasons: ['insufficient_oos_trades'],
+      evaluationKind: 'oos',
+      warnings: [],
+      engineVersion: 'analysis-engine/backtesting.py@0.6.5',
+      unsupportedConditions: [],
+    });
+    await defaultOosBacktestRunner({
+      dsl: makeDsl(),
+      // T 付きで Z 無し (= 旧実装ではそのまま渡って Zod `datetime()` で弾かれていたケース)
+      startDate: '2024-10-01T00:00:00Z',
+      endDate: '2024-12-31T23:59:59Z',
+    });
+    const call = mockedRun.mock.calls[0]?.[0];
+    expect(call?.startDate).toMatch(/Z$/);
+    expect(call?.endDate).toMatch(/Z$/);
+  });
+
+  it('7. PR #110 Copilot #2: thresholds / config を adapter で重複定義せず、schema defaults に任せる (drift 防止)', async () => {
     mockedRun.mockResolvedValue({
       metrics: { pf: 1.5, tradeCount: 30, maxDrawdown: 8, expectancy: null, winRate: 0.6 },
       verdict: 'passed',
@@ -161,10 +182,9 @@ describe('defaultOosBacktestRunner', () => {
       endDate: '2024-12-31',
     });
     const call = mockedRun.mock.calls[0]?.[0];
-    expect(call?.thresholds).toEqual({
-      minOosPf: 1.0,
-      minOosTrades: 20,
-      maxOosDrawdown: 30.0,
-    });
+    // adapter は `thresholds` / `config` を **明示的に渡さない** (= undefined)。
+    // schema の `.default(...)` が parse 内で値を埋めるため、HTTP payload には乗る。
+    expect(call?.thresholds).toBeUndefined();
+    expect(call?.config).toBeUndefined();
   });
 });

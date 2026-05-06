@@ -11,7 +11,7 @@ import { z } from 'zod';
 import type {
   AnalysisEngineIndicatorSpec,
   AnalysisEngineIndicatorSeriesResponse,
-  AnalysisEngineOosValidationRequest,
+  AnalysisEngineOosValidationRequestInput,
   AnalysisEngineOosValidationResponse,
   AnalysisEngineScreeningBacktestRequest,
   AnalysisEngineScreeningBacktestResponse,
@@ -213,7 +213,10 @@ export async function runScreeningBacktest(
  * timeout は ScreeningBacktest と同じ 180s。
  */
 export async function runOosValidation(
-  input: AnalysisEngineOosValidationRequest,
+  // PR #110 Copilot review #2: schema の `.default(...)` を使う `config` / `thresholds` を
+  // adapter 側で再ハードコードしないため、input 型を `z.input<>` 系に変える。
+  // Zod parse 内で defaults が埋まり、call site では省略可能になる。
+  input: AnalysisEngineOosValidationRequestInput,
 ): Promise<AnalysisEngineOosValidationResponse> {
   const baseUrl = getAnalysisEngineBaseUrl();
   const payload = AnalysisEngineOosValidationRequestSchema.parse(input);

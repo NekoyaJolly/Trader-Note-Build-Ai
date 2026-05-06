@@ -179,10 +179,22 @@ export function isOosWindowEmpty(window: OosSplitWindow): boolean {
 // 本番 default runner (PR #110)
 // =================================================================
 
-/** ISO 日付文字列を analysis-engine が受け取る datetime (= UTC 00:00 末尾 Z) に整形。 */
+/**
+ * ISO 日付文字列を analysis-engine が受け取る RFC3339 (`Z` 付き UTC) に整形。
+ *
+ * PR #110 Copilot review #1 対応:
+ *   旧実装は `value.includes('T')` ならそのまま返していたため、
+ *   `'2024-10-01T00:00:00'` のように TZ/Z が無い datetime が来ると
+ *   `z.string().datetime()` で弾かれていた。`new Date(value).toISOString()` で
+ *   常に `Z` 付き UTC に統一する。
+ *
+ * - YYYY-MM-DD のみ → `YYYY-MM-DDT00:00:00.000Z` (Date 解釈は UTC 00:00)
+ * - すでに Z / オフセット付き ISO → 同じ瞬間の UTC ISO を返す
+ * - TZ 抜きの datetime → ローカル TZ で解釈されたものを UTC ISO に変換
+ *   (= 表現形式は ISO に揃う、analysis-engine 側で受理可能)
+ */
 function toIsoDateTimeForEngine(value: string): string {
-  if (value.includes('T')) return value;
-  return `${value}T00:00:00.000Z`;
+  return new Date(value).toISOString();
 }
 
 /**
@@ -210,6 +222,9 @@ export const defaultOosBacktestRunner: OosBacktestRunnerFn = async ({
   const symbol = normalizeCTraderSymbol(dsl.symbol);
   const timeframe = normalizeTimeframe(dsl.timeframe);
 
+  // PR #110 Copilot review #2 対応: `config` / `thresholds` は schema の `.default(...)` に
+  // 任せて drift を防ぐ (= 単一の真実 = `AnalysisEngineOosValidationRequestSchema` の defaults)。
+  // 将来閾値を変えるときは schema 側だけ更新すればよい。
   const response = await runOosValidation({
     hypothesisId: dsl.id,
     symbol,
@@ -217,8 +232,6 @@ export const defaultOosBacktestRunner: OosBacktestRunnerFn = async ({
     startDate: toIsoDateTimeForEngine(startDate),
     endDate: toIsoDateTimeForEngine(endDate),
     notePayload,
-    config: { initialCapital: 10_000, leverage: 1, tradingCost: 0 },
-    thresholds: { minOosPf: 1.0, minOosTrades: 20, maxOosDrawdown: 30.0 },
   });
 
   return {

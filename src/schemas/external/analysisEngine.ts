@@ -264,6 +264,16 @@ export type AnalysisEngineOosValidationRequest = z.infer<
   typeof AnalysisEngineOosValidationRequestSchema
 >;
 
+/**
+ * `runOosValidation` の **入力型** (= `z.input`)。schema の `.default(...)` を持つ
+ * フィールド (`config` / `thresholds`) を **省略可能** にする。defaults は schema parse の
+ * 中で埋まるため、adapter 側で値を再ハードコードしなくても良い (= 単一の真実、
+ * PR #110 Copilot review #2 対応で drift 防止)。
+ */
+export type AnalysisEngineOosValidationRequestInput = z.input<
+  typeof AnalysisEngineOosValidationRequestSchema
+>;
+
 export const OosValidationMetricsSchema = z.object({
   pf: z.number().nullable(),
   tradeCount: z.number().int().nonnegative(),
