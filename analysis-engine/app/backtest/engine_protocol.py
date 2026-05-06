@@ -81,6 +81,11 @@ class BTSpec:
     ノート (defaultRiskManagement / direction) を adapter で変換した結果がこの形になる。
     エンジン実装 (BacktestingPyEngine 等) はこの spec を読み取って自身のフレームワーク
     に合わせて Strategy / setup を構築する。
+
+    PR #112:
+        `trigger_group` で AND/OR 構造を保った条件グループを運ぶ。指定時、Strategy.next()
+        は `condition_evaluator.evaluate_condition_group` で評価して entry 判定する。
+        None なら従来挙動 (= 条件無視で毎バー entry、SL/TP のみ)。
     """
 
     direction: Literal["long", "short", "either"]
@@ -89,6 +94,11 @@ class BTSpec:
     max_holding_bars: Optional[int] = None
     # 将来 engine 側で評価したい指標仕様 (現段階では未使用)
     indicators: List[dict] = field(default_factory=list)
+    # PR #112: ConditionGroup (再帰構造)。BTSpec を engine 非依存に保つため、
+    # 型は schemas.ScreeningBacktestConditionGroup または互換オブジェクトを受ける
+    # (object 型で吸収)。具体実装 (BacktestingPyEngine) は
+    # condition_evaluator.evaluate_condition_group に直接渡して評価する。
+    trigger_group: Optional[object] = None
 
 
 @dataclass(frozen=True)

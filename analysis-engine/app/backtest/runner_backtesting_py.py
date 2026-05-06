@@ -24,10 +24,15 @@ from .engine_protocol import (
     BTSummary,
     BTTrade,
 )
+from .condition_evaluator import (
+    collect_required_ohlcv_features,
+    evaluate_condition_group,
+)
 
 
 # 本実装のバージョン (DB の engineVersion カラムに記録される)
-ENGINE_VERSION = "analysis-engine/backtesting.py@0.6.5"
+# PR #112: DSL conditions 評価対応で minor 更新
+ENGINE_VERSION = "analysis-engine/backtesting.py@0.6.5+conditions"
 
 
 class BacktestingPyEngine:
@@ -106,25 +111,48 @@ class BacktestingPyEngine:
 
     @staticmethod
     def _build_strategy_class(spec: BTSpec) -> type[Strategy]:
-        """BTSpec を閉包して backtesting.py の Strategy クラスを生成する。"""
+        """BTSpec を閉包して backtesting.py の Strategy クラスを生成する。
+
+        PR #112 改修:
+            - `spec.trigger_group` (= ConditionGroup) が指定されていれば、
+              `init()` で必要 feature (rsi / atr 等) を pandas_ta で計算 + self.I() 登録、
+              `next()` で `evaluate_condition_group` を呼んで条件成立時のみ entry。
+            - SL/TP は全 type 対応 (atr_multiple / fixed_pips / swing_point の SL、
+              rr_ratio / atr_multiple / fixed_pips の TP)。
+            - pip サイズはシンボル別 (現状 forex 4桁=0.0001、JPY ペア=0.01) に推定。
+        """
 
         sl_spec = spec.stop_loss
         tp_spec = spec.take_profit
         direction = spec.direction
         max_holding = spec.max_holding_bars
+        trigger_group = spec.trigger_group
 
         atr_length = 14  # ATR length は固定 14 (Phase 4b の慣行と整合)
+        rsi_length = 14  # RSI length は固定 14 (TS surrogate と整合)
+        # PR #112: 必要 feature を事前抽出 (trigger_group が None なら空集合)
+        required_features = collect_required_ohlcv_features(trigger_group)
+
+        # SL/TP の swing 計算用 lookback bars (BTStopLossSwingPoint)
+        swing_lookback_bars = (
+            int(getattr(sl_spec, "lookback_bars", 20))
+            if getattr(sl_spec, "kind", None) == "swing_point"
+            else 20
+        )
 
         class GeneratedStrategy(Strategy):
             _spec_direction = direction
             _spec_sl = sl_spec
             _spec_tp = tp_spec
+            _trigger_group = trigger_group
             _max_holding_bars: Optional[int] = max_holding
+            _swing_lookback_bars = swing_lookback_bars
 
             def init(self) -> None:
                 high = pd.Series(self.data.High)
                 low = pd.Series(self.data.Low)
                 close = pd.Series(self.data.Close)
+                # ATR は SL/TP 計算と「ohlcv.atr」条件の両方で要る
                 self._atr = self.I(
                     lambda h, l, c: ta.atr(
                         high=pd.Series(h),
@@ -136,7 +164,33 @@ class BacktestingPyEngine:
                     low.values,
                     close.values,
                 )
+                # PR #112: 必要に応じて RSI を計算
+                if "rsi" in required_features:
+                    self._rsi = self.I(
+                        lambda c: ta.rsi(pd.Series(c), length=rsi_length).to_numpy(),
+                        close.values,
+                    )
+                else:
+                    self._rsi = None
                 self._entry_bar: Optional[int] = None
+
+            def _build_feature_snapshot(self) -> dict:
+                """現バーの ohlcv feature 値辞書を作る。条件評価器に渡す入力。"""
+                snapshot = {
+                    "open": float(self.data.Open[-1]),
+                    "high": float(self.data.High[-1]),
+                    "low": float(self.data.Low[-1]),
+                    "close": float(self.data.Close[-1]),
+                    "volume": float(self.data.Volume[-1]),
+                    "atr": float(self._atr[-1]) if self._atr is not None else None,
+                }
+                if self._rsi is not None:
+                    snapshot["rsi"] = float(self._rsi[-1])
+                # NaN は None に倒す (= condition_evaluator 側で false 判定)
+                for k, v in list(snapshot.items()):
+                    if isinstance(v, float) and (v != v):
+                        snapshot[k] = None
+                return snapshot
 
             def next(self) -> None:
                 # `either` direction は段階 1 では未対応 → runner.py 側で事前に弾く想定。
@@ -164,6 +218,13 @@ class BacktestingPyEngine:
                 if atr_val is None or np.isnan(atr_val) or atr_val <= 0:
                     return
 
+                # PR #112: trigger_group が指定されていれば DSL conditions を評価。
+                # None なら従来挙動 (= 条件無視で毎バー entry)。
+                if self._trigger_group is not None:
+                    snapshot = self._build_feature_snapshot()
+                    if not evaluate_condition_group(self._trigger_group, snapshot):
+                        return  # 条件不成立 → entry しない
+
                 entry_price = float(self.data.Close[-1])
                 sl_distance = self._compute_sl_distance(atr_val, entry_price)
                 if sl_distance is None or sl_distance <= 0:
@@ -185,11 +246,36 @@ class BacktestingPyEngine:
                         self.sell(sl=sl, tp=tp)
                         self._entry_bar = len(self.data) - 1
 
+            def _pip_size(self, entry_price: float) -> float:
+                """pip サイズを推定。JPY ペアは 0.01、その他 forex は 0.0001、
+                超低価格 (= 0.01 未満) では 0.0001 を返す保守値。
+                """
+                # 価格レンジから JPY ペア相当か判定 (例: 150.000 のような 3 桁台)
+                if entry_price >= 50.0:
+                    return 0.01
+                return 0.0001
+
             def _compute_sl_distance(self, atr_val: float, entry_price: float) -> Optional[float]:
                 spec = self._spec_sl
                 if spec.kind == "atr_multiple":
                     return float(atr_val) * float(spec.value)
-                # 段階 1 では fixed_pips / swing_point は未対応
+                if spec.kind == "fixed_pips":
+                    pips = float(spec.value)
+                    if pips <= 0:
+                        return None
+                    return pips * self._pip_size(entry_price)
+                if spec.kind == "swing_point":
+                    # 直近 lookback_bars の最安値 (long) / 最高値 (short) からの距離
+                    lookback = max(2, int(self._swing_lookback_bars))
+                    n = min(lookback, len(self.data))
+                    if n < 2:
+                        return None
+                    if self._spec_direction == "long":
+                        recent_low = float(min(self.data.Low[-n:]))
+                        return entry_price - recent_low
+                    # short
+                    recent_high = float(max(self.data.High[-n:]))
+                    return recent_high - entry_price
                 return None
 
             def _compute_tp_distance(
@@ -200,6 +286,11 @@ class BacktestingPyEngine:
                     return sl_distance * float(spec.value)
                 if spec.kind == "atr_multiple":
                     return float(atr_val) * float(spec.value)
+                if spec.kind == "fixed_pips":
+                    pips = float(spec.value)
+                    if pips <= 0:
+                        return None
+                    return pips * self._pip_size(entry_price)
                 return None
 
         return GeneratedStrategy
