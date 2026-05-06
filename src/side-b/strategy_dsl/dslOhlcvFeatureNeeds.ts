@@ -3,11 +3,15 @@
  *
  * 条件式・SL/TP 型に応じ、不要な配列（例: 条件に RSI 未使用なのに全バー計算）を作らない。
  *
- * 注意: 現状スナップショットに載せるのは ohlcv レンズの rsi/atr のみ。他レンズは本シミュでは未展開。
+ * PR #116b: TS surrogate が新たに対応した indicator (ema/sma/rsi/atr/macd/bb) +
+ * `Condition.params` / `compareTarget` を扱うため、`collectDslIndicatorNeeds` を追加。
+ * 既存 `collectDslOhlcvFeatureNeeds` (rsi/atr の bool のみ) は後方互換のため残す。
  */
 
-import type { Condition, ConditionGroup } from './schema';
+import { isTsSurrogateIndicatorFeature } from './indicatorSurrogate';
+import type { Condition, ConditionGroup, ConditionParams } from './schema';
 import type { StrategyDSL } from './schema';
+import { buildSnapshotKey } from './snapshotKey';
 import { isWaitForTriggerEntry } from './types';
 
 /** 前計算が必要な ohlcv 特徴（シミュの buildFeatureTable 用） */
@@ -53,4 +57,58 @@ export function collectDslOhlcvFeatureNeeds(dsl: StrategyDSL): DslOhlcvFeatureNe
   }
 
   return out;
+}
+
+/**
+ * PR #116b: TS surrogate が新たに対応する indicator (params 付き / compareTarget) の
+ * 集計エントリ。`buildBarFeatureTable` が必要な series のみ計算するために使う。
+ */
+export interface DslIndicatorNeed {
+  /** indicator feature 名 (ema, sma, rsi, atr, macd, bb のいずれか) */
+  feature: string;
+  /** 動的パラメータ。空なら指標のデフォルト値 */
+  params: ConditionParams;
+  /** snapshot key (= `${lens}.${feature}(stable_params)` 形式) */
+  snapshotKey: string;
+}
+
+/**
+ * DSL を walk して、TS surrogate が事前計算すべき indicator series 一覧を抽出する。
+ *
+ * 対象:
+ *   - leaf condition の `lens.feature(params)` (params なしの ohlcv.rsi/atr 等も含む、後方互換)
+ *   - `compareTarget` の `lens.feature(params)`
+ *
+ * `lens === 'ohlcv'` かつ `feature` が `isTsSurrogateIndicatorFeature` を満たすものだけ
+ * 拾う。それ以外 (= 別 lens / 未対応 feature) は `null` 扱いとして evaluator 側で
+ * false 評価される (= Phase 6.7b の方針)。
+ *
+ * 同じ snapshot key が複数 condition から参照された場合は重複排除。
+ */
+export function collectDslIndicatorNeeds(dsl: StrategyDSL): DslIndicatorNeed[] {
+  const map = new Map<string, DslIndicatorNeed>();
+  const visit = (lens: string, feature: string, params?: ConditionParams) => {
+    if (lens !== 'ohlcv') return;
+    if (!isTsSurrogateIndicatorFeature(feature)) return;
+    const key = buildSnapshotKey(lens, feature, params);
+    if (!map.has(key)) {
+      map.set(key, { feature, params: params ?? {}, snapshotKey: key });
+    }
+  };
+
+  const onLeaf = (c: Condition) => {
+    visit(c.lens, c.feature, c.params);
+    if (c.compareTarget) {
+      visit(c.compareTarget.lens, c.compareTarget.feature, c.compareTarget.params);
+    }
+  };
+
+  const e = dsl.entry;
+  if (isWaitForTriggerEntry(e)) {
+    walkGroup(e.triggerConditions, onLeaf);
+  } else if ('trigger' in e) {
+    walkGroup(e.trigger, onLeaf);
+  }
+
+  return Array.from(map.values());
 }

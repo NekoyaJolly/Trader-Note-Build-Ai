@@ -92,10 +92,23 @@ describe('PR #115: shared indicator registry', () => {
       }
     });
 
-    it('PR #115 時点では tsSurrogate=false (= PR #116 で実反映予定)', () => {
-      for (const entry of INDICATOR_REGISTRY) {
-        expect(entry.support.tsSurrogate).toBe(false);
-      }
+    it('PR #116b 時点で tsSurrogate=true なのは ema/sma/rsi/macd/bb/atr の 6 指標', () => {
+      const tsSurrogateIds = INDICATOR_REGISTRY
+        .filter((e) => e.support.tsSurrogate)
+        .map((e) => e.id)
+        .sort();
+      expect(tsSurrogateIds).toEqual(['atr', 'bb', 'ema', 'macd', 'rsi', 'sma']);
+    });
+
+    it('PR #116b 時点で tsSurrogate=false なのは残り 17 指標 (PR #118+ で順次拡張)', () => {
+      const notTsSurrogate = INDICATOR_REGISTRY
+        .filter((e) => !e.support.tsSurrogate)
+        .map((e) => e.id);
+      expect(notTsSurrogate).toHaveLength(17);
+      // 含まれる代表例
+      expect(notTsSurrogate).toEqual(
+        expect.arrayContaining(['stochastic', 'williamsR', 'roc', 'mfi', 'adx', 'supertrend', 'pivot']),
+      );
     });
   });
 

@@ -1,5 +1,5 @@
 {
-  "$comment": "PR #115 canonical indicator registry. このファイルが 23 指標の単一情報源。registry.ts が Zod parse + typed export。src/models/indicatorConfig.ts はここから INDICATOR_METADATA を構築する後方互換 re-export。Python 側 (analysis-engine/app/indicators.py) で実装済の指標は support.pythonSeries=true。tsSurrogate (TS 側 EvolutionLoop surrogate 用) は PR #116 で実反映予定のため現時点は全 false。",
+  "$comment": "PR #115 canonical indicator registry. このファイルが 23 指標の単一情報源。registry.ts が Zod parse + typed export。src/models/indicatorConfig.ts はここから INDICATOR_METADATA を構築する後方互換 re-export。Python 側 (analysis-engine/app/indicators.py) で実装済の指標は support.pythonSeries=true。tsSurrogate (TS 側 EvolutionLoop surrogate 用) は PR #116b で ema/sma/rsi/macd/bb/atr の 6 個を true 化、それ以外は将来 PR で順次拡張。",
   "version": 1,
   "indicators": [
     {
@@ -7,117 +7,222 @@
       "displayName": "RSI（相対力指数）",
       "category": "momentum",
       "description": "買われ過ぎ・売られ過ぎを判断する指標。0-100の範囲で表示",
-      "defaultParams": { "period": 14 },
-      "paramConstraints": { "minPeriod": 2, "maxPeriod": 100 },
-      "support": { "pythonSeries": true, "tsSurrogate": false }
+      "defaultParams": {
+        "period": 14
+      },
+      "paramConstraints": {
+        "minPeriod": 2,
+        "maxPeriod": 100
+      },
+      "support": {
+        "pythonSeries": true,
+        "tsSurrogate": true
+      }
     },
     {
       "id": "stochastic",
       "displayName": "ストキャスティクス",
       "category": "momentum",
       "description": "一定期間の最高値・最安値に対する現在値の位置を示す",
-      "defaultParams": { "kPeriod": 14, "dPeriod": 3 },
-      "paramConstraints": { "minPeriod": 1, "maxPeriod": 100 },
-      "support": { "pythonSeries": true, "tsSurrogate": false }
+      "defaultParams": {
+        "kPeriod": 14,
+        "dPeriod": 3
+      },
+      "paramConstraints": {
+        "minPeriod": 1,
+        "maxPeriod": 100
+      },
+      "support": {
+        "pythonSeries": true,
+        "tsSurrogate": false
+      }
     },
     {
       "id": "williamsR",
       "displayName": "Williams %R",
       "category": "momentum",
       "description": "ストキャスティクスと類似のオシレーター。-100〜0で表示",
-      "defaultParams": { "period": 14 },
-      "paramConstraints": { "minPeriod": 1, "maxPeriod": 100 },
-      "support": { "pythonSeries": true, "tsSurrogate": false }
+      "defaultParams": {
+        "period": 14
+      },
+      "paramConstraints": {
+        "minPeriod": 1,
+        "maxPeriod": 100
+      },
+      "support": {
+        "pythonSeries": true,
+        "tsSurrogate": false
+      }
     },
     {
       "id": "roc",
       "displayName": "ROC（変化率）",
       "category": "momentum",
       "description": "指定期間前との価格変化率を表示",
-      "defaultParams": { "period": 10 },
-      "paramConstraints": { "minPeriod": 1, "maxPeriod": 100 },
-      "support": { "pythonSeries": true, "tsSurrogate": false }
+      "defaultParams": {
+        "period": 10
+      },
+      "paramConstraints": {
+        "minPeriod": 1,
+        "maxPeriod": 100
+      },
+      "support": {
+        "pythonSeries": true,
+        "tsSurrogate": false
+      }
     },
     {
       "id": "mfi",
       "displayName": "MFI（マネーフローインデックス）",
       "category": "momentum",
       "description": "出来高を加味したRSI。0-100の範囲で表示",
-      "defaultParams": { "period": 14 },
-      "paramConstraints": { "minPeriod": 2, "maxPeriod": 100 },
-      "support": { "pythonSeries": true, "tsSurrogate": false }
+      "defaultParams": {
+        "period": 14
+      },
+      "paramConstraints": {
+        "minPeriod": 2,
+        "maxPeriod": 100
+      },
+      "support": {
+        "pythonSeries": true,
+        "tsSurrogate": false
+      }
     },
     {
       "id": "sma",
       "displayName": "SMA（単純移動平均）",
       "category": "trend",
       "description": "指定期間の終値平均。トレンドの方向性を判断",
-      "defaultParams": { "period": 20 },
-      "paramConstraints": { "minPeriod": 1, "maxPeriod": 500 },
-      "support": { "pythonSeries": true, "tsSurrogate": false }
+      "defaultParams": {
+        "period": 20
+      },
+      "paramConstraints": {
+        "minPeriod": 1,
+        "maxPeriod": 500
+      },
+      "support": {
+        "pythonSeries": true,
+        "tsSurrogate": true
+      }
     },
     {
       "id": "ema",
       "displayName": "EMA（指数移動平均）",
       "category": "trend",
       "description": "直近の価格に重みを置いた移動平均",
-      "defaultParams": { "period": 20 },
-      "paramConstraints": { "minPeriod": 1, "maxPeriod": 500 },
-      "support": { "pythonSeries": true, "tsSurrogate": false }
+      "defaultParams": {
+        "period": 20
+      },
+      "paramConstraints": {
+        "minPeriod": 1,
+        "maxPeriod": 500
+      },
+      "support": {
+        "pythonSeries": true,
+        "tsSurrogate": true
+      }
     },
     {
       "id": "dema",
       "displayName": "DEMA（二重指数移動平均）",
       "category": "trend",
       "description": "EMAのラグを軽減した移動平均",
-      "defaultParams": { "period": 20 },
-      "paramConstraints": { "minPeriod": 1, "maxPeriod": 500 },
-      "support": { "pythonSeries": true, "tsSurrogate": false }
+      "defaultParams": {
+        "period": 20
+      },
+      "paramConstraints": {
+        "minPeriod": 1,
+        "maxPeriod": 500
+      },
+      "support": {
+        "pythonSeries": true,
+        "tsSurrogate": false
+      }
     },
     {
       "id": "tema",
       "displayName": "TEMA（三重指数移動平均）",
       "category": "trend",
       "description": "DEMAよりさらにラグを軽減した移動平均",
-      "defaultParams": { "period": 20 },
-      "paramConstraints": { "minPeriod": 1, "maxPeriod": 500 },
-      "support": { "pythonSeries": true, "tsSurrogate": false }
+      "defaultParams": {
+        "period": 20
+      },
+      "paramConstraints": {
+        "minPeriod": 1,
+        "maxPeriod": 500
+      },
+      "support": {
+        "pythonSeries": true,
+        "tsSurrogate": false
+      }
     },
     {
       "id": "macd",
       "displayName": "MACD",
       "category": "trend",
       "description": "短期・長期EMAの差分でトレンド転換を捉える",
-      "defaultParams": { "fastPeriod": 12, "slowPeriod": 26, "signalPeriod": 9 },
-      "paramConstraints": { "minPeriod": 1, "maxPeriod": 100 },
-      "support": { "pythonSeries": true, "tsSurrogate": false }
+      "defaultParams": {
+        "fastPeriod": 12,
+        "slowPeriod": 26,
+        "signalPeriod": 9
+      },
+      "paramConstraints": {
+        "minPeriod": 1,
+        "maxPeriod": 100
+      },
+      "support": {
+        "pythonSeries": true,
+        "tsSurrogate": true
+      }
     },
     {
       "id": "aroon",
       "displayName": "Aroon（アルーン）",
       "category": "trend",
       "description": "トレンドの強さと方向を判断する指標",
-      "defaultParams": { "period": 25 },
-      "paramConstraints": { "minPeriod": 1, "maxPeriod": 100 },
-      "support": { "pythonSeries": true, "tsSurrogate": false }
+      "defaultParams": {
+        "period": 25
+      },
+      "paramConstraints": {
+        "minPeriod": 1,
+        "maxPeriod": 100
+      },
+      "support": {
+        "pythonSeries": true,
+        "tsSurrogate": false
+      }
     },
     {
       "id": "cci",
       "displayName": "CCI（コモディティチャネル指数）",
       "category": "trend",
       "description": "平均価格からの乖離度を測定",
-      "defaultParams": { "period": 20 },
-      "paramConstraints": { "minPeriod": 1, "maxPeriod": 100 },
-      "support": { "pythonSeries": true, "tsSurrogate": false }
+      "defaultParams": {
+        "period": 20
+      },
+      "paramConstraints": {
+        "minPeriod": 1,
+        "maxPeriod": 100
+      },
+      "support": {
+        "pythonSeries": true,
+        "tsSurrogate": false
+      }
     },
     {
       "id": "psar",
       "displayName": "Parabolic SAR",
       "category": "trend",
       "description": "トレンドの転換点を示す指標",
-      "defaultParams": { "step": 0.02, "maxStep": 0.2 },
+      "defaultParams": {
+        "step": 0.02,
+        "maxStep": 0.2
+      },
       "paramConstraints": {},
-      "support": { "pythonSeries": true, "tsSurrogate": false }
+      "support": {
+        "pythonSeries": true,
+        "tsSurrogate": false
+      }
     },
     {
       "id": "ichimoku",
@@ -130,35 +235,65 @@
         "spanBPeriod": 52,
         "displacement": 26
       },
-      "paramConstraints": { "minPeriod": 1, "maxPeriod": 200 },
-      "support": { "pythonSeries": true, "tsSurrogate": false }
+      "paramConstraints": {
+        "minPeriod": 1,
+        "maxPeriod": 200
+      },
+      "support": {
+        "pythonSeries": true,
+        "tsSurrogate": false
+      }
     },
     {
       "id": "atr",
       "displayName": "ATR（平均真幅）",
       "category": "volatility",
       "description": "ボラティリティの大きさを測定",
-      "defaultParams": { "period": 14 },
-      "paramConstraints": { "minPeriod": 1, "maxPeriod": 100 },
-      "support": { "pythonSeries": true, "tsSurrogate": false }
+      "defaultParams": {
+        "period": 14
+      },
+      "paramConstraints": {
+        "minPeriod": 1,
+        "maxPeriod": 100
+      },
+      "support": {
+        "pythonSeries": true,
+        "tsSurrogate": true
+      }
     },
     {
       "id": "bb",
       "displayName": "ボリンジャーバンド",
       "category": "volatility",
       "description": "移動平均と標準偏差でバンドを形成（2σ固定）",
-      "defaultParams": { "period": 20 },
-      "paramConstraints": { "minPeriod": 1, "maxPeriod": 100 },
-      "support": { "pythonSeries": true, "tsSurrogate": false }
+      "defaultParams": {
+        "period": 20
+      },
+      "paramConstraints": {
+        "minPeriod": 1,
+        "maxPeriod": 100
+      },
+      "support": {
+        "pythonSeries": true,
+        "tsSurrogate": true
+      }
     },
     {
       "id": "kc",
       "displayName": "ケルトナーチャネル",
       "category": "volatility",
       "description": "ATRを使用したトレンドバンド（ATR×2固定）",
-      "defaultParams": { "period": 20 },
-      "paramConstraints": { "minPeriod": 1, "maxPeriod": 100 },
-      "support": { "pythonSeries": true, "tsSurrogate": false }
+      "defaultParams": {
+        "period": 20
+      },
+      "paramConstraints": {
+        "minPeriod": 1,
+        "maxPeriod": 100
+      },
+      "support": {
+        "pythonSeries": true,
+        "tsSurrogate": false
+      }
     },
     {
       "id": "obv",
@@ -167,7 +302,10 @@
       "description": "出来高の累積で需給を判断",
       "defaultParams": {},
       "paramConstraints": {},
-      "support": { "pythonSeries": true, "tsSurrogate": false }
+      "support": {
+        "pythonSeries": true,
+        "tsSurrogate": false
+      }
     },
     {
       "id": "vwap",
@@ -176,43 +314,76 @@
       "description": "出来高で加重した平均価格。機関投資家の基準",
       "defaultParams": {},
       "paramConstraints": {},
-      "support": { "pythonSeries": true, "tsSurrogate": false }
+      "support": {
+        "pythonSeries": true,
+        "tsSurrogate": false
+      }
     },
     {
       "id": "cmf",
       "displayName": "CMF（チャイキンマネーフロー）",
       "category": "volume",
       "description": "一定期間の買い圧力・売り圧力を測定",
-      "defaultParams": { "period": 20 },
-      "paramConstraints": { "minPeriod": 1, "maxPeriod": 100 },
-      "support": { "pythonSeries": true, "tsSurrogate": false }
+      "defaultParams": {
+        "period": 20
+      },
+      "paramConstraints": {
+        "minPeriod": 1,
+        "maxPeriod": 100
+      },
+      "support": {
+        "pythonSeries": true,
+        "tsSurrogate": false
+      }
     },
     {
       "id": "adx",
       "displayName": "ADX（平均方向性指数）",
       "category": "trend",
       "description": "トレンドの強さを測定。25以上でトレンドあり",
-      "defaultParams": { "period": 14 },
-      "paramConstraints": { "minPeriod": 5, "maxPeriod": 50 },
-      "support": { "pythonSeries": false, "tsSurrogate": false }
+      "defaultParams": {
+        "period": 14
+      },
+      "paramConstraints": {
+        "minPeriod": 5,
+        "maxPeriod": 50
+      },
+      "support": {
+        "pythonSeries": false,
+        "tsSurrogate": false
+      }
     },
     {
       "id": "supertrend",
       "displayName": "Supertrend",
       "category": "trend",
       "description": "ATRベースのトレンドフォロー指標",
-      "defaultParams": { "period": 10, "multiplier": 3.0 },
-      "paramConstraints": { "minPeriod": 5, "maxPeriod": 50 },
-      "support": { "pythonSeries": false, "tsSurrogate": false }
+      "defaultParams": {
+        "period": 10,
+        "multiplier": 3.0
+      },
+      "paramConstraints": {
+        "minPeriod": 5,
+        "maxPeriod": 50
+      },
+      "support": {
+        "pythonSeries": false,
+        "tsSurrogate": false
+      }
     },
     {
       "id": "pivot",
       "displayName": "Pivot Points",
       "category": "support_resistance",
       "description": "前日の高値・安値・終値からサポート/レジスタンスを計算",
-      "defaultParams": { "pivotType": "standard" },
+      "defaultParams": {
+        "pivotType": "standard"
+      },
       "paramConstraints": {},
-      "support": { "pythonSeries": false, "tsSurrogate": false }
+      "support": {
+        "pythonSeries": false,
+        "tsSurrogate": false
+      }
     }
   ]
 }
