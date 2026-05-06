@@ -95,22 +95,66 @@ export type AnalysisEngineIndicatorSeriesResponse = z.infer<typeof AnalysisEngin
 // ============================================
 
 /**
+ * Indicator operand (PR #116c で追加): condition の右辺に別 indicator series を置く。
+ *
+ * `value` の代替として `compareTarget` を指定すると、Python 側 condition_evaluator は
+ * `lensName.featureKey(params)` を snapshot key にして series を引き、それを right
+ * operand として比較する (例: `close > ema(20)`)。
+ */
+const ScreeningBacktestIndicatorOperandSchema = z.object({
+  lensName: z.string(),
+  featureKey: z.string(),
+  params: z.record(z.string(), z.number().finite()).optional(),
+});
+
+/**
  * 仮説の MachineReadableCondition を Python BT で評価可能な形で送る。
  * 設計方針 (§12.3): 「変換アダプタを作らない」 → そのまま素直に渡す。
  * Python 側の app/backtest.py で評価する。
+ *
+ * PR #116c: `params` (動的 indicator パラメータ) と `compareTarget` (indicator operand)
+ * を追加。後方互換のため両方 optional、`value` も optional 化 (compareTarget 指定時は
+ * value 不要)。
  */
-const ScreeningBacktestConditionSchema = z.object({
-  lensName: z.string(),
-  featureKey: z.string(),
-  op: z.enum(['<', '<=', '>', '>=', '==', '!=', 'between', 'in']),
-  value: z.union([
-    z.number(),
-    z.string(),
-    z.boolean(),
-    z.tuple([z.number(), z.number()]),
-    z.array(z.string()),
-  ]),
-});
+const ScreeningBacktestConditionSchema = z
+  .object({
+    lensName: z.string(),
+    featureKey: z.string(),
+    op: z.enum(['<', '<=', '>', '>=', '==', '!=', 'between', 'in']),
+    value: z
+      .union([
+        z.number(),
+        z.string(),
+        z.boolean(),
+        z.tuple([z.number(), z.number()]),
+        z.array(z.string()),
+      ])
+      .optional(),
+    /** PR #116c: 動的 indicator パラメータ (例: { period: 20 })。snapshot key 構築に使う */
+    params: z.record(z.string(), z.number().finite()).optional(),
+    /** PR #116c: 別 indicator series との比較 (例: close > ema(20)) */
+    compareTarget: ScreeningBacktestIndicatorOperandSchema.optional(),
+  })
+  .superRefine((val, ctx) => {
+    // PR #118 Copilot review #1: value と compareTarget の排他性を schema 上で強制。
+    // どちらも未指定 / 両方指定の不正 payload を schema 段階で弾く (= Python 側で
+    // 静かに false 評価されて原因が隠れることを防ぐ)。DSL 側 ConditionSchema と同じ規則。
+    const hasValue = val.value !== undefined;
+    const hasTarget = val.compareTarget !== undefined;
+    if (!hasValue && !hasTarget) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'condition は value または compareTarget のどちらかを指定する必要がある',
+      });
+      return;
+    }
+    if (hasValue && hasTarget) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'condition に value と compareTarget を同時指定することはできない (排他)',
+      });
+    }
+  });
 
 const ScreeningBacktestStopLossSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('atr_multiple'), value: z.number().positive() }),

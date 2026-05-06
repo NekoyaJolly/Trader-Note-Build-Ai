@@ -14,7 +14,10 @@
 
 import type { LensFeature, LensFeatureSnapshot } from '../../lenses/types';
 import { DSLEvaluator } from '../../strategy_dsl/DSLEvaluator';
-import { collectDslIndicatorNeeds } from '../../strategy_dsl/dslOhlcvFeatureNeeds';
+import {
+  collectDslIndicatorNeeds,
+  collectDslOhlcvFeatureNeeds,
+} from '../../strategy_dsl/dslOhlcvFeatureNeeds';
 import {
   computeTsSurrogateIndicator,
   isTsSurrogateIndicatorFeature,
@@ -191,6 +194,52 @@ describe('PR #116b: collectDslIndicatorNeeds', () => {
     const needs = collectDslIndicatorNeeds(dsl);
     const keys = needs.map((n) => n.snapshotKey).sort();
     expect(keys).toEqual(['ohlcv.atr(period=21)', 'ohlcv.rsi(period=7)']);
+  });
+});
+
+// PR #120 Copilot review #9: collectDslOhlcvFeatureNeeds が compareTarget を walk して
+// params なしの rsi/atr を正しく mark することを pin。これがないと
+// `close > rsi (compareTarget)` が rsi 未計算で常に false 評価になる。
+describe('PR #120: collectDslOhlcvFeatureNeeds は compareTarget も走査する', () => {
+  it('compareTarget が rsi (params なし) を参照すると rsi=true を mark', () => {
+    const dsl = makeDsl([
+      {
+        lens: 'ohlcv',
+        feature: 'close',
+        op: '>',
+        compareTarget: { lens: 'ohlcv', feature: 'rsi' },
+      },
+    ]);
+    const needs = collectDslOhlcvFeatureNeeds(dsl);
+    expect(needs.rsi).toBe(true);
+  });
+
+  it('compareTarget が atr (params なし) を参照すると atr=true を mark', () => {
+    const dsl = makeDsl([
+      {
+        lens: 'ohlcv',
+        feature: 'close',
+        op: '>',
+        compareTarget: { lens: 'ohlcv', feature: 'atr' },
+      },
+    ]);
+    const needs = collectDslOhlcvFeatureNeeds(dsl);
+    expect(needs.atr).toBe(true);
+  });
+
+  it('compareTarget の params あり (例: rsi(period=7)) は collectDslOhlcvFeatureNeeds 経路では mark しない (= dynamic 経路)', () => {
+    const dsl = makeDsl([
+      {
+        lens: 'ohlcv',
+        feature: 'close',
+        op: '>',
+        compareTarget: { lens: 'ohlcv', feature: 'rsi', params: { period: 7 } },
+      },
+    ]);
+    const needs = collectDslOhlcvFeatureNeeds(dsl);
+    // params あり は collectDslIndicatorNeeds で別 key (rsi(period=7)) として処理されるため
+    // legacy 経路の rsi は不要 → false のまま
+    expect(needs.rsi).toBe(false);
   });
 });
 
