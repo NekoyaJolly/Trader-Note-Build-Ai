@@ -53,9 +53,13 @@ interface BarFeatureTable {
   atr?: number[];
   /**
    * PR #116b: params 付き / 新 indicator (ema/sma/macd/bb 等) の series を
-   * snapshot key (`feature(stable_params)`) で格納する。
+   * **snapshot key (= `${lens}.${feature}` または `${lens}.${feature}(stable_params)`、
+   * lens を含む形)** で格納する。`snapshotAt` が lens prefix (`ohlcv.`) を剥がして
+   * features Map の feature key 部分を構築する。
+   *
    * params なしの ohlcv.rsi / ohlcv.atr は legacy パスの `rsi` / `atr` フィールド
-   * (period=14 既定) で扱う。新 series は本 Map 経由で snapshotAt が詰める。
+   * (period=14 既定) で扱う (= `collectDslIndicatorNeeds` 側で除外済み、indicatorts
+   * 由来の値で上書きしないことで後方互換を保つ)。
    */
   indicatorSeries?: Map<string, number[]>;
 }
@@ -425,8 +429,12 @@ export function runDslSimulation(
   const featureNeeds = collectDslOhlcvFeatureNeeds(dsl);
   const indicatorNeeds = collectDslIndicatorNeeds(dsl);
   const needAtrForTransactionCost = (roundTripCostAtrMult ?? 0) > 0;
-  const needWarmup =
-    featureNeeds.rsi || featureNeeds.atr || needAtrForTransactionCost || indicatorNeeds.length > 0;
+  // PR #116b Copilot review #1:
+  // needWarmup から indicatorNeeds を除外する。短期 indicator (例: ema(5)) でも
+  // minLen=20 が適用されると初期バーのエントリ機会を丸ごとスキップしてしまう。
+  // indicator 系列は warm-up 期間中 NaN で snapshotAt が値なし扱い → leaf が false
+  // になるので、minLen 強制は legacy rsi/atr/取引コスト用途に限定する。
+  const needWarmup = featureNeeds.rsi || featureNeeds.atr || needAtrForTransactionCost;
   const minLen = needWarmup ? 20 : 2;
   if (bars.length < minLen) {
     const empty = calculateSummary([], initialCapital);

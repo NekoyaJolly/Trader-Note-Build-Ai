@@ -68,7 +68,11 @@ export interface DslIndicatorNeed {
   feature: string;
   /** 動的パラメータ。空なら指標のデフォルト値 */
   params: ConditionParams;
-  /** snapshot key (= `${lens}.${feature}(stable_params)` 形式) */
+  /**
+   * snapshot key。`buildSnapshotKey(lens, feature, params)` の戻り値で、
+   * - params なしの場合: `${lens}.${feature}`              (例: `ohlcv.rsi`)
+   * - params ありの場合: `${lens}.${feature}(stable_params)` (例: `ohlcv.ema(period=20)`)
+   */
   snapshotKey: string;
 }
 
@@ -90,6 +94,15 @@ export function collectDslIndicatorNeeds(dsl: StrategyDSL): DslIndicatorNeed[] {
   const visit = (lens: string, feature: string, params?: ConditionParams) => {
     if (lens !== 'ohlcv') return;
     if (!isTsSurrogateIndicatorFeature(feature)) return;
+    // PR #116b Copilot review #2+#3:
+    // params なしの ohlcv.rsi / ohlcv.atr は legacy 経路 (BarFeatureTable.rsi / atr,
+    // surrogateFitnessSimulation 内の SMA / TR ベース計算) で既に扱われている。
+    // ここで indicatorService 由来 (Wilder ベース) の series を need に積むと、
+    // snapshotAt で legacy 計算結果を上書きして数値が変わる = 既存戦略の挙動が変わる。
+    // params 指定があるケースのみ TS surrogate adapter 経由で別 key に詰める。
+    if ((feature === 'rsi' || feature === 'atr') && (!params || Object.keys(params).length === 0)) {
+      return;
+    }
     const key = buildSnapshotKey(lens, feature, params);
     if (!map.has(key)) {
       map.set(key, { feature, params: params ?? {}, snapshotKey: key });

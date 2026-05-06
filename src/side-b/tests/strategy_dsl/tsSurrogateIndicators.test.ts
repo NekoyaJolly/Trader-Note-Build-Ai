@@ -168,6 +168,30 @@ describe('PR #116b: collectDslIndicatorNeeds', () => {
     const needs = collectDslIndicatorNeeds(dsl);
     expect(needs).toHaveLength(0);
   });
+
+  // PR #116b Copilot review #2+#3: params なしの rsi/atr は legacy 経路と二重計算で
+  // snapshotAt 上書きが起きるため除外する
+  it('params なしの ohlcv.rsi は need に含まれない (legacy 経路で計算済み)', () => {
+    const dsl = makeDsl([{ lens: 'ohlcv', feature: 'rsi', op: '<', value: 30 }]);
+    const needs = collectDslIndicatorNeeds(dsl);
+    expect(needs).toHaveLength(0);
+  });
+
+  it('params なしの ohlcv.atr も need に含まれない (legacy 経路で計算済み)', () => {
+    const dsl = makeDsl([{ lens: 'ohlcv', feature: 'atr', op: '>', value: 0.001 }]);
+    const needs = collectDslIndicatorNeeds(dsl);
+    expect(needs).toHaveLength(0);
+  });
+
+  it('params 指定された rsi/atr (= legacy と異なるパラメータ) は need に含まれる', () => {
+    const dsl = makeDsl([
+      { lens: 'ohlcv', feature: 'rsi', op: '<', value: 30, params: { period: 7 } },
+      { lens: 'ohlcv', feature: 'atr', op: '>', value: 0.001, params: { period: 21 } },
+    ]);
+    const needs = collectDslIndicatorNeeds(dsl);
+    const keys = needs.map((n) => n.snapshotKey).sort();
+    expect(keys).toEqual(['ohlcv.atr(period=21)', 'ohlcv.rsi(period=7)']);
+  });
 });
 
 describe('PR #116b: DSLEvaluator が params / compareTarget を解釈する', () => {
