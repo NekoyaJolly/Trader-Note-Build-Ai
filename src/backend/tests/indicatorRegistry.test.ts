@@ -21,6 +21,7 @@ import {
   INDICATOR_REGISTRY,
   IndicatorRegistryEntrySchema,
   IndicatorRegistryFileSchema,
+  PivotTypeSchema,
   getIndicatorRegistryEntry,
   getPythonSupportedIndicators,
   isIndicatorId,
@@ -147,6 +148,62 @@ describe('PR #115: shared indicator registry', () => {
       for (const meta of INDICATOR_METADATA) {
         expect(meta).not.toHaveProperty('support');
       }
+    });
+
+    // PR #115 Copilot review #3: defaultParams の shallow copy が機能することを pin
+    it('getIndicatorMetadata の defaultParams を mutation しても registry 側が汚染されない', () => {
+      const m1 = getIndicatorMetadata('rsi');
+      // defaultParams は IndicatorParams 型 (period 等の optional field) なので
+      // 直接代入ではなく Object.assign で書き換える
+      Object.assign(m1?.defaultParams ?? {}, { period: 999 });
+      const m2 = getIndicatorMetadata('rsi');
+      expect(m2?.defaultParams).toEqual({ period: 14 });
+      expect(getIndicatorRegistryEntry('rsi')?.defaultParams).toEqual({ period: 14 });
+    });
+  });
+
+  // PR #115 Copilot review #1 + #2: defaultParams の値型を indicator 別に厳密化
+  describe('defaultParams 値型の厳密化 (Copilot review #1 + #2)', () => {
+    function makeBaseEntry(): Record<string, unknown> {
+      return {
+        id: 'rsi',
+        displayName: 'RSI',
+        category: 'momentum',
+        description: 'desc',
+        defaultParams: { period: 14 },
+        paramConstraints: {},
+        support: { pythonSeries: true, tsSurrogate: false },
+      };
+    }
+
+    it('rsi.defaultParams.period が number なら通る', () => {
+      const entry = { ...makeBaseEntry(), defaultParams: { period: 14 } };
+      expect(() => IndicatorRegistryEntrySchema.parse(entry)).not.toThrow();
+    });
+
+    it('rsi.defaultParams.period が string ("14") だと弾く (validateIndicatorConfig が数値比較を前提とするため)', () => {
+      const entry = { ...makeBaseEntry(), defaultParams: { period: '14' } };
+      expect(() => IndicatorRegistryEntrySchema.parse(entry)).toThrow(/数値である必要がある/);
+    });
+
+    it('pivot.defaultParams.pivotType は PivotTypeSchema の値のみ通る', () => {
+      const base = { ...makeBaseEntry(), id: 'pivot', displayName: 'Pivot', category: 'support_resistance' as const };
+      // standard / fibonacci / camarilla はすべて通る
+      for (const t of PivotTypeSchema.options) {
+        const entry = { ...base, defaultParams: { pivotType: t } };
+        expect(() => IndicatorRegistryEntrySchema.parse(entry)).not.toThrow();
+      }
+      // 範囲外は弾く
+      const bad = { ...base, defaultParams: { pivotType: 'invalid_xyz' } };
+      expect(() => IndicatorRegistryEntrySchema.parse(bad)).toThrow(/pivotType は/);
+    });
+
+    it('PivotTypeSchema は実際に schema 内で参照されている (= 不要定義ではない)', () => {
+      // Copilot review #1: PivotTypeSchema が unused だと指摘されていたが
+      // superRefine で利用するように変更した。`pivotType: "invalid"` を弾くことで
+      // 実際に schema 経由で使われていることを保証する。
+      const entry = { ...makeBaseEntry(), id: 'pivot', defaultParams: { pivotType: 'invalid' } };
+      expect(() => IndicatorRegistryEntrySchema.parse(entry)).toThrow();
     });
   });
 });

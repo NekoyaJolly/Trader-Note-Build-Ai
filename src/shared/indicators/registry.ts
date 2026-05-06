@@ -97,7 +97,34 @@ export const IndicatorRegistryEntrySchema = z
     paramConstraints: ParamConstraintsSchema,
     support: IndicatorSupportSchema,
   })
-  .strict();
+  .strict()
+  .superRefine((val, ctx) => {
+    // PR #115 Copilot review #1 + #2:
+    // defaultParams は全体で number | string を許容するが、`validateIndicatorConfig`
+    // 等の下流は数値比較を前提とするため、indicator ごとに value 型を厳密化する。
+    //   - pivot.pivotType: PivotTypeSchema ('standard' | 'fibonacci' | 'camarilla') のみ
+    //   - それ以外の全 indicator / 全 key: 必ず number (period: "14" のような string 数値は弾く)
+    for (const [key, value] of Object.entries(val.defaultParams)) {
+      if (val.id === 'pivot' && key === 'pivotType') {
+        const parsed = PivotTypeSchema.safeParse(value);
+        if (!parsed.success) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['defaultParams', key],
+            message: `pivotType は ${PivotTypeSchema.options.join(' / ')} のいずれか`,
+          });
+        }
+        continue;
+      }
+      if (typeof value !== 'number') {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['defaultParams', key],
+          message: `${val.id}.defaultParams.${key} は数値である必要がある (pivot.pivotType を除く)`,
+        });
+      }
+    }
+  });
 export type IndicatorRegistryEntry = z.infer<typeof IndicatorRegistryEntrySchema>;
 
 /** registry.json ルート。 */

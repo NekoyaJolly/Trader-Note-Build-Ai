@@ -156,7 +156,9 @@ function projectRegistryEntry(entry: (typeof INDICATOR_REGISTRY)[number]): Indic
     description: entry.description,
     // registry 側は Record<string, number | string>。`IndicatorParams` の optional field 群と
     // 整合する範囲しか入っていない (前提: registry.json をいじる側がレビューで担保)。
-    defaultParams: entry.defaultParams,
+    // PR #115 Copilot review #3: shallow copy しないと consumer 側のミューテーションが
+    // registry を汚染する。paramConstraints と同じく spread でコピーする。
+    defaultParams: { ...entry.defaultParams },
     paramConstraints: { ...entry.paramConstraints },
   };
 }
