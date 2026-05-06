@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -16,6 +17,8 @@ import numpy as np
 import pandas as pd
 import pandas_ta as ta
 from backtesting import Backtest, Strategy
+
+logger = logging.getLogger(__name__)
 
 from .engine_protocol import (
     BTConfig,
@@ -198,9 +201,20 @@ class BacktestingPyEngine:
                         "volume": pd.Series(self.data.Volume),
                     }
                 )
+                # PR #118 Copilot review #6: 未対応 indicator / params で series を計算
+                # できなかった事例は snapshot 登録せず leaf 評価で false に倒れる挙動だが、
+                # 「常に false」の原因が観測できないため WARN ログを出力する。
+                # 戦略 instance に未対応 snapshot key リストを保持して、上位層から取り出す
+                # 経路の整備は別 PR で対応 (本 PR では observability のみ最低限担保)。
+                self._unsupported_dynamic_indicators: List[str] = []
                 for snapshot_key, lens_name, feature_key, params_items in required_dynamic_indicators:
                     if lens_name != "ohlcv":
                         # 別 lens は現状未対応 → snapshot に登録せず、leaf 評価で false に倒れる
+                        logger.warning(
+                            "PR #116c: dynamic indicator skipped (non-ohlcv lens): %s",
+                            snapshot_key,
+                        )
+                        self._unsupported_dynamic_indicators.append(snapshot_key)
                         continue
                     params_dict = dict(params_items)
                     try:
@@ -210,8 +224,16 @@ class BacktestingPyEngine:
                             field="value",
                             df=ohlcv_df,
                         )
-                    except (ValueError, KeyError):
-                        # 未対応 indicator は snapshot 登録せず leaf 評価で false 化
+                    except (ValueError, KeyError) as exc:
+                        # 未対応 indicator は snapshot 登録せず leaf 評価で false 化、
+                        # 原因究明のため WARN ログを残す。
+                        logger.warning(
+                            "PR #116c: dynamic indicator skipped (compute_indicator_series failed): %s — %s: %s",
+                            snapshot_key,
+                            type(exc).__name__,
+                            exc,
+                        )
+                        self._unsupported_dynamic_indicators.append(snapshot_key)
                         continue
                     self._dynamic_indicator_series[snapshot_key] = values
                 self._entry_bar: Optional[int] = None

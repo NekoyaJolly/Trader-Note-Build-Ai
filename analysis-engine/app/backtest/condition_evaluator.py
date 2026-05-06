@@ -58,11 +58,17 @@ SUPPORTED_LENS_FEATURE_MAP: dict = {
 def _format_stable_number(v: Any) -> str:
     """TS `formatStableNumber` と同等の数値正規化。
 
+    - **bool は明示的に弾く** (PR #118 Copilot review #4: Python の bool は int の
+      subclass なので `isinstance(v, (int, float))` を素通りしてしまう。TS 側
+      `z.number()` と挙動を揃えるため)
     - 非有限値 (NaN / Infinity) は ValueError
     - -0 は 0 に正規化
     - 整数値の float (例: 20.0) は int 表記 (= TS の `String(20)` と一致)
     - その他は `str(v)`
     """
+    if isinstance(v, bool):
+        # bool は int subclass なので isinstance(v, int) が true になる。先に弾く。
+        raise ValueError(f"snapshot key params: bool は使えない (value={v!r})")
     if not isinstance(v, (int, float)):
         raise ValueError(f"snapshot key params: 数値以外は使えない (value={v!r})")
     if isinstance(v, float):
@@ -98,17 +104,27 @@ def _resolve_snapshot_key(condition: ScreeningBacktestCondition):
     PR #116c: `params` 付き condition は `${lens}.${feature}(stable_params)` 形式の
     snapshot key を返す (= runner_backtesting_py.py が pre-compute した series の key)。
     `params` なしは従来通り `SUPPORTED_LENS_FEATURE_MAP` 経由で簡略 key (例: 'rsi') に。
+
+    PR #118 Copilot review #3: `params` 付きでも **lens は ohlcv のみ許可**
+    (= analysis-engine が対応するのは ohlcv lens の indicator のみ)。それ以外は
+    None を返して `unsupportedConditions` 観測経路に乗せる。
     """
     params = getattr(condition, "params", None)
     if params:
+        if condition.lensName != "ohlcv":
+            return None
         return _build_dynamic_snapshot_key(condition.lensName, condition.featureKey, params)
     return SUPPORTED_LENS_FEATURE_MAP.get((condition.lensName, condition.featureKey))
 
 
 def _resolve_operand_snapshot_key(operand: ScreeningBacktestIndicatorOperand):
-    """PR #116c: compareTarget operand から snapshot key を構築する。"""
+    """PR #116c: compareTarget operand から snapshot key を構築する。
+    PR #118 Copilot review #3: dynamic key (params 付き) も ohlcv lens のみ許可。
+    """
     params = getattr(operand, "params", None)
     if params:
+        if operand.lensName != "ohlcv":
+            return None
         return _build_dynamic_snapshot_key(operand.lensName, operand.featureKey, params)
     return SUPPORTED_LENS_FEATURE_MAP.get((operand.lensName, operand.featureKey))
 

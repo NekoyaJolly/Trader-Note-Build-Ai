@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class IndicatorSpec(BaseModel):
@@ -113,6 +114,23 @@ class WalkForwardResponse(BaseModel):
 # ============================================
 
 
+def _validate_finite_non_bool_params(params: Optional[Dict[str, float]]) -> Optional[Dict[str, float]]:
+    """PR #118 Copilot review #5: params の値検証。
+
+    - bool は弾く (Python の bool は int の subclass で `Dict[str, float]` を素通り
+      してしまう。TS 側 `z.number()` と挙動を揃える)
+    - NaN / Infinity も弾く (snapshot key 構築で例外になる前に早期検出)
+    """
+    if params is None:
+        return None
+    for k, v in params.items():
+        if isinstance(v, bool):
+            raise ValueError(f"params の値に bool は使えない (key={k}, value={v!r})")
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            raise ValueError(f"params の値に非有限値は使えない (key={k}, value={v})")
+    return params
+
+
 class ScreeningBacktestIndicatorOperand(BaseModel):
     """PR #116c: condition の右辺に別 indicator series を置く operand。
 
@@ -125,6 +143,11 @@ class ScreeningBacktestIndicatorOperand(BaseModel):
     lensName: str
     featureKey: str
     params: Optional[Dict[str, float]] = None
+
+    @field_validator("params")
+    @classmethod
+    def _params_finite_non_bool(cls, v):
+        return _validate_finite_non_bool_params(v)
 
 
 class ScreeningBacktestCondition(BaseModel):
@@ -139,6 +162,11 @@ class ScreeningBacktestCondition(BaseModel):
     PR #116c: `params` (動的 indicator パラメータ) と `compareTarget` (indicator
     operand) を追加。後方互換のため両方 optional、`value` も optional 化
     (compareTarget 指定時は value 不要)。
+
+    PR #118 Copilot review #5: TS 側 schema (analysisEngine.ts ConditionSchema)
+    と同じく以下を model 側でも強制する:
+    - params の値は bool / 非有限値を弾く
+    - value と compareTarget は **ちょうど一方** を指定する (排他)
     """
 
     lensName: str
@@ -147,6 +175,25 @@ class ScreeningBacktestCondition(BaseModel):
     value: Optional[Any] = None
     params: Optional[Dict[str, float]] = None
     compareTarget: Optional[ScreeningBacktestIndicatorOperand] = None
+
+    @field_validator("params")
+    @classmethod
+    def _params_finite_non_bool(cls, v):
+        return _validate_finite_non_bool_params(v)
+
+    @model_validator(mode="after")
+    def _exclusive_value_or_compare_target(self):
+        has_value = self.value is not None
+        has_target = self.compareTarget is not None
+        if not has_value and not has_target:
+            raise ValueError(
+                "condition は value または compareTarget のどちらかを指定する必要がある"
+            )
+        if has_value and has_target:
+            raise ValueError(
+                "condition に value と compareTarget を同時指定することはできない (排他)"
+            )
+        return self
 
 
 class ScreeningBacktestStopLoss(BaseModel):

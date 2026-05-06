@@ -136,9 +136,15 @@ function dslConditionToBacktest(
             value: resolveValueLike(c.value, resolvedParams),
         };
     }
-    // schema 上 value / compareTarget のどちらか必須なのでここには来ないが、
-    // 型 narrow のため fallback (= 評価器側で false に倒れる)
-    return base;
+    // PR #118 Copilot review #2: ConditionSchema の superRefine が
+    // value / compareTarget の片方を必須としているためここには到達しないが、
+    // 型破壊経路 (例: `as` キャストで強制) で素通りすると不完全な condition を
+    // Python 側に送ってしまい、原因不明の false 評価になる。明示 throw で
+    // 早期に気付けるようにする。
+    throw new Error(
+        `dslConditionToBacktest: condition に value / compareTarget が両方欠落 ` +
+            `(lens=${c.lens}, feature=${c.feature}, op=${c.op})`,
+    );
 }
 
 /**
