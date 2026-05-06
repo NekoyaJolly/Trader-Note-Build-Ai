@@ -57,13 +57,14 @@ describe('loadPrompt', () => {
     });
 
     // PR #113: mutation / crossover prompt の lens/feature 範囲明示を pin
-    describe('PR #113: mutation / crossover に対応 lens/feature 範囲が明記されている', () => {
-        it('mutation.md に対応 lens/feature 表が含まれている', () => {
+    // PR #117e: 動的 indicator metadata 注入で構造変更 (静的 feature 表 + macro 注入)
+    describe('PR #113 + #117e: mutation / crossover に対応 lens/feature 範囲が明記されている', () => {
+        it('mutation.md に静的 ohlcv feature 表が含まれている', () => {
             const content = loadPrompt('mutation');
             // 対応 lens=ohlcv のみであることを明示
             expect(content).toContain('利用可能なエントリー条件');
-            expect(content).toContain('対応 lens / feature');
-            // 7 features 全て列挙
+            expect(content).toContain('静的 ohlcv feature');
+            // 7 static features 全て列挙
             expect(content).toContain('| `ohlcv` | `open` |');
             expect(content).toContain('| `ohlcv` | `high` |');
             expect(content).toContain('| `ohlcv` | `low` |');
@@ -74,10 +75,6 @@ describe('loadPrompt', () => {
             // alias 表記を許容
             expect(content).toContain("`lens='rsi', feature='value'`");
             expect(content).toContain("`lens='atr', feature='value'`");
-            // 未対応 lens を明示禁止
-            expect(content).toContain('サポート外');
-            expect(content).toContain('ema');
-            expect(content).toContain('macd');
             // 「常に true」条件の禁止例
             expect(content).toContain('常に true');
             // PR #113 Copilot review: コード例ブロックは「json」ではなく説明用 (LLM がそのままコピーしても無効 JSON にならないこと)
@@ -85,17 +82,26 @@ describe('loadPrompt', () => {
             // PR #113 Copilot review: ParamRef を value に使う場合は parameters 側で定義必須を注記
             expect(content).toContain('ParamRef を value に使う場合は');
             expect(content).toContain('parameters');
+            // PR #117e: 動的 indicator metadata 注入 macro
+            expect(content).toContain('{{INDICATOR_METADATA_TABLE}}');
+            expect(content).toContain('動的パラメータ付き indicator');
+            // PR #117e: PR #116 の新機能 (params / compareTarget) が変異の種類に追加されている
+            expect(content).toContain('Condition.params');
+            expect(content).toContain('compareTarget');
         });
 
-        it('crossover.md に対応 lens/feature 表が含まれている', () => {
+        it('crossover.md に静的 ohlcv feature 表 + macro 注入が含まれている', () => {
             const content = loadPrompt('crossover');
             expect(content).toContain('利用可能なエントリー条件');
-            expect(content).toContain('対応 lens / feature');
+            expect(content).toContain('静的 ohlcv feature');
             expect(content).toContain('| `ohlcv` | `rsi` |');
             expect(content).toContain('| `ohlcv` | `atr` |');
-            // 親が未対応 lens を持つ場合の処理方針
+            // 親が未対応 lens を持つ場合の処理方針 (= 旧 pin、文言は変わるが意図は維持)
             expect(content).toContain('対応 lens に置き換える');
             expect(content).toContain('常に true');
+            // PR #117e: 動的 indicator metadata 注入 macro
+            expect(content).toContain('{{INDICATOR_METADATA_TABLE}}');
+            expect(content).toContain('動的パラメータ付き indicator');
         });
     });
 });

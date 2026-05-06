@@ -9,7 +9,8 @@ import { randomUUID } from 'crypto';
 import type { ZodError } from 'zod';
 
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
-import { loadPromptWithGlobal } from '../prompts/loader';
+import { formatIndicatorMetadataTable } from '../../shared/indicators/promptTable';
+import { loadPromptWithGlobal, type PromptMacros } from '../prompts/loader';
 import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
 import { modelFor } from '../../config';
@@ -95,16 +96,22 @@ export class MutationAgent {
   /**
    * Phase 6.7a: PromptRegistry.getCompositeActive で DB の __global__ + mutation active を合成。
    * Registry 未 seed / DB 不整合時は loadPromptWithGlobal にフォールバック。
+   *
+   * PR #117e: `{{INDICATOR_METADATA_TABLE}}` macro を registry から動的に注入する。
+   * Registry 経路もファイル経路も同じ macros 辞書を渡すため、両方で展開される。
    */
   private async resolveSystemPrompt(): Promise<string> {
+    const macros: PromptMacros = {
+      INDICATOR_METADATA_TABLE: formatIndicatorMetadataTable(),
+    };
     try {
-      return await promptRegistry.getCompositeActive('mutation');
+      return await promptRegistry.getCompositeActive('mutation', macros);
     } catch (err) {
       console.warn(
         '[MutationAgent] Registry 合成に失敗、ファイル fallback:',
         err instanceof Error ? err.message : err,
       );
-      return loadPromptWithGlobal('mutation');
+      return loadPromptWithGlobal('mutation', macros);
     }
   }
 
