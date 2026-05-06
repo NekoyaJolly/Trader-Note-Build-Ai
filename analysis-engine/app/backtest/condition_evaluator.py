@@ -8,18 +8,26 @@ Python 側 BT が DSL.entry.trigger (= ConditionGroup) を **構造を保った�
     - 評価本体は本ファイル (純粋関数)。Strategy.next() からは「現バーの feature 値辞書」
       と「ConditionGroup」を渡して true/false を受け取るだけ。
     - 対応 lens は **`ohlcv` のみ** (= 現 DSL の表現範囲、TS surrogate と同等)。
-      features: `open / high / low / close / volume / rsi / atr` の 7 種。
+      static features: `open / high / low / close / volume / rsi / atr` の 7 種。
     - 未対応 lens / feature は **leaf 単位で false を返す**。verdict は OOS validation 側で
       analysis-engine が判定する (= leaf が常に false でも tradeCount=0 → unknown 経路で
       正しく観測される)。
-    - `params` / `compareTarget` は v1 では未対応 (DSL 側にも無いため)。
+    - PR #116c: `params` (動的 indicator パラメータ) と `compareTarget` (indicator
+      operand 比較) に対応。snapshot key は `${lens}.${feature}(stable_params)`
+      形式 (TS の `buildSnapshotKey` と同形)、`runner_backtesting_py.py` の
+      `_build_feature_snapshot` がこの key で series を提供する。
 """
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Optional, Sequence, Union
+import math
+from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple, Union
 
-from app.schemas import ScreeningBacktestCondition, ScreeningBacktestConditionGroup
+from app.schemas import (
+    ScreeningBacktestCondition,
+    ScreeningBacktestConditionGroup,
+    ScreeningBacktestIndicatorOperand,
+)
 
 
 # =================================================================
@@ -47,14 +55,92 @@ SUPPORTED_LENS_FEATURE_MAP: dict = {
 }
 
 
+def _format_stable_number(v: Any) -> str:
+    """TS `formatStableNumber` と同等の数値正規化。
+
+    - **bool は明示的に弾く** (PR #118 Copilot review #4: Python の bool は int の
+      subclass なので `isinstance(v, (int, float))` を素通りしてしまう。TS 側
+      `z.number()` と挙動を揃えるため)
+    - 非有限値 (NaN / Infinity) は ValueError
+    - -0 は 0 に正規化
+    - 整数値の float (例: 20.0) は int 表記 (= TS の `String(20)` と一致)
+    - その他は `str(v)`
+    """
+    if isinstance(v, bool):
+        # bool は int subclass なので isinstance(v, int) が true になる。先に弾く。
+        raise ValueError(f"snapshot key params: bool は使えない (value={v!r})")
+    if not isinstance(v, (int, float)):
+        raise ValueError(f"snapshot key params: 数値以外は使えない (value={v!r})")
+    if isinstance(v, float):
+        if math.isnan(v) or math.isinf(v):
+            raise ValueError(f"snapshot key params: 非有限値は使えない (value={v})")
+    if v == 0:
+        return "0"
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v)
+
+
+def _format_stable_params(params: Optional[Mapping[str, Any]]) -> str:
+    """TS `formatStableParams` と同等。キー昇順 + 数値正規化で `key=value,key=value` 形式。"""
+    if not params:
+        return ""
+    parts = []
+    for k in sorted(params.keys()):
+        parts.append(f"{k}={_format_stable_number(params[k])}")
+    return ",".join(parts)
+
+
+def _build_dynamic_snapshot_key(lens_name: str, feature_key: str, params: Optional[Mapping[str, Any]]) -> str:
+    """PR #116c: params 付き indicator の snapshot key を構築 (TS `buildSnapshotKey` 同等)。"""
+    if not params:
+        return f"{lens_name}.{feature_key}"
+    return f"{lens_name}.{feature_key}({_format_stable_params(params)})"
+
+
 def _resolve_snapshot_key(condition: ScreeningBacktestCondition):
-    """leaf 条件を snapshot key に正規化する。サポート外なら None。"""
+    """leaf 条件を snapshot key に正規化する。サポート外なら None。
+
+    PR #116c: `params` 付き condition は `${lens}.${feature}(stable_params)` 形式の
+    snapshot key を返す (= runner_backtesting_py.py が pre-compute した series の key)。
+    `params` なしは従来通り `SUPPORTED_LENS_FEATURE_MAP` 経由で簡略 key (例: 'rsi') に。
+
+    PR #118 Copilot review #3: `params` 付きでも **lens は ohlcv のみ許可**
+    (= analysis-engine が対応するのは ohlcv lens の indicator のみ)。それ以外は
+    None を返して `unsupportedConditions` 観測経路に乗せる。
+    """
+    params = getattr(condition, "params", None)
+    if params:
+        if condition.lensName != "ohlcv":
+            return None
+        return _build_dynamic_snapshot_key(condition.lensName, condition.featureKey, params)
     return SUPPORTED_LENS_FEATURE_MAP.get((condition.lensName, condition.featureKey))
 
 
+def _resolve_operand_snapshot_key(operand: ScreeningBacktestIndicatorOperand):
+    """PR #116c: compareTarget operand から snapshot key を構築する。
+    PR #118 Copilot review #3: dynamic key (params 付き) も ohlcv lens のみ許可。
+    """
+    params = getattr(operand, "params", None)
+    if params:
+        if operand.lensName != "ohlcv":
+            return None
+        return _build_dynamic_snapshot_key(operand.lensName, operand.featureKey, params)
+    return SUPPORTED_LENS_FEATURE_MAP.get((operand.lensName, operand.featureKey))
+
+
 def is_supported_leaf(condition: ScreeningBacktestCondition) -> bool:
-    """leaf 条件が Python 評価器でサポートされているか。"""
-    return _resolve_snapshot_key(condition) is not None
+    """leaf 条件が Python 評価器でサポートされているか。
+
+    PR #116c: params 付き condition は dynamic snapshot key 経由で対応 (= snapshot に
+    値があれば true と判定可能)。compareTarget の operand も同様に snapshot から引ける形なら OK。
+    """
+    if _resolve_snapshot_key(condition) is None:
+        return False
+    target = getattr(condition, "compareTarget", None)
+    if target is not None and _resolve_operand_snapshot_key(target) is None:
+        return False
+    return True
 
 
 # =================================================================
@@ -126,20 +212,40 @@ def _evaluate_leaf(
     `(lensName, featureKey)` を `SUPPORTED_LENS_FEATURE_MAP` で snapshot key に正規化
     してから snapshot を引く (= `rsi.value` も `ohlcv.rsi` も同じ snapshot key 'rsi'
     を経由するので両方の DSL 表現を受けられる)。
+
+    PR #116c: `params` 付き condition は dynamic snapshot key (`lens.feature(stable_params)`)
+    経由で snapshot を引く。`compareTarget` 付きは right operand を別 snapshot key から取る。
     """
     snapshot_key = _resolve_snapshot_key(condition)
     if snapshot_key is None:
         return False
-    value = feature_snapshot.get(snapshot_key)
-    if value is None:
+    left = feature_snapshot.get(snapshot_key)
+    if left is None:
         return False
     # 数値である NaN は比較不能なので False に倒す
     try:
-        if value != value:  # NaN
+        if left != left:  # NaN
             return False
     except TypeError:
         pass
-    return _compare(value, condition.op, condition.value)
+
+    # PR #116c: compareTarget があれば right operand を別 indicator series から取る
+    target = getattr(condition, "compareTarget", None)
+    if target is not None:
+        target_key = _resolve_operand_snapshot_key(target)
+        if target_key is None:
+            return False
+        right = feature_snapshot.get(target_key)
+        if right is None:
+            return False
+        try:
+            if right != right:  # NaN
+                return False
+        except TypeError:
+            pass
+        return _compare(left, condition.op, right)
+
+    return _compare(left, condition.op, condition.value)
 
 
 # =================================================================
@@ -219,6 +325,49 @@ def collect_required_ohlcv_features(
             snapshot_key = _resolve_snapshot_key(cond)
             if snapshot_key is not None:
                 out.add(snapshot_key)
+    return out
+
+
+def collect_required_dynamic_indicator_keys(
+    group: Optional[ScreeningBacktestConditionGroup],
+) -> Iterable[Tuple[str, str, str, Tuple[Tuple[str, Any], ...]]]:
+    """PR #116c: ConditionGroup を再帰走査し、params 付き indicator (= dynamic snapshot key)
+    の (snapshot_key, lens, feature, params_items) を集めて返す。
+
+    `runner_backtesting_py.py` の `_build_strategy_class` がこれを使って必要な
+    indicator series を `compute_indicator_series` で pre-compute、`feature_snapshot`
+    に詰める (key = snapshot_key)。
+
+    戻り値の `params_items` は `tuple(sorted(params.items()))` で hashable + 比較可能。
+    呼び出し側で重複排除に利用する。
+    """
+    out: list = []
+    seen: set = set()
+    if group is None:
+        return out
+
+    def _visit(lens_name: str, feature_key: str, params: Optional[Mapping[str, Any]]) -> None:
+        if not params:
+            return  # static feature は別経路 (collect_required_ohlcv_features) で扱う
+        snapshot_key = _build_dynamic_snapshot_key(lens_name, feature_key, params)
+        if snapshot_key in seen:
+            return
+        seen.add(snapshot_key)
+        params_items = tuple(sorted(params.items()))
+        out.append((snapshot_key, lens_name, feature_key, params_items))
+
+    def _walk(g: ScreeningBacktestConditionGroup) -> None:
+        for child in g.conditions:
+            if _is_group(child):
+                _walk(child)  # type: ignore[arg-type]
+            else:
+                cond: ScreeningBacktestCondition = child  # type: ignore[assignment]
+                _visit(cond.lensName, cond.featureKey, getattr(cond, "params", None))
+                target = getattr(cond, "compareTarget", None)
+                if target is not None:
+                    _visit(target.lensName, target.featureKey, getattr(target, "params", None))
+
+    _walk(group)
     return out
 
 

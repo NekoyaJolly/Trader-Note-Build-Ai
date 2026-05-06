@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -16,6 +17,8 @@ import numpy as np
 import pandas as pd
 import pandas_ta as ta
 from backtesting import Backtest, Strategy
+
+logger = logging.getLogger(__name__)
 
 from .engine_protocol import (
     BTConfig,
@@ -25,14 +28,17 @@ from .engine_protocol import (
     BTTrade,
 )
 from .condition_evaluator import (
+    collect_required_dynamic_indicator_keys,
     collect_required_ohlcv_features,
     evaluate_condition_group,
 )
+from app.indicators import compute_indicator_series
 
 
 # 本実装のバージョン (DB の engineVersion カラムに記録される)
 # PR #112: DSL conditions 評価対応で minor 更新
-ENGINE_VERSION = "analysis-engine/backtesting.py@0.6.5+conditions"
+# PR #116c: params 付き indicator / compareTarget 評価対応
+ENGINE_VERSION = "analysis-engine/backtesting.py@0.6.5+conditions+indicators"
 
 
 class BacktestingPyEngine:
@@ -132,6 +138,13 @@ class BacktestingPyEngine:
         rsi_length = 14  # RSI length は固定 14 (TS surrogate と整合)
         # PR #112: 必要 feature を事前抽出 (trigger_group が None なら空集合)
         required_features = collect_required_ohlcv_features(trigger_group)
+        # PR #116c: params 付き indicator / compareTarget の operand を事前抽出。
+        # 戻り値は (snapshot_key, lens, feature, params_items) tuple のリスト。
+        # snapshot_key は `${lens}.${feature}(stable_params)` 形式で、
+        # `_build_feature_snapshot` がこの key で series 値を提供する。
+        required_dynamic_indicators = list(
+            collect_required_dynamic_indicator_keys(trigger_group)
+        )
 
         # SL/TP の swing 計算用 lookback bars (BTStopLossSwingPoint)
         swing_lookback_bars = (
@@ -172,10 +185,66 @@ class BacktestingPyEngine:
                     )
                 else:
                     self._rsi = None
+                # PR #116c: params 付き indicator (ema(20) / macd(12,26,9) 等) と
+                # compareTarget の operand を pre-compute。snapshot key (lens.feature(params))
+                # → 値配列のマップとして保持し、`_build_feature_snapshot` が現バー値を
+                # 取り出して feature_snapshot に詰める。
+                # `compute_indicator_series` (analysis-engine 既存) を呼んで pandas_ta で
+                # 計算、戻り値の `values` は OHLCV 行数と同じ長さ (warm-up は None)。
+                self._dynamic_indicator_series: dict = {}
+                ohlcv_df = pd.DataFrame(
+                    {
+                        "open": pd.Series(self.data.Open),
+                        "high": pd.Series(self.data.High),
+                        "low": pd.Series(self.data.Low),
+                        "close": close,
+                        "volume": pd.Series(self.data.Volume),
+                    }
+                )
+                # PR #118 Copilot review #6: 未対応 indicator / params で series を計算
+                # できなかった事例は snapshot 登録せず leaf 評価で false に倒れる挙動だが、
+                # 「常に false」の原因が観測できないため WARN ログを出力する。
+                # 戦略 instance に未対応 snapshot key リストを保持して、上位層から取り出す
+                # 経路の整備は別 PR で対応 (本 PR では observability のみ最低限担保)。
+                self._unsupported_dynamic_indicators: List[str] = []
+                for snapshot_key, lens_name, feature_key, params_items in required_dynamic_indicators:
+                    if lens_name != "ohlcv":
+                        # 別 lens は現状未対応 → snapshot に登録せず、leaf 評価で false に倒れる
+                        logger.warning(
+                            "PR #116c: dynamic indicator skipped (non-ohlcv lens): %s",
+                            snapshot_key,
+                        )
+                        self._unsupported_dynamic_indicators.append(snapshot_key)
+                        continue
+                    params_dict = dict(params_items)
+                    try:
+                        _key, values = compute_indicator_series(
+                            indicator_id=feature_key,
+                            params=params_dict,
+                            field="value",
+                            df=ohlcv_df,
+                        )
+                    except (ValueError, KeyError) as exc:
+                        # 未対応 indicator は snapshot 登録せず leaf 評価で false 化、
+                        # 原因究明のため WARN ログを残す。
+                        logger.warning(
+                            "PR #116c: dynamic indicator skipped (compute_indicator_series failed): %s — %s: %s",
+                            snapshot_key,
+                            type(exc).__name__,
+                            exc,
+                        )
+                        self._unsupported_dynamic_indicators.append(snapshot_key)
+                        continue
+                    self._dynamic_indicator_series[snapshot_key] = values
                 self._entry_bar: Optional[int] = None
 
             def _build_feature_snapshot(self) -> dict:
-                """現バーの ohlcv feature 値辞書を作る。条件評価器に渡す入力。"""
+                """現バーの ohlcv feature 値辞書を作る。条件評価器に渡す入力。
+
+                static feature (open/high/low/close/volume/rsi/atr) に加えて、
+                PR #116c で pre-compute した params 付き indicator の値も
+                snapshot key (`lens.feature(stable_params)`) で詰める。
+                """
                 snapshot = {
                     "open": float(self.data.Open[-1]),
                     "high": float(self.data.High[-1]),
@@ -186,6 +255,15 @@ class BacktestingPyEngine:
                 }
                 if self._rsi is not None:
                     snapshot["rsi"] = float(self._rsi[-1])
+                # PR #116c: dynamic indicator (params 付き) の現バー値を追加。
+                # `compute_indicator_series` の戻り値 `values` はバー数と同じ長さの
+                # `List[Optional[float]]` (warm-up は None)。現バー index は `len(self.data) - 1`。
+                idx = len(self.data) - 1
+                for snapshot_key, values in self._dynamic_indicator_series.items():
+                    if 0 <= idx < len(values):
+                        snapshot[snapshot_key] = values[idx]
+                    else:
+                        snapshot[snapshot_key] = None
                 # NaN は None に倒す (= condition_evaluator 側で false 判定)
                 for k, v in list(snapshot.items()):
                     if isinstance(v, float) and (v != v):

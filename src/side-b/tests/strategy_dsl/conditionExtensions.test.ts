@@ -171,16 +171,18 @@ describe('PR #116a: ConditionSchema 拡張', () => {
     });
   });
 
-  describe('6. dslToBacktestNotePayload: compareTarget 付き condition は sentinel 化 (PR #116c までの一時措置)', () => {
+  describe('6. dslToBacktestNotePayload: PR #116c で compareTarget をネイティブ schema で表現', () => {
     it('value 付き condition は通常の payload', () => {
       const dsl = makeBaseStrategy([{ lens: 'ohlcv', feature: 'rsi', op: '<', value: 30 }]);
       const payload = dslToBacktestNotePayload(dsl, {});
       const conds = payload.conditions ?? [];
       expect(conds).toHaveLength(1);
       expect(conds[0]).toMatchObject({ lensName: 'ohlcv', featureKey: 'rsi', op: '<', value: 30 });
+      // params なし condition は notePayload.indicators[] には積まれない (= static feature)
+      expect(payload.indicators).toEqual([]);
     });
 
-    it('compareTarget 付き condition は sentinel value で payload に出る (Python 側で false 評価)', () => {
+    it('compareTarget 付き condition は新 schema フィールドで素直に渡される (PR #116c で sentinel 撤去)', () => {
       const dsl = makeBaseStrategy([
         {
           lens: 'ohlcv',
@@ -194,28 +196,37 @@ describe('PR #116a: ConditionSchema 拡張', () => {
       expect(conds).toHaveLength(1);
       expect(conds[0].lensName).toBe('ohlcv');
       expect(conds[0].featureKey).toBe('close');
-      // PR #116a Copilot review #4: sentinel は dslToBacktestNotePayload 側が単一 source。
-      // PR #116a Copilot review #1: op も `==` に固定して `number == string` で必ず false 評価
-      expect(conds[0].op).toBe('==');
-      expect(conds[0].value).toBe(UNSUPPORTED_COMPARE_TARGET_SENTINEL);
+      // op は元の op がそのまま残る (sentinel 経路は撤去)
+      expect(conds[0].op).toBe('>');
+      // value はもう sentinel ではない (= 新 schema では undefined)
+      expect(conds[0].value).toBeUndefined();
+      // compareTarget はネイティブ schema で表現
+      expect(conds[0].compareTarget).toEqual({
+        lensName: 'ohlcv',
+        featureKey: 'ema',
+        params: { period: 20 },
+      });
+      // notePayload.indicators[] に compareTarget の operand spec が自動 populate
+      expect(payload.indicators).toEqual([
+        { indicatorId: 'ema', params: { period: 20 }, field: 'value' },
+      ]);
     });
 
-    it('compareTarget + op="!=" でも sentinel 経路で確実に false 評価される (PR #116a Copilot review #1)', () => {
-      // 旧実装は op をそのまま残していたため `op="!=" + value=string` は number != string が true になり
-      // 「未対応 condition は常に false 評価」が崩れていた。op を `==` に固定することで
-      // op に関わらず必ず false に倒れるようになっている。
+    it('params 付き leaf condition も notePayload.indicators[] に自動 populate', () => {
       const dsl = makeBaseStrategy([
-        {
-          lens: 'ohlcv',
-          feature: 'close',
-          op: '!=',
-          compareTarget: { lens: 'ohlcv', feature: 'ema', params: { period: 20 } },
-        },
+        { lens: 'ohlcv', feature: 'ema', op: '>', value: 1.05, params: { period: 50 } },
       ]);
       const payload = dslToBacktestNotePayload(dsl, {});
-      const conds = payload.conditions ?? [];
-      expect(conds[0].op).toBe('==');
-      expect(conds[0].value).toBe(UNSUPPORTED_COMPARE_TARGET_SENTINEL);
+      expect(payload.indicators).toEqual([
+        { indicatorId: 'ema', params: { period: 50 }, field: 'value' },
+      ]);
+      // leaf 自体にも params が残る
+      expect(payload.conditions?.[0].params).toEqual({ period: 50 });
+    });
+
+    it('UNSUPPORTED_COMPARE_TARGET_SENTINEL は deprecated だが値は維持 (下流互換)', () => {
+      // PR #116c で sentinel 経路は撤去されたが、定数 export は下流の参照箇所のため残す
+      expect(UNSUPPORTED_COMPARE_TARGET_SENTINEL).toBe('__pr116a_unsupported_compareTarget__');
     });
   });
 
