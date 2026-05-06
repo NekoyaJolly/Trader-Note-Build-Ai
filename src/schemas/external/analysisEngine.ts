@@ -207,3 +207,92 @@ export const AnalysisEngineScreeningBacktestResponseSchema = z.object({
 export type AnalysisEngineScreeningBacktestResponse = z.infer<
   typeof AnalysisEngineScreeningBacktestResponseSchema
 >;
+
+// ============================================
+// Critical-4 PR #109/#110: OOS Validation
+// ============================================
+//
+// Python 側 `/v1/oos-validation` の request/response。Side-B `OosBacktestRunnerResult`
+// (TS) と互換命名で運ぶ vehicle。verdict は **analysis-engine 側で判定** する
+// (= Side-B では再判定しない、PR #105 設計確定事項)。
+
+export const OosValidationVerdictSchema = z.enum(['passed', 'failed', 'unknown']);
+export type OosValidationVerdict = z.infer<typeof OosValidationVerdictSchema>;
+
+export const OosValidationFailureReasonSchema = z.enum([
+  'low_oos_pf',
+  'insufficient_oos_trades',
+  'high_oos_drawdown',
+  'oos_engine_error',
+  'insufficient_oos_data',
+  'unknown',
+]);
+export type OosValidationFailureReason = z.infer<typeof OosValidationFailureReasonSchema>;
+
+export const OosValidationThresholdsSchema = z.object({
+  /** OOS 期間の PF 下限 (default 1.0)。 */
+  minOosPf: z.number().positive().default(1.0),
+  /** OOS 期間の最低 trade 数 (default 20)。 */
+  minOosTrades: z.number().int().nonnegative().default(20),
+  /** OOS 期間の最大 maxDD (% スケール、default 30)。 */
+  maxOosDrawdown: z.number().positive().default(30.0),
+});
+export type OosValidationThresholds = z.infer<typeof OosValidationThresholdsSchema>;
+
+export const AnalysisEngineOosValidationRequestSchema = z.object({
+  hypothesisId: z.string().min(1),
+  symbol: z.string().min(1),
+  timeframe: z.string().min(1),
+  /** OOS 期間 start (= 既に Side-B adapter 側で OOS split 済みの範囲)。 */
+  startDate: z.string().datetime(),
+  /** OOS 期間 end。 */
+  endDate: z.string().datetime(),
+  notePayload: ScreeningBacktestNotePayloadSchema,
+  config: ScreeningBacktestConfigSchema.optional().default(() => ({
+    initialCapital: 10_000,
+    leverage: 1,
+    tradingCost: 0,
+  })),
+  thresholds: OosValidationThresholdsSchema.optional().default(() => ({
+    minOosPf: 1.0,
+    minOosTrades: 20,
+    maxOosDrawdown: 30.0,
+  })),
+});
+
+export type AnalysisEngineOosValidationRequest = z.infer<
+  typeof AnalysisEngineOosValidationRequestSchema
+>;
+
+/**
+ * `runOosValidation` の **入力型** (= `z.input`)。schema の `.default(...)` を持つ
+ * フィールド (`config` / `thresholds`) を **省略可能** にする。defaults は schema parse の
+ * 中で埋まるため、adapter 側で値を再ハードコードしなくても良い (= 単一の真実、
+ * PR #110 Copilot review #2 対応で drift 防止)。
+ */
+export type AnalysisEngineOosValidationRequestInput = z.input<
+  typeof AnalysisEngineOosValidationRequestSchema
+>;
+
+export const OosValidationMetricsSchema = z.object({
+  pf: z.number().nullable(),
+  tradeCount: z.number().int().nonnegative(),
+  maxDrawdown: z.number().nullable(),
+  expectancy: z.number().nullable(),
+  winRate: z.number().nullable(),
+});
+export type OosValidationMetrics = z.infer<typeof OosValidationMetricsSchema>;
+
+export const AnalysisEngineOosValidationResponseSchema = z.object({
+  metrics: OosValidationMetricsSchema,
+  verdict: OosValidationVerdictSchema,
+  failureReasons: z.array(OosValidationFailureReasonSchema).default([]),
+  evaluationKind: z.literal('oos').default('oos'),
+  warnings: z.array(z.string()).default([]),
+  engineVersion: z.string().min(1),
+  unsupportedConditions: z.array(z.string()).default([]),
+});
+
+export type AnalysisEngineOosValidationResponse = z.infer<
+  typeof AnalysisEngineOosValidationResponseSchema
+>;

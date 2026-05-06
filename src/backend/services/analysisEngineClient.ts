@@ -11,6 +11,8 @@ import { z } from 'zod';
 import type {
   AnalysisEngineIndicatorSpec,
   AnalysisEngineIndicatorSeriesResponse,
+  AnalysisEngineOosValidationRequestInput,
+  AnalysisEngineOosValidationResponse,
   AnalysisEngineScreeningBacktestRequest,
   AnalysisEngineScreeningBacktestResponse,
 } from '../../schemas/external/analysisEngine';
@@ -18,6 +20,8 @@ import {
   AnalysisEngineIndicatorSeriesByVersionRequestSchema,
   AnalysisEngineIndicatorSeriesRequestSchema,
   AnalysisEngineIndicatorSeriesResponseSchema,
+  AnalysisEngineOosValidationRequestSchema,
+  AnalysisEngineOosValidationResponseSchema,
   AnalysisEngineScreeningBacktestRequestSchema,
   AnalysisEngineScreeningBacktestResponseSchema,
 } from '../../schemas/external/analysisEngine';
@@ -193,6 +197,40 @@ export async function runScreeningBacktest(
   const parsed = AnalysisEngineScreeningBacktestResponseSchema.safeParse(res.data);
   if (!parsed.success) {
     throw new Error(`analysis-engine BT レスポンスが不正です: ${parsed.error.message}`);
+  }
+
+  return parsed.data;
+}
+
+/**
+ * Critical-4 PR #109/#110: `/v1/oos-validation` を呼ぶ薄い HTTP client。
+ *
+ * Side-B `oosBacktestRunner` の adapter 経由で呼ばれ、結果はそのまま
+ * `OosBacktestRunnerResult` (TS) に詰め替えて Evolution layer に運ばれる。
+ * **verdict は analysis-engine 側が判定** したものを尊重する (= Side-B では再判定しない、
+ * PR #105 設計確定事項)。
+ *
+ * timeout は ScreeningBacktest と同じ 180s。
+ */
+export async function runOosValidation(
+  // PR #110 Copilot review #2: schema の `.default(...)` を使う `config` / `thresholds` を
+  // adapter 側で再ハードコードしないため、input 型を `z.input<>` 系に変える。
+  // Zod parse 内で defaults が埋まり、call site では省略可能になる。
+  input: AnalysisEngineOosValidationRequestInput,
+): Promise<AnalysisEngineOosValidationResponse> {
+  const baseUrl = getAnalysisEngineBaseUrl();
+  const payload = AnalysisEngineOosValidationRequestSchema.parse(input);
+
+  const res = await axios.post(`${baseUrl}/v1/oos-validation`, payload, {
+    timeout: 180_000,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  const parsed = AnalysisEngineOosValidationResponseSchema.safeParse(res.data);
+  if (!parsed.success) {
+    throw new Error(
+      `analysis-engine OOS validation レスポンスが不正です: ${parsed.error.message}`,
+    );
   }
 
   return parsed.data;

@@ -28,6 +28,11 @@ import type {
   OosMetrics,
   WalkForwardFold,
 } from './oosValidationResultMapper';
+import { runOosValidation } from '../../backend/services/analysisEngineClient';
+import { dslToBacktestNotePayload } from '../strategy_dsl/dslToBacktestNotePayload';
+import { defaultParameterValues } from '../strategy_dsl/dslParameterUtils';
+import { normalizeCTraderSymbol } from '../../utils/symbolNormalization';
+import { normalizeTimeframe } from '../constants/timeframes';
 
 // =================================================================
 // 型定義: analysis-engine 結果を運ぶ vehicle
@@ -169,3 +174,85 @@ export function buildOosSplitWindowV1(input: {
 export function isOosWindowEmpty(window: OosSplitWindow): boolean {
   return window.oosStart === window.oosEnd;
 }
+
+// =================================================================
+// 本番 default runner (PR #110)
+// =================================================================
+
+/**
+ * ISO 日付文字列を analysis-engine が受け取る RFC3339 (`Z` 付き UTC) に整形。
+ *
+ * PR #110 Copilot review #1 対応:
+ *   旧実装は `value.includes('T')` ならそのまま返していたため、
+ *   `'2024-10-01T00:00:00'` のように TZ/Z が無い datetime が来ると
+ *   `z.string().datetime()` で弾かれていた。`new Date(value).toISOString()` で
+ *   常に `Z` 付き UTC に統一する。
+ *
+ * - YYYY-MM-DD のみ → `YYYY-MM-DDT00:00:00.000Z` (Date 解釈は UTC 00:00)
+ * - すでに Z / オフセット付き ISO → 同じ瞬間の UTC ISO を返す
+ * - TZ 抜きの datetime → ローカル TZ で解釈されたものを UTC ISO に変換
+ *   (= 表現形式は ISO に揃う、analysis-engine 側で受理可能)
+ */
+function toIsoDateTimeForEngine(value: string): string {
+  return new Date(value).toISOString();
+}
+
+/**
+ * 本番経路で `oosBacktestRunner` の default として注入する adapter。
+ *
+ * - analysis-engine `/v1/oos-validation` を呼び、結果をそのまま `OosBacktestRunnerResult`
+ *   に詰め替えて Evolution layer に運ぶ。**verdict は analysis-engine 側が判定** したものを
+ *   尊重し、Side-B では再判定しない (PR #105 設計確定事項)。
+ * - 例外は throw (= EvolutionLoop 側で `oos_engine_error` として観測される)
+ * - 既存 `runFormalBacktest` adapter (= ScreeningBacktest 経路) と同じ symbol/timeframe
+ *   正規化を行う。OHLCV の表記ゆれで OOS 評価が空回りしないようにするため。
+ *
+ * EvolutionLoop の constructor では本関数を **default としてはセットしない** (= 既存テストの
+ * 期待値 = `null` で `not_evaluated` 観測 を保護するため)。本番 scheduler / smoke 側で
+ * 明示的に `oosBacktestRunner: defaultOosBacktestRunner` を渡す運用にする。
+ */
+export const defaultOosBacktestRunner: OosBacktestRunnerFn = async ({
+  dsl,
+  startDate,
+  endDate,
+}) => {
+  // DSL → analysis-engine notePayload (= ScreeningBacktest と同じ converter を流用)
+  const params = defaultParameterValues(dsl);
+  const notePayload = dslToBacktestNotePayload(dsl, params);
+  const symbol = normalizeCTraderSymbol(dsl.symbol);
+  const timeframe = normalizeTimeframe(dsl.timeframe);
+
+  // PR #110 Copilot review #2 対応: `config` / `thresholds` は schema の `.default(...)` に
+  // 任せて drift を防ぐ (= 単一の真実 = `AnalysisEngineOosValidationRequestSchema` の defaults)。
+  // 将来閾値を変えるときは schema 側だけ更新すればよい。
+  const response = await runOosValidation({
+    hypothesisId: dsl.id,
+    symbol,
+    timeframe,
+    startDate: toIsoDateTimeForEngine(startDate),
+    endDate: toIsoDateTimeForEngine(endDate),
+    notePayload,
+  });
+
+  return {
+    metrics: {
+      pf: response.metrics.pf,
+      tradeCount: response.metrics.tradeCount,
+      maxDrawdown: response.metrics.maxDrawdown,
+      expectancy: response.metrics.expectancy,
+      winRate: response.metrics.winRate,
+    },
+    verdict: response.verdict,
+    failureReasons: response.failureReasons,
+    evaluationKind: response.evaluationKind,
+    warnings:
+      response.warnings.length > 0 || response.unsupportedConditions.length > 0
+        ? [
+            ...response.warnings,
+            ...(response.unsupportedConditions.length > 0
+              ? [`unsupportedConditions=${response.unsupportedConditions.join(',')}`]
+              : []),
+          ]
+        : undefined,
+  };
+};

@@ -71,6 +71,7 @@ import { CrossoverAgent } from '../agents/CrossoverAgent';
 import { MutationAgent } from '../agents/MutationAgent';
 import { DiversityEnforcer } from '../evolution/DiversityEnforcer';
 import { EvolutionLoop } from '../evolution/EvolutionLoop';
+import { defaultOosBacktestRunner } from '../evolution/analysisEngineRobustnessAdapter';
 import { StrategyPopulation } from '../evolution/StrategyPopulation';
 import { SurrogateFitnessSimulator } from '../strategy_dsl/SurrogateFitnessSimulator';
 import {
@@ -840,6 +841,9 @@ export class SideBScheduler {
     };
 
     // Phase 5A: EdgeLedger への自動登録は撤廃（候補抽出のみ）
+    // PR #110: 本番 scheduler では analysis-engine `/v1/oos-validation` を叩く
+    //   `defaultOosBacktestRunner` を注入し、validation_candidate に対する OOS 観測を
+    //   実データで動かす (= validation_confirmed / oos_passed / oos_failed が trend に出る)
     const loop = new EvolutionLoop({
       population,
       adapter: new SurrogateFitnessSimulator(),
@@ -847,6 +851,7 @@ export class SideBScheduler {
       crossoverAgent: new CrossoverAgent(),
       enforcer: new DiversityEnforcer(),
       defaultPeriod,
+      oosBacktestRunner: defaultOosBacktestRunner,
     });
 
     const errors: string[] = [];
