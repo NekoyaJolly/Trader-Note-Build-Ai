@@ -23,20 +23,38 @@ from app.schemas import ScreeningBacktestCondition, ScreeningBacktestConditionGr
 
 
 # =================================================================
-# feature 名の対応表 (lensName.featureKey → 評価可能か)
+# feature 名の対応表 (lensName.featureKey → snapshot key)
 # =================================================================
 
-# 現 DSL が表現できる範囲。TS surrogate と完全に同じセット。
-SUPPORTED_OHLCV_FEATURES = frozenset(
-    ["open", "high", "low", "close", "volume", "rsi", "atr"]
-)
+# Side-B DSL は歴史的経緯で **2 系統の表現** を持つ:
+#   (A) `lens: 'ohlcv', feature: 'rsi'`    ← TS surrogate (snapshotAt) が期待する形
+#   (B) `lens: 'rsi',   feature: 'value'`  ← 過去の DSL fixture / mutation 出力に存在
+# 両方を取りこぼさないため、`(lensName, featureKey)` から **snapshot key** に正規化する
+# alias マップを単一の真実として持つ。snapshot key は `runner_backtesting_py.py` の
+# `_build_feature_snapshot()` が辞書のキーとして使う名前。
+SUPPORTED_LENS_FEATURE_MAP: dict = {
+    # 標準 ohlcv lens
+    ("ohlcv", "open"): "open",
+    ("ohlcv", "high"): "high",
+    ("ohlcv", "low"): "low",
+    ("ohlcv", "close"): "close",
+    ("ohlcv", "volume"): "volume",
+    ("ohlcv", "rsi"): "rsi",
+    ("ohlcv", "atr"): "atr",
+    # 別系統表現の alias (= 旧 DSL fixture / mutation 出力での書き方)
+    ("rsi", "value"): "rsi",
+    ("atr", "value"): "atr",
+}
+
+
+def _resolve_snapshot_key(condition: ScreeningBacktestCondition):
+    """leaf 条件を snapshot key に正規化する。サポート外なら None。"""
+    return SUPPORTED_LENS_FEATURE_MAP.get((condition.lensName, condition.featureKey))
 
 
 def is_supported_leaf(condition: ScreeningBacktestCondition) -> bool:
     """leaf 条件が Python 評価器でサポートされているか。"""
-    if condition.lensName != "ohlcv":
-        return False
-    return condition.featureKey in SUPPORTED_OHLCV_FEATURES
+    return _resolve_snapshot_key(condition) is not None
 
 
 # =================================================================
@@ -103,10 +121,16 @@ def _evaluate_leaf(
     condition: ScreeningBacktestCondition,
     feature_snapshot: Mapping[str, Optional[float]],
 ) -> bool:
-    """単一 leaf を評価する。サポート外 lens / feature は False を返す。"""
-    if not is_supported_leaf(condition):
+    """単一 leaf を評価する。サポート外 lens / feature は False を返す。
+
+    `(lensName, featureKey)` を `SUPPORTED_LENS_FEATURE_MAP` で snapshot key に正規化
+    してから snapshot を引く (= `rsi.value` も `ohlcv.rsi` も同じ snapshot key 'rsi'
+    を経由するので両方の DSL 表現を受けられる)。
+    """
+    snapshot_key = _resolve_snapshot_key(condition)
+    if snapshot_key is None:
         return False
-    value = feature_snapshot.get(condition.featureKey)
+    value = feature_snapshot.get(snapshot_key)
     if value is None:
         return False
     # 数値である NaN は比較不能なので False に倒す
@@ -176,10 +200,12 @@ def evaluate_condition_group(
 def collect_required_ohlcv_features(
     group: Optional[ScreeningBacktestConditionGroup],
 ) -> set:
-    """ConditionGroup を再帰走査し、必要な ohlcv featureKey 集合を返す。
+    """ConditionGroup を再帰走査し、必要な **snapshot key** 集合を返す。
 
     Strategy.init() で「どの指標を pandas_ta で計算するか」を決めるために使う。
-    - 戻り値は `{'rsi', 'atr', 'close', ...}` のセット
+    - 戻り値は `{'rsi', 'atr', 'close', ...}` のセット (= snapshot key)
+    - `(lens, feature)` のゆらぎ (`'ohlcv.rsi'` vs `'rsi.value'`) は alias マップで
+      同じ snapshot key (`'rsi'`) に正規化される
     - サポート外 lens の leaf は無視する (= 評価で false に倒れるため計算不要)
     """
     out: set = set()
@@ -190,6 +216,29 @@ def collect_required_ohlcv_features(
             out |= collect_required_ohlcv_features(child)  # type: ignore[arg-type]
         else:
             cond: ScreeningBacktestCondition = child  # type: ignore[assignment]
-            if is_supported_leaf(cond):
-                out.add(cond.featureKey)
+            snapshot_key = _resolve_snapshot_key(cond)
+            if snapshot_key is not None:
+                out.add(snapshot_key)
+    return out
+
+
+def collect_unsupported_leaf_descriptions(
+    group: Optional[ScreeningBacktestConditionGroup],
+) -> list:
+    """PR #112 Copilot review #2: ConditionGroup 内の **未対応 leaf** を文字列化して集める。
+
+    `describe_unsupported_conditions` (flatten 配列向け) と並列で、triggerGroup ベースの
+    未対応観測経路を提供する。将来 client が flatten conditions[] を空にして
+    triggerGroup だけ送る場合でも、unsupportedConditions が漏れないようにする。
+    """
+    out: list = []
+    if group is None:
+        return out
+    for child in group.conditions:
+        if _is_group(child):
+            out.extend(collect_unsupported_leaf_descriptions(child))  # type: ignore[arg-type]
+        else:
+            cond: ScreeningBacktestCondition = child  # type: ignore[assignment]
+            if not is_supported_leaf(cond):
+                out.append(f"{cond.lensName}.{cond.featureKey} {cond.op} {cond.value!r}")
     return out

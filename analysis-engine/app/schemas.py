@@ -116,8 +116,11 @@ class WalkForwardResponse(BaseModel):
 class ScreeningBacktestCondition(BaseModel):
     """仮説の MachineReadableCondition (Node 側と同形)。
 
-    段階 1 では Python 側でレンズ feature の評価機構を持たないため、
-    実際にはエントリー条件として使われず unsupportedConditions に積まれる。
+    PR #112 で Python 側に評価器 (`condition_evaluator.evaluate_condition_group`) を
+    実装。`triggerGroup` 経由で受けた条件は `Strategy.next()` で評価され entry 判定に
+    使われる。flatten 配列 `conditions[]` (本フィールドのリスト) は後方互換のため残す。
+    `condition_evaluator.SUPPORTED_LENS_FEATURE_MAP` に該当しない leaf は
+    `unsupportedConditions` に積まれ、verdict 判定からは PR #109 で除外済み。
     """
 
     lensName: str

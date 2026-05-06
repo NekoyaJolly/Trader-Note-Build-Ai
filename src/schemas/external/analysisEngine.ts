@@ -140,7 +140,12 @@ export type ScreeningBacktestConditionGroup = {
   >;
 };
 
-const ScreeningBacktestConditionGroupSchema: z.ZodType<ScreeningBacktestConditionGroup> = z.lazy(
+/**
+ * PR #112 Copilot review #4: schema を `export` して下流 consumer (テスト / mapper /
+ * 他 service) からも runtime で parse できるよう一貫性を保つ (型 `ScreeningBacktestConditionGroup`
+ * とセットで export)。
+ */
+export const ScreeningBacktestConditionGroupSchema: z.ZodType<ScreeningBacktestConditionGroup> = z.lazy(
   () =>
     z.object({
       logic: z.enum(['AND', 'OR']),

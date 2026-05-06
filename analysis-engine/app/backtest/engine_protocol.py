@@ -10,9 +10,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Literal, Optional, Protocol, Union
+from typing import TYPE_CHECKING, List, Literal, Optional, Protocol, Union
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    # 型のみの参照 (= ランタイム循環 import を防ぐ。BTSpec.trigger_group の型注釈用)
+    from app.schemas import ScreeningBacktestConditionGroup
 
 
 # ---------------------------------------------------------------
@@ -95,10 +99,10 @@ class BTSpec:
     # 将来 engine 側で評価したい指標仕様 (現段階では未使用)
     indicators: List[dict] = field(default_factory=list)
     # PR #112: ConditionGroup (再帰構造)。BTSpec を engine 非依存に保つため、
-    # 型は schemas.ScreeningBacktestConditionGroup または互換オブジェクトを受ける
-    # (object 型で吸収)。具体実装 (BacktestingPyEngine) は
-    # condition_evaluator.evaluate_condition_group に直接渡して評価する。
-    trigger_group: Optional[object] = None
+    # ランタイム import は避け TYPE_CHECKING ブロックで型のみ参照する。
+    # 具体実装 (BacktestingPyEngine) は condition_evaluator.evaluate_condition_group に
+    # 直接渡して評価する。
+    trigger_group: Optional["ScreeningBacktestConditionGroup"] = None
 
 
 @dataclass(frozen=True)

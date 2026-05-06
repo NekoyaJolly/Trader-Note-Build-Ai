@@ -247,10 +247,15 @@ class BacktestingPyEngine:
                         self._entry_bar = len(self.data) - 1
 
             def _pip_size(self, entry_price: float) -> float:
-                """pip サイズを推定。JPY ペアは 0.01、その他 forex は 0.0001、
-                超低価格 (= 0.01 未満) では 0.0001 を返す保守値。
+                """pip サイズを entry_price レンジから推定する。
+
+                - `entry_price >= 50.0`: JPY ペア相当 (例: USDJPY=150.x) → 0.01
+                - それ以外: 標準 forex / 低価格資産 → 0.0001 (保守値)
+
+                v1 はシンボル文字列を見ずに価格レンジだけで判定するため、特殊資産
+                (BTC など) では実価格と pip 単位がズレる可能性がある。設計書 §4 で
+                許容される簡易推定として扱う。
                 """
-                # 価格レンジから JPY ペア相当か判定 (例: 150.000 のような 3 桁台)
                 if entry_price >= 50.0:
                     return 0.01
                 return 0.0001

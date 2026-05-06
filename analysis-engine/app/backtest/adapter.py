@@ -128,20 +128,40 @@ def btresult_to_response_parts(result: BTResult):
 # ---------------------------------------------------------------
 
 
-def describe_unsupported_conditions(conditions: List[ScreeningBacktestCondition]) -> List[str]:
+def describe_unsupported_conditions(
+    conditions: List[ScreeningBacktestCondition],
+    trigger_group: object = None,
+) -> List[str]:
     """engine が解釈できなかった条件だけを返す (PR #112 で評価経路を実装)。
 
-    現行対応範囲: `lensName='ohlcv'` の `{open, high, low, close, volume, rsi, atr}`
-    feature のみ。それ以外 (例: `lensName='ema'`, `lensName='elliott'`) は
-    `unsupportedConditions` に積むが、`triggerGroup` 評価の結果として false に倒れる
-    (= verdict 判定からは PR #109 で除外済み)。
-    """
-    from .condition_evaluator import is_supported_leaf  # 循環 import 回避のため遅延
+    現行対応範囲 (= `condition_evaluator.SUPPORTED_LENS_FEATURE_MAP`):
+        - `ohlcv.{open, high, low, close, volume, rsi, atr}`
+        - `rsi.value` / `atr.value` (= 旧 DSL fixture 互換 alias)
+    上記以外 (例: `ema.value`, `elliott.wave`) は `unsupportedConditions` に積むが、
+    `triggerGroup` 評価の結果として false に倒れる (= verdict 判定からは PR #109 で除外済み)。
 
+    PR #112 Copilot review #2: `trigger_group` が指定されている場合、`conditions[]` だけでなく
+    triggerGroup も再帰的に walk して未対応 leaf を集める。これにより将来 client が
+    flatten conditions[] を空にして triggerGroup だけ送る場合でも漏れない。重複は除去する。
+    """
+    from .condition_evaluator import (  # 循環 import 回避のため遅延
+        collect_unsupported_leaf_descriptions,
+        is_supported_leaf,
+    )
+
+    seen: set = set()
     out: List[str] = []
     for c in conditions:
         if not is_supported_leaf(c):
-            out.append(f"{c.lensName}.{c.featureKey} {c.op} {c.value!r}")
+            desc = f"{c.lensName}.{c.featureKey} {c.op} {c.value!r}"
+            if desc not in seen:
+                seen.add(desc)
+                out.append(desc)
+    if trigger_group is not None:
+        for desc in collect_unsupported_leaf_descriptions(trigger_group):  # type: ignore[arg-type]
+            if desc not in seen:
+                seen.add(desc)
+                out.append(desc)
     return out
 
 

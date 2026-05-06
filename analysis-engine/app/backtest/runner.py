@@ -100,7 +100,10 @@ def _empty_response(
     engine_version: str,
     extra_unsupported: Optional[List[str]] = None,
 ) -> ScreeningBacktestResponse:
-    unsupported = adapter.describe_unsupported_conditions(note_payload.conditions)
+    # PR #112: triggerGroup も walk して未対応 leaf を漏れなく集める。
+    unsupported = adapter.describe_unsupported_conditions(
+        note_payload.conditions, trigger_group=note_payload.triggerGroup
+    )
     if extra_unsupported:
         unsupported.extend(extra_unsupported)
     return ScreeningBacktestResponse(
@@ -174,5 +177,8 @@ def run_screening_backtest(
         trades=parts["trades"],
         equity=parts["equity"],
         engineVersion=parts["engineVersion"],
-        unsupportedConditions=adapter.describe_unsupported_conditions(req.notePayload.conditions),
+        # PR #112: triggerGroup も walk (= flatten conditions[] が空のケースでも漏れない)
+        unsupportedConditions=adapter.describe_unsupported_conditions(
+            req.notePayload.conditions, trigger_group=req.notePayload.triggerGroup
+        ),
     )
