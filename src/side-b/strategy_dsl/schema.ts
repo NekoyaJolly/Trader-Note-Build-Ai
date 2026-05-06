@@ -34,8 +34,12 @@ export const ConditionValueSchema = z.union([
  *
  * v1 では数値パラメータのみ受け付ける。pivot.pivotType のような string は
  * 必要になった時点で拡張する (PR #118+ 想定)。
+ *
+ * PR #116a Copilot review #2: `z.number()` だけだと `Infinity` / `NaN` が通って
+ * 後段の `formatStableNumber` (snapshotKey 構築) で例外になる。`finite()` で
+ * parse 時点で弾く (= invalid 入力は DSL Schema レベルで早期検出)。
  */
-export const ConditionParamsSchema = z.record(z.string(), z.number());
+export const ConditionParamsSchema = z.record(z.string(), z.number().finite());
 export type ConditionParams = z.infer<typeof ConditionParamsSchema>;
 
 /**

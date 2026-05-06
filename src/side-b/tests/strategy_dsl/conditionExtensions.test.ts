@@ -11,7 +11,10 @@
  *      (Python 側で false 評価される、PR #116c までの一時措置)
  */
 
-import { dslToBacktestNotePayload } from '../../strategy_dsl/dslToBacktestNotePayload';
+import {
+  UNSUPPORTED_COMPARE_TARGET_SENTINEL,
+  dslToBacktestNotePayload,
+} from '../../strategy_dsl/dslToBacktestNotePayload';
 import {
   ConditionSchema,
   IndicatorOperandSchema,
@@ -20,7 +23,22 @@ import {
 } from '../../strategy_dsl/schema';
 import { buildSnapshotKey, formatStableParams } from '../../strategy_dsl/snapshotKey';
 
-function makeBaseStrategy(triggerConditions: unknown[]): StrategyDSL {
+/**
+ * テスト用 trigger conditions の入力型 (Condition leaf の最小形)。
+ * PR #116a Copilot review #5: `unknown[]` は型が弱すぎるため、Condition の
+ * input 形に揃える (parse 通る形で受ける)。group ネストは現テストでは未使用のため
+ * leaf 型のみで十分。
+ */
+type ConditionLeafInput = {
+  lens: string;
+  feature: string;
+  op: string;
+  value?: unknown;
+  params?: Record<string, number>;
+  compareTarget?: { lens: string; feature: string; params?: Record<string, number> };
+};
+
+function makeBaseStrategy(triggerConditions: ConditionLeafInput[]): StrategyDSL {
   return StrategyDSLSchema.parse({
     id: 'test-strategy',
     generation: 0,
@@ -176,9 +194,41 @@ describe('PR #116a: ConditionSchema 拡張', () => {
       expect(conds).toHaveLength(1);
       expect(conds[0].lensName).toBe('ohlcv');
       expect(conds[0].featureKey).toBe('close');
-      expect(conds[0].op).toBe('>');
-      // PR #116c で payload schema が compareTarget を解釈するまで sentinel 経路
-      expect(conds[0].value).toBe('__pr116a_unsupported_compareTarget__');
+      // PR #116a Copilot review #4: sentinel は dslToBacktestNotePayload 側が単一 source。
+      // PR #116a Copilot review #1: op も `==` に固定して `number == string` で必ず false 評価
+      expect(conds[0].op).toBe('==');
+      expect(conds[0].value).toBe(UNSUPPORTED_COMPARE_TARGET_SENTINEL);
+    });
+
+    it('compareTarget + op="!=" でも sentinel 経路で確実に false 評価される (PR #116a Copilot review #1)', () => {
+      // 旧実装は op をそのまま残していたため `op="!=" + value=string` は number != string が true になり
+      // 「未対応 condition は常に false 評価」が崩れていた。op を `==` に固定することで
+      // op に関わらず必ず false に倒れるようになっている。
+      const dsl = makeBaseStrategy([
+        {
+          lens: 'ohlcv',
+          feature: 'close',
+          op: '!=',
+          compareTarget: { lens: 'ohlcv', feature: 'ema', params: { period: 20 } },
+        },
+      ]);
+      const payload = dslToBacktestNotePayload(dsl, {});
+      const conds = payload.conditions ?? [];
+      expect(conds[0].op).toBe('==');
+      expect(conds[0].value).toBe(UNSUPPORTED_COMPARE_TARGET_SENTINEL);
+    });
+  });
+
+  // PR #116a Copilot review #2: ConditionParamsSchema を z.number().finite() で厳密化
+  describe('ConditionParamsSchema: 非有限値は parse 時点で弾く', () => {
+    it('params に Infinity が含まれていると parse エラー', () => {
+      const c = { lens: 'ohlcv', feature: 'ema', op: '>', value: 1, params: { period: Infinity } };
+      expect(() => ConditionSchema.parse(c)).toThrow();
+    });
+
+    it('params に NaN が含まれていると parse エラー', () => {
+      const c = { lens: 'ohlcv', feature: 'ema', op: '>', value: 1, params: { period: NaN } };
+      expect(() => ConditionSchema.parse(c)).toThrow();
     });
   });
 });

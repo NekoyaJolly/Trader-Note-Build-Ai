@@ -38,14 +38,14 @@ export function buildSnapshotKey(
 }
 
 /**
- * params を「キー昇順 + 値を Number で正規化」して安定文字列に変換する。
+ * params を「キー昇順 + 値を Number で正規化」して安定キー文字列に変換する。
  *
  * 例: `{ slowPeriod: 26, fastPeriod: 12 }` → `fastPeriod=12,slowPeriod=26`
  *
- * JSON ではなく `key=value,key=value` 形式にしているのは:
+ * 出力形式は **JSON ではなく `key=value,key=value` 形式**。理由:
  *   - 人が読みやすい
- *   - パースしやすい (snapshot dump や log で目視確認できる)
- *   - JSON.stringify の whitespace / unicode escape の差異を回避
+ *   - snapshot dump や log で目視確認しやすい
+ *   - JSON.stringify の whitespace / unicode escape / プロパティ列挙順の差異を避ける
  */
 export function formatStableParams(params: ConditionParams): string {
   const sortedKeys = Object.keys(params).sort();

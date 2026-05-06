@@ -91,25 +91,34 @@ function collectFromGroup(group: ConditionGroup): DSLCondition[] {
 /**
  * PR #116a: `compareTarget` を持つ condition (= value 未指定) は old payload 形式
  * では表現できない。analysis-engine 側で compareTarget を解釈する PR #116c までは
- * sentinel string を value に詰めて Python 側で確実に false 評価させる
- * (`number op string` は false に倒れる)。
+ * sentinel string + op を `==` に固定して Python 側で確実に false 評価させる。
+ *
+ * PR #116a Copilot review #1: 元 `op` を残すと `op='!='` の時 `number != string`
+ * は **true** になり「確実に false」が崩れる。op も `==` に正規化することで
+ * `number == string` は必ず false に倒れる。
  *
  * PR #116c で payload schema を拡張したらこの sentinel 経路は撤去する。
  */
-const UNSUPPORTED_COMPARE_TARGET_SENTINEL = '__pr116a_unsupported_compareTarget__';
+export const UNSUPPORTED_COMPARE_TARGET_SENTINEL = '__pr116a_unsupported_compareTarget__';
 
 function dslConditionToBacktest(
     c: DSLCondition,
     resolvedParams: Record<string, number>,
 ): BacktestCondition {
+    if (c.value === undefined) {
+        // compareTarget 付き condition: op を `==` に固定して必ず false 評価
+        return {
+            lensName: c.lens,
+            featureKey: c.feature,
+            op: '==',
+            value: UNSUPPORTED_COMPARE_TARGET_SENTINEL,
+        };
+    }
     return {
         lensName: c.lens,
         featureKey: c.feature,
         op: c.op,
-        value:
-            c.value !== undefined
-                ? resolveValueLike(c.value, resolvedParams)
-                : UNSUPPORTED_COMPARE_TARGET_SENTINEL,
+        value: resolveValueLike(c.value, resolvedParams),
     };
 }
 
