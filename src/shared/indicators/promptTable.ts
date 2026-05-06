@@ -20,7 +20,12 @@ import { INDICATOR_REGISTRY, type IndicatorRegistryEntry } from './registry';
 function formatDefaultParams(params: IndicatorRegistryEntry['defaultParams']): string {
   const entries = Object.entries(params);
   if (entries.length === 0) return '(なし)';
-  return entries.map(([k, v]) => `${k}=${v}`).join(', ');
+  // PR #117e Copilot review #1: 文字列値 (例: pivotType="standard") は引用符付きで表示。
+  // LLM に「値が文字列」であることを伝えるため (引用符なしだと数値や未クォート token と
+  // 誤解する誘因になる)。
+  return entries
+    .map(([k, v]) => (typeof v === 'string' ? `${k}="${v}"` : `${k}=${v}`))
+    .join(', ');
 }
 
 function formatRow(entry: IndicatorRegistryEntry, columns: 3 | 2): string {
@@ -47,7 +52,10 @@ export function formatIndicatorMetadataTable(): string {
 
   const lines: string[] = [];
 
-  lines.push('### 実装済 (mutation 推奨、TS surrogate + Python BT 両対応)');
+  // PR #117e Copilot review #2: prompt md 側で `### 動的パラメータ付き indicator`
+  // 見出しの下に macro を埋め込んでいるため、macro 自身も `###` だと同階層が
+  // 入れ子になって Markdown 構造が崩れる。`####` に下げて挿入先と整合する形にする。
+  lines.push('#### 実装済 (mutation 推奨、TS surrogate + Python BT 両対応)');
   lines.push('');
   lines.push('| feature | category | デフォルト params |');
   lines.push('|---|---|---|');
@@ -61,7 +69,7 @@ export function formatIndicatorMetadataTable(): string {
   lines.push('');
 
   if (pythonOnly.length > 0) {
-    lines.push('### Python BT のみ対応 (TS surrogate では false 評価、推奨度低)');
+    lines.push('#### Python BT のみ対応 (TS surrogate では false 評価、推奨度低)');
     lines.push('');
     lines.push('| feature | category | デフォルト params |');
     lines.push('|---|---|---|');
@@ -75,7 +83,7 @@ export function formatIndicatorMetadataTable(): string {
   }
 
   if (unsupported.length > 0) {
-    lines.push('### 完全未対応 (出力禁止)');
+    lines.push('#### 完全未対応 (出力禁止)');
     lines.push('');
     lines.push('| feature | category |');
     lines.push('|---|---|');
