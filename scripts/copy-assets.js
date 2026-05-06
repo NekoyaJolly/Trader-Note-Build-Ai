@@ -38,6 +38,16 @@ const COPY_RULES = [
     extensions: ['.md'],
     minCount: 1,
   },
+  // PR #115 で導入した共通 indicator registry の JSON canonical。
+  // `src/shared/indicators/registry.ts` が起動時に `fs.readFileSync(__dirname/data/registry.json)`
+  // で読むため dist 側にも配置必須。コピー漏れがあると本番起動時に ENOENT で
+  // Cloud Run のコンテナがポート listen 前に死ぬ (= 2026-05-07 の本番障害の原因)。
+  {
+    sourceDir: path.join(SRC, 'shared', 'indicators', 'data'),
+    targetDir: path.join(DIST, 'shared', 'indicators', 'data'),
+    extensions: ['.json'],
+    minCount: 1,
+  },
 ];
 
 function ensureDir(dir) {
