@@ -18,6 +18,8 @@ from app.schemas import (
     IndicatorSeriesByVersionRequest,
     IndicatorSeriesRequest,
     IndicatorSeriesResponse,
+    OosValidationRequest,
+    OosValidationResponse,
     ScreeningBacktestRequest,
     ScreeningBacktestResponse,
     WalkForwardRequest,
@@ -25,6 +27,7 @@ from app.schemas import (
 )
 from app.walk_forward import run_walk_forward
 from app.backtest import run_screening_backtest
+from app.oos_validation import run_oos_validation
 
 app = FastAPI(title="TradeAssist Analysis Engine", version="0.1.0")
 
@@ -45,6 +48,21 @@ def walk_forward(req: WalkForwardRequest) -> WalkForwardResponse:
     過学習スコアと安定性指標を返す。
     """
     return run_walk_forward(req)
+
+
+@app.post("/v1/oos-validation", response_model=OosValidationResponse)
+def oos_validation(req: OosValidationRequest) -> OosValidationResponse:
+    """Critical-4 PR #109: OOS Validation v1。
+
+    既存 ScreeningBacktest を OOS 期間で実行し、metrics と保守的な verdict
+    (passed / failed / unknown) を返す。Side-B Evolution layer から本 endpoint を
+    叩いて `oosBacktestRunner` の戻り値として運ぶ想定。
+
+    設計書 (docs/design/pr_105_analysis_engine_authority_addendum.md):
+        - 評価の正本は analysis-engine 側。Side-B では再判定しない
+        - 既存 endpoint には触らず additive に追加する
+    """
+    return run_oos_validation(engine, req)
 
 
 @app.post("/v1/screening-backtest", response_model=ScreeningBacktestResponse)
