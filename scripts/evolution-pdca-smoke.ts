@@ -44,6 +44,7 @@ import { CrossoverAgent } from '../src/side-b/agents/CrossoverAgent';
 import { MutationAgent } from '../src/side-b/agents/MutationAgent';
 import { DiversityEnforcer } from '../src/side-b/evolution/DiversityEnforcer';
 import { EvolutionLoop, type GenerationReport } from '../src/side-b/evolution/EvolutionLoop';
+import { defaultOosBacktestRunner } from '../src/side-b/evolution/analysisEngineRobustnessAdapter';
 import { StrategyPopulation } from '../src/side-b/evolution/StrategyPopulation';
 import { SurrogateFitnessSimulator } from '../src/side-b/strategy_dsl/SurrogateFitnessSimulator';
 import { evolutionBacktestRunRepository } from '../src/backend/repositories/evolutionBacktestRunRepository';
@@ -261,6 +262,10 @@ async function main(): Promise<void> {
     defaultPeriod: { start: args.periodStart, end: args.periodEnd },
     formalBtTopK: args.topK,
     evolutionRunId,
+    // PR #110: 本番経路 (smoke / scheduler) では analysis-engine `/v1/oos-validation` を
+    // 叩く defaultOosBacktestRunner を注入し、validation_candidate に対して実 OOS 評価を行う。
+    // これにより oosValidationSummary / oosAwarePromotionSummary が実データで動く。
+    oosBacktestRunner: defaultOosBacktestRunner,
     // 既定 repo (EvolutionBacktestRun への書き込み) を使う
   });
 
