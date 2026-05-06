@@ -187,3 +187,76 @@ class ScreeningBacktestResponse(BaseModel):
     equity: Optional[List[float]] = None
     engineVersion: str
     unsupportedConditions: List[str] = Field(default_factory=list)
+
+
+# ============================================
+# Critical-4 PR #109: OOS Validation
+# ============================================
+#
+# 設計方針 (docs/design/pr_105_analysis_engine_authority_addendum.md):
+#   - 評価の正本は analysis-engine 側。Side-B (Evolution layer) では再判定しない。
+#   - 本 endpoint は ScreeningBacktest を OOS 期間で実行し、保守的 verdict (passed/failed/unknown)
+#     を **analysis-engine 側で決定** して返す。
+#   - 既存 endpoint には一切手を入れない (= 完全 additive)。
+
+OosVerdict = Literal["passed", "failed", "unknown"]
+OosFailureReason = Literal[
+    "low_oos_pf",
+    "insufficient_oos_trades",
+    "high_oos_drawdown",
+    "oos_engine_error",
+    "insufficient_oos_data",
+    "unknown",
+]
+
+
+class OosValidationThresholds(BaseModel):
+    """OOS verdict 判定の保守的閾値。Side-B からも override 可能。"""
+
+    minOosPf: float = Field(default=1.0, gt=0, description="OOS 期間の PF 下限")
+    minOosTrades: int = Field(default=20, ge=0, description="OOS 期間の最低 trade 数")
+    maxOosDrawdown: float = Field(
+        default=30.0,
+        gt=0,
+        description="OOS 期間の最大 maxDD (% スケール)。これを超えると failed",
+    )
+
+
+class OosValidationRequest(BaseModel):
+    """`/v1/oos-validation` のリクエスト。
+
+    `ScreeningBacktestRequest` と同じ DSL/期間情報を受け取り、analysis-engine 側で
+    OOS 期間の BT を実行 + verdict 判定する。`startDate` / `endDate` は **既に
+    OOS 期間に切り出された範囲** を渡す前提 (= split 計算は Side-B 側 adapter で実施済み)。
+    """
+
+    hypothesisId: str
+    symbol: str
+    timeframe: str
+    startDate: datetime
+    endDate: datetime
+    notePayload: ScreeningBacktestNotePayload
+    config: ScreeningBacktestConfig = Field(default_factory=ScreeningBacktestConfig)
+    thresholds: OosValidationThresholds = Field(default_factory=OosValidationThresholds)
+
+
+class OosValidationMetrics(BaseModel):
+    """OOS 期間の metrics。Side-B `OosMetrics` (TS) と互換な命名で運ぶ。"""
+
+    pf: Optional[float] = None
+    tradeCount: int = 0
+    maxDrawdown: Optional[float] = None
+    expectancy: Optional[float] = None
+    winRate: Optional[float] = None
+
+
+class OosValidationResponse(BaseModel):
+    """`/v1/oos-validation` のレスポンス。Side-B `OosBacktestRunnerResult` (TS) と互換。"""
+
+    metrics: OosValidationMetrics
+    verdict: OosVerdict
+    failureReasons: List[OosFailureReason] = Field(default_factory=list)
+    evaluationKind: Literal["oos"] = "oos"
+    warnings: List[str] = Field(default_factory=list)
+    engineVersion: str
+    unsupportedConditions: List[str] = Field(default_factory=list)
