@@ -356,14 +356,14 @@ export interface GenerationReport {
  * 全条件は PR #112 で対応済の `ohlcv.{rsi, atr}` のみで構成、AND 結合。
  * 数学的に常時 true / false にはならない (= 進化の意味のある出発点)。
  */
-type SeedConditionLeaf = {
+export type SeedConditionLeaf = {
   lens: 'ohlcv';
   feature: 'rsi' | 'atr';
   op: '<' | '<=' | '>' | '>=' | 'between';
   value: number | [number, number];
 };
 
-type SeedDescriptor = {
+export type SeedDescriptor = {
   description: string;
   conditions: SeedConditionLeaf[];
   stopLoss: { type: 'atr_multiple'; value: number };
