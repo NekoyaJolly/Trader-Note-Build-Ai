@@ -24,6 +24,7 @@ export const ConditionValueSchema = z.union([
   z.tuple([z.number(), z.number()]),
   z.array(z.union([z.number(), z.string()])),
 ]);
+export type ConditionValue = z.infer<typeof ConditionValueSchema>;
 
 /**
  * Indicator パラメータ (PR #116a で追加)。

@@ -17,7 +17,11 @@
 import { calculatePnl, calculateSummary } from '../../backend/services/backtestCalculations';
 import type { BacktestResultSummary, BacktestTradeEvent, TradeSide } from '../../backend/services/backtestCalculations';
 import type { LensFeature, LensFeatureSnapshot } from '../lenses/types';
-import { collectDslOhlcvFeatureNeeds } from './dslOhlcvFeatureNeeds';
+import {
+  collectDslIndicatorNeeds,
+  collectDslOhlcvFeatureNeeds,
+  type DslIndicatorNeed,
+} from './dslOhlcvFeatureNeeds';
 import { DSLEvaluator } from './DSLEvaluator';
 import type {
   ExecutionCostSummary,
@@ -25,6 +29,7 @@ import type {
   ExecutionModel,
   ExecutionSimulationMetadata,
 } from './executionSimulation';
+import { computeTsSurrogateIndicator } from './indicatorSurrogate';
 import type { StrategyDSL } from './schema';
 import { isWaitForTriggerEntry } from './types';
 
@@ -46,6 +51,17 @@ interface BarFeatureTable {
   volume: number[];
   rsi?: number[];
   atr?: number[];
+  /**
+   * PR #116b: params 付き / 新 indicator (ema/sma/macd/bb 等) の series を
+   * **snapshot key (= `${lens}.${feature}` または `${lens}.${feature}(stable_params)`、
+   * lens を含む形)** で格納する。`snapshotAt` が lens prefix (`ohlcv.`) を剥がして
+   * features Map の feature key 部分を構築する。
+   *
+   * params なしの ohlcv.rsi / ohlcv.atr は legacy パスの `rsi` / `atr` フィールド
+   * (period=14 既定) で扱う (= `collectDslIndicatorNeeds` 側で除外済み、indicatorts
+   * 由来の値で上書きしないことで後方互換を保つ)。
+   */
+  indicatorSeries?: Map<string, number[]>;
 }
 
 /** シンボルに応じたおおよその 1pip 価格幅（最小版） */
@@ -117,6 +133,7 @@ function computeAtr(high: number[], low: number[], close: number[], period: numb
 function buildFeatureTable(
   bars: OhlcvBar[],
   needs: { rsi: boolean; atr: boolean },
+  indicatorNeeds: readonly DslIndicatorNeed[] = [],
 ): BarFeatureTable {
   const open = bars.map((b) => b.open);
   const high = bars.map((b) => b.high);
@@ -129,6 +146,24 @@ function buildFeatureTable(
   }
   if (needs.atr) {
     table.atr = computeAtr(high, low, close, 14);
+  }
+  if (indicatorNeeds.length > 0) {
+    // PR #116b: 新 indicator (ema/sma/rsi/atr/macd/bb の params 付き) を
+    // `IndicatorService` 経由で計算し、leading NaN padding して同じ bar 数に揃える。
+    // snapshotAt はこの Map から「snapshot key (= feature(stable_params))」で取り出して
+    // snapshot.features に詰める。
+    const series = new Map<string, number[]>();
+    for (const need of indicatorNeeds) {
+      const computed = computeTsSurrogateIndicator(
+        need.feature,
+        need.params,
+        { open, high, low, close, volume },
+      );
+      if (computed) {
+        series.set(need.snapshotKey, computed);
+      }
+    }
+    table.indicatorSeries = series;
   }
   return table;
 }
@@ -149,6 +184,21 @@ function snapshotAt(
   };
   if (table.rsi && !Number.isNaN(table.rsi[i])) f.rsi = table.rsi[i]!;
   if (table.atr && !Number.isNaN(table.atr[i])) f.atr = table.atr[i]!;
+  // PR #116b: 新 indicator series を snapshot.features に snapshot key 形式で詰める。
+  // snapshotKey は `${lens}.${feature}(stable_params)` だが、snapshot.features の key は
+  // lens prefix を取り除いた `feature(stable_params)` 形式 (lens 自体は features Map の key)。
+  if (table.indicatorSeries) {
+    for (const [snapshotKey, series] of table.indicatorSeries) {
+      const v = series[i];
+      if (typeof v === 'number' && !Number.isNaN(v)) {
+        // snapshotKey の lens prefix (`ohlcv.`) を取り除いて feature key 部分のみ使う
+        const featureKey = snapshotKey.startsWith('ohlcv.')
+          ? snapshotKey.slice('ohlcv.'.length)
+          : snapshotKey;
+        f[featureKey] = v;
+      }
+    }
+  }
 
   features.set('ohlcv', {
     lensName: 'ohlcv',
@@ -377,9 +427,14 @@ export function runDslSimulation(
   const executionDataSource: ExecutionDataSource = options?.executionDataSource ?? 'ctrader';
 
   const featureNeeds = collectDslOhlcvFeatureNeeds(dsl);
+  const indicatorNeeds = collectDslIndicatorNeeds(dsl);
   const needAtrForTransactionCost = (roundTripCostAtrMult ?? 0) > 0;
-  const needWarmup =
-    featureNeeds.rsi || featureNeeds.atr || needAtrForTransactionCost;
+  // PR #116b Copilot review #1:
+  // needWarmup から indicatorNeeds を除外する。短期 indicator (例: ema(5)) でも
+  // minLen=20 が適用されると初期バーのエントリ機会を丸ごとスキップしてしまう。
+  // indicator 系列は warm-up 期間中 NaN で snapshotAt が値なし扱い → leaf が false
+  // になるので、minLen 強制は legacy rsi/atr/取引コスト用途に限定する。
+  const needWarmup = featureNeeds.rsi || featureNeeds.atr || needAtrForTransactionCost;
   const minLen = needWarmup ? 20 : 2;
   if (bars.length < minLen) {
     const empty = calculateSummary([], initialCapital);
@@ -401,10 +456,14 @@ export function runDslSimulation(
     };
   }
 
-  const table = buildFeatureTable(bars, {
-    rsi: featureNeeds.rsi,
-    atr: featureNeeds.atr || needAtrForTransactionCost,
-  });
+  const table = buildFeatureTable(
+    bars,
+    {
+      rsi: featureNeeds.rsi,
+      atr: featureNeeds.atr || needAtrForTransactionCost,
+    },
+    indicatorNeeds,
+  );
   const pipSize = defaultPipSizeForSymbol(dsl.symbol);
   const symbolNorm = dsl.symbol.replace(/\//g, '');
 
@@ -438,7 +497,7 @@ export function runDslSimulation(
     if (!position && deferredImmediate && i === deferredImmediate.openAtIndex) {
       const e = dsl.entry;
       if (!('trigger' in e)) {
-        deferredImmediate = null;
+        // PR #116b lint fix: deferredImmediate への代入は break で抜けるため意味がない
         break;
       }
       const j = i;
