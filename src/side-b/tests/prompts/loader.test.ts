@@ -55,4 +55,42 @@ describe('loadPrompt', () => {
         });
         expect(content).not.toContain('{{CORE_TRADING_RULES}}');
     });
+
+    // PR #113: mutation / crossover prompt の lens/feature 範囲明示を pin
+    describe('PR #113: mutation / crossover に対応 lens/feature 範囲が明記されている', () => {
+        it('mutation.md に対応 lens/feature 表が含まれている', () => {
+            const content = loadPrompt('mutation');
+            // 対応 lens=ohlcv のみであることを明示
+            expect(content).toContain('利用可能なエントリー条件');
+            expect(content).toContain('対応 lens / feature');
+            // 7 features 全て列挙
+            expect(content).toContain('| `ohlcv` | `open` |');
+            expect(content).toContain('| `ohlcv` | `high` |');
+            expect(content).toContain('| `ohlcv` | `low` |');
+            expect(content).toContain('| `ohlcv` | `close` |');
+            expect(content).toContain('| `ohlcv` | `volume` |');
+            expect(content).toContain('| `ohlcv` | `rsi` |');
+            expect(content).toContain('| `ohlcv` | `atr` |');
+            // alias 表記を許容
+            expect(content).toContain("`lens='rsi', feature='value'`");
+            expect(content).toContain("`lens='atr', feature='value'`");
+            // 未対応 lens を明示禁止
+            expect(content).toContain('サポート外');
+            expect(content).toContain('ema');
+            expect(content).toContain('macd');
+            // 「常に true」条件の禁止例
+            expect(content).toContain('常に true');
+        });
+
+        it('crossover.md に対応 lens/feature 表が含まれている', () => {
+            const content = loadPrompt('crossover');
+            expect(content).toContain('利用可能なエントリー条件');
+            expect(content).toContain('対応 lens / feature');
+            expect(content).toContain('| `ohlcv` | `rsi` |');
+            expect(content).toContain('| `ohlcv` | `atr` |');
+            // 親が未対応 lens を持つ場合の処理方針
+            expect(content).toContain('対応 lens に置き換える');
+            expect(content).toContain('常に true');
+        });
+    });
 });
