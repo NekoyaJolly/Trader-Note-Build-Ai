@@ -97,7 +97,11 @@ import {
   summarizeOosValidationResults,
   type OosValidationSummary,
 } from './oosValidationSummary';
-import type { MutationBudgetAllocation } from './adaptiveRepairBudgetPolicy';
+import {
+  getDefaultMutationRouteSharesV1,
+  mutationCountBaseV1,
+  type MutationBudgetAllocation,
+} from './adaptiveRepairBudgetPolicy';
 
 /**
  * EvolutionLoop が repository に求める最小契約。
@@ -477,15 +481,48 @@ export class EvolutionLoop {
     const { population, adapter, mutationAgent, crossoverAgent, enforcer } = this.deps;
     const period = this.deps.defaultPeriod;
 
-    // PR #107: adaptive budget を受領しても、v1 では mutation count / route quota への
-    // 反映経路がまだ無い。silent で握り潰さず errors / warnings に観測ログを 1 行残す。
-    // 実反映は後続 PR (MutationAgent への route quota 渡し対応) で行う。
+    // PR #107: adaptive budget を受領した場合、PR #111 で実 mutation count / crossover /
+    // diverse の生成数に反映する。未指定なら従来挙動 (= count 10/5/5) を完全維持。
+    //
+    // 反映方針 (= 控えめ + bounded):
+    //   default 比率を基準に各 route の比率を計算し、既定 count に乗算する。
+    //   - mutation: default share = repair_guided + standard = 20 + 35 = 55%pt → base count 10
+    //   - crossover:                = 20%pt → base count 5
+    //   - diverse (= novelty_seed): = 15%pt → base count 5
+    //   share / default_share の比率に既定 count を掛けて整数化。Math.max(1, ...) で 0 を防ぐ。
+    //
+    // 設計書 PR #107 §最重要判断基準 §代替方針:
+    //   - parent pool 比率は変えない (= ここで触らない)
+    //   - production_candidate 自動昇格は変えない (= 観測軸のみ調整)
+    //   - LLM 不使用 (deterministic な乗算)
+    let mutationCount: number = mutationCountBaseV1.mutation;
+    let crossoverCount: number = mutationCountBaseV1.crossover;
+    let diverseCount: number = mutationCountBaseV1.diverse;
     if (options?.mutationBudgetAllocation) {
       const a = options.mutationBudgetAllocation;
+      const mutationShare = a.byRoute.repair_guided_mutation + a.byRoute.standard_mutation;
+      const crossoverShare = a.byRoute.crossover;
+      const diverseShare = a.byRoute.novelty_seed;
+      // PR #111 Copilot review #1 対応:
+      // default share / base count を adaptiveRepairBudgetPolicy 側の単一ソースから参照する
+      // ことで、`defaultMutationBudgetAllocationV1.byRoute` を将来変更しても drift しない。
+      const defaults = getDefaultMutationRouteSharesV1();
+      mutationCount = Math.max(
+        1,
+        Math.round(mutationCountBaseV1.mutation * (mutationShare / defaults.mutationShare)),
+      );
+      crossoverCount = Math.max(
+        1,
+        Math.round(mutationCountBaseV1.crossover * (crossoverShare / defaults.crossoverShare)),
+      );
+      diverseCount = Math.max(
+        1,
+        Math.round(mutationCountBaseV1.diverse * (diverseShare / defaults.diverseShare)),
+      );
       errors.push(
-        `[info] adaptive mutation budget 受領: repair=${a.byRoute.repair_guided_mutation}%pt / ` +
-          `novelty=${a.byRoute.novelty_seed}%pt / random=${a.byRoute.random_exploration}%pt ` +
-          `(v1 は観測のみ、実 mutation count への反映は後続 PR)`,
+        `[info] adaptive mutation budget 適用: mutation=${mutationCount} (share=${mutationShare}%pt) / ` +
+          `crossover=${crossoverCount} (share=${crossoverShare}%pt) / diverse=${diverseCount} (share=${diverseShare}%pt) / ` +
+          `repair=${a.byRoute.repair_guided_mutation}%pt / novelty=${a.byRoute.novelty_seed}%pt / random=${a.byRoute.random_exploration}%pt`,
       );
     }
 
@@ -579,7 +616,7 @@ export class EvolutionLoop {
       mutants = await mutationAgent.generateMutants(
         parentDsls,
         parentScores,
-        10,
+        mutationCount,
         repairHintsForMutation.size > 0 ? repairHintsForMutation : undefined,
       );
     } catch (e) {
@@ -602,7 +639,7 @@ export class EvolutionLoop {
       }
     }
     try {
-      crosses = await crossoverAgent.generateCrossovers(parentDsls, parentScores, 5);
+      crosses = await crossoverAgent.generateCrossovers(parentDsls, parentScores, crossoverCount);
     } catch (e) {
       errors.push(`crossover: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -617,7 +654,7 @@ export class EvolutionLoop {
     if (div < 0.3) {
       lowDiversityBoost = true;
       try {
-        const extra = await mutationAgent.generateDiverse(regime, 5);
+        const extra = await mutationAgent.generateDiverse(regime, diverseCount);
         for (const s of extra) {
           population.add(regime, s);
         }
