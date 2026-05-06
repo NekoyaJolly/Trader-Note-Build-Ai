@@ -7,8 +7,9 @@
  *   3. compareTarget 付き condition が parse 通る (indicator operand)
  *   4. value と compareTarget の排他性 (両方 / どちらも無し は parse エラー)
  *   5. snapshot key 構築の挙動 (params 順序非依存、Number 正規化)
- *   6. dslToBacktestNotePayload で compareTarget 付き condition は sentinel 化
- *      (Python 側で false 評価される、PR #116c までの一時措置)
+ *   6. dslToBacktestNotePayload で compareTarget をネイティブ schema で表現
+ *      (PR #116c で sentinel 経路は撤去済み、`ScreeningBacktestCondition.compareTarget`
+ *      フィールドにそのまま載る)
  */
 
 import {
@@ -19,6 +20,7 @@ import {
   ConditionSchema,
   IndicatorOperandSchema,
   StrategyDSLSchema,
+  type ConditionValue,
   type StrategyDSL,
 } from '../../strategy_dsl/schema';
 import { buildSnapshotKey, formatStableParams } from '../../strategy_dsl/snapshotKey';
@@ -28,12 +30,16 @@ import { buildSnapshotKey, formatStableParams } from '../../strategy_dsl/snapsho
  * PR #116a Copilot review #5: `unknown[]` は型が弱すぎるため、Condition の
  * input 形に揃える (parse 通る形で受ける)。group ネストは現テストでは未使用のため
  * leaf 型のみで十分。
+ *
+ * PR #120 Copilot review #2: `value?: unknown` は any/unknown 禁止 rule に違反する
+ * ため、schema が受け付ける `ConditionValue` 型に揃える (= literal / ParamRef /
+ * range / set のいずれか)。
  */
 type ConditionLeafInput = {
   lens: string;
   feature: string;
   op: string;
-  value?: unknown;
+  value?: ConditionValue;
   params?: Record<string, number>;
   compareTarget?: { lens: string; feature: string; params?: Record<string, number> };
 };
@@ -171,16 +177,18 @@ describe('PR #116a: ConditionSchema 拡張', () => {
     });
   });
 
-  describe('6. dslToBacktestNotePayload: compareTarget 付き condition は sentinel 化 (PR #116c までの一時措置)', () => {
+  describe('6. dslToBacktestNotePayload: PR #116c で compareTarget をネイティブ schema で表現', () => {
     it('value 付き condition は通常の payload', () => {
       const dsl = makeBaseStrategy([{ lens: 'ohlcv', feature: 'rsi', op: '<', value: 30 }]);
       const payload = dslToBacktestNotePayload(dsl, {});
       const conds = payload.conditions ?? [];
       expect(conds).toHaveLength(1);
       expect(conds[0]).toMatchObject({ lensName: 'ohlcv', featureKey: 'rsi', op: '<', value: 30 });
+      // params なし condition は notePayload.indicators[] には積まれない (= static feature)
+      expect(payload.indicators).toEqual([]);
     });
 
-    it('compareTarget 付き condition は sentinel value で payload に出る (Python 側で false 評価)', () => {
+    it('compareTarget 付き condition は新 schema フィールドで素直に渡される (PR #116c で sentinel 撤去)', () => {
       const dsl = makeBaseStrategy([
         {
           lens: 'ohlcv',
@@ -194,28 +202,79 @@ describe('PR #116a: ConditionSchema 拡張', () => {
       expect(conds).toHaveLength(1);
       expect(conds[0].lensName).toBe('ohlcv');
       expect(conds[0].featureKey).toBe('close');
-      // PR #116a Copilot review #4: sentinel は dslToBacktestNotePayload 側が単一 source。
-      // PR #116a Copilot review #1: op も `==` に固定して `number == string` で必ず false 評価
-      expect(conds[0].op).toBe('==');
-      expect(conds[0].value).toBe(UNSUPPORTED_COMPARE_TARGET_SENTINEL);
+      // op は元の op がそのまま残る (sentinel 経路は撤去)
+      expect(conds[0].op).toBe('>');
+      // value はもう sentinel ではない (= 新 schema では undefined)
+      expect(conds[0].value).toBeUndefined();
+      // compareTarget はネイティブ schema で表現
+      expect(conds[0].compareTarget).toEqual({
+        lensName: 'ohlcv',
+        featureKey: 'ema',
+        params: { period: 20 },
+      });
+      // notePayload.indicators[] に compareTarget の operand spec が自動 populate
+      expect(payload.indicators).toEqual([
+        { indicatorId: 'ema', params: { period: 20 }, field: 'value' },
+      ]);
     });
 
-    it('compareTarget + op="!=" でも sentinel 経路で確実に false 評価される (PR #116a Copilot review #1)', () => {
-      // 旧実装は op をそのまま残していたため `op="!=" + value=string` は number != string が true になり
-      // 「未対応 condition は常に false 評価」が崩れていた。op を `==` に固定することで
-      // op に関わらず必ず false に倒れるようになっている。
+    it('params 付き leaf condition も notePayload.indicators[] に自動 populate', () => {
       const dsl = makeBaseStrategy([
-        {
-          lens: 'ohlcv',
-          feature: 'close',
-          op: '!=',
-          compareTarget: { lens: 'ohlcv', feature: 'ema', params: { period: 20 } },
-        },
+        { lens: 'ohlcv', feature: 'ema', op: '>', value: 1.05, params: { period: 50 } },
       ]);
       const payload = dslToBacktestNotePayload(dsl, {});
-      const conds = payload.conditions ?? [];
-      expect(conds[0].op).toBe('==');
-      expect(conds[0].value).toBe(UNSUPPORTED_COMPARE_TARGET_SENTINEL);
+      expect(payload.indicators).toEqual([
+        { indicatorId: 'ema', params: { period: 50 }, field: 'value' },
+      ]);
+      // leaf 自体にも params が残る
+      expect(payload.conditions?.[0].params).toEqual({ period: 50 });
+    });
+
+    it('UNSUPPORTED_COMPARE_TARGET_SENTINEL は deprecated だが値は維持 (下流互換)', () => {
+      // PR #116c で sentinel 経路は撤去されたが、定数 export は下流の参照箇所のため残す
+      expect(UNSUPPORTED_COMPARE_TARGET_SENTINEL).toBe('__pr116a_unsupported_compareTarget__');
+    });
+  });
+
+  // PR #120 Copilot review #3: 期間系キーは整数 + 正値を強制
+  describe('PR #120: ConditionParamsSchema 期間系キー整数性', () => {
+    it('period が整数なら parse 通る (例: 14)', () => {
+      const c = { lens: 'ohlcv', feature: 'rsi', op: '<', value: 30, params: { period: 14 } };
+      expect(() => ConditionSchema.parse(c)).not.toThrow();
+    });
+
+    it('period が小数 (20.5) だと parse エラー (snapshot key と実計算ズレ防止)', () => {
+      const c = { lens: 'ohlcv', feature: 'ema', op: '>', value: 1, params: { period: 20.5 } };
+      expect(() => ConditionSchema.parse(c)).toThrow(/integer|整数/);
+    });
+
+    it('period が 0 / 負値だと parse エラー', () => {
+      for (const period of [0, -1, -14]) {
+        const c = { lens: 'ohlcv', feature: 'rsi', op: '<', value: 30, params: { period } };
+        expect(() => ConditionSchema.parse(c)).toThrow(/正の値|positive/);
+      }
+    });
+
+    it('macd の fastPeriod / slowPeriod / signalPeriod も整数強制', () => {
+      const bad = {
+        lens: 'ohlcv',
+        feature: 'macd',
+        op: '>',
+        value: 0,
+        params: { fastPeriod: 12, slowPeriod: 26.5, signalPeriod: 9 },
+      };
+      expect(() => ConditionSchema.parse(bad)).toThrow(/integer|整数/);
+    });
+
+    it('期間系以外のキー (例: multiplier, threshold) は小数 OK', () => {
+      const c = {
+        lens: 'ohlcv',
+        feature: 'ema',
+        op: '>',
+        value: 1,
+        params: { period: 20, multiplier: 2.5 }, // multiplier は INTEGER_PARAM_KEYS に含まれない
+      };
+      expect(() => ConditionSchema.parse(c)).not.toThrow();
     });
   });
 

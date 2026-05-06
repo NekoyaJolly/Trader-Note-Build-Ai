@@ -24,6 +24,32 @@ export const ConditionValueSchema = z.union([
   z.tuple([z.number(), z.number()]),
   z.array(z.union([z.number(), z.string()])),
 ]);
+export type ConditionValue = z.infer<typeof ConditionValueSchema>;
+
+/**
+ * 期間系パラメータキーの集合。
+ *
+ * これらは indicator 計算側 (TS `IndicatorService.calculate*` / Python `compute_indicator_series`)
+ * で int として扱われる (例: `length=int(params.get('period', 14))`)。
+ *
+ * PR #120 Copilot review #3-#4-#7: 非整数 (例: `period: 20.5`) を許容すると、
+ * snapshot key (`period=20.5`) と実計算 (`length=20`) が **不一致** になり、
+ * 評価器が series を引けず leaf が常に false 評価になる。schema レベルで
+ * 整数 + 正値を強制して入力時点で弾く。
+ */
+export const INTEGER_PARAM_KEYS = new Set([
+  'period',
+  'fastPeriod',
+  'slowPeriod',
+  'signalPeriod',
+  'kPeriod',
+  'dPeriod',
+  'lookbackBars',
+  'displacement',
+  'spanBPeriod',
+  'basePeriod',
+  'conversionPeriod',
+]);
 
 /**
  * Indicator パラメータ (PR #116a で追加)。
@@ -38,8 +64,32 @@ export const ConditionValueSchema = z.union([
  * PR #116a Copilot review #2: `z.number()` だけだと `Infinity` / `NaN` が通って
  * 後段の `formatStableNumber` (snapshotKey 構築) で例外になる。`finite()` で
  * parse 時点で弾く (= invalid 入力は DSL Schema レベルで早期検出)。
+ *
+ * PR #120 Copilot review #3: `INTEGER_PARAM_KEYS` に列挙された期間系キーは
+ * **正の整数** であることを `superRefine` で強制 (= TS と Python で snapshot key
+ * と実計算が一致するよう保証)。
  */
-export const ConditionParamsSchema = z.record(z.string(), z.number().finite());
+export const ConditionParamsSchema = z
+  .record(z.string(), z.number().finite())
+  .superRefine((val, ctx) => {
+    for (const [key, value] of Object.entries(val)) {
+      if (INTEGER_PARAM_KEYS.has(key)) {
+        if (!Number.isInteger(value)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message: `${key} は整数である必要がある (got: ${value})`,
+          });
+        } else if (value <= 0) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message: `${key} は正の値である必要がある (got: ${value})`,
+          });
+        }
+      }
+    }
+  });
 export type ConditionParams = z.infer<typeof ConditionParamsSchema>;
 
 /**
