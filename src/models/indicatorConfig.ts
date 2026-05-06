@@ -1,61 +1,45 @@
 /**
  * インジケーター設定型定義
- * 
+ *
  * 目的:
- * - ユーザーが選択可能な20種類のインジケーターを定義
+ * - ユーザーが選択可能な23種類のインジケーターを定義
  * - 同一インジケーターの複数期間選択をサポート
  * - TradeDefinition生成時の特徴量計算に使用
- * 
- * 設計方針:
- * - 各インジケーターは固有のIDと表示名を持つ
- * - パラメータは型安全に定義
- * - バリデーションルールを明示
+ *
+ * PR #115: 23 指標のメタデータ canonical は `src/shared/indicators/registry.json`。
+ * ここでは Side-A の既存 API (型 / INDICATOR_METADATA / helper) を維持しつつ
+ * 中身は registry から構築する。新しい指標を追加したい時は registry.json を編集する。
  */
 
+import type {
+  IndicatorCategory as RegistryIndicatorCategory,
+  IndicatorId as RegistryIndicatorId,
+} from '../shared/indicators/registry';
+import {
+  INDICATOR_REGISTRY,
+  getIndicatorRegistryEntry,
+  getIndicatorsByCategory as getRegistryIndicatorsByCategory,
+} from '../shared/indicators/registry';
+
 /**
- * 利用可能なインジケーター種別
- * 
+ * 利用可能なインジケーター種別 (Side-A 互換 alias)。
+ *
  * indicatorts ライブラリの分類に基づく:
  * - momentum: モメンタム系（RSI, Stochastic, WilliamsR 等）
  * - trend: トレンド系（SMA, EMA, MACD, Aroon 等）
  * - volatility: ボラティリティ系（ATR, BB, KC 等）
  * - volume: 出来高系（OBV, VWAP, CMF 等）
+ * - support_resistance: 支持/抵抗系 (Pivot 等)
  */
-export type IndicatorCategory = 'momentum' | 'trend' | 'volatility' | 'volume' | 'support_resistance';
+export type IndicatorCategory = RegistryIndicatorCategory;
 
 /**
- * サポートするインジケーター ID
- * 
- * Phase 1 では 20 種類をサポート:
- * 既存 9 種 + 新規 11 種 = 20 種
+ * サポートするインジケーター ID (Side-A 互換 alias)。
+ *
+ * 23 種類: 既存 9 種 + 新規 11 種 + 追加 3 種。
+ * 真の定義は `src/shared/indicators/registry.json` 側。
  */
-export type IndicatorId =
-  // 既存（9種）
-  | 'rsi'           // Relative Strength Index
-  | 'sma'           // Simple Moving Average
-  | 'ema'           // Exponential Moving Average
-  | 'macd'          // Moving Average Convergence Divergence
-  | 'bb'            // Bollinger Bands
-  | 'atr'           // Average True Range
-  | 'stochastic'    // Stochastic Oscillator
-  | 'obv'           // On Balance Volume
-  | 'vwap'          // Volume Weighted Average Price
-  // 新規追加（11種）
-  | 'williamsR'     // Williams %R
-  | 'cci'           // Community Channel Index (CCI)
-  | 'aroon'         // Aroon Indicator
-  | 'roc'           // Rate of Change (Price Rate of Change)
-  | 'mfi'           // Money Flow Index
-  | 'cmf'           // Chaikin Money Flow
-  | 'dema'          // Double Exponential Moving Average
-  | 'tema'          // Triple Exponential Moving Average
-  | 'kc'            // Keltner Channel
-  | 'psar'          // Parabolic SAR
-  | 'ichimoku'      // Ichimoku Cloud
-  // 追加（3種）
-  | 'adx'           // Average Directional Index
-  | 'pivot'         // Pivot Points
-  | 'supertrend';   // Supertrend
+export type IndicatorId = RegistryIndicatorId;
 
 /**
  * インジケーターメタデータ
@@ -159,225 +143,55 @@ export interface IndicatorSet {
 }
 
 /**
- * 利用可能なインジケーターのメタデータ一覧
- * 
- * UI でのインジケーター選択やバリデーションに使用
+ * registry.json の 1 エントリを Side-A 既存の `IndicatorMetadata` 形に投影する。
+ * Side-B 用の `support` フィールド (pythonSeries / tsSurrogate) は Side-A の UI 側
+ * では使わないので落とす。`defaultParams` の値は registry 側で number | string、
+ * Side-A の `IndicatorParams` は number / string-literal を含むので素直に合致させる。
  */
-export const INDICATOR_METADATA: readonly IndicatorMetadata[] = [
-  // === Momentum 系 ===
-  {
-    id: 'rsi',
-    displayName: 'RSI（相対力指数）',
-    category: 'momentum',
-    description: '買われ過ぎ・売られ過ぎを判断する指標。0-100の範囲で表示',
-    defaultParams: { period: 14 },
-    paramConstraints: { minPeriod: 2, maxPeriod: 100 },
-  },
-  {
-    id: 'stochastic',
-    displayName: 'ストキャスティクス',
-    category: 'momentum',
-    description: '一定期間の最高値・最安値に対する現在値の位置を示す',
-    defaultParams: { kPeriod: 14, dPeriod: 3 },
-    paramConstraints: { minPeriod: 1, maxPeriod: 100 },
-  },
-  {
-    id: 'williamsR',
-    displayName: 'Williams %R',
-    category: 'momentum',
-    description: 'ストキャスティクスと類似のオシレーター。-100〜0で表示',
-    defaultParams: { period: 14 },
-    paramConstraints: { minPeriod: 1, maxPeriod: 100 },
-  },
-  {
-    id: 'roc',
-    displayName: 'ROC（変化率）',
-    category: 'momentum',
-    description: '指定期間前との価格変化率を表示',
-    defaultParams: { period: 10 },
-    paramConstraints: { minPeriod: 1, maxPeriod: 100 },
-  },
-  {
-    id: 'mfi',
-    displayName: 'MFI（マネーフローインデックス）',
-    category: 'momentum',
-    description: '出来高を加味したRSI。0-100の範囲で表示',
-    defaultParams: { period: 14 },
-    paramConstraints: { minPeriod: 2, maxPeriod: 100 },
-  },
-  // === Trend 系 ===
-  {
-    id: 'sma',
-    displayName: 'SMA（単純移動平均）',
-    category: 'trend',
-    description: '指定期間の終値平均。トレンドの方向性を判断',
-    defaultParams: { period: 20 },
-    paramConstraints: { minPeriod: 1, maxPeriod: 500 },
-  },
-  {
-    id: 'ema',
-    displayName: 'EMA（指数移動平均）',
-    category: 'trend',
-    description: '直近の価格に重みを置いた移動平均',
-    defaultParams: { period: 20 },
-    paramConstraints: { minPeriod: 1, maxPeriod: 500 },
-  },
-  {
-    id: 'dema',
-    displayName: 'DEMA（二重指数移動平均）',
-    category: 'trend',
-    description: 'EMAのラグを軽減した移動平均',
-    defaultParams: { period: 20 },
-    paramConstraints: { minPeriod: 1, maxPeriod: 500 },
-  },
-  {
-    id: 'tema',
-    displayName: 'TEMA（三重指数移動平均）',
-    category: 'trend',
-    description: 'DEMAよりさらにラグを軽減した移動平均',
-    defaultParams: { period: 20 },
-    paramConstraints: { minPeriod: 1, maxPeriod: 500 },
-  },
-  {
-    id: 'macd',
-    displayName: 'MACD',
-    category: 'trend',
-    description: '短期・長期EMAの差分でトレンド転換を捉える',
-    defaultParams: { fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
-    paramConstraints: { minPeriod: 1, maxPeriod: 100 },
-  },
-  {
-    id: 'aroon',
-    displayName: 'Aroon（アルーン）',
-    category: 'trend',
-    description: 'トレンドの強さと方向を判断する指標',
-    defaultParams: { period: 25 },
-    paramConstraints: { minPeriod: 1, maxPeriod: 100 },
-  },
-  {
-    id: 'cci',
-    displayName: 'CCI（コモディティチャネル指数）',
-    category: 'trend',
-    description: '平均価格からの乖離度を測定',
-    defaultParams: { period: 20 },
-    paramConstraints: { minPeriod: 1, maxPeriod: 100 },
-  },
-  {
-    id: 'psar',
-    displayName: 'Parabolic SAR',
-    category: 'trend',
-    description: 'トレンドの転換点を示す指標',
-    defaultParams: { step: 0.02, maxStep: 0.2 },
-    paramConstraints: {},
-  },
-  {
-    id: 'ichimoku',
-    displayName: '一目均衡表',
-    category: 'trend',
-    description: '転換線・基準線・雲で複合的にトレンドを判断',
-    defaultParams: {
-      conversionPeriod: 9,
-      basePeriod: 26,
-      spanBPeriod: 52,
-      displacement: 26,
-    },
-    paramConstraints: { minPeriod: 1, maxPeriod: 200 },
-  },
-  // === Volatility 系 ===
-  {
-    id: 'atr',
-    displayName: 'ATR（平均真幅）',
-    category: 'volatility',
-    description: 'ボラティリティの大きさを測定',
-    defaultParams: { period: 14 },
-    paramConstraints: { minPeriod: 1, maxPeriod: 100 },
-  },
-  {
-    id: 'bb',
-    displayName: 'ボリンジャーバンド',
-    category: 'volatility',
-    description: '移動平均と標準偏差でバンドを形成（2σ固定）',
-    defaultParams: { period: 20 },
-    paramConstraints: { minPeriod: 1, maxPeriod: 100 },
-  },
-  {
-    id: 'kc',
-    displayName: 'ケルトナーチャネル',
-    category: 'volatility',
-    description: 'ATRを使用したトレンドバンド（ATR×2固定）',
-    defaultParams: { period: 20 },
-    paramConstraints: { minPeriod: 1, maxPeriod: 100 },
-  },
-  // === Volume 系 ===
-  {
-    id: 'obv',
-    displayName: 'OBV（オンバランスボリューム）',
-    category: 'volume',
-    description: '出来高の累積で需給を判断',
-    defaultParams: {},
-    paramConstraints: {},
-  },
-  {
-    id: 'vwap',
-    displayName: 'VWAP（出来高加重平均価格）',
-    category: 'volume',
-    description: '出来高で加重した平均価格。機関投資家の基準',
-    defaultParams: {},
-    paramConstraints: {},
-  },
-  {
-    id: 'cmf',
-    displayName: 'CMF（チャイキンマネーフロー）',
-    category: 'volume',
-    description: '一定期間の買い圧力・売り圧力を測定',
-    defaultParams: { period: 20 },
-    paramConstraints: { minPeriod: 1, maxPeriod: 100 },
-  },
-  // === 追加インジケーター ===
-  {
-    id: 'adx',
-    displayName: 'ADX（平均方向性指数）',
-    category: 'trend',
-    description: 'トレンドの強さを測定。25以上でトレンドあり',
-    defaultParams: { period: 14 },
-    paramConstraints: { minPeriod: 5, maxPeriod: 50 },
-  },
-  {
-    id: 'supertrend',
-    displayName: 'Supertrend',
-    category: 'trend',
-    description: 'ATRベースのトレンドフォロー指標',
-    defaultParams: { period: 10, multiplier: 3.0 },
-    paramConstraints: { minPeriod: 5, maxPeriod: 50 },
-  },
-  {
-    id: 'pivot',
-    displayName: 'Pivot Points',
-    category: 'support_resistance',
-    description: '前日の高値・安値・終値からサポート/レジスタンスを計算',
-    defaultParams: { pivotType: 'standard' },
-    paramConstraints: {},
-  },
-] as const;
+function projectRegistryEntry(entry: (typeof INDICATOR_REGISTRY)[number]): IndicatorMetadata {
+  return {
+    id: entry.id,
+    displayName: entry.displayName,
+    category: entry.category,
+    description: entry.description,
+    // registry 側は Record<string, number | string>。`IndicatorParams` の optional field 群と
+    // 整合する範囲しか入っていない (前提: registry.json をいじる側がレビューで担保)。
+    defaultParams: entry.defaultParams,
+    paramConstraints: { ...entry.paramConstraints },
+  };
+}
+
+/**
+ * 利用可能なインジケーターのメタデータ一覧 (Side-A 既存 API 互換)。
+ *
+ * 真の定義は `src/shared/indicators/registry.json`。本配列はそこから登録順を
+ * 維持して構築する。UI / バリデーション / バックエンドの既存利用箇所
+ * (`indicatorRoutes.ts` / `indicatorProfileService.ts` / `indicatorSettingsService.ts`)
+ * は変更不要のまま動く。
+ */
+export const INDICATOR_METADATA: readonly IndicatorMetadata[] = Object.freeze(
+  INDICATOR_REGISTRY.map(projectRegistryEntry),
+);
 
 /**
  * インジケーターIDからメタデータを取得
- * 
+ *
  * @param id - インジケーターID
  * @returns メタデータまたはundefined
  */
 export function getIndicatorMetadata(id: IndicatorId): IndicatorMetadata | undefined {
-  return INDICATOR_METADATA.find(meta => meta.id === id);
+  const entry = getIndicatorRegistryEntry(id);
+  return entry ? projectRegistryEntry(entry) : undefined;
 }
 
 /**
  * カテゴリでインジケーターをフィルタ
- * 
+ *
  * @param category - インジケーターカテゴリ
  * @returns 該当カテゴリのメタデータ配列
  */
 export function getIndicatorsByCategory(category: IndicatorCategory): IndicatorMetadata[] {
-  return INDICATOR_METADATA.filter(meta => meta.category === category);
+  return getRegistryIndicatorsByCategory(category).map(projectRegistryEntry);
 }
 
 /**
