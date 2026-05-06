@@ -88,6 +88,16 @@ function collectFromGroup(group: ConditionGroup): DSLCondition[] {
     return out;
 }
 
+/**
+ * PR #116a: `compareTarget` を持つ condition (= value 未指定) は old payload 形式
+ * では表現できない。analysis-engine 側で compareTarget を解釈する PR #116c までは
+ * sentinel string を value に詰めて Python 側で確実に false 評価させる
+ * (`number op string` は false に倒れる)。
+ *
+ * PR #116c で payload schema を拡張したらこの sentinel 経路は撤去する。
+ */
+const UNSUPPORTED_COMPARE_TARGET_SENTINEL = '__pr116a_unsupported_compareTarget__';
+
 function dslConditionToBacktest(
     c: DSLCondition,
     resolvedParams: Record<string, number>,
@@ -96,12 +106,17 @@ function dslConditionToBacktest(
         lensName: c.lens,
         featureKey: c.feature,
         op: c.op,
-        value: resolveValueLike(c.value, resolvedParams),
+        value:
+            c.value !== undefined
+                ? resolveValueLike(c.value, resolvedParams)
+                : UNSUPPORTED_COMPARE_TARGET_SENTINEL,
     };
 }
 
 function resolveValueLike(
-    raw: DSLCondition['value'],
+    // PR #116a: DSLCondition['value'] は optional 化されたが、本関数は呼び出し側
+    // (`dslConditionToBacktest`) で undefined を弾いてから渡される前提。
+    raw: NonNullable<DSLCondition['value']>,
     resolvedParams: Record<string, number>,
 ): BacktestCondition['value'] {
     if (typeof raw === 'string' && raw.startsWith('$')) {
