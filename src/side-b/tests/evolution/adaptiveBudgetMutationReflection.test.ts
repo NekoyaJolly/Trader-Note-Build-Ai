@@ -89,6 +89,12 @@ function summary(n: number, w: number, p: number) {
 
 interface SetupOptions {
   budget?: MutationBudgetAllocation;
+  /**
+   * PR #111 Copilot review #2: lowDiversityBoost (= div<0.3) を確実に発火させたいテスト用に、
+   * 同 structure の DSL を population に複数追加する経路。`true` のとき同 dsl を 3 件追加し
+   * `diversityScore=0` を作る。
+   */
+  forceLowDiversity?: boolean;
 }
 
 async function setupAndRun(opts: SetupOptions = {}) {
@@ -128,6 +134,14 @@ async function setupAndRun(opts: SetupOptions = {}) {
     .mockResolvedValue([]);
   const population = new StrategyPopulation(undefined);
   population.add('breakout', dsl);
+  // PR #111 Copilot review #2: lowDiversityBoost 経路 (= diversityScore < 0.3) を
+  // 確実に発火させるため、enforcer.diversityScore を直接モックする。population に同
+  // structure DSL を入れる方式は EvolutionLoop の removeWorst で削除されてしまい
+  // 不安定なため、enforcer の判定ロジック自体を制御する形に統一する。
+  const enforcer = new DiversityEnforcer();
+  if (opts.forceLowDiversity) {
+    jest.spyOn(enforcer, 'diversityScore').mockReturnValue(0.1);
+  }
   const runFormalBacktest = jest
     .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
     .mockResolvedValue(makeFormalBtResponse(1.8, 0.55, 35));
@@ -136,7 +150,7 @@ async function setupAndRun(opts: SetupOptions = {}) {
     adapter,
     mutationAgent,
     crossoverAgent,
-    enforcer: new DiversityEnforcer(),
+    enforcer,
     defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
     evolutionBacktestRepo: null,
     edgeHypothesisLoader: null,
@@ -244,6 +258,37 @@ describe('PR #111: Adaptive budget の MutationAgent 実反映', () => {
       e.includes('adaptive mutation budget 適用'),
     );
     expect(log).toBeUndefined();
+  });
+
+  it('9. PR #111 Copilot #2: lowDiversityBoost 経路で generateDiverse の count に novelty_seed share が反映される', async () => {
+    // 同 structure の DSL を 3 件入れて diversityScore < 0.3 を作り、lowDiversityBoost を発火
+    // novelty_seed=30%pt (default 15 の 2 倍) → diverseCount = round(5 * 30/15) = 10
+    const budget: MutationBudgetAllocation = {
+      ...defaultMutationBudgetAllocationV1,
+      byRoute: {
+        repair_guided_mutation: 20,
+        standard_mutation: 35,
+        crossover: 20,
+        novelty_seed: 30,
+        indicator_augmentation: 5,
+        random_exploration: 5,
+      },
+    };
+    const { generateDiverseSpy, report } = await setupAndRun({
+      budget,
+      forceLowDiversity: true,
+    });
+    expect(report.lowDiversityBoost).toBe(true);
+    expect(generateDiverseSpy).toHaveBeenCalledTimes(1);
+    // generateDiverse(regime, count) の第 2 引数が diverseCount (= 10) になっている
+    expect(generateDiverseSpy.mock.calls[0][1]).toBe(10);
+  });
+
+  it('10. PR #111 Copilot #2: budget 未指定でも lowDiversityBoost 経路は count=5 (= 既存挙動)', async () => {
+    const { generateDiverseSpy, report } = await setupAndRun({ forceLowDiversity: true });
+    expect(report.lowDiversityBoost).toBe(true);
+    expect(generateDiverseSpy).toHaveBeenCalledTimes(1);
+    expect(generateDiverseSpy.mock.calls[0][1]).toBe(5);
   });
 
   it('8. budget 反映後も parentPoolSummary / productionEligible は不変', async () => {

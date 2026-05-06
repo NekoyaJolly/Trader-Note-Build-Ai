@@ -97,7 +97,11 @@ import {
   summarizeOosValidationResults,
   type OosValidationSummary,
 } from './oosValidationSummary';
-import type { MutationBudgetAllocation } from './adaptiveRepairBudgetPolicy';
+import {
+  getDefaultMutationRouteSharesV1,
+  mutationCountBaseV1,
+  type MutationBudgetAllocation,
+} from './adaptiveRepairBudgetPolicy';
 
 /**
  * EvolutionLoop が repository に求める最小契約。
@@ -491,21 +495,30 @@ export class EvolutionLoop {
     //   - parent pool 比率は変えない (= ここで触らない)
     //   - production_candidate 自動昇格は変えない (= 観測軸のみ調整)
     //   - LLM 不使用 (deterministic な乗算)
-    let mutationCount = 10;
-    let crossoverCount = 5;
-    let diverseCount = 5;
+    let mutationCount: number = mutationCountBaseV1.mutation;
+    let crossoverCount: number = mutationCountBaseV1.crossover;
+    let diverseCount: number = mutationCountBaseV1.diverse;
     if (options?.mutationBudgetAllocation) {
       const a = options.mutationBudgetAllocation;
       const mutationShare = a.byRoute.repair_guided_mutation + a.byRoute.standard_mutation;
       const crossoverShare = a.byRoute.crossover;
       const diverseShare = a.byRoute.novelty_seed;
-      // default 比率 (= defaultMutationBudgetAllocationV1 を反映)
-      const DEFAULT_MUTATION_SHARE = 55;
-      const DEFAULT_CROSSOVER_SHARE = 20;
-      const DEFAULT_DIVERSE_SHARE = 15;
-      mutationCount = Math.max(1, Math.round(10 * (mutationShare / DEFAULT_MUTATION_SHARE)));
-      crossoverCount = Math.max(1, Math.round(5 * (crossoverShare / DEFAULT_CROSSOVER_SHARE)));
-      diverseCount = Math.max(1, Math.round(5 * (diverseShare / DEFAULT_DIVERSE_SHARE)));
+      // PR #111 Copilot review #1 対応:
+      // default share / base count を adaptiveRepairBudgetPolicy 側の単一ソースから参照する
+      // ことで、`defaultMutationBudgetAllocationV1.byRoute` を将来変更しても drift しない。
+      const defaults = getDefaultMutationRouteSharesV1();
+      mutationCount = Math.max(
+        1,
+        Math.round(mutationCountBaseV1.mutation * (mutationShare / defaults.mutationShare)),
+      );
+      crossoverCount = Math.max(
+        1,
+        Math.round(mutationCountBaseV1.crossover * (crossoverShare / defaults.crossoverShare)),
+      );
+      diverseCount = Math.max(
+        1,
+        Math.round(mutationCountBaseV1.diverse * (diverseShare / defaults.diverseShare)),
+      );
       errors.push(
         `[info] adaptive mutation budget 適用: mutation=${mutationCount} (share=${mutationShare}%pt) / ` +
           `crossover=${crossoverCount} (share=${crossoverShare}%pt) / diverse=${diverseCount} (share=${diverseShare}%pt) / ` +

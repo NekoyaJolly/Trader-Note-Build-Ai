@@ -136,6 +136,48 @@ export const defaultMutationBudgetAllocationV1: MutationBudgetAllocation = {
 };
 
 /**
+ * EvolutionLoop が `mutationBudgetAllocation` を渡されたとき、share→count 比例計算で
+ * 使う **基準 mutation count** (= adaptive 未指定時の生成数 = 既存挙動)。
+ *
+ * - mutation: `generateMutants(parents, scores, count, hints)` の count
+ * - crossover: `generateCrossovers(parents, scores, count)` の count
+ * - diverse: `generateDiverse(regime, count)` の count (lowDiversityBoost 経路)
+ *
+ * **重要**: 反映式は `next = base * (share / defaultShare)`。base / share の両方を本ファイルで
+ * 一元管理することで、`defaultMutationBudgetAllocationV1.byRoute` と drift しないようにする。
+ *
+ * (PR #111 Copilot review #1 対応)
+ */
+export const mutationCountBaseV1 = {
+  mutation: 10,
+  crossover: 5,
+  diverse: 5,
+} as const;
+
+/**
+ * `defaultMutationBudgetAllocationV1.byRoute` から、EvolutionLoop の adaptive 反映で参照する
+ * default share を導出する単一ソース。
+ *
+ * - mutation: `repair_guided_mutation + standard_mutation` (= mutation 系の合計)
+ * - crossover: `crossover` 単独
+ * - diverse: `novelty_seed` 単独 (lowDiversityBoost 経路で使う)
+ *
+ * 将来 default 比率を変えても、こちらが自動追随する (= drift 防止)。
+ *
+ * (PR #111 Copilot review #1 対応)
+ */
+export function getDefaultMutationRouteSharesV1(
+  allocation: MutationBudgetAllocation = defaultMutationBudgetAllocationV1,
+): { mutationShare: number; crossoverShare: number; diverseShare: number } {
+  return {
+    mutationShare:
+      allocation.byRoute.repair_guided_mutation + allocation.byRoute.standard_mutation,
+    crossoverShare: allocation.byRoute.crossover,
+    diverseShare: allocation.byRoute.novelty_seed,
+  };
+}
+
+/**
  * conservative な調整幅。設計書 §Adaptive 判定ルール。
  * v1 では ±0.2 が上限、route の per-decision 増減も ±5%pt 程度に留める。
  */
