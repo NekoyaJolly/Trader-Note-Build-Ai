@@ -47,7 +47,9 @@ export function dslToBacktestNotePayload(
         triggerGroup: dslConditionGroupToBacktest(dslGroup, resolvedParams),
         stopLoss: resolveStopLoss(dsl.stopLoss, resolvedParams),
         takeProfit: resolveTakeProfit(dsl.takeProfit, resolvedParams),
-        indicators: [],
+        // PR #116c: DSL condition の params / compareTarget を walk して、Python 側で
+        // pre-compute すべき indicator series 一覧を自動 populate する。
+        indicators: collectIndicatorSpecsFromDslGroup(dslGroup),
     };
 }
 
@@ -89,37 +91,98 @@ function collectFromGroup(group: ConditionGroup): DSLCondition[] {
 }
 
 /**
- * PR #116a: `compareTarget` を持つ condition (= value 未指定) は old payload 形式
- * では表現できない。analysis-engine 側で compareTarget を解釈する PR #116c までは
- * sentinel string + op を `==` に固定して Python 側で確実に false 評価させる。
+ * PR #116a で導入し、PR #116c で撤去予定の sentinel 文字列。
  *
- * PR #116a Copilot review #1: 元 `op` を残すと `op='!='` の時 `number != string`
- * は **true** になり「確実に false」が崩れる。op も `==` に正規化することで
- * `number == string` は必ず false に倒れる。
+ * PR #116c で `ScreeningBacktestCondition` schema が `params` / `compareTarget` を
+ * 受けるようになったため、compareTarget 付き condition は素直に新 schema で表現する。
+ * 本 sentinel は **下流テスト互換のために値だけ export を維持** するが、
+ * `dslConditionToBacktest` からは出力されなくなる (= deprecated)。
  *
- * PR #116c で payload schema を拡張したらこの sentinel 経路は撤去する。
+ * @deprecated PR #116c で role 完了。新コードは `compareTarget` を直接使うこと。
  */
 export const UNSUPPORTED_COMPARE_TARGET_SENTINEL = '__pr116a_unsupported_compareTarget__';
 
+/**
+ * DSL condition を BT condition に変換する。
+ *
+ * PR #116c: compareTarget 付き condition も新 schema (`compareTarget` フィールド) で
+ * そのまま渡せるようになったため、PR #116a の sentinel 経路は撤去。
+ */
 function dslConditionToBacktest(
     c: DSLCondition,
     resolvedParams: Record<string, number>,
 ): BacktestCondition {
-    if (c.value === undefined) {
-        // compareTarget 付き condition: op を `==` に固定して必ず false 評価
-        return {
-            lensName: c.lens,
-            featureKey: c.feature,
-            op: '==',
-            value: UNSUPPORTED_COMPARE_TARGET_SENTINEL,
-        };
-    }
-    return {
+    const base = {
         lensName: c.lens,
         featureKey: c.feature,
         op: c.op,
-        value: resolveValueLike(c.value, resolvedParams),
+        ...(c.params && Object.keys(c.params).length > 0 ? { params: { ...c.params } } : {}),
     };
+    if (c.compareTarget) {
+        return {
+            ...base,
+            compareTarget: {
+                lensName: c.compareTarget.lens,
+                featureKey: c.compareTarget.feature,
+                ...(c.compareTarget.params && Object.keys(c.compareTarget.params).length > 0
+                    ? { params: { ...c.compareTarget.params } }
+                    : {}),
+            },
+        };
+    }
+    if (c.value !== undefined) {
+        return {
+            ...base,
+            value: resolveValueLike(c.value, resolvedParams),
+        };
+    }
+    // schema 上 value / compareTarget のどちらか必須なのでここには来ないが、
+    // 型 narrow のため fallback (= 評価器側で false に倒れる)
+    return base;
+}
+
+/**
+ * PR #116c: DSL ConditionGroup を walk して必要な indicator series spec 一覧を抽出する。
+ *
+ * - `lens === 'ohlcv'` で動的パラメータ付き feature (例: ema(20)) → spec 化
+ * - `compareTarget` の operand も同様に spec 化
+ * - 同じ (indicatorId, params) は重複排除
+ *
+ * Python 側 (`runner_backtesting_py.py`) は notePayload.indicators[] を pre-compute して、
+ * `lens.feature(stable_params)` 形式の snapshot key で series を保持する。
+ */
+function collectIndicatorSpecsFromDslGroup(
+    group: ConditionGroup,
+): ScreeningBacktestNotePayload['indicators'] {
+    const map = new Map<string, ScreeningBacktestNotePayload['indicators'][number]>();
+    const visit = (lens: string, feature: string, params?: Record<string, number>) => {
+        if (lens !== 'ohlcv') return;
+        // params 無しは static feature (open/high/low/close/volume/rsi/atr) として扱い、
+        // notePayload.indicators[] に積む必要は無い (= snapshot 構築側で常時計算済み)
+        if (!params || Object.keys(params).length === 0) return;
+        const stableKey = `${feature}|${JSON.stringify(params, Object.keys(params).sort())}`;
+        if (!map.has(stableKey)) {
+            map.set(stableKey, {
+                indicatorId: feature,
+                params: { ...params },
+                field: 'value',
+            });
+        }
+    };
+    const walk = (g: ConditionGroup) => {
+        for (const c of g.conditions) {
+            if ('logic' in c) {
+                walk(c);
+            } else {
+                visit(c.lens, c.feature, c.params);
+                if (c.compareTarget) {
+                    visit(c.compareTarget.lens, c.compareTarget.feature, c.compareTarget.params);
+                }
+            }
+        }
+    };
+    walk(group);
+    return Array.from(map.values());
 }
 
 function resolveValueLike(

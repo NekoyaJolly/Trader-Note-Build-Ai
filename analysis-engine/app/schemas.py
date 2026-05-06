@@ -113,6 +113,20 @@ class WalkForwardResponse(BaseModel):
 # ============================================
 
 
+class ScreeningBacktestIndicatorOperand(BaseModel):
+    """PR #116c: condition の右辺に別 indicator series を置く operand。
+
+    例: `close > ema(20)` を `compareTarget={lensName: 'ohlcv', featureKey: 'ema',
+    params: {period: 20}}` で表現する。Python 側 `condition_evaluator` は
+    `lensName.featureKey(stable_params)` の snapshot key で series を引いて right
+    operand として比較する。
+    """
+
+    lensName: str
+    featureKey: str
+    params: Optional[Dict[str, float]] = None
+
+
 class ScreeningBacktestCondition(BaseModel):
     """仮説の MachineReadableCondition (Node 側と同形)。
 
@@ -121,12 +135,18 @@ class ScreeningBacktestCondition(BaseModel):
     使われる。flatten 配列 `conditions[]` (本フィールドのリスト) は後方互換のため残す。
     `condition_evaluator.SUPPORTED_LENS_FEATURE_MAP` に該当しない leaf は
     `unsupportedConditions` に積まれ、verdict 判定からは PR #109 で除外済み。
+
+    PR #116c: `params` (動的 indicator パラメータ) と `compareTarget` (indicator
+    operand) を追加。後方互換のため両方 optional、`value` も optional 化
+    (compareTarget 指定時は value 不要)。
     """
 
     lensName: str
     featureKey: str
     op: Literal["<", "<=", ">", ">=", "==", "!=", "between", "in"]
-    value: Any
+    value: Optional[Any] = None
+    params: Optional[Dict[str, float]] = None
+    compareTarget: Optional[ScreeningBacktestIndicatorOperand] = None
 
 
 class ScreeningBacktestStopLoss(BaseModel):
