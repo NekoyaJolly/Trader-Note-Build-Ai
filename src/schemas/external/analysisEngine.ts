@@ -125,12 +125,48 @@ const ScreeningBacktestTakeProfitSchema = z.discriminatedUnion('type', [
 ]);
 
 /**
+ * Critical-4 PR #112: AND/OR 構造を保持した条件グループ。
+ *
+ * 旧 `conditions[]` は flatten された配列で AND/OR ロジックを失っていたが、
+ * Python 側で DSL 通りの BT を行うには **構造を保ったまま** 渡す必要がある。
+ * 本フィールドが指定されている場合、Python 評価器はこちらを優先する。
+ *
+ * 既存 `conditions[]` は後方互換のため残す (= 旧 client / 旧 Python は flatten 配列を見る)。
+ */
+export type ScreeningBacktestConditionGroup = {
+  logic: 'AND' | 'OR';
+  conditions: Array<
+    z.infer<typeof ScreeningBacktestConditionSchema> | ScreeningBacktestConditionGroup
+  >;
+};
+
+/**
+ * PR #112 Copilot review #4: schema を `export` して下流 consumer (テスト / mapper /
+ * 他 service) からも runtime で parse できるよう一貫性を保つ (型 `ScreeningBacktestConditionGroup`
+ * とセットで export)。
+ */
+export const ScreeningBacktestConditionGroupSchema: z.ZodType<ScreeningBacktestConditionGroup> = z.lazy(
+  () =>
+    z.object({
+      logic: z.enum(['AND', 'OR']),
+      conditions: z.array(
+        z.union([ScreeningBacktestConditionSchema, ScreeningBacktestConditionGroupSchema]),
+      ),
+    }),
+);
+
+/**
  * BT 入力スナップショット (notePayload)。
  * 「ノート schema を BT 入力形式に寄せる」(§12.3) ため、仮説側のフィールド名をそのまま使う。
  */
 export const ScreeningBacktestNotePayloadSchema = z.object({
   direction: z.enum(['long', 'short', 'either']),
   conditions: z.array(ScreeningBacktestConditionSchema),
+  /**
+   * PR #112: AND/OR 構造を保った条件グループ。指定時 Python 側はこちらを優先評価する。
+   * 未指定時は既存挙動 (= conditions[] flatten 経路) で互換動作。
+   */
+  triggerGroup: ScreeningBacktestConditionGroupSchema.optional(),
   stopLoss: ScreeningBacktestStopLossSchema,
   takeProfit: ScreeningBacktestTakeProfitSchema,
   /** 指標スペック (Python 側で pandas_ta により計算) */

@@ -180,4 +180,99 @@ describe('dslToBacktestNotePayload', () => {
             lensName: 'a', featureKey: 'b', op: 'between', value: [10, 20],
         });
     });
+
+    // =================================================================
+    // PR #112: triggerGroup (AND/OR 構造保持) の pin テスト
+    // =================================================================
+
+    it('PR #112: triggerGroup に AND/OR 構造を保ったまま運ぶ (flat conditions[] と並存)', () => {
+        const payload = dslToBacktestNotePayload(makeDsl(), {});
+        expect(payload.triggerGroup).toEqual({
+            logic: 'AND',
+            conditions: [
+                { lensName: 'rsi', featureKey: 'value', op: '<', value: 30 },
+            ],
+        });
+        // 後方互換のため flat conditions[] も従来通り埋まる
+        expect(payload.conditions).toEqual([
+            { lensName: 'rsi', featureKey: 'value', op: '<', value: 30 },
+        ]);
+    });
+
+    it('PR #112: ネストした AND-of-OR を triggerGroup でそのまま保持する', () => {
+        const dsl = makeDsl({
+            entry: {
+                direction: 'long',
+                trigger: {
+                    logic: 'AND',
+                    conditions: [
+                        { lens: 'a', feature: 'f', op: '>', value: 1 },
+                        {
+                            logic: 'OR',
+                            conditions: [
+                                { lens: 'b', feature: 'g', op: '==', value: 2 },
+                                { lens: 'c', feature: 'h', op: '<', value: 3 },
+                            ],
+                        },
+                    ],
+                },
+                orderType: 'market',
+            },
+        });
+        const payload = dslToBacktestNotePayload(dsl, {});
+        expect(payload.triggerGroup).toEqual({
+            logic: 'AND',
+            conditions: [
+                { lensName: 'a', featureKey: 'f', op: '>', value: 1 },
+                {
+                    logic: 'OR',
+                    conditions: [
+                        { lensName: 'b', featureKey: 'g', op: '==', value: 2 },
+                        { lensName: 'c', featureKey: 'h', op: '<', value: 3 },
+                    ],
+                },
+            ],
+        });
+        // flat conditions[] では構造を失う (= 後方互換のための fallback、新経路では使わない)
+        expect(payload.conditions).toHaveLength(3);
+    });
+
+    it('PR #112: wait_for_trigger entry も triggerGroup に正しく入る', () => {
+        const dsl = makeDsl({
+            entry: {
+                type: 'wait_for_trigger',
+                direction: 'short',
+                triggerConditions: {
+                    logic: 'OR',
+                    conditions: [
+                        { lens: 'ohlcv', feature: 'close', op: '>', value: 2000 },
+                        { lens: 'ohlcv', feature: 'volume', op: '>', value: 100 },
+                    ],
+                },
+                maxWaitBars: 10,
+                executionType: 'market',
+            },
+        });
+        const payload = dslToBacktestNotePayload(dsl, {});
+        expect(payload.triggerGroup?.logic).toBe('OR');
+        expect(payload.triggerGroup?.conditions).toHaveLength(2);
+    });
+
+    it('PR #112: triggerGroup の leaf も resolveValueLike で値が解決される', () => {
+        const dsl = makeDsl({
+            entry: {
+                direction: 'long',
+                trigger: {
+                    logic: 'AND',
+                    conditions: [
+                        { lens: 'ohlcv', feature: 'rsi', op: '<', value: '$threshold' },
+                    ],
+                },
+                orderType: 'market',
+            },
+        });
+        const payload = dslToBacktestNotePayload(dsl, { threshold: 30 });
+        const leaf = payload.triggerGroup?.conditions[0];
+        expect(leaf).toEqual({ lensName: 'ohlcv', featureKey: 'rsi', op: '<', value: 30 });
+    });
 });

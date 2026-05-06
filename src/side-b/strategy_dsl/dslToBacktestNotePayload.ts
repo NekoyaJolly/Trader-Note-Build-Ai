@@ -18,6 +18,7 @@ import type {
     StrategyDSL,
 } from './schema';
 import type {
+    ScreeningBacktestConditionGroup,
     ScreeningBacktestNotePayload,
 } from '../../schemas/external/analysisEngine';
 
@@ -35,23 +36,44 @@ export function dslToBacktestNotePayload(
     dsl: StrategyDSL,
     resolvedParams: Record<string, number>,
 ): ScreeningBacktestNotePayload {
+    const dslGroup = extractDslConditionGroup(dsl.entry);
     return {
         direction: dsl.entry.direction,
-        conditions: flattenEntryConditions(dsl.entry).map((c) =>
+        // PR #112 後方互換: flatten 配列も従来通り運ぶ (旧 Python / 旧 client の fallback 用)。
+        conditions: collectFromGroup(dslGroup).map((c) =>
             dslConditionToBacktest(c, resolvedParams),
         ),
+        // PR #112: AND/OR 構造を保ったまま運ぶ。Python 側はこちらを優先評価する。
+        triggerGroup: dslConditionGroupToBacktest(dslGroup, resolvedParams),
         stopLoss: resolveStopLoss(dsl.stopLoss, resolvedParams),
         takeProfit: resolveTakeProfit(dsl.takeProfit, resolvedParams),
         indicators: [],
     };
 }
 
-function flattenEntryConditions(entry: StrategyDSL['entry']): DSLCondition[] {
-    const root: ConditionGroup =
-        'type' in entry && entry.type === 'wait_for_trigger'
-            ? entry.triggerConditions
-            : (entry as { trigger: ConditionGroup }).trigger;
-    return collectFromGroup(root);
+function extractDslConditionGroup(entry: StrategyDSL['entry']): ConditionGroup {
+    return 'type' in entry && entry.type === 'wait_for_trigger'
+        ? entry.triggerConditions
+        : (entry as { trigger: ConditionGroup }).trigger;
+}
+
+/**
+ * DSL の ConditionGroup を ScreeningBacktestConditionGroup に再帰変換する。
+ * AND/OR 構造を保ったまま、各 leaf の `Condition` を BT 用 leaf
+ * (`{ lensName, featureKey, op, value }`) に正規化する。
+ */
+function dslConditionGroupToBacktest(
+    group: ConditionGroup,
+    resolvedParams: Record<string, number>,
+): ScreeningBacktestConditionGroup {
+    return {
+        logic: group.logic,
+        conditions: group.conditions.map((c) =>
+            'logic' in c
+                ? dslConditionGroupToBacktest(c, resolvedParams)
+                : dslConditionToBacktest(c, resolvedParams),
+        ),
+    };
 }
 
 function collectFromGroup(group: ConditionGroup): DSLCondition[] {
