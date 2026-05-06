@@ -17,9 +17,27 @@
  * 実反映 (= EMA/SMA/RSI/MACD/BB/ATR の subset を true 化予定)。
  */
 
+import { readFileSync } from 'fs';
+import path from 'path';
+
 import { z } from 'zod';
 
-import registryJson from './registry.json';
+/**
+ * registry.json は canonical 情報源。`data/` サブディレクトリに置くのは
+ * registry.ts と同名 (`registry.json` ↔ `registry.ts`) の衝突を避けるため。
+ *
+ * 同ディレクトリに同名 .ts と .json を置くと、Node の require resolver が
+ * 拡張子なし import (`from '../shared/indicators/registry'`) を解決する際
+ * `.json` を `.ts` より先に選んでしまうケースがある (CI E2E で
+ * `INDICATOR_REGISTRY` が undefined になる事象として顕在化、PR #115)。
+ * subfolder に分けることで衝突が起きない構造にする。
+ *
+ * fs.readFileSync で読むのは ts-node や bundler の JSON resolution 挙動に
+ * 依存しないため。本ファイルは server-side / build-time のみで利用する前提
+ * (Side-A の API ルート、Side-B の EvolutionLoop 等)。client bundle に
+ * 含まれる経路では import しないこと。
+ */
+const REGISTRY_JSON_PATH = path.join(__dirname, 'data', 'registry.json');
 
 /** 指標カテゴリ。 */
 export const IndicatorCategorySchema = z.enum([
@@ -136,7 +154,11 @@ export const IndicatorRegistryFileSchema = z
   })
   .strict();
 
-const PARSED = IndicatorRegistryFileSchema.parse(registryJson);
+// JSON.parse の戻り値は any/unknown で危ういので Zod の入力にだけ使い、
+// 中間変数を作らずに parse 結果 (型付き) のみ保持する。
+const PARSED = IndicatorRegistryFileSchema.parse(
+  JSON.parse(readFileSync(REGISTRY_JSON_PATH, 'utf-8')),
+);
 
 /** registry を id 重複なく登録。重複はビルド時に検出する。 */
 function buildIndexById(entries: readonly IndicatorRegistryEntry[]): Map<string, IndicatorRegistryEntry> {

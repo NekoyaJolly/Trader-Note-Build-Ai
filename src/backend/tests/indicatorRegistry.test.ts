@@ -27,7 +27,7 @@ import {
   isIndicatorId,
 } from '../../shared/indicators/registry';
 
-const REGISTRY_JSON_PATH = path.join(__dirname, '../../shared/indicators/registry.json');
+const REGISTRY_JSON_PATH = path.join(__dirname, '../../shared/indicators/data/registry.json');
 
 describe('PR #115: shared indicator registry', () => {
   describe('registry.json (canonical)', () => {
