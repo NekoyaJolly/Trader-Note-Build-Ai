@@ -38,7 +38,9 @@
 
 ## 良い条件の例
 
-```json
+以下はそれぞれ ConditionGroup の `conditions[]` に入る単独 leaf の形例 (列挙であって 1 つの JSON ドキュメントではない):
+
+```text
 { "lens": "ohlcv", "feature": "rsi", "op": "<", "value": 30 }
 { "lens": "ohlcv", "feature": "rsi", "op": ">", "value": 70 }
 { "lens": "ohlcv", "feature": "atr", "op": ">", "value": 0.001 }
@@ -46,7 +48,9 @@
 { "lens": "ohlcv", "feature": "rsi", "op": "between", "value": [30, 70] }
 ```
 
-AND/OR の入れ子も可:
+`"$threshold"` のような **ParamRef を value に使う場合は、必ず同じ戦略の `parameters` に同名キー (例: `threshold`) を定義すること**。未定義の ParamRef は DSLEvaluator が例外を投げ、戦略全体が評価不能になる。
+
+AND/OR の入れ子は単一の JSON オブジェクトとして表現する (この形は LLM がそのまま `entry.trigger` に詰めて出力できる):
 
 ```json
 {
@@ -66,11 +70,13 @@ AND/OR の入れ子も可:
 
 ## 悪い条件の例 (出力禁止)
 
-```json
-{ "lens": "ema", "feature": "value", "op": ">", "value": 100 }   // ❌ 未対応 lens
-{ "lens": "macd", "feature": "histogram", "op": ">", "value": 0 } // ❌ 未対応 lens
-{ "lens": "ohlcv", "feature": "close", "op": ">", "value": 0 }    // ❌ 常に true、無意味
-{ "lens": "ohlcv", "feature": "volume", "op": ">", "value": -1 }  // ❌ 常に true、無意味
+各行はサンプル + 違反理由のメモ (JSON ではなく説明用):
+
+```text
+{ "lens": "ema",   "feature": "value",     "op": ">", "value": 100 }   ← 未対応 lens
+{ "lens": "macd",  "feature": "histogram", "op": ">", "value": 0 }     ← 未対応 lens
+{ "lens": "ohlcv", "feature": "close",     "op": ">", "value": 0 }     ← 常に true、無意味
+{ "lens": "ohlcv", "feature": "volume",    "op": ">", "value": -1 }    ← 常に true、無意味
 ```
 
 ## 変異の種類（必ず混在させる）

@@ -80,6 +80,11 @@ describe('loadPrompt', () => {
             expect(content).toContain('macd');
             // 「常に true」条件の禁止例
             expect(content).toContain('常に true');
+            // PR #113 Copilot review: コード例ブロックは「json」ではなく説明用 (LLM がそのままコピーしても無効 JSON にならないこと)
+            expect(content).toContain('ConditionGroup の `conditions[]` に入る単独 leaf');
+            // PR #113 Copilot review: ParamRef を value に使う場合は parameters 側で定義必須を注記
+            expect(content).toContain('ParamRef を value に使う場合は');
+            expect(content).toContain('parameters');
         });
 
         it('crossover.md に対応 lens/feature 表が含まれている', () => {
