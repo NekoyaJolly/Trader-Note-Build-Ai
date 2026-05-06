@@ -338,7 +338,86 @@ export interface GenerationReport {
   oosAwarePromotionDecisions: OosAwarePromotionDecision[];
 }
 
-function seedStrategy(regime: string): StrategyDSL {
+/**
+ * regime 別の seed トリガー構造 + SL/TP 設定。
+ *
+ * PR #114 (Critical-4 Phase 5A.5): 旧 seed は全 regime で `close > 0` (常時 true) という
+ * 「無条件エントリー」相当だった。これでは進化の出発点が trivial になり、mutation で
+ * 多様な仮説に発散しにくい。
+ *
+ * 各 regime の意図 (現 DSL は `lens.feature op literal` のみ表現可能、`close > open` のような
+ * indicator 同士比較は PR #116 で `compareTarget` 追加予定):
+ * - **breakout**: RSI 強気帯 (>55) + ATR 高ボラ (>0.0008) → 上昇 + 揺らぎ十分
+ * - **trending_with_pullback**: RSI 中立 (40-60) → 押し目買い候補
+ * - **consolidation**: RSI 中立 (45-55) + 低ボラ (<0.0015) → レンジ底狙い
+ * - **reversal**: RSI 売られすぎ (<30) → 反転狙い
+ * - **default (未知 regime)**: RSI 弱気帯 (<50) → 保守値
+ *
+ * 全条件は PR #112 で対応済の `ohlcv.{rsi, atr}` のみで構成、AND 結合。
+ * 数学的に常時 true / false にはならない (= 進化の意味のある出発点)。
+ */
+type SeedConditionLeaf = {
+  lens: 'ohlcv';
+  feature: 'rsi' | 'atr';
+  op: '<' | '<=' | '>' | '>=' | 'between';
+  value: number | [number, number];
+};
+
+type SeedDescriptor = {
+  description: string;
+  conditions: SeedConditionLeaf[];
+  stopLoss: { type: 'atr_multiple'; value: number };
+  takeProfit: { type: 'rr_ratio'; value: number };
+};
+
+export function getSeedDescriptor(regime: string): SeedDescriptor {
+  switch (regime) {
+    case 'breakout':
+      return {
+        description: 'breakout シード: RSI 強気帯 (>55) + 高ボラ (atr>0.0008)',
+        conditions: [
+          { lens: 'ohlcv', feature: 'rsi', op: '>', value: 55 },
+          { lens: 'ohlcv', feature: 'atr', op: '>', value: 0.0008 },
+        ],
+        stopLoss: { type: 'atr_multiple', value: 1.5 },
+        takeProfit: { type: 'rr_ratio', value: 2 },
+      };
+    case 'trending_with_pullback':
+      return {
+        description: 'trending_with_pullback シード: RSI 中立 (40-60) で押し目買い候補',
+        conditions: [{ lens: 'ohlcv', feature: 'rsi', op: 'between', value: [40, 60] }],
+        stopLoss: { type: 'atr_multiple', value: 2.0 },
+        takeProfit: { type: 'rr_ratio', value: 2.5 },
+      };
+    case 'consolidation':
+      return {
+        description: 'consolidation シード: RSI 中立 (45-55) + 低ボラ (atr<0.0015) でレンジ底狙い',
+        conditions: [
+          { lens: 'ohlcv', feature: 'rsi', op: 'between', value: [45, 55] },
+          { lens: 'ohlcv', feature: 'atr', op: '<', value: 0.0015 },
+        ],
+        stopLoss: { type: 'atr_multiple', value: 1.0 },
+        takeProfit: { type: 'rr_ratio', value: 1.5 },
+      };
+    case 'reversal':
+      return {
+        description: 'reversal シード: RSI 売られすぎ (<30) で反転狙い',
+        conditions: [{ lens: 'ohlcv', feature: 'rsi', op: '<', value: 30 }],
+        stopLoss: { type: 'atr_multiple', value: 1.5 },
+        takeProfit: { type: 'rr_ratio', value: 2 },
+      };
+    default:
+      return {
+        description: `default シード (regime=${regime}): RSI 弱気帯 (<50) で保守的に拾う`,
+        conditions: [{ lens: 'ohlcv', feature: 'rsi', op: '<', value: 50 }],
+        stopLoss: { type: 'atr_multiple', value: 1.5 },
+        takeProfit: { type: 'rr_ratio', value: 2 },
+      };
+  }
+}
+
+export function seedStrategy(regime: string): StrategyDSL {
+  const desc = getSeedDescriptor(regime);
   const raw = {
     id: `seed-${regime}-${randomUUID()}`,
     generation: 0,
@@ -350,17 +429,17 @@ function seedStrategy(regime: string): StrategyDSL {
       direction: 'long' as const,
       trigger: {
         logic: 'AND' as const,
-        conditions: [{ lens: 'ohlcv', feature: 'close', op: '>' as const, value: 0 }],
+        conditions: desc.conditions,
       },
       orderType: 'market' as const,
     },
-    stopLoss: { type: 'atr_multiple' as const, value: 1.5 },
-    takeProfit: { type: 'rr_ratio' as const, value: 2 },
+    stopLoss: desc.stopLoss,
+    takeProfit: desc.takeProfit,
     parameters: {},
     metadata: {
       createdAt: new Date().toISOString(),
       createdBy: 'initial_random' as const,
-      description: '最小シード戦略（Phase5A）',
+      description: desc.description,
     },
   };
   return StrategyDSLSchema.parse(raw);
