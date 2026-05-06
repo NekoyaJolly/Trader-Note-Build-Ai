@@ -7,7 +7,8 @@
 import { randomUUID } from 'crypto';
 
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
-import { loadPromptWithGlobal } from '../prompts/loader';
+import { formatIndicatorMetadataTable } from '../../shared/indicators/promptTable';
+import { loadPromptWithGlobal, type PromptMacros } from '../prompts/loader';
 import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
 import { modelFor } from '../../config';
@@ -17,16 +18,19 @@ import { recordAgentUsage } from './scoringRecorder';
 
 /**
  * 4a.PDCA: API 失敗とパース失敗を分離するため、discriminated union を返す。
+ *
+ * PR #117e lint fix: `unknown` を Error に narrow (catch ブロックの例外を必ず Error 化)。
+ * memory feedback_no_any_unknown.md「any/unknown 禁止」を満たすため。
  */
-type RetryResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
+type RetryResult<T> = { ok: true; value: T } | { ok: false; error: Error };
 
 async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<RetryResult<T>> {
-  let last: unknown;
+  let last: Error = new Error('CrossoverAgent withRetries: 例外なしで終了 (到達不能)');
   for (let i = 0; i < times; i++) {
     try {
       return { ok: true, value: await fn() };
     } catch (e) {
-      last = e;
+      last = e instanceof Error ? e : new Error(String(e));
     }
   }
   console.error('[CrossoverAgent] リトライ尽くし', last);
@@ -39,16 +43,21 @@ export class CrossoverAgent {
   /**
    * Phase 6.7a: PromptRegistry.getCompositeActive で DB の __global__ + crossover active を合成。
    * Registry 未 seed / DB 不整合時は loadPromptWithGlobal にフォールバック。
+   *
+   * PR #117e: `{{INDICATOR_METADATA_TABLE}}` macro を registry から動的に注入する。
    */
   private async resolveSystemPrompt(): Promise<string> {
+    const macros: PromptMacros = {
+      INDICATOR_METADATA_TABLE: formatIndicatorMetadataTable(),
+    };
     try {
-      return await promptRegistry.getCompositeActive('crossover');
+      return await promptRegistry.getCompositeActive('crossover', macros);
     } catch (err) {
       console.warn(
         '[CrossoverAgent] Registry 合成に失敗、ファイル fallback:',
         err instanceof Error ? err.message : err,
       );
-      return loadPromptWithGlobal('crossover');
+      return loadPromptWithGlobal('crossover', macros);
     }
   }
 

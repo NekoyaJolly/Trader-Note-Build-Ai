@@ -12,7 +12,7 @@
 
 **重要**: 以下に列挙された lens / feature **以外を出力すると、Python 側の正式 BT で評価されず unsupportedConditions に積まれ、その条件 leaf は false として扱われる**。Mutation の意義を成立させるため、必ず以下から選ぶこと。
 
-### 対応 lens / feature
+### 静的 ohlcv feature (params 不要、常時利用可)
 
 | lens | feature | 説明 |
 |---|---|---|
@@ -21,8 +21,8 @@
 | `ohlcv` | `low` | バーの安値 |
 | `ohlcv` | `close` | バーの終値 |
 | `ohlcv` | `volume` | 出来高 |
-| `ohlcv` | `rsi` | RSI(14) — 0〜100 のオシレーター |
-| `ohlcv` | `atr` | ATR(14) — 価格絶対値の変動幅 |
+| `ohlcv` | `rsi` | RSI(14) — 0〜100 のオシレーター (params なしは period=14 既定) |
+| `ohlcv` | `atr` | ATR(14) — 価格絶対値の変動幅 (params なしは period=14 既定) |
 
 ### 別表記の alias (どちらでも評価可能)
 
@@ -31,10 +31,11 @@
 | `lens='rsi', feature='value'` | `lens='ohlcv', feature='rsi'` |
 | `lens='atr', feature='value'` | `lens='ohlcv', feature='atr'` |
 
-### サポート外 (出力禁止)
+### 動的パラメータ付き indicator (params 指定で多様な期間が使える、PR #116 で追加)
 
-- `ema`, `sma`, `macd`, `bb`, `stochastic`, `cci`, `obv`, `adx`, `ichimoku` 等の指標 lens は **現時点で評価器が対応していない**(後続 PR で順次拡張予定)。出すと false 評価で entry 不能になる。
-- `elliott`, `smc`, `pattern` 等の高度レンズも同様。
+`Condition.params` で動的パラメータを指定すると、registry に登録された indicator を任意の期間で評価できる。下記テーブルが registry 経由で自動生成される **実装状況**。
+
+{{INDICATOR_METADATA_TABLE}}
 
 ## 良い条件の例
 
@@ -84,7 +85,9 @@ AND/OR の入れ子は単一の JSON オブジェクトとして表現する (�
 1. パラメータ範囲の変更（`parameters`。固定値または `kind: "range"`）
 2. エントリー条件の追加・緩和（`entry.trigger` / `wait_for_trigger.triggerConditions`）
 3. **対応 lens 内** での feature 差し替え（例: `rsi` ↔ `atr`、`close` ↔ `high`）
-4. SL/TP の変異（ATR倍率、固定pips、RR比）
+4. **PR #116**: `Condition.params` で indicator の期間を変える (例: `rsi(14)` → `rsi(7)`、`ema(20)` → `ema(50)`)
+5. **PR #116**: `compareTarget` で indicator 同士の比較 (例: `close > ema(20)`、`ema(10) > ema(50)`)
+6. SL/TP の変異（ATR倍率、固定pips、RR比）
 
 ## 制約
 
