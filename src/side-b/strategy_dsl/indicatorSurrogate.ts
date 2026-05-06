@@ -81,39 +81,54 @@ export function computeTsSurrogateIndicator(
 
   switch (feature) {
     case 'ema': {
-      const period = numberOrDefault(p.period, 20);
+      const period = positiveIntegerOrDefault(p.period, 20);
       return padLeadingNaN(indicatorService.calculateEMA(bars.close, period), N);
     }
     case 'sma': {
-      const period = numberOrDefault(p.period, 20);
+      const period = positiveIntegerOrDefault(p.period, 20);
       return padLeadingNaN(indicatorService.calculateSMA(bars.close, period), N);
     }
     case 'rsi': {
-      const period = numberOrDefault(p.period, 14);
+      const period = positiveIntegerOrDefault(p.period, 14);
       return padLeadingNaN(indicatorService.calculateRSI(bars.close, period), N);
     }
     case 'atr': {
-      const period = numberOrDefault(p.period, 14);
+      const period = positiveIntegerOrDefault(p.period, 14);
       const r = indicatorService.calculateATR(bars.high, bars.low, bars.close, period);
       return padLeadingNaN(r.atrLine, N);
     }
     case 'macd': {
       // PR #116b では macd の主出力 (macdLine) のみ。signal/histogram は将来 PR で拡張。
-      const fast = numberOrDefault(p.fastPeriod, 12);
-      const slow = numberOrDefault(p.slowPeriod, 26);
-      const signal = numberOrDefault(p.signalPeriod, 9);
+      const fast = positiveIntegerOrDefault(p.fastPeriod, 12);
+      const slow = positiveIntegerOrDefault(p.slowPeriod, 26);
+      const signal = positiveIntegerOrDefault(p.signalPeriod, 9);
       const r = indicatorService.calculateMACD(bars.close, fast, slow, signal);
       return padLeadingNaN(r.macdLine, N);
     }
     case 'bb': {
       // PR #116b では bb の middleBand のみ。upper/lower は将来 PR で拡張。
-      const period = numberOrDefault(p.period, 20);
+      const period = positiveIntegerOrDefault(p.period, 20);
       const r = indicatorService.calculateBollingerBands(bars.close, period);
       return padLeadingNaN(r.middleBand, N);
     }
   }
 }
 
-function numberOrDefault(v: number | undefined, fallback: number): number {
-  return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+/**
+ * 期間系パラメータ用の正規化。
+ *
+ * PR #120 Copilot review #4: indicatorts は `period` 等を int として受けるが、
+ * 旧実装は finite 数値ならそのまま渡していたため、20.5 が渡ると indicatorts 側で
+ * `Math.trunc` 的に切り捨てられて snapshot key と不一致になっていた。
+ *
+ * 本来 schema (`ConditionParamsSchema.superRefine`) で弾く規約だが、TS surrogate
+ * 単体テストで schema parse を経由しない経路を考慮し、defensive に「正の整数で
+ * なければ fallback」に倒す。
+ */
+function positiveIntegerOrDefault(v: number | undefined, fallback: number): number {
+  if (typeof v !== 'number' || !Number.isFinite(v) || !Number.isInteger(v) || v <= 0) {
+    return fallback;
+  }
+  return v;
 }
+

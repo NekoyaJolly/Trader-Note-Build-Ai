@@ -1,7 +1,7 @@
 /**
  * DSL 条件を LensFeatureSnapshot 上で評価する（Phase 5）
  *
- * @see docs/design/phase_5_specification.md §4.2
+ * @see docs/design/archive/phase_5_specification.md §4.2
  *
  * PR #116b: `Condition.params` (動的 indicator パラメータ) と
  * `Condition.compareTarget` (indicator operand 比較) に対応。

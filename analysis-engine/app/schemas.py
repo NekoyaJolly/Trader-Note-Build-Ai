@@ -114,12 +114,36 @@ class WalkForwardResponse(BaseModel):
 # ============================================
 
 
+# PR #120 Copilot review #7: 期間系パラメータキー (TS schema.ts INTEGER_PARAM_KEYS と整合)。
+# これらは `compute_indicator_series` で `int(...)` 切り捨てが起きるため、
+# 非整数を許すと snapshot key (`period=20.5`) と実計算 (`length=20`) が不一致になる。
+_INTEGER_PARAM_KEYS = frozenset(
+    [
+        "period",
+        "fastPeriod",
+        "slowPeriod",
+        "signalPeriod",
+        "kPeriod",
+        "dPeriod",
+        "lookbackBars",
+        "displacement",
+        "spanBPeriod",
+        "basePeriod",
+        "conversionPeriod",
+    ]
+)
+
+
 def _validate_finite_non_bool_params(params: Optional[Dict[str, float]]) -> Optional[Dict[str, float]]:
     """PR #118 Copilot review #5: params の値検証。
 
     - bool は弾く (Python の bool は int の subclass で `Dict[str, float]` を素通り
       してしまう。TS 側 `z.number()` と挙動を揃える)
     - NaN / Infinity も弾く (snapshot key 構築で例外になる前に早期検出)
+
+    PR #120 Copilot review #7: 期間系キー (`period` / `*Period` / `lookbackBars` 等)
+    は **整数 + 正値** であることを強制する。snapshot key と実計算 (`int(...)` 切り捨て)
+    のズレを防ぐ。
     """
     if params is None:
         return None
@@ -128,6 +152,17 @@ def _validate_finite_non_bool_params(params: Optional[Dict[str, float]]) -> Opti
             raise ValueError(f"params の値に bool は使えない (key={k}, value={v!r})")
         if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
             raise ValueError(f"params の値に非有限値は使えない (key={k}, value={v})")
+        if k in _INTEGER_PARAM_KEYS:
+            # int 値、または整数値の float (例: 14.0) のみ許可。20.5 等は弾く。
+            is_integer_valued = isinstance(v, int) or (isinstance(v, float) and v.is_integer())
+            if not is_integer_valued:
+                raise ValueError(
+                    f"params の {k} は整数である必要がある (got: {v!r})"
+                )
+            if v <= 0:
+                raise ValueError(
+                    f"params の {k} は正の値である必要がある (got: {v})"
+                )
     return params
 
 

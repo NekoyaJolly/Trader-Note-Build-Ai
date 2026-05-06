@@ -7,8 +7,9 @@
  *   3. compareTarget 付き condition が parse 通る (indicator operand)
  *   4. value と compareTarget の排他性 (両方 / どちらも無し は parse エラー)
  *   5. snapshot key 構築の挙動 (params 順序非依存、Number 正規化)
- *   6. dslToBacktestNotePayload で compareTarget 付き condition は sentinel 化
- *      (Python 側で false 評価される、PR #116c までの一時措置)
+ *   6. dslToBacktestNotePayload で compareTarget をネイティブ schema で表現
+ *      (PR #116c で sentinel 経路は撤去済み、`ScreeningBacktestCondition.compareTarget`
+ *      フィールドにそのまま載る)
  */
 
 import {
@@ -19,6 +20,7 @@ import {
   ConditionSchema,
   IndicatorOperandSchema,
   StrategyDSLSchema,
+  type ConditionValue,
   type StrategyDSL,
 } from '../../strategy_dsl/schema';
 import { buildSnapshotKey, formatStableParams } from '../../strategy_dsl/snapshotKey';
@@ -28,12 +30,16 @@ import { buildSnapshotKey, formatStableParams } from '../../strategy_dsl/snapsho
  * PR #116a Copilot review #5: `unknown[]` は型が弱すぎるため、Condition の
  * input 形に揃える (parse 通る形で受ける)。group ネストは現テストでは未使用のため
  * leaf 型のみで十分。
+ *
+ * PR #120 Copilot review #2: `value?: unknown` は any/unknown 禁止 rule に違反する
+ * ため、schema が受け付ける `ConditionValue` 型に揃える (= literal / ParamRef /
+ * range / set のいずれか)。
  */
 type ConditionLeafInput = {
   lens: string;
   feature: string;
   op: string;
-  value?: unknown;
+  value?: ConditionValue;
   params?: Record<string, number>;
   compareTarget?: { lens: string; feature: string; params?: Record<string, number> };
 };
@@ -227,6 +233,48 @@ describe('PR #116a: ConditionSchema 拡張', () => {
     it('UNSUPPORTED_COMPARE_TARGET_SENTINEL は deprecated だが値は維持 (下流互換)', () => {
       // PR #116c で sentinel 経路は撤去されたが、定数 export は下流の参照箇所のため残す
       expect(UNSUPPORTED_COMPARE_TARGET_SENTINEL).toBe('__pr116a_unsupported_compareTarget__');
+    });
+  });
+
+  // PR #120 Copilot review #3: 期間系キーは整数 + 正値を強制
+  describe('PR #120: ConditionParamsSchema 期間系キー整数性', () => {
+    it('period が整数なら parse 通る (例: 14)', () => {
+      const c = { lens: 'ohlcv', feature: 'rsi', op: '<', value: 30, params: { period: 14 } };
+      expect(() => ConditionSchema.parse(c)).not.toThrow();
+    });
+
+    it('period が小数 (20.5) だと parse エラー (snapshot key と実計算ズレ防止)', () => {
+      const c = { lens: 'ohlcv', feature: 'ema', op: '>', value: 1, params: { period: 20.5 } };
+      expect(() => ConditionSchema.parse(c)).toThrow(/integer|整数/);
+    });
+
+    it('period が 0 / 負値だと parse エラー', () => {
+      for (const period of [0, -1, -14]) {
+        const c = { lens: 'ohlcv', feature: 'rsi', op: '<', value: 30, params: { period } };
+        expect(() => ConditionSchema.parse(c)).toThrow(/正の値|positive/);
+      }
+    });
+
+    it('macd の fastPeriod / slowPeriod / signalPeriod も整数強制', () => {
+      const bad = {
+        lens: 'ohlcv',
+        feature: 'macd',
+        op: '>',
+        value: 0,
+        params: { fastPeriod: 12, slowPeriod: 26.5, signalPeriod: 9 },
+      };
+      expect(() => ConditionSchema.parse(bad)).toThrow(/integer|整数/);
+    });
+
+    it('期間系以外のキー (例: multiplier, threshold) は小数 OK', () => {
+      const c = {
+        lens: 'ohlcv',
+        feature: 'ema',
+        op: '>',
+        value: 1,
+        params: { period: 20, multiplier: 2.5 }, // multiplier は INTEGER_PARAM_KEYS に含まれない
+      };
+      expect(() => ConditionSchema.parse(c)).not.toThrow();
     });
   });
 

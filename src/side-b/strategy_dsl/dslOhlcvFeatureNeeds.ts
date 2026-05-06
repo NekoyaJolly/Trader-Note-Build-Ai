@@ -31,14 +31,27 @@ function walkGroup(group: ConditionGroup, onLeaf: (c: Condition) => void) {
 }
 
 /**
- * 当該 DSL でシミュ中に ohlcv.rsi / ohlcv.atr を要するかを列挙する
+ * 当該 DSL でシミュ中に ohlcv.rsi / ohlcv.atr を要するかを列挙する。
+ *
+ * PR #120 Copilot review #9: leaf の `compareTarget` も走査して、operand が
+ * static rsi/atr (params なし、例: `compareTarget=rsi`) を参照する場合に
+ * mark する。これがないと `close > rsi (compareTarget)` が rsi 未計算で
+ * 常に false 評価になる。params 付き compareTarget は
+ * `collectDslIndicatorNeeds` 経路で別途処理されるため重複しない。
  */
 export function collectDslOhlcvFeatureNeeds(dsl: StrategyDSL): DslOhlcvFeatureNeeds {
   const out: DslOhlcvFeatureNeeds = { rsi: false, atr: false };
+  const markFeature = (lens: string, feature: string, params?: ConditionParams) => {
+    if (lens !== 'ohlcv') return;
+    // params 付きは dynamic 経路 (collectDslIndicatorNeeds) で処理する
+    if (params && Object.keys(params).length > 0) return;
+    if (feature === 'rsi') out.rsi = true;
+    if (feature === 'atr') out.atr = true;
+  };
   const mark = (c: Condition) => {
-    if (c.lens === 'ohlcv') {
-      if (c.feature === 'rsi') out.rsi = true;
-      if (c.feature === 'atr') out.atr = true;
+    markFeature(c.lens, c.feature, c.params);
+    if (c.compareTarget) {
+      markFeature(c.compareTarget.lens, c.compareTarget.feature, c.compareTarget.params);
     }
   };
 

@@ -313,6 +313,12 @@ def collect_required_ohlcv_features(
     - `(lens, feature)` のゆらぎ (`'ohlcv.rsi'` vs `'rsi.value'`) は alias マップで
       同じ snapshot key (`'rsi'`) に正規化される
     - サポート外 lens の leaf は無視する (= 評価で false に倒れるため計算不要)
+
+    PR #120 Copilot review #8: leaf の `compareTarget` も走査して、operand が
+    static feature (params なし、例: `compareTarget=rsi`) を参照する場合に
+    snapshot key を集合に含める。これがないと `close > rsi (compareTarget)` が
+    rsi 未計算で常に false 評価になる。params 付き compareTarget は
+    `collect_required_dynamic_indicator_keys` 経路で別途処理されるため重複しない。
     """
     out: set = set()
     if group is None:
@@ -325,6 +331,12 @@ def collect_required_ohlcv_features(
             snapshot_key = _resolve_snapshot_key(cond)
             if snapshot_key is not None:
                 out.add(snapshot_key)
+            # PR #120 Copilot review #8: compareTarget の static operand も拾う
+            target = getattr(cond, "compareTarget", None)
+            if target is not None and not getattr(target, "params", None):
+                target_key = _resolve_operand_snapshot_key(target)
+                if target_key is not None:
+                    out.add(target_key)
     return out
 
 

@@ -91,12 +91,15 @@ function collectFromGroup(group: ConditionGroup): DSLCondition[] {
 }
 
 /**
- * PR #116a で導入し、PR #116c で撤去予定の sentinel 文字列。
+ * PR #116a で導入し、PR #116c で **経路撤去済み** の sentinel 文字列。
  *
  * PR #116c で `ScreeningBacktestCondition` schema が `params` / `compareTarget` を
- * 受けるようになったため、compareTarget 付き condition は素直に新 schema で表現する。
- * 本 sentinel は **下流テスト互換のために値だけ export を維持** するが、
- * `dslConditionToBacktest` からは出力されなくなる (= deprecated)。
+ * 受けるようになったため、compareTarget 付き condition は新 schema で素直に表現される。
+ * 本 sentinel は **下流テスト互換のために値だけ export を維持** する (= 過去 PR で
+ * sentinel value をリテラル pin していたテストを壊さないため)。
+ * `dslConditionToBacktest` からは出力されない。
+ *
+ * PR #120 Copilot review #6: 「PR #116c で撤去予定」の表記を「撤去済み」に更新。
  *
  * @deprecated PR #116c で role 完了。新コードは `compareTarget` を直接使うこと。
  */
