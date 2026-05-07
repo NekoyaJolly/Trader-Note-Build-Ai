@@ -115,11 +115,16 @@ function dslConditionToBacktest(
     c: DSLCondition,
     resolvedParams: Record<string, number>,
 ): BacktestCondition {
+    // PR ⑤B (MTF): condition.timeframe を payload に含める。主 timeframe との一致判定は
+    // 行わず、collectDslIndicatorNeeds で主と異なる場合のみ timeframe が DSL 上に存在
+    // する形 (= mutation/crossover で生成された MTF 戦略は主とは別の上位足を明示する)。
+    // 未指定なら payload にも含めず、analysis-engine 側は主 timeframe 扱い。
     const base = {
         lensName: c.lens,
         featureKey: c.feature,
         op: c.op,
         ...(c.params && Object.keys(c.params).length > 0 ? { params: { ...c.params } } : {}),
+        ...(c.timeframe ? { timeframe: c.timeframe } : {}),
     };
     if (c.compareTarget) {
         return {
@@ -129,6 +134,9 @@ function dslConditionToBacktest(
                 featureKey: c.compareTarget.feature,
                 ...(c.compareTarget.params && Object.keys(c.compareTarget.params).length > 0
                     ? { params: { ...c.compareTarget.params } }
+                    : {}),
+                ...(c.compareTarget.timeframe
+                    ? { timeframe: c.compareTarget.timeframe }
                     : {}),
             },
         };

@@ -9,8 +9,9 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import pandas as pd
 from sqlalchemy import text
@@ -166,6 +167,29 @@ def run_screening_backtest(
     # (3) ノート schema → engine 抽象
     spec = adapter.notepayload_to_btspec(req.notePayload)
     config = adapter.config_to_btconfig(req.config)
+
+    # PR ⑤B (MTF): trigger_group を walk して必要な上位足 timeframe を集め、
+    # それぞれ OHLCV を別 SQL で読んで spec.upper_timeframe_ohlcv に詰める。
+    # 上位足が指定されていなければ何もしない (= 後方互換)。
+    upper_tf_ohlcv: Dict[str, pd.DataFrame] = {}
+    if spec.trigger_group is not None:
+        from .condition_evaluator import collect_required_timeframes
+        required_tfs = collect_required_timeframes(spec.trigger_group)
+        for tf in required_tfs:
+            if tf == req.timeframe:
+                continue  # 主 timeframe は既に ohlcv に読み込み済
+            upper_df = _load_ohlcv(sql_engine, req.symbol, tf, req.startDate, req.endDate)
+            if not upper_df.empty:
+                upper_tf_ohlcv[tf] = upper_df
+    if upper_tf_ohlcv:
+        spec = replace(
+            spec,
+            upper_timeframe_ohlcv=upper_tf_ohlcv,
+            primary_timeframe=req.timeframe,
+        )
+    elif req.timeframe and spec.primary_timeframe is None:
+        # MTF を使わなくても primary_timeframe を入れておく (= 観測情報として)
+        spec = replace(spec, primary_timeframe=req.timeframe)
 
     # (4) BT 実行 (engine 抽象)
     result = engine.run(spec, ohlcv, config)

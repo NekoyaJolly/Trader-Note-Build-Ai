@@ -115,6 +115,14 @@ export interface LensFeatureSnapshot {
   features: Map<string, LensFeature>;
   /** 全レンズ合計の計算時間（ms） */
   totalComputeDurationMs: number;
+  /**
+   * PR ⑤B (MTF): 主 timeframe (canonical 表記、例: `'15m'`)。MTF 評価で
+   * `condition.timeframe` を主 timeframe と比較して、一致なら接尾なしの lens key
+   * (`'ohlcv'`)、上位足なら `'ohlcv@1h'` のような lens key で snapshot.features
+   * を引くために必要。surrogate / analysis-engine 側で snapshot 構築時に詰める。
+   * 未設定 (= MTF 非対応の経路) なら DSLEvaluator は condition.timeframe を無視。
+   */
+  primaryTimeframe?: string;
 }
 
 /**

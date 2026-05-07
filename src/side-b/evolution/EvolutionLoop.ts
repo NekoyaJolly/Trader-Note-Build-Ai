@@ -92,6 +92,8 @@ import {
   fetchGenerationIndicatorCaches,
   type GenerationIndicatorCaches,
 } from './generationIndicatorCache';
+import { defaultHttpOhlcvSource } from '../../shared/marketdata';
+import { normalizeTimeframe as normalizeCanonicalTimeframe } from '../../shared/timeframes';
 import {
   mapAnalysisEngineRobustnessResult,
   type OosMetrics,
@@ -578,19 +580,41 @@ export class EvolutionLoop {
     const scores = new Map<string, number>();
     const dslById = new Map<string, StrategyDSL>();
 
-    // PR ④F: 世代スコープで全候補が必要とする indicator + pattern を 1 HTTP で
-    // analysis-engine から一括取得。各 evaluateFitness にキャッシュを渡し、
-    // surrogate 内部での TS 再計算を撤廃する (= 真実は pandas_ta 一本化)。
+    // PR ④F + PR ⑤B (MTF): 世代スコープで全候補が必要とする indicator + pattern を
+    // 主 timeframe + 上位足それぞれで取得して一括 cache に詰める。各
+    // evaluateFitness にキャッシュを渡し、surrogate 内部での TS 再計算を撤廃する
+    // (= 真実は pandas_ta 一本化)。MTF: 上位足は主 timeframe バー長に forward fill
+    // 済 (= cache 経由で透過的に参照可能)。
     let generationCaches: GenerationIndicatorCaches | undefined = undefined;
     if (list.length > 0) {
       try {
-        generationCaches = await fetchGenerationIndicatorCaches(
-          list,
-          list[0].symbol,
-          list[0].timeframe,
-          new Date(period.start),
-          new Date(period.end),
-        );
+        const symbolNorm = list[0].symbol.replace(/\//g, '');
+        const primaryTf = normalizeCanonicalTimeframe(list[0].timeframe);
+        if (primaryTf === null) {
+          errors.push(
+            `[warn] indicator-series 取得スキップ (regime=${regime}): 未知 timeframe '${list[0].timeframe}'`,
+          );
+        } else {
+          const start = new Date(period.start);
+          const end = new Date(period.end);
+          // PR ⑤B: 主 timeframe の OHLCV を取得 (= 上位足 forward fill のための
+          // バーアライメント計算に必要)。surrogate 側でも同じ fetch が走る (=
+          // 重複)、後追い PR で primary bars を共有する形に最適化予定。
+          const primaryBars = await defaultHttpOhlcvSource.fetchBars({
+            symbol: symbolNorm,
+            timeframe: primaryTf,
+            startDate: start,
+            endDate: end,
+          });
+          generationCaches = await fetchGenerationIndicatorCaches(
+            list,
+            symbolNorm,
+            primaryTf,
+            start,
+            end,
+            primaryBars,
+          );
+        }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         errors.push(`[warn] indicator-series 一括取得に失敗 (regime=${regime}): ${msg}`);

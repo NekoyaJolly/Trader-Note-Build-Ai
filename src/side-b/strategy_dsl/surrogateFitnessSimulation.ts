@@ -219,39 +219,53 @@ function snapshotAt(
   ts: Date,
   table: BarFeatureTable,
   i: number,
+  primaryTimeframe?: string,
 ): LensFeatureSnapshot {
   const features = new Map<string, LensFeature>();
-  const f: Record<string, number | string | boolean> = {
+  // PR ⑤B: lens 別の features バケットを作る (= 主 timeframe `ohlcv` + 上位足
+  // `ohlcv@1h` 等を別 lens エントリとして詰める)。`pattern@1h` も同様。
+  const lensBuckets = new Map<string, Record<string, number | string | boolean>>();
+  const ohlcvBucket: Record<string, number | string | boolean> = {
     open: table.open[i],
     high: table.high[i],
     low: table.low[i],
     close: table.close[i],
     volume: table.volume[i],
   };
-  if (table.rsi && !Number.isNaN(table.rsi[i])) f.rsi = table.rsi[i]!;
-  if (table.atr && !Number.isNaN(table.atr[i])) f.atr = table.atr[i]!;
-  // PR #116b: 新 indicator series を snapshot.features に snapshot key 形式で詰める。
-  // snapshotKey は `${lens}.${feature}(stable_params)` だが、snapshot.features の key は
-  // lens prefix を取り除いた `feature(stable_params)` 形式 (lens 自体は features Map の key)。
+  if (table.rsi && !Number.isNaN(table.rsi[i])) ohlcvBucket.rsi = table.rsi[i]!;
+  if (table.atr && !Number.isNaN(table.atr[i])) ohlcvBucket.atr = table.atr[i]!;
+  lensBuckets.set('ohlcv', ohlcvBucket);
+
+  // PR ⑤B: indicator series の snapshot key を lens 部分と feature 部分に分割。
+  //   - `ohlcv.ema(period=20)` → lens=`ohlcv`、feature=`ema(period=20)`
+  //   - `ohlcv@1h.ema(period=20)` → lens=`ohlcv@1h`、feature=`ema(period=20)`
+  //   - `pattern@1h.engulfing_bull` → lens=`pattern@1h`、feature=`engulfing_bull`
+  // 区切りは **最初に出てくる '.'** (= lens 部分は @ を含めて 1 トークン)。
   if (table.indicatorSeries) {
     for (const [snapshotKey, series] of table.indicatorSeries) {
       const v = series[i];
-      if (typeof v === 'number' && !Number.isNaN(v)) {
-        // snapshotKey の lens prefix (`ohlcv.`) を取り除いて feature key 部分のみ使う
-        const featureKey = snapshotKey.startsWith('ohlcv.')
-          ? snapshotKey.slice('ohlcv.'.length)
-          : snapshotKey;
-        f[featureKey] = v;
+      if (typeof v !== 'number' || Number.isNaN(v)) continue;
+      const dotIdx = snapshotKey.indexOf('.');
+      if (dotIdx < 0) continue;
+      const lensName = snapshotKey.slice(0, dotIdx);
+      const featureKey = snapshotKey.slice(dotIdx + 1);
+      let bucket = lensBuckets.get(lensName);
+      if (!bucket) {
+        bucket = {};
+        lensBuckets.set(lensName, bucket);
       }
+      bucket[featureKey] = v;
     }
   }
 
-  features.set('ohlcv', {
-    lensName: 'ohlcv',
-    lensVersion: '1.0.0',
-    features: f,
-    computedAt: ts,
-  });
+  for (const [lensName, bucket] of lensBuckets) {
+    features.set(lensName, {
+      lensName,
+      lensVersion: '1.0.0',
+      features: bucket,
+      computedAt: ts,
+    });
+  }
 
   // PR ②-1: pattern lens features (= 12 種ローソク足パターン真偽) を詰める。
   // patternFlags が未設定 (= DSL が pattern lens を参照しない) なら lens 自体を
@@ -276,6 +290,7 @@ function snapshotAt(
     symbol,
     features,
     totalComputeDurationMs: 0,
+    primaryTimeframe,
   };
 }
 
@@ -607,7 +622,7 @@ export function runDslSimulation(
   let prevSnap: LensFeatureSnapshot | undefined = undefined;
   for (let i = startI; i < bars.length; i++) {
     const ts = bars[i].timestamp;
-    const snap = snapshotAt(symbolNorm, ts, table, i);
+    const snap = snapshotAt(symbolNorm, ts, table, i, dsl.timeframe);
 
     if (!position && deferredImmediate && i === deferredImmediate.openAtIndex) {
       const e = dsl.entry;

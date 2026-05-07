@@ -114,6 +114,18 @@ def _build_dynamic_snapshot_key(lens_name: str, feature_key: str, params: Option
     return f"{lens_name}.{feature_key}({_format_stable_params(params)})"
 
 
+def _apply_timeframe_to_lens(lens_name: str, timeframe: Optional[str]) -> str:
+    """PR ⑤B (MTF): timeframe が指定されていれば lens に `@<tf>` 修飾を付ける。
+
+    主 timeframe との一致判定はここでは行わず、上流 (= dslToBacktestNotePayload で
+    主 timeframe と一致するなら timeframe を payload に含めない) の責務とする。
+    本関数に届いた timeframe は **既に上位足判定済** の前提。
+    """
+    if not timeframe:
+        return lens_name
+    return f"{lens_name}@{timeframe}"
+
+
 def _resolve_snapshot_key(condition: ScreeningBacktestCondition):
     """leaf 条件を snapshot key に正規化する。サポート外なら None。
 
@@ -124,24 +136,45 @@ def _resolve_snapshot_key(condition: ScreeningBacktestCondition):
     PR #118 Copilot review #3: `params` 付きでも **lens は ohlcv のみ許可**
     (= analysis-engine が対応するのは ohlcv lens の indicator のみ)。それ以外は
     None を返して `unsupportedConditions` 観測経路に乗せる。
+
+    PR ⑤B (MTF): condition.timeframe が指定されていれば lens に `@<tf>` 修飾を付け、
+    上位足の snapshot key (`ohlcv@1h.feature(stable)`) を返す。runner 側で同じ
+    key で series を pre-compute & feature_snapshot に詰める。
     """
+    timeframe = getattr(condition, "timeframe", None)
+    lens_with_tf = _apply_timeframe_to_lens(condition.lensName, timeframe)
     params = getattr(condition, "params", None)
+    base_lens = condition.lensName  # @ を含まない素の lens
     if params:
-        if condition.lensName != "ohlcv":
+        if base_lens != "ohlcv":
             return None
-        return _build_dynamic_snapshot_key(condition.lensName, condition.featureKey, params)
+        return _build_dynamic_snapshot_key(lens_with_tf, condition.featureKey, params)
+    if timeframe:
+        # PR ⑤B: 上位足は SUPPORTED_LENS_FEATURE_MAP に登録されないので、`lens@tf.feature`
+        # 形式の動的 key を直接返す (= runner 側で同じ key で feature_snapshot に詰まる)
+        if base_lens not in ("ohlcv", "pattern"):
+            return None
+        return f"{lens_with_tf}.{condition.featureKey}"
     return SUPPORTED_LENS_FEATURE_MAP.get((condition.lensName, condition.featureKey))
 
 
 def _resolve_operand_snapshot_key(operand: ScreeningBacktestIndicatorOperand):
     """PR #116c: compareTarget operand から snapshot key を構築する。
     PR #118 Copilot review #3: dynamic key (params 付き) も ohlcv lens のみ許可。
+    PR ⑤B (MTF): operand.timeframe が指定されていれば `@<tf>` 修飾を付けて返す。
     """
+    timeframe = getattr(operand, "timeframe", None)
+    lens_with_tf = _apply_timeframe_to_lens(operand.lensName, timeframe)
     params = getattr(operand, "params", None)
+    base_lens = operand.lensName
     if params:
-        if operand.lensName != "ohlcv":
+        if base_lens != "ohlcv":
             return None
-        return _build_dynamic_snapshot_key(operand.lensName, operand.featureKey, params)
+        return _build_dynamic_snapshot_key(lens_with_tf, operand.featureKey, params)
+    if timeframe:
+        if base_lens not in ("ohlcv", "pattern"):
+            return None
+        return f"{lens_with_tf}.{operand.featureKey}"
     return SUPPORTED_LENS_FEATURE_MAP.get((operand.lensName, operand.featureKey))
 
 
@@ -476,6 +509,10 @@ def collect_required_dynamic_indicator_keys(
     """PR #116c: ConditionGroup を再帰走査し、params 付き indicator (= dynamic snapshot key)
     の (snapshot_key, lens, feature, params_items) を集めて返す。
 
+    PR ⑤B (MTF): condition.timeframe / operand.timeframe が指定されていれば
+    lens に `@<tf>` 修飾を付けて返す (例: `ohlcv@1h.ema(period=20)`)。runner 側で
+    `lens` 名から `@` を分離して上位足判定し、適切な timeframe で indicator を計算する。
+
     `runner_backtesting_py.py` の `_build_strategy_class` がこれを使って必要な
     indicator series を `compute_indicator_series` で pre-compute、`feature_snapshot`
     に詰める (key = snapshot_key)。
@@ -488,15 +525,22 @@ def collect_required_dynamic_indicator_keys(
     if group is None:
         return out
 
-    def _visit(lens_name: str, feature_key: str, params: Optional[Mapping[str, Any]]) -> None:
+    def _visit(
+        lens_name: str,
+        feature_key: str,
+        params: Optional[Mapping[str, Any]],
+        timeframe: Optional[str],
+    ) -> None:
         if not params:
             return  # static feature は別経路 (collect_required_ohlcv_features) で扱う
-        snapshot_key = _build_dynamic_snapshot_key(lens_name, feature_key, params)
+        # PR ⑤B (MTF): timeframe があれば lens に @<tf> を付与
+        lens_with_tf = f"{lens_name}@{timeframe}" if timeframe else lens_name
+        snapshot_key = _build_dynamic_snapshot_key(lens_with_tf, feature_key, params)
         if snapshot_key in seen:
             return
         seen.add(snapshot_key)
         params_items = tuple(sorted(params.items()))
-        out.append((snapshot_key, lens_name, feature_key, params_items))
+        out.append((snapshot_key, lens_with_tf, feature_key, params_items))
 
     def _walk(g: ScreeningBacktestConditionGroup) -> None:
         for child in g.conditions:
@@ -504,10 +548,109 @@ def collect_required_dynamic_indicator_keys(
                 _walk(child)  # type: ignore[arg-type]
             else:
                 cond: ScreeningBacktestCondition = child  # type: ignore[assignment]
-                _visit(cond.lensName, cond.featureKey, getattr(cond, "params", None))
+                cond_tf = getattr(cond, "timeframe", None)
+                _visit(
+                    cond.lensName,
+                    cond.featureKey,
+                    getattr(cond, "params", None),
+                    cond_tf,
+                )
                 target = getattr(cond, "compareTarget", None)
                 if target is not None:
-                    _visit(target.lensName, target.featureKey, getattr(target, "params", None))
+                    target_tf = getattr(target, "timeframe", None) or cond_tf
+                    _visit(
+                        target.lensName,
+                        target.featureKey,
+                        getattr(target, "params", None),
+                        target_tf,
+                    )
+
+    _walk(group)
+    return out
+
+
+def collect_required_timeframes(
+    group: Optional[ScreeningBacktestConditionGroup],
+) -> set:
+    """PR ⑤B (MTF): ConditionGroup を再帰走査し、`condition.timeframe` /
+    `operand.timeframe` で指定された **上位足 timeframe 集合** を返す。
+
+    runner 側で「主 timeframe に加えてどの timeframe の OHLCV を別途読むか」を
+    決めるために使う。主 timeframe (= リクエストの `request.timeframe`) は呼び出し
+    側で別途扱う前提で、本関数は **明示指定された timeframe のみ** を返す。
+    """
+    out: set = set()
+    if group is None:
+        return out
+    for child in group.conditions:
+        if _is_group(child):
+            out |= collect_required_timeframes(child)  # type: ignore[arg-type]
+        else:
+            cond: ScreeningBacktestCondition = child  # type: ignore[assignment]
+            tf = getattr(cond, "timeframe", None)
+            if tf:
+                out.add(tf)
+            target = getattr(cond, "compareTarget", None)
+            if target is not None:
+                ttf = getattr(target, "timeframe", None)
+                if ttf:
+                    out.add(ttf)
+    return out
+
+
+def collect_required_upper_tf_features(
+    group: Optional[ScreeningBacktestConditionGroup],
+) -> set:
+    """PR ⑤B (MTF): condition.timeframe 指定 + params **なし** の static feature
+    を `<lens>@<tf>.<feature>` 形式の snapshot key 集合で返す。
+
+    例: `{lens=ohlcv, feature=close, timeframe=1h}` → `'ohlcv@1h.close'`
+    例: `{lens=pattern, feature=engulfing_bull, timeframe=1h}` → `'pattern@1h.engulfing_bull'`
+
+    runner で「上位足のどの static feature を pre-compute して詰めるべきか」を
+    決めるために使う。params 付きは `collect_required_dynamic_indicator_keys`
+    経由で扱われるので本関数では除外。
+    """
+    out: set = set()
+    if group is None:
+        return out
+
+    def _visit(
+        lens_name: str,
+        feature_key: str,
+        params: Optional[Mapping[str, Any]],
+        timeframe: Optional[str],
+    ) -> None:
+        if not timeframe:
+            return
+        if params:
+            return  # dynamic は別経路
+        if lens_name not in ("ohlcv", "pattern"):
+            return
+        out.add(f"{lens_name}@{timeframe}.{feature_key}")
+
+    def _walk(g: ScreeningBacktestConditionGroup) -> None:
+        for child in g.conditions:
+            if _is_group(child):
+                _walk(child)  # type: ignore[arg-type]
+            else:
+                cond: ScreeningBacktestCondition = child  # type: ignore[assignment]
+                cond_tf = getattr(cond, "timeframe", None)
+                _visit(
+                    cond.lensName,
+                    cond.featureKey,
+                    getattr(cond, "params", None),
+                    cond_tf,
+                )
+                target = getattr(cond, "compareTarget", None)
+                if target is not None:
+                    target_tf = getattr(target, "timeframe", None) or cond_tf
+                    _visit(
+                        target.lensName,
+                        target.featureKey,
+                        getattr(target, "params", None),
+                        target_tf,
+                    )
 
     _walk(group)
     return out
