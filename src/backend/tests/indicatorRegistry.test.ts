@@ -92,23 +92,29 @@ describe('PR #115: shared indicator registry', () => {
       }
     });
 
-    it('PR #116b 時点で tsSurrogate=true なのは ema/sma/rsi/macd/bb/atr の 6 指標', () => {
+    it('PR ④F 後: tsSurrogate=true は pythonSeries=true と同義 (= 20 指標)', () => {
+      // PR ④F で TS surrogate も analysis-engine 経由で indicator を取得する
+      // ようになり、TS 側で再計算しなくなったため、pythonSeries=true なら
+      // すべて tsSurrogate=true。pythonSeries=false の adx/supertrend/pivot のみ
+      // tsSurrogate=false のまま。
       const tsSurrogateIds = INDICATOR_REGISTRY
         .filter((e) => e.support.tsSurrogate)
         .map((e) => e.id)
         .sort();
-      expect(tsSurrogateIds).toEqual(['atr', 'bb', 'ema', 'macd', 'rsi', 'sma']);
+      const pythonSeriesIds = INDICATOR_REGISTRY
+        .filter((e) => e.support.pythonSeries)
+        .map((e) => e.id)
+        .sort();
+      expect(tsSurrogateIds).toEqual(pythonSeriesIds);
+      expect(tsSurrogateIds).toHaveLength(20);
     });
 
-    it('PR #116b 時点で tsSurrogate=false なのは残り 17 指標 (PR #118+ で順次拡張)', () => {
+    it('PR ④F 後: tsSurrogate=false なのは pythonSeries=false の 3 指標のみ', () => {
       const notTsSurrogate = INDICATOR_REGISTRY
         .filter((e) => !e.support.tsSurrogate)
-        .map((e) => e.id);
-      expect(notTsSurrogate).toHaveLength(17);
-      // 含まれる代表例
-      expect(notTsSurrogate).toEqual(
-        expect.arrayContaining(['stochastic', 'williamsR', 'roc', 'mfi', 'adx', 'supertrend', 'pivot']),
-      );
+        .map((e) => e.id)
+        .sort();
+      expect(notTsSurrogate).toEqual(['adx', 'pivot', 'supertrend']);
     });
   });
 

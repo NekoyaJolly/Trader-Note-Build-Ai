@@ -31,6 +31,39 @@ import {
 } from './dslParameterUtils';
 import { isLegacyParameterDef, isParameterRangeV2 } from './types';
 
+/**
+ * PR ④F: 世代スコープ indicator/pattern キャッシュを `[start, end)` で slice する。
+ * train / validation 分割時に bars と同じ index で series 配列を切り詰めるため使う。
+ * cache が未指定の場合は元の simulationOptions をそのまま返す。
+ */
+function sliceSimulationCaches(
+  options: DslSimulationOptions | undefined,
+  start: number,
+  end: number,
+): DslSimulationOptions | undefined {
+  if (!options) return undefined;
+  const indicatorSeriesCache = options.indicatorSeriesCache;
+  const patternFlagsCache = options.patternFlagsCache;
+  if (!indicatorSeriesCache && !patternFlagsCache) return options;
+
+  const out: DslSimulationOptions = { ...options };
+  if (indicatorSeriesCache) {
+    const sliced = new Map<string, ReadonlyArray<number | null>>();
+    for (const [key, arr] of indicatorSeriesCache) {
+      sliced.set(key, arr.slice(start, end));
+    }
+    out.indicatorSeriesCache = sliced;
+  }
+  if (patternFlagsCache) {
+    const sliced: Record<string, ReadonlyArray<boolean>> = {};
+    for (const [key, arr] of Object.entries(patternFlagsCache)) {
+      sliced[key] = arr ? arr.slice(start, end) : [];
+    }
+    out.patternFlagsCache = sliced as DslSimulationOptions['patternFlagsCache'];
+  }
+  return out;
+}
+
 /** profitFactor が Infinity のときも数値計算できるよう上限化 */
 function safeProfitFactor(s: BacktestResultSummary): number {
   const pf = s.profitFactor;
@@ -218,8 +251,15 @@ export class SurrogateFitnessSimulator {
     const valBars = bars.slice(split);
 
     const mergedParams = { ...defaultParameterValues(dsl), ...paramValues };
-    const trainResult = runDslSimulation(trainBars, dsl, mergedParams, simulationOptions);
-    const valResult = runDslSimulation(valBars, dsl, mergedParams, simulationOptions);
+    // PR ④F: simulationOptions.indicatorSeriesCache / patternFlagsCache は
+    // **全期間分** が渡される想定 (= EvolutionLoop が世代開始時に 1 HTTP で取得)。
+    // train (= 0..split) / validation (= split..end) ごとに同じ index で slice
+    // して runDslSimulation に渡す。slice しないと bars と series で index が
+    // ズレて leaf 評価が歪む。
+    const trainOptions = sliceSimulationCaches(simulationOptions, 0, split);
+    const valOptions = sliceSimulationCaches(simulationOptions, split, bars.length);
+    const trainResult = runDslSimulation(trainBars, dsl, mergedParams, trainOptions);
+    const valResult = runDslSimulation(valBars, dsl, mergedParams, valOptions);
 
     const trainPf = safeProfitFactor(trainResult.summary);
     const validationPf = safeProfitFactor(valResult.summary);

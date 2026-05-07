@@ -1,5 +1,5 @@
 {
-  "$comment": "PR #115 canonical indicator registry. このファイルが 23 指標の単一情報源。registry.ts が Zod parse + typed export。src/models/indicatorConfig.ts はここから INDICATOR_METADATA を構築する後方互換 re-export。Python 側 (analysis-engine/app/indicators.py) で実装済の指標は support.pythonSeries=true。tsSurrogate (TS 側 EvolutionLoop surrogate 用) は PR #116b で ema/sma/rsi/macd/bb/atr の 6 個を true 化、それ以外は将来 PR で順次拡張。",
+  "$comment": "PR #115 canonical indicator registry。このファイルが 23 指標の単一情報源。registry.ts が Zod parse + typed export。src/models/indicatorConfig.ts はここから INDICATOR_METADATA を構築する後方互換 re-export。Python 側 (analysis-engine/app/indicators.py) で実装済の指標は support.pythonSeries=true。PR ④F (post-Phase 5A) で **TS surrogate も analysis-engine 経由で indicator series を取得** する形に切替えたため、tsSurrogate は pythonSeries=true なら全部 true になる (= TS 側で indicator を再計算しない、真実は pandas_ta のみ)。adx/supertrend/pivot は Python 側未実装で pythonSeries=false。",
   "version": 1,
   "indicators": [
     {
@@ -34,7 +34,7 @@
       },
       "support": {
         "pythonSeries": true,
-        "tsSurrogate": false
+        "tsSurrogate": true
       }
     },
     {
@@ -51,7 +51,7 @@
       },
       "support": {
         "pythonSeries": true,
-        "tsSurrogate": false
+        "tsSurrogate": true
       }
     },
     {
@@ -68,7 +68,7 @@
       },
       "support": {
         "pythonSeries": true,
-        "tsSurrogate": false
+        "tsSurrogate": true
       }
     },
     {
@@ -85,7 +85,7 @@
       },
       "support": {
         "pythonSeries": true,
-        "tsSurrogate": false
+        "tsSurrogate": true
       }
     },
     {
@@ -136,7 +136,7 @@
       },
       "support": {
         "pythonSeries": true,
-        "tsSurrogate": false
+        "tsSurrogate": true
       }
     },
     {
@@ -153,7 +153,7 @@
       },
       "support": {
         "pythonSeries": true,
-        "tsSurrogate": false
+        "tsSurrogate": true
       }
     },
     {
@@ -189,7 +189,7 @@
       },
       "support": {
         "pythonSeries": true,
-        "tsSurrogate": false
+        "tsSurrogate": true
       }
     },
     {
@@ -206,7 +206,7 @@
       },
       "support": {
         "pythonSeries": true,
-        "tsSurrogate": false
+        "tsSurrogate": true
       }
     },
     {
@@ -221,7 +221,7 @@
       "paramConstraints": {},
       "support": {
         "pythonSeries": true,
-        "tsSurrogate": false
+        "tsSurrogate": true
       }
     },
     {
@@ -241,7 +241,7 @@
       },
       "support": {
         "pythonSeries": true,
-        "tsSurrogate": false
+        "tsSurrogate": true
       }
     },
     {
@@ -292,7 +292,7 @@
       },
       "support": {
         "pythonSeries": true,
-        "tsSurrogate": false
+        "tsSurrogate": true
       }
     },
     {
@@ -304,7 +304,7 @@
       "paramConstraints": {},
       "support": {
         "pythonSeries": true,
-        "tsSurrogate": false
+        "tsSurrogate": true
       }
     },
     {
@@ -316,7 +316,7 @@
       "paramConstraints": {},
       "support": {
         "pythonSeries": true,
-        "tsSurrogate": false
+        "tsSurrogate": true
       }
     },
     {
@@ -333,7 +333,7 @@
       },
       "support": {
         "pythonSeries": true,
-        "tsSurrogate": false
+        "tsSurrogate": true
       }
     },
     {

@@ -24,7 +24,6 @@ import {
   type DslIndicatorNeed,
 } from './dslOhlcvFeatureNeeds';
 import {
-  computeAllPatternFlags,
   ALL_CANDLE_PATTERN_IDS,
   type CandlePatternId,
 } from '../../shared/patterns';
@@ -35,7 +34,9 @@ import type {
   ExecutionModel,
   ExecutionSimulationMetadata,
 } from './executionSimulation';
-import { computeTsSurrogateIndicator } from './indicatorSurrogate';
+// PR ④F: 旧 `computeTsSurrogateIndicator` (= TS で indicator を計算する経路) は撤廃。
+// 全 indicator は analysis-engine `/v1/indicator-series` から取得し、
+// `DslSimulationOptions.indicatorSeriesCache` 経由で本ファイルに渡される。
 import type { StrategyDSL } from './schema';
 import { isWaitForTriggerEntry } from './types';
 
@@ -147,6 +148,8 @@ function buildFeatureTable(
   needs: { rsi: boolean; atr: boolean },
   indicatorNeeds: readonly DslIndicatorNeed[] = [],
   patternNeeded: boolean = false,
+  indicatorSeriesCache?: DslSimulationOptions['indicatorSeriesCache'],
+  patternFlagsCache?: DslSimulationOptions['patternFlagsCache'],
 ): BarFeatureTable {
   const open = bars.map((b) => b.open);
   const high = bars.map((b) => b.high);
@@ -160,29 +163,48 @@ function buildFeatureTable(
   if (needs.atr) {
     table.atr = computeAtr(high, low, close, 14);
   }
+  // PR ④F: 動的 indicator series は **analysis-engine HTTP 経由のキャッシュから引く**。
+  // EvolutionLoop が世代開始時に `fetchIndicatorSeries` で取得して `indicatorSeriesCache`
+  // に詰めて渡す前提。キャッシュ未指定 / 該当キー欠落時は indicator series を Map に
+  // 積まず leaf 評価で false に倒れる (= legacy TS 計算経路は撤廃)。
   if (indicatorNeeds.length > 0) {
-    // PR #116b: 新 indicator (ema/sma/rsi/atr/macd/bb の params 付き) を
-    // `IndicatorService` 経由で計算し、leading NaN padding して同じ bar 数に揃える。
-    // snapshotAt はこの Map から「snapshot key (= feature(stable_params))」で取り出して
-    // snapshot.features に詰める。
     const series = new Map<string, number[]>();
     for (const need of indicatorNeeds) {
-      const computed = computeTsSurrogateIndicator(
-        need.feature,
-        need.params,
-        { open, high, low, close, volume },
-      );
-      if (computed) {
-        series.set(need.snapshotKey, computed);
+      const cached = indicatorSeriesCache?.get(need.snapshotKey);
+      if (!cached) continue;
+      // keys 整合は呼び出し側の責任。長さが bars と一致しない場合は短い方に合わせる。
+      // null は NaN に倒して既存 BarFeatureTable.indicatorSeries の数値配列形式に揃える。
+      const len = Math.min(cached.length, bars.length);
+      const values = new Array<number>(len);
+      for (let i = 0; i < len; i++) {
+        const v = cached[i];
+        values[i] = v === null || v === undefined ? Number.NaN : v;
       }
+      series.set(need.snapshotKey, values);
     }
     table.indicatorSeries = series;
   }
-  // PR ②-1: pattern lens 参照あれば 12 種のフラグ配列を一括計算
-  if (patternNeeded) {
-    table.patternFlags = computeAllPatternFlags(
-      bars.map((b) => ({ open: b.open, high: b.high, low: b.low, close: b.close })),
-    );
+  // PR ②-1 + PR ④F: pattern lens 参照ありなら、analysis-engine HTTP 経由の
+  // patternFlagsCache から 12 種 boolean 配列を取り出す。キャッシュ未指定で
+  // pattern が必要な場合は features 未積みになり leaf は false 評価。
+  if (patternNeeded && patternFlagsCache) {
+    const patternFlags = {} as Record<CandlePatternId, boolean[]>;
+    for (const id of ALL_CANDLE_PATTERN_IDS) {
+      const arr = patternFlagsCache[id];
+      if (!arr) {
+        patternFlags[id] = new Array<boolean>(bars.length).fill(false);
+        continue;
+      }
+      const len = Math.min(arr.length, bars.length);
+      const values = new Array<boolean>(len);
+      for (let i = 0; i < len; i++) {
+        values[i] = Boolean(arr[i]);
+      }
+      // arr が短い場合は末尾を false で詰める
+      for (let i = len; i < bars.length; i++) values[i] = false;
+      patternFlags[id] = values;
+    }
+    table.patternFlags = patternFlags;
   }
   return table;
 }
@@ -342,6 +364,30 @@ export interface DslSimulationOptions {
   executionModel?: ExecutionModel;
   executionConfigHash?: string;
   executionDataSource?: ExecutionDataSource;
+  /**
+   * PR ④F: analysis-engine `/v1/indicator-series` から取得した indicator 値配列の
+   * 世代スコープキャッシュ。key は **DSL snapshot key 形式** (`${lens}.${feature}` /
+   * `${lens}.${feature}(stable_params)`)、value は bar 数と同じ長さの数値配列
+   * (warm-up は null)。
+   *
+   * 渡されていれば surrogate は内部で indicator 計算を **行わず**、本キャッシュから
+   * 値を引いて snapshot に詰める。`EvolutionLoop` が世代開始時に全候補が必要とする
+   * indicator を一括 HTTP 取得して構築する。
+   *
+   * 未指定 (= legacy 経路) では DSL に indicator 条件があっても snapshot にその
+   * 値が積まれず leaf 評価で false に倒れるため、indicator を使う戦略を評価する
+   * 場合は **必ず指定** すること。
+   */
+  indicatorSeriesCache?: ReadonlyMap<string, ReadonlyArray<number | null>>;
+  /**
+   * PR ④F: analysis-engine `/v1/indicator-series` から取得した pattern flag 配列の
+   * 世代スコープキャッシュ。key は `CandlePatternId` (`pinbar` / `engulfing_bull` 等)、
+   * value は bar 数と同じ長さの boolean 配列。
+   *
+   * 未指定で DSL が pattern lens を参照する場合、pattern features が snapshot に
+   * 積まれず is_true / is_false leaf が常に false になる。
+   */
+  patternFlagsCache?: Readonly<Record<CandlePatternId, ReadonlyArray<boolean>>>;
 }
 
 /**
@@ -502,6 +548,8 @@ export function runDslSimulation(
     },
     indicatorNeeds,
     patternNeeded,
+    options?.indicatorSeriesCache,
+    options?.patternFlagsCache,
   );
   const pipSize = defaultPipSizeForSymbol(dsl.symbol);
   const symbolNorm = dsl.symbol.replace(/\//g, '');

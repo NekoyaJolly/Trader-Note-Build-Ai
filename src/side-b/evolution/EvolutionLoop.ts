@@ -89,6 +89,10 @@ import {
   type OosBacktestRunnerResult,
 } from './analysisEngineRobustnessAdapter';
 import {
+  fetchGenerationIndicatorCaches,
+  type GenerationIndicatorCaches,
+} from './generationIndicatorCache';
+import {
   mapAnalysisEngineRobustnessResult,
   type OosMetrics,
   type OosValidationResult,
@@ -574,10 +578,33 @@ export class EvolutionLoop {
     const scores = new Map<string, number>();
     const dslById = new Map<string, StrategyDSL>();
 
+    // PR ④F: 世代スコープで全候補が必要とする indicator + pattern を 1 HTTP で
+    // analysis-engine から一括取得。各 evaluateFitness にキャッシュを渡し、
+    // surrogate 内部での TS 再計算を撤廃する (= 真実は pandas_ta 一本化)。
+    let generationCaches: GenerationIndicatorCaches | undefined = undefined;
+    if (list.length > 0) {
+      try {
+        generationCaches = await fetchGenerationIndicatorCaches(
+          list,
+          list[0].symbol,
+          list[0].timeframe,
+          new Date(period.start),
+          new Date(period.end),
+        );
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        errors.push(`[warn] indicator-series 一括取得に失敗 (regime=${regime}): ${msg}`);
+        generationCaches = undefined;
+      }
+    }
+
     for (const strategy of list) {
       dslById.set(strategy.id, strategy);
       try {
-        const agg = await adapter.evaluateFitness(strategy, {}, period);
+        const agg = await adapter.evaluateFitness(strategy, {}, period, {
+          indicatorSeriesCache: generationCaches?.indicatorSeriesCache,
+          patternFlagsCache: generationCaches?.patternFlagsCache,
+        });
         metrics.set(strategy.id, agg);
         scores.set(strategy.id, scoreFromValidationSummary(agg.validation.summary));
       } catch (e) {

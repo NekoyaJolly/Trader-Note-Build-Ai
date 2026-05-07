@@ -1,11 +1,13 @@
 /**
- * PatternLens の単体テスト (PR ②-1)。
+ * PatternLens の単体テスト (PR ②-1, PR ④F で挙動変更)。
  *
- * - shared/patterns に委譲する形なので、ここでは「lens 規約 (副作用なし、
- *   決定性、欠損入力で confidence 0)」と「最終バーで pattern を判定する」
- *   挙動だけを確認する。pattern 判定の式自体は shared/patterns のテストで担保。
+ * PR ④F: TS で pattern を再計算する経路は撤廃。`LensInput.precomputedPatternFlags`
+ * (= 上位層が analysis-engine から取得した flags) を末尾バーで参照する薄い
+ * wrapper 化したため、ここでは「cache を渡せば末尾バーの flag を返す / cache が
+ * なければ全 false」を確認する。
  */
 
+import { ALL_CANDLE_PATTERN_IDS, type CandlePatternId } from '../../../shared/patterns';
 import { PatternLens } from '../../lenses/PatternLens';
 import type { LensInput } from '../../lenses/types';
 import type { OHLCVBar } from '../../lenses/utils/pivotDetection';
@@ -14,12 +16,22 @@ function bar(o: number, h: number, l: number, c: number, t = '2026-05-08T00:00:0
   return { timestamp: new Date(t), open: o, high: h, low: l, close: c, volume: 1 };
 }
 
-function makeInput(bars: OHLCVBar[]): LensInput {
+function emptyFlagsForN(n: number): Record<CandlePatternId, boolean[]> {
+  const out = {} as Record<CandlePatternId, boolean[]>;
+  for (const id of ALL_CANDLE_PATTERN_IDS) out[id] = new Array<boolean>(n).fill(false);
+  return out;
+}
+
+function makeInput(
+  bars: OHLCVBar[],
+  precomputedPatternFlags?: Record<CandlePatternId, boolean[]>,
+): LensInput {
   return {
     symbol: 'EURUSD',
     timeframe: '1h',
     timestamp: new Date('2026-05-08T00:00:00.000Z'),
     ohlcvBars: bars,
+    precomputedPatternFlags,
   };
 }
 
@@ -39,28 +51,42 @@ describe('PatternLens', () => {
     for (const v of Object.values(out.features)) expect(v).toBe(false);
   });
 
-  it('最終バーが pinbar_bull のとき pattern.pinbar_bull=true', async () => {
-    const bars = [bar(10, 11.5, 9.5, 11), bar(10, 11, 6, 11)];
-    // 末尾: body=1, lower=4, upper=0 → pinbar_bull (= 3:0.5 比率)
+  it('precomputedPatternFlags が未指定なら全 false + confidence 0 (PR ④F: TS 再計算しない)', async () => {
+    const bars = [bar(10, 11, 9, 10), bar(10, 11, 6, 11)];
     const out = await lens.compute(makeInput(bars));
+    expect(out.confidence).toBe(0);
+    for (const v of Object.values(out.features)) expect(v).toBe(false);
+  });
+
+  it('precomputedPatternFlags が指定されていれば末尾バーの flag を返す', async () => {
+    const bars = [bar(10, 11.5, 9.5, 11), bar(10, 11, 6, 11)];
+    const flags = emptyFlagsForN(bars.length);
+    flags.pinbar[1] = true;
+    flags.pinbar_bull[1] = true;
+    const out = await lens.compute(makeInput(bars, flags));
     expect(out.features.pinbar_bull).toBe(true);
     expect(out.features.pinbar).toBe(true);
+    expect(out.features.engulfing_bull).toBe(false);
     expect(out.confidence).toBe(1.0);
   });
 
-  it('engulfing_bull は前バー (= bars[i-1]) 依存で末尾バーの判定', async () => {
-    const bars = [
-      bar(11, 11, 10, 10), // 前バー: bear
-      bar(10, 11.5, 9.8, 11.2), // 末尾: bull, 前バー実体を包む
-    ];
-    const out = await lens.compute(makeInput(bars));
-    expect(out.features.engulfing_bull).toBe(true);
+  it('cache が部分的に欠けていてもクラッシュせず false で埋める', async () => {
+    const bars = [bar(10, 11, 9, 10)];
+    const partial = {} as Record<CandlePatternId, boolean[]>;
+    partial.engulfing_bull = [false];
+    const out = await lens.compute(makeInput(bars, partial));
+    expect(out.features.engulfing_bull).toBe(false);
+    // 他のパターンは false (= 配列なし扱い)
+    expect(out.features.pinbar).toBe(false);
+    expect(out.features.doji).toBe(false);
   });
 
-  it('決定性: 同じ入力で 2 回呼んで feature が一致', async () => {
+  it('決定性: 同じ cache で 2 回呼んで feature が一致', async () => {
     const bars = [bar(10, 11.5, 9.5, 11), bar(10, 11, 6, 11)];
-    const a = await lens.compute(makeInput(bars));
-    const b = await lens.compute(makeInput(bars));
+    const flags = emptyFlagsForN(bars.length);
+    flags.engulfing_bull[1] = true;
+    const a = await lens.compute(makeInput(bars, flags));
+    const b = await lens.compute(makeInput(bars, flags));
     expect(a.features).toEqual(b.features);
   });
 });

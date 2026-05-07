@@ -40,14 +40,14 @@ function formatRow(entry: IndicatorRegistryEntry, columns: 3 | 2): string {
  *
  * 戻り値は markdown 形式の文字列で、`{{INDICATOR_METADATA_TABLE}}` macro として
  * loader.expandMacros 経由で展開される想定。
+ *
+ * PR ④F: TS surrogate も analysis-engine `/v1/indicator-series` 経由で indicator
+ * を取得するようになり、`pythonSeries=true` の 20 indicator は **すべて
+ * mutation で利用可能**。旧「Python BT のみ対応」セクションは消滅する。
+ * 完全未対応 (`pythonSeries=false`) のみ別セクションで「出力禁止」と明示。
  */
 export function formatIndicatorMetadataTable(): string {
-  const fullySupported = INDICATOR_REGISTRY.filter(
-    (e) => e.support.tsSurrogate && e.support.pythonSeries,
-  );
-  const pythonOnly = INDICATOR_REGISTRY.filter(
-    (e) => !e.support.tsSurrogate && e.support.pythonSeries,
-  );
+  const supported = INDICATOR_REGISTRY.filter((e) => e.support.pythonSeries);
   const unsupported = INDICATOR_REGISTRY.filter((e) => !e.support.pythonSeries);
 
   const lines: string[] = [];
@@ -55,11 +55,11 @@ export function formatIndicatorMetadataTable(): string {
   // PR #117e Copilot review #2: prompt md 側で `### 動的パラメータ付き indicator`
   // 見出しの下に macro を埋め込んでいるため、macro 自身も `###` だと同階層が
   // 入れ子になって Markdown 構造が崩れる。`####` に下げて挿入先と整合する形にする。
-  lines.push('#### 実装済 (mutation 推奨、TS surrogate + Python BT 両対応)');
+  lines.push('#### 実装済 (mutation 推奨、surrogate + 本格 BT 両対応)');
   lines.push('');
   lines.push('| feature | category | デフォルト params |');
   lines.push('|---|---|---|');
-  for (const e of fullySupported) {
+  for (const e of supported) {
     lines.push(formatRow(e, 3));
   }
   lines.push('');
@@ -67,20 +67,6 @@ export function formatIndicatorMetadataTable(): string {
   lines.push('例: `{ "lens": "ohlcv", "feature": "ema", "op": ">", "value": 1.05, "params": { "period": 20 } }`');
   lines.push('例: `{ "lens": "ohlcv", "feature": "close", "op": ">", "compareTarget": { "lens": "ohlcv", "feature": "ema", "params": { "period": 20 } } }`');
   lines.push('');
-
-  if (pythonOnly.length > 0) {
-    lines.push('#### Python BT のみ対応 (TS surrogate では false 評価、推奨度低)');
-    lines.push('');
-    lines.push('| feature | category | デフォルト params |');
-    lines.push('|---|---|---|');
-    for (const e of pythonOnly) {
-      lines.push(formatRow(e, 3));
-    }
-    lines.push('');
-    lines.push('これらは Python 正式 BT では動くが、TS surrogate (進化計算の fitness 評価) では `false` に倒れる。');
-    lines.push('= surrogate fitness が 0 寄りに沈むため、進化が回りにくい。**できるだけ「実装済」セクションの feature を優先**。');
-    lines.push('');
-  }
 
   if (unsupported.length > 0) {
     lines.push('#### 完全未対応 (出力禁止)');

@@ -39,6 +39,17 @@ export interface LensInput {
   indicators?: Record<string, number>;
   /** 既存の MarketAnalysis 結果（渡されていれば再計算不要） */
   existingAnalysis?: MarketAnalysis;
+  /**
+   * PR ④F: ローソク足パターン flag 配列。bar index ごとの 12 種 boolean を
+   * `Record<CandlePatternId, boolean[]>` 形式で持つ。`PatternLens` が末尾バーの
+   * flags を features として返すために参照する。
+   *
+   * 真実は analysis-engine `compute_candlestick_pattern_flags` / `compute_pinbar_flags`。
+   * `EvolutionLoop` が世代開始時に `/v1/indicator-series` で取得して LensInput に
+   * 詰める想定。未指定なら `PatternLens.compute` は全 false features + confidence 0
+   * を返す。
+   */
+  precomputedPatternFlags?: Readonly<Record<string, ReadonlyArray<boolean>>>;
 }
 
 /**
