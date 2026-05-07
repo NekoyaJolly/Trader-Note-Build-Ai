@@ -139,6 +139,11 @@ function dslConditionToBacktest(
             value: resolveValueLike(c.value, resolvedParams),
         };
     }
+    // PR ①-B: is_true / is_false は左辺の Boolean 評価のみで RHS 不要 (= 設計上の妥当ケース)。
+    // value / compareTarget なしでも analysis-engine 側 _evaluate_leaf が left のみ参照する。
+    if (c.op === 'is_true' || c.op === 'is_false') {
+        return base;
+    }
     // PR #118 Copilot review #2: ConditionSchema の superRefine が
     // value / compareTarget の片方を必須としているためここには到達しないが、
     // 型破壊経路 (例: `as` キャストで強制) で素通りすると不完全な condition を

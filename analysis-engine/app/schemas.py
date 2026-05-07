@@ -206,7 +206,23 @@ class ScreeningBacktestCondition(BaseModel):
 
     lensName: str
     featureKey: str
-    op: Literal["<", "<=", ">", ">=", "==", "!=", "between", "in"]
+    op: Literal[
+        "<",
+        "<=",
+        ">",
+        ">=",
+        "==",
+        "!=",
+        "between",
+        "in",
+        # PR ①-B (post-Phase 5A): Side-A 戦略表現力に揃える
+        "cross_above",
+        "cross_below",
+        "touch_close",
+        "touch_wick",
+        "is_true",
+        "is_false",
+    ]
     value: Optional[Any] = None
     params: Optional[Dict[str, float]] = None
     compareTarget: Optional[ScreeningBacktestIndicatorOperand] = None
@@ -218,6 +234,10 @@ class ScreeningBacktestCondition(BaseModel):
 
     @model_validator(mode="after")
     def _exclusive_value_or_compare_target(self):
+        # PR ①-B: is_true / is_false は左辺の Boolean 評価のみで RHS 不要
+        # (= DSL ConditionSchema と TS analysisEngine.ts schema と同じ規則)。
+        if self.op in ("is_true", "is_false"):
+            return self
         has_value = self.value is not None
         has_target = self.compareTarget is not None
         if not has_value and not has_target:

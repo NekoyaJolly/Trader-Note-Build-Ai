@@ -7,8 +7,16 @@
  * `Condition.compareTarget` (indicator operand 比較) に対応。
  * - params 付き leaf は snapshot から `feature(stable_params)` 形式の key で lookup
  * - compareTarget 付き leaf は right operand を別 indicator series から取得
+ *
+ * PR ①-B (post-Phase 5A): cross_above / cross_below / touch_close / touch_wick /
+ * is_true / is_false に対応。比較ロジックは `src/shared/strategy-evaluator/operators`
+ * の `compareValues` に委譲し、Side-A `strategyConditionEvaluator` と評価結果が
+ * **必ず一致** する (= drift 防止)。状態遷移系 (cross / Touch) のため、
+ * `evaluateConditions` に **`prevSnapshot`** (= 前バーの LensFeatureSnapshot) を
+ * 任意引数で受け取れるようにした。
  */
 
+import { compareValues, isWithinBarRange } from '../../shared/strategy-evaluator/operators';
 import type { LensFeatureSnapshot } from '../lenses/types';
 import type { ConditionGroup, Condition, ConditionValue, IndicatorOperand } from './schema';
 import { formatStableParams } from './snapshotKey';
@@ -29,23 +37,40 @@ type EvaluatorOperand =
 
 /** 条件評価 */
 export class DSLEvaluator {
-  /** 条件グループを再帰的に評価 */
+  /**
+   * 条件グループを再帰的に評価。
+   *
+   * PR ①-B: `prevSnapshot` 任意引数を追加。cross / Touch 系 op の判定で前バー値が
+   * 必要なため、呼び出し側で前バー snapshot を構築して渡す。未指定なら状態遷移
+   * 判定不能 → 該当 leaf は false (= 先頭バー扱い)。
+   */
   evaluateConditions(
     group: ConditionGroup,
     snapshot: LensFeatureSnapshot,
     paramValues: Record<string, number>,
+    prevSnapshot?: LensFeatureSnapshot,
   ): boolean {
     const results = group.conditions.map((c) =>
       'logic' in c
-        ? this.evaluateConditions(c, snapshot, paramValues)
-        : this.evaluateLeaf(c, snapshot, paramValues),
+        ? this.evaluateConditions(c, snapshot, paramValues, prevSnapshot)
+        : this.evaluateLeaf(c, snapshot, paramValues, prevSnapshot),
     );
     return group.logic === 'AND' ? results.every(Boolean) : results.some(Boolean);
   }
 
-  private evaluateLeaf(c: Condition, snapshot: LensFeatureSnapshot, paramValues: Record<string, number>): boolean {
+  private evaluateLeaf(
+    c: Condition,
+    snapshot: LensFeatureSnapshot,
+    paramValues: Record<string, number>,
+    prevSnapshot?: LensFeatureSnapshot,
+  ): boolean {
     const left = this.lookupOperand(c.lens, c.feature, c.params, snapshot);
     if (left === null) return false;
+
+    // is_true / is_false は left の Boolean 評価のみ、right 不要
+    if (c.op === 'is_true' || c.op === 'is_false') {
+      return compareValues(left, undefined, c.op);
+    }
 
     let right: EvaluatorOperand | undefined;
     if (c.compareTarget) {
@@ -65,7 +90,37 @@ export class DSLEvaluator {
       return false;
     }
 
-    return this.compare(left, c.op, right);
+    // PR ①-B: touch_wick は呼び出し側で「左辺値が現バーの high-low レンジ内か」判定
+    if (c.op === 'touch_wick') {
+      if (typeof left !== 'number') return false;
+      const high = this.lookupOperand('ohlcv', 'high', undefined, snapshot);
+      const low = this.lookupOperand('ohlcv', 'low', undefined, snapshot);
+      if (typeof high !== 'number' || typeof low !== 'number') return false;
+      return isWithinBarRange(left, { high, low });
+    }
+
+    // PR ①-B: cross 系は前バー値も取得 (Side-B DSL は Touch/touch を含めず、
+    // shared 側の後方互換 alias は Side-A 専用)
+    let prevLeft: number | undefined;
+    let prevRight: number | undefined;
+    if (prevSnapshot && (c.op === 'cross_above' || c.op === 'cross_below')) {
+      const pl = this.lookupOperand(c.lens, c.feature, c.params, prevSnapshot);
+      if (typeof pl === 'number') prevLeft = pl;
+      if (c.compareTarget) {
+        const pr = this.lookupOperand(
+          c.compareTarget.lens,
+          c.compareTarget.feature,
+          c.compareTarget.params,
+          prevSnapshot,
+        );
+        if (typeof pr === 'number') prevRight = pr;
+      } else if (typeof right === 'number') {
+        // 固定値 right は前バーでも同じ
+        prevRight = right;
+      }
+    }
+
+    return compareValues(left, right ?? null, c.op, prevLeft, prevRight);
   }
 
   /**
@@ -129,44 +184,5 @@ export class DSLEvaluator {
       });
     }
     return value;
-  }
-
-  private compare(
-    left: number | string | boolean,
-    op: Condition['op'],
-    right: EvaluatorOperand,
-  ): boolean {
-    switch (op) {
-      case '==':
-        return left === right;
-      case '!=':
-        return left !== right;
-      case '<':
-        return Number(left) < Number(right);
-      case '<=':
-        return Number(left) <= Number(right);
-      case '>':
-        return Number(left) > Number(right);
-      case '>=':
-        return Number(left) >= Number(right);
-      case 'between': {
-        if (
-          !Array.isArray(right) ||
-          right.length !== 2 ||
-          typeof right[0] !== 'number' ||
-          typeof right[1] !== 'number'
-        ) {
-          return false;
-        }
-        const n = Number(left);
-        return n >= right[0] && n <= right[1];
-      }
-      case 'in': {
-        if (!Array.isArray(right)) return false;
-        return right.includes(left) || right.map(String).includes(String(left));
-      }
-      default:
-        return false;
-    }
   }
 }

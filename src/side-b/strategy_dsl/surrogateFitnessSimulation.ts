@@ -490,6 +490,11 @@ export function runDslSimulation(
   /** 即時 trigger + next_bar_open: シグナル足 index → 次足始値で建てる */
   let deferredImmediate: { openAtIndex: number; isLong: boolean } | null = null;
 
+  // PR ①-B: cross / Touch 系 op のため前バー snapshot を保持。
+  // 先頭バー (= prevSnap=undefined) では状態遷移系 leaf は false に倒される。
+  // PR ①-B Copilot review #2: 毎バー snapshotAt を 2 回呼ぶと indicatorSeries
+  // 全走査が 2 回走るため、前ループの snap を prevSnap に使い回して 1 回/バーに抑える。
+  let prevSnap: LensFeatureSnapshot | undefined = undefined;
   for (let i = startI; i < bars.length; i++) {
     const ts = bars[i].timestamp;
     const snap = snapshotAt(symbolNorm, ts, table, i);
@@ -600,6 +605,7 @@ export function runDslSimulation(
 
     if (!position && isWait) {
       if (waitAborted) {
+        prevSnap = snap;
         continue;
       }
       const wEntry = dsl.entry;
@@ -611,9 +617,15 @@ export function runDslSimulation(
       }
       if (i - waitStart > wEntry.maxWaitBars) {
         waitAborted = true;
+        prevSnap = snap;
         continue;
       }
-      const condOk = evaluator.evaluateConditions(wEntry.triggerConditions, snap, paramValues);
+      const condOk = evaluator.evaluateConditions(
+        wEntry.triggerConditions,
+        snap,
+        paramValues,
+        prevSnap,
+      );
       if (condOk && i + 1 < bars.length) {
         const j = i + 1;
         const openPx = bars[j].open;
@@ -664,7 +676,7 @@ export function runDslSimulation(
       if (!('trigger' in e)) {
         break;
       }
-      const entryOk = evaluator.evaluateConditions(e.trigger, snap, paramValues);
+      const entryOk = evaluator.evaluateConditions(e.trigger, snap, paramValues, prevSnap);
       if (entryOk) {
         if (immediateFill === 'next_bar_open' && i + 1 < bars.length) {
           deferredImmediate = { openAtIndex: i + 1, isLong: e.direction === 'long' };
@@ -712,6 +724,10 @@ export function runDslSimulation(
         }
       }
     }
+
+    // PR ①-B: 次イテで使う前バー snapshot を保存。break で抜けた場合は不要 (= ループ離脱)、
+    // continue 経路では各 continue の直前で prevSnap を更新済み (= 抜け漏れ防止)。
+    prevSnap = snap;
   }
 
   const summary = calculateSummary(events, initialCapital);

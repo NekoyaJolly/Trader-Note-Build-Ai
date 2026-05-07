@@ -78,6 +78,21 @@ export const EDGE_SOURCES: EdgeSource[] = [
 // 条件 / 結果サマリー
 // ===========================================
 
+/**
+ * MachineReadableCondition で使える比較演算子。
+ *
+ * **DSL 用の OpSchema (`src/side-b/strategy_dsl/schema.ts`) とは別物**。
+ * MachineReadableCondition は EdgeHypothesis 仮説の機械判定で使われ、
+ * 評価器は `src/side-b/ledger/conditionMatcher.ts`。状態遷移系
+ * (cross_above / cross_below) や Touch / Boolean 系 (is_true / is_false)
+ * は前バー snapshot 入力が必要だが、conditionMatcher の評価 API には
+ * その入力がないため、**ここでは従来 8 op に限定する**。Side-B が探索する
+ * 戦略 (DSL) の表現力を上げる目的では `OpSchema` を見ること。
+ *
+ * PR ①-B Copilot review #3: ここで cross 系を ConditionOp に追加すると
+ * conditionMatcher が default で常に false 返却し、誤って EdgeHypothesis に
+ * その op を入れた仮説が永久に成立しないため、追加しない方針に揃えた。
+ */
 export type ConditionOp =
     | '<'
     | '<='
@@ -333,6 +348,7 @@ export function isEdgeSource(x: JsonValue | undefined): x is EdgeSource {
 }
 
 export function isConditionOp(x: JsonValue | undefined): x is ConditionOp {
+    // PR ①-B: DSL 用の OpSchema とは別物。conditionMatcher が対応する 8 op に限定。
     return (
         typeof x === 'string' &&
         ['<', '<=', '>', '>=', '==', '!=', 'between', 'in'].includes(x)
