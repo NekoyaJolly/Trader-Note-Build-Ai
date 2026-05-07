@@ -27,7 +27,10 @@ import {
   ALL_CANDLE_PATTERN_IDS,
   type CandlePatternId,
 } from '../../shared/patterns';
-import { computeTimeSessionFeatures } from '../../shared/timeframes/timeSession';
+import {
+  computeTimeSessionFeatures,
+  TIME_SESSION_LENS_VERSION,
+} from '../../shared/timeframes/timeSession';
 import { DSLEvaluator } from './DSLEvaluator';
 import type {
   ExecutionCostSummary,
@@ -283,7 +286,7 @@ function snapshotAt(
   const timeSessionFeatures = computeTimeSessionFeatures(ts);
   features.set('time_session', {
     lensName: 'time_session',
-    lensVersion: '1.1.0',
+    lensVersion: TIME_SESSION_LENS_VERSION,
     features: timeSessionFeatures,
     computedAt: ts,
   });

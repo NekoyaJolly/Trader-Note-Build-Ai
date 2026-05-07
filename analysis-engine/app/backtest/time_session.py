@@ -43,13 +43,16 @@ def _minutes_since_open(ts: datetime, open_hour_utc: int) -> int:
 
 
 def _is_fx_market_open_simple(ts: datetime) -> bool:
-    """簡易判定: 土曜は終日休、金曜 21 UTC 以降と日曜 21 UTC 前は休。
+    """**簡易判定** (= 固定 21 UTC 切替): 土曜は終日休、金曜 21 UTC 以降と日曜 21
+    UTC 前は休。
 
-    TS 側 `isFXMarketOpen` (= utils/marketHours.ts) と完全一致は本 PR では狙わない
-    (= TS 側は holiday カレンダー等を見るが、本 PR では曜日のみで近似)。BT 評価は
-    canonical 実装の TS 側 isFXMarketOpen を真実とし、Python は近似で OK。
-    is_weekend feature を strategy に使うときは TS surrogate と analysis-engine で
-    若干乖離する可能性があるが、戦略の filter 用途では実用上問題ない。
+    PR ⑤D-1 で **TS surrogate (`shared/timeframes/timeSession.ts`) /
+    Side-B `TimeSessionLens.compute` / 本関数の 3 経路で同じ式に統一** された。
+    旧 `TimeSessionLens` は `marketHours.ts:isFXMarketOpen` の DST 考慮 (= 22 UTC
+    切替) を使っていたが、Python に DST 判定をポートするコストが高い + 戦略
+    filter 用途では 1 時間ズレは実用上影響軽微なため、本 PR では DST 考慮を
+    捨てて simple 統一。将来 DST 考慮を戻す場合は shared 側で DST ロジックを
+    実装 + Python に同期する形で別 PR 対応 (= 単一真実は維持)。
     """
     weekday = ts.weekday()  # Python: 0=月曜, 6=日曜
     # 土曜は終日休

@@ -1,13 +1,18 @@
 /**
  * time_session lens の計算 (PR ⑤D-1)。
  *
- * Side-B `TimeSessionLens` (= 単一 timestamp) と analysis-engine
- * `compute_time_session_features` (= 各バー) の **共通の式**。surrogate の
- * `snapshotAt` 内で各バーの timestamp から features を計算するために使う。
+ * **単一真実**: TS surrogate (`snapshotAt`) / Side-B `TimeSessionLens.compute` /
+ * Python `compute_time_session_features` (analysis-engine) の **3 経路全部** で
+ * この関数の式を採用する (= drift 防止)。`TimeSessionLens.compute` は本関数を
+ * 呼び出して features を構築する形にラップされ、is_weekend 等の式が分岐する
+ * 経路は存在しない。
  *
- * 式は `src/side-b/lenses/TimeSessionLens.ts` と完全一致 (= drift 防止)、
- * Python `analysis-engine/app/backtest/time_session.py` とも一致 (= TS と
- * Python で同じ判定をする)。
+ * **既知の制約**: 本関数の `is_weekend` は **簡易判定** (= 固定 21 UTC で金曜
+ * クローズ / 日曜オープン)。`utils/marketHours.ts:isFXMarketOpen` の DST 考慮
+ * (= 夏時間で 22 UTC 切替) は **本 PR では捨てる方針**。理由は (a) Python に
+ * DST 判定をポートするコスト (b) 戦略 filter 用途では 1 時間ズレは実用上影響
+ * 軽微。将来 DST 考慮を戻す場合は shared/timeSession.ts に DST ロジックを実装
+ * + Python にも同期する形で別 PR 対応。
  */
 
 const TOKYO_OPEN_UTC = 0;
@@ -83,6 +88,13 @@ export function computeTimeSessionFeatures(
     is_tokyo_lunch: isTokyoLunch,
   };
 }
+
+/**
+ * TimeSessionLens の version (= 単一真実)。`TimeSessionLens.version` /
+ * surrogate snapshotAt の `lensVersion` 等から参照され、リテラル直書きを避ける。
+ * features の追加 / 式変更時に bump する。
+ */
+export const TIME_SESSION_LENS_VERSION = '1.1.0';
 
 /** time_session features の全 key 一覧 (= condition collect 用)。 */
 export const TIME_SESSION_FEATURE_KEYS = [

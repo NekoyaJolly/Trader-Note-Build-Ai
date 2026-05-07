@@ -40,6 +40,12 @@ from app.schemas import (
 # 両方を取りこぼさないため、`(lensName, featureKey)` から **snapshot key** に正規化する
 # alias マップを単一の真実として持つ。snapshot key は `runner_backtesting_py.py` の
 # `_build_feature_snapshot()` が辞書のキーとして使う名前。
+#
+# **対応 lens** (PR #130 Copilot review #6 で追記):
+#   - ohlcv (= 静的 OHLCV / RSI / ATR、PR #112)
+#   - pattern (= ローソク足パターン 12 種、PR ②-1)
+#   - time_session (= 時刻 / 曜日 / 日付 / セッション、PR ⑤D-1)
+#   - 上位足 (= ohlcv@<tf> / pattern@<tf>、PR ⑤B、_resolve_snapshot_key で動的解決)
 SUPPORTED_LENS_FEATURE_MAP: dict = {
     # 標準 ohlcv lens
     ("ohlcv", "open"): "open",
