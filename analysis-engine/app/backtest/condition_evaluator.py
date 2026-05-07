@@ -40,6 +40,12 @@ from app.schemas import (
 # 両方を取りこぼさないため、`(lensName, featureKey)` から **snapshot key** に正規化する
 # alias マップを単一の真実として持つ。snapshot key は `runner_backtesting_py.py` の
 # `_build_feature_snapshot()` が辞書のキーとして使う名前。
+#
+# **対応 lens** (PR #130 Copilot review #6 で追記):
+#   - ohlcv (= 静的 OHLCV / RSI / ATR、PR #112)
+#   - pattern (= ローソク足パターン 12 種、PR ②-1)
+#   - time_session (= 時刻 / 曜日 / 日付 / セッション、PR ⑤D-1)
+#   - 上位足 (= ohlcv@<tf> / pattern@<tf>、PR ⑤B、_resolve_snapshot_key で動的解決)
 SUPPORTED_LENS_FEATURE_MAP: dict = {
     # 標準 ohlcv lens
     ("ohlcv", "open"): "open",
@@ -52,6 +58,27 @@ SUPPORTED_LENS_FEATURE_MAP: dict = {
     # 別系統表現の alias (= 旧 DSL fixture / mutation 出力での書き方)
     ("rsi", "value"): "rsi",
     ("atr", "value"): "atr",
+    # PR ⑤D-1: time_session lens (= utc_hour / day_of_week / day_of_month /
+    # tokyo_active / london_active / ny_active / is_friday_close / is_tokyo_lunch
+    # 等)。runner 側で各バーの timestamp から計算して snapshot に
+    # `time_session.<feature>` 形式で詰める。アノマリー戦略 (= ゴトー日 /
+    # 月曜オープン / 金曜クローズ前 等) を表現可能にする。
+    ("time_session", "utc_hour"): "time_session.utc_hour",
+    ("time_session", "utc_minute"): "time_session.utc_minute",
+    ("time_session", "day_of_week"): "time_session.day_of_week",
+    ("time_session", "day_of_month"): "time_session.day_of_month",
+    ("time_session", "tokyo_active"): "time_session.tokyo_active",
+    ("time_session", "london_active"): "time_session.london_active",
+    ("time_session", "ny_active"): "time_session.ny_active",
+    ("time_session", "overlap_london_ny"): "time_session.overlap_london_ny",
+    ("time_session", "overlap_tokyo_london"): "time_session.overlap_tokyo_london",
+    ("time_session", "minutes_since_tokyo_open"): "time_session.minutes_since_tokyo_open",
+    ("time_session", "minutes_since_london_open"): "time_session.minutes_since_london_open",
+    ("time_session", "minutes_since_ny_open"): "time_session.minutes_since_ny_open",
+    ("time_session", "is_weekend"): "time_session.is_weekend",
+    ("time_session", "is_monday_open"): "time_session.is_monday_open",
+    ("time_session", "is_friday_close"): "time_session.is_friday_close",
+    ("time_session", "is_tokyo_lunch"): "time_session.is_tokyo_lunch",
     # PR ②-1: pattern lens (12 種ローソク足パターン真偽)。
     # snapshot key は `pattern.<patternId>` (= TS PatternLens features key と
     # `_build_feature_snapshot` で詰める key を一致させる)。本格 BT は

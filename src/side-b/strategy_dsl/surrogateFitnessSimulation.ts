@@ -27,6 +27,10 @@ import {
   ALL_CANDLE_PATTERN_IDS,
   type CandlePatternId,
 } from '../../shared/patterns';
+import {
+  computeTimeSessionFeatures,
+  TIME_SESSION_LENS_VERSION,
+} from '../../shared/timeframes/timeSession';
 import { DSLEvaluator } from './DSLEvaluator';
 import type {
   ExecutionCostSummary,
@@ -272,6 +276,20 @@ function snapshotAt(
       computedAt: ts,
     });
   }
+
+  // PR ⑤D-1: time_session lens features を計算 + 詰める。各バーの timestamp から
+  // utc_hour / day_of_week / day_of_month / tokyo_active / is_friday_close 等を
+  // 計算して features.set('time_session', ...) で詰める。analysis-engine と同じ式
+  // (= shared/timeframes/timeSession.ts) で計算するので drift しない。
+  // 計算コストは軽量 (= 1 バー数 us 程度) なので DSL が time_session を参照する
+  // か否かに関わらず常に詰める。
+  const timeSessionFeatures = computeTimeSessionFeatures(ts);
+  features.set('time_session', {
+    lensName: 'time_session',
+    lensVersion: TIME_SESSION_LENS_VERSION,
+    features: timeSessionFeatures,
+    computedAt: ts,
+  });
 
   // PR ②-1: pattern lens features (= 12 種ローソク足パターン真偽) を詰める。
   // patternFlags が未設定 (= DSL が pattern lens を参照しない) なら lens 自体を

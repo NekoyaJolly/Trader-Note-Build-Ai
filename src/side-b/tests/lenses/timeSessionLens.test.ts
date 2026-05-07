@@ -115,6 +115,58 @@ describe('TimeSessionLens - 曜日・週末', () => {
   });
 });
 
+// PR ⑤D-1 + Copilot review #3-4: day_of_month / is_tokyo_lunch のテスト
+// 注: TimeSessionLens は未来時刻 (> now + 60s) を例外にするため、過去日付 (2026-01)
+//     を使う (= 既存テスト群と同じ慣行)。
+describe('TimeSessionLens - PR ⑤D-1 で追加した features', () => {
+  it('day_of_month は UTC 日付で 1-31 を返す', async () => {
+    const lens = new TimeSessionLens();
+    expect((await lens.compute(makeInput('2026-01-08T03:00:00Z'))).features.day_of_month).toBe(8);
+    expect((await lens.compute(makeInput('2026-01-15T10:00:00Z'))).features.day_of_month).toBe(15);
+    expect((await lens.compute(makeInput('2026-01-01T00:00:00Z'))).features.day_of_month).toBe(1);
+    expect((await lens.compute(makeInput('2026-01-31T23:59:00Z'))).features.day_of_month).toBe(31);
+  });
+
+  it('day_of_month はゴトー日 (= [5,10,15,20,25,30]) で in 評価可能な値を返す', async () => {
+    const lens = new TimeSessionLens();
+    for (const day of [5, 10, 15, 20, 25, 30]) {
+      const ts = `2026-01-${String(day).padStart(2, '0')}T10:00:00Z`;
+      const f = await lens.compute(makeInput(ts));
+      expect(f.features.day_of_month).toBe(day);
+    }
+  });
+
+  it('is_tokyo_lunch は UTC 02:30-03:30 で true', async () => {
+    const lens = new TimeSessionLens();
+    expect((await lens.compute(makeInput('2026-01-08T02:30:00Z'))).features.is_tokyo_lunch).toBe(true);
+    expect((await lens.compute(makeInput('2026-01-08T03:00:00Z'))).features.is_tokyo_lunch).toBe(true);
+    expect((await lens.compute(makeInput('2026-01-08T03:29:00Z'))).features.is_tokyo_lunch).toBe(true);
+  });
+
+  it('is_tokyo_lunch は境界値の外側 (02:29 / 03:30) で false', async () => {
+    const lens = new TimeSessionLens();
+    expect((await lens.compute(makeInput('2026-01-08T02:29:00Z'))).features.is_tokyo_lunch).toBe(false);
+    expect((await lens.compute(makeInput('2026-01-08T03:30:00Z'))).features.is_tokyo_lunch).toBe(false);
+  });
+
+  it('PR ⑤D-1: shared 関数経由で計算しているので surrogate / Python と式が一致', async () => {
+    // shared 関数を直接呼んだ結果と TimeSessionLens.compute の結果が同一であること
+    const { computeTimeSessionFeatures } = await import('../../../shared/timeframes/timeSession');
+    const ts = new Date('2026-01-15T14:30:00Z');
+    const lens = new TimeSessionLens();
+    const lensFeatures = (await lens.compute({
+      symbol: 'EURUSD',
+      timeframe: '15m',
+      timestamp: ts,
+    })).features;
+    const sharedFeatures = computeTimeSessionFeatures(ts);
+    // 全 16 feature が一致
+    for (const [key, value] of Object.entries(sharedFeatures)) {
+      expect(lensFeatures[key]).toBe(value);
+    }
+  });
+});
+
 describe('TimeSessionLens - 不正入力', () => {
   it('未来時刻（60秒以上先）は例外を投げる', async () => {
     const lens = new TimeSessionLens();

@@ -42,6 +42,7 @@ from .mtf_helpers import (
     forward_fill_to_primary,
     split_lens_with_timeframe,
 )
+from .time_session import compute_time_session_features
 
 
 # PR ②-1: pattern.* snapshot key (= SUPPORTED_LENS_FEATURE_MAP の値) と
@@ -474,6 +475,20 @@ class BacktestingPyEngine:
                         snapshot[snapshot_key] = series[idx]
                     else:
                         snapshot[snapshot_key] = None
+                # PR ⑤D-1: time_session lens features を計算 + 詰める。各バーの
+                # timestamp (= self.data.index[idx_neg]) から utc_hour /
+                # day_of_week / day_of_month / tokyo_active / is_friday_close 等を
+                # 計算して `time_session.<feature>` snapshot key で詰める。
+                # アノマリー戦略 (= ゴトー日 / 月曜オープン / 金曜クローズ前) を
+                # 本格 BT で評価可能にする。
+                bar_ts = self.data.index[idx_neg]
+                if isinstance(bar_ts, pd.Timestamp):
+                    bar_ts_dt = bar_ts.to_pydatetime()
+                else:
+                    bar_ts_dt = bar_ts
+                ts_features = compute_time_session_features(bar_ts_dt)
+                for feature_name, feature_value in ts_features.items():
+                    snapshot[f"time_session.{feature_name}"] = feature_value
                 # NaN は None に倒す (= condition_evaluator 側で false 判定)
                 for k, v in list(snapshot.items()):
                     if isinstance(v, float) and (v != v):
