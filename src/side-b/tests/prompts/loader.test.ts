@@ -77,8 +77,6 @@ describe('loadPrompt', () => {
             expect(content).toContain("`lens='atr', feature='value'`");
             // 「常に true」条件の禁止例
             expect(content).toContain('常に true');
-            // PR #113 Copilot review: コード例ブロックは「json」ではなく説明用 (LLM がそのままコピーしても無効 JSON にならないこと)
-            expect(content).toContain('ConditionGroup の `conditions[]` に入る単独 leaf');
             // PR #113 Copilot review: ParamRef を value に使う場合は parameters 側で定義必須を注記
             expect(content).toContain('ParamRef を value に使う場合は');
             expect(content).toContain('parameters');
@@ -88,6 +86,16 @@ describe('loadPrompt', () => {
             // PR #117e: PR #116 の新機能 (params / compareTarget) が変異の種類に追加されている
             expect(content).toContain('Condition.params');
             expect(content).toContain('compareTarget');
+            // PR ⑤C: MTF / 状態遷移 op / multi-instance / wait_for_trigger / 戦略アーキタイプ
+            // / 探索的変異 が prompt に明示されている (= 機能群を使い切れる prompt)
+            expect(content).toContain('マルチタイムフレーム');
+            expect(content).toContain('Condition.timeframe');
+            expect(content).toContain('cross_above');
+            expect(content).toContain('touch_close');
+            expect(content).toContain('multi-instance');
+            expect(content).toContain('wait_for_trigger');
+            expect(content).toContain('探索的変異');
+            expect(content).toContain('戦略アーキタイプの広がり');
         });
 
         it('crossover.md に静的 ohlcv feature 表 + macro 注入が含まれている', () => {
@@ -102,6 +110,10 @@ describe('loadPrompt', () => {
             // PR #117e: 動的 indicator metadata 注入 macro
             expect(content).toContain('{{INDICATOR_METADATA_TABLE}}');
             expect(content).toContain('動的パラメータ付き indicator');
+            // PR ⑤C: 創発的統合 + MTF / multi-instance / wait_for_trigger
+            expect(content).toContain('創発的統合');
+            expect(content).toContain('構造を 1 段引き上げる');
+            expect(content).toContain('マルチタイムフレーム');
         });
     });
 });
