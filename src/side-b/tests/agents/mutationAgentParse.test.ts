@@ -33,7 +33,7 @@ function validDsl(id: string): unknown {
       direction: 'long',
       trigger: {
         logic: 'AND',
-        conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+        conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
       },
       orderType: 'market',
     },
@@ -124,7 +124,7 @@ describe('MutationAgent silent-empty 観測ログ (4a.PDCA)', () => {
         direction: 'sideways', // Zod 不正
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
         orderType: 'market',
       },
