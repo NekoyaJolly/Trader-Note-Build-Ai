@@ -150,6 +150,8 @@ function buildFeatureTable(
   patternNeeded: boolean = false,
   indicatorSeriesCache?: DslSimulationOptions['indicatorSeriesCache'],
   patternFlagsCache?: DslSimulationOptions['patternFlagsCache'],
+  indicatorSeriesCacheOffset: number = 0,
+  patternFlagsCacheOffset: number = 0,
 ): BarFeatureTable {
   const open = bars.map((b) => b.open);
   const high = bars.map((b) => b.high);
@@ -167,45 +169,44 @@ function buildFeatureTable(
   // EvolutionLoop が世代開始時に `fetchIndicatorSeries` で取得して `indicatorSeriesCache`
   // に詰めて渡す前提。キャッシュ未指定 / 該当キー欠落時は indicator series を Map に
   // 積まず leaf 評価で false に倒れる (= legacy TS 計算経路は撤廃)。
+  // PR ④F: indicatorSeriesCache は **世代スコープの全期間配列** (= 候補間共有)
+  // で、`indicatorSeriesCacheOffset` が「現在 bars が cache のどの位置から始まるか」
+  // を表す。bar i の値は cached[i + offset] で取得する (= slice によるコピーなし)。
+  // bars 範囲外 (offset + i が cached の範囲外) は NaN に倒し、leaf 評価で false。
   if (indicatorNeeds.length > 0) {
     const series = new Map<string, number[]>();
     for (const need of indicatorNeeds) {
       const cached = indicatorSeriesCache?.get(need.snapshotKey);
       if (!cached) continue;
-      // PR ④F Copilot review: bars.length まで NaN padding する (= pattern 側と
-      // 対称な扱い)。キャッシュが短い場合は末尾に NaN を埋め、leaf 評価で「値なし」
-      // (= isNaN チェックで false 扱い) になる。長すぎる場合は bars 長で打ち切り。
       const values = new Array<number>(bars.length);
-      const copyLen = Math.min(cached.length, bars.length);
-      for (let i = 0; i < copyLen; i++) {
-        const v = cached[i];
+      for (let i = 0; i < bars.length; i++) {
+        const sourceIdx = i + indicatorSeriesCacheOffset;
+        if (sourceIdx < 0 || sourceIdx >= cached.length) {
+          values[i] = Number.NaN;
+          continue;
+        }
+        const v = cached[sourceIdx];
         values[i] = v === null || v === undefined ? Number.NaN : v;
-      }
-      for (let i = copyLen; i < bars.length; i++) {
-        values[i] = Number.NaN;
       }
       series.set(need.snapshotKey, values);
     }
     table.indicatorSeries = series;
   }
-  // PR ②-1 + PR ④F: pattern lens 参照ありなら、analysis-engine HTTP 経由の
-  // patternFlagsCache から 12 種 boolean 配列を取り出す。キャッシュ未指定で
-  // pattern が必要な場合は features 未積みになり leaf は false 評価。
+  // PR ②-1 + PR ④F: pattern lens features も同じく世代スコープ全期間配列 +
+  // offset (= patternFlagsCacheOffset) で参照する。範囲外は false padding。
   if (patternNeeded && patternFlagsCache) {
     const patternFlags = {} as Record<CandlePatternId, boolean[]>;
     for (const id of ALL_CANDLE_PATTERN_IDS) {
       const arr = patternFlagsCache[id];
+      const values = new Array<boolean>(bars.length);
       if (!arr) {
-        patternFlags[id] = new Array<boolean>(bars.length).fill(false);
-        continue;
+        for (let i = 0; i < bars.length; i++) values[i] = false;
+      } else {
+        for (let i = 0; i < bars.length; i++) {
+          const sourceIdx = i + patternFlagsCacheOffset;
+          values[i] = sourceIdx >= 0 && sourceIdx < arr.length ? Boolean(arr[sourceIdx]) : false;
+        }
       }
-      const len = Math.min(arr.length, bars.length);
-      const values = new Array<boolean>(len);
-      for (let i = 0; i < len; i++) {
-        values[i] = Boolean(arr[i]);
-      }
-      // arr が短い場合は末尾を false で詰める
-      for (let i = len; i < bars.length; i++) values[i] = false;
       patternFlags[id] = values;
     }
     table.patternFlags = patternFlags;
@@ -370,13 +371,19 @@ export interface DslSimulationOptions {
   executionDataSource?: ExecutionDataSource;
   /**
    * PR ④F: analysis-engine `/v1/indicator-series` から取得した indicator 値配列の
-   * 世代スコープキャッシュ。key は **DSL snapshot key 形式** (`${lens}.${feature}` /
-   * `${lens}.${feature}(stable_params)`)、value は bar 数と同じ長さの数値配列
-   * (warm-up は null)。
+   * **世代スコープ全期間** キャッシュ。key は DSL snapshot key 形式
+   * (`${lens}.${feature}` / `${lens}.${feature}(stable_params)`)、value は世代の
+   * 全期間バー数と同じ長さの数値配列 (warm-up は null)。
    *
    * 渡されていれば surrogate は内部で indicator 計算を **行わず**、本キャッシュから
    * 値を引いて snapshot に詰める。`EvolutionLoop` が世代開始時に全候補が必要とする
    * indicator を一括 HTTP 取得して構築する。
+   *
+   * **本キャッシュは世代の全期間配列を保持し、候補ごとに slice せずに共有する**
+   * (= PR ④F Copilot review #3: メモリコピー削減)。`evaluateFitness` で
+   * train (前 70%) / validation (後 30%) に分割するときは、本フィールド自体は
+   * 同一参照を渡し、`indicatorSeriesCacheOffset` で「現在 bars が cache の
+   * どの index から始まるか」を伝える。
    *
    * 未指定 (= legacy 経路) では DSL に indicator 条件があっても snapshot にその
    * 値が積まれず leaf 評価で false に倒れるため、indicator を使う戦略を評価する
@@ -384,14 +391,24 @@ export interface DslSimulationOptions {
    */
   indicatorSeriesCache?: ReadonlyMap<string, ReadonlyArray<number | null>>;
   /**
+   * PR ④F: `indicatorSeriesCache` のビュー offset。bars[i] の indicator 値は
+   * `indicatorSeriesCache.get(key)[i + indicatorSeriesCacheOffset]` で取得する。
+   * train で `0`、validation で `split` (= train 終端 index) を渡す想定。
+   * 未指定なら 0。
+   */
+  indicatorSeriesCacheOffset?: number;
+  /**
    * PR ④F: analysis-engine `/v1/indicator-series` から取得した pattern flag 配列の
-   * 世代スコープキャッシュ。key は `CandlePatternId` (`pinbar` / `engulfing_bull` 等)、
-   * value は bar 数と同じ長さの boolean 配列。
+   * **世代スコープ全期間** キャッシュ。key は `CandlePatternId`、value は世代の
+   * 全期間バー数と同じ長さの boolean 配列。`indicatorSeriesCache` と同じく
+   * 候補間で共有し、train/validation 分割は `patternFlagsCacheOffset` で表現する。
    *
    * 未指定で DSL が pattern lens を参照する場合、pattern features が snapshot に
    * 積まれず is_true / is_false leaf が常に false になる。
    */
   patternFlagsCache?: Readonly<Record<CandlePatternId, ReadonlyArray<boolean>>>;
+  /** PR ④F: `patternFlagsCache` のビュー offset。挙動は `indicatorSeriesCacheOffset` と同様。 */
+  patternFlagsCacheOffset?: number;
 }
 
 /**
@@ -554,6 +571,8 @@ export function runDslSimulation(
     patternNeeded,
     options?.indicatorSeriesCache,
     options?.patternFlagsCache,
+    options?.indicatorSeriesCacheOffset ?? 0,
+    options?.patternFlagsCacheOffset ?? 0,
   );
   const pipSize = defaultPipSizeForSymbol(dsl.symbol);
   const symbolNorm = dsl.symbol.replace(/\//g, '');

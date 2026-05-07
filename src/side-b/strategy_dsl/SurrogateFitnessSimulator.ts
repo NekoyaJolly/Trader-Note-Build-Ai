@@ -32,36 +32,31 @@ import {
 import { isLegacyParameterDef, isParameterRangeV2 } from './types';
 
 /**
- * PR ④F: 世代スコープ indicator/pattern キャッシュを `[start, end)` で slice する。
- * train / validation 分割時に bars と同じ index で series 配列を切り詰めるため使う。
- * cache が未指定の場合は元の simulationOptions をそのまま返す。
+ * PR ④F: 世代スコープ indicator/pattern キャッシュを train / validation 分割で
+ * **ビュー offset 加算** する (= 配列コピーなし、メモリ効率重視)。
+ *
+ * - cache 自体は世代の全期間配列を保持し、候補間で共有
+ * - 分割時は `indicatorSeriesCacheOffset` / `patternFlagsCacheOffset` に
+ *   `start` (= train なら 0、validation なら split index) を加算するだけ
+ * - 旧 PR では `arr.slice(start, end)` で 候補数 × indicator 数の配列コピーが
+ *   発生していたが、これを撤廃 (= PR #128 Copilot review #3)
+ *
+ * 既に offset が指定されていた場合は `(既存 offset) + start` を新 offset とする
+ * (= 多段 slice にも耐える)。end は未使用 (= cache 末尾までを参照可能、bar 数
+ * 範囲外は buildFeatureTable 側で NaN/false padding)。
  */
-function sliceSimulationCaches(
+function offsetSimulationCaches(
   options: DslSimulationOptions | undefined,
   start: number,
-  end: number,
 ): DslSimulationOptions | undefined {
   if (!options) return undefined;
-  const indicatorSeriesCache = options.indicatorSeriesCache;
-  const patternFlagsCache = options.patternFlagsCache;
-  if (!indicatorSeriesCache && !patternFlagsCache) return options;
-
-  const out: DslSimulationOptions = { ...options };
-  if (indicatorSeriesCache) {
-    const sliced = new Map<string, ReadonlyArray<number | null>>();
-    for (const [key, arr] of indicatorSeriesCache) {
-      sliced.set(key, arr.slice(start, end));
-    }
-    out.indicatorSeriesCache = sliced;
-  }
-  if (patternFlagsCache) {
-    const sliced: Record<string, ReadonlyArray<boolean>> = {};
-    for (const [key, arr] of Object.entries(patternFlagsCache)) {
-      sliced[key] = arr ? arr.slice(start, end) : [];
-    }
-    out.patternFlagsCache = sliced as DslSimulationOptions['patternFlagsCache'];
-  }
-  return out;
+  if (!options.indicatorSeriesCache && !options.patternFlagsCache) return options;
+  if (start === 0) return options;
+  return {
+    ...options,
+    indicatorSeriesCacheOffset: (options.indicatorSeriesCacheOffset ?? 0) + start,
+    patternFlagsCacheOffset: (options.patternFlagsCacheOffset ?? 0) + start,
+  };
 }
 
 /** profitFactor が Infinity のときも数値計算できるよう上限化 */
@@ -253,11 +248,12 @@ export class SurrogateFitnessSimulator {
     const mergedParams = { ...defaultParameterValues(dsl), ...paramValues };
     // PR ④F: simulationOptions.indicatorSeriesCache / patternFlagsCache は
     // **全期間分** が渡される想定 (= EvolutionLoop が世代開始時に 1 HTTP で取得)。
-    // train (= 0..split) / validation (= split..end) ごとに同じ index で slice
-    // して runDslSimulation に渡す。slice しないと bars と series で index が
-    // ズレて leaf 評価が歪む。
-    const trainOptions = sliceSimulationCaches(simulationOptions, 0, split);
-    const valOptions = sliceSimulationCaches(simulationOptions, split, bars.length);
+    // train (= 0..split) / validation (= split..end) は **ビュー offset 加算** で
+    // 表現する (= 配列コピーなし、PR #128 Copilot review #3)。bar i に対応する
+    // cache index は `i + offset` で求まり、buildFeatureTable がその index で
+    // 値を読む。
+    const trainOptions = offsetSimulationCaches(simulationOptions, 0);
+    const valOptions = offsetSimulationCaches(simulationOptions, split);
     const trainResult = runDslSimulation(trainBars, dsl, mergedParams, trainOptions);
     const valResult = runDslSimulation(valBars, dsl, mergedParams, valOptions);
 
