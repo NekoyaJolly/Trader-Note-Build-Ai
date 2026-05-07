@@ -152,6 +152,31 @@ describe('shared/strategy-evaluator/operators: compareValues', () => {
       expect(compareValues(0, undefined, 'is_false')).toBe(true);
       expect(compareValues(true, undefined, 'is_false')).toBe(false);
     });
+
+    // PR #123 Copilot review #1: is_false は null/undefined 入力を「成立」と
+    // 誤判定してはいけない。「欠損データは条件不成立」契約。
+    it('is_true: null / undefined left は false (= 欠損データ契約)', () => {
+      expect(compareValues(null, undefined, 'is_true')).toBe(false);
+      expect(compareValues(undefined, undefined, 'is_true')).toBe(false);
+    });
+
+    it('is_false: null / undefined left は false (= 欠損データを成立扱いしない)', () => {
+      expect(compareValues(null, undefined, 'is_false')).toBe(false);
+      expect(compareValues(undefined, undefined, 'is_false')).toBe(false);
+    });
+  });
+
+  // PR #123 Copilot review #2: != が right=null/undefined を成立扱いしない
+  describe('null / undefined right の入力検証', () => {
+    it('!= で right が null / undefined なら false (= 判定不能を成立扱いしない)', () => {
+      expect(compareValues(1, null, '!=')).toBe(false);
+      expect(compareValues(1, undefined, '!=')).toBe(false);
+    });
+
+    it('== で right が null / undefined なら false', () => {
+      expect(compareValues(1, null, '==')).toBe(false);
+      expect(compareValues(1, undefined, '==')).toBe(false);
+    });
   });
 });
 

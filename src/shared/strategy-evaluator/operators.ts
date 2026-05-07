@@ -5,9 +5,14 @@
  * Side-B `DSLEvaluator` も同じロジックを使うことで、Side-A / Side-B 間の
  * **評価結果の同一性** を保証する (= drift 防止)。
  *
- * クロス系 (`cross_above` / `cross_below`) と Touch 系 (`Touch` / `touch`) は
- * **前バー値** (prevLeft / prevRight) を必要とする。呼び出し側で前バー snapshot を
- * 取得して渡すこと。前バー値が無い場合は false (= 状態遷移が判定できない先頭バー)。
+ * クロス系 (`cross_above` / `cross_below`) は **前バー値** (prevLeft / prevRight)
+ * 必須。前バー値が無い場合は常に false (= 状態遷移が判定できない先頭バー)。
+ *
+ * Touch 系 (`Touch` / `touch`、Side-A 後方互換) は「同一足での近接」も成立条件に
+ * 含むため、前バー値が無くても `Math.abs(left-right) <= epsilon` なら true になる。
+ * **状態遷移としての判定が必要な場合のみ前バー値が必須**。`operatorNeedsPreviousValues`
+ * は「前バー値があれば判定が変わる op」を返すため Touch も true を返す (= 呼び出し側
+ * で取得しておくと精度が上がるが、必須ではない)。
  *
  * `touch_close`: 終値タッチ (= 値の一致 / 近接のみ、クロスは cross_* に任せる)。
  * `touch_wick`: ヒゲタッチ (= 別途 high/low データが必要、本関数では扱わず呼び出し側で判定)。
@@ -69,16 +74,18 @@ export function compareValues(
   const normalized: ComparisonOperator =
     op === 'GC' ? 'cross_above' : op === 'DC' ? 'cross_below' : op;
 
-  // is_true / is_false は left を Boolean 評価
+  // 入力検証 (= 全 op 共通: left が null/undefined なら false。「欠損データは条件不成立」を契約)
+  if (left === null || left === undefined) return false;
+
+  // is_true / is_false は left を Boolean 評価。
+  // PR #123 Copilot review #1: null/undefined は上で弾いているため、ここに来た
+  // 時点で left は値を持つ (= 0 / false / '' 等は falsy で扱う)。
   if (normalized === 'is_true') {
     return Boolean(left);
   }
   if (normalized === 'is_false') {
     return !left;
   }
-
-  // 入力検証
-  if (left === null || left === undefined) return false;
 
   // strict equality
   if (normalized === '==' || normalized === '=') {
@@ -90,6 +97,8 @@ export function compareValues(
     return left === right;
   }
   if (normalized === '!=') {
+    // PR #123 Copilot review #2: right が null/undefined のときは判定不能、契約通り false
+    if (right === null || right === undefined) return false;
     return left !== right;
   }
 

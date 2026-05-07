@@ -189,8 +189,12 @@ export function getPriceValue(ctx: EvaluationContext, priceType: string): number
  * 比較演算を実行 (post-Phase 5A: shared/strategy-evaluator/operators に委譲)。
  *
  * Side-A / Side-B 両方で同じ評価結果になるよう、本関数は shared 側の `compareValues`
- * を呼び出す薄いアダプタ。`touch_wick` は呼び出し側 (= `evaluateCondition`) で
- * バー range 判定するため、本関数の op 型からは除外している。
+ * を呼び出す薄いアダプタ。
+ *
+ * `touch_wick` は型上は `ComparisonOperator` に含まれるが、shared 側の compareValues
+ * では false を返す (= バーの high-low レンジ判定が必要なため)。実際の判定は
+ * `evaluateCondition` 側で `touch_wick` を早期 return + `bar.low <= left && left <= bar.high`
+ * で行っている。本アダプタは touch_wick が来ても shared の挙動 (= false 返し) に従う。
  *
  * @param left - 左辺値
  * @param right - 右辺値
