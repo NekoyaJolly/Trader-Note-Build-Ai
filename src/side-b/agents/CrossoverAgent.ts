@@ -8,6 +8,7 @@ import { randomUUID } from 'crypto';
 
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { formatIndicatorMetadataTable } from '../../shared/indicators/promptTable';
+import { formatPatternMetadataTable } from '../../shared/patterns/promptTable';
 import { loadPromptWithGlobal, type PromptMacros } from '../prompts/loader';
 import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
@@ -45,10 +46,12 @@ export class CrossoverAgent {
    * Registry 未 seed / DB 不整合時は loadPromptWithGlobal にフォールバック。
    *
    * PR #117e: `{{INDICATOR_METADATA_TABLE}}` macro を registry から動的に注入する。
+   * PR ②-2: `{{PATTERN_METADATA_TABLE}}` macro を pattern registry から注入する。
    */
   private async resolveSystemPrompt(): Promise<string> {
     const macros: PromptMacros = {
       INDICATOR_METADATA_TABLE: formatIndicatorMetadataTable(),
+      PATTERN_METADATA_TABLE: formatPatternMetadataTable(),
     };
     try {
       return await promptRegistry.getCompositeActive('crossover', macros);

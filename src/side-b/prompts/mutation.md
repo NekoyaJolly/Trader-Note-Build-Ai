@@ -37,6 +37,19 @@
 
 {{INDICATOR_METADATA_TABLE}}
 
+### ローソク足パターン (PR ②-2 で追加、`lens="pattern"` で参照可能)
+
+戦略の幅を出すため、価格水準ベース (RSI 等) だけでなく **ローソク足の形状ベース** の条件も組み合わせて使う。下記 12 種が registry 経由で自動生成される。各 pattern は `is_true` / `is_false` op で評価し、RHS (value/compareTarget) は不要。
+
+{{PATTERN_METADATA_TABLE}}
+
+戦略アーキタイプの例 (= LLM がこの語彙を組み合わせて多様な戦略を生成できる):
+
+- **反転戦略**: `pattern.engulfing_bull is_true` + `ohlcv.rsi < 30` → 下落終盤での包み足ロング
+- **継続戦略**: `pattern.thrust_bull is_true` + `ohlcv.close > ohlcv.ema(period=20)` → 上抜け勢い確認
+- **フィルタ**: `pattern.doji is_false` を AND に加える (= 迷い相場でのエントリー回避)
+- **逆張り**: `pattern.shooting_star is_true` + `ohlcv.rsi > 70` → 高値圏売り
+
 ## 良い条件の例
 
 以下はそれぞれ ConditionGroup の `conditions[]` に入る単独 leaf の形例 (列挙であって 1 つの JSON ドキュメントではない):
