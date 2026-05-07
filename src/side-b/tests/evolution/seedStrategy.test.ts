@@ -1,136 +1,212 @@
 /**
- * PR #114: regime 別 seed strategy のテスト。
+ * novelty seed 生成のテスト (PR ⑤D-2 で全面再設計)。
  *
- * 旧 seed は全 regime で `close > 0` (常時 true) という trivial な「無条件エントリー」相当だった。
- * このテストは regime 別 seed が:
- *   1. 各 regime で意味の異なる trigger 条件を返す
- *   2. 全 leaf が PR #112 対応の `ohlcv.{rsi, atr}` のみに収まる (= Python BT が動く)
- *   3. trigger が数学的に常時 true な条件 (`close > 0` 等) を含まない
- *   4. StrategyDSLSchema を通る (= Zod parse が落ちない)
- *   5. 未知 regime は default に倒れる
- *
- * を pin する。
+ * 旧 PR #114 の `getSeedDescriptor` / `seedStrategy` (= regime 別 RSI/ATR 単純 seed)
+ * は撤廃され、PR ⑤D-2 で **6 カテゴリ × long/short = 12 種** の
+ * `buildSeedDsl(kind, regime)` / `buildAllNoveltySeeds(regime)` に置き換えられた。
+ * 本テストは新方式を pin する:
+ *   1. 12 種すべて schema 通過 (= 機械判定可能な DSL)
+ *   2. long seed と short seed の direction が正しく設定される
+ *   3. 各 seed が意味のある条件を含む (= MTF / multi-instance / time_session 等)
+ *   4. id は randomUUID で重複しない
+ *   5. buildAllNoveltySeeds で 12 種を一括生成可能
  */
 
-import { getSeedDescriptor, seedStrategy } from '../../evolution/EvolutionLoop';
-import type { ConditionGroup } from '../../strategy_dsl/schema';
-import { StrategyDSLSchema, type Condition, type StrategyDSL } from '../../strategy_dsl/schema';
+import {
+  ALL_SEED_KINDS,
+  buildAllNoveltySeeds,
+  buildSeedDsl,
+  type SeedKind,
+} from '../../evolution/EvolutionLoop';
+import { StrategyDSLSchema } from '../../strategy_dsl/schema';
 
-/** seed の trigger ConditionGroup を取り出す。seed は ImmediateEntry を生成する想定。 */
-function getTriggerGroup(seed: StrategyDSL): ConditionGroup {
-  const entry = seed.entry as { trigger?: ConditionGroup; triggerConditions?: ConditionGroup };
-  // seed は ImmediateEntry なので trigger を持つ
-  const group = entry.trigger ?? entry.triggerConditions;
-  if (!group) {
-    throw new Error('seed entry に trigger / triggerConditions が見つからない');
-  }
-  return group;
-}
-
-/** ConditionGroup の leaf を平坦化 */
-function flattenLeaves(group: ConditionGroup): Condition[] {
-  const out: Condition[] = [];
-  for (const c of group.conditions) {
-    if ('logic' in c) out.push(...flattenLeaves(c));
-    else out.push(c);
-  }
-  return out;
-}
-
-describe('PR #114: regime 別 seed strategy', () => {
-  describe('getSeedDescriptor', () => {
-    it('breakout: RSI 強気帯 (>55) + 高ボラ (atr>0.0008)', () => {
-      const desc = getSeedDescriptor('breakout');
-      expect(desc.conditions).toHaveLength(2);
-      expect(desc.conditions).toContainEqual({ lens: 'ohlcv', feature: 'rsi', op: '>', value: 55 });
-      expect(desc.conditions).toContainEqual({ lens: 'ohlcv', feature: 'atr', op: '>', value: 0.0008 });
-      expect(desc.stopLoss).toEqual({ type: 'atr_multiple', value: 1.5 });
-      expect(desc.takeProfit).toEqual({ type: 'rr_ratio', value: 2 });
+describe('PR ⑤D-2: 新 12 種の novelty seed', () => {
+  describe('ALL_SEED_KINDS', () => {
+    it('12 種の seed kind を含む', () => {
+      expect(ALL_SEED_KINDS).toHaveLength(12);
     });
 
-    it('trending_with_pullback: RSI 中立 (between 40-60)', () => {
-      const desc = getSeedDescriptor('trending_with_pullback');
-      expect(desc.conditions).toEqual([
-        { lens: 'ohlcv', feature: 'rsi', op: 'between', value: [40, 60] },
-      ]);
-      expect(desc.stopLoss).toEqual({ type: 'atr_multiple', value: 2.0 });
-      expect(desc.takeProfit).toEqual({ type: 'rr_ratio', value: 2.5 });
-    });
-
-    it('consolidation: RSI 中立 (45-55) + 低ボラ (atr<0.0015)', () => {
-      const desc = getSeedDescriptor('consolidation');
-      expect(desc.conditions).toHaveLength(2);
-      expect(desc.conditions).toContainEqual({ lens: 'ohlcv', feature: 'rsi', op: 'between', value: [45, 55] });
-      expect(desc.conditions).toContainEqual({ lens: 'ohlcv', feature: 'atr', op: '<', value: 0.0015 });
-      expect(desc.stopLoss).toEqual({ type: 'atr_multiple', value: 1.0 });
-      expect(desc.takeProfit).toEqual({ type: 'rr_ratio', value: 1.5 });
-    });
-
-    it('reversal: RSI 売られすぎ (<30)', () => {
-      const desc = getSeedDescriptor('reversal');
-      expect(desc.conditions).toEqual([{ lens: 'ohlcv', feature: 'rsi', op: '<', value: 30 }]);
-    });
-
-    it('未知 regime は default (RSI <50) に倒れる', () => {
-      const desc = getSeedDescriptor('totally_unknown_regime_xyz');
-      expect(desc.conditions).toEqual([{ lens: 'ohlcv', feature: 'rsi', op: '<', value: 50 }]);
-    });
-
-    it('未知 regime の description には regime 名が埋め込まれる', () => {
-      const desc = getSeedDescriptor('mystery_regime');
-      expect(desc.description).toContain('mystery_regime');
+    it('6 カテゴリ × long/short の組合せが揃っている', () => {
+      const sorted = [...ALL_SEED_KINDS].sort();
+      expect(sorted).toEqual(
+        [
+          'anomaly_long',
+          'anomaly_short',
+          'mtf_long',
+          'mtf_short',
+          'multi_instance_long',
+          'multi_instance_short',
+          'oscillator_long',
+          'oscillator_short',
+          'range_long',
+          'range_short',
+          'trend_long',
+          'trend_short',
+        ].sort(),
+      );
     });
   });
 
-  describe('seedStrategy', () => {
-    const regimes = ['breakout', 'trending_with_pullback', 'consolidation', 'reversal', 'unknown_x'];
-
-    it.each(regimes)('regime=%s: StrategyDSLSchema を通る', (regime) => {
-      const seed = seedStrategy(regime);
-      expect(() => StrategyDSLSchema.parse(seed)).not.toThrow();
-      expect(seed.regimeTarget).toBe(regime);
-      expect(seed.metadata.createdBy).toBe('initial_random');
-      expect(seed.metadata.description).toBeDefined();
-    });
-
-    it.each(regimes)('regime=%s: 全 leaf が ohlcv.{rsi, atr} のみ (PR #112 対応範囲)', (regime) => {
-      const seed = seedStrategy(regime);
-      const leaves = flattenLeaves(getTriggerGroup(seed));
-      const allowedFeatures = new Set(['rsi', 'atr']);
-      expect(leaves.length).toBeGreaterThan(0);
-      for (const leaf of leaves) {
-        expect(leaf.lens).toBe('ohlcv');
-        expect(allowedFeatures.has(leaf.feature)).toBe(true);
+  describe('buildSeedDsl', () => {
+    it('全 12 seed kind が StrategyDSLSchema を通る (= 機械判定可能な DSL)', () => {
+      for (const kind of ALL_SEED_KINDS) {
+        const seed = buildSeedDsl(kind, 'breakout');
+        expect(() => StrategyDSLSchema.parse(seed)).not.toThrow();
       }
     });
 
-    it.each(regimes)('regime=%s: 数学的に常時 true な leaf (close > 0 等) を含まない', (regime) => {
-      const seed = seedStrategy(regime);
-      const leaves = flattenLeaves(getTriggerGroup(seed));
-      const trivial = leaves.find(
-        (l) => l.lens === 'ohlcv' && l.feature === 'close' && l.op === '>' && l.value === 0,
-      );
-      expect(trivial).toBeUndefined();
+    it('long seed と short seed の direction が正しく設定される', () => {
+      const longKinds: SeedKind[] = [
+        'mtf_long',
+        'multi_instance_long',
+        'trend_long',
+        'oscillator_long',
+        'anomaly_long',
+        'range_long',
+      ];
+      const shortKinds: SeedKind[] = [
+        'mtf_short',
+        'multi_instance_short',
+        'trend_short',
+        'oscillator_short',
+        'anomaly_short',
+        'range_short',
+      ];
+      for (const k of longKinds) {
+        const seed = buildSeedDsl(k, 'breakout');
+        expect(
+          'direction' in seed.entry ? seed.entry.direction : undefined,
+        ).toBe('long');
+      }
+      for (const k of shortKinds) {
+        const seed = buildSeedDsl(k, 'breakout');
+        expect(
+          'direction' in seed.entry ? seed.entry.direction : undefined,
+        ).toBe('short');
+      }
     });
 
-    it('異なる regime は異なる trigger 構造になる (= 進化の出発点が分岐する)', () => {
-      const breakout = seedStrategy('breakout');
-      const reversal = seedStrategy('reversal');
-      const consolidation = seedStrategy('consolidation');
-      const trendingPb = seedStrategy('trending_with_pullback');
-
-      const sigs = [breakout, reversal, consolidation, trendingPb].map((s) =>
-        JSON.stringify(getTriggerGroup(s).conditions),
-      );
-      // 4 regime の trigger 構造はすべて異なる
-      expect(new Set(sigs).size).toBe(4);
+    it('seed の id が異なる (= randomUUID で重複しない)', () => {
+      const ids = new Set<string>();
+      for (const kind of ALL_SEED_KINDS) {
+        for (let i = 0; i < 3; i++) {
+          ids.add(buildSeedDsl(kind, 'breakout').id);
+        }
+      }
+      // 12 kind × 3 = 36 件すべて異なる id
+      expect(ids.size).toBe(36);
     });
 
-    it('trigger は AND 結合の ConditionGroup である', () => {
-      const seed = seedStrategy('breakout');
-      const group = getTriggerGroup(seed);
-      expect(group.logic).toBe('AND');
-      expect(group.conditions.length).toBeGreaterThanOrEqual(1);
+    it('regimeTarget は引数の値が入る', () => {
+      const seed = buildSeedDsl('mtf_long', 'trending_with_pullback');
+      expect(seed.regimeTarget).toBe('trending_with_pullback');
+    });
+
+    it('既定 symbol/timeframe は EURUSD/15m', () => {
+      const seed = buildSeedDsl('range_long', 'consolidation');
+      expect(seed.symbol).toBe('EURUSD');
+      expect(seed.timeframe).toBe('15m');
+    });
+
+    it('symbol/timeframe を引数で上書き可能', () => {
+      const seed = buildSeedDsl('range_long', 'breakout', 'GBPJPY', '1h');
+      expect(seed.symbol).toBe('GBPJPY');
+      expect(seed.timeframe).toBe('1h');
+    });
+
+    it('mtf_long seed には timeframe 1h の上位足条件が含まれる', () => {
+      const seed = buildSeedDsl('mtf_long', 'trending_with_pullback');
+      const conditions =
+        'trigger' in seed.entry ? seed.entry.trigger.conditions : [];
+      // 上位足条件 (= timeframe='1h') が 1 つ以上含まれる
+      const hasMtf = conditions.some(
+        (c) => 'timeframe' in c && c.timeframe === '1h',
+      );
+      expect(hasMtf).toBe(true);
+    });
+
+    it('multi_instance_long は EMA の異なる period が複数現れる', () => {
+      const seed = buildSeedDsl('multi_instance_long', 'breakout');
+      const conditions =
+        'trigger' in seed.entry ? seed.entry.trigger.conditions : [];
+      const periods = new Set<number>();
+      for (const c of conditions) {
+        if ('feature' in c && c.feature === 'ema' && c.params?.period) {
+          periods.add(Number(c.params.period));
+        }
+        if (
+          'compareTarget' in c &&
+          c.compareTarget?.feature === 'ema' &&
+          c.compareTarget.params?.period
+        ) {
+          periods.add(Number(c.compareTarget.params.period));
+        }
+      }
+      expect(periods.has(7)).toBe(true);
+      expect(periods.has(15)).toBe(true);
+      expect(periods.has(60)).toBe(true);
+    });
+
+    it('anomaly_long は time_session.day_of_month を参照する', () => {
+      const seed = buildSeedDsl('anomaly_long', 'breakout');
+      const conditions =
+        'trigger' in seed.entry ? seed.entry.trigger.conditions : [];
+      const hasGotoubi = conditions.some(
+        (c) =>
+          'lens' in c &&
+          c.lens === 'time_session' &&
+          c.feature === 'day_of_month' &&
+          c.op === 'in',
+      );
+      expect(hasGotoubi).toBe(true);
+    });
+
+    it('oscillator_long は indicator 2 種以上 (rsi + williamsR) を含む', () => {
+      const seed = buildSeedDsl('oscillator_long', 'breakout');
+      const conditions =
+        'trigger' in seed.entry ? seed.entry.trigger.conditions : [];
+      const features = new Set<string>();
+      for (const c of conditions) {
+        if ('feature' in c) features.add(c.feature);
+      }
+      expect(features.size).toBeGreaterThanOrEqual(2);
+      expect(features.has('rsi')).toBe(true);
+      expect(features.has('williamsR')).toBe(true);
+    });
+
+    it('全 12 seed の trigger に少なくとも 1 leaf 含まれる (= 空 trigger ではない)', () => {
+      for (const kind of ALL_SEED_KINDS) {
+        const seed = buildSeedDsl(kind, 'breakout');
+        const conditions =
+          'trigger' in seed.entry ? seed.entry.trigger.conditions : [];
+        expect(conditions.length).toBeGreaterThanOrEqual(1);
+      }
+    });
+  });
+
+  describe('buildAllNoveltySeeds', () => {
+    it('12 個の seed を ALL_SEED_KINDS の順序で返す', () => {
+      const seeds = buildAllNoveltySeeds('breakout');
+      expect(seeds).toHaveLength(12);
+      for (let i = 0; i < ALL_SEED_KINDS.length; i++) {
+        const expectedKind = ALL_SEED_KINDS[i];
+        // id の prefix に kind 名が含まれる (= novelty-<kind>-<regime>-<uuid>)
+        expect(seeds[i].id).toContain(expectedKind);
+      }
+    });
+
+    it('全 seed が schema 通過済 (= StrategyDSLSchema.parse 成功)', () => {
+      const seeds = buildAllNoveltySeeds('breakout');
+      for (const s of seeds) {
+        expect(() => StrategyDSLSchema.parse(s)).not.toThrow();
+      }
+    });
+
+    it('regimeTarget は全 seed で一致する', () => {
+      const seeds = buildAllNoveltySeeds('reversal');
+      for (const s of seeds) {
+        expect(s.regimeTarget).toBe('reversal');
+      }
     });
   });
 });

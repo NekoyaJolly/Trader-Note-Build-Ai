@@ -27,7 +27,7 @@ import { createHash, randomUUID } from 'crypto';
 import type { CrossoverAgent } from '../agents/CrossoverAgent';
 import type { MutationAgent } from '../agents/MutationAgent';
 import type { SurrogateFitnessSimulator, BacktestPeriod, SurrogateFitnessAggregate } from '../strategy_dsl/SurrogateFitnessSimulator';
-import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
+import type { StrategyDSL } from '../strategy_dsl/schema';
 import type { DiversityEnforcer } from './DiversityEnforcer';
 import { scoreFromValidationSummary } from './evolutionScore';
 // PR #96: 旧 extractPromotionCandidates が直接参照していた閾値は surrogateRescuePolicy
@@ -345,46 +345,20 @@ export interface GenerationReport {
 }
 
 /**
- * regime 別の seed トリガー構造 + SL/TP 設定。
+ * regime 別の seed (= novelty seed) は `seedDescriptor.ts` に集約。
  *
- * PR #122 Copilot review: 循環依存 (`EvolutionLoop` ↔ `parentPoolPolicy`) を避けるため、
- * 実装は `./seedDescriptor.ts` に切り出し済み。本ファイルは互換のため re-export する。
+ * PR ⑤D-2: 旧 `getSeedDescriptor` / `SeedDescriptor` / `SeedConditionLeaf` /
+ * `seedStrategy(regime)` (= regime 別 RSI/ATR 単純 seed 1 つ) は撤廃され、
+ * **6 カテゴリ × long/short = 12 種** の `buildSeedDsl(kind, regime)` /
+ * `buildAllNoveltySeeds(regime)` に置き換えられた。本ファイルは re-export のみ。
  */
 export {
-  getSeedDescriptor,
-  type SeedConditionLeaf,
-  type SeedDescriptor,
+  buildSeedDsl,
+  buildAllNoveltySeeds,
+  ALL_SEED_KINDS,
+  type SeedKind,
 } from './seedDescriptor';
-import { getSeedDescriptor } from './seedDescriptor';
-
-export function seedStrategy(regime: string): StrategyDSL {
-  const desc = getSeedDescriptor(regime);
-  const raw = {
-    id: `seed-${regime}-${randomUUID()}`,
-    generation: 0,
-    parentIds: [] as string[],
-    regimeTarget: regime,
-    symbol: 'EURUSD',
-    timeframe: '1h',
-    entry: {
-      direction: 'long' as const,
-      trigger: {
-        logic: 'AND' as const,
-        conditions: desc.conditions,
-      },
-      orderType: 'market' as const,
-    },
-    stopLoss: desc.stopLoss,
-    takeProfit: desc.takeProfit,
-    parameters: {},
-    metadata: {
-      createdAt: new Date().toISOString(),
-      createdBy: 'initial_random' as const,
-      description: desc.description,
-    },
-  };
-  return StrategyDSLSchema.parse(raw);
-}
+import { buildAllNoveltySeeds } from './seedDescriptor';
 
 /**
  * 段階 4a.3: 正式 BT の合格 PF 下限。
@@ -548,7 +522,11 @@ export class EvolutionLoop {
 
     let list = population.getByRegime(regime);
     if (list.length === 0) {
-      population.add(regime, seedStrategy(regime));
+      // PR ⑤D-2: 旧 `seedStrategy(regime)` (= 単一 RSI/ATR seed) を撤廃し、
+      // 12 種の novelty seed (6 カテゴリ × long/short) を一括注入する。
+      for (const seed of buildAllNoveltySeeds(regime)) {
+        population.add(regime, seed);
+      }
       list = population.getByRegime(regime);
     }
 

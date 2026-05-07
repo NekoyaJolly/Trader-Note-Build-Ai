@@ -12,12 +12,15 @@
  * @see docs/design/evolution_loop_agent_prompt.md (PR #95 親個体プール v1 最小版)
  */
 
-import { randomUUID } from 'crypto';
+// PR ⑤D-2: novelty seed の id 採番は seedDescriptor.buildSeedDsl 内で randomUUID を
+// 使うようになったので本ファイルでは不要。
 
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
 // PR #122 Copilot review: `EvolutionLoop` ↔ `parentPoolPolicy` の循環依存を避けるため、
-// `getSeedDescriptor` は専用ファイル `seedDescriptor.ts` から直接 import する。
-import { getSeedDescriptor } from './seedDescriptor';
+// PR ⑤D-2: 旧 getSeedDescriptor (= regime 別 RSI/ATR 単純 seed) は撤廃され、
+// 6 カテゴリ × long/short = 12 種の novelty seed を `buildAllNoveltySeeds` /
+// `buildSeedDsl` で供給する形に統一された。
+import { ALL_SEED_KINDS, buildSeedDsl } from './seedDescriptor';
 import type { StrategyPopulation } from './StrategyPopulation';
 import type { EvolutionBacktestRunRepository } from '../../backend/repositories/evolutionBacktestRunRepository';
 import type { EdgeHypothesis, EdgeStatus } from '../models/edgeHypothesis';
@@ -163,44 +166,26 @@ function loadCurrentPopulationParents(
 }
 
 /**
- * v1: novelty seed = regime 別の意味のある最小戦略 (LLM 不使用、コスト 0)。
- * 将来的には mutationAgent.generateDiverse() に差し替え検討。
+ * PR ⑤D-2: novelty seed = **6 カテゴリ × long/short = 12 種** の戦略を初期世代に
+ * 並列注入する (LLM 不使用、コスト 0)。
  *
- * post-Phase 5A: 旧実装は `close > 0` (常時 true) を出していたが、本番 smoke
- * (2026-05-07) で StrategyPopulation 汚染源として確認されたため、`getSeedDescriptor`
- * (PR #114 で追加した regime 別 RSI/ATR 条件) を使う形に統一。
+ * - 6 カテゴリ: MTF / multi-instance / トレンド / オシレーター / アノマリー / レンジ
+ * - 各カテゴリに long と short 両方を用意 (= 計 12)
+ * - count >= 12 なら 12 種を全部 + 余分は 12 種からラウンドロビンで複製
+ * - count < 12 なら 12 種から先頭 count 個を注入
+ * - 各 seed は **異なる id (= randomUUID 含む)** を持ち、StrategyPopulation で
+ *   重複しない
  *
- * 重複しないよう毎回 randomUUID() で id を切る。
+ * post-Phase 5A: 旧実装は regime 別の RSI/ATR 単純 seed (PR #114) で、進化が
+ * 同じような戦略を生み続けるリスクがあった。PR ⑤D-2 で機能群 (= MTF /
+ * multi-instance / pattern / time_session / 20 indicator) を「使い切る」形に
+ * 全面再設計。`buildSeedDsl(kind, regime)` 経由で 12 種を供給。
  */
 function generateNoveltySeeds(regime: string, count: number): StrategyDSL[] {
   const out: StrategyDSL[] = [];
-  const descriptor = getSeedDescriptor(regime);
   for (let i = 0; i < count; i++) {
-    const raw = {
-      id: `novelty-${regime}-${randomUUID()}`,
-      generation: 0,
-      parentIds: [] as string[],
-      regimeTarget: regime,
-      symbol: 'EURUSD',
-      timeframe: '1h',
-      entry: {
-        direction: 'long' as const,
-        trigger: {
-          logic: 'AND' as const,
-          conditions: descriptor.conditions,
-        },
-        orderType: 'market' as const,
-      },
-      stopLoss: descriptor.stopLoss,
-      takeProfit: descriptor.takeProfit,
-      parameters: {},
-      metadata: {
-        createdAt: new Date().toISOString(),
-        createdBy: 'initial_random' as const,
-        description: `novelty seed for ${regime}: ${descriptor.description}`,
-      },
-    };
-    out.push(StrategyDSLSchema.parse(raw));
+    const kind = ALL_SEED_KINDS[i % ALL_SEED_KINDS.length];
+    out.push(buildSeedDsl(kind, regime));
   }
   return out;
 }
