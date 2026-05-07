@@ -43,6 +43,60 @@
 
 {{INDICATOR_METADATA_TABLE}}
 
+### 時間 / 曜日 / 日付 (PR ⑤D-1 で追加、`lens="time_session"` で参照可能)
+
+アノマリー戦略 (= ゴトー日 / 曜日効果 / セッション効果) を表現するために `time_session` lens を使う。各バーの timestamp (UTC) から計算される。
+
+| feature | 型 | 説明 |
+|---|---|---|
+| `utc_hour` | int 0-23 | UTC 時 |
+| `utc_minute` | int 0-59 | UTC 分 |
+| `day_of_week` | int 0-6 | 曜日 (0=日曜, 1=月曜, ..., 5=金曜, 6=土曜) |
+| `day_of_month` | int 1-31 | 月の日付 |
+| `tokyo_active` | bool | 東京セッション中 (UTC 0-6) |
+| `london_active` | bool | ロンドンセッション中 (UTC 8-16) |
+| `ny_active` | bool | NY セッション中 (UTC 13-21) |
+| `overlap_london_ny` | bool | ロンドン/NY オーバーラップ (UTC 13-16) |
+| `overlap_tokyo_london` | bool | 東京/ロンドン境界 (UTC 7-8) |
+| `minutes_since_tokyo_open` | int | 東京オープンからの経過分 (セッション外は -1) |
+| `minutes_since_london_open` | int | ロンドンオープンからの経過分 |
+| `minutes_since_ny_open` | int | NY オープンからの経過分 |
+| `is_weekend` | bool | 週末 (土日 / 金曜クローズ後 / 日曜オープン前) |
+| `is_monday_open` | bool | 月曜の最初 4 時間 (= ボラ高 / ギャップ) |
+| `is_friday_close` | bool | 金曜 17-21 UTC (= NY クローズ前、決済集中) |
+| `is_tokyo_lunch` | bool | 東京昼休み (UTC 02:30-03:30、薄商い) |
+
+アノマリー戦略例:
+
+```json
+// ゴトー日 (= 5/10/15/20/25/30) + ロンドンフィキシング前後 (= UTC 16:00 前) で円安バイアス
+{
+  "logic": "AND",
+  "conditions": [
+    { "lens": "time_session", "feature": "day_of_month", "op": "in", "value": [5, 10, 15, 20, 25, 30] },
+    { "lens": "time_session", "feature": "utc_hour", "op": "between", "value": [14, 16] }
+  ]
+}
+
+// 月曜オープン直後 + ボラ拡大 (= 週初ギャップ後の継続狙い)
+{
+  "logic": "AND",
+  "conditions": [
+    { "lens": "time_session", "feature": "is_monday_open", "op": "is_true" },
+    { "lens": "ohlcv", "feature": "atr", "op": ">", "value": 0.001 }
+  ]
+}
+
+// 金曜 NY クローズ前 + RSI 過買いでショート (= 週末ポジション整理狙い)
+{
+  "logic": "AND",
+  "conditions": [
+    { "lens": "time_session", "feature": "is_friday_close", "op": "is_true" },
+    { "lens": "ohlcv", "feature": "rsi", "op": ">", "value": 60 }
+  ]
+}
+```
+
 ### ローソク足パターン (PR ②-2 で追加、`lens="pattern"` で参照可能)
 
 戦略の幅を出すため、価格水準ベース (RSI 等) だけでなく **ローソク足の形状ベース** の条件も組み合わせて使う。下記 12 種が registry 経由で自動生成される。各 pattern は `is_true` / `is_false` op で評価し、RHS (value/compareTarget) は不要。

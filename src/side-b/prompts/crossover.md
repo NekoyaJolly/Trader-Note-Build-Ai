@@ -44,6 +44,24 @@
 
 {{INDICATOR_METADATA_TABLE}}
 
+### 時間 / 曜日 / 日付 (PR ⑤D-1 で追加、`lens="time_session"` で参照可能)
+
+両親がアノマリー (= 時間帯 / 曜日 / 日付 ベース) を使っているなら継承する。新規にも下記 features を組み合わせてよい。
+
+| feature | 型 | 説明 |
+|---|---|---|
+| `day_of_month` | int 1-31 | 月の日付 (= ゴトー日: `in [5,10,15,20,25,30]`) |
+| `day_of_week` | int 0-6 | 曜日 (0=日曜, 1=月曜, 5=金曜) |
+| `utc_hour` / `utc_minute` | int | UTC 時刻 |
+| `tokyo_active` / `london_active` / `ny_active` | bool | セッション中判定 |
+| `overlap_london_ny` / `overlap_tokyo_london` | bool | セッションオーバーラップ |
+| `is_monday_open` / `is_friday_close` / `is_tokyo_lunch` | bool | 特殊時間帯 |
+
+組み合わせ例:
+- 親 A: `day_of_month in [5,10,15,20,25,30]` (ゴトー日) + 親 B: `rsi < 30` → 子: ゴトー日かつ過売り
+- 親 A: `is_friday_close is_true` + 親 B: `pattern.shooting_star is_true` → 子: 金曜クローズ前の天井形成
+- 親 A: `tokyo_active is_true` + 親 B: indicator フィルタ → 子: 東京セッション限定戦略
+
 ### ローソク足パターン (PR ②-2 で追加、`lens="pattern"` で参照可能)
 
 両親の戦略が pattern (ローソク足の形状ベース) を使っているなら、**継承して残す** のが基本。新規にも下記 12 種から選んで組み合わせてよい。各 pattern は `is_true` / `is_false` op で評価し、RHS (value/compareTarget) は不要。

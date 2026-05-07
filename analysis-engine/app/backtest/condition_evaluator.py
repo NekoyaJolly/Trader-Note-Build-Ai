@@ -52,6 +52,27 @@ SUPPORTED_LENS_FEATURE_MAP: dict = {
     # 別系統表現の alias (= 旧 DSL fixture / mutation 出力での書き方)
     ("rsi", "value"): "rsi",
     ("atr", "value"): "atr",
+    # PR ⑤D-1: time_session lens (= utc_hour / day_of_week / day_of_month /
+    # tokyo_active / london_active / ny_active / is_friday_close / is_tokyo_lunch
+    # 等)。runner 側で各バーの timestamp から計算して snapshot に
+    # `time_session.<feature>` 形式で詰める。アノマリー戦略 (= ゴトー日 /
+    # 月曜オープン / 金曜クローズ前 等) を表現可能にする。
+    ("time_session", "utc_hour"): "time_session.utc_hour",
+    ("time_session", "utc_minute"): "time_session.utc_minute",
+    ("time_session", "day_of_week"): "time_session.day_of_week",
+    ("time_session", "day_of_month"): "time_session.day_of_month",
+    ("time_session", "tokyo_active"): "time_session.tokyo_active",
+    ("time_session", "london_active"): "time_session.london_active",
+    ("time_session", "ny_active"): "time_session.ny_active",
+    ("time_session", "overlap_london_ny"): "time_session.overlap_london_ny",
+    ("time_session", "overlap_tokyo_london"): "time_session.overlap_tokyo_london",
+    ("time_session", "minutes_since_tokyo_open"): "time_session.minutes_since_tokyo_open",
+    ("time_session", "minutes_since_london_open"): "time_session.minutes_since_london_open",
+    ("time_session", "minutes_since_ny_open"): "time_session.minutes_since_ny_open",
+    ("time_session", "is_weekend"): "time_session.is_weekend",
+    ("time_session", "is_monday_open"): "time_session.is_monday_open",
+    ("time_session", "is_friday_close"): "time_session.is_friday_close",
+    ("time_session", "is_tokyo_lunch"): "time_session.is_tokyo_lunch",
     # PR ②-1: pattern lens (12 種ローソク足パターン真偽)。
     # snapshot key は `pattern.<patternId>` (= TS PatternLens features key と
     # `_build_feature_snapshot` で詰める key を一致させる)。本格 BT は

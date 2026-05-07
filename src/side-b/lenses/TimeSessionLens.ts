@@ -37,7 +37,8 @@ function minutesSinceOpen(now: Date, openHourUTC: number): number {
 
 export class TimeSessionLens implements Lens {
   readonly name = 'time_session';
-  readonly version = '1.0.0';
+  // PR ⑤D-1: day_of_month / is_tokyo_lunch 追加で minor bump
+  readonly version = '1.1.0';
   readonly dependencies = ['timestamp'] as const;
 
   async compute(input: LensInput): Promise<LensFeature> {
@@ -54,6 +55,7 @@ export class TimeSessionLens implements Lens {
     const hour = ts.getUTCHours();
     const minute = ts.getUTCMinutes();
     const dayOfWeek = ts.getUTCDay();
+    const dayOfMonth = ts.getUTCDate();
 
     const tokyoActive = hour >= TOKYO_OPEN_UTC && hour < TOKYO_CLOSE_UTC;
     const londonActive = hour >= LONDON_OPEN_UTC && hour < LONDON_CLOSE_UTC;
@@ -68,11 +70,17 @@ export class TimeSessionLens implements Lens {
     const isMondayOpen = dayOfWeek === 1 && hour < 4;
     // 金曜の最後の4時間: クローズ手前 17-21 UTC
     const isFridayClose = dayOfWeek === 5 && hour >= 17 && hour < 22;
+    // PR ⑤D-1: 東京昼休み (JST 11:30-12:30 = UTC 02:30-03:30、薄商い)
+    const isTokyoLunch =
+      (hour === 2 && minute >= 30) || (hour === 3 && minute < 30);
 
     const features: Record<string, number | string | boolean> = {
       utc_hour: hour,
       utc_minute: minute,
       day_of_week: dayOfWeek,
+      // PR ⑤D-1: 月の日付 (1-31)。ゴトー日 (= [5,10,15,20,25,30]) のような
+      // 日本特有のアノマリー戦略を表現可能にする。
+      day_of_month: dayOfMonth,
       tokyo_active: tokyoActive,
       london_active: londonActive,
       ny_active: nyActive,
@@ -84,6 +92,7 @@ export class TimeSessionLens implements Lens {
       is_weekend: isWeekend,
       is_monday_open: isMondayOpen,
       is_friday_close: isFridayClose,
+      is_tokyo_lunch: isTokyoLunch,
     };
 
     return {
