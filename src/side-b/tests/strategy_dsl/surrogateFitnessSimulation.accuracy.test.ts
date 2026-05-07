@@ -35,7 +35,7 @@ describe('collectDslOhlcvFeatureNeeds', () => {
       timeframe: '1h',
       entry: {
         direction: 'long',
-        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }] },
+        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }] },
       },
       stopLoss: { type: 'fixed_pips', value: 20 },
       takeProfit: { type: 'rr_ratio', value: 2 },
@@ -75,7 +75,7 @@ describe('collectDslOhlcvFeatureNeeds', () => {
       timeframe: '1h',
       entry: {
         direction: 'long',
-        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }] },
+        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }] },
       },
       stopLoss: { type: 'atr_multiple', value: 1.5 },
       takeProfit: { type: 'rr_ratio', value: 2 },
@@ -112,7 +112,7 @@ describe('runDslSimulation 執行オプション', () => {
       timeframe: '1m',
       entry: {
         direction: 'long',
-        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }] },
+        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }] },
       },
       stopLoss: { type: 'fixed_pips', value: 50 },
       takeProfit: { type: 'fixed_pips', value: 10 },
@@ -123,8 +123,8 @@ describe('runDslSimulation 執行オプション', () => {
     const withCost = runDslSimulation(bars, dsl, {}, { lotSize: 100_000, roundTripCostPips: 2 });
     expect(base.trades.length).toBeGreaterThan(0);
     expect(withCost.trades.length).toBe(base.trades.length);
-    const t0 = base.trades[0]!;
-    const t1 = withCost.trades[0]!;
+    const t0 = base.trades[0];
+    const t1 = withCost.trades[0];
     // 2 pips * 0.0001 * 100000 = 20
     expect(t1.pnl).toBeCloseTo(t0.pnl - 20, 5);
   });
@@ -145,7 +145,7 @@ describe('runDslSimulation 執行オプション', () => {
       timeframe: '1m',
       entry: {
         direction: 'long',
-        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }] },
+        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }] },
       },
       stopLoss: { type: 'fixed_pips', value: 100 },
       takeProfit: { type: 'fixed_pips', value: 100 },
@@ -157,7 +157,7 @@ describe('runDslSimulation 執行オプション', () => {
     const optimistic = runDslSimulation(bars, dsl, {}, { lotSize: 1, intraBarExitMode: 'optimistic' });
     expect(pessimistic.trades.length).toBe(1);
     expect(optimistic.trades.length).toBe(1);
-    expect(optimistic.trades[0]!.pnl).toBeGreaterThan(pessimistic.trades[0]!.pnl);
+    expect(optimistic.trades[0].pnl).toBeGreaterThan(pessimistic.trades[0].pnl);
   });
 
   it('immediateEntryFill: next_bar_open はシグナル足の次の始値で建つ', () => {
@@ -185,7 +185,7 @@ describe('runDslSimulation 執行オプション', () => {
     });
     const atClose = runDslSimulation(bars, dsl, {}, {});
     const atOpen = runDslSimulation(bars, dsl, {}, { immediateEntryFill: 'next_bar_open' });
-    expect(atClose.trades[0]!.entryPrice).toBe(1.0);
-    expect(atOpen.trades[0]!.entryPrice).toBe(1.5);
+    expect(atClose.trades[0].entryPrice).toBe(1.0);
+    expect(atOpen.trades[0].entryPrice).toBe(1.5);
   });
 });

@@ -37,7 +37,7 @@ describe('SurrogateFitnessSimulator.evaluateFitnessOnBars', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 50 },

@@ -35,7 +35,7 @@ describe('runSurrogateFitnessRobustnessOnBars', () => {
       timeframe: '1h',
       entry: {
         direction: 'long',
-        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }] },
+        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }] },
       },
       stopLoss: { type: 'fixed_pips', value: 200 },
       takeProfit: { type: 'fixed_pips', value: 100 },
@@ -67,7 +67,7 @@ describe('roundTripCostAtrMult', () => {
       timeframe: '1h',
       entry: {
         direction: 'long',
-        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }] },
+        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }] },
       },
       stopLoss: { type: 'fixed_pips', value: 5 },
       takeProfit: { type: 'fixed_pips', value: 200 },

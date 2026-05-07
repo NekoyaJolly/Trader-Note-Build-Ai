@@ -36,7 +36,7 @@ describe('ParameterRangeV2 グリッド', () => {
       timeframe: '1h',
       entry: {
         direction: 'long',
-        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }] },
+        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }] },
       },
       stopLoss: { type: 'fixed_pips', value: 20 },
       takeProfit: { type: 'rr_ratio', value: 2 },
@@ -61,7 +61,7 @@ describe('ParameterRangeV2 グリッド', () => {
       timeframe: '1h',
       entry: {
         direction: 'long',
-        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }] },
+        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }] },
       },
       stopLoss: { type: 'fixed_pips', value: 20 },
       takeProfit: { type: 'rr_ratio', value: 2 },
@@ -216,7 +216,7 @@ describe('Phase 6.8 execution metadata', () => {
       timeframe: '1h',
       entry: {
         direction: 'long',
-        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }] },
+        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }] },
       },
       stopLoss: { type: 'fixed_pips', value: 5 },
       takeProfit: { type: 'rr_ratio', value: 1 },
@@ -238,7 +238,7 @@ describe('Phase 6.8 execution metadata', () => {
     expect(r.execution.executionConfigHash).toHaveLength(16);
     expect(r.execution.costSummary.totalCost).toBeGreaterThan(0);
     expect(r.trades.length).toBeGreaterThan(0);
-    const first = r.trades[0]!;
+    const first = r.trades[0];
     expect(first.indicatorValues?.grossPnl).toBeGreaterThan(first.pnl);
     expect(first.indicatorValues?.transactionCost).toBeGreaterThan(0);
   });
@@ -255,7 +255,7 @@ describe('Phase 6.8 execution metadata', () => {
       timeframe: '1h',
       entry: {
         direction: 'long',
-        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }] },
+        trigger: { logic: 'AND', conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }] },
       },
       stopLoss: { type: 'fixed_pips', value: 5 },
       takeProfit: { type: 'rr_ratio', value: 1 },
@@ -285,8 +285,8 @@ describe('Phase 6.8 execution metadata', () => {
     );
     expect(l2.trades.length).toBeGreaterThan(0);
     expect(zero.trades.length).toBeGreaterThan(0);
-    expect(l2.trades[0]!.entryPrice).toBeGreaterThan(zero.trades[0]!.entryPrice);
-    expect(l2.trades[0]!.exitPrice).toBeLessThan(zero.trades[0]!.exitPrice);
-    expect(l2.trades[0]!.indicatorValues?.grossPnl).toBeGreaterThan(l2.trades[0]!.pnl);
+    expect(l2.trades[0].entryPrice).toBeGreaterThan(zero.trades[0].entryPrice);
+    expect(l2.trades[0].exitPrice).toBeLessThan(zero.trades[0].exitPrice);
+    expect(l2.trades[0].indicatorValues?.grossPnl).toBeGreaterThan(l2.trades[0].pnl);
   });
 });

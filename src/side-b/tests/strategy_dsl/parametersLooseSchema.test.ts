@@ -38,7 +38,7 @@ function dslWith(parameters: unknown): unknown {
       direction: 'long',
       trigger: {
         logic: 'AND',
-        conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+        conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
       },
       orderType: 'market',
     },
@@ -230,16 +230,16 @@ describe('isParameterRangeV2 強化 (4a-parameters)', () => {
 
   it('step が 0 や負数だと false', () => {
     expect(
-      isParameterRangeV2({ kind: 'range', min: 1, max: 5, step: 0, default: 3 } as never),
+      isParameterRangeV2({ kind: 'range', min: 1, max: 5, step: 0, default: 3 }),
     ).toBe(false);
     expect(
-      isParameterRangeV2({ kind: 'range', min: 1, max: 5, step: -1, default: 3 } as never),
+      isParameterRangeV2({ kind: 'range', min: 1, max: 5, step: -1, default: 3 }),
     ).toBe(false);
   });
 
   it('default が NaN / Infinity だと false', () => {
     expect(
-      isParameterRangeV2({ kind: 'range', min: 1, max: 5, step: 1, default: NaN } as never),
+      isParameterRangeV2({ kind: 'range', min: 1, max: 5, step: 1, default: NaN }),
     ).toBe(false);
     expect(
       isParameterRangeV2({
@@ -248,7 +248,7 @@ describe('isParameterRangeV2 強化 (4a-parameters)', () => {
         max: 5,
         step: 1,
         default: Infinity,
-      } as never),
+      }),
     ).toBe(false);
   });
 
@@ -284,14 +284,14 @@ describe('isLegacyParameterDef 強化 (4a-parameters)', () => {
 
 describe('parameter type guards (4a-parameters)', () => {
   it('isLegacyParameterDef は raw 値を弾く', () => {
-    expect(isLegacyParameterDef(0.5 as never)).toBe(false);
-    expect(isLegacyParameterDef('foo' as never)).toBe(false);
-    expect(isLegacyParameterDef(null as never)).toBe(false);
+    expect(isLegacyParameterDef(0.5)).toBe(false);
+    expect(isLegacyParameterDef('foo')).toBe(false);
+    expect(isLegacyParameterDef(null)).toBe(false);
   });
 
   it('isParameterRangeV2 は raw 値を弾く', () => {
-    expect(isParameterRangeV2(0.5 as never)).toBe(false);
-    expect(isParameterRangeV2(null as never)).toBe(false);
+    expect(isParameterRangeV2(0.5)).toBe(false);
+    expect(isParameterRangeV2(null)).toBe(false);
   });
 
   it('isRawParameterValue は number / string / boolean / null を true に', () => {
@@ -308,7 +308,7 @@ describe('parameter type guards (4a-parameters)', () => {
     expect(isSimpleParameterObject({ kind: 'range', min: 1, max: 5, step: 1, default: 3 })).toBe(
       false,
     );
-    expect(isSimpleParameterObject(0.5 as never)).toBe(false);
+    expect(isSimpleParameterObject(0.5)).toBe(false);
   });
 
   it('isSimpleParameterObject は value が raw scalar 以外の時は false (型回避経由の不正値を防ぐ)', () => {

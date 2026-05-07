@@ -15,6 +15,7 @@ import {
 } from '../../evolution/parentPoolPolicy';
 import { StrategyPopulation } from '../../evolution/StrategyPopulation';
 import { StrategyDSLSchema, type StrategyDSL } from '../../strategy_dsl/schema';
+import type { EdgeHypothesis } from '../../models/edgeHypothesis';
 import type { EvolutionBacktestRunRepository } from '../../../backend/repositories/evolutionBacktestRunRepository';
 import type { EvolutionBacktestRun } from '@prisma/client';
 
@@ -32,7 +33,7 @@ function makeDsl(id: string, regime = 'breakout'): StrategyDSL {
       direction: 'long',
       trigger: {
         logic: 'AND',
-        conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+        conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
       },
       orderType: 'market',
     },
@@ -50,15 +51,15 @@ function makeFormalBtPassedRow(id: string, candidateHash: string, regime = 'brea
     generation: 1,
     candidateId: id,
     candidateHash,
-    dslSnapshot: makeDsl(id, regime) as unknown as object,
+    dslSnapshot: makeDsl(id, regime),
     surrogateScore: 0.8,
     formalBtPassed: true,
-    formalBtMetrics: { pf: 1.5, winRate: 0.6, tradeCount: 30 } as unknown as object,
+    formalBtMetrics: { pf: 1.5, winRate: 0.6, tradeCount: 30 },
     formalBtFailureReason: null,
     engine: 'analysis-engine',
     engineVersion: 'test',
     createdAt: new Date(),
-  } as EvolutionBacktestRun;
+  };
 }
 
 describe('computeRequestedCounts (PR #95 v1 / PR #98 v2)', () => {
@@ -199,7 +200,7 @@ describe('buildParentPool (PR #95 親個体プール v1)', () => {
     const badRow = makeFormalBtPassedRow('fbt-bad', 'h-bad');
     (badRow.dslSnapshot as unknown as { entry: { direction: string } }).entry = {
       direction: 'sideways', // Zod 不適合
-    } as never;
+    };
 
     repoMock.findRecentFormalBtPassed.mockResolvedValue([badRow]);
     const population = new StrategyPopulation(undefined);
@@ -242,7 +243,7 @@ describe('buildParentPool (PR #95 親個体プール v1)', () => {
   // PR #98 EdgeHypothesis 統合テスト
   // ===========================================
 
-  function makeStubHypothesis(id: string, status: 'confirmed' | 'screening_passed' | 'unverified'): import('../../models/edgeHypothesis').EdgeHypothesis {
+  function makeStubHypothesis(id: string, status: 'confirmed' | 'screening_passed' | 'unverified'): EdgeHypothesis {
     const now = new Date();
     return {
       id,
