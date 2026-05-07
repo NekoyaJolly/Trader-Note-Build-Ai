@@ -217,7 +217,7 @@ async function fetchUpperTimeframeAndFill(
   indicatorSeriesCache: Map<string, ReadonlyArray<number | null>>,
   ohlcvSource: OhlcvSource,
 ): Promise<void> {
-  // 上位足 OHLCV (= alignment 計算用)
+  // 上位足 OHLCV (= alignment 計算 + 上位足 price/volume の forward fill)
   const upperBars = await ohlcvSource.fetchBars({
     symbol,
     timeframe: tf,
@@ -225,6 +225,27 @@ async function fetchUpperTimeframeAndFill(
     endDate,
   });
   const alignment = buildBarAlignment(primaryBars, upperBars, primaryTimeframe, tf);
+
+  // PR #130 Copilot review #2/#6/#8: 上位足の **OHLCV (open/high/low/close/volume)
+  // も `ohlcv@<tf>.<field>` snapshot key で indicatorSeriesCache に詰める**。
+  // これがないと `Condition.timeframe='1h'` の price 系 leaf (例: ohlcv@1h.close) や
+  // touch_wick op が常に欠損 → false 評価になる。alignment + forward fill で
+  // 主バー長に揃えた number 配列で詰める。
+  const upperOpens: number[] = upperBars.map((b) => b.open);
+  const upperHighs: number[] = upperBars.map((b) => b.high);
+  const upperLows: number[] = upperBars.map((b) => b.low);
+  const upperCloses: number[] = upperBars.map((b) => b.close);
+  const upperVolumes: number[] = upperBars.map((b) => b.volume);
+  for (const [field, arr] of [
+    ['open', upperOpens],
+    ['high', upperHighs],
+    ['low', upperLows],
+    ['close', upperCloses],
+    ['volume', upperVolumes],
+  ] as const) {
+    const filled = forwardFillSeriesToPrimary<number | null>(arr, alignment, null);
+    indicatorSeriesCache.set(`ohlcv@${tf}.${field}`, filled);
+  }
 
   // 上位足 indicator + pattern を 1 HTTP で取得
   const indicators = Array.from(tfNeeds.values()).map((n) => ({

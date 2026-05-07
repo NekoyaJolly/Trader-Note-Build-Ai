@@ -173,11 +173,14 @@ function buildFeatureTable(
   // で、`indicatorSeriesCacheOffset` が「現在 bars が cache のどの位置から始まるか」
   // を表す。bar i の値は cached[i + offset] で取得する (= slice によるコピーなし)。
   // bars 範囲外 (offset + i が cached の範囲外) は NaN に倒し、leaf 評価で false。
-  if (indicatorNeeds.length > 0) {
+  // PR #130 Copilot review #5/#6: indicatorNeeds は主 timeframe の動的 indicator
+  // のみを集めるが、上位足の price 系 / pattern@<tf> 系列も snapshot に積む必要が
+  // ある。これらは indicatorSeriesCache の **全 key を loop** して取り出す形に
+  // 変更する。snapshotAt は必要な lens key のみ読み出すので余分 key の存在は
+  // 評価結果に影響しない (= 数値変換コストのみ増える)。
+  if (indicatorSeriesCache && indicatorSeriesCache.size > 0) {
     const series = new Map<string, number[]>();
-    for (const need of indicatorNeeds) {
-      const cached = indicatorSeriesCache?.get(need.snapshotKey);
-      if (!cached) continue;
+    for (const [key, cached] of indicatorSeriesCache) {
       const values = new Array<number>(bars.length);
       for (let i = 0; i < bars.length; i++) {
         const sourceIdx = i + indicatorSeriesCacheOffset;
@@ -188,10 +191,13 @@ function buildFeatureTable(
         const v = cached[sourceIdx];
         values[i] = v === null || v === undefined ? Number.NaN : v;
       }
-      series.set(need.snapshotKey, values);
+      series.set(key, values);
     }
     table.indicatorSeries = series;
   }
+  // 引数 indicatorNeeds は collect 段階での観測情報として残すが、buildFeatureTable
+  // 自体ではもう使わなくなった (= cache 全 key 経路で十分)。
+  void indicatorNeeds;
   // PR ②-1 + PR ④F: pattern lens features も同じく世代スコープ全期間配列 +
   // offset (= patternFlagsCacheOffset) で参照する。範囲外は false padding。
   if (patternNeeded && patternFlagsCache) {

@@ -253,10 +253,15 @@ class BacktestingPyEngine:
 
                 # PR ⑤B (MTF): 上位足 OHLCV からの indicator pre-compute + alignment 計算 +
                 # forward fill。alignment は timeframe ごとに 1 回だけ計算してキャッシュ。
+                # PR #130 Copilot review #7: ohlcv_df は self.data.* から組み立てた
+                # DataFrame で index が RangeIndex(0..N) になり alignment 計算で
+                # AttributeError になる。主バー側は backtesting.py が保持する元 DataFrame
+                # の timestamp index (= self.data.index、_load_ohlcv で datetime にしてある)
+                # を使う。
                 upper_tf_dfs: Dict[str, pd.DataFrame] = {}
                 upper_tf_alignments: Dict[str, List[int]] = {}
                 if upper_tf_ohlcv and primary_timeframe_for_mtf:
-                    primary_index = list(ohlcv_df.index)
+                    primary_index = list(self.data.index)
                     for tf, upper_df in upper_tf_ohlcv.items():
                         # OHLCV column を小文字に正規化
                         upper_df_norm = upper_df.copy()
@@ -387,6 +392,35 @@ class BacktestingPyEngine:
                         filled = forward_fill_to_primary(upper_bools, alignment, False)
                         self._pattern_flag_series[sk] = filled
 
+                # PR #130 Copilot review #8: 上位足の OHLCV (open/high/low/close/volume)
+                # も `ohlcv@<tf>.<field>` snapshot key で保持する。collect_required_upper_tf_features
+                # で「必要な上位足 static feature」が判定されており、それらを alignment +
+                # forward fill して詰める。これがないと condition.timeframe='1h' の price 系
+                # leaf (例: `ohlcv@1h.close > 1.05`) が snapshot に値なし → 常に false 評価。
+                self._upper_tf_static_features: dict = {}
+                # `required_features` set に含まれる `ohlcv@<tf>.<field>` を抽出
+                upper_tf_static_keys = [
+                    k for k in required_features
+                    if isinstance(k, str)
+                    and k.startswith("ohlcv@")
+                    and "." in k
+                ]
+                for sk in upper_tf_static_keys:
+                    base_lens, lens_tf, field = split_lens_with_timeframe(sk)
+                    if base_lens != "ohlcv" or lens_tf is None:
+                        continue
+                    if field not in ("open", "high", "low", "close", "volume"):
+                        continue
+                    upper_df = upper_tf_dfs.get(lens_tf)
+                    alignment = upper_tf_alignments.get(lens_tf)
+                    if upper_df is None or alignment is None:
+                        continue
+                    if field not in upper_df.columns:
+                        continue
+                    upper_arr = list(upper_df[field].astype(float).values)
+                    filled = forward_fill_to_primary(upper_arr, alignment, None)
+                    self._upper_tf_static_features[sk] = filled
+
                 self._entry_bar: Optional[int] = None
 
             def _build_feature_snapshot(self, offset: int = 0) -> dict:
@@ -433,6 +467,13 @@ class BacktestingPyEngine:
                         snapshot[snapshot_key] = bool(series[idx])
                     else:
                         snapshot[snapshot_key] = False
+                # PR #130 Copilot review #8: 上位足の static feature
+                # (`ohlcv@<tf>.open/high/low/close/volume`) も詰める。
+                for snapshot_key, series in self._upper_tf_static_features.items():
+                    if 0 <= idx < len(series):
+                        snapshot[snapshot_key] = series[idx]
+                    else:
+                        snapshot[snapshot_key] = None
                 # NaN は None に倒す (= condition_evaluator 側で false 判定)
                 for k, v in list(snapshot.items()):
                     if isinstance(v, float) and (v != v):

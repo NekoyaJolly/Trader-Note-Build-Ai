@@ -12,6 +12,7 @@
  * - パラメータ参照 (`$p1` 等) は呼び出し側で解決済みの `resolvedParams` から差し戻す
  */
 
+import { normalizeTimeframe } from '../../shared/timeframes';
 import type {
     Condition as DSLCondition,
     ConditionGroup,
@@ -115,18 +116,21 @@ function dslConditionToBacktest(
     c: DSLCondition,
     resolvedParams: Record<string, number>,
 ): BacktestCondition {
-    // PR ⑤B (MTF): condition.timeframe を payload に含める。主 timeframe との一致判定は
-    // 行わず、collectDslIndicatorNeeds で主と異なる場合のみ timeframe が DSL 上に存在
-    // する形 (= mutation/crossover で生成された MTF 戦略は主とは別の上位足を明示する)。
-    // 未指定なら payload にも含めず、analysis-engine 側は主 timeframe 扱い。
+    // PR ⑤B (MTF) + PR #130 Copilot review #3-4: condition.timeframe を canonical
+    // 化してから payload に載せる。analysis-engine は canonical のみ対応するため、
+    // alias / 大小文字違い (`'60m'` / `'1H'`) で送ると判定が崩れる。未知 timeframe
+    // は **payload に含めない** (= 主 timeframe 扱いで送る)。compareTarget も同様。
+    const cTf = c.timeframe ? normalizeTimeframe(c.timeframe) : undefined;
     const base = {
         lensName: c.lens,
         featureKey: c.feature,
         op: c.op,
         ...(c.params && Object.keys(c.params).length > 0 ? { params: { ...c.params } } : {}),
-        ...(c.timeframe ? { timeframe: c.timeframe } : {}),
+        ...(cTf ? { timeframe: cTf } : {}),
     };
     if (c.compareTarget) {
+        const targetTfRaw = c.compareTarget.timeframe;
+        const targetTf = targetTfRaw ? normalizeTimeframe(targetTfRaw) : undefined;
         return {
             ...base,
             compareTarget: {
@@ -135,9 +139,7 @@ function dslConditionToBacktest(
                 ...(c.compareTarget.params && Object.keys(c.compareTarget.params).length > 0
                     ? { params: { ...c.compareTarget.params } }
                     : {}),
-                ...(c.compareTarget.timeframe
-                    ? { timeframe: c.compareTarget.timeframe }
-                    : {}),
+                ...(targetTf ? { timeframe: targetTf } : {}),
             },
         };
     }

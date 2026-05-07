@@ -170,10 +170,14 @@ export class DSLEvaluator {
    * から引く lens key を返す。
    *
    * - timeframe 未指定 → `lens` (= 主 timeframe 扱い、後方互換)
+   * - timeframe が未知 (canonical 化不能) → `lens` (= 後方互換、leaf は false 評価)
+   * - PR #130 Copilot review #1: snapshot.primaryTimeframe が未設定 →
+   *   **timeframe を無視して `lens`** を返す (= MTF 非対応経路で leaf が常に false に
+   *   ならないように後方互換を優先)。`@<tf>` は MTF 経路でのみ意味を持つため、
+   *   primaryTimeframe を知らない経路 (= 旧テスト fixture / 単独 evaluator 利用) では
+   *   主 timeframe 扱いに倒す。
    * - timeframe = 主 timeframe (canonical 一致) → `lens` (= 接尾なし)
    * - timeframe ≠ 主 timeframe → `${lens}@${canonical}` (例: `ohlcv@1h`)
-   * - timeframe が未知 / snapshot.primaryTimeframe が未設定 → そのまま `lens` を
-   *   使う (= 後方互換、ただし上位足参照は機能しないため leaf 評価で false に倒れる)
    */
   private resolveLensKey(
     lens: string,
@@ -183,7 +187,7 @@ export class DSLEvaluator {
     if (!timeframe) return lens;
     const ct = normalizeTimeframe(timeframe);
     if (ct === null) return lens;
-    if (!primaryTimeframe) return `${lens}@${ct}`;
+    if (!primaryTimeframe) return lens;
     const cp = normalizeTimeframe(primaryTimeframe);
     if (cp === null || ct === cp) return lens;
     return `${lens}@${ct}`;
