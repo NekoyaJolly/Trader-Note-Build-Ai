@@ -94,7 +94,7 @@ export function computePinbarFlags(
 
 /**
  * Python `compute_candlestick_pattern_flags` と同じ式で 12 系列のうち
- * 9 系列 (pinbar 以外) を判定する。
+ * 9 系列 (pinbar 系を除く) を判定する。
  *
  * 定義 (Python と同期):
  * - 実体 = |close - open|
@@ -108,9 +108,14 @@ export function computePinbarFlags(
  * - thrust: 実体 >= 0.7 * レンジ
  * - engulfing: 前バー実体を現バー実体が包む (先頭バーは無効)
  *
- * 注: Python 側は同関数内で `pinbar_like` (3:0.5 比率) も計算するが、
- * 戻り値には含まない。本 TS 実装も pinbar 系は別関数 (`computePinbarFlags`) で
- * 提供し、ここからは **意図的に省く** (Python の戻り値構造に揃える)。
+ * 注: Python `compute_candlestick_pattern_flags` は同関数内で `pinbar_like`
+ * (3:0.5 比率) も計算し、**戻り値に `pinbar` キーを含む** (= bull/bear 分割
+ * なしの 1 種のみ)。一方で `compute_pinbar_flags` は同じ判定式で
+ * `pinbar` / `pinbar_bull` / `pinbar_bear` の 3 種を返す。本実装では責務を
+ * 分離して **pinbar 系は `computePinbarFlags` (TS) を真実とし**、本関数
+ * (`computeCandlestickPatternFlags`) からは **意図的に省く**。Python 側
+ * 同関数の `pinbar` キーは Side-A の他経路 (例: indicator-series API) で
+ * 利用されるので残るが、本 TS port は新たに参照しない。
  */
 export function computeCandlestickPatternFlags(
   bars: readonly PatternBar[],

@@ -41,8 +41,18 @@ from app.indicators import (
 
 # PR ②-1: pattern.* snapshot key (= SUPPORTED_LENS_FEATURE_MAP の値) と
 # `compute_*_flags` の戻り値 dict キーの対応。
-# `compute_pinbar_flags` は pinbar/pinbar_bull/pinbar_bear を返し、
-# `compute_candlestick_pattern_flags` は残り 9 系列を返す (pinbar 系を含まない)。
+#
+# Python 実装の責務分離:
+# - `compute_pinbar_flags` は厳密な pinbar (3:0.5 比率) を **bull / bear で分割**
+#   して返す (`pinbar` / `pinbar_bull` / `pinbar_bear` の 3 種)。
+# - `compute_candlestick_pattern_flags` は同じ pinbar_like 式も内部で計算し、
+#   **戻り値に `pinbar` キー (bull/bear 分割なし) を含む**。さらに hammer 系 /
+#   shooting_star / engulfing / doji / thrust 系の 9 系列を返す。
+#
+# 本 runner の DSL pattern lens は **pinbar 系を `compute_pinbar_flags` から
+# 取得** し (= bull/bear を区別したいため)、`compute_candlestick_pattern_flags`
+# 側の `pinbar` キーは **意図的に使わない**。残りの 9 系列は
+# `compute_candlestick_pattern_flags` から取得する。
 _PATTERN_SNAPSHOT_KEYS: dict = {
     "pattern.pinbar": ("pinbar", "pinbar"),
     "pattern.pinbar_bull": ("pinbar", "pinbar_bull"),
