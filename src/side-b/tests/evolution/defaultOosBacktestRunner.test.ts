@@ -35,7 +35,7 @@ function makeDsl(id = 'd1'): StrategyDSL {
       direction: 'long',
       trigger: {
         logic: 'AND',
-        conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+        conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
       },
       orderType: 'market',
     },

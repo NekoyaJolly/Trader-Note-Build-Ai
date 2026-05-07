@@ -236,6 +236,73 @@ describe('PR #116a: ConditionSchema 拡張', () => {
     });
   });
 
+  // post-Phase 5A: 数学的に常時 true / false な leaf を schema レベルで弾く
+  describe('post-Phase 5A: trivial leaf (常時 true / false) は parse エラー', () => {
+    it('close > 0 は常時 true (価格 > 0 前提) → エラー', () => {
+      const c = { lens: 'ohlcv', feature: 'close', op: '>', value: 0 };
+      expect(() => ConditionSchema.parse(c)).toThrow(/常時 true/);
+    });
+
+    it('close > -0.5 も常時 true → エラー', () => {
+      const c = { lens: 'ohlcv', feature: 'close', op: '>', value: -0.5 };
+      expect(() => ConditionSchema.parse(c)).toThrow(/常時 true/);
+    });
+
+    it('close >= 0 も常時 true → エラー', () => {
+      const c = { lens: 'ohlcv', feature: 'close', op: '>=', value: 0 };
+      expect(() => ConditionSchema.parse(c)).toThrow(/常時 true/);
+    });
+
+    it('close < 0 は常時 false → エラー', () => {
+      const c = { lens: 'ohlcv', feature: 'close', op: '<', value: 0 };
+      expect(() => ConditionSchema.parse(c)).toThrow(/常時 false/);
+    });
+
+    it('open / high / low も同等に弾く', () => {
+      for (const feature of ['open', 'high', 'low']) {
+        const c = { lens: 'ohlcv', feature, op: '>', value: 0 };
+        expect(() => ConditionSchema.parse(c)).toThrow(/常時 true/);
+      }
+    });
+
+    it('volume > -1 は常時 true (volume >= 0 前提) → エラー', () => {
+      const c = { lens: 'ohlcv', feature: 'volume', op: '>', value: -1 };
+      expect(() => ConditionSchema.parse(c)).toThrow(/常時 true/);
+    });
+
+    it('volume < -1 は常時 false → エラー', () => {
+      const c = { lens: 'ohlcv', feature: 'volume', op: '<', value: -1 };
+      expect(() => ConditionSchema.parse(c)).toThrow(/常時 false/);
+    });
+
+    it('close > 0.0001 は通る (forex 価格は 1.0+ で実質常時 true だが境界判定の対象外)', () => {
+      const c = { lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 };
+      expect(() => ConditionSchema.parse(c)).not.toThrow();
+    });
+
+    it('volume > 0 は通る (= 弾く対象外、value < 0 のみ trivial 扱い)', () => {
+      const c = { lens: 'ohlcv', feature: 'volume', op: '>', value: 0 };
+      expect(() => ConditionSchema.parse(c)).not.toThrow();
+    });
+
+    it('rsi / atr は trivial 判定の対象外 (= 範囲が複雑なため別判定)', () => {
+      const rsiCond = { lens: 'ohlcv', feature: 'rsi', op: '>', value: 0 };
+      expect(() => ConditionSchema.parse(rsiCond)).not.toThrow();
+      const atrCond = { lens: 'ohlcv', feature: 'atr', op: '>', value: 0 };
+      expect(() => ConditionSchema.parse(atrCond)).not.toThrow();
+    });
+
+    it('別 lens (例: rsi.value) は判定対象外 (= ohlcv lens のみ)', () => {
+      const c = { lens: 'rsi', feature: 'value', op: '>', value: 0 };
+      expect(() => ConditionSchema.parse(c)).not.toThrow();
+    });
+
+    it('非数値 value (ParamRef) は判定対象外', () => {
+      const c = { lens: 'ohlcv', feature: 'close', op: '>', value: '$threshold' };
+      expect(() => ConditionSchema.parse(c)).not.toThrow();
+    });
+  });
+
   // PR #120 Copilot review #3: 期間系キーは整数 + 正値を強制
   describe('PR #120: ConditionParamsSchema 期間系キー整数性', () => {
     it('period が整数なら parse 通る (例: 14)', () => {

@@ -60,7 +60,7 @@ describe('DSLEvaluator', () => {
             { lens: 'ohlcv', feature: 'rsi', op: '>', value: 80 },
           ],
         },
-        { lens: 'ohlcv', feature: 'close', op: '>', value: 0 },
+        { lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 },
       ],
     };
     expect(ev.evaluateConditions(g, makeSnapshot(1, 10), {})).toBe(true);

@@ -124,6 +124,58 @@ export type IndicatorOperand = z.infer<typeof IndicatorOperandSchema>;
  * superRefine 制約:
  *   - `value` と `compareTarget` はちょうど一方だけ指定する (排他、両方 / どちらも無し は不可)
  */
+/**
+ * 数学的に常時 true / false な leaf を弾く判定 (post-Phase 5A 汚染防止)。
+ *
+ * 本番 smoke で `close > 0` / `volume > -1` 等の trivial 条件が StrategyPopulation
+ * に残り続け、mutation がそれを継承して再生産する汚染を観測したため schema レベル
+ * で弾く。LLM 出力 / DB 永続化の両方を防ぐ。
+ *
+ * 弾く対象 (ohlcv lens のみ):
+ *   - open/high/low/close: 価格は通常正なので `> ≤0` / `>= ≤0` は常時 true、
+ *     `< ≤0` / `<= ≤0` は常時 false
+ *   - volume: 出来高は >= 0 なので `> <0` / `>= <0` は常時 true、
+ *     `< <0` / `<= <0` は常時 false
+ *
+ * 注: 価格が負値になる商品 (歴史的原油先物等) は対象外。本プロジェクトは forex 中心
+ * のため価格 > 0 を前提として判定。RSI/ATR は範囲が複雑 (0-100 / 0+) で「常時 true」
+ * の境界が曖昧なため本判定では対象外 (= 別の品質チェックに委ねる)。
+ */
+const TRIVIAL_PRICE_FEATURES = new Set(['open', 'high', 'low', 'close']);
+const TRIVIAL_NONNEG_FEATURES = new Set(['volume']);
+
+function detectTriviallyAlwaysTrueOrFalse(c: {
+  lens: string;
+  feature: string;
+  op: string;
+  value?: ConditionValue;
+}): string | null {
+  if (c.lens !== 'ohlcv') return null;
+  if (typeof c.value !== 'number') return null;
+
+  const isPriceFeature = TRIVIAL_PRICE_FEATURES.has(c.feature);
+  const isNonNegFeature = TRIVIAL_NONNEG_FEATURES.has(c.feature);
+  if (!isPriceFeature && !isNonNegFeature) return null;
+
+  if (isPriceFeature) {
+    if ((c.op === '>' || c.op === '>=') && c.value <= 0) {
+      return `${c.feature} ${c.op} ${c.value} は常時 true (価格 > 0 前提)`;
+    }
+    if ((c.op === '<' || c.op === '<=') && c.value <= 0) {
+      return `${c.feature} ${c.op} ${c.value} は常時 false (価格 > 0 前提)`;
+    }
+  }
+  if (isNonNegFeature) {
+    if ((c.op === '>' || c.op === '>=') && c.value < 0) {
+      return `${c.feature} ${c.op} ${c.value} は常時 true (volume >= 0 前提)`;
+    }
+    if ((c.op === '<' || c.op === '<=') && c.value < 0) {
+      return `${c.feature} ${c.op} ${c.value} は常時 false (volume >= 0 前提)`;
+    }
+  }
+  return null;
+}
+
 export const ConditionSchema = z
   .object({
     lens: z.string(),
@@ -147,6 +199,15 @@ export const ConditionSchema = z
       ctx.addIssue({
         code: 'custom',
         message: '条件式に value と compareTarget を同時指定することはできない (排他)',
+      });
+      return;
+    }
+    // post-Phase 5A: 数学的に常時 true / false な leaf を弾く (mutation 汚染防止)
+    const trivialMessage = detectTriviallyAlwaysTrueOrFalse(val);
+    if (trivialMessage !== null) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `数学的に常時 true / false な条件は不可: ${trivialMessage}`,
       });
     }
   });

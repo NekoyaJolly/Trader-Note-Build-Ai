@@ -53,7 +53,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -137,7 +137,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -250,7 +250,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -353,7 +353,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -445,7 +445,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
           direction: 'long',
           trigger: {
             logic: 'AND',
-            conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: i }],
+            conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: i + 0.0001 }],
           },
         },
         stopLoss: { type: 'fixed_pips', value: 30 },
@@ -552,7 +552,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -706,7 +706,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -801,7 +801,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -907,7 +907,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -1010,7 +1010,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -1120,7 +1120,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -1225,7 +1225,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -1351,7 +1351,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -1452,7 +1452,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -1553,7 +1553,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -1660,7 +1660,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -1801,7 +1801,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -1925,7 +1925,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -2043,7 +2043,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -2144,7 +2144,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -2255,7 +2255,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -2356,7 +2356,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -2460,7 +2460,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -2560,7 +2560,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },
@@ -2645,7 +2645,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         direction: 'long',
         trigger: {
           logic: 'AND',
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
         },
       },
       stopLoss: { type: 'fixed_pips', value: 30 },

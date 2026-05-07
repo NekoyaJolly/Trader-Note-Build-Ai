@@ -55,7 +55,7 @@ function makeDsl(overrides: DslOverrides = {}): StrategyDSL {
               op: c.op ?? '>',
               value: c.value ?? 0,
             }))
-          : [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0 }],
+          : [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
       },
       orderType: 'market',
     },

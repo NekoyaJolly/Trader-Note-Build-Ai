@@ -15,6 +15,7 @@
 import { randomUUID } from 'crypto';
 
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
+import { getSeedDescriptor } from './EvolutionLoop';
 import type { StrategyPopulation } from './StrategyPopulation';
 import type { EvolutionBacktestRunRepository } from '../../backend/repositories/evolutionBacktestRunRepository';
 import type { EdgeHypothesis, EdgeStatus } from '../models/edgeHypothesis';
@@ -160,14 +161,18 @@ function loadCurrentPopulationParents(
 }
 
 /**
- * v1: novelty seed = ランダムなシード戦略 (LLM 不使用、コスト 0)。
+ * v1: novelty seed = regime 別の意味のある最小戦略 (LLM 不使用、コスト 0)。
  * 将来的には mutationAgent.generateDiverse() に差し替え検討。
  *
- * 既存 EvolutionLoop.seedStrategy と同等の最小戦略を生成。重複しないよう
- * 毎回 randomUUID() で id を切る。
+ * post-Phase 5A: 旧実装は `close > 0` (常時 true) を出していたが、本番 smoke
+ * (2026-05-07) で StrategyPopulation 汚染源として確認されたため、`getSeedDescriptor`
+ * (PR #114 で追加した regime 別 RSI/ATR 条件) を使う形に統一。
+ *
+ * 重複しないよう毎回 randomUUID() で id を切る。
  */
 function generateNoveltySeeds(regime: string, count: number): StrategyDSL[] {
   const out: StrategyDSL[] = [];
+  const descriptor = getSeedDescriptor(regime);
   for (let i = 0; i < count; i++) {
     const raw = {
       id: `novelty-${regime}-${randomUUID()}`,
@@ -180,17 +185,17 @@ function generateNoveltySeeds(regime: string, count: number): StrategyDSL[] {
         direction: 'long' as const,
         trigger: {
           logic: 'AND' as const,
-          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>' as const, value: 0 }],
+          conditions: descriptor.conditions,
         },
         orderType: 'market' as const,
       },
-      stopLoss: { type: 'atr_multiple' as const, value: 1.5 },
-      takeProfit: { type: 'rr_ratio' as const, value: 2 },
+      stopLoss: descriptor.stopLoss,
+      takeProfit: descriptor.takeProfit,
       parameters: {},
       metadata: {
         createdAt: new Date().toISOString(),
         createdBy: 'initial_random' as const,
-        description: `novelty seed for ${regime}`,
+        description: `novelty seed for ${regime}: ${descriptor.description}`,
       },
     };
     out.push(StrategyDSLSchema.parse(raw));
