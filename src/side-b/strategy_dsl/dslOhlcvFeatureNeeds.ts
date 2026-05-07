@@ -112,12 +112,15 @@ export function collectDslIndicatorNeeds(dsl: StrategyDSL): DslIndicatorNeed[] {
   const visit = (lens: string, feature: string, params?: ConditionParams) => {
     if (lens !== 'ohlcv') return;
     if (!isPythonSupportedIndicatorId(feature)) return;
-    // PR #116b Copilot review #2+#3 (= rsi/atr の params なし):
-    // params なしの ohlcv.rsi / ohlcv.atr は legacy 経路 (BarFeatureTable.rsi / atr,
-    // surrogateFitnessSimulation 内の SMA / TR ベース計算) で既に扱われている。
-    // ここで HTTP 取得した series を need に積むと、snapshotAt で legacy 計算結果を
-    // 上書きして数値が変わる = 既存戦略の挙動が変わるため除外する (= 後追い PR で
-    // legacy rsi/atr 経路も HTTP 統合するときに再考)。
+    // **既知の例外** (PR #116b Copilot review #2+#3):
+    // params なしの ohlcv.rsi / ohlcv.atr は依然として legacy TS 計算経路
+    // (`surrogateFitnessSimulation` 内 `computeRsi` / `computeAtr` で SMA / TR ベース
+    // 計算) を使う。HTTP 経由の pandas_ta (Wilder smoothing) と式が違うため、ここで
+    // HTTP 取得 series に置き換えると **既存戦略の挙動が変わる**。
+    // PR ④F の主旨「TS 計算経路を撤廃して analysis-engine 一本化」に対する **唯一の
+    // 例外**。後追い PR で `BarFeatureTable.rsi / atr` 自体を HTTP 経由に置き換える
+    // 際に解消予定。params 付き (例: rsi(period=21)) は本除外の対象外で、HTTP 経由
+    // で取得される。
     if ((feature === 'rsi' || feature === 'atr') && (!params || Object.keys(params).length === 0)) {
       return;
     }

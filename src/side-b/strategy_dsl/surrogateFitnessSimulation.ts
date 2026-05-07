@@ -172,13 +172,17 @@ function buildFeatureTable(
     for (const need of indicatorNeeds) {
       const cached = indicatorSeriesCache?.get(need.snapshotKey);
       if (!cached) continue;
-      // keys 整合は呼び出し側の責任。長さが bars と一致しない場合は短い方に合わせる。
-      // null は NaN に倒して既存 BarFeatureTable.indicatorSeries の数値配列形式に揃える。
-      const len = Math.min(cached.length, bars.length);
-      const values = new Array<number>(len);
-      for (let i = 0; i < len; i++) {
+      // PR ④F Copilot review: bars.length まで NaN padding する (= pattern 側と
+      // 対称な扱い)。キャッシュが短い場合は末尾に NaN を埋め、leaf 評価で「値なし」
+      // (= isNaN チェックで false 扱い) になる。長すぎる場合は bars 長で打ち切り。
+      const values = new Array<number>(bars.length);
+      const copyLen = Math.min(cached.length, bars.length);
+      for (let i = 0; i < copyLen; i++) {
         const v = cached[i];
         values[i] = v === null || v === undefined ? Number.NaN : v;
+      }
+      for (let i = copyLen; i < bars.length; i++) {
+        values[i] = Number.NaN;
       }
       series.set(need.snapshotKey, values);
     }

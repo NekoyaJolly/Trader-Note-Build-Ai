@@ -131,27 +131,5 @@ function emptyPatternFlagsCache(): Record<CandlePatternId, ReadonlyArray<boolean
   return out;
 }
 
-/**
- * 世代スコープ seriesMap / patternFlagsCache を `[start, end)` で slice する。
- * `evaluateFitness` 内で全期間 cache を train (前 70%) / validation (後 30%) に
- * 分割して `runDslSimulation` に渡すために使う。
- */
-export function sliceGenerationCaches(
-  caches: GenerationIndicatorCaches,
-  start: number,
-  end: number,
-): GenerationIndicatorCaches {
-  const slicedSeries = new Map<string, ReadonlyArray<number | null>>();
-  for (const [key, arr] of caches.indicatorSeriesCache) {
-    slicedSeries.set(key, arr.slice(start, end));
-  }
-  const slicedPatterns = {} as Record<CandlePatternId, ReadonlyArray<boolean>>;
-  for (const id of ALL_CANDLE_PATTERN_IDS) {
-    const arr = caches.patternFlagsCache[id];
-    slicedPatterns[id] = arr ? arr.slice(start, end) : [];
-  }
-  return {
-    indicatorSeriesCache: slicedSeries,
-    patternFlagsCache: slicedPatterns,
-  };
-}
+// 注: train/validation 分割時の slice は `SurrogateFitnessSimulator` 側の
+// `sliceSimulationCaches` で扱う (= PR ④F Copilot review #4: 重複 export を避ける)。
