@@ -31,6 +31,34 @@ import {
 } from './dslParameterUtils';
 import { isLegacyParameterDef, isParameterRangeV2 } from './types';
 
+/**
+ * PR ④F: 世代スコープ indicator/pattern キャッシュを train / validation 分割で
+ * **ビュー offset 加算** する (= 配列コピーなし、メモリ効率重視)。
+ *
+ * - cache 自体は世代の全期間配列を保持し、候補間で共有
+ * - 分割時は `indicatorSeriesCacheOffset` / `patternFlagsCacheOffset` に
+ *   `start` (= train なら 0、validation なら split index) を加算するだけ
+ * - 旧 PR では `arr.slice(start, end)` で 候補数 × indicator 数の配列コピーが
+ *   発生していたが、これを撤廃 (= PR #128 Copilot review #3)
+ *
+ * 既に offset が指定されていた場合は `(既存 offset) + start` を新 offset とする
+ * (= 多段 slice にも耐える)。end は未使用 (= cache 末尾までを参照可能、bar 数
+ * 範囲外は buildFeatureTable 側で NaN/false padding)。
+ */
+function offsetSimulationCaches(
+  options: DslSimulationOptions | undefined,
+  start: number,
+): DslSimulationOptions | undefined {
+  if (!options) return undefined;
+  if (!options.indicatorSeriesCache && !options.patternFlagsCache) return options;
+  if (start === 0) return options;
+  return {
+    ...options,
+    indicatorSeriesCacheOffset: (options.indicatorSeriesCacheOffset ?? 0) + start,
+    patternFlagsCacheOffset: (options.patternFlagsCacheOffset ?? 0) + start,
+  };
+}
+
 /** profitFactor が Infinity のときも数値計算できるよう上限化 */
 function safeProfitFactor(s: BacktestResultSummary): number {
   const pf = s.profitFactor;
@@ -218,8 +246,16 @@ export class SurrogateFitnessSimulator {
     const valBars = bars.slice(split);
 
     const mergedParams = { ...defaultParameterValues(dsl), ...paramValues };
-    const trainResult = runDslSimulation(trainBars, dsl, mergedParams, simulationOptions);
-    const valResult = runDslSimulation(valBars, dsl, mergedParams, simulationOptions);
+    // PR ④F: simulationOptions.indicatorSeriesCache / patternFlagsCache は
+    // **全期間分** が渡される想定 (= EvolutionLoop が世代開始時に 1 HTTP で取得)。
+    // train (= 0..split) / validation (= split..end) は **ビュー offset 加算** で
+    // 表現する (= 配列コピーなし、PR #128 Copilot review #3)。bar i に対応する
+    // cache index は `i + offset` で求まり、buildFeatureTable がその index で
+    // 値を読む。
+    const trainOptions = offsetSimulationCaches(simulationOptions, 0);
+    const valOptions = offsetSimulationCaches(simulationOptions, split);
+    const trainResult = runDslSimulation(trainBars, dsl, mergedParams, trainOptions);
+    const valResult = runDslSimulation(valBars, dsl, mergedParams, valOptions);
 
     const trainPf = safeProfitFactor(trainResult.summary);
     const validationPf = safeProfitFactor(valResult.summary);

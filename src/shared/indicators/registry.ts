@@ -12,9 +12,11 @@
  * `support.pythonSeries`: analysis-engine `app/indicators.py:compute_indicator_series`
  * で実装されているか。false の指標は Python 側で評価できない (PR #118+ で順次拡張)。
  *
- * `support.tsSurrogate`: TS surrogate (EvolutionLoop の軽量近似) で
- * 計算されるか。PR #115 段階では全 false、PR #116 で IndicatorService 接続時に
- * 実反映 (= EMA/SMA/RSI/MACD/BB/ATR の subset を true 化予定)。
+ * `support.tsSurrogate`: PR ④F (post-Phase 5A) 以降は **`pythonSeries=true` と
+ * 同義** (= TS 側で indicator を再計算しない、analysis-engine `/v1/indicator-series`
+ * 経由で取得する)。フィールド自体は registry スキーマ後方互換のため残してある。
+ * PR #115 〜 PR #116 期は「TS 側で indicator を計算する」設計だったため独立した
+ * フラグだったが、PR ④F で TS 計算経路を撤廃した結果、両者は実質同じ意味になった。
  */
 
 import { readFileSync } from 'fs';
@@ -213,4 +215,17 @@ export function getPythonSupportedIndicators(): IndicatorRegistryEntry[] {
 /** id が registry に登録された有効な指標 ID か判定する type guard。 */
 export function isIndicatorId(value: string): value is IndicatorId {
   return INDEX_BY_ID.has(value);
+}
+
+/**
+ * PR ④F: id が **analysis-engine (= pandas_ta) で計算可能** な指標か判定。
+ *
+ * 用途: Side-B 進化ループの `collectDslIndicatorNeeds` で「世代開始時に
+ * `/v1/indicator-series` に投げる集合」を絞り込む。adx / supertrend / pivot は
+ * Python 側も実装無し (= pythonSeries=false) なので collect しても fetch 結果が
+ * 戻らないため、ここで除外する。
+ */
+export function isPythonSupportedIndicatorId(value: string): value is IndicatorId {
+  const entry = INDEX_BY_ID.get(value);
+  return entry !== undefined && entry.support.pythonSeries;
 }

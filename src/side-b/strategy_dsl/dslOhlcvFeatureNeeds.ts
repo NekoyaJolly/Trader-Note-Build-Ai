@@ -8,7 +8,11 @@
  * 既存 `collectDslOhlcvFeatureNeeds` (rsi/atr の bool のみ) は後方互換のため残す。
  */
 
-import { isTsSurrogateIndicatorFeature } from './indicatorSurrogate';
+// PR ④F: TS surrogate 専用の `isTsSurrogateIndicatorFeature` (= 6 個限定) は撤廃。
+// 全 indicator は analysis-engine 経由で取得可能 = registry の `pythonSeries=true`
+// に該当する 20 個全部が candidate。collect 段階では `isPythonSupportedIndicatorId`
+// で判定する。
+import { isPythonSupportedIndicatorId } from '../../shared/indicators/registry';
 import type { Condition, ConditionGroup, ConditionParams } from './schema';
 import type { StrategyDSL } from './schema';
 import { buildSnapshotKey } from './snapshotKey';
@@ -96,9 +100,10 @@ export interface DslIndicatorNeed {
  *   - leaf condition の `lens.feature(params)` (params なしの ohlcv.rsi/atr 等も含む、後方互換)
  *   - `compareTarget` の `lens.feature(params)`
  *
- * `lens === 'ohlcv'` かつ `feature` が `isTsSurrogateIndicatorFeature` を満たすものだけ
- * 拾う。それ以外 (= 別 lens / 未対応 feature) は `null` 扱いとして evaluator 側で
- * false 評価される (= Phase 6.7b の方針)。
+ * `lens === 'ohlcv'` かつ `feature` が **registry の pythonSeries=true** に該当する
+ * indicator のみ拾う (= analysis-engine が計算可能な 20 個)。それ以外 (= 別 lens /
+ * 未対応 feature / pythonSeries=false の adx/supertrend/pivot) は **collect 対象外**
+ * → seriesMap に積まれず leaf 評価で false に倒れる。
  *
  * 同じ snapshot key が複数 condition から参照された場合は重複排除。
  */
@@ -106,13 +111,16 @@ export function collectDslIndicatorNeeds(dsl: StrategyDSL): DslIndicatorNeed[] {
   const map = new Map<string, DslIndicatorNeed>();
   const visit = (lens: string, feature: string, params?: ConditionParams) => {
     if (lens !== 'ohlcv') return;
-    if (!isTsSurrogateIndicatorFeature(feature)) return;
-    // PR #116b Copilot review #2+#3:
-    // params なしの ohlcv.rsi / ohlcv.atr は legacy 経路 (BarFeatureTable.rsi / atr,
-    // surrogateFitnessSimulation 内の SMA / TR ベース計算) で既に扱われている。
-    // ここで indicatorService 由来 (Wilder ベース) の series を need に積むと、
-    // snapshotAt で legacy 計算結果を上書きして数値が変わる = 既存戦略の挙動が変わる。
-    // params 指定があるケースのみ TS surrogate adapter 経由で別 key に詰める。
+    if (!isPythonSupportedIndicatorId(feature)) return;
+    // **既知の例外** (PR #116b Copilot review #2+#3):
+    // params なしの ohlcv.rsi / ohlcv.atr は依然として legacy TS 計算経路
+    // (`surrogateFitnessSimulation` 内 `computeRsi` / `computeAtr` で SMA / TR ベース
+    // 計算) を使う。HTTP 経由の pandas_ta (Wilder smoothing) と式が違うため、ここで
+    // HTTP 取得 series に置き換えると **既存戦略の挙動が変わる**。
+    // PR ④F の主旨「TS 計算経路を撤廃して analysis-engine 一本化」に対する **唯一の
+    // 例外**。後追い PR で `BarFeatureTable.rsi / atr` 自体を HTTP 経由に置き換える
+    // 際に解消予定。params 付き (例: rsi(period=21)) は本除外の対象外で、HTTP 経由
+    // で取得される。
     if ((feature === 'rsi' || feature === 'atr') && (!params || Object.keys(params).length === 0)) {
       return;
     }

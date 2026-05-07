@@ -1,11 +1,10 @@
 /**
- * PR #117e: registry → mutation/crossover prompt 用 metadata table 整形のテスト。
+ * PR #117e + PR ④F: registry → mutation/crossover prompt 用 metadata table の整形テスト。
  *
- * `formatIndicatorMetadataTable()` が:
- *   - 実装済 (mutation 推奨) セクションに ema/sma/rsi/atr/macd/bb の 6 指標
- *   - Python BT のみ対応セクションに 14 指標
- *   - 完全未対応セクションに adx/supertrend/pivot
- * を出力することを pin。registry.json を更新したらこのテストも追従する。
+ * PR ④F で TS surrogate が analysis-engine 経由に切替わった結果、
+ * `pythonSeries=true` の 20 指標は **すべて 1 セクション (実装済)** に集約され、
+ * 旧「Python BT のみ対応」セクションは消滅した。完全未対応 (= pythonSeries=false)
+ * の 3 指標 (adx/supertrend/pivot) のみ別セクションで出力される。
  */
 
 import { formatIndicatorMetadataTable } from '../../shared/indicators/promptTable';
@@ -13,18 +12,8 @@ import { formatIndicatorMetadataTable } from '../../shared/indicators/promptTabl
 describe('PR #117e: formatIndicatorMetadataTable', () => {
   const table = formatIndicatorMetadataTable();
 
-  /**
-   * PR #117e Copilot review #3: split 連鎖で undefined.split が起きると、どの
-   * セクション抽出で壊れたか分からない。事前に存在を確認してから取り出す helper。
-   */
-  function extractBetween(content: string, startMarker: string, endMarker: string): string {
-    const startParts = content.split(startMarker);
-    expect(startParts.length).toBeGreaterThan(1); // startMarker が見つからないと test 即失敗
-    const afterStart = startParts.slice(1).join(startMarker);
-    const endParts = afterStart.split(endMarker);
-    expect(endParts.length).toBeGreaterThan(1); // endMarker も同様
-    return endParts[0];
-  }
+  // PR ④F: extractBetween は旧「Python BT のみ対応」セクション (= 廃止) を
+  // 取り出すために使っていたが、不要になったので削除。
 
   function extractAfter(content: string, marker: string): string {
     const parts = content.split(marker);
@@ -34,15 +23,21 @@ describe('PR #117e: formatIndicatorMetadataTable', () => {
 
   it('セクション見出しが揃っている (#### で挿入先見出しと整合)', () => {
     // PR #117e Copilot review #2: prompt md 側で `### 動的パラメータ付き indicator`
-    // の下に macro を埋め込むため、macro 内は `####` で 1 段下げる
-    expect(table).toContain('#### 実装済 (mutation 推奨、TS surrogate + Python BT 両対応)');
-    expect(table).toContain('#### Python BT のみ対応 (TS surrogate では false 評価、推奨度低)');
+    // の下に macro を埋め込むため、macro 内は `####` で 1 段下げる。
+    // PR ④F: 旧「Python BT のみ対応」セクションは消滅 (= 全 pythonSeries=true は実装済)。
+    expect(table).toContain('#### 実装済 (mutation 推奨、surrogate + 本格 BT 両対応)');
     expect(table).toContain('#### 完全未対応 (出力禁止)');
+    expect(table).not.toContain('#### Python BT のみ対応');
   });
 
-  it('実装済セクションに ema/sma/rsi/atr/macd/bb の 6 指標が並ぶ', () => {
-    // 各 indicator の行を pin (markdown table の cell 形式)
-    for (const id of ['ema', 'sma', 'rsi', 'atr', 'macd', 'bb']) {
+  it('実装済セクションに pythonSeries=true の 20 指標 (= 旧 6 + 旧 14) が並ぶ', () => {
+    // PR ④F: stochastic/cci/williamsR/dema/tema 等もすべて実装済セクションに統合
+    for (const id of [
+      'ema', 'sma', 'rsi', 'atr', 'macd', 'bb', // 旧「実装済」
+      'stochastic', 'williamsR', 'roc', 'mfi', // 旧「Python BT のみ」momentum
+      'dema', 'tema', 'aroon', 'cci', 'psar', 'ichimoku', // 旧「Python BT のみ」trend
+      'kc', 'obv', 'vwap', 'cmf', // 旧「Python BT のみ」volatility/volume
+    ]) {
       expect(table).toContain(`| \`${id}\` |`);
     }
   });
@@ -55,13 +50,6 @@ describe('PR #117e: formatIndicatorMetadataTable', () => {
     }
   });
 
-  it('Python BT のみ対応セクションに stochastic/cci/williamsR が含まれる (例)', () => {
-    const middle = extractBetween(table, '#### Python BT のみ対応', '#### 完全未対応');
-    for (const id of ['stochastic', 'cci', 'williamsR', 'roc', 'mfi']) {
-      expect(middle).toContain(`\`${id}\``);
-    }
-  });
-
   it('実装済セクションに params 付き条件 / compareTarget の使用例が含まれる', () => {
     expect(table).toContain('"params": { "period": 20 }');
     expect(table).toContain('"compareTarget"');
@@ -69,7 +57,8 @@ describe('PR #117e: formatIndicatorMetadataTable', () => {
 
   it('実装済セクションに ema の defaultParams (period=20) が出る', () => {
     // formatDefaultParams が "period=20" の表記で出すこと
-    const top = table.split('#### Python BT のみ対応')[0];
+    // PR ④F: 旧「Python BT のみ対応」セクションが消滅したため、unsupported 直前までが実装済領域
+    const top = table.split('#### 完全未対応')[0];
     expect(top).toMatch(/\| `ema` \| trend \| period=20 \|/);
   });
 
@@ -94,8 +83,9 @@ describe('PR #117e: formatIndicatorMetadataTable', () => {
     expect(table).not.toMatch(/period="14"/);
   });
 
-  it('テーブル全体は概ね 23 指標分の行を含む (= 6 + 14 + 3)', () => {
-    // 厳密な行数 pin は registry 順序変更で fragile になるので、各セクションに最低限の件数があることのみ確認
+  it('テーブル全体は概ね 23 指標分の行を含む (= 20 実装済 + 3 未対応)', () => {
+    // 厳密な行数 pin は registry 順序変更で fragile になるので、実装済セクションに
+    // 主要 indicator が含まれることのみ確認
     const fullySupportedRows = (table.match(/\| `(ema|sma|rsi|atr|macd|bb)` \|/g) ?? []).length;
     expect(fullySupportedRows).toBe(6);
   });
