@@ -32,7 +32,41 @@ from .condition_evaluator import (
     collect_required_ohlcv_features,
     evaluate_condition_group,
 )
-from app.indicators import compute_indicator_series
+from app.indicators import (
+    compute_candlestick_pattern_flags,
+    compute_indicator_series,
+    compute_pinbar_flags,
+)
+
+
+# PR ②-1: pattern.* snapshot key (= SUPPORTED_LENS_FEATURE_MAP の値) と
+# `compute_*_flags` の戻り値 dict キーの対応。
+#
+# Python 実装の責務分離:
+# - `compute_pinbar_flags` は厳密な pinbar (3:0.5 比率) を **bull / bear で分割**
+#   して返す (`pinbar` / `pinbar_bull` / `pinbar_bear` の 3 種)。
+# - `compute_candlestick_pattern_flags` は同じ pinbar_like 式も内部で計算し、
+#   **戻り値に `pinbar` キー (bull/bear 分割なし) を含む**。さらに hammer 系 /
+#   shooting_star / engulfing / doji / thrust 系の 9 系列を返す。
+#
+# 本 runner の DSL pattern lens は **pinbar 系を `compute_pinbar_flags` から
+# 取得** し (= bull/bear を区別したいため)、`compute_candlestick_pattern_flags`
+# 側の `pinbar` キーは **意図的に使わない**。残りの 9 系列は
+# `compute_candlestick_pattern_flags` から取得する。
+_PATTERN_SNAPSHOT_KEYS: dict = {
+    "pattern.pinbar": ("pinbar", "pinbar"),
+    "pattern.pinbar_bull": ("pinbar", "pinbar_bull"),
+    "pattern.pinbar_bear": ("pinbar", "pinbar_bear"),
+    "pattern.hammer": ("candlestick", "hammer"),
+    "pattern.hammer_bull": ("candlestick", "hammer_bull"),
+    "pattern.hammer_bear": ("candlestick", "hammer_bear"),
+    "pattern.shooting_star": ("candlestick", "shooting_star"),
+    "pattern.engulfing_bull": ("candlestick", "engulfing_bull"),
+    "pattern.engulfing_bear": ("candlestick", "engulfing_bear"),
+    "pattern.doji": ("candlestick", "doji"),
+    "pattern.thrust_bull": ("candlestick", "thrust_bull"),
+    "pattern.thrust_bear": ("candlestick", "thrust_bear"),
+}
 
 
 # 本実装のバージョン (DB の engineVersion カラムに記録される)
@@ -236,6 +270,27 @@ class BacktestingPyEngine:
                         self._unsupported_dynamic_indicators.append(snapshot_key)
                         continue
                     self._dynamic_indicator_series[snapshot_key] = values
+
+                # PR ②-1: pattern lens (12 種ローソク足パターン真偽) を pre-compute。
+                # `required_features` 中に `pattern.<patternId>` snapshot key が
+                # 含まれていれば 1 度だけ計算して `self._pattern_flag_series` に詰める。
+                # `_build_feature_snapshot` がバー index で boolean を引いて
+                # snapshot に `pattern.<patternId>` キーで詰める。
+                self._pattern_flag_series: dict = {}
+                pattern_keys_needed = [
+                    k for k in required_features if isinstance(k, str) and k.startswith("pattern.")
+                ]
+                if pattern_keys_needed:
+                    pin_dict = compute_pinbar_flags(ohlcv_df)
+                    cs_dict = compute_candlestick_pattern_flags(ohlcv_df)
+                    for sk in pattern_keys_needed:
+                        if sk not in _PATTERN_SNAPSHOT_KEYS:
+                            continue
+                        source, key = _PATTERN_SNAPSHOT_KEYS[sk]
+                        src_dict = pin_dict if source == "pinbar" else cs_dict
+                        if key in src_dict:
+                            self._pattern_flag_series[sk] = src_dict[key]
+
                 self._entry_bar: Optional[int] = None
 
             def _build_feature_snapshot(self, offset: int = 0) -> dict:
@@ -275,6 +330,13 @@ class BacktestingPyEngine:
                         snapshot[snapshot_key] = values[idx]
                     else:
                         snapshot[snapshot_key] = None
+                # PR ②-1: pattern lens の N バー前値を追加。
+                # 戻り値 `series` は List[bool] (バー数と同じ長さ)。
+                for snapshot_key, series in self._pattern_flag_series.items():
+                    if 0 <= idx < len(series):
+                        snapshot[snapshot_key] = bool(series[idx])
+                    else:
+                        snapshot[snapshot_key] = False
                 # NaN は None に倒す (= condition_evaluator 側で false 判定)
                 for k, v in list(snapshot.items()):
                     if isinstance(v, float) and (v != v):
