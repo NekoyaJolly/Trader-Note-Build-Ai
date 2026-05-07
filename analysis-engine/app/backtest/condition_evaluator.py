@@ -148,14 +148,49 @@ def is_supported_leaf(condition: ScreeningBacktestCondition) -> bool:
 # =================================================================
 
 
-def _compare(left: Union[float, int, str, bool, None], op: str, right: Any) -> bool:
-    """単一比較 leaf の真偽を返す。型不整合 / None / 失敗時は False。"""
+_TOUCH_EPSILON = 1e-6
+
+
+def _compare(
+    left: Union[float, int, str, bool, None],
+    op: str,
+    right: Any,
+    prev_left: Optional[float] = None,
+    prev_right: Optional[float] = None,
+) -> bool:
+    """単一比較 leaf の真偽を返す。型不整合 / None / 失敗時は False。
+
+    PR ①-B (post-Phase 5A): cross_above / cross_below / touch_close / is_true /
+    is_false を追加。TS 側 `src/shared/strategy-evaluator/operators.compareValues`
+    と評価結果が **必ず一致** するよう実装を揃える (= drift 防止)。
+    `touch_wick` はバー range 判定が必要なため呼び出し側 (`_evaluate_leaf`) で扱う。
+    """
+    # is_true / is_false: left を Boolean 評価。null/undefined は false (= 欠損契約)
+    if op == "is_true":
+        if left is None:
+            return False
+        return bool(left)
+    if op == "is_false":
+        if left is None:
+            return False
+        return not bool(left)
+
     if left is None:
         return False
 
-    if op == "==":
+    if op == "==" or op == "=":
+        if right is None:
+            return False
+        # 数値同等は誤差許容 (= TS shared と整合)
+        if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+            try:
+                return abs(float(left) - float(right)) < 0.0001
+            except (TypeError, ValueError):
+                return False
         return left == right
     if op == "!=":
+        if right is None:
+            return False
         return left != right
     if op == "<":
         try:
@@ -195,6 +230,33 @@ def _compare(left: Union[float, int, str, bool, None], op: str, right: Any) -> b
         except TypeError:
             return False
 
+    # PR ①-B: cross_above / cross_below (= 状態変化)
+    if op == "cross_above":
+        if prev_left is None or prev_right is None:
+            return False
+        try:
+            return prev_left < prev_right and float(left) > float(right)
+        except (TypeError, ValueError):
+            return False
+    if op == "cross_below":
+        if prev_left is None or prev_right is None:
+            return False
+        try:
+            return prev_left > prev_right and float(left) < float(right)
+        except (TypeError, ValueError):
+            return False
+
+    # PR ①-B: touch_close (= 値の一致 / 近接のみ、クロスは cross_* に任せる)
+    if op == "touch_close":
+        try:
+            return abs(float(left) - float(right)) <= _TOUCH_EPSILON
+        except (TypeError, ValueError):
+            return False
+
+    # touch_wick は呼び出し側 (_evaluate_leaf) で扱う
+    if op == "touch_wick":
+        return False
+
     return False
 
 
@@ -206,6 +268,7 @@ def _compare(left: Union[float, int, str, bool, None], op: str, right: Any) -> b
 def _evaluate_leaf(
     condition: ScreeningBacktestCondition,
     feature_snapshot: Mapping[str, Optional[float]],
+    prev_feature_snapshot: Optional[Mapping[str, Optional[float]]] = None,
 ) -> bool:
     """単一 leaf を評価する。サポート外 lens / feature は False を返す。
 
@@ -215,11 +278,21 @@ def _evaluate_leaf(
 
     PR #116c: `params` 付き condition は dynamic snapshot key (`lens.feature(stable_params)`)
     経由で snapshot を引く。`compareTarget` 付きは right operand を別 snapshot key から取る。
+
+    PR ①-B (post-Phase 5A): cross_above / cross_below / touch_close / touch_wick /
+    is_true / is_false に対応。`prev_feature_snapshot` 任意引数を追加し、cross 系
+    op で前バー値を取得して `_compare` に渡す。touch_wick は当該バーの high-low
+    レンジに左辺値が入っているかを判定する。
     """
     snapshot_key = _resolve_snapshot_key(condition)
     if snapshot_key is None:
         return False
     left = feature_snapshot.get(snapshot_key)
+
+    # is_true / is_false は left の Boolean 評価のみ、right 不要
+    if condition.op in ("is_true", "is_false"):
+        return _compare(left, condition.op, None)
+
     if left is None:
         return False
     # 数値である NaN は比較不能なので False に倒す
@@ -229,23 +302,60 @@ def _evaluate_leaf(
     except TypeError:
         pass
 
+    # PR ①-B: touch_wick は左辺値が現バーの high-low レンジ内かを判定
+    if condition.op == "touch_wick":
+        try:
+            left_f = float(left)
+        except (TypeError, ValueError):
+            return False
+        high = feature_snapshot.get("high")
+        low = feature_snapshot.get("low")
+        if not isinstance(high, (int, float)) or not isinstance(low, (int, float)):
+            return False
+        return float(low) <= left_f <= float(high)
+
     # PR #116c: compareTarget があれば right operand を別 indicator series から取る
     target = getattr(condition, "compareTarget", None)
+    right_value: Any = None
+    target_key: Optional[str] = None
     if target is not None:
         target_key = _resolve_operand_snapshot_key(target)
         if target_key is None:
             return False
-        right = feature_snapshot.get(target_key)
-        if right is None:
+        right_value = feature_snapshot.get(target_key)
+        if right_value is None:
             return False
         try:
-            if right != right:  # NaN
+            if right_value != right_value:  # NaN
                 return False
         except TypeError:
             pass
-        return _compare(left, condition.op, right)
+    else:
+        right_value = condition.value
 
-    return _compare(left, condition.op, condition.value)
+    # PR ①-B: cross 系は前バー値を取得
+    prev_left: Optional[float] = None
+    prev_right: Optional[float] = None
+    if (
+        prev_feature_snapshot is not None
+        and condition.op in ("cross_above", "cross_below")
+    ):
+        prev_left_raw = prev_feature_snapshot.get(snapshot_key)
+        if isinstance(prev_left_raw, (int, float)) and not (
+            isinstance(prev_left_raw, float) and prev_left_raw != prev_left_raw
+        ):
+            prev_left = float(prev_left_raw)
+        if target_key is not None:
+            prev_right_raw = prev_feature_snapshot.get(target_key)
+            if isinstance(prev_right_raw, (int, float)) and not (
+                isinstance(prev_right_raw, float) and prev_right_raw != prev_right_raw
+            ):
+                prev_right = float(prev_right_raw)
+        elif isinstance(right_value, (int, float)):
+            # 固定値 right は前バーでも同じ
+            prev_right = float(right_value)
+
+    return _compare(left, condition.op, right_value, prev_left, prev_right)
 
 
 # =================================================================
@@ -260,6 +370,7 @@ def _is_group(item: Any) -> bool:
 def evaluate_condition_group(
     group: Optional[ScreeningBacktestConditionGroup],
     feature_snapshot: Mapping[str, Optional[float]],
+    prev_feature_snapshot: Optional[Mapping[str, Optional[float]]] = None,
 ) -> bool:
     """ConditionGroup を再帰的に評価して true/false を返す。
 
@@ -267,6 +378,9 @@ def evaluate_condition_group(
     - `group.conditions` が空 → AND なら True、OR なら False (= 数学的な単位元)
     - 各 leaf は `_evaluate_leaf` で評価、子 group は再帰
     - `logic == 'AND'` なら全 child が True、`'OR'` なら少なくとも 1 つ True
+
+    PR ①-B (post-Phase 5A): `prev_feature_snapshot` 任意引数を追加。cross 系 op
+    で前バー値を取得するため呼び出し側で前バー snapshot を構築して渡す。
     """
     if group is None:
         return True
@@ -280,20 +394,20 @@ def evaluate_condition_group(
     if group.logic == "AND":
         for child in children:
             if _is_group(child):
-                if not evaluate_condition_group(child, feature_snapshot):  # type: ignore[arg-type]
+                if not evaluate_condition_group(child, feature_snapshot, prev_feature_snapshot):  # type: ignore[arg-type]
                     return False
             else:
-                if not _evaluate_leaf(child, feature_snapshot):  # type: ignore[arg-type]
+                if not _evaluate_leaf(child, feature_snapshot, prev_feature_snapshot):  # type: ignore[arg-type]
                     return False
         return True
 
     # OR
     for child in children:
         if _is_group(child):
-            if evaluate_condition_group(child, feature_snapshot):  # type: ignore[arg-type]
+            if evaluate_condition_group(child, feature_snapshot, prev_feature_snapshot):  # type: ignore[arg-type]
                 return True
         else:
-            if _evaluate_leaf(child, feature_snapshot):  # type: ignore[arg-type]
+            if _evaluate_leaf(child, feature_snapshot, prev_feature_snapshot):  # type: ignore[arg-type]
                 return True
     return False
 

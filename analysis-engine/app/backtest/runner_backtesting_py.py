@@ -238,27 +238,38 @@ class BacktestingPyEngine:
                     self._dynamic_indicator_series[snapshot_key] = values
                 self._entry_bar: Optional[int] = None
 
-            def _build_feature_snapshot(self) -> dict:
-                """現バーの ohlcv feature 値辞書を作る。条件評価器に渡す入力。
+            def _build_feature_snapshot(self, offset: int = 0) -> dict:
+                """`offset` バー前の ohlcv feature 値辞書を作る。条件評価器に渡す入力。
+
+                - `offset=0`: 現バー (= `self.data.Close[-1]`)
+                - `offset=1`: 1 バー前 (= cross / Touch 系 op 用の前バー snapshot)
 
                 static feature (open/high/low/close/volume/rsi/atr) に加えて、
                 PR #116c で pre-compute した params 付き indicator の値も
                 snapshot key (`lens.feature(stable_params)`) で詰める。
+
+                PR ①-B (post-Phase 5A): `offset` パラメータを追加。前バーが存在しない
+                場合 (= `len(self.data) <= offset`) は空 dict を返す。
                 """
+                if len(self.data) <= offset:
+                    return {}
+                # backtesting.py の self.data はバー進行に応じてスライスされており、
+                # 現バー = index -1。`offset=N` で N バー前を取りたい場合は -1-N。
+                idx_neg = -1 - offset
                 snapshot = {
-                    "open": float(self.data.Open[-1]),
-                    "high": float(self.data.High[-1]),
-                    "low": float(self.data.Low[-1]),
-                    "close": float(self.data.Close[-1]),
-                    "volume": float(self.data.Volume[-1]),
-                    "atr": float(self._atr[-1]) if self._atr is not None else None,
+                    "open": float(self.data.Open[idx_neg]),
+                    "high": float(self.data.High[idx_neg]),
+                    "low": float(self.data.Low[idx_neg]),
+                    "close": float(self.data.Close[idx_neg]),
+                    "volume": float(self.data.Volume[idx_neg]),
+                    "atr": float(self._atr[idx_neg]) if self._atr is not None else None,
                 }
                 if self._rsi is not None:
-                    snapshot["rsi"] = float(self._rsi[-1])
-                # PR #116c: dynamic indicator (params 付き) の現バー値を追加。
+                    snapshot["rsi"] = float(self._rsi[idx_neg])
+                # PR #116c: dynamic indicator (params 付き) の N バー前値を追加。
                 # `compute_indicator_series` の戻り値 `values` はバー数と同じ長さの
-                # `List[Optional[float]]` (warm-up は None)。現バー index は `len(self.data) - 1`。
-                idx = len(self.data) - 1
+                # `List[Optional[float]]` (warm-up は None)。
+                idx = len(self.data) - 1 - offset
                 for snapshot_key, values in self._dynamic_indicator_series.items():
                     if 0 <= idx < len(values):
                         snapshot[snapshot_key] = values[idx]
@@ -298,9 +309,14 @@ class BacktestingPyEngine:
 
                 # PR #112: trigger_group が指定されていれば DSL conditions を評価。
                 # None なら従来挙動 (= 条件無視で毎バー entry)。
+                # PR ①-B: cross / Touch 系 op のため前バー snapshot も併せて渡す。
                 if self._trigger_group is not None:
-                    snapshot = self._build_feature_snapshot()
-                    if not evaluate_condition_group(self._trigger_group, snapshot):
+                    snapshot = self._build_feature_snapshot(offset=0)
+                    prev_snapshot = self._build_feature_snapshot(offset=1)
+                    prev_arg = prev_snapshot if prev_snapshot else None
+                    if not evaluate_condition_group(
+                        self._trigger_group, snapshot, prev_arg
+                    ):
                         return  # 条件不成立 → entry しない
 
                 entry_price = float(self.data.Close[-1])

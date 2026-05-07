@@ -493,6 +493,11 @@ export function runDslSimulation(
   for (let i = startI; i < bars.length; i++) {
     const ts = bars[i].timestamp;
     const snap = snapshotAt(symbolNorm, ts, table, i);
+    // PR ①-B: cross / Touch 系 op のため前バー snapshot も併せて作る。
+    // 先頭バー (i===0) は前バー無しなので undefined を渡し、評価器側で
+    // 状態遷移系 leaf は false に倒す (= 先頭バーで cross 判定しない)。
+    const prevSnap =
+      i > 0 ? snapshotAt(symbolNorm, bars[i - 1].timestamp, table, i - 1) : undefined;
 
     if (!position && deferredImmediate && i === deferredImmediate.openAtIndex) {
       const e = dsl.entry;
@@ -613,7 +618,12 @@ export function runDslSimulation(
         waitAborted = true;
         continue;
       }
-      const condOk = evaluator.evaluateConditions(wEntry.triggerConditions, snap, paramValues);
+      const condOk = evaluator.evaluateConditions(
+        wEntry.triggerConditions,
+        snap,
+        paramValues,
+        prevSnap,
+      );
       if (condOk && i + 1 < bars.length) {
         const j = i + 1;
         const openPx = bars[j].open;
@@ -664,7 +674,7 @@ export function runDslSimulation(
       if (!('trigger' in e)) {
         break;
       }
-      const entryOk = evaluator.evaluateConditions(e.trigger, snap, paramValues);
+      const entryOk = evaluator.evaluateConditions(e.trigger, snap, paramValues, prevSnap);
       if (entryOk) {
         if (immediateFill === 'next_bar_open' && i + 1 < bars.length) {
           deferredImmediate = { openAtIndex: i + 1, isLong: e.direction === 'long' };

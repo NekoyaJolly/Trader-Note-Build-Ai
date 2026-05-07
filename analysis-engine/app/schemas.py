@@ -206,7 +206,23 @@ class ScreeningBacktestCondition(BaseModel):
 
     lensName: str
     featureKey: str
-    op: Literal["<", "<=", ">", ">=", "==", "!=", "between", "in"]
+    op: Literal[
+        "<",
+        "<=",
+        ">",
+        ">=",
+        "==",
+        "!=",
+        "between",
+        "in",
+        # PR ①-B (post-Phase 5A): Side-A 戦略表現力に揃える
+        "cross_above",
+        "cross_below",
+        "touch_close",
+        "touch_wick",
+        "is_true",
+        "is_false",
+    ]
     value: Optional[Any] = None
     params: Optional[Dict[str, float]] = None
     compareTarget: Optional[ScreeningBacktestIndicatorOperand] = None

@@ -120,7 +120,23 @@ const ScreeningBacktestConditionSchema = z
   .object({
     lensName: z.string(),
     featureKey: z.string(),
-    op: z.enum(['<', '<=', '>', '>=', '==', '!=', 'between', 'in']),
+    op: z.enum([
+      '<',
+      '<=',
+      '>',
+      '>=',
+      '==',
+      '!=',
+      'between',
+      'in',
+      // PR ①-B (post-Phase 5A): Side-A 戦略表現力に揃える
+      'cross_above',
+      'cross_below',
+      'touch_close',
+      'touch_wick',
+      'is_true',
+      'is_false',
+    ]),
     value: z
       .union([
         z.number(),

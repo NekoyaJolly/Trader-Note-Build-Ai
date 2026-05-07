@@ -86,7 +86,14 @@ export type ConditionOp =
     | '=='
     | '!='
     | 'between'
-    | 'in';
+    | 'in'
+    // PR ①-B (post-Phase 5A): Side-A 戦略表現力に揃える
+    | 'cross_above'
+    | 'cross_below'
+    | 'touch_close'
+    | 'touch_wick'
+    | 'is_true'
+    | 'is_false';
 
 /**
  * 機械判定可能な条件
@@ -335,7 +342,23 @@ export function isEdgeSource(x: JsonValue | undefined): x is EdgeSource {
 export function isConditionOp(x: JsonValue | undefined): x is ConditionOp {
     return (
         typeof x === 'string' &&
-        ['<', '<=', '>', '>=', '==', '!=', 'between', 'in'].includes(x)
+        [
+            '<',
+            '<=',
+            '>',
+            '>=',
+            '==',
+            '!=',
+            'between',
+            'in',
+            // PR ①-B
+            'cross_above',
+            'cross_below',
+            'touch_close',
+            'touch_wick',
+            'is_true',
+            'is_false',
+        ].includes(x)
     );
 }
 

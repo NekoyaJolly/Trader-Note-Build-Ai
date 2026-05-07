@@ -6,8 +6,34 @@
 
 import { z } from 'zod';
 
-/** 比較演算子 */
-export const OpSchema = z.enum(['<', '<=', '>', '>=', '==', '!=', 'between', 'in']);
+/**
+ * 比較演算子。
+ *
+ * post-Phase 5A 拡張 (PR ①-B): Side-A 戦略表現力 (`strategyConditionEvaluator`) と
+ * 揃えるため、状態変化系 (`cross_above` / `cross_below`) と Touch 系
+ * (`touch_close` / `touch_wick`) と boolean 系 (`is_true` / `is_false`) を追加。
+ * 評価本体は `src/shared/strategy-evaluator/operators.ts` の `compareValues` に
+ * 委譲する (= Side-A / Side-B で評価結果が必ず一致する drift 防止)。
+ */
+export const OpSchema = z.enum([
+  '<',
+  '<=',
+  '>',
+  '>=',
+  '==',
+  '!=',
+  'between',
+  'in',
+  // PR ①-B: 状態遷移系 (= 前バー snapshot 必要)
+  'cross_above',
+  'cross_below',
+  // PR ①-B: タッチ系
+  'touch_close',
+  'touch_wick',
+  // PR ①-B: boolean 評価系 (= pattern lens の is_true / is_false に使う)
+  'is_true',
+  'is_false',
+]);
 
 /** パラメーター参照("$p1" のような記法) */
 export const ParamRefSchema = z.string().regex(/^\$[a-z][a-z0-9_]*$/);
@@ -186,6 +212,13 @@ export const ConditionSchema = z
     compareTarget: IndicatorOperandSchema.optional(),
   })
   .superRefine((val, ctx) => {
+    // PR ①-B: is_true / is_false は left を Boolean 評価するだけで value/compareTarget は不要
+    // (例: pattern lens の `pinbar_bull is_true`)。排他性検証もスキップ。
+    if (val.op === 'is_true' || val.op === 'is_false') {
+      // 念のため value/compareTarget が指定されていてもエラーにはしない (= 互換)。
+      // ただし trivial 弾きは数値 op 用なので、is_true/is_false は対象外。
+      return;
+    }
     const hasValue = val.value !== undefined;
     const hasTarget = val.compareTarget !== undefined;
     if (!hasValue && !hasTarget) {
