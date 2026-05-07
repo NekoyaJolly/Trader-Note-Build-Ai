@@ -17,8 +17,11 @@
 import { PATTERN_REGISTRY, type PatternRegistryEntry } from './registry';
 
 function formatExamples(examples: readonly string[]): string {
-  // markdown table 内では改行できないので `<br>` を使う
-  return examples.map((e) => `\`${e}\``).join('<br>');
+  // markdown table 内では改行できないので `<br>` を使う。
+  // 各例文は JSON 側で既に backtick を埋め込んでいる前提なので、
+  // formatter 側では再度 backtick で包まずそのまま結合する
+  // (= 二重 backtick で markdown のインラインコードが壊れるのを防ぐ)。
+  return examples.join('<br>');
 }
 
 function formatRow(entry: PatternRegistryEntry): string {

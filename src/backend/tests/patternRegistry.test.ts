@@ -15,9 +15,10 @@ import {
 import { formatPatternMetadataTable } from '../../shared/patterns/promptTable';
 
 describe('PATTERN_REGISTRY', () => {
-  it('12 entries (= ALL_CANDLE_PATTERN_IDS と同数)', () => {
+  it('PATTERN_REGISTRY と ALL_CANDLE_PATTERN_IDS の件数が一致 (= drift 検出)', () => {
+    // PR ②-2 Copilot review #3: 12 への二重 pin は将来 patterns 数を増減した
+    // 際の更新箇所を増やすので、ALL_CANDLE_PATTERN_IDS 側に寄せる。
     expect(PATTERN_REGISTRY).toHaveLength(ALL_CANDLE_PATTERN_IDS.length);
-    expect(PATTERN_REGISTRY).toHaveLength(12);
   });
 
   it('id の順序が ALL_CANDLE_PATTERN_IDS と一致 (= drift 検出)', () => {

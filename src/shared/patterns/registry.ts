@@ -64,8 +64,12 @@ const PARSED = PatternRegistryFileSchema.parse(
 
 function buildIndexById(
   entries: readonly PatternRegistryEntry[],
-): Map<CandlePatternId, PatternRegistryEntry> {
-  const map = new Map<CandlePatternId, PatternRegistryEntry>();
+): Map<string, PatternRegistryEntry> {
+  // PR ②-2 Copilot review #2: Map のキー型を string にする (= indicator registry
+  // と同じ流儀)。`getPatternRegistryEntry(id: string)` で型アサーション (`as
+  // CandlePatternId`) を不要にするため。CandlePatternId は ALL_CANDLE_PATTERN_IDS
+  // tuple との整合チェック (本ファイル末尾) で別途担保される。
+  const map = new Map<string, PatternRegistryEntry>();
   for (const e of entries) {
     if (map.has(e.id)) {
       throw new Error(`pattern registry: 重複した id="${e.id}" が patternRegistry.json に存在`);
@@ -104,7 +108,7 @@ export const PATTERN_REGISTRY: readonly PatternRegistryEntry[] = Object.freeze([
 
 /** id でメタデータを取得。未登録なら undefined。 */
 export function getPatternRegistryEntry(id: string): PatternRegistryEntry | undefined {
-  return INDEX_BY_ID.get(id as CandlePatternId);
+  return INDEX_BY_ID.get(id);
 }
 
 /** category でフィルタ。 */
