@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, List, Literal, Optional, Protocol, Union
+from typing import TYPE_CHECKING, Dict, List, Literal, Optional, Protocol, Union
 
 import pandas as pd
 
@@ -103,6 +103,18 @@ class BTSpec:
     # 具体実装 (BacktestingPyEngine) は condition_evaluator.evaluate_condition_group に
     # 直接渡して評価する。
     trigger_group: Optional["ScreeningBacktestConditionGroup"] = None
+    # PR ⑤B (MTF): 上位足 timeframe ごとの OHLCV (= timestamp 列を index に持つ
+    # DataFrame)。空 dict / None なら主 timeframe のみで評価 (= 後方互換)。
+    # runner.py が collect_required_timeframes で必要 timeframe を集めて _load_ohlcv
+    # で読んだ結果を詰める。BacktestingPyEngine は init() で alignment 計算 +
+    # 上位足 indicator/pattern pre-compute + forward fill を行い、_build_feature_snapshot
+    # で `<lens>@<tf>.<feature>` キーで snapshot に詰める。
+    upper_timeframe_ohlcv: Optional[Dict[str, pd.DataFrame]] = None
+    # PR ⑤B (MTF): 主 timeframe (canonical 表記、例: "15m")。MTF alignment 計算で
+    # 「主バーの close 時刻」を求めるために必要。runner.py が `req.timeframe` を
+    # canonical 化して詰める。未設定なら BacktestingPyEngine 側で OHLCV index 間隔
+    # から推定する。
+    primary_timeframe: Optional[str] = None
 
 
 @dataclass(frozen=True)

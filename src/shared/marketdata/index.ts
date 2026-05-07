@@ -5,3 +5,4 @@
 export type { OhlcvBar, OhlcvFetchRequest, OhlcvSource } from './OhlcvSource';
 export { fetchMultiTimeframeBars } from './OhlcvSource';
 export { HttpOhlcvSource, defaultHttpOhlcvSource } from './HttpOhlcvSource';
+export { buildBarAlignment, forwardFillSeriesToPrimary } from './barAlignment';

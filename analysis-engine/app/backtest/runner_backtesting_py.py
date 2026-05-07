@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -36,6 +36,11 @@ from app.indicators import (
     compute_candlestick_pattern_flags,
     compute_indicator_series,
     compute_pinbar_flags,
+)
+from .mtf_helpers import (
+    build_bar_alignment,
+    forward_fill_to_primary,
+    split_lens_with_timeframe,
 )
 
 
@@ -179,6 +184,10 @@ class BacktestingPyEngine:
         required_dynamic_indicators = list(
             collect_required_dynamic_indicator_keys(trigger_group)
         )
+        # PR ⑤B (MTF): 上位足 timeframe ごとの OHLCV (= runner.py で _load_ohlcv 済)。
+        # init() で alignment 計算 + indicator/pattern pre-compute + forward fill する。
+        upper_tf_ohlcv = spec.upper_timeframe_ohlcv or {}
+        primary_timeframe_for_mtf = spec.primary_timeframe
 
         # SL/TP の swing 計算用 lookback bars (BTStopLossSwingPoint)
         swing_lookback_bars = (
@@ -241,8 +250,46 @@ class BacktestingPyEngine:
                 # 戦略 instance に未対応 snapshot key リストを保持して、上位層から取り出す
                 # 経路の整備は別 PR で対応 (本 PR では observability のみ最低限担保)。
                 self._unsupported_dynamic_indicators: List[str] = []
+
+                # PR ⑤B (MTF): 上位足 OHLCV からの indicator pre-compute + alignment 計算 +
+                # forward fill。alignment は timeframe ごとに 1 回だけ計算してキャッシュ。
+                # PR #130 Copilot review #7: ohlcv_df は self.data.* から組み立てた
+                # DataFrame で index が RangeIndex(0..N) になり alignment 計算で
+                # AttributeError になる。主バー側は backtesting.py が保持する元 DataFrame
+                # の timestamp index (= self.data.index、_load_ohlcv で datetime にしてある)
+                # を使う。
+                upper_tf_dfs: Dict[str, pd.DataFrame] = {}
+                upper_tf_alignments: Dict[str, List[int]] = {}
+                if upper_tf_ohlcv and primary_timeframe_for_mtf:
+                    primary_index = list(self.data.index)
+                    for tf, upper_df in upper_tf_ohlcv.items():
+                        # OHLCV column を小文字に正規化
+                        upper_df_norm = upper_df.copy()
+                        for c in ("open", "high", "low", "close", "volume"):
+                            if c in upper_df_norm.columns:
+                                upper_df_norm[c] = upper_df_norm[c].astype(float)
+                        upper_tf_dfs[tf] = upper_df_norm
+                        try:
+                            upper_tf_alignments[tf] = build_bar_alignment(
+                                primary_index,
+                                list(upper_df_norm.index),
+                                primary_timeframe_for_mtf,
+                                tf,
+                            )
+                        except ValueError as exc:
+                            # 未知 timeframe など。本 timeframe の MTF 計算は丸ごとスキップ
+                            logger.warning(
+                                "PR ⑤B: MTF alignment skipped (tf=%s): %s",
+                                tf,
+                                exc,
+                            )
+
                 for snapshot_key, lens_name, feature_key, params_items in required_dynamic_indicators:
-                    if lens_name != "ohlcv":
+                    # PR ⑤B (MTF): lens_name は `ohlcv` または `ohlcv@<tf>` (= 上位足)
+                    base_lens, lens_tf, _ = split_lens_with_timeframe(
+                        f"{lens_name}.{feature_key}"
+                    )
+                    if base_lens != "ohlcv":
                         # 別 lens は現状未対応 → snapshot に登録せず、leaf 評価で false に倒れる
                         logger.warning(
                             "PR #116c: dynamic indicator skipped (non-ohlcv lens): %s",
@@ -250,17 +297,30 @@ class BacktestingPyEngine:
                         )
                         self._unsupported_dynamic_indicators.append(snapshot_key)
                         continue
+
                     params_dict = dict(params_items)
+                    # PR ⑤B (MTF): timeframe が指定されていて主と異なる場合は上位足経路
+                    use_upper_tf = (
+                        lens_tf is not None
+                        and lens_tf != primary_timeframe_for_mtf
+                    )
+                    target_df = upper_tf_dfs.get(lens_tf) if use_upper_tf else ohlcv_df
+                    if target_df is None:
+                        logger.warning(
+                            "PR ⑤B: MTF dynamic indicator skipped (tf %s OHLCV not loaded): %s",
+                            lens_tf,
+                            snapshot_key,
+                        )
+                        self._unsupported_dynamic_indicators.append(snapshot_key)
+                        continue
                     try:
                         _key, values = compute_indicator_series(
                             indicator_id=feature_key,
                             params=params_dict,
                             field="value",
-                            df=ohlcv_df,
+                            df=target_df,
                         )
                     except (ValueError, KeyError) as exc:
-                        # 未対応 indicator は snapshot 登録せず leaf 評価で false 化、
-                        # 原因究明のため WARN ログを残す。
                         logger.warning(
                             "PR #116c: dynamic indicator skipped (compute_indicator_series failed): %s — %s: %s",
                             snapshot_key,
@@ -269,27 +329,97 @@ class BacktestingPyEngine:
                         )
                         self._unsupported_dynamic_indicators.append(snapshot_key)
                         continue
+                    if use_upper_tf and lens_tf is not None:
+                        # 主バー長に forward fill
+                        alignment = upper_tf_alignments.get(lens_tf)
+                        if alignment is None:
+                            self._unsupported_dynamic_indicators.append(snapshot_key)
+                            continue
+                        values = forward_fill_to_primary(values, alignment, None)
                     self._dynamic_indicator_series[snapshot_key] = values
 
                 # PR ②-1: pattern lens (12 種ローソク足パターン真偽) を pre-compute。
-                # `required_features` 中に `pattern.<patternId>` snapshot key が
-                # 含まれていれば 1 度だけ計算して `self._pattern_flag_series` に詰める。
-                # `_build_feature_snapshot` がバー index で boolean を引いて
-                # snapshot に `pattern.<patternId>` キーで詰める。
+                # PR ⑤B (MTF): `pattern.<patternId>` (= 主 timeframe) と
+                #   `pattern@<tf>.<patternId>` (= 上位足) の両方をサポート。
+                #   主 timeframe は既存通り、上位足は upper_tf_dfs から計算 + forward fill。
                 self._pattern_flag_series: dict = {}
-                pattern_keys_needed = [
-                    k for k in required_features if isinstance(k, str) and k.startswith("pattern.")
-                ]
-                if pattern_keys_needed:
+                primary_pattern_keys: list = []
+                upper_pattern_keys_by_tf: Dict[str, list] = {}
+                for k in required_features:
+                    if not isinstance(k, str) or not k.startswith("pattern"):
+                        continue
+                    base_lens, lens_tf, feature_part = split_lens_with_timeframe(k)
+                    if base_lens != "pattern":
+                        continue
+                    if lens_tf is None or lens_tf == primary_timeframe_for_mtf:
+                        primary_pattern_keys.append(k)
+                    else:
+                        upper_pattern_keys_by_tf.setdefault(lens_tf, []).append(k)
+
+                if primary_pattern_keys:
                     pin_dict = compute_pinbar_flags(ohlcv_df)
                     cs_dict = compute_candlestick_pattern_flags(ohlcv_df)
-                    for sk in pattern_keys_needed:
+                    for sk in primary_pattern_keys:
                         if sk not in _PATTERN_SNAPSHOT_KEYS:
                             continue
                         source, key = _PATTERN_SNAPSHOT_KEYS[sk]
                         src_dict = pin_dict if source == "pinbar" else cs_dict
                         if key in src_dict:
                             self._pattern_flag_series[sk] = src_dict[key]
+
+                # 上位足 pattern: timeframe ごとに 1 度だけ pin/cs を計算 + forward fill
+                for upper_tf, sk_list in upper_pattern_keys_by_tf.items():
+                    upper_df = upper_tf_dfs.get(upper_tf)
+                    alignment = upper_tf_alignments.get(upper_tf)
+                    if upper_df is None or alignment is None:
+                        continue
+                    pin_dict = compute_pinbar_flags(upper_df)
+                    cs_dict = compute_candlestick_pattern_flags(upper_df)
+                    for sk in sk_list:
+                        # sk = `pattern@1h.engulfing_bull` → 主 timeframe key への
+                        #   変換: `pattern.engulfing_bull` で _PATTERN_SNAPSHOT_KEYS を
+                        #   引いて (source, key) を取得
+                        _, _, feat_part = split_lens_with_timeframe(sk)
+                        primary_form_sk = f"pattern.{feat_part}"
+                        if primary_form_sk not in _PATTERN_SNAPSHOT_KEYS:
+                            continue
+                        source, key = _PATTERN_SNAPSHOT_KEYS[primary_form_sk]
+                        src_dict = pin_dict if source == "pinbar" else cs_dict
+                        if key not in src_dict:
+                            continue
+                        # 上位足 boolean 配列を主バー長に forward fill
+                        upper_bools = list(src_dict[key])
+                        filled = forward_fill_to_primary(upper_bools, alignment, False)
+                        self._pattern_flag_series[sk] = filled
+
+                # PR #130 Copilot review #8: 上位足の OHLCV (open/high/low/close/volume)
+                # も `ohlcv@<tf>.<field>` snapshot key で保持する。collect_required_upper_tf_features
+                # で「必要な上位足 static feature」が判定されており、それらを alignment +
+                # forward fill して詰める。これがないと condition.timeframe='1h' の price 系
+                # leaf (例: `ohlcv@1h.close > 1.05`) が snapshot に値なし → 常に false 評価。
+                self._upper_tf_static_features: dict = {}
+                # `required_features` set に含まれる `ohlcv@<tf>.<field>` を抽出
+                upper_tf_static_keys = [
+                    k for k in required_features
+                    if isinstance(k, str)
+                    and k.startswith("ohlcv@")
+                    and "." in k
+                ]
+                for sk in upper_tf_static_keys:
+                    base_lens, lens_tf, field = split_lens_with_timeframe(sk)
+                    if base_lens != "ohlcv" or lens_tf is None:
+                        continue
+                    if field not in ("open", "high", "low", "close", "volume"):
+                        continue
+                    upper_df = upper_tf_dfs.get(lens_tf)
+                    alignment = upper_tf_alignments.get(lens_tf)
+                    if upper_df is None or alignment is None:
+                        continue
+                    if field not in upper_df.columns:
+                        continue
+                    upper_arr = list(upper_df[field].astype(float).values)
+                    filled = forward_fill_to_primary(upper_arr, alignment, None)
+                    self._upper_tf_static_features[sk] = filled
 
                 self._entry_bar: Optional[int] = None
 
@@ -337,6 +467,13 @@ class BacktestingPyEngine:
                         snapshot[snapshot_key] = bool(series[idx])
                     else:
                         snapshot[snapshot_key] = False
+                # PR #130 Copilot review #8: 上位足の static feature
+                # (`ohlcv@<tf>.open/high/low/close/volume`) も詰める。
+                for snapshot_key, series in self._upper_tf_static_features.items():
+                    if 0 <= idx < len(series):
+                        snapshot[snapshot_key] = series[idx]
+                    else:
+                        snapshot[snapshot_key] = None
                 # NaN は None に倒す (= condition_evaluator 側で false 判定)
                 for k, v in list(snapshot.items()):
                     if isinstance(v, float) and (v != v):

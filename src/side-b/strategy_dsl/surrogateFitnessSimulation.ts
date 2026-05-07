@@ -173,11 +173,14 @@ function buildFeatureTable(
   // で、`indicatorSeriesCacheOffset` が「現在 bars が cache のどの位置から始まるか」
   // を表す。bar i の値は cached[i + offset] で取得する (= slice によるコピーなし)。
   // bars 範囲外 (offset + i が cached の範囲外) は NaN に倒し、leaf 評価で false。
-  if (indicatorNeeds.length > 0) {
+  // PR #130 Copilot review #5/#6: indicatorNeeds は主 timeframe の動的 indicator
+  // のみを集めるが、上位足の price 系 / pattern@<tf> 系列も snapshot に積む必要が
+  // ある。これらは indicatorSeriesCache の **全 key を loop** して取り出す形に
+  // 変更する。snapshotAt は必要な lens key のみ読み出すので余分 key の存在は
+  // 評価結果に影響しない (= 数値変換コストのみ増える)。
+  if (indicatorSeriesCache && indicatorSeriesCache.size > 0) {
     const series = new Map<string, number[]>();
-    for (const need of indicatorNeeds) {
-      const cached = indicatorSeriesCache?.get(need.snapshotKey);
-      if (!cached) continue;
+    for (const [key, cached] of indicatorSeriesCache) {
       const values = new Array<number>(bars.length);
       for (let i = 0; i < bars.length; i++) {
         const sourceIdx = i + indicatorSeriesCacheOffset;
@@ -188,10 +191,13 @@ function buildFeatureTable(
         const v = cached[sourceIdx];
         values[i] = v === null || v === undefined ? Number.NaN : v;
       }
-      series.set(need.snapshotKey, values);
+      series.set(key, values);
     }
     table.indicatorSeries = series;
   }
+  // 引数 indicatorNeeds は collect 段階での観測情報として残すが、buildFeatureTable
+  // 自体ではもう使わなくなった (= cache 全 key 経路で十分)。
+  void indicatorNeeds;
   // PR ②-1 + PR ④F: pattern lens features も同じく世代スコープ全期間配列 +
   // offset (= patternFlagsCacheOffset) で参照する。範囲外は false padding。
   if (patternNeeded && patternFlagsCache) {
@@ -219,39 +225,53 @@ function snapshotAt(
   ts: Date,
   table: BarFeatureTable,
   i: number,
+  primaryTimeframe?: string,
 ): LensFeatureSnapshot {
   const features = new Map<string, LensFeature>();
-  const f: Record<string, number | string | boolean> = {
+  // PR ⑤B: lens 別の features バケットを作る (= 主 timeframe `ohlcv` + 上位足
+  // `ohlcv@1h` 等を別 lens エントリとして詰める)。`pattern@1h` も同様。
+  const lensBuckets = new Map<string, Record<string, number | string | boolean>>();
+  const ohlcvBucket: Record<string, number | string | boolean> = {
     open: table.open[i],
     high: table.high[i],
     low: table.low[i],
     close: table.close[i],
     volume: table.volume[i],
   };
-  if (table.rsi && !Number.isNaN(table.rsi[i])) f.rsi = table.rsi[i]!;
-  if (table.atr && !Number.isNaN(table.atr[i])) f.atr = table.atr[i]!;
-  // PR #116b: 新 indicator series を snapshot.features に snapshot key 形式で詰める。
-  // snapshotKey は `${lens}.${feature}(stable_params)` だが、snapshot.features の key は
-  // lens prefix を取り除いた `feature(stable_params)` 形式 (lens 自体は features Map の key)。
+  if (table.rsi && !Number.isNaN(table.rsi[i])) ohlcvBucket.rsi = table.rsi[i]!;
+  if (table.atr && !Number.isNaN(table.atr[i])) ohlcvBucket.atr = table.atr[i]!;
+  lensBuckets.set('ohlcv', ohlcvBucket);
+
+  // PR ⑤B: indicator series の snapshot key を lens 部分と feature 部分に分割。
+  //   - `ohlcv.ema(period=20)` → lens=`ohlcv`、feature=`ema(period=20)`
+  //   - `ohlcv@1h.ema(period=20)` → lens=`ohlcv@1h`、feature=`ema(period=20)`
+  //   - `pattern@1h.engulfing_bull` → lens=`pattern@1h`、feature=`engulfing_bull`
+  // 区切りは **最初に出てくる '.'** (= lens 部分は @ を含めて 1 トークン)。
   if (table.indicatorSeries) {
     for (const [snapshotKey, series] of table.indicatorSeries) {
       const v = series[i];
-      if (typeof v === 'number' && !Number.isNaN(v)) {
-        // snapshotKey の lens prefix (`ohlcv.`) を取り除いて feature key 部分のみ使う
-        const featureKey = snapshotKey.startsWith('ohlcv.')
-          ? snapshotKey.slice('ohlcv.'.length)
-          : snapshotKey;
-        f[featureKey] = v;
+      if (typeof v !== 'number' || Number.isNaN(v)) continue;
+      const dotIdx = snapshotKey.indexOf('.');
+      if (dotIdx < 0) continue;
+      const lensName = snapshotKey.slice(0, dotIdx);
+      const featureKey = snapshotKey.slice(dotIdx + 1);
+      let bucket = lensBuckets.get(lensName);
+      if (!bucket) {
+        bucket = {};
+        lensBuckets.set(lensName, bucket);
       }
+      bucket[featureKey] = v;
     }
   }
 
-  features.set('ohlcv', {
-    lensName: 'ohlcv',
-    lensVersion: '1.0.0',
-    features: f,
-    computedAt: ts,
-  });
+  for (const [lensName, bucket] of lensBuckets) {
+    features.set(lensName, {
+      lensName,
+      lensVersion: '1.0.0',
+      features: bucket,
+      computedAt: ts,
+    });
+  }
 
   // PR ②-1: pattern lens features (= 12 種ローソク足パターン真偽) を詰める。
   // patternFlags が未設定 (= DSL が pattern lens を参照しない) なら lens 自体を
@@ -276,6 +296,7 @@ function snapshotAt(
     symbol,
     features,
     totalComputeDurationMs: 0,
+    primaryTimeframe,
   };
 }
 
@@ -607,7 +628,7 @@ export function runDslSimulation(
   let prevSnap: LensFeatureSnapshot | undefined = undefined;
   for (let i = startI; i < bars.length; i++) {
     const ts = bars[i].timestamp;
-    const snap = snapshotAt(symbolNorm, ts, table, i);
+    const snap = snapshotAt(symbolNorm, ts, table, i, dsl.timeframe);
 
     if (!position && deferredImmediate && i === deferredImmediate.openAtIndex) {
       const e = dsl.entry;

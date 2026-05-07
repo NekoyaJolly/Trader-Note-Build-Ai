@@ -105,6 +105,8 @@ const ScreeningBacktestIndicatorOperandSchema = z.object({
   lensName: z.string(),
   featureKey: z.string(),
   params: z.record(z.string(), z.number().finite()).optional(),
+  /** PR ⑤B (MTF): 上位足を指定する場合の canonical timeframe (例: "1h")。 */
+  timeframe: z.string().optional(),
 });
 
 /**
@@ -150,6 +152,8 @@ const ScreeningBacktestConditionSchema = z
     params: z.record(z.string(), z.number().finite()).optional(),
     /** PR #116c: 別 indicator series との比較 (例: close > ema(20)) */
     compareTarget: ScreeningBacktestIndicatorOperandSchema.optional(),
+    /** PR ⑤B (MTF): 上位足を指定する場合の canonical timeframe (例: "1h")。主と一致するなら未指定で OK */
+    timeframe: z.string().optional(),
   })
   .superRefine((val, ctx) => {
     // PR ①-B: is_true / is_false は左辺の Boolean 評価のみで RHS 不要 (= DSL ConditionSchema と同じ規則)。

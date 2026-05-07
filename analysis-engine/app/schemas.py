@@ -178,6 +178,8 @@ class ScreeningBacktestIndicatorOperand(BaseModel):
     lensName: str
     featureKey: str
     params: Optional[Dict[str, float]] = None
+    # PR ⑤B (MTF): 上位足を指定する場合の canonical timeframe (例: "1h")。
+    timeframe: Optional[str] = None
 
     @field_validator("params")
     @classmethod
@@ -226,6 +228,10 @@ class ScreeningBacktestCondition(BaseModel):
     value: Optional[Any] = None
     params: Optional[Dict[str, float]] = None
     compareTarget: Optional[ScreeningBacktestIndicatorOperand] = None
+    # PR ⑤B (MTF): 上位足を指定する場合の canonical timeframe (例: "1h")。
+    # 未指定 / 主 timeframe と一致 → 主 timeframe で評価 (= 後方互換)。
+    # 主 timeframe より長い時間足のみ許容、短い (下位足) は collect 側で弾かれる前提。
+    timeframe: Optional[str] = None
 
     @field_validator("params")
     @classmethod
