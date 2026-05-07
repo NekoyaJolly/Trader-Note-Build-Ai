@@ -1,0 +1,136 @@
+{
+  "$comment": "PR ②-2 canonical pattern registry. 12 ローソク足パターンの単一情報源。registry.ts が Zod parse + typed export。Side-B mutation/crossover prompt に LLM へ「pattern 戦略を組む語彙」を渡すために使う。判定式は src/shared/patterns/index.ts (TS 真実) + analysis-engine/app/indicators.py (Python 真実、本格 BT)。",
+  "version": 1,
+  "patterns": [
+    {
+      "id": "pinbar",
+      "displayName": "ピンバー (両方向)",
+      "category": "reversal",
+      "shape": "実体に対して片側のヒゲが長い (>=3倍)、反対側のヒゲは短い (<=0.5倍) ローソク。bull/bear どちらの形でも真。",
+      "tradeContext": "値動きが拒絶されたサイン。サポート / レジスタンスでの反発・反転の初期シグナル。トレンドの末端でよく見られる。",
+      "usageExamples": [
+        "押し目買い候補で `pattern.pinbar is_true` (= 反発確認の追加フィルタ)",
+        "ボラ拡大 + pinbar で逆張りの条件として使う"
+      ]
+    },
+    {
+      "id": "pinbar_bull",
+      "displayName": "ピンバー (強気)",
+      "category": "reversal",
+      "shape": "下ヒゲが実体の 3 倍以上、上ヒゲが 0.5 倍以下。下方向の値動きが拒絶された形。",
+      "tradeContext": "下値の買い支え。ロング (= 反発買い) のエントリーシグナル。サポート付近で出ると信頼度が高い。",
+      "usageExamples": [
+        "ロング戦略で entry trigger に `pattern.pinbar_bull is_true`",
+        "RSI<30 と AND 条件にしてオーバーソールド反発を捉える"
+      ]
+    },
+    {
+      "id": "pinbar_bear",
+      "displayName": "ピンバー (弱気)",
+      "category": "reversal",
+      "shape": "上ヒゲが実体の 3 倍以上、下ヒゲが 0.5 倍以下。上方向の値動きが拒絶された形。",
+      "tradeContext": "高値の売り圧力。ショート (= 反転売り) のエントリーシグナル。レジスタンス付近で出ると信頼度が高い。",
+      "usageExamples": [
+        "ショート戦略で entry trigger に `pattern.pinbar_bear is_true`",
+        "RSI>70 と AND 条件にしてオーバーボウト反転を捉える"
+      ]
+    },
+    {
+      "id": "hammer",
+      "displayName": "ハンマー (両方向)",
+      "category": "reversal",
+      "shape": "下ヒゲが実体の 2 倍以上、上ヒゲが 0.5 倍以下。pinbar より緩い判定 (2 倍 vs 3 倍)。bull/bear どちらでも真。",
+      "tradeContext": "下方向への値動きが弱まったサイン。pinbar より頻出だが信頼度はやや劣る。下落トレンドの底値で見ると反発の予兆。",
+      "usageExamples": [
+        "下落トレンド + hammer で底値の予兆として使う",
+        "高ボラ環境では pinbar、低ボラ環境では hammer のように使い分け"
+      ]
+    },
+    {
+      "id": "hammer_bull",
+      "displayName": "ハンマー (強気)",
+      "category": "reversal",
+      "shape": "ハンマーの形状で陽線 (close > open)。下ヒゲ長い + 終値が始値より高い。",
+      "tradeContext": "下落からの切り返しが明確。ロング側のエントリーシグナル。",
+      "usageExamples": [
+        "ロング戦略の entry trigger に `pattern.hammer_bull is_true`"
+      ]
+    },
+    {
+      "id": "hammer_bear",
+      "displayName": "ハンマー (弱気)",
+      "category": "reversal",
+      "shape": "ハンマーの形状で陰線 (close < open)。下ヒゲ長いが終値が始値より低い。",
+      "tradeContext": "下方向は拒絶されたが買いも続かなかった迷い相場。逆張りには使いにくい、レンジ判定に近い。",
+      "usageExamples": [
+        "レンジ相場の判定補助 (= 単独で entry trigger には使わない)"
+      ]
+    },
+    {
+      "id": "shooting_star",
+      "displayName": "シューティングスター",
+      "category": "reversal",
+      "shape": "上ヒゲが実体の 2 倍以上、下ヒゲが 0.5 倍以下。hammer の上下反転版。",
+      "tradeContext": "高値圏での売りサイン。ショート側のエントリーシグナル。レジスタンス付近で出ると信頼度が高い。",
+      "usageExamples": [
+        "ショート戦略の entry trigger に `pattern.shooting_star is_true`",
+        "上昇トレンド + shooting_star で天井確認"
+      ]
+    },
+    {
+      "id": "engulfing_bull",
+      "displayName": "包み足 (強気)",
+      "category": "reversal",
+      "shape": "前バーが陰線、現バーが陽線で前バーの実体を完全に包む (open <= prev.close, close >= prev.open)。先頭バーは判定不能 (false)。",
+      "tradeContext": "強気転換の代表的シグナル。前バーの売り圧力を完全に飲み込んだ形で、ロングの強い根拠になる。トレンド転換点で出やすい。",
+      "usageExamples": [
+        "ロング戦略の entry trigger に `pattern.engulfing_bull is_true`",
+        "下落トレンド終盤で出現すると反転買い"
+      ]
+    },
+    {
+      "id": "engulfing_bear",
+      "displayName": "包み足 (弱気)",
+      "category": "reversal",
+      "shape": "前バーが陽線、現バーが陰線で前バーの実体を完全に包む (open >= prev.close, close <= prev.open)。先頭バーは判定不能 (false)。",
+      "tradeContext": "弱気転換の代表的シグナル。前バーの買い圧力を完全に飲み込んだ形で、ショートの強い根拠になる。トレンド転換点で出やすい。",
+      "usageExamples": [
+        "ショート戦略の entry trigger に `pattern.engulfing_bear is_true`",
+        "上昇トレンド終盤で出現すると反転売り"
+      ]
+    },
+    {
+      "id": "doji",
+      "displayName": "ドージ",
+      "category": "indecision",
+      "shape": "実体がレンジに対して 10% 以下 (= 始値 ≈ 終値)。十字線。",
+      "tradeContext": "売り買い拮抗・迷い相場の象徴。**単独でエントリーには使わない**。トレンド継続 / 反転の判断は次バーの動き待ち。フィルタ用途や逆張りの除外条件として使う。",
+      "usageExamples": [
+        "ボラ拡大局面で `pattern.doji is_false` をエントリー条件に AND (= 迷い時はエントリーしない)",
+        "ブレイクアウト戦略で前バー doji の場合のみ trigger 有効化"
+      ]
+    },
+    {
+      "id": "thrust_bull",
+      "displayName": "強気スラスト",
+      "category": "continuation",
+      "shape": "実体がレンジの 70% 以上を占める陽線。ヒゲが短く一方向の強い動き。",
+      "tradeContext": "買いの勢いが強いサイン。トレンド継続のシグナル。ブレイクアウト戦略の trigger によく使う。",
+      "usageExamples": [
+        "ロング戦略の entry trigger に `pattern.thrust_bull is_true`",
+        "上抜けブレイク + thrust_bull で勢いを確認してエントリー"
+      ]
+    },
+    {
+      "id": "thrust_bear",
+      "displayName": "弱気スラスト",
+      "category": "continuation",
+      "shape": "実体がレンジの 70% 以上を占める陰線。ヒゲが短く一方向の強い動き。",
+      "tradeContext": "売りの勢いが強いサイン。下方向トレンド継続のシグナル。ショートのブレイクアウト戦略の trigger に使う。",
+      "usageExamples": [
+        "ショート戦略の entry trigger に `pattern.thrust_bear is_true`",
+        "下抜けブレイク + thrust_bear で勢いを確認してエントリー"
+      ]
+    }
+  ]
+}

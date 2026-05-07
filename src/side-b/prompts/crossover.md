@@ -37,6 +37,17 @@
 
 {{INDICATOR_METADATA_TABLE}}
 
+### ローソク足パターン (PR ②-2 で追加、`lens="pattern"` で参照可能)
+
+両親の戦略が pattern (ローソク足の形状ベース) を使っているなら、**継承して残す** のが基本。新規にも下記 12 種から選んで組み合わせてよい。各 pattern は `is_true` / `is_false` op で評価し、RHS (value/compareTarget) は不要。
+
+{{PATTERN_METADATA_TABLE}}
+
+組み合わせの例 (= 両親の片方が pattern、もう片方が indicator なら混ぜる):
+
+- 親 A: `ohlcv.rsi < 30` + 親 B: `pattern.engulfing_bull is_true` → 子: 両方 AND の反転ロング
+- 親 A の `pattern.shooting_star is_true` を維持しつつ、SL/TP は親 B のリスク管理を採用
+
 ## 指針
 
 - 片方のエントリー条件グループと、もう片方のリスク（SL/TP）設定を組み合わせてよい。

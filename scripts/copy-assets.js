@@ -48,6 +48,16 @@ const COPY_RULES = [
     extensions: ['.json'],
     minCount: 1,
   },
+  // PR ②-2 で導入した共通 pattern registry の JSON canonical。
+  // `src/shared/patterns/registry.ts` が起動時に
+  // `fs.readFileSync(__dirname/data/patternRegistry.json)` で読むため dist 側にも配置必須。
+  // indicator registry と同じ流儀で COPY_RULES に登録 (= dist 欠落で本番 ENOENT 防止)。
+  {
+    sourceDir: path.join(SRC, 'shared', 'patterns', 'data'),
+    targetDir: path.join(DIST, 'shared', 'patterns', 'data'),
+    extensions: ['.json'],
+    minCount: 1,
+  },
 ];
 
 function ensureDir(dir) {

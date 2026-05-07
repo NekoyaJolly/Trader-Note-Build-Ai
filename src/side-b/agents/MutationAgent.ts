@@ -10,6 +10,7 @@ import type { ZodError } from 'zod';
 
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { formatIndicatorMetadataTable } from '../../shared/indicators/promptTable';
+import { formatPatternMetadataTable } from '../../shared/patterns/promptTable';
 import { loadPromptWithGlobal, type PromptMacros } from '../prompts/loader';
 import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
@@ -99,10 +100,15 @@ export class MutationAgent {
    *
    * PR #117e: `{{INDICATOR_METADATA_TABLE}}` macro を registry から動的に注入する。
    * Registry 経路もファイル経路も同じ macros 辞書を渡すため、両方で展開される。
+   *
+   * PR ②-2: `{{PATTERN_METADATA_TABLE}}` macro を pattern registry から注入。
+   * LLM が pattern (= ローソク足パターン 12 種) の意味 / 用法を理解して
+   * pattern ベース戦略を生成できるようにする。
    */
   private async resolveSystemPrompt(): Promise<string> {
     const macros: PromptMacros = {
       INDICATOR_METADATA_TABLE: formatIndicatorMetadataTable(),
+      PATTERN_METADATA_TABLE: formatPatternMetadataTable(),
     };
     try {
       return await promptRegistry.getCompositeActive('mutation', macros);
