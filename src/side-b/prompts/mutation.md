@@ -57,7 +57,7 @@ DSL は以下の 14 op を提供する。**保守的な変異だけでなく、�
 
 - `<` / `<=` / `>` / `>=` / `==` / `!=`: 単純数値比較
 - `between`: 範囲指定 (`value: [min, max]`、両端含む)。例: `rsi between [30, 70]`
-- `in`: 集合判定 (`value: [v1, v2, ...]`)。例: `pivotType in ['standard', 'fibonacci']`
+- `in`: 集合判定 (`value: [v1, v2, ...]`)。**数値配列のみ**。例: `rsi in [25, 28, 30]` (= 過売り近辺の特定値で発火)
 
 ### 状態遷移 op (= 前バーの値も参照、value or compareTarget で右辺指定)
 
@@ -81,8 +81,9 @@ DSL は以下の 14 op を提供する。**保守的な変異だけでなく、�
 
 ### MTF ルール
 
-- **戦略の主時間足** (`StrategyDSL.timeframe`) より **長い時間足のみ** 上位足として指定可能。下位足指定は不正で leaf が常に false になる。
-- timeframe 未指定 (= フィールド省略) → 主時間足扱い (= 後方互換)
+- **戦略の主時間足** (`StrategyDSL.timeframe`) より **長い時間足のみ** 上位足として指定可能。下位足指定は schema で弾かれる。
+- timeframe 未指定 (= フィールド省略) → 主時間足扱い (= 後方互換)。
+- **未知 timeframe** (`'2h'` のような canonical 外) を指定すると **主 timeframe 扱いに silently fallback** されてしまう (= snapshot key 修飾が付かない、payload からも timeframe が落ちる)。意図したMTF 戦略にならないため **必ず canonical 表記を使う** こと。
 - 上位足の値は **そのバーの close が確定してから** 参照可 (= look-ahead bias 防止)。前バーで 1h 足が閉じていなければ参照不可で leaf は false。
 
 ### MTF 戦略例
@@ -147,31 +148,45 @@ DSL は以下の 14 op を提供する。**保守的な変異だけでなく、�
 
 ## wait_for_trigger (= シーケンス戦略)
 
-`entry.type = "wait_for_trigger"` でセットアップ→トリガーの 2 段階エントリーが書ける。`maxWaitBars` 以内に `triggerConditions` が成立すれば建てる。
+`entry.type = "wait_for_trigger"` で、`maxWaitBars` 以内に `triggerConditions` が成立したら次バー始値で建てる。
+
+**schema 制約**:
+- フィールドは `type` / `direction` / `triggerConditions` / `maxWaitBars` / `executionType` (必須、`'market'` or `'limit'`) / `limitPrice` (optional)。**`setup` フィールドは存在しない**。
+- `triggerConditions` は **ohlcv lens のみ**。pattern lens を trigger に直接入れると Zod で弾かれる (`wait_for_trigger の条件に BT 未対応レンズが含まれる` エラー)。
+- 上位足条件 (`Condition.timeframe`) を triggerConditions に含めて MTF 化することは可能。
 
 ```json
-// セットアップ: 4h 上昇トレンド (= 4h close > 4h ema(50))
-// トリガー: 15m で hammer_bull 出現 → 8 バー以内なら建てる
+// 4h 足の上昇トレンド context で、15m 足の close が 4h EMA(50) 上抜けしたら 8 バー以内に建てる
 {
   "type": "wait_for_trigger",
   "direction": "long",
-  "setup": {
-    "logic": "AND",
-    "conditions": [
-      {
-        "lens": "ohlcv", "feature": "close", "op": ">",
-        "compareTarget": { "lens": "ohlcv", "feature": "ema", "params": { "period": 50 }, "timeframe": "4h" },
-        "timeframe": "4h"
-      }
-    ]
-  },
+  "executionType": "market",
   "triggerConditions": {
     "logic": "AND",
     "conditions": [
-      { "lens": "pattern", "feature": "hammer_bull", "op": "is_true" }
+      {
+        "lens": "ohlcv", "feature": "close", "op": "cross_above",
+        "compareTarget": { "lens": "ohlcv", "feature": "ema", "params": { "period": 50 }, "timeframe": "4h" }
+      }
     ]
   },
   "maxWaitBars": 8
+}
+```
+
+pattern を活かしたい場合は **即時 entry** (= `direction` + `trigger` を持つ ImmediateEntry 形式) で書く:
+
+```json
+// 即時 entry: pattern を含む trigger で 1 バーで判定
+{
+  "direction": "long",
+  "trigger": {
+    "logic": "AND",
+    "conditions": [
+      { "lens": "pattern", "feature": "engulfing_bull", "op": "is_true" },
+      { "lens": "ohlcv", "feature": "rsi", "op": "<", "value": 35 }
+    ]
+  }
 }
 ```
 

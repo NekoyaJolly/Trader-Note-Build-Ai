@@ -123,29 +123,32 @@ DSL は以下の 14 op を提供する。**親が単純 op (`<` / `>`) しか使
 
 ## wait_for_trigger (= シーケンス戦略)
 
-両親の片方が「設定」(= ボラ条件 / 上位足トレンド) を持ち、もう片方が「トリガー」(= pattern / cross) を持つなら、子は `wait_for_trigger` で 2 段階に再構築できる。
+両親の片方が「context 条件」(= ボラ / 上位足トレンド)、もう片方が「トリガー条件」(= cross / touch) を持つなら、子は `wait_for_trigger` で **両条件を AND した triggerConditions** に統合し、context が満たされた状態で trigger 発火を `maxWaitBars` 以内に待つ形にできる。
+
+**schema 制約**:
+- フィールドは `type` / `direction` / `triggerConditions` / `maxWaitBars` / `executionType` (必須) / `limitPrice?` のみ。**`setup` フィールドは存在しない**。
+- `triggerConditions` は **ohlcv lens のみ**。pattern lens は wait_for_trigger には入れられない (= Zod で弾かれる)。pattern を使いたい場合は即時 entry (`direction` + `trigger`) を選ぶ。
 
 ```json
-// 親 A: 4h 足上昇トレンド (close > ema(50)@4h) — 即時 entry
-// 親 B: 15m 足 hammer_bull で entry
-// → 子: 親 A をセットアップ条件、親 B を 8 バー以内のトリガーに統合
+// 親 A: 4h 足上昇トレンド (close > ema(50)@4h)
+// 親 B: 15m 足 EMA(7) cross_above EMA(21)
+// → 子: 両条件を AND で triggerConditions に入れて、maxWaitBars 内に発火を待つ
 {
   "type": "wait_for_trigger",
   "direction": "long",
-  "setup": {
+  "executionType": "market",
+  "triggerConditions": {
     "logic": "AND",
     "conditions": [
       {
         "lens": "ohlcv", "feature": "close", "op": ">",
         "compareTarget": { "lens": "ohlcv", "feature": "ema", "params": { "period": 50 }, "timeframe": "4h" },
         "timeframe": "4h"
+      },
+      {
+        "lens": "ohlcv", "feature": "ema", "op": "cross_above", "params": { "period": 7 },
+        "compareTarget": { "lens": "ohlcv", "feature": "ema", "params": { "period": 21 } }
       }
-    ]
-  },
-  "triggerConditions": {
-    "logic": "AND",
-    "conditions": [
-      { "lens": "pattern", "feature": "hammer_bull", "op": "is_true" }
     ]
   },
   "maxWaitBars": 8
