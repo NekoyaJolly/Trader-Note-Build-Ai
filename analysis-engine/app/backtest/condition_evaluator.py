@@ -52,6 +52,22 @@ SUPPORTED_LENS_FEATURE_MAP: dict = {
     # 別系統表現の alias (= 旧 DSL fixture / mutation 出力での書き方)
     ("rsi", "value"): "rsi",
     ("atr", "value"): "atr",
+    # PR ②-1: pattern lens (12 種ローソク足パターン真偽)。
+    # snapshot key は `pattern.<patternId>` (= TS PatternLens features key と
+    # `_build_feature_snapshot` で詰める key を一致させる)。本格 BT は
+    # analysis-engine `compute_candlestick_pattern_flags` を runner 側で呼ぶ。
+    ("pattern", "pinbar"): "pattern.pinbar",
+    ("pattern", "pinbar_bull"): "pattern.pinbar_bull",
+    ("pattern", "pinbar_bear"): "pattern.pinbar_bear",
+    ("pattern", "hammer"): "pattern.hammer",
+    ("pattern", "hammer_bull"): "pattern.hammer_bull",
+    ("pattern", "hammer_bear"): "pattern.hammer_bear",
+    ("pattern", "shooting_star"): "pattern.shooting_star",
+    ("pattern", "engulfing_bull"): "pattern.engulfing_bull",
+    ("pattern", "engulfing_bear"): "pattern.engulfing_bear",
+    ("pattern", "doji"): "pattern.doji",
+    ("pattern", "thrust_bull"): "pattern.thrust_bull",
+    ("pattern", "thrust_bear"): "pattern.thrust_bear",
 }
 
 

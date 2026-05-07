@@ -22,6 +22,7 @@ export { CurrentAnalysisLens } from './CurrentAnalysisLens';
 export { TimeSessionLens } from './TimeSessionLens';
 export { DowTheoryLens } from './DowTheoryLens';
 export { VolatilityRegimeLens } from './VolatilityRegimeLens';
+export { PatternLens } from './PatternLens';
 export type { OHLCVBar, Pivot } from './utils/pivotDetection';
 
 import { defaultLensAggregator } from './LensAggregator';
@@ -29,6 +30,7 @@ import { CurrentAnalysisLens } from './CurrentAnalysisLens';
 import { TimeSessionLens } from './TimeSessionLens';
 import { DowTheoryLens } from './DowTheoryLens';
 import { VolatilityRegimeLens } from './VolatilityRegimeLens';
+import { PatternLens } from './PatternLens';
 
 /**
  * defaultLensAggregator に基本レンズを登録する
@@ -38,6 +40,7 @@ import { VolatilityRegimeLens } from './VolatilityRegimeLens';
  *
  * Phase 1: current_analysis / time_session
  * Phase 3: dow_theory / volatility_regime
+ * PR ②-1: pattern (12 種ローソク足パターン真偽)
  */
 export function registerDefaultLenses(): void {
   const registered = new Set(defaultLensAggregator.getRegisteredLenses());
@@ -52,5 +55,8 @@ export function registerDefaultLenses(): void {
   }
   if (!registered.has('volatility_regime')) {
     defaultLensAggregator.register(new VolatilityRegimeLens());
+  }
+  if (!registered.has('pattern')) {
+    defaultLensAggregator.register(new PatternLens());
   }
 }

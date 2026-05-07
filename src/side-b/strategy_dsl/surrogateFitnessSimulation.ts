@@ -20,8 +20,14 @@ import type { LensFeature, LensFeatureSnapshot } from '../lenses/types';
 import {
   collectDslIndicatorNeeds,
   collectDslOhlcvFeatureNeeds,
+  collectDslPatternNeed,
   type DslIndicatorNeed,
 } from './dslOhlcvFeatureNeeds';
+import {
+  computeAllPatternFlags,
+  ALL_CANDLE_PATTERN_IDS,
+  type CandlePatternId,
+} from '../../shared/patterns';
 import { DSLEvaluator } from './DSLEvaluator';
 import type {
   ExecutionCostSummary,
@@ -62,6 +68,12 @@ interface BarFeatureTable {
    * 由来の値で上書きしないことで後方互換を保つ)。
    */
   indicatorSeries?: Map<string, number[]>;
+  /**
+   * PR ②-1: ローソク足パターン真偽配列。`computeAllPatternFlags` で全バー分を
+   * 1 度に計算しておき、`snapshotAt(i)` で i 番目を引いて pattern lens features
+   * を構築する。DSL が pattern lens を参照しないなら未設定 (= 計算スキップ)。
+   */
+  patternFlags?: Record<CandlePatternId, boolean[]>;
 }
 
 /** シンボルに応じたおおよその 1pip 価格幅（最小版） */
@@ -134,6 +146,7 @@ function buildFeatureTable(
   bars: OhlcvBar[],
   needs: { rsi: boolean; atr: boolean },
   indicatorNeeds: readonly DslIndicatorNeed[] = [],
+  patternNeeded: boolean = false,
 ): BarFeatureTable {
   const open = bars.map((b) => b.open);
   const high = bars.map((b) => b.high);
@@ -164,6 +177,12 @@ function buildFeatureTable(
       }
     }
     table.indicatorSeries = series;
+  }
+  // PR ②-1: pattern lens 参照あれば 12 種のフラグ配列を一括計算
+  if (patternNeeded) {
+    table.patternFlags = computeAllPatternFlags(
+      bars.map((b) => ({ open: b.open, high: b.high, low: b.low, close: b.close })),
+    );
   }
   return table;
 }
@@ -206,6 +225,24 @@ function snapshotAt(
     features: f,
     computedAt: ts,
   });
+
+  // PR ②-1: pattern lens features (= 12 種ローソク足パターン真偽) を詰める。
+  // patternFlags が未設定 (= DSL が pattern lens を参照しない) なら lens 自体を
+  // 登録しない (= DSLEvaluator.lookupOperand で features.get('pattern') が undefined
+  // → leaf は false 評価)。
+  if (table.patternFlags) {
+    const pf: Record<string, boolean> = {};
+    for (const id of ALL_CANDLE_PATTERN_IDS) {
+      const arr = table.patternFlags[id];
+      pf[id] = arr ? Boolean(arr[i]) : false;
+    }
+    features.set('pattern', {
+      lensName: 'pattern',
+      lensVersion: '1.0.0',
+      features: pf,
+      computedAt: ts,
+    });
+  }
 
   return {
     timestamp: ts,
@@ -428,6 +465,7 @@ export function runDslSimulation(
 
   const featureNeeds = collectDslOhlcvFeatureNeeds(dsl);
   const indicatorNeeds = collectDslIndicatorNeeds(dsl);
+  const patternNeeded = collectDslPatternNeed(dsl);
   const needAtrForTransactionCost = (roundTripCostAtrMult ?? 0) > 0;
   // PR #116b Copilot review #1:
   // needWarmup から indicatorNeeds を除外する。短期 indicator (例: ema(5)) でも
@@ -463,6 +501,7 @@ export function runDslSimulation(
       atr: featureNeeds.atr || needAtrForTransactionCost,
     },
     indicatorNeeds,
+    patternNeeded,
   );
   const pipSize = defaultPipSizeForSymbol(dsl.symbol);
   const symbolNorm = dsl.symbol.replace(/\//g, '');

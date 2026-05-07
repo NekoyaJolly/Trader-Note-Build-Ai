@@ -138,3 +138,26 @@ export function collectDslIndicatorNeeds(dsl: StrategyDSL): DslIndicatorNeed[] {
 
   return Array.from(map.values());
 }
+
+/**
+ * PR ②-1: DSL が pattern lens (= 12 種ローソク足パターン) を参照しているか。
+ *
+ * 参照していれば surrogate 側で `computeAllPatternFlags` を 1 回呼んで
+ * 全バー分の boolean 配列を pre-compute する。pattern lens は OHLCV のみで
+ * 完結し計算コストが軽いので、参照判定だけで足りる (= indicator のように
+ * params で series が変わることはない)。
+ */
+export function collectDslPatternNeed(dsl: StrategyDSL): boolean {
+  let needed = false;
+  const onLeaf = (c: Condition) => {
+    if (c.lens === 'pattern') needed = true;
+    if (c.compareTarget && c.compareTarget.lens === 'pattern') needed = true;
+  };
+  const e = dsl.entry;
+  if (isWaitForTriggerEntry(e)) {
+    walkGroup(e.triggerConditions, onLeaf);
+  } else if ('trigger' in e) {
+    walkGroup(e.trigger, onLeaf);
+  }
+  return needed;
+}
