@@ -134,6 +134,12 @@ export const IndicatorOperandSchema = z.object({
   lens: z.string(),
   feature: z.string(),
   params: ConditionParamsSchema.optional(),
+  /**
+   * PR ⑤ (MTF): 上位足を指定する場合の timeframe (canonical 表記、例: `'1h'`)。
+   * 未指定なら戦略の主 timeframe (`StrategyDSL.timeframe`) と同じ扱い (= 後方互換)。
+   * 主 timeframe より下位足の指定は不正 (= surrogate / analysis-engine 側で弾く)。
+   */
+  timeframe: z.string().optional(),
 });
 export type IndicatorOperand = z.infer<typeof IndicatorOperandSchema>;
 
@@ -210,6 +216,12 @@ export const ConditionSchema = z
     value: ConditionValueSchema.optional(),
     params: ConditionParamsSchema.optional(),
     compareTarget: IndicatorOperandSchema.optional(),
+    /**
+     * PR ⑤ (MTF): 本 leaf を上位足で評価する場合の timeframe (canonical、例: `'1h'`)。
+     * 未指定なら主 timeframe (`StrategyDSL.timeframe`) で評価 (= 後方互換)。
+     * 主 timeframe より下位足は不正、未知 timeframe も不正で surrogate 側で弾く。
+     */
+    timeframe: z.string().optional(),
   })
   .superRefine((val, ctx) => {
     // PR ①-B: is_true / is_false は left を Boolean 評価するだけで value/compareTarget は不要
