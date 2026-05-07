@@ -152,6 +152,11 @@ const ScreeningBacktestConditionSchema = z
     compareTarget: ScreeningBacktestIndicatorOperandSchema.optional(),
   })
   .superRefine((val, ctx) => {
+    // PR ①-B: is_true / is_false は左辺の Boolean 評価のみで RHS 不要 (= DSL ConditionSchema と同じ規則)。
+    // value / compareTarget なしでも合法。両方指定もここでは弾かない。
+    if (val.op === 'is_true' || val.op === 'is_false') {
+      return;
+    }
     // PR #118 Copilot review #1: value と compareTarget の排他性を schema 上で強制。
     // どちらも未指定 / 両方指定の不正 payload を schema 段階で弾く (= Python 側で
     // 静かに false 評価されて原因が隠れることを防ぐ)。DSL 側 ConditionSchema と同じ規則。
