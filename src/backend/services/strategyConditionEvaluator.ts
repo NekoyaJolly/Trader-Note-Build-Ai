@@ -9,6 +9,8 @@
 
 import type { StrategyDetail } from './strategyService';
 import { makeIndicatorCacheKey } from './analysisEngineClient';
+// post-Phase 5A: Side-A / Side-B 共通の比較演算ライブラリを使う (drift 防止)。
+import { compareValues as sharedCompareValues } from '../../shared/strategy-evaluator/operators';
 
 // ============================================
 // 型定義
@@ -17,7 +19,11 @@ import { makeIndicatorCacheKey } from './analysisEngineClient';
 /** 論理演算子 */
 export type LogicalOperator = 'AND' | 'OR' | 'NOT' | 'IF_THEN' | 'SEQUENCE';
 
-/** 比較演算子 */
+/**
+ * 比較演算子。Side-A 既存型を維持しつつ、shared 側の `ComparisonOperator` の subset
+ * となるよう揃える (= shared に追加された is_true/is_false/between/in は Side-A の
+ * 比較経路では使わない)。
+ */
 export type ComparisonOperator =
   | '<'
   | '<='
@@ -180,8 +186,16 @@ export function getPriceValue(ctx: EvaluationContext, priceType: string): number
 // ============================================
 
 /**
- * 比較演算を実行
- * 
+ * 比較演算を実行 (post-Phase 5A: shared/strategy-evaluator/operators に委譲)。
+ *
+ * Side-A / Side-B 両方で同じ評価結果になるよう、本関数は shared 側の `compareValues`
+ * を呼び出す薄いアダプタ。
+ *
+ * `touch_wick` は型上は `ComparisonOperator` に含まれるが、shared 側の compareValues
+ * では false を返す (= バーの high-low レンジ判定が必要なため)。実際の判定は
+ * `evaluateCondition` 側で `touch_wick` を早期 return + `bar.low <= left && left <= bar.high`
+ * で行っている。本アダプタは touch_wick が来ても shared の挙動 (= false 返し) に従う。
+ *
  * @param left - 左辺値
  * @param right - 右辺値
  * @param operator - 比較演算子
@@ -194,49 +208,10 @@ function compareValues(
   right: number,
   operator: ComparisonOperator,
   prevLeft?: number,
-  prevRight?: number
+  prevRight?: number,
 ): boolean {
-  // 後方互換: UI/保存形式の別名を正規化
-  const normalized: ComparisonOperator = operator === 'GC'
-    ? 'cross_above'
-    : operator === 'DC'
-      ? 'cross_below'
-      : operator;
-
-  switch (normalized) {
-    case '<': return left < right;
-    case '<=': return left <= right;
-    case '=': return Math.abs(left - right) < 0.0001;
-    case '>=': return left >= right;
-    case '>': return left > right;
-    case 'touch_close': {
-      // 終値タッチ: 値の一致/近接のみ（クロスは cross_* に任せる）
-      const eps = 1e-6;
-      return Math.abs(left - right) <= eps;
-    }
-    case 'Touch':
-    case 'touch': {
-      // Touch: 「近接（許容誤差内）」または「同一足で接触/反転」を許容
-      // ※ 実データは小数点誤差があるため epsilon を持たせる
-      const eps = 1e-6;
-      if (Math.abs(left - right) <= eps) return true;
-      if (prevLeft === undefined || prevRight === undefined) return false;
-      const prevDiff = prevLeft - prevRight;
-      const currDiff = left - right;
-      // 符号が変わった/ゼロに近づいた場合を Touch とみなす
-      return (prevDiff === 0) || (currDiff === 0) || (prevDiff > 0 && currDiff < 0) || (prevDiff < 0 && currDiff > 0);
-    }
-    case 'cross_above':
-      // 前回は下、今回は上
-      if (prevLeft === undefined || prevRight === undefined) return false;
-      return prevLeft < prevRight && left > right;
-    case 'cross_below':
-      // 前回は上、今回は下
-      if (prevLeft === undefined || prevRight === undefined) return false;
-      return prevLeft > prevRight && left < right;
-    default:
-      return false;
-  }
+  // Side-A の op は shared op の subset なので as キャスト相当で渡せる
+  return sharedCompareValues(left, right, operator, prevLeft, prevRight);
 }
 
 /**
