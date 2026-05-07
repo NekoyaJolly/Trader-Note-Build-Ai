@@ -9,7 +9,9 @@
  *
  * 設計:
  * - canonical は **小文字 + 単位接尾** ('1m' / '15m' / '1h' / '4h' / '1d')
- *   に統一する。registry の単一情報源として `TIMEFRAME_REGISTRY` を export
+ *   に統一する。`TIMEFRAME_REGISTRY` (= alias / 秒数 / canonical の対応表) を
+ *   **モジュール内部** で持ち、外部には `normalizeTimeframe` /
+ *   `compareTimeframes` / `timeframeSeconds` 等の関数経由で公開する。
  * - 単位は m (分) / h (時間) / d (日) のみ対応。1 timeframe の絶対秒数を内部
  *   で持ち、上位下位判定はこれを使う
  * - 未知の timeframe (= registry にない) は normalizeTimeframe で null 戻し

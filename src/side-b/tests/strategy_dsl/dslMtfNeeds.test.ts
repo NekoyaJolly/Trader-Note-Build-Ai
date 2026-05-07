@@ -15,10 +15,19 @@ import {
   collectDslIndicatorNeeds,
   collectDslPatternNeeds,
 } from '../../strategy_dsl/dslOhlcvFeatureNeeds';
-import type { StrategyDSL } from '../../strategy_dsl/schema';
+import { StrategyDSLSchema, type Condition, type ConditionGroup, type StrategyDSL } from '../../strategy_dsl/schema';
 
-function makeDsl(timeframe: string, conditions: object[]): StrategyDSL {
-  return {
+/**
+ * PR #129 Copilot review #2-3: テスト用 DSL を `StrategyDSLSchema.parse` で
+ * Zod を通して構築する (= unknown キャストを使わない型安全な経路)。
+ *
+ * conditions は `Condition | ConditionGroup` の union 型で受ける。
+ */
+function makeDsl(
+  timeframe: string,
+  conditions: Array<Condition | ConditionGroup>,
+): StrategyDSL {
+  const raw = {
     id: 'test',
     generation: 0,
     parentIds: [],
@@ -26,14 +35,18 @@ function makeDsl(timeframe: string, conditions: object[]): StrategyDSL {
     symbol: 'EURUSD',
     timeframe,
     entry: {
-      direction: 'long',
-      trigger: { logic: 'AND', conditions: conditions as never[] },
+      direction: 'long' as const,
+      trigger: { logic: 'AND' as const, conditions },
     },
-    stopLoss: { type: 'atr_multiple', value: 1.5 },
-    takeProfit: { type: 'rr_ratio', value: 2 },
+    stopLoss: { type: 'atr_multiple' as const, value: 1.5 },
+    takeProfit: { type: 'rr_ratio' as const, value: 2 },
     parameters: {},
-    metadata: { createdAt: '2026-05-08T00:00:00Z', createdBy: 'mutation' },
-  } as unknown as StrategyDSL;
+    metadata: {
+      createdAt: '2026-05-08T00:00:00Z',
+      createdBy: 'mutation' as const,
+    },
+  };
+  return StrategyDSLSchema.parse(raw);
 }
 
 describe('buildSnapshotKey: PR ⑤ 拡張', () => {

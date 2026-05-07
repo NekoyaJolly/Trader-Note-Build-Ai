@@ -19,7 +19,7 @@
  */
 
 import type { CanonicalTimeframe } from '../../shared/timeframes';
-import { normalizeTimeframe } from '../../shared/timeframes';
+import { normalizeTimeframe, timeframeSeconds } from '../../shared/timeframes';
 import type { ConditionParams } from './schema';
 
 /**
@@ -53,9 +53,11 @@ export function buildSnapshotKey(
  *
  * - `conditionTimeframe` が undefined → 主 timeframe 扱い (= 修飾なし)
  * - `conditionTimeframe` が主と一致 → 修飾なし
- * - `conditionTimeframe` が主と異なる → `@<canonical>` 修飾
+ * - `conditionTimeframe` が主より **上位足** → `@<canonical>` 修飾
+ * - `conditionTimeframe` が主より **下位足** → **例外** (= 設計上不可、collect 段階で
+ *   既に弾かれている前提だが、防御的に本関数でもチェックする)
  *
- * canonical 化に失敗した場合 (= 未知 timeframe) は例外を投げる。
+ * canonical 化に失敗した場合 (= 未知 timeframe) も例外を投げる。
  */
 export function buildSnapshotKeyWithPrimary(
   lens: string,
@@ -78,6 +80,16 @@ export function buildSnapshotKeyWithPrimary(
   if (tf === primary) {
     // 主 timeframe と同じなら接尾なし (後方互換)
     return buildSnapshotKey(lens, feature, params);
+  }
+  // PR #129 Copilot review #1: 下位足は設計上不可 (= 主より細かい時間足を上位足
+  // として扱うのは意味不明)。`collectDslIndicatorNeeds` 側で既に弾いているはずだが、
+  // 直接 `buildSnapshotKeyWithPrimary` を呼ぶ箇所が将来増えても安全になるよう
+  // 本関数でも防御的に例外化する。
+  if (timeframeSeconds(tf) < timeframeSeconds(primary)) {
+    throw new Error(
+      `buildSnapshotKeyWithPrimary: 下位足 ('${conditionTimeframe}') は不正、` +
+        `主 timeframe ('${primaryTimeframe}') と同じか上位足のみ許可`,
+    );
   }
   return buildSnapshotKey(lens, feature, params, tf);
 }
