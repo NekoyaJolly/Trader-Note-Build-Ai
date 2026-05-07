@@ -13,9 +13,14 @@
 // に該当する 20 個全部が candidate。collect 段階では `isPythonSupportedIndicatorId`
 // で判定する。
 import { isPythonSupportedIndicatorId } from '../../shared/indicators/registry';
+import {
+  type CanonicalTimeframe,
+  isHigherTimeframe,
+  normalizeTimeframe,
+} from '../../shared/timeframes';
 import type { Condition, ConditionGroup, ConditionParams } from './schema';
 import type { StrategyDSL } from './schema';
-import { buildSnapshotKey } from './snapshotKey';
+import { buildSnapshotKeyWithPrimary } from './snapshotKey';
 import { isWaitForTriggerEntry } from './types';
 
 /** 前計算が必要な ohlcv 特徴（シミュの buildFeatureTable 用） */
@@ -77,20 +82,30 @@ export function collectDslOhlcvFeatureNeeds(dsl: StrategyDSL): DslOhlcvFeatureNe
 }
 
 /**
- * PR #116b: TS surrogate が新たに対応する indicator (params 付き / compareTarget) の
- * 集計エントリ。`buildBarFeatureTable` が必要な series のみ計算するために使う。
+ * PR #116b + PR ⑤: TS surrogate が事前計算すべき indicator (params 付き /
+ * compareTarget / 上位足) の集計エントリ。`buildBarFeatureTable` / 世代スコープ
+ * cache 取得が必要な series のみ取り扱うために使う。
  */
 export interface DslIndicatorNeed {
-  /** indicator feature 名 (ema, sma, rsi, atr, macd, bb のいずれか) */
+  /** indicator feature 名 (ema, sma, rsi, atr, macd, bb 等) */
   feature: string;
   /** 動的パラメータ。空なら指標のデフォルト値 */
   params: ConditionParams;
   /**
-   * snapshot key。`buildSnapshotKey(lens, feature, params)` の戻り値で、
-   * - params なしの場合: `${lens}.${feature}`              (例: `ohlcv.rsi`)
-   * - params ありの場合: `${lens}.${feature}(stable_params)` (例: `ohlcv.ema(period=20)`)
+   * snapshot key。`buildSnapshotKeyWithPrimary` の戻り値:
+   *   - 主 timeframe + params なし: `ohlcv.rsi`
+   *   - 主 timeframe + params あり: `ohlcv.ema(period=20)`
+   *   - 上位足 + params なし: `ohlcv@1h.rsi`
+   *   - 上位足 + params あり: `ohlcv@1h.ema(period=20)`
    */
   snapshotKey: string;
+  /**
+   * PR ⑤: 評価する canonical timeframe。主 timeframe と一致するなら
+   * `StrategyDSL.timeframe` の canonical 化。上位足なら `'1h'` 等。
+   * 世代スコープ HTTP 取得時に「どの timeframe で series を取得するか」を
+   * 知るために必要。
+   */
+  timeframe: CanonicalTimeframe;
 }
 
 /**
@@ -109,31 +124,62 @@ export interface DslIndicatorNeed {
  */
 export function collectDslIndicatorNeeds(dsl: StrategyDSL): DslIndicatorNeed[] {
   const map = new Map<string, DslIndicatorNeed>();
-  const visit = (lens: string, feature: string, params?: ConditionParams) => {
+  const primaryTf = normalizeTimeframe(dsl.timeframe);
+  if (primaryTf === null) {
+    // 主 timeframe が canonical でないなら collect 対象なし (= 既存戦略は全て
+    // canonical 表記で渡る前提、未知 timeframe は schema 上は string として通すが
+    // surrogate / analysis-engine 側で別途 reject される)。
+    return [];
+  }
+  const visit = (
+    lens: string,
+    feature: string,
+    params: ConditionParams | undefined,
+    conditionTimeframe: string | undefined,
+  ) => {
     if (lens !== 'ohlcv') return;
     if (!isPythonSupportedIndicatorId(feature)) return;
+    // PR ⑤: timeframe 解決。未指定なら主 timeframe、指定ありなら canonical 化。
+    // 主より下位足の指定は不正 → collect しない (= 上流で未対応扱い)。
+    let tf: CanonicalTimeframe = primaryTf;
+    if (conditionTimeframe) {
+      const ct = normalizeTimeframe(conditionTimeframe);
+      if (ct === null) return; // 未知 timeframe は collect しない
+      // 下位足は不正 (= 主 timeframe より細かい時間足を上位足として使うのは設計上不可)
+      const isPrimary = ct === primaryTf;
+      const isHigher = isHigherTimeframe(ct, primaryTf);
+      if (!isPrimary && !isHigher) return;
+      tf = ct;
+    }
     // **既知の例外** (PR #116b Copilot review #2+#3):
-    // params なしの ohlcv.rsi / ohlcv.atr は依然として legacy TS 計算経路
+    // 主 timeframe + params なしの ohlcv.rsi / ohlcv.atr は legacy TS 計算経路
     // (`surrogateFitnessSimulation` 内 `computeRsi` / `computeAtr` で SMA / TR ベース
     // 計算) を使う。HTTP 経由の pandas_ta (Wilder smoothing) と式が違うため、ここで
     // HTTP 取得 series に置き換えると **既存戦略の挙動が変わる**。
     // PR ④F の主旨「TS 計算経路を撤廃して analysis-engine 一本化」に対する **唯一の
     // 例外**。後追い PR で `BarFeatureTable.rsi / atr` 自体を HTTP 経由に置き換える
-    // 際に解消予定。params 付き (例: rsi(period=21)) は本除外の対象外で、HTTP 経由
-    // で取得される。
-    if ((feature === 'rsi' || feature === 'atr') && (!params || Object.keys(params).length === 0)) {
-      return;
-    }
-    const key = buildSnapshotKey(lens, feature, params);
+    // 際に解消予定。**上位足の場合は除外しない** (= 上位足は legacy 経路がそもそも
+    // 無く、HTTP 取得が必要)。params 付きも除外しない。
+    const isPrimaryDefaultRsiOrAtr =
+      tf === primaryTf &&
+      (feature === 'rsi' || feature === 'atr') &&
+      (!params || Object.keys(params).length === 0);
+    if (isPrimaryDefaultRsiOrAtr) return;
+    const key = buildSnapshotKeyWithPrimary(lens, feature, params, tf, dsl.timeframe);
     if (!map.has(key)) {
-      map.set(key, { feature, params: params ?? {}, snapshotKey: key });
+      map.set(key, { feature, params: params ?? {}, snapshotKey: key, timeframe: tf });
     }
   };
 
   const onLeaf = (c: Condition) => {
-    visit(c.lens, c.feature, c.params);
+    visit(c.lens, c.feature, c.params, c.timeframe);
     if (c.compareTarget) {
-      visit(c.compareTarget.lens, c.compareTarget.feature, c.compareTarget.params);
+      visit(
+        c.compareTarget.lens,
+        c.compareTarget.feature,
+        c.compareTarget.params,
+        c.compareTarget.timeframe ?? c.timeframe, // operand 未指定なら親 condition の timeframe を継承
+      );
     }
   };
 
@@ -148,12 +194,50 @@ export function collectDslIndicatorNeeds(dsl: StrategyDSL): DslIndicatorNeed[] {
 }
 
 /**
- * PR ②-1: DSL が pattern lens (= 12 種ローソク足パターン) を参照しているか。
+ * PR ②-1 + PR ⑤ (MTF): DSL が pattern lens を参照する **timeframe 集合** を返す。
  *
- * 参照していれば surrogate 側で `computeAllPatternFlags` を 1 回呼んで
- * 全バー分の boolean 配列を pre-compute する。pattern lens は OHLCV のみで
- * 完結し計算コストが軽いので、参照判定だけで足りる (= indicator のように
- * params で series が変わることはない)。
+ * 戻り値は canonical timeframe の集合。空集合なら pattern 不要。pattern lens は
+ * OHLCV のみで完結し計算コストが軽いので、各 timeframe で 12 種フラグを一括
+ * 計算する (= indicator のように params で variation が発生しない)。
+ *
+ * 主 timeframe (= 戦略の主時間足) と 上位足が両方使われる場合、両方が集合に入る。
+ * 主 timeframe より下位足の pattern 指定は除外。
+ */
+export function collectDslPatternNeeds(dsl: StrategyDSL): Set<CanonicalTimeframe> {
+  const needed = new Set<CanonicalTimeframe>();
+  const primaryTf = normalizeTimeframe(dsl.timeframe);
+  if (primaryTf === null) return needed;
+  const visit = (lens: string, conditionTimeframe: string | undefined) => {
+    if (lens !== 'pattern') return;
+    let tf: CanonicalTimeframe = primaryTf;
+    if (conditionTimeframe) {
+      const ct = normalizeTimeframe(conditionTimeframe);
+      if (ct === null) return;
+      if (ct !== primaryTf && !isHigherTimeframe(ct, primaryTf)) return; // 下位足不可
+      tf = ct;
+    }
+    needed.add(tf);
+  };
+  const onLeaf = (c: Condition) => {
+    visit(c.lens, c.timeframe);
+    if (c.compareTarget) visit(c.compareTarget.lens, c.compareTarget.timeframe ?? c.timeframe);
+  };
+  const e = dsl.entry;
+  if (isWaitForTriggerEntry(e)) {
+    walkGroup(e.triggerConditions, onLeaf);
+  } else if ('trigger' in e) {
+    walkGroup(e.trigger, onLeaf);
+  }
+  return needed;
+}
+
+/**
+ * 後方互換: 旧 `collectDslPatternNeed(dsl): boolean` 呼び出しを維持するため
+ * の薄いラッパー (= 戻り値が「主 timeframe での pattern 利用有無」)。
+ *
+ * MTF 対応版は `collectDslPatternNeeds` を使う。本関数は将来削除予定。
+ *
+ * @deprecated PR ⑤: `collectDslPatternNeeds` を直接使うこと。
  */
 export function collectDslPatternNeed(dsl: StrategyDSL): boolean {
   let needed = false;

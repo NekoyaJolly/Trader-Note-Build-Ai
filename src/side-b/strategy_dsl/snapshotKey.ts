@@ -1,22 +1,25 @@
 /**
- * Indicator series の snapshot key 正規化 (PR #116a)。
+ * Indicator series の snapshot key 正規化 (PR #116a, PR ⑤ で MTF 拡張)。
  *
  * DSL の Condition / IndicatorOperand を評価する際、indicator series を
  * 一意に特定するためのキー文字列を構築する。
  *
  * フォーマット:
- *   - params なし: `${lens}.${feature}`              (例: `ohlcv.rsi`)
- *   - params あり: `${lens}.${feature}(${stable})`  (例: `ohlcv.ema(period=20)`)
+ *   - 主 timeframe + params なし: `${lens}.${feature}`              (例: `ohlcv.rsi`)
+ *   - 主 timeframe + params あり: `${lens}.${feature}(${stable})`  (例: `ohlcv.ema(period=20)`)
+ *   - **上位足 + params なし**:    `${lens}@${tf}.${feature}`         (例: `ohlcv@1h.rsi`)
+ *   - **上位足 + params あり**:    `${lens}@${tf}.${feature}(${stable})` (例: `ohlcv@1h.ema(period=20)`)
+ *
+ * 主 timeframe (= `StrategyDSL.timeframe`) と一致する条件は **接尾なし** で従来 key
+ * と完全互換。上位足 (= 戦略の主時間足より長い時間足) のみ `@<tf>` を lens に修飾
+ * する形で区別する。
  *
  * `stable` は params を **キー昇順 + 安定 JSON 化** して文字列化したもの。
  * 同じ params (順序違い) からは必ず同じ key が出るため、cache hit 率を保てる。
- *
- * 評価器側 (PR #116b TS surrogate / PR #116c Python) はこの key で
- * indicator series を取得・cache する。analysis-engine 側の同等関数は
- * `analysis-engine/app/indicators.py:make_cache_key` (既存)、
- * `condition_evaluator.py` 側の正規化キーもこの形式に揃える予定。
  */
 
+import type { CanonicalTimeframe } from '../../shared/timeframes';
+import { normalizeTimeframe, timeframeSeconds } from '../../shared/timeframes';
 import type { ConditionParams } from './schema';
 
 /**
@@ -25,16 +28,70 @@ import type { ConditionParams } from './schema';
  * @param lens   レンズ名 (例: `ohlcv`)
  * @param feature 特徴量名 (例: `rsi`, `ema`, `macd`)
  * @param params 動的パラメータ。undefined / 空オブジェクトは「params なし」扱い
+ * @param timeframe 上位足を指定する場合の canonical timeframe
+ *                  (例: `'1h'`)。`undefined` または主 timeframe と同じ値なら接尾なし
+ *                  (= 後方互換)。**呼び出し側が「主 timeframe と同じか」を判定して
+ *                  渡す責務**を持つ (= ここで判定するには `primaryTimeframe` 引数が
+ *                  必要になり API が膨らむため、判定は `buildSnapshotKeyWithPrimary`
+ *                  に切り出してある)。
  */
 export function buildSnapshotKey(
   lens: string,
   feature: string,
   params?: ConditionParams,
+  timeframe?: CanonicalTimeframe,
 ): string {
+  const lensWithTf = timeframe ? `${lens}@${timeframe}` : lens;
   if (!params || Object.keys(params).length === 0) {
-    return `${lens}.${feature}`;
+    return `${lensWithTf}.${feature}`;
   }
-  return `${lens}.${feature}(${formatStableParams(params)})`;
+  return `${lensWithTf}.${feature}(${formatStableParams(params)})`;
+}
+
+/**
+ * 主 timeframe と比較して上位足の場合のみ `@<tf>` 修飾を付ける snapshot key を構築する。
+ *
+ * - `conditionTimeframe` が undefined → 主 timeframe 扱い (= 修飾なし)
+ * - `conditionTimeframe` が主と一致 → 修飾なし
+ * - `conditionTimeframe` が主より **上位足** → `@<canonical>` 修飾
+ * - `conditionTimeframe` が主より **下位足** → **例外** (= 設計上不可、collect 段階で
+ *   既に弾かれている前提だが、防御的に本関数でもチェックする)
+ *
+ * canonical 化に失敗した場合 (= 未知 timeframe) も例外を投げる。
+ */
+export function buildSnapshotKeyWithPrimary(
+  lens: string,
+  feature: string,
+  params: ConditionParams | undefined,
+  conditionTimeframe: string | undefined,
+  primaryTimeframe: string,
+): string {
+  const primary = normalizeTimeframe(primaryTimeframe);
+  if (primary === null) {
+    throw new Error(`buildSnapshotKeyWithPrimary: 未知の primaryTimeframe '${primaryTimeframe}'`);
+  }
+  if (!conditionTimeframe) {
+    return buildSnapshotKey(lens, feature, params);
+  }
+  const tf = normalizeTimeframe(conditionTimeframe);
+  if (tf === null) {
+    throw new Error(`buildSnapshotKeyWithPrimary: 未知の conditionTimeframe '${conditionTimeframe}'`);
+  }
+  if (tf === primary) {
+    // 主 timeframe と同じなら接尾なし (後方互換)
+    return buildSnapshotKey(lens, feature, params);
+  }
+  // PR #129 Copilot review #1: 下位足は設計上不可 (= 主より細かい時間足を上位足
+  // として扱うのは意味不明)。`collectDslIndicatorNeeds` 側で既に弾いているはずだが、
+  // 直接 `buildSnapshotKeyWithPrimary` を呼ぶ箇所が将来増えても安全になるよう
+  // 本関数でも防御的に例外化する。
+  if (timeframeSeconds(tf) < timeframeSeconds(primary)) {
+    throw new Error(
+      `buildSnapshotKeyWithPrimary: 下位足 ('${conditionTimeframe}') は不正、` +
+        `主 timeframe ('${primaryTimeframe}') と同じか上位足のみ許可`,
+    );
+  }
+  return buildSnapshotKey(lens, feature, params, tf);
 }
 
 /**
