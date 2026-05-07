@@ -15,7 +15,9 @@
 import { randomUUID } from 'crypto';
 
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
-import { getSeedDescriptor } from './EvolutionLoop';
+// PR #122 Copilot review: `EvolutionLoop` ↔ `parentPoolPolicy` の循環依存を避けるため、
+// `getSeedDescriptor` は専用ファイル `seedDescriptor.ts` から直接 import する。
+import { getSeedDescriptor } from './seedDescriptor';
 import type { StrategyPopulation } from './StrategyPopulation';
 import type { EvolutionBacktestRunRepository } from '../../backend/repositories/evolutionBacktestRunRepository';
 import type { EdgeHypothesis, EdgeStatus } from '../models/edgeHypothesis';
