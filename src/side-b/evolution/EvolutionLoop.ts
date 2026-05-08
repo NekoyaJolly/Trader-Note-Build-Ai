@@ -36,6 +36,7 @@ import { scoreFromValidationSummary } from './evolutionScore';
 import type { StrategyPopulation } from './StrategyPopulation';
 import { runScreeningBacktest as defaultRunScreeningBacktest } from '../../backend/services/analysisEngineClient';
 import { computeDeflatedSharpeRatio } from '../../shared/statistics/deflatedSharpeRatio';
+import { computeWinRateLift } from '../../shared/statistics/winRateLift';
 import { dslToBacktestNotePayload } from '../strategy_dsl/dslToBacktestNotePayload';
 import { defaultParameterValues } from '../strategy_dsl/dslParameterUtils';
 import { VALIDATION_THRESHOLDS } from '../config/validationThresholds';
@@ -119,7 +120,7 @@ import {
  */
 export type EvolutionBacktestPersister = Pick<
   EvolutionBacktestRunRepository,
-  'createMany' | 'findRecentFormalBtPassed'
+  'createMany' | 'findRecentFormalBtPassed' | 'findByEvolutionRun'
 >;
 
 /**
@@ -438,6 +439,21 @@ export class EvolutionLoop {
    * 明示注入する経路を使う。
    */
   private lastRepairBaselines: ReadonlyMap<string, RepairOutcomeBaseline> = new Map();
+  /**
+   * Filter Evolution M2: 同インスタンスで連続世代を回す場合の trade list 保持先。
+   * 親 A の trade list を子 A+F (= 次世代の crossover/mutation child) と比較して
+   * winRateLift を観測ログに残すために使う。EvolutionBacktestRun テーブルには
+   * `trades` 列が存在しないため、in-memory で保持する設計 (= DB 永続化は別 PR)。
+   *
+   * - キー: dslId (= candidate.dslId、世代をまたいで一意)
+   * - 値: 該当 candidate の formal BT で得られた trade list (= entryTime + outcome のみ抽出)
+   * - 失敗 candidate も含めて保持 (= 子側 filter が失敗 trade を除去できているかの観察用)
+   * - インスタンス削除で消える (= cron/smoke 1 回ごとに揮発、設計通り)
+   */
+  private tradesByDslId: Map<
+    string,
+    ReadonlyArray<{ entryTime: string; outcome: 'win' | 'loss' | 'timeout' }>
+  > = new Map();
 
   constructor(private readonly deps: EvolutionLoopDeps) {
     this.runFormalBacktest = deps.runFormalBacktest ?? defaultRunScreeningBacktest;
@@ -765,6 +781,52 @@ export class EvolutionLoop {
         errors.push(
           `[info] DSR observation dslId=${c.dslId} ${detail} T=${result.sampleSize} N=${dsrTrialCount}`,
         );
+      }
+    }
+
+    // Filter Evolution M2: winRateLift 観測ログ。各 verified candidate (passed/failed
+    // 問わず) について、第一親 (= parentIds[0]) の trades と比較して winRateLift を
+    // 計算し errors に観測情報として残す。本 PR では Promotion gate には組み込まず観測
+    // のみ。設計書: docs/design/phase_filter_evolution_specification.md
+    //
+    // Gen 1 (= 親が novelty seed の世代) は parent trades が無いため全件 notComputable
+    // で正常。Gen 2+ で multi-generation runner 経由なら親の trades が tradesByDslId
+    // に乗っていて Lift が計算できる。
+    for (const r of verifyResults) {
+      const parentIds = r.dsl.parentIds ?? [];
+      if (parentIds.length === 0) continue; // seed / hypothesis 由来は親なしで観察対象外
+      if (!r.trades || r.trades.length === 0) continue; // analysis-engine 失敗時は計算不能
+      // 第一親 (= primary parent) を base とする (設計書 §2.3)。crossover の場合、
+      // parentIds = [parent_A, parent_B] で parent_A を base、parent_B を filter 素材とする想定。
+      const parentId = parentIds[0];
+      const parentTrades = this.tradesByDslId.get(parentId);
+      if (!parentTrades) {
+        errors.push(
+          `[info] win rate lift dslId=${r.candidate.dslId} parentId=${parentId} ` +
+            `notComputable=parent has no formal BT result in this evolution run`,
+        );
+        continue;
+      }
+      const liftResult = computeWinRateLift({
+        parentTrades,
+        childTrades: r.trades,
+      });
+      const liftDetail = liftResult.notComputable
+        ? `notComputable=${liftResult.notComputable}`
+        : `lift=${liftResult.lift.toFixed(3)} parentWR=${liftResult.parentWinRate.toFixed(3)} ` +
+          `childWR=${liftResult.childWinRate.toFixed(3)} preserveWin=${liftResult.preserveWin.toFixed(3)} ` +
+          `specificity=${liftResult.specificity.toFixed(3)} filterPrecision=${liftResult.filterPrecision.toFixed(3)}`;
+      errors.push(
+        `[info] win rate lift dslId=${r.candidate.dslId} parentId=${parentId} ${liftDetail} ` +
+          `parentT=${liftResult.parentTradeCount} childT=${liftResult.childTradeCount}`,
+      );
+    }
+    // 当世代 verifyResults の trades を tradesByDslId に保存 (= 次世代の親候補として使う)。
+    // passed/failed 問わず保存する (= 失敗 candidate の trade list でも子の filter 効果は
+    // 観察できる、ただし safety guard で実質弾かれる可能性は高い)。
+    for (const r of verifyResults) {
+      if (r.trades) {
+        this.tradesByDslId.set(r.candidate.dslId, r.trades);
       }
     }
 
@@ -1224,6 +1286,11 @@ export class EvolutionLoop {
        * Deflated Sharpe Ratio (DSR) の観測ログ計算に使う。failure 時 / 取得不能時は undefined。
        */
       tradePnls?: readonly number[];
+      /**
+       * Filter Evolution M2: 本格 BT で発生した trade list (entryTime + outcome のみ)。
+       * Win Rate Lift の親子比較に使う。failure 時 / 取得不能時は undefined。
+       */
+      trades?: ReadonlyArray<{ entryTime: string; outcome: 'win' | 'loss' | 'timeout' }>;
     }>
   > {
     const out: Array<{
@@ -1232,6 +1299,7 @@ export class EvolutionLoop {
       engineVersion: string;
       surrogateScore: number;
       tradePnls?: readonly number[];
+      trades?: ReadonlyArray<{ entryTime: string; outcome: 'win' | 'loss' | 'timeout' }>;
     }> = [];
     for (const { candidate: cand, dsl } of candidatesWithDsl) {
       const surrogateScore = scores.get(cand.dslId) ?? 0;
@@ -1317,6 +1385,12 @@ export class EvolutionLoop {
       // PR ⑤E: DSR 観測ログ用に trade pnls を保持。response.trades は Zod 契約で
       // 必須、各 entry に pnl が入っている (= analysisEngine schema)。
       const tradePnls = response.trades.map((t) => t.pnl);
+      // Filter Evolution M2: winRateLift 観測用に entryTime + outcome のみ抽出して保持。
+      // 全 fields を保持すると JSON サイズが膨らむため必要最小限に絞る。
+      const trades = response.trades.map((t) => ({
+        entryTime: t.entryTime,
+        outcome: t.outcome,
+      }));
 
       out.push({
         candidate: {
@@ -1328,6 +1402,7 @@ export class EvolutionLoop {
         engineVersion,
         surrogateScore,
         tradePnls,
+        trades,
       });
     }
     return out;
