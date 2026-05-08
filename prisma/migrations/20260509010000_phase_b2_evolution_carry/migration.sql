@@ -7,7 +7,8 @@
 --     lastRepairBaselines) の復元
 --   - 新規 cron 起動時に regime 単位で最新 carry を 1 件読み出して初期値に使う
 --
--- retention 14 日 (= Phase B-3 で cron job が古い行を TRUNCATE する想定)。
+-- retention 14 日 (= Phase B-3 で cron job が古い行を条件付き DELETE する想定、
+-- 具体的には `EvolutionInstanceCarryRepository.deleteOlderThan(14)` を呼ぶ)。
 CREATE TABLE "EvolutionInstanceCarry" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "evolutionRunId" UUID NOT NULL,

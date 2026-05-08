@@ -36,6 +36,13 @@ beforeEach(() => {
   mockDeleteMany.mockReset();
 });
 
+// PR #140 review #4 / #5: console.warn を spy しているテストが mockRestore() を
+// 呼ばずにファイル内 spy 残留 → 後続テストへ副作用が漏れる懸念があったため、afterEach で
+// 一括 restore する。これで各テストの jest.spyOn(console, 'warn') が確実に元へ戻る。
+afterEach(() => {
+  jest.restoreAllMocks();
+});
+
 const validPayload: EvolutionCarryPayload = {
   tradesByDslId: {
     'dsl-1': [

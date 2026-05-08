@@ -783,7 +783,8 @@ model EvolutionBacktestRun {
 /// サイクルを成立させる。各 cron 起動 (= 新規 evolutionRunId) では regime 単位で
 /// 最新 carry を読み出して in-memory cache の初期値とする。
 ///
-/// retention は 14 日 (= Phase B-3 で別 cron job が古い行を TRUNCATE する想定)。
+/// retention は 14 日 (= Phase B-3 で別 cron job が古い行を条件付き DELETE する想定、
+/// 具体的には `EvolutionInstanceCarryRepository.deleteOlderThan(14)` を呼ぶ)。
 ///
 /// 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.B.2
 model EvolutionInstanceCarry {

@@ -3198,6 +3198,201 @@ describe('EvolutionLoop Phase B-2: carry state load/save', () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 
+  it('PR #140 review #1: regime 切替時に前 regime の cache が残留しない (state 汚染防止)', async () => {
+    const dsl = buildBaseDsl('phase-b2-no-state-pollution');
+    const adapter = new SurrogateFitnessSimulator();
+    jest.spyOn(adapter, 'evaluateFitness').mockResolvedValue({
+      dslId: dsl.id,
+      period: { start: '2024-01-01', end: '2024-12-31' },
+      trainPf: 1.5,
+      validationPf: 1.4,
+      overfitScore: 0.1,
+      train: {
+        summary: {
+          totalTrades: 30, winningTrades: 18, losingTrades: 12, winRate: 0.6,
+          netProfit: 100, netProfitRate: 0.1, maxDrawdown: 30, maxDrawdownRate: 0.03,
+          profitFactor: 1.5, averageWin: 15, averageLoss: -10,
+          riskRewardRatio: 1.5, maxConsecutiveWins: 3, maxConsecutiveLosses: 2,
+        },
+        trades: [],
+      },
+      validation: {
+        summary: {
+          totalTrades: 15, winningTrades: 9, losingTrades: 6, winRate: 0.6,
+          netProfit: 50, netProfitRate: 0.05, maxDrawdown: 15, maxDrawdownRate: 0.015,
+          profitFactor: 1.4, averageWin: 12, averageLoss: -8,
+          riskRewardRatio: 1.5, maxConsecutiveWins: 2, maxConsecutiveLosses: 1,
+        },
+        trades: [],
+      },
+      execution: {
+        executionModel: 'legacy_zero_cost',
+        executionConfigHash: 'legacy-zero-cost',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'legacy_zero_cost', dataSource: 'ctrader',
+          roundTripCostPips: 0, roundTripCostAtrMult: 0, totalCost: 0,
+        },
+      },
+    });
+
+    const mutationAgent = new MutationAgent();
+    jest.spyOn(mutationAgent, 'generateMutants').mockResolvedValue([]);
+    jest.spyOn(mutationAgent, 'generateDiverse').mockResolvedValue([]);
+    const crossoverAgent = new CrossoverAgent();
+    jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
+
+    const population = new StrategyPopulation(undefined);
+    population.add('breakout', dsl);
+    population.add('reversal', { ...dsl, id: 'reversal-dsl', regimeTarget: 'reversal' });
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockResolvedValue(makeFormalBtResponse(1.5, 0.6, 30));
+
+    // 1 回目 (breakout) は carry あり、2 回目 (reversal) は carry なし
+    const breakoutCarry: EvolutionInstanceCarryRecord = {
+      id: 'carry-breakout',
+      evolutionRunId: '00000000-0000-0000-0000-000000000099',
+      regime: 'breakout',
+      generation: 5,
+      payload: {
+        tradesByDslId: {
+          'parent-breakout': [
+            { entryTime: '2024-05-01T00:00:00.000Z', side: 'long', pnl: 100, outcome: 'win' },
+          ],
+        },
+        repairHints: {},
+        repairBaselines: {},
+      },
+      recordedAt: new Date(),
+    };
+
+    const findLatestByRegime: jest.MockedFunction<
+      EvolutionInstanceCarryPersister['findLatestByRegime']
+    > = jest
+      .fn()
+      .mockImplementation(async (regime: string) => {
+        if (regime === 'breakout') return breakoutCarry;
+        return null; // reversal は carry 無し
+      });
+    const create: jest.MockedFunction<EvolutionInstanceCarryPersister['create']> = jest.fn();
+    const deleteOlderThan: jest.MockedFunction<
+      EvolutionInstanceCarryPersister['deleteOlderThan']
+    > = jest.fn();
+
+    const loop = new EvolutionLoop({
+      population,
+      adapter,
+      mutationAgent,
+      crossoverAgent,
+      enforcer: new DiversityEnforcer(),
+      defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
+      runFormalBacktest,
+      evolutionInstanceCarryRepo: { findLatestByRegime, create, deleteOlderThan },
+    });
+
+    // breakout 実行 → carry がロードされる
+    await loop.runOneGeneration('breakout');
+    // reversal 実行 → carry なし、breakout の cache が漏れないことを確認
+    await loop.runOneGeneration('reversal');
+
+    // create は 2 回呼ばれる、reversal の payload に breakout の trades が混入していないこと
+    expect(create).toHaveBeenCalledTimes(2);
+    const reversalSaveArg = create.mock.calls[1][0];
+    expect(reversalSaveArg.regime).toBe('reversal');
+    // 'parent-breakout' (breakout 由来) が reversal の payload に含まれていないこと
+    expect(reversalSaveArg.payload.tradesByDslId).not.toHaveProperty('parent-breakout');
+  });
+
+  it('PR #140 review #2: load 失敗時 (DB 一時障害) は flag を立てず、次世代で再試行する', async () => {
+    const dsl = buildBaseDsl('phase-b2-retry-on-load-fail');
+    const adapter = new SurrogateFitnessSimulator();
+    jest.spyOn(adapter, 'evaluateFitness').mockResolvedValue({
+      dslId: dsl.id,
+      period: { start: '2024-01-01', end: '2024-12-31' },
+      trainPf: 1.5,
+      validationPf: 1.4,
+      overfitScore: 0.1,
+      train: {
+        summary: {
+          totalTrades: 30, winningTrades: 18, losingTrades: 12, winRate: 0.6,
+          netProfit: 100, netProfitRate: 0.1, maxDrawdown: 30, maxDrawdownRate: 0.03,
+          profitFactor: 1.5, averageWin: 15, averageLoss: -10,
+          riskRewardRatio: 1.5, maxConsecutiveWins: 3, maxConsecutiveLosses: 2,
+        },
+        trades: [],
+      },
+      validation: {
+        summary: {
+          totalTrades: 15, winningTrades: 9, losingTrades: 6, winRate: 0.6,
+          netProfit: 50, netProfitRate: 0.05, maxDrawdown: 15, maxDrawdownRate: 0.015,
+          profitFactor: 1.4, averageWin: 12, averageLoss: -8,
+          riskRewardRatio: 1.5, maxConsecutiveWins: 2, maxConsecutiveLosses: 1,
+        },
+        trades: [],
+      },
+      execution: {
+        executionModel: 'legacy_zero_cost',
+        executionConfigHash: 'legacy-zero-cost',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'legacy_zero_cost', dataSource: 'ctrader',
+          roundTripCostPips: 0, roundTripCostAtrMult: 0, totalCost: 0,
+        },
+      },
+    });
+
+    const mutationAgent = new MutationAgent();
+    jest.spyOn(mutationAgent, 'generateMutants').mockResolvedValue([]);
+    jest.spyOn(mutationAgent, 'generateDiverse').mockResolvedValue([]);
+    const crossoverAgent = new CrossoverAgent();
+    jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
+
+    const population = new StrategyPopulation(undefined);
+    population.add('breakout', dsl);
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockResolvedValue(makeFormalBtResponse(1.5, 0.6, 30));
+
+    // 1 回目: load 失敗、2 回目: load 成功
+    const findLatestByRegime: jest.MockedFunction<
+      EvolutionInstanceCarryPersister['findLatestByRegime']
+    > = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('DB connection lost'))
+      .mockResolvedValueOnce(null);
+    const create: jest.MockedFunction<EvolutionInstanceCarryPersister['create']> = jest.fn();
+    const deleteOlderThan: jest.MockedFunction<
+      EvolutionInstanceCarryPersister['deleteOlderThan']
+    > = jest.fn();
+
+    const loop = new EvolutionLoop({
+      population,
+      adapter,
+      mutationAgent,
+      crossoverAgent,
+      enforcer: new DiversityEnforcer(),
+      defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
+      runFormalBacktest,
+      evolutionInstanceCarryRepo: { findLatestByRegime, create, deleteOlderThan },
+    });
+
+    const report1 = await loop.runOneGeneration('breakout');
+    const report2 = await loop.runOneGeneration('breakout');
+
+    // 1 回目で load が失敗 (warning ログ) → flag が立たないため 2 回目で再試行
+    expect(findLatestByRegime).toHaveBeenCalledTimes(2);
+    const warnLog1 = report1.errors.find((e) => e.includes('[warn] B-2 carry load 失敗'));
+    expect(warnLog1).toBeDefined();
+    // 2 回目は成功 (= '既存 carry なし' info ログ)
+    const infoLog2 = report2.errors.find((e) => e.includes('既存 carry なし'));
+    expect(infoLog2).toBeDefined();
+  });
+
   it('同インスタンスで同 regime に対する 2 回目以降は load を再実行しない (in-memory 引き継ぎ)', async () => {
     const dsl = buildBaseDsl('phase-b2-loaded-once');
     const adapter = new SurrogateFitnessSimulator();

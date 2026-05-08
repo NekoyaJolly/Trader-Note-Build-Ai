@@ -536,10 +536,19 @@ export class EvolutionLoop {
     // Phase B-2: 同 regime に対する初回呼び出しでのみ DB から carry を load する。
     //   - 2 回目以降の呼び出し (= 同 instance で multi-gen 経路) は in-memory cache を使う
     //   - load 失敗 / 該当 carry 不在 / Zod 不適合は warning ログ + 空 cache 維持
+    //   - PR #140 review #1: 同 EvolutionLoop instance を全 regime で使い回す運用 (= sideBScheduler)
+    //     では、regime 切替時に前 regime の cache が残留して別 regime の payload に混入する事故が
+    //     起こり得る。`loadCarryStateForRegime` 側で必ず cache を一旦初期化してから carry 上書きする。
+    //   - PR #140 review #2: load 失敗時 (= DB 一時障害等) は flag を立てない設計に変更し、同 instance
+    //     内の 2 世代目以降で再試行余地を残す。
     if (!this.carryLoadedRegimes.has(regime)) {
-      this.carryLoadedRegimes.add(regime);
       const loaded = await this.loadCarryStateForRegime(regime);
       if (loaded !== null) errors.push(loaded);
+      // 「成功」または「carry なし (= DB 接続済、永続化スキップでない通常運転)」の場合のみ
+      // 再試行を抑制する。一時障害 (= warn ログ) のときは flag 立てず、次世代で再 load を試みる。
+      if (loaded === null || !loaded.startsWith('[warn]')) {
+        this.carryLoadedRegimes.add(regime);
+      }
     }
 
     // PR #107: adaptive budget を受領した場合、PR #111 で実 mutation count / crossover /
@@ -1032,8 +1041,20 @@ export class EvolutionLoop {
     // Phase B-2: 当世代の in-memory cache (tradesByDslId / lastRepairHints /
     // lastRepairBaselines) を carry payload として DB に永続化。次回 cron 起動時に
     // `findLatestByRegime(regime)` で復元される。例外は飲んで世代結果には影響させない。
+    //
+    // PR #140 review #3: generation には当世代 verified 候補の最大世代番号を使う
+    // (= debug / 観測軸として正しい値)。verifyResults が空の場合は当 regime population の
+    // 最大値、それも空なら 0。
     if (this.evolutionInstanceCarryRepo) {
-      const saveError = await this.saveCarryStateForRegime(regime);
+      const verifiedGen = verifyResults.reduce(
+        (max, r) => Math.max(max, r.dsl.generation),
+        0,
+      );
+      const populationGen = population
+        .getByRegime(regime)
+        .reduce((max, s) => Math.max(max, s.generation), 0);
+      const recordedGeneration = Math.max(verifiedGen, populationGen);
+      const saveError = await this.saveCarryStateForRegime(regime, recordedGeneration);
       if (saveError !== null) errors.push(saveError);
     }
 
@@ -1550,6 +1571,15 @@ export class EvolutionLoop {
    */
   private async loadCarryStateForRegime(regime: string): Promise<string | null> {
     if (!this.evolutionInstanceCarryRepo) return null;
+
+    // PR #140 review #1: 同 EvolutionLoop instance を全 regime で使い回す運用では、
+    // 前 regime の cache が次 regime に残留すると payload 汚染が起きる。
+    // load 試行の起点で必ず cache をクリアして「regime 単位の独立性」を保証する。
+    // carry が見つかれば即座に上書き、見つからなければ「空 cache で当 regime 開始」になる。
+    this.tradesByDslId = new Map();
+    this.lastRepairHints = new Map();
+    this.lastRepairBaselines = new Map();
+
     try {
       const carry = await this.evolutionInstanceCarryRepo.findLatestByRegime(regime);
       if (!carry) {
@@ -1621,7 +1651,10 @@ export class EvolutionLoop {
    *
    * @returns observation 用 errors[] エントリ、`null` = ログに残す情報なし
    */
-  private async saveCarryStateForRegime(regime: string): Promise<string | null> {
+  private async saveCarryStateForRegime(
+    regime: string,
+    generation: number,
+  ): Promise<string | null> {
     if (!this.evolutionInstanceCarryRepo) return null;
     try {
       // tradesByDslId は EvolutionLoop 内部型 → CarriedTrade に構造的互換 (mutable copy で型整合)
@@ -1670,10 +1703,10 @@ export class EvolutionLoop {
         };
       }
 
-      const generation = this.tradesByDslId.size > 0 ? 1 : 0;
       await this.evolutionInstanceCarryRepo.create({
         evolutionRunId: this.evolutionRunId,
         regime,
+        // PR #140 review #3: 引数で渡された当世代の実 generation 値を使う (= debug 観測用)
         generation,
         payload: {
           tradesByDslId: tradesPayload,
