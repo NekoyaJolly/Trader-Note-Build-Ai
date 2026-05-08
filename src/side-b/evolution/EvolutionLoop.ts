@@ -47,6 +47,14 @@ import {
   evolutionBacktestRunRepository as defaultEvolutionBacktestRepo,
   type EvolutionBacktestRunRepository,
 } from '../../backend/repositories/evolutionBacktestRunRepository';
+// Phase B-2: 既定値は null (= 明示注入なしで副作用ゼロ)。本番 scheduler で
+// `evolutionInstanceCarryRepository` を明示注入する。default repo を直接使うことはしない。
+import type {
+  EvolutionInstanceCarryPersister,
+  CarriedTrade,
+  CarriedRepairHint,
+  CarriedRepairBaseline,
+} from '../../backend/repositories/evolutionInstanceCarryRepository';
 import {
   buildParentPool,
   type EdgeHypothesisLoader,
@@ -178,6 +186,17 @@ export interface EvolutionLoopDeps {
    * OOS 評価は走らない (= 観測ゼロでも runOneGeneration は壊れない)。
    */
   oosBacktestRunner?: OosBacktestRunnerFn;
+  /**
+   * Phase B-2 (2026-05-09): cron 起動を跨いだ in-memory cache の永続化口 (optional)。
+   *   - undefined / null: 永続化を完全 skip (= 既定挙動、テスト互換、cron 跨ぎ復元なし)
+   *   - 値を指定:         各 regime の `runOneGeneration` で carry の load/save を実行
+   *
+   * 本番 scheduler では `evolutionInstanceCarryRepository` (DB 接続) を明示注入する経路を取る。
+   * `oosBacktestRunner` と同じパターン (= 既定は副作用ゼロ、明示注入で機能 ON)。
+   *
+   * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.B.2
+   */
+  evolutionInstanceCarryRepo?: EvolutionInstanceCarryPersister | null;
 }
 
 /**
@@ -425,6 +444,14 @@ export class EvolutionLoop {
   private readonly evolutionRunId: string;
   private readonly edgeHypothesisLoader: EdgeHypothesisLoader | null;
   private readonly oosBacktestRunner: OosBacktestRunnerFn | null;
+  /** Phase B-2: cron 起動を跨いだ in-memory cache の永続化口 (= null で skip)。 */
+  private readonly evolutionInstanceCarryRepo: EvolutionInstanceCarryPersister | null;
+  /**
+   * Phase B-2: regime 単位で「DB carry を既に load 試行済みか」を記録するフラグ。
+   * 同 EvolutionLoop instance 内で同 regime に対して `runOneGeneration` を複数回
+   * 呼ばれても DB load は最初の 1 回だけにする (= 後続は in-memory 引き継ぎ)。
+   */
+  private readonly carryLoadedRegimes: Set<string> = new Set();
   /**
    * PR #100: 同インスタンスで連続世代を回す場合の repairHints 保持先。
    * 1 世代目に生成した RepairHint を、2 世代目の mutation に自動的に渡すために使う。
@@ -475,6 +502,9 @@ export class EvolutionLoop {
         ? null
         : (deps.evolutionBacktestRepo ?? defaultEvolutionBacktestRepo);
     this.evolutionRunId = deps.evolutionRunId ?? randomUUID();
+    // Phase B-2: 既定は null (= cron 跨ぎ復元スキップ)。scheduler 側で本番 repo を明示注入する経路を取る。
+    // この既定値はテスト互換 (= prisma に触らない) と明示性を両立する (= oosBacktestRunner と同じ pattern)。
+    this.evolutionInstanceCarryRepo = deps.evolutionInstanceCarryRepo ?? null;
     // PR #98: edgeHypothesisLoader 同様の挙動 (null 明示で skip、undefined なら既定の edgeLedger)
     this.edgeHypothesisLoader =
       deps.edgeHypothesisLoader === null
@@ -502,6 +532,15 @@ export class EvolutionLoop {
     const errors: string[] = [];
     const { population, adapter, mutationAgent, crossoverAgent, enforcer } = this.deps;
     const period = this.deps.defaultPeriod;
+
+    // Phase B-2: 同 regime に対する初回呼び出しでのみ DB から carry を load する。
+    //   - 2 回目以降の呼び出し (= 同 instance で multi-gen 経路) は in-memory cache を使う
+    //   - load 失敗 / 該当 carry 不在 / Zod 不適合は warning ログ + 空 cache 維持
+    if (!this.carryLoadedRegimes.has(regime)) {
+      this.carryLoadedRegimes.add(regime);
+      const loaded = await this.loadCarryStateForRegime(regime);
+      if (loaded !== null) errors.push(loaded);
+    }
 
     // PR #107: adaptive budget を受領した場合、PR #111 で実 mutation count / crossover /
     // diverse の生成数に反映する。未指定なら従来挙動 (= count 10/5/5) を完全維持。
@@ -988,6 +1027,14 @@ export class EvolutionLoop {
     // 段階 4a.4: 正式 BT 履歴を永続化 (passed/failed 全件、DSL 不在分岐は無いので欠損なし)。
     if (this.evolutionBacktestRepo) {
       await this.persistFormalBtHistory(verifyResults).catch(() => undefined);
+    }
+
+    // Phase B-2: 当世代の in-memory cache (tradesByDslId / lastRepairHints /
+    // lastRepairBaselines) を carry payload として DB に永続化。次回 cron 起動時に
+    // `findLatestByRegime(regime)` で復元される。例外は飲んで世代結果には影響させない。
+    if (this.evolutionInstanceCarryRepo) {
+      const saveError = await this.saveCarryStateForRegime(regime);
+      if (saveError !== null) errors.push(saveError);
     }
 
     await population.save().catch(() => undefined);
@@ -1489,6 +1536,162 @@ export class EvolutionLoop {
    * verifyResults は `{ candidate, dsl, engineVersion, surrogateScore }` を直接持つため、
    * ここでは追加の lookup を行わない (= DSL 不在による行欠損が起こらない)。
    */
+  /**
+   * Phase B-2: regime に対する最新 carry を DB から load し、in-memory cache を初期化する。
+   *
+   * - 該当 carry が存在しない (= 初回 cron 起動 / 別 regime 履歴のみ) なら何もしない
+   * - load 成功時は `tradesByDslId` / `lastRepairHints` / `lastRepairBaselines` を上書き
+   * - 既存 in-memory に値がある場合 (= 同 instance で 2 回目以降の同 regime 呼び出し) は
+   *   `carryLoadedRegimes` フラグで本メソッドが呼ばれない
+   * - 例外は飲んで warning 文字列を返し、世代結果に observation log として残す
+   *
+   * @returns observation 用 errors[] エントリ (= 何もしない / load 成功 / load 失敗のいずれか)、
+   *   `null` = ログに残す情報なし (= repo 未注入)
+   */
+  private async loadCarryStateForRegime(regime: string): Promise<string | null> {
+    if (!this.evolutionInstanceCarryRepo) return null;
+    try {
+      const carry = await this.evolutionInstanceCarryRepo.findLatestByRegime(regime);
+      if (!carry) {
+        return `[info] B-2 carry: regime=${regime} 既存 carry なし (= 初回 cron / 該当 regime 履歴なし)`;
+      }
+      const { tradesByDslId, repairHints, repairBaselines } = carry.payload;
+
+      // tradesByDslId 復元: CarriedTrade は EvolutionLoop の内部 trade 型と structurally 互換
+      this.tradesByDslId = new Map(Object.entries(tradesByDslId));
+
+      // RepairHint / RepairBaseline は payload 形を内部型に合わせて復元。
+      // Zod schema (CarriedRepairHintSchema / CarriedRepairBaselineSchema) が
+      // RepairHint / RepairOutcomeBaseline と structurally 同形になるよう同期されているため、
+      // 構造分解 + 再構築で型整合する (= unknown / any cast を避ける)。
+      const hintsMap = new Map<string, RepairHint>();
+      for (const [dslId, hint] of Object.entries(repairHints)) {
+        hintsMap.set(dslId, {
+          failureReason: hint.failureReason,
+          severity: hint.severity,
+          summary: hint.summary,
+          actions: hint.actions.map((a) => ({
+            target: a.target,
+            instruction: a.instruction,
+            allowedChangeScope: a.allowedChangeScope,
+          })),
+          mutationGuidance: hint.mutationGuidance,
+          shouldUseForRepairMutation: hint.shouldUseForRepairMutation,
+          shouldExcludeFromParentPool: hint.shouldExcludeFromParentPool,
+          warnings: [...hint.warnings],
+        });
+      }
+      this.lastRepairHints = hintsMap;
+
+      const baselinesMap = new Map<string, RepairOutcomeBaseline>();
+      for (const [dslId, baseline] of Object.entries(repairBaselines)) {
+        baselinesMap.set(dslId, {
+          candidateId: baseline.candidateId,
+          dslId: baseline.dslId,
+          failureReason: baseline.failureReason,
+          route: baseline.route,
+          metrics: {
+            pf: baseline.metrics.pf,
+            tradeCount: baseline.metrics.tradeCount,
+            maxDrawdown: baseline.metrics.maxDrawdown,
+            expectancy: baseline.metrics.expectancy,
+          },
+        });
+      }
+      this.lastRepairBaselines = baselinesMap;
+
+      return (
+        `[info] B-2 carry restored: regime=${regime} carryId=${carry.id} ` +
+        `gen=${carry.generation} prevRunId=${carry.evolutionRunId} ` +
+        `trades=${this.tradesByDslId.size} hints=${this.lastRepairHints.size} ` +
+        `baselines=${this.lastRepairBaselines.size}`
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return `[warn] B-2 carry load 失敗: regime=${regime} error=${msg}`;
+    }
+  }
+
+  /**
+   * Phase B-2: 当世代の in-memory cache (tradesByDslId / lastRepairHints /
+   * lastRepairBaselines) を carry payload として DB に永続化。
+   *
+   * - 例外は飲んで warning 文字列を返す (= 世代結果には影響させない)
+   * - payload は Zod schema に従って書き込み (= 復元時に Zod 不適合で読み出し不能にならないため)
+   *
+   * @returns observation 用 errors[] エントリ、`null` = ログに残す情報なし
+   */
+  private async saveCarryStateForRegime(regime: string): Promise<string | null> {
+    if (!this.evolutionInstanceCarryRepo) return null;
+    try {
+      // tradesByDslId は EvolutionLoop 内部型 → CarriedTrade に構造的互換 (mutable copy で型整合)
+      const tradesPayload: Record<string, CarriedTrade[]> = {};
+      for (const [dslId, trades] of this.tradesByDslId.entries()) {
+        tradesPayload[dslId] = trades.map((t) => ({
+          entryTime: t.entryTime,
+          side: t.side,
+          pnl: t.pnl,
+          outcome: t.outcome,
+        }));
+      }
+
+      // RepairHint は repairHintPolicy.ts の interface 通りに展開
+      const hintsPayload: Record<string, CarriedRepairHint> = {};
+      for (const [dslId, hint] of this.lastRepairHints.entries()) {
+        hintsPayload[dslId] = {
+          failureReason: hint.failureReason,
+          severity: hint.severity,
+          summary: hint.summary,
+          actions: hint.actions.map((a) => ({
+            target: a.target,
+            instruction: a.instruction,
+            allowedChangeScope: a.allowedChangeScope,
+          })),
+          mutationGuidance: hint.mutationGuidance,
+          shouldUseForRepairMutation: hint.shouldUseForRepairMutation,
+          shouldExcludeFromParentPool: hint.shouldExcludeFromParentPool,
+          warnings: [...hint.warnings],
+        };
+      }
+
+      const baselinesPayload: Record<string, CarriedRepairBaseline> = {};
+      for (const [dslId, baseline] of this.lastRepairBaselines.entries()) {
+        baselinesPayload[dslId] = {
+          candidateId: baseline.candidateId,
+          dslId: baseline.dslId,
+          failureReason: baseline.failureReason,
+          route: baseline.route,
+          metrics: {
+            pf: baseline.metrics.pf,
+            tradeCount: baseline.metrics.tradeCount,
+            maxDrawdown: baseline.metrics.maxDrawdown,
+            expectancy: baseline.metrics.expectancy,
+          },
+        };
+      }
+
+      const generation = this.tradesByDslId.size > 0 ? 1 : 0;
+      await this.evolutionInstanceCarryRepo.create({
+        evolutionRunId: this.evolutionRunId,
+        regime,
+        generation,
+        payload: {
+          tradesByDslId: tradesPayload,
+          repairHints: hintsPayload,
+          repairBaselines: baselinesPayload,
+        },
+      });
+      return (
+        `[info] B-2 carry saved: regime=${regime} runId=${this.evolutionRunId} ` +
+        `trades=${this.tradesByDslId.size} hints=${this.lastRepairHints.size} ` +
+        `baselines=${this.lastRepairBaselines.size}`
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return `[warn] B-2 carry save 失敗: regime=${regime} error=${msg}`;
+    }
+  }
+
   private async persistFormalBtHistory(
     verifyResults: Array<{
       candidate: EvolutionPromotionCandidate;

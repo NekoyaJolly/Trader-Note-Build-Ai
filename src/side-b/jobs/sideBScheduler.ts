@@ -77,6 +77,7 @@ import {
   runMultiGenerationEvolutionV1,
   type MultiGenerationRunReport,
 } from '../evolution/multiGenerationRunner';
+import { evolutionInstanceCarryRepository } from '../../backend/repositories/evolutionInstanceCarryRepository';
 import { StrategyPopulation } from '../evolution/StrategyPopulation';
 import { SurrogateFitnessSimulator } from '../strategy_dsl/SurrogateFitnessSimulator';
 import {
@@ -989,6 +990,9 @@ export class SideBScheduler {
       enforcer: new DiversityEnforcer(),
       defaultPeriod,
       oosBacktestRunner: defaultOosBacktestRunner,
+      // Phase B-2 (2026-05-09): cron 起動を跨いだ in-memory cache 復元を有効化。
+      // EvolutionLoop は既定 null だが、本番 scheduler では DB 接続済 repo を明示注入する。
+      evolutionInstanceCarryRepo: evolutionInstanceCarryRepository,
     });
 
     // PR #138 Copilot review #4: configOverride 経由で 0 や maxGenerations 超過の値が渡されると
