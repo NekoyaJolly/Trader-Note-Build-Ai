@@ -12,7 +12,9 @@
  * **使い方** (= 本 PR では観測のみ):
  * - DSR > 0 (= z > 0): N 試行を補正しても期待 max Sharpe を上回る (= 真の有意)
  * - DSR <= 0: 偶然 N 試行の中で運が良かっただけの可能性が高い
- * - 通常 DSR > 1.96 で 95% 有意 (= one-sided)
+ * - 通常 DSR > 1.645 で 95% one-sided 有意 (= 標準正規分布の片側 95% 臨界値)。
+ *   両側 95% (= 1.96) ではなく、DSR は「N 試行補正後の真の Sharpe > 0」を
+ *   検定する片側仮説に使うのが慣例 (= López de Prado 系の論文)。
  *
  * 本 PR では Promotion gate に組み込まず、各 promotion candidate に対して
  * DSR を計算してログに残すのみ (= 観測フェーズ)。本番運用前に Promotion gate
@@ -124,10 +126,13 @@ export function expectedMaxSharpe(N: number): number {
  * - `γ4`: kurtosis (Pearson、正規分布で 3)
  * - `N`: 試行回数 (= 同じ意思決定で試した戦略数)
  *
- * 戻り値は **z-score**。z > 0 で「N 試行を補正しても有意」、通常 z > 1.96 で
- * 95% one-sided 有意。
+ * 戻り値は **z-score**。z > 0 で「N 試行を補正しても有意」、通常 z > 1.645 で
+ * 95% one-sided 有意 (= 標準正規分布の片側 95% 臨界値)。両側 95% は 1.96 だが、
+ * DSR は片側仮説検定に使うのが慣例 (= López de Prado 系の用法)。
  *
- * 計算不能ケース (= サンプル不足、std=0、補正分母 ≤ 0) では 0 を返す。
+ * 計算不能ケース (= サンプル不足、std=0、補正分母 ≤ 0) では `notComputable` に
+ * 理由を入れて dsr=0 を返す。SR==0 でも std>0 なら DSR は計算可能 (= 負値)
+ * のでそのまま計算する (= mean=0 でも DSR は意味のある統計量)。
  */
 export interface DsrInputs {
   /** trade returns (= pnl / initial_capital など無次元化された値、時系列で並べる) */
@@ -172,7 +177,17 @@ export function computeDeflatedSharpeRatio(inputs: DsrInputs): DsrResult {
       notComputable: 'sample size < 2',
     };
   }
-  if (sharpeRatio === 0) {
+  // std=0 (= 全 returns が同値、損益が一切動かない) のケースだけを「計算不能」
+  // にする。computeSharpeRatio は std=0 でも mean=0 でも 0 を返してしまうので、
+  // SR==0 だけで notComputable 判定するのは誤り (= mean=0 / std>0 のときは
+  // SR=0 でも DSR は (0 - expectedMaxSr) * sqrt(T-1) で計算可能、負値となる)。
+  let sumForVar = 0;
+  for (const r of returns) sumForVar += r;
+  const meanForVar = sumForVar / T;
+  let sqSum = 0;
+  for (const r of returns) sqSum += (r - meanForVar) * (r - meanForVar);
+  const variance = sqSum / (T - 1);
+  if (variance <= 0) {
     return {
       dsr: 0,
       sharpeRatio,
@@ -180,7 +195,7 @@ export function computeDeflatedSharpeRatio(inputs: DsrInputs): DsrResult {
       skewness,
       kurtosis,
       sampleSize: T,
-      notComputable: 'sharpe ratio is 0 (= flat returns or std=0)',
+      notComputable: 'std=0 (= flat returns、損益が一切動かない)',
     };
   }
   // 補正分母 (= 1 - γ3 * SR + (γ4 - 1) / 4 * SR^2)

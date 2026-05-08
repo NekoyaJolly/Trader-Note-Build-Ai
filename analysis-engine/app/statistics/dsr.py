@@ -102,11 +102,13 @@ def compute_deflated_sharpe_ratio(
     式 (Bailey & López de Prado 2014, eq. 9):
       DSR = (SR^ - SR0) * sqrt((T - 1) / (1 - γ3 * SR^ + ((γ4 - 1) / 4) * SR^2))
 
-    戻り値は z-score。z > 0 で「N 試行を補正しても有意」、z > 1.96 で 95%
-    one-sided 有意。
+    戻り値は z-score。z > 0 で「N 試行を補正しても有意」、z > 1.645 で 95%
+    one-sided 有意 (= 標準正規分布の片側 95% 臨界値)。両側 95% は 1.96 だが、
+    DSR は片側仮説検定に使うのが慣例 (= López de Prado 系の用法)。
 
     計算不能ケース (= サンプル不足 / std=0 / 補正分母 ≤ 0) では dsr=0 +
-    not_computable に理由を入れて返す (= 観測ログ用)。
+    not_computable に理由を入れて返す (= 観測ログ用)。SR==0 でも std>0 なら
+    DSR は計算可能 (= 負値) なのでそのまま計算する。
     """
     rets = list(returns)
     T = len(rets)
@@ -125,7 +127,13 @@ def compute_deflated_sharpe_ratio(
             sample_size=T,
             not_computable="sample size < 2",
         )
-    if sharpe_ratio == 0:
+    # std=0 (= 全 returns が同値) だけを「計算不能」にする。compute_sharpe_ratio は
+    # std=0 でも mean=0 でも 0 を返すため、SR==0 で早期 return すると mean=0 /
+    # std>0 のケース (= DSR が負値で計算可能) を取り逃す。variance を直接見る。
+    mean = sum(rets) / T
+    sq_sum = sum((r - mean) ** 2 for r in rets)
+    variance = sq_sum / (T - 1)
+    if variance <= 0:
         return DsrResult(
             dsr=0.0,
             sharpe_ratio=sharpe_ratio,
@@ -133,7 +141,7 @@ def compute_deflated_sharpe_ratio(
             skewness=skewness,
             kurtosis=kurtosis,
             sample_size=T,
-            not_computable="sharpe ratio is 0 (= flat returns or std=0)",
+            not_computable="std=0 (= flat returns、損益が一切動かない)",
         )
     correction_term = (
         1 - skewness * sharpe_ratio + ((kurtosis - 1) / 4) * sharpe_ratio * sharpe_ratio

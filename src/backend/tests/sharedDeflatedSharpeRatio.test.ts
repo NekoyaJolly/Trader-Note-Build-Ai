@@ -90,13 +90,24 @@ describe('computeDeflatedSharpeRatio', () => {
     expect(result.notComputable).toBe('sample size < 2');
   });
 
-  it('flat returns (= std=0) も notComputable', () => {
+  it('flat returns (= std=0) は notComputable に std=0 を入れて返す', () => {
     const result = computeDeflatedSharpeRatio({
       returns: [1, 1, 1, 1, 1],
       trialCount: 10,
     });
     expect(result.dsr).toBe(0);
-    expect(result.notComputable).toContain('sharpe ratio is 0');
+    expect(result.notComputable).toContain('std=0');
+  });
+
+  it('SR=0 でも std>0 (= mean=0 / 分散あり) なら DSR は計算可能で負値', () => {
+    // mean=0、std>0 のケース: 値が +/- 対称に分布、SR=0 だが DSR は (0 - expectedMaxSr) * sqrt(T-1) で計算可能。
+    // SR==0 早期 return ではこのケースを取り逃すため、std=0 と SR==0 を区別する。
+    const returns = [1, -1, 1, -1, 1, -1, 1, -1];
+    const result = computeDeflatedSharpeRatio({ returns, trialCount: 10 });
+    expect(result.notComputable).toBeNull();
+    expect(result.sharpeRatio).toBeCloseTo(0, 6);
+    expect(result.expectedMaxSr).toBeGreaterThan(0);
+    expect(result.dsr).toBeLessThan(0);
   });
 
   it('正常系: 高 SR + 多サンプル + 少試行 で DSR > 0', () => {
@@ -131,12 +142,13 @@ describe('computeDeflatedSharpeRatio', () => {
     expect(result.dsr).toBeLessThan(0);
   });
 
-  it('SR と expectedMaxSr が同値なら DSR = 0', () => {
-    // sample std=0 ではなく、ちょうど SR = expectedMaxSharpe(N) を作るのは難しいので、
-    // expectedMaxSharpe(1)=0 を使って SR > 0 での DSR > 0 を確認
+  it('trialCount=1 (= expectedMaxSr=0) かつ SR>0 なら DSR > 0 (= SR がそのまま z-score の符号を決める)', () => {
+    // expectedMaxSharpe(1)=0 なので、SR>0 → DSR > 0、SR<0 → DSR < 0 になる。
+    // 試行 1 回 = max 補正不要のケース。
     const returns = [0.1, 0.05, 0.15, 0.08];
     const result = computeDeflatedSharpeRatio({ returns, trialCount: 1 });
     expect(result.expectedMaxSr).toBe(0);
+    expect(result.sharpeRatio).toBeGreaterThan(0);
     expect(result.dsr).toBeGreaterThan(0);
   });
 
