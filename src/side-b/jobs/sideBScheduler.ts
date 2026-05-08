@@ -72,6 +72,11 @@ import { MutationAgent } from '../agents/MutationAgent';
 import { DiversityEnforcer } from '../evolution/DiversityEnforcer';
 import { EvolutionLoop } from '../evolution/EvolutionLoop';
 import { defaultOosBacktestRunner } from '../evolution/analysisEngineRobustnessAdapter';
+import {
+  MULTI_GENERATION_DEFAULTS,
+  runMultiGenerationEvolutionV1,
+  type MultiGenerationRunReport,
+} from '../evolution/multiGenerationRunner';
 import { StrategyPopulation } from '../evolution/StrategyPopulation';
 import { SurrogateFitnessSimulator } from '../strategy_dsl/SurrogateFitnessSimulator';
 import {
@@ -130,6 +135,28 @@ export interface SideBSchedulerConfig {
   autoEvolution: boolean;
   /** 進化ループ対象レジーム（StrategyDSL.regimeTarget と対応） */
   evolutionRegimes: string[];
+  /**
+   * Phase A (2026-05-09): 1 cron 実行あたりの世代数。
+   * - default 1 = 単世代経路 (= 後方互換、従来挙動)
+   * - 2 以上 = `runMultiGenerationEvolutionV1` 経由で世代間に
+   *   tradesByDslId / RepairHint / RepairOutcome baseline を引き継ぐ
+   * - 上限 5 (= multiGenerationRunner の MULTI_GENERATION_DEFAULTS.maxGenerations)
+   *
+   * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.A
+   */
+  evolutionGenerations: number;
+  /**
+   * Phase A: Adaptive Repair / Mutation Budget v1 を有効化するか (default false)。
+   * `evolutionGenerations >= 2` でのみ機能する (= 単世代では observation のみ)。
+   */
+  evolutionAdaptiveBudget: boolean;
+  /**
+   * Phase A: Quality-Diversity Archive Lite v1 を有効化するか (default false)。
+   * `evolutionGenerations >= 2` でのみ機能する。
+   */
+  evolutionQDArchive: boolean;
+  /** Phase A: QD-Archive parent injection 上限 (default 2)。 */
+  evolutionQDParentLimit: number;
   /** Phase 6: 月次プロンプト進化ジョブを自動トリガーするか(既定 false、手動のみ) */
   autoTriggerPromptEvolution: boolean;
   /** cTrader アカウントID（cTraderデータソース有効化用） */
@@ -171,8 +198,109 @@ const DEFAULT_CONFIG: SideBSchedulerConfig = {
     'consolidation',
     'reversal',
   ],
+  // Phase A: 既定は単世代 (= 後方互換)。env EVOLUTION_GENERATIONS で上書き可能。
+  evolutionGenerations: 1,
+  evolutionAdaptiveBudget: false,
+  evolutionQDArchive: false,
+  evolutionQDParentLimit: 2,
   autoTriggerPromptEvolution: false, // Phase 6: 既定は手動のみ(CLI / UI からの明示的トリガー)
 };
+
+/**
+ * Phase A: 環境変数から進化ループの世代数 / Adaptive Budget / QD-Archive 切り替えを読む。
+ *
+ * 環境変数 (すべて optional、未指定時は DEFAULT_CONFIG を使う):
+ *   - EVOLUTION_GENERATIONS: 1〜5 の整数。範囲外は ignore + warning。
+ *   - EVOLUTION_ADAPTIVE_BUDGET: 'true' / 'false' (case-insensitive)。
+ *   - EVOLUTION_QD_ARCHIVE: 'true' / 'false'。
+ *   - EVOLUTION_QD_PARENT_LIMIT: 0 以上の整数。負数は ignore。
+ *
+ * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.A.2
+ *
+ * @see SideBSchedulerConfig
+ */
+/**
+ * 環境変数値が「整数表現の文字列」であることを厳密に検証する。
+ *
+ * `parseInt` だと '2abc' / '2.9' / '  2 ' を 2 として受理してしまう。本関数は
+ * trim 後に `^-?\d+$` 全体一致でなければ null を返し、設定ミスを silent fail
+ * させない (= PR #138 Copilot review で指摘された運用事故防止)。
+ */
+function parseStrictInt(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!/^-?\d+$/.test(trimmed)) return null;
+  const n = Number(trimmed);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * 環境変数値を `'true' | 'false'` で厳密に判定する。trim + toLowerCase 後に
+ * 'true' / 'false' でなければ null (= 想定外文字列、warning 対象)。
+ */
+function parseStrictBool(raw: string): boolean | null {
+  const trimmed = raw.trim().toLowerCase();
+  if (trimmed === 'true') return true;
+  if (trimmed === 'false') return false;
+  return null;
+}
+
+function readEvolutionEnvOverrides(): Partial<SideBSchedulerConfig> {
+  const out: Partial<SideBSchedulerConfig> = {};
+
+  const gensRaw = process.env.EVOLUTION_GENERATIONS;
+  if (gensRaw !== undefined && gensRaw !== '') {
+    const parsed = parseStrictInt(gensRaw);
+    if (
+      parsed !== null &&
+      parsed >= 1 &&
+      parsed <= MULTI_GENERATION_DEFAULTS.maxGenerations
+    ) {
+      out.evolutionGenerations = parsed;
+    } else {
+      console.warn(
+        `[SideBScheduler] EVOLUTION_GENERATIONS=${gensRaw} は不正値 (1〜${MULTI_GENERATION_DEFAULTS.maxGenerations} の整数のみ)、無視します`,
+      );
+    }
+  }
+
+  const adaptiveRaw = process.env.EVOLUTION_ADAPTIVE_BUDGET;
+  if (adaptiveRaw !== undefined && adaptiveRaw !== '') {
+    const parsed = parseStrictBool(adaptiveRaw);
+    if (parsed === null) {
+      console.warn(
+        `[SideBScheduler] EVOLUTION_ADAPTIVE_BUDGET=${adaptiveRaw} は不正値 ('true' | 'false' のみ)、無視します`,
+      );
+    } else {
+      out.evolutionAdaptiveBudget = parsed;
+    }
+  }
+
+  const qdRaw = process.env.EVOLUTION_QD_ARCHIVE;
+  if (qdRaw !== undefined && qdRaw !== '') {
+    const parsed = parseStrictBool(qdRaw);
+    if (parsed === null) {
+      console.warn(
+        `[SideBScheduler] EVOLUTION_QD_ARCHIVE=${qdRaw} は不正値 ('true' | 'false' のみ)、無視します`,
+      );
+    } else {
+      out.evolutionQDArchive = parsed;
+    }
+  }
+
+  const qdLimitRaw = process.env.EVOLUTION_QD_PARENT_LIMIT;
+  if (qdLimitRaw !== undefined && qdLimitRaw !== '') {
+    const parsed = parseStrictInt(qdLimitRaw);
+    if (parsed !== null && parsed >= 0) {
+      out.evolutionQDParentLimit = parsed;
+    } else {
+      console.warn(
+        `[SideBScheduler] EVOLUTION_QD_PARENT_LIMIT=${qdLimitRaw} は不正値 (>=0 の整数のみ)、無視します`,
+      );
+    }
+  }
+
+  return out;
+}
 
 /**
  * ジョブ実行結果
@@ -252,7 +380,10 @@ export class SideBScheduler {
   private prisma: PrismaClient;
 
   constructor(configOverride?: Partial<SideBSchedulerConfig>) {
-    this.config = { ...DEFAULT_CONFIG, ...configOverride };
+    // Phase A: env からの override を DEFAULT_CONFIG と configOverride の中間に挟む。
+    // 優先順位 (高 → 低): configOverride 引数 > 環境変数 > DEFAULT_CONFIG。
+    const envOverrides = readEvolutionEnvOverrides();
+    this.config = { ...DEFAULT_CONFIG, ...envOverrides, ...configOverride };
     this.isProduction = process.env.NODE_ENV === 'production';
 
     // サービス初期化
@@ -823,7 +954,13 @@ export class SideBScheduler {
   }
 
   /**
-   * Phase 5: 進化ループを手動実行（全レジーム順に 1 世代ずつ、間にスリープ）
+   * Phase 5 + Phase A: 進化ループを手動実行（全レジーム順、各レジームで N 世代）
+   *
+   * Phase A (2026-05-09): `evolutionGenerations >= 2` で `runMultiGenerationEvolutionV1`
+   * 経由になり、世代間で tradesByDslId / RepairHint / RepairOutcome baseline が引き継がれる。
+   * `=1` (default) では従来単世代経路を維持 (= 完全な後方互換)。
+   *
+   * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.A
    */
   async runEvolutionNow(): Promise<{ regimeReports: number; errors: string[] }> {
     const regimes = this.config.evolutionRegimes?.length
@@ -854,20 +991,72 @@ export class SideBScheduler {
       oosBacktestRunner: defaultOosBacktestRunner,
     });
 
+    // PR #138 Copilot review #4: configOverride 経由で 0 や maxGenerations 超過の値が渡されると
+    // runner 側で clamp される一方で scheduler のログ表示や useMultiGen 判定がズレる。
+    // ここで [1, MULTI_GENERATION_DEFAULTS.maxGenerations] に clamp してから dispatch する。
+    const rawGenerations = this.config.evolutionGenerations ?? 1;
+    const generations = Math.max(
+      1,
+      Math.min(MULTI_GENERATION_DEFAULTS.maxGenerations, Math.floor(rawGenerations)),
+    );
+    if (generations !== rawGenerations) {
+      this.log(
+        `[Evolution] 設定 evolutionGenerations=${rawGenerations} を [1, ${MULTI_GENERATION_DEFAULTS.maxGenerations}] に clamp して ${generations} で実行`,
+      );
+    }
+    const useMultiGen = generations >= 2;
     const errors: string[] = [];
     let n = 0;
-    this.log(`[Evolution] 進化ループ開始: ${regimes.length} レジーム, 期間 ${defaultPeriod.start}〜${defaultPeriod.end}`);
+    this.log(
+      `[Evolution] 進化ループ開始: ${regimes.length} レジーム, ` +
+        `期間 ${defaultPeriod.start}〜${defaultPeriod.end}, ` +
+        `世代数=${generations} (${useMultiGen ? 'multi-gen' : 'single-gen'}), ` +
+        `adaptive=${this.config.evolutionAdaptiveBudget} qd=${this.config.evolutionQDArchive}`,
+    );
 
     for (let i = 0; i < regimes.length; i++) {
       const regime = regimes[i];
       try {
-        const report = await loop.runOneGeneration(regime);
-        n++;
-        this.log(
-          `[Evolution] regime=${regime} elites=${report.eliteIds.length} mut=${report.mutantsReceived} cross=${report.crossoversReceived} candidates=${report.promotionCandidates.length} divBoost=${report.lowDiversityBoost}`,
-        );
-        if (report.errors.length > 0) {
-          errors.push(...report.errors);
+        if (useMultiGen) {
+          const runReport = await this.runEvolutionMultiGen(loop, regime, generations);
+          // multi-gen runner の trend summary をログに残す + 個別 generation report も流す
+          for (const g of runReport.generations) {
+            n++;
+            if (g.report) {
+              this.log(
+                `[Evolution] regime=${regime} gen=${g.generationIndex + 1}/${generations} ` +
+                  `elites=${g.report.eliteIds.length} mut=${g.report.mutantsReceived} ` +
+                  `cross=${g.report.crossoversReceived} ` +
+                  `candidates=${g.report.promotionCandidates.length} ` +
+                  `divBoost=${g.report.lowDiversityBoost} status=${g.status}`,
+              );
+              if (g.report.errors.length > 0) errors.push(...g.report.errors);
+            } else {
+              this.log(
+                `[Evolution] regime=${regime} gen=${g.generationIndex + 1}/${generations} ` +
+                  `status=${g.status} error=${g.errorMessage ?? 'unknown'}`,
+              );
+              if (g.errorMessage) errors.push(`${regime} gen ${g.generationIndex + 1}: ${g.errorMessage}`);
+            }
+          }
+          this.log(
+            `[Evolution] regime=${regime} multi-gen trend: ` +
+              `formalBtPassed=[${runReport.trendSummary.formalBtPassedByGeneration.join(',')}] ` +
+              `validationConfirmed=[${runReport.trendSummary.validationConfirmedByGeneration.join(',')}] ` +
+              `repairImproved=[${runReport.trendSummary.repairOutcomeImprovedByGeneration.join(',')}] ` +
+              `stoppedEarly=${runReport.trendSummary.stoppedEarly}` +
+              (runReport.trendSummary.stopReason ? ` reason=${runReport.trendSummary.stopReason}` : ''),
+          );
+        } else {
+          // 後方互換: 単世代経路 (= evolutionGenerations === 1)
+          const report = await loop.runOneGeneration(regime);
+          n++;
+          this.log(
+            `[Evolution] regime=${regime} elites=${report.eliteIds.length} ` +
+              `mut=${report.mutantsReceived} cross=${report.crossoversReceived} ` +
+              `candidates=${report.promotionCandidates.length} divBoost=${report.lowDiversityBoost}`,
+          );
+          if (report.errors.length > 0) errors.push(...report.errors);
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -880,8 +1069,44 @@ export class SideBScheduler {
     }
 
     this.lastEvolutionRun = new Date();
-    this.log(`[Evolution] 進化ループ完了: レジーム処理=${n}件`);
+    this.log(`[Evolution] 進化ループ完了: レジーム×世代の合計実行=${n}件`);
     return { regimeReports: n, errors };
+  }
+
+  /**
+   * Phase A: multi-generation runner 経由の 1 regime 実行。
+   *
+   * `runMultiGenerationEvolutionV1` に loop.runOneGeneration を adapter で渡し、
+   * 世代間で tradesByDslId / RepairHint / RepairOutcome baseline を引き継ぐ。
+   * QD-Archive / Adaptive Budget は config で個別に切り替え可能。
+   */
+  private async runEvolutionMultiGen(
+    loop: EvolutionLoop,
+    regime: string,
+    generations: number,
+  ): Promise<MultiGenerationRunReport> {
+    return await runMultiGenerationEvolutionV1({
+      options: {
+        generations,
+        regime,
+        adaptiveRepairBudget: this.config.evolutionAdaptiveBudget,
+        qualityDiversityArchive: this.config.evolutionQDArchive,
+        qualityDiversityArchiveParentLimit: this.config.evolutionQDParentLimit,
+        // 世代間引き継ぎは default ON のまま (= Filter Evolution M2/M3 が成立する条件)
+      },
+      runOneGeneration: async ({
+        repairHintsForMutation,
+        repairBaselinesForOutcome,
+        mutationBudgetAllocation,
+        qualityDiversityArchiveParents,
+      }) =>
+        loop.runOneGeneration(regime, {
+          repairHintsForMutation,
+          repairBaselinesForOutcome,
+          mutationBudgetAllocation,
+          qualityDiversityArchiveParents,
+        }),
+    });
   }
 
   /**
