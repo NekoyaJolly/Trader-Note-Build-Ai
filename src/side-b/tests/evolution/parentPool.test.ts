@@ -91,7 +91,7 @@ describe('computeRequestedCounts (PR #95 v1 / PR #98 v2)', () => {
     const c = computeRequestedCounts(10, true);
     const total = Object.values(c).reduce((a, b) => a + b, 0);
     expect(total).toBe(10);
-    // v2 policy では edge_screening_passed が最大配分 (0.35)
+    // v2 policy では edge_screening_passed が最大配分 (PR ⑤E で 0.35 → 0.30、novelty_seed 振替)
     expect(c.edge_screening_passed).toBeGreaterThanOrEqual(c.edge_confirmed);
     expect(c.edge_screening_passed).toBeGreaterThanOrEqual(c.formal_bt_passed);
   });
