@@ -238,6 +238,9 @@ function makeMultiGenReport(regime: string, generations: number): MultiGeneratio
     report: makeReport(regime, i + 1),
     warnings: [],
   }));
+  // PR #138 Copilot review #5: generations に応じた配列長を Array.from で常に生成する
+  // (= 旧実装の [0,0,0].slice() だと generations >= 4 で配列長不足、将来テスト拡張時に落とし穴)
+  const zerosByGen = Array.from({ length: generations }, () => 0);
   return {
     startedAt: new Date().toISOString(),
     finishedAt: new Date().toISOString(),
@@ -254,13 +257,13 @@ function makeMultiGenReport(regime: string, generations: number): MultiGeneratio
       stopReason: null,
       formalBtCandidatesByGeneration: generationEntries.map((_, i) => i + 1),
       formalBtPassedByGeneration: generationEntries.map((_, i) => i + 1),
-      repairHintsByGeneration: [0, 0, 0].slice(0, generations),
-      repairOutcomeImprovedByGeneration: [0, 0, 0].slice(0, generations),
+      repairHintsByGeneration: [...zerosByGen],
+      repairOutcomeImprovedByGeneration: [...zerosByGen],
       validationCandidatesByGeneration: generationEntries.map((_, i) => i + 1),
-      validationConfirmedByGeneration: [0, 0, 0].slice(0, generations),
-      oosPassedByGeneration: [0, 0, 0].slice(0, generations),
-      oosFailedByGeneration: [0, 0, 0].slice(0, generations),
-      productionEligibleByGeneration: [0, 0, 0].slice(0, generations),
+      validationConfirmedByGeneration: [...zerosByGen],
+      oosPassedByGeneration: [...zerosByGen],
+      oosFailedByGeneration: [...zerosByGen],
+      productionEligibleByGeneration: [...zerosByGen],
       warnings: [],
     },
     finalState: {
@@ -441,5 +444,111 @@ describe('SideBScheduler.runEvolutionNow Phase A multi-generation', () => {
     await scheduler.runEvolutionNow();
 
     expect(runMultiGenMock.mock.calls[0][0].options.generations).toBe(2);
+  });
+
+  // PR #138 Copilot review: 厳密整数チェック / 想定外 bool 文字列 / config 値 clamp
+  describe('PR #138 Copilot review 対応', () => {
+    it("EVOLUTION_GENERATIONS='2abc' (parseInt 受理だが厳密整数ではない) は warning + 無視", async () => {
+      process.env.EVOLUTION_GENERATIONS = '2abc';
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      runOneGenerationMock.mockImplementation((regime: string) =>
+        Promise.resolve(makeReport(regime, 1)),
+      );
+
+      const scheduler = new SideBScheduler({ evolutionRegimes: ['breakout'] });
+      await scheduler.runEvolutionNow();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('EVOLUTION_GENERATIONS=2abc'),
+      );
+      // default=1 で単世代経路
+      expect(runMultiGenMock).not.toHaveBeenCalled();
+      expect(runOneGenerationMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("EVOLUTION_GENERATIONS='2.9' (小数表記) は warning + 無視", async () => {
+      process.env.EVOLUTION_GENERATIONS = '2.9';
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      runOneGenerationMock.mockImplementation((regime: string) =>
+        Promise.resolve(makeReport(regime, 1)),
+      );
+
+      const scheduler = new SideBScheduler({ evolutionRegimes: ['breakout'] });
+      await scheduler.runEvolutionNow();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('EVOLUTION_GENERATIONS=2.9'),
+      );
+      expect(runMultiGenMock).not.toHaveBeenCalled();
+    });
+
+    it("EVOLUTION_ADAPTIVE_BUDGET='yes' (= 想定外文字列) は warning + DEFAULT_CONFIG (false) を維持", async () => {
+      process.env.EVOLUTION_GENERATIONS = '2';
+      process.env.EVOLUTION_ADAPTIVE_BUDGET = 'yes';
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      runMultiGenMock.mockImplementation(({ options }) =>
+        Promise.resolve(makeMultiGenReport(options.regime, options.generations)),
+      );
+
+      const scheduler = new SideBScheduler({ evolutionRegimes: ['breakout'] });
+      await scheduler.runEvolutionNow();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('EVOLUTION_ADAPTIVE_BUDGET=yes'),
+      );
+      // DEFAULT_CONFIG.evolutionAdaptiveBudget は false なので、runner には false が渡る
+      expect(runMultiGenMock.mock.calls[0][0].options.adaptiveRepairBudget).toBe(false);
+    });
+
+    it("EVOLUTION_QD_PARENT_LIMIT='3foo' (= parseInt 受理だが厳密整数ではない) は warning + 無視", async () => {
+      process.env.EVOLUTION_GENERATIONS = '2';
+      process.env.EVOLUTION_QD_PARENT_LIMIT = '3foo';
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      runMultiGenMock.mockImplementation(({ options }) =>
+        Promise.resolve(makeMultiGenReport(options.regime, options.generations)),
+      );
+
+      const scheduler = new SideBScheduler({ evolutionRegimes: ['breakout'] });
+      await scheduler.runEvolutionNow();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('EVOLUTION_QD_PARENT_LIMIT=3foo'),
+      );
+      // DEFAULT_CONFIG.evolutionQDParentLimit は 2
+      expect(runMultiGenMock.mock.calls[0][0].options.qualityDiversityArchiveParentLimit).toBe(2);
+    });
+
+    it('configOverride で範囲外の値 (=0) を渡すと scheduler 側で clamp して動く', async () => {
+      // configOverride 経由で 0 を渡す → scheduler で max(1, ...) に clamp される
+      runOneGenerationMock.mockImplementation((regime: string) =>
+        Promise.resolve(makeReport(regime, 1)),
+      );
+
+      const scheduler = new SideBScheduler({
+        evolutionRegimes: ['breakout'],
+        evolutionGenerations: 0,
+      });
+      const result = await scheduler.runEvolutionNow();
+
+      // generations=1 (clamp 後) → 単世代経路
+      expect(runMultiGenMock).not.toHaveBeenCalled();
+      expect(runOneGenerationMock).toHaveBeenCalledTimes(1);
+      expect(result.regimeReports).toBe(1);
+    });
+
+    it('configOverride で範囲外の値 (=99) を渡すと scheduler 側で max=5 に clamp', async () => {
+      runMultiGenMock.mockImplementation(({ options }) =>
+        Promise.resolve(makeMultiGenReport(options.regime, options.generations)),
+      );
+
+      const scheduler = new SideBScheduler({
+        evolutionRegimes: ['breakout'],
+        evolutionGenerations: 99,
+      });
+      await scheduler.runEvolutionNow();
+
+      // 5 (= MULTI_GENERATION_DEFAULTS.maxGenerations) に clamp
+      expect(runMultiGenMock.mock.calls[0][0].options.generations).toBe(5);
+    });
   });
 });

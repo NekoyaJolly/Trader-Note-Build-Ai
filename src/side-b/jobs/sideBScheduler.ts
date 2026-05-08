@@ -219,41 +219,82 @@ const DEFAULT_CONFIG: SideBSchedulerConfig = {
  *
  * @see SideBSchedulerConfig
  */
+/**
+ * 環境変数値が「整数表現の文字列」であることを厳密に検証する。
+ *
+ * `parseInt` だと '2abc' / '2.9' / '  2 ' を 2 として受理してしまう。本関数は
+ * trim 後に `^-?\d+$` 全体一致でなければ null を返し、設定ミスを silent fail
+ * させない (= PR #138 Copilot review で指摘された運用事故防止)。
+ */
+function parseStrictInt(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!/^-?\d+$/.test(trimmed)) return null;
+  const n = Number(trimmed);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * 環境変数値を `'true' | 'false'` で厳密に判定する。trim + toLowerCase 後に
+ * 'true' / 'false' でなければ null (= 想定外文字列、warning 対象)。
+ */
+function parseStrictBool(raw: string): boolean | null {
+  const trimmed = raw.trim().toLowerCase();
+  if (trimmed === 'true') return true;
+  if (trimmed === 'false') return false;
+  return null;
+}
+
 function readEvolutionEnvOverrides(): Partial<SideBSchedulerConfig> {
   const out: Partial<SideBSchedulerConfig> = {};
 
   const gensRaw = process.env.EVOLUTION_GENERATIONS;
   if (gensRaw !== undefined && gensRaw !== '') {
-    const parsed = parseInt(gensRaw, 10);
+    const parsed = parseStrictInt(gensRaw);
     if (
-      Number.isFinite(parsed) &&
+      parsed !== null &&
       parsed >= 1 &&
       parsed <= MULTI_GENERATION_DEFAULTS.maxGenerations
     ) {
       out.evolutionGenerations = parsed;
     } else {
       console.warn(
-        `[SideBScheduler] EVOLUTION_GENERATIONS=${gensRaw} は範囲外 (1〜${MULTI_GENERATION_DEFAULTS.maxGenerations})、無視します`,
+        `[SideBScheduler] EVOLUTION_GENERATIONS=${gensRaw} は不正値 (1〜${MULTI_GENERATION_DEFAULTS.maxGenerations} の整数のみ)、無視します`,
       );
     }
   }
 
-  const adaptiveRaw = process.env.EVOLUTION_ADAPTIVE_BUDGET?.trim().toLowerCase();
-  if (adaptiveRaw === 'true') out.evolutionAdaptiveBudget = true;
-  else if (adaptiveRaw === 'false') out.evolutionAdaptiveBudget = false;
+  const adaptiveRaw = process.env.EVOLUTION_ADAPTIVE_BUDGET;
+  if (adaptiveRaw !== undefined && adaptiveRaw !== '') {
+    const parsed = parseStrictBool(adaptiveRaw);
+    if (parsed === null) {
+      console.warn(
+        `[SideBScheduler] EVOLUTION_ADAPTIVE_BUDGET=${adaptiveRaw} は不正値 ('true' | 'false' のみ)、無視します`,
+      );
+    } else {
+      out.evolutionAdaptiveBudget = parsed;
+    }
+  }
 
-  const qdRaw = process.env.EVOLUTION_QD_ARCHIVE?.trim().toLowerCase();
-  if (qdRaw === 'true') out.evolutionQDArchive = true;
-  else if (qdRaw === 'false') out.evolutionQDArchive = false;
+  const qdRaw = process.env.EVOLUTION_QD_ARCHIVE;
+  if (qdRaw !== undefined && qdRaw !== '') {
+    const parsed = parseStrictBool(qdRaw);
+    if (parsed === null) {
+      console.warn(
+        `[SideBScheduler] EVOLUTION_QD_ARCHIVE=${qdRaw} は不正値 ('true' | 'false' のみ)、無視します`,
+      );
+    } else {
+      out.evolutionQDArchive = parsed;
+    }
+  }
 
   const qdLimitRaw = process.env.EVOLUTION_QD_PARENT_LIMIT;
   if (qdLimitRaw !== undefined && qdLimitRaw !== '') {
-    const parsed = parseInt(qdLimitRaw, 10);
-    if (Number.isFinite(parsed) && parsed >= 0) {
+    const parsed = parseStrictInt(qdLimitRaw);
+    if (parsed !== null && parsed >= 0) {
       out.evolutionQDParentLimit = parsed;
     } else {
       console.warn(
-        `[SideBScheduler] EVOLUTION_QD_PARENT_LIMIT=${qdLimitRaw} は不正値 (>=0 の整数)、無視します`,
+        `[SideBScheduler] EVOLUTION_QD_PARENT_LIMIT=${qdLimitRaw} は不正値 (>=0 の整数のみ)、無視します`,
       );
     }
   }
@@ -950,7 +991,19 @@ export class SideBScheduler {
       oosBacktestRunner: defaultOosBacktestRunner,
     });
 
-    const generations = this.config.evolutionGenerations ?? 1;
+    // PR #138 Copilot review #4: configOverride 経由で 0 や maxGenerations 超過の値が渡されると
+    // runner 側で clamp される一方で scheduler のログ表示や useMultiGen 判定がズレる。
+    // ここで [1, MULTI_GENERATION_DEFAULTS.maxGenerations] に clamp してから dispatch する。
+    const rawGenerations = this.config.evolutionGenerations ?? 1;
+    const generations = Math.max(
+      1,
+      Math.min(MULTI_GENERATION_DEFAULTS.maxGenerations, Math.floor(rawGenerations)),
+    );
+    if (generations !== rawGenerations) {
+      this.log(
+        `[Evolution] 設定 evolutionGenerations=${rawGenerations} を [1, ${MULTI_GENERATION_DEFAULTS.maxGenerations}] に clamp して ${generations} で実行`,
+      );
+    }
     const useMultiGen = generations >= 2;
     const errors: string[] = [];
     let n = 0;
