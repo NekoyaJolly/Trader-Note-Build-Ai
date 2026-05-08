@@ -88,8 +88,14 @@ export interface ModuleParent {
  *
  * **Why immutable + 固定**: M4 MVP では静的選択。動的生成 / 学習 weight は
  * 将来 PR (= M3 観察データを踏まえて判断)。
+ *
+ * 各エントリも `Object.freeze` 済み (= 配列の shallow freeze だけだと entry の
+ * プロパティが実行時変更可能になり「immutable」の建前が崩れるため、deep freeze
+ * 相当を確保する)。
  */
-export const MODULE_PARENT_REGISTRY: readonly ModuleParent[] = Object.freeze([
+export const MODULE_PARENT_REGISTRY: readonly ModuleParent[] = Object.freeze(
+  (
+    [
   // === MTF Filter ===
   {
     id: 'mtf-htf-trend-aligned',
@@ -123,23 +129,25 @@ export const MODULE_PARENT_REGISTRY: readonly ModuleParent[] = Object.freeze([
     typicalOps: ['is_false'],
   },
   // === Pattern Filter ===
+  // PatternLens の features は CandlePatternId (= shared/patterns registry の id)
+  // を直接 key として持つ。reversal 系で代表的な engulfing を採用。
   {
-    id: 'pattern-bullish-confirm-for-long',
+    id: 'pattern-engulfing-bull-confirm-for-long',
     category: 'pattern',
     description:
-      'long entry の直前にブル系反転パターン (= ハンマー / エンガルフィング等) が確認されているか。reversal 戦略の早撃ち騙しを除去。',
+      'long entry の直前に強気エンガルフィング (= engulfing_bull) が確認されているか。reversal 戦略の早撃ち騙しを除去。',
     lensName: 'pattern',
-    featureKey: 'bullish_reversal_present',
+    featureKey: 'engulfing_bull',
     typicalOps: ['is_true'],
     recommendedRegimes: ['reversal'],
   },
   {
-    id: 'pattern-bearish-confirm-for-short',
+    id: 'pattern-engulfing-bear-confirm-for-short',
     category: 'pattern',
     description:
-      'short entry の直前にベア系反転パターンが確認されているか。reversal 戦略の早撃ち騙しを除去。',
+      'short entry の直前に弱気エンガルフィング (= engulfing_bear) が確認されているか。reversal 戦略の早撃ち騙しを除去。',
     lensName: 'pattern',
-    featureKey: 'bearish_reversal_present',
+    featureKey: 'engulfing_bear',
     typicalOps: ['is_true'],
     recommendedRegimes: ['reversal'],
   },
@@ -166,17 +174,21 @@ export const MODULE_PARENT_REGISTRY: readonly ModuleParent[] = Object.freeze([
     recommendedRegimes: ['trending_with_pullback'],
   },
   // === Volatility Filter ===
+  // VolatilityRegimeLens.classifyRegime の出力値 (BB幅 percentile による分類):
+  //   contracting (<20%) / low (<40%) / normal (<60%) / elevated (<80%) / expanding (>=80%) / unknown
   {
-    id: 'volatility-mid-regime-only',
+    id: 'volatility-normal-regime-only',
     category: 'volatility',
     description:
-      'ボラティリティが中庸レンジ (= 低すぎず高すぎず) のときだけ entry。低ボラのレンジ騙し / 高ボラのスパイク騙しを両方除去。',
+      'ボラティリティが normal (= BB 幅 40-60 percentile) のときだけ entry。低ボラのレンジ騙し / 高ボラのスパイク騙しを両方除去。',
     lensName: 'volatility_regime',
     featureKey: 'regime_label',
     typicalOps: ['=='],
-    typicalValueHint: "['low', 'mid', 'high'] のうち通常 'mid'",
+    typicalValueHint: "['contracting', 'low', 'normal', 'elevated', 'expanding'] のうち通常 'normal'",
   },
-] as const);
+    ] satisfies readonly ModuleParent[]
+  ).map((entry) => Object.freeze(entry)),
+);
 
 // =================================================================
 // 選別ロジック
@@ -211,8 +223,10 @@ export interface SelectModuleParentsOptions {
  * 組み合わせるか」を発見する役割に集中させる (= CLAUDE.md 原則 3)。
  */
 export function selectModuleParents(options: SelectModuleParentsOptions): ModuleParent[] {
-  const { regime, count, rotationOffset = 0 } = options;
-  if (count <= 0) return [];
+  const { regime } = options;
+  // count を非負整数に正規化 (= 負数 / 小数 / NaN 入力をガード)
+  const safeCount = Math.max(0, Math.floor(Number.isFinite(options.count) ? options.count : 0));
+  if (safeCount <= 0) return [];
 
   // regime に合致する candidates を抽出
   const candidates = MODULE_PARENT_REGISTRY.filter((m) => {
@@ -223,10 +237,16 @@ export function selectModuleParents(options: SelectModuleParentsOptions): Module
   // 候補が空なら全 registry にフォールバック (= regime 未指定 / 想定外 regime)
   const pool = candidates.length > 0 ? candidates : MODULE_PARENT_REGISTRY;
 
+  // rotationOffset を非負整数に正規化 (= JS の `%` は負数を返し得る、配列は小数 index 不可)
+  const rawOffset = options.rotationOffset ?? 0;
+  const safeOffset = Number.isFinite(rawOffset) ? Math.floor(rawOffset) : 0;
+  // ((offset % len) + len) % len で必ず 0..len-1 に収める
+  const normalizedOffset = ((safeOffset % pool.length) + pool.length) % pool.length;
+
   // round-robin で count 件返す
   const out: ModuleParent[] = [];
-  for (let i = 0; i < count; i++) {
-    const idx = (rotationOffset + i) % pool.length;
+  for (let i = 0; i < safeCount; i++) {
+    const idx = (normalizedOffset + i) % pool.length;
     out.push(pool[idx]);
   }
   return out;

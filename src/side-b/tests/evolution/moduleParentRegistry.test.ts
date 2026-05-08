@@ -55,6 +55,12 @@ describe('MODULE_PARENT_REGISTRY 整合性', () => {
   it('registry が immutable (= Object.freeze 適用済)', () => {
     expect(Object.isFrozen(MODULE_PARENT_REGISTRY)).toBe(true);
   });
+
+  it('各 entry も deep freeze 済 (= プロパティを実行時に変更できない)', () => {
+    for (const m of MODULE_PARENT_REGISTRY) {
+      expect(Object.isFrozen(m)).toBe(true);
+    }
+  });
 });
 
 describe('selectModuleParents', () => {
@@ -80,7 +86,62 @@ describe('selectModuleParents', () => {
   it('regime=reversal で reversal 専用の pattern entry が含まれる', () => {
     const out = selectModuleParents({ regime: 'reversal', count: 10 });
     const patternIds = out.filter((m) => m.category === 'pattern').map((m) => m.id);
-    expect(patternIds).toContain('pattern-bullish-confirm-for-long');
+    expect(patternIds).toContain('pattern-engulfing-bull-confirm-for-long');
+  });
+
+  it('pattern entry の featureKey は CandlePatternId と一致する (= 実装と乖離させない)', () => {
+    // PatternLens は features.{patternId} を boolean で出力する。
+    // ModuleParent の featureKey が patternRegistry に存在する id と一致することを pin。
+    const validPatternIds = new Set([
+      'pinbar',
+      'pinbar_bull',
+      'pinbar_bear',
+      'hammer',
+      'hammer_bull',
+      'hammer_bear',
+      'shooting_star',
+      'engulfing_bull',
+      'engulfing_bear',
+      'doji',
+      'thrust_bull',
+      'thrust_bear',
+    ]);
+    for (const m of MODULE_PARENT_REGISTRY) {
+      if (m.lensName === 'pattern') {
+        expect(validPatternIds.has(m.featureKey)).toBe(true);
+      }
+    }
+  });
+
+  it('volatility_regime.regime_label の hint は実装の値域と一致 (= contracting/low/normal/elevated/expanding)', () => {
+    const volEntries = MODULE_PARENT_REGISTRY.filter(
+      (m) => m.lensName === 'volatility_regime' && m.featureKey === 'regime_label',
+    );
+    expect(volEntries.length).toBeGreaterThan(0);
+    for (const m of volEntries) {
+      expect(m.typicalValueHint).toContain('normal');
+      expect(m.typicalValueHint).toContain('contracting');
+      expect(m.typicalValueHint).toContain('expanding');
+    }
+  });
+
+  it('rotationOffset 負数でも安全に正規化される', () => {
+    const out = selectModuleParents({ regime: 'breakout', count: 1, rotationOffset: -5 });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toBeDefined();
+    expect(out[0].id).toBeTruthy();
+  });
+
+  it('rotationOffset 小数でも安全に正規化される (= floor)', () => {
+    const out = selectModuleParents({ regime: 'breakout', count: 1, rotationOffset: 1.7 });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toBeDefined();
+  });
+
+  it('count 負数 / 小数 / NaN は 0 扱いで空配列を返す', () => {
+    expect(selectModuleParents({ regime: 'breakout', count: -1 })).toEqual([]);
+    expect(selectModuleParents({ regime: 'breakout', count: 0.4 })).toEqual([]);
+    expect(selectModuleParents({ regime: 'breakout', count: NaN })).toEqual([]);
   });
 
   it('count > 候補数 でも例外を投げず round-robin で返す', () => {
