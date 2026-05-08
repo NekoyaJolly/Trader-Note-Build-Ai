@@ -86,15 +86,23 @@ describe('PR ⑤D-2: 新 12 種の novelty seed', () => {
       }
     });
 
-    it('seed の id が異なる (= randomUUID で重複しない)', () => {
-      const ids = new Set<string>();
+    it('seed の id が `novelty-<kind>-<regime>-<uuid v4>` 形式で kind/regime を含む', () => {
+      // PR #133 Copilot review #3: randomUUID 衝突の偶発 flake を避けるため
+      // 「全 36 個が異なる」から「id の構造を pin」する形に変更。UUID v4 部分は
+      // 正規表現で検証 (= 8-4-4-4-12 hex)。
+      const uuidV4Re =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
       for (const kind of ALL_SEED_KINDS) {
         for (let i = 0; i < 3; i++) {
-          ids.add(buildSeedDsl(kind, 'breakout').id);
+          const id = buildSeedDsl(kind, 'breakout').id;
+          // prefix が `novelty-<kind>-<regime>-` で始まる
+          const prefix = `novelty-${kind}-breakout-`;
+          expect(id.startsWith(prefix)).toBe(true);
+          // 末尾は UUID v4 形式
+          const uuidPart = id.slice(prefix.length);
+          expect(uuidPart).toMatch(uuidV4Re);
         }
       }
-      // 12 kind × 3 = 36 件すべて異なる id
-      expect(ids.size).toBe(36);
     });
 
     it('regimeTarget は引数の値が入る', () => {

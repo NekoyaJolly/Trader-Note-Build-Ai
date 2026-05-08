@@ -3,9 +3,10 @@
  *
  * **設計方針 (Nekoさん 確定)**: 既存の regime 別 5 seed (RSI/ATR 単純) は撤廃し、
  * 6 戦略カテゴリ × long/short = **12 種の seed** を初期世代に並列注入する。
- * 各 seed は機能群 (= MTF / multi-instance / pattern / time_session / 20 indicator)
- * を意識的に「使い切る」形で組まれており、進化ループの探索初期から多様な
- * 戦略アーキタイプが出発点に並ぶ。
+ * 各 seed は機能群 (= MTF / multi-instance / time_session / 20 indicator) を
+ * 意識的に「使い切る」形で組まれており、進化ループの探索初期から多様な戦略
+ * アーキタイプが出発点に並ぶ。pattern lens は本 seed 集には含めず、mutation /
+ * crossover の探索的変異 (PR ⑤C) で導入される想定 (= 12 seed 数を保つため)。
  *
  * **戦略カテゴリ**:
  * 1. **MTF** (= 上位足コンテキスト + 下位足エントリー): mtf_long / mtf_short
@@ -352,8 +353,12 @@ const SEED_RECIPES: Record<SeedKind, SeedRecipe> = {
 };
 
 /**
- * 指定 seedKind の StrategyDSL を生成する。`StrategyDSLSchema.parse` で検証済の
- * 不変オブジェクトを返す。
+ * 指定 seedKind の StrategyDSL を生成する。`StrategyDSLSchema.parse` で
+ * 検証済の `StrategyDSL` を返す (= 構造的に正当な DSL であることが保証される)。
+ *
+ * 注: 戻り値は **deep freeze されない** (= 呼び出し側で破壊的変更が物理的には
+ * 可能)。進化ループでは戦略を mutation で派生させる際にコピーして使うので
+ * 実用上は問題ないが、不変性を強要したい場合は呼び出し側で Object.freeze する。
  *
  * @param kind seed カテゴリ
  * @param regime 戦略の `regimeTarget` フィールドに入れる値 (= 進化ループの分類用)
