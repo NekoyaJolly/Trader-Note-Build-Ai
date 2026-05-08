@@ -28,6 +28,23 @@ export interface EvolutionBacktestMetrics {
   tradeCount: number;
 }
 
+/**
+ * Filter Evolution Phase B-1 (2026-05-09): 本格 BT で発生した個別 trade の永続化形式。
+ *
+ * 各候補の trade list は `EvolutionBacktestRun.trades` に JSON 配列として保存され、
+ * cron 起動を跨いだ Win Rate Lift 計算 (= M2) や parentLossTrades 抽出 (= M3) の
+ * データソースになる。
+ *
+ * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.B.3
+ */
+export interface EvolutionBacktestTrade {
+  /** ISO 8601 datetime */
+  entryTime: string;
+  side: 'long' | 'short';
+  pnl: number;
+  outcome: 'win' | 'loss' | 'timeout';
+}
+
 export interface EvolutionBacktestRunInsertData {
   evolutionRunId: string;
   generation: number;
@@ -40,6 +57,11 @@ export interface EvolutionBacktestRunInsertData {
   formalBtFailureReason: string | null;
   engine: string;
   engineVersion: string;
+  /**
+   * Phase B-1: 本格 BT で発生した trade list。tradeCount > 0 の候補は非空、
+   * BT 失敗 / response 取得不能の候補は undefined (= NULL 永続化、Phase B-1 以前の行と同等)。
+   */
+  trades?: ReadonlyArray<EvolutionBacktestTrade>;
 }
 
 export class EvolutionBacktestRunRepository {
@@ -52,12 +74,20 @@ export class EvolutionBacktestRunRepository {
       dslSnapshot: toPrismaJsonValue(data.dslSnapshot),
       surrogateScore: data.surrogateScore,
       formalBtPassed: data.formalBtPassed,
+      // PR #139 Copilot review: `Prisma.JsonNull` は JSON 値としての null (= JSONB に "null" が
+      // 書き込まれる)、`Prisma.DbNull` は SQL の NULL (= 列が NULL)。Phase B-1 以前の既存行は
+      // SQL NULL なので、未指定値を `Prisma.DbNull` に統一して将来の `IS NULL` / `equals: DbNull`
+      // 検索でも一致するようにする。formalBtMetrics / trades 両方で同じ意味論を維持する。
       formalBtMetrics: data.formalBtMetrics
         ? toPrismaJsonValue(data.formalBtMetrics)
-        : Prisma.JsonNull,
+        : Prisma.DbNull,
       formalBtFailureReason: data.formalBtFailureReason,
       engine: data.engine,
       engineVersion: data.engineVersion,
+      // Phase B-1: trades が undefined のときは SQL NULL を書き込み、既存行 (Phase B-1 以前) と
+      //   完全に同じ意味論にする。analysis-engine 例外で trades 取得不能だった候補は
+      //   読み出し側で notComputable 経路に逃がす。
+      trades: data.trades ? toPrismaJsonValue(data.trades) : Prisma.DbNull,
     };
     return prisma.evolutionBacktestRun.create({ data: createData });
   }

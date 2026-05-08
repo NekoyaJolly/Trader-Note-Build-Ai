@@ -1495,6 +1495,12 @@ export class EvolutionLoop {
       dsl: StrategyDSL;
       engineVersion: string;
       surrogateScore: number;
+      trades?: ReadonlyArray<{
+        entryTime: string;
+        side: 'long' | 'short';
+        pnl: number;
+        outcome: 'win' | 'loss' | 'timeout';
+      }>;
     }>,
   ): Promise<void> {
     if (!this.evolutionBacktestRepo || verifyResults.length === 0) return;
@@ -1511,6 +1517,10 @@ export class EvolutionLoop {
       formalBtFailureReason: r.candidate.formalBtFailureReason ?? null,
       engine: 'analysis-engine',
       engineVersion: r.engineVersion,
+      // Phase B-1: trades 列に永続化。analysis-engine 例外などで trades が undefined の場合は
+      // repo 側で `Prisma.DbNull` (= SQL NULL) に解釈して既存行 (Phase B-1 以前) と同じ意味論にする。
+      // `Prisma.JsonNull` (= JSON 値の null) ではない (PR #139 Copilot review 指摘対応)。
+      trades: r.trades,
     }));
 
     await this.evolutionBacktestRepo.createMany(rows);

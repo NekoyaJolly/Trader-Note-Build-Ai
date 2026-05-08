@@ -694,6 +694,166 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
     expect(passRow?.candidateHash).not.toBe(failRow?.candidateHash);
   });
 
+  it('Phase B-1: analysis-engine の trades が createMany の row.trades に伝播する', async () => {
+    const dsl = StrategyDSLSchema.parse({
+      id: 'persist-trades',
+      generation: 1,
+      parentIds: [],
+      regimeTarget: 'breakout',
+      symbol: 'EURUSD',
+      timeframe: '1h',
+      entry: {
+        direction: 'long',
+        trigger: {
+          logic: 'AND',
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
+        },
+      },
+      stopLoss: { type: 'fixed_pips', value: 30 },
+      takeProfit: { type: 'rr_ratio', value: 1.5 },
+      parameters: {},
+      metadata: { createdAt: new Date().toISOString(), createdBy: 'initial_random' },
+    });
+
+    const adapter = new SurrogateFitnessSimulator();
+    const summary = (pf: number) => ({
+      totalTrades: 30,
+      winningTrades: 18,
+      losingTrades: 12,
+      winRate: 0.6,
+      netProfit: 200,
+      netProfitRate: 0.1,
+      maxDrawdown: 30,
+      maxDrawdownRate: 0.03,
+      profitFactor: pf,
+      averageWin: 15,
+      averageLoss: -10,
+      riskRewardRatio: 1.5,
+      maxConsecutiveWins: 3,
+      maxConsecutiveLosses: 2,
+    });
+    jest.spyOn(adapter, 'evaluateFitness').mockResolvedValue({
+      dslId: 'persist-trades',
+      period: { start: '2024-01-01', end: '2024-12-31' },
+      trainPf: 2.0,
+      validationPf: 1.6,
+      overfitScore: 0.15,
+      train: { summary: summary(2.0), trades: [] },
+      validation: { summary: summary(1.6), trades: [] },
+      execution: {
+        executionModel: 'legacy_zero_cost',
+        executionConfigHash: 'legacy-zero-cost',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'legacy_zero_cost',
+          dataSource: 'ctrader',
+          roundTripCostPips: 0,
+          roundTripCostAtrMult: 0,
+          totalCost: 0,
+        },
+      },
+    });
+
+    const mutationAgent = new MutationAgent();
+    jest.spyOn(mutationAgent, 'generateMutants').mockResolvedValue([]);
+    jest.spyOn(mutationAgent, 'generateDiverse').mockResolvedValue([]);
+    const crossoverAgent = new CrossoverAgent();
+    jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
+
+    const population = new StrategyPopulation(undefined);
+    population.add('breakout', dsl);
+
+    // analysis-engine が trades を 3 件返す
+    const sampleTrades = [
+      {
+        entryTime: '2024-06-01T00:00:00.000Z',
+        entryPrice: 1.0850,
+        exitTime: '2024-06-01T03:00:00.000Z',
+        exitPrice: 1.0900,
+        side: 'long' as const,
+        pnl: 50,
+        outcome: 'win' as const,
+      },
+      {
+        entryTime: '2024-06-02T00:00:00.000Z',
+        entryPrice: 1.0900,
+        exitTime: '2024-06-02T03:00:00.000Z',
+        exitPrice: 1.0850,
+        side: 'long' as const,
+        pnl: -50,
+        outcome: 'loss' as const,
+      },
+      {
+        entryTime: '2024-06-03T00:00:00.000Z',
+        entryPrice: 1.0900,
+        exitTime: null,
+        exitPrice: null,
+        side: 'long' as const,
+        pnl: 0,
+        outcome: 'timeout' as const,
+      },
+    ];
+
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockResolvedValue({
+        summary: { pf: 1.5, winRate: 0.6, tradeCount: 30, maxDD: 0.05, sharpe: 1.2, returnPct: 0.1 },
+        trades: sampleTrades,
+        equity: null,
+        engineVersion: 'analysis-engine/backtesting.py@test',
+        unsupportedConditions: [],
+      });
+
+    const createMany: jest.MockedFunction<EvolutionBacktestPersister['createMany']> = jest
+      .fn<
+        ReturnType<EvolutionBacktestPersister['createMany']>,
+        Parameters<EvolutionBacktestPersister['createMany']>
+      >()
+      .mockResolvedValue([]);
+    const findRecentFormalBtPassed: jest.MockedFunction<
+      EvolutionBacktestPersister['findRecentFormalBtPassed']
+    > = jest
+      .fn<
+        ReturnType<EvolutionBacktestPersister['findRecentFormalBtPassed']>,
+        Parameters<EvolutionBacktestPersister['findRecentFormalBtPassed']>
+      >()
+      .mockResolvedValue([]);
+
+    const loop = new EvolutionLoop({
+      population,
+      adapter,
+      mutationAgent,
+      crossoverAgent,
+      enforcer: new DiversityEnforcer(),
+      defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      runFormalBacktest,
+      evolutionBacktestRepo: { createMany, findRecentFormalBtPassed },
+      edgeHypothesisLoader: null,
+      evolutionRunId: '00000000-0000-0000-0000-000000000099',
+    });
+
+    await loop.runOneGeneration('breakout');
+
+    expect(createMany).toHaveBeenCalledTimes(1);
+    const rows = createMany.mock.calls[0][0] as Array<{
+      candidateId: string;
+      trades?: ReadonlyArray<{
+        entryTime: string;
+        side: 'long' | 'short';
+        pnl: number;
+        outcome: 'win' | 'loss' | 'timeout';
+      }>;
+    }>;
+    expect(rows).toHaveLength(1);
+
+    // trades は entryTime / side / pnl / outcome のみ抽出 (entryPrice / exitPrice 等は除外)
+    expect(rows[0].trades).toEqual([
+      { entryTime: '2024-06-01T00:00:00.000Z', side: 'long', pnl: 50, outcome: 'win' },
+      { entryTime: '2024-06-02T00:00:00.000Z', side: 'long', pnl: -50, outcome: 'loss' },
+      { entryTime: '2024-06-03T00:00:00.000Z', side: 'long', pnl: 0, outcome: 'timeout' },
+    ]);
+  });
+
   it('段階 4a.4: evolutionBacktestRepo に null を渡すと永続化はスキップされる', async () => {
     const dsl = StrategyDSLSchema.parse({
       id: 'no-persist',
