@@ -98,22 +98,25 @@ describe('loadPrompt', () => {
             expect(content).toContain('戦略アーキタイプの広がり');
         });
 
-        it('crossover.md に静的 ohlcv feature 表 + macro 注入が含まれている', () => {
+        it('crossover.md に静的 ohlcv feature 表 + macro 注入 + Filter Evolution M3 要素が含まれている', () => {
             const content = loadPrompt('crossover');
             expect(content).toContain('利用可能なエントリー条件');
             expect(content).toContain('静的 ohlcv feature');
             expect(content).toContain('| `ohlcv` | `rsi` |');
             expect(content).toContain('| `ohlcv` | `atr` |');
-            // 親が未対応 lens を持つ場合の処理方針 (= 旧 pin、文言は変わるが意図は維持)
-            expect(content).toContain('対応 lens に置き換える');
             expect(content).toContain('常に true');
             // PR #117e: 動的 indicator metadata 注入 macro
             expect(content).toContain('{{INDICATOR_METADATA_TABLE}}');
             expect(content).toContain('動的パラメータ付き indicator');
-            // PR ⑤C: 創発的統合 + MTF / multi-instance / wait_for_trigger
-            expect(content).toContain('創発的統合');
-            expect(content).toContain('構造を 1 段引き上げる');
             expect(content).toContain('マルチタイムフレーム');
+            // Filter Evolution M3: filter 追加器再設計 / 親 A の負けトレード文脈 / wrapper 出力 / ModuleParent
+            expect(content).toContain('フィルタ追加器');
+            expect(content).toContain('親A_loss_trades');
+            expect(content).toContain('module_parents');
+            expect(content).toContain('child_dsl');
+            expect(content).toContain('rejected_loss_count');
+            expect(content).toContain('preserved_win_count');
+            expect(content).toContain('rationale');
         });
     });
 });

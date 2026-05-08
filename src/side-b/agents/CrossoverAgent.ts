@@ -1,7 +1,8 @@
 /**
  * 交配オペレーター（LLM）（Phase 5 + Filter Evolution M3）
  *
- * @see docs/design/phase_5_specification.md §4.6
+ * @see docs/design/archive/phase_5_specification.md §4.6 (旧仕様、archive 移動済み)
+ * @see docs/design/phase_5a_specification.md (Phase 5A 進化探索基盤、現行)
  * @see docs/design/phase_filter_evolution_specification.md §3 (M3)
  *
  * Filter Evolution M3 (2026-05-09):
@@ -216,7 +217,9 @@ export class CrossoverAgent {
     let lastApiError: string | null = null;
 
     // M3: ModuleParent 候補を user prompt に乗せるためのシリアライズ。
-    // recommendedRegimes / typicalValueHint は optional のため undefined を保ったまま JSON 化する。
+    // recommendedRegimes / typicalValueHint は optional。`JSON.stringify` は undefined の
+    // プロパティを出力に含めないため、未指定 entry では該当キーが prompt に出ないが、
+    // LLM 側で「素材ヒント不足の素材」と扱える形式なので問題ない（明示的 null 化はしない）。
     const moduleParentBlock =
       options?.moduleParents && options.moduleParents.length > 0
         ? `\n\nmodule_parents (= フィルタ素材候補、id を選んで filter 1 個を構築する):\n${JSON.stringify(
