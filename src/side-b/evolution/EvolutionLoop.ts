@@ -1518,7 +1518,8 @@ export class EvolutionLoop {
       engine: 'analysis-engine',
       engineVersion: r.engineVersion,
       // Phase B-1: trades 列に永続化。analysis-engine 例外などで trades が undefined の場合は
-      // 列を NULL のままにして既存行 (Phase B-1 以前) と同じ意味論にする。
+      // repo 側で `Prisma.DbNull` (= SQL NULL) に解釈して既存行 (Phase B-1 以前) と同じ意味論にする。
+      // `Prisma.JsonNull` (= JSON 値の null) ではない (PR #139 Copilot review 指摘対応)。
       trades: r.trades,
     }));
 

@@ -74,16 +74,20 @@ export class EvolutionBacktestRunRepository {
       dslSnapshot: toPrismaJsonValue(data.dslSnapshot),
       surrogateScore: data.surrogateScore,
       formalBtPassed: data.formalBtPassed,
+      // PR #139 Copilot review: `Prisma.JsonNull` は JSON 値としての null (= JSONB に "null" が
+      // 書き込まれる)、`Prisma.DbNull` は SQL の NULL (= 列が NULL)。Phase B-1 以前の既存行は
+      // SQL NULL なので、未指定値を `Prisma.DbNull` に統一して将来の `IS NULL` / `equals: DbNull`
+      // 検索でも一致するようにする。formalBtMetrics / trades 両方で同じ意味論を維持する。
       formalBtMetrics: data.formalBtMetrics
         ? toPrismaJsonValue(data.formalBtMetrics)
-        : Prisma.JsonNull,
+        : Prisma.DbNull,
       formalBtFailureReason: data.formalBtFailureReason,
       engine: data.engine,
       engineVersion: data.engineVersion,
-      // Phase B-1: trades が undefined のときは Prisma.JsonNull (= DB の NULL) を維持して
-      //   既存 NULL 行と区別しない。analysis-engine 例外で trades 取得不能だった候補は
-      //   notComputable 経路で扱う側に委ねる。
-      trades: data.trades ? toPrismaJsonValue(data.trades) : Prisma.JsonNull,
+      // Phase B-1: trades が undefined のときは SQL NULL を書き込み、既存行 (Phase B-1 以前) と
+      //   完全に同じ意味論にする。analysis-engine 例外で trades 取得不能だった候補は
+      //   読み出し側で notComputable 経路に逃がす。
+      trades: data.trades ? toPrismaJsonValue(data.trades) : Prisma.DbNull,
     };
     return prisma.evolutionBacktestRun.create({ data: createData });
   }

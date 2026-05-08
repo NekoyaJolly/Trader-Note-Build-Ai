@@ -19,7 +19,10 @@ jest.mock('@prisma/client', () => {
   }
   return {
     PrismaClient: MockPrismaClient,
-    Prisma: { JsonNull: 'DbNull' },
+    // PR #139 Copilot review: Prisma.JsonNull は JSON 値としての null、Prisma.DbNull は SQL NULL。
+    // Phase B-1 では未指定値を SQL NULL にしたいので Prisma.DbNull に統一。テスト mock も両者を
+    // 区別可能な sentinel 文字列で表現して、production 挙動と一致させる。
+    Prisma: { JsonNull: 'JsonNull', DbNull: 'DbNull' },
   };
 });
 
@@ -171,7 +174,7 @@ describe('EvolutionBacktestRunRepository.create (Phase B-1: trades 永続化)', 
     expect(createArg.data.trades).toEqual(trades);
   });
 
-  it('trades が undefined のときは Prisma.JsonNull (= DB NULL) で永続化', async () => {
+  it('trades が undefined のときは Prisma.DbNull (= SQL NULL) で永続化', async () => {
     mockCreate.mockResolvedValue({ id: 'row-2' });
     const repo = new EvolutionBacktestRunRepository();
 
@@ -191,7 +194,33 @@ describe('EvolutionBacktestRunRepository.create (Phase B-1: trades 永続化)', 
     });
 
     const createArg = mockCreate.mock.calls[0][0] as { data: { trades: unknown } };
-    // Prisma.JsonNull は本ファイルの mock では文字列 'DbNull' として表現される
+    // Prisma.DbNull は本ファイルの mock で 'DbNull' sentinel に解決される (= SQL NULL 意味論)
+    expect(createArg.data.trades).toBe('DbNull');
+  });
+
+  it('formalBtMetrics が null のときも Prisma.DbNull (= SQL NULL) で永続化される', async () => {
+    mockCreate.mockResolvedValue({ id: 'row-4' });
+    const repo = new EvolutionBacktestRunRepository();
+
+    await repo.create({
+      evolutionRunId: '00000000-0000-0000-0000-000000000004',
+      generation: 0,
+      candidateId: 'cand-4',
+      candidateHash: 'hash-4',
+      dslSnapshot: minimalDsl,
+      surrogateScore: 0,
+      formalBtPassed: false,
+      formalBtMetrics: null, // analysis-engine HTTP 失敗で metrics 取得不能のケース
+      formalBtFailureReason: 'analysis-engine BT failed: connection refused',
+      engine: 'analysis-engine',
+      engineVersion: 'analysis-engine/test@1',
+      trades: undefined,
+    });
+
+    const createArg = mockCreate.mock.calls[0][0] as {
+      data: { formalBtMetrics: unknown; trades: unknown };
+    };
+    expect(createArg.data.formalBtMetrics).toBe('DbNull');
     expect(createArg.data.trades).toBe('DbNull');
   });
 
