@@ -1,6 +1,6 @@
 # Filter Evolution 設計仕様書 (= mutation/crossover 再設計)
 
-> **ステータス**: 設計合意中 (2026-05-08 時点)
+> **ステータス**: M2 + M4 完了 (PR #135 / PR #136)、M3 着手中 (2026-05-09 時点)
 > **目的**: 進化ループにおける mutation/crossover の役割を「新戦略の生成」から「騙し (false signal) を除去するフィルタの追加」へ再定義する。surrogate 評価軸に「騙し回避スコア」を追加し、LLM = 構造発見 / Python = 数値最適化 の役割分担を CLAUDE.md 原則に沿って明確化する。
 > **前提**: Phase 5A (PR #122-#128) + Phase ⑤A〜⑤E (PR #129-#134) 完了。`StrategyDSL` / `EvolutionLoop` / `MutationAgent` / `CrossoverAgent` / `EvolutionBacktestRun` 既存。
 > **位置づけ**: Phase 5B (= 自動昇格) hold 中の活動。Phase 6 メタ進化とは別軸 (= mutation/crossover の意味論変更、Phase 6 はプロンプト進化のメタ層)。
@@ -272,15 +272,22 @@ LLM の役割は「構造発見 + 解釈」(= CLAUDE.md 原則 OK)。LLM が出�
 
 PR 粒度: M3 単独で 1 PR。M2 完了後に着手 (= filter_score 観測軸が動いていることが前提)。
 
-### 3.4 mutation の処遇 (= M2 観察後に早期判断)
+### 3.4 mutation の処遇 (= M3 + 観測 完了後に再判断、撤廃は撤回)
 
-Nekoさん 方針: **mutation は撤廃寄り**。M2 観察 (= winRateLift 分布データ) を踏まえて以下のいずれかを M3 着手前に決定:
+**2026-05-09 更新**: 当初は M2 観察直後 (= M3 着手前) に mutation 撤廃を判断する想定だったが、Nekoさん 判断で **撤廃判断は撤回 + 後ろ倒し** とした。
 
-- (A) **完全撤廃**: M2 で mutation 由来 child の Lift がほぼ全て 1.0 だった場合。crossover + Python 最適化のみに集約。MutationAgent / mutation prompt 削除。
-- (B) **repair 専用に縮退**: M2 で mutation 由来 child が時々 Lift > 1.0 を出すが crossover ほどではない場合。failureReason → RepairHint 経路 (PR #100) のみに用途を絞り、通常の mutation route は削除。
-- (C) **構造変異専用**: M2 で mutation が新規 operator 追加 (cross_above 等) で固有の貢献をしている場合。crossover が組合せ、mutation が新規構造、と役割明確化。
+理由:
+- M3 が完成して進化ループが「filter 追加器」として 1 周回る前に mutation を消すと、filter Evolution 全体の改善効果と mutation 寄与が分離できない
+- 一度ちゃんと完成させた状態で観測しないと、撤廃可否の判断材料が出揃わない
 
-着手判断は Nekoさん の合意必須 (= 「勝手に決めない」原則)。デフォルト想定は (A) 撤廃。
+**新しい判断タイミング**: M3 完了 + 本番スモーク観測フェーズ完了後に以下の選択肢から選ぶ:
+
+- (A) **完全撤廃**: mutation 由来 child の Lift がほぼ全て 1.0 で固定される場合。crossover + Python 最適化のみに集約。MutationAgent / mutation prompt 削除。
+- (B) **repair 専用に縮退**: mutation 由来 child が時々 Lift > 1.0 を出すが crossover ほどではない場合。failureReason → RepairHint 経路 (PR #100) のみに用途を絞り、通常の mutation route は削除。
+- (C) **構造変異専用**: mutation が新規 operator 追加 (cross_above 等) で固有の貢献をしている場合。crossover が組合せ、mutation が新規構造、と役割明確化。
+- (D) **現状維持**: M3 + smoke 観測フェーズで mutation がノイズになっていないと判断できる場合。
+
+着手判断は Nekoさん の合意必須 (= 「勝手に決めない」原則)。観測ベースで決める。
 
 ---
 
@@ -440,15 +447,19 @@ Phase 6 (memory `project_phase_6_completed.md`) は **mutation/crossover prompt 
 
 ## 8. リスク / 開いた論点
 
-### 8.1 確認済 (Nekoさん 合意、2026-05-08)
+### 8.1 確認済
 
+**2026-05-08 合意:**
 - ✅ 評価指標 = **Win Rate Lift** (= ML/マーケティングの Lift を流用、業界に統一名称が存在しない事実を確認)
 - ✅ 副次観察として filter_precision / specificity / preserve_win もログに残す
 - ✅ DSL 構造分離 (M1) は保留、M2-M5 は親子関係 (parentIds) ベースで実装
-- ✅ mutation は撤廃寄り、M2 観察直後に判断 (M3 着手前)
 - ✅ mutation の数値変異役割は Python (Optuna) に切り出す
 - ✅ 着手順序 = M2 → M4 → M3 → M5
 - ✅ 設計書は M2 PR と同梱でコミット
+
+**2026-05-09 更新:**
+- ✅ mutation 撤廃判断は **撤回 + 後ろ倒し** (M3 完了 + 本番スモーク観測完了後に再判断)
+- ✅ 一度 filter Evolution を完成させて、ループが回って改善するか観測してから処遇判断する
 
 ### 8.2 後続で詰める論点
 
@@ -483,10 +494,13 @@ Phase 6 (memory `project_phase_6_completed.md`) は **mutation/crossover prompt 
 - [ ] CrossoverAgent が ModuleParent を受け取れる (interface のみ、prompt 改修は M3 で)
 
 ### M3 完了条件
-- [ ] crossover prompt 再設計 (`src/side-b/prompts/crossover.md`)
-- [ ] CrossoverAgent が親 A の負けトレード list を受け取る
-- [ ] 5 世代 smoke で crossover 由来 child が **少なくとも 1 つ以上 promotion top-K に届く**
-- [ ] 5 回繰り返し smoke で filter_score の中央値が観測される
+- [x] crossover prompt 再設計 (`src/side-b/prompts/crossover.md`) — 2026-05-09 PR で対応
+- [x] CrossoverAgent が親 A の負けトレード list + ModuleParent 候補を受け取る
+- [x] CrossoverAgent が wrapper 形式 `{ child_dsl, rejected_loss_count, preserved_win_count, rationale }` を受理（後方互換: direct DSL 形式も継続）
+- [x] EvolutionLoop が `tradesByDslId` から負けトレード (outcome === 'loss') を抽出して CrossoverAgent に渡す経路実装
+- [x] CrossoverAgent ユニットテスト追加（wrapper 受理 / abs(pnl) 上位 30 件絞り込み / parentLossTrades 注入 / moduleParents 注入）
+- [ ] 5 世代 smoke で crossover 由来 child が **少なくとも 1 つ以上 promotion top-K に届く** (= 本番スモーク後に検証)
+- [ ] 5 回繰り返し smoke で Win Rate Lift > 1.0 を出す child が観測される (= 本番スモーク後に検証)
 
 ### M5 完了条件
 - [ ] `analysis-engine/app/optimization/optuna_runner.py` 実装

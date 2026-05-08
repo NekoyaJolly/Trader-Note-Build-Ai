@@ -24,7 +24,7 @@
 
 import { createHash, randomUUID } from 'crypto';
 
-import type { CrossoverAgent } from '../agents/CrossoverAgent';
+import type { CrossoverAgent, LossTradeSummary } from '../agents/CrossoverAgent';
 import type { MutationAgent } from '../agents/MutationAgent';
 import type { SurrogateFitnessSimulator, BacktestPeriod, SurrogateFitnessAggregate } from '../strategy_dsl/SurrogateFitnessSimulator';
 import type { StrategyDSL } from '../strategy_dsl/schema';
@@ -440,19 +440,30 @@ export class EvolutionLoop {
    */
   private lastRepairBaselines: ReadonlyMap<string, RepairOutcomeBaseline> = new Map();
   /**
-   * Filter Evolution M2: 同インスタンスで連続世代を回す場合の trade list 保持先。
-   * 親 A の trade list を子 A+F (= 次世代の crossover/mutation child) と比較して
-   * winRateLift を観測ログに残すために使う。EvolutionBacktestRun テーブルには
-   * `trades` 列が存在しないため、in-memory で保持する設計 (= DB 永続化は別 PR)。
+   * Filter Evolution M2 + M3: 同インスタンスで連続世代を回す場合の trade list 保持先。
+   *
+   * 用途:
+   * - M2: 親 A の trade list を子 A+F (= 次世代の crossover/mutation child) と比較して
+   *   winRateLift を観測ログに残す（entryTime + outcome のみ参照）
+   * - M3: 親 A の負けトレード (= outcome === 'loss') を CrossoverAgent に渡し、
+   *   filter 設計の文脈材料とする（entryTime + side + pnl を参照）
+   *
+   * EvolutionBacktestRun テーブルには `trades` 列が存在しないため、in-memory で
+   * 保持する設計 (= DB 永続化は別 PR)。
    *
    * - キー: dslId (= candidate.dslId、世代をまたいで一意)
-   * - 値: 該当 candidate の formal BT で得られた trade list (= entryTime + outcome のみ抽出)
+   * - 値: 該当 candidate の formal BT で得られた trade list (entryTime/side/pnl/outcome)
    * - 失敗 candidate も含めて保持 (= 子側 filter が失敗 trade を除去できているかの観察用)
    * - インスタンス削除で消える (= cron/smoke 1 回ごとに揮発、設計通り)
    */
   private tradesByDslId: Map<
     string,
-    ReadonlyArray<{ entryTime: string; outcome: 'win' | 'loss' | 'timeout' }>
+    ReadonlyArray<{
+      entryTime: string;
+      side: 'long' | 'short';
+      pnl: number;
+      outcome: 'win' | 'loss' | 'timeout';
+    }>
   > = new Map();
 
   constructor(private readonly deps: EvolutionLoopDeps) {
@@ -702,13 +713,41 @@ export class EvolutionLoop {
         if (t) repairAppliedTraces.set(m.id, t);
       }
     }
+    // Filter Evolution M3: 親 (= parentPool の各 dsl) について、tradesByDslId から
+    // 負けトレード (outcome === 'loss') のみを抽出して CrossoverAgent に渡す。
+    // 親が tradesByDslId に未登録 (= novelty seed 等で formal BT 履歴なし) の場合は
+    // 空配列 ではなく Map から欠落させる（CrossoverAgent 側で「資料なし」として扱われる）。
+    const parentLossTrades = new Map<string, ReadonlyArray<LossTradeSummary>>();
+    let totalParentLossSamples = 0;
+    for (const e of parentPool) {
+      const trades = this.tradesByDslId.get(e.dsl.id);
+      if (!trades) continue;
+      const losses = trades
+        .filter((t) => t.outcome === 'loss')
+        .map((t) => ({ entryTime: t.entryTime, side: t.side, pnl: t.pnl }));
+      if (losses.length === 0) continue;
+      parentLossTrades.set(e.dsl.id, losses);
+      totalParentLossSamples += losses.length;
+    }
+    if (parentLossTrades.size > 0) {
+      errors.push(
+        `[info] M3 parent loss trades collected: parents=${parentLossTrades.size}/${parentPool.length} totalLossSamples=${totalParentLossSamples}`,
+      );
+    }
+
     try {
       crosses = await crossoverAgent.generateCrossovers(
         parentDsls,
         parentScores,
         crossoverCount,
-        // Filter Evolution M4: moduleParents 経路を確保 (= prompt 接続は M3 で別 PR)
-        moduleParents.length > 0 ? { moduleParents } : undefined,
+        // Filter Evolution M3 + M4: moduleParents (= フィルタ素材) と parentLossTrades
+        // (= 親 A の負けトレード一覧) を合わせて渡す。両方 / 片方 / 無しの全パターンが許容される。
+        moduleParents.length > 0 || parentLossTrades.size > 0
+          ? {
+              moduleParents: moduleParents.length > 0 ? moduleParents : undefined,
+              parentLossTrades: parentLossTrades.size > 0 ? parentLossTrades : undefined,
+            }
+          : undefined,
       );
     } catch (e) {
       errors.push(`crossover: ${e instanceof Error ? e.message : String(e)}`);
@@ -1299,10 +1338,17 @@ export class EvolutionLoop {
        */
       tradePnls?: readonly number[];
       /**
-       * Filter Evolution M2: 本格 BT で発生した trade list (entryTime + outcome のみ)。
-       * Win Rate Lift の親子比較に使う。failure 時 / 取得不能時は undefined。
+       * Filter Evolution M2 + M3: 本格 BT で発生した trade list。
+       * - M2 winRateLift: entryTime + outcome を参照
+       * - M3 CrossoverAgent: 負けトレード（outcome=='loss'）から entryTime + side + pnl を参照
+       * failure 時 / 取得不能時は undefined。
        */
-      trades?: ReadonlyArray<{ entryTime: string; outcome: 'win' | 'loss' | 'timeout' }>;
+      trades?: ReadonlyArray<{
+        entryTime: string;
+        side: 'long' | 'short';
+        pnl: number;
+        outcome: 'win' | 'loss' | 'timeout';
+      }>;
     }>
   > {
     const out: Array<{
@@ -1311,7 +1357,12 @@ export class EvolutionLoop {
       engineVersion: string;
       surrogateScore: number;
       tradePnls?: readonly number[];
-      trades?: ReadonlyArray<{ entryTime: string; outcome: 'win' | 'loss' | 'timeout' }>;
+      trades?: ReadonlyArray<{
+        entryTime: string;
+        side: 'long' | 'short';
+        pnl: number;
+        outcome: 'win' | 'loss' | 'timeout';
+      }>;
     }> = [];
     for (const { candidate: cand, dsl } of candidatesWithDsl) {
       const surrogateScore = scores.get(cand.dslId) ?? 0;
@@ -1367,12 +1418,15 @@ export class EvolutionLoop {
 
       // PR ⑤E: DSR 観測ログ用に trade pnls を保持。response.trades は Zod 契約で
       // 必須、各 entry に pnl が入っている (= analysisEngine schema)。
-      // Filter Evolution M2: winRateLift 観測用に entryTime + outcome も抽出。
-      // gate 判定 (= tradeCount/pf) より前に抽出することで、閾値未達 で落ちる候補も
-      // 観測ログ対象にする (= 失敗ケースでの filter 効果も観察したい)。
+      // Filter Evolution M2 + M3: winRateLift 観測用 + CrossoverAgent 文脈材料用に
+      // entryTime + side + pnl + outcome を抽出。gate 判定 (= tradeCount/pf) より前に
+      // 抽出することで、閾値未達 で落ちる候補も観測ログ対象にする
+      // (= 失敗ケースでの filter 効果 / 負けパターンも観察したい)。
       const tradePnls = response.trades.map((t) => t.pnl);
       const trades = response.trades.map((t) => ({
         entryTime: t.entryTime,
+        side: t.side,
+        pnl: t.pnl,
         outcome: t.outcome,
       }));
 
