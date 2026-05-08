@@ -5,13 +5,14 @@
  */
 
 const mockFindMany = jest.fn();
+const mockCreate = jest.fn();
 
 jest.mock('@prisma/client', () => {
   class MockPrismaClient {
     evolutionBacktestRun = {
       findMany: mockFindMany,
       findUnique: jest.fn(),
-      create: jest.fn(),
+      create: mockCreate,
     };
     $connect = jest.fn();
     $disconnect = jest.fn();
@@ -29,6 +30,7 @@ import {
 
 beforeEach(() => {
   mockFindMany.mockReset();
+  mockCreate.mockReset();
 });
 
 describe('classifyFailureReason', () => {
@@ -109,5 +111,145 @@ describe('EvolutionBacktestRunRepository.summarizeByEvolutionRun', () => {
     expect(summary.failed).toBe(0);
     expect(summary.failureReasonCounts).toEqual({});
     expect(summary.generations).toEqual([]);
+  });
+});
+
+// =================================================================
+// Filter Evolution Phase B-1: trades 列の永続化テスト
+// =================================================================
+
+const minimalDsl = {
+  id: 'dsl-1',
+  generation: 0,
+  parentIds: [],
+  regimeTarget: 'breakout',
+  symbol: 'EURUSD',
+  timeframe: '1h',
+  entry: {
+    direction: 'long' as const,
+    orderType: 'market' as const,
+    trigger: {
+      logic: 'AND' as const,
+      conditions: [{ lens: 'ohlcv' as const, feature: 'close', op: '>' as const, value: 0.0001 }],
+    },
+  },
+  stopLoss: { type: 'fixed_pips' as const, value: 30 },
+  takeProfit: { type: 'rr_ratio' as const, value: 1.5 },
+  parameters: {},
+  metadata: {
+    createdAt: '2026-05-09T00:00:00.000Z',
+    createdBy: 'crossover' as const,
+  },
+};
+
+describe('EvolutionBacktestRunRepository.create (Phase B-1: trades 永続化)', () => {
+  it('trades が指定された場合は JSONB として書き込まれる', async () => {
+    mockCreate.mockResolvedValue({ id: 'row-1' });
+    const repo = new EvolutionBacktestRunRepository();
+    const trades = [
+      { entryTime: '2024-01-01T00:00:00Z', side: 'long' as const, pnl: 12.5, outcome: 'win' as const },
+      { entryTime: '2024-01-02T00:00:00Z', side: 'long' as const, pnl: -8.2, outcome: 'loss' as const },
+    ];
+
+    await repo.create({
+      evolutionRunId: '00000000-0000-0000-0000-000000000001',
+      generation: 1,
+      candidateId: 'cand-1',
+      candidateHash: 'hash-1',
+      dslSnapshot: minimalDsl,
+      surrogateScore: 0.5,
+      formalBtPassed: true,
+      formalBtMetrics: { pf: 1.6, winRate: 0.55, tradeCount: 30 },
+      formalBtFailureReason: null,
+      engine: 'analysis-engine',
+      engineVersion: 'analysis-engine/test@1',
+      trades,
+    });
+
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    const createArg = mockCreate.mock.calls[0][0] as { data: { trades: unknown } };
+    expect(createArg.data.trades).toEqual(trades);
+  });
+
+  it('trades が undefined のときは Prisma.JsonNull (= DB NULL) で永続化', async () => {
+    mockCreate.mockResolvedValue({ id: 'row-2' });
+    const repo = new EvolutionBacktestRunRepository();
+
+    await repo.create({
+      evolutionRunId: '00000000-0000-0000-0000-000000000002',
+      generation: 0,
+      candidateId: 'cand-2',
+      candidateHash: 'hash-2',
+      dslSnapshot: minimalDsl,
+      surrogateScore: 0,
+      formalBtPassed: false,
+      formalBtMetrics: null,
+      formalBtFailureReason: 'analysis-engine BT failed: timeout',
+      engine: 'analysis-engine',
+      engineVersion: 'analysis-engine/test@1',
+      // trades 未指定 (= analysis-engine 例外で trade list 取得不能のケース)
+    });
+
+    const createArg = mockCreate.mock.calls[0][0] as { data: { trades: unknown } };
+    // Prisma.JsonNull は本ファイルの mock では文字列 'DbNull' として表現される
+    expect(createArg.data.trades).toBe('DbNull');
+  });
+
+  it('trades が空配列のときは [] を JSONB に書き込む (= 取引 0 件の正規ケース)', async () => {
+    mockCreate.mockResolvedValue({ id: 'row-3' });
+    const repo = new EvolutionBacktestRunRepository();
+
+    await repo.create({
+      evolutionRunId: '00000000-0000-0000-0000-000000000003',
+      generation: 0,
+      candidateId: 'cand-3',
+      candidateHash: 'hash-3',
+      dslSnapshot: minimalDsl,
+      surrogateScore: 0,
+      formalBtPassed: false,
+      formalBtMetrics: { pf: 0, winRate: 0, tradeCount: 0 },
+      formalBtFailureReason: 'tradeCount 0 < 20',
+      engine: 'analysis-engine',
+      engineVersion: 'analysis-engine/test@1',
+      trades: [],
+    });
+
+    const createArg = mockCreate.mock.calls[0][0] as { data: { trades: unknown } };
+    expect(createArg.data.trades).toEqual([]);
+  });
+});
+
+describe('EvolutionBacktestRunRepository.createMany (Phase B-1)', () => {
+  it('1 行失敗しても他は永続化を継続し、成功行のみ返す', async () => {
+    mockCreate
+      .mockResolvedValueOnce({ id: 'row-a' })
+      .mockRejectedValueOnce(new Error('connection lost'))
+      .mockResolvedValueOnce({ id: 'row-c' });
+
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const repo = new EvolutionBacktestRunRepository();
+    const baseRow = {
+      evolutionRunId: '00000000-0000-0000-0000-000000000099',
+      generation: 0,
+      candidateHash: 'hash',
+      dslSnapshot: minimalDsl,
+      surrogateScore: 0,
+      formalBtPassed: false,
+      formalBtMetrics: null,
+      formalBtFailureReason: null,
+      engine: 'analysis-engine',
+      engineVersion: 'analysis-engine/test@1',
+    };
+    const result = await repo.createMany([
+      { ...baseRow, candidateId: 'a' },
+      { ...baseRow, candidateId: 'b' },
+      { ...baseRow, candidateId: 'c' },
+    ]);
+
+    expect(result).toHaveLength(2);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('candidateId=b'),
+    );
+    warnSpy.mockRestore();
   });
 });
