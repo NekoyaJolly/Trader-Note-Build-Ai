@@ -43,14 +43,20 @@ export const parentPoolPolicy = {
 /**
  * PR #98 親プール統合後の配分。EdgeHypothesis 資産を再利用する 6 系統。
  * v2 が選ばれるかは buildParentPool の deps.edgeHypothesisLoader の有無で自動判定する。
+ *
+ * PR ⑤E (学術検証 fb): novelty_seed を 5% → 10% に引き上げる。Lehman & Stanley
+ * (2011) "Abandoning Objectives" の知見で、目的関数だけ追うと local optimum
+ * に落ちるため novelty 注入が不可欠とされる。市場レジーム変化時の多様性枯渇
+ * を防ぐため novelty 圧を増やす。差分は edge_screening_passed (35% → 30%)
+ * から振り替え (= 合計 100% 維持)。
  */
 export const parentPoolPolicyV2 = {
   edge_confirmed: 0.25,
-  edge_screening_passed: 0.35,
+  edge_screening_passed: 0.30,
   formal_bt_passed: 0.2,
   current_population: 0.1,
   edge_unverified: 0.05,
-  novelty_seed: 0.05,
+  novelty_seed: 0.10,
 } as const;
 
 export type ParentPoolSource =

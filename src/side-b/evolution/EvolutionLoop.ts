@@ -35,6 +35,7 @@ import { scoreFromValidationSummary } from './evolutionScore';
 // 閾値定義そのものは evolutionPromotionThresholds で一元管理を継続する。
 import type { StrategyPopulation } from './StrategyPopulation';
 import { runScreeningBacktest as defaultRunScreeningBacktest } from '../../backend/services/analysisEngineClient';
+import { computeDeflatedSharpeRatio } from '../../shared/statistics/deflatedSharpeRatio';
 import { dslToBacktestNotePayload } from '../strategy_dsl/dslToBacktestNotePayload';
 import { defaultParameterValues } from '../strategy_dsl/dslParameterUtils';
 import { VALIDATION_THRESHOLDS } from '../config/validationThresholds';
@@ -742,6 +743,31 @@ export class EvolutionLoop {
       return { ...r.candidate, dsl: r.dsl, repairHint: hint };
     });
     const promotionCandidates = formalBtVerifiedCandidates.filter((c) => c.formalBtPassed);
+
+    // PR ⑤E (学術検証 fb): 各 promotion candidate の Deflated Sharpe Ratio (DSR)
+    // を計算して観測ログに残す。本 PR では Promotion gate には組み込まず観測のみ。
+    // 試行回数 N = formalBtVerifiedCandidates.length (= 同 evolution_run の本格 BT
+    // 試行数、local 定義)。Bailey & López de Prado 2014 の式で「N 試行を補正しても
+    // 有意か」を評価。本番判定への組み込みは別 PR で対応予定。
+    if (promotionCandidates.length > 0) {
+      const dsrTrialCount = formalBtVerifiedCandidates.length;
+      const tradePnlsByDslId = new Map<string, readonly number[]>();
+      for (const r of verifyResults) {
+        if (r.tradePnls) tradePnlsByDslId.set(r.candidate.dslId, r.tradePnls);
+      }
+      for (const c of promotionCandidates) {
+        const pnls = tradePnlsByDslId.get(c.dslId) ?? [];
+        if (pnls.length === 0) continue;
+        const result = computeDeflatedSharpeRatio({ returns: pnls, trialCount: dsrTrialCount });
+        const detail = result.notComputable
+          ? `notComputable=${result.notComputable}`
+          : `dsr=${result.dsr.toFixed(3)} sr=${result.sharpeRatio.toFixed(3)} maxSr=${result.expectedMaxSr.toFixed(3)} skew=${result.skewness.toFixed(3)} kurt=${result.kurtosis.toFixed(3)}`;
+        errors.push(
+          `[info] DSR observation dslId=${c.dslId} ${detail} T=${result.sampleSize} N=${dsrTrialCount}`,
+        );
+      }
+    }
+
     const repairHintSummary = summarizeRepairHints(
       formalBtVerifiedCandidates
         .filter((c): c is typeof c & { repairHint: RepairHint } => Boolean(c.repairHint))
@@ -1193,6 +1219,11 @@ export class EvolutionLoop {
       dsl: StrategyDSL;
       engineVersion: string;
       surrogateScore: number;
+      /**
+       * PR ⑤E: 本格 BT で発生した trade ごとの pnl 配列。
+       * Deflated Sharpe Ratio (DSR) の観測ログ計算に使う。failure 時 / 取得不能時は undefined。
+       */
+      tradePnls?: readonly number[];
     }>
   > {
     const out: Array<{
@@ -1200,6 +1231,7 @@ export class EvolutionLoop {
       dsl: StrategyDSL;
       engineVersion: string;
       surrogateScore: number;
+      tradePnls?: readonly number[];
     }> = [];
     for (const { candidate: cand, dsl } of candidatesWithDsl) {
       const surrogateScore = scores.get(cand.dslId) ?? 0;
@@ -1282,6 +1314,10 @@ export class EvolutionLoop {
         continue;
       }
 
+      // PR ⑤E: DSR 観測ログ用に trade pnls を保持。response.trades は Zod 契約で
+      // 必須、各 entry に pnl が入っている (= analysisEngine schema)。
+      const tradePnls = response.trades.map((t) => t.pnl);
+
       out.push({
         candidate: {
           ...cand,
@@ -1291,6 +1327,7 @@ export class EvolutionLoop {
         dsl,
         engineVersion,
         surrogateScore,
+        tradePnls,
       });
     }
     return out;
