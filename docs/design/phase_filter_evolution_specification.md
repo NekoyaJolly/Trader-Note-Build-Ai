@@ -124,13 +124,16 @@ Nekoさん の指摘で本質的な再定義が決まった:
 
 「騙しを回避できた」を 2 値分類問題として捉える。filter は「取引するか / スキップするか」を判定する binary classifier。
 
-**前提**: 親 A の trade list と 子 A+F (= A から派生した child) の trade list を**同じ評価期間で**比較する。filter は trade を除去するだけで追加しない (= 子の trade list は親の subset)。
+**前提**: 親 A の trade list と 子 A+F (= A から派生した child) の trade list を**同じ評価期間で**比較する。filter は trade を除去するだけで追加しない (= 子の trade list は親の subset、何も除去しない identity filter も legitimate な subset)。
 
 | | A の結果 | A+F の結果 |
 |---|---|---|
 | **win** | W_A | W_AF |
 | **loss** | L_A | L_AF |
-| **total trades** | T_A = W_A + L_A | T_AF = W_AF + L_AF |
+| **timeout** | TO_A | TO_AF |
+| **total trades** | T_A = W_A + L_A + TO_A | T_AF = W_AF + L_AF + TO_AF |
+
+`winRate = win_count / total_count` で **timeout も分母に含める**。timeout は「勝ちでも負けでもない」中立扱いで勝率を保守的に下げる方向の設計 (= filter で勝ちが timeout 化された場合に勝率が正しく下がる)。
 
 採用指標 (= **Win Rate Lift with safety guard**):
 
@@ -154,14 +157,34 @@ winRateLift = winRate(A+F) / winRate(A)
 
 ### 2.2 計算に必要なデータ
 
-すべて **既存の `EvolutionBacktestRun` テーブルに保存済み**:
+**重要な発見** (= 実装時に判明、2026-05-08): `EvolutionBacktestRun` テーブルには
+`trades` 列が **存在しない**。`ScreeningBacktestRun` (= EdgeHypothesis 由来) には
+あるが、進化候補側 `EvolutionBacktestRun` のスキーマには `trades Json` フィールドが
+ない。
 
-- `EvolutionBacktestRun.trades` (Json): trade list (entryTime, entryPrice, exitTime, exitPrice, side, pnl, outcome)
-- `EvolutionBacktestRun.candidateId`: dslId
-- `EvolutionBacktestRun.dslSnapshot`: DSL 全体 (含む `metadata.parentIds[]`)
-- `EvolutionBacktestRun.formalBtMetrics`: pf / winRate / tradeCount
+既存データだけでは parent 側 trade list を取得できないため、本 PR (M2) では:
 
-→ **新たな DB 変更は不要**。既存データから計算可能。
+- **EvolutionLoop インスタンス内の in-memory map** (`tradesByDslId`) で世代間に
+  trade list を保持
+- 各候補の formal BT 完了時に entryTime + outcome を抽出してキャッシュ
+- 同インスタンスの次世代以降 (= multi-generation 経路) で親候補の trade list を
+  参照可能
+
+**制約**:
+- 単一世代 smoke では gen 1 親 (= novelty seed) は formal BT 履歴を持たないため
+  全件 notComputable で正常
+- multi-generation runner (= `--generations 2+`) で gen 2 以降から実 Lift 値が出る
+- インスタンス削除で消える (= cron/smoke 1 回ごとに揮発)
+
+利用するデータソース:
+- 親 A の trade list: `tradesByDslId.get(parentDslId)` (= prior 世代で保存済み)
+- 子 A+F の trade list: `verifyResults` の各 entry の `trades` フィールド
+- 親子関係: `dsl.parentIds[0]` (= 第一親、設計書 §2.3)
+- BT サマリ: `EvolutionBacktestRun.formalBtMetrics` (= 既存)
+
+**将来 PR**: `EvolutionBacktestRun` に `trades Json` 列を追加する DB migration を
+別 PR で対応すれば、cross-instance 分析や resume 対応が可能になる (= M2 完了後に
+判断、CLAUDE.md の「DB schema 変更は migration 必須レビュー対象」原則に従う)。
 
 ### 2.3 計算経路の設計
 

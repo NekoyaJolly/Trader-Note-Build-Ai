@@ -120,7 +120,7 @@ import {
  */
 export type EvolutionBacktestPersister = Pick<
   EvolutionBacktestRunRepository,
-  'createMany' | 'findRecentFormalBtPassed' | 'findByEvolutionRun'
+  'createMany' | 'findRecentFormalBtPassed'
 >;
 
 /**
@@ -795,9 +795,11 @@ export class EvolutionLoop {
     for (const r of verifyResults) {
       const parentIds = r.dsl.parentIds ?? [];
       if (parentIds.length === 0) continue; // seed / hypothesis 由来は親なしで観察対象外
-      if (!r.trades || r.trades.length === 0) continue; // analysis-engine 失敗時は計算不能
+      if (!r.trades) continue; // analysis-engine 自体が失敗 (= response 取得不能) のケースのみ skip
       // 第一親 (= primary parent) を base とする (設計書 §2.3)。crossover の場合、
       // parentIds = [parent_A, parent_B] で parent_A を base、parent_B を filter 素材とする想定。
+      // 子の trades が空 (= filter が全 reject) は computeWinRateLift 側で notComputable
+      // として記録される重要な観測情報なので、空配列でも計算ループに通す。
       const parentId = parentIds[0];
       const parentTrades = this.tradesByDslId.get(parentId);
       if (!parentTrades) {
@@ -1353,6 +1355,17 @@ export class EvolutionLoop {
       };
       const engineVersion = response.engineVersion;
 
+      // PR ⑤E: DSR 観測ログ用に trade pnls を保持。response.trades は Zod 契約で
+      // 必須、各 entry に pnl が入っている (= analysisEngine schema)。
+      // Filter Evolution M2: winRateLift 観測用に entryTime + outcome も抽出。
+      // gate 判定 (= tradeCount/pf) より前に抽出することで、閾値未達 で落ちる候補も
+      // 観測ログ対象にする (= 失敗ケースでの filter 効果も観察したい)。
+      const tradePnls = response.trades.map((t) => t.pnl);
+      const trades = response.trades.map((t) => ({
+        entryTime: t.entryTime,
+        outcome: t.outcome,
+      }));
+
       if (formalBtMetrics.tradeCount < FORMAL_BT_MIN_TRADES) {
         out.push({
           candidate: {
@@ -1364,6 +1377,8 @@ export class EvolutionLoop {
           dsl,
           engineVersion,
           surrogateScore,
+          tradePnls,
+          trades,
         });
         continue;
       }
@@ -1378,19 +1393,11 @@ export class EvolutionLoop {
           dsl,
           engineVersion,
           surrogateScore,
+          tradePnls,
+          trades,
         });
         continue;
       }
-
-      // PR ⑤E: DSR 観測ログ用に trade pnls を保持。response.trades は Zod 契約で
-      // 必須、各 entry に pnl が入っている (= analysisEngine schema)。
-      const tradePnls = response.trades.map((t) => t.pnl);
-      // Filter Evolution M2: winRateLift 観測用に entryTime + outcome のみ抽出して保持。
-      // 全 fields を保持すると JSON サイズが膨らむため必要最小限に絞る。
-      const trades = response.trades.map((t) => ({
-        entryTime: t.entryTime,
-        outcome: t.outcome,
-      }));
 
       out.push({
         candidate: {

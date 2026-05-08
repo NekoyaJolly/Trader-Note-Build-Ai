@@ -87,8 +87,14 @@ const DEFAULT_MIN_ABSOLUTE_TRADE_COUNT = 20;
 
 /**
  * trade list から win / loss 件数と total を集計する。
- * timeout は total には含めるが win/loss には含めない (= 勝率計算では除外、
- * 取引数 guard では含める保守的な設計)。
+ *
+ * 設計上の取扱い:
+ * - `totalCount = trades.length` (= win + loss + timeout を全て含む)
+ * - `winCount` には timeout を含めない、`lossCount` にも timeout を含めない
+ * - 勝率計算 `winRate = winCount / totalCount` の **分母には timeout が含まれる**
+ *   (= timeout は「勝ちでも負けでもない」中立扱い、勝率を保守的に下げる方向の設計)
+ * - これは「filter で timeout が増えても勝率が下がるべきでない」という意味で
+ *   保守的判定。filter で勝ちが timeout 化された場合 winRate は下がる。
  */
 function countOutcomes(trades: readonly WinRateLiftTrade[]): {
   winCount: number;
@@ -105,11 +111,18 @@ function countOutcomes(trades: readonly WinRateLiftTrade[]): {
 }
 
 /**
- * 子の trade list が親の trade list の strict subset かどうかを entryTime ベースで確認。
+ * 子の trade list が親の trade list の subset (= 部分集合、等しい場合も含む) かどうかを
+ * entryTime ベースで確認。
+ *
  * filter は本来 trade を除去するだけ (= entry timing をずらさない) なので、子の全 entry が
- * 親に存在するはず。subset でなければ filter 以外の影響が混入している。
+ * 親に存在するはず。「何も除去しない identity filter」も legitimate な subset として
+ * 扱う (= filter が不発でも entry list が一致する)。
+ *
+ * 真部分集合 (= 子 < 親) を要求しないのは、Lift 計算の意味論として「filter が
+ * 効果なし = Lift = 1.0」が正常結果のため。`childTrades.length < parentTrades.length`
+ * の判定は呼び出し側の判断 (= safety guard 等) に委ねる。
  */
-function isStrictSubset(
+function isSubset(
   parentTrades: readonly WinRateLiftTrade[],
   childTrades: readonly WinRateLiftTrade[],
 ): boolean {
@@ -181,11 +194,11 @@ export function computeWinRateLift(inputs: WinRateLiftInputs): WinRateLiftResult
   if (child.totalCount === 0) {
     return { ...baseResult, lift: 1.0, notComputable: 'child has no trades (= filter rejected all)' };
   }
-  if (!isStrictSubset(parentTrades, childTrades)) {
+  if (!isSubset(parentTrades, childTrades)) {
     return {
       ...baseResult,
       lift: 1.0,
-      notComputable: 'child is not a strict subset of parent (= filter changed entry timing)',
+      notComputable: 'child is not a subset of parent (= filter changed entry timing)',
     };
   }
 

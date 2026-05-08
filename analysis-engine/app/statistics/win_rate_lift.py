@@ -72,8 +72,14 @@ class WinRateLiftResult:
 def _count_outcomes(
     trades: Sequence[WinRateLiftTrade],
 ) -> tuple[int, int, int]:
-    """trade list から (win件数, loss件数, total件数) を集計。timeout は total
-    に含めるが win/loss には含めない (= 勝率計算では除外、保守的)。"""
+    """trade list から (win件数, loss件数, total件数) を集計。
+
+    設計上の取扱い:
+    - total_count = len(trades) (= win + loss + timeout を全て含む)
+    - win_count に timeout は含めない、loss_count にも timeout は含めない
+    - 勝率計算 win_rate = win_count / total_count の **分母には timeout が含まれる**
+      (= timeout は「勝ちでも負けでもない」中立扱い、勝率を保守的に下げる方向)
+    """
     win_count = 0
     loss_count = 0
     for t in trades:
@@ -84,11 +90,16 @@ def _count_outcomes(
     return win_count, loss_count, len(trades)
 
 
-def _is_strict_subset(
+def _is_subset(
     parent_trades: Sequence[WinRateLiftTrade],
     child_trades: Sequence[WinRateLiftTrade],
 ) -> bool:
-    """子の trade list が親の trade list の strict subset かを entry_time で確認。"""
+    """子の trade list が親の trade list の subset (= 部分集合、等しい場合も含む)
+    かどうかを entry_time ベースで確認。
+
+    「何も除去しない identity filter」も legitimate な subset として扱う
+    (= 真部分集合 を要求しない、Lift = 1.0 が正常結果のため)。
+    """
     parent_entry_times = {t.entry_time for t in parent_trades}
     return all(c.entry_time in parent_entry_times for c in child_trades)
 
@@ -145,10 +156,10 @@ def compute_win_rate_lift(
         return _result(1.0, "parent has zero win rate")
     if c_total == 0:
         return _result(1.0, "child has no trades (= filter rejected all)")
-    if not _is_strict_subset(parent_trades, child_trades):
+    if not _is_subset(parent_trades, child_trades):
         return _result(
             1.0,
-            "child is not a strict subset of parent (= filter changed entry timing)",
+            "child is not a subset of parent (= filter changed entry timing)",
         )
 
     min_required_win = sg.min_win_preservation_ratio * p_win

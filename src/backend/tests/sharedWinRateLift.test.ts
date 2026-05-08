@@ -59,14 +59,14 @@ describe('computeWinRateLift', () => {
       expect(r.notComputable).toContain('child has no trades');
     });
 
-    it('child not strict subset (= 異なる entryTime あり) → notComputable', () => {
+    it('child not subset (= 異なる entryTime あり) → notComputable', () => {
       const parent = makeTrades([['win', 10], ['loss', 10]]);
       const child: WinRateLiftTrade[] = [
         makeTrade('2026-99-99T00:00:00.000Z', 'win'), // parent に存在しない entryTime
       ];
       const r = computeWinRateLift({ parentTrades: parent, childTrades: child });
       expect(r.lift).toBe(1.0);
-      expect(r.notComputable).toContain('not a strict subset');
+      expect(r.notComputable).toContain('not a subset');
     });
   });
 
