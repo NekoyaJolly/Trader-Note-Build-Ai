@@ -25,6 +25,13 @@ import type { StrategyPopulation } from './StrategyPopulation';
 import type { EvolutionBacktestRunRepository } from '../../backend/repositories/evolutionBacktestRunRepository';
 import type { EdgeHypothesis, EdgeStatus } from '../models/edgeHypothesis';
 import { dslFromHypothesis, stableDslIdFromHypothesis } from './dslFromHypothesis';
+// Filter Evolution M4: ModuleParent (= フィルタ素材) を crossover 用候補として並列に提供。
+// 親プール (= StrategyDSL parents) とは別軸で、entry 1 つ分の filter spec として渡す。
+import {
+  selectModuleParents,
+  type ModuleParent,
+  type ModuleParentCategory,
+} from './moduleParentRegistry';
 
 // =================================================================
 // Policy 設定
@@ -97,6 +104,17 @@ export interface ParentPoolSummary {
     /** 変換失敗 / 警告ログ (debug 用、最大 10 件) */
     warnings: string[];
   };
+  /**
+   * Filter Evolution M4: ModuleParent (= フィルタ素材) の選別結果。
+   * crossover/mutation で「親 A に追加できる filter 部品」として使う。
+   * - `selected`: 選別された ModuleParent 件数
+   * - `byCategory`: カテゴリ別件数 (= 観測用、調整判断材料)
+   * 本 PR (M4) では interface 拡張のみで prompt には未連携 (M3 で接続)。
+   */
+  moduleParents?: {
+    selected: number;
+    byCategory: Partial<Record<ModuleParentCategory, number>>;
+  };
 }
 
 /**
@@ -120,6 +138,17 @@ export interface BuildParentPoolDeps {
    * edge_unverified) のロード口。null / undefined なら v1 配分にフォールバック。
    */
   edgeHypothesisLoader?: EdgeHypothesisLoader | null;
+  /**
+   * Filter Evolution M4: ModuleParent を選別する件数。0 や undefined で無効化。
+   * 推奨: 5 (= 設計書 §4.2、親 A 1 つあたり 3〜5 種の filter 候補を渡す)。
+   * 静的選択 (= moduleParentRegistry の round-robin) なので副作用なし。
+   */
+  moduleParentCount?: number;
+  /**
+   * Filter Evolution M4: ModuleParent 選別の rotation offset (= テスト時の決定性 pin)。
+   * 通常運用では未指定で OK (= 0 から開始)。
+   */
+  moduleParentRotationOffset?: number;
 }
 
 // =================================================================
@@ -351,7 +380,17 @@ export async function buildParentPool(
   targetSize: number,
   scores: Map<string, number>,
   deps: BuildParentPoolDeps,
-): Promise<{ entries: ParentPoolEntry[]; summary: ParentPoolSummary }> {
+): Promise<{
+  entries: ParentPoolEntry[];
+  /**
+   * Filter Evolution M4: ModuleParent 選別結果 (= フィルタ素材)。
+   * `deps.moduleParentCount` 未指定 / 0 なら空配列。crossover agent には
+   * `entries` (= StrategyDSL 親) と並列に渡し、prompt で「親 A に AND 追加
+   * できる filter 候補」として扱う (M3 で接続)。
+   */
+  moduleEntries: ModuleParent[];
+  summary: ParentPoolSummary;
+}> {
   const hasEdgeLoader = deps.edgeHypothesisLoader != null;
   const requested = computeRequestedCounts(targetSize, hasEdgeLoader);
   const entries: ParentPoolEntry[] = [];
@@ -545,7 +584,31 @@ export async function buildParentPool(
     };
   }
 
-  return { entries, summary };
+  // === 7. ModuleParent (= フィルタ素材) 選別 (Filter Evolution M4) ===
+  // crossover/mutation で「親 A に追加できる filter 部品」として並列に提供する。
+  // 既存の StrategyDSL 親プールとは別軸 (= moduleEntries として返す)。
+  // 本 PR (M4) では選別 + summary 反映のみ、prompt 接続は M3 で別 PR。
+  const moduleParentCount = deps.moduleParentCount ?? 0;
+  const moduleEntries: ModuleParent[] =
+    moduleParentCount > 0
+      ? selectModuleParents({
+          regime,
+          count: moduleParentCount,
+          rotationOffset: deps.moduleParentRotationOffset,
+        })
+      : [];
+  if (moduleEntries.length > 0) {
+    const byCategory: Partial<Record<ModuleParentCategory, number>> = {};
+    for (const m of moduleEntries) {
+      byCategory[m.category] = (byCategory[m.category] ?? 0) + 1;
+    }
+    summary.moduleParents = {
+      selected: moduleEntries.length,
+      byCategory,
+    };
+  }
+
+  return { entries, moduleEntries, summary };
 }
 
 /**

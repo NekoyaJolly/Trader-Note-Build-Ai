@@ -12,6 +12,8 @@ import { formatPatternMetadataTable } from '../../shared/patterns/promptTable';
 import { loadPromptWithGlobal, type PromptMacros } from '../prompts/loader';
 import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
+// Filter Evolution M4: ModuleParent 受領経路 (interface のみ、本 PR では prompt 未連携、M3 で接続)。
+import type { ModuleParent } from '../evolution/moduleParentRegistry';
 import { modelFor } from '../../config';
 import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import { extractJson } from './llmJsonExtract';
@@ -66,12 +68,31 @@ export class CrossoverAgent {
 
   /**
    * エリート集合からペアを組み、子個体を生成
+   *
+   * Filter Evolution M4: `moduleParents` (= フィルタ素材) を optional 引数として
+   * 受け取れるように拡張。本 PR では受領のみで prompt には未連携 (= 観測経路の確保
+   * のみ)。M3 で「親 A の負けトレードに対してどの ModuleParent を選んで filter
+   * 追加するか」を LLM に判断させる prompt 改修を行う。
    */
   async generateCrossovers(
     elites: StrategyDSL[],
     scores: Map<string, number>,
     pairCount: number,
+    options?: {
+      /** Filter Evolution M4: フィルタ素材候補 (= moduleParentRegistry から選別済) */
+      readonly moduleParents?: readonly ModuleParent[];
+    },
   ): Promise<StrategyDSL[]> {
+    // M4 観測ログ: moduleParents を受領した事実だけ残す (= 件数・カテゴリ集計、prompt 未使用)
+    if (options?.moduleParents && options.moduleParents.length > 0) {
+      const byCategory: Record<string, number> = {};
+      for (const m of options.moduleParents) {
+        byCategory[m.category] = (byCategory[m.category] ?? 0) + 1;
+      }
+      console.info(
+        `[CrossoverAgent] M4 moduleParents received count=${options.moduleParents.length} byCategory=${JSON.stringify(byCategory)} (= prompt 未連携、M3 で接続予定)`,
+      );
+    }
     if (elites.length < 2) return [];
     const out: StrategyDSL[] = [];
     const system = await this.resolveSystemPrompt();

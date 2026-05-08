@@ -485,4 +485,76 @@ describe('buildParentPool (PR #95 親個体プール v1)', () => {
     expect(summary.fallbackApplied).toBe(true);
     expect(summary.totalSelected).toBe(5);
   });
+
+  // ===========================================
+  // Filter Evolution M4: ModuleParent 統合
+  // ===========================================
+
+  it('M4-1. moduleParentCount 未指定なら moduleEntries は空、summary.moduleParents も undefined', async () => {
+    const population = new StrategyPopulation(undefined);
+    const { moduleEntries, summary } = await buildParentPool('breakout', 5, new Map(), {
+      population,
+      evolutionBacktestRepo: null,
+    });
+    expect(moduleEntries).toEqual([]);
+    expect(summary.moduleParents).toBeUndefined();
+  });
+
+  it('M4-2. moduleParentCount=5 で 5 件の moduleEntries が選別、summary.moduleParents に集計', async () => {
+    const population = new StrategyPopulation(undefined);
+    const { moduleEntries, summary } = await buildParentPool('breakout', 5, new Map(), {
+      population,
+      evolutionBacktestRepo: null,
+      moduleParentCount: 5,
+    });
+    expect(moduleEntries).toHaveLength(5);
+    expect(summary.moduleParents).toBeDefined();
+    expect(summary.moduleParents!.selected).toBe(5);
+    // 少なくとも 1 カテゴリは含まれる
+    const categories = Object.keys(summary.moduleParents!.byCategory);
+    expect(categories.length).toBeGreaterThan(0);
+  });
+
+  it('M4-3. moduleParents は StrategyDSL parentPool とは独立して選別される (= entries / moduleEntries 両方が並列に出る)', async () => {
+    repoMock.findRecentFormalBtPassed.mockResolvedValue([
+      makeFormalBtPassedRow('fbt-1', 'h1'),
+      makeFormalBtPassedRow('fbt-2', 'h2'),
+    ]);
+    const population = new StrategyPopulation(undefined);
+    population.add('breakout', makeDsl('pop-1'));
+    population.add('breakout', makeDsl('pop-2'));
+    const { entries, moduleEntries, summary } = await buildParentPool(
+      'breakout',
+      5,
+      new Map(),
+      {
+        population,
+        evolutionBacktestRepo: repoMock,
+        moduleParentCount: 3,
+      },
+    );
+    // strategy parent pool (= entries) は targetSize=5 で構築
+    expect(summary.totalSelected).toBe(5);
+    expect(entries.length).toBe(5);
+    // moduleEntries は独立して 3 件
+    expect(moduleEntries).toHaveLength(3);
+    expect(summary.moduleParents!.selected).toBe(3);
+  });
+
+  it('M4-4. moduleParentRotationOffset で決定論性 pin', async () => {
+    const population = new StrategyPopulation(undefined);
+    const a = await buildParentPool('breakout', 5, new Map(), {
+      population,
+      evolutionBacktestRepo: null,
+      moduleParentCount: 1,
+      moduleParentRotationOffset: 0,
+    });
+    const b = await buildParentPool('breakout', 5, new Map(), {
+      population,
+      evolutionBacktestRepo: null,
+      moduleParentCount: 1,
+      moduleParentRotationOffset: 1,
+    });
+    expect(a.moduleEntries[0].id).not.toBe(b.moduleEntries[0].id);
+  });
 });

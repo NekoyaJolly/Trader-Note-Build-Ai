@@ -646,9 +646,13 @@ export class EvolutionLoop {
       population,
       evolutionBacktestRepo: this.evolutionBacktestRepo,
       edgeHypothesisLoader: this.edgeHypothesisLoader,
+      // Filter Evolution M4: 1 世代あたり 5 種の ModuleParent (= フィルタ素材) を選別。
+      // crossoverAgent に渡す経路は確保するが prompt 接続は M3 で別 PR (= 観測のみ)。
+      moduleParentCount: 5,
     });
     population.removeWorst(regime, 5, scores);
     const parentPool = parentPoolResult.entries;
+    const moduleParents = parentPoolResult.moduleEntries;
     const parentDsls = parentPool.map((e) => e.dsl);
     // mutation/crossover は score Map を期待するため、parent pool 側のスコアをマージ。
     // formal_bt_passed / novelty_seed は surrogate score を持たないため 0 を仮置きする。
@@ -699,7 +703,13 @@ export class EvolutionLoop {
       }
     }
     try {
-      crosses = await crossoverAgent.generateCrossovers(parentDsls, parentScores, crossoverCount);
+      crosses = await crossoverAgent.generateCrossovers(
+        parentDsls,
+        parentScores,
+        crossoverCount,
+        // Filter Evolution M4: moduleParents 経路を確保 (= prompt 接続は M3 で別 PR)
+        moduleParents.length > 0 ? { moduleParents } : undefined,
+      );
     } catch (e) {
       errors.push(`crossover: ${e instanceof Error ? e.message : String(e)}`);
     }
