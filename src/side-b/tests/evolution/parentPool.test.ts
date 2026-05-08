@@ -58,6 +58,9 @@ function makeFormalBtPassedRow(id: string, candidateHash: string, regime = 'brea
     formalBtFailureReason: null,
     engine: 'analysis-engine',
     engineVersion: 'test',
+    // Phase B-1: 既存 mock 行は trades フィールドを使わない (= parentPool 経路は dslSnapshot のみ参照)
+    // 型整合のため null を指定 (= SQL NULL 相当、Phase B-1 以前の行と同等の意味論)
+    trades: null,
     createdAt: new Date(),
   };
 }
