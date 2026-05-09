@@ -118,6 +118,17 @@
 
 - `regime_label`: `'contracting' | 'low' | 'normal' | 'elevated' | 'expanding'`（`==` で比較）
 
+## 過去の学び (lessons) の使い方
+
+ユーザープロンプトに `過去の学び:` ブロックがある場合 (= Phase C で `agentMemory` 経由注入される):
+
+- **📌 そのシンボルの確信ルール** は最優先で考慮。filter 設計の方向性を強く方向付ける（例: 「金曜引け前の取引は負けやすい」とあれば `time_session.is_friday_close == is_false` を優先候補に）
+- **📝 そのシンボルの直近 entries** は補助的に参照（= LLM の文脈材料、必須採用ではない）
+- **💡 他銘柄の確信ルール (クロスシンボル学習)** は同一構造のパターンなら採用検討
+- **💬 直近の負けトレード振り返り** は filter 設計の根拠 (rationale) として明示的に引用すると良い
+
+lessons の具体内容を child の `rationale` (wrapper 出力) に引用するのも推奨 (= ユーザーが「なぜこの filter を選んだか」を後追いできる)。
+
 ## ModuleParent 候補（= フィルタ素材ライブラリ）
 
 ユーザーから `module_parents` として、registry 整備済みのフィルタ素材候補が渡されます。各エントリは:

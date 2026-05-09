@@ -19,6 +19,7 @@ import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import { extractJson } from './llmJsonExtract';
 import { recordAgentUsage } from './scoringRecorder';
 import type { RepairHint } from '../evolution/repairHintPolicy';
+import { buildLessonsPromptBlock } from './CrossoverAgent';
 
 /**
  * PR #100: 親候補 ID → RepairHint の対応表。
@@ -190,10 +191,23 @@ export class MutationAgent {
           `上記の target を優先して修復し、allowedChangeScope を超える大改変は行わないでください。\n`
         : '';
 
+    // Phase C: エリートの先頭 (= 主たる親) の symbol で agentMemory から lessons を取得して
+    // prompt 末尾に注入。複数 symbol が混在する場合は先頭採用 (= 通常 evolutionRegimes は
+    // symbol 単位で運用される想定)。lessons 0 件なら何もしない (= 既存挙動と同等)。
+    const primarySymbol = effectiveElites[0]?.symbol;
+    const lessonsResult = buildLessonsPromptBlock(primarySymbol);
+    const lessonsBlock = lessonsResult?.block ?? '';
+    if (lessonsResult) {
+      console.info(
+        `[MutationAgent] Phase C lessons injected symbol=${primarySymbol} count=${lessonsResult.count}`,
+      );
+    }
+
     const user =
       `エリート戦略（JSON）:\n${payload}\n\n` +
       `スコア:\n${perfLines.join('\n')}\n` +
       repairSection +
+      lessonsBlock +
       `\n上記を参考に、異なる変異を含む戦略をちょうど ${count} 件、JSON 配列のみで返してください。`;
 
     if (repairLines.length > 0) {

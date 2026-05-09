@@ -15,6 +15,7 @@
 import { randomUUID } from 'crypto';
 
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
+import { agentMemory } from '../agent/agentMemory';
 import { formatIndicatorMetadataTable } from '../../shared/indicators/promptTable';
 import { formatPatternMetadataTable } from '../../shared/patterns/promptTable';
 import { loadPromptWithGlobal, type PromptMacros } from '../prompts/loader';
@@ -27,6 +28,39 @@ import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import type { JsonValue } from '../../utils/jsonValue';
 import { extractJson } from './llmJsonExtract';
 import { recordAgentUsage } from './scoringRecorder';
+
+/**
+ * Filter Evolution Phase C (2026-05-09): mutation/crossover prompt に注入する lessons の
+ * 上限件数。token 消費を抑えつつ確信ルール / 直近 entries / クロスシンボル / 直近負けトレードを
+ * 載せられる現実的な値。`agentMemory.getLessonsForStrategy(symbol)` の出力上位 N 件を採用する。
+ *
+ * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.C.1
+ */
+const LESSONS_PROMPT_LIMIT = 10;
+
+/**
+ * Phase C: lessons block を生成する。
+ *
+ * - 親 DSL の symbol を `agentMemory.getLessonsForStrategy(symbol)` のキーに使う
+ * - lessons が 0 件 / undefined symbol なら null (= prompt に含めない)
+ * - 上位 N 件 (= LESSONS_PROMPT_LIMIT) で truncate
+ * - 観測ログ ([CrossoverAgent] / [MutationAgent] Phase C lessons injected) は呼び出し側で出す
+ *
+ * @returns lessons block (= 改行始まりの文字列、user prompt 末尾に連結する想定) / null
+ */
+export function buildLessonsPromptBlock(symbol: string | undefined): {
+  block: string;
+  count: number;
+} | null {
+  if (!symbol) return null;
+  const lessons = agentMemory.getLessonsForStrategy(symbol);
+  if (lessons.length === 0) return null;
+  const truncated = lessons.slice(0, LESSONS_PROMPT_LIMIT);
+  const block =
+    `\n\n過去の学び (= 直近の Reflection AI / 確信ルールから抽出、symbol=${symbol}、` +
+    `上位 ${truncated.length}/${lessons.length} 件):\n${truncated.join('\n')}`;
+  return { block, count: truncated.length };
+}
 
 /**
  * Filter Evolution M3: 親 A の負けトレード概要（= LLM への文脈材料）。
@@ -259,12 +293,23 @@ export class CrossoverAgent {
               }):\n${JSON.stringify(lossTradesForPrompt, null, 2)}`
             : `\n\n親A_loss_trades: なし (= 親 A は直近で本格 BT 履歴なし、または負けトレード 0 件。一般的な filter を選んでよい)`;
 
+        // Phase C: 親 A の symbol で agentMemory から lessons を取得して prompt 末尾に注入。
+        // lessons 0 件 / symbol 不明なら何もしない (= 既存挙動と同等)。
+        const lessonsResult = buildLessonsPromptBlock(a.symbol);
+        const lessonsBlock = lessonsResult?.block ?? '';
+        if (lessonsResult) {
+          console.info(
+            `[CrossoverAgent] Phase C lessons injected symbol=${a.symbol} count=${lessonsResult.count}`,
+          );
+        }
+
         const line =
           `親A score=${(scores.get(a.id) ?? 0).toFixed(4)}\n親B score=${(scores.get(b.id) ?? 0).toFixed(4)}`;
         const user =
           `${line}\n\n親A:\n${JSON.stringify(a, null, 2)}\n\n親B:\n${JSON.stringify(b, null, 2)}` +
           lossTradesBlock +
           moduleParentBlock +
+          lessonsBlock +
           `\n\n親 A の base setup を維持しつつ、親 A の負けトレードを除去する filter を 1 つ AND 結合で追加した「1 件」の StrategyDSL を、` +
           `wrapper 形式 \`{ child_dsl, rejected_loss_count, preserved_win_count, rationale }\` で返してください（配列にしない）。`;
 
