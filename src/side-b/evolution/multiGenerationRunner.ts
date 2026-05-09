@@ -42,6 +42,13 @@ import {
   type QualityDiversityArchiveUpdateSummaryV1,
 } from './qualityDiversityArchiveLite';
 import type { StrategyDSL } from '../strategy_dsl/schema';
+// Filter Evolution Phase D-1b (2026-05-09): 世代単位 reflection エージェント + lesson 永続化。
+// runner は agent / repo を optional 引数で受け取り、未指定時は何もしない (= 既存挙動維持)。
+import type { GenerationReflectionAgent, GenerationReflectionInput } from '../agents/GenerationReflectionAgent';
+import type {
+  GenerationLessonInsertData,
+  GenerationLessonPersister,
+} from '../../backend/repositories/generationLessonRepository';
 
 // =================================================================
 // 設定
@@ -103,6 +110,32 @@ export interface MultiGenerationRunOptions {
   qualityDiversityArchive?: boolean;
   /** PR #108: 各世代に注入する archive parent 数の上限。default 2。 */
   qualityDiversityArchiveParentLimit?: number;
+  /**
+   * Filter Evolution Phase D-1b (2026-05-09): 世代単位 reflection を有効化するか。
+   *
+   * 有効時は各世代終了直後に `generationReflectionAgent.reflect()` を呼び、
+   * 出力 lessons を `generationLessonRepo` に永続化する。
+   * 未指定 / agent / repo が両方 undefined なら何もしない (= 既存挙動維持)。
+   *
+   * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.D.3
+   */
+  generationReflectionAgent?: GenerationReflectionAgent;
+  /** Phase D-1b: lessons 永続化口。`generationReflectionAgent` と一緒に inject する。 */
+  generationLessonRepo?: GenerationLessonPersister;
+  /**
+   * Phase D-1b: 直前世代の summary 履歴を reflect 時に渡す上限件数 (default 3)。
+   * 多すぎると prompt 肥大化、少なすぎると trend 検出が困難。
+   */
+  reflectionPriorGenerationsLimit?: number;
+  /**
+   * Phase D-1b (PR #145 Copilot review #5): GenerationLesson 永続化時の evolutionRunId。
+   *
+   * runner は `EvolutionLoop` の private な evolutionRunId にアクセスできないため、
+   * 呼び出し側 (= sideBScheduler / smoke) が明示的に渡す。`generationReflectionAgent` +
+   * `generationLessonRepo` を inject する場合は本フィールドも必須 (= 一緒に渡さないと
+   * `null` placeholder で永続化されてしまうリスクを排除)。
+   */
+  evolutionRunIdForLessons?: string;
 }
 
 /**
@@ -166,6 +199,23 @@ export interface MultiGenerationRunReport {
   qualityDiversityArchiveUpdates?: QualityDiversityArchiveUpdateSummaryV1[];
   /** PR #108: QD archive 有効時のみ非 undefined。 */
   qualityDiversityArchiveSummary?: QualityDiversityArchiveSummaryV1;
+  /**
+   * Phase D-1b (2026-05-09): 各世代の reflection 結果サマリ。
+   * generationReflectionAgent が指定されているときのみ非空。
+   * 各 entry は `{ generationIndex, lessons[], summary, confidence, persistedCount }` で、
+   * lessons は LLM 出力そのまま、persistedCount は実際に DB に永続化された件数 (= < lessons.length なら一部失敗)。
+   * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.D
+   */
+  generationReflections?: ReadonlyArray<{
+    readonly generationIndex: number;
+    readonly lessons: ReadonlyArray<{
+      readonly category: string;
+      readonly lesson: string;
+    }>;
+    readonly summary: string;
+    readonly confidence: number;
+    readonly persistedCount: number;
+  }>;
 }
 
 /**
@@ -380,6 +430,29 @@ export async function runMultiGenerationEvolutionV1(input: {
   const qdUpdates: QualityDiversityArchiveUpdateSummaryV1[] = [];
   let qdTotalSelectedParents = 0;
 
+  // Phase D-1b: GenerationReflectionAgent + repo + evolutionRunId の 3 点が全て揃ったときのみ ON。
+  // PR #145 Copilot review #5: evolutionRunId が未指定だと永続化できないため、必須条件に加える。
+  const reflectionEnabled =
+    opts.generationReflectionAgent !== undefined &&
+    opts.generationLessonRepo !== undefined &&
+    opts.evolutionRunIdForLessons !== undefined;
+  const reflectionPriorLimit = opts.reflectionPriorGenerationsLimit ?? 3;
+  // mutable な作業用配列。最終戻り値時に readonly 配列として公開される。
+  const generationReflections: Array<{
+    generationIndex: number;
+    lessons: Array<{ category: string; lesson: string }>;
+    summary: string;
+    confidence: number;
+    persistedCount: number;
+  }> = [];
+  // Phase D-1b: reflect 入力用の prior generations 履歴 (= 直近 N 世代の summary)。
+  const priorGenerationSummaries: Array<{
+    generationIndex: number;
+    promotionCandidates: number;
+    validationConfirmed: number;
+    formalBtPassed: number;
+  }> = [];
+
   const trend = emptyTrend(requested);
   const runWarnings: string[] = [];
   if (clampWarning) {
@@ -537,6 +610,86 @@ export async function runMultiGenerationEvolutionV1(input: {
         qdArchiveState = upd.nextState;
         qdUpdates.push(upd.updateSummary);
       }
+
+      // Phase D-1b (2026-05-09): 当世代終了直後に reflection を実行し、lessons を永続化。
+      // 失敗 (LLM API / Zod / DB) は飲んで世代結果に影響させない (= warning ログのみ)。
+      // 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.D.3
+      //
+      // PR #145 Copilot review #3/#4/#5 対応:
+      //   - dead code (`evolutionRunIdForLesson` placeholder) を削除
+      //   - 矛盾コメント (= 「runner は永続化しない」と書きつつ実装は永続化していた) を整理
+      //   - `evolutionRunId` を `opts.evolutionRunIdForLessons` から受け取る形に変更
+      //     (= ダミー UUID + wrapper 上書き設計を排除して型 / 引数で事故を防ぐ)
+      if (
+        reflectionEnabled &&
+        opts.generationReflectionAgent !== undefined &&
+        opts.generationLessonRepo !== undefined &&
+        opts.evolutionRunIdForLessons !== undefined
+      ) {
+        try {
+          const formalBtPassedCount = report.formalBtVerifiedCandidates.filter(
+            (c) => c.formalBtPassed,
+          ).length;
+          const winRateLiftLogs = report.errors.filter((e) => e.includes('win rate lift'));
+          const reflectionInput: GenerationReflectionInput = {
+            regime: opts.regime,
+            generationIndex,
+            generationsTotal: generations,
+            promotionCandidates: report.promotionCandidates.length,
+            validationConfirmed: report.oosAwarePromotionSummary.validationConfirmed,
+            formalBtPassed: formalBtPassedCount,
+            mutantsReceived: report.mutantsReceived,
+            crossoversReceived: report.crossoversReceived,
+            winRateLiftLogs,
+            priorGenerations: priorGenerationSummaries.slice(-reflectionPriorLimit),
+          };
+          const reflection = await opts.generationReflectionAgent.reflect(reflectionInput);
+          if (reflection) {
+            const evolutionRunIdResolved = opts.evolutionRunIdForLessons;
+            const insertResults = await Promise.all(
+              reflection.lessons.map(async (l): Promise<boolean> => {
+                try {
+                  const insertData: GenerationLessonInsertData = {
+                    evolutionRunId: evolutionRunIdResolved,
+                    regime: opts.regime,
+                    generation: generationIndex,
+                    category: l.category,
+                    lesson: l.lesson,
+                    metrics: l.metrics,
+                    confidence: reflection.confidence,
+                  };
+                  await opts.generationLessonRepo!.create(insertData);
+                  return true;
+                } catch (e) {
+                  const m = e instanceof Error ? e.message : String(e);
+                  runWarnings.push(
+                    `generation ${generationIndex} reflection lesson 永続化失敗: ${m}`,
+                  );
+                  return false;
+                }
+              }),
+            );
+            generationReflections.push({
+              generationIndex,
+              lessons: reflection.lessons.map((l) => ({ category: l.category, lesson: l.lesson })),
+              summary: reflection.summary,
+              confidence: reflection.confidence,
+              persistedCount: insertResults.filter((r) => r).length,
+            });
+          }
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          runWarnings.push(`generation ${generationIndex} reflection 例外: ${msg}`);
+        }
+      }
+
+      // Phase D-1b: prior generations 履歴を更新 (reflect の入力に使う)
+      priorGenerationSummaries.push({
+        generationIndex,
+        promotionCandidates: report.promotionCandidates.length,
+        validationConfirmed: report.oosAwarePromotionSummary.validationConfirmed,
+        formalBtPassed: report.formalBtVerifiedCandidates.filter((c) => c.formalBtPassed).length,
+      });
     } else if (status === 'failed') {
       trend.generationsFailed += 1;
       if (opts.stopOnGenerationError) {
@@ -598,5 +751,6 @@ export async function runMultiGenerationEvolutionV1(input: {
     adaptiveRepairBudgetSummary: adaptiveSummary,
     qualityDiversityArchiveUpdates: qdEnabled ? qdUpdates : undefined,
     qualityDiversityArchiveSummary: qdSummary,
+    generationReflections: reflectionEnabled ? generationReflections : undefined,
   };
 }

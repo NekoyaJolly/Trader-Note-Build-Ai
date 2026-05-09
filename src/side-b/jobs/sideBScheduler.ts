@@ -78,6 +78,10 @@ import {
   type MultiGenerationRunReport,
 } from '../evolution/multiGenerationRunner';
 import { evolutionInstanceCarryRepository } from '../../backend/repositories/evolutionInstanceCarryRepository';
+// Phase D-1b (2026-05-09): GenerationReflectionAgent + lesson 永続化を本番 multi-gen に inject。
+import { generationReflectionAgent } from '../agents/GenerationReflectionAgent';
+import { generationLessonRepository } from '../../backend/repositories/generationLessonRepository';
+import { randomUUID } from 'crypto';
 import { StrategyPopulation } from '../evolution/StrategyPopulation';
 import { SurrogateFitnessSimulator } from '../strategy_dsl/SurrogateFitnessSimulator';
 import {
@@ -1111,6 +1115,12 @@ export class SideBScheduler {
     regime: string,
     generations: number,
   ): Promise<MultiGenerationRunReport> {
+    // Phase D-1b: lesson 永続化用 evolutionRunId を生成し、runner options で明示的に渡す。
+    // PR #145 Copilot review #5 対応: 旧設計 (= wrapper repo で UUID を上書き) は wrapper を
+    // 通さない呼び出しで誤った evolutionRunId が永続化されるリスクがあった。runner options で
+    // 渡す形に統一して型 / 引数で事故を防ぐ。
+    const evolutionRunId = randomUUID();
+
     return await runMultiGenerationEvolutionV1({
       options: {
         generations,
@@ -1119,6 +1129,10 @@ export class SideBScheduler {
         qualityDiversityArchive: this.config.evolutionQDArchive,
         qualityDiversityArchiveParentLimit: this.config.evolutionQDParentLimit,
         // 世代間引き継ぎは default ON のまま (= Filter Evolution M2/M3 が成立する条件)
+        // Phase D-1b: GenerationReflectionAgent + lesson repo + evolutionRunId の 3 点を inject。
+        generationReflectionAgent,
+        generationLessonRepo: generationLessonRepository,
+        evolutionRunIdForLessons: evolutionRunId,
       },
       runOneGeneration: async ({
         repairHintsForMutation,

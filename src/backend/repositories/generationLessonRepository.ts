@@ -14,28 +14,18 @@
 
 import type { GenerationLesson } from '@prisma/client';
 import { Prisma } from '@prisma/client';
-import { z } from 'zod';
 
 import { prisma } from '../db/client';
 import { toPrismaJsonValue } from '../../utils/prismaJson';
 import type { JsonValue } from '../../utils/jsonValue';
+// PR #145 Copilot review #7: category enum は副作用のない独立モジュールから import する
+// (= Agent 側からの参照で prisma client を引き込まないため)
+import {
+  GenerationLessonCategorySchema,
+  type GenerationLessonCategory,
+} from '../../schemas/generationLessonCategory';
 
-/**
- * GenerationReflectionAgent が出すカテゴリの Zod 列挙 (= 設計書 §5.D.1)。
- *
- * 値の追加時は `GenerationReflectionAgent` の prompt 側 (Phase D-1b) も同期更新する。
- */
-export const GenerationLessonCategorySchema = z.enum([
-  'breakthrough',
-  'stagnation',
-  'mutation_decay',
-  'novelty_emerged',
-  'regime_shift_detected',
-  'filter_efficacy_increased',
-  // 想定外カテゴリの fallback (= LLM が新カテゴリを出した場合の受け皿)
-  'other',
-]);
-export type GenerationLessonCategory = z.infer<typeof GenerationLessonCategorySchema>;
+export { GenerationLessonCategorySchema, type GenerationLessonCategory };
 
 // PR #144 Copilot review #1: GenerationLessonMetricsSchema を定義していたが
 // `create` / `toRecord` で実際には使っておらず死蔵していた。Phase D-1a の段階では
