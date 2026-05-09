@@ -19,7 +19,9 @@ import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import { extractJson } from './llmJsonExtract';
 import { recordAgentUsage } from './scoringRecorder';
 import type { RepairHint } from '../evolution/repairHintPolicy';
-import { buildLessonsPromptBlock } from './CrossoverAgent';
+// Phase C: lessons 注入の共有 helper。CrossoverAgent と同じ module から import することで
+// 両 agent 間の結合 (= MutationAgent → CrossoverAgent の依存) を避ける (PR #141 Copilot review #1/#2)。
+import { buildLessonsPromptBlock } from './lessonsPrompt';
 
 /**
  * PR #100: 親候補 ID → RepairHint の対応表。

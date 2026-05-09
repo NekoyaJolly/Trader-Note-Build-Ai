@@ -344,7 +344,7 @@ pattern を活かしたい場合は **即時 entry** (= `direction` + `trigger` 
 
 ## 過去の学び (lessons) の使い方
 
-ユーザープロンプトに `過去の学び:` ブロックがある場合 (= Phase C で `agentMemory` 経由注入される):
+ユーザープロンプトに `過去の学び` で始まるブロック（= 実装上は `過去の学び (= 直近の Reflection AI / 確信ルールから抽出、symbol=...、上位 N/M 件):` の形）が含まれる場合 (= Phase C で `agentMemory` 経由注入される):
 
 - **📌 確信ルール** は最優先。「金曜引け前は負けやすい」のような確信ルールに沿った変異 (= `time_session.is_friday_close` を AND に追加した個体) を 1〜2 個含めると、Reflection AI の知見が変異探索に反映される
 - **📝 直近 entries** は補助的に参照

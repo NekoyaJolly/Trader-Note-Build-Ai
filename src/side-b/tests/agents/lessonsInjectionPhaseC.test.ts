@@ -17,9 +17,12 @@
 import { agentMemory } from '../../agent/agentMemory';
 import {
   CrossoverAgent,
-  buildLessonsPromptBlock,
   type LossTradeSummary,
 } from '../../agents/CrossoverAgent';
+import {
+  buildLessonsPromptBlock,
+  LESSONS_PROMPT_LIMIT,
+} from '../../agents/lessonsPrompt';
 import { MutationAgent } from '../../agents/MutationAgent';
 import type { AIProvider } from '../../agent/aiProvider';
 import { StrategyDSLSchema, type StrategyDSL } from '../../strategy_dsl/schema';
@@ -108,15 +111,17 @@ describe('Phase C: buildLessonsPromptBlock helper', () => {
     expect(result?.block).toContain('ロンドン NY オーバーラップ');
   });
 
-  it('lessons が 11 件以上なら 10 件で truncate される', () => {
-    const manyLessons = Array.from({ length: 15 }, (_, i) => `📌 lesson #${i}`);
+  it('lessons が LESSONS_PROMPT_LIMIT 超なら定数件数で truncate される', () => {
+    // PR #141 Copilot review #4: ハードコード値ではなく export された定数を参照する
+    const totalCount = LESSONS_PROMPT_LIMIT + 5;
+    const manyLessons = Array.from({ length: totalCount }, (_, i) => `📌 lesson #${i}`);
     jest.spyOn(agentMemory, 'getLessonsForStrategy').mockReturnValue(manyLessons);
     const result = buildLessonsPromptBlock('EURUSD');
-    expect(result?.count).toBe(10);
-    expect(result?.block).toContain('上位 10/15 件');
-    // 11 件目以降は出ない
-    expect(result?.block).toContain('lesson #9');
-    expect(result?.block).not.toContain('lesson #10');
+    expect(result?.count).toBe(LESSONS_PROMPT_LIMIT);
+    expect(result?.block).toContain(`上位 ${LESSONS_PROMPT_LIMIT}/${totalCount} 件`);
+    // limit-1 番目は含まれ、limit 番目は含まれない (= 0-indexed の境界確認)
+    expect(result?.block).toContain(`lesson #${LESSONS_PROMPT_LIMIT - 1}`);
+    expect(result?.block).not.toContain(`lesson #${LESSONS_PROMPT_LIMIT}`);
   });
 });
 
