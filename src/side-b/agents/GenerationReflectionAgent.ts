@@ -26,7 +26,9 @@ import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import type { JsonValue } from '../../utils/jsonValue';
 import { extractJson } from './llmJsonExtract';
 import { recordAgentUsage } from './scoringRecorder';
-import { GenerationLessonCategorySchema } from '../../backend/repositories/generationLessonRepository';
+// PR #145 Copilot review #7: category enum は副作用のない独立モジュールから import
+// (= 旧経路は repo から import で prisma client を引き込んでいた)
+import { GenerationLessonCategorySchema } from '../../schemas/generationLessonCategory';
 
 // =================================================================
 // 型定義
@@ -69,24 +71,60 @@ export interface GenerationReflectionInput {
   }>;
 }
 
-/** LLM 出力 lesson 1 件の Zod schema。 */
-export const ReflectionLessonOutputSchema = z.object({
-  category: GenerationLessonCategorySchema,
-  lesson: z.string().min(10).max(500),
-  // metrics は LLM が自由形式で返す。値は number / string / boolean / null のみ許容 (= JsonValue サブセット)。
-  metrics: z.record(
-    z.string(),
-    z.union([z.number(), z.string(), z.boolean(), z.null()]),
-  ),
-});
+/**
+ * LLM 出力 lesson 1 件の Zod schema。
+ *
+ * PR #145 Copilot review #6: prompt 側で「metrics 空オブジェクト禁止」と明記されているが
+ * Zod 側で弾いていなかったため、`refine` で `Object.keys(metrics).length > 0` を必須化。
+ * 根拠の薄い lesson が DB に永続化されるのを防ぐ。
+ */
+export const ReflectionLessonOutputSchema = z
+  .object({
+    category: GenerationLessonCategorySchema,
+    lesson: z.string().min(10).max(500),
+    // metrics は LLM が自由形式で返す。値は number / string / boolean / null のみ許容 (= JsonValue サブセット)。
+    metrics: z.record(
+      z.string(),
+      z.union([z.number(), z.string(), z.boolean(), z.null()]),
+    ),
+  })
+  .refine((v) => Object.keys(v.metrics).length > 0, {
+    message: 'metrics は空オブジェクト禁止 (= 数値根拠を必ず含めること)',
+    path: ['metrics'],
+  });
 export type ReflectionLessonOutput = z.infer<typeof ReflectionLessonOutputSchema>;
 
-/** LLM 出力 wrapper の Zod schema。 */
-export const GenerationReflectionOutputSchema = z.object({
-  lessons: z.array(ReflectionLessonOutputSchema).min(1).max(3),
-  summary: z.string().min(5).max(300),
-  confidence: z.number().min(0).max(1),
-});
+/**
+ * 過信検知 confidence 上限。
+ *
+ * 設計書 §5.D「常に 0.9 以上を出すのは禁止」と整合。LLM が常に 0.95+ を出すと
+ * 「過信」が検知できなくなるため、Zod 側で 0.9 以下に制限する。
+ */
+export const REFLECTION_CONFIDENCE_MAX = 0.9;
+
+/**
+ * LLM 出力 wrapper の Zod schema。
+ *
+ * PR #145 Copilot review #1: prompt 制約を Zod で厳密検証する:
+ * - `lessons` 内の category 一意性 (= 同 category 重複禁止)
+ * - confidence は `REFLECTION_CONFIDENCE_MAX` 以下 (= 過信検知)
+ */
+export const GenerationReflectionOutputSchema = z
+  .object({
+    lessons: z.array(ReflectionLessonOutputSchema).min(1).max(3),
+    summary: z.string().min(5).max(300),
+    confidence: z.number().min(0).max(REFLECTION_CONFIDENCE_MAX),
+  })
+  .refine(
+    (v) => {
+      const cats = v.lessons.map((l) => l.category);
+      return new Set(cats).size === cats.length;
+    },
+    {
+      message: 'lessons の category は一意でなければならない (= 同 category 重複は 1 lesson に統合)',
+      path: ['lessons'],
+    },
+  );
 export type GenerationReflectionOutput = z.infer<typeof GenerationReflectionOutputSchema>;
 
 // =================================================================
@@ -160,9 +198,19 @@ function buildUserPrompt(input: GenerationReflectionInput): string {
 // GenerationReflectionAgent
 // =================================================================
 
+/**
+ * GenerationReflectionAgent が依存する AIProvider の最小 interface。
+ *
+ * PR #145 Copilot review #2 対応: 内部で `chat` のみ呼ぶため `Pick<AIProvider, 'chat'>`
+ * に緩和する。テストで `as unknown as AIProvider` の二重キャスト無しに最小 mock を渡せる。
+ */
+export type AIProviderForReflection = Pick<AIProvider, 'chat'>;
+
 export class GenerationReflectionAgent {
   constructor(
-    private readonly ai: AIProvider = new AIProvider({ model: modelFor('generation_reflection') }),
+    private readonly ai: AIProviderForReflection = new AIProvider({
+      model: modelFor('generation_reflection'),
+    }),
   ) {}
 
   /**

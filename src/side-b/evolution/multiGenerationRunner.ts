@@ -127,6 +127,15 @@ export interface MultiGenerationRunOptions {
    * 多すぎると prompt 肥大化、少なすぎると trend 検出が困難。
    */
   reflectionPriorGenerationsLimit?: number;
+  /**
+   * Phase D-1b (PR #145 Copilot review #5): GenerationLesson 永続化時の evolutionRunId。
+   *
+   * runner は `EvolutionLoop` の private な evolutionRunId にアクセスできないため、
+   * 呼び出し側 (= sideBScheduler / smoke) が明示的に渡す。`generationReflectionAgent` +
+   * `generationLessonRepo` を inject する場合は本フィールドも必須 (= 一緒に渡さないと
+   * `null` placeholder で永続化されてしまうリスクを排除)。
+   */
+  evolutionRunIdForLessons?: string;
 }
 
 /**
@@ -421,9 +430,12 @@ export async function runMultiGenerationEvolutionV1(input: {
   const qdUpdates: QualityDiversityArchiveUpdateSummaryV1[] = [];
   let qdTotalSelectedParents = 0;
 
-  // Phase D-1b: GenerationReflectionAgent + repo の inject 状態を判定。両方揃っているときのみ ON。
+  // Phase D-1b: GenerationReflectionAgent + repo + evolutionRunId の 3 点が全て揃ったときのみ ON。
+  // PR #145 Copilot review #5: evolutionRunId が未指定だと永続化できないため、必須条件に加える。
   const reflectionEnabled =
-    opts.generationReflectionAgent !== undefined && opts.generationLessonRepo !== undefined;
+    opts.generationReflectionAgent !== undefined &&
+    opts.generationLessonRepo !== undefined &&
+    opts.evolutionRunIdForLessons !== undefined;
   const reflectionPriorLimit = opts.reflectionPriorGenerationsLimit ?? 3;
   // mutable な作業用配列。最終戻り値時に readonly 配列として公開される。
   const generationReflections: Array<{
@@ -602,10 +614,17 @@ export async function runMultiGenerationEvolutionV1(input: {
       // Phase D-1b (2026-05-09): 当世代終了直後に reflection を実行し、lessons を永続化。
       // 失敗 (LLM API / Zod / DB) は飲んで世代結果に影響させない (= warning ログのみ)。
       // 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.D.3
+      //
+      // PR #145 Copilot review #3/#4/#5 対応:
+      //   - dead code (`evolutionRunIdForLesson` placeholder) を削除
+      //   - 矛盾コメント (= 「runner は永続化しない」と書きつつ実装は永続化していた) を整理
+      //   - `evolutionRunId` を `opts.evolutionRunIdForLessons` から受け取る形に変更
+      //     (= ダミー UUID + wrapper 上書き設計を排除して型 / 引数で事故を防ぐ)
       if (
         reflectionEnabled &&
         opts.generationReflectionAgent !== undefined &&
-        opts.generationLessonRepo !== undefined
+        opts.generationLessonRepo !== undefined &&
+        opts.evolutionRunIdForLessons !== undefined
       ) {
         try {
           const formalBtPassedCount = report.formalBtVerifiedCandidates.filter(
@@ -626,57 +645,36 @@ export async function runMultiGenerationEvolutionV1(input: {
           };
           const reflection = await opts.generationReflectionAgent.reflect(reflectionInput);
           if (reflection) {
-            const evolutionRunIdForLesson = report.formalBtVerifiedCandidates[0]?.dslId
-              ? // 当 evolutionRunId を直接 report から取得する経路は未公開だが、
-                // formalBtVerifiedCandidates の dsl 経由で間接的に判別可能。
-                // 確実な経路として options 起源は持たないため、各 lesson 行は
-                // GenerationLesson テーブル側で UUID 自動採番に任せ、evolutionRunId は
-                // null 不可 (NOT NULL 制約) なので runner 引数で受け取るのが筋だが、
-                // Phase D-1b の最小スコープでは callArgs から取れない。
-                // → 暫定: runner では evolutionRunId を受け取らず、scheduler 側で
-                // wrapper を用意して inject するパターンに変更する。本処理は
-                // sideBScheduler 側の adapter 経由でのみ機能する想定。
-                undefined
-              : undefined;
-            // Phase D-1b: evolutionRunId は runner には渡されない (= EvolutionLoop の private)。
-            // scheduler 側で reflectionAgent + repo を wrap して evolutionRunId を bind した
-            // adapter を渡すパターンを採る。本 runner では agent.reflect → 結果を受けて lessons を
-            // 整形するところまでに集中し、永続化は外側の adapter (= sideBScheduler) に委ねる。
-            //
-            // 実装: 本 runner は generationLessonRepo に直接書かず、reflection の結果を
-            // generationReflections 配列にだけ積む (= 観測用)。実 DB 永続化は scheduler 側で
-            // generationReflections を読んで write する形にする。
-            const insertablePromises = reflection.lessons.map(async (l): Promise<boolean> => {
-              try {
-                // 永続化に必要な evolutionRunId は runner には無いので、persisterは
-                // scheduler 経由の wrapper repo を期待する (= 内部で evolutionRunId を bind)
-                const insertData: GenerationLessonInsertData = {
-                  evolutionRunId: '00000000-0000-0000-0000-000000000000', // wrapper が上書き
-                  regime: opts.regime,
-                  generation: generationIndex,
-                  category: l.category,
-                  lesson: l.lesson,
-                  metrics: l.metrics,
-                  confidence: reflection.confidence,
-                };
-                await opts.generationLessonRepo!.create(insertData);
-                return true;
-              } catch (e) {
-                const m = e instanceof Error ? e.message : String(e);
-                runWarnings.push(
-                  `generation ${generationIndex} reflection lesson 永続化失敗: ${m}`,
-                );
-                return false;
-              }
-            });
-            const results = await Promise.all(insertablePromises);
-            void evolutionRunIdForLesson; // 未使用警告抑止 (= 上のコメントで設計を説明済み)
+            const evolutionRunIdResolved = opts.evolutionRunIdForLessons;
+            const insertResults = await Promise.all(
+              reflection.lessons.map(async (l): Promise<boolean> => {
+                try {
+                  const insertData: GenerationLessonInsertData = {
+                    evolutionRunId: evolutionRunIdResolved,
+                    regime: opts.regime,
+                    generation: generationIndex,
+                    category: l.category,
+                    lesson: l.lesson,
+                    metrics: l.metrics,
+                    confidence: reflection.confidence,
+                  };
+                  await opts.generationLessonRepo!.create(insertData);
+                  return true;
+                } catch (e) {
+                  const m = e instanceof Error ? e.message : String(e);
+                  runWarnings.push(
+                    `generation ${generationIndex} reflection lesson 永続化失敗: ${m}`,
+                  );
+                  return false;
+                }
+              }),
+            );
             generationReflections.push({
               generationIndex,
               lessons: reflection.lessons.map((l) => ({ category: l.category, lesson: l.lesson })),
               summary: reflection.summary,
               confidence: reflection.confidence,
-              persistedCount: results.filter((r) => r).length,
+              persistedCount: insertResults.filter((r) => r).length,
             });
           }
         } catch (e) {

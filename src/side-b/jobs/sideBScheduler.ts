@@ -80,11 +80,7 @@ import {
 import { evolutionInstanceCarryRepository } from '../../backend/repositories/evolutionInstanceCarryRepository';
 // Phase D-1b (2026-05-09): GenerationReflectionAgent + lesson 永続化を本番 multi-gen に inject。
 import { generationReflectionAgent } from '../agents/GenerationReflectionAgent';
-import {
-  generationLessonRepository,
-  type GenerationLessonInsertData,
-  type GenerationLessonPersister,
-} from '../../backend/repositories/generationLessonRepository';
+import { generationLessonRepository } from '../../backend/repositories/generationLessonRepository';
 import { randomUUID } from 'crypto';
 import { StrategyPopulation } from '../evolution/StrategyPopulation';
 import { SurrogateFitnessSimulator } from '../strategy_dsl/SurrogateFitnessSimulator';
@@ -1119,16 +1115,11 @@ export class SideBScheduler {
     regime: string,
     generations: number,
   ): Promise<MultiGenerationRunReport> {
-    // Phase D-1b: lesson 永続化は wrapper repo で evolutionRunId を bind する。
-    // runner 側は placeholder UUID を渡してくるが、本 wrapper が真の evolutionRunId に上書きする。
-    // randomUUID は scheduler が runEvolutionMultiGen を呼ぶごとに作る (= regime × cron 起動単位)。
+    // Phase D-1b: lesson 永続化用 evolutionRunId を生成し、runner options で明示的に渡す。
+    // PR #145 Copilot review #5 対応: 旧設計 (= wrapper repo で UUID を上書き) は wrapper を
+    // 通さない呼び出しで誤った evolutionRunId が永続化されるリスクがあった。runner options で
+    // 渡す形に統一して型 / 引数で事故を防ぐ。
     const evolutionRunId = randomUUID();
-    const lessonRepoWrapper: GenerationLessonPersister = {
-      create: async (data: GenerationLessonInsertData) =>
-        generationLessonRepository.create({ ...data, evolutionRunId }),
-      findRecentByRegime: (r, limit) => generationLessonRepository.findRecentByRegime(r, limit),
-      deleteOlderThan: (days) => generationLessonRepository.deleteOlderThan(days),
-    };
 
     return await runMultiGenerationEvolutionV1({
       options: {
@@ -1138,9 +1129,10 @@ export class SideBScheduler {
         qualityDiversityArchive: this.config.evolutionQDArchive,
         qualityDiversityArchiveParentLimit: this.config.evolutionQDParentLimit,
         // 世代間引き継ぎは default ON のまま (= Filter Evolution M2/M3 が成立する条件)
-        // Phase D-1b: GenerationReflectionAgent + lesson repo wrapper を inject (= 各世代終了時に reflection)
+        // Phase D-1b: GenerationReflectionAgent + lesson repo + evolutionRunId の 3 点を inject。
         generationReflectionAgent,
-        generationLessonRepo: lessonRepoWrapper,
+        generationLessonRepo: generationLessonRepository,
+        evolutionRunIdForLessons: evolutionRunId,
       },
       runOneGeneration: async ({
         repairHintsForMutation,

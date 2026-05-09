@@ -17,8 +17,15 @@ import {
 } from '../../agents/GenerationReflectionAgent';
 import type { AIProvider } from '../../agent/aiProvider';
 
-function mockAi(impl: jest.Mock): AIProvider {
-  return { chat: impl } as unknown as AIProvider;
+/**
+ * PR #145 Copilot review #2 対応: `as unknown as AIProvider` の二重キャストを避けるため、
+ * `Pick<AIProvider, 'chat'>` の最小 interface で受ける形に変更。
+ * GenerationReflectionAgent は内部で `chat` のみ呼ぶので、これで型整合する。
+ */
+type AIProviderChatLike = Pick<AIProvider, 'chat'>;
+
+function mockAi(impl: jest.Mock): AIProviderChatLike {
+  return { chat: impl };
 }
 
 const validInput: GenerationReflectionInput = {
