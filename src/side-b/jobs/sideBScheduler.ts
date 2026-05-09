@@ -1126,6 +1126,37 @@ export class SideBScheduler {
   }
 
   /**
+   * Filter Evolution Phase B-3 (2026-05-09): EvolutionInstanceCarry retention 実行。
+   *
+   * 14 日より古い carry 行を `evolutionInstanceCarryRepository.deleteOlderThan()` で削除し、
+   * 削除件数 > 0 のときは `console.info` で本番 (NODE_ENV=production) でも Cloud Logging に
+   * 残るログを出す (PR #142 Copilot review #1: `this.log()` は production で no-op のため不適)。
+   *
+   * 例外は飲んで全体クリーンアップを止めない (= 他種データ削除はそのまま継続)。
+   * 例外時は `this.addError` でスケジューラエラーリストに記録する。
+   *
+   * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.B.4
+   */
+  async runEvolutionCarryRetentionNow(): Promise<{ deleted: number; error?: string }> {
+    try {
+      const carryDeleted = await evolutionInstanceCarryRepository.deleteOlderThan(
+        EVOLUTION_CARRY_RETENTION_DAYS,
+      );
+      if (carryDeleted > 0) {
+        console.info(
+          `[SideBScheduler] [Phase B-3] EvolutionInstanceCarry retention: ${carryDeleted} 件削除 ` +
+            `(${EVOLUTION_CARRY_RETENTION_DAYS} 日より古い行)`,
+        );
+      }
+      return { deleted: carryDeleted };
+    } catch (carryErr) {
+      const carryMsg = carryErr instanceof Error ? carryErr.message : String(carryErr);
+      this.addError(`[Phase B-3] EvolutionInstanceCarry retention 失敗: ${carryMsg}`);
+      return { deleted: 0, error: carryMsg };
+    }
+  }
+
+  /**
    * DiscoveryAgent を手動実行（外部 API / デバッグ用）
    */
   async runDiscoveryNow(): Promise<void> {
@@ -1665,23 +1696,9 @@ export class SideBScheduler {
           }
 
           // Filter Evolution Phase B-3 (2026-05-09): EvolutionInstanceCarry retention 14 日。
-          // Phase B-2 で永続化した carry 行を retention 期限超で削除し、テーブル肥大を防ぐ。
-          // 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.B.4
-          // 例外は飲んでクリーンアップ全体を止めない (= 他種データ削除はそのまま継続)。
-          try {
-            const carryDeleted = await evolutionInstanceCarryRepository.deleteOlderThan(
-              EVOLUTION_CARRY_RETENTION_DAYS,
-            );
-            if (carryDeleted > 0) {
-              this.log(
-                `[Phase B-3] EvolutionInstanceCarry retention: ${carryDeleted} 件削除 ` +
-                  `(${EVOLUTION_CARRY_RETENTION_DAYS} 日より古い行)`,
-              );
-            }
-          } catch (carryErr) {
-            const carryMsg = carryErr instanceof Error ? carryErr.message : String(carryErr);
-            this.addError(`[Phase B-3] EvolutionInstanceCarry retention 失敗: ${carryMsg}`);
-          }
+          // Phase B-2 で永続化した carry 行を retention 期限超で削除する。
+          // テスト可能化のため public method `runEvolutionCarryRetentionNow` に切り出し。
+          await this.runEvolutionCarryRetentionNow();
         } catch (error) {
           const message = error instanceof Error ? error.message : '不明なエラー';
           this.addError(`クリーンアップエラー: ${message}`);
