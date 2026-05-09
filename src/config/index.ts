@@ -107,7 +107,9 @@ export type AIAgentKey =
   // Side-A 強化版 AI サマリ (enhancedAISummaryService) — マルチモーダル / 拡張プロンプト
   | 'ai_summary_enhanced'
   // 推論サービス (decisionInferenceService) — 判断推論の説明生成
-  | 'decision_inference';
+  | 'decision_inference'
+  // Filter Evolution Phase D-1b (2026-05-09): 世代単位 reflection 専用 — 軽量サマリ系で十分
+  | 'generation_reflection';
 
 export const config = {
   server: {
@@ -161,6 +163,9 @@ export const config = {
         process.env.AI_MODEL_AI_SUMMARY_ENHANCED || 'google/gemini-3.1-flash-lite-preview',
       decision_inference:
         process.env.AI_MODEL_DECISION_INFERENCE || 'google/gemini-3.1-flash-lite-preview',
+      // Phase D-1b: 世代単位 reflection — 軽量サマリ + categoization タスク、Haiku 4.5 既定
+      generation_reflection:
+        process.env.AI_MODEL_GENERATION_REFLECTION || 'anthropic/claude-haiku-4.5',
     } as Record<AIAgentKey, string>,
   },
   market: {

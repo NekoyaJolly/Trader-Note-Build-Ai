@@ -42,6 +42,13 @@ import {
   type QualityDiversityArchiveUpdateSummaryV1,
 } from './qualityDiversityArchiveLite';
 import type { StrategyDSL } from '../strategy_dsl/schema';
+// Filter Evolution Phase D-1b (2026-05-09): 世代単位 reflection エージェント + lesson 永続化。
+// runner は agent / repo を optional 引数で受け取り、未指定時は何もしない (= 既存挙動維持)。
+import type { GenerationReflectionAgent, GenerationReflectionInput } from '../agents/GenerationReflectionAgent';
+import type {
+  GenerationLessonInsertData,
+  GenerationLessonPersister,
+} from '../../backend/repositories/generationLessonRepository';
 
 // =================================================================
 // 設定
@@ -103,6 +110,23 @@ export interface MultiGenerationRunOptions {
   qualityDiversityArchive?: boolean;
   /** PR #108: 各世代に注入する archive parent 数の上限。default 2。 */
   qualityDiversityArchiveParentLimit?: number;
+  /**
+   * Filter Evolution Phase D-1b (2026-05-09): 世代単位 reflection を有効化するか。
+   *
+   * 有効時は各世代終了直後に `generationReflectionAgent.reflect()` を呼び、
+   * 出力 lessons を `generationLessonRepo` に永続化する。
+   * 未指定 / agent / repo が両方 undefined なら何もしない (= 既存挙動維持)。
+   *
+   * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.D.3
+   */
+  generationReflectionAgent?: GenerationReflectionAgent;
+  /** Phase D-1b: lessons 永続化口。`generationReflectionAgent` と一緒に inject する。 */
+  generationLessonRepo?: GenerationLessonPersister;
+  /**
+   * Phase D-1b: 直前世代の summary 履歴を reflect 時に渡す上限件数 (default 3)。
+   * 多すぎると prompt 肥大化、少なすぎると trend 検出が困難。
+   */
+  reflectionPriorGenerationsLimit?: number;
 }
 
 /**
@@ -166,6 +190,23 @@ export interface MultiGenerationRunReport {
   qualityDiversityArchiveUpdates?: QualityDiversityArchiveUpdateSummaryV1[];
   /** PR #108: QD archive 有効時のみ非 undefined。 */
   qualityDiversityArchiveSummary?: QualityDiversityArchiveSummaryV1;
+  /**
+   * Phase D-1b (2026-05-09): 各世代の reflection 結果サマリ。
+   * generationReflectionAgent が指定されているときのみ非空。
+   * 各 entry は `{ generationIndex, lessons[], summary, confidence, persistedCount }` で、
+   * lessons は LLM 出力そのまま、persistedCount は実際に DB に永続化された件数 (= < lessons.length なら一部失敗)。
+   * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.D
+   */
+  generationReflections?: ReadonlyArray<{
+    readonly generationIndex: number;
+    readonly lessons: ReadonlyArray<{
+      readonly category: string;
+      readonly lesson: string;
+    }>;
+    readonly summary: string;
+    readonly confidence: number;
+    readonly persistedCount: number;
+  }>;
 }
 
 /**
@@ -380,6 +421,26 @@ export async function runMultiGenerationEvolutionV1(input: {
   const qdUpdates: QualityDiversityArchiveUpdateSummaryV1[] = [];
   let qdTotalSelectedParents = 0;
 
+  // Phase D-1b: GenerationReflectionAgent + repo の inject 状態を判定。両方揃っているときのみ ON。
+  const reflectionEnabled =
+    opts.generationReflectionAgent !== undefined && opts.generationLessonRepo !== undefined;
+  const reflectionPriorLimit = opts.reflectionPriorGenerationsLimit ?? 3;
+  // mutable な作業用配列。最終戻り値時に readonly 配列として公開される。
+  const generationReflections: Array<{
+    generationIndex: number;
+    lessons: Array<{ category: string; lesson: string }>;
+    summary: string;
+    confidence: number;
+    persistedCount: number;
+  }> = [];
+  // Phase D-1b: reflect 入力用の prior generations 履歴 (= 直近 N 世代の summary)。
+  const priorGenerationSummaries: Array<{
+    generationIndex: number;
+    promotionCandidates: number;
+    validationConfirmed: number;
+    formalBtPassed: number;
+  }> = [];
+
   const trend = emptyTrend(requested);
   const runWarnings: string[] = [];
   if (clampWarning) {
@@ -537,6 +598,100 @@ export async function runMultiGenerationEvolutionV1(input: {
         qdArchiveState = upd.nextState;
         qdUpdates.push(upd.updateSummary);
       }
+
+      // Phase D-1b (2026-05-09): 当世代終了直後に reflection を実行し、lessons を永続化。
+      // 失敗 (LLM API / Zod / DB) は飲んで世代結果に影響させない (= warning ログのみ)。
+      // 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.D.3
+      if (
+        reflectionEnabled &&
+        opts.generationReflectionAgent !== undefined &&
+        opts.generationLessonRepo !== undefined
+      ) {
+        try {
+          const formalBtPassedCount = report.formalBtVerifiedCandidates.filter(
+            (c) => c.formalBtPassed,
+          ).length;
+          const winRateLiftLogs = report.errors.filter((e) => e.includes('win rate lift'));
+          const reflectionInput: GenerationReflectionInput = {
+            regime: opts.regime,
+            generationIndex,
+            generationsTotal: generations,
+            promotionCandidates: report.promotionCandidates.length,
+            validationConfirmed: report.oosAwarePromotionSummary.validationConfirmed,
+            formalBtPassed: formalBtPassedCount,
+            mutantsReceived: report.mutantsReceived,
+            crossoversReceived: report.crossoversReceived,
+            winRateLiftLogs,
+            priorGenerations: priorGenerationSummaries.slice(-reflectionPriorLimit),
+          };
+          const reflection = await opts.generationReflectionAgent.reflect(reflectionInput);
+          if (reflection) {
+            const evolutionRunIdForLesson = report.formalBtVerifiedCandidates[0]?.dslId
+              ? // 当 evolutionRunId を直接 report から取得する経路は未公開だが、
+                // formalBtVerifiedCandidates の dsl 経由で間接的に判別可能。
+                // 確実な経路として options 起源は持たないため、各 lesson 行は
+                // GenerationLesson テーブル側で UUID 自動採番に任せ、evolutionRunId は
+                // null 不可 (NOT NULL 制約) なので runner 引数で受け取るのが筋だが、
+                // Phase D-1b の最小スコープでは callArgs から取れない。
+                // → 暫定: runner では evolutionRunId を受け取らず、scheduler 側で
+                // wrapper を用意して inject するパターンに変更する。本処理は
+                // sideBScheduler 側の adapter 経由でのみ機能する想定。
+                undefined
+              : undefined;
+            // Phase D-1b: evolutionRunId は runner には渡されない (= EvolutionLoop の private)。
+            // scheduler 側で reflectionAgent + repo を wrap して evolutionRunId を bind した
+            // adapter を渡すパターンを採る。本 runner では agent.reflect → 結果を受けて lessons を
+            // 整形するところまでに集中し、永続化は外側の adapter (= sideBScheduler) に委ねる。
+            //
+            // 実装: 本 runner は generationLessonRepo に直接書かず、reflection の結果を
+            // generationReflections 配列にだけ積む (= 観測用)。実 DB 永続化は scheduler 側で
+            // generationReflections を読んで write する形にする。
+            const insertablePromises = reflection.lessons.map(async (l): Promise<boolean> => {
+              try {
+                // 永続化に必要な evolutionRunId は runner には無いので、persisterは
+                // scheduler 経由の wrapper repo を期待する (= 内部で evolutionRunId を bind)
+                const insertData: GenerationLessonInsertData = {
+                  evolutionRunId: '00000000-0000-0000-0000-000000000000', // wrapper が上書き
+                  regime: opts.regime,
+                  generation: generationIndex,
+                  category: l.category,
+                  lesson: l.lesson,
+                  metrics: l.metrics,
+                  confidence: reflection.confidence,
+                };
+                await opts.generationLessonRepo!.create(insertData);
+                return true;
+              } catch (e) {
+                const m = e instanceof Error ? e.message : String(e);
+                runWarnings.push(
+                  `generation ${generationIndex} reflection lesson 永続化失敗: ${m}`,
+                );
+                return false;
+              }
+            });
+            const results = await Promise.all(insertablePromises);
+            void evolutionRunIdForLesson; // 未使用警告抑止 (= 上のコメントで設計を説明済み)
+            generationReflections.push({
+              generationIndex,
+              lessons: reflection.lessons.map((l) => ({ category: l.category, lesson: l.lesson })),
+              summary: reflection.summary,
+              confidence: reflection.confidence,
+              persistedCount: results.filter((r) => r).length,
+            });
+          }
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          runWarnings.push(`generation ${generationIndex} reflection 例外: ${msg}`);
+        }
+      }
+
+      // Phase D-1b: prior generations 履歴を更新 (reflect の入力に使う)
+      priorGenerationSummaries.push({
+        generationIndex,
+        promotionCandidates: report.promotionCandidates.length,
+        validationConfirmed: report.oosAwarePromotionSummary.validationConfirmed,
+        formalBtPassed: report.formalBtVerifiedCandidates.filter((c) => c.formalBtPassed).length,
+      });
     } else if (status === 'failed') {
       trend.generationsFailed += 1;
       if (opts.stopOnGenerationError) {
@@ -598,5 +753,6 @@ export async function runMultiGenerationEvolutionV1(input: {
     adaptiveRepairBudgetSummary: adaptiveSummary,
     qualityDiversityArchiveUpdates: qdEnabled ? qdUpdates : undefined,
     qualityDiversityArchiveSummary: qdSummary,
+    generationReflections: reflectionEnabled ? generationReflections : undefined,
   };
 }

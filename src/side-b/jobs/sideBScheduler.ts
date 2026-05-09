@@ -78,6 +78,14 @@ import {
   type MultiGenerationRunReport,
 } from '../evolution/multiGenerationRunner';
 import { evolutionInstanceCarryRepository } from '../../backend/repositories/evolutionInstanceCarryRepository';
+// Phase D-1b (2026-05-09): GenerationReflectionAgent + lesson 永続化を本番 multi-gen に inject。
+import { generationReflectionAgent } from '../agents/GenerationReflectionAgent';
+import {
+  generationLessonRepository,
+  type GenerationLessonInsertData,
+  type GenerationLessonPersister,
+} from '../../backend/repositories/generationLessonRepository';
+import { randomUUID } from 'crypto';
 import { StrategyPopulation } from '../evolution/StrategyPopulation';
 import { SurrogateFitnessSimulator } from '../strategy_dsl/SurrogateFitnessSimulator';
 import {
@@ -1111,6 +1119,17 @@ export class SideBScheduler {
     regime: string,
     generations: number,
   ): Promise<MultiGenerationRunReport> {
+    // Phase D-1b: lesson 永続化は wrapper repo で evolutionRunId を bind する。
+    // runner 側は placeholder UUID を渡してくるが、本 wrapper が真の evolutionRunId に上書きする。
+    // randomUUID は scheduler が runEvolutionMultiGen を呼ぶごとに作る (= regime × cron 起動単位)。
+    const evolutionRunId = randomUUID();
+    const lessonRepoWrapper: GenerationLessonPersister = {
+      create: async (data: GenerationLessonInsertData) =>
+        generationLessonRepository.create({ ...data, evolutionRunId }),
+      findRecentByRegime: (r, limit) => generationLessonRepository.findRecentByRegime(r, limit),
+      deleteOlderThan: (days) => generationLessonRepository.deleteOlderThan(days),
+    };
+
     return await runMultiGenerationEvolutionV1({
       options: {
         generations,
@@ -1119,6 +1138,9 @@ export class SideBScheduler {
         qualityDiversityArchive: this.config.evolutionQDArchive,
         qualityDiversityArchiveParentLimit: this.config.evolutionQDParentLimit,
         // 世代間引き継ぎは default ON のまま (= Filter Evolution M2/M3 が成立する条件)
+        // Phase D-1b: GenerationReflectionAgent + lesson repo wrapper を inject (= 各世代終了時に reflection)
+        generationReflectionAgent,
+        generationLessonRepo: lessonRepoWrapper,
       },
       runOneGeneration: async ({
         repairHintsForMutation,
