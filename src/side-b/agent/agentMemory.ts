@@ -14,6 +14,13 @@
 import type { MarketAnalysis } from '../models/marketAnalysis';
 import type { LensFeatureSnapshot } from '../lenses';
 import { lessonSimilarityService } from '../services/lessonSimilarityService';
+// Filter Evolution Phase D-1a (2026-05-09): GenerationReflectionAgent が出した世代単位
+// lesson を取得するための DB 経路。Phase D-1b で mutation/crossover prompt に流す。
+import {
+    generationLessonRepository as defaultGenerationLessonRepo,
+    type GenerationLessonPersister,
+    type GenerationLessonRecord,
+} from '../../backend/repositories/generationLessonRepository';
 
 // ===========================================
 // 型定義
@@ -573,6 +580,57 @@ export class AgentMemory {
         return lessons;
     }
 
+    /**
+     * Filter Evolution Phase D-1a (2026-05-09): 世代単位 reflection lessons を取得する。
+     *
+     * `GenerationReflectionAgent` (= Phase D-1b 以降に実装) が `GenerationLesson` テーブルへ
+     * 永続化した lessons を、mutation/crossover の prompt 注入用に整形して返す。
+     *
+     * 整形: `getLessonsForStrategy` と同じく emoji prefix で人間語に統一する。
+     *   - 🎯 [breakthrough/breakout gen=3] Gen 3 で time_session filter で promotion top-K に到達
+     *   - 📉 [stagnation/breakout gen=4] mutation 由来 child の Lift がほぼ全て 1.0
+     *
+     * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.D / §5.E.2
+     *
+     * @param options - regime / limit / lessonRepo (test 用 inject)
+     * @returns 整形済み lesson 文字列の配列。DB 取得失敗時は空配列 + warning ログで fallback。
+     */
+    async getGenerationLessons(options?: {
+        readonly regime?: string;
+        readonly limit?: number;
+        /** test 互換 / DI 用。未指定なら本番 prisma 経由の repo singleton を使う。 */
+        readonly lessonRepo?: GenerationLessonPersister;
+    }): Promise<string[]> {
+        const repo = options?.lessonRepo ?? defaultGenerationLessonRepo;
+        const limit = options?.limit ?? 10;
+        try {
+            let records: GenerationLessonRecord[];
+            if (options?.regime) {
+                records = await repo.findRecentByRegime(options.regime, limit);
+            } else {
+                // regime 未指定 = cross-symbol 学習 / 全体観察。findRecent は repo に存在するが
+                // GenerationLessonPersister Pick 経由では見えないため、findRecentByRegime に
+                // 'all-regimes-marker' のような特殊文字列は使わず、lessonRepo に findRecent も
+                // 含めるよう Persister 型を拡張するべき場面 — Phase D-1b で必要に応じて拡張する。
+                // 現状は regime 指定必須で運用 (= mutation/crossover も symbol→regime で限定するため)。
+                console.warn(
+                    '[AgentMemory.getGenerationLessons] regime 未指定の呼び出しは現状サポート外、空配列を返す',
+                );
+                return [];
+            }
+
+            return records.map((r) => emojiForCategory(r.category) +
+                ` [${r.category}/${r.regime} gen=${r.generation}] ${r.lesson}`,
+            );
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.warn(
+                `[AgentMemory.getGenerationLessons] DB 取得失敗、空配列で fallback: ${msg}`,
+            );
+            return [];
+        }
+    }
+
     // --- サマリー ---
 
     /**
@@ -588,6 +646,37 @@ export class AgentMemory {
             `監視:${state.watchSymbols.join(',')} | ` +
             `OP:${openCount} | 勝率:${winRate.toFixed(0)}%(${state.recentTradeResults.length}件) | ` +
             `戦略:${strategiesCount}件 | サイクル:${state.cycleCount}`;
+    }
+}
+
+/**
+ * Filter Evolution Phase D-1a: GenerationLessonCategory に対応する emoji prefix を返す。
+ *
+ * `getLessonsForStrategy` の emoji 体系 (📌 / 📝 / 💡 / 💬) と区別できる新カテゴリ:
+ *   - 🎯 breakthrough         (= 突破)
+ *   - 📉 stagnation           (= 停滞)
+ *   - 🔻 mutation_decay       (= mutation 由来 child の Lift 停滞)
+ *   - ✨ novelty_emerged      (= 新規パターン出現)
+ *   - 🌪 regime_shift_detected (= regime 切替検出)
+ *   - 🧪 filter_efficacy_increased (= filter 効果上昇)
+ *   - 🌀 other / fallback     (= 想定外カテゴリ)
+ */
+function emojiForCategory(category: string): string {
+    switch (category) {
+        case 'breakthrough':
+            return '🎯';
+        case 'stagnation':
+            return '📉';
+        case 'mutation_decay':
+            return '🔻';
+        case 'novelty_emerged':
+            return '✨';
+        case 'regime_shift_detected':
+            return '🌪';
+        case 'filter_efficacy_increased':
+            return '🧪';
+        default:
+            return '🌀';
     }
 }
 

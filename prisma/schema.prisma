@@ -776,6 +776,41 @@ model EvolutionBacktestRun {
   @@index([formalBtPassed, createdAt(sort: Desc)], map: "idx_evolution_bt_passed_created")
 }
 
+/// Filter Evolution Phase D-1a (2026-05-09): 世代単位の reflection lessons。
+///
+/// `GenerationReflectionAgent` (= Phase D-1b で実装) が各世代終了直後に出す
+/// 「当世代で何が起きたか」の verbal lesson を永続化する。
+/// 用途:
+///   - 後続世代の mutation/crossover prompt に lesson を流す (= AgentMemory.getGenerationLessons)
+///   - PDCA loop の thinking log に世代単位の振り返りを残す (Phase E と組み合わせ)
+///   - 観察フェーズで「学習が機能しているか」を定量確認 (= 設計書 §3.3 観測条件 4)
+///
+/// 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.B.1 / §5.D
+model GenerationLesson {
+  id              String   @id @default(uuid()) @db.Uuid
+  /// 当該 lesson を生成した evolutionRunId (= cron 起動毎に発番、debug 用)
+  evolutionRunId  String   @db.Uuid
+  /// 進化ループ regime (= Reflection 対象世代の regime)
+  regime          String
+  /// 生成元世代番号 (= multi-gen runner の generationIndex、0-indexed)
+  generation      Int
+  /// 'breakthrough' / 'stagnation' / 'mutation_decay' / 'novelty_emerged' /
+  /// 'regime_shift_detected' / 'filter_efficacy_increased' 等のカテゴリ。
+  /// 値域は GenerationReflectionAgent の prompt schema 側で固定。
+  category        String
+  /// 人間語の lesson (= DESIGN_DOC §1.1 原則 5「人間語に翻訳して記録」)
+  lesson          String
+  /// supporting metrics (= dsr / lift 等の数値根拠、JSON 形式)
+  metrics         Json?
+  /// LLM が報告した confidence (0.0-1.0)、未報告時 null
+  confidence      Float?
+  recordedAt      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([evolutionRunId, regime, generation], map: "idx_gen_lesson_run_regime_gen")
+  @@index([regime, recordedAt(sort: Desc)], map: "idx_gen_lesson_regime_recorded")
+  @@index([category, recordedAt(sort: Desc)], map: "idx_gen_lesson_category_recorded")
+}
+
 /// Filter Evolution Phase B-2 (2026-05-09): 進化ループ世代間で引き継ぐ短命 state。
 ///
 /// EvolutionLoop の in-memory cache (tradesByDslId / lastRepairHints /
