@@ -109,13 +109,39 @@ function printHelp(): void {
 
 type Route = 'crossover' | 'mutation' | 'novelty' | 'edge_hypothesis' | 'other';
 
+/**
+ * candidateId prefix から route を分類する。
+ *
+ * PR #146 Copilot review #1 対応: 現行 MutationAgent (`MutationAgent.ts:263`) は `mut-` prefix を
+ * 生成するが、過去スモーク / 旧実装で `mutation-` 始まりの id も DB に残っている可能性がある。
+ * 両方の prefix を mutation 扱いにすることで、観察データの集計漏れを防ぐ。
+ *
+ * 各 prefix の定義元:
+ *   - `x-`: CrossoverAgent.ts:157 (`x-${randomUUID()}`)
+ *   - `mut-`: MutationAgent.ts:263 (現行、`mut-${randomUUID()}`)
+ *   - `mutation-`: 旧 / smoke seed (= mutation-anomaly-short-... 形式)
+ *   - `novelty-`: seedDescriptor.ts:376 (`novelty-${kind}-${regime}-${uuid}`)
+ *   - `edge-hypothesis-`: EdgeLedger 由来
+ */
 function classifyRoute(candidateId: string): Route {
   if (candidateId.startsWith('x-')) return 'crossover';
-  if (candidateId.startsWith('mutation-')) return 'mutation';
+  if (candidateId.startsWith('mut-') || candidateId.startsWith('mutation-')) return 'mutation';
   if (candidateId.startsWith('novelty-')) return 'novelty';
   if (candidateId.startsWith('edge-hypothesis-')) return 'edge_hypothesis';
   return 'other';
 }
+
+/**
+ * regime 指定時に十分なサンプルを集めるためのクエリ件数上限。
+ *
+ * PR #146 Copilot review #2/#3 対応: regime 指定時は JS 側 filter で激減することを考慮し、
+ * regime 未指定の `take=5000` よりさらに大きい上限を使う。これでも `--days 90` × 全 regime の
+ * 想定件数 22500 を下回るが、実用上は regime 指定 + 期間 14 日程度で運用するため十分。
+ *
+ * 期間 14 日 × 5 regime × 50 候補/世代 = 約 3500、`take=10000` で余裕を持たせる。
+ */
+const QUERY_TAKE_LIMIT_REGIME_FILTERED = 10_000;
+const QUERY_TAKE_LIMIT_DEFAULT = 5_000;
 
 // =================================================================
 // EvolutionBacktestRun 集計
@@ -133,22 +159,18 @@ async function summarizeBacktestRuns(
   regime: string | null,
 ): Promise<BtRunSummary> {
   const cutoff = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
+  // PR #146 Copilot review #2 対応: regime 指定時は JS 側 filter で激減するため、上限を 2 倍に。
+  // dslSnapshot.regimeTarget は JSON path query が Prisma 6 で複雑なので broad に取得 + JS filter。
+  const takeLimit = regime ? QUERY_TAKE_LIMIT_REGIME_FILTERED : QUERY_TAKE_LIMIT_DEFAULT;
   const rows = await prisma.evolutionBacktestRun.findMany({
-    where: {
-      createdAt: { gte: cutoff },
-      ...(regime
-        ? // dslSnapshot 内の regimeTarget でフィルタ (= JSON path クエリは Prisma 6 で複雑なので
-          // ここでは broad に取得し JS 側で filter する方が単純)
-          {}
-        : {}),
-    },
+    where: { createdAt: { gte: cutoff } },
     select: {
       candidateId: true,
       generation: true,
       formalBtPassed: true,
       dslSnapshot: true,
     },
-    take: 5000, // 90 日 × 1 cron / 日 × 5 regime × 50 候補/世代 ~ 22500、上限で broad に絞る
+    take: takeLimit,
     orderBy: { createdAt: 'desc' },
   });
 
@@ -213,14 +235,17 @@ function printBtRunSummary(s: BtRunSummary, daysAgo: number, regime: string | nu
     console.log(`| ${r} | ${v.total} | ${v.passed} | ${v.failed} | ${pct(v.passed, v.total)} |`);
   }
 
-  console.log(`\n### 1.2 Generation 別 pass 率 (= 世代を進めるほど劣化していないか)\n`);
+  // PR #146 Copilot review #4 対応: 劣化検知目的なので **新しい 10 世代** を表示する。
+  // byGeneration は generation 昇順なので末尾を slice + 表示用に降順反転して見やすく。
+  console.log(`\n### 1.2 Generation 別 pass 率 (= 直近 10 世代、新しい順で劣化検知)\n`);
   console.log(`| Generation | total | passed | pass率 |`);
   console.log(`|---:|---:|---:|---:|`);
-  for (const g of s.byGeneration.slice(0, 10)) {
+  const recentGens = s.byGeneration.slice(-10).reverse();
+  for (const g of recentGens) {
     console.log(`| ${g.generation} | ${g.total} | ${g.passed} | ${pct(g.passed, g.total)} |`);
   }
   if (s.byGeneration.length > 10) {
-    console.log(`\n(残り ${s.byGeneration.length - 10} 世代分は省略)`);
+    console.log(`\n(全 ${s.byGeneration.length} 世代中、直近 10 世代を表示)`);
   }
 }
 
@@ -256,11 +281,24 @@ function median(values: number[]): number | null {
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 }
 
+/**
+ * 線形補間 (= type 7 / R-7 / Excel `PERCENTILE.INC` と同等) ベースの quantile 計算。
+ *
+ * PR #146 Copilot review #5 対応: 旧実装は `Math.floor(q * length)` で「length=4, q=0.75 → idx=3 (= 最大値)」
+ * のように一般的な percentile 定義とズレていた。`(n-1) * q` で position を計算し、
+ * 整数部 + 小数部で線形補間する形に修正。意思決定材料 (= P25 / P75) の正確性を担保する。
+ */
 function quantile(values: number[], q: number): number | null {
   if (values.length === 0) return null;
+  if (q < 0 || q > 1) return null;
   const sorted = [...values].sort((a, b) => a - b);
-  const idx = Math.min(sorted.length - 1, Math.max(0, Math.floor(q * sorted.length)));
-  return sorted[idx];
+  if (sorted.length === 1) return sorted[0];
+  const pos = (sorted.length - 1) * q;
+  const lower = Math.floor(pos);
+  const upper = Math.ceil(pos);
+  if (lower === upper) return sorted[lower];
+  const fraction = pos - lower;
+  return sorted[lower] + (sorted[upper] - sorted[lower]) * fraction;
 }
 
 async function summarizeWinRateLift(
@@ -269,6 +307,8 @@ async function summarizeWinRateLift(
   regime: string | null,
 ): Promise<LiftDistribution> {
   const cutoff = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
+  // PR #146 Copilot review #3 対応: regime 指定時の filter 漏れ防止のため take 上限を引き上げる。
+  const takeLimit = regime ? QUERY_TAKE_LIMIT_REGIME_FILTERED : QUERY_TAKE_LIMIT_DEFAULT;
   const rows = await prisma.evolutionBacktestRun.findMany({
     where: { createdAt: { gte: cutoff } },
     select: {
@@ -279,7 +319,7 @@ async function summarizeWinRateLift(
       trades: true,
       dslSnapshot: true,
     },
-    take: 5000,
+    take: takeLimit,
     orderBy: { createdAt: 'desc' },
   });
 
@@ -326,13 +366,19 @@ async function summarizeWinRateLift(
     };
   });
 
-  // 親子マップ: 同 evolutionRunId 内で candidateId → trades を構築
-  const tradesByCandId = new Map<string, WinRateLiftTrade[]>();
+  // PR #146 Copilot review #6 対応: 親子マップは `(evolutionRunId, candidateId)` 複合キー。
+  // edge-hypothesis / novelty seed は cron を跨いで同じ DSL id が再登場しうるため、
+  // 単一キーだと別 evolutionRunId の親 trades を誤って拾うリスクがある。
+  // 子の evolutionRunId と一致する親だけを参照する形にする。
+  const compositeKey = (runId: string, candId: string): string => `${runId}::${candId}`;
+  const tradesByCompositeKey = new Map<string, WinRateLiftTrade[]>();
   for (const r of filtered) {
-    if (r.trades && r.trades.length > 0) tradesByCandId.set(r.candidateId, r.trades);
+    if (r.trades && r.trades.length > 0) {
+      tradesByCompositeKey.set(compositeKey(r.evolutionRunId, r.candidateId), r.trades);
+    }
   }
 
-  // 親 ID は dslSnapshot.parentIds[0] から取得
+  // 親 ID は dslSnapshot.parentIds[0] から取得し、同 evolutionRunId の親のみ参照
   const liftValues: number[] = [];
   const liftByRoute: Record<Route, number[]> = {
     crossover: [],
@@ -361,7 +407,8 @@ async function summarizeWinRateLift(
       notComputable += 1;
       continue;
     }
-    const parentTrades = tradesByCandId.get(parentId);
+    // 子の evolutionRunId と一致する親 trades のみ参照 (= cron 跨ぎ汚染防止)
+    const parentTrades = tradesByCompositeKey.get(compositeKey(r.evolutionRunId, parentId));
     if (!parentTrades || parentTrades.length === 0) {
       notComputable += 1;
       continue;
@@ -404,8 +451,11 @@ function fmtNum(n: number | null): string {
   return n === null ? '–' : n.toFixed(3);
 }
 
-function printLiftDistribution(d: LiftDistribution, daysAgo: number): void {
-  console.log(`\n## 2. Win Rate Lift 分布 (直近 ${daysAgo} 日)\n`);
+function printLiftDistribution(d: LiftDistribution, daysAgo: number, regime: string | null): void {
+  // PR #146 Copilot review #7 対応: regime フィルタ時に見出しに regime を明示し、
+  // 上流ヘッダだけに依存しない自己完結型の表示にする。
+  const regimeLabel = regime ? `, regime=${regime}` : ', 全 regime';
+  console.log(`\n## 2. Win Rate Lift 分布 (直近 ${daysAgo} 日${regimeLabel})\n`);
   console.log(`- **総候補数**: ${d.totalCandidates}`);
   console.log(`- **trades あり**: ${d.withTrades} (Phase B-1 で永続化された行)`);
   console.log(`- **Lift 計算可能**: ${d.computableLifts}`);
@@ -626,7 +676,7 @@ async function main(): Promise<void> {
     printBtRunSummary(btSummary, args.days, args.regime);
 
     const liftDist = await summarizeWinRateLift(prisma, args.days, args.regime);
-    printLiftDistribution(liftDist, args.days);
+    printLiftDistribution(liftDist, args.days, args.regime);
 
     const carrySummary = await summarizeCarryState(prisma, args.days, args.regime);
     printCarrySummary(carrySummary, args.days);
