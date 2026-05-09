@@ -26,6 +26,9 @@ import { modelFor } from '../../config';
 import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import type { JsonValue } from '../../utils/jsonValue';
 import { extractJson } from './llmJsonExtract';
+// Phase C: lessons 注入の共有 helper。MutationAgent も同じ helper を使うため、
+// 両 agent 間の結合を避けるべく独立 module に切り出している (PR #141 Copilot review #1/#2)。
+import { buildLessonsPromptBlock } from './lessonsPrompt';
 import { recordAgentUsage } from './scoringRecorder';
 
 /**
@@ -259,12 +262,23 @@ export class CrossoverAgent {
               }):\n${JSON.stringify(lossTradesForPrompt, null, 2)}`
             : `\n\n親A_loss_trades: なし (= 親 A は直近で本格 BT 履歴なし、または負けトレード 0 件。一般的な filter を選んでよい)`;
 
+        // Phase C: 親 A の symbol で agentMemory から lessons を取得して prompt 末尾に注入。
+        // lessons 0 件 / symbol 不明なら何もしない (= 既存挙動と同等)。
+        const lessonsResult = buildLessonsPromptBlock(a.symbol);
+        const lessonsBlock = lessonsResult?.block ?? '';
+        if (lessonsResult) {
+          console.info(
+            `[CrossoverAgent] Phase C lessons injected symbol=${a.symbol} count=${lessonsResult.count}`,
+          );
+        }
+
         const line =
           `親A score=${(scores.get(a.id) ?? 0).toFixed(4)}\n親B score=${(scores.get(b.id) ?? 0).toFixed(4)}`;
         const user =
           `${line}\n\n親A:\n${JSON.stringify(a, null, 2)}\n\n親B:\n${JSON.stringify(b, null, 2)}` +
           lossTradesBlock +
           moduleParentBlock +
+          lessonsBlock +
           `\n\n親 A の base setup を維持しつつ、親 A の負けトレードを除去する filter を 1 つ AND 結合で追加した「1 件」の StrategyDSL を、` +
           `wrapper 形式 \`{ child_dsl, rejected_loss_count, preserved_win_count, rationale }\` で返してください（配列にしない）。`;
 
