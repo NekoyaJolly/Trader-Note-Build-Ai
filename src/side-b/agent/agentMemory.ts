@@ -18,6 +18,7 @@ import { lessonSimilarityService } from '../services/lessonSimilarityService';
 // lesson を取得するための DB 経路。Phase D-1b で mutation/crossover prompt に流す。
 import {
     generationLessonRepository as defaultGenerationLessonRepo,
+    type GenerationLessonCategory,
     type GenerationLessonPersister,
     type GenerationLessonRecord,
 } from '../../backend/repositories/generationLessonRepository';
@@ -660,8 +661,11 @@ export class AgentMemory {
  *   - 🌪 regime_shift_detected (= regime 切替検出)
  *   - 🧪 filter_efficacy_increased (= filter 効果上昇)
  *   - 🌀 other / fallback     (= 想定外カテゴリ)
+ *
+ * PR #144 Copilot review #2: 引数を `GenerationLessonCategory` union 型にすることで、
+ * カテゴリ追加時にコンパイルエラーで取りこぼしを検知できる (= switch の網羅性チェック)。
  */
-function emojiForCategory(category: string): string {
+function emojiForCategory(category: GenerationLessonCategory): string {
     switch (category) {
         case 'breakthrough':
             return '🎯';
@@ -675,8 +679,13 @@ function emojiForCategory(category: string): string {
             return '🌪';
         case 'filter_efficacy_increased':
             return '🧪';
-        default:
+        case 'other':
             return '🌀';
+        default: {
+            // 網羅性チェック: 新カテゴリ追加時に never 型違反でコンパイルエラーになる
+            const _exhaustive: never = category;
+            return _exhaustive;
+        }
     }
 }
 

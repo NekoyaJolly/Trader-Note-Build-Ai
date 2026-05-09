@@ -37,8 +37,11 @@ function record(
 }
 
 describe('AgentMemory.getGenerationLessons (Phase D-1a)', () => {
+  // PR #144 Copilot review #3/#4: 二重キャスト (`as unknown as jest.Mock`) を避けるため、
+  // spy を変数に保持して直接 toHaveBeenCalledWith で参照する形に統一。
+  let warnSpy: jest.SpyInstance;
   beforeEach(() => {
-    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
   });
   afterEach(() => {
     jest.restoreAllMocks();
@@ -100,7 +103,6 @@ describe('AgentMemory.getGenerationLessons (Phase D-1a)', () => {
   });
 
   it('regime 未指定の呼び出しは現状サポート外、空配列 + warning ログ', async () => {
-    const warnSpy = console.warn as unknown as jest.Mock;
     const result = await agentMemory.getGenerationLessons({});
     expect(result).toEqual([]);
     expect(warnSpy).toHaveBeenCalledWith(
@@ -114,7 +116,6 @@ describe('AgentMemory.getGenerationLessons (Phase D-1a)', () => {
       findRecentByRegime: jest.fn().mockRejectedValue(new Error('DB connection lost')),
       deleteOlderThan: jest.fn(),
     };
-    const warnSpy = console.warn as unknown as jest.Mock;
 
     const result = await agentMemory.getGenerationLessons({
       regime: 'breakout',

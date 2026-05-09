@@ -37,16 +37,10 @@ export const GenerationLessonCategorySchema = z.enum([
 ]);
 export type GenerationLessonCategory = z.infer<typeof GenerationLessonCategorySchema>;
 
-/**
- * lesson に紐づける metrics の Zod schema。
- *
- * LLM 出力の supporting metrics (= dsr / lift / filterCategory 等) を JSON object として受ける。
- * `unknown` を避けるため JsonValue ベースで表現し、配列 / プリミティブは弾く (= object のみ)。
- */
-export const GenerationLessonMetricsSchema = z.record(
-  z.string(),
-  z.unknown(), // record 内部値は LLM 由来で型不確定、Zod では z.unknown() を使うが repo 外には JsonValue で公開
-);
+// PR #144 Copilot review #1: GenerationLessonMetricsSchema を定義していたが
+// `create` / `toRecord` で実際には使っておらず死蔵していた。Phase D-1a の段階では
+// LLM 出力 (= Phase D-1b で来る) の metrics 検証は意味薄いので、Zod schema は削除して
+// JsonValue ベースの型表現に統一する。Phase D-1b で必要になれば再導入。
 
 /**
  * insert に使う最低限の入力。`metrics` / `confidence` は optional。
