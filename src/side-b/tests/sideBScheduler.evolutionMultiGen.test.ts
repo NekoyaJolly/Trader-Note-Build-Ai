@@ -633,4 +633,44 @@ describe('SideBScheduler.runEvolutionNow Phase A multi-generation', () => {
       );
     });
   });
+
+  // 観察フェーズ移行 (2026-05-09): AUTO_EVOLUTION env override
+  describe('AUTO_EVOLUTION env override (観察フェーズ移行)', () => {
+    it('AUTO_EVOLUTION=true で config.autoEvolution が true になる', () => {
+      process.env.AUTO_EVOLUTION = 'true';
+      const scheduler = new SideBScheduler({ evolutionRegimes: ['breakout'] });
+      expect(scheduler.getStatus().config.autoEvolution).toBe(true);
+    });
+
+    it('AUTO_EVOLUTION=false で config.autoEvolution が false (default も同じ値だが env 反映を確認)', () => {
+      process.env.AUTO_EVOLUTION = 'false';
+      const scheduler = new SideBScheduler({ evolutionRegimes: ['breakout'] });
+      expect(scheduler.getStatus().config.autoEvolution).toBe(false);
+    });
+
+    it('AUTO_EVOLUTION 未指定なら DEFAULT_CONFIG (= false) を維持 (= 既存挙動)', () => {
+      delete process.env.AUTO_EVOLUTION;
+      const scheduler = new SideBScheduler({ evolutionRegimes: ['breakout'] });
+      expect(scheduler.getStatus().config.autoEvolution).toBe(false);
+    });
+
+    it("AUTO_EVOLUTION='yes' (= 想定外文字列) は warning + DEFAULT_CONFIG (false) を維持", () => {
+      process.env.AUTO_EVOLUTION = 'yes';
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const scheduler = new SideBScheduler({ evolutionRegimes: ['breakout'] });
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('AUTO_EVOLUTION=yes'),
+      );
+      expect(scheduler.getStatus().config.autoEvolution).toBe(false);
+    });
+
+    it('configOverride > env: configOverride で false 明示なら AUTO_EVOLUTION=true を上書き', () => {
+      process.env.AUTO_EVOLUTION = 'true';
+      const scheduler = new SideBScheduler({
+        evolutionRegimes: ['breakout'],
+        autoEvolution: false,
+      });
+      expect(scheduler.getStatus().config.autoEvolution).toBe(false);
+    });
+  });
 });

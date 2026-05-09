@@ -231,8 +231,10 @@ const EVOLUTION_CARRY_RETENTION_DAYS = 14;
  *   - EVOLUTION_ADAPTIVE_BUDGET: 'true' / 'false' (case-insensitive)。
  *   - EVOLUTION_QD_ARCHIVE: 'true' / 'false'。
  *   - EVOLUTION_QD_PARENT_LIMIT: 0 以上の整数。負数は ignore。
+ *   - AUTO_EVOLUTION: 'true' / 'false' (= Filter Evolution 観察フェーズ移行用、2026-05-09 追加)。
+ *     true で 24h ごとの evolution cron が自動起動する。LLM コスト発生注意。
  *
- * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.A.2
+ * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.A.2 / §5.A.5
  *
  * @see SideBSchedulerConfig
  */
@@ -313,6 +315,21 @@ function readEvolutionEnvOverrides(): Partial<SideBSchedulerConfig> {
       console.warn(
         `[SideBScheduler] EVOLUTION_QD_PARENT_LIMIT=${qdLimitRaw} は不正値 (>=0 の整数のみ)、無視します`,
       );
+    }
+  }
+
+  // Filter Evolution 観察フェーズ (2026-05-09): AUTO_EVOLUTION で evolution cron の自動起動を制御。
+  // - true で `startEvolutionJob` が動き 24h ごと `runEvolutionNow` が走る (= LLM コスト発生)
+  // - DEFAULT_CONFIG.autoEvolution は false なので、本番で観察データを蓄積するには true 設定が必須
+  const autoEvolutionRaw = process.env.AUTO_EVOLUTION;
+  if (autoEvolutionRaw !== undefined && autoEvolutionRaw !== '') {
+    const parsed = parseStrictBool(autoEvolutionRaw);
+    if (parsed === null) {
+      console.warn(
+        `[SideBScheduler] AUTO_EVOLUTION=${autoEvolutionRaw} は不正値 ('true' | 'false' のみ)、無視します`,
+      );
+    } else {
+      out.autoEvolution = parsed;
     }
   }
 

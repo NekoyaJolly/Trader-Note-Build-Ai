@@ -123,7 +123,7 @@ jobs:
             --image ${{ env.GCP_IMAGE }} \
             --region ${{ env.GCP_REGION }} \
             --platform managed \
-            --update-env-vars NODE_ENV=production,ANALYSIS_ENGINE_URL=${{ needs.deploy-analysis-engine.outputs.analysis_url }},PYTHON_VALIDATION_MODE=http,EVOLUTION_GENERATIONS=2 \
+            --update-env-vars NODE_ENV=production,ANALYSIS_ENGINE_URL=${{ needs.deploy-analysis-engine.outputs.analysis_url }},PYTHON_VALIDATION_MODE=http,EVOLUTION_GENERATIONS=2,AUTO_EVOLUTION=true \
             --update-secrets AI_API_KEY=AI_API_KEY:latest,AI_MODEL=AI_MODEL:latest,AI_BASE_URL=AI_BASE_URL:latest,CRON_SECRET=CRON_SECRET:latest
 
       - name: デプロイ後の動作確認（最大5分待機）
