@@ -591,10 +591,14 @@ export class PDCALoop {
                 ? reflectionLessons.map((l) => `[${l.category}] ${l.lesson}`).join(' | ')
                 : '(reflection lessons なし — Phase D 未完成 または 世代結果に特記なし)';
 
+        // PR #143 Copilot review #4: scheduler の console log は 1-indexed (generationIndex + 1) で
+        // 表示しているため、人間が読む thinking log もここで 1-indexed に揃える (= 表記ゆれ解消)。
+        // summary 型のセマンティクスは 0-indexed のままにし、表示時のみ +1 を足す。
+        const genHuman = summary.generationIndex + 1;
         this.addThinkingLog(
             this.memory.getState(),
             `進化ループ世代完了: regime=${regime} ` +
-                `gen=${summary.generationIndex}/${summary.generationsTotal} ` +
+                `gen=${genHuman}/${summary.generationsTotal} ` +
                 `promo=${summary.promotionCandidates} ` +
                 `validationConfirmed=${summary.validationConfirmed} ` +
                 `formalBtPassed=${summary.formalBtPassed}`,

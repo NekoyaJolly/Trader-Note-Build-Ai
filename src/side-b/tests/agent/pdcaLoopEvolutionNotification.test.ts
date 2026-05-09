@@ -13,37 +13,16 @@
 import { PDCALoop, type EvolutionGenerationSummaryForPDCA, type EvolutionReflectionLesson } from '../../agent/pdcaLoop';
 
 describe('PDCALoop.notifyEvolutionGenerationComplete (Phase E)', () => {
+  // PR #143 Copilot review #2: 不要な型キャストを削除し、PDCALoopConfig の必要キーのみを渡す
   function makeLoop(): PDCALoop {
     return new PDCALoop({
       enabled: true,
       symbols: ['XAU/USD'],
-      timeframe: '15m',
-      higherTimeframe: '4h',
-      monitorIntervalMs: 60_000,
-      planIntervalHours: 4,
-      dailyPlanTimeUTC: '00:00',
-      autoGenerateNote: false,
-      autoSummary: false,
-      autoExpireTrades: false,
-      autoCleanup: false,
-      planRetentionDays: 30,
-      tradeRetentionDays: 90,
-      autoSimilarityCheck: false,
-      similarityThreshold: 0.85,
-      autoScreening: false,
-      screeningMaxPerRun: 10,
-      autoFullValidation: false,
-      fullValidationMaxPerRun: 5,
-      autoEvolution: false,
-      evolutionRegimes: ['breakout'],
-      evolutionGenerations: 1,
-      evolutionAdaptiveBudget: false,
-      evolutionQDArchive: false,
-      evolutionQDParentLimit: 2,
-      autoTriggerPromptEvolution: false,
       normalIntervalMs: 60_000,
       activeIntervalMs: 5_000,
-    } as unknown as ConstructorParameters<typeof PDCALoop>[0]);
+      positionIntervalMs: 1_000,
+      verbose: false,
+    });
   }
 
   function summaryFor(generationIndex: number, generationsTotal: number): EvolutionGenerationSummaryForPDCA {
@@ -65,7 +44,8 @@ describe('PDCALoop.notifyEvolutionGenerationComplete (Phase E)', () => {
     const last = logs[logs.length - 1];
     expect(last.action).toContain('進化ループ世代完了');
     expect(last.action).toContain('regime=breakout');
-    expect(last.action).toContain('gen=0/3');
+    // PR #143 Copilot review #4: thinking log は 1-indexed 表示 (= summary.generationIndex+1)
+    expect(last.action).toContain('gen=1/3');
     expect(last.action).toContain('promo=3');
     expect(last.action).toContain('validationConfirmed=2');
     expect(last.action).toContain('formalBtPassed=4');
