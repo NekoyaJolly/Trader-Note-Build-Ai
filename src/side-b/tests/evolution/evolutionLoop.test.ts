@@ -2895,3 +2895,586 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
     expect(injectionLog).toContain('1');
   });
 });
+
+// =================================================================
+// Phase B-2: cron 跨ぎ carry state load/save 配線テスト
+// =================================================================
+
+import type {
+  EvolutionInstanceCarryPersister,
+  EvolutionCarryPayload,
+  EvolutionInstanceCarryRecord,
+} from '../../../backend/repositories/evolutionInstanceCarryRepository';
+
+describe('EvolutionLoop Phase B-2: carry state load/save', () => {
+  function buildBaseDsl(id: string) {
+    return StrategyDSLSchema.parse({
+      id,
+      generation: 0,
+      parentIds: [],
+      regimeTarget: 'breakout',
+      symbol: 'EURUSD',
+      timeframe: '1h',
+      entry: {
+        direction: 'long',
+        trigger: {
+          logic: 'AND',
+          conditions: [{ lens: 'ohlcv', feature: 'close', op: '>', value: 0.0001 }],
+        },
+      },
+      stopLoss: { type: 'fixed_pips', value: 30 },
+      takeProfit: { type: 'rr_ratio', value: 1.5 },
+      parameters: {},
+      metadata: { createdAt: new Date().toISOString(), createdBy: 'initial_random' },
+    });
+  }
+
+  it('evolutionInstanceCarryRepo 未指定なら carry 経路は呼ばれない (既存挙動維持)', async () => {
+    const dsl = buildBaseDsl('phase-b2-no-carry');
+    const adapter = new SurrogateFitnessSimulator();
+    jest.spyOn(adapter, 'evaluateFitness').mockResolvedValue({
+      dslId: dsl.id,
+      period: { start: '2024-01-01', end: '2024-12-31' },
+      trainPf: 1.5,
+      validationPf: 1.4,
+      overfitScore: 0.1,
+      train: {
+        summary: {
+          totalTrades: 30, winningTrades: 18, losingTrades: 12, winRate: 0.6,
+          netProfit: 100, netProfitRate: 0.1, maxDrawdown: 30, maxDrawdownRate: 0.03,
+          profitFactor: 1.5, averageWin: 15, averageLoss: -10,
+          riskRewardRatio: 1.5, maxConsecutiveWins: 3, maxConsecutiveLosses: 2,
+        },
+        trades: [],
+      },
+      validation: {
+        summary: {
+          totalTrades: 15, winningTrades: 9, losingTrades: 6, winRate: 0.6,
+          netProfit: 50, netProfitRate: 0.05, maxDrawdown: 15, maxDrawdownRate: 0.015,
+          profitFactor: 1.4, averageWin: 12, averageLoss: -8,
+          riskRewardRatio: 1.5, maxConsecutiveWins: 2, maxConsecutiveLosses: 1,
+        },
+        trades: [],
+      },
+      execution: {
+        executionModel: 'legacy_zero_cost',
+        executionConfigHash: 'legacy-zero-cost',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'legacy_zero_cost', dataSource: 'ctrader',
+          roundTripCostPips: 0, roundTripCostAtrMult: 0, totalCost: 0,
+        },
+      },
+    });
+
+    const mutationAgent = new MutationAgent();
+    jest.spyOn(mutationAgent, 'generateMutants').mockResolvedValue([]);
+    jest.spyOn(mutationAgent, 'generateDiverse').mockResolvedValue([]);
+    const crossoverAgent = new CrossoverAgent();
+    jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
+
+    const population = new StrategyPopulation(undefined);
+    population.add('breakout', dsl);
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockResolvedValue(makeFormalBtResponse(1.5, 0.6, 30));
+
+    const loop = new EvolutionLoop({
+      population,
+      adapter,
+      mutationAgent,
+      crossoverAgent,
+      enforcer: new DiversityEnforcer(),
+      defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
+      runFormalBacktest,
+      // evolutionInstanceCarryRepo: undefined → null と同等 (= 既定 null で skip)
+    });
+
+    const report = await loop.runOneGeneration('breakout');
+    // carry 関連の info ログが errors[] に含まれない
+    const carryLogs = report.errors.filter((e) => e.includes('B-2 carry'));
+    expect(carryLogs).toEqual([]);
+  });
+
+  it('evolutionInstanceCarryRepo 指定時、初回 runOneGeneration で findLatestByRegime + create が呼ばれる', async () => {
+    const dsl = buildBaseDsl('phase-b2-empty-carry');
+    const adapter = new SurrogateFitnessSimulator();
+    jest.spyOn(adapter, 'evaluateFitness').mockResolvedValue({
+      dslId: dsl.id,
+      period: { start: '2024-01-01', end: '2024-12-31' },
+      trainPf: 1.5,
+      validationPf: 1.4,
+      overfitScore: 0.1,
+      train: {
+        summary: {
+          totalTrades: 30, winningTrades: 18, losingTrades: 12, winRate: 0.6,
+          netProfit: 100, netProfitRate: 0.1, maxDrawdown: 30, maxDrawdownRate: 0.03,
+          profitFactor: 1.5, averageWin: 15, averageLoss: -10,
+          riskRewardRatio: 1.5, maxConsecutiveWins: 3, maxConsecutiveLosses: 2,
+        },
+        trades: [],
+      },
+      validation: {
+        summary: {
+          totalTrades: 15, winningTrades: 9, losingTrades: 6, winRate: 0.6,
+          netProfit: 50, netProfitRate: 0.05, maxDrawdown: 15, maxDrawdownRate: 0.015,
+          profitFactor: 1.4, averageWin: 12, averageLoss: -8,
+          riskRewardRatio: 1.5, maxConsecutiveWins: 2, maxConsecutiveLosses: 1,
+        },
+        trades: [],
+      },
+      execution: {
+        executionModel: 'legacy_zero_cost',
+        executionConfigHash: 'legacy-zero-cost',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'legacy_zero_cost', dataSource: 'ctrader',
+          roundTripCostPips: 0, roundTripCostAtrMult: 0, totalCost: 0,
+        },
+      },
+    });
+
+    const mutationAgent = new MutationAgent();
+    jest.spyOn(mutationAgent, 'generateMutants').mockResolvedValue([]);
+    jest.spyOn(mutationAgent, 'generateDiverse').mockResolvedValue([]);
+    const crossoverAgent = new CrossoverAgent();
+    jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
+
+    const population = new StrategyPopulation(undefined);
+    population.add('breakout', dsl);
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockResolvedValue(makeFormalBtResponse(1.5, 0.6, 30));
+
+    const findLatestByRegime: jest.MockedFunction<
+      EvolutionInstanceCarryPersister['findLatestByRegime']
+    > = jest.fn().mockResolvedValue(null);
+    const create: jest.MockedFunction<EvolutionInstanceCarryPersister['create']> = jest.fn();
+    const deleteOlderThan: jest.MockedFunction<
+      EvolutionInstanceCarryPersister['deleteOlderThan']
+    > = jest.fn();
+    const carryRepo: EvolutionInstanceCarryPersister = {
+      findLatestByRegime,
+      create,
+      deleteOlderThan,
+    };
+
+    const loop = new EvolutionLoop({
+      population,
+      adapter,
+      mutationAgent,
+      crossoverAgent,
+      enforcer: new DiversityEnforcer(),
+      defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
+      runFormalBacktest,
+      evolutionInstanceCarryRepo: carryRepo,
+    });
+
+    const report = await loop.runOneGeneration('breakout');
+
+    expect(findLatestByRegime).toHaveBeenCalledTimes(1);
+    expect(findLatestByRegime).toHaveBeenCalledWith('breakout');
+    expect(create).toHaveBeenCalledTimes(1);
+    const createArg = create.mock.calls[0][0];
+    expect(createArg.regime).toBe('breakout');
+    expect(createArg.payload.tradesByDslId).toBeDefined();
+    expect(createArg.payload.repairHints).toBeDefined();
+    expect(createArg.payload.repairBaselines).toBeDefined();
+
+    // info ログに「carry なし」と「carry saved」が出る
+    const noCarryLog = report.errors.find((e) => e.includes('既存 carry なし'));
+    const savedLog = report.errors.find((e) => e.includes('B-2 carry saved'));
+    expect(noCarryLog).toBeDefined();
+    expect(savedLog).toBeDefined();
+  });
+
+  it('既存 carry が DB にあれば load して in-memory cache を初期化する (= info ログ確認)', async () => {
+    const dsl = buildBaseDsl('phase-b2-with-carry');
+    const adapter = new SurrogateFitnessSimulator();
+    jest.spyOn(adapter, 'evaluateFitness').mockResolvedValue({
+      dslId: dsl.id,
+      period: { start: '2024-01-01', end: '2024-12-31' },
+      trainPf: 1.5,
+      validationPf: 1.4,
+      overfitScore: 0.1,
+      train: {
+        summary: {
+          totalTrades: 30, winningTrades: 18, losingTrades: 12, winRate: 0.6,
+          netProfit: 100, netProfitRate: 0.1, maxDrawdown: 30, maxDrawdownRate: 0.03,
+          profitFactor: 1.5, averageWin: 15, averageLoss: -10,
+          riskRewardRatio: 1.5, maxConsecutiveWins: 3, maxConsecutiveLosses: 2,
+        },
+        trades: [],
+      },
+      validation: {
+        summary: {
+          totalTrades: 15, winningTrades: 9, losingTrades: 6, winRate: 0.6,
+          netProfit: 50, netProfitRate: 0.05, maxDrawdown: 15, maxDrawdownRate: 0.015,
+          profitFactor: 1.4, averageWin: 12, averageLoss: -8,
+          riskRewardRatio: 1.5, maxConsecutiveWins: 2, maxConsecutiveLosses: 1,
+        },
+        trades: [],
+      },
+      execution: {
+        executionModel: 'legacy_zero_cost',
+        executionConfigHash: 'legacy-zero-cost',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'legacy_zero_cost', dataSource: 'ctrader',
+          roundTripCostPips: 0, roundTripCostAtrMult: 0, totalCost: 0,
+        },
+      },
+    });
+
+    const mutationAgent = new MutationAgent();
+    jest.spyOn(mutationAgent, 'generateMutants').mockResolvedValue([]);
+    jest.spyOn(mutationAgent, 'generateDiverse').mockResolvedValue([]);
+    const crossoverAgent = new CrossoverAgent();
+    jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
+
+    const population = new StrategyPopulation(undefined);
+    population.add('breakout', dsl);
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockResolvedValue(makeFormalBtResponse(1.5, 0.6, 30));
+
+    const existingCarry: EvolutionInstanceCarryRecord = {
+      id: 'carry-existing',
+      evolutionRunId: '00000000-0000-0000-0000-000000000099',
+      regime: 'breakout',
+      generation: 5,
+      payload: {
+        tradesByDslId: {
+          'parent-from-prev-cron': [
+            { entryTime: '2024-05-01T00:00:00.000Z', side: 'long', pnl: 100, outcome: 'win' },
+            { entryTime: '2024-05-02T00:00:00.000Z', side: 'short', pnl: -50, outcome: 'loss' },
+          ],
+        },
+        repairHints: {},
+        repairBaselines: {},
+      } satisfies EvolutionCarryPayload,
+      recordedAt: new Date('2026-05-09T00:00:00.000Z'),
+    };
+
+    const findLatestByRegime: jest.MockedFunction<
+      EvolutionInstanceCarryPersister['findLatestByRegime']
+    > = jest.fn().mockResolvedValue(existingCarry);
+    const create: jest.MockedFunction<EvolutionInstanceCarryPersister['create']> = jest.fn();
+    const deleteOlderThan: jest.MockedFunction<
+      EvolutionInstanceCarryPersister['deleteOlderThan']
+    > = jest.fn();
+    const carryRepo: EvolutionInstanceCarryPersister = {
+      findLatestByRegime,
+      create,
+      deleteOlderThan,
+    };
+
+    const loop = new EvolutionLoop({
+      population,
+      adapter,
+      mutationAgent,
+      crossoverAgent,
+      enforcer: new DiversityEnforcer(),
+      defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
+      runFormalBacktest,
+      evolutionInstanceCarryRepo: carryRepo,
+    });
+
+    const report = await loop.runOneGeneration('breakout');
+
+    // 復元成功ログに前 cron の trades 件数が含まれる
+    const restoredLog = report.errors.find((e) => e.includes('B-2 carry restored'));
+    expect(restoredLog).toBeDefined();
+    expect(restoredLog).toContain('trades=1');
+    expect(restoredLog).toContain('carryId=carry-existing');
+
+    // 当世代の cache (= 復元 trades + 当世代 trades) が save される
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('PR #140 review #1: regime 切替時に前 regime の cache が残留しない (state 汚染防止)', async () => {
+    const dsl = buildBaseDsl('phase-b2-no-state-pollution');
+    const adapter = new SurrogateFitnessSimulator();
+    jest.spyOn(adapter, 'evaluateFitness').mockResolvedValue({
+      dslId: dsl.id,
+      period: { start: '2024-01-01', end: '2024-12-31' },
+      trainPf: 1.5,
+      validationPf: 1.4,
+      overfitScore: 0.1,
+      train: {
+        summary: {
+          totalTrades: 30, winningTrades: 18, losingTrades: 12, winRate: 0.6,
+          netProfit: 100, netProfitRate: 0.1, maxDrawdown: 30, maxDrawdownRate: 0.03,
+          profitFactor: 1.5, averageWin: 15, averageLoss: -10,
+          riskRewardRatio: 1.5, maxConsecutiveWins: 3, maxConsecutiveLosses: 2,
+        },
+        trades: [],
+      },
+      validation: {
+        summary: {
+          totalTrades: 15, winningTrades: 9, losingTrades: 6, winRate: 0.6,
+          netProfit: 50, netProfitRate: 0.05, maxDrawdown: 15, maxDrawdownRate: 0.015,
+          profitFactor: 1.4, averageWin: 12, averageLoss: -8,
+          riskRewardRatio: 1.5, maxConsecutiveWins: 2, maxConsecutiveLosses: 1,
+        },
+        trades: [],
+      },
+      execution: {
+        executionModel: 'legacy_zero_cost',
+        executionConfigHash: 'legacy-zero-cost',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'legacy_zero_cost', dataSource: 'ctrader',
+          roundTripCostPips: 0, roundTripCostAtrMult: 0, totalCost: 0,
+        },
+      },
+    });
+
+    const mutationAgent = new MutationAgent();
+    jest.spyOn(mutationAgent, 'generateMutants').mockResolvedValue([]);
+    jest.spyOn(mutationAgent, 'generateDiverse').mockResolvedValue([]);
+    const crossoverAgent = new CrossoverAgent();
+    jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
+
+    const population = new StrategyPopulation(undefined);
+    population.add('breakout', dsl);
+    population.add('reversal', { ...dsl, id: 'reversal-dsl', regimeTarget: 'reversal' });
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockResolvedValue(makeFormalBtResponse(1.5, 0.6, 30));
+
+    // 1 回目 (breakout) は carry あり、2 回目 (reversal) は carry なし
+    const breakoutCarry: EvolutionInstanceCarryRecord = {
+      id: 'carry-breakout',
+      evolutionRunId: '00000000-0000-0000-0000-000000000099',
+      regime: 'breakout',
+      generation: 5,
+      payload: {
+        tradesByDslId: {
+          'parent-breakout': [
+            { entryTime: '2024-05-01T00:00:00.000Z', side: 'long', pnl: 100, outcome: 'win' },
+          ],
+        },
+        repairHints: {},
+        repairBaselines: {},
+      },
+      recordedAt: new Date(),
+    };
+
+    const findLatestByRegime: jest.MockedFunction<
+      EvolutionInstanceCarryPersister['findLatestByRegime']
+    > = jest
+      .fn()
+      .mockImplementation(async (regime: string) => {
+        if (regime === 'breakout') return breakoutCarry;
+        return null; // reversal は carry 無し
+      });
+    const create: jest.MockedFunction<EvolutionInstanceCarryPersister['create']> = jest.fn();
+    const deleteOlderThan: jest.MockedFunction<
+      EvolutionInstanceCarryPersister['deleteOlderThan']
+    > = jest.fn();
+
+    const loop = new EvolutionLoop({
+      population,
+      adapter,
+      mutationAgent,
+      crossoverAgent,
+      enforcer: new DiversityEnforcer(),
+      defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
+      runFormalBacktest,
+      evolutionInstanceCarryRepo: { findLatestByRegime, create, deleteOlderThan },
+    });
+
+    // breakout 実行 → carry がロードされる
+    await loop.runOneGeneration('breakout');
+    // reversal 実行 → carry なし、breakout の cache が漏れないことを確認
+    await loop.runOneGeneration('reversal');
+
+    // create は 2 回呼ばれる、reversal の payload に breakout の trades が混入していないこと
+    expect(create).toHaveBeenCalledTimes(2);
+    const reversalSaveArg = create.mock.calls[1][0];
+    expect(reversalSaveArg.regime).toBe('reversal');
+    // 'parent-breakout' (breakout 由来) が reversal の payload に含まれていないこと
+    expect(reversalSaveArg.payload.tradesByDslId).not.toHaveProperty('parent-breakout');
+  });
+
+  it('PR #140 review #2: load 失敗時 (DB 一時障害) は flag を立てず、次世代で再試行する', async () => {
+    const dsl = buildBaseDsl('phase-b2-retry-on-load-fail');
+    const adapter = new SurrogateFitnessSimulator();
+    jest.spyOn(adapter, 'evaluateFitness').mockResolvedValue({
+      dslId: dsl.id,
+      period: { start: '2024-01-01', end: '2024-12-31' },
+      trainPf: 1.5,
+      validationPf: 1.4,
+      overfitScore: 0.1,
+      train: {
+        summary: {
+          totalTrades: 30, winningTrades: 18, losingTrades: 12, winRate: 0.6,
+          netProfit: 100, netProfitRate: 0.1, maxDrawdown: 30, maxDrawdownRate: 0.03,
+          profitFactor: 1.5, averageWin: 15, averageLoss: -10,
+          riskRewardRatio: 1.5, maxConsecutiveWins: 3, maxConsecutiveLosses: 2,
+        },
+        trades: [],
+      },
+      validation: {
+        summary: {
+          totalTrades: 15, winningTrades: 9, losingTrades: 6, winRate: 0.6,
+          netProfit: 50, netProfitRate: 0.05, maxDrawdown: 15, maxDrawdownRate: 0.015,
+          profitFactor: 1.4, averageWin: 12, averageLoss: -8,
+          riskRewardRatio: 1.5, maxConsecutiveWins: 2, maxConsecutiveLosses: 1,
+        },
+        trades: [],
+      },
+      execution: {
+        executionModel: 'legacy_zero_cost',
+        executionConfigHash: 'legacy-zero-cost',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'legacy_zero_cost', dataSource: 'ctrader',
+          roundTripCostPips: 0, roundTripCostAtrMult: 0, totalCost: 0,
+        },
+      },
+    });
+
+    const mutationAgent = new MutationAgent();
+    jest.spyOn(mutationAgent, 'generateMutants').mockResolvedValue([]);
+    jest.spyOn(mutationAgent, 'generateDiverse').mockResolvedValue([]);
+    const crossoverAgent = new CrossoverAgent();
+    jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
+
+    const population = new StrategyPopulation(undefined);
+    population.add('breakout', dsl);
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockResolvedValue(makeFormalBtResponse(1.5, 0.6, 30));
+
+    // 1 回目: load 失敗、2 回目: load 成功
+    const findLatestByRegime: jest.MockedFunction<
+      EvolutionInstanceCarryPersister['findLatestByRegime']
+    > = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('DB connection lost'))
+      .mockResolvedValueOnce(null);
+    const create: jest.MockedFunction<EvolutionInstanceCarryPersister['create']> = jest.fn();
+    const deleteOlderThan: jest.MockedFunction<
+      EvolutionInstanceCarryPersister['deleteOlderThan']
+    > = jest.fn();
+
+    const loop = new EvolutionLoop({
+      population,
+      adapter,
+      mutationAgent,
+      crossoverAgent,
+      enforcer: new DiversityEnforcer(),
+      defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
+      runFormalBacktest,
+      evolutionInstanceCarryRepo: { findLatestByRegime, create, deleteOlderThan },
+    });
+
+    const report1 = await loop.runOneGeneration('breakout');
+    const report2 = await loop.runOneGeneration('breakout');
+
+    // 1 回目で load が失敗 (warning ログ) → flag が立たないため 2 回目で再試行
+    expect(findLatestByRegime).toHaveBeenCalledTimes(2);
+    const warnLog1 = report1.errors.find((e) => e.includes('[warn] B-2 carry load 失敗'));
+    expect(warnLog1).toBeDefined();
+    // 2 回目は成功 (= '既存 carry なし' info ログ)
+    const infoLog2 = report2.errors.find((e) => e.includes('既存 carry なし'));
+    expect(infoLog2).toBeDefined();
+  });
+
+  it('同インスタンスで同 regime に対する 2 回目以降は load を再実行しない (in-memory 引き継ぎ)', async () => {
+    const dsl = buildBaseDsl('phase-b2-loaded-once');
+    const adapter = new SurrogateFitnessSimulator();
+    jest.spyOn(adapter, 'evaluateFitness').mockResolvedValue({
+      dslId: dsl.id,
+      period: { start: '2024-01-01', end: '2024-12-31' },
+      trainPf: 1.5,
+      validationPf: 1.4,
+      overfitScore: 0.1,
+      train: {
+        summary: {
+          totalTrades: 30, winningTrades: 18, losingTrades: 12, winRate: 0.6,
+          netProfit: 100, netProfitRate: 0.1, maxDrawdown: 30, maxDrawdownRate: 0.03,
+          profitFactor: 1.5, averageWin: 15, averageLoss: -10,
+          riskRewardRatio: 1.5, maxConsecutiveWins: 3, maxConsecutiveLosses: 2,
+        },
+        trades: [],
+      },
+      validation: {
+        summary: {
+          totalTrades: 15, winningTrades: 9, losingTrades: 6, winRate: 0.6,
+          netProfit: 50, netProfitRate: 0.05, maxDrawdown: 15, maxDrawdownRate: 0.015,
+          profitFactor: 1.4, averageWin: 12, averageLoss: -8,
+          riskRewardRatio: 1.5, maxConsecutiveWins: 2, maxConsecutiveLosses: 1,
+        },
+        trades: [],
+      },
+      execution: {
+        executionModel: 'legacy_zero_cost',
+        executionConfigHash: 'legacy-zero-cost',
+        dataSource: 'ctrader',
+        costSummary: {
+          model: 'legacy_zero_cost', dataSource: 'ctrader',
+          roundTripCostPips: 0, roundTripCostAtrMult: 0, totalCost: 0,
+        },
+      },
+    });
+
+    const mutationAgent = new MutationAgent();
+    jest.spyOn(mutationAgent, 'generateMutants').mockResolvedValue([]);
+    jest.spyOn(mutationAgent, 'generateDiverse').mockResolvedValue([]);
+    const crossoverAgent = new CrossoverAgent();
+    jest.spyOn(crossoverAgent, 'generateCrossovers').mockResolvedValue([]);
+
+    const population = new StrategyPopulation(undefined);
+    population.add('breakout', dsl);
+    const runFormalBacktest = jest
+      .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
+      .mockResolvedValue(makeFormalBtResponse(1.5, 0.6, 30));
+
+    const findLatestByRegime: jest.MockedFunction<
+      EvolutionInstanceCarryPersister['findLatestByRegime']
+    > = jest.fn().mockResolvedValue(null);
+    const create: jest.MockedFunction<EvolutionInstanceCarryPersister['create']> = jest.fn();
+    const deleteOlderThan: jest.MockedFunction<
+      EvolutionInstanceCarryPersister['deleteOlderThan']
+    > = jest.fn();
+    const carryRepo: EvolutionInstanceCarryPersister = {
+      findLatestByRegime,
+      create,
+      deleteOlderThan,
+    };
+
+    const loop = new EvolutionLoop({
+      population,
+      adapter,
+      mutationAgent,
+      crossoverAgent,
+      enforcer: new DiversityEnforcer(),
+      defaultPeriod: { start: '2024-01-01', end: '2024-12-31' },
+      evolutionBacktestRepo: null,
+      edgeHypothesisLoader: null,
+      runFormalBacktest,
+      evolutionInstanceCarryRepo: carryRepo,
+    });
+
+    await loop.runOneGeneration('breakout');
+    await loop.runOneGeneration('breakout');
+
+    // 同 regime に対する load は 1 回のみ (= multi-gen 経路で in-memory 引き継ぎ)
+    expect(findLatestByRegime).toHaveBeenCalledTimes(1);
+    // save は 2 回呼ばれる
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+});

@@ -776,6 +776,37 @@ model EvolutionBacktestRun {
   @@index([formalBtPassed, createdAt(sort: Desc)], map: "idx_evolution_bt_passed_created")
 }
 
+/// Filter Evolution Phase B-2 (2026-05-09): 進化ループ世代間で引き継ぐ短命 state。
+///
+/// EvolutionLoop の in-memory cache (tradesByDslId / lastRepairHints /
+/// lastRepairBaselines) を 1 行に詰めて永続化し、cron 起動を跨いだ「学ぶ」
+/// サイクルを成立させる。各 cron 起動 (= 新規 evolutionRunId) では regime 単位で
+/// 最新 carry を読み出して in-memory cache の初期値とする。
+///
+/// retention は 14 日 (= Phase B-3 で別 cron job が古い行を条件付き DELETE する想定、
+/// 具体的には `EvolutionInstanceCarryRepository.deleteOlderThan(14)` を呼ぶ)。
+///
+/// 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.B.2
+model EvolutionInstanceCarry {
+  id              String   @id @default(uuid()) @db.Uuid
+  /// 当該 carry を生成した evolutionRunId (= cron 起動毎に発番、debug 用)
+  evolutionRunId  String   @db.Uuid
+  /// 進化ループ regime (= 復元時のキー、cron 跨ぎで同 regime の最新 carry を引く)
+  regime          String
+  /// 生成元世代番号 (= multi-gen runner 内では 1 cron 中に複数 carry が積まれる、最新が読み出される)
+  generation      Int
+  /// payload shape: { tradesByDslId: Record<dslId, Array<{entryTime, side, pnl, outcome}>>,
+  ///                  repairHints: Record<dslId, RepairHint>,
+  ///                  repairBaselines: Record<dslId, RepairOutcomeBaseline> }
+  /// 詳細は src/backend/repositories/evolutionInstanceCarryRepository.ts の Zod schema 参照。
+  payload         Json
+  recordedAt      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([evolutionRunId, regime, generation], map: "idx_evolution_carry_run_regime_gen")
+  @@index([regime, recordedAt(sort: Desc)], map: "idx_evolution_carry_regime_recorded")
+  @@index([recordedAt(sort: Desc)], map: "idx_evolution_carry_recorded")
+}
+
 /// ストラテジーアラート設定
 /// ストラテジー条件成立時のリアルタイム通知設定
 model StrategyAlert {
