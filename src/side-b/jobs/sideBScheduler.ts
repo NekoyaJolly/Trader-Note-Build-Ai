@@ -70,7 +70,7 @@ import path from 'path';
 import { CrossoverAgent } from '../agents/CrossoverAgent';
 import { MutationAgent } from '../agents/MutationAgent';
 import { DiversityEnforcer } from '../evolution/DiversityEnforcer';
-import { EvolutionLoop } from '../evolution/EvolutionLoop';
+import { EvolutionLoop, type GenerationReport } from '../evolution/EvolutionLoop';
 import { defaultOosBacktestRunner } from '../evolution/analysisEngineRobustnessAdapter';
 import {
   MULTI_GENERATION_DEFAULTS,
@@ -1047,6 +1047,14 @@ export class SideBScheduler {
                   `divBoost=${g.report.lowDiversityBoost} status=${g.status}`,
               );
               if (g.report.errors.length > 0) errors.push(...g.report.errors);
+              // Phase E (2026-05-09): 各世代終了時に PDCA に通知して実 loop の thinking log に記録。
+              // 例外は飲んで世代結果に影響させない。
+              this.notifyPdcaEvolutionGeneration(
+                regime,
+                g.generationIndex,
+                generations,
+                g.report,
+              );
             } else {
               this.log(
                 `[Evolution] regime=${regime} gen=${g.generationIndex + 1}/${generations} ` +
@@ -1073,6 +1081,8 @@ export class SideBScheduler {
               `candidates=${report.promotionCandidates.length} divBoost=${report.lowDiversityBoost}`,
           );
           if (report.errors.length > 0) errors.push(...report.errors);
+          // Phase E (2026-05-09): 単世代経路でも PDCA に世代完了通知を送る (= multi-gen と同じ経路)。
+          this.notifyPdcaEvolutionGeneration(regime, 0, 1, report);
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -1123,6 +1133,38 @@ export class SideBScheduler {
           qualityDiversityArchiveParents,
         }),
     });
+  }
+
+  /**
+   * Filter Evolution Phase E (2026-05-09): 進化ループ世代完了を PDCA に通知。
+   *
+   * GenerationReport から最低限の集計値を抜粋して PDCA loop の通知 hook に渡す。
+   * pdcaLoop 側の `notifyEvolutionGenerationComplete` で thinking log に記録される。
+   *
+   * 例外は飲んで世代結果に影響させない (= 通知失敗で進化ループが停止しないよう保護)。
+   * Phase D の GenerationReflectionAgent が完成したら `reflectionLessons` 引数も渡す経路を増やす。
+   *
+   * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.E.1
+   */
+  private notifyPdcaEvolutionGeneration(
+    regime: string,
+    generationIndex: number,
+    generationsTotal: number,
+    report: GenerationReport,
+  ): void {
+    try {
+      const formalBtPassed = report.formalBtVerifiedCandidates.filter((c) => c.formalBtPassed).length;
+      pdcaLoop.notifyEvolutionGenerationComplete(regime, {
+        generationIndex,
+        generationsTotal,
+        promotionCandidates: report.promotionCandidates.length,
+        validationConfirmed: report.oosAwarePromotionSummary.validationConfirmed,
+        formalBtPassed,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.addError(`[Phase E] PDCA 通知失敗: regime=${regime} gen=${generationIndex} error=${msg}`);
+    }
   }
 
   /**

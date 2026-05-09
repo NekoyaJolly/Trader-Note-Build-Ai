@@ -95,6 +95,40 @@ export interface ThinkingLogEntry {
     data?: PDCATickDetails;
 }
 
+/**
+ * Filter Evolution Phase E (2026-05-09): 進化ループ世代結果を PDCA に通知する際の
+ * 構造的型。`GenerationReport` の必要部分だけを抜粋することで EvolutionLoop との
+ * 循環依存を避ける。
+ *
+ * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.E.1
+ */
+export interface EvolutionGenerationSummaryForPDCA {
+    /** 0-indexed の世代番号 (= multi-gen runner 内の generationIndex) */
+    readonly generationIndex: number;
+    /** 全世代数 (= multi-gen 経路では runOptions.generations、単世代経路では 1) */
+    readonly generationsTotal: number;
+    /** GenerationReport.promotionCandidates.length */
+    readonly promotionCandidates: number;
+    /** GenerationReport.oosAwarePromotionSummary.validationConfirmed */
+    readonly validationConfirmed: number;
+    /** GenerationReport.formalBtVerifiedCandidates のうち formalBtPassed=true の件数 */
+    readonly formalBtPassed: number;
+}
+
+/**
+ * Filter Evolution Phase E: GenerationReflectionAgent (= Phase D 後実装) が出す
+ * 世代単位 lesson の構造的型。Phase E 時点では optional 引数として用意し、
+ * Phase D 完成後に sideBScheduler が値を流す経路ができる。
+ *
+ * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.D.1
+ */
+export interface EvolutionReflectionLesson {
+    /** 'breakthrough' / 'stagnation' / 'mutation_decay' / 'novelty_emerged' / etc. */
+    readonly category: string;
+    /** 人間語の lesson (= DESIGN_DOC §1.1 原則 5「人間語に翻訳して記録」) */
+    readonly lesson: string;
+}
+
 // ===========================================
 // PDCA Loop クラス
 // ===========================================
@@ -223,9 +257,11 @@ export class PDCALoop {
             case 'REVISING_STRATEGY':
                 return this.handleRevisingStrategy();
             default:
+                // 全 case 網羅後の defensive default。state は型上 never だが、AgentState の
+                // 列挙が将来追加された場合に runtime で値を文字列として表示できるよう String() で受ける。
                 return {
                     state: 'IDLE',
-                    action: `不明な状態: ${state}`,
+                    action: `不明な状態: ${String(state)}`,
                     nextCheckMs: this.config.normalIntervalMs,
                 };
         }
@@ -526,6 +562,44 @@ export class PDCALoop {
         this.addThinkingLog(this.memory.getState(),
             `${label}完了: ${summary.processed}件処理`,
             `${positiveLabel}: ${positiveCount}, rejected: ${summary.rejected}, not_testable: ${summary.notTestable}, errors: ${summary.errors}`);
+    }
+
+    /**
+     * Filter Evolution Phase E (2026-05-09): 進化ループの世代完了を通知。
+     *
+     * sideBScheduler.runEvolutionNow が各世代終了時に呼ぶことで、
+     * 探索 loop (Evolution) の結果が実 loop (PDCA) の thinking log に流れる。
+     * Phase A-C で完成した「世代を跨ぐ仕組み」+「PDCA → Evolution の lessons 注入」と合わせて、
+     * 双方向の「学ぶエージェントループ」を成立させる最後の配線。
+     *
+     * 引数:
+     * - regime: 当世代の regime (= 設計書の evolutionRegimes 単位)
+     * - summary: GenerationReport から最低限の集計値だけを抜粋した structural type
+     *   (= EvolutionLoop の GenerationReport 全体を import せず循環依存を避ける)
+     * - reflectionLessons: Phase D の GenerationReflectionAgent が出した lessons (optional)
+     *   現状 Phase E 単独では undefined、Phase D 完成後に値が来る
+     *
+     * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.E.1
+     */
+    notifyEvolutionGenerationComplete(
+        regime: string,
+        summary: EvolutionGenerationSummaryForPDCA,
+        reflectionLessons?: ReadonlyArray<EvolutionReflectionLesson>,
+    ): void {
+        const lessonsText =
+            reflectionLessons && reflectionLessons.length > 0
+                ? reflectionLessons.map((l) => `[${l.category}] ${l.lesson}`).join(' | ')
+                : '(reflection lessons なし — Phase D 未完成 または 世代結果に特記なし)';
+
+        this.addThinkingLog(
+            this.memory.getState(),
+            `進化ループ世代完了: regime=${regime} ` +
+                `gen=${summary.generationIndex}/${summary.generationsTotal} ` +
+                `promo=${summary.promotionCandidates} ` +
+                `validationConfirmed=${summary.validationConfirmed} ` +
+                `formalBtPassed=${summary.formalBtPassed}`,
+            lessonsText,
+        );
     }
 
     // --- 情報取得 ---

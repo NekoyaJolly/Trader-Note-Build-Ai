@@ -79,6 +79,8 @@ jest.mock('../agent', () => ({
     notifyStrategyComplete: jest.fn(),
     notifyTradeCompleted: jest.fn(),
     notifyValidationBatchComplete: jest.fn(),
+    // Phase E (2026-05-09): 各世代終了時に scheduler から呼ばれる
+    notifyEvolutionGenerationComplete: jest.fn(),
   },
 }));
 
@@ -549,6 +551,86 @@ describe('SideBScheduler.runEvolutionNow Phase A multi-generation', () => {
 
       // 5 (= MULTI_GENERATION_DEFAULTS.maxGenerations) に clamp
       expect(runMultiGenMock.mock.calls[0][0].options.generations).toBe(5);
+    });
+  });
+
+  // Phase E (2026-05-09): Evolution → PDCA 通知配線
+  describe('Phase E: 各世代終了時に pdcaLoop.notifyEvolutionGenerationComplete を呼ぶ', () => {
+    // mock pdcaLoop reference
+    const { pdcaLoop } = jest.requireMock('../agent') as {
+      pdcaLoop: {
+        notifyEvolutionGenerationComplete: jest.Mock;
+      };
+    };
+
+    it('multi-gen 経路で各世代終了時に通知される (regime=N × generations=M = N*M 回)', async () => {
+      runMultiGenMock.mockImplementation(({ options }) =>
+        Promise.resolve(makeMultiGenReport(options.regime, options.generations)),
+      );
+
+      const scheduler = new SideBScheduler({
+        evolutionRegimes: ['breakout', 'reversal'],
+        evolutionGenerations: 3,
+      });
+      await scheduler.runEvolutionNow();
+
+      // 2 regime × 3 gen = 6 回呼ばれる
+      expect(pdcaLoop.notifyEvolutionGenerationComplete).toHaveBeenCalledTimes(6);
+
+      // 1 回目 (breakout, gen 0) の引数チェック
+      const firstCall = pdcaLoop.notifyEvolutionGenerationComplete.mock.calls[0];
+      expect(firstCall[0]).toBe('breakout');
+      expect(firstCall[1]).toMatchObject({
+        generationIndex: 0,
+        generationsTotal: 3,
+        promotionCandidates: expect.any(Number),
+        validationConfirmed: expect.any(Number),
+        formalBtPassed: expect.any(Number),
+      });
+    });
+
+    it('単世代経路 (= evolutionGenerations=1) でも 1 回通知される', async () => {
+      runOneGenerationMock.mockImplementation((regime: string) =>
+        Promise.resolve(makeReport(regime, 1)),
+      );
+
+      const scheduler = new SideBScheduler({
+        evolutionRegimes: ['breakout'],
+        evolutionGenerations: 1,
+      });
+      await scheduler.runEvolutionNow();
+
+      expect(pdcaLoop.notifyEvolutionGenerationComplete).toHaveBeenCalledTimes(1);
+      const firstCall = pdcaLoop.notifyEvolutionGenerationComplete.mock.calls[0];
+      expect(firstCall[0]).toBe('breakout');
+      expect(firstCall[1]).toMatchObject({
+        generationIndex: 0,
+        generationsTotal: 1,
+      });
+    });
+
+    it('PDCA 通知失敗時 (例外) でも世代結果に影響せず errors[] に記録される', async () => {
+      runOneGenerationMock.mockImplementation((regime: string) =>
+        Promise.resolve(makeReport(regime, 1)),
+      );
+      // 通知 hook が例外を投げる
+      pdcaLoop.notifyEvolutionGenerationComplete.mockImplementation(() => {
+        throw new Error('PDCA 通知失敗');
+      });
+
+      const scheduler = new SideBScheduler({
+        evolutionRegimes: ['breakout'],
+        evolutionGenerations: 1,
+      });
+      const result = await scheduler.runEvolutionNow();
+
+      // 世代実行自体は成功カウント
+      expect(result.regimeReports).toBe(1);
+      // errors[] には PDCA 通知失敗ログが入る (= addError 経由)
+      const status = scheduler.getStatus();
+      expect(status.errors).toEqual(
+        expect.arrayContaining([expect.stringContaining('[Phase E] PDCA 通知失敗')]),
+      );
     });
   });
 });
