@@ -71,12 +71,21 @@ elif [ "$COPILOT_LATEST" \> "$SUMMARY_LATEST" ]; then
 fi
 
 if [ "$NEEDS_RESPONSE" = "1" ]; then
-    cat <<EOF
-🤖 Copilot レビュー検知 (PR #$PR_NUMBER, branch: $BRANCH)
-未対応の Copilot レビューコメントが検出されました ($COPILOT_LATEST)。
-\`copilot-review-responder\` スキルを起動して対応してください (Skill tool で skill="copilot-review-responder", args="PR #$PR_NUMBER")。
-過去対応サマリ: ${SUMMARY_LATEST:-なし}
-EOF
+    # Stop hook で次ターンに context を注入するには、plain stdout ではなく JSON で
+    # hookSpecificOutput.additionalContext を返す必要がある (= UI 表示用 systemMessage と区別)。
+    # decision: "block" を併用することで、Stop を取り消して Claude を続行させる
+    # (= 即座に skill 起動の判断をさせる)。
+    SUMMARY_DISPLAY="${SUMMARY_LATEST:-なし}"
+    cat <<JSON
+{
+  "decision": "block",
+  "reason": "未対応 Copilot レビュー検出 (PR #${PR_NUMBER})",
+  "hookSpecificOutput": {
+    "hookEventName": "Stop",
+    "additionalContext": "🤖 Copilot レビュー検知 (PR #${PR_NUMBER}, branch: ${BRANCH})。未対応の Copilot レビューコメントが検出されました (最新: ${COPILOT_LATEST}, 過去対応サマリ: ${SUMMARY_DISPLAY})。copilot-review-responder スキルを起動して対応してください (Skill tool で skill=\"copilot-review-responder\", args=\"PR #${PR_NUMBER}\")。"
+  }
+}
+JSON
 fi
 
 exit 0
