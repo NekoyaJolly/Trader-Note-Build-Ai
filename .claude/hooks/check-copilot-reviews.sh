@@ -35,13 +35,15 @@ PR_NUMBER=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].nu
 REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null)
 [ -z "$REPO" ] && exit 0
 
-# Copilot の最新投稿時刻 (line コメント + レビュー本体の中で最大)
-COPILOT_LATEST_LINE=$(gh api "repos/$REPO/pulls/$PR_NUMBER/comments" \
-    --jq '[.[] | select(.user.login == "Copilot" or .user.login == "copilot-pull-request-reviewer")] | map(.created_at) | max' \
-    2>/dev/null)
-COPILOT_LATEST_REVIEW=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" \
-    --jq '[.[] | select(.user.login == "Copilot" or .user.login == "copilot-pull-request-reviewer")] | map(.submitted_at) | max' \
-    2>/dev/null)
+# Copilot の最新投稿時刻 (line コメント + レビュー本体の中で最大)。
+# --paginate で全ページ取得し、各エントリの時刻を行ごとに出力 → sort -r | head -1 で最大値。
+# (--paginate を付けないと 30 件超の PR で取りこぼし、誤判定の原因になる。PR #150 review (1) 対応)
+COPILOT_LATEST_LINE=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/comments" \
+    --jq '.[] | select(.user.login == "Copilot" or .user.login == "copilot-pull-request-reviewer") | .created_at' \
+    2>/dev/null | sort -r | head -1)
+COPILOT_LATEST_REVIEW=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/reviews" \
+    --jq '.[] | select(.user.login == "Copilot" or .user.login == "copilot-pull-request-reviewer") | .submitted_at' \
+    2>/dev/null | sort -r | head -1)
 
 # どちらも null/空なら Copilot 未介入 → 終了
 COPILOT_LATEST=""
@@ -55,10 +57,10 @@ if [ -n "$COPILOT_LATEST_REVIEW" ] && [ "$COPILOT_LATEST_REVIEW" != "null" ]; th
 fi
 [ -z "$COPILOT_LATEST" ] && exit 0
 
-# 最新の対応完了サマリコメント時刻
-SUMMARY_LATEST=$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" \
-    --jq '[.[] | select(.body | startswith("## Copilot レビュー"))] | map(.created_at) | max' \
-    2>/dev/null)
+# 最新の対応完了サマリコメント時刻 (--paginate で 30 件超対応)
+SUMMARY_LATEST=$(gh api --paginate "repos/$REPO/issues/$PR_NUMBER/comments" \
+    --jq '.[] | select(.body | startswith("## Copilot レビュー")) | .created_at' \
+    2>/dev/null | sort -r | head -1)
 
 # サマリ無し or Copilot 投稿の方が新しい → 未対応扱い
 NEEDS_RESPONSE=0
