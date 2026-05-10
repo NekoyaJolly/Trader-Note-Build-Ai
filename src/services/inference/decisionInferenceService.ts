@@ -1,5 +1,6 @@
 import type { Trade } from '@prisma/client';
 import { config, modelFor } from '../../config';
+import { AIProvider } from '../../side-b/agent/aiProvider';
 import type { MarketContext } from '../note-generator/featureExtractor';
 
 export type InferredMode = 'trend' | 'meanReversion' | 'other';
@@ -133,38 +134,23 @@ export class DecisionInferenceService {
   }
 
   /**
-   * OpenAI API を呼び出し JSON をパースする
+   * AIProvider 経由で OpenAI 互換 API を呼び出し、JSON 応答をパースする
    */
   private async callAI(prompt: string): Promise<Omit<DecisionInferenceResult, 'prompt'>> {
-    const response = await fetch(`${this.baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: this.model,
-        messages: [
-          { role: 'system', content: 'あなたはトレード判断モードの推定に特化したアシスタントです。必ず JSON のみを返してください。' },
-          { role: 'user', content: prompt },
-        ],
-        temperature: 0.2,
-        max_tokens: 300,
-      }),
+    const provider = new AIProvider({
+      apiKey: this.apiKey,
+      model: this.model,
+      baseURL: this.baseURL,
     });
 
-    if (!response.ok) {
-      throw new Error(`AI 推定 API エラー: ${response.status} ${response.statusText}`);
-    }
+    const aiResponse = await provider.chat(
+      [
+        { role: 'system', content: 'あなたはトレード判断モードの推定に特化したアシスタントです。必ず JSON のみを返してください。' },
+        { role: 'user', content: prompt },
+      ],
+      { temperature: 0.2, maxTokens: 300, responseFormat: { type: 'json_object' } },
+    );
 
-    // OpenAI API レスポンスの型定義
-    interface OpenAIResponse {
-      choices?: Array<{ message?: { content?: string } }>;
-      usage?: { prompt_tokens?: number; completion_tokens?: number };
-      model?: string;
-    }
-    
-    // AI 応答のパース結果の型定義
     interface ParsedInferenceResult {
       primaryTimeframe?: string;
       secondaryTimeframes?: string[];
@@ -172,25 +158,22 @@ export class DecisionInferenceService {
       rationale?: string;
     }
 
-    const data = await response.json() as OpenAIResponse;
-    const content = data.choices?.[0]?.message?.content || '{}';
-
+    const content = aiResponse.content || '{}';
     let parsed: ParsedInferenceResult;
     try {
-      parsed = JSON.parse(content);
+      parsed = JSON.parse(content) as ParsedInferenceResult;
     } catch {
       throw new Error('AI 応答の JSON パースに失敗しました');
     }
 
-    // デフォルト値を設定して必須フィールドを保証
     return {
       primaryTimeframe: parsed.primaryTimeframe || '1h',
       secondaryTimeframes: parsed.secondaryTimeframes || ['15m', '4h'],
       inferredMode: (parsed.inferredMode as InferredMode) || 'other',
       rationale: parsed.rationale || 'AI 推定結果',
-      promptTokens: data.usage?.prompt_tokens,
-      completionTokens: data.usage?.completion_tokens,
-      model: data.model,
+      promptTokens: aiResponse.promptTokens,
+      completionTokens: aiResponse.completionTokens,
+      model: aiResponse.model,
     };
   }
 }

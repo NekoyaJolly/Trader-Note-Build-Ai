@@ -34,6 +34,7 @@ import type { LensFeatureSnapshot } from '../lenses';
 import type { EdgeHypothesis } from '../models/edgeHypothesis';
 import { extractJson } from '../agents/llmJsonExtract';
 import type { JsonValue } from '../../utils/jsonValue';
+import { AIProvider } from '../agent/aiProvider';
 
 // ===========================================
 // 型定義
@@ -368,42 +369,21 @@ ${candidateContext}
   private async callAI(prompt: string): Promise<{ content: JsonValue; tokenUsage: number; model: string }> {
     const systemPrompt = await this.resolveStrategyThinkerSystemPrompt();
 
-    const response = await fetch(`${this.baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: this.model,
-        messages: [
-          {
-            role: 'system',
-            content: systemPrompt,
-          },
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0.4,
-        max_tokens: 4096,
-      }),
+    const provider = new AIProvider({
+      apiKey: this.apiKey,
+      model: this.model,
+      baseURL: this.baseURL,
     });
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new Error(`AI API エラー: ${response.status} - ${errorBody}`);
-    }
+    const aiResponse = await provider.chat(
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt },
+      ],
+      { temperature: 0.4, maxTokens: 4096, responseFormat: { type: 'json_object' } },
+    );
 
-    const data = await response.json() as {
-      choices?: { message?: { content?: string } }[];
-      usage?: { total_tokens?: number };
-      model?: string;
-    };
-
-    const content = data.choices?.[0]?.message?.content;
+    const content = aiResponse.content;
     if (!content) {
       throw new Error('AI APIからの応答が空です');
     }
@@ -418,8 +398,8 @@ ${candidateContext}
 
     return {
       content: parsed,
-      tokenUsage: data.usage?.total_tokens || 0,
-      model: data.model || this.model,
+      tokenUsage: aiResponse.tokenUsage,
+      model: aiResponse.model,
     };
   }
 

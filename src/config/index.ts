@@ -109,7 +109,9 @@ export type AIAgentKey =
   // 推論サービス (decisionInferenceService) — 判断推論の説明生成
   | 'decision_inference'
   // Filter Evolution Phase D-1b (2026-05-09): 世代単位 reflection 専用 — 軽量サマリ系で十分
-  | 'generation_reflection';
+  | 'generation_reflection'
+  // パターン分析 (patternAnalysisService) — チャートパターン抽出 + アノマリー検知、低コスト想定
+  | 'pattern_analysis';
 
 export const config = {
   server: {
@@ -132,6 +134,17 @@ export const config = {
     // グローバル既定 `config.ai.model` は安全網としてのみ使う(新エージェント追加時の忘れ対策)。
     model: process.env.AI_MODEL || 'anthropic/claude-sonnet-4.6',
     baseURL: process.env.AI_BASE_URL || 'https://openrouter.ai/api/v1',
+    // reasoning モデル (gpt-5系 / o系) の思考レベル既定値。
+    // AIProvider は isReasoningModel() で対象モデル時のみ送信するため、
+    // 非 reasoning モデル (gpt-4o, anthropic/* 等) では無視される。
+    // 取りうる値: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+    reasoningEffort: (process.env.AI_REASONING_EFFORT || 'high') as
+      | 'none'
+      | 'minimal'
+      | 'low'
+      | 'medium'
+      | 'high'
+      | 'xhigh',
     // エージェント別モデル既定値(Phase 6.5 確定)。
     // - 最重要判断(MetaEvolution/Strategist/HypothesisGen/Discovery/DevilsAdvocate) → Opus 4.7
     // - 中位生成系(Mutation/Crossover/PromptMutation/StrategyThinker/Reflection) → Sonnet 4.6 or Haiku 4.5
@@ -166,6 +179,9 @@ export const config = {
       // Phase D-1b: 世代単位 reflection — 軽量サマリ + categoization タスク、Haiku 4.5 既定
       generation_reflection:
         process.env.AI_MODEL_GENERATION_REFLECTION || 'anthropic/claude-haiku-4.5',
+      // パターン分析 — 旧ハードコード 'gpt-4o-mini' を撤去し、AI_MODEL_OVERRIDE_ALL が効くよう modelFor 経由に統一
+      pattern_analysis:
+        process.env.AI_MODEL_PATTERN_ANALYSIS || 'google/gemini-3.1-flash-lite-preview',
     } as Record<AIAgentKey, string>,
   },
   market: {

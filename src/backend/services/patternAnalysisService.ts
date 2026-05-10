@@ -11,8 +11,9 @@
  * 参照: docs/phase-next/ml-pattern-recognition.md
  */
 
-import { config } from '../../config';
+import { config, modelFor } from '../../config';
 import type { JsonValue } from '../../utils/jsonValue';
+import { AIProvider } from '../../side-b/agent/aiProvider';
 
 // ===========================================
 // 型定義
@@ -142,7 +143,8 @@ export class PatternAnalysisService {
 
   constructor() {
     this.apiKey = process.env.AI_API_KEY || '';
-    this.model = 'gpt-4o-mini';  // コスト最適化
+    // modelFor('pattern_analysis') 経由で AI_MODEL_OVERRIDE_ALL / AI_MODEL_PATTERN_ANALYSIS を尊重する
+    this.model = modelFor('pattern_analysis');
     this.baseURL = config.ai.baseURL || 'https://api.openai.com/v1';
   }
 
@@ -441,50 +443,35 @@ ${this.calculateDeviations(currentFeatures, avgNormal)}
   }
 
   /**
-   * AI APIを呼び出し
+   * AI APIを呼び出し (AIProvider 経由)
    */
   private async callAI(
     prompt: string,
     systemPrompt: string
   ): Promise<{ content: JsonValue; tokenUsage: number; model: string }> {
-    const response = await fetch(`${this.baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: this.model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: prompt },
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0.3,
-        max_tokens: 1000,
-      }),
+    const provider = new AIProvider({
+      apiKey: this.apiKey,
+      model: this.model,
+      baseURL: this.baseURL,
     });
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new Error(`AI API エラー: ${response.status} - ${errorBody}`);
-    }
+    const aiResponse = await provider.chat(
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt },
+      ],
+      { temperature: 0.3, maxTokens: 1000, responseFormat: { type: 'json_object' } },
+    );
 
-    const data = await response.json() as {
-      choices?: { message?: { content?: string } }[];
-      usage?: { total_tokens?: number };
-      model?: string;
-    };
-
-    const content = data.choices?.[0]?.message?.content;
+    const content = aiResponse.content;
     if (!content) {
       throw new Error('AI APIからの応答が空です');
     }
 
     return {
       content: JSON.parse(content) as JsonValue,
-      tokenUsage: data.usage?.total_tokens || 0,
-      model: data.model || this.model,
+      tokenUsage: aiResponse.tokenUsage,
+      model: aiResponse.model,
     };
   }
 

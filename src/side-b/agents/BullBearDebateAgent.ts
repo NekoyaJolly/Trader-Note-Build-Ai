@@ -42,10 +42,7 @@ import {
   type DebateMarketContext,
   type BullBearDebateOutput,
 } from '../../schemas/api/sideB';
-import {
-  parseOpenAIResponse,
-  OpenAIChatCompletionResponseSchema,
-} from '../../schemas/external/openai';
+import { AIProvider } from '../agent/aiProvider';
 
 // ===========================================
 // 型定義（sideB.ts で Zod スキーマから推論された型を再エクスポート）
@@ -267,44 +264,30 @@ export class BullBearDebateAgent {
   }
 
   /**
-   * LLM API を呼び出す
+   * LLM API を呼び出す (AIProvider 経由)
    */
   private async callAI(
     systemPrompt: string,
     userPrompt: string,
   ): Promise<{ content: unknown; tokenUsage: number; model: string }> {
-    const response = await fetch(`${this.baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: this.model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0.5,
-        max_tokens: 4096,
-      }),
+    const provider = new AIProvider({
+      apiKey: this.apiKey,
+      model: this.model,
+      baseURL: this.baseURL,
     });
 
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Bull vs Bear Debate API エラー: ${response.status} - ${body}`);
+    const aiResponse = await provider.chat(
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      { temperature: 0.5, maxTokens: 4096, responseFormat: { type: 'json_object' } },
+    );
+
+    const content = aiResponse.content;
+    if (!content) {
+      throw new Error('Bull vs Bear Debate API からの応答が空です');
     }
-
-    const rawData: unknown = await response.json();
-
-    // OpenAIChatCompletionResponseSchema で安全にパースしてメタ情報を取得
-    const chatResult = OpenAIChatCompletionResponseSchema.safeParse(rawData);
-    const tokenUsage = chatResult.success ? (chatResult.data.usage?.total_tokens ?? 0) : 0;
-    const model = chatResult.success ? chatResult.data.model : this.model;
-
-    // parseOpenAIResponse でコンテンツ文字列を安全に抽出（未知の形式は throw）
-    const content = parseOpenAIResponse(rawData);
 
     const extracted = extractJson(content);
     if (!extracted.ok) {
@@ -315,8 +298,8 @@ export class BullBearDebateAgent {
 
     return {
       content: extracted.data,
-      tokenUsage,
-      model,
+      tokenUsage: aiResponse.tokenUsage,
+      model: aiResponse.model,
     };
   }
 

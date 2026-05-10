@@ -37,6 +37,7 @@ import type { EdgeLedger } from '../ledger/EdgeLedger';
 import { edgeLedger as defaultLedger } from '../ledger/EdgeLedger';
 import { agentMemory } from '../agent/agentMemory';
 import type { JsonValue } from '../../utils/jsonValue';
+import { AIProvider } from '../agent/aiProvider';
 
 // ===========================================
 // 型定義
@@ -505,36 +506,21 @@ export class DiscoveryAgent {
         systemPrompt: string,
         userPrompt: string,
     ): Promise<{ content: JsonValue; tokenUsage: number; model: string }> {
-        const response = await fetch(`${this.baseURL}/chat/completions`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${this.apiKey}`,
-            },
-            body: JSON.stringify({
-                model: this.model,
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: userPrompt },
-                ],
-                response_format: { type: 'json_object' },
-                temperature: 0.5,
-                max_tokens: 4096,
-            }),
+        const provider = new AIProvider({
+            apiKey: this.apiKey,
+            model: this.model,
+            baseURL: this.baseURL,
         });
 
-        if (!response.ok) {
-            const body = await response.text();
-            throw new Error(`Discovery API エラー: ${response.status} - ${body}`);
-        }
+        const aiResponse = await provider.chat(
+            [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt },
+            ],
+            { temperature: 0.5, maxTokens: 4096, responseFormat: { type: 'json_object' } },
+        );
 
-        const data = (await response.json()) as {
-            choices?: { message?: { content?: string } }[];
-            usage?: { total_tokens?: number };
-            model?: string;
-        };
-
-        const content = data.choices?.[0]?.message?.content;
+        const content = aiResponse.content;
         if (!content) {
             throw new Error('Discovery API からの応答が空です');
         }
@@ -549,8 +535,8 @@ export class DiscoveryAgent {
 
         return {
             content: extracted.data,
-            tokenUsage: data.usage?.total_tokens || 0,
-            model: data.model || this.model,
+            tokenUsage: aiResponse.tokenUsage,
+            model: aiResponse.model,
         };
     }
 }

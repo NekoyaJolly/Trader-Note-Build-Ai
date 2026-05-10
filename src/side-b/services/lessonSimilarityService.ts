@@ -43,6 +43,7 @@ interface SimilarityRequest {
 // ===========================================
 
 import { config, modelFor } from '../../config';
+import { AIProvider } from '../agent/aiProvider';
 
 export class LessonSimilarityService {
     private apiKey: string;
@@ -122,35 +123,25 @@ JSON のみを出力してください。説明は不要です。`;
     }
 
     /**
-     * AI API を呼び出し
+     * AIProvider 経由で AI API を呼び出し、JSON をパースして返す
      */
     private async callAI(prompt: string): Promise<unknown> {
-        const response = await fetch(`${this.baseURL}/chat/completions`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.apiKey}`,
-            },
-            body: JSON.stringify({
-                model: this.model,
-                messages: [
-                    { role: 'user', content: prompt },
-                ],
-                temperature: 0.1, // 判定なので低温度
-                max_tokens: 200,  // JSON 1 行なので少量で十分
-                response_format: { type: 'json_object' },
-            }),
+        const provider = new AIProvider({
+            apiKey: this.apiKey,
+            model: this.model,
+            baseURL: this.baseURL,
         });
 
-        if (!response.ok) {
-            throw new Error(`AI API error: ${response.status} ${response.statusText}`);
-        }
+        const aiResponse = await provider.chat(
+            [{ role: 'user', content: prompt }],
+            {
+                temperature: 0.1, // 判定なので低温度
+                maxTokens: 200, // JSON 1 行なので少量で十分
+                responseFormat: { type: 'json_object' },
+            },
+        );
 
-        const data = await response.json() as {
-            choices: Array<{ message: { content: string } }>;
-        };
-
-        const content = data.choices[0]?.message?.content;
+        const content = aiResponse.content;
         if (!content) {
             throw new Error('AI API returned empty content');
         }

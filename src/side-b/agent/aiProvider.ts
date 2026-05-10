@@ -47,8 +47,12 @@ export interface AIResponse {
     content: string | null;
     /** ツール呼び出し要求（あればエージェントが実行すべき） */
     toolCalls: ToolCall[];
-    /** 使用トークン数 */
+    /** 使用トークン数 (= prompt + completion + reasoning) */
     tokenUsage: number;
+    /** プロンプト側のトークン数 (provider が返した時のみ) */
+    promptTokens?: number;
+    /** 生成側のトークン数 (provider が返した時のみ) */
+    completionTokens?: number;
     /** 使用モデル名 */
     model: string;
     /** 応答の終了理由 */
@@ -65,6 +69,9 @@ interface OpenAIToolDef {
     };
 }
 
+/** OpenAI Chat Completions の reasoning_effort 取りうる値 */
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+
 /**
  * chat() の呼び出しオプション (Phase 6 hotfix で統一)。
  *
@@ -72,11 +79,17 @@ interface OpenAIToolDef {
  * - `maxTokens`: 生成トークン上限 (既定: プロバイダー既定 = 指定しない)
  *   Phase 6 系エージェントは JSON 応答が長くなるため 4096 を明示指定推奨
  * - `tools`: function calling 用の MCP ツール定義
+ * - `responseFormat`: OpenAI Chat Completions の response_format。
+ *   `{ type: 'json_object' }` で JSON モード強制、`{ type: 'text' }` で平文
+ * - `reasoningEffort`: gpt-5系 / o系の思考レベル。未指定時は config.ai.reasoningEffort。
+ *   isReasoningModel() でゲートされ、非対象モデルでは送られない (= 安全に渡せる)
  */
 export interface ChatOptions {
     temperature?: number;
     maxTokens?: number;
     tools?: McpToolDefinition[];
+    responseFormat?: { type: 'json_object' } | { type: 'text' };
+    reasoningEffort?: ReasoningEffort;
 }
 
 // ===========================================
@@ -115,6 +128,21 @@ export class AIProvider {
     private usesOpenAINewParam(): boolean {
         // 大文字小文字を吸収しつつ "api.openai.com" を含むかで判定
         return this.baseURL.toLowerCase().includes('api.openai.com');
+    }
+
+    /**
+     * reasoning モデル (= reasoning_effort を受け付けるモデル) かを判定する。
+     *
+     * 対応: OpenAI gpt-5 系 (gpt-5, gpt-5-mini, gpt-5.1 等), o 系 (o1, o3, o3-mini, o4-mini 等)
+     * 非対応: gpt-4o, gpt-4-turbo, anthropic/*, google/* 等
+     *
+     * モデル名で判定しているため、OpenRouter 経由の "openai/gpt-5-mini" 等にも対応。
+     */
+    private isReasoningModel(model: string): boolean {
+        const m = model.toLowerCase();
+        // "openai/" プレフィックスを剥がして判定 (OpenRouter 経由対応)
+        const stripped = m.startsWith('openai/') ? m.slice('openai/'.length) : m;
+        return /^gpt-5/.test(stripped) || /^o\d/.test(stripped);
     }
 
     /**
@@ -167,6 +195,21 @@ export class AIProvider {
             body[tokenParam] = options.maxTokens;
         }
 
+        // response_format (JSON モード等) — 指定された時のみ送信
+        if (options.responseFormat) {
+            body.response_format = options.responseFormat;
+        }
+
+        // reasoning_effort — reasoning モデル (gpt-5系/o系) の時のみ送信。
+        // 非対象モデルに送ると API エラーになるため、isReasoningModel() でゲートする。
+        // 値は options.reasoningEffort > config.ai.reasoningEffort の優先度。
+        if (this.isReasoningModel(this.model)) {
+            const effort = options.reasoningEffort ?? config.ai.reasoningEffort;
+            if (effort) {
+                body.reasoning_effort = effort;
+            }
+        }
+
         // ツール定義がある場合のみ追加
         const mcpTools = options.tools;
         if (mcpTools && mcpTools.length > 0) {
@@ -196,7 +239,7 @@ export class AIProvider {
                 };
                 finish_reason?: string;
             }>;
-            usage?: { total_tokens?: number };
+            usage?: { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number };
             model?: string;
         };
 
@@ -209,6 +252,8 @@ export class AIProvider {
             content: choice.message.content ?? null,
             toolCalls: choice.message.tool_calls || [],
             tokenUsage: data.usage?.total_tokens || 0,
+            promptTokens: data.usage?.prompt_tokens,
+            completionTokens: data.usage?.completion_tokens,
             model: data.model || this.model,
             finishReason: choice.finish_reason || 'unknown',
         };
