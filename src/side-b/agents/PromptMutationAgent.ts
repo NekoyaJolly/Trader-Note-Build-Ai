@@ -120,7 +120,7 @@ export class PromptMutationAgent {
     } catch (err) {
       console.warn(
         '[PromptMutationAgent] Registry 合成に失敗、ファイル fallback:',
-        err instanceof Error ? err.message : err,
+        safeStringify(err),
       );
       return loadPromptWithGlobal('prompt_mutation');
     }

@@ -32,6 +32,7 @@ import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import { recordAgentUsage } from './scoringRecorder';
 import { modelFor } from '../../config';
 import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
+import { safeStringify } from '../../utils/safeStringify';
 
 // ===========================================
 // 型
@@ -188,7 +189,7 @@ export class StrategistAgent {
         } catch (err) {
             console.warn(
                 '[Strategist] Registry 合成に失敗、ファイル fallback:',
-                err instanceof Error ? err.message : err,
+                safeStringify(err),
             );
             return loadPromptWithGlobal('strategist');
         }

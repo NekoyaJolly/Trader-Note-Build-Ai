@@ -27,6 +27,7 @@ import {
   SPECIALIST_COMMON_AGENT_NAME,
 } from '../prompts/registry/PromptRegistry';
 import { extractJson } from './llmJsonExtract';
+import { safeStringify } from '../../utils/safeStringify';
 
 export interface AgentPerformance {
   agentName: string;
@@ -90,10 +91,11 @@ export interface ExecuteProposalResult {
 /** 月あたり新規エージェント追加上限。§3.3.4。 */
 export const MONTHLY_ADD_LIMIT = 1;
 
-let defaultPrisma: PrismaClient | null = null;
+// PR #152: canonical singleton 経由で pool 共有
 function getDefaultPrisma(): PrismaClient {
-  if (!defaultPrisma) defaultPrisma = new PrismaClient();
-  return defaultPrisma;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { prisma } = require('../../backend/db/client') as { prisma: PrismaClient };
+  return prisma;
 }
 
 async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<T | null> {
@@ -227,7 +229,7 @@ export class MetaEvolutionAgent {
     } catch (err) {
       console.warn(
         '[MetaEvolutionAgent] Registry 合成に失敗、ファイル fallback:',
-        err instanceof Error ? err.message : err,
+        safeStringify(err),
       );
       return loadPromptWithGlobal('meta_evolution');
     }

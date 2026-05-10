@@ -64,7 +64,9 @@ import { MarketDataService } from '../../services/marketDataService';
 import { CTraderAuthService } from '../../backend/services/ctrader/ctraderAuthService';
 import type { OHLCVData } from '../../services/indicators/indicatorService';
 import { pdcaLoop } from '../agent';
-import { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
+// canonical singleton (PR #152)
+import { prisma as canonicalPrisma } from '../../backend/db/client';
 import { ohlcvRepository } from '../../backend/repositories/ohlcvRepository';
 import path from 'path';
 import { CrossoverAgent } from '../agents/CrossoverAgent';
@@ -420,8 +422,8 @@ export class SideBScheduler {
     this.config = { ...DEFAULT_CONFIG, ...envOverrides, ...configOverride };
     this.isProduction = process.env.NODE_ENV === 'production';
 
-    // サービス初期化
-    this.prisma = new PrismaClient();
+    // サービス初期化 (PR #152: canonical singleton 経由で connection pool 共有)
+    this.prisma = canonicalPrisma;
     this.orchestrator = new AIOrchestrator();
     this.marketDataService = new MarketDataService();
     this.cronSimilarityService = new CronSimilarityService({

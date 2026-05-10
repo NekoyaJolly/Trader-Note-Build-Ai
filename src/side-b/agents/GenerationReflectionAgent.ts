@@ -29,6 +29,7 @@ import { recordAgentUsage } from './scoringRecorder';
 // PR #145 Copilot review #7: category enum は副作用のない独立モジュールから import
 // (= 旧経路は repo から import で prisma client を引き込んでいた)
 import { GenerationLessonCategorySchema } from '../../schemas/generationLessonCategory';
+import { safeStringify } from '../../utils/safeStringify';
 
 // =================================================================
 // 型定義
@@ -222,7 +223,7 @@ export class GenerationReflectionAgent {
     } catch (err) {
       console.warn(
         '[GenerationReflectionAgent] Registry 合成に失敗、ファイル fallback:',
-        err instanceof Error ? err.message : err,
+        safeStringify(err),
       );
       return loadPromptWithGlobal('generation_reflection');
     }

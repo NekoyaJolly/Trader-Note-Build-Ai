@@ -14,7 +14,6 @@
 import type { Job } from 'bullmq';
 import { Worker } from 'bullmq';
 import type { RevaluationJobType, Prisma } from '@prisma/client';
-import { PrismaClient } from '@prisma/client';
 import {
   QUEUE_NAMES,
   getRedisConnection,
@@ -31,8 +30,8 @@ import { featureService } from './featureService';
 import { ohlcvRepository } from '../backend/repositories/ohlcvRepository';
 import type { TradeDataForSummary } from './aiSummaryService';
 import { AISummaryService } from './aiSummaryService';
-
-const prisma = new PrismaClient();
+// canonical singleton (PR #152)
+import { prisma } from '../backend/db/client';
 const aiSummaryService = new AISummaryService();
 
 /**

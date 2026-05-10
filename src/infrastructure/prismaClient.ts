@@ -1,42 +1,27 @@
-import { PrismaClient } from '@prisma/client';
+/**
+ * Prisma Client シングルトン経由参照ラッパー (互換用)。
+ *
+ * 設計: 本ファイルは独自に `new PrismaClient()` していたが、
+ *       プロジェクト全体で複数 PrismaClient が乱立し
+ *       Cloud Run + Supabase pgBouncer で connection pool 枯渇 (PR #152, signal 11) を起こした。
+ *       canonical singleton (`src/backend/db/client.ts` の `prisma`) にリダイレクトすることで
+ *       既存呼び出し元 (6 ファイル) を破壊変更なしに 1 つの client に集約する。
+ *
+ * 新規コードは直接 `import { prisma } from '@/backend/db/client'` を推奨。
+ */
+import type { PrismaClient } from '@prisma/client';
+import { prisma } from '../backend/db/client';
+
+/** canonical singleton を返す。プロセス内で常に同一インスタンス。 */
+export function getPrismaClient(): PrismaClient {
+  return prisma;
+}
 
 /**
- * Prisma Client シングルトンインスタンス
- * 全体で唯一のDB接続を使用する
+ * 互換 API: 旧実装は内部 instance を `$disconnect()` して null クリアしていたが、
+ * canonical singleton はプロセス全体で共有されるため、ここでは何もしない (= no-op)。
+ * 切断は `process.on('exit')` で OS が回収する際に Prisma 自体が処理する。
  */
-
-console.log('[Prisma] PrismaClient をインスタンス化中...');
-
-let prismaInstance: PrismaClient | null = null;
-
-export function getPrismaClient(): PrismaClient {
-  if (!prismaInstance) {
-    console.log('[Prisma] 新規PrismaClientを作成します');
-    try {
-      prismaInstance = new PrismaClient({
-        log: [
-          { emit: 'stdout', level: 'warn' },
-          { emit: 'stdout', level: 'error' },
-        ],
-      });
-      console.log('[Prisma] ✅ PrismaClient作成成功');
-    } catch (error) {
-      console.error('[Prisma] ❌ PrismaClient作成失敗:', error);
-      throw error;
-    }
-  }
-  return prismaInstance;
-}
-
 export function closePrismaClient(): void {
-  if (prismaInstance) {
-    console.log('[Prisma] PrismaClientを切断中...');
-    prismaInstance.$disconnect();
-    prismaInstance = null;
-  }
+  // no-op: canonical singleton はプロセス共有のため明示切断しない
 }
-
-// グローバルエラーハンドラー（Prisma接続エラー時）
-process.on('exit', () => {
-  closePrismaClient();
-});

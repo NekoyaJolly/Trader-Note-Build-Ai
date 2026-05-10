@@ -10,15 +10,14 @@
  * - コード重複削減のための共通化
  */
 
-import { PrismaClient } from '@prisma/client';
 import type { OHLCVData } from './indicators/indicatorService';
 import { IndicatorService } from './indicators/indicatorService';
 import { calculateCosineSimilarity } from './featureVectorService';
 import * as aiNoteRepository from '../side-b/repositories/aiNoteRepository';
 import type { AITradeNote } from '../side-b/models';
 import type { SimilarNoteItem } from '../schemas/api/similarity';
-
-const prisma = new PrismaClient();
+// canonical singleton (PR #152: Cloud Run pool 枯渇対応で複数 PrismaClient 乱立を解消)
+import { prisma } from '../backend/db/client';
 const indicatorService = new IndicatorService();
 
 /**

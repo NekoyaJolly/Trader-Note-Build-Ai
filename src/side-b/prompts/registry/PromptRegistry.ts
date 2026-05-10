@@ -44,13 +44,13 @@ export { GLOBAL_AGENT_NAME, SPECIALIST_COMMON_AGENT_NAME };
  *   ここでは生成されない。最初の DB 操作(getActive 等)で初めて生成される。
  *   そのため DB 設定が不要なユニットテスト / 型チェックでは副作用ゼロ。
  */
-let defaultPrisma: PrismaClient | null = null;
-
+// PR #152: canonical singleton (src/backend/db/client.ts) を使用し、
+// プロセス全体で 1 つの PrismaClient を共有する (pool 枯渇対策)。
+// 遅延 import でモジュール評価時の副作用を避ける (ユニットテスト互換)。
 function getDefaultPrisma(): PrismaClient {
-  if (!defaultPrisma) {
-    defaultPrisma = new PrismaClient();
-  }
-  return defaultPrisma;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { prisma } = require('../../../backend/db/client') as { prisma: PrismaClient };
+  return prisma;
 }
 
 /** Prisma 行 → アプリ層型への変換。 */

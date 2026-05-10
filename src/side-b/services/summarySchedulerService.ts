@@ -14,11 +14,10 @@
  */
 
 import * as cron from 'node-cron';
-import { PrismaClient } from '@prisma/client';
 import { getComparisonAnalysis, type ComparisonPeriod } from './comparisonService';
 import { z } from 'zod';
-
-const prisma = new PrismaClient();
+// canonical singleton (PR #152)
+import { prisma } from '../../backend/db/client';
 
 // ========================================
 // Zod スキーマ定義

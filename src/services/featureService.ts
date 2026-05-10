@@ -12,7 +12,7 @@
  */
 
 import type { TradeNote} from '@prisma/client';
-import { PrismaClient, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import type {
   OHLCVData,
   FeatureSnapshot} from './indicators/indicatorService';
@@ -22,8 +22,8 @@ import {
 import {
   calculateCosineSimilarity,
 } from './featureVectorService';
-
-const prisma = new PrismaClient();
+// canonical singleton (PR #152)
+import { prisma } from '../backend/db/client';
 const indicatorService = new IndicatorService();
 
 /**

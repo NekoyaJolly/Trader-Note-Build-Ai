@@ -53,3 +53,4 @@ tests/ai-orchestrator/test-scenarios.json
 __pycache__/
 *.pyc
 *.pyo
+.tmp/

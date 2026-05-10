@@ -30,6 +30,7 @@ import { extractJson } from './llmJsonExtract';
 // 両 agent 間の結合を避けるべく独立 module に切り出している (PR #141 Copilot review #1/#2)。
 import { buildLessonsPromptBlock } from './lessonsPrompt';
 import { recordAgentUsage } from './scoringRecorder';
+import { safeStringify } from '../../utils/safeStringify';
 
 /**
  * Filter Evolution M3: 親 A の負けトレード概要（= LLM への文脈材料）。
@@ -158,7 +159,7 @@ export class CrossoverAgent {
     } catch (err) {
       console.warn(
         '[CrossoverAgent] Registry 合成に失敗、ファイル fallback:',
-        err instanceof Error ? err.message : err,
+        safeStringify(err),
       );
       return loadPromptWithGlobal('crossover', macros);
     }
