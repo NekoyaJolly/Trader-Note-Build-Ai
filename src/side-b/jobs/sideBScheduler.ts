@@ -397,6 +397,7 @@ export class SideBScheduler {
   private screeningIntervalId?: NodeJS.Timeout;
   private fullValidationIntervalId?: NodeJS.Timeout;
   private evolutionIntervalId?: NodeJS.Timeout;
+  private evolutionFirstTimerId?: NodeJS.Timeout;
   private promptEvolutionIntervalId?: NodeJS.Timeout;
   private lastPlanRun: Map<string, Date> = new Map();
   private lastMonitorRun?: Date;
@@ -585,6 +586,11 @@ export class SideBScheduler {
     if (this.fullValidationIntervalId) {
       clearInterval(this.fullValidationIntervalId);
       this.fullValidationIntervalId = undefined;
+    }
+
+    if (this.evolutionFirstTimerId) {
+      clearTimeout(this.evolutionFirstTimerId);
+      this.evolutionFirstTimerId = undefined;
     }
 
     if (this.evolutionIntervalId) {
@@ -936,17 +942,26 @@ export class SideBScheduler {
    * Phase 5: 日次進化ループジョブ（1時間ごとにチェックし 24h ごとに実行）
    */
   private startEvolutionJob(): void {
-    const checkIntervalMs = 60 * 60 * 1000;
-    const dailyMs = 24 * 60 * 60 * 1000;
+    const checkIntervalMs = 60 * 60 * 1000;       // 起動後の通常チェック間隔: 60 分
+    const firstCheckMs = 15 * 60 * 1000;          // 起動直後の初回チェック: 15 分後
+    const dailyMs = 24 * 60 * 60 * 1000;          // 24 h 経過時のみ実行 (= 1 日 1 回)
 
-    this.evolutionIntervalId = setInterval(() => {
+    const runIfDue = (): void => {
       const now = Date.now();
       if (!this.lastEvolutionRun || now - this.lastEvolutionRun.getTime() >= dailyMs) {
         this.runEvolutionNow().catch((err) => {
           this.addError(`進化ループジョブエラー: ${err}`);
         });
       }
-    }, checkIntervalMs);
+    };
+
+    // 起動から 15 分後に初回チェック → 以降 60 分間隔で setInterval。
+    // 旧実装は最初のチェックが起動 60 分後で、deploy 直後に動作確認しにくかったため早めた
+    // (Nekoさん指示、2026-05-11)。実行は dailyMs ガードがあるので 24 h 多重起動はしない。
+    this.evolutionFirstTimerId = setTimeout(() => {
+      runIfDue();
+      this.evolutionIntervalId = setInterval(runIfDue, checkIntervalMs);
+    }, firstCheckMs);
   }
 
   /**
