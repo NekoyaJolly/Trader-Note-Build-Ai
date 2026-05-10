@@ -18,6 +18,7 @@
  */
 
 import { config, modelFor } from '../../config';
+import { AIProvider } from '../agent/aiProvider';
 import type { TradeResultSummary, TodayStrategyContext } from '../agent/agentMemory';
 import {
     ReflectionOutputSchema,
@@ -235,21 +236,20 @@ ${existingLessons.slice(-5).map((l, i) => `${i + 1}. ${l}`).join('\n')}`;
     // --- AI呼び出し ---
 
     /**
-     * AI APIを呼び出し
+     * AI APIを呼び出し (AIProvider 経由)
      */
     private async callAI(prompt: string): Promise<{ content: unknown; tokenUsage: number; model: string }> {
-        const response = await fetch(`${this.baseURL}/chat/completions`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.apiKey}`,
-            },
-            body: JSON.stringify({
-                model: this.model,
-                messages: [
-                    {
-                        role: 'system',
-                        content: `あなたは経験豊富なFXトレードコーチです。
+        const provider = new AIProvider({
+            apiKey: this.apiKey,
+            model: this.model,
+            baseURL: this.baseURL,
+        });
+
+        const aiResponse = await provider.chat(
+            [
+                {
+                    role: 'system',
+                    content: `あなたは経験豊富なFXトレードコーチです。
 トレーダーの取引を振り返り、建設的なフィードバックと具体的な学びを提供してください。
 
 振り返りの原則:
@@ -258,30 +258,13 @@ ${existingLessons.slice(-5).map((l, i) => `${i + 1}. ${l}`).join('\n')}`;
 - 同じミスを繰り返さないための、短く記憶に残るルールを提示
 - 良かった点も必ず指摘する（全否定しない）
 - 必ず有効なJSONのみを出力してください`,
-                    },
-                    {
-                        role: 'user',
-                        content: prompt,
-                    },
-                ],
-                response_format: { type: 'json_object' },
-                temperature: 0.4,
-                max_tokens: 1500,
-            }),
-        });
+                },
+                { role: 'user', content: prompt },
+            ],
+            { temperature: 0.4, maxTokens: 1500, responseFormat: { type: 'json_object' } },
+        );
 
-        if (!response.ok) {
-            const errorBody = await response.text();
-            throw new Error(`AI API エラー: ${response.status} - ${errorBody}`);
-        }
-
-        const data = await response.json() as {
-            choices?: { message?: { content?: string } }[];
-            usage?: { total_tokens?: number };
-            model?: string;
-        };
-
-        const content = data.choices?.[0]?.message?.content;
+        const content = aiResponse.content;
         if (!content) {
             throw new Error('AI APIからの応答が空です');
         }
@@ -290,8 +273,8 @@ ${existingLessons.slice(-5).map((l, i) => `${i + 1}. ${l}`).join('\n')}`;
 
         return {
             content: parsed,
-            tokenUsage: data.usage?.total_tokens || 0,
-            model: data.model || this.model,
+            tokenUsage: aiResponse.tokenUsage,
+            model: aiResponse.model,
         };
     }
 

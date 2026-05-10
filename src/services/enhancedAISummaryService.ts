@@ -24,7 +24,7 @@ import type {
 import {
   AISummaryService
 } from './aiSummaryService';
-import { OpenAIChatCompletionResponseSchema } from '../schemas/external/openai';
+import { AIProvider } from '../side-b/agent/aiProvider';
 
 const indicatorService = new IndicatorService();
 
@@ -278,54 +278,34 @@ export class EnhancedAISummaryService {
   }
 
   /**
-   * 拡張プロンプトで AI API を呼び出す
+   * 拡張プロンプトで AI API を呼び出す (AIProvider 経由)
    */
   private async callEnhancedAIAPI(tradeData: ExtendedTradeData): Promise<AISummaryResult> {
     const prompt = this.buildEnhancedPrompt(tradeData);
 
-    const response = await fetch(`${this.baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: this.model,
-        messages: [
-          {
-            role: 'system',
-            content: 'あなたはプロのトレードアナリストです。トレードデータを分析し、判断の背景と市場状況を含めた簡潔な日本語要約を生成してください。5行以内で記述し、冗長な表現は避けてください。',
-          },
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-        max_tokens: 200,
-        temperature: 0.3,
-      }),
+    const provider = new AIProvider({
+      apiKey: this.apiKey,
+      model: this.model,
+      baseURL: this.baseURL,
     });
 
-    if (!response.ok) {
-      throw new Error(`AI API エラー: ${response.status} ${response.statusText}`);
-    }
-
-    const rawData = await response.json();
-
-    // Zodスキーマで型安全にパース
-    const parseResult = OpenAIChatCompletionResponseSchema.safeParse(rawData);
-
-    if (!parseResult.success) {
-      throw new Error(`OpenAI レスポンスパースエラー: ${parseResult.error.message}`);
-    }
-
-    const data = parseResult.data;
+    const aiResponse = await provider.chat(
+      [
+        {
+          role: 'system',
+          content:
+            'あなたはプロのトレードアナリストです。トレードデータを分析し、判断の背景と市場状況を含めた簡潔な日本語要約を生成してください。5行以内で記述し、冗長な表現は避けてください。',
+        },
+        { role: 'user', content: prompt },
+      ],
+      { maxTokens: 200, temperature: 0.3 },
+    );
 
     return {
-      summary: data.choices[0]?.message?.content?.trim() || '',
-      promptTokens: data.usage?.prompt_tokens,
-      completionTokens: data.usage?.completion_tokens,
-      model: data.model,
+      summary: (aiResponse.content || '').trim(),
+      promptTokens: aiResponse.promptTokens,
+      completionTokens: aiResponse.completionTokens,
+      model: aiResponse.model,
     };
   }
 

@@ -21,6 +21,7 @@ import {
 import type { ResearchAIOutput , OHLCVSnapshot} from '../models/marketResearch';
 import { calculateExpiryDate } from '../models/marketResearch';
 import { getRelevantIndicatorContext } from '../knowledge';
+import { AIProvider } from '../agent/aiProvider';
 
 // ===========================================
 // 型定義
@@ -281,21 +282,20 @@ ${getRelevantIndicatorContext(indicators as unknown as Record<string, unknown>)}
   }
 
   /**
-   * AI APIを呼び出し
+   * AI APIを呼び出し (AIProvider 経由)
    */
   private async callAI(prompt: string): Promise<{ content: unknown; tokenUsage: number; model: string }> {
-    const response = await fetch(`${this.baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: this.model,
-        messages: [
-          {
-            role: 'system',
-            content: `あなたは市場データからテクニカル特徴量を抽出する分析エンジンです。
+    const provider = new AIProvider({
+      apiKey: this.apiKey,
+      model: this.model,
+      baseURL: this.baseURL,
+    });
+
+    const aiResponse = await provider.chat(
+      [
+        {
+          role: 'system',
+          content: `あなたは市場データからテクニカル特徴量を抽出する分析エンジンです。
 売買判断は行わず、観察事実と構造化された特徴量のみを出力してください。
 
 重要:
@@ -303,30 +303,13 @@ ${getRelevantIndicatorContext(indicators as unknown as Record<string, unknown>)}
 - 不確実な場合は confidence を低く設定し、理由をriskFactorsに明記
 - サポート/レジスタンスは実際の価格反転ポイントやMA等の融合点を根拠に
 - 必ず有効なJSONのみを出力してください`,
-          },
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0.3,
-        max_tokens: 2000,
-      }),
-    });
+        },
+        { role: 'user', content: prompt },
+      ],
+      { temperature: 0.3, maxTokens: 2000, responseFormat: { type: 'json_object' } },
+    );
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new Error(`AI API エラー: ${response.status} - ${errorBody}`);
-    }
-
-    const data = await response.json() as {
-      choices?: { message?: { content?: string } }[];
-      usage?: { total_tokens?: number };
-      model?: string;
-    };
-
-    const content = data.choices?.[0]?.message?.content;
+    const content = aiResponse.content;
     if (!content) {
       throw new Error('AI APIからの応答が空です');
     }
@@ -335,8 +318,8 @@ ${getRelevantIndicatorContext(indicators as unknown as Record<string, unknown>)}
 
     return {
       content: parsed,
-      tokenUsage: data.usage?.total_tokens || 0,
-      model: data.model || this.model,
+      tokenUsage: aiResponse.tokenUsage,
+      model: aiResponse.model,
     };
   }
 

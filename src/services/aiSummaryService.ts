@@ -15,9 +15,7 @@
  */
 
 import { config, modelFor } from '../config';
-import {
-  OpenAIChatCompletionResponseSchema,
-} from '../schemas/external/openai';
+import { AIProvider } from '../side-b/agent/aiProvider';
 
 /**
  * トレードデータの構造化入力
@@ -211,72 +209,31 @@ export class AISummaryService {
       };
     }
 
-    // OpenAI API を呼び出す
-    const response = await fetch(`${this.baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: this.model,
-        messages: [
-          {
-            role: 'system',
-            content: 'あなたはトレード分析の専門家です。トレードデータから簡潔で分かりやすい要約を日本語で生成してください。',
-          },
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-        max_completion_tokens: 5000,  // GPT-5 推論モデル用（コスト: 約 $2/1M tokens）
-        // 注意: gpt-5 シリーズは temperature をサポートしない（デフォルト 1 のみ）
-      }),
+    // AIProvider 経由で /chat/completions を呼び出す
+    // (max_completion_tokens / temperature 抑止 / reasoning_effort は AIProvider が判定)
+    const provider = new AIProvider({
+      apiKey: this.apiKey,
+      model: this.model,
+      baseURL: this.baseURL,
     });
 
-    if (!response.ok) {
-      // エラー詳細を取得
-      const errorBody = await response.text();
-      console.error('AI API エラー詳細:', errorBody);
-      throw new Error(`AI API エラー: ${response.status} ${response.statusText}`);
-    }
+    const aiResponse = await provider.chat(
+      [
+        {
+          role: 'system',
+          content: 'あなたはトレード分析の専門家です。トレードデータから簡潔で分かりやすい要約を日本語で生成してください。',
+        },
+        { role: 'user', content: prompt },
+      ],
+      { maxTokens: 5000 },
+    );
 
-    const rawData = await response.json();
-
-    // デバッグ: レスポンス構造を確認
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('AI API レスポンス:', JSON.stringify(rawData, null, 2));
-    }
-
-    // Zodスキーマで型安全にパース
-    const parseResult = OpenAIChatCompletionResponseSchema.safeParse(rawData);
-
-    if (parseResult.success) {
-      // Chat Completions形式
-      const data = parseResult.data;
-      const content = data.choices[0]?.message?.content || '';
-
-      return {
-        summary: content.trim(),
-        promptTokens: data.usage?.prompt_tokens,
-        completionTokens: data.usage?.completion_tokens,
-        model: data.model,
-      };
-    }
-
-    // GPT-5 Responses API形式のフォールバック（スキーマが異なる場合）
-    const legacyData = rawData as { output_text?: string; usage?: { prompt_tokens?: number; completion_tokens?: number }; model?: string };
-    if (legacyData.output_text) {
-      return {
-        summary: legacyData.output_text.trim(),
-        promptTokens: legacyData.usage?.prompt_tokens,
-        completionTokens: legacyData.usage?.completion_tokens,
-        model: legacyData.model,
-      };
-    }
-
-    throw new Error('AI APIレスポンス形式が不明です');
+    return {
+      summary: (aiResponse.content || '').trim(),
+      promptTokens: aiResponse.promptTokens,
+      completionTokens: aiResponse.completionTokens,
+      model: aiResponse.model,
+    };
   }
 
   /**
