@@ -942,8 +942,8 @@ export class SideBScheduler {
    * Phase 5: 日次進化ループジョブ（1時間ごとにチェックし 24h ごとに実行）
    */
   private startEvolutionJob(): void {
-    const checkIntervalMs = 60 * 60 * 1000;       // 起動後の通常チェック間隔: 60 分
-    const firstCheckMs = 15 * 60 * 1000;          // 起動直後の初回チェック: 15 分後
+    const checkIntervalMs = 60 * 60 * 1000;       // 通常チェック間隔: 60 分 (起動 60 分後の最初 tick から)
+    const firstCheckMs = 15 * 60 * 1000;          // 起動 15 分後の初回確認用 one-shot
     const dailyMs = 24 * 60 * 60 * 1000;          // 24 h 経過時のみ実行 (= 1 日 1 回)
 
     const runIfDue = (): void => {
@@ -955,13 +955,14 @@ export class SideBScheduler {
       }
     };
 
-    // 起動から 15 分後に初回チェック → 以降 60 分間隔で setInterval。
-    // 旧実装は最初のチェックが起動 60 分後で、deploy 直後に動作確認しにくかったため早めた
-    // (Nekoさん指示、2026-05-11)。実行は dailyMs ガードがあるので 24 h 多重起動はしない。
-    this.evolutionFirstTimerId = setTimeout(() => {
-      runIfDue();
-      this.evolutionIntervalId = setInterval(runIfDue, checkIntervalMs);
-    }, firstCheckMs);
+    // 起動時に 60 分間隔の setInterval を即時開始 (= 通常 cadence は旧実装と同一: 60min, 120min...)。
+    // 加えて、起動 15 分後に **one-shot で runIfDue を 1 回だけ追加実行** することで cold start
+    // 直後の動作確認を可能にする (Nekoさん指示、2026-05-11)。
+    // dailyMs ガードがあるため両 tick が同じ run を二重実行することはない。
+    // PR #153 review 対応: setInterval を初回 tick 内で開始する旧実装だと subsequent cadence が
+    // +15 分ずれる問題があったため、setInterval は起動時に開始する形に修正。
+    this.evolutionIntervalId = setInterval(runIfDue, checkIntervalMs);
+    this.evolutionFirstTimerId = setTimeout(runIfDue, firstCheckMs);
   }
 
   /**
