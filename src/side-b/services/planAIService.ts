@@ -35,6 +35,7 @@ import type { EdgeHypothesis } from '../models/edgeHypothesis';
 import { extractJson } from '../agents/llmJsonExtract';
 import type { JsonValue } from '../../utils/jsonValue';
 import { AIProvider } from '../agent/aiProvider';
+import { safeStringify } from '../../utils/safeStringify';
 
 // ===========================================
 // 型定義
@@ -358,7 +359,7 @@ ${candidateContext}
     } catch (err) {
       console.warn(
         '[StrategyThinker] Registry 合成に失敗、ファイル fallback:',
-        err instanceof Error ? `${err.name}: ${err.message || '(empty message)'}` : JSON.stringify(err),
+        safeStringify(err),
       );
       const fallback = loadPromptWithGlobal('strategy_thinker', macros);
       if (process.env.NODE_ENV === 'test') this.resolvedPromptCache = fallback;

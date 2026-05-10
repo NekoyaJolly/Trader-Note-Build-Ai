@@ -38,6 +38,7 @@ import { edgeLedger as defaultLedger } from '../ledger/EdgeLedger';
 import { agentMemory } from '../agent/agentMemory';
 import type { JsonValue } from '../../utils/jsonValue';
 import { AIProvider } from '../agent/aiProvider';
+import { safeStringify } from '../../utils/safeStringify';
 
 // ===========================================
 // 型定義
@@ -496,7 +497,7 @@ export class DiscoveryAgent {
         } catch (err) {
             console.warn(
                 '[DiscoveryAgent] Registry 合成に失敗、ファイル fallback:',
-                err instanceof Error ? `${err.name}: ${err.message || '(empty message)'}` : JSON.stringify(err),
+                safeStringify(err),
             );
             return loadPromptWithGlobal('discovery');
         }

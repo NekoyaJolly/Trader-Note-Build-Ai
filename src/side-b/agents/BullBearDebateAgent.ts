@@ -43,6 +43,7 @@ import {
   type BullBearDebateOutput,
 } from '../../schemas/api/sideB';
 import { AIProvider } from '../agent/aiProvider';
+import { safeStringify } from '../../utils/safeStringify';
 
 // ===========================================
 // 型定義（sideB.ts で Zod スキーマから推論された型を再エクスポート）
@@ -194,7 +195,7 @@ export class BullBearDebateAgent {
     } catch (err) {
       console.warn(
         '[BullBearDebate] Registry 合成に失敗、ファイル fallback:',
-        err instanceof Error ? `${err.name}: ${err.message || '(empty message)'}` : JSON.stringify(err),
+        safeStringify(err),
       );
       return loadPromptWithGlobal('bull_bear_debate');
     }

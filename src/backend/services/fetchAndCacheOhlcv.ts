@@ -15,6 +15,7 @@ import { splitDateRange } from '../../utils/dateRangeChunks';
 import { normalizeCTraderSymbol, toTwelveDataSymbol } from '../../utils/symbolNormalization';
 import { TwelveDataTimeSeriesResponseSchema } from '../../schemas/external/twelveData';
 import { prisma } from '../db/client';
+import { safeStringify } from '../../utils/safeStringify';
 
 const ctraderAuthService = new CTraderAuthService(prisma);
 const ctraderDataService = new CTraderDataService(ctraderAuthService);
@@ -243,14 +244,10 @@ async function fetchFromTwelveDataFallback(
     } catch (error) {
         // fetch() の失敗は `error.message='fetch failed'` で実体は `error.cause` にあるため、
         // cause も含めてログする (DNS / 接続 / Timeout 等の切り分けに必要)。
+        // safeStringify で BigInt / 循環参照 / toJSON throw に対応 (PR #152 review)。
         const msg = error instanceof Error ? error.message : '不明なエラー';
         const cause = (error as { cause?: unknown })?.cause;
-        const causeStr =
-            cause instanceof Error
-                ? ` (cause: ${cause.name}: ${cause.message})`
-                : cause
-                  ? ` (cause: ${JSON.stringify(cause)})`
-                  : '';
+        const causeStr = cause ? ` (cause: ${safeStringify(cause)})` : '';
         return { success: false, cachedCount: 0, error: `Twelve Data フォールバックエラー: ${msg}${causeStr}` };
     }
 }

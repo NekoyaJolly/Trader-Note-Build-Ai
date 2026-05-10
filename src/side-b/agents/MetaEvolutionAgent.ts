@@ -27,6 +27,7 @@ import {
   SPECIALIST_COMMON_AGENT_NAME,
 } from '../prompts/registry/PromptRegistry';
 import { extractJson } from './llmJsonExtract';
+import { safeStringify } from '../../utils/safeStringify';
 
 export interface AgentPerformance {
   agentName: string;
@@ -228,7 +229,7 @@ export class MetaEvolutionAgent {
     } catch (err) {
       console.warn(
         '[MetaEvolutionAgent] Registry 合成に失敗、ファイル fallback:',
-        err instanceof Error ? `${err.name}: ${err.message || '(empty message)'}` : JSON.stringify(err),
+        safeStringify(err),
       );
       return loadPromptWithGlobal('meta_evolution');
     }
