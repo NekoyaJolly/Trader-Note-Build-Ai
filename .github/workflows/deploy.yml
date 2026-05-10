@@ -129,6 +129,9 @@ jobs:
         #   これによりデプロイで設定ドリフトを解消し、deploy.yml 列挙が「真実の唯一のソース」になる。
         # - --allow-unauthenticated --quiet を明示。サービス新規作成時の対話プロンプトを回避し
         #   災害復旧シナリオでも非対話で完走できるようにする。
+        # - --max-instances=5: pgBouncer pool 枯渇 (signal 11 segfault) 対策の一環。
+        #   Prisma connection_limit=1 と組み合わせて 5 instance × 1 = 最大 5 connection に抑える。
+        #   負荷観察後 (24h~) で安定が確認できたら段階的に max=10 / connection_limit=3 へ戻す方針。
         # - MARKET_API_URL と TWELVE_DATA_API_URL は同値で両方注入。コード側で参照箇所が分かれている
         #   (config/index.ts は MARKET_API_URL、TwelveDataProvider/fetchAndCacheOhlcv は TWELVE_DATA_API_URL)
         #   ため、片方だけだと一部コンポーネントに反映されない。
@@ -144,6 +147,7 @@ jobs:
             --platform managed \
             --allow-unauthenticated \
             --quiet \
+            --max-instances=5 \
             --set-env-vars NODE_ENV=production,ANALYSIS_ENGINE_URL=${{ needs.deploy-analysis-engine.outputs.analysis_url }},PYTHON_VALIDATION_MODE=http,EVOLUTION_GENERATIONS=2,AUTO_EVOLUTION=${{ vars.AUTO_EVOLUTION || 'false' }},SIDE_B_SCHEDULER_ENABLED=true,MARKET_API_URL=https://api.twelvedata.com,TWELVE_DATA_API_URL=https://api.twelvedata.com \
             --set-secrets AI_API_KEY=AI_API_KEY:latest,AI_MODEL=AI_MODEL:latest,AI_BASE_URL=AI_BASE_URL:latest,AI_MODEL_OVERRIDE_ALL=AI_MODEL_OVERRIDE_ALL:latest,CRON_SECRET=CRON_SECRET:latest,DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,CTRADER_CLIENT_ID=CTRADER_CLIENT_ID:latest,CTRADER_CLIENT_SECRET=CTRADER_CLIENT_SECRET:latest,CTRADER_REDIRECT_URI=CTRADER_REDIRECT_URI:latest,VAPID_PUBLIC_KEY=VAPID_PUBLIC_KEY:latest,VAPID_PRIVATE_KEY=VAPID_PRIVATE_KEY:latest,TWELVE_DATA_API_KEY=TWELVE_DATA_API_KEY:latest
 

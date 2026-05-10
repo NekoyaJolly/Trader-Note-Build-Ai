@@ -90,10 +90,11 @@ export interface ExecuteProposalResult {
 /** 月あたり新規エージェント追加上限。§3.3.4。 */
 export const MONTHLY_ADD_LIMIT = 1;
 
-let defaultPrisma: PrismaClient | null = null;
+// PR #152: canonical singleton 経由で pool 共有
 function getDefaultPrisma(): PrismaClient {
-  if (!defaultPrisma) defaultPrisma = new PrismaClient();
-  return defaultPrisma;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { prisma } = require('../../backend/db/client') as { prisma: PrismaClient };
+  return prisma;
 }
 
 async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<T | null> {

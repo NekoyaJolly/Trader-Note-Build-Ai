@@ -27,12 +27,11 @@ import { PromptRegistry } from '../registry/PromptRegistry';
 /** 勝者判定の閾値: 最高スコアが 2 位スコアの 1.15 倍以上なら勝者。 */
 const WINNER_MARGIN = 1.15;
 
-let defaultPrisma: PrismaClient | null = null;
+// PR #152: canonical singleton 経由で pool 共有
 function getDefaultPrisma(): PrismaClient {
-  if (!defaultPrisma) {
-    defaultPrisma = new PrismaClient();
-  }
-  return defaultPrisma;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { prisma } = require('../../../backend/db/client') as { prisma: PrismaClient };
+  return prisma;
 }
 
 export interface ABTestRunnerOptions {
