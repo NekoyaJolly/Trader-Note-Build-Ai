@@ -214,6 +214,8 @@ export interface FormalBtMetrics {
   maxDrawdown?: number;
   sharpe?: number;
   returnPct?: number;
+  recoveryFactor?: number;
+  riskReward?: number;
 }
 
 /**
@@ -1485,6 +1487,8 @@ export class EvolutionLoop {
         ...(response.summary.maxDD != null ? { maxDrawdown: response.summary.maxDD } : {}),
         ...(response.summary.sharpe != null ? { sharpe: response.summary.sharpe } : {}),
         ...(response.summary.returnPct != null ? { returnPct: response.summary.returnPct } : {}),
+        ...(response.summary.recoveryFactor != null ? { recoveryFactor: response.summary.recoveryFactor } : {}),
+        ...(response.summary.riskReward != null ? { riskReward: response.summary.riskReward } : {}),
       };
       const engineVersion = response.engineVersion;
 

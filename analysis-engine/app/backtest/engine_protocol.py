@@ -142,6 +142,8 @@ class BTSummary:
     max_dd: Optional[float]  # %
     sharpe: Optional[float]
     return_pct: Optional[float]
+    recovery_factor: Optional[float]
+    risk_reward: Optional[float]
 
 
 @dataclass(frozen=True)

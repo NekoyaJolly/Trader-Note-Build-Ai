@@ -322,6 +322,8 @@ class ScreeningBacktestSummary(BaseModel):
     maxDD: Optional[float] = None
     sharpe: Optional[float] = None
     returnPct: Optional[float] = None
+    recoveryFactor: Optional[float] = None
+    riskReward: Optional[float] = None
 
 
 class ScreeningBacktestTrade(BaseModel):

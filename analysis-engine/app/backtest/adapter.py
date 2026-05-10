@@ -97,6 +97,8 @@ def btsummary_to_response(summary) -> ScreeningBacktestSummary:
         maxDD=summary.max_dd,
         sharpe=summary.sharpe,
         returnPct=summary.return_pct,
+        recoveryFactor=summary.recovery_factor,
+        riskReward=summary.risk_reward,
     )
 
 

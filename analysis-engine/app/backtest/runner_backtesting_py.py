@@ -638,6 +638,18 @@ class BacktestingPyEngine:
             None if return_pct is None or np.isnan(return_pct) else float(return_pct)
         )
 
+        recovery_factor = None
+        if return_pct_val is not None and max_dd is not None and max_dd != 0:
+            recovery_factor = float(return_pct_val / abs(max_dd))
+
+        avg_win = stats.get("Avg. Winning Trade [%]")
+        avg_loss = stats.get("Avg. Losing Trade [%]")
+        risk_reward = None
+        if avg_win is not None and not np.isnan(avg_win) and avg_loss is not None and not np.isnan(avg_loss):
+            val_loss = float(avg_loss)
+            if val_loss != 0:
+                risk_reward = abs(float(avg_win) / val_loss)
+
         return BTSummary(
             pf=pf,
             win_rate=win_rate,
@@ -645,6 +657,8 @@ class BacktestingPyEngine:
             max_dd=max_dd,
             sharpe=sharpe,
             return_pct=return_pct_val,
+            recovery_factor=recovery_factor,
+            risk_reward=risk_reward,
         )
 
     @classmethod
@@ -749,6 +763,8 @@ class BacktestingPyEngine:
                 max_dd=None,
                 sharpe=None,
                 return_pct=None,
+                recovery_factor=None,
+                risk_reward=None,
             ),
             trades=[],
             equity=None,

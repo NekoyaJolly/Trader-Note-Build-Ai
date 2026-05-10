@@ -279,6 +279,8 @@ export const ScreeningBacktestSummarySchema = z.object({
   maxDD: z.number().nullable(),
   sharpe: z.number().nullable(),
   returnPct: z.number().nullable(),
+  recoveryFactor: z.number().nullable().optional(),
+  riskReward: z.number().nullable().optional(),
 });
 
 export type ScreeningBacktestSummary = z.infer<typeof ScreeningBacktestSummarySchema>;
