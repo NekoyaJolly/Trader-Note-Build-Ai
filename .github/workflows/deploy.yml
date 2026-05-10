@@ -49,14 +49,17 @@ jobs:
           docker push ${{ env.GCP_ANALYSIS_IMAGE }}
 
       - name: Cloud Run へデプロイ（analysis-engine）
+        # API 側と同じく --set-* で完全置換 + --quiet で非対話化。
+        # 列挙外の env/secrets は削除されるため、deploy.yml が真実の唯一のソースになる。
         run: |
           gcloud run deploy ${{ env.GCP_ANALYSIS_SERVICE_NAME }} \
             --image ${{ env.GCP_ANALYSIS_IMAGE }} \
             --region ${{ env.GCP_REGION }} \
             --platform managed \
             --allow-unauthenticated \
-            --update-env-vars NODE_ENV=production \
-            --update-secrets ANALYSIS_DATABASE_URL=ANALYSIS_DATABASE_URL:latest
+            --quiet \
+            --set-env-vars NODE_ENV=production \
+            --set-secrets ANALYSIS_DATABASE_URL=ANALYSIS_DATABASE_URL:latest
 
       - name: analysis-engine のURLを取得
         id: outputs
@@ -118,21 +121,31 @@ jobs:
           docker push ${{ env.GCP_IMAGE }}
 
       - name: Cloud Run へデプロイ
-        # --update-secrets は GCP Secret Manager の全 14 件を反映する。
+        # GCP Secret Manager の全 14 件 + plain env を Cloud Run に反映。
         # サービス再作成時の災害復旧でこの workflow 1 回で本番設定が完全再現できるようにする。
-        # 注意:
-        # - DATABASE_PASSWORD / DIRECT_URL は Secret Manager に存在するが Cloud Run runtime には不要のため意図的に除外:
-        #   - DIRECT_URL は Prisma migration 時のみ使用 (run-migration job で Cloud Run Job 経由)
-        #   - DATABASE_PASSWORD は将来 DB パス分離管理する時用、現状 DATABASE_URL 内包なので未使用
-        # - VAPID_SUBJECT は Secret Manager に未登録 (Web Push 動作要件は未確認、必要なら別 PR で追加)
-        # - SIDE_B_SCHEDULER_ENABLED / MARKET_API_URL は plain env で注入 (機密でない)
+        #
+        # 設計判断:
+        # - --set-* (env-vars / secrets) を使い、列挙していない既存の env/secrets は削除する。
+        #   これによりデプロイで設定ドリフトを解消し、deploy.yml 列挙が「真実の唯一のソース」になる。
+        # - --allow-unauthenticated --quiet を明示。サービス新規作成時の対話プロンプトを回避し
+        #   災害復旧シナリオでも非対話で完走できるようにする。
+        # - MARKET_API_URL と TWELVE_DATA_API_URL は同値で両方注入。コード側で参照箇所が分かれている
+        #   (config/index.ts は MARKET_API_URL、TwelveDataProvider/fetchAndCacheOhlcv は TWELVE_DATA_API_URL)
+        #   ため、片方だけだと一部コンポーネントに反映されない。
+        #
+        # 意図的に除外 (Secret Manager に存在するが Cloud Run runtime で未使用):
+        # - DIRECT_URL: Prisma migration 専用、run-migration job (Cloud Run Job) で別途参照
+        # - DATABASE_PASSWORD: 将来の DB パス分離管理用、現状 DATABASE_URL 内包
+        # - VAPID_SUBJECT: Secret Manager 未登録、Web Push 動作確認後に必要なら追加
         run: |
           gcloud run deploy ${{ env.GCP_SERVICE_NAME }} \
             --image ${{ env.GCP_IMAGE }} \
             --region ${{ env.GCP_REGION }} \
             --platform managed \
-            --update-env-vars NODE_ENV=production,ANALYSIS_ENGINE_URL=${{ needs.deploy-analysis-engine.outputs.analysis_url }},PYTHON_VALIDATION_MODE=http,EVOLUTION_GENERATIONS=2,AUTO_EVOLUTION=${{ vars.AUTO_EVOLUTION || 'false' }},SIDE_B_SCHEDULER_ENABLED=true,MARKET_API_URL=https://api.twelvedata.com \
-            --update-secrets AI_API_KEY=AI_API_KEY:latest,AI_MODEL=AI_MODEL:latest,AI_BASE_URL=AI_BASE_URL:latest,AI_MODEL_OVERRIDE_ALL=AI_MODEL_OVERRIDE_ALL:latest,CRON_SECRET=CRON_SECRET:latest,DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,CTRADER_CLIENT_ID=CTRADER_CLIENT_ID:latest,CTRADER_CLIENT_SECRET=CTRADER_CLIENT_SECRET:latest,CTRADER_REDIRECT_URI=CTRADER_REDIRECT_URI:latest,VAPID_PUBLIC_KEY=VAPID_PUBLIC_KEY:latest,VAPID_PRIVATE_KEY=VAPID_PRIVATE_KEY:latest,TWELVE_DATA_API_KEY=TWELVE_DATA_API_KEY:latest
+            --allow-unauthenticated \
+            --quiet \
+            --set-env-vars NODE_ENV=production,ANALYSIS_ENGINE_URL=${{ needs.deploy-analysis-engine.outputs.analysis_url }},PYTHON_VALIDATION_MODE=http,EVOLUTION_GENERATIONS=2,AUTO_EVOLUTION=${{ vars.AUTO_EVOLUTION || 'false' }},SIDE_B_SCHEDULER_ENABLED=true,MARKET_API_URL=https://api.twelvedata.com,TWELVE_DATA_API_URL=https://api.twelvedata.com \
+            --set-secrets AI_API_KEY=AI_API_KEY:latest,AI_MODEL=AI_MODEL:latest,AI_BASE_URL=AI_BASE_URL:latest,AI_MODEL_OVERRIDE_ALL=AI_MODEL_OVERRIDE_ALL:latest,CRON_SECRET=CRON_SECRET:latest,DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,CTRADER_CLIENT_ID=CTRADER_CLIENT_ID:latest,CTRADER_CLIENT_SECRET=CTRADER_CLIENT_SECRET:latest,CTRADER_REDIRECT_URI=CTRADER_REDIRECT_URI:latest,VAPID_PUBLIC_KEY=VAPID_PUBLIC_KEY:latest,VAPID_PRIVATE_KEY=VAPID_PRIVATE_KEY:latest,TWELVE_DATA_API_KEY=TWELVE_DATA_API_KEY:latest
 
       - name: デプロイ後の動作確認（最大5分待機）
         run: |
