@@ -717,6 +717,51 @@ export async function runMultiGenerationEvolutionV1(input: {
         stopReason = `generation ${generationIndex}: parentPoolSummary.totalSelected=0`;
         break;
       }
+
+      // ===== 追加: 本番運用レベルの戦略発見時の早期ストップ（多様性確保） =====
+      let foundProductionReady = false;
+      let matchedCondition = '';
+
+      for (const c of report.formalBtVerifiedCandidates) {
+        if (!c.formalBtPassed || !c.formalBtMetrics) continue;
+        const metrics = c.formalBtMetrics;
+
+        // 基本条件: 取引数が少なすぎる場合は信頼性が低いため除外（最低30件）
+        if (metrics.tradeCount < 30) continue;
+
+        // 条件セット1: 王道・バランス型（PF 2.0以上 かつ 勝率 60%以上）
+        if (metrics.pf >= 2.0 && metrics.winRate >= 0.60) {
+          foundProductionReady = true;
+          matchedCondition = 'Set1(Balance: PF>=2.0, Win>=60%)';
+          break;
+        }
+        // 条件セット2: 高勝率・薄利多売型（PF 1.5以上 かつ 勝率 70%以上）
+        if (metrics.pf >= 1.5 && metrics.winRate >= 0.70) {
+          foundProductionReady = true;
+          matchedCondition = 'Set2(HighWinRate: PF>=1.5, Win>=70%)';
+          break;
+        }
+        // 条件セット3: 損小利大・トレンドフォロー型（PF 2.5以上 かつ 勝率 45%以上）
+        if (metrics.pf >= 2.5 && metrics.winRate >= 0.45) {
+          foundProductionReady = true;
+          matchedCondition = 'Set3(TrendFollow: PF>=2.5, Win>=45%)';
+          break;
+        }
+        // 条件セット4: 圧倒的PF・ホームラン型（PF 3.0以上 かつ 勝率 40%以上）
+        if (metrics.pf >= 3.0 && metrics.winRate >= 0.40) {
+          foundProductionReady = true;
+          matchedCondition = 'Set4(HighProfit: PF>=3.0, Win>=40%)';
+          break;
+        }
+      }
+
+      if (foundProductionReady) {
+        stoppedEarly = true;
+        stopReason = `generation ${generationIndex}: production-ready strategy found (${matchedCondition})`;
+        break;
+      }
+      // =====================================================================
+
       if (noImprovementChecker.push(report)) {
         stoppedEarly = true;
         stopReason = `generation ${generationIndex}: no improvement streak >= ${opts.maxConsecutiveNoImprovement}`;

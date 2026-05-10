@@ -205,8 +205,8 @@ const DEFAULT_CONFIG: SideBSchedulerConfig = {
     'consolidation',
     'reversal',
   ],
-  // Phase A: 既定は単世代 (= 後方互換)。env EVOLUTION_GENERATIONS で上書き可能。
-  evolutionGenerations: 1,
+  // Phase A: デフォルトは最大5世代。env EVOLUTION_GENERATIONS で上書き可能。
+  evolutionGenerations: 5,
   evolutionAdaptiveBudget: false,
   evolutionQDArchive: false,
   evolutionQDParentLimit: 2,
