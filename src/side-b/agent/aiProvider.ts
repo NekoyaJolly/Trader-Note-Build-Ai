@@ -14,8 +14,52 @@
  * (破壊的変更、旧 (messages, tools?, temperature?) 形式は廃止)
  */
 
+import { z } from 'zod';
 import { config, resolveDefaultModel } from '../../config';
 import type { McpToolDefinition } from './mcpClient';
+
+/**
+ * AIProvider が必要とする最小限のレスポンス形状を Zod で検証する。
+ *
+ * 設計方針:
+ * - リポジトリの `OpenAIChatCompletionResponseSchema` は `id`/`object`/`created` 等も必須にする厳格版で、
+ *   プロバイダ差異 (OpenRouter / Gemini OpenAI 互換 / 今後の新エンドポイント) や
+ *   既存テストの最小モックを壊しやすい。
+ * - AIProvider が実際に参照するのは `choices[].message.content` / `usage.*_tokens` / `model` のみ。
+ *   不要な field は `optional()` にし、必要 field の **欠落** だけを runtime error で弾く。
+ * - これにより、PR #149 Copilot レビュー (4) の「type assertion で潜在エラーを隠さない」要件は満たしつつ、
+ *   過度な型結合を避ける。
+ */
+const AIProviderToolCallSchema = z.object({
+    id: z.string(),
+    type: z.literal('function'),
+    function: z.object({
+        name: z.string(),
+        arguments: z.string(),
+    }),
+});
+
+const AIProviderResponseSchema = z.object({
+    choices: z
+        .array(
+            z.object({
+                message: z.object({
+                    content: z.string().nullable().optional(),
+                    tool_calls: z.array(AIProviderToolCallSchema).optional(),
+                }),
+                finish_reason: z.string().nullable().optional(),
+            }),
+        )
+        .min(1, 'AI API レスポンスに choices がありません'),
+    usage: z
+        .object({
+            total_tokens: z.number().optional(),
+            prompt_tokens: z.number().optional(),
+            completion_tokens: z.number().optional(),
+        })
+        .optional(),
+    model: z.string().optional(),
+});
 
 // ===========================================
 // 型定義
@@ -115,19 +159,23 @@ export class AIProvider {
     }
 
     /**
-     * OpenAI の **直エンドポイント** かを判定する。
-     *
-     * OpenAI の o 系 / gpt-5 系は以下の API 仕様変更があるため、`api.openai.com` 直の時だけ
-     * リクエスト形式を切り替える:
-     *   - `max_tokens` を拒否 → `max_completion_tokens` を要求
-     *   - `temperature` 非対応 (デフォルト 1 のみ) → 送信しない
-     *
-     * OpenRouter (`openrouter.ai`) / Gemini OpenAI 互換 (`generativelanguage.googleapis.com`)
-     * は従来形式を受け付けるため切り替えない。
+     * OpenAI の **直エンドポイント** かを判定する (baseURL のみ判定)。
+     * 通常は {@link requiresOpenAINewParamFormat} 経由で参照すること。
      */
-    private usesOpenAINewParam(): boolean {
-        // 大文字小文字を吸収しつつ "api.openai.com" を含むかで判定
+    private usesOpenAIDirectEndpoint(): boolean {
         return this.baseURL.toLowerCase().includes('api.openai.com');
+    }
+
+    /**
+     * OpenAI 新パラメータ形式 (temperature 抑止 + max_completion_tokens) を要求するかを判定する。
+     *
+     * 条件: **OpenAI 直エンドポイント (api.openai.com) かつ reasoning モデル (gpt-5系 / o系)** の時のみ true。
+     *
+     * 同 baseURL でも gpt-4o 等の非 reasoning モデルでは従来形式 (temperature OK / max_tokens) を維持する必要がある。
+     * baseURL だけで判定すると gpt-4o 直叩きが壊れるため、必ずモデルとセットで判定する。
+     */
+    private requiresOpenAINewParamFormat(): boolean {
+        return this.usesOpenAIDirectEndpoint() && this.isReasoningModel(this.model);
     }
 
     /**
@@ -179,19 +227,18 @@ export class AIProvider {
             messages,
         };
 
-        // OpenAI の o 系 / gpt-5 系は temperature 非対応 (デフォルト 1 のみ受理)。
-        // 既存 aiSummaryService.ts も同様の対応をしており、ここで揃える。
-        // OpenRouter / Gemini OpenAI 互換 / その他は temperature を尊重。
-        if (!this.usesOpenAINewParam()) {
+        // OpenAI 直 + reasoning モデル (gpt-5系/o系) は temperature 非対応 (デフォルト 1 のみ受理)。
+        // 同じ OpenAI 直でも gpt-4o 等は temperature を受け付けるため、モデルもセットで判定する。
+        // OpenRouter / Gemini OpenAI 互換 / その他は常に temperature を尊重。
+        if (!this.requiresOpenAINewParamFormat()) {
             body.temperature = options.temperature ?? 0.3;
         }
 
-        // max_tokens は明示指定された時のみ付ける(プロバイダー既定に任せたい場合は省略可)
-        // OpenAI の o 系 / gpt-5 系は `max_tokens` を拒否し `max_completion_tokens` を要求するため、
-        // OpenAI 直エンドポイントの時だけパラメータ名を切り替える。
-        // OpenRouter / Gemini OpenAI 互換 / その他は従来通り `max_tokens`。
+        // max_tokens は明示指定された時のみ付ける(プロバイダー既定に任せたい場合は省略可)。
+        // OpenAI 直 + reasoning モデル (gpt-5系/o系) は `max_tokens` を拒否し `max_completion_tokens` を要求する。
+        // 非 reasoning モデル (gpt-4o 等) や OpenRouter 経由は従来通り `max_tokens`。
         if (options.maxTokens !== undefined) {
-            const tokenParam = this.usesOpenAINewParam() ? 'max_completion_tokens' : 'max_tokens';
+            const tokenParam = this.requiresOpenAINewParamFormat() ? 'max_completion_tokens' : 'max_tokens';
             body[tokenParam] = options.maxTokens;
         }
 
@@ -231,31 +278,25 @@ export class AIProvider {
             throw new Error(`AI API error: ${response.status} - ${errorBody}`);
         }
 
-        const data = (await response.json()) as {
-            choices?: Array<{
-                message?: {
-                    content?: string | null;
-                    tool_calls?: ToolCall[];
-                };
-                finish_reason?: string;
-            }>;
-            usage?: { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number };
-            model?: string;
-        };
-
-        const choice = data.choices?.[0];
-        if (!choice?.message) {
-            throw new Error('Empty response from AI API');
+        // 軽量 Zod スキーマでレスポンスを検証し、プロバイダ側の形式変化を runtime error で早期検知する。
+        // type assertion ではキー欠落・型不一致が `undefined` の連鎖で隠れるため避ける (PR #149 Copilot レビュー (4))。
+        const rawData = await response.json();
+        const parseResult = AIProviderResponseSchema.safeParse(rawData);
+        if (!parseResult.success) {
+            throw new Error(`AI API レスポンス形式エラー: ${parseResult.error.message}`);
         }
+        const data = parseResult.data;
 
+        const choice = data.choices[0];
+        // choices.min(1) を満たしていれば choice は存在する。message も schema 上必須。
         return {
             content: choice.message.content ?? null,
-            toolCalls: choice.message.tool_calls || [],
-            tokenUsage: data.usage?.total_tokens || 0,
+            toolCalls: (choice.message.tool_calls ?? []) as ToolCall[],
+            tokenUsage: data.usage?.total_tokens ?? 0,
             promptTokens: data.usage?.prompt_tokens,
             completionTokens: data.usage?.completion_tokens,
-            model: data.model || this.model,
-            finishReason: choice.finish_reason || 'unknown',
+            model: data.model ?? this.model,
+            finishReason: choice.finish_reason ?? 'unknown',
         };
     }
 }

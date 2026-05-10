@@ -15,12 +15,23 @@ import { AIProvider } from '../agent/aiProvider';
 global.fetch = jest.fn();
 
 function mockFetchOnce(): void {
+  // OpenAIChatCompletionResponseSchema を満たす完全なレスポンス
+  // (id / object / created / model / choices[].index は必須)
   (global.fetch as jest.Mock).mockResolvedValueOnce({
     ok: true,
     json: async () => ({
-      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
-      usage: { total_tokens: 0 },
+      id: 'chatcmpl-test',
+      object: 'chat.completion',
+      created: 1700000000,
       model: 'mocked',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'ok' },
+          finish_reason: 'stop',
+        },
+      ],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
     }),
   });
 }
@@ -125,6 +136,17 @@ describe('AIProvider request body', () => {
       expect(body).not.toHaveProperty('max_tokens');
     });
 
+    it('OpenAI 直 + gpt-4o-mini (非 reasoning): temperature と max_tokens を従来通り送る (回帰防止 #149)', async () => {
+      // PR #149 Copilot レビュー (3): baseURL のみで切替判定すると gpt-4o-mini 直叩きが壊れる問題の回帰テスト
+      mockFetchOnce();
+      const provider = new AIProvider({ apiKey: 'test', model: 'gpt-4o-mini', baseURL: 'https://api.openai.com/v1' });
+      await provider.chat([{ role: 'user', content: 'hi' }], { maxTokens: 1024, temperature: 0.7 });
+      const body = lastRequestBody();
+      expect(body.temperature).toBe(0.7);
+      expect(body.max_tokens).toBe(1024);
+      expect(body).not.toHaveProperty('max_completion_tokens');
+    });
+
     it('OpenRouter 経由: temperature と max_tokens を従来通り送る', async () => {
       mockFetchOnce();
       const provider = new AIProvider({
@@ -137,6 +159,18 @@ describe('AIProvider request body', () => {
       expect(body.temperature).toBe(0.5);
       expect(body.max_tokens).toBe(1024);
       expect(body).not.toHaveProperty('max_completion_tokens');
+    });
+  });
+
+  describe('レスポンス Zod 検証 (PR #149 Copilot レビュー (4))', () => {
+    it('レスポンス形式が壊れている場合、明確なエラーを throw する', async () => {
+      // type assertion だと undefined 連鎖で隠れていた壊れたレスポンス
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ unexpected: 'shape' }),
+      });
+      const provider = new AIProvider({ apiKey: 'test', model: 'gpt-4o-mini', baseURL: 'https://api.openai.com/v1' });
+      await expect(provider.chat([{ role: 'user', content: 'hi' }])).rejects.toThrow(/レスポンス形式エラー/);
     });
   });
 });

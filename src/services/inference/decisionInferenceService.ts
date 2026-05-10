@@ -169,11 +169,24 @@ export class DecisionInferenceService {
     return {
       primaryTimeframe: parsed.primaryTimeframe || '1h',
       secondaryTimeframes: parsed.secondaryTimeframes || ['15m', '4h'],
-      inferredMode: (parsed.inferredMode as InferredMode) || 'other',
+      inferredMode: validateInferredMode(parsed.inferredMode),
       rationale: parsed.rationale || 'AI 推定結果',
       promptTokens: aiResponse.promptTokens,
       completionTokens: aiResponse.completionTokens,
       model: aiResponse.model,
     };
   }
+}
+
+/**
+ * AI が返す `inferredMode` が enum (InferredMode) のいずれかであるかをランタイムで検証する。
+ * 想定外文字列 (例: 'trendish') が来たら 'other' にフォールバック。
+ * 型 assertion だけでは契約違反を見逃すため、明示的な値チェックで防御する。
+ */
+const VALID_INFERRED_MODES: readonly InferredMode[] = ['trend', 'meanReversion', 'other'];
+function validateInferredMode(value: unknown): InferredMode {
+  if (typeof value === 'string' && (VALID_INFERRED_MODES as readonly string[]).includes(value)) {
+    return value as InferredMode;
+  }
+  return 'other';
 }
