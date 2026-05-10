@@ -397,7 +397,6 @@ export class SideBScheduler {
   private screeningIntervalId?: NodeJS.Timeout;
   private fullValidationIntervalId?: NodeJS.Timeout;
   private evolutionIntervalId?: NodeJS.Timeout;
-  private evolutionFirstTimerId?: NodeJS.Timeout;
   private promptEvolutionIntervalId?: NodeJS.Timeout;
   private lastPlanRun: Map<string, Date> = new Map();
   private lastMonitorRun?: Date;
@@ -586,11 +585,6 @@ export class SideBScheduler {
     if (this.fullValidationIntervalId) {
       clearInterval(this.fullValidationIntervalId);
       this.fullValidationIntervalId = undefined;
-    }
-
-    if (this.evolutionFirstTimerId) {
-      clearTimeout(this.evolutionFirstTimerId);
-      this.evolutionFirstTimerId = undefined;
     }
 
     if (this.evolutionIntervalId) {
@@ -942,8 +936,14 @@ export class SideBScheduler {
    * Phase 5: 日次進化ループジョブ（1時間ごとにチェックし 24h ごとに実行）
    */
   private startEvolutionJob(): void {
-    const checkIntervalMs = 60 * 60 * 1000;       // 通常チェック間隔: 60 分 (起動 60 分後の最初 tick から)
-    const firstCheckMs = 15 * 60 * 1000;          // 起動 15 分後の初回確認用 one-shot
+    // チェック cadence は 15 分で統一 (起動 → 15min, 30min, 45min, 60min, ...)。
+    // - 旧実装は 60 分間隔だったが deploy 直後の動作確認に長すぎた
+    // - 中間案として「初回 15 min one-shot + 以降 60 min」としたが、cadence が混在すると
+    //   どの足を参照しているか不明瞭になる (Nekoさん指摘、2026-05-11)。
+    // - 15 分一貫で刻むことで「15 分足」相当の規則的な timing になる
+    // 実行は dailyMs (24h) ガードで 1 日 1 回に絞られているため、check 頻度が増えても
+    // Evolution 本体 (LLM 呼び出し等) のコストは増加しない。
+    const checkIntervalMs = 15 * 60 * 1000;       // 15 分間隔チェック
     const dailyMs = 24 * 60 * 60 * 1000;          // 24 h 経過時のみ実行 (= 1 日 1 回)
 
     const runIfDue = (): void => {
@@ -955,14 +955,7 @@ export class SideBScheduler {
       }
     };
 
-    // 起動時に 60 分間隔の setInterval を即時開始 (= 通常 cadence は旧実装と同一: 60min, 120min...)。
-    // 加えて、起動 15 分後に **one-shot で runIfDue を 1 回だけ追加実行** することで cold start
-    // 直後の動作確認を可能にする (Nekoさん指示、2026-05-11)。
-    // dailyMs ガードがあるため両 tick が同じ run を二重実行することはない。
-    // PR #153 review 対応: setInterval を初回 tick 内で開始する旧実装だと subsequent cadence が
-    // +15 分ずれる問題があったため、setInterval は起動時に開始する形に修正。
     this.evolutionIntervalId = setInterval(runIfDue, checkIntervalMs);
-    this.evolutionFirstTimerId = setTimeout(runIfDue, firstCheckMs);
   }
 
   /**
