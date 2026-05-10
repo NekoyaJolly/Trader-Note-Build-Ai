@@ -212,6 +212,8 @@ export interface FormalBtMetrics {
   winRate: number;
   tradeCount: number;
   maxDrawdown?: number;
+  sharpe?: number;
+  returnPct?: number;
 }
 
 /**
@@ -1481,6 +1483,8 @@ export class EvolutionLoop {
         winRate: response.summary.winRate,
         tradeCount: response.summary.tradeCount,
         ...(response.summary.maxDD != null ? { maxDrawdown: response.summary.maxDD } : {}),
+        ...(response.summary.sharpe != null ? { sharpe: response.summary.sharpe } : {}),
+        ...(response.summary.returnPct != null ? { returnPct: response.summary.returnPct } : {}),
       };
       const engineVersion = response.engineVersion;
 
