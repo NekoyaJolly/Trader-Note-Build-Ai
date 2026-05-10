@@ -25,6 +25,7 @@ import {
   SPECIALIST_COMMON_AGENT_NAME,
   type PromptMacros,
 } from '../loader';
+import { EVOLUTION_TARGETS_PROMPT_TEXT } from '../../evolution/evolutionTargets';
 
 /**
  * Phase 6.7a: グローバルルール専用の特殊 agentName (`__global__`)。
@@ -171,7 +172,7 @@ export class PromptRegistry {
       return localExpanded;
     }
     const globalExpanded = expandMacros(globalPrompt.content, macros);
-    return `${globalExpanded}\n\n${localExpanded}`;
+    return `${globalExpanded}\n\n${EVOLUTION_TARGETS_PROMPT_TEXT}\n\n${localExpanded}`;
   }
 
   /**
@@ -192,7 +193,7 @@ export class PromptRegistry {
       return localExpanded;
     }
     const globalExpanded = expandMacros(globalPrompt.content, macros);
-    return `${globalExpanded}\n\n${localExpanded}`;
+    return `${globalExpanded}\n\n${EVOLUTION_TARGETS_PROMPT_TEXT}\n\n${localExpanded}`;
   }
 
   /**
@@ -211,6 +212,7 @@ export class PromptRegistry {
     const parts: string[] = [];
     if (globalPrompt) {
       parts.push(expandMacros(globalPrompt.content, macros));
+      parts.push(EVOLUTION_TARGETS_PROMPT_TEXT);
     } else {
       console.warn(
         `[PromptRegistry] ${GLOBAL_AGENT_NAME} active が存在しません。専門家 local は継続します`,

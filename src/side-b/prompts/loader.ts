@@ -12,6 +12,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { EVOLUTION_TARGETS_PROMPT_TEXT } from '../evolution/evolutionTargets';
 
 const PROMPTS_DIR = __dirname;
 
@@ -104,7 +105,7 @@ export function loadPromptWithGlobal(name: string, macros?: PromptMacros): strin
     }
     const globalRaw = fs.readFileSync(globalPath, 'utf-8');
     const globalExpanded = expandMacros(globalRaw, macros);
-    return `${globalExpanded}\n\n${localContent}`;
+    return `${globalExpanded}\n\n${EVOLUTION_TARGETS_PROMPT_TEXT}\n\n${localContent}`;
 }
 
 /**
@@ -128,6 +129,9 @@ export function loadSpecialistPromptWithGlobalAndCommon(
             continue;
         }
         parts.push(expandMacros(fs.readFileSync(filePath, 'utf-8'), macros));
+        if (reservedName === GLOBAL_AGENT_NAME) {
+            parts.push(EVOLUTION_TARGETS_PROMPT_TEXT);
+        }
     }
     parts.push(localContent);
     return parts.join('\n\n');
@@ -158,5 +162,5 @@ export function prependGlobalPromptFromFile(
     const globalRaw = fs.readFileSync(globalPath, 'utf-8');
     const globalExpanded = expandMacros(globalRaw, macros);
     const localExpanded = expandMacros(localContent, macros);
-    return `${globalExpanded}\n\n${localExpanded}`;
+    return `${globalExpanded}\n\n${EVOLUTION_TARGETS_PROMPT_TEXT}\n\n${localExpanded}`;
 }
