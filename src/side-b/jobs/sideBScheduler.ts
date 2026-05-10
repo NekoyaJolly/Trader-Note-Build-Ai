@@ -391,6 +391,7 @@ export interface SchedulerStatus {
 export class SideBScheduler {
   private config: SideBSchedulerConfig;
   private isRunning: boolean = false;
+  private isEvolutionRunning: boolean = false;
   private monitorIntervalId?: NodeJS.Timeout;
   private planIntervalId?: NodeJS.Timeout;
   private discoveryIntervalId?: NodeJS.Timeout;
@@ -946,16 +947,28 @@ export class SideBScheduler {
     const checkIntervalMs = 15 * 60 * 1000;       // 15 分間隔チェック
     const dailyMs = 24 * 60 * 60 * 1000;          // 24 h 経過時のみ実行 (= 1 日 1 回)
 
-    const runIfDue = (): void => {
+    const runIfDue = async (): Promise<void> => {
+      if (this.isEvolutionRunning) {
+        this.log('[Evolution] 既に実行中のためスキップします');
+        return;
+      }
+
       const now = Date.now();
       if (!this.lastEvolutionRun || now - this.lastEvolutionRun.getTime() >= dailyMs) {
-        this.runEvolutionNow().catch((err) => {
+        this.isEvolutionRunning = true;
+        // 実行開始時に暫定的にlastEvolutionRunを更新して二重起動の確率をさらに下げる
+        this.lastEvolutionRun = new Date();
+        try {
+          await this.runEvolutionNow();
+        } catch (err) {
           this.addError(`進化ループジョブエラー: ${err}`);
-        });
+        } finally {
+          this.isEvolutionRunning = false;
+        }
       }
     };
 
-    this.evolutionIntervalId = setInterval(runIfDue, checkIntervalMs);
+    this.evolutionIntervalId = setInterval(() => { runIfDue().catch(console.error); }, checkIntervalMs);
   }
 
   /**
@@ -1120,6 +1133,10 @@ export class SideBScheduler {
         const msg = err instanceof Error ? err.message : String(err);
         errors.push(`${regime}: ${msg}`);
         this.addError(`[Evolution] ${regime} 失敗: ${msg}`);
+        // PDCAループに失敗を通知して学習ログに残す
+        try {
+          pdcaLoop.notifyEvolutionFailed(regime, msg);
+        } catch { /* PDCAループ未起動時は無視 */ }
       }
       if (i < regimes.length - 1) {
         await new Promise((r) => setTimeout(r, 30_000));
@@ -1878,9 +1895,7 @@ export class SideBScheduler {
    * ログ出力
    */
   private log(message: string): void {
-    if (!this.isProduction) {
-      console.log(`[SideBScheduler] ${message}`);
-    }
+    console.log(`[SideBScheduler] ${message}`);
   }
 
   /**

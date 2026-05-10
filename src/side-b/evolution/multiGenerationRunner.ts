@@ -646,29 +646,28 @@ export async function runMultiGenerationEvolutionV1(input: {
           const reflection = await opts.generationReflectionAgent.reflect(reflectionInput);
           if (reflection) {
             const evolutionRunIdResolved = opts.evolutionRunIdForLessons;
-            const insertResults = await Promise.all(
-              reflection.lessons.map(async (l): Promise<boolean> => {
-                try {
-                  const insertData: GenerationLessonInsertData = {
-                    evolutionRunId: evolutionRunIdResolved,
-                    regime: opts.regime,
-                    generation: generationIndex,
-                    category: l.category,
-                    lesson: l.lesson,
-                    metrics: l.metrics,
-                    confidence: reflection.confidence,
-                  };
-                  await opts.generationLessonRepo!.create(insertData);
-                  return true;
-                } catch (e) {
-                  const m = e instanceof Error ? e.message : String(e);
-                  runWarnings.push(
-                    `generation ${generationIndex} reflection lesson 永続化失敗: ${m}`,
-                  );
-                  return false;
-                }
-              }),
-            );
+            const insertResults: boolean[] = [];
+            for (const l of reflection.lessons) {
+              try {
+                const insertData: GenerationLessonInsertData = {
+                  evolutionRunId: evolutionRunIdResolved,
+                  regime: opts.regime,
+                  generation: generationIndex,
+                  category: l.category,
+                  lesson: l.lesson,
+                  metrics: l.metrics,
+                  confidence: reflection.confidence,
+                };
+                await opts.generationLessonRepo!.create(insertData);
+                insertResults.push(true);
+              } catch (e) {
+                const m = e instanceof Error ? e.message : String(e);
+                runWarnings.push(
+                  `generation ${generationIndex} reflection lesson 永続化失敗: ${m}`,
+                );
+                insertResults.push(false);
+              }
+            }
             generationReflections.push({
               generationIndex,
               lessons: reflection.lessons.map((l) => ({ category: l.category, lesson: l.lesson })),

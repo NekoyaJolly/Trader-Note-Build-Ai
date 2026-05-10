@@ -606,6 +606,18 @@ export class PDCALoop {
         );
     }
 
+    /**
+     * 進化ループの失敗を通知。
+     * sideBScheduler で進化ループ実行中に致命的エラーが起きた場合に、PDCAにその旨を伝える。
+     */
+    notifyEvolutionFailed(regime: string, error: string): void {
+        this.addThinkingLog(
+            this.memory.getState(),
+            `進化ループ実行失敗: regime=${regime}`,
+            error,
+        );
+    }
+
     // --- 情報取得 ---
 
     /**

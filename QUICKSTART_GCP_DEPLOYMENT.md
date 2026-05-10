@@ -41,6 +41,7 @@ gcloud run deploy trader-note \
   --timeout 3600 \
   --max-instances 10 \
   --min-instances 1 \
+  --no-cpu-throttling \
   --allow-unauthenticated \
   --update-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,CTRADER_CLIENT_ID=CTRADER_CLIENT_ID:latest,CTRADER_CLIENT_SECRET=CTRADER_CLIENT_SECRET:latest,OAUTH_ENCRYPTION_KEY=OAUTH_ENCRYPTION_KEY:latest,VAPID_PUBLIC_KEY=VAPID_PUBLIC_KEY:latest,VAPID_PRIVATE_KEY=VAPID_PRIVATE_KEY:latest,NEXTAUTH_SECRET=NEXTAUTH_SECRET:latest,NEXT_PUBLIC_API_URL=NEXT_PUBLIC_API_URL:latest,FRONTEND_URL=FRONTEND_URL:latest
 ```
