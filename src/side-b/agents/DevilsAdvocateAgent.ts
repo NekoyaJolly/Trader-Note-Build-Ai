@@ -210,7 +210,7 @@ export class DevilsAdvocateAgent {
         } catch (err) {
             console.warn(
                 '[DevilsAdvocate] Registry 合成に失敗、ファイル fallback:',
-                err instanceof Error ? err.message : err,
+                err instanceof Error ? `${err.name}: ${err.message || '(empty message)'}` : JSON.stringify(err),
             );
             return loadPromptWithGlobal('devils_advocate');
         }

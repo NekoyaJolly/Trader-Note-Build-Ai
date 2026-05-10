@@ -194,7 +194,7 @@ export class BullBearDebateAgent {
     } catch (err) {
       console.warn(
         '[BullBearDebate] Registry 合成に失敗、ファイル fallback:',
-        err instanceof Error ? err.message : err,
+        err instanceof Error ? `${err.name}: ${err.message || '(empty message)'}` : JSON.stringify(err),
       );
       return loadPromptWithGlobal('bull_bear_debate');
     }

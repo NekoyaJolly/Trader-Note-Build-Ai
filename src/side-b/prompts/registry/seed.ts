@@ -83,6 +83,13 @@ export const DEFAULT_SEED_ENTRIES: SeedEntry[] = [
     file: 'bull_bear_debate.md',
     notes: 'Phase 6.7a BullBearDebateAgent (PR#55 で追加)',
   },
+  // Phase D-1b: GenerationReflectionAgent (PR #145 で追加)。
+  // seed リスト漏れにより本番で「Registry 合成失敗 → ファイル fallback」が頻発していた問題を解消。
+  {
+    agentName: 'generation_reflection',
+    file: 'generation_reflection.md',
+    notes: 'Phase D-1b GenerationReflectionAgent (PR #145)',
+  },
 ];
 
 export interface SeedResult {

@@ -241,8 +241,17 @@ async function fetchFromTwelveDataFallback(
             },
         };
     } catch (error) {
+        // fetch() の失敗は `error.message='fetch failed'` で実体は `error.cause` にあるため、
+        // cause も含めてログする (DNS / 接続 / Timeout 等の切り分けに必要)。
         const msg = error instanceof Error ? error.message : '不明なエラー';
-        return { success: false, cachedCount: 0, error: `Twelve Data フォールバックエラー: ${msg}` };
+        const cause = (error as { cause?: unknown })?.cause;
+        const causeStr =
+            cause instanceof Error
+                ? ` (cause: ${cause.name}: ${cause.message})`
+                : cause
+                  ? ` (cause: ${JSON.stringify(cause)})`
+                  : '';
+        return { success: false, cachedCount: 0, error: `Twelve Data フォールバックエラー: ${msg}${causeStr}` };
     }
 }
 

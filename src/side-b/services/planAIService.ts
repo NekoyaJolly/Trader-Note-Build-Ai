@@ -358,7 +358,7 @@ ${candidateContext}
     } catch (err) {
       console.warn(
         '[StrategyThinker] Registry 合成に失敗、ファイル fallback:',
-        err instanceof Error ? err.message : err,
+        err instanceof Error ? `${err.name}: ${err.message || '(empty message)'}` : JSON.stringify(err),
       );
       const fallback = loadPromptWithGlobal('strategy_thinker', macros);
       if (process.env.NODE_ENV === 'test') this.resolvedPromptCache = fallback;

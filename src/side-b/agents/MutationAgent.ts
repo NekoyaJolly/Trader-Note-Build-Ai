@@ -118,7 +118,7 @@ export class MutationAgent {
     } catch (err) {
       console.warn(
         '[MutationAgent] Registry 合成に失敗、ファイル fallback:',
-        err instanceof Error ? err.message : err,
+        err instanceof Error ? `${err.name}: ${err.message || '(empty message)'}` : JSON.stringify(err),
       );
       return loadPromptWithGlobal('mutation', macros);
     }
