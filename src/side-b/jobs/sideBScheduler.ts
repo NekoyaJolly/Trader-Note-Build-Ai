@@ -936,17 +936,26 @@ export class SideBScheduler {
    * Phase 5: 日次進化ループジョブ（1時間ごとにチェックし 24h ごとに実行）
    */
   private startEvolutionJob(): void {
-    const checkIntervalMs = 60 * 60 * 1000;
-    const dailyMs = 24 * 60 * 60 * 1000;
+    // チェック cadence は 15 分で統一 (起動 → 15min, 30min, 45min, 60min, ...)。
+    // - 旧実装は 60 分間隔だったが deploy 直後の動作確認に長すぎた
+    // - 中間案として「初回 15 min one-shot + 以降 60 min」としたが、cadence が混在すると
+    //   どの足を参照しているか不明瞭になる (Nekoさん指摘、2026-05-11)。
+    // - 15 分一貫で刻むことで「15 分足」相当の規則的な timing になる
+    // 実行は dailyMs (24h) ガードで 1 日 1 回に絞られているため、check 頻度が増えても
+    // Evolution 本体 (LLM 呼び出し等) のコストは増加しない。
+    const checkIntervalMs = 15 * 60 * 1000;       // 15 分間隔チェック
+    const dailyMs = 24 * 60 * 60 * 1000;          // 24 h 経過時のみ実行 (= 1 日 1 回)
 
-    this.evolutionIntervalId = setInterval(() => {
+    const runIfDue = (): void => {
       const now = Date.now();
       if (!this.lastEvolutionRun || now - this.lastEvolutionRun.getTime() >= dailyMs) {
         this.runEvolutionNow().catch((err) => {
           this.addError(`進化ループジョブエラー: ${err}`);
         });
       }
-    }, checkIntervalMs);
+    };
+
+    this.evolutionIntervalId = setInterval(runIfDue, checkIntervalMs);
   }
 
   /**
