@@ -49,6 +49,7 @@ import type {
   GenerationLessonInsertData,
   GenerationLessonPersister,
 } from '../../backend/repositories/generationLessonRepository';
+import { EVOLUTION_TARGETS } from './evolutionTargets';
 
 // =================================================================
 // 設定
@@ -728,42 +729,22 @@ export async function runMultiGenerationEvolutionV1(input: {
 
         // 基本条件: 取引数が少なすぎる場合は信頼性が低いため除外（最低30件）
         if (metrics.tradeCount < 30) continue;
+        for (const target of EVOLUTION_TARGETS) {
+          let isMatch = true;
+          if (target.minPf !== undefined && metrics.pf < target.minPf) isMatch = false;
+          if (target.minWinRate !== undefined && metrics.winRate < target.minWinRate) isMatch = false;
+          if (target.minRecoveryFactor !== undefined && (metrics.recoveryFactor == null || metrics.recoveryFactor < target.minRecoveryFactor)) isMatch = false;
+          if (target.minRiskReward !== undefined && (metrics.riskReward == null || metrics.riskReward < target.minRiskReward)) isMatch = false;
+          if (target.maxDrawdown !== undefined && (metrics.maxDrawdown == null || Math.abs(metrics.maxDrawdown) > target.maxDrawdown)) isMatch = false;
 
-        // 条件セット1: 王道・バランス安定型 (安定稼働EA水準)
-        // PF 1.5以上、リカバリーファクター 3.0以上
-        if (metrics.pf >= 1.5 && metrics.recoveryFactor != null && metrics.recoveryFactor >= 3.0) {
-          foundProductionReady = true;
-          matchedCondition = 'Set1(EA-Standard: PF>=1.5, RF>=3.0)';
-          break;
+          if (isMatch) {
+            foundProductionReady = true;
+            matchedCondition = `Set: ${target.name} (${target.description})`;
+            break;
+          }
         }
-        // 条件セット2: 高勝率・スキャルピング型 (薄利多売EA水準)
-        // 勝率 75%以上、PF 1.4以上、リスクリワード 0.5以上
-        if (metrics.winRate >= 0.75 && metrics.pf >= 1.4 && metrics.riskReward != null && metrics.riskReward >= 0.5) {
-          foundProductionReady = true;
-          matchedCondition = 'Set2(Scalping: Win>=75%, PF>=1.4, RR>=0.5)';
-          break;
-        }
-        // 条件セット3: 損小利大・トレンドフォロー型 (大相場狙いEA水準)
-        // リスクリワード 2.0以上、勝率 40%以上、PF 1.5以上
-        if (metrics.riskReward != null && metrics.riskReward >= 2.0 && metrics.winRate >= 0.40 && metrics.pf >= 1.5) {
-          foundProductionReady = true;
-          matchedCondition = 'Set3(TrendFollow: RR>=2.0, Win>=40%, PF>=1.5)';
-          break;
-        }
-        // 条件セット4: 資金防衛・堅牢型 (低リスクEA水準)
-        // 最大ドローダウン 10%以下、リカバリーファクター 4.0以上、PF 1.3以上
-        if (metrics.maxDrawdown != null && Math.abs(metrics.maxDrawdown) <= 10.0 && metrics.recoveryFactor != null && metrics.recoveryFactor >= 4.0 && metrics.pf >= 1.3) {
-          foundProductionReady = true;
-          matchedCondition = 'Set4(Defense: MaxDD<=10%, RF>=4.0, PF>=1.3)';
-          break;
-        }
-        // 条件セット5: 圧倒的ホームラン型 (超高収益EA水準)
-        // PF 2.5以上、リカバリーファクター 5.0以上
-        if (metrics.pf >= 2.5 && metrics.recoveryFactor != null && metrics.recoveryFactor >= 5.0) {
-          foundProductionReady = true;
-          matchedCondition = 'Set5(HomeRun: PF>=2.5, RF>=5.0)';
-          break;
-        }
+
+        if (foundProductionReady) break;
       }
 
       if (foundProductionReady) {

@@ -50,6 +50,7 @@
 import { Router } from 'express';
 import { sideBController } from '../controllers';
 import { ledgerDashboardController } from '../controllers/ledgerDashboardController';
+import { evolutionController } from '../controllers/evolutionController';
 import { validationRoutes } from './validationRoutes';
 import { validateBody, validateQuery, validateParams } from '../../middleware/validateRequest';
 import {
@@ -102,6 +103,15 @@ router.get('/stats/by-category', ledgerDashboardController.byCategory);
 router.get('/stats/validation-activity', ledgerDashboardController.validationActivity);
 router.get('/discovery/latest', ledgerDashboardController.latestDiscovery);
 router.get('/system/health', ledgerDashboardController.systemHealth);
+
+// ===========================================
+// 進化エンジン（Evolution）API
+// ===========================================
+router.get('/evolution/lessons', evolutionController.getLessons);
+router.get('/evolution/runs', evolutionController.getRuns);
+router.get('/evolution/runs/:runId/summary', evolutionController.getRunSummary);
+router.get('/evolution/runs/:runId/candidates', evolutionController.getRunCandidates);
+
 
 // ===========================================
 // リサーチ

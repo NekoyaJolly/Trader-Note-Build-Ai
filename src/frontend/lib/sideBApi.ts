@@ -48,12 +48,13 @@ import type {
   RecentHypothesesResponse,
   DiscoveryLatestResponse,
   SystemHealthResponse,
-  GeneratePlanResponse,
   GeneratePlanRequest,
   ListPlansParams,
   ListPlansResponse,
   GetPlanResponse,
   AITradePlanPayload,
+  ListGenerationLessonsQuery,
+  ListEvolutionRunsQuery,
 } from "@/types/sideB";
 import { getPublicApiBaseUrl } from "./publicApiBaseUrl";
 
@@ -430,6 +431,37 @@ async function getTodayPlan(symbol: string): Promise<AITradePlanPayload | null> 
 }
 
 // ===========================================
+// 進化エンジン (Evolution)
+// ===========================================
+
+async function getEvolutionLessons(params: ListGenerationLessonsQuery = {}): Promise<any> {
+  const sp = new URLSearchParams();
+  if (params.regime) sp.set("regime", params.regime);
+  if (params.limit) sp.set("limit", String(params.limit));
+  const query = sp.toString() ? `?${sp.toString()}` : '';
+  return request<any>(`/evolution/lessons${query}`);
+}
+
+async function getEvolutionRuns(params: ListEvolutionRunsQuery = {}): Promise<any> {
+  const sp = new URLSearchParams();
+  if (params.limit) sp.set("limit", String(params.limit));
+  const query = sp.toString() ? `?${sp.toString()}` : '';
+  return request<any>(`/evolution/runs${query}`);
+}
+
+async function getEvolutionRunSummary(runId: string): Promise<any> {
+  if (!runId) throw new SideBApiError("runId は必須です", 400, "/evolution/runs/:runId/summary");
+  return request<any>(`/evolution/runs/${encodeURIComponent(runId)}/summary`);
+}
+
+async function getEvolutionRunCandidates(runId: string, limit?: number): Promise<any> {
+  if (!runId) throw new SideBApiError("runId は必須です", 400, "/evolution/runs/:runId/candidates");
+  const query = limit ? `?limit=${limit}` : '';
+  return request<any>(`/evolution/runs/${encodeURIComponent(runId)}/candidates${query}`);
+}
+
+
+// ===========================================
 // export
 // ===========================================
 
@@ -455,6 +487,10 @@ export const sideBApi = {
   listPlans,
   getPlan,
   getTodayPlan,
+  getEvolutionLessons,
+  getEvolutionRuns,
+  getEvolutionRunSummary,
+  getEvolutionRunCandidates,
 };
 
 /** 外部テスト向け: クエリ組み立てのみ検証できるよう内部 util を露出 */

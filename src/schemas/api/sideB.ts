@@ -1199,4 +1199,34 @@ export const RunScreeningQuerySchema = z
     }
   });
 
+// ========================================
+// 進化エンジン（Evolution）API スキーマ
+// ========================================
+
+/**
+ * GET /api/side-b/evolution/lessons クエリ
+ */
+export const ListGenerationLessonsQuerySchema = z.object({
+  regime: z.string().optional(),
+  limit: z.string().transform(Number).pipe(z.number().int().min(1).max(100)).optional(),
+});
+export type ListGenerationLessonsQuery = z.infer<typeof ListGenerationLessonsQuerySchema>;
+
+/**
+ * GET /api/side-b/evolution/runs クエリ
+ */
+export const ListEvolutionRunsQuerySchema = z.object({
+  limit: z.string().transform(Number).pipe(z.number().int().min(1).max(100)).optional(),
+});
+export type ListEvolutionRunsQuery = z.infer<typeof ListEvolutionRunsQuerySchema>;
+
+/**
+ * GET /api/side-b/evolution/runs/:runId クエリ
+ */
+export const GetEvolutionRunQuerySchema = z.object({
+  limit: z.string().transform(Number).pipe(z.number().int().min(1).max(1000)).optional(),
+});
+export type GetEvolutionRunQuery = z.infer<typeof GetEvolutionRunQuerySchema>;
+
+
 export type RunScreeningQuery = z.infer<typeof RunScreeningQuerySchema>;

@@ -16,6 +16,7 @@ import {
   TrendingUp,
   GitCompare,
   CalendarClock,
+  Dna,
 } from "lucide-react";
 
 /** ナビ項目の安定 ID（キー・分析用） */
@@ -24,6 +25,7 @@ export type SideBNavId =
   | "hypotheses"
   | "validation"
   | "agent"
+  | "evolution"
   | "ai-notes"
   | "trades"
   | "comparison"
@@ -83,6 +85,15 @@ export const SIDE_B_WORKSPACE_ITEMS: readonly SideBNavEntry[] = [
     labelTab: "運転席",
     icon: Bot,
     order: 40,
+    showInAgentTabStrip: true,
+  },
+  {
+    id: "evolution",
+    href: "/side-b/evolution",
+    labelSidebar: "進化トラッキング",
+    labelTab: "進化",
+    icon: Dna,
+    order: 45,
     showInAgentTabStrip: true,
   },
   {

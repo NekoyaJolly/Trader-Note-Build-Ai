@@ -234,6 +234,8 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       winRate: 0.55,
       tradeCount: 35,
       maxDrawdown: 0.05,
+      returnPct: 0.1,
+      sharpe: 1.2,
     });
     expect(cand?.formalBtFailureReason).toBeUndefined();
   });
