@@ -100,7 +100,9 @@ const outcomeLabels: Record<string, string> = {
 
 // ===== APIクライアント =====
 
-const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "") + "/api/side-b";
+import { getPublicApiBaseUrl } from "@/lib/publicApiBaseUrl";
+
+const API_BASE = getPublicApiBaseUrl() + "/api/side-b";
 
 async function fetchDashboard(period: ComparisonPeriod, symbol?: string): Promise<DashboardData> {
   const params = new URLSearchParams({ period });

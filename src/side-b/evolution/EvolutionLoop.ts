@@ -1042,6 +1042,42 @@ export class EvolutionLoop {
       await this.persistFormalBtHistory(verifyResults).catch(() => undefined);
     }
 
+    // --- EdgeLedger への自動登録 (進化・エージェント連携の修正) ---
+    for (const c of promotionCandidates) {
+      try {
+        const dsl = verifyResults.find(r => r.candidate.dslId === c.dslId)?.dsl;
+        if (!dsl) continue;
+        
+        await defaultEdgeLedger.create({
+          statement: c.description || `Evolution AI Generated Strategy (${c.regime})`,
+          category: 'other',
+          conditions: [],
+          expectedDirection: dsl.entry.direction === 'long' || dsl.entry.direction === 'short' ? dsl.entry.direction : 'either',
+          status: 'screening_passed', // AIダッシュボードや検証フローに乗せるため screening_passed を指定
+          source: 'discovery', // evolutionはEdgeSourceに無いため discovery を使用
+          symbols: [c.symbol],
+          timeframes: [c.timeframe],
+          observationCount: 0,
+          winCount: 0,
+          lossCount: 0,
+          breakevenCount: 0,
+          totalPnlPips: 0,
+          avgRR: 0,
+          screeningResult: c.formalBtMetrics ? {
+            executedAt: new Date().toISOString(),
+            passed: true,
+            metrics: {
+              pf: c.formalBtMetrics.pf,
+              winRate: c.formalBtMetrics.winRate * 100, // 0-100%形式に合わせるか確認
+              tradeCount: c.formalBtMetrics.tradeCount,
+            }
+          } : undefined
+        });
+      } catch (err) {
+        errors.push(`[error] EdgeLedger 自動登録に失敗 (dslId=${c.dslId}): ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
     // Phase B-2: 当世代の in-memory cache (tradesByDslId / lastRepairHints /
     // lastRepairBaselines) を carry payload として DB に永続化。次回 cron 起動時に
     // `findLatestByRegime(regime)` で復元される。例外は飲んで世代結果には影響させない。

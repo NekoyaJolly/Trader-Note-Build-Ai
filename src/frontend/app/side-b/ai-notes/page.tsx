@@ -203,7 +203,8 @@ const directionToJapanese = (direction: "long" | "short"): string => {
 };
 
 // 数値をフォーマット
-const formatNumber = (value: number, decimals: number = 2): string => {
+const formatNumber = (value: number | undefined | null, decimals: number = 2): string => {
+  if (value === undefined || value === null) return "0";
   return value.toLocaleString("ja-JP", {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
@@ -287,10 +288,24 @@ export default function AINotesPage() {
       setGeneratingSummary(true);
       setError(null);
 
+      const endDate = new Date();
+      const startDate = new Date();
+      if (period === "daily") {
+        // Today
+      } else if (period === "weekly") {
+        startDate.setDate(endDate.getDate() - 7);
+      } else if (period === "monthly") {
+        startDate.setMonth(endDate.getMonth() - 1);
+      }
+
       const res = await fetch(`${API_BASE}/side-b/ai-notes/summaries/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ period }),
+        body: JSON.stringify({ 
+          period,
+          startDate: startDate.toISOString().split("T")[0],
+          endDate: endDate.toISOString().split("T")[0]
+        }),
       });
 
       if (!res.ok) {
