@@ -24,8 +24,10 @@ on:
 
 | ステップ | コマンド | PR fail 条件 |
 |---------|---------|-------------|
-| TypeScript コンパイル確認 | `npx tsc --noEmit` | ✅ tsc が non-zero exit で fail |
-| ESLint チェック | `npm run lint --if-present \|\| echo "ESLint スキップ"` | ❌ **failure を握りつぶす** (`\|\| echo` で常に exit 0) |
+| TypeScript コンパイル確認 | `npx tsc --noEmit` | ✅ tsc (本番 tsconfig 経由) が non-zero exit で fail |
+| ESLint チェック | `npm run lint --if-present \|\| echo "ESLint スキップ"` | ❌ **そもそも未実行** (root の `package.json` に `lint` スクリプトが存在せず、`--if-present` でスキップされる。`\|\| echo` は到達せず success 扱い) |
+
+> **修正の経緯**: 当初は「`\|\| echo` で failure を握りつぶす」と記述したが、PR #156 の Copilot レビュー指摘 (3) を受けて正確な状況を再調査。root `package.json` には `lint:backend` `lint:backend:tests` `lint:backend:files` の 3 つのみが存在し `lint` は無いため、`--if-present` の時点で **ESLint は一切実行されない**。`src/frontend/package.json` には `"lint": "eslint"` があるが CI 上は frontend を対象にしていない。
 
 ### 1.3 判定
 
@@ -80,7 +82,21 @@ GitHub Settings → Branches → Add branch protection rule for `main`:
 
 ### 3.2 ESLint PR ゲート化 (Step 0 完了後の別 PR で対応)
 
-`.github/workflows/ci.yml` 第52行を以下のように変更:
+現状は root に `lint` スクリプトが無いため CI で ESLint が一切走らない。PR ゲート化には 2 つの対応が必要:
+
+#### 対応A: root に `lint` スクリプトを追加 (推奨)
+
+`package.json` に以下を追加:
+
+```jsonc
+{
+  "scripts": {
+    "lint": "eslint ."
+  }
+}
+```
+
+その上で `.github/workflows/ci.yml` 第52行を変更:
 
 ```yaml
 # Before
@@ -92,11 +108,22 @@ GitHub Settings → Branches → Add branch protection rule for `main`:
   run: npm run lint
 ```
 
+#### 対応B: 既存スクリプトを使う
+
+`lint:backend` 等の既存スクリプトを CI から呼び出す。範囲を分けて実行できるが、tests 系の検査漏れに注意。
+
+```yaml
+- name: ESLint チェック (backend)
+  run: npm run lint:backend
+- name: ESLint チェック (backend tests)
+  run: npm run lint:backend:tests
+```
+
 **ただし即座に変更すると**: Phase B Ticket B2 の audit で計測した通り、現状 488 errors が残っており、変更直後に全 PR が CI fail で塞がる。よって以下の順序で進める:
 
 1. Step 0 完了 (Phase C / Final Gate)
 2. 別 PR で side-b 優先で ESLint 違反を段階解消 (STEP_0_ESLINT_AUDIT.md §4 推奨優先順)
-3. 違反 0 件になったタイミングで `|| echo "ESLint スキップ"` を削除し PR ゲート化
+3. 違反 0 件になったタイミングで対応A (`lint` スクリプト追加) と `|| echo "ESLint スキップ"` の削除を同時に行い PR ゲート化
 
 ### 3.3 Frontend tsc 追加 (任意、別 PR で対応)
 

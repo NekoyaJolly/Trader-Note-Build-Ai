@@ -76,7 +76,8 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-argument': 'off',
       '@typescript-eslint/no-unsafe-call': 'off',
       '@typescript-eslint/no-unsafe-return': 'off',
-      '@typescript-eslint/ban-ts-comment': 'off',
+      // ban-ts-comment は tests/scripts でも有効に保つ (AGENTS.md §2 の
+      // 「@ts-ignore / @ts-nocheck は一切の例外なし禁止」と整合させる)
     },
   },
 );

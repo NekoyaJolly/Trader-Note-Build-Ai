@@ -1,15 +1,41 @@
 # STEP_0_TSCONFIG_AUDIT.md - tsconfig strict 強化監査
 
 > **チケット**: Ticket B1
-> **作成日**: 2026-05-12
-> **対象**: ルート `tsconfig.json` と `src/frontend/tsconfig.json`
+> **作成日**: 2026-05-12 (Copilot レビュー対応で audit 分離方式に変更)
+> **対象**: ルート `tsconfig.audit.json` と `src/frontend/tsconfig.audit.json` (新規)
 > **方針**: 既存エラーは**修正しない**。レポートのみ (KICKOFF.md §B1)
 
 ---
 
-## 1. 適用したオプション
+## 1. 適用したオプション (audit 用 tsconfig 分離方式)
 
-両 tsconfig は `strict: true` のみが有効だった。本チケットで以下の 3 オプションを追加した:
+> **設計の経緯**: 当初は本番 `tsconfig.json` 直接に 3 オプションを追加していたが、PR #156 の Copilot レビュー指摘 (1) を受けて方針変更。本番 `tsconfig.json` (`tsc && ...` ビルドや `next build` が参照) に 1423 件のエラーを発生させると CI / 本番ビルドが破壊されるため、**audit 専用の `tsconfig.audit.json` を分離**した。
+
+### 構成
+
+両プロジェクトの本番 tsconfig は元の `strict: true` のみに戻し、新規に audit 用 tsconfig を作成:
+
+```
+/tsconfig.json                         # 本番 (strict のみ、build / dev で使用)
+/tsconfig.audit.json                   # 監査 (extends + 3 オプション追加)
+/src/frontend/tsconfig.json            # 本番 (strict のみ、next build で使用)
+/src/frontend/tsconfig.audit.json      # 監査 (extends + 3 オプション追加)
+```
+
+### audit tsconfig の中身 (両プロジェクト共通)
+
+```jsonc
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true
+  }
+}
+```
+
+### 追加された 3 オプション
 
 | オプション | 値 | 効果 |
 |------------|----|----|
@@ -17,19 +43,19 @@
 | `noImplicitOverride` | `true` | クラスメソッド override に `override` キーワード必須 |
 | `exactOptionalPropertyTypes` | `true` | optional プロパティに明示的 `undefined` を代入禁止 |
 
-`strict: true` には `noImplicitAny`, `strictNullChecks`, `strictFunctionTypes`, `strictBindCallApply`, `strictPropertyInitialization`, `noImplicitThis`, `useUnknownInCatchVariables`, `alwaysStrict` が含まれる (公式仕様)。本チケットで追加した 3 オプションはこの strict 群に**含まれていない**追加項目である。
+`strict: true` には `noImplicitAny`, `strictNullChecks`, `strictFunctionTypes`, `strictBindCallApply`, `strictPropertyInitialization`, `noImplicitThis`, `useUnknownInCatchVariables`, `alwaysStrict` が含まれる (公式仕様)。本チケットで追加した 3 オプションはこの strict 群に**含まれていない**追加項目。
 
 ---
 
 ## 2. エラー件数
 
-| プロジェクト | strict のみベースライン | 3 オプション追加後 | 差分 |
-|-------------|-----------------------|-------------------|------|
-| ルート (`tsconfig.json`) | 0 | **1044** | +1044 |
-| Frontend (`src/frontend/tsconfig.json`) | 0 | **379** | +379 |
+| プロジェクト | 本番 tsconfig (strict のみ) | audit tsconfig (3 オプション追加) | 差分 |
+|-------------|-------------------------|-----------------------------|------|
+| ルート (`tsconfig.audit.json`) | 0 | **1044** | +1044 |
+| Frontend (`src/frontend/tsconfig.audit.json`) | 0 | **379** | +379 |
 | **合計** | **0** | **1423** | **+1423** |
 
-ベースラインがクリーン (0 errors) だったため、検出された 1423 件はすべて新規 3 オプション由来。
+本番 tsconfig はクリーン (0 errors) で `npm run build` / `next build` が引き続き通る。audit tsconfig 経由で計測した 1423 件はすべて新規 3 オプション由来。
 
 ---
 
@@ -177,15 +203,21 @@ const settings: ExitSettings = {
 - 各 PR で `npx tsc --noEmit` を必須チェックとして PR ゲートに組み込む (Phase B Ticket B3 で扱う)
 - side-b の不可侵領域 (EdgeLedger 昇格判定 / Evolution 探索) に触る変更は ADK_ADOPTION.md §6 のレビューを経る
 
-### 5.4 オプションを「とりあえず無効化」しない
+### 5.4 オプションを「とりあえず無効化」しない (audit 分離方式での解釈)
 
-KICKOFF.md §B1 の禁止事項に従い、これらのオプションを後から `false` に戻すことはしない。1423 件を抱えたまま PR ゲートを有効化することになるが、Phase B Ticket B3 で CI ゲートを段階導入する際に「既存エラーは許容、新規エラーは error」のような baseline 戦略を検討する必要がある (これは Step 0 範囲外、Phase B 完了後に別議論)。
+KICKOFF.md §B1 の禁止事項「オプションをとりあえず無効化しない」は、**本番 tsconfig での話**として読み替える。audit tsconfig は監視を継続するための分離であり、3 オプションは audit 側で確実に有効化されている。本番 tsconfig には**意図的に**追加していない (CI / ビルドを壊さないため)。
+
+Step 0 完了後、別 PR で既存エラーを段階的に解消し、解消が完了した範囲から本番 tsconfig に 3 オプションを段階的に取り込む方針 (例: 「side-b の 3 オプション解消が終わった時点で本番 tsconfig に取り込む」)。
 
 ---
 
 ## 6. 監査スナップショット
 
-- 計測日: 2026-05-12
-- TypeScript バージョン: `package.json` 記載の devDependencies に従う (本書執筆時点では未確認、必要なら別途記録)
-- 計測コマンド: `npx tsc --noEmit -p <tsconfig>` (ルート / src/frontend それぞれ)
-- 生ログ: `tmp` 領域に保存 (PR には含めない、本書の数値が正)
+- 計測日: 2026-05-12 (Copilot レビュー対応で audit 分離方式に更新)
+- TypeScript バージョン: `package.json` 記載の devDependencies に従う
+- 計測コマンド (audit 分離後):
+  - ルート: `npx tsc --noEmit -p tsconfig.audit.json`
+  - Frontend: `cd src/frontend && npx tsc --noEmit -p tsconfig.audit.json`
+- 本番 tsconfig での回帰確認:
+  - ルート `npx tsc --noEmit -p tsconfig.json`: **0 errors** ✅
+  - Frontend `cd src/frontend && npx tsc --noEmit -p tsconfig.json`: **0 errors** ✅

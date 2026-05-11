@@ -41,7 +41,9 @@
 - `@typescript-eslint/no-explicit-any`
 - `@typescript-eslint/unbound-method`
 - `@typescript-eslint/no-unsafe-*` (5 規則すべて)
-- `@typescript-eslint/ban-ts-comment` (本 PR で追加)
+
+**`@typescript-eslint/ban-ts-comment` は tests/scripts でも有効に保つ**:
+当初は off にしていたが、PR #156 の Copilot レビュー指摘 (2)(4) を受けて変更。AGENTS.md §2 の「`@ts-ignore` / `@ts-nocheck` は一切の例外なし禁止」と整合させるため、tests/scripts の override から `ban-ts-comment: 'off'` を削除した。既存 tests/scripts 配下に `@ts-ignore` / `@ts-nocheck` は 0 件であることを確認済み (`grep -rn` で 0 一致)、よって ESLint 強化による既存違反増加は無い。
 
 ---
 
