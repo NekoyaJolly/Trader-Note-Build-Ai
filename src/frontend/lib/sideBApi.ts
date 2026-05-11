@@ -49,6 +49,7 @@ import type {
   DiscoveryLatestResponse,
   SystemHealthResponse,
   GeneratePlanRequest,
+  GeneratePlanResponse,
   ListPlansParams,
   ListPlansResponse,
   GetPlanResponse,

@@ -722,3 +722,18 @@ export type GeneratePlanRequest = {
   timeframe?: string;
   forceRefresh?: boolean;
 };
+
+/**
+ * GET /api/side-b/evolution/lessons クエリパラメータ
+ */
+export interface ListGenerationLessonsQuery {
+  regime?: string;
+  limit?: number;
+}
+
+/**
+ * GET /api/side-b/evolution/runs クエリパラメータ
+ */
+export interface ListEvolutionRunsQuery {
+  limit?: number;
+}
