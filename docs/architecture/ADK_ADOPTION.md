@@ -170,6 +170,6 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 | [/AGENTS.md](../../AGENTS.md) | 全エージェント共通ルール (正本) |
 | [/src/side-b/AGENTS.md](../../src/side-b/AGENTS.md) | side-b 固有ルール |
 | [/src/side-b/adk/AGENTS.md](../../src/side-b/adk/AGENTS.md) | ADK サイドカー領域固有ルール |
-| [docs/design/STEP_0_KICKOFF.md](../design/STEP_0_KICKOFF.md) | Step 0 のキックオフドキュメント (作業手順書) |
+| [docs/design/STEP_0_KICKOFF.md](../design/STEP_0_KICKOFF.md) ※ 本 PR 時点では untracked、後続 PR で commit 予定 | Step 0 のキックオフドキュメント (作業手順書) |
 | [docs/architecture/STEP_0_ANALYSIS.md](./STEP_0_ANALYSIS.md) | 既存設計書の棚卸し結果 (Ticket A1 成果物) |
 | [docs/design/DESIGN_DOC_autonomous_trading_architecture.md](../design/DESIGN_DOC_autonomous_trading_architecture.md) | Side-B 自律 AI 設計の正本 |
