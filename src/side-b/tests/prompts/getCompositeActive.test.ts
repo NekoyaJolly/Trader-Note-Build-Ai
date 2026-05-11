@@ -8,6 +8,7 @@
 import type { PrismaClient } from '@prisma/client';
 import type { PromptMacros } from '../../prompts/loader';
 import { PromptRegistry, GLOBAL_AGENT_NAME } from '../../prompts/registry/PromptRegistry';
+import { EVOLUTION_TARGETS_PROMPT_TEXT } from '../../evolution/evolutionTargets';
 
 interface FakeRow {
   id: string;
@@ -110,7 +111,7 @@ function asPrisma(stub: FakePrismaStub): PrismaClient {
 }
 
 describe('PromptRegistry.getCompositeActive', () => {
-  it('global + agent の content を "\\n\\n" で連結して返す', async () => {
+  it('global + evolution targets + agent の content を連結して返す', async () => {
     const { fake } = makeFakePrisma();
     const reg = new PromptRegistry(asPrisma(fake));
     await reg.register({
@@ -128,7 +129,12 @@ describe('PromptRegistry.getCompositeActive', () => {
       status: 'active',
     });
     const out = await reg.getCompositeActive('trend_specialist');
-    expect(out).toBe('# Global\n\n# Local Trend');
+    // 現在の実装: global + EVOLUTION_TARGETS_PROMPT_TEXT + local の3部構成
+    expect(out).toContain('# Global');
+    expect(out).toContain(EVOLUTION_TARGETS_PROMPT_TEXT);
+    expect(out).toContain('# Local Trend');
+    expect(out.indexOf('# Global')).toBeLessThan(out.indexOf(EVOLUTION_TARGETS_PROMPT_TEXT));
+    expect(out.indexOf(EVOLUTION_TARGETS_PROMPT_TEXT)).toBeLessThan(out.indexOf('# Local Trend'));
   });
 
   it('macros を両方の content に適用する', async () => {

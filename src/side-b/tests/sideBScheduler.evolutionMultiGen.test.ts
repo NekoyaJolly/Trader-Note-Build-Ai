@@ -414,11 +414,11 @@ describe('SideBScheduler.runEvolutionNow Phase A multi-generation', () => {
     });
   });
 
-  it('env EVOLUTION_GENERATIONS=invalid (範囲外整数) は無視され、default=1 (= 単世代) で動く', async () => {
+  it('env EVOLUTION_GENERATIONS=invalid (範囲外整数) は無視され、default=5 (= マルチ世代) で動く', async () => {
     process.env.EVOLUTION_GENERATIONS = '99'; // max=5 を超過
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    runOneGenerationMock.mockImplementation((regime: string) =>
-      Promise.resolve(makeReport(regime, 1)),
+    runMultiGenMock.mockImplementation(({ options }) =>
+      Promise.resolve(makeMultiGenReport(options.regime, options.generations)),
     );
 
     const scheduler = new SideBScheduler({ evolutionRegimes: ['breakout'] });
@@ -427,9 +427,10 @@ describe('SideBScheduler.runEvolutionNow Phase A multi-generation', () => {
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('EVOLUTION_GENERATIONS=99'),
     );
-    // default=1 で単世代経路
-    expect(runOneGenerationMock).toHaveBeenCalledTimes(1);
-    expect(runMultiGenMock).not.toHaveBeenCalled();
+    // default=5 (= マルチ世代) なので runMultiGenMock が呼ばれる
+    expect(runMultiGenMock).toHaveBeenCalledTimes(1);
+    expect(runMultiGenMock.mock.calls[0][0].options.generations).toBe(5);
+    expect(runOneGenerationMock).not.toHaveBeenCalled();
   });
 
   it('configOverride 引数 > env > DEFAULT_CONFIG の優先順位', async () => {
@@ -453,8 +454,8 @@ describe('SideBScheduler.runEvolutionNow Phase A multi-generation', () => {
     it("EVOLUTION_GENERATIONS='2abc' (parseInt 受理だが厳密整数ではない) は warning + 無視", async () => {
       process.env.EVOLUTION_GENERATIONS = '2abc';
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-      runOneGenerationMock.mockImplementation((regime: string) =>
-        Promise.resolve(makeReport(regime, 1)),
+      runMultiGenMock.mockImplementation(({ options }) =>
+        Promise.resolve(makeMultiGenReport(options.regime, options.generations)),
       );
 
       const scheduler = new SideBScheduler({ evolutionRegimes: ['breakout'] });
@@ -463,16 +464,17 @@ describe('SideBScheduler.runEvolutionNow Phase A multi-generation', () => {
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('EVOLUTION_GENERATIONS=2abc'),
       );
-      // default=1 で単世代経路
-      expect(runMultiGenMock).not.toHaveBeenCalled();
-      expect(runOneGenerationMock).toHaveBeenCalledTimes(1);
+      // default=5 (= マルチ世代) なので runMultiGenMock が呼ばれる
+      expect(runMultiGenMock).toHaveBeenCalledTimes(1);
+      expect(runMultiGenMock.mock.calls[0][0].options.generations).toBe(5);
+      expect(runOneGenerationMock).not.toHaveBeenCalled();
     });
 
     it("EVOLUTION_GENERATIONS='2.9' (小数表記) は warning + 無視", async () => {
       process.env.EVOLUTION_GENERATIONS = '2.9';
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-      runOneGenerationMock.mockImplementation((regime: string) =>
-        Promise.resolve(makeReport(regime, 1)),
+      runMultiGenMock.mockImplementation(({ options }) =>
+        Promise.resolve(makeMultiGenReport(options.regime, options.generations)),
       );
 
       const scheduler = new SideBScheduler({ evolutionRegimes: ['breakout'] });
@@ -481,7 +483,10 @@ describe('SideBScheduler.runEvolutionNow Phase A multi-generation', () => {
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('EVOLUTION_GENERATIONS=2.9'),
       );
-      expect(runMultiGenMock).not.toHaveBeenCalled();
+      // default=5 (= マルチ世代) なので runMultiGenMock が呼ばれる
+      expect(runMultiGenMock).toHaveBeenCalledTimes(1);
+      expect(runMultiGenMock.mock.calls[0][0].options.generations).toBe(5);
+      expect(runOneGenerationMock).not.toHaveBeenCalled();
     });
 
     it("EVOLUTION_ADAPTIVE_BUDGET='yes' (= 想定外文字列) は warning + DEFAULT_CONFIG (false) を維持", async () => {
