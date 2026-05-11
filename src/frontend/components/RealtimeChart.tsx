@@ -51,10 +51,10 @@ const TIMEFRAME_OPTIONS = [
 ];
 
 const DATA_COUNT_OPTIONS = [
-	{ value: 60, label: "60本" },
-	{ value: 120, label: "120本" },
-	{ value: 180, label: "180本" },
-	{ value: 240, label: "240本" },
+	{ value: 500, label: "500本" },
+	{ value: 1000, label: "1000本" },
+	{ value: 2000, label: "2000本" },
+	{ value: 5000, label: "5000本" },
 ];
 
 const DEFAULT_LINE_COLOR = "#fbbf24";
@@ -167,7 +167,7 @@ export function RealtimeChart({
 	rightAction,
 }: RealtimeChartProps) {
 	const [timeframe, setTimeframe] = useState(initialTimeframe);
-	const [dataCount, setDataCount] = useState(60); // データ本数
+	const [dataCount, setDataCount] = useState(1000); // データ本数
 	const [drawingMode, setDrawingMode] = useState<DrawingMode>("none");
 	const [drawnLines, setDrawnLines] = useState<DrawnLine[]>([]);
 	const [hasEverConnected, setHasEverConnected] = useState(false);

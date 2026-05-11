@@ -522,11 +522,20 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       }
     }
 
-    // 表示範囲を調整
-    // リアルタイムでは毎tick fitContent すると重くなり更新が追従しないため、
-    // データ本数が増えた時（新バー追加）にだけ実行する
-    if (chartRef.current && candleData.length !== lastFitCountRef.current) {
-      chartRef.current.timeScale().fitContent();
+    // 表示範囲の初期化
+    // リアルタイムでは毎tick fitContent すると重くなり更新が追従しない＆ズームがリセットされるため、
+    // 初回ロード時のみ直近の150本が表示されるようにズームレベルを初期化する。
+    // 以降の追加バーに対しては lightweight-charts が自動で右端への追従を行う。
+    if (chartRef.current && lastFitCountRef.current === 0 && candleData.length > 0) {
+      const totalBars = candleData.length;
+      const visibleBars = Math.min(150, totalBars);
+      chartRef.current.timeScale().setVisibleLogicalRange({
+        from: totalBars - visibleBars,
+        to: totalBars - 1,
+      });
+      lastFitCountRef.current = candleData.length;
+    } else if (candleData.length > lastFitCountRef.current) {
+      // 本数が増えたことだけを記録（fitContentは呼ばず、ユーザーのズーム/パン状態を維持）
       lastFitCountRef.current = candleData.length;
     }
   }, [ohlcvData]);
