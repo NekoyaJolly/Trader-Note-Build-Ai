@@ -12,6 +12,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { getPublicApiBaseUrl } from "@/lib/publicApiBaseUrl";
 
 // ===== 型定義 =====
 
@@ -242,9 +243,8 @@ export default function AINotesPage() {
   const [activeTab, setActiveTab] = useState<"notes" | "summaries">("notes");
   const [generatingSummary, setGeneratingSummary] = useState(false);
 
-  // API ベース URL（同一オリジン: 相対パス）
-  const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "") + "/api";
-
+  // API ベース URL
+  const API_BASE = getPublicApiBaseUrl() + "/api";
   // データ取得
   const fetchData = useCallback(async () => {
     try {
@@ -406,25 +406,25 @@ export default function AINotesPage() {
 
         {/* 統計カード */}
         <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
+          <div className="glass-surface hover-glow transition-smooth rounded-xl p-4">
             <div className="text-slate-400 text-sm">総トレード数</div>
             <div className="text-2xl font-bold text-white">
               {currentStats.totalTrades}
             </div>
           </div>
-          <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
+          <div className="glass-surface hover-glow transition-smooth rounded-xl p-4">
             <div className="text-slate-400 text-sm">勝率</div>
             <div className={`text-2xl font-bold ${currentStats.winRate >= 50 ? "text-green-400" : "text-red-400"}`}>
               {formatNumber(currentStats.winRate, 1)}%
             </div>
           </div>
-          <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
+          <div className="glass-surface hover-glow transition-smooth rounded-xl p-4">
             <div className="text-slate-400 text-sm">プロフィットファクター</div>
             <div className={`text-2xl font-bold ${currentStats.profitFactor >= 1 ? "text-green-400" : "text-red-400"}`}>
               {formatNumber(currentStats.profitFactor, 2)}
             </div>
           </div>
-          <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
+          <div className="glass-surface hover-glow transition-smooth rounded-xl p-4">
             <div className="text-slate-400 text-sm">累計損益 (pips)</div>
             <div className={`text-2xl font-bold ${currentStats.totalPnl >= 0 ? "text-green-400" : "text-red-400"}`}>
               {currentStats.totalPnl >= 0 ? "+" : ""}{formatNumber(currentStats.totalPnl, 1)}
@@ -471,7 +471,7 @@ export default function AINotesPage() {
                 {notes.map((note) => (
                   <div
                     key={note.id}
-                    className={`bg-slate-800/50 border border-slate-700 rounded-xl p-4 cursor-pointer hover:border-cyan-500/50 transition-colors ${selectedNote?.id === note.id ? "border-cyan-500" : ""
+                    className={`glass-surface hover-glow press-scale transition-smooth rounded-xl p-4 cursor-pointer ${selectedNote?.id === note.id ? "border-cyan-500" : ""
                       }`}
                     onClick={() => setSelectedNote(selectedNote?.id === note.id ? null : note)}
                   >
@@ -694,7 +694,7 @@ export default function AINotesPage() {
                 {summaries.map((summary) => (
                   <div
                     key={summary.id}
-                    className="bg-slate-800/50 border border-slate-700 rounded-xl p-4"
+                    className="glass-surface hover-glow transition-smooth rounded-xl p-4"
                   >
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-3">

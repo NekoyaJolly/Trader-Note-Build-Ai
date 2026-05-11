@@ -7,7 +7,9 @@ import { Progress } from "@/components/ui/Progress";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/Alert";
 import { fetchProfileOptions, ProfileOption } from "@/lib/api";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+import { getPublicApiBaseUrl } from "@/lib/publicApiBaseUrl";
+
+const API_BASE_URL = getPublicApiBaseUrl();
 
 /**
  * 履歴インポート導線ページ
@@ -129,7 +131,7 @@ export default function ImportPage() {
       </div>
 
       {/* メインカード */}
-      <div className="card-surface p-4 sm:p-6 max-w-2xl mx-auto">
+      <div className="glass-surface p-4 sm:p-6 max-w-2xl mx-auto rounded-xl">
         <div className="space-y-2 sm:space-y-4 text-gray-300 mb-6">
           <p className="text-xs sm:text-sm md:text-base leading-relaxed font-medium">MT4/MT5などのCSV出力に対応</p>
           <p className="text-xs sm:text-sm md:text-base leading-relaxed text-gray-400">欠損データは自動スキップ</p>

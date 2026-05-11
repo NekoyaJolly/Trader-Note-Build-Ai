@@ -179,10 +179,10 @@ export default function NotesPage() {
         />
       ) : (
         // 一覧表示（テーブル）
-        <div className="card-surface overflow-hidden">
+        <div className="glass-surface overflow-hidden rounded-xl">
           <div className="overflow-x-auto">
             <table className="min-w-full">
-              <thead className="bg-slate-700/50 border-b border-slate-600">
+              <thead className="bg-slate-800/80 border-b border-slate-600">
                 <tr>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-300">通貨ペア</th>
                   <th className="px-4 py-3 text-left text-sm font-semibold text-gray-300">方向</th>
@@ -193,7 +193,7 @@ export default function NotesPage() {
               </thead>
               <tbody>
                 {notes.map((note) => (
-                  <tr key={note.id} className="border-b border-slate-700 hover:bg-slate-700/30 transition-colors">
+                  <tr key={note.id} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
                     <td className="px-4 py-3 text-sm font-bold text-white">{note.symbol}</td>
                     <td className="px-4 py-3 text-sm">
                       <Badge variant={note.side === "buy" ? "secondary" : "destructive"}>
