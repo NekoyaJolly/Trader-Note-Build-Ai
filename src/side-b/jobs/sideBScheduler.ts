@@ -31,10 +31,7 @@
  */
 
 import { getMarketStatusJST, isFXMarketOpen } from '../utils/marketHours';
-import { discoveryAgent } from '../agents/DiscoveryAgent';
-import { findAITradeNotesInPeriod } from '../repositories/aiNoteRepository';
 import { summarySchedulerService } from '../services/summarySchedulerService';
-import { executeCleanup, type CleanupConfig } from '../services/dataCleanupService';
 import { CronSimilarityService } from '../services/cronSimilarityService';
 import { AIOrchestrator } from '../orchestrator/aiOrchestrator';
 import { MarketDataService } from '../../services/marketDataService';
@@ -42,10 +39,7 @@ import { CTraderAuthService } from '../../backend/services/ctrader/ctraderAuthSe
 import type { PrismaClient } from '@prisma/client';
 // canonical singleton (PR #152)
 import { prisma as canonicalPrisma } from '../../backend/db/client';
-import {
-  runPromptEvolutionCycle,
-  type PromptEvolutionResult,
-} from '../prompts/registry/promptEvolutionJob';
+import type { PromptEvolutionResult } from '../prompts/registry/promptEvolutionJob';
 import type { JsonValue } from '../../utils/jsonValue';
 // PR-1 (sideb-refactor): Evolution 系を切り出し
 import {
@@ -65,6 +59,10 @@ import {
 // PR-3 (sideb-refactor): TradeMonitoring / PlanGeneration 系を切り出し
 import { TradeMonitoringJob } from './tradeMonitoringJob';
 import { PlanGenerationJob } from './planGenerationJob';
+// PR-4 (sideb-refactor): Discovery / PromptEvolution / Cleanup 系を切り出し
+import { DiscoveryJob } from './discoveryJob';
+import { PromptEvolutionJob } from './promptEvolutionJob';
+import { CleanupJob } from './cleanupJob';
 
 // ===========================================
 // 型定義
@@ -272,6 +270,10 @@ export class SideBScheduler {
   // PR-3 (sideb-refactor): TradeMonitoring / PlanGeneration を delegation。
   private tradeMonitoringJob: TradeMonitoringJob;
   private planGenerationJob: PlanGenerationJob;
+  // PR-4 (sideb-refactor): Discovery / PromptEvolution / Cleanup を delegation。
+  private discoveryJob: DiscoveryJob;
+  private promptEvolutionJob: PromptEvolutionJob;
+  private cleanupJob: CleanupJob;
 
   constructor(configOverride?: Partial<SideBSchedulerConfig>) {
     // Phase A: env からの override を DEFAULT_CONFIG と configOverride の中間に挟む。
@@ -331,6 +333,24 @@ export class SideBScheduler {
         this.lastPlanRun.set(symbol, completedAt);
       },
       getLastSymbolRun: (symbol: string) => this.lastPlanRun.get(symbol),
+    });
+    this.discoveryJob = new DiscoveryJob(deps, {
+      onCompleted: (completedAt: Date) => {
+        this.lastDiscoveryRun = completedAt;
+      },
+    });
+    this.promptEvolutionJob = new PromptEvolutionJob(deps, {
+      onCompleted: (completedAt: Date) => {
+        this.lastPromptEvolutionRun = completedAt;
+      },
+    });
+    this.cleanupJob = new CleanupJob(deps, {
+      servicesFactory: () => ({
+        runEvolutionCarryRetention: () => this.evolutionJob.runCarryRetention(),
+      }),
+      onCompleted: (completedAt: Date) => {
+        this.lastCleanupRun = completedAt;
+      },
     });
   }
 
@@ -790,15 +810,7 @@ export class SideBScheduler {
    * - PromptMutationAgent で新 experimental を 3 件/エージェント 生成
    */
   async runPromptEvolutionNow(): Promise<PromptEvolutionResult> {
-    this.log('[PromptEvolution] 月次プロンプト進化を実行');
-    const result = await runPromptEvolutionCycle();
-    this.lastPromptEvolutionRun = new Date();
-    for (const r of result.reports) {
-      this.log(
-        `[PromptEvolution] agent=${r.agentName} new=${r.newExperimentalIds.length} rejected=${r.rejectedIds.length} promotionCandidates=${r.promotionCandidates.length} errors=${r.errors.length}`,
-      );
-    }
-    return result;
+    return this.promptEvolutionJob.run(this.config);
   }
 
   /**
@@ -833,34 +845,7 @@ export class SideBScheduler {
    * DiscoveryAgent を手動実行（外部 API / デバッグ用）
    */
   async runDiscoveryNow(): Promise<void> {
-    const periodEnd = new Date();
-    const periodStart = new Date(periodEnd.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-    this.log(
-      `[Discovery] 週次エッジ分析を実行: ${periodStart.toISOString()} 〜 ${periodEnd.toISOString()}`,
-    );
-
-    try {
-      const notes = await findAITradeNotesInPeriod(
-        periodStart.toISOString().split('T')[0],
-        periodEnd.toISOString().split('T')[0],
-      );
-      this.log(`[Discovery] 対象ノート数: ${notes.length}`);
-
-      if (notes.length === 0) {
-        this.log('[Discovery] 分析対象ノートなし。スキップします。');
-        this.lastDiscoveryRun = new Date();
-        return;
-      }
-
-      const report = await discoveryAgent.analyze(notes, periodStart, periodEnd);
-      this.log(
-        `[Discovery] 完了: 新規仮説 ${report.newHypotheses.length}個 / レンズ ${report.lensInsights.length}件 / tokens ${report.tokenUsage}`,
-      );
-      this.lastDiscoveryRun = new Date();
-    } catch (err) {
-      this.addError(`[Discovery] 失敗: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    await this.discoveryJob.run(this.config);
   }
 
   /**
@@ -921,44 +906,13 @@ export class SideBScheduler {
   private async executePlanJob(): Promise<JobResult> {
     const planResult = await this.planGenerationJob.run(this.config);
 
-    // クリーンアップ (1 日に 1 回、最初のプラン実行時のみ)
-    // PR-4 (Phase 5) で CleanupJob として独立予定。それまでは Scheduler 側に残す。
+    // クリーンアップ (1 日に 1 回、最初のプラン実行時のみ)。
+    // PR-4 (sideb-refactor): CleanupJob に移行済み。Scheduler は autoCleanup フラグ +
+    // プラン成功有無 + 24h ガードを判定して Job を呼ぶ責任のみ。
     if (this.config.autoCleanup) {
       const anyFirstRun = planResult.results.some((r) => r.success);
-      const cleanupDue =
-        !this.lastCleanupRun ||
-        Date.now() - this.lastCleanupRun.getTime() > 24 * 60 * 60 * 1000;
-      if (anyFirstRun && cleanupDue) {
-        try {
-          this.log('クリーンアップを実行中...');
-          const cleanupConfig: Partial<CleanupConfig> = {
-            cleanupExpiredResearch: true,
-            cleanupOldPlans: true,
-            planRetentionDays: this.config.planRetentionDays,
-            cleanupOldTrades: true,
-            tradeRetentionDays: this.config.tradeRetentionDays,
-          };
-          const cleanupResult = await executeCleanup(cleanupConfig);
-          this.lastCleanupRun = new Date();
-
-          const totalDeleted =
-            cleanupResult.expiredResearchCount +
-            cleanupResult.oldPlansCount +
-            cleanupResult.oldTradesCount;
-          if (totalDeleted > 0) {
-            this.log(
-              `クリーンアップ完了: リサーチ ${cleanupResult.expiredResearchCount}件, ` +
-                `プラン ${cleanupResult.oldPlansCount}件, ` +
-                `トレード ${cleanupResult.oldTradesCount}件 削除`,
-            );
-          }
-
-          // Filter Evolution Phase B-3 (2026-05-09): EvolutionInstanceCarry retention 14 日。
-          await this.runEvolutionCarryRetentionNow();
-        } catch (error) {
-          const message = error instanceof Error ? error.message : '不明なエラー';
-          this.addError(`クリーンアップエラー: ${message}`);
-        }
+      if (anyFirstRun && CleanupJob.shouldRun(this.lastCleanupRun)) {
+        await this.cleanupJob.run(this.config);
       }
     }
 
