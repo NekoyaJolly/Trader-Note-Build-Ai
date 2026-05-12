@@ -50,6 +50,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@google/adk": "^1.1.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@prisma/client": "^6.19.2",
     "@reiryoku/ctrader-layer": "^2.2.0",
