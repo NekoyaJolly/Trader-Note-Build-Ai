@@ -104,7 +104,9 @@ export class ScreeningJob
     };
 
     try {
-      const unverified = await edgeLedger.findByStatus('unverified');
+      // PR #160 Copilot review: findByStatus に limit を渡して DB 側で take を効かせる
+      // (件数増加時のメモリ/DB 負荷を抑制)。安全のため取得後も slice で念のため絞る。
+      const unverified = await edgeLedger.findByStatus('unverified', limit);
       const targets = unverified.slice(0, limit);
       this.deps.log(`[Screening] 対象仮説: ${targets.length}件`);
 

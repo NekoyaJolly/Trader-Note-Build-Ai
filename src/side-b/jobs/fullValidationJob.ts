@@ -86,7 +86,9 @@ export class FullValidationJob
     };
 
     try {
-      const targets = await edgeLedger.findByStatus('screening_passed');
+      // PR #160 Copilot review: findByStatus に limit を渡して DB 側で take を効かせる
+      // (件数増加時のメモリ/DB 負荷を抑制)。安全のため取得後も slice で念のため絞る。
+      const targets = await edgeLedger.findByStatus('screening_passed', limit);
       const limited = targets.slice(0, limit);
       this.deps.log(`[FullValidation] 対象仮説: ${limited.length}件`);
 
