@@ -57,8 +57,8 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 
 `@google/adk@1.1.0` の `peerDependencies` は `@mikro-orm/{mariadb,mssql,mysql,postgresql,sqlite}: ^6.6.6` のいずれかを要求するが、本プロジェクトでは **MikroORM を導入しない**。対応:
 
-- **インストール方法**: `npm install @google/adk --legacy-peer-deps` (peer dep 不整合を warning に降格)
-  - 推奨: チーム共有設定として `.npmrc` に `legacy-peer-deps=true` を追記 (Step 1 着手時に判断)
+- **インストール方法**: `npm install @google/adk --legacy-peer-deps` (`@google/adk` 導入時は peer dependencies を解決対象から外してインストールする)
+  - **`.npmrc` の扱い**: チーム共有設定としての `legacy-peer-deps=true` 追記は **任意（推奨）**。未追記でも、上記インストールコマンドを明示的に用いる方針で整合する
 - **コード上の制約**:
   - ✅ OK: `Runner`, `SequentialAgent`, `ParallelAgent`, `LoopAgent`, `FunctionTool`, `Tracing` の利用
   - ❌ 禁止: `DatabaseSessionService` および ADK 内部の永続化 API の呼び出し
