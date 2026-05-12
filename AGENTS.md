@@ -1,6 +1,6 @@
 > ## 最優先 5 原則 (全エージェント / 全ディレクトリ共通)
 > 1. **勝手に決めない**: 設計判断はユーザーに必ず確認する
-> 2. **any 型を絶対に書かない**: unknown は許可するが即座に zod.parse / type guard で narrow する (※ 現行 ESLint の実態は §2 を参照)
+> 2. **`any` 型も `unknown` 型も書かない** (テスト・スクリプトのみ例外。外部入力は Zod で即具体型に narrow する)
 > 3. **指定範囲を超えない**: 「ついで」「ちなみに」の追加実装は禁止
 > 4. **既存APIを壊さない**: 後方互換必須。破壊的変更はユーザー承認が必要
 > 5. **ディレクトリ跨ぎ作業時は、対象ディレクトリの `AGENTS.md` を読み、必ずルート `/AGENTS.md` に戻る**
@@ -55,24 +55,21 @@
 **原則**: 型安全規約は本セクションで方針を述べ、**具体的な検出と強制は CI (ESLint + tsc) が行う**。
 
 - **`any` 型を絶対に書かない** (最優先5原則 §2)
-- **`unknown` 型は許可されるが、即座に `zod.parse()` または type guard で narrow する** (利用箇所を残してはならない)
+- **`unknown` 型も書かない** (最優先5原則 §2、tests/scripts のみ例外)
 - **`@ts-ignore` `@ts-nocheck` を禁止する** (一切の例外なし)
+- **`@ts-expect-error` は description (10 文字以上) 付きで限定的に許可** (テスト等の意図的な型エラー検証用途のみ)
 - **外部入力 (API レスポンス、AI 出力、ユーザー入力) は必ず Zod でランタイム検証する**
 - **手動 if バリデーションは使わない** (Zod スキーマで一元管理)
 
 CI で `error` レベルで強制される ESLint ルールの詳細は §「CI で強制されているルール (参考)」を参照。
 
-### 2.1 unknown 型と ESLint 実態の関係 (2026-05-12 時点)
+### 2.1 unknown 型禁止の確定方針 (2026-05-12)
 
-**現状の不整合**: 本 §2 と最優先5原則 §2 は「`unknown` は許可するが即 narrow」と記述しているが、現行 `eslint.config.mjs` は `no-restricted-syntax` で `TSUnknownKeyword` を **error 禁止**している (例外: `**/*.test.ts`, `**/*.spec.ts`, `tests/**/*.ts`, `scripts/**/*.ts`)。実態としてプロダクションコード上では `unknown` も使えない。
+**確定方針**: `unknown` 型は本番コード上では**禁止**する。例外は `**/*.test.ts`, `**/*.spec.ts`, `tests/**/*.ts`, `scripts/**/*.ts` のみ。型不明な外部入力は最初から Zod スキーマで具体型に narrow する。
 
-**運用方針 (暫定)**: ESLint 実態に従い、プロダクションコードでは `unknown` も書かない。型不明な外部入力は最初から Zod スキーマで具体型に narrow する。
+**根拠**: 現行 `eslint.config.mjs` の `no-restricted-syntax` (`TSUnknownKeyword` を error 禁止) と整合する。規約を甘くすると最終的にエラーが多発する傾向にある (Nekoさん判断、2026-05-12 PR #155 マージ時)。
 
-**最終方針判断は Phase B (Ticket B2 ESLint 規則強化) で再検討する**:
-- 案A: ESLint を緩和して `unknown` を許可 (即 narrow 前提)
-- 案B: 規約を強化して「`unknown` も禁止 (テスト・スクリプトのみ例外)」を明文化
-
-→ Phase B でユーザー判断を仰ぐ。
+**Phase A 時点の暫定文言を Phase B Ticket B2 で確定したもの**: 旧版 (Phase A) では「unknown は許可するが即 narrow」「最終方針は Phase B でユーザー判断」と保留していた。Phase B Ticket B2 で案B (規約強化) を採用し、本 §2 / 最優先5原則 §2 / 各サブ AGENTS.md の冒頭 blockquote をすべて整合させた。
 
 ---
 
