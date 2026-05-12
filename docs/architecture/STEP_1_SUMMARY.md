@@ -2,7 +2,7 @@
 
 > **ステータス**: ✅ 完了 (2026-05-13)
 > **期間**: 2026-05-13 (Phase 1 と Phase 2 を同日進行、各 Phase は別 PR)
-> **完了 PR**: #164 (Phase 1) / #TBD (Phase 2)
+> **完了 PR**: #164 (Phase 1) / #165 (Phase 2)
 > **次ステップ**: Step 2 (Tracing / Telemetry 統合) — Nekoさんが KICKOFF.md を作成予定
 
 ---
@@ -25,7 +25,7 @@ Step 0 (設計ガード) で整備したガードレールを土台に、`@googl
 | Phase | PR | 主要成果 |
 |-------|----|----------|
 | **Phase 1** (基盤 + 設計確定) | [#164](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/164) ✅ | `@google/adk@1.1.0` インストール、アダプター設計書 (Nekoさん T2 承認)、ADK FunctionTool API 実測スパイク (T2.5 承認、方式 B 確定)、`jsonSchemaToZod` 実装 (47 cases PASS、実 Skill 全 8 件検証)、Copilot レビュー 7 件全対応 |
-| **Phase 2** (アダプター本体 + 等価性検証) | #TBD ✅ | `skillContext.ts` + `skillRegistryToAdkTools.ts` 本体実装、`_testHelpers.ts` (テスト専用)、等価性検証テスト (deep equal)、スパイク + smoke test 削除、`ADK_ADOPTION.md` §7 を完了状態に更新、`AGENTS.md` 更新 |
+| **Phase 2** (アダプター本体 + 等価性検証) | #165 ✅ | `skillContext.ts` + `skillRegistryToAdkTools.ts` 本体実装、`_testHelpers.ts` (テスト専用)、等価性検証テスト (deep equal)、スパイク + smoke test 削除、`ADK_ADOPTION.md` §7 を完了状態に更新、`AGENTS.md` 更新 |
 
 ---
 
