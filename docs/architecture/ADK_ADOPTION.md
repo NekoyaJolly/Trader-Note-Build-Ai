@@ -135,12 +135,12 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 
 ## 7. 実装状況
 
-> **最終更新**: 2026-05-12 (Step 0 全 Phase 完了、Final Gate 提出)
+> **最終更新**: 2026-05-13 (Step 1 全 Phase 完了)
 
 ### Step 進捗
 
 - [x] Step 0: 設計ガード (完了 2026-05-12)
-- [ ] Step 1: Skill → ADK FunctionTool アダプター
+- [x] Step 1: Skill → ADK FunctionTool アダプター (完了 2026-05-13)
 - [ ] Step 2: Tracing / Telemetry 統合
 - [ ] Step 3: PDCALoop の SequentialAgent ラップ
 - [ ] Step 4: Lens 並列実行の ParallelAgent ラップ
@@ -184,6 +184,43 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 - 全コミット数: Phase A 8 + Phase B 6 + Phase C 3 = **17 コミット** (本 PR マージ前時点では Phase C 3 コミット + Gate 3 修正分)
 - 監査レポート: `STEP_0_ANALYSIS`, `STEP_0_TSCONFIG_AUDIT`, `STEP_0_ESLINT_AUDIT`, `STEP_0_CI_STATUS`, `STEP_0_HUSKY_SETUP`, `STEP_0_ADK_INSTALL_DRYRUN` の **6 件**
 - 計測結果: tsconfig audit 1423 errors / ESLint 488 errors + 237 warnings / `@google/adk` peer deps 要 MikroORM
+
+#### Step 1: Skill → ADK FunctionTool アダプター (完了 2026-05-13)
+
+**実装場所**:
+- ADK サイドカー実装: `/src/side-b/adk/adapters/`
+  - `jsonSchemaToZod.ts` — SkillInputSchema (JSONSchema draft-07 subset) → Zod 変換
+  - `skillContext.ts` — ADK `Context` → 既存 `SkillContext` マッピング (`ADK_DEFAULT_CALLER_REASON` / `ADK_DEFAULT_CALLER_AGENT` 定数)
+  - `skillRegistryToAdkTools.ts` — `SkillRegistry` → ADK `FunctionTool[]` factory
+  - `_testHelpers.ts` — テスト専用 `createMinimalAdkContext` (本番不使用)
+  - `README.md` — アダプター設計書 (Nekoさん T2 / T2.5 承認、§3 §4 §6 §8 確定)
+- ADK サイドカー テスト: `/src/side-b/tests/adk/`
+  - `jsonSchemaToZod.test.ts` (47 cases) / `skillContext.test.ts` (8 cases) / `skillRegistryToAdkTools.test.ts` (9 cases) / `equivalence.test.ts` (7 cases) — **計 71/71 PASS**
+
+**採用方式**:
+- **方式 B (Zod)** — `parameters` 変換は `SkillInputSchema → Zod`。理由: ADK の `parameters` 型が `z3/z4 ZodObject | Schema | undefined` を受け、ADK 内部で `parse(req.args)` の自動 validation が効く。型安全性とデバッグ性が最も高い (T2.5 実測スパイク参照)
+- **Context 経路**: `runAsync()` (public method) のみ使用。`execute` / `_getDeclaration` 等 private API には依存しない (Nekoさん T2.5 承認)
+- **エラー伝播**: アダプター内では throw に変換せず、`SkillResult` を **そのまま return** (既存 `registry.invoke()` の挙動を完全保持、等価性検証 T7 で確認)
+
+**検証結果**:
+- **Phase 1 (PR #164 マージ済み 2026-05-13)**:
+  - Ticket T1: `@google/adk@1.1.0` インストール (`--legacy-peer-deps` + `.npmrc`)
+  - Ticket T2: アダプター設計書 (Nekoさん T2 approved with note: callerReason フォールバック / public API 限定テスト)
+  - Ticket T2.5: ADK FunctionTool API 実測スパイク (方式 B 確定、Nekoさん T2.5 approved with note: z.any() 禁止、自前実装、throw with skill+field path)
+  - Ticket T3: `jsonSchemaToZod` ユーティリティ (47 ケース PASS、実 Skill 全 8 件 inputSchema 変換確認)
+  - Ticket T4: Phase 1 PR 提出 → Copilot レビュー 7 件 → 全件対応 → マージ
+- **Phase 2 (PR #TBD)**:
+  - Ticket T5: SkillContext mapper (8 cases PASS)
+  - Ticket T6: skillRegistryToAdkTools 本体 (9 cases PASS、KICKOFF §T6 6 パターン網羅)
+  - Ticket T7: 等価性検証 (モック Skill 4 件、7 cases PASS、deep equal)
+  - Ticket T8: スパイク + smoke test 削除
+  - Ticket T9: 本ドキュメント + AGENTS.md + STEP_1_SUMMARY.md 更新
+
+**数値スナップショット (Step 1 完了時)**:
+- 新規実装: 4 ファイル (adapters 配下) + 4 ファイル (tests/adk 配下)
+- 既存実装の変更: **ゼロ** (`/src/side-b/skills/`, `/src/side-b/agent/`, etc.)
+- テストケース: 71/71 PASS、any/unknown 違反ゼロ (型ガード 1 箇所のみ ESLint コメントで例外宣言)
+- 本番コードからの ADK SDK 内部 API (`@internal` / underscore prefix / private field) 依存: **ゼロ**
 
 ---
 

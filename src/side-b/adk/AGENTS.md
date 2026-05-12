@@ -80,13 +80,24 @@
 
 ### サブディレクトリの目的
 
-| サブディレクトリ | 用途 | 配置例 |
+| サブディレクトリ | 用途 | 配置 (2026-05-13 時点) |
 |------------------|------|--------|
-| `adapters/` | 既存実装を ADK インターフェイスに適合させるアダプター | `SkillToFunctionToolAdapter.ts`、`PromptToInstructionAdapter.ts` |
-| `tracing/` | ADK の Tracing / Telemetry 統合 | `OtelExporter.ts`、`SpanCollector.ts` |
-| `agents/` | ADK ベースの Custom Agent / Sequential / Parallel / Loop Agent 実装 | `AdkPdcaAgent.ts`、`AdkHypothesisAgent.ts` |
+| `adapters/` | 既存実装を ADK インターフェイスに適合させるアダプター | **Step 1 で実装済み**: `jsonSchemaToZod.ts` / `skillContext.ts` / `skillRegistryToAdkTools.ts` / `README.md` / `_testHelpers.ts` (テスト専用) |
+| `tracing/` | ADK の Tracing / Telemetry 統合 | 未実装 (Step 2 で対応) |
+| `agents/` | ADK ベースの Custom Agent / Sequential / Parallel / Loop Agent 実装 | 未実装 (Step 3〜5 で対応) |
 
-各サブディレクトリは現時点では空 (`.gitkeep` のみ)。実装は Step 1 以降で行う。
+#### adapters/ の使用例 (Step 1 完了)
+
+```typescript
+import { buildDefaultSkillRegistry } from '../../skills';
+import { skillRegistryToAdkTools } from './adapters/skillRegistryToAdkTools';
+
+const registry = buildDefaultSkillRegistry();
+const tools = skillRegistryToAdkTools(registry);
+// tools を ADK Runner / LlmAgent.tools に渡して利用
+```
+
+詳細は `/src/side-b/adk/adapters/README.md` (アダプター設計書、§2 §4 §6 §8) を参照。
 
 ---
 
