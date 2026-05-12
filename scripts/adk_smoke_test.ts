@@ -14,10 +14,17 @@
 
 import { FunctionTool } from '@google/adk';
 
+// ADK 1.1.0 の FunctionTool constructor は `execute` が必須 (T2.5 実測)。
+// `fn` ではないため `execute` で渡す。input は parameters 未指定時 `unknown` 型。
+// `execute` は `Promise<unknown> | unknown` を返すシグネチャ。同期 return のため
+// async は付けない (ESLint require-await 回避)。
 const tool = new FunctionTool({
   name: 'smoke_test_tool',
   description: 'Step 1 T1 smoke test: SDK が動作することを確認するだけのダミーツール',
-  fn: ({ x }: { x: number }): { result: number } => {
+  execute: (input): { result: number } => {
+    const x = typeof input === 'object' && input !== null && 'x' in input
+      ? (input as { x: number }).x
+      : 0;
     return { result: x * 2 };
   },
 });

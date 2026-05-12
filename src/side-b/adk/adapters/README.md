@@ -128,20 +128,6 @@ export function toSkillContext(toolContext: Context | undefined): SkillContext {
 
 → **T2.5 結果**: ADK 標準に存在しないことを確認。`ADK_DEFAULT_CALLER_REASON = 'invoked-via-adk-runner'` を adapter 側定数として実装する (§3.3 確定マッピング)。
 
-### 3.5 ✅ Nekoさん承認時の追加方針 (2026-05-13)
-
-**`callerReason` の取り扱い** (T2 approved with note):
-
-- ADK 標準 Context に `callerReason` 相当が存在しない可能性が高い
-- T2.5 で取得不能と判明した場合の対応:
-  - **固定文字列**: 例えば `'invoked-via-adk'` のような adapter 側定数として埋める
-  - または **adapter 側定数**として明示的に export (例: `ADK_DEFAULT_CALLER_REASON`)
-- **重要**: 既存 `SkillContext` 型 (`src/side-b/skills/types.ts`) は**変更しない**
-  - 不可侵領域 (`ADK_ADOPTION.md` §6 / `/src/side-b/skills/` 改変禁止) と整合
-  - `callerReason?: string` のまま、フォールバック値を埋めるだけ
-
-→ T2.5 で `callerReason` 相当の ADK フィールドの有無を確認し、無ければ本方針に従う。
-
 ---
 
 ## 4. 型変換方針 (parameters) 🔍 T2.5 検証対象 — 3 案併記
@@ -527,23 +513,6 @@ export function createMinimalAdkContext(options: { agentName?: string }): Contex
 - `toSkillContext()` は `Context | undefined` を受けて (Runner 経由なら定義、テストヘルパーでも生成、いずれも対応可)
 - `Context.agentName` getter にのみアクセス。他フィールドには触らない (= mock 構築の最小化を維持)
 - `createMinimalAdkContext` の本番呼び出しは禁止 (ESLint で防御するなら `no-restricted-imports` などを将来検討)
-
-### 8.4 ✅ Nekoさん承認時の追加方針 (2026-05-13)
-
-**ADK public API 経由テストの厳格化** (T2 approved with note):
-
-T2.5 で `FunctionTool` の公開実行 API が以下のいずれかと判明した場合の対応を明文化:
-
-| ケース | T7 等価性検証の経路 |
-|--------|--------------------|
-| `execute()` が public method として露出 | `execute()` 直接呼び出し可 |
-| **`runAsync()` または相当が public method** | `runAsync()` 経由でテスト (`execute()` は internal 扱いの可能性) |
-| **Runner / Agent 経由でしか実行できない** | Runner / Agent を T7 テストで構築 (mock Agent + ADK Runner 経由) |
-| internal/private な execute のみ | **internal API には依存しない** (= Runner 経由のテストに変更) |
-
-**禁止**: ADK SDK の internal / private API (`@internal` JSDoc、underscore prefix、d.ts 非公開等) に依存するテストコード。脆い (SDK 更新で壊れる) ため。
-
-T2.5 で確定した実行経路を T7 設計時に厳守する。
 
 ---
 

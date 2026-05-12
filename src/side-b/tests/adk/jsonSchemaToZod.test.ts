@@ -114,6 +114,124 @@ describe('jsonSchemaToZod: object 型', () => {
 });
 
 // ============================================================================
+// additionalProperties (確定方針: false→strict / true/未指定→strip)
+// ============================================================================
+
+describe('jsonSchemaToZod: additionalProperties', () => {
+  const schemaWith = (additionalProperties: boolean | undefined) =>
+    jsonSchemaToZod(
+      {
+        type: 'object',
+        properties: { name: { type: 'string' } },
+        required: ['name'],
+        ...(additionalProperties === undefined ? {} : { additionalProperties }),
+      },
+      opts(),
+    );
+
+  it('additionalProperties: false → extra key で reject (strict)', () => {
+    const schema = schemaWith(false);
+    const result = schema.safeParse({ name: 'Alice', extra: 'x' });
+    expect(result.success).toBe(false);
+  });
+
+  it('additionalProperties: true → extra key は strip (アダプター方針)', () => {
+    const schema = schemaWith(true);
+    const result = schema.safeParse({ name: 'Alice', extra: 'x' });
+    // LLM 安全性のため passthrough は採用せず strip 固定
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ name: 'Alice' });
+      expect((result.data as Record<string, unknown>).extra).toBeUndefined();
+    }
+  });
+
+  it('additionalProperties 未指定 → extra key は strip (default)', () => {
+    const schema = schemaWith(undefined);
+    const result = schema.safeParse({ name: 'Alice', extra: 'x' });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ name: 'Alice' });
+    }
+  });
+});
+
+// ============================================================================
+// description (enum / type union / unknown 経路でも反映されること)
+// ============================================================================
+
+describe('jsonSchemaToZod: description 反映 (早期 return 経路)', () => {
+  it('enum + description → .describe() 反映', () => {
+    const result = jsonSchemaToZod(
+      { type: 'string', enum: ['unverified', 'confirmed'], description: '仮説状態' },
+      opts(),
+    );
+    expect(result.description).toBe('仮説状態');
+  });
+
+  it('type union + description → .describe() 反映', () => {
+    const result = jsonSchemaToZod(
+      { type: ['string', 'number'], description: '識別子 (文字列または数値)' },
+      opts(),
+    );
+    expect(result.description).toBe('識別子 (文字列または数値)');
+  });
+
+  it('type 省略 (unknown) + description → .describe() 反映', () => {
+    const result = jsonSchemaToZod(
+      { description: '任意の JSON 値' },
+      opts(),
+    );
+    expect(result.description).toBe('任意の JSON 値');
+  });
+});
+
+// ============================================================================
+// 不正な schema fragment (null / プリミティブ / 配列)
+// ============================================================================
+
+describe('jsonSchemaToZod: 不正な schema fragment は構造化エラー', () => {
+  it('null 値 → JsonSchemaToZodError (TypeError ではない)', () => {
+    expect(() =>
+      jsonSchemaToZod(null as unknown as Parameters<typeof jsonSchemaToZod>[0], opts()),
+    ).toThrow(JsonSchemaToZodError);
+  });
+
+  it('プリミティブ (文字列) → JsonSchemaToZodError', () => {
+    expect(() =>
+      jsonSchemaToZod('string' as unknown as Parameters<typeof jsonSchemaToZod>[0], opts()),
+    ).toThrow(JsonSchemaToZodError);
+  });
+
+  it('配列 → JsonSchemaToZodError', () => {
+    expect(() =>
+      jsonSchemaToZod([] as unknown as Parameters<typeof jsonSchemaToZod>[0], opts()),
+    ).toThrow(JsonSchemaToZodError);
+  });
+
+  it('properties 内に null 値 → JsonSchemaToZodError (field path 付き)', () => {
+    try {
+      jsonSchemaToZod(
+        {
+          type: 'object',
+          properties: {
+            badField: null as unknown as { type: 'string' },
+          },
+        },
+        { skillName: 'mySkill' },
+      );
+      throw new Error('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(JsonSchemaToZodError);
+      const e = err as JsonSchemaToZodError;
+      expect(e.skillName).toBe('mySkill');
+      expect(e.fieldPath).toContain('badField');
+      expect(e.message).toContain('plain object');
+    }
+  });
+});
+
+// ============================================================================
 // 配列型
 // ============================================================================
 

@@ -126,6 +126,25 @@ function isJsonSchemaType(value: string): value is JsonSchemaType {
   return (SUPPORTED_TYPES as readonly string[]).includes(value);
 }
 
+/**
+ * 型ガード: 入力値が「plain object として扱える JsonSchemaFragment」であるか判定する。
+ *
+ * - `null` / `undefined` / プリミティブ / 配列 は false
+ * - その他の object は true (内部 keyword は `convertFragment` でさらに検証する)
+ *
+ * 不正な properties 値 (null / 文字列等) が JSON Schema に入っている場合、convertFragment 冒頭で
+ * これを使って **JsonSchemaToZodError として throw** する。これにより TypeError ではなく
+ * 構造化エラーとしてレポートできる (skill 名 / field path 付き)。
+ *
+ * ESLint 例外: 型ガードは性質上、未知の値 (`unknown`) を受け取って絞り込む関数。プロジェクト
+ * 規約の `unknown` 禁止は「業務ロジック内で曖昧な型を放置するな」の意図のため、入力検証用の
+ * 型ガード一点に限定して disable する。
+ */
+// eslint-disable-next-line no-restricted-syntax
+function isPlainSchemaObject(value: unknown): value is JsonSchemaFragment {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 // ============================================================================
 // 公開関数
 // ============================================================================
@@ -164,6 +183,7 @@ export function jsonSchemaToZod(
 
   // SkillInputSchema (properties: Record<string, unknown>) を JsonSchemaFragment として narrow。
   // 構造は同じ (JSON value tree)、内部で再帰時に各 fragment を再度検証する。
+  // 不正な値 (null / プリミティブ / 配列 等) は convertFragment 冒頭で plain object 検証する。
   return convertFragment(schema as JsonSchemaFragment, opts);
 }
 
@@ -178,17 +198,31 @@ function convertFragment(
   schema: JsonSchemaFragment,
   opts: Required<JsonSchemaToZodOptions>,
 ): z.ZodTypeAny {
+  // 0. plain object 検証 (最優先)
+  //
+  // properties の値が null / プリミティブ / 配列 等の不正な形だった場合、
+  // ここで構造化エラー (JsonSchemaToZodError) として throw する。検証なしだと
+  // `schema.pattern` などの property アクセス時に TypeError で落ち、skill 名や
+  // field path が失われる。
+  if (!isPlainSchemaObject(schema)) {
+    throw new JsonSchemaToZodError(
+      opts.skillName,
+      opts.fieldPath,
+      `schema fragment must be a plain object (got ${schema === null ? 'null' : Array.isArray(schema) ? 'array' : typeof schema})`,
+    );
+  }
+
   // 1. 未対応 keyword の検出 (最優先で throw)
   checkUnsupportedKeywords(schema, opts);
 
   // 2. enum (type に依らず enum 単体で評価)
   if (schema.enum !== undefined) {
-    return convertEnum(schema.enum, opts);
+    return applyDescription(convertEnum(schema.enum, opts), schema.description);
   }
 
   // 3. type が配列の場合 (type union)
   if (Array.isArray(schema.type)) {
-    return convertTypeUnion(schema, opts);
+    return applyDescription(convertTypeUnion(schema, opts), schema.description);
   }
 
   // 4. type 単一値の確認とランタイム検証
@@ -208,11 +242,7 @@ function convertFragment(
     // - silent な型情報喪失なし (unknown は明示的)
     // - 未対応 keyword (pattern / format 等) との区別: 「JSON Schema 仕様の機能」と
     //   「アダプターが対応していない機能」は別物
-    let result: z.ZodTypeAny = z.unknown();
-    if (typeof schema.description === 'string' && schema.description.length > 0) {
-      result = result.describe(schema.description);
-    }
-    return result;
+    return applyDescription(z.unknown(), schema.description);
   }
 
   // type が string で来た場合のランタイム検証
@@ -258,11 +288,23 @@ function convertFragment(
   }
 
   // 5. description を付与
-  if (typeof schema.description === 'string' && schema.description.length > 0) {
-    result = result.describe(schema.description);
-  }
+  return applyDescription(result, schema.description);
+}
 
-  return result;
+/**
+ * Zod スキーマに `.describe()` を適用するヘルパー。
+ *
+ * description が string でなければ何もせず元の zod を返す。enum / type union / unknown
+ * のような早期 return 経路でも漏れなく description を反映するために使う。
+ */
+function applyDescription(
+  zod: z.ZodTypeAny,
+  description: string | undefined,
+): z.ZodTypeAny {
+  if (typeof description === 'string' && description.length > 0) {
+    return zod.describe(description);
+  }
+  return zod;
 }
 
 /**
@@ -447,11 +489,23 @@ function convertObject(
 
   let zodObject: z.ZodTypeAny = z.object(shape);
 
-  // additionalProperties: false → strict
+  // additionalProperties の挙動 (確定方針):
+  // - `false` → Zod `.strict()` (extra key で reject)
+  // - `true` / `undefined` → Zod default = **strip** (extra key を静かに削除)
+  //
+  // JSON Schema draft-07 仕様では `true` は「追加プロパティを許容して保持」、`undefined`
+  // は default = `true` 相当。Zod の `.passthrough()` を使うとこの仕様に厳密準拠できるが、
+  // ADK FunctionTool の引数は **LLM が生成する** ため、想定外の余計なフィールドが
+  // tool 側 (= Skill 側) にそのまま渡るのはセキュリティ的・デバッグ的に望ましくない。
+  //
+  // → **アダプターとしては LLM 安全性を優先し、strip 固定**にする (passthrough は採用しない)。
+  // - `additionalProperties: false` → reject (Skill 設計者が「余計なキー禁止」と明示)
+  // - `additionalProperties: true` / 未指定 → strip (余計なキーは無視するが reject はしない)
+  //
+  // この方針はテストで固定されている (`additionalProperties` の挙動テスト参照)。
   if (schema.additionalProperties === false) {
     zodObject = (zodObject as z.ZodObject<Record<string, z.ZodTypeAny>>).strict();
   }
-  // additionalProperties: true (default) は何もしない (Zod の default は extra を strip)
   return zodObject;
 }
 
