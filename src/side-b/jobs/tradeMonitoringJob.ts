@@ -26,10 +26,7 @@
  */
 
 import { isFXMarketOpen } from '../utils/marketHours';
-import {
-  createTradeFromPlan as _createTradeFromPlan,
-  expirePendingTrades,
-} from '../services/virtualTradeService';
+import { expirePendingTrades } from '../services/virtualTradeService';
 import {
   verifyTradeState,
   summarizeVerificationResult,
@@ -57,8 +54,6 @@ import type { OHLCVData } from '../../services/indicators/indicatorService';
 
 import type { SideBJobDeps, SideBJobName, SideBJobRunner } from './types';
 import type { SideBSchedulerConfig, JobResult } from './sideBScheduler';
-
-void _createTradeFromPlan; // re-export 用に保持 (現状未参照、将来 Job 内で使う可能性)
 
 /**
  * TradeMonitoringJob が依存する外部サービス群。
@@ -92,22 +87,36 @@ export class TradeMonitoringJob
    * Scheduler の `lastMonitorRun` を更新する。
    */
   private readonly onStarted?: (startedAt: Date) => void;
+  /**
+   * Services を遅延取得するファクトリ (PR #161 Copilot review #2 対応)。
+   *
+   * run() 内で都度 services を取得することで、Scheduler の field 書き換え
+   * (`(scheduler as any).marketDataService = mock`) がテスト時に反映される。
+   * クロージャ経由のため、Job constructor 時に Scheduler の field を bind する
+   * 旧設計より柔軟。
+   */
+  private readonly servicesFactory: () => TradeMonitoringJobServices;
 
-  constructor(deps: SideBJobDeps, options: { onStarted?: (startedAt: Date) => void } = {}) {
+  constructor(
+    deps: SideBJobDeps,
+    options: {
+      servicesFactory: () => TradeMonitoringJobServices;
+      onStarted?: (startedAt: Date) => void;
+    },
+  ) {
     this.deps = deps;
     this.onStarted = options.onStarted;
+    this.servicesFactory = options.servicesFactory;
   }
 
   /**
-   * SideBJobRunner 規約に従った run。services は渡せないため、
-   * 実運用では `runWithServices()` を直接呼ぶ。
+   * SideBJobRunner 規約に従った run。
    *
-   * 本メソッドは型整合のためだけにあり、呼ばれない想定 (services 必須)。
+   * services は constructor で渡された factory から都度取得する
+   * (= テスト時の private 書き換えに追従する)。
    */
-  run(_config: SideBSchedulerConfig): Promise<JobResult> {
-    return Promise.reject(
-      new Error('TradeMonitoringJob.run() requires services. Use runWithServices() instead.'),
-    );
+  async run(config: SideBSchedulerConfig): Promise<JobResult> {
+    return this.runWithServices(config, this.servicesFactory());
   }
 
   /**

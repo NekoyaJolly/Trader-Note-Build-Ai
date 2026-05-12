@@ -88,26 +88,31 @@ export class PlanGenerationJob
    */
   private readonly getLastSymbolRun?: (symbol: string) => Date | undefined;
 
+  /**
+   * Services を遅延取得するファクトリ (PR #161 Copilot review #3 対応)。
+   * 詳細は TradeMonitoringJob と同じ。
+   */
+  private readonly servicesFactory: () => PlanGenerationJobServices;
+
   constructor(
     deps: SideBJobDeps,
     options: {
+      servicesFactory: () => PlanGenerationJobServices;
       onSymbolCompleted?: (symbol: string, completedAt: Date) => void;
       getLastSymbolRun?: (symbol: string) => Date | undefined;
-    } = {},
+    },
   ) {
     this.deps = deps;
     this.onSymbolCompleted = options.onSymbolCompleted;
     this.getLastSymbolRun = options.getLastSymbolRun;
+    this.servicesFactory = options.servicesFactory;
   }
 
   /**
-   * SideBJobRunner 規約に従った run。services は渡せないため、
-   * 実運用では `runWithServices()` を直接呼ぶ。
+   * SideBJobRunner 規約に従った run。services は constructor の factory から都度取得。
    */
-  run(_config: SideBSchedulerConfig): Promise<PlanGenerationRunReport> {
-    return Promise.reject(
-      new Error('PlanGenerationJob.run() requires services. Use runWithServices() instead.'),
-    );
+  async run(config: SideBSchedulerConfig): Promise<PlanGenerationRunReport> {
+    return this.runWithServices(config, this.servicesFactory());
   }
 
   /**

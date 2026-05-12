@@ -312,11 +312,21 @@ export class SideBScheduler {
       },
     });
     this.tradeMonitoringJob = new TradeMonitoringJob(deps, {
+      // PR #161 Copilot review: services をクロージャで遅延取得 (= テスト時の
+      // private 書き換え (`(scheduler as any).marketDataService = mock`) に追従)
+      servicesFactory: () => ({
+        marketDataService: this.marketDataService,
+        cronSimilarityService: this.cronSimilarityService,
+      }),
       onStarted: (startedAt: Date) => {
         this.lastMonitorRun = startedAt;
       },
     });
     this.planGenerationJob = new PlanGenerationJob(deps, {
+      servicesFactory: () => ({
+        marketDataService: this.marketDataService,
+        orchestrator: this.orchestrator,
+      }),
       onSymbolCompleted: (symbol: string, completedAt: Date) => {
         this.lastPlanRun.set(symbol, completedAt);
       },
@@ -898,10 +908,7 @@ export class SideBScheduler {
    * `(scheduler as any).marketDataService = mock` などの書き換えが反映される。
    */
   private async executeMonitorJob(): Promise<JobResult> {
-    return this.tradeMonitoringJob.runWithServices(this.config, {
-      marketDataService: this.marketDataService,
-      cronSimilarityService: this.cronSimilarityService,
-    });
+    return this.tradeMonitoringJob.run(this.config);
   }
 
   /**
@@ -912,10 +919,7 @@ export class SideBScheduler {
    * 一旦 Scheduler 側に残し本メソッド内で Job 呼び出し後に実行する。
    */
   private async executePlanJob(): Promise<JobResult> {
-    const planResult = await this.planGenerationJob.runWithServices(this.config, {
-      marketDataService: this.marketDataService,
-      orchestrator: this.orchestrator,
-    });
+    const planResult = await this.planGenerationJob.run(this.config);
 
     // クリーンアップ (1 日に 1 回、最初のプラン実行時のみ)
     // PR-4 (Phase 5) で CleanupJob として独立予定。それまでは Scheduler 側に残す。
