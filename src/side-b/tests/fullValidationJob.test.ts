@@ -30,8 +30,14 @@ const mockPdcaLoop = pdcaLoop as unknown as { notifyValidationBatchComplete: jes
 
 function mockSleepInstant() {
   const realSetTimeout = global.setTimeout;
-  jest.spyOn(global, 'setTimeout').mockImplementation((cb: (...args: unknown[]) => void) => {
-    return realSetTimeout(cb, 0);
+  // PR #163 Copilot review: 将来 setTimeout(cb, ms, ...args) を使う実装に対応するため
+  // 追加引数 (...args) を保持して realSetTimeout に渡す
+  jest.spyOn(global, 'setTimeout').mockImplementation((
+    cb: (...args: unknown[]) => void,
+    _ms?: number,
+    ...args: unknown[]
+  ) => {
+    return realSetTimeout(cb, 0, ...args);
   });
 }
 
