@@ -76,9 +76,21 @@ npm v7+ における peer dependencies の扱いは以下:
 
 ---
 
-## 3. Step 1 着手時の対応方針 (推奨)
+## 3. Step 1 着手時の対応方針
 
-### 3.1 オプション A: peer dependency を無視してインストール
+> **2026-05-12 確定**: 以下 3 オプションのうち **オプション A (`--legacy-peer-deps`)** を採用し、加えて **ADK の `DatabaseSessionService` 系 (MikroORM 依存の永続化レイヤー) は不採用** とすることが Nekoさん判断で決定した。
+>
+> 確定理由:
+> - 本プロジェクトは既に Prisma で広範に実装しており、MikroORM を入れると **ORM 二重管理**になる
+> - 今後の実装でエージェント (Claude Code) が「どっちの ORM を使うべきか」迷う原因になる
+> - Prisma を **ORM の唯一の責務** とする (1 ORM ポリシー)
+> - ADK の他機能 (Runner / Sequential / Parallel / Loop / FunctionTool / Tracing) は採用価値が十分残っている
+>
+> セッション / 状態永続化が必要になった場合は **Prisma ベースで自作する** (急がない、Step 後半で対応)。
+>
+> 詳細は `docs/architecture/ADK_ADOPTION.md` §2.2 / §2.3 を参照。
+
+### 3.1 オプション A: peer dependency を無視してインストール (✅ **採用**)
 
 ```bash
 npm install @google/adk --legacy-peer-deps
