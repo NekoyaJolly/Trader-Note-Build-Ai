@@ -41,28 +41,20 @@ import { SurrogateFitnessSimulator } from '../strategy_dsl/SurrogateFitnessSimul
 
 import type { SideBJobDeps, SideBJobName, SideBJobRunner } from './types';
 import type { SideBSchedulerConfig } from './sideBScheduler';
+// PR #159 Copilot review #3 対応: 純粋関数 / 定数を別ファイルに分離 (テスト軽量化)
+import {
+  EVOLUTION_CARRY_RETENTION_DAYS,
+  DEFAULT_EVOLUTION_REGIMES,
+  clampEvolutionGenerations,
+} from './evolutionJobConfig';
 
-/**
- * EvolutionInstanceCarry の保持日数 (= 14 日より古い行を retention で削除)。
- * 旧 sideBScheduler.ts の module private 定数を移植。
- */
-export const EVOLUTION_CARRY_RETENTION_DAYS = 14;
-
-/**
- * 進化ループのデフォルト対象レジーム。
- *
- * SideBScheduler.DEFAULT_CONFIG.evolutionRegimes はこの定数を spread する形で参照する
- * (= 依存方向: scheduler → evolutionJob、循環なし)。
- *
- * configOverride で空配列が渡されたケースの fallback としても本 Job 内で参照する
- * (`EvolutionJob.run()` 冒頭、旧 sideBScheduler.ts L1024-1026 の挙動互換)。
- */
-export const DEFAULT_EVOLUTION_REGIMES = [
-  'trending_with_pullback',
-  'breakout',
-  'consolidation',
-  'reversal',
-] as const;
+// 再 export: 既存の import 互換維持 (`import { EVOLUTION_CARRY_RETENTION_DAYS } from './evolutionJob'` 等)
+export {
+  EVOLUTION_CARRY_RETENTION_DAYS,
+  DEFAULT_EVOLUTION_REGIMES,
+  readEvolutionEnvOverrides,
+  clampEvolutionGenerations,
+} from './evolutionJobConfig';
 
 /**
  * EvolutionJob の戻り値型。
@@ -85,123 +77,9 @@ export interface EvolutionCarryRetentionResult {
   error?: string;
 }
 
-// ============================================================================
-// 環境変数解釈ヘルパー (旧 sideBScheduler.ts L243-266 を移植)
-// ============================================================================
-
-/**
- * 環境変数値が「整数表現の文字列」であることを厳密に検証する。
- *
- * `parseInt` だと '2abc' / '2.9' / '  2 ' を 2 として受理してしまう。本関数は
- * trim 後に `^-?\d+$` 全体一致でなければ null を返し、設定ミスを silent fail
- * させない (PR #138 Copilot review で指摘された運用事故防止)。
- */
-function parseStrictInt(raw: string): number | null {
-  const trimmed = raw.trim();
-  if (!/^-?\d+$/.test(trimmed)) return null;
-  const n = Number(trimmed);
-  return Number.isFinite(n) ? n : null;
-}
-
-/**
- * 環境変数値を `'true' | 'false'` で厳密に判定する。
- *
- * trim + toLowerCase 後に 'true' / 'false' でなければ null (= 想定外文字列、warning 対象)。
- */
-function parseStrictBool(raw: string): boolean | null {
-  const trimmed = raw.trim().toLowerCase();
-  if (trimmed === 'true') return true;
-  if (trimmed === 'false') return false;
-  return null;
-}
-
-/**
- * 環境変数から Evolution 関連の設定 override を読み取る。
- *
- * 対応 env:
- * - `EVOLUTION_GENERATIONS` (1〜MULTI_GENERATION_DEFAULTS.maxGenerations の整数)
- * - `EVOLUTION_ADAPTIVE_BUDGET` ('true' | 'false')
- * - `EVOLUTION_QD_ARCHIVE` ('true' | 'false')
- * - `EVOLUTION_QD_PARENT_LIMIT` (>=0 の整数)
- * - `AUTO_EVOLUTION` ('true' | 'false', Filter Evolution 観察フェーズ用)
- *
- * 不正値は warning を出力した上で無視 (= DEFAULT_CONFIG が使われる)。
- *
- * 旧 sideBScheduler.ts の `readEvolutionEnvOverrides()` をそのまま移植。
- * warning 文言は `evolutionMultiGen.test.ts` で検証されているため変更不可。
- */
-export function readEvolutionEnvOverrides(): Partial<SideBSchedulerConfig> {
-  const out: Partial<SideBSchedulerConfig> = {};
-
-  const gensRaw = process.env.EVOLUTION_GENERATIONS;
-  if (gensRaw !== undefined && gensRaw !== '') {
-    const parsed = parseStrictInt(gensRaw);
-    if (
-      parsed !== null &&
-      parsed >= 1 &&
-      parsed <= MULTI_GENERATION_DEFAULTS.maxGenerations
-    ) {
-      out.evolutionGenerations = parsed;
-    } else {
-      console.warn(
-        `[SideBScheduler] EVOLUTION_GENERATIONS=${gensRaw} は不正値 (1〜${MULTI_GENERATION_DEFAULTS.maxGenerations} の整数のみ)、無視します`,
-      );
-    }
-  }
-
-  const adaptiveRaw = process.env.EVOLUTION_ADAPTIVE_BUDGET;
-  if (adaptiveRaw !== undefined && adaptiveRaw !== '') {
-    const parsed = parseStrictBool(adaptiveRaw);
-    if (parsed === null) {
-      console.warn(
-        `[SideBScheduler] EVOLUTION_ADAPTIVE_BUDGET=${adaptiveRaw} は不正値 ('true' | 'false' のみ)、無視します`,
-      );
-    } else {
-      out.evolutionAdaptiveBudget = parsed;
-    }
-  }
-
-  const qdRaw = process.env.EVOLUTION_QD_ARCHIVE;
-  if (qdRaw !== undefined && qdRaw !== '') {
-    const parsed = parseStrictBool(qdRaw);
-    if (parsed === null) {
-      console.warn(
-        `[SideBScheduler] EVOLUTION_QD_ARCHIVE=${qdRaw} は不正値 ('true' | 'false' のみ)、無視します`,
-      );
-    } else {
-      out.evolutionQDArchive = parsed;
-    }
-  }
-
-  const qdLimitRaw = process.env.EVOLUTION_QD_PARENT_LIMIT;
-  if (qdLimitRaw !== undefined && qdLimitRaw !== '') {
-    const parsed = parseStrictInt(qdLimitRaw);
-    if (parsed !== null && parsed >= 0) {
-      out.evolutionQDParentLimit = parsed;
-    } else {
-      console.warn(
-        `[SideBScheduler] EVOLUTION_QD_PARENT_LIMIT=${qdLimitRaw} は不正値 (>=0 の整数のみ)、無視します`,
-      );
-    }
-  }
-
-  // Filter Evolution 観察フェーズ (2026-05-09): AUTO_EVOLUTION で evolution cron の自動起動を制御。
-  // - true で `startEvolutionJob` が動き 24h ごと `runEvolutionNow` が走る (= LLM コスト発生)
-  // - DEFAULT_CONFIG.autoEvolution は false なので、本番で観察データを蓄積するには true 設定が必須
-  const autoEvolutionRaw = process.env.AUTO_EVOLUTION;
-  if (autoEvolutionRaw !== undefined && autoEvolutionRaw !== '') {
-    const parsed = parseStrictBool(autoEvolutionRaw);
-    if (parsed === null) {
-      console.warn(
-        `[SideBScheduler] AUTO_EVOLUTION=${autoEvolutionRaw} は不正値 ('true' | 'false' のみ)、無視します`,
-      );
-    } else {
-      out.autoEvolution = parsed;
-    }
-  }
-
-  return out;
-}
+// 環境変数解釈ヘルパー (parseStrictInt / parseStrictBool / readEvolutionEnvOverrides) は
+// `./evolutionJobConfig.ts` に分離 (PR #159 Copilot review #3 対応、テスト軽量化)。
+// 本ファイルからは上記の re-export 経由で参照可能。
 
 // ============================================================================
 // EvolutionJob 本体
@@ -227,20 +105,6 @@ export class EvolutionJob implements SideBJobRunner<SideBSchedulerConfig, Evolut
   constructor(deps: SideBJobDeps, options: { onCompleted?: (completedAt: Date) => void } = {}) {
     this.deps = deps;
     this.onCompleted = options.onCompleted;
-  }
-
-  /**
-   * `evolutionGenerations` を [1, MULTI_GENERATION_DEFAULTS.maxGenerations] に clamp する。
-   *
-   * configOverride 経由で 0 や maxGenerations 超過の値が渡されると runner 側で
-   * clamp される一方で scheduler のログ表示や useMultiGen 判定がズレるため、
-   * Job 入口で必ず clamp する (PR #138 Copilot review #4)。
-   */
-  static clampGenerations(raw: number): number {
-    return Math.max(
-      1,
-      Math.min(MULTI_GENERATION_DEFAULTS.maxGenerations, Math.floor(raw)),
-    );
   }
 
   /**
@@ -281,8 +145,9 @@ export class EvolutionJob implements SideBJobRunner<SideBSchedulerConfig, Evolut
     });
 
     // configOverride 経由で 0 や maxGenerations 超過の値が渡されたときの clamp。
+    // PR #159 Copilot review #1 対応: NaN / Infinity も Job 入口で 1 に fallback。
     const rawGenerations = config.evolutionGenerations ?? 1;
-    const generations = EvolutionJob.clampGenerations(rawGenerations);
+    const generations = clampEvolutionGenerations(rawGenerations);
     if (generations !== rawGenerations) {
       this.deps.log(
         `[Evolution] 設定 evolutionGenerations=${rawGenerations} を [1, ${MULTI_GENERATION_DEFAULTS.maxGenerations}] に clamp して ${generations} で実行`,
