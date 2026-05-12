@@ -89,8 +89,11 @@ npm v7+ における peer dependencies の扱いは以下:
 > セッション / 状態永続化が必要になった場合は **Prisma ベースで自作する** (急がない、Step 後半で対応)。
 >
 > 詳細は `docs/architecture/ADK_ADOPTION.md` §2.2 / §2.3 を参照。
+>
+> **本ドキュメントではオプションAの採用は確定済み** とし、以下のオプション記載は実施方針と参考比較を整理するためのものとする。
+> オプションB/Cを記載する場合も、**Step 1 の判断対象ではなく参考案**として扱う。
 
-### 3.1 オプション A: peer dependency を無視してインストール (✅ **採用**)
+### 3.1 採用確定オプション A: peer dependency を無視してインストール
 
 ```bash
 npm install @google/adk --legacy-peer-deps
