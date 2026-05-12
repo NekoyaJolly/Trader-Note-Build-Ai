@@ -260,6 +260,77 @@ async runAsync(req) {
 
 `SkillInputSchema` (JSONSchema draft-07 subset) を Zod object に変換するユーティリティが必要。詳細は KICKOFF.md §T3 参照。
 
+### 4.7 ✅ T3 詳細ルール (Nekoさん T2.5 承認時の追加指示)
+
+#### 4.7.1 実装方針: 自前実装
+
+**外部パッケージ採用しない** (`json-schema-to-zod` 等を npm 追加しない)。理由:
+- 既存 `SkillInputSchema` は JSONSchema draft-07 のごく一部のサブセット (`type` / `properties` / `required` / `items` / `enum` / `description`)
+- 実 Skill 6 件 (`computeLensFeatures` / `readRecentNotes` / `recordLesson` / `getHypothesis` / `queryEdgeLedger` / `registerHypothesis` 等) で使用される features を実測 → 自前で十分対応可能
+- 自前実装の方が変換可能範囲を明示的に文書化でき、未対応 schema を確実に throw できる
+- 外部パッケージは npm 依存増 + 「裏で `z.any()` でフォールバック」のリスク
+
+#### 4.7.2 サポート対象 (実 Skill 利用状況に基づく)
+
+✅ **対応必須**:
+- `type: 'string'` → `z.string()`
+- `type: 'number'` → `z.number()`
+- `type: 'integer'` → `z.number().int()`
+- `type: 'boolean'` → `z.boolean()`
+- `type: 'null'` → `z.null()`
+- `type: 'object'` + `properties` + `required` → `z.object({...})`
+- `type: 'array'` + `items` → `z.array(...)`
+- `enum: [...]` → `z.enum([...])` (string array の場合) または `z.union([z.literal(...), ...])`
+- `description: string` → `.describe(...)`
+
+✅ **任意対応** (best effort):
+- `additionalProperties: false` → `.strict()`
+- `additionalProperties: true` (default) → `.passthrough()` または何もしない
+- type union (`type: ['string', 'number']`) → `z.union([z.string(), z.number()])`
+
+#### 4.7.3 ❌ 未対応スキーマは throw する
+
+以下は**握りつぶさず必ず throw**:
+- `pattern` (正規表現制約)
+- `format` (例: `email`, `uri`, `date-time` 等)
+- `minimum` / `maximum` / `multipleOf` (数値範囲制約)
+- `minLength` / `maxLength` (文字列長制約)
+- `minItems` / `maxItems` / `uniqueItems` (配列制約)
+- `oneOf` / `anyOf` / `allOf` (合成スキーマ、複雑な場合)
+- `$ref` / `$defs` (内部参照)
+- 未知の `type` 値
+
+#### 4.7.4 エラーメッセージ形式
+
+```typescript
+class JsonSchemaToZodError extends Error {
+  constructor(
+    public readonly skillName: string,
+    public readonly fieldPath: string,
+    public readonly reason: string,
+  ) {
+    super(`[jsonSchemaToZod] Skill '${skillName}' field '${fieldPath}': ${reason}`);
+    this.name = 'JsonSchemaToZodError';
+  }
+}
+
+// 利用例:
+// throw new JsonSchemaToZodError('recordLesson', 'lesson', "unsupported 'pattern' constraint");
+```
+
+- **skill 名**: 呼び出し側 (`skillRegistryToAdkTools`) から渡される
+- **field path**: 再帰中に構築 (例: `'conditions[].rule'` のような dotted/bracketed path)
+- **reason**: 何が未対応かを具体的に (例: `"unsupported keyword: 'pattern'"`)
+
+#### 4.7.5 ❌ `z.any()` フォールバック禁止
+
+- 未対応 schema を `z.any()` / `z.unknown()` で握りつぶす実装は禁止
+- 未対応に遭遇したら必ず throw して、開発者に明示的に対応を求める
+- これにより:
+  - LLM の不正引数をすり抜けさせない
+  - 新規 Skill 追加時に未対応 schema を即座に検出
+  - silent failure を防ぐ
+
 ---
 
 ## 5. session-less 設計 ✅ 確定
@@ -425,13 +496,17 @@ T2.5 で確定した実行経路を T7 設計時に厳守する。
 `runAsync({ args, toolContext })` の `toolContext: Context` は非 optional。フル `InvocationContext` 構築は重い (agent / session / pluginManager 必須) ため、テスト用最小 mock を提供する:
 
 ```typescript
-// /src/side-b/adk/adapters/_testHelpers.ts (T6 で実装予定、test 専用 export)
+// /src/side-b/adk/adapters/_testHelpers.ts (T6 で実装予定)
+// ★★ テスト専用ヘルパー — 本番実装からは使わない (Nekoさん T2.5 承認時の方針)
 import type { Context } from '@google/adk';
 
 /**
  * テスト専用: `Context` の必要最小限フィールドのみを持つ mock を生成。
  * adapter 本体が触る field (agentName のみ) を持つ。
- * 本番コードでは使わない (テストヘルパー)。
+ *
+ * ★ 本番コードからは絶対に使わない。テストヘルパー専用。
+ * ★ ファイル名 `_testHelpers.ts` の underscore prefix で「内部用」を明示。
+ * ★ 本番 export からは含めない (jobs/index.ts などへ含めない)。
  */
 export function createMinimalAdkContext(options: { agentName?: string }): Context {
   // 本番 Context は InvocationContext を要求するが、adapter が触るのは agentName のみ。
@@ -446,6 +521,12 @@ export function createMinimalAdkContext(options: { agentName?: string }): Contex
 ```
 
 このアプローチは ADK の internal API に依存せず (= `Object.defineProperty` は標準 JS API)、`Context.prototype` の継承だけ利用する。
+
+**本番実装での Context 利用ルール**:
+- 本番アダプター (`skillRegistryToAdkTools`) は ADK Runner が渡してくる本物の `Context` をそのまま受ける
+- `toSkillContext()` は `Context | undefined` を受けて (Runner 経由なら定義、テストヘルパーでも生成、いずれも対応可)
+- `Context.agentName` getter にのみアクセス。他フィールドには触らない (= mock 構築の最小化を維持)
+- `createMinimalAdkContext` の本番呼び出しは禁止 (ESLint で防御するなら `no-restricted-imports` などを将来検討)
 
 ### 8.4 ✅ Nekoさん承認時の追加方針 (2026-05-13)
 
@@ -490,27 +571,27 @@ T2.5 で確定した実行経路を T7 設計時に厳守する。
 
 承認に基づき T2.5 (実測スパイク) に進行中。
 
-### T2.5 (実測スパイク): 🔍 ユーザー承認待ち (2026-05-13)
+### T2.5 (実測スパイク): ✅ 承認済み (2026-05-13)
 
-**実測結果サマリ**:
+**Nekoさん回答**: `T2.5 approved with note`
 
-- **採用方式: B (Zod)** — ADK が `z3.ZodObject | z4.ZodObject | Schema | undefined` を受ける、`parameters.parse(req.args)` で自動 validation。型安全性が最も高い
-- **§3 SkillContext マッピング確定**: `callerAgent ← Context.agentName`、`callerReason = ADK_DEFAULT_CALLER_REASON` (定数)、`timestamp = new Date()`
-- **§6 エラー伝播確定**: アダプター内で throw しない。`SkillResult` をそのまま tool 戻り値として return (既存 invoke と等価)
-- **§8 テスト経路確定**: `runAsync({ args, toolContext })` 経由。`Context` は `createMinimalAdkContext()` ヘルパーで minimum mock
-- **T3 実行**: ✅ 必要 (方式 B 採用のため、`jsonSchemaToZod` を実装する)
+**確定方針** (本書 §3 §4 §6 §8 に反映済み):
+- ✅ **方式 B (Zod)** — `parameters` 変換は `SkillInputSchema → Zod`
+- ✅ **`runAsync()` public API 経由テスト限定**、`execute` / `_getDeclaration` 等 private/internal 不依存
+- ✅ **`ADK_DEFAULT_CALLER_REASON = 'invoked-via-adk-runner'`** adapter 側定数
+- ✅ アダプター内で `SkillResult` を **throw に変換せず return**
+- ✅ Zod validation error は ADK 標準 throw 伝播に任せる
+- ✅ `createMinimalAdkContext` は **test helper 専用**、本番未使用 (§8.5 で明記)
 
-**スパイク成果物** (Phase 2 T8 で削除予定):
-- `scripts/adk_spike_typedefs.md`: ADK 主要型の実定義まとめ
-- `scripts/adk_spike_methods.ts`: 3 方式の動作確認 (実行確認済み: `npx tsx scripts/adk_spike_methods.ts` で全て OK)
+**T3 前の修正** (本セクション以下に反映):
+- ✅ `createMinimalAdkContext` がテスト専用であることを §8.5 で明記
+- ✅ `jsonSchemaToZod` は **自前実装** (外部パッケージ採用しない)。既存 `SkillInputSchema` subset 向け
 
-**判断を仰ぐ点**:
-1. **採用方式 B (Zod)** で問題ないか
-2. **`ADK_DEFAULT_CALLER_REASON = 'invoked-via-adk-runner'`** の定数名・値で問題ないか (他案: `'adk-tool-call'`、`'auto-runner'` など)
-3. **`createMinimalAdkContext` ヘルパー方針** (Object.create + defineProperty で agentName のみ持つ partial mock) で問題ないか
-4. **T3 実装方針**: 自前実装 vs `json-schema-to-zod` 等のパッケージ採用 — どちらが好み? (パッケージは npm 依存増、自前は変換可能範囲を限定的に明文化)
+### T3 (jsonSchemaToZod) 合格条件 (Nekoさん追加指示)
 
-ご返答方法:
-- `T2.5 approved` → T3 (jsonSchemaToZod 実装) に進む
-- `T2.5 approved with note: <内容>` → 補足付きで承認
-- `revise: <内容>` → 修正指示
+- ✅ **未対応 JSONSchema を `z.any()` で握りつぶさない**
+- ✅ **未対応 schema は skill 名 / field path 付きで throw する**
+
+→ §4.7 に T3 詳細ルールとして反映。
+
+### T3 (実装) 着手中
