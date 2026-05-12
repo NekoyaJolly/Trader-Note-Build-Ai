@@ -1,8 +1,9 @@
 # SkillRegistry → ADK FunctionTool アダプター 設計書
 
-> **チケット**: Step 1 Ticket T2 (初期ドラフト)
+> **チケット**: Step 1 Ticket T2 (初期ドラフト) → T2.5 着手中
 > **作成日**: 2026-05-13
-> **ステータス**: 🔍 **T2 初期ドラフト ユーザーレビュー待ち** (T2.5 スパイク前)
+> **ステータス**: ✅ **T2 ユーザー承認済み (2026-05-13)** / T2.5 スパイク進行中
+> **Nekoさん承認時の追加方針** (§3 §8 に反映済み): callerReason フォールバック方針、ADK public API 経由テスト限定
 > **計画書**: `docs/architecture/STEP_1_KICKOFF.md` §Ticket T2
 > **位置づけ**: ADK 段階導入 Step 1 のサイドカー設計
 > **依存方向**: `adk → 既存` (skills, agent 等) のみ。逆向きは禁止
@@ -93,6 +94,20 @@ export function toSkillContext(adkContext: <T2.5 で確定>): SkillContext;
 ### 3.4 マッピングの確定時期
 
 T2.5 完了時に本セクションを実 ADK context 型で書き直す。フィールド欠落フォールバックも T2.5 で確定。
+
+### 3.5 ✅ Nekoさん承認時の追加方針 (2026-05-13)
+
+**`callerReason` の取り扱い** (T2 approved with note):
+
+- ADK 標準 Context に `callerReason` 相当が存在しない可能性が高い
+- T2.5 で取得不能と判明した場合の対応:
+  - **固定文字列**: 例えば `'invoked-via-adk'` のような adapter 側定数として埋める
+  - または **adapter 側定数**として明示的に export (例: `ADK_DEFAULT_CALLER_REASON`)
+- **重要**: 既存 `SkillContext` 型 (`src/side-b/skills/types.ts`) は**変更しない**
+  - 不可侵領域 (`ADK_ADOPTION.md` §6 / `/src/side-b/skills/` 改変禁止) と整合
+  - `callerReason?: string` のまま、フォールバック値を埋めるだけ
+
+→ T2.5 で `callerReason` 相当の ADK フィールドの有無を確認し、無ければ本方針に従う。
 
 ---
 
@@ -283,6 +298,23 @@ Phase 2 完了時の想定構成:
 
 T2.5 で確定したテスト経路を T7 で利用。**ADK SDK の public API を使う**ことが原則 (internal API 利用は脆い)。
 
+### 8.4 ✅ Nekoさん承認時の追加方針 (2026-05-13)
+
+**ADK public API 経由テストの厳格化** (T2 approved with note):
+
+T2.5 で `FunctionTool` の公開実行 API が以下のいずれかと判明した場合の対応を明文化:
+
+| ケース | T7 等価性検証の経路 |
+|--------|--------------------|
+| `execute()` が public method として露出 | `execute()` 直接呼び出し可 |
+| **`runAsync()` または相当が public method** | `runAsync()` 経由でテスト (`execute()` は internal 扱いの可能性) |
+| **Runner / Agent 経由でしか実行できない** | Runner / Agent を T7 テストで構築 (mock Agent + ADK Runner 経由) |
+| internal/private な execute のみ | **internal API には依存しない** (= Runner 経由のテストに変更) |
+
+**禁止**: ADK SDK の internal / private API (`@internal` JSDoc、underscore prefix、d.ts 非公開等) に依存するテストコード。脆い (SDK 更新で壊れる) ため。
+
+T2.5 で確定した実行経路を T7 設計時に厳守する。
+
 ---
 
 ## 9. 関連ドキュメント
@@ -298,18 +330,17 @@ T2.5 で確定したテスト経路を T7 で利用。**ADK SDK の public API �
 
 ---
 
-## 10. ユーザーレビュー依頼
+## 10. ユーザーレビュー履歴
 
-Nekoさん、本書の **初期ドラフト** をご確認ください。以下のいずれかでご返答ください:
+### T2 (初期ドラフト): ✅ 承認済み (2026-05-13)
 
-- `T2 approved` → T2.5 (実測スパイク) に進みます
-- `T2 approved with note: <内容>` → 補足事項を含めて承認
-- `revise: <内容>` → 修正指示
+**Nekoさん回答**: `T2 approved with note` (2 件)
 
-### 特に判断を仰ぎたい点
+1. **callerReason フォールバック方針** → §3.5 に反映
+2. **ADK public API 経由テスト限定 (internal/private API 不依存)** → §8.4 に反映
 
-1. **§2 採用するアダプターパターン**: factory 関数 + 1 Skill = 1 FunctionTool 方針で確定 (= ADK Agent の慣習に合致)。これでよろしいか?
-2. **§5 session-less 設計**: Skill stateless + 既存 agentMemory 継続活用。これでよろしいか?
-3. **§4 3 方式併記の妥当性**: T2.5 で確定する形にしているが、もし「この方式は最初から却下」という強い意向があればご指示ください
+承認に基づき T2.5 (実測スパイク) に進行中。
 
-T2.5 では `@google/adk@1.1.0` の実 API を node_modules の `.d.ts` から確認し、本書の 🔍 セクションを実測結果で更新します。
+### T2.5 (実測スパイク完了後): 🔍 ユーザー承認待ち
+
+T2.5 完了時に本書の §3 / §4 / §6 / §8 を実測結果で更新し、採用方式 (A/B/C) を確定。再度ユーザーレビューを依頼する。
