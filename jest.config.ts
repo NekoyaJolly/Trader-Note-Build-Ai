@@ -26,7 +26,17 @@ const config: Config = {
     '^.+\\.ts$': ['ts-jest', {
       tsconfig: 'tsconfig.test.json',
     }],
+    // @google/adk が内部で require する ESM-only パッケージ (lodash-es 等) を CJS
+    // に変換するため、許可リスト内の .js は babel-jest で transform する。
+    '^.+\\.js$': ['babel-jest', {
+      presets: [['@babel/preset-env', { targets: { node: 'current' } }]],
+    }],
   },
+  // Jest 既定 (`node_modules/` 全除外) を上書きし、ESM-only パッケージのみ
+  // transform 対象に含める。@google/adk 経由で lodash-es を require するため。
+  transformIgnorePatterns: [
+    '/node_modules/(?!(@google/adk|@google/genai|lodash-es|uuid)/)',
+  ],
 };
 
 export default config;
