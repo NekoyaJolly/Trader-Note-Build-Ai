@@ -1,0 +1,215 @@
+# WORKFLOW.md - 開発ワークフロー
+
+> **対象**: Code (Claude Code / Cursor / Gemini など実装エージェント)、Nekoさん
+> **位置づけ**: 運用ドキュメント。設計書ではない
+> **最終更新**: 2026-05-13
+
+---
+
+## 1. 基本フロー
+
+```
+[Code] 実装
+  ↓
+[Code] PR 作成 (または main 直接 commit)
+  ↓
+[Copilot bot] レビュー (PR の場合)
+  ↓
+[Code] レビュー対応 (修正 → commit → push → サマリコメント投稿)
+  ↓
+[Code] マージ自動確認 polling 開始 (背景タスク)
+  ↓
+[Nekoさん] マージ判断 (GitHub UI / スマホ等から)
+  ↓
+[Code] polling が MERGED を検出 → 次 Phase へ自動着手
+```
+
+**Nekoさんの役割**: マージ判断のみ。コードは書かない。マージ完了の口頭報告も不要 (Code が自動検出する)。
+
+---
+
+## 2. PR vs main 直接 commit の判断基準
+
+### PR が必要な作業 (= 重め)
+
+- 多段 Phase 構成の Phase 完了 (Step KICKOFF の Phase 1 / Phase 2 等)
+- 複数ファイル / 複数ロジックに渡るコード変更
+- 設計判断や仕様変更を伴う
+- 本番動作に影響する変更
+- Nekoさんが明示的に PR を求めた作業
+
+### main 直接 commit で OK (= 軽量)
+
+- ドキュメント 1 つの追加・更新
+- 軽微なタイポ / 表記揺れ修正
+- 設計書のクロージング作業 (サマリー作成等)
+- Code 側から「軽い」と判断できる作業
+
+**迷ったら Nekoさんに確認**。全てを PR にすると重たくなる。
+
+---
+
+## 3. PR ワークフロー詳細
+
+### 3.1 PR 作成
+
+```bash
+git checkout -b <step>/<phase>-<scope>      # 例: step1/phase2-adk-adapter-impl
+# 実装 → 段階的 commit (チケット単位)
+git push -u origin <branch>
+gh pr create --base main --head <branch> --title "..." --body "..."
+```
+
+**コミットメッセージ形式**:
+- 通常実装: `feat(scope): 内容` / `fix(scope): 内容` / `refactor(scope): 内容` / `test(scope): 内容` / `docs(scope): 内容` / `chore(scope): 内容`
+- レビュー対応: `fix(review): Copilot レビュー対応 (PR #N)`
+- Step 0 等チケット単位: `chore(step0): <内容> (Ticket {ID})`
+
+### 3.2 Copilot レビュー対応 (PR 作成と同ターンで実行)
+
+`gh pr create` 完了後、**Nekoさんへ応答を返さず同じターン内で連続実行**:
+
+1. **30〜60 秒間隔で Copilot レビュー polling**
+   ```bash
+   gh api repos/{owner}/{repo}/pulls/{N}/reviews    # overview
+   gh api repos/{owner}/{repo}/pulls/{N}/comments   # inline 指摘
+   ```
+   `user.login` が `copilot-pull-request-reviewer` または `Copilot` のもの。
+2. **最大 10 分待機**。timeout したら PR コメントで「未着、次回確認時に対応」と残して終了
+3. レビューが届いたら **`copilot-review-responder` スキルは呼ばず inline で対応**:
+   - 各指摘を分類: 軽微 (typo / lint / 小さなロジック) / 設計判断 (大きな変更要求)
+   - 軽微: `edit → commit → push`
+   - 設計判断: **修正せず保留**、サマリで「ユーザー確認待ち」と明示
+4. **`suppressed (low confidence)` 指摘も内容を見て対応する** (実態としてしばしば正当な指摘)
+5. ローカル検証 (`tsc + jest`) を commit 前に実行
+6. **サマリコメント 1 件投稿** (フォーマットは §3.3 参照)
+
+#### Stop hook / UserPromptSubmit / Skill 起動は禁止
+
+過去 (2026-05-11 PR #152 後の議論) に試したが timing 不安定で動かず。Nekoさん判断で「Claude が user 入力を待たずに自分でポーリングして処理する」運用に確定。
+
+### 3.3 サマリコメントの統一フォーマット
+
+```markdown
+## Copilot レビュー N 件 → 対応完了 (commit <短縮sha>)
+
+| # | 指摘 | 対応 |
+|---|---|---|
+| (1) | <Copilot 指摘の要約 1 行> | <修正内容 or 判断理由 1-2 行> |
+| (2) | ... | ... |
+
+## ローカル検証
+- 型チェック: クリーン
+- 単体テスト: XX/XX PASS
+```
+
+過去実例: PR #148 / PR #156 / PR #164 / PR #165 等。
+
+### 3.4 マージ自動確認 polling (★ 自走の核)
+
+サマリコメント投稿後、**Nekoさんのマージを待たず**に自動 polling を仕掛ける:
+
+```bash
+PR_NUMBER=<N>
+while true; do
+  state=$(gh pr view $PR_NUMBER --json state --jq .state 2>/dev/null || echo "")
+  if [ "$state" = "MERGED" ]; then
+    echo "MERGED at $(date)"; exit 0
+  elif [ "$state" = "CLOSED" ]; then
+    echo "CLOSED_WITHOUT_MERGE at $(date)"; exit 0
+  fi
+  sleep 60
+done
+```
+
+**実行方法**: `Bash run_in_background: true` + `timeout: 600000` (10 min)。
+
+#### 通知結果に応じた分岐
+
+| 通知 | 意味 | Code の対応 |
+|------|------|------------|
+| `MERGED` | Nekoさんが承認マージ | 次 PR / 次 Phase に自動着手 |
+| `CLOSED` (without merge) | Nekoさんが問題を見つけて閉じた | **停止して Nekoさんに報告** |
+| `TIMEOUT` (10 min 未マージ) | Nekoさんがまだマージしていない | **同じ polling を再起動**して延長 |
+
+#### TIMEOUT 延長戦略
+
+- 最大回数の制限なし (Nekoさんが外出から戻るまで)
+- 1 分間隔の `gh API` 呼び出しのみで負荷は極小
+- Code は notification 待ちで他作業可能
+
+### 3.5 マージ後の次 Phase 着手
+
+```bash
+git checkout main
+git pull --ff-only origin main
+git checkout -b <next-branch>   # 次 Phase
+# 実装着手
+```
+
+多段 Phase 全 PR が完了するまで自走可能。
+
+---
+
+## 4. なぜこの形か (Why)
+
+### 4.1 Nekoさんが外出中でも進行する
+
+スマホ等から `gh pr merge` または GitHub UI でマージするだけで Code が検出して次 PR へ進む。ローカル環境前にいる必要がない。
+
+### 4.2 「マージ完了」の手動報告不要
+
+Nekoさんが Code に対して「マージ完了」と打ち込まなくても、polling で自動検出する。Nekoさんの認知負荷を最小化。
+
+### 4.3 マージ判断の主体は Nekoさん
+
+Code は「マージされたか」を**検出するだけ**。マージ可否の判断 (内容を読む / Copilot レビューを確認 / 他作業との優先度) は GitHub 上で Nekoさんが行う。
+
+### 4.4 軽量作業まで PR にしない
+
+ドキュメント 1 つの追加で PR を作るのは過剰。main 直接 commit で十分。判断は Code 側で行う (迷ったら確認)。
+
+---
+
+## 5. 禁止事項
+
+- **main への直接 push** (軽量 commit でも push 自体は問題ないが、`git push --force` 系は禁止)
+- **`--no-verify` で hook をスキップする**
+- **`git push --force` / `git reset --hard origin/...` で履歴を上書きする** (Nekoさんが明示指示した場合のみ)
+- **Copilot 指摘の設計判断系を独断で修正する** (必ず保留してサマリで明示)
+- **Nekoさん承認なしに PR をマージする**
+- **`Skill` tool で `copilot-review-responder` を呼ぶ** (inline 実行ルール、§3.2 参照)
+- **Stop hook / UserPromptSubmit hook に polling を委ねる** (§3.2 参照)
+
+---
+
+## 6. 軽量作業 (main 直接 commit) の手順
+
+```bash
+git checkout main && git pull --ff-only origin main
+# 編集
+git add <files>
+git commit -m "<type>(<scope>): <内容>"
+git push origin main
+```
+
+PR と違って Copilot レビューは走らない。push 後の CI fail には注意。
+
+---
+
+## 7. 関連ドキュメント / リソース
+
+| リソース | 内容 |
+|---------|------|
+| `.claude/skills/copilot-review-responder/` | Copilot レビュー対応スキル定義 (本書 §3.2 の inline 実行を仕様化したもの) |
+| `/AGENTS.md` | 全エージェント共通ルール (正本) |
+| `docs/architecture/ADK_ADOPTION.md` | ADK 採用計画 (Step 進捗管理) |
+| `docs/architecture/STEP_*_KICKOFF.md` / `STEP_*_SUMMARY.md` | 各 Step の作業手順書 / 完了サマリー |
+
+---
+
+## 8. 履歴
+
+- **2026-05-11** (PR #152 後): Stop hook / UserPromptSubmit hook 経由の自動発火が timing 不安定 → Claude が同ターン内で inline polling する方式に Nekoさん判断で確定
+- **2026-05-12**: PR/コミット使い分け + マージ自動確認の運用が以後の標準ワークフローとして確定 (Step 0 進行中)
+- **2026-05-13**: 本書 (`WORKFLOW.md`) としてリポジトリに正式文書化 (それまでは Claude のメモリにのみ存在)
