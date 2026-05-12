@@ -30,41 +30,18 @@
  * @see docs/side-b/TradeAssistant-AI.md
  */
 
-import { isFXMarketOpen, getMarketStatusJST } from '../utils/marketHours';
-import {
-  createTradeFromPlan,
-  expirePendingTrades,
-} from '../services/virtualTradeService';
-import {
-  verifyTradeState,
-  summarizeVerificationResult,
-  type MinuteOHLCV,
-} from '../services/tradeVerificationService';
-import { generateNoteFromTrade } from '../services/aiNoteService';
-import { agentMemory } from '../agent/agentMemory';
+import { getMarketStatusJST, isFXMarketOpen } from '../utils/marketHours';
 import { discoveryAgent } from '../agents/DiscoveryAgent';
 import { findAITradeNotesInPeriod } from '../repositories/aiNoteRepository';
 import { summarySchedulerService } from '../services/summarySchedulerService';
 import { executeCleanup, type CleanupConfig } from '../services/dataCleanupService';
 import { CronSimilarityService } from '../services/cronSimilarityService';
-import * as aiNoteRepository from '../repositories/aiNoteRepository';
-import {
-  planRepository,
-  researchRepository,
-  findVirtualTrades,
-  updateTradeToOpen,
-  closeTrade,
-} from '../repositories';
-import { calculatePnL, type CloseVirtualTradeInput, type TradeDirection, type ExitReason } from '../models';
 import { AIOrchestrator } from '../orchestrator/aiOrchestrator';
 import { MarketDataService } from '../../services/marketDataService';
 import { CTraderAuthService } from '../../backend/services/ctrader/ctraderAuthService';
-import type { OHLCVData } from '../../services/indicators/indicatorService';
-import { pdcaLoop } from '../agent';
 import type { PrismaClient } from '@prisma/client';
 // canonical singleton (PR #152)
 import { prisma as canonicalPrisma } from '../../backend/db/client';
-import { ohlcvRepository } from '../../backend/repositories/ohlcvRepository';
 import {
   runPromptEvolutionCycle,
   type PromptEvolutionResult,
@@ -85,6 +62,9 @@ import {
   type ScreeningJobOptions,
   type ScreeningJobResult,
 } from './screeningJob';
+// PR-3 (sideb-refactor): TradeMonitoring / PlanGeneration 系を切り出し
+import { TradeMonitoringJob } from './tradeMonitoringJob';
+import { PlanGenerationJob } from './planGenerationJob';
 
 // ===========================================
 // 型定義
@@ -289,6 +269,9 @@ export class SideBScheduler {
   // PR-2 (sideb-refactor): FullValidation / Screening を delegation。
   private fullValidationJob: FullValidationJob;
   private screeningJob: ScreeningJob;
+  // PR-3 (sideb-refactor): TradeMonitoring / PlanGeneration を delegation。
+  private tradeMonitoringJob: TradeMonitoringJob;
+  private planGenerationJob: PlanGenerationJob;
 
   constructor(configOverride?: Partial<SideBSchedulerConfig>) {
     // Phase A: env からの override を DEFAULT_CONFIG と configOverride の中間に挟む。
@@ -327,6 +310,27 @@ export class SideBScheduler {
       onCompleted: (completedAt: Date) => {
         this.lastScreeningRun = completedAt;
       },
+    });
+    this.tradeMonitoringJob = new TradeMonitoringJob(deps, {
+      // PR #161 Copilot review: services をクロージャで遅延取得 (= テスト時の
+      // private 書き換え (`(scheduler as any).marketDataService = mock`) に追従)
+      servicesFactory: () => ({
+        marketDataService: this.marketDataService,
+        cronSimilarityService: this.cronSimilarityService,
+      }),
+      onStarted: (startedAt: Date) => {
+        this.lastMonitorRun = startedAt;
+      },
+    });
+    this.planGenerationJob = new PlanGenerationJob(deps, {
+      servicesFactory: () => ({
+        marketDataService: this.marketDataService,
+        orchestrator: this.orchestrator,
+      }),
+      onSymbolCompleted: (symbol: string, completedAt: Date) => {
+        this.lastPlanRun.set(symbol, completedAt);
+      },
+      getLastSymbolRun: (symbol: string) => this.lastPlanRun.get(symbol),
     });
   }
 
@@ -894,454 +898,36 @@ export class SideBScheduler {
   }
 
   /**
-   * 監視ジョブを実行（高安値ベース検証）
-   * 
-   * 1時間ごとに直近60本の1分足を取得して:
-   * 1. pending トレード: エントリー条件判定
-   * 2. open トレード: SL/TP到達判定
-   * 
-   * 高安値を使用することで、終値のみの判定より正確な約定タイミングを特定
+   * 監視ジョブを実行 (高安値ベース検証)。
+   *
+   * PR-3 (sideb-refactor): 本体は TradeMonitoringJob.runWithServices() へ移行済み。
+   * テスト互換のため private 名を維持し、`(scheduler as any).executeMonitorJob()` の
+   * 直呼び出しを引き続き機能させる (sideBScheduler.similarity.test.ts)。
+   *
+   * services は Scheduler の private field を引数経由で渡すことで、テスト時の
+   * `(scheduler as any).marketDataService = mock` などの書き換えが反映される。
    */
   private async executeMonitorJob(): Promise<JobResult> {
-    // 市場が閉まっている場合はスキップ（API呼び出しを節約）
-    if (!isFXMarketOpen()) {
-      return {
-        success: true,
-        message: '市場が閉まっているため監視をスキップしました',
-      };
-    }
-
-    this.lastMonitorRun = new Date();
-    this.log('1時間ごと検証を開始します（高安値ベース）');
-
-    const results = {
-      processed: 0,
-      entries: 0,
-      exits: 0,
-      expired: 0,
-      similarityChecks: 0,
-      notificationsSent: 0,
-      errors: [] as string[],
-    };
-
-    // 期限切れトレードの自動キャンセル（autoExpireTradesが有効な場合）
-    if (this.config.autoExpireTrades) {
-      try {
-        const expiredCount = await expirePendingTrades();
-        results.expired = expiredCount;
-        if (expiredCount > 0) {
-          this.log(`期限切れトレードを ${expiredCount} 件キャンセルしました`);
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : '不明なエラー';
-        results.errors.push(`期限切れ処理: ${message}`);
-      }
-    }
-
-    try {
-      // 各シンボルについて処理
-      for (const symbol of this.config.symbols) {
-        try {
-          // 1分足60本を取得（1時間分）
-          const minuteData = await this.marketDataService.getRecentMinuteOHLCV(symbol, 60);
-
-          if (!minuteData || minuteData.length === 0) {
-            results.errors.push(`${symbol}: 1分足データ取得失敗`);
-            continue;
-          }
-
-          // MinuteOHLCV形式に変換
-          const ohlcvData: MinuteOHLCV[] = minuteData.map(d => ({
-            timestamp: d.timestamp,
-            open: d.open,
-            high: d.high,
-            low: d.low,
-            close: d.close,
-            volume: d.volume,
-          }));
-
-          // pending トレードの検証
-          const pendingTrades = await findVirtualTrades({
-            symbol,
-            status: 'pending',
-          });
-
-          for (const trade of pendingTrades) {
-            results.processed++;
-            const verificationResult = verifyTradeState(
-              ohlcvData,
-              'pending',
-              trade.direction as TradeDirection,
-              trade.plannedEntry,
-              trade.stopLoss,
-              trade.takeProfit,
-            );
-
-            this.log(`[${symbol}] Trade ${trade.id}: ${summarizeVerificationResult(verificationResult)}`);
-
-            if (verificationResult.entry?.triggered) {
-              // エントリー約定
-              await updateTradeToOpen(
-                trade.id,
-                verificationResult.entry.entryPrice!,
-                verificationResult.entry.entryTime,
-              );
-              results.entries++;
-              this.log(`[${symbol}] エントリー約定: ${verificationResult.entry.entryPrice}`);
-
-              // 即座にSL/TPもチェック（同一バーでの決済）
-              if (verificationResult.exit?.triggered) {
-                await this.closeTradeInternal(
-                  trade.id,
-                  verificationResult.entry.entryPrice!,
-                  verificationResult.exit.exitPrice!,
-                  verificationResult.exit.exitReason!,
-                  trade.direction as TradeDirection,
-                  symbol,
-                  verificationResult.exit.exitTime,
-                );
-                results.exits++;
-              }
-            }
-          }
-
-          // open トレードの検証
-          const openTrades = await findVirtualTrades({
-            symbol,
-            status: 'open',
-          });
-
-          for (const trade of openTrades) {
-            results.processed++;
-            const verificationResult = verifyTradeState(
-              ohlcvData,
-              'open',
-              trade.direction as TradeDirection,
-              trade.plannedEntry,
-              trade.stopLoss,
-              trade.takeProfit,
-            );
-
-            this.log(`[${symbol}] Trade ${trade.id}: ${summarizeVerificationResult(verificationResult)}`);
-
-            if (verificationResult.exit?.triggered) {
-              const entryPrice = trade.actualEntry ?? trade.plannedEntry;
-              await this.closeTradeInternal(
-                trade.id,
-                entryPrice,
-                verificationResult.exit.exitPrice!,
-                verificationResult.exit.exitReason!,
-                trade.direction as TradeDirection,
-                symbol,
-                verificationResult.exit.exitTime,
-              );
-              results.exits++;
-            }
-          }
-
-          // AIノート類似度チェック（autoSimilarityCheckが有効な場合）
-          if (this.config.autoSimilarityCheck) {
-            try {
-              // OHLCVData形式に変換（indicatorServiceが期待する型）
-              const ohlcvForSimilarity: OHLCVData[] = minuteData.map(d => ({
-                timestamp: d.timestamp,
-                open: d.open,
-                high: d.high,
-                low: d.low,
-                close: d.close,
-                volume: d.volume,
-              }));
-
-              const similarityResult = await this.cronSimilarityService.checkSimilarityAndNotify({
-                symbol,
-                ohlcvData: ohlcvForSimilarity,
-                timeframe: this.config.timeframe,
-              });
-
-              results.similarityChecks++;
-              results.notificationsSent += similarityResult.notificationsSent;
-
-              if (similarityResult.similarNotesFound > 0) {
-                this.log(`[${symbol}] 類似ノート検出: ${similarityResult.similarNotesFound}件, 通知送信: ${similarityResult.notificationsSent}件`);
-              }
-            } catch (error) {
-              const message = error instanceof Error ? error.message : '不明なエラー';
-              results.errors.push(`${symbol} 類似度チェック: ${message}`);
-              this.log(`[${symbol}] 類似度チェックエラー: ${message}`);
-            }
-          }
-
-        } catch (error) {
-          const message = error instanceof Error ? error.message : '不明なエラー';
-          results.errors.push(`${symbol}: ${message}`);
-        }
-      }
-
-      // 決済があった場合、Note自動生成
-      if (this.config.autoGenerateNote && results.exits > 0) {
-        await this.generateNotesForClosedTrades();
-      }
-
-      // 監視結果のサマリーメッセージを構築
-      const summaryParts = [
-        `処理 ${results.processed}件`,
-        `エントリー ${results.entries}件`,
-        `決済 ${results.exits}件`,
-      ];
-      if (results.expired > 0) {
-        summaryParts.push(`期限切れキャンセル ${results.expired}件`);
-      }
-      if (this.config.autoSimilarityCheck && results.similarityChecks > 0) {
-        summaryParts.push(`類似度チェック ${results.similarityChecks}件`);
-        summaryParts.push(`通知送信 ${results.notificationsSent}件`);
-      }
-      const message = `監視完了: ${summaryParts.join(', ')}`;
-      this.log(message);
-
-      if (results.errors.length > 0) {
-        this.log(`エラー: ${results.errors.join(', ')}`);
-      }
-
-      return {
-        success: true,
-        message,
-        data: results,
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '不明なエラー';
-      this.addError(`監視ジョブ失敗: ${message}`);
-      return { success: false, message };
-    }
+    return this.tradeMonitoringJob.run(this.config);
   }
 
   /**
-   * トレードを決済（内部ヘルパー）
-   */
-  private async closeTradeInternal(
-    tradeId: string,
-    entryPrice: number,
-    exitPrice: number,
-    exitReason: ExitReason,
-    direction: TradeDirection,
-    symbol: string,
-    exitTime?: Date,
-  ): Promise<void> {
-    const pnl = calculatePnL(direction, entryPrice, exitPrice);
-
-    const input: CloseVirtualTradeInput = {
-      exitPrice,
-      exitReason,
-      note: `高安値ベース検証により ${exitReason === 'stop_loss' ? 'SL' : 'TP'} 到達を検出`,
-    };
-
-    await closeTrade(tradeId, input, pnl.pips, pnl.amount);
-    this.log(`決済完了: ${tradeId} (${exitReason}, ${pnl.pips > 0 ? '+' : ''}${pnl.pips.toFixed(1)} pips)`);
-
-    // PDCAループに通知
-    try {
-      pdcaLoop.notifyTradeCompleted({
-        id: tradeId,
-        symbol,
-        direction,
-        entryPrice,
-        exitPrice,
-        pnlPips: pnl.pips,
-        outcome: pnl.pips > 0 ? 'win' : pnl.pips < 0 ? 'loss' : 'breakeven',
-        exitReason,
-        strategyRationale: `${exitReason}による決済`,
-        tradedAt: exitTime ?? new Date(),
-        closedAt: exitTime ?? new Date(),
-      });
-    } catch { /* PDCAループ未起動時は無視 */ }
-  }
-
-  /**
-   * プラン生成ジョブを実行（4時間ごと / MTF対応）
-   * 
-   * 1. 執行足OHLCV取得（cTrader優先 → Twelve Dataフォールバック）
-   * 2. 上位足OHLCV取得（MTF分析用）
-   * 3. Orchestrator に higherTFData を渡してプラン生成
-   * 4. Trade作成（pending）
+   * プラン生成ジョブを実行。
+   *
+   * PR-3 (sideb-refactor): プラン生成本体は PlanGenerationJob.runWithServices() へ
+   * 移行済み。cleanup 部分は Phase 5 (PR-4) で CleanupJob として独立予定のため、
+   * 一旦 Scheduler 側に残し本メソッド内で Job 呼び出し後に実行する。
    */
   private async executePlanJob(): Promise<JobResult> {
-    const intervalLabel = this.config.planIntervalHours
-      ? `${this.config.planIntervalHours}時間ごと`
-      : '日次';
-    this.log(`${intervalLabel}プラン生成を開始します`);
+    const planResult = await this.planGenerationJob.run(this.config);
 
-    const results: { symbol: string; success: boolean; error?: string }[] = [];
-
-    for (const symbol of this.config.symbols) {
-      try {
-        // 最終実行チェック（間隔内なら該シンボルはスキップ）
-        const lastRun = this.lastPlanRun.get(symbol);
-        const intervalMs = (this.config.planIntervalHours || 24) * 60 * 60 * 1000;
-        if (lastRun && (Date.now() - lastRun.getTime()) < intervalMs) {
-          this.log(`[${symbol}] 間隔内のためスキップ（最終: ${lastRun.toISOString()}）`);
-          continue;
-        }
-
-        // 1. 執行足OHLCVデータ取得
-        this.log(`[${symbol}] 執行足(${this.config.timeframe})OHLCV取得中...`);
-        const ohlcvData = await this.marketDataService.getHistoricalData(
-          symbol,
-          this.config.timeframe,
-          100,
-        );
-
-        if (!ohlcvData || ohlcvData.length === 0) {
-          throw new Error('執行足OHLCVデータの取得に失敗');
-        }
-
-        // 1b. 執行足OHLCVをDBに永続化（バックテスト・ストラテジー分析で再利用）
-        try {
-          const normalizedSymbol = symbol.replace('/', '');
-          const source = this.marketDataService.isCTraderAvailable() ? 'ctrader' : 'twelvedata';
-          const insertCount = await ohlcvRepository.bulkInsert(
-            ohlcvData.map(d => ({
-              symbol: normalizedSymbol,
-              timeframe: this.config.timeframe,
-              timestamp: new Date(d.timestamp),
-              open: d.open,
-              high: d.high,
-              low: d.low,
-              close: d.close,
-              volume: d.volume ?? 0,
-              source,
-            }))
-          );
-          if (insertCount > 0) {
-            this.log(`[${symbol}] 執行足 ${insertCount}本をDBに保存`);
-          }
-        } catch (persistError) {
-          this.log(`[${symbol}] 執行足DB保存エラー（AI処理は続行）: ${String(persistError)}`);
-        }
-
-        // 2. 上位足OHLCVデータ取得（MTF分析用）
-        let higherTFData: { timeframe: string; ohlcvData: { timestamp: Date; open: number; high: number; low: number; close: number; volume?: number }[] } | undefined;
-        try {
-          this.log(`[${symbol}] 上位足(${this.config.higherTimeframe})OHLCV取得中...`);
-          const htfOhlcv = await this.marketDataService.getHistoricalData(
-            symbol,
-            this.config.higherTimeframe,
-            100,
-          );
-          if (htfOhlcv && htfOhlcv.length > 0) {
-            higherTFData = {
-              timeframe: this.config.higherTimeframe,
-              ohlcvData: htfOhlcv.map(d => ({
-                timestamp: new Date(d.timestamp),
-                open: d.open,
-                high: d.high,
-                low: d.low,
-                close: d.close,
-                volume: d.volume,
-              })),
-            };
-            this.log(`[${symbol}] 上位足 ${htfOhlcv.length}本取得成功`);
-
-            // 2b. 上位足OHLCVもDBに永続化
-            try {
-              const normalizedSymbol = symbol.replace('/', '');
-              const source = this.marketDataService.isCTraderAvailable() ? 'ctrader' : 'twelvedata';
-              const insertCount = await ohlcvRepository.bulkInsert(
-                htfOhlcv.map(d => ({
-                  symbol: normalizedSymbol,
-                  timeframe: this.config.higherTimeframe,
-                  timestamp: new Date(d.timestamp),
-                  open: d.open,
-                  high: d.high,
-                  low: d.low,
-                  close: d.close,
-                  volume: d.volume ?? 0,
-                  source,
-                }))
-              );
-              if (insertCount > 0) {
-                this.log(`[${symbol}] 上位足 ${insertCount}本をDBに保存`);
-              }
-            } catch (persistError) {
-              this.log(`[${symbol}] 上位足DB保存エラー（AI処理は続行）: ${String(persistError)}`);
-            }
-          }
-        } catch (htfError) {
-          this.log(`[${symbol}] 上位足取得失敗（単一TFで続行）: ${String(htfError)}`);
-        }
-
-        // 3. オーケストレーターでプラン生成（Research → Plan + MTF）
-        this.log(`[${symbol}] AI分析を実行中...`);
-        const planResult = await this.orchestrator.generatePlan({
-          symbol,
-          targetDate: new Date().toISOString().split('T')[0],
-          ohlcvData: ohlcvData.map((d) => ({
-            timestamp: new Date(d.timestamp),
-            open: d.open,
-            high: d.high,
-            low: d.low,
-            close: d.close,
-            volume: d.volume,
-          })),
-          higherTFData,
-        });
-
-        if (!planResult.success || !planResult.data) {
-          throw new Error(planResult.error || 'プラン生成に失敗');
-        }
-
-        // 4. Tradeを作成（pending状態）
-        this.log(`[${symbol}] 仮想トレードを作成中...`);
-        const tradeResult = await createTradeFromPlan(planResult.data.id);
-
-        if (!tradeResult.success) {
-          throw new Error(tradeResult.error || 'トレード作成に失敗');
-        }
-
-        this.lastPlanRun.set(symbol, new Date());
-        // ノートレード判断(シナリオ 0 件)は skipped で来るため、エラーにせず
-        // 正常完了として記録する。trade オブジェクトは存在しない。
-        if (tradeResult.skipped) {
-          this.log(
-            `[${symbol}] プラン完了: ${tradeResult.skipReason ?? 'ノートレード判断'} (Trade 作成はスキップ)`,
-          );
-        } else {
-          this.log(`[${symbol}] プラン完了: Trade ID ${tradeResult.trade?.id}`);
-        }
-        results.push({ symbol, success: true });
-
-        // PDCAループに戦略完了を通知
-        try {
-          const planData = planResult.data;
-          const research = planData?.researchId
-            ? await researchRepository.findById(planData.researchId)
-            : null;
-          if (research?.marketAnalysis) {
-            pdcaLoop.notifyAnalysisComplete(symbol, research.marketAnalysis);
-          }
-          if (planData?.scenarios) {
-            pdcaLoop.notifyStrategyComplete(
-              symbol,
-              planData.scenarios.map((s) => ({
-                name: s.name,
-                direction: s.direction,
-                entryPrice: s.entry.price,
-                confidence: s.confidence,
-              }))
-            );
-          }
-        } catch { /* PDCAループ未起動時は無視 */ }
-
-      } catch (error) {
-        const message = error instanceof Error ? error.message : '不明なエラー';
-        this.addError(`[${symbol}] プラン失敗: ${message}`);
-        results.push({ symbol, success: false, error: message });
-      }
-    }
-
-    // クリーンアップ（1日に1回、最初のプラン実行時のみ）
+    // クリーンアップ (1 日に 1 回、最初のプラン実行時のみ)
+    // PR-4 (Phase 5) で CleanupJob として独立予定。それまでは Scheduler 側に残す。
     if (this.config.autoCleanup) {
-      const anyFirstRun = results.some(r => r.success);
-      const cleanupDue = !this.lastCleanupRun
-        || (Date.now() - this.lastCleanupRun.getTime()) > 24 * 60 * 60 * 1000;
+      const anyFirstRun = planResult.results.some((r) => r.success);
+      const cleanupDue =
+        !this.lastCleanupRun ||
+        Date.now() - this.lastCleanupRun.getTime() > 24 * 60 * 60 * 1000;
       if (anyFirstRun && cleanupDue) {
         try {
           this.log('クリーンアップを実行中...');
@@ -1355,18 +941,19 @@ export class SideBScheduler {
           const cleanupResult = await executeCleanup(cleanupConfig);
           this.lastCleanupRun = new Date();
 
-          const totalDeleted = cleanupResult.expiredResearchCount
-            + cleanupResult.oldPlansCount
-            + cleanupResult.oldTradesCount;
+          const totalDeleted =
+            cleanupResult.expiredResearchCount +
+            cleanupResult.oldPlansCount +
+            cleanupResult.oldTradesCount;
           if (totalDeleted > 0) {
-            this.log(`クリーンアップ完了: リサーチ ${cleanupResult.expiredResearchCount}件, ` +
-              `プラン ${cleanupResult.oldPlansCount}件, ` +
-              `トレード ${cleanupResult.oldTradesCount}件 削除`);
+            this.log(
+              `クリーンアップ完了: リサーチ ${cleanupResult.expiredResearchCount}件, ` +
+                `プラン ${cleanupResult.oldPlansCount}件, ` +
+                `トレード ${cleanupResult.oldTradesCount}件 削除`,
+            );
           }
 
           // Filter Evolution Phase B-3 (2026-05-09): EvolutionInstanceCarry retention 14 日。
-          // Phase B-2 で永続化した carry 行を retention 期限超で削除する。
-          // テスト可能化のため public method `runEvolutionCarryRetentionNow` に切り出し。
           await this.runEvolutionCarryRetentionNow();
         } catch (error) {
           const message = error instanceof Error ? error.message : '不明なエラー';
@@ -1375,88 +962,23 @@ export class SideBScheduler {
       }
     }
 
-    const successCount = results.filter((r) => r.success).length;
-    const message = `${intervalLabel}プラン生成完了: ${successCount}/${results.length} シンボル成功`;
-    this.log(message);
+    // PlanGenerationSymbolResult[] を JsonValue 互換に変換 (JobResult.data の型整合)
+    const dataAsJson: JsonValue = planResult.results.map((r) => {
+      const obj: { [key: string]: JsonValue } = {
+        symbol: r.symbol,
+        success: r.success,
+      };
+      if (r.error !== undefined) {
+        obj.error = r.error;
+      }
+      return obj;
+    });
 
     return {
-      success: successCount > 0,
-      message,
-      data: results,
+      success: planResult.success,
+      message: planResult.message,
+      data: dataAsJson,
     };
-  }
-
-  /**
-   * 決済済みトレードのNote自動生成
-   */
-  private async generateNotesForClosedTrades(): Promise<void> {
-    try {
-      // 最近決済されたトレードを取得（Note未生成のもの）
-      const closedTrades = await findVirtualTrades({
-        status: 'closed',
-        limit: 10,
-      });
-
-      for (const trade of closedTrades) {
-        // 既にNote生成済みかチェック
-        const existingNote = await aiNoteRepository.findAITradeNoteByVirtualTradeId(trade.id);
-        if (existingNote) {
-          continue;
-        }
-
-        // プランを取得
-        const plan = await planRepository.findById(trade.planId);
-        if (!plan) {
-          this.addError(`[Note生成] Trade ${trade.id}: プランが見つかりません`);
-          continue;
-        }
-
-        this.log(`[Note生成] Trade ${trade.id} のNoteを生成中...`);
-
-        try {
-          // Phase 3: Plan 時点で AgentMemory に保存したレンズスナップショットを取得
-          const lensSnapshot = agentMemory.getCurrentLensSnapshot(trade.symbol);
-
-          // tradeとplanを正しい形式で渡す
-          await generateNoteFromTrade(
-            {
-              id: trade.id,
-              planId: trade.planId,
-              symbol: trade.symbol,
-              direction: trade.direction as 'long' | 'short',
-              plannedEntry: trade.plannedEntry,
-              actualEntry: trade.actualEntry,
-              stopLoss: trade.stopLoss,
-              takeProfit: trade.takeProfit,
-              exitPrice: trade.exitPrice,
-              exitReason: trade.exitReason,
-              enteredAt: trade.enteredAt,
-              exitedAt: trade.exitedAt,
-              pnlPips: trade.pnlPips,
-            },
-            {
-              id: plan.id,
-              marketAnalysis: {
-                regime: plan.marketAnalysis?.regime || 'range',
-                summary: plan.marketAnalysis?.summary || '',
-              },
-              scenarios: plan.scenarios?.map(s => ({
-                direction: s.direction,
-                priority: s.priority || 'primary',
-              })) || [],
-            },
-            lensSnapshot,
-          );
-          this.log(`[Note生成] Trade ${trade.id} のNote生成完了${lensSnapshot ? ' (lensSnapshot付き)' : ''}`);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : '不明なエラー';
-          this.addError(`[Note生成] Trade ${trade.id} 失敗: ${message}`);
-        }
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '不明なエラー';
-      this.addError(`Note自動生成エラー: ${message}`);
-    }
   }
 
   /**
