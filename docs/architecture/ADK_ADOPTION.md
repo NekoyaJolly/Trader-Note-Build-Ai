@@ -51,6 +51,20 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 | **SkillRegistry の API** | `src/side-b/skills/` | スキル登録の既存 API を保つ。ADK FunctionTool は**アダプター経由**で利用 |
 | **AgentLoop / PDCALoop の内部** | `src/side-b/agent/pdcaLoop.ts` | 中核ループ、内部書き換え禁止。ADK では Custom Agent で**合成 (composition) によりラップ**するのみ |
 | **AIProvider** | AI 呼び出しラッパー | OpenRouter 経由の reasoning_effort 等を保つため、ADK Model 抽象に置き換えない |
+| **ADK `DatabaseSessionService` 系** (永続化・セッション) | 既存 `src/side-b/agent/agentMemory.ts` (Prisma 経由)、必要に応じ Prisma ベース自作 | `@google/adk@1.1.0` の peer dependency が MikroORM を要求しているため。**プロジェクト全体で ORM は Prisma 単独** (Nekoさん判断 2026-05-12)。MikroORM を入れると ORM 二重管理になりエージェントが迷う |
+
+### 2.3 peer dependency 対応方針 (2026-05-12 確定)
+
+`@google/adk@1.1.0` の `peerDependencies` は `@mikro-orm/{mariadb,mssql,mysql,postgresql,sqlite}: ^6.6.6` のいずれかを要求するが、本プロジェクトでは **MikroORM を導入しない**。対応:
+
+- **インストール方法**: `npm install @google/adk --legacy-peer-deps` (`@google/adk` 導入時は peer dependencies を解決対象から外してインストールする)
+  - **`.npmrc` の扱い**: チーム共有設定としての `legacy-peer-deps=true` 追記は **任意（推奨）**。未追記でも、上記インストールコマンドを明示的に用いる方針で整合する
+- **コード上の制約**:
+  - ✅ OK: `Runner`, `SequentialAgent`, `ParallelAgent`, `LoopAgent`, `FunctionTool`, `Tracing` の利用
+  - ❌ 禁止: `DatabaseSessionService` および ADK 内部の永続化 API の呼び出し
+- **セッション / 状態管理の代替**:
+  - 既存 `src/side-b/agent/agentMemory.ts` (Prisma ベース) を継続活用
+  - 新規でセッション層が必要になった場合、**Prisma ベースで自作** (急がない、Step 後半で必要に応じて対応)
 
 ---
 
@@ -164,7 +178,7 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 2. ESLint PR ゲート化と既存違反 488 件の段階解消 (`STEP_0_CI_STATUS.md` §3.2, `STEP_0_ESLINT_AUDIT.md` §4)
 3. Frontend tsc を CI に追加する判断 (`STEP_0_CI_STATUS.md` §3.3)
 4. tsconfig audit 違反 1423 件の side-b 優先解消 (`STEP_0_TSCONFIG_AUDIT.md` §5.1)
-5. **@google/adk peer dep 対応方針 (案A/B/C のいずれか)** を Step 1 着手前に判断 (`STEP_0_ADK_INSTALL_DRYRUN.md` §3)
+5. ~~**@google/adk peer dep 対応方針 (案A/B/C のいずれか)** を Step 1 着手前に判断~~ → **✅ 確定済み (2026-05-12)**: 案A (`--legacy-peer-deps`) 採用 + `DatabaseSessionService` 系不採用 + Prisma セッション自作。詳細は §2.2 / §2.3 を参照
 
 **3 セッション通算**:
 - 全コミット数: Phase A 8 + Phase B 6 + Phase C 3 = **17 コミット** (本 PR マージ前時点では Phase C 3 コミット + Gate 3 修正分)
