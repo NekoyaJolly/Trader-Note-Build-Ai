@@ -68,29 +68,19 @@ import type { PrismaClient } from '@prisma/client';
 // canonical singleton (PR #152)
 import { prisma as canonicalPrisma } from '../../backend/db/client';
 import { ohlcvRepository } from '../../backend/repositories/ohlcvRepository';
-import path from 'path';
-import { CrossoverAgent } from '../agents/CrossoverAgent';
-import { MutationAgent } from '../agents/MutationAgent';
-import { DiversityEnforcer } from '../evolution/DiversityEnforcer';
-import { EvolutionLoop, type GenerationReport } from '../evolution/EvolutionLoop';
-import { defaultOosBacktestRunner } from '../evolution/analysisEngineRobustnessAdapter';
-import {
-  MULTI_GENERATION_DEFAULTS,
-  runMultiGenerationEvolutionV1,
-  type MultiGenerationRunReport,
-} from '../evolution/multiGenerationRunner';
-import { evolutionInstanceCarryRepository } from '../../backend/repositories/evolutionInstanceCarryRepository';
-// Phase D-1b (2026-05-09): GenerationReflectionAgent + lesson 永続化を本番 multi-gen に inject。
-import { generationReflectionAgent } from '../agents/GenerationReflectionAgent';
-import { generationLessonRepository } from '../../backend/repositories/generationLessonRepository';
-import { randomUUID } from 'crypto';
-import { StrategyPopulation } from '../evolution/StrategyPopulation';
-import { SurrogateFitnessSimulator } from '../strategy_dsl/SurrogateFitnessSimulator';
 import {
   runPromptEvolutionCycle,
   type PromptEvolutionResult,
 } from '../prompts/registry/promptEvolutionJob';
 import type { JsonValue } from '../../utils/jsonValue';
+// PR-1 (sideb-refactor): Evolution 系を切り出し
+import {
+  EvolutionJob,
+  readEvolutionEnvOverrides,
+  DEFAULT_EVOLUTION_REGIMES,
+  type EvolutionJobResult,
+  type EvolutionCarryRetentionResult,
+} from './evolutionJob';
 
 // ===========================================
 // 型定義
@@ -199,12 +189,7 @@ const DEFAULT_CONFIG: SideBSchedulerConfig = {
   autoFullValidation: true,   // Phase 4c: 日次フル検証自動実行
   fullValidationMaxPerRun: 5, // Python + LLM のコストを考慮して控えめに
   autoEvolution: false, // Phase 5: 意図的に無効（有効化時は LLM×複数レジームでコスト注意）
-  evolutionRegimes: [
-    'trending_with_pullback',
-    'breakout',
-    'consolidation',
-    'reversal',
-  ],
+  evolutionRegimes: [...DEFAULT_EVOLUTION_REGIMES],
   // Phase A: デフォルトは最大5世代。env EVOLUTION_GENERATIONS で上書き可能。
   evolutionGenerations: 5,
   evolutionAdaptiveBudget: false,
@@ -213,130 +198,9 @@ const DEFAULT_CONFIG: SideBSchedulerConfig = {
   autoTriggerPromptEvolution: false, // Phase 6: 既定は手動のみ(CLI / UI からの明示的トリガー)
 };
 
-/**
- * Filter Evolution Phase B-3 (2026-05-09): EvolutionInstanceCarry の retention 期限。
- *
- * 既定 14 日。日次クリーンアップ (= autoCleanup) のループで `deleteOlderThan(14)` を呼ぶ。
- * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.B.4
- *
- * 必要なら env で上書きする経路を将来追加可能 (現状は固定値で運用)。14 日より短くすると
- * 「途中で評価が長引いた regime の carry が消える」リスクがあり、長くすると DB 容量が
- * 線形に増える (= 設計書 §8.2 の容量試算 168MB / 14d を超過)。
- */
-const EVOLUTION_CARRY_RETENTION_DAYS = 14;
-
-/**
- * Phase A: 環境変数から進化ループの世代数 / Adaptive Budget / QD-Archive 切り替えを読む。
- *
- * 環境変数 (すべて optional、未指定時は DEFAULT_CONFIG を使う):
- *   - EVOLUTION_GENERATIONS: 1〜5 の整数。範囲外は ignore + warning。
- *   - EVOLUTION_ADAPTIVE_BUDGET: 'true' / 'false' (case-insensitive)。
- *   - EVOLUTION_QD_ARCHIVE: 'true' / 'false'。
- *   - EVOLUTION_QD_PARENT_LIMIT: 0 以上の整数。負数は ignore。
- *   - AUTO_EVOLUTION: 'true' / 'false' (= Filter Evolution 観察フェーズ移行用、2026-05-09 追加)。
- *     true で 24h ごとの evolution cron が自動起動する。LLM コスト発生注意。
- *
- * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.A.2 / §5.A.5
- *
- * @see SideBSchedulerConfig
- */
-/**
- * 環境変数値が「整数表現の文字列」であることを厳密に検証する。
- *
- * `parseInt` だと '2abc' / '2.9' / '  2 ' を 2 として受理してしまう。本関数は
- * trim 後に `^-?\d+$` 全体一致でなければ null を返し、設定ミスを silent fail
- * させない (= PR #138 Copilot review で指摘された運用事故防止)。
- */
-function parseStrictInt(raw: string): number | null {
-  const trimmed = raw.trim();
-  if (!/^-?\d+$/.test(trimmed)) return null;
-  const n = Number(trimmed);
-  return Number.isFinite(n) ? n : null;
-}
-
-/**
- * 環境変数値を `'true' | 'false'` で厳密に判定する。trim + toLowerCase 後に
- * 'true' / 'false' でなければ null (= 想定外文字列、warning 対象)。
- */
-function parseStrictBool(raw: string): boolean | null {
-  const trimmed = raw.trim().toLowerCase();
-  if (trimmed === 'true') return true;
-  if (trimmed === 'false') return false;
-  return null;
-}
-
-function readEvolutionEnvOverrides(): Partial<SideBSchedulerConfig> {
-  const out: Partial<SideBSchedulerConfig> = {};
-
-  const gensRaw = process.env.EVOLUTION_GENERATIONS;
-  if (gensRaw !== undefined && gensRaw !== '') {
-    const parsed = parseStrictInt(gensRaw);
-    if (
-      parsed !== null &&
-      parsed >= 1 &&
-      parsed <= MULTI_GENERATION_DEFAULTS.maxGenerations
-    ) {
-      out.evolutionGenerations = parsed;
-    } else {
-      console.warn(
-        `[SideBScheduler] EVOLUTION_GENERATIONS=${gensRaw} は不正値 (1〜${MULTI_GENERATION_DEFAULTS.maxGenerations} の整数のみ)、無視します`,
-      );
-    }
-  }
-
-  const adaptiveRaw = process.env.EVOLUTION_ADAPTIVE_BUDGET;
-  if (adaptiveRaw !== undefined && adaptiveRaw !== '') {
-    const parsed = parseStrictBool(adaptiveRaw);
-    if (parsed === null) {
-      console.warn(
-        `[SideBScheduler] EVOLUTION_ADAPTIVE_BUDGET=${adaptiveRaw} は不正値 ('true' | 'false' のみ)、無視します`,
-      );
-    } else {
-      out.evolutionAdaptiveBudget = parsed;
-    }
-  }
-
-  const qdRaw = process.env.EVOLUTION_QD_ARCHIVE;
-  if (qdRaw !== undefined && qdRaw !== '') {
-    const parsed = parseStrictBool(qdRaw);
-    if (parsed === null) {
-      console.warn(
-        `[SideBScheduler] EVOLUTION_QD_ARCHIVE=${qdRaw} は不正値 ('true' | 'false' のみ)、無視します`,
-      );
-    } else {
-      out.evolutionQDArchive = parsed;
-    }
-  }
-
-  const qdLimitRaw = process.env.EVOLUTION_QD_PARENT_LIMIT;
-  if (qdLimitRaw !== undefined && qdLimitRaw !== '') {
-    const parsed = parseStrictInt(qdLimitRaw);
-    if (parsed !== null && parsed >= 0) {
-      out.evolutionQDParentLimit = parsed;
-    } else {
-      console.warn(
-        `[SideBScheduler] EVOLUTION_QD_PARENT_LIMIT=${qdLimitRaw} は不正値 (>=0 の整数のみ)、無視します`,
-      );
-    }
-  }
-
-  // Filter Evolution 観察フェーズ (2026-05-09): AUTO_EVOLUTION で evolution cron の自動起動を制御。
-  // - true で `startEvolutionJob` が動き 24h ごと `runEvolutionNow` が走る (= LLM コスト発生)
-  // - DEFAULT_CONFIG.autoEvolution は false なので、本番で観察データを蓄積するには true 設定が必須
-  const autoEvolutionRaw = process.env.AUTO_EVOLUTION;
-  if (autoEvolutionRaw !== undefined && autoEvolutionRaw !== '') {
-    const parsed = parseStrictBool(autoEvolutionRaw);
-    if (parsed === null) {
-      console.warn(
-        `[SideBScheduler] AUTO_EVOLUTION=${autoEvolutionRaw} は不正値 ('true' | 'false' のみ)、無視します`,
-      );
-    } else {
-      out.autoEvolution = parsed;
-    }
-  }
-
-  return out;
-}
+// EVOLUTION_CARRY_RETENTION_DAYS は EvolutionJob 側に移動 (`./evolutionJob.ts`)。
+// readEvolutionEnvOverrides / parseStrictInt / parseStrictBool も同様に移動。
+// 旧 sideBScheduler.ts に存在した env 解釈と clamp ロジックは PR-1 で EvolutionJob 配下に集約。
 
 /**
  * ジョブ実行結果
@@ -416,9 +280,13 @@ export class SideBScheduler {
   private cronSimilarityService: CronSimilarityService;
   private prisma: PrismaClient;
 
+  // PR-1 (sideb-refactor): Evolution 系 Job を保持し、runEvolutionNow / runEvolutionCarryRetentionNow を delegation。
+  private evolutionJob: EvolutionJob;
+
   constructor(configOverride?: Partial<SideBSchedulerConfig>) {
     // Phase A: env からの override を DEFAULT_CONFIG と configOverride の中間に挟む。
     // 優先順位 (高 → 低): configOverride 引数 > 環境変数 > DEFAULT_CONFIG。
+    // env 解釈は EvolutionJob 側 (`readEvolutionEnvOverrides`) に集約済み。
     const envOverrides = readEvolutionEnvOverrides();
     this.config = { ...DEFAULT_CONFIG, ...envOverrides, ...configOverride };
     this.isProduction = process.env.NODE_ENV === 'production';
@@ -431,6 +299,20 @@ export class SideBScheduler {
       similarityThreshold: this.config.similarityThreshold,
       debug: !this.isProduction,
     });
+
+    // PR-1 (sideb-refactor): EvolutionJob を Scheduler の addError / log を依存注入して構築。
+    // 完了時に lastEvolutionRun を Scheduler 側で更新する。
+    this.evolutionJob = new EvolutionJob(
+      {
+        addError: (msg: string) => this.addError(msg),
+        log: (msg: string) => this.log(msg),
+      },
+      {
+        onCompleted: (completedAt: Date) => {
+          this.lastEvolutionRun = completedAt;
+        },
+      },
+    );
   }
 
   /**
@@ -961,7 +843,8 @@ export class SideBScheduler {
         try {
           await this.runEvolutionNow();
         } catch (err) {
-          this.addError(`進化ループジョブエラー: ${err}`);
+          const msg = err instanceof Error ? err.message : String(err);
+          this.addError(`進化ループジョブエラー: ${msg}`);
         } finally {
           this.isEvolutionRunning = false;
         }
@@ -1012,249 +895,31 @@ export class SideBScheduler {
   }
 
   /**
-   * Phase 5 + Phase A: 進化ループを手動実行（全レジーム順、各レジームで N 世代）
+   * Phase 5 + Phase A: 進化ループを手動実行（全レジーム順、各レジームで N 世代）。
    *
-   * Phase A (2026-05-09): `evolutionGenerations >= 2` で `runMultiGenerationEvolutionV1`
-   * 経由になり、世代間で tradesByDslId / RepairHint / RepairOutcome baseline が引き継がれる。
-   * `=1` (default) では従来単世代経路を維持 (= 完全な後方互換)。
+   * PR-1 (sideb-refactor): 本体は `EvolutionJob.run()` へ移行済み。本メソッドは
+   * 互換 API として残し delegation のみを行う。詳細・設計書:
+   * - `./evolutionJob.ts` の `EvolutionJob.run()`
+   * - docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.A
    *
-   * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.A
+   * 戻り値形 `{ regimeReports: number; errors: string[] }` は維持
+   * (`evolutionMultiGen.test.ts` が直接検証)。
    */
-  async runEvolutionNow(): Promise<{ regimeReports: number; errors: string[] }> {
-    const regimes = this.config.evolutionRegimes?.length
-      ? this.config.evolutionRegimes
-      : DEFAULT_CONFIG.evolutionRegimes;
-    const persistPath = path.join(process.cwd(), 'data', 'evolution', 'strategy-population.json');
-    const population = new StrategyPopulation(persistPath);
-    await population.load();
-
-    const end = new Date();
-    const start = new Date(end.getTime() - 365 * 24 * 60 * 60 * 1000);
-    const defaultPeriod = {
-      start: start.toISOString().slice(0, 10),
-      end: end.toISOString().slice(0, 10),
-    };
-
-    // Phase 5A: EdgeLedger への自動登録は撤廃（候補抽出のみ）
-    // PR #110: 本番 scheduler では analysis-engine `/v1/oos-validation` を叩く
-    //   `defaultOosBacktestRunner` を注入し、validation_candidate に対する OOS 観測を
-    //   実データで動かす (= validation_confirmed / oos_passed / oos_failed が trend に出る)
-    const loop = new EvolutionLoop({
-      population,
-      adapter: new SurrogateFitnessSimulator(),
-      mutationAgent: new MutationAgent(),
-      crossoverAgent: new CrossoverAgent(),
-      enforcer: new DiversityEnforcer(),
-      defaultPeriod,
-      oosBacktestRunner: defaultOosBacktestRunner,
-      // Phase B-2 (2026-05-09): cron 起動を跨いだ in-memory cache 復元を有効化。
-      // EvolutionLoop は既定 null だが、本番 scheduler では DB 接続済 repo を明示注入する。
-      evolutionInstanceCarryRepo: evolutionInstanceCarryRepository,
-    });
-
-    // PR #138 Copilot review #4: configOverride 経由で 0 や maxGenerations 超過の値が渡されると
-    // runner 側で clamp される一方で scheduler のログ表示や useMultiGen 判定がズレる。
-    // ここで [1, MULTI_GENERATION_DEFAULTS.maxGenerations] に clamp してから dispatch する。
-    const rawGenerations = this.config.evolutionGenerations ?? 1;
-    const generations = Math.max(
-      1,
-      Math.min(MULTI_GENERATION_DEFAULTS.maxGenerations, Math.floor(rawGenerations)),
-    );
-    if (generations !== rawGenerations) {
-      this.log(
-        `[Evolution] 設定 evolutionGenerations=${rawGenerations} を [1, ${MULTI_GENERATION_DEFAULTS.maxGenerations}] に clamp して ${generations} で実行`,
-      );
-    }
-    const useMultiGen = generations >= 2;
-    const errors: string[] = [];
-    let n = 0;
-    this.log(
-      `[Evolution] 進化ループ開始: ${regimes.length} レジーム, ` +
-        `期間 ${defaultPeriod.start}〜${defaultPeriod.end}, ` +
-        `世代数=${generations} (${useMultiGen ? 'multi-gen' : 'single-gen'}), ` +
-        `adaptive=${this.config.evolutionAdaptiveBudget} qd=${this.config.evolutionQDArchive}`,
-    );
-
-    for (let i = 0; i < regimes.length; i++) {
-      const regime = regimes[i];
-      try {
-        if (useMultiGen) {
-          const runReport = await this.runEvolutionMultiGen(loop, regime, generations);
-          // multi-gen runner の trend summary をログに残す + 個別 generation report も流す
-          for (const g of runReport.generations) {
-            n++;
-            if (g.report) {
-              this.log(
-                `[Evolution] regime=${regime} gen=${g.generationIndex + 1}/${generations} ` +
-                  `elites=${g.report.eliteIds.length} mut=${g.report.mutantsReceived} ` +
-                  `cross=${g.report.crossoversReceived} ` +
-                  `candidates=${g.report.promotionCandidates.length} ` +
-                  `divBoost=${g.report.lowDiversityBoost} status=${g.status}`,
-              );
-              if (g.report.errors.length > 0) errors.push(...g.report.errors);
-              // Phase E (2026-05-09): 各世代終了時に PDCA に通知して実 loop の thinking log に記録。
-              // 例外は飲んで世代結果に影響させない。
-              this.notifyPdcaEvolutionGeneration(
-                regime,
-                g.generationIndex,
-                generations,
-                g.report,
-              );
-            } else {
-              this.log(
-                `[Evolution] regime=${regime} gen=${g.generationIndex + 1}/${generations} ` +
-                  `status=${g.status} error=${g.errorMessage ?? 'unknown'}`,
-              );
-              if (g.errorMessage) errors.push(`${regime} gen ${g.generationIndex + 1}: ${g.errorMessage}`);
-            }
-          }
-          this.log(
-            `[Evolution] regime=${regime} multi-gen trend: ` +
-              `formalBtPassed=[${runReport.trendSummary.formalBtPassedByGeneration.join(',')}] ` +
-              `validationConfirmed=[${runReport.trendSummary.validationConfirmedByGeneration.join(',')}] ` +
-              `repairImproved=[${runReport.trendSummary.repairOutcomeImprovedByGeneration.join(',')}] ` +
-              `stoppedEarly=${runReport.trendSummary.stoppedEarly}` +
-              (runReport.trendSummary.stopReason ? ` reason=${runReport.trendSummary.stopReason}` : ''),
-          );
-        } else {
-          // 後方互換: 単世代経路 (= evolutionGenerations === 1)
-          const report = await loop.runOneGeneration(regime);
-          n++;
-          this.log(
-            `[Evolution] regime=${regime} elites=${report.eliteIds.length} ` +
-              `mut=${report.mutantsReceived} cross=${report.crossoversReceived} ` +
-              `candidates=${report.promotionCandidates.length} divBoost=${report.lowDiversityBoost}`,
-          );
-          if (report.errors.length > 0) errors.push(...report.errors);
-          // Phase E (2026-05-09): 単世代経路でも PDCA に世代完了通知を送る (= multi-gen と同じ経路)。
-          this.notifyPdcaEvolutionGeneration(regime, 0, 1, report);
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        errors.push(`${regime}: ${msg}`);
-        this.addError(`[Evolution] ${regime} 失敗: ${msg}`);
-        // PDCAループに失敗を通知して学習ログに残す
-        try {
-          pdcaLoop.notifyEvolutionFailed(regime, msg);
-        } catch { /* PDCAループ未起動時は無視 */ }
-      }
-      if (i < regimes.length - 1) {
-        await new Promise((r) => setTimeout(r, 30_000));
-      }
-    }
-
-    this.lastEvolutionRun = new Date();
-    this.log(`[Evolution] 進化ループ完了: レジーム×世代の合計実行=${n}件`);
-    return { regimeReports: n, errors };
-  }
-
-  /**
-   * Phase A: multi-generation runner 経由の 1 regime 実行。
-   *
-   * `runMultiGenerationEvolutionV1` に loop.runOneGeneration を adapter で渡し、
-   * 世代間で tradesByDslId / RepairHint / RepairOutcome baseline を引き継ぐ。
-   * QD-Archive / Adaptive Budget は config で個別に切り替え可能。
-   */
-  private async runEvolutionMultiGen(
-    loop: EvolutionLoop,
-    regime: string,
-    generations: number,
-  ): Promise<MultiGenerationRunReport> {
-    // Phase D-1b: lesson 永続化用 evolutionRunId を生成し、runner options で明示的に渡す。
-    // PR #145 Copilot review #5 対応: 旧設計 (= wrapper repo で UUID を上書き) は wrapper を
-    // 通さない呼び出しで誤った evolutionRunId が永続化されるリスクがあった。runner options で
-    // 渡す形に統一して型 / 引数で事故を防ぐ。
-    const evolutionRunId = randomUUID();
-
-    return await runMultiGenerationEvolutionV1({
-      options: {
-        generations,
-        regime,
-        adaptiveRepairBudget: this.config.evolutionAdaptiveBudget,
-        qualityDiversityArchive: this.config.evolutionQDArchive,
-        qualityDiversityArchiveParentLimit: this.config.evolutionQDParentLimit,
-        // 世代間引き継ぎは default ON のまま (= Filter Evolution M2/M3 が成立する条件)
-        // Phase D-1b: GenerationReflectionAgent + lesson repo + evolutionRunId の 3 点を inject。
-        generationReflectionAgent,
-        generationLessonRepo: generationLessonRepository,
-        evolutionRunIdForLessons: evolutionRunId,
-      },
-      runOneGeneration: async ({
-        repairHintsForMutation,
-        repairBaselinesForOutcome,
-        mutationBudgetAllocation,
-        qualityDiversityArchiveParents,
-      }) =>
-        loop.runOneGeneration(regime, {
-          repairHintsForMutation,
-          repairBaselinesForOutcome,
-          mutationBudgetAllocation,
-          qualityDiversityArchiveParents,
-        }),
-    });
-  }
-
-  /**
-   * Filter Evolution Phase E (2026-05-09): 進化ループ世代完了を PDCA に通知。
-   *
-   * GenerationReport から最低限の集計値を抜粋して PDCA loop の通知 hook に渡す。
-   * pdcaLoop 側の `notifyEvolutionGenerationComplete` で thinking log に記録される。
-   *
-   * 例外は飲んで世代結果に影響させない (= 通知失敗で進化ループが停止しないよう保護)。
-   * Phase D の GenerationReflectionAgent が完成したら `reflectionLessons` 引数も渡す経路を増やす。
-   *
-   * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.E.1
-   */
-  private notifyPdcaEvolutionGeneration(
-    regime: string,
-    generationIndex: number,
-    generationsTotal: number,
-    report: GenerationReport,
-  ): void {
-    try {
-      const formalBtPassed = report.formalBtVerifiedCandidates.filter((c) => c.formalBtPassed).length;
-      pdcaLoop.notifyEvolutionGenerationComplete(regime, {
-        generationIndex,
-        generationsTotal,
-        promotionCandidates: report.promotionCandidates.length,
-        validationConfirmed: report.oosAwarePromotionSummary.validationConfirmed,
-        formalBtPassed,
-      });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      this.addError(`[Phase E] PDCA 通知失敗: regime=${regime} gen=${generationIndex} error=${msg}`);
-    }
+  async runEvolutionNow(): Promise<EvolutionJobResult> {
+    return this.evolutionJob.run(this.config);
   }
 
   /**
    * Filter Evolution Phase B-3 (2026-05-09): EvolutionInstanceCarry retention 実行。
    *
-   * 14 日より古い carry 行を `evolutionInstanceCarryRepository.deleteOlderThan()` で削除し、
-   * 削除件数 > 0 のときは `console.info` で本番 (NODE_ENV=production) でも Cloud Logging に
-   * 残るログを出す (PR #142 Copilot review #1: `this.log()` は production で no-op のため不適)。
-   *
-   * 例外は飲んで全体クリーンアップを止めない (= 他種データ削除はそのまま継続)。
-   * 例外時は `this.addError` でスケジューラエラーリストに記録する。
+   * PR-1 (sideb-refactor): 本体は `EvolutionJob.runCarryRetention()` へ移行済み。
+   * console.info 経路 (PR #142 Copilot review #1: production で `this.log()` no-op 対応) は
+   * EvolutionJob 側で維持されている。`evolutionCarryRetention.test.ts` が直接検証。
    *
    * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.B.4
    */
-  async runEvolutionCarryRetentionNow(): Promise<{ deleted: number; error?: string }> {
-    try {
-      const carryDeleted = await evolutionInstanceCarryRepository.deleteOlderThan(
-        EVOLUTION_CARRY_RETENTION_DAYS,
-      );
-      if (carryDeleted > 0) {
-        console.info(
-          `[SideBScheduler] [Phase B-3] EvolutionInstanceCarry retention: ${carryDeleted} 件削除 ` +
-            `(${EVOLUTION_CARRY_RETENTION_DAYS} 日より古い行)`,
-        );
-      }
-      return { deleted: carryDeleted };
-    } catch (carryErr) {
-      const carryMsg = carryErr instanceof Error ? carryErr.message : String(carryErr);
-      this.addError(`[Phase B-3] EvolutionInstanceCarry retention 失敗: ${carryMsg}`);
-      return { deleted: 0, error: carryMsg };
-    }
+  async runEvolutionCarryRetentionNow(): Promise<EvolutionCarryRetentionResult> {
+    return this.evolutionJob.runCarryRetention();
   }
 
   /**
