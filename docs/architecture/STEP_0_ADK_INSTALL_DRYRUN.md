@@ -55,15 +55,24 @@ npm view @google/adk version description peerDependencies
 
 MikroORM は導入されていない。
 
-### 2.3 dry-run で error にならなかった理由
+### 2.3 dry-run で error にならなかった理由 (npm の peer deps 挙動)
 
-npm の挙動として、peer dependency の不足は以下のように扱われる:
+npm v7+ における peer dependencies の扱いは以下:
 
-- **v7 以降**: peer dependency が見つからない場合は **warning** (error にはならない)
-- **v7 未満**: peer dependency 不足を完全に無視
-- `--dry-run` フラグは衝突レポートを表示するが、peer dependency 不足の warning は本 dry-run の最後尾の `added 402 packages, and changed 1 package` メッセージに集約されてしまい、目立たない
+- **自動解決を試みる**: npm v7+ は peer dependency を install ツリーに自動で含めようとする (v6 までは無視)
+- **競合時は `ERESOLVE` で失敗**: 既存依存と peer dep が両立しない場合 (例: バージョン範囲の交差なし)、実 install 時に `ERESOLVE` エラーで停止
+- **挙動はフラグで変わる**:
+  - `--legacy-peer-deps`: v6 以前の挙動 (peer dep 不整合を無視して install)
+  - `--strict-peer-deps`: warning も error として扱う
+  - `--force`: 衝突を強引にスキップして install
+- **dry-run の限界**: `npm install --dry-run` は依存解決ツリーをシミュレートするが、本リポジトリ実行時の `added 402 packages` メッセージで peer dep に関する warning が混在しても明示されない場合がある
 
-→ **「dry-run が exit 0 を返した = 安全」とは限らない**。peer dependency 要件は別途レビューが必要。
+本 dry-run では:
+- `@google/adk` の peer dep `@mikro-orm/*` は**現在の本リポジトリに存在しない**
+- npm はこれを「peer dep 不在」として処理した可能性が高い (実 install では warning レベル、`--strict-peer-deps` を付ければ error)
+- `ERESOLVE` までは至らなかったため exit 0
+
+→ **「dry-run exit 0 = 安全」とは限らない**。実 install 時の挙動は npm 設定 (`.npmrc` の `legacy-peer-deps` 等) とフラグ次第で変わる。peer dependency 要件は別途レビューが必要。
 
 ---
 

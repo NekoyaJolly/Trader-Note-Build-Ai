@@ -155,7 +155,7 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
   - Ticket B1: tsconfig.audit.json (root + frontend) 分離方式採用。audit 値 = 1044 + 379 = 1423 errors (`STEP_0_TSCONFIG_AUDIT.md`)、本番 tsconfig は 0 errors 維持
   - Ticket B2: ESLint 5 規則 warn→error 格上げ、`ban-ts-comment` 追加 (tests/scripts も有効)。`STEP_0_ESLINT_AUDIT.md` (488 errors 残存、別 PR で順次解消)。**unknown 禁止方針** を案B (規約強化) として確定し AGENTS.md 群に反映
   - Ticket B3: CI 状況報告 (`STEP_0_CI_STATUS.md`)。ESLint は root に lint script 不在で未実行、main は保護未設定 → ユーザー対応依頼
-- **Phase C (Gate 3 approved)**: PR #_ で提出予定 (本 PR)
+- **Phase C (PR #157 submitted, pending approval)**: 本 PR
   - Ticket C1: simple-git-hooks + lint-staged が既存導入されており機能等価のため husky 置き換えは不要。Mac/Windows 動作確認手順を `STEP_0_HUSKY_SETUP.md` にドキュメント化
   - Ticket C2: `@google/adk@1.1.0` dry-run 成功 (`STEP_0_ADK_INSTALL_DRYRUN.md`)。**重要発見**: peer dependency が MikroORM ファミリーを要求 (Prisma 採用の本プロジェクトと不一致)。Step 1 着手前にユーザー判断必須
 
@@ -163,7 +163,7 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 1. main ブランチ保護ルール設定 (`STEP_0_CI_STATUS.md` §3.1)
 2. ESLint PR ゲート化と既存違反 488 件の段階解消 (`STEP_0_CI_STATUS.md` §3.2, `STEP_0_ESLINT_AUDIT.md` §4)
 3. Frontend tsc を CI に追加する判断 (`STEP_0_CI_STATUS.md` §3.3)
-4. tsconfig audit 違反 1423 件の側-b 優先解消 (`STEP_0_TSCONFIG_AUDIT.md` §5.1)
+4. tsconfig audit 違反 1423 件の side-b 優先解消 (`STEP_0_TSCONFIG_AUDIT.md` §5.1)
 5. **@google/adk peer dep 対応方針 (案A/B/C のいずれか)** を Step 1 着手前に判断 (`STEP_0_ADK_INSTALL_DRYRUN.md` §3)
 
 **3 セッション通算**:
