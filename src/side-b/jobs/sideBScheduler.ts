@@ -43,9 +43,6 @@ import {
 import { generateNoteFromTrade } from '../services/aiNoteService';
 import { agentMemory } from '../agent/agentMemory';
 import { discoveryAgent } from '../agents/DiscoveryAgent';
-import { strategistAgent } from '../agents/StrategistAgent';
-import { screeningOrchestrator } from '../bridge';
-import { edgeLedger } from '../ledger';
 import { findAITradeNotesInPeriod } from '../repositories/aiNoteRepository';
 import { summarySchedulerService } from '../services/summarySchedulerService';
 import { executeCleanup, type CleanupConfig } from '../services/dataCleanupService';
@@ -81,6 +78,13 @@ import {
   type EvolutionJobResult,
   type EvolutionCarryRetentionResult,
 } from './evolutionJob';
+// PR-2 (sideb-refactor): FullValidation / Screening 系を切り出し
+import { FullValidationJob, type FullValidationJobResult } from './fullValidationJob';
+import {
+  ScreeningJob,
+  type ScreeningJobOptions,
+  type ScreeningJobResult,
+} from './screeningJob';
 
 // ===========================================
 // 型定義
@@ -282,6 +286,9 @@ export class SideBScheduler {
 
   // PR-1 (sideb-refactor): Evolution 系 Job を保持し、runEvolutionNow / runEvolutionCarryRetentionNow を delegation。
   private evolutionJob: EvolutionJob;
+  // PR-2 (sideb-refactor): FullValidation / Screening を delegation。
+  private fullValidationJob: FullValidationJob;
+  private screeningJob: ScreeningJob;
 
   constructor(configOverride?: Partial<SideBSchedulerConfig>) {
     // Phase A: env からの override を DEFAULT_CONFIG と configOverride の中間に挟む。
@@ -300,19 +307,27 @@ export class SideBScheduler {
       debug: !this.isProduction,
     });
 
-    // PR-1 (sideb-refactor): EvolutionJob を Scheduler の addError / log を依存注入して構築。
-    // 完了時に lastEvolutionRun を Scheduler 側で更新する。
-    this.evolutionJob = new EvolutionJob(
-      {
-        addError: (msg: string) => this.addError(msg),
-        log: (msg: string) => this.log(msg),
+    // PR-1 / PR-2 (sideb-refactor): 各 Job を Scheduler の addError / log を依存注入して構築。
+    // 完了時に lastXxxRun を Scheduler 側で更新する。
+    const deps = {
+      addError: (msg: string) => this.addError(msg),
+      log: (msg: string) => this.log(msg),
+    };
+    this.evolutionJob = new EvolutionJob(deps, {
+      onCompleted: (completedAt: Date) => {
+        this.lastEvolutionRun = completedAt;
       },
-      {
-        onCompleted: (completedAt: Date) => {
-          this.lastEvolutionRun = completedAt;
-        },
+    });
+    this.fullValidationJob = new FullValidationJob(deps, {
+      onCompleted: (completedAt: Date) => {
+        this.lastFullValidationRun = completedAt;
       },
-    );
+    });
+    this.screeningJob = new ScreeningJob(deps, {
+      onCompleted: (completedAt: Date) => {
+        this.lastScreeningRun = completedAt;
+      },
+    });
   }
 
   /**
@@ -653,71 +668,14 @@ export class SideBScheduler {
   /**
    * Phase 4b 縮小版 + Critical-4 段階 1.6: スクリーニングを手動実行
    *
-   * unverified 仮説を最大 `limit` 件取り出し、
-   * ScreeningOrchestrator.runScreening で順次評価する。
-   * 各仮説の失敗は他仮説に影響させない（best-effort）。
+   * PR-2 (sideb-refactor): 本体は `ScreeningJob.runWithOptions()` へ移行済み。
+   * 本メソッドは互換 API として残し delegation のみを行う。
    *
-   * @param options.limit  config.screeningMaxPerRun の override (運用側で 1 回分の処理量を絞る)
+   * @param options.limit  config.screeningMaxPerRun の override
    * @param options.period BT 対象期間 override (env SCREENING_PERIOD_DAYS のデフォルトを上書き)
    */
-  async runScreeningNow(options?: {
-    limit?: number;
-    period?: { start: string; end: string };
-  }): Promise<{
-    processed: number;
-    passed: number;
-    rejected: number;
-    notTestable: number;
-    errors: number;
-  }> {
-    const limit = Math.max(1, options?.limit ?? this.config.screeningMaxPerRun);
-    const periodLog = options?.period ? ` period=${options.period.start}〜${options.period.end}` : '';
-    this.log(`[Screening] 事前スクリーニングを開始 (上限 ${limit}件)${periodLog}`);
-
-    const summary = { processed: 0, passed: 0, rejected: 0, notTestable: 0, errors: 0 };
-
-    try {
-      const unverified = await edgeLedger.findByStatus('unverified');
-      const targets = unverified.slice(0, limit);
-      this.log(`[Screening] 対象仮説: ${targets.length}件`);
-
-      for (const hyp of targets) {
-        summary.processed++;
-        try {
-          const symbol = hyp.symbols[0];
-          const lensSnapshot = symbol ? agentMemory.getCurrentLensSnapshot(symbol) : undefined;
-          const result = await screeningOrchestrator.runScreening(hyp.id, {
-            lensSnapshot,
-            ...(options?.period ? { period: options.period } : {}),
-          });
-
-          if (result.verdict === 'screening_passed') {
-            summary.passed++;
-            this.log(`[Screening] passed: ${hyp.id} pf=${result.metrics.pf.toFixed(3)} winRate=${result.metrics.winRate.toFixed(3)} trades=${result.metrics.tradeCount}`);
-          } else if (result.verdict === 'rejected') {
-            summary.rejected++;
-            this.log(`[Screening] rejected: ${hyp.id} reasons=[${result.reasons.join(', ')}]`);
-          } else {
-            summary.notTestable++;
-            this.log(`[Screening] not_testable: ${hyp.id} reason=${result.reason}`);
-          }
-        } catch (err) {
-          summary.errors++;
-          const message = err instanceof Error ? err.message : String(err);
-          this.addError(`[Screening] ${hyp.id} 失敗: ${message}`);
-        }
-      }
-      this.lastScreeningRun = new Date();
-      this.log(`[Screening] 完了: processed=${summary.processed} passed=${summary.passed} rejected=${summary.rejected} not_testable=${summary.notTestable} errors=${summary.errors}`);
-      try {
-        pdcaLoop.notifyValidationBatchComplete('screening', summary);
-      } catch { /* PDCAループ未起動時は無視 */ }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.addError(`[Screening] 仮説取得失敗: ${message}`);
-    }
-
-    return summary;
+  async runScreeningNow(options?: ScreeningJobOptions): Promise<ScreeningJobResult> {
+    return this.screeningJob.runWithOptions(this.config, options);
   }
 
   /**
@@ -752,67 +710,12 @@ export class SideBScheduler {
   /**
    * Phase 4c: 本格検証を手動実行
    *
-   * screening_passed 仮説を最大 fullValidationMaxPerRun 件取り出し、
-   * StrategistAgent.validate で順次評価する。Python 起動 + LLM コストを
-   * 抑えるため各仮説間にクールダウンを挟む（10秒）。
+   * PR-2 (sideb-refactor): 本体は `FullValidationJob.run()` へ移行済み。
+   * 本メソッドは互換 API として残し delegation のみを行う。
+   * `sideBScheduler.fullValidation.test.ts` が直接検証。
    */
-  async runFullValidationNow(): Promise<{
-    processed: number;
-    confirmed: number;
-    rejected: number;
-    notTestable: number;
-    errors: number;
-  }> {
-    const limit = Math.max(1, this.config.fullValidationMaxPerRun);
-    this.log(`[FullValidation] 本格検証を開始 (上限 ${limit}件)`);
-
-    const summary = { processed: 0, confirmed: 0, rejected: 0, notTestable: 0, errors: 0 };
-
-    try {
-      const targets = await edgeLedger.findByStatus('screening_passed');
-      const limited = targets.slice(0, limit);
-      this.log(`[FullValidation] 対象仮説: ${limited.length}件`);
-
-      for (let i = 0; i < limited.length; i++) {
-        const hyp = limited[i];
-        summary.processed++;
-        try {
-          const verdict = await strategistAgent.validate(hyp.id);
-          if (verdict.verdict === 'confirmed') {
-            summary.confirmed++;
-            this.log(`[FullValidation] confirmed: ${hyp.id}`);
-          } else if (verdict.verdict === 'rejected') {
-            summary.rejected++;
-            this.log(`[FullValidation] rejected: ${hyp.id} reasons=[${verdict.baseCriteriaReasons.join(', ')}]`);
-          } else {
-            summary.notTestable++;
-            this.log(`[FullValidation] ${verdict.verdict}: ${hyp.id}`);
-          }
-        } catch (err) {
-          summary.errors++;
-          const message = err instanceof Error ? err.message : String(err);
-          this.addError(`[FullValidation] ${hyp.id} 失敗: ${message}`);
-        }
-
-        // クールダウン（Python コンテナ / LLM API 保護）。最後は不要
-        if (i < limited.length - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 10000));
-        }
-      }
-
-      this.lastFullValidationRun = new Date();
-      this.log(
-        `[FullValidation] 完了: processed=${summary.processed} confirmed=${summary.confirmed} rejected=${summary.rejected} not_testable=${summary.notTestable} errors=${summary.errors}`,
-      );
-      try {
-        pdcaLoop.notifyValidationBatchComplete('full_validation', summary);
-      } catch { /* PDCAループ未起動時は無視 */ }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.addError(`[FullValidation] 対象取得失敗: ${message}`);
-    }
-
-    return summary;
+  async runFullValidationNow(): Promise<FullValidationJobResult> {
+    return this.fullValidationJob.run(this.config);
   }
 
   /**
