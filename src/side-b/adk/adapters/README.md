@@ -1,9 +1,9 @@
 # SkillRegistry → ADK FunctionTool アダプター 設計書
 
-> **チケット**: Step 1 Ticket T2 (初期ドラフト) → T2.5 着手中
-> **作成日**: 2026-05-13
-> **ステータス**: ✅ **T2 ユーザー承認済み (2026-05-13)** / T2.5 スパイク進行中
-> **Nekoさん承認時の追加方針** (§3 §8 に反映済み): callerReason フォールバック方針、ADK public API 経由テスト限定
+> **チケット**: Step 1 Ticket T2 (初期ドラフト) → T2.5 (実測スパイク完了、ユーザー承認待ち)
+> **作成日**: 2026-05-13 (T2 初稿) / 2026-05-13 (T2.5 実測反映)
+> **ステータス**: ✅ T2 承認済み / 🔍 **T2.5 ユーザー承認待ち** (採用方式 B 確定、§3 §4 §6 §8 を実測で更新済み)
+> **Nekoさん承認時の追加方針** (§3.5 §8.4 に反映済み): callerReason フォールバック、ADK public API 経由テスト限定
 > **計画書**: `docs/architecture/STEP_1_KICKOFF.md` §Ticket T2
 > **位置づけ**: ADK 段階導入 Step 1 のサイドカー設計
 > **依存方向**: `adk → 既存` (skills, agent 等) のみ。逆向きは禁止
@@ -59,41 +59,74 @@ ADK Agent は `tools` 配列を受け取る API である。`SkillRegistry` を 
 
 ---
 
-## 3. SkillContext マッピング 🔍 T2.5 検証対象
+## 3. SkillContext マッピング ✅ T2.5 完了で確定
 
 ### 3.1 既存 `SkillContext`
 
 ```typescript
-// src/side-b/skills/types.ts
+// src/side-b/skills/types.ts (改変禁止、不可侵領域)
 export interface SkillContext {
-  callerAgent?: string;     // 呼び出し元エージェント名 (例: 'discovery', 'strategist')
-  callerReason?: string;    // LLM が自由記述で渡す呼び出し理由
-  timestamp: Date;          // 呼び出し時刻 (省略時は現在時刻)
+  callerAgent?: string;
+  callerReason?: string;
+  timestamp: Date;
 }
 ```
 
-### 3.2 仮説: ADK 実行 context から構築
+### 3.2 ADK `Context` の実構造 (T2.5 実測)
 
-ADK の Tool 実行時 context (callerAgent / trace_id / invocation_id 相当を含む想定) から `SkillContext` を構築する変換関数 `toSkillContext()` を提供する。
+ADK の `Context` クラス (`ReadonlyContext` 継承) から取得可能なフィールド:
+
+| ADK Context field / getter | 型 | SkillContext へのマッピング |
+|----------------------------|----|----------------------------|
+| `agentName` (getter, from ReadonlyContext) | `string` | **`callerAgent`** ✅ |
+| `invocationId` (getter) | `string` | SkillContext 対応なし (将来 trace 用) |
+| `functionCallId` (field) | `string \| undefined` | SkillContext 対応なし (将来 trace 用) |
+| `sessionId` (getter) | `string` | SkillContext 対応なし |
+| `userId` (getter) | `string` | SkillContext 対応なし |
+| `userContent` (getter) | `Content \| undefined` | SkillContext 対応なし |
+| (なし) | — | **`callerReason`**: ADK 標準になし → §3.5 fallback |
+| (なし) | — | **`timestamp`**: ADK 標準になし → `new Date()` |
+
+### 3.3 確定マッピング
 
 ```typescript
-// 仮の型 (T2.5 で実型を確定)
-export function toSkillContext(adkContext: <T2.5 で確定>): SkillContext;
+// /src/side-b/adk/adapters/skillContext.ts (T5 で実装予定)
+import type { Context } from '@google/adk';
+import type { SkillContext } from '../../skills/types';
+
+/** ADK Context に callerReason 相当がない場合のフォールバック (§3.5)。 */
+export const ADK_DEFAULT_CALLER_REASON = 'invoked-via-adk-runner';
+
+export function toSkillContext(toolContext: Context | undefined): SkillContext {
+  return {
+    // ADK の agentName を直接利用。toolContext が無い場合は固定値
+    callerAgent: toolContext?.agentName ?? 'adk-runner',
+    // ADK Context に対応 field なし → adapter 側定数 (§3.5 Nekoさん承認)
+    callerReason: ADK_DEFAULT_CALLER_REASON,
+    // ADK Context に時刻なし → 呼び出し時刻を生成
+    timestamp: new Date(),
+  };
+}
 ```
 
-### 3.3 T2.5 で検証する項目
+### 3.4 注記
 
-| 項目 | 確認内容 |
-|------|---------|
-| `callerAgent` 相当 | ADK 実行 context のどのフィールドから取得できるか / フィールド名 |
-| `callerReason` 相当 | ADK 側で LLM が自由記述する位置はあるか (なければ固定文字列で代用) |
-| `timestamp` 相当 | ADK 側で取得可能か / なければ `new Date()` で生成 |
-| `trace_id` / `invocation_id` | ADK 標準フィールドの実態と、`SkillContext` 拡張の必要性 |
-| フィールド欠落時 | フォールバック挙動 (例: `callerAgent ?? 'adk-runner'`) |
+- `SkillContext` 型 (`src/side-b/skills/types.ts`) は**変更しない** (不可侵領域、`ADK_ADOPTION.md` §6)
+- ADK 拡張情報 (`invocationId` / `functionCallId` 等) は将来 Tracing 統合 (Step 2) で活用予定。SkillContext には入れない
 
-### 3.4 マッピングの確定時期
+### 3.5 ✅ Nekoさん承認時の追加方針 (2026-05-13)
 
-T2.5 完了時に本セクションを実 ADK context 型で書き直す。フィールド欠落フォールバックも T2.5 で確定。
+**`callerReason` の取り扱い** (T2 approved with note):
+
+- ADK 標準 Context に `callerReason` 相当が存在しない可能性が高い
+- T2.5 で取得不能と判明した場合の対応:
+  - **固定文字列**: 例えば `'invoked-via-adk'` のような adapter 側定数として埋める
+  - または **adapter 側定数**として明示的に export (例: `ADK_DEFAULT_CALLER_REASON`)
+- **重要**: 既存 `SkillContext` 型 (`src/side-b/skills/types.ts`) は**変更しない**
+  - 不可侵領域 (`ADK_ADOPTION.md` §6 / `/src/side-b/skills/` 改変禁止) と整合
+  - `callerReason?: string` のまま、フォールバック値を埋めるだけ
+
+→ **T2.5 結果**: ADK 標準に存在しないことを確認。`ADK_DEFAULT_CALLER_REASON = 'invoked-via-adk-runner'` を adapter 側定数として実装する (§3.3 確定マッピング)。
 
 ### 3.5 ✅ Nekoさん承認時の追加方針 (2026-05-13)
 
@@ -179,15 +212,53 @@ const tool = new FunctionTool({
 - **メリット**: 既存 Skill が内部で Zod parse を行っている前提なら最小実装
 - **デメリット**: ADK 側の自動 validation が効かず、LLM の不正引数検出が後ろ倒し
 
-### 4.3 採用方式の決定基準
+### 4.3 採用方式 ✅ T2.5 完了で確定
 
-T2.5 で以下を確認した上で決定:
+**採用方式**: **方式 B (Zod)**
 
-- ADK `FunctionTool` constructor の `parameters` フィールドの**期待型** (Zod / JSONSchema / 独自?)
-- ADK が parameters から **runtime validation** を行うか / 行うとしてどういう挙動か
-- Zod を受ける場合の Zod バージョン要件
+### 4.4 実測結果
 
-T2.5 完了後、本セクションで **採用方式 (A/B/C) と理由** を明記。不採用方式の理由も併記。
+ADK `FunctionTool` の `parameters` 型 (実測):
+
+```typescript
+// node_modules/@google/adk/dist/types/tools/function_tool.d.ts
+export type ToolInputParameters =
+  | z3.ZodObject<z3.ZodRawShape>   // Zod v3
+  | z4.ZodObject<z4.ZodRawShape>   // Zod v4
+  | Schema                          // @google/genai の Schema 型
+  | undefined;
+```
+
+→ **Zod v3 / v4 を直接受ける = ADK ネイティブ対応**。
+
+`runAsync` 内部の挙動 (実コード):
+
+```javascript
+// node_modules/@google/adk/dist/esm/tools/function_tool.js
+async runAsync(req) {
+  let validatedArgs = req.args;
+  if (isZodObject(this.parameters)) {
+    validatedArgs = this.parameters.parse(req.args);  // ADK が自動 Zod parse
+  }
+  return await this.execute(validatedArgs, req.toolContext);
+}
+```
+
+→ ADK が `parameters.parse(req.args)` で**自動 validation** してくれる。
+
+### 4.5 各方式の評価
+
+| 方式 | 採否 | 理由 |
+|------|------|------|
+| **B (Zod)** | ✅ **採用** | ADK ネイティブ対応、自動 validation、`input` が `z.infer` で型付け済み |
+| A (Schema) | ❌ 不採用 | `@google/genai` の `Schema` 型からの変換が複雑。Zod の方が型安全 |
+| C (parameters なし) | ❌ 不採用 | ADK 側の自動 validation が効かず、LLM の不正引数検出が後ろ倒し。デバッグ性が低い |
+
+### 4.6 T3 実行要否
+
+**方式 B 採用** → T3 (`jsonSchemaToZod` ユーティリティ実装) を実行する。
+
+`SkillInputSchema` (JSONSchema draft-07 subset) を Zod object に変換するユーティリティが必要。詳細は KICKOFF.md §T3 参照。
 
 ---
 
@@ -209,38 +280,58 @@ ADK 経由でも直接経由でも、Skill の挙動は同一であるべき (= 
 
 ---
 
-## 6. エラー伝播 🔍 T2.5 検証対象
+## 6. エラー伝播 ✅ T2.5 完了で確定
 
 ### 6.1 既存 `Skill.invoke()` の挙動
 
 ```typescript
-// SkillRegistry.invoke() の戻り値型
 type SkillResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: { code: string; message: string; details?: unknown } };
 ```
 
 - Skill 内部の例外を catch して `{ ok: false, error: ... }` でラップ
-- throw は呼び出し側に伝播しない (= 既存パターン: 「エラーを握りつぶさず、構造化して返す」)
+- throw は呼び出し側に伝播しない
 
-### 6.2 仮説: ADK 経由のエラー伝播
+### 6.2 ADK `runAsync` の実挙動 (T2.5 実測)
 
-| シナリオ | 既存 `invoke()` の戻り値 | ADK 経由でどう返す? (仮説) |
-|---------|------------------------|-------------------------|
-| 成功 | `{ ok: true, data }` | tool 戻り値として data |
-| Skill 内例外 | `{ ok: false, error: {code, message} }` | ADK の tool error 慣習形式 (T2.5 で確認) |
-| Zod parse 失敗 | `{ ok: false, error: { code: 'ZodError', ... } }` | 同上 |
+```javascript
+// node_modules/@google/adk/dist/esm/tools/function_tool.js
+async runAsync(req) {
+  try {
+    /* ... */
+    return await this.execute(validatedArgs, req.toolContext);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Error in tool '${this.name}': ${errorMessage}`);  // ★ throw 伝播
+  }
+}
+```
 
-### 6.3 T2.5 で検証する項目
+→ ADK の標準慣習は **throw 伝播**。execute が throw すると `Error in tool 'xxx': ...` で wrap して再 throw される。
 
-- ADK が期待する tool エラー形式 (throw / `{status: 'error'}` / `{ok: false}` / etc.)
-- ADK Runner がエラーをトレースする経路 (Tracing 統合時のため)
-- tool 実行のタイムアウト・キャンセル機構の有無
+### 6.3 採用方針: アダプター内では throw しない
 
-### 6.4 確定方針
+ADK 慣習と既存 `invoke()` の慣習が異なる。両者を併存させるため:
 
-- アダプター内で **throw しない** (= 既存と同じ「握りつぶさない、構造化して返す」)
-- ADK が期待するエラー形式に変換 (T2.5 で確定)
+| シナリオ | アダプターの挙動 |
+|---------|-----------------|
+| Skill 成功 | `registry.invoke()` の `{ ok: true, data }` を tool 戻り値として **return** |
+| Skill 内例外 | `registry.invoke()` が `{ ok: false, error }` に wrap → そのまま **return** |
+| Zod parse 失敗 (ADK 自動 validation) | ADK が throw → ADK 標準 wrap (`Error in tool 'xxx': ...`) |
+
+### 6.4 理由
+
+- アダプターは **`SkillRegistry.invoke()` をそのまま呼ぶ**。既存挙動を完全保持
+- `invoke()` の戻り値 (`SkillResult<T>`) を tool 戻り値として返すことで、LLM 視点では構造化エラー JSON が見える (デバッグ性が高い)
+- ADK 経由でも throw されない (= §5 session-less + §8 等価性検証の前提)
+- ADK 自動 validation エラー (Zod parse 失敗) のみ ADK 標準 throw が発生 → これは LLM の不正引数 (= LLM 側で修正すべき) なので throw で正解
+
+### 6.5 等価性検証 (T7) への影響
+
+- 直接経路: `await registry.invoke(name, input, ctx)` → `SkillResult<T>`
+- ADK 経路: `await tool.runAsync({ args: input, toolContext })` → `SkillResult<T>` (アダプターが invoke を呼んで結果を return するため)
+- 両者の戻り値が **deep equal** で一致するはず
 
 ---
 
@@ -277,26 +368,84 @@ Phase 2 完了時の想定構成:
 
 ---
 
-## 8. テスト戦略 🔍 T2.5 検証対象
+## 8. テスト戦略 ✅ T2.5 完了で確定
 
 ### 8.1 想定するテストレイヤー
 
 | レイヤー | 対象 | 実装場所 | 備考 |
 |---------|------|---------|------|
-| ユニット (変換) | `jsonSchemaToZod()` | T3 (方式 B のみ) | プリミティブ / 配列 / オブジェクト / enum / union / null 網羅 |
-| ユニット (context) | `toSkillContext()` | T5 | フィールド欠落フォールバック含む |
+| ユニット (変換) | `jsonSchemaToZod()` | T3 | プリミティブ / 配列 / オブジェクト / enum / union / null 網羅 |
+| ユニット (context) | `toSkillContext()` | T5 | フィールド欠落フォールバック含む (Context undefined → 'adk-runner') |
 | ユニット (アダプター) | `skillRegistryToAdkTools()` | T6 | 空 registry / 1 Skill / N Skill / parameters 整合 / エラー変換 |
 | **等価性** | ADK 経由 vs 直接 invoke | T7 | 同一入力 → 同一出力を deep equal で検証 |
 
-### 8.2 T2.5 で検証する項目
+### 8.2 ADK 実行 API 実測結果
 
-- ADK SDK 内部の `FunctionTool.execute()` が **public API か internal か**
-- public でない場合、Runner や Agent 経由でしか呼べないかを確認
-- テストでアダプター単体の検証が可能な経路を特定
+| API | 種別 | 利用可否 |
+|-----|------|---------|
+| `FunctionTool.execute` (private field) | **private** (`private readonly execute`) | ❌ 利用禁止 (Nekoさん承認 §8.4) |
+| `FunctionTool._getDeclaration` | internal (`_` prefix) | ❌ 利用禁止 |
+| `FunctionTool.runAsync(req)` | **public method** (BaseTool で abstract、FunctionTool で実装) | ✅ **これを使う** |
 
-### 8.3 等価性検証 (T7) の経路
+### 8.3 等価性検証 (T7) の経路 ✅ 確定
 
-T2.5 で確定したテスト経路を T7 で利用。**ADK SDK の public API を使う**ことが原則 (internal API 利用は脆い)。
+T7 では `tool.runAsync({ args, toolContext })` を使う。
+
+```typescript
+// T7 等価性検証の概念コード
+const directResult = await registry.invoke('skill_name', input, ctx);
+const adkResult = await tool.runAsync({
+  args: input,
+  toolContext: createMinimalAdkContext({ agentName: ctx.callerAgent }),
+});
+expect(adkResult).toEqual(directResult);  // deep equal
+```
+
+### 8.4 ✅ Nekoさん承認時の追加方針 (2026-05-13)
+
+**ADK public API 経由テストの厳格化** (T2 approved with note):
+
+T2.5 で `FunctionTool` の公開実行 API が以下のいずれかと判明した場合の対応を明文化:
+
+| ケース | T7 等価性検証の経路 |
+|--------|--------------------|
+| `execute()` が public method として露出 | `execute()` 直接呼び出し可 |
+| **`runAsync()` または相当が public method** | `runAsync()` 経由でテスト (`execute()` は internal 扱いの可能性) |
+| **Runner / Agent 経由でしか実行できない** | Runner / Agent を T7 テストで構築 (mock Agent + ADK Runner 経由) |
+| internal/private な execute のみ | **internal API には依存しない** (= Runner 経由のテストに変更) |
+
+**禁止**: ADK SDK の internal / private API (`@internal` JSDoc、underscore prefix、d.ts 非公開等) に依存するテストコード。脆い (SDK 更新で壊れる) ため。
+
+T2.5 で確定した実行経路を T7 設計時に厳守する。
+
+### 8.5 T2.5 確定: `runAsync` 経由 + Context partial mock
+
+実測の結果、**`runAsync()` が public method、`execute` は private field**。Nekoさん承認 §8.4 表の 2 行目 (`runAsync()` 経由) のケースに該当。
+
+`runAsync({ args, toolContext })` の `toolContext: Context` は非 optional。フル `InvocationContext` 構築は重い (agent / session / pluginManager 必須) ため、テスト用最小 mock を提供する:
+
+```typescript
+// /src/side-b/adk/adapters/_testHelpers.ts (T6 で実装予定、test 専用 export)
+import type { Context } from '@google/adk';
+
+/**
+ * テスト専用: `Context` の必要最小限フィールドのみを持つ mock を生成。
+ * adapter 本体が触る field (agentName のみ) を持つ。
+ * 本番コードでは使わない (テストヘルパー)。
+ */
+export function createMinimalAdkContext(options: { agentName?: string }): Context {
+  // 本番 Context は InvocationContext を要求するが、adapter が触るのは agentName のみ。
+  // Object.create + getter で最小限を満たす。
+  const ctx = Object.create(Context.prototype) as Context;
+  Object.defineProperty(ctx, 'agentName', {
+    value: options.agentName ?? 'test-agent',
+    enumerable: true,
+  });
+  return ctx;
+}
+```
+
+このアプローチは ADK の internal API に依存せず (= `Object.defineProperty` は標準 JS API)、`Context.prototype` の継承だけ利用する。
 
 ### 8.4 ✅ Nekoさん承認時の追加方針 (2026-05-13)
 
@@ -341,6 +490,27 @@ T2.5 で確定した実行経路を T7 設計時に厳守する。
 
 承認に基づき T2.5 (実測スパイク) に進行中。
 
-### T2.5 (実測スパイク完了後): 🔍 ユーザー承認待ち
+### T2.5 (実測スパイク): 🔍 ユーザー承認待ち (2026-05-13)
 
-T2.5 完了時に本書の §3 / §4 / §6 / §8 を実測結果で更新し、採用方式 (A/B/C) を確定。再度ユーザーレビューを依頼する。
+**実測結果サマリ**:
+
+- **採用方式: B (Zod)** — ADK が `z3.ZodObject | z4.ZodObject | Schema | undefined` を受ける、`parameters.parse(req.args)` で自動 validation。型安全性が最も高い
+- **§3 SkillContext マッピング確定**: `callerAgent ← Context.agentName`、`callerReason = ADK_DEFAULT_CALLER_REASON` (定数)、`timestamp = new Date()`
+- **§6 エラー伝播確定**: アダプター内で throw しない。`SkillResult` をそのまま tool 戻り値として return (既存 invoke と等価)
+- **§8 テスト経路確定**: `runAsync({ args, toolContext })` 経由。`Context` は `createMinimalAdkContext()` ヘルパーで minimum mock
+- **T3 実行**: ✅ 必要 (方式 B 採用のため、`jsonSchemaToZod` を実装する)
+
+**スパイク成果物** (Phase 2 T8 で削除予定):
+- `scripts/adk_spike_typedefs.md`: ADK 主要型の実定義まとめ
+- `scripts/adk_spike_methods.ts`: 3 方式の動作確認 (実行確認済み: `npx tsx scripts/adk_spike_methods.ts` で全て OK)
+
+**判断を仰ぐ点**:
+1. **採用方式 B (Zod)** で問題ないか
+2. **`ADK_DEFAULT_CALLER_REASON = 'invoked-via-adk-runner'`** の定数名・値で問題ないか (他案: `'adk-tool-call'`、`'auto-runner'` など)
+3. **`createMinimalAdkContext` ヘルパー方針** (Object.create + defineProperty で agentName のみ持つ partial mock) で問題ないか
+4. **T3 実装方針**: 自前実装 vs `json-schema-to-zod` 等のパッケージ採用 — どちらが好み? (パッケージは npm 依存増、自前は変換可能範囲を限定的に明文化)
+
+ご返答方法:
+- `T2.5 approved` → T3 (jsonSchemaToZod 実装) に進む
+- `T2.5 approved with note: <内容>` → 補足付きで承認
+- `revise: <内容>` → 修正指示
