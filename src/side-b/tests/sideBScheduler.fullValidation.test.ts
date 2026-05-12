@@ -118,12 +118,12 @@ function makeHyp(id: string): EdgeHypothesis {
  */
 function mockSleepToInstant() {
     const realSetTimeout = global.setTimeout;
-    jest.spyOn(global, 'setTimeout').mockImplementation(((
+    jest.spyOn(global, 'setTimeout').mockImplementation((
         cb: (...args: unknown[]) => void,
         _ms?: number,
     ) => {
         return realSetTimeout(cb, 0);
-    }) as typeof setTimeout);
+    });
 }
 
 describe('SideBScheduler.runFullValidationNow', () => {
@@ -158,7 +158,9 @@ describe('SideBScheduler.runFullValidationNow', () => {
         const scheduler = new SideBScheduler({ fullValidationMaxPerRun: 5 });
         const result = await scheduler.runFullValidationNow();
 
-        expect(mockEdgeLedger.findByStatus).toHaveBeenCalledWith('screening_passed');
+        // PR #160 Copilot review #2: findByStatus に limit (fullValidationMaxPerRun=5) を渡して
+        // DB 側で take を効かせる
+        expect(mockEdgeLedger.findByStatus).toHaveBeenCalledWith('screening_passed', 5);
         expect(mockStrategist.validate).toHaveBeenCalledTimes(2);
         expect(result).toEqual({
             processed: 2,
