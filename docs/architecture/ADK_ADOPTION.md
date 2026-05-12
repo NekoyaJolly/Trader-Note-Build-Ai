@@ -121,11 +121,11 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 
 ## 7. 実装状況
 
-> **最終更新**: 2026-05-12
+> **最終更新**: 2026-05-12 (Step 0 全 Phase 完了、Final Gate 提出)
 
 ### Step 進捗
 
-- [ ] Step 0: 設計ガード (進行中、本書および AGENTS.md 群を整備中)
+- [x] Step 0: 設計ガード (完了 2026-05-12)
 - [ ] Step 1: Skill → ADK FunctionTool アダプター
 - [ ] Step 2: Tracing / Telemetry 統合
 - [ ] Step 3: PDCALoop の SequentialAgent ラップ
@@ -133,33 +133,43 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 - [ ] Step 5: 進化ループの LoopAgent ラップ (条件付き)
 - [ ] Step 6: ADK 継続採用 / 撤退 / 部分採用の判断
 
-### Step 0 詳細 (進行中)
-
-- **着手日**: 2026-05-12
-- **完了予定**: Phase A〜C の Gate を順次通過、Final Gate 承認時に完了
-- **進捗**:
-  - Phase A (Session 1, 設計書層): 進行中
-    - [x] Ticket A1: 既存設計書の棚卸し (`docs/architecture/STEP_0_ANALYSIS.md` 完了、ユーザー承認済み)
-    - [x] Ticket A2: ルート `/AGENTS.md` 正本版作成
-    - [x] Ticket A3: `/CLAUDE.md` / `/.cursorrules` / `/GEMINI.md` シム化
-    - [x] Ticket A4: `/src/side-b/AGENTS.md` 作成
-    - [x] Ticket A5: `/src/side-b/adk/` サイドカー scaffold
-    - [x] Ticket A6: `docs/architecture/ADK_ADOPTION.md` 作成 (本書)
-    - [ ] Gate 1 承認待ち
-  - Phase B (Session 2, CI/CD 層): 未着手
-    - [ ] Ticket B1: tsconfig.json strict 化確認
-    - [ ] Ticket B2: ESLint 規則強化
-    - [ ] Ticket B3: CI PR ゲート確認
-    - [ ] Gate 2 承認待ち
-  - Phase C (Session 3, IDE 層と環境準備): 未着手
-    - [ ] Ticket C1: husky + lint-staged (任意)
-    - [ ] Ticket C2: `@google/adk` dry install 確認
-    - [ ] Gate 3 承認待ち
-    - [ ] Final Gate 承認待ち
-
 ### 完了した Step の詳細
 
-(Step 0 完了時に追記される)
+#### Step 0: 設計ガード (完了 2026-05-12)
+
+**実装場所**:
+- ルート設計書群: `/AGENTS.md` (正本), `/CLAUDE.md` `/.cursorrules` `/GEMINI.md` (シム), `/src/side-b/AGENTS.md`, `/src/side-b/adk/AGENTS.md`
+- ADK サイドカー scaffold: `/src/side-b/adk/{adapters,tracing,agents}/`
+- ADK 採用計画: 本書 `docs/architecture/ADK_ADOPTION.md`
+- Step 0 監査ドキュメント群: `docs/architecture/STEP_0_*.md`
+
+**検証結果**:
+- **Phase A (Gate 1 approved)**: PR #155 マージ済み (2026-05-12)
+  - Ticket A1: 既存設計書棚卸し (`STEP_0_ANALYSIS.md`)、Q1〜Q7 ユーザー承認
+  - Ticket A2: ルート `/AGENTS.md` 正本版作成
+  - Ticket A3: `/CLAUDE.md` / `/.cursorrules` / `/GEMINI.md` シム化
+  - Ticket A4: `/src/side-b/AGENTS.md` 作成
+  - Ticket A5: `/src/side-b/adk/` サイドカー scaffold
+  - Ticket A6: 本書作成
+- **Phase B (Gate 2 approved)**: PR #156 マージ済み (2026-05-12)
+  - Ticket B1: tsconfig.audit.json (root + frontend) 分離方式採用。audit 値 = 1044 + 379 = 1423 errors (`STEP_0_TSCONFIG_AUDIT.md`)、本番 tsconfig は 0 errors 維持
+  - Ticket B2: ESLint 5 規則 warn→error 格上げ、`ban-ts-comment` 追加 (tests/scripts も有効)。`STEP_0_ESLINT_AUDIT.md` (488 errors 残存、別 PR で順次解消)。**unknown 禁止方針** を案B (規約強化) として確定し AGENTS.md 群に反映
+  - Ticket B3: CI 状況報告 (`STEP_0_CI_STATUS.md`)。ESLint は root に lint script 不在で未実行、main は保護未設定 → ユーザー対応依頼
+- **Phase C (PR #157 submitted, pending approval)**: 本 PR
+  - Ticket C1: simple-git-hooks + lint-staged が既存導入されており機能等価のため husky 置き換えは不要。Mac/Windows 動作確認手順を `STEP_0_HUSKY_SETUP.md` にドキュメント化
+  - Ticket C2: `@google/adk@1.1.0` dry-run 成功 (`STEP_0_ADK_INSTALL_DRYRUN.md`)。**重要発見**: peer dependency が MikroORM ファミリーを要求 (Prisma 採用の本プロジェクトと不一致)。Step 1 着手前にユーザー判断必須
+
+**ユーザー対応依頼 (Step 0 完了後も継続)**:
+1. main ブランチ保護ルール設定 (`STEP_0_CI_STATUS.md` §3.1)
+2. ESLint PR ゲート化と既存違反 488 件の段階解消 (`STEP_0_CI_STATUS.md` §3.2, `STEP_0_ESLINT_AUDIT.md` §4)
+3. Frontend tsc を CI に追加する判断 (`STEP_0_CI_STATUS.md` §3.3)
+4. tsconfig audit 違反 1423 件の side-b 優先解消 (`STEP_0_TSCONFIG_AUDIT.md` §5.1)
+5. **@google/adk peer dep 対応方針 (案A/B/C のいずれか)** を Step 1 着手前に判断 (`STEP_0_ADK_INSTALL_DRYRUN.md` §3)
+
+**3 セッション通算**:
+- 全コミット数: Phase A 8 + Phase B 6 + Phase C 3 = **17 コミット** (本 PR マージ前時点では Phase C 3 コミット + Gate 3 修正分)
+- 監査レポート: `STEP_0_ANALYSIS`, `STEP_0_TSCONFIG_AUDIT`, `STEP_0_ESLINT_AUDIT`, `STEP_0_CI_STATUS`, `STEP_0_HUSKY_SETUP`, `STEP_0_ADK_INSTALL_DRYRUN` の **6 件**
+- 計測結果: tsconfig audit 1423 errors / ESLint 488 errors + 237 warnings / `@google/adk` peer deps 要 MikroORM
 
 ---
 
