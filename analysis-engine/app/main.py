@@ -25,6 +25,7 @@ from app.schemas import (
     WalkForwardRequest,
     WalkForwardResponse,
 )
+from app.chart_patterns import compute_chart_patterns
 from app.smc import compute_smc_structures
 from app.walk_forward import run_walk_forward
 from app.backtest import run_screening_backtest
@@ -179,6 +180,11 @@ def indicator_series(req: IndicatorSeriesRequest) -> IndicatorSeriesResponse:
     if req.includeSmc:
         smc_payload = compute_smc_structures(df)
 
+    # Chart Patterns (Phase 7b 追加、req.includeChartPatterns=True 時のみ計算)
+    chart_patterns_payload = None
+    if req.includeChartPatterns:
+        chart_patterns_payload = compute_chart_patterns(df)
+
     return IndicatorSeriesResponse(
         symbol=req.symbol,
         timeframe=req.timeframe,
@@ -186,6 +192,7 @@ def indicator_series(req: IndicatorSeriesRequest) -> IndicatorSeriesResponse:
         series=series,
         patterns=patterns,
         smc=smc_payload,
+        chartPatterns=chart_patterns_payload,
     )
 
 
