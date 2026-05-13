@@ -44,9 +44,13 @@ from .schemas import ChartPatternsPayload
 DEFAULT_LEFT_BARS = 5
 DEFAULT_RIGHT_BARS = 5
 
-# パターン形成バー数の許容範囲
+# パターン形成バー数の許容範囲 (TRIANGLE / WEDGE / HEAD_SHOULDER / DOUBLE 系で参照)
 MIN_PATTERN_BARS = 5
 MAX_PATTERN_BARS = 30
+
+# FLAG / PENNANT 検出時の consolidation バー数 (上記とは別系統、より短期の consolidation を想定)
+FLAG_PENNANT_CONSOLIDATION_MIN_BARS = 3
+FLAG_PENNANT_CONSOLIDATION_MAX_BARS = 15
 
 # 価格一致判定の許容誤差 (DOUBLE_TOP / DOUBLE_BOTTOM など、相対誤差)
 PRICE_MATCH_TOLERANCE = 0.003  # 0.3%
@@ -136,17 +140,24 @@ def _slope(values: List[float], indices: List[int]) -> float:
 def _detect_double_pattern(
     pivots: List[int],
     prices: List[float],
-    is_top: bool,
+    n_df: int,
 ) -> Tuple[float, int]:
     """DOUBLE_TOP / DOUBLE_BOTTOM の confidence + パターン形成バー数を返す。
 
     最新 2 つの同方向 pivot の価格が一致 (相対距離 ≤ PRICE_MATCH_TOLERANCE) すれば検出。
     confidence は「価格差が許容範囲内のどれだけ中央に近いか」(0-1)。
+
+    **リセンシー制約 (Copilot review PR #189 指摘で追加)**: 最新 pivot が末尾から
+    MAX_PATTERN_BARS 以内に位置していなければ「直近に検出されたパターンではない」
+    と判定し、return (0.0, 0)。is_top は呼び出し側で prices を取り分けるため不要 (削除)。
     """
     if len(pivots) < 2:
         return 0.0, 0
     last = pivots[-1]
     prev = pivots[-2]
+    # Recency: 最新 pivot が末尾から MAX_PATTERN_BARS 以内に存在すること
+    if last < n_df - MAX_PATTERN_BARS:
+        return 0.0, 0
     p_last = prices[-1]
     p_prev = prices[-2]
     if max(p_last, p_prev) == 0:
@@ -163,6 +174,7 @@ def _detect_head_shoulder(
     pivots: List[int],
     prices: List[float],
     is_inverted: bool,
+    n_df: int,
 ) -> Tuple[float, int]:
     """HEAD_SHOULDER / INV_HEAD_SHOULDER の confidence + 形成バー数を返す。
 
@@ -170,8 +182,14 @@ def _detect_head_shoulder(
     - HEAD_SHOULDER: 中央が最高 (left_shoulder < head > right_shoulder)
     - INV_HEAD_SHOULDER: 中央が最低
     かつ 両肩の価格が一致に近い (相対距離 ≤ PRICE_MATCH_TOLERANCE)。
+
+    **リセンシー制約 (Copilot review PR #189 指摘で追加)**: 最新 pivot が末尾から
+    MAX_PATTERN_BARS 以内に位置していなければ古いパターンと判断し return (0.0, 0)。
     """
     if len(pivots) < 3:
+        return 0.0, 0
+    # Recency: 最新 pivot が末尾から MAX_PATTERN_BARS 以内
+    if pivots[-1] < n_df - MAX_PATTERN_BARS:
         return 0.0, 0
     left = prices[-3]
     head = prices[-2]
@@ -278,18 +296,30 @@ def _detect_flag_pennant(
         return ("NONE", 0.0, 0, "NEUTRAL")
 
     # 直近 10 本のうち最大 (high - low) を持つバーが impulse の起点 (簡素化)
-    last10_range = df["high"].iloc[-10:] - df["low"].iloc[-10:]
-    impulse_bar = last10_range.idxmax() if not last10_range.empty else None
-    if impulse_bar is None:
+    # **位置指定明示 (Copilot review PR #189 指摘)**: pandas.idxmax() はラベルを返すため、
+    # df の index が timestamp 等に変わると silent に壊れる。numpy.argmax で
+    # 相対位置を取得後、末尾 10 本のオフセット (n - 10) を加えて絶対位置に変換する。
+    last10_high = df["high"].to_numpy()[-10:]
+    last10_low = df["low"].to_numpy()[-10:]
+    last10_range_arr = last10_high - last10_low
+    if len(last10_range_arr) == 0:
         return ("NONE", 0.0, 0, "NEUTRAL")
+    impulse_rel_pos = int(last10_range_arr.argmax())
+    impulse_bar = n - 10 + impulse_rel_pos
 
     impulse_range = df["high"].iloc[impulse_bar] - df["low"].iloc[impulse_bar]
     if impulse_range < 2.0 * avg_range:
         return ("NONE", 0.0, 0, "NEUTRAL")
 
-    # impulse 起点 → 末尾までを consolidation とみなす (5-10 本)
+    # impulse 起点 → 末尾までを consolidation とみなす
+    # **定数化 (Copilot review PR #189 指摘)**: 旧版は magic number (3 / 15) で
+    # 判定していたが、モジュール定数 (FLAG_PENNANT_CONSOLIDATION_MIN_BARS /
+    # FLAG_PENNANT_CONSOLIDATION_MAX_BARS) を参照する形に修正
     consolidation_bars = (n - 1) - impulse_bar
-    if consolidation_bars < 3 or consolidation_bars > 15:
+    if (
+        consolidation_bars < FLAG_PENNANT_CONSOLIDATION_MIN_BARS
+        or consolidation_bars > FLAG_PENNANT_CONSOLIDATION_MAX_BARS
+    ):
         return ("NONE", 0.0, 0, "NEUTRAL")
 
     # consolidation 内 (impulse 起点+1 以降) の 高値 / 安値 を線形回帰
@@ -364,16 +394,17 @@ def compute_chart_patterns(df: pd.DataFrame) -> ChartPatternsPayload:
     if df is None or len(df) == 0:
         return ChartPatternsPayload()
 
+    n_df = len(df)
     high_indices, low_indices = _detect_pivots(df)
 
     candidates: List[Tuple[ChartPatternLabel, float, int, DirectionBias]] = []
 
-    # DOUBLE_TOP
+    # DOUBLE_TOP — n_df 渡しでリセンシー制約を適用
     if high_indices:
         conf, bars = _detect_double_pattern(
             high_indices,
             [df["high"].iloc[i] for i in high_indices],
-            is_top=True,
+            n_df=n_df,
         )
         if conf > 0.0:
             candidates.append(("DOUBLE_TOP", conf, bars, "BEAR"))
@@ -383,17 +414,18 @@ def compute_chart_patterns(df: pd.DataFrame) -> ChartPatternsPayload:
         conf, bars = _detect_double_pattern(
             low_indices,
             [df["low"].iloc[i] for i in low_indices],
-            is_top=False,
+            n_df=n_df,
         )
         if conf > 0.0:
             candidates.append(("DOUBLE_BOTTOM", conf, bars, "BULL"))
 
-    # HEAD_SHOULDER (高値 3 つ)
+    # HEAD_SHOULDER (高値 3 つ) — n_df 渡しでリセンシー制約を適用
     if len(high_indices) >= 3:
         conf, bars = _detect_head_shoulder(
             high_indices,
             [df["high"].iloc[i] for i in high_indices],
             is_inverted=False,
+            n_df=n_df,
         )
         if conf > 0.0:
             candidates.append(("HEAD_SHOULDER", conf, bars, "BEAR"))
@@ -404,6 +436,7 @@ def compute_chart_patterns(df: pd.DataFrame) -> ChartPatternsPayload:
             low_indices,
             [df["low"].iloc[i] for i in low_indices],
             is_inverted=True,
+            n_df=n_df,
         )
         if conf > 0.0:
             candidates.append(("INV_HEAD_SHOULDER", conf, bars, "BULL"))
