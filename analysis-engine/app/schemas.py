@@ -116,10 +116,14 @@ class SmcStructuresPayload(BaseModel):
         description="直近構造イベントから経過したバー数。なし時 -1",
     )
 
-    # Zone — 直近 swing high/low の中央 50% 基準で premium / discount を判定
+    # Zone — 直近 swing high/low から計算した zonePositionPct で premium / discount を判定
+    # 閾値 0.45 / 0.55 で「中央 10% を EQUILIBRIUM」とする (smc.py _compute_zone と同期)
     currentZone: Literal["PREMIUM", "DISCOUNT", "EQUILIBRIUM"] = Field(
         "EQUILIBRIUM",
-        description="現在の zone。直近 swing range の上半分=PREMIUM、下半分=DISCOUNT、中央=EQUILIBRIUM",
+        description=(
+            "現在の zone。zonePositionPct 基準で 0.0-0.45=DISCOUNT、0.45-0.55=EQUILIBRIUM (中央 10%)、"
+            "0.55-1.0=PREMIUM。Phase 7a 設計選択 (smc.py _compute_zone と一致)"
+        ),
     )
     zonePositionPct: float = Field(
         0.5,

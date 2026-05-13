@@ -91,7 +91,14 @@ export interface SmcStructuresPayload {
   readonly lastStructureEvent: 'BOS_BULL' | 'BOS_BEAR' | 'CHOCH_BULL' | 'CHOCH_BEAR' | 'NONE';
   /** 直近構造イベントから経過したバー数。なし時 -1 */
   readonly barsSinceLastStructureEvent: number;
-  /** 現在の zone。swing range の上半分=PREMIUM、下半分=DISCOUNT、中央=EQUILIBRIUM */
+  /**
+   * 現在の zone。zonePositionPct 基準で:
+   * - 0.0-0.45: DISCOUNT
+   * - 0.45-0.55: EQUILIBRIUM (中央 10%)
+   * - 0.55-1.0: PREMIUM
+   *
+   * Phase 7a 設計選択 (analysis-engine `smc.py` `_compute_zone` と一致)。
+   */
   readonly currentZone: 'PREMIUM' | 'DISCOUNT' | 'EQUILIBRIUM';
   /** swing range 内の現在位置 (0.0=extreme discount, 1.0=extreme premium) */
   readonly zonePositionPct: number;

@@ -41,7 +41,10 @@ export const SMC_LENS_FEATURE_KEYS = [
 export class SMCLens implements Lens {
   readonly name = 'smc';
   readonly version = '1.0.0';
-  readonly dependencies = ['symbol', 'ohlcvBars', 'precomputedSmcStructures'] as const;
+  // `compute` 内では `precomputedSmcStructures` のみを参照する。`ohlcvBars` は
+  // 上位層 (= analysis-engine 側) で SMC 計算済みの payload を作る前提のため、
+  // 本 lens の dependencies には含めない (Copilot review PR #186 指摘で修正)。
+  readonly dependencies = ['symbol', 'precomputedSmcStructures'] as const;
 
   // eslint-disable-next-line @typescript-eslint/require-await
   async compute(input: LensInput): Promise<LensFeature> {
@@ -95,19 +98,39 @@ function payloadToFeatures(
 
 /**
  * payload 未指定時の sentinel features。
- * すべて「なし」を表す値 (`-1.0` / `-1` / `'NONE'` / `'EQUILIBRIUM'` / 0) で埋める。
+ *
+ * **設計方針 (Copilot review PR #186 指摘で改善)**:
+ *
+ * SMC features は **「payload なし」と「実データの 0 / 中央値」を区別できるよう sentinel
+ * を設計する**。具体的:
+ *
+ * | feature | 実データの最小値 | sentinel | 区別可? |
+ * |---|---|---|---|
+ * | nearest_ob_*_distance_pips | 0.0 (= 同バー) | -1.0 | ✅ |
+ * | liquidity_*_count | 0 (= 実データの「なし」) | -1 (= payload 未指定) | ✅ |
+ * | fvg_*_count_last_20 | 0 | -1 | ✅ |
+ * | last_structure_event | 'NONE' (= 実データの「なし」) | 'NONE' (共通、意味も同じ) | △ |
+ * | bars_since_last_structure_event | 0 (= 同バー) | -1 | ✅ |
+ * | current_zone | 'EQUILIBRIUM' (= 実データの中央) | 'EQUILIBRIUM' (共通) | △ |
+ * | zone_position_pct | 0.0 〜 1.0 | -1.0 (range 外) | ✅ |
+ *
+ * △ 印 (`last_structure_event` / `current_zone`) は sentinel と実データ値が共通になるが、
+ * 意味的に「直近イベントなし」「ニュートラルな zone」を指す点で整合しているため許容。
+ * 完全な区別が必要な DSL 用途では **`confidence === 0` で判定**するか、上記 ✅ 印の
+ * scalar features (例: `bars_since_last_structure_event === -1`) で payload 未指定を
+ * 検出する。
  */
 function emptySmcFeatures(): Record<string, number | string | boolean> {
   return {
     nearest_ob_bull_distance_pips: -1.0,
     nearest_ob_bear_distance_pips: -1.0,
-    liquidity_above_count: 0,
-    liquidity_below_count: 0,
-    fvg_bull_count_last_20: 0,
-    fvg_bear_count_last_20: 0,
+    liquidity_above_count: -1,
+    liquidity_below_count: -1,
+    fvg_bull_count_last_20: -1,
+    fvg_bear_count_last_20: -1,
     last_structure_event: 'NONE',
     bars_since_last_structure_event: -1,
     current_zone: 'EQUILIBRIUM',
-    zone_position_pct: 0.5,
+    zone_position_pct: -1.0,
   };
 }

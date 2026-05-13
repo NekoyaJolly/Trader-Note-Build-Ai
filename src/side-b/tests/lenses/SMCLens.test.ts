@@ -14,14 +14,8 @@
  * 8. edge case (極端な payload 値)
  */
 
-import {
-  SMCLens,
-  SMC_LENS_FEATURE_KEYS,
-} from '../../../side-b/lenses/SMCLens';
-import type {
-  LensInput,
-  SmcStructuresPayload,
-} from '../../../side-b/lenses/types';
+import { SMCLens, SMC_LENS_FEATURE_KEYS } from '../../lenses/SMCLens';
+import type { LensInput, SmcStructuresPayload } from '../../lenses/types';
 
 // ============================================================================
 // テスト用 payload ファクトリ
@@ -61,7 +55,7 @@ describe('SMCLens: Lens interface 実装', () => {
     const lens = new SMCLens();
     expect(lens.name).toBe('smc');
     expect(lens.version).toBe('1.0.0');
-    expect(lens.dependencies).toEqual(['symbol', 'ohlcvBars', 'precomputedSmcStructures']);
+    expect(lens.dependencies).toEqual(['symbol', 'precomputedSmcStructures']);
   });
 
   it('SMC_LENS_FEATURE_KEYS が 10 個 (§5.1 仕様通り)', () => {
@@ -83,16 +77,44 @@ describe('SMCLens: payload 未指定時 (sentinel + confidence 0)', () => {
     const result = await lens.compute(makeMinimalInput(undefined));
     expect(Object.keys(result.features).sort()).toEqual([...SMC_LENS_FEATURE_KEYS].sort());
 
+    // sentinel 設計 (Copilot review PR #186 で改善):
+    // payload なしと実データの 0 / 中央値を区別できる sentinel 値を採用
     expect(result.features.nearest_ob_bull_distance_pips).toBe(-1.0);
     expect(result.features.nearest_ob_bear_distance_pips).toBe(-1.0);
-    expect(result.features.liquidity_above_count).toBe(0);
-    expect(result.features.liquidity_below_count).toBe(0);
-    expect(result.features.fvg_bull_count_last_20).toBe(0);
-    expect(result.features.fvg_bear_count_last_20).toBe(0);
-    expect(result.features.last_structure_event).toBe('NONE');
+    expect(result.features.liquidity_above_count).toBe(-1); // 実データ 0 と区別
+    expect(result.features.liquidity_below_count).toBe(-1);
+    expect(result.features.fvg_bull_count_last_20).toBe(-1);
+    expect(result.features.fvg_bear_count_last_20).toBe(-1);
+    expect(result.features.last_structure_event).toBe('NONE'); // 実データの「なし」と意味共通
     expect(result.features.bars_since_last_structure_event).toBe(-1);
-    expect(result.features.current_zone).toBe('EQUILIBRIUM');
-    expect(result.features.zone_position_pct).toBe(0.5);
+    expect(result.features.current_zone).toBe('EQUILIBRIUM'); // 実データの中央と意味共通
+    expect(result.features.zone_position_pct).toBe(-1.0); // 実データ範囲 [0, 1] 外で区別
+  });
+
+  it('sentinel 設計: payload なし時の count 系 / zone_position_pct は実データの 0 / 0.5 と区別可', async () => {
+    const lens = new SMCLens();
+
+    // payload なし時
+    const emptyResult = await lens.compute(makeMinimalInput(undefined));
+    expect(emptyResult.confidence).toBe(0);
+
+    // 実データで count 0 / zone 中央 0.5 を持つ payload
+    const realDataPayload = makeFullPayload({
+      liquidityAboveCount: 0,
+      liquidityBelowCount: 0,
+      fvgBullCountLast20: 0,
+      fvgBearCountLast20: 0,
+      zonePositionPct: 0.5,
+      currentZone: 'EQUILIBRIUM',
+    });
+    const realResult = await lens.compute(makeMinimalInput(realDataPayload));
+    expect(realResult.confidence).toBe(1.0);
+
+    // confidence !== の他、scalar feature でも区別可能
+    expect(emptyResult.features.liquidity_above_count).toBe(-1);
+    expect(realResult.features.liquidity_above_count).toBe(0);
+    expect(emptyResult.features.zone_position_pct).toBe(-1.0);
+    expect(realResult.features.zone_position_pct).toBe(0.5);
   });
 });
 

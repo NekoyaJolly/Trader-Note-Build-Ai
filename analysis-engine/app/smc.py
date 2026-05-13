@@ -96,6 +96,11 @@ def _compute_nearest_ob_distance(
     - Bull OB: 直近の swing low から **後続 5 本で当該 swing low の high をブレイク** した起点 candle
     - Bear OB: 直近の swing high から **後続 5 本で当該 swing high の low をブレイク** した起点 candle
 
+    **SMC 通常解釈に従う方向制約 (Copilot review PR #186 指摘で追加)**:
+    - Bull OB は **現在価格より下の支持ゾーン**として参照される (= OB level ≤ current_close)
+    - Bear OB は **現在価格より上の抵抗ゾーン**として参照される (= OB level ≥ current_close)
+    - 既に上抜け済の Bull OB / 下抜け済の Bear OB は採用しない (= 距離計算から除外)
+
     なし時 -1.0 を返す (sentinel)。
     """
     n = len(df)
@@ -109,10 +114,14 @@ def _compute_nearest_ob_distance(
     nearest_bear_distance = -1.0
 
     # Bull OB candidates: swing lows where price subsequently broke the swing low's high
+    # **Bull OB は close 以下 (= 支持ゾーン) のみ採用**。上抜け済みの OB は除外。
     for idx in reversed(low_indices):
         if idx + 5 >= n:
             continue
         swing_low_high = df["high"].iloc[idx]
+        if swing_low_high > current_close:
+            # 既に上抜け済み (price が OB level より上にある) → SMC 解釈上不採用
+            continue
         # Check if subsequent 5 bars break above swing_low_high
         post_window_high = df["high"].iloc[idx + 1 : idx + 6].max()
         if post_window_high > swing_low_high:
@@ -122,10 +131,14 @@ def _compute_nearest_ob_distance(
             break
 
     # Bear OB candidates: swing highs where price subsequently broke the swing high's low
+    # **Bear OB は close 以上 (= 抵抗ゾーン) のみ採用**。下抜け済みの OB は除外。
     for idx in reversed(high_indices):
         if idx + 5 >= n:
             continue
         swing_high_low = df["low"].iloc[idx]
+        if swing_high_low < current_close:
+            # 既に下抜け済み (price が OB level より下にある) → SMC 解釈上不採用
+            continue
         post_window_low = df["low"].iloc[idx + 1 : idx + 6].min()
         if post_window_low < swing_high_low:
             distance_pips = abs(current_close - swing_high_low) / pip
@@ -176,37 +189,6 @@ def _compute_fvg_counts(df: pd.DataFrame) -> Tuple[int, int]:
             bear_count += 1
 
     return bull_count, bear_count
-
-
-def _compute_last_structure_event(
-    high_indices: List[int],
-    low_indices: List[int],
-    n: int,
-) -> Tuple[Literal["BOS_BULL", "BOS_BEAR", "CHOCH_BULL", "CHOCH_BEAR", "NONE"], int]:
-    """直近の構造イベント (BOS / CHOCH) と経過バー数を返す。
-
-    簡易定義 (Phase 7a):
-    - BOS_BULL: 最新 high pivot が 1 つ前の high pivot を上回る (uptrend 継続)
-    - BOS_BEAR: 最新 low pivot が 1 つ前の low pivot を下回る (downtrend 継続)
-    - CHOCH_BULL: 直前 BOS_BEAR の後で BOS_BULL が発生 (trend 転換)
-    - CHOCH_BEAR: 直前 BOS_BULL の後で BOS_BEAR が発生
-
-    Phase 7a 簡素化: trend 履歴を遡らず、直近 pivot 同士の比較のみで BOS のみ判定。
-    CHOCH は Phase 7c (Wyckoff phase 判定) で詳細化する余地あり。
-    """
-    # Need at least 2 high pivots and 2 low pivots for BOS detection
-    if len(high_indices) >= 2 and len(low_indices) >= 2:
-        last_high_idx = high_indices[-1]
-        prev_high_idx = high_indices[-2]
-        last_low_idx = low_indices[-1]
-        prev_low_idx = low_indices[-2]
-
-        # Determine most recent structure event by bar index
-        events: List[Tuple[int, str]] = []
-        # We can't compute price comparison without df; do this in caller
-        return ("NONE", -1)  # placeholder
-
-    return ("NONE", -1)
 
 
 def _compute_last_structure_event_with_prices(
@@ -260,10 +242,15 @@ def _compute_zone(
 ) -> Tuple[Literal["PREMIUM", "DISCOUNT", "EQUILIBRIUM"], float]:
     """Premium / Discount / Equilibrium zone を直近 SWING_RANGE_LOOKBACK 本から判定。
 
-    swing range 内の現在位置 (zonePositionPct):
-    - 0.0 〜 0.45: DISCOUNT (下半分)
-    - 0.45 〜 0.55: EQUILIBRIUM (中央 10%)
-    - 0.55 〜 1.0: PREMIUM (上半分)
+    swing range 内の現在位置 (zonePositionPct) と zone の対応:
+    - 0.0 〜 0.45: DISCOUNT (= swing range の下側 45%)
+    - 0.45 〜 0.55: EQUILIBRIUM (中央 10% のニュートラル帯)
+    - 0.55 〜 1.0: PREMIUM (= swing range の上側 45%)
+
+    閾値 0.45 / 0.55 は「中央 10% を EQUILIBRIUM」とする Phase 7a の設計選択。
+    一般的な SMC では「上半分 / 下半分」 (= 境界 0.5) と表現されることもあるが、
+    本実装では中央 10% を明示的に EQUILIBRIUM に割り当てている点に注意。
+    docstring (schemas.py / types.ts) もこの実装に合わせている。
     """
     n = len(df)
     if n == 0:
