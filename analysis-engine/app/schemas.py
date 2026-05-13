@@ -243,16 +243,20 @@ class WyckoffPhasesPayload(BaseModel):
     )
     lastSosBarsAgo: int = Field(
         -1,
+        ge=-1,
         description=(
             "直近の SOS (Sign of Strength) からの経過バー数。"
-            "なし時 -1 (sentinel)。SOS は 5-bar 上昇 impulse + (volume があれば) 高 volume で判定"
+            "なし時 -1 (sentinel)、それ以外は 0+ 実データ。SOS は 5-bar 上昇 impulse + "
+            "(volume があれば) 高 volume で判定。境界制約 ge=-1 で sentinel 設計を API レベルで担保"
         ),
     )
     lastSowBarsAgo: int = Field(
         -1,
+        ge=-1,
         description=(
             "直近の SOW (Sign of Weakness) からの経過バー数。"
-            "なし時 -1 (sentinel)。SOW は 5-bar 下降 impulse + 高 volume で判定"
+            "なし時 -1 (sentinel)、それ以外は 0+ 実データ。SOW は 5-bar 下降 impulse + 高 volume で判定。"
+            "境界制約 ge=-1 で sentinel 設計を API レベルで担保"
         ),
     )
 

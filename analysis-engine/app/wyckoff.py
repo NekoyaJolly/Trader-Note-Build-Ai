@@ -188,24 +188,36 @@ def _detect_sos_sow(df: pd.DataFrame) -> Tuple[int, int]:
     last_sow_bar = -1
 
     # 5-bar lookback で impulse 検出
+    # 「has_volume だが avg_volume_20 == 0」(CSV 取込時 volume 未指定で全 0 のケース) でも
+    # impulse のみで SOS / SOW を記録できるよう、volume 比較を有効化する条件を厳しく取る
+    # (Copilot review PR #191 指摘で修正)
+    volume_check_enabled = (
+        has_volume
+        and volumes is not None
+        and avg_volume_20 is not None
+        and avg_volume_20 > 0
+    )
     for i in range(cutoff, n):
         if i - 5 < 0:
             continue
         close_diff = closes[i] - closes[i - 5]
         # SOS 候補: 5 本で大きく上昇
         if close_diff >= IMPULSE_STRENGTH_MULTIPLIER * avg_range_20:
-            if has_volume and volumes is not None and avg_volume_20 is not None and avg_volume_20 > 0:
+            if volume_check_enabled:
+                # volume データ十分 → volume が直近平均の HIGH_VOLUME_MULTIPLIER 倍以上で SOS
                 if volumes[i] >= HIGH_VOLUME_MULTIPLIER * avg_volume_20:
                     last_sos_bar = i
+                # else: high volume 不足、SOS としては記録しない (正しい挙動)
             else:
-                # volume なしでも上昇 impulse のみで SOS とみなす (簡素化)
+                # volume データなし or 全 0 (avg = 0) → impulse のみで SOS とみなす (簡素化)
                 last_sos_bar = i
         # SOW 候補: 5 本で大きく下降
         elif -close_diff >= IMPULSE_STRENGTH_MULTIPLIER * avg_range_20:
-            if has_volume and volumes is not None and avg_volume_20 is not None and avg_volume_20 > 0:
+            if volume_check_enabled:
                 if volumes[i] >= HIGH_VOLUME_MULTIPLIER * avg_volume_20:
                     last_sow_bar = i
             else:
+                # volume データなし or 全 0 → impulse のみで SOW とみなす
                 last_sow_bar = i
 
     last_sos_bars_ago = (n - 1 - last_sos_bar) if last_sos_bar >= 0 else -1

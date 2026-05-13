@@ -183,9 +183,10 @@ export const AnalysisEngineWyckoffPhasesPayloadSchema = z.object({
   wyckoffPhaseConfidence: z.number().min(0).max(1),
   springDetectedInLast20Bars: z.boolean(),
   upthrustDetectedInLast20Bars: z.boolean(),
-  // Sign of Strength / Weakness 経過バー数。なし時 -1 sentinel
-  lastSosBarsAgo: z.number().int(),
-  lastSowBarsAgo: z.number().int(),
+  // Sign of Strength / Weakness 経過バー数。-1 (sentinel = なし) または 0+ (実データ) のみ許可
+  // (Copilot review PR #191 指摘: 仕様上の境界を Zod でも明示)
+  lastSosBarsAgo: z.number().int().min(-1),
+  lastSowBarsAgo: z.number().int().min(-1),
 });
 
 export type AnalysisEngineWyckoffPhasesPayload = z.infer<typeof AnalysisEngineWyckoffPhasesPayloadSchema>;
