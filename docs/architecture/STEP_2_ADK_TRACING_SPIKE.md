@@ -17,7 +17,7 @@ Phase 2 / Phase 3 で採用する方針:
 | **Trace を取る位置** | adapter (`skillRegistryToAdkTools`) の `execute` 内部 |
 | **ADK Plugin 依存** | なし (`BasePlugin.*ToolCallback` は Runner / PluginManager 経由のみ発火) |
 | **Trace event 定義** | 自前 (`AdkTraceEvent` + `TraceSink` interface) |
-| **Context から取る値** | `agentName` / `invocationId?` / `functionCallId?` / `sessionId?` / `userId?` (optional) |
+| **Context から取る値** | `agentName` / `invocationId` / `sessionId` / `userId` (ADK 型で必須) + `functionCallId?` (Context のみ optional)。**adapter 視点では `ctx` 自体が undefined になりうる**ため、optional chain で扱う |
 | **raw payload** | 保存しない (KICKOFF §5.2 厳守) |
 | **summary 関数** | `argsSummary` / `resultSummary` を自前生成 (`TracePayloadSummary` で field 数 + 上位キー名のみ) |
 | **Runner 統合** | Step 3 で `runEphemeral + InMemorySessionService` を試す (session-less 維持) |
@@ -31,16 +31,18 @@ Phase 2 / Phase 3 で採用する方針:
 
 `@google/adk` の `Context extends ReadonlyContext` から取得できる値 (実測 + d.ts 確認):
 
-| Getter | 型 | 取得可否 | 用途 |
-|--------|-----|---------|------|
-| `agentName` | `string` | ✅ 必ず取れる (BaseAgent 由来) | **`SkillContext.callerAgent` にマッピング** (Step 1 で確立) |
-| `invocationId` | `string` | ✅ 取れる (= 一度の Agent 実行に紐付く ID) | **trace の root span 識別子** として有用 |
-| `functionCallId` | `string?` | ✅ 取れる (= LLM が割り振った tool call の ID) | **trace の child span 識別子** として有用 |
-| `sessionId` | `string` | ✅ 取れる | trace の cross-cutting ID 候補 |
-| `userId` | `string` | ✅ 取れる | trace の cross-cutting ID 候補 |
+| Getter | ADK 型 | 取得可否 | 用途 |
+|--------|--------|---------|------|
+| `agentName` | `string` (必須) | ✅ 必ず取れる (BaseAgent 由来) | **`SkillContext.callerAgent` にマッピング** (Step 1 で確立) |
+| `invocationId` | `string` (必須) | ✅ 取れる (= 一度の Agent 実行に紐付く ID) | **trace の root span 識別子** として有用 |
+| `functionCallId` | `string?` (Context のみ、optional) | ⚠️ 取れない場合あり | **trace の child span 識別子** として有用 (取れるときのみ) |
+| `sessionId` | `string` (必須) | ✅ 取れる | trace の cross-cutting ID 候補 |
+| `userId` | `string` (必須) | ✅ 取れる | trace の cross-cutting ID 候補 |
 | `userContent` | `Content?` | ✅ 取れる | LLM input — **trace に保存しない** (KICKOFF §5.2) |
 | `state` | `Readonly<State>` | ✅ 取れる | session state — trace に保存しない |
 | `eventActions` | `EventActions` | ✅ (`Context` のみ) | trace 用途では使わない |
+
+**adapter 視点の補足**: 上記は ADK 型定義上の話。adapter (`toSkillContext`) は **`ctx: Context | undefined` で受ける** ため、テスト helper 経由の場合に `ctx` 自体が undefined になりうる。実装上は `ctx?.invocationId` 等の optional chain で扱い、全フィールドを optional として扱う方が安全。
 
 **重要な実装上の知見** (Step 1 から継続):
 
@@ -53,9 +55,13 @@ Phase 2 / Phase 3 で採用する方針:
 ```typescript
 await tool.runAsync({
   args: { symbol: 'XAU/USD' },   // ← LLM 生成相当の引数 (parameters の Zod で parse される)
-  toolContext: ctx,               // ← Context | undefined (必須引数だが undefined 不可、Context は必要)
+  toolContext: ctx,               // ← Context (RunAsyncToolRequest 型では非 optional、必ず渡す)
 });
 ```
+
+補足: `RunAsyncToolRequest.toolContext: Context` は **非 optional** (= 必ず渡す)。一方で `execute` の 2 番目の引数 `tool_context?: Context` は **execute シグネチャ上は optional** (= 関数定義で受け側が省略可能)。
+
+→ adapter の `execute` 内では `tool_context` は実態として常に渡ってくるが、テスト用 mock 等の運用都合で **optional として扱う**のが安全。
 
 実測した挙動:
 
