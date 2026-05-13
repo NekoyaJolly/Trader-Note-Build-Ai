@@ -5,7 +5,7 @@
 > **作成日**: 2026-05-14
 > **位置づけ**: Side-B Lens 基盤の拡張フェーズ。Step 4 (ADK ParallelAgent dry-run) の前提として、マーケット観測 Lens のカバレッジを実用域まで仕上げる
 > **完了条件**: 本書 §7 の DoD をすべて満たすこと
-> **実行戦略**: Phase 7a → 7b → 7c の順序固定、各 Phase 完了ごとに PR、Copilot レビュー対応、Nekoさんマージ判断後に次 Phase へ進行 (WORKFLOW.md §3 準拠)
+> **実行戦略**: Phase 7a → 7b → 7c の順序固定、各 Phase 完了ごとに PR、Copilot レビュー対応、Nekoさんマージ判断後に次 Phase へ進行 ([`../architecture/WORKFLOW.md`](../architecture/WORKFLOW.md) §3 準拠)
 
 ---
 
@@ -33,7 +33,7 @@ Phase 7 では、上記哲学のうち **「観測」段階の充実** を担う
 | カテゴリ | 現状 | Phase 7 で対応 |
 |---|---|---|
 | チャートパターン (N-bar 構造) | ❌ 未実装 | ✅ Phase 7b で `ChartPatternLens` 新規 |
-| ローソク足のパターン | ✅ 既存 `PatternLens` (12 種) | ✅ Phase 7b で `CandlePatternLens` に rename (混乱回避) |
+| ローソク足のパターン | ✅ 既存 `PatternLens` (12 種、`lensName: 'pattern'`) | ✅ Phase 7b で `CandlePatternLens` に rename (`lensName: 'candle_pattern'` への移行、§5.3 / §12.1 で互換性方針) |
 | SMC | ❌ 未実装 | ✅ Phase 7a で `SMCLens` 新規 |
 | エリオット波動 | ❌ 未実装 | ⬜ Phase 8 (本書 §3.2 で不採用、`lens_elliott_wave_future_design.md` 参照) |
 | ダウ理論 | ✅ 既存 `DowTheoryLens` | (Phase 7 では touch しない、再利用のみ) |
@@ -201,7 +201,7 @@ CandlePatternLens への rename 以外、既存 Lens のソースは改変しな
 
   // Structure
   last_structure_event: 'BOS_BULL' | 'BOS_BEAR' | 'CHOCH_BULL' | 'CHOCH_BEAR' | 'NONE';
-  bars_since_last_structure_event: number;
+  bars_since_last_structure_event: number;       // 直近 structure event 無しなら -1 (LensFeature.features は null 不可)
 
   // Zone
   current_zone: 'PREMIUM' | 'DISCOUNT' | 'EQUILIBRIUM';
@@ -291,8 +291,10 @@ CandlePatternLens への rename 以外、既存 Lens のソースは改変しな
   wyckoff_phase_confidence: number;            // 0-1
   spring_detected_in_last_20_bars: boolean;
   upthrust_detected_in_last_20_bars: boolean;
-  last_sos_bars_ago: number | null;            // SOS なら 0+、無ければ null
-  last_sow_bars_ago: number | null;
+  // LensFeature.features は `Record<string, number | string | boolean>` で null 不可。
+  // 「SOS / SOW なし」は sentinel -1 で表現する。
+  last_sos_bars_ago: number;                   // SOS なら 0+、無ければ -1
+  last_sow_bars_ago: number;                   // 同上
 }
 ```
 
@@ -308,7 +310,7 @@ CandlePatternLens への rename 以外、既存 Lens のソースは改変しな
 
 ## 6. Phase 構成
 
-## Phase 7a: SMC Lens 実装
+### 6.1 Phase 7a: SMC Lens 実装
 
 ### 目的
 
@@ -340,7 +342,7 @@ CandlePatternLens への rename 以外、既存 Lens のソースは改変しな
 
 ---
 
-## Phase 7b: ChartPatternLens 新規 + PatternLens rename
+### 6.2 Phase 7b: ChartPatternLens 新規 + PatternLens rename
 
 ### 目的
 
@@ -385,7 +387,7 @@ N-bar 構造のチャートパターン 11 種を観測する Lens を新規追�
 
 ---
 
-## Phase 7c: Wyckoff Lens 実装
+### 6.3 Phase 7c: Wyckoff Lens 実装
 
 ### 目的
 
@@ -416,10 +418,10 @@ N-bar 構造のチャートパターン 11 種を観測する Lens を新規追�
 
 ---
 
-## Phase 7 完了処理 (Phase 7c 完了 PR と同梱、または別 PR)
+### 6.4 Phase 7 完了処理 (Phase 7c 完了 PR と同梱、または別 PR)
 
 - [ ] `docs/design/phase_7_summary.md` を作成 (Phase 7 全体総括、3 Lens 追加 + rename + analysis-engine 拡張の集約)
-- [ ] `docs/design/phase_6_specification.md` §9.1 を更新 (Phase 7 / 8 / 9 のスコープ反映)
+- [ ] `docs/design/phase_6_specification.md` §9.1 を**再確認**し、必要なら追記 (本 KICKOFF と同時の commit で Phase 7 / 8 / 9 のスコープ反映は初版更新済み。実装が変わって追記が必要になった場合に更新する)
 - [ ] `docs/architecture/ADK_ADOPTION.md` §3 ロードマップで Step 4 着手前提として Phase 7 完了を記載 (必要なら)
 - [ ] `/src/side-b/lenses/` の 全 Lens (8 本: 既存 5 + 新規 3) が `registerDefaultLenses` で登録されている
 

@@ -93,7 +93,7 @@ Nekoさん構想の核心は「エリオット単独で結論を出さず、他�
 
 ### 3.5 EvolutionLoop での扱い
 
-エリオット features は他 Lens と並列に LensAggregator に統合される。`strategy_dsl` の条件式で `wave_count_top3[0]` 等を参照できるようにするには、現行 DSL の表現力で足りるか確認が必要。
+エリオット features は他 Lens と並列に LensAggregator に統合される。`strategy_dsl` の条件式で `wave_top1_label` / `wave_top1_score` 等のフラット key 群 (§3.1 案 A) を参照する形になる。配列アクセス (`wave_count_top3[0]` 等) は `LensFeature.features` の型制約上できないため、Phase 8 着手時に DSL 文法側で追加対応が不要であることを確認する。
 
 ---
 
