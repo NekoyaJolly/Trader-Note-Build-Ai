@@ -37,7 +37,7 @@ function makeAnalysis(overrides: Partial<MarketAnalysis> = {}): MarketAnalysis {
       resistanceProximity: 70,
     },
     ...overrides,
-  } as MarketAnalysis;
+  };
 }
 
 const baseInput: LensInput = {
