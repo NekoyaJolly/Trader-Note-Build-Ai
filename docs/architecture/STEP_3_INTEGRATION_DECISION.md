@@ -46,7 +46,7 @@ KICKOFF §5.13 の 7 軸を Phase 1〜3 の実測結果に当てはめる。各�
 | 軸 | 評価 |
 |----|------|
 | smoke の安定性 | Phase 1/2/3 の **計 47 cases** が一度も flake せずに pass。複数回のローカル実行 (build + jest) でも安定 |
-| ADK SDK 更新リスク | `@google/adk@1.1.0` 固定。SDK の internal / private API には依存ゼロのため、SDK 内部実装が変わっても影響を受けにくい |
+| ADK SDK 更新リスク | `package.json` は `@google/adk@^1.1.0` の caret range で宣言 (`package-lock.json` で 1.1.0 に lock 中)。SDK の internal / private API には依存ゼロのため、SDK 内部実装が変わっても影響を受けにくい |
 | Runner の挙動 | Event stream / invocationId / author 順序がすべて期待通り (Phase 1 NOTES §3.4 / Phase 2 NOTES §4.2-4.4) |
 
 → **採用寄り**
