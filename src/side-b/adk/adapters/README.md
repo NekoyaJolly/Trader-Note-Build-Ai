@@ -528,14 +528,14 @@ export function createMinimalAdkContext(options: { agentName?: string }): Contex
 
 ```typescript
 import { skillRegistryToAdkTools } from '...';
-import { InMemoryTraceSink, NoopTraceSink } from '...';
+import { InMemoryTraceSink } from '...';
 
-// Step 1 互換: trace なし
-const tools = skillRegistryToAdkTools(registry);
+// Step 1 互換: trace なし (options 省略時は内部で NoopTraceSink を使用)
+const toolsNoTrace = skillRegistryToAdkTools(registry);
 
 // Step 2: trace 付き
 const sink = new InMemoryTraceSink();
-const tools = skillRegistryToAdkTools(registry, { traceSink: sink });
+const toolsWithTrace = skillRegistryToAdkTools(registry, { traceSink: sink });
 // ... tool 実行後、sink.events に AdkTraceEvent が蓄積される
 ```
 
