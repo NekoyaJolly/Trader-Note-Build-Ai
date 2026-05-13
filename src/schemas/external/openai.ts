@@ -264,7 +264,7 @@ export function extractJSONFromAIResponse<T>(
   try {
     parsed = JSON.parse(jsonString);
   } catch (e) {
-    throw new Error(`AI出力のJSONパースに失敗: ${e instanceof Error ? e.message : String(e)}`);
+    throw new Error(`AI出力のJSONパースに失敗: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
   }
   
   // Zodスキーマでバリデーション
