@@ -50,6 +50,58 @@ export interface LensInput {
    * を返す。
    */
   precomputedPatternFlags?: Readonly<Record<CandlePatternId, ReadonlyArray<boolean>>>;
+
+  /**
+   * Phase 7a: 末尾バー時点での SMC (Smart Money Concept) 構造観測結果。
+   *
+   * 真実は analysis-engine `compute_smc_structures` (`smc.py`)。
+   * `EvolutionLoop` 等が `/v1/indicator-series` (`includeSmc: true`) で取得して
+   * LensInput に詰める想定。未指定なら `SMCLens.compute` は全 sentinel features +
+   * confidence 0 を返す。
+   *
+   * 設計書: `docs/design/phase_7_specification.md` §5.1
+   */
+  precomputedSmcStructures?: SmcStructuresPayload;
+}
+
+/**
+ * Phase 7a: SMC structures snapshot at end-of-bars.
+ *
+ * 末尾バー時点での Order Block / Liquidity / FVG / Structure event / Zone の
+ * 観測結果。`LensFeature.features` の型制約 (`number | string | boolean`、null 不可、
+ * 配列不可) に合わせ、すべて scalar 型のみで表現。「なし」は sentinel
+ * (`-1.0` / `-1` / `'NONE'`) で表現する。
+ *
+ * 設計書: `docs/design/phase_7_specification.md` §5.1 / `analysis-engine/app/smc.py`
+ */
+export interface SmcStructuresPayload {
+  /** 直近 Bull OB との距離 (pips)。なし時 -1.0 */
+  readonly nearestObBullDistancePips: number;
+  /** 直近 Bear OB との距離 (pips)。なし時 -1.0 */
+  readonly nearestObBearDistancePips: number;
+  /** 上方 BSL (Buy-side liquidity) クラスター数 (lookback 20 bars) */
+  readonly liquidityAboveCount: number;
+  /** 下方 SSL (Sell-side liquidity) クラスター数 */
+  readonly liquidityBelowCount: number;
+  /** 直近 20 bars 内の Bull FVG 数 */
+  readonly fvgBullCountLast20: number;
+  /** 直近 20 bars 内の Bear FVG 数 */
+  readonly fvgBearCountLast20: number;
+  /** 直近の構造イベント。BOS = trend 継続、CHOCH = trend 転換。なし時 'NONE' */
+  readonly lastStructureEvent: 'BOS_BULL' | 'BOS_BEAR' | 'CHOCH_BULL' | 'CHOCH_BEAR' | 'NONE';
+  /** 直近構造イベントから経過したバー数。なし時 -1 */
+  readonly barsSinceLastStructureEvent: number;
+  /**
+   * 現在の zone。zonePositionPct 基準で:
+   * - 0.0-0.45: DISCOUNT
+   * - 0.45-0.55: EQUILIBRIUM (中央 10%)
+   * - 0.55-1.0: PREMIUM
+   *
+   * Phase 7a 設計選択 (analysis-engine `smc.py` `_compute_zone` と一致)。
+   */
+  readonly currentZone: 'PREMIUM' | 'DISCOUNT' | 'EQUILIBRIUM';
+  /** swing range 内の現在位置 (0.0=extreme discount, 1.0=extreme premium) */
+  readonly zonePositionPct: number;
 }
 
 /**

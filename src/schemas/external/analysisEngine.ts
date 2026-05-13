@@ -43,6 +43,9 @@ export const AnalysisEngineIndicatorSeriesRequestSchema = z.object({
     .default([]),
   bbBandwidthWindow: z.number().int().min(2).max(500).default(20),
   bbBandwidthThreshold: z.number().min(0).max(10).default(0.2),
+  // Phase 7a: SMC structures 取得フラグ。default false で既存挙動互換。
+  // True の場合 response.smc に AnalysisEngineSmcStructuresPayload が返る。
+  includeSmc: z.boolean().default(false),
 });
 
 export type AnalysisEngineIndicatorSeriesRequest = z.infer<typeof AnalysisEngineIndicatorSeriesRequestSchema>;
@@ -80,12 +83,48 @@ export const AnalysisEngineIndicatorSeriesByVersionRequestSchema = z.object({
 
 export type AnalysisEngineIndicatorSeriesByVersionRequest = z.infer<typeof AnalysisEngineIndicatorSeriesByVersionRequestSchema>;
 
+/**
+ * Phase 7a: SMC (Smart Money Concept) structures snapshot at end-of-bars.
+ *
+ * analysis-engine `compute_smc_structures` の返り値。`LensFeature.features` の型制約
+ * (Record<string, number | string | boolean>、null 不可、配列不可) に合わせ、すべて
+ * scalar 型のみで構成。「なし」は sentinel (-1.0 / -1 / 'NONE') で表現する。
+ *
+ * Node 側 EvolutionLoop 等が `/v1/indicator-series` (`includeSmc: true`) で取得して
+ * `LensInput.precomputedSmcStructures` 経由で `SMCLens` に渡す。
+ *
+ * 設計書: `docs/design/phase_7_specification.md` §5.1
+ */
+export const AnalysisEngineSmcStructuresPayloadSchema = z.object({
+  // OB (Order Block) — 直近の Bull/Bear OB との距離 (pips)、なし時 -1.0
+  nearestObBullDistancePips: z.number(),
+  nearestObBearDistancePips: z.number(),
+  // Liquidity zone (BSL / SSL) — lookback 20 bars 内のクラスター数
+  liquidityAboveCount: z.number().int().min(0),
+  liquidityBelowCount: z.number().int().min(0),
+  // Fair Value Gap (FVG) — 直近 20 bars 内の 3-bar gap 数
+  fvgBullCountLast20: z.number().int().min(0),
+  fvgBearCountLast20: z.number().int().min(0),
+  // Structure event (BOS / CHOCH) — 直近イベント、なし時 'NONE'
+  lastStructureEvent: z.enum(['BOS_BULL', 'BOS_BEAR', 'CHOCH_BULL', 'CHOCH_BEAR', 'NONE']),
+  barsSinceLastStructureEvent: z.number().int(),
+  // Zone (Premium / Discount / Equilibrium) — 直近 swing range の中央 10% (0.45-0.55) を Equilibrium
+  currentZone: z.enum(['PREMIUM', 'DISCOUNT', 'EQUILIBRIUM']),
+  zonePositionPct: z.number().min(0).max(1),
+});
+
+export type AnalysisEngineSmcStructuresPayload = z.infer<typeof AnalysisEngineSmcStructuresPayloadSchema>;
+
 export const AnalysisEngineIndicatorSeriesResponseSchema = z.object({
   symbol: z.string().min(1),
   timeframe: z.string().min(1),
   timestamps: z.array(z.string().datetime()),
   series: z.record(z.string(), z.array(z.number().nullable())),
   patterns: z.record(z.string(), z.array(z.boolean())).default({}),
+  // Phase 7a: SMC structures snapshot (request.includeSmc=true 時のみ Python 側で詰まる)
+  // 未指定 (request.includeSmc=false) なら null / 省略。Zod は未知フィールドを silently
+  // strip するため、本フィールドが無いと SMCLens まで届かない (Copilot review PR #186 指摘)
+  smc: AnalysisEngineSmcStructuresPayloadSchema.nullable().optional(),
 });
 
 export type AnalysisEngineIndicatorSeriesResponse = z.infer<typeof AnalysisEngineIndicatorSeriesResponseSchema>;
