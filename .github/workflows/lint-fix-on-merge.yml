@@ -1,0 +1,166 @@
+name: Auto lint-fix on PR merge
+
+# 実装 PR が main にマージされたタイミングで、変更ファイルが含まれるディレクトリ
+# (1 階層分) に対して ESLint / TypeScript の違反を Copilot Coding Agent に修正させる。
+#
+# 設計: docs/architecture/WORKFLOW.md §10 (Auto lint-fix) を予定
+# 経緯: ESLint 488 errors / tsconfig audit 1423 errors の段階解消を Nekoさん負担ゼロで
+#       進めるため (Step 0 完了サマリーで「ユーザー対応依頼」として残っていた項目)。
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+jobs:
+  trigger-lint-fix:
+    # 無限ループ予防:
+    # - marged == false (close だけ) は対象外
+    # - copilot/ ブランチからのマージは対象外 (Copilot Coding Agent 自身の PR を弾く)
+    # - chore/lint-fix-* も念のため除外 (将来の手動 lint-fix PR にも対応)
+    if: >
+      github.event.pull_request.merged == true &&
+      !startsWith(github.event.pull_request.head.ref, 'copilot/') &&
+      !startsWith(github.event.pull_request.head.ref, 'chore/lint-fix-')
+    runs-on: ubuntu-latest
+    steps:
+      - name: 対象ファイル抽出 (TS/JS のみ、1 階層親ディレクトリ)
+        id: changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          # マージされた PR の変更ファイル一覧を取得
+          gh pr diff "$PR_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --name-only > changed.txt || true
+
+          # TypeScript / JavaScript ファイルのみ抽出 (CI 対象外の .md / .yml 等は除く)
+          grep -E '\.(ts|tsx|js|jsx)$' changed.txt > ts_files.txt || true
+
+          # node_modules / dist / build は除外
+          grep -vE '^(node_modules|dist|build|\.next|coverage)/' ts_files.txt > filtered.txt || true
+
+          if [ ! -s filtered.txt ]; then
+            echo "TS/JS ファイル変更なし、Copilot Coding Agent は起動しない"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 各ファイルの 1 階層親ディレクトリを抽出して重複削除
+          # (例: src/side-b/adk/adapters/skillContext.ts → src/side-b/adk/adapters)
+          xargs -a filtered.txt -I {} dirname {} | sort -u > dirs.txt
+
+          # GITHUB_OUTPUT への multi-line 値 (heredoc 形式)
+          {
+            echo "dirs<<EOF_DIRS"
+            cat dirs.txt
+            echo "EOF_DIRS"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "files<<EOF_FILES"
+            cat filtered.txt
+            echo "EOF_FILES"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+          echo "== 対象ディレクトリ =="
+          cat dirs.txt
+          echo "== 対象ファイル =="
+          cat filtered.txt
+
+      - name: Issue 作成 (Copilot Coding Agent を assign)
+        if: steps.changed.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          DIRS: ${{ steps.changed.outputs.dirs }}
+          FILES: ${{ steps.changed.outputs.files }}
+        run: |
+          set -euo pipefail
+
+          # Issue body をテンプレ化して組み立て
+          ISSUE_BODY=$(cat <<EOF
+          ## Lint 修正タスク (PR #${PR_NUMBER} マージに伴う自動起動)
+
+          - **トリガー PR**: [#${PR_NUMBER} - ${PR_TITLE}](${PR_URL})
+          - **修正対象**: 下記ディレクトリ配下の TypeScript / JavaScript ファイル
+
+          ### 対象ディレクトリ (1 階層分)
+
+          \`\`\`
+          ${DIRS}
+          \`\`\`
+
+          ### マージ PR で変更されたファイル (参考)
+
+          \`\`\`
+          ${FILES}
+          \`\`\`
+
+          ---
+
+          ## 修正方針
+
+          上記ディレクトリ配下のファイルに対して、以下を実施してください:
+
+          1. **ESLint の auto-fixable 違反を修正** (\`npx eslint <dirs> --fix\` で直るもの)
+          2. **型注釈の追加** (\`any\` 残置 / 戻り値型欠落 / 引数型欠落) を可能な範囲で
+          3. **未使用 import / 未使用変数の削除**
+
+          ## 厳守事項 (重要)
+
+          - **既存機能・ロジック・テスト結果を一切変更しない**
+          - **デザイン・UI の見た目を一切変更しない**
+          - **フォーマット規約・命名規約も変更しない**
+          - **修正は ESLint / tsc 違反の解消のみ**
+          - **修正前後で \`npx jest\` が同じ結果になること**
+          - **\`unknown\` の具体型化は今回は対象外** (人間判断が要るため別途対応)
+
+          ## 検証手順 (PR 提出前に必ず実施)
+
+          \`\`\`bash
+          npx eslint <対象ディレクトリ>            # 0 error 推奨
+          npx tsc --noEmit -p tsconfig.json        # 0 error 必須
+          npx jest src/                            # 全 PASS 必須
+          \`\`\`
+
+          ## PR の出し方
+
+          - **ブランチ名**: \`copilot/lint-fix-${PR_NUMBER}\` (Copilot Coding Agent デフォルトの \`copilot/\` prefix を維持)
+          - **PR タイトル**: \`chore(lint): PR #${PR_NUMBER} 影響範囲の lint/tsc 修正\`
+          - **base ブランチ**: \`main\`
+          - **PR description には以下を含める**:
+            - 修正した違反の件数 (ESLint X 件、tsc Y 件)
+            - **直せなかったもの** (unknown 残置、設計判断が要るもの、副作用が読めなかったもの) を箇条書きでレポート
+
+          ## 自動起動の補足
+
+          - 本 Issue は \`.github/workflows/lint-fix-on-merge.yml\` から自動作成された
+          - 完了したら本 Issue は close してよい
+          - 修正対象が 0 件だった場合は、その旨をコメントして PR は作らず close でよい
+          EOF
+          )
+
+          # Issue 作成 (Copilot Coding Agent を assignee に指定)
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "[lint-fix] PR #${PR_NUMBER} の影響範囲を lint 修正" \
+            --body "$ISSUE_BODY" \
+            --assignee Copilot
+
+      - name: スキップ理由を記録 (TS/JS 変更なし時)
+        if: steps.changed.outputs.skip == 'true'
+        run: |
+          echo "::notice::PR #${{ github.event.pull_request.number }} に TS/JS ファイル変更がなかったため、Copilot Coding Agent は起動しません"
