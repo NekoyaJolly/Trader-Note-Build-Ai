@@ -46,6 +46,9 @@ export const AnalysisEngineIndicatorSeriesRequestSchema = z.object({
   // Phase 7a: SMC structures 取得フラグ。default false で既存挙動互換。
   // True の場合 response.smc に AnalysisEngineSmcStructuresPayload が返る。
   includeSmc: z.boolean().default(false),
+  // Phase 7b: Chart Patterns 取得フラグ。default false で既存挙動互換。
+  // True の場合 response.chartPatterns に AnalysisEngineChartPatternsPayload が返る。
+  includeChartPatterns: z.boolean().default(false),
 });
 
 export type AnalysisEngineIndicatorSeriesRequest = z.infer<typeof AnalysisEngineIndicatorSeriesRequestSchema>;
@@ -115,6 +118,42 @@ export const AnalysisEngineSmcStructuresPayloadSchema = z.object({
 
 export type AnalysisEngineSmcStructuresPayload = z.infer<typeof AnalysisEngineSmcStructuresPayloadSchema>;
 
+/**
+ * Phase 7b: Chart Patterns (N-bar structural) detection snapshot at end-of-bars.
+ *
+ * analysis-engine `compute_chart_patterns` の返り値。同時複数検出時は confidence
+ * 最高の 1 つを採用する。LensFeature.features の型制約に合わせて scalar 型のみで構成。
+ *
+ * 「Pattern」(ローソク足、既存 `PatternLens` / `lensName: 'pattern'`) と
+ * 「Chart Pattern」(N-bar 構造、本 lens / `lensName: 'chart_pattern'`) は階層的に
+ * 異なる概念。ローソク足 = 基本、Chart Pattern = 応用 / 組み合わせ。
+ * user 哲学 (2026-05-14): pattern = 基本、chart_pattern = 応用。
+ *
+ * 設計書: `docs/design/phase_7_specification.md` §5.2
+ */
+export const AnalysisEngineChartPatternsPayloadSchema = z.object({
+  patternDetected: z.enum([
+    'FLAG',
+    'PENNANT',
+    'TRIANGLE_ASC',
+    'TRIANGLE_DESC',
+    'TRIANGLE_SYM',
+    'HEAD_SHOULDER',
+    'INV_HEAD_SHOULDER',
+    'DOUBLE_TOP',
+    'DOUBLE_BOTTOM',
+    'WEDGE_RISE',
+    'WEDGE_FALL',
+    'NONE',
+  ]),
+  patternConfidence: z.number().min(0).max(1),
+  patternBreakImminent: z.boolean(),
+  patternBarsCount: z.number().int().min(0),
+  patternDirectionBias: z.enum(['BULL', 'BEAR', 'NEUTRAL']),
+});
+
+export type AnalysisEngineChartPatternsPayload = z.infer<typeof AnalysisEngineChartPatternsPayloadSchema>;
+
 export const AnalysisEngineIndicatorSeriesResponseSchema = z.object({
   symbol: z.string().min(1),
   timeframe: z.string().min(1),
@@ -125,6 +164,8 @@ export const AnalysisEngineIndicatorSeriesResponseSchema = z.object({
   // 未指定 (request.includeSmc=false) なら null / 省略。Zod は未知フィールドを silently
   // strip するため、本フィールドが無いと SMCLens まで届かない (Copilot review PR #186 指摘)
   smc: AnalysisEngineSmcStructuresPayloadSchema.nullable().optional(),
+  // Phase 7b: Chart Patterns snapshot (request.includeChartPatterns=true 時のみ Python 側で詰まる)
+  chartPatterns: AnalysisEngineChartPatternsPayloadSchema.nullable().optional(),
 });
 
 export type AnalysisEngineIndicatorSeriesResponse = z.infer<typeof AnalysisEngineIndicatorSeriesResponseSchema>;

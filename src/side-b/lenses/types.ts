@@ -62,6 +62,22 @@ export interface LensInput {
    * 設計書: `docs/design/phase_7_specification.md` §5.1
    */
   precomputedSmcStructures?: SmcStructuresPayload;
+
+  /**
+   * Phase 7b: 末尾バー時点での Chart Pattern (N-bar 構造) 検出結果。
+   *
+   * 真実は analysis-engine `compute_chart_patterns` (`chart_patterns.py`)。
+   * `EvolutionLoop` 等が `/v1/indicator-series` (`includeChartPatterns: true`) で
+   * 取得して LensInput に詰める想定。未指定なら `ChartPatternLens.compute` は
+   * sentinel features + confidence 0 を返す。
+   *
+   * 「Pattern」(ローソク足、既存 PatternLens) と「Chart Pattern」(N-bar 構造、本 lens)
+   * は階層的に異なる概念。ローソク足 = 基本、Chart Pattern = 応用 / 組み合わせ。
+   * user 哲学 (2026-05-14): pattern = 基本、chart_pattern = 応用。
+   *
+   * 設計書: `docs/design/phase_7_specification.md` §5.2
+   */
+  precomputedChartPatterns?: ChartPatternsPayload;
 }
 
 /**
@@ -102,6 +118,50 @@ export interface SmcStructuresPayload {
   readonly currentZone: 'PREMIUM' | 'DISCOUNT' | 'EQUILIBRIUM';
   /** swing range 内の現在位置 (0.0=extreme discount, 1.0=extreme premium) */
   readonly zonePositionPct: number;
+}
+
+/**
+ * Phase 7b: Chart Pattern (N-bar 構造) 検出 snapshot。
+ *
+ * `compute_chart_patterns` (`chart_patterns.py`) が同時複数パターン検出時は
+ * confidence が最も高い 1 つを採用する。`LensFeature.features` の型制約 (`Record<string,
+ * number | string | boolean>`、null 不可) に合わせ scalar 型のみで構成。「なし」は
+ * `patternDetected: 'NONE'` で表現、その他は 0 / false / 'NEUTRAL' で表現。
+ *
+ * 設計書: `docs/design/phase_7_specification.md` §5.2 / `analysis-engine/app/chart_patterns.py`
+ */
+export interface ChartPatternsPayload {
+  /**
+   * 検出された chart pattern。なし時 'NONE'。
+   *
+   * 11 種:
+   * - FLAG / PENNANT: 大きな impulse 後の consolidation
+   * - TRIANGLE_ASC / DESC / SYM: 高値・安値線の収束
+   * - HEAD_SHOULDER / INV_HEAD_SHOULDER: 3 山構造
+   * - DOUBLE_TOP / DOUBLE_BOTTOM: 2 山構造
+   * - WEDGE_RISE / FALL: 高安両方向の収束
+   */
+  readonly patternDetected:
+    | 'FLAG'
+    | 'PENNANT'
+    | 'TRIANGLE_ASC'
+    | 'TRIANGLE_DESC'
+    | 'TRIANGLE_SYM'
+    | 'HEAD_SHOULDER'
+    | 'INV_HEAD_SHOULDER'
+    | 'DOUBLE_TOP'
+    | 'DOUBLE_BOTTOM'
+    | 'WEDGE_RISE'
+    | 'WEDGE_FALL'
+    | 'NONE';
+  /** 検出 confidence (0.0-1.0)。NONE 時は 0.0 */
+  readonly patternConfidence: number;
+  /** 直近 3 本以内に breakout / breakdown が発生しそうか */
+  readonly patternBreakImminent: boolean;
+  /** パターン形成期間 (バー数)。0 = なし or NONE */
+  readonly patternBarsCount: number;
+  /** パターンが示唆する方向バイアス */
+  readonly patternDirectionBias: 'BULL' | 'BEAR' | 'NEUTRAL';
 }
 
 /**

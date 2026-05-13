@@ -56,6 +56,11 @@ class IndicatorSeriesRequest(BaseModel):
     # Node 側 SMCLens が `LensInput.precomputedSmcStructures` 経由で受け取る。
     includeSmc: bool = False
 
+    # Chart Patterns 計算の要求（Phase 7b で追加、default false で既存挙動互換）
+    # True 時 ChartPatternsPayload を IndicatorSeriesResponse.chartPatterns に格納して返す。
+    # Node 側 ChartPatternLens が `LensInput.precomputedChartPatterns` 経由で受け取る。
+    includeChartPatterns: bool = False
+
 
 class IndicatorSeriesByVersionRequest(BaseModel):
     """Node 側から最小情報（ID + 期間）だけを受け取り、
@@ -133,6 +138,56 @@ class SmcStructuresPayload(BaseModel):
     )
 
 
+class ChartPatternsPayload(BaseModel):
+    """Chart Pattern (N-bar structural) detection snapshot at end-of-bars.
+
+    Phase 7b (`docs/design/phase_7_specification.md` §5.2) で導入。
+
+    本 payload は **末尾バー時点で検出された chart pattern** を表す。
+    `compute_chart_patterns` (`chart_patterns.py`) が同時複数検出時は
+    confidence が最も高い 1 つを採用する。
+
+    LensFeature.features の型制約 (TypeScript 側 `Record<string, number | string | boolean>`、
+    null 不可) に合わせ、すべての値は number / string (Literal) / boolean のみで構成。
+
+    本 payload は `IndicatorSeriesResponse.chartPatterns` に格納されて Node 側
+    `ChartPatternLens` に渡る (PR ④F / Phase 7a SMCLens と同パターン)。
+
+    「Pattern」(ローソク足、既存 `PatternLens`) と「Chart Pattern」(N-bar 構造、本 lens)
+    は階層的に異なる概念。ローソク足 = 基本、Chart Pattern = 応用 / 組み合わせ。
+    user 哲学 (2026-05-14): pattern = 基本、chart_pattern = 応用。
+    """
+
+    patternDetected: Literal[
+        "FLAG",
+        "PENNANT",
+        "TRIANGLE_ASC",
+        "TRIANGLE_DESC",
+        "TRIANGLE_SYM",
+        "HEAD_SHOULDER",
+        "INV_HEAD_SHOULDER",
+        "DOUBLE_TOP",
+        "DOUBLE_BOTTOM",
+        "WEDGE_RISE",
+        "WEDGE_FALL",
+        "NONE",
+    ] = Field("NONE", description="検出された chart pattern。なし時 'NONE'")
+    patternConfidence: float = Field(0.0, ge=0.0, le=1.0, description="検出 confidence (0-1)")
+    patternBreakImminent: bool = Field(
+        False,
+        description="直近 3 本以内にパターンの breakout/breakdown が発生しそうか",
+    )
+    patternBarsCount: int = Field(
+        0,
+        ge=0,
+        description="パターン形成期間 (バー数)。0 = なし or NONE",
+    )
+    patternDirectionBias: Literal["BULL", "BEAR", "NEUTRAL"] = Field(
+        "NEUTRAL",
+        description="パターンが示唆する方向バイアス。ニュートラル含む",
+    )
+
+
 class IndicatorSeriesResponse(BaseModel):
     symbol: str
     timeframe: str
@@ -146,6 +201,9 @@ class IndicatorSeriesResponse(BaseModel):
 
     # SMC structures snapshot (Phase 7a 追加、`request.includeSmc=True` 時のみ格納)
     smc: Optional[SmcStructuresPayload] = None
+
+    # Chart Patterns snapshot (Phase 7b 追加、`request.includeChartPatterns=True` 時のみ格納)
+    chartPatterns: Optional[ChartPatternsPayload] = None
 
 
 class WalkForwardEvent(BaseModel):
