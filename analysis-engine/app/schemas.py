@@ -61,6 +61,13 @@ class IndicatorSeriesRequest(BaseModel):
     # Node 側 ChartPatternLens が `LensInput.precomputedChartPatterns` 経由で受け取る。
     includeChartPatterns: bool = False
 
+    # Wyckoff phases 計算の要求（Phase 7c で追加、default false で既存挙動互換）
+    # True 時 WyckoffPhasesPayload を IndicatorSeriesResponse.wyckoff に格納して返す。
+    # Node 側 WyckoffLens が `LensInput.precomputedWyckoffPhases` 経由で受け取る。
+    # Wyckoff phase 判定は **SMC context (Phase 7a)** を入力として利用するため、
+    # includeSmc も True にすると精度が上がる (互いに独立に True/False 設定可)。
+    includeWyckoff: bool = False
+
 
 class IndicatorSeriesByVersionRequest(BaseModel):
     """Node 側から最小情報（ID + 期間）だけを受け取り、
@@ -188,6 +195,68 @@ class ChartPatternsPayload(BaseModel):
     )
 
 
+class WyckoffPhasesPayload(BaseModel):
+    """Wyckoff phase / signal detection snapshot at end-of-bars.
+
+    Phase 7c (`docs/design/phase_7_specification.md` §5.4) で導入。
+
+    本 payload は **末尾バー時点での Wyckoff phase 判定 + 主要シグナル検出結果** を表す。
+    `compute_wyckoff_phases` (`wyckoff.py`) が SMC context (Phase 7a) を optional input
+    として活用し、BOS / CHOCH 情報を phase 判定に組み込む。
+
+    LensFeature.features の型制約 (TypeScript 側 `Record<string, number | string | boolean>`、
+    null 不可) に合わせ、すべて scalar 型のみで構成。「なし」は sentinel (-1 / 'UNKNOWN' / false)
+    で表現する。
+
+    本 payload は `IndicatorSeriesResponse.wyckoff` に格納されて Node 側 `WyckoffLens`
+    に渡る (Phase 7a / 7b と同パターン)。
+    """
+
+    wyckoffPhase: Literal[
+        "ACCUMULATION",
+        "MARKUP",
+        "DISTRIBUTION",
+        "MARKDOWN",
+        "RE_ACCUMULATION",
+        "RE_DISTRIBUTION",
+        "UNKNOWN",
+    ] = Field(
+        "UNKNOWN",
+        description=(
+            "Wyckoff サイクル phase 判定。SMC BOS/CHOCH と trend slope の組合せで判定。"
+            "UNKNOWN は判定材料不足を示す"
+        ),
+    )
+    wyckoffPhaseConfidence: float = Field(
+        0.0,
+        ge=0.0,
+        le=1.0,
+        description="phase 判定の confidence (0-1)。SMC context が一致すると高くなる",
+    )
+    springDetectedInLast20Bars: bool = Field(
+        False,
+        description="直近 20 bars 内に Spring 検出 (= swing low を一時的に割って戻る pattern)",
+    )
+    upthrustDetectedInLast20Bars: bool = Field(
+        False,
+        description="直近 20 bars 内に Upthrust 検出 (= swing high を一時的に超えて戻る pattern)",
+    )
+    lastSosBarsAgo: int = Field(
+        -1,
+        description=(
+            "直近の SOS (Sign of Strength) からの経過バー数。"
+            "なし時 -1 (sentinel)。SOS は 5-bar 上昇 impulse + (volume があれば) 高 volume で判定"
+        ),
+    )
+    lastSowBarsAgo: int = Field(
+        -1,
+        description=(
+            "直近の SOW (Sign of Weakness) からの経過バー数。"
+            "なし時 -1 (sentinel)。SOW は 5-bar 下降 impulse + 高 volume で判定"
+        ),
+    )
+
+
 class IndicatorSeriesResponse(BaseModel):
     symbol: str
     timeframe: str
@@ -204,6 +273,9 @@ class IndicatorSeriesResponse(BaseModel):
 
     # Chart Patterns snapshot (Phase 7b 追加、`request.includeChartPatterns=True` 時のみ格納)
     chartPatterns: Optional[ChartPatternsPayload] = None
+
+    # Wyckoff phases snapshot (Phase 7c 追加、`request.includeWyckoff=True` 時のみ格納)
+    wyckoff: Optional[WyckoffPhasesPayload] = None
 
 
 class WalkForwardEvent(BaseModel):

@@ -78,6 +78,20 @@ export interface LensInput {
    * 設計書: `docs/design/phase_7_specification.md` §5.2
    */
   precomputedChartPatterns?: ChartPatternsPayload;
+
+  /**
+   * Phase 7c: 末尾バー時点での Wyckoff phase 判定 + 主要シグナル検出結果。
+   *
+   * 真実は analysis-engine `compute_wyckoff_phases` (`wyckoff.py`)。`EvolutionLoop`
+   * 等が `/v1/indicator-series` (`includeWyckoff: true`) で取得して LensInput に
+   * 詰める想定。未指定なら `WyckoffLens.compute` は sentinel features + confidence 0 を返す。
+   *
+   * Wyckoff phase 判定は **SMC context (Phase 7a) を input として活用** することで
+   * 精度が向上する。`includeSmc: true` も併用すると BOS / CHOCH 情報が反映される。
+   *
+   * 設計書: `docs/design/phase_7_specification.md` §5.4
+   */
+  precomputedWyckoffPhases?: WyckoffPhasesPayload;
 }
 
 /**
@@ -162,6 +176,46 @@ export interface ChartPatternsPayload {
   readonly patternBarsCount: number;
   /** パターンが示唆する方向バイアス */
   readonly patternDirectionBias: 'BULL' | 'BEAR' | 'NEUTRAL';
+}
+
+/**
+ * Phase 7c: Wyckoff phase / signal detection snapshot at end-of-bars.
+ *
+ * `compute_wyckoff_phases` (`wyckoff.py`) が SMC context (Phase 7a) を optional input
+ * として活用、BOS / CHOCH 情報を phase 判定に組み込む。`LensFeature.features` の型制約
+ * に合わせ scalar 型のみで構成。「なし」は sentinel (`-1` / `'UNKNOWN'` / `false`) で表現。
+ *
+ * 設計書: `docs/design/phase_7_specification.md` §5.4 / `analysis-engine/app/wyckoff.py`
+ */
+export interface WyckoffPhasesPayload {
+  /**
+   * Wyckoff サイクル phase 判定:
+   * - ACCUMULATION: 横ばい + 下方ゾーン (買い溜め期)
+   * - MARKUP: 強い上昇 + BOS_BULL
+   * - DISTRIBUTION: 横ばい + 上方ゾーン (利確期)
+   * - MARKDOWN: 強い下降 + BOS_BEAR
+   * - RE_ACCUMULATION: 横ばい + CHOCH_BULL (= MARKUP への転換期)
+   * - RE_DISTRIBUTION: 横ばい + CHOCH_BEAR
+   * - UNKNOWN: 判定材料不足
+   */
+  readonly wyckoffPhase:
+    | 'ACCUMULATION'
+    | 'MARKUP'
+    | 'DISTRIBUTION'
+    | 'MARKDOWN'
+    | 'RE_ACCUMULATION'
+    | 'RE_DISTRIBUTION'
+    | 'UNKNOWN';
+  /** phase 判定の confidence (0-1)。SMC context が一致すると高くなる */
+  readonly wyckoffPhaseConfidence: number;
+  /** 直近 20 bars 内に Spring (= swing low 一時 break) 検出 */
+  readonly springDetectedInLast20Bars: boolean;
+  /** 直近 20 bars 内に Upthrust (= swing high 一時 break) 検出 */
+  readonly upthrustDetectedInLast20Bars: boolean;
+  /** 直近の SOS (Sign of Strength) からの経過バー数。なし時 -1 sentinel */
+  readonly lastSosBarsAgo: number;
+  /** 直近の SOW (Sign of Weakness) からの経過バー数。なし時 -1 sentinel */
+  readonly lastSowBarsAgo: number;
 }
 
 /**

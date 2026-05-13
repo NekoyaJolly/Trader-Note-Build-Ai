@@ -49,6 +49,11 @@ export const AnalysisEngineIndicatorSeriesRequestSchema = z.object({
   // Phase 7b: Chart Patterns 取得フラグ。default false で既存挙動互換。
   // True の場合 response.chartPatterns に AnalysisEngineChartPatternsPayload が返る。
   includeChartPatterns: z.boolean().default(false),
+  // Phase 7c: Wyckoff phases 取得フラグ。default false で既存挙動互換。
+  // True の場合 response.wyckoff に AnalysisEngineWyckoffPhasesPayload が返る。
+  // SMC context (Phase 7a) を Wyckoff phase 判定に活用するため、includeSmc も
+  // 同時に True にすると精度が上がる (互いに独立に設定可)。
+  includeWyckoff: z.boolean().default(false),
 });
 
 export type AnalysisEngineIndicatorSeriesRequest = z.infer<typeof AnalysisEngineIndicatorSeriesRequestSchema>;
@@ -154,6 +159,37 @@ export const AnalysisEngineChartPatternsPayloadSchema = z.object({
 
 export type AnalysisEngineChartPatternsPayload = z.infer<typeof AnalysisEngineChartPatternsPayloadSchema>;
 
+/**
+ * Phase 7c: Wyckoff phase / signal detection snapshot at end-of-bars.
+ *
+ * analysis-engine `compute_wyckoff_phases(df, smc_context)` の返り値。SMC context
+ * (Phase 7a) を input として活用し、BOS / CHOCH 情報で phase 判定の精度を上げる。
+ *
+ * LensFeature.features の型制約に合わせ scalar 型のみで構成。「なし」は sentinel
+ * (-1 / 'UNKNOWN' / false) で表現する。
+ *
+ * 設計書: `docs/design/phase_7_specification.md` §5.4
+ */
+export const AnalysisEngineWyckoffPhasesPayloadSchema = z.object({
+  wyckoffPhase: z.enum([
+    'ACCUMULATION',
+    'MARKUP',
+    'DISTRIBUTION',
+    'MARKDOWN',
+    'RE_ACCUMULATION',
+    'RE_DISTRIBUTION',
+    'UNKNOWN',
+  ]),
+  wyckoffPhaseConfidence: z.number().min(0).max(1),
+  springDetectedInLast20Bars: z.boolean(),
+  upthrustDetectedInLast20Bars: z.boolean(),
+  // Sign of Strength / Weakness 経過バー数。なし時 -1 sentinel
+  lastSosBarsAgo: z.number().int(),
+  lastSowBarsAgo: z.number().int(),
+});
+
+export type AnalysisEngineWyckoffPhasesPayload = z.infer<typeof AnalysisEngineWyckoffPhasesPayloadSchema>;
+
 export const AnalysisEngineIndicatorSeriesResponseSchema = z.object({
   symbol: z.string().min(1),
   timeframe: z.string().min(1),
@@ -166,6 +202,8 @@ export const AnalysisEngineIndicatorSeriesResponseSchema = z.object({
   smc: AnalysisEngineSmcStructuresPayloadSchema.nullable().optional(),
   // Phase 7b: Chart Patterns snapshot (request.includeChartPatterns=true 時のみ Python 側で詰まる)
   chartPatterns: AnalysisEngineChartPatternsPayloadSchema.nullable().optional(),
+  // Phase 7c: Wyckoff phases snapshot (request.includeWyckoff=true 時のみ Python 側で詰まる)
+  wyckoff: AnalysisEngineWyckoffPhasesPayloadSchema.nullable().optional(),
 });
 
 export type AnalysisEngineIndicatorSeriesResponse = z.infer<typeof AnalysisEngineIndicatorSeriesResponseSchema>;
