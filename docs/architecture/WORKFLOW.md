@@ -276,10 +276,82 @@ Step 0 完了時点で「ユーザー対応依頼」として残っていた **E
 
 ---
 
-## 9. 履歴
+## 9. Production Deployment 失敗の早期検出フロー (2026-05-14 追加)
+
+PR #184 (deploy #457〜#472 の 15 連続失敗) の振り返りで、deploy 失敗を merge から最大 15 PR ぶん見逃した事例が発生したため、確認フローを **pre-merge 強化 + post-merge 瞬間チェック** の 2 段構えに整理する。
+
+### 9.1 目的
+
+- 各 PR の merge 後に走る Production Deployment の失敗を、**次 Phase 着手前に検出**する
+- ただし、毎 PR で deploy success まで待つと ~12 分 / PR の追加待機が発生するため、待ち時間を最小化する
+- Step 完了 PR (Phase 5 cleanup) のような区切り PR でだけ完全に待つ運用も検討した (§9.5 参照) が、各 Phase 着手時の瞬間チェックの方が遅延が小さく済む
+
+### 9.2 pre-merge ゲート (`docker build` を CI Pipeline 内で実行)
+
+`.github/workflows/ci.yml` の `docker-build` ジョブで `docker build .` を実行する。
+
+- 過去 (PR #184) の Dockerfile drift (`.npmrc` の COPY 抜け) のような **ローカル `npm ci` は通るが Docker 内 `npm ci` で落ちる** 食い違いを pre-merge で捕捉する
+- ローカル `.npmrc` の `legacy-peer-deps=true` が効くため `npm ci` / `tsc` / `jest` ベースの既存 CI ジョブはすり抜けるが、`docker build` は Docker context で実行されるため `.npmrc` の不在等を確実に検出する
+- ジョブ追加による CI 時間増加は GitHub Actions cache (`type=gha`) で最小化
+
+### 9.3 post-merge 瞬間チェック (次 Phase 着手時)
+
+各 Phase の作業着手の **冒頭**で、最新 Production Deployment の状態を 2 秒で確認する。
+
+```bash
+gh run list --workflow=deploy.yml --limit=1 --json conclusion,number,headSha,status,createdAt
+```
+
+判定:
+
+| 最新 deploy の状態 | 着手判断 |
+|------------------|----------|
+| `success` | ✅ 次 Phase 着手 OK |
+| `in_progress` | ✅ 次 Phase 着手 OK (in_progress は後で見直す。並走で別 Phase を進める間に結果が出るのが普通) |
+| `failure` で headSha が直近 1〜2 commit 以内 | ❌ **次 Phase 着手せず Nekoさんに即時報告**。原因調査 PR を先行 |
+| `failure` だが headSha が古い (= 既に修正済み or 失敗が放置されていない) | 状況を Nekoさんに確認 |
+
+これにより、deploy 失敗の検出遅延は **最大で 1 Phase ぶん (= 次 PR まで)** に抑えられる。Step 3 のように 5 Phase 構成でも、検出が「Phase 1 失敗 → Phase 2 着手時に検知」で済む。
+
+### 9.4 §3.4 (merge polling) との関係
+
+§3.4 の merge polling は引き続き「MERGED 検出 → 次 Phase へ自動着手」のままで変更しない。本 §9.3 の瞬間チェックは「次 Phase 着手の冒頭ステップ」として追加される。
+
+合算した流れ:
+
+```
+[Code] サマリコメント投稿 → merge polling 起動
+  ↓
+[Nekoさん] merge
+  ↓
+[Code] polling MERGED 検出
+  ↓
+[Code] git checkout main && git pull --ff-only origin main
+  ↓
+[Code] ★ 最新 deploy 状態を瞬間チェック (本 §9.3)
+  ↓ success / in_progress
+[Code] git checkout -b <next-phase-branch>
+  ↓
+[Code] 次 Phase 実装着手
+```
+
+### 9.5 採用しなかった案 (記録)
+
+| 案 | 採否 | 理由 |
+|---|------|------|
+| 毎 PR で deploy success まで完全待機 | ❌ | 各 PR ~12 分追加、ESLint 厳格化後はさらに伸びる |
+| Step 完了 PR (Phase 5) のみ deploy success まで待つ | ❌ | Phase 1〜4 で壊れた場合 Step 末尾まで検出が遅れる (Step 3 の場合 ~5 PR 分) |
+| 全 PR で CI Pipeline (6 分) のみ待つ | ❌ | Production Deploy 自体の失敗は検出できない |
+| post-merge polling を background で常時走らせる | ❌ | 失敗時の判断 (継続 / 停止) が曖昧、通知混入で混乱しやすい |
+| 採用: pre-merge `docker build` + 次 Phase 着手時瞬間チェック | ✅ | 待ち時間ゼロ近く、検出遅延 1 Phase 以内 |
+
+---
+
+## 10. 履歴
 
 - **2026-05-11** (PR #152 後): Stop hook / UserPromptSubmit hook 経由の自動発火が timing 不安定 → Claude が同ターン内で inline polling する方式に Nekoさん判断で確定
 - **2026-05-12**: PR/コミット使い分け + マージ自動確認の運用が以後の標準ワークフローとして確定 (Step 0 進行中)
 - **2026-05-13** (commit 3ea62e6): 本書 (`WORKFLOW.md`) としてリポジトリに正式文書化 (それまでは Claude のメモリにのみ存在)
 - **2026-05-13** (commit b66ca30): §8 自動 lint 修正ワークフロー追加 (`.github/workflows/lint-fix-on-merge.yml`)。Copilot Coding Agent ベース、ESLint 488 / tsconfig audit 1423 の段階解消を Nekoさん負担ゼロで継続するため
 - **2026-05-13**: 本書 (`WORKFLOW.md`) としてリポジトリに正式文書化 (それまでは Claude のメモリにのみ存在)
+- **2026-05-14** (PR #184 振り返り): §9 Production Deployment 失敗の早期検出フロー追加。pre-merge `docker build` ゲート + 次 Phase 着手時の瞬間チェックの 2 段構成。deploy #457〜#472 の 15 連続失敗を merge から検知まで放置した事例を踏まえた再発防止

@@ -289,3 +289,37 @@ jobs:
         run: npm audit --audit-level=moderate
         continue-on-error: true
 
+  # ── 6. Docker ビルド検証 (pre-merge ゲート) ──
+  #
+  # Production Deployment (deploy.yml) で走る `docker build` を **PR 段階で同じ環境で再現** する。
+  # 過去 (PR #184, 2026-05-14) に Dockerfile の `COPY package*.json ./` が `.npmrc` を含まない
+  # ことが原因で deploy が #457 以降 15 連続失敗した。lint / typecheck / jest はローカル
+  # `.npmrc` の `legacy-peer-deps=true` 経由で通っていたため、Docker 内の `npm ci` が strict
+  # mode で失敗するという食い違いを CI で捕まえられなかった。
+  #
+  # 本ジョブで `docker build .` を走らせて pre-merge で同じ食い違いを検出する。
+  # 失敗例: Dockerfile の COPY 行から `.npmrc` 抜け / 新規 builder stage で `npm ci` 直走り。
+  #
+  # WORKFLOW.md §9 (post-merge 確認フロー) と連動する: 本ゲートが通れば post-merge の
+  # Production Deployment 失敗確率は大幅に減るため、Phase 着手時の瞬間チェックが現実的になる。
+  docker-build:
+    name: Docker Build (root Dockerfile)
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Docker Buildx セットアップ (cache 活用のため)
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker ビルド検証 (本番イメージ相当、push しない)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          # cache を使ってビルド時間短縮 (ESLint 厳格化後の長時間化に備える)
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # CI 上では tag 不要 (push しないため)
+          tags: trader-note-build-ai:ci-check
+
