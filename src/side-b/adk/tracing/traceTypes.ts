@@ -23,14 +23,28 @@
 /**
  * trace event の kind (start / completed / failed)。
  *
+ * **Skill 実行 (Step 2 Phase 3 で導入)**:
  * - `adk.skill.started`: adapter が `execute` 内に入った直後 (Zod parse 後)
  * - `adk.skill.completed`: Skill が成功 (`SkillResult.ok === true`) して return
  * - `adk.skill.failed`: Skill が失敗 (`SkillResult.ok === false`) または adapter 外で throw
+ *
+ * **Sub-Agent 実行 (Step 3 Phase 2 で追加)**:
+ * - `adk.subagent.started`: SequentialAgent の sub-agent が `runAsync` を開始
+ * - `adk.subagent.completed`: sub-agent が正常完了 (例外なく runAsync が終了)
+ * - `adk.subagent.failed`: sub-agent 実行中に例外が発生
+ *
+ * Sub-Agent 系の event では、`skillName` フィールドを **step 識別子 (= sub-agent 名)**
+ * として再利用する。`kind` 値が discriminant となり、Skill 名と sub-agent 名のどちらを
+ * 指しているかが判別できる。新規フィールドの追加は行わず、Step 1/2 の既存テストを
+ * 未改変で全 pass にする (KICKOFF §3.1)。
  */
 export type AdkTraceEventKind =
   | 'adk.skill.started'
   | 'adk.skill.completed'
-  | 'adk.skill.failed';
+  | 'adk.skill.failed'
+  | 'adk.subagent.started'
+  | 'adk.subagent.completed'
+  | 'adk.subagent.failed';
 
 /**
  * trace event の結果状態。
@@ -114,7 +128,14 @@ export interface AdkTraceEvent {
   /** ADK `Context.agentName` または adapter のフォールバック値。 */
   readonly agentName: string;
 
-  /** adapter が把握している Skill 名 (= `Skill.name`)。 */
+  /**
+   * step 識別子。
+   * - `adk.skill.*` event では adapter が把握している Skill 名 (= `Skill.name`)
+   * - `adk.subagent.*` event では SequentialAgent の sub-agent 名 (= `BaseAgent.name`)
+   *
+   * `kind` を discriminant にしてどちらを指しているか判別する。新規フィールドの追加
+   * を避け Step 1/2 既存テストの互換性を維持する目的で、命名は `skillName` のまま維持。
+   */
   readonly skillName: string;
 
   /** adapter 側の固定文字列 (Step 1 で確立した `ADK_DEFAULT_CALLER_REASON`)。 */
