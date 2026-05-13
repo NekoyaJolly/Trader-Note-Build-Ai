@@ -516,14 +516,80 @@ export function createMinimalAdkContext(options: { agentName?: string }): Contex
 
 ---
 
-## 9. 関連ドキュメント
+## 9. Tracing 統合 ✅ Step 2 Phase 3 で確定
+
+### 9.1 概要
+
+`skillRegistryToAdkTools(registry, options?)` に optional `traceSink` を追加。adapter の `execute` 内で `AdkTraceEvent` を `TraceSink.record()` に流し込む。
+
+実装ファイル: `/src/side-b/adk/tracing/` (Step 2 Phase 2 で実装)。
+
+### 9.2 使い方
+
+```typescript
+import { skillRegistryToAdkTools } from '...';
+import { InMemoryTraceSink } from '...';
+
+// Step 1 互換: trace なし (options 省略時は内部で NoopTraceSink を使用)
+const toolsNoTrace = skillRegistryToAdkTools(registry);
+
+// Step 2: trace 付き
+const sink = new InMemoryTraceSink();
+const toolsWithTrace = skillRegistryToAdkTools(registry, { traceSink: sink });
+// ... tool 実行後、sink.events に AdkTraceEvent が蓄積される
+```
+
+### 9.3 記録される event
+
+| シナリオ | event | status |
+|---------|-------|--------|
+| Skill 成功 | `adk.skill.started` + `adk.skill.completed` | `started` + `ok` |
+| SkillResult error (invoke 内で catch された throw) | `adk.skill.started` + `adk.skill.failed` | `started` + `error` |
+| **Zod validation error** | (記録されない、§9.5 参照) | - |
+
+### 9.4 安全性ガード
+
+- `traceSink.record()` が同期 throw / Promise reject しても **Skill 実行は壊れない** (adapter が catch)
+- raw payload (input / result の生値) は **保存されない** (`payloadToSummary` で要約のみ)
+- error message は `shortenErrorMessage` で短縮 (デフォルト 500 文字)
+- ADK Context の getter が test mock で throw する場合 (prototype 経由)、`safeContextString` で undefined にフォールバック
+
+### 9.5 Zod validation error の trace について (制約事項)
+
+ADK が `parameters` の Zod parse に失敗した場合、`Error in tool '<name>': ...` を throw して adapter の `execute` を **呼ばない**。adapter 内で trace event を発生させる前に throw が起きるため、Zod validation error は **trace event として記録されない** (Step 2 では仕様)。
+
+完全な `started + failed (thrown)` 記録には FunctionTool を outer wrap する設計が必要だが、wrap すると LLM 用 schema 公開 (parameters declaration) が崩れる。**Step 3 で Runner 経由統合する際に再検討する**。
+
+### 9.6 trace event の field 対応
+
+| event field | 値の出所 |
+|-------------|---------|
+| `kind` | `adk.skill.started` / `.completed` / `.failed` の 3 値 |
+| `traceId` | adapter が `randomUUID()` で生成 |
+| `parentTraceId` | completed/failed event のみ。started event の `traceId` を参照 |
+| `invocationId` | `Context.invocationId` (safeContextString 経由、取れない場合は undefined) |
+| `functionCallId` | `Context.functionCallId` (同上) |
+| `agentName` | `SkillContext.callerAgent` (= Step 1 マッピング) |
+| `skillName` | `Skill.name` |
+| `callerReason` | `ADK_DEFAULT_CALLER_REASON` 固定 |
+| `startedAt` / `endedAt` / `durationMs` | adapter が計測 |
+| `status` | `started` / `ok` / `error` (`thrown` は §9.5 で未実装) |
+| `errorCode` / `errorMessage` | failed event のみ、`SkillResult.error` から |
+| `argsSummary` / `resultSummary` | `payloadToSummary` で要約 |
+
+---
+
+## 10. 関連ドキュメント
 
 | ドキュメント | 内容 |
 |-------------|------|
 | `docs/architecture/STEP_1_KICKOFF.md` | Step 1 全体の作業手順書 (Nekoさん作成) |
+| `docs/architecture/STEP_2_KICKOFF.md` | Step 2 全体の作業手順書 (Nekoさん作成) |
+| `docs/architecture/STEP_2_ADK_TRACING_SPIKE.md` | Step 2 Phase 1 実測結果 + 設計方針 |
 | `docs/architecture/ADK_ADOPTION.md` | ADK 採用範囲・撤退基準・不可侵領域 |
 | `docs/architecture/STEP_0_ADK_INSTALL_DRYRUN.md` | @google/adk dry-run 結果 + peer dep 対応方針 |
 | `/src/side-b/adk/AGENTS.md` | ADK サイドカー領域の作業ルール (依存方向制約等) |
+| `/src/side-b/adk/tracing/` | tracing 実装 (traceTypes / traceSink / NoopTraceSink / InMemoryTraceSink / traceSummaries) |
 | `/src/side-b/skills/types.ts` | 既存 Skill / SkillRegistry / SkillContext の型定義 |
 | `/src/side-b/skills/registry.ts` | 既存 SkillRegistry の実装 |
 
