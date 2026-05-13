@@ -72,7 +72,7 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 
 | Step | 内容 | 期間目安 | 状態 |
 |------|------|---------|------|
-| **Step 0** | 設計ガード (L1/L2/L3 多層防御の整備、ADK 採用範囲の明文化) | 約 8 時間 (3 セッション) | 🟡 進行中 |
+| **Step 0** | 設計ガード (L1/L2/L3 多層防御の整備、ADK 採用範囲の明文化) | 約 8 時間 (3 セッション) | ✅ 完了 (2026-05-12) |
 | **Step 1** | Skill → ADK FunctionTool アダプター | 数日 | ✅ 完了 (2026-05-13) |
 | **Step 2** | Tracing / Telemetry 統合 (内部 TraceSink interface、OTel exporter は Step 3 以降の判断) | 数日 | ✅ 完了 (2026-05-13) |
 | **Step 3** | PDCALoop の SequentialAgent ラップ (既存内部は不可侵) | 数日 | ⬜ 未着手 |

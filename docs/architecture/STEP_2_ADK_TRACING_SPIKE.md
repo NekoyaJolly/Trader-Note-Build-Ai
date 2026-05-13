@@ -83,10 +83,11 @@ execute: async (input, toolContext) => {
 };
 ```
 
-- ADK 自動 Zod validation が成功した後でしか execute は呼ばれない → validation error は別経路の trace (後述)
+- ADK 自動 Zod validation が成功した後でしか execute は呼ばれない → validation error は execute 経由では trace できない
 - validation error 時は `execute` が呼ばれない = adapter 内では捕捉できない
-  - **対応**: ADK の throw を adapter の外側で try/catch して trace する (Phase 3 で実装)、または validation error は trace しない (KICKOFF §5.4 で要相談)
-  - **採用案**: Phase 3 で `tool.runAsync` 自体を adapter が wrap してしまい、外側で catch → trace `adk.skill.failed` (status: 'thrown') を出す
+  - **Phase 1 時点の検討案**: `tool.runAsync` 自体を adapter が wrap して外側で catch → trace `adk.skill.failed` (status: 'thrown') を記録する
+  - **Phase 3 で確定した最終方針**: wrap **不採用**。理由: wrap すると LLM 用 `parameters` declaration (FunctionTool が ADK 内部で公開する schema) が崩れ、LLM が正しい引数構造を判断できなくなる。validation error の trace は**意図的に未記録**とし、Step 3 で Runner 経由統合する際に Runner 側 event stream からの捕捉経路を再検討する
+  - 詳細: [`STEP_2_SUMMARY.md`](./STEP_2_SUMMARY.md) §3.6 / `src/side-b/adk/adapters/skillRegistryToAdkTools.ts` 冒頭 JSDoc
 
 ### 2.3 BasePlugin tool callbacks の発火条件
 
@@ -250,14 +251,14 @@ export function skillRegistryToAdkTools(
 
 ### 3.4 status 値の対応関係
 
-| シナリオ | trace event | status |
-|---------|------------|--------|
-| Skill が成功 (`SkillResult.ok === true`) | `adk.skill.completed` | `'ok'` |
-| Skill が失敗 (`SkillResult.ok === false`) | `adk.skill.failed` | `'error'` |
-| Zod validation error (ADK が throw) | `adk.skill.failed` | `'thrown'` |
-| Unexpected throw (Skill 内部の bug) | `adk.skill.failed` | `'thrown'` |
+| シナリオ | trace event | status | Phase 3 で実装したか |
+|---------|------------|--------|---------------------|
+| Skill が成功 (`SkillResult.ok === true`) | `adk.skill.started` + `adk.skill.completed` | `'ok'` | ✅ |
+| Skill が失敗 (`SkillResult.ok === false`) | `adk.skill.started` + `adk.skill.failed` | `'error'` | ✅ |
+| Unexpected throw (Skill 内部の bug) | `adk.skill.started` + `adk.skill.failed` | `'thrown'` | ✅ |
+| Zod validation error (ADK が execute 前に throw) | — | — | ❌ **意図的に未記録** (§2.2 の Phase 3 最終方針参照) |
 
-`'thrown'` の場合は、adapter が `tool.runAsync` を wrap して外側で catch する形で記録する。
+`'thrown'` (Skill 内部の bug) は adapter execute 内の try/catch で記録する (= `tool.runAsync` wrap には依存しない)。Zod validation error については adapter で捕捉できないため、Step 3 で Runner 経由統合する際の event stream 側からの捕捉経路を再検討する (§4 未解決事項に再掲)。
 
 ---
 
