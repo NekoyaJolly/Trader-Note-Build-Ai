@@ -13,7 +13,18 @@ WORKDIR /app
 # 注意: `--ignore-scripts` で全 lifecycle を停止する案は採用しない。bcrypt の
 # ネイティブバイナリ / @prisma/client / @prisma/engines 等の依存側 install フックも
 # 止めてしまうため、コンテナ実行時に require / 初期化が壊れる可能性がある。
-COPY package*.json ./
+#
+# ★ `.npmrc` も COPY する必要がある (2026-05-14 deploy 修正):
+#   ADK Step 1 で @google/adk@^1.1.0 を導入したが、ADK の peerDependencies が
+#   MikroORM ファミリー (@mikro-orm/{mariadb,mssql,mysql,postgresql,sqlite,knex})
+#   を要求する一方、本プロジェクトは Prisma 単独 ORM 方針で MikroORM を採用しない
+#   (`ADK_ADOPTION.md` §2.3、Nekoさん 2026-05-12 確定)。
+#   この方針は `.npmrc` の `legacy-peer-deps=true` で実現されており、
+#   `.npmrc` が無い環境で `npm ci` を実行すると strict mode で MikroORM peer を
+#   要求して "Missing from lock file" エラーになる (run #457 以降の deploy 失敗原因)。
+#   `.npmrc` には token 等の secret は含まれず legacy-peer-deps=true のみのため、
+#   本番イメージに含めても情報漏洩リスクなし。
+COPY package*.json .npmrc ./
 COPY scripts ./scripts
 RUN npm ci
 
