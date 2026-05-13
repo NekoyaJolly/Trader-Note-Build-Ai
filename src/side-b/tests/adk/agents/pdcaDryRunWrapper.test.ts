@@ -35,7 +35,7 @@ import {
   PdcaObservationSubAgent,
   runPdcaDryRun,
 } from '../../../adk/agents/pdcaDryRunWrapper';
-import { InMemoryTraceSink } from '../../../adk/tracing';
+import { DEFAULT_ERROR_MESSAGE_MAX, InMemoryTraceSink } from '../../../adk/tracing';
 
 // ============================================================================
 // テスト共通
@@ -364,7 +364,11 @@ describe('error ケース: failed trace が記録される', () => {
     const failed = sink.events.find((e) => e.kind === 'adk.subagent.failed');
     expect(failed).toBeDefined();
     expect((failed?.errorMessage ?? '').length).toBeLessThan(longMessage.length);
-    expect((failed?.errorMessage ?? '').length).toBeLessThanOrEqual(600);
+    // 上限値 (= DEFAULT_ERROR_MESSAGE_MAX) を import して検証することで、定数変更や
+    // off-by-one 不整合が混入した場合に確実に検知できるようにする (Copilot review PR #181 指摘)
+    expect((failed?.errorMessage ?? '').length).toBeLessThanOrEqual(DEFAULT_ERROR_MESSAGE_MAX);
+    // 巨大入力 (= 10KB 超) を入れているので、短縮結果が必ず上限に張り付くこともテスト
+    expect((failed?.errorMessage ?? '').length).toBe(DEFAULT_ERROR_MESSAGE_MAX);
   });
 });
 
