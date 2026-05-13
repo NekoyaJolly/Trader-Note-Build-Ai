@@ -25,6 +25,7 @@ from app.schemas import (
     WalkForwardRequest,
     WalkForwardResponse,
 )
+from app.smc import compute_smc_structures
 from app.walk_forward import run_walk_forward
 from app.backtest import run_screening_backtest
 from app.oos_validation import run_oos_validation
@@ -173,12 +174,18 @@ def indicator_series(req: IndicatorSeriesRequest) -> IndicatorSeriesResponse:
             )
         )
 
+    # SMC structures (Phase 7a 追加、req.includeSmc=True 時のみ計算)
+    smc_payload = None
+    if req.includeSmc:
+        smc_payload = compute_smc_structures(df)
+
     return IndicatorSeriesResponse(
         symbol=req.symbol,
         timeframe=req.timeframe,
         timestamps=timestamps,
         series=series,
         patterns=patterns,
+        smc=smc_payload,
     )
 
 

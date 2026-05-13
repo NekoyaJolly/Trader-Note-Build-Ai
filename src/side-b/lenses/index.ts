@@ -10,6 +10,7 @@ export type {
   LensFeature,
   LensFeatureSnapshot,
   SerializedLensFeatureSnapshot,
+  SmcStructuresPayload,
 } from './types';
 
 export {
@@ -23,6 +24,7 @@ export { TimeSessionLens } from './TimeSessionLens';
 export { DowTheoryLens } from './DowTheoryLens';
 export { VolatilityRegimeLens } from './VolatilityRegimeLens';
 export { PatternLens } from './PatternLens';
+export { SMCLens, SMC_LENS_FEATURE_KEYS } from './SMCLens';
 export type { OHLCVBar, Pivot } from './utils/pivotDetection';
 
 import { defaultLensAggregator } from './LensAggregator';
@@ -31,6 +33,7 @@ import { TimeSessionLens } from './TimeSessionLens';
 import { DowTheoryLens } from './DowTheoryLens';
 import { VolatilityRegimeLens } from './VolatilityRegimeLens';
 import { PatternLens } from './PatternLens';
+import { SMCLens } from './SMCLens';
 
 /**
  * defaultLensAggregator に基本レンズを登録する
@@ -41,6 +44,7 @@ import { PatternLens } from './PatternLens';
  * Phase 1: current_analysis / time_session
  * Phase 3: dow_theory / volatility_regime
  * PR ②-1: pattern (12 種ローソク足パターン真偽)
+ * Phase 7a: smc (SMC structures snapshot at end-of-bars)
  */
 export function registerDefaultLenses(): void {
   const registered = new Set(defaultLensAggregator.getRegisteredLenses());
@@ -58,5 +62,8 @@ export function registerDefaultLenses(): void {
   }
   if (!registered.has('pattern')) {
     defaultLensAggregator.register(new PatternLens());
+  }
+  if (!registered.has('smc')) {
+    defaultLensAggregator.register(new SMCLens());
   }
 }

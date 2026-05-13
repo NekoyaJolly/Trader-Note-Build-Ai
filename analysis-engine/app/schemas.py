@@ -51,6 +51,11 @@ class IndicatorSeriesRequest(BaseModel):
     bbBandwidthWindow: int = Field(20, ge=2, le=500)
     bbBandwidthThreshold: float = Field(0.2, ge=0.0, le=10.0)
 
+    # SMC structures 計算の要求（Phase 7a で追加、default false で既存挙動互換）
+    # True 時 SmcStructuresPayload を IndicatorSeriesResponse.smc に格納して返す。
+    # Node 側 SMCLens が `LensInput.precomputedSmcStructures` 経由で受け取る。
+    includeSmc: bool = False
+
 
 class IndicatorSeriesByVersionRequest(BaseModel):
     """Node 側から最小情報（ID + 期間）だけを受け取り、
@@ -70,6 +75,60 @@ class IndicatorSeriesByVersionRequest(BaseModel):
     bbBandwidthThreshold: float = Field(0.2, ge=0.0, le=10.0)
 
 
+class SmcStructuresPayload(BaseModel):
+    """SMC (Smart Money Concept) structures snapshot at end-of-bars.
+
+    Phase 7a (`docs/design/phase_7_specification.md` §5.1) で導入。
+
+    本 payload は **末尾バー時点の SMC 構造観測結果** を表す。`compute_smc_structures`
+    が `df` (OHLCV DataFrame) を受け取って末尾バー時点の状態をスナップショット化する。
+
+    LensFeature.features の型制約 (TypeScript 側 `Record<string, number | string | boolean>`、
+    null 不可) に合わせ、すべての値は number / string (Literal) のみで構成し、
+    「なし」は **sentinel `-1.0` / `-1` / `'NONE'`** で表現する。
+
+    本 payload は IndicatorSeriesResponse.smc に格納されて Node 側 SMCLens に渡る。
+    """
+
+    # Order Block — 直近の Bull/Bear OB との距離 (pips)
+    # なし時 -1.0、近い (= 同バー内 or 直近 1 bar) なら 0 以上の小値
+    nearestObBullDistancePips: float = Field(-1.0, description="直近 Bull OB との距離 (pips)。なし時 -1.0")
+    nearestObBearDistancePips: float = Field(-1.0, description="直近 Bear OB との距離 (pips)。なし時 -1.0")
+
+    # Liquidity — 上方 BSL (Buy-side liquidity) / 下方 SSL (Sell-side liquidity) クラスター数
+    # lookback 20 bars 内の swing high/low の数を集計
+    liquidityAboveCount: int = Field(0, ge=0, description="上方 BSL クラスター数 (lookback 20 bars)")
+    liquidityBelowCount: int = Field(0, ge=0, description="下方 SSL クラスター数")
+
+    # Fair Value Gap — 3-bar gap (bull / bear)
+    # lookback 20 bars 内の FVG 数
+    fvgBullCountLast20: int = Field(0, ge=0, description="直近 20 bars 内の Bull FVG 数")
+    fvgBearCountLast20: int = Field(0, ge=0, description="直近 20 bars 内の Bear FVG 数")
+
+    # Structure — 直近の構造イベント (BOS / CHOCH)
+    # 'NONE' は「直近に構造イベントなし」を表す
+    lastStructureEvent: Literal["BOS_BULL", "BOS_BEAR", "CHOCH_BULL", "CHOCH_BEAR", "NONE"] = Field(
+        "NONE",
+        description="直近の構造イベント。BOS = trend 継続、CHOCH = trend 転換。なし時 NONE",
+    )
+    barsSinceLastStructureEvent: int = Field(
+        -1,
+        description="直近構造イベントから経過したバー数。なし時 -1",
+    )
+
+    # Zone — 直近 swing high/low の中央 50% 基準で premium / discount を判定
+    currentZone: Literal["PREMIUM", "DISCOUNT", "EQUILIBRIUM"] = Field(
+        "EQUILIBRIUM",
+        description="現在の zone。直近 swing range の上半分=PREMIUM、下半分=DISCOUNT、中央=EQUILIBRIUM",
+    )
+    zonePositionPct: float = Field(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        description="swing range 内の現在位置 (0.0=extreme discount, 1.0=extreme premium)",
+    )
+
+
 class IndicatorSeriesResponse(BaseModel):
     symbol: str
     timeframe: str
@@ -80,6 +139,9 @@ class IndicatorSeriesResponse(BaseModel):
 
     # パターンは boolean 系
     patterns: Dict[str, List[bool]] = Field(default_factory=dict)
+
+    # SMC structures snapshot (Phase 7a 追加、`request.includeSmc=True` 時のみ格納)
+    smc: Optional[SmcStructuresPayload] = None
 
 
 class WalkForwardEvent(BaseModel):
