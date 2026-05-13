@@ -597,16 +597,25 @@ Claude Code に推奨する実装順序:
 
 ## 9. 将来拡張(このフェーズの範囲外)
 
-### 9.1 専門家の追加予定
+### 9.1 専門家の追加予定 (2026-05-14 更新: Phase 7 スコープ確定)
 
 このフェーズで3専門家を作るが、将来以下を追加する:
 
-- **Phase 7**: SMC Lens 実装、SMC 専門家追加
-- **Phase 8**: Elliott Lens 実装、Elliott 専門家追加
-- **Phase 9(構想)**: ファンダメンタルズ基盤 + ファンダメンタルズ専門家
-  - 経済指標カレンダー
-  - 中央銀行政策スタンス
-  - 地政学・市場センチメント
+- **Phase 7**: **Lens 拡張 (SMC / ChartPattern / Wyckoff の 3 Lens 追加 + `PatternLens` → `CandlePatternLens` rename)** — 詳細は [`phase_7_specification.md`](./phase_7_specification.md) 参照
+  - Phase 7a: SMC Lens 実装 (Order Block / Liquidity / FVG / BOS / CHOCH / Premium-Discount zone)
+  - Phase 7b: ChartPattern Lens 新規追加 (N-bar 構造) + 既存 `PatternLens` → `CandlePatternLens` rename (命名混乱回避)
+  - Phase 7c: Wyckoff Lens 実装 (Accumulation/Markup/Distribution/Markdown phase + Spring/Upthrust/SOS/SOW)
+  - Phase 7 完了後に Step 4 (ADK ParallelAgent dry-run) 着手予定
+- **Phase 8**: **Elliott Wave Lens 実装** — 詳細は [`lens_elliott_wave_future_design.md`](./lens_elliott_wave_future_design.md) 参照
+  - 起点ユーザー選択方式 (UI 上でバー候補を提示 → 選択された起点から推論)
+  - 確率分布 (top-N candidate + score) で wave count を保持、他レンズで不確実性を補う
+  - Phase 7 完了 + Step 4 完了 + 運用観察を経て Nekoさん判断で着手
+- **Phase 9 (構想)**: 以下のいずれかを Phase 7 / 8 完了後の運用観察結果で判断
+  - Point & Figure Lens (チャートパターンと観測内容が部分的に重なる、優先度は最後)
+  - ファンダメンタルズ基盤 + ファンダメンタルズ専門家
+    - 経済指標カレンダー
+    - 中央銀行政策スタンス
+    - 地政学・市場センチメント
 
 ### 9.2 MetaEvolutionAgent の発展
 
