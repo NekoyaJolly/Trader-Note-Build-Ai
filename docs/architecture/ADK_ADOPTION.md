@@ -73,8 +73,8 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 | Step | 内容 | 期間目安 | 状態 |
 |------|------|---------|------|
 | **Step 0** | 設計ガード (L1/L2/L3 多層防御の整備、ADK 採用範囲の明文化) | 約 8 時間 (3 セッション) | 🟡 進行中 |
-| **Step 1** | Skill → ADK FunctionTool アダプター | 数日 | ⬜ 未着手 |
-| **Step 2** | Tracing / Telemetry 統合 (OpenTelemetry エクスポーター) | 数日 | ⬜ 未着手 |
+| **Step 1** | Skill → ADK FunctionTool アダプター | 数日 | ✅ 完了 (2026-05-13) |
+| **Step 2** | Tracing / Telemetry 統合 (内部 TraceSink interface、OTel exporter は Step 3 以降の判断) | 数日 | ✅ 完了 (2026-05-13) |
 | **Step 3** | PDCALoop の SequentialAgent ラップ (既存内部は不可侵) | 数日 | ⬜ 未着手 |
 | **Step 4** | Lens 並列実行の ParallelAgent ラップ | 数日 | ⬜ 未着手 |
 | **Step 5** | 進化ループの LoopAgent ラップ (条件付き) | 1〜2 週 | ⬜ 未着手 |
@@ -90,7 +90,7 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 |------|-----|----------|
 | Step 0 | ガードレール (AGENTS.md 群、ADK_ADOPTION.md、ESLint/tsc strict、CI ゲート) が整備されている | ① Gate 1〜3 全て承認、② B1/B2 違反レポート提出、③ C2 dry-run 成功 |
 | Step 1 | 既存スキルを変更せずに `adapters/SkillToFunctionToolAdapter` 経由で ADK Runner から呼び出せる | スキル単体テストが ADK 経由で全て通過 |
-| Step 2 | OTel Exporter が SpanCollector からデータを受け取り、Jaeger / Tempo 等で可視化できる | 1 PDCA サイクルの全スパンがツリー表示される |
+| Step 2 | adapter 層に自前 `TraceSink` interface が組み込まれ、`skillRegistryToAdkTools()` 経由の Skill 実行が trace event として記録できる (raw payload は保存しない方針)。Step 3 以降で OTel exporter / Jaeger / Cloud Trace に流す土台が確保されている | adapter テストで成功・失敗・throw の trace が記録されることを `InMemoryTraceSink` で検証 |
 | Step 3 | PDCALoop が SequentialAgent でラップされ、Plan/Do/Check/Act の各フェーズが個別スパンとして観測できる。既存 `pdcaLoop.ts` の内部は変更されていない | 既存テスト全 pass + 新規 Sequential ラップテスト pass |
 | Step 4 | Lens 群が ParallelAgent で並列実行され、各レンズが独立スパンとして観測できる。レンズの決定性が崩れていない | 既存決定性テスト全 pass + 並列実行で同入力同出力 |
 | Step 5 | 進化ループの一部 (撤退基準が満たされない範囲) が LoopAgent でラップされる | エッジ昇格率 (PF/WF) が ADK 採用前後で 10% 以内の差 |
@@ -135,13 +135,13 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 
 ## 7. 実装状況
 
-> **最終更新**: 2026-05-13 (Step 1 全 Phase 完了)
+> **最終更新**: 2026-05-13 (Step 2 全 Phase 完了)
 
 ### Step 進捗
 
 - [x] Step 0: 設計ガード (完了 2026-05-12)
 - [x] Step 1: Skill → ADK FunctionTool アダプター (完了 2026-05-13)
-- [ ] Step 2: Tracing / Telemetry 統合
+- [x] Step 2: Tracing / Telemetry 統合 (完了 2026-05-13)
 - [ ] Step 3: PDCALoop の SequentialAgent ラップ
 - [ ] Step 4: Lens 並列実行の ParallelAgent ラップ
 - [ ] Step 5: 進化ループの LoopAgent ラップ (条件付き)
@@ -209,7 +209,7 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
   - Ticket T2.5: ADK FunctionTool API 実測スパイク (方式 B 確定、Nekoさん T2.5 approved with note: z.any() 禁止、自前実装、throw with skill+field path)
   - Ticket T3: `jsonSchemaToZod` ユーティリティ (47 ケース PASS、実 Skill 全 8 件 inputSchema 変換確認)
   - Ticket T4: Phase 1 PR 提出 → Copilot レビュー 7 件 → 全件対応 → マージ
-- **Phase 2 (PR #TBD)**:
+- **Phase 2 (PR #165 マージ済み 2026-05-13)**:
   - Ticket T5: SkillContext mapper (8 cases PASS)
   - Ticket T6: skillRegistryToAdkTools 本体 (9 cases PASS、KICKOFF §T6 6 パターン網羅)
   - Ticket T7: 等価性検証 (モック Skill 4 件、7 cases PASS、deep equal)
@@ -222,6 +222,64 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 - テストケース: 71/71 PASS、any/unknown 違反ゼロ (型ガード 1 箇所のみ ESLint コメントで例外宣言)
 - 本番コードからの ADK SDK 内部 API (`@internal` / underscore prefix / private field) 依存: **ゼロ**
 
+#### Step 2: Tracing / Telemetry 統合 (完了 2026-05-13)
+
+**実装場所**:
+- ADK tracing サイドカー: `/src/side-b/adk/tracing/`
+  - `traceTypes.ts` — `AdkTraceEvent` / `AdkTraceEventKind` / `AdkTraceStatus` / `TracePayloadSummary`
+  - `traceSink.ts` — `TraceSink` interface
+  - `noopTraceSink.ts` — production default (no-op)
+  - `inMemoryTraceSink.ts` — tests / local 用 (配列保持)
+  - `traceSummaries.ts` — `payloadToSummary` / `shortenErrorMessage` + 上限定数 (`TOP_LEVEL_KEYS_LIMIT=20` / `KEY_NAME_LIMIT=64` / `DEFAULT_ERROR_MESSAGE_MAX=512`)
+  - `index.ts` — 公開 API barrel + 使用例 JSDoc
+- ADK adapter (Phase 3 で変更): `/src/side-b/adk/adapters/skillRegistryToAdkTools.ts` に optional `{ traceSink }` を追加 (既存 signature 維持)
+- ADK tracing テスト: `/src/side-b/tests/adk/tracing/`
+  - `traceTypes.test.ts` (10) / `traceSummaries.test.ts` (23) / `sinks.test.ts` (9) / `adapterTracing.test.ts` (17) — **計 59 cases PASS**
+- 設計書群:
+  - `docs/architecture/STEP_2_ADK_TRACING_SPIKE.md` (Phase 1 実測結果)
+  - `docs/architecture/STEP_2_ADK_RUNNER_SMOKE_NOTES.md` (Phase 4 Runner smoke 構成ノート)
+  - `docs/architecture/STEP_2_SUMMARY.md` (本 Step 完了サマリー)
+
+**採用方式**:
+- **trace を取る位置**: adapter `execute` 内 (BasePlugin callbacks には依存しない、Runner 経由 / 直接呼び出しの両方で同じ trace が取れる)
+- **raw payload 保存禁止**: `TracePayloadSummary` で field 数 + 上位キー名のみ。LLM prompt / response 全文 / DB row / API key 等は一切保存しない
+- **出力先抽象化**: 自前 `TraceSink` interface に依存 (ADK 内部 `telemetry/tracing.ts` には直接依存しない、OTel SDK 追加導入なし)
+- **既存挙動の保持**: `traceSink` 未指定時は Step 1 と完全同挙動 (Step 1 等価性テスト 7 cases を未改変で全 pass)
+- **status 体系**: `'ok'` (Skill 成功) / `'error'` (SkillResult.ok=false) / `'thrown'` (Skill 内部 throw)
+- **Zod validation error trace の意図的非記録**: ADK が `execute` 呼び出し前に throw するため未記録。adapter 側で `runAsync` wrap すると LLM 用 schema 公開が崩れる、Step 3 Runner 統合時に再検討 (詳細: `STEP_2_SUMMARY.md` §3.6)
+- **traceSink 失敗の握りつぶし**: `traceSink.record()` が throw / reject しても Skill 実行は絶対に壊さない (try/catch で握りつぶす)
+
+**検証結果**:
+- **Phase 1 (PR #166 マージ済み 2026-05-13)**:
+  - ADK TypeScript SDK の `Context` getter / `FunctionTool.runAsync` / `BasePlugin` callbacks / `Runner` API / `telemetry/tracing.ts` を実測
+  - 実測結果に基づき Phase 2 / Phase 3 の採用方針を確定 (`STEP_2_ADK_TRACING_SPIKE.md` §3)
+- **Phase 2 (PR #168 マージ済み 2026-05-13)**:
+  - trace 型 / sink interface / Noop / InMemory / summaries の各 unit 実装と test 計 42 cases (型 10 / summaries 23 / sinks 9)
+- **Phase 3 (PR #170 マージ済み 2026-05-13)**:
+  - `skillRegistryToAdkTools()` に optional `{ traceSink }` 統合
+  - adapter 経由の成功 / SkillResult error / unexpected throw / sink 失敗握りつぶし / 既存挙動維持を 17 cases で網羅
+- **Phase 4 + 5 (本 PR)**:
+  - `STEP_2_ADK_RUNNER_SMOKE_NOTES.md` 作成 (Step 3 Runner smoke 用最小構成: `InMemorySessionService` + `Runner.runEphemeral()` + 既存 `traceSink` 維持)
+  - `STEP_2_SUMMARY.md` 作成 (本書 §7 / §8 / 上記 §3 §4 のソース)
+  - 本書 (`ADK_ADOPTION.md`) §3 / §4 / §7 / §8 を Step 2 完了状態に更新
+  - `scripts/adk_tracing_spike.ts` 削除 (Phase 1 用一時 script、KICKOFF §6 Phase 5 で削除予定と明記)
+
+**Step 3 への引き継ぎ事項**:
+1. `InMemorySessionService` + `Runner.runEphemeral()` で session-less smoke を実機実行 (`Runner.runAsync()` は使わない、sessionId 必須のため)
+2. Runner 経由でも `traceSink` に event が記録されることを実機確認
+3. `LlmAgent.tools` への `FunctionTool[]` 受理を実機確認 (型レベルは Phase 1 で確認済み)
+4. Zod validation error trace の捕捉経路 (Runner event stream 側) を再検討
+5. OTel exporter 統合は別タスク (`OtelTraceSink` を `TraceSink` の実装として追加するだけで済む構造を Step 2 で確保済み)
+
+**数値スナップショット (Step 2 完了時)**:
+- 新規実装: 6 ファイル (tracing 配下) + 4 ファイル (tests/adk/tracing 配下) + 2 ドキュメント (RUNNER_SMOKE_NOTES / SUMMARY)
+- 変更ファイル: `adapters/skillRegistryToAdkTools.ts` / `adapters/README.md` / 本書 = 3
+- 削除ファイル: `scripts/adk_tracing_spike.ts` = 1
+- 既存実装 (`/src/side-b/skills/`, `/src/side-b/agent/`, `prisma/schema.prisma`) の変更: **ゼロ**
+- テストケース (Step 2 増分): 59/59 PASS、Step 1 既存 71 cases も全 PASS → **adk 領域累計 130 cases**
+- 本番コードの any / unknown 違反: **ゼロ**
+- 本番コードからの ADK SDK 内部 API 依存: **ゼロ** (`Context` / `FunctionTool` / `BaseTool` の public API のみ)
+
 ---
 
 ## 8. 関連ドキュメント
@@ -233,4 +291,9 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 | [/src/side-b/adk/AGENTS.md](../../src/side-b/adk/AGENTS.md) | ADK サイドカー領域固有ルール |
 | [docs/design/STEP_0_KICKOFF.md](../design/STEP_0_KICKOFF.md) ※ 本 PR 時点では untracked、後続 PR で commit 予定 | Step 0 のキックオフドキュメント (作業手順書) |
 | [docs/architecture/STEP_0_ANALYSIS.md](./STEP_0_ANALYSIS.md) | 既存設計書の棚卸し結果 (Ticket A1 成果物) |
+| [docs/architecture/STEP_1_SUMMARY.md](./STEP_1_SUMMARY.md) | Step 1 完了サマリー (adapter 設計の前提) |
+| [docs/architecture/STEP_2_KICKOFF.md](./STEP_2_KICKOFF.md) | Step 2 作業指示書 (Nekoさん作成) |
+| [docs/architecture/STEP_2_ADK_TRACING_SPIKE.md](./STEP_2_ADK_TRACING_SPIKE.md) | Step 2 Phase 1 実測結果 (採用方針の根拠) |
+| [docs/architecture/STEP_2_ADK_RUNNER_SMOKE_NOTES.md](./STEP_2_ADK_RUNNER_SMOKE_NOTES.md) | Step 2 Phase 4 成果物 (Step 3 Runner smoke 着手用構成) |
+| [docs/architecture/STEP_2_SUMMARY.md](./STEP_2_SUMMARY.md) | Step 2 完了サマリー (本 §7 Step 2 詳細の出典) |
 | [docs/design/DESIGN_DOC_autonomous_trading_architecture.md](../design/DESIGN_DOC_autonomous_trading_architecture.md) | Side-B 自律 AI 設計の正本 |

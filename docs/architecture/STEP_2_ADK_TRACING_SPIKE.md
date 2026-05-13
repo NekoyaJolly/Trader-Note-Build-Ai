@@ -3,8 +3,8 @@
 > **作成日**: 2026-05-13
 > **対象**: `@google/adk@1.1.0`
 > **目的**: Step 2 Phase 1 (Tracing Spike) の検証結果。Phase 2 (Trace Contract) / Phase 3 (Adapter Integration) の方針確定の根拠
-> **実行スクリプト**: `scripts/adk_tracing_spike.ts` (Phase 5 で削除予定)
-> **削除予定**: 本書と spike script は Step 2 Phase 5 (Cleanup) で削除
+> **実行スクリプト**: `scripts/adk_tracing_spike.ts` (Phase 5 で削除済み)
+> **本書の扱い**: Phase 2 / Phase 3 / Phase 4 で参照する設計判断の根拠として **残存**。Phase 5 cleanup の対象は spike script のみ (本書は Step 3 着手時にも引き続き参照される)
 
 ---
 
@@ -278,4 +278,4 @@ export function skillRegistryToAdkTools(
 | [`ADK_ADOPTION.md`](./ADK_ADOPTION.md) | ADK 採用計画 (§2.2 で DatabaseSessionService 不採用を確定) |
 | [`STEP_1_SUMMARY.md`](./STEP_1_SUMMARY.md) | Step 1 完了サマリー (adapter 設計の前提) |
 | [`/src/side-b/adk/adapters/README.md`](../../src/side-b/adk/adapters/README.md) | adapter 設計書 (Step 1) |
-| [`scripts/adk_tracing_spike.ts`](../../scripts/adk_tracing_spike.ts) | 本 spike の実行スクリプト (Phase 5 で削除) |
+| ~~`scripts/adk_tracing_spike.ts`~~ | 本 spike の実行スクリプト (Phase 5 で削除済み、本書のみ残存) |
