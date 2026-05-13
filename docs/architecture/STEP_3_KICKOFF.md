@@ -237,14 +237,14 @@ const sequential = new SequentialAgent({
 
 ### 5.4 PDCALoop ラップ方針
 
-`pdcaLoop.ts` (725 行、`PDCALoop` クラス + 7 state handler) の**内部に触れずに**ラップする。
+`pdcaLoop.ts` (`PDCALoop` クラス + 7 state handler) の**内部に触れずに**ラップする。
 
 採用するアプローチ (Phase 3 で確定):
 
 | アプローチ | 内容 | 採否 |
 |-----------|------|------|
 | A. private state handler を SequentialAgent sub-agent として個別公開 | `pdcaLoop.ts` の `handleMonitoring` 等を public 化、または getter を追加 | ❌ 不可侵領域改変、本 Step では不採用 |
-| B. `pdcaLoop` の public API (`start()` / `stop()` / `getState()` 等) を sub-agent から呼ぶ合成ラッパー | `pdcaLoop.ts` 無改変、`adk/agents/pdcaLoopAdkWrapper.ts` のみ追加 | ✅ 本 Step で採用 |
+| B. `pdcaLoop` の public API (`start()` / `stop()` / `updateConfig()` / `getStatus()` / `getThinkingLog()`) を sub-agent から呼ぶ合成ラッパー | `pdcaLoop.ts` 無改変、`adk/agents/pdcaLoopAdkWrapper.ts` のみ追加 | ✅ 本 Step で採用 |
 | C. PDCALoop を ADK でゼロから書き直し | 既存実装の置き換え | ❌ 不可侵領域 (合成ラップのみ可)、本 Step では絶対採用しない |
 
 → **アプローチ B** で進行。dry-run wrapper の具体的サブ Agent 構成 (sub-agent 数・名前・責務) は Phase 3 設計書 (`STEP_3_PDCALOOP_WRAP_DESIGN.md`) で確定する。
@@ -359,7 +359,7 @@ ADK `SequentialAgent` の挙動を、最小サブ Agent 構成 (toy) で実機�
 
 ### 目的
 
-既存 `pdcaLoop.ts` (725 行、`PDCALoop` クラス + 7 state handler) の **内部に一切触れずに**、その挙動を ADK `SequentialAgent` で**合成によりラップ**する dry-run wrapper を構築する。pdcaLoop の実行が個別 span (trace event) として観測可能になる構造を作る。
+既存 `pdcaLoop.ts` (`PDCALoop` クラス + 7 state handler) の **内部に一切触れずに**、その挙動を ADK `SequentialAgent` で**合成によりラップ**する dry-run wrapper を構築する。pdcaLoop の実行が個別 span (trace event) として観測可能になる構造を作る。
 
 ### 作業対象
 
@@ -371,7 +371,7 @@ ADK `SequentialAgent` の挙動を、最小サブ Agent 構成 (toy) で実機�
 ### 確認項目
 
 1. `pdcaLoop.ts` の内部に**一切**触れずに wrapper を構築できる (git diff で確認)
-2. 既存 PDCALoop の公開 API (`start()` / `stop()` / `getState()` / 等) のみで wrapper が機能する
+2. 既存 PDCALoop の公開 API (`start()` / `stop()` / `updateConfig()` / `getStatus()` / `getThinkingLog()`) のみで wrapper が機能する
 3. wrapper を実行しても**副作用が起きない** (取引判断・DB 書き込み・通知が一切起きない、dry-run)
 4. wrapper の実行が `traceSink` に span として記録される
 5. SequentialAgent の sub-agent 構成は Phase 2 で確定した方向性に従う
@@ -591,9 +591,9 @@ KICKOFF 起案時点では「本 Step では接続しない」前提で書いた
 
 ### 9.4 既存 SideBScheduler との関係
 
-`SideBScheduler` は本書の §6 / §7 で言及していないが、PDCALoop は SideBScheduler の起動経路の一部に組み込まれている可能性がある (要確認)。dry-run wrapper を試す際、SideBScheduler を**起動しないこと**を Phase 1 から徹底する。
+`SideBScheduler` は本書の §3.2 / §7.1 / §8 / §11.2 で「dry-run wrapper を組み込まない / ADK Runner を呼ばない」と禁止事項として明記済み。ただし、**SideBScheduler の起動条件 (env 変数 / config フラグ) の具体は本 KICKOFF 起案時点では未確認**であり、PDCALoop が SideBScheduler の起動経路の一部に組み込まれているかは Phase 1 着手時に実コードを読んで確認する必要がある。
 
-**現時点の推奨**: Phase 1 着手時に SideBScheduler の起動条件 (env 変数 / config フラグ) を確認し、smoke script では起動しないことを明示する。
+**現時点の推奨**: Phase 1 着手時に `src/side-b/jobs/sideBScheduler.ts` (および関連 entry point) の起動条件を確認し、Phase 1〜3 の smoke script / test では SideBScheduler が一切起動されないことを明示的にコード上で担保する。
 
 ---
 
