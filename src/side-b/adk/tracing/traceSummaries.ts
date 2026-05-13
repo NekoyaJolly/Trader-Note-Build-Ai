@@ -15,8 +15,9 @@
  * - `topLevelKeys` には上限を設ける (デフォルト 20 件)
  * - 関数 / Symbol / BigInt 等の非 JSON プリミティブも安全に扱う
  *
- * ESLint 例外: `unknown` 禁止プロジェクトだが、本ファイルは「外部から来る任意の値を
- * 受け取って要約する」境界層のため、入力に限り `unknown` 受けを許可。
+ * 型方針: 「任意の値を受ける」境界層だが、リポジトリ規約 (`unknown` 禁止) を守るため
+ * ジェネリック `<T>(value: T)` で受ける。呼び出し側は推論で自然に通り、本関数内では
+ * `typeof` / `Array.isArray` / `value === null` で narrow できる。
  */
 
 import type { TracePayloadSummary } from './traceTypes';
@@ -53,11 +54,10 @@ export const DEFAULT_ERROR_MESSAGE_MAX = 500;
  *
  * `redacted: true` リテラルは常に付与。
  *
- * @param value 要約対象。任意の値を受け付ける (境界層のため `unknown`)。
+ * @param value 要約対象 (任意の値、ジェネリック `T` で受ける)。
  * @returns raw value を含まない `TracePayloadSummary`。
  */
-// eslint-disable-next-line no-restricted-syntax -- 境界層 (外部から任意の値が来る) のため unknown 受け
-export function payloadToSummary(value: unknown): TracePayloadSummary {
+export function payloadToSummary<T>(value: T): TracePayloadSummary {
   // null
   if (value === null) {
     return { primitiveType: 'null', redacted: true };
@@ -120,7 +120,9 @@ export function shortenErrorMessage(
   maxLength: number = DEFAULT_ERROR_MESSAGE_MAX,
 ): string {
   if (typeof msg !== 'string') return '';
+  // maxLength <= 0 は「上限ゼロ」= 空文字。"…" 1 文字も返さない (契約: 戻り値長 ≤ maxLength)。
+  if (maxLength <= 0) return '';
   if (msg.length <= maxLength) return msg;
-  // 末尾を切る (前半 maxLength-1 文字 + '…')
-  return `${msg.slice(0, Math.max(0, maxLength - 1))}…`;
+  // 末尾を切る (前半 maxLength-1 文字 + '…' 計 maxLength 文字)
+  return `${msg.slice(0, maxLength - 1)}…`;
 }

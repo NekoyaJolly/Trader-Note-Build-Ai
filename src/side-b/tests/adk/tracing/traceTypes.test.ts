@@ -105,28 +105,52 @@ describe('AdkTraceEvent', () => {
     expect(e.errorCode).toBe('ZodError');
   });
 
-  it('AdkTraceEvent に errorDetails や rawPayload のような型レベル禁止フィールドがないこと (型上 keyof で確認)', () => {
-    // keyof AdkTraceEvent に "errorDetails" / "rawArgs" / "rawResult" 等が含まれないことを
-    // 型システムで確認する。ここではコンパイル時の型エラーが出ないことが PASS の証拠。
-    type Keys = keyof AdkTraceEvent;
-    const allowedKeys: Keys[] = [
-      'kind',
-      'traceId',
-      'parentTraceId',
-      'invocationId',
-      'functionCallId',
-      'agentName',
-      'skillName',
-      'callerReason',
-      'startedAt',
-      'endedAt',
-      'durationMs',
-      'status',
-      'errorCode',
-      'errorMessage',
-      'argsSummary',
-      'resultSummary',
-    ];
-    expect(allowedKeys).toHaveLength(16);
+  it('keyof AdkTraceEvent が想定 16 フィールドと完全一致 (網羅性の型レベル検証)', () => {
+    // Record<keyof AdkTraceEvent, true> 形式で網羅性を型レベルに持たせる。
+    // - 列挙し損ねた keyof があれば型エラー
+    // - 列挙にない (= AdkTraceEvent に存在しない) キーを書いても型エラー
+    const allKeys: Record<keyof AdkTraceEvent, true> = {
+      kind: true,
+      traceId: true,
+      parentTraceId: true,
+      invocationId: true,
+      functionCallId: true,
+      agentName: true,
+      skillName: true,
+      callerReason: true,
+      startedAt: true,
+      endedAt: true,
+      durationMs: true,
+      status: true,
+      errorCode: true,
+      errorMessage: true,
+      argsSummary: true,
+      resultSummary: true,
+    };
+    expect(Object.keys(allKeys)).toHaveLength(16);
+  });
+
+  it('禁止フィールドが型レベルで存在しない (ts-expect-error で検証)', () => {
+    /*
+     * 以下は AdkTraceEvent に存在しないキー = TypeScript で型エラーになる。
+     * ts-expect-error directive は「型エラーが起きること」を期待するため、エラーが
+     * 起きないと逆に test compile が失敗する。これにより「禁止フィールドが存在しない」
+     * が型レベルで担保される。
+     *
+     * (説明コメントを block 形式にしているのは、行コメントだと directive 誤認識を
+     *  起こすため)
+     */
+
+    // @ts-expect-error errorDetails は AdkTraceEvent に存在しない (raw payload 保存禁止)
+    type _ForbidsErrorDetails = Pick<AdkTraceEvent, 'errorDetails'>;
+    // @ts-expect-error rawArgs は AdkTraceEvent に存在しない (raw payload 保存禁止)
+    type _ForbidsRawArgs = Pick<AdkTraceEvent, 'rawArgs'>;
+    // @ts-expect-error rawResult は AdkTraceEvent に存在しない (raw payload 保存禁止)
+    type _ForbidsRawResult = Pick<AdkTraceEvent, 'rawResult'>;
+    // @ts-expect-error stackTrace は AdkTraceEvent に存在しない (機微情報の保存禁止)
+    type _ForbidsStackTrace = Pick<AdkTraceEvent, 'stackTrace'>;
+
+    // 型レベル検証のため runtime 値の確認は不要 (型が通れば PASS)
+    expect(true).toBe(true);
   });
 });

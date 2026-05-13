@@ -153,7 +153,11 @@ describe('shortenErrorMessage', () => {
     expect(shortenErrorMessage(undefined)).toBe('');
   });
 
-  it('maxLength=0 → 空文字 (slice(0, max(-1, 0)) = 空)', () => {
-    expect(shortenErrorMessage('hello', 0)).toBe('…');
+  it('maxLength=0 → 空文字 (上限ゼロは "…" 1 文字も含まない)', () => {
+    expect(shortenErrorMessage('hello', 0)).toBe('');
+  });
+
+  it('maxLength=-1 → 空文字', () => {
+    expect(shortenErrorMessage('hello', -1)).toBe('');
   });
 });
