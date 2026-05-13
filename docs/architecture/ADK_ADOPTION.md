@@ -75,7 +75,7 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 | **Step 0** | 設計ガード (L1/L2/L3 多層防御の整備、ADK 採用範囲の明文化) | 約 8 時間 (3 セッション) | ✅ 完了 (2026-05-12) |
 | **Step 1** | Skill → ADK FunctionTool アダプター | 数日 | ✅ 完了 (2026-05-13) |
 | **Step 2** | Tracing / Telemetry 統合 (内部 TraceSink interface、OTel exporter は Step 3 以降の判断) | 数日 | ✅ 完了 (2026-05-13) |
-| **Step 3** | PDCALoop の SequentialAgent ラップ (既存内部は不可侵) | 数日 | ⬜ 未着手 |
+| **Step 3** | Runner Smoke + PDCALoop の SequentialAgent dry-run ラップ (既存内部は不可侵) | 数日 | ✅ 完了 (2026-05-14) |
 | **Step 4** | Lens 並列実行の ParallelAgent ラップ | 数日 | ⬜ 未着手 |
 | **Step 5** | 進化ループの LoopAgent ラップ (条件付き) | 1〜2 週 | ⬜ 未着手 |
 | **Step 6** | 評価: ADK 継続採用 / 撤退 / 部分採用の判断 | 1 週 | ⬜ 未着手 |
@@ -91,7 +91,7 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 | Step 0 | ガードレール (AGENTS.md 群、ADK_ADOPTION.md、ESLint/tsc strict、CI ゲート) が整備されている | ① Gate 1〜3 全て承認、② B1/B2 違反レポート提出、③ C2 dry-run 成功 |
 | Step 1 | 既存スキルを変更せずに `adapters/SkillToFunctionToolAdapter` 経由で ADK Runner から呼び出せる | スキル単体テストが ADK 経由で全て通過 |
 | Step 2 | adapter 層に自前 `TraceSink` interface が組み込まれ、`skillRegistryToAdkTools()` 経由の Skill 実行が trace event として記録できる (raw payload は保存しない方針)。Step 3 以降で OTel exporter / Jaeger / Cloud Trace に流す土台が確保されている | adapter テストで成功・失敗・throw の trace が記録されることを `InMemoryTraceSink` で検証 |
-| Step 3 | PDCALoop が SequentialAgent でラップされ、Plan/Do/Check/Act の各フェーズが個別スパンとして観測できる。既存 `pdcaLoop.ts` の内部は変更されていない | 既存テスト全 pass + 新規 Sequential ラップテスト pass |
+| Step 3 | ① Runner / LlmAgent の最小 smoke が `runEphemeral` + `InMemorySessionService` で動く、② SequentialAgent の sub-agent 単位を `adk.subagent.*` trace event として観測できる、③ 既存 PDCALoop を**合成によりラップ**した dry-run wrapper が public API のみで観測可能。pdcaLoop.ts / agentMemory.ts / agentLoop.ts の **git diff ゼロ** | adk 領域テスト 177 cases 全 pass (Step 1: 71 + Step 2: 59 + Step 3: 47) + `STEP_3_INTEGRATION_DECISION.md` 作成 + 既存 SideBScheduler / Express server 接続なし |
 | Step 4 | Lens 群が ParallelAgent で並列実行され、各レンズが独立スパンとして観測できる。レンズの決定性が崩れていない | 既存決定性テスト全 pass + 並列実行で同入力同出力 |
 | Step 5 | 進化ループの一部 (撤退基準が満たされない範囲) が LoopAgent でラップされる | エッジ昇格率 (PF/WF) が ADK 採用前後で 10% 以内の差 |
 | Step 6 | ADK の継続採用 / 撤退 / 部分採用の判断ドキュメントが作成されている | ユーザー承認 |
@@ -135,14 +135,14 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 
 ## 7. 実装状況
 
-> **最終更新**: 2026-05-13 (Step 2 全 Phase 完了)
+> **最終更新**: 2026-05-14 (Step 3 全 Phase 完了)
 
 ### Step 進捗
 
 - [x] Step 0: 設計ガード (完了 2026-05-12)
 - [x] Step 1: Skill → ADK FunctionTool アダプター (完了 2026-05-13)
 - [x] Step 2: Tracing / Telemetry 統合 (完了 2026-05-13)
-- [ ] Step 3: PDCALoop の SequentialAgent ラップ
+- [x] Step 3: Runner Smoke + PDCALoop SequentialAgent dry-run ラップ (完了 2026-05-14)
 - [ ] Step 4: Lens 並列実行の ParallelAgent ラップ
 - [ ] Step 5: 進化ループの LoopAgent ラップ (条件付き)
 - [ ] Step 6: ADK 継続採用 / 撤退 / 部分採用の判断
@@ -280,6 +280,54 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 - 本番コードの any / unknown 違反: **ゼロ**
 - 本番コードからの ADK SDK 内部 API 依存: **ゼロ** (`Context` / `FunctionTool` / `BaseTool` の public API のみ)
 
+#### Step 3: Runner Smoke + PDCALoop SequentialAgent Dry-Run Wrapper (完了 2026-05-14)
+
+**実装場所**:
+- ADK agents サイドカー: `/src/side-b/adk/agents/`
+  - `runnerSmoke.ts` — Runner / LlmAgent / InMemorySessionService の最小 factory (Phase 1)
+  - `sequentialSmoke.ts` — SequentialAgent + `SmokeSubAgent` (BaseAgent 直接 subclass、LLM 非依存) + `extractSubAgentOrder` (Phase 2)
+  - `pdcaDryRunWrapper.ts` — `PdcaObservationSubAgent` + 4 観測アクション + `createDryRunPdcaLoop` (Phase 3)
+  - `README.md` — agents 領域設計書 (Phase 3 初版、Phase 5 で最終形)
+- trace 契約拡張: `/src/side-b/adk/tracing/traceTypes.ts`
+  - `AdkTraceEventKind` に `adk.subagent.*` を **additive 追加** (Phase 2)
+  - `AdkTraceEvent.skillName` を「step 識別子」として汎用化 (Skill 名 / sub-agent 名の両用途、`kind` で discriminant)
+  - Step 1/2 既存テスト 130 cases に影響ゼロ
+- ADK agents テスト: `/src/side-b/tests/adk/agents/`
+  - `runnerSmoke.test.ts` (11) / `sequentialSmoke.test.ts` (18) / `pdcaDryRunWrapper.test.ts` (18) — **計 47 cases PASS**
+- 設計書群: `STEP_3_RUNNER_SMOKE_NOTES.md` / `STEP_3_SEQUENTIAL_AGENT_NOTES.md` / `STEP_3_PDCA_DRYRUN_NOTES.md` / `STEP_3_INTEGRATION_DECISION.md` / `STEP_3_SUMMARY.md`
+
+**採用方式**:
+- **Runner / Session**: `Runner.runEphemeral` + `InMemorySessionService` のみ採用、`runAsync` (sessionId 必須) と `DatabaseSessionService` は不採用継続
+- **LLM 呼び出し回避**: Phase 1 では `BaseLlm` 継承 stub、Phase 2/3 では `BaseAgent` 直接 subclass で smoke を完了 (実 LLM 呼び出しゼロ)
+- **trace 契約拡張**: additive で `adk.subagent.*` event kind 追加。`skillName` フィールドを step 識別子として両系統で再利用、新規フィールド追加なし
+- **PDCALoop ラップ方針**: 合成ラップのみ、`enabled: false` で構築した PDCALoop を public API (`start` / `stop` / `getStatus` / `getThinkingLog`) 経由で観測。private method / private field / `as any` / `as unknown as` 完全ゼロ (TS コンパイラで防御)
+- **副作用ゼロ実証**: dry-run wrapper 実行前後で `agentMemory.getState()` / `pdcaLoop.getStatus()` の不変性を test で実機検証
+- **既存実装の不可侵性**: Phase 1〜3 全 PR で `src/side-b/agent/` / `src/side-b/skills/` / `prisma/schema.prisma` の git diff 常にゼロ
+
+**検証結果**:
+- **Phase 1 (PR #177 マージ済み 2026-05-13)**: Runner / LlmAgent 最小 smoke、`BaseLlm` 継承 stub model 採用、Runner 経由でも adapter 内 traceSink がそのまま発火することを実機確認
+- **Phase 2 (PR #179 マージ済み 2026-05-13)**: SequentialAgent + toy `SmokeSubAgent` の 18 cases、sub-agent 順序保証 / error 伝播 / orphan started なし / trace 契約 additive 拡張を実機確認
+- **Phase 3 (PR #181 マージ済み 2026-05-14)**: `PdcaObservationSubAgent` 18 cases、PDCALoop 公開 API 4 アクションすべての副作用ゼロ + agentMemory state 不変を実機検証
+- **Phase 4 (本 PR)**: `STEP_3_INTEGRATION_DECISION.md` 作成。KICKOFF §5.13 の 7 軸 (安定性 / 観測性 / 侵襲性 / 撤退性 / 型安全 / session 整合 / コスト) すべて採用寄り、撤退基準 5 項目すべて非該当 → **Step 4 (Lens ParallelAgent dry-run) を推奨**
+- **Phase 5 (本 PR)**: `STEP_3_SUMMARY.md` 作成、本書 §3 / §4 / §7 / §8 を Step 3 完了状態に更新、agents/README.md 最終形
+
+**Step 4 への引き継ぎ事項**:
+1. Lens 群が ADK_ADOPTION.md §6 不可侵領域 (純粋関数特性) を維持しているか Step 4 Phase 1 spike で確認
+2. ADK `ParallelAgent` の並列実行モデルが Lens の純粋関数前提と整合するか実機検証
+3. Step 3 で確立した 3 つの建材 (`runnerSmoke.ts` / `sequentialSmoke.ts` / `pdcaDryRunWrapper.ts`) を流用
+4. trace 契約は本 Step Phase 2 拡張版をそのまま使う (`adk.subagent.*` を ParallelAgent でも再利用)
+5. Step 4 spike で問題が見つかれば Step 6 (撤退判断) へ切り替え可能な体制を維持
+
+**数値スナップショット (Step 3 完了時)**:
+- 新規ファイル: 3 (agents 配下) + 3 (tests/adk/agents 配下) + 5 (Step 3 docs) + 1 (agents/README.md) = **12**
+- 変更ファイル: `tracing/traceTypes.ts` (Phase 2) / 本書 (Phase 5) = **2**
+- 削除ファイル: なし
+- 既存実装 (`/src/side-b/skills/`, `/src/side-b/agent/`, `prisma/schema.prisma`) の変更: **ゼロ**
+- テストケース (Step 3 増分): 47/47 PASS、Step 1 既存 71 cases + Step 2 既存 59 cases も全 PASS → **adk 領域累計 177 cases**
+- 本番コードの any / unknown / `as any` / `as unknown as` 違反: **ゼロ**
+- 本番コードからの ADK SDK 内部 API 依存: **ゼロ** (`Runner` / `LlmAgent` / `SequentialAgent` / `BaseAgent` / `BaseLlm` / `InMemorySessionService` / `FunctionTool` / `createEvent` / `Context` / `InvocationContext` の public API のみ)
+- PDCALoop private アクセス: **ゼロ** (TS コンパイラで防御)
+
 ---
 
 ## 8. 関連ドキュメント
@@ -296,4 +344,11 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 | [docs/architecture/STEP_2_ADK_TRACING_SPIKE.md](./STEP_2_ADK_TRACING_SPIKE.md) | Step 2 Phase 1 実測結果 (採用方針の根拠) |
 | [docs/architecture/STEP_2_ADK_RUNNER_SMOKE_NOTES.md](./STEP_2_ADK_RUNNER_SMOKE_NOTES.md) | Step 2 Phase 4 成果物 (Step 3 Runner smoke 着手用構成) |
 | [docs/architecture/STEP_2_SUMMARY.md](./STEP_2_SUMMARY.md) | Step 2 完了サマリー (本 §7 Step 2 詳細の出典) |
+| [docs/architecture/STEP_3_KICKOFF.md](./STEP_3_KICKOFF.md) | Step 3 作業指示書 (Nekoさん作成) |
+| [docs/architecture/STEP_3_RUNNER_SMOKE_NOTES.md](./STEP_3_RUNNER_SMOKE_NOTES.md) | Step 3 Phase 1 実測結果 (Runner / LlmAgent 実機 smoke) |
+| [docs/architecture/STEP_3_SEQUENTIAL_AGENT_NOTES.md](./STEP_3_SEQUENTIAL_AGENT_NOTES.md) | Step 3 Phase 2 実測結果 (SequentialAgent + trace 契約拡張) |
+| [docs/architecture/STEP_3_PDCA_DRYRUN_NOTES.md](./STEP_3_PDCA_DRYRUN_NOTES.md) | Step 3 Phase 3 実測結果 (PDCALoop dry-run wrapper) |
+| [docs/architecture/STEP_3_INTEGRATION_DECISION.md](./STEP_3_INTEGRATION_DECISION.md) | Step 3 Phase 4 進路判断 (Step 4 推奨、撤退基準非該当) |
+| [docs/architecture/STEP_3_SUMMARY.md](./STEP_3_SUMMARY.md) | Step 3 完了サマリー (本 §7 Step 3 詳細の出典) |
+| [/src/side-b/adk/agents/README.md](../../src/side-b/adk/agents/README.md) | agents 領域設計書 (Step 3 で構築した 3 つの建材の使用例) |
 | [docs/design/DESIGN_DOC_autonomous_trading_architecture.md](../design/DESIGN_DOC_autonomous_trading_architecture.md) | Side-B 自律 AI 設計の正本 |
