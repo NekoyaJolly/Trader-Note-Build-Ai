@@ -40,9 +40,25 @@ import {
 import type { Content } from '@google/genai';
 
 import type { AdkTraceEvent, TraceSink } from '../tracing';
+import { shortenErrorMessage } from '../tracing';
 
 /** Phase 2 smoke で使用する固定 callerReason (Skill 系の ADK_DEFAULT_CALLER_REASON とは別系統)。 */
 export const SUBAGENT_SMOKE_CALLER_REASON = 'invoked-via-adk-sequential-smoke';
+
+/**
+ * `TraceSink.record()` の失敗を握りつぶす内部ヘルパー。
+ *
+ * Step 2 Phase 3 (`/src/side-b/adk/adapters/skillRegistryToAdkTools.ts`) で確立した
+ * 「traceSink 失敗で本処理を壊さない」契約 (`STEP_3_KICKOFF.md` §6.3 trace 安全) に
+ * 揃える。同期 throw / Promise reject の両方を捕捉し、原因例外を呼び出し元に伝播しない。
+ */
+async function safeRecord(sink: TraceSink, event: AdkTraceEvent): Promise<void> {
+  try {
+    await Promise.resolve(sink.record(event));
+  } catch {
+    // intentionally swallowed: trace 記録の失敗で sub-agent 実行を壊さない
+  }
+}
 
 /** デフォルト app 名 (Phase 1 と同系の識別子)。 */
 export const SEQUENTIAL_SMOKE_DEFAULT_APP_NAME =
@@ -106,7 +122,7 @@ export class SmokeSubAgent extends BaseAgent {
         startedAt,
         status: 'started',
       };
-      await Promise.resolve(sink.record(startedEvent));
+      await safeRecord(sink, startedEvent);
     }
 
     try {
@@ -143,11 +159,12 @@ export class SmokeSubAgent extends BaseAgent {
           durationMs: endedAt.getTime() - startedAt.getTime(),
           status: 'ok',
         };
-        await Promise.resolve(sink.record(completedEvent));
+        await safeRecord(sink, completedEvent);
       }
     } catch (err) {
       if (sink !== undefined) {
         const endedAt = new Date();
+        const rawMessage = err instanceof Error ? err.message : String(err);
         const failedEvent: AdkTraceEvent = {
           kind: 'adk.subagent.failed',
           traceId: randomUUID(),
@@ -161,14 +178,11 @@ export class SmokeSubAgent extends BaseAgent {
           durationMs: endedAt.getTime() - startedAt.getTime(),
           status: 'thrown',
           errorCode: 'SUBAGENT_THROWN',
-          errorMessage: err instanceof Error ? err.message : String(err),
+          // Step 2 Phase 2 で確立した上限 (DEFAULT_ERROR_MESSAGE_MAX) で短縮、巨大な
+          // error message が trace event に乗らないようにする (KICKOFF §6.3 trace 安全)
+          errorMessage: shortenErrorMessage(rawMessage),
         };
-        // record 自体の失敗で原因例外を消さないように catch (Step 2 Phase 3 と同じ握りつぶし方針)
-        try {
-          await Promise.resolve(sink.record(failedEvent));
-        } catch {
-          // intentionally swallowed
-        }
+        await safeRecord(sink, failedEvent);
       }
       throw err;
     }

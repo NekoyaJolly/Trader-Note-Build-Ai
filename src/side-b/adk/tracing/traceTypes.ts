@@ -99,15 +99,22 @@ export interface TracePayloadSummary {
 // ============================================================================
 
 /**
- * ADK adapter 経由の Skill 実行を表す内部 trace event。
+ * ADK 経由の実行を表す内部 trace event。
  *
- * Phase 3 で `skillRegistryToAdkTools` の `execute` 内で生成され、`TraceSink.record()` に渡される。
+ * **対応する実行系統** (kind で discriminant):
+ * - `adk.skill.*` (Step 2 Phase 3 で導入): adapter (`skillRegistryToAdkTools`) の `execute` 内で
+ *   生成され、`TraceSink.record()` に渡される。`skillName` には `Skill.name` が入る。
+ * - `adk.subagent.*` (Step 3 Phase 2 で追加): SequentialAgent の sub-agent (BaseAgent サブクラス) の
+ *   `runAsyncImpl` 内で生成され、同じ `TraceSink.record()` 経路で渡される。`skillName` には
+ *   sub-agent 名 (`BaseAgent.name`) が入る (step 識別子としての再利用)。
  *
- * **重要**:
+ * **重要 (両系統共通)**:
  * - `argsSummary` / `resultSummary` は `TracePayloadSummary` のみ。raw object は保存しない
  * - `errorMessage` は保存 OK だが、巨大文字列は呼び出し側 (`traceSummaries.shortenErrorMessage`) で短縮
  * - `errorDetails` フィールドは**存在しない** (= 型レベルで元 Error 等の保存を禁止)
- * - `traceId` は adapter が生成 (UUID 等)。`parentTraceId` で started と completed/failed を紐付ける
+ * - `traceId` は emitter (adapter / sub-agent) が生成 (UUID 等)。`parentTraceId` で started と
+ *   completed/failed を紐付ける
+ * - `TraceSink.record()` の失敗は emitter 側で握りつぶし、本処理を壊さない (`KICKOFF` §6.3)
  */
 export interface AdkTraceEvent {
   /** event の kind (start / completed / failed)。 */

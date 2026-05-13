@@ -267,6 +267,66 @@ describe('sub-agent 単位の trace event 記録', () => {
     const order = extractSubAgentOrder(events);
     expect(order).toEqual(['no-trace-a', 'no-trace-b']);
   });
+
+  it('traceSink.record() が同期 throw しても sub-agent 実行は壊れない', async () => {
+    const failingSink = {
+      record: (): void => {
+        throw new Error('sink throws synchronously');
+      },
+    };
+    const subA = new SmokeSubAgent({ name: 'sub-with-failing-sink', traceSink: failingSink });
+    const { runner } = buildSequentialSmoke({ subAgents: [subA] });
+
+    // record の throw は内部で握りつぶされ、smoke は正常完走する
+    const events = await runSequentialSmoke(runner, {
+      userId: 'phase2-user',
+      newMessage: helloMessage,
+    });
+    expect(events.length).toBeGreaterThan(0);
+    expect(extractSubAgentOrder(events)).toEqual(['sub-with-failing-sink']);
+  });
+
+  it('traceSink.record() が Promise reject しても sub-agent 実行は壊れない', async () => {
+    const rejectingSink = {
+      record: (): Promise<void> => Promise.reject(new Error('sink rejects async')),
+    };
+    const subA = new SmokeSubAgent({ name: 'sub-with-rejecting-sink', traceSink: rejectingSink });
+    const { runner } = buildSequentialSmoke({ subAgents: [subA] });
+
+    const events = await runSequentialSmoke(runner, {
+      userId: 'phase2-user',
+      newMessage: helloMessage,
+    });
+    expect(events.length).toBeGreaterThan(0);
+    expect(extractSubAgentOrder(events)).toEqual(['sub-with-rejecting-sink']);
+  });
+});
+
+describe('error message 短縮 (DEFAULT_ERROR_MESSAGE_MAX)', () => {
+  it('巨大な throw message は failed event の errorMessage で短縮される', async () => {
+    const sink = new InMemoryTraceSink();
+    const longMessage = 'X'.repeat(10_000); // 10KB の巨大メッセージ
+    const subA = new SmokeSubAgent({
+      name: 'long-throw',
+      traceSink: sink,
+      shouldThrow: true,
+      throwMessage: longMessage,
+    });
+    const { runner } = buildSequentialSmoke({ subAgents: [subA] });
+
+    await expect(
+      runSequentialSmoke(runner, {
+        userId: 'phase2-user',
+        newMessage: helloMessage,
+      }),
+    ).rejects.toThrow();
+
+    const failed = sink.events.find((e) => e.kind === 'adk.subagent.failed');
+    expect(failed).toBeDefined();
+    // 短縮後の errorMessage は元の 10KB より十分短い (Step 2 の DEFAULT_ERROR_MESSAGE_MAX = 512)
+    expect((failed?.errorMessage ?? '').length).toBeLessThan(longMessage.length);
+    expect((failed?.errorMessage ?? '').length).toBeLessThanOrEqual(600); // 余裕を持って 600 で判定
+  });
 });
 
 // ============================================================================
