@@ -202,14 +202,84 @@ PR と違って Copilot レビューは走らない。push 後の CI fail には
 | リソース | 内容 |
 |---------|------|
 | `.claude/skills/copilot-review-responder/` | Copilot レビュー対応スキル定義 (本書 §3.2 の inline 実行を仕様化したもの) |
+| `.github/workflows/lint-fix-on-merge.yml` | 本書 §8 の自動 lint 修正 workflow 本体 |
 | `/AGENTS.md` | 全エージェント共通ルール (正本) |
 | `docs/architecture/ADK_ADOPTION.md` | ADK 採用計画 (Step 進捗管理) |
 | `docs/architecture/STEP_*_KICKOFF.md` / `STEP_*_SUMMARY.md` | 各 Step の作業手順書 / 完了サマリー |
 
 ---
 
-## 8. 履歴
+## 8. 自動 lint 修正ワークフロー (Copilot Coding Agent)
+
+実装 PR が main にマージされたタイミングで、変更ファイルの 1 階層親ディレクトリに対して ESLint / tsc 違反を **Copilot Coding Agent** に自動修正させる仕組み。
+
+### 8.1 目的
+
+Step 0 完了時点で「ユーザー対応依頼」として残っていた **ESLint 488 errors / tsconfig audit 1423 errors** を、Nekoさん負担ゼロで継続的に減らす。実装 1 PR ごとに少しずつ lint 修正 PR が生まれて、Nekoさんはマージ判断するだけ。
+
+### 8.2 フロー
+
+```
+[実装 PR が main にマージ]
+  ↓ GH Actions trigger
+  ↓ (excludes copilot/* and chore/lint-fix-*)
+[Action が PR diff から TS/JS ファイルを抽出 → 1 階層親ディレクトリ算出]
+  ↓
+[Action が Issue 自動作成]
+  - title: "[lint-fix] PR #N の影響範囲を lint 修正"
+  - body: 対象ディレクトリ + 厳守事項 + 検証手順
+  - assignee: Copilot ← Coding Agent
+  ↓
+[Copilot Coding Agent が PR 作成]
+  - branch: copilot/lint-fix-N (デフォルト命名)
+  ↓
+[Copilot レビュー + Nekoさんマージ判断]
+```
+
+### 8.3 修正範囲・深さ
+
+| 項目 | 採用 |
+|------|------|
+| 修正範囲 | マージ PR が触れた TS/JS ファイルの **1 階層親ディレクトリのみ** (作りながら段階拡張) |
+| 修正の深さ | ESLint auto-fixable + 型注釈追加 (any 残置 / 戻り値型欠落) + 未使用 import 削除 |
+| 対象外 | `unknown` の具体型化 (人間判断が必要なため別途対応)、設計判断を伴うリファクタ |
+| ファイル種別 | `.ts` / `.tsx` / `.js` / `.jsx` のみ (.md / .yml / .json 等は対象外) |
+
+### 8.4 Copilot への厳守事項 (Issue body にテンプレ化)
+
+- **既存機能・ロジック・テスト結果を一切変更しない**
+- **デザイン・UI の見た目を一切変更しない**
+- **フォーマット規約・命名規約も変更しない**
+- **修正前後で `npx jest` が同じ結果になること**
+- **直せなかったもの** (unknown 残置、副作用が読めなかったもの) は **PR description にレポート**
+
+### 8.5 無限ループ予防 (3 重)
+
+| 予防 | 条件 |
+|------|------|
+| (1) close-only を除外 | `pull_request.merged == true` のみトリガー |
+| (2) Copilot 自身の PR を除外 | `head.ref` が `copilot/` で始まらないこと |
+| (3) 手動 lint-fix PR を除外 | `head.ref` が `chore/lint-fix-` で始まらないこと |
+
+→ Copilot Coding Agent が出す lint 修正 PR (`copilot/lint-fix-N`) がマージされても、もう一度 lint エージェントは起動しない。
+
+### 8.6 起動条件
+
+- マージされた PR に **TS/JS ファイル変更が 1 件以上ある** こと
+- 0 件なら Issue を作らずに workflow 終了 (無駄起動の予防)
+
+### 8.7 動作確認・調整
+
+- 初回実走で Copilot の修正品質を観察
+- プロンプト調整は Issue body テンプレ (workflow YAML) を更新する形で
+- 修正範囲を 2 階層 / 3 階層に広げる場合は workflow YAML の `dirname` ロジックを変更
+
+---
+
+## 9. 履歴
 
 - **2026-05-11** (PR #152 後): Stop hook / UserPromptSubmit hook 経由の自動発火が timing 不安定 → Claude が同ターン内で inline polling する方式に Nekoさん判断で確定
 - **2026-05-12**: PR/コミット使い分け + マージ自動確認の運用が以後の標準ワークフローとして確定 (Step 0 進行中)
+- **2026-05-13** (commit 3ea62e6): 本書 (`WORKFLOW.md`) としてリポジトリに正式文書化 (それまでは Claude のメモリにのみ存在)
+- **2026-05-13** (commit b66ca30): §8 自動 lint 修正ワークフロー追加 (`.github/workflows/lint-fix-on-merge.yml`)。Copilot Coding Agent ベース、ESLint 488 / tsconfig audit 1423 の段階解消を Nekoさん負担ゼロで継続するため
 - **2026-05-13**: 本書 (`WORKFLOW.md`) としてリポジトリに正式文書化 (それまでは Claude のメモリにのみ存在)
