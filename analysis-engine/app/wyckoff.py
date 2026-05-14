@@ -309,7 +309,9 @@ def _classify_phase(
             if smc_context.currentZone == "PREMIUM":
                 return "DISTRIBUTION", 0.55
         # SMC context なし or EQUILIBRIUM → 不明
-        return "UNKNOWN", 0.3
+        # UNKNOWN は WyckoffLens 契約 (UNKNOWN → confidence 0) と整合させて 0.0 を返す。
+        # 「不明」を non-zero confidence で返すと wyckoff_phase_confidence が誤って actionable に見える。
+        return "UNKNOWN", 0.0
 
     # Strong trend but SMC 不整合 (BOS 方向が trend と逆 or NONE) → 低 confidence
     if is_strong_up:
@@ -325,7 +327,9 @@ def _classify_phase(
         # weak down: DISTRIBUTION 後の MARKDOWN 初期 or RE_DISTRIBUTION
         return "DISTRIBUTION", 0.45
 
-    return "UNKNOWN", 0.3
+    # 末端 fallback: いずれの判定枝にも入らない (= relative_slope == 0 ピンポイント等) ケース。
+    # UNKNOWN は WyckoffLens 契約と整合させて confidence 0.0 を返す。
+    return "UNKNOWN", 0.0
 
 
 # ----------------------------------------------------------------------------
