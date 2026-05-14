@@ -41,7 +41,15 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { BaseAgent, type Event, type InvocationContext, createEvent } from '@google/adk';
+import {
+  BaseAgent,
+  type Event,
+  InMemorySessionService,
+  type InvocationContext,
+  ParallelAgent,
+  Runner,
+  createEvent,
+} from '@google/adk';
 import type { Content } from '@google/genai';
 
 import type { Lens, LensFeature, LensInput } from '../../lenses';
@@ -92,6 +100,20 @@ export interface LensSubAgentOptions {
    * 同じ Lens から複数の sub-agent を作るときだけ override する。
    */
   readonly nameOverride?: string;
+  /**
+   * Phase 3 追加: 失敗時の throw を呼び出し元へ伝播せず握りつぶすか。
+   *
+   * - `false` (default): Phase 2 既存挙動。Lens が throw すると `runAsyncImpl` の
+   *   呼び出し元 (Runner) まで例外が伝播し、Runner 全体が停止する。単体検証向け。
+   * - `true`: 例外を握りつぶし、`getError()` だけに保存して generator は正常終了。
+   *   ADK `ParallelAgent` は内部で `Promise.race` (`mergeAgentRuns`) を使うため、
+   *   1 sub-agent の throw が全体停止につながる。1 Lens の失敗が他 Lens の実行を
+   *   巻き込まないようにするには本オプションを true にして "failure isolation"
+   *   を sub-agent 側で吸収する必要がある (KICKOFF §5 Phase 3 DoD)。
+   *
+   * いずれの場合でも `traceSink` には `adk.subagent.failed` が必ず記録される。
+   */
+  readonly isolateFailure?: boolean;
 }
 
 /**
@@ -126,12 +148,15 @@ export class LensSubAgent extends BaseAgent {
   private readonly input: LensInput;
   /** trace 出力先 (任意)。 */
   private readonly traceSink: TraceSink | undefined;
+  /** failure isolation オプション (Phase 3 追加、default false)。 */
+  private readonly isolateFailure: boolean;
 
   constructor(options: LensSubAgentOptions) {
     super({ name: options.nameOverride ?? options.lens.name });
     this.lens = options.lens;
     this.input = options.input;
     this.traceSink = options.traceSink;
+    this.isolateFailure = options.isolateFailure ?? false;
   }
 
   /** 成功時に Lens から得た `LensFeature` を返す (未実行/失敗時は `undefined`)。 */
@@ -157,6 +182,13 @@ export class LensSubAgent extends BaseAgent {
   protected override async *runAsyncImpl(
     context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
+    // 同一 instance を誤って 2 回実行された場合に、前回の result / error が
+    // 残って外側集約 (`runLensParallelSmoke.getResult()` / `getError()`) で
+    // 状態混入を起こさないよう、runAsyncImpl 冒頭で必ず初期化する。
+    // 通常運用では factory が常に新規 instance を返すが、防衛的に reset しておく。
+    this.result = undefined;
+    this.error = undefined;
+
     const startedAt = new Date();
     const startedTraceId = randomUUID();
     const sink = this.traceSink;
@@ -249,7 +281,12 @@ export class LensSubAgent extends BaseAgent {
         };
         await safeRecord(sink, failedEvent);
       }
-      throw error;
+      if (!this.isolateFailure) {
+        throw error;
+      }
+      // isolateFailure: true の場合は例外を握りつぶす。getError() で保存済みの
+      // Error を参照することで失敗事実は失われない。ParallelAgent の Promise.race
+      // 経路で他 sub-agent を巻き込まないために必要 (KICKOFF Phase 3 DoD)。
     }
   }
 
@@ -284,4 +321,199 @@ export class LensSubAgent extends BaseAgent {
  */
 export function createLensSubAgent(options: LensSubAgentOptions): LensSubAgent {
   return new LensSubAgent(options);
+}
+
+// ============================================================================
+// ParallelAgent dry-run wrapper (Phase 3)
+// ============================================================================
+
+/** Phase 3 ParallelAgent root agent のデフォルト appName。 */
+export const LENS_PARALLEL_SMOKE_DEFAULT_APP_NAME =
+  'trader-note-build-ai-adk-lens-parallel-smoke';
+
+/** Phase 3 ParallelAgent root agent のデフォルト名。 */
+export const LENS_PARALLEL_SMOKE_DEFAULT_AGENT_NAME = 'adk-lens-parallel-smoke-root';
+
+/** Phase 3 ParallelAgent dry-run の構築 config。 */
+export interface LensParallelSmokeConfig {
+  /** 並列実行する Lens 群 (順序は無関係、最終出力は lensName でソート)。 */
+  readonly lenses: readonly Lens[];
+  /** 全 Lens に渡す共通の `LensInput`。 */
+  readonly input: LensInput;
+  /** trace event の出力先 (任意、各 sub-agent に共有)。 */
+  readonly traceSink?: TraceSink;
+  /** Runner.appName の override (任意)。 */
+  readonly appName?: string;
+  /** ParallelAgent.name の override (任意)。 */
+  readonly agentName?: string;
+}
+
+/** Phase 3 ParallelAgent dry-run の構築物。 */
+export interface LensParallelSmokeArtifacts {
+  readonly runner: Runner;
+  readonly rootAgent: ParallelAgent;
+  readonly sessionService: InMemorySessionService;
+  /** lensName で昇順ソート済みの `LensSubAgent` 配列。実行後に `getResult` / `getError` を回収する。 */
+  readonly subAgents: readonly LensSubAgent[];
+}
+
+/**
+ * `runLensParallelSmoke` の戻り値。
+ *
+ * 成功と失敗を分離して保持。両者とも `lensName` で安定ソート済み (= 並列実行順に
+ * 依存しない安定 key、KICKOFF Phase 3 DoD)。
+ */
+export interface LensParallelExecutionResult {
+  /** 成功 Lens の features (lensName 昇順)。 */
+  readonly successes: readonly LensFeature[];
+  /** 失敗 Lens の {lensName, error} (lensName 昇順)。 */
+  readonly failures: readonly LensParallelFailure[];
+}
+
+/** Phase 3 並列実行で 1 Lens が失敗したことを示す record。 */
+export interface LensParallelFailure {
+  readonly lensName: string;
+  readonly error: Error;
+}
+
+/**
+ * 複数 Lens を `ParallelAgent` で並列実行する dry-run wrapper を構築する。
+ *
+ * KICKOFF §5 Phase 3 / §4.2 (Lens Parallel dry-run wrapper) に準拠:
+ * - 各 Lens を `LensSubAgent` (isolateFailure: true) でラップ
+ * - 同一 `LensInput` を全 sub-agent で共有
+ * - `ParallelAgent` で束ね、`Runner` + `InMemorySessionService` で実行可能にする
+ * - trace event は各 sub-agent が自分で `adk.subagent.*` を `traceSink` に record
+ *
+ * **failure isolation の仕組み**: ADK `ParallelAgent` は内部で `Promise.race`
+ * (`mergeAgentRuns`) を使って sub-agent generator を merge するため、1 sub-agent
+ * の throw が全体を停止させる。これを避けるため `LensSubAgent.isolateFailure=true`
+ * を渡し、Lens 失敗時に sub-agent generator が throw せず正常終了するようにする。
+ * 失敗事実は `LensSubAgent.getError()` で `runLensParallelSmoke` 側が後から集約する。
+ *
+ * @throws lenses が空の場合
+ * @throws lenses 内に同名 Lens が 2 つ以上含まれる場合
+ */
+export function buildLensParallelSmoke(
+  config: LensParallelSmokeConfig,
+): LensParallelSmokeArtifacts {
+  if (config.lenses.length === 0) {
+    throw new Error('buildLensParallelSmoke: lenses must be non-empty');
+  }
+
+  // 同名 Lens を弾く (ParallelAgent の sub-agent 名一意性を担保、確実な集約のためにも必要)。
+  const seenNames = new Set<string>();
+  for (const lens of config.lenses) {
+    if (seenNames.has(lens.name)) {
+      throw new Error(
+        `buildLensParallelSmoke: duplicate lens name "${lens.name}" detected`,
+      );
+    }
+    seenNames.add(lens.name);
+  }
+
+  // lensName 昇順でソートして安定 key 順序を確保。並列実行順序はこの順序に依存しない。
+  const sortedLenses = [...config.lenses].sort((a, b) => a.name.localeCompare(b.name));
+
+  // 各 Lens を LensSubAgent でラップ (isolateFailure: true で failure isolation)。
+  const subAgents = sortedLenses.map((lens) =>
+    createLensSubAgent({
+      lens,
+      input: config.input,
+      traceSink: config.traceSink,
+      isolateFailure: true,
+    }),
+  );
+
+  // ParallelAgent に渡す sub-agent は mutable BaseAgent[] 期待のため readonly 解除。
+  // 本 smoke では構築後に sub-agent を変更しないため安全 (Step 3 sequentialSmoke と同じ運用)。
+  const subAgentList: BaseAgent[] = subAgents.map((a) => a);
+
+  const rootAgent = new ParallelAgent({
+    name: config.agentName ?? LENS_PARALLEL_SMOKE_DEFAULT_AGENT_NAME,
+    subAgents: subAgentList,
+  });
+
+  const sessionService = new InMemorySessionService();
+
+  const runner = new Runner({
+    appName: config.appName ?? LENS_PARALLEL_SMOKE_DEFAULT_APP_NAME,
+    agent: rootAgent,
+    sessionService,
+  });
+
+  return { runner, rootAgent, sessionService, subAgents };
+}
+
+/**
+ * 構築済みの `LensParallelSmokeArtifacts` を `Runner.runEphemeral` で実行し、
+ * 各 Lens の結果を成功 / 失敗別に集約して返す。
+ *
+ * 出力 (`LensParallelExecutionResult`) は `lensName` 昇順で安定ソート済み。
+ * 並列実行順序 / trace event 順序には依存しない (KICKOFF Phase 3 DoD §安定 key)。
+ *
+ * @example
+ * ```typescript
+ * const artifacts = buildLensParallelSmoke({ lenses, input });
+ * const result = await runLensParallelSmoke(artifacts);
+ * for (const f of result.successes) console.log(f.lensName, f.features);
+ * for (const fail of result.failures) console.log(fail.lensName, fail.error.message);
+ * ```
+ */
+export async function runLensParallelSmoke(
+  artifacts: LensParallelSmokeArtifacts,
+  params?: { readonly userId?: string },
+): Promise<LensParallelExecutionResult> {
+  const triggerMessage: Content = {
+    role: 'user',
+    parts: [{ text: 'lens parallel smoke trigger' }],
+  };
+  const generator = artifacts.runner.runEphemeral({
+    userId: params?.userId ?? 'lens-parallel-smoke-tester',
+    newMessage: triggerMessage,
+  });
+  // generator を最後まで回し、各 sub-agent の runAsyncImpl を完了させる。
+  // Event の中身は本 wrapper では使用しない (= trace 経由で観測する設計)。
+  for await (const _event of generator) {
+    // 副作用なし
+  }
+
+  const successes: LensFeature[] = [];
+  const failures: LensParallelFailure[] = [];
+  for (const sub of artifacts.subAgents) {
+    const result = sub.getResult();
+    const error = sub.getError();
+    if (result !== undefined) {
+      successes.push(result);
+    } else if (error !== undefined) {
+      failures.push({ lensName: sub.getLensName(), error });
+    } else {
+      // 起こりえないが防衛: 未実行 (runEphemeral でも回らなかった) ケース。
+      failures.push({
+        lensName: sub.getLensName(),
+        error: new Error(
+          `LensSubAgent ${sub.getLensName()} did not run (no result, no error)`,
+        ),
+      });
+    }
+  }
+  // 集約結果も lensName 昇順で再ソート (subAgents は既にソート済みだが defensively)。
+  successes.sort((a, b) => a.lensName.localeCompare(b.lensName));
+  failures.sort((a, b) => a.lensName.localeCompare(b.lensName));
+
+  return { successes, failures };
+}
+
+/**
+ * `buildLensParallelSmoke` + `runLensParallelSmoke` をまとめて呼ぶ一発便利関数。
+ *
+ * 既存ファクトリ命名 (`runnerSmoke` / `sequentialSmoke`) と整合させるための薄い
+ * wrapper。詳細制御が必要な場合は `buildLensParallelSmoke` を直接使う。
+ */
+export async function createDryRunLensParallelAgent(
+  config: LensParallelSmokeConfig,
+  params?: { readonly userId?: string },
+): Promise<LensParallelExecutionResult> {
+  const artifacts = buildLensParallelSmoke(config);
+  return runLensParallelSmoke(artifacts, params);
 }
