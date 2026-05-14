@@ -459,6 +459,76 @@ describe('LensSubAgent: 実 Lens 統合 smoke (薄め、KICKOFF §8.4)', () => {
 // Phase 3: isolateFailure オプション (LensSubAgent 単体)
 // ============================================================================
 
+describe('LensSubAgent: runAsyncImpl 冒頭 reset (Phase 3 Copilot review 対応)', () => {
+  /**
+   * 同 instance を意図的に 2 回実行した場合、1 回目の result / error が
+   * 2 回目に状態混入しないことを確認する。通常運用では factory が新規
+   * instance を返すが、防衛的 reset の挙動を直接検証する。
+   */
+  class SwitchableLens implements Lens {
+    readonly name: string = 'switchable';
+    readonly version: string = '1.0.0';
+    readonly dependencies: ReadonlyArray<keyof LensInput> = ['symbol'];
+    public mode: 'ok' | 'fail' = 'ok';
+    public callCount: number = 0;
+
+    compute(_input: LensInput): Promise<LensFeature> {
+      this.callCount += 1;
+      if (this.mode === 'fail') {
+        return Promise.reject(new Error(`switchable failed on call #${this.callCount}`));
+      }
+      return Promise.resolve({
+        lensName: this.name,
+        lensVersion: this.version,
+        features: { call: this.callCount },
+        computedAt: new Date(0),
+        computeDurationMs: 0,
+        confidence: 0.5,
+      });
+    }
+  }
+
+  it('成功 → 失敗で同 instance 再実行: result が undefined にリセットされる', async () => {
+    const lens = new SwitchableLens();
+    const sub = createLensSubAgent({
+      lens,
+      input: dummyInput,
+      isolateFailure: true,
+    });
+    // 1 回目: 成功
+    await runLensSubAgentSmoke(sub);
+    expect(sub.getResult()).toBeDefined();
+    expect(sub.getError()).toBeUndefined();
+
+    // 2 回目: 失敗
+    lens.mode = 'fail';
+    await runLensSubAgentSmoke(sub);
+    expect(sub.getResult()).toBeUndefined();
+    expect(sub.getError()?.message).toMatch(/switchable failed on call #2/);
+  });
+
+  it('失敗 → 成功で同 instance 再実行: error が undefined にリセットされる', async () => {
+    const lens = new SwitchableLens();
+    lens.mode = 'fail';
+    const sub = createLensSubAgent({
+      lens,
+      input: dummyInput,
+      isolateFailure: true,
+    });
+    // 1 回目: 失敗
+    await runLensSubAgentSmoke(sub);
+    expect(sub.getError()).toBeDefined();
+    expect(sub.getResult()).toBeUndefined();
+
+    // 2 回目: 成功
+    lens.mode = 'ok';
+    await runLensSubAgentSmoke(sub);
+    expect(sub.getError()).toBeUndefined();
+    expect(sub.getResult()).toBeDefined();
+    expect(sub.getResult()?.features.call).toBe(2);
+  });
+});
+
 describe('LensSubAgent: isolateFailure オプション (Phase 3 追加)', () => {
   it('isolateFailure=true なら Lens throw でも runEphemeral が正常完了する', async () => {
     const sink = new InMemoryTraceSink();

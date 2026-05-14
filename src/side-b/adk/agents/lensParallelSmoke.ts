@@ -182,6 +182,13 @@ export class LensSubAgent extends BaseAgent {
   protected override async *runAsyncImpl(
     context: InvocationContext,
   ): AsyncGenerator<Event, void, void> {
+    // 同一 instance を誤って 2 回実行された場合に、前回の result / error が
+    // 残って外側集約 (`runLensParallelSmoke.getResult()` / `getError()`) で
+    // 状態混入を起こさないよう、runAsyncImpl 冒頭で必ず初期化する。
+    // 通常運用では factory が常に新規 instance を返すが、防衛的に reset しておく。
+    this.result = undefined;
+    this.error = undefined;
+
     const startedAt = new Date();
     const startedTraceId = randomUUID();
     const sink = this.traceSink;
