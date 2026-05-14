@@ -253,6 +253,8 @@ CandlePatternLens への rename 以外、既存 Lens のソースは改変しな
 
 ### 5.3 PatternLens → CandlePatternLens rename (Phase 7b 同梱)
 
+> **⚠ 完了時点の更新 (2026-05-14)**: 本節で計画した rename は **実施しなかった**。Neko さん判断で「ローソク足 = 基本のパターン、N-bar 構造 = 応用のチャートパターン」という命名階層化を採用し、`PatternLens` は無改変のまま `ChartPatternLens` を新規追加。詳細経緯は [`phase_7_summary.md`](./phase_7_summary.md) §3 を参照。以下の本文は「予定としてはこうだった」記録として残す。
+
 既存 `PatternLens` (12 種ローソク足パターン、PR ②-1) を `CandlePatternLens` に rename。Phase 7b の最初の作業として実施。
 
 **影響範囲** (grep 確認必須):
@@ -429,6 +431,8 @@ N-bar 構造のチャートパターン 11 種を観測する Lens を新規追�
 
 ## 7. 全体 DoD
 
+> **⚠ 完了時点の更新 (2026-05-14)**: Phase 7 完了。本節 DoD の実達成状況は [`phase_7_summary.md`](./phase_7_summary.md) §8 を参照。`CandlePatternLens` rename 関連の項目 (§7.1 / §7.2) は §5.3 / §12.1 のとおり不実施で確定 (`PatternLens` のまま継続)。
+
 Phase 7 は以下をすべて満たした場合に完了とする。
 
 ### 7.1 実装 DoD
@@ -565,6 +569,8 @@ Step 4 で実装する Lens dry-run wrapper は本 Phase の `LensAggregator` �
 本 KICKOFF 起案時点で確定していない判断。Phase 着手前 (または該当 Phase の PR レビュー時) にレビューで確定したい。
 
 ### 12.1 `lensName: 'pattern'` → `'candle_pattern'` の互換性方針
+
+> **⚠ 完了時点の更新 (2026-05-14)**: 本節の 3 案は **採用見送り**。§5.3 で記録した通り rename 自体が不実施となり、`PatternLens.lensName = 'pattern'` / `ChartPatternLens.lensName = 'chart_pattern'` の階層化された別 key で衝突回避。既存永続化データ (`AITradeNote.lensSnapshot` 等) も無改変のまま継続使用。詳細は [`phase_7_summary.md`](./phase_7_summary.md) §3。以下の本文は「もし rename していた場合」の方針案として記録に残す。
 
 §5.3 で 3 案 (A: 全データ書き換え / B: alias 機構 / C: 既存データ放置) を提示。Phase 7b PR 0 着手前に Nekoさん判断が必要。
 

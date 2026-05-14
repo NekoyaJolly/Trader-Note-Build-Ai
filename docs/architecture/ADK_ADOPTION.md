@@ -76,7 +76,7 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 | **Step 1** | Skill → ADK FunctionTool アダプター | 数日 | ✅ 完了 (2026-05-13) |
 | **Step 2** | Tracing / Telemetry 統合 (内部 TraceSink interface、OTel exporter は Step 3 以降の判断) | 数日 | ✅ 完了 (2026-05-13) |
 | **Step 3** | Runner Smoke + PDCALoop の SequentialAgent dry-run ラップ (既存内部は不可侵) | 数日 | ✅ 完了 (2026-05-14) |
-| **Step 4** | Lens 並列実行の ParallelAgent ラップ | 数日 | ⬜ 未着手 |
+| **Step 4** | Lens 並列実行の ParallelAgent ラップ (前提: Phase 7 完了で Lens 8 本へ拡張済み、詳細: [`../design/phase_7_summary.md`](../design/phase_7_summary.md)) | 数日 | ⬜ 未着手 |
 | **Step 5** | 進化ループの LoopAgent ラップ (条件付き) | 1〜2 週 | ⬜ 未着手 |
 | **Step 6** | 評価: ADK 継続採用 / 撤退 / 部分採用の判断 | 1 週 | ⬜ 未着手 |
 
