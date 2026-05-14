@@ -19,6 +19,7 @@
 import { McpClientManager, type McpToolResult } from './mcpClient';
 import { AIProvider, type ChatMessage } from './aiProvider';
 import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
+import { loadPrompt } from '../prompts/loader';
 
 // ===========================================
 // 型定義
@@ -42,7 +43,8 @@ export interface AgentResult {
 export interface ToolCallRecord {
     /** ツール名 */
     tool: string;
-    /** ツール引数 */
+    /** ツール引数 (MCP プロトコル上、tool ごとにスキーマが異なるため unknown 値で保持) */
+    // eslint-disable-next-line no-restricted-syntax
     args: Record<string, unknown>;
     /** ツール実行結果（テキスト） */
     result: string;
@@ -74,26 +76,14 @@ export interface AgentStep {
 // ===========================================
 // デフォルトシステムプロンプト
 // ===========================================
+//
+// Phase 5.5: ハードコードを廃止し `src/side-b/prompts/agent_loop_default.md`
+// から読み込む。CLAUDE.md「プロンプトを編集する時の注意」(プロンプトは外部ファイル化)
+// に準拠。将来の進化的探索でプロンプト自体を変異対象にできるようにするため。
 
-const DEFAULT_SYSTEM_PROMPT = `あなたはSide-B AI Trade Systemの自律トレーディングエージェントです。
-
-あなたの役割:
-- 市場データを分析し、トレード戦略を立案する
-- 仮想トレードを実行し、結果を検証する
-- 過去のトレードノートから学び、戦略を改善する
-
-PDCAサイクル:
-1. Plan: 市場データ取得 → 分析 → トレード計画作成
-2. Do: 仮想トレード実行
-3. Check: 過去ノートの検索・振り返り
-4. Act: 学びを次の戦略に反映
-
-重要なルール:
-- 必ず市場データを確認してからプランを作成すること
-- リスクリワード比は最低1.5以上を目指すこと
-- 過去の失敗パターンを確認して同じミスを避けること
-- 不確実な場合はトレードを見送る判断も正しい
-- 日本語で応答すること`;
+function loadDefaultSystemPrompt(): string {
+    return loadPrompt('agent_loop_default');
+}
 
 // ===========================================
 // Agent Loop クラス
@@ -109,7 +99,7 @@ export class AgentLoop {
         this.aiProvider = aiProvider || new AIProvider();
         this.config = {
             maxIterations: agentConfig?.maxIterations ?? 10,
-            systemPrompt: agentConfig?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+            systemPrompt: agentConfig?.systemPrompt ?? loadDefaultSystemPrompt(),
             temperature: agentConfig?.temperature ?? 0.3,
             onStep: agentConfig?.onStep,
         };
@@ -208,9 +198,11 @@ export class AgentLoop {
                 });
 
                 let toolResult: McpToolResult;
+                // eslint-disable-next-line no-restricted-syntax -- MCP tool 引数。スキーマは tool ごとに動的決定されるため Record<string, unknown> で保持し、callTool 側で検証する
                 let parsedArgs: Record<string, unknown> = {};
 
                 try {
+                    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- JSON.parse の戻り。直後の callTool で MCP server 側スキーマ検証に委ねる
                     parsedArgs = JSON.parse(argsStr);
                     toolResult = await this.mcpClient.callTool(name, parsedArgs);
                 } catch (error) {
