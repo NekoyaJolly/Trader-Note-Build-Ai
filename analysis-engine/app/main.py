@@ -28,6 +28,7 @@ from app.schemas import (
 from app.chart_patterns import compute_chart_patterns
 from app.smc import compute_smc_structures
 from app.walk_forward import run_walk_forward
+from app.wyckoff import compute_wyckoff_phases
 from app.backtest import run_screening_backtest
 from app.oos_validation import run_oos_validation
 
@@ -185,6 +186,12 @@ def indicator_series(req: IndicatorSeriesRequest) -> IndicatorSeriesResponse:
     if req.includeChartPatterns:
         chart_patterns_payload = compute_chart_patterns(df)
 
+    # Wyckoff phases (Phase 7c 追加、req.includeWyckoff=True 時のみ計算)
+    # SMC context (Phase 7a) があれば phase 判定の精度が上がる、なくても動く
+    wyckoff_payload = None
+    if req.includeWyckoff:
+        wyckoff_payload = compute_wyckoff_phases(df, smc_context=smc_payload)
+
     return IndicatorSeriesResponse(
         symbol=req.symbol,
         timeframe=req.timeframe,
@@ -193,6 +200,7 @@ def indicator_series(req: IndicatorSeriesRequest) -> IndicatorSeriesResponse:
         patterns=patterns,
         smc=smc_payload,
         chartPatterns=chart_patterns_payload,
+        wyckoff=wyckoff_payload,
     )
 
 
