@@ -871,3 +871,100 @@ describe('Phase 3 実 Lens 統合 smoke (KICKOFF §8.4)', () => {
     expect(Object.keys(f.features).length).toBeGreaterThan(0);
   });
 });
+
+// ============================================================================
+// Phase 4: 決定性 / 失敗分離の実機再検証 (KICKOFF §5 Phase 4)
+//
+// volatile field (computedAt / computeDurationMs) は完全一致比較から除外する
+// (KICKOFF §4.2 / §8.2、Phase 1 report §2.4 で確定)。features / lensName /
+// lensVersion / confidence のみを比較する。
+// ============================================================================
+
+describe('Phase 4: ADK 経由 vs Lens 直接実行の features 一致 (KICKOFF §5 Phase 4)', () => {
+  /** volatile field を除いた比較対象だけを残すヘルパー。 */
+  function stripVolatile(
+    f: LensFeature,
+  ): {
+    lensName: string;
+    lensVersion: string;
+    features: Readonly<Record<string, number | string | boolean>>;
+    confidence: number | undefined;
+  } {
+    return {
+      lensName: f.lensName,
+      lensVersion: f.lensVersion,
+      features: f.features,
+      confidence: f.confidence,
+    };
+  }
+
+  it('DeterministicFakeLens: 直接 compute と ADK 経由実行で features 完全一致', async () => {
+    const lens = new DeterministicFakeLens({
+      name: 'parity_check',
+      features: { v: 42, tag: 'check', flag: true },
+      confidence: 0.7,
+    });
+    const direct = await lens.compute(dummyInput);
+    const result = await createDryRunLensParallelAgent({
+      lenses: [lens],
+      input: dummyInput,
+    });
+    expect(result.successes).toHaveLength(1);
+    const viaAdk = result.successes[0];
+    expect(stripVolatile(viaAdk)).toEqual(stripVolatile(direct));
+  });
+
+  it('TimeSessionLens (実 Lens): 直接 compute と ADK 経由で features 完全一致', async () => {
+    const lens = new TimeSessionLens();
+    const fixedInput: LensInput = {
+      symbol: 'XAUUSD',
+      timeframe: '15m',
+      // 固定 timestamp で実 Lens の決定性も担保 (Date.now() validation の 60s 余裕内)
+      timestamp: new Date(Date.now() - 60_000),
+    };
+    const direct = await lens.compute(fixedInput);
+    const result = await createDryRunLensParallelAgent({
+      lenses: [lens],
+      input: fixedInput,
+    });
+    expect(result.successes).toHaveLength(1);
+    expect(stripVolatile(result.successes[0])).toEqual(stripVolatile(direct));
+  });
+
+  it('複数 Lens (ADK 経由) で集約された features が、各 Lens の直接 compute と一致', async () => {
+    const a = new DeterministicFakeLens({ name: 'pair_a', features: { x: 1 } });
+    const b = new DeterministicFakeLens({ name: 'pair_b', features: { y: 'two' } });
+    const directA = await a.compute(dummyInput);
+    const directB = await b.compute(dummyInput);
+    const result = await createDryRunLensParallelAgent({
+      lenses: [a, b],
+      input: dummyInput,
+    });
+    const byName = new Map(result.successes.map((f) => [f.lensName, f]));
+    expect(stripVolatile(byName.get('pair_a')!)).toEqual(stripVolatile(directA));
+    expect(stripVolatile(byName.get('pair_b')!)).toEqual(stripVolatile(directB));
+  });
+});
+
+describe('Phase 4: failure isolation 実機再検証 (1 throw が他 Lens を巻き込まない)', () => {
+  it('混在シナリオ: throw + success Lens を 1 ParallelAgent 内で同時実行 → success の features が直接実行と一致', async () => {
+    const okLens = new DeterministicFakeLens({
+      name: 'ok_lens',
+      features: { val: 99 },
+      confidence: 0.9,
+    });
+    const directOk = await okLens.compute(dummyInput);
+    const result = await createDryRunLensParallelAgent({
+      lenses: [okLens, new ThrowingFakeLens('isolated boom')],
+      input: dummyInput,
+    });
+    // success: ok_lens のみ
+    expect(result.successes).toHaveLength(1);
+    expect(result.successes[0].lensName).toBe('ok_lens');
+    expect(result.successes[0].features).toEqual(directOk.features);
+    // failure: ThrowingFakeLens
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0].lensName).toBe('fake_throwing');
+    expect(result.failures[0].error.message).toBe('isolated boom');
+  });
+});

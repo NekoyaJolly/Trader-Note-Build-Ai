@@ -1,12 +1,12 @@
 # /src/side-b/adk/agents — ADK Agents サイドカー
 
-> **位置づけ**: ADK 段階導入 Step 3 で構築した agents 領域の設計書 (**Step 3 全 5 Phase 完了状態**、Phase 5 最終形)
+> **位置づけ**: ADK 段階導入 Step 3 + Step 4 で構築した agents 領域の設計書
 > **発注者**: Nekoさん
-> **作成日**: 2026-05-13 (Step 3 Phase 3 で初版作成) / 2026-05-14 (Step 3 Phase 5 で最終形に整備)
-> **Step 3 ステータス**: ✅ 完了 (PR #177 / #179 / #181 / 本 PR)
+> **作成日**: 2026-05-13 (Step 3 Phase 3 で初版作成) / 2026-05-14 (Step 3 Phase 5 で最終形に整備) / 2026-05-14 (Step 4 Phase 6 で Step 4 節追記)
+> **Step 3 / Step 4 ステータス**: ✅ 共に完了 (Step 3: PR #177 / #179 / #181 / Step 3 完了 PR、Step 4: PR #194 / #196 / 本 PR)
 > **依存方向**: 本ディレクトリ → 既存 `src/side-b/` (read-only) のみ。逆方向の import は禁止 (`/src/side-b/adk/AGENTS.md` §依存方向の制約)
 > **撤退時の保証**: 本ディレクトリ含む `/src/side-b/adk/` を `git rm -rf` するだけで完全撤退できる状態を維持 (ADK_ADOPTION.md §5)
-> **テスト**: adk 領域累計 **177 cases 全 pass** (Step 1: 71 + Step 2: 59 + Step 3: 47)
+> **テスト**: adk 領域累計 **226 cases 全 pass** (Step 1: 71 + Step 2: 59 + Step 3: 47 + Step 4: 49)
 
 ---
 
@@ -25,16 +25,22 @@ ADK (Google Agent Development Kit) の `Runner` / `LlmAgent` / `SequentialAgent`
 
 ---
 
-## ファイル構成 (2026-05-14 Step 3 完了時点)
+## ファイル構成 (2026-05-14 Step 4 完了時点)
 
 | ファイル | 役割 | Step / Phase | テスト数 |
 |---------|------|--------------|---------|
 | `runnerSmoke.ts` | ADK `Runner` + `LlmAgent` + `InMemorySessionService` の最小 factory。LLM 呼び出しは呼び出し側 (`BaseLlm` 実装) の責任 | Step 3 Phase 1 (PR #177) | 11 |
 | `sequentialSmoke.ts` | `SequentialAgent` + toy `SmokeSubAgent` の構成 factory。sub-agent 単位の trace event を `adk.subagent.*` で記録 | Step 3 Phase 2 (PR #179) | 18 |
 | `pdcaDryRunWrapper.ts` | 既存 `PDCALoop` の public API (`start` / `stop` / `getStatus` / `getThinkingLog`) を sub-agent でラップする dry-run wrapper | Step 3 Phase 3 (PR #181) | 18 |
-| `README.md` | 本書 | Step 3 Phase 3 で初版 / Phase 5 で最終形 | — |
+| `lensParallelSmoke.ts` | `LensSubAgent` + `ParallelAgent` で 8 Lens を並列観測する dry-run wrapper。`LensSubAgent.isolateFailure` で ADK `Promise.race` 経路の failure isolation を吸収 | Step 4 Phase 2-4 (PR #194 / #196 / 本 PR) | 49 |
+| `README.md` | 本書 | Step 3 Phase 3 初版 / Step 3 Phase 5 最終形 / Step 4 Phase 6 追記 | — |
 
-各ファイルは互いに独立しており、Step 4 以降では既存 3 つの建材をそのまま流用できる。Step 4 (Lens ParallelAgent dry-run) が次の追加候補。
+各ファイルは互いに独立しており、Step 5 以降では既存 4 つの建材 (`runnerSmoke` / `sequentialSmoke` / `pdcaDryRunWrapper` / `lensParallelSmoke`) をそのまま流用できる。Step 5 (進化ループの LoopAgent ラップ、条件付き) が次の追加候補。
+
+### Step 4 で確立した重要パターン
+
+- **failure isolation**: ADK `ParallelAgent.runAsyncImpl` は内部で `Promise.race` (`mergeAgentRuns`) を使うため、1 sub-agent の throw が全体停止につながる。`LensSubAgent.isolateFailure: true` で例外を握りつぶし、`getError()` に保存することで「1 Lens 失敗が他 Lens を巻き込まない」を実現。`runLensParallelSmoke` 側が後から `successes` / `failures` を集約。同 instance を多世代回す場合の状態混入は `runAsyncImpl` 冒頭で `result` / `error` を reset して防ぐ。
+- **ADK 経由 = 直接実行**: `stripVolatile(feature)` で `computedAt` / `computeDurationMs` を除外して比較し、ADK を挟んでも features が変わらないことを実 Lens (`TimeSessionLens`) 含む 3 ケースで実機確認 (Phase 4)。
 
 ---
 

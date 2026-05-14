@@ -76,7 +76,7 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 | **Step 1** | Skill → ADK FunctionTool アダプター | 数日 | ✅ 完了 (2026-05-13) |
 | **Step 2** | Tracing / Telemetry 統合 (内部 TraceSink interface、OTel exporter は Step 3 以降の判断) | 数日 | ✅ 完了 (2026-05-13) |
 | **Step 3** | Runner Smoke + PDCALoop の SequentialAgent dry-run ラップ (既存内部は不可侵) | 数日 | ✅ 完了 (2026-05-14) |
-| **Step 4** | Lens 並列実行の ParallelAgent ラップ (前提: Phase 7 完了で Lens 8 本へ拡張済み、詳細: [`../design/phase_7_summary.md`](../design/phase_7_summary.md)) | 数日 | ⬜ 未着手 |
+| **Step 4** | Lens 並列実行の ParallelAgent ラップ (前提: Phase 7 完了で Lens 8 本へ拡張済み、詳細: [`../design/phase_7_summary.md`](../design/phase_7_summary.md)) | 数日 | ✅ 完了 (2026-05-14) |
 | **Step 5** | 進化ループの LoopAgent ラップ (条件付き) | 1〜2 週 | ⬜ 未着手 |
 | **Step 6** | 評価: ADK 継続採用 / 撤退 / 部分採用の判断 | 1 週 | ⬜ 未着手 |
 
@@ -135,7 +135,7 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 
 ## 7. 実装状況
 
-> **最終更新**: 2026-05-14 (Step 3 全 Phase 完了)
+> **最終更新**: 2026-05-14 (Step 4 全 Phase 完了)
 
 ### Step 進捗
 
@@ -143,7 +143,7 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 - [x] Step 1: Skill → ADK FunctionTool アダプター (完了 2026-05-13)
 - [x] Step 2: Tracing / Telemetry 統合 (完了 2026-05-13)
 - [x] Step 3: Runner Smoke + PDCALoop SequentialAgent dry-run ラップ (完了 2026-05-14)
-- [ ] Step 4: Lens 並列実行の ParallelAgent ラップ
+- [x] Step 4: Lens 並列実行の ParallelAgent ラップ (完了 2026-05-14)
 - [ ] Step 5: 進化ループの LoopAgent ラップ (条件付き)
 - [ ] Step 6: ADK 継続採用 / 撤退 / 部分採用の判断
 
@@ -328,6 +328,44 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 - 本番コードからの ADK SDK 内部 API 依存: **ゼロ** (`Runner` / `LlmAgent` / `SequentialAgent` / `BaseAgent` / `BaseLlm` / `InMemorySessionService` / `FunctionTool` / `createEvent` / `Context` / `InvocationContext` の public API のみ)
 - PDCALoop private アクセス: **ゼロ** (TS コンパイラで防御)
 
+#### Step 4: Lens ParallelAgent Dry-run (完了 2026-05-14)
+
+**実装場所**:
+- ADK agents サイドカー: `/src/side-b/adk/agents/`
+  - `lensParallelSmoke.ts` — `LensSubAgent` + `createLensSubAgent` + `LensParallelSmokeConfig` / `Artifacts` / `ExecutionResult` + `buildLensParallelSmoke` + `runLensParallelSmoke` + `createDryRunLensParallelAgent`
+- ADK agents テスト: `/src/side-b/tests/adk/agents/lensParallelSmoke.test.ts` (49 cases pass)
+- 設計書群: `STEP_4_KICKOFF.md` / `STEP_4_LENS_PARALLEL_AGENT_REPORT.md` / `STEP_4_SUMMARY.md`
+
+**採用方式**:
+- **Lens sub-agent**: `BaseAgent` 直接 subclass、Step 3 `SmokeSubAgent` と同パターン。`lens.compute(input)` の呼び出し境界を ADK で薄くラップするだけで、新たな相場判断を持たない (KICKOFF §4.1)
+- **failure isolation**: ADK `ParallelAgent.runAsyncImpl` は内部で `Promise.race` (`mergeAgentRuns`) を使うため 1 sub-agent throw で全体が止まる。`LensSubAgent.isolateFailure: true` で例外を握りつぶし、`getError()` に保存。`runLensParallelSmoke` 側が後から `successes` / `failures` を集約する形で「1 Lens 失敗が他 Lens を巻き込まない」を実現 (KICKOFF Phase 3 DoD)
+- **trace event 契約**: Step 3 の `adk.subagent.{started,completed,failed}` をそのまま再利用 (新規 kind ゼロ)、`skillName` を Lens 名として再利用、`callerReason = 'lens_parallel_dry_run'` の固定値で Step 4 系統を識別
+- **raw payload 非保存**: `resultSummary.fieldCount` (= features 数) と `redacted: true` マーカーのみ。features の中身 / Lens dependencies / OHLCV / API key は trace に乗せない (KICKOFF §4.3)
+- **決定性検証**: `stripVolatile(feature)` ヘルパーで `computedAt` / `computeDurationMs` を除外して features を比較し、**ADK 経由実行と Lens 直接実行で features が完全一致** することを実 Lens (`TimeSessionLens`) 含む 3 ケースで実機確認 (Phase 4)
+- **既存実装の不可侵性**: Phase 0-6 全 PR で `src/side-b/lenses/` / `src/side-b/agent/` / `src/side-b/skills/` / `prisma/schema.prisma` の git diff 常にゼロ
+
+**検証結果**:
+- **PR #194 (Phase 0+1+2、マージ済み 2026-05-14)**: 棚卸し + 静的確認 + 単体 Lens sub-agent wrapper。Copilot レビュー 4 件対応済 (throw 正規化 / コメント整合 / KICKOFF テスト配置表記)
+- **PR #196 (Phase 3、マージ済み 2026-05-14)**: ParallelAgent dry-run wrapper、failure isolation 実装。Copilot レビュー 1 件対応済 (`runAsyncImpl` 冒頭で result/error reset)
+- **PR 3 (Phase 4+5+6、本 PR)**: 決定性 / failure isolation 実機再検証 + side-b 全体 regression (1678/1682 PASS、128 suites) + `STEP_4_SUMMARY.md` / 本書 §3 / §7 / §8 / `agents/README.md` 更新
+- **撤退基準 9 項目すべて非該当** (`STEP_4_SUMMARY.md` §4)
+
+**Step 5 への引き継ぎ事項**:
+1. `LensSubAgent` (isolateFailure 含む) を LoopAgent 配下 sub-agent としても再利用可能 — `Promise.race` 経路を吸収する設計が継続採用される
+2. `buildLensParallelSmoke` / `runLensParallelSmoke` を LoopAgent の評価フェーズに組み込む選択肢あり
+3. Step 4 で確立した `adk.subagent.*` trace event kind と `skillName` 再利用パターンを LoopAgent でも使う (additive 拡張なし)
+4. Step 5 着手前に「LoopAgent が進化的探索の決定論性を壊さないか」spike が必要 (Step 6 撤退判断と直結)
+5. Step 4 で確認した制約: 同名 Lens 拒否 / 失敗時 result/error 状態混入リセット (`runAsyncImpl` 冒頭)
+
+**数値スナップショット (Step 4 完了時)**:
+- 新規ファイル: 3 (agents/lensParallelSmoke.ts + tests/adk/agents/lensParallelSmoke.test.ts + STEP_4_LENS_PARALLEL_AGENT_REPORT.md) + 2 (STEP_4_KICKOFF + STEP_4_SUMMARY) + agents/README.md 追記 = **5 ファイル touch (純粋新規) + 2 ファイル更新 (ADK_ADOPTION 本書 + agents/README.md)**
+- 既存実装 (`/src/side-b/lenses/` / `/src/side-b/agent/` / `/src/side-b/skills/` / `prisma/schema.prisma`) の変更: **ゼロ**
+- テストケース (Step 4 増分): 49/49 PASS、Step 1-3 既存 177 cases も全 PASS → **adk 領域累計 226 cases**
+- side-b 全体 regression: 128 suites、**1678/1682 PASS** (4 skipped、failure ゼロ)
+- 本番コードの any / unknown / `as any` / `as unknown as` 違反: **ゼロ**
+- 本番コードからの ADK SDK 内部 API 依存: **ゼロ** (`ParallelAgent` / `BaseAgent` / `Runner` / `InMemorySessionService` / `createEvent` / `InvocationContext` / `Event` の public API のみ)
+- Copilot レビュー累計指摘: 5 件 (PR #194: 4 / PR #196: 1)、全件対応済
+
 ---
 
 ## 8. 関連ドキュメント
@@ -350,5 +388,8 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 | [docs/architecture/STEP_3_PDCA_DRYRUN_NOTES.md](./STEP_3_PDCA_DRYRUN_NOTES.md) | Step 3 Phase 3 実測結果 (PDCALoop dry-run wrapper) |
 | [docs/architecture/STEP_3_INTEGRATION_DECISION.md](./STEP_3_INTEGRATION_DECISION.md) | Step 3 Phase 4 進路判断 (Step 4 推奨、撤退基準非該当) |
 | [docs/architecture/STEP_3_SUMMARY.md](./STEP_3_SUMMARY.md) | Step 3 完了サマリー (本 §7 Step 3 詳細の出典) |
-| [/src/side-b/adk/agents/README.md](../../src/side-b/adk/agents/README.md) | agents 領域設計書 (Step 3 で構築した 3 つの建材の使用例) |
+| [docs/architecture/STEP_4_KICKOFF.md](./STEP_4_KICKOFF.md) | Step 4 作業指示書 (Nekoさん作成) |
+| [docs/architecture/STEP_4_LENS_PARALLEL_AGENT_REPORT.md](./STEP_4_LENS_PARALLEL_AGENT_REPORT.md) | Step 4 Phase 0-6 結果の集約 report |
+| [docs/architecture/STEP_4_SUMMARY.md](./STEP_4_SUMMARY.md) | Step 4 完了サマリー (本 §7 Step 4 詳細の出典) |
+| [/src/side-b/adk/agents/README.md](../../src/side-b/adk/agents/README.md) | agents 領域設計書 (Step 3-4 で構築した建材の使用例) |
 | [docs/design/DESIGN_DOC_autonomous_trading_architecture.md](../design/DESIGN_DOC_autonomous_trading_architecture.md) | Side-B 自律 AI 設計の正本 |
