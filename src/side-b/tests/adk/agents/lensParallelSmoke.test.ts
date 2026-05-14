@@ -947,7 +947,7 @@ describe('Phase 4: ADK 経由 vs Lens 直接実行の features 一致 (KICKOFF �
 });
 
 describe('Phase 4: failure isolation 実機再検証 (1 throw が他 Lens を巻き込まない)', () => {
-  it('混在シナリオ: throw + success Lens を 1 PR 2 で同時実行 → success の features が直接実行と一致', async () => {
+  it('混在シナリオ: throw + success Lens を 1 ParallelAgent 内で同時実行 → success の features が直接実行と一致', async () => {
     const okLens = new DeterministicFakeLens({
       name: 'ok_lens',
       features: { val: 99 },
