@@ -1,9 +1,9 @@
-# Step 4 Lens Parallel Agent Report (PR 1+2: Phase 0+1+2+3)
+# Step 4 Lens Parallel Agent Report (PR 1+2+3: Phase 0-6 完全版)
 
-> **作成日**: 2026-05-14 (PR 1)、2026-05-14 (PR 2 追記)
-> **対象**: Step 4 Phase 0 (棚卸し) / Phase 1 (静的確認) / Phase 2 (単体 Lens sub-agent wrapper) / Phase 3 (ParallelAgent dry-run) の実装結果
+> **作成日**: 2026-05-14 (PR 1)、2026-05-14 (PR 2 追記)、2026-05-14 (PR 3 追記)
+> **対象**: Step 4 全 Phase (Phase 0-6) の実装結果
 > **設計書**: [`STEP_4_KICKOFF.md`](./STEP_4_KICKOFF.md)
-> **ステータス**: PR 1+2 完了。Phase 4-6 は PR 3 で追記。
+> **ステータス**: ✅ 全 Phase 完了 (2026-05-14)。最終総括は [`STEP_4_SUMMARY.md`](./STEP_4_SUMMARY.md)
 
 ---
 
@@ -18,8 +18,10 @@
 | determinism 比較除外フィールド | `LensFeature.computedAt` / `LensFeature.computeDurationMs` (Phase 4 で確定) |
 | Phase 2 wrapper 実装 | `src/side-b/adk/agents/lensParallelSmoke.ts`: `LensSubAgent` + `createLensSubAgent` |
 | Phase 3 wrapper 実装 | `lensParallelSmoke.ts`: `buildLensParallelSmoke` + `runLensParallelSmoke` + `createDryRunLensParallelAgent` + `LensParallelExecutionResult` (failure isolation 設計、ADK `Promise.race` 挙動への対応として `LensSubAgent.isolateFailure` オプション追加) |
-| Phase 2+3 test 結果 | **43 cases pass** (Phase 2: 23 / Phase 3: 20) |
-| ADK 領域累計 | **220 cases pass** (Step 1-3 既存 177 + Phase 2 23 + Phase 3 20) |
+| Phase 2+3+4 test 結果 | **49 cases pass** (Phase 2: 23 / Phase 3: 22 / Phase 4: 4) |
+| ADK 領域累計 | **226 cases pass** (Step 1-3 既存 177 + Phase 2 23 + Phase 3 22 + Phase 4 4) |
+| side-b 全体 regression (Phase 5) | **1678/1682 PASS** (128 suites、4 skipped、failure ゼロ) |
+| 完了 docs (Phase 6) | `STEP_4_SUMMARY.md` 新規 + `ADK_ADOPTION.md` §3/§7/§8 更新 + `agents/README.md` Step 4 節追記 |
 | 既存不可侵領域 git diff | ✅ ゼロ (`src/side-b/lenses/` / `src/side-b/agent/` / `src/side-b/skills/` / `prisma/schema.prisma`) |
 
 ---
@@ -325,25 +327,109 @@ async function* mergeAgentRuns(agentRuns) {
 
 ---
 
-## 6. 次 PR への引き継ぎ事項
+## 6. Phase 4: 決定性 / 失敗分離 実機再検証 (PR 3 追記)
 
-### 6.1 PR 3 (Phase 4-6: 決定性 / 失敗分離 / 完了処理)
+### 6.1 検証内容
 
-- Phase 4: 同入力 → 同 features の実機検証、failed Lens が他 Lens を巻き込まない、ADK 経由 vs 直接実行の features 一致
-- Phase 5: ADK 領域 + lenses 領域 + side-b 全体の regression 確認
-- Phase 6: `STEP_4_SUMMARY.md` 作成 / `ADK_ADOPTION.md` Step 4 進捗更新 / agents/README.md 追記
+`lensParallelSmoke.test.ts` に Phase 4 describe ブロックを追加し、以下を実機 test で確認:
+
+| 検証項目 | test cases |
+|---|---|
+| ADK 経由 vs Lens 直接実行の features 完全一致 (`stripVolatile` で `computedAt` / `computeDurationMs` 除外) | DeterministicFakeLens / TimeSessionLens (実 Lens) / 複数 Lens 集約 = **3 cases** |
+| failure isolation 実機再検証 (throw + success 混在で success features が直接実行と一致) | **1 case** |
+
+Phase 4 累計: **+4 cases** (Phase 2+3 既存 45 と合わせて 49 cases pass)。
+
+### 6.2 結論
+
+**ADK を挟んでも Lens features が変わらない**。volatile field 除外で features / lensName / lensVersion / confidence が完全一致。
+
+これにより KICKOFF Phase 4 DoD すべて充足:
+- [x] 同一 input / 同一 features が成立する
+- [x] 直接実行と ADK 経由実行の features が一致する
+- [x] failed Lens が他 Lens を巻き込まない
+- [x] volatile field の扱いを文書化している (本書 §2.4 + Phase 4 test の `stripVolatile` ヘルパー)
 
 ---
 
-## 7. 関連ドキュメント
+## 7. Phase 5: テスト統合 (PR 3 追記)
+
+### 7.1 実行コマンドと結果
+
+| コマンド | 結果 |
+|---|---|
+| `npx tsc --noEmit` | ✅ clean (warning / error ゼロ) |
+| `npx jest src/side-b/tests/adk/agents/lensParallelSmoke.test.ts` | **49 cases pass** |
+| `npx jest src/side-b/tests/adk` | **226 cases pass** (12 suites) |
+| `npx jest src/side-b` | **1678/1682 pass** (128 suites、4 skipped、failure ゼロ) |
+| `npm run lint:backend` | 既存 246 problems (215 errors + 31 warnings)、Step 4 開始前と同数値 = 新規違反ゼロ |
+
+### 7.2 既存テストへの影響
+
+- Step 1-3 ADK 領域 177 cases: 全 pass 維持
+- Phase 7 lenses 領域: 全 pass 維持
+- side-b 中核 (agent / scheduler / dsl / evolution / ledger / skills): 全 pass 維持
+
+→ Step 4 追加が既存実装を破壊していない。
+
+### 7.3 KICKOFF Phase 5 DoD 達成
+
+- [x] ADK 領域既存 177 cases が維持される
+- [x] Step 4 新規テストが pass (49 cases)
+- [x] typecheck pass
+- [x] lint pass、または既存違反と新規違反を分離して報告 (本書 §7.1 で既存 246 件を明示、Step 4 新規違反ゼロ)
+- [x] 既存中核の git diff がない
+
+---
+
+## 8. Phase 6: ドキュメント更新 (PR 3 追記)
+
+### 8.1 作成 / 更新ファイル
+
+| ファイル | 状態 |
+|---|---|
+| [`STEP_4_SUMMARY.md`](./STEP_4_SUMMARY.md) | ✅ 新規作成 (Step 4 全体総括) |
+| [`STEP_4_LENS_PARALLEL_AGENT_REPORT.md`](./STEP_4_LENS_PARALLEL_AGENT_REPORT.md) | ✅ 本書、Phase 4-6 結果を §6 / §7 / §8 に追記 |
+| [`ADK_ADOPTION.md`](./ADK_ADOPTION.md) | ✅ §3 ロードマップ Step 4 を `[x]` / §7 に Step 4 詳細追記 / §8 関連 docs に Step 4 リンク 3 件 |
+| [`/src/side-b/adk/agents/README.md`](../../src/side-b/adk/agents/README.md) | ✅ Step 4 節追記 (`lensParallelSmoke.ts` 4 ファイル目に追加、failure isolation / ADK 経由=直接実行パターン明記) |
+
+### 8.2 KICKOFF Phase 6 DoD 達成
+
+- [x] Step 4 の判断材料が文書化されている (本書 + SUMMARY + ADK_ADOPTION §7)
+- [x] 次 Step の判断ができる状態になっている (SUMMARY §4 撤退基準チェック + §5 Step 5 引き継ぎ)
+- [x] 実装だけで終わっていない
+
+---
+
+## 9. 次 Step への引き継ぎ事項
+
+### 9.1 Step 5 (進化ループの LoopAgent ラップ、条件付き)
+
+詳細は [`STEP_4_SUMMARY.md`](./STEP_4_SUMMARY.md) §5 を参照。要点:
+
+- `LensSubAgent` (isolateFailure 含む) を LoopAgent 配下 sub-agent としても再利用可能
+- `buildLensParallelSmoke` / `runLensParallelSmoke` を LoopAgent の評価フェーズに組み込む選択肢あり
+- `adk.subagent.*` trace event kind と `skillName` 再利用パターンを LoopAgent でも継続 (additive 拡張なし)
+- Step 5 着手前に「LoopAgent が進化的探索の決定論性を壊さないか」spike が必要 (Step 6 撤退判断と直結)
+
+### 9.2 Step 4 で確認した制約 (Step 5 でも継続)
+
+- **同名 Lens 拒否**: `buildLensParallelSmoke` で同名 Lens 2 つ以上は throw。複数 Aggregator を束ねる場合は命名空間を分ける
+- **失敗時 result/error 状態混入**: `runAsyncImpl` 冒頭で reset 済 (PR #196 review 対応)。LoopAgent で同 instance を多世代回す場合も安全
+
+---
+
+## 10. 関連ドキュメント
 
 | ドキュメント | 内容 |
 |---|---|
-| [`STEP_4_KICKOFF.md`](./STEP_4_KICKOFF.md) | Step 4 KICKOFF (本書はその Phase 0-2 完了報告) |
+| [`STEP_4_KICKOFF.md`](./STEP_4_KICKOFF.md) | Step 4 KICKOFF (Neko さん作成) |
+| [`STEP_4_SUMMARY.md`](./STEP_4_SUMMARY.md) | Step 4 完了サマリー (撤退基準チェック + Step 5 引き継ぎの正本) |
 | [`STEP_3_SUMMARY.md`](./STEP_3_SUMMARY.md) | Step 3 完了サマリー (建材の出典) |
 | [`STEP_3_SEQUENTIAL_AGENT_NOTES.md`](./STEP_3_SEQUENTIAL_AGENT_NOTES.md) | Step 3 Phase 2 (`adk.subagent.*` trace 契約の根拠) |
 | [`../design/phase_7_summary.md`](../design/phase_7_summary.md) | Phase 7 完了サマリー (Lens 8 本拡張) |
-| [`ADK_ADOPTION.md`](./ADK_ADOPTION.md) | ADK 段階導入計画 |
+| [`ADK_ADOPTION.md`](./ADK_ADOPTION.md) | ADK 段階導入計画 (本 PR で §3 / §7 / §8 更新) |
 | [`/AGENTS.md`](../../AGENTS.md) | ドメイン原則 §4 (Lens 独立・純粋・決定性) |
-| [`/src/side-b/adk/agents/lensParallelSmoke.ts`](../../src/side-b/adk/agents/lensParallelSmoke.ts) | Phase 2 wrapper 実装本体 |
-| [`/src/side-b/tests/adk/agents/lensParallelSmoke.test.ts`](../../src/side-b/tests/adk/agents/lensParallelSmoke.test.ts) | Phase 2 test |
+| [`/src/side-b/adk/agents/lensParallelSmoke.ts`](../../src/side-b/adk/agents/lensParallelSmoke.ts) | Phase 2-3 wrapper 実装本体 |
+| [`/src/side-b/tests/adk/agents/lensParallelSmoke.test.ts`](../../src/side-b/tests/adk/agents/lensParallelSmoke.test.ts) | Step 4 全 49 cases test |
+| [`/src/side-b/adk/agents/README.md`](../../src/side-b/adk/agents/README.md) | agents 領域設計書 (本 PR で Step 4 節追記) |
