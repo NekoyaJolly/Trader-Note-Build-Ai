@@ -34,9 +34,15 @@ import { TimeSessionLens } from '../../../lenses';
 import type { Lens, LensFeature, LensInput } from '../../../lenses';
 import {
   LENS_PARALLEL_SMOKE_CALLER_REASON,
+  LENS_PARALLEL_SMOKE_DEFAULT_AGENT_NAME,
+  LENS_PARALLEL_SMOKE_DEFAULT_APP_NAME,
+  buildLensParallelSmoke,
+  createDryRunLensParallelAgent,
   createLensSubAgent,
+  runLensParallelSmoke,
 } from '../../../adk/agents/lensParallelSmoke';
 import type { LensSubAgent } from '../../../adk/agents/lensParallelSmoke';
+import { ParallelAgent } from '@google/adk';
 import {
   DEFAULT_ERROR_MESSAGE_MAX,
   InMemoryTraceSink,
@@ -446,5 +452,352 @@ describe('LensSubAgent: 実 Lens 統合 smoke (薄め、KICKOFF §8.4)', () => {
     expect(result?.lensName).toBe(lens.name);
     expect(result?.lensVersion).toBe(lens.version);
     expect(Object.keys(result?.features ?? {}).length).toBeGreaterThan(0);
+  });
+});
+
+// ============================================================================
+// Phase 3: isolateFailure オプション (LensSubAgent 単体)
+// ============================================================================
+
+describe('LensSubAgent: isolateFailure オプション (Phase 3 追加)', () => {
+  it('isolateFailure=true なら Lens throw でも runEphemeral が正常完了する', async () => {
+    const sink = new InMemoryTraceSink();
+    const sub = createLensSubAgent({
+      lens: new ThrowingFakeLens('isolated err'),
+      input: dummyInput,
+      traceSink: sink,
+      isolateFailure: true,
+    });
+    await expect(runLensSubAgentSmoke(sub)).resolves.toBeUndefined();
+    expect(sub.getResult()).toBeUndefined();
+    expect(sub.getError()).toBeInstanceOf(Error);
+    expect(sub.getError()?.message).toBe('isolated err');
+    // failed trace は isolateFailure に関わらず記録される
+    expect(sink.events).toHaveLength(2);
+    expect(sink.events[1].kind).toBe('adk.subagent.failed');
+  });
+
+  it('isolateFailure=false (default) は Phase 2 既存挙動 (throw 伝播)', async () => {
+    const sub = createLensSubAgent({
+      lens: new ThrowingFakeLens('still bubbles up'),
+      input: dummyInput,
+    });
+    await expect(runLensSubAgentSmoke(sub)).rejects.toThrow(/still bubbles up/);
+  });
+});
+
+// ============================================================================
+// buildLensParallelSmoke: 構築物
+// ============================================================================
+
+describe('buildLensParallelSmoke: 構築物', () => {
+  it('lenses 空で throw する', () => {
+    expect(() =>
+      buildLensParallelSmoke({ lenses: [], input: dummyInput }),
+    ).toThrow(/lenses must be non-empty/);
+  });
+
+  it('同名 Lens が含まれていると throw する', () => {
+    const a = new DeterministicFakeLens({ name: 'dup' });
+    const b = new DeterministicFakeLens({ name: 'dup' });
+    expect(() =>
+      buildLensParallelSmoke({ lenses: [a, b], input: dummyInput }),
+    ).toThrow(/duplicate lens name "dup"/);
+  });
+
+  it('ParallelAgent / Runner / InMemorySessionService / subAgents が揃う', () => {
+    const a = new DeterministicFakeLens({ name: 'lens_a' });
+    const b = new DeterministicFakeLens({ name: 'lens_b' });
+    const art = buildLensParallelSmoke({ lenses: [a, b], input: dummyInput });
+    expect(art.runner).toBeDefined();
+    expect(art.rootAgent).toBeInstanceOf(ParallelAgent);
+    expect(art.sessionService).toBeDefined();
+    expect(art.subAgents).toHaveLength(2);
+  });
+
+  it('subAgents は lensName 昇順でソートされる (構築時点で安定 key)', () => {
+    const c = new DeterministicFakeLens({ name: 'gamma' });
+    const a = new DeterministicFakeLens({ name: 'alpha' });
+    const b = new DeterministicFakeLens({ name: 'beta' });
+    const art = buildLensParallelSmoke({ lenses: [c, a, b], input: dummyInput });
+    expect(art.subAgents.map((s) => s.getLensName())).toEqual(['alpha', 'beta', 'gamma']);
+  });
+
+  it('appName / agentName のデフォルトが Phase 3 用識別子', () => {
+    const art = buildLensParallelSmoke({
+      lenses: [new DeterministicFakeLens()],
+      input: dummyInput,
+    });
+    expect(art.runner.appName).toBe(LENS_PARALLEL_SMOKE_DEFAULT_APP_NAME);
+    expect(art.rootAgent.name).toBe(LENS_PARALLEL_SMOKE_DEFAULT_AGENT_NAME);
+  });
+
+  it('appName / agentName を override できる', () => {
+    const art = buildLensParallelSmoke({
+      lenses: [new DeterministicFakeLens()],
+      input: dummyInput,
+      appName: 'custom-app',
+      agentName: 'custom-root',
+    });
+    expect(art.runner.appName).toBe('custom-app');
+    expect(art.rootAgent.name).toBe('custom-root');
+  });
+
+  it('各 sub-agent は isolateFailure=true で構築される (Lens throw を吸収して並列継続)', async () => {
+    // 直接フィールド検証は private のためできない → 実行で挙動確認: 1 Lens throw で全体停止しない
+    const art = buildLensParallelSmoke({
+      lenses: [
+        new ThrowingFakeLens('one fails'),
+        new DeterministicFakeLens({ name: 'survives' }),
+      ],
+      input: dummyInput,
+    });
+    await expect(runLensParallelSmoke(art)).resolves.toBeDefined();
+  });
+});
+
+// ============================================================================
+// runLensParallelSmoke: 並列実行 + 集約
+// ============================================================================
+
+describe('runLensParallelSmoke: 並列実行', () => {
+  it('複数 Lens が同入力で実行され、successes が lensName 昇順', async () => {
+    const art = buildLensParallelSmoke({
+      lenses: [
+        new DeterministicFakeLens({ name: 'zeta' }),
+        new DeterministicFakeLens({ name: 'alpha' }),
+        new DeterministicFakeLens({ name: 'mu' }),
+      ],
+      input: dummyInput,
+    });
+    const result = await runLensParallelSmoke(art);
+    expect(result.successes.map((f) => f.lensName)).toEqual(['alpha', 'mu', 'zeta']);
+    expect(result.failures).toEqual([]);
+  });
+
+  it('各 sub-agent の features が個別に取得できる', async () => {
+    const art = buildLensParallelSmoke({
+      lenses: [
+        new DeterministicFakeLens({ name: 'lens_x', features: { v: 1 } }),
+        new DeterministicFakeLens({ name: 'lens_y', features: { w: 2 } }),
+      ],
+      input: dummyInput,
+    });
+    const result = await runLensParallelSmoke(art);
+    expect(result.successes.find((f) => f.lensName === 'lens_x')?.features.v).toBe(1);
+    expect(result.successes.find((f) => f.lensName === 'lens_y')?.features.w).toBe(2);
+  });
+
+  it('trace event が lensName 単位で分離される (sub-agent ごとに started+completed)', async () => {
+    const sink = new InMemoryTraceSink();
+    const art = buildLensParallelSmoke({
+      lenses: [
+        new DeterministicFakeLens({ name: 'lens_a' }),
+        new DeterministicFakeLens({ name: 'lens_b' }),
+        new DeterministicFakeLens({ name: 'lens_c' }),
+      ],
+      input: dummyInput,
+      traceSink: sink,
+    });
+    await runLensParallelSmoke(art);
+    // 3 Lens × (started + completed) = 6 event
+    expect(sink.events).toHaveLength(6);
+    // Lens 名単位で started + completed が揃うことを順序非依存で検証
+    const byLens = new Map<string, AdkTraceEvent[]>();
+    for (const ev of sink.events) {
+      const arr = byLens.get(ev.skillName) ?? [];
+      arr.push(ev);
+      byLens.set(ev.skillName, arr);
+    }
+    for (const name of ['lens_a', 'lens_b', 'lens_c']) {
+      const evs = byLens.get(name);
+      expect(evs).toHaveLength(2);
+      const kinds = new Set(evs?.map((e) => e.kind));
+      expect(kinds).toEqual(
+        new Set(['adk.subagent.started', 'adk.subagent.completed']),
+      );
+    }
+  });
+});
+
+// ============================================================================
+// runLensParallelSmoke: failure isolation (Phase 3 DoD)
+// ============================================================================
+
+describe('runLensParallelSmoke: failure isolation', () => {
+  it('1 Lens が throw しても他 Lens の completed が観測できる', async () => {
+    const sink = new InMemoryTraceSink();
+    const art = buildLensParallelSmoke({
+      lenses: [
+        new DeterministicFakeLens({ name: 'survivor_a' }),
+        new ThrowingFakeLens('boom'),
+        new DeterministicFakeLens({ name: 'survivor_b' }),
+      ],
+      input: dummyInput,
+      traceSink: sink,
+    });
+    const result = await runLensParallelSmoke(art);
+    expect(result.successes.map((f) => f.lensName).sort()).toEqual([
+      'survivor_a',
+      'survivor_b',
+    ]);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0].lensName).toBe('fake_throwing');
+    expect(result.failures[0].error.message).toBe('boom');
+  });
+
+  it('複数 Lens が throw しても他 Lens の success が完全に取れる', async () => {
+    // ThrowingFakeLens は内部固定名 'fake_throwing' なので 2 件入れると重複。
+    // Phase 3 wrapper では同名で throw する故、ここでは別名で fake を作って検証する。
+    class NamedThrowingLens extends ThrowingFakeLens {
+      readonly name: string;
+      constructor(name: string, message: string) {
+        super(message);
+        this.name = name;
+      }
+    }
+    const art = buildLensParallelSmoke({
+      lenses: [
+        new NamedThrowingLens('thrower_1', 'err 1'),
+        new NamedThrowingLens('thrower_2', 'err 2'),
+        new DeterministicFakeLens({ name: 'survivor' }),
+      ],
+      input: dummyInput,
+    });
+    const result = await runLensParallelSmoke(art);
+    expect(result.successes.map((f) => f.lensName)).toEqual(['survivor']);
+    expect(result.failures.map((f) => f.lensName).sort()).toEqual([
+      'thrower_1',
+      'thrower_2',
+    ]);
+  });
+
+  it('全 Lens が throw しても successes が空配列で返り、例外伝播しない', async () => {
+    class NamedThrowingLens extends ThrowingFakeLens {
+      readonly name: string;
+      constructor(name: string) {
+        super('all fail');
+        this.name = name;
+      }
+    }
+    const art = buildLensParallelSmoke({
+      lenses: [new NamedThrowingLens('a'), new NamedThrowingLens('b')],
+      input: dummyInput,
+    });
+    const result = await runLensParallelSmoke(art);
+    expect(result.successes).toEqual([]);
+    expect(result.failures.map((f) => f.lensName)).toEqual(['a', 'b']);
+  });
+});
+
+// ============================================================================
+// runLensParallelSmoke: determinism (KICKOFF Phase 3 DoD §同入力同出力)
+// ============================================================================
+
+describe('runLensParallelSmoke: determinism', () => {
+  function makeStablePair() {
+    return [
+      new DeterministicFakeLens({ name: 'd_alpha', features: { val: 1, tag: 'A' } }),
+      new DeterministicFakeLens({ name: 'd_beta', features: { val: 2, tag: 'B' } }),
+    ] as const;
+  }
+
+  it('同 input で 2 回実行しても features (volatile 除く) が一致する', async () => {
+    const lenses1 = makeStablePair();
+    const lenses2 = makeStablePair();
+    const r1 = await runLensParallelSmoke(
+      buildLensParallelSmoke({ lenses: [...lenses1], input: dummyInput }),
+    );
+    const r2 = await runLensParallelSmoke(
+      buildLensParallelSmoke({ lenses: [...lenses2], input: dummyInput }),
+    );
+    // volatile field (computedAt / computeDurationMs) を除外して比較
+    const strip = (fs: readonly { lensName: string; lensVersion: string; features: Readonly<Record<string, number | string | boolean>>; confidence?: number }[]) =>
+      fs.map((f) => ({
+        lensName: f.lensName,
+        lensVersion: f.lensVersion,
+        features: f.features,
+        confidence: f.confidence,
+      }));
+    expect(strip(r1.successes)).toEqual(strip(r2.successes));
+  });
+
+  it('並列実行を 3 回繰り返しても全 features が同一', async () => {
+    const runs = [];
+    for (let i = 0; i < 3; i++) {
+      const lenses = makeStablePair();
+      const art = buildLensParallelSmoke({ lenses: [...lenses], input: dummyInput });
+      runs.push(await runLensParallelSmoke(art));
+    }
+    const first = runs[0].successes;
+    for (let i = 1; i < runs.length; i++) {
+      const r = runs[i].successes;
+      expect(r).toHaveLength(first.length);
+      for (let j = 0; j < first.length; j++) {
+        expect(r[j].lensName).toBe(first[j].lensName);
+        expect(r[j].features).toEqual(first[j].features);
+      }
+    }
+  });
+
+  it('lenses の入力順序を変えても successes は lensName 昇順で同一', async () => {
+    const r1 = await runLensParallelSmoke(
+      buildLensParallelSmoke({
+        lenses: [
+          new DeterministicFakeLens({ name: 'z' }),
+          new DeterministicFakeLens({ name: 'a' }),
+          new DeterministicFakeLens({ name: 'm' }),
+        ],
+        input: dummyInput,
+      }),
+    );
+    const r2 = await runLensParallelSmoke(
+      buildLensParallelSmoke({
+        lenses: [
+          new DeterministicFakeLens({ name: 'a' }),
+          new DeterministicFakeLens({ name: 'm' }),
+          new DeterministicFakeLens({ name: 'z' }),
+        ],
+        input: dummyInput,
+      }),
+    );
+    expect(r1.successes.map((f) => f.lensName)).toEqual(['a', 'm', 'z']);
+    expect(r2.successes.map((f) => f.lensName)).toEqual(['a', 'm', 'z']);
+  });
+});
+
+// ============================================================================
+// createDryRunLensParallelAgent: 一発便利関数
+// ============================================================================
+
+describe('createDryRunLensParallelAgent: 一発便利関数', () => {
+  it('build + run を 1 関数呼び出しで完了できる', async () => {
+    const result = await createDryRunLensParallelAgent({
+      lenses: [
+        new DeterministicFakeLens({ name: 'one' }),
+        new DeterministicFakeLens({ name: 'two' }),
+      ],
+      input: dummyInput,
+    });
+    expect(result.successes.map((f) => f.lensName)).toEqual(['one', 'two']);
+    expect(result.failures).toEqual([]);
+  });
+});
+
+// ============================================================================
+// 実 Lens 統合 smoke (Phase 3): 既存 Lens 群を ParallelAgent で並列観測
+// ============================================================================
+
+describe('Phase 3 実 Lens 統合 smoke (KICKOFF §8.4)', () => {
+  it('TimeSessionLens を ParallelAgent 経由で 1 件だけ並列観測する', async () => {
+    const result = await createDryRunLensParallelAgent({
+      lenses: [new TimeSessionLens()],
+      input: dummyInput,
+    });
+    expect(result.failures).toEqual([]);
+    expect(result.successes).toHaveLength(1);
+    const f = result.successes[0];
+    expect(f.lensName).toBe(new TimeSessionLens().name);
+    expect(Object.keys(f.features).length).toBeGreaterThan(0);
   });
 });

@@ -1,9 +1,9 @@
-# Step 4 Lens Parallel Agent Report (PR 1: Phase 0+1+2)
+# Step 4 Lens Parallel Agent Report (PR 1+2: Phase 0+1+2+3)
 
-> **作成日**: 2026-05-14
-> **対象**: Step 4 Phase 0 (棚卸し) / Phase 1 (静的確認) / Phase 2 (単体 Lens sub-agent wrapper) の実装結果
+> **作成日**: 2026-05-14 (PR 1)、2026-05-14 (PR 2 追記)
+> **対象**: Step 4 Phase 0 (棚卸し) / Phase 1 (静的確認) / Phase 2 (単体 Lens sub-agent wrapper) / Phase 3 (ParallelAgent dry-run) の実装結果
 > **設計書**: [`STEP_4_KICKOFF.md`](./STEP_4_KICKOFF.md)
-> **ステータス**: PR 1 完了。Phase 3-6 は後続 PR で追記。
+> **ステータス**: PR 1+2 完了。Phase 4-6 は PR 3 で追記。
 
 ---
 
@@ -16,9 +16,10 @@
 | 失敗分離 (`Promise.allSettled`) | ✅ `LensAggregator.computeAll` で既存実装あり |
 | 純粋関数性違反 | ❌ なし (Step 4 対象外候補 = ゼロ) |
 | determinism 比較除外フィールド | `LensFeature.computedAt` / `LensFeature.computeDurationMs` (Phase 4 で確定) |
-| Phase 2 wrapper 実装 | `src/side-b/adk/agents/lensParallelSmoke.ts` 新規 (`LensSubAgent` + `createLensSubAgent`) |
-| Phase 2 test 結果 | **23 cases pass** (新規) |
-| ADK 領域累計 | **200 cases pass** (Step 1-3 既存 177 + Phase 2 新規 23) |
+| Phase 2 wrapper 実装 | `src/side-b/adk/agents/lensParallelSmoke.ts`: `LensSubAgent` + `createLensSubAgent` |
+| Phase 3 wrapper 実装 | `lensParallelSmoke.ts`: `buildLensParallelSmoke` + `runLensParallelSmoke` + `createDryRunLensParallelAgent` + `LensParallelExecutionResult` (failure isolation 設計、ADK `Promise.race` 挙動への対応として `LensSubAgent.isolateFailure` オプション追加) |
+| Phase 2+3 test 結果 | **43 cases pass** (Phase 2: 23 / Phase 3: 20) |
+| ADK 領域累計 | **220 cases pass** (Step 1-3 既存 177 + Phase 2 23 + Phase 3 20) |
 | 既存不可侵領域 git diff | ✅ ゼロ (`src/side-b/lenses/` / `src/side-b/agent/` / `src/side-b/skills/` / `prisma/schema.prisma`) |
 
 ---
@@ -239,16 +240,94 @@ raw input / Lens features の中身 / Lens dependencies は **trace event に乗
 
 ---
 
-## 5. 次 PR への引き継ぎ事項
+## 5. Phase 3: ParallelAgent dry-run wrapper 実装結果 (PR 2 追記)
 
-### 5.1 PR 2 (Phase 3: ParallelAgent dry-run)
+### 5.1 重要発見: ADK ParallelAgent の failure 伝播挙動
 
-- `createDryRunLensParallelAgent(lenses, options)` factory: 複数 `LensSubAgent` を `ParallelAgent` で束ねる
-- `runLensParallelSmoke(input, options)`: ParallelAgent を `Runner.runEphemeral` で実行し、各 Lens の `LensFeature` を lensName で安定ソートして返す
-- `SlowFakeLens` test double: 並列実行の同時性検証用 (Promise.race 的なシナリオ)
-- KICKOFF §4.2 / §5 Phase 3 の DoD 検証
+`node_modules/@google/adk/dist/cjs/agents/parallel_agent.js` の `mergeAgentRuns` を実機確認した結果:
 
-### 5.2 PR 3 (Phase 4-6: 決定性 / 失敗分離 / 完了処理)
+```javascript
+async function* mergeAgentRuns(agentRuns) {
+  // ...
+  while (pendingPromises.size > 0) {
+    const { result, index } = await Promise.race(pendingPromises.values());
+    // ...
+  }
+}
+```
+
+**`Promise.race`** で sub-agent generators を merge する。**1 sub-agent が throw すると `Promise.race` 全体が reject** し、他 sub-agent の結果を待たずに ParallelAgent が停止する。
+
+→ KICKOFF §5 Phase 3 DoD「1 Lens が failed でも他 Lens の completed を確認できる」を満たすには、**sub-agent 側で throw を吸収する** 必要がある。
+
+### 5.2 解決策: `LensSubAgent.isolateFailure` オプション追加
+
+`LensSubAgent` に optional `isolateFailure: boolean` (default `false`) を additive 追加:
+
+| 値 | 挙動 | 使用シーン |
+|---|---|---|
+| `false` (default) | Phase 2 既存挙動。Lens throw を呼び出し元へ伝播 | 単体検証 (Phase 2 test) |
+| `true` | Lens throw を握りつぶし、`getError()` に保存して generator は正常終了 | `ParallelAgent` 配下 (Phase 3 並列実行) |
+
+いずれの場合でも `traceSink` に `adk.subagent.failed` event は必ず記録される (失敗の事実は trace 側で保存)。
+
+### 5.3 新規追加 API (lensParallelSmoke.ts、additive)
+
+| シンボル | 用途 |
+|---|---|
+| `LensParallelSmokeConfig` | 構築 config (`lenses` + `input` + optional `traceSink` / `appName` / `agentName`) |
+| `LensParallelSmokeArtifacts` | `runner` + `rootAgent` (ParallelAgent) + `sessionService` + `subAgents` (lensName 昇順済み) |
+| `LensParallelExecutionResult` | `successes: LensFeature[]` + `failures: LensParallelFailure[]` (両者 lensName 昇順) |
+| `LensParallelFailure` | `{ lensName, error }` |
+| `LENS_PARALLEL_SMOKE_DEFAULT_APP_NAME` / `_AGENT_NAME` | デフォルト識別子 |
+| `buildLensParallelSmoke(config)` | 構築 (実行はしない、validation のみ) |
+| `runLensParallelSmoke(artifacts, params?)` | `runEphemeral` 実行 + `subAgents.getResult/getError` 集約 + lensName 昇順返却 |
+| `createDryRunLensParallelAgent(config, params?)` | build + run の一発便利関数 |
+
+### 5.4 KICKOFF Phase 3 DoD 達成状況
+
+| DoD | 達成 | 確認方法 |
+|---|---|---|
+| 複数 Lens が同一 input で実行される | ✅ | `runLensParallelSmoke: 並列実行` の test 3 件 |
+| 各 Lens の trace が lensName 単位で分離される | ✅ | `trace event が lensName 単位で分離される` test (6 event を skillName でグルーピング) |
+| trace event の順序に依存しない検証になっている | ✅ | 上記 test は順序固定せず Map で集計 |
+| output が安定ソート / 安定 key で返る | ✅ | `successes` / `failures` 共に `lensName` 昇順、入力順序変更でも同結果 (`lenses 入力順序を変えても` test) |
+| 1 Lens が failed でも他 Lens の completed を確認できる | ✅ | `failure isolation` 3 cases (1 throw / 複数 throw / 全 throw) |
+| 並列実行回数を増やしても同一 features が返る | ✅ | `determinism` 3 cases (2 回比較 / 3 回比較 / 入力順序変更) |
+
+### 5.5 重要な実装上の制約
+
+- **同名 Lens 拒否**: `buildLensParallelSmoke` が同名 Lens 2 つ以上を含む config を受けると throw。理由: `subAgents` を `lensName` で集約・ソートする設計で、同名があると結果集約が破綻するため。
+- **`lensName` 安定 key の起点**: `subAgents` を構築時に `lensName` 昇順でソート。これにより `result.successes` / `failures` の順序が並列実行順 (`Promise.race` で merge) に依存しなくなる。
+- **`isolateFailure: true` での型安全**: catch ブロックは `throw error` 経路 (Phase 2 修正) と `// 握りつぶし` 経路の両方を持つ。`getError()` で外側から失敗を取得できるため情報損失なし。
+
+### 5.6 Phase 3 test 内訳 (新規 20 cases)
+
+| グループ | cases | 主な検証 |
+|---|---|---|
+| LensSubAgent isolateFailure オプション | 2 | true で握りつぶし / false で従来の throw 伝播 |
+| `buildLensParallelSmoke: 構築物` | 7 | 空 throw / 同名 throw / artifacts 揃う / ソート / app/agent name default / override / isolateFailure 適用確認 |
+| `runLensParallelSmoke: 並列実行` | 3 | 3 Lens 並列 / 個別 features / trace lensName 分離 |
+| `failure isolation` | 3 | 1 throw / 複数 throw / 全 throw |
+| `determinism` | 3 | 2 回比較 / 3 回比較 / 入力順序非依存 |
+| `createDryRunLensParallelAgent` 便利関数 | 1 | build + run 一発 |
+| Phase 3 実 Lens 統合 smoke | 1 | TimeSessionLens 1 件並列観測 |
+
+合計 Phase 2+3: **43 cases pass**。
+
+### 5.7 累計テスト結果
+
+- Phase 2 既存 23 cases: 全 pass 維持 (Phase 3 拡張で破壊なし)
+- Phase 3 新規 20 cases: 全 pass
+- ADK 領域累計: **220 cases pass** (Step 1-3 既存 177 + Phase 2 23 + Phase 3 20)
+- 既存不可侵領域 (`src/side-b/lenses/` / `src/side-b/agent/` / `src/side-b/skills/` / `prisma/schema.prisma`) git diff: **ゼロ**
+- 本番コードの `any` / `unknown` / `as any` / `as unknown as`: ゼロ
+
+---
+
+## 6. 次 PR への引き継ぎ事項
+
+### 6.1 PR 3 (Phase 4-6: 決定性 / 失敗分離 / 完了処理)
 
 - Phase 4: 同入力 → 同 features の実機検証、failed Lens が他 Lens を巻き込まない、ADK 経由 vs 直接実行の features 一致
 - Phase 5: ADK 領域 + lenses 領域 + side-b 全体の regression 確認
@@ -256,7 +335,7 @@ raw input / Lens features の中身 / Lens dependencies は **trace event に乗
 
 ---
 
-## 6. 関連ドキュメント
+## 7. 関連ドキュメント
 
 | ドキュメント | 内容 |
 |---|---|
