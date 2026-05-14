@@ -28,6 +28,33 @@ describe('loadPrompt', () => {
         expect(() => loadPrompt('nonexistent_prompt_xyz')).toThrow(/not found/);
     });
 
+    // Phase 5.5: ハードコード prompt 外部ファイル化 PR
+    // agentLoop / reflectionAIService / researchAIService の system prompt を
+    // src/side-b/prompts/*.md に移植したことを保証する。ファイル削除や rename で
+    // 本番起動時に「Prompt file not found」になる事故を防ぐ。
+    describe('Phase 5.5: ハードコードから移植した prompt が読める', () => {
+        it('agent_loop_default.md を読み込める', () => {
+            const content = loadPrompt('agent_loop_default');
+            expect(content).toContain('Side-B AI Trade System');
+            expect(content).toContain('PDCAサイクル');
+            expect(content).toContain('リスクリワード比');
+        });
+
+        it('reflection.md を読み込める', () => {
+            const content = loadPrompt('reflection');
+            expect(content).toContain('FXトレードコーチ');
+            expect(content).toContain('プロセスを評価');
+            expect(content).toContain('JSONのみを出力');
+        });
+
+        it('research.md を読み込める', () => {
+            const content = loadPrompt('research');
+            expect(content).toContain('テクニカル特徴量を抽出');
+            expect(content).toContain('再現性');
+            expect(content).toContain('JSONのみを出力');
+        });
+    });
+
     it('マクロ展開が機能する', () => {
         const macros = {
             CORE_TRADING_RULES: '## テスト用コアルール',

@@ -24,6 +24,7 @@ import {
     ReflectionOutputSchema,
     type ReflectionOutput,
 } from '../../schemas/api/sideB';
+import { loadPrompt } from '../prompts/loader';
 
 // ===========================================
 // 型定義
@@ -93,6 +94,7 @@ export class ReflectionAIService {
         }
 
         const prompt = this.buildPrompt(input);
+        // eslint-disable-next-line no-restricted-syntax -- catch 節由来のエラー型は TypeScript 標準で unknown。instanceof Error で絞り込んで使用する
         let lastError: unknown;
 
         for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
@@ -237,7 +239,11 @@ ${existingLessons.slice(-5).map((l, i) => `${i + 1}. ${l}`).join('\n')}`;
 
     /**
      * AI APIを呼び出し (AIProvider 経由)
+     *
+     * `content: unknown` は AI レスポンス未検証段階の型として意図的。呼び出し側で
+     * ReflectionOutputSchema.safeParse() による Zod 検証を経て型を確定させる契約。
      */
+    // eslint-disable-next-line no-restricted-syntax
     private async callAI(prompt: string): Promise<{ content: unknown; tokenUsage: number; model: string }> {
         const provider = new AIProvider({
             apiKey: this.apiKey,
@@ -249,15 +255,7 @@ ${existingLessons.slice(-5).map((l, i) => `${i + 1}. ${l}`).join('\n')}`;
             [
                 {
                     role: 'system',
-                    content: `あなたは経験豊富なFXトレードコーチです。
-トレーダーの取引を振り返り、建設的なフィードバックと具体的な学びを提供してください。
-
-振り返りの原則:
-- 結果論ではなく、プロセスを評価する（結果が利益でもプロセスが悪ければ指摘する）
-- 「たられば」は最小限に。次に実行可能な具体的アドバイスを重視
-- 同じミスを繰り返さないための、短く記憶に残るルールを提示
-- 良かった点も必ず指摘する（全否定しない）
-- 必ず有効なJSONのみを出力してください`,
+                    content: loadPrompt('reflection'),
                 },
                 { role: 'user', content: prompt },
             ],
@@ -269,6 +267,7 @@ ${existingLessons.slice(-5).map((l, i) => `${i + 1}. ${l}`).join('\n')}`;
             throw new Error('AI APIからの応答が空です');
         }
 
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- JSON.parse の戻りは unknown 相当。直後の ReflectionOutputSchema.safeParse で検証される
         const parsed = JSON.parse(content);
 
         return {

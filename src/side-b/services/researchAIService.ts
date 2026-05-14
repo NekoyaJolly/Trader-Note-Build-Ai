@@ -22,6 +22,7 @@ import type { ResearchAIOutput , OHLCVSnapshot} from '../models/marketResearch';
 import { calculateExpiryDate } from '../models/marketResearch';
 import { getRelevantIndicatorContext } from '../knowledge';
 import { AIProvider } from '../agent/aiProvider';
+import { loadPrompt } from '../prompts/loader';
 
 // ===========================================
 // 型定義
@@ -278,12 +279,19 @@ ${indicators ? `
 - confidence はデータの質と分析の確実性に基づいて正直に。
 - 有効なJSONのみを出力してください。
 
-${getRelevantIndicatorContext(indicators as unknown as Record<string, unknown>)}`;
+${getRelevantIndicatorContext(
+            // eslint-disable-next-line no-restricted-syntax -- IndicatorData は事前計算済み数値の集合。getRelevantIndicatorContext は Record<string, unknown> 受け取りに統一されているため二段キャストで橋渡し
+            indicators as unknown as Record<string, unknown>
+        )}`;
   }
 
   /**
    * AI APIを呼び出し (AIProvider 経由)
+   *
+   * `content: unknown` は AI レスポンス未検証段階の型として意図的。呼び出し側で
+   * ResearchAIOutputSchema (本ファイル内 validate 関数) による Zod 検証を経て型を確定させる契約。
    */
+  // eslint-disable-next-line no-restricted-syntax
   private async callAI(prompt: string): Promise<{ content: unknown; tokenUsage: number; model: string }> {
     const provider = new AIProvider({
       apiKey: this.apiKey,
@@ -295,14 +303,7 @@ ${getRelevantIndicatorContext(indicators as unknown as Record<string, unknown>)}
       [
         {
           role: 'system',
-          content: `あなたは市場データからテクニカル特徴量を抽出する分析エンジンです。
-売買判断は行わず、観察事実と構造化された特徴量のみを出力してください。
-
-重要:
-- 再現性のある分析を心がけてください（同じデータなら同じ結論）
-- 不確実な場合は confidence を低く設定し、理由をriskFactorsに明記
-- サポート/レジスタンスは実際の価格反転ポイントやMA等の融合点を根拠に
-- 必ず有効なJSONのみを出力してください`,
+          content: loadPrompt('research'),
         },
         { role: 'user', content: prompt },
       ],
@@ -314,6 +315,7 @@ ${getRelevantIndicatorContext(indicators as unknown as Record<string, unknown>)}
       throw new Error('AI APIからの応答が空です');
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- JSON.parse の戻りは unknown 相当。呼び出し側の Zod 検証で型を確定させる
     const parsed = JSON.parse(content);
 
     return {
