@@ -26,8 +26,11 @@
  *   - sub-agent 単位の trace event は `adk.subagent.*` kind (Step 3 Phase 2 で追加)
  *     を再利用。`skillName` フィールドを Lens 名として再利用 (`traceTypes.ts` §AdkTraceEventKind)。
  *   - `callerReason` は Step 4 専用の固定値 `lens_parallel_dry_run` (KICKOFF §4.3)。
- *   - trace payload に raw input/output を入れない。保存するのは lensName / lensVersion /
- *     featureCount / durationMs / dependencyCount / errorMessage 短縮版のみ (KICKOFF §4.3)。
+ *   - trace payload に raw input/output を入れない。実際に AdkTraceEvent に乗せるのは
+ *     `agentName` / `skillName` (= Lens 名) / `durationMs` / `status` /
+ *     `resultSummary.fieldCount` (features 数) / `errorMessage` 短縮版のみ。
+ *     `lensVersion` / dependencies は trace 型に乗せず、外側から `getLensVersion()`
+ *     等で参照する設計 (KICKOFF §4.3 の許可リストのうち trace 型と整合する subset)。
  *
  * 本ファイルは:
  *   - 本番 SideBScheduler / Express server / EvolutionLoop / PDCALoop に組み込まない
@@ -216,9 +219,14 @@ export class LensSubAgent extends BaseAgent {
         await safeRecord(sink, completedEvent);
       }
     } catch (err) {
-      // err は unknown のまま受け取り、cause として伝播。文字列化は trace event の
-      // errorMessage 用にのみ行い、原因 Error の throw 経路にはそのまま転送する。
-      const error = err instanceof Error ? err : new Error(String(err));
+      // err は unknown のまま受け取り、Error subclass でない場合 (string / object 等を
+      // throw する Lens 実装がもし出てきた場合) は Error に正規化する。`getError()` と
+      // 「呼び出し元に伝播する例外」を**同一 instance** にするため、正規化後の `error`
+      // を保存しつつ `throw error` で呼び出し元へ転送する (`{ cause: err }` で元の値も
+      // 失わない、ES2022 Error.cause)。文字列化は trace event の errorMessage 用にのみ
+      // 行い、原因情報は cause として保持される。
+      const error =
+        err instanceof Error ? err : new Error(String(err), { cause: err });
       this.error = error;
 
       if (sink !== undefined) {
@@ -241,7 +249,7 @@ export class LensSubAgent extends BaseAgent {
         };
         await safeRecord(sink, failedEvent);
       }
-      throw err;
+      throw error;
     }
   }
 

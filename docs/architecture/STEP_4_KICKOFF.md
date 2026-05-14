@@ -57,7 +57,7 @@ Step 4 はこの延長として、Lens 群だけを対象に `ParallelAgent` dry
 src/side-b/adk/agents/
 src/side-b/adk/tracing/
 src/side-b/adk/adapters/   # 必要な場合のみ
-src/side-b/adk/agents/__tests__/
+src/side-b/tests/adk/agents/
 docs/architecture/
 ```
 
@@ -254,7 +254,7 @@ Lens 群が ParallelAgent に向いているか、まず静的に確認する。
 
 ```text
 src/side-b/adk/agents/lensParallelSmoke.ts
-src/side-b/adk/agents/__tests__/lensParallelSmoke.test.ts
+src/side-b/tests/adk/agents/lensParallelSmoke.test.ts
 ```
 
 ### 実装方針
