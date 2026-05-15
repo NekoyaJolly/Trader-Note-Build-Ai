@@ -71,6 +71,24 @@ export interface AITradePlanWithResearch extends AITradePlanWithTypes {
   };
 }
 
+/**
+ * アプリ型 (PlanMarketAnalysis / AITradeScenario[] 等) を Prisma の
+ * `InputJsonValue` として受け取る型橋渡しヘルパー。
+ *
+ * Prisma の `InputJsonValue` は深い再帰型 (`JsonValue` の自己参照) を持ち、
+ * 構造的に互換であっても TypeScript の assignability checker が拒否する。
+ * 本関数 1 箇所だけで unknown 経由の二段キャストを集約することで、各 callsite
+ * から `as unknown as Prisma.InputJsonValue` を排除する。
+ *
+ * 安全性: 入力 `value` が JSON serializable であることは Prisma が runtime
+ * で検証する。`PlanMarketAnalysis` / `AITradeScenario` は本リポジトリの
+ * caller (planAIService) が schema 経由で生成しており JSON 互換性は担保済。
+ */
+function toInputJsonValue<T>(value: T): Prisma.InputJsonValue {
+  // eslint-disable-next-line no-restricted-syntax -- Prisma JsonValue ↔ アプリ型の橋渡し境界、本関数 1 箇所で unknown を集約
+  return value as unknown as Prisma.InputJsonValue;
+}
+
 // ===========================================
 // リポジトリクラス
 // ===========================================
@@ -91,8 +109,51 @@ export class PlanRepository {
         researchId: input.researchId,
         targetDate: input.targetDate,
         symbol: input.symbol,
-        marketAnalysis: input.marketAnalysis as unknown as Prisma.InputJsonValue,
-        scenarios: input.scenarios as unknown as Prisma.InputJsonValue,
+        marketAnalysis: toInputJsonValue(input.marketAnalysis),
+        scenarios: toInputJsonValue(input.scenarios),
+        overallConfidence: input.overallConfidence,
+        warnings: input.warnings || [],
+        aiModel: input.aiModel,
+        tokenUsage: input.tokenUsage,
+      },
+    });
+
+    return this.toTypedPlan(plan);
+  }
+
+  /**
+   * 日付 + 銘柄キー (`@@unique([targetDate, symbol])`) でプランを upsert する。
+   *
+   * cron が先行で同日 Plan を作成した後に手動発火 (`POST /scheduler/run-daily-plan`)
+   * を行うと `Unique constraint failed on (targetDate, symbol)` で失敗するため、
+   * 手動再生成 = 上書きの意味として upsert を提供する。`researchId` も新しい
+   * 値で更新されるため、Plan に紐付く Research も最新に切り替わる。
+   *
+   * 既存の `create()` は cron 系の「新規作成のみ」経路では引き続き使用可能。
+   */
+  async upsertByDateSymbol(input: CreatePlanInput): Promise<AITradePlanWithTypes> {
+    const plan = await this.prisma.aITradePlan.upsert({
+      where: {
+        targetDate_symbol: {
+          targetDate: input.targetDate,
+          symbol: input.symbol,
+        },
+      },
+      update: {
+        researchId: input.researchId,
+        marketAnalysis: toInputJsonValue(input.marketAnalysis),
+        scenarios: toInputJsonValue(input.scenarios),
+        overallConfidence: input.overallConfidence,
+        warnings: input.warnings || [],
+        aiModel: input.aiModel,
+        tokenUsage: input.tokenUsage,
+      },
+      create: {
+        researchId: input.researchId,
+        targetDate: input.targetDate,
+        symbol: input.symbol,
+        marketAnalysis: toInputJsonValue(input.marketAnalysis),
+        scenarios: toInputJsonValue(input.scenarios),
         overallConfidence: input.overallConfidence,
         warnings: input.warnings || [],
         aiModel: input.aiModel,
@@ -282,7 +343,9 @@ export class PlanRepository {
   private toTypedPlan(plan: AITradePlan): AITradePlanWithTypes {
     return {
       ...plan,
+      // eslint-disable-next-line no-restricted-syntax -- DB JsonValue → アプリ型の検証境界。本リポジトリの caller (planAIService) が書き込み時に型整合性を保証している前提。Zod による runtime 検証追加は別 PR 候補 (Phase D 記録)
       marketAnalysis: plan.marketAnalysis as unknown as PlanMarketAnalysis,
+      // eslint-disable-next-line no-restricted-syntax -- 同上
       scenarios: plan.scenarios as unknown as AITradeScenario[],
     };
   }

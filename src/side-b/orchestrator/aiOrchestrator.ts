@@ -543,7 +543,10 @@ export class AIOrchestrator {
       }
 
       // 6. DB保存（Plan AIが解釈を含む新設計）
-      const saved = await this.planRepo.create({
+      // cron 先行で同日 Plan が存在する場合 (POST /scheduler/run-daily-plan の
+      // 手動再発火) に Unique constraint 衝突しないよう upsertByDateSymbol を使う。
+      // 手動発火 = 上書き再生成の意味として動作する。
+      const saved = await this.planRepo.upsertByDateSymbol({
         researchId: research.id,
         targetDate: date,
         symbol,

@@ -12,7 +12,7 @@ import type { PlanAIService } from '../../services/planAIService';
 import type { PlanAIResult } from '../../services/planAIService';
 import type { ResearchRepository, PlanRepository, CreatePlanInput } from '../../repositories';
 import type { MarketResearchWithTypes, AITradePlanWithTypes } from '../../repositories';
-import { FeatureVector12D } from '../../models/featureVector';
+import type { FeatureVector12D } from '../../models/featureVector';
 import type { DevilsAdvocateAgent } from '../../agents/DevilsAdvocateAgent';
 import type { HypothesisGeneratorAgent } from '../../agents/HypothesisGeneratorAgent';
 import type { StrategyBacktesterAgent } from '../../agents/StrategyBacktesterAgent';
@@ -159,6 +159,7 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
     const planRepo = {
       findByDateAndSymbol: findByDate,
       create: createPlan,
+      upsertByDateSymbol: createPlan,
       delete: delPlan,
     } as unknown as PlanRepository;
     const devilsAdvocate = { critique } as unknown as DevilsAdvocateAgent;
@@ -188,9 +189,9 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
     expect(result.success).toBe(true);
     expect(result.data?.strategyBacktest).toEqual(buildStrategyBacktestResult());
     expect(runMock).toHaveBeenCalledTimes(1);
-    expect(runMock.mock.calls[0]![0]).toHaveLength(1);
-    expect(runMock.mock.calls[0]![0]![0]!.name).toBe('テストシナリオ');
-    expect(runMock.mock.calls[0]![1]).toEqual({ symbol: 'XAUUSD', timeframe: '15m' });
+    expect(runMock.mock.calls[0][0]).toHaveLength(1);
+    expect(runMock.mock.calls[0][0][0].name).toBe('テストシナリオ');
+    expect(runMock.mock.calls[0][1]).toEqual({ symbol: 'XAUUSD', timeframe: '15m' });
     expect(hgGen).not.toHaveBeenCalled();
   });
 
@@ -218,6 +219,7 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
     const planRepo = {
       findByDateAndSymbol: findByDate,
       create: createPlan,
+      upsertByDateSymbol: createPlan,
       delete: delPlan,
     } as unknown as PlanRepository;
     const devilsAdvocate = { critique } as unknown as DevilsAdvocateAgent;
@@ -276,6 +278,7 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
     const planRepo = {
       findByDateAndSymbol: findByDate,
       create: createPlan,
+      upsertByDateSymbol: createPlan,
       delete: delPlan,
     } as unknown as PlanRepository;
     const devilsAdvocate = { critique: daCritique } as unknown as DevilsAdvocateAgent;
