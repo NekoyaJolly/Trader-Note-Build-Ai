@@ -45,6 +45,7 @@ import {
 } from '../../schemas/api/sideB';
 import { AIProvider } from '../agent/aiProvider';
 import { safeStringify } from '../../utils/safeStringify';
+import type { JsonObject, JsonValue } from '../../utils/jsonValue';
 
 // ===========================================
 // 型定義（sideB.ts で Zod スキーマから推論された型を再エクスポート）
@@ -82,8 +83,7 @@ export interface BullBearDebateInput {
  * 各派（bull/bear）の出力を Zod スキーマでバリデーションする。
  * エラー時はフィールドパスを含むカスタムメッセージで再スローする。
  */
-// eslint-disable-next-line no-restricted-syntax -- AI レスポンス検証境界。直後の DebateSideOutputSchema.safeParse で型確定
-function parseSideOutput(data: unknown, side: 'bull' | 'bear'): DebateSideOutput {
+function parseSideOutput(data: JsonValue | undefined, side: 'bull' | 'bear'): DebateSideOutput {
   const result = DebateSideOutputSchema.safeParse(data);
   if (!result.success) {
     // 最初のエラーのパスを "bull.scenario" などの形式で組み立てて再スロー
@@ -103,14 +103,14 @@ function parseSideOutput(data: unknown, side: 'bull' | 'bear'): DebateSideOutput
  * - biasStrength・preferredConfidence は 0-100 にクランプ
  * - phaseAnalysis 欠落または要素が非オブジェクト（null 等）は空配列/デフォルト値にフォールバック
  */
-// eslint-disable-next-line no-restricted-syntax -- AI レスポンス検証関数の入力境界。本関数内で type narrowing で型確定させる
-export function validateBullBearDebateOutput(data: unknown): BullBearDebateOutput {
-  // 最上位の型チェック
-  if (!data || typeof data !== 'object') {
+export function validateBullBearDebateOutput(
+  data: JsonValue | undefined,
+): BullBearDebateOutput {
+  // 最上位の型チェック (JsonValue は primitive / array / object のいずれか、undefined は invalid)
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
     throw new Error('Bull vs Bear debate output must be an object');
   }
-  // eslint-disable-next-line no-restricted-syntax -- 直前の typeof check 後、Record<string, unknown> として安全に narrow
-  const obj = data as Record<string, unknown>;
+  const obj: JsonObject = data;
 
   // marketContext の存在チェック（Zod は内部フィールドをフォールバックで扱う）
   if (!obj.marketContext || typeof obj.marketContext !== 'object') {
@@ -274,8 +274,7 @@ export class BullBearDebateAgent {
   private async callAI(
     systemPrompt: string,
     userPrompt: string,
-    // eslint-disable-next-line no-restricted-syntax -- AI レスポンス未検証段階の content は unknown が契約。呼び出し側で validateBullBearDebateOutput により型確定
-  ): Promise<{ content: unknown; tokenUsage: number; model: string }> {
+  ): Promise<{ content: JsonValue; tokenUsage: number; model: string }> {
     const provider = new AIProvider({
       apiKey: this.apiKey,
       model: this.model,
