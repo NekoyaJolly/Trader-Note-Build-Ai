@@ -24,7 +24,7 @@ export class MarketDataService {
   private apiKey: string;
   private ctraderDataService: CTraderDataService | null = null;
   private ctraderAccountId: string | null = null;
-  private cTraderConfigPromise: Promise<void> | null = null;
+  private ctraderConfigPromise: Promise<void> | null = null;
 
   constructor() {
     this.apiUrl = config.market.apiUrl;
@@ -56,13 +56,18 @@ export class MarketDataService {
    *
    * MarketDataService は callsite ごとに new されており、起動時の一括 configure
    * 経路が存在しない。各 instance が初回データ取得時に DB から token を読んで
-   * 自分で配線する遅延初期化。idempotent + Promise キャッシュで再エントリーに耐える。
+   * 自分で配線する遅延初期化。
+   *
+   * Promise キャッシュは「同 instance 内の並列リクエストが二重 DB ヒットしないため」
+   * に使う。試行後 isCTraderAvailable() が false (token 未登録 / 取得失敗) のときは
+   * キャッシュをクリアして、次回呼び出し時に再試行できるようにする。これにより、
+   * サーバー起動後に OAuth 接続が完了/更新された場合でも自動的に拾える。
    */
   async ensureCTraderConfigured(): Promise<void> {
     if (this.isCTraderAvailable()) return;
-    if (this.cTraderConfigPromise) return this.cTraderConfigPromise;
+    if (this.ctraderConfigPromise) return this.ctraderConfigPromise;
 
-    this.cTraderConfigPromise = (async () => {
+    this.ctraderConfigPromise = (async () => {
       try {
         const authService = new CTraderAuthService(prisma);
         const token = await authService.getValidToken();
@@ -71,10 +76,14 @@ export class MarketDataService {
         }
       } catch (error) {
         console.warn('[MarketDataService] cTrader 自動配線エラー:', error);
-        this.cTraderConfigPromise = null;
+      } finally {
+        // 試行後も未配線なら次回再試行できるようにキャッシュを破棄する
+        if (!this.isCTraderAvailable()) {
+          this.ctraderConfigPromise = null;
+        }
       }
     })();
-    return this.cTraderConfigPromise;
+    return this.ctraderConfigPromise;
   }
 
   /**
