@@ -1,0 +1,1110 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Side-B アーキテクチャ詳細 — Trader-Note-Build-Ai</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --bg-elev: #11141c;
+    --bg-elev-2: #161a26;
+    --border: #232838;
+    --border-soft: #1b1f2c;
+    --text: #e6e9f2;
+    --text-dim: #9aa3b8;
+    --text-faint: #6b7488;
+    --accent: #7c9cff;
+    --accent-2: #6ee7c7;
+    --warn: #f5b942;
+    --danger: #ff6b8a;
+    --ok: #5dd39e;
+    --info: #62c5ff;
+    --mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--text); }
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(124,156,255,0.08), transparent 60%),
+      radial-gradient(900px 500px at -10% 30%, rgba(110,231,199,0.05), transparent 60%),
+      var(--bg);
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, pre, .mono { font-family: var(--mono); }
+  code { background: var(--bg-elev-2); padding: 1px 6px; border-radius: 4px; font-size: 0.88em; color: #cfd6e8; }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 48px 28px 120px; }
+
+  /* hero */
+  .hero { margin-bottom: 56px; }
+  .eyebrow {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    color: var(--accent-2);
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border: 1px solid rgba(110,231,199,0.3);
+    border-radius: 999px;
+    margin-bottom: 18px;
+  }
+  h1 { font-size: 44px; line-height: 1.2; margin: 0 0 16px; letter-spacing: -0.02em; }
+  .lede { color: var(--text-dim); max-width: 760px; font-size: 17px; margin: 0 0 24px; }
+  .hero-meta {
+    display: flex; flex-wrap: wrap; gap: 18px;
+    color: var(--text-faint); font-family: var(--mono); font-size: 12px;
+    border-top: 1px solid var(--border-soft);
+    border-bottom: 1px solid var(--border-soft);
+    padding: 14px 0;
+  }
+  .hero-meta b { color: var(--text); font-weight: 500; }
+
+  /* toc */
+  .toc {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 26px;
+    margin: 36px 0 56px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 8px 24px;
+  }
+  .toc .toc-title {
+    grid-column: 1 / -1;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .toc a {
+    display: flex; gap: 10px; align-items: baseline;
+    padding: 4px 0; color: var(--text);
+    border-bottom: 1px dashed transparent;
+  }
+  .toc a:hover { color: var(--accent); text-decoration: none; border-bottom-color: var(--accent); }
+  .toc .num { font-family: var(--mono); color: var(--text-faint); font-size: 12px; min-width: 28px; }
+
+  /* section */
+  section { margin: 64px 0; scroll-margin-top: 24px; }
+  .sec-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 8px; }
+  .sec-num {
+    font-family: var(--mono); font-size: 12px;
+    color: var(--text-faint); letter-spacing: 0.14em;
+  }
+  h2 { font-size: 28px; margin: 0; letter-spacing: -0.01em; }
+  h3 { font-size: 18px; margin: 28px 0 12px; color: var(--text); }
+  h4 { font-size: 14px; margin: 18px 0 8px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+  .sec-tagline { color: var(--text-dim); margin: 0 0 24px; max-width: 820px; }
+
+  /* card grid */
+  .grid { display: grid; gap: 14px; }
+  .grid.cols-2 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  .grid.cols-3 { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .grid.cols-4 { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+  .card {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+  .card h4 { margin-top: 0; color: var(--text); text-transform: none; letter-spacing: 0; font-size: 15px; }
+  .card p { margin: 0; color: var(--text-dim); font-size: 13.5px; }
+  .card .badge { float: right; }
+
+  /* badge */
+  .badge {
+    display: inline-block;
+    font-family: var(--mono); font-size: 10px;
+    padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    background: var(--bg-elev-2);
+    letter-spacing: 0.06em;
+  }
+  .badge.ok { color: var(--ok); border-color: rgba(93,211,158,0.35); }
+  .badge.warn { color: var(--warn); border-color: rgba(245,185,66,0.35); }
+  .badge.info { color: var(--info); border-color: rgba(98,197,255,0.35); }
+  .badge.todo { color: var(--text-faint); }
+  .badge.accent { color: var(--accent); border-color: rgba(124,156,255,0.35); }
+
+  /* path inline */
+  .path { font-family: var(--mono); font-size: 12px; color: var(--text-faint); }
+  .path b { color: var(--text-dim); font-weight: 500; }
+
+  /* callout */
+  .callout {
+    border-left: 3px solid var(--accent);
+    background: rgba(124,156,255,0.06);
+    padding: 14px 18px;
+    border-radius: 0 10px 10px 0;
+    margin: 18px 0;
+    color: var(--text);
+  }
+  .callout.warn { border-left-color: var(--warn); background: rgba(245,185,66,0.06); }
+  .callout.danger { border-left-color: var(--danger); background: rgba(255,107,138,0.06); }
+  .callout.ok { border-left-color: var(--ok); background: rgba(93,211,158,0.06); }
+  .callout strong { color: #fff; }
+
+  /* table */
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+  th { color: var(--text-dim); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+  tr:hover td { background: rgba(255,255,255,0.015); }
+  td.mono { font-family: var(--mono); font-size: 12.5px; color: var(--text-dim); }
+
+  /* details/toggle */
+  details {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0;
+    margin: 10px 0;
+  }
+  details > summary {
+    cursor: pointer;
+    padding: 12px 16px;
+    list-style: none;
+    color: var(--text);
+    display: flex; align-items: center; gap: 10px;
+    user-select: none;
+  }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::before {
+    content: "▸"; color: var(--text-faint); transition: transform 0.15s;
+  }
+  details[open] > summary::before { transform: rotate(90deg); }
+  details .body { padding: 0 16px 14px 36px; color: var(--text-dim); font-size: 14px; }
+
+  /* tabs */
+  .tabs { margin: 18px 0; }
+  .tab-strip { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 18px; flex-wrap: wrap; }
+  .tab-strip button {
+    background: none; border: 0; color: var(--text-faint);
+    padding: 10px 14px; font: inherit; cursor: pointer;
+    border-bottom: 2px solid transparent;
+    font-size: 13px;
+  }
+  .tab-strip button:hover { color: var(--text); }
+  .tab-strip button.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* svg figure */
+  figure.diagram {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    margin: 20px 0;
+    padding: 20px;
+  }
+  figure.diagram figcaption {
+    margin-top: 12px; color: var(--text-faint);
+    font-size: 12px; font-family: var(--mono);
+    text-align: center;
+  }
+  figure.diagram svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+
+  /* progress dots */
+  .step-row {
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px;
+    margin: 24px 0;
+  }
+  .step-cell {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 12px;
+    text-align: center;
+    position: relative;
+  }
+  .step-cell .lbl { font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+  .step-cell .title { font-size: 13px; margin: 4px 0 6px; color: var(--text); }
+  .step-cell .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    margin: 6px auto 0;
+    background: var(--border);
+  }
+  .step-cell.done .dot { background: var(--ok); box-shadow: 0 0 12px rgba(93,211,158,0.6); }
+  .step-cell.todo .dot { background: var(--text-faint); }
+  .step-cell.done { border-color: rgba(93,211,158,0.35); }
+
+  /* color legend pills */
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 8px 0 18px; font-size: 12px; color: var(--text-dim); }
+  .legend .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: middle; }
+
+  hr.divider { border: 0; border-top: 1px solid var(--border-soft); margin: 80px 0; }
+
+  /* references */
+  .refs { columns: 2; column-gap: 32px; font-size: 13.5px; }
+  .refs li { break-inside: avoid; margin-bottom: 6px; }
+
+  /* footer */
+  footer { color: var(--text-faint); font-size: 12px; margin-top: 80px; text-align: center; }
+
+  @media (max-width: 720px) {
+    h1 { font-size: 32px; }
+    .step-row { grid-template-columns: repeat(2, 1fr); }
+    .refs { columns: 1; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <span class="eyebrow">Architecture Reference / 2026-05-15</span>
+  <h1>Side-B アーキテクチャ詳細</h1>
+  <p class="lede">
+    Trader-Note-Build-Ai の Side-B — 自律トレーディング AI のサブシステム。
+    Multi-Agent ループ・進化的探索・エッジ台帳・ADK 段階導入の現在地を 1 枚に集約した参照ドキュメント。
+  </p>
+  <div class="hero-meta">
+    <span>Repo: <b>Trader-Note-Build-Ai</b></span>
+    <span>Branch: <b>main</b></span>
+    <span>HEAD: <b>1397d57</b></span>
+    <span>Side-B 起点: <b>src/side-b/</b></span>
+    <span>正本ルール: <b>/AGENTS.md</b></span>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Table of contents">
+  <div class="toc-title">Contents · 14 sections</div>
+  <a href="#s01"><span class="num">01</span> ポジショニング</a>
+  <a href="#s02"><span class="num">02</span> ディレクトリ構成</a>
+  <a href="#s03"><span class="num">03</span> PDCA ループ</a>
+  <a href="#s04"><span class="num">04</span> データフロー</a>
+  <a href="#s05"><span class="num">05</span> エージェント群</a>
+  <a href="#s06"><span class="num">06</span> サービス層</a>
+  <a href="#s07"><span class="num">07</span> Lens 体系</a>
+  <a href="#s08"><span class="num">08</span> Edge Ledger</a>
+  <a href="#s09"><span class="num">09</span> Strategy DSL</a>
+  <a href="#s10"><span class="num">10</span> 進化ループ</a>
+  <a href="#s11"><span class="num">11</span> ADK 段階導入</a>
+  <a href="#s12"><span class="num">12</span> 永続化と外部依存</a>
+  <a href="#s13"><span class="num">13</span> 設定 / モデル選択</a>
+  <a href="#s14"><span class="num">14</span> テスト / 観測性</a>
+</nav>
+
+<!-- ============================================================== -->
+<section id="s01">
+  <div class="sec-head"><span class="sec-num">01</span><h2>ポジショニング — Side-A と Side-B の責務分離</h2></div>
+  <p class="sec-tagline">
+    Trader-Note-Build-Ai は人間向けと AI 向けの 2 サブシステムで構成される。Side-B は <em>「AI が自律的に市場を観察し、仮説を立て、検証し、エッジ台帳を育てながら運用するシステム」</em>へ段階進化させていく領域。
+  </p>
+
+  <div class="grid cols-2">
+    <div class="card">
+      <span class="badge ok">MVP 完成</span>
+      <h4>Side-A — TradeAssist (人間向け)</h4>
+      <p>トレード履歴からの自動ノート生成、リアルタイム市場データとの一致判定、通知 + 発注支援 UI。</p>
+    </div>
+    <div class="card" style="border-color: rgba(124,156,255,0.35);">
+      <span class="badge accent">段階進化中</span>
+      <h4>Side-B — TradeAssistant-AI (AI 向け)</h4>
+      <p>AI による日次トレードプラン生成、仮想トレード実行・記録、AI 用ノートによる学習ループ。本ドキュメントの対象。</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <strong>設計の正本:</strong>
+    <span class="path">/AGENTS.md</span> →
+    <span class="path">/src/side-b/AGENTS.md</span> →
+    <span class="path">/src/side-b/adk/AGENTS.md</span>。
+    作業着手前に必ずルートの最優先 5 原則を確認すること。
+  </div>
+</section>
+
+<!-- ============================================================== -->
+<section id="s02">
+  <div class="sec-head"><span class="sec-num">02</span><h2>ディレクトリ構成 — <code>src/side-b/</code></h2></div>
+  <p class="sec-tagline">単数形 <code>agent/</code> はループ中核、複数形 <code>agents/</code> は個別エージェント実装。両者は別物。</p>
+
+  <div class="grid cols-3">
+    <div class="card"><h4><code>agent/</code></h4><p>PDCA ループ、エージェントメモリ等の中核実装 (単数形)</p></div>
+    <div class="card"><h4><code>agents/</code></h4><p>個別エージェント実装 16+ 体 (複数形)</p></div>
+    <div class="card"><h4><code>lenses/</code></h4><p>レンズ 8 本。副作用なし・他依存なし・決定性ありの純粋関数</p></div>
+    <div class="card"><h4><code>prompts/</code></h4><p>エージェントのシステムプロンプト群 (外部 <code>.md</code> 化必須、24+ 本)</p></div>
+    <div class="card"><h4><code>strategy_dsl/</code></h4><p>JSON 戦略 DSL のスキーマ / 評価器 / シミュレーター</p></div>
+    <div class="card"><h4><code>evolution/</code></h4><p>進化ループ・進化的探索 (27+ ファイル)</p></div>
+    <div class="card"><h4><code>ledger/</code></h4><p>EdgeLedger、ステータス管理、条件マッチング</p></div>
+    <div class="card"><h4><code>knowledge/</code></h4><p>トレーディング規則、コンテキスト</p></div>
+    <div class="card"><h4><code>orchestrator/</code></h4><p>AIOrchestrator — エージェント間調整</p></div>
+    <div class="card"><h4><code>skills/</code></h4><p>SkillRegistry / ADK FunctionTool 対応のスキル群</p></div>
+    <div class="card"><h4><code>models/</code></h4><p>EdgeHypothesis, MarketAnalysis, VirtualTrade ほか 9 型</p></div>
+    <div class="card"><h4><code>services/</code></h4><p>AI サービス層 (Research / Plan / Reflection など 13)</p></div>
+    <div class="card"><h4><code>repositories/</code></h4><p>Prisma → Supabase の永続化層</p></div>
+    <div class="card"><h4><code>controllers/</code> · <code>routes/</code></h4><p>Express REST API エンドポイント</p></div>
+    <div class="card"><h4><code>bridge/</code></h4><p>Side-A / Side-B 変換層 (Screening, Materialization)</p></div>
+    <div class="card"><h4><code>adk/</code></h4><p><span class="badge accent">サイドカー</span> ADK 段階導入。撤退時は丸ごと削除可能</p></div>
+    <div class="card"><h4><code>jobs/</code> · <code>cli/</code></h4><p>バッチ / CLI ユーティリティ</p></div>
+    <div class="card"><h4><code>tests/</code> · <code>__tests__/</code></h4><p>128+ テスト</p></div>
+  </div>
+</section>
+
+<!-- ============================================================== -->
+<section id="s03">
+  <div class="sec-head"><span class="sec-num">03</span><h2>PDCA ループ — 7 状態のステートマシン</h2></div>
+  <p class="sec-tagline">市場のオープン/クローズと持ち玉の有無に応じて状態遷移する。各状態は別の責務とエージェント呼出パターンを持つ。</p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 880 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="PDCA loop state diagram">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c9cff"/>
+        </marker>
+        <style>
+          .node rect { fill: #161a26; stroke: #7c9cff; stroke-width: 1.2; rx: 14; ry: 14; }
+          .node text { fill: #e6e9f2; font: 13px ui-monospace, monospace; text-anchor: middle; }
+          .node .sub { fill: #9aa3b8; font: 11px sans-serif; }
+          .edge { stroke: #7c9cff; stroke-width: 1.2; fill: none; opacity: 0.65; }
+          .lbl { fill: #6b7488; font: 11px ui-monospace, monospace; text-anchor: middle; }
+        </style>
+      </defs>
+      <!-- IDLE -->
+      <g class="node"><rect x="370" y="20" width="140" height="50"/>
+        <text x="440" y="42">IDLE</text><text class="sub" x="440" y="60">市場閉場</text></g>
+      <!-- SESSION_OPEN -->
+      <g class="node"><rect x="650" y="100" width="180" height="50"/>
+        <text x="740" y="122">SESSION_OPEN</text><text class="sub" x="740" y="140">ベース戦略立案</text></g>
+      <!-- MONITORING -->
+      <g class="node"><rect x="650" y="200" width="180" height="50"/>
+        <text x="740" y="222">MONITORING</text><text class="sub" x="740" y="240">15分〜1h ごとの監視</text></g>
+      <!-- EVALUATING -->
+      <g class="node"><rect x="370" y="300" width="180" height="50"/>
+        <text x="460" y="322">EVALUATING_ENTRY</text><text class="sub" x="460" y="340">エントリー精密チェック</text></g>
+      <!-- MANAGING -->
+      <g class="node"><rect x="90" y="300" width="180" height="50"/>
+        <text x="180" y="322">MANAGING_POSITION</text><text class="sub" x="180" y="340">出口判断</text></g>
+      <!-- REFLECTING -->
+      <g class="node"><rect x="50" y="200" width="160" height="50"/>
+        <text x="130" y="222">REFLECTING</text><text class="sub" x="130" y="240">学び抽出</text></g>
+      <!-- REVISING -->
+      <g class="node"><rect x="50" y="100" width="180" height="50"/>
+        <text x="140" y="122">REVISING_STRATEGY</text><text class="sub" x="140" y="140">市場変化 → 修正</text></g>
+      <!-- edges -->
+      <path class="edge" d="M 510 45 Q 600 50 670 110" marker-end="url(#arrow)"/>
+      <text class="lbl" x="595" y="65">market open</text>
+      <path class="edge" d="M 740 150 L 740 200" marker-end="url(#arrow)"/>
+      <path class="edge" d="M 700 250 Q 600 290 555 305" marker-end="url(#arrow)"/>
+      <text class="lbl" x="615" y="295">条件接近</text>
+      <path class="edge" d="M 370 325 L 275 325" marker-end="url(#arrow)"/>
+      <text class="lbl" x="325" y="315">entry</text>
+      <path class="edge" d="M 180 300 Q 150 270 130 250" marker-end="url(#arrow)"/>
+      <text class="lbl" x="200" y="270">exit</text>
+      <path class="edge" d="M 130 200 L 130 150" marker-end="url(#arrow)"/>
+      <text class="lbl" x="160" y="180">lessons</text>
+      <path class="edge" d="M 200 110 Q 280 60 370 45" marker-end="url(#arrow)"/>
+      <text class="lbl" x="300" y="75">replan / re-idle</text>
+      <!-- MONITORING self loop -->
+      <path class="edge" d="M 830 215 Q 870 225 830 240" marker-end="url(#arrow)"/>
+      <text class="lbl" x="855" y="230">tick</text>
+    </svg>
+    <figcaption>src/side-b/agent/pdcaLoop.ts — 7 状態の遷移</figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================== -->
+<section id="s04">
+  <div class="sec-head"><span class="sec-num">04</span><h2>1 サイクルのデータフロー</h2></div>
+  <p class="sec-tagline">市場データ取得 → Lens 並列計算 → 仮説生成 → DSL 化 → 検証 → 台帳更新 → 仮想トレード → 学び抽出 → 進化ループへ。</p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 980 540" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Data flow diagram">
+      <defs>
+        <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#6ee7c7"/>
+        </marker>
+        <style>
+          .b rect { rx: 10; ry: 10; stroke-width: 1.2; }
+          .b text { font: 12px ui-monospace, monospace; fill: #e6e9f2; text-anchor: middle; }
+          .b .role { font: 10.5px sans-serif; fill: #9aa3b8; }
+          .flow { stroke: #6ee7c7; stroke-width: 1.3; fill: none; opacity: 0.7; }
+          .lane { fill: #11141c; stroke: #232838; stroke-width: 1; }
+          .lane-label { fill: #6b7488; font: 11px ui-monospace, monospace; }
+        </style>
+      </defs>
+      <!-- lanes -->
+      <rect class="lane" x="20" y="20" width="940" height="80" rx="10"/>
+      <text class="lane-label" x="32" y="40">INPUT</text>
+      <rect class="lane" x="20" y="115" width="940" height="80" rx="10"/>
+      <text class="lane-label" x="32" y="135">OBSERVE</text>
+      <rect class="lane" x="20" y="210" width="940" height="80" rx="10"/>
+      <text class="lane-label" x="32" y="230">HYPOTHESIZE & PLAN</text>
+      <rect class="lane" x="20" y="305" width="940" height="80" rx="10"/>
+      <text class="lane-label" x="32" y="325">VERIFY (parallel)</text>
+      <rect class="lane" x="20" y="400" width="940" height="80" rx="10"/>
+      <text class="lane-label" x="32" y="420">EXECUTE & LEARN</text>
+
+      <!-- INPUT -->
+      <g class="b">
+        <rect x="120" y="50" width="180" height="40" fill="#1b2230" stroke="#62c5ff"/>
+        <text x="210" y="68">OHLCV / 指標</text><text class="role" x="210" y="84">Twelve Data API</text>
+      </g>
+      <g class="b">
+        <rect x="380" y="50" width="180" height="40" fill="#1b2230" stroke="#62c5ff"/>
+        <text x="470" y="68">cTrader ポジション</text><text class="role" x="470" y="84">実トレード参照</text>
+      </g>
+      <g class="b">
+        <rect x="640" y="50" width="200" height="40" fill="#1b2230" stroke="#62c5ff"/>
+        <text x="740" y="68">既存 Lessons / Notes</text><text class="role" x="740" y="84">Supabase + AgentMemory</text>
+      </g>
+
+      <!-- OBSERVE -->
+      <g class="b">
+        <rect x="300" y="135" width="380" height="40" fill="#181f15" stroke="#6ee7c7"/>
+        <text x="490" y="153">Lens × 8 (並列, 純関数)</text>
+        <text class="role" x="490" y="170">Dow / SMC / Wyckoff / Volatility / TimeSession / Pattern / ChartPattern / Current</text>
+      </g>
+
+      <!-- HYPOTHESIZE -->
+      <g class="b">
+        <rect x="60" y="232" width="170" height="40" fill="#1a1d2a" stroke="#7c9cff"/>
+        <text x="145" y="252">HypothesisGenerator</text><text class="role" x="145" y="268">仮説生成</text>
+      </g>
+      <g class="b">
+        <rect x="260" y="232" width="170" height="40" fill="#1a1d2a" stroke="#7c9cff"/>
+        <text x="345" y="252">StrategyThinker</text><text class="role" x="345" y="268">DSL 化</text>
+      </g>
+      <g class="b">
+        <rect x="460" y="232" width="170" height="40" fill="#1a1d2a" stroke="#7c9cff"/>
+        <text x="545" y="252">Devil's Advocate</text><text class="role" x="545" y="268">反証</text>
+      </g>
+      <g class="b">
+        <rect x="660" y="232" width="240" height="40" fill="#1a1d2a" stroke="#7c9cff"/>
+        <text x="780" y="252">Bull / Bear Debate</text><text class="role" x="780" y="268">対話的検証</text>
+      </g>
+
+      <!-- VERIFY -->
+      <g class="b">
+        <rect x="60" y="327" width="190" height="40" fill="#1e1a1a" stroke="#f5b942"/>
+        <text x="155" y="347">ScreeningOrchestrator</text><text class="role" x="155" y="363">事前 BT (Side-A)</text>
+      </g>
+      <g class="b">
+        <rect x="270" y="327" width="160" height="40" fill="#1e1a1a" stroke="#f5b942"/>
+        <text x="350" y="347">BacktestScreening</text><text class="role" x="350" y="363">TypeScript</text>
+      </g>
+      <g class="b">
+        <rect x="450" y="327" width="160" height="40" fill="#1e1a1a" stroke="#f5b942"/>
+        <text x="530" y="347">WalkForward</text><text class="role" x="530" y="363">Python / vectorbt</text>
+      </g>
+      <g class="b">
+        <rect x="630" y="327" width="160" height="40" fill="#1e1a1a" stroke="#f5b942"/>
+        <text x="710" y="347">MonteCarlo</text><text class="role" x="710" y="363">TypeScript</text>
+      </g>
+      <g class="b">
+        <rect x="810" y="327" width="130" height="40" fill="#1e1a1a" stroke="#f5b942"/>
+        <text x="875" y="347">BuyAndHold</text><text class="role" x="875" y="363">ベンチマーク</text>
+      </g>
+
+      <!-- EXECUTE -->
+      <g class="b">
+        <rect x="60" y="422" width="170" height="40" fill="#1b2227" stroke="#5dd39e"/>
+        <text x="145" y="442">EdgeLedger</text><text class="role" x="145" y="458">confirmed / rejected</text>
+      </g>
+      <g class="b">
+        <rect x="260" y="422" width="180" height="40" fill="#1b2227" stroke="#5dd39e"/>
+        <text x="350" y="442">VirtualTrade Exec</text><text class="role" x="350" y="458">VirtualPortfolio</text>
+      </g>
+      <g class="b">
+        <rect x="470" y="422" width="170" height="40" fill="#1b2227" stroke="#5dd39e"/>
+        <text x="555" y="442">Reflection AI</text><text class="role" x="555" y="458">lessons 抽出</text>
+      </g>
+      <g class="b">
+        <rect x="670" y="422" width="170" height="40" fill="#1b2227" stroke="#5dd39e"/>
+        <text x="755" y="442">AgentMemory</text><text class="role" x="755" y="458">DB + メモリ</text>
+      </g>
+
+      <!-- flow arrows down between lanes -->
+      <path class="flow" d="M 490 95 L 490 135" marker-end="url(#arr2)"/>
+      <path class="flow" d="M 490 175 L 490 215" marker-end="url(#arr2)"/>
+      <path class="flow" d="M 490 275 L 490 310" marker-end="url(#arr2)"/>
+      <path class="flow" d="M 490 370 L 490 410" marker-end="url(#arr2)"/>
+    </svg>
+    <figcaption>市場データ → Lens → 仮説/計画 → 並列検証 → 実行 / 学習</figcaption>
+  </figure>
+
+  <div class="callout warn">
+    <strong>Promotion Gate (Phase 4c 確定):</strong>
+    エッジ昇格は <code>PF &gt; 1.5</code> <em>かつ</em> <code>WF &lt; 0.3</code> の <strong>両条件同時成立</strong>が必須。
+    どちらか片方では <code>rejected</code>。
+    <span class="path">/src/side-b/config/validationThresholds.ts</span>
+  </div>
+</section>
+
+<!-- ============================================================== -->
+<section id="s05">
+  <div class="sec-head"><span class="sec-num">05</span><h2>エージェント群 — 16+ 体</h2></div>
+  <p class="sec-tagline"><span class="path">/src/side-b/agents/</span> に集約。LLM 利用 / 決定論的の区別を意識して構成されている。</p>
+
+  <div class="legend">
+    <span><span class="swatch" style="background:#7c9cff"></span>上位 (判断)</span>
+    <span><span class="swatch" style="background:#f5b942"></span>中位 (検証統括)</span>
+    <span><span class="swatch" style="background:#6ee7c7"></span>進化系</span>
+    <span><span class="swatch" style="background:#62c5ff"></span>副専門家</span>
+  </div>
+
+  <div class="tabs">
+    <div class="tab-strip" role="tablist">
+      <button class="active" data-tab="t-top">上位 (判断するエージェント)</button>
+      <button data-tab="t-mid">中位 (束ねるエージェント)</button>
+      <button data-tab="t-evo">進化系 (Phase 5A+)</button>
+      <button data-tab="t-aux">副専門家</button>
+    </div>
+
+    <div id="t-top" class="tab-panel active">
+      <div class="grid cols-2">
+        <div class="card" style="border-left: 3px solid #7c9cff;">
+          <h4>StrategistAgent</h4>
+          <p>検証結果の総合判定と LLM 解釈。入力: Backtester 結果 + Lens 特徴量 → 出力: 最終 approval / rejection。</p>
+        </div>
+        <div class="card" style="border-left: 3px solid #7c9cff;">
+          <h4>HypothesisGeneratorAgent</h4>
+          <p>観察から仮説を生成する専門役。MarketAnalysis + LensFeatureSnapshot → EdgeHypothesis 群 (<code>unverified</code>)。</p>
+        </div>
+        <div class="card" style="border-left: 3px solid #7c9cff;">
+          <h4>DevilsAdvocateAgent</h4>
+          <p>戦略を叩く反証専任。AITradeScenario + 検証結果 → リスク指摘・改訂提案。</p>
+        </div>
+        <div class="card" style="border-left: 3px solid #7c9cff;">
+          <h4>DiscoveryAgent</h4>
+          <p>週次でレンズ有効性を分析する調査員。仮想トレード履歴・レンズ別パフォーマンス → Discovery レポート。</p>
+        </div>
+        <div class="card" style="border-left: 3px solid #7c9cff;">
+          <h4>GenerationReflectionAgent</h4>
+          <p>進化ループ世代単位の学び抽出。世代結果 + バックテスト結果 → Generation Lesson。</p>
+        </div>
+        <div class="card" style="border-left: 3px solid #7c9cff;">
+          <h4>BullBearDebateAgent</h4>
+          <p>強気 / 弱気シナリオの対話的検証。MarketAnalysis + 仮説候補 → 対話スコア / リスク調整。</p>
+        </div>
+      </div>
+    </div>
+
+    <div id="t-mid" class="tab-panel">
+      <div class="grid cols-2">
+        <div class="card" style="border-left: 3px solid #f5b942;">
+          <h4>BacktesterAgent <span class="badge">決定論的</span></h4>
+          <p>検証ツール群の並列実行統括。<strong>LLM 不使用</strong>のオーケストレーター。AITradeScenario → ScreeningResult。</p>
+        </div>
+        <div class="card" style="border-left: 3px solid #f5b942;">
+          <h4>StrategyBacktesterAgent</h4>
+          <p>Strategy DSL のバックテスト実行と結果キャッシュ管理。JSON DSL → BacktestResult (PF, WF など)。</p>
+        </div>
+      </div>
+    </div>
+
+    <div id="t-evo" class="tab-panel">
+      <div class="grid cols-2">
+        <div class="card" style="border-left: 3px solid #6ee7c7;">
+          <h4>MutationAgent</h4>
+          <p>LLM による戦略変異オペレーター。親戦略 → 変異戦略 (JSON DSL)。</p>
+        </div>
+        <div class="card" style="border-left: 3px solid #6ee7c7;">
+          <h4>CrossoverAgent</h4>
+          <p>LLM による戦略交配オペレーター。両親戦略 → 交配戦略 (JSON DSL)。</p>
+        </div>
+        <div class="card" style="border-left: 3px solid #6ee7c7;">
+          <h4>MetaEvolutionAgent</h4>
+          <p>進化パラメーター自体を最適化。EvolutionLoop 履歴メトリクス → 調整指示。</p>
+        </div>
+        <div class="card" style="border-left: 3px solid #6ee7c7;">
+          <h4>PromptMutationAgent</h4>
+          <p>エージェントプロンプト自体を変異対象に。プロンプト + 仮説検証結果 → 変異プロンプト。</p>
+        </div>
+      </div>
+    </div>
+
+    <div id="t-aux" class="tab-panel">
+      <div class="grid cols-2">
+        <div class="card" style="border-left: 3px solid #62c5ff;">
+          <h4>BehaviorDescriptorAgent</h4>
+          <p>戦略の行動記述子 (trend-following / mean-reversion 等) を抽出。Quality-Diversity アーカイブの軸として利用。</p>
+        </div>
+        <div class="card" style="border-left: 3px solid #62c5ff;">
+          <h4>FundamentalsResearcher (構想)</h4>
+          <p>2026-04-24 計画。ファンダ + Web 取得の新エージェント。現 <code>researchAIService</code> は特徴量抽出器に役割確定。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================== -->
+<section id="s06">
+  <div class="sec-head"><span class="sec-num">06</span><h2>サービス層 — 13 サービス</h2></div>
+  <p class="sec-tagline"><span class="path">/src/side-b/services/</span>。エージェントは「振る舞いを持つ思考主体」、サービスは「ユースケースを束ねる関数集」。</p>
+
+  <table>
+    <thead><tr><th>サービス</th><th>責務</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">planAIService</td><td>Strategy Thinker：分析結果から条件付き戦略を生成</td></tr>
+      <tr><td class="mono">researchAIService</td><td>Market Analyst：チャート + インジケーターから詳細分析 (将来は特徴量抽出器へ役割移管)</td></tr>
+      <tr><td class="mono">reflectionAIService</td><td>Reflection AI：トレード結果から学びを抽出</td></tr>
+      <tr><td class="mono">lessonSimilarityService</td><td>過去の learnings との類似度検索 (AgentMemory 活用)</td></tr>
+      <tr><td class="mono">virtualTradeService</td><td>仮想トレードの実行・記録</td></tr>
+      <tr><td class="mono">tradeVerificationService</td><td>トレード照合・一致判定</td></tr>
+      <tr><td class="mono">aiNoteService</td><td>AITradeNote (AI 用ノート) 生成・管理</td></tr>
+      <tr><td class="mono">comparisonService</td><td>Side-A との比較分析</td></tr>
+      <tr><td class="mono">cronSimilarityService</td><td>定期的な類似度チェック</td></tr>
+      <tr><td class="mono">summarySchedulerService</td><td>日次サマリー生成のスケジューリング</td></tr>
+      <tr><td class="mono">dataCleanupService</td><td>不要データの定期削除</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============================================================== -->
+<section id="s07">
+  <div class="sec-head"><span class="sec-num">07</span><h2>Lens 体系 — 8 本の純粋関数</h2></div>
+  <p class="sec-tagline">
+    各レンズは <strong>副作用なし・他レンズ依存なし・決定性あり</strong>。<code>LensAggregator</code> が並列実行し <code>LensFeatureSnapshot</code> に集約する。決定論性は ADK 採用後も死守する不可侵領域。
+  </p>
+
+  <div class="grid cols-4">
+    <div class="card"><h4>DowTheoryLens</h4><p>トレンド方向・強度</p></div>
+    <div class="card"><h4>SMCLens</h4><p>Smart Money Concept の支抵</p></div>
+    <div class="card"><h4>WyckoffLens</h4><p>Wyckoff 波動段階</p></div>
+    <div class="card"><h4>VolatilityRegimeLens</h4><p>Low / Med / High</p></div>
+    <div class="card"><h4>TimeSessionLens</h4><p>時間帯別セッション</p></div>
+    <div class="card"><h4>ChartPatternLens</h4><p>古典パターン認識</p></div>
+    <div class="card"><h4>PatternLens</h4><p>統計的パターン検出</p></div>
+    <div class="card"><h4>CurrentAnalysisLens</h4><p>現時点の市場分析</p></div>
+  </div>
+
+  <pre style="background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 16px; overflow:auto; font-size: 12.5px; color: #cfd6e8;">interface LensFeatureSnapshot {
+  timestamp: Date;
+  symbol: string;
+  lenses: {
+    dow?: DowTheoryOutput;
+    smc?: SMCOutput;
+    wyckoff?: WyckoffOutput;
+    volatility?: VolatilityRegimeOutput;
+    timeSession?: TimeSessionOutput;
+    chartPattern?: ChartPatternOutput;
+    pattern?: PatternOutput;
+    currentAnalysis?: CurrentAnalysisOutput;
+  };
+}</pre>
+</section>
+
+<!-- ============================================================== -->
+<section id="s08">
+  <div class="sec-head"><span class="sec-num">08</span><h2>Edge Ledger — エッジ台帳のライフサイクル</h2></div>
+  <p class="sec-tagline">仮説は最初 <code>unverified</code>。検証パイプラインを通って <code>confirmed</code> に昇格、または <code>rejected</code> / <code>stale</code> として記録され続ける。</p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 880 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EdgeHypothesis state lifecycle">
+      <defs>
+        <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#9aa3b8"/>
+        </marker>
+        <style>
+          .s { fill: #161a26; stroke-width: 1.4; }
+          .sl { stroke: #9aa3b8; fill: none; stroke-width: 1.2; opacity: 0.6; }
+          .lbl2 { font: 11px ui-monospace, monospace; fill: #9aa3b8; text-anchor: middle; }
+          .st { font: 12px ui-monospace, monospace; fill: #e6e9f2; text-anchor: middle; }
+        </style>
+      </defs>
+      <rect class="s" x="20"  y="100" width="140" height="44" rx="22" stroke="#7c9cff"/>
+      <text class="st" x="90"  y="127">unverified</text>
+      <rect class="s" x="200" y="100" width="160" height="44" rx="22" stroke="#62c5ff"/>
+      <text class="st" x="280" y="127">screening_passed</text>
+      <rect class="s" x="400" y="100" width="140" height="44" rx="22" stroke="#f5b942"/>
+      <text class="st" x="470" y="127">testing</text>
+      <rect class="s" x="580" y="50"  width="140" height="44" rx="22" stroke="#5dd39e"/>
+      <text class="st" x="650" y="77">confirmed</text>
+      <rect class="s" x="580" y="150" width="140" height="44" rx="22" stroke="#ff6b8a"/>
+      <text class="st" x="650" y="177">rejected</text>
+      <rect class="s" x="760" y="50"  width="100" height="44" rx="22" stroke="#9aa3b8"/>
+      <text class="st" x="810" y="77">stale</text>
+      <rect class="s" x="200" y="190" width="200" height="44" rx="22" stroke="#9aa3b8"/>
+      <text class="st" x="300" y="217">insufficient_data</text>
+      <rect class="s" x="420" y="190" width="180" height="44" rx="22" stroke="#9aa3b8"/>
+      <text class="st" x="510" y="217">not_testable</text>
+
+      <path class="sl" d="M 160 122 L 200 122" marker-end="url(#arr3)"/>
+      <path class="sl" d="M 360 122 L 400 122" marker-end="url(#arr3)"/>
+      <path class="sl" d="M 540 122 Q 560 100 580 80"  marker-end="url(#arr3)"/>
+      <text class="lbl2" x="560" y="98">PF&gt;1.5 ∧ WF&lt;0.3</text>
+      <path class="sl" d="M 540 130 Q 560 150 580 170" marker-end="url(#arr3)"/>
+      <text class="lbl2" x="560" y="160">それ以外</text>
+      <path class="sl" d="M 720 72  L 760 72"  marker-end="url(#arr3)"/>
+      <text class="lbl2" x="740" y="62">劣化</text>
+      <path class="sl" d="M 280 144 L 280 190" marker-end="url(#arr3)"/>
+      <path class="sl" d="M 470 144 L 480 190" marker-end="url(#arr3)"/>
+    </svg>
+    <figcaption>EdgeStatus の遷移 — 8 ステータス</figcaption>
+  </figure>
+
+  <div class="callout">
+    <strong>定義場所:</strong>
+    <span class="path">/src/side-b/models/edgeHypothesis.ts</span>,
+    判定ロジックは <span class="path">/src/side-b/ledger/EdgeLedger.ts</span>。
+    昇格しきい値は <span class="path">/src/side-b/config/validationThresholds.ts</span> の <code>PROMOTION_GATE</code>。
+  </div>
+</section>
+
+<!-- ============================================================== -->
+<section id="s09">
+  <div class="sec-head"><span class="sec-num">09</span><h2>Strategy DSL — JSON 戦略言語</h2></div>
+  <p class="sec-tagline">エージェントの出力する戦略はテキストではなく構造化 JSON。Mutation / Crossover / Backtest 全てがこのスキーマを共通言語にする。</p>
+
+  <details open>
+    <summary><strong>StrategyDSL の骨格</strong></summary>
+    <div class="body">
+<pre style="background: var(--bg); border-radius: 8px; padding: 14px; margin: 8px 0 0; overflow:auto; font-size: 12.5px; color: #cfd6e8;">interface StrategyDSL {
+  id: string; name: string; description: string;
+
+  entryFilter: {
+    conditions: Array&lt;{
+      indicator: string;
+      operator: '&lt;' | '&gt;' | '=' | 'between';
+      value: number;
+    }&gt;;
+    logic: 'AND' | 'OR';
+  };
+
+  exitRules: {
+    takeProfit: { pips: number };
+    stopLoss:   { pips: number };
+    trailingStop?: { pips: number };
+    timeExit?:     { barCount: number };
+  };
+
+  riskManagement: {
+    positionSize: number;
+    maxDailyLoss: number;
+  };
+
+  source: 'manual' | 'mutation' | 'crossover' | 'human';
+  generation: number;
+  parentIds?: string[];
+  fitness?: { pf: number; sharpe: number; winRate: number };
+}</pre>
+    </div>
+  </details>
+
+  <div class="grid cols-3">
+    <div class="card"><h4>DSLEvaluator</h4><p>JSON のバリデーション・マッピング</p></div>
+    <div class="card"><h4>SurrogateFitnessSimulator</h4><p>高速代理フィットネス評価</p></div>
+    <div class="card"><h4>ExecutionSimulation</h4><p>OHLCV 上の取引シミュレーション</p></div>
+  </div>
+</section>
+
+<!-- ============================================================== -->
+<section id="s10">
+  <div class="sec-head"><span class="sec-num">10</span><h2>進化ループ — Phase 6 / Filter Evolution</h2></div>
+  <p class="sec-tagline">
+    <span class="path">/src/side-b/evolution/</span> 27+ ファイル。Quality-Diversity アーカイブと多目的最適化を組み合わせ、戦略集団 (<code>data/evolution/strategy-population.json</code>) を世代交代させる。
+  </p>
+
+  <figure class="diagram">
+    <svg viewBox="0 0 940 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Evolution loop">
+      <defs>
+        <marker id="arr4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#6ee7c7"/>
+        </marker>
+        <style>
+          .ev rect { fill: #161a26; stroke: #6ee7c7; stroke-width: 1.2; rx: 12; ry: 12; }
+          .ev text { font: 12px ui-monospace, monospace; fill: #e6e9f2; text-anchor: middle; }
+          .ev .role { font: 10.5px sans-serif; fill: #9aa3b8; }
+          .ee { stroke: #6ee7c7; stroke-width: 1.4; fill: none; opacity: 0.7; }
+        </style>
+      </defs>
+
+      <g class="ev"><rect x="380" y="20" width="180" height="50"/>
+        <text x="470" y="42">StrategyPopulation</text><text class="role" x="470" y="60">Gen i</text></g>
+
+      <g class="ev"><rect x="40" y="120" width="200" height="50"/>
+        <text x="140" y="142">MultiGenerationRunner</text><text class="role" x="140" y="160">並列評価</text></g>
+      <g class="ev"><rect x="280" y="120" width="200" height="50"/>
+        <text x="380" y="142">SurrogateFitness</text><text class="role" x="380" y="160">代理フィットネス</text></g>
+      <g class="ev"><rect x="520" y="120" width="200" height="50"/>
+        <text x="620" y="142">OOS Validation</text><text class="role" x="620" y="160">Out-of-Sample</text></g>
+      <g class="ev"><rect x="760" y="120" width="160" height="50"/>
+        <text x="840" y="142">BehaviorDescriptor</text><text class="role" x="840" y="160">行動軸</text></g>
+
+      <g class="ev"><rect x="40" y="220" width="200" height="50"/>
+        <text x="140" y="242">ParentPoolPolicy</text><text class="role" x="140" y="260">親選択</text></g>
+      <g class="ev"><rect x="280" y="220" width="200" height="50"/>
+        <text x="380" y="242">Mutation / Crossover</text><text class="role" x="380" y="260">LLM オペレーター</text></g>
+      <g class="ev"><rect x="520" y="220" width="200" height="50"/>
+        <text x="620" y="242">AdaptiveRepair</text><text class="role" x="620" y="260">無効 DSL 修復</text></g>
+      <g class="ev"><rect x="760" y="220" width="160" height="50"/>
+        <text x="840" y="242">QD Archive</text><text class="role" x="840" y="260">多目的最適化</text></g>
+
+      <g class="ev"><rect x="280" y="300" width="200" height="50"/>
+        <text x="380" y="322">PromotionGatePolicy</text><text class="role" x="380" y="340">EdgeLedger 昇格</text></g>
+      <g class="ev"><rect x="520" y="300" width="200" height="50"/>
+        <text x="620" y="322">SurrogateRescue</text><text class="role" x="620" y="340">失敗世代の救済</text></g>
+
+      <path class="ee" d="M 470 70 L 470 100 L 140 100 L 140 120" marker-end="url(#arr4)"/>
+      <path class="ee" d="M 470 70 L 380 120" marker-end="url(#arr4)"/>
+      <path class="ee" d="M 470 70 L 620 120" marker-end="url(#arr4)"/>
+      <path class="ee" d="M 470 70 L 840 120" marker-end="url(#arr4)"/>
+      <path class="ee" d="M 140 170 L 140 220" marker-end="url(#arr4)"/>
+      <path class="ee" d="M 380 170 L 380 220" marker-end="url(#arr4)"/>
+      <path class="ee" d="M 620 170 L 620 220" marker-end="url(#arr4)"/>
+      <path class="ee" d="M 840 170 L 840 220" marker-end="url(#arr4)"/>
+      <path class="ee" d="M 380 270 L 380 300" marker-end="url(#arr4)"/>
+      <path class="ee" d="M 620 270 L 620 300" marker-end="url(#arr4)"/>
+    </svg>
+    <figcaption>EvolutionLoop の主要コンポーネント</figcaption>
+  </figure>
+
+  <h3>Filter Evolution マイルストーン</h3>
+  <div class="grid cols-4">
+    <div class="card" style="border-color: rgba(93,211,158,0.35);"><span class="badge ok">完了</span><h4>M2</h4><p>Filter Evolution Phase 1 — Indicator Selection</p></div>
+    <div class="card" style="border-color: rgba(245,185,66,0.35);"><span class="badge warn">実装中</span><h4>M3</h4><p>Filter Evolution Phase 2 — Entry Condition Filter。本番スモーク後に mutation 撤廃を再判断 (後ろ倒し)</p></div>
+    <div class="card" style="border-color: rgba(93,211,158,0.35);"><span class="badge ok">完了</span><h4>M4</h4><p>Filter Evolution Phase 3 — Exit Condition Filter</p></div>
+    <div class="card"><span class="badge todo">予定</span><h4>M5+</h4><p>未定 (mutation 撤廃判断後)</p></div>
+  </div>
+</section>
+
+<!-- ============================================================== -->
+<section id="s11">
+  <div class="sec-head"><span class="sec-num">11</span><h2>ADK 段階導入 — サイドカー方式</h2></div>
+  <p class="sec-tagline">
+    Google ADK は <code>src/side-b/adk/</code> サイドカー内に隔離し、既存 → ADK 方向の依存は一切持たせない。撤退時は <code>git rm -rf src/side-b/adk/</code> だけで完全撤去できる構造。
+  </p>
+
+  <div class="step-row">
+    <div class="step-cell done"><div class="lbl">Step 0</div><div class="title">設計ガード</div><div class="dot"></div></div>
+    <div class="step-cell done"><div class="lbl">Step 1</div><div class="title">Skill→Tool</div><div class="dot"></div></div>
+    <div class="step-cell done"><div class="lbl">Step 2</div><div class="title">Tracing</div><div class="dot"></div></div>
+    <div class="step-cell done"><div class="lbl">Step 3</div><div class="title">PDCA Sequential</div><div class="dot"></div></div>
+    <div class="step-cell done"><div class="lbl">Step 4</div><div class="title">Lens Parallel</div><div class="dot"></div></div>
+    <div class="step-cell todo"><div class="lbl">Step 5</div><div class="title">Evo LoopAgent</div><div class="dot"></div></div>
+    <div class="step-cell todo"><div class="lbl">Step 6</div><div class="title">採否判断</div><div class="dot"></div></div>
+  </div>
+
+  <div class="grid cols-2">
+    <div class="card">
+      <h4>採用する範囲</h4>
+      <p>Runner / SequentialAgent / ParallelAgent / LoopAgent / FunctionTool / Tracing。すべて既存ロジックを <em>合成でラップ</em>するのみ。</p>
+    </div>
+    <div class="card">
+      <h4>採用しない範囲 (既存維持)</h4>
+      <p>PromptRegistry (<code>.md</code> 外部化 — 進化変異対象のため), SkillRegistry API, AgentLoop/PDCALoop 内部, AIProvider (OpenRouter <code>reasoning_effort</code> 維持), strategy_dsl / EdgeLedger / Lens / Evolution の決定論性, Prisma ベース AgentMemory。</p>
+    </div>
+  </div>
+
+  <h3>撤退基準 (1 つでも該当したら撤退)</h3>
+  <table>
+    <thead><tr><th style="width:60px">#</th><th>条件</th><th>検証方法</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">1</td><td>OpenRouter 経由で <code>reasoning_effort</code> が伝達されない</td><td>LLM ログ検証</td></tr>
+      <tr><td class="mono">2</td><td>PromptRegistry スコアが 10% 以上劣化</td><td>同一仮説スコア比較</td></tr>
+      <tr><td class="mono">3</td><td>ADK SDK が 6 ヶ月間メジャー更新されない</td><td>リリース日確認</td></tr>
+      <tr><td class="mono">4</td><td>Google が ADK を deprecated 宣言</td><td>公式ドキュメント</td></tr>
+      <tr><td class="mono">5</td><td>ユーザー判断で継続不適切</td><td>Neko さん判断 (理由不問)</td></tr>
+    </tbody>
+  </table>
+
+  <h3>サイドカー内部構成</h3>
+<pre style="background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 14px; overflow:auto; font-size: 12.5px; color: #cfd6e8;">src/side-b/adk/
+├── adapters/
+│   ├── jsonSchemaToZod.ts       JSONSchema → Zod
+│   ├── skillContext.ts          ADK Context → SkillContext
+│   ├── skillRegistryToAdkTools.ts  SkillRegistry → FunctionTool[]
+│   └── _testHelpers.ts
+├── tracing/
+│   ├── traceTypes.ts            AdkTraceEvent / AdkTraceEventKind
+│   ├── traceSink.ts             plugin インターフェース
+│   ├── noopTraceSink.ts         production default
+│   ├── inMemoryTraceSink.ts     tests / local
+│   └── traceSummaries.ts
+├── agents/
+│   ├── runnerSmoke.ts           Runner / LlmAgent factory
+│   ├── sequentialSmoke.ts       SequentialAgent + SubAgent
+│   ├── pdcaDryRunWrapper.ts     PDCALoop SequentialAgent ラップ
+│   └── lensParallelSmoke.ts     Lens ParallelAgent
+└── AGENTS.md                    adk 専門ルール</pre>
+</section>
+
+<!-- ============================================================== -->
+<section id="s12">
+  <div class="sec-head"><span class="sec-num">12</span><h2>永続化と外部依存</h2></div>
+
+  <div class="grid cols-2">
+    <div class="card">
+      <h4>DB — Supabase via Prisma</h4>
+      <ul style="margin: 6px 0 0; padding-left: 18px; color: var(--text-dim); font-size: 13.5px;">
+        <li><code>ai_market_research</code> — researchRepository</li>
+        <li><code>ai_trade_plan</code> — planRepository</li>
+        <li><code>ai_trade_note</code> — aiNoteRepository</li>
+        <li><code>virtual_trade</code> — virtualTradeRepository</li>
+        <li><code>virtual_portfolio</code> — portfolioRepository</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>File — <code>data/evolution/</code></h4>
+      <p>戦略集団スナップショット <code>strategy-population.json</code> + 多数のタイムスタンプ別 <code>.bak</code>。世代交代の入出力ペイロード。</p>
+    </div>
+    <div class="card">
+      <h4>External API</h4>
+      <ul style="margin: 6px 0 0; padding-left: 18px; color: var(--text-dim); font-size: 13.5px;">
+        <li><strong>OpenAI / Anthropic</strong> via OpenRouter (<code>reasoning_effort</code> 必須)</li>
+        <li><strong>Twelve Data</strong> — OHLCV + 指標</li>
+        <li><strong>cTrader</strong> — 実ポジション取得 (MarketDataService 自己配線, PR #203)</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>AgentMemory</h4>
+      <p>DB + メモリ層のハイブリッド。lessons の類似度検索 (<code>lessonSimilarityService</code>) で過去の学びを参照。</p>
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <strong>macOS Icon ファイル汚染:</strong>
+    <code>git fetch</code> が <code>bad object refs/Icon?</code> で落ちたら、<span class="path">.git/refs</span> 内の <code>Icon?</code> ファイルを削除して復旧する。
+    (※ 本リポジトリでも多数発生中)
+  </div>
+</section>
+
+<!-- ============================================================== -->
+<section id="s13">
+  <div class="sec-head"><span class="sec-num">13</span><h2>設定 / モデル選択</h2></div>
+  <p class="sec-tagline">エージェントごとに利用 LLM を差し替え可能。reasoning モデル向けの <code>maxTokens</code> 集約は PR #204 で 10 万ベースに引き上げ済み。</p>
+
+  <div class="grid cols-2">
+    <div class="card">
+      <h4>per-agent モデル設定</h4>
+      <p>
+        <code>config.ai.models.&lt;key&gt;</code> + <code>modelFor()</code> + 環境変数 <code>AI_MODEL_&lt;KEY&gt;</code>。
+        グローバルデフォルトは <code>AI_MODEL</code>。
+      </p>
+    </div>
+    <div class="card">
+      <h4>maxTokens 集約</h4>
+      <p>
+        ハードコード 7 箇所を <span class="path">/src/config/aiTokenLimits.ts</span> 周辺に集約 (PR #204)。
+        reasoning モデルは 10 万ベース。
+      </p>
+    </div>
+    <div class="card">
+      <h4>プロンプト管理</h4>
+      <p>
+        <span class="path">/src/side-b/prompts/</span> に 24+ の <code>.md</code> を配置。
+        <code>__global__.md</code> / <code>__specialist_common__.md</code> を全エージェントに合成。
+        PromptRegistry が動的読込 + マクロ注入 (日付・シンボル等)。
+      </p>
+    </div>
+    <div class="card">
+      <h4>外部 <code>.md</code> 化の意義</h4>
+      <p>進化的探索の <strong>変異対象</strong>にプロンプト自体を含めるため、コード文字列リテラルではなくファイルとして版管理する。</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <strong>ts-node の <code>.ts/.json</code> 同名衝突:</strong>
+    同ディレクトリの同名 <code>.ts/.json</code> は <code>ts-node</code> で <code>.json</code> が優先解決され TS export が <code>undefined</code> 化する。
+    サブディレクトリ分離 + <code>fs.readFileSync</code> が安全。
+  </div>
+</section>
+
+<!-- ============================================================== -->
+<section id="s14">
+  <div class="sec-head"><span class="sec-num">14</span><h2>テスト / 観測性</h2></div>
+
+  <div class="grid cols-2">
+    <div class="card">
+      <h4>テスト構成 <span class="badge accent">128+ ファイル</span></h4>
+      <p>
+        正常系 / 境界値 / 異常系 を必須化。一致判定・レンズは決定性テスト。
+        ADK サイドカーは累計 <strong>177 cases PASS</strong> (Step 1–4)。
+      </p>
+    </div>
+    <div class="card">
+      <h4>Observability</h4>
+      <p>
+        実行スクリプト <span class="path">scripts/sideB_runtime_observability_smoke.ts</span> が
+        <span class="path">.observability-trace.json</span> を生成 (gitignore)。
+        <span class="path">docs/architecture/STEP_5_OBSERVABILITY_AUDIT.md</span> が監査記録。
+      </p>
+    </div>
+  </div>
+
+  <h3>Trace イベント体系 (ADK Tracing)</h3>
+  <table>
+    <thead><tr><th>イベント</th><th>意味</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">adk.subagent.started</td><td>sub-agent 開始</td></tr>
+      <tr><td class="mono">adk.subagent.completed</td><td>sub-agent 成功</td></tr>
+      <tr><td class="mono">adk.subagent.failed</td><td>sub-agent 失敗</td></tr>
+      <tr><td class="mono">adk.skill.executed</td><td>Skill 実行</td></tr>
+      <tr><td class="mono">adk.skill.error</td><td>Skill エラー</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout ok">
+    <strong>Phase F (2026-05-15) 実測:</strong>
+    PDCALoop Dry-Run Wrapper — <code>eventCount=4, duration=19ms</code> /
+    Lens ParallelAgent — <code>eventCount=6, duration=2ms (successes=2, failures=1)</code>。
+    1 lens 失敗時に他 lens が完走することを確認済み。
+  </div>
+
+  <h3>スモーク方針</h3>
+  <div class="callout">
+    <strong>1 PR 1 回原則:</strong>
+    初回 push 前に 1 回スモーク。Copilot 修正後は <code>jest</code> のみで push。
+    例外は DB / analysis-engine HTTP / <code>.env</code> / smoke 出力に触ったとき。
+  </div>
+</section>
+
+<hr class="divider"/>
+
+<section>
+  <h2>付録 — 参照ドキュメント (本ファイル正本化後)</h2>
+  <ul class="refs">
+    <li><span class="path">/AGENTS.md</span> — 全エージェント共通ルール</li>
+    <li><span class="path">/src/side-b/AGENTS.md</span> — Side-B 専門ルール</li>
+    <li><span class="path">/src/side-b/adk/AGENTS.md</span> — ADK サイドカー専門ルール</li>
+    <li><span class="path">/docs/architecture/ADK_ADOPTION.md</span> — ADK 採用記録 (現役)</li>
+    <li><span class="path">/docs/design/phase_x_bt_layer_audit.md</span> — BT 層 audit (現役)</li>
+    <li><span class="path">/docs/design/phase_6_7b_strategy_dsl_audit.md</span> — DSL audit (現役)</li>
+    <li><span class="path">/prisma/schema.prisma</span> — Side-A/B 統合スキーマ</li>
+  </ul>
+  <p class="note" style="color: var(--text-faint); font-size: 13px; margin-top: 16px;">
+    2026-05-15 整理: フェーズ毎の <code>phase_*.md</code> / <code>STEP_*.md</code> / <code>pr_*.md</code> / 作業ノート系 83 件を削除し、設計記述を本 HTML に集約する方針に切替。
+    削除済ファイルの内容は git log で参照可能。
+    今後のフェーズ完了時は <strong>本 HTML を更新 → サマリー 1 件をローリング差し替え</strong> の運用 (AGENTS.md §5.0)。
+  </p>
+</section>
+
+<footer>
+  Generated 2026-05-15 · main @ <code>9ae4dc8</code> · Side-B 設計正本 (ローリング運用)
+</footer>
+
+</div>
+
+<script>
+  // tabs
+  document.querySelectorAll('.tabs').forEach(group => {
+    const buttons = group.querySelectorAll('.tab-strip button');
+    const panels = group.querySelectorAll('.tab-panel');
+    buttons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        buttons.forEach(b => b.classList.remove('active'));
+        panels.forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        const id = btn.getAttribute('data-tab');
+        const target = group.querySelector('#' + id);
+        if (target) target.classList.add('active');
+      });
+    });
+  });
+</script>
+</body>
+</html>
