@@ -13,6 +13,7 @@
  */
 
 import { config, modelFor } from '../../config';
+import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import {
   type MarketAnalysis,
   validateMarketAnalysis,
@@ -307,7 +308,7 @@ ${getRelevantIndicatorContext(
         },
         { role: 'user', content: prompt },
       ],
-      { temperature: 0.3, maxTokens: 2000, responseFormat: { type: 'json_object' } },
+      { temperature: 0.3, maxTokens: AI_MAX_TOKENS.MEDIUM, responseFormat: { type: 'json_object' } },
     );
 
     const content = aiResponse.content;

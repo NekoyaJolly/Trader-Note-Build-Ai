@@ -21,6 +21,7 @@
  */
 
 import { config, modelFor } from '../../config';
+import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import { loadPromptWithGlobal } from '../prompts/loader';
 import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import { recordAgentUsage } from './scoringRecorder';
@@ -81,6 +82,7 @@ export interface BullBearDebateInput {
  * 各派（bull/bear）の出力を Zod スキーマでバリデーションする。
  * エラー時はフィールドパスを含むカスタムメッセージで再スローする。
  */
+// eslint-disable-next-line no-restricted-syntax -- AI レスポンス検証境界。直後の DebateSideOutputSchema.safeParse で型確定
 function parseSideOutput(data: unknown, side: 'bull' | 'bear'): DebateSideOutput {
   const result = DebateSideOutputSchema.safeParse(data);
   if (!result.success) {
@@ -101,11 +103,13 @@ function parseSideOutput(data: unknown, side: 'bull' | 'bear'): DebateSideOutput
  * - biasStrength・preferredConfidence は 0-100 にクランプ
  * - phaseAnalysis 欠落または要素が非オブジェクト（null 等）は空配列/デフォルト値にフォールバック
  */
+// eslint-disable-next-line no-restricted-syntax -- AI レスポンス検証関数の入力境界。本関数内で type narrowing で型確定させる
 export function validateBullBearDebateOutput(data: unknown): BullBearDebateOutput {
   // 最上位の型チェック
   if (!data || typeof data !== 'object') {
     throw new Error('Bull vs Bear debate output must be an object');
   }
+  // eslint-disable-next-line no-restricted-syntax -- 直前の typeof check 後、Record<string, unknown> として安全に narrow
   const obj = data as Record<string, unknown>;
 
   // marketContext の存在チェック（Zod は内部フィールドをフォールバックで扱う）
@@ -270,6 +274,7 @@ export class BullBearDebateAgent {
   private async callAI(
     systemPrompt: string,
     userPrompt: string,
+    // eslint-disable-next-line no-restricted-syntax -- AI レスポンス未検証段階の content は unknown が契約。呼び出し側で validateBullBearDebateOutput により型確定
   ): Promise<{ content: unknown; tokenUsage: number; model: string }> {
     const provider = new AIProvider({
       apiKey: this.apiKey,
@@ -282,7 +287,7 @@ export class BullBearDebateAgent {
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      { temperature: 0.5, maxTokens: 4096, responseFormat: { type: 'json_object' } },
+      { temperature: 0.5, maxTokens: AI_MAX_TOKENS.HEAVY, responseFormat: { type: 'json_object' } },
     );
 
     const content = aiResponse.content;
