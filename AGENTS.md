@@ -181,59 +181,54 @@ router.post('/', async (req, res) => {
 
 ---
 
-## 5. ドキュメント運用ポリシー
+## 5. ドキュメント運用ポリシー (2026-05-15 整備)
 
-### 5.0 ドキュメント増殖禁止 (最重要、2026-05-15 制定)
+### 5.0 ローリング運用 — フェーズ完了で「正本に統合 → サマリー差し替え」
 
-**新規 Markdown ドキュメントを作る前に、必ず以下を確認**:
+ドキュメントは **正本 + 現在進行中のフェーズの指示書 + サマリー 1 件** の 3 種類で運用する。完了したら正本に統合してアーカイブ / 削除し、**過去のフェーズ作業ノートを溜め込まない**。
 
-1. 既存の設計正本 (HTML / `DESIGN_DOC_*.md`) に統合できないか
-2. AGENTS.md / CLAUDE.md / README.md に統合できないか
-3. チャット返信や PR description / PR comment で済まないか
-4. TaskUpdate description で進捗集約できないか
+#### 構成 (常にこの 3 つだけ)
 
-**新規 .md 作成が許される条件**: 既存の単一ソース・オブ・トゥルース (= 設計正本) では構造的に表現できない、かつ後から繰り返し参照される情報。
+1. **設計正本** (1 件、不変):
+   - HTML: `docs/architecture/side-b-architecture.html` (整備中)
+   - 暫定 Markdown: `docs/design/DESIGN_DOC_autonomous_trading_architecture.md`
+2. **現在進行中フェーズの指示書** (0〜1 件):
+   - 例: `docs/design/phase_N_specification.md`
+3. **直近完了フェーズのサマリー** (1 件、ローリング):
+   - 例: `docs/design/CURRENT_PHASE_SUMMARY.md`
+   - 次フェーズエージェントが起動時に読む唯一の引き継ぎ
 
-**禁止パターン** (2026-05-15 に 83 件削除した教訓):
-- `docs/architecture/STEP_*.md` (フェーズ作業ノート)
-- `docs/design/phase_*.md` (各フェーズ仕様)
-- `docs/design/pr_*.md` (PR プロンプト保存版)
-- `docs/diagnostics/*.md` (障害調査履歴)
-- `docs/review/*.md` (レビュー結果)
-- 「KICKOFF」「SUMMARY」「NOTES」「AUDIT」系の繰り返し増殖パターン
+#### フェーズ完了時のフロー (必須)
 
-**Why**: ドキュメント分散 → 単一ソース・オブ・トゥルース喪失 → 後から読んだ AI / 人間が認識ズレを起こす → 設計違反コード混入の温床になる。実例: 設計書 §1.4 で「Discovery は調査員」と明記、`prompts/discovery.md` で「仮説を出さない」と禁止していたのに、コードが仮説挿入していた (Phase D で発覚、PR #213 で修正)。
+1. 実装完了
+2. **HTML 正本に該当フェーズの変更を記述** (これがないと完了とみなさない)
+3. 完了フェーズの **新サマリー** を作成 (1 件)
+4. 前回サマリーを **削除**
+5. 指示書 (`phase_N_specification.md`) は **削除またはアーカイブ移動**
+6. KICKOFF / NOTES / AUDIT 等の作業ノートも **全部削除**
 
-**正本**:
-- HTML 設計書 `docs/architecture/side-b-architecture.html` (整備中)
-- `DESIGN_DOC_autonomous_trading_architecture.md` (HTML 統合まで暫定)
+#### 禁止パターン
 
-進捗・分析・調査結果は **チャット / PR comment / TaskUpdate** で完結させ、md 化しないのが原則。
+- フェーズ完了後に指示書 / 作業ノートを `docs/design/` や `docs/architecture/` に溜め込む
+- 「KICKOFF」「SUMMARY」「NOTES」「AUDIT」系の **複数件同居** (= サマリーは常に 1 件まで)
+- 進捗・調査・分析の md 化 (チャット返信 / PR description / TaskUpdate で済ます)
 
-### 5.1 実装状況セクション運用
+**Why**: ドキュメント分散 → 単一ソース・オブ・トゥルース喪失 → 後から読んだ AI / 人間が認識ズレ → 設計違反コード混入の温床。2026-05-15 に 83 件削除して整理 (例: 設計書 §1.4 で「Discovery は調査員」と明記、`prompts/discovery.md` で「仮説を出さない」と禁止していたのにコードが仮説挿入していた → PR #213 で修正)。
 
-設計書 (特に `docs/architecture/ADK_ADOPTION.md` の §7 実装状況) は、Step / フェーズ単位で進捗を反映する。
+### 5.1 設計書の更新義務
 
-- 各 Step 完了時に「完了」状態に更新し、完了日を記載
-- 実装場所・検証結果を「完了した Step の詳細」セクションに追記
-- Step 着手時に「進行中」状態に更新
+- 各フェーズ完了時、HTML 設計正本 (or 暫定 Markdown) に **必ず** 内容を統合
+- 統合せずにフェーズ完了とみなすのは禁止 (= サマリー差し替えだけでは不十分)
+- 実装 PR と設計書更新は **同 PR でも別 PR でも可** (柔軟に判断、強制しない)
 
-### 5.2 別 PR 原則
-
-実装と設計書更新は原則として**別 PR**にする。理由:
-- 設計書の更新内容を独立にレビューできる
-- 実装が差し戻された場合に設計書を巻き戻す必要がない
-
-例外: Step 0 のように設計書のみを変更する作業はその限りでない。
-
-### 5.3 変更種類別の更新対象
+### 5.2 変更種類別の更新対象
 
 | 変更種類 | 更新対象 |
 |----------|----------|
 | ノート仕様変更 | `NOTE.md` |
-| アーキテクチャ変更 | `docs/ARCHITECTURE.md` |
+| アーキテクチャ変更 | HTML 設計正本 (`side-b-architecture.html`) |
 | API 変更 | `docs/API.md` |
-| Side-B 関連 | HTML 設計書 (`side-b-architecture.html`、整備中)、暫定で `DESIGN_DOC_autonomous_trading_architecture.md` |
+| Side-B 関連 | HTML 設計正本、暫定で `DESIGN_DOC_autonomous_trading_architecture.md` |
 | ADK 採用範囲・実装状況 | `docs/architecture/ADK_ADOPTION.md` |
 
 ---
