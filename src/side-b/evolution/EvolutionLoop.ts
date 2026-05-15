@@ -1059,49 +1059,31 @@ export class EvolutionLoop {
       await this.persistFormalBtHistory(verifyResults).catch(() => undefined);
     }
 
-    // --- EdgeLedger への自動登録 (進化・エージェント連携) ---
-    // STEP 5 Phase D (2026-05-16): 旧コードは `status: 'screening_passed'` を強制
-    // セットして「AI ダッシュボードや検証フローに乗せる」意図だったが、Evolution の
-    // BT 結果は `EvolutionBacktestRun` テーブル (別系統) に保存される一方、
-    // FullValidation の StrategistAgent は `screeningResult.screeningBacktestRunId`
-    // (= `ScreeningBacktestRun.id`) を要求する。Evolution 経路ではこの ID を渡せず、
-    // 結果として登録された仮説が **全件 FullValidation で not_testable に落ちる**
-    // 構造的問題があった (本番観察: confirmed=0/100 件、status=not_testable 42%)。
+    // STEP 5 Phase D (2026-05-16): Evolution の EdgeLedger 自動登録ブロックを削除。
     //
-    // 修正: status を `'unverified'` で登録して、正規の Screening cron (経路 6) に
-    // 拾わせる。Screening が analysis-engine 経由で BT を実行 →
-    // `screeningBacktestRunId` を付与した上で `screening_passed` に遷移し、FullValidation
-    // で正しく検証される。Evolution の `formalBtMetrics` は仮説の参考情報として残す
-    // (Discovery 由来仮説と同様、screening の対象として扱う)。
-    for (const c of promotionCandidates) {
-      try {
-        const dsl = verifyResults.find(r => r.candidate.dslId === c.dslId)?.dsl;
-        if (!dsl) continue;
-
-        await defaultEdgeLedger.create({
-          statement: c.description || `Evolution AI Generated Strategy (${c.regime})`,
-          category: 'other',
-          conditions: [],
-          expectedDirection: dsl.entry.direction === 'long' || dsl.entry.direction === 'short' ? dsl.entry.direction : 'either',
-          status: 'unverified', // Screening cron に拾わせて正規パイプラインで検証する (上記コメント参照)
-          source: 'discovery', // evolutionはEdgeSourceに無いため discovery を使用
-          symbols: [c.symbol],
-          timeframes: [c.timeframe],
-          observationCount: 0,
-          winCount: 0,
-          lossCount: 0,
-          breakevenCount: 0,
-          totalPnlPips: 0,
-          avgRR: 0,
-          // screeningResult は意図的に未設定。Screening cron が analysis-engine BT を
-          // 実行して正規の screeningResult (screeningBacktestRunId 付き) を記録する。
-          // Evolution の formalBtMetrics は EvolutionBacktestRun テーブルに保存済で
-          // 参照可能だが、本仮説の screening_passed 判定には流用しない。
-        });
-      } catch (err) {
-        errors.push(`[error] EdgeLedger 自動登録に失敗 (dslId=${c.dslId}): ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
+    // 経緯:
+    //   - 旧コードは「AI ダッシュボードや検証フローに乗せる」目的で promotionCandidates
+    //     を EdgeLedger.create で `status: 'screening_passed'` 強制セットしていた
+    //   - しかし本ファイル冒頭 (L9) の Phase 5A 設計コメント:
+    //       「EdgeLedger への自動登録・自動 `confirmed` 昇格は行わない」
+    //     と明確に矛盾するパッチだった (設計違反)
+    //   - 結果として Evolution の DSL を持たない空 conditions の EdgeHypothesis が大量生成され、
+    //     FullValidation の StrategistAgent が screeningBacktestRunId 欠落で全件
+    //     not_testable に落とす状況になっていた (本番観察: confirmed=0 件、95%+ が
+    //     screening_passed/not_testable で滞留)
+    //   - そもそも Evolution は `StrategyDSL` を扱い、EdgeHypothesis は「人間語の仮説 + conditions」を
+    //     扱う別概念。混ぜるのが構造的に誤り
+    //
+    // 正しい役割分担:
+    //   - **Evolution**: 戦略 DSL を生成 → `EvolutionBacktestRun` で BT → `Strategy` テーブル
+    //     へ昇格 (Phase 5B 想定)。UI は `/side-b/evolution` で表示
+    //   - **Discovery / HypothesisGenerator**: 仮説を生成 → `EdgeHypothesis` →
+    //     正規 Screening パイプライン → confirmed/rejected
+    //
+    // Phase 5B 接続時に Evolution → Strategy 経路を本格設計する。それまでの間、
+    // Evolution の運用は `EvolutionBacktestRun` テーブル + `/side-b/evolution` UI で完結する。
+    // 既存の screening_passed/not_testable な Evolution 由来仮説 (本番 95 件程度) は
+    // L 案 (仮説ライフサイクル設計、PR #209 で記録) の archive 処理で別途整理。
 
     // Phase B-2: 当世代の in-memory cache (tradesByDslId / lastRepairHints /
     // lastRepairBaselines) を carry payload として DB に永続化。次回 cron 起動時に
