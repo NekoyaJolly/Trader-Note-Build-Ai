@@ -145,6 +145,77 @@ describe('verifyEntryCondition', () => {
       expect(result.entryPrice).toBe(2000);
     });
   });
+
+  // STEP 5 Phase D (2026-05-16): SL 貫通急落 entry の排除 (本番 50 件の closed
+  // VirtualTrade のうち 29 件が entry=exit、pnlPips=0 のフェイクトレード状態だった
+  // 問題への対処)。
+  describe('stopLoss 引数による entry 妥当性チェック', () => {
+    it('Long: bar.open が stopLoss 以下まで急落した場合、entry を skip', () => {
+      // plannedEntry=2000, stopLoss=1995。価格が一気に 1990 まで急落
+      // (bar.open=1990 <= plannedEntry なので従来は entry=1990 で約定するが、
+      //  actualEntry(1990) <= stopLoss(1995) なので skip すべき)
+      const ohlcvData = createMinuteBars([
+        { open: 1990, high: 1995, low: 1985, close: 1988 },
+      ]);
+
+      const result = verifyEntryCondition(ohlcvData, 'long', 2000, 1995);
+
+      expect(result.triggered).toBe(false);
+      expect(result.reason).toContain('エントリー条件未達成');
+    });
+
+    it('Long: 急落 entry を skip しつつ、後続バーで条件成立した場合は entry', () => {
+      // 1 本目: 急落で SL 貫通 → skip
+      // 2 本目: 価格回復で plannedEntry に達する → entry 成立
+      const ohlcvData = createMinuteBars([
+        { open: 1990, high: 1995, low: 1985, close: 1988 }, // 1: skip
+        { open: 1998, high: 2001, low: 1996, close: 2000 }, // 2: plannedEntry hit
+      ]);
+
+      const result = verifyEntryCondition(ohlcvData, 'long', 2000, 1995);
+
+      expect(result.triggered).toBe(true);
+      // 2 本目の bar.open(1998) <= plannedEntry(2000) なので bar.open で約定 (ギャップダウンルール)
+      // actualEntry(1998) > stopLoss(1995) なので entry 妥当性チェックも通る
+      expect(result.entryPrice).toBe(1998);
+    });
+
+    it('Short: bar.open が stopLoss 以上まで急騰した場合、entry を skip', () => {
+      // plannedEntry=2000 (short), stopLoss=2005。価格が一気に 2010 まで急騰
+      const ohlcvData = createMinuteBars([
+        { open: 2010, high: 2015, low: 2005, close: 2012 },
+      ]);
+
+      const result = verifyEntryCondition(ohlcvData, 'short', 2000, 2005);
+
+      expect(result.triggered).toBe(false);
+      expect(result.reason).toContain('エントリー条件未達成');
+    });
+
+    it('stopLoss 未指定の場合は従来挙動 (entry 妥当性チェックなし)', () => {
+      // SL 貫通価格でも従来の挙動で entry が成立する (後方互換性)
+      const ohlcvData = createMinuteBars([
+        { open: 1990, high: 1995, low: 1985, close: 1988 },
+      ]);
+
+      const result = verifyEntryCondition(ohlcvData, 'long', 2000);
+
+      expect(result.triggered).toBe(true);
+      expect(result.entryPrice).toBe(1990); // 従来通り bar.open で約定
+    });
+
+    it('actualEntry が stopLoss と完全一致なら skip (= 損失ゾーン境界も除外)', () => {
+      // bar.open == stopLoss のケース。Long で actualEntry=1995=stopLoss なら、
+      // entry した瞬間に SL trigger 条件 (low <= SL) が成立するため skip。
+      const ohlcvData = createMinuteBars([
+        { open: 1995, high: 2000, low: 1993, close: 1998 },
+      ]);
+
+      const result = verifyEntryCondition(ohlcvData, 'long', 2000, 1995);
+
+      expect(result.triggered).toBe(false);
+    });
+  });
 });
 
 // ===========================================

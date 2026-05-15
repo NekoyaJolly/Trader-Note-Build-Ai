@@ -96,6 +96,7 @@ export function verifyEntryCondition(
   ohlcvData: MinuteOHLCV[],
   direction: TradeDirection,
   plannedEntry: number,
+  stopLoss?: number,
 ): EntryVerificationResult {
   // データがない場合
   if (!ohlcvData || ohlcvData.length === 0) {
@@ -113,7 +114,18 @@ export function verifyEntryCondition(
         // - 始値が予定価格以下: 始値で約定（ギャップダウン）
         // - そうでなければ: 予定価格で約定
         const actualEntry = bar.open <= plannedEntry ? bar.open : plannedEntry;
-        
+
+        // STEP 5 Phase D (2026-05-16): SL を貫通した急落 entry を排除する。
+        // 例: plannedEntry=4588.5, stopLoss=4582, 価格が一気に 4553 まで急落
+        // して bar.open=4553 になると actualEntry=4553 (= SL 以下) となるが、
+        // 既に損失ゾーンに居る状態なので entry させない。本番 50 件の closed
+        // VirtualTrade のうち 29 件 (58%) が「stop_loss exit + pnlPips=0」状態で
+        // ほぼ全件このパターン (entry と exit が同価格、1 ティックで pending→
+        // open→closed を一気に処理した結果)。
+        if (stopLoss !== undefined && actualEntry <= stopLoss) {
+          continue; // 本バーの entry を skip、後続バーで再試行
+        }
+
         return {
           triggered: true,
           entryTime: bar.timestamp,
@@ -128,7 +140,15 @@ export function verifyEntryCondition(
         // - 始値が予定価格以上: 始値で約定（ギャップアップ）
         // - そうでなければ: 予定価格で約定
         const actualEntry = bar.open >= plannedEntry ? bar.open : plannedEntry;
-        
+
+        // STEP 5 Phase D (2026-05-16): SL を貫通した急騰 entry を排除する。
+        // Short の SL は entry より上に設定されるため、actualEntry が SL 以上に
+        // なる急騰時には既に損失ゾーン。同じバーで entry + SL hit が両方発生して
+        // pnlPips=0 のフェイクトレードが記録されるのを防ぐ。
+        if (stopLoss !== undefined && actualEntry >= stopLoss) {
+          continue; // 本バーの entry を skip、後続バーで再試行
+        }
+
         return {
           triggered: true,
           entryTime: bar.timestamp,
@@ -333,7 +353,7 @@ export function verifyTradeState(
 
   if (status === 'pending') {
     // pending状態: エントリー条件をチェック
-    const entryResult = verifyEntryCondition(ohlcvData, direction, plannedEntry);
+    const entryResult = verifyEntryCondition(ohlcvData, direction, plannedEntry, stopLoss);
     result.entry = entryResult;
     
     if (entryResult.triggered) {
