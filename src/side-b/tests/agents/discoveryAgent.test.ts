@@ -186,7 +186,12 @@ describe('DiscoveryAgent.analyze', () => {
         expect(global.fetch).not.toHaveBeenCalled();
     });
 
-    it('LLM 解釈 + 新仮説登録が一貫して動く', async () => {
+    // STEP 5 Phase D (2026-05-16): Discovery が `newHypotheses` を EdgeLedger に
+    // 直接挿入していたブロックを削除した変更を verify。Discovery は調査員役で、
+    // 仮説生成は HypothesisGenerator の責務。LLM が newHypotheses を返しても
+    // EdgeLedger には書き込まない (= report.newHypotheses は常に []、stub.created
+    // は 0 件)。
+    it('LLM が newHypotheses を返しても EdgeLedger には書き込まない (調査員役を遵守)', async () => {
         mockFetchWith({
             interpretations: [
                 {
@@ -220,10 +225,10 @@ describe('DiscoveryAgent.analyze', () => {
         ];
 
         const report = await agent.analyze(notes, new Date('2026-04-10'), new Date('2026-04-17'));
-        expect(report.newHypotheses).toHaveLength(1);
-        expect(stub.created).toHaveLength(1);
-        expect(stub.created[0].source).toBe('discovery');
-        expect(stub.created[0].status).toBe('unverified');
+        // Discovery は調査員役のため、LLM が newHypotheses を返しても EdgeLedger には
+        // 挿入しない。report.newHypotheses は常に空配列、stub.created も 0 件。
+        expect(report.newHypotheses).toEqual([]);
+        expect(stub.created).toHaveLength(0);
         expect(report.weeklyNote).toBe('今週の主要発見');
         expect(report.tokenUsage).toBe(800);
     });

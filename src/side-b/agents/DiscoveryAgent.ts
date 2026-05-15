@@ -21,7 +21,6 @@ import type { AITradeNote } from '../models/aiTradeNote';
 import { extractJson } from './llmJsonExtract';
 import type {
     EdgeHypothesis,
-    CreateEdgeHypothesisInput,
     EdgeCategory,
     MachineReadableCondition,
 } from '../models/edgeHypothesis';
@@ -330,37 +329,32 @@ export class DiscoveryAgent {
             await recordAgentUsage('discovery', {}, llmSucceeded ? llmOutput : null);
         }
 
-        // 3. 新仮説を EdgeLedger に登録（重複は除外）
-        const existing = await this.ledger.findByStatus('unverified');
-        const existingConfirmed = await this.ledger.findByStatus('confirmed');
-        const allExisting = [...existing, ...existingConfirmed];
-
+        // STEP 5 Phase D (2026-05-16): Discovery が `llmOutput.newHypotheses` を
+        // EdgeLedger に直接挿入していたブロックを削除。
+        //
+        // 設計違反だった経緯:
+        //   - `prompts/discovery.md` の役割定義: 「あなたは週次のレンズ有効性調査官」
+        //   - 同プロンプトの禁止事項: 「`newHypotheses` を出力しない。仮説生成は HG の責務」
+        //   - 設計書 §1.4: 「Discovery AI (週次): レジーム別に効いているレンズ/指標を
+        //     洗い出す **調査員**」 (= 仮説生成役ではない)
+        //   - にも関わらず本コードが `llmOutput.newHypotheses` を反復して
+        //     `ledger.create({source: 'discovery'})` で大量挿入していた
+        //   - 本番観察 (Phase D): EURUSD 仮説 95% 生成、AITradeNote が全件
+        //     XAU/USD なのに Discovery 仮説の symbols=['EURUSD'] という不整合
+        //   - PR #212 で削除した Evolution → EdgeLedger 自動登録ブロックと
+        //     同じパターンの設計違反 (役割侵食 + symbol/timeframe 担保なし)
+        //
+        // 正しい役割分担:
+        //   - Discovery: `hintsForHG` を AgentMemory にキャッシュ (経路 5 → 経路 2)
+        //   - HypothesisGenerator (経路 2 PDCALoop 内): `hintsForHG` を読んで
+        //     現在の market context に応じて新仮説を生成 (= 経路 2 → EdgeHypothesis)
+        //
+        // 既存の Discovery 由来仮説 (本番 95 件程度) は touch しない。L 案
+        // (仮説ライフサイクル設計、PR #209 で記録) の archive 処理で別途整理。
+        //
+        // `llmOutput.newHypotheses` を返さない LLM 出力フォーマットへの統一は別 PR
+        // 候補 (現状は LLM 側で出力される可能性があるが、コードでは読まないだけ)。
         const newHypotheses: EdgeHypothesis[] = [];
-        const symbolsInNotes = Array.from(new Set(truncated.map((n) => n.symbol)));
-        for (const h of llmOutput.newHypotheses) {
-            if (this.isDuplicate(h.statement, allExisting)) continue;
-            const input: CreateEdgeHypothesisInput = {
-                statement: h.statement,
-                category: h.category,
-                conditions: h.conditions,
-                expectedDirection: h.expectedDirection,
-                status: 'unverified',
-                symbols: symbolsInNotes.length > 0 ? symbolsInNotes : [],
-                timeframes: [],
-                observationCount: 0,
-                winCount: 0,
-                lossCount: 0,
-                breakevenCount: 0,
-                totalPnlPips: 0,
-                avgRR: 0,
-                source: 'discovery',
-                lensRelevance: h.lensRelevance,
-                parentIds: [],
-                relatedNoteIds: [],
-            };
-            const created = await this.ledger.create(input);
-            newHypotheses.push(created);
-        }
 
         // 4. レポート整形
         const lensInsights = this.groupByLens(topSeparations, llmOutput.interpretations);
