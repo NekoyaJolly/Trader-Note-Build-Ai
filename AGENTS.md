@@ -181,7 +181,34 @@ router.post('/', async (req, res) => {
 
 ---
 
-## 5. 設計書の更新義務
+## 5. ドキュメント運用ポリシー
+
+### 5.0 ドキュメント増殖禁止 (最重要、2026-05-15 制定)
+
+**新規 Markdown ドキュメントを作る前に、必ず以下を確認**:
+
+1. 既存の設計正本 (HTML / `DESIGN_DOC_*.md`) に統合できないか
+2. AGENTS.md / CLAUDE.md / README.md に統合できないか
+3. チャット返信や PR description / PR comment で済まないか
+4. TaskUpdate description で進捗集約できないか
+
+**新規 .md 作成が許される条件**: 既存の単一ソース・オブ・トゥルース (= 設計正本) では構造的に表現できない、かつ後から繰り返し参照される情報。
+
+**禁止パターン** (2026-05-15 に 83 件削除した教訓):
+- `docs/architecture/STEP_*.md` (フェーズ作業ノート)
+- `docs/design/phase_*.md` (各フェーズ仕様)
+- `docs/design/pr_*.md` (PR プロンプト保存版)
+- `docs/diagnostics/*.md` (障害調査履歴)
+- `docs/review/*.md` (レビュー結果)
+- 「KICKOFF」「SUMMARY」「NOTES」「AUDIT」系の繰り返し増殖パターン
+
+**Why**: ドキュメント分散 → 単一ソース・オブ・トゥルース喪失 → 後から読んだ AI / 人間が認識ズレを起こす → 設計違反コード混入の温床になる。実例: 設計書 §1.4 で「Discovery は調査員」と明記、`prompts/discovery.md` で「仮説を出さない」と禁止していたのに、コードが仮説挿入していた (Phase D で発覚、PR #213 で修正)。
+
+**正本**:
+- HTML 設計書 `docs/architecture/side-b-architecture.html` (整備中)
+- `DESIGN_DOC_autonomous_trading_architecture.md` (HTML 統合まで暫定)
+
+進捗・分析・調査結果は **チャット / PR comment / TaskUpdate** で完結させ、md 化しないのが原則。
 
 ### 5.1 実装状況セクション運用
 
@@ -206,7 +233,7 @@ router.post('/', async (req, res) => {
 | ノート仕様変更 | `NOTE.md` |
 | アーキテクチャ変更 | `docs/ARCHITECTURE.md` |
 | API 変更 | `docs/API.md` |
-| Side-B 関連 | `docs/side-b/` 配下、必要に応じ `docs/design/DESIGN_DOC_autonomous_trading_architecture.md` |
+| Side-B 関連 | HTML 設計書 (`side-b-architecture.html`、整備中)、暫定で `DESIGN_DOC_autonomous_trading_architecture.md` |
 | ADK 採用範囲・実装状況 | `docs/architecture/ADK_ADOPTION.md` |
 
 ---
