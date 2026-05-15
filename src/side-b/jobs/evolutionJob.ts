@@ -142,6 +142,11 @@ export class EvolutionJob implements SideBJobRunner<SideBSchedulerConfig, Evolut
       oosBacktestRunner: defaultOosBacktestRunner,
       // Phase B-2 (2026-05-09): cron 起動を跨いだ in-memory cache 復元を有効化。
       evolutionInstanceCarryRepo: evolutionInstanceCarryRepository,
+      // STEP 5 段階 2 Phase C C-1 (2026-05-15): scheduler config の symbols[0] /
+      // timeframe を novelty seed に伝播させる。これがないと seedDescriptor の
+      // default `'EURUSD'` / `'15m'` で固定され、本番 XAU/USD 運用と乖離する。
+      symbol: config.symbols[0],
+      timeframe: config.timeframe,
     });
 
     // configOverride 経由で 0 や maxGenerations 超過の値が渡されたときの clamp。
