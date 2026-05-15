@@ -1059,41 +1059,31 @@ export class EvolutionLoop {
       await this.persistFormalBtHistory(verifyResults).catch(() => undefined);
     }
 
-    // --- EdgeLedger への自動登録 (進化・エージェント連携の修正) ---
-    for (const c of promotionCandidates) {
-      try {
-        const dsl = verifyResults.find(r => r.candidate.dslId === c.dslId)?.dsl;
-        if (!dsl) continue;
-        
-        await defaultEdgeLedger.create({
-          statement: c.description || `Evolution AI Generated Strategy (${c.regime})`,
-          category: 'other',
-          conditions: [],
-          expectedDirection: dsl.entry.direction === 'long' || dsl.entry.direction === 'short' ? dsl.entry.direction : 'either',
-          status: 'screening_passed', // AIダッシュボードや検証フローに乗せるため screening_passed を指定
-          source: 'discovery', // evolutionはEdgeSourceに無いため discovery を使用
-          symbols: [c.symbol],
-          timeframes: [c.timeframe],
-          observationCount: 0,
-          winCount: 0,
-          lossCount: 0,
-          breakevenCount: 0,
-          totalPnlPips: 0,
-          avgRR: 0,
-          screeningResult: c.formalBtMetrics ? {
-            executedAt: new Date().toISOString(),
-            passed: true,
-            metrics: {
-              pf: c.formalBtMetrics.pf,
-              winRate: c.formalBtMetrics.winRate * 100, // 0-100%形式に合わせるか確認
-              tradeCount: c.formalBtMetrics.tradeCount,
-            }
-          } : undefined
-        });
-      } catch (err) {
-        errors.push(`[error] EdgeLedger 自動登録に失敗 (dslId=${c.dslId}): ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
+    // STEP 5 Phase D (2026-05-16): Evolution の EdgeLedger 自動登録ブロックを削除。
+    //
+    // 経緯:
+    //   - 旧コードは「AI ダッシュボードや検証フローに乗せる」目的で promotionCandidates
+    //     を EdgeLedger.create で `status: 'screening_passed'` 強制セットしていた
+    //   - しかし本ファイル冒頭 (L9) の Phase 5A 設計コメント:
+    //       「EdgeLedger への自動登録・自動 `confirmed` 昇格は行わない」
+    //     と明確に矛盾するパッチだった (設計違反)
+    //   - 結果として Evolution の DSL を持たない空 conditions の EdgeHypothesis が大量生成され、
+    //     FullValidation の StrategistAgent が screeningBacktestRunId 欠落で全件
+    //     not_testable に落とす状況になっていた (本番観察: confirmed=0 件、95%+ が
+    //     screening_passed/not_testable で滞留)
+    //   - そもそも Evolution は `StrategyDSL` を扱い、EdgeHypothesis は「人間語の仮説 + conditions」を
+    //     扱う別概念。混ぜるのが構造的に誤り
+    //
+    // 正しい役割分担:
+    //   - **Evolution**: 戦略 DSL を生成 → `EvolutionBacktestRun` で BT → `Strategy` テーブル
+    //     へ昇格 (Phase 5B 想定)。UI は `/side-b/evolution` で表示
+    //   - **Discovery / HypothesisGenerator**: 仮説を生成 → `EdgeHypothesis` →
+    //     正規 Screening パイプライン → confirmed/rejected
+    //
+    // Phase 5B 接続時に Evolution → Strategy 経路を本格設計する。それまでの間、
+    // Evolution の運用は `EvolutionBacktestRun` テーブル + `/side-b/evolution` UI で完結する。
+    // 既存の screening_passed/not_testable な Evolution 由来仮説 (本番 95 件程度) は
+    // L 案 (仮説ライフサイクル設計、PR #209 で記録) の archive 処理で別途整理。
 
     // Phase B-2: 当世代の in-memory cache (tradesByDslId / lastRepairHints /
     // lastRepairBaselines) を carry payload として DB に永続化。次回 cron 起動時に
