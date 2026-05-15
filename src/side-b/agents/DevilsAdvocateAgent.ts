@@ -16,6 +16,7 @@
  */
 
 import { config, modelFor } from '../../config';
+import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import { loadPromptWithGlobal } from '../prompts/loader';
 import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import { recordAgentUsage } from './scoringRecorder';
@@ -254,7 +255,7 @@ ${JSON.stringify(context, null, 2)}
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: userPrompt },
             ],
-            { temperature: 0.4, maxTokens: 4096, responseFormat: { type: 'json_object' } },
+            { temperature: 0.4, maxTokens: AI_MAX_TOKENS.MEDIUM, responseFormat: { type: 'json_object' } },
         );
 
         const content = aiResponse.content;

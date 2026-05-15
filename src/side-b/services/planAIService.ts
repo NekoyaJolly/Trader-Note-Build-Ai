@@ -13,6 +13,7 @@
  */
 
 import { config, modelFor } from '../../config';
+import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import type {
   PlanAIOutput} from '../models';
 import {
@@ -381,7 +382,7 @@ ${candidateContext}
         { role: 'system', content: systemPrompt },
         { role: 'user', content: prompt },
       ],
-      { temperature: 0.4, maxTokens: 4096, responseFormat: { type: 'json_object' } },
+      { temperature: 0.4, maxTokens: AI_MAX_TOKENS.HEAVY, responseFormat: { type: 'json_object' } },
     );
 
     const content = aiResponse.content;

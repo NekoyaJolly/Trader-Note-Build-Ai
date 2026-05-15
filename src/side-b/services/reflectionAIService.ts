@@ -18,6 +18,7 @@
  */
 
 import { config, modelFor } from '../../config';
+import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import { AIProvider } from '../agent/aiProvider';
 import type { TradeResultSummary, TodayStrategyContext } from '../agent/agentMemory';
 import {
@@ -259,7 +260,7 @@ ${existingLessons.slice(-5).map((l, i) => `${i + 1}. ${l}`).join('\n')}`;
                 },
                 { role: 'user', content: prompt },
             ],
-            { temperature: 0.4, maxTokens: 1500, responseFormat: { type: 'json_object' } },
+            { temperature: 0.4, maxTokens: AI_MAX_TOKENS.MEDIUM, responseFormat: { type: 'json_object' } },
         );
 
         const content = aiResponse.content;

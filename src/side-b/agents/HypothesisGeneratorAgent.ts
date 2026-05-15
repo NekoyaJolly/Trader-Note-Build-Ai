@@ -13,6 +13,7 @@
  */
 
 import { config, modelFor } from '../../config';
+import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import { loadPromptWithGlobal } from '../prompts/loader';
 import type { LensFeatureSnapshot } from '../lenses';
 import type {
@@ -609,7 +610,7 @@ ${existingDump}
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: userPrompt },
             ],
-            { temperature: 0.6, maxTokens: 4096, responseFormat: { type: 'json_object' } },
+            { temperature: 0.6, maxTokens: AI_MAX_TOKENS.HEAVY, responseFormat: { type: 'json_object' } },
         );
 
         const content = aiResponse.content;
