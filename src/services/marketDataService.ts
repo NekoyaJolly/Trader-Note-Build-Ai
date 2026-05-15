@@ -4,7 +4,8 @@ import type { OHLCVData} from './indicators';
 import { indicatorService } from './indicators';
 import type { OHLCVBarResult } from '../backend/services/ctrader/ctraderDataService';
 import { CTraderDataService } from '../backend/services/ctrader/ctraderDataService';
-import type { CTraderAuthService } from '../backend/services/ctrader/ctraderAuthService';
+import { CTraderAuthService } from '../backend/services/ctrader/ctraderAuthService';
+import { prisma } from '../backend/db/client';
 
 /**
  * 市場データサービス
@@ -23,6 +24,7 @@ export class MarketDataService {
   private apiKey: string;
   private ctraderDataService: CTraderDataService | null = null;
   private ctraderAccountId: string | null = null;
+  private cTraderConfigPromise: Promise<void> | null = null;
 
   constructor() {
     this.apiUrl = config.market.apiUrl;
@@ -47,6 +49,32 @@ export class MarketDataService {
    */
   isCTraderAvailable(): boolean {
     return !!(this.ctraderDataService?.isConfigured() && this.ctraderAccountId);
+  }
+
+  /**
+   * cTrader 自己配線 (DB 永続化 token から有効アカウントを取得して configure)
+   *
+   * MarketDataService は callsite ごとに new されており、起動時の一括 configure
+   * 経路が存在しない。各 instance が初回データ取得時に DB から token を読んで
+   * 自分で配線する遅延初期化。idempotent + Promise キャッシュで再エントリーに耐える。
+   */
+  async ensureCTraderConfigured(): Promise<void> {
+    if (this.isCTraderAvailable()) return;
+    if (this.cTraderConfigPromise) return this.cTraderConfigPromise;
+
+    this.cTraderConfigPromise = (async () => {
+      try {
+        const authService = new CTraderAuthService(prisma);
+        const token = await authService.getValidToken();
+        if (token) {
+          this.configureCTrader(token.accountId, authService);
+        }
+      } catch (error) {
+        console.warn('[MarketDataService] cTrader 自動配線エラー:', error);
+        this.cTraderConfigPromise = null;
+      }
+    })();
+    return this.cTraderConfigPromise;
   }
 
   /**
@@ -87,6 +115,7 @@ export class MarketDataService {
     symbol: string,
     timeframe: string = '15m'
   ): Promise<MarketData> {
+    await this.ensureCTraderConfigured();
     // 1. cTrader 利用可能なら優先
     if (this.isCTraderAvailable()) {
       try {
@@ -160,7 +189,7 @@ export class MarketDataService {
     }
 
     // トレンド判定（RSI と価格変動から）
-    let trend: 'bullish' | 'bearish' | 'neutral' = 'neutral';
+    let trend: 'bullish' | 'bearish' | 'neutral';
     if (rsi > 60) {
       trend = 'bullish';
     } else if (rsi < 40) {
@@ -252,6 +281,7 @@ export class MarketDataService {
     timeframe: string,
     limit: number = 100
   ): Promise<MarketData[]> {
+    await this.ensureCTraderConfigured();
     // 1. cTrader 利用可能なら優先
     if (this.isCTraderAvailable()) {
       try {
@@ -315,6 +345,7 @@ export class MarketDataService {
     symbol: string,
     count: number = 60
   ): Promise<MarketData[]> {
+    await this.ensureCTraderConfigured();
     if (this.isCTraderAvailable()) {
       try {
         console.log(`[MarketDataService] cTrader 1分足取得: ${symbol} × ${count}本`);
