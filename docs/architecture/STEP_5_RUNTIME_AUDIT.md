@@ -182,16 +182,68 @@ C-1〜C-10 を以下のとおり分類して優先順位を Nekoさん と合意
 | UX 整理 (= ユーザーが信頼できる UI を作るための再構成) | C-3, C-4, C-9, C-10 | 次点 |
 | 個別バグ修正 | C-6 (表示), C-7 (リンク欠落), C-8 (サイドバー閉動作) | 段階 2 完了後 |
 
+## §C-3: C-1 第二段階 調査結果 (2026-05-15 追記)
+
+PR #208 (Evolution seed の symbol/timeframe を `config.symbols[0]` から渡す) マージ後、本番 `/api/side-b/hypotheses` で改めて symbol 分布を取得した結果、依然として 95% の仮説が `symbols: ["EURUSD"]` で生成されていることを確認。原因を完全に切り分けた。
+
+### C-3-1: 切り分け結果
+
+仮説 100 件サンプリングの集計:
+
+| `source` | `symbols` | 件数 |
+|---|---|---|
+| `discovery` | `["EURUSD"]` | **95** |
+| `ai_generated` | `["XAU/USD"]` | 5 |
+
+AITradeNote 100 件サンプリングは **全件 XAU/USD**。
+
+→ **HypothesisGenerator 経路 (`source=ai_generated`)** は `aiOrchestrator → planGenerationJob → config.symbols[0]` (XAU/USD) で正しく伝播 ✅
+→ **Discovery 経路 (`source=discovery`)** だけが EURUSD で仮説化
+
+### C-3-2: Discovery 経路の真の root cause
+
+最新 `source=discovery` 仮説 5 件の `statement` が以下のような戦略テキスト + `screeningResult` (`pf`, `winRate`, `tradeCount` 付き) を持つことを確認:
+
+- 「RSIとATRを厳しめにして重複時間の低ボラ反発だけを狙う」 (pf=1.45, win=45%, n=22)
+- 「許容幅を広げつつRRを上げて伸びる局面を待つ」 (pf=1.03, win=35%, n=93)
+- 「RSI条件を少し緩め、執行時間を限定して初動の取りこぼしを減らす」 (pf=1.04, win=42%, n=142)
+
+これは「過去の AITradeNote から発見した観察」ではなく **Evolution → screening で抽出された戦略がそのまま仮説化されている**。`source=discovery` 表記は誤解を招くが、実体は Evolution 由来戦略。
+
+ローカル `data/evolution/strategy-population.json` の現状: 全 50 戦略中 **EURUSD: 36 件 / XAU/USD: 14 件** (本番も同様の分布が想定される)。
+
+つまり **PR #208 は新規 seed のみに効き**、既存 population に蓄積された EURUSD 戦略は引き続き screening でフィルタを通って仮説化され続ける。
+
+### C-3-3: 解決策の選択肢 (Nekoさん 判断要)
+
+| # | 案 | 内容 | リスク |
+|---|---|---|---|
+| A | **本番 population クリア** | `data/evolution/strategy-population.json` を truncate / リセットして、PR #208 後の XAU/USD seed から再構築 | 過去の戦略蓄積 (50 件) を全捨て。最も clean、再構築に数日〜数週 |
+| B | **Evolution に population ロード時の symbol フィルタ追加** | `config.symbols` に含まれない symbol の戦略をスキップ or 削除する Code 修正 | 既存戦略が自動的に消える、自動化される |
+| C | **screening 時に config.symbols で symbol を上書き** | EURUSD 戦略の symbol だけ書き換えて XAU/USD で screening | パラメータが EURUSD ボラ前提のため XAU/USD 市場で機能しない可能性大、**非推奨** |
+| D | **既存 EURUSD 仮説 95 件を archive ステータスに変更** | DB の EdgeHypothesis status update で UI 非表示化、Evolution side の対応なし | 仮説の archive は対症療法、新規 EURUSD 仮説は引き続き生成される |
+
+**推奨**: **A + B の併用**
+- A: 一旦本番 population をクリーンにして再スタート (Nekoさん の本番運用判断)
+- B: Code で「config.symbols に含まれない symbol の戦略を population ロード時に warn + skip」を実装して再発防止
+
+C-3 全体の解消は本 PR の範囲外、別 KICKOFF / フォロー PR で着手予定。
+
+### C-3-4: C-1 ステータス更新
+
+| 項目 | ステータス |
+|---|---|
+| C-1 第一段階 (新規 seed の symbol) | ✅ 完了 (PR #208 マージ済、main 0348ff0) |
+| C-1 第二段階 (既存 population の EURUSD 戦略残存) | 🔄 Nekoさん 判断待ち (A/B の選択 + 本番運用作業) |
+
 ## 次ステップ
 
-1. 本ドキュメントの追加 (§C-1, C-2) をマージ (現在の追記 PR)
-2. C-1, C-2, C-5 の **データバグ調査** を最優先で着手 (個別フォロー PR)
-   - C-1: シンボルハードコード調査 (`src/side-b/agents/DiscoveryAgent.ts`、`HypothesisGeneratorAgent.ts`、Watchlist / Plan の symbol 伝播パス)
-   - C-2: 検証パイプラインのキュー滞留原因調査 (`screeningJob`、`fullValidationJob`、重複検出ロジック)
-   - C-5: AI ノート / 仮想トレード / 比較ダッシュボードの集計クエリパス調査 (どの数字を集計しているか実コードで確認)
-3. C-3, C-4, C-9, C-10 の **UX 整理** は Nekoさん と設計合意後に着手 (別 KICKOFF)
-4. C-6, C-7, C-8 の **個別バグ** は段階 2 完了後にまとめて修正 PR
-5. 「[中程度修正 - 別 KICKOFF / フォロー PR 候補]」#2-5、「[設計判断要 - 別 KICKOFF]」#6-11、「[未追跡 - 続調査]」#12-13 (本ドキュメント §§ の各セクション参照) は本フェーズ完了後の個別 KICKOFF
+1. 本ドキュメントの追加 (§C, §C-1, §C-2, §C-3) をマージ
+2. C-1 第二段階の解決策 (A 単独 / A+B 併用 / B 単独) を Nekoさん と合意 → 別 PR
+3. C-2 / C-5 のデータバグ調査 (本 PR 完了後に個別フォロー PR)
+4. C-3, C-4, C-9, C-10 の **UX 整理** は Nekoさん と設計合意後に着手 (別 KICKOFF)
+5. C-6, C-7, C-8 の **個別バグ** は段階 2 完了後にまとめて修正 PR
+6. 「[中程度修正 - 別 KICKOFF / フォロー PR 候補]」#2-5、「[設計判断要 - 別 KICKOFF]」#6-11、「[未追跡 - 続調査]」#12-13 (本ドキュメント §§ の各セクション参照) は本フェーズ完了後の個別 KICKOFF
 
 ## 関連ファイル
 
