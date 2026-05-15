@@ -54,3 +54,6 @@ __pycache__/
 *.pyc
 *.pyo
 .tmp/
+
+# Side-B observability scripts artifacts (STEP 5 Phase F)
+.observability-trace.json
