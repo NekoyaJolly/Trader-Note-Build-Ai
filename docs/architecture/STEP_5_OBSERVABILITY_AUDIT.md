@@ -98,7 +98,7 @@ Trace Event 種別内訳:
 | 時間計測 | `durationMs` で per-agent 性能観測可能 | ✅ |
 | 失敗追跡 | `failed` event に `errorCode` + 短縮済 `errorMessage` (Step 2 `DEFAULT_ERROR_MESSAGE_MAX` 適用) | ✅ |
 | 機密保護 | `resultSummary.redacted: true` で生 features を伏せ、`fieldCount` のみ公開 | ✅ |
-| failure isolation | 1 Lens 失敗で他 Lens が完走 (Lens ParallelAgent で `failed=1, completed=4` 確認) | ✅ |
+| failure isolation | 1 Lens 失敗で他 Lens が完走 (Lens ParallelAgent シナリオ単独で `started=3, completed=2, failed=1` を確認、合計 10 events のうち PDCA 2 sub-agents + Lens 3 lens の構成内訳が成立) | ✅ |
 
 ### 現状の制限 / 不足
 

@@ -50,8 +50,9 @@
 1. **Strategy Thinker と AITradeNote の紐付け方法**: PlanAIService の出力が `AITradePlan` に入るのは確認できたが、その先 `AITradeNote` との関係 (例: Plan ID 経由で結合表示するのか、Note 内に複製するのか) が設計書と実装で曖昧
 2. **Devil's Advocate の orchestrator 呼出パス**: 専用 API がない (orchestrator 内部のみ) ため、どのエンドポイント経由で誘発されるかが要追跡
 3. **Reflection AI と `GenerationReflectionAgent` の役割重複**: ReflectionAIService と GenerationReflectionAgent (別エージェント) が両方とも learning 抽出を行う。両者の明確な分担が不明
-4. **Discovery AI の新仮説自動登録経路**: `WeeklyDiscoveryReport.newHypotheses[]` が `EdgeHypothesis` テーブルに **どこで** 挿入されるかコード上で確認不可
-5. **`/side-b/validation` の表示分割**: StrategistAgent の判定結果と BacktesterAgent のレポートをどう分割表示するかが UI 仕様不明
+4. **`/side-b/validation` の表示分割**: StrategistAgent の判定結果と BacktesterAgent のレポートをどう分割表示するかが UI 仕様不明
+
+(Discovery AI の新仮説自動登録経路は `src/side-b/agents/DiscoveryAgent.ts:340-362` で `llmOutput.newHypotheses[]` を反復 → `this.ledger.create({..., source: 'discovery'})` で挿入していることをコードで確認済のため、初稿の「未確定」リストから除外した。)
 
 これらは Phase D の不足ポイント集計に合流する候補。
 
@@ -79,5 +80,5 @@
 
 - **Devil's Advocate** が公開 API / UI 表示先を持たない (`Phase D` 候補: 中程度修正 — orchestrator 経由でも閲覧手段が欲しい)
 - **Reflection AI と GenerationReflectionAgent の役割重複** (`Phase D` 候補: 設計判断要)
-- **Discovery AI の新仮説自動登録経路が未追跡** (`Phase D` 候補: コード読解続行)
+- ~~**Discovery AI の新仮説自動登録経路**~~ — `DiscoveryAgent.ts:340-362` で `this.ledger.create({..., source: 'discovery'})` で挿入していることを確認済 (Phase C-bis 内で実装根拠を確定)
 - **`/side-b/validation` の表示分割仕様** (`Phase D` 候補: 設計判断要)

@@ -62,7 +62,7 @@
 |---|---|---|
 | 12 | Strategy Thinker の出力と AITradeNote の紐付け方法 (PlanAIService が AITradePlan に保存するのは確認、Note 経由結合の流れが曖昧) | C-bis |
 | 13 | Devil's Advocate の orchestrator 呼出パス (orchestrator 内部利用のみ、誘発エンドポイントが要追跡) | C-bis |
-| 14 | Discovery AI 新仮説の `EdgeHypothesis` 自動登録経路 (`WeeklyDiscoveryReport.newHypotheses[]` がどこで挿入されるかコード上で確認不可) | C-bis |
+| ~~14~~ | ~~Discovery AI 新仮説の `EdgeHypothesis` 自動登録経路~~ — `src/side-b/agents/DiscoveryAgent.ts:340-362` で `llmOutput.newHypotheses[]` を反復 → `this.ledger.create({..., source: 'discovery'})` で挿入していることを確認済 (PR #205 レビューで判明、本リストから除外) | C-bis |
 
 ## §A: Phase A 詳細 (Scheduler 稼働確認)
 
@@ -149,12 +149,12 @@ curl で確認した到達性 (HTTP 200 OK):
 1. 本ドキュメントを含む観察フェーズドキュメント PR をマージ (現在のこの PR)
 2. フォロー PR で Phase D 中程度修正 #1 (Plan upsert) を対応
 3. Nekoさん が本番 UI を実機確認、結果を `STEP_5_RUNTIME_AUDIT.md` §C に追記
-4. 中程度修正 #2-5 / 設計判断要 #6-11 / 未追跡 #12-14 は段階 2 完了確認後、個別 KICKOFF で着手
+4. 中程度修正 #2-5 / 設計判断要 #6-11 / 未追跡 #12-13 は段階 2 完了確認後、個別 KICKOFF で着手
 
 ## 関連ファイル
 
 - 設計正本: `docs/design/DESIGN_DOC_autonomous_trading_architecture.md`
-- 段階 2 KICKOFF: 本検証セッションで Nekoさん が提示 (HTML 設計書 `docs/architecture/side-b-architecture.html` で全体俯瞰可能)
+- 段階 2 KICKOFF: 本検証セッションで Nekoさん が提示 (検証中に Nekoさん 側で HTML 形式の設計サマリ `side-b-architecture.html` を整備、git 管理外のため本リポジトリには未収録)
 - マッピング表: `docs/architecture/STEP_5_AGENT_UI_MAPPING.md`
 - 可視性検証: `docs/architecture/STEP_5_OBSERVABILITY_AUDIT.md`
 - 検証スクリプト: `scripts/sideB_runtime_observability_smoke.ts`

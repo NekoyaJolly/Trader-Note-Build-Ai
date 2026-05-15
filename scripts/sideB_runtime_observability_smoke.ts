@@ -1,7 +1,8 @@
 /**
  * Phase F: ADK 可視性 / 監視ソリューションの実地確認 (dry-run smoke)
  *
- * 設計書: docs/architecture/STEP_5_KICKOFF (段階 2 運用動作完成) Phase F
+ * 設計書: docs/architecture/STEP_5_OBSERVABILITY_AUDIT.md (Phase F 検証結果まとめ)
+ *           docs/architecture/STEP_5_RUNTIME_AUDIT.md (Phase A-F 全体集約)
  *
  * 目的:
  *   - Step 3 PDCALoop dry-run wrapper + Step 4 Lens ParallelAgent wrapper を
