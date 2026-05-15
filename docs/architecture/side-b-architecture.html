@@ -280,7 +280,7 @@
 </header>
 
 <nav class="toc" aria-label="Table of contents">
-  <div class="toc-title">Contents · 14 sections</div>
+  <div class="toc-title">Contents · 17 sections</div>
   <a href="#s01"><span class="num">01</span> ポジショニング</a>
   <a href="#s02"><span class="num">02</span> ディレクトリ構成</a>
   <a href="#s03"><span class="num">03</span> PDCA ループ</a>
@@ -295,6 +295,9 @@
   <a href="#s12"><span class="num">12</span> 永続化と外部依存</a>
   <a href="#s13"><span class="num">13</span> 設定 / モデル選択</a>
   <a href="#s14"><span class="num">14</span> テスト / 観測性</a>
+  <a href="#s15"><span class="num">15</span> 重要な設計上の禁止事項</a>
+  <a href="#s16"><span class="num">16</span> 成功の指標</a>
+  <a href="#s17"><span class="num">17</span> 設計教訓</a>
 </nav>
 
 <!-- ============================================================== -->
@@ -1061,6 +1064,97 @@
     初回 push 前に 1 回スモーク。Copilot 修正後は <code>jest</code> のみで push。
     例外は DB / analysis-engine HTTP / <code>.env</code> / smoke 出力に触ったとき。
   </div>
+</section>
+
+<hr class="divider"/>
+
+<section>
+  <div class="sec-head"><span class="sec-num">15</span><h2>重要な設計上の禁止事項</h2></div>
+  <p class="sec-tagline">実装時に絶対に侵犯してはならない 8 原則。1 件でも違反するとシステムの意味論が崩壊する。</p>
+
+  <ul>
+    <li><strong>既存の <code>MarketAnalysis</code> / <code>featureVector</code> / <code>AgentMemory</code> のデータ構造を破壊的変更しない</strong>。新機能は常に後方互換のラッパー or 拡張として実装</li>
+    <li><strong>Side-A のコードを Side-B の変更で壊さない</strong> (協業パートナー原則)</li>
+    <li><strong>UI の全機能停止を伴う移行をしない</strong>。既存機能が動き続けながら新機能を重ねる</li>
+    <li><strong>一度に複数フェーズを並行着手しない</strong>。1 フェーズ完了 → 運用確認 → 次フェーズ</li>
+    <li><strong>AI 独自のブラックボックスパターンをエッジ台帳に記録しない</strong>。人間語への翻訳が必須</li>
+    <li><strong>"暗記した" 成績でエッジを昇格させない</strong>。未知データでの検証必須</li>
+    <li><strong>LLM に昇格判定をさせない</strong>。LLM は解釈のみ、判定は決定論的ロジック</li>
+    <li><strong>統計的検証を飛ばした自動昇格を行わない</strong> (Phase 5A の設計教訓、§17.3 参照)</li>
+  </ul>
+
+  <div class="note" style="background: rgba(245,185,66,0.05); border-left: 3px solid var(--warn); padding: 12px 16px; margin-top: 16px; font-size: 14px;">
+    <strong>2026-05-15 追補 (Phase 5A 設計遵守の徹底):</strong>
+    本セクションに加えて、EdgeLedger への自動登録を Evolution / Discovery 経路から行うことも禁止 (Phase 5A 設計コメント明記)。
+    Discovery は調査員役 (<code>hintsForHG</code> のみ出力)、HypothesisGenerator のみが <code>EdgeHypothesis</code> を生成する。
+    PR #212 (Evolution 自動登録削除) / PR #213 (Discovery 自動登録削除) で本原則を完全準拠化。
+  </div>
+</section>
+
+<hr class="divider"/>
+
+<section>
+  <div class="sec-head"><span class="sec-num">16</span><h2>成功の指標</h2></div>
+  <p class="sec-tagline">本アーキテクチャが機能しているかを測る KPI。勝率や PnL は副次的指標、主要指標は「エッジ台帳の成長と再現性」。</p>
+
+  <div class="grid cols-3">
+    <div class="card">
+      <h4 style="color: var(--accent-2);">短期 (3 ヶ月)</h4>
+      <p>エッジ台帳に <code>confirmed</code> ステータスのエントリが <strong>5 個以上</strong></p>
+    </div>
+    <div class="card">
+      <h4 style="color: var(--accent-2);">中期 (6 ヶ月)</h4>
+      <p>仮想トレードの月次 PF が <strong>3 ヶ月連続で 1.3 以上</strong></p>
+    </div>
+    <div class="card">
+      <h4 style="color: var(--accent-2);">長期 (1 年)</h4>
+      <p>Discovery AI が発見した「人間が気付かなかった組み合わせ」で稼働中のエッジが存在</p>
+    </div>
+  </div>
+</section>
+
+<hr class="divider"/>
+
+<section>
+  <div class="sec-head"><span class="sec-num">17</span><h2>設計教訓 (実装を通じて得た知見)</h2></div>
+  <p class="sec-tagline">過去フェーズで実装中に直面した教訓。これらを忘れると同じ過ちを繰り返す。</p>
+
+  <h3>17.1 仕様書の空白が実装に流出する</h3>
+  <p>
+    Phase 5 → Phase 5A の縮小、Phase 4 → 4a/4b/4c/4d の分岐で学んだ教訓。
+    <strong>データ構造の境界を跨ぐ箇所は、必ず詳細仕様を書く</strong>。暗黙の了解に任せると、Claude Code が最小侵襲で埋めた結果として予期しない挙動 (例: <code>[DSL:uuid]</code> プレフィックスが UI に露出) が発生する。
+  </p>
+
+  <h3>17.2 他 AI との壁打ちの価値</h3>
+  <p>
+    Phase 5A への縮小判断は、他 AI との壁打ちで得られた指摘が決め手となった。設計者の盲点を外部視点で補う手法として有効。実装中の AI (Claude) は実装の流れに引きずられやすく、より大きな設計判断では外部視点が必要。
+  </p>
+
+  <h3>17.3 急いで作ろうとすると意味論が壊れる</h3>
+  <p>
+    Phase 5 の自動 <code>confirmed</code> 昇格、Phase 4 で Side-A 検証基盤に無理に接続しようとした試み、Phase 5A 設計を破った <code>EvolutionLoop</code> / <code>DiscoveryAgent</code> の <code>EdgeLedger</code> 自動登録 (2026-05-15 PR #212/#213 で除去) — これらは「早く完成させたい」気持ちから意味論的な妥協をしかけた事例。
+  </p>
+  <p><strong>設計の整合性を犠牲にして速度を取ると、後で大きな手戻りになる</strong>。</p>
+
+  <h3>17.4 既存を壊さない重要性</h3>
+  <p>
+    Side-A と Side-B の協業パートナー関係、<code>MaterializationService</code> による片方向ブリッジ、<code>EdgeHypothesis</code> の新フィールドを全てオプショナル化 — これらは全て「既存を壊さない」原則の具体化。
+  </p>
+  <p>動いているものを壊すコストは、新機能を付け加えるコストより遥かに大きい。</p>
+
+  <h3>17.5 分割の価値</h3>
+  <p>
+    Phase 4 → 4a/4b/4c/4d、Phase 5 → 5A/5B の分割で学んだ教訓。
+    <strong>一つの大きなフェーズを無理に完遂するより、小さなフェーズに分割して段階的に進める方が、設計の整合性を保ちやすい</strong>。各段階で区切って運用観察を入れれば、次の段階の判断材料が増える。
+  </p>
+
+  <h3>17.6 ドキュメント増殖が認識ズレを生む (2026-05-15 追補)</h3>
+  <p>
+    フェーズ毎の <code>phase_*.md</code> / PR 毎の <code>pr_*.md</code> / Step 毎の <code>STEP_*.md</code> / 作業ノート系を 80+ 件溜め込んだ結果、後から読んだ AI / 人間が「設計はどれが正本か」を見失い、<strong>プロンプトとコードの設計違反 (例: Discovery が仮説生成、Evolution が EdgeLedger 直接書込) を見逃す</strong> 状況に陥った。
+  </p>
+  <p>
+    対策: <strong>正本は本 HTML 1 件</strong>、フェーズ完了時は HTML に統合 → サマリー 1 件ローリング差し替え → 旧指示書 / 作業ノートは即削除 (AGENTS.md §5.0)。
+  </p>
 </section>
 
 <hr class="divider"/>
