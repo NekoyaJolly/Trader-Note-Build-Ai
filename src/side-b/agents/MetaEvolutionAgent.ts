@@ -14,7 +14,7 @@
  */
 
 import type { Prisma } from '@prisma/client';
-import { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { loadPromptWithGlobal } from '../prompts/loader';
 import { recordAgentUsage } from './scoringRecorder';

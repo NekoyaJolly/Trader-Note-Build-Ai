@@ -12,6 +12,15 @@
  * Layer 3: (将来) ツール経由で過去ノートやバックテスト結果を参照。
  */
 
+import type { JsonValue } from '../../utils/jsonValue';
+
+/**
+ * `getRelevantIndicatorContext` などのコンテキスト生成関数が受け取る
+ * インジケーター値の型。値の中身までは見ずキー名で分岐するため、
+ * JSON 互換の値型 (`JsonValue | undefined`) で広めに受ける。
+ */
+export type IndicatorContextValue = JsonValue | undefined;
+
 // ===========================================
 // Layer 1: コアトレーディングルール
 // ===========================================
@@ -262,7 +271,9 @@ const INDICATOR_FIELD_MAPPING: Record<string, string[]> = {
  * @returns 関連するインジケーター知識を結合した文字列（なければ空文字列）
  */
 export function getRelevantIndicatorContext(
-    indicators?: Record<string, unknown> | null
+    // 値の中身は見ずキーの有無と null/undefined チェックのみ行うため、
+    // JSON 互換の任意値 (`JsonValue`) で受け取れば充分。
+    indicators?: Record<string, IndicatorContextValue> | null
 ): string {
     if (!indicators) return '';
 
@@ -304,7 +315,7 @@ export function getRelevantIndicatorContext(
  */
 export function getPlanIndicatorContext(
     featureVector: Record<string, number>,
-    indicators?: Record<string, unknown> | null
+    indicators?: Record<string, IndicatorContextValue> | null
 ): string {
     const parts: string[] = [];
 

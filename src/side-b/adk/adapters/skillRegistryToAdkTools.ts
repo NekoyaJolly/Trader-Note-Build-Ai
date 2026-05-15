@@ -43,6 +43,7 @@ import { z } from 'zod';
 
 import type { SkillRegistry } from '../../skills/registry';
 import type { Skill, SkillResult } from '../../skills/types';
+import type { JsonValue } from '../../../utils/jsonValue';
 import {
   NoopTraceSink,
   payloadToSummary,
@@ -172,8 +173,14 @@ function skillToFunctionTool(
         argsSummary: payloadToSummary(input),
       });
 
-      // Skill 実行 (既存 invoke の挙動完全保持)
-      const result: SkillResult = await registry.invoke(skill.name, input, skillContext);
+      // Skill 実行 (既存 invoke の挙動完全保持)。
+      // ADK FunctionTool 側で Zod 検証済みの input は構造的に JSON 互換 (オブジェクト) のため、
+      // SkillRegistry.invoke の `JsonValue` 引数へ橋渡しキャストする。
+      const result: SkillResult = await registry.invoke(
+        skill.name,
+        input as Record<string, JsonValue>,
+        skillContext,
+      );
 
       const endedAt = new Date();
       const durationMs = endedAt.getTime() - startedAt.getTime();

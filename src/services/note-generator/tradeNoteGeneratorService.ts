@@ -241,7 +241,13 @@ export class TradeNoteGeneratorService {
    * @param marketContext - 市場コンテキスト
    * @returns 指標データ (JSON 互換オブジェクト)
    */
-  private extractIndicators(marketContext: MarketContext): Record<string, unknown> {
+  private extractIndicators(marketContext: MarketContext): {
+    rsi: number | undefined;
+    macd: number | undefined;
+    previousClose: number | undefined;
+    averageVolume: number | undefined;
+    marketHours: MarketContext['marketHours'];
+  } {
     return {
       rsi: marketContext.rsi,
       macd: marketContext.macd,

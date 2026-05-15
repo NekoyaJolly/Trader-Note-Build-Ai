@@ -33,6 +33,7 @@ import { recordAgentUsage } from './scoringRecorder';
 import { modelFor } from '../../config';
 import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import { safeStringify } from '../../utils/safeStringify';
+import type { JsonValue } from '../../utils/jsonValue';
 
 // ===========================================
 // 型
@@ -275,18 +276,22 @@ export class StrategistAgent {
         if (!match) {
             throw new Error(`LLM output contained no JSON object: ${content.slice(0, 200)}`);
         }
-        let parsed: unknown;
+        // JSON.parse の戻り値は構造上 JsonValue 互換 (LLM 由来の JSON テキストのため)
+        let parsed: JsonValue;
         try {
-            parsed = JSON.parse(match[0]);
+            parsed = JSON.parse(match[0]) as JsonValue;
         } catch (err) {
+            // 元のパース例外を cause として保持する
             throw new Error(
                 `LLM output JSON parse failed: ${err instanceof Error ? err.message : String(err)}`,
+                { cause: err },
             );
         }
-        if (!parsed || typeof parsed !== 'object') {
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
             throw new Error('LLM output is not a JSON object');
         }
-        const p = parsed as Record<string, unknown>;
+        // JsonObject ({[k]: JsonValue | undefined}) として narrow し以降のフィールド参照に使う
+        const p: { [key: string]: JsonValue | undefined } = parsed;
         if (typeof p.interpretation !== 'string' || p.interpretation.trim() === '') {
             throw new Error('LLM output missing interpretation field');
         }

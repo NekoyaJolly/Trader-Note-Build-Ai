@@ -292,11 +292,13 @@ class SummarySchedulerService {
    */
   stop(): void {
     if (this.weeklyTask) {
-      this.weeklyTask.stop();
+      // node-cron の stop() は void | Promise<void> を返すため、ファイア&フォーゲットで明示的に無視する
+      void this.weeklyTask.stop();
       this.weeklyTask = null;
     }
     if (this.monthlyTask) {
-      this.monthlyTask.stop();
+      // node-cron の stop() は void | Promise<void> を返すため、ファイア&フォーゲットで明示的に無視する
+      void this.monthlyTask.stop();
       this.monthlyTask = null;
     }
     console.log('[SummaryScheduler] スケジューラー停止');

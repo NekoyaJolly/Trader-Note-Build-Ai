@@ -20,6 +20,7 @@ import {
 import type { ScreeningBacktestTrade } from '../../../schemas/external/analysisEngine';
 import { fromPrismaJsonValue } from '../../../utils/prismaJson';
 import { createDefaultPythonBridge, type PythonBridge } from '../python_bridge';
+import type { PythonJsonPayload } from '../python_bridge/types';
 import { VALIDATION_THRESHOLDS } from '../../config/validationThresholds';
 import type {
     HypothesisValidationInput,
@@ -27,6 +28,7 @@ import type {
     ValidationToolInput,
     ValidationToolResult,
 } from './types';
+import type { JsonValue } from '../../../utils/jsonValue';
 
 // ===========================================
 // Python 出力の契約
@@ -43,9 +45,17 @@ interface WalkForwardPythonOutput {
     windowsEvaluated: number;
 }
 
-function isWalkForwardOutput(o: unknown): o is WalkForwardPythonOutput {
-    if (!o || typeof o !== 'object') return false;
-    const r = o as Record<string, unknown>;
+/**
+ * Python 出力を WalkForwardPythonOutput に narrow する型ガード。
+ *
+ * 入力は `PythonJsonPayload | undefined` (= Python ブリッジが返す JSON 互換の動的構造) を許容。
+ * 各フィールドの存在と型を runtime チェックして narrow する。
+ */
+function isWalkForwardOutput(
+    o: PythonJsonPayload | undefined,
+): o is PythonJsonPayload & WalkForwardPythonOutput {
+    if (!o) return false;
+    const r: Record<string, JsonValue | undefined> = o;
     return (
         (r.overfitScore === null || typeof r.overfitScore === 'number') &&
         typeof r.splitCount === 'number' &&

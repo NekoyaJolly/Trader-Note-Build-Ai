@@ -641,11 +641,13 @@ export function getMatchStrength(similarity: number): SimilarityResult['matchStr
 // ============================================
 
 /**
- * ベクトルが有効な12次元かチェック
- * 
+ * ベクトルが有効な12次元かチェック。
+ * 型ガードは「未検証の任意値」を narrow するのが本来の役割。
+ *
  * @param vector - チェック対象
  * @returns 有効な12次元ベクトルかどうか
  */
+// eslint-disable-next-line no-restricted-syntax -- 型ガードの入力は型不明な値であることが本質
 export function isValid12DVector(vector: unknown): vector is FeatureVector12D {
   if (!Array.isArray(vector)) return false;
   if (vector.length !== VECTOR_DIMENSION) return false;

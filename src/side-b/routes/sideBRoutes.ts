@@ -107,10 +107,12 @@ router.get('/system/health', ledgerDashboardController.systemHealth);
 // ===========================================
 // 進化エンジン（Evolution）API
 // ===========================================
-router.get('/evolution/lessons', evolutionController.getLessons);
-router.get('/evolution/runs', evolutionController.getRuns);
-router.get('/evolution/runs/:runId/summary', evolutionController.getRunSummary);
-router.get('/evolution/runs/:runId/candidates', evolutionController.getRunCandidates);
+// evolutionController のメソッドは this を参照しないが、unbound-method 警告を避けるため
+// アロー関数でラップしてレキシカルにバインドする
+router.get('/evolution/lessons', (req, res) => evolutionController.getLessons(req, res));
+router.get('/evolution/runs', (req, res) => evolutionController.getRuns(req, res));
+router.get('/evolution/runs/:runId/summary', (req, res) => evolutionController.getRunSummary(req, res));
+router.get('/evolution/runs/:runId/candidates', (req, res) => evolutionController.getRunCandidates(req, res));
 
 
 // ===========================================

@@ -17,8 +17,12 @@ import { splitDateRange } from '../../../utils/dateRangeChunks';
 import type { CTraderAuthService } from './ctraderAuthService';
 import type { CTraderConnectionType } from './types/connection';
 
+// @reiryoku/ctrader-layer は型定義がないため、コンストラクタ型を明示してから取り出す。
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { CTraderConnection } = require('@reiryoku/ctrader-layer');
+const ctraderLayer = require('@reiryoku/ctrader-layer') as {
+  CTraderConnection: new (config: { host: string; port: number }) => CTraderConnectionType;
+};
+const { CTraderConnection } = ctraderLayer;
 
 // ========================================
 // 型定義
@@ -684,7 +688,7 @@ export class CTraderDataService {
                 const connection = new CTraderConnection({
                     host: env.host,
                     port: config.ctrader.wsPort,
-                }) as CTraderConnectionType;
+                });
 
                 await connection.open();
 

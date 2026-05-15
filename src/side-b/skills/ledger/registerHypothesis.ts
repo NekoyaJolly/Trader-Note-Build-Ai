@@ -23,11 +23,21 @@ import {
   type MachineReadableCondition,
 } from '../../models/edgeHypothesis';
 
+// MachineReadableCondition.value の取りうる型と一致させる。
+// (number / string / boolean / [min, max] / string[])
+const ConditionValueSchema = z.union([
+  z.number(),
+  z.string(),
+  z.boolean(),
+  z.tuple([z.number(), z.number()]),
+  z.array(z.string()),
+]);
+
 const ConditionSchema = z.object({
   lensName: z.string(),
   featureKey: z.string(),
   op: z.enum(['<', '<=', '>', '>=', '==', '!=', 'between', 'in']),
-  value: z.unknown(),
+  value: ConditionValueSchema,
 });
 
 const InputSchema = z.object({
@@ -111,7 +121,10 @@ export function createRegisterHypothesisSkill(
       return ledger.create({
         statement: input.statement,
         category: input.category,
-        conditions: input.conditions as unknown as MachineReadableCondition[],
+        // Zod スキーマで value を MachineReadableCondition.value と同じ union に narrow 済みのため、
+        // 構造的に互換。型システムが strictTuple / readonly 配列の差で許容しない場合のみ
+        // satisfies で契約を維持する。
+        conditions: input.conditions satisfies MachineReadableCondition[],
         expectedDirection: input.expectedDirection,
         status: 'unverified',
         statusNote: input.statusNote,

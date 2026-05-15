@@ -20,6 +20,7 @@ import { McpClientManager, type McpToolResult } from './mcpClient';
 import { AIProvider, type ChatMessage } from './aiProvider';
 import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import { loadPrompt } from '../prompts/loader';
+import type { JsonValue } from '../../utils/jsonValue';
 
 // ===========================================
 // 型定義
@@ -198,8 +199,9 @@ export class AgentLoop {
                 });
 
                 let toolResult: McpToolResult;
-                // eslint-disable-next-line no-restricted-syntax -- MCP tool 引数。スキーマは tool ごとに動的決定されるため Record<string, unknown> で保持し、callTool 側で検証する
-                let parsedArgs: Record<string, unknown> = {};
+                // MCP tool 引数。スキーマは tool ごとに動的決定されるため JSON 互換型 (Record<string, JsonValue>) で保持。
+                // 具体的な検証は MCP server 側で行う契約。
+                let parsedArgs: Record<string, JsonValue> = {};
 
                 try {
                     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- JSON.parse の戻り。直後の callTool で MCP server 側スキーマ検証に委ねる

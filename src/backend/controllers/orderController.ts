@@ -1,7 +1,17 @@
 import type { Request, Response } from 'express';
+import { z } from 'zod';
 import type { OrderPreset } from '../../models/types';
 import { TradeNoteService } from '../../services/tradeNoteService';
 import { MarketDataService } from '../../services/marketDataService';
+
+// 注文確認リクエストボディ（参考情報生成用）
+// 自動売買ではなく、フロント表示用の概算計算用のため緩めの検証に留める。
+const ConfirmationBodySchema = z.object({
+  symbol: z.string().min(1, 'symbol は必須です'),
+  side: z.string().min(1, 'side は必須です'),
+  price: z.number().positive('price は正の数値で指定してください'),
+  quantity: z.number().positive('quantity は正の数値で指定してください'),
+});
 
 export class OrderController {
   private noteService: TradeNoteService;
@@ -50,14 +60,21 @@ export class OrderController {
    * 注文確認データを取得
    * 注意: 本システムは自動売買を行いません。これは参考情報のみを提供します。
    */
-  getConfirmation = async (req: Request, res: Response): Promise<void> => {
+  getConfirmation = (req: Request, res: Response): Promise<void> => {
     try {
-      const { symbol, side, price, quantity } = req.body;
-
-      if (!symbol || !side || !price || !quantity) {
-        res.status(400).json({ error: '必須項目が不足しています（symbol, side, price, quantity）' });
-        return;
+      // Zod で req.body を具体型に narrow
+      const parsed = ConfirmationBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({
+          error: '必須項目が不足しています（symbol, side, price, quantity）',
+          issues: parsed.error.issues.map((issue) => ({
+            path: issue.path.join('.'),
+            message: issue.message,
+          })),
+        });
+        return Promise.resolve();
       }
+      const { symbol, side, price, quantity } = parsed.data;
 
       // 概算コストを計算（参考値）
       const estimatedCost = price * quantity;
@@ -81,5 +98,6 @@ export class OrderController {
       // 本番環境では内部エラーの詳細を隠蔽
       res.status(500).json({ error: '注文確認情報の取得に失敗しました' });
     }
+    return Promise.resolve();
   };
 }

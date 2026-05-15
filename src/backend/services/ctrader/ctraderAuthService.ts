@@ -22,9 +22,13 @@ import type { CTraderConnectionType } from './types/connection';
 import { CTraderAccountListResponseSchema } from '../../../schemas/external/ctrader';
 
 // cTrader Layer ライブラリを使用してアカウント情報を取得
-// @reiryoku/ctrader-layer は型定義がないため、型定義は types/connection.ts で提供
+// @reiryoku/ctrader-layer は型定義がないため、型定義は types/connection.ts で提供。
+// require の戻り値は any のため、コンストラクタ型を明示してから取り出す。
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { CTraderConnection } = require('@reiryoku/ctrader-layer');
+const ctraderLayer = require('@reiryoku/ctrader-layer') as {
+  CTraderConnection: new (config: { host: string; port: number }) => CTraderConnectionType;
+};
+const { CTraderConnection } = ctraderLayer;
 
 /** Error.cause を付与する（target ES2020 のため Error コンストラクタ第2引数は使わない） */
 function errorWithCause(message: string, cause?: Error): Error {
@@ -472,7 +476,7 @@ export class CTraderAuthService {
       connection = new CTraderConnection({
         host: config.ctrader.wsLiveHost,
         port: config.ctrader.wsPort,
-      }) as CTraderConnectionType;
+      });
 
       await connection.open();
       console.log('[CTraderAuth] WebSocket 接続成功 (Live環境)');
@@ -548,7 +552,7 @@ export class CTraderAuthService {
         connection = new CTraderConnection({
           host: config.ctrader.wsDemoHost,
           port: config.ctrader.wsPort,
-        }) as CTraderConnectionType;
+        });
 
         await connection.open();
         console.log('[CTraderAuth] WebSocket 接続成功 (Demo環境)');

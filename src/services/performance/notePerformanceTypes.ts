@@ -52,8 +52,11 @@ export interface WeakPattern {
   occurrences: number;
   /** このパターンでの平均類似度 */
   avgSimilarity: number;
-  /** 詳細情報（検出に使用した条件等） */
-  details?: Record<string, unknown>;
+  /**
+   * 詳細情報（検出に使用した条件等）。
+   * 値は JSON シリアライズ可能なプリミティブ/オブジェクトを想定。
+   */
+  details?: Record<string, string | number | boolean | null | object>;
 }
 
 /**

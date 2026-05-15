@@ -15,6 +15,7 @@
  */
 
 import { z } from 'zod';
+import type { JsonValue } from '../../utils/jsonValue';
 import type { FeatureVector12D } from './featureVector';
 
 // ===========================================
@@ -107,14 +108,14 @@ export type MarketAnalysis = z.infer<typeof MarketAnalysisSchema>;
 /**
  * MarketAnalysis のバリデーション
  */
-export function validateMarketAnalysis(data: unknown): MarketAnalysis {
+export function validateMarketAnalysis(data: JsonValue): MarketAnalysis {
     return MarketAnalysisSchema.parse(data);
 }
 
 /**
  * 安全なバリデーション（例外を投げない）
  */
-export function safeValidateMarketAnalysis(data: unknown): MarketAnalysis | null {
+export function safeValidateMarketAnalysis(data: JsonValue): MarketAnalysis | null {
     const result = MarketAnalysisSchema.safeParse(data);
     return result.success ? result.data : null;
 }

@@ -19,6 +19,7 @@
 
 import type { Request, Response } from 'express';
 import { Router } from 'express';
+import { z } from 'zod';
 import { cronAuth } from '../../middleware/cronAuth';
 import { getSideBScheduler } from '../../side-b/jobs/sideBScheduler';
 import { isFXMarketOpen, getMarketStatusJST } from '../../side-b/utils/marketHours';
@@ -362,9 +363,22 @@ router.get('/matching-pipeline', async (_req: Request, res: Response) => {
  * デバッグ・開発用。市場休場中でも実行可能。
  * bodyにsideBOnlyを渡すとSide-Bのみテスト可能。
  */
+/**
+ * /matching-pipeline/test 用の入力スキーマ。
+ *
+ * sideBOnly は任意 boolean フラグ。未指定なら false。
+ */
+const MatchingPipelineTestBodySchema = z
+  .object({
+    sideBOnly: z.boolean().optional(),
+  })
+  .optional();
+
 router.post('/matching-pipeline/test', async (req: Request, res: Response) => {
   const startTime = Date.now();
-  const sideBOnly = req.body?.sideBOnly ?? false;
+  // Zod で req.body を具体型に narrow
+  const parsed = MatchingPipelineTestBodySchema.safeParse(req.body);
+  const sideBOnly: boolean = parsed.success ? parsed.data?.sideBOnly ?? false : false;
 
   try {
     console.log(`[Cron/Test] マッチングテストを開始 (sideBOnly=${sideBOnly})`);

@@ -12,7 +12,7 @@
  * - 握りつぶし禁止: エラーは呼び出し側に伝播
  */
 
-import { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 import type {
   PromptVersion,
   PromptStatus,

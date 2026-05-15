@@ -78,7 +78,8 @@ export class DecisionInferenceService {
     const primaryTimeframe = input.marketContext?.timeframe || '15m';
     const secondaryTimeframes = ['60m', '240m'].filter((tf) => tf !== primaryTimeframe).slice(0, 2);
 
-    let inferredMode: InferredMode = 'other';
+    // if/else 全分岐で必ず代入されるため初期値は付けない
+    let inferredMode: InferredMode;
     let rationale: string;
 
     if (rsi >= 60) {
@@ -117,8 +118,9 @@ export class DecisionInferenceService {
       '【入力】',
       `- 銘柄: ${trade.symbol}`,
       `- 売買: ${trade.side}`,
-      `- 約定価格: ${trade.price}`,
-      `- 数量: ${trade.quantity}`,
+      // Prisma の Decimal 型は template literal で直接展開できないため明示的に文字列化する
+      `- 約定価格: ${trade.price.toString()}`,
+      `- 数量: ${trade.quantity.toString()}`,
       `- 約定日時: ${trade.timestamp.toISOString()}`,
       `- 暗黙の時間足: ${timeframe}`,
       `- RSI(推定): ${rsi}`,
@@ -184,6 +186,8 @@ export class DecisionInferenceService {
  * 型 assertion だけでは契約違反を見逃すため、明示的な値チェックで防御する。
  */
 const VALID_INFERRED_MODES: readonly InferredMode[] = ['trend', 'meanReversion', 'other'];
+// AI 由来の任意文字列を InferredMode enum に narrow する境界関数のため unknown を受ける。
+// eslint-disable-next-line no-restricted-syntax -- AI 出力の任意値を enum に narrow する境界関数
 function validateInferredMode(value: unknown): InferredMode {
   if (typeof value === 'string' && (VALID_INFERRED_MODES as readonly string[]).includes(value)) {
     return value as InferredMode;

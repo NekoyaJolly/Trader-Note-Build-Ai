@@ -136,7 +136,8 @@ export function enumerateParameterGrid(dsl: StrategyDSL): Array<Record<string, n
     return [{}];
   }
   const out: Array<Record<string, number>> = [];
-  const stack: number[] = new Array(sweep.length).fill(0);
+  // `new Array(n).fill(0)` の戻り値は any[] と推論されるため、明示的に number[] を生成する
+  const stack: number[] = Array.from({ length: sweep.length }, () => 0);
 
   for (;;) {
     const row: Record<string, number> = {};

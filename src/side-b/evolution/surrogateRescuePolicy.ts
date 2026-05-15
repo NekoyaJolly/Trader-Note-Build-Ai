@@ -141,8 +141,8 @@ export function isNearMiss(agg: SurrogateFitnessAggregate): { yes: boolean; fail
   ];
   const passedCount = passes.filter((p) => p).length;
   if (passedCount !== 2) return { yes: false, failedCondition: null };
-  // どの条件が未達かを文字列で返す (smoke ログ用)
-  let failedCondition = '';
+  // どの条件が未達かを文字列で返す (smoke ログ用)。3 分岐すべてで必ず代入される
+  let failedCondition: string;
   if (!passes[0]) failedCondition = `trainPf=${agg.trainPf.toFixed(2)} <= ${MIN_TRAIN_PROFIT_FACTOR}`;
   else if (!passes[1])
     failedCondition = `validationPf=${agg.validationPf.toFixed(2)} <= ${MIN_VALIDATION_PROFIT_FACTOR}`;

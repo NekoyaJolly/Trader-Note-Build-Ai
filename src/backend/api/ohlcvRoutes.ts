@@ -15,8 +15,18 @@ import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import { z } from 'zod';
 import { ohlcvImportService } from '../services/ohlcvImportService';
 import { ohlcvRepository } from '../repositories/ohlcvRepository';
+
+// multipart/form-data の body 部分（ファイル以外のフィールド）バリデーション。
+// すべて任意フィールド扱い。
+const OhlcvImportBodySchema = z.object({
+  symbol: z.string().optional(),
+  timeframe: z.string().optional(),
+  presetName: z.string().optional(),
+  description: z.string().optional(),
+});
 
 const router = Router();
 
@@ -83,11 +93,14 @@ router.post('/import', upload.single('file'), async (req: Request, res: Response
       return;
     }
 
+    // multipart/form-data の他フィールドを Zod で具体型に narrow
+    const bodyParsed = OhlcvImportBodySchema.safeParse(req.body);
+    const bodyData = bodyParsed.success ? bodyParsed.data : {};
     const options = {
-      symbol: req.body.symbol as string | undefined,
-      timeframe: req.body.timeframe as string | undefined,
-      presetName: req.body.presetName as string | undefined,
-      description: req.body.description as string | undefined,
+      symbol: bodyData.symbol,
+      timeframe: bodyData.timeframe,
+      presetName: bodyData.presetName,
+      description: bodyData.description,
       source: 'csv',
     };
 

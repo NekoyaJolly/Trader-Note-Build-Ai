@@ -12,6 +12,64 @@ import type { CreatePortfolioInput, UpdatePortfolioSettings, PortfolioStats, Por
 import { DEFAULT_PORTFOLIO_STATS, DEFAULT_PORTFOLIO_SETTINGS } from "../models";
 import { Decimal } from "@prisma/client/runtime/library";
 
+/**
+ * PortfolioStats を Prisma JSON 書き込み用に変換する。
+ *
+ * lastUpdated (Date) は ISO 文字列化し、他の数値フィールドはそのまま、
+ * `Prisma.InputJsonValue` 互換のオブジェクトとして返す。
+ * 二段 `as unknown as Prisma.InputJsonValue` キャストを避けるための薄いヘルパー。
+ */
+function portfolioStatsToJson(stats: PortfolioStats): Prisma.InputJsonValue {
+  return {
+    totalTrades: stats.totalTrades,
+    wins: stats.wins,
+    losses: stats.losses,
+    winRate: stats.winRate,
+    profitFactor: stats.profitFactor,
+    totalPnlPips: stats.totalPnlPips,
+    totalPnlAmount: stats.totalPnlAmount,
+    avgWinPips: stats.avgWinPips,
+    avgLossPips: stats.avgLossPips,
+    maxDrawdownPips: stats.maxDrawdownPips,
+    maxDrawdownPercent: stats.maxDrawdownPercent,
+    openPositions: stats.openPositions,
+    lastUpdated: stats.lastUpdated.toISOString(),
+  };
+}
+
+/**
+ * Prisma JSON フィールドから PortfolioStats を復元する。
+ *
+ * 書き込み時に `portfolioStatsToJson` で lastUpdated を ISO 文字列化しているので、
+ * 読み込み側ではここで Date に戻す。形式不一致 / null はデフォルト値で安全に補完。
+ */
+function revivePortfolioStats(raw: Prisma.JsonValue): PortfolioStats {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return DEFAULT_PORTFOLIO_STATS;
+  }
+  const obj: Prisma.JsonObject = raw;
+  const num = (v: Prisma.JsonValue | undefined, fallback: number): number =>
+    typeof v === 'number' ? v : fallback;
+  const lastUpdatedRaw = obj.lastUpdated;
+  const lastUpdated =
+    typeof lastUpdatedRaw === 'string' ? new Date(lastUpdatedRaw) : new Date();
+  return {
+    totalTrades: num(obj.totalTrades, 0),
+    wins: num(obj.wins, 0),
+    losses: num(obj.losses, 0),
+    winRate: num(obj.winRate, 0),
+    profitFactor: num(obj.profitFactor, 0),
+    totalPnlPips: num(obj.totalPnlPips, 0),
+    totalPnlAmount: num(obj.totalPnlAmount, 0),
+    avgWinPips: num(obj.avgWinPips, 0),
+    avgLossPips: num(obj.avgLossPips, 0),
+    maxDrawdownPips: num(obj.maxDrawdownPips, 0),
+    maxDrawdownPercent: num(obj.maxDrawdownPercent, 0),
+    openPositions: num(obj.openPositions, 0),
+    lastUpdated,
+  };
+}
+
 // ===========================================
 // 型定義
 // ===========================================
@@ -45,7 +103,7 @@ export async function createPortfolio(
       name: input.name ?? "Default",
       initialBalance: new Decimal(input.initialBalance ?? 100000),
       currentBalance: new Decimal(input.initialBalance ?? 100000),
-      stats: DEFAULT_PORTFOLIO_STATS as unknown as Prisma.InputJsonValue,
+      stats: portfolioStatsToJson(DEFAULT_PORTFOLIO_STATS),
       maxOpenPositions: DEFAULT_PORTFOLIO_SETTINGS.maxOpenPositions,
       riskPercentPerTrade: new Decimal(DEFAULT_PORTFOLIO_SETTINGS.riskPercentPerTrade),
       enableSpread: DEFAULT_PORTFOLIO_SETTINGS.enableSpread,
@@ -104,8 +162,10 @@ export async function updatePortfolioSettings(
   id: string,
   settings: UpdatePortfolioSettings,
 ): Promise<PortfolioRecord> {
-  const data: Record<string, unknown> = {};
-  
+  // Prisma の生成型 `VirtualPortfolioUpdateInput` を直接使うことで、
+  // 動的キー追加でも型安全 (Record<string, unknown> を避ける)。
+  const data: Prisma.VirtualPortfolioUpdateInput = {};
+
   if (settings.maxOpenPositions !== undefined) {
     data.maxOpenPositions = settings.maxOpenPositions;
   }
@@ -154,7 +214,7 @@ export async function updatePortfolioStats(
   const portfolio = await prisma.virtualPortfolio.update({
     where: { id },
     data: {
-      stats: stats as unknown as Prisma.InputJsonValue,
+      stats: portfolioStatsToJson(stats),
     },
   });
   
@@ -182,7 +242,8 @@ function toPortfolioRecord(portfolio: {
   name: string;
   initialBalance: Decimal;
   currentBalance: Decimal;
-  stats: unknown;
+  // Prisma の JSON フィールドは `Prisma.JsonValue` (具体型) で受ける
+  stats: Prisma.JsonValue;
   maxOpenPositions: number;
   riskPercentPerTrade: Decimal;
   enableSpread: boolean;
@@ -190,8 +251,10 @@ function toPortfolioRecord(portfolio: {
   createdAt: Date;
   updatedAt: Date;
 }): PortfolioRecord {
-  // statsをパース
-  const stats = (portfolio.stats as PortfolioStats) ?? DEFAULT_PORTFOLIO_STATS;
+  // statsをパース。Prisma.JsonValue から PortfolioStats へ復元する。
+  // 書き込み時に lastUpdated を ISO 文字列化しているため、読み出し時には
+  // 文字列 → Date への戻し変換が必要。null/非オブジェクトはデフォルト値。
+  const stats: PortfolioStats = revivePortfolioStats(portfolio.stats);
   
   return {
     id: portfolio.id,

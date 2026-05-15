@@ -7,7 +7,7 @@
  * - 料金発生APIの呼び出し数を事前に警告
  */
 
-export default async () => {
+export default (): Promise<void> => {
   console.log('\n🔧 Test Environment Setup\n');
   
   const secrets = {
@@ -49,4 +49,5 @@ export default async () => {
   }
   
   console.log('');
+  return Promise.resolve();
 };

@@ -70,7 +70,8 @@ export class FeatureExtractor {
    * - なし (純粋関数)
    */
   extractFeatures(trade: Trade, context?: MarketContext): FeatureVector {
-    const features = new Array(FeatureExtractor.FEATURE_LENGTH).fill(0);
+    // 型推論で any[] になるのを防ぐため number[] を明示する
+    const features: number[] = new Array<number>(FeatureExtractor.FEATURE_LENGTH).fill(0);
 
     // Decimal を number に変換
     const price = typeof trade.price === 'number' ? trade.price : Number(trade.price);

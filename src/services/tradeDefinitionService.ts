@@ -83,7 +83,8 @@ export class TradeDefinitionService {
 
     // === 市場データの取得 ===
     let marketSnapshot: MarketSnapshot;
-    let ohlcvData: OHLCVData[] = [];
+    // 初期値は try/catch 双方で必ず代入されるため未代入で宣言する
+    let ohlcvData: OHLCVData[];
     
     try {
       const marketData = await this.marketDataService.getHistoricalData(

@@ -8,6 +8,7 @@
  */
 
 import { z } from 'zod';
+import type { JsonValue } from '../../utils/jsonValue';
 
 // ===========================================
 // Zodスキーマ定義
@@ -71,19 +72,19 @@ export type FeatureVector12D = z.infer<typeof FeatureVector12DSchema>;
 /**
  * 12次元特徴量のバリデーション
  * Zodスキーマによる型安全なバリデーション
- * 
+ *
  * @throws ZodError バリデーションエラー時
  */
-export function validateFeatureVector(data: unknown): FeatureVector12D {
+export function validateFeatureVector(data: JsonValue): FeatureVector12D {
   return FeatureVector12DSchema.parse(data);
 }
 
 /**
  * 12次元特徴量の安全なバリデーション（例外を投げない）
- * 
+ *
  * @returns 成功時はデータ、失敗時はnull
  */
-export function safeValidateFeatureVector(data: unknown): FeatureVector12D | null {
+export function safeValidateFeatureVector(data: JsonValue): FeatureVector12D | null {
   const result = FeatureVector12DSchema.safeParse(data);
   return result.success ? result.data : null;
 }

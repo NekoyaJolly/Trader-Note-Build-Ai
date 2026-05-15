@@ -50,14 +50,14 @@ export class VolatilityRegimeLens implements Lens {
         this.config = { ...DEFAULT_CONFIG, ...(config ?? {}) };
     }
 
-    async compute(input: LensInput): Promise<LensFeature> {
+    compute(input: LensInput): Promise<LensFeature> {
         const start = Date.now();
         const computedAt = new Date();
         const bars = input.ohlcvBars;
 
         const minBars = this.config.indicatorWindow + this.config.atrChangeWindow + 1;
         if (!bars || bars.length < minBars) {
-            return {
+            return Promise.resolve({
                 lensName: this.name,
                 lensVersion: this.version,
                 features: {
@@ -69,7 +69,7 @@ export class VolatilityRegimeLens implements Lens {
                 computedAt,
                 computeDurationMs: Date.now() - start,
                 confidence: 0,
-            };
+            });
         }
 
         // --- BB幅の時系列計算 ---
@@ -113,14 +113,14 @@ export class VolatilityRegimeLens implements Lens {
             bars_in_current_regime: barsInCurrentRegime,
         };
 
-        return {
+        return Promise.resolve({
             lensName: this.name,
             lensVersion: this.version,
             features,
             computedAt,
             computeDurationMs: Date.now() - start,
             confidence: 0.9,
-        };
+        });
     }
 
     // --- 内部計算 ---

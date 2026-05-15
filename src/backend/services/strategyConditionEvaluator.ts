@@ -140,27 +140,27 @@ export interface EvaluationContext {
  * @param field - フィールド名（'value', 'signal', 'histogram', 'upper', 'lower' など）
  * @returns インジケーター値（計算不可の場合は undefined）
  */
-export async function getIndicatorValue(
+export function getIndicatorValue(
   ctx: EvaluationContext,
   indicatorId: string,
   params: Record<string, number>,
   field: string
 ): Promise<number | undefined> {
   const cacheKey = makeIndicatorCacheKey(indicatorId, params, field);
-  
+
   // 原則: インジケーター計算は analysis-engine（Python / pandas-ta）に委譲する。
   // ここでは「キャッシュに存在する値のみ」を参照する。
   if (!ctx.indicatorCache.has(cacheKey)) {
     console.warn(`[ConditionEvaluator] インジケーター値がキャッシュに存在しません（analysis-engine 未取得の可能性）: ${cacheKey}`);
-    return undefined;
+    return Promise.resolve(undefined);
   }
-  
+
   const cached = ctx.indicatorCache.get(cacheKey);
-  if (!cached) return undefined;
+  if (!cached) return Promise.resolve(undefined);
 
   const value = cached[ctx.currentIndex];
   // pandas-ta の計算初期は欠損が発生しやすい（NaN）ため、undefined に寄せる
-  return Number.isFinite(value) ? value : undefined;
+  return Promise.resolve(Number.isFinite(value) ? value : undefined);
 }
 
 /**
@@ -302,15 +302,15 @@ export async function evaluateCondition(
 }
 
 /** パターン条件を評価 */
-export async function evaluatePatternCondition(
+export function evaluatePatternCondition(
   ctx: EvaluationContext,
   condition: PatternCondition
 ): Promise<boolean> {
   const series = ctx.patternCache?.get(condition.patternId);
-  if (!series) return false;
+  if (!series) return Promise.resolve(false);
 
   const flag = series[ctx.currentIndex] ?? false;
-  return condition.operator === 'is_false' ? !flag : !!flag;
+  return Promise.resolve(condition.operator === 'is_false' ? !flag : !!flag);
 }
 
 /**

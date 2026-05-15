@@ -24,6 +24,7 @@ import { calculateExpiryDate } from '../models/marketResearch';
 import { getRelevantIndicatorContext } from '../knowledge';
 import { AIProvider } from '../agent/aiProvider';
 import { loadPrompt } from '../prompts/loader';
+import type { JsonValue } from '../../utils/jsonValue';
 
 // ===========================================
 // 型定義
@@ -281,19 +282,19 @@ ${indicators ? `
 - 有効なJSONのみを出力してください。
 
 ${getRelevantIndicatorContext(
-            // eslint-disable-next-line no-restricted-syntax -- IndicatorData は事前計算済み数値の集合。getRelevantIndicatorContext は Record<string, unknown> 受け取りに統一されているため二段キャストで橋渡し
-            indicators as unknown as Record<string, unknown>
+            // IndicatorData は数値 / オブジェクトのみで構成され JSON 互換のため、
+            // getRelevantIndicatorContext の Record<string, IndicatorContextValue> へ構造的に橋渡しできる。
+            indicators as Record<string, JsonValue>
         )}`;
   }
 
   /**
    * AI APIを呼び出し (AIProvider 経由)
    *
-   * `content: unknown` は AI レスポンス未検証段階の型として意図的。呼び出し側で
-   * ResearchAIOutputSchema (本ファイル内 validate 関数) による Zod 検証を経て型を確定させる契約。
+   * `content` は AI レスポンス未検証段階の値だが、JSON.parse 由来で構造的に `JsonValue` 互換。
+   * 呼び出し側で `validateMarketAnalysis` (Zod) による narrow を行う契約。
    */
-  // eslint-disable-next-line no-restricted-syntax
-  private async callAI(prompt: string): Promise<{ content: unknown; tokenUsage: number; model: string }> {
+  private async callAI(prompt: string): Promise<{ content: JsonValue; tokenUsage: number; model: string }> {
     const provider = new AIProvider({
       apiKey: this.apiKey,
       model: this.model,
@@ -316,8 +317,7 @@ ${getRelevantIndicatorContext(
       throw new Error('AI APIからの応答が空です');
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- JSON.parse の戻りは unknown 相当。呼び出し側の Zod 検証で型を確定させる
-    const parsed = JSON.parse(content);
+    const parsed = JSON.parse(content) as JsonValue;
 
     return {
       content: parsed,

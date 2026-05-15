@@ -20,6 +20,7 @@
  */
 
 import type { Request, Response } from 'express';
+import type { ParsedQs } from 'qs';
 import { BatchValidateRequestSchema } from '../../schemas/api/sideB';
 import {
     edgeLedger as defaultEdgeLedger,
@@ -69,11 +70,21 @@ export type ValidationHistoryEntry =
 // ===========================================
 
 /**
+ * Express の `req.query` の各要素が取りうる型 (= `ParsedQs[string]`)。
+ * 単一文字列 / 文字列配列 / ネストされた ParsedQs / undefined を含む。
+ */
+type QueryValue =
+    | undefined
+    | string
+    | ParsedQs
+    | (string | ParsedQs)[];
+
+/**
  * Express の query は `string | string[] | undefined` の他に
  * ParsedQs も取り得るが、このコントローラーは配列 or 単一文字列のみ扱う。
  * 未知形式は undefined 扱いで無視する（検証用途で例外は立てない）。
  */
-function toStringArray(raw: unknown): string[] | undefined {
+function toStringArray(raw: QueryValue): string[] | undefined {
     if (raw === undefined || raw === null) return undefined;
     if (Array.isArray(raw)) {
         const arr = raw
@@ -88,7 +99,7 @@ function toStringArray(raw: unknown): string[] | undefined {
     return undefined;
 }
 
-function toPositiveInt(raw: unknown, fallback: number): number {
+function toPositiveInt(raw: QueryValue, fallback: number): number {
     if (typeof raw !== 'string') return fallback;
     const parsed = Number.parseInt(raw, 10);
     if (!Number.isFinite(parsed) || parsed < 1) return fallback;
@@ -102,7 +113,7 @@ function filterByEnum<T extends string>(values: string[] | undefined, allowed: r
 }
 
 const SORT_KEYS_ALLOWED: EdgeFindSortKey[] = ['newest', 'oldest', 'observation'];
-function toSortKey(raw: unknown): EdgeFindSortKey {
+function toSortKey(raw: QueryValue): EdgeFindSortKey {
     if (typeof raw !== 'string') return 'newest';
     return SORT_KEYS_ALLOWED.includes(raw as EdgeFindSortKey)
         ? (raw as EdgeFindSortKey)

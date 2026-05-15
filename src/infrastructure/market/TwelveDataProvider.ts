@@ -210,24 +210,25 @@ export class TwelveDataProvider extends BaseMarketDataProvider {
    * Twelve Data の WebSocket は有料プランのみのため、
    * Side-B（バックテスト用途）では実装しない
    */
-  async connect(): Promise<boolean> {
+  connect(): Promise<boolean> {
     console.warn('[TwelveDataProvider] WebSocket は有料プランのみのため未サポートです');
     this.setConnectionState('disconnected');
-    return false;
+    return Promise.resolve(false);
   }
-  
+
   /**
    * WebSocket 接続を終了
    */
-  async disconnect(): Promise<void> {
+  disconnect(): Promise<void> {
     this.setConnectionState('disconnected');
+    return Promise.resolve();
   }
-  
+
   /**
    * Tick 購読を開始（未サポート）
    */
-  async subscribeToTicks(_symbols: string[], _callback: TickCallback): Promise<void> {
-    throw new Error('[TwelveDataProvider] WebSocket Tick 購読は未サポートです。Side-A では CTraderProvider を使用してください。');
+  subscribeToTicks(_symbols: string[], _callback: TickCallback): Promise<void> {
+    return Promise.reject(new Error('[TwelveDataProvider] WebSocket Tick 購読は未サポートです。Side-A では CTraderProvider を使用してください。'));
   }
   
   /**

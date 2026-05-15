@@ -11,24 +11,63 @@
  */
 
 import type { McpToolDefinition, McpToolResult } from '../agent/mcpClient';
+import type { JsonValue } from '../../utils/jsonValue';
 import type {
+  BaseSkill,
   Skill,
   SkillContext,
   SkillInvocationContext,
   SkillResult,
+  SkillJsonInput,
+  SkillJsonOutput,
 } from './types';
 
-export class SkillRegistry {
-  private readonly skills = new Map<string, Skill>();
+/**
+ * 個別スキル (Skill<TInput, TOutput>) を Registry に登録するための共通形 (BaseSkill) に
+ * 変換する薄いブリッジ。
+ *
+ * Registry レイヤーは入出力を JsonValue として扱うため、個別スキルの具体型を
+ * 構造的キャストで一段落とす。安全性は呼び出し側 (Zod 検証 + 戻り値の型) に依存する。
+ */
+function toBaseSkill<TInput, TOutput>(skill: Skill<TInput, TOutput>): BaseSkill {
+  return {
+    name: skill.name,
+    description: skill.description,
+    inputSchema: skill.inputSchema,
+    async execute(input: SkillJsonInput, context: SkillContext): Promise<SkillJsonOutput> {
+      // input は JsonValue。個別スキルは execute() 内部で Zod 等により具体型 (TInput) に narrow するため、
+      // ここでは Registry ↔ 個別スキル間の型ブリッジ目的で構造的キャストを行う。
+      const narrowed = input as TInput;
+      const output = await skill.execute(narrowed, context);
+      // 出力 (TOutput) は JSON シリアライズ可能であることを各スキルの戻り値型で担保する想定。
+      return output as SkillJsonOutput;
+    },
+  };
+}
 
-  register(skill: Skill): void {
+export class SkillRegistry {
+  private readonly skills = new Map<string, BaseSkill>();
+
+  /**
+   * 個別スキル (Skill<TInput, TOutput>) を Registry に登録する。
+   *
+   * 個別スキルの具体型は登録時に消去し、Registry 内では BaseSkill として保持する。
+   */
+  register<TInput, TOutput>(skill: Skill<TInput, TOutput>): void {
     if (this.skills.has(skill.name)) {
       throw new Error(`[SkillRegistry] Skill already registered: ${skill.name}`);
     }
-    this.skills.set(skill.name, skill);
+    this.skills.set(skill.name, toBaseSkill(skill));
   }
 
-  registerAll(skills: readonly Skill[]): void {
+  /**
+   * 複数スキルを一括登録する。
+   *
+   * 要素ごとに `TInput` / `TOutput` が異なる場合、配列リテラルでは共通の最広型
+   * (= `Skill<JsonValue, JsonValue>`) に推論できないことがあるため、個別の
+   * `register()` ループで呼び出し側に型を尊重させる構造にしている。
+   */
+  registerAll(skills: ReadonlyArray<Skill<JsonValue, JsonValue>>): void {
     for (const s of skills) this.register(s);
   }
 
@@ -36,11 +75,11 @@ export class SkillRegistry {
     return this.skills.has(name);
   }
 
-  get(name: string): Skill | undefined {
+  get(name: string): BaseSkill | undefined {
     return this.skills.get(name);
   }
 
-  list(): Skill[] {
+  list(): BaseSkill[] {
     return [...this.skills.values()];
   }
 
@@ -54,7 +93,9 @@ export class SkillRegistry {
       description: s.description,
       inputSchema: {
         type: 'object',
-        properties: s.inputSchema.properties as Record<string, object> | undefined,
+        // JSONSchema ノード型は Record<string, SkillJsonSchemaNode> → MCP は
+        // Record<string, object> を要求。構造的に互換のため安全にダウンキャスト。
+        properties: s.inputSchema.properties,
         required: s.inputSchema.required,
       },
     }));
@@ -66,9 +107,9 @@ export class SkillRegistry {
    * 例外は握りつぶさず SkillResult(ok=false) の error.details に保持する。
    * Zod バリデーション失敗は code='ZodError' で返される。
    */
-  async invoke<T = unknown>(
+  async invoke<T = SkillJsonOutput>(
     name: string,
-    input: unknown,
+    input: SkillJsonInput,
     context: SkillInvocationContext = {},
   ): Promise<SkillResult<T>> {
     const skill = this.skills.get(name);
@@ -90,6 +131,8 @@ export class SkillRegistry {
 
     try {
       const data = await skill.execute(input, ctx);
+      // T は呼び出し側が想定する具体的な戻り値型。BaseSkill.execute の戻り値 (JsonValue)
+      // を構造的に下位型 T へキャストする。
       return { ok: true, data: data as T };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -97,9 +140,12 @@ export class SkillRegistry {
         error instanceof Error && error.name && error.name !== 'Error'
           ? error.name
           : 'SKILL_EXECUTION_ERROR';
+      // details にはスタックトレース等の構造化情報のみ保持し、Error オブジェクト
+      // そのものは触らない (循環参照や非 JSON 値を含むため)。
+      const stack = error instanceof Error ? error.stack : undefined;
       return {
         ok: false,
-        error: { code, message, details: error },
+        error: { code, message, details: stack ? { stack } : undefined },
       };
     }
   }
@@ -112,7 +158,7 @@ export class SkillRegistry {
    */
   async callAsMcpTool(
     name: string,
-    args: Record<string, unknown>,
+    args: Record<string, JsonValue>,
     context: SkillInvocationContext = {},
   ): Promise<McpToolResult> {
     const result = await this.invoke(name, args, context);

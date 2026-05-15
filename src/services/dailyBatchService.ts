@@ -83,7 +83,8 @@ export class DailyBatchService {
         report.importSummary = await this.tradeImportService.importFromCSV(options.csvFilePath);
       } catch (error) {
         const message = `CSV 取り込み失敗: ${(error as Error).message}`;
-        if (options.failFast) throw new Error(message);
+        // failFast の場合は原因例外を cause として伝播させる
+        if (options.failFast) throw new Error(message, { cause: error });
         errors.push(message);
       }
     }
@@ -143,7 +144,8 @@ export class DailyBatchService {
       }
     } catch (error) {
       const message = `一致判定全体で失敗: ${(error as Error).message}`;
-      if (options.failFast) throw new Error(message);
+      // failFast の場合は原因例外を cause として伝播させる
+      if (options.failFast) throw new Error(message, { cause: error });
       errors.push(message);
     }
 

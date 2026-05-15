@@ -84,15 +84,15 @@ import { createComputeLensFeaturesSkill } from './lens/computeLensFeatures';
  */
 export function buildDefaultSkillRegistry(): SkillRegistry {
   const registry = new SkillRegistry();
-  registry.registerAll([
-    createQueryEdgeLedgerSkill(),
-    createGetHypothesisSkill(),
-    createRegisterHypothesisSkill(),
-    createRunScreeningSkill(),
-    createRunFullValidationSkill(),
-    createReadRecentNotesSkill(),
-    createRecordLessonSkill(),
-    createComputeLensFeaturesSkill(),
-  ]);
+  // 個別 register で 1 件ずつ登録することで、各スキルの具体型 (TInput / TOutput) を
+  // ジェネリック推論で個別にキャプチャできる。
+  registry.register(createQueryEdgeLedgerSkill());
+  registry.register(createGetHypothesisSkill());
+  registry.register(createRegisterHypothesisSkill());
+  registry.register(createRunScreeningSkill());
+  registry.register(createRunFullValidationSkill());
+  registry.register(createReadRecentNotesSkill());
+  registry.register(createRecordLessonSkill());
+  registry.register(createComputeLensFeaturesSkill());
   return registry;
 }

@@ -1,10 +1,20 @@
+import type { Prisma } from '@prisma/client';
 import type { CooldownCheckResult } from '../../backend/repositories/notificationLogRepository';
 import { NotificationLogRepository } from '../../backend/repositories/notificationLogRepository';
+
+/**
+ * 市場スナップショットを表す型。
+ * - Prisma MarketSnapshot から取得した行 (オブジェクト)
+ * - JSON 列由来の JsonValue
+ * - レガシー経路で空オブジェクトを渡すケース
+ * を全てカバーする具体型。
+ */
+type MarketSnapshotInput = Prisma.JsonValue | Record<string, Prisma.JsonValue> | object | null;
 
 export interface NotificationTriggerInput {
   matchScore: number;
   historicalNoteId: string;
-  marketSnapshot: unknown;
+  marketSnapshot: MarketSnapshotInput;
   marketSnapshotId?: string;
   symbol?: string;
   channel?: 'in_app' | 'push' | 'webhook';
@@ -26,11 +36,11 @@ interface LegacyMatchResult {
   // 新形式
   score?: number;
   noteId?: string;
-  marketSnapshot?: unknown;
+  marketSnapshot?: MarketSnapshotInput;
   // 旧形式
   matchScore?: number;
   historicalNoteId?: string;
-  currentMarket?: unknown;
+  currentMarket?: MarketSnapshotInput;
 }
 
 const NOTIFICATION_THRESHOLD = parseFloat(process.env.NOTIFY_THRESHOLD || '0.75');
@@ -228,11 +238,11 @@ export class NotificationTriggerService {
    * @param matchResult - 旧形式または新形式のマッチ結果
    * @returns 通知トリガ結果
    */
-  async evaluateAndNotify(matchResult: LegacyMatchResult): Promise<NotificationTriggerResult> {
-    return this.evaluate({
+  evaluateAndNotify(matchResult: LegacyMatchResult): Promise<NotificationTriggerResult> {
+    return Promise.resolve(this.evaluate({
       matchScore: matchResult?.score ?? matchResult?.matchScore ?? 0,
       historicalNoteId: matchResult?.noteId ?? matchResult?.historicalNoteId ?? '',
       marketSnapshot: matchResult?.marketSnapshot ?? matchResult?.currentMarket ?? {},
-    });
+    }));
   }
 }

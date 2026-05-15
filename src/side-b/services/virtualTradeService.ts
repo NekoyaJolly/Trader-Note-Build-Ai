@@ -114,7 +114,6 @@ export async function createTradeFromPlan(
     }
     
     // シナリオを特定
-    const scenarios = plan.scenarios as unknown[];
     interface ScenarioData {
       id: string;
       direction: TradeDirection;
@@ -122,6 +121,9 @@ export async function createTradeFromPlan(
       stopLoss: { price: number };
       takeProfit: { price: number };
     }
+    // Prisma JSON フィールド由来。実体は ScenarioData[] だが、配列でない可能性に備え
+    // ReadonlyArray<ScenarioData> として narrow する。
+    const scenarios = (Array.isArray(plan.scenarios) ? plan.scenarios : []) as ScenarioData[];
     
     // シナリオ存在チェック
     // シナリオ 0 件 = Plan AI (StrategyThinker) が「エントリー条件未成立 = ノートレード」と
@@ -135,8 +137,8 @@ export async function createTradeFromPlan(
     }
     
     const scenario = scenarioId
-      ? (scenarios as ScenarioData[]).find((s) => s.id === scenarioId)
-      : (scenarios as ScenarioData[])[0]; // デフォルトは最初のシナリオ
+      ? scenarios.find((s) => s.id === scenarioId)
+      : scenarios[0]; // デフォルトは最初のシナリオ
     
     if (!scenario) {
       return { success: false, error: "シナリオが見つかりません" };

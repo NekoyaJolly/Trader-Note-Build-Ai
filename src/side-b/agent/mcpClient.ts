@@ -15,6 +15,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import path from 'path';
+import type { JsonValue } from '../../utils/jsonValue';
 
 // ===========================================
 // 型定義
@@ -143,7 +144,7 @@ export class McpClientManager {
      * @param args ツール引数
      * @returns ツール実行結果
      */
-    async callTool(name: string, args: Record<string, unknown>): Promise<McpToolResult> {
+    async callTool(name: string, args: Record<string, JsonValue>): Promise<McpToolResult> {
         if (!this.client || !this.connected) {
             throw new Error('[McpClient] Not connected. Call connect() first.');
         }

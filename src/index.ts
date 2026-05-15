@@ -33,12 +33,18 @@ process.on('uncaughtException', (err: Error) => {
   }
 });
 
-process.on('unhandledRejection', (reason: unknown, promise: Promise<unknown>) => {
+// Node の unhandledRejection ハンドラは (reason, promise) のシグネチャが固定で
+// reason の型は何でも入りうるため Error | string | object と JSON 化可能な広い具体型で受ける。
+// promise 側はログ用途で型タグを取るだけなので Promise<void> で十分。
+type RejectionReason = Error | string | number | boolean | null | object;
+process.on('unhandledRejection', (reason: RejectionReason, promise: Promise<void>) => {
   logError('═══════════════════════════════════════');
   logError('  未処理のPromise Rejectが発生しました');
   logError('═══════════════════════════════════════');
   logError(`Reason: ${JSON.stringify(reason)}`);
-  logError(`Promise: ${promise}`);
+  // Promise オブジェクトを直接 template literal に埋め込むと '[object Object]' になり
+  // 暗黙の toString 警告が出るため、型タグを明示的に取得する
+  logError(`Promise: ${Object.prototype.toString.call(promise)}`);
   logError('═══════════════════════════════════════');
   // 本番環境では致命的エラーの場合は終了する
   if (process.env.NODE_ENV === 'production') {
@@ -57,11 +63,18 @@ try {
   application.start().then(() => {
     log('サーバー起動処理が完了しました');
     log('✅ TradeAssist アプリケーション起動成功');
-  }).catch((err: unknown) => {
+  }).catch((err: Error | string | object | null) => {
     logError('═══════════════════════════════════════');
     logError('  アプリケーション起動エラー (async)');
     logError('═══════════════════════════════════════');
-    logError(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    // object 系を直接 template literal に埋め込むと '[object Object]' になるため
+    // JSON.stringify で構造化文字列に変換する。
+    const errStr =
+      err instanceof Error ? err.message
+      : typeof err === 'string' ? err
+      : err === null ? 'null'
+      : JSON.stringify(err);
+    logError(`Error: ${errStr}`);
     if (err instanceof Error) {
       logError(`Stack: ${err.stack}`);
     }

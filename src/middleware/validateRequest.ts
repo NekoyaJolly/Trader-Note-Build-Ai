@@ -142,12 +142,13 @@ export function validateParams<T>(schema: z.ZodSchema<T>) {
 
 /**
  * 複合バリデーションミドルウェア
- * body, query, params を同時にバリデーション
+ * body, query, params を同時にバリデーション。
+ * 各ジェネリックは Zod スキーマから推論されるため、デフォルトは object 型を採用する。
  */
 export function validateRequest<
-  TBody = unknown,
-  TQuery = unknown,
-  TParams = unknown
+  TBody extends object = object,
+  TQuery extends object = object,
+  TParams extends object = object
 >(options: {
   body?: z.ZodSchema<TBody>;
   query?: z.ZodSchema<TQuery>;

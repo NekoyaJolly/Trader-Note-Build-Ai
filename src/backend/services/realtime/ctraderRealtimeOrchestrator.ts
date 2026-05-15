@@ -25,9 +25,13 @@ import type {
 import { CTraderAccountListResponseSchema } from '../../../schemas/external/ctrader';
 
 // cTrader Layer ライブラリ（型定義なし）
-// @reiryoku/ctrader-layer は型定義がないため、型定義は types/connection.ts で提供
+// @reiryoku/ctrader-layer は型定義がないため、型定義は types/connection.ts で提供。
+// require の戻り値は any のため、コンストラクタ型を明示してから取り出す。
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { CTraderConnection } = require('@reiryoku/ctrader-layer');
+const ctraderLayer = require('@reiryoku/ctrader-layer') as {
+  CTraderConnection: new (config: { host: string; port: number }) => CTraderConnectionType;
+};
+const { CTraderConnection } = ctraderLayer;
 
 // ========================================
 // 型定義
@@ -249,7 +253,7 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
       this.connection = new CTraderConnection({
         host: connectionHost,
         port: config.ctrader.wsPort,
-      }) as CTraderConnectionType;
+      });
 
       await this.connection.open();
       console.log('[CTraderOrchestrator] WebSocket 接続成功 (Live環境)');
@@ -300,7 +304,7 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
         this.connection = new CTraderConnection({
           host: connectionHost,
           port: config.ctrader.wsPort,
-        }) as CTraderConnectionType;
+        });
 
         await this.connection.open();
         console.log('[CTraderOrchestrator] WebSocket 接続成功 (Demo環境)');
@@ -434,9 +438,9 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
   /**
    * シンボルの購読を解除
    */
-  async unsubscribe(symbols: string[]): Promise<void> {
+  unsubscribe(symbols: string[]): Promise<void> {
     if (this.status !== 'connected' || !this.connection) {
-      return;
+      return Promise.resolve();
     }
 
     for (const symbol of symbols) {
@@ -448,6 +452,8 @@ export class CTraderRealtimeOrchestrator extends EventEmitter {
       this.subscribedSymbols.delete(symbol);
       console.log(`[CTraderOrchestrator] ${symbol} の購読を解除`);
     }
+
+    return Promise.resolve();
   }
 
   /**

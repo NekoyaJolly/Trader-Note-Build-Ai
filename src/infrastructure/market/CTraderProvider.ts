@@ -194,8 +194,8 @@ export class CTraderProvider extends BaseMarketDataProvider {
     }
   }
 
-  async getCurrentPrice(_symbol: string, _timeframe: Timeframe): Promise<OHLCVBar | null> {
-    return null;
+  getCurrentPrice(_symbol: string, _timeframe: Timeframe): Promise<OHLCVBar | null> {
+    return Promise.resolve(null);
   }
 
   async connect(): Promise<boolean> {
@@ -261,7 +261,7 @@ export class CTraderProvider extends BaseMarketDataProvider {
     }
   }
 
-  async disconnect(): Promise<void> {
+  disconnect(): Promise<void> {
     console.log('[cTrader] 切断開始...');
     this.stopHeartbeat();
     this.clearReconnectTimer();
@@ -271,6 +271,7 @@ export class CTraderProvider extends BaseMarketDataProvider {
     }
     this.setConnectionState('disconnected');
     console.log('[cTrader] 切断完了');
+    return Promise.resolve();
   }
 
   async subscribeToTicks(symbols: string[], callback: TickCallback): Promise<void> {
@@ -350,9 +351,9 @@ export class CTraderProvider extends BaseMarketDataProvider {
     await this.sendRequest(message);
   }
 
-  private async resolveSymbolId(symbol: string): Promise<number> {
+  private resolveSymbolId(symbol: string): Promise<number> {
     const cached = this.symbolIdMap.get(symbol);
-    if (cached) return cached;
+    if (cached) return Promise.resolve(cached);
 
     const commonSymbolIds: Record<string, number> = {
       'XAUUSD': 1, 'EURUSD': 2, 'USDJPY': 3, 'GBPUSD': 4,
@@ -362,9 +363,9 @@ export class CTraderProvider extends BaseMarketDataProvider {
     if (symbolId) {
       this.symbolIdMap.set(symbol, symbolId);
       this.reverseSymbolIdMap.set(symbolId, symbol);
-      return symbolId;
+      return Promise.resolve(symbolId);
     }
-    throw new Error(`[cTrader] シンボル ${symbol} のIDが見つかりません`);
+    return Promise.reject(new Error(`[cTrader] シンボル ${symbol} のIDが見つかりません`));
   }
 
   private async subscribeToSymbol(symbolId: number): Promise<void> {

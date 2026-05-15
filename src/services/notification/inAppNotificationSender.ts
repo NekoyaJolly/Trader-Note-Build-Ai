@@ -80,33 +80,33 @@ export class InAppNotificationSender implements NotificationSender {
    * Push 通知（スタブ実装）
    * Phase4 では実装は不要。Phase5 以降で FCM/APNs を統合する想定
    */
-  async sendPush(payload: NotificationPayload): Promise<{ success: boolean; id?: string }> {
+  sendPush(payload: NotificationPayload): Promise<{ success: boolean; id?: string }> {
     // 本番環境ではスタブログを抑制
     if (!this.isProduction) {
       console.log(
         `[スタブ] Push 通知: ${payload.symbol} - ${payload.title} (score=${payload.score})`
       );
     }
-    return {
+    return Promise.resolve({
       success: true,
       id: `push_stub_${Date.now()}`,
-    };
+    });
   }
 
   /**
    * Webhook（スタブ実装）
    * Phase4 では実装は不要。設定に基づいて Slack などへ通知する想定
    */
-  async sendWebhook(payload: NotificationPayload): Promise<{ success: boolean; id?: string }> {
+  sendWebhook(payload: NotificationPayload): Promise<{ success: boolean; id?: string }> {
     // 本番環境ではスタブログを抑制
     if (!this.isProduction) {
       console.log(
         `[スタブ] Webhook 通知: ${payload.symbol} - ${payload.title} (score=${payload.score})`
       );
     }
-    return {
+    return Promise.resolve({
       success: true,
       id: `webhook_stub_${Date.now()}`,
-    };
+    });
   }
 }

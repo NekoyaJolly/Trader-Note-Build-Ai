@@ -32,6 +32,7 @@ import type {
     PythonBridgeConfig,
     PythonExecutionRequest,
     PythonExecutionResult,
+    PythonJsonPayload,
 } from './types';
 
 // ===========================================
@@ -233,9 +234,10 @@ export class PythonBridge {
             };
         }
 
-        let output: Record<string, unknown>;
+        // Python 側からの JSON は構造未確定のため `PythonJsonPayload` (= Record<string, JsonValue>) で受ける
+        let output: PythonJsonPayload;
         try {
-            output = JSON.parse(raw) as Record<string, unknown>;
+            output = JSON.parse(raw) as PythonJsonPayload;
         } catch (err) {
             await this.safeUnlink(inputHost, outputHost);
             return {
@@ -313,7 +315,7 @@ export class PythonBridge {
                     durationMs: Date.now() - start,
                 };
             }
-            const output = await res.json() as Record<string, unknown>;
+            const output = (await res.json()) as PythonJsonPayload;
             return {
                 success: true,
                 output,

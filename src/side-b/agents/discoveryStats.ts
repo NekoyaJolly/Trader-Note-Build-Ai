@@ -134,7 +134,7 @@ export function computeFeatureSeparations(
 // 内部ユーティリティ
 // ===========================================
 
-function isAllNumeric(values: readonly unknown[]): boolean {
+function isAllNumeric(values: readonly (number | string | boolean)[]): boolean {
     return values.every((v) => typeof v === 'number' && Number.isFinite(v));
 }
 

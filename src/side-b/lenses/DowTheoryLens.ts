@@ -50,14 +50,14 @@ export class DowTheoryLens implements Lens {
         };
     }
 
-    async compute(input: LensInput): Promise<LensFeature> {
+    compute(input: LensInput): Promise<LensFeature> {
         const start = Date.now();
         const computedAt = new Date();
         const bars = input.ohlcvBars;
 
         const minBars = this.config.pivot.leftBars + this.config.pivot.rightBars + 1;
         if (!bars || bars.length < minBars) {
-            return {
+            return Promise.resolve({
                 lensName: this.name,
                 lensVersion: this.version,
                 features: {
@@ -71,7 +71,7 @@ export class DowTheoryLens implements Lens {
                 computedAt,
                 computeDurationMs: Date.now() - start,
                 confidence: 0,
-            };
+            });
         }
 
         const pivots = detectPivots(bars, this.config.pivot);
@@ -134,14 +134,14 @@ export class DowTheoryLens implements Lens {
             pivot_count: pivots.length,
         };
 
-        return {
+        return Promise.resolve({
             lensName: this.name,
             lensVersion: this.version,
             features,
             computedAt,
             computeDurationMs: Date.now() - start,
             confidence: trendState === 'unclear' ? 0.3 : 0.8,
-        };
+        });
     }
 
     // --- 内部ヘルパー ---

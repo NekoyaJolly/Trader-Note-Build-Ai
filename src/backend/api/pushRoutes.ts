@@ -10,6 +10,7 @@
 
 import type { Request, Response } from 'express';
 import { Router } from 'express';
+import { z } from 'zod';
 import { WebPushService } from '../services/webPushService';
 import { requireAuth } from '../../middleware/authMiddleware';
 import { getPrismaClient } from '../../infrastructure/prismaClient';
@@ -17,6 +18,25 @@ import { getPrismaClient } from '../../infrastructure/prismaClient';
 const router = Router();
 const prisma = getPrismaClient();
 const webPushService = new WebPushService(prisma);
+
+// PushSubscription 形式の Zod スキーマ
+const PushSubscriptionSchema = z.object({
+  endpoint: z.string().min(1, 'endpoint は必須です'),
+  keys: z.object({
+    p256dh: z.string().min(1, 'keys.p256dh は必須です'),
+    auth: z.string().min(1, 'keys.auth は必須です'),
+  }),
+});
+
+// POST /api/push/subscribe のリクエストボディ
+const SubscribeBodySchema = z.object({
+  subscription: PushSubscriptionSchema,
+});
+
+// POST /api/push/unsubscribe のリクエストボディ
+const UnsubscribeBodySchema = z.object({
+  endpoint: z.string().min(1, 'endpoint は必須です'),
+});
 
 /**
  * GET /api/push/vapid-public-key
@@ -65,24 +85,21 @@ router.get('/status', (_req: Request, res: Response) => {
 router.post('/subscribe', requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const { subscription } = req.body;
 
-    // バリデーション
-    if (!subscription || !subscription.endpoint || !subscription.keys) {
+    // Zod で req.body を具体型に narrow
+    const parsed = SubscribeBodySchema.safeParse(req.body);
+    if (!parsed.success) {
       res.status(400).json({
         success: false,
         error: '購読情報が不正です。endpoint と keys (p256dh, auth) が必要です。',
+        issues: parsed.error.issues.map((issue) => ({
+          path: issue.path.join('.'),
+          message: issue.message,
+        })),
       });
       return;
     }
-
-    if (!subscription.keys.p256dh || !subscription.keys.auth) {
-      res.status(400).json({
-        success: false,
-        error: '購読の keys に p256dh と auth が必要です。',
-      });
-      return;
-    }
+    const { subscription } = parsed.data;
 
     const result = await webPushService.registerSubscription(userId, subscription);
 
@@ -112,15 +129,16 @@ router.post('/subscribe', requireAuth, async (req: Request, res: Response) => {
  */
 router.post('/unsubscribe', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { endpoint } = req.body;
-
-    if (!endpoint) {
+    // Zod で req.body を具体型に narrow
+    const parsed = UnsubscribeBodySchema.safeParse(req.body);
+    if (!parsed.success) {
       res.status(400).json({
         success: false,
         error: 'endpoint は必須です',
       });
       return;
     }
+    const { endpoint } = parsed.data;
 
     await webPushService.unregisterSubscription(endpoint);
 

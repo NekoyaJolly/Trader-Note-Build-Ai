@@ -199,16 +199,20 @@ export type TwelveDataBBResponse = z.infer<typeof TwelveDataBBResponseSchema>;
 // ========================================
 
 /**
- * Twelve Dataレスポンスがエラーかどうかを判定
+ * Twelve Dataレスポンスがエラーかどうかを判定。
+ * 型ガードは「未検証の外部値」を Zod で narrow するのが本来の役割。
  */
+// eslint-disable-next-line no-restricted-syntax -- 型ガードの入力は型不明な外部値であることが本質
 export function isTwelveDataError(response: unknown): response is TwelveDataError {
   const result = TwelveDataErrorSchema.safeParse(response);
   return result.success;
 }
 
 /**
- * 時系列レスポンスを安全にパース
+ * 時系列レスポンスを安全にパース。
+ * 外部 API から戻る生レスポンスを Zod で narrow する境界関数のため unknown を受ける。
  */
+// eslint-disable-next-line no-restricted-syntax -- 外部 API レスポンスを Zod で narrow する境界関数
 export function parseTwelveDataTimeSeries(response: unknown): TwelveDataTimeSeriesSuccess {
   const result = TwelveDataTimeSeriesResponseSchema.safeParse(response);
   
@@ -224,8 +228,10 @@ export function parseTwelveDataTimeSeries(response: unknown): TwelveDataTimeSeri
 }
 
 /**
- * 価格レスポンスを安全にパース
+ * 価格レスポンスを安全にパース。
+ * 外部 API から戻る生レスポンスを Zod で narrow する境界関数のため unknown を受ける。
  */
+// eslint-disable-next-line no-restricted-syntax -- 外部 API レスポンスを Zod で narrow する境界関数
 export function parseTwelveDataPrice(response: unknown): TwelveDataPrice {
   const result = TwelveDataPriceResponseSchema.safeParse(response);
   
