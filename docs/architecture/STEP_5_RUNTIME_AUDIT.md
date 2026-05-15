@@ -182,11 +182,13 @@ C-1〜C-10 を以下のとおり分類して優先順位を Nekoさん と合意
 | UX 整理 (= ユーザーが信頼できる UI を作るための再構成) | C-3, C-4, C-9, C-10 | 次点 |
 | 個別バグ修正 | C-6 (表示), C-7 (リンク欠落), C-8 (サイドバー閉動作) | 段階 2 完了後 |
 
-## §C-3: C-1 第二段階 調査結果 (2026-05-15 追記)
+## §C-Investigation-1: C-1 第二段階 調査結果 (2026-05-15 追記)
 
 PR #208 (Evolution seed の symbol/timeframe を `config.symbols[0]` から渡す) マージ後、本番 `/api/side-b/hypotheses` で改めて symbol 分布を取得した結果、依然として 95% の仮説が `symbols: ["EURUSD"]` で生成されていることを確認。原因を完全に切り分けた。
 
-### C-3-1: 切り分け結果
+(注: 本セクションの番号は C-1〜C-10 (Phase C 課題 ID) と衝突しないよう `Investigation-1` 系統に分離。)
+
+### Investigation-1-A: 切り分け結果
 
 仮説 100 件サンプリングの集計:
 
@@ -200,7 +202,7 @@ AITradeNote 100 件サンプリングは **全件 XAU/USD**。
 → **HypothesisGenerator 経路 (`source=ai_generated`)** は `aiOrchestrator → planGenerationJob → config.symbols[0]` (XAU/USD) で正しく伝播 ✅
 → **Discovery 経路 (`source=discovery`)** だけが EURUSD で仮説化
 
-### C-3-2: Discovery 経路の真の root cause
+### Investigation-1-B: Discovery 経路の真の root cause
 
 最新 `source=discovery` 仮説 5 件の `statement` が以下のような戦略テキスト + `screeningResult` (`pf`, `winRate`, `tradeCount` 付き) を持つことを確認:
 
@@ -214,31 +216,48 @@ AITradeNote 100 件サンプリングは **全件 XAU/USD**。
 
 つまり **PR #208 は新規 seed のみに効き**、既存 population に蓄積された EURUSD 戦略は引き続き screening でフィルタを通って仮説化され続ける。
 
-### C-3-3: 解決策の選択肢 (Nekoさん 判断要)
+### Investigation-1-C: Nekoさん 方針 (2026-05-15 追加)
 
-| # | 案 | 内容 | リスク |
+初稿で提示した 4 解決策 (A/B/C/D) に対し、Nekoさん から次の方針を共有された:
+
+> 戦略生成 → ループ → Evolution が選択 → ループで回す、という流れ自体は正しい (特に XAU/USD 戦略は生成されている = `source=ai_generated` 5 件で確認)。
+>
+> 問題は **大量に生成されたが選択されなかった仮説 / 戦略の処理が機能していない** 方。
+>
+> 解決の方向性:
+> 1. フィルタ (screening 等の検証) をより厳格にして、新規生成される弱い仮説を減らす
+> 2. 不採用の仮説は順次 **アーカイブ** に移して UI 表示・再評価対象から外す
+> 3. ある程度溜まったら **まとめて物理 cleanup** する
+>
+> これは即決の話ではなく設計判断要。
+
+つまり「root cause = EURUSD seed」だけに focus するのではなく、**仮説ライフサイクル (生成 → 評価 → 不採用ならアーカイブ → 定期 cleanup) の設計強化** が本質的な解消策。
+
+### Investigation-1-D: 改訂された解決策案
+
+| # | 案 | 内容 | 評価 |
 |---|---|---|---|
-| A | **本番 population クリア** | `data/evolution/strategy-population.json` を truncate / リセットして、PR #208 後の XAU/USD seed から再構築 | 過去の戦略蓄積 (50 件) を全捨て。最も clean、再構築に数日〜数週 |
-| B | **Evolution に population ロード時の symbol フィルタ追加** | `config.symbols` に含まれない symbol の戦略をスキップ or 削除する Code 修正 | 既存戦略が自動的に消える、自動化される |
-| C | **screening 時に config.symbols で symbol を上書き** | EURUSD 戦略の symbol だけ書き換えて XAU/USD で screening | パラメータが EURUSD ボラ前提のため XAU/USD 市場で機能しない可能性大、**非推奨** |
-| D | **既存 EURUSD 仮説 95 件を archive ステータスに変更** | DB の EdgeHypothesis status update で UI 非表示化、Evolution side の対応なし | 仮説の archive は対症療法、新規 EURUSD 仮説は引き続き生成される |
+| **L (Lifecycle)** | **仮説ライフサイクル設計の強化 (推奨、Nekoさん 方針)** | (1) screening / promote 基準を厳格化して新規生成を絞る (2) status=screening_passed のまま長期滞留している仮説を archive ステータスへ自動遷移 (3) archive 後 N 日経過した仮説を物理削除する cleanup job | 設計判断要、別 KICKOFF |
+| A | 本番 population リセット | 本番の `data/evolution/strategy-population.json` を **ファイル削除** または **`{"version":1,"populations":{}}` の空 JSON で上書き** (truncate = 空文字書き込みは JSON として不正、避ける) | 短期的な clean、ただし蓄積を全捨てなので慎重に。L 案後の判断 |
+| B | Evolution に population ロード時の symbol filter | `config.symbols` 以外の symbol を持つ既存戦略を **warn + skip** (DB / ファイルからの削除は行わない、起動時のメモリ load 時点で除外) | Code のみ、データは保持。L 案と独立に実装可能 |
+| C | screening 時の symbol 上書き | パラメータが EURUSD ボラ前提のため XAU/USD 市場で機能しない可能性大 | **非推奨** |
+| D | 既存 EURUSD 仮説 95 件を archive | 対症療法。新規 EURUSD 仮説は引き続き生成される | L 案の一部として組み込む |
 
-**推奨**: **A + B の併用**
-- A: 一旦本番 population をクリーンにして再スタート (Nekoさん の本番運用判断)
-- B: Code で「config.symbols に含まれない symbol の戦略を population ロード時に warn + skip」を実装して再発防止
+**Nekoさん 方針反映後の推奨進行**:
+1. **L 案** (仮説ライフサイクル設計) の KICKOFF を別ドキュメントで起票、Nekoさん と要件合意
+2. L 案実装と並行 / 直後で **A** (population リセット) を判断 (本番運用作業)
+3. **B** (population ロード時 symbol filter) は L 案・A 案と独立に実装可能、再発防止枠で別 PR
 
-C-3 全体の解消は本 PR の範囲外、別 KICKOFF / フォロー PR で着手予定。
-
-### C-3-4: C-1 ステータス更新
+### Investigation-1-E: C-1 ステータス更新
 
 | 項目 | ステータス |
 |---|---|
 | C-1 第一段階 (新規 seed の symbol) | ✅ 完了 (PR #208 マージ済、main 0348ff0) |
-| C-1 第二段階 (既存 population の EURUSD 戦略残存) | 🔄 Nekoさん 判断待ち (A/B の選択 + 本番運用作業) |
+| C-1 第二段階 (既存 population の EURUSD 戦略残存 + 仮説ライフサイクル設計) | 🔄 Nekoさん 方針反映済、L 案 KICKOFF 起票を別タスクで |
 
 ## 次ステップ
 
-1. 本ドキュメントの追加 (§C, §C-1, §C-2, §C-3) をマージ
+1. 本ドキュメントの追加 (§C / §C-Investigation-1) をマージ
 2. C-1 第二段階の解決策 (A 単独 / A+B 併用 / B 単独) を Nekoさん と合意 → 別 PR
 3. C-2 / C-5 のデータバグ調査 (本 PR 完了後に個別フォロー PR)
 4. C-3, C-4, C-9, C-10 の **UX 整理** は Nekoさん と設計合意後に着手 (別 KICKOFF)
