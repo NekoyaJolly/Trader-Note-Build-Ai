@@ -21,12 +21,12 @@ Side-B システム内で動いている **9 経路** のループ / 定期実�
 
 ## 経路 1. agentLoop (古典 PDCA エージェント)
 
-- **Trigger**: API `POST /api/side-b/agent/run` (手動呼出のみ)
+- **Trigger**: API `POST /api/side-b/agent/start` で開始、`POST /api/side-b/agent/stop` で停止 (`sideBRoutes.ts` 経由)。直接の runOnce 系 API はリポジトリ内に存在せず、scheduler 連動なしの手動起動経路のみ
 - **Input**: ユーザーゴール文字列、MCP ツール群
 - **Agents**: `AgentLoop` (MCP tool + AI driver)
 - **Output type**: `AgentResult` (response, toolCallHistory, tokenUsage, iterations)
 - **DB write**: transient (DB 書き込みなし)
-- **API**: `GET /api/side-b/agent/status`
+- **API**: `GET /api/side-b/agent/status`、`GET /api/side-b/agent/lessons`
 - **UI**: `/side-b/agent`
 - **備考**: 旧実装、PDCALoop に徐々に統合予定
 
@@ -70,9 +70,9 @@ Side-B システム内で動いている **9 経路** のループ / 定期実�
 - **Agents**: `DiscoveryAgent.analyze` (新規仮説 / レンズ insights 生成)
 - **Output type**: `DiscoveryJobResult` (noteCount, newHypothesesCount, lensInsightsCount, tokenUsage)
 - **DB write**: `EdgeHypothesis` (`unverified` で登録、`source: 'discovery'`)
-- **API**: `GET /api/side-b/discovery/latest`
+- **API**: `GET /api/side-b/discovery/latest`、仮説そのものは `GET /api/side-b/hypotheses?status=unverified` (status クエリで `unverified`/`screening_passed`/`confirmed`/`rejected`/`not_testable` 等の任意 status をフィルタ可能)
 - **UI**: `/side-b/dashboard` (discovery section)、`/side-b/hypotheses`
-- **備考**: 新規仮説は EdgeLedger に自動登録。screening 連鎖の起点
+- **備考**: 新規仮説は EdgeLedger に自動登録 (`source: 'discovery'`)。screening 連鎖の起点
 
 ## 経路 6. Screening cron
 
@@ -80,8 +80,8 @@ Side-B システム内で動いている **9 経路** のループ / 定期実�
 - **Input**: `EdgeHypothesis` (`status='unverified'`)、backtesting data
 - **Agents**: `ScreeningOrchestrator.runScreening` (LLM 事前評価)
 - **Output type**: `ScreeningJobResult` (processed, passed, rejected, notTestable, errors)
-- **DB write**: `EdgeHypothesis.status: unverified → screening_passed / rejected`
-- **API**: 専用 endpoint 未確認 (`/api/side-b/hypotheses` で status filter)
+- **DB write**: `EdgeHypothesis.status: unverified → screening_passed / rejected / not_testable` (analysis-engine 失敗や symbols 欠損等で `EdgeLedger.markNotTestable` 経由)
+- **API**: 専用 endpoint なし。`GET /api/side-b/hypotheses?status=screening_passed` 等で参照
 - **UI**: `/side-b/validation` (仮説検証ダッシュボード)
 - **備考**: 1 回最大 `screeningMaxPerRun` (default 10) 件処理
 
@@ -89,9 +89,9 @@ Side-B システム内で動いている **9 経路** のループ / 定期実�
 
 - **Trigger**: `sideBScheduler.startFullValidationJob()` → 1 時間チェック → 24h ごと (Phase 4c)
 - **Input**: `EdgeHypothesis` (`status='screening_passed'`)
-- **Agents**: `StrategistAgent.validate` (Python BT + LLM 検証) → `GenerationReflectionAgent` (lesson)
+- **Agents**: `StrategistAgent.validate` (Python BT + LLM 検証)。`GenerationReflectionAgent` は Evolution (多世代) 側で使用、本経路では呼ばれない
 - **Output type**: `FullValidationJobResult` (processed, confirmed, rejected, notTestable, errors)
-- **DB write**: `EdgeHypothesis.status: screening_passed → confirmed / oos_failed / rejected`
+- **DB write**: `EdgeHypothesis.status: screening_passed → testing → confirmed / rejected / not_testable` (検証中は `testing` 経由、`oos_failed` は EdgeHypothesis status として未使用)
 - **API**: `GET /api/side-b/hypotheses/:id/validation-status`
 - **UI**: `/side-b/validation` (confirmed/rejected タブ)
 - **備考**: 仮説間 10s cooldown (Python/LLM 保護)、`fullValidationMaxPerRun` (default 5)
