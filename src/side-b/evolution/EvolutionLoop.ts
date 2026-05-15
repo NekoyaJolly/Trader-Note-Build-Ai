@@ -197,6 +197,21 @@ export interface EvolutionLoopDeps {
    * 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.B.2
    */
   evolutionInstanceCarryRepo?: EvolutionInstanceCarryPersister | null;
+  /**
+   * STEP 5 段階 2 Phase C C-1 (2026-05-15): novelty seed を生成する際に
+   * 使う運用 symbol / timeframe。未指定時は `buildAllNoveltySeeds` の default
+   * (`'EURUSD'` / `'15m'`) が使われる。
+   *
+   * 本番 scheduler から `config.symbols[0]` / `config.timeframe` を注入することで、
+   * 「仮説一覧が EUR/USD 15m 固定」「UI のシンボル設定 (XAU/USD) が無視される」
+   * 問題 (C-1) の root cause を解消する。
+   *
+   * 既存テスト互換のため optional。値が未指定の経路は引き続き default を使うため
+   * 本変更は非破壊的。
+   */
+  symbol?: string;
+  /** STEP 5 段階 2 Phase C C-1: novelty seed の timeframe (default '15m')。 */
+  timeframe?: string;
 }
 
 /**
@@ -604,7 +619,9 @@ export class EvolutionLoop {
     if (list.length === 0) {
       // PR ⑤D-2: 旧 `seedStrategy(regime)` (= 単一 RSI/ATR seed) を撤廃し、
       // 12 種の novelty seed (6 カテゴリ × long/short) を一括注入する。
-      for (const seed of buildAllNoveltySeeds(regime)) {
+      // STEP 5 Phase C C-1 (2026-05-15): symbol / timeframe を deps から渡し、
+      // EUR/USD 15m 固定の bug (本番 XAU/USD 運用で seed が EURUSD になる) を解消。
+      for (const seed of buildAllNoveltySeeds(regime, this.deps.symbol, this.deps.timeframe)) {
         population.add(regime, seed);
       }
       list = population.getByRegime(regime);
@@ -1848,7 +1865,10 @@ type JsonValue =
  */
 function stableStringify(value: JsonValue): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map((v) => stableStringify(v)).join(',')}]`;
+  if (Array.isArray(value)) {
+    // Array.isArray の type narrowing は JsonValue[] を any[] に広げるため、明示再型付けする。
+    return `[${(value as readonly JsonValue[]).map((v) => stableStringify(v)).join(',')}]`;
+  }
   const obj = value as { readonly [key: string]: JsonValue };
   const keys = Object.keys(obj).sort();
   return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(',')}}`;

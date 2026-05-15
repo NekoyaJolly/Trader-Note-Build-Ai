@@ -132,6 +132,18 @@ export class EvolutionJob implements SideBJobRunner<SideBSchedulerConfig, Evolut
     // PR #110: 本番 scheduler では analysis-engine `/v1/oos-validation` を叩く
     //   `defaultOosBacktestRunner` を注入し、validation_candidate に対する OOS 観測を
     //   実データで動かす (= validation_confirmed / oos_passed / oos_failed が trend に出る)
+    // STEP 5 段階 2 Phase C C-1 (2026-05-15): scheduler config の symbols[0] /
+    // timeframe を novelty seed に伝播させる。これがないと seedDescriptor の
+    // default `'EURUSD'` / `'15m'` で固定され、本番 XAU/USD 運用と乖離する。
+    // config.symbols が空配列だと silent に EURUSD default へ regress するため、
+    // 空のときは警告ログを出して operator が誤設定に気付けるようにする。
+    if (config.symbols.length === 0) {
+      this.deps.log(
+        '[Evolution] config.symbols が空のため novelty seed が seedDescriptor の ' +
+          "default ('EURUSD' / '15m') で生成されます。本番運用では config.symbols を必ず設定してください。",
+      );
+    }
+
     const loop = new EvolutionLoop({
       population,
       adapter: new SurrogateFitnessSimulator(),
@@ -142,6 +154,8 @@ export class EvolutionJob implements SideBJobRunner<SideBSchedulerConfig, Evolut
       oosBacktestRunner: defaultOosBacktestRunner,
       // Phase B-2 (2026-05-09): cron 起動を跨いだ in-memory cache 復元を有効化。
       evolutionInstanceCarryRepo: evolutionInstanceCarryRepository,
+      symbol: config.symbols[0],
+      timeframe: config.timeframe,
     });
 
     // configOverride 経由で 0 や maxGenerations 超過の値が渡されたときの clamp。
