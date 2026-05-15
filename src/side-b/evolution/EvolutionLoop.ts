@@ -1059,18 +1059,31 @@ export class EvolutionLoop {
       await this.persistFormalBtHistory(verifyResults).catch(() => undefined);
     }
 
-    // --- EdgeLedger への自動登録 (進化・エージェント連携の修正) ---
+    // --- EdgeLedger への自動登録 (進化・エージェント連携) ---
+    // STEP 5 Phase D (2026-05-16): 旧コードは `status: 'screening_passed'` を強制
+    // セットして「AI ダッシュボードや検証フローに乗せる」意図だったが、Evolution の
+    // BT 結果は `EvolutionBacktestRun` テーブル (別系統) に保存される一方、
+    // FullValidation の StrategistAgent は `screeningResult.screeningBacktestRunId`
+    // (= `ScreeningBacktestRun.id`) を要求する。Evolution 経路ではこの ID を渡せず、
+    // 結果として登録された仮説が **全件 FullValidation で not_testable に落ちる**
+    // 構造的問題があった (本番観察: confirmed=0/100 件、status=not_testable 42%)。
+    //
+    // 修正: status を `'unverified'` で登録して、正規の Screening cron (経路 6) に
+    // 拾わせる。Screening が analysis-engine 経由で BT を実行 →
+    // `screeningBacktestRunId` を付与した上で `screening_passed` に遷移し、FullValidation
+    // で正しく検証される。Evolution の `formalBtMetrics` は仮説の参考情報として残す
+    // (Discovery 由来仮説と同様、screening の対象として扱う)。
     for (const c of promotionCandidates) {
       try {
         const dsl = verifyResults.find(r => r.candidate.dslId === c.dslId)?.dsl;
         if (!dsl) continue;
-        
+
         await defaultEdgeLedger.create({
           statement: c.description || `Evolution AI Generated Strategy (${c.regime})`,
           category: 'other',
           conditions: [],
           expectedDirection: dsl.entry.direction === 'long' || dsl.entry.direction === 'short' ? dsl.entry.direction : 'either',
-          status: 'screening_passed', // AIダッシュボードや検証フローに乗せるため screening_passed を指定
+          status: 'unverified', // Screening cron に拾わせて正規パイプラインで検証する (上記コメント参照)
           source: 'discovery', // evolutionはEdgeSourceに無いため discovery を使用
           symbols: [c.symbol],
           timeframes: [c.timeframe],
@@ -1080,15 +1093,10 @@ export class EvolutionLoop {
           breakevenCount: 0,
           totalPnlPips: 0,
           avgRR: 0,
-          screeningResult: c.formalBtMetrics ? {
-            executedAt: new Date().toISOString(),
-            passed: true,
-            metrics: {
-              pf: c.formalBtMetrics.pf,
-              winRate: c.formalBtMetrics.winRate * 100, // 0-100%形式に合わせるか確認
-              tradeCount: c.formalBtMetrics.tradeCount,
-            }
-          } : undefined
+          // screeningResult は意図的に未設定。Screening cron が analysis-engine BT を
+          // 実行して正規の screeningResult (screeningBacktestRunId 付き) を記録する。
+          // Evolution の formalBtMetrics は EvolutionBacktestRun テーブルに保存済で
+          // 参照可能だが、本仮説の screening_passed 判定には流用しない。
         });
       } catch (err) {
         errors.push(`[error] EdgeLedger 自動登録に失敗 (dslId=${c.dslId}): ${err instanceof Error ? err.message : String(err)}`);
