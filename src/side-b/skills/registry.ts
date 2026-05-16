@@ -22,42 +22,24 @@ import type {
   SkillJsonOutput,
 } from './types';
 
-/**
- * 個別スキル (Skill<TInput, TOutput>) を Registry に登録するための共通形 (BaseSkill) に
- * 変換する薄いブリッジ。
- *
- * Registry レイヤーは入出力を JsonValue として扱うため、個別スキルの具体型を
- * 構造的キャストで一段落とす。安全性は呼び出し側 (Zod 検証 + 戻り値の型) に依存する。
- */
-function toBaseSkill<TInput, TOutput>(skill: Skill<TInput, TOutput>): BaseSkill {
-  return {
-    name: skill.name,
-    description: skill.description,
-    inputSchema: skill.inputSchema,
-    async execute(input: SkillJsonInput, context: SkillContext): Promise<SkillJsonOutput> {
-      // input は JsonValue。個別スキルは execute() 内部で Zod 等により具体型 (TInput) に narrow するため、
-      // ここでは Registry ↔ 個別スキル間の型ブリッジ目的で構造的キャストを行う。
-      const narrowed = input as TInput;
-      const output = await skill.execute(narrowed, context);
-      // 出力 (TOutput) は JSON シリアライズ可能であることを各スキルの戻り値型で担保する想定。
-      return output as SkillJsonOutput;
-    },
-  };
-}
-
 export class SkillRegistry {
   private readonly skills = new Map<string, BaseSkill>();
 
   /**
    * 個別スキル (Skill<TInput, TOutput>) を Registry に登録する。
    *
-   * 個別スキルの具体型は登録時に消去し、Registry 内では BaseSkill として保持する。
+   * 個別スキルの具体型は TypeScript レベルで消去し、Registry 内では BaseSkill として保持する。
+   * **同一参照** を保存することで `get()` / `list()` の戻り値が登録時の原参照と一致する
+   * (登録 → 取得の identity を契約として保つ)。
+   *
+   * 関数引数の反変性で `Skill<TInput, TOutput>` を直接 `BaseSkill` に代入できないため、
+   * `never` を介した構造的キャストで橋渡しする (実行時挙動は同一)。
    */
   register<TInput, TOutput>(skill: Skill<TInput, TOutput>): void {
     if (this.skills.has(skill.name)) {
       throw new Error(`[SkillRegistry] Skill already registered: ${skill.name}`);
     }
-    this.skills.set(skill.name, toBaseSkill(skill));
+    this.skills.set(skill.name, skill as BaseSkill);
   }
 
   /**
@@ -140,12 +122,12 @@ export class SkillRegistry {
         error instanceof Error && error.name && error.name !== 'Error'
           ? error.name
           : 'SKILL_EXECUTION_ERROR';
-      // details にはスタックトレース等の構造化情報のみ保持し、Error オブジェクト
-      // そのものは触らない (循環参照や非 JSON 値を含むため)。
-      const stack = error instanceof Error ? error.stack : undefined;
+      // details は Error インスタンスのときは原例外をそのまま保持 (デバッグ容易性 + 後方互換)。
+      // SkillErrorDetails 型が `Error | SkillErrorDetailsObject` の union のため型整合。
+      // JSON シリアライズパスでは呼び出し側で stack/message を抽出する想定。
       return {
         ok: false,
-        error: { code, message, details: stack ? { stack } : undefined },
+        error: { code, message, details: error instanceof Error ? error : undefined },
       };
     }
   }

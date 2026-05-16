@@ -121,7 +121,13 @@ export class FileNotificationRepository implements NotificationRepository {
       read: Boolean(raw.read),
     };
 
-    if (raw.matchResult) {
+    // raw.matchResult は型上は Record<string, JsonValue> だが、JSON 由来のため実体が
+    // 文字列 / 数値 / 配列 / null になり得る。スプレッド前に「非 null かつ object かつ非配列」を確認する。
+    if (
+      raw.matchResult &&
+      typeof raw.matchResult === 'object' &&
+      !Array.isArray(raw.matchResult)
+    ) {
       // JSON 由来の値を Record<string, JsonValue> として narrow し、文字列フィールドだけ Date 化する
       const matchResultRaw = raw.matchResult;
       const mrTimestamp = typeof matchResultRaw.timestamp === 'string' ? matchResultRaw.timestamp : undefined;

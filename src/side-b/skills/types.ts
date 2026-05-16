@@ -45,12 +45,9 @@ export interface SkillContext {
 export type SkillInvocationContext = Partial<SkillContext>;
 
 /**
- * エラー詳細のフィールド型。
- *
- * 元例外スタックを文字列で保持しつつ、構造化情報 (Zod issues 等) も
- * `JsonValue` で持てるよう union している。
+ * エラー詳細の構造化フィールド型。Zod issues や任意のメタ情報を JSON 互換で保持する。
  */
-export interface SkillErrorDetails {
+export interface SkillErrorDetailsObject {
   /** 元例外のスタックトレース等 */
   stack?: string;
   /** Zod issues 等の構造化情報 */
@@ -58,6 +55,17 @@ export interface SkillErrorDetails {
   /** その他構造化メタ情報 */
   meta?: JsonValue;
 }
+
+/**
+ * エラー詳細のフィールド型。
+ *
+ * - 元例外が `Error` インスタンスのときは Error をそのまま保持する (デバッグ容易性 + 後方互換)。
+ * - 構造化情報 (Zod issues 等) を保持したい場合は `SkillErrorDetailsObject` を使う。
+ *
+ * 注意: JSON シリアライズパスに乗せる場合は Error 由来の循環参照や非 JSON 値が
+ * 含まれる可能性があるため、呼び出し側で stack/message を抽出するなどの整形を行うこと。
+ */
+export type SkillErrorDetails = Error | SkillErrorDetailsObject;
 
 /** スキル実行時のエラー(Registry が wrap する)。 */
 export interface SkillError {

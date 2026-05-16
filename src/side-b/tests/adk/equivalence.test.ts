@@ -28,6 +28,7 @@
 
 import { SkillRegistry } from '../../skills/registry';
 import type { Skill, SkillContext, SkillResult } from '../../skills/types';
+import type { JsonValue } from '../../../utils/jsonValue';
 import { skillRegistryToAdkTools } from '../../adk/adapters/skillRegistryToAdkTools';
 import { createMinimalAdkContext } from '../../adk/adapters/_testHelpers';
 import { ADK_DEFAULT_CALLER_REASON } from '../../adk/adapters/skillContext';
@@ -126,7 +127,7 @@ function buildEquivalentContext(): Pick<SkillContext, 'callerAgent' | 'callerRea
  */
 async function assertEquivalent(
   skillName: string,
-  input: Record<string, unknown>,
+  input: Record<string, JsonValue>,
   registry: SkillRegistry,
 ): Promise<void> {
   // 直接経路

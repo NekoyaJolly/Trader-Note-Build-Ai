@@ -34,6 +34,19 @@ import type {
     PythonExecutionResult,
     PythonJsonPayload,
 } from './types';
+import type { JsonValue } from '../../../utils/jsonValue';
+
+/**
+ * Python 側の応答 (任意の JsonValue) を `PythonJsonPayload` (Record<string, JsonValue>) に
+ * narrow する型ガード。配列 / プリミティブ / null は契約違反として扱う。
+ *
+ * 理由: `JSON.parse` の戻り値は any/JsonValue で、型システム上は object に強制できるが、
+ * 実体が配列やプリミティブの場合に as キャストすると output の型と実体が乖離する。
+ * Python 側の契約 (オブジェクトを返す) を runtime で確認することで呼び出し側が安全に扱える。
+ */
+function isPythonJsonPayload(value: JsonValue): value is PythonJsonPayload {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 // ===========================================
 // デフォルト docker ランナー
@@ -234,10 +247,12 @@ export class PythonBridge {
             };
         }
 
-        // Python 側からの JSON は構造未確定のため `PythonJsonPayload` (= Record<string, JsonValue>) で受ける
-        let output: PythonJsonPayload;
+        // Python 側からの JSON は構造未確定のため、まず JsonValue で受けてから
+        // PythonJsonPayload (Record<string, JsonValue>) であることを runtime で確認する。
+        // 配列やプリミティブが返ってきた場合は契約違反として success=false で返す。
+        let parsed: JsonValue;
         try {
-            output = JSON.parse(raw) as PythonJsonPayload;
+            parsed = JSON.parse(raw) as JsonValue;
         } catch (err) {
             await this.safeUnlink(inputHost, outputHost);
             return {
@@ -246,11 +261,19 @@ export class PythonBridge {
                 durationMs: Date.now() - start,
             };
         }
+        if (!isPythonJsonPayload(parsed)) {
+            await this.safeUnlink(inputHost, outputHost);
+            return {
+                success: false,
+                error: `出力 JSON が PythonJsonPayload (オブジェクト) ではありません: ${Array.isArray(parsed) ? 'array' : typeof parsed}`,
+                durationMs: Date.now() - start,
+            };
+        }
 
         await this.safeUnlink(inputHost, outputHost);
         return {
             success: true,
-            output,
+            output: parsed,
             durationMs: Date.now() - start,
         };
     }
@@ -315,10 +338,18 @@ export class PythonBridge {
                     durationMs: Date.now() - start,
                 };
             }
-            const output = (await res.json()) as PythonJsonPayload;
+            // HTTP モードでも docker_exec と同様、レスポンスが配列やプリミティブの場合は契約違反として扱う
+            const parsed = (await res.json()) as JsonValue;
+            if (!isPythonJsonPayload(parsed)) {
+                return {
+                    success: false,
+                    error: `HTTP 応答が PythonJsonPayload (オブジェクト) ではありません: ${Array.isArray(parsed) ? 'array' : typeof parsed}`,
+                    durationMs: Date.now() - start,
+                };
+            }
             return {
                 success: true,
-                output,
+                output: parsed,
                 durationMs: Date.now() - start,
             };
         } catch (err) {

@@ -1,4 +1,5 @@
 import App from './app';
+import { safeStringify } from './utils/safeStringify';
 
 // 標準出力をフラッシュするヘルパー
 const log = (message: string) => {
@@ -41,7 +42,8 @@ process.on('unhandledRejection', (reason: RejectionReason, promise: Promise<void
   logError('═══════════════════════════════════════');
   logError('  未処理のPromise Rejectが発生しました');
   logError('═══════════════════════════════════════');
-  logError(`Reason: ${JSON.stringify(reason)}`);
+  // safeStringify は BigInt / 循環参照 / toJSON throw 等で 2 次例外を出さない
+  logError(`Reason: ${safeStringify(reason)}`);
   // Promise オブジェクトを直接 template literal に埋め込むと '[object Object]' になり
   // 暗黙の toString 警告が出るため、型タグを明示的に取得する
   logError(`Promise: ${Object.prototype.toString.call(promise)}`);
@@ -68,12 +70,12 @@ try {
     logError('  アプリケーション起動エラー (async)');
     logError('═══════════════════════════════════════');
     // object 系を直接 template literal に埋め込むと '[object Object]' になるため
-    // JSON.stringify で構造化文字列に変換する。
+    // safeStringify で構造化文字列に変換する (BigInt / 循環参照でも 2 次例外を出さない)。
     const errStr =
       err instanceof Error ? err.message
       : typeof err === 'string' ? err
       : err === null ? 'null'
-      : JSON.stringify(err);
+      : safeStringify(err);
     logError(`Error: ${errStr}`);
     if (err instanceof Error) {
       logError(`Stack: ${err.stack}`);

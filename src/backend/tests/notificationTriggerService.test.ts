@@ -1,8 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import type { NotificationTriggerInput } from '../../services/notification/notificationTriggerService';
 import { NotificationTriggerService } from '../../services/notification/notificationTriggerService';
 
-// シンプルな DTO で評価のみを検証する
-const createDto = (overrides?: Partial<{ matchScore: number; historicalNoteId: string; marketSnapshot: unknown }>) => ({
+// シンプルな DTO で評価のみを検証する。
+// NotificationTriggerInput の marketSnapshot は MarketSnapshotInput (Prisma.JsonValue 等の具体 union)
+// であるため、テストでも Partial<NotificationTriggerInput> 型に揃えて型安全性を保つ。
+const createDto = (overrides?: Partial<NotificationTriggerInput>): NotificationTriggerInput => ({
   matchScore: 0.8,
   historicalNoteId: 'note_1',
   marketSnapshot: { symbol: 'BTCUSDT', timeframe: '1h' },

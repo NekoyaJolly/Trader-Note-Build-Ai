@@ -121,9 +121,20 @@ export async function createTradeFromPlan(
       stopLoss: { price: number };
       takeProfit: { price: number };
     }
-    // Prisma JSON フィールド由来。実体は ScenarioData[] だが、配列でない可能性に備え
-    // ReadonlyArray<ScenarioData> として narrow する。
-    const scenarios = (Array.isArray(plan.scenarios) ? plan.scenarios : []) as ScenarioData[];
+    // Prisma JSON フィールド由来のため、要素レベルで「id を持つオブジェクト」かを確認する。
+    // 配列でない / null / プリミティブ要素は除外することで、後段の scenario.entry?.price 等で
+    // Cannot read properties of null になることを防ぐ。
+    const rawScenarios: unknown[] = Array.isArray(plan.scenarios) ? plan.scenarios : []; // eslint-disable-line no-restricted-syntax -- JSON 由来配列の要素型を runtime で narrow するための入口
+    const scenarios: ScenarioData[] = rawScenarios.filter(
+      (s): s is ScenarioData =>
+        s !== null &&
+        typeof s === 'object' &&
+        !Array.isArray(s) &&
+        'id' in s &&
+        'entry' in s &&
+        'stopLoss' in s &&
+        'takeProfit' in s,
+    );
     
     // シナリオ存在チェック
     // シナリオ 0 件 = Plan AI (StrategyThinker) が「エントリー条件未成立 = ノートレード」と
