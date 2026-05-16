@@ -135,7 +135,7 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 
 ## 7. 実装状況
 
-> **最終更新**: 2026-05-14 (Step 4 全 Phase 完了)
+> **最終更新**: 2026-05-17 (ORCH WBS Phase 0〜10 完了、Step 4 までは 2026-05-14 時点)
 
 ### Step 進捗
 
@@ -144,8 +144,23 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 - [x] Step 2: Tracing / Telemetry 統合 (完了 2026-05-13)
 - [x] Step 3: Runner Smoke + PDCALoop SequentialAgent dry-run ラップ (完了 2026-05-14)
 - [x] Step 4: Lens 並列実行の ParallelAgent ラップ (完了 2026-05-14)
+- [x] **ORCH (ADK Orchestrator + RunLedger + StrategyDraft WBS): Phase 0〜10 完了 (2026-05-17)** ← Step 5 と独立した実行ハブ分離 PR シーケンス
 - [ ] Step 5: 進化ループの LoopAgent ラップ (条件付き)
 - [ ] Step 6: ADK 継続採用 / 撤退 / 部分採用の判断
+
+### ORCH WBS 完了 (2026-05-17)
+
+`SideBScheduler` の実行ハブ責務を **ADK Orchestrator Wrapper** (外側の順序制御) /
+**RunLedgerService** (run/step の永続台帳) / **StrategyDraftService** (Evolution 候補の
+Draft lifecycle) に分離した。詳細は [`adk_run_ledger_summary.md`](./adk_run_ledger_summary.md)
+を参照。Phase 0〜10 を PR #216〜#225 + Phase 10 docs PR で完結。
+
+- WBS: [`adk_run_ledger_strategy_draft_完全版wbs.md`](./adk_run_ledger_strategy_draft_完全版wbs.md)
+- Phase 0 棚卸し: [`adk_run_ledger_phase_0_棚卸し.md`](./adk_run_ledger_phase_0_棚卸し.md)
+- 完了サマリー: [`adk_run_ledger_summary.md`](./adk_run_ledger_summary.md)
+
+撤退時の削除対象: `src/side-b/adk/` + **`src/side-b/tests/adk/`** + Bridge (`sideBSchedulerOrchestratorBridge.ts` + 関連 test) + Scheduler の `runOrchestratedCycleNow` メソッド + Bridge import + `package.json`/`package-lock.json` から `@google/adk`。
+詳細な実行手順 (5 ステップ + 検証 + 完了記録) は [`adk_run_ledger_summary.md`](./adk_run_ledger_summary.md) §6.1 を参照。既存 Job / PDCALoop / Lens / Evolution / EdgeLedger は本 WBS で改変していないため、上記削除のみで完全撤退できる。
 
 ### 完了した Step の詳細
 
