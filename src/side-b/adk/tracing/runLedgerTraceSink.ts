@@ -22,8 +22,10 @@ import type { RunLedgerService } from '../../services/runLedgerService';
  * RunLedger 連携 TraceSink を作る factory。
  *
  * 動作:
- *   - `*.started` event: startStep を呼ぶ (stepName = event.skillName)。
- *     既に同名 step が開始済み (= ADK 内で既に startStep が呼ばれた) なら no-op。
+ *   - `*.started` event: `ledger.startStep` を無条件に呼ぶ (stepName = event.skillName)。
+ *     既に同名 step が `running` 状態だと `RunLedgerStateError` が出るが、それは下記
+ *     failure isolation の try/catch で logger.warn として握りつぶされる。重複起動
+ *     event がノイズになる場合は、呼び出し側で重複を抑止すること。
  *   - `*.completed` event: succeedStep を呼ぶ (summary は event.skillName + duration)。
  *   - `*.failed` event: failStep を呼ぶ (errorCode / errorMessage を伝播)。
  *

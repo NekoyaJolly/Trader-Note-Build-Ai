@@ -7,13 +7,14 @@
  * - GET    /runs/:id           - AgentRun 詳細 + steps
  * - GET    /drafts             - StrategyDraft 一覧 (status / limit フィルタ)
  * - GET    /drafts/:id         - StrategyDraft 詳細
+ * - GET    /runs              - AgentRun 一覧 (status 必須、limit 1〜200)
  * - POST   /drafts/:id/approve - Draft 承認 (reviewer 必須、reason 任意)
  * - POST   /drafts/:id/reject  - Draft 却下 (reviewer + reason 必須)
  * - POST   /drafts/:id/queue   - approved → queued_for_validation
  * - POST   /drafts/:id/archive - Draft archive (reason 必須)
  *
- * Run 一覧 API (GET /runs) は RunLedgerService.listByStatus の追加が必要なため、
- * Phase 9 統合テスト時の Service 拡張と一緒に追加する (本 PR では未提供)。
+ * `GET /runs` は Phase 9 で `RunLedgerService.listByStatus` を追加した時に実装済み
+ * (本 chain merge では Phase 8 PR と Phase 9 PR が両方含まれる)。
  *
  * 設計方針:
  * - Service (RunLedgerService / StrategyDraftService) のみを呼ぶ

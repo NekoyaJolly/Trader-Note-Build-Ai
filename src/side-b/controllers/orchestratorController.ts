@@ -18,6 +18,11 @@ import {
 // ============================================================
 // 入力 Zod schema
 // ============================================================
+// 注意 (PR #227 Copilot review #5): Side-B の他ルートは `src/schemas/api/sideB.ts` の
+// schema を `validateQuery/validateParams/validateBody` ミドルウェア経由で適用している。
+// 本 controller は Phase 8 初期実装の都合で schema をここに集約しているが、後続 PR で
+// `src/schemas/api/sideB.ts` 側へ移し routes 側で validate ミドルウェアを使う形に
+// 揃えることを検討する (本 WBS スコープ外)。
 
 export const RunIdParamSchema = z.object({ id: z.string().uuid() });
 export const DraftIdParamSchema = z.object({ id: z.string().uuid() });

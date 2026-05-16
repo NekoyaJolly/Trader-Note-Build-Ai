@@ -302,7 +302,10 @@ async function runDraftStep(
   const stepName = DRAFT_STEP_NAME;
   await ledger.startStep(runId, { stepName, traceKind: 'orchestrator' });
 
-  let processedIndex = -1;
+  // processedIndex は「候補ループ何件目で失敗したか」のラベル。
+  // 候補処理前 (findLatestStepId / extractCandidates) で失敗した場合は 'pre-loop' を使い、
+  // ループに入ってからは数値 index を使う (PR #227 Copilot review #4 対応)。
+  let processedIndex: number | 'pre-loop' = 'pre-loop';
   let created = 0;
   let duplicate = 0;
   let totalCandidates = 0;
@@ -318,7 +321,7 @@ async function runDraftStep(
     totalCandidates = candidates.length;
 
     for (let i = 0; i < candidates.length; i += 1) {
-      processedIndex = i;
+      processedIndex = i; // 数値 index に上書き (ループ内失敗の正確な位置)
       const candidate = candidates[i];
       if (!candidate) continue;
       const result = await draftService.createFromEvolutionCandidate(candidate, {

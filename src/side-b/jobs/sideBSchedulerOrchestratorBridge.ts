@@ -92,7 +92,13 @@ export interface BridgeOptions {
 export async function runScheduledOrchestratedCycle(
   options: BridgeOptions,
 ): Promise<BridgeResult> {
-  const enabled = options.forceEnabled ?? isAdkOrchestratorEnabled(options.env);
+  // forceEnabled は「true のときだけ env を無視して有効化」する意味。
+  // false / undefined のときは env 判定にフォールバックする (forceEnabled=false で
+  // env=true を打ち消さない、PR #227 Copilot review #1 対応)。
+  const enabled =
+    options.forceEnabled === true
+      ? true
+      : isAdkOrchestratorEnabled(options.env);
   if (!enabled) {
     return { kind: 'disabled' };
   }
