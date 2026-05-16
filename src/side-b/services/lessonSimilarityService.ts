@@ -44,6 +44,7 @@ interface SimilarityRequest {
 
 import { config, modelFor } from '../../config';
 import { AIProvider } from '../agent/aiProvider';
+import type { JsonValue } from '../../utils/jsonValue';
 
 export class LessonSimilarityService {
     private apiKey: string;
@@ -125,7 +126,7 @@ JSON のみを出力してください。説明は不要です。`;
     /**
      * AIProvider 経由で AI API を呼び出し、JSON をパースして返す
      */
-    private async callAI(prompt: string): Promise<unknown> {
+    private async callAI(prompt: string): Promise<JsonValue> {
         const provider = new AIProvider({
             apiKey: this.apiKey,
             model: this.model,
@@ -146,13 +147,19 @@ JSON のみを出力してください。説明は不要です。`;
             throw new Error('AI API returned empty content');
         }
 
-        return JSON.parse(content);
+        return JSON.parse(content) as JsonValue;
     }
 
     /**
      * AI 応答をパース
      */
-    private parseResult(data: unknown): SimilarityResult | null {
+    private parseResult(data: JsonValue): SimilarityResult | null {
+        // JsonValue → 必要キーのみを持つ薄い型に narrow する。
+        // 中身は parseResult 直後の typeof チェックで検証されるので、ここでは形だけ整える。
+        if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+            console.warn('[LessonSimilarity] AI応答がオブジェクトではない:', data);
+            return null;
+        }
         const result = data as { index?: number; similarity?: number; mergedText?: string };
 
         if (

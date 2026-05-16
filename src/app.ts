@@ -233,7 +233,7 @@ class App {
   /**
    * Start the application
    */
-  public async start(): Promise<void> {
+  public start(): Promise<void> {
     // ルートを初期化
     console.log('[App] ルートを初期化中...');
     this.initializeRoutes();
@@ -325,6 +325,8 @@ class App {
       console.error('═══════════════════════════════════════');
       process.exit(1);
     }
+
+    return Promise.resolve();
   }
 
   /**

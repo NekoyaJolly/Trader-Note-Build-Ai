@@ -125,22 +125,22 @@ export class CrossSimilarityService {
    * 
    * OHLCVデータまたは特徴ベクトルから検索用ベクトルを生成
    */
-  private async prepareQueryVector(
+  private prepareQueryVector(
     ohlcvData?: OHLCVData[],
     featureVector?: number[]
   ): Promise<number[]> {
     // 特徴ベクトルが直接指定されている場合
     if (featureVector && featureVector.length > 0) {
-      return featureVector;
+      return Promise.resolve(featureVector);
     }
 
     // OHLCVデータから特徴量を抽出
     if (ohlcvData && ohlcvData.length > 0) {
       const snapshot = indicatorService.generateFeatureSnapshot(ohlcvData, '1h');
-      return indicatorService.generateFeatureVector(snapshot);
+      return Promise.resolve(indicatorService.generateFeatureVector(snapshot));
     }
 
-    throw new Error('ohlcvData または featureVector が必要です');
+    return Promise.reject(new Error('ohlcvData または featureVector が必要です'));
   }
 
   /**

@@ -2,11 +2,21 @@
  * PythonBridge 公開型（Phase 4c Step B）
  */
 
+import type { JsonValue } from '../../../utils/jsonValue';
+
+/**
+ * Python 側との JSON 受け渡しに用いるペイロード型。
+ *
+ * `JsonValue` ベースの具体型で、`unknown` を持ち込まない。値の検証は呼び出し側で
+ * Zod スキーマにより narrow する想定。
+ */
+export type PythonJsonPayload = Record<string, JsonValue>;
+
 export interface PythonExecutionRequest {
     /** コンテナ内でのスクリプトパス（例: /app/walk_forward/walk_forward.py） */
     scriptPath: string;
     /** Python 側へ渡す JSON ペイロード */
-    input: Record<string, unknown>;
+    input: PythonJsonPayload;
     /** このコール限定のタイムアウト上書き */
     timeoutMs?: number;
 }
@@ -14,7 +24,7 @@ export interface PythonExecutionRequest {
 export interface PythonExecutionResult {
     success: boolean;
     /** 成功時のみ。Python 側が書き出した JSON をパースしたもの */
-    output?: Record<string, unknown>;
+    output?: PythonJsonPayload;
     /** success=false のとき必ず埋まる */
     error?: string;
     durationMs: number;

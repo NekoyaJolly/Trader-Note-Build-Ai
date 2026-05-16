@@ -17,6 +17,7 @@ import {
   SPECIALIST_COMMON_AGENT_NAME,
 } from './PromptRegistry';
 import { PromptMutationAgent, type RecentFailure } from '../../agents/PromptMutationAgent';
+import { safeStringify } from '../../../utils/safeStringify';
 
 /** 1 エージェント分の進化ジョブ結果。 */
 export interface AgentEvolutionReport {
@@ -80,7 +81,7 @@ export async function runPromptEvolutionCycle(
   const minUsageForPromotion = options.minUsageForPromotion ?? 20;
   const proposalsPerAgent = options.proposalsPerAgent ?? 3;
   const makeVersion = options.makeVersion ?? defaultMakeVersion;
-  const fetchRecentFailures = options.fetchRecentFailures ?? (async () => []);
+  const fetchRecentFailures = options.fetchRecentFailures ?? ((): Promise<RecentFailure[]> => Promise.resolve([]));
 
   const allAgentNames = await registry.listAgents();
   // Phase 6.7a/6.7c: グローバル・専門家共通テンプレは進化サイクル対象外
@@ -121,7 +122,7 @@ export async function runPromptEvolutionCycle(
             );
             report.rejectedIds.push(e.id);
           } catch (err) {
-            report.errors.push(`reject 失敗 ${e.id}: ${fmtErr(err)}`);
+            report.errors.push(`reject 失敗 ${e.id}: ${safeStringify(err)}`);
           }
           continue;
         }
@@ -164,11 +165,11 @@ export async function runPromptEvolutionCycle(
           });
           report.newExperimentalIds.push(registered.id);
         } catch (err) {
-          report.errors.push(`register 失敗 (proposal ${i}): ${fmtErr(err)}`);
+          report.errors.push(`register 失敗 (proposal ${i}): ${safeStringify(err)}`);
         }
       }
     } catch (err) {
-      report.errors.push(`サイクル失敗: ${fmtErr(err)}`);
+      report.errors.push(`サイクル失敗: ${safeStringify(err)}`);
     }
     reports.push(report);
   }
@@ -176,6 +177,3 @@ export async function runPromptEvolutionCycle(
   return { ranAt: new Date(), reports };
 }
 
-function fmtErr(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}

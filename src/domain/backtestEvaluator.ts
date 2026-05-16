@@ -261,13 +261,25 @@ function calculateExitPrice(
 // ============================================================================
 
 /**
+ * 条件判定 evaluator の `conditions` を表す型。
+ *
+ * 本来は `IndicatorCondition[]` または `ConditionGroup` (= side-b に定義) のいずれかだが、
+ * domain 層は side-b 型に依存させない方針のため、JSON 互換のオブジェクト/配列として広く受ける。
+ * 受け取った factory 側で具体型に narrow する責務を持つ。
+ */
+type JsonPrimitive = string | number | boolean | null;
+interface JsonObject { [key: string]: JsonPrimitive | JsonObject | JsonArray | undefined }
+type JsonArray = ReadonlyArray<JsonPrimitive | JsonObject | JsonArray>;
+export type ExactEvaluatorConditions = Readonly<JsonObject> | JsonArray;
+
+/**
  * 条件判定用 Evaluator を生成
  */
 export type ExactEvaluatorFactory = (config: {
   id: string;
   symbol: string;
   direction: 'long' | 'short';
-  conditions: unknown; // IndicatorCondition[] or ConditionGroup
+  conditions: ExactEvaluatorConditions;
 }) => BacktestEvaluator;
 
 /**

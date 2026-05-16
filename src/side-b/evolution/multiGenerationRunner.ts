@@ -659,7 +659,7 @@ export async function runMultiGenerationEvolutionV1(input: {
                   metrics: l.metrics,
                   confidence: reflection.confidence,
                 };
-                await opts.generationLessonRepo!.create(insertData);
+                await opts.generationLessonRepo.create(insertData);
                 insertResults.push(true);
               } catch (e) {
                 const m = e instanceof Error ? e.message : String(e);

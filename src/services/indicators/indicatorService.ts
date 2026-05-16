@@ -33,6 +33,7 @@ import {
   keltnerChannel,
   parabolicSAR,
   ichimokuCloud,
+  Trend,
 } from 'indicatorts';
 
 /**
@@ -706,8 +707,8 @@ export class IndicatorService {
     const result = parabolicSAR(highs, lows, closes, { step, max });
     return {
       sar: result.psarResult,
-      // indicatorts の Trend 型を boolean に変換
-      trends: result.trends.map(t => t === 1), // 1 = Rising (上昇)
+      // indicatorts の Trend 型 (FALLING=-1 / STABLE=0 / RISING=1) を boolean に変換
+      trends: result.trends.map(t => t === Trend.RISING),
     };
   }
 

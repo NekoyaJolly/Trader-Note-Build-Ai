@@ -13,6 +13,20 @@
  *   日次サマリーシステムへの入力源として利用
  */
 
+import type { JsonValue } from '../../utils/jsonValue';
+
+/**
+ * スキル基盤で扱う汎用入出力値型。
+ *
+ * 各スキルの実装側で具体型に再定義することが前提だが、Registry レイヤーや
+ * 内部呼び出しでは個別スキルを意識せずに扱う必要があるため、JSON 互換の
+ * 具体型 (`JsonValue` ベース) で抽象化している。
+ * - LLM/外部入力 → Registry → 各スキル の流路で、Registry は構造を解釈しない
+ * - 型キーワード `unknown` を使わずに「JSON 互換の何か」を表現する
+ */
+export type SkillJsonInput = JsonValue;
+export type SkillJsonOutput = JsonValue;
+
 /**
  * スキル呼び出し時のコンテキスト。
  *
@@ -30,6 +44,29 @@ export interface SkillContext {
 /** Registry.invoke に渡す部分コンテキスト(timestamp 省略時は現在時刻)。 */
 export type SkillInvocationContext = Partial<SkillContext>;
 
+/**
+ * エラー詳細の構造化フィールド型。Zod issues や任意のメタ情報を JSON 互換で保持する。
+ */
+export interface SkillErrorDetailsObject {
+  /** 元例外のスタックトレース等 */
+  stack?: string;
+  /** Zod issues 等の構造化情報 */
+  issues?: JsonValue;
+  /** その他構造化メタ情報 */
+  meta?: JsonValue;
+}
+
+/**
+ * エラー詳細のフィールド型。
+ *
+ * - 元例外が `Error` インスタンスのときは Error をそのまま保持する (デバッグ容易性 + 後方互換)。
+ * - 構造化情報 (Zod issues 等) を保持したい場合は `SkillErrorDetailsObject` を使う。
+ *
+ * 注意: JSON シリアライズパスに乗せる場合は Error 由来の循環参照や非 JSON 値が
+ * 含まれる可能性があるため、呼び出し側で stack/message を抽出するなどの整形を行うこと。
+ */
+export type SkillErrorDetails = Error | SkillErrorDetailsObject;
+
 /** スキル実行時のエラー(Registry が wrap する)。 */
 export interface SkillError {
   /** エラーコード(例: 'SKILL_NOT_FOUND', 'INVALID_INPUT', 'ZodError') */
@@ -37,13 +74,38 @@ export interface SkillError {
   /** 人間向けメッセージ */
   message: string;
   /** 元例外(デバッグ用。シリアライズ時は注意) */
-  details?: unknown;
+  details?: SkillErrorDetails;
 }
 
 /** スキル実行結果。ok=false の場合は error を参照。 */
-export type SkillResult<T = unknown> =
+export type SkillResult<T = SkillJsonOutput> =
   | { ok: true; data: T }
   | { ok: false; error: SkillError };
+
+/**
+ * JSONSchema プロパティ定義の最小サブセット。
+ *
+ * OpenAI function calling / MCP の仕様準拠で、再帰的に `properties` や
+ * `items` を持つ。`unknown` を避け、明示的な JSON ノード型として定義。
+ */
+export interface SkillJsonSchemaNode {
+  type?: string | string[];
+  description?: string;
+  enum?: JsonValue[];
+  properties?: Record<string, SkillJsonSchemaNode>;
+  required?: string[];
+  items?: SkillJsonSchemaNode | SkillJsonSchemaNode[];
+  additionalProperties?: boolean | SkillJsonSchemaNode;
+  default?: JsonValue;
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  format?: string;
+  // 拡張可能性のため一部 JSON 値の任意キーを許容
+  [key: string]: JsonValue | SkillJsonSchemaNode | SkillJsonSchemaNode[] | undefined;
+}
 
 /**
  * スキル入力スキーマ。JSONSchema draft-07 サブセット。
@@ -51,9 +113,28 @@ export type SkillResult<T = unknown> =
  */
 export interface SkillInputSchema {
   type: 'object';
-  properties?: Record<string, unknown>;
+  properties?: Record<string, SkillJsonSchemaNode>;
   required?: string[];
   additionalProperties?: boolean;
+}
+
+/**
+ * Registry レイヤーで保持するためのスキルの共通基底型。
+ *
+ * - 個別スキルの TInput / TOutput を消去 (= 構造的に「何でも受けて何でも返す」) する。
+ * - Registry は中身を解釈せず、AgentLoop / MCP に橋渡しするだけなので、
+ *   個別スキルの型契約は呼び出し側の Skill<TInput, TOutput> 側で表現する。
+ * - any/unknown を書かないために、入出力には JSON 互換型 (`JsonValue`) を採用。
+ */
+export interface BaseSkill {
+  readonly name: string;
+  readonly description: string;
+  readonly inputSchema: SkillInputSchema;
+  /**
+   * 入力は JsonValue (= LLM/MCP から来る JSON 互換値)、出力は JsonValue。
+   * 実装側は安全にダウンキャスト・narrow した上で具体型として扱う。
+   */
+  execute(input: SkillJsonInput, context: SkillContext): Promise<SkillJsonOutput>;
 }
 
 /**
@@ -61,8 +142,12 @@ export interface SkillInputSchema {
  *
  * TInput / TOutput は TypeScript レベルの補助で、
  * 実行時バリデーションは execute() 内で Zod などを使って行う。
+ *
+ * 注意: 個別スキルの TInput / TOutput は具体型 (Zod スキーマから推論された型等) を
+ * 取り、`BaseSkill` (= Registry が保持する型) と構造互換にはならないことが多い。
+ * Registry 登録時は `toBaseSkill()` でブリッジするか、構造的キャストを介する。
  */
-export interface Skill<TInput = unknown, TOutput = unknown> {
+export interface Skill<TInput = SkillJsonInput, TOutput = SkillJsonOutput> {
   readonly name: string;
   readonly description: string;
   readonly inputSchema: SkillInputSchema;

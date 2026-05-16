@@ -22,6 +22,7 @@ import {
 import {
   calculateCosineSimilarity,
 } from './featureVectorService';
+import { fromPrismaJsonValue, toPrismaJsonValue } from '../utils/prismaJson';
 // canonical singleton (PR #152)
 import { prisma } from '../backend/db/client';
 const indicatorService = new IndicatorService();
@@ -78,7 +79,7 @@ export class FeatureService {
     return prisma.tradeNote.update({
       where: { id: noteId },
       data: {
-        indicators: snapshot as unknown as Prisma.InputJsonValue,
+        indicators: toPrismaJsonValue(snapshot),
         featureVector: vector,
         timeframe: tf,
         updatedAt: new Date(),
@@ -123,7 +124,8 @@ export class FeatureService {
       return null;
     }
 
-    return note.indicators as unknown as FeatureSnapshot;
+    // Prisma JsonValue から FeatureSnapshot に narrow するヘルパー (utils/prismaJson)
+    return fromPrismaJsonValue<FeatureSnapshot>(note.indicators) ?? null;
   }
 
   /**
@@ -265,7 +267,7 @@ export class FeatureService {
 
     // トレンドでフィルター（indicators からトレンドを判定）
     const filtered = allSimilar.filter(result => {
-      const indicators = result.note.indicators as unknown as FeatureSnapshot;
+      const indicators = fromPrismaJsonValue<FeatureSnapshot>(result.note.indicators);
       if (!indicators) return false;
 
       // インジケータからトレンドを判定

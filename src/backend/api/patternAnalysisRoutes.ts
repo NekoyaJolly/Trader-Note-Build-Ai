@@ -44,6 +44,23 @@ const FeatureVectorSchema = z.object({
   resistanceProximity: z.number().min(0).max(100),
 });
 
+/** パターン分析の追加コンテキスト */
+const PatternContextSchema = z
+  .object({
+    recentPrice: z.number().optional(),
+    recentHigh: z.number().optional(),
+    recentLow: z.number().optional(),
+    timeframe: z.string().optional(),
+  })
+  .optional();
+
+/** ストラテジー単位のパターン分析リクエスト */
+const AnalyzeStrategyRequestSchema = z.object({
+  strategyId: z.string().min(1, 'strategyId は必須です'),
+  currentFeatures: FeatureVectorSchema,
+  context: PatternContextSchema,
+});
+
 /** パターン分析リクエストスキーマ */
 const PatternAnalysisRequestSchema = z.object({
   symbol: z.string().min(1),
@@ -278,23 +295,15 @@ router.get('/patterns/:strategyId', async (req: Request, res: Response) => {
  */
 router.post('/analyze-strategy', async (req: Request, res: Response) => {
   try {
-    const { strategyId, currentFeatures, context } = req.body;
-
-    // バリデーション
-    if (!strategyId || !currentFeatures) {
+    // Zod で req.body を具体型に narrow
+    const parsed = AnalyzeStrategyRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
       return res.status(400).json({
         success: false,
-        error: 'strategyId と currentFeatures は必須です',
+        error: parsed.error.format(),
       });
     }
-
-    const featuresResult = FeatureVectorSchema.safeParse(currentFeatures);
-    if (!featuresResult.success) {
-      return res.status(400).json({
-        success: false,
-        error: featuresResult.error.format(),
-      });
-    }
+    const { strategyId, currentFeatures, context } = parsed.data;
 
     // ストラテジー取得
     const strategy = await prisma.strategy.findUnique({
@@ -369,7 +378,7 @@ router.post('/analyze-strategy', async (req: Request, res: Response) => {
     // パターン分析実行
     const input: PatternAnalysisInput = {
       symbol: strategy.symbol,
-      currentFeatures: featuresResult.data,
+      currentFeatures,
       winningPatterns,
       side: strategy.side as 'buy' | 'sell',
       context,

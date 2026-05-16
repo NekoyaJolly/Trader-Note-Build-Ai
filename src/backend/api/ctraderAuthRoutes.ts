@@ -53,7 +53,7 @@ const DisconnectRequestSchema = z.object({
  * 認証URL を生成して返す
  * クライアントはこの URL にリダイレクトしてユーザー認証を開始
  */
-router.get('/ctrader/url', async (req: Request, res: Response) => {
+router.get('/ctrader/url', (req: Request, res: Response) => {
   try {
     const queryResult = GetAuthUrlQuerySchema.safeParse(req.query);
 
@@ -95,9 +95,13 @@ router.get('/ctrader/url', async (req: Request, res: Response) => {
  */
 router.post('/ctrader/callback', async (req: Request, res: Response) => {
   try {
+    // 受信時点の req.body は any 由来なので、ログ用にだけ最小スキーマで narrow する。
+    // 本格的なバリデーションは下の ExchangeCodeRequestSchema に任せる。
+    const logShape = z.object({ code: z.string().optional() }).safeParse(req.body);
+    const codeForLog: string | undefined = logShape.success ? logShape.data.code : undefined;
     console.log('[cTraderAuth] コールバック処理開始:', {
-      hasCode: !!req.body?.code,
-      codeLength: req.body?.code?.length,
+      hasCode: !!codeForLog,
+      codeLength: codeForLog?.length,
       headers: {
         origin: req.headers.origin,
         referer: req.headers.referer,
@@ -254,8 +258,11 @@ router.delete('/ctrader', async (req: Request, res: Response) => {
  */
 router.put('/ctrader/primary', async (req: Request, res: Response) => {
   try {
-    // JWT からユーザーIDを取得
-    let token = req.cookies?.auth_token;
+    // JWT を Cookie か Authorization ヘッダーから取得する。
+    // req.cookies は cookie-parser により Record<string, any> となるため、
+    // 直接アクセスせずに Record<string, string | undefined> として narrow してから扱う。
+    const cookieRecord = (req.cookies ?? {}) as Record<string, string | undefined>;
+    let token: string = cookieRecord.auth_token ?? '';
 
     if (!token) {
       const authHeader = req.headers.authorization;
@@ -362,8 +369,11 @@ router.post('/ctrader/refresh', async (req: Request, res: Response) => {
  */
 router.get('/me', async (req: Request, res: Response) => {
   try {
-    // Cookie または Authorization ヘッダーから JWT を取得
-    let token = req.cookies?.auth_token;
+    // Cookie または Authorization ヘッダーから JWT を取得する。
+    // req.cookies は cookie-parser により Record<string, any> なので、
+    // Record<string, string | undefined> として narrow してから扱う。
+    const cookieRecord = (req.cookies ?? {}) as Record<string, string | undefined>;
+    let token: string = cookieRecord.auth_token ?? '';
 
     console.log('[cTraderAuth] /me エンドポイント:', {
       hasCookie: !!token,
@@ -451,7 +461,7 @@ router.get('/me', async (req: Request, res: Response) => {
  * 
  * ログアウト（Cookie削除）
  */
-router.post('/logout', async (_req: Request, res: Response) => {
+router.post('/logout', (_req: Request, res: Response) => {
   try {
     // Cookie を削除
     sessionService.clearTokenCookie(res);

@@ -245,8 +245,12 @@ async function fetchFromTwelveDataFallback(
         // fetch() の失敗は `error.message='fetch failed'` で実体は `error.cause` にあるため、
         // cause も含めてログする (DNS / 接続 / Timeout 等の切り分けに必要)。
         // safeStringify で BigInt / 循環参照 / toJSON throw に対応 (PR #152 review)。
+        // cause の型は環境により異なる (Error / string / 任意オブジェクト) ため
+        // safeStringify に渡す前提で Error の cause を取り出す。
         const msg = error instanceof Error ? error.message : '不明なエラー';
-        const cause = (error as { cause?: unknown })?.cause;
+        const cause = error instanceof Error
+          ? (error as Error & { cause?: Error | string }).cause
+          : undefined;
         const causeStr = cause ? ` (cause: ${safeStringify(cause)})` : '';
         return { success: false, cachedCount: 0, error: `Twelve Data フォールバックエラー: ${msg}${causeStr}` };
     }

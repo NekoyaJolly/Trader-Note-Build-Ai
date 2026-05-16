@@ -161,7 +161,8 @@ function calculateAllIndicators(data: OHLCV[]): Map<AnalysisIndicator, number[]>
       result.set('MACD_HIST', macdHist);
     } catch (e) {
       console.warn('[FilterAnalysis] MACD計算エラー:', e);
-      result.set('MACD_HIST', new Array(closes.length).fill(0));
+      // `new Array(n).fill(0)` は any[] になるため、明示的に number[] にする
+      result.set('MACD_HIST', new Array<number>(closes.length).fill(0));
     }
     
     // ボリンジャーバンド（try-catch）
@@ -184,9 +185,10 @@ function calculateAllIndicators(data: OHLCV[]): Map<AnalysisIndicator, number[]>
       result.set('BB_POSITION', bbPosition);
     } catch (e) {
       console.warn('[FilterAnalysis] BB計算エラー:', e);
-      result.set('BB_UPPER', new Array(closes.length).fill(0));
-      result.set('BB_LOWER', new Array(closes.length).fill(0));
-      result.set('BB_POSITION', new Array(closes.length).fill(0.5));
+      // `new Array(n).fill(0)` は any[] になるため、明示的に number[] にする
+      result.set('BB_UPPER', new Array<number>(closes.length).fill(0));
+      result.set('BB_LOWER', new Array<number>(closes.length).fill(0));
+      result.set('BB_POSITION', new Array<number>(closes.length).fill(0.5));
     }
   } catch (e) {
     console.error('[FilterAnalysis] インジケーター計算エラー:', e);

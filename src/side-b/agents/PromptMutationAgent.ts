@@ -17,6 +17,8 @@ import { loadPromptWithGlobal } from '../prompts/loader';
 import { modelFor } from '../../config';
 import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import type { PromptVersion } from '../prompts/registry/types';
+import type { JsonValue } from '../../utils/jsonValue';
+import { safeStringify as commonSafeStringify } from '../../utils/safeStringify';
 import { extractJson } from './llmJsonExtract';
 import {
   GLOBAL_AGENT_NAME,
@@ -37,10 +39,10 @@ export interface PromptMutationProposal {
 }
 
 export interface RecentFailure {
-  /** 失敗した入力(サマリでよい) */
-  context: unknown;
-  /** 失敗した出力 / エラー概要 */
-  output: unknown;
+  /** 失敗した入力(サマリでよい)。JSON シリアライズ可能な構造のみ受け取る */
+  context: JsonValue;
+  /** 失敗した出力 / エラー概要。JSON シリアライズ可能な構造のみ受け取る */
+  output: JsonValue;
 }
 
 export interface ProposeImprovementsInput {
@@ -55,12 +57,14 @@ export interface ProposeImprovementsInput {
 }
 
 async function withRetries<T>(fn: () => Promise<T>, times = 3): Promise<T | null> {
-  let last: unknown;
+  // 最後にキャッチした例外を保持する。Error は Error 型、それ以外は string で保持し、
+  // unknown 型を導入せずに最終ログ出力のみに使う。
+  let last: Error | string | undefined;
   for (let i = 0; i < times; i++) {
     try {
       return await fn();
     } catch (e) {
-      last = e;
+      last = e instanceof Error ? e : String(e);
     }
   }
   console.error('[PromptMutationAgent] リトライ尽くし', last);
@@ -85,8 +89,9 @@ function parseProposalArray(content: string): PromptMutationProposal[] {
   }
   const out: PromptMutationProposal[] = [];
   for (const item of data) {
-    if (!item || typeof item !== 'object') continue;
-    const o = item as Record<string, unknown>;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    // extractJson が返した JsonValue 内のオブジェクトを Record<string, JsonValue> として扱う
+    const o = item as Record<string, JsonValue>;
     if (typeof o.version !== 'string' || typeof o.content !== 'string') continue;
     if (o.content.trim().length < 50) continue; // 短すぎる改善案は除外
     out.push({
@@ -120,7 +125,7 @@ export class PromptMutationAgent {
     } catch (err) {
       console.warn(
         '[PromptMutationAgent] Registry 合成に失敗、ファイル fallback:',
-        safeStringify(err),
+        commonSafeStringify(err),
       );
       return loadPromptWithGlobal('prompt_mutation');
     }
@@ -215,11 +220,18 @@ ${failuresDump}
   }
 }
 
-function safeStringify(v: unknown): string {
+/**
+ * JsonValue を簡易にダンプする (LLM プロンプト用、500 文字制限)。
+ *
+ * `JSON.stringify` で循環参照や BigInt 等が混入した場合のフォールバックは
+ * 共通の `safeStringify` ヘルパーに委譲し、`String(v)` による
+ * `[object Object]` 化を避ける。
+ */
+function safeStringify(v: JsonValue): string {
   try {
     const s = JSON.stringify(v);
     return s.length > 500 ? s.slice(0, 500) + '…' : s;
   } catch {
-    return String(v);
+    return commonSafeStringify(v);
   }
 }

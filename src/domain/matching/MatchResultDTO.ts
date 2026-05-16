@@ -23,8 +23,14 @@ export interface MatchResultDTO {
   matchScore: number;
   /** 過去トレードノート ID */
   historicalNoteId: string;
-  /** 市場スナップショット（Layer1 データ） */
-  marketSnapshot: unknown;
+  /**
+   * 市場スナップショット（Layer1 データ）。
+   * - Prisma の MarketSnapshot リレーション (取得済みの場合)
+   * - アプリ内の MarketData 構造 (リアルタイム/直近相場)
+   * - 空オブジェクト (取得失敗時のフォールバック)
+   * のいずれかが入る。広い具体型として object で受ける。
+   */
+  marketSnapshot: object;
   /** 市場スナップショット ID（DB 永続化用） */
   marketSnapshotId?: string;
   /** 銘柄シンボル */
@@ -95,7 +101,9 @@ function extractReasons(reasonsJson: Prisma.JsonValue): string[] {
   }
   
   // オブジェクト形式の場合（新形式: { explanations: string[] }）
-  const obj = reasonsJson as Record<string, unknown>;
+  // この時点で reasonsJson は object (Array でなく null でない) と確定しており、
+  // Prisma.JsonValue のうち JsonObject に narrow 済みのためアサーション不要。
+  const obj = reasonsJson;
   if (Array.isArray(obj.explanations)) {
     return obj.explanations.filter((r): r is string => typeof r === 'string');
   }

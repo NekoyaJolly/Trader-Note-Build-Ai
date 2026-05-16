@@ -11,11 +11,35 @@
 
 import type { Request, Response } from 'express';
 import { Router } from 'express';
+import { z } from 'zod';
 import { requireAuth } from '../../middleware/authMiddleware';
 import { getPrismaClient } from '../../infrastructure/prismaClient';
 
 const router = Router();
 const prisma = getPrismaClient();
+
+// 有効な時間足
+const VALID_TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'] as const;
+const TimeframeSchema = z.enum(VALID_TIMEFRAMES);
+
+// POST /api/watchlist のリクエストボディ
+const CreateWatchlistBodySchema = z.object({
+  symbol: z.string().min(1, 'シンボルは必須です'),
+  timeframes: z.array(TimeframeSchema).optional(),
+  notes: z.string().nullable().optional(),
+});
+
+// PUT /api/watchlist/:id のリクエストボディ
+const UpdateWatchlistBodySchema = z.object({
+  timeframes: z.array(TimeframeSchema).optional(),
+  active: z.boolean().optional(),
+  notes: z.string().nullable().optional(),
+});
+
+// /api/watchlist/:id の URL パラメータ
+const WatchlistIdParamsSchema = z.object({
+  id: z.string().min(1),
+});
 
 /**
  * GET /api/watchlist
@@ -54,40 +78,28 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 router.post('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const { symbol, timeframes, notes } = req.body;
 
-    // バリデーション
-    if (!symbol || typeof symbol !== 'string') {
+    // Zod で req.body を具体型に narrow
+    const parsed = CreateWatchlistBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      const firstIssue = parsed.error.issues[0];
       res.status(400).json({
         success: false,
-        error: 'シンボルは必須です',
+        error: firstIssue?.message ?? 'シンボルは必須です',
+        issues: parsed.error.issues.map((issue) => ({
+          path: issue.path.join('.'),
+          message: issue.message,
+        })),
       });
       return;
     }
+    const { symbol, timeframes, notes } = parsed.data;
 
     // シンボルを正規化（大文字、スラッシュなし）
     const normalizedSymbol = symbol.toUpperCase().replace(/[^A-Z0-9]/g, '');
 
-    // 時間足のバリデーション
-    const validTimeframes = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
-    const requestedTimeframes = timeframes || ['15m', '1h'];
-    
-    if (!Array.isArray(requestedTimeframes)) {
-      res.status(400).json({
-        success: false,
-        error: 'timeframes は配列で指定してください',
-      });
-      return;
-    }
-
-    const invalidTimeframes = requestedTimeframes.filter((tf: string) => !validTimeframes.includes(tf));
-    if (invalidTimeframes.length > 0) {
-      res.status(400).json({
-        success: false,
-        error: `無効な時間足: ${invalidTimeframes.join(', ')}。有効な値: ${validTimeframes.join(', ')}`,
-      });
-      return;
-    }
+    // 時間足のデフォルト（指定なしは ["15m", "1h"]）
+    const requestedTimeframes: string[] = timeframes ?? ['15m', '1h'];
 
     // 既存チェック（ユーザー × シンボルでユニーク）
     const existing = await prisma.watchlist.findUnique({
@@ -112,7 +124,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         userId,
         symbol: normalizedSymbol,
         timeframes: requestedTimeframes,
-        notes: notes || null,
+        notes: notes ?? null,
         active: true,
       },
     });
@@ -141,8 +153,31 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 router.put('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const { id } = req.params;
-    const { timeframes, active, notes } = req.body;
+
+    // Zod で req.params / req.body を具体型に narrow
+    const paramsParsed = WatchlistIdParamsSchema.safeParse(req.params);
+    if (!paramsParsed.success) {
+      res.status(400).json({
+        success: false,
+        error: 'id パラメータが不正です',
+      });
+      return;
+    }
+    const { id } = paramsParsed.data;
+
+    const bodyParsed = UpdateWatchlistBodySchema.safeParse(req.body);
+    if (!bodyParsed.success) {
+      res.status(400).json({
+        success: false,
+        error: 'リクエストボディが不正です',
+        issues: bodyParsed.error.issues.map((issue) => ({
+          path: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+      return;
+    }
+    const { timeframes, active, notes } = bodyParsed.data;
 
     // 所有権チェック
     const existing = await prisma.watchlist.findFirst({
@@ -155,28 +190,6 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
         error: 'ウォッチリスト項目が見つかりません',
       });
       return;
-    }
-
-    // 時間足のバリデーション（指定された場合）
-    if (timeframes !== undefined) {
-      const validTimeframes = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
-      
-      if (!Array.isArray(timeframes)) {
-        res.status(400).json({
-          success: false,
-          error: 'timeframes は配列で指定してください',
-        });
-        return;
-      }
-
-      const invalidTimeframes = timeframes.filter((tf: string) => !validTimeframes.includes(tf));
-      if (invalidTimeframes.length > 0) {
-        res.status(400).json({
-          success: false,
-          error: `無効な時間足: ${invalidTimeframes.join(', ')}`,
-        });
-        return;
-      }
     }
 
     const watchlist = await prisma.watchlist.update({

@@ -27,8 +27,18 @@ export type ExistingPlanDecision =
  *   - scenarios.length === 0     → delete (empty-scenarios / ノートレード判断の空プラン)
  *   - それ以外(scenarios >= 1)  → reuse  (cache-hit)
  */
+/**
+ * 本関数は scenarios フィールドの「配列か」「長さが 0 か」だけを参照する。
+ * 呼び出し側の具体型 (`AITradeScenario[]` 等) と互換であるように、
+ * `length` プロパティだけを要求する `ArrayLike` 互換の最小契約を宣言する。
+ */
+interface PlanWithScenariosShape {
+  /** シナリオ列。中身は問わず length のみ参照する */
+  scenarios?: { readonly length: number } | null;
+}
+
 export function decideExistingPlanAction(
-  existingPlan: { scenarios?: unknown } | null | undefined,
+  existingPlan: PlanWithScenariosShape | null | undefined,
   forceRefresh: boolean,
 ): ExistingPlanDecision {
   if (forceRefresh) {

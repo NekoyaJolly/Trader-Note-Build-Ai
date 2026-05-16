@@ -113,6 +113,25 @@ interface OpenAIToolDef {
     };
 }
 
+/**
+ * Chat Completions API へ送るリクエスト body の型。
+ *
+ * オプション送信のフィールドは optional とし、`Record<string, unknown>` を
+ * 使わず具体型として表現する。値はすべて JSON.stringify で送る前提なので
+ * JSON プリミティブ + 既知オブジェクトのみで構成する。
+ */
+interface ChatRequestBody {
+    model: string;
+    messages: ChatMessage[];
+    temperature?: number;
+    max_tokens?: number;
+    max_completion_tokens?: number;
+    response_format?: { type: 'json_object' } | { type: 'text' };
+    reasoning_effort?: ReasoningEffort;
+    tools?: OpenAIToolDef[];
+    tool_choice?: 'auto' | 'none';
+}
+
 /** OpenAI Chat Completions の reasoning_effort 取りうる値 */
 export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
@@ -222,7 +241,10 @@ export class AIProvider {
         messages: ChatMessage[],
         options: ChatOptions = {},
     ): Promise<AIResponse> {
-        const body: Record<string, unknown> = {
+        // OpenAI 互換 API へ送る JSON body。
+        // 値は number / string / boolean / 配列 / オブジェクトのいずれかで、
+        // 最終的に JSON.stringify される。型は ChatRequestBody (union) で表現する。
+        const body: ChatRequestBody = {
             model: this.model,
             messages,
         };
@@ -238,8 +260,11 @@ export class AIProvider {
         // OpenAI 直 + reasoning モデル (gpt-5系/o系) は `max_tokens` を拒否し `max_completion_tokens` を要求する。
         // 非 reasoning モデル (gpt-4o 等) や OpenRouter 経由は従来通り `max_tokens`。
         if (options.maxTokens !== undefined) {
-            const tokenParam = this.requiresOpenAINewParamFormat() ? 'max_completion_tokens' : 'max_tokens';
-            body[tokenParam] = options.maxTokens;
+            if (this.requiresOpenAINewParamFormat()) {
+                body.max_completion_tokens = options.maxTokens;
+            } else {
+                body.max_tokens = options.maxTokens;
+            }
         }
 
         // response_format (JSON モード等) — 指定された時のみ送信
@@ -291,7 +316,7 @@ export class AIProvider {
         // choices.min(1) を満たしていれば choice は存在する。message も schema 上必須。
         return {
             content: choice.message.content ?? null,
-            toolCalls: (choice.message.tool_calls ?? []) as ToolCall[],
+            toolCalls: (choice.message.tool_calls ?? []),
             tokenUsage: data.usage?.total_tokens ?? 0,
             promptTokens: data.usage?.prompt_tokens,
             completionTokens: data.usage?.completion_tokens,

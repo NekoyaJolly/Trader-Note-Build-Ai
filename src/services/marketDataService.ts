@@ -323,9 +323,9 @@ export class MarketDataService {
    * 
    * @returns 銘柄リスト
    */
-  async getAvailableSymbols(): Promise<string[]> {
+  getAvailableSymbols(): Promise<string[]> {
     // 主要な銘柄を返す（将来的にはAPIから取得）
-    return [
+    return Promise.resolve([
       'BTC/USD',
       'ETH/USD',
       'EUR/USD',
@@ -335,7 +335,7 @@ export class MarketDataService {
       'GOOGL',
       'MSFT',
       'AMZN',
-    ];
+    ]);
   }
 
   /**

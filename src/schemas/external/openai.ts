@@ -168,8 +168,10 @@ export type OpenAIAPIResponse = z.infer<typeof OpenAIAPIResponseSchema>;
 // ========================================
 
 /**
- * OpenAIレスポンスがエラーかどうかを判定
+ * OpenAIレスポンスがエラーかどうかを判定。
+ * 型ガードは「未検証の外部値」を Zod で narrow するのが本来の役割。
  */
+// eslint-disable-next-line no-restricted-syntax -- 型ガードの入力は型不明な外部値であることが本質
 export function isOpenAIError(response: unknown): response is OpenAIErrorResponse {
   const result = OpenAIErrorResponseSchema.safeParse(response);
   return result.success;
@@ -208,8 +210,10 @@ export function extractResponsesContent(response: OpenAIResponsesAPI): string | 
 }
 
 /**
- * OpenAIレスポンスを安全にパースしてテキストを抽出
+ * OpenAIレスポンスを安全にパースしてテキストを抽出。
+ * 外部 API から戻る生レスポンスを Zod で narrow するエントリポイントのため unknown を受ける。
  */
+// eslint-disable-next-line no-restricted-syntax -- 外部 API レスポンスを Zod で narrow する境界関数
 export function parseOpenAIResponse(response: unknown): string {
   // Chat Completions形式を試行
   const chatResult = OpenAIChatCompletionResponseSchema.safeParse(response);
@@ -259,10 +263,13 @@ export function extractJSONFromAIResponse<T>(
     jsonString = content.trim();
   }
   
-  // JSONをパース
-  let parsed: unknown;
+  // JSONをパースして JsonValue 相当の具体型で受ける。
+  // JSON.parse の戻り値は any のため、JsonInput (= JSON 表現の和型) として一旦受けて
+  // 直後の Zod スキーマ validation で T に narrow する。
+  type JsonInput = string | number | boolean | null | JsonInput[] | { [key: string]: JsonInput };
+  let parsed: JsonInput;
   try {
-    parsed = JSON.parse(jsonString);
+    parsed = JSON.parse(jsonString) as JsonInput;
   } catch (e) {
     throw new Error(`AI出力のJSONパースに失敗: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
   }

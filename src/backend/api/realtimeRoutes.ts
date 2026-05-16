@@ -118,9 +118,9 @@ const UnsubscribeRequestSchema = z.object({
  * GET /api/realtime/status
  * 接続状態を取得
  */
-router.get('/status', async (req: Request, res: Response) => {
+router.get('/status', (req: Request, res: Response) => {
   setCorsHeaders(req, res);
-  
+
   try {
     const orch = getDefaultOrchestrator();
     const status = orch.getStatus();
@@ -325,7 +325,7 @@ router.post('/clear-bars/:symbol', async (req: Request, res: Response) => {
  * POST /api/realtime/clear-all-bars
  * 全ての異常バーをクリア
  */
-router.post('/clear-all-bars', async (_req: Request, res: Response) => {
+router.post('/clear-all-bars', (_req: Request, res: Response) => {
   try {
     // 全時間足のオーケストレーターの進行中バーをクリア
     for (const orch of orchestrators.values()) {

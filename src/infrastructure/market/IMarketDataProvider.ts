@@ -310,16 +310,20 @@ export abstract class BaseMarketDataProvider implements IMarketDataProvider {
   }
   
   /**
-   * OHLCV バーの妥当性を検証
+   * OHLCV バーの妥当性を検証。
+   * 型ガードは「入力時点で型不明な値」を narrow する API なので unknown を受けるのが本来の役割。
    */
+  // eslint-disable-next-line no-restricted-syntax -- 型ガードの入力は型不明な値であることが本質
   protected validateOHLCVBar(bar: unknown): bar is OHLCVBar {
     const result = OHLCVBarSchema.safeParse(bar);
     return result.success;
   }
-  
+
   /**
-   * Tick データの妥当性を検証
+   * Tick データの妥当性を検証。
+   * 型ガードは「入力時点で型不明な値」を narrow する API なので unknown を受けるのが本来の役割。
    */
+  // eslint-disable-next-line no-restricted-syntax -- 型ガードの入力は型不明な値であることが本質
   protected validateTickData(tick: unknown): tick is TickData {
     const result = TickDataSchema.safeParse(tick);
     return result.success;

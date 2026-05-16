@@ -217,17 +217,26 @@ export class ResearchRepository {
    * v2 (新): featureVector列にMarketAnalysis → marketAnalysisとfeatureVector両方を返す
    */
   private toTypedResearch(research: MarketResearch): MarketResearchWithTypes {
-    const rawData = research.featureVector as unknown as Record<string, unknown>;
+    // Prisma JSON フィールド (`Prisma.JsonValue`) からの取り出し。
+    // featureVector 列に v1=12次元 / v2=MarketAnalysis の両形式が混在しており、
+    // ここでは構造的に `Prisma.JsonObject` (= Record) として narrow する。
+    const rawValue = research.featureVector;
+    const rawData: Prisma.JsonObject | null =
+      rawValue !== null && typeof rawValue === 'object' && !Array.isArray(rawValue)
+        ? rawValue
+        : null;
 
     // v2チェック: _version === 2 なら MarketAnalysis
-    const isV2 = rawData && rawData._version === 2;
+    const isV2 = rawData !== null && rawData._version === 2;
 
     let featureVector: FeatureVector12D;
     let marketAnalysis: MarketAnalysis | undefined;
 
-    if (isV2) {
+    if (isV2 && rawData) {
       // v2: featureVector列から MarketAnalysis を取り出す
       const { _version, ...analysisData } = rawData;
+      // _version は分岐判定のみに使用するため、ここでは捨てて構わない
+      void _version;
       marketAnalysis = safeValidateMarketAnalysis(analysisData) || undefined;
       // legacy互換用の featureVector を生成
       featureVector = marketAnalysis
@@ -235,9 +244,17 @@ export class ResearchRepository {
         : createEmptyFeatureVector();
     } else {
       // v1: 旧12次元データ — ランタイムバリデーションで不正データを防止
-      const validated = safeValidateFeatureVector(rawData);
+      const validated = rawData ? safeValidateFeatureVector(rawData) : null;
       featureVector = validated ?? createEmptyFeatureVector();
     }
+
+    // OHLCVSnapshot は Prisma JSON 列。構造的に互換だが Prisma.JsonValue から
+    // 直接 OHLCVSnapshot に narrow する型ガードはここでは省略 (上位で利用前検証)。
+    const snapshotRaw = research.ohlcvSnapshot;
+    const ohlcvSnapshot: OHLCVSnapshot | undefined =
+      snapshotRaw !== null && typeof snapshotRaw === 'object' && !Array.isArray(snapshotRaw)
+        ? reviveOhlcvSnapshot(snapshotRaw)
+        : undefined;
 
     return {
       id: research.id,
@@ -245,13 +262,37 @@ export class ResearchRepository {
       timeframe: research.timeframe,
       featureVector,
       marketAnalysis,
-      ohlcvSnapshot: research.ohlcvSnapshot as unknown as OHLCVSnapshot | undefined,
+      ohlcvSnapshot,
       aiModel: research.aiModel,
       tokenUsage: research.tokenUsage,
       expiresAt: research.expiresAt,
       createdAt: research.createdAt,
     };
   }
+}
+
+/**
+ * Prisma JSON フィールドから `OHLCVSnapshot` を復元する薄いヘルパー。
+ *
+ * 形状不一致は `undefined` 相当 (空オブジェクト) を返さず、各フィールドを
+ * 型ガード経由で安全に取り出す。型は OHLCVSnapshot のフィールド構成に追随。
+ */
+function reviveOhlcvSnapshot(raw: Prisma.JsonObject): OHLCVSnapshot | undefined {
+  const numOrUndef = (v: Prisma.JsonValue | undefined): number | undefined =>
+    typeof v === 'number' ? v : undefined;
+  const latestPrice = numOrUndef(raw.latestPrice);
+  if (latestPrice === undefined) return undefined;
+  const recentHigh = numOrUndef(raw.recentHigh);
+  const recentLow = numOrUndef(raw.recentLow);
+  const dataPoints = numOrUndef(raw.dataPoints);
+  const closes = raw.recentCloses;
+  const recentCloses: number[] = Array.isArray(closes)
+    ? closes.filter((v): v is number => typeof v === 'number')
+    : [];
+  if (recentHigh === undefined || recentLow === undefined || dataPoints === undefined) {
+    return undefined;
+  }
+  return { latestPrice, recentHigh, recentLow, dataPoints, recentCloses };
 }
 
 // デフォルトインスタンス

@@ -938,7 +938,7 @@ export class TradeNoteService {
   /**
    * FSにノートを保存する（レガシー互換）
    */
-  private async saveNoteToFs(note: TradeNote): Promise<void> {
+  private saveNoteToFs(note: TradeNote): Promise<void> {
     const filename = `${note.id}.json`;
     const filepath = path.join(this.notesPath, filename);
 
@@ -947,6 +947,7 @@ export class TradeNoteService {
     if (process.env.NODE_ENV !== 'production') {
       console.log(`[FS] Saved trade note: ${filename}`);
     }
+    return Promise.resolve();
   }
 
   /**
@@ -983,11 +984,11 @@ export class TradeNoteService {
   /**
    * FSから全ノートを取得（レガシー互換）
    */
-  private async loadAllNotesFromFs(): Promise<TradeNote[]> {
+  private loadAllNotesFromFs(): Promise<TradeNote[]> {
     const notes: TradeNote[] = [];
 
     if (!fs.existsSync(this.notesPath)) {
-      return notes;
+      return Promise.resolve(notes);
     }
 
     const files = fs.readdirSync(this.notesPath);
@@ -1004,7 +1005,7 @@ export class TradeNoteService {
       }
     }
 
-    return notes;
+    return Promise.resolve(notes);
   }
 
   /**
@@ -1043,11 +1044,11 @@ export class TradeNoteService {
   /**
    * FSから単一ノートを取得（レガシー互換）
    */
-  private async getNoteByIdFromFs(noteId: string): Promise<TradeNote | null> {
+  private getNoteByIdFromFs(noteId: string): Promise<TradeNote | null> {
     const filepath = path.join(this.notesPath, `${noteId}.json`);
 
     if (!fs.existsSync(filepath)) {
-      return null;
+      return Promise.resolve(null);
     }
 
     const content = fs.readFileSync(filepath, 'utf-8');
@@ -1055,7 +1056,7 @@ export class TradeNoteService {
     note.timestamp = new Date(note.timestamp);
     note.createdAt = new Date(note.createdAt);
 
-    return note;
+    return Promise.resolve(note);
   }
 
   /**

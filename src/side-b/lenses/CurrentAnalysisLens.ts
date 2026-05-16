@@ -22,19 +22,19 @@ export class CurrentAnalysisLens implements Lens {
   readonly version = '1.0.0';
   readonly dependencies = ['symbol', 'existingAnalysis'] as const;
 
-  async compute(input: LensInput): Promise<LensFeature> {
+  compute(input: LensInput): Promise<LensFeature> {
     const start = Date.now();
     const computedAt = new Date();
 
     if (!input.existingAnalysis) {
-      return {
+      return Promise.resolve({
         lensName: this.name,
         lensVersion: this.version,
         features: {},
         computedAt,
         computeDurationMs: Date.now() - start,
         confidence: 0,
-      };
+      });
     }
 
     const analysis = input.existingAnalysis;
@@ -58,13 +58,13 @@ export class CurrentAnalysisLens implements Lens {
       ).length,
     };
 
-    return {
+    return Promise.resolve({
       lensName: this.name,
       lensVersion: this.version,
       features,
       computedAt,
       computeDurationMs: Date.now() - start,
       confidence: analysis.confidence / 100,
-    };
+    });
   }
 }

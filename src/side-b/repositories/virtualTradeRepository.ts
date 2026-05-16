@@ -7,7 +7,7 @@
  */
 
 import { prisma } from "../../backend/db/client";
-import type { VirtualTradeStatus } from "@prisma/client";
+import type { Prisma, VirtualTradeStatus } from "@prisma/client";
 import type { CreateVirtualTradeInput, CloseVirtualTradeInput } from "../models";
 import { Decimal } from "@prisma/client/runtime/library";
 
@@ -100,20 +100,22 @@ export async function findVirtualTrades(
   options: FindVirtualTradesOptions = {},
 ): Promise<VirtualTradeRecord[]> {
   const { planId, status, symbol, from, to, limit, offset } = options;
-  
-  const where: Record<string, unknown> = {};
-  
+
+  // Prisma の生成型で where 条件を組み立て、Record<string, unknown> を排除する。
+  const where: Prisma.VirtualTradeWhereInput = {};
+
   if (planId) where.planId = planId;
   if (symbol) where.symbol = symbol;
-  
+
   if (status) {
     where.status = Array.isArray(status) ? { in: status } : status;
   }
-  
+
   if (from || to) {
-    where.createdAt = {};
-    if (from) (where.createdAt as Record<string, unknown>).gte = from;
-    if (to) (where.createdAt as Record<string, unknown>).lte = to;
+    const createdAt: Prisma.DateTimeFilter = {};
+    if (from) createdAt.gte = from;
+    if (to) createdAt.lte = to;
+    where.createdAt = createdAt;
   }
   
   const trades = await prisma.virtualTrade.findMany({
@@ -249,7 +251,8 @@ export async function updateStopLossTakeProfit(
   stopLoss?: number,
   takeProfit?: number,
 ): Promise<VirtualTradeRecord> {
-  const data: Record<string, unknown> = {};
+  // Prisma 生成型を直接使うことで動的キー追加でも型安全
+  const data: Prisma.VirtualTradeUpdateInput = {};
   if (stopLoss !== undefined) data.stopLoss = new Decimal(stopLoss);
   if (takeProfit !== undefined) data.takeProfit = new Decimal(takeProfit);
   

@@ -28,6 +28,7 @@ import {
     findAITradeNotesBySymbol,
     findRecentAITradeNotes,
 } from '../side-b/repositories/aiNoteRepository';
+import type { AITradeNote } from '../side-b/models/aiTradeNote';
 import { prisma } from '../backend/db/client';
 
 // ===========================================
@@ -399,16 +400,7 @@ function convertTimeframeToInternal(tf: string): string {
 /**
  * AITradeNote をAIに渡しやすい形式にフォーマット
  */
-function formatNote(note: {
-    id: string;
-    date: string;
-    symbol: string;
-    direction: string;
-    result: { outcome: string; pnlPips: number; pnlPercentage: number; riskRewardActual: number; holdingDuration: number };
-    learnings: unknown;
-    planEvaluation: unknown;
-    createdAt: Date;
-}) {
+function formatNote(note: AITradeNote) {
     return {
         id: note.id,
         date: note.date,
@@ -427,6 +419,12 @@ function formatNote(note: {
 /**
  * エラーレスポンスを統一フォーマットで返す
  */
+/**
+ * エラーレスポンスを統一フォーマットで返す。
+ * catch ハンドラからの呼び出しを想定しており、入力型は本質的に「型不明」のため
+ * 型ガードでメッセージ抽出する設計上 unknown を受ける必要がある。
+ */
+// eslint-disable-next-line no-restricted-syntax -- catch ハンドラからのエラー値を narrow する責務上 unknown を受ける
 function formatError(toolName: string, error: unknown) {
     const message = error instanceof Error ? error.message : '不明なエラーが発生しました';
     const stack = error instanceof Error ? error.stack : undefined;

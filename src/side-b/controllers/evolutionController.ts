@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import { prisma } from '../../backend/db/client';
 import { generationLessonRepository } from '../../backend/repositories/generationLessonRepository';
 import { evolutionBacktestRunRepository } from '../../backend/repositories/evolutionBacktestRunRepository';

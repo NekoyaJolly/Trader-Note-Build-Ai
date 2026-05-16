@@ -10,6 +10,7 @@
  * - gpt-4o-miniの能力範囲内に収める
  */
 
+import type { JsonValue } from '../../utils/jsonValue';
 import type { FeatureVector12D} from './featureVector';
 import { validateFeatureVector } from './featureVector';
 
@@ -93,17 +94,23 @@ export interface ResearchAIOutput {
 
 /**
  * Research AI出力のバリデーション（シンプル化）
+ *
+ * 入力は LLM 応答などの未検証 JSON。`JsonValue` の具体型で受け取り、
+ * 内部で `featureVector` の存在確認 → Zod による narrow を行う。
  */
-export function validateResearchAIOutput(data: unknown): ResearchAIOutput {
-  const obj = data as Record<string, unknown>;
+export function validateResearchAIOutput(data: JsonValue): ResearchAIOutput {
+  // JSON 値がオブジェクトであることを最初に確認
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+    throw new Error('Research AI output must be a JSON object');
+  }
 
-  // 特徴量ベクトルの存在チェック
-  if (!obj.featureVector) {
+  const featureVectorRaw = data.featureVector;
+  if (featureVectorRaw === undefined) {
     throw new Error('featureVector is required in Research AI output');
   }
 
   // 特徴量ベクトルのバリデーション
-  const featureVector = validateFeatureVector(obj.featureVector);
+  const featureVector = validateFeatureVector(featureVectorRaw);
 
   return {
     featureVector,

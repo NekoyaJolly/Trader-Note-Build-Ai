@@ -12,7 +12,20 @@
  */
 
 import type { Request, Response } from 'express';
+import { z } from 'zod';
 import { checkDataCoverage } from '../services/strategyBacktestService';
+import type { BacktestTimeframe } from '../services/strategyBacktestService';
+
+// BT カバレッジチェックの時間足 (BacktestTimeframe 型と同等)
+const BacktestTimeframeSchema = z.enum(['1m', '5m', '15m', '30m', '1h', '4h', '1d']);
+
+// POST /api/backtest/check-coverage のリクエストボディ
+const CheckCoverageBodySchema = z.object({
+  symbol: z.string().min(1, 'symbol は必須です'),
+  timeframe: BacktestTimeframeSchema,
+  startDate: z.string().min(1, 'startDate は必須です'),
+  endDate: z.string().min(1, 'endDate は必須です'),
+});
 
 /**
  * バックテストコントローラークラス (coverage check 専用)
@@ -27,14 +40,21 @@ export class BacktestController {
    */
   checkCoverage = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { symbol, timeframe, startDate, endDate } = req.body;
-
-      if (!symbol || !timeframe || !startDate || !endDate) {
+      // Zod で req.body を具体型に narrow
+      const parsed = CheckCoverageBodySchema.safeParse(req.body);
+      if (!parsed.success) {
         res.status(400).json({
           error: '必須パラメータが不足しています: symbol, timeframe, startDate, endDate',
+          issues: parsed.error.issues.map((issue) => ({
+            path: issue.path.join('.'),
+            message: issue.message,
+          })),
         });
         return;
       }
+      const { symbol, timeframe, startDate, endDate } = parsed.data;
+      // 型を明示 (checkDataCoverage が BacktestTimeframe を要求するため)
+      const tf: BacktestTimeframe = timeframe;
 
       const start = new Date(startDate);
       const end = new Date(endDate);
@@ -46,7 +66,7 @@ export class BacktestController {
         return;
       }
 
-      const coverage = await checkDataCoverage(symbol, timeframe, start, end);
+      const coverage = await checkDataCoverage(symbol, tf, start, end);
 
       // フロントエンドが期待するフィールド名にマッピング
       // hasEnoughData: 95% 以上のカバレッジで true (警告不要)

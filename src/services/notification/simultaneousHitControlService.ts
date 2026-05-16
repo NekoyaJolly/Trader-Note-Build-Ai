@@ -12,7 +12,7 @@
  * @see docs/ARCHITECTURE.md
  */
 
-import type { PrismaClient} from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import { prisma } from '../../backend/db/client';
 
 /**
@@ -268,16 +268,16 @@ export class SimultaneousHitControlService {
    * 
    * 例: "BTCUSDT: ノートA(85%), ノートB(78%)"
    */
-  async generateGroupedMessage(hits: MatchHit[]): Promise<string> {
-    if (hits.length === 0) return '';
+  generateGroupedMessage(hits: MatchHit[]): Promise<string> {
+    if (hits.length === 0) return Promise.resolve('');
     if (hits.length === 1) {
-      return `${hits[0].symbol}: ${(hits[0].similarity * 100).toFixed(0)}%`;
+      return Promise.resolve(`${hits[0].symbol}: ${(hits[0].similarity * 100).toFixed(0)}%`);
     }
 
     const symbol = hits[0].symbol;
     const noteInfos = hits.map(h => `${(h.similarity * 100).toFixed(0)}%`);
-    
-    return `${symbol}: ${noteInfos.join(', ')}`;
+
+    return Promise.resolve(`${symbol}: ${noteInfos.join(', ')}`);
   }
 
   /**
@@ -323,16 +323,18 @@ export class SimultaneousHitControlService {
   } = {}): Promise<{
     noteId: string;
     reason: string;
-    details: unknown;
+    // Prisma Json 列のため JsonValue で受ける (= null | string | number | boolean | JsonArray | JsonObject)
+    details: Prisma.JsonValue;
     skippedAt: Date;
   }[]> {
-    const where: Record<string, unknown> = {};
+    const where: Prisma.NotificationSkipLogWhereInput = {};
     
     if (options.noteId) where.noteId = options.noteId;
     if (options.from || options.to) {
-      where.skippedAt = {};
-      if (options.from) (where.skippedAt as Record<string, Date>).gte = options.from;
-      if (options.to) (where.skippedAt as Record<string, Date>).lte = options.to;
+      const skippedAtFilter: Prisma.DateTimeFilter = {};
+      if (options.from) skippedAtFilter.gte = options.from;
+      if (options.to) skippedAtFilter.lte = options.to;
+      where.skippedAt = skippedAtFilter;
     }
 
     const logs = await this.prisma.notificationSkipLog.findMany({

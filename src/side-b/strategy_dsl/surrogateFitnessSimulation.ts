@@ -90,7 +90,8 @@ export function defaultPipSizeForSymbol(symbol: string): number {
 }
 
 function computeSma(values: number[], period: number): number[] {
-  const out: number[] = new Array(values.length).fill(NaN);
+  // `new Array(n).fill(NaN)` の戻り値は any[] と推論されるため、明示的に number[] を生成する
+  const out: number[] = Array.from({ length: values.length }, () => NaN);
   let sum = 0;
   for (let i = 0; i < values.length; i++) {
     sum += values[i];
@@ -101,7 +102,8 @@ function computeSma(values: number[], period: number): number[] {
 }
 
 function computeRsi(closes: number[], period: number): number[] {
-  const out: number[] = new Array(closes.length).fill(NaN);
+  // `new Array(n).fill(NaN)` の戻り値は any[] と推論されるため、明示的に number[] を生成する
+  const out: number[] = Array.from({ length: closes.length }, () => NaN);
   if (closes.length < period + 1) return out;
   let gain = 0;
   let loss = 0;
@@ -127,7 +129,8 @@ function computeRsi(closes: number[], period: number): number[] {
 }
 
 function computeTrueRange(high: number[], low: number[], close: number[]): number[] {
-  const tr: number[] = new Array(high.length).fill(0);
+  // `new Array(n).fill(0)` の戻り値は any[] と推論されるため、明示的に number[] を生成する
+  const tr: number[] = Array.from({ length: high.length }, () => 0);
   for (let i = 0; i < high.length; i++) {
     if (i === 0) {
       tr[i] = high[i] - low[i];

@@ -210,8 +210,8 @@ export class MonteCarloTool implements ValidationTool {
         };
     }
 
-    async isAvailable(): Promise<boolean> {
-        return true;
+    isAvailable(): Promise<boolean> {
+        return Promise.resolve(true);
     }
 
     private fail(reason: string, start: number): ValidationToolResult {

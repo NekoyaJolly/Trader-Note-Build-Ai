@@ -11,7 +11,7 @@
  * @see src/services/performance/notePerformanceTypes.ts
  */
 
-import type { PrismaClient, EvaluationLog } from '@prisma/client';
+import type { Prisma, PrismaClient, EvaluationLog } from '@prisma/client';
 import { prisma } from '../../backend/db/client';
 import type {
   NotePerformanceReport,
@@ -203,18 +203,15 @@ export class NotePerformanceService {
     noteId: string,
     options: { from?: Date; to?: Date; timeframe?: string }
   ): Promise<EvaluationLog[]> {
-    const where: Record<string, unknown> = { noteId };
-    
+    const where: Prisma.EvaluationLogWhereInput = { noteId };
+
     if (options.from || options.to) {
-      where.evaluatedAt = {};
-      if (options.from) {
-        (where.evaluatedAt as Record<string, Date>).gte = options.from;
-      }
-      if (options.to) {
-        (where.evaluatedAt as Record<string, Date>).lte = options.to;
-      }
+      const evaluatedAtFilter: Prisma.DateTimeFilter = {};
+      if (options.from) evaluatedAtFilter.gte = options.from;
+      if (options.to) evaluatedAtFilter.lte = options.to;
+      where.evaluatedAt = evaluatedAtFilter;
     }
-    
+
     if (options.timeframe) {
       where.timeframe = options.timeframe;
     }
@@ -408,8 +405,10 @@ export class NotePerformanceService {
     const counterTrendLogs = weakLogs.filter(l => {
       const condition = this.detectMarketCondition(l);
       // 診断情報からノートのトレンド方向を取得し、逆方向かチェック
-      const diag = l.diagnostics as Record<string, unknown> | null;
-      const noteTrend = diag?.noteTrend as string | undefined;
+      // Prisma Json 列の値を narrow する (JsonObject = { [Key in string]?: JsonValue })
+      const diag = (l.diagnostics ?? null) as Prisma.JsonObject | null;
+      const noteTrendRaw = diag?.noteTrend;
+      const noteTrend: string | undefined = typeof noteTrendRaw === 'string' ? noteTrendRaw : undefined;
       
       if (noteTrend === 'bullish' && condition === 'trending_down') return true;
       if (noteTrend === 'bearish' && condition === 'trending_up') return true;
@@ -435,8 +434,9 @@ export class NotePerformanceService {
    * EvaluationLog から相場状況を判定
    */
   private detectMarketCondition(log: EvaluationLog): MarketCondition {
-    const diag = log.diagnostics as Record<string, unknown> | null;
-    
+    // Prisma Json 列の値を narrow する
+    const diag = (log.diagnostics ?? null) as Prisma.JsonObject | null;
+
     if (!diag) {
       // 診断情報がない場合は level から推測
       if (log.level === 'strong') return 'ranging'; // 高類似度 = レンジ向き

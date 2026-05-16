@@ -13,7 +13,7 @@
  * - 結果は DB(PromptAbTestResult)に自動記録(persist=false で無効化可)
  */
 
-import { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
 import type {
   AbTestResult,

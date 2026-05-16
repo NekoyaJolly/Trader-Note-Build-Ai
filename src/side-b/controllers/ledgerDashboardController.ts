@@ -5,6 +5,7 @@
  */
 
 import type { Request, Response } from 'express';
+import type { ParsedQs } from 'qs';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../backend/db/client';
 import {
@@ -13,7 +14,17 @@ import {
 } from '../ledger/EdgeLedger';
 import { pythonBridge } from '../validation/python_bridge';
 
-function toPositiveInt(raw: unknown, fallback: number, max?: number): number {
+/**
+ * Express の `req.query` 各フィールドが取りうる型 (`ParsedQs[string]` と同等)。
+ * string / 配列 / ネストされた ParsedQs / undefined を含む。
+ */
+type QueryValue =
+    | undefined
+    | string
+    | ParsedQs
+    | (string | ParsedQs)[];
+
+function toPositiveInt(raw: QueryValue, fallback: number, max?: number): number {
     if (typeof raw !== 'string') return fallback;
     const parsed = Number.parseInt(raw, 10);
     if (!Number.isFinite(parsed) || parsed < 1) return fallback;

@@ -313,7 +313,7 @@ export class TradeNormalizationService {
     // 日本語形式（例: 2024/01/15 10:30:00 または 2024-01-15 10:30:00）を先にチェック
     // 注: スラッシュ区切りだけでなくハイフン区切りの YYYY-MM-DD 形式も日本語形式として扱い、JST → UTC 変換を行う
     // ISO 8601 形式（例: 2024-01-15T19:30:00Z など T と Z を含む文字列）は後続の処理（new Date(...)）で解釈する
-    const jpPattern = /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})[\s]?(\d{1,2})?:?(\d{1,2})?:?(\d{1,2})?$/;
+    const jpPattern = /^(\d{4})[/-](\d{1,2})[/-](\d{1,2})[\s]?(\d{1,2})?:?(\d{1,2})?:?(\d{1,2})?$/;
     const jpMatch = trimmed.match(jpPattern);
     if (jpMatch) {
       const [, year, month, day, hour = '0', minute = '0', second = '0'] = jpMatch;

@@ -11,11 +11,11 @@ import type { SessionPayload } from '../backend/services/auth/sessionService';
 import { sessionService } from '../backend/services/auth/sessionService';
 
 // Express のリクエスト型を拡張して user プロパティを追加
-declare global {
-  namespace Express {
-    interface Request {
-      user?: SessionPayload;
-    }
+// no-namespace ルールを避けるため、cookie-parser 等と同じく "express" モジュールを
+// 拡張する形で Request インターフェイスに user フィールドを足す
+declare module 'express' {
+  interface Request {
+    user?: SessionPayload;
   }
 }
 
@@ -28,11 +28,13 @@ declare global {
  */
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   // Cookie または Authorization ヘッダーから JWT を取得
-  let token = req.cookies?.auth_token;
-  
+  // req.cookies は cookie-parser 型定義上 any のため、明示的に narrow する
+  const cookies = req.cookies as Record<string, string | undefined> | undefined;
+  let token: string | undefined = cookies?.auth_token;
+
   if (!token) {
     const authHeader = req.headers.authorization;
-    
+
     // Authorization ヘッダーの存在チェック
     if (!authHeader) {
       res.status(401).json({
@@ -56,7 +58,14 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   }
 
   try {
-    // トークンを検証
+    // トークンを検証 (この時点で token は string と確定済み)
+    if (!token) {
+      res.status(401).json({
+        success: false,
+        error: '認証トークンが空です',
+      });
+      return;
+    }
     const payload = sessionService.verifyToken(token);
 
     // リクエストにユーザー情報を付加
@@ -81,8 +90,10 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
  */
 export function optionalAuth(req: Request, res: Response, next: NextFunction): void {
   // Cookie または Authorization ヘッダーから JWT を取得
-  let token = req.cookies?.auth_token;
-  
+  // req.cookies は cookie-parser 型定義上 any のため、明示的に narrow する
+  const cookies = req.cookies as Record<string, string | undefined> | undefined;
+  let token: string | undefined = cookies?.auth_token;
+
   if (!token) {
     const authHeader = req.headers.authorization;
 
@@ -100,6 +111,11 @@ export function optionalAuth(req: Request, res: Response, next: NextFunction): v
     }
 
     token = parts[1];
+  }
+
+  if (!token) {
+    next();
+    return;
   }
 
   try {
