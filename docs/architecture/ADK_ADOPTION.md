@@ -135,7 +135,7 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 
 ## 7. 実装状況
 
-> **最終更新**: 2026-05-14 (Step 4 全 Phase 完了)
+> **最終更新**: 2026-05-17 (ORCH WBS Phase 0〜10 完了、Step 4 までは 2026-05-14 時点)
 
 ### Step 進捗
 
@@ -159,8 +159,8 @@ Draft lifecycle) に分離した。詳細は [`adk_run_ledger_summary.md`](./adk
 - Phase 0 棚卸し: [`adk_run_ledger_phase_0_棚卸し.md`](./adk_run_ledger_phase_0_棚卸し.md)
 - 完了サマリー: [`adk_run_ledger_summary.md`](./adk_run_ledger_summary.md)
 
-撤退時は `git rm -rf src/side-b/adk/` + Bridge 削除 + Scheduler の新メソッド削除のみで完結
-(既存 Job / PDCALoop / Lens / Evolution / EdgeLedger は無変更)。
+撤退時の削除対象: `src/side-b/adk/` + **`src/side-b/tests/adk/`** + Bridge (`sideBSchedulerOrchestratorBridge.ts` + 関連 test) + Scheduler の `runOrchestratedCycleNow` メソッド + Bridge import + `package.json`/`package-lock.json` から `@google/adk`。
+詳細な実行手順 (5 ステップ + 検証 + 完了記録) は [`adk_run_ledger_summary.md`](./adk_run_ledger_summary.md) §6.1 を参照。既存 Job / PDCALoop / Lens / Evolution / EdgeLedger は本 WBS で改変していないため、上記削除のみで完全撤退できる。
 
 ### 完了した Step の詳細
 

@@ -14,21 +14,21 @@
 
 ## 1. PR 一覧 (Phase 0 → 10)
 
-| Phase | タイトル | PR | base | マージ | 主要成果物 |
+| Phase | タイトル | PR | base 作成時 | マージ | 主要成果物 |
 |---|---|---|---|---|---|
-| 0 | jobs/scheduler 棚卸しと baseline | [#216](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/216) | main | 2026-05-16 | `adk_run_ledger_phase_0_棚卸し.md` |
-| 1 | AgentRun / AgentRunStep / StrategyDraft schema | [#217](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/217) | main | 2026-05-16 | Prisma 3 model + 4 enum + migration + 11 smoke test |
-| 2 | RunLedgerService | [#218](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/218) | main | 2026-05-16 | Service + Repository + redaction + 35 test |
-| 3 | JobPort / JobResultEnvelope | [#219](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/219) | main | 2026-05-16 | JobPort interface + adapter helper + 2 adapter (cleanup / discovery) + 14 test |
-| 4 | StrategyDraftService | [#220](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/220) | main | 2026-05-16 | Service + Repository + Zod + TOCTOU + 26 test |
-| 5 | RunLedgerTraceSink | [#221](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/221) | main | 2026-05-16 | ADK trace → RunLedger adapter + failure isolation + 8 test |
-| 6 | ADK Orchestrator Wrapper | [#222](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/222) | main | (chain) | Golden Path 実装 + 11 test |
-| 7 | SideBScheduler 接続 | [#223](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/223) | main | (chain) | feature flag bridge + Scheduler.runOrchestratedCycleNow() + 6 test |
-| 8 | Run / Draft API | [#224](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/224) | main | (chain) | Controller + Routes + 10 test |
-| 9 | 統合テスト / 失敗系 / 回帰 | [#225](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/225) | main | (chain) | e2e 7 test + `GET /runs` 実装 |
-| 10 | Docs / Runbook | (本 PR) | main | (chain) | 本 Summary + `ADK_ADOPTION.md` §7 更新 |
+| 0 | jobs/scheduler 棚卸しと baseline | [#216](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/216) | `main` | 2026-05-16 | `adk_run_ledger_phase_0_棚卸し.md` |
+| 1 | AgentRun / AgentRunStep / StrategyDraft schema | [#217](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/217) | `main` | 2026-05-16 | Prisma 3 model + 4 enum + migration + 11 smoke test |
+| 2 | RunLedgerService | [#218](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/218) | `main` | 2026-05-16 | Service + Repository + redaction + 35 test |
+| 3 | JobPort / JobResultEnvelope | [#219](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/219) | `feature/orch-phase-2-run-ledger-service` → `main` | 2026-05-16 | JobPort interface + adapter helper + 2 adapter (cleanup / discovery) + 14 test |
+| 4 | StrategyDraftService | [#220](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/220) | `feature/orch-phase-3-job-port` → `main` | 2026-05-16 | Service + Repository + Zod + TOCTOU + 26 test |
+| 5 | RunLedgerTraceSink | [#221](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/221) | `feature/orch-phase-4-strategy-draft` → `main` | 2026-05-16 | ADK trace → RunLedger adapter + failure isolation + 8 test |
+| 6 | ADK Orchestrator Wrapper | [#222](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/222) | `feature/orch-phase-5-trace-sink` → `main` | (待ち) | Golden Path 実装 + 11 test |
+| 7 | SideBScheduler 接続 | [#223](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/223) | `feature/orch-phase-6-orchestrator` | (待ち) | feature flag bridge + Scheduler.runOrchestratedCycleNow() + 6 test |
+| 8 | Run / Draft API | [#224](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/224) | `feature/orch-phase-7-scheduler` | (待ち) | Controller + Routes + 10 test |
+| 9 | 統合テスト / 失敗系 / 回帰 | [#225](https://github.com/NekoyaJolly/Trader-Note-Build-Ai/pull/225) | `feature/orch-phase-8-api` | (待ち) | e2e 7 test + `GET /runs` 実装 |
+| 10 | Docs / Runbook | (本 PR) | `feature/orch-phase-9-integration` | (待ち) | 本 Summary + `ADK_ADOPTION.md` §7 更新 |
 
-(chain) = base が前 Phase のため、Phase 0-5 マージ後に再帰的に main 向けに切り替わる予定。
+**base 列の読み方**: Phase 0-5 は最初から `main` を base に作成。Phase 3-5 はマージ時点では既に main 同期済 (上位 PR が先にマージされた)。Phase 6-10 は前 Phase ブランチを base にした **chained PR**。Phase 6 がマージされると GitHub が自動で Phase 7 の base を main へ切替、これが Phase 10 まで再帰的に伝播する。
 
 ### Copilot レビュー対応総数
 
@@ -151,24 +151,50 @@
 
 ## 4. Golden Path 実行例
 
+> **注意**: 本 WBS 完了時点で `runSideBOrchestratedCycle()` が受ける `jobs` は
+> `readiness` / `plan` / `monitor` / `evolution` / `validation` の 5 key。下の例で
+> 渡している adapter は本 PR シーケンスで実装した 2 個 (`cleanup` / `discovery`) と
+> は別系統で、これらは Golden Path の 5 step には現状直接マッピングされない (= 引継ぎ §8
+> 参照)。下記は **5 step すべてに JobPort を wire した想定** の最小完全例。
+
 ```ts
 import { runScheduledOrchestratedCycle } from './src/side-b/jobs/sideBSchedulerOrchestratorBridge';
-import { createCleanupJobAdapter } from './src/side-b/jobs/adapters/cleanupJobAdapter';
-import { createDiscoveryJobAdapter } from './src/side-b/jobs/adapters/discoveryJobAdapter';
+import type { JobPort } from './src/side-b/jobs/jobPort';
+import { runJobWithLedger } from './src/side-b/jobs/jobLedgerAdapter';
 
 // feature flag (env で制御)
 process.env.SIDE_B_ADK_ORCHESTRATOR_ENABLED = 'true';
 
+// 例: 既存 Job を wrap した JobPort を 5 step 分用意 (実装は別 PR 想定)
+const readinessAdapter: JobPort = {
+  stepName: 'readiness',
+  execute: (ctx) => runJobWithLedger(ctx, {
+    stepName: 'readiness',
+    invoke: async () => ({ ready: true }),
+    mapResult: () => ({ ok: true, status: 'succeeded', summary: 'ready', nextAction: 'proceed' }),
+  }),
+};
+// plan / monitor / evolution / validation も同パターンで作成
+declare const planAdapter: JobPort;
+declare const monitorAdapter: JobPort;
+declare const evolutionAdapter: JobPort;
+declare const validationAdapter: JobPort;
+
 const result = await runScheduledOrchestratedCycle({
   jobs: {
-    // readiness / plan / monitor / evolution / validation は将来 adapter 追加
-    // 本 Phase 3 では 2 adapter のみ実装、残り 6 adapter は Phase 6+ で順次追加可能
+    readiness: readinessAdapter,
+    plan: planAdapter,
+    monitor: monitorAdapter,
+    evolution: evolutionAdapter,
+    validation: validationAdapter,
   },
   orchestratorOptions: {
     idempotencyKey: `side-b-${new Date().toISOString().slice(0, 13)}`, // 1 時間ごとに別 cycle
     extractCandidates: async (evolutionEnvelope, ctx) => {
       // Evolution が返す envelope から候補を抽出する関数
-      return []; // candidates
+      return [
+        { candidateHash: 'sha256:example', strategySummary: 'EMA crossover H1' },
+      ];
     },
     autoQueueApprovedDrafts: false, // 保守的なデフォルト
   },
@@ -181,9 +207,27 @@ if (result.kind === 'executed') {
 }
 ```
 
+**最小 dry-run**: `jobs: {}` を渡せば全 step が `job not wired` で skip され、Draft も
+作らずに run が `succeeded` で終わる。配線確認や CI のスモークに利用できる。
+
 ---
 
 ## 5. 運用 Runbook
+
+### 5.0 前提: Router マウント
+
+本 WBS の Phase 8 で実装した `createOrchestratorRouter()` は **本 PR シーケンスでは
+`app.ts` / `sideBRoutes.ts` に未マウント**。下の curl コマンドが 404 を返す場合は、
+以下を `src/side-b/routes/sideBRoutes.ts` または `src/app.ts` に追加してから利用する:
+
+```ts
+import { createOrchestratorRouter } from './routes/orchestratorRoutes';
+// sideBRoutes が src/app.ts で /api/side-b にマウントされている場合:
+router.use('/orchestrator', createOrchestratorRouter());
+```
+
+マウント先は組織のルーティング規約に合わせて調整する。下の curl は
+`/api/side-b/orchestrator/...` にマウントした想定。
 
 ### 5.1 失敗 run の調査
 
@@ -241,22 +285,48 @@ env 変更だけで即時切り替わる。Scheduler / 既存 Job / cron 経路�
 
 ### 6.1 全面撤退 (ADK 採用断念)
 
-`/src/side-b/adk/` を `git rm -rf` した時点で:
-- `adk/agents/sideBOrchestrator.ts` 消滅 → Bridge から呼べなくなる
-- `adk/tracing/runLedgerTraceSink.ts` 消滅 → trace 連携が消える
-- **既存 Job / PDCALoop / Lens / Evolution は無変更なので壊れない**
-- `RunLedgerService` / `StrategyDraftService` / `Repository` / `Controller` / `Router` は ADK 非依存なのでそのまま残せる
-- `Bridge` (`sideBSchedulerOrchestratorBridge.ts`) は Orchestrator を呼ぶため import エラーになる → Bridge も削除 or `runScheduledOrchestratedCycle` を no-op に書き換え
+削除対象:
+- `src/side-b/adk/` 配下すべて (Orchestrator / TraceSink / 既存 Step 1-4 の adapter/tracing/agents 全て)
+- `src/side-b/tests/adk/` 配下すべて (ADK モジュールを import しているため、残すと tsc + test が壊れる)
+- `src/side-b/jobs/sideBSchedulerOrchestratorBridge.ts` と関連 test
+- `src/side-b/jobs/sideBScheduler.ts` の `runOrchestratedCycleNow` メソッド + Bridge import 行
+- `package.json` / `package-lock.json` から `@google/adk`
+
+非削除 (ADK 非依存なので残せる):
+- `src/side-b/services/runLedgerService.ts` / `runLedgerRedaction.ts`
+- `src/side-b/services/strategyDraftService.ts`
+- `src/side-b/repositories/runLedgerRepository.ts` / `strategyDraftRepository.ts`
+- `src/side-b/controllers/orchestratorController.ts`
+- `src/side-b/routes/orchestratorRoutes.ts`
+- `src/side-b/jobs/jobPort.ts` / `jobLedgerAdapter.ts` / `adapters/`
+- `prisma/schema.prisma` の 3 model + 4 enum + migration
+- 既存 Job / PDCALoop / Lens / Evolution / EdgeLedger / PromptRegistry (本 WBS では未変更)
 
 実行手順:
 
 ```bash
+# 1. ADK サイドカー本体 + テストを削除
 git rm -rf src/side-b/adk/
+git rm -rf src/side-b/tests/adk/
+
+# 2. Bridge と関連テストを削除
 git rm src/side-b/jobs/sideBSchedulerOrchestratorBridge.ts
 git rm src/side-b/tests/orchestrator/sideBSchedulerOrchestratorBridge.test.ts
-# Scheduler.ts から runOrchestratedCycleNow + import を削除
-# Bridge を使う他テストも削除 or skip
+
+# 3. Scheduler.ts から下記 2 箇所を手動削除
+#    - Bridge import 行 (`import { runScheduledOrchestratedCycle, ... } from './sideBSchedulerOrchestratorBridge'`)
+#    - `runOrchestratedCycleNow()` メソッド本体
+#    既存 cron / start / stop / runEvolutionNow 等の旧経路は触らない
+
+# 4. npm 依存を外す (package.json + package-lock.json)
 npm uninstall @google/adk
+# .npmrc の `legacy-peer-deps=true` も追加していた場合は削除を検討
+
+# 5. 検証
+npx tsc --noEmit       # 0 errors になることを確認
+npm test               # adk/ 削除で参照が残る test がないことを確認
+
+# 6. ADK_ADOPTION.md §7 / adk_run_ledger_summary.md §0 に「撤退完了 (YYYY-MM-DD)」を追記
 ```
 
 ### 6.2 部分撤退 (Orchestrator だけ削除、台帳は残す)
@@ -288,7 +358,7 @@ npm uninstall @google/adk
 | 主要失敗系がテストされている | ✅ (Phase 9 e2e 7 + 各 Phase で約 200 cases) |
 | 二重実行 / 未承認投入 / raw payload 保存が防がれている | ✅ (Phase 2 idempotency、Phase 4 Zod + state、Phase 5 redaction、test で網羅) |
 | 既存 Side-B 中核の不可侵領域が守られている | ✅ (全 Phase で `src/side-b/jobs/*Job.ts`, `src/side-b/agent/`, `src/side-b/lenses/`, `src/side-b/evolution/`, `src/side-b/ledger/` の git diff ゼロ) |
-| ADK を外しても既存実装が壊れない | ✅ (撤退手順 §6.1 で `src/side-b/adk/` 削除のみで完結) |
+| ADK を外しても既存実装が壊れない | ✅ (撤退手順 §6.1: `src/side-b/adk/` + `src/side-b/tests/adk/` + Bridge + Scheduler 新メソッド + `@google/adk` を順次削除すれば既存 Job / PDCALoop / Lens / Evolution は無傷) |
 
 ---
 
@@ -298,9 +368,13 @@ WBS スコープ外として残った項目 (本サマリーから別 PR / 別 P
 
 | 項目 | 関連 Phase | 備考 |
 |---|---|---|
-| 残り 6 Job adapter (monitor / plan / screening / full-validation / evolution / prompt-evolution) | Phase 3 | 同じ `runJobWithLedger` パターンで追加可能、Phase 6 の Wrapper と一緒に wire 推奨 |
+| Golden Path 5 step (readiness / plan / monitor / evolution / validation) の Job adapter wire | Phase 3 + Phase 6 | 同じ `runJobWithLedger` パターンで追加可能。`SideBOrchestratorJobs` interface は既にこの 5 key を受ける形 |
+| Phase 3 で実装した cleanup / discovery adapter の Golden Path 組み込み | Phase 3 + Phase 6 | 現状 `SideBOrchestratorJobs` の 5 step に該当しない。Wrapper に新 step を追加 (interface 拡張) するか、`runOrchestratedCycleNow` の前後に Bridge から個別呼出する形を選択 |
+| 残り 4 既存 Job (screening / full-validation / prompt-evolution / cleanup) の Wrapper への組込判断 | Phase 3 + Phase 6 | これらは Golden Path の 5 step とは別軸。`Wrapper` に新 step を増やすか、cron で並走させ続けるかをユーザーが判断 |
 | Run / Draft 最小 UI | Phase 8 | frontend 側で別 PR |
 | 操作権限 (認証 / 認可) | Phase 8 | 現状無認証、別 PR |
+| `createOrchestratorRouter()` の Express アプリへのマウント | Phase 8 | 本 PR シーケンスでは Router 作成のみ。`sideBRoutes.ts` または `app.ts` でマウントするまで API は 404 (Runbook §5.0) |
+| `RunLedgerService.listByStatus` 以外の検索 (期間 / kind フィルタ等) | Phase 9 | UI 要件次第で追加 |
 | WBS §1.1 `nextAction` の `continue` → `proceed` 同期 | Phase 1 で実装上の判断 | WBS 本文も `proceed` に揃えれば完全一致 |
 
 ---
