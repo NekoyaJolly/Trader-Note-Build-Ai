@@ -63,6 +63,12 @@ import { PlanGenerationJob } from './planGenerationJob';
 import { DiscoveryJob } from './discoveryJob';
 import { PromptEvolutionJob } from './promptEvolutionJob';
 import { CleanupJob } from './cleanupJob';
+// Phase 7 (orch): ADK Orchestrator Wrapper bridge
+import {
+  runScheduledOrchestratedCycle,
+  type BridgeOptions,
+  type BridgeResult,
+} from './sideBSchedulerOrchestratorBridge';
 
 // ===========================================
 // 型定義
@@ -594,6 +600,23 @@ export class SideBScheduler {
    */
   async runMonitorNow(): Promise<JobResult> {
     return this.executeMonitorJob();
+  }
+
+  /**
+   * ADK Orchestrator Wrapper 経由で 1 サイクル実行する (Phase 7 で追加)。
+   *
+   * feature flag (env `SIDE_B_ADK_ORCHESTRATOR_ENABLED`) が ON の場合のみ動作し、
+   * OFF の場合は何もせず `{ kind: 'disabled' }` を返す (= 旧経路は cron で並走)。
+   *
+   * 既存の `runDailyPlanNow` / `runMonitorNow` / `runEvolutionNow` 等の旧経路は
+   * 一切変更しない (本メソッドは新規 entry point のみ)。
+   *
+   * 設計書: docs/architecture/adk_run_ledger_strategy_draft_完全版wbs.md §12 (Phase 7.3)
+   */
+  async runOrchestratedCycleNow(
+    options?: BridgeOptions,
+  ): Promise<BridgeResult> {
+    return runScheduledOrchestratedCycle(options ?? {});
   }
 
   // ===========================================
