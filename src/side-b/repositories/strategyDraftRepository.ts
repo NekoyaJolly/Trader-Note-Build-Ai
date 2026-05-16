@@ -88,6 +88,37 @@ export function createStrategyDraftRepository(client: DraftPrisma = defaultPrism
     },
 
     /**
+     * 期待 status との一致を条件付きで更新する (TOCTOU 解消)。
+     * 並行操作で先に他の遷移が完了した場合 count=0 を返し、Service 側で
+     * StrategyDraftStateError に変換される設計。
+     *
+     * 戻り値: 更新後の Draft (一致した場合) または null (期待 status と
+     * 一致せず更新されなかった場合)。
+     */
+    async updateDraftIfStatus(
+      draftId: string,
+      expectedStatus: StrategyDraftStatus,
+      patch: {
+        status?: StrategyDraftStatus;
+        approvalReason?: string | null;
+        rejectionReason?: string | null;
+        archiveReason?: string | null;
+        reviewer?: string | null;
+        validatedAt?: Date | null;
+        validationResultId?: string | null;
+      },
+    ): Promise<StrategyDraft | null> {
+      const updateResult = await client.strategyDraft.updateMany({
+        where: { id: draftId, status: expectedStatus },
+        data: patch,
+      });
+      if (updateResult.count !== 1) {
+        return null;
+      }
+      return client.strategyDraft.findUnique({ where: { id: draftId } });
+    },
+
+    /**
      * status 別の Draft 一覧 (UI / 調査用)。新しい順。
      */
     async listByStatus(

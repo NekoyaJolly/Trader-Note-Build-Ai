@@ -9,6 +9,8 @@
  *   - candidateHash で重複排除 (dedupeDraft)
  *   - 承認 / 却下 / Validation 投入 / Validated / Archive の lifecycle 遷移
  *   - WBS §1.3 の状態遷移ルールを強制
+ *   - 入力境界での Zod ランタイム検証 (PR #220 Copilot review #4 対応)
+ *   - TOCTOU 解消のための DB 条件付き更新 (PR #220 Copilot review #5/6 対応)
  *   - redaction (raw payload を保存しない)
  *
  * 持たない責務:
@@ -19,6 +21,7 @@
  * 設計書: docs/architecture/adk_run_ledger_strategy_draft_完全版wbs.md §9 (Phase 4)
  */
 
+import { z } from 'zod';
 import type { StrategyDraft, StrategyDraftStatus } from '@prisma/client';
 import {
   createStrategyDraftRepository,
@@ -51,6 +54,22 @@ export function canTransitionDraft(
   return DRAFT_TRANSITIONS[from].includes(to);
 }
 
+/**
+ * 期待 status の集合 (canTransition で「to」へ遷移可能な「from」状態すべて) を返す純関数。
+ * 条件付き更新で「現在 status が想定範囲内」を確認するのに使う。
+ */
+function statesAllowedToTransitionTo(
+  to: StrategyDraftStatus,
+): ReadonlyArray<StrategyDraftStatus> {
+  const allowed: StrategyDraftStatus[] = [];
+  for (const from of Object.keys(DRAFT_TRANSITIONS) as StrategyDraftStatus[]) {
+    if (canTransitionDraft(from, to)) {
+      allowed.push(from);
+    }
+  }
+  return allowed;
+}
+
 /** Draft 状態遷移違反 / 不正操作のエラー */
 export class StrategyDraftStateError extends Error {
   constructor(message: string) {
@@ -59,28 +78,32 @@ export class StrategyDraftStateError extends Error {
   }
 }
 
-/**
- * Evolution 候補。Service の入力境界で受ける形。
- * candidateHash は呼び出し側が DSL から決定論的に算出する想定 (例: sha256(dsl-canonical))。
- */
-export interface EvolutionCandidateInput {
-  /** 候補の同一性ハッシュ (sha256 hex 等) */
-  candidateHash: string;
-  /** 戦略の人間語要約 (redaction 済み) */
-  strategySummary: string;
-  /** リスクの人間語要約 (redaction 済み、任意) */
-  riskSummary?: string | null;
-}
+// ============================================================
+// 入力境界 Zod schema (PR #220 Copilot review #4 対応)
+// ============================================================
 
 /**
- * Draft 生成時のコンテキスト (どの run / step から派生したか)。
+ * Service の入力境界で受ける Zod schema 群。type interface ではなく schema を
+ * 一次定義として持ち、`z.infer` で型を派生させる (AGENTS.md §3.5)。
  */
-export interface EvolutionCandidateContext {
-  /** 生成元 AgentRun.id */
-  sourceRunId: string;
-  /** 生成元 AgentRunStep.id (= AgentRunStep.runId と一致する必要あり、DB 複合 FK で強制) */
-  sourceStepId: string;
-}
+export const EvolutionCandidateInputSchema = z.object({
+  /** 候補の同一性ハッシュ。短すぎ / 長すぎを弾く (sha256 hex 64 文字を含む幅) */
+  candidateHash: z.string().min(8).max(256),
+  /** 戦略の人間語要約 (空白のみ / 空文字は拒否) */
+  strategySummary: z.string().min(1),
+  /** リスク要約 (任意) */
+  riskSummary: z.string().nullish(),
+});
+export type EvolutionCandidateInput = z.infer<typeof EvolutionCandidateInputSchema>;
+
+export const EvolutionCandidateContextSchema = z.object({
+  sourceRunId: z.string().uuid(),
+  sourceStepId: z.string().uuid(),
+});
+export type EvolutionCandidateContext = z.infer<typeof EvolutionCandidateContextSchema>;
+
+const NonEmptyReasonSchema = z.string().trim().min(1, '理由 (reason) は空文字 / 空白のみ不可');
+const ReviewerSchema = z.string().trim().min(1, 'reviewer は空文字 / 空白のみ不可').max(128);
 
 /** createFromEvolutionCandidate の戻り値 */
 export type CreateDraftResult =
@@ -101,62 +124,86 @@ export function createStrategyDraftService(options?: {
   /**
    * Evolution 候補から Draft を作る。
    *
-   * candidateHash が既に存在する場合は新規作成せず、`kind: 'duplicate'` と既存 Draft を返す。
-   * 並行呼び出しによる unique 違反 (race) にも対応: createDraft 失敗時に再検索する。
+   * 入力は EvolutionCandidateInputSchema / ContextSchema で safeParse される。
+   * candidateHash が既に存在する場合は新規作成せず、`kind: 'duplicate'` を返す。
+   * 並行呼び出しによる unique 違反は createDraft 試行直前に絞った try/catch で
+   * 再検索する (P2002 等のみを拾い、入力エラーは漏れない設計)。
    */
   async function createFromEvolutionCandidate(
-    candidate: EvolutionCandidateInput,
-    context: EvolutionCandidateContext,
+    rawCandidate: EvolutionCandidateInput,
+    rawContext: EvolutionCandidateContext,
   ): Promise<CreateDraftResult> {
+    const candidate = EvolutionCandidateInputSchema.parse(rawCandidate);
+    const context = EvolutionCandidateContextSchema.parse(rawContext);
+
     const existing = await repository.findByCandidateHash(candidate.candidateHash);
     if (existing) {
       return { kind: 'duplicate', existing };
     }
 
+    const summary = redactSummary(candidate.strategySummary);
+    if (summary === null) {
+      // Zod の min(1) で空文字は弾くが、redaction 後に null になるケース (全角空白 + trim 等) も拒否。
+      throw new StrategyDraftStateError(
+        'strategySummary の redaction 結果が null (空文字 / 空白のみ不可)',
+      );
+    }
+    const riskSummary = redactSummary(candidate.riskSummary ?? null);
+
+    // race 安全のため、createDraft の呼び出しのみを try/catch で囲む。
+    // requireSummary / redaction の入力エラーは catch の対象外で、原因がそのまま伝播する。
     try {
       const draft = await repository.createDraft({
         sourceRunId: context.sourceRunId,
         sourceStepId: context.sourceStepId,
         candidateHash: candidate.candidateHash,
-        strategySummary: requireSummary(candidate.strategySummary),
-        riskSummary: redactSummary(candidate.riskSummary ?? null),
+        strategySummary: summary,
+        riskSummary,
       });
       return { kind: 'created', draft };
-    } catch (rawError) {
-      // race 対応: createDraft が unique 違反した場合、再検索して existing を返す。
+    } catch (createError) {
+      // catch 直後で同一 hash 再検索。並行作成された Draft が見つかれば duplicate 扱い。
+      // 見つからなければ createError をそのまま再 throw (Prisma 接続エラー等の本物の DB 障害)。
       const raced = await repository.findByCandidateHash(candidate.candidateHash);
       if (raced) {
         return { kind: 'duplicate', existing: raced };
       }
-      throw rawError;
+      throw createError;
     }
   }
 
   /** Draft を承認状態に遷移させる */
   async function approveDraft(
     draftId: string,
-    reviewer: string,
+    rawReviewer: string,
     reason?: string,
   ): Promise<StrategyDraft> {
-    await mustTransition(draftId, 'approved');
-    return repository.updateDraft(draftId, {
+    const reviewer = ReviewerSchema.parse(rawReviewer);
+    return transitionWithCondition(draftId, 'approved', {
       status: 'approved',
       reviewer,
       approvalReason: redactSummary(reason ?? null),
     });
   }
 
-  /** Draft を却下状態に遷移させる (理由必須) */
+  /**
+   * Draft を却下状態に遷移させる。理由 (reason) は必須・空文字不可。
+   */
   async function rejectDraft(
     draftId: string,
-    reviewer: string,
-    reason: string,
+    rawReviewer: string,
+    rawReason: string,
   ): Promise<StrategyDraft> {
-    await mustTransition(draftId, 'rejected');
-    return repository.updateDraft(draftId, {
+    const reviewer = ReviewerSchema.parse(rawReviewer);
+    const reason = NonEmptyReasonSchema.parse(rawReason);
+    const redactedReason = redactErrorMessage(reason);
+    if (redactedReason === null) {
+      throw new StrategyDraftStateError('rejection reason の redaction 結果が null');
+    }
+    return transitionWithCondition(draftId, 'rejected', {
       status: 'rejected',
       reviewer,
-      rejectionReason: redactErrorMessage(reason),
+      rejectionReason: redactedReason,
     });
   }
 
@@ -165,8 +212,7 @@ export function createStrategyDraftService(options?: {
    * 状態遷移: approved → queued_for_validation
    */
   async function queueForValidation(draftId: string): Promise<StrategyDraft> {
-    await mustTransition(draftId, 'queued_for_validation');
-    return repository.updateDraft(draftId, {
+    return transitionWithCondition(draftId, 'queued_for_validation', {
       status: 'queued_for_validation',
     });
   }
@@ -179,8 +225,7 @@ export function createStrategyDraftService(options?: {
     draftId: string,
     validationResultId?: string,
   ): Promise<StrategyDraft> {
-    await mustTransition(draftId, 'validated');
-    return repository.updateDraft(draftId, {
+    return transitionWithCondition(draftId, 'validated', {
       status: 'validated',
       validatedAt: clock(),
       validationResultId: validationResultId ?? null,
@@ -188,17 +233,21 @@ export function createStrategyDraftService(options?: {
   }
 
   /**
-   * Draft を archive する。任意の非終端 / 終端状態から遷移可 (rejected / validated 等の整理用)。
+   * Draft を archive する。理由 (reason) は必須・空文字不可。
    * 状態遷移マップ上は archived から戻れない (終端)。
    */
   async function archiveDraft(
     draftId: string,
-    reason: string,
+    rawReason: string,
   ): Promise<StrategyDraft> {
-    await mustTransition(draftId, 'archived');
-    return repository.updateDraft(draftId, {
+    const reason = NonEmptyReasonSchema.parse(rawReason);
+    const redactedReason = redactSummary(reason);
+    if (redactedReason === null) {
+      throw new StrategyDraftStateError('archive reason の redaction 結果が null');
+    }
+    return transitionWithCondition(draftId, 'archived', {
       status: 'archived',
-      archiveReason: redactSummary(reason),
+      archiveReason: redactedReason,
     });
   }
 
@@ -217,34 +266,39 @@ export function createStrategyDraftService(options?: {
 
   // ----- internal helpers -----
 
-  async function mustTransition(
+  /**
+   * TOCTOU 安全な状態遷移。
+   *
+   * 「to へ遷移可能な from 状態」の集合を計算し、その中の各候補で updateDraftIfStatus
+   * を呼ぶ。一致したものがあればそれが更新後 Draft、なければ「現在 status が遷移不可」
+   * として StrategyDraftStateError を throw する。
+   *
+   * Prisma の updateMany({ where: { id, status: expectedStatus } }) で count=1 を
+   * 確認することで、並行操作による上書きを構造的に防ぐ (Copilot review #5/6 対応)。
+   */
+  async function transitionWithCondition(
     draftId: string,
     to: StrategyDraftStatus,
+    patch: Parameters<StrategyDraftRepository['updateDraftIfStatus']>[2],
   ): Promise<StrategyDraft> {
+    const allowedFroms = statesAllowedToTransitionTo(to);
+    if (allowedFroms.length === 0) {
+      throw new StrategyDraftStateError(`to=${to} は遷移先として未定義`);
+    }
+
+    for (const from of allowedFroms) {
+      const updated = await repository.updateDraftIfStatus(draftId, from, patch);
+      if (updated) return updated;
+    }
+
+    // どの from でも一致しなかった: 存在しない / 終端 / 並行操作で別状態に遷移済み。
     const current = await repository.findById(draftId);
     if (!current) {
       throw new StrategyDraftStateError(`StrategyDraft(id=${draftId}) が存在しない`);
     }
-    if (!canTransitionDraft(current.status, to)) {
-      throw new StrategyDraftStateError(
-        `不正な Draft 状態遷移: ${current.status} -> ${to} (draftId=${draftId})`,
-      );
-    }
-    return current;
-  }
-
-  function requireSummary(summary: string): string {
-    const trimmed = summary.trim();
-    if (trimmed === '') {
-      throw new StrategyDraftStateError(
-        'strategySummary は必須 (空文字 / 空白のみは許可されない)',
-      );
-    }
-    const redacted = redactSummary(trimmed);
-    if (redacted === null) {
-      throw new StrategyDraftStateError('strategySummary の redaction 結果が null');
-    }
-    return redacted;
+    throw new StrategyDraftStateError(
+      `不正な Draft 状態遷移: ${current.status} -> ${to} (draftId=${draftId})`,
+    );
   }
 
   return {

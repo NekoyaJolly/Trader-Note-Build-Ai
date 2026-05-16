@@ -80,6 +80,19 @@ function createInMemoryRepository(now: () => Date = () => new Date()): {
       return updated;
     },
 
+    async updateDraftIfStatus(draftId, expectedStatus, patch) {
+      const existing = store.drafts.get(draftId);
+      if (!existing) return null;
+      if (existing.status !== expectedStatus) return null;
+      const updated: StrategyDraft = {
+        ...existing,
+        ...patch,
+        updatedAt: now(),
+      };
+      store.drafts.set(draftId, updated);
+      return updated;
+    },
+
     async listByStatus(status, limit = 50) {
       return [...store.drafts.values()]
         .filter((d) => d.status === status)
@@ -149,13 +162,13 @@ describe('createFromEvolutionCandidate', () => {
         strategySummary: 'EMA cross H1',
         riskSummary: 'drawdown 5%',
       },
-      { sourceRunId: 'run-1', sourceStepId: 'step-1' },
+      { sourceRunId: '00000000-0000-4000-8000-000000000100', sourceStepId: '00000000-0000-4000-8000-000000000200' },
     );
     expect(result.kind).toBe('created');
     if (result.kind === 'created') {
       expect(result.draft.status).toBe<StrategyDraftStatus>('draft');
-      expect(result.draft.sourceRunId).toBe('run-1');
-      expect(result.draft.sourceStepId).toBe('step-1');
+      expect(result.draft.sourceRunId).toBe('00000000-0000-4000-8000-000000000100');
+      expect(result.draft.sourceStepId).toBe('00000000-0000-4000-8000-000000000200');
       expect(result.draft.strategySummary).toBe('EMA cross H1');
       expect(result.draft.riskSummary).toBe('drawdown 5%');
     }
@@ -166,11 +179,11 @@ describe('createFromEvolutionCandidate', () => {
     const service = createStrategyDraftService({ repository });
     const first = await service.createFromEvolutionCandidate(
       { candidateHash: 'sha256:def', strategySummary: 'RSI' },
-      { sourceRunId: 'run-1', sourceStepId: 'step-1' },
+      { sourceRunId: '00000000-0000-4000-8000-000000000301', sourceStepId: '00000000-0000-4000-8000-000000000401' },
     );
     const second = await service.createFromEvolutionCandidate(
       { candidateHash: 'sha256:def', strategySummary: 'RSI (duplicate)' },
-      { sourceRunId: 'run-2', sourceStepId: 'step-2' },
+      { sourceRunId: '00000000-0000-4000-8000-000000000302', sourceStepId: '00000000-0000-4000-8000-000000000402' },
     );
     expect(first.kind).toBe('created');
     expect(second.kind).toBe('duplicate');
@@ -185,8 +198,8 @@ describe('createFromEvolutionCandidate', () => {
     const service = createStrategyDraftService({ repository });
     await expect(
       service.createFromEvolutionCandidate(
-        { candidateHash: 'h1', strategySummary: '   ' },
-        { sourceRunId: 'r', sourceStepId: 's' },
+        { candidateHash: 'sha256:h1-empty', strategySummary: '   ' },
+        { sourceRunId: '00000000-0000-4000-8000-000000000010', sourceStepId: '00000000-0000-4000-8000-000000000020' },
       ),
     ).rejects.toBeInstanceOf(StrategyDraftStateError);
   });
@@ -195,8 +208,8 @@ describe('createFromEvolutionCandidate', () => {
     const { repository, store } = createInMemoryRepository();
     const service = createStrategyDraftService({ repository });
     const result = await service.createFromEvolutionCandidate(
-      { candidateHash: 'h2', strategySummary: 'a'.repeat(2000) },
-      { sourceRunId: 'r', sourceStepId: 's' },
+      { candidateHash: 'sha256:h2-long', strategySummary: 'a'.repeat(2000) },
+      { sourceRunId: '00000000-0000-4000-8000-000000000010', sourceStepId: '00000000-0000-4000-8000-000000000020' },
     );
     expect(result.kind).toBe('created');
     if (result.kind === 'created') {
@@ -218,8 +231,8 @@ describe('lifecycle transitions', () => {
     const { repository } = createInMemoryRepository(clock);
     const service = createStrategyDraftService({ repository, clock });
     const created = await service.createFromEvolutionCandidate(
-      { candidateHash: 'h', strategySummary: 'S' },
-      { sourceRunId: 'r', sourceStepId: 's' },
+      { candidateHash: 'sha256:h-default', strategySummary: 'S' },
+      { sourceRunId: '00000000-0000-4000-8000-000000000010', sourceStepId: '00000000-0000-4000-8000-000000000020' },
     );
     if (created.kind !== 'created') throw new Error('expected created');
     const draftId = created.draft.id;
@@ -243,8 +256,8 @@ describe('lifecycle transitions', () => {
     const { repository } = createInMemoryRepository();
     const service = createStrategyDraftService({ repository });
     const created = await service.createFromEvolutionCandidate(
-      { candidateHash: 'h', strategySummary: 'S' },
-      { sourceRunId: 'r', sourceStepId: 's' },
+      { candidateHash: 'sha256:h-default', strategySummary: 'S' },
+      { sourceRunId: '00000000-0000-4000-8000-000000000010', sourceStepId: '00000000-0000-4000-8000-000000000020' },
     );
     if (created.kind !== 'created') throw new Error('expected created');
     await service.rejectDraft(created.draft.id, 'neko', 'PF too low');
@@ -257,8 +270,8 @@ describe('lifecycle transitions', () => {
     const { repository } = createInMemoryRepository();
     const service = createStrategyDraftService({ repository });
     const created = await service.createFromEvolutionCandidate(
-      { candidateHash: 'h', strategySummary: 'S' },
-      { sourceRunId: 'r', sourceStepId: 's' },
+      { candidateHash: 'sha256:h-default', strategySummary: 'S' },
+      { sourceRunId: '00000000-0000-4000-8000-000000000010', sourceStepId: '00000000-0000-4000-8000-000000000020' },
     );
     if (created.kind !== 'created') throw new Error('expected created');
     await expect(
@@ -270,8 +283,8 @@ describe('lifecycle transitions', () => {
     const { repository } = createInMemoryRepository();
     const service = createStrategyDraftService({ repository });
     const created = await service.createFromEvolutionCandidate(
-      { candidateHash: 'h', strategySummary: 'S' },
-      { sourceRunId: 'r', sourceStepId: 's' },
+      { candidateHash: 'sha256:h-default', strategySummary: 'S' },
+      { sourceRunId: '00000000-0000-4000-8000-000000000010', sourceStepId: '00000000-0000-4000-8000-000000000020' },
     );
     if (created.kind !== 'created') throw new Error('expected created');
     await service.approveDraft(created.draft.id, 'neko');
@@ -284,8 +297,8 @@ describe('lifecycle transitions', () => {
     const { repository } = createInMemoryRepository();
     const service = createStrategyDraftService({ repository });
     const created = await service.createFromEvolutionCandidate(
-      { candidateHash: 'h', strategySummary: 'S' },
-      { sourceRunId: 'r', sourceStepId: 's' },
+      { candidateHash: 'sha256:h-default', strategySummary: 'S' },
+      { sourceRunId: '00000000-0000-4000-8000-000000000010', sourceStepId: '00000000-0000-4000-8000-000000000020' },
     );
     if (created.kind !== 'created') throw new Error('expected created');
     await service.approveDraft(created.draft.id, 'neko');
@@ -299,8 +312,8 @@ describe('lifecycle transitions', () => {
     const { repository } = createInMemoryRepository();
     const service = createStrategyDraftService({ repository });
     const created = await service.createFromEvolutionCandidate(
-      { candidateHash: 'h', strategySummary: 'S' },
-      { sourceRunId: 'r', sourceStepId: 's' },
+      { candidateHash: 'sha256:h-default', strategySummary: 'S' },
+      { sourceRunId: '00000000-0000-4000-8000-000000000010', sourceStepId: '00000000-0000-4000-8000-000000000020' },
     );
     if (created.kind !== 'created') throw new Error('expected created');
     await service.rejectDraft(created.draft.id, 'neko', 'r');
@@ -313,8 +326,8 @@ describe('lifecycle transitions', () => {
     const { repository } = createInMemoryRepository();
     const service = createStrategyDraftService({ repository });
     const created = await service.createFromEvolutionCandidate(
-      { candidateHash: 'h', strategySummary: 'S' },
-      { sourceRunId: 'r', sourceStepId: 's' },
+      { candidateHash: 'sha256:h-default', strategySummary: 'S' },
+      { sourceRunId: '00000000-0000-4000-8000-000000000010', sourceStepId: '00000000-0000-4000-8000-000000000020' },
     );
     if (created.kind !== 'created') throw new Error('expected created');
     await service.archiveDraft(created.draft.id, 'cleanup');
@@ -343,32 +356,126 @@ describe('listByStatus / findById', () => {
     const { repository } = createInMemoryRepository(clock);
     const service = createStrategyDraftService({ repository, clock });
     await service.createFromEvolutionCandidate(
-      { candidateHash: 'a', strategySummary: 'A' },
-      { sourceRunId: 'r', sourceStepId: 's' },
+      { candidateHash: 'sha256:list-a', strategySummary: 'A' },
+      { sourceRunId: '00000000-0000-4000-8000-000000000010', sourceStepId: '00000000-0000-4000-8000-000000000020' },
     );
     t = 2000;
     await service.createFromEvolutionCandidate(
-      { candidateHash: 'b', strategySummary: 'B' },
-      { sourceRunId: 'r', sourceStepId: 's' },
+      { candidateHash: 'sha256:list-b', strategySummary: 'B' },
+      { sourceRunId: '00000000-0000-4000-8000-000000000010', sourceStepId: '00000000-0000-4000-8000-000000000020' },
     );
     t = 3000;
     await service.createFromEvolutionCandidate(
-      { candidateHash: 'c', strategySummary: 'C' },
-      { sourceRunId: 'r', sourceStepId: 's' },
+      { candidateHash: 'sha256:list-c', strategySummary: 'C' },
+      { sourceRunId: '00000000-0000-4000-8000-000000000010', sourceStepId: '00000000-0000-4000-8000-000000000020' },
     );
     const drafts = await service.listByStatus('draft');
-    expect(drafts.map((d) => d.candidateHash)).toEqual(['c', 'b', 'a']);
+    expect(drafts.map((d) => d.candidateHash)).toEqual(['sha256:list-c', 'sha256:list-b', 'sha256:list-a']);
   });
 
   it('findById で取得できる', async () => {
     const { repository } = createInMemoryRepository();
     const service = createStrategyDraftService({ repository });
     const created = await service.createFromEvolutionCandidate(
-      { candidateHash: 'h', strategySummary: 'S' },
-      { sourceRunId: 'r', sourceStepId: 's' },
+      { candidateHash: 'sha256:h-default', strategySummary: 'S' },
+      { sourceRunId: '00000000-0000-4000-8000-000000000010', sourceStepId: '00000000-0000-4000-8000-000000000020' },
     );
     if (created.kind !== 'created') throw new Error('expected created');
     const fetched = await service.findById(created.draft.id);
     expect(fetched?.id).toBe(created.draft.id);
+  });
+});
+
+// ============================================================
+// PR #220 Copilot review #1/#2/#7 対応: reason 必須 (空文字 / 空白拒否)
+// ============================================================
+
+describe('reason 必須強制 (Copilot review #1/#2/#7)', () => {
+  async function makeDraft() {
+    const { repository } = createInMemoryRepository();
+    const service = createStrategyDraftService({ repository });
+    const created = await service.createFromEvolutionCandidate(
+      { candidateHash: 'sha256:h-default', strategySummary: 'S' },
+      { sourceRunId: '00000000-0000-4000-8000-000000000010', sourceStepId: '00000000-0000-4000-8000-000000000020' },
+    );
+    if (created.kind !== 'created') throw new Error('expected created');
+    return { service, draftId: created.draft.id };
+  }
+
+  it('rejectDraft: 空文字の reason は throw する', async () => {
+    const { service, draftId } = await makeDraft();
+    await expect(service.rejectDraft(draftId, 'neko', '')).rejects.toThrow();
+  });
+
+  it('rejectDraft: 空白のみの reason は throw する', async () => {
+    const { service, draftId } = await makeDraft();
+    await expect(service.rejectDraft(draftId, 'neko', '   ')).rejects.toThrow();
+  });
+
+  it('archiveDraft: 空文字の reason は throw する', async () => {
+    const { service, draftId } = await makeDraft();
+    await expect(service.archiveDraft(draftId, '')).rejects.toThrow();
+  });
+
+  it('approveDraft: 空文字の reviewer は throw する', async () => {
+    const { service, draftId } = await makeDraft();
+    await expect(service.approveDraft(draftId, '   ')).rejects.toThrow();
+  });
+});
+
+// ============================================================
+// PR #220 Copilot review #4 対応: Zod 入力検証
+// ============================================================
+
+describe('Zod 入力検証 (Copilot review #4)', () => {
+  it('candidateHash が短すぎると ZodError', async () => {
+    const { repository } = createInMemoryRepository();
+    const service = createStrategyDraftService({ repository });
+    await expect(
+      service.createFromEvolutionCandidate(
+        { candidateHash: 'short', strategySummary: 'S' },
+        { sourceRunId: '00000000-0000-4000-8000-000000000010', sourceStepId: '00000000-0000-4000-8000-000000000020' },
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('sourceRunId が UUID 形式でないと ZodError', async () => {
+    const { repository } = createInMemoryRepository();
+    const service = createStrategyDraftService({ repository });
+    await expect(
+      service.createFromEvolutionCandidate(
+        { candidateHash: 'sha256:valid-hash', strategySummary: 'S' },
+        { sourceRunId: 'not-uuid', sourceStepId: '00000000-0000-4000-8000-000000000020' },
+      ),
+    ).rejects.toThrow();
+  });
+});
+
+// ============================================================
+// PR #220 Copilot review #5/#6 対応: TOCTOU 解消
+// ============================================================
+
+describe('TOCTOU 解消 (Copilot review #5/#6)', () => {
+  it('同一 draft を draft → approved と draft → rejected で並行遷移しても、1 つだけ成功する', async () => {
+    const { repository } = createInMemoryRepository();
+    const service = createStrategyDraftService({ repository });
+    const created = await service.createFromEvolutionCandidate(
+      { candidateHash: 'sha256:race-test', strategySummary: 'S' },
+      { sourceRunId: '00000000-0000-4000-8000-000000000010', sourceStepId: '00000000-0000-4000-8000-000000000020' },
+    );
+    if (created.kind !== 'created') throw new Error('expected created');
+
+    // 同時に approve と reject を投げる
+    const results = await Promise.allSettled([
+      service.approveDraft(created.draft.id, 'neko'),
+      service.rejectDraft(created.draft.id, 'neko', 'PF too low'),
+    ]);
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(fulfilled.length).toBe(1);
+    expect(rejected.length).toBe(1);
+    // 最終 status は approved か rejected のどちらか (両方ではない)
+    const final = await service.findById(created.draft.id);
+    expect(['approved', 'rejected']).toContain(final?.status);
   });
 });
