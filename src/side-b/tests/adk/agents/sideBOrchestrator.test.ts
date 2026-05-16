@@ -401,5 +401,109 @@ describe('runSideBOrchestratedCycle', () => {
     expect(second.idempotentReuse).toBe(true);
     expect(second.run.id).toBe(first.run.id);
     expect(second.stepEnvelopes).toHaveLength(0);
+    // Copilot review #4 対応: idempotent reuse 時の finalStatus は null (透過)
+    expect(second.finalStatus).toBeNull();
+  });
+
+  // ============================================================
+  // Copilot review #1 対応: skip された step も RunLedger に記録される
+  // ============================================================
+
+  it('Copilot #1: skip された step も startStep + skipStep として RunLedger に記録される', async () => {
+    const ledger = createRunLedgerService({ repository: createInMemoryLedgerRepo() });
+    const draftService = createStrategyDraftService({ repository: createInMemoryDraftRepo() });
+
+    // すべての job 未配線 → 全 step skip → 全 skip が ledger に記録されるはず
+    const result = await runSideBOrchestratedCycle({
+      ledger, draftService, jobs: {},
+    });
+    const detail = await ledger.findRunWithSteps(result.run.id);
+    expect(detail).not.toBeNull();
+    // readiness / plan / monitor / evolution / draft / validation-queue / validation の 7 step
+    const stepNames = detail?.steps.map((s) => s.stepName) ?? [];
+    expect(stepNames).toContain('readiness');
+    expect(stepNames).toContain('plan');
+    expect(stepNames).toContain('validation');
+    expect(stepNames).toContain('validation-queue');
+    // すべて status=skipped
+    const skippedCount = detail?.steps.filter((s) => s.status === 'skipped').length ?? 0;
+    expect(skippedCount).toBeGreaterThanOrEqual(7);
+  });
+
+  // ============================================================
+  // Copilot review #2 対応: shouldStop が skip 理由として優先される
+  // ============================================================
+
+  it('Copilot #2: shouldStop が autoQueueApprovedDrafts=false の理由を上書きする', async () => {
+    const ledger = createRunLedgerService({ repository: createInMemoryLedgerRepo() });
+    const draftService = createStrategyDraftService({ repository: createInMemoryDraftRepo() });
+    const jobs: SideBOrchestratorJobs = {
+      readiness: mockJob('readiness', { ok: false, status: 'failed', summary: null, errorCode: 'E', errorMessage: 'x', nextAction: 'stop' }, ledger),
+    };
+    const result = await runSideBOrchestratedCycle({
+      ledger, draftService, jobs,
+      autoQueueApprovedDrafts: false,
+    });
+    const queueEnv = result.stepEnvelopes.find((e) => e.stepName === 'validation-queue');
+    expect(queueEnv && 'kind' in queueEnv).toBe(true);
+    if (queueEnv && 'kind' in queueEnv && queueEnv.kind === 'skipped') {
+      expect(queueEnv.reason).toBe('previous step requested stop');
+    }
+  });
+
+  // ============================================================
+  // Copilot review #3 対応: Draft step に batchSize の cap がかかる
+  // ============================================================
+
+  it('Copilot #3: draftBatchSize で Draft step の候補数が cap される', async () => {
+    const ledger = createRunLedgerService({ repository: createInMemoryLedgerRepo() });
+    const draftService = createStrategyDraftService({ repository: createInMemoryDraftRepo() });
+    const jobs: SideBOrchestratorJobs = {
+      evolution: mockJob('evolution', { ok: true, status: 'succeeded', summary: null, nextAction: 'proceed' }, ledger),
+    };
+    const extractCandidates: ExtractEvolutionCandidatesFn = async () =>
+      Array.from({ length: 25 }, (_, i) => ({
+        candidateHash: `sha256:cap-${i}`,
+        strategySummary: `cand-${i}`,
+      }));
+    const result = await runSideBOrchestratedCycle({
+      ledger, draftService, jobs, extractCandidates,
+      draftBatchSize: 5,
+    });
+    expect(result.drafts).toHaveLength(5);
+    const draftEnv = result.stepEnvelopes.find((e) => e.stepName === 'draft');
+    if (draftEnv && 'summary' in draftEnv) {
+      expect(draftEnv.summary).toContain('candidates=5');
+      expect(draftEnv.summary).toContain('truncatedFrom=25');
+    }
+  });
+
+  // ============================================================
+  // Copilot review #6 対応: Draft step の partial failure summary
+  // ============================================================
+
+  it('Copilot #6: Draft step が途中で throw した場合 summary に partial 進捗が残る', async () => {
+    const ledger = createRunLedgerService({ repository: createInMemoryLedgerRepo() });
+    const draftService = createStrategyDraftService({ repository: createInMemoryDraftRepo() });
+    const jobs: SideBOrchestratorJobs = {
+      evolution: mockJob('evolution', { ok: true, status: 'succeeded', summary: null, nextAction: 'proceed' }, ledger),
+    };
+    // 3 候補返し、2 番目で意図的に throw する extractCandidates ではなく、
+    // 候補は正常に返すが draftService がモック throw する場合をシミュレート: 候補 hash を invalid にする
+    const extractCandidates: ExtractEvolutionCandidatesFn = async () => [
+      { candidateHash: 'sha256:partial-1', strategySummary: 'A' },
+      { candidateHash: 'bad', strategySummary: 'B' }, // Zod min(8) で reject
+      { candidateHash: 'sha256:partial-3', strategySummary: 'C' },
+    ];
+    const result = await runSideBOrchestratedCycle({
+      ledger, draftService, jobs, extractCandidates,
+    });
+    const draftEnv = result.stepEnvelopes.find((e) => e.stepName === 'draft');
+    if (draftEnv && 'status' in draftEnv) {
+      expect(draftEnv.status).toBe('failed');
+      expect(draftEnv.summary).toContain('candidates=3');
+      expect(draftEnv.summary).toContain('created=1');
+      expect(draftEnv.summary).toContain('failedAt=1');
+    }
   });
 });

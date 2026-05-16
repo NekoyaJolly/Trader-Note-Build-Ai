@@ -8,6 +8,7 @@
  * 責務:
  *   - RunLedgerService.startRun() で run を作る
  *   - 順序通り JobPort.execute() を呼び、nextAction で分岐 (stop / skip / retry / manual_review)
+ *   - skip された step も RunLedger に startStep + skipStep を残す (observability 確保)
  *   - Evolution 候補があれば StrategyDraftService.createFromEvolutionCandidate() を呼ぶ
  *   - 承認済み Draft (autoQueueApprovedDrafts=true 時) を queueForValidation する
  *   - Validation Job を JobPort 経由で呼ぶ (queue にある Draft 件数だけ)
@@ -39,12 +40,6 @@ import {
 
 /**
  * Golden Path で呼ぶ Job 群。すべて optional: 未指定の step は skip される。
- *
- * - readiness: 実行可否チェック (失敗で stop)
- * - plan: プラン生成
- * - monitor: 約定検証 / トレード監視
- * - evolution: 進化ループ実行 (候補を返す)
- * - validation: Validation Job (queued_for_validation の Draft を回す)
  */
 export interface SideBOrchestratorJobs {
   readonly readiness?: JobPort;
@@ -56,11 +51,6 @@ export interface SideBOrchestratorJobs {
 
 /**
  * Evolution の戻り envelope から候補リストを抽出する関数。
- *
- * 既存 EvolutionJob の戻り値 (`EvolutionJobResult`) には DSL の hash や summary が
- * 直接含まれていないため、呼び出し側が「Evolution の生成物 (population repository 等)
- * から取り出す」適切な実装を渡す。本 PR では interface だけ用意し、実 adapter は
- * Phase 7 / 後続で wire する。
  */
 export type ExtractEvolutionCandidatesFn = (
   evolutionEnvelope: JobResultEnvelope,
@@ -71,42 +61,35 @@ export type ExtractEvolutionCandidatesFn = (
  * Orchestrator の起動オプション。
  */
 export interface SideBOrchestratorOptions {
-  /** 必須: RunLedgerService */
   readonly ledger: RunLedgerService;
-  /** 必須: StrategyDraftService */
   readonly draftService: StrategyDraftService;
-  /** Golden Path 各 step の Job (未指定 step は skip) */
   readonly jobs: SideBOrchestratorJobs;
-  /** 実行種別 (デフォルト 'side_b_cycle') */
   readonly kind?: string;
-  /** 起動元 (デフォルト 'adk') */
   readonly triggeredBy?: string;
-  /** 冪等性キー (同一値で重複起動を防ぐ) */
   readonly idempotencyKey?: string;
-  /** Evolution → Draft 抽出関数 (省略時は Draft step を skip) */
   readonly extractCandidates?: ExtractEvolutionCandidatesFn;
-  /**
-   * 自動で approved Draft を queue へ流すか (デフォルト false)。
-   * 「動いたから本番へ流そう」事故を避けるため保守的なデフォルト (WBS §3 末尾)。
-   */
   readonly autoQueueApprovedDrafts?: boolean;
-  /** Draft step / Validation step の上限 (1 run あたり処理する Draft 数、デフォルト 10) */
+  /**
+   * 1 run で処理する Draft 数の上限。Draft step / Validation queue step の **両方** に適用される。
+   * - Draft step: extractCandidates 戻り値の先頭から batchSize 件のみ処理
+   * - Validation queue step: listByStatus('approved', batchSize) で取得した Draft を queueForValidation
+   * デフォルト 10。極端に多い候補による DB 圧迫を防ぐ。
+   */
   readonly draftBatchSize?: number;
 }
 
 /**
  * Orchestrator 実行結果。
+ *
+ * `finalStatus` は新規実行時のみ `TerminalRunStatus` を持ち、idempotency reuse 時は
+ * `null` を返す (= 既存 run の状態を加工せず透過。誤検知防止)。`idempotentReuse=true`
+ * のとき呼び出し側は `run.status` を見て自身で判断する。
  */
 export interface SideBOrchestratorResult {
-  /** 作成された AgentRun (idempotency 重複で既存 run を再利用した場合も含む) */
   readonly run: AgentRun;
-  /** 各 step の envelope (skip も含む)。順序は実行順 */
   readonly stepEnvelopes: ReadonlyArray<JobResultEnvelope | OrchestratorSkipEnvelope>;
-  /** 作成された Draft (新規 + duplicate)。Draft step を skip した場合は空 */
   readonly drafts: ReadonlyArray<StrategyDraft>;
-  /** run の終了状態 */
-  readonly finalStatus: TerminalRunStatus;
-  /** 冪等性で既存 run が再利用された場合 true */
+  readonly finalStatus: TerminalRunStatus | null;
   readonly idempotentReuse: boolean;
 }
 
@@ -131,14 +114,17 @@ const VALIDATION_QUEUE_STEP_NAME = 'validation-queue';
  *
  * 失敗分岐 (WBS §6.8):
  *   - nextAction='stop' → 後続 step をすべて skip、finishRun(failed)
- *   - nextAction='skip' → その step を skip 記録、後続継続
+ *   - nextAction='skip' → Orchestrator は no-op として透過 (= proceed と同等の挙動)。
+ *     Job 自身が status=skipped を RunLedger に記録する想定。Orchestrator の loop には
+ *     skip 専用の分岐を入れない (将来 metrics が必要になったら追加)。
  *   - nextAction='retry' → 本 Orchestrator では retry しない (上位呼び出し側で再起動の判断)
  *   - nextAction='manual_review' → step を残し、後続 step を skip、finishRun(failed)
  *   - nextAction='proceed' → 通常通り次 step
  *
  * 冪等性 (WBS §2.4):
  *   - idempotencyKey 指定時、既存 run があれば `RunLedgerDuplicateRunError` を catch し、
- *     既存 run を再利用 (`idempotentReuse=true`)
+ *     既存 run を再利用 (`idempotentReuse=true`)。`finalStatus` は `null` で返す
+ *     (= 既存 run の状態を加工せず透過、呼び出し側は run.status を参照)。
  */
 export async function runSideBOrchestratedCycle(
   options: SideBOrchestratorOptions,
@@ -159,12 +145,13 @@ export async function runSideBOrchestratedCycle(
     if (err instanceof RunLedgerDuplicateRunError) {
       run = err.existingRun;
       idempotentReuse = true;
-      // 既存 run の場合は早期 return: ADK Orchestrator は cycle を二重実行しない
+      // 既存 run の場合は早期 return: cycle を二重実行しない。
+      // finalStatus は null で透過 (Copilot review #4 対応: failed 誤判定の回避)。
       return {
         run,
         stepEnvelopes: [],
         drafts: [],
-        finalStatus: terminalStatusOf(run),
+        finalStatus: null,
         idempotentReuse,
       };
     }
@@ -187,11 +174,15 @@ export async function runSideBOrchestratedCycle(
   let evolutionEnvelope: JobResultEnvelope | null = null;
   for (const step of steps) {
     if (shouldStop) {
-      stepEnvelopes.push(skipEnvelope(step.name, 'previous step requested stop'));
+      stepEnvelopes.push(
+        await recordSkipAsStep(ctx, step.name, 'previous step requested stop'),
+      );
       continue;
     }
     if (!step.job) {
-      stepEnvelopes.push(skipEnvelope(step.name, 'job not wired'));
+      stepEnvelopes.push(
+        await recordSkipAsStep(ctx, step.name, 'job not wired'),
+      );
       continue;
     }
     const env = await step.job.execute(ctx);
@@ -212,15 +203,20 @@ export async function runSideBOrchestratedCycle(
       options.extractCandidates,
       draftService,
       drafts,
+      batchSize,
     );
     stepEnvelopes.push(draftEnvelope);
     if (draftEnvelope.nextAction === 'stop' || draftEnvelope.nextAction === 'manual_review') {
       shouldStop = true;
     }
   } else {
-    stepEnvelopes.push(skipEnvelope(DRAFT_STEP_NAME,
-      !evolutionEnvelope ? 'no evolution candidate' : 'extractCandidates not provided',
-    ));
+    // 理由文は shouldStop を最優先 (Copilot review #2 対応)
+    const reason = shouldStop
+      ? 'previous step requested stop'
+      : !evolutionEnvelope
+        ? 'no evolution candidate'
+        : 'extractCandidates not provided';
+    stepEnvelopes.push(await recordSkipAsStep(ctx, DRAFT_STEP_NAME, reason));
   }
 
   // ----- Validation queue step (自動 queue が有効な場合のみ) -----
@@ -231,9 +227,11 @@ export async function runSideBOrchestratedCycle(
       shouldStop = true;
     }
   } else {
-    stepEnvelopes.push(skipEnvelope(VALIDATION_QUEUE_STEP_NAME,
-      options.autoQueueApprovedDrafts ? 'previous step requested stop' : 'autoQueueApprovedDrafts disabled',
-    ));
+    // shouldStop を最優先 (Copilot review #2 対応)
+    const reason = shouldStop
+      ? 'previous step requested stop'
+      : 'autoQueueApprovedDrafts disabled';
+    stepEnvelopes.push(await recordSkipAsStep(ctx, VALIDATION_QUEUE_STEP_NAME, reason));
   }
 
   // ----- Validation Job step -----
@@ -244,9 +242,11 @@ export async function runSideBOrchestratedCycle(
       shouldStop = true;
     }
   } else {
-    stepEnvelopes.push(skipEnvelope('validation',
-      !jobs.validation ? 'validation job not wired' : 'previous step requested stop',
-    ));
+    // shouldStop を最優先 (Copilot review #2 対応)
+    const reason = shouldStop
+      ? 'previous step requested stop'
+      : 'validation job not wired';
+    stepEnvelopes.push(await recordSkipAsStep(ctx, 'validation', reason));
   }
 
   // ----- run finish -----
@@ -269,23 +269,26 @@ export async function runSideBOrchestratedCycle(
 // internal helpers
 // ============================================================
 
-function skipEnvelope(stepName: string, reason: string): OrchestratorSkipEnvelope {
+/**
+ * skip された step を RunLedger にも記録する (Copilot review #1 対応)。
+ * startStep → skipStep を呼び、in-memory envelope と同じ stepName / reason を残す。
+ * Ledger 側エラーは catch せず伝播 (Orchestrator 本体の整合性を優先)。
+ */
+async function recordSkipAsStep(
+  ctx: { runId: string; ledger: RunLedgerService },
+  stepName: string,
+  reason: string,
+): Promise<OrchestratorSkipEnvelope> {
+  await ctx.ledger.startStep(ctx.runId, { stepName, traceKind: 'orchestrator' });
+  await ctx.ledger.skipStep(ctx.runId, stepName, { reason, nextAction: 'proceed' });
   return { kind: 'skipped', stepName, reason };
-}
-
-function terminalStatusOf(run: AgentRun): TerminalRunStatus {
-  const status = run.status;
-  if (status === 'succeeded' || status === 'failed' || status === 'skipped' || status === 'cancelled') {
-    return status;
-  }
-  // 進行中の run を再利用した場合は failed 扱い (cycle 二重起動を上位に通知)
-  return 'failed';
 }
 
 /**
  * Evolution 候補を抽出し Draft 化する step。
- * 各 candidate を `createFromEvolutionCandidate` に流し、新規 / 重複の両方を `drafts` に push する。
- * 1 candidate でも throw した場合は failed envelope を返す。
+ * - candidates.slice(0, batchSize) で Draft step にも cap を適用 (Copilot review #3 対応)
+ * - 候補ループの途中で throw した場合、failed envelope の summary に partial 進捗を含める
+ *   (Copilot review #6 対応): `candidates=N, created=K, duplicate=D, failedAt=index`
  */
 async function runDraftStep(
   ctx: { runId: string; ledger: RunLedgerService },
@@ -293,21 +296,31 @@ async function runDraftStep(
   extractCandidates: ExtractEvolutionCandidatesFn,
   draftService: StrategyDraftService,
   draftsOut: StrategyDraft[],
+  batchSize: number,
 ): Promise<JobResultEnvelope> {
   const { ledger, runId } = ctx;
   const stepName = DRAFT_STEP_NAME;
   await ledger.startStep(runId, { stepName, traceKind: 'orchestrator' });
 
+  let processedIndex = -1;
+  let created = 0;
+  let duplicate = 0;
+  let totalCandidates = 0;
+
   try {
     const evolutionStepId = await findLatestStepId(ledger, runId, 'evolution');
-    const candidates = await extractCandidates(evolutionEnvelope, {
+    const rawCandidates = await extractCandidates(evolutionEnvelope, {
       runId,
       stepId: evolutionStepId,
     });
+    // batchSize 上限を適用 (Copilot review #3)
+    const candidates = rawCandidates.slice(0, batchSize);
+    totalCandidates = candidates.length;
 
-    let created = 0;
-    let duplicate = 0;
-    for (const candidate of candidates) {
+    for (let i = 0; i < candidates.length; i += 1) {
+      processedIndex = i;
+      const candidate = candidates[i];
+      if (!candidate) continue;
       const result = await draftService.createFromEvolutionCandidate(candidate, {
         sourceRunId: runId,
         sourceStepId: evolutionStepId,
@@ -317,7 +330,15 @@ async function runDraftStep(
       else duplicate += 1;
     }
 
-    const summary = `candidates=${candidates.length}, created=${created}, duplicate=${duplicate}`;
+    const summaryParts = [
+      `candidates=${totalCandidates}`,
+      `created=${created}`,
+      `duplicate=${duplicate}`,
+    ];
+    if (rawCandidates.length > totalCandidates) {
+      summaryParts.push(`truncatedFrom=${rawCandidates.length}`);
+    }
+    const summary = summaryParts.join(', ');
     await ledger.succeedStep(runId, stepName, { summary, nextAction: 'proceed' });
     return {
       ok: true,
@@ -328,16 +349,23 @@ async function runDraftStep(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown draft step error';
+    const partialSummary = [
+      `candidates=${totalCandidates}`,
+      `created=${created}`,
+      `duplicate=${duplicate}`,
+      `failedAt=${processedIndex}`,
+    ].join(', ');
     await ledger.failStep(runId, stepName, {
       errorCode: 'DRAFT_STEP_FAILED',
       errorMessage: message,
+      summary: partialSummary,
       nextAction: 'stop',
     });
     return {
       ok: false,
       status: 'failed',
       stepName,
-      summary: null,
+      summary: partialSummary,
       errorCode: 'DRAFT_STEP_FAILED',
       errorMessage: message,
       nextAction: 'stop',
@@ -347,6 +375,7 @@ async function runDraftStep(
 
 /**
  * approved Draft を queue へ流す step (autoQueueApprovedDrafts=true 時のみ呼ばれる)。
+ * batchSize で 1 run の処理件数を制限。
  */
 async function runValidationQueueStep(
   ctx: { runId: string; ledger: RunLedgerService },
@@ -394,8 +423,6 @@ async function runValidationQueueStep(
 
 /**
  * RunLedger の findRunWithSteps から最新の指定 step ID を取得する。
- * Draft step の sourceStepId として渡す。見つからない場合は throw (step が存在しないのは
- * Orchestrator の設計違反)。
  */
 async function findLatestStepId(
   ledger: RunLedgerService,
@@ -408,7 +435,6 @@ async function findLatestStepId(
   if (matching.length === 0) {
     throw new Error(`step not found in run: ${stepName} (runId=${runId})`);
   }
-  // 最新 attempt を採用
   matching.sort((a, b) => b.attempt - a.attempt);
   const latest = matching[0];
   if (!latest) {
