@@ -304,16 +304,16 @@ describe('finishRun', () => {
     expect(finished.summary).toBe('all green');
   });
 
-  it('終端状態以外の status を渡すと RunLedgerStateError', async () => {
+  it('FinishRunInput.status は TerminalRunStatus に narrow されており、'
+    + ' pending / running はコンパイル時に排除される', async () => {
     const { repository } = createInMemoryRepository();
     const service = createRunLedgerService({ repository });
     const run = await service.startRun({ kind: 'side_b_cycle', triggeredBy: 'scheduler' });
-    await expect(
-      service.finishRun(run.id, { status: 'running' }),
-    ).rejects.toBeInstanceOf(RunLedgerStateError);
-    await expect(
-      service.finishRun(run.id, { status: 'pending' }),
-    ).rejects.toBeInstanceOf(RunLedgerStateError);
+
+    // @ts-expect-error -- 型レベルで終端 status のみ受けるため running は不可 (Copilot review #2 対応で導入)
+    await expect(service.finishRun(run.id, { status: 'running' })).rejects.toBeDefined();
+    // @ts-expect-error -- 型レベルで終端 status のみ受けるため pending は不可 (Copilot review #2 対応で導入)
+    await expect(service.finishRun(run.id, { status: 'pending' })).rejects.toBeDefined();
   });
 
   it('存在しない runId は RunLedgerStateError', async () => {

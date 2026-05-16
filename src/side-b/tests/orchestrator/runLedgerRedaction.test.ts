@@ -1,8 +1,9 @@
 /**
  * runLedgerRedaction helper の単体 test。
  *
- * 目的: summary / errorMessage / errorCode の長さ制限と
- *   raw payload を summary 文字列化する際の sensitive key マスキングを検証する。
+ * 目的: summary / errorMessage / errorCode の長さ制限を境界値で検証する
+ *   (summary / errorMessage は ... 付きで切り詰め、errorCode は完全一致比較を
+ *   保つため ... を付けず単純切り捨て)。null / 空文字は null に正規化される。
  *
  * 設計書: docs/architecture/adk_run_ledger_strategy_draft_完全版wbs.md §7 / §17
  */

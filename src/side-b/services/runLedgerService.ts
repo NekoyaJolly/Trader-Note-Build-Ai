@@ -94,20 +94,30 @@ export class RunLedgerDuplicateRunError extends Error {
 // Service API
 // ============================================================
 
+/** finishRun が受け付ける終端状態 (pending / running は不可) */
+export type TerminalRunStatus = Extract<
+  AgentRunStatus,
+  'succeeded' | 'failed' | 'skipped' | 'cancelled'
+>;
+
 export interface StartRunInput {
   /** 実行種別 (例: side_b_cycle, manual, dry_run) */
   kind: string;
   /** 起動元 (例: scheduler, manual, test, adk) */
   triggeredBy: string;
-  /** 冪等性キー (同一値で startRun が再度呼ばれた場合は既存 run を返す) */
+  /**
+   * 冪等性キー。同一値で startRun が再度呼ばれた場合は
+   * `RunLedgerDuplicateRunError` を throw する (`error.existingRun` で既存 run を expose)。
+   * 呼び出し側は catch して既存 run を再利用するか / そのままエラーとして扱うかを選ぶ。
+   */
   idempotencyKey?: string;
   /** 開始時 summary (redaction 済み) */
   summary?: string | null;
 }
 
 export interface FinishRunInput {
-  /** 終了状態 (succeeded / failed / cancelled / skipped のいずれか) */
-  status: AgentRunStatus;
+  /** 終了状態 (終端 status のみ。コンパイル時に pending / running を排除) */
+  status: TerminalRunStatus;
   /** 完了時 summary (redaction 済み) */
   summary?: string | null;
   /** 失敗時の短縮エラーコード */
@@ -155,8 +165,8 @@ export type StartStepResult =
 /**
  * RunLedgerService factory.
  *
- * @param repo Repository (省略時は default Prisma)
- * @param clock 現在時刻 (test 用に injectable、省略時は `Date.now()`)
+ * @param options.repository Repository (省略時は default Prisma に接続した本物)
+ * @param options.clock 現在時刻を返す関数 (test 用に injectable、省略時は `() => new Date()`)
  */
 export function createRunLedgerService(options?: {
   repository?: RunLedgerRepository;
@@ -168,8 +178,10 @@ export function createRunLedgerService(options?: {
   /**
    * 新規 AgentRun を開始する。
    *
-   * idempotencyKey が指定されており既存 run があれば `RunLedgerDuplicateRunError` を throw する。
-   * 呼び出し側は catch して既存 run を再利用するか、エラーとして扱うかを選ぶ。
+   * idempotencyKey が指定されており既存 run があれば `RunLedgerDuplicateRunError`
+   * を throw する (`error.existingRun` で既存 run を expose)。
+   * 並行呼び出しによる race 条件にも対応する: 事前検索で見落としても、
+   * createRun の DB unique 制約違反を catch して再検索 → 同じ error に変換する。
    */
   async function startRun(input: StartRunInput): Promise<AgentRun> {
     if (input.idempotencyKey) {
@@ -179,27 +191,36 @@ export function createRunLedgerService(options?: {
       }
     }
 
-    return repository.createRun({
-      kind: input.kind,
-      triggeredBy: input.triggeredBy,
-      status: 'running',
-      summary: redactSummary(input.summary ?? null),
-      idempotencyKey: input.idempotencyKey ?? null,
-    });
+    try {
+      return await repository.createRun({
+        kind: input.kind,
+        triggeredBy: input.triggeredBy,
+        status: 'running',
+        summary: redactSummary(input.summary ?? null),
+        idempotencyKey: input.idempotencyKey ?? null,
+      });
+    } catch (rawError) {
+      // 並行 startRun で別呼び出しが先に作っていた場合に備えて、
+      // idempotencyKey 経由で再検索し、見つかれば DuplicateRunError に変換する。
+      // catch 変数の型は TypeScript default の unknown 推論に任せる (型注釈は付けない)。
+      if (input.idempotencyKey) {
+        const racedExisting = await repository.findRunByIdempotencyKey(input.idempotencyKey);
+        if (racedExisting) {
+          throw new RunLedgerDuplicateRunError(racedExisting);
+        }
+      }
+      throw rawError;
+    }
   }
 
   /**
-   * 既存 run を終端状態に遷移させる。`succeeded` / `failed` / `cancelled` / `skipped` のみ受け付ける。
-   * `pending` / `running` への遷移を試みると `RunLedgerStateError` を throw する。
+   * 既存 run を終端状態に遷移させる。受け付けるのは終端 status のみ
+   * (`succeeded` / `failed` / `skipped` / `cancelled`)。コンパイル時に
+   * `FinishRunInput.status` の型で `pending` / `running` を排除している。
+   * 加えて、現状の run.status から遷移できない場合 (例: 既に終端、または
+   * pending から succeeded への飛び越し) は `RunLedgerStateError` を throw する。
    */
   async function finishRun(runId: string, input: FinishRunInput): Promise<AgentRun> {
-    const terminal: ReadonlyArray<AgentRunStatus> = ['succeeded', 'failed', 'skipped', 'cancelled'];
-    if (!terminal.includes(input.status)) {
-      throw new RunLedgerStateError(
-        `finishRun の status は終端状態のみ許可される (受信: ${input.status})`,
-      );
-    }
-
     const current = await repository.findRunById(runId);
     if (!current) {
       throw new RunLedgerStateError(`AgentRun(id=${runId}) が存在しない`);
@@ -271,7 +292,8 @@ export function createRunLedgerService(options?: {
   }
 
   /**
-   * step を成功で閉じる。`pending` / `running` 以外から `succeeded` 遷移は拒否される。
+   * step を成功で閉じる。`running` から `succeeded` への遷移のみ許可される
+   * (`pending` から直接 `succeeded` への飛び越しは状態遷移マップ上で拒否)。
    * durationMs は startedAt と現在時刻から自動計算する。
    */
   async function succeedStep(
@@ -291,7 +313,8 @@ export function createRunLedgerService(options?: {
   }
 
   /**
-   * step を失敗で閉じる。`pending` / `running` から `failed` 遷移のみ許可。
+   * step を失敗で閉じる。`running` から `failed` への遷移のみ許可される
+   * (`pending` から直接 `failed` への飛び越しは状態遷移マップ上で拒否)。
    */
   async function failStep(
     runId: string,
@@ -312,7 +335,8 @@ export function createRunLedgerService(options?: {
   }
 
   /**
-   * step を skip 扱いで閉じる。`pending` / `running` から `skipped` 遷移のみ許可。
+   * step を skip 扱いで閉じる。`pending` / `running` の両方から
+   * `skipped` 遷移が許可される (状態遷移マップに従う)。
    * skip 理由は summary に redaction 済みで保存される。
    */
   async function skipStep(
