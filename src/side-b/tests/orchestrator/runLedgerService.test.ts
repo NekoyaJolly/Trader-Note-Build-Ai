@@ -166,6 +166,13 @@ function createInMemoryRepository(now: () => Date = () => new Date()): {
         });
       return { ...run, steps };
     },
+
+    async listRunsByStatus(status, limit = 50) {
+      return [...store.runs.values()]
+        .filter((r) => r.status === status)
+        .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())
+        .slice(0, limit);
+    },
   };
 
   return { repository, store };

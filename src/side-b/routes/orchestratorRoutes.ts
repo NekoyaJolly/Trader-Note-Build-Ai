@@ -58,6 +58,7 @@ export function createOrchestratorRouter(
   const controller = createOrchestratorController({ ledger, draftService });
   const router = Router();
 
+  router.get('/runs', (req, res) => { void controller.listRuns(req, res); });
   router.get('/runs/:id', (req, res) => { void controller.getRunWithSteps(req, res); });
   router.get('/drafts', (req, res) => { void controller.listDrafts(req, res); });
   router.get('/drafts/:id', (req, res) => { void controller.getDraft(req, res); });
