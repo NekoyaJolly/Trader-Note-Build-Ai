@@ -129,6 +129,12 @@ function createInMemoryLedgerRepo(now: () => Date = () => new Date()): RunLedger
         });
       return { ...run, steps: stepList };
     },
+    async listRunsByStatus(status, limit = 50) {
+      return [...runs.values()]
+        .filter((r) => r.status === status)
+        .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())
+        .slice(0, limit);
+    },
   };
 }
 

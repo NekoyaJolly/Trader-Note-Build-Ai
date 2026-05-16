@@ -362,6 +362,16 @@ export function createRunLedgerService(options?: {
     return repository.findRunWithSteps(runId);
   }
 
+  /**
+   * status 別の AgentRun 一覧 (UI / API 用、Phase 9 で追加)。新しい順、limit 上限あり。
+   */
+  async function listRunsByStatus(
+    status: AgentRunStatus,
+    limit?: number,
+  ): Promise<AgentRun[]> {
+    return repository.listRunsByStatus(status, limit);
+  }
+
   // ----- internal helpers -----
 
   async function mustGetActiveStep(runId: string, stepName: string): Promise<AgentRunStep> {
@@ -392,6 +402,7 @@ export function createRunLedgerService(options?: {
     failStep,
     skipStep,
     findRunWithSteps,
+    listRunsByStatus,
   };
 }
 

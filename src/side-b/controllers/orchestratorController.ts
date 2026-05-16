@@ -22,6 +22,15 @@ import {
 export const RunIdParamSchema = z.object({ id: z.string().uuid() });
 export const DraftIdParamSchema = z.object({ id: z.string().uuid() });
 
+export const RunStatusSchema = z.enum([
+  'pending', 'running', 'succeeded', 'failed', 'skipped', 'cancelled',
+]);
+
+export const RunListQuerySchema = z.object({
+  status: RunStatusSchema,
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+
 export const DraftStatusSchema = z.enum([
   'draft', 'approved', 'rejected', 'queued_for_validation', 'validated', 'archived',
 ]);
@@ -58,6 +67,20 @@ export function createOrchestratorController(deps: OrchestratorControllerDeps) {
   const { ledger, draftService } = deps;
 
   return {
+    /**
+     * GET /runs?status=...&limit=... - AgentRun 一覧 (Phase 9 で追加)。
+     * status は必須、limit は 1〜200 (default 50)。
+     */
+    async listRuns(req: Request, res: Response): Promise<void> {
+      try {
+        const query = RunListQuerySchema.parse(req.query);
+        const runs = await ledger.listRunsByStatus(query.status, query.limit);
+        res.json({ status: query.status, count: runs.length, runs });
+      } catch (err) {
+        sendError(res, err);
+      }
+    },
+
     /**
      * GET /runs/:id - AgentRun 詳細 + steps を返す。404 if not found。
      */

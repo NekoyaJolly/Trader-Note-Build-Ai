@@ -78,6 +78,12 @@ function makeLedgerRepo(): RunLedgerRepository {
       const list = [...steps.values()].filter((s) => s.runId === runId);
       return { ...run, steps: list };
     },
+    async listRunsByStatus(status, limit = 50) {
+      return [...runs.values()]
+        .filter((r) => r.status === status)
+        .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())
+        .slice(0, limit);
+    },
   };
 }
 
