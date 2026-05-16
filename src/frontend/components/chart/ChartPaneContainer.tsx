@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   CandlestickData,
   CandlestickSeries,
@@ -135,6 +135,10 @@ export function ChartPaneContainer({
 
   const mainChartRef = useRef<IChartApi | null>(null);
   const mainSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  // DrawingOverlay には ref.current の値そのものを渡す必要があるため、
+  // render 中に ref を読まずに済むよう state で同期する (react-hooks/refs 対策)。
+  const [drawingChart, setDrawingChart] = useState<IChartApi | null>(null);
+  const [drawingSeries, setDrawingSeries] = useState<ISeriesApi<"Candlestick"> | null>(null);
   const subChartsRef = useRef<Map<string, IChartApi>>(new Map());
   const allSeriesRef = useRef<Map<string, ISeriesApi<"Line"> | ISeriesApi<"Histogram">>>(new Map());
   const drawnSeriesRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
@@ -225,6 +229,7 @@ export function ChartPaneContainer({
 
     const mainChart = createBaseChart(mainPaneRef.current, mainHeight);
     mainChartRef.current = mainChart;
+    setDrawingChart(mainChart);
     const candleSeries = mainChart.addSeries(CandlestickSeries, {
       upColor: CHART_THEME.upColor,
       downColor: CHART_THEME.downColor,
@@ -235,6 +240,7 @@ export function ChartPaneContainer({
       borderDownColor: CHART_THEME.downColor,
     });
     mainSeriesRef.current = candleSeries;
+    setDrawingSeries(candleSeries);
 
     const volumeSeries = mainChart.addSeries(HistogramSeries, {
       color: "#26a69a",
@@ -317,14 +323,21 @@ export function ChartPaneContainer({
     };
 
     window.addEventListener("resize", handleResize);
+    // クリーンアップ時に ref.current が別チャートに差し替わっている可能性があるため、
+    // effect 内で参照を固定してから cleanup で使う (react-hooks/exhaustive-deps 警告対策)。
+    const subCharts = subChartsRef.current;
+    const allSeries = allSeriesRef.current;
+    const drawnSeries = drawnSeriesRef.current;
     return () => {
       window.removeEventListener("resize", handleResize);
       mainChartRef.current?.remove();
       mainChartRef.current = null;
-      subChartsRef.current.forEach((chart) => chart.remove());
-      subChartsRef.current.clear();
-      allSeriesRef.current.clear();
-      drawnSeriesRef.current.clear();
+      setDrawingChart(null);
+      setDrawingSeries(null);
+      subCharts.forEach((chart) => chart.remove());
+      subCharts.clear();
+      allSeries.clear();
+      drawnSeries.clear();
     };
   }, [mainHeight, paneDefs, subHeight]);
 
@@ -543,8 +556,8 @@ export function ChartPaneContainer({
           style={{ zIndex: 8 }}
         />
         <DrawingOverlay
-          chart={mainChartRef.current}
-          candleSeries={mainSeriesRef.current}
+          chart={drawingChart}
+          candleSeries={drawingSeries}
           drawingMode={drawingMode}
           drawnLines={drawnLines}
           onCreateLine={(line) => onCompleteLine?.(line)}

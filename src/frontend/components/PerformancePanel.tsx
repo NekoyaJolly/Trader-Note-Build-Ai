@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -49,11 +49,7 @@ export default function PerformancePanel({ noteId }: PerformancePanelProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadPerformance();
-  }, [noteId]);
-
-  async function loadPerformance() {
+  const loadPerformance = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
@@ -64,7 +60,11 @@ export default function PerformancePanel({ noteId }: PerformancePanelProps) {
     } finally {
       setIsLoading(false);
     }
-  }
+  }, [noteId]);
+
+  useEffect(() => {
+    void loadPerformance();
+  }, [loadPerformance]);
 
   // ローディング
   if (isLoading) {

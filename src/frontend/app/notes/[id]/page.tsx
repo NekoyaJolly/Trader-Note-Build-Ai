@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import type { NoteDetail, NoteStatus } from "@/types/note";
 import { fetchNoteDetail, approveNote, rejectNote, revertNoteToDraft, updateNote } from "@/lib/api";
@@ -24,7 +24,6 @@ import PerformancePanel from "@/components/PerformancePanel";
  */
 export default function NoteDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const id = params.id as string;
 
   const [note, setNote] = useState<NoteDetail | null>(null);
@@ -38,21 +37,12 @@ export default function NoteDetailPage() {
   const [editedUserNotes, setEditedUserNotes] = useState("");
   const [editedTags, setEditedTags] = useState("");
 
-  useEffect(() => {
-    if (!id) return;
-    loadNote();
-  }, [id]);
-
-  /**
-   * ノート詳細を API から取得
-   */
-  async function loadNote() {
+  const loadNote = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
       const data = await fetchNoteDetail(id);
       setNote(data);
-      // 編集用の初期値をセット
       setEditedSummary(data.aiSummary);
       setEditedUserNotes(data.userNotes ?? "");
       setEditedTags(data.tags?.join(", ") ?? "");
@@ -61,7 +51,12 @@ export default function NoteDetailPage() {
     } finally {
       setIsLoading(false);
     }
-  }
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    void loadNote();
+  }, [id, loadNote]);
 
   /**
    * ステータスに応じたバッジのスタイルを返す
@@ -86,7 +81,7 @@ export default function NoteDetailPage() {
       setActionLoading(true);
       await approveNote(id);
       await loadNote(); // 最新状態を再取得
-    } catch (e) {
+    } catch (_e) {
       alert("承認に失敗しました。時間をおいて再試行してください。");
     } finally {
       setActionLoading(false);
@@ -105,7 +100,7 @@ export default function NoteDetailPage() {
       setActionLoading(true);
       await rejectNote(id);
       await loadNote();
-    } catch (e) {
+    } catch (_e) {
       alert("非承認に失敗しました。時間をおいて再試行してください。");
     } finally {
       setActionLoading(false);
@@ -121,7 +116,7 @@ export default function NoteDetailPage() {
       setActionLoading(true);
       await revertNoteToDraft(id);
       await loadNote();
-    } catch (e) {
+    } catch (_e) {
       alert("状態変更に失敗しました。時間をおいて再試行してください。");
     } finally {
       setActionLoading(false);
@@ -146,7 +141,7 @@ export default function NoteDetailPage() {
       });
       setIsEditing(false);
       await loadNote();
-    } catch (e) {
+    } catch (_e) {
       alert("保存に失敗しました。時間をおいて再試行してください。");
     } finally {
       setActionLoading(false);

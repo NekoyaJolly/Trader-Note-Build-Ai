@@ -18,7 +18,6 @@ import {
   deleteComparisonSession,
   runPortfolioOptimization,
   type ComparisonSession,
-  type StrategyPerformance,
   type OptimizationMethod,
   type OptimizationResult,
 } from "@/lib/api";

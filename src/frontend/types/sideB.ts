@@ -737,3 +737,82 @@ export interface ListGenerationLessonsQuery {
 export interface ListEvolutionRunsQuery {
   limit?: number;
 }
+
+/**
+ * 世代単位の振り返り (GenerationLesson) を UI で扱うときの最小形。
+ * バックエンドの `GenerationLessonRecord` (src/backend/repositories/generationLessonRepository.ts) のうち、
+ * 進化トラッキング画面が参照するフィールドのみを公開する。
+ */
+export interface EvolutionLesson {
+  id: string;
+  evolutionRunId: string;
+  regime: string;
+  generation: number;
+  category: string;
+  lesson: string;
+  recordedAt: string;
+}
+
+export interface ListEvolutionLessonsResponse {
+  success: true;
+  lessons: EvolutionLesson[];
+}
+
+/**
+ * 進化ループ (EvolutionRun) のサマリエントリ。
+ * バックエンドは distinct な `evolutionRunId` と最終 `createdAt` のみを返す。
+ */
+export interface EvolutionRunListItem {
+  evolutionRunId: string;
+  createdAt: string;
+}
+
+export interface ListEvolutionRunsResponse {
+  success: true;
+  runs: EvolutionRunListItem[];
+}
+
+/**
+ * 進化ループ 1 件のサマリ。
+ * バックエンドの `EvolutionRunSummary` (src/backend/repositories/evolutionBacktestRunRepository.ts) と整合。
+ */
+export interface EvolutionRunSummary {
+  evolutionRunId: string;
+  totalCandidates: number;
+  passed: number;
+  failed: number;
+  failureReasonCounts: Record<string, number>;
+  generations: Array<{
+    generation: number;
+    passed: number;
+    failed: number;
+  }>;
+}
+
+export interface GetEvolutionRunSummaryResponse {
+  success: true;
+  summary: EvolutionRunSummary;
+}
+
+/**
+ * 進化ループで評価された候補 1 件の UI 表示用形。
+ * Prisma の EvolutionBacktestRun のうち、フロントが参照するフィールドのみ公開する。
+ */
+export interface EvolutionRunCandidate {
+  id: string;
+  generation: number;
+  candidateHash: string;
+  surrogateScore: number;
+  formalBtPassed: boolean;
+  formalBtFailureReason: string | null;
+  formalBtMetrics: {
+    pf?: number;
+    winRate?: number;
+    tradeCount?: number;
+  } | null;
+}
+
+export interface GetEvolutionRunCandidatesResponse {
+  success: true;
+  candidates: EvolutionRunCandidate[];
+}

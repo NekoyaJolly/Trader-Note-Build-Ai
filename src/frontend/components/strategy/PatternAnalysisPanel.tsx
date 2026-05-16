@@ -153,16 +153,14 @@ function AnomalyCard({ result }: { result: AnomalyDetectionResult }) {
 
 export default function PatternAnalysisPanel({
   strategyId,
-  strategyName,
   symbol,
-  side,
   currentFeatures,
 }: PatternAnalysisPanelProps) {
   // 状態
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<PatternAnalysisResult | null>(null);
   const [anomalyResult, setAnomalyResult] = useState<AnomalyDetectionResult | null>(null);
-  const [patterns, setPatterns] = useState<WinningPattern[]>([]);
+  const [, setPatterns] = useState<WinningPattern[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // ダミー特徴量（現在の市場データがない場合のテスト用）

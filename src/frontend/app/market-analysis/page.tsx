@@ -182,15 +182,21 @@ export default function MarketAnalysisPage() {
         }
     }, [viewMode, analysisData, loading, fetchAnalysis]);
 
-    // OHLCVデータをチャート用に変換
-    const chartData: OHLCVDataPoint[] = analysisData?.ohlcv.map(d => ({
-        timestamp: new Date(d.timestamp).getTime(),
-        open: d.open,
-        high: d.high,
-        low: d.low,
-        close: d.close,
-        volume: d.volume,
-    })) || [];
+    // OHLCVデータをチャート用に変換。
+    // useMemo で参照を安定化させないと、依存に持つ useMemo が毎レンダー再計算される
+    // (react-hooks/exhaustive-deps の logical expression 警告対策)。
+    const chartData: OHLCVDataPoint[] = useMemo(
+        () =>
+            analysisData?.ohlcv.map(d => ({
+                timestamp: new Date(d.timestamp).getTime(),
+                open: d.open,
+                high: d.high,
+                low: d.low,
+                close: d.close,
+                volume: d.volume,
+            })) || [],
+        [analysisData],
+    );
 
     // プリセット選択時のDBデータ取得
     const handleSelectPreset = useCallback(async (preset: DataPreset) => {

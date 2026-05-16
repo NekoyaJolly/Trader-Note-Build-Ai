@@ -80,7 +80,6 @@ function DistributionHistogram({
   title,
   actualValue,
   formatValue = (v: number) => v.toFixed(2),
-  highlightHigh = true, // 高い値が良いかどうか
 }: {
   stats: DistributionStats;
   title: string;
@@ -89,7 +88,7 @@ function DistributionHistogram({
   highlightHigh?: boolean;
 }) {
   // ヒストグラムデータを変換
-  const data = stats.histogram.map((bin, idx) => ({
+  const data = stats.histogram.map((bin) => ({
     name: formatValue((bin.min + bin.max) / 2),
     value: bin.percentage,
     min: bin.min,

@@ -18,7 +18,6 @@ import {
   fetchUserSettings,
   saveUserSettings,
   resetUserSettings,
-  UserSettings,
   SettingsTimeframe,
 } from "@/lib/api";
 

@@ -38,6 +38,10 @@ export default function HomeWorkbench() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
+    // localStorage は SSR 中に存在しないため client mount 後に読む。
+    // 「外部システム (= localStorage) からの 1 回読み込み + 同期」であり、
+    // react-hooks/set-state-in-effect の禁止意図 (cascading renders) には該当しない。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLastPath(readLastSideAPath());
   }, []);
 

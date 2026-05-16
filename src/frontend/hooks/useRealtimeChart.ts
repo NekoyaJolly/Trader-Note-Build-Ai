@@ -266,7 +266,7 @@ export function useRealtimeChart(
         emitSharedState();
       };
 
-      eventSource.onerror = (e) => {
+      eventSource.onerror = (_e) => {
         // EventSource の readyState を確認
         // 0 = CONNECTING, 1 = OPEN, 2 = CLOSED
         const readyState = eventSource.readyState;

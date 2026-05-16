@@ -25,7 +25,7 @@ import type {
   IndicatorCondition,
   PatternCondition,
 } from "@/types/strategy";
-import { isIndicatorCondition, isPatternCondition } from "@/types/strategy";
+import { isConditionGroup, isIndicatorCondition, isPatternCondition } from "@/types/strategy";
 import type { IndicatorParams } from "@/types/indicator";
 
 type PriceType = "open" | "high" | "low" | "close";
@@ -173,7 +173,7 @@ function atr(data: OHLCV[], period: number): number[] {
   return out;
 }
 
-function computeIndicatorSeries(data: OHLCV[], indicatorId: string, params: Record<string, number>, field: string): number[] {
+function computeIndicatorSeries(data: OHLCV[], indicatorId: string, params: Record<string, number>): number[] {
   const close = data.map((d) => d.close);
   const low = data.map((d) => d.low);
   const high = data.map((d) => d.high);
@@ -336,9 +336,9 @@ function evalGroup(ctx: EvalContext, group: ConditionGroup): boolean {
   }
 
   if (group.operator === "IF_THEN") {
-    const ifNode = (group as any).ifCondition ?? group.conditions[0];
-    const thenNode = (group as any).thenCondition ?? group.conditions[1];
-    const maxBars = (group as any).maxBarsToWait ?? 5;
+    const ifNode = group.ifCondition ?? group.conditions[0];
+    const thenNode = group.thenCondition ?? group.conditions[1];
+    const maxBars = group.maxBarsToWait ?? 5;
     if (!ctx.ifThenState) ctx.ifThenState = { triggered: false, triggeredIndex: -1 };
 
     const ifOk = isIndicatorCondition(ifNode)
@@ -623,28 +623,24 @@ export function EntryPreviewMiniChart({
   const sampleData = useMemo(() => generateFixedSampleData(300), []);
   const debouncedConditions = useDebouncedValue(entryConditions, 400);
 
-  const [entryIndices, setEntryIndices] = useState<number[]>([]);
-
   const { indicatorCache, patternCache, warmupBars } = useMemo(() => {
     // 条件から必要な指標specを抽出（左辺＋右辺indicator）
     const specs = new Map<string, { indicatorId: string; params: Record<string, number>; field: string }>();
 
     const visit = (node: ConditionGroup | IndicatorCondition | PatternCondition) => {
-      if ((node as any).conditions) {
-        for (const c of (node as ConditionGroup).conditions) visit(c as any);
-        if ((node as any).operator === "IF_THEN") {
-          const ifNode = (node as any).ifCondition;
-          const thenNode = (node as any).thenCondition;
-          if (ifNode) visit(ifNode);
-          if (thenNode) visit(thenNode);
+      if (isConditionGroup(node)) {
+        for (const c of node.conditions) visit(c);
+        if (node.operator === "IF_THEN") {
+          if (node.ifCondition) visit(node.ifCondition);
+          if (node.thenCondition) visit(node.thenCondition);
         }
         return;
       }
 
-      if (isPatternCondition(node as any)) return;
-      if (!isIndicatorCondition(node as any)) return;
+      if (isPatternCondition(node)) return;
+      if (!isIndicatorCondition(node)) return;
 
-      const cond = node as IndicatorCondition;
+      const cond = node;
       const leftParams: Record<string, number> = {};
       for (const [k, v] of Object.entries(cond.params ?? {})) {
         if (typeof v === "number" && Number.isFinite(v)) leftParams[k] = v;
@@ -666,7 +662,7 @@ export function EntryPreviewMiniChart({
 
     const cache = new Map<string, number[]>();
     for (const spec of specs.values()) {
-      const series = computeIndicatorSeries(sampleData, spec.indicatorId, spec.params, spec.field);
+      const series = computeIndicatorSeries(sampleData, spec.indicatorId, spec.params);
       const key = makeIndicatorCacheKey(spec.indicatorId, spec.params, spec.field);
       cache.set(key, series);
     }
@@ -726,8 +722,10 @@ export function EntryPreviewMiniChart({
     return { indicatorCache: cache, patternCache: patterns, warmupBars: warmup };
   }, [debouncedConditions, sampleData]);
 
-  useEffect(() => {
-    // 300本のうち、エントリー成立バーを抽出
+  // 300本のうち、エントリー成立バーを抽出する純粋計算。
+  // 入力 (debouncedConditions / indicatorCache / patternCache / sampleData / warmupBars) は
+  // すべて派生・固定値なので、effect + setState ではなく useMemo で同期的に導出する。
+  const entryIndices = useMemo(() => {
     const indices: number[] = [];
     const ctx: EvalContext = {
       data: sampleData,
@@ -742,7 +740,7 @@ export function EntryPreviewMiniChart({
       const hit = evalGroup(ctx, debouncedConditions);
       if (hit) indices.push(i);
     }
-    setEntryIndices(indices);
+    return indices;
   }, [debouncedConditions, indicatorCache, patternCache, sampleData, warmupBars]);
 
   const ohlcvData: OHLCVDataPoint[] = useMemo(() => {

@@ -21,8 +21,6 @@ import type {
   StrategyDirection,
   SupportedSymbol,
   EntryTiming,
-  SUPPORTED_SYMBOLS,
-  SYMBOL_INFO,
 } from "@/types/strategy";
 import type { IndicatorMetadata } from "@/types/indicator";
 import {

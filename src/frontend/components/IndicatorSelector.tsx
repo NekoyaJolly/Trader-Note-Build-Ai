@@ -101,34 +101,6 @@ export function IndicatorSelector({
   );
 
   /**
-   * パラメータ更新
-   */
-  const updateParams = useCallback(
-    (indicatorId: string, params: Record<string, number>) => {
-      onSelectionChange(
-        selectedIndicators.map((ind) =>
-          ind.id === indicatorId ? { ...ind, params } : ind
-        )
-      );
-    },
-    [selectedIndicators, onSelectionChange]
-  );
-
-  /**
-   * 表示設定更新
-   */
-  const updateDisplaySettings = useCallback(
-    (indicatorId: string, displaySettings: IndicatorDisplaySettings) => {
-      onSelectionChange(
-        selectedIndicators.map((ind) =>
-          ind.id === indicatorId ? { ...ind, displaySettings } : ind
-        )
-      );
-    },
-    [selectedIndicators, onSelectionChange]
-  );
-
-  /**
    * インジケーター削除
    */
   const removeIndicator = useCallback(
@@ -283,7 +255,6 @@ function CategorySection({
   selectedIndicators,
   onToggle,
   onEdit,
-  editingId,
   onRemove,
 }: CategorySectionProps) {
   return (

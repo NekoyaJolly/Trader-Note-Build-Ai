@@ -20,7 +20,6 @@ import {
     EDGE_STATUSES,
     EDGE_CATEGORIES,
     EDGE_SOURCES,
-    type EdgeStatus,
     type EdgeCategory,
     type EdgeSource,
     type HypothesisListParams,
