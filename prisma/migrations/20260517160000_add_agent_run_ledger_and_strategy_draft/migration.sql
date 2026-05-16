@@ -71,6 +71,10 @@ CREATE TABLE "AgentRunStep" (
 -- CreateIndex: 同一 run / step / attempt の二重作成を防ぐ
 CREATE UNIQUE INDEX "uq_agent_run_step_attempt" ON "AgentRunStep"("runId", "stepName", "attempt");
 
+-- CreateIndex: (id, runId) を unique 化することで、StrategyDraft が複合 FK で
+-- step.runId と draft.sourceRunId の整合を DB レベルで強制できる
+CREATE UNIQUE INDEX "uq_agent_run_step_id_run" ON "AgentRunStep"("id", "runId");
+
 -- CreateIndex: run 内の time series
 CREATE INDEX "idx_agent_run_step_run_started" ON "AgentRunStep"("runId", "startedAt");
 
@@ -113,5 +117,7 @@ CREATE INDEX "idx_strategy_draft_source_run" ON "StrategyDraft"("sourceRunId");
 -- AddForeignKey: source run への参照
 ALTER TABLE "StrategyDraft" ADD CONSTRAINT "StrategyDraft_sourceRunId_fkey" FOREIGN KEY ("sourceRunId") REFERENCES "AgentRun"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
--- AddForeignKey: source step への参照
-ALTER TABLE "StrategyDraft" ADD CONSTRAINT "StrategyDraft_sourceStepId_fkey" FOREIGN KEY ("sourceStepId") REFERENCES "AgentRunStep"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+-- AddForeignKey: source step への参照 (複合 FK で run との lineage を強制)
+-- (sourceStepId, sourceRunId) → AgentRunStep(id, runId)。これにより draft が
+-- 指す step は必ず draft が指す run の子になる (Copilot review #1 対応)。
+ALTER TABLE "StrategyDraft" ADD CONSTRAINT "StrategyDraft_sourceStepId_sourceRunId_fkey" FOREIGN KEY ("sourceStepId", "sourceRunId") REFERENCES "AgentRunStep"("id", "runId") ON DELETE RESTRICT ON UPDATE CASCADE;

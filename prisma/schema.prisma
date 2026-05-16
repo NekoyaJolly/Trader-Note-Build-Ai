@@ -1900,10 +1900,11 @@ model AgentRestructureProposal {
 // 設計書: docs/architecture/adk_run_ledger_strategy_draft_完全版wbs.md §6 (Phase 1)
 // 目的:
 //   - AgentRun / AgentRunStep: Side-B 全実行経路 (Scheduler / ADK Wrapper / 手動)
-//     の共通実行台帳。RunLedgerService からのみ書き込まれる
+//     の共通実行台帳。RunLedgerService (Phase 2) からのみ書き込まれる
 //   - StrategyDraft: Evolution 候補の Draft lifecycle。
-//     StrategyDraftService からのみ書き込まれる
-// 不可侵: SideBScheduler / 既存 Job / StrategyDraftService 以外からの直接 CRUD 禁止
+//     StrategyDraftService (Phase 4) からのみ書き込まれる
+// 不可侵 (WBS §17): SideBScheduler / 既存 Job / その他すべての呼び出し元からの
+//   直接 CRUD は禁止。必ず RunLedgerService または StrategyDraftService を経由する。
 
 /// Side-B 実行ラン (Golden Path 単位)
 /// Scheduler / ADK Orchestrator Wrapper / 手動実行から共通利用される台帳
@@ -1973,7 +1974,7 @@ model AgentRunStep {
   errorCode    String?
   /// 失敗時の短縮エラーメッセージ
   errorMessage String?
-  /// 次アクション (continue / stop / skip / retry / manual_review)
+  /// 次アクション (proceed / stop / skip / retry / manual_review)
   nextAction   AgentRunStepNextAction?
   /// trace の発生元 (例: adk, job, service)
   traceKind    String?
@@ -1987,6 +1988,9 @@ model AgentRunStep {
 
   /// 同一 run / step / attempt の二重作成を防ぐ
   @@unique([runId, stepName, attempt], map: "uq_agent_run_step_attempt")
+  /// (id, runId) を unique 化することで、StrategyDraft が複合 FK 経由で
+  /// step.runId と draft.sourceRunId の整合を DB レベルで強制できる。
+  @@unique([id, runId], map: "uq_agent_run_step_id_run")
   @@index([runId, startedAt], map: "idx_agent_run_step_run_started")
   @@index([status], map: "idx_agent_run_step_status")
 }
@@ -2001,7 +2005,9 @@ enum AgentRunStepStatus {
 }
 
 /// AgentRunStep の次アクション (ADK Orchestrator が参照する)
-/// WBS §1.1: continue / stop / skip / retry / manual_review
+/// WBS §1.1 では `continue` と表記されているが、TypeScript の予約語との衝突を
+/// 避けるため実装上は `proceed` として導入する (Phase 10 で WBS 本文も同期予定)。
+/// 5 値: proceed / stop / skip / retry / manual_review
 enum AgentRunStepNextAction {
   proceed
   stop
@@ -2044,7 +2050,10 @@ model StrategyDraft {
   updatedAt          DateTime            @updatedAt @db.Timestamptz(6)
 
   sourceRun  AgentRun     @relation("StrategyDraftSourceRun", fields: [sourceRunId], references: [id])
-  sourceStep AgentRunStep @relation("StrategyDraftSourceStep", fields: [sourceStepId], references: [id])
+  /// sourceStep への参照は (sourceStepId, sourceRunId) → (id, runId) の複合 FK。
+  /// これにより「draft が指す step が、draft が指す run の子であること」を
+  /// DB レベルで強制する (lineage 不整合を構造的に排除)。
+  sourceStep AgentRunStep @relation("StrategyDraftSourceStep", fields: [sourceStepId, sourceRunId], references: [id, runId])
 
   /// 同一候補の重複作成を防ぐ
   @@unique([candidateHash], map: "uq_strategy_draft_candidate_hash")
