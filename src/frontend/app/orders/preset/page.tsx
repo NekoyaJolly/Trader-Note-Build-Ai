@@ -13,7 +13,7 @@
 
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/Alert";
@@ -71,23 +71,7 @@ function OrderPresetContent() {
   const [isConfirming, setIsConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  /**
-   * noteId から注文プリセットを取得
-   */
-  useEffect(() => {
-    if (!noteId) {
-      setError("noteId が指定されていません");
-      setIsLoading(false);
-      return;
-    }
-
-    loadOrderPreset();
-  }, [noteId]);
-
-  /**
-   * 注文プリセットを API から取得
-   */
-  async function loadOrderPreset() {
+  const loadOrderPreset = useCallback(async () => {
     if (!noteId) return;
 
     try {
@@ -102,7 +86,17 @@ function OrderPresetContent() {
     } finally {
       setIsLoading(false);
     }
-  }
+  }, [noteId]);
+
+  useEffect(() => {
+    if (!noteId) {
+      setError("noteId が指定されていません");
+      setIsLoading(false);
+      return;
+    }
+
+    void loadOrderPreset();
+  }, [noteId, loadOrderPreset]);
 
   /**
    * 注文確認情報を取得

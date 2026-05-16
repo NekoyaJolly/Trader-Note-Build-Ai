@@ -56,6 +56,10 @@ import type {
   AITradePlanPayload,
   ListGenerationLessonsQuery,
   ListEvolutionRunsQuery,
+  ListEvolutionLessonsResponse,
+  ListEvolutionRunsResponse,
+  GetEvolutionRunSummaryResponse,
+  GetEvolutionRunCandidatesResponse,
 } from "@/types/sideB";
 import { getPublicApiBaseUrl } from "./publicApiBaseUrl";
 
@@ -435,30 +439,39 @@ async function getTodayPlan(symbol: string): Promise<AITradePlanPayload | null> 
 // 進化エンジン (Evolution)
 // ===========================================
 
-async function getEvolutionLessons(params: ListGenerationLessonsQuery = {}): Promise<any> {
+async function getEvolutionLessons(
+  params: ListGenerationLessonsQuery = {},
+): Promise<ListEvolutionLessonsResponse> {
   const sp = new URLSearchParams();
   if (params.regime) sp.set("regime", params.regime);
   if (params.limit) sp.set("limit", String(params.limit));
   const query = sp.toString() ? `?${sp.toString()}` : '';
-  return request<any>(`/evolution/lessons${query}`);
+  return request<ListEvolutionLessonsResponse>(`/evolution/lessons${query}`);
 }
 
-async function getEvolutionRuns(params: ListEvolutionRunsQuery = {}): Promise<any> {
+async function getEvolutionRuns(
+  params: ListEvolutionRunsQuery = {},
+): Promise<ListEvolutionRunsResponse> {
   const sp = new URLSearchParams();
   if (params.limit) sp.set("limit", String(params.limit));
   const query = sp.toString() ? `?${sp.toString()}` : '';
-  return request<any>(`/evolution/runs${query}`);
+  return request<ListEvolutionRunsResponse>(`/evolution/runs${query}`);
 }
 
-async function getEvolutionRunSummary(runId: string): Promise<any> {
+async function getEvolutionRunSummary(runId: string): Promise<GetEvolutionRunSummaryResponse> {
   if (!runId) throw new SideBApiError("runId は必須です", 400, "/evolution/runs/:runId/summary");
-  return request<any>(`/evolution/runs/${encodeURIComponent(runId)}/summary`);
+  return request<GetEvolutionRunSummaryResponse>(`/evolution/runs/${encodeURIComponent(runId)}/summary`);
 }
 
-async function getEvolutionRunCandidates(runId: string, limit?: number): Promise<any> {
+async function getEvolutionRunCandidates(
+  runId: string,
+  limit?: number,
+): Promise<GetEvolutionRunCandidatesResponse> {
   if (!runId) throw new SideBApiError("runId は必須です", 400, "/evolution/runs/:runId/candidates");
   const query = limit ? `?limit=${limit}` : '';
-  return request<any>(`/evolution/runs/${encodeURIComponent(runId)}/candidates${query}`);
+  return request<GetEvolutionRunCandidatesResponse>(
+    `/evolution/runs/${encodeURIComponent(runId)}/candidates${query}`,
+  );
 }
 
 

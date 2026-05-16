@@ -11,8 +11,8 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import ScoreGauge from "@/components/ScoreGauge";
 import MatchReasonVisualizer from "@/components/MatchReasonVisualizer";
@@ -30,38 +30,21 @@ import { fetchNotificationDetail, markNotificationAsRead } from "@/lib/api";
  */
 export default function NotificationDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const id = params.id as string;
 
-  // 通知詳細データ
   const [notification, setNotification] = useState<NotificationDetail | null>(
     null
   );
-  // ローディング状態
   const [isLoading, setIsLoading] = useState(true);
-  // エラー状態
   const [error, setError] = useState<string | null>(null);
 
-  /**
-   * 通知詳細データを取得
-   */
-  useEffect(() => {
-    if (!id) return;
-
-    loadNotificationDetail();
-  }, [id]);
-
-  /**
-   * 通知詳細をAPIから取得
-   */
-  async function loadNotificationDetail() {
+  const loadNotificationDetail = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
       const data = await fetchNotificationDetail(id);
       setNotification(data);
 
-      // 未読の場合は自動的に既読にする
       if (!data.isRead) {
         await markNotificationAsRead(id);
         setNotification((prev) => (prev ? { ...prev, isRead: true } : null));
@@ -73,7 +56,12 @@ export default function NotificationDetailPage() {
     } finally {
       setIsLoading(false);
     }
-  }
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    void loadNotificationDetail();
+  }, [id, loadNotificationDetail]);
 
   // ローディング表示（Skeleton で統一）
   if (isLoading) {

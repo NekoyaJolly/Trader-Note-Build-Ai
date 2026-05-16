@@ -6,16 +6,18 @@
  *
  * Phase 2 要件:
  * - ステータスフィルタ（全件 / 下書き / 承認済み / 非承認）
- * - ステータス件数表示
  * - クリックで詳細遷移
- * 
+ *
+ * 注: 当初要件にあった「ステータス件数表示」は UI から既に外されていたため、
+ * 件数取得 API 呼び出し (fetchNoteStatusCounts) も合わせて削除した (PR #215 lint 整理)。
+ * 件数バッジを復活させたい場合は両方を戻すこと。
+ *
  * @see docs/phase12/UI_DESIGN_GUIDE.md
  */
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import { fetchNotes, fetchNoteStatusCounts } from "@/lib/api";
-import type { NoteListItem, NoteStatus, NoteStatusCounts, NoteSummary } from "@/types/note";
+import { useCallback, useEffect, useState } from "react";
+import { fetchNotes } from "@/lib/api";
+import type { NoteStatus, NoteSummary } from "@/types/note";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/Alert";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { NeonButton } from "@/components/ui/NeonButton";
@@ -29,41 +31,30 @@ type StatusFilter = "all" | NoteStatus;
 
 export default function NotesPage() {
   const [notes, setNotes] = useState<NoteSummary[]>([]);
-  const [statusCounts, setStatusCounts] = useState<NoteStatusCounts | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadData();
-  }, [statusFilter]);
-
-  /**
-   * ノート一覧とステータス集計を取得
-   */
-  async function loadData() {
+  const loadData = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
-      
-      // ステータス集計は常に取得
-      const countsPromise = fetchNoteStatusCounts().catch(() => null);
-      
-      // フィルタに応じてノートを取得
-      const notesPromise = statusFilter === "all"
-        ? fetchNotes()
-        : fetchNotes(statusFilter);
-      
-      const [counts, data] = await Promise.all([countsPromise, notesPromise]);
-      
-      setStatusCounts(counts);
+
+      const data = statusFilter === "all"
+        ? await fetchNotes()
+        : await fetchNotes(statusFilter);
+
       setNotes(data.notes);
     } catch (err) {
       setError(err instanceof Error ? err.message : "ノート一覧の取得に失敗しました");
     } finally {
       setIsLoading(false);
     }
-  }
+  }, [statusFilter]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
 
   /**
    * ステータスに応じたバッジスタイル

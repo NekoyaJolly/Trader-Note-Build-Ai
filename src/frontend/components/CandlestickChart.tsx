@@ -433,6 +433,12 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
     queueMicrotask(() => setIsLoading(false));
 
+    // クリーンアップで参照する Map は effect 開始時点のものに固定する
+    // (react-hooks/exhaustive-deps の「ref.current が変わっているかも」警告対策)。
+    const indicatorSeries = indicatorSeriesRef.current;
+    const drawnLineSeries = drawnLineSeriesRef.current;
+    const positionOverlaySeries = positionOverlaySeriesRef.current;
+
     return () => {
       window.removeEventListener("resize", handleResize);
       const chartInstance = chartRef.current;
@@ -445,9 +451,9 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
       chartRef.current = null;
       candlestickSeriesRef.current = null;
       volumeSeriesRef.current = null;
-      indicatorSeriesRef.current.clear();
-      drawnLineSeriesRef.current.clear();
-      positionOverlaySeriesRef.current.clear();
+      indicatorSeries.clear();
+      drawnLineSeries.clear();
+      positionOverlaySeries.clear();
       guideLineSeriesRef.current = null;
       markersPluginRef.current = null;
     };

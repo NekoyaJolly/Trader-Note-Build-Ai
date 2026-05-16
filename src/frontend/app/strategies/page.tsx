@@ -8,7 +8,7 @@
 
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useCallback, useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { fetchStrategies, deleteStrategy, updateStrategyStatus, duplicateStrategy } from "@/lib/api";
@@ -180,8 +180,7 @@ export default function StrategiesPage() {
   const [statusFilter, setStatusFilter] = useState<StrategyStatus | "all">("all");
   const [searchQuery, setSearchQuery] = useState("");
 
-  // ストラテジー一覧を取得
-  const loadStrategies = async () => {
+  const loadStrategies = useCallback(async () => {
     try {
       setIsLoading(true);
       const data = await fetchStrategies(
@@ -194,11 +193,11 @@ export default function StrategiesPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [statusFilter]);
 
   useEffect(() => {
-    loadStrategies();
-  }, [statusFilter]);
+    void loadStrategies();
+  }, [loadStrategies]);
 
   // 削除処理
   const handleDelete = async (id: string) => {

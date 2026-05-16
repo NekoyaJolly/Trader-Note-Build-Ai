@@ -18,7 +18,6 @@ import { useState, useEffect, useRef } from 'react';
 import type {
   AccountInfoResponse,
   PositionResponse,
-  PositionUpdateEvent
 } from '@/schemas/api/trading';
 import {
   AccountInfoResponseSchema,

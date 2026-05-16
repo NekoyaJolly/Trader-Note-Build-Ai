@@ -56,22 +56,31 @@ export function ValidationProgressBar({
         ? Math.min(95, Math.max(8, (completed / 4) * 100))
         : (completed / 4) * 100;
 
-  const [tick, setTick] = React.useState(0);
+  // 検証中は 900ms ごとに「現在の経過秒数」を再計算する。
+  // useMemo 内で Date.now() を直接呼ぶと react-hooks/purity に違反するため、
+  // state に保持して effect 内で更新する。
+  const [elapsedLabel, setElapsedLabel] = React.useState<string | null>(null);
   React.useEffect(() => {
+    if (!startedAtIso) {
+      setElapsedLabel(null);
+      return;
+    }
+    const startedMs = new Date(startedAtIso).getTime();
+    if (Number.isNaN(startedMs)) {
+      setElapsedLabel(null);
+      return;
+    }
+    const update = () => {
+      const sec = Math.max(0, Math.floor((Date.now() - startedMs) / 1000));
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      setElapsedLabel(m > 0 ? `${m}分${s}秒` : `${s}秒`);
+    };
+    update();
     if (!isTesting) return;
-    const id = window.setInterval(() => setTick((t) => t + 1), 900);
+    const id = window.setInterval(update, 900);
     return () => window.clearInterval(id);
-  }, [isTesting]);
-
-  const elapsedLabel = React.useMemo(() => {
-    if (!startedAtIso) return null;
-    const t = new Date(startedAtIso).getTime();
-    if (Number.isNaN(t)) return null;
-    const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return m > 0 ? `${m}分${s}秒` : `${s}秒`;
-  }, [startedAtIso, tick, isTesting]);
+  }, [startedAtIso, isTesting]);
 
   return (
     <div

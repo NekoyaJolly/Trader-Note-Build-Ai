@@ -1,63 +1,68 @@
 "use client";
 
-import * as React from "react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { sideBApi } from "@/lib/sideBApi";
+import type {
+  EvolutionLesson,
+  EvolutionRunCandidate,
+  EvolutionRunListItem,
+  EvolutionRunSummary,
+} from "@/types/sideB";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Loader2 } from "lucide-react";
 
 export default function EvolutionPage() {
   const [activeTab, setActiveTab] = useState<"runs" | "lessons">("runs");
-  const [lessons, setLessons] = useState<any[]>([]);
-  const [runs, setRuns] = useState<any[]>([]);
+  const [lessons, setLessons] = useState<EvolutionLesson[]>([]);
+  const [runs, setRuns] = useState<EvolutionRunListItem[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [runSummary, setRunSummary] = useState<any>(null);
-  const [runCandidates, setRunCandidates] = useState<any[]>([]);
+  const [runSummary, setRunSummary] = useState<EvolutionRunSummary | null>(null);
+  const [runCandidates, setRunCandidates] = useState<EvolutionRunCandidate[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchData();
-  }, [activeTab]);
-
-  useEffect(() => {
-    if (selectedRunId) {
-      fetchRunDetails(selectedRunId);
-    }
-  }, [selectedRunId]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       if (activeTab === "runs") {
         const res = await sideBApi.getEvolutionRuns({ limit: 20 });
-        if (res?.runs) setRuns(res.runs);
+        if (res.runs) setRuns(res.runs);
       } else {
         const res = await sideBApi.getEvolutionLessons({ limit: 50 });
-        if (res?.lessons) setLessons(res.lessons);
+        if (res.lessons) setLessons(res.lessons);
       }
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeTab]);
 
-  const fetchRunDetails = async (runId: string) => {
+  const fetchRunDetails = useCallback(async (runId: string) => {
     setLoading(true);
     try {
       const [summaryRes, candidatesRes] = await Promise.all([
         sideBApi.getEvolutionRunSummary(runId),
-        sideBApi.getEvolutionRunCandidates(runId)
+        sideBApi.getEvolutionRunCandidates(runId),
       ]);
-      if (summaryRes?.summary) setRunSummary(summaryRes.summary);
-      if (candidatesRes?.candidates) setRunCandidates(candidatesRes.candidates);
+      if (summaryRes.summary) setRunSummary(summaryRes.summary);
+      if (candidatesRes.candidates) setRunCandidates(candidatesRes.candidates);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    void fetchData();
+  }, [fetchData]);
+
+  useEffect(() => {
+    if (selectedRunId) {
+      void fetchRunDetails(selectedRunId);
+    }
+  }, [selectedRunId, fetchRunDetails]);
 
   return (
     <div className="space-y-6">
@@ -244,7 +249,7 @@ export default function EvolutionPage() {
                                 {cand.formalBtPassed ? (
                                   <span className="text-green-500 font-medium">Passed</span>
                                 ) : (
-                                  <span className="text-red-500 text-xs" title={cand.formalBtFailureReason}>
+                                  <span className="text-red-500 text-xs" title={cand.formalBtFailureReason ?? undefined}>
                                     Failed
                                   </span>
                                 )}

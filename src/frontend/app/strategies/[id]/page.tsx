@@ -23,12 +23,11 @@ import {
 } from "@/lib/api";
 import {
   COMPARISON_OPERATOR_INFO,
-  FIELD_LABELS,
   LOGICAL_OPERATOR_INFO,
   isIndicatorCondition,
   isPatternCondition,
 } from "@/types/strategy";
-import type { Strategy, StrategyStatus, ConditionGroup, IndicatorCondition, PatternCondition, ExitSettings, StrategyDirection, SupportedSymbol, EntryTiming, UpdateStrategyRequest, CandlePatternId, PatternOperator } from "@/types/strategy";
+import type { Strategy, StrategyStatus, ConditionGroup, IndicatorCondition, PatternCondition, ExitSettings, StrategyDirection, SupportedSymbol, UpdateStrategyRequest, CandlePatternId, PatternOperator } from "@/types/strategy";
 import type { IndicatorMetadata } from "@/types/indicator";
 import ConditionBuilder from "@/components/strategy/ConditionBuilder";
 import { NeonButton } from "@/components/ui/NeonButton";

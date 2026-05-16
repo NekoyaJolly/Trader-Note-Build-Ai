@@ -87,7 +87,7 @@ self.addEventListener("notificationclick", (event) => {
 /**
  * Service Worker インストールハンドラ
  */
-self.addEventListener("install", (event) => {
+self.addEventListener("install", (_event) => {
   console.log("[SW] インストール完了");
   // 即座にアクティブ化
   self.skipWaiting();
