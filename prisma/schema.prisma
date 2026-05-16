@@ -1894,3 +1894,170 @@ model AgentRestructureProposal {
 
   @@index([status, proposedAt(sort: Desc)], map: "idx_agent_restructure_status_proposed")
 }
+// ============================================================
+// ADK Orchestrator + RunLedger + StrategyDraft (Phase 1)
+// ============================================================
+// 設計書: docs/architecture/adk_run_ledger_strategy_draft_完全版wbs.md §6 (Phase 1)
+// 目的:
+//   - AgentRun / AgentRunStep: Side-B 全実行経路 (Scheduler / ADK Wrapper / 手動)
+//     の共通実行台帳。RunLedgerService からのみ書き込まれる
+//   - StrategyDraft: Evolution 候補の Draft lifecycle。
+//     StrategyDraftService からのみ書き込まれる
+// 不可侵: SideBScheduler / 既存 Job / StrategyDraftService 以外からの直接 CRUD 禁止
+
+/// Side-B 実行ラン (Golden Path 単位)
+/// Scheduler / ADK Orchestrator Wrapper / 手動実行から共通利用される台帳
+model AgentRun {
+  id             String         @id @default(uuid()) @db.Uuid
+  /// 実行種別 (例: side_b_cycle, manual, dry_run)
+  kind           String
+  /// 起動元 (例: scheduler, manual, test, adk)
+  triggeredBy    String
+  /// run 全体の状態
+  status         AgentRunStatus @default(pending)
+  /// 開始時刻
+  startedAt      DateTime       @default(now()) @db.Timestamptz(6)
+  /// 完了時刻 (成功 / 失敗 / cancelled いずれでも記録)
+  finishedAt     DateTime?      @db.Timestamptz(6)
+  /// redaction 済み run 全体要約 (raw prompt / raw output は保存しない)
+  summary        String?
+  /// 失敗時の短縮エラーコード
+  errorCode      String?
+  /// 失敗時の短縮エラーメッセージ (raw payload は保存しない)
+  errorMessage   String?
+  /// 冪等性キー (同一 trigger で二重 run を防ぐ)
+  idempotencyKey String?        @unique(map: "uq_agent_run_idempotency_key")
+  /// 作成日時
+  createdAt      DateTime       @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt      DateTime       @updatedAt @db.Timestamptz(6)
+
+  steps          AgentRunStep[]  @relation("AgentRunSteps")
+  strategyDrafts StrategyDraft[] @relation("StrategyDraftSourceRun")
+
+  @@index([status, startedAt(sort: Desc)], map: "idx_agent_run_status_started")
+  @@index([kind, triggeredBy], map: "idx_agent_run_kind_trigger")
+}
+
+/// AgentRun の状態 (WBS §1.2 State Machine)
+enum AgentRunStatus {
+  pending
+  running
+  succeeded
+  failed
+  skipped
+  cancelled
+}
+
+/// AgentRun 内の各 step (readiness / plan / monitor / evolution / draft / validation 等)
+/// 同じ runId + stepName + attempt の組合せで一意 (retry 時は attempt を増やす)
+model AgentRunStep {
+  id           String                  @id @default(uuid()) @db.Uuid
+  /// 親 run
+  runId        String                  @db.Uuid
+  /// step 名 (readiness / plan / monitor / evolution / draft / validation 等)
+  stepName     String
+  /// step 状態
+  status       AgentRunStepStatus      @default(pending)
+  /// retry 回数 (初回 0)
+  attempt      Int                     @default(0)
+  /// 開始時刻
+  startedAt    DateTime                @default(now()) @db.Timestamptz(6)
+  /// 完了時刻
+  finishedAt   DateTime?               @db.Timestamptz(6)
+  /// 所要時間 ms (finishedAt - startedAt のキャッシュ)
+  durationMs   Int?
+  /// redaction 済み step 要約 (raw payload は保存しない)
+  summary      String?
+  /// 失敗時の短縮エラーコード
+  errorCode    String?
+  /// 失敗時の短縮エラーメッセージ
+  errorMessage String?
+  /// 次アクション (continue / stop / skip / retry / manual_review)
+  nextAction   AgentRunStepNextAction?
+  /// trace の発生元 (例: adk, job, service)
+  traceKind    String?
+  /// 作成日時
+  createdAt    DateTime                @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt    DateTime                @updatedAt @db.Timestamptz(6)
+
+  run            AgentRun        @relation("AgentRunSteps", fields: [runId], references: [id], onDelete: Cascade)
+  strategyDrafts StrategyDraft[] @relation("StrategyDraftSourceStep")
+
+  /// 同一 run / step / attempt の二重作成を防ぐ
+  @@unique([runId, stepName, attempt], map: "uq_agent_run_step_attempt")
+  @@index([runId, startedAt], map: "idx_agent_run_step_run_started")
+  @@index([status], map: "idx_agent_run_step_status")
+}
+
+/// AgentRunStep の状態 (WBS §1.2 State Machine)
+enum AgentRunStepStatus {
+  pending
+  running
+  succeeded
+  failed
+  skipped
+}
+
+/// AgentRunStep の次アクション (ADK Orchestrator が参照する)
+/// WBS §1.1: continue / stop / skip / retry / manual_review
+enum AgentRunStepNextAction {
+  proceed
+  stop
+  skip
+  retry
+  manual_review
+}
+
+/// Evolution 候補の Draft (StrategyDraftService のライフサイクル管理対象)
+/// Evolution Job → Validation Job への直行を防ぐための業務境界
+model StrategyDraft {
+  id                 String              @id @default(uuid()) @db.Uuid
+  /// 生成元 run
+  sourceRunId        String              @db.Uuid
+  /// 生成元 step
+  sourceStepId       String              @db.Uuid
+  /// 候補の同一性ハッシュ (重複排除キー)
+  candidateHash      String
+  /// Draft の lifecycle 状態
+  status             StrategyDraftStatus @default(draft)
+  /// redaction 済み候補要約 (raw prompt / raw output / DSL 全文は保存しない)
+  strategySummary    String
+  /// redaction 済みリスク要約
+  riskSummary        String?
+  /// 承認理由 (status=approved / queued_for_validation / validated 遷移時)
+  approvalReason     String?
+  /// 却下理由 (status=rejected 時)
+  rejectionReason    String?
+  /// archive 理由 (status=archived 時)
+  archiveReason      String?
+  /// レビュアー (承認者 / 却下者の識別子。人間 ID または rule_engine 等)
+  reviewer           String?
+  /// 検証完了時刻 (status=validated 遷移時)
+  validatedAt        DateTime?           @db.Timestamptz(6)
+  /// 検証結果への参照 (Phase 4 では文字列で柔軟に保持、Phase 6 で型紐付け再判断)
+  validationResultId String?
+  /// 作成日時
+  createdAt          DateTime            @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt          DateTime            @updatedAt @db.Timestamptz(6)
+
+  sourceRun  AgentRun     @relation("StrategyDraftSourceRun", fields: [sourceRunId], references: [id])
+  sourceStep AgentRunStep @relation("StrategyDraftSourceStep", fields: [sourceStepId], references: [id])
+
+  /// 同一候補の重複作成を防ぐ
+  @@unique([candidateHash], map: "uq_strategy_draft_candidate_hash")
+  @@index([status, createdAt(sort: Desc)], map: "idx_strategy_draft_status_created")
+  @@index([sourceRunId], map: "idx_strategy_draft_source_run")
+}
+
+/// StrategyDraft の lifecycle 状態 (WBS §1.3)
+enum StrategyDraftStatus {
+  draft
+  approved
+  rejected
+  queued_for_validation
+  validated
+  archived
+}
