@@ -6,8 +6,8 @@
       "cwd": "${workspaceFolder}/tools/gemini-drive-mcp"
     },
     "lastmile-mcp": {
-      "command": "${workspaceFolder}/node_modules/.bin/lastmile-mcp",
-      "args": [],
+      "command": "npx",
+      "args": ["--no-install", "lastmile-mcp"],
       "cwd": "${workspaceFolder}"
     }
   }

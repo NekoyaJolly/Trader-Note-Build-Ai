@@ -16,7 +16,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildDashboardDebugContextPatch,
   type DashboardDebugContextInput,
-} from "@/app/side-b/dashboard/page";
+} from "@/app/side-b/dashboard/debugContext";
 import type {
   StatsOverviewResponse,
   SystemHealthResponse,
@@ -158,15 +158,19 @@ describe("buildDashboardDebugContextPatch", () => {
     });
   });
 
-  it("AGENTS.md §5 で禁止された機密キーが patch に含まれないこと (token / accountId / 取引額)", () => {
+  it("domain はホワイトリストキーのみを返し、機密キーを混入させない", () => {
     const patch = buildDashboardDebugContextPatch(makeInput());
-    const flat = JSON.stringify(patch);
+    const domainKeys = Object.keys(patch.domain ?? {}).sort();
 
-    // ホワイトリスト的に、これらが含まれていないことを保証
-    expect(flat).not.toMatch(/accountId/i);
-    expect(flat).not.toMatch(/access_?token/i);
-    expect(flat).not.toMatch(/refresh_?token/i);
-    expect(flat).not.toMatch(/balance/i);
-    expect(flat).not.toMatch(/equity/i);
+    expect(domainKeys).toEqual([
+      "confirmedCount",
+      "databaseHealth",
+      "hasLatestDiscoveryWeeklyReport",
+      "hypothesisCount",
+      "newHypothesesThisWeek",
+      "pythonValidatorHealth",
+      "recentConfirmedCount",
+      "recentRejectedCount",
+    ]);
   });
 });
