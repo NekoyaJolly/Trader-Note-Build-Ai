@@ -14,6 +14,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { toast } from "sonner";
 
 // APIベースURL（同一オリジン: 相対パス）
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "") + "/api/side-b";
@@ -107,7 +108,9 @@ export default function SettingsPage() {
       setEditConfig(data.config);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "不明なエラー");
+      const msg = err instanceof Error ? err.message : "不明なエラー";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -126,8 +129,11 @@ export default function SettingsPage() {
       const data = await res.json();
       setStatus(data);
       setError(null);
+      toast.success("設定を保存しました");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "不明なエラー");
+      const msg = err instanceof Error ? err.message : "不明なエラー";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setSaving(false);
     }
@@ -142,8 +148,11 @@ export default function SettingsPage() {
       const data = await res.json();
       setStatus(data);
       setError(null);
+      toast.success("スケジューラーを開始しました");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "不明なエラー");
+      const msg = err instanceof Error ? err.message : "不明なエラー";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setRunning(false);
     }
@@ -158,8 +167,11 @@ export default function SettingsPage() {
       const data = await res.json();
       setStatus(data);
       setError(null);
+      toast.success("スケジューラーを停止しました");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "不明なエラー");
+      const msg = err instanceof Error ? err.message : "不明なエラー";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setRunning(false);
     }
@@ -173,8 +185,11 @@ export default function SettingsPage() {
       if (!res.ok) throw new Error("日次プラン実行に失敗しました");
       await fetchStatus();
       setError(null);
+      toast.success("日次プランを実行しました");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "不明なエラー");
+      const msg = err instanceof Error ? err.message : "不明なエラー";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setRunning(false);
     }
@@ -188,8 +203,11 @@ export default function SettingsPage() {
       if (!res.ok) throw new Error("監視実行に失敗しました");
       await fetchStatus();
       setError(null);
+      toast.success("監視を実行しました");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "不明なエラー");
+      const msg = err instanceof Error ? err.message : "不明なエラー";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setRunning(false);
     }
