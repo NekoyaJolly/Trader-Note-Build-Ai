@@ -1,5 +1,5 @@
 /**
- * Golden Path 1-cycle smoke (一回限り、Step 5 段階 0 動作確認用)
+ * Golden Path 1-cycle smoke (再利用可能 check スクリプト、scripts/check/ 配下)
  *
  * 目的:
  *   - SideBScheduler 経由を経ず、bridge `runScheduledOrchestratedCycle` を
@@ -7,14 +7,16 @@
  *   - AgentRun / AgentRunStep に何が書き込まれるかを観察する
  *   - 市場依存 Job (Plan / Monitor) は wire しないので週末でも安全
  *
- * 実行: npx tsx scripts/golden-path-smoke.ts
+ * 実行: npx tsx scripts/check/golden-path-smoke.ts
  *
- * 一度きりの観察用。本番経路 (cron) には組み込まない。
+ * 用途: Job adapter wire-up 進捗のたびに 1 cycle 観測したい場面 (Step 5 着手前後)
+ * で再利用する。本番経路 (cron) には組み込まない。`scripts/README.md` §3 登録表
+ * を参照。削除条件は登録表参照。
  */
 
 import 'dotenv/config';
 
-import { runScheduledOrchestratedCycle } from '../src/side-b/jobs/sideBSchedulerOrchestratorBridge';
+import { runScheduledOrchestratedCycle } from '../../src/side-b/jobs/sideBSchedulerOrchestratorBridge';
 
 async function main(): Promise<void> {
   console.log('[golden-path-smoke] start');
