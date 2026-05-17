@@ -9,6 +9,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { sideBApi } from "@/lib/sideBApi";
+import { formatPercent } from "@/lib/format";
 import type { AITradePlanPayload } from "@/types/sideB";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "") + "/api/side-b";
@@ -257,7 +258,7 @@ export default function AgentDetailPage() {
                                         <div className="text-right">
                                             <p className="text-xs text-gray-500">全体信頼度</p>
                                             <p className="text-sm font-semibold text-cyan-300">
-                                                {plan.overallConfidence ?? "-"}
+                                                {formatPercent(plan.overallConfidence)}
                                             </p>
                                         </div>
                                     </div>
@@ -286,7 +287,7 @@ export default function AgentDetailPage() {
                                                         <p className="text-xs font-medium text-white">
                                                             {scenario.name}{" "}
                                                             <span className="text-gray-500">
-                                                                ({directionLabel[scenario.direction]} / 信頼度{scenario.confidence})
+                                                                ({directionLabel[scenario.direction]} / 信頼度 {formatPercent(scenario.confidence)})
                                                             </span>
                                                         </p>
                                                         <p className="text-[11px] text-gray-500">
