@@ -1,8 +1,8 @@
-# LAST_MILE_INTEGRATION.md — Last-Mile Shared Context 導入手順 (Phase 11)
+# LAST_MILE_INTEGRATION.md — Last-Mile Shared Context 規約 + 導入手順
 
-> **位置づけ**: TradeAssist (Trader-Note-Build-Ai) における `last-mile-shared-context` 導入の作業手順 / MCP 設定 / 実地検査の証跡。
-> **規約の正本**: `/AGENTS.md` の「Last-Mile Shared Context Rule」セクション (規約はそちら、本ファイルは手順)。
-> **上流**: https://github.com/NekoyaJolly/last-mile-shared-context
+> **位置づけ**: TradeAssist (Trader-Note-Build-Ai) における `last-mile-shared-context` の **規約正本 + 作業手順 + 実地検査の証跡**。UI / API / DB / Job のラストマイル修正に着手する前に必ず本ファイルを読む。
+> **発火条件**: `/AGENTS.md` §「Last-Mile Shared Context Rule」を参照。日常作業では本ファイルは読み込まず、ラストマイル修正時にのみ読み込む。
+> **上流**: https://github.com/NekoyaJolly/last-mile-shared-context (テンプレ正本は `vendor/last-mile-context/templates/AGENTS.last-mile.md`)
 
 ---
 
@@ -15,7 +15,7 @@
 | Frontend 依存 | schema / app-bridge / react-bridge | `src/frontend/package.json` dependencies + `overrides` |
 | 設定 | プロジェクト固有の `appName` / `environment` / `redaction` ホワイトリスト | `lastmile.config.json` |
 | UI 連携 | Dashboard 1 画面で `setAiDebugContext` + `mergeAiDebugContext` + `CopyAiDebugContextButton` | `src/frontend/app/side-b/dashboard/page.tsx` |
-| 規約 | 9 項目 / Domain ID マッピング / cTrader OAuth 取得手順 | `/AGENTS.md` §「Last-Mile Shared Context Rule」 |
+| 規約 | 9 項目 / 守るべき原則 / Domain ID マッピング / Bundle 安全境界 | 本ファイル §5 (`/AGENTS.md` には発火条件のみ) |
 | MCP | `lastmile-mcp` を VSCode/Claude Code MCP に登録 | `.vscode/mcp.json` |
 | 取得物 | Bundle JSON / screenshot / console / network 派生 | `.last-mile/latest/` (`.gitignore` 済) |
 
@@ -55,7 +55,7 @@ npx lastmile doctor
 
 の 2 経路で AI に渡る。
 
-**Domain ID マッピング (TradeAssist 固有)** は `/AGENTS.md` §5 を参照。Dashboard では `target.type='dashboard'` / `target.id='overview'` 固定で、`relatedIds.latestDiscoveryHypothesisId` のみ流す。**token / 取引額 / cTrader accountId は流さない** 原則。
+**Domain ID マッピング (TradeAssist 固有)** は本ファイル §5.4 を参照。Dashboard では `target.type='dashboard'` / `target.id='overview'` 固定で、`relatedIds.latestDiscoveryHypothesisId` のみ流す。**token / 取引額 / cTrader accountId は流さない** 原則。
 
 ---
 
@@ -94,18 +94,61 @@ Dashboard 画面右上の **Copy AI Context** (dev のみ) → clipboard へ con
 
 ---
 
-## 5. 原因分類
+## 5. 規約 (Last-Mile Shared Context Rule)
 
-`@last-mile-context/core` の `classifyIssue(bundle)` を使う。判定優先順は:
+UI / UX / API 連携 / DB 状態 / Job 状態に関する **ラストマイル修正** では、コードだけで判断してはならない。修正前に必ず **Last-Mile Bundle** を確認する。Bundle の取得手段は §4 を参照。
 
-1. `server.errors[]` あり → `Server`
-2. `network.failedRequests[]` に `status>=500` → `API` / それ以外 (4xx, abort) → `Network`
-3. `console.errors[]` あり → `UI`
-4. `userObservation.expected !== actual` で上記なし → `UX`
-5. console warning のみ → `UX` 候補
-6. 何もなし → `NoIssue` / `Unknown`
+### 5.1 必ず確認する 9 項目
 
-詳細な対応規約は `/AGENTS.md` §「Last-Mile Shared Context Rule」§3〜§4 を参照。
+| # | 確認対象 | 取得元 |
+|---|---|---|
+| 1 | 対象画面 | `page.url` / `page.title` / `debugContext.screen` |
+| 2 | 操作手順 | `userObservation.lastAction` (人間が書く) |
+| 3 | 期待値 | `userObservation.expected` (人間が書く) |
+| 4 | 実際の挙動 | `userObservation.actual` (人間が書く) |
+| 5 | Console | `console.errors` / `console.warnings` |
+| 6 | Network | `network.failedRequests` / `network.recentRequests` |
+| 7 | AI Debug Context | `debugContext` (= アプリ側 `window.__AI_DEBUG_CONTEXT__`) |
+| 8 | Domain ID | `debugContext.target.id` / `debugContext.target.relatedIds` |
+| 9 | Server log | `server.errors` / `server.hints` (= backend log 抜粋) |
+
+### 5.2 原因分類 (Bundle を見て決める)
+
+`@last-mile-context/core` の `classifyIssue(bundle)` を使う。判定優先順:
+
+| 兆候 | 分類 |
+|---|---|
+| `server.errors[]` あり | Server |
+| `network.failedRequests[]` に `status>=500` | API |
+| `network.failedRequests[]` で 5xx 以外 (4xx / abort) | Network |
+| `console.errors[]` あり | UI |
+| 上記なし & `userObservation.expected !== actual` | UX |
+| `console.warnings[]` のみ | UX 候補 |
+| 何もなし | NoIssue / Unknown |
+
+### 5.3 守るべき原則
+
+1. **原因分類なしに修正してはならない**: Bundle を見ずに「ここっぽい」で修正しない
+2. **修正後に再収集して回帰確認**: 同じ Bundle 観点で改善を確認する
+3. **再発防止のため Playwright spec / checklist 化**: 解決したラストマイル issue は `tests/e2e/` 配下に Playwright spec として再現手順を残す (= `generatePlaywrightTestFromBundle` で雛形生成可)
+4. **`window.__AI_DEBUG_CONTEXT__` に token / 個人情報を入れない**: cTrader OAuth token / JWT / refresh token / `accountId` 等の機密値は Domain ID から除外。redaction は最終防衛線
+5. **AI に渡す前に redaction を再確認**: `npx lastmile mask .last-mile/latest/last-mile-bundle.json --strict` で Authorization / Cookie / JWT が落ちていることを確認
+6. **production 環境への collect は禁止**: `environment: 'development'` 固定 (`lastmile.config.json`)。Chrome は dedicated profile (`--user-data-dir=.chrome-lastmile-trader-note`) で起動し、本番ブラウザと混ぜない
+
+### 5.4 TradeAssist 固有の Domain ID マッピング
+
+`debugContext.target` および `debugContext.domain` には以下の Domain ID を Bundle に含めること (画面ごとに必要なものだけ):
+
+| 画面 | `target.type` | `target.id` の意味 | `target.relatedIds` で渡す ID |
+|---|---|---|---|
+| `/side-b/dashboard` | `dashboard` | `'overview'` 固定 | `latestDiscoveryHypothesisId` (= Discovery サマリで先頭表示しているもの)。`latestAgentRunId` / `latestValidationId` は dashboard API が未提供のため Phase 12 以降で追加。**画面が API として取得していない ID は載せない** |
+| `/side-b/hypotheses` | `hypothesisList` | クエリ条件のハッシュ | (なし) |
+| `/side-b/hypotheses/[id]` | `hypothesis` | `hypothesisId` | `agentRunId` / `latestValidationId` / `tradeNoteIds` |
+| `/side-b/validation` | `validation` | `validationId` | `hypothesisId` / `agentRunId` |
+| `/side-b/agent` | `agentRun` | `agentRunId` | `hypothesisId` |
+| `/side-b/evolution` | `evolutionGeneration` | `generationId` | `parentHypothesisIds` |
+
+`domain` には **ID ではなく状態サマリ** を入れる: `hypothesisStatus` / `latestValidationStatus` / `latestAgentRunStatus` / `dashboardHealthState` 等の文字列。**個人情報 / 取引額 / cTrader accountId / 実残高は入れない** (redaction で落とせない値はそもそも入れない原則)。
 
 ---
 
@@ -170,7 +213,7 @@ CDP collector は **attach した時点の Chrome タブ** を観測するため
 | MCP 経由で同等構造の context を取得できる | ✅ `.vscode/mcp.json` に `lastmile-mcp` 登録 |
 | 実 issue 1 件を Bundle 分類できる | ✅ §6.2 で `classifyIssue` → `UX` |
 | 回帰テストが通る | ✅ `npm test` / `cd src/frontend && npm test` (本 PR 説明欄に結果) |
-| AGENTS.md に今後の導入ルールが反映 | ✅ `/AGENTS.md` §「Last-Mile Shared Context Rule」追加済み |
+| AGENTS.md に今後の発火条件が反映 | ✅ `/AGENTS.md` §「Last-Mile Shared Context Rule」は発火条件 + 本ファイルへのリンクのみ (規約本体は本ファイル §5 が正本) |
 
 ---
 

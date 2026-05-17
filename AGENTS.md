@@ -333,80 +333,21 @@ AIが発見したパターンを記録する際、必ず人間語の `label` と
 
 ## Last-Mile Shared Context Rule
 
-> **由来**: `last-mile-shared-context` Phase 11 で TradeAssist へ導入したラストマイル観察規約。テンプレ正本は `vendor/last-mile-context/` 配布物の `templates/AGENTS.last-mile.md` (https://github.com/NekoyaJolly/last-mile-shared-context)。
+> **規約本体は `docs/architecture/LAST_MILE_INTEGRATION.md` §5**。本セクションは **発火条件 + 常時有効な安全境界** のみ。日常作業では LAST_MILE_INTEGRATION.md を読まなくてよい。
 
-UI・UX・API 連携・DB 状態・Job 状態に関する **ラストマイル修正** では、コードだけで判断してはならない。修正前に必ず **Last-Mile Bundle** を確認する。
+**発火条件**: UI / UX / API 連携 / DB 状態 / Job 状態に関する **ラストマイル修正** (実行してみたら期待と挙動が違う系) に着手するとき。コードだけで推測修正してはならない。以下の順に実行する:
 
-### 1. 必ず確認する 9 項目
+1. `docs/architecture/LAST_MILE_INTEGRATION.md` を読む (規約 + 取得手段 + Domain ID マッピング)
+2. **Last-Mile Bundle** を `.last-mile/latest/` に取得 (CLI / MCP / 手動の 3 経路)
+3. `@last-mile-context/core` の `classifyIssue(bundle)` で原因分類してから修正
+4. AI に渡す前に `npx lastmile mask --strict` で redaction 再確認
+5. 解決後は `tests/e2e/` に Playwright spec で再現手順を残す
 
-| # | 確認対象 | 取得元 |
-|---|---|---|
-| 1 | 対象画面 | `page.url` / `page.title` / `debugContext.screen` |
-| 2 | 操作手順 | `userObservation.lastAction` (人間が書く) |
-| 3 | 期待値 | `userObservation.expected` (人間が書く) |
-| 4 | 実際の挙動 | `userObservation.actual` (人間が書く) |
-| 5 | Console | `console.errors` / `console.warnings` |
-| 6 | Network | `network.failedRequests` / `network.recentRequests` |
-| 7 | AI Debug Context | `debugContext` (= アプリ側 `window.__AI_DEBUG_CONTEXT__`) |
-| 8 | Domain ID | `debugContext.target.id` / `debugContext.target.relatedIds` |
-| 9 | Server log | `server.errors` / `server.hints` (= backend log 抜粋) |
+**常時有効な安全境界 (ラストマイル作業外でも `window.__AI_DEBUG_CONTEXT__` を触る時に必須)**:
+- `__AI_DEBUG_CONTEXT__` に token / cTrader OAuth token / JWT / refresh token / cTrader accountId / 取引額 / 実残高 を入れない (redaction は最終防衛線、そもそも入れない方が安全)
+- production 環境への collect は禁止 (`lastmile.config.json` の `environment: 'development'` 固定)
 
-### 2. 取得手段
-
-- **CLI**: `npx lastmile collect --last-action "..." --expected "..." --actual "..." --out .last-mile/latest` (要 Chrome `--remote-debugging-port=9222`)
-- **MCP**: `lastmile-mcp` を MCP クライアント (Claude Desktop / Cursor) に登録し `collect_last_mile_bundle` を呼ぶ
-- **手動**: 画面の **Copy AI Context** ボタン (dev 限定表示) → クリップボード経由で AI に貼り付け
-
-### 3. 原因分類 (Bundle を見て決める)
-
-| 兆候 | 分類 |
-|---|---|
-| `server.errors[]` あり | Server |
-| `network.failedRequests[]` に status>=500 | API |
-| `network.failedRequests[]` で 5xx 以外 (4xx / abort) | Network |
-| `console.errors[]` あり | UI |
-| 上記なし & `userObservation.expected !== actual` | UX |
-| 何もなし | NoIssue / Unknown |
-
-`@last-mile-context/core` の `classifyIssue(bundle)` で雛形分類が得られる。
-
-### 4. 守るべき原則
-
-1. **原因分類なしに修正してはならない**: Bundle を見ずに「ここっぽい」で修正しない
-2. **修正後に再収集して回帰確認**: 同じ Bundle 観点で改善を確認する
-3. **再発防止のため Playwright spec / checklist 化**: 解決したラストマイル issue は `tests/e2e/` 配下に Playwright spec として再現手順を残す (= `generatePlaywrightTestFromBundle` で雛形生成可)
-4. **`window.__AI_DEBUG_CONTEXT__` に token / 個人情報を入れない**: cTrader OAuth token / JWT / refresh token / `accountId` 等の機密値は Domain ID から除外。redaction は最終防衛線
-5. **Bundle に含まれる Authorization / Cookie / JWT は redaction で自動マスク**: AI に渡す前に `npx lastmile mask .last-mile/latest/last-mile-bundle.json --strict` で再確認する
-
-### 5. TradeAssist 固有の Domain ID マッピング
-
-`debugContext.target` および `debugContext.domain` には以下の TradeAssist Domain ID を Bundle に含めること (画面ごとに必要なものだけ):
-
-| 画面 | `target.type` | `target.id` の意味 | `target.relatedIds` で渡す ID |
-|---|---|---|---|
-| `/side-b/dashboard` | `dashboard` | `'overview'` 固定 | `latestDiscoveryHypothesisId` (= Discovery サマリで先頭表示しているもの)。`latestAgentRunId` / `latestValidationId` は dashboard API が未提供のため Phase 12 以降で追加。**画面が API として取得していない ID は載せない** |
-| `/side-b/hypotheses` | `hypothesisList` | クエリ条件のハッシュ | (なし) |
-| `/side-b/hypotheses/[id]` | `hypothesis` | `hypothesisId` | `agentRunId` / `latestValidationId` / `tradeNoteIds` |
-| `/side-b/validation` | `validation` | `validationId` | `hypothesisId` / `agentRunId` |
-| `/side-b/agent` | `agentRun` | `agentRunId` | `hypothesisId` |
-| `/side-b/evolution` | `evolutionGeneration` | `generationId` | `parentHypothesisIds` |
-
-`domain` には **ID ではなく状態サマリ** を入れる: `hypothesisStatus` / `latestValidationStatus` / `latestAgentRunStatus` / `dashboardHealthState` 等の文字列。**個人情報・取引額・cTrader accountId・実残高は入れない** (redaction で落とせない値はそもそも入れない原則)。
-
-### 6. ログイン前提画面の扱い
-
-TradeAssist の `/side-b/*` は cTrader OAuth 必須。Bundle 取得時:
-
-- Chrome を `--remote-debugging-port=9222 --user-data-dir=.chrome-lastmile-trader-note` で起動し、開発者が事前にそのプロファイルで cTrader ログインしておく
-- collector は既存セッションを共有して認証済ページを取得 (token は redaction でマスクされる)
-- Playwright を使う場合は `storageState` (`tests/e2e/.auth/user.json` 相当) を保存し、各テストで読み込む
-- production 環境への collect は禁止。`environment: 'development'` 固定 (`lastmile.config.json`)
-
-### 7. 参照ドキュメント
-
-- `vendor/last-mile-context/` 内 tarball の README / templates
-- 上流: https://github.com/NekoyaJolly/last-mile-shared-context (`docs/LAST_MILE_PROTOCOL.md` 等)
-- 本プロジェクトの導入手順 / MCP 設定: `docs/architecture/LAST_MILE_INTEGRATION.md`
+由来: `last-mile-shared-context` Phase 11 で導入。テンプレ正本は `vendor/last-mile-context/templates/AGENTS.last-mile.md`。上流: https://github.com/NekoyaJolly/last-mile-shared-context
 
 ---
 
