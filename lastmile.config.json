@@ -1,0 +1,19 @@
+{
+  "appName": "trader-note-build-ai",
+  "environment": "development",
+  "chrome": {
+    "remoteDebuggingUrl": "http://localhost:9222"
+  },
+  "output": {
+    "dir": ".last-mile/latest"
+  },
+  "redaction": {
+    "maskHeaders": [
+      "authorization",
+      "cookie",
+      "set-cookie",
+      "x-api-key",
+      "x-trader-note-token"
+    ]
+  }
+}

@@ -7,6 +7,14 @@
 import * as React from "react";
 import Link from "next/link";
 
+import {
+  enableAiDebugContextWindowPublish,
+  mergeAiDebugContext,
+  setAiDebugContext,
+} from "@last-mile-context/app-bridge";
+import type { AiDebugContext } from "@last-mile-context/schema";
+import { CopyAiDebugContextButton } from "@last-mile-context/react-bridge";
+
 import { Button } from "@/components/ui/Button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/Alert";
 import { Card } from "@/components/ui/Card";
@@ -25,6 +33,41 @@ import type {
   DiscoveryLatestResponse,
   SystemHealthResponse,
 } from "@/types/sideB";
+
+/**
+ * AI Debug Context の初期値 (Phase 11 / AGENTS.md §「Last-Mile Shared Context Rule」§5)。
+ *
+ * - `target.type='dashboard'` / `target.id='overview'` 固定 (Dashboard は単一画面)
+ * - 初期 `relatedIds` / `domain` は空。load() 成功時に mergeAiDebugContext で実状態を反映
+ * - token / cTrader accountId / 取引額 等の機密値は **絶対に入れない**
+ */
+const initialDashboardDebugContext: AiDebugContext = {
+  screen: {
+    name: "SideBDashboard",
+    route: "/side-b/dashboard",
+    mode: "development",
+  },
+  target: {
+    type: "dashboard",
+    id: "overview",
+    relatedIds: {},
+  },
+  action: {
+    name: "idle",
+    status: "idle",
+    expected: "",
+    actual: "",
+  },
+  domain: {},
+  runtime: {
+    latestApi: [],
+    latestError: null,
+    warnings: [],
+  },
+};
+
+/** dev 環境判定。production build では Copy ボタンを描画しない (個人情報露出回避)。 */
+const isDevMode = process.env.NODE_ENV !== "production";
 
 export default function SideBDashboardPage() {
   const [overview, setOverview] = React.useState<StatsOverviewResponse | null>(null);
@@ -81,6 +124,85 @@ export default function SideBDashboardPage() {
     load();
   }, [load]);
 
+  // AI Debug Context を window.__AI_DEBUG_CONTEXT__ に公開する (mount 時 1 回のみ)。
+  // production では `enableAiDebugContextWindowPublish({ allowProduction: false })` により NO-OP。
+  React.useEffect(() => {
+    enableAiDebugContextWindowPublish({ allowProduction: false });
+    setAiDebugContext(initialDashboardDebugContext);
+  }, []);
+
+  // load() の各種 state が更新されたら、AI Debug Context にも実状態を反映 (P11-05)。
+  // Domain ID は AGENTS.md §「Last-Mile Shared Context Rule」§5 で定義したマッピングに従う。
+  React.useEffect(() => {
+    if (loading) {
+      mergeAiDebugContext({
+        action: {
+          name: "load-dashboard",
+          status: "pending",
+          expected: "8 種の Dashboard API がすべて成功して画面に反映される",
+          actual: "API 取得中",
+        },
+      });
+      return;
+    }
+    if (error !== null) {
+      mergeAiDebugContext({
+        action: {
+          name: "load-dashboard",
+          status: "failed",
+          expected: "8 種の Dashboard API がすべて成功して画面に反映される",
+          actual: `エラー: ${error}`,
+        },
+        domain: {
+          hypothesisCount: overview?.totalHypotheses ?? null,
+          databaseHealth: health?.database ?? null,
+          pythonValidatorHealth: health?.pythonValidator ?? null,
+          loadError: error,
+        },
+        runtime: {
+          latestApi: [],
+          latestError: {
+            message: error,
+            timestamp: new Date().toISOString(),
+          },
+          warnings: [],
+        },
+      });
+      return;
+    }
+    // 正常系: overview / health / discovery などのサマリだけを domain に流す
+    // (個別の数値・取引額・個人情報・cTrader accountId は入れない原則)
+    const sampleDiscoveryId = discovery?.sampleHypotheses[0]?.id;
+    mergeAiDebugContext({
+      action: {
+        name: "load-dashboard",
+        status: "success",
+        expected: "8 種の Dashboard API がすべて成功して画面に反映される",
+        actual: overview === null ? "ロード完了だが overview なし" : "ロード完了",
+      },
+      target: {
+        type: "dashboard",
+        id: "overview",
+        relatedIds: sampleDiscoveryId !== undefined ? { latestDiscoveryHypothesisId: sampleDiscoveryId } : {},
+      },
+      domain: {
+        hypothesisCount: overview?.totalHypotheses ?? null,
+        confirmedCount: overview?.confirmedCount ?? null,
+        newHypothesesThisWeek: overview?.newHypothesesThisWeek ?? null,
+        databaseHealth: health?.database ?? null,
+        pythonValidatorHealth: health?.pythonValidator ?? null,
+        recentConfirmedCount: recentConf.length,
+        recentRejectedCount: recentRej.length,
+        hasLatestDiscoveryWeeklyReport: discovery?.hasWeeklyReport ?? false,
+      },
+      runtime: {
+        latestApi: [],
+        latestError: null,
+        warnings: [],
+      },
+    });
+  }, [loading, error, overview, health, discovery, recentConf.length, recentRej.length]);
+
   return (
     <div className="min-h-screen bg-slate-900 text-gray-100">
       <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-6">
@@ -91,11 +213,22 @@ export default function SideBDashboardPage() {
               エッジ台帳の成長・検証活動・システム状態の俯瞰
             </p>
           </div>
-          <Link href="/side-b">
-            <Button variant="outline" size="sm">
-              エージェントへ
-            </Button>
-          </Link>
+          <div className="flex items-center gap-2">
+            {isDevMode && (
+              <CopyAiDebugContextButton
+                label="Copy AI Context"
+                className="text-xs px-2 py-1 border border-cyan-500/40 rounded bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20"
+                buttonProps={{
+                  title: "現在の window.__AI_DEBUG_CONTEXT__ を整形して clipboard へコピー (dev のみ)",
+                }}
+              />
+            )}
+            <Link href="/side-b">
+              <Button variant="outline" size="sm">
+                エージェントへ
+              </Button>
+            </Link>
+          </div>
         </div>
 
         <section>
