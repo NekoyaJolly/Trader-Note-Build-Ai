@@ -4,6 +4,11 @@
       "command": "node",
       "args": ["build/index.js"],
       "cwd": "${workspaceFolder}/tools/gemini-drive-mcp"
+    },
+    "lastmile-mcp": {
+      "command": "npx",
+      "args": ["--no-install", "lastmile-mcp"],
+      "cwd": "${workspaceFolder}"
     }
   }
 }

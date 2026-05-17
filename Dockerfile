@@ -26,6 +26,10 @@ WORKDIR /app
 #   本番イメージに含めても情報漏洩リスクなし。
 COPY package*.json .npmrc ./
 COPY scripts ./scripts
+# Last-Mile Shared Context (Phase 11) — `package.json` が `file:./vendor/last-mile-context/*.tgz`
+# を直接参照するため、`npm ci` 前に vendor/ を COPY しないと "ENOENT: ... .tgz" で失敗する。
+# 配布物は registry に publish していない (社内 / vendor 同梱方針) ため、本ファイルが正本。
+COPY vendor ./vendor
 RUN npm ci
 
 # Prisma スキーマをコピーして Client 生成

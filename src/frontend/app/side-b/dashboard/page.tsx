@@ -6,6 +6,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 
 import { Button } from "@/components/ui/Button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/Alert";
@@ -14,6 +15,10 @@ import { NeonCard } from "@/components/ui/NeonCard";
 import { HypothesisCard } from "@/components/side-b/HypothesisCard";
 import { LedgerStats } from "@/components/side-b/LedgerStats";
 import { DashboardCharts } from "@/components/side-b/DashboardCharts";
+import {
+  initialDashboardDebugContext,
+  buildDashboardDebugContextPatch,
+} from "@/app/side-b/dashboard/debugContext";
 import { sideBApi, SideBApiError } from "@/lib/sideBApi";
 import { parseEvolutionStatement } from "@/lib/evolutionStatement";
 import type {
@@ -25,6 +30,13 @@ import type {
   DiscoveryLatestResponse,
   SystemHealthResponse,
 } from "@/types/sideB";
+
+/** dev 環境判定。production build では Copy ボタンを描画しない (個人情報露出回避)。 */
+const isDevMode = process.env.NODE_ENV !== "production";
+const DevCopyAiDebugContextButton = dynamic(
+  () => import("@last-mile-context/react-bridge").then((module) => module.CopyAiDebugContextButton),
+  { ssr: false },
+);
 
 export default function SideBDashboardPage() {
   const [overview, setOverview] = React.useState<StatsOverviewResponse | null>(null);
@@ -38,6 +50,14 @@ export default function SideBDashboardPage() {
 
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  const debugContextBridgeRef = React.useRef<
+    | {
+        mergeAiDebugContext: (
+          patch: ReturnType<typeof buildDashboardDebugContextPatch>,
+        ) => void;
+      }
+    | null
+  >(null);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -81,6 +101,46 @@ export default function SideBDashboardPage() {
     load();
   }, [load]);
 
+  // AI Debug Context を window.__AI_DEBUG_CONTEXT__ に公開する (mount 時 1 回のみ)。
+  // production では `enableAiDebugContextWindowPublish({ allowProduction: false })` により NO-OP。
+  React.useEffect(() => {
+    let mounted = true;
+    void import("@last-mile-context/app-bridge").then((bridge) => {
+      if (!mounted) {
+        return;
+      }
+      bridge.enableAiDebugContextWindowPublish({ allowProduction: false });
+      bridge.setAiDebugContext(initialDashboardDebugContext);
+      debugContextBridgeRef.current = {
+        mergeAiDebugContext: bridge.mergeAiDebugContext,
+      };
+    });
+    return () => {
+      mounted = false;
+      debugContextBridgeRef.current = null;
+    };
+  }, []);
+
+  // load() の各種 state が更新されたら、AI Debug Context にも実状態を反映 (P11-05)。
+  // Domain ID は AGENTS.md §「Last-Mile Shared Context Rule」§5 で定義したマッピングに従う。
+  React.useEffect(() => {
+    const bridge = debugContextBridgeRef.current;
+    if (bridge === null) {
+      return;
+    }
+    bridge.mergeAiDebugContext(
+      buildDashboardDebugContextPatch({
+        loading,
+        error,
+        overview,
+        health,
+        discovery,
+        recentConfirmedCount: recentConf.length,
+        recentRejectedCount: recentRej.length,
+      }),
+    );
+  }, [loading, error, overview, health, discovery, recentConf, recentRej]);
+
   return (
     <div className="min-h-screen bg-slate-900 text-gray-100">
       <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-6">
@@ -91,11 +151,22 @@ export default function SideBDashboardPage() {
               エッジ台帳の成長・検証活動・システム状態の俯瞰
             </p>
           </div>
-          <Link href="/side-b">
-            <Button variant="outline" size="sm">
-              エージェントへ
-            </Button>
-          </Link>
+          <div className="flex items-center gap-2">
+            {isDevMode && (
+              <DevCopyAiDebugContextButton
+                label="Copy AI Context"
+                className="text-xs px-2 py-1 border border-cyan-500/40 rounded bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20"
+                buttonProps={{
+                  title: "現在の window.__AI_DEBUG_CONTEXT__ を整形して clipboard へコピー (dev のみ)",
+                }}
+              />
+            )}
+            <Link href="/side-b">
+              <Button variant="outline" size="sm">
+                エージェントへ
+              </Button>
+            </Link>
+          </div>
         </div>
 
         <section>

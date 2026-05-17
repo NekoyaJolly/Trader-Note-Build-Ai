@@ -113,6 +113,33 @@ export type AIAgentKey =
   // パターン分析 (patternAnalysisService) — チャートパターン抽出 + アノマリー検知、低コスト想定
   | 'pattern_analysis';
 
+/**
+ * `AI_REASONING_EFFORT` env のホワイトリスト検証。
+ * 許容値: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+ * 不正値・未設定の場合は 'high' にフォールバック。
+ * 不正値の時は警告ログを出して運用事故を可視化する。
+ *
+ * NOTE: `config` 内 `ai.reasoningEffort` の初期化から呼ばれるため、参照する
+ *       `const VALID_REASONING_EFFORTS` を `config` 宣言より前に置く必要がある
+ *       (TDZ 回避)。
+ */
+const VALID_REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+export type ReasoningEffortValue = typeof VALID_REASONING_EFFORTS[number];
+
+export function resolveReasoningEffort(): ReasoningEffortValue {
+  const raw = process.env.AI_REASONING_EFFORT;
+  if (!raw) return 'high';
+  const trimmed = raw.trim().toLowerCase();
+  if ((VALID_REASONING_EFFORTS as readonly string[]).includes(trimmed)) {
+    return trimmed as ReasoningEffortValue;
+  }
+  console.warn(
+    `[Config] AI_REASONING_EFFORT に不正な値: "${raw}". 'high' にフォールバックします. ` +
+      `許容値: ${VALID_REASONING_EFFORTS.join(', ')}`,
+  );
+  return 'high';
+}
+
 export const config = {
   server: {
     // 優先度: BACKEND_PORT > PORT > 3100（env設定がある場合はそちらを優先）
@@ -214,29 +241,6 @@ export const config = {
     notes: './data/notes',
   },
 };
-
-/**
- * `AI_REASONING_EFFORT` env のホワイトリスト検証。
- * 許容値: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
- * 不正値・未設定の場合は 'high' にフォールバック。
- * 不正値の時は警告ログを出して運用事故を可視化する。
- */
-const VALID_REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
-export type ReasoningEffortValue = typeof VALID_REASONING_EFFORTS[number];
-
-export function resolveReasoningEffort(): ReasoningEffortValue {
-  const raw = process.env.AI_REASONING_EFFORT;
-  if (!raw) return 'high';
-  const trimmed = raw.trim().toLowerCase();
-  if ((VALID_REASONING_EFFORTS as readonly string[]).includes(trimmed)) {
-    return trimmed as ReasoningEffortValue;
-  }
-  console.warn(
-    `[Config] AI_REASONING_EFFORT に不正な値: "${raw}". 'high' にフォールバックします. ` +
-      `許容値: ${VALID_REASONING_EFFORTS.join(', ')}`,
-  );
-  return 'high';
-}
 
 /**
  * `AI_MODEL_OVERRIDE_ALL` env が有効に設定されていれば trim した値を返す。

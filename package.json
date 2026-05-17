@@ -80,6 +80,12 @@
     "@babel/core": "^7.29.0",
     "@babel/preset-env": "^7.29.5",
     "@eslint/js": "^10.0.1",
+    "@last-mile-context/cdp-collector": "file:./vendor/last-mile-context/last-mile-context-cdp-collector-0.1.0.tgz",
+    "@last-mile-context/cli": "file:./vendor/last-mile-context/last-mile-context-cli-0.1.0.tgz",
+    "@last-mile-context/core": "file:./vendor/last-mile-context/last-mile-context-core-0.1.0.tgz",
+    "@last-mile-context/mcp-server": "file:./vendor/last-mile-context/last-mile-context-mcp-server-0.1.0.tgz",
+    "@last-mile-context/playwright-adapter": "file:./vendor/last-mile-context/last-mile-context-playwright-adapter-0.1.0.tgz",
+    "@last-mile-context/schema": "file:./vendor/last-mile-context/last-mile-context-schema-0.1.0.tgz",
     "@playwright/test": "^1.40.0",
     "@types/bcrypt": "^6.0.0",
     "@types/cors": "^2.8.19",
@@ -109,7 +115,13 @@
     "typescript-eslint": "^8.59.1"
   },
   "overrides": {
-    "axios": "^1.12.0"
+    "axios": "^1.12.0",
+    "@last-mile-context/schema": "$@last-mile-context/schema",
+    "@last-mile-context/core": "$@last-mile-context/core",
+    "@last-mile-context/cdp-collector": "$@last-mile-context/cdp-collector",
+    "@last-mile-context/cli": "$@last-mile-context/cli",
+    "@last-mile-context/mcp-server": "$@last-mile-context/mcp-server",
+    "@last-mile-context/playwright-adapter": "$@last-mile-context/playwright-adapter"
   },
   "simple-git-hooks": {
     "pre-commit": "npx lint-staged"
