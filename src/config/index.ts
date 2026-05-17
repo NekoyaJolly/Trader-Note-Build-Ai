@@ -119,9 +119,9 @@ export type AIAgentKey =
  * 不正値・未設定の場合は 'high' にフォールバック。
  * 不正値の時は警告ログを出して運用事故を可視化する。
  *
- * NOTE: 下の `config` 初期化 (L140: `reasoningEffort: resolveReasoningEffort()`)
- *       から呼ばれるため、参照する `const VALID_REASONING_EFFORTS` を
- *       `config` 宣言より前に置く必要がある (TDZ 回避)。
+ * NOTE: `config` 内 `ai.reasoningEffort` の初期化から呼ばれるため、参照する
+ *       `const VALID_REASONING_EFFORTS` を `config` 宣言より前に置く必要がある
+ *       (TDZ 回避)。
  */
 const VALID_REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
 export type ReasoningEffortValue = typeof VALID_REASONING_EFFORTS[number];

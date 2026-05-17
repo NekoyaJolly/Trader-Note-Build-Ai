@@ -384,7 +384,7 @@ UI・UX・API 連携・DB 状態・Job 状態に関する **ラストマイル�
 
 | 画面 | `target.type` | `target.id` の意味 | `target.relatedIds` で渡す ID |
 |---|---|---|---|
-| `/side-b/dashboard` | `dashboard` | `'overview'` 固定 | `latestAgentRunId` / `latestValidationId` (= dashboard が直近表示しているもの) |
+| `/side-b/dashboard` | `dashboard` | `'overview'` 固定 | `latestDiscoveryHypothesisId` (= Discovery サマリで先頭表示しているもの)。`latestAgentRunId` / `latestValidationId` は dashboard API が未提供のため Phase 12 以降で追加。**画面が API として取得していない ID は載せない** |
 | `/side-b/hypotheses` | `hypothesisList` | クエリ条件のハッシュ | (なし) |
 | `/side-b/hypotheses/[id]` | `hypothesis` | `hypothesisId` | `agentRunId` / `latestValidationId` / `tradeNoteIds` |
 | `/side-b/validation` | `validation` | `validationId` | `hypothesisId` / `agentRunId` |
