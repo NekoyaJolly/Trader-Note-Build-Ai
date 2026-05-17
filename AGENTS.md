@@ -231,6 +231,22 @@ router.post('/', async (req, res) => {
 | Side-B 関連 | HTML 設計正本、暫定で `DESIGN_DOC_autonomous_trading_architecture.md` |
 | ADK 採用範囲・実装状況 | `docs/architecture/ADK_ADOPTION.md` |
 
+### 5.3 新規ファイル作成は最終手段 (2026-05-17 制定)
+
+新規ファイルは「作業の副産物」ではなく「設計上の追加物」。実装・修正・検証でファイルを増やす前に、以下を必ず確認する。
+
+1. 既存ファイルへの追記・修正で済まないか
+2. 既存テスト / スクリプト / helper / util / service にケース・オプションを追加して統合できないか
+3. そのファイルが恒久的に必要か、一時的な調査用か
+
+新規作成が必要な場合は、PR 説明に **責務 / 既存統合しなかった理由 / 恒久 or 一時の別 / 実行 or 参照経路 / 削除条件** を必ず記載する。
+
+一時調査ファイルを `src/` 配下やリポジトリ直下に置かない (`.tmp/` / `tmp/` / `scratch/` を使い、`.gitignore` する)。テストはバグ修正ごとに新ファイルを作らず、既存テストファイルにケース追加するのが原則。
+
+### 5.4 scripts/ ディレクトリの運用
+
+`scripts/` 配下に置くスクリプトは **`scripts/README.md` の登録表に必ず追記**する。追記しないスクリプトは追加してはならない。用途分類は `dev/` `check/` `migrate/` `ci/` `maintenance/` `one-shot/`、one-shot は冒頭に削除予定日を記載する。詳細は [`scripts/README.md`](./scripts/README.md) を参照。
+
 ---
 
 ## 6. PR / コミット規約
