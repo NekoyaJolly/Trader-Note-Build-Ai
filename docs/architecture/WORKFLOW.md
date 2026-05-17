@@ -202,16 +202,19 @@ PR と違って Copilot レビューは走らない。push 後の CI fail には
 | リソース | 内容 |
 |---------|------|
 | `.claude/skills/copilot-review-responder/` | Copilot レビュー対応スキル定義 (本書 §3.2 の inline 実行を仕様化したもの) |
-| `.github/workflows/lint-fix-on-merge.yml` | 本書 §8 の自動 lint 修正 workflow 本体 |
 | `/AGENTS.md` | 全エージェント共通ルール (正本) |
 | `docs/architecture/ADK_ADOPTION.md` | ADK 採用計画 (Step 進捗管理) |
 | `docs/architecture/STEP_*_KICKOFF.md` / `STEP_*_SUMMARY.md` | 各 Step の作業手順書 / 完了サマリー |
 
 ---
 
-## 8. 自動 lint 修正ワークフロー (Copilot Coding Agent)
+## 8. 自動 lint 修正ワークフロー (2026-05-17 停止)
 
-実装 PR が main にマージされたタイミングで、変更ファイルの 1 階層親ディレクトリに対して ESLint / tsc 違反を **Copilot Coding Agent** に自動修正させる仕組み。
+> **ステータス**: 停止 (`.github/workflows/lint-fix-on-pr.yml` を削除)
+> **理由**: ESLint backend/frontend のエラーは PR #214 / #215 で完全解消済 (backend 195 errors + 31 warnings / frontend 27 errors + 47 warnings をゼロ化)。CI の `Lint & TypeCheck` ジョブが新規違反を pre-merge でブロックするため、auto-fix bot は不要になった。
+> **以下は経緯記録**。再開する場合は新規 PR で復活させる前提。
+
+実装 PR が main にマージされたタイミングで、変更ファイルの 1 階層親ディレクトリに対して ESLint / tsc 違反を **Copilot Coding Agent** に自動修正させる仕組みとして当初導入した。
 
 ### 8.1 目的
 
@@ -355,3 +358,4 @@ gh run list --workflow=deploy.yml --limit=1 --json conclusion,number,headSha,sta
 - **2026-05-13** (commit b66ca30): §8 自動 lint 修正ワークフロー追加 (`.github/workflows/lint-fix-on-merge.yml`)。Copilot Coding Agent ベース、ESLint 488 / tsconfig audit 1423 の段階解消を Nekoさん負担ゼロで継続するため
 - **2026-05-13**: 本書 (`WORKFLOW.md`) としてリポジトリに正式文書化 (それまでは Claude のメモリにのみ存在)
 - **2026-05-14** (PR #184 振り返り): §9 Production Deployment 失敗の早期検出フロー追加。pre-merge `docker build` ゲート + 次 Phase 着手時の瞬間チェックの 2 段構成。deploy #457〜#472 の 15 連続失敗を merge から検知まで放置した事例を踏まえた再発防止
+- **2026-05-17**: §8 自動 lint 修正ワークフロー停止 (`.github/workflows/lint-fix-on-pr.yml` 削除)。理由: PR #214 / #215 で ESLint backend/frontend エラーをゼロ化済、CI の `Lint & TypeCheck` ジョブが新規違反を pre-merge でブロックするため auto-fix bot は不要に。本書 §8 は経緯記録のみ残し、再開時は新規 PR で復活させる前提
