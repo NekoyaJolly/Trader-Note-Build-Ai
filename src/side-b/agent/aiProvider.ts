@@ -16,7 +16,7 @@
 
 import { z } from 'zod';
 import { config, resolveDefaultModel } from '../../config';
-import type { McpToolDefinition } from './mcpClient';
+import type { McpToolDefinition } from '../skills/types';
 
 /**
  * AIProvider が必要とする最小限のレスポンス形状を Zod で検証する。

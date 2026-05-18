@@ -153,3 +153,27 @@ export interface Skill<TInput = SkillJsonInput, TOutput = SkillJsonOutput> {
   readonly inputSchema: SkillInputSchema;
   execute(input: TInput, context: SkillContext): Promise<TOutput>;
 }
+
+/**
+ * LLM tool 呼び出し schema (OpenAI function calling / MCP 互換)。
+ *
+ * 経緯 (2026-05-19): もとは `src/side-b/agent/mcpClient.ts` で定義されていたが、
+ * Phase 5.5 の AgentLoop + MCP server を撤去した際、AIProvider と SkillRegistry が
+ * 引き続き本型を必要としていたため本ファイルに移植 (memory: 新規ファイル作成は最終手段)。
+ * 型名はそのまま (= 改名は別 PR スコープ)、構造も元定義のまま保持。
+ */
+export interface McpToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: {
+    type: 'object';
+    properties?: Record<string, object>;
+    required?: string[];
+  };
+}
+
+/** LLM tool 実行結果 (MCP プロトコル互換形式)。経緯は McpToolDefinition と同じ。 */
+export interface McpToolResult {
+  content: Array<{ type: string; text?: string }>;
+  isError?: boolean;
+}

@@ -10,7 +10,7 @@
  *   に wrap する。details に元例外を保持するので、呼び出し側でロギング可能。
  */
 
-import type { McpToolDefinition, McpToolResult } from '../agent/mcpClient';
+import type { McpToolDefinition, McpToolResult } from './types';
 import type { JsonValue } from '../../utils/jsonValue';
 import type {
   BaseSkill,

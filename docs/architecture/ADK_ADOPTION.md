@@ -18,7 +18,9 @@ Side-B 自律トレーディング AI における **エージェントオーケ
 
 ### 1.2 背景
 
-Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `PromptRegistry` 等の中核実装が存在する。これらは**進化的探索**を前提とした特殊な設計 (プロンプトの外部ファイル化、レンズの決定性、エッジ台帳の厳格な昇格判定等) を持っており、ADK の標準パターンに置き換えると失われる価値がある。
+Side-B には既に独自実装の `PDCALoop` `SkillRegistry` `PromptRegistry` 等の中核実装が存在する。これらは**進化的探索**を前提とした特殊な設計 (プロンプトの外部ファイル化、レンズの決定性、エッジ台帳の厳格な昇格判定等) を持っており、ADK の標準パターンに置き換えると失われる価値がある。
+
+> NOTE (2026-05-19): 旧 `AgentLoop` (= Phase 5.5 設計の「1 LLM が PDCA 全部を回す」自律エージェント) は **撤去済** ([本セッション議論結果](../diagnostics/2026-05-19_loops_flow_diagram.html))。Phase 6.7a 以降は **役割別細分化された各 Agent + PromptRegistry** が正規路で、ADK 統合の wrap 対象も `PDCALoop` + 各個別 Agent (`HypothesisGeneratorAgent` 等) に限定される。
 
 そのため、**ADK は既存実装を置き換えるのではなく、既存実装をラップしオーケストレーションとトレースを上乗せする「サイドカー」として導入する**。
 
@@ -49,7 +51,7 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 | **Lens 群** | `src/side-b/lenses/` | 副作用なし・依存なし・決定性ありの純粋関数。ADK Agent ではなく単純な関数のまま保つ |
 | **Evolution 探索アルゴリズム** | `src/side-b/evolution/` | 進化的探索の決定論性を保つため、ADK Agent でラップしない |
 | **SkillRegistry の API** | `src/side-b/skills/` | スキル登録の既存 API を保つ。ADK FunctionTool は**アダプター経由**で利用 |
-| **AgentLoop / PDCALoop の内部** | `src/side-b/agent/pdcaLoop.ts` | 中核ループ、内部書き換え禁止。ADK では Custom Agent で**合成 (composition) によりラップ**するのみ |
+| **PDCALoop の内部** | `src/side-b/agent/pdcaLoop.ts` | 中核ループ、内部書き換え禁止。ADK では Custom Agent で**合成 (composition) によりラップ**するのみ。(旧 `AgentLoop` は 2026-05-19 撤去済) |
 | **AIProvider** | AI 呼び出しラッパー | OpenRouter 経由の reasoning_effort 等を保つため、ADK Model 抽象に置き換えない |
 | **ADK `DatabaseSessionService` 系** (永続化・セッション) | 既存 `src/side-b/agent/agentMemory.ts` (Prisma 経由)、必要に応じ Prisma ベース自作 | `@google/adk@1.1.0` の peer dependency が MikroORM を要求しているため。**プロジェクト全体で ORM は Prisma 単独** (Nekoさん判断 2026-05-12)。MikroORM を入れると ORM 二重管理になりエージェントが迷う |
 
@@ -122,7 +124,7 @@ Side-B には既に独自実装の `PDCALoop` `AgentLoop` `SkillRegistry` `Promp
 |------|---------------------------|----------------|
 | **PromptRegistry** | `src/side-b/prompts/` 周辺 | 進化的探索でプロンプト自体を変異対象にするため、外部 `.md` ファイル化と読み込み機構を保つ |
 | **SkillRegistry API** | `src/side-b/skills/` | スキル登録 API は既存。ADK 統合はアダプター経由 |
-| **AgentLoop / PDCALoop 内部** | `src/side-b/agent/pdcaLoop.ts` | 中核ループ。ADK は**合成によるラップ**のみ可、内部書き換え禁止 |
+| **PDCALoop 内部** | `src/side-b/agent/pdcaLoop.ts` | 中核ループ。ADK は**合成によるラップ**のみ可、内部書き換え禁止。(旧 `AgentLoop` は 2026-05-19 撤去済) |
 | **AIProvider 内部** | AI 呼び出しラッパー | OpenRouter 経由の `reasoning_effort` 等の透過を保つ |
 | **strategy_dsl** | `src/side-b/strategy_dsl/` | 戦略 DSL の仕様独立性 |
 | **EdgeLedger 昇格判定** | `src/side-b/ledger/` | PF > 1.5, WF < 0.3 等の決定論的判定 |

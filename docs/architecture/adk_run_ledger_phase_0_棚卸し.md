@@ -140,7 +140,7 @@ WBS §17 (PR ごとの禁止事項) と `docs/architecture/ADK_ADOPTION.md` §6 
 |---|---|
 | `PromptRegistry` | `src/side-b/prompts/` 周辺 |
 | `SkillRegistry` API | `src/side-b/skills/` |
-| `AgentLoop` / `PDCALoop` 内部 | `src/side-b/agent/pdcaLoop.ts` |
+| `PDCALoop` 内部 | `src/side-b/agent/pdcaLoop.ts` (旧 `AgentLoop` は 2026-05-19 撤去済) |
 | `AIProvider` 内部 | OpenRouter ラッパー |
 | `strategy_dsl` | `src/side-b/strategy_dsl/` |
 | `EdgeLedger` 昇格判定 | `src/side-b/ledger/` |
