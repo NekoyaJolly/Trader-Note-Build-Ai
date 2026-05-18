@@ -110,8 +110,13 @@ export class HypothesisHardlimitExceededError extends Error {
     }
 }
 
-/** デフォルトのソース別 24h 上限 (Wave 1 応急、Neko 判断: 24h あたり 5 件) */
-const DEFAULT_DAILY_HARDLIMITS: Readonly<Record<string, number>> = {
+/**
+ * デフォルトのソース別 24h 上限 (Wave 1 応急、Neko 判断: 24h あたり 5 件)。
+ *
+ * `Record<EdgeSource, number>` 型で全 source 網羅を TypeScript レベルで強制する
+ * (= 新 source 追加時に default を埋めないとビルドが落ちる)。
+ */
+const DEFAULT_DAILY_HARDLIMITS: Readonly<Record<EdgeSource, number>> = {
     ai_generated: 5,
     discovery: 5,
     reflection: 5,
@@ -134,8 +139,20 @@ export class EdgeLedger {
         if (process.env.HYPOTHESIS_HARDLIMIT_ENABLED === 'false') return;
         const envKey = `HYPOTHESIS_HARDLIMIT_${source.toUpperCase()}_24H`;
         const envValue = process.env[envKey];
-        const limit = envValue !== undefined ? Number(envValue) : DEFAULT_DAILY_HARDLIMITS[source];
-        if (limit === undefined || !Number.isFinite(limit) || limit <= 0) return;
+        // 無効な env 値 (NaN / 負値 / 0) は default にフォールバック (fail safe)。
+        // 過去版は !Number.isFinite で early-return していたため fail open になっていた (Copilot #1)。
+        let limit = DEFAULT_DAILY_HARDLIMITS[source];
+        if (envValue !== undefined) {
+            const parsed = Number(envValue);
+            if (Number.isFinite(parsed) && parsed > 0) {
+                limit = parsed;
+            } else {
+                console.warn(
+                    `[EdgeLedger] Invalid hardlimit override ${envKey}='${envValue}', falling back to default (${limit})`,
+                );
+            }
+        }
+        if (!Number.isFinite(limit) || limit <= 0) return;
         const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
         const recent = await prisma.edgeHypothesis.count({
             where: { source, createdAt: { gte: since } },

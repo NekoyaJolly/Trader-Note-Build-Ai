@@ -98,7 +98,7 @@ export default function SettingsPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // 状態取得
+  // 状態取得 (初期化 + 30秒 polling、ユーザー操作起因ではないため toast は出さず inline のみ)
   async function fetchStatus() {
     try {
       const res = await fetch(`${API_BASE}/scheduler/status`);
@@ -108,9 +108,9 @@ export default function SettingsPage() {
       setEditConfig(data.config);
       setError(null);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "不明なエラー";
-      setError(msg);
-      toast.error(msg);
+      // 30s polling で動くため toast を出すと連発する (Copilot レビュー #4)。
+      // 初期化失敗のフィードバックは inline UI のみで担保。
+      setError(err instanceof Error ? err.message : "不明なエラー");
     } finally {
       setLoading(false);
     }
