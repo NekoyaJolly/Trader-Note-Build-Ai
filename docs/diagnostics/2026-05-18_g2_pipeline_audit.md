@@ -7,6 +7,19 @@
 
 ---
 
+## 0. ⚠️ 前提崩れの警告 (2026-05-18 18:00 追記)
+
+Neko さん指摘により本 audit の §1 / §6.1〜§6.3 の数値は **誤解を招く** ことが判明:
+
+- 集計対象は **過去 7-14 日蓄積 (Discovery 自動挿入由来データ込み)** であり、現状の pipeline 流量を反映していない
+- Discovery 経路は **2026-05-16 にコード削除済** (`DiscoveryAgent.ts §STEP 5 Phase D`)
+- 「BT 通過 91% でも confirmed 1 件」は **「もう作られない戦略の残骸込みの平均値」**
+- これに基づく Hypothesis A (確定基準厳しい) / B (screening 緩い) / C (経路バグ) の議論は **前提から組み直し要**
+
+**真の現状は §6.4 (= 2026-05-17 以降の純粋集計) を見るべし**。Hypothesis D (analysis-engine 不通) の重みが大幅に増した。
+
+---
+
 ## 1. 出発点 — 数値の矛盾
 
 DB 集計 (2026-05-18 時点):
@@ -193,6 +206,29 @@ DB 集計 (2026-05-18 時点):
 | mutation_decay | 1 |
 
 → breakthrough と stagnation がほぼ均衡。`novelty_emerged` / `mutation_decay` 検出がほぼ機能していない (1 件ずつ)。
+
+### 6.4 ⭐ Discovery 削除後 (2026-05-17 以降) の純粋集計
+
+§0 警告に対応する、現状の pipeline 流量だけを切り出した集計 (`createdAt >= 2026-05-17`):
+
+| メトリクス | 値 | 解釈 |
+|---|---|---|
+| EdgeHypothesis 総数 | **15** | 24h あたり 12 件で量産問題なし |
+| status=`not_testable` | **12 (80%)** | **screening でほぼ全部 not_testable に落ちている** |
+| status=`rejected` | 3 (20%) | |
+| status=`screening_passed` | **0** | **screening 自体が機能していない兆候** |
+| status=`confirmed` | **0** | |
+| source=`ai_generated` | 15 | 全件 HG 経由 (discovery は 0) |
+| EvolutionBacktestRun 総数 | 17 | |
+| EvolutionBacktestRun.formalBtPassed | **14 (82%)** | **Evolution 側は走っており passed もしている** |
+| GenerationLesson | other 14 / stagnation 8 / breakthrough 6 | |
+
+**新事実**:
+- 過去蓄積データを除外すると、**screening_passed=0 / confirmed=0** = pipeline 詰まりじゃなく **screening 経路で全部 not_testable に落ちている**
+- 一方 `EvolutionBacktestRun.formalBtPassed=82%` = **Evolution 側の BT は走っており通る**
+- = **`ScreeningOrchestrator` 経路と `EvolutionLoop` 経路で analysis-engine 接続性が違う可能性**、もしくは **`ScreeningOrchestrator` だけが OHLCV カバレッジ不足 / symbols 未設定で全部弾かれている**
+
+**Hypothesis D (analysis-engine 不通) の重みが大幅に増した**。Hypothesis A/B/C は過去データ蓄積の影響で誤解しやすい構造になっていた。
 
 ---
 
