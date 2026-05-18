@@ -18,6 +18,7 @@ import { HypothesisCard } from "@/components/side-b/HypothesisCard";
 import { ValidationTrigger } from "@/components/side-b/ValidationTrigger";
 import { ValidationProgressBar } from "@/components/side-b/ValidationProgressBar";
 import { sideBApi, SideBApiError } from "@/lib/sideBApi";
+import { toast } from "sonner";
 import type { EdgeHypothesis, HypothesisListItem, ValidationStatusResponse } from "@/types/sideB";
 
 const UUID_RE =
@@ -176,11 +177,16 @@ function ValidationPageInner() {
       const res = await sideBApi.batchValidate(ids);
       const ok = res.results.filter((r) => r.ok).length;
       const ng = res.results.length - ok;
-      setBatchMsg(`完了: 成功 ${ok} / 失敗 ${ng}`);
+      const summary = `完了: 成功 ${ok} / 失敗 ${ng}`;
+      setBatchMsg(summary);
+      if (ng === 0) toast.success(summary);
+      else toast.warning(summary);
       setSelected(new Set());
       await loadStatic();
     } catch (e) {
-      setBatchMsg(e instanceof SideBApiError ? e.message : String(e));
+      const msg = e instanceof SideBApiError ? e.message : String(e);
+      setBatchMsg(msg);
+      toast.error(msg);
     }
   };
 

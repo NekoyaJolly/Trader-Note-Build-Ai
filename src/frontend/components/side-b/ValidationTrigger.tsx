@@ -8,6 +8,8 @@
 
 import * as React from "react";
 
+import { toast } from "sonner";
+
 import { Button } from "@/components/ui/Button";
 import { sideBApi, SideBApiError } from "@/lib/sideBApi";
 import type { ValidateResponse } from "@/types/sideB";
@@ -44,9 +46,11 @@ export function ValidationTrigger({
     setLoading(true);
     try {
       const result = await sideBApi.triggerValidation(hypothesisId);
+      toast.success("本格検証を実行しました");
       onComplete?.(result);
     } catch (err) {
       const msg = err instanceof SideBApiError ? err.message : String(err);
+      toast.error(`本格検証エラー: ${msg}`);
       onError?.(msg);
     } finally {
       setLoading(false);

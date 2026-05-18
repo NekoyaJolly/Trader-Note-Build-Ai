@@ -14,6 +14,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { toast } from "sonner";
 
 // APIベースURL（同一オリジン: 相対パス）
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "") + "/api/side-b";
@@ -97,7 +98,7 @@ export default function SettingsPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // 状態取得
+  // 状態取得 (初期化 + 30秒 polling、ユーザー操作起因ではないため toast は出さず inline のみ)
   async function fetchStatus() {
     try {
       const res = await fetch(`${API_BASE}/scheduler/status`);
@@ -107,6 +108,8 @@ export default function SettingsPage() {
       setEditConfig(data.config);
       setError(null);
     } catch (err) {
+      // 30s polling で動くため toast を出すと連発する (Copilot レビュー #4)。
+      // 初期化失敗のフィードバックは inline UI のみで担保。
       setError(err instanceof Error ? err.message : "不明なエラー");
     } finally {
       setLoading(false);
@@ -126,8 +129,11 @@ export default function SettingsPage() {
       const data = await res.json();
       setStatus(data);
       setError(null);
+      toast.success("設定を保存しました");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "不明なエラー");
+      const msg = err instanceof Error ? err.message : "不明なエラー";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setSaving(false);
     }
@@ -142,8 +148,11 @@ export default function SettingsPage() {
       const data = await res.json();
       setStatus(data);
       setError(null);
+      toast.success("スケジューラーを開始しました");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "不明なエラー");
+      const msg = err instanceof Error ? err.message : "不明なエラー";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setRunning(false);
     }
@@ -158,8 +167,11 @@ export default function SettingsPage() {
       const data = await res.json();
       setStatus(data);
       setError(null);
+      toast.success("スケジューラーを停止しました");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "不明なエラー");
+      const msg = err instanceof Error ? err.message : "不明なエラー";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setRunning(false);
     }
@@ -173,8 +185,11 @@ export default function SettingsPage() {
       if (!res.ok) throw new Error("日次プラン実行に失敗しました");
       await fetchStatus();
       setError(null);
+      toast.success("日次プランを実行しました");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "不明なエラー");
+      const msg = err instanceof Error ? err.message : "不明なエラー";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setRunning(false);
     }
@@ -188,8 +203,11 @@ export default function SettingsPage() {
       if (!res.ok) throw new Error("監視実行に失敗しました");
       await fetchStatus();
       setError(null);
+      toast.success("監視を実行しました");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "不明なエラー");
+      const msg = err instanceof Error ? err.message : "不明なエラー";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setRunning(false);
     }

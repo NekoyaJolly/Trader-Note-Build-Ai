@@ -14,6 +14,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { sideBApi, SideBApiError } from "@/lib/sideBApi";
 import { StrategyBacktestSummary } from "@/components/side-b/StrategyBacktestSummary";
+import { toast } from "sonner";
 import type { GeneratePlanResponse } from "@/types/sideB";
 
 // ===== 型定義 =====
@@ -278,15 +279,17 @@ export default function TradesPage() {
         timeframe: "15m",
       });
       setLastPlanResult(res);
+      toast.success("プラン + 即時BT を生成しました");
     } catch (e) {
       setLastPlanResult(null);
-      setPlanTestError(
+      const msg =
         e instanceof SideBApiError
           ? e.message
           : e instanceof Error
             ? e.message
-            : "プラン生成に失敗しました",
-      );
+            : "プラン生成に失敗しました";
+      setPlanTestError(msg);
+      toast.error(msg);
     } finally {
       setPlanTestLoading(false);
     }

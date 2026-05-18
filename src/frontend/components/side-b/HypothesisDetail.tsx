@@ -28,6 +28,7 @@ import type {
 } from "@/types/sideB";
 import { cn } from "@/lib/utils";
 import { parseEvolutionStatement } from "@/lib/evolutionStatement";
+import { formatPercent } from "@/lib/format";
 
 // ===========================================
 // ラベル
@@ -67,12 +68,6 @@ function formatDateTime(iso?: string): string {
         hour: "2-digit",
         minute: "2-digit",
     });
-}
-
-function formatPercent(value?: number): string {
-    if (typeof value !== "number" || !Number.isFinite(value)) return "—";
-    const normalized = value <= 1 ? value * 100 : value;
-    return `${normalized.toFixed(1)}%`;
 }
 
 function formatConditionValue(v: MachineReadableCondition["value"]): string {

@@ -12,9 +12,9 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@last-mile-context/schema": "file:../../vendor/last-mile-context/last-mile-context-schema-0.1.0.tgz",
     "@last-mile-context/app-bridge": "file:../../vendor/last-mile-context/last-mile-context-app-bridge-0.1.0.tgz",
     "@last-mile-context/react-bridge": "file:../../vendor/last-mile-context/last-mile-context-react-bridge-0.1.0.tgz",
+    "@last-mile-context/schema": "file:../../vendor/last-mile-context/last-mile-context-schema-0.1.0.tgz",
     "@radix-ui/react-progress": "^1.1.8",
     "@radix-ui/react-slot": "^1.2.4",
     "@types/event-source-polyfill": "^1.0.5",
@@ -28,6 +28,7 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "recharts": "^3.6.0",
+    "sonner": "^2.0.7",
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {

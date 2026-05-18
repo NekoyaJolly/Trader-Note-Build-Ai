@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { Toaster } from "sonner";
 import "./globals.css";
 import { AuthProvider } from "../contexts/AuthContext";
 import { AuthLayoutWrapper } from "@/components/layout/AuthLayoutWrapper";
@@ -34,6 +35,8 @@ export default function RootLayout({
         <AuthProvider>
           <AuthLayoutWrapper>{children}</AuthLayoutWrapper>
         </AuthProvider>
+        {/* Wave 1 G5-3 (2026-05-18): mutation アクションの toast フィードバック横断追加 */}
+        <Toaster richColors position="top-right" duration={4000} />
       </body>
     </html>
   );

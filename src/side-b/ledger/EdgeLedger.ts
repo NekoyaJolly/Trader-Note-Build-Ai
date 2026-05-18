@@ -80,13 +80,90 @@ export interface EdgeFindResult {
 }
 
 // ===========================================
+// Wave 1 G1 応急ハードリミット (2026-05-18)
+// ===========================================
+
+/**
+ * Wave 1 G1 応急処置: source 別 24h ハードリミットを超過した場合に投げるエラー。
+ *
+ * 経緯: Last-Mile Shared Context Phase 11 後の側B 探索で「EURUSD 15m の仮説が
+ * 539 件存在 / 7 日間で 654 件生成」を観察。Discovery 自動挿入は
+ * 2026-05-16 にコード削除済 (DiscoveryAgent.ts §STEP 5 Phase D 参照) だが、
+ * HG 経由 (source='ai_generated') は今も 1 日 12 件流入していたため
+ * 全 source 共通の最後の防壁として ledger 入口で抑止する。
+ *
+ * 上限は環境変数 HYPOTHESIS_HARDLIMIT_<SOURCE>_24H で上書き可、
+ * HYPOTHESIS_HARDLIMIT_ENABLED=false で機能ごと無効化可 (= テスト用)。
+ * 将来的に UI からの設定値で上書き可能にする予定 (上限ハードコードは恒久残置)。
+ */
+export class HypothesisHardlimitExceededError extends Error {
+    constructor(
+        public readonly source: string,
+        public readonly recent: number,
+        public readonly limit: number,
+    ) {
+        super(
+            `Hypothesis hardlimit exceeded: source='${source}' has ${recent} entries in last 24h (limit=${limit}). ` +
+                `Override via env HYPOTHESIS_HARDLIMIT_${source.toUpperCase()}_24H or disable via HYPOTHESIS_HARDLIMIT_ENABLED=false.`,
+        );
+        this.name = 'HypothesisHardlimitExceededError';
+    }
+}
+
+/**
+ * デフォルトのソース別 24h 上限 (Wave 1 応急、Neko 判断: 24h あたり 5 件)。
+ *
+ * `Record<EdgeSource, number>` 型で全 source 網羅を TypeScript レベルで強制する
+ * (= 新 source 追加時に default を埋めないとビルドが落ちる)。
+ */
+const DEFAULT_DAILY_HARDLIMITS: Readonly<Record<EdgeSource, number>> = {
+    ai_generated: 5,
+    discovery: 5,
+    reflection: 5,
+    user_input: 5,
+    backtest: 5,
+};
+
+// ===========================================
 // EdgeLedger 本体
 // ===========================================
 
 export class EdgeLedger {
     // --- CRUD ---
 
+    /**
+     * Wave 1 G1: 直近 24h で同 source の仮説件数が上限を超えていれば throw。
+     * 環境変数 HYPOTHESIS_HARDLIMIT_ENABLED='false' で機能ごと無効化可。
+     */
+    private async assertWithinDailyHardlimit(source: EdgeSource): Promise<void> {
+        if (process.env.HYPOTHESIS_HARDLIMIT_ENABLED === 'false') return;
+        const envKey = `HYPOTHESIS_HARDLIMIT_${source.toUpperCase()}_24H`;
+        const envValue = process.env[envKey];
+        // 無効な env 値 (NaN / 負値 / 0) は default にフォールバック (fail safe)。
+        // 過去版は !Number.isFinite で early-return していたため fail open になっていた (Copilot #1)。
+        let limit = DEFAULT_DAILY_HARDLIMITS[source];
+        if (envValue !== undefined) {
+            const parsed = Number(envValue);
+            if (Number.isFinite(parsed) && parsed > 0) {
+                limit = parsed;
+            } else {
+                console.warn(
+                    `[EdgeLedger] Invalid hardlimit override ${envKey}='${envValue}', falling back to default (${limit})`,
+                );
+            }
+        }
+        if (!Number.isFinite(limit) || limit <= 0) return;
+        const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const recent = await prisma.edgeHypothesis.count({
+            where: { source, createdAt: { gte: since } },
+        });
+        if (recent >= limit) {
+            throw new HypothesisHardlimitExceededError(source, recent, limit);
+        }
+    }
+
     async create(input: CreateEdgeHypothesisInput): Promise<EdgeHypothesis> {
+        await this.assertWithinDailyHardlimit(input.source);
         const now = new Date();
         const created = await prisma.edgeHypothesis.create({
             data: {
