@@ -33,12 +33,8 @@ describe('loadPrompt', () => {
     // src/side-b/prompts/*.md に移植したことを保証する。ファイル削除や rename で
     // 本番起動時に「Prompt file not found」になる事故を防ぐ。
     describe('Phase 5.5: ハードコードから移植した prompt が読める', () => {
-        it('agent_loop_default.md を読み込める', () => {
-            const content = loadPrompt('agent_loop_default');
-            expect(content).toContain('Side-B AI Trade System');
-            expect(content).toContain('PDCAサイクル');
-            expect(content).toContain('リスクリワード比');
-        });
+        // 2026-05-19 PR #231: agent_loop_default.md は AgentLoop 撤去に伴い削除済。
+        // reflection.md / research.md は引き続き reflectionAIService / researchAIService で使用。
 
         it('reflection.md を読み込める', () => {
             const content = loadPrompt('reflection');
