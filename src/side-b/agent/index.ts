@@ -1,19 +1,15 @@
 /**
  * Side-B AI Agent
  *
- * MCPサーバー経由でツールを使い、自律的にPDCAサイクルを実行するAIエージェント。
- * AIモデルは .env で自由に切り替え可能。
+ * AIProvider (汎用 LLM client) + AgentMemory (state ストア) + PDCALoop
+ * (状態機械) を集約する。AI モデルは .env で自由に切り替え可能。
+ *
+ * NOTE (2026-05-19): Phase 5.5 の「1 LLM が PDCA を全部回す」設計
+ * (AgentLoop + McpClientManager + src/mcp-server) は撤去済。
+ * Phase 6.7a 以降の役割別細分化 + PromptRegistry が正規路。
  */
 
-export { McpClientManager, type McpToolDefinition, type McpToolResult } from './mcpClient';
 export { AIProvider, type ChatMessage, type ToolCall, type AIResponse } from './aiProvider';
-export {
-    AgentLoop,
-    type AgentResult,
-    type AgentConfig,
-    type AgentStep,
-    type ToolCallRecord,
-} from './agentLoop';
 
 // 自律トレーディングAI（Phase 1-2 新規）
 export {
