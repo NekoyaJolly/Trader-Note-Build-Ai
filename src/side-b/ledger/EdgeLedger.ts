@@ -133,10 +133,17 @@ export class EdgeLedger {
 
     /**
      * Wave 1 G1: 直近 24h で同 source の仮説件数が上限を超えていれば throw。
-     * 環境変数 HYPOTHESIS_HARDLIMIT_ENABLED='false' で機能ごと無効化可。
+     *
+     * Neko 判断 (2026-05-18 Wave 1 完了後): Discovery 自動挿入が
+     * 2026-05-16 に削除済で、直近 24h は ai_generated 12 件で収まっている
+     * (= 量産問題は既に解決済)。実ユーザー流入までは default OFF とし、
+     * UI からのユーザー設定が実装された段階で再び ON にする。
+     * ガード本体 + env 制御 + DEFAULT_DAILY_HARDLIMITS は恒久残置。
+     *
+     * 明示的に `HYPOTHESIS_HARDLIMIT_ENABLED='true'` を設定した場合のみ有効化される。
      */
     private async assertWithinDailyHardlimit(source: EdgeSource): Promise<void> {
-        if (process.env.HYPOTHESIS_HARDLIMIT_ENABLED === 'false') return;
+        if (process.env.HYPOTHESIS_HARDLIMIT_ENABLED !== 'true') return;
         const envKey = `HYPOTHESIS_HARDLIMIT_${source.toUpperCase()}_24H`;
         const envValue = process.env[envKey];
         // 無効な env 値 (NaN / 負値 / 0) は default にフォールバック (fail safe)。

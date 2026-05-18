@@ -10,14 +10,6 @@
 export default (): Promise<void> => {
   console.log('\n🔧 Test Environment Setup\n');
 
-  // Wave 1 G1 (2026-05-18): テスト時は EdgeHypothesis 24h ハードリミットを既定で無効化。
-  // 既存テスト群に `source: 'ai_generated' / 'discovery'` で 6 件以上 create するものが
-  // 含まれており、production と同じ上限を効かせると壊れるため。
-  // 個別テストで hardlimit を検証したい場合は test 内で env を直接上書きする。
-  if (process.env.HYPOTHESIS_HARDLIMIT_ENABLED === undefined) {
-    process.env.HYPOTHESIS_HARDLIMIT_ENABLED = 'false';
-  }
-
   const secrets = {
     AI_API_KEY: !!process.env.AI_API_KEY,
     MARKET_API_KEY: !!process.env.MARKET_API_KEY,
