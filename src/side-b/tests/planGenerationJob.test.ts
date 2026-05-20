@@ -9,6 +9,7 @@ jest.mock('../services/virtualTradeService', () => ({
 }));
 jest.mock('../repositories', () => ({
   researchRepository: { findById: jest.fn() },
+  researchOutputRepository: { findById: jest.fn() },
 }));
 jest.mock('../../backend/repositories/ohlcvRepository', () => ({
   ohlcvRepository: { bulkInsert: jest.fn().mockResolvedValue(0) },
@@ -22,6 +23,8 @@ jest.mock('../agent', () => ({
 
 import { PlanGenerationJob, type PlanGenerationJobServices } from '../jobs/planGenerationJob';
 import { createTradeFromPlan } from '../services/virtualTradeService';
+import { researchRepository, researchOutputRepository } from '../repositories';
+import { pdcaLoop } from '../agent';
 import type { SideBSchedulerConfig } from '../jobs/sideBScheduler';
 
 const mockCreateTradeFromPlan = createTradeFromPlan as jest.Mock;
@@ -150,5 +153,74 @@ describe('PlanGenerationJob', () => {
 
     await job.run(minimalConfig);
     expect(currentServices.marketDataService.getHistoricalData).toHaveBeenCalled();
+  });
+
+  // ===========================================
+  // Phase A: research 取得経路の分岐 (PR #233 Copilot review 指摘 #4)
+  // ===========================================
+
+  it('Phase A: researchOutputId がある plan は researchOutputRepository から research を取得', async () => {
+    const mockMarketAnalysis = { regime: 'range' as const, summary: 'phase-a-new' };
+    (researchOutputRepository.findById as jest.Mock).mockResolvedValue({
+      marketAnalysis: mockMarketAnalysis,
+    });
+    (researchRepository.findById as jest.Mock).mockResolvedValue(null);
+    mockCreateTradeFromPlan.mockResolvedValue({ success: true, trade: { id: 'trade-1' } });
+    const { job, services } = makeJob();
+    (services.orchestrator.generatePlan as jest.Mock).mockResolvedValue({
+      success: true,
+      data: {
+        id: 'plan-1',
+        scenarios: [],
+        researchId: null,
+        researchOutputId: 'research-output-1',
+      },
+    });
+
+    await job.runWithServices(minimalConfig, services);
+
+    expect(researchOutputRepository.findById).toHaveBeenCalledWith('research-output-1');
+    expect(researchRepository.findById).not.toHaveBeenCalled();
+    expect(pdcaLoop.notifyAnalysisComplete).toHaveBeenCalledWith('XAU/USD', mockMarketAnalysis);
+  });
+
+  it('Phase A: researchOutputId 未指定 (旧データ) では researchRepository にフォールバック', async () => {
+    const mockMarketAnalysis = { regime: 'trend' as const, summary: 'legacy-research' };
+    (researchRepository.findById as jest.Mock).mockResolvedValue({
+      marketAnalysis: mockMarketAnalysis,
+    });
+    (researchOutputRepository.findById as jest.Mock).mockResolvedValue(null);
+    mockCreateTradeFromPlan.mockResolvedValue({ success: true, trade: { id: 'trade-2' } });
+    const { job, services } = makeJob();
+    (services.orchestrator.generatePlan as jest.Mock).mockResolvedValue({
+      success: true,
+      data: {
+        id: 'plan-legacy',
+        scenarios: [],
+        researchId: 'legacy-research-1',
+        researchOutputId: null,
+      },
+    });
+
+    await job.runWithServices(minimalConfig, services);
+
+    expect(researchRepository.findById).toHaveBeenCalledWith('legacy-research-1');
+    expect(researchOutputRepository.findById).not.toHaveBeenCalled();
+    expect(pdcaLoop.notifyAnalysisComplete).toHaveBeenCalledWith('XAU/USD', mockMarketAnalysis);
+  });
+
+  it('Phase A: researchId / researchOutputId 両方 null なら pdcaLoop.notifyAnalysisComplete を呼ばない', async () => {
+    mockCreateTradeFromPlan.mockResolvedValue({ success: true, trade: { id: 'trade-3' } });
+    const { job, services } = makeJob();
+    (services.orchestrator.generatePlan as jest.Mock).mockResolvedValue({
+      success: true,
+      data: { id: 'plan-orphan', scenarios: [], researchId: null, researchOutputId: null },
+    });
+
+    await job.runWithServices(minimalConfig, services);
+
+    expect(researchOutputRepository.findById).not.toHaveBeenCalled();
+    expect(researchRepository.findById).not.toHaveBeenCalled();
+    expect(pdcaLoop.notifyAnalysisComplete).not.toHaveBeenCalled();
   });
 });

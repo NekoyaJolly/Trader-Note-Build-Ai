@@ -20,6 +20,7 @@ import {
   type MarketAnalysis,
   safeValidateMarketAnalysis,
   analysisToLegacyFeatureVector,
+  createEmptyFeatureVector,
 } from '../models';
 import { normalizeTimeframe } from '../constants/timeframes';
 import { toPrismaJsonValue } from '../../utils/prismaJson';
@@ -36,14 +37,16 @@ export type ResearchContextSnapshot = Prisma.JsonObject;
 
 /**
  * リサーチ出力作成用の入力データ
+ *
+ * featureVector はここでは受け取らない: marketAnalysis から
+ * `analysisToLegacyFeatureVector()` で読み取り時に派生させる方針
+ * (旧 MarketResearch の v1/v2 混在問題を避けるため)。
  */
 export interface CreateResearchOutputInput {
   symbol: string;
   timeframe?: string;
   /** 構造化分析データ (v2 MarketAnalysis 相当) */
   marketAnalysis: MarketAnalysis;
-  /** 後方互換性のための 12 次元 featureVector (optional、新規データでは MarketAnalysis から自動派生) */
-  featureVector?: FeatureVector12D;
   ohlcvSnapshot?: OHLCVSnapshot;
   /** EODHD News context (PR #2 で実取得) */
   newsContext?: ResearchContextSnapshot;
@@ -210,17 +213,16 @@ export class ResearchOutputRepository {
         ? rawValue
         : {};
 
-    // rawOutput は v2 (MarketAnalysis + _version: 2) 形式のみ想定
+    // rawOutput は v2 (MarketAnalysis + _version: 2) 形式のみ想定。
+    // ただし読み取り時の validation 失敗はキャッシュミス相当として扱い、
+    // marketAnalysis を undefined にして継続させる (1 レコードの corruption で
+    // findValidBySymbol() 全体が落ちないように、Copilot review #233 指摘)。
     const { _version, ...analysisData } = rawObject;
     void _version;
-    const marketAnalysis = safeValidateMarketAnalysis(analysisData);
-    if (!marketAnalysis) {
-      throw new Error(
-        `ResearchOutput ${output.id}: rawOutput が MarketAnalysis として検証できません`,
-      );
-    }
-
-    const featureVector: FeatureVector12D = analysisToLegacyFeatureVector(marketAnalysis);
+    const marketAnalysis = safeValidateMarketAnalysis(analysisData) ?? undefined;
+    const featureVector: FeatureVector12D = marketAnalysis
+      ? analysisToLegacyFeatureVector(marketAnalysis)
+      : createEmptyFeatureVector();
 
     const snapshotRaw = output.ohlcvSnapshot;
     const ohlcvSnapshot: OHLCVSnapshot | undefined =

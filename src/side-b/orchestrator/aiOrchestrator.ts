@@ -206,11 +206,11 @@ export class AIOrchestrator {
 
       const aiResult = await this.researchAI.generateResearch(aiInput);
 
-      // 3. DB保存（MarketAnalysis 対応）
+      // 3. DB保存 (Phase A: ResearchOutput に marketAnalysis のみを構造化保存。
+      //    featureVector は読み取り時に analysisToLegacyFeatureVector() で派生)
       const saved = await this.researchOutputRepo.create({
         symbol,
         timeframe,
-        featureVector: aiResult.output.featureVector,
         marketAnalysis: aiResult.marketAnalysis,
         ohlcvSnapshot: aiResult.ohlcvSnapshot,
         aiModel: aiResult.model,
