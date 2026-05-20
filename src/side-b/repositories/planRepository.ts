@@ -27,9 +27,15 @@ import type {
 
 /**
  * プラン作成用の入力データ
+ *
+ * Phase A: `researchId` (MarketResearch 参照) は Deprecated、新規データは
+ * `researchOutputId` (ResearchOutput 参照) を埋める。どちらか一方が埋まる前提。
  */
 export interface CreatePlanInput {
-  researchId: string;
+  /** 旧 MarketResearch.id を参照 (Phase A 以降は使用しない、互換性のため optional 受付) */
+  researchId?: string;
+  /** 新 ResearchOutput.id を参照 (Phase A 以降の新規データ) */
+  researchOutputId?: string;
   targetDate: Date;
   symbol: string;
   marketAnalysis: PlanMarketAnalysis;
@@ -107,6 +113,7 @@ export class PlanRepository {
     const plan = await this.prisma.aITradePlan.create({
       data: {
         researchId: input.researchId,
+        researchOutputId: input.researchOutputId,
         targetDate: input.targetDate,
         symbol: input.symbol,
         marketAnalysis: toInputJsonValue(input.marketAnalysis),
@@ -141,6 +148,7 @@ export class PlanRepository {
       },
       update: {
         researchId: input.researchId,
+        researchOutputId: input.researchOutputId,
         marketAnalysis: toInputJsonValue(input.marketAnalysis),
         scenarios: toInputJsonValue(input.scenarios),
         overallConfidence: input.overallConfidence,
@@ -150,6 +158,7 @@ export class PlanRepository {
       },
       create: {
         researchId: input.researchId,
+        researchOutputId: input.researchOutputId,
         targetDate: input.targetDate,
         symbol: input.symbol,
         marketAnalysis: toInputJsonValue(input.marketAnalysis),

@@ -29,12 +29,12 @@ import {
   planAIService
 } from '../services';
 import type {
-  ResearchRepository,
-  MarketResearchWithTypes,
+  ResearchOutputRepository,
+  ResearchOutputWithTypes,
   PlanRepository,
   AITradePlanWithTypes} from '../repositories';
 import {
-  researchRepository,
+  researchOutputRepository,
   planRepository
 } from '../repositories';
 import type {
@@ -105,6 +105,10 @@ export interface OrchestratorResearchRequest {
 export interface OrchestratorPlanRequest {
   symbol: string;
   targetDate?: string;
+  /**
+   * Phase A: ResearchOutput.id を指定して既存リサーチを再利用
+   * (旧 researchId と命名互換: 内部は ResearchOutput を参照)
+   */
   researchId?: string;
   userPreferences?: UserTradingPreferences;
   ohlcvData?: { timestamp: Date; open: number; high: number; low: number; close: number; volume?: number }[];
@@ -136,7 +140,7 @@ export interface OrchestratorResult<T> {
 export class AIOrchestrator {
   private researchAI: ResearchAIService;
   private planAI: PlanAIService;
-  private researchRepo: ResearchRepository;
+  private researchOutputRepo: ResearchOutputRepository;
   private planRepo: PlanRepository;
   private devilsAdvocate: DevilsAdvocateAgent;
   private hypothesisGenerator: HypothesisGeneratorAgent;
@@ -146,7 +150,7 @@ export class AIOrchestrator {
   constructor(
     researchAI?: ResearchAIService,
     planAI?: PlanAIService,
-    researchRepo?: ResearchRepository,
+    researchOutputRepo?: ResearchOutputRepository,
     planRepo?: PlanRepository,
     devilsAdvocate?: DevilsAdvocateAgent,
     hypothesisGenerator?: HypothesisGeneratorAgent,
@@ -155,7 +159,7 @@ export class AIOrchestrator {
   ) {
     this.researchAI = researchAI || researchAIService;
     this.planAI = planAI || planAIService;
-    this.researchRepo = researchRepo || researchRepository;
+    this.researchOutputRepo = researchOutputRepo || researchOutputRepository;
     this.planRepo = planRepo || planRepository;
     this.devilsAdvocate = devilsAdvocate || devilsAdvocateAgent;
     this.hypothesisGenerator = hypothesisGenerator || hypothesisGeneratorAgent;
@@ -171,7 +175,7 @@ export class AIOrchestrator {
    * 2. なければ Research AI 呼び出し
    * 3. DB保存
    */
-  async generateResearch(request: OrchestratorResearchRequest): Promise<OrchestratorResult<MarketResearchWithTypes>> {
+  async generateResearch(request: OrchestratorResearchRequest): Promise<OrchestratorResult<ResearchOutputWithTypes>> {
     const { symbol, timeframe, ohlcvData, indicators, forceRefresh = false } = request;
 
     console.log(`[Orchestrator] リサーチ生成開始: ${symbol}`);
@@ -179,7 +183,7 @@ export class AIOrchestrator {
     try {
       // 1. キャッシュ確認
       if (!forceRefresh) {
-        const cached = await this.researchRepo.findValidBySymbol(symbol);
+        const cached = await this.researchOutputRepo.findValidBySymbol(symbol);
         if (cached) {
           console.log(`[Orchestrator] キャッシュヒット: ${cached.id}`);
           return {
@@ -203,7 +207,7 @@ export class AIOrchestrator {
       const aiResult = await this.researchAI.generateResearch(aiInput);
 
       // 3. DB保存（MarketAnalysis 対応）
-      const saved = await this.researchRepo.create({
+      const saved = await this.researchOutputRepo.create({
         symbol,
         timeframe,
         featureVector: aiResult.output.featureVector,
@@ -271,12 +275,12 @@ export class AIOrchestrator {
       }
 
       // 2. リサーチ取得または生成
-      let research: MarketResearchWithTypes | null = null;
+      let research: ResearchOutputWithTypes | null = null;
       let researchTokens = 0;
 
       if (researchId) {
         // 指定されたリサーチを使用
-        research = await this.researchRepo.findById(researchId);
+        research = await this.researchOutputRepo.findById(researchId);
         if (!research) {
           return {
             success: false,
@@ -547,7 +551,8 @@ export class AIOrchestrator {
       // 手動再発火) に Unique constraint 衝突しないよう upsertByDateSymbol を使う。
       // 手動発火 = 上書き再生成の意味として動作する。
       const saved = await this.planRepo.upsertByDateSymbol({
-        researchId: research.id,
+        // Phase A: 新規 plan は ResearchOutput を参照 (旧 researchId は Deprecated)
+        researchOutputId: research.id,
         targetDate: date,
         symbol,
         marketAnalysis: planResult.output.marketAnalysis,
@@ -592,7 +597,7 @@ export class AIOrchestrator {
     forceRefresh?: boolean;
   }): Promise<{
     success: boolean;
-    research?: MarketResearchWithTypes;
+    research?: ResearchOutputWithTypes;
     plan?: AITradePlanWithOptionalBacktest;
     error?: string;
     totalTokenUsage: number;
@@ -657,7 +662,7 @@ export class AIOrchestrator {
    * 期限切れリサーチをクリーンアップ
    */
   async cleanupExpiredResearch(): Promise<number> {
-    const deleted = await this.researchRepo.deleteExpired();
+    const deleted = await this.researchOutputRepo.deleteExpired();
     console.log(`[Orchestrator] 期限切れリサーチ削除: ${deleted}件`);
     return deleted;
   }
