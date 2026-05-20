@@ -738,29 +738,29 @@ model ScreeningBacktestRun {
 ///   - failureReason 別の分布 (どのケースで失敗が多いか)
 ///   - 同 candidateHash の再評価追跡 (DSL ハッシュで重複検出)
 model EvolutionBacktestRun {
-  id            String   @id @default(uuid()) @db.Uuid
+  id                    String   @id @default(uuid()) @db.Uuid
   /// 進化ループ実行単位 ID (1 サイクル = 1 evolutionRunId、cron 起動毎に発番)
-  evolutionRunId String  @db.Uuid
+  evolutionRunId        String   @db.Uuid
   /// 世代番号 (DSL.generation と同値、0 始まり)
-  generation    Int
+  generation            Int
   /// 進化候補の DSL ID (DSL.id と同じ)
-  candidateId   String
+  candidateId           String
   /// DSL の構造ハッシュ (同一構造の重複検出 / 再評価追跡用)
-  candidateHash String
+  candidateHash         String
   /// DSL スナップショット (validation / debug 用、StrategyDSL JSON 全体)
-  dslSnapshot   Json
+  dslSnapshot           Json
   /// surrogate fitness の合成スコア (= scoreFromValidationSummary 値)
-  surrogateScore Float
+  surrogateScore        Float
   /// analysis-engine 正式 BT を通過したか
-  formalBtPassed Boolean
+  formalBtPassed        Boolean
   /// 正式 BT メトリクス (pf / winRate / tradeCount)、analysis-engine 成功時のみ非 null
-  formalBtMetrics Json?
+  formalBtMetrics       Json?
   /// 失敗時の理由 (HTTP / timeout / PF 未達 / トレード数不足など)、passed=true の場合 null
   formalBtFailureReason String?
   /// BT エンジン識別子 (例: 'analysis-engine')
-  engine        String
+  engine                String
   /// BT エンジンバージョン (例: 'backtesting.py@0.6.5')
-  engineVersion String
+  engineVersion         String
   /// Filter Evolution Phase B-1 (2026-05-09): 本格 BT で発生した trade list。
   /// 各要素は { entryTime, side, pnl, outcome }。tradeCount > 0 の候補のみ非空。
   /// 用途:
@@ -768,8 +768,8 @@ model EvolutionBacktestRun {
   ///   - 失敗診断 / オフライン分析 (= Phase B-2 で carry state と組み合わせる)
   /// 既存行 (Phase B-1 以前) は NULL のまま、計算側 helper は notComputable で逃げる。
   /// 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.B.3
-  trades        Json?
-  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+  trades                Json?
+  createdAt             DateTime @default(now()) @db.Timestamptz(6)
 
   @@index([evolutionRunId, generation], map: "idx_evolution_bt_run_gen")
   @@index([candidateHash, createdAt(sort: Desc)], map: "idx_evolution_bt_hash_created")
@@ -787,24 +787,24 @@ model EvolutionBacktestRun {
 ///
 /// 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.B.1 / §5.D
 model GenerationLesson {
-  id              String   @id @default(uuid()) @db.Uuid
+  id             String   @id @default(uuid()) @db.Uuid
   /// 当該 lesson を生成した evolutionRunId (= cron 起動毎に発番、debug 用)
-  evolutionRunId  String   @db.Uuid
+  evolutionRunId String   @db.Uuid
   /// 進化ループ regime (= Reflection 対象世代の regime)
-  regime          String
+  regime         String
   /// 生成元世代番号 (= multi-gen runner の generationIndex、0-indexed)
-  generation      Int
+  generation     Int
   /// 'breakthrough' / 'stagnation' / 'mutation_decay' / 'novelty_emerged' /
   /// 'regime_shift_detected' / 'filter_efficacy_increased' 等のカテゴリ。
   /// 値域は GenerationReflectionAgent の prompt schema 側で固定。
-  category        String
+  category       String
   /// 人間語の lesson (= DESIGN_DOC §1.1 原則 5「人間語に翻訳して記録」)
-  lesson          String
+  lesson         String
   /// supporting metrics (= dsr / lift 等の数値根拠、JSON 形式)
-  metrics         Json?
+  metrics        Json?
   /// LLM が報告した confidence (0.0-1.0)、未報告時 null
-  confidence      Float?
-  recordedAt      DateTime @default(now()) @db.Timestamptz(6)
+  confidence     Float?
+  recordedAt     DateTime @default(now()) @db.Timestamptz(6)
 
   @@index([evolutionRunId, regime, generation], map: "idx_gen_lesson_run_regime_gen")
   @@index([regime, recordedAt(sort: Desc)], map: "idx_gen_lesson_regime_recorded")
@@ -823,19 +823,19 @@ model GenerationLesson {
 ///
 /// 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.B.2
 model EvolutionInstanceCarry {
-  id              String   @id @default(uuid()) @db.Uuid
+  id             String   @id @default(uuid()) @db.Uuid
   /// 当該 carry を生成した evolutionRunId (= cron 起動毎に発番、debug 用)
-  evolutionRunId  String   @db.Uuid
+  evolutionRunId String   @db.Uuid
   /// 進化ループ regime (= 復元時のキー、cron 跨ぎで同 regime の最新 carry を引く)
-  regime          String
+  regime         String
   /// 生成元世代番号 (= multi-gen runner 内では 1 cron 中に複数 carry が積まれる、最新が読み出される)
-  generation      Int
+  generation     Int
   /// payload shape: { tradesByDslId: Record<dslId, Array<{entryTime, side, pnl, outcome}>>,
   ///                  repairHints: Record<dslId, RepairHint>,
   ///                  repairBaselines: Record<dslId, RepairOutcomeBaseline> }
   /// 詳細は src/backend/repositories/evolutionInstanceCarryRepository.ts の Zod schema 参照。
-  payload         Json
-  recordedAt      DateTime @default(now()) @db.Timestamptz(6)
+  payload        Json
+  recordedAt     DateTime @default(now()) @db.Timestamptz(6)
 
   @@index([evolutionRunId, regime, generation], map: "idx_evolution_carry_run_regime_gen")
   @@index([regime, recordedAt(sort: Desc)], map: "idx_evolution_carry_regime_recorded")
@@ -1236,11 +1236,74 @@ model MarketResearch {
   @@index([expiresAt], map: "idx_market_research_expires")
 }
 
+/// ResearchAgent (researchAIService) の LLM 出力永続化テーブル (Phase A 新設、2026-05-21)
+/// MarketResearch との差分:
+///   - featureVector → rawOutput (Zod 検証済み構造化 JSON)
+///   - 外部要因 context (News/Sentiment/EconomicEvents/Macro/Fundamentals) を input snapshot として保持
+/// LLM 出力永続化方針の最初の 1 agent 実装。
+model ResearchOutput {
+  id        String @id @default(uuid()) @db.Uuid
+  /// 対象シンボル（例: XAUUSD）
+  symbol    String
+  /// 分析時間軸（multi: マルチタイムフレーム）
+  timeframe String @default("multi")
+
+  // ===========================================
+  // ResearchAgent の LLM 出力 (Zod 検証済み)
+  // ===========================================
+
+  /// 構造化された ResearchAI 出力 (Zod スキーマで検証済み)
+  /// 旧 MarketResearch.featureVector の置き換え
+  rawOutput Json
+
+  // ===========================================
+  // 入力スナップショット (再現性 / デバッグ用)
+  // ===========================================
+
+  /// OHLCV スナップショット
+  ohlcvSnapshot       Json?
+  /// EODHD News context
+  newsContext         Json?
+  /// EODHD Sentiment context
+  sentimentContext    Json?
+  /// EODHD Economic Events context
+  economicEvents      Json?
+  /// EODHD Macro Indicators context
+  macroContext        Json?
+  /// EODHD Fundamentals context (API 対応シンボルのみ、未対応シンボルでは null)
+  fundamentalsContext Json?
+
+  // ===========================================
+  // メタ情報
+  // ===========================================
+
+  /// 使用 AI モデル（例: gpt-5.4-mini）
+  aiModel     String
+  /// トークン使用量
+  tokenUsage  Int?
+  /// EODHD API call cost 合計 (1/5/10 重み付け、観測性用)
+  apiCallCost Int?
+
+  // 有効期限管理
+  /// 有効期限（デフォルト 4 時間後）
+  expiresAt DateTime @db.Timestamptz(6)
+  /// 作成日時
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  // リレーション
+  tradePlans AITradePlan[]
+
+  @@index([symbol], map: "idx_research_output_symbol")
+  @@index([createdAt(sort: Desc)], map: "idx_research_output_created")
+  @@index([expiresAt], map: "idx_research_output_expires")
+}
+
 /// AIトレードプラン（Plan AIが生成）
 model AITradePlan {
   id         String   @id @default(uuid()) @db.Uuid
-  /// 参照するリサーチID
-  researchId String   @db.Uuid
+  /// 参照する MarketResearch.id (Deprecated, Phase A 以降の新規データは null)
+  /// 物理削除は Phase D 相当 (memory: project_llm_output_persistence_principle)
+  researchId String?  @db.Uuid
   /// 対象日（YYYY-MM-DD）
   targetDate DateTime @db.Date
   /// 対象シンボル
@@ -1265,14 +1328,20 @@ model AITradePlan {
   /// 作成日時
   createdAt DateTime @default(now()) @db.Timestamptz(6)
 
+  // Phase A 新設: ResearchOutput 参照 (新規データはこちらを使う、旧 researchId は Deprecated)
+  /// 参照する ResearchOutput.id (Phase A 以降の新規データで使用、旧データは null)
+  researchOutputId String? @db.Uuid
+
   // リレーション
-  research      MarketResearch @relation(fields: [researchId], references: [id])
-  virtualTrades VirtualTrade[]
-  aiNotes       AITradeNote[]
+  research       MarketResearch? @relation(fields: [researchId], references: [id])
+  researchOutput ResearchOutput? @relation(fields: [researchOutputId], references: [id])
+  virtualTrades  VirtualTrade[]
+  aiNotes        AITradeNote[]
 
   @@unique([targetDate, symbol], map: "uq_ai_trade_plan_date_symbol")
   @@index([targetDate], map: "idx_ai_trade_plan_date")
   @@index([symbol], map: "idx_ai_trade_plan_symbol")
+  @@index([researchOutputId], map: "idx_ai_trade_plan_research_output")
 }
 
 /// 仮想トレード（Phase B用）
@@ -1894,6 +1963,7 @@ model AgentRestructureProposal {
 
   @@index([status, proposedAt(sort: Desc)], map: "idx_agent_restructure_status_proposed")
 }
+
 // ============================================================
 // ADK Orchestrator + RunLedger + StrategyDraft (Phase 1)
 // ============================================================
