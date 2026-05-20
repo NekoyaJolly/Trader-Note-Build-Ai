@@ -23,7 +23,7 @@
  */
 
 import { createTradeFromPlan } from '../services/virtualTradeService';
-import { researchRepository } from '../repositories';
+import { researchRepository, researchOutputRepository } from '../repositories';
 import { ohlcvRepository } from '../../backend/repositories/ohlcvRepository';
 import { pdcaLoop } from '../agent';
 import type { AIOrchestrator } from '../orchestrator/aiOrchestrator';
@@ -290,9 +290,12 @@ export class PlanGenerationJob
         // PDCA ループに戦略完了を通知
         try {
           const planData = planResult.data;
-          const research = planData?.researchId
-            ? await researchRepository.findById(planData.researchId)
-            : null;
+          // Phase A: 新規 plan は researchOutputId、旧 plan は researchId を参照
+          const research = planData?.researchOutputId
+            ? await researchOutputRepository.findById(planData.researchOutputId)
+            : planData?.researchId
+              ? await researchRepository.findById(planData.researchId)
+              : null;
           if (research?.marketAnalysis) {
             pdcaLoop.notifyAnalysisComplete(symbol, research.marketAnalysis);
           }

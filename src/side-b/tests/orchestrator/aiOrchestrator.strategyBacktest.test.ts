@@ -10,8 +10,8 @@ import { AIOrchestrator } from '../../orchestrator/aiOrchestrator';
 import { defaultLensAggregator } from '../../lenses';
 import type { PlanAIService } from '../../services/planAIService';
 import type { PlanAIResult } from '../../services/planAIService';
-import type { ResearchRepository, PlanRepository, CreatePlanInput } from '../../repositories';
-import type { MarketResearchWithTypes, AITradePlanWithTypes } from '../../repositories';
+import type { ResearchOutputRepository, PlanRepository, CreatePlanInput } from '../../repositories';
+import type { ResearchOutputWithTypes, AITradePlanWithTypes } from '../../repositories';
 import type { FeatureVector12D } from '../../models/featureVector';
 import type { DevilsAdvocateAgent } from '../../agents/DevilsAdvocateAgent';
 import type { HypothesisGeneratorAgent } from '../../agents/HypothesisGeneratorAgent';
@@ -33,7 +33,7 @@ const mockFeatureVector: FeatureVector12D = {
   resistanceProximity: 50,
 };
 
-const mockResearch: MarketResearchWithTypes = {
+const mockResearch: ResearchOutputWithTypes = {
   id: 'orch-bt-research',
   symbol: 'XAUUSD',
   timeframe: '15m',
@@ -42,6 +42,8 @@ const mockResearch: MarketResearchWithTypes = {
   featureVector: mockFeatureVector,
   aiModel: 'test',
   tokenUsage: 0,
+  rawOutput: {},
+  apiCallCost: null,
 };
 
 function buildPlanAIResultWithOneScenario(): PlanAIResult {
@@ -101,7 +103,9 @@ function savedPlanFromCreate(input: CreatePlanInput): AITradePlanWithTypes {
   return {
     id: 'saved-plan-id',
     createdAt: new Date(),
-    researchId: input.researchId,
+    // Phase A: researchId / researchOutputId はどちらか一方が入る (nullable)
+    researchId: input.researchId ?? null,
+    researchOutputId: input.researchOutputId ?? null,
     // Prisma 由来の AITradePlan では日付列は Date
     targetDate: input.targetDate,
     symbol: input.symbol,
@@ -155,7 +159,7 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
     }));
 
     const planAI = { generatePlan: genPlan } as unknown as PlanAIService;
-    const researchRepo = { findById: findResearch } as unknown as ResearchRepository;
+    const researchRepo = { findById: findResearch } as unknown as ResearchOutputRepository;
     const planRepo = {
       findByDateAndSymbol: findByDate,
       create: createPlan,
@@ -215,7 +219,7 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
     const critique = jest.fn();
 
     const planAI = { generatePlan: genPlan } as unknown as PlanAIService;
-    const researchRepo = { findById: findResearch } as unknown as ResearchRepository;
+    const researchRepo = { findById: findResearch } as unknown as ResearchOutputRepository;
     const planRepo = {
       findByDateAndSymbol: findByDate,
       create: createPlan,
@@ -274,7 +278,7 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
     }));
 
     const planAI = { generatePlan: genPlan } as unknown as PlanAIService;
-    const researchRepo = { findById: findResearch } as unknown as ResearchRepository;
+    const researchRepo = { findById: findResearch } as unknown as ResearchOutputRepository;
     const planRepo = {
       findByDateAndSymbol: findByDate,
       create: createPlan,

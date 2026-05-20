@@ -27,9 +27,15 @@ import type {
 
 /**
  * プラン作成用の入力データ
+ *
+ * Phase A: `researchId` (MarketResearch 参照) は Deprecated、新規データは
+ * `researchOutputId` (ResearchOutput 参照) を埋める。どちらか一方が埋まる前提。
  */
 export interface CreatePlanInput {
-  researchId: string;
+  /** 旧 MarketResearch.id を参照 (Phase A 以降は使用しない、互換性のため optional 受付) */
+  researchId?: string;
+  /** 新 ResearchOutput.id を参照 (Phase A 以降の新規データ) */
+  researchOutputId?: string;
   targetDate: Date;
   symbol: string;
   marketAnalysis: PlanMarketAnalysis;
@@ -89,6 +95,31 @@ function toInputJsonValue<T>(value: T): Prisma.InputJsonValue {
   return value as unknown as Prisma.InputJsonValue;
 }
 
+/**
+ * `researchId` / `researchOutputId` の XOR 不変条件を保証するヘルパー
+ *
+ * Copilot review (PR #233) の指摘対応: 両方 optional だと「両方未指定」「両方指定」が
+ * 型的に許容されるため、runtime で正確に「どちらか一方のみ」を確認 + 正規化する。
+ * 片方が指定されていればもう片方は null に固定 (DB 列も nullable なので null 化 OK)。
+ */
+function normalizePlanResearchRefs(input: CreatePlanInput): {
+  researchId: string | null;
+  researchOutputId: string | null;
+} {
+  const hasResearchId = input.researchId !== undefined && input.researchId !== null;
+  const hasResearchOutputId =
+    input.researchOutputId !== undefined && input.researchOutputId !== null;
+  if (hasResearchId === hasResearchOutputId) {
+    throw new Error(
+      `CreatePlanInput: researchId と researchOutputId はちょうど片方のみ指定してください (researchId=${input.researchId ?? 'null'}, researchOutputId=${input.researchOutputId ?? 'null'})`,
+    );
+  }
+  return {
+    researchId: hasResearchId ? (input.researchId ?? null) : null,
+    researchOutputId: hasResearchOutputId ? (input.researchOutputId ?? null) : null,
+  };
+}
+
 // ===========================================
 // リポジトリクラス
 // ===========================================
@@ -104,9 +135,11 @@ export class PlanRepository {
    * プランを作成
    */
   async create(input: CreatePlanInput): Promise<AITradePlanWithTypes> {
+    const { researchId, researchOutputId } = normalizePlanResearchRefs(input);
     const plan = await this.prisma.aITradePlan.create({
       data: {
-        researchId: input.researchId,
+        researchId,
+        researchOutputId,
         targetDate: input.targetDate,
         symbol: input.symbol,
         marketAnalysis: toInputJsonValue(input.marketAnalysis),
@@ -132,6 +165,7 @@ export class PlanRepository {
    * 既存の `create()` は cron 系の「新規作成のみ」経路では引き続き使用可能。
    */
   async upsertByDateSymbol(input: CreatePlanInput): Promise<AITradePlanWithTypes> {
+    const { researchId, researchOutputId } = normalizePlanResearchRefs(input);
     const plan = await this.prisma.aITradePlan.upsert({
       where: {
         targetDate_symbol: {
@@ -140,7 +174,8 @@ export class PlanRepository {
         },
       },
       update: {
-        researchId: input.researchId,
+        researchId,
+        researchOutputId,
         marketAnalysis: toInputJsonValue(input.marketAnalysis),
         scenarios: toInputJsonValue(input.scenarios),
         overallConfidence: input.overallConfidence,
@@ -149,7 +184,8 @@ export class PlanRepository {
         tokenUsage: input.tokenUsage,
       },
       create: {
-        researchId: input.researchId,
+        researchId,
+        researchOutputId,
         targetDate: input.targetDate,
         symbol: input.symbol,
         marketAnalysis: toInputJsonValue(input.marketAnalysis),

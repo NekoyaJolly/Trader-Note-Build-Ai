@@ -10,6 +10,16 @@ export {
   type MarketResearchWithTypes,
 } from './researchRepository';
 
+// Phase A 新設: ResearchOutput リポジトリ (researchAIService の永続化先)
+export {
+  ResearchOutputRepository,
+  researchOutputRepository,
+  type CreateResearchOutputInput,
+  type FindResearchOutputOptions,
+  type ResearchOutputWithTypes,
+  type ResearchContextSnapshot,
+} from './researchOutputRepository';
+
 export {
   PlanRepository,
   planRepository,
