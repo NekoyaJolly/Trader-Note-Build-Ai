@@ -25,6 +25,14 @@ import { getRelevantIndicatorContext } from '../knowledge';
 import { AIProvider } from '../agent/aiProvider';
 import { loadPrompt } from '../prompts/loader';
 import type { JsonValue } from '../../utils/jsonValue';
+// Phase A: EODHD 外部要因 context 型 (PR #2 で配線)
+import type {
+  NewsContext,
+  SentimentContext,
+  EconomicEventsContext,
+  MacroContext,
+  FundamentalsContext,
+} from '../../schemas/external/eodhd';
 
 // ===========================================
 // 型定義
@@ -32,12 +40,27 @@ import type { JsonValue } from '../../utils/jsonValue';
 
 /**
  * Market Analyst への入力データ
+ *
+ * Phase A: 外部要因 context (newsContext / sentimentContext / economicEvents /
+ * macroContext / fundamentalsContext) を optional 追加。aiOrchestrator が
+ * EODHD から取得して詰める。各 context は EODHD 取得失敗時 undefined のまま、
+ * researchAIService 側は欠落許容 (OHLCV だけで分析継続可能)。
  */
 export interface ResearchAIInput {
   symbol: string;
   timeframe?: string;
   ohlcvData: OHLCVData[];
   indicators?: IndicatorData;
+  /** EODHD News API から取得した上位記事サマリ (Phase A) */
+  newsContext?: NewsContext;
+  /** EODHD Sentiments API の日次センチメント時系列 (Phase A) */
+  sentimentContext?: SentimentContext;
+  /** EODHD EconomicEvents カレンダー (Phase A) */
+  economicEvents?: EconomicEventsContext;
+  /** EODHD MacroIndicator の時系列 (Phase A) */
+  macroContext?: MacroContext;
+  /** EODHD Fundamentals (株式系シンボルのみ、FX/Crypto/Commodity では undefined) (Phase A) */
+  fundamentalsContext?: FundamentalsContext;
 }
 
 /**
@@ -195,6 +218,9 @@ export class ResearchAIService {
         ? '50.0'
         : ((snapshot.latestPrice - snapshot.recentLow) / rangeSize * 100).toFixed(1);
 
+    // Phase A: 外部要因 context を整形 (PR #2)
+    const externalContextSection = this.buildExternalContextSection(input);
+
     return `# 市場分析リクエスト
 
 ## あなたの役割
@@ -226,7 +252,7 @@ ${indicators ? `
 - ATR: ${indicators.atr?.toFixed(2) ?? 'N/A'}
 - BB上限: ${indicators.bbUpper?.toFixed(2) ?? 'N/A'}, BB下限: ${indicators.bbLower?.toFixed(2) ?? 'N/A'}, BB中央: ${indicators.bbMiddle?.toFixed(2) ?? 'N/A'}
 ` : 'テクニカル指標は事前計算なし。OHLCVデータから推定してください。'}
-
+${externalContextSection}
 ## 分析タスク
 
 以下の3つの観点で分析してください:
@@ -286,6 +312,82 @@ ${getRelevantIndicatorContext(
             // getRelevantIndicatorContext の Record<string, IndicatorContextValue> へ構造的に橋渡しできる。
             indicators as Record<string, JsonValue>
         )}`;
+  }
+
+  /**
+   * Phase A: 外部要因 context (News / Sentiment / Economic Events / Macro / Fundamentals)
+   * を AI プロンプト用テキストに整形する。
+   *
+   * いずれの context も optional。すべて undefined なら空文字を返し、プロンプトには出さない。
+   */
+  private buildExternalContextSection(input: ResearchAIInput): string {
+    const lines: string[] = [];
+
+    if (input.newsContext && input.newsContext.topItems.length > 0) {
+      lines.push(
+        `### News (最新 ${input.newsContext.topItems.length} 件 / 全 ${input.newsContext.totalCount} 件)`,
+      );
+      for (const news of input.newsContext.topItems) {
+        const sentiment =
+          news.sentimentPolarity !== undefined
+            ? ` [sentiment: ${news.sentimentPolarity.toFixed(2)}]`
+            : '';
+        const tags = news.tags && news.tags.length > 0 ? ` (${news.tags.join(', ')})` : '';
+        lines.push(`- ${news.date.slice(0, 10)}: ${news.title}${sentiment}${tags}`);
+      }
+    }
+
+    if (input.sentimentContext && input.sentimentContext.points.length > 0) {
+      const recent = input.sentimentContext.points.slice(-7);
+      lines.push(`### Sentiment (直近 ${recent.length} 日)`);
+      for (const p of recent) {
+        const normStr = p.normalized !== undefined ? p.normalized.toFixed(2) : 'N/A';
+        lines.push(`- ${p.date}: count=${p.count}, normalized=${normStr}`);
+      }
+    }
+
+    if (input.economicEvents && input.economicEvents.topItems.length > 0) {
+      lines.push(
+        `### Economic Events (上位 ${Math.min(input.economicEvents.topItems.length, 5)} 件 / 全 ${input.economicEvents.totalCount} 件)`,
+      );
+      for (const ev of input.economicEvents.topItems.slice(0, 5)) {
+        const parts = [ev.date, ev.country, ev.type].filter(Boolean).join(' ');
+        const metrics = [
+          ev.actual !== undefined ? `actual=${ev.actual}` : null,
+          ev.estimate !== undefined ? `est=${ev.estimate}` : null,
+          ev.previous !== undefined ? `prev=${ev.previous}` : null,
+        ]
+          .filter(Boolean)
+          .join(', ');
+        lines.push(`- ${parts}${metrics ? `: ${metrics}` : ''}`);
+      }
+    }
+
+    if (input.macroContext && input.macroContext.points.length > 0) {
+      const indicator = input.macroContext.indicator ?? 'default';
+      lines.push(`### Macro Indicator: ${indicator} (${input.macroContext.country})`);
+      const recent = input.macroContext.points.slice(-6);
+      lines.push(`- ${recent.map((p) => `${p.date}: ${p.value}`).join(' | ')}`);
+    }
+
+    if (input.fundamentalsContext?.available && input.fundamentalsContext.highlights) {
+      const h = input.fundamentalsContext.highlights;
+      const fundamentalLines: string[] = [];
+      if (h.sector) fundamentalLines.push(`Sector: ${h.sector}`);
+      if (h.industry) fundamentalLines.push(`Industry: ${h.industry}`);
+      if (h.marketCapitalization !== undefined)
+        fundamentalLines.push(`Market Cap: ${h.marketCapitalization.toLocaleString()}`);
+      if (h.peRatio !== undefined) fundamentalLines.push(`PE Ratio: ${h.peRatio.toFixed(2)}`);
+      if (h.dividendYield !== undefined)
+        fundamentalLines.push(`Dividend Yield: ${(h.dividendYield * 100).toFixed(2)}%`);
+      if (fundamentalLines.length > 0) {
+        lines.push('### Fundamentals (株式系シンボル)');
+        for (const fl of fundamentalLines) lines.push(`- ${fl}`);
+      }
+    }
+
+    if (lines.length === 0) return '';
+    return '\n## 外部要因 (EODHD 取得、Phase A)\n\n' + lines.join('\n') + '\n';
   }
 
   /**

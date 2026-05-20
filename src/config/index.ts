@@ -205,10 +205,15 @@ export const config = {
     } as Record<AIAgentKey, string>,
   },
   market: {
-    // Twelve Data API のデフォルトURL を設定
+    // Twelve Data API のデフォルトURL を設定 (Phase D で撤去予定)
     apiUrl: process.env.MARKET_API_URL || process.env.TWELVE_DATA_API_URL || 'https://api.twelvedata.com',
     // TWELVE_DATA_API_KEY も MARKET_API_KEY のエイリアスとして使用可能
     apiKey: process.env.MARKET_API_KEY || process.env.TWELVE_DATA_API_KEY || '',
+  },
+  // Phase A 新設: EODHD All-In-One ($99.99/月、2026-05-19 確定)
+  eodhd: {
+    apiToken: (process.env.EODHD_API_KEY || '').trim(),
+    baseUrl: process.env.EODHD_BASE_URL || 'https://eodhd.com/api',
   },
   matching: {
     threshold: parseFloat(process.env.MATCH_THRESHOLD || '0.75'),
