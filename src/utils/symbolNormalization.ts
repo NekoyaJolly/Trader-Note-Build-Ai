@@ -33,7 +33,9 @@ export function toTwelveDataSymbol(symbol: string): string {
 /**
  * EODHD 形式のシンボルに変換 (例: XAUUSD → XAUUSD.FOREX)
  *
- * 既にサフィックス (.FOREX / .US / .INDX / .CC / .ETF) が付いていればそのまま返す。
+ * サフィックス (.FOREX / .US / .INDX / .CC / .ETF) の有無に関わらず、ベース部分を
+ * `normalizeCTraderSymbol()` で正規化してからサフィックスを再付与する。
+ * これにより `EUR/USD.FOREX` のような不正混在も `EURUSD.FOREX` に正される。
  * デフォルト market type は FOREX (本プロジェクトの主用途)。
  */
 export function toEodhdSymbol(
@@ -41,18 +43,23 @@ export function toEodhdSymbol(
   marketType: EodhdMarketType = 'FOREX',
 ): string {
   const trimmedUpper = symbol.trim().toUpperCase();
-  if (EODHD_SUFFIX_PATTERN.test(trimmedUpper)) {
-    return trimmedUpper;
+  const suffixMatch = trimmedUpper.match(EODHD_SUFFIX_PATTERN);
+  if (suffixMatch) {
+    const baseRaw = trimmedUpper.replace(EODHD_SUFFIX_PATTERN, '');
+    return `${normalizeCTraderSymbol(baseRaw)}${suffixMatch[0]}`;
   }
-  const normalized = normalizeCTraderSymbol(symbol);
-  return `${normalized}.${marketType}`;
+  return `${normalizeCTraderSymbol(symbol)}.${marketType}`;
 }
 
 /**
  * EODHD 形式から内部正規化形式 (cTrader 互換) に戻す (例: XAUUSD.FOREX → XAUUSD)
+ *
+ * サフィックスを除去した後、ベース部を `normalizeCTraderSymbol()` で正規化する
+ * (スラッシュ・ハイフン等の非許容文字を除去、大文字化)。
  */
 export function fromEodhdSymbol(symbol: string): string {
-  return symbol.trim().toUpperCase().replace(EODHD_SUFFIX_PATTERN, '');
+  const withoutSuffix = symbol.trim().toUpperCase().replace(EODHD_SUFFIX_PATTERN, '');
+  return normalizeCTraderSymbol(withoutSuffix);
 }
 
 /**

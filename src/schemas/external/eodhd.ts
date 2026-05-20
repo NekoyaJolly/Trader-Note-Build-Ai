@@ -269,7 +269,7 @@ const FundamentalsRawSchema = z
 export const FundamentalsContextSchema = z.object({
   symbol: z.string(),
   fetchedAt: z.string(),
-  /** API 対応シンボル (US/ETF/INDX) 以外では null */
+  /** API 対応シンボル (US/ETF/INDX) 以外では false */
   available: z.boolean(),
   /** 利用可能な場合のみ含まれる主要メタ */
   highlights: z

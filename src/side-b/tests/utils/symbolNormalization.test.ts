@@ -60,6 +60,12 @@ describe('symbolNormalization (Phase A: EODHD 拡張)', () => {
     it('小文字 input を大文字化', () => {
       expect(toEodhdSymbol('eurusd')).toBe('EURUSD.FOREX');
     });
+
+    it('サフィックス付きでもベース部のスラッシュ等は正規化される', () => {
+      // Copilot review (PR #234) 指摘 4 対応: EUR/USD.FOREX → EURUSD.FOREX
+      expect(toEodhdSymbol('EUR/USD.FOREX')).toBe('EURUSD.FOREX');
+      expect(toEodhdSymbol('xau-usd.US')).toBe('XAUUSD.US');
+    });
   });
 
   describe('fromEodhdSymbol', () => {
@@ -73,6 +79,12 @@ describe('symbolNormalization (Phase A: EODHD 拡張)', () => {
 
     it('サフィックスなしはそのまま大文字化', () => {
       expect(fromEodhdSymbol('xauusd')).toBe('XAUUSD');
+    });
+
+    it('サフィックス除去後にハイフン/スラッシュも正規化される', () => {
+      // Copilot review (PR #234) 指摘 4 対応
+      expect(fromEodhdSymbol('XAU-USD.FOREX')).toBe('XAUUSD');
+      expect(fromEodhdSymbol('eur/usd.FOREX')).toBe('EURUSD');
     });
   });
 
