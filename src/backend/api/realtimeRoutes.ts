@@ -40,19 +40,15 @@ function flushStreamResponse(res: Response): void {
 
 const router = Router();
 
-// 時間足ごとのオーケストレーター (Phase A PR #3 で EODHD 経路に切替)
-const orchestrators: Map<number, EodhdRealtimeOrchestrator> = new Map();
-
 /**
- * オーケストレーターを取得（時間足ごとに管理）
+ * 時間足ごとのオーケストレーターを取得
+ *
+ * Phase A PR #3 (2026-05-21) で EODHD 経路に切替。
+ * `getEodhdRealtimeOrchestrator` が barIntervalSeconds キーで内部 Map 管理するため、
+ * 本 routes 側で重ねて Map を持つ必要はなく、同 interval なら同インスタンスが返る。
  */
 function getOrchestrator(barIntervalSeconds: number = 60): EodhdRealtimeOrchestrator {
-  let orch = orchestrators.get(barIntervalSeconds);
-  if (!orch) {
-    orch = getEodhdRealtimeOrchestrator(prisma, { barIntervalSeconds });
-    orchestrators.set(barIntervalSeconds, orch);
-  }
-  return orch;
+  return getEodhdRealtimeOrchestrator(prisma, { barIntervalSeconds });
 }
 
 /**
@@ -328,10 +324,11 @@ router.post('/clear-bars/:symbol', async (req: Request, res: Response) => {
  */
 router.post('/clear-all-bars', (_req: Request, res: Response) => {
   try {
-    // 全時間足のオーケストレーターの進行中バーをクリア
-    for (const orch of orchestrators.values()) {
-      orch.clearAllPendingBars();
-    }
+    // 進行中バーをクリア (default orchestrator: barInterval=60s)。
+    // 複数 timeframe の orchestrator は factory 内 Map で管理されるが、
+    // clearAllPendingBars は RealtimeTickService の global pending bars をクリアするため
+    // どの orchestrator から呼んでも同じ効果になる。
+    getDefaultOrchestrator().clearAllPendingBars();
 
     return res.json({
       success: true,

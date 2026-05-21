@@ -146,10 +146,12 @@ open http://localhost:3000/  # ログイン後 RealtimeChart にアクセス
 # 3. 確認ポイント
 # (a) XAU/USD など FX シンボルでローソク足が更新される
 # (b) 接続状態インジケーターが "connected"
-# (c) サーバログに以下が出る (cTrader → EODHD に切替済を確認)
-#     [EodhdProvider] connecting
-#     [EodhdRealtimeOrchestrator] subscribed: XAU/USD
-# (d) cTrader 関連ログが出ない (cTraderRealtimeOrchestrator の起動ログがない)
+# (c) サーバログに以下が順に出る (cTrader → EODHD に切替済を確認)
+#     [EodhdProvider] connecting feed=forex
+#     [EodhdProvider] connected
+#     [EodhdOrchestrator] connected (barInterval=60s)
+#     [EodhdOrchestrator] subscribed: XAU/USD
+# (d) cTrader 関連の Tick 配信ログが出ない (旧 ctraderRealtimeOrchestrator は削除済)
 ```
 
 ## 範囲外 (後続フェーズ)
