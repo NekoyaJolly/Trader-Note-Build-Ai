@@ -37,6 +37,18 @@
  * として再利用する。`kind` 値が discriminant となり、Skill 名と sub-agent 名のどちらを
  * 指しているかが判別できる。新規フィールドの追加は行わず、Step 1/2 の既存テストを
  * 未改変で全 pass にする (KICKOFF §3.1)。
+ *
+ * **PDCA state 遷移 (P3b で追加)**:
+ * - `pdca.state.started`: PDCALoop.tick() が state handler に入った直後
+ * - `pdca.state.completed`: state handler が正常完了 (PDCATickResult を返した)
+ * - `pdca.state.failed`: state handler 実行中に例外が発生
+ *
+ * `pdca.state.*` event では `skillName` フィールドに **state 識別子**
+ * (例: 'IDLE' / 'SESSION_OPEN' / 'MONITORING' / 'EVALUATING_ENTRY' /
+ * 'MANAGING_POSITION' / 'REFLECTING' / 'REVISING_STRATEGY') を入れる。
+ * Sub-Agent との意味論差 (= sequential step vs state machine 遷移) は kind の prefix
+ * (`adk.subagent` vs `pdca.state`) で識別する。Observer MVP (P1a) からは
+ * `kind: 'pdca.state.*'` のみフィルタすれば PDCA state 系のみ集計できる。
  */
 export type AdkTraceEventKind =
   | 'adk.skill.started'
@@ -44,7 +56,10 @@ export type AdkTraceEventKind =
   | 'adk.skill.failed'
   | 'adk.subagent.started'
   | 'adk.subagent.completed'
-  | 'adk.subagent.failed';
+  | 'adk.subagent.failed'
+  | 'pdca.state.started'
+  | 'pdca.state.completed'
+  | 'pdca.state.failed';
 
 /**
  * trace event の結果状態。
