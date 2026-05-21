@@ -47,9 +47,10 @@ import type { JsonValue } from '../../../utils/jsonValue';
 import {
   NoopTraceSink,
   payloadToSummary,
+  safeRecord,
   shortenErrorMessage,
 } from '../tracing';
-import type { AdkTraceEvent, TraceSink } from '../tracing';
+import type { TraceSink } from '../tracing';
 import { jsonSchemaToZod } from './jsonSchemaToZod';
 import { toSkillContext } from './skillContext';
 
@@ -101,24 +102,8 @@ function safeContextString(
   }
 }
 
-/**
- * `traceSink.record()` を「絶対に throw しない」形で呼ぶ。
- *
- * 同期 throw も Promise reject も catch して握りつぶす。Skill 実行を壊さないため。
- */
-function safeRecord(sink: TraceSink, event: AdkTraceEvent): void {
-  try {
-    const maybePromise = sink.record(event);
-    if (maybePromise instanceof Promise) {
-      // 非同期実装の reject も握りつぶす
-      maybePromise.catch(() => {
-        /* swallow */
-      });
-    }
-  } catch {
-    // 同期 throw も握りつぶす
-  }
-}
+// (旧: 内部 `safeRecord` 関数は `tracing/safeRecord.ts` に切り出し、Plan 多段 trace
+//  helper (`tracePlanStep`) と共有するようにした。挙動は等価。)
 
 // ============================================================================
 // 内部: 単一 Skill → FunctionTool 変換

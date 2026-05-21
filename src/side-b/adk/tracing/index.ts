@@ -44,3 +44,9 @@ export {
   KEY_NAME_LIMIT,
   DEFAULT_ERROR_MESSAGE_MAX,
 } from './traceSummaries';
+
+// safe trace recording (P3)
+export { safeRecord } from './safeRecord';
+
+// Plan 多段 step trace helper (P3)
+export { tracePlanStep, type PlanStepTraceContext } from './planStepTrace';
