@@ -256,6 +256,17 @@ export function getEodhdRealtimeOrchestrator(
   return instance;
 }
 
+/**
+ * 全 timeframe の orchestrator インスタンスを取得
+ *
+ * Copilot review (PR #237) 指摘対応: 運用系 API (例: clear-all-bars) が
+ * 全 timeframe を横断的に扱えるよう、生成済インスタンスをスナップショットで返す。
+ * 生成されていない timeframe は含まれない (lazy init 設計)。
+ */
+export function getAllEodhdRealtimeOrchestrators(): EodhdRealtimeOrchestrator[] {
+  return Array.from(instances.values());
+}
+
 /** テスト用に全インスタンスをリセット */
 export function __resetEodhdOrchestratorForTesting(): void {
   instances.clear();

@@ -23,7 +23,10 @@ import type {
   EodhdRealtimeOrchestrator,
   ConnectionStatus,
 } from '../services/realtime/eodhdRealtimeOrchestrator';
-import { getEodhdRealtimeOrchestrator } from '../services/realtime/eodhdRealtimeOrchestrator';
+import {
+  getEodhdRealtimeOrchestrator,
+  getAllEodhdRealtimeOrchestrators,
+} from '../services/realtime/eodhdRealtimeOrchestrator';
 import type { TickDataInput, OHLCVBarInput, PendingBar } from '../services/realtime/realtimeTickService';
 import type { JsonValue } from '../../utils/jsonValue';
 import { prisma } from '../db/client';
@@ -324,16 +327,21 @@ router.post('/clear-bars/:symbol', async (req: Request, res: Response) => {
  */
 router.post('/clear-all-bars', (_req: Request, res: Response) => {
   try {
-    // 進行中バーをクリア (default orchestrator: barInterval=60s)。
-    // 複数 timeframe の orchestrator は factory 内 Map で管理されるが、
-    // clearAllPendingBars は RealtimeTickService の global pending bars をクリアするため
-    // どの orchestrator から呼んでも同じ効果になる。
-    getDefaultOrchestrator().clearAllPendingBars();
+    // Copilot review (PR #237) 指摘対応:
+    // RealtimeTickService は barIntervalSeconds ごとに別インスタンスのため、
+    // 全 timeframe の orchestrator を走査して各々の pending bars をクリアする必要がある。
+    // 生成済 orchestrator のみを対象 (lazy init で未生成の timeframe には pending bars も無い)。
+    const allOrchestrators = getAllEodhdRealtimeOrchestrators();
+    const clearedCount = allOrchestrators.length;
+    for (const orch of allOrchestrators) {
+      orch.clearAllPendingBars();
+    }
 
     return res.json({
       success: true,
       data: {
-        message: '全ての進行中バーをクリアしました',
+        message: `${clearedCount} 個の timeframe の進行中バーをクリアしました`,
+        clearedTimeframes: clearedCount,
       },
     });
   } catch (error) {
