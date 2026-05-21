@@ -14,6 +14,7 @@
  * 関連: docs/architecture/EODHD_PHASE_A_WBS.md PR #3 A-12
  */
 
+import { z } from 'zod';
 import { EODHDClient, type EODHDWebSocket, type WebSocketFeed, type WebSocketTick } from 'eodhd';
 import { config } from '../../config';
 import {
@@ -28,6 +29,19 @@ import {
 import { toEodhdSymbol, fromEodhdSymbol } from '../../utils/symbolNormalization';
 
 const KNOWN_QUOTES = ['USDT', 'USD', 'JPY', 'EUR', 'GBP', 'AUD', 'CAD', 'CHF', 'NZD'] as const;
+
+/**
+ * EODHD WebSocket Tick の Zod schema (boundary validation)
+ * Copilot review (PR #235) 指摘 6 対応: 手動 typeof 判定を Zod に統一
+ */
+const WebSocketTickSchema = z
+  .object({
+    s: z.string().min(1),
+    p: z.number().finite().positive(),
+    t: z.number().finite(),
+    v: z.number().optional(),
+  })
+  .passthrough();
 
 export interface EodhdProviderOptions {
   /** API トークン (省略時は config.eodhd.apiToken) */
@@ -94,15 +108,17 @@ export class EodhdProvider extends BaseMarketDataProvider {
       return true;
     }
     this.setConnectionState('connecting');
+    console.log(`[EodhdProvider] connecting feed=${this.feed}`);
     try {
       const initial = Array.from(this.subscribedProviderSymbols);
       const ws = this.client.websocket(this.feed, initial);
       ws.on('data', (tick) => this.handleTick(tick));
       ws.on('error', (err) => {
-        console.error('[EODHD WS] error:', err.message);
+        console.error('[EodhdProvider] error:', err.message);
         this.setConnectionState('error', err);
       });
       ws.on('close', () => {
+        console.log('[EodhdProvider] closed');
         this.setConnectionState('disconnected');
       });
       ws.on('reconnectFailed', () => {
@@ -110,6 +126,7 @@ export class EodhdProvider extends BaseMarketDataProvider {
       });
       this.ws = ws;
       this.setConnectionState('connected');
+      console.log('[EodhdProvider] connected');
       return true;
     } catch (err) {
       const error = err instanceof Error ? err : new Error('EODHD connect 失敗');
@@ -126,10 +143,20 @@ export class EodhdProvider extends BaseMarketDataProvider {
     this.tickCallbacks = [];
     this.subscribedProviderSymbols.clear();
     this.setConnectionState('disconnected');
+    console.log('[EodhdProvider] disconnected');
   }
 
   async subscribeToTicks(symbols: string[], callback: TickCallback): Promise<void> {
     this.tickCallbacks.push(callback);
+    await this.addSymbols(symbols);
+  }
+
+  /**
+   * 既存の Tick callback を再登録せずに symbols だけ購読追加するメソッド。
+   * Copilot review (PR #235) 指摘 3 対応: orchestrator 側で callback の重複登録を防ぐため、
+   * 2 回目以降の subscribe は本メソッドを呼んで callback の重複を回避する。
+   */
+  async addSymbols(symbols: string[]): Promise<void> {
     const providerSymbols = symbols.map((s) => this.toProviderSymbol(s));
     for (const ps of providerSymbols) this.subscribedProviderSymbols.add(ps);
     if (this.ws) {
@@ -153,20 +180,22 @@ export class EodhdProvider extends BaseMarketDataProvider {
   // ===========================================
 
   private handleTick(raw: WebSocketTick): void {
-    if (typeof raw.s !== 'string' || typeof raw.p !== 'number' || typeof raw.t !== 'number') {
+    // Copilot review (PR #235) 指摘 6 対応: Zod schema で形状を narrow
+    const parsed = WebSocketTickSchema.safeParse(raw);
+    if (!parsed.success) {
       // 形状不一致の tick は無視
       return;
     }
-    const price = raw.p;
+    const { s, p, t } = parsed.data;
     const tick: TickData = {
-      symbol: this.normalizeSymbol(raw.s),
-      timestamp: new Date(raw.t),
+      symbol: this.normalizeSymbol(s),
+      timestamp: new Date(t),
       // forex feed は bid/ask 分離フィールドを公開しない場合があるため、
       // p (last price) を mid と仮定し、bid/ask 同値・spread=0 で正規化する。
       // 実 bid/ask が必要な画面では Phase C で us-quote feed を別 Provider 化する。
-      bid: price,
-      ask: price,
-      mid: price,
+      bid: p,
+      ask: p,
+      mid: p,
       spread: 0,
     };
     for (const callback of this.tickCallbacks) {

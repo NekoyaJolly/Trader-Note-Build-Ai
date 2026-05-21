@@ -68,12 +68,24 @@ export class EodhdRealtimeOrchestrator extends EventEmitter {
   private status: ConnectionStatus = 'disconnected';
   private subscribedSymbols: Set<string> = new Set();
 
+  /** EodhdProvider の callback を 1 回だけ登録するためのフラグ (Copilot review #235 指摘 3) */
+  private providerCallbackRegistered = false;
+  /** EodhdProvider に渡す Tick callback (再登録防止のため固定化) */
+  private readonly providerTickCallback = (tick: TickData): void => {
+    this.handleProviderTick(tick).catch((err) => {
+      console.error('[EodhdOrchestrator] processTick エラー:', err);
+    });
+  };
+
   constructor(prisma: PrismaClient, config: Partial<OrchestratorConfig> = {}) {
     super();
     this.prisma = prisma;
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.provider = new EodhdProvider({ feed: 'forex' });
-    this.tickService = getRealtimeTickService(this.prisma);
+    // Copilot review #235 指摘 1 対応: barIntervalSeconds を TickService にも揃える
+    this.tickService = getRealtimeTickService(this.prisma, {
+      barIntervalSeconds: this.config.barIntervalSeconds,
+    });
 
     // RealtimeTickService の event を re-emit (旧 ctrader 版と同じ contract)
     this.tickService.on('tick', (tick: TickDataInput) => this.emit('tick', tick));
@@ -99,23 +111,42 @@ export class EodhdRealtimeOrchestrator extends EventEmitter {
       this.setStatus('error');
       return false;
     }
+    // Copilot review #235 指摘 2 対応: バー確定/フラッシュ用タイマーを起動
+    this.tickService.start();
     this.setStatus('connected');
+    console.log(
+      `[EodhdOrchestrator] connected (barInterval=${this.config.barIntervalSeconds}s)`,
+    );
     return true;
   }
 
   async disconnect(): Promise<void> {
+    // Copilot review #235 指摘 2 対応: タイマー停止 → DB flush
+    await this.tickService.stop();
     await this.provider.disconnect();
     this.subscribedSymbols.clear();
+    this.providerCallbackRegistered = false;
     this.setStatus('disconnected');
+    console.log('[EodhdOrchestrator] disconnected');
   }
 
   async subscribe(symbols: string[]): Promise<void> {
-    for (const s of symbols) this.subscribedSymbols.add(s);
-    await this.provider.subscribeToTicks(symbols, (tick) => {
-      this.handleProviderTick(tick).catch((err) => {
-        console.error('[EodhdOrchestrator] processTick エラー:', err);
-      });
-    });
+    // Copilot review #235 指摘 3 対応: 新規 symbol のみ追加 + callback は 1 回だけ登録
+    const newSymbols = symbols.filter((s) => !this.subscribedSymbols.has(s));
+    if (newSymbols.length === 0) {
+      return;
+    }
+    for (const s of newSymbols) this.subscribedSymbols.add(s);
+
+    if (!this.providerCallbackRegistered) {
+      // 初回: callback 登録 + symbols 購読
+      await this.provider.subscribeToTicks(newSymbols, this.providerTickCallback);
+      this.providerCallbackRegistered = true;
+    } else {
+      // 2 回目以降: 新規 symbols のみ追加購読 (callback は固定化済)
+      await this.provider.addSymbols(newSymbols);
+    }
+    console.log(`[EodhdOrchestrator] subscribed: ${newSymbols.join(', ')}`);
   }
 
   async unsubscribe(symbols: string[]): Promise<void> {
@@ -198,25 +229,45 @@ export class EodhdRealtimeOrchestrator extends EventEmitter {
 }
 
 // ===========================================
-// Singleton
+// Instances (barIntervalSeconds キーで管理)
 // ===========================================
 
-let _instance: EodhdRealtimeOrchestrator | null = null;
+// Copilot review #235 指摘 4/5 対応:
+// realtimeRoutes が timeframe ごとに orchestrator を切り替える前提のため、
+// barIntervalSeconds をキーにインスタンスを管理する (旧 getCTraderRealtimeOrchestrator 互換)。
+const instances: Map<number, EodhdRealtimeOrchestrator> = new Map();
 
 /**
- * シングルトン取得 (旧 getCTraderRealtimeOrchestrator と shape を揃える)
+ * timeframe (barIntervalSeconds) ごとに orchestrator を取得
+ *
+ * 同一 barIntervalSeconds なら同じインスタンスを返す。
+ * 別 timeframe では別インスタンスを保持し、TickService の集約周期と整合させる。
  */
 export function getEodhdRealtimeOrchestrator(
   prisma: PrismaClient,
-  config?: Partial<OrchestratorConfig>,
+  config: Partial<OrchestratorConfig> = {},
 ): EodhdRealtimeOrchestrator {
-  if (!_instance) {
-    _instance = new EodhdRealtimeOrchestrator(prisma, config);
+  const interval = config.barIntervalSeconds ?? DEFAULT_CONFIG.barIntervalSeconds;
+  let instance = instances.get(interval);
+  if (!instance) {
+    instance = new EodhdRealtimeOrchestrator(prisma, { ...config, barIntervalSeconds: interval });
+    instances.set(interval, instance);
   }
-  return _instance;
+  return instance;
 }
 
-/** テスト用に singleton をリセット */
+/**
+ * 全 timeframe の orchestrator インスタンスを取得
+ *
+ * Copilot review (PR #237) 指摘対応: 運用系 API (例: clear-all-bars) が
+ * 全 timeframe を横断的に扱えるよう、生成済インスタンスをスナップショットで返す。
+ * 生成されていない timeframe は含まれない (lazy init 設計)。
+ */
+export function getAllEodhdRealtimeOrchestrators(): EodhdRealtimeOrchestrator[] {
+  return Array.from(instances.values());
+}
+
+/** テスト用に全インスタンスをリセット */
 export function __resetEodhdOrchestratorForTesting(): void {
-  _instance = null;
+  instances.clear();
 }

@@ -23,7 +23,10 @@ import type {
   EodhdRealtimeOrchestrator,
   ConnectionStatus,
 } from '../services/realtime/eodhdRealtimeOrchestrator';
-import { getEodhdRealtimeOrchestrator } from '../services/realtime/eodhdRealtimeOrchestrator';
+import {
+  getEodhdRealtimeOrchestrator,
+  getAllEodhdRealtimeOrchestrators,
+} from '../services/realtime/eodhdRealtimeOrchestrator';
 import type { TickDataInput, OHLCVBarInput, PendingBar } from '../services/realtime/realtimeTickService';
 import type { JsonValue } from '../../utils/jsonValue';
 import { prisma } from '../db/client';
@@ -40,19 +43,15 @@ function flushStreamResponse(res: Response): void {
 
 const router = Router();
 
-// 時間足ごとのオーケストレーター (Phase A PR #3 で EODHD 経路に切替)
-const orchestrators: Map<number, EodhdRealtimeOrchestrator> = new Map();
-
 /**
- * オーケストレーターを取得（時間足ごとに管理）
+ * 時間足ごとのオーケストレーターを取得
+ *
+ * Phase A PR #3 (2026-05-21) で EODHD 経路に切替。
+ * `getEodhdRealtimeOrchestrator` が barIntervalSeconds キーで内部 Map 管理するため、
+ * 本 routes 側で重ねて Map を持つ必要はなく、同 interval なら同インスタンスが返る。
  */
 function getOrchestrator(barIntervalSeconds: number = 60): EodhdRealtimeOrchestrator {
-  let orch = orchestrators.get(barIntervalSeconds);
-  if (!orch) {
-    orch = getEodhdRealtimeOrchestrator(prisma, { barIntervalSeconds });
-    orchestrators.set(barIntervalSeconds, orch);
-  }
-  return orch;
+  return getEodhdRealtimeOrchestrator(prisma, { barIntervalSeconds });
 }
 
 /**
@@ -328,15 +327,21 @@ router.post('/clear-bars/:symbol', async (req: Request, res: Response) => {
  */
 router.post('/clear-all-bars', (_req: Request, res: Response) => {
   try {
-    // 全時間足のオーケストレーターの進行中バーをクリア
-    for (const orch of orchestrators.values()) {
+    // Copilot review (PR #237) 指摘対応:
+    // RealtimeTickService は barIntervalSeconds ごとに別インスタンスのため、
+    // 全 timeframe の orchestrator を走査して各々の pending bars をクリアする必要がある。
+    // 生成済 orchestrator のみを対象 (lazy init で未生成の timeframe には pending bars も無い)。
+    const allOrchestrators = getAllEodhdRealtimeOrchestrators();
+    const clearedCount = allOrchestrators.length;
+    for (const orch of allOrchestrators) {
       orch.clearAllPendingBars();
     }
 
     return res.json({
       success: true,
       data: {
-        message: '全ての進行中バーをクリアしました',
+        message: `${clearedCount} 個の timeframe の進行中バーをクリアしました`,
+        clearedTimeframes: clearedCount,
       },
     });
   } catch (error) {
