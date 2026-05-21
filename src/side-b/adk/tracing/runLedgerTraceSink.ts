@@ -94,23 +94,51 @@ async function routeEvent(
 }
 
 function isStartedKind(kind: AdkTraceEvent['kind']): boolean {
-  return kind === 'adk.skill.started' || kind === 'adk.subagent.started';
+  return (
+    kind === 'adk.skill.started' ||
+    kind === 'adk.subagent.started' ||
+    kind === 'pdca.state.started'
+  );
 }
 
 function isCompletedKind(kind: AdkTraceEvent['kind']): boolean {
-  return kind === 'adk.skill.completed' || kind === 'adk.subagent.completed';
+  return (
+    kind === 'adk.skill.completed' ||
+    kind === 'adk.subagent.completed' ||
+    kind === 'pdca.state.completed'
+  );
 }
 
 function isFailedKind(kind: AdkTraceEvent['kind']): boolean {
-  return kind === 'adk.skill.failed' || kind === 'adk.subagent.failed';
+  return (
+    kind === 'adk.skill.failed' ||
+    kind === 'adk.subagent.failed' ||
+    kind === 'pdca.state.failed'
+  );
 }
 
 /**
  * traceKind を AdkTraceEvent.kind から推論する (RunLedger.startStep に渡す値)。
+ *
+ * PR #243 Copilot review #1 対応: `pdca.state.*` (P3b で追加) も RunLedger に
+ * 反映されるよう `pdca-state` を追加。旧実装では default が `adk-subagent` だったため、
+ * `pdca.state.*` event が誤って sub-agent 扱いで保存される可能性があった。
+ * 明示分岐で誤分類を防ぐ。
  */
 function inferTraceKind(kind: AdkTraceEvent['kind']): string {
-  if (kind === 'adk.skill.started' || kind === 'adk.skill.completed' || kind === 'adk.skill.failed') {
+  if (
+    kind === 'adk.skill.started' ||
+    kind === 'adk.skill.completed' ||
+    kind === 'adk.skill.failed'
+  ) {
     return 'adk-skill';
+  }
+  if (
+    kind === 'pdca.state.started' ||
+    kind === 'pdca.state.completed' ||
+    kind === 'pdca.state.failed'
+  ) {
+    return 'pdca-state';
   }
   return 'adk-subagent';
 }

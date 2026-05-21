@@ -87,6 +87,52 @@ describe('createRunLedgerTraceSink', () => {
     }));
   });
 
+  it('pdca.state.started → startStep (traceKind=pdca-state、P3b で追加)', async () => {
+    // PR #243 Copilot review #1 対応: 旧実装では kind 判定が adk.* のみで
+    // pdca.state.* は黙ってドロップされていた。新 kind を追加した本テストで
+    // 「started → startStep + traceKind=pdca-state」が再発しないよう lock する。
+    const spy = makeSpyLedger();
+    const sink = createRunLedgerTraceSink(spy.service, 'run-pdca-1');
+    await sink.record(makeEvent({ kind: 'pdca.state.started', skillName: 'MONITORING' }));
+    expect(spy.startStepMock).toHaveBeenCalledWith('run-pdca-1', expect.objectContaining({
+      stepName: 'MONITORING',
+      traceKind: 'pdca-state',
+    }));
+  });
+
+  it('pdca.state.completed → succeedStep + summary に kind=pdca.state.completed が入る', async () => {
+    const spy = makeSpyLedger();
+    const sink = createRunLedgerTraceSink(spy.service, 'run-pdca-2');
+    await sink.record(makeEvent({
+      kind: 'pdca.state.completed',
+      status: 'ok',
+      durationMs: 12,
+      resultSummary: { fieldCount: 3, redacted: true },
+      skillName: 'REFLECTING',
+    }));
+    expect(spy.succeedStepMock).toHaveBeenCalledWith('run-pdca-2', 'REFLECTING', expect.objectContaining({
+      summary: expect.stringContaining('kind=pdca.state.completed'),
+      nextAction: 'proceed',
+    }));
+  });
+
+  it('pdca.state.failed → failStep + errorCode/Message が伝播', async () => {
+    const spy = makeSpyLedger();
+    const sink = createRunLedgerTraceSink(spy.service, 'run-pdca-3');
+    await sink.record(makeEvent({
+      kind: 'pdca.state.failed',
+      status: 'thrown',
+      errorCode: 'PDCA_REFLECTING_FAILED',
+      errorMessage: 'reflectionAIService が応答しない',
+      skillName: 'REFLECTING',
+    }));
+    expect(spy.failStepMock).toHaveBeenCalledWith('run-pdca-3', 'REFLECTING', expect.objectContaining({
+      errorCode: 'PDCA_REFLECTING_FAILED',
+      errorMessage: 'reflectionAIService が応答しない',
+      nextAction: 'stop',
+    }));
+  });
+
   it('adk.skill.completed → succeedStep (summary に duration/fieldCount)', async () => {
     const spy = makeSpyLedger();
     const sink = createRunLedgerTraceSink(spy.service, 'run-3');

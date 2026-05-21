@@ -58,6 +58,11 @@ describe('tracePdcaState: 成功時', () => {
     });
 
     it('async ハンドラ (= handleReflecting 相当) も受けられる', async () => {
+        // PR #243 Copilot review #2 対応: 元実装は `setTimeout(5)` + `durationMs >= 5`
+        // を要求していたが、CI のタイマー分解能 / スケジューリング次第で 4ms 等になり
+        // flake のリスクがあった (cleanupJob.test.ts と同種の問題)。本テストの主目的は
+        // 「async ハンドラを await で吸収できる」契約の検証で durationMs 精度ではない
+        // ため、`>= 0` に緩めて決定論的にする。
         const sink = new InMemoryTraceSink();
         const ctx = makeCtx(sink);
 
@@ -66,7 +71,7 @@ describe('tracePdcaState: 成功時', () => {
             'REFLECTING',
             { cycle: 100 },
             async () => {
-                await new Promise((r) => setTimeout(r, 5));
+                await Promise.resolve();
                 return { state: 'IDLE' as const, action: 'reflection 完了', nextCheckMs: 0 };
             },
         );
@@ -74,7 +79,7 @@ describe('tracePdcaState: 成功時', () => {
         expect(result.action).toBe('reflection 完了');
         const completed = sink.events[1];
         expect(completed.kind).toBe('pdca.state.completed');
-        expect(completed.durationMs).toBeGreaterThanOrEqual(5);
+        expect(completed.durationMs).toBeGreaterThanOrEqual(0);
     });
 
     it('args / result は TracePayloadSummary に縮約される', async () => {
