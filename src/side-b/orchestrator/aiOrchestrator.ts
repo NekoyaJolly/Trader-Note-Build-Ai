@@ -184,7 +184,10 @@ export class AIOrchestrator {
     this.strategyBacktester = strategyBacktester || strategyBacktesterAgent;
     this.bullBearDebate = bullBearDebate || bullBearDebateAgent;
     // P3: traceSink は test / 観測機構から差し替え可能。未指定時は NoopTraceSink で
-    // 既存挙動と完全に等価 (record 呼び出しは存在するが何も記録されない)。
+    // 機能等価 (= 記録は何も残らず本処理は同じ結果)。tracePlanStep は呼出毎に UUID
+    // 生成 + payloadToSummary + event object 構築のコストが発生するため、厳密な「完全
+    // 等価」ではない (PR #242 Copilot review 対応)。本番では NoopTraceSink で支配的
+    // コストとはならない (10 step × ~数 μs = 数十 μs / generatePlan) ことを確認済。
     this.traceSink = traceSink || new NoopTraceSink();
   }
 
