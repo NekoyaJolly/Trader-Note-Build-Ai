@@ -74,6 +74,8 @@ import {
   bullBearDebateAgent,
   type BullBearDebateResult,
 } from '../agents/BullBearDebateAgent';
+// Phase A: EODHD 外部要因 context 取得
+import { fetchEodhdContextsForResearch } from '../research/eodhdContextFetcher';
 
 // ===========================================
 // 型定義
@@ -195,6 +197,9 @@ export class AIOrchestrator {
         }
       }
 
+      // Phase A: EODHD 外部要因 context を並列取得 (各失敗は graceful、OHLCV だけで継続可能)
+      const eodhdContexts = await fetchEodhdContextsForResearch(symbol);
+
       // 2. Research AI 呼び出し
       console.log(`[Orchestrator] Research AI 呼び出し`);
       const aiInput: ResearchAIInput = {
@@ -202,6 +207,7 @@ export class AIOrchestrator {
         timeframe,
         ohlcvData,
         indicators: indicators,
+        ...eodhdContexts,
       };
 
       const aiResult = await this.researchAI.generateResearch(aiInput);
