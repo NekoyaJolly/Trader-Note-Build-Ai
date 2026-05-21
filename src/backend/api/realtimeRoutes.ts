@@ -1,12 +1,9 @@
 /**
  * リアルタイムデータ API ルート
- *
- * 目的: EODHD WebSocket から受信した Tick/OHLCV データを
+ * 
+ * 目的: cTrader WebSocket から受信した Tick/OHLCV データを
  *       SSE (Server-Sent Events) でフロントエンドにリアルタイム配信
- *
- * Phase A PR #3 (2026-05-21): Tick source を cTrader → EODHD WebSocket に切替。
- * 旧 CTraderRealtimeOrchestrator → 新 EodhdRealtimeOrchestrator (互換 API)。
- *
+ * 
  * エンドポイント:
  * - GET /api/realtime/stream/:symbol - SSE ストリーム
  * - GET /api/realtime/bars/:symbol - 最新バー取得
@@ -20,10 +17,12 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../../middleware/authMiddleware';
 import type {
-  EodhdRealtimeOrchestrator,
-  ConnectionStatus,
-} from '../services/realtime/eodhdRealtimeOrchestrator';
-import { getEodhdRealtimeOrchestrator } from '../services/realtime/eodhdRealtimeOrchestrator';
+  CTraderRealtimeOrchestrator,
+  ConnectionStatus
+} from '../services/realtime/ctraderRealtimeOrchestrator';
+import {
+  getCTraderRealtimeOrchestrator
+} from '../services/realtime/ctraderRealtimeOrchestrator';
 import type { TickDataInput, OHLCVBarInput, PendingBar } from '../services/realtime/realtimeTickService';
 import type { JsonValue } from '../../utils/jsonValue';
 import { prisma } from '../db/client';
@@ -40,16 +39,16 @@ function flushStreamResponse(res: Response): void {
 
 const router = Router();
 
-// 時間足ごとのオーケストレーター (Phase A PR #3 で EODHD 経路に切替)
-const orchestrators: Map<number, EodhdRealtimeOrchestrator> = new Map();
+// 時間足ごとのオーケストレーター
+const orchestrators: Map<number, CTraderRealtimeOrchestrator> = new Map();
 
 /**
  * オーケストレーターを取得（時間足ごとに管理）
  */
-function getOrchestrator(barIntervalSeconds: number = 60): EodhdRealtimeOrchestrator {
+function getOrchestrator(barIntervalSeconds: number = 60): CTraderRealtimeOrchestrator {
   let orch = orchestrators.get(barIntervalSeconds);
   if (!orch) {
-    orch = getEodhdRealtimeOrchestrator(prisma, { barIntervalSeconds });
+    orch = getCTraderRealtimeOrchestrator(prisma, { barIntervalSeconds });
     orchestrators.set(barIntervalSeconds, orch);
   }
   return orch;
@@ -58,7 +57,7 @@ function getOrchestrator(barIntervalSeconds: number = 60): EodhdRealtimeOrchestr
 /**
  * デフォルトのオーケストレーターを取得
  */
-function getDefaultOrchestrator(): EodhdRealtimeOrchestrator {
+function getDefaultOrchestrator(): CTraderRealtimeOrchestrator {
   return getOrchestrator(60);
 }
 
