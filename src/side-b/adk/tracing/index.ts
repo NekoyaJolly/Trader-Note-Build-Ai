@@ -50,3 +50,6 @@ export { safeRecord } from './safeRecord';
 
 // Plan 多段 step trace helper (P3)
 export { tracePlanStep, type PlanStepTraceContext } from './planStepTrace';
+
+// PDCA state machine trace helper (P3b)
+export { tracePdcaState, type PdcaStateTraceContext } from './pdcaStateTrace';

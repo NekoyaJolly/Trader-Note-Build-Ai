@@ -35,6 +35,19 @@ import {
 import type { MarketAnalysis } from '../models/marketAnalysis';
 import { isFXMarketOpen } from '../utils/marketHours';
 import { reflectionAI } from '../services/reflectionAIService';
+// P3b: PDCA state machine trace 配線
+import { randomUUID } from 'crypto';
+import {
+    NoopTraceSink,
+    tracePdcaState,
+    type PdcaStateTraceContext,
+    type TraceSink,
+} from '../adk/tracing';
+
+/** P3b: PDCA state trace の agentName 固定値 (= AdkTraceEvent.agentName)。 */
+const PDCA_AGENT_NAME = 'pdcaLoop';
+/** P3b: PDCA state trace の callerReason 固定値 (= AdkTraceEvent.callerReason)。 */
+const PDCA_CALLER_REASON = 'pdca-state-machine';
 
 // ===========================================
 // 型定義
@@ -145,10 +158,17 @@ export class PDCALoop {
     private lastAction?: string;
     private lastError?: string;
     private lastTickDurationMs?: number;
+    /** P3b: PDCA state handler 単位の trace 投入先。デフォルトは NoopTraceSink。 */
+    private traceSink: TraceSink;
 
-    constructor(config?: Partial<PDCALoopConfig>) {
+    constructor(config?: Partial<PDCALoopConfig>, traceSink?: TraceSink) {
         this.config = { ...DEFAULT_PDCA_CONFIG, ...config };
         this.memory = agentMemory;
+        // P3b: traceSink は test / 観測機構 (Observer MVP) から差し替え可能。未指定時は
+        // NoopTraceSink で機能等価 (= 何も記録されない、record 呼び出しコストのみ発生)。
+        // tracePdcaState は呼出毎に UUID 生成 + payloadToSummary + event object 構築の
+        // コストがかかるが、本番では tick 1 回あたり数 μs オーダーで無視できる。
+        this.traceSink = traceSink ?? new NoopTraceSink();
     }
 
     /**
@@ -240,22 +260,46 @@ export class PDCALoop {
             };
         }
 
+        // P3b: 本 tick 全体に紐づく trace context (= invocationId 1 つで 1 cycle を識別)。
+        // Observer MVP (P1a) からは「同じ invocationId の pdca.state.* event 群」で
+        // 1 tick 内の遷移を集計できる。args には cycle / marketOpen の scalar snapshot
+        // を入れる (payloadToSummary が topLevelKeys と redacted: true を抽出する)。
+        const traceCtx: PdcaStateTraceContext = {
+            sink: this.traceSink,
+            agentName: PDCA_AGENT_NAME,
+            invocationId: randomUUID(),
+            callerReason: PDCA_CALLER_REASON,
+        };
+        const traceArgs = { cycle, state, marketOpen };
+
         // 状態に基づいた処理
         switch (state) {
             case 'IDLE':
-                return this.handleIdle();
+                return await tracePdcaState(traceCtx, 'IDLE', traceArgs, () => this.handleIdle());
             case 'SESSION_OPEN':
-                return this.handleSessionOpen();
+                return await tracePdcaState(traceCtx, 'SESSION_OPEN', traceArgs, () =>
+                    this.handleSessionOpen(),
+                );
             case 'MONITORING':
-                return this.handleMonitoring();
+                return await tracePdcaState(traceCtx, 'MONITORING', traceArgs, () =>
+                    this.handleMonitoring(),
+                );
             case 'EVALUATING_ENTRY':
-                return this.handleEvaluatingEntry();
+                return await tracePdcaState(traceCtx, 'EVALUATING_ENTRY', traceArgs, () =>
+                    this.handleEvaluatingEntry(),
+                );
             case 'MANAGING_POSITION':
-                return this.handleManagingPosition();
+                return await tracePdcaState(traceCtx, 'MANAGING_POSITION', traceArgs, () =>
+                    this.handleManagingPosition(),
+                );
             case 'REFLECTING':
-                return this.handleReflecting();
+                return await tracePdcaState(traceCtx, 'REFLECTING', traceArgs, () =>
+                    this.handleReflecting(),
+                );
             case 'REVISING_STRATEGY':
-                return this.handleRevisingStrategy();
+                return await tracePdcaState(traceCtx, 'REVISING_STRATEGY', traceArgs, () =>
+                    this.handleRevisingStrategy(),
+                );
             default:
                 // 全 case 網羅後の defensive default。state は型上 never だが、AgentState の
                 // 列挙が将来追加された場合に runtime で値を文字列として表示できるよう String() で受ける。
