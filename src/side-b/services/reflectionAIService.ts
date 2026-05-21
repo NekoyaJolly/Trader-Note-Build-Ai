@@ -26,6 +26,9 @@ import {
     type ReflectionOutput,
 } from '../../schemas/api/sideB';
 import { loadPrompt } from '../prompts/loader';
+import { PromptRegistry } from '../prompts/registry/PromptRegistry';
+
+const REFLECTION_AGENT_NAME = 'reflection';
 
 // ===========================================
 // 型定義
@@ -74,15 +77,53 @@ export interface ReflectionResult {
 /** 最大リトライ回数 */
 const MAX_RETRY_ATTEMPTS = 3;
 
+/**
+ * ReflectionAIService 依存性 (テスト差し替え用)。
+ *
+ * - registry: PromptRegistry を test mock に差し替える経路。未指定時は遅延生成
+ *   (constructor で `new PromptRegistry()` を呼ばないことで、PrismaClient 起動を
+ *   実 DB 操作まで遅延させる。HypothesisGenerator と同じパターン)。
+ */
+export interface ReflectionAIServiceDeps {
+    registry?: PromptRegistry;
+}
+
 export class ReflectionAIService {
     private apiKey: string;
     private model: string;
     private baseURL: string;
+    private _registry: PromptRegistry | null;
 
-    constructor() {
+    constructor(deps: ReflectionAIServiceDeps = {}) {
         this.apiKey = process.env.AI_API_KEY || '';
         this.model = modelFor('reflection');
         this.baseURL = process.env.AI_BASE_URL || config.ai.baseURL || 'https://api.openai.com/v1';
+        this._registry = deps.registry ?? null;
+    }
+
+    /** registry の遅延アクセサ。未指定時は初回参照で PromptRegistry を生成。 */
+    private get registry(): PromptRegistry {
+        if (!this._registry) {
+            this._registry = new PromptRegistry();
+        }
+        return this._registry;
+    }
+
+    /**
+     * P2: Registry の active を取得し global + agent prompt を合成して返す。
+     * 取得失敗 (= seed 未投入 / DB 接続不可 等) は警告ログ + ファイル `loadPrompt`
+     * fallback で続行する。HypothesisGenerator と同じフェイルオープン方針。
+     */
+    private async loadSystemPrompt(): Promise<string> {
+        try {
+            return await this.registry.getCompositeActive(REFLECTION_AGENT_NAME);
+        } catch (err) {
+            console.warn(
+                `[ReflectionAI] PromptRegistry 取得失敗、ファイル fallback (${REFLECTION_AGENT_NAME}):`,
+                err instanceof Error ? err.message : err,
+            );
+            return loadPrompt(REFLECTION_AGENT_NAME);
+        }
     }
 
     /**
@@ -252,12 +293,10 @@ ${existingLessons.slice(-5).map((l, i) => `${i + 1}. ${l}`).join('\n')}`;
             baseURL: this.baseURL,
         });
 
+        const systemPrompt = await this.loadSystemPrompt();
         const aiResponse = await provider.chat(
             [
-                {
-                    role: 'system',
-                    content: loadPrompt('reflection'),
-                },
+                { role: 'system', content: systemPrompt },
                 { role: 'user', content: prompt },
             ],
             { temperature: 0.4, maxTokens: AI_MAX_TOKENS.MEDIUM, responseFormat: { type: 'json_object' } },

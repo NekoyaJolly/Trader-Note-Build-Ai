@@ -24,7 +24,10 @@ import { calculateExpiryDate } from '../models/marketResearch';
 import { getRelevantIndicatorContext } from '../knowledge';
 import { AIProvider } from '../agent/aiProvider';
 import { loadPrompt } from '../prompts/loader';
+import { PromptRegistry } from '../prompts/registry/PromptRegistry';
 import type { JsonValue } from '../../utils/jsonValue';
+
+const RESEARCH_AGENT_NAME = 'research';
 // Phase A: EODHD 外部要因 context 型 (PR #2 で配線)
 import type {
   NewsContext,
@@ -108,15 +111,48 @@ export interface ResearchAIResult {
 // サービスクラス
 // ===========================================
 
+/**
+ * ResearchAIService 依存性 (テスト差し替え用)。reflectionAIService と同パターン。
+ */
+export interface ResearchAIServiceDeps {
+  registry?: PromptRegistry;
+}
+
 export class ResearchAIService {
   private apiKey: string;
   private model: string;
   private baseURL: string;
+  private _registry: PromptRegistry | null;
 
-  constructor() {
+  constructor(deps: ResearchAIServiceDeps = {}) {
     this.apiKey = process.env.AI_API_KEY || '';
     this.model = modelFor('research');
     this.baseURL = process.env.AI_BASE_URL || config.ai.baseURL || 'https://api.openai.com/v1';
+    this._registry = deps.registry ?? null;
+  }
+
+  /** registry の遅延アクセサ。reflectionAIService と同パターン。 */
+  private get registry(): PromptRegistry {
+    if (!this._registry) {
+      this._registry = new PromptRegistry();
+    }
+    return this._registry;
+  }
+
+  /**
+   * P2: Registry の active を取得し global + agent prompt を合成して返す。
+   * 取得失敗時はファイル `loadPrompt` fallback (フェイルオープン)。
+   */
+  private async loadSystemPrompt(): Promise<string> {
+    try {
+      return await this.registry.getCompositeActive(RESEARCH_AGENT_NAME);
+    } catch (err) {
+      console.warn(
+        `[MarketAnalyst] PromptRegistry 取得失敗、ファイル fallback (${RESEARCH_AGENT_NAME}):`,
+        err instanceof Error ? err.message : err,
+      );
+      return loadPrompt(RESEARCH_AGENT_NAME);
+    }
   }
 
   /**
@@ -403,12 +439,10 @@ ${getRelevantIndicatorContext(
       baseURL: this.baseURL,
     });
 
+    const systemPrompt = await this.loadSystemPrompt();
     const aiResponse = await provider.chat(
       [
-        {
-          role: 'system',
-          content: loadPrompt('research'),
-        },
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: prompt },
       ],
       { temperature: 0.3, maxTokens: AI_MAX_TOKENS.MEDIUM, responseFormat: { type: 'json_object' } },

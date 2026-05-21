@@ -90,6 +90,19 @@ export const DEFAULT_SEED_ENTRIES: SeedEntry[] = [
     file: 'generation_reflection.md',
     notes: 'Phase D-1b GenerationReflectionAgent (PR #145)',
   },
+  // P2 (PR #241): Phase 5.5 経路 (reflectionAIService / researchAIService) を
+  // Registry 配下に統合。これにより両 service もプロンプト進化 / PromptMutation
+  // の対象になり、global ルール (`__global__`) も自動で前置される。
+  {
+    agentName: 'reflection',
+    file: 'reflection.md',
+    notes: 'Phase 5.5 reflectionAIService (PDCALoop REFLECTING ハンドラから呼出)',
+  },
+  {
+    agentName: 'research',
+    file: 'research.md',
+    notes: 'Phase 5.5 researchAIService (= MarketAnalyst、aiOrchestrator 多段の段1)',
+  },
 ];
 
 export interface SeedResult {
