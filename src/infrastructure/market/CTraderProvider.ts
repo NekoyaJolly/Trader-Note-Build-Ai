@@ -274,32 +274,26 @@ export class CTraderProvider extends BaseMarketDataProvider {
     return Promise.resolve();
   }
 
-  async subscribeToTicks(symbols: string[], callback: TickCallback): Promise<void> {
-    if (this.connectionState !== 'connected') {
-      throw new Error('[cTrader] 接続されていません');
-    }
-    this.tickCallbacks.push(callback);
-    for (const symbol of symbols) {
-      try {
-        const symbolId = await this.resolveSymbolId(symbol);
-        await this.subscribeToSymbol(symbolId);
-        this.subscribedSymbols.add(symbol);
-        console.log(`[cTrader] ${symbol} の Tick 購読開始`);
-      } catch (error) {
-        console.error(`[cTrader] ${symbol} の購読エラー:`, error);
-      }
-    }
+  /**
+   * @deprecated Phase A PR #3 (2026-05-21) で Tick 配信は EodhdProvider に移行。
+   * CTraderProvider は発注/決済 only に縮小されたため、本メソッドを呼ぶと例外を投げる。
+   * リアルタイム Tick が必要な場合は `EodhdProvider.subscribeToTicks()` を使用すること。
+   */
+  async subscribeToTicks(_symbols: string[], _callback: TickCallback): Promise<void> {
+    void _symbols;
+    void _callback;
+    throw new Error(
+      '[cTrader] Tick subscription は Phase A 以降 EodhdProvider に移行済。CTraderProvider は発注/決済 only。',
+    );
   }
 
-  async unsubscribeFromTicks(symbols: string[]): Promise<void> {
-    for (const symbol of symbols) {
-      const symbolId = this.symbolIdMap.get(symbol);
-      if (symbolId) {
-        await this.unsubscribeFromSymbol(symbolId);
-        this.subscribedSymbols.delete(symbol);
-        console.log(`[cTrader] ${symbol} の購読解除`);
-      }
-    }
+  /**
+   * @deprecated Phase A PR #3 (2026-05-21) で Tick 配信は EodhdProvider に移行。
+   * 本メソッドは IMarketDataProvider 互換のため残されているが no-op。
+   */
+  async unsubscribeFromTicks(_symbols: string[]): Promise<void> {
+    void _symbols;
+    // no-op: Tick subscription は EodhdProvider に移行済
   }
 
   // ========================================

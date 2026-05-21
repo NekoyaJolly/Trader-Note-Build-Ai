@@ -90,8 +90,9 @@ export type Timeframe = z.infer<typeof TimeframeSchema>;
  * プロバイダー種別
  */
 export const ProviderTypeSchema = z.enum([
-  'twelve_data',  // Side-B用（REST）
-  'ctrader',      // Side-A用（WebSocket）
+  'twelve_data',  // 旧 Side-B 用 (REST、Phase D で撤去予定)
+  'ctrader',      // 旧 Side-A Tick + 実売買 (Phase A PR #3 以降は発注/決済 only に縮小)
+  'eodhd',        // Phase A 新設 (WebSocket Tick + ヒストリカル + 外部要因 API)
 ]);
 
 export type ProviderType = z.infer<typeof ProviderTypeSchema>;
