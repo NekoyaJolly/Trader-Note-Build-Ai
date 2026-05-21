@@ -108,11 +108,54 @@ ResearchOutput の `expiresAt` (= デフォルト 4h) を流用。各 context �
 
 Rate limit warn / cache hit rate は Phase E (運用フェーズ) で本格化。
 
+## Phase A PR #3 完了内容 (2026-05-21)
+
+### A-12 EodhdProvider 新設
+
+`src/infrastructure/market/EodhdProvider.ts`:
+- `IMarketDataProvider` を実装、`name: 'eodhd'`
+- EODHD SDK の `client.websocket('forex', symbols)` をラップ
+- forex feed: `WebSocketTick.p` (last price) を `bid/ask/mid` 同値で正規化、`spread=0`
+- 状態遷移は `BaseMarketDataProvider.setConnectionState()` 経由
+
+### A-13 Side-A RealtimeChart の data source 切替
+
+`src/backend/services/realtime/eodhdRealtimeOrchestrator.ts` 新設、
+旧 `CTraderRealtimeOrchestrator` と同一 API surface (events: `tick`/`bar`/`pendingBar`/`statusChange`)。
+`realtimeRoutes.ts` の `getOrchestrator()` を新 orchestrator に差し替え。
+**フロントエンド側 (`RealtimeChart.tsx`) の変更不要** — 同じ `/api/realtime/*` エンドポイントを叩くため。
+
+### A-14 cTrader Tick 系削除 + Provider 縮小
+
+- `ctraderRealtimeOrchestrator.ts` 削除 (872 行)
+- `CTraderProvider.subscribeToTicks()` を deprecate + 例外化
+- `CTraderProvider.unsubscribeFromTicks()` を no-op 化
+- → `CTraderProvider` は **発注/決済 + 過去 OHLCV/Spread 取得** に縮小 (Phase B でさらに OHLCV/Spread も EODHD 化予定)
+
+## A-15 E2E 動作確認手順 (Nekoさん 実行)
+
+EODHD_API_KEY を `.env` に設定後、以下を実行:
+
+```bash
+# 1. dev サーバ起動
+npm run dev
+
+# 2. ブラウザで Side-A RealtimeChart を開く
+open http://localhost:3000/  # ログイン後 RealtimeChart にアクセス
+
+# 3. 確認ポイント
+# (a) XAU/USD など FX シンボルでローソク足が更新される
+# (b) 接続状態インジケーターが "connected"
+# (c) サーバログに以下が出る (cTrader → EODHD に切替済を確認)
+#     [EodhdProvider] connecting
+#     [EodhdRealtimeOrchestrator] subscribed: XAU/USD
+# (d) cTrader 関連ログが出ない (cTraderRealtimeOrchestrator の起動ログがない)
+```
+
 ## 範囲外 (後続フェーズ)
 
-- **PR #3** (Phase A 残): Side-A RealtimeChart を EODHD WebSocket に切替 + cTrader Tick 削除
 - **Phase B**: OHLCV 履歴を Twelve Data → EODHD 切替 (= **Intraday は別プラン契約が必要**、All-In-One では取得不可)
-- **Phase C**: US 株 / Crypto WebSocket 拡張、cTrader 完全撤去判断
+- **Phase C**: US 株 / Crypto WebSocket 拡張、cTrader 完全撤去判断 (Order 系統も最終的に FIX API 等に移行検討)
 - **Phase D**: Twelve Data 完全撤去 (Phase B 完了後)
 
 ## A-8 手動スモークテスト (Nekoさん 実行)
