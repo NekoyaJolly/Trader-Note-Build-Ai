@@ -20,7 +20,9 @@
  * @see docs/design/critical_4_bt_unification.md §3 段階 1 / §6 / §11.4 / §12
  */
 
+import axios, { type AxiosError } from 'axios';
 import type { ScreeningResult } from '../models/edgeHypothesis';
+import { safeStringify } from '../../utils/safeStringify';
 import {
     DEFAULT_RISK_MANAGEMENT,
     type EdgeHypothesis,
@@ -188,9 +190,20 @@ export class ScreeningOrchestrator {
                 },
             });
         } catch (err) {
-            const reason = `analysis-engine BT 実行失敗: ${
-                err instanceof Error ? err.message : String(err)
-            }`;
+            // 旧実装 (`err.message` のみ採取) では AxiosError でも `message` が `'Error'` 単体に
+            // 潰れ、Python 側 / Cloud Run / 認証 / payload 不整合 等の真因を区別できなかった
+            // (P0 真因実測で 12/12 件が `analysis-engine BT 実行失敗: Error` に終端していた)。
+            // AxiosError の場合は status / code / response body 先頭 200 文字までを reason に含め、
+            // 再発時に runScreening を再走させなくても statusNote だけで原因が見える状態にする。
+            //
+            // catch の err は型システム上 unknown だが、本番コードで `unknown` を直接持ち回らないため、
+            // ここで具体型に narrow した上で helper に渡す (AGENTS.md §2.1 準拠)。
+            const narrowed: AxiosError | Error | string = axios.isAxiosError(err)
+                ? err
+                : err instanceof Error
+                  ? err
+                  : String(err);
+            const reason = this.buildBacktestErrorReason(narrowed);
             await this.edgeLedger.markNotTestable(hypothesisId, reason);
             return { hypothesisId, verdict: 'not_testable', reason };
         }
@@ -409,6 +422,43 @@ export class ScreeningOrchestrator {
             `(symbol=${symbol} tf=${timeframe} period=${periodStr}, ` +
             `forex 5/7 期待値ベース、source=${fetchSource ?? 'unknown'}, fetched=${fetchedCount ?? 0})`
         );
+    }
+
+    /**
+     * analysis-engine 通信エラー時の reason 文字列を組み立てる (P0 観測性改善)。
+     *
+     * AxiosError の場合は `code` / HTTP status / message / response.data の先頭 200 文字を
+     * 列挙する。response.data は文字列なら直、object なら JSON.stringify。BigInt / 循環参照
+     * 等の異常値は `safeStringify` (= 2 次例外で元のエラーを潰さない util) と同じ思想で
+     * try/catch で防御する。
+     *
+     * AxiosError 以外の Error は `name: message` 形式、それ以外は `String(err)` で fallback。
+     *
+     * Why: `markNotTestable` に保存される `statusNote` を見ただけで真因が判別できる状態を作る。
+     * Evolution 経路は 82% 成功・Screening 経路は 100% 失敗という非対称が観測されているが、
+     * 旧実装では reason が `'Error'` 単体に潰れていたため経路差の根本原因を追跡できなかった。
+     */
+    private buildBacktestErrorReason(err: AxiosError | Error | string): string {
+        const prefix = 'analysis-engine BT 実行失敗';
+        if (typeof err === 'string') {
+            return `${prefix}: ${err}`;
+        }
+        if (axios.isAxiosError(err)) {
+            const parts: string[] = [];
+            if (err.code) parts.push(`code=${err.code}`);
+            const status = err.response?.status;
+            if (status !== undefined) parts.push(`status=${status}`);
+            if (err.message) parts.push(`message=${err.message}`);
+            // err.response?.data は axios 型定義上 any (= 任意 body 構造を許容するため意図的)。
+            // 直接保持せず、循環参照 / BigInt / toJSON throw に既に対応している safeStringify
+            // (utils 内で eslint-disable 1 行付き) に委譲し、本ファイル側では any を持ち回さない。
+            if (err.response?.data !== undefined && err.response?.data !== null) {
+                parts.push(`body=${safeStringify(err.response.data).slice(0, 200)}`);
+            }
+            return parts.length > 0 ? `${prefix}: ${parts.join(' / ')}` : `${prefix}: (axios error, no detail)`;
+        }
+        // err instanceof Error (catch 側で narrow 済み)
+        return `${prefix}: ${err.name}: ${err.message || '(empty)'}`;
     }
 
     private timeframeToMs(timeframe: string): number {

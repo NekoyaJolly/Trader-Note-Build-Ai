@@ -38,6 +38,8 @@
 | ファイル | 用途 | 実行コマンド | 種別 | 削除条件 |
 |---|---|---|---|---|
 | `check/golden-path-smoke.ts` | bridge を `forceEnabled` で叩き、AgentRun が 1 周回るか実 DB で確認 (jobs={} 全 step skip) | `npx tsx scripts/check/golden-path-smoke.ts` | check | `sideB_runtime_observability_smoke.ts` に `--rehearsal` フラグで統合された場合、または Job adapter wire-up 完了で別の検証経路に移行した場合 |
+| `check/edge-hypothesis-not-testable-reasons.ts` | `EdgeHypothesis.statusNote` を 5 経路 (SO.A/B/C + SA.A/B) に分類集計、Screening 全 not_testable バグの真因特定 (P0) | `npx tsx scripts/check/edge-hypothesis-not-testable-reasons.ts [--since=YYYY-MM-DD] [--sample=N]` | check | Observer MVP (P1a) 内に同等の集計機能が統合された場合、または Screening 全 not_testable バグ再発監視が運用に乗った場合 |
+| `check/analysis-engine-health.ts` | analysis-engine `/health` を 1 回 GET し、Screening 失敗が接続性そのものかを切り分ける (P0 サポート) | `ANALYSIS_ENGINE_URL=https://... npx tsx scripts/check/analysis-engine-health.ts` | check | Observer MVP (P1a) または専用 SRE ダッシュボードに analysis-engine 監視が統合された場合 |
 | (既存 40+ scripts) | ルール制定以前の資産、§7 に従い段階的に整理 | — | — | — |
 
 ## 4. one-shot スクリプトの制限
