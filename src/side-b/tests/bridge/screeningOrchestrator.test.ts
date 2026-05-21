@@ -199,6 +199,72 @@ describe('ScreeningOrchestrator.runScreening (Critical-4 段階 1)', () => {
         expect(mocks.edgeLedger.recordScreeningResult).not.toHaveBeenCalled();
     });
 
+    it('AxiosError 時は reason に status / code / response.data 先頭が含まれる (P0 観測性改善)', async () => {
+        // 旧実装は `err.message` のみ採取で `'Error'` 単体に潰れていた。新実装では
+        // AxiosError の status / code / response body を reason に展開し、再発時に
+        // statusNote だけで原因 (= Cloud Run 5xx / 認証 401 / payload 422 等) が判別できる。
+        const hyp = makeHypothesis();
+        const axiosError = Object.assign(new Error('Request failed with status code 422'), {
+            isAxiosError: true,
+            code: 'ERR_BAD_REQUEST',
+            response: {
+                status: 422,
+                data: { detail: 'invalid notePayload: triggerGroup missing' },
+            },
+        });
+        const mocks = makeMocks({
+            runBacktest: jest.fn().mockRejectedValue(axiosError) as MockDeps['runBacktest'],
+        });
+        mocks.edgeLedger.get.mockResolvedValue(hyp);
+
+        const result = await makeOrchestrator(mocks).runScreening(hyp.id);
+
+        expect(result.verdict).toBe('not_testable');
+        const reasonArg = mocks.edgeLedger.markNotTestable.mock.calls[0][1];
+        expect(reasonArg).toContain('analysis-engine BT');
+        expect(reasonArg).toContain('status=422');
+        expect(reasonArg).toContain('code=ERR_BAD_REQUEST');
+        expect(reasonArg).toContain('triggerGroup missing'); // body から拾えていること
+    });
+
+    it('AxiosError で response が空 (ECONNREFUSED 等) の場合は code と message が含まれる', async () => {
+        const hyp = makeHypothesis();
+        const networkError = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:8000'), {
+            isAxiosError: true,
+            code: 'ECONNREFUSED',
+            // response は存在しない (network 到達不能)
+        });
+        const mocks = makeMocks({
+            runBacktest: jest.fn().mockRejectedValue(networkError) as MockDeps['runBacktest'],
+        });
+        mocks.edgeLedger.get.mockResolvedValue(hyp);
+
+        const result = await makeOrchestrator(mocks).runScreening(hyp.id);
+
+        expect(result.verdict).toBe('not_testable');
+        const reasonArg = mocks.edgeLedger.markNotTestable.mock.calls[0][1];
+        expect(reasonArg).toContain('code=ECONNREFUSED');
+        expect(reasonArg).toContain('ECONNREFUSED 127.0.0.1');
+        expect(reasonArg).not.toContain('status='); // response がないため status は付かない
+    });
+
+    it('非 Error 値 (string) を throw された場合は String(err) で fallback', async () => {
+        const hyp = makeHypothesis();
+        const mocks = makeMocks({
+            // 実装上 throw されるのは Error が大多数だが、外部ライブラリが string を throw する
+            // ケースも理論上ありうる。fallback 経路が動くことを保証する。
+            runBacktest: jest.fn().mockRejectedValue('raw string error') as MockDeps['runBacktest'],
+        });
+        mocks.edgeLedger.get.mockResolvedValue(hyp);
+
+        const result = await makeOrchestrator(mocks).runScreening(hyp.id);
+
+        expect(result.verdict).toBe('not_testable');
+        const reasonArg = mocks.edgeLedger.markNotTestable.mock.calls[0][1];
+        expect(reasonArg).toContain('analysis-engine BT');
+        expect(reasonArg).toContain('raw string error');
+    });
+
     it('OHLCV カバレッジ 90% 未満で fetchAndCache 失敗時は not_testable + 取得不能の理由', async () => {
         const hyp = makeHypothesis();
         const mocks = makeMocks({
