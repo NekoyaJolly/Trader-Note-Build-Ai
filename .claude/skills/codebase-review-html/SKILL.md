@@ -18,7 +18,7 @@ description: Trader-Note-Build-Ai のコードベース全体を網羅的にレ�
 
 - 1 つの HTML ファイル: `docs/diagnostics/codebase_review_YYYY-MM-DD.html`
 - self-contained (= 外部 CSS / JS 依存なし、Chrome 等で開いてそのまま閲覧可能)
-- セクション構成は `template.html` 準拠 (10 section)
+- セクション構成は `template.html` 準拠 (11 section: Summary / Progress / Method / Frontend / Backend Node / Backend Python / Database / AI Agent / Testing / Roadmap / Final)
 
 ## 実行手順
 
@@ -98,7 +98,11 @@ P0 / P1 / P2 の優先度タグを付け、テーブルにまとめる。
 
 ### Step 6: HTML 生成
 
-`.claude/skills/codebase-review-html/template.html` を読み込み、上記 Step 1-5 で集めた内容を `{{PLACEHOLDER}}` 部分に埋め込む。完了後、`docs/diagnostics/codebase_review_<YYYY-MM-DD>.html` として **新規ファイル**で保存する (= 既存レポートは上書きせず、日付別で蓄積)。
+`.claude/skills/codebase-review-html/template.html` を読み込み、上記 Step 1-5 で集めた内容を `{{PLACEHOLDER}}` 部分に埋め込む。完了後、`docs/diagnostics/codebase_review_YYYY-MM-DD.html` として **新規ファイル**で保存する (`YYYY-MM-DD` は `date +%Y-%m-%d` の出力で置換、角括弧は付けない)。既存レポートは上書きせず日付別で蓄積する。
+
+**HTML エスケープ必須** (PR #244 Copilot review 対応):
+- `{{PLACEHOLDER}}` に埋め込むテキスト (= PR タイトル / Issue タイトル / git log / コミットメッセージ / ファイルパス / コード抜粋 等) は **必ず HTML エスケープ**してから挿入する。最低限 `&` → `&amp;`、`<` → `&lt;`、`>` → `&gt;`、`"` → `&quot;`、`'` → `&#39;` の 5 文字を置換する。エスケープなしで埋めるとブラウザで意図せず HTML/JS が実行される、または `<` を含むコミットメッセージで表示が壊れる
+- 例外: 自分が template に書く意図的な markup (`<table>`, `<ul>`, `<span class="tag bad">P0</span>` 等) はそのまま挿入。これは「HTML を許可するブロック」として用途を限定する。
 
 最後にユーザーへ:
 - 出力ファイルのフルパス

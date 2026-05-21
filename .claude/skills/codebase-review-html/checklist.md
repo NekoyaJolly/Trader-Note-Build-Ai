@@ -77,14 +77,19 @@
 
 ## AI Agent / Side-B (`src/side-b/`)
 
-### 必ず確認
-- 8.1 **PDCALoop** (`agent/pdcaLoop.ts`): state machine 7 state、各 handler、AgentMemory 経由のデータ流
-- 8.2 **EvolutionLoop** (`evolution/EvolutionLoop.ts`): 進化 9 step、formal BT、QD archive
-- 8.3 **AIOrchestrator** (`orchestrator/aiOrchestrator.ts`): Plan 多段 10 step、specialists / debate
-- 8.4 **観測性**: ADK trace 配線 (`adk/tracing/`)、RunLedger 接続
-- 8.5 **PromptRegistry** (`prompts/registry/`): seed / active / experimental
-- 8.6 **Edge Ledger** (`ledger/EdgeLedger.ts`): 仮説状態 (unverified / screening_passed / confirmed / 等)
-- 8.7 **Bridge** (`bridge/ScreeningOrchestrator.ts`): analysis-engine 連携
+レビューを 7 観点に分けて出力する。template.html の section 8 配下の見出し
+(8.1 PDCALoop / 8.2 EvolutionLoop / 8.3 AI オーケストレーション / 8.4 観測性)
+は出力 HTML の見出しとして使い、本リストの「PromptRegistry / Edge Ledger /
+Bridge」は section 8.3 (オーケストレーション) の文中で扱う。
+
+### 必ず確認 (7 観点)
+- **PDCALoop** (`agent/pdcaLoop.ts`): state machine 7 state、各 handler、AgentMemory 経由のデータ流
+- **EvolutionLoop** (`evolution/EvolutionLoop.ts`): 進化 9 step、formal BT、QD archive
+- **AIOrchestrator** (`orchestrator/aiOrchestrator.ts`): Plan 多段 10 step、specialists / debate
+- **観測性**: ADK trace 配線 (`adk/tracing/`)、RunLedger 接続
+- **PromptRegistry** (`prompts/registry/`): seed / active / experimental
+- **Edge Ledger** (`ledger/EdgeLedger.ts`): 仮説状態 (unverified / screening_passed / confirmed / 等)
+- **Bridge** (`bridge/ScreeningOrchestrator.ts`): analysis-engine 連携
 
 ### よく見落とすが重要
 - LLM token 消費の見積もり (大量 prompt が走るか)
