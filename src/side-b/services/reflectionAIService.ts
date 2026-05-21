@@ -25,8 +25,9 @@ import {
     ReflectionOutputSchema,
     type ReflectionOutput,
 } from '../../schemas/api/sideB';
-import { loadPrompt } from '../prompts/loader';
+import { loadPromptWithGlobal } from '../prompts/loader';
 import { PromptRegistry } from '../prompts/registry/PromptRegistry';
+import { safeStringify } from '../../utils/safeStringify';
 
 const REFLECTION_AGENT_NAME = 'reflection';
 
@@ -111,8 +112,13 @@ export class ReflectionAIService {
 
     /**
      * P2: Registry の active を取得し global + agent prompt を合成して返す。
-     * 取得失敗 (= seed 未投入 / DB 接続不可 等) は警告ログ + ファイル `loadPrompt`
-     * fallback で続行する。HypothesisGenerator と同じフェイルオープン方針。
+     * 取得失敗 (= seed 未投入 / DB 接続不可 等) は警告ログ + ファイル fallback で
+     * 続行する (planAIService / BullBearDebateAgent と同じパターン)。
+     *
+     * PR #241 Copilot review 対応:
+     *   fallback も `loadPromptWithGlobal` を使い、Registry 経路で前置される
+     *   `__global__` ルール (および EVOLUTION_TARGETS_PROMPT_TEXT 相当) を欠落させない。
+     *   旧 `loadPrompt` だと DB 不調時にシステムプロンプト内容が大きく変わってしまう。
      */
     private async loadSystemPrompt(): Promise<string> {
         try {
@@ -120,9 +126,9 @@ export class ReflectionAIService {
         } catch (err) {
             console.warn(
                 `[ReflectionAI] PromptRegistry 取得失敗、ファイル fallback (${REFLECTION_AGENT_NAME}):`,
-                err instanceof Error ? err.message : err,
+                safeStringify(err),
             );
-            return loadPrompt(REFLECTION_AGENT_NAME);
+            return loadPromptWithGlobal(REFLECTION_AGENT_NAME);
         }
     }
 

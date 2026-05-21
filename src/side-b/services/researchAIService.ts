@@ -23,8 +23,9 @@ import type { ResearchAIOutput , OHLCVSnapshot} from '../models/marketResearch';
 import { calculateExpiryDate } from '../models/marketResearch';
 import { getRelevantIndicatorContext } from '../knowledge';
 import { AIProvider } from '../agent/aiProvider';
-import { loadPrompt } from '../prompts/loader';
+import { loadPromptWithGlobal } from '../prompts/loader';
 import { PromptRegistry } from '../prompts/registry/PromptRegistry';
+import { safeStringify } from '../../utils/safeStringify';
 import type { JsonValue } from '../../utils/jsonValue';
 
 const RESEARCH_AGENT_NAME = 'research';
@@ -141,7 +142,9 @@ export class ResearchAIService {
 
   /**
    * P2: Registry の active を取得し global + agent prompt を合成して返す。
-   * 取得失敗時はファイル `loadPrompt` fallback (フェイルオープン)。
+   * 取得失敗時はファイル fallback (フェイルオープン)、ただし `loadPromptWithGlobal`
+   * で `__global__` ルールも前置することで Registry 経路との同等性を保つ
+   * (PR #241 Copilot review 対応、planAIService と同パターン)。
    */
   private async loadSystemPrompt(): Promise<string> {
     try {
@@ -149,9 +152,9 @@ export class ResearchAIService {
     } catch (err) {
       console.warn(
         `[MarketAnalyst] PromptRegistry 取得失敗、ファイル fallback (${RESEARCH_AGENT_NAME}):`,
-        err instanceof Error ? err.message : err,
+        safeStringify(err),
       );
-      return loadPrompt(RESEARCH_AGENT_NAME);
+      return loadPromptWithGlobal(RESEARCH_AGENT_NAME);
     }
   }
 
