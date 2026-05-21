@@ -41,6 +41,21 @@ const minimalConfig = {
 } as SideBSchedulerConfig;
 
 describe('CleanupJob.shouldRun (24h ガード)', () => {
+  // 24h 境界テストは `Date.now()` を 2 回呼ぶ間 (= テスト内で past を作る瞬間と
+  // shouldRun 内部評価の瞬間) に進む数 μs/ms で境界が崩れる。CI ランナーでは
+  // GC や I/O 待ちにより数十 ms 経過することがあり「ちょうど 24h 前」が
+  // 「24h+数ms 前」になって shouldRun が true を返してしまう (PR #241 CI fail)。
+  // jest.useFakeTimers でシステム時刻を固定し決定論的に評価する。
+  const FIXED_NOW = new Date('2026-05-21T00:00:00Z').getTime();
+
+  beforeEach(() => {
+    jest.useFakeTimers({ now: FIXED_NOW });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it('lastCleanupRun が undefined なら true', () => {
     expect(CleanupJob.shouldRun(undefined)).toBe(true);
   });
