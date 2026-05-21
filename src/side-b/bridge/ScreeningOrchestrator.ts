@@ -428,9 +428,10 @@ export class ScreeningOrchestrator {
      * analysis-engine 通信エラー時の reason 文字列を組み立てる (P0 観測性改善)。
      *
      * AxiosError の場合は `code` / HTTP status / message / response.data の先頭 200 文字を
-     * 列挙する。response.data は文字列なら直、object なら JSON.stringify。BigInt / 循環参照
-     * 等の異常値は `safeStringify` (= 2 次例外で元のエラーを潰さない util) と同じ思想で
-     * try/catch で防御する。
+     * 列挙する。response.data の文字列化は **既存 `safeStringify` util に委譲** し、本関数
+     * 自身は try/catch を持たない。`safeStringify` 側で BigInt / 循環参照 / toJSON throw を
+     * すべて吸収し「2 次例外で元のエラーを潰さない」契約を満たしている (PR #240 Copilot
+     * review #1 で実装とコメントを一致させた)。
      *
      * AxiosError 以外の Error は `name: message` 形式、それ以外は `String(err)` で fallback。
      *

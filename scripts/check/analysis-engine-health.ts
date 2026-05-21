@@ -25,9 +25,14 @@
 
 import { config as loadEnv } from 'dotenv';
 import axios from 'axios';
+import { safeStringify } from '../../src/utils/safeStringify';
 
 loadEnv();
 
+// PR #240 Copilot review #2: `ScreeningOrchestrator.buildBacktestErrorReason` と
+// 整形ロジックを一本化 (= 観測性の差分と二次例外リスクを排除)。本 script は scripts/
+// 配下のため `unknown` を引数に取ることが許容される (AGENTS.md §2.1)。
+// eslint-disable-next-line no-restricted-syntax -- catch 由来の任意型を整形する責務
 function buildErrorReport(err: unknown): string {
     if (axios.isAxiosError(err)) {
         const parts: string[] = [];
@@ -35,15 +40,8 @@ function buildErrorReport(err: unknown): string {
         const status = err.response?.status;
         if (status !== undefined) parts.push(`status=${status}`);
         if (err.message) parts.push(`message=${err.message}`);
-        const data = err.response?.data;
-        if (data !== undefined && data !== null) {
-            let dataStr: string;
-            try {
-                dataStr = typeof data === 'string' ? data : JSON.stringify(data);
-            } catch {
-                dataStr = '[unserializable response.data]';
-            }
-            parts.push(`body=${dataStr.slice(0, 200)}`);
+        if (err.response?.data !== undefined && err.response?.data !== null) {
+            parts.push(`body=${safeStringify(err.response.data).slice(0, 200)}`);
         }
         return parts.join(' / ');
     }
@@ -68,12 +66,8 @@ async function main(): Promise<void> {
             // production の Cloud Run などで認証ヘッダが必要な場合の対応余地を残す
             // (現状 analysis-engine /health は無認証で OK の前提)
         });
-        let bodyStr: string;
-        try {
-            bodyStr = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
-        } catch {
-            bodyStr = '[unserializable response.data]';
-        }
+        // PR #240 Copilot review #2: 二次例外吸収を含めて safeStringify に統一
+        const bodyStr = safeStringify(res.data);
         console.log('--- 成功 ---');
         console.log(`status: ${res.status}`);
         console.log(`body  : ${bodyStr.slice(0, 200)}`);

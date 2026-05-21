@@ -24,8 +24,8 @@
  * 出力:
  *   - 期間内 not_testable 総数
  *   - 5 経路 + その他の分類別件数 + 比率
- *   - 各経路から N 件のサンプル reason 文字列
- *   - 直近 createdAt 上位 N 件の id / createdAt / symbols / statusNote
+ *   - 各経路から N 件のサンプル (createdAt / hypothesisId 先頭 8 桁 / symbols / reason 先頭 200 文字)
+ *   - 最多経路を「推奨アクション」として明示
  *
  * 削除条件:
  *   - Screening 全 not_testable バグ解消 + 同種バグの再発監視運用 (Observer MVP / P1a)
@@ -123,7 +123,6 @@ async function main(): Promise<void> {
                 createdAt: true,
                 symbols: true,
                 statusNote: true,
-                source: true,
             },
             orderBy: { createdAt: 'desc' },
         });
