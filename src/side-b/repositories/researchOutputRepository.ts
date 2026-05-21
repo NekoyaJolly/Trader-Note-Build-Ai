@@ -23,7 +23,7 @@ import {
   createEmptyFeatureVector,
 } from '../models';
 import { normalizeTimeframe } from '../constants/timeframes';
-import { toPrismaJsonValue } from '../../utils/prismaJson';
+import { toPrismaJsonValueOrDbNull } from '../../utils/prismaJson';
 
 // ===========================================
 // 型定義
@@ -133,12 +133,13 @@ export class ResearchOutputRepository {
         symbol: input.symbol,
         timeframe: normalizeTimeframe(input.timeframe),
         rawOutput: rawOutputData,
-        ohlcvSnapshot: toPrismaJsonValue(input.ohlcvSnapshot),
-        newsContext: toPrismaJsonValue(input.newsContext),
-        sentimentContext: toPrismaJsonValue(input.sentimentContext),
-        economicEvents: toPrismaJsonValue(input.economicEvents),
-        macroContext: toPrismaJsonValue(input.macroContext),
-        fundamentalsContext: toPrismaJsonValue(input.fundamentalsContext),
+        // すべて nullable JSON 列 (`Json?`)。input が undefined のときは SQL NULL を入れる。
+        ohlcvSnapshot: toPrismaJsonValueOrDbNull(input.ohlcvSnapshot),
+        newsContext: toPrismaJsonValueOrDbNull(input.newsContext),
+        sentimentContext: toPrismaJsonValueOrDbNull(input.sentimentContext),
+        economicEvents: toPrismaJsonValueOrDbNull(input.economicEvents),
+        macroContext: toPrismaJsonValueOrDbNull(input.macroContext),
+        fundamentalsContext: toPrismaJsonValueOrDbNull(input.fundamentalsContext),
         aiModel: input.aiModel,
         tokenUsage: input.tokenUsage,
         apiCallCost: input.apiCallCost,
