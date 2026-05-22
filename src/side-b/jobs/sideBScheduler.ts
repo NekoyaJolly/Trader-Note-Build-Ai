@@ -63,6 +63,8 @@ import { PlanGenerationJob } from './planGenerationJob';
 import { DiscoveryJob } from './discoveryJob';
 import { PromptEvolutionJob } from './promptEvolutionJob';
 import { CleanupJob } from './cleanupJob';
+// Phase B (2026-05-22): symbols は Watchlist から動的取得するため正規化関数を import
+import { normalizeCTraderSymbol } from '../../utils/symbolNormalization';
 // Phase 7 (orch): ADK Orchestrator Wrapper bridge
 import {
   runScheduledOrchestratedCycle,
@@ -158,7 +160,10 @@ export interface SideBSchedulerConfig {
  */
 const DEFAULT_CONFIG: SideBSchedulerConfig = {
   enabled: false,  // デフォルトは無効
-  symbols: ['XAU/USD'],
+  // Watchlist 連携が無い場合の fallback。表記は内部規約 (cTrader 形式 = スラッシュなし大文字)
+  // に整合させる (Phase B 2026-05-22)。実運用では start() で Watchlist から動的取得した
+  // symbols で上書きされる。
+  symbols: ['XAUUSD'],
   timeframe: '15m',
   higherTimeframe: '4h',      // MTF上位足: 4時間足
   monitorIntervalMs: 60 * 60 * 1000,  // 1時間間隔（高安値ベース検証）
@@ -281,12 +286,24 @@ export class SideBScheduler {
   private promptEvolutionJob: PromptEvolutionJob;
   private cleanupJob: CleanupJob;
 
+  /**
+   * Phase B (2026-05-22): symbols が外部から明示的に指定されたかを記録する。
+   * configOverride / envOverrides どちらでも symbols が指定されていなければ、
+   * start() で Watchlist テーブルから動的に取得する。
+   */
+  private readonly explicitSymbolsOverride: boolean;
+
   constructor(configOverride?: Partial<SideBSchedulerConfig>) {
     // Phase A: env からの override を DEFAULT_CONFIG と configOverride の中間に挟む。
     // 優先順位 (高 → 低): configOverride 引数 > 環境変数 > DEFAULT_CONFIG。
     // env 解釈は EvolutionJob 側 (`readEvolutionEnvOverrides`) に集約済み。
     const envOverrides = readEvolutionEnvOverrides();
     this.config = { ...DEFAULT_CONFIG, ...envOverrides, ...configOverride };
+    // Phase B (2026-05-22): symbols が明示指定されたかを判定。未指定なら start() で
+    // Watchlist から動的取得する経路に乗せる。「明示指定」は Partial で undefined を
+    // 渡されていない場合 (= 配列値が来た) を意味する。
+    this.explicitSymbolsOverride =
+      configOverride?.symbols !== undefined || envOverrides.symbols !== undefined;
     this.isProduction = process.env.NODE_ENV === 'production';
 
     // サービス初期化 (PR #152: canonical singleton 経由で connection pool 共有)
@@ -411,13 +428,65 @@ export class SideBScheduler {
       return;
     }
 
-    // cTrader データソースを自動検出してから起動
-    this.initCTraderDataSource().then(() => {
-      this.startInternal();
-    }).catch((err) => {
-      this.log(`cTrader初期化エラー（Twelve Dataで続行）: ${err}`);
-      this.startInternal();
-    });
+    // Phase B (2026-05-22): cTrader 初期化 → Watchlist 解決 → startInternal の順で進める。
+    // Watchlist 解決は symbols が明示指定されていない場合のみ動的取得 (= ハードコード排除)。
+    // 旧 start() 同様 fire-and-forget なので void で明示的に non-awaited を伝える。
+    void this.initCTraderDataSource()
+      .catch((err) => {
+        this.log(`cTrader初期化エラー（market data fallback で続行）: ${err}`);
+      })
+      .then(() => this.resolveWatchlistSymbolsIfNeeded())
+      .catch((err) => {
+        this.log(`Watchlist 解決エラー (DEFAULT_CONFIG fallback): ${err}`);
+      })
+      .then(() => this.startInternal());
+  }
+
+  /**
+   * Phase B (2026-05-22): symbols が明示指定されていない場合、Watchlist テーブルから
+   * `active=true` の symbol を集約して `this.config.symbols` を上書きする。
+   *
+   * 「リストから動的取得」原則 (Nekoさん 2026-05-22) に従い、scheduler 起動経路の
+   * symbol を hardcode から DB ベースに切替。明示指定 (configOverride.symbols /
+   * envOverrides.symbols) があれば動的取得をスキップして指定値を尊重する。
+   *
+   * 取得した symbol は `normalizeCTraderSymbol()` で正規化済 (= スラッシュ無し大文字)。
+   * Watchlist が空 / 取得失敗の場合は DEFAULT_CONFIG.symbols (= ['XAUUSD']) を維持。
+   */
+  private async resolveWatchlistSymbolsIfNeeded(): Promise<void> {
+    if (this.explicitSymbolsOverride) {
+      this.log(
+        `symbols は明示指定済 (= ${this.config.symbols.join(', ')})、Watchlist 連携をスキップ`,
+      );
+      return;
+    }
+
+    try {
+      const rows = await this.prisma.watchlist.findMany({
+        where: { active: true },
+        select: { symbol: true },
+      });
+      const symbols = Array.from(
+        new Set(
+          rows
+            .map((r) => normalizeCTraderSymbol(r.symbol))
+            .filter((s): s is string => Boolean(s)),
+        ),
+      );
+      if (symbols.length > 0) {
+        this.config = { ...this.config, symbols };
+        this.log(
+          `Watchlist から ${symbols.length} 件の symbol を読み込み: ${symbols.join(', ')}`,
+        );
+      } else {
+        this.log(
+          `Watchlist が空のため DEFAULT_CONFIG (${this.config.symbols.join(', ')}) を fallback として使用`,
+        );
+      }
+    } catch (err) {
+      // DB 取得失敗時は fallback を維持して継続 (= 起動を妨げない)
+      this.log(`Watchlist 取得エラー (DEFAULT_CONFIG fallback): ${String(err)}`);
+    }
   }
 
   /**
