@@ -18,6 +18,7 @@ import {
   buildSeedDsl,
   type SeedKind,
 } from '../../evolution/EvolutionLoop';
+import { deriveHigherTimeframe } from '../../evolution/seedDescriptor';
 import { StrategyDSLSchema } from '../../strategy_dsl/schema';
 
 describe('PR ⑤D-2: 新 12 種の novelty seed', () => {
@@ -122,7 +123,7 @@ describe('PR ⑤D-2: 新 12 種の novelty seed', () => {
       expect(seed.timeframe).toBe('1h');
     });
 
-    it('mtf_long seed には timeframe 1h の上位足条件が含まれる', () => {
+    it('mtf_long seed には timeframe 1h の上位足条件が含まれる (= default entry 15m → higher 1h)', () => {
       const seed = buildSeedDsl('mtf_long', 'trending_with_pullback');
       const conditions =
         'trigger' in seed.entry ? seed.entry.trigger.conditions : [];
@@ -132,6 +133,76 @@ describe('PR ⑤D-2: 新 12 種の novelty seed', () => {
       );
       expect(hasMtf).toBe(true);
     });
+
+    it('MTF seed の上位足は entry timeframe から derive される (Phase B 2026-05-22)', () => {
+      // entry=1h → higher=4h
+      const seed1h = buildSeedDsl('mtf_long', 'breakout', 'EURUSD', '1h');
+      const conds1h =
+        'trigger' in seed1h.entry ? seed1h.entry.trigger.conditions : [];
+      expect(
+        conds1h.some((c) => 'timeframe' in c && c.timeframe === '4h'),
+      ).toBe(true);
+
+      // entry=5m → higher=15m
+      const seed5m = buildSeedDsl('mtf_short', 'breakout', 'EURUSD', '5m');
+      const conds5m =
+        'trigger' in seed5m.entry ? seed5m.entry.trigger.conditions : [];
+      expect(
+        conds5m.some((c) => 'timeframe' in c && c.timeframe === '15m'),
+      ).toBe(true);
+
+      // entry=4h → higher=1d
+      const seed4h = buildSeedDsl('mtf_long', 'breakout', 'EURUSD', '4h');
+      const conds4h =
+        'trigger' in seed4h.entry ? seed4h.entry.trigger.conditions : [];
+      expect(
+        conds4h.some((c) => 'timeframe' in c && c.timeframe === '1d'),
+      ).toBe(true);
+    });
+
+    it('非 MTF seed (range_long 等) は entry timeframe そのまま (上位足 derive されない)', () => {
+      // range_long は MTF ではないため timeframe を伴う leaf 条件を持たない
+      const seed = buildSeedDsl('range_long', 'breakout', 'EURUSD', '1h');
+      expect(seed.timeframe).toBe('1h');
+      const conditions =
+        'trigger' in seed.entry ? seed.entry.trigger.conditions : [];
+      // range_long の conditions は ATR + RSI のみで `timeframe` 指定なし (= entry 同足)
+      const explicitTfs = conditions.filter((c) => 'timeframe' in c && c.timeframe);
+      expect(explicitTfs).toHaveLength(0);
+    });
+  });
+
+  describe('deriveHigherTimeframe (Phase B 2026-05-22)', () => {
+    it('各 entry timeframe から次段階の上位足を返す', () => {
+      expect(deriveHigherTimeframe('1m')).toBe('5m');
+      expect(deriveHigherTimeframe('5m')).toBe('15m');
+      expect(deriveHigherTimeframe('15m')).toBe('1h');
+      expect(deriveHigherTimeframe('30m')).toBe('4h');
+      expect(deriveHigherTimeframe('1h')).toBe('4h');
+      expect(deriveHigherTimeframe('4h')).toBe('1d');
+      expect(deriveHigherTimeframe('1d')).toBe('1w');
+    });
+
+    it('1w は自身を返す (= 最上位足)', () => {
+      expect(deriveHigherTimeframe('1w')).toBe('1w');
+    });
+
+    it('未知の値は \'1h\' にフォールバック (= 過去デフォルト挙動)', () => {
+      // normalizeTimeframe で '15m' (DEFAULT_TIMEFRAME) に正規化 → map['15m']='1h'
+      expect(deriveHigherTimeframe('2h')).toBe('1h');
+      expect(deriveHigherTimeframe('')).toBe('1h');
+      expect(deriveHigherTimeframe('multi')).toBe('1h');
+    });
+
+    it('表記ゆれ (大文字 / 前後空白) を吸収して期待通りの上位足を返す (PR #246 Copilot review #1)', () => {
+      // 旧版は生文字列マッチで '1H' / ' 1h ' を未知扱いして '1h' fallback してたが、
+      // normalizeTimeframe で正規化することで '1h' として認識 → '4h' を返す
+      expect(deriveHigherTimeframe('1H')).toBe('4h');
+      expect(deriveHigherTimeframe(' 1h ')).toBe('4h');
+      expect(deriveHigherTimeframe('15M')).toBe('1h');
+      expect(deriveHigherTimeframe('  4h  ')).toBe('1d');
+    });
+  });
 
     it('multi_instance_long は EMA の異なる period が複数現れる', () => {
       const seed = buildSeedDsl('multi_instance_long', 'breakout');
@@ -217,4 +288,3 @@ describe('PR ⑤D-2: 新 12 種の novelty seed', () => {
       }
     });
   });
-});

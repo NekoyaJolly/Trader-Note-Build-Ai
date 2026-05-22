@@ -32,7 +32,42 @@
 
 import { randomUUID } from 'crypto';
 
+import {
+  normalizeTimeframe,
+  type SupportedTimeframe,
+} from '../constants/timeframes';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
+
+/**
+ * Entry timeframe から MTF 上位足を派生する (= 次段階の足、Phase B 2026-05-22)。
+ *
+ * 旧 `seedDescriptor` は MTF seed (`mtf_long` / `mtf_short`) の `compareTarget.timeframe`
+ * を `'1h'` ハードコードしていたため、entry timeframe が `'15m'` 以外で運用する
+ * 場合に上位足の意味が壊れていた (例: entry=1h なら上位は 4h であるべきが '1h' のまま)。
+ * 本関数で entry timeframe → 次段階上位足を派生させ、MTF seed の上位足を可変化する。
+ *
+ * 入力は `normalizeTimeframe()` で `SupportedTimeframe` に narrow してから引く。
+ * これにより `'1H'` / `' 1h '` 等の表記ゆれが `'1h'` に正規化されて期待通り `'4h'`
+ * を返す (PR #246 Copilot review #1)。未対応値は `DEFAULT_TIMEFRAME='15m'` に
+ * 倒れるため、戻り値は `'1h'` (= 15m → 1h) になる。
+ *
+ * マッピング:
+ * - 1m → 5m, 5m → 15m, 15m → 1h, 30m → 4h, 1h → 4h, 4h → 1d, 1d → 1w, 1w → 1w
+ */
+export function deriveHigherTimeframe(entryTf: string): SupportedTimeframe {
+  const normalized = normalizeTimeframe(entryTf);
+  const map: Record<SupportedTimeframe, SupportedTimeframe> = {
+    '1m': '5m',
+    '5m': '15m',
+    '15m': '1h',
+    '30m': '4h',
+    '1h': '4h',
+    '4h': '1d',
+    '1d': '1w',
+    '1w': '1w',
+  };
+  return map[normalized];
+}
 
 /** 12 種の seed の識別子 (= 安定キー)。 */
 export type SeedKind =
@@ -90,48 +125,57 @@ const STANDARD_TP: StrategyDSL['takeProfit'] = { type: 'rr_ratio', value: 2 };
 const TIGHT_SL: StrategyDSL['stopLoss'] = { type: 'atr_multiple', value: 1.0 };
 const TIGHT_TP: StrategyDSL['takeProfit'] = { type: 'rr_ratio', value: 1.5 };
 
+/**
+ * MTF seed の recipe を entry timeframe から組み立てる (Phase B 2026-05-22)。
+ *
+ * MTF (= Multi-Timeframe) は entry より上位の足を「コンテキスト」として使うため、
+ * 上位足は entry timeframe から `deriveHigherTimeframe()` で派生させる必要がある。
+ * 旧版は `'1h'` を hardcode していたが、entry が `'15m'` 以外で運用する場合
+ * 意味が壊れるため、本 factory で都度派生する。
+ *
+ * description の文中に時間帯を埋め込むため、テンプレ文字列で動的に組み立てる。
+ */
+function buildMtfRecipe(entryTf: string, direction: 'long' | 'short'): SeedRecipe {
+  const higherTf = deriveHigherTimeframe(entryTf);
+  const kind: SeedKind = direction === 'long' ? 'mtf_long' : 'mtf_short';
+  const trendOp = direction === 'long' ? '>' : '<';
+  const rsiOp = direction === 'long' ? '<' : '>';
+  const rsiValue = direction === 'long' ? 35 : 65;
+  const trendLabel = direction === 'long' ? '上昇' : '下降';
+  const oversoldLabel = direction === 'long' ? '過売り → 押し目買い' : '過買り → 戻り売り';
+
+  return {
+    kind,
+    description: `MTF ${direction}: ${higherTf} 足が EMA(50) より${trendOp === '>' ? '上' : '下'} (= 上位足${trendLabel}トレンド) かつ ${entryTf} RSI ${oversoldLabel}`,
+    direction,
+    trigger: {
+      logic: 'AND',
+      conditions: [
+        {
+          lens: 'ohlcv',
+          feature: 'close',
+          op: trendOp,
+          compareTarget: { lens: 'ohlcv', feature: 'ema', params: { period: 50 }, timeframe: higherTf },
+          timeframe: higherTf,
+        },
+        { lens: 'ohlcv', feature: 'rsi', op: rsiOp, value: rsiValue },
+      ],
+    },
+    stopLoss: STANDARD_SL,
+    takeProfit: STANDARD_TP,
+  };
+}
+
 const SEED_RECIPES: Record<SeedKind, SeedRecipe> = {
   // === 1. MTF (= 上位足コンテキスト + 下位足エントリー) ===
-  mtf_long: {
-    kind: 'mtf_long',
-    description: 'MTF long: 1h 足が EMA(50) より上 (= 上位足上昇トレンド) かつ 15m RSI 過売り → 押し目買い',
-    direction: 'long',
-    trigger: {
-      logic: 'AND',
-      conditions: [
-        {
-          lens: 'ohlcv',
-          feature: 'close',
-          op: '>',
-          compareTarget: { lens: 'ohlcv', feature: 'ema', params: { period: 50 }, timeframe: '1h' },
-          timeframe: '1h',
-        },
-        { lens: 'ohlcv', feature: 'rsi', op: '<', value: 35 },
-      ],
-    },
-    stopLoss: STANDARD_SL,
-    takeProfit: STANDARD_TP,
-  },
-  mtf_short: {
-    kind: 'mtf_short',
-    description: 'MTF short: 1h 足が EMA(50) より下 (= 上位足下降トレンド) かつ 15m RSI 過買り → 戻り売り',
-    direction: 'short',
-    trigger: {
-      logic: 'AND',
-      conditions: [
-        {
-          lens: 'ohlcv',
-          feature: 'close',
-          op: '<',
-          compareTarget: { lens: 'ohlcv', feature: 'ema', params: { period: 50 }, timeframe: '1h' },
-          timeframe: '1h',
-        },
-        { lens: 'ohlcv', feature: 'rsi', op: '>', value: 65 },
-      ],
-    },
-    stopLoss: STANDARD_SL,
-    takeProfit: STANDARD_TP,
-  },
+  //
+  // 注 (PR #246 Copilot review #2): 本オブジェクトの mtf_long / mtf_short エントリは
+  // 「default entry=15m での recipe」を保持する fallback。実運用では `buildSeedDsl()`
+  // が kind=`mtf_*` を検出した時に `buildMtfRecipe(timeframe, direction)` を呼んで
+  // entry timeframe から動的に上書き生成するため、ここに格納された値は使われない。
+  // `Record<SeedKind, SeedRecipe>` の型整合 (= 全 SeedKind を網羅) のために残す。
+  mtf_long: buildMtfRecipe('15m', 'long'),
+  mtf_short: buildMtfRecipe('15m', 'short'),
 
   // === 2. multi-instance EMA (= パーフェクトオーダー) ===
   multi_instance_long: {
@@ -371,7 +415,14 @@ export function buildSeedDsl(
   symbol: string = 'EURUSD',
   timeframe: string = '15m',
 ): StrategyDSL {
-  const recipe = SEED_RECIPES[kind];
+  // MTF seed は entry timeframe から上位足を派生させるため、SEED_RECIPES の
+  // プレースホルダーではなく `buildMtfRecipe()` で動的に組み立てる (Phase B 2026-05-22)。
+  const recipe =
+    kind === 'mtf_long'
+      ? buildMtfRecipe(timeframe, 'long')
+      : kind === 'mtf_short'
+        ? buildMtfRecipe(timeframe, 'short')
+        : SEED_RECIPES[kind];
   const raw = {
     id: `novelty-${kind}-${regime}-${randomUUID()}`,
     generation: 0,
