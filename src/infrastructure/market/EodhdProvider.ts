@@ -140,9 +140,14 @@ export class EodhdProvider extends BaseMarketDataProvider {
         to: toSec,
       });
 
+      // Copilot review (PR #245) 指摘: EODHD intraday の SDK 返却順は仕様で保証されていないため、
+      // factor=1 (native) 経路でも明示的に timestamp 昇順にソートしてから slice する。
+      // 集約経路 (factor>1) は aggregateOHLCV() 内で sort 済のため不要。
       const nativeBars = raw.map((p) => this.intradayPointToBar(p));
       const aggregated =
-        plan.factor === 1 ? nativeBars : aggregateOHLCV(nativeBars, TIMEFRAME_MS[timeframe]);
+        plan.factor === 1
+          ? [...nativeBars].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+          : aggregateOHLCV(nativeBars, TIMEFRAME_MS[timeframe]);
 
       const limited = aggregated.slice(-limit);
       return {
@@ -213,9 +218,13 @@ export class EodhdProvider extends BaseMarketDataProvider {
         to: toSec,
       });
 
+      // Copilot review (PR #245) 指摘: SDK 返却順が保証されないため、factor=1 経路も明示 sort。
+      // 集約経路 (factor>1) は aggregateOHLCV() 内で sort 済。
       const nativeBars = raw.map((p) => this.intradayPointToBar(p));
       const aggregated =
-        plan.factor === 1 ? nativeBars : aggregateOHLCV(nativeBars, TIMEFRAME_MS[timeframe]);
+        plan.factor === 1
+          ? [...nativeBars].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+          : aggregateOHLCV(nativeBars, TIMEFRAME_MS[timeframe]);
 
       // 集約後にレンジ内に絞り込む (= バケット端で範囲外に出ることがあるため)
       const inRange = aggregated.filter(

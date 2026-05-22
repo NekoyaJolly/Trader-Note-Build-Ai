@@ -79,6 +79,42 @@ describe('EodhdProvider.getHistoricalData (intraday native)', () => {
     expect(result.provider).toBe('eodhd');
   });
 
+  it('SDK が降順 (新→旧) で返しても、native (factor=1) 経路は timestamp 昇順に整列する', async () => {
+    // Copilot review (PR #245) 指摘 1 対応: SDK 返却順が保証されないケースの防御
+    sdkMocks.intraday.mockResolvedValueOnce([
+      intradayPoint('2026-05-22T10:02:00Z', 102, 103, 101, 103, 30),
+      intradayPoint('2026-05-22T10:01:00Z', 101, 102, 100, 102, 20),
+      intradayPoint('2026-05-22T10:00:00Z', 100, 101, 99, 101, 10),
+    ]);
+
+    const provider = new EodhdProvider({ apiToken: 'test-token' });
+    const result = await provider.getHistoricalData('XAU/USD', '1m', 3);
+
+    expect(result.bars).toHaveLength(3);
+    expect(result.bars[0].timestamp.toISOString()).toBe('2026-05-22T10:00:00.000Z');
+    expect(result.bars[1].timestamp.toISOString()).toBe('2026-05-22T10:01:00.000Z');
+    expect(result.bars[2].timestamp.toISOString()).toBe('2026-05-22T10:02:00.000Z');
+    // close は時系列順なので 101 / 102 / 103
+    expect(result.bars.map((b) => b.close)).toEqual([101, 102, 103]);
+  });
+
+  it('SDK 降順で limit=1 のとき、getCurrentPrice は最新バー (最大 timestamp) を返す', async () => {
+    // Copilot review (PR #245) 指摘 3 対応: SDK 降順時の getCurrentPrice / getHistoricalData の挙動確認
+    sdkMocks.intraday.mockResolvedValueOnce([
+      intradayPoint('2026-05-22T10:02:00Z', 102, 103, 101, 103, 30),
+      intradayPoint('2026-05-22T10:01:00Z', 101, 102, 100, 102, 20),
+      intradayPoint('2026-05-22T10:00:00Z', 100, 101, 99, 101, 10),
+    ]);
+
+    const provider = new EodhdProvider({ apiToken: 'test-token' });
+    const bar = await provider.getCurrentPrice('XAU/USD', '1m');
+
+    // SDK が降順で返しても、ソート後の最新バー (10:02) が返ること
+    expect(bar).not.toBeNull();
+    expect(bar?.timestamp.toISOString()).toBe('2026-05-22T10:02:00.000Z');
+    expect(bar?.close).toBe(103);
+  });
+
   it('5m: SDK の intraday を interval=5m で呼ぶ', async () => {
     sdkMocks.intraday.mockResolvedValueOnce([
       intradayPoint('2026-05-22T10:00:00Z', 100, 102, 99, 101, 10),
@@ -283,6 +319,32 @@ describe('EodhdProvider.getHistoricalRange', () => {
     const params = sdkMocks.intraday.mock.calls[0][1];
     expect(params.from).toBe(Math.floor(fromDate.getTime() / 1000));
     expect(params.to).toBe(Math.floor(toDate.getTime() / 1000));
+  });
+
+  it('intraday (native): SDK が降順で返しても、getHistoricalRange は昇順整列で返す', async () => {
+    // Copilot review (PR #245) 指摘 2 対応: getHistoricalRange の factor=1 経路も sort
+    sdkMocks.intraday.mockResolvedValueOnce([
+      intradayPoint('2026-05-22T10:15:00Z', 103, 104, 102, 103, 10),
+      intradayPoint('2026-05-22T10:10:00Z', 102, 103, 101, 102, 10),
+      intradayPoint('2026-05-22T10:05:00Z', 101, 102, 100, 101, 10),
+      intradayPoint('2026-05-22T10:00:00Z', 100, 101, 99, 100, 10),
+    ]);
+
+    const provider = new EodhdProvider({ apiToken: 'test-token' });
+    const result = await provider.getHistoricalRange(
+      'XAU/USD',
+      '5m',
+      new Date('2026-05-22T10:00:00Z'),
+      new Date('2026-05-22T10:20:00Z'),
+    );
+
+    expect(result.bars).toHaveLength(4);
+    expect(result.bars.map((b) => b.timestamp.toISOString())).toEqual([
+      '2026-05-22T10:00:00.000Z',
+      '2026-05-22T10:05:00.000Z',
+      '2026-05-22T10:10:00.000Z',
+      '2026-05-22T10:15:00.000Z',
+    ]);
   });
 
   it('eod: from/to を YYYY-MM-DD 形式で渡す', async () => {
