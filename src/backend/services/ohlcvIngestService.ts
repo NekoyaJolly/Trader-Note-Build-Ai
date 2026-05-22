@@ -1,29 +1,41 @@
 /**
- * OHLCV インジェストサービス
+ * OHLCV インジェストサービス (Phase B、2026-05-22 EODHD 切替)
  *
- * 日次でウォッチリストのシンボルのOHLCVデータを取得し、DBに蓄積
+ * 日次でウォッチリストのシンボルの OHLCV データを取得し、DB に蓄積する。
+ *
  * - Watchlist モデルからアクティブなシンボル一覧を取得
- * - Twelve Data API から OHLCV データを取得
+ * - EODHD All-In-One API から OHLCV データを取得 (旧 Twelve Data 経路を廃止)
  * - OHLCVCandle テーブルに保存
- * - レート制限対策（bottleneck）
+ * - レート制限対策 (bottleneck): EODHD All-In-One = 1,000 req/min なので Twelve Data 時代より緩和
+ *
+ * Timeframe マッピング:
+ * - 1m / 5m / 1h: EODHD intraday API ネイティブ
+ * - 15m / 30m / 4h: EODHD intraday (5m or 1h) を取得後にクライアント側で集約
+ *   (詳細は `src/infrastructure/market/ohlcvAggregation.ts`)
+ * - 1d / 1w: EODHD eod API (period=d/w)
  */
 
 import Bottleneck from 'bottleneck';
 import { prisma } from '../db/client';
+import { EodhdProvider } from '../../infrastructure/market/EodhdProvider';
+import { TimeframeSchema, type Timeframe } from '../../infrastructure/market/IMarketDataProvider';
 
-// Twelve Data API のレート制限: 8 req/min（無料プラン）
-// 安全マージンを取って 7 req/min に設定
+/**
+ * EODHD All-In-One のレート制限: 1,000 req/分。
+ * 安全マージン込みで 500 req/分 (= 8.3 req/秒) に設定。
+ * Watchlist スキャンは Symbol × Timeframe の組合せ数で逐次回るため、
+ * 並列度 1・最小間隔 120ms で安定運用する。
+ */
 const limiter = new Bottleneck({
-  reservoir: 7, // 初期トークン数
-  reservoirRefreshAmount: 7, // リフレッシュ時の追加トークン数
-  reservoirRefreshInterval: 60 * 1000, // 1分ごとにリフレッシュ
-  maxConcurrent: 1, // 同時実行数
-  minTime: 9000, // リクエスト間の最小間隔（約6.7秒）
+  reservoir: 500,
+  reservoirRefreshAmount: 500,
+  reservoirRefreshInterval: 60 * 1000,
+  maxConcurrent: 1,
+  minTime: 120,
 });
 
-// Twelve Data API 設定
-const TWELVE_DATA_API_KEY = process.env.TWELVE_DATA_API_KEY || '';
-const TWELVE_DATA_BASE_URL = 'https://api.twelvedata.com';
+// EODHD Provider のシングルトン (config 経由で APIキー / baseUrl を解決)
+const eodhdProvider = new EodhdProvider();
 
 /**
  * OHLCVデータの型定義
@@ -35,30 +47,6 @@ export interface OHLCVData {
   low: number;
   close: number;
   volume: number;
-}
-
-/**
- * Twelve Data API レスポンスの型
- */
-interface TwelveDataTimeSeriesResponse {
-  meta?: {
-    symbol: string;
-    interval: string;
-    currency?: string;
-    exchange_timezone?: string;
-    type?: string;
-  };
-  values?: Array<{
-    datetime: string;
-    open: string;
-    high: string;
-    low: string;
-    close: string;
-    volume?: string;
-  }>;
-  status?: string;
-  code?: number;
-  message?: string;
 }
 
 /**
@@ -89,84 +77,39 @@ export interface IngestSummary {
 }
 
 /**
- * Twelve Data API から OHLCV データを取得
+ * EODHD から OHLCV データを取得 (Phase B、旧 fetchFromTwelveData の置換)
  *
- * @param symbol - シンボル（例: USDJPY）
- * @param interval - 時間足（例: 15min, 1h）
- * @param outputSize - 取得件数（デフォルト: 100）
- * @returns OHLCV データ配列
+ * Provider 層で内部 Timeframe → EODHD interval / period のマッピングと
+ * 15m / 30m / 4h の集約を一括処理するため、本サービスは Provider に渡すだけ。
  */
-async function fetchFromTwelveData(
+async function fetchFromEodhd(
   symbol: string,
-  interval: string,
-  outputSize: number = 100
+  timeframe: Timeframe,
+  outputSize: number,
 ): Promise<OHLCVData[]> {
-  if (!TWELVE_DATA_API_KEY) {
-    throw new Error('TWELVE_DATA_API_KEY が設定されていません');
-  }
-
-  const url = new URL(`${TWELVE_DATA_BASE_URL}/time_series`);
-  url.searchParams.set('symbol', symbol);
-  url.searchParams.set('interval', interval);
-  url.searchParams.set('outputsize', String(outputSize));
-  url.searchParams.set('apikey', TWELVE_DATA_API_KEY);
-
-  const response = await fetch(url.toString());
-
-  if (!response.ok) {
-    throw new Error(`Twelve Data API エラー: ${response.status} ${response.statusText}`);
-  }
-
-  const data = (await response.json()) as TwelveDataTimeSeriesResponse;
-
-  // エラーチェック
-  if (data.status === 'error' || data.code) {
-    throw new Error(`Twelve Data API エラー: ${data.message || 'Unknown error'}`);
-  }
-
-  if (!data.values || data.values.length === 0) {
-    return [];
-  }
-
-  // OHLCVData 形式に変換
-  return data.values.map((v) => ({
-    timestamp: new Date(v.datetime),
-    open: parseFloat(v.open),
-    high: parseFloat(v.high),
-    low: parseFloat(v.low),
-    close: parseFloat(v.close),
-    volume: parseFloat(v.volume || '0'),
+  const result = await eodhdProvider.getHistoricalData(symbol, timeframe, outputSize);
+  return result.bars.map((b) => ({
+    timestamp: b.timestamp,
+    open: b.open,
+    high: b.high,
+    low: b.low,
+    close: b.close,
+    volume: b.volume,
   }));
 }
 
 /**
- * 時間足をTwelve Data API形式に変換
- */
-function convertTimeframe(timeframe: string): string {
-  const map: Record<string, string> = {
-    '1m': '1min',
-    '5m': '5min',
-    '15m': '15min',
-    '30m': '30min',
-    '1h': '1h',
-    '4h': '4h',
-    '1d': '1day',
-  };
-  return map[timeframe] || timeframe;
-}
-
-/**
- * 単一シンボル・時間足のOHLCVデータをインジェスト
+ * 単一シンボル・時間足の OHLCV データをインジェスト
  *
- * @param symbol - シンボル
- * @param timeframe - 時間足（内部形式: 15m, 1h など）
+ * @param symbol - シンボル (例: 'XAU/USD' または 'XAUUSD' どちらでも EodhdProvider が正規化する)
+ * @param timeframe - 時間足 (内部形式: 1m / 5m / 15m / 30m / 1h / 4h / 1d / 1w)
  * @param outputSize - 取得件数
  * @returns インジェスト結果
  */
 export async function ingestOHLCV(
   symbol: string,
   timeframe: string,
-  outputSize: number = 100
+  outputSize: number = 100,
 ): Promise<IngestResult> {
   const result: IngestResult = {
     symbol,
@@ -176,11 +119,18 @@ export async function ingestOHLCV(
     skippedCount: 0,
   };
 
+  // Zod で内部 Timeframe に narrow (EODHD 非対応の文字列を早期に弾く)
+  const parsedTf = TimeframeSchema.safeParse(timeframe);
+  if (!parsedTf.success) {
+    result.error = `未対応の時間足: ${timeframe} (Timeframe enum 外)`;
+    console.error(`[OHLCVIngest] ${symbol}/${timeframe} エラー:`, result.error);
+    return result;
+  }
+
   try {
-    // レート制限を適用してAPI呼び出し
-    const apiInterval = convertTimeframe(timeframe);
+    // レート制限を適用して API 呼び出し
     const ohlcvData = await limiter.schedule(() =>
-      fetchFromTwelveData(symbol, apiInterval, outputSize)
+      fetchFromEodhd(symbol, parsedTf.data, outputSize),
     );
 
     result.fetchedCount = ohlcvData.length;
@@ -209,7 +159,7 @@ export async function ingestOHLCV(
             low: candle.low,
             close: candle.close,
             volume: candle.volume,
-            source: 'twelvedata',
+            source: 'eodhd',
           },
           update: {
             open: candle.open,
