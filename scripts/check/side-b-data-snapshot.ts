@@ -9,31 +9,17 @@
  *
  * 本スクリプトは **read-only** で Side-B 系 21 テーブルの:
  *   1. 現状の総件数
- *   2. Phase B マージ前 (= 旧 hardcode 期) と マージ後 (= Phase B 修正後) の期間別件数
- *   3. EdgeHypothesis / EvolutionBacktestRun / GenerationLesson 等の主要テーブルは
- *      status / category 等のキー別 cross 集計も追加
- * を取得して、データクリア範囲判断の材料を提供する。
+ *   2. EdgeHypothesis / EvolutionBacktestRun は Phase B マージ前後の期間別件数 +
+ *      status / formalBtPassed 別 cross 集計
+ *   3. 他テーブルは total のみ (= 日付フィールドがテーブルごとに異なるため、まずは
+ *      量感把握を優先)
  *
  * **DELETE / TRUNCATE は一切実行しない**。本スクリプトはあくまで snapshot 取得。
- * 実際のクリアは別スクリプト or migration で Nekoさん 承認後に実施する。
  *
  * 使い方:
  *   DATABASE_URL=... npx tsx scripts/check/side-b-data-snapshot.ts
- *
- * オプション:
- *   --boundary=YYYY-MM-DDThh:mm:ssZ
- *     Phase B マージ前後の境界日時 (default: 2026-05-22T00:00:00Z)
- *   --json
- *     人間可読 table の代わりに JSON 出力 (= 後で集計加工する場合)
- *
- * 出力例 (table モード):
- *   === Side-B Data Snapshot (boundary: 2026-05-22T00:00:00Z) ===
- *   EdgeHypothesis        total=735  before=720  after=15
- *     status=screening_passed before=323 after=0
- *     status=not_testable    before=288 after=12
- *     ...
- *
- * @see docs/diagnostics/codebase_review_2026-05-22.html § Top Risks 解消行
+ *   DATABASE_URL=... npx tsx scripts/check/side-b-data-snapshot.ts --json
+ *   DATABASE_URL=... npx tsx scripts/check/side-b-data-snapshot.ts --boundary=2026-05-22T02:51:21Z
  */
 
 import { config as loadEnv } from 'dotenv';
@@ -76,34 +62,23 @@ function parseArgs(): CliArgs {
 interface TableSnapshot {
   table: string;
   total: number;
-  before: number;
-  after: number;
+  before?: number;
+  after?: number;
   groupedBy?: Record<string, { before: number; after: number }>;
-}
-
-async function countWithBoundary(
-  prisma: PrismaClient,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  model: any,
-  boundaryDate: Date,
-  dateField: string = 'createdAt',
-): Promise<{ total: number; before: number; after: number }> {
-  const total = await model.count();
-  const before = await model.count({
-    where: { [dateField]: { lt: boundaryDate } },
-  });
-  const after = await model.count({
-    where: { [dateField]: { gte: boundaryDate } },
-  });
-  return { total, before, after };
+  note?: string;
 }
 
 async function snapshotEdgeHypothesis(
   prisma: PrismaClient,
   boundaryDate: Date,
 ): Promise<TableSnapshot> {
-  const base = await countWithBoundary(prisma, prisma.edgeHypothesis, boundaryDate);
-  // status 別 cross 集計
+  const total = await prisma.edgeHypothesis.count();
+  const before = await prisma.edgeHypothesis.count({
+    where: { firstObservedAt: { lt: boundaryDate } },
+  });
+  const after = await prisma.edgeHypothesis.count({
+    where: { firstObservedAt: { gte: boundaryDate } },
+  });
   const statuses = [
     'unverified',
     'screening_passed',
@@ -116,79 +91,91 @@ async function snapshotEdgeHypothesis(
   ] as const;
   const groupedBy: Record<string, { before: number; after: number }> = {};
   for (const status of statuses) {
-    const before = await prisma.edgeHypothesis.count({
-      where: { status, createdAt: { lt: boundaryDate } },
+    const sBefore = await prisma.edgeHypothesis.count({
+      where: { status, firstObservedAt: { lt: boundaryDate } },
     });
-    const after = await prisma.edgeHypothesis.count({
-      where: { status, createdAt: { gte: boundaryDate } },
+    const sAfter = await prisma.edgeHypothesis.count({
+      where: { status, firstObservedAt: { gte: boundaryDate } },
     });
-    if (before > 0 || after > 0) {
-      groupedBy[`status=${status}`] = { before, after };
+    if (sBefore > 0 || sAfter > 0) {
+      groupedBy[`status=${status}`] = { before: sBefore, after: sAfter };
     }
   }
-  return { table: 'EdgeHypothesis', ...base, groupedBy };
+  return { table: 'EdgeHypothesis', total, before, after, groupedBy };
 }
 
 async function snapshotEvolutionBacktestRun(
   prisma: PrismaClient,
   boundaryDate: Date,
 ): Promise<TableSnapshot> {
-  const base = await countWithBoundary(prisma, prisma.evolutionBacktestRun, boundaryDate);
-  // formalBtPassed 別
+  const total = await prisma.evolutionBacktestRun.count();
+  const before = await prisma.evolutionBacktestRun.count({
+    where: { createdAt: { lt: boundaryDate } },
+  });
+  const after = await prisma.evolutionBacktestRun.count({
+    where: { createdAt: { gte: boundaryDate } },
+  });
   const groupedBy: Record<string, { before: number; after: number }> = {};
   for (const passed of [true, false]) {
-    const before = await prisma.evolutionBacktestRun.count({
+    const pBefore = await prisma.evolutionBacktestRun.count({
       where: { formalBtPassed: passed, createdAt: { lt: boundaryDate } },
     });
-    const after = await prisma.evolutionBacktestRun.count({
+    const pAfter = await prisma.evolutionBacktestRun.count({
       where: { formalBtPassed: passed, createdAt: { gte: boundaryDate } },
     });
-    groupedBy[`formalBtPassed=${String(passed)}`] = { before, after };
+    groupedBy[`formalBtPassed=${String(passed)}`] = { before: pBefore, after: pAfter };
   }
-  return { table: 'EvolutionBacktestRun', ...base, groupedBy };
+  return { table: 'EvolutionBacktestRun', total, before, after, groupedBy };
 }
 
 async function snapshotGenerationLesson(
   prisma: PrismaClient,
   boundaryDate: Date,
 ): Promise<TableSnapshot> {
-  const base = await countWithBoundary(prisma, prisma.generationLesson, boundaryDate);
-  const categories = ['breakthrough', 'stagnation', 'failure', 'success'] as const;
-  const groupedBy: Record<string, { before: number; after: number }> = {};
-  for (const category of categories) {
-    const before = await prisma.generationLesson.count({
-      where: { category, createdAt: { lt: boundaryDate } },
-    });
-    const after = await prisma.generationLesson.count({
-      where: { category, createdAt: { gte: boundaryDate } },
-    });
-    if (before > 0 || after > 0) {
-      groupedBy[`category=${category}`] = { before, after };
-    }
-  }
-  return { table: 'GenerationLesson', ...base, groupedBy };
+  const total = await prisma.generationLesson.count();
+  const before = await prisma.generationLesson.count({
+    where: { recordedAt: { lt: boundaryDate } },
+  });
+  const after = await prisma.generationLesson.count({
+    where: { recordedAt: { gte: boundaryDate } },
+  });
+  return { table: 'GenerationLesson', total, before, after };
 }
 
-async function snapshotAgentRun(
-  prisma: PrismaClient,
-  boundaryDate: Date,
+/**
+ * 簡素版: 各テーブルの total のみを取得。
+ * 日付フィールドがテーブルごとにバラバラ (createdAt / startedAt / recordedAt /
+ * proposedAt / completedAt / 等) のため、期間別 cross 集計は主要 2 テーブルに絞り、
+ * 残りは total を見て「クリア対象の量感」を把握する目的に特化させる。
+ */
+async function snapshotTotal(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  model: any,
+  tableName: string,
+  note?: string,
 ): Promise<TableSnapshot> {
-  const base = await countWithBoundary(prisma, prisma.agentRun, boundaryDate, 'startedAt');
-  return { table: 'AgentRun', ...base };
+  const total = await model.count();
+  return { table: tableName, total, note };
 }
 
 function formatSnapshot(snap: TableSnapshot): string {
   const lines: string[] = [];
-  lines.push(
-    `${snap.table.padEnd(28)} total=${String(snap.total).padStart(6)}  ` +
-      `before=${String(snap.before).padStart(6)}  ` +
-      `after=${String(snap.after).padStart(6)}`,
-  );
+  const totalStr = String(snap.total).padStart(7);
+  if (snap.before !== undefined && snap.after !== undefined) {
+    lines.push(
+      `${snap.table.padEnd(28)} total=${totalStr}  ` +
+        `before=${String(snap.before).padStart(7)}  ` +
+        `after=${String(snap.after).padStart(7)}`,
+    );
+  } else {
+    const noteStr = snap.note ? `  (${snap.note})` : '';
+    lines.push(`${snap.table.padEnd(28)} total=${totalStr}${noteStr}`);
+  }
   if (snap.groupedBy) {
     for (const [key, counts] of Object.entries(snap.groupedBy)) {
       lines.push(
-        `  ${key.padEnd(36)} before=${String(counts.before).padStart(4)}  ` +
-          `after=${String(counts.after).padStart(4)}`,
+        `  ${key.padEnd(36)} before=${String(counts.before).padStart(5)}  ` +
+          `after=${String(counts.after).padStart(5)}`,
       );
     }
   }
@@ -207,106 +194,54 @@ async function main(): Promise<void> {
   const snapshots: TableSnapshot[] = [];
 
   try {
-    // 仮説中核
+    // === 仮説中核 (期間別 cross 集計あり) ===
     snapshots.push(await snapshotEdgeHypothesis(prisma, boundaryDate));
 
-    // 進化 BT 系
+    // === 進化 BT 系 ===
     snapshots.push(await snapshotEvolutionBacktestRun(prisma, boundaryDate));
     snapshots.push(await snapshotGenerationLesson(prisma, boundaryDate));
-    snapshots.push({
-      table: 'EvolutionInstanceCarry',
-      ...(await countWithBoundary(prisma, prisma.evolutionInstanceCarry, boundaryDate)),
-    });
+    snapshots.push(await snapshotTotal(prisma.evolutionInstanceCarry, 'EvolutionInstanceCarry'));
 
-    // 戦略 BT 系
-    snapshots.push({
-      table: 'StrategyBacktestRun',
-      ...(await countWithBoundary(prisma, prisma.strategyBacktestRun, boundaryDate)),
-    });
-    snapshots.push({
-      table: 'StrategyBacktestResult',
-      ...(await countWithBoundary(prisma, prisma.strategyBacktestResult, boundaryDate)),
-    });
-    snapshots.push({
-      table: 'StrategyBacktestEvent',
-      ...(await countWithBoundary(prisma, prisma.strategyBacktestEvent, boundaryDate)),
-    });
-    snapshots.push({
-      table: 'ScreeningBacktestRun',
-      ...(await countWithBoundary(prisma, prisma.screeningBacktestRun, boundaryDate)),
-    });
+    // === 戦略 BT 系 ===
+    snapshots.push(await snapshotTotal(prisma.strategyBacktestRun, 'StrategyBacktestRun'));
+    snapshots.push(await snapshotTotal(prisma.strategyBacktestResult, 'StrategyBacktestResult'));
+    snapshots.push(await snapshotTotal(prisma.strategyBacktestEvent, 'StrategyBacktestEvent'));
+    snapshots.push(await snapshotTotal(prisma.screeningBacktestRun, 'ScreeningBacktestRun'));
 
-    // 検証ツール
-    snapshots.push({
-      table: 'WalkForwardRun',
-      ...(await countWithBoundary(prisma, prisma.walkForwardRun, boundaryDate)),
-    });
-    snapshots.push({
-      table: 'MonteCarloRun',
-      ...(await countWithBoundary(prisma, prisma.monteCarloRun, boundaryDate)),
-    });
+    // === 検証ツール ===
+    snapshots.push(await snapshotTotal(prisma.walkForwardRun, 'WalkForwardRun'));
+    snapshots.push(await snapshotTotal(prisma.monteCarloRun, 'MonteCarloRun'));
 
-    // メタ進化
-    snapshots.push({
-      table: 'AgentRestructureProposal',
-      ...(await countWithBoundary(prisma, prisma.agentRestructureProposal, boundaryDate)),
-    });
+    // === メタ進化 / 戦略下書き ===
+    snapshots.push(await snapshotTotal(prisma.agentRestructureProposal, 'AgentRestructureProposal'));
+    snapshots.push(await snapshotTotal(prisma.strategyDraft, 'StrategyDraft'));
 
-    // 戦略下書き
-    snapshots.push({
-      table: 'StrategyDraft',
-      ...(await countWithBoundary(prisma, prisma.strategyDraft, boundaryDate)),
-    });
+    // === AI 出力 / 仮想トレード (= クリア可否は別判断) ===
+    snapshots.push(await snapshotTotal(prisma.aITradePlan, 'AITradePlan'));
+    snapshots.push(await snapshotTotal(prisma.aITradeNote, 'AITradeNote', 'ユーザー閲覧データ'));
+    snapshots.push(await snapshotTotal(prisma.aINoteSummary, 'AINoteSummary'));
+    snapshots.push(await snapshotTotal(prisma.researchOutput, 'ResearchOutput'));
+    snapshots.push(await snapshotTotal(prisma.marketResearch, 'MarketResearch', '旧 Research、Phase D 削除予定'));
+    snapshots.push(await snapshotTotal(prisma.virtualTrade, 'VirtualTrade'));
+    snapshots.push(await snapshotTotal(prisma.virtualPortfolio, 'VirtualPortfolio'));
 
-    // AI 出力 / 仮想トレード (= 削除可否は別判断)
-    snapshots.push({
-      table: 'AITradePlan',
-      ...(await countWithBoundary(prisma, prisma.aITradePlan, boundaryDate)),
-    });
-    snapshots.push({
-      table: 'AITradeNote',
-      ...(await countWithBoundary(prisma, prisma.aITradeNote, boundaryDate)),
-    });
-    snapshots.push({
-      table: 'AINoteSummary',
-      ...(await countWithBoundary(prisma, prisma.aINoteSummary, boundaryDate)),
-    });
-    snapshots.push({
-      table: 'ResearchOutput',
-      ...(await countWithBoundary(prisma, prisma.researchOutput, boundaryDate)),
-    });
-    snapshots.push({
-      table: 'MarketResearch',
-      ...(await countWithBoundary(prisma, prisma.marketResearch, boundaryDate)),
-    });
-    snapshots.push({
-      table: 'VirtualTrade',
-      ...(await countWithBoundary(prisma, prisma.virtualTrade, boundaryDate)),
-    });
-    snapshots.push({
-      table: 'VirtualPortfolio',
-      ...(await countWithBoundary(prisma, prisma.virtualPortfolio, boundaryDate)),
-    });
-
-    // Run Ledger (= ADK trace 履歴、デバッグ用)
-    snapshots.push(await snapshotAgentRun(prisma, boundaryDate));
-    snapshots.push({
-      table: 'AgentRunStep',
-      ...(await countWithBoundary(prisma, prisma.agentRunStep, boundaryDate, 'startedAt')),
-    });
+    // === Run Ledger (= ADK trace 履歴) ===
+    snapshots.push(await snapshotTotal(prisma.agentRun, 'AgentRun', 'ADK trace 履歴'));
+    snapshots.push(await snapshotTotal(prisma.agentRunStep, 'AgentRunStep'));
 
     if (args.jsonMode) {
       console.log(JSON.stringify({ boundary: args.boundaryIso, snapshots }, null, 2));
     } else {
       console.log(`\n=== Side-B Data Snapshot (boundary: ${args.boundaryIso}) ===\n`);
-      console.log(`(before = boundary 以前 = 旧 hardcode 期 / after = boundary 以降 = Phase B 修正後)\n`);
+      console.log(
+        `(EdgeHypothesis / EvolutionBacktestRun / GenerationLesson のみ before=hardcode 期 / after=Phase B 修正後 で分割。他は total のみ)\n`,
+      );
       for (const snap of snapshots) {
         console.log(formatSnapshot(snap));
       }
       console.log('\n');
-      const totalBefore = snapshots.reduce((sum, s) => sum + s.before, 0);
-      const totalAfter = snapshots.reduce((sum, s) => sum + s.after, 0);
-      console.log(`合計: before=${totalBefore}, after=${totalAfter}\n`);
+      const totalAll = snapshots.reduce((sum, s) => sum + s.total, 0);
+      console.log(`全テーブル合計: ${totalAll} 行\n`);
     }
   } finally {
     await prisma.$disconnect();
