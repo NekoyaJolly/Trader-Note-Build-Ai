@@ -288,10 +288,14 @@ export class SideBScheduler {
 
   /**
    * Phase B (2026-05-22): symbols が外部から明示的に指定されたかを記録する。
-   * configOverride / envOverrides どちらでも symbols が指定されていなければ、
-   * start() で Watchlist テーブルから動的に取得する。
+   * - constructor で configOverride.symbols !== undefined ならセット
+   * - updateConfig() で symbols が渡されたら true に更新 (= 後付けの明示指定)
+   * - false のままなら start() で Watchlist テーブルから動的に取得する
+   *
+   * `readonly` を外して updateConfig 経由の更新を許可している (= PR #247
+   * Copilot review #1 対応: SideBController からの設定更新が無効化されないため)。
    */
-  private readonly explicitSymbolsOverride: boolean;
+  private explicitSymbolsOverride: boolean;
 
   constructor(configOverride?: Partial<SideBSchedulerConfig>) {
     // Phase A: env からの override を DEFAULT_CONFIG と configOverride の中間に挟む。
@@ -302,8 +306,10 @@ export class SideBScheduler {
     // Phase B (2026-05-22): symbols が明示指定されたかを判定。未指定なら start() で
     // Watchlist から動的取得する経路に乗せる。「明示指定」は Partial で undefined を
     // 渡されていない場合 (= 配列値が来た) を意味する。
-    this.explicitSymbolsOverride =
-      configOverride?.symbols !== undefined || envOverrides.symbols !== undefined;
+    // 注 (PR #247 Copilot review #2): envOverrides.symbols は現状 readEvolutionEnvOverrides()
+    // が返さないため常に undefined だが、将来 env 経路で symbols を追加する余地を残すなら
+    // ここでチェックすべき。現時点で意図を明確にするため configOverride のみ判定する。
+    this.explicitSymbolsOverride = configOverride?.symbols !== undefined;
     this.isProduction = process.env.NODE_ENV === 'production';
 
     // サービス初期化 (PR #152: canonical singleton 経由で connection pool 共有)
@@ -605,6 +611,11 @@ export class SideBScheduler {
 
   /**
    * 設定を更新
+   *
+   * PR #247 Copilot review #1: symbols が newConfig で渡されたら
+   * explicitSymbolsOverride を true に更新する。これにより updateConfig 経由で
+   * symbols を明示指定した場合 (= SideBController などからの設定変更) 、
+   * start() で Watchlist 取得に上書きされない。
    */
   updateConfig(newConfig: Partial<SideBSchedulerConfig>): void {
     const wasRunning = this.isRunning;
@@ -614,6 +625,9 @@ export class SideBScheduler {
     }
 
     this.config = { ...this.config, ...newConfig };
+    if (newConfig.symbols !== undefined) {
+      this.explicitSymbolsOverride = true;
+    }
     this.log('Side-Bスケジューラー設定を更新しました');
 
     if (wasRunning && this.config.enabled) {

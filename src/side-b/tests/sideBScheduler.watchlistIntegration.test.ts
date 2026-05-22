@@ -95,10 +95,12 @@ jest.mock('../services/summarySchedulerService', () => ({
   },
 }));
 
-const findManyMock = jest.fn();
+// PR #247 Copilot review #3: jest.mock の hoist で外側変数 (findManyMock) が
+// TDZ になるリスクを避けるため、factory 内で jest.fn() を作り、jest.requireMock
+// で参照を取得する形にする。
 jest.mock('../../backend/db/client', () => ({
   prisma: {
-    watchlist: { findMany: findManyMock },
+    watchlist: { findMany: jest.fn() },
   },
 }));
 
@@ -106,7 +108,11 @@ jest.mock('../../backend/db/client', () => ({
 // 本体
 // =================================================================
 
+import { prisma as mockedPrisma } from '../../backend/db/client';
 import { SideBScheduler } from '../jobs/sideBScheduler';
+
+// jest.mock factory 内で作られた jest.fn() への参照を取得 (TDZ-safe)
+const findManyMock = mockedPrisma.watchlist.findMany as jest.Mock;
 
 /**
  * SideBScheduler の private method `resolveWatchlistSymbolsIfNeeded` を呼んで結果を確認する。
@@ -224,6 +230,37 @@ describe('SideBScheduler Watchlist 連携 (Phase B 2026-05-22)', () => {
       // throw せず resolve する (= 起動を妨げない)
       await expect(callResolveWatchlist(scheduler)).resolves.toBeUndefined();
       expect(getConfigSymbols(scheduler)).toEqual(['XAUUSD']);
+    });
+  });
+
+  describe('updateConfig 経由の symbols 明示指定 (PR #247 Copilot review #1)', () => {
+    it('updateConfig({ symbols }) が呼ばれたら explicitSymbolsOverride=true に更新、後続の Watchlist 連携をスキップ', async () => {
+      findManyMock.mockResolvedValue([{ symbol: 'EURUSD' }]);
+      const scheduler = new SideBScheduler();
+
+      // 初期は Watchlist 連携対象 (explicitSymbolsOverride=false)
+      // updateConfig で symbols を渡すと explicitSymbolsOverride=true に更新される
+      scheduler.updateConfig({ symbols: ['BTCUSD', 'ETHUSD'] });
+
+      await callResolveWatchlist(scheduler);
+
+      // Watchlist は呼ばれない (= updateConfig 経由の明示指定が尊重される)
+      expect(findManyMock).not.toHaveBeenCalled();
+      expect(getConfigSymbols(scheduler)).toEqual(['BTCUSD', 'ETHUSD']);
+    });
+
+    it('updateConfig で symbols 以外の項目だけ更新しても explicitSymbolsOverride は変わらない', async () => {
+      findManyMock.mockResolvedValue([{ symbol: 'EURUSD' }]);
+      const scheduler = new SideBScheduler();
+
+      // symbols 以外の項目 (例: timeframe) だけ更新
+      scheduler.updateConfig({ timeframe: '1h' });
+
+      // explicitSymbolsOverride は false のまま → Watchlist 連携が動く
+      await callResolveWatchlist(scheduler);
+
+      expect(findManyMock).toHaveBeenCalled();
+      expect(getConfigSymbols(scheduler)).toEqual(['EURUSD']);
     });
   });
 });
