@@ -1,24 +1,29 @@
 /**
- * OHLCVデータ取得・キャッシュサービス
+ * OHLCV データ取得・キャッシュサービス
  *
  * 目的:
- * - **cTrader Open API 優先**（ブローカーと同一の価格・足区切りを正とする）
- * - cTrader が使えない/失敗した場合のみ Twelve Data にフォールバック
- * - cTrader APIの時間範囲制限に対応した分割リクエスト
- * - 取得データをDBに永続化（upsert）
- * - 進捗コールバック対応（SSE配信用）
+ * - **cTrader Open API 優先** (ブローカーと同一の価格・足区切りを正とする)
+ * - cTrader が使えない/失敗した場合のみ EODHD にフォールバック (Phase B、2026-05-22 切替)
+ * - cTrader API の時間範囲制限に対応した分割リクエスト
+ * - 取得データを DB に永続化 (upsert)
+ * - 進捗コールバック対応 (SSE 配信用)
+ *
+ * 旧 Twelve Data 経路は Phase B で廃止。EODHD の `intraday / eod` API を Provider 経由で利用し、
+ * 15m / 30m / 4h は `EodhdProvider.getHistoricalRange()` 内でクライアント側集約される。
  */
 
 import { CTraderDataService } from './ctrader/ctraderDataService';
 import { CTraderAuthService } from './ctrader/ctraderAuthService';
 import { splitDateRange } from '../../utils/dateRangeChunks';
-import { normalizeCTraderSymbol, toTwelveDataSymbol } from '../../utils/symbolNormalization';
-import { TwelveDataTimeSeriesResponseSchema } from '../../schemas/external/twelveData';
+import { normalizeCTraderSymbol } from '../../utils/symbolNormalization';
+import { EodhdProvider } from '../../infrastructure/market/EodhdProvider';
+import { TimeframeSchema } from '../../infrastructure/market/IMarketDataProvider';
 import { prisma } from '../db/client';
 import { safeStringify } from '../../utils/safeStringify';
 
 const ctraderAuthService = new CTraderAuthService(prisma);
 const ctraderDataService = new CTraderDataService(ctraderAuthService);
+const eodhdProvider = new EodhdProvider();
 
 /**
  * 期間外データを cTrader から補完取得できるか
@@ -43,7 +48,7 @@ export interface FetchAndCacheResult {
     success: boolean;
     cachedCount: number;
     error?: string;
-    source?: 'ctrader' | 'twelvedata';
+    source?: 'ctrader' | 'eodhd';
     details?: {
         symbol: string;
         timeframe: string;
@@ -110,8 +115,8 @@ export async function fetchAndCacheOhlcv(
     try {
         const normalizedSymbol = normalizeCTraderSymbol(symbol);
         if (!ctraderDataService.isConfigured()) {
-            console.warn('[fetchAndCacheOhlcv] cTrader API が未設定のため Twelve Data フォールバックを試行します');
-            return await fetchFromTwelveDataFallback(normalizedSymbol, timeframe, startDate, endDate, onProgress);
+            console.warn('[fetchAndCacheOhlcv] cTrader API が未設定のため EODHD フォールバックを試行します');
+            return await fetchFromEodhdFallback(normalizedSymbol, timeframe, startDate, endDate, onProgress);
         }
 
         const ctraderResult = await fetchFromCTrader(normalizedSymbol, timeframe, startDate, endDate, onProgress);
@@ -120,8 +125,8 @@ export async function fetchAndCacheOhlcv(
             return ctraderResult;
         }
 
-        console.warn(`[fetchAndCacheOhlcv] cTrader 取得失敗、Twelve Data フォールバックを試行: ${ctraderResult.error}`);
-        return await fetchFromTwelveDataFallback(normalizedSymbol, timeframe, startDate, endDate, onProgress);
+        console.warn(`[fetchAndCacheOhlcv] cTrader 取得失敗、EODHD フォールバックを試行: ${ctraderResult.error}`);
+        return await fetchFromEodhdFallback(normalizedSymbol, timeframe, startDate, endDate, onProgress);
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : '不明なエラー';
         console.error(`[fetchAndCacheOhlcv] エラー:`, error);
@@ -133,20 +138,20 @@ export async function fetchAndCacheOhlcv(
     }
 }
 
-async function fetchFromTwelveDataFallback(
+async function fetchFromEodhdFallback(
     symbol: string,
     timeframe: string,
     startDate: Date,
     endDate: Date,
     onProgress?: OnProgressCallback,
 ): Promise<FetchAndCacheResult> {
-    const apiKey = process.env.TWELVE_DATA_API_KEY || process.env.MARKET_API_KEY;
-    const apiUrl = process.env.TWELVE_DATA_API_URL || 'https://api.twelvedata.com';
-    if (!apiKey) {
+    // Zod で内部 Timeframe に narrow (EODHD 非対応の文字列を早期に弾く)
+    const parsedTf = TimeframeSchema.safeParse(timeframe);
+    if (!parsedTf.success) {
         return {
             success: false,
             cachedCount: 0,
-            error: 'Twelve Data APIキーが未設定です（TWELVE_DATA_API_KEY または MARKET_API_KEY）',
+            error: `EODHD: 未対応の時間足 ${timeframe} (Timeframe enum 外)`,
         };
     }
 
@@ -154,84 +159,57 @@ async function fetchFromTwelveDataFallback(
         onProgress?.({
             current: 0,
             total: 1,
-            message: 'Twelve Data フォールバックでOHLCV取得中...',
-            source: 'twelvedata',
+            message: 'EODHD フォールバックで OHLCV 取得中...',
+            source: 'eodhd',
             percent: 10,
         });
 
-        const intervalMinutes = getIntervalMinutes(timeframe);
-        const expectedBars = Math.ceil((endDate.getTime() - startDate.getTime()) / (intervalMinutes * 60 * 1000));
-        const outputSize = Math.min(Math.max(expectedBars + 50, 1), MAX_BARS_PER_REQUEST);
-        const url = new URL(`${apiUrl}/time_series`);
-        url.searchParams.set('symbol', toTwelveDataSymbol(symbol));
-        url.searchParams.set('interval', toTwelveDataTimeframe(timeframe));
-        url.searchParams.set('start_date', formatTwelveDataDate(startDate));
-        url.searchParams.set('end_date', formatTwelveDataDate(endDate));
-        url.searchParams.set('outputsize', String(outputSize));
-        url.searchParams.set('apikey', apiKey);
+        // EodhdProvider.getHistoricalRange は内部で:
+        //  - 1m/5m/1h: intraday API ネイティブ
+        //  - 15m/30m/4h: intraday を取得後にクライアント側集約
+        //  - 1d/1w: eod API
+        // を切り分け、from/to 範囲内のバーだけ返す。
+        const result = await eodhdProvider.getHistoricalRange(
+            symbol,
+            parsedTf.data,
+            startDate,
+            endDate,
+        );
 
-        const response = await fetch(url.toString());
-        if (!response.ok) {
-            return {
-                success: false,
-                cachedCount: 0,
-                error: `Twelve Data API エラー: ${response.status} ${response.statusText}`,
-            };
-        }
-
-        const json = await response.json();
-        const parsed = TwelveDataTimeSeriesResponseSchema.safeParse(json);
-        if (!parsed.success) {
-            return {
-                success: false,
-                cachedCount: 0,
-                error: `Twelve Data レスポンスパースエラー: ${parsed.error.message}`,
-            };
-        }
-        if ('code' in parsed.data) {
-            return {
-                success: false,
-                cachedCount: 0,
-                error: `Twelve Data API エラー: ${parsed.data.message}`,
-            };
-        }
-
-        const successData = parsed.data;
-        const allData = successData.values
-            .map((v) => ({
-                timestamp: new Date(v.datetime),
-                open: v.open,
-                high: v.high,
-                low: v.low,
-                close: v.close,
-                volume: v.volume ?? 0,
+        const allData = result.bars
+            .map((b) => ({
+                timestamp: b.timestamp,
+                open: b.open,
+                high: b.high,
+                low: b.low,
+                close: b.close,
+                volume: b.volume,
             }))
-            .filter((bar) => bar.timestamp >= startDate && bar.timestamp <= endDate)
             .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
         if (allData.length === 0) {
             return {
                 success: false,
                 cachedCount: 0,
-                error: `Twelve Data: ${symbol}/${timeframe} のデータが取得できませんでした`,
+                error: `EODHD: ${symbol}/${timeframe} のデータが取得できませんでした`,
             };
         }
 
         onProgress?.({
             current: 1,
             total: 1,
-            message: `Twelve Data取得分をDB保存中... (${allData.length}件)`,
-            source: 'twelvedata',
+            message: `EODHD 取得分を DB 保存中... (${allData.length}件)`,
+            source: 'eodhd',
             percent: 80,
         });
 
-        const cachedCount = await batchUpsertOhlcv(symbol, timeframe, allData, 'twelvedata');
+        const cachedCount = await batchUpsertOhlcv(symbol, timeframe, allData, 'eodhd');
         await updateDataPresetMetadata(symbol, timeframe);
 
         return {
             success: true,
             cachedCount,
-            source: 'twelvedata',
+            source: 'eodhd',
             details: {
                 symbol,
                 timeframe,
@@ -252,7 +230,7 @@ async function fetchFromTwelveDataFallback(
           ? (error as Error & { cause?: Error | string }).cause
           : undefined;
         const causeStr = cause ? ` (cause: ${safeStringify(cause)})` : '';
-        return { success: false, cachedCount: 0, error: `Twelve Data フォールバックエラー: ${msg}${causeStr}` };
+        return { success: false, cachedCount: 0, error: `EODHD フォールバックエラー: ${msg}${causeStr}` };
     }
 }
 
@@ -438,7 +416,7 @@ async function batchUpsertOhlcv(
     symbol: string,
     timeframe: string,
     data: Array<{ timestamp: Date; open: number; high: number; low: number; close: number; volume: number }>,
-    source: 'ctrader' | 'twelvedata' = 'ctrader',
+    source: 'ctrader' | 'eodhd' = 'ctrader',
 ): Promise<number> {
     const parallelSize = getUpsertParallelSize();
     let cachedCount = 0;
@@ -608,7 +586,7 @@ async function updateDataPresetMetadata(symbol: string, timeframe: string): Prom
 }
 
 /**
- * 時間足を分に変換
+ * 時間足を分に変換 (cTrader 取得経路の expectedBars 計算に使用)
  */
 function getIntervalMinutes(timeframe: string): number {
     const map: Record<string, number> = {
@@ -621,22 +599,4 @@ function getIntervalMinutes(timeframe: string): number {
         '1d': 1440,
     };
     return map[timeframe] || 60;
-}
-
-function toTwelveDataTimeframe(timeframe: string): string {
-    const map: Record<string, string> = {
-        '1m': '1min',
-        '5m': '5min',
-        '15m': '15min',
-        '30m': '30min',
-        '1h': '1h',
-        '4h': '4h',
-        '1d': '1day',
-        '1w': '1week',
-    };
-    return map[timeframe] || timeframe;
-}
-
-function formatTwelveDataDate(date: Date): string {
-    return date.toISOString().replace('T', ' ').slice(0, 19);
 }

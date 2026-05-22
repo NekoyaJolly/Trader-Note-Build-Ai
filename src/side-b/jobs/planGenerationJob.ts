@@ -157,7 +157,7 @@ export class PlanGenerationJob
           const normalizedSymbol = symbol.replace('/', '');
           const source = services.marketDataService.isCTraderAvailable()
             ? 'ctrader'
-            : 'twelvedata';
+            : 'eodhd';
           const insertCount = await ohlcvRepository.bulkInsert(
             ohlcvData.map((d) => ({
               symbol: normalizedSymbol,
@@ -219,7 +219,7 @@ export class PlanGenerationJob
               const normalizedSymbol = symbol.replace('/', '');
               const source = services.marketDataService.isCTraderAvailable()
                 ? 'ctrader'
-                : 'twelvedata';
+                : 'eodhd';
               const insertCount = await ohlcvRepository.bulkInsert(
                 htfOhlcv.map((d) => ({
                   symbol: normalizedSymbol,

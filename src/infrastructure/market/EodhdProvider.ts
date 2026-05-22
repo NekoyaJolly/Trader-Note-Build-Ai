@@ -1,7 +1,8 @@
 /**
- * EODHD WebSocket Provider (Phase A A-12、2026-05-21)
+ * EODHD Provider (Phase A WebSocket + Phase B OHLCV ヒストリカル)
  *
- * Side-A RealtimeChart のリアルタイム配信を cTrader → EODHD WebSocket に切替える際の Provider。
+ * Side-A RealtimeChart のリアルタイム配信 (Phase A) と Side-B / バックテスト用の
+ * ヒストリカル OHLCV 取得 (Phase B) を担う統合 Provider。
  *
  * 設計方針:
  * - `IMarketDataProvider` の WebSocket メソッド (connect / subscribeToTicks 等) を実装
@@ -9,13 +10,25 @@
  * - WebSocketTick (s/p/v/t) を内部 TickData (bid/ask/mid/spread) に変換
  *   forex feed では bid/ask 分離フィールドが提供されない場合があるため、
  *   p (last price) を bid/ask/mid 全てに同値で詰め、spread=0 として返す
- * - getHistoricalData / getCurrentPrice は Phase B で実装予定 (PR #3 では throw)
+ * - getHistoricalData: EODHD intraday API は `1m / 5m / 1h` のみ。それ以外の Timeframe は
+ *   `ohlcvAggregation.ts` のクライアント側集約で 15m / 30m / 4h を合成する。
+ *   1d / 1w は eod API (period=d/w) を直接使用。
+ * - getCurrentPrice: getHistoricalData(limit=1) の薄いラッパー
  *
- * 関連: docs/architecture/EODHD_PHASE_A_WBS.md PR #3 A-12
+ * 関連:
+ * - docs/architecture/EODHD_PHASE_A_WBS.md PR #3 A-12 (Phase A WebSocket)
+ * - docs/architecture/EODHD_INTEGRATION.md (Phase A 完了時新規)
  */
 
 import { z } from 'zod';
-import { EODHDClient, type EODHDWebSocket, type WebSocketFeed, type WebSocketTick } from 'eodhd';
+import {
+  EODHDClient,
+  type EodDataPoint,
+  type EODHDWebSocket,
+  type IntradayDataPoint,
+  type WebSocketFeed,
+  type WebSocketTick,
+} from 'eodhd';
 import { config } from '../../config';
 import {
   BaseMarketDataProvider,
@@ -27,8 +40,20 @@ import {
   type Timeframe,
 } from './IMarketDataProvider';
 import { toEodhdSymbol, fromEodhdSymbol } from '../../utils/symbolNormalization';
+import {
+  TIMEFRAME_MS,
+  planEodhdFetch,
+  aggregateOHLCV,
+} from './ohlcvAggregation';
 
 const KNOWN_QUOTES = ['USDT', 'USD', 'JPY', 'EUR', 'GBP', 'AUD', 'CAD', 'CHF', 'NZD'] as const;
+
+/**
+ * Date → 'YYYY-MM-DD' (UTC) 形式に変換。EODHD eod の from/to 用。
+ */
+function formatDateOnly(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
 
 /**
  * EODHD WebSocket Tick の Zod schema (boundary validation)
@@ -76,23 +101,207 @@ export class EodhdProvider extends BaseMarketDataProvider {
   }
 
   // ===========================================
-  // REST (Phase B で実装)
+  // REST (Phase B 実装、2026-05-22)
   // ===========================================
 
+  /**
+   * ヒストリカル OHLCV を取得 (limit 件)。
+   *
+   * 内部 Timeframe → EODHD 取得計画は `planEodhdFetch()` に集約:
+   * - 1m / 5m / 1h: intraday API ネイティブ
+   * - 15m / 30m / 4h: 5m or 1h を取得後にクライアント側で集約
+   * - 1d / 1w: eod API (period=d/w)
+   *
+   * limit に対する from/to レンジ:
+   * - intraday: 必要な native bar 数 = limit × factor、安全係数 ×2.5 で from を計算 (週末・休場日吸収)
+   * - eod: 必要な日数 = limit × (period=='w' ? 7 : 1)、安全係数 ×1.6 で from を計算
+   */
   async getHistoricalData(
-    _symbol: string,
-    _timeframe: Timeframe,
-    _limit: number,
+    symbol: string,
+    timeframe: Timeframe,
+    limit: number,
   ): Promise<MarketDataResult> {
-    throw new Error(
-      'EodhdProvider.getHistoricalData() は Phase B (OHLCV 切替) で実装予定',
-    );
+    this.ensureClient();
+    const providerSymbol = this.toProviderSymbol(symbol);
+    const plan = planEodhdFetch(timeframe);
+
+    if (plan.kind === 'intraday') {
+      const nativeTfMs = TIMEFRAME_MS[plan.interval];
+      // 必要な native bar 数 (集約後 limit 件を確保)
+      const requiredNativeBars = limit * plan.factor;
+      // 週末・休場日を含めて余裕を持って取得 (FX は週末 ~2 日 / 計 7 日中 5 営業日 ≈ 2.4x が安全)
+      const lookbackMs = requiredNativeBars * nativeTfMs * 2.5;
+      const toSec = Math.floor(Date.now() / 1000);
+      const fromSec = toSec - Math.ceil(lookbackMs / 1000);
+
+      const raw = await this.client!.intraday(providerSymbol, {
+        interval: plan.interval,
+        from: fromSec,
+        to: toSec,
+      });
+
+      // Copilot review (PR #245) 指摘: EODHD intraday の SDK 返却順は仕様で保証されていないため、
+      // factor=1 (native) 経路でも明示的に timestamp 昇順にソートしてから slice する。
+      // 集約経路 (factor>1) は aggregateOHLCV() 内で sort 済のため不要。
+      const nativeBars = raw.map((p) => this.intradayPointToBar(p));
+      const aggregated =
+        plan.factor === 1
+          ? [...nativeBars].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+          : aggregateOHLCV(nativeBars, TIMEFRAME_MS[timeframe]);
+
+      const limited = aggregated.slice(-limit);
+      return {
+        symbol,
+        timeframe,
+        bars: limited,
+        provider: this.name,
+        fetchedAt: new Date(),
+      };
+    }
+
+    // eod 経路 (1d / 1w)
+    const daysPerBar = plan.period === 'w' ? 7 : 1;
+    const requiredDays = limit * daysPerBar;
+    // 株式・FX は土日休場 / 祝日もあるため 1.6x の安全係数で from を計算
+    const lookbackDays = Math.ceil(requiredDays * 1.6);
+    const from = formatDateOnly(new Date(Date.now() - lookbackDays * TIMEFRAME_MS['1d']));
+    const to = formatDateOnly(new Date());
+
+    const raw = await this.client!.eod(providerSymbol, {
+      period: plan.period,
+      from,
+      to,
+      order: 'a',
+    });
+
+    const bars = raw.map((p) => this.eodPointToBar(p));
+    const limited = bars.slice(-limit);
+    return {
+      symbol,
+      timeframe,
+      bars: limited,
+      provider: this.name,
+      fetchedAt: new Date(),
+    };
   }
 
-  async getCurrentPrice(_symbol: string, _timeframe: Timeframe): Promise<OHLCVBar | null> {
-    throw new Error(
-      'EodhdProvider.getCurrentPrice() は Phase B (OHLCV 切替) で実装予定',
-    );
+  async getCurrentPrice(symbol: string, timeframe: Timeframe): Promise<OHLCVBar | null> {
+    const result = await this.getHistoricalData(symbol, timeframe, 1);
+    return result.bars[result.bars.length - 1] ?? null;
+  }
+
+  /**
+   * 期間指定でヒストリカル OHLCV を取得 (バックテストキャッシュ用)。
+   *
+   * `getHistoricalData(limit)` は最新側起点で固定本数を取得するが、
+   * バックテストでは特定期間 [from, to] の全 bar が必要 (= `fetchAndCacheOhlcv` 用途)。
+   * 本メソッドはその用途専用で、IMarketDataProvider インターフェースには含めない
+   * (cTrader 等の他 Provider は別経路を持つため)。
+   */
+  async getHistoricalRange(
+    symbol: string,
+    timeframe: Timeframe,
+    fromDate: Date,
+    toDate: Date,
+  ): Promise<MarketDataResult> {
+    this.ensureClient();
+    const providerSymbol = this.toProviderSymbol(symbol);
+    const plan = planEodhdFetch(timeframe);
+
+    if (plan.kind === 'intraday') {
+      const fromSec = Math.floor(fromDate.getTime() / 1000);
+      const toSec = Math.floor(toDate.getTime() / 1000);
+
+      const raw = await this.client!.intraday(providerSymbol, {
+        interval: plan.interval,
+        from: fromSec,
+        to: toSec,
+      });
+
+      // Copilot review (PR #245) 指摘: SDK 返却順が保証されないため、factor=1 経路も明示 sort。
+      // 集約経路 (factor>1) は aggregateOHLCV() 内で sort 済。
+      const nativeBars = raw.map((p) => this.intradayPointToBar(p));
+      const aggregated =
+        plan.factor === 1
+          ? [...nativeBars].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+          : aggregateOHLCV(nativeBars, TIMEFRAME_MS[timeframe]);
+
+      // 集約後にレンジ内に絞り込む (= バケット端で範囲外に出ることがあるため)
+      const inRange = aggregated.filter(
+        (b) => b.timestamp >= fromDate && b.timestamp <= toDate,
+      );
+
+      return {
+        symbol,
+        timeframe,
+        bars: inRange,
+        provider: this.name,
+        fetchedAt: new Date(),
+      };
+    }
+
+    const raw = await this.client!.eod(providerSymbol, {
+      period: plan.period,
+      from: formatDateOnly(fromDate),
+      to: formatDateOnly(toDate),
+      order: 'a',
+    });
+
+    const bars = raw
+      .map((p) => this.eodPointToBar(p))
+      .filter((b) => b.timestamp >= fromDate && b.timestamp <= toDate);
+
+    return {
+      symbol,
+      timeframe,
+      bars,
+      provider: this.name,
+      fetchedAt: new Date(),
+    };
+  }
+
+  /**
+   * intraday data point → OHLCVBar 変換。
+   *
+   * EODHD intraday は `timestamp` (Unix epoch 秒) と `datetime` (UTC 文字列) を持つが、
+   * timestamp の方が原本に近いため、こちらを Date に変換する。
+   */
+  private intradayPointToBar(p: IntradayDataPoint): OHLCVBar {
+    return {
+      timestamp: new Date(p.timestamp * 1000),
+      open: p.open,
+      high: p.high,
+      low: p.low,
+      close: p.close,
+      volume: p.volume ?? 0,
+    };
+  }
+
+  /**
+   * eod data point → OHLCVBar 変換。
+   *
+   * `adjusted_close` は分割・配当調整済の値。バックテストでは生の close を使うのが慣例
+   * (= cTrader / Twelve Data と整合) のため、close は無調整値をそのまま使う。
+   */
+  private eodPointToBar(p: EodDataPoint): OHLCVBar {
+    // EODHD eod の date は 'YYYY-MM-DD' 形式。UTC 00:00 として解釈する
+    // (Twelve Data / cTrader の 1d バーの timestamp と互換性を保つため)
+    return {
+      timestamp: new Date(`${p.date}T00:00:00.000Z`),
+      open: p.open,
+      high: p.high,
+      low: p.low,
+      close: p.close,
+      volume: p.volume ?? 0,
+    };
+  }
+
+  private ensureClient(): void {
+    if (!this.client) {
+      throw new Error(
+        'EodhdProvider: EODHD_API_KEY が未設定のため REST API を利用できません',
+      );
+    }
   }
 
   // ===========================================
