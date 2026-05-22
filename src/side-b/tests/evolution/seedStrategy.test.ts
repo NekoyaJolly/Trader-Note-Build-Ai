@@ -188,10 +188,21 @@ describe('PR ⑤D-2: 新 12 種の novelty seed', () => {
     });
 
     it('未知の値は \'1h\' にフォールバック (= 過去デフォルト挙動)', () => {
+      // normalizeTimeframe で '15m' (DEFAULT_TIMEFRAME) に正規化 → map['15m']='1h'
       expect(deriveHigherTimeframe('2h')).toBe('1h');
       expect(deriveHigherTimeframe('')).toBe('1h');
       expect(deriveHigherTimeframe('multi')).toBe('1h');
     });
+
+    it('表記ゆれ (大文字 / 前後空白) を吸収して期待通りの上位足を返す (PR #246 Copilot review #1)', () => {
+      // 旧版は生文字列マッチで '1H' / ' 1h ' を未知扱いして '1h' fallback してたが、
+      // normalizeTimeframe で正規化することで '1h' として認識 → '4h' を返す
+      expect(deriveHigherTimeframe('1H')).toBe('4h');
+      expect(deriveHigherTimeframe(' 1h ')).toBe('4h');
+      expect(deriveHigherTimeframe('15M')).toBe('1h');
+      expect(deriveHigherTimeframe('  4h  ')).toBe('1d');
+    });
+  });
 
     it('multi_instance_long は EMA の異なる period が複数現れる', () => {
       const seed = buildSeedDsl('multi_instance_long', 'breakout');
@@ -277,4 +288,3 @@ describe('PR ⑤D-2: 新 12 種の novelty seed', () => {
       }
     });
   });
-});

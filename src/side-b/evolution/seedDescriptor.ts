@@ -32,6 +32,10 @@
 
 import { randomUUID } from 'crypto';
 
+import {
+  normalizeTimeframe,
+  type SupportedTimeframe,
+} from '../constants/timeframes';
 import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
 
 /**
@@ -42,12 +46,17 @@ import { StrategyDSLSchema, type StrategyDSL } from '../strategy_dsl/schema';
  * 場合に上位足の意味が壊れていた (例: entry=1h なら上位は 4h であるべきが '1h' のまま)。
  * 本関数で entry timeframe → 次段階上位足を派生させ、MTF seed の上位足を可変化する。
  *
+ * 入力は `normalizeTimeframe()` で `SupportedTimeframe` に narrow してから引く。
+ * これにより `'1H'` / `' 1h '` 等の表記ゆれが `'1h'` に正規化されて期待通り `'4h'`
+ * を返す (PR #246 Copilot review #1)。未対応値は `DEFAULT_TIMEFRAME='15m'` に
+ * 倒れるため、戻り値は `'1h'` (= 15m → 1h) になる。
+ *
  * マッピング:
  * - 1m → 5m, 5m → 15m, 15m → 1h, 30m → 4h, 1h → 4h, 4h → 1d, 1d → 1w, 1w → 1w
- * - 未知の値は `'1h'` を返す (= 過去のデフォルト挙動と整合、`'1w'` も自身を返す = 最上位)
  */
-export function deriveHigherTimeframe(entryTf: string): string {
-  const map: Record<string, string> = {
+export function deriveHigherTimeframe(entryTf: string): SupportedTimeframe {
+  const normalized = normalizeTimeframe(entryTf);
+  const map: Record<SupportedTimeframe, SupportedTimeframe> = {
     '1m': '5m',
     '5m': '15m',
     '15m': '1h',
@@ -57,7 +66,7 @@ export function deriveHigherTimeframe(entryTf: string): string {
     '1d': '1w',
     '1w': '1w',
   };
-  return map[entryTf] ?? '1h';
+  return map[normalized];
 }
 
 /** 12 種の seed の識別子 (= 安定キー)。 */
@@ -160,10 +169,11 @@ function buildMtfRecipe(entryTf: string, direction: 'long' | 'short'): SeedRecip
 const SEED_RECIPES: Record<SeedKind, SeedRecipe> = {
   // === 1. MTF (= 上位足コンテキスト + 下位足エントリー) ===
   //
-  // 注: mtf_long / mtf_short は本オブジェクト内ではプレースホルダー (= '__MTF__'
-  // を kind に持つダミー)。実際の recipe は `buildSeedDsl` 内で entry timeframe
-  // から `buildMtfRecipe()` を呼んで動的に組み立てる。
-  // Record<SeedKind, SeedRecipe> の型整合のために要素は埋めておく。
+  // 注 (PR #246 Copilot review #2): 本オブジェクトの mtf_long / mtf_short エントリは
+  // 「default entry=15m での recipe」を保持する fallback。実運用では `buildSeedDsl()`
+  // が kind=`mtf_*` を検出した時に `buildMtfRecipe(timeframe, direction)` を呼んで
+  // entry timeframe から動的に上書き生成するため、ここに格納された値は使われない。
+  // `Record<SeedKind, SeedRecipe>` の型整合 (= 全 SeedKind を網羅) のために残す。
   mtf_long: buildMtfRecipe('15m', 'long'),
   mtf_short: buildMtfRecipe('15m', 'short'),
 
