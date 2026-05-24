@@ -225,7 +225,13 @@ export async function checkDataCoverage(
 
   // coversStart/coversEnd 判定（バックテスト実行時の fetchHistoricalData と同じ考え方）
   // 理由: プリセットの start/end が古いままでも、実データが期間をカバーしていれば警告を出さないため
-  const toleranceMs = intervalMinutes * 60 * 1000 * 3; // 3バー分の許容誤差
+  //
+  // 2026-05-24 (PR #253): fetchHistoricalData と同じく、3 バーと 49 時間 (FX 週末
+  // クローズ 48h + 1h バッファ) の大きい方を採用。週末/祝日ギャップで coverage
+  // 判定が常に false 化するのを防ぐ。
+  const baseToleranceMs = intervalMinutes * 60 * 1000 * 3; // 3バー分
+  const minToleranceMs = 49 * 60 * 60 * 1000; // 49h (= FX 週末クローズ 48h + 1h)
+  const toleranceMs = Math.max(baseToleranceMs, minToleranceMs);
   const coversStart = minTs.getTime() <= startDate.getTime() + toleranceMs;
   const coversEnd = maxTs.getTime() >= endDate.getTime() - toleranceMs;
 
@@ -305,13 +311,17 @@ export async function fetchHistoricalData(
   //    期待バー数ではなく、最古/最新のタイムスタンプが要求期間をカバーしているかで判断
   //    （休場日・ブローカー固有の休止はAPIが返さないバー＝存在しないデータなので無視）
   //
-  // 2026-05-24 (PR #253): tolerance は **3 バー** と **1 日 (= 24h)** の大きい方を採用。
-  // 旧版は 3 バー固定 (= 15m なら 45 分) だったため、要求期間開始が週末・祝日・
-  // 年末年始等で cTrader データ無し期間に当たると永遠に coversStart=false で
+  // 2026-05-24 (PR #253): tolerance は **3 バー** と **49 時間 (= 週末 + 1h バッファ)** の
+  // 大きい方を採用。旧版は 3 バー固定 (= 15m なら 45 分) だったため、要求期間開始が
+  // 週末・祝日・年末年始等で cTrader データ無し期間に当たると永遠に coversStart=false で
   // fetchAndCacheOhlcv 再呼び出しが無限ループ (= EvolutionLoop で 43 回再 fetch、
-  // smoke 50-60 分の主因)。最低 1 日の tolerance で週末ギャップを吸収する。
+  // smoke 50-60 分の主因)。
+  //
+  // 2026-05-24 (PR #253 Copilot review): 当初 24h で実装したが、FX 週末クローズは
+  // 金 21:00 UTC → 日 21:00 UTC の 48h ギャップ。24h では coversStart=false のまま
+  // ループ抑止できない。最低 49h (= 48h 週末 + 1h バッファ) に拡大。
   const baseToleranceMs = intervalMinutes * 60 * 1000 * 3; // 3 バー分
-  const minToleranceMs = 24 * 60 * 60 * 1000; // 1 日 (= 週末 / 祝日ギャップ吸収)
+  const minToleranceMs = 49 * 60 * 60 * 1000; // 49h (= FX 週末クローズ 48h + 1h)
   const toleranceMs = Math.max(baseToleranceMs, minToleranceMs);
   let coversStart = false;
   let coversEnd = false;
