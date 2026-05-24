@@ -1159,6 +1159,50 @@
 
 <hr class="divider"/>
 
+<!-- ============================================================== -->
+<section id="s18">
+  <div class="sec-head"><span class="sec-num">18</span><h2>本番運用と障害耐性 (Production Readiness)</h2></div>
+  <p class="sec-tagline">
+    本番環境での安全な運用のためのキルスイッチ、自動緊急停止、DB容量監視、およびフロントエンド競合ガード。
+  </p>
+
+  <div class="grid cols-2">
+    <div class="card">
+      <h4>手動・自動緊急停止（キルスイッチ）</h4>
+      <p>
+        システムの異常動作時に即座に新規取引を停止し、保有ポジションを一括決済する仕組み。
+        <code>SystemState</code> テーブルにて永続化管理され、管理画面の「緊急停止ボタン」や管理者向けインバウンドメール Webhook（セキュリティトークン付き）から制御可能。
+        また、監視ジョブで <strong>3回連続してエラー</strong> が発生した場合は自動的にキルスイッチが作動し、管理者へメールで通知されます。
+      </p>
+    </div>
+    <div class="card">
+      <h4>DB 容量監視・自動警告</h4>
+      <p>
+        Supabase の無料枠（500MB）制限対策として、毎時データベース総使用量（<code>pg_database_size</code>）を測定。
+        警告閾値の <strong>400MB</strong> を超過した場合、フロントエンドに警告を表示するとともに、管理者へ警告メールを送信。
+        メールの過剰送信を防ぐため、送信履歴（<code>last_db_alert_sent</code>）を Zod で厳密にパース・チェックし、24時間以内の再送を抑制します。
+        ポーリング負荷低減のため、取得結果は5分間インメモリでキャッシュされます。
+      </p>
+    </div>
+    <div class="card">
+      <h4>データ整合性ガード</h4>
+      <p>
+        緊急停止による強制一括決済時に、未確定の損益（<code>exitPrice</code>, <code>pnlPips</code>, <code>pnlAmount</code>）を 0 ではなく <code>null</code> としてクローズ。
+        これにより、実際の損益が「建値決済」として統計データや検証データに混入し、学習精度が劣化することを防止します。
+      </p>
+    </div>
+    <div class="card">
+      <h4>フロントエンド競合ガード (Race Condition)</h4>
+      <p>
+        オーケストレーター実行履歴詳細の表示において、ユーザーの連続クリック等による非同期リクエストの解決順序の不整合（Race Condition）を防ぐため、
+        React の <code>useRef</code> を用いて直近のリクエストIDをトラッキング。先行リクエストの遅延解決による誤った上書きを防ぎます。
+      </p>
+    </div>
+  </div>
+</section>
+
+<hr class="divider"/>
+
 <section>
   <h2>付録 — 参照ドキュメント (本ファイル正本化後)</h2>
   <ul class="refs">
