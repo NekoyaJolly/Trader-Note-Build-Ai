@@ -39,8 +39,11 @@ import { CTraderAuthService } from '../../backend/services/ctrader/ctraderAuthSe
 import type { PrismaClient } from '@prisma/client';
 // canonical singleton (PR #152)
 import { prisma as canonicalPrisma } from '../../backend/db/client';
+import { createSystemStateRepository } from '../repositories/systemStateRepository';
+import { mailService } from '../services/mailService';
 import type { PromptEvolutionResult } from '../prompts/registry/promptEvolutionJob';
 import type { JsonValue } from '../../utils/jsonValue';
+
 // PR-1 (sideb-refactor): Evolution 系を切り出し
 import {
   EvolutionJob,
@@ -295,6 +298,7 @@ export class SideBScheduler {
   private discoveryJob: DiscoveryJob;
   private promptEvolutionJob: PromptEvolutionJob;
   private cleanupJob: CleanupJob;
+  private systemStateRepository = createSystemStateRepository();
 
   /**
    * Phase B (2026-05-22): symbols が外部から明示的に指定されたかを記録する。
@@ -741,9 +745,20 @@ export class SideBScheduler {
   async runOrchestratedCycle(
     trigger: 'cron' | 'manual' | 'test' = 'cron',
   ): Promise<TopLevelOrchestratorResult> {
+    const isStopped = await this.systemStateRepository.getBoolean('emergency_stop', false);
+    if (isStopped) {
+      this.log('緊急停止(キルスイッチ)がONのため、Orchestratorサイクル実行をスキップします。');
+      return {
+        output: null,
+        strictBlockedReason: 'emergency_stop',
+        executedJobs: [],
+      };
+    }
+
     const orchestrator = await this.getTopLevelOrchestrator();
     return orchestrator.decideAndExecute(trigger);
   }
+
 
   /**
    * ADK Orchestrator Wrapper 経由で 1 サイクル実行する (Phase 7 で追加)。
@@ -1059,7 +1074,57 @@ export class SideBScheduler {
    * `(scheduler as any).marketDataService = mock` などの書き換えが反映される。
    */
   private async executeMonitorJob(): Promise<JobResult> {
-    return this.tradeMonitoringJob.run(this.config);
+    const isStopped = await this.systemStateRepository.getBoolean('emergency_stop', false);
+    if (isStopped) {
+      this.log('緊急停止(キルスイッチ)がONのため、監視ジョブの実行をスキップします。');
+      return {
+        success: true,
+        message: '緊急停止中のためスキップ',
+      };
+    }
+
+    try {
+      const result = await this.tradeMonitoringJob.run(this.config);
+
+      // エラー検知ロジック
+      const errors = (result.data as { errors?: string[] })?.errors || [];
+      if (!result.success || errors.length > 0) {
+        const state = await this.systemStateRepository.increment('consecutive_errors');
+        const currentErrors = parseInt(state.value, 10);
+        this.log(`監視ジョブでエラーが検出されました。連続エラー回数: ${currentErrors}`);
+
+        if (currentErrors >= 3) {
+          this.log('連続エラー回数がしきい値(3回)に達したため、緊急停止(キルスイッチ)を作動させます。');
+          await this.systemStateRepository.setBoolean('emergency_stop', true);
+          
+          const errDetail = errors.join(', ') || result.message || '不明な例外';
+          await mailService.sendAlertMail(
+            '自動緊急停止(キルスイッチ)が作動しました',
+            `システム監視ジョブで3回連続してエラーが発生したため、安全のために自動緊急停止が実行されました。\n\nエラー内容:\n${errDetail}`
+          );
+        }
+      } else {
+        // 成功した場合はエラーカウントをリセット
+        await this.systemStateRepository.setInt('consecutive_errors', 0);
+      }
+
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      const state = await this.systemStateRepository.increment('consecutive_errors');
+      const currentErrors = parseInt(state.value, 10);
+      this.log(`監視ジョブ実行中に例外が発生しました。連続エラー回数: ${currentErrors} - ${message}`);
+
+      if (currentErrors >= 3) {
+        await this.systemStateRepository.setBoolean('emergency_stop', true);
+        await mailService.sendAlertMail(
+          '自動緊急停止(キルスイッチ)が作動しました',
+          `システム監視ジョブ実行中に3回連続して例外が発生したため、安全のために自動緊急停止が実行されました。\n\n例外内容:\n${message}`
+        );
+      }
+
+      throw err;
+    }
   }
 
   /**
@@ -1070,6 +1135,16 @@ export class SideBScheduler {
    * 一旦 Scheduler 側に残し本メソッド内で Job 呼び出し後に実行する。
    */
   private async executePlanJob(): Promise<JobResult> {
+    const isStopped = await this.systemStateRepository.getBoolean('emergency_stop', false);
+    if (isStopped) {
+      this.log('緊急停止(キルスイッチ)がONのため、プラン生成ジョブの実行をスキップします。');
+      return {
+        success: true,
+        message: '緊急停止中のためスキップ',
+        data: [],
+      };
+    }
+
     const planResult = await this.planGenerationJob.run(this.config);
 
     // クリーンアップ (1 日に 1 回、最初のプラン実行時のみ)。

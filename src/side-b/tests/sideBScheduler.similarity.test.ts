@@ -5,13 +5,29 @@
  */
 
 import { SideBScheduler } from '../jobs/sideBScheduler';
-import { CronSimilarityService } from '../services/cronSimilarityService';
+import type { CronSimilarityService } from '../services/cronSimilarityService';
 import { MarketDataService } from '../../services/marketDataService';
 import type { SimilarityCheckResult } from '../services/cronSimilarityService';
+import { isFXMarketOpen } from '../utils/marketHours';
 
 // ========================================
 // モック
 // ========================================
+
+jest.mock('../repositories/systemStateRepository', () => ({
+  createSystemStateRepository: jest.fn(() => ({
+    get: jest.fn().mockResolvedValue(null),
+    set: jest.fn().mockResolvedValue({}),
+    getBoolean: jest.fn().mockResolvedValue(false),
+    setBoolean: jest.fn().mockResolvedValue({}),
+    getInt: jest.fn().mockResolvedValue(0),
+    setInt: jest.fn().mockResolvedValue({}),
+    delete: jest.fn().mockResolvedValue({ count: 0 }),
+    increment: jest.fn().mockImplementation((key: string) =>
+      Promise.resolve({ key, value: '1', updatedAt: new Date() })
+    ),
+  })),
+}));
 
 jest.mock('../services/cronSimilarityService');
 jest.mock('../../services/marketDataService');
@@ -126,7 +142,6 @@ describe('SideBScheduler 類似度チェック統合', () => {
     jest.clearAllMocks();
 
     // デフォルトでは市場は開いている状態にリセット
-    const { isFXMarketOpen } = require('../utils/marketHours');
     (isFXMarketOpen as jest.Mock).mockReturnValue(true);
 
     // MarketDataService のモック
@@ -309,7 +324,6 @@ describe('SideBScheduler 類似度チェック統合', () => {
 
   describe('市場休場時', () => {
     beforeEach(() => {
-      const { isFXMarketOpen } = require('../utils/marketHours');
       (isFXMarketOpen as jest.Mock).mockReturnValue(false);
     });
 

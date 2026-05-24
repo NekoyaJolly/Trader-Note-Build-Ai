@@ -1230,3 +1230,18 @@ export type GetEvolutionRunQuery = z.infer<typeof GetEvolutionRunQuerySchema>;
 
 
 export type RunScreeningQuery = z.infer<typeof RunScreeningQuerySchema>;
+
+// ========================================
+// インバウンドメール受信スキーマ
+// ========================================
+
+/**
+ * POST /api/side-b/mail/receive リクエストボディ
+ */
+export const InboundMailSchema = z.object({
+  from: z.string().email('送信元メールアドレスの形式が正しくありません'),
+  subject: z.string().min(1, '件名は必須です'),
+  text: z.string().min(1, '本文は必須です'),
+});
+
+export type InboundMail = z.infer<typeof InboundMailSchema>;

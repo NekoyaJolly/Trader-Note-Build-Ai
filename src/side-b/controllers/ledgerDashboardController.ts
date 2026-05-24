@@ -4,6 +4,7 @@
  * @see docs/design/phase_4d_specification.md §4.5 §4.7
  */
 
+import { z } from 'zod';
 import type { Request, Response } from 'express';
 import type { ParsedQs } from 'qs';
 import { Prisma } from '@prisma/client';
@@ -13,6 +14,8 @@ import {
     type EdgeLedger,
 } from '../ledger/EdgeLedger';
 import { pythonBridge } from '../validation/python_bridge';
+import { createSystemStateRepository } from '../repositories/systemStateRepository';
+import { mailService } from '../services/mailService';
 
 /**
  * Express の `req.query` 各フィールドが取りうる型 (`ParsedQs[string]` と同等)。
@@ -33,6 +36,12 @@ function toPositiveInt(raw: QueryValue, fallback: number, max?: number): number 
 }
 
 export class LedgerDashboardController {
+    private readonly systemStateRepository = createSystemStateRepository();
+    // DB容量取得キャッシュ用のメンバ変数 (指摘1)
+    private cachedDbSizeBytes: number | null = null;
+    private lastDbSizeCheckTime: number = 0;
+    private readonly DB_SIZE_CACHE_TTL = 5 * 60 * 1000; // 5分間キャッシュ
+
     constructor(private readonly ledger: EdgeLedger = defaultEdgeLedger) {}
 
     /**
@@ -270,11 +279,72 @@ export class LedgerDashboardController {
     systemHealth = async (_req: Request, res: Response): Promise<void> => {
         try {
             let dbOk = false;
-            try {
-                await prisma.$queryRaw(Prisma.sql`SELECT 1`);
+            let dbSizeBytes = 0;
+            const nowTime = Date.now();
+
+            if (this.cachedDbSizeBytes !== null && (nowTime - this.lastDbSizeCheckTime < this.DB_SIZE_CACHE_TTL)) {
+                dbSizeBytes = this.cachedDbSizeBytes;
                 dbOk = true;
-            } catch {
-                dbOk = false;
+            } else {
+                try {
+                    const sizeRows = await prisma.$queryRaw<Array<{ size_bytes: bigint }>>`
+                      SELECT pg_database_size(current_database())::bigint AS size_bytes
+                    `;
+                    dbSizeBytes = sizeRows[0] ? Number(sizeRows[0].size_bytes) : 0;
+                    dbOk = true;
+                    // キャッシュを更新
+                    this.cachedDbSizeBytes = dbSizeBytes;
+                    this.lastDbSizeCheckTime = nowTime;
+                } catch (err) {
+                    console.error('[LedgerDashboardController] DB容量取得エラー:', err);
+                    dbOk = false;
+                    // エラー時は前回のキャッシュがあればそれを fallback
+                    if (this.cachedDbSizeBytes !== null) {
+                        dbSizeBytes = this.cachedDbSizeBytes;
+                        dbOk = true;
+                    }
+                }
+            }
+
+            // DB容量制限チェック（無料枠上限500MB対策で400MBを警告閾値とする）
+            const DB_LIMIT_BYTES = 400 * 1024 * 1024; // 400MB
+            const dbWarning = dbSizeBytes > DB_LIMIT_BYTES;
+
+            if (dbWarning && dbOk) {
+                try {
+                    const lastAlertStr = await this.systemStateRepository.get('last_db_alert_sent');
+                    const now = Date.now();
+                    const oneDayMs = 24 * 60 * 60 * 1000;
+
+                    let shouldSend = true;
+                    if (lastAlertStr) {
+                        // Zod を用いてミリ秒を表す正の整数文字列を厳密にパース (指摘2)
+                        const EpochSchema = z.string().regex(/^\d+$/).transform(Number);
+                        const parsed = EpochSchema.safeParse(lastAlertStr);
+
+                        if (parsed.success) {
+                            const lastAlert = parsed.data;
+                            if (now - lastAlert < oneDayMs) {
+                                shouldSend = false;
+                            }
+                        } else {
+                            // 不正なデータはリセットして警告
+                            console.warn(`[LedgerDashboardController] last_db_alert_sent に不正な値 "${lastAlertStr}" が検出されたため削除リセットします。`);
+                            await this.systemStateRepository.delete('last_db_alert_sent');
+                        }
+                    }
+
+                    if (shouldSend) {
+                        const sizeMB = (dbSizeBytes / (1024 * 1024)).toFixed(1);
+                        await mailService.sendAlertMail(
+                            'データベース容量警告',
+                            `Supabaseデータベースの総使用量が警告閾値(400MB)を超えています。\n現在の使用量: ${sizeMB} MB\n不要なログや過去データのクリーンアップを実行してください。`
+                        );
+                        await this.systemStateRepository.set('last_db_alert_sent', now.toString());
+                    }
+                } catch (mailErr) {
+                    console.error('[LedgerDashboardController] DB容量警告メール送信失敗:', mailErr);
+                }
             }
 
             // Phase 6.8b: boolean ではなく 4値ステータスで返す
@@ -284,6 +354,8 @@ export class LedgerDashboardController {
             res.json({
                 success: true,
                 database: dbOk ? 'ok' : 'error',
+                dbSizeBytes,
+                dbWarning,
                 pythonValidator: pythonValidatorStatus,
                 checkedAt: new Date().toISOString(),
             });

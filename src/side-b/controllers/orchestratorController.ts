@@ -32,7 +32,7 @@ export const RunStatusSchema = z.enum([
 ]);
 
 export const RunListQuerySchema = z.object({
-  status: RunStatusSchema,
+  status: RunStatusSchema.optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });
 
@@ -80,7 +80,7 @@ export function createOrchestratorController(deps: OrchestratorControllerDeps) {
       try {
         const query = RunListQuerySchema.parse(req.query);
         const runs = await ledger.listRunsByStatus(query.status, query.limit);
-        res.json({ status: query.status, count: runs.length, runs });
+        res.json({ status: query.status ?? null, count: runs.length, runs });
       } catch (err) {
         sendError(res, err);
       }

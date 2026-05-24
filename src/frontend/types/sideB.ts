@@ -541,6 +541,8 @@ export interface DiscoveryLatestResponse {
 export interface SystemHealthResponse {
   success: true;
   database: "ok" | "error";
+  dbSizeBytes?: number;
+  dbWarning?: boolean;
   /**
    * Phase 6.8b: 4値ステータス
    * - 'ok'             : 疎通 OK（http モード: 本番 HTTP service）
@@ -551,6 +553,7 @@ export interface SystemHealthResponse {
   pythonValidator: "ok" | "local_only" | "not_configured" | "error";
   checkedAt: string;
 }
+
 
 // ===========================================
 // プラン即時BT（Phase 6.7b、POST /api/side-b/plans）
@@ -816,3 +819,67 @@ export interface GetEvolutionRunCandidatesResponse {
   success: true;
   candidates: EvolutionRunCandidate[];
 }
+
+// ===========================================
+// オーケストレーター実行履歴 (AgentRun / AgentRunStep)
+// ===========================================
+
+export interface AgentRunStep {
+  id: string;
+  runId: string;
+  stepName: string;
+  attempt: number;
+  status: "pending" | "running" | "succeeded" | "failed" | "skipped";
+  traceKind: string | null;
+  summary: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  nextAction: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  durationMs: number | null;
+}
+
+export interface AgentRun {
+  id: string;
+  kind: string;
+  triggeredBy: string;
+  status: "pending" | "running" | "succeeded" | "failed" | "skipped" | "cancelled";
+  summary: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export interface ListOrchestratorRunsResponse {
+  status: string | null;
+  count: number;
+  runs: AgentRun[];
+}
+
+export interface GetOrchestratorRunDetailResponse extends AgentRun {
+  steps: AgentRunStep[];
+}
+
+export interface EmergencyStatusResponse {
+  success: true;
+  data: {
+    isEmergencyStopped: boolean;
+    consecutiveErrors: number;
+  };
+}
+
+export interface EmergencyStopResponse {
+  success: true;
+  message: string;
+  data: {
+    closeSummary: string[];
+  };
+}
+
+export interface EmergencyResumeResponse {
+  success: true;
+  message: string;
+}
+

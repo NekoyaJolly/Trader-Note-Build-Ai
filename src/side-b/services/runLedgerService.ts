@@ -366,7 +366,7 @@ export function createRunLedgerService(options?: {
    * status 別の AgentRun 一覧 (UI / API 用、Phase 9 で追加)。新しい順、limit 上限あり。
    */
   async function listRunsByStatus(
-    status: AgentRunStatus,
+    status?: AgentRunStatus,
     limit?: number,
   ): Promise<AgentRun[]> {
     return repository.listRunsByStatus(status, limit);
