@@ -65,6 +65,12 @@ import { PromptEvolutionJob } from './promptEvolutionJob';
 import { CleanupJob } from './cleanupJob';
 // Phase B (2026-05-22): symbols は Watchlist から動的取得するため正規化関数を import
 import { normalizeCTraderSymbol } from '../../utils/symbolNormalization';
+// Phase B+ (2026-05-24): Top-Level Orchestrator (= 薄い最上位判断層) の型 import
+// 実体は遅延 import (= 循環依存回避のため `import('../orchestrator')` を使用)
+import type {
+  TopLevelOrchestrator as TopLevelOrchestratorType,
+  TopLevelOrchestratorResult,
+} from '../orchestrator';
 // Phase 7 (orch): ADK Orchestrator Wrapper bridge
 import {
   runScheduledOrchestratedCycle,
@@ -683,6 +689,56 @@ export class SideBScheduler {
    */
   async runMonitorNow(): Promise<JobResult> {
     return this.executeMonitorJob();
+  }
+
+  // ============================================
+  // Phase B+ (2026-05-24): Top-Level Orchestrator 経由のサイクル実行
+  // ============================================
+
+  /** TopLevelOrchestrator の遅延 init keeper */
+  private _topLevelOrchestrator: TopLevelOrchestratorType | null = null;
+
+  private async getTopLevelOrchestrator(): Promise<TopLevelOrchestratorType> {
+    if (this._topLevelOrchestrator) return this._topLevelOrchestrator;
+    const { TopLevelOrchestrator } = await import('../orchestrator');
+    this._topLevelOrchestrator = new TopLevelOrchestrator({
+      prisma: this.prisma,
+      jobInvokers: {
+        runPlanGeneration: async () => {
+          await this.runDailyPlanNow();
+        },
+        runScreening: async () => {
+          await this.runScreeningNow();
+        },
+        runFullValidation: async () => {
+          await this.runFullValidationNow();
+        },
+        runEvolution: async () => {
+          await this.runEvolutionNow();
+        },
+      },
+      log: (msg) => this.log(`[TopLevelOrchestrator] ${msg}`),
+    });
+    return this._topLevelOrchestrator;
+  }
+
+  /**
+   * Top-Level Orchestrator 経由で 1 サイクル実行 (Phase B+、2026-05-24)。
+   *
+   * cron route から `TOP_LEVEL_ORCHESTRATOR_ENABLED=true` の場合に呼ばれる。
+   * Orchestrator が「次にどのループを回すか」を LLM 判断し、判断結果に応じて
+   * 既存 Job (runDailyPlanNow / runScreeningNow / runFullValidationNow / runEvolutionNow)
+   * を委ねて呼ぶ。
+   *
+   * `runDailyPlanNow` 等の旧経路は維持される (= env false なら従来通り)。
+   *
+   * 設計書: docs/architecture/TOP_LEVEL_ORCHESTRATOR_DESIGN.md
+   */
+  async runOrchestratedCycle(
+    trigger: 'cron' | 'manual' | 'test' = 'cron',
+  ): Promise<TopLevelOrchestratorResult> {
+    const orchestrator = await this.getTopLevelOrchestrator();
+    return orchestrator.decideAndExecute(trigger);
   }
 
   /**

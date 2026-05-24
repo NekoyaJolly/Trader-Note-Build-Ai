@@ -85,8 +85,33 @@ router.get('/side-b/daily-plan', async (_req: Request, res: Response) => {
       return;
     }
 
-    // スケジューラーから日次プランを実行
     const scheduler = getSideBScheduler();
+
+    // Phase B+ (2026-05-24): TOP_LEVEL_ORCHESTRATOR_ENABLED=true なら、
+    // Top-Level Orchestrator が「次にどのループを回すか」を LLM 判断し、判断結果に応じて
+    // 既存 Job (planGeneration / screening / fullValidation / evolution) を委ねて呼ぶ。
+    // env false (default) は従来通り runDailyPlanNow を直接呼ぶ (= 既存挙動互換)。
+    // 設計書: docs/architecture/TOP_LEVEL_ORCHESTRATOR_DESIGN.md
+    if (process.env.TOP_LEVEL_ORCHESTRATOR_ENABLED === 'true') {
+      console.log('[Cron] TopLevelOrchestrator 経由でサイクル実行');
+      const orchResult = await scheduler.runOrchestratedCycle('cron');
+      res.json({
+        success: true,
+        message: orchResult.output
+          ? `Orchestrator action=${orchResult.output.action} (${orchResult.executedJobs.length} jobs)`
+          : `Orchestrator strictBlocked: ${orchResult.strictBlockedReason ?? 'unknown'}`,
+        data: {
+          action: orchResult.output?.action ?? null,
+          reasoning: orchResult.output?.reasoning ?? null,
+          executedJobs: orchResult.executedJobs,
+          strictBlockedReason: orchResult.strictBlockedReason ?? null,
+        },
+        duration: Date.now() - startTime,
+      });
+      return;
+    }
+
+    // スケジューラーから日次プランを実行 (既存経路)
     const result = await scheduler.runDailyPlanNow();
 
     console.log('[Cron] 日次プラン生成完了:', result.message);
