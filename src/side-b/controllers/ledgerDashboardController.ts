@@ -13,6 +13,8 @@ import {
     type EdgeLedger,
 } from '../ledger/EdgeLedger';
 import { pythonBridge } from '../validation/python_bridge';
+import { createSystemStateRepository } from '../repositories/systemStateRepository';
+import { mailService } from '../services/mailService';
 
 /**
  * Express の `req.query` 各フィールドが取りうる型 (`ParsedQs[string]` と同等)。
@@ -33,6 +35,7 @@ function toPositiveInt(raw: QueryValue, fallback: number, max?: number): number 
 }
 
 export class LedgerDashboardController {
+    private readonly systemStateRepository = createSystemStateRepository();
     constructor(private readonly ledger: EdgeLedger = defaultEdgeLedger) {}
 
     /**
@@ -270,11 +273,47 @@ export class LedgerDashboardController {
     systemHealth = async (_req: Request, res: Response): Promise<void> => {
         try {
             let dbOk = false;
+            let dbSizeBytes = 0;
             try {
-                await prisma.$queryRaw(Prisma.sql`SELECT 1`);
+                const sizeRows = await prisma.$queryRaw<Array<{ size_bytes: bigint }>>`
+                  SELECT pg_database_size(current_database())::bigint AS size_bytes
+                `;
+                dbSizeBytes = sizeRows[0] ? Number(sizeRows[0].size_bytes) : 0;
                 dbOk = true;
-            } catch {
+            } catch (err) {
+                console.error('[LedgerDashboardController] DB容量取得エラー:', err);
                 dbOk = false;
+            }
+
+            // DB容量制限チェック（無料枠上限500MB対策で400MBを警告閾値とする）
+            const DB_LIMIT_BYTES = 400 * 1024 * 1024; // 400MB
+            const dbWarning = dbSizeBytes > DB_LIMIT_BYTES;
+
+            if (dbWarning && dbOk) {
+                try {
+                    const lastAlertStr = await this.systemStateRepository.get('last_db_alert_sent');
+                    const now = Date.now();
+                    const oneDayMs = 24 * 60 * 60 * 1000;
+
+                    let shouldSend = true;
+                    if (lastAlertStr) {
+                        const lastAlert = parseInt(lastAlertStr, 10);
+                        if (now - lastAlert < oneDayMs) {
+                            shouldSend = false;
+                        }
+                    }
+
+                    if (shouldSend) {
+                        await this.systemStateRepository.set('last_db_alert_sent', now.toString());
+                        const sizeMB = (dbSizeBytes / (1024 * 1024)).toFixed(1);
+                        await mailService.sendAlertMail(
+                            'データベース容量警告',
+                            `Supabaseデータベースの総使用量が警告閾値(400MB)を超えています。\n現在の使用量: ${sizeMB} MB\n不要なログや過去データのクリーンアップを実行してください。`
+                        );
+                    }
+                } catch (mailErr) {
+                    console.error('[LedgerDashboardController] DB容量警告メール送信失敗:', mailErr);
+                }
             }
 
             // Phase 6.8b: boolean ではなく 4値ステータスで返す
@@ -284,6 +323,8 @@ export class LedgerDashboardController {
             res.json({
                 success: true,
                 database: dbOk ? 'ok' : 'error',
+                dbSizeBytes,
+                dbWarning,
                 pythonValidator: pythonValidatorStatus,
                 checkedAt: new Date().toISOString(),
             });

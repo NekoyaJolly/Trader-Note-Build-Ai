@@ -52,6 +52,9 @@ import { sideBController } from '../controllers';
 import { ledgerDashboardController } from '../controllers/ledgerDashboardController';
 import { evolutionController } from '../controllers/evolutionController';
 import { validationRoutes } from './validationRoutes';
+import { createOrchestratorRouter } from './orchestratorRoutes';
+import { mailRouter } from './mailRoutes';
+import { emergencyRouter } from './emergencyRoutes';
 import { validateBody, validateQuery, validateParams } from '../../middleware/validateRequest';
 import {
   // リサーチ
@@ -93,6 +96,10 @@ const router = Router();
 // /api/side-b/hypotheses/:id/validation-status (GET)
 // ===========================================
 router.use('/hypotheses', validationRoutes);
+router.use('/orchestrator', createOrchestratorRouter());
+router.use('/mail', mailRouter);
+router.use('/emergency', emergencyRouter);
+
 
 // ===========================================
 // 台帳ダッシュボード統計・ヘルス (Phase 4d Step 6)

@@ -60,8 +60,14 @@ import type {
   ListEvolutionRunsResponse,
   GetEvolutionRunSummaryResponse,
   GetEvolutionRunCandidatesResponse,
+  ListOrchestratorRunsResponse,
+  GetOrchestratorRunDetailResponse,
+  EmergencyStatusResponse,
+  EmergencyStopResponse,
+  EmergencyResumeResponse,
 } from "@/types/sideB";
 import { getPublicApiBaseUrl } from "./publicApiBaseUrl";
+
 
 // ===========================================
 // 基盤
@@ -474,6 +480,38 @@ async function getEvolutionRunCandidates(
   );
 }
 
+async function getOrchestratorRuns(
+  status?: string,
+  limit?: number,
+): Promise<ListOrchestratorRunsResponse> {
+  const sp = new URLSearchParams();
+  if (status) sp.set("status", status);
+  if (limit) sp.set("limit", String(limit));
+  const query = sp.toString() ? `?${sp.toString()}` : "";
+  return request<ListOrchestratorRunsResponse>(`/orchestrator/runs${query}`);
+}
+
+async function getOrchestratorRunDetail(runId: string): Promise<GetOrchestratorRunDetailResponse> {
+  if (!runId) {
+    throw new SideBApiError("runId は必須です", 400, "/orchestrator/runs/:id");
+  }
+  return request<GetOrchestratorRunDetailResponse>(
+    `/orchestrator/runs/${encodeURIComponent(runId)}`,
+  );
+}
+
+async function getEmergencyStatus(): Promise<EmergencyStatusResponse> {
+  return request<EmergencyStatusResponse>("/emergency/status");
+}
+
+async function triggerEmergencyStop(): Promise<EmergencyStopResponse> {
+  return request<EmergencyStopResponse>("/emergency/stop", { method: "POST" });
+}
+
+async function triggerEmergencyResume(): Promise<EmergencyResumeResponse> {
+  return request<EmergencyResumeResponse>("/emergency/resume", { method: "POST" });
+}
+
 
 // ===========================================
 // export
@@ -505,6 +543,11 @@ export const sideBApi = {
   getEvolutionRuns,
   getEvolutionRunSummary,
   getEvolutionRunCandidates,
+  getOrchestratorRuns,
+  getOrchestratorRunDetail,
+  getEmergencyStatus,
+  triggerEmergencyStop,
+  triggerEmergencyResume,
 };
 
 /** 外部テスト向け: クエリ組み立てのみ検証できるよう内部 util を露出 */

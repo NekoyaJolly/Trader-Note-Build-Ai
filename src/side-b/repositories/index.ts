@@ -62,3 +62,11 @@ export {
   updatePortfolioStats,
   deletePortfolio,
 } from './portfolioRepository';
+
+// 本番耐用化: SystemState
+export {
+  type SystemStateKey,
+  type SystemStateRepository,
+  createSystemStateRepository,
+} from './systemStateRepository';
+

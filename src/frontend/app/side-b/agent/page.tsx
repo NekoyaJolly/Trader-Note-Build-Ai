@@ -10,7 +10,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { sideBApi } from "@/lib/sideBApi";
 import { formatPercent } from "@/lib/format";
-import type { AITradePlanPayload } from "@/types/sideB";
+import type { AITradePlanPayload, AgentRun, GetOrchestratorRunDetailResponse } from "@/types/sideB";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "") + "/api/side-b";
 
@@ -127,14 +127,29 @@ export default function AgentDetailPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [logLimit, setLogLimit] = useState(50);
 
+    const [orchestratorRuns, setOrchestratorRuns] = useState<AgentRun[]>([]);
+    const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+    const [selectedRunDetail, setSelectedRunDetail] = useState<GetOrchestratorRunDetailResponse | null>(null);
+    const [isDetailLoading, setIsDetailLoading] = useState(false);
+
+    // 本番耐用化: キルスイッチと容量監視用の状態
+    const [isEmergencyStopped, setIsEmergencyStopped] = useState(false);
+    const [consecutiveErrors, setConsecutiveErrors] = useState(0);
+    const [dbWarning, setDbWarning] = useState(false);
+    const [dbSizeBytes, setDbSizeBytes] = useState(0);
+    const [isEmergencyActionLoading, setIsEmergencyActionLoading] = useState(false);
+
     const fetchData = useCallback(async () => {
         try {
-            const [logRes, lessonsRes, plansRes, pendingValidationRes, recentlyValidatedRes] = await Promise.allSettled([
+            const [logRes, lessonsRes, plansRes, pendingValidationRes, recentlyValidatedRes, runsRes, emergencyRes, healthRes] = await Promise.allSettled([
                 fetch(`${API_BASE}/agent/thinking-log?limit=${logLimit}`),
                 fetch(`${API_BASE}/agent/lessons`),
                 sideBApi.listPlans({ limit: 5 }),
                 sideBApi.getPendingValidation(),
                 sideBApi.getRecentlyValidated(24),
+                sideBApi.getOrchestratorRuns(undefined, 10),
+                sideBApi.getEmergencyStatus(),
+                sideBApi.getSystemHealth(),
             ]);
 
             if (logRes.status === "fulfilled") {
@@ -151,6 +166,17 @@ export default function AgentDetailPage() {
             }
             if (plansRes.status === "fulfilled") {
                 setRecentPlans(plansRes.value.plans);
+            }
+            if (runsRes.status === "fulfilled") {
+                setOrchestratorRuns(runsRes.value.runs || []);
+            }
+            if (emergencyRes.status === "fulfilled" && emergencyRes.value) {
+                setIsEmergencyStopped(emergencyRes.value.data.isEmergencyStopped);
+                setConsecutiveErrors(emergencyRes.value.data.consecutiveErrors);
+            }
+            if (healthRes.status === "fulfilled" && healthRes.value) {
+                setDbWarning(!!healthRes.value.dbWarning);
+                setDbSizeBytes(healthRes.value.dbSizeBytes || 0);
             }
             const nextValidation: ValidationVisibilityData = {
                 pendingCount: 0,
@@ -170,6 +196,60 @@ export default function AgentDetailPage() {
         }
     }, [logLimit]);
 
+    const handleEmergencyStop = async () => {
+        if (!window.confirm("本当に緊急キルスイッチを作動させますか？\n保有しているすべての実ポジション（cTrader）及び仮想ポジションが強制決済され、システムが一時停止します。")) {
+            return;
+        }
+        setIsEmergencyActionLoading(true);
+        try {
+            const res = await sideBApi.triggerEmergencyStop();
+            const closeSummaryMsg = res.data.closeSummary.length > 0
+                ? "\n\n決済ログ:\n" + res.data.closeSummary.join("\n")
+                : "\n\n決済対象のポジションはありませんでした。";
+            alert(res.message + closeSummaryMsg);
+            await fetchData();
+        } catch (err) {
+            alert("緊急停止の実行中にエラーが発生しました: " + (err instanceof Error ? err.message : String(err)));
+        } finally {
+            setIsEmergencyActionLoading(false);
+        }
+    };
+
+    const handleEmergencyResume = async () => {
+        if (!window.confirm("緊急停止状態を解除して、自律取引サイクルを再開しますか？")) {
+            return;
+        }
+        setIsEmergencyActionLoading(true);
+        try {
+            const res = await sideBApi.triggerEmergencyResume();
+            alert(res.message);
+            await fetchData();
+        } catch (err) {
+            alert("緊急停止解除中にエラーが発生しました: " + (err instanceof Error ? err.message : String(err)));
+        } finally {
+            setIsEmergencyActionLoading(false);
+        }
+    };
+
+
+    const fetchRunDetail = async (runId: string) => {
+        if (selectedRunId === runId) {
+            setSelectedRunId(null);
+            setSelectedRunDetail(null);
+            return;
+        }
+        setSelectedRunId(runId);
+        setIsDetailLoading(true);
+        try {
+            const detail = await sideBApi.getOrchestratorRunDetail(runId);
+            setSelectedRunDetail(detail);
+        } catch (err) {
+            console.error("fetchRunDetail error:", err);
+        } finally {
+            setIsDetailLoading(false);
+        }
+    };
+
     useEffect(() => {
         fetchData();
         const interval = setInterval(fetchData, 10_000);
@@ -186,18 +266,65 @@ export default function AgentDetailPage() {
 
     return (
         <div className="min-h-screen">
-            <main className="max-w-5xl w-full mx-auto px-3 sm:px-4 md:px-6 py-6 sm:py-8">
-                {/* ヘッダー */}
-                <div className="flex items-center gap-3 mb-6">
+            {/* 警告バー */}
+            {isEmergencyStopped && (
+                <div className="bg-red-500/20 border-b border-red-500/30 text-red-200 px-4 py-3 text-center text-xs font-semibold flex items-center justify-center gap-3 animate-pulse">
+                    <span>⚠️ システム緊急停止中（キルスイッチ作動中）です。意思決定サイクルおよび新規取引はすべて停止されています。{consecutiveErrors > 0 && `(連続エラー数: ${consecutiveErrors})`}</span>
+                    <button
+                        onClick={handleEmergencyResume}
+                        disabled={isEmergencyActionLoading}
+                        className="bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded font-bold text-[11px] transition-colors disabled:opacity-50"
+                    >
+                        {isEmergencyActionLoading ? "処理中..." : "停止状態を解除"}
+                    </button>
+                </div>
+            )}
+            {dbWarning && (
+                <div className="bg-yellow-500/20 border-b border-yellow-500/30 text-yellow-200 px-4 py-3 text-center text-xs font-semibold flex items-center justify-center gap-3">
+                    <span>⚠️ データベース容量警告: Supabase の総使用量が 400MB を超過しています（現在: {(dbSizeBytes / (1024 * 1024)).toFixed(1)} MB）。</span>
                     <Link
                         href="/side-b"
-                        className="flex items-center gap-1 text-sm text-gray-400 hover:text-white transition-colors"
+                        className="underline hover:text-white transition-colors font-bold text-[11px]"
                     >
-                        ← Dashboard
+                        クリーンアップを推奨
                     </Link>
-                    <span className="text-gray-600">|</span>
-                    <h1 className="text-xl font-bold text-white">AI Agent 詳細</h1>
                 </div>
+            )}
+
+            <main className="max-w-5xl w-full mx-auto px-3 sm:px-4 md:px-6 py-6 sm:py-8">
+                {/* ヘッダー */}
+                <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+                    <div className="flex items-center gap-3">
+                        <Link
+                            href="/side-b"
+                            className="flex items-center gap-1 text-sm text-gray-400 hover:text-white transition-colors"
+                        >
+                            ← Dashboard
+                        </Link>
+                        <span className="text-gray-600">|</span>
+                        <h1 className="text-xl font-bold text-white">AI Agent 詳細</h1>
+                    </div>
+                    <div>
+                        {isEmergencyStopped ? (
+                            <button
+                                onClick={handleEmergencyResume}
+                                disabled={isEmergencyActionLoading}
+                                className="bg-red-600 hover:bg-red-500 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                            >
+                                {isEmergencyActionLoading ? "処理中..." : "緊急停止を解除"}
+                            </button>
+                        ) : (
+                            <button
+                                onClick={handleEmergencyStop}
+                                disabled={isEmergencyActionLoading}
+                                className="bg-red-950/40 hover:bg-red-900/60 border border-red-700/50 text-red-200 font-bold text-xs px-3 py-1.5 rounded-lg transition-all disabled:opacity-50"
+                            >
+                                {isEmergencyActionLoading ? "処理中..." : "🚨 緊急停止 (KILL SWITCH)"}
+                            </button>
+                        )}
+                    </div>
+                </div>
+
 
                 {/* 統計カード */}
                 {lessonsData && (
@@ -322,6 +449,118 @@ export default function AgentDetailPage() {
                                     )}
                                 </article>
                             ))
+                        )}
+                    </div>
+                </div>
+
+                {/* Orchestrator 意思決定履歴 */}
+                <div className="card-surface rounded-xl overflow-hidden mb-6">
+                    <div className="px-4 py-3 border-b border-slate-700/50">
+                        <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+                            <span>🤖</span> Orchestrator 意思決定履歴 (直近10件)
+                        </h2>
+                        <p className="text-[11px] text-gray-500 mt-0.5">
+                            最上位のオーケストレーターが「次に回すループ」を LLM 判断した履歴です。
+                        </p>
+                    </div>
+                    <div className="px-4 py-3 space-y-3">
+                        {orchestratorRuns.length === 0 ? (
+                            <p className="text-sm text-gray-500 text-center py-6">意思決定履歴がありません</p>
+                        ) : (
+                            orchestratorRuns.map((run) => {
+                                const isSelected = selectedRunId === run.id;
+                                const statusColors: Record<string, string> = {
+                                    succeeded: "text-green-400 bg-green-500/20",
+                                    failed: "text-red-400 bg-red-500/20",
+                                    running: "text-blue-400 bg-blue-500/20 animate-pulse",
+                                    pending: "text-gray-400 bg-gray-500/20",
+                                    cancelled: "text-yellow-400 bg-yellow-500/20",
+                                };
+                                return (
+                                    <div
+                                        key={run.id}
+                                        className="rounded-xl border border-slate-700/60 bg-slate-900/30 p-3"
+                                    >
+                                        <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
+                                            <div className="flex items-center gap-2">
+                                                <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[run.status] || "text-gray-400 bg-gray-500/20"}`}>
+                                                    {run.status.toUpperCase()}
+                                                </span>
+                                                <span className="text-sm font-semibold text-white font-mono">
+                                                    {run.kind}
+                                                </span>
+                                            </div>
+                                            <span className="text-[10px] text-gray-500 font-mono">
+                                                {new Date(run.startedAt).toLocaleString("ja-JP")}
+                                            </span>
+                                        </div>
+                                        {run.summary && (
+                                            <p className="text-xs text-gray-300 mb-2 whitespace-pre-wrap font-sans">
+                                                {run.summary}
+                                            </p>
+                                        )}
+                                        {run.errorMessage && (
+                                            <p className="text-xs text-red-400 bg-red-950/20 border border-red-900/30 rounded p-2 mb-2 font-mono">
+                                                エラー: {run.errorMessage}
+                                            </p>
+                                        )}
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-[10px] text-gray-500">
+                                                Trigger: {run.triggeredBy}
+                                            </span>
+                                            <button
+                                                onClick={() => fetchRunDetail(run.id)}
+                                                className="text-xs text-purple-400 hover:text-purple-300 transition-colors"
+                                            >
+                                                {isSelected ? "詳細を閉じる ▲" : "ステップ詳細を表示 ▼"}
+                                            </button>
+                                        </div>
+
+                                        {/* アコーディオンの中身 */}
+                                        {isSelected && (
+                                            <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-2">
+                                                {isDetailLoading ? (
+                                                    <div className="flex items-center justify-center py-4">
+                                                        <div className="w-5 h-5 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                                                    </div>
+                                                ) : selectedRunDetail && selectedRunDetail.steps.length === 0 ? (
+                                                    <p className="text-xs text-gray-500 text-center py-2">実行されたステップはありません</p>
+                                                ) : selectedRunDetail ? (
+                                                    <div className="space-y-2">
+                                                        <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">実行ステップ一覧</p>
+                                                        {selectedRunDetail.steps.map((step) => (
+                                                            <div
+                                                                key={step.id}
+                                                                className="text-xs rounded-lg border border-slate-800 bg-slate-900/50 p-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                                                            >
+                                                                <div>
+                                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                                        <span className="font-semibold text-white">{step.stepName}</span>
+                                                                        <span className="text-[10px] text-gray-500">(Attempt #{step.attempt})</span>
+                                                                        <span className={`px-1 rounded text-[10px] ${
+                                                                            step.status === "succeeded" ? "text-green-400 bg-green-950/20" :
+                                                                            step.status === "failed" ? "text-red-400 bg-red-950/20" : "text-gray-400 bg-slate-800"
+                                                                        }`}>
+                                                                            {step.status}
+                                                                        </span>
+                                                                    </div>
+                                                                    {step.summary && <p className="text-[11px] text-gray-400 mt-1 font-mono">{step.summary}</p>}
+                                                                    {step.errorMessage && <p className="text-[10px] text-red-400 mt-0.5 font-mono">Error: {step.errorMessage}</p>}
+                                                                </div>
+                                                                <div className="text-right shrink-0">
+                                                                    {step.durationMs !== null && (
+                                                                        <p className="text-[10px] text-gray-500 font-mono">{(step.durationMs / 1000).toFixed(2)}s</p>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })
                         )}
                     </div>
                 </div>

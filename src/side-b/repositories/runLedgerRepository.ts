@@ -167,11 +167,11 @@ export function createRunLedgerRepository(client: LedgerPrisma = defaultPrisma) 
      * status 別の AgentRun 一覧 (UI / API 用、Phase 9 で追加)。新しい順、limit 上限あり。
      */
     async listRunsByStatus(
-      status: AgentRunStatus,
+      status?: AgentRunStatus,
       limit = 50,
     ): Promise<AgentRun[]> {
       return client.agentRun.findMany({
-        where: { status },
+        where: status ? { status } : {},
         orderBy: { startedAt: 'desc' },
         take: limit,
       });

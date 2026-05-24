@@ -2140,3 +2140,11 @@ enum StrategyDraftStatus {
   validated
   archived
 }
+
+/// システム共通の状態管理（キルスイッチや連続エラー数など）
+model SystemState {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+}
+
