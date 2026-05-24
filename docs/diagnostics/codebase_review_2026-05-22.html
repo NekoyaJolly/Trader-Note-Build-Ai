@@ -119,11 +119,11 @@
           <td>新規 LLM 層は作らない。観測ツール整備で代替を継続 (今後も「本当に LLM が必要」と確認できるまで保留)</td>
         </tr>
         <tr>
-          <td><span class="tag warn">P1</span></td>
-          <td>Backend Node</td>
-          <td>`src/app.ts` に helmet / express-rate-limit / CSRF middleware が無い。CORS と cookie-parser のみで、認証 cookie が XSS / CSRF 経路に晒される</td>
-          <td><code>src/app.ts:1-100</code> で `helmet` `rate.limit` `rateLimit` のいずれも grep 0 hit / Cookie の `auth_token` は <code>src/middleware/authMiddleware.ts:33</code> から読まれる</td>
-          <td>helmet 導入 + rate-limit (auth / cron route) + SameSite=Strict cookie 確認。Phase B の最低品質ゲートに含める</td>
+          <td><span class="tag good">解消</span></td>
+          <td>Backend Node セキュリティ (旧 P1)</td>
+          <td>2026-05-24 解消: PR #250 (<code>3b579f2</code>) で <strong>helmet + express-rate-limit 導入</strong>。helmet は全 route に standard security headers、rate-limit は <code>/api/auth</code> に 15 分窓 30 req/IP。<code>app.set('trust proxy', 1)</code> で Cloud Run / LB の X-Forwarded-For 解釈、MemoryStore の Cloud Run 水平スケール時分断は best-effort として明文化 (Redis 共有 store は別 PR)</td>
+          <td>main <code>3b579f2</code> / Cloud Run デプロイ後に手動動作確認</td>
+          <td>—</td>
         </tr>
         <tr>
           <td><span class="tag warn">P1</span></td>
@@ -364,10 +364,12 @@
       <li><strong>✅ Evolution MTF seed の上位足 hardcode 排除 (PR #246 マージ済 <code>f533837</code>)</strong>: <code>seedDescriptor.ts</code> の <code>'1h'</code> hardcode を <code>deriveHigherTimeframe(entryTf)</code> で entry timeframe から派生、<code>normalizeTimeframe</code> で表記ゆれ吸収。「仮説単一性」真因候補 #1 対応。</li>
       <li><strong>✅ Scheduler symbols hardcode 排除 (PR #247 マージ済 <code>ac93b8d</code>)</strong>: DEFAULT_CONFIG.symbols 表記統一 (<code>'XAU/USD'</code> → <code>'XAUUSD'</code>) + Watchlist 動的取得 + <code>updateConfig</code> 経由の明示指定対応 (<code>explicitSymbolsOverride</code>)。Nekoさん 原則「ハードコードしない、リストから選択」。</li>
       <li><strong>⏳ Phase B G2 仮説検証 (本番 24-72h 運用後)</strong>: Issue #239 で判断キュー中の <code>scripts/check/edge-hypothesis-not-testable-reasons.ts</code> を本番 Supabase に read-only 実行 → <code>not_testable</code> 5 経路別件数を取得。特に B 経路 (OHLCV 補完失敗) と A 経路 (symbols 未設定) の変化を観測。memory <code>project_phase_b_g2_hypothesis.md</code> 参照。</li>
-      <li><strong>⏳ helmet + rate-limit 導入</strong>: 最低品質ゲート。1 PR で完結。本日着手 (= 2026-05-24 セッションで C タスクとして着手予定)。</li>
-      <li><strong>✅ 運用衛生</strong>: <code>.gitignore</code> に <code>data/evolution/*.bak*</code> を追加 (commit <code>b51441f</code>)、12 件 untracked 解消済。Lint-fix bot 系 Open PR 7 件は自然解消済 (= Open PR は #248 のみ)。</li>
-      <li><strong>⏳ fallback symbol をマイナー通貨に</strong>: scheduler / pdcaLoop の DEFAULT fallback (<code>'XAUUSD'</code>) を <code>'NZDCHF'</code> に変更 PR 進行中 (= 2026-05-24 B タスク)。memory <code>feedback_fallback_minor_symbol.md</code> 反映。</li>
-      <li><strong>⏳ Top-Level Orchestrator MVP</strong>: PR #248 で実装、Copilot レビュー 12 件対応済、マージ待機中。env default OFF で既存挙動互換、Phase 2/3 で dev → 本番ロールアウト予定。設計書: <code>docs/architecture/TOP_LEVEL_ORCHESTRATOR_DESIGN.md</code></li>
+      <li><strong>✅ helmet + rate-limit 導入</strong>: PR #250 (<code>3b579f2</code>) マージ済。helmet (全 route) + rate-limit (<code>/api/auth</code> 15 分 30 req)、trust proxy=1 で Cloud Run 対応。MemoryStore は best-effort、Redis 共有 store は将来 PR。</li>
+      <li><strong>✅ 運用衛生</strong>: <code>.gitignore</code> に <code>data/evolution/*.bak*</code> を追加 (commit <code>b51441f</code>)、12 件 untracked 解消済。Lint-fix bot 系 Open PR 7 件は自然解消済 (= 全 7 件すでにクローズ済)。</li>
+      <li><strong>✅ fallback symbol をマイナー通貨に</strong>: PR #249 (<code>2083a24</code>) マージ済。scheduler / pdcaLoop の DEFAULT fallback を <code>'XAUUSD'</code> → <code>'NZDCHF'</code> に変更、fallback されている状態を一目で判別可能に。</li>
+      <li><strong>✅ Top-Level Orchestrator MVP</strong>: PR #248 (<code>ff57217</code>) マージ済、Copilot レビュー 12 件対応済。env default OFF で既存挙動互換、Phase 2/3 で dev → 本番ロールアウト予定。設計書: <code>docs/architecture/TOP_LEVEL_ORCHESTRATOR_DESIGN.md</code>。memory <code>project_top_level_orchestrator_mvp.md</code></li>
+      <li><strong>⏳ Phase B G2 仮説検証</strong>: PR #245+#246+#247 マージ後の本番運用 24-72h 観察。<code>scripts/check/edge-hypothesis-not-testable-reasons.ts</code> で <code>not_testable</code> 5 経路別件数の改善を観測。Issue #239 は経路変更で close 済</li>
+      <li><strong>⏳ Top-Level Orchestrator Phase 2</strong>: dev 環境で <code>TOP_LEVEL_ORCHESTRATOR_ENABLED=true</code>、24-48h 観察。前提として AgentRun への書き込み (= 禁止事項 #1/#3/#6 を実発火させる) を別 PR で追加</li>
     </ul>
 
     <h3>10.2 中期: 1〜2 か月</h3>
@@ -398,7 +400,7 @@
       <strong>仮説検証フェーズに移行</strong>: Nekoさん 提唱の「5/18 以降の G2 pipeline 連鎖故障 (not_testable=288 / confirmed=1) は Twelve Data API のレート制限 + hardcode 経路によるもの」仮説 (memory <code>project_phase_b_g2_hypothesis.md</code>) を、本番運用 24-72h 後に <code>edge-hypothesis-not-testable-reasons.ts</code> で実測検証する。3 PR の合算効果なので個別寄与の切り分けは難しいが、`not_testable` 比率の大幅低下 + `confirmed` 件数の増加が観察されれば仮説確定。
     </div>
     <div class="callout">
-      <strong>並行で進められるもの</strong>: helmet + rate-limit 導入、.gitignore で bak ファイル除外、lint-fix bot PR 7 件のクローズ判断、fallback symbol のマイナー通貨化 (= 軽微)。Top-Loop LLM 層は 2026-05-22 に <strong>保留確定</strong> のため、もう着手判断は不要。
+      <strong>2026-05-24 セッション成果</strong>: 短期ロードマップの全項目 (helmet + rate-limit / .gitignore / lint-fix PR / fallback symbol / Top-Level Orchestrator MVP) を 1 日でクローズ。残るのは Phase B G2 仮説検証 (= 本番運用観察) と Top-Level Orchestrator Phase 2 (= dev で env=true 観察)。E (Twelve Data 物理削除) は memory 通り仮説検証完了まで保留。
     </div>
     <div class="callout bad">
       <strong>残る最重要リスク</strong>: G2 pipeline の `confirmed=1 件` 問題は P0 で観測性は付いたが、真因 (analysis-engine 通信 / OHLCV カバレッジ / 4 ツール判定基準) の切り分けがまだ。今回のレビューでも `docs/diagnostics/2026-05-18_g2_pipeline_audit.md` §0 の前提崩れ警告以降、実測ベースの追跡が止まっている。
