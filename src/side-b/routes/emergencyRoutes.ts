@@ -14,8 +14,14 @@ import { CTraderAuthService } from '../../backend/services/ctrader/ctraderAuthSe
 import { CTraderProvider } from '../../infrastructure/market/CTraderProvider';
 import { CTraderAccountService } from '../../backend/services/ctrader/ctraderAccountService';
 import { mailService } from '../services/mailService';
+import { requireAuth, requireRole } from '../../middleware/authMiddleware';
 
 const router = Router();
+
+// 緊急操作APIは管理者権限のみに制限
+router.use(requireAuth);
+router.use(requireRole(['admin']));
+
 const systemStateRepository = createSystemStateRepository();
 
 /**
@@ -108,7 +114,7 @@ router.post('/stop', async (req, res) => {
             where: { id: trade.id },
             data: {
               status: 'closed',
-              exitPrice: trade.plannedEntry, // 手動クローズなのでエントリー値で決済したと仮定
+              exitPrice: trade.actualEntry ?? trade.plannedEntry, // 手動クローズなのでエントリー値(実エントリー優先)で決済したと仮定
               exitReason: 'manual_close',
               pnlPips: 0,
               pnlAmount: 0,

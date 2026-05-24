@@ -6,16 +6,8 @@
  */
 
 import nodemailer from 'nodemailer';
-import { z } from 'zod';
 import { createSystemStateRepository } from '../repositories/systemStateRepository';
-
-// インバウンドメール受信時のZodスキーマ
-export const InboundMailSchema = z.object({
-  from: z.string().email(),
-  subject: z.string(),
-  text: z.string(),
-});
-export type InboundMail = z.infer<typeof InboundMailSchema>;
+import type { InboundMail } from '../../schemas/api/sideB';
 
 export class MailService {
   private readonly systemStateRepository = createSystemStateRepository();

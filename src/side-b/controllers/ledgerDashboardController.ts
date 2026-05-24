@@ -298,18 +298,18 @@ export class LedgerDashboardController {
                     let shouldSend = true;
                     if (lastAlertStr) {
                         const lastAlert = parseInt(lastAlertStr, 10);
-                        if (now - lastAlert < oneDayMs) {
+                        if (!isNaN(lastAlert) && (now - lastAlert < oneDayMs)) {
                             shouldSend = false;
                         }
                     }
 
                     if (shouldSend) {
-                        await this.systemStateRepository.set('last_db_alert_sent', now.toString());
                         const sizeMB = (dbSizeBytes / (1024 * 1024)).toFixed(1);
                         await mailService.sendAlertMail(
                             'データベース容量警告',
                             `Supabaseデータベースの総使用量が警告閾値(400MB)を超えています。\n現在の使用量: ${sizeMB} MB\n不要なログや過去データのクリーンアップを実行してください。`
                         );
+                        await this.systemStateRepository.set('last_db_alert_sent', now.toString());
                     }
                 } catch (mailErr) {
                     console.error('[LedgerDashboardController] DB容量警告メール送信失敗:', mailErr);

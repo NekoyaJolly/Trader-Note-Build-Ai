@@ -5,7 +5,10 @@
  */
 
 import { Router } from 'express';
-import { mailService, InboundMailSchema } from '../services/mailService';
+import { mailService } from '../services/mailService';
+import { InboundMailSchema } from '../../schemas/api/sideB';
+import type { InboundMail } from '../../schemas/api/sideB';
+import { validateBody } from '../../middleware/validateRequest';
 
 const router = Router();
 
@@ -13,14 +16,10 @@ const router = Router();
  * POST /api/side-b/mail/receive
  * インバウンドメールWebhookの受け口
  */
-router.post('/receive', async (req, res) => {
-  const result = InboundMailSchema.safeParse(req.body);
-  if (!result.success) {
-    return res.status(400).json({ error: result.error.format() });
-  }
-
+router.post('/receive', validateBody(InboundMailSchema), async (req, res) => {
   try {
-    const handleResult = await mailService.handleInboundMail(result.data);
+    const mailData = req.body as InboundMail;
+    const handleResult = await mailService.handleInboundMail(mailData);
     if (!handleResult.success) {
       return res.status(400).json({ error: handleResult.message });
     }

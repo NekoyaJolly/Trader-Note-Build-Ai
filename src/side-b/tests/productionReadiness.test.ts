@@ -1,12 +1,12 @@
 /**
- * 本番耐用化 (Production Readiness) テスクコード
+ * 本番耐用化 (Production Readiness) テストコード
  *
  * 対象: SystemStateRepository, MailService, キルスイッチ連携
  */
 
 import { createSystemStateRepository } from '../repositories/systemStateRepository';
 import { MailService } from '../services/mailService';
-import type { InboundMail } from '../services/mailService';
+import type { InboundMail } from '../../schemas/api/sideB';
 
 describe('SystemStateRepository', () => {
   it('値の書き込み・読み込みが正しく機能すること', async () => {
