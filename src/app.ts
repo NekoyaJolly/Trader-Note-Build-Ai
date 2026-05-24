@@ -3,6 +3,8 @@ import express from 'express';
 import type { Server } from 'http';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import { config } from './config';
 import tradeRoutes from './backend/api/tradeRoutes';
 import matchingRoutes from './backend/api/matchingRoutes';
@@ -42,6 +44,12 @@ class App {
     console.log('[App] コンストラクタ開始');
     this.app = express();
     this.scheduler = new MatchingScheduler();
+    // 2026-05-24 (PR #250 Copilot review #1): Cloud Run / LB 配下で req.ip を正しく
+    // 取得するため trust proxy を有効化。`1` = 1 hop の proxy (= Cloud Run のフロント
+    // プロキシ) を信頼し、X-Forwarded-For の最初の値を req.ip として採用する。
+    // これにより express-rate-limit の keyGenerator (= 既定 req.ip) がクライアント
+    // 単位で正しく動作する。
+    this.app.set('trust proxy', 1);
     console.log('[App] ミドルウェアを初期化中...');
     this.initializeMiddlewares();
     // ルート初期化は start() で行う（Next.js ハンドラーの準備を待つため）
@@ -52,6 +60,23 @@ class App {
    * Initialize middlewares
    */
   private initializeMiddlewares(): void {
+    // 2026-05-24: セキュリティヘッダー (helmet)。memory `feedback_codebase_review_skill.md`
+    // で「最低品質ゲート」として追加。CSP は frontend (Next.js + lightweight-charts +
+    // last-mile-context) の inline script / eval を一部許容するため、開発時は緩めて
+    // 本番では NEXT 標準 nonce ベース CSP に頼る方針 (= ここでは contentSecurityPolicy=false)。
+    // X-Frame-Options / X-Content-Type-Options / Strict-Transport-Security 等の標準ヘッダーは付ける。
+    console.log('[App] helmet セキュリティヘッダーを設定中...');
+    this.app.use(
+      helmet({
+        // Phase 1: CSP は Next.js 側で管理 (= express 側で二重定義しない)
+        contentSecurityPolicy: false,
+        // 同一オリジン埋め込みは許可 (= TradeAssist 自身の iframe / SSR 想定)
+        crossOriginEmbedderPolicy: false,
+        // strict CORS 既定で同一オリジン以外からの埋め込みを拒否、ただし opener は許可
+        crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+      }),
+    );
+
     console.log('[App] CORS設定を初期化中...');
     // CORS設定: 開発環境と Vercel デプロイの両方を許可
     // 本番 Cloud Run 統合の同一オリジンリクエストは origin=undefined で自動許可
@@ -112,10 +137,32 @@ class App {
         });
       });
 
+      // 2026-05-24 (PR #250): auth route に rate-limit を適用 (= ログイン試行 / OAuth
+      // callback 連打防止)。memory `feedback_codebase_review_skill.md` で P1「helmet +
+      // rate-limit 導入」として追加。
+      //
+      // 制限: 15 分窓で 30 req/IP (= keyGenerator は既定で req.ip、trust proxy=1 で
+      // X-Forwarded-For 解釈済み)。
+      //
+      // **既知の制約 (PR #250 Copilot review #2 対応の明文化)**: 本実装は MemoryStore
+      // を使うため、Cloud Run の水平スケール (= 複数インスタンス) 時はインスタンス間で
+      // rate-limit が分断される (= 1 インスタンス 30 req/15min を回避すれば、N インスタンス
+      // で 30N req/15min まで通過可能)。攻撃側並列回避を完全に防ぐには共有 store
+      // (= Redis 等) または Cloud Armor 等のエッジ側 rate-limit が必要。
+      // 本 PR は **best-effort の最低品質ゲート** として位置付け、本格 rate-limit は
+      // 別 PR (= Redis store 導入 or Cloud Armor 設定) で扱う。
+      const authRateLimiter = rateLimit({
+        windowMs: 15 * 60 * 1000,
+        max: 30,
+        standardHeaders: true,
+        legacyHeaders: false,
+        message: { error: 'Too many auth requests, try again later' },
+      });
+
       // API routes
-      // cTrader OAuth 認証ルート（認証不要）
-      console.log('[App] /api/auth ルートを登録中...');
-      this.app.use('/api/auth', ctraderAuthRoutes);
+      // cTrader OAuth 認証ルート（認証不要、rate-limit 適用）
+      console.log('[App] /api/auth ルートを登録中 (rate-limit 適用)...');
+      this.app.use('/api/auth', authRateLimiter, ctraderAuthRoutes);
 
       // トレーディングルート（認証必須）
       console.log('[App] /api/trading ルートを登録中...');
