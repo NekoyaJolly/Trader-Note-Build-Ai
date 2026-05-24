@@ -170,9 +170,9 @@ const DEFAULT_CONFIG: SideBSchedulerConfig = {
   // に整合させる (Phase B 2026-05-22)。実運用では start() で Watchlist から動的取得した
   // symbols で上書きされる。
   //
-  // 2026-05-24 (memory `feedback_fallback_minor_symbol.md`): fallback は **マイナー通貨**
-  // (= NZDCHF) にして「fallback されてる」と一目で分かるようにする。メジャー通貨
-  // (XAUUSD / EURUSD 等) だと実運用と見分けがつかない。
+  // 2026-05-24 (PR #249): fallback はメジャー通貨 (XAUUSD / EURUSD 等) ではなく
+  // **マイナー通貨** (= NZDCHF) にしておく。実運用 (= Watchlist 動的取得、PR #247) と
+  // 区別がつき、「fallback されている」状態が一目で判別可能になる。
   symbols: ['NZDCHF'],
   timeframe: '15m',
   higherTimeframe: '4h',      // MTF上位足: 4時間足

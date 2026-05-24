@@ -138,7 +138,7 @@ describe('SideBScheduler Watchlist 連携 (Phase B 2026-05-22)', () => {
   describe('DEFAULT_CONFIG', () => {
     it('symbols 未指定で構築すると DEFAULT_CONFIG (= マイナー通貨 \'NZDCHF\' fallback) が初期値', () => {
       const scheduler = new SideBScheduler();
-      // 2026-05-24: fallback はマイナー通貨 NZDCHF (memory `feedback_fallback_minor_symbol.md`)
+      // 2026-05-24 (PR #249): fallback はマイナー通貨 NZDCHF (= 実運用との視認区別)
       expect(getConfigSymbols(scheduler)).toEqual(['NZDCHF']);
     });
 

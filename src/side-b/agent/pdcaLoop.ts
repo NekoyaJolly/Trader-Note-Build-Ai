@@ -73,8 +73,8 @@ export interface PDCALoopConfig {
 
 const DEFAULT_PDCA_CONFIG: PDCALoopConfig = {
     enabled: false,
-    // 2026-05-24 (memory `feedback_fallback_minor_symbol.md`): fallback は **マイナー通貨**
-    // (= NZDCHF) にして「fallback されてる」と一目で分かるようにする。実運用では
+    // 2026-05-24 (PR #249): fallback はメジャー通貨ではなく **マイナー通貨** (= NZDCHF)
+    // にして「fallback されている」状態が一目で判別可能になる設計。実運用では
     // SideBController API or scheduler から symbols が明示渡しされる。
     symbols: ['NZDCHF'],
     normalIntervalMs: 60 * 60 * 1000,    // 1時間（通常時）
