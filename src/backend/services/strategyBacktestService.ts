@@ -304,7 +304,15 @@ export async function fetchHistoricalData(
   // 2. キャッシュのカバレッジをタイムスタンプ範囲で判定
   //    期待バー数ではなく、最古/最新のタイムスタンプが要求期間をカバーしているかで判断
   //    （休場日・ブローカー固有の休止はAPIが返さないバー＝存在しないデータなので無視）
-  const toleranceMs = intervalMinutes * 60 * 1000 * 3; // 3バー分の許容誤差
+  //
+  // 2026-05-24 (PR #253): tolerance は **3 バー** と **1 日 (= 24h)** の大きい方を採用。
+  // 旧版は 3 バー固定 (= 15m なら 45 分) だったため、要求期間開始が週末・祝日・
+  // 年末年始等で cTrader データ無し期間に当たると永遠に coversStart=false で
+  // fetchAndCacheOhlcv 再呼び出しが無限ループ (= EvolutionLoop で 43 回再 fetch、
+  // smoke 50-60 分の主因)。最低 1 日の tolerance で週末ギャップを吸収する。
+  const baseToleranceMs = intervalMinutes * 60 * 1000 * 3; // 3 バー分
+  const minToleranceMs = 24 * 60 * 60 * 1000; // 1 日 (= 週末 / 祝日ギャップ吸収)
+  const toleranceMs = Math.max(baseToleranceMs, minToleranceMs);
   let coversStart = false;
   let coversEnd = false;
   if (cachedData.length > 0) {
