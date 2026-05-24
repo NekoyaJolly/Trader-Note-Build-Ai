@@ -3,8 +3,10 @@
 # 目的: GitHub Actionsで Side-Bの自動化タスクを定期実行する
 #
 # スケジュール:
-#   - 日次プラン生成: 毎日 00:00 UTC（09:00 JST）
-#   - 監視実行: 毎時 0分
+#   - プラン生成: 4 時間ごと (0/4/8/12/16/20 UTC = JST 09/13/17/21/01/05)、1 日 6 回
+#     (2026-05-24 変更: 旧 daily 1 回 → 4h ごと 6 回。仮説生成サンプルを増やして
+#      Phase B 後の screening 観察を加速する目的、PR #251)
+#   - 監視実行: 毎時 0 分 (4h ごとの cron と重なる時刻は plan + monitor 並行)
 #
 # 必要なシークレット:
 #   - CRON_SECRET: Cron認証用秘密鍵
@@ -14,9 +16,9 @@ name: Side-B Automation Cron
 
 on:
   schedule:
-    # 日次プラン生成: 毎日 00:00 UTC（09:00 JST）
-    - cron: '0 0 * * *'
-    # 監視実行: 毎時 0分
+    # プラン生成: 4 時間ごと (= JST 09/13/17/21/01/05、1 日 6 回)
+    - cron: '0 */4 * * *'
+    # 監視実行: 毎時 0 分 (= 4h cron と重なる時刻は両方走る、scheduler 側で lastPlanRun 制御)
     - cron: '0 * * * *'
   workflow_dispatch:
     inputs:
@@ -35,11 +37,12 @@ env:
 
 jobs:
   daily-plan:
-    name: 日次プラン生成
+    name: プラン生成 (4h ごと)
     runs-on: ubuntu-latest
-    # 00:00 UTC のスケジュール、または手動実行で daily-plan を選択した場合
+    # 4h ごとのスケジュール (= 0/4/8/12/16/20 UTC)、または手動実行で daily-plan を選択した場合
+    # ※ job 名は API path (/api/cron/side-b/daily-plan) と整合のため "daily-plan" のまま維持
     if: |
-      (github.event_name == 'schedule' && github.event.schedule == '0 0 * * *') ||
+      (github.event_name == 'schedule' && github.event.schedule == '0 */4 * * *') ||
       (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'daily-plan')
     steps:
       - name: 日次プラン生成を実行
