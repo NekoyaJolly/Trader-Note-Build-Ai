@@ -10,7 +10,7 @@
  * 2. configOverride.symbols が指定されたら explicitSymbolsOverride=true、Watchlist 連携をスキップ
  * 3. configOverride.symbols 未指定なら Watchlist の active 行から symbol を取得
  * 4. Watchlist 取得結果は normalizeCTraderSymbol で正規化済 + 重複排除
- * 5. Watchlist が空なら DEFAULT_CONFIG.symbols (= ['XAUUSD']) を fallback として使用
+ * 5. Watchlist が空なら DEFAULT_CONFIG.symbols (= ['NZDCHF'] = マイナー通貨 fallback) を使用
  *
  * scheduler 構築時の重い依存は jest.mock で差し替え、Watchlist 解決ロジックだけを
  * 純粋に検証する。
@@ -136,9 +136,10 @@ describe('SideBScheduler Watchlist 連携 (Phase B 2026-05-22)', () => {
   });
 
   describe('DEFAULT_CONFIG', () => {
-    it('symbols 未指定で構築すると DEFAULT_CONFIG (= cTrader 形式 \'XAUUSD\') が初期値', () => {
+    it('symbols 未指定で構築すると DEFAULT_CONFIG (= マイナー通貨 \'NZDCHF\' fallback) が初期値', () => {
       const scheduler = new SideBScheduler();
-      expect(getConfigSymbols(scheduler)).toEqual(['XAUUSD']);
+      // 2026-05-24 (PR #249): fallback はマイナー通貨 NZDCHF (= 実運用との視認区別)
+      expect(getConfigSymbols(scheduler)).toEqual(['NZDCHF']);
     });
 
     it('symbols 表記が内部規約 (= スラッシュなし大文字) と整合 (旧 \'XAU/USD\' バグ修正)', () => {
@@ -213,23 +214,23 @@ describe('SideBScheduler Watchlist 連携 (Phase B 2026-05-22)', () => {
       expect(getConfigSymbols(scheduler)).toEqual(['EURUSD']);
     });
 
-    it('Watchlist が空なら DEFAULT_CONFIG.symbols (= [\'XAUUSD\']) を fallback として維持', async () => {
+    it('Watchlist が空なら DEFAULT_CONFIG.symbols (= [\'NZDCHF\'] = マイナー通貨 fallback) を維持', async () => {
       findManyMock.mockResolvedValue([]);
       const scheduler = new SideBScheduler();
 
       await callResolveWatchlist(scheduler);
 
-      // 取得結果が空なので DEFAULT_CONFIG.symbols が維持される
-      expect(getConfigSymbols(scheduler)).toEqual(['XAUUSD']);
+      // 取得結果が空なので DEFAULT_CONFIG.symbols が維持される (2026-05-24: NZDCHF)
+      expect(getConfigSymbols(scheduler)).toEqual(['NZDCHF']);
     });
 
-    it('Watchlist 取得が throw しても DEFAULT_CONFIG.symbols を維持して継続', async () => {
+    it('Watchlist 取得が throw しても DEFAULT_CONFIG.symbols (= [\'NZDCHF\']) を維持して継続', async () => {
       findManyMock.mockRejectedValue(new Error('DB 接続エラー (テスト)'));
       const scheduler = new SideBScheduler();
 
       // throw せず resolve する (= 起動を妨げない)
       await expect(callResolveWatchlist(scheduler)).resolves.toBeUndefined();
-      expect(getConfigSymbols(scheduler)).toEqual(['XAUUSD']);
+      expect(getConfigSymbols(scheduler)).toEqual(['NZDCHF']);
     });
   });
 

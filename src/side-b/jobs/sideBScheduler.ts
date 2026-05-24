@@ -169,7 +169,11 @@ const DEFAULT_CONFIG: SideBSchedulerConfig = {
   // Watchlist 連携が無い場合の fallback。表記は内部規約 (cTrader 形式 = スラッシュなし大文字)
   // に整合させる (Phase B 2026-05-22)。実運用では start() で Watchlist から動的取得した
   // symbols で上書きされる。
-  symbols: ['XAUUSD'],
+  //
+  // 2026-05-24 (PR #249): fallback はメジャー通貨 (XAUUSD / EURUSD 等) ではなく
+  // **マイナー通貨** (= NZDCHF) にしておく。実運用 (= Watchlist 動的取得、PR #247) と
+  // 区別がつき、「fallback されている」状態が一目で判別可能になる。
+  symbols: ['NZDCHF'],
   timeframe: '15m',
   higherTimeframe: '4h',      // MTF上位足: 4時間足
   monitorIntervalMs: 60 * 60 * 1000,  // 1時間間隔（高安値ベース検証）
@@ -463,7 +467,7 @@ export class SideBScheduler {
    * envOverrides.symbols) があれば動的取得をスキップして指定値を尊重する。
    *
    * 取得した symbol は `normalizeCTraderSymbol()` で正規化済 (= スラッシュ無し大文字)。
-   * Watchlist が空 / 取得失敗の場合は DEFAULT_CONFIG.symbols (= ['XAUUSD']) を維持。
+   * Watchlist が空 / 取得失敗の場合は DEFAULT_CONFIG.symbols (= ['NZDCHF']、= マイナー通貨で fallback と分かる) を維持。
    */
   private async resolveWatchlistSymbolsIfNeeded(): Promise<void> {
     if (this.explicitSymbolsOverride) {
