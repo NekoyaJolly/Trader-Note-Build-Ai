@@ -154,18 +154,18 @@
           <td>マージ済、SideBController API 経由の symbols 明示指定が `explicitSymbolsOverride` で尊重される</td>
         </tr>
         <tr>
-          <td><span class="tag warn">P2</span></td>
-          <td>運用衛生</td>
-          <td>`data/evolution/strategy-population.json.bak.*` バックアップ 12 個が untracked のまま放置。<code>.gitignore</code> 未制御で IDE 上のノイズ大</td>
-          <td><code>git status</code> 出力 / `find data -name '*.bak*'` = 12 件</td>
-          <td>`.gitignore` に `data/evolution/*.bak*` 追加、または `scripts/cleanup-evolution-bak.sh` で定期削除。1 PR で完結</td>
+          <td><span class="tag good">解消</span></td>
+          <td>運用衛生 (旧 P2)</td>
+          <td>2026-05-24 解消: `.gitignore` に <code>data/evolution/*.bak*</code> 追加 (commit <code>b51441f</code>)、untracked ノイズ 12 件消える</td>
+          <td>main 直 push 済</td>
+          <td>—</td>
         </tr>
         <tr>
-          <td><span class="tag warn">P2</span></td>
-          <td>Lint-fix PR 滞留</td>
-          <td>Open PR #174 / #190 / #192 / #195 / #197 / #199 / #201 (lint-fix bot 系) が 7 件未処理</td>
-          <td><code>gh pr list --state open</code> 結果</td>
-          <td>main 直 push で済む軽微なものは feedback memory <code>feedback_pr_vs_direct_push.md</code> 準拠でクローズ判断。残すなら自動マージ条件を再設定</td>
+          <td><span class="tag good">解消</span></td>
+          <td>Lint-fix PR 滞留 (旧 P2)</td>
+          <td>2026-05-24 確認: 全 7 件 (= #174 / #190 / #192 / #195 / #197 / #199 / #201) は既にクローズ済 (= 自然解消、おそらく自動マージ条件で消化)。Open PR は #248 のみ</td>
+          <td><code>gh pr list --state open</code> = #248 のみ</td>
+          <td>—</td>
         </tr>
       </tbody>
     </table>
@@ -364,9 +364,10 @@
       <li><strong>✅ Evolution MTF seed の上位足 hardcode 排除 (PR #246 マージ済 <code>f533837</code>)</strong>: <code>seedDescriptor.ts</code> の <code>'1h'</code> hardcode を <code>deriveHigherTimeframe(entryTf)</code> で entry timeframe から派生、<code>normalizeTimeframe</code> で表記ゆれ吸収。「仮説単一性」真因候補 #1 対応。</li>
       <li><strong>✅ Scheduler symbols hardcode 排除 (PR #247 マージ済 <code>ac93b8d</code>)</strong>: DEFAULT_CONFIG.symbols 表記統一 (<code>'XAU/USD'</code> → <code>'XAUUSD'</code>) + Watchlist 動的取得 + <code>updateConfig</code> 経由の明示指定対応 (<code>explicitSymbolsOverride</code>)。Nekoさん 原則「ハードコードしない、リストから選択」。</li>
       <li><strong>⏳ Phase B G2 仮説検証 (本番 24-72h 運用後)</strong>: Issue #239 で判断キュー中の <code>scripts/check/edge-hypothesis-not-testable-reasons.ts</code> を本番 Supabase に read-only 実行 → <code>not_testable</code> 5 経路別件数を取得。特に B 経路 (OHLCV 補完失敗) と A 経路 (symbols 未設定) の変化を観測。memory <code>project_phase_b_g2_hypothesis.md</code> 参照。</li>
-      <li><strong>helmet + rate-limit 導入</strong>: 最低品質ゲート。1 PR で完結。本日着手せず、仮説検証と並行可能。</li>
-      <li><strong>運用衛生</strong>: <code>.gitignore</code> に <code>data/evolution/*.bak.*</code> を追加 (現状 12 件 untracked)。lint-fix bot 系 Open PR 7 件をクローズ判断。</li>
-      <li><strong>軽微: fallback symbol をマイナー通貨に</strong>: scheduler / pdcaLoop の DEFAULT fallback (<code>'XAUUSD'</code>) を <code>'NZDCHF'</code> 等のマイナー通貨に変更 (= 一目で「fallback されてる」と分かるように)。memory <code>feedback_fallback_minor_symbol.md</code> 参照、重複実装回避のため Watchlist 連携の二重実装は避ける。</li>
+      <li><strong>⏳ helmet + rate-limit 導入</strong>: 最低品質ゲート。1 PR で完結。本日着手 (= 2026-05-24 セッションで C タスクとして着手予定)。</li>
+      <li><strong>✅ 運用衛生</strong>: <code>.gitignore</code> に <code>data/evolution/*.bak*</code> を追加 (commit <code>b51441f</code>)、12 件 untracked 解消済。Lint-fix bot 系 Open PR 7 件は自然解消済 (= Open PR は #248 のみ)。</li>
+      <li><strong>⏳ fallback symbol をマイナー通貨に</strong>: scheduler / pdcaLoop の DEFAULT fallback (<code>'XAUUSD'</code>) を <code>'NZDCHF'</code> に変更 PR 進行中 (= 2026-05-24 B タスク)。memory <code>feedback_fallback_minor_symbol.md</code> 反映。</li>
+      <li><strong>⏳ Top-Level Orchestrator MVP</strong>: PR #248 で実装、Copilot レビュー 12 件対応済、マージ待機中。env default OFF で既存挙動互換、Phase 2/3 で dev → 本番ロールアウト予定。設計書: <code>docs/architecture/TOP_LEVEL_ORCHESTRATOR_DESIGN.md</code></li>
     </ul>
 
     <h3>10.2 中期: 1〜2 か月</h3>
