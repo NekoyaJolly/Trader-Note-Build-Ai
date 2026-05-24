@@ -103,6 +103,15 @@ export const DEFAULT_SEED_ENTRIES: SeedEntry[] = [
     file: 'research.md',
     notes: 'Phase 5.5 researchAIService (= MarketAnalyst、aiOrchestrator 多段の段1)',
   },
+  // Phase B+ (2026-05-24): Top-Level Orchestrator
+  // Cron 起動時に「次にどのループを回すか」だけを LLM 判断する薄い最上位層。
+  // 旧 AgentLoop の轍 (= 1 LLM で PDCA 全部 → 機能せず PR #231 撤去) を踏まないため、
+  // 責務を action 選択のみに限定し、実行は既存 Job に委ねる。
+  {
+    agentName: 'top_level_orchestrator',
+    file: 'top_level_orchestrator.md',
+    notes: 'Phase B+ TopLevelOrchestrator (= 薄い最上位判断層、Cron 起動経路に挿入)',
+  },
 ];
 
 export interface SeedResult {

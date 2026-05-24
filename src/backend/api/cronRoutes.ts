@@ -71,8 +71,16 @@ router.get('/side-b/daily-plan', async (_req: Request, res: Response) => {
   try {
     console.log('[Cron] 日次プラン生成を開始します');
 
-    // 市場開場チェック
-    if (!isFXMarketOpen()) {
+    const scheduler = getSideBScheduler();
+    const orchestratorEnabled = process.env.TOP_LEVEL_ORCHESTRATOR_ENABLED === 'true';
+
+    // 市場開場チェック (PR #248 Copilot review #7 対応):
+    // Orchestrator 経路では action が screening / evolution / wait の場合は市場開場と無関係に
+    // 進められるため、ここでの早期 return は **しない** (= Orchestrator 側 / 各 Job 内部で
+    // 必要に応じて market gate を適用)。
+    // 旧 (= Orchestrator OFF) 経路は従来通り `runDailyPlanNow` だけ呼ばれるため、
+    // ここで早期 return する (= planGenerationJob は市場開場必須)。
+    if (!orchestratorEnabled && !isFXMarketOpen()) {
       const marketStatus = getMarketStatusJST();
       console.log('[Cron] 市場休場のためスキップ:', marketStatus.message);
       res.json({
@@ -85,8 +93,31 @@ router.get('/side-b/daily-plan', async (_req: Request, res: Response) => {
       return;
     }
 
-    // スケジューラーから日次プランを実行
-    const scheduler = getSideBScheduler();
+    // Phase B+ (2026-05-24): TOP_LEVEL_ORCHESTRATOR_ENABLED=true なら、
+    // Top-Level Orchestrator が「次にどのループを回すか」を LLM 判断し、判断結果に応じて
+    // 既存 Job (planGeneration / screening / fullValidation / evolution) を委ねて呼ぶ。
+    // env false (default) は従来通り runDailyPlanNow を直接呼ぶ (= 既存挙動互換)。
+    // 設計書: docs/architecture/TOP_LEVEL_ORCHESTRATOR_DESIGN.md
+    if (orchestratorEnabled) {
+      console.log('[Cron] TopLevelOrchestrator 経由でサイクル実行');
+      const orchResult = await scheduler.runOrchestratedCycle('cron');
+      res.json({
+        success: true,
+        message: orchResult.output
+          ? `Orchestrator action=${orchResult.output.action} (${orchResult.executedJobs.length} jobs)`
+          : `Orchestrator strictBlocked: ${orchResult.strictBlockedReason ?? 'unknown'}`,
+        data: {
+          action: orchResult.output?.action ?? null,
+          reasoning: orchResult.output?.reasoning ?? null,
+          executedJobs: orchResult.executedJobs,
+          strictBlockedReason: orchResult.strictBlockedReason ?? null,
+        },
+        duration: Date.now() - startTime,
+      });
+      return;
+    }
+
+    // スケジューラーから日次プランを実行 (既存経路)
     const result = await scheduler.runDailyPlanNow();
 
     console.log('[Cron] 日次プラン生成完了:', result.message);

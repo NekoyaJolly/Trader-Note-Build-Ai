@@ -104,6 +104,8 @@ export type AIAgentKey =
   | 'ai_note'
   // Side-A AI サマリ (aiSummaryService) — トレード履歴の要約
   | 'ai_summary'
+  // Phase B+ (2026-05-24): Top-Level Orchestrator — 「次にどのループを回すか」の薄い判断層
+  | 'top_level_orchestrator'
   // Side-A 強化版 AI サマリ (enhancedAISummaryService) — マルチモーダル / 拡張プロンプト
   | 'ai_summary_enhanced'
   // 推論サービス (decisionInferenceService) — 判断推論の説明生成
@@ -202,6 +204,9 @@ export const config = {
       // パターン分析 — 旧ハードコード 'gpt-4o-mini' を撤去し、AI_MODEL_OVERRIDE_ALL が効くよう modelFor 経由に統一
       pattern_analysis:
         process.env.AI_MODEL_PATTERN_ANALYSIS || 'google/gemini-3.1-flash-lite-preview',
+      // Phase B+ (2026-05-24): Top-Level Orchestrator — 「次にどのループを回すか」だけ判断する軽量層、Haiku 4.5 既定
+      top_level_orchestrator:
+        process.env.AI_MODEL_TOP_LEVEL_ORCHESTRATOR || 'anthropic/claude-haiku-4.5',
     } as Record<AIAgentKey, string>,
   },
   market: {
