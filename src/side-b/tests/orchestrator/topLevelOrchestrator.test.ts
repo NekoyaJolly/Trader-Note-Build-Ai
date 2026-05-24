@@ -284,15 +284,26 @@ describe('TopLevelOrchestrator.dispatchAction (= LLM mock で action 別 dispatc
   }
 
   function makePrismaMock(): unknown {
-    // 最低限のスタブ (= decideAndExecute 内部の prisma 呼び出しを全て 0/空で返す)
+    // 最低限のスタブ (= decideAndExecute 内部の prisma 呼び出しを全て 0/空で返す)。
+    // Phase 2 (2026-05-24): AgentRun の create/update + AgentRunStep の create/findMany を追加。
     const groupBy = jest.fn().mockResolvedValue([]);
     const count = jest.fn().mockResolvedValue(0);
     const findFirst = jest.fn().mockResolvedValue(null);
     const findMany = jest.fn().mockResolvedValue([]);
+    // AgentRun.create は dummy run record を返す (= id だけ使われる)
+    const agentRunCreate = jest.fn().mockResolvedValue({
+      id: '00000000-0000-0000-0000-000000000001',
+      status: 'pending',
+      startedAt: new Date(),
+    });
+    const agentRunUpdate = jest.fn().mockResolvedValue({});
+    const agentRunStepCreate = jest.fn().mockResolvedValue({});
+    const agentRunStepFindMany = jest.fn().mockResolvedValue([]);
     return {
       edgeHypothesis: { groupBy, count },
       evolutionBacktestRun: { count, findFirst },
-      agentRun: { findMany },
+      agentRun: { findMany, create: agentRunCreate, update: agentRunUpdate },
+      agentRunStep: { create: agentRunStepCreate, findMany: agentRunStepFindMany },
     };
   }
 
@@ -455,7 +466,15 @@ describe('TopLevelOrchestrator.dispatchAction (= LLM mock で action 別 dispatc
         count: jest.fn().mockResolvedValue(0),
         findFirst: jest.fn().mockResolvedValue(null),
       },
-      agentRun: { findMany: jest.fn().mockResolvedValue([]) },
+      agentRun: {
+        findMany: jest.fn().mockResolvedValue([]),
+        create: jest.fn().mockResolvedValue({ id: '00000000-0000-0000-0000-000000000002' }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      agentRunStep: {
+        create: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
     };
     // LLM が blocked action='create_hypothesis' を選ぶ (= ルール無視)
     const aiProvider = {
@@ -499,6 +518,81 @@ describe('TopLevelOrchestrator.dispatchAction (= LLM mock で action 別 dispatc
     // フェンスが剥がれて parse 成功
     expect(result.output?.action).toBe('wait');
     expect(result.output?.reasoning).toBe('fenced');
+  });
+
+  it('Phase 2: 成功時に AgentRun.create (status=pending) + update (status=succeeded) が呼ばれる', async () => {
+    const invokers = makeInvokerMocks();
+    const prismaMock = makePrismaMock() as {
+      agentRun: { create: jest.Mock; update: jest.Mock };
+      agentRunStep: { create: jest.Mock };
+    };
+    const orchestrator = new TopLevelOrchestrator({
+      prisma: prismaMock as never,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      aiProvider: makeAiProviderMock('wait') as any,
+      jobInvokers: invokers,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      promptRegistry: { getCompositeActive: async () => 'sys' } as any,
+    });
+    await orchestrator.decideAndExecute('test');
+
+    // AgentRun が pending で作られた
+    expect(prismaMock.agentRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        kind: 'top_level_orchestrator',
+        triggeredBy: 'test',
+        status: 'pending',
+      }),
+    });
+    // 完了時に succeeded で update された
+    expect(prismaMock.agentRun.update).toHaveBeenCalledWith({
+      where: { id: '00000000-0000-0000-0000-000000000001' },
+      data: expect.objectContaining({
+        status: 'succeeded',
+        finishedAt: expect.any(Date),
+        summary: expect.stringContaining('action=wait'),
+      }),
+    });
+    // AgentRunStep に判断履歴が保存された
+    expect(prismaMock.agentRunStep.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        runId: '00000000-0000-0000-0000-000000000001',
+        stepName: 'decide',
+        status: 'succeeded',
+        summary: expect.stringContaining('action=wait'),
+      }),
+    });
+  });
+
+  it('Phase 2: LLM 例外時は AgentRun.update (status=failed, errorCode=fatal_*) が呼ばれて throw', async () => {
+    const invokers = makeInvokerMocks();
+    const prismaMock = makePrismaMock() as {
+      agentRun: { create: jest.Mock; update: jest.Mock };
+    };
+    // LLM が必ず throw する mock
+    const aiProvider = {
+      chat: jest.fn().mockRejectedValue(new Error('LLM API down')),
+    };
+    const orchestrator = new TopLevelOrchestrator({
+      prisma: prismaMock as never,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      aiProvider: aiProvider as any,
+      jobInvokers: invokers,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      promptRegistry: { getCompositeActive: async () => 'sys' } as any,
+    });
+
+    await expect(orchestrator.decideAndExecute('test')).rejects.toThrow(/LLM API down/);
+
+    // 失敗時 update が呼ばれた、fatal_ プレフィックスで isFatal 判定可能に
+    expect(prismaMock.agentRun.update).toHaveBeenCalledWith({
+      where: { id: '00000000-0000-0000-0000-000000000001' },
+      data: expect.objectContaining({
+        status: 'failed',
+        errorCode: 'fatal_decideAndExecute',
+        errorMessage: expect.stringContaining('LLM API down'),
+      }),
+    });
   });
 
   it('LLM 出力が schema 違反なら throw (Zod)', async () => {

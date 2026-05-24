@@ -153,6 +153,36 @@ function parseRateLimitEnv(raw: string | undefined, defaultValue: number, log: (
 }
 
 /**
+ * Phase 2 (2026-05-24): Prisma `AgentRunStatus` enum (= pending/running/succeeded/
+ * failed/skipped/cancelled) を rules モジュールの論理 status (= running/completed/
+ * failed/blocked) にマップする。
+ *
+ * - pending / running → 'running' (= まだ動いてる)
+ * - succeeded / skipped → 'completed' (= 完走、成功扱い)
+ * - cancelled → 'blocked' (= strictBlocked or token-budget で閉じた run)
+ * - failed → 'failed' (= 例外で閉じた run)
+ */
+function mapAgentRunStatusToRuleStatus(
+  status: string,
+): 'running' | 'completed' | 'failed' | 'blocked' {
+  switch (status) {
+    case 'pending':
+    case 'running':
+      return 'running';
+    case 'succeeded':
+    case 'skipped':
+      return 'completed';
+    case 'cancelled':
+      return 'blocked';
+    case 'failed':
+      return 'failed';
+    default:
+      // 想定外の Prisma enum 拡張時は 'completed' に倒して安全側
+      return 'completed';
+  }
+}
+
+/**
  * PR #248 Copilot review #4/#10 対応: LLM 応答からコードフェンス (```json ... ```) を
  * 剥がして生 JSON を抽出する。fence が無ければ元文字列を返す。
  */
@@ -207,61 +237,140 @@ export class TopLevelOrchestrator {
    * 1 サイクル実行: 入力収集 → 禁止事項 check → LLM 判断 → 実行。
    *
    * trigger='cron' が通常経路。'manual' は SideBController API 経由。'test' は unit test。
+   *
+   * Phase 2 (2026-05-24): AgentRun の永続化を追加。
+   *   - サイクル開始時に AgentRun.create (status='pending')
+   *   - LLM 判断後に AgentRunStep.create (= 判断履歴)
+   *   - サイクル完了時に AgentRun.update (status='succeeded' / 'cancelled' / 'failed')
+   *   - 例外時は AgentRun.update (status='failed', errorCode='fatal_*', errorMessage=...)
+   *
+   * これにより `fetchRecentAgentRuns` が実データを返し、禁止事項 #1 (連続 3 fatal) /
+   * #3 (連打) / #6 (running 競合) が実運用で発火するようになる。
    */
   async decideAndExecute(
     trigger: 'cron' | 'manual' | 'test' = 'cron',
   ): Promise<TopLevelOrchestratorResult> {
-    const input = await this.collectInput(trigger);
-
-    // 禁止事項 check (= LLM 呼び出し前)
-    const ruleResult = evaluateInputRules(
-      {
-        recentAgentRuns: await this.fetchRecentAgentRuns(),
-        edgeLedgerByStatus: input.edgeLedger.byStatus,
-        now: new Date(),
+    // Phase 2: サイクル開始時に AgentRun を作成 (status='pending')
+    const agentRun = await this.prisma.agentRun.create({
+      data: {
+        kind: AGENT_RUN_KIND,
+        triggeredBy: trigger,
+        status: 'pending',
+        startedAt: new Date(),
       },
-      this.rateLimitPerHour,
-    );
+    });
 
-    if (ruleResult.strictBlocked) {
-      const reason = ruleResult.strictBlockedReason ?? 'unknown';
-      this.log(`strictBlocked → wait (${reason})`);
-      return { output: null, strictBlockedReason: reason, executedJobs: [] };
+    try {
+      const input = await this.collectInput(trigger);
+
+      // 禁止事項 check (= LLM 呼び出し前)。fetchRecentAgentRuns は **自身を除外** するため、
+      // 直前に作成した自分の AgentRun (= agentRun.id) を除外したリストを使う。
+      const ruleResult = evaluateInputRules(
+        {
+          recentAgentRuns: await this.fetchRecentAgentRuns(agentRun.id),
+          edgeLedgerByStatus: input.edgeLedger.byStatus,
+          now: new Date(),
+        },
+        this.rateLimitPerHour,
+      );
+
+      if (ruleResult.strictBlocked) {
+        const reason = ruleResult.strictBlockedReason ?? 'unknown';
+        this.log(`strictBlocked → wait (${reason})`);
+        // AgentRun を 'cancelled' で閉じる (= DB enum に 'blocked' は無いので summary で表現)
+        await this.prisma.agentRun.update({
+          where: { id: agentRun.id },
+          data: {
+            status: 'cancelled',
+            finishedAt: new Date(),
+            summary: `blocked: ${reason}`,
+          },
+        });
+        return { output: null, strictBlockedReason: reason, executedJobs: [] };
+      }
+
+      // blockedActions を input に反映
+      input.blockedActions = Array.from(ruleResult.blockedActions);
+      input.blockedReasons = ruleResult.blockedReasons;
+
+      // LLM 判断
+      const llmStartedAt = new Date();
+      let output = await this.invokeLlm(input);
+
+      // PR #248 Copilot review #2 対応: LLM が blockedActions を無視した場合、
+      // 機械的に 'wait' に強制する (= 禁止事項 #4 が確実に enforce される)。
+      if (ruleResult.blockedActions.has(output.action)) {
+        const reason = ruleResult.blockedReasons[output.action] ?? 'blocked action';
+        this.log(`LLM が blocked action=${output.action} を選んだ → 'wait' に強制 (${reason})`);
+        output = {
+          action: 'wait',
+          reasoning: `機械的に 'wait' に強制 (LLM 選択=${output.action}、理由: ${reason})`,
+        };
+      }
+
+      // Phase 2: 判断結果を AgentRunStep に保存 (= recentDecisions 取得用)
+      await this.prisma.agentRunStep.create({
+        data: {
+          runId: agentRun.id,
+          stepName: 'decide',
+          status: 'succeeded',
+          startedAt: llmStartedAt,
+          finishedAt: new Date(),
+          summary: `action=${output.action} reasoning=${output.reasoning.slice(0, 400)}`,
+        },
+      });
+
+      // 出力後 check (= 禁止事項 #2 トークン推定)
+      const estimatedTokens = JSON.stringify(input).length / 4 + JSON.stringify(output).length / 4;
+      const tokenCheck = checkLlmTokenBudget(Math.ceil(estimatedTokens));
+      if (tokenCheck.blocked) {
+        this.log(`token budget exceeded → wait に切替 (${tokenCheck.reason})`);
+        const tokenWait: TopLevelOrchestratorOutput = {
+          action: 'wait',
+          reasoning: tokenCheck.reason ?? 'token budget',
+        };
+        await this.prisma.agentRun.update({
+          where: { id: agentRun.id },
+          data: {
+            status: 'cancelled',
+            finishedAt: new Date(),
+            summary: `token-budget-exceeded: ${tokenCheck.reason}`,
+          },
+        });
+        return { output: tokenWait, executedJobs: [] };
+      }
+
+      // dispatchAction
+      const executedJobs = await this.dispatchAction(output);
+      this.log(`action=${output.action} 完了、executed=${executedJobs.join(',')}`);
+
+      // AgentRun を 'succeeded' で閉じる
+      await this.prisma.agentRun.update({
+        where: { id: agentRun.id },
+        data: {
+          status: 'succeeded',
+          finishedAt: new Date(),
+          summary: `action=${output.action} executed=[${executedJobs.join(',')}]`,
+        },
+      });
+
+      return { output, executedJobs };
+    } catch (err) {
+      // Phase 2: 例外時は 'failed' + errorCode='fatal_decideAndExecute' で AgentRun を閉じる。
+      // 'fatal_' プレフィックスは禁止事項 #1 (連続 3 fatal) の判定に使われる。
+      const errMessage = err instanceof Error ? err.message : String(err);
+      this.log(`decideAndExecute 例外: ${errMessage}`);
+      await this.prisma.agentRun.update({
+        where: { id: agentRun.id },
+        data: {
+          status: 'failed',
+          finishedAt: new Date(),
+          errorCode: 'fatal_decideAndExecute',
+          errorMessage: errMessage.slice(0, 500),
+        },
+      });
+      throw err;
     }
-
-    // blockedActions を input に反映
-    input.blockedActions = Array.from(ruleResult.blockedActions);
-    input.blockedReasons = ruleResult.blockedReasons;
-
-    // LLM 判断
-    let output = await this.invokeLlm(input);
-
-    // PR #248 Copilot review #2 対応: LLM が blockedActions を無視した場合、
-    // 機械的に 'wait' に強制する (= 禁止事項 #4 が確実に enforce される)。
-    if (ruleResult.blockedActions.has(output.action)) {
-      const reason = ruleResult.blockedReasons[output.action] ?? 'blocked action';
-      this.log(`LLM が blocked action=${output.action} を選んだ → 'wait' に強制 (${reason})`);
-      output = {
-        action: 'wait',
-        reasoning: `機械的に 'wait' に強制 (LLM 選択=${output.action}、理由: ${reason})`,
-      };
-    }
-
-    // 出力後 check (= 禁止事項 #2 トークン推定)
-    const estimatedTokens = JSON.stringify(input).length / 4 + JSON.stringify(output).length / 4;
-    const tokenCheck = checkLlmTokenBudget(Math.ceil(estimatedTokens));
-    if (tokenCheck.blocked) {
-      this.log(`token budget exceeded → wait に切替 (${tokenCheck.reason})`);
-      return {
-        output: { action: 'wait', reasoning: tokenCheck.reason ?? 'token budget' },
-        executedJobs: [],
-      };
-    }
-
-    // dispatchAction
-    const executedJobs = await this.dispatchAction(output);
-    this.log(`action=${output.action} 完了、executed=${executedJobs.join(',')}`);
-    return { output, executedJobs };
   }
 
   /**
@@ -307,8 +416,10 @@ export class TopLevelOrchestrator {
       select: { createdAt: true },
     });
 
-    // 自身の直近 5 件の判断履歴 (= AgentRunStep 経由、本 PR では空配列で代用)
-    const recentDecisions: TopLevelOrchestratorInput['recentDecisions'] = [];
+    // Phase 2 (2026-05-24): 直近 5 件の判断履歴を AgentRunStep から取得。
+    // `stepName='decide'` でフィルタし、summary に `action=X reasoning=Y` 形式で
+    // 保存された値を parse して構造化して返す。
+    const recentDecisions = await this.fetchRecentDecisions(5);
 
     return {
       trigger,
@@ -341,22 +452,67 @@ export class TopLevelOrchestrator {
   }
 
   /**
-   * 自身の AgentRun 直近を取得 (PR #248 Copilot review #1 対応)。
+   * Phase 2 (2026-05-24): 自身の直近 N 件の判断履歴を AgentRunStep から取得。
    *
-   * `AgentRun.kind = 'top_level_orchestrator'` でフィルタした直近 24h の run を、
-   * finishedAt 降順で 20 件取得。ここで取得した結果が:
+   * `AgentRunStep` で `stepName='decide'` かつ親 AgentRun が `kind='top_level_orchestrator'`
+   * のものを取得。summary は `decideAndExecute` で `action=X reasoning=Y` 形式に
+   * 保存しているので、それを parse して構造化する。
+   */
+  private async fetchRecentDecisions(
+    limit: number,
+  ): Promise<TopLevelOrchestratorInput['recentDecisions']> {
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const steps = await this.prisma.agentRunStep.findMany({
+      where: {
+        stepName: 'decide',
+        startedAt: { gte: dayAgo },
+        run: { kind: AGENT_RUN_KIND },
+      },
+      orderBy: { startedAt: 'desc' },
+      take: limit,
+      select: { startedAt: true, summary: true },
+    });
+
+    return steps.map((s) => {
+      const summary = s.summary ?? '';
+      // 'action=X reasoning=Y' の単純 parse (= 失敗時は wait + summary 全文を reasoning に格納)
+      const actionMatch = summary.match(/^action=([a-z_]+)/);
+      const reasoningMatch = summary.match(/reasoning=(.+)$/);
+      const action = (actionMatch?.[1] ?? 'wait') as TopLevelAction;
+      const reasoning = reasoningMatch?.[1] ?? summary;
+      return {
+        decidedAt: s.startedAt.toISOString(),
+        action,
+        reasoning,
+      };
+    });
+  }
+
+  /**
+   * 自身の AgentRun 直近を取得 (Phase 2: 2026-05-24 で実データ取得を完成)。
+   *
+   * `AgentRun.kind = 'top_level_orchestrator'` でフィルタした直近 24h の run を
+   * startedAt 降順で 20 件取得。ここで取得した結果が:
    *   - 連続 3 fatal → 禁止事項 #1 (強制 'wait')
    *   - 1h 内 4 回起動 → 禁止事項 #3 (連打防止)
    *   - running が混在 → 禁止事項 #6 (競合防止)
    * の判定に使われる。
    *
-   * 注意 (本 PR の MVP 制約): Top-Level Orchestrator 自身の AgentRun への
-   * **書き込み** は本 PR では未実装 (= Phase 2 で RunLedgerService 経由で追加予定)。
-   * そのため env=true で実運用しても、書き込みが無ければ取得結果は空のまま、
-   * 禁止事項 #1/#3/#6 は実質発火しない。env=true は Phase 2 (= 書き込み実装) と
-   * セットで有効化することを設計書 / PR description で明示。
+   * `excludeRunId` は自身の AgentRun (= サイクル開始時に create したもの) を除外する
+   * ための ID。これがないと「自身の running を見て #6 で常に強制 wait」になる。
+   *
+   * Prisma `AgentRunStatus` enum (= pending/running/succeeded/failed/skipped/cancelled)
+   * を rules の論理型 (= running/completed/failed/blocked) にマップ:
+   *   - pending / running → 'running'
+   *   - succeeded / skipped → 'completed'
+   *   - cancelled → 'blocked' (= strictBlocked / token-budget で閉じた run)
+   *   - failed → 'failed'
+   *
+   * `isFatal` 判定: status='failed' かつ errorCode が 'fatal_' プレフィックス。
    */
-  private async fetchRecentAgentRuns(): Promise<
+  private async fetchRecentAgentRuns(
+    excludeRunId?: string,
+  ): Promise<
     Array<{ finishedAt: Date | null; status: 'running' | 'completed' | 'failed' | 'blocked'; isFatal: boolean }>
   > {
     const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -364,6 +520,7 @@ export class TopLevelOrchestrator {
       where: {
         kind: AGENT_RUN_KIND,
         startedAt: { gte: dayAgo },
+        ...(excludeRunId ? { id: { not: excludeRunId } } : {}),
       },
       orderBy: { startedAt: 'desc' },
       take: 20,
@@ -371,14 +528,8 @@ export class TopLevelOrchestrator {
     });
     return rows.map((r) => ({
       finishedAt: r.finishedAt,
-      // Prisma の AgentRunStatus enum を topLevelOrchestratorRules の status に narrow
-      status: (r.status === 'pending' ? 'running' : r.status) as
-        | 'running'
-        | 'completed'
-        | 'failed'
-        | 'blocked',
-      // fatal 判定: errorCode が 'fatal' プレフィックス or status='failed'
-      isFatal: r.status === 'failed' || (r.errorCode?.startsWith('fatal') ?? false),
+      status: mapAgentRunStatusToRuleStatus(r.status),
+      isFatal: r.status === 'failed' && (r.errorCode?.startsWith('fatal') ?? false),
     }));
   }
 
