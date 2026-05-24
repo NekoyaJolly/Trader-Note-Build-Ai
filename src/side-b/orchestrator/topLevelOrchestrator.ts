@@ -19,7 +19,7 @@
  */
 
 import { z } from 'zod';
-import type { PrismaClient } from '@prisma/client';
+import type { AgentRunStatus, PrismaClient } from '@prisma/client';
 
 import { AIProvider } from '../agent/aiProvider';
 import { modelFor } from '../../config';
@@ -163,8 +163,11 @@ function parseRateLimitEnv(raw: string | undefined, defaultValue: number, log: (
  * - failed → 'failed' (= 例外で閉じた run)
  */
 function mapAgentRunStatusToRuleStatus(
-  status: string,
+  status: AgentRunStatus,
 ): 'running' | 'completed' | 'failed' | 'blocked' {
+  // PR #252 Copilot review #1: 引数を Prisma enum 型で受ける (型安全化)。
+  // default fallback は **'running'** に倒す (= 想定外の enum 拡張時に「進行中扱い」で
+  // 禁止事項 #6 競合防止を発火させる方が安全。'completed' だと検出漏れリスク)。
   switch (status) {
     case 'pending':
     case 'running':
@@ -176,9 +179,13 @@ function mapAgentRunStatusToRuleStatus(
       return 'blocked';
     case 'failed':
       return 'failed';
-    default:
-      // 想定外の Prisma enum 拡張時は 'completed' に倒して安全側
-      return 'completed';
+    default: {
+      // 想定外 enum 拡張時は 'running' に倒す (= 安全側、#6 で blocking)
+      // exhaustiveness check で switch 漏れを TypeScript で検出
+      const _exhaustive: never = status;
+      void _exhaustive;
+      return 'running';
+    }
   }
 }
 
@@ -308,19 +315,9 @@ export class TopLevelOrchestrator {
         };
       }
 
-      // Phase 2: 判断結果を AgentRunStep に保存 (= recentDecisions 取得用)
-      await this.prisma.agentRunStep.create({
-        data: {
-          runId: agentRun.id,
-          stepName: 'decide',
-          status: 'succeeded',
-          startedAt: llmStartedAt,
-          finishedAt: new Date(),
-          summary: `action=${output.action} reasoning=${output.reasoning.slice(0, 400)}`,
-        },
-      });
-
       // 出力後 check (= 禁止事項 #2 トークン推定)
+      // PR #252 Copilot review #2 対応: AgentRunStep 作成は token budget check **後** に
+      // 移動 (= token budget 超過で実行されなかった判断を recentDecisions に残さない)。
       const estimatedTokens = JSON.stringify(input).length / 4 + JSON.stringify(output).length / 4;
       const tokenCheck = checkLlmTokenBudget(Math.ceil(estimatedTokens));
       if (tokenCheck.blocked) {
@@ -337,8 +334,23 @@ export class TopLevelOrchestrator {
             summary: `token-budget-exceeded: ${tokenCheck.reason}`,
           },
         });
+        // token budget 超過時の AgentRunStep は **記録しない** (= 実行されなかった判断は
+        // recentDecisions に残さない、PR #252 Copilot review #2 対応)
         return { output: tokenWait, executedJobs: [] };
       }
+
+      // 判断結果を AgentRunStep に保存 (= recentDecisions 取得用)。
+      // token budget pass 後 + dispatchAction 前に記録 (= 実際に実行される予定の判断のみ残す)
+      await this.prisma.agentRunStep.create({
+        data: {
+          runId: agentRun.id,
+          stepName: 'decide',
+          status: 'succeeded',
+          startedAt: llmStartedAt,
+          finishedAt: new Date(),
+          summary: `action=${output.action} reasoning=${output.reasoning.slice(0, 400)}`,
+        },
+      });
 
       // dispatchAction
       const executedJobs = await this.dispatchAction(output);
@@ -358,17 +370,25 @@ export class TopLevelOrchestrator {
     } catch (err) {
       // Phase 2: 例外時は 'failed' + errorCode='fatal_decideAndExecute' で AgentRun を閉じる。
       // 'fatal_' プレフィックスは禁止事項 #1 (連続 3 fatal) の判定に使われる。
+      //
+      // PR #252 Copilot review #4 対応: agentRun.update が失敗した場合に元の例外が
+      // マスクされないよう best-effort で update する (= update 失敗時は log のみ)。
       const errMessage = err instanceof Error ? err.message : String(err);
       this.log(`decideAndExecute 例外: ${errMessage}`);
-      await this.prisma.agentRun.update({
-        where: { id: agentRun.id },
-        data: {
-          status: 'failed',
-          finishedAt: new Date(),
-          errorCode: 'fatal_decideAndExecute',
-          errorMessage: errMessage.slice(0, 500),
-        },
-      });
+      try {
+        await this.prisma.agentRun.update({
+          where: { id: agentRun.id },
+          data: {
+            status: 'failed',
+            finishedAt: new Date(),
+            errorCode: 'fatal_decideAndExecute',
+            errorMessage: errMessage.slice(0, 500),
+          },
+        });
+      } catch (updateErr) {
+        // best-effort: AgentRun 更新失敗は log のみで握り潰して元エラーを優先的に throw
+        this.log(`AgentRun.update (failed status) も失敗、元エラーを優先 throw: ${String(updateErr)}`);
+      }
       throw err;
     }
   }
@@ -473,12 +493,17 @@ export class TopLevelOrchestrator {
       select: { startedAt: true, summary: true },
     });
 
+    // PR #252 Copilot review #3 対応: 文字列を `as TopLevelAction` で強制 cast する
+    // のではなく、TopLevelOrchestratorOutputSchema.shape.action (= z.enum) で検証してから
+    // 採用する。enum 外の値 (= 過去サマリ / 手動投入) は安全に 'wait' へフォールバック。
+    const actionSchema = TopLevelOrchestratorOutputSchema.shape.action;
     return steps.map((s) => {
       const summary = s.summary ?? '';
       // 'action=X reasoning=Y' の単純 parse (= 失敗時は wait + summary 全文を reasoning に格納)
       const actionMatch = summary.match(/^action=([a-z_]+)/);
       const reasoningMatch = summary.match(/reasoning=(.+)$/);
-      const action = (actionMatch?.[1] ?? 'wait') as TopLevelAction;
+      const parsedAction = actionSchema.safeParse(actionMatch?.[1]);
+      const action: TopLevelAction = parsedAction.success ? parsedAction.data : 'wait';
       const reasoning = reasoningMatch?.[1] ?? summary;
       return {
         decidedAt: s.startedAt.toISOString(),

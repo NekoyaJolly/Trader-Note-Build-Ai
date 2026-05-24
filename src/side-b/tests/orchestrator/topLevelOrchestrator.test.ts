@@ -595,6 +595,98 @@ describe('TopLevelOrchestrator.dispatchAction (= LLM mock で action 別 dispatc
     });
   });
 
+  it('PR #252 Copilot review #5: strictBlocked 経路で AgentRun が cancelled + summary=blocked: ... で閉じる', async () => {
+    const invokers = makeInvokerMocks();
+    const prismaMock = makePrismaMock() as {
+      agentRun: { create: jest.Mock; update: jest.Mock; findMany: jest.Mock };
+      agentRunStep: { create: jest.Mock };
+    };
+    // running の AgentRun を 1 件返す → 禁止事項 #6 (= 手動 running 中) で strictBlocked
+    // 自身の AgentRun (id='...001') は excludeRunId で除外されるので、別 id を使う
+    prismaMock.agentRun.findMany.mockResolvedValue([
+      {
+        id: '00000000-0000-0000-0000-000000000099',
+        status: 'running',
+        startedAt: new Date(),
+        finishedAt: null,
+        errorCode: null,
+      },
+    ]);
+
+    const orchestrator = new TopLevelOrchestrator({
+      prisma: prismaMock as never,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      aiProvider: makeAiProviderMock('wait') as any,
+      jobInvokers: invokers,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      promptRegistry: { getCompositeActive: async () => 'sys' } as any,
+    });
+
+    const result = await orchestrator.decideAndExecute('test');
+
+    // 出力は null (= strictBlocked)、jobs 実行なし
+    expect(result.output).toBeNull();
+    expect(result.strictBlockedReason).toBeDefined();
+    expect(result.executedJobs).toEqual([]);
+    // どの Job も呼ばれない
+    expect(invokers.counts).toEqual({ plan: 0, screening: 0, fullValidation: 0, evolution: 0 });
+
+    // AgentRun は cancelled + summary='blocked: ...' で閉じられた
+    expect(prismaMock.agentRun.update).toHaveBeenCalledWith({
+      where: { id: '00000000-0000-0000-0000-000000000001' },
+      data: expect.objectContaining({
+        status: 'cancelled',
+        finishedAt: expect.any(Date),
+        summary: expect.stringMatching(/^blocked: /),
+      }),
+    });
+    // strictBlocked では LLM 呼び出しもないので AgentRunStep は記録されない
+    expect(prismaMock.agentRunStep.create).not.toHaveBeenCalled();
+  });
+
+  it('PR #252 Copilot review #5: token-budget 超過時に AgentRun が cancelled + summary=token-budget-exceeded: ... で閉じる', async () => {
+    const invokers = makeInvokerMocks();
+    const prismaMock = makePrismaMock() as {
+      agentRun: { create: jest.Mock; update: jest.Mock };
+      agentRunStep: { create: jest.Mock };
+    };
+    // 100k token (= 400k 文字) 超の reasoning を返す mock LLM で禁止事項 #2 を発火
+    const hugeReasoning = 'x'.repeat(500_000);
+    const aiProvider = {
+      chat: jest.fn().mockResolvedValue({
+        content: JSON.stringify({ action: 'wait', reasoning: hugeReasoning }),
+        usage: { totalTokens: 100 },
+      }),
+    };
+
+    const orchestrator = new TopLevelOrchestrator({
+      prisma: prismaMock as never,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      aiProvider: aiProvider as any,
+      jobInvokers: invokers,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      promptRegistry: { getCompositeActive: async () => 'sys' } as any,
+    });
+
+    const result = await orchestrator.decideAndExecute('test');
+
+    // 強制 'wait' に切替、jobs 実行なし
+    expect(result.output?.action).toBe('wait');
+    expect(result.executedJobs).toEqual([]);
+
+    // AgentRun は cancelled + summary='token-budget-exceeded: ...' で閉じられた
+    expect(prismaMock.agentRun.update).toHaveBeenCalledWith({
+      where: { id: '00000000-0000-0000-0000-000000000001' },
+      data: expect.objectContaining({
+        status: 'cancelled',
+        finishedAt: expect.any(Date),
+        summary: expect.stringMatching(/^token-budget-exceeded: /),
+      }),
+    });
+    // token-budget 超過時の判断は recentDecisions に残さない (= PR #252 #2 対応)
+    expect(prismaMock.agentRunStep.create).not.toHaveBeenCalled();
+  });
+
   it('LLM 出力が schema 違反なら throw (Zod)', async () => {
     const invokers = makeInvokerMocks();
     const aiProvider = {
