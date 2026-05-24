@@ -21,12 +21,22 @@ router.post('/receive', validateBody(InboundMailSchema), async (req, res) => {
     const mailData = req.body as InboundMail;
     const handleResult = await mailService.handleInboundMail(mailData);
     if (!handleResult.success) {
-      return res.status(400).json({ error: handleResult.message });
+      const isAuthError = handleResult.message.includes('セキュリティトークン');
+      return res.status(isAuthError ? 403 : 400).json({
+        success: false,
+        error: handleResult.message,
+      });
     }
-    return res.status(200).json({ message: handleResult.message });
+    return res.status(200).json({
+      success: true,
+      message: handleResult.message,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
-    return res.status(500).json({ error: message });
+    return res.status(500).json({
+      success: false,
+      error: message,
+    });
   }
 });
 

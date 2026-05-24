@@ -1089,8 +1089,8 @@ export class SideBScheduler {
       // エラー検知ロジック
       const errors = (result.data as { errors?: string[] })?.errors || [];
       if (!result.success || errors.length > 0) {
-        const currentErrors = await this.systemStateRepository.getInt('consecutive_errors', 0) + 1;
-        await this.systemStateRepository.setInt('consecutive_errors', currentErrors);
+        const state = await this.systemStateRepository.increment('consecutive_errors');
+        const currentErrors = parseInt(state.value, 10);
         this.log(`監視ジョブでエラーが検出されました。連続エラー回数: ${currentErrors}`);
 
         if (currentErrors >= 3) {
@@ -1111,8 +1111,8 @@ export class SideBScheduler {
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      const currentErrors = await this.systemStateRepository.getInt('consecutive_errors', 0) + 1;
-      await this.systemStateRepository.setInt('consecutive_errors', currentErrors);
+      const state = await this.systemStateRepository.increment('consecutive_errors');
+      const currentErrors = parseInt(state.value, 10);
       this.log(`監視ジョブ実行中に例外が発生しました。連続エラー回数: ${currentErrors} - ${message}`);
 
       if (currentErrors >= 3) {

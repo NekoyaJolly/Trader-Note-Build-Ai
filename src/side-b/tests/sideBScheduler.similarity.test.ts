@@ -23,6 +23,9 @@ jest.mock('../repositories/systemStateRepository', () => ({
     getInt: jest.fn().mockResolvedValue(0),
     setInt: jest.fn().mockResolvedValue({}),
     delete: jest.fn().mockResolvedValue({ count: 0 }),
+    increment: jest.fn().mockImplementation((key: string) =>
+      Promise.resolve({ key, value: '1', updatedAt: new Date() })
+    ),
   })),
 }));
 

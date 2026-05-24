@@ -6,7 +6,7 @@
 
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { sideBApi } from "@/lib/sideBApi";
 import { formatPercent } from "@/lib/format";
@@ -131,6 +131,7 @@ export default function AgentDetailPage() {
     const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
     const [selectedRunDetail, setSelectedRunDetail] = useState<GetOrchestratorRunDetailResponse | null>(null);
     const [isDetailLoading, setIsDetailLoading] = useState(false);
+    const activeRunIdRef = useRef<string | null>(null);
 
     // 本番耐用化: キルスイッチと容量監視用の状態
     const [isEmergencyStopped, setIsEmergencyStopped] = useState(false);
@@ -236,17 +237,23 @@ export default function AgentDetailPage() {
         if (selectedRunId === runId) {
             setSelectedRunId(null);
             setSelectedRunDetail(null);
+            activeRunIdRef.current = null;
             return;
         }
         setSelectedRunId(runId);
+        activeRunIdRef.current = runId;
         setIsDetailLoading(true);
         try {
             const detail = await sideBApi.getOrchestratorRunDetail(runId);
-            setSelectedRunDetail(detail);
+            if (activeRunIdRef.current === runId) {
+                setSelectedRunDetail(detail);
+            }
         } catch (err) {
             console.error("fetchRunDetail error:", err);
         } finally {
-            setIsDetailLoading(false);
+            if (activeRunIdRef.current === runId) {
+                setIsDetailLoading(false);
+            }
         }
     };
 

@@ -10,7 +10,9 @@ import { prisma as defaultPrisma } from '../../backend/db/client';
 
 export type SystemStateKey = 'emergency_stop' | 'consecutive_errors' | 'last_db_alert_sent';
 
-type SystemStatePrisma = Pick<PrismaClient, 'systemState'>;
+type SystemStatePrisma = Pick<PrismaClient, 'systemState'> & {
+  $queryRawUnsafe?: PrismaClient['$queryRawUnsafe'];
+};
 
 export function createSystemStateRepository(client: SystemStatePrisma = defaultPrisma) {
   const get = async (key: SystemStateKey): Promise<string | null> => {
@@ -59,6 +61,28 @@ export function createSystemStateRepository(client: SystemStatePrisma = defaultP
     });
   };
 
+  const increment = async (key: SystemStateKey): Promise<SystemState> => {
+    // raw query でアトミックにインクリメントする（モック等でメソッドがない場合はフォールバック）
+    if (!client.$queryRawUnsafe) {
+      const current = await getInt(key, 0);
+      return setInt(key, current + 1);
+    }
+
+    const rows = await client.$queryRawUnsafe<SystemState[]>(`
+      INSERT INTO "SystemState" (key, value, "updatedAt")
+      VALUES ($1, '1', NOW())
+      ON CONFLICT (key)
+      DO UPDATE SET 
+        value = CASE 
+          WHEN "SystemState".value ~ '^[0-9]+$' THEN ("SystemState".value::integer + 1)::text
+          ELSE '1'
+        END,
+        "updatedAt" = NOW()
+      RETURNING *;
+    `, key);
+    return rows[0];
+  };
+
   return {
     get,
     getBoolean,
@@ -67,6 +91,7 @@ export function createSystemStateRepository(client: SystemStatePrisma = defaultP
     setBoolean,
     setInt,
     delete: deleteKey,
+    increment,
   };
 }
 

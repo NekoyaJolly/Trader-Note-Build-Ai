@@ -25,7 +25,7 @@ export class MailService {
 
     if (!host || !portStr || !user || !pass || !to) {
       console.warn('[MailService] SMTP設定が不足しているため、メール送信をスキップします。');
-      console.log(`[MailService] 送信予定メール - 件名: ${subject}, 本文: ${text}`);
+      console.log(`[MailService] 送信予定メール - 件名: ${subject}`);
       return false;
     }
 

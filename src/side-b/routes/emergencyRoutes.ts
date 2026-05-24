@@ -114,10 +114,10 @@ router.post('/stop', async (req, res) => {
             where: { id: trade.id },
             data: {
               status: 'closed',
-              exitPrice: trade.actualEntry ?? trade.plannedEntry, // 手動クローズなのでエントリー値(実エントリー優先)で決済したと仮定
+              exitPrice: null, // 強制クローズのため決済価格・損益は未確定（null）
               exitReason: 'manual_close',
-              pnlPips: 0,
-              pnlAmount: 0,
+              pnlPips: null,
+              pnlAmount: null,
               exitedAt: new Date(),
             },
           });
