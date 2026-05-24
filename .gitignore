@@ -17,6 +17,10 @@ data/notes/*.json
 data/notifications.json
 data/ohlcv/*.csv
 data/evolution/*.json
+# strategy-population.json の手動 / 自動バックアップ (= scripts/cleanup-evolution-bak.sh
+# 等で生成される .bak.<timestamp> 系)。2026-05-22 時点で 12 件 untracked 蓄積、
+# IDE / git status ノイズになっていたため除外 (memory `feedback_codebase_review_skill.md`)。
+data/evolution/*.bak*
 
 # Logs
 *.log
