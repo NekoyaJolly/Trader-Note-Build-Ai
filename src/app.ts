@@ -3,6 +3,8 @@ import express from 'express';
 import type { Server } from 'http';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import { config } from './config';
 import tradeRoutes from './backend/api/tradeRoutes';
 import matchingRoutes from './backend/api/matchingRoutes';
@@ -52,6 +54,23 @@ class App {
    * Initialize middlewares
    */
   private initializeMiddlewares(): void {
+    // 2026-05-24: セキュリティヘッダー (helmet)。memory `feedback_codebase_review_skill.md`
+    // で「最低品質ゲート」として追加。CSP は frontend (Next.js + lightweight-charts +
+    // last-mile-context) の inline script / eval を一部許容するため、開発時は緩めて
+    // 本番では NEXT 標準 nonce ベース CSP に頼る方針 (= ここでは contentSecurityPolicy=false)。
+    // X-Frame-Options / X-Content-Type-Options / Strict-Transport-Security 等の標準ヘッダーは付ける。
+    console.log('[App] helmet セキュリティヘッダーを設定中...');
+    this.app.use(
+      helmet({
+        // Phase 1: CSP は Next.js 側で管理 (= express 側で二重定義しない)
+        contentSecurityPolicy: false,
+        // 同一オリジン埋め込みは許可 (= TradeAssist 自身の iframe / SSR 想定)
+        crossOriginEmbedderPolicy: false,
+        // strict CORS 既定で同一オリジン以外からの埋め込みを拒否、ただし opener は許可
+        crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+      }),
+    );
+
     console.log('[App] CORS設定を初期化中...');
     // CORS設定: 開発環境と Vercel デプロイの両方を許可
     // 本番 Cloud Run 統合の同一オリジンリクエストは origin=undefined で自動許可
@@ -112,10 +131,22 @@ class App {
         });
       });
 
+      // 2026-05-24: auth route に rate-limit を適用 (= ログイン試行 / OAuth callback 連打防止)。
+      // memory `feedback_codebase_review_skill.md` で P1「helmet + rate-limit 導入」として追加。
+      // 制限: 15 分窓で 30 req/IP。Cloud Run 単一インスタンス内のメモリ store (= デフォルト)
+      // で十分 (= multi-instance 時は redis store に切替可、Phase 2 で必要なら追加)。
+      const authRateLimiter = rateLimit({
+        windowMs: 15 * 60 * 1000,
+        max: 30,
+        standardHeaders: true,
+        legacyHeaders: false,
+        message: { error: 'Too many auth requests, try again later' },
+      });
+
       // API routes
-      // cTrader OAuth 認証ルート（認証不要）
-      console.log('[App] /api/auth ルートを登録中...');
-      this.app.use('/api/auth', ctraderAuthRoutes);
+      // cTrader OAuth 認証ルート（認証不要、rate-limit 適用）
+      console.log('[App] /api/auth ルートを登録中 (rate-limit 適用)...');
+      this.app.use('/api/auth', authRateLimiter, ctraderAuthRoutes);
 
       // トレーディングルート（認証必須）
       console.log('[App] /api/trading ルートを登録中...');
