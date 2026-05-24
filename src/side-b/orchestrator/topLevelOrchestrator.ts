@@ -38,10 +38,13 @@ export type TopLevelAction =
   | 'run_all'
   | 'wait';
 
+/**
+ * PR #248 Copilot review #6 対応: 未使用フィールド (maxLlmTokens / timeoutMs) を削除し、
+ * 実際に dispatchAction で消費される `maxParallel` のみに絞る。将来 timeout / token
+ * 制御を導入したらフィールドを足す。
+ */
 const RunAllBudgetSchema = z.object({
   maxParallel: z.number().int().min(1).max(5),
-  maxLlmTokens: z.number().int().min(1000).max(200_000),
-  timeoutMs: z.number().int().min(10_000).max(60 * 60 * 1000),
 });
 
 export const TopLevelOrchestratorOutputSchema = z.object({
@@ -124,6 +127,42 @@ export interface TopLevelOrchestratorResult {
 }
 
 const PROMPT_NAME = 'top_level_orchestrator';
+/** PR #248 Copilot review #1: AgentRun から自身の履歴を取得する際の agentName 識別子 */
+const AGENT_RUN_KIND = 'top_level_orchestrator';
+/** PR #248 Copilot review #2: 既定の run_all budget (= LLM が指定しなかった時の fallback) */
+const DEFAULT_RUN_ALL_BUDGET: z.infer<typeof RunAllBudgetSchema> = { maxParallel: 3 };
+
+/**
+ * PR #248 Copilot review #3 対応: 環境変数の rate-limit 値を厳密パース。
+ * 不正値 (NaN / 負数 / 文字列) は warning を出して default にフォールバック。
+ * `evolutionJobConfig.ts:parseStrictInt` と同じ慣行に揃える。
+ */
+function parseRateLimitEnv(raw: string | undefined, defaultValue: number, log: (msg: string) => void): number {
+  if (raw === undefined) return defaultValue;
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    log(`TOP_LEVEL_ORCHESTRATOR_RATE_LIMIT_PER_HOUR='${raw}' は不正値、default=${defaultValue} を使用`);
+    return defaultValue;
+  }
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 1) {
+    log(`TOP_LEVEL_ORCHESTRATOR_RATE_LIMIT_PER_HOUR='${raw}' は不正値 (< 1)、default=${defaultValue} を使用`);
+    return defaultValue;
+  }
+  return n;
+}
+
+/**
+ * PR #248 Copilot review #4/#10 対応: LLM 応答からコードフェンス (```json ... ```) を
+ * 剥がして生 JSON を抽出する。fence が無ければ元文字列を返す。
+ */
+function stripCodeFence(content: string): string {
+  const trimmed = content.trim();
+  // ```json\n...\n``` または ```\n...\n```
+  const fencedMatch = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```\s*$/);
+  if (fencedMatch) return fencedMatch[1].trim();
+  return trimmed;
+}
 
 // ==========================================
 // 本体
@@ -142,10 +181,11 @@ export class TopLevelOrchestrator {
     this.aiProvider = deps.aiProvider ?? new AIProvider({ model: modelFor('top_level_orchestrator') });
     this._registry = deps.promptRegistry ?? null;
     this.jobInvokers = deps.jobInvokers;
+    this.log = deps.log ?? ((msg) => console.log(`[TopLevelOrchestrator] ${msg}`));
+    // PR #248 Copilot review #3: env を厳密パース、不正値は warning + default
     this.rateLimitPerHour =
       deps.rateLimitPerHour ??
-      Number(process.env.TOP_LEVEL_ORCHESTRATOR_RATE_LIMIT_PER_HOUR ?? '3');
-    this.log = deps.log ?? ((msg) => console.log(`[TopLevelOrchestrator] ${msg}`));
+      parseRateLimitEnv(process.env.TOP_LEVEL_ORCHESTRATOR_RATE_LIMIT_PER_HOUR, 3, this.log);
   }
 
   /**
@@ -194,7 +234,18 @@ export class TopLevelOrchestrator {
     input.blockedReasons = ruleResult.blockedReasons;
 
     // LLM 判断
-    const output = await this.invokeLlm(input);
+    let output = await this.invokeLlm(input);
+
+    // PR #248 Copilot review #2 対応: LLM が blockedActions を無視した場合、
+    // 機械的に 'wait' に強制する (= 禁止事項 #4 が確実に enforce される)。
+    if (ruleResult.blockedActions.has(output.action)) {
+      const reason = ruleResult.blockedReasons[output.action] ?? 'blocked action';
+      this.log(`LLM が blocked action=${output.action} を選んだ → 'wait' に強制 (${reason})`);
+      output = {
+        action: 'wait',
+        reasoning: `機械的に 'wait' に強制 (LLM 選択=${output.action}、理由: ${reason})`,
+      };
+    }
 
     // 出力後 check (= 禁止事項 #2 トークン推定)
     const estimatedTokens = JSON.stringify(input).length / 4 + JSON.stringify(output).length / 4;
@@ -290,16 +341,45 @@ export class TopLevelOrchestrator {
   }
 
   /**
-   * 自身の AgentRun 直近 (Top-Level Orchestrator 用、本 PR では空配列で代用)。
+   * 自身の AgentRun 直近を取得 (PR #248 Copilot review #1 対応)。
    *
-   * 将来: RunLedgerService 経由で `agentName='top_level_orchestrator'` に絞った
-   * AgentRun を直近 24h で取得。現状は禁止事項 check に最小限で対応するため空。
+   * `AgentRun.kind = 'top_level_orchestrator'` でフィルタした直近 24h の run を、
+   * finishedAt 降順で 20 件取得。ここで取得した結果が:
+   *   - 連続 3 fatal → 禁止事項 #1 (強制 'wait')
+   *   - 1h 内 4 回起動 → 禁止事項 #3 (連打防止)
+   *   - running が混在 → 禁止事項 #6 (競合防止)
+   * の判定に使われる。
+   *
+   * 注意 (本 PR の MVP 制約): Top-Level Orchestrator 自身の AgentRun への
+   * **書き込み** は本 PR では未実装 (= Phase 2 で RunLedgerService 経由で追加予定)。
+   * そのため env=true で実運用しても、書き込みが無ければ取得結果は空のまま、
+   * 禁止事項 #1/#3/#6 は実質発火しない。env=true は Phase 2 (= 書き込み実装) と
+   * セットで有効化することを設計書 / PR description で明示。
    */
-  // eslint-disable-next-line @typescript-eslint/require-await -- Phase B+ MVP では空配列で代用、将来 RunLedgerService 経由で実装すると async になる
   private async fetchRecentAgentRuns(): Promise<
     Array<{ finishedAt: Date | null; status: 'running' | 'completed' | 'failed' | 'blocked'; isFatal: boolean }>
   > {
-    return [];
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const rows = await this.prisma.agentRun.findMany({
+      where: {
+        kind: AGENT_RUN_KIND,
+        startedAt: { gte: dayAgo },
+      },
+      orderBy: { startedAt: 'desc' },
+      take: 20,
+      select: { finishedAt: true, status: true, errorCode: true },
+    });
+    return rows.map((r) => ({
+      finishedAt: r.finishedAt,
+      // Prisma の AgentRunStatus enum を topLevelOrchestratorRules の status に narrow
+      status: (r.status === 'pending' ? 'running' : r.status) as
+        | 'running'
+        | 'completed'
+        | 'failed'
+        | 'blocked',
+      // fatal 判定: errorCode が 'fatal' プレフィックス or status='failed'
+      isFatal: r.status === 'failed' || (r.errorCode?.startsWith('fatal') ?? false),
+    }));
   }
 
   /**
@@ -322,15 +402,14 @@ export class TopLevelOrchestrator {
       throw new Error('Top-Level Orchestrator: LLM 応答が空');
     }
 
-    // JSON parse + Zod 検証 (= Zod.safeParse は unknown を受け付けるので
-    // parse 戻り値 (= JsonValue 相当) をそのまま渡せる)
+    // PR #248 Copilot review #4/#10 対応: コードフェンス (```json ... ```) を剥がしてから
+    // JSON parse する (= LLM が prompt の指示を逸脱してフェンスで囲んでも壊れない)
+    const stripped = stripCodeFence(content);
     try {
-      // JSON.parse の戻り値は仕様上 any 扱いだが、直後の Zod parse で narrow される
-      // ため本コードでは中間変数の型注釈を付けない (= unknown キーワードを書かない)
-      return TopLevelOrchestratorOutputSchema.parse(JSON.parse(content));
+      return TopLevelOrchestratorOutputSchema.parse(JSON.parse(stripped));
     } catch (err) {
       throw new Error(
-        `Top-Level Orchestrator: JSON parse or schema 検証失敗: ${String(err)} content=${content.slice(0, 200)}`,
+        `Top-Level Orchestrator: JSON parse or schema 検証失敗: ${String(err)} content=${stripped.slice(0, 200)}`,
         { cause: err },
       );
     }
@@ -379,7 +458,10 @@ export class TopLevelOrchestrator {
         await safeInvoke('evolution', () => this.jobInvokers.runEvolution());
         return executed;
       case 'run_all': {
-        const budget = output.runAllBudget ?? { maxParallel: 3, maxLlmTokens: 50_000, timeoutMs: 600_000 };
+        // PR #248 Copilot review #5/#6/#9/#11 対応: runAllBudget は optional のまま
+        // 維持 (= スキーマ・プロンプト・テスト全部整合済)、未指定時は
+        // DEFAULT_RUN_ALL_BUDGET (= maxParallel=3) を使う
+        const budget = output.runAllBudget ?? DEFAULT_RUN_ALL_BUDGET;
         const tasks: Array<{ name: string; fn: () => Promise<void> }> = [
           { name: 'planGeneration', fn: () => this.jobInvokers.runPlanGeneration() },
           { name: 'screening', fn: () => this.jobInvokers.runScreening() },

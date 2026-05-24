@@ -98,7 +98,10 @@ export function checkLlmTokenBudget(estimatedTokens: number): {
 /**
  * Rule #3: 1h に 4 回以上起動 → 強制 'wait'
  *
- * 連打 / 暴走を防ぐ。recentAgentRuns の startedAt から 1h 以内の件数を数える。
+ * 連打 / 暴走を防ぐ。recentAgentRuns の **finishedAt** から 1h 以内の件数を数える
+ * (PR #248 Copilot review #12 対応: コメントと実装を finishedAt 基準で統一)。
+ * `running` 中 (= finishedAt=null) の run はここではカウントされない (= 競合は
+ * 別 rule #6 で別途強制 'wait' される)。
  * デフォルト上限は env `TOP_LEVEL_ORCHESTRATOR_RATE_LIMIT_PER_HOUR` で可変 (default 3、
  * = 4 回目以降を拒否)。
  */
@@ -108,9 +111,9 @@ export function checkRateLimit(
   limitPerHour: number = 3,
 ): { blocked: boolean; reason?: string } {
   const oneHourAgoMs = now.getTime() - 60 * 60 * 1000;
-  // finishedAt が null (= running 中) も含めて、直近 1h で起動された件数を数える
-  // (= recentAgentRuns は finishedAt or startedAt でフィルタ済前提だが、ここでは
-  //   finishedAt 基準で安全側に倒す)
+  // finishedAt 基準で直近 1h に完了した run の件数を数える (PR #248 Copilot review #12)。
+  // finishedAt=null (= running 中) は別 rule #6 (checkManualJobRunning) で扱うため、
+  // ここではカウントしない。
   const recentCount = recentAgentRuns.filter(
     (r) => r.finishedAt && r.finishedAt.getTime() >= oneHourAgoMs,
   ).length;

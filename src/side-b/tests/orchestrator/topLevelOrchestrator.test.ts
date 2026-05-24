@@ -206,8 +206,14 @@ describe('topLevelOrchestratorRules', () => {
 // ==========================================
 
 describe('TopLevelOrchestratorOutputSchema', () => {
-  it('valid な 5 action はすべて通る', () => {
-    const actions = ['create_hypothesis', 'advance_validation', 'run_evolution', 'wait'];
+  it('valid な 5 action はすべて通る (PR #248 Copilot review #8 修正: run_all 含む)', () => {
+    const actions = [
+      'create_hypothesis',
+      'advance_validation',
+      'run_evolution',
+      'run_all',
+      'wait',
+    ];
     for (const action of actions) {
       const result = TopLevelOrchestratorOutputSchema.safeParse({
         action,
@@ -217,7 +223,7 @@ describe('TopLevelOrchestratorOutputSchema', () => {
     }
   });
 
-  it('run_all は runAllBudget なしでも通る (= optional)', () => {
+  it('run_all は runAllBudget なしでも通る (= optional、PR #248 review #9 整合)', () => {
     const result = TopLevelOrchestratorOutputSchema.safeParse({
       action: 'run_all',
       reasoning: 'test',
@@ -225,11 +231,11 @@ describe('TopLevelOrchestratorOutputSchema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('runAllBudget の値域 (maxParallel 1-5) を強制', () => {
+  it('runAllBudget の値域 (maxParallel 1-5) を強制 (= 未使用フィールド削除済、PR #248 review #6)', () => {
     const result = TopLevelOrchestratorOutputSchema.safeParse({
       action: 'run_all',
       reasoning: 'test',
-      runAllBudget: { maxParallel: 10, maxLlmTokens: 50_000, timeoutMs: 60_000 },
+      runAllBudget: { maxParallel: 10 },
     });
     expect(result.success).toBe(false);
   });
@@ -282,9 +288,11 @@ describe('TopLevelOrchestrator.dispatchAction (= LLM mock で action 別 dispatc
     const groupBy = jest.fn().mockResolvedValue([]);
     const count = jest.fn().mockResolvedValue(0);
     const findFirst = jest.fn().mockResolvedValue(null);
+    const findMany = jest.fn().mockResolvedValue([]);
     return {
       edgeHypothesis: { groupBy, count },
       evolutionBacktestRun: { count, findFirst },
+      agentRun: { findMany },
     };
   }
 
@@ -368,7 +376,7 @@ describe('TopLevelOrchestrator.dispatchAction (= LLM mock で action 別 dispatc
         content: JSON.stringify({
           action: 'run_all',
           reasoning: 'parallel',
-          runAllBudget: { maxParallel: 3, maxLlmTokens: 50_000, timeoutMs: 60_000 },
+          runAllBudget: { maxParallel: 3 },
         }),
         usage: { totalTokens: 100 },
       }),
@@ -395,7 +403,7 @@ describe('TopLevelOrchestrator.dispatchAction (= LLM mock で action 別 dispatc
         content: JSON.stringify({
           action: 'run_all',
           reasoning: 'limited',
-          runAllBudget: { maxParallel: 1, maxLlmTokens: 50_000, timeoutMs: 60_000 },
+          runAllBudget: { maxParallel: 1 },
         }),
         usage: { totalTokens: 100 },
       }),
@@ -433,6 +441,64 @@ describe('TopLevelOrchestrator.dispatchAction (= LLM mock で action 別 dispatc
       promptRegistry: { getCompositeActive: async () => 'sys' } as any,
     });
     await expect(orchestrator.decideAndExecute('test')).rejects.toThrow(/JSON parse/);
+  });
+
+  it('PR #248 review #2: LLM が blockedActions の action を選んだら強制 wait に', async () => {
+    const invokers = makeInvokerMocks();
+    // prisma mock で EdgeHypothesis を 1500 件 (= 禁止事項 #4 発火) として返す
+    const groupBy = jest.fn().mockResolvedValue([
+      { status: 'unverified', _count: { _all: 1500 } },
+    ]);
+    const prismaMock = {
+      edgeHypothesis: { groupBy, count: jest.fn().mockResolvedValue(0) },
+      evolutionBacktestRun: {
+        count: jest.fn().mockResolvedValue(0),
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+      agentRun: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    // LLM が blocked action='create_hypothesis' を選ぶ (= ルール無視)
+    const aiProvider = {
+      chat: jest.fn().mockResolvedValue({
+        content: JSON.stringify({ action: 'create_hypothesis', reasoning: 'ignore blockedActions' }),
+        usage: { totalTokens: 100 },
+      }),
+    };
+    const orchestrator = new TopLevelOrchestrator({
+      prisma: prismaMock as never,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      aiProvider: aiProvider as any,
+      jobInvokers: invokers,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      promptRegistry: { getCompositeActive: async () => 'sys' } as any,
+    });
+    const result = await orchestrator.decideAndExecute('test');
+    // 強制 'wait' に切替わる、reasoning に強制経緯を明示
+    expect(result.output?.action).toBe('wait');
+    expect(result.output?.reasoning).toMatch(/強制|blocked/);
+    // planGeneration は呼ばれない
+    expect(invokers.counts.plan).toBe(0);
+    expect(result.executedJobs).toEqual([]);
+  });
+
+  it('PR #248 review #4/#10: コードフェンス付き JSON を剥がして parse できる', async () => {
+    const invokers = makeInvokerMocks();
+    const fencedContent = "```json\n" + JSON.stringify({ action: 'wait', reasoning: 'fenced' }) + "\n```";
+    const aiProvider = {
+      chat: jest.fn().mockResolvedValue({ content: fencedContent, usage: { totalTokens: 100 } }),
+    };
+    const orchestrator = new TopLevelOrchestrator({
+      prisma: makePrismaMock() as never,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      aiProvider: aiProvider as any,
+      jobInvokers: invokers,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      promptRegistry: { getCompositeActive: async () => 'sys' } as any,
+    });
+    const result = await orchestrator.decideAndExecute('test');
+    // フェンスが剥がれて parse 成功
+    expect(result.output?.action).toBe('wait');
+    expect(result.output?.reasoning).toBe('fenced');
   });
 
   it('LLM 出力が schema 違反なら throw (Zod)', async () => {

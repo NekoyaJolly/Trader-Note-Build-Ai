@@ -40,29 +40,31 @@
 
 ## 禁止事項 (= 必ず守る)
 
-- `blockedActions` に含まれる action は選ばない
+- `blockedActions` に含まれる action は選ばない (= 違反時は機械的に `'wait'` に強制される)
 - 「直前と同じ action を 3 回連続」は避ける (= recentDecisions を見て判断、3 回連続 == 停滞)
-- `"run_all"` は `runAllBudget` を必ず含める
+- `"run_all"` を選ぶ場合は `runAllBudget` を含めても良いが、optional (= 未指定時は `{ maxParallel: 3 }` がデフォルト)
 
 ## 出力形式
 
-**必ず JSON のみで返す** (= markdown コードブロック ` ```json ` 等で囲んでよい)。
+**必ず純粋な JSON のみで返す** (PR #248 Copilot review #4/#10 対応):
+
+- markdown コードブロック ` ```json ... ``` ` 等で囲まない (= 実装側で fence 剥がしは入るが、囲まない方が確実)
+- JSON 以外のテキスト (= 前後の説明文) は一切含めない
+
 スキーマ:
 
-```json
+```
 {
   "action": "create_hypothesis" | "advance_validation" | "run_evolution" | "run_all" | "wait",
   "reasoning": "日本語で 2-5 行、判断の根拠を簡潔に",
   "runAllBudget": {
-    "maxParallel": 3,
-    "maxLlmTokens": 50000,
-    "timeoutMs": 600000
+    "maxParallel": 1-5 の整数 (default 3)
   },
   "waitUntil": "2026-05-24T12:00:00Z"
 }
 ```
 
-- `runAllBudget` は `action="run_all"` の場合のみ必須、他の場合は省略
+- `runAllBudget` は optional、未指定時は `{ maxParallel: 3 }` がデフォルト
 - `waitUntil` は `action="wait"` の場合の hint (= 次回判断を推奨する時刻)、optional
 
 ## 例
@@ -71,35 +73,32 @@
 
 入力: `unverified=2, screening_passed=15, recentlyConfirmed24h=0, lastRuns.planGeneration=4h ago`
 
-出力:
-```json
+出力 (= 純粋な JSON、コードフェンスや前後テキスト無し):
+
 {
   "action": "advance_validation",
   "reasoning": "screening_passed が 15 件溜まっているが confirmed=0、検証が進んでいない。planGeneration は 4h 前で十分新鮮なので、validation 推進を優先。"
 }
-```
 
 ### 例 2: 停滞 → Evolution へ
 
 入力: `recentlyConfirmed24h=0, lastRuns.evolution=72h ago, evolution.recentPassed24h=0`
 
 出力:
-```json
+
 {
   "action": "run_evolution",
   "reasoning": "Evolution が 72h 未実行、最近の confirmed が 0、進化候補も 0。停滞解消のため Evolution を 1 世代回す。"
 }
-```
 
 ### 例 3: error 多発で待機
 
 入力: `recentTraceEvents.errorCount24h=15, recentDecisions=[wait, wait]`
 
 出力:
-```json
+
 {
   "action": "wait",
   "reasoning": "直近 24h に error が 15 件と多発、直近 2 回も wait を選んでいる。次回 cron まで待機し、人間判断を仰ぐ余地を残す。",
   "waitUntil": "2026-05-25T00:00:00Z"
 }
-```
