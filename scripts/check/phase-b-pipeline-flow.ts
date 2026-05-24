@@ -1,17 +1,19 @@
 /**
- * Phase B 5 経路パイプラインフロー集計 (2026-05-24 セッション、Phase B 観察用)
+ * Phase B パイプラインフロー集計 (2026-05-24 セッション、Phase B 観察用)
  *
  * 目的:
  *   PR #251 (Cron 4h ごと) + PR #252 (Top-Level Orchestrator Phase 2) マージ後の
  *   plan → screening → full-validation 経路の 24h/7d 集計を取り、Phase B 仮説検証
- *   (= not_testable=288 の連鎖故障が解消するか) を 5 経路別件数で観察する。
+ *   (= not_testable=288 の連鎖故障が解消するか) を経路通過量で観察する。
  *
  *   side-b-data-snapshot.ts は boundary 前後の "クリア候補量感把握" が役割。
  *   本スクリプトは "Cron 起動と経路通過の動作観察" が役割で目的が異なる。
  *
- * 集計内容:
- *   (1) EdgeHypothesis: 直近 24h / 7d 生成件数 + status 分布
- *   (2) ScreeningBacktestRun: 直近 24h / 7d 実行件数 + outcome (= summary.pf > 1.1 通過率の概算)
+ * 集計内容 (4 セクション):
+ *   (1) EdgeHypothesis: 直近 24h / 7d 生成件数 + status 分布 (= 5 status: unverified /
+ *       screening_passed / testing / confirmed / not_testable / insufficient_data /
+ *       rejected / stale) で経路通過量を表現
+ *   (2) ScreeningBacktestRun: 直近 24h / 7d 実行件数 + summary.pf > 1.1 通過率
  *   (3) EvolutionBacktestRun: 直近 24h / 7d + formalBtPassed 別
  *   (4) AgentRun: kind 別件数 (= top_level_orchestrator は Phase 3 着手後の動作確認用、
  *       Phase 3 前は 0 のはず)
@@ -65,7 +67,7 @@ function formatSection(s: PipelineSection): string {
 
 async function collectEdgeHypothesis(
   prisma: PrismaClient,
-  now: Date,
+  _now: Date,
   dayAgo: Date,
   weekAgo: Date,
 ): Promise<PipelineSection> {
@@ -104,6 +106,10 @@ async function collectEdgeHypothesis(
   };
 }
 
+/**
+ * ScreeningBacktestRun の summary.pf を抽出して 1.1 通過率を集計。
+ * summary は Json field なので Prisma の groupBy は使えず、findMany + 各 row 走査する。
+ */
 async function collectScreening(
   prisma: PrismaClient,
   _now: Date,
@@ -115,10 +121,36 @@ async function collectScreening(
     prisma.screeningBacktestRun.count({ where: { createdAt: { gte: weekAgo } } }),
     prisma.screeningBacktestRun.count(),
   ]);
+
+  // pf > 1.1 通過率 (= 24h / 7d 期間内、summary.pf を JSON から抽出)
+  type CountTriple = { day: number; week: number; total: number };
+  const passed: CountTriple = { day: 0, week: 0, total: 0 };
+  const failed: CountTriple = { day: 0, week: 0, total: 0 };
+  const noPf: CountTriple = { day: 0, week: 0, total: 0 };
+
+  // 全期間取得は重い → 7d 以内のみ走査、それより古いものは集計に含めない (= 観察用途)
+  const rows = await prisma.screeningBacktestRun.findMany({
+    where: { createdAt: { gte: weekAgo } },
+    select: { summary: true, createdAt: true },
+  });
+  for (const r of rows) {
+    const sum = r.summary as Record<string, unknown> | null;
+    const pf = sum && typeof sum.pf === 'number' ? (sum.pf as number) : null;
+    const bucket = pf === null ? noPf : pf >= 1.1 ? passed : failed;
+    if (r.createdAt >= dayAgo) bucket.day += 1;
+    bucket.week += 1;
+    bucket.total += 1; // 7d 集計に閉じた total
+  }
+
   return {
     title: '(2) ScreeningBacktestRun (= 1.1 PF screening 実行)',
     counts: { day, week, total },
-    note: 'EdgeHypothesis 1 件あたり 1 ScreeningBT、24h で同程度の件数が期待値',
+    grouped: [
+      { key: 'summary.pf >= 1.1 (passed)', counts: passed },
+      { key: 'summary.pf <  1.1 (failed)', counts: failed },
+      { key: 'summary.pf missing', counts: noPf },
+    ],
+    note: 'EdgeHypothesis 1 件あたり 1 ScreeningBT、24h で同程度の件数が期待値。passed/failed は 7d 内のみ集計',
   };
 }
 
