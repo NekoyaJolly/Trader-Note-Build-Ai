@@ -153,8 +153,9 @@ export class PlanGenerationJob
         // 5-15 分遅延するため、in-memory `lastPlanRun` の 4h skip ロジックと衝突して
         // 連鎖的に全 symbol が continue → `0/0 シンボル成功` で plan が永続的に生成
         // されない事象が発生した。
-        // 解決: cron schedule (= 4h 間隔) が間隔保証するため in-memory skip は不要。
-        // 手動 trigger も毎回確実に走るようになり、debug もしやすくなる。
+        // 解決: 間隔制御の責務を呼び出し側 (= cron schedule) に寄せ、Job 内の
+        // in-memory skip を廃止する。これにより GitHub Actions の cron 遅延に関わらず
+        // 起動された分は確実に走り、手動 trigger も毎回実行されて debug しやすくなる。
 
         // 1. 執行足 OHLCV データ取得
         this.deps.log(`[${symbol}] 執行足(${config.timeframe})OHLCV取得中...`);
