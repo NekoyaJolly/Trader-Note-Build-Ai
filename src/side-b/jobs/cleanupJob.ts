@@ -23,10 +23,21 @@
  */
 
 import { executeCleanup, type CleanupConfig } from '../services/dataCleanupService';
+import { pruneOldCacheEntries } from '../agents/specialists/indicatorSeriesCacheRepository';
 
 import type { SideBJobDeps, SideBJobName, SideBJobRunner } from './types';
 import type { SideBSchedulerConfig } from './sideBScheduler';
 import type { EvolutionCarryRetentionResult } from './evolutionJob';
+
+/**
+ * IndicatorSeriesCache の各 key (= symbol×timeframe×indicator×params×field) ごとに
+ * 保持する件数。cron 4h ごとに 1 件溜まるので 12 件 = 2 日分の history。
+ *
+ * Step 3b で「前回 / 前々回」しか参照しないため最低 3 件で動くが、analysis-engine
+ * 障害時のフォールバック (= Step 4 で実装、cache + 現 OHLCV から推定) で多くの履歴が
+ * 役立つ可能性があるため、当面 12 件保持で運用観察。
+ */
+const INDICATOR_CACHE_KEEP_COUNT = 12;
 
 /**
  * CleanupJob の戻り値型。
@@ -42,6 +53,11 @@ export interface CleanupJobResult {
   oldTradesCount: number;
   /** EvolutionInstanceCarry retention の結果 */
   carryRetention: EvolutionCarryRetentionResult;
+  /**
+   * IndicatorSeriesCache の retention 結果 (Phase 6.8 Step 3c)。
+   * 削除件数 + 失敗時のエラーメッセージ (= 失敗しても本体 cleanup は続行)。
+   */
+  indicatorCacheRetention: { deleted: number; error?: string };
   /** エラーがあった場合のメッセージ (executed=true でも一部失敗ありえる) */
   error?: string;
 }
@@ -110,6 +126,7 @@ export class CleanupJob
       oldPlansCount: 0,
       oldTradesCount: 0,
       carryRetention: { deleted: 0 },
+      indicatorCacheRetention: { deleted: 0 },
     };
 
     try {
@@ -144,6 +161,24 @@ export class CleanupJob
       // 例外は EvolutionJob 側でキャッチされ result.error で返る (上には投げない)。
       const services = this.servicesFactory();
       result.carryRetention = await services.runEvolutionCarryRetention();
+
+      // Phase 6.8 Step 3c: IndicatorSeriesCache retention (各 key 直近 12 件保持)。
+      // 失敗してもキャッチして cleanup 全体は続行 (= cleanup 一部失敗で他の retention を
+      // 止めない方針、EvolutionInstanceCarry retention と同じ扱い)。
+      try {
+        const deleted = await pruneOldCacheEntries({ keepCount: INDICATOR_CACHE_KEEP_COUNT });
+        result.indicatorCacheRetention = { deleted };
+        if (deleted > 0) {
+          this.deps.log(`IndicatorSeriesCache retention 完了: ${deleted}件削除`);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // Scheduler errors[] / JobPort failed 判定に乗せるため log + addError 両方で記録
+        // (PR #265 Copilot review #4 対応、EvolutionInstanceCarry retention と同等)
+        this.deps.log(`IndicatorSeriesCache retention 失敗: ${msg}`);
+        this.deps.addError(`IndicatorSeriesCache retention エラー: ${msg}`);
+        result.indicatorCacheRetention = { deleted: 0, error: msg };
+      }
 
       this.onCompleted?.(new Date());
     } catch (error) {

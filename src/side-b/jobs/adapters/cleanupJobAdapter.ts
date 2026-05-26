@@ -76,5 +76,6 @@ function summarizeCounts(result: CleanupJobResult): string {
     `oldPlans=${result.oldPlansCount}`,
     `oldTrades=${result.oldTradesCount}`,
     `evolutionCarryDeleted=${result.carryRetention.deleted}`,
+    `indicatorCacheDeleted=${result.indicatorCacheRetention.deleted}`,
   ].join(', ');
 }
