@@ -92,6 +92,24 @@ describe('PlanGenerationJob', () => {
     expect(onSymbolCompleted).toHaveBeenCalledWith('XAU/USD', expect.any(Date));
   });
 
+  it('防御コード (2026-05-26): config.symbols が空配列なら fallback NZDCHF で plan 生成', async () => {
+    // 本番で観察された "0/0 シンボル成功" 事象に対する fallback 防御コード。
+    // 進化ループの DEFAULT_EVOLUTION_REGIMES と同じパターン。
+    mockCreateTradeFromPlan.mockResolvedValue({ success: true, trade: { id: 'trade-fallback' } });
+    const { job, services, log } = makeJob();
+
+    const emptyConfig: SideBSchedulerConfig = { ...minimalConfig, symbols: [] };
+    const result = await job.runWithServices(emptyConfig, services);
+
+    // fallback ログが出ている
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('[plan-fallback]'));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('NZDCHF'));
+    // 0/0 ではなく 1/1 で動作している (= 防御コードが効いて NZDCHF で実行)
+    expect(result.results).toEqual([{ symbol: 'NZDCHF', success: true }]);
+    expect(result.message).toContain('1/1 シンボル成功');
+    expect(result.success).toBe(true);
+  });
+
   it('getLastSymbolRun で間隔内ならスキップ (lastRun = 直前)', async () => {
     const justRun = new Date(); // 直前に実行された想定
     const { job, services } = makeJob({ getLastSymbolRun: () => justRun });
