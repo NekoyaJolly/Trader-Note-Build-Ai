@@ -143,6 +143,29 @@ describe('IndicatorSpecialist', () => {
       expect(macros.currentRsi).toBe('(unavailable)');
       expect(macros.currentMacd).toBe('(unavailable)');
     });
+
+    it('Phase 6.8 Step 3b: historicalContext 未指定時は currentRsiHistory が (no history)', () => {
+      const macros = buildMacros(makeInput());
+      expect(macros.currentRsiHistory).toBe('(no history)');
+      expect(macros.higherRsiHistory).toBe('(no history)');
+    });
+
+    it('Phase 6.8 Step 3b: historicalContext 指定時は prev / Δ / penult を含む', () => {
+      const baseData = makeTimeframeData();
+      const input = makeInput({
+        current: {
+          ...baseData,
+          historicalContext: {
+            rsi: { previousLatest: 55, penultimateLatest: 50 },
+          },
+        },
+      });
+      const macros = buildMacros(input);
+      // recentValues=[50, 55, 60] → latest=60、前回 55 → Δ=+5
+      expect(macros.currentRsiHistory).toContain('prev=55');
+      expect(macros.currentRsiHistory).toContain('Δ=+');
+      expect(macros.currentRsiHistory).toContain('penult=50');
+    });
   });
 
   describe('hasMinimumDataForAnalysis', () => {

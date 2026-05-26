@@ -78,11 +78,51 @@ function formatIndicatorForPrompt(series: IndicatorSeries | undefined): string {
 }
 
 /**
+ * 過去キャッシュ (= 前回・前々回 fetch の latest) を prompt 用 1 行 string に整形。
+ *
+ * 出力形式 (空白区切り、括弧なし):
+ *   - 履歴あり + 前回 latest と現在 latest 両方 number: `prev=X.XXXXX Δ=±Y.YYYYY penult=Z.ZZZZZ`
+ *   - 履歴ありで Δ 計算不可 (= 片方が null): `prev=X.XXXXX penult=Z.ZZZZZ`
+ *   - 履歴なし: `(no history)`
+ *
+ * Δ は `latestNow - previousLatest` (= 増減の方向 + 大きさ)。
+ */
+function formatHistoricalForPrompt(
+  latestNow: number | null | undefined,
+  history?: { previousLatest?: number | null; penultimateLatest?: number | null },
+): string {
+  if (!history || (history.previousLatest === undefined && history.penultimateLatest === undefined)) {
+    return '(no history)';
+  }
+  const fmt = (v: number | null | undefined): string =>
+    v === null || v === undefined ? 'null' : v.toFixed(5);
+  const parts: string[] = [];
+  if (history.previousLatest !== undefined) {
+    parts.push(`prev=${fmt(history.previousLatest)}`);
+    if (
+      typeof latestNow === 'number' &&
+      typeof history.previousLatest === 'number'
+    ) {
+      const delta = latestNow - history.previousLatest;
+      const sign = delta >= 0 ? '+' : '';
+      parts.push(`Δ=${sign}${delta.toFixed(5)}`);
+    }
+  }
+  if (history.penultimateLatest !== undefined) {
+    parts.push(`penult=${fmt(history.penultimateLatest)}`);
+  }
+  return parts.join(' ');
+}
+
+/**
  * `IndicatorSpecialistInput` を flat な `PromptMacros` 辞書に展開する。
  *
  * 既存 `expandMacros` (src/side-b/prompts/loader.ts) は `{{KEY}}` の flat 単純置換で、
  * ドット記法 (= `{{current.indicators.rsi}}`) は解決しない。そのため、prompt の placeholder
  * を flat キー (= `currentRsi`, `higherRsi` 等) で受けるよう構造化する。
+ *
+ * Phase 6.8 Step 3b で `currentXxxHistory` / `higherXxxHistory` flat キー (= 前回・前々回
+ * fetch の latest 値 + Δ) も追加 (`formatHistoricalForPrompt()` 経由)。
  *
  * @returns prompt template の `{{xxx}}` 各キーに対応した値を持つ辞書
  */
@@ -97,12 +137,22 @@ export function buildMacros(input: IndicatorSpecialistInput): PromptMacros {
 
   // 各 indicator を current/higher で flat キーに展開
   // (= IndicatorId の各値に対し、currentXxx / higherXxx の 2 キーを生成)
+  // Phase 6.8 Step 3b: 履歴がある場合は currentXxxHistory / higherXxxHistory も追加
   for (const spec of INDICATOR_CATALOG) {
     const id = spec.id;
-    const currentKey = `current${capitalize(id)}`;
-    const higherKey = `higher${capitalize(id)}`;
-    macros[currentKey] = formatIndicatorForPrompt(input.current.indicators[id]);
-    macros[higherKey] = formatIndicatorForPrompt(input.higher.indicators[id]);
+    const cap = capitalize(id);
+    const currentSeries = input.current.indicators[id];
+    const higherSeries = input.higher.indicators[id];
+    macros[`current${cap}`] = formatIndicatorForPrompt(currentSeries);
+    macros[`higher${cap}`] = formatIndicatorForPrompt(higherSeries);
+    macros[`current${cap}History`] = formatHistoricalForPrompt(
+      currentSeries?.latest ?? null,
+      input.current.historicalContext?.[id],
+    );
+    macros[`higher${cap}History`] = formatHistoricalForPrompt(
+      higherSeries?.latest ?? null,
+      input.higher.historicalContext?.[id],
+    );
   }
 
   return macros;

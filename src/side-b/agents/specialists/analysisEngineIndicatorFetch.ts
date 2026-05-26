@@ -16,7 +16,10 @@ import {
   fetchIndicatorSeries,
   makeIndicatorCacheKey,
 } from '../../../backend/services/analysisEngineClient';
-import { writeIndicatorCacheEntry } from './indicatorSeriesCacheRepository';
+import {
+  writeIndicatorCacheEntry,
+  fetchRecentCacheEntries,
+} from './indicatorSeriesCacheRepository';
 import type { AnalysisEngineIndicatorSpec } from '../../../schemas/external/analysisEngine';
 import { toIndicatorSeries } from './IndicatorSpecialist';
 import { INDICATOR_CATALOG } from './indicatorCatalog';
@@ -124,11 +127,44 @@ async function fetchTimeframeData(args: {
     // (PR #263 Copilot review #3: indicator 数ぶん直列 await で 1 TF 内のレイテンシが
     // 増えるため、Promise.allSettled で並列 + best-effort に変更)
     const cacheWritePromises: Array<Promise<void>> = [];
+    // Phase 6.8 Step 3b: 前回・前々回キャッシュ取得 Promise を蓄積、並列実行する。
+    // 「今回 write より先に read」することで cache[0]=前回, cache[1]=前々回 の意味を保つ
+    // (= 同時並行で write すると順序が不定になる)。
+    type HistoryEntry = { previousLatest?: number | null; penultimateLatest?: number | null };
+    const historyResults: Array<{ id: IndicatorId; entry: HistoryEntry }> = [];
+    const historyReadPromises: Array<Promise<void>> = [];
+
     for (const spec of INDICATOR_CATALOG) {
       const key = makeIndicatorCacheKey(spec.id, spec.params, spec.field);
       const values = response.series[key];
       if (Array.isArray(values)) {
         indicators[spec.id] = toIndicatorSeries(values);
+        // 過去キャッシュを並列に取得 (= write より先に呼ばれるよう Promise を先に作る)
+        historyReadPromises.push(
+          fetchRecentCacheEntries({
+            symbol,
+            timeframe,
+            indicatorId: spec.id,
+            params: spec.params,
+            field: spec.field,
+            limit: 2,
+          })
+            .then((history) => {
+              const extractLatest = (vals: Array<number | null>): number | null =>
+                vals.length > 0 ? vals[vals.length - 1] : null;
+              const entry: HistoryEntry = {};
+              if (history.length > 0) entry.previousLatest = extractLatest(history[0].values);
+              if (history.length > 1) entry.penultimateLatest = extractLatest(history[1].values);
+              if (entry.previousLatest !== undefined || entry.penultimateLatest !== undefined) {
+                historyResults.push({ id: spec.id, entry });
+              }
+            })
+            .catch((err) => {
+              const msg = err instanceof Error ? err.message : String(err);
+              console.warn(`[IndicatorSpecialist] キャッシュ読み出し失敗 (${spec.id}):`, msg);
+            }),
+        );
+
         cacheWritePromises.push(
           writeIndicatorCacheEntry({
             symbol,
@@ -146,11 +182,20 @@ async function fetchTimeframeData(args: {
         );
       }
     }
+    // 過去取得は write より先に await する (= read → write の順序保証で「前回」の意味維持)
+    await Promise.allSettled(historyReadPromises);
     // 並列実行 + 完了待ち (= 全件 catch 済なので rejection で停止しない)
     await Promise.allSettled(cacheWritePromises);
 
+    // historyResults を historicalContext に集約
+    const historicalContext: TimeframeData['historicalContext'] = {};
+    for (const { id, entry } of historyResults) {
+      historicalContext[id] = entry;
+    }
+
     return {
       indicators,
+      historicalContext: Object.keys(historicalContext).length > 0 ? historicalContext : undefined,
       priceContext: buildPriceContext(ohlcv),
     };
   } catch (err) {
