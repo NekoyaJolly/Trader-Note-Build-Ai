@@ -78,17 +78,14 @@ function formatIndicatorForPrompt(series: IndicatorSeries | undefined): string {
 }
 
 /**
- * `IndicatorSpecialistInput` を flat な `PromptMacros` 辞書に展開する。
- *
- * 既存 `expandMacros` (src/side-b/prompts/loader.ts) は `{{KEY}}` の flat 単純置換で、
- * ドット記法 (= `{{current.indicators.rsi}}`) は解決しない。そのため、prompt の placeholder
- * を flat キー (= `currentRsi`, `higherRsi` 等) で受けるよう構造化する。
- *
- * @returns prompt template の `{{xxx}}` 各キーに対応した値を持つ辞書
- */
-/**
  * 過去キャッシュ (= 前回・前々回 fetch の latest) を prompt 用 1 行 string に整形。
- * 「prev=X.XX (Δ=+0.05) penult=Y.YY」のような形式、不在は "(no history)"。
+ *
+ * 出力形式 (空白区切り、括弧なし):
+ *   - 履歴あり + 前回 latest と現在 latest 両方 number: `prev=X.XXXXX Δ=±Y.YYYYY penult=Z.ZZZZZ`
+ *   - 履歴ありで Δ 計算不可 (= 片方が null): `prev=X.XXXXX penult=Z.ZZZZZ`
+ *   - 履歴なし: `(no history)`
+ *
+ * Δ は `latestNow - previousLatest` (= 増減の方向 + 大きさ)。
  */
 function formatHistoricalForPrompt(
   latestNow: number | null | undefined,
@@ -117,6 +114,18 @@ function formatHistoricalForPrompt(
   return parts.join(' ');
 }
 
+/**
+ * `IndicatorSpecialistInput` を flat な `PromptMacros` 辞書に展開する。
+ *
+ * 既存 `expandMacros` (src/side-b/prompts/loader.ts) は `{{KEY}}` の flat 単純置換で、
+ * ドット記法 (= `{{current.indicators.rsi}}`) は解決しない。そのため、prompt の placeholder
+ * を flat キー (= `currentRsi`, `higherRsi` 等) で受けるよう構造化する。
+ *
+ * Phase 6.8 Step 3b で `currentXxxHistory` / `higherXxxHistory` flat キー (= 前回・前々回
+ * fetch の latest 値 + Δ) も追加 (`formatHistoricalForPrompt()` 経由)。
+ *
+ * @returns prompt template の `{{xxx}}` 各キーに対応した値を持つ辞書
+ */
 export function buildMacros(input: IndicatorSpecialistInput): PromptMacros {
   const macros: PromptMacros = {
     symbol: input.symbol,
