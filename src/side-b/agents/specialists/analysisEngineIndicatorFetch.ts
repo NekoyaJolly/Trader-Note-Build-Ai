@@ -16,6 +16,7 @@ import {
   fetchIndicatorSeries,
   makeIndicatorCacheKey,
 } from '../../../backend/services/analysisEngineClient';
+import { writeIndicatorCacheEntry } from './indicatorSeriesCacheRepository';
 import type { AnalysisEngineIndicatorSpec } from '../../../schemas/external/analysisEngine';
 import { toIndicatorSeries } from './IndicatorSpecialist';
 import { INDICATOR_CATALOG } from './indicatorCatalog';
@@ -124,6 +125,26 @@ async function fetchTimeframeData(args: {
       const values = response.series[key];
       if (Array.isArray(values)) {
         indicators[spec.id] = toIndicatorSeries(values);
+        // Phase 6.8 Step 3a: 取得した系列を DB キャッシュに書き込み (= 後段の prompt 反映
+        // で「前回 / 前々回」との比較を可能に)。書き込み失敗は indicators 構築に影響させない
+        // (= 取得自体は成功しているので Specialist は走る)。
+        try {
+          await writeIndicatorCacheEntry({
+            symbol,
+            timeframe,
+            indicatorId: spec.id,
+            params: spec.params,
+            field: spec.field,
+            values,
+            startDate,
+            endDate,
+          });
+        } catch (cacheErr) {
+          console.warn(
+            `[IndicatorSpecialist] キャッシュ書き込み失敗 (${spec.id}):`,
+            cacheErr instanceof Error ? cacheErr.message : String(cacheErr),
+          );
+        }
       }
     }
 
