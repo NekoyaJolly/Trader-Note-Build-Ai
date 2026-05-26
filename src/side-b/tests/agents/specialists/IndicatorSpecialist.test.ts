@@ -169,7 +169,9 @@ describe('IndicatorSpecialist', () => {
 
   describe('IndicatorAnalysisSchema', () => {
     const validOutput = {
-      interpretation: '現 TF は RSI 62 で短期上昇、上位 TF も aligned bullish',
+      // min(40) 文字制約を満たす長さの解釈
+      interpretation:
+        '現 TF は RSI 62 で短期上昇、MACD ヒストグラム拡大、上位 TF も EMA20 上抜けで aligned bullish の整合',
       confidence: 0.7,
       current: {
         trendState: 'weak_up' as const,
@@ -232,6 +234,19 @@ describe('IndicatorSpecialist', () => {
       const { primaryIndicators: _, ...rest } = validOutput;
       const result = IndicatorAnalysisSchema.safeParse(rest);
       expect(result.success).toBe(false);
+    });
+
+    it('interpretation min 40 文字制約 (= prompt 80 文字要求の緩和版)', () => {
+      const shortText = { ...validOutput, interpretation: '短い' };
+      expect(IndicatorAnalysisSchema.safeParse(shortText).success).toBe(false);
+    });
+
+    it('primaryIndicators に未知 indicator id があれば reject (= IndicatorId enum で制約)', () => {
+      const invalid = {
+        ...validOutput,
+        primaryIndicators: { current: ['unknown_xxx'], higher: [] },
+      };
+      expect(IndicatorAnalysisSchema.safeParse(invalid).success).toBe(false);
     });
   });
 });

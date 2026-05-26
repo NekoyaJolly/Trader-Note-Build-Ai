@@ -4,6 +4,15 @@
 
 **重要**: あなたは indicator を **計算しません**。すでに計算済みの値を **解釈するだけ** です。
 
+## Phase 1 の取得対象 indicator
+
+本フェーズでは以下の **P0+P1 の 10 種固定** が analysis-engine から取得され、prompt 末尾の `[入力データ]` セクションに値が注入されます (= 後続フェーズで P2 追加予定):
+
+- P0 必須 (5 種): SMA / EMA / RSI / MACD / ATR
+- P1 高 (5 種): OBV / VWAP / Ichimoku / CCI / Aroon
+
+不在の indicator は `(unavailable)` と表示されるので、判断材料に含めず `confidence` を控えめに調整してください。
+
 ## 判断の重点
 
 1. 現在 TF 単体のテクニカル状態 (= trend / oscillator / volatility / volume)
@@ -12,17 +21,19 @@
 
 ## Indicator カタログ (= 各 indicator の意味)
 
-以下が analysis-engine から取得される indicator とその意味です。値は実行時に注入されます。
-
 {{indicatorCatalog}}
 
-## MTF 解釈の典型パターン
+## MTF 解釈パターン (= `mtfAlignment` のセット例)
 
-- **aligned_bullish**: 上位 TF も現 TF も上昇 → 順張り買いの整合
-- **aligned_bearish**: 上位 TF も現 TF も下降 → 順張り売りの整合
-- **mixed (pullback)**: 上位 TF が上昇、現 TF が短期反落 → 押し目買い好機
-- **mixed (counter)**: 上位 TF が下降、現 TF が短期反発 → 逆張り反転シグナル (慎重に)
-- **aligned_neutral**: 両 TF ともレンジ → ブレイクアウト待ち
+`trendAlignment` は次の 4 値のいずれかを取り、種別 (押し目 / 逆張り) は別フィールドで表現します。**括弧付き値 (例: "mixed (pullback)") を出力しないでください** — それは Zod enum で弾かれます。
+
+| trendAlignment | 状況 | pullbackOpportunity | counterTrendSignal |
+|---|---|---|---|
+| `aligned_bullish` | 両 TF とも上昇 → 順張り買いの整合 | false | false |
+| `aligned_bearish` | 両 TF とも下降 → 順張り売りの整合 | false | false |
+| `mixed` (押し目) | 上位 TF 上昇 × 現 TF 短期反落 → 押し目買い好機 | **true** | false |
+| `mixed` (逆張り) | 上位 TF 下降 × 現 TF 短期反発 → 逆張り反転シグナル (慎重に) | false | **true** |
+| `aligned_neutral` | 両 TF ともレンジ → ブレイクアウト待ち | false | false |
 
 ## 入力データ (= analysis-engine 計算結果、値は実行時注入)
 

@@ -20,6 +20,12 @@
 
 import { z } from 'zod';
 import type { LensFeatureSnapshot } from '../../lenses';
+import { INDICATOR_IDS, type IndicatorId } from '../../../shared/indicators/registry';
+import type { SupportedTimeframe } from '../../constants/timeframes';
+
+// IndicatorIdSchema: shared registry の INDICATOR_IDS を Zod enum 化
+// (= primaryIndicators の str 配列を未知 ID で誤魔化さないため)
+const IndicatorIdSchema = z.enum(INDICATOR_IDS);
 
 // ============================================================================
 // 旧型 (Phase 6、Trend / Oscillator / VolatilityVolume 3 体並列、次 PR で削除予定)
@@ -95,32 +101,16 @@ export interface IndicatorSeries {
 /**
  * 1 つの時間足分の indicator + price データ。
  *
- * 各 indicator は P0/P1/P2 優先度 (= `indicatorCatalog.ts`) に基づいて取得され、
- * 取得失敗または未取得は undefined。Specialist は不在 indicator を prompt で明示。
+ * `indicators` は `shared/indicators/registry.ts` の \`IndicatorId\` を canonical な
+ * キーとする `Partial<Record<IndicatorId, IndicatorSeries>>`。これにより:
+ * - shared registry に新規 indicator が追加されても自動対応 (= drift 防止)
+ * - 取得失敗 / 未取得 indicator は undefined (= prompt で「不在」として表示)
+ *
+ * 実際の取得対象は `indicatorCatalog.ts` の `INDICATOR_CATALOG` (= P0/P1 優先度) で
+ * 制限される。本型は柔軟性のため registry 全体をフルに受け取れる構造。
  */
 export interface TimeframeData {
-  indicators: {
-    // トレンド系
-    sma?: IndicatorSeries;
-    ema?: IndicatorSeries;
-    dema?: IndicatorSeries;
-    tema?: IndicatorSeries;
-    macd?: IndicatorSeries;
-    ichimoku?: IndicatorSeries;
-    psar?: IndicatorSeries;
-    aroon?: IndicatorSeries;
-    // オシレーター系
-    rsi?: IndicatorSeries;
-    cci?: IndicatorSeries;
-    roc?: IndicatorSeries;
-    mfi?: IndicatorSeries;
-    // ボラ/出来高系
-    atr?: IndicatorSeries;
-    kc?: IndicatorSeries;
-    obv?: IndicatorSeries;
-    vwap?: IndicatorSeries;
-    cmf?: IndicatorSeries;
-  };
+  indicators: Partial<Record<IndicatorId, IndicatorSeries>>;
   /** OHLCV 直近サマリ (= 価格・出来高の絶対値、indicator では表現できない情報) */
   priceContext: {
     latestClose: number;
@@ -135,13 +125,16 @@ export interface TimeframeData {
  *
  * MTF (Multi-Timeframe) 対応 (Nekoさん 2026-05-27 指示): 現在 TF + 上位 TF の indicator を
  * 両方取って、LLM に MTF 整合性を判断させる。上位 TF は `deriveHigherTimeframe()` で導出。
+ *
+ * `currentTimeframe / higherTimeframe` は `SupportedTimeframe` で制約 (= `src/side-b/
+ * constants/timeframes.ts` の単一情報源、`normalizeTimeframe()` で正規化済の値が入る前提)。
  */
 export interface IndicatorSpecialistInput {
   symbol: string;
   /** 現在の時間足 (= entry / execution TF) */
-  currentTimeframe: string;
+  currentTimeframe: SupportedTimeframe;
   /** 上位の時間足 (= MTF 整合性確認用) */
-  higherTimeframe: string;
+  higherTimeframe: SupportedTimeframe;
   current: TimeframeData;
   higher: TimeframeData;
 }
@@ -207,8 +200,13 @@ const MtfAlignmentSchema = z.object({
  * MTF 整合性判断 (`higher` / `mtfAlignment`) + primaryIndicators を持つ。
  */
 export const IndicatorAnalysisSchema = z.object({
-  /** 自然言語の総合解釈 (= MTF 観点込みのテクニカル状態説明) */
-  interpretation: z.string().min(1),
+  /**
+   * 自然言語の総合解釈 (= MTF 観点込みのテクニカル状態説明)。
+   * prompt は「80 文字以上、根拠 indicator id を必ず含める」を要求するが、Zod は
+   * 境界ケースの過剰失敗を避けるため最低 40 文字に緩める (= 多くの場合 80 超を出すが、
+   * indicator 不在等で短くなる場合も許容)。
+   */
+  interpretation: z.string().min(40),
   /** 確信度 0-1 (= signal の強さ / MTF 整合性) */
   confidence: z.number().min(0).max(1),
   /** 現在 TF (= currentTimeframe) のテクニカル判断 */
@@ -217,10 +215,13 @@ export const IndicatorAnalysisSchema = z.object({
   higher: HigherAnalysisSchema,
   /** MTF 整合性判断 */
   mtfAlignment: MtfAlignmentSchema,
-  /** どの indicator が判断の主根拠になったか (TF 別、後段 debug / Reflection 用) */
+  /**
+   * どの indicator が判断の主根拠になったか (TF 別、後段 debug / Reflection 用)。
+   * shared registry の `IndicatorId` enum で制約 (= 未知 ID / 誤字を早期に弾く)。
+   */
   primaryIndicators: z.object({
-    current: z.array(z.string()),
-    higher: z.array(z.string()),
+    current: z.array(IndicatorIdSchema),
+    higher: z.array(IndicatorIdSchema),
   }),
 });
 

@@ -7,21 +7,21 @@
  * 設計書: docs/architecture/INDICATOR_SPECIALIST_DESIGN.md
  *
  * 役割:
- * - analysis-engine が計算した 17+ indicator の **計算済み値** を、
- *   現在 TF + 上位 TF (MTF) で受け取り、テクニカル状態を統合的に解釈する
+ * - analysis-engine が計算した **Phase 1 固定 10 種の indicator** (P0+P1、`indicatorCatalog.ts`)
+ *   の計算済み値を、現在 TF + 上位 TF (MTF) で受け取り、テクニカル状態を統合的に解釈する
  * - 計算は行わない (= 決定論的計算は analysis-engine の責任)
  * - 出力は `IndicatorAnalysis` (= 旧 3 体出力の和集合 + MTF 整合性判断)
+ *
+ * Phase 2 以降で必要に応じて P2 indicator (dema/tema/kc/psar/mfi/roc/cmf 等) を CATALOG に
+ * 追加可能。型 (`TimeframeData.indicators`) は shared registry 全体を受け入れる構造。
  */
 
 import { AIProvider } from '../../agent/aiProvider';
 import { loadSpecialistPromptWithGlobalAndCommon, type PromptMacros } from '../../prompts/loader';
 import { modelFor } from '../../../config';
 import { parseJsonLoose } from './specialistCommon';
-import {
-  INDICATOR_CATALOG,
-  renderIndicatorCatalog,
-  type IndicatorId,
-} from './indicatorCatalog';
+import { INDICATOR_CATALOG, renderIndicatorCatalog } from './indicatorCatalog';
+import type { IndicatorId } from '../../../shared/indicators/registry';
 import {
   IndicatorAnalysisSchema,
   type IndicatorAnalysis,
