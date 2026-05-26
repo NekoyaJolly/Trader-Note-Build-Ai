@@ -104,7 +104,7 @@ describe('indicatorSpecialistScoreFn (Phase 6.8 統合 = 旧 trend/oscillator/vo
 });
 
 describe('getScoringFunction', () => {
-  it('Phase 6 MVP + Critical-3 残スコープの 12 エージェント分は取得できる', () => {
+  it('Phase 6 MVP + Critical-3 残スコープの 10 エージェント分は取得できる', () => {
     expect(getScoringFunction('hypothesis_generator')).not.toBeNull();
     expect(getScoringFunction('indicator_specialist')).not.toBeNull();
     expect(getScoringFunction('strategist')).not.toBeNull();
