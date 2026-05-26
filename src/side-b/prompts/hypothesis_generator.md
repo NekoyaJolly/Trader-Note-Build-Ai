@@ -23,15 +23,17 @@
 
 ## 探索ステップ
 
-### ステップ0: 下位専門家の分析を統合する（Phase 6 で追加）
+### ステップ0: IndicatorSpecialist の MTF テクニカル分析を統合する（Phase 6.8 で更新）
 
-入力に `specialistAnalyses` が含まれる場合、それは下位専門家エージェント（Trend / Oscillator / VolatilityVolume）が先に行った分析です。あなたの役割は **その分析を統合して仮説を生成する** ことです。
+入力に `indicatorAnalysis` が含まれる場合、それは **IndicatorSpecialist** が現在 TF + 上位 TF の indicator (P0+P1 の 10 種: SMA / EMA / RSI / MACD / ATR / OBV / VWAP / Ichimoku / CCI / Aroon) を統合解釈した結果です。あなたの役割は **その分析を踏まえて仮説を生成する** ことです。
 
 統合の作法:
-- 専門家ごとの `confidence` を重みに、共通して示唆している方向性に注目する
-- 専門家間で **矛盾** がある場合、その矛盾自体が仮説の種になる（例: "トレンドは up だがモメンタムは oversold" → 押し目仮説）
-- ただし、専門家の結論をそのまま繰り返すのではなく、**専門家が見ていない組み合わせ** を探す
-- `specialistAnalyses` が欠損 / null の専門家分は、あなた自身がレンズ特徴量から直接読み取る
+- `indicatorAnalysis.confidence` を重みに、`current.trendState` / `current.momentum` / `mtfAlignment.trendAlignment` の整合性に注目する
+- `mtfAlignment.pullbackOpportunity=true` なら **押し目買い** 系の仮説、`counterTrendSignal=true` なら **逆張り反転** 系の仮説 (慎重に) を優先候補に
+- `current` と `higher` の trendState が乖離している場合 (= mixed)、その乖離自体が仮説の種になる
+- `current.divergence` (RSI/MACD ダイバージェンス) は反転シグナルとして有力な仮説材料
+- ただし、IndicatorSpecialist の結論をそのまま繰り返すのではなく、**IndicatorSpecialist が見ていない組み合わせ** (= 価格レベル / 時間帯 / セッション境界) を探す
+- `indicatorAnalysis` が欠損 / null の場合は、あなた自身がレンズ特徴量から直接読み取る
 
 ### Discovery からの示唆（`discoveryHints` がある場合）
 

@@ -16,6 +16,7 @@ import { config, modelFor } from '../../config';
 import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import { loadPromptWithGlobal } from '../prompts/loader';
 import type { LensFeatureSnapshot } from '../lenses';
+import type { IndicatorAnalysis } from './specialists/types';
 import type {
     EdgeHypothesis,
     EdgeCategory,
@@ -111,15 +112,10 @@ export interface HypothesisGeneratorInput {
     lensSnapshot: LensFeatureSnapshot;
     existingHypotheses: EdgeHypothesis[];
     /**
-     * Phase 6: 下位専門家エージェントによる事前分析(任意)。
-     * 渡された場合はプロンプトの ステップ0 で統合する。
-     * 渡されない場合、従来通りレンズ特徴量だけを参照する(後方互換)。
+     * Phase 6.8 (2026-05-27): IndicatorSpecialist の MTF テクニカル分析 (= 旧 3 体並列を統合)。
+     * 渡された場合はプロンプトの ステップ0 で統合する。未指定なら従来通りレンズ特徴量のみ参照。
      */
-    specialistAnalyses?: {
-        trend?: object;
-        oscillator?: object;
-        volatilityVolume?: object;
-    };
+    indicatorAnalysis?: IndicatorAnalysis;
     /**
      * Phase 6.7c: Discovery 週次レポート等からの探索ヒント（任意。未指定なら従来通り）
      */
@@ -527,7 +523,7 @@ export class HypothesisGeneratorAgent {
                       .map((h) => `- [${h.status}] ${h.statement}`)
                       .join('\n');
 
-        const specialistsDump = this.formatSpecialistAnalyses(input.specialistAnalyses);
+        const indicatorAnalysisDump = this.formatIndicatorAnalysis(input.indicatorAnalysis);
         const discoveryDump =
             input.discoveryHints !== undefined && input.discoveryHints !== null
                 ? `\n## Discovery からの示唆 (discoveryHints)\n${JSON.stringify(input.discoveryHints, null, 2)}\n`
@@ -541,7 +537,7 @@ export class HypothesisGeneratorAgent {
 
 ## 現在のレンズスナップショット
 ${lensDump.join('\n')}
-${specialistsDump}${discoveryDump}
+${indicatorAnalysisDump}${discoveryDump}
 ## 既存仮説リスト（重複回避）
 ${existingDump}
 
@@ -549,29 +545,14 @@ ${existingDump}
     }
 
     /**
-     * Phase 6: specialistAnalyses のダンプをプロンプト向けに整形する。
-     * 未指定時は空文字を返し、プロンプト本文に影響を与えない(後方互換)。
+     * Phase 6.8 (2026-05-27): IndicatorSpecialist の MTF テクニカル分析を prompt 向けに整形。
+     * 未指定時は空文字 (= 後方互換、レンズ特徴量のみで動く)。
      */
-    private formatSpecialistAnalyses(
-        specialistAnalyses?: HypothesisGeneratorInput['specialistAnalyses'],
+    private formatIndicatorAnalysis(
+        indicatorAnalysis?: HypothesisGeneratorInput['indicatorAnalysis'],
     ): string {
-        if (!specialistAnalyses) return '';
-        const entries: string[] = [];
-        if (specialistAnalyses.trend) {
-            entries.push(`### Trend Specialist\n${JSON.stringify(specialistAnalyses.trend, null, 2)}`);
-        }
-        if (specialistAnalyses.oscillator) {
-            entries.push(
-                `### Oscillator Specialist\n${JSON.stringify(specialistAnalyses.oscillator, null, 2)}`,
-            );
-        }
-        if (specialistAnalyses.volatilityVolume) {
-            entries.push(
-                `### Volatility/Volume Specialist\n${JSON.stringify(specialistAnalyses.volatilityVolume, null, 2)}`,
-            );
-        }
-        if (entries.length === 0) return '';
-        return `\n## 下位専門家の分析(統合して使う)\n${entries.join('\n\n')}\n`;
+        if (!indicatorAnalysis) return '';
+        return `\n## IndicatorSpecialist 分析 (MTF テクニカル統合)\n\n${JSON.stringify(indicatorAnalysis, null, 2)}\n`;
     }
 
     private isDuplicateOfExisting(

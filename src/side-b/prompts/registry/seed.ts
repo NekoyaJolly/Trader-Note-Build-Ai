@@ -53,19 +53,9 @@ export const DEFAULT_SEED_ENTRIES: SeedEntry[] = [
   { agentName: 'mutation', file: 'mutation.md', notes: 'Phase 5A MutationAgent' },
   { agentName: 'crossover', file: 'crossover.md', notes: 'Phase 5A CrossoverAgent' },
   {
-    agentName: 'trend_specialist',
-    file: 'specialists/trend_specialist.md',
-    notes: 'Phase 6 TrendSpecialist',
-  },
-  {
-    agentName: 'oscillator_specialist',
-    file: 'specialists/oscillator_specialist.md',
-    notes: 'Phase 6 OscillatorSpecialist',
-  },
-  {
-    agentName: 'volatility_volume_specialist',
-    file: 'specialists/volatility_volume_specialist.md',
-    notes: 'Phase 6 VolatilityVolumeSpecialist',
+    agentName: 'indicator_specialist',
+    file: 'specialists/indicator_specialist.md',
+    notes: 'Phase 6.8 IndicatorSpecialist (= 旧 trend/oscillator/volatility_volume 統合)',
   },
   {
     agentName: 'prompt_mutation',

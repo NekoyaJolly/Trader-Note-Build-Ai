@@ -1,83 +1,20 @@
 /**
- * Specialist エージェントの入出力型定義。
+ * IndicatorSpecialist (Phase 6.8、2026-05-27) の入出力型定義。
  *
- * ## Phase 6 (旧)
- * 3 体並列 Specialist (Trend / Oscillator / VolatilityVolume) の入出力。
- * `SpecialistInput` / `SpecialistBundle` / `TrendAnalysis` / `OscillatorAnalysis` /
- * `VolatilityVolumeAnalysis` がこれに対応。
- *
- * ## Phase 6.8 (新、2026-05-27)
- * 上記 3 体を `IndicatorSpecialist` 1 体に統合。`IndicatorSpecialistInput` /
- * `IndicatorAnalysis` / `TimeframeData` / `IndicatorSeries` がこれに対応。テクニカル
- * indicator の **計算は analysis-engine 側**、本 Specialist は **計算済み値の解釈** に
- * 専念する役割分離設計。
+ * 旧 Phase 6 の 3 体並列 Specialist (Trend / Oscillator / VolatilityVolume) を統合し、
+ * `IndicatorSpecialist` 1 体に集約した。テクニカル indicator の **計算は analysis-engine
+ * 側**、本 Specialist は **計算済み値の解釈** に専念する役割分離設計。
  *
  * 設計書: docs/architecture/INDICATOR_SPECIALIST_DESIGN.md
- *
- * 移行: 本 PR では新型を **追加** するだけで、旧 3 体は残置 (= tsc 維持)。次 PR で
- * aiOrchestrator / 下流接続切替 + 旧 3 体削除を行う。
  */
 
 import { z } from 'zod';
-import type { LensFeatureSnapshot } from '../../lenses';
 import { INDICATOR_IDS, type IndicatorId } from '../../../shared/indicators/registry';
 import type { SupportedTimeframe } from '../../constants/timeframes';
 
 // IndicatorIdSchema: shared registry の INDICATOR_IDS を Zod enum 化
 // (= primaryIndicators の str 配列を未知 ID で誤魔化さないため)
 const IndicatorIdSchema = z.enum(INDICATOR_IDS);
-
-// ============================================================================
-// 旧型 (Phase 6、Trend / Oscillator / VolatilityVolume 3 体並列、次 PR で削除予定)
-// ============================================================================
-
-/** 専門家エージェントへの共通入力。 */
-export interface SpecialistInput {
-  symbol: string;
-  timeframe: string;
-  lensSnapshot: LensFeatureSnapshot;
-}
-
-/** 専門家の確信度共通フィールド(0-1)。 */
-export interface SpecialistBase {
-  interpretation: string;
-  confidence: number;
-}
-
-/** TrendSpecialist の出力。 */
-export interface TrendAnalysis extends SpecialistBase {
-  trendState: 'strong_up' | 'weak_up' | 'ranging' | 'weak_down' | 'strong_down';
-  trendStrength: number;
-  trendMaturity: 'early' | 'middle' | 'late';
-  keyLevels: {
-    support: number[];
-    resistance: number[];
-  };
-}
-
-/** OscillatorSpecialist の出力。 */
-export interface OscillatorAnalysis extends SpecialistBase {
-  momentum: 'overbought' | 'bullish' | 'neutral' | 'bearish' | 'oversold';
-  divergence: 'bullish_divergence' | 'bearish_divergence' | 'none';
-}
-
-/** VolatilityVolumeSpecialist の出力。 */
-export interface VolatilityVolumeAnalysis extends SpecialistBase {
-  volatilityRegime: 'expansion' | 'normal' | 'contraction';
-  breakoutRisk: 'high' | 'medium' | 'low';
-  volumeSignal: 'unusual_high' | 'normal' | 'unusual_low' | 'no_data';
-}
-
-/** 3 専門家の統合結果(HypothesisGenerator / StrategyThinker への入力で使用)。 */
-export interface SpecialistBundle {
-  trend: TrendAnalysis | null;
-  oscillator: OscillatorAnalysis | null;
-  volatilityVolume: VolatilityVolumeAnalysis | null;
-}
-
-// ============================================================================
-// 新型 (Phase 6.8、IndicatorSpecialist 1 体統合、2026-05-27)
-// ============================================================================
 
 // ============================================================================
 // 入力型

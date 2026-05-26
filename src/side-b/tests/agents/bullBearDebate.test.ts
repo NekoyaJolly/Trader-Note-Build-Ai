@@ -227,6 +227,46 @@ describe('BullBearDebateAgent.debate', () => {
     expect(result.model).toBe('test-model');
   });
 
+  it('Phase 6.8: indicatorAnalysis 指定時は prompt に IndicatorSpecialist セクションが注入される', async () => {
+    mockAIResponse(buildValidDebateOutput());
+    await agent.debate({
+      symbol: 'XAUUSD',
+      timeframe: '15m',
+      indicatorAnalysis: {
+        interpretation: 'MTF テクニカル統合解釈、RSI と MACD で上昇継続シグナル',
+        confidence: 0.7,
+        current: {
+          trendState: 'weak_up',
+          trendStrength: 0.6,
+          trendMaturity: 'middle',
+          keyLevels: { support: [1.4], resistance: [1.55] },
+          momentum: 'bullish',
+          divergence: 'none',
+          volatilityRegime: 'normal',
+          breakoutRisk: 'medium',
+          volumeSignal: 'normal',
+        },
+        higher: {
+          trendState: 'weak_up',
+          trendStrength: 0.5,
+          keyLevels: { support: [1.35], resistance: [1.6] },
+          momentum: 'bullish',
+        },
+        mtfAlignment: {
+          trendAlignment: 'aligned_bullish',
+          pullbackOpportunity: false,
+          counterTrendSignal: false,
+        },
+        primaryIndicators: { current: ['rsi', 'macd'], higher: ['ichimoku'] },
+      },
+    });
+    const fetchCall = (global.fetch as jest.Mock).mock.calls[0];
+    const body = JSON.parse(fetchCall[1].body);
+    const userMessage = body.messages.find((m: { role: string }) => m.role === 'user').content;
+    expect(userMessage).toContain('IndicatorSpecialist 分析');
+    expect(userMessage).toContain('aligned_bullish');
+  });
+
   it('API エラー時にフォールバックを返す', async () => {
     (global.fetch as jest.Mock).mockRejectedValue(new Error('500 Internal'));
 

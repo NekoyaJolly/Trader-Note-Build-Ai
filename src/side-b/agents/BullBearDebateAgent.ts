@@ -26,11 +26,7 @@ import { loadPromptWithGlobal } from '../prompts/loader';
 import { promptRegistry } from '../prompts/registry/PromptRegistry';
 import { recordAgentUsage } from './scoringRecorder';
 import { serializeLensSnapshot, type LensFeatureSnapshot } from '../lenses';
-import type {
-  TrendAnalysis,
-  OscillatorAnalysis,
-  VolatilityVolumeAnalysis,
-} from './specialists/types';
+import type { IndicatorAnalysis } from './specialists/types';
 import type { EdgeHypothesis } from '../models/edgeHypothesis';
 import { extractJson } from './llmJsonExtract';
 import {
@@ -67,12 +63,11 @@ export interface BullBearDebateInput {
   timeframe: string;
   lensSnapshot?: LensFeatureSnapshot;
   candidateHypotheses?: EdgeHypothesis[];
-  /** 専門家分析の結果（具体型を使用して型安全を確保） */
-  specialistAnalyses?: {
-    trend?: TrendAnalysis;
-    oscillator?: OscillatorAnalysis;
-    volatilityVolume?: VolatilityVolumeAnalysis;
-  };
+  /**
+   * Phase 6.8 (2026-05-27): IndicatorSpecialist 統合分析。旧 3 体並列 (Trend / Oscillator /
+   * VolatilityVolume) を 1 体に集約、MTF テクニカル状態を統合した結果。
+   */
+  indicatorAnalysis?: IndicatorAnalysis;
 }
 
 // ===========================================
@@ -226,31 +221,13 @@ export class BullBearDebateAgent {
       sections.push('```');
     }
 
-    // 専門家分析
-    if (input.specialistAnalyses) {
-      const { trend, oscillator, volatilityVolume } = input.specialistAnalyses;
-      if (trend || oscillator || volatilityVolume) {
-        sections.push('');
-        sections.push('## 専門家分析');
-        if (trend) {
-          sections.push('### トレンド分析');
-          sections.push('```json');
-          sections.push(JSON.stringify(trend, null, 2));
-          sections.push('```');
-        }
-        if (oscillator) {
-          sections.push('### オシレーター分析');
-          sections.push('```json');
-          sections.push(JSON.stringify(oscillator, null, 2));
-          sections.push('```');
-        }
-        if (volatilityVolume) {
-          sections.push('### ボラティリティ・ボリューム分析');
-          sections.push('```json');
-          sections.push(JSON.stringify(volatilityVolume, null, 2));
-          sections.push('```');
-        }
-      }
+    // Phase 6.8: IndicatorSpecialist 統合分析 (MTF テクニカル)
+    if (input.indicatorAnalysis) {
+      sections.push('');
+      sections.push('## IndicatorSpecialist 分析 (MTF テクニカル統合)');
+      sections.push('```json');
+      sections.push(JSON.stringify(input.indicatorAnalysis, null, 2));
+      sections.push('```');
     }
 
     // 候補仮説

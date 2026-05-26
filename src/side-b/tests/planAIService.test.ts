@@ -10,10 +10,11 @@
  * 料金は一切発生しません。
  */
 
-import { PlanAIService, PlanAIInput } from '../services/planAIService';
-import { FeatureVector12D } from '../models/featureVector';
-import { OHLCVSnapshot } from '../models/marketResearch';
-import { MarketResearchWithTypes } from '../repositories';
+import { PlanAIService } from '../services/planAIService';
+import type { PlanAIInput } from '../services/planAIService';
+import type { FeatureVector12D } from '../models/featureVector';
+import type { OHLCVSnapshot } from '../models/marketResearch';
+import type { MarketResearchWithTypes } from '../repositories';
 
 // fetch をモック
 global.fetch = jest.fn();
@@ -152,6 +153,56 @@ describe('PlanAIService', () => {
       expect(result.output.scenarios).toHaveLength(1);
       expect(result.output.scenarios[0].direction).toBe('long');
       expect(result.tokenUsage).toBe(1800);
+    });
+
+    it('Phase 6.8: indicatorAnalysis 指定時は prompt に IndicatorSpecialist セクションが注入される', async () => {
+      const mockOutput = createMockPlanAIOutput();
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          choices: [{ message: { content: JSON.stringify(mockOutput) } }],
+          usage: { total_tokens: 1500 },
+          model: 'gpt-4o',
+        }),
+      });
+      const input: PlanAIInput = {
+        research: mockResearch,
+        targetDate: '2026-01-05',
+        userPreferences: { tradingStyle: 'swing' },
+        indicatorAnalysis: {
+          interpretation: 'MTF テクニカル統合解釈、RSI と MACD で上昇継続シグナル',
+          confidence: 0.7,
+          current: {
+            trendState: 'weak_up',
+            trendStrength: 0.6,
+            trendMaturity: 'middle',
+            keyLevels: { support: [1.4], resistance: [1.55] },
+            momentum: 'bullish',
+            divergence: 'none',
+            volatilityRegime: 'normal',
+            breakoutRisk: 'medium',
+            volumeSignal: 'normal',
+          },
+          higher: {
+            trendState: 'weak_up',
+            trendStrength: 0.5,
+            keyLevels: { support: [1.35], resistance: [1.6] },
+            momentum: 'bullish',
+          },
+          mtfAlignment: {
+            trendAlignment: 'aligned_bullish',
+            pullbackOpportunity: false,
+            counterTrendSignal: false,
+          },
+          primaryIndicators: { current: ['rsi', 'macd'], higher: ['ichimoku'] },
+        },
+      };
+      await service.generatePlan(input);
+      const fetchCall = (global.fetch as jest.Mock).mock.calls[0];
+      const body = JSON.parse(fetchCall[1].body);
+      const userMessage = body.messages.find((m: { role: string }) => m.role === 'user').content;
+      expect(userMessage).toContain('IndicatorSpecialist 分析');
+      expect(userMessage).toContain('aligned_bullish');
     });
 
     it('APIキーがない場合はフォールバック', async () => {
