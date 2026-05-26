@@ -96,18 +96,40 @@ export async function fetchRecentCacheEntries(args: {
 }
 
 /**
- * 任意 retention 削除 (= 古いキャッシュをクリーンアップ、cron で呼ぶ想定)。
+ * retention 削除 (Phase 6.8 Step 3c、2026-05-27)
  *
- * **本 PR (Step 3a) では実装せず、Step 3b で本格運用時に raw SQL ベースで最適化する** 予定。
- * シグネチャだけ公開して後段の呼び出し側でモック化テストできるようにする。
+ * 各 (symbol, timeframe, indicatorId, paramsHash, field) 単位で **直近 keepCount 件**
+ * を保持し、それより古い行を削除する。raw SQL の `ROW_NUMBER() OVER (PARTITION BY ...)`
+ * を使うことで per-key の上位 N 件を効率的に判定。
  *
- * @param keepCount 各 (symbol, timeframe, indicatorId, paramsHash, field) ごとに保持する件数
- * @returns 削除件数 (= 現状常に 0)
+ * cron からの呼び出し前提 (= cleanupJob 経由、daily-plan 後の 24h ガード内で 1 回)。
+ *
+ * @param keepCount 各 key ごとに保持する直近件数 (= 例 12 で cron 4h × 2 日分相当)
+ * @returns 削除件数
  */
-export function pruneOldCacheEntries(_args: {
-  symbol?: string;
+export async function pruneOldCacheEntries(args: {
   keepCount: number;
-}): number {
-  // 現状は no-op (= safety)、Step 3b で実装
-  return 0;
+}): Promise<number> {
+  const { keepCount } = args;
+  if (!Number.isInteger(keepCount) || keepCount < 1) {
+    throw new Error(`pruneOldCacheEntries: keepCount は 1 以上の整数が必要 (= ${keepCount})`);
+  }
+  // PostgreSQL: ROW_NUMBER() で per-key の直近 N 件を保持、それ以外を削除
+  // Prisma の $executeRaw は安全な parameterized query を返す。
+  const result = await prisma.$executeRaw`
+    DELETE FROM "IndicatorSeriesCache"
+    WHERE "id" IN (
+      SELECT "id" FROM (
+        SELECT "id",
+          ROW_NUMBER() OVER (
+            PARTITION BY "symbol", "timeframe", "indicatorId", "paramsHash", "field"
+            ORDER BY "fetchedAt" DESC
+          ) AS rn
+        FROM "IndicatorSeriesCache"
+      ) ranked
+      WHERE rn > ${keepCount}
+    )
+  `;
+  // $executeRaw は影響行数を Number で返す
+  return Number(result);
 }
