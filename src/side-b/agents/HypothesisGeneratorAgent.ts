@@ -112,11 +112,6 @@ export interface HypothesisGeneratorInput {
     lensSnapshot: LensFeatureSnapshot;
     existingHypotheses: EdgeHypothesis[];
     /**
-     * Phase 6: 下位専門家エージェントによる事前分析(任意)。
-     * 渡された場合はプロンプトの ステップ0 で統合する。
-     * 渡されない場合、従来通りレンズ特徴量だけを参照する(後方互換)。
-     */
-    /**
      * Phase 6.8 (2026-05-27): IndicatorSpecialist の MTF テクニカル分析 (= 旧 3 体並列を統合)。
      * 渡された場合はプロンプトの ステップ0 で統合する。未指定なら従来通りレンズ特徴量のみ参照。
      */
@@ -528,7 +523,7 @@ export class HypothesisGeneratorAgent {
                       .map((h) => `- [${h.status}] ${h.statement}`)
                       .join('\n');
 
-        const specialistsDump = this.formatIndicatorAnalysis(input.indicatorAnalysis);
+        const indicatorAnalysisDump = this.formatIndicatorAnalysis(input.indicatorAnalysis);
         const discoveryDump =
             input.discoveryHints !== undefined && input.discoveryHints !== null
                 ? `\n## Discovery からの示唆 (discoveryHints)\n${JSON.stringify(input.discoveryHints, null, 2)}\n`
@@ -542,7 +537,7 @@ export class HypothesisGeneratorAgent {
 
 ## 現在のレンズスナップショット
 ${lensDump.join('\n')}
-${specialistsDump}${discoveryDump}
+${indicatorAnalysisDump}${discoveryDump}
 ## 既存仮説リスト（重複回避）
 ${existingDump}
 

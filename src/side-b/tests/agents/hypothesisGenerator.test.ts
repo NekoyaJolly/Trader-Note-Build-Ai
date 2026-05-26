@@ -165,6 +165,62 @@ describe('HypothesisGeneratorAgent.generate', () => {
         expect(result.tokenUsage).toBe(500);
     });
 
+    it('Phase 6.8: indicatorAnalysis 未指定時は prompt に IndicatorSpecialist セクションが含まれない', async () => {
+        mockFetchWith(validOutput);
+        await agent.generate({
+            symbol: 'XAUUSD',
+            timeframe: '15m',
+            lensSnapshot: makeSnapshot(),
+            existingHypotheses: [],
+        });
+        const fetchCall = (global.fetch as jest.Mock).mock.calls[0];
+        const body = JSON.parse(fetchCall[1].body);
+        const userMessage = body.messages.find((m: { role: string }) => m.role === 'user').content;
+        expect(userMessage).not.toContain('IndicatorSpecialist 分析');
+    });
+
+    it('Phase 6.8: indicatorAnalysis 指定時は prompt に IndicatorSpecialist 分析セクションが注入される', async () => {
+        mockFetchWith(validOutput);
+        await agent.generate({
+            symbol: 'XAUUSD',
+            timeframe: '15m',
+            lensSnapshot: makeSnapshot(),
+            existingHypotheses: [],
+            indicatorAnalysis: {
+                interpretation: 'テクニカル統合解釈、RSI と MACD の根拠による上昇継続シグナル',
+                confidence: 0.7,
+                current: {
+                    trendState: 'weak_up',
+                    trendStrength: 0.6,
+                    trendMaturity: 'middle',
+                    keyLevels: { support: [1.4], resistance: [1.55] },
+                    momentum: 'bullish',
+                    divergence: 'none',
+                    volatilityRegime: 'normal',
+                    breakoutRisk: 'medium',
+                    volumeSignal: 'normal',
+                },
+                higher: {
+                    trendState: 'weak_up',
+                    trendStrength: 0.5,
+                    keyLevels: { support: [1.35], resistance: [1.6] },
+                    momentum: 'bullish',
+                },
+                mtfAlignment: {
+                    trendAlignment: 'aligned_bullish',
+                    pullbackOpportunity: false,
+                    counterTrendSignal: false,
+                },
+                primaryIndicators: { current: ['rsi', 'macd'], higher: ['ichimoku'] },
+            },
+        });
+        const fetchCall = (global.fetch as jest.Mock).mock.calls[0];
+        const body = JSON.parse(fetchCall[1].body);
+        const userMessage = body.messages.find((m: { role: string }) => m.role === 'user').content;
+        expect(userMessage).toContain('IndicatorSpecialist 分析');
+        expect(userMessage).toContain('aligned_bullish');
+    });
+
     it('fetch エラー時は空を返す（throw しない）', async () => {
         (global.fetch as jest.Mock).mockRejectedValue(new Error('network down'));
         const result = await agent.generate({

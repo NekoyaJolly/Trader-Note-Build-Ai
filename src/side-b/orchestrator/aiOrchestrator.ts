@@ -463,6 +463,14 @@ export class AIOrchestrator {
                     higherOhlcv: higherTFData?.ohlcvData,
                   });
                   if (!specialistInput) return null;
+                  // P0 必須 indicator (= sma/ema/rsi/macd/atr) が現在 TF で 1 つでも
+                  // 欠落していたら LLM 呼び出しを skip (= 低品質出力 + 無駄コスト回避)
+                  if (!IndicatorSpecialist.hasMinimumDataForAnalysis(specialistInput)) {
+                    console.warn(
+                      '[Orchestrator] P0 必須 indicator 欠落、IndicatorSpecialist スキップ',
+                    );
+                    return null;
+                  }
                   // LLM 解釈
                   const specialist = new IndicatorSpecialist();
                   return await specialist.analyze(specialistInput);

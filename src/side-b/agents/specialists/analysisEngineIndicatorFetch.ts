@@ -12,7 +12,10 @@
  * 本 PR ではキャッシュ層 / フォールバック計算は実装しない (= 次以降の PR で追加)。
  */
 
-import { fetchIndicatorSeries } from '../../../backend/services/analysisEngineClient';
+import {
+  fetchIndicatorSeries,
+  makeIndicatorCacheKey,
+} from '../../../backend/services/analysisEngineClient';
 import type { AnalysisEngineIndicatorSpec } from '../../../schemas/external/analysisEngine';
 import { toIndicatorSeries } from './IndicatorSpecialist';
 import { INDICATOR_CATALOG } from './indicatorCatalog';
@@ -61,15 +64,14 @@ function catalogToAnalysisEngineSpecs(): AnalysisEngineIndicatorSpec[] {
 
 /**
  * OHLCV 末尾から priceContext を組み立てる。
- * volume が未取得の場合は 0、session の高低は OHLCV 全体ではなく **末尾 1 本** を採用
- * (= scheduler が短期セッション内の bar を渡す前提)。
+ * volume が未取得の場合は 0、sessionHigh / sessionLow は **OHLCV 全体** (= 渡された
+ * 期間内) の最高値 / 最安値。
  */
 function buildPriceContext(ohlcv: ReadonlyArray<OhlcvBar>): TimeframeData['priceContext'] {
   if (ohlcv.length === 0) {
     return { latestClose: 0, latestVolume: 0, sessionHigh: 0, sessionLow: 0 };
   }
   const last = ohlcv[ohlcv.length - 1];
-  // sessionHigh / sessionLow は直近 N 本 (= 全体 or 24 本程度) の高低、ここでは全体採用
   let sessionHigh = -Infinity;
   let sessionLow = Infinity;
   for (const bar of ohlcv) {
@@ -113,17 +115,13 @@ async function fetchTimeframeData(args: {
     });
 
     // response.series は Record<string, Array<number | null>>
-    // 各 cache key (= indicator + params + field) を IndicatorSeries に変換
+    // `makeIndicatorCacheKey(indicatorId, params, field)` で analysis-engine 側の
+    // 正確な cache key (= `{id}_{params_key}_{field}`) を組み立てて参照する。
+    // 同一 indicatorId で複数 series が返るケース (= 将来拡張) への耐性も確保。
     const indicators: Partial<Record<IndicatorId, IndicatorSeries>> = {};
     for (const spec of INDICATOR_CATALOG) {
-      // analysis-engine の cache key 形式は `{indicator_id}_{params_key}_{field}` だが、
-      // 呼び出し側で indicators[] を 1 spec/id ずつ送るので response key は予測可能。
-      // 簡略化: response.series の中で、key が当該 indicator id を prefix に持つものを採用。
-      const matchKey = Object.keys(response.series).find((k) =>
-        k.toLowerCase().startsWith(`${spec.id.toLowerCase()}_`),
-      );
-      if (!matchKey) continue;
-      const values = response.series[matchKey];
+      const key = makeIndicatorCacheKey(spec.id, spec.params, spec.field);
+      const values = response.series[key];
       if (Array.isArray(values)) {
         indicators[spec.id] = toIndicatorSeries(values);
       }

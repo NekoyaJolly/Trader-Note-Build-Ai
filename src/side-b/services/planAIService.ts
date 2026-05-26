@@ -163,7 +163,7 @@ export class PlanAIService {
     const analysis = research.marketAnalysis;
     const lensContext = this.buildLensContext(lensSnapshot);
     const candidateContext = this.buildCandidateHypothesesContext(candidateHypotheses);
-    const specialistContext = this.buildIndicatorContext(indicatorAnalysis);
+    const indicatorContext = this.buildIndicatorContext(indicatorAnalysis);
 
     // MarketAnalysis がある場合のリッチコンテキスト
     const analysisContext = analysis ? `
@@ -236,7 +236,7 @@ ${lessonsContext}
 
 ${lensContext}
 
-${specialistContext}
+${indicatorContext}
 
 ${candidateContext}
 
