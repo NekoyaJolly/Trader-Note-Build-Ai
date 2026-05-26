@@ -116,6 +116,9 @@ export async function pruneOldCacheEntries(args: {
   }
   // PostgreSQL: ROW_NUMBER() で per-key の直近 N 件を保持、それ以外を削除
   // Prisma の $executeRaw は安全な parameterized query を返す。
+  // ORDER BY のタイブレーク: 同 key 内で fetchedAt が同値になった場合 (= 並列 insert
+  // や timestamp 精度の都合) に「どの行を残すか」を決定的にするため `id DESC` を追加
+  // (PR #265 Copilot review #2)。UUID は単調増加ではないがランダム性で安定一意ソート。
   const result = await prisma.$executeRaw`
     DELETE FROM "IndicatorSeriesCache"
     WHERE "id" IN (
@@ -123,7 +126,7 @@ export async function pruneOldCacheEntries(args: {
         SELECT "id",
           ROW_NUMBER() OVER (
             PARTITION BY "symbol", "timeframe", "indicatorId", "paramsHash", "field"
-            ORDER BY "fetchedAt" DESC
+            ORDER BY "fetchedAt" DESC, "id" DESC
           ) AS rn
         FROM "IndicatorSeriesCache"
       ) ranked

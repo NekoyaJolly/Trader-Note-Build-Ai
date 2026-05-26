@@ -24,6 +24,7 @@ function baseResult(overrides: Partial<CleanupJobResult> = {}): CleanupJobResult
     oldPlansCount: 0,
     oldTradesCount: 0,
     carryRetention: { deleted: 0 },
+    indicatorCacheRetention: { deleted: 0 },
     ...overrides,
   };
 }
@@ -64,7 +65,9 @@ describe('mapCleanupResult', () => {
     }));
     expect(env.status).toBe('succeeded');
     expect(env.ok).toBe(true);
-    expect(env.summary).toBe('expiredResearch=10, oldPlans=5, oldTrades=3, evolutionCarryDeleted=2');
+    expect(env.summary).toBe(
+      'expiredResearch=10, oldPlans=5, oldTrades=3, evolutionCarryDeleted=2, indicatorCacheDeleted=0',
+    );
     expect(env.nextAction).toBe('proceed');
   });
 });

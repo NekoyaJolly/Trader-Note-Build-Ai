@@ -84,6 +84,9 @@ describe('CleanupJob.shouldRun (24h ガード)', () => {
 describe('CleanupJob.run', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // pruneOldCacheEntries は Promise<number> を返す API。既定で 0 件削除を設定
+    // (= テスト未設定時の挙動不一致防止、PR #265 Copilot review #3 対応)
+    mockPruneOldCacheEntries.mockResolvedValue(0);
   });
 
   it('executeCleanup に planRetentionDays / tradeRetentionDays を渡す', async () => {
