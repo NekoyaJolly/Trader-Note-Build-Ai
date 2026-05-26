@@ -2178,6 +2178,6 @@ model IndicatorSeriesCache {
   /// キャッシュ書き込み時刻 (= 「前回 / 前々回」順序付けの基準)
   fetchedAt   DateTime @default(now()) @db.Timestamptz(6)
 
-  @@index([symbol, timeframe, indicatorId, paramsHash, fetchedAt(sort: Desc)], map: "idx_indicator_cache_lookup")
+  @@index([symbol, timeframe, indicatorId, paramsHash, field, fetchedAt(sort: Desc)], map: "idx_indicator_cache_lookup")
 }
 

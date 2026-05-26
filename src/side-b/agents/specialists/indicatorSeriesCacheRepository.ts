@@ -11,8 +11,15 @@
  * 設計書: docs/architecture/INDICATOR_SPECIALIST_DESIGN.md
  */
 
+import { z } from 'zod';
 import { prisma } from '../../../backend/db/client';
 import { stableParamsKey } from '../../../backend/services/analysisEngineClient';
+
+/**
+ * DB の Json カラム `values` の shape を厳密検証する Zod schema。
+ * 想定外データ (= 旧スキーマ / 破損 / 手動投入の不正値) を silent に通さない。
+ */
+const CachedValuesSchema = z.array(z.number().nullable());
 
 export interface CacheEntry {
   symbol: string;
@@ -50,48 +57,57 @@ export async function writeIndicatorCacheEntry(entry: CacheEntry): Promise<void>
  * 直近 N 件のキャッシュ取得 (Step 3b で prompt 反映時に利用)。
  *
  * `fetchedAt` 降順で `take=N`、最新が [0]、前回が [1]、前々回が [2]。
+ *
+ * **`field` を含めた厳密 lookup** (PR #263 Copilot review #1): 同一 indicatorId で
+ * 複数 field (例: macd / signal / histogram) を保存するケースで他 field の履歴が
+ * 混ざるのを防ぐ。
+ *
+ * `values` は Json カラムなので Zod (`CachedValuesSchema`) で shape を検証し、
+ * 不正データは空配列で返す (= silent な型崩れを避ける、PR #263 Copilot review #2)。
  */
 export async function fetchRecentCacheEntries(args: {
   symbol: string;
   timeframe: string;
   indicatorId: string;
   params: Record<string, number>;
+  field: string;
   limit: number;
-}): Promise<Array<{ fetchedAt: Date; values: Array<number | null> }>> {
+}): Promise<Array<{ fetchedAt: Date; field: string; values: Array<number | null> }>> {
   const rows = await prisma.indicatorSeriesCache.findMany({
     where: {
       symbol: args.symbol,
       timeframe: args.timeframe,
       indicatorId: args.indicatorId,
       paramsHash: stableParamsKey(args.params),
+      field: args.field,
     },
     orderBy: { fetchedAt: 'desc' },
     take: args.limit,
-    select: { fetchedAt: true, values: true },
+    select: { fetchedAt: true, field: true, values: true },
   });
-  return rows.map((r) => ({
-    fetchedAt: r.fetchedAt,
-    values: r.values as Array<number | null>,
-  }));
+  return rows.map((r) => {
+    const parsed = CachedValuesSchema.safeParse(r.values);
+    return {
+      fetchedAt: r.fetchedAt,
+      field: r.field,
+      values: parsed.success ? parsed.data : [],
+    };
+  });
 }
 
 /**
  * 任意 retention 削除 (= 古いキャッシュをクリーンアップ、cron で呼ぶ想定)。
- * 本 PR では未配線、Step 3b 以降で必要に応じて使う。
  *
- * @param symbol 対象 symbol (= null なら全 symbol)
- * @param keepCount 各 (symbol, timeframe, indicatorId, paramsHash) ごとに保持する件数
- * @returns 削除件数
+ * **本 PR (Step 3a) では実装せず、Step 3b で本格運用時に raw SQL ベースで最適化する** 予定。
+ * シグネチャだけ公開して後段の呼び出し側でモック化テストできるようにする。
+ *
+ * @param keepCount 各 (symbol, timeframe, indicatorId, paramsHash, field) ごとに保持する件数
+ * @returns 削除件数 (= 現状常に 0)
  */
-export async function pruneOldCacheEntries(args: {
+export function pruneOldCacheEntries(_args: {
   symbol?: string;
   keepCount: number;
-}): Promise<number> {
-  // 簡易実装: 古い fetchedAt を順次削除。完全な per-key 制限は raw SQL でないと
-  // 効率が悪いので、Step 3b で本格運用時に最適化する。
-  // 本 PR は API のみ用意、未使用。
-  const cutoffPerKey = args.keepCount;
-  if (cutoffPerKey <= 0) return 0;
+}): number {
   // 現状は no-op (= safety)、Step 3b で実装
   return 0;
 }

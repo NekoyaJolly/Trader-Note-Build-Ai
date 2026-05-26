@@ -120,16 +120,17 @@ async function fetchTimeframeData(args: {
     // 正確な cache key (= `{id}_{params_key}_{field}`) を組み立てて参照する。
     // 同一 indicatorId で複数 series が返るケース (= 将来拡張) への耐性も確保。
     const indicators: Partial<Record<IndicatorId, IndicatorSeries>> = {};
+    // Phase 6.8 Step 3a: キャッシュ書き込み Promise を蓄積、最後に並列実行する
+    // (PR #263 Copilot review #3: indicator 数ぶん直列 await で 1 TF 内のレイテンシが
+    // 増えるため、Promise.allSettled で並列 + best-effort に変更)
+    const cacheWritePromises: Array<Promise<void>> = [];
     for (const spec of INDICATOR_CATALOG) {
       const key = makeIndicatorCacheKey(spec.id, spec.params, spec.field);
       const values = response.series[key];
       if (Array.isArray(values)) {
         indicators[spec.id] = toIndicatorSeries(values);
-        // Phase 6.8 Step 3a: 取得した系列を DB キャッシュに書き込み (= 後段の prompt 反映
-        // で「前回 / 前々回」との比較を可能に)。書き込み失敗は indicators 構築に影響させない
-        // (= 取得自体は成功しているので Specialist は走る)。
-        try {
-          await writeIndicatorCacheEntry({
+        cacheWritePromises.push(
+          writeIndicatorCacheEntry({
             symbol,
             timeframe,
             indicatorId: spec.id,
@@ -138,15 +139,15 @@ async function fetchTimeframeData(args: {
             values,
             startDate,
             endDate,
-          });
-        } catch (cacheErr) {
-          console.warn(
-            `[IndicatorSpecialist] キャッシュ書き込み失敗 (${spec.id}):`,
-            cacheErr instanceof Error ? cacheErr.message : String(cacheErr),
-          );
-        }
+          }).catch((cacheErr) => {
+            const msg = cacheErr instanceof Error ? cacheErr.message : String(cacheErr);
+            console.warn(`[IndicatorSpecialist] キャッシュ書き込み失敗 (${spec.id}):`, msg);
+          }),
+        );
       }
     }
+    // 並列実行 + 完了待ち (= 全件 catch 済なので rejection で停止しない)
+    await Promise.allSettled(cacheWritePromises);
 
     return {
       indicators,

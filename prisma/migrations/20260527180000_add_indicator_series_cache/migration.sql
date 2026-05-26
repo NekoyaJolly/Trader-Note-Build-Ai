@@ -15,7 +15,7 @@ CREATE TABLE "IndicatorSeriesCache" (
 );
 
 -- CreateIndex
-CREATE INDEX "idx_indicator_cache_lookup" ON "IndicatorSeriesCache"("symbol", "timeframe", "indicatorId", "paramsHash", "fetchedAt" DESC);
+CREATE INDEX "idx_indicator_cache_lookup" ON "IndicatorSeriesCache"("symbol", "timeframe", "indicatorId", "paramsHash", "field", "fetchedAt" DESC);
 
 -- Enable RLS (= Side-B プライベートテーブル、Supabase RLS 慣行に合わせる)
 ALTER TABLE "IndicatorSeriesCache" ENABLE ROW LEVEL SECURITY;
