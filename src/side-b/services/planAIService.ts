@@ -32,6 +32,7 @@ import type { MacroEnvironmentData, HigherTimeframeContext } from '../knowledge'
 import { loadPromptWithGlobal, type PromptMacros } from '../prompts/loader';
 import { PromptRegistry } from '../prompts/registry/PromptRegistry';
 import type { LensFeatureSnapshot } from '../lenses';
+import type { IndicatorAnalysis } from '../agents/specialists/types';
 import type { EdgeHypothesis } from '../models/edgeHypothesis';
 import { extractJson } from '../agents/llmJsonExtract';
 import type { JsonValue } from '../../utils/jsonValue';
@@ -67,12 +68,11 @@ export interface PlanAIInput {
    * Phase 6: 下位専門家エージェントによる事前分析(任意)。
    * 渡された場合はプロンプトの ステップ0 で統合する。
    * 未指定時は従来通りレンズ特徴量だけを参照する(後方互換)。
+   *
+   * Phase 6.8 (2026-05-27): 旧 3 体並列 (Trend / Oscillator / VolatilityVolume) を
+   * IndicatorSpecialist 1 体に統合、MTF テクニカル分析を提供。
    */
-  specialistAnalyses?: {
-    trend?: object;
-    oscillator?: object;
-    volatilityVolume?: object;
-  };
+  indicatorAnalysis?: IndicatorAnalysis;
 }
 
 /**
@@ -157,13 +157,13 @@ export class PlanAIService {
    * プロンプトを構築 — MarketAnalysis ベースの戦略思考
    */
   private buildPrompt(input: PlanAIInput): string {
-    const { research, targetDate, userPreferences, macroData, higherTF, agentLessons, lensSnapshot, candidateHypotheses, specialistAnalyses } = input;
+    const { research, targetDate, userPreferences, macroData, higherTF, agentLessons, lensSnapshot, candidateHypotheses, indicatorAnalysis } = input;
     const fv = research.featureVector;
     const snapshot = research.ohlcvSnapshot;
     const analysis = research.marketAnalysis;
     const lensContext = this.buildLensContext(lensSnapshot);
     const candidateContext = this.buildCandidateHypothesesContext(candidateHypotheses);
-    const specialistContext = this.buildSpecialistContext(specialistAnalyses);
+    const specialistContext = this.buildIndicatorContext(indicatorAnalysis);
 
     // MarketAnalysis がある場合のリッチコンテキスト
     const analysisContext = analysis ? `
@@ -286,31 +286,15 @@ ${candidateContext}
   }
 
   /**
-   * Phase 6: 下位専門家エージェントの分析をユーザープロンプトに注入する。
-   * specialistAnalyses が未指定 or 全て null の場合は空文字列を返す(後方互換)。
+   * Phase 6.8 (2026-05-27): IndicatorSpecialist の MTF テクニカル分析を prompt に注入。
+   * 旧 3 体並列 (Trend / Oscillator / VolatilityVolume) を 1 体に統合した結果。
+   * 未指定なら空文字 (= 後方互換、レンズ特徴量のみで動く)。
    */
-  private buildSpecialistContext(
-    specialistAnalyses?: PlanAIInput['specialistAnalyses'],
+  private buildIndicatorContext(
+    indicatorAnalysis?: PlanAIInput['indicatorAnalysis'],
   ): string {
-    if (!specialistAnalyses) return '';
-    const entries: string[] = [];
-    if (specialistAnalyses.trend) {
-      entries.push(
-        `### Trend Specialist\n${JSON.stringify(specialistAnalyses.trend, null, 2)}`,
-      );
-    }
-    if (specialistAnalyses.oscillator) {
-      entries.push(
-        `### Oscillator Specialist\n${JSON.stringify(specialistAnalyses.oscillator, null, 2)}`,
-      );
-    }
-    if (specialistAnalyses.volatilityVolume) {
-      entries.push(
-        `### Volatility/Volume Specialist\n${JSON.stringify(specialistAnalyses.volatilityVolume, null, 2)}`,
-      );
-    }
-    if (entries.length === 0) return '';
-    return `## 下位専門家の分析(統合して戦略化)\n${entries.join('\n\n')}`;
+    if (!indicatorAnalysis) return '';
+    return `## IndicatorSpecialist 分析 (MTF テクニカル統合、統合して戦略化)\n\`\`\`json\n${JSON.stringify(indicatorAnalysis, null, 2)}\n\`\`\``;
   }
 
   /**

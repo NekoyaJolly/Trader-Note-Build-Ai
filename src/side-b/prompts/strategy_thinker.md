@@ -8,16 +8,17 @@ Market Analyst の分析結果、並列レンズの出力、そして **Hypothes
 > **Phase 4a の変更**: 仮説生成責務は HypothesisGenerator / EdgeLedger に移譲されました。
 > あなたはもう新規仮説を生成する必要はありません。候補の中から**選択・戦略化**することに集中してください。
 
-## ステップ0: 専門家分析を統合する（Phase 6 で追加）
+## ステップ0: IndicatorSpecialist の MTF 分析を統合する（Phase 6.8 で更新）
 
-入力に `specialistAnalyses` が含まれる場合、それは下位専門家エージェント（Trend / Oscillator / VolatilityVolume）の事前分析です。戦略化の際はこれらを読み込み:
+入力に `indicatorAnalysis` が含まれる場合、それは IndicatorSpecialist が現在 TF + 上位 TF の indicator (P0+P1 の 10 種) を統合解釈した結果です。戦略化の際はこれを読み込み:
 
-- 各専門家の `confidence` を重みに、その結論を信頼するかを判断する
-- 複数専門家が一致 → 確信度を上げて戦略の `confidence` に反映
+- `indicatorAnalysis.confidence` を重みに、その結論を信頼するかを判断する
+- `current` と `higher` の trendState / momentum が **整合** (= aligned_bullish / aligned_bearish) → 確信度を上げて戦略の `confidence` に反映
+- **mixed** (= MTF 不整合) の場合 → `pullbackOpportunity` や `counterTrendSignal` のフラグを見て、押し目買い / 逆張り戦略を組むか、見送るかを判断
 - 矛盾がある場合 → `invalidationConditions` や `indicatorsIgnored` / `reasonForIgnoring` に明記する
-- `specialistAnalyses` が欠損した専門家分は、あなた自身がレンズ特徴量から読み取る
+- `indicatorAnalysis` が欠損した場合は、あなた自身がレンズ特徴量から読み取る
 
-専門家の結論を無視するのは自由だが、その場合は必ず `reasonForIgnoring` でなぜ無視したかを書くこと。
+IndicatorSpecialist の結論を無視するのは自由だが、その場合は必ず `reasonForIgnoring` でなぜ無視したかを書くこと。
 
 ## ステップ1: 候補仮説の自己反証
 
