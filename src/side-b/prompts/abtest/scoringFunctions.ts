@@ -27,6 +27,7 @@
  */
 
 import type { ScoringFunction } from './types';
+import type { IndicatorAnalysis } from '../../agents/specialists/types';
 import type { JsonValue } from '../../../utils/jsonValue';
 
 /**
@@ -101,12 +102,12 @@ function specialistScoreBase(
 export const indicatorSpecialistScoreFn: ScoringFunction<
   object,
   {
-    interpretation?: string;
-    confidence?: number;
-    current?: object;
-    higher?: object;
-    mtfAlignment?: object;
-    primaryIndicators?: object;
+    interpretation?: IndicatorAnalysis['interpretation'];
+    confidence?: IndicatorAnalysis['confidence'];
+    current?: Partial<IndicatorAnalysis['current']>;
+    higher?: Partial<IndicatorAnalysis['higher']>;
+    mtfAlignment?: Partial<IndicatorAnalysis['mtfAlignment']>;
+    primaryIndicators?: Partial<IndicatorAnalysis['primaryIndicators']>;
   }
 > = (_input, output) =>
   specialistScoreBase(output, [
