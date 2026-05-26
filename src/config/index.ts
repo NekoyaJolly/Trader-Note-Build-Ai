@@ -92,10 +92,12 @@ export type AIAgentKey =
   | 'lesson_similarity'
   | 'mutation'
   | 'crossover'
-  // Phase 6: 専門家エージェント / プロンプト進化 / MetaEvolution
+  // Phase 6 旧: 3 体並列 Specialist (次 PR で削除予定、Phase 6.8 で IndicatorSpecialist に統合)
   | 'trend_specialist'
   | 'oscillator_specialist'
   | 'volatility_volume_specialist'
+  // Phase 6.8 (2026-05-27): IndicatorSpecialist 統合 (= 旧 3 key を統合した新 key)
+  | 'indicator_specialist'
   | 'prompt_mutation'
   | 'meta_evolution'
   // Phase 7: Bull vs Bear 討論
@@ -183,10 +185,16 @@ export const config = {
       lesson_similarity: process.env.AI_MODEL_LESSON_SIMILARITY || 'google/gemini-3.1-flash-lite-preview',
       mutation: process.env.AI_MODEL_MUTATION || 'anthropic/claude-sonnet-4.6',
       crossover: process.env.AI_MODEL_CROSSOVER || 'anthropic/claude-sonnet-4.6',
+      // Phase 6 旧: 3 体並列 Specialist (次 PR で削除予定、Phase 6.8 で IndicatorSpecialist に統合)
       trend_specialist: process.env.AI_MODEL_TREND_SPECIALIST || 'google/gemini-3.1-flash-lite-preview',
       oscillator_specialist: process.env.AI_MODEL_OSCILLATOR_SPECIALIST || 'google/gemini-3.1-flash-lite-preview',
       volatility_volume_specialist:
         process.env.AI_MODEL_VOLATILITY_VOLUME_SPECIALIST || 'google/gemini-3.1-flash-lite-preview',
+      // Phase 6.8 (2026-05-27): 旧 trend / oscillator / volatility_volume の 3 体を統合し
+      // IndicatorSpecialist 1 体に。LLM call 数 1/3 + MTF 整合性 + 役割分離。default は
+      // Sonnet 4.6 (= 17+ indicator + MTF を扱うため Gemini Flash Lite より中位モデル推奨)。
+      indicator_specialist:
+        process.env.AI_MODEL_INDICATOR_SPECIALIST || 'anthropic/claude-sonnet-4.6',
       prompt_mutation: process.env.AI_MODEL_PROMPT_MUTATION || 'anthropic/claude-sonnet-4.6',
       meta_evolution: process.env.AI_MODEL_META_EVOLUTION || 'anthropic/claude-opus-4.7',
       // Phase 7: Bull vs Bear 討論 — 判断品質重視のため Opus
