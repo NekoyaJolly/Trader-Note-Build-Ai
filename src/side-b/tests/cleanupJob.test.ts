@@ -181,7 +181,7 @@ describe('CleanupJob.run', () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining('IndicatorSeriesCache retention 完了: 15件削除'));
   });
 
-  it('Phase 6.8 Step 3c: IndicatorSeriesCache retention 失敗時も本体 cleanup 続行', async () => {
+  it('Phase 6.8 Step 3c: IndicatorSeriesCache retention 失敗時も本体 cleanup 続行 + addError', async () => {
     mockExecuteCleanup.mockResolvedValue({
       expiredResearchCount: 0,
       oldPlansCount: 0,
@@ -189,7 +189,7 @@ describe('CleanupJob.run', () => {
     });
     mockRunEvolutionCarryRetention.mockResolvedValue({ deleted: 0 });
     mockPruneOldCacheEntries.mockRejectedValue(new Error('DB connection lost'));
-    const { job } = makeJob();
+    const { job, addError } = makeJob();
 
     const result = await job.run(minimalConfig);
 
@@ -197,6 +197,11 @@ describe('CleanupJob.run', () => {
     expect(result.executed).toBe(true);
     expect(result.indicatorCacheRetention.deleted).toBe(0);
     expect(result.indicatorCacheRetention.error).toContain('DB connection lost');
+    // PR #265 Copilot review #4: addError も呼ばれて Scheduler errors[] / JobPort
+    // failed 判定に乗ること
+    expect(addError).toHaveBeenCalledWith(
+      expect.stringContaining('IndicatorSeriesCache retention エラー'),
+    );
   });
 
   it('executeCleanup が throw すると addError を呼び result.error にメッセージを記録', async () => {

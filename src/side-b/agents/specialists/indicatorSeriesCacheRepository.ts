@@ -114,24 +114,41 @@ export async function pruneOldCacheEntries(args: {
   if (!Number.isInteger(keepCount) || keepCount < 1) {
     throw new Error(`pruneOldCacheEntries: keepCount は 1 以上の整数が必要 (= ${keepCount})`);
   }
-  // PostgreSQL: ROW_NUMBER() で per-key の直近 N 件を保持、それ以外を削除
-  // Prisma の $executeRaw は安全な parameterized query を返す。
-  // ORDER BY のタイブレーク: 同 key 内で fetchedAt が同値になった場合 (= 並列 insert
-  // や timestamp 精度の都合) に「どの行を残すか」を決定的にするため `id DESC` を追加
-  // (PR #265 Copilot review #2)。UUID は単調増加ではないがランダム性で安定一意ソート。
+  // PostgreSQL: 「keepCount 超過 key」だけを CTE で絞ってから ROW_NUMBER を計算する
+  // ことで、テーブル肥大化時のスキャン対象を最小化 (PR #265 Copilot review #5 対応)。
+  //
+  // 戦略:
+  // 1. `over_capacity_keys` CTE: GROUP BY で per-key の COUNT を出し、keepCount を
+  //    超えている key だけを抽出 (= HAVING COUNT(*) > keepCount)
+  // 2. INNER JOIN で対象 key の行のみに絞る (= 超過していない大多数の key は除外)
+  // 3. ROW_NUMBER + 同 key 内 DESC ORDER で keepCount より古い行の id を取得
+  // 4. それらを一括 DELETE
+  //
+  // ORDER BY のタイブレーク (PR #265 Copilot review #2): 同 key 内で fetchedAt が
+  // 同値の時に保持対象を決定的にするため `id DESC` を二次キーに追加。
   const result = await prisma.$executeRaw`
-    DELETE FROM "IndicatorSeriesCache"
-    WHERE "id" IN (
-      SELECT "id" FROM (
-        SELECT "id",
-          ROW_NUMBER() OVER (
-            PARTITION BY "symbol", "timeframe", "indicatorId", "paramsHash", "field"
-            ORDER BY "fetchedAt" DESC, "id" DESC
-          ) AS rn
-        FROM "IndicatorSeriesCache"
-      ) ranked
-      WHERE rn > ${keepCount}
+    WITH over_capacity_keys AS (
+      SELECT "symbol", "timeframe", "indicatorId", "paramsHash", "field"
+      FROM "IndicatorSeriesCache"
+      GROUP BY "symbol", "timeframe", "indicatorId", "paramsHash", "field"
+      HAVING COUNT(*) > ${keepCount}
+    ),
+    ranked AS (
+      SELECT c."id",
+        ROW_NUMBER() OVER (
+          PARTITION BY c."symbol", c."timeframe", c."indicatorId", c."paramsHash", c."field"
+          ORDER BY c."fetchedAt" DESC, c."id" DESC
+        ) AS rn
+      FROM "IndicatorSeriesCache" c
+      INNER JOIN over_capacity_keys k ON
+        c."symbol" = k."symbol" AND
+        c."timeframe" = k."timeframe" AND
+        c."indicatorId" = k."indicatorId" AND
+        c."paramsHash" = k."paramsHash" AND
+        c."field" = k."field"
     )
+    DELETE FROM "IndicatorSeriesCache"
+    WHERE "id" IN (SELECT "id" FROM ranked WHERE rn > ${keepCount})
   `;
   // $executeRaw は影響行数を Number で返す
   return Number(result);

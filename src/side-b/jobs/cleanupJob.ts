@@ -173,7 +173,10 @@ export class CleanupJob
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+        // Scheduler errors[] / JobPort failed 判定に乗せるため log + addError 両方で記録
+        // (PR #265 Copilot review #4 対応、EvolutionInstanceCarry retention と同等)
         this.deps.log(`IndicatorSeriesCache retention 失敗: ${msg}`);
+        this.deps.addError(`IndicatorSeriesCache retention エラー: ${msg}`);
         result.indicatorCacheRetention = { deleted: 0, error: msg };
       }
 
