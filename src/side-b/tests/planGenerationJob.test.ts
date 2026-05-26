@@ -47,7 +47,6 @@ function makeServices(): PlanGenerationJobServices {
 
 function makeJob(opts: {
   onSymbolCompleted?: (s: string, d: Date) => void;
-  getLastSymbolRun?: (s: string) => Date | undefined;
 } = {}) {
   const addError = jest.fn();
   const log = jest.fn();
@@ -58,7 +57,6 @@ function makeJob(opts: {
       {
         servicesFactory: () => services,
         onSymbolCompleted: opts.onSymbolCompleted,
-        getLastSymbolRun: opts.getLastSymbolRun,
       },
     ),
     addError,
@@ -108,18 +106,6 @@ describe('PlanGenerationJob', () => {
     expect(result.results).toEqual([{ symbol: 'NZDCHF', success: true }]);
     expect(result.message).toContain('1/1 シンボル成功');
     expect(result.success).toBe(true);
-  });
-
-  it('getLastSymbolRun で間隔内ならスキップ (lastRun = 直前)', async () => {
-    const justRun = new Date(); // 直前に実行された想定
-    const { job, services } = makeJob({ getLastSymbolRun: () => justRun });
-
-    const result = await job.runWithServices(minimalConfig, services);
-
-    expect(services.marketDataService.getHistoricalData).not.toHaveBeenCalled();
-    // 全シンボルがスキップされたので results は空、success は false (successCount=0 のため)
-    expect(result.results).toEqual([]);
-    expect(result.success).toBe(false);
   });
 
   it('OHLCV 取得失敗で errors に計上、results.success=false', async () => {

@@ -8,7 +8,6 @@
  * - executePlanJob() のプラン生成部分 (約 175 行、L1166-1339)
  *
  * 含まれる処理:
- * - シンボルごとの最終実行チェック (lastPlanRun の経過時間で skip 判定)
  * - 執行足 OHLCV 取得 (marketDataService.getHistoricalData)
  * - OHLCV の DB 永続化 (ohlcvRepository.bulkInsert)
  * - 上位足 OHLCV 取得 + 永続化 (MTF 分析用)
@@ -98,12 +97,6 @@ export class PlanGenerationJob
   private readonly onSymbolCompleted?: (symbol: string, completedAt: Date) => void;
 
   /**
-   * シンボル毎の前回実行日時を取得するためのコールバック。
-   * Scheduler の `lastPlanRun.get(symbol)` を参照する。
-   */
-  private readonly getLastSymbolRun?: (symbol: string) => Date | undefined;
-
-  /**
    * Services を遅延取得するファクトリ (PR #161 Copilot review #3 対応)。
    * 詳細は TradeMonitoringJob と同じ。
    */
@@ -114,12 +107,10 @@ export class PlanGenerationJob
     options: {
       servicesFactory: () => PlanGenerationJobServices;
       onSymbolCompleted?: (symbol: string, completedAt: Date) => void;
-      getLastSymbolRun?: (symbol: string) => Date | undefined;
     },
   ) {
     this.deps = deps;
     this.onSymbolCompleted = options.onSymbolCompleted;
-    this.getLastSymbolRun = options.getLastSymbolRun;
     this.servicesFactory = options.servicesFactory;
   }
 
@@ -157,13 +148,13 @@ export class PlanGenerationJob
 
     for (const symbol of symbols) {
       try {
-        // 最終実行チェック (間隔内なら該シンボルはスキップ)
-        const lastRun = this.getLastSymbolRun?.(symbol);
-        const intervalMs = (config.planIntervalHours || 24) * 60 * 60 * 1000;
-        if (lastRun && Date.now() - lastRun.getTime() < intervalMs) {
-          this.deps.log(`[${symbol}] 間隔内のためスキップ（最終: ${lastRun.toISOString()}）`);
-          continue;
-        }
+        // 2026-05-26: 最終実行チェック (間隔内 skip) を削除。
+        // 経緯: cron 経由 (4h 間隔) で起動される設計だが、GitHub Actions の cron 発火が
+        // 5-15 分遅延するため、in-memory `lastPlanRun` の 4h skip ロジックと衝突して
+        // 連鎖的に全 symbol が continue → `0/0 シンボル成功` で plan が永続的に生成
+        // されない事象が発生した。
+        // 解決: cron schedule (= 4h 間隔) が間隔保証するため in-memory skip は不要。
+        // 手動 trigger も毎回確実に走るようになり、debug もしやすくなる。
 
         // 1. 執行足 OHLCV データ取得
         this.deps.log(`[${symbol}] 執行足(${config.timeframe})OHLCV取得中...`);

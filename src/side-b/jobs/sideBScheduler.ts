@@ -375,7 +375,6 @@ export class SideBScheduler {
       onSymbolCompleted: (symbol: string, completedAt: Date) => {
         this.lastPlanRun.set(symbol, completedAt);
       },
-      getLastSymbolRun: (symbol: string) => this.lastPlanRun.get(symbol),
     });
     this.discoveryJob = new DiscoveryJob(deps, {
       onCompleted: (completedAt: Date) => {
