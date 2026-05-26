@@ -33,6 +33,21 @@ import type { SideBJobDeps, SideBJobName, SideBJobRunner } from './types';
 import type { SideBSchedulerConfig } from './sideBScheduler';
 
 /**
+ * config.symbols が空配列で渡された場合の fallback (2026-05-26 追加)。
+ *
+ * 経緯: 2026-05-26 観察で本番 cron daily-plan endpoint が `0/0 シンボル成功` を返し続け、
+ * 24h 内の EdgeHypothesis 生成が 0 件になる事象が判明。コード上 DEFAULT_CONFIG.symbols は
+ * ['NZDCHF'] で空配列にならない設計だが、本番では実際に空配列で渡されているため、
+ * 進化ループ (= evolutionJobConfig.ts の DEFAULT_EVOLUTION_REGIMES) と同じ防御パターンを
+ * plan generation 側にも追加する。根本原因 (= scheduler 起動経路 / Watchlist 解決の
+ * race condition) は別途調査。
+ *
+ * NZDCHF は [[feedback_fallback_minor_symbol]] 原則どおりマイナー通貨で、fallback 状態が
+ * 一目で判別できる。
+ */
+const PLAN_GENERATION_FALLBACK_SYMBOLS = ['NZDCHF'] as const;
+
+/**
  * PlanGenerationJob が依存する外部サービス群。
  */
 export interface PlanGenerationJobServices {
@@ -128,9 +143,19 @@ export class PlanGenerationJob
       : '日次';
     this.deps.log(`${intervalLabel}プラン生成を開始します`);
 
+    // 防御コード (2026-05-26): config.symbols が空配列なら fallback を使用。
+    // 本番で `0/0 シンボル成功` が継続する事象に対する応急処置。
+    let symbols: readonly string[] = config.symbols;
+    if (!symbols || symbols.length === 0) {
+      this.deps.log(
+        `[plan-fallback] config.symbols が空配列で渡されました。fallback (${PLAN_GENERATION_FALLBACK_SYMBOLS.join(', ')}) を使用します。根本原因 (= scheduler 起動経路 / Watchlist 解決) は別途調査`,
+      );
+      symbols = PLAN_GENERATION_FALLBACK_SYMBOLS;
+    }
+
     const results: PlanGenerationSymbolResult[] = [];
 
-    for (const symbol of config.symbols) {
+    for (const symbol of symbols) {
       try {
         // 最終実行チェック (間隔内なら該シンボルはスキップ)
         const lastRun = this.getLastSymbolRun?.(symbol);
