@@ -2148,3 +2148,36 @@ model SystemState {
   updatedAt DateTime @updatedAt @db.Timestamptz(6)
 }
 
+/// IndicatorSpecialist 用 indicator 系列キャッシュ (Phase 6.8 Step 3、2026-05-27)
+///
+/// analysis-engine から取得した indicator 値の系列を symbol × timeframe × indicator × params
+/// 単位でキャッシュ。Nekoさん 2026-05-27 議論で「前回・前々回との比較で流れを見られる」
+/// ようにする目的。
+///
+/// 本 PR では **書き込みのみ実装**、prompt への前回比較反映は別 PR (Step 3b)。
+/// retention は実運用観察で決定 (= 当面 cron 4h × 直近 N 件 = 例えば 12-24 件保持で十分)
+///
+/// 設計書: docs/architecture/INDICATOR_SPECIALIST_DESIGN.md
+model IndicatorSeriesCache {
+  id          String   @id @default(uuid()) @db.Uuid
+  /// 対象 symbol
+  symbol      String
+  /// 対象 timeframe (= SupportedTimeframe の文字列)
+  timeframe   String
+  /// shared registry の IndicatorId (= rsi / macd / sma / ema / ichimoku 等)
+  indicatorId String
+  /// 標準パラメータの安定キー (= stableParamsKey() の出力、`makeIndicatorCacheKey()` 整合)
+  paramsHash  String
+  /// 取得した field (= macd / value / tenkan 等)
+  field       String
+  /// 系列値 (Array<number | null>)。analysis-engine response.series[key] そのまま
+  values      Json
+  /// 系列の対象期間 (= analysis-engine リクエストの startDate / endDate)
+  startDate   DateTime @db.Timestamptz(6)
+  endDate     DateTime @db.Timestamptz(6)
+  /// キャッシュ書き込み時刻 (= 「前回 / 前々回」順序付けの基準)
+  fetchedAt   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([symbol, timeframe, indicatorId, paramsHash, field, fetchedAt(sort: Desc)], map: "idx_indicator_cache_lookup")
+}
+
