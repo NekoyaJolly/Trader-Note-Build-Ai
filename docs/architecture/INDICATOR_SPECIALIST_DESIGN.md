@@ -121,17 +121,48 @@ interface TimeframeData {
 }
 ```
 
-`IndicatorSeries` は analysis-engine の出力をそのまま受け取れる構造:
+`IndicatorSeries` は **analysis-engine 生レスポンスを TS 側で整形した形**:
+
 ```ts
 interface IndicatorSeries {
   latest: number | null;
   previous: number | null;
   // 直近 N 期間の値 (Specialist が傾きや変化を判断する材料)
   recentValues: Array<number | null>;
-  // 統計サマリ (= prompt トークン削減目的、生配列が冗長な時に置換)
+  // 統計サマリ (= 生配列が冗長な時に置換)
   summary?: { mean: number; std: number; min: number; max: number };
 }
 ```
+
+**変換ステップ** (Phase 1 実装で TS 側に追加):
+
+analysis-engine の `/v1/indicator-series` (POST) レスポンスは現状:
+```ts
+// src/schemas/external/analysisEngine.ts L198 (= AnalysisEngineIndicatorSeriesResponse)
+series: Record<string, Array<number | null>>
+// 例: { "rsi": [50.1, 51.2, null, 52.3, ...], "macd_signal": [...], ... }
+```
+
+つまり生レスポンスは **キー=indicator id × 値=単一の数値時系列配列**。`IndicatorSeries` (= `latest/previous/recentValues/summary`) への変換は IndicatorSpecialist の入力構築層で行う:
+
+```ts
+function toIndicatorSeries(values: Array<number | null>, recentN = 20): IndicatorSeries {
+  const latest = values.length > 0 ? values[values.length - 1] : null;
+  const previous = values.length > 1 ? values[values.length - 2] : null;
+  const recentValues = values.slice(-recentN);
+  // summary は recentValues の非 null 値から計算 (= mean/std/min/max)
+  const nonNull = recentValues.filter((v): v is number => v !== null);
+  const summary = nonNull.length > 0 ? {
+    mean: nonNull.reduce((a, b) => a + b, 0) / nonNull.length,
+    std: /* ... */,
+    min: Math.min(...nonNull),
+    max: Math.max(...nonNull),
+  } : undefined;
+  return { latest, previous, recentValues, summary };
+}
+```
+
+この変換層により、analysis-engine の単純な配列レスポンスと、LLM 解釈に適した `IndicatorSeries` 型の責任を明確に分離する。
 
 ### 3.3 出力 `IndicatorAnalysis`
 
@@ -220,8 +251,10 @@ P0/P1 (= 10 種類) を最初は固定取得。P2 は後段の必要性に応じ
 
 ### 4.3 取得方法 (= MTF 対応)
 
-- analysis-engine の `/indicator-series` API を batch でコール
-- **現在 TF + 上位 TF の両方** を 1 batch リクエストで取得 (= API 側で対応可能なら 1 request、不可なら 2 並列 request)
+- analysis-engine の **`POST /v1/indicator-series`** (= `AnalysisEngineIndicatorSeriesRequest` → `AnalysisEngineIndicatorSeriesResponse`) を使用
+  - 既存 TS クライアント: `src/backend/services/analysisEngineClient.ts` を流用
+  - 関連エンドポイント: `POST /v1/indicator-series/by-version` (= 戦略 version 由来の indicator spec で取得、使い分けは Phase 1 実装時に判断)
+- **現在 TF + 上位 TF を 2 並列 request** で取得 (= 単一 request では複数 TF を扱えないため)
 - 各 indicator のパラメータは標準値 (= RSI=14, MACD=12-26-9 等) を構成定数として `src/side-b/agents/specialists/indicatorCatalog.ts` (新規) に集約
 - 上位 TF の導出は既存 `deriveHigherTimeframe(currentTimeframe)` (PR #246) を流用
 
@@ -283,18 +316,18 @@ P0/P1 (= 10 種類) を最初は固定取得。P2 は後段の必要性に応じ
 symbol: {{symbol}}
 current_timeframe: {{currentTimeframe}}
 higher_timeframe: {{higherTimeframe}}
-latest_close: {{current.priceContext.latestClose}}
+latest_close: {{latestClose}}
 
 current ({{currentTimeframe}}):
-  rsi: {{current.indicators.rsi}}
-  macd: {{current.indicators.macd}}
-  atr: {{current.indicators.atr}}
+  rsi: {{currentRsi}}
+  macd: {{currentMacd}}
+  atr: {{currentAtr}}
   ... (要は P0/P1 で取得した indicator 一覧)
 
 higher ({{higherTimeframe}}):
-  rsi: {{higher.indicators.rsi}}
-  macd: {{higher.indicators.macd}}
-  ichimoku: {{higher.indicators.ichimoku}}
+  rsi: {{higherRsi}}
+  macd: {{higherMacd}}
+  ichimoku: {{higherIchimoku}}
   ... (同上)
 
 [出力 (= structured JSON)]
@@ -312,9 +345,28 @@ higher ({{higherTimeframe}}):
 }
 ```
 
-**注**: prompt 内に **symbol / timeframe / 価格レベル等の具体値をハードコードしてはいけない** (Nekoさん 2026-05-27 指示)。実行時に `IndicatorSpecialistInput` から動的に展開する。`{{xxx}}` は placeholder で、prompt template engine (= `loadSpecialistPromptWithGlobalAndCommon` 等の既存 loader 経由) で実値に置換される。
+**注 1 (Nekoさん 2026-05-27 指示)**: prompt 内に **symbol / timeframe / 価格レベル等の具体値をハードコードしてはいけない**。実行時に `IndicatorSpecialistInput` から動的に展開する。
 
-### 5.4 出力検証
+**注 2 (placeholder 形式)**: 既存 `expandMacros` (`src/side-b/prompts/loader.ts:74`) は `{{KEY}}` の **flat な単純置換**でドット記法 (= `{{current.indicators.rsi}}`) は解決しない。本設計ではドット記法を使わず、**flat な macros キー** (`{{currentRsi}}`, `{{higherRsi}}` 等) を用いる。IndicatorSpecialist の prompt 構築層で `IndicatorSpecialistInput` をフラットな `PromptMacros` 辞書に展開する変換ステップを Phase 1 実装に含める:
+
+```ts
+function buildMacros(input: IndicatorSpecialistInput): PromptMacros {
+  return {
+    symbol: input.symbol,
+    currentTimeframe: input.currentTimeframe,
+    higherTimeframe: input.higherTimeframe,
+    latestClose: String(input.current.priceContext.latestClose),
+    currentRsi: formatIndicator(input.current.indicators.rsi),
+    currentMacd: formatIndicator(input.current.indicators.macd),
+    // ... 各 indicator を fmt して flat キーに展開
+    higherRsi: formatIndicator(input.higher.indicators.rsi),
+    higherMacd: formatIndicator(input.higher.indicators.macd),
+    // ...
+  };
+}
+```
+
+### 5.3 出力検証
 
 Zod schema (`IndicatorAnalysisSchema`) で structured JSON を厳密検証。失敗時は **1 回リトライ + exponential backoff** → 失敗時は null。
 
