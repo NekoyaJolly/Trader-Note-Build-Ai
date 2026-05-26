@@ -35,7 +35,7 @@ describe('modelFor() / resolveDefaultModel() - AI_MODEL_OVERRIDE_ALL', () => {
     process.env.AI_MODEL_OVERRIDE_ALL = 'gpt-4o-mini';
     expect(modelFor('strategist')).toBe('gpt-4o-mini');
     expect(modelFor('mutation')).toBe('gpt-4o-mini');
-    expect(modelFor('trend_specialist')).toBe('gpt-4o-mini');
+    expect(modelFor('indicator_specialist')).toBe('gpt-4o-mini');
     expect(modelFor('ai_note')).toBe('gpt-4o-mini');
     expect(modelFor('ai_summary')).toBe('gpt-4o-mini');
     expect(modelFor('decision_inference')).toBe('gpt-4o-mini');

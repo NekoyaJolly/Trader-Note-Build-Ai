@@ -7,9 +7,7 @@
  *
  * 実装済みエージェント:
  * - hypothesis_generator (Phase 6 MVP)
- * - trend_specialist (Phase 6 MVP)
- * - oscillator_specialist (Phase 6 MVP)
- * - volatility_volume_specialist (Phase 6 MVP)
+ * - indicator_specialist (Phase 6.8 統合 = 旧 trend / oscillator / volatility_volume 統合)
  * - strategist (Critical-3)
  * - devils_advocate (Critical-3)
  * - discovery (Critical-3)
@@ -29,6 +27,7 @@
  */
 
 import type { ScoringFunction } from './types';
+import type { IndicatorAnalysis } from '../../agents/specialists/types';
 import type { JsonValue } from '../../../utils/jsonValue';
 
 /**
@@ -93,54 +92,35 @@ function specialistScoreBase(
   return 0.5 * fieldsFilled + 0.3 * interpScore + 0.2 * confInRange;
 }
 
-export const trendSpecialistScoreFn: ScoringFunction<
+/**
+ * IndicatorSpecialist (Phase 6.8、2026-05-27 統合) の scoring 関数。
+ *
+ * 旧 trend / oscillator / volatility_volume の 3 つの scoring 関数を統合。
+ * IndicatorAnalysis のトップレベル 6 フィールドが揃っているかを `specialistScoreBase`
+ * で評価 (= interpretation の文字数 + confidence 範囲 + 各オブジェクトの存在)。
+ */
+export const indicatorSpecialistScoreFn: ScoringFunction<
   object,
   {
-    trendState?: string;
-    trendStrength?: number;
-    trendMaturity?: string;
-    keyLevels?: { support?: number[]; resistance?: number[] };
-    interpretation?: string;
-    confidence?: number;
+    interpretation?: IndicatorAnalysis['interpretation'];
+    confidence?: IndicatorAnalysis['confidence'];
+    current?: Partial<IndicatorAnalysis['current']>;
+    higher?: Partial<IndicatorAnalysis['higher']>;
+    mtfAlignment?: Partial<IndicatorAnalysis['mtfAlignment']>;
+    primaryIndicators?: Partial<IndicatorAnalysis['primaryIndicators']>;
   }
 > = (_input, output) =>
   specialistScoreBase(output, [
-    'trendState',
-    'trendStrength',
-    'trendMaturity',
-    'keyLevels',
     'interpretation',
     'confidence',
+    'current',
+    'higher',
+    'mtfAlignment',
+    'primaryIndicators',
   ]);
 
-export const oscillatorSpecialistScoreFn: ScoringFunction<
-  object,
-  {
-    momentum?: string;
-    divergence?: string;
-    interpretation?: string;
-    confidence?: number;
-  }
-> = (_input, output) =>
-  specialistScoreBase(output, ['momentum', 'divergence', 'interpretation', 'confidence']);
-
-export const volatilityVolumeSpecialistScoreFn: ScoringFunction<
-  object,
-  {
-    volatilityRegime?: string;
-    breakoutRisk?: string;
-    volumeSignal?: string;
-    interpretation?: string;
-    confidence?: number;
-  }
-> = (_input, output) =>
-  specialistScoreBase(output, [
-    'volatilityRegime',
-    'breakoutRisk',
-    'volumeSignal',
-    'interpretation',
-    'confidence',
-  ]);
+// 旧 trendSpecialistScoreFn / oscillatorSpecialistScoreFn /
+// volatilityVolumeSpecialistScoreFn は Phase 6.8 で削除済 (= indicatorSpecialistScoreFn に統合)。
 
 // ============================================================
 // Critical-3 残スコープ: 死蔵 8 体のスコア関数
@@ -481,13 +461,11 @@ export const bullBearDebateScoreFn: ScoringFunction<
   return 0.4 * sideAvgScore + 0.4 * synthesisScore + 0.2 * marketScore;
 };
 
-/** エージェント名 → スコア関数 のマッピング(全 12 体、Phase 6 MVP + Critical-3 残)。 */
+/** エージェント名 → スコア関数 のマッピング (Phase 6.8 統合後 = 10 体)。 */
 export const SCORING_FUNCTIONS: Record<string, ScoringFunction<object, object>> = {
-  // Phase 6 MVP
+  // Phase 6 MVP + Phase 6.8 統合 (indicator_specialist で旧 3 体を統合)
   hypothesis_generator: hypothesisGeneratorScoreFn,
-  trend_specialist: trendSpecialistScoreFn,
-  oscillator_specialist: oscillatorSpecialistScoreFn,
-  volatility_volume_specialist: volatilityVolumeSpecialistScoreFn,
+  indicator_specialist: indicatorSpecialistScoreFn,
   // Critical-3 残スコープ(死蔵 8 体)
   strategist: strategistScoreFn,
   devils_advocate: devilsAdvocateScoreFn,

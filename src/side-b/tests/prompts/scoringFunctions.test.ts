@@ -4,9 +4,7 @@
 
 import {
   hypothesisGeneratorScoreFn,
-  trendSpecialistScoreFn,
-  oscillatorSpecialistScoreFn,
-  volatilityVolumeSpecialistScoreFn,
+  indicatorSpecialistScoreFn,
   strategistScoreFn,
   devilsAdvocateScoreFn,
   discoveryScoreFn,
@@ -67,32 +65,32 @@ describe('hypothesisGeneratorScoreFn', () => {
   });
 });
 
-describe('trendSpecialistScoreFn', () => {
-  it('必須フィールド全揃い + 長めの interpretation + 妥当な confidence で高スコア', () => {
-    const s = trendSpecialistScoreFn(
+describe('indicatorSpecialistScoreFn (Phase 6.8 統合 = 旧 trend/oscillator/volatility_volume)', () => {
+  it('必須フィールド (interpretation/confidence/current/higher/mtfAlignment/primaryIndicators) 全揃いで高スコア', () => {
+    const s = indicatorSpecialistScoreFn(
       {},
       {
-        trendState: 'strong_up',
-        trendStrength: 0.7,
-        trendMaturity: 'middle',
-        keyLevels: { support: [100], resistance: [110] },
         interpretation: 'x'.repeat(100),
         confidence: 0.6,
+        current: { trendState: 'strong_up' },
+        higher: { trendState: 'weak_up' },
+        mtfAlignment: { trendAlignment: 'aligned_bullish' },
+        primaryIndicators: { current: ['rsi'], higher: ['ichimoku'] },
       },
     );
     expect(s).toBeCloseTo(1, 5);
   });
 
   it('confidence が範囲外だとペナルティ', () => {
-    const s = trendSpecialistScoreFn(
+    const s = indicatorSpecialistScoreFn(
       {},
       {
-        trendState: 'up',
-        trendStrength: 0.5,
-        trendMaturity: 'middle',
-        keyLevels: { support: [], resistance: [] },
         interpretation: 'x'.repeat(100),
         confidence: 0.99,
+        current: {},
+        higher: {},
+        mtfAlignment: {},
+        primaryIndicators: {},
       },
     );
     expect(s).toBeLessThan(1);
@@ -100,44 +98,15 @@ describe('trendSpecialistScoreFn', () => {
   });
 
   it('空オブジェクトは低スコア', () => {
-    const s = trendSpecialistScoreFn({}, {});
+    const s = indicatorSpecialistScoreFn({}, {});
     expect(s).toBeLessThan(0.3);
   });
 });
 
-describe('oscillatorSpecialistScoreFn / volatilityVolumeSpecialistScoreFn', () => {
-  it('それぞれ必須フィールドで満点', () => {
-    const o = oscillatorSpecialistScoreFn(
-      {},
-      {
-        momentum: 'bullish',
-        divergence: 'none',
-        interpretation: 'y'.repeat(100),
-        confidence: 0.5,
-      },
-    );
-    expect(o).toBeCloseTo(1, 5);
-
-    const v = volatilityVolumeSpecialistScoreFn(
-      {},
-      {
-        volatilityRegime: 'normal',
-        breakoutRisk: 'low',
-        volumeSignal: 'no_data',
-        interpretation: 'z'.repeat(100),
-        confidence: 0.4,
-      },
-    );
-    expect(v).toBeCloseTo(1, 5);
-  });
-});
-
 describe('getScoringFunction', () => {
-  it('Phase 6 MVP + Critical-3 残スコープの 12 エージェント分は取得できる', () => {
+  it('Phase 6 MVP + Critical-3 残スコープの 10 エージェント分は取得できる', () => {
     expect(getScoringFunction('hypothesis_generator')).not.toBeNull();
-    expect(getScoringFunction('trend_specialist')).not.toBeNull();
-    expect(getScoringFunction('oscillator_specialist')).not.toBeNull();
-    expect(getScoringFunction('volatility_volume_specialist')).not.toBeNull();
+    expect(getScoringFunction('indicator_specialist')).not.toBeNull();
     expect(getScoringFunction('strategist')).not.toBeNull();
     expect(getScoringFunction('devils_advocate')).not.toBeNull();
     expect(getScoringFunction('discovery')).not.toBeNull();
