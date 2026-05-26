@@ -122,10 +122,22 @@ router.get('/side-b/daily-plan', async (_req: Request, res: Response) => {
 
     console.log('[Cron] 日次プラン生成完了:', result.message);
 
+    // 2026-05-26: `0/0 シンボル成功` 事象の原因切り分け用 diagnostics。
+    // 本番で fallback (PR #257) が効いているかどうか、scheduler の symbols 設定状態を
+    // response に出して即時で判別可能にする。根本原因が特定されたら削除予定。
+    const status = scheduler.getStatus();
+    const diagnostics = {
+      symbols: status.config.symbols,
+      symbolsLength: status.config.symbols?.length ?? 0,
+      lastDailyPlanRun: status.lastDailyPlanRun ?? null,
+      isRunning: status.isRunning,
+    };
+
     res.json({
       success: result.success,
       message: result.message,
       data: result.data,
+      diagnostics,
       duration: Date.now() - startTime,
     });
   } catch (error) {
