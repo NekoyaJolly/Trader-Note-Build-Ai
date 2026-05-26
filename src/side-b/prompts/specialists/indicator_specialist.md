@@ -18,6 +18,7 @@
 1. 現在 TF 単体のテクニカル状態 (= trend / oscillator / volatility / volume)
 2. 上位 TF 単体のテクニカル状態
 3. **MTF (Multi-Timeframe) 整合性** (= 両 TF のトレンドが揃っているか、押し目買いの好機か、逆張りシグナルか)
+4. **前回・前々回との比較 (= 流れ)** — 各 indicator の History フィールドに `prev=X.XX Δ=±Y` などが含まれる場合、それは過去 fetch (= cron 4h ごと) の latest 値。値が増加/減少傾向にあるか、加速/減速しているかを必ず読み取って interpretation に反映してください。`(no history)` の場合は今回が初回 fetch で履歴情報なし。
 
 ## Indicator カタログ (= 各 indicator の意味)
 
@@ -44,29 +45,31 @@ higher_timeframe: {{higherTimeframe}}
 latest_close: {{latestClose}}
 
 current ({{currentTimeframe}}):
-  rsi: {{currentRsi}}
-  macd: {{currentMacd}}
-  atr: {{currentAtr}}
-  sma: {{currentSma}}
-  ema: {{currentEma}}
-  ichimoku: {{currentIchimoku}}
-  cci: {{currentCci}}
-  aroon: {{currentAroon}}
-  obv: {{currentObv}}
-  vwap: {{currentVwap}}
+  rsi: {{currentRsi}}  | history: {{currentRsiHistory}}
+  macd: {{currentMacd}}  | history: {{currentMacdHistory}}
+  atr: {{currentAtr}}  | history: {{currentAtrHistory}}
+  sma: {{currentSma}}  | history: {{currentSmaHistory}}
+  ema: {{currentEma}}  | history: {{currentEmaHistory}}
+  ichimoku: {{currentIchimoku}}  | history: {{currentIchimokuHistory}}
+  cci: {{currentCci}}  | history: {{currentCciHistory}}
+  aroon: {{currentAroon}}  | history: {{currentAroonHistory}}
+  obv: {{currentObv}}  | history: {{currentObvHistory}}
+  vwap: {{currentVwap}}  | history: {{currentVwapHistory}}
 
 higher ({{higherTimeframe}}):
-  rsi: {{higherRsi}}
-  macd: {{higherMacd}}
-  atr: {{higherAtr}}
-  sma: {{higherSma}}
-  ema: {{higherEma}}
-  ichimoku: {{higherIchimoku}}
-  cci: {{higherCci}}
-  aroon: {{higherAroon}}
-  obv: {{higherObv}}
-  vwap: {{higherVwap}}
+  rsi: {{higherRsi}}  | history: {{higherRsiHistory}}
+  macd: {{higherMacd}}  | history: {{higherMacdHistory}}
+  atr: {{higherAtr}}  | history: {{higherAtrHistory}}
+  sma: {{higherSma}}  | history: {{higherSmaHistory}}
+  ema: {{higherEma}}  | history: {{higherEmaHistory}}
+  ichimoku: {{higherIchimoku}}  | history: {{higherIchimokuHistory}}
+  cci: {{higherCci}}  | history: {{higherCciHistory}}
+  aroon: {{higherAroon}}  | history: {{higherAroonHistory}}
+  obv: {{higherObv}}  | history: {{higherObvHistory}}
+  vwap: {{higherVwap}}  | history: {{higherVwapHistory}}
 ```
+
+**履歴フィールドの読み方**: 各 indicator の `history` 部分は `prev=<前回 fetch 時の値> Δ=<前回からの変化量> penult=<前々回 fetch 時の値>` 形式 (= 各 cron 4h サイクルでのスナップショット)。`(no history)` は初回 fetch。`Δ` の符号と大きさから「加速 / 減速 / 反転」を判断材料に使ってください。
 
 不在 (= 取得失敗) の indicator は「(unavailable)」と表示されます。あなたはそれらを判断材料に含めず、`confidence` を控えめに調整してください。
 

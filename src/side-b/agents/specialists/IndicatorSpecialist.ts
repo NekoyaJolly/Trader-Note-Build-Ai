@@ -86,6 +86,37 @@ function formatIndicatorForPrompt(series: IndicatorSeries | undefined): string {
  *
  * @returns prompt template の `{{xxx}}` 各キーに対応した値を持つ辞書
  */
+/**
+ * 過去キャッシュ (= 前回・前々回 fetch の latest) を prompt 用 1 行 string に整形。
+ * 「prev=X.XX (Δ=+0.05) penult=Y.YY」のような形式、不在は "(no history)"。
+ */
+function formatHistoricalForPrompt(
+  latestNow: number | null | undefined,
+  history?: { previousLatest?: number | null; penultimateLatest?: number | null },
+): string {
+  if (!history || (history.previousLatest === undefined && history.penultimateLatest === undefined)) {
+    return '(no history)';
+  }
+  const fmt = (v: number | null | undefined): string =>
+    v === null || v === undefined ? 'null' : v.toFixed(5);
+  const parts: string[] = [];
+  if (history.previousLatest !== undefined) {
+    parts.push(`prev=${fmt(history.previousLatest)}`);
+    if (
+      typeof latestNow === 'number' &&
+      typeof history.previousLatest === 'number'
+    ) {
+      const delta = latestNow - history.previousLatest;
+      const sign = delta >= 0 ? '+' : '';
+      parts.push(`Δ=${sign}${delta.toFixed(5)}`);
+    }
+  }
+  if (history.penultimateLatest !== undefined) {
+    parts.push(`penult=${fmt(history.penultimateLatest)}`);
+  }
+  return parts.join(' ');
+}
+
 export function buildMacros(input: IndicatorSpecialistInput): PromptMacros {
   const macros: PromptMacros = {
     symbol: input.symbol,
@@ -97,12 +128,22 @@ export function buildMacros(input: IndicatorSpecialistInput): PromptMacros {
 
   // 各 indicator を current/higher で flat キーに展開
   // (= IndicatorId の各値に対し、currentXxx / higherXxx の 2 キーを生成)
+  // Phase 6.8 Step 3b: 履歴がある場合は currentXxxHistory / higherXxxHistory も追加
   for (const spec of INDICATOR_CATALOG) {
     const id = spec.id;
-    const currentKey = `current${capitalize(id)}`;
-    const higherKey = `higher${capitalize(id)}`;
-    macros[currentKey] = formatIndicatorForPrompt(input.current.indicators[id]);
-    macros[higherKey] = formatIndicatorForPrompt(input.higher.indicators[id]);
+    const cap = capitalize(id);
+    const currentSeries = input.current.indicators[id];
+    const higherSeries = input.higher.indicators[id];
+    macros[`current${cap}`] = formatIndicatorForPrompt(currentSeries);
+    macros[`higher${cap}`] = formatIndicatorForPrompt(higherSeries);
+    macros[`current${cap}History`] = formatHistoricalForPrompt(
+      currentSeries?.latest ?? null,
+      input.current.historicalContext?.[id],
+    );
+    macros[`higher${cap}History`] = formatHistoricalForPrompt(
+      higherSeries?.latest ?? null,
+      input.higher.historicalContext?.[id],
+    );
   }
 
   return macros;

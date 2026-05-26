@@ -48,6 +48,24 @@ export interface IndicatorSeries {
  */
 export interface TimeframeData {
   indicators: Partial<Record<IndicatorId, IndicatorSeries>>;
+  /**
+   * 前回・前々回 fetch 時の latest 値 (Phase 6.8 Step 3b、2026-05-27)。
+   *
+   * `IndicatorSeriesCache` から取得して組み立てる。LLM が「前回からどう変化したか」
+   * を解釈するための情報源。各 indicator id ごとに optional で、キャッシュなし
+   * (= 初回 fetch / 別 symbol) なら欠落 (= undefined)。
+   */
+  historicalContext?: Partial<
+    Record<
+      IndicatorId,
+      {
+        /** 前回 fetch の latest 値 (= cache[0]) */
+        previousLatest?: number | null;
+        /** 前々回 fetch の latest 値 (= cache[1]) */
+        penultimateLatest?: number | null;
+      }
+    >
+  >;
   /** OHLCV 直近サマリ (= 価格・出来高の絶対値、indicator では表現できない情報) */
   priceContext: {
     latestClose: number;
