@@ -412,6 +412,7 @@ export class AIOrchestrator {
        * IndicatorSpecialist は常時呼出に変更 (= シナリオ生成の前提として常に必要)。
        */
       let indicatorAnalysis: IndicatorAnalysis | null = null;
+      let indicatorSpecialistTokens = 0;
       if (lensSnapshot) {
         try {
           const matched = await edgeLedger.findMatching(symbol, lensSnapshot, {
@@ -421,7 +422,7 @@ export class AIOrchestrator {
 
           // Phase 6.8: IndicatorSpecialist で MTF テクニカル分析を取得 (常時呼出)
           try {
-            indicatorAnalysis = await tracePlanStep(
+            const specialistResult = await tracePlanStep(
               traceCtx,
               'indicator_specialist',
               { symbol, timeframe: planTimeframe },
@@ -465,7 +466,9 @@ export class AIOrchestrator {
                 return await specialist.analyze(specialistInput);
               },
             );
-            if (indicatorAnalysis) {
+            if (specialistResult) {
+              indicatorAnalysis = specialistResult.output;
+              indicatorSpecialistTokens = specialistResult.tokenUsage;
               console.log(
                 `[Orchestrator] IndicatorSpecialist 完了: ` +
                   `current=${indicatorAnalysis.current.trendState}/${indicatorAnalysis.current.momentum}, ` +
@@ -588,8 +591,8 @@ export class AIOrchestrator {
             overallConfidence: planResult.output.overallConfidence,
             warnings: aggregatedWarnings,
             aiModel: planResult.model,
-            // debateTokens を加算してコスト追跡値を API 返却値と揃える
-            tokenUsage: planResult.tokenUsage + debateTokens,
+            // debateTokens + indicatorSpecialistTokens を加算してコスト追跡値を API 返却値と揃える
+            tokenUsage: planResult.tokenUsage + indicatorSpecialistTokens + debateTokens,
           }),
       );
 
@@ -602,6 +605,7 @@ export class AIOrchestrator {
         tokenUsage:
           researchTokens +
           planResult.tokenUsage +
+          indicatorSpecialistTokens +
           debateTokens,
       };
     } catch (error) {
