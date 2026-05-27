@@ -488,8 +488,39 @@ export class AIOrchestrator {
         }
       }
 
-      // 4c. Bull vs Bear 討論（Phase 7: Strategy Thinker の意思決定直前）
+      // 4c. Plan AI 呼び出し
+      //
+      // Step A-2: 順序入替。旧フロー (Debate → PlanAI) では Debate output が PlanAI に
+      // 渡されておらず、Debate が意思決定に寄与しない設計の歪みがあった。新フロー
+      // (PlanAI → Debate) ではシナリオを先に生成し、生成シナリオに対する優勢判定を
+      // Debate で行う流れに整理する。Debate output を採用方向として hookup するのは
+      // 後続 Step A-4 で実施。本 PR ではあくまで「順序入替」のみ行う。
+      console.log(`[Orchestrator] Plan AI 呼び出し (候補仮説: ${candidateHypotheses.length}個)`);
+      const planInput: PlanAIInput = {
+        research,
+        targetDate: dateStr,
+        userPreferences,
+        higherTF: higherTFContext,
+        lensSnapshot,
+        candidateHypotheses,
+        // Phase 6.8: IndicatorSpecialist の MTF テクニカル分析を Plan AI にも渡す
+        indicatorAnalysis: indicatorAnalysis ?? undefined,
+      };
+
+      const planResult = await tracePlanStep(
+        traceCtx,
+        'plan_ai',
+        { symbol, dateStr, candidateCount: candidateHypotheses.length },
+        () => this.planAI.generatePlan(planInput),
+      );
+
+      // 4d. Bull vs Bear 討論
       // テスト環境では外部 LLM 呼び出しを防ぐためスキップ（DI でモックを渡さない場合の安全弁）
+      // Step A-2 ではあくまで呼出順を PlanAI の後ろに移動するだけ。Debate の input は
+      // 従来通り (candidateHypotheses / lensSnapshot / indicatorAnalysis) で PlanAI が
+      // 生成した scenarios は参照しない。Debate output (= 優勢判定) も planResult や
+      // 保存内容には反映されず、記録のみ。Debate input に scenarios を渡す + output を
+      // 採用方向として hookup するのは Step A-4 で実施予定。
       let debateResult: BullBearDebateResult | undefined;
       let debateTokens = 0;
       if (process.env.NODE_ENV !== 'test') {
@@ -515,29 +546,9 @@ export class AIOrchestrator {
             `confidence=${String(debateResult.output.synthesis.preferredConfidence)}`,
           );
         } catch (debateErr) {
-          console.warn('[Orchestrator] Bull vs Bear 討論失敗（Plan AI へ続行）:', debateErr);
+          console.warn('[Orchestrator] Bull vs Bear 討論失敗（続行）:', debateErr);
         }
       }
-
-      // 4d. Plan AI 呼び出し
-      console.log(`[Orchestrator] Plan AI 呼び出し (候補仮説: ${candidateHypotheses.length}個)`);
-      const planInput: PlanAIInput = {
-        research,
-        targetDate: dateStr,
-        userPreferences,
-        higherTF: higherTFContext,
-        lensSnapshot,
-        candidateHypotheses,
-        // Phase 6.8: IndicatorSpecialist の MTF テクニカル分析を Plan AI にも渡す
-        indicatorAnalysis: indicatorAnalysis ?? undefined,
-      };
-
-      const planResult = await tracePlanStep(
-        traceCtx,
-        'plan_ai',
-        { symbol, dateStr, candidateCount: candidateHypotheses.length },
-        () => this.planAI.generatePlan(planInput),
-      );
 
       // シナリオにIDを付与
       const scenariosWithId: AITradeScenario[] = planResult.output.scenarios.map((s, index: number) => ({
