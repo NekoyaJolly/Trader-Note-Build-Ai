@@ -12,7 +12,12 @@
 
 export type PromptStatus = 'active' | 'experimental' | 'deprecated' | 'rejected';
 
-export type PromptCreatedBy = 'human' | 'mutation';
+/**
+ * Step F (PR #267): MetaEvolutionAgent は削除済だが、DB 既存行 (`createdBy='meta_evolution'`)
+ * との型互換のため列挙値は残置。新規生成側 (PromptMutationAgent / MetaEvolutionAgent) は
+ * 既に削除済なので、今後 'meta_evolution' が write 経路から書き込まれることはない。
+ */
+export type PromptCreatedBy = 'human' | 'mutation' | 'meta_evolution';
 
 export const PROMPT_STATUSES: PromptStatus[] = [
   'active',
@@ -24,6 +29,7 @@ export const PROMPT_STATUSES: PromptStatus[] = [
 export const PROMPT_CREATED_BY_VALUES: PromptCreatedBy[] = [
   'human',
   'mutation',
+  'meta_evolution',
 ];
 
 /**
