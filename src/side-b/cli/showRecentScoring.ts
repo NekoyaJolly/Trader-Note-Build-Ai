@@ -102,7 +102,7 @@ function toDomain(row: PromptVersionRow): PromptVersion {
 }
 
 const ALLOWED_STATUSES: PromptStatus[] = ['active', 'experimental', 'deprecated', 'rejected'];
-const ALLOWED_CREATED_BY: PromptCreatedBy[] = ['human', 'mutation', 'meta_evolution'];
+const ALLOWED_CREATED_BY: PromptCreatedBy[] = ['human', 'mutation'];
 
 function narrowStatus(s: string): PromptStatus {
   return (ALLOWED_STATUSES as readonly string[]).includes(s)

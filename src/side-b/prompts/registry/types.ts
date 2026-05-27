@@ -5,14 +5,14 @@
  * DB(Prisma PromptVersion)とアプリケーション層で共有する。
  *
  * 設計原則:
- * - agentName は列挙型で固定しない(将来 MetaEvolutionAgent が新エージェントを追加する前提)
+ * - agentName は列挙型で固定しない(将来エージェント追加に備える)
  * - ステータスは 'active' | 'experimental' | 'deprecated' | 'rejected' の 4 種
  * - active は 1 エージェント 1 件(アプリケーション層で保証)
  */
 
 export type PromptStatus = 'active' | 'experimental' | 'deprecated' | 'rejected';
 
-export type PromptCreatedBy = 'human' | 'mutation' | 'meta_evolution';
+export type PromptCreatedBy = 'human' | 'mutation';
 
 export const PROMPT_STATUSES: PromptStatus[] = [
   'active',
@@ -24,13 +24,12 @@ export const PROMPT_STATUSES: PromptStatus[] = [
 export const PROMPT_CREATED_BY_VALUES: PromptCreatedBy[] = [
   'human',
   'mutation',
-  'meta_evolution',
 ];
 
 /**
  * プロンプトバージョン本体
  *
- * - `parentVersionId`: 変異元プロンプトの ID(PromptMutationAgent が設定)
+ * - `parentVersionId`: 変異元プロンプトの ID
  * - `avgScore` / `usageCount` / `successCount`: `recordUsage` で逐次更新
  * - `approvedAt` / `approvedBy`: 人間承認フロー経由で設定される
  */

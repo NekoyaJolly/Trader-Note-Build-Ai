@@ -243,7 +243,7 @@ describe('PromptRegistry', () => {
         agentName: 'new_agent',
         version: '1.1',
         content: 'y',
-        createdBy: 'meta_evolution',
+        createdBy: 'human',
       }),
     ).rejects.toThrow(/already has active/);
   });

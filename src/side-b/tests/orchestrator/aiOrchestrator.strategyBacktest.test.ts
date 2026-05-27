@@ -13,7 +13,6 @@ import type { PlanAIResult } from '../../services/planAIService';
 import type { ResearchOutputRepository, PlanRepository, CreatePlanInput } from '../../repositories';
 import type { ResearchOutputWithTypes, AITradePlanWithTypes } from '../../repositories';
 import type { FeatureVector12D } from '../../models/featureVector';
-import type { DevilsAdvocateAgent } from '../../agents/DevilsAdvocateAgent';
 import type { HypothesisGeneratorAgent } from '../../agents/HypothesisGeneratorAgent';
 import type { StrategyBacktesterAgent } from '../../agents/StrategyBacktesterAgent';
 import type { StrategyBacktesterRunResult } from '../../agents/StrategyBacktesterAgent';
@@ -147,16 +146,6 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
     createPlan.mockImplementation(async (input: CreatePlanInput) => savedPlanFromCreate(input));
     const delPlan = jest.fn();
     delPlan.mockImplementation(async () => undefined);
-    const critique = jest.fn();
-    critique.mockImplementation(async () => ({
-      output: {
-        failureScenarios: [],
-        weakestAssumption: { description: '', whyVulnerable: '' },
-        recommendation: { action: 'proceed' as const, rationale: 'テスト' },
-      },
-      tokenUsage: 0,
-      model: 'mock-da',
-    }));
 
     const planAI = { generatePlan: genPlan } as unknown as PlanAIService;
     const researchRepo = { findById: findResearch } as unknown as ResearchOutputRepository;
@@ -166,7 +155,6 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
       upsertByDateSymbol: createPlan,
       delete: delPlan,
     } as unknown as PlanRepository;
-    const devilsAdvocate = { critique } as unknown as DevilsAdvocateAgent;
     const hgGen = jest.fn();
     const hypothesisGenerator = {
       generate: hgGen,
@@ -179,7 +167,6 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
       planAI,
       researchRepo,
       planRepo,
-      devilsAdvocate,
       hypothesisGenerator,
       strategyBacktester,
     );
@@ -216,7 +203,6 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
     createPlan.mockImplementation(async (input: CreatePlanInput) => savedPlanFromCreate(input));
     const delPlan = jest.fn();
     delPlan.mockImplementation(async () => undefined);
-    const critique = jest.fn();
 
     const planAI = { generatePlan: genPlan } as unknown as PlanAIService;
     const researchRepo = { findById: findResearch } as unknown as ResearchOutputRepository;
@@ -226,7 +212,6 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
       upsertByDateSymbol: createPlan,
       delete: delPlan,
     } as unknown as PlanRepository;
-    const devilsAdvocate = { critique } as unknown as DevilsAdvocateAgent;
     const hypothesisGenerator = {
       generate: jest.fn(),
       toCreateInputs: jest.fn(),
@@ -238,7 +223,6 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
       planAI,
       researchRepo,
       planRepo,
-      devilsAdvocate,
       hypothesisGenerator,
       strategyBacktester,
     );
@@ -252,7 +236,7 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
     expect(runMock).not.toHaveBeenCalled();
   });
 
-  it('run が例外のときは strategyBacktest を載せず Devil’s Advocate へ続行する', async () => {
+  it('run が例外のときも strategyBacktest を載せず後続処理に続行する', async () => {
     runMock.mockRejectedValue(new Error('BT ダウン'));
     const genPlan = jest.fn();
     genPlan.mockImplementation(async () => buildPlanAIResultWithOneScenario());
@@ -266,16 +250,6 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
     createPlan.mockImplementation(async (input: CreatePlanInput) => savedPlanFromCreate(input));
     const delPlan = jest.fn();
     delPlan.mockImplementation(async () => undefined);
-    const daCritique = jest.fn();
-    daCritique.mockImplementation(async () => ({
-      output: {
-        failureScenarios: [],
-        weakestAssumption: { description: '', whyVulnerable: '' },
-        recommendation: { action: 'proceed' as const, rationale: 'テスト' },
-      },
-      tokenUsage: 0,
-      model: 'mock-da',
-    }));
 
     const planAI = { generatePlan: genPlan } as unknown as PlanAIService;
     const researchRepo = { findById: findResearch } as unknown as ResearchOutputRepository;
@@ -285,7 +259,6 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
       upsertByDateSymbol: createPlan,
       delete: delPlan,
     } as unknown as PlanRepository;
-    const devilsAdvocate = { critique: daCritique } as unknown as DevilsAdvocateAgent;
     const hypothesisGenerator = {
       generate: jest.fn(),
       toCreateInputs: jest.fn(),
@@ -297,7 +270,6 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
       planAI,
       researchRepo,
       planRepo,
-      devilsAdvocate,
       hypothesisGenerator,
       strategyBacktester,
     );
@@ -310,6 +282,5 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
 
     expect(result.success).toBe(true);
     expect(result.data?.strategyBacktest).toBeUndefined();
-    expect(daCritique).toHaveBeenCalled();
   });
 });

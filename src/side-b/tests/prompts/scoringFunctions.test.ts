@@ -6,12 +6,9 @@ import {
   hypothesisGeneratorScoreFn,
   indicatorSpecialistScoreFn,
   strategistScoreFn,
-  devilsAdvocateScoreFn,
   discoveryScoreFn,
   mutationScoreFn,
   crossoverScoreFn,
-  promptMutationScoreFn,
-  metaEvolutionScoreFn,
   bullBearDebateScoreFn,
   getScoringFunction,
 } from '../../prompts/abtest/scoringFunctions';
@@ -104,16 +101,13 @@ describe('indicatorSpecialistScoreFn (Phase 6.8 統合 = 旧 trend/oscillator/vo
 });
 
 describe('getScoringFunction', () => {
-  it('Phase 6 MVP + Critical-3 残スコープの 10 エージェント分は取得できる', () => {
+  it('Step F 整理後の 7 エージェント分は取得できる', () => {
     expect(getScoringFunction('hypothesis_generator')).not.toBeNull();
     expect(getScoringFunction('indicator_specialist')).not.toBeNull();
     expect(getScoringFunction('strategist')).not.toBeNull();
-    expect(getScoringFunction('devils_advocate')).not.toBeNull();
     expect(getScoringFunction('discovery')).not.toBeNull();
     expect(getScoringFunction('mutation')).not.toBeNull();
     expect(getScoringFunction('crossover')).not.toBeNull();
-    expect(getScoringFunction('prompt_mutation')).not.toBeNull();
-    expect(getScoringFunction('meta_evolution')).not.toBeNull();
     expect(getScoringFunction('bull_bear_debate')).not.toBeNull();
   });
 
@@ -175,59 +169,6 @@ describe('strategistScoreFn', () => {
       },
     );
     expect(s).toBeCloseTo(1, 5);
-  });
-});
-
-describe('devilsAdvocateScoreFn', () => {
-  it('シナリオ 2 件 + 弱点 + 推奨アクション充実で満点', () => {
-    const s = devilsAdvocateScoreFn(
-      {},
-      {
-        failureScenarios: [
-          {
-            description: 'd'.repeat(40),
-            triggerConditions: 't'.repeat(30),
-            estimatedLikelihood: 'medium',
-          },
-          {
-            description: 'd'.repeat(40),
-            triggerConditions: 't'.repeat(30),
-            estimatedLikelihood: 'high',
-          },
-        ],
-        weakestAssumption: {
-          description: 'wd'.repeat(20),
-          whyVulnerable: 'wv'.repeat(20),
-        },
-        recommendation: {
-          action: 'modify',
-          rationale: 'r'.repeat(40),
-          suggestedModifications: ['fix1'],
-        },
-      },
-    );
-    expect(s).toBeCloseTo(1, 5);
-  });
-
-  it('空出力はゼロ', () => {
-    expect(devilsAdvocateScoreFn({}, {})).toBe(0);
-  });
-
-  it('シナリオ 1 件のみは低スコア', () => {
-    const s = devilsAdvocateScoreFn(
-      {},
-      {
-        failureScenarios: [
-          {
-            description: 'd'.repeat(40),
-            triggerConditions: 't'.repeat(30),
-            estimatedLikelihood: 'high',
-          },
-        ],
-      },
-    );
-    // scenariosScore = 0.5 * 0.5 + 0.5 * 1 = 0.75、他 0 → 0.4 * 0.75 = 0.3
-    expect(s).toBeCloseTo(0.3, 5);
   });
 });
 
@@ -303,73 +244,6 @@ describe('crossoverScoreFn', () => {
 
   it('空配列はゼロ', () => {
     expect(crossoverScoreFn({ pairCount: 2 }, [])).toBe(0);
-  });
-});
-
-describe('promptMutationScoreFn', () => {
-  it('3 件 × 100 文字 + metadata 埋まりで満点', () => {
-    const proposals = Array.from({ length: 3 }, (_, i) => ({
-      version: `v${i}`,
-      content: 'c'.repeat(100),
-      notes: 'n',
-      expectedImprovement: 'e',
-    }));
-    expect(promptMutationScoreFn({ count: 3 }, proposals)).toBeCloseTo(1, 5);
-  });
-
-  it('content 短すぎは contentScore=0', () => {
-    const proposals = [
-      { version: 'v1', content: 'short', notes: 'n', expectedImprovement: 'e' },
-    ];
-    // count=1/3、content=0、metadata=1
-    // = 0.4 * (1/3) + 0 + 0.2 * 1 ≒ 0.333
-    const s = promptMutationScoreFn({ count: 3 }, proposals);
-    expect(s).toBeGreaterThan(0.2);
-    expect(s).toBeLessThan(0.4);
-  });
-
-  it('空配列はゼロ', () => {
-    expect(promptMutationScoreFn({ count: 3 }, [])).toBe(0);
-  });
-});
-
-describe('metaEvolutionScoreFn', () => {
-  it('proposals + analysis + confidence 全揃いで満点', () => {
-    const s = metaEvolutionScoreFn(
-      {},
-      {
-        proposals: [
-          {
-            type: 'add',
-            agentName: 'newAgent',
-            reasoning: 'r'.repeat(40),
-            expectedImprovement: 'e'.repeat(30),
-          },
-        ],
-        analysis: {
-          currentAgents: ['hg'],
-          coverageGaps: [],
-          underperformers: [],
-        },
-        confidence: 0.7,
-      },
-    );
-    expect(s).toBeCloseTo(1, 5);
-  });
-
-  it('空提案 + confidence 範囲外でも 0 にはならない(analysis 評価が独立)', () => {
-    const s = metaEvolutionScoreFn(
-      {},
-      {
-        proposals: [],
-        analysis: { currentAgents: ['hg'], coverageGaps: [], underperformers: [] },
-        confidence: 0.99,
-      },
-    );
-    // proposalsScore=0、analysisScore=1、confInRange=0.3
-    // = 0 + 0.3 + 0.06 = 0.36
-    expect(s).toBeGreaterThan(0.3);
-    expect(s).toBeLessThan(0.5);
   });
 });
 

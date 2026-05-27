@@ -43,8 +43,6 @@ import {
   buildHigherTFContext
 } from '../knowledge';
 import type { HigherTimeframeContext } from '../knowledge';
-import type { DevilsAdvocateAgent} from '../agents/DevilsAdvocateAgent';
-import { devilsAdvocateAgent } from '../agents/DevilsAdvocateAgent';
 import {
   defaultLensAggregator,
   registerDefaultLenses,
@@ -158,7 +156,6 @@ export class AIOrchestrator {
   private planAI: PlanAIService;
   private researchOutputRepo: ResearchOutputRepository;
   private planRepo: PlanRepository;
-  private devilsAdvocate: DevilsAdvocateAgent;
   private hypothesisGenerator: HypothesisGeneratorAgent;
   private strategyBacktester: StrategyBacktesterAgent;
   private bullBearDebate: BullBearDebateAgent;
@@ -170,7 +167,6 @@ export class AIOrchestrator {
     planAI?: PlanAIService,
     researchOutputRepo?: ResearchOutputRepository,
     planRepo?: PlanRepository,
-    devilsAdvocate?: DevilsAdvocateAgent,
     hypothesisGenerator?: HypothesisGeneratorAgent,
     strategyBacktester?: StrategyBacktesterAgent,
     bullBearDebate?: BullBearDebateAgent,
@@ -180,7 +176,6 @@ export class AIOrchestrator {
     this.planAI = planAI || planAIService;
     this.researchOutputRepo = researchOutputRepo || researchOutputRepository;
     this.planRepo = planRepo || planRepository;
-    this.devilsAdvocate = devilsAdvocate || devilsAdvocateAgent;
     this.hypothesisGenerator = hypothesisGenerator || hypothesisGeneratorAgent;
     this.strategyBacktester = strategyBacktester || strategyBacktesterAgent;
     this.bullBearDebate = bullBearDebate || bullBearDebateAgent;
@@ -622,42 +617,13 @@ export class AIOrchestrator {
             )}, scenarios=${String(scenariosWithId.length)}`,
           );
         } catch (btErr) {
-          console.warn('[Orchestrator] 戦略BT 全体失敗（DevilsAdvocate へ続行）:', btErr);
+          console.warn('[Orchestrator] 戦略BT 全体失敗（続行）:', btErr);
         }
       }
 
-      // 5. Devil's Advocate で各シナリオをレビュー（Phase 2）
-      //    abandon 判定なら confidence を 20 に抑え、warnings に追加する。
-      //    代替戦略は提案させない（反証専任）。
-      let devilsAdvocateTokens = 0;
       const aggregatedWarnings: string[] = [...(planResult.output.warnings ?? [])];
-      for (const scenario of scenariosWithId) {
-        try {
-          const critique = await tracePlanStep(
-            traceCtx,
-            'devils_advocate',
-            { scenarioName: scenario.name },
-            () => this.devilsAdvocate.critique(scenario, planResult.output.marketAnalysis),
-          );
-          devilsAdvocateTokens += critique.tokenUsage;
 
-          if (critique.output.recommendation.action === 'abandon') {
-            scenario.confidence = Math.min(scenario.confidence, 20);
-            const warn = `Devil's Advocate: ${critique.output.recommendation.rationale}`;
-            scenario.warnings = [...(scenario.warnings ?? []), warn];
-            aggregatedWarnings.push(`[${scenario.name}] ${warn}`);
-            console.log(`[Orchestrator] Devil's Advocate abandon: ${scenario.name}`);
-          } else if (critique.output.recommendation.action === 'modify') {
-            const warn = `Devil's Advocate(modify): ${critique.output.recommendation.rationale}`;
-            scenario.warnings = [...(scenario.warnings ?? []), warn];
-            console.log(`[Orchestrator] Devil's Advocate modify: ${scenario.name}`);
-          }
-        } catch (daError) {
-          console.warn(`[Orchestrator] Devil's Advocate 失敗（スキップ）:`, daError);
-        }
-      }
-
-      // 6. DB保存（Plan AIが解釈を含む新設計）
+      // 5. DB保存（Plan AIが解釈を含む新設計）
       // cron 先行で同日 Plan が存在する場合 (POST /scheduler/run-daily-plan の
       // 手動再発火) に Unique constraint 衝突しないよう upsertByDateSymbol を使う。
       // 手動発火 = 上書き再生成の意味として動作する。
@@ -677,7 +643,7 @@ export class AIOrchestrator {
             warnings: aggregatedWarnings,
             aiModel: planResult.model,
             // debateTokens を加算してコスト追跡値を API 返却値と揃える
-            tokenUsage: planResult.tokenUsage + devilsAdvocateTokens + debateTokens,
+            tokenUsage: planResult.tokenUsage + debateTokens,
           }),
       );
 
@@ -690,7 +656,6 @@ export class AIOrchestrator {
         tokenUsage:
           researchTokens +
           planResult.tokenUsage +
-          devilsAdvocateTokens +
           hypothesisGeneratorTokens +
           debateTokens,
       };

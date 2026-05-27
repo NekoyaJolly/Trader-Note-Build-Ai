@@ -15,15 +15,6 @@ describe('loadPrompt', () => {
         expect(content).toContain('候補仮説');
     });
 
-    it('devils_advocate.md を読み込める', () => {
-        const content = loadPrompt('devils_advocate');
-        expect(content).toContain("Devil's Advocate");
-        expect(content).toContain('failureScenarios');
-        expect(content).toContain('weakestAssumption');
-        expect(content).toContain('btWeaknesses');
-        expect(content).toContain('watchItems');
-    });
-
     it('存在しないプロンプト名はエラーになる', () => {
         expect(() => loadPrompt('nonexistent_prompt_xyz')).toThrow(/not found/);
     });

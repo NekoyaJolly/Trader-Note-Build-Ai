@@ -83,7 +83,6 @@ console.log('[Config] サーバーポート:', process.env.BACKEND_PORT || proce
  */
 export type AIAgentKey =
   | 'strategist'
-  | 'devils_advocate'
   | 'discovery'
   | 'hypothesis_generator'
   | 'plan'
@@ -94,8 +93,6 @@ export type AIAgentKey =
   | 'crossover'
   // Phase 6.8 (2026-05-27): IndicatorSpecialist 統合 (= 旧 trend/oscillator/volatility_volume 統合)
   | 'indicator_specialist'
-  | 'prompt_mutation'
-  | 'meta_evolution'
   // Phase 7: Bull vs Bear 討論
   | 'bull_bear_debate'
   // Side-B AI ノート生成 (aiNoteService) — Gemini 既定の汎用ノート文章生成
@@ -166,13 +163,12 @@ export const config = {
     // 非 reasoning モデル (gpt-4o, anthropic/* 等) では無視される。
     reasoningEffort: resolveReasoningEffort(),
     // エージェント別モデル既定値(Phase 6.5 確定)。
-    // - 最重要判断(MetaEvolution/Strategist/HypothesisGen/Discovery/DevilsAdvocate) → Opus 4.7
-    // - 中位生成系(Mutation/Crossover/PromptMutation/StrategyThinker/Reflection) → Sonnet 4.6 or Haiku 4.5
+    // - 最重要判断(Strategist/HypothesisGen/Discovery) → Opus 4.7
+    // - 中位生成系(Mutation/Crossover/StrategyThinker/Reflection) → Sonnet 4.6 or Haiku 4.5
     // - 下位専門家 + 軽量タスク → Gemini 3.1 Flash Lite Preview
     // 環境変数 `AI_MODEL_<KEY>` で上書き可。
     models: {
       strategist: process.env.AI_MODEL_STRATEGIST || 'anthropic/claude-opus-4.7',
-      devils_advocate: process.env.AI_MODEL_DEVILS_ADVOCATE || 'anthropic/claude-opus-4.7',
       discovery: process.env.AI_MODEL_DISCOVERY || 'anthropic/claude-opus-4.7',
       hypothesis_generator: process.env.AI_MODEL_HYPOTHESIS_GENERATOR || 'anthropic/claude-opus-4.7',
       plan: process.env.AI_MODEL_PLAN || 'anthropic/claude-sonnet-4.6',
@@ -186,8 +182,6 @@ export const config = {
       // Sonnet 4.6 (= 17 indicator + MTF を扱うため Gemini Flash Lite より中位モデル推奨)。
       indicator_specialist:
         process.env.AI_MODEL_INDICATOR_SPECIALIST || 'anthropic/claude-sonnet-4.6',
-      prompt_mutation: process.env.AI_MODEL_PROMPT_MUTATION || 'anthropic/claude-sonnet-4.6',
-      meta_evolution: process.env.AI_MODEL_META_EVOLUTION || 'anthropic/claude-opus-4.7',
       // Phase 7: Bull vs Bear 討論 — 判断品質重視のため Opus
       bull_bear_debate: process.env.AI_MODEL_BULL_BEAR_DEBATE || 'anthropic/claude-opus-4.7',
       // 軽量サマリ・推論系 — 既定は Gemini Flash Lite (低コスト)
