@@ -51,11 +51,6 @@ import {
 import { agentMemory } from '../agent/agentMemory';
 import { edgeLedger } from '../ledger';
 import { decideExistingPlanAction } from './existingPlanDecision';
-import type {
-  HypothesisGeneratorAgent} from '../agents/HypothesisGeneratorAgent';
-import {
-  hypothesisGeneratorAgent,
-} from '../agents/HypothesisGeneratorAgent';
 import type { EdgeHypothesis } from '../models/edgeHypothesis';
 import { IndicatorSpecialist } from '../agents/specialists/IndicatorSpecialist';
 import { fetchIndicatorBundleForMTF } from '../agents/specialists/analysisEngineIndicatorFetch';
@@ -156,7 +151,6 @@ export class AIOrchestrator {
   private planAI: PlanAIService;
   private researchOutputRepo: ResearchOutputRepository;
   private planRepo: PlanRepository;
-  private hypothesisGenerator: HypothesisGeneratorAgent;
   private strategyBacktester: StrategyBacktesterAgent;
   private bullBearDebate: BullBearDebateAgent;
   /** P3: Plan 多段 step 単位の trace 投入先。デフォルトは NoopTraceSink (= 配線済だが no-op)。 */
@@ -167,7 +161,6 @@ export class AIOrchestrator {
     planAI?: PlanAIService,
     researchOutputRepo?: ResearchOutputRepository,
     planRepo?: PlanRepository,
-    hypothesisGenerator?: HypothesisGeneratorAgent,
     strategyBacktester?: StrategyBacktesterAgent,
     bullBearDebate?: BullBearDebateAgent,
     traceSink?: TraceSink,
@@ -176,7 +169,6 @@ export class AIOrchestrator {
     this.planAI = planAI || planAIService;
     this.researchOutputRepo = researchOutputRepo || researchOutputRepository;
     this.planRepo = planRepo || planRepository;
-    this.hypothesisGenerator = hypothesisGenerator || hypothesisGeneratorAgent;
     this.strategyBacktester = strategyBacktester || strategyBacktesterAgent;
     this.bullBearDebate = bullBearDebate || bullBearDebateAgent;
     // P3: traceSink は test / 観測機構から差し替え可能。未指定時は NoopTraceSink で
@@ -406,16 +398,21 @@ export class AIOrchestrator {
         console.warn(`[Orchestrator] レンズ計算失敗（戦略生成は続行）:`, lensError);
       }
 
-      // 4b. 候補仮説を集める（Phase 4a: EdgeLedger マッチ + HypothesisGenerator 新規）
+      // 4b. 既存仮説候補を集める (= EdgeLedger マッチのみ)
+      //
+      // Step A-1: HypothesisGenerator は Plan フェーズから完全切出 (= 別枠 dormant 化、
+      // class は src/side-b/agents/HypothesisGeneratorAgent.ts に残置)。新規仮説生成は
+      // 今後別経路 (= 将来 Top-Level Orchestrator action 経由 or 手動呼出) で実施する。
       let candidateHypotheses: EdgeHypothesis[] = [];
-      let hypothesisGeneratorTokens = 0;
       /**
-       * Phase 6.8 (2026-05-27): IndicatorSpecialist 統合。旧 3 体並列 (Trend / Oscillator /
-       * VolatilityVolume) を 1 体に集約、MTF (現在 TF + 上位 TF) で 17 indicator のうち
-       * P0+P1 の 10 種を見て解釈する。HypothesisGenerator / BullBearDebate / Plan AI に
+       * Phase 6.8 (2026-05-27): IndicatorSpecialist 統合。MTF (現在 TF + 上位 TF) で
+       * 17 indicator のうち P0+P1 の 10 種を見て解釈する。BullBearDebate / Plan AI に
        * 同じ `indicatorAnalysis` を渡す。
+       * Step A-1: HypothesisGen 切出に伴い「matched.length < 3 の時だけ呼ぶ」条件を撤廃、
+       * IndicatorSpecialist は常時呼出に変更 (= シナリオ生成の前提として常に必要)。
        */
       let indicatorAnalysis: IndicatorAnalysis | null = null;
+      let indicatorSpecialistTokens = 0;
       if (lensSnapshot) {
         try {
           const matched = await edgeLedger.findMatching(symbol, lensSnapshot, {
@@ -423,113 +420,66 @@ export class AIOrchestrator {
           });
           console.log(`[Orchestrator] 既存マッチ仮説: ${matched.length}個`);
 
-          // マッチが少ない時だけ新規候補を生成（LLMコスト制御）
-          if (matched.length < 3) {
-            // Phase 6.8: IndicatorSpecialist で MTF テクニカル分析を取得
-            try {
-              indicatorAnalysis = await tracePlanStep(
-                traceCtx,
-                'indicator_specialist',
-                { symbol, timeframe: planTimeframe },
-                async () => {
-                  // 上位 TF を導出 (= PR #246 deriveHigherTimeframe を流用)
-                  if (!isSupportedTimeframe(planTimeframe)) {
-                    console.warn(
-                      `[Orchestrator] planTimeframe=${planTimeframe} は SupportedTimeframe 外、` +
-                        `IndicatorSpecialist スキップ`,
-                    );
-                    return null;
-                  }
-                  // ohlcvData は本経路 (research 未生成) に到達する時には必ず非 null
-                  // (= L331 でガード済) だが、TS 型は optional なのでここで再確認
-                  if (!ohlcvData || ohlcvData.length === 0) {
-                    console.warn(
-                      '[Orchestrator] ohlcvData が空、IndicatorSpecialist スキップ',
-                    );
-                    return null;
-                  }
-                  const higherTimeframe = deriveHigherTimeframe(planTimeframe);
-                  // analysis-engine 2 並列 batch 取得
-                  const specialistInput = await fetchIndicatorBundleForMTF({
-                    symbol,
-                    currentTimeframe: planTimeframe,
-                    higherTimeframe,
-                    currentOhlcv: ohlcvData,
-                    higherOhlcv: higherTFData?.ohlcvData,
-                  });
-                  if (!specialistInput) return null;
-                  // P0 必須 indicator (= sma/ema/rsi/macd/atr) が現在 TF で 1 つでも
-                  // 欠落していたら LLM 呼び出しを skip (= 低品質出力 + 無駄コスト回避)
-                  if (!IndicatorSpecialist.hasMinimumDataForAnalysis(specialistInput)) {
-                    console.warn(
-                      '[Orchestrator] P0 必須 indicator 欠落、IndicatorSpecialist スキップ',
-                    );
-                    return null;
-                  }
-                  // LLM 解釈
-                  const specialist = new IndicatorSpecialist();
-                  return await specialist.analyze(specialistInput);
-                },
-              );
-              if (indicatorAnalysis) {
-                console.log(
-                  `[Orchestrator] IndicatorSpecialist 完了: ` +
-                    `current=${indicatorAnalysis.current.trendState}/${indicatorAnalysis.current.momentum}, ` +
-                    `mtf=${indicatorAnalysis.mtfAlignment.trendAlignment}, ` +
-                    `confidence=${indicatorAnalysis.confidence}`,
-                );
-              } else {
-                console.log('[Orchestrator] IndicatorSpecialist null (= 取得失敗 or 解釈失敗)');
-              }
-            } catch (err) {
-              console.warn('[Orchestrator] IndicatorSpecialist 失敗(仮説生成は続行):', err);
-            }
-
-            // Critical-7: Discovery 週次レポートが残した hintsForHG を AgentMemory から
-            // 取り出して HG に渡す。Discovery が走っていなければ undefined。
-            const cachedDiscovery = agentMemory.getLatestDiscoveryHints();
-            const discoveryHints =
-              cachedDiscovery && cachedDiscovery.hints.length > 0
-                ? {
-                    capturedAt: cachedDiscovery.capturedAt.toISOString(),
-                    analyzedTradeCount: cachedDiscovery.analyzedTradeCount,
-                    hints: cachedDiscovery.hints,
-                  }
-                : undefined;
-
-            const genResult = await tracePlanStep(
+          // Phase 6.8: IndicatorSpecialist で MTF テクニカル分析を取得 (常時呼出)
+          try {
+            const specialistResult = await tracePlanStep(
               traceCtx,
-              'hypothesis_generator',
-              { symbol, timeframe: planTimeframe, matchedCount: matched.length },
-              () =>
-                this.hypothesisGenerator.generate({
+              'indicator_specialist',
+              { symbol, timeframe: planTimeframe },
+              async () => {
+                // 上位 TF を導出 (= PR #246 deriveHigherTimeframe を流用)
+                if (!isSupportedTimeframe(planTimeframe)) {
+                  console.warn(
+                    `[Orchestrator] planTimeframe=${planTimeframe} は SupportedTimeframe 外、` +
+                      `IndicatorSpecialist スキップ`,
+                  );
+                  return null;
+                }
+                // ohlcvData は本経路 (research 未生成) に到達する時には必ず非 null
+                // (= L331 でガード済) だが、TS 型は optional なのでここで再確認
+                if (!ohlcvData || ohlcvData.length === 0) {
+                  console.warn(
+                    '[Orchestrator] ohlcvData が空、IndicatorSpecialist スキップ',
+                  );
+                  return null;
+                }
+                const higherTimeframe = deriveHigherTimeframe(planTimeframe);
+                // analysis-engine 2 並列 batch 取得
+                const specialistInput = await fetchIndicatorBundleForMTF({
                   symbol,
-                  timeframe: planTimeframe,
-                  lensSnapshot,
-                  existingHypotheses: matched,
-                  indicatorAnalysis: indicatorAnalysis ?? undefined,
-                  discoveryHints,
-                }),
-            );
-            hypothesisGeneratorTokens = genResult.tokenUsage;
-            const createInputs = this.hypothesisGenerator.toCreateInputs(
-              genResult.output,
-              {
-                symbol,
-                timeframe: planTimeframe,
-                lensSnapshot,
-                existingHypotheses: matched,
+                  currentTimeframe: planTimeframe,
+                  higherTimeframe,
+                  currentOhlcv: ohlcvData,
+                  higherOhlcv: higherTFData?.ohlcvData,
+                });
+                if (!specialistInput) return null;
+                // P0 必須 indicator (= sma/ema/rsi/macd/atr) が現在 TF で 1 つでも
+                // 欠落していたら LLM 呼び出しを skip (= 低品質出力 + 無駄コスト回避)
+                if (!IndicatorSpecialist.hasMinimumDataForAnalysis(specialistInput)) {
+                  console.warn(
+                    '[Orchestrator] P0 必須 indicator 欠落、IndicatorSpecialist スキップ',
+                  );
+                  return null;
+                }
+                // LLM 解釈
+                const specialist = new IndicatorSpecialist();
+                return await specialist.analyze(specialistInput);
               },
             );
-            for (const ci of createInputs) {
-              try {
-                const created = await edgeLedger.create(ci);
-                matched.push(created);
-              } catch (err) {
-                console.warn('[Orchestrator] EdgeLedger.create 失敗:', err);
-              }
+            if (specialistResult) {
+              indicatorAnalysis = specialistResult.output;
+              indicatorSpecialistTokens = specialistResult.tokenUsage;
+              console.log(
+                `[Orchestrator] IndicatorSpecialist 完了: ` +
+                  `current=${indicatorAnalysis.current.trendState}/${indicatorAnalysis.current.momentum}, ` +
+                  `mtf=${indicatorAnalysis.mtfAlignment.trendAlignment}, ` +
+                  `confidence=${indicatorAnalysis.confidence}`,
+              );
+            } else {
+              console.log('[Orchestrator] IndicatorSpecialist null (= 取得失敗 or 解釈失敗)');
             }
-            console.log(`[Orchestrator] 新規仮説登録: ${createInputs.length}個`);
+          } catch (err) {
+            console.warn('[Orchestrator] IndicatorSpecialist 失敗(続行):', err);
           }
 
           candidateHypotheses = matched;
@@ -579,7 +529,6 @@ export class AIOrchestrator {
         lensSnapshot,
         candidateHypotheses,
         // Phase 6.8: IndicatorSpecialist の MTF テクニカル分析を Plan AI にも渡す
-        // (= 上の HypothesisGenerator と同じ indicatorAnalysis を再利用)
         indicatorAnalysis: indicatorAnalysis ?? undefined,
       };
 
@@ -642,8 +591,8 @@ export class AIOrchestrator {
             overallConfidence: planResult.output.overallConfidence,
             warnings: aggregatedWarnings,
             aiModel: planResult.model,
-            // debateTokens を加算してコスト追跡値を API 返却値と揃える
-            tokenUsage: planResult.tokenUsage + debateTokens,
+            // debateTokens + indicatorSpecialistTokens を加算してコスト追跡値を API 返却値と揃える
+            tokenUsage: planResult.tokenUsage + indicatorSpecialistTokens + debateTokens,
           }),
       );
 
@@ -656,7 +605,7 @@ export class AIOrchestrator {
         tokenUsage:
           researchTokens +
           planResult.tokenUsage +
-          hypothesisGeneratorTokens +
+          indicatorSpecialistTokens +
           debateTokens,
       };
     } catch (error) {

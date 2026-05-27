@@ -181,8 +181,13 @@ export class IndicatorSpecialist {
    *
    * リトライ: 最大 2 回 (exponential backoff: 1s, 2s)。
    * 並列 LLM rate limit (= 429) 対策として、リトライは backoff を挟む。
+   *
+   * Step A-1 (PR #268): 返り値に tokenUsage を含める形式に変更 (= 呼出側で集計するため)。
+   * 旧 `IndicatorAnalysis | null` → 新 `{ output: IndicatorAnalysis; tokenUsage: number } | null`。
    */
-  async analyze(input: IndicatorSpecialistInput): Promise<IndicatorAnalysis | null> {
+  async analyze(
+    input: IndicatorSpecialistInput,
+  ): Promise<{ output: IndicatorAnalysis; tokenUsage: number } | null> {
     const systemPrompt = this.buildSystemPrompt(input);
     const userPrompt = this.buildUserPrompt(input);
 
@@ -194,7 +199,7 @@ export class IndicatorSpecialist {
         ]);
         const parsed = parseJsonLoose(res.content ?? '');
         const validated = IndicatorAnalysisSchema.safeParse(parsed);
-        if (validated.success) return validated.data;
+        if (validated.success) return { output: validated.data, tokenUsage: res.tokenUsage };
         console.warn(
           `[IndicatorSpecialist] Zod 検証失敗 (attempt ${attempt + 1}/${MAX_RETRIES + 1}):`,
           validated.error.issues.slice(0, 3),
