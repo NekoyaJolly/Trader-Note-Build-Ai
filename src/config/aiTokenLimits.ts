@@ -28,17 +28,17 @@
  */
 export const AI_MAX_TOKENS = {
   /**
-   * 重い生成: 10 件 JSON 戦略 / プロンプト全体変異 / メタ分析 / 仮説 N 件 / Strategy 構造化等。
+   * 重い生成: 10 件 JSON 戦略 / 仮説 N 件 / Strategy 構造化等。
    * 65536 → 100000 (10 万デフォルト)。reasoning model の思考分も含む。
-   * 適用先: MutationAgent / PromptMutationAgent / StrategistAgent / MetaEvolutionAgent /
-   *   HypothesisGeneratorAgent / DiscoveryAgent / planAIService / BullBearDebateAgent
+   * 適用先: MutationAgent / StrategistAgent / HypothesisGeneratorAgent /
+   *   DiscoveryAgent / planAIService / BullBearDebateAgent
    */
   HEAVY: 100000,
   /**
    * 中程度: 単発戦略生成 / 専門家分析 / トレード判断 / 特徴量抽出 / 振り返り 1 件等。
    * 32768 → 50000。reasoning モデルでも 1 件 JSON なら十分。
    * 適用先: CrossoverAgent / specialistCommon / agentLoop / researchAIService /
-   *   reflectionAIService / DevilsAdvocateAgent / GenerationReflectionAgent
+   *   reflectionAIService / GenerationReflectionAgent
    */
   MEDIUM: 50000,
 } as const;

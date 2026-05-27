@@ -6,7 +6,7 @@
  * 月次プロンプト進化 / A/B テスト / 人間承認フローの基盤として利用する。
  *
  * 設計原則:
- * - agentName は列挙型で固定しない(将来 MetaEvolutionAgent が新エージェントを追加する)
+ * - agentName は列挙型で固定しない(将来エージェント追加に備える)
  * - active は 1 エージェント 1 件(promote() 時に既存 active を deprecated に自動遷移)
  * - 使用成績集計は recordUsage() で逐次更新(avgScore は単純平均)
  * - 握りつぶし禁止: エラーは呼び出し側に伝播
@@ -32,7 +32,6 @@ import { EVOLUTION_TARGETS_PROMPT_TEXT } from '../../evolution/evolutionTargets'
  *
  * 単一ソースは `loader.ts`。ここは後方互換のため re-export する。
  * - 全エージェント共通のプロンプトで、実エージェントとしては扱わない
- * - PromptMutationAgent / MetaEvolutionAgent は本定数で変異・再編成対象から除外する
  * - seed.ts が initial を投入
  */
 export { GLOBAL_AGENT_NAME, SPECIALIST_COMMON_AGENT_NAME };
@@ -329,7 +328,7 @@ export class PromptRegistry {
   }
 
   /**
-   * 動的エージェント追加(MetaEvolutionAgent 用)。
+   * 動的エージェント追加。
    * 初期プロンプトを active として登録する。
    * 既に同エージェントの active が存在する場合は例外。
    */

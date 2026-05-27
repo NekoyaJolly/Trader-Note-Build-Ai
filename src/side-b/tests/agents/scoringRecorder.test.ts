@@ -154,7 +154,7 @@ describe('recordAgentUsage', () => {
     expect(recordCalls[0].input.success).toBe(true);
   });
 
-  it('mutation/crossover/prompt_mutation の scoringInput { count } が反映される', async () => {
+  it('mutation/crossover の scoringInput { count } が反映される', async () => {
     const { registry, recordCalls } = makeMockRegistry({
       active: buildPromptVersion({ id: 'v-mut', agentName: 'mutation' }),
     });
@@ -177,13 +177,11 @@ describe('recordAgentUsage', () => {
 
   it('scoring 結果が低い (score < 0.3) なら success=false', async () => {
     const { registry, recordCalls } = makeMockRegistry({
-      active: buildPromptVersion({ id: 'v-da', agentName: 'devils_advocate' }),
+      active: buildPromptVersion({ id: 'v-hg', agentName: 'hypothesis_generator' }),
     });
 
-    // failureScenarios 1 件のみ + 他なし → 0.4 * 0.75 = 0.3 ぴったり
-    // success の境界が >= 0.3 なので 0.3 ジャストは success=true。
-    // success=false ケースは scenarios も recommendation も空にして 0 を作る。
-    await recordAgentUsage('devils_advocate', {}, {}, registry);
+    // 空 output → hypothesisGeneratorScoreFn は 0 を返す。success=false。
+    await recordAgentUsage('hypothesis_generator', {}, {}, registry);
 
     expect(recordCalls).toHaveLength(1);
     expect(recordCalls[0].input.score).toBe(0);

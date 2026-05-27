@@ -27,8 +27,8 @@ const PROMPTS_DIR = __dirname;
 export const GLOBAL_AGENT_NAME = '__global__';
 
 /**
- * 専門家3エージェント用共通テンプレの予約名（Registry agentName）。
- * Phase 6.7c: 未投入時も識別子として使用。`PromptMutation` / `MetaEvolution` の変異対象外。
+ * 専門家エージェント用共通テンプレの予約名（Registry agentName）。
+ * Phase 6.7c: 未投入時も識別子として使用。
  */
 export const SPECIALIST_COMMON_AGENT_NAME = '__specialist_common__';
 

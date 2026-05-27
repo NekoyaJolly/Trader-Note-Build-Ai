@@ -9,12 +9,9 @@
  * - hypothesis_generator (Phase 6 MVP)
  * - indicator_specialist (Phase 6.8 統合 = 旧 trend / oscillator / volatility_volume 統合)
  * - strategist (Critical-3)
- * - devils_advocate (Critical-3)
  * - discovery (Critical-3)
  * - mutation (Critical-3)
  * - crossover (Critical-3)
- * - prompt_mutation (Critical-3)
- * - meta_evolution (Critical-3)
  * - bull_bear_debate (Critical-3)
  *
  * 未定義エージェントに対しては null が返る(`getScoringFunction` の返り値仕様)。
@@ -169,60 +166,6 @@ export const strategistScoreFn: ScoringFunction<
 };
 
 /**
- * DevilsAdvocate: 失敗シナリオの数と詳細さ + 弱点記述の深さ + 推奨アクションの説得力。
- */
-export const devilsAdvocateScoreFn: ScoringFunction<
-  object,
-  {
-    failureScenarios?: Array<{
-      description?: string;
-      triggerConditions?: string;
-      estimatedLikelihood?: string;
-    }>;
-    weakestAssumption?: {
-      description?: string;
-      whyVulnerable?: string;
-    };
-    recommendation?: {
-      action?: string;
-      rationale?: string;
-      suggestedModifications?: string[];
-    };
-  }
-> = (_input, output) => {
-  const VALID_LIKELIHOODS = new Set(['low', 'medium', 'high']);
-  const VALID_ACTIONS = new Set(['proceed', 'modify', 'abandon']);
-
-  const scenarios = output?.failureScenarios ?? [];
-  const scenarioCountScore = Math.min(scenarios.length / 2, 1);
-  const scenarioQualityScore =
-    scenarios.length === 0
-      ? 0
-      : scenarios.filter(
-          (s) =>
-            (s.description ?? '').length >= 30 &&
-            (s.triggerConditions ?? '').length >= 20 &&
-            VALID_LIKELIHOODS.has(s.estimatedLikelihood ?? ''),
-        ).length / scenarios.length;
-  const scenariosScore = 0.5 * scenarioCountScore + 0.5 * scenarioQualityScore;
-
-  const weakest = output?.weakestAssumption;
-  const weakestScore = weakest
-    ? 0.5 * (lengthScore(weakest.description, 30) +
-        lengthScore(weakest.whyVulnerable, 30))
-    : 0;
-
-  const recommendation = output?.recommendation;
-  const recScore = recommendation
-    ? 0.5 *
-        (VALID_ACTIONS.has(recommendation.action ?? '') ? 1 : 0) +
-      0.5 * lengthScore(recommendation.rationale, 30)
-    : 0;
-
-  return 0.4 * scenariosScore + 0.2 * weakestScore + 0.4 * recScore;
-};
-
-/**
  * Discovery: 解釈の数 + 新仮説の数 + HG 向けヒント + 週次ノート。
  */
 export const discoveryScoreFn: ScoringFunction<
@@ -327,89 +270,6 @@ export const crossoverScoreFn: ScoringFunction<
 };
 
 /**
- * PromptMutation: 改善案配列の充実度。
- *
- * - 配列長(既定 3 件で満点)
- * - 各 content の長さ(>=100 で満点)
- * - notes / expectedImprovement の充填率
- */
-export const promptMutationScoreFn: ScoringFunction<
-  { count?: number },
-  Array<{
-    version?: string;
-    content?: string;
-    notes?: string;
-    expectedImprovement?: string;
-  }>
-> = (input, output) => {
-  if (!Array.isArray(output) || output.length === 0) return 0;
-  const requestedCount = input?.count ?? 3;
-  const countScore =
-    requestedCount > 0 ? Math.min(output.length / requestedCount, 1) : 1;
-  const contentScore =
-    output.filter((p) => (p.content ?? '').length >= 100).length / output.length;
-  const metadataScore =
-    output.filter(
-      (p) =>
-        typeof p.version === 'string' &&
-        p.version.length > 0 &&
-        ((p.notes ?? '').length > 0 || (p.expectedImprovement ?? '').length > 0),
-    ).length / output.length;
-  return 0.4 * countScore + 0.4 * contentScore + 0.2 * metadataScore;
-};
-
-/**
- * MetaEvolution (AgentRestructureProposal): 提案の数と質 + 分析の網羅性 + confidence。
- */
-export const metaEvolutionScoreFn: ScoringFunction<
-  object,
-  {
-    proposals?: Array<{
-      type?: string;
-      agentName?: string;
-      reasoning?: string;
-      expectedImprovement?: string;
-    }>;
-    analysis?: {
-      currentAgents?: string[];
-      coverageGaps?: string[];
-      underperformers?: string[];
-    };
-    confidence?: number;
-  }
-> = (_input, output) => {
-  const VALID_TYPES = new Set(['add', 'modify', 'deprecate']);
-
-  const proposals = output?.proposals ?? [];
-  const proposalCountScore = Math.min(proposals.length, 1);
-  const proposalQualityScore =
-    proposals.length === 0
-      ? 0
-      : proposals.filter(
-          (p) =>
-            VALID_TYPES.has(p.type ?? '') &&
-            typeof p.agentName === 'string' &&
-            p.agentName.length > 0 &&
-            (p.reasoning ?? '').length >= 30 &&
-            (p.expectedImprovement ?? '').length >= 20,
-        ).length / proposals.length;
-  const proposalsScore = 0.5 * proposalCountScore + 0.5 * proposalQualityScore;
-
-  const analysis = output?.analysis;
-  const analysisScore = analysis
-    ? (Array.isArray(analysis.currentAgents) && analysis.currentAgents.length > 0 ? 1 : 0) *
-        (1 / 3) +
-      (Array.isArray(analysis.coverageGaps) ? 1 : 0) * (1 / 3) +
-      (Array.isArray(analysis.underperformers) ? 1 : 0) * (1 / 3)
-    : 0;
-
-  const conf = output?.confidence ?? 0;
-  const confInRange = conf >= 0.1 && conf <= 0.95 ? 1 : 0.3;
-
-  return 0.5 * proposalsScore + 0.3 * analysisScore + 0.2 * confInRange;
-};
-
-/**
  * BullBearDebate: bull/bear 双方の論拠 + 統合解釈 + 市場文脈。
  */
 export const bullBearDebateScoreFn: ScoringFunction<
@@ -461,21 +321,17 @@ export const bullBearDebateScoreFn: ScoringFunction<
   return 0.4 * sideAvgScore + 0.4 * synthesisScore + 0.2 * marketScore;
 };
 
-/** エージェント名 → スコア関数 のマッピング (Phase 6.8 統合後 = 10 体)。 */
+/** エージェント名 → スコア関数 のマッピング (Step F 整理後 = 7 体)。 */
 export const SCORING_FUNCTIONS: Record<string, ScoringFunction<object, object>> = {
   // Phase 6 MVP + Phase 6.8 統合 (indicator_specialist で旧 3 体を統合)
   hypothesis_generator: hypothesisGeneratorScoreFn,
   indicator_specialist: indicatorSpecialistScoreFn,
-  // Critical-3 残スコープ(死蔵 8 体)
   strategist: strategistScoreFn,
-  devils_advocate: devilsAdvocateScoreFn,
   discovery: discoveryScoreFn,
-  // mutation/crossover/prompt_mutation は input 型が { count? } / { pairCount? } のため
+  // mutation/crossover は input 型が { count? } / { pairCount? } のため
   // Record<string, ScoringFunction<object, object>> に直接代入できず型アサーションが必要。
   mutation: mutationScoreFn as ScoringFunction<object, object>,
   crossover: crossoverScoreFn as ScoringFunction<object, object>,
-  prompt_mutation: promptMutationScoreFn as ScoringFunction<object, object>,
-  meta_evolution: metaEvolutionScoreFn,
   bull_bear_debate: bullBearDebateScoreFn,
 };
 

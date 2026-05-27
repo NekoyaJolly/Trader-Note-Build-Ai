@@ -102,6 +102,7 @@ function toDomain(row: PromptVersionRow): PromptVersion {
 }
 
 const ALLOWED_STATUSES: PromptStatus[] = ['active', 'experimental', 'deprecated', 'rejected'];
+// Step F (PR #267) で MetaEvolutionAgent は削除済だが、DB 既存行表示のため 'meta_evolution' は残置。
 const ALLOWED_CREATED_BY: PromptCreatedBy[] = ['human', 'mutation', 'meta_evolution'];
 
 function narrowStatus(s: string): PromptStatus {

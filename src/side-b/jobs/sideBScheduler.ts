@@ -41,7 +41,6 @@ import type { PrismaClient } from '@prisma/client';
 import { prisma as canonicalPrisma } from '../../backend/db/client';
 import { createSystemStateRepository } from '../repositories/systemStateRepository';
 import { mailService } from '../services/mailService';
-import type { PromptEvolutionResult } from '../prompts/registry/promptEvolutionJob';
 import type { JsonValue } from '../../utils/jsonValue';
 
 // PR-1 (sideb-refactor): Evolution 系を切り出し
@@ -62,9 +61,8 @@ import {
 // PR-3 (sideb-refactor): TradeMonitoring / PlanGeneration 系を切り出し
 import { TradeMonitoringJob } from './tradeMonitoringJob';
 import { PlanGenerationJob } from './planGenerationJob';
-// PR-4 (sideb-refactor): Discovery / PromptEvolution / Cleanup 系を切り出し
+// PR-4 (sideb-refactor): Discovery / Cleanup 系を切り出し
 import { DiscoveryJob } from './discoveryJob';
-import { PromptEvolutionJob } from './promptEvolutionJob';
 import { CleanupJob } from './cleanupJob';
 // Phase B (2026-05-22): symbols は Watchlist から動的取得するため正規化関数を import
 import { normalizeCTraderSymbol } from '../../utils/symbolNormalization';
@@ -153,8 +151,6 @@ export interface SideBSchedulerConfig {
   evolutionQDArchive: boolean;
   /** Phase A: QD-Archive parent injection 上限 (default 2)。 */
   evolutionQDParentLimit: number;
-  /** Phase 6: 月次プロンプト進化ジョブを自動トリガーするか(既定 false、手動のみ) */
-  autoTriggerPromptEvolution: boolean;
   /** cTrader アカウントID（cTraderデータソース有効化用） */
   ctraderAccountId?: string;
 }
@@ -201,7 +197,6 @@ const DEFAULT_CONFIG: SideBSchedulerConfig = {
   evolutionAdaptiveBudget: false,
   evolutionQDArchive: false,
   evolutionQDParentLimit: 2,
-  autoTriggerPromptEvolution: false, // Phase 6: 既定は手動のみ(CLI / UI からの明示的トリガー)
 };
 
 // EVOLUTION_CARRY_RETENTION_DAYS は EvolutionJob 側に移動 (`./evolutionJob.ts`)。
@@ -268,7 +263,6 @@ export class SideBScheduler {
   private screeningIntervalId?: NodeJS.Timeout;
   private fullValidationIntervalId?: NodeJS.Timeout;
   private evolutionIntervalId?: NodeJS.Timeout;
-  private promptEvolutionIntervalId?: NodeJS.Timeout;
   private lastPlanRun: Map<string, Date> = new Map();
   private lastMonitorRun?: Date;
   private lastCleanupRun?: Date;
@@ -276,7 +270,6 @@ export class SideBScheduler {
   private lastScreeningRun?: Date;
   private lastFullValidationRun?: Date;
   private lastEvolutionRun?: Date;
-  private lastPromptEvolutionRun?: Date;
   private errors: string[] = [];
   private readonly isProduction: boolean;
 
@@ -294,9 +287,8 @@ export class SideBScheduler {
   // PR-3 (sideb-refactor): TradeMonitoring / PlanGeneration を delegation。
   private tradeMonitoringJob: TradeMonitoringJob;
   private planGenerationJob: PlanGenerationJob;
-  // PR-4 (sideb-refactor): Discovery / PromptEvolution / Cleanup を delegation。
+  // PR-4 (sideb-refactor): Discovery / Cleanup を delegation。
   private discoveryJob: DiscoveryJob;
-  private promptEvolutionJob: PromptEvolutionJob;
   private cleanupJob: CleanupJob;
   private systemStateRepository = createSystemStateRepository();
 
@@ -379,11 +371,6 @@ export class SideBScheduler {
     this.discoveryJob = new DiscoveryJob(deps, {
       onCompleted: (completedAt: Date) => {
         this.lastDiscoveryRun = completedAt;
-      },
-    });
-    this.promptEvolutionJob = new PromptEvolutionJob(deps, {
-      onCompleted: (completedAt: Date) => {
-        this.lastPromptEvolutionRun = completedAt;
       },
     });
     this.cleanupJob = new CleanupJob(deps, {
@@ -552,11 +539,6 @@ export class SideBScheduler {
       this.startEvolutionJob();
     }
 
-    // Phase 6: 月次プロンプト進化ジョブ(既定は無効)
-    if (this.config.autoTriggerPromptEvolution) {
-      this.startPromptEvolutionJob();
-    }
-
     // 週次/月次サマリースケジューラーを連動起動
     if (this.config.autoSummary) {
       this.log('週次/月次サマリースケジューラーを連動起動します');
@@ -606,11 +588,6 @@ export class SideBScheduler {
     if (this.evolutionIntervalId) {
       clearInterval(this.evolutionIntervalId);
       this.evolutionIntervalId = undefined;
-    }
-
-    if (this.promptEvolutionIntervalId) {
-      clearInterval(this.promptEvolutionIntervalId);
-      this.promptEvolutionIntervalId = undefined;
     }
 
     // サマリースケジューラーも連動停止
@@ -959,38 +936,6 @@ export class SideBScheduler {
     };
 
     this.evolutionIntervalId = setInterval(() => { runIfDue().catch(console.error); }, checkIntervalMs);
-  }
-
-  /**
-   * Phase 6: 月次プロンプト進化ジョブを開始する。
-   * 1 時間ごとにチェックし、最終実行から 30 日経過していたら実行する。
-   * autoTriggerPromptEvolution=false(既定)なら呼ばれない。
-   */
-  private startPromptEvolutionJob(): void {
-    const checkIntervalMs = 60 * 60 * 1000;
-    const monthlyMs = 30 * 24 * 60 * 60 * 1000;
-    this.promptEvolutionIntervalId = setInterval(() => {
-      const now = Date.now();
-      if (
-        !this.lastPromptEvolutionRun ||
-        now - this.lastPromptEvolutionRun.getTime() >= monthlyMs
-      ) {
-        this.runPromptEvolutionNow().catch((err) => {
-          this.addError(`プロンプト進化ジョブエラー: ${err}`);
-        });
-      }
-    }, checkIntervalMs);
-  }
-
-  /**
-   * Phase 6: プロンプト進化を手動実行する。
-   * - 全エージェントの experimental 成績を評価
-   * - 昇格候補のレポートを返す(自動昇格はしない = 人間承認は approveCli.ts 経由)
-   * - 成績不振の experimental は reject
-   * - PromptMutationAgent で新 experimental を 3 件/エージェント 生成
-   */
-  async runPromptEvolutionNow(): Promise<PromptEvolutionResult> {
-    return this.promptEvolutionJob.run(this.config);
   }
 
   /**

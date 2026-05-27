@@ -37,7 +37,6 @@ export interface SeedEntry {
 export const DEFAULT_SEED_ENTRIES: SeedEntry[] = [
   // Phase 6.7a: グローバルルール(全エージェント共通の前段プロンプト)
   //   - agentName は GLOBAL_AGENT_NAME 固定
-  //   - PromptMutation / MetaEvolution の対象外(安全装置あり)
   //   - 更新は人間承認フロー経由のみ
   { agentName: GLOBAL_AGENT_NAME, file: `${GLOBAL_AGENT_NAME}.md`, notes: 'Phase 6.7a Global Rules' },
   {
@@ -46,7 +45,6 @@ export const DEFAULT_SEED_ENTRIES: SeedEntry[] = [
     notes: 'Phase 6.7c Specialist Common Rules',
   },
   { agentName: 'strategist', file: 'strategist.md', notes: 'Phase 4c StrategistAgent' },
-  { agentName: 'devils_advocate', file: 'devils_advocate.md', notes: 'Phase 2 DevilsAdvocate' },
   { agentName: 'discovery', file: 'discovery.md', notes: 'Phase 4a DiscoveryAgent' },
   { agentName: 'hypothesis_generator', file: 'hypothesis_generator.md', notes: 'Phase 4a HypothesisGenerator' },
   { agentName: 'strategy_thinker', file: 'strategy_thinker.md', notes: 'Phase 2 StrategyThinker(planAIService)' },
@@ -56,16 +54,6 @@ export const DEFAULT_SEED_ENTRIES: SeedEntry[] = [
     agentName: 'indicator_specialist',
     file: 'specialists/indicator_specialist.md',
     notes: 'Phase 6.8 IndicatorSpecialist (= 旧 trend/oscillator/volatility_volume 統合)',
-  },
-  {
-    agentName: 'prompt_mutation',
-    file: 'prompt_mutation.md',
-    notes: 'Phase 6 PromptMutationAgent',
-  },
-  {
-    agentName: 'meta_evolution',
-    file: 'meta_evolution.md',
-    notes: 'Phase 6 MetaEvolutionAgent',
   },
   // Phase 6.7a: BullBearDebateAgent を seed 対象に追加
   {

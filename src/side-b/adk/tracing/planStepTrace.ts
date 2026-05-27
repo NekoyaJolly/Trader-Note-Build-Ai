@@ -2,9 +2,9 @@
  * Plan 多段 flow step 単位 trace ヘルパー (P3)
  *
  * 用途:
- *   `AIOrchestrator.generatePlan` の 10 step (research_primary / research_higher_tf
+ *   `AIOrchestrator.generatePlan` の各 step (research_primary / research_higher_tf
  *   / lens_aggregation / specialists / hypothesis_generator / bull_bear_debate
- *   / plan_ai / strategy_backtest / devils_advocate / plan_persist) を 1 step ずつ
+ *   / plan_ai / strategy_backtest / plan_persist) を 1 step ずつ
  *   wrap し、`adk.subagent.*` 系の trace event を emit する。
  *
  * trace kind 選定 (`adk.subagent.*` の流用):

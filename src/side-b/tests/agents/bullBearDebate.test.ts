@@ -2,7 +2,6 @@
  * BullBearDebateAgent 単体テスト
  *
  * 討論エージェントのバリデーション・フォールバック・API 呼び出し配線を検証する。
- * 既存の DevilsAdvocateAgent テストパターンを踏襲。
  *
  * モック戦略: fetch をモックし、AI API 呼び出しを制御する。
  * 実 API は叩かない（料金発生なし）。
