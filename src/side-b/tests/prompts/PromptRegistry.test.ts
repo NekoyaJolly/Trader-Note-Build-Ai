@@ -6,7 +6,6 @@
  */
 
 import { PromptRegistry } from '../../prompts/registry/PromptRegistry';
-import type { PromptStatus } from '../../prompts/registry/types';
 
 // PromptVersion テーブル行のフェイク表現(Prisma スキーマの部分集合)
 interface FakeRow {
@@ -105,8 +104,8 @@ function makeFakePrisma() {
       async ({ where, data }: { where: { id: string }; data: Partial<FakeRow> }) => {
         const i = rows.findIndex((r) => r.id === where.id);
         if (i === -1) throw new Error(`Not found: ${where.id}`);
-        rows[i] = { ...rows[i]!, ...data, updatedAt: new Date() };
-        return { ...rows[i]! };
+        rows[i] = { ...rows[i], ...data, updatedAt: new Date() };
+        return { ...rows[i] };
       },
     ),
     updateMany: jest.fn(
@@ -119,7 +118,7 @@ function makeFakePrisma() {
       }) => {
         let count = 0;
         for (let i = 0; i < rows.length; i++) {
-          const r = rows[i]!;
+          const r = rows[i];
           if (r.agentName === where.agentName && r.status === where.status) {
             rows[i] = { ...r, ...data, updatedAt: new Date() };
             count++;
@@ -140,21 +139,21 @@ function makeFakePrisma() {
 describe('PromptRegistry', () => {
   it('register で新規 experimental を追加できる', async () => {
     const { fake } = makeFakePrisma();
-    const reg = new PromptRegistry(fake as any);
+    const reg = new PromptRegistry(fake);
     const v = await reg.register({
-      agentName: 'trend_specialist',
+      agentName: 'indicator_specialist',
       version: '1.0.0',
       content: '...',
       createdBy: 'human',
     });
-    expect(v.agentName).toBe('trend_specialist');
+    expect(v.agentName).toBe('indicator_specialist');
     expect(v.status).toBe('experimental');
     expect(v.avgScore).toBe(0);
   });
 
   it('getActive は status=active の最新を返す、なければ null', async () => {
     const { fake } = makeFakePrisma();
-    const reg = new PromptRegistry(fake as any);
+    const reg = new PromptRegistry(fake);
     await reg.register({
       agentName: 'x',
       version: '1',
@@ -169,7 +168,7 @@ describe('PromptRegistry', () => {
 
   it('recordUsage で usageCount/successCount/avgScore が逐次更新される', async () => {
     const { fake } = makeFakePrisma();
-    const reg = new PromptRegistry(fake as any);
+    const reg = new PromptRegistry(fake);
     const v = await reg.register({
       agentName: 'x',
       version: '1',
@@ -189,7 +188,7 @@ describe('PromptRegistry', () => {
 
   it('promote は実行時に既存 active を deprecated にする', async () => {
     const { fake, rows } = makeFakePrisma();
-    const reg = new PromptRegistry(fake as any);
+    const reg = new PromptRegistry(fake);
     const oldActive = await reg.register({
       agentName: 'x',
       version: '1',
@@ -216,7 +215,7 @@ describe('PromptRegistry', () => {
 
   it('promote は experimental 以外を拒否する', async () => {
     const { fake } = makeFakePrisma();
-    const reg = new PromptRegistry(fake as any);
+    const reg = new PromptRegistry(fake);
     const v = await reg.register({
       agentName: 'x',
       version: '1',
@@ -231,7 +230,7 @@ describe('PromptRegistry', () => {
 
   it('registerNewAgent は既存 active があると例外', async () => {
     const { fake } = makeFakePrisma();
-    const reg = new PromptRegistry(fake as any);
+    const reg = new PromptRegistry(fake);
     await reg.register({
       agentName: 'new_agent',
       version: '1',
@@ -251,7 +250,7 @@ describe('PromptRegistry', () => {
 
   it('listAgents は distinct な agentName を返す', async () => {
     const { fake } = makeFakePrisma();
-    const reg = new PromptRegistry(fake as any);
+    const reg = new PromptRegistry(fake);
     await reg.register({
       agentName: 'a',
       version: '1',
@@ -279,7 +278,7 @@ describe('PromptRegistry', () => {
 
   it('listActiveAndExperimental は 2 つのステータスを返す', async () => {
     const { fake } = makeFakePrisma();
-    const reg = new PromptRegistry(fake as any);
+    const reg = new PromptRegistry(fake);
     await reg.register({
       agentName: 'x',
       version: '1',
@@ -299,7 +298,7 @@ describe('PromptRegistry', () => {
       version: '0',
       content: '.',
       createdBy: 'human',
-      status: 'deprecated' as PromptStatus,
+      status: 'deprecated',
     });
     const list = await reg.listActiveAndExperimental('x');
     const statuses = list.map((p) => p.status).sort();

@@ -64,32 +64,32 @@ function makeFakePrisma() {
 describe('ABTestRunner', () => {
   it('複数バリアントを並行実行し、スコア最高を勝者判定する', async () => {
     const { fake } = makeFakePrisma();
-    const reg = new PromptRegistry(fake as any);
+    const reg = new PromptRegistry(fake);
     const v1 = await reg.register({
-      agentName: 'trend_specialist',
+      agentName: 'indicator_specialist',
       version: 'A',
       content: 'promptA',
       createdBy: 'human',
       status: 'active',
     });
     const v2 = await reg.register({
-      agentName: 'trend_specialist',
+      agentName: 'indicator_specialist',
       version: 'B',
       content: 'promptB',
       createdBy: 'mutation',
       status: 'experimental',
     });
 
-    const executor: VariantExecutor<string, { q: number }> = async (prompt, input) => ({
+    const executor: VariantExecutor<string, { q: number }> = async (prompt, _input) => ({
       q: prompt === 'promptB' ? 1.0 : 0.5,
     });
     const scoreFn: ScoringFunction<string, { q: number }> = (_i, o) => o.q;
 
     const runner = new ABTestRunner(executor, scoreFn, {
       registry: reg,
-      prisma: fake as any,
+      prisma: fake,
     });
-    const res = await runner.runTest('trend_specialist', 'x', [v1.id, v2.id]);
+    const res = await runner.runTest('indicator_specialist', 'x', [v1.id, v2.id]);
     expect(res.variants.length).toBe(2);
     expect(res.winnerVersionId).toBe(v2.id); // 1.0 / 0.5 = 2 >= 1.15
     expect(res.winnerReason).toMatch(/ratio=2/);
@@ -97,7 +97,7 @@ describe('ABTestRunner', () => {
 
   it('有意差未満なら winnerVersionId 未設定', async () => {
     const { fake } = makeFakePrisma();
-    const reg = new PromptRegistry(fake as any);
+    const reg = new PromptRegistry(fake);
     const a = await reg.register({
       agentName: 'x',
       version: 'A',
@@ -115,7 +115,7 @@ describe('ABTestRunner', () => {
     const runner = new ABTestRunner(
       async () => ({ score: 1 }),
       (_i, o: any) => (o.score === 1 ? 0.5 : 0.45),
-      { registry: reg, prisma: fake as any },
+      { registry: reg, prisma: fake },
     );
     const res = await runner.runTest('x', 'any', [a.id, b.id]);
     expect(res.winnerVersionId).toBeUndefined();
@@ -124,7 +124,7 @@ describe('ABTestRunner', () => {
 
   it('1 バリアントが例外でも他は完走する', async () => {
     const { fake } = makeFakePrisma();
-    const reg = new PromptRegistry(fake as any);
+    const reg = new PromptRegistry(fake);
     const a = await reg.register({
       agentName: 'x',
       version: 'A',
@@ -145,7 +145,7 @@ describe('ABTestRunner', () => {
         return 'ok';
       },
       (_i, o) => (o === 'ok' ? 0.8 : 0.3),
-      { registry: reg, prisma: fake as any },
+      { registry: reg, prisma: fake },
     );
     const res = await runner.runTest('x', 'input', [a.id, b.id]);
     const aRes = res.variants.find((v) => v.promptVersionId === a.id)!;
@@ -159,7 +159,7 @@ describe('ABTestRunner', () => {
 
   it('agentName が一致しないバリアントは拒否', async () => {
     const { fake } = makeFakePrisma();
-    const reg = new PromptRegistry(fake as any);
+    const reg = new PromptRegistry(fake);
     const a = await reg.register({
       agentName: 'alpha',
       version: 'A',
@@ -170,7 +170,7 @@ describe('ABTestRunner', () => {
     const runner = new ABTestRunner(
       async () => ({}),
       () => 0,
-      { registry: reg, prisma: fake as any },
+      { registry: reg, prisma: fake },
     );
     await expect(runner.runTest('beta', 'x', [a.id])).rejects.toThrow(
       /belongs to agentName=alpha/,
@@ -179,18 +179,18 @@ describe('ABTestRunner', () => {
 
   it('variantIds が空なら例外', async () => {
     const { fake } = makeFakePrisma();
-    const reg = new PromptRegistry(fake as any);
+    const reg = new PromptRegistry(fake);
     const runner = new ABTestRunner(
       async () => ({}),
       () => 0,
-      { registry: reg, prisma: fake as any },
+      { registry: reg, prisma: fake },
     );
     await expect(runner.runTest('x', 'i', [])).rejects.toThrow(/must not be empty/);
   });
 
   it('persist=false なら DB 書き込みなし', async () => {
     const { fake } = makeFakePrisma();
-    const reg = new PromptRegistry(fake as any);
+    const reg = new PromptRegistry(fake);
     const v = await reg.register({
       agentName: 'x',
       version: 'A',
@@ -201,7 +201,7 @@ describe('ABTestRunner', () => {
     const runner = new ABTestRunner(
       async () => ({}),
       () => 0.5,
-      { registry: reg, prisma: fake as any, persist: false },
+      { registry: reg, prisma: fake, persist: false },
     );
     const res = await runner.runTest('x', 'i', [v.id]);
     expect(res.variants.length).toBe(1);
