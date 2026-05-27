@@ -514,9 +514,13 @@ export class AIOrchestrator {
         () => this.planAI.generatePlan(planInput),
       );
 
-      // 4d. Bull vs Bear 討論（PlanAI 生成シナリオに対する優勢判定）
+      // 4d. Bull vs Bear 討論
       // テスト環境では外部 LLM 呼び出しを防ぐためスキップ（DI でモックを渡さない場合の安全弁）
-      // Step A-4 で Debate output を採用方向として hookup 予定。現状は記録のみ。
+      // Step A-2 ではあくまで呼出順を PlanAI の後ろに移動するだけ。Debate の input は
+      // 従来通り (candidateHypotheses / lensSnapshot / indicatorAnalysis) で PlanAI が
+      // 生成した scenarios は参照しない。Debate output (= 優勢判定) も planResult や
+      // 保存内容には反映されず、記録のみ。Debate input に scenarios を渡す + output を
+      // 採用方向として hookup するのは Step A-4 で実施予定。
       let debateResult: BullBearDebateResult | undefined;
       let debateTokens = 0;
       if (process.env.NODE_ENV !== 'test') {
