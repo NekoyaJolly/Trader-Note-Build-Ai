@@ -1,7 +1,7 @@
 /**
  * AIOrchestrator × StrategyBacktesterAgent 配線のスモークテスト
  *
- * レンズ計算を意図的に失敗させ、EdgeLedger / HypothesisGenerator / 専門家を
+ * レンズ計算を意図的に失敗させ、EdgeLedger / 専門家を
  * 経由しないようにして、Plan AI 以降と戦略 BT 呼び出しだけを検証する。
  */
 
@@ -13,7 +13,6 @@ import type { PlanAIResult } from '../../services/planAIService';
 import type { ResearchOutputRepository, PlanRepository, CreatePlanInput } from '../../repositories';
 import type { ResearchOutputWithTypes, AITradePlanWithTypes } from '../../repositories';
 import type { FeatureVector12D } from '../../models/featureVector';
-import type { HypothesisGeneratorAgent } from '../../agents/HypothesisGeneratorAgent';
 import type { StrategyBacktesterAgent } from '../../agents/StrategyBacktesterAgent';
 import type { StrategyBacktesterRunResult } from '../../agents/StrategyBacktesterAgent';
 
@@ -155,11 +154,6 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
       upsertByDateSymbol: createPlan,
       delete: delPlan,
     } as unknown as PlanRepository;
-    const hgGen = jest.fn();
-    const hypothesisGenerator = {
-      generate: hgGen,
-      toCreateInputs: jest.fn(),
-    } as unknown as HypothesisGeneratorAgent;
     const strategyBacktester = { run: runMock } as unknown as StrategyBacktesterAgent;
 
     const orchestrator = new AIOrchestrator(
@@ -167,7 +161,6 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
       planAI,
       researchRepo,
       planRepo,
-      hypothesisGenerator,
       strategyBacktester,
     );
 
@@ -183,7 +176,6 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
     expect(runMock.mock.calls[0][0]).toHaveLength(1);
     expect(runMock.mock.calls[0][0][0].name).toBe('テストシナリオ');
     expect(runMock.mock.calls[0][1]).toEqual({ symbol: 'XAUUSD', timeframe: '15m' });
-    expect(hgGen).not.toHaveBeenCalled();
   });
 
   it('シナリオ 0 件のとき strategyBacktester.run は呼ばない', async () => {
@@ -212,10 +204,6 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
       upsertByDateSymbol: createPlan,
       delete: delPlan,
     } as unknown as PlanRepository;
-    const hypothesisGenerator = {
-      generate: jest.fn(),
-      toCreateInputs: jest.fn(),
-    } as unknown as HypothesisGeneratorAgent;
     const strategyBacktester = { run: runMock } as unknown as StrategyBacktesterAgent;
 
     const orchestrator = new AIOrchestrator(
@@ -223,7 +211,6 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
       planAI,
       researchRepo,
       planRepo,
-      hypothesisGenerator,
       strategyBacktester,
     );
 
@@ -259,10 +246,6 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
       upsertByDateSymbol: createPlan,
       delete: delPlan,
     } as unknown as PlanRepository;
-    const hypothesisGenerator = {
-      generate: jest.fn(),
-      toCreateInputs: jest.fn(),
-    } as unknown as HypothesisGeneratorAgent;
     const strategyBacktester = { run: runMock } as unknown as StrategyBacktesterAgent;
 
     const orchestrator = new AIOrchestrator(
@@ -270,7 +253,6 @@ describe('AIOrchestrator / StrategyBacktesterAgent', () => {
       planAI,
       researchRepo,
       planRepo,
-      hypothesisGenerator,
       strategyBacktester,
     );
 
