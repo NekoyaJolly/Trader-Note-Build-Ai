@@ -22,7 +22,7 @@
  *   GET  /api/side-b/stats/overview, time-series, by-category, validation-activity
  *   GET  /api/side-b/discovery/latest
  *   GET  /api/side-b/system/health
- *   POST /api/side-b/plans（即時BT `plan.strategyBacktest`、Phase 6.7b）
+ *   POST /api/side-b/plans
  *
  * @see docs/design/phase_4d_specification.md §4.7
  */
@@ -378,7 +378,7 @@ async function getSystemHealth(): Promise<SystemHealthResponse> {
 /**
  * POST /api/side-b/plans
  *
- * プラン生成。`forceRefresh: true` で同日キャッシュを上書きし、即時BT（`plan.strategyBacktest`）を含めやすい。
+ * プラン生成。`forceRefresh: true` で同日キャッシュを上書きする。
  */
 async function generatePlan(body: GeneratePlanRequest): Promise<GeneratePlanResponse> {
   if (!body?.symbol?.trim()) {
