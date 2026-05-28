@@ -368,15 +368,21 @@ export class AIOrchestrator {
       }
 
       // 4a. 並列レンズ計算（Phase 3）— Strategy Thinker 呼び出し前に実行
-      // MTF 文脈は必須 (feedback_timeframe_mandatory): TF 無しの research 出力は誤りなので、
-      // 黙って '15m' に倒さず明示的にエラー化する (generatePlan の try/catch が {success:false} に degrade)。
-      const planTimeframe = research.timeframe;
-      if (!planTimeframe) {
+      // MTF 文脈は必須 (feedback_timeframe_mandatory): TF 無し/非対応の research 出力は誤りなので、
+      // 黙って既定値へ倒さず正規化 + 検証し、不正なら明示エラー化する
+      // (generatePlan の try/catch が {success:false} に degrade)。
+      // normalizeTimeframe は不正値を DEFAULT に silent クランプするため使わない。
+      // planTimeframe を canonical (trim+小文字) に揃えることで、内部で正規化する
+      // deriveHigherTimeframe との整合 (timeframe ↔ higherTimeframe) を保証する。
+      const rawTimeframe = research.timeframe?.trim().toLowerCase();
+      if (!rawTimeframe || !isSupportedTimeframe(rawTimeframe)) {
+        const reportedTimeframe = rawTimeframe || 'なし';
         throw new Error(
-          `[Orchestrator] research.timeframe が未設定のため plan を生成できません (symbol=${symbol})。` +
-            `MTF 文脈 (執行足 + 上位足) は plan→trade→note を通じて必須。`,
+          `[Orchestrator] research.timeframe が未設定/非対応 (${reportedTimeframe}) のため ` +
+            `plan を生成できません (symbol=${symbol})。MTF 文脈 (執行足 + 上位足) は plan→trade→note を通じて必須。`,
         );
       }
+      const planTimeframe = rawTimeframe; // 正規化済み・検証済み (canonical SupportedTimeframe)
       // 永続化用に上位足を常時算出 (IndicatorSpecialist 分岐の有無に依らず plan に残す)。
       const planHigherTimeframe = deriveHigherTimeframe(planTimeframe);
       registerDefaultLenses();
@@ -431,14 +437,8 @@ export class AIOrchestrator {
               'indicator_specialist',
               { symbol, timeframe: planTimeframe },
               async () => {
-                // 上位 TF を導出 (= PR #246 deriveHigherTimeframe を流用)
-                if (!isSupportedTimeframe(planTimeframe)) {
-                  console.warn(
-                    `[Orchestrator] planTimeframe=${planTimeframe} は SupportedTimeframe 外、` +
-                      `IndicatorSpecialist スキップ`,
-                  );
-                  return null;
-                }
+                // planTimeframe は上流 (4a) で trim+小文字+isSupportedTimeframe 検証済 (canonical
+                // SupportedTimeframe) のため、ここでの再チェックは不要。
                 // ohlcvData は本経路 (research 未生成) に到達する時には必ず非 null
                 // (= L331 でガード済) だが、TS 型は optional なのでここで再確認
                 if (!ohlcvData || ohlcvData.length === 0) {

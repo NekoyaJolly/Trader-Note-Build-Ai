@@ -181,10 +181,13 @@ export async function createTradeFromPlan(
     // MTF 文脈必須 (feedback_timeframe_mandatory): plan に timeframe/higherTimeframe が
     // 無い (= migration 前の旧 plan 等) 場合は TF 不明のトレードを開かない。新規 plan は
     // orchestrator が必ず両方を埋めるため、本ガードに掛かるのは legacy plan のみ。
+    // これはエラーではなく正常スキップ (= 呼び出し側で例外扱いさせない) なので、
+    // 既存の「ノートレード判断」と同じ skipped 表現に揃える。
     if (!plan.timeframe || !plan.higherTimeframe) {
       return {
-        success: false,
-        error: `plan に MTF 文脈 (timeframe/higherTimeframe) がありません (planId=${planId})。TF 無しのトレードは作成しません。`,
+        success: true,
+        skipped: true,
+        skipReason: `MTF 文脈なし (legacy plan, planId=${planId}) — TF 不明のトレードは作成しない`,
       };
     }
 
