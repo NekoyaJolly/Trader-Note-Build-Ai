@@ -15,6 +15,7 @@ import { NeonCard } from "@/components/ui/NeonCard";
 import { HypothesisCard } from "@/components/side-b/HypothesisCard";
 import { LedgerStats } from "@/components/side-b/LedgerStats";
 import { DashboardCharts } from "@/components/side-b/DashboardCharts";
+import { DiscoveryFunnelPanel } from "@/components/side-b/DiscoveryFunnelPanel";
 import {
   initialDashboardDebugContext,
   buildDashboardDebugContextPatch,
@@ -28,6 +29,7 @@ import type {
   StatsValidationActivityResponse,
   EdgeHypothesis,
   DiscoveryLatestResponse,
+  DiscoveryFunnelResponse,
   SystemHealthResponse,
 } from "@/types/sideB";
 
@@ -46,6 +48,7 @@ export default function SideBDashboardPage() {
   const [recentConf, setRecentConf] = React.useState<EdgeHypothesis[]>([]);
   const [recentRej, setRecentRej] = React.useState<EdgeHypothesis[]>([]);
   const [discovery, setDiscovery] = React.useState<DiscoveryLatestResponse | null>(null);
+  const [funnel, setFunnel] = React.useState<DiscoveryFunnelResponse | null>(null);
   const [health, setHealth] = React.useState<SystemHealthResponse | null>(null);
 
   const [loading, setLoading] = React.useState(true);
@@ -71,6 +74,7 @@ export default function SideBDashboardPage() {
         rc,
         rr,
         disc,
+        fnl,
         hl,
       ] = await Promise.all([
         sideBApi.getOverviewStats(),
@@ -80,6 +84,7 @@ export default function SideBDashboardPage() {
         sideBApi.getRecentConfirmed(5),
         sideBApi.getRecentRejected(5),
         sideBApi.getLatestDiscovery(),
+        sideBApi.getDiscoveryFunnel(),
         sideBApi.getSystemHealth(),
       ]);
       setOverview(ov);
@@ -89,6 +94,7 @@ export default function SideBDashboardPage() {
       setRecentConf(rc);
       setRecentRej(rr);
       setDiscovery(disc);
+      setFunnel(fnl);
       setHealth(hl);
     } catch (e) {
       setError(e instanceof SideBApiError ? e.message : String(e));
@@ -281,6 +287,8 @@ export default function SideBDashboardPage() {
             )}
           </Card>
         </section>
+
+        <DiscoveryFunnelPanel funnel={funnel} />
 
         <section>
           <h2 className="text-sm font-semibold text-gray-300 mb-2">システム状態</h2>

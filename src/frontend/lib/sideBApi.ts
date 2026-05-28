@@ -47,6 +47,7 @@ import type {
   StatsValidationActivityResponse,
   RecentHypothesesResponse,
   DiscoveryLatestResponse,
+  DiscoveryFunnelResponse,
   SystemHealthResponse,
   GeneratePlanRequest,
   GeneratePlanResponse,
@@ -371,6 +372,10 @@ async function getLatestDiscovery(): Promise<DiscoveryLatestResponse> {
   return request<DiscoveryLatestResponse>("/discovery/latest");
 }
 
+async function getDiscoveryFunnel(): Promise<DiscoveryFunnelResponse> {
+  return request<DiscoveryFunnelResponse>("/discovery/funnel");
+}
+
 async function getSystemHealth(): Promise<SystemHealthResponse> {
   return request<SystemHealthResponse>("/system/health");
 }
@@ -534,6 +539,7 @@ export const sideBApi = {
   getCategoryStats,
   getValidationActivity,
   getLatestDiscovery,
+  getDiscoveryFunnel,
   getSystemHealth,
   generatePlan,
   listPlans,
