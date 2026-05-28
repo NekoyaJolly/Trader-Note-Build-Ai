@@ -204,6 +204,7 @@ export class ReflectionAIService {
 
 ## トレード概要
 - **通貨ペア**: ${trade.symbol}
+- **時間足**: ${trade.timeframe ?? '不明'}${trade.higherTimeframe ? ` (上位足: ${trade.higherTimeframe})` : ''}
 - **方向**: ${trade.direction}
 - **エントリー価格**: ${trade.entryPrice}
 - **決済価格**: ${trade.exitPrice}

@@ -33,6 +33,10 @@ import {
 export interface TradeResultSummary {
     id: string;
     symbol: string;
+    /** 執行足（current timeframe）。MTF 文脈の一級フィールド。VirtualTrade から伝播、legacy は未設定。 */
+    timeframe?: string;
+    /** 分析した上位足（higher timeframe）。VirtualTrade から伝播。 */
+    higherTimeframe?: string;
     direction: 'long' | 'short';
     entryPrice: number;
     exitPrice: number;
