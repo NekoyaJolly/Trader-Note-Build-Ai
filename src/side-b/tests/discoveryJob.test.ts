@@ -74,6 +74,33 @@ describe('DiscoveryJob', () => {
     expect(onCompleted).toHaveBeenCalledTimes(1);
   });
 
+  it('(symbol, timeframe) ごとにグループ化して analyze を呼び、カウントを合算する', async () => {
+    // Step D-4: per-group 呼び出し。2 グループ (XAUUSD/15m, EURUSD/1h) → analyze 2 回。
+    mockFindAITradeNotesInPeriod.mockResolvedValue([
+      { id: 'n1', symbol: 'XAUUSD', timeframe: '15m' },
+      { id: 'n2', symbol: 'XAUUSD', timeframe: '15m' },
+      { id: 'n3', symbol: 'EURUSD', timeframe: '1h' },
+    ]);
+    mockDiscoveryAgentAnalyze.mockResolvedValue({
+      newHypotheses: [{ id: 'h1' }],
+      lensInsights: [{ id: 'l1' }],
+      tokenUsage: 100,
+    });
+    const onCompleted = jest.fn();
+    const { deps } = makeDeps();
+    const job = new DiscoveryJob(deps, { onCompleted });
+
+    const result = await job.run(minimalConfig);
+
+    expect(mockDiscoveryAgentAnalyze).toHaveBeenCalledTimes(2);
+    expect(result.noteCount).toBe(3);
+    expect(result.newHypothesesCount).toBe(2);
+    expect(result.lensInsightsCount).toBe(2);
+    expect(result.tokenUsage).toBe(200);
+    expect(result.skipped).toBe(false);
+    expect(onCompleted).toHaveBeenCalledTimes(1);
+  });
+
   it('findAITradeNotesInPeriod が throw しても addError が呼ばれ throw しない', async () => {
     mockFindAITradeNotesInPeriod.mockRejectedValue(new Error('db down'));
     const onCompleted = jest.fn();

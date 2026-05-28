@@ -521,7 +521,7 @@ export class SideBScheduler {
     // 定期プランジョブを開始
     this.startPlanJob();
 
-    // 週次 DiscoveryAgent ジョブを開始（Phase 4a）
+    // 日次 DiscoveryAgent ジョブを開始（Phase 4a / Step D-4 で週次→日次）
     this.startDiscoveryJob();
 
     // 日次スクリーニングジョブを開始（Phase 4b 縮小版）
@@ -803,13 +803,15 @@ export class SideBScheduler {
    */
   private startDiscoveryJob(): void {
     const checkIntervalMs = 60 * 60 * 1000;
-    const weeklyMs = 7 * 24 * 60 * 60 * 1000;
+    // Step D-4: Discovery を週次→日次に変更 (lookback は 7 日 rolling のまま維持)。
+    // 組成役として日々の新規 AITradeNote を取り込み、仮説を鮮度高く回す。
+    const dailyMs = 24 * 60 * 60 * 1000;
 
     this.discoveryIntervalId = setInterval(() => {
       const now = Date.now();
       if (
         !this.lastDiscoveryRun ||
-        now - this.lastDiscoveryRun.getTime() >= weeklyMs
+        now - this.lastDiscoveryRun.getTime() >= dailyMs
       ) {
         this.runDiscoveryNow().catch((err) => {
           this.addError(`Discoveryジョブエラー: ${err}`);
