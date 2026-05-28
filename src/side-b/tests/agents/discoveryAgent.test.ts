@@ -15,13 +15,15 @@ global.fetch = jest.fn();
 function makeNote(
     outcome: 'win' | 'loss',
     features: Record<string, Record<string, number | string | boolean>>,
+    opts?: { symbol?: string; timeframe?: string },
 ): AITradeNote {
     return {
         id: `note-${Math.random()}`,
         virtualTradeId: 'vt',
         planId: 'plan',
         date: '2026-04-15',
-        symbol: 'XAUUSD',
+        symbol: opts?.symbol ?? 'XAUUSD',
+        timeframe: opts?.timeframe ?? '15m',
         direction: 'long',
         result: {
             outcome,
@@ -186,36 +188,34 @@ describe('DiscoveryAgent.analyze', () => {
         expect(global.fetch).not.toHaveBeenCalled();
     });
 
-    // STEP 5 Phase D (2026-05-16): Discovery が `newHypotheses` を EdgeLedger に
-    // 直接挿入していたブロックを削除した変更を verify。Discovery は調査員役で、
-    // 仮説生成は HypothesisGenerator の責務。LLM が newHypotheses を返しても
-    // EdgeLedger には書き込まない (= report.newHypotheses は常に []、stub.created
-    // は 0 件)。
-    it('LLM が newHypotheses を返しても EdgeLedger には書き込まない (調査員役を遵守)', async () => {
-        mockFetchWith({
-            interpretations: [
-                {
-                    lensName: 'volatility_regime',
-                    featureKey: 'bb_width_percentile',
-                    interpretation: '低パーセンタイルで勝率が高い',
-                },
-            ],
-            newHypotheses: [
-                {
-                    statement: '低ボラ期間中の順張りは勝率が高い',
-                    category: 'volatility',
-                    expectedDirection: 'either',
-                    reasoning: 'ボラ圧縮後のブレイクは継続しやすい',
-                    conditions: [
-                        { lensName: 'volatility_regime', featureKey: 'bb_width_percentile', op: '<', value: 20 },
-                        { lensName: 'volatility_regime', featureKey: 'is_squeeze', op: '==', value: true },
-                    ],
-                },
-            ],
-            weeklyNote: '今週の主要発見',
-        });
+    // Step D-4a (2026-05-29): Discovery を組成役に再活性。組成は env ゲート
+    // (DISCOVERY_COMPOSE_ENABLED) で既定 OFF。symbol/timeframe は LLM ではなく
+    // 分析ノートの実値からクランプする。
+    const composeFetchOutput = {
+        interpretations: [
+            {
+                lensName: 'volatility_regime',
+                featureKey: 'bb_width_percentile',
+                interpretation: '低パーセンタイルで勝率が高い',
+            },
+        ],
+        newHypotheses: [
+            {
+                statement: '低ボラ期間中の順張りは勝率が高い',
+                category: 'volatility',
+                expectedDirection: 'either',
+                reasoning: 'ボラ圧縮後のブレイクは継続しやすい',
+                conditions: [
+                    { lensName: 'volatility_regime', featureKey: 'bb_width_percentile', op: '<', value: 20 },
+                    { lensName: 'volatility_regime', featureKey: 'is_squeeze', op: '==', value: true },
+                ],
+            },
+        ],
+        weeklyNote: '今週の主要発見',
+    };
 
-        const notes: AITradeNote[] = [
+    function singleGroupNotes(): AITradeNote[] {
+        return [
             makeNote('win', { volatility_regime: { bb_width_percentile: 10, is_squeeze: true } }),
             makeNote('win', { volatility_regime: { bb_width_percentile: 12, is_squeeze: true } }),
             makeNote('win', { volatility_regime: { bb_width_percentile: 15, is_squeeze: true } }),
@@ -223,14 +223,51 @@ describe('DiscoveryAgent.analyze', () => {
             makeNote('loss', { volatility_regime: { bb_width_percentile: 80, is_squeeze: false } }),
             makeNote('loss', { volatility_regime: { bb_width_percentile: 75, is_squeeze: false } }),
         ];
+    }
 
-        const report = await agent.analyze(notes, new Date('2026-04-10'), new Date('2026-04-17'));
-        // Discovery は調査員役のため、LLM が newHypotheses を返しても EdgeLedger には
-        // 挿入しない。report.newHypotheses は常に空配列、stub.created も 0 件。
+    it('compose ゲート OFF (既定) では newHypotheses を返しても EdgeLedger に書き込まない', async () => {
+        mockFetchWith(composeFetchOutput);
+        // beforeEach の agent は composeEnabled 未指定 = env 未設定で OFF
+        const report = await agent.analyze(singleGroupNotes(), new Date('2026-04-10'), new Date('2026-04-17'));
         expect(report.newHypotheses).toEqual([]);
         expect(stub.created).toHaveLength(0);
         expect(report.weeklyNote).toBe('今週の主要発見');
         expect(report.tokenUsage).toBe(800);
+    });
+
+    it('compose ゲート ON + 単一 (symbol, timeframe) では symbol/timeframe をノート実値にクランプして登録', async () => {
+        mockFetchWith(composeFetchOutput);
+        const composer = new DiscoveryAgent(
+            { minSeparationScore: 0.1, composeEnabled: true },
+            stub.ledger,
+        );
+        const report = await composer.analyze(singleGroupNotes(), new Date('2026-04-10'), new Date('2026-04-17'));
+        expect(report.newHypotheses.length).toBeGreaterThan(0);
+        expect(stub.created).toHaveLength(1);
+        // symbol/timeframe は LLM 出力ではなく分析ノートの実値 (XAUUSD / 15m) でクランプ
+        expect(stub.created[0].symbols).toEqual(['XAUUSD']);
+        expect(stub.created[0].timeframes).toEqual(['15m']);
+        expect(stub.created[0].source).toBe('discovery');
+    });
+
+    it('compose ゲート ON でも timeframe が混在する場合はクランプ一意性を保てず登録スキップ', async () => {
+        mockFetchWith(composeFetchOutput);
+        const composer = new DiscoveryAgent(
+            { minSeparationScore: 0.1, composeEnabled: true },
+            stub.ledger,
+        );
+        // 同一 symbol だが timeframe が 15m / 1h 混在 → per-group 不能でスキップ
+        const mixed: AITradeNote[] = [
+            makeNote('win', { volatility_regime: { bb_width_percentile: 10, is_squeeze: true } }, { timeframe: '15m' }),
+            makeNote('win', { volatility_regime: { bb_width_percentile: 12, is_squeeze: true } }, { timeframe: '15m' }),
+            makeNote('win', { volatility_regime: { bb_width_percentile: 15, is_squeeze: true } }, { timeframe: '1h' }),
+            makeNote('loss', { volatility_regime: { bb_width_percentile: 70, is_squeeze: false } }, { timeframe: '1h' }),
+            makeNote('loss', { volatility_regime: { bb_width_percentile: 80, is_squeeze: false } }, { timeframe: '15m' }),
+            makeNote('loss', { volatility_regime: { bb_width_percentile: 75, is_squeeze: false } }, { timeframe: '1h' }),
+        ];
+        const report = await composer.analyze(mixed, new Date('2026-04-10'), new Date('2026-04-17'));
+        expect(report.newHypotheses).toEqual([]);
+        expect(stub.created).toHaveLength(0);
     });
 
     it('解析後に hintsForHG を AgentMemory にキャッシュする (Critical-7)', async () => {
