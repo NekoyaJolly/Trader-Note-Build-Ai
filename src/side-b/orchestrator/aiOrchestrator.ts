@@ -57,12 +57,6 @@ import { fetchIndicatorBundleForMTF } from '../agents/specialists/analysisEngine
 import type { IndicatorAnalysis } from '../agents/specialists/types';
 import { deriveHigherTimeframe } from '../evolution/seedDescriptor';
 import { isSupportedTimeframe } from '../constants/timeframes';
-import type {
-  StrategyBacktesterAgent} from '../agents/StrategyBacktesterAgent';
-import {
-  strategyBacktesterAgent,
-  type StrategyBacktesterRunResult,
-} from '../agents/StrategyBacktesterAgent';
 import {
   type BullBearDebateAgent,
   bullBearDebateAgent,
@@ -89,10 +83,12 @@ const PLAN_CALLER_REASON = 'plan-multi-stage';
 // ===========================================
 
 /**
- * DB 永続化されたプラン＋直近の戦略 BT 結果（メモリ上のみ。Phase 6.7b）
+ * DB 永続化されたプラン＋直近の Bull vs Bear 討論結果（メモリ上のみ）
+ *
+ * Step A-3: 旧 `strategyBacktest` フィールドは廃止。StrategyBacktester は Plan フェーズ
+ * から切り出され、後続 Step D-3 で Action フロー末尾 (= 戦略の削り落とし) に再配置予定。
  */
 export type AITradePlanWithOptionalBacktest = AITradePlanWithTypes & {
-  strategyBacktest?: StrategyBacktesterRunResult;
   /** Phase 7: Bull vs Bear 討論結果（メモリ上のみ） */
   bullBearDebate?: BullBearDebateResult;
 };
@@ -151,7 +147,6 @@ export class AIOrchestrator {
   private planAI: PlanAIService;
   private researchOutputRepo: ResearchOutputRepository;
   private planRepo: PlanRepository;
-  private strategyBacktester: StrategyBacktesterAgent;
   private bullBearDebate: BullBearDebateAgent;
   /** P3: Plan 多段 step 単位の trace 投入先。デフォルトは NoopTraceSink (= 配線済だが no-op)。 */
   private traceSink: TraceSink;
@@ -161,7 +156,6 @@ export class AIOrchestrator {
     planAI?: PlanAIService,
     researchOutputRepo?: ResearchOutputRepository,
     planRepo?: PlanRepository,
-    strategyBacktester?: StrategyBacktesterAgent,
     bullBearDebate?: BullBearDebateAgent,
     traceSink?: TraceSink,
   ) {
@@ -169,7 +163,6 @@ export class AIOrchestrator {
     this.planAI = planAI || planAIService;
     this.researchOutputRepo = researchOutputRepo || researchOutputRepository;
     this.planRepo = planRepo || planRepository;
-    this.strategyBacktester = strategyBacktester || strategyBacktesterAgent;
     this.bullBearDebate = bullBearDebate || bullBearDebateAgent;
     // P3: traceSink は test / 観測機構から差し替え可能。未指定時は NoopTraceSink で
     // 機能等価 (= 記録は何も残らず本処理は同じ結果)。tracePlanStep は呼出毎に UUID
@@ -556,31 +549,10 @@ export class AIOrchestrator {
         id: `${symbol}-${dateStr}-${index + 1}`,
       }));
 
-      // 4e. シナリオを StrategyDSL に落とし即時 BT（Phase 6.7b、Devil's Advocate より前）
-      let strategyBacktest: StrategyBacktesterRunResult | undefined;
-      if (scenariosWithId.length > 0) {
-        const tBt = Date.now();
-        try {
-          strategyBacktest = await tracePlanStep(
-            traceCtx,
-            'strategy_backtest',
-            { symbol, scenarioCount: scenariosWithId.length },
-            () =>
-              this.strategyBacktester.run(scenariosWithId, {
-                symbol,
-                timeframe: planTimeframe,
-              }),
-          );
-          console.log(
-            `[Orchestrator] 戦略BT 完了: ${String(Date.now() - tBt)}ms, overallPassed=${String(
-              strategyBacktest.overallPassed,
-            )}, scenarios=${String(scenariosWithId.length)}`,
-          );
-        } catch (btErr) {
-          console.warn('[Orchestrator] 戦略BT 全体失敗（続行）:', btErr);
-        }
-      }
-
+      // Step A-3: Plan フェーズから StrategyBacktester (= DSL+BT) を切出。
+      // Plan は「シナリオ作りに専念」する設計に整理する。strategyBacktesterAgent class
+      // は残置 (src/side-b/agents/StrategyBacktesterAgent.ts)、後続 Step D-3 で Action
+      // フロー末尾の「削り落とし」役として再配置予定。
       const aggregatedWarnings: string[] = [...(planResult.output.warnings ?? [])];
 
       // 5. DB保存（Plan AIが解釈を含む新設計）
@@ -611,7 +583,7 @@ export class AIOrchestrator {
 
       return {
         success: true,
-        data: { ...saved, strategyBacktest, bullBearDebate: debateResult },
+        data: { ...saved, bullBearDebate: debateResult },
         cached: false,
         tokenUsage:
           researchTokens +

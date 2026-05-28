@@ -645,6 +645,12 @@ export interface AITradePlanPayload {
   aiModel: string | null;
   tokenUsage: number | null;
   createdAt: string;
+  /**
+   * Step A-3: バックエンド側で Plan フェーズから StrategyBacktester を切出済。
+   * 本フィールドは新規プランからは付与されない (= 常に undefined)。
+   * 既存プラン (旧フォーマット) を表示する経路のために型は optional として残置。
+   * 後続 Step D-3 で Action フローに再配置後、別 PR で扱いを再決定する。
+   */
   strategyBacktest?: StrategyBacktestRunPayload;
 }
 
