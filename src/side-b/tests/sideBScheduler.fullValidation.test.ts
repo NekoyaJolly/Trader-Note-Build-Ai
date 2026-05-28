@@ -244,7 +244,7 @@ describe('SideBScheduler.runFullValidationNow', () => {
         });
     }, 30000);
 
-    it('対象 0 件なら StrategistAgent は呼ばれない', async () => {
+    it('対象 0 件なら validateHypothesis は呼ばれない', async () => {
         mockEdgeLedger.findByStatus.mockResolvedValue([]);
         const scheduler = new SideBScheduler({ fullValidationMaxPerRun: 5 });
         const result = await scheduler.runFullValidationNow();

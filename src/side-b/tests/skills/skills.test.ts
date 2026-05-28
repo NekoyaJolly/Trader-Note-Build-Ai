@@ -14,6 +14,7 @@ import { createGetHypothesisSkill } from '../../skills/ledger/getHypothesis';
 import { createRegisterHypothesisSkill } from '../../skills/ledger/registerHypothesis';
 import { createRunScreeningSkill } from '../../skills/validation/runScreening';
 import { createRunFullValidationSkill } from '../../skills/validation/runFullValidation';
+import type { validateHypothesis } from '../../services/hypothesisValidationService';
 import { createReadRecentNotesSkill } from '../../skills/notes/readRecentNotes';
 import { createRecordLessonSkill } from '../../skills/notes/recordLesson';
 import { createComputeLensFeaturesSkill } from '../../skills/lens/computeLensFeatures';
@@ -173,14 +174,15 @@ describe('run_screening', () => {
 
 describe('run_full_validation', () => {
   it('validateHypothesis に hypothesisId と period を渡す', async () => {
-    const validateFn = jest.fn().mockResolvedValue({
+    const validateFn = jest.fn() as jest.MockedFunction<typeof validateHypothesis>;
+    validateFn.mockResolvedValue({
       verdict: 'confirmed',
       hypothesisId: 'h1',
       baseCriteriaReasons: [],
       decidedAt: new Date(),
     });
-     
-    const skill = createRunFullValidationSkill(validateFn as any);
+
+    const skill = createRunFullValidationSkill(validateFn);
 
     await skill.execute({ hypothesisId: 'h1' }, ctx);
 
