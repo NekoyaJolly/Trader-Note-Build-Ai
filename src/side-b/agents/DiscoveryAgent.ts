@@ -559,20 +559,18 @@ export class DiscoveryAgent {
         if (symbols.length !== 1) return '';
         const symbol = symbols[0];
         try {
-            const { hypotheses } = await this.ledger.find({
+            // 評価済 status を find の filter に渡して DB 側で絞ってから limit を効かせる
+            // (limit を status フィルタ前にかけると、新しい unverified ばかりの時に評価済みが
+            // 落ちて feedback が空/不完全になるため)。
+            const { hypotheses: evaluated } = await this.ledger.find({
                 sources: ['discovery'],
                 symbols: [symbol],
+                statuses: ['confirmed', 'rejected', 'screening_passed'],
                 sortBy: 'newest',
-                limit: 30,
+                limit: 10,
             });
-            const evaluated = hypotheses.filter(
-                (h) =>
-                    h.status === 'confirmed' ||
-                    h.status === 'rejected' ||
-                    h.status === 'screening_passed',
-            );
             if (evaluated.length === 0) return '';
-            const lines = evaluated.slice(0, 10).map((h) => {
+            const lines = evaluated.map((h) => {
                 const label =
                     h.status === 'confirmed'
                         ? '✅ 採用 (confirmed)'
