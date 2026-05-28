@@ -216,6 +216,8 @@ export class TradeMonitoringJob
                   trade.direction as TradeDirection,
                   symbol,
                   verificationResult.exit.exitTime,
+                  trade.timeframe,
+                  trade.higherTimeframe,
                 );
                 results.exits++;
               }
@@ -246,6 +248,8 @@ export class TradeMonitoringJob
                 trade.direction as TradeDirection,
                 symbol,
                 verificationResult.exit.exitTime,
+                trade.timeframe,
+                trade.higherTimeframe,
               );
               results.exits++;
             }
@@ -337,6 +341,9 @@ export class TradeMonitoringJob
     direction: TradeDirection,
     symbol: string,
     exitTime?: Date,
+    // MTF 文脈: VirtualTrade から伝播し reflection ハンドオフ (TradeResultSummary) に乗せる。
+    timeframe?: string | null,
+    higherTimeframe?: string | null,
   ): Promise<void> {
     const pnl = calculatePnL(direction, entryPrice, exitPrice);
 
@@ -356,6 +363,8 @@ export class TradeMonitoringJob
       pdcaLoop.notifyTradeCompleted({
         id: tradeId,
         symbol,
+        timeframe: timeframe ?? undefined,
+        higherTimeframe: higherTimeframe ?? undefined,
         direction,
         entryPrice,
         exitPrice,

@@ -73,6 +73,15 @@
 - 既存の型を拡張する場合はオプショナルフィールドとして追加 (必須フィールド追加禁止)
 - 型には JSDoc コメントを必ず付ける
 
+### MTF 文脈 (timeframe) は必須
+
+> **由来**: 2026-05-29 に「timeframe が plan→trade→note 経路で追跡されていない」基盤欠落が判明したことを受けた原則。
+
+- エージェント出力 / DB モデル / エージェント間ハンドオフ payload には、**symbol と同格で MTF 文脈 (執行足 = current timeframe + 見た上位足 = higher timeframe) を必ず含める**。
+- **timeframe 無し / 上位足を脱落させた出力は誤り**。テクニカルもレンズも「どの足を見たか」で結論が変わるため、TF を欠いた情報の受け渡しはオーケストレーションとして成立しない。
+- timeframe を「黙って既定値にクランプする」fallback (例: `research.timeframe || '15m'`、`normalizeTimeframe` の DEFAULT 倒し) は禁止。未確定なら明示的に検証・エラー化する。
+- 既知の TF-aware 層 (OHLCV / `LensFeatureSnapshot.primaryTimeframe` / `StrategyDSL.timeframe` / `EdgeHypothesis.timeframes[]` / screening / BT) を維持し、新しい記録・ハンドオフでも同じ粒度で TF を運ぶ。
+
 ---
 
 ## テスト
