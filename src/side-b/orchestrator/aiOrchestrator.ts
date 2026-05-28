@@ -368,7 +368,17 @@ export class AIOrchestrator {
       }
 
       // 4a. 並列レンズ計算（Phase 3）— Strategy Thinker 呼び出し前に実行
-      const planTimeframe = research.timeframe || '15m';
+      // MTF 文脈は必須 (feedback_timeframe_mandatory): TF 無しの research 出力は誤りなので、
+      // 黙って '15m' に倒さず明示的にエラー化する (generatePlan の try/catch が {success:false} に degrade)。
+      const planTimeframe = research.timeframe;
+      if (!planTimeframe) {
+        throw new Error(
+          `[Orchestrator] research.timeframe が未設定のため plan を生成できません (symbol=${symbol})。` +
+            `MTF 文脈 (執行足 + 上位足) は plan→trade→note を通じて必須。`,
+        );
+      }
+      // 永続化用に上位足を常時算出 (IndicatorSpecialist 分岐の有無に依らず plan に残す)。
+      const planHigherTimeframe = deriveHigherTimeframe(planTimeframe);
       registerDefaultLenses();
       let lensSnapshot: LensFeatureSnapshot | undefined;
       try {
@@ -593,6 +603,8 @@ export class AIOrchestrator {
             researchOutputId: research.id,
             targetDate: date,
             symbol,
+            timeframe: planTimeframe,
+            higherTimeframe: planHigherTimeframe,
             marketAnalysis: planResult.output.marketAnalysis,
             scenarios: adjustedScenarios,
             overallConfidence: planResult.output.overallConfidence,

@@ -23,6 +23,10 @@ export interface VirtualTradeRecord {
   planId: string;
   scenarioId: string;
   symbol: string;
+  /** 執行足（current timeframe）。plan から伝播。既存行は null。 */
+  timeframe: string | null;
+  /** 分析した上位足（higher timeframe）。plan から伝播。既存行は null。 */
+  higherTimeframe: string | null;
   direction: string;
   status: VirtualTradeStatus;
   plannedEntry: number;
@@ -71,6 +75,8 @@ export async function createVirtualTrade(
       planId: input.planId,
       scenarioId: input.scenarioId,
       symbol: input.symbol,
+      timeframe: input.timeframe,
+      higherTimeframe: input.higherTimeframe,
       direction: input.direction,
       status: "pending",
       plannedEntry: new Decimal(input.plannedEntry),
@@ -329,6 +335,8 @@ function toVirtualTradeRecord(trade: {
   planId: string;
   scenarioId: string;
   symbol: string;
+  timeframe: string | null;
+  higherTimeframe: string | null;
   direction: string;
   status: VirtualTradeStatus;
   plannedEntry: Decimal;
@@ -359,6 +367,8 @@ function toVirtualTradeRecord(trade: {
     planId: trade.planId,
     scenarioId: trade.scenarioId,
     symbol: trade.symbol,
+    timeframe: trade.timeframe,
+    higherTimeframe: trade.higherTimeframe,
     direction: trade.direction,
     status: trade.status,
     plannedEntry,

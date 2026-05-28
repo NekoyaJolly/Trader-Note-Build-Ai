@@ -178,11 +178,23 @@ export async function createTradeFromPlan(
       return { success: false, error: `オープンポジション上限（${portfolio.settings.maxOpenPositions}）に達しています` };
     }
     
+    // MTF 文脈必須 (feedback_timeframe_mandatory): plan に timeframe/higherTimeframe が
+    // 無い (= migration 前の旧 plan 等) 場合は TF 不明のトレードを開かない。新規 plan は
+    // orchestrator が必ず両方を埋めるため、本ガードに掛かるのは legacy plan のみ。
+    if (!plan.timeframe || !plan.higherTimeframe) {
+      return {
+        success: false,
+        error: `plan に MTF 文脈 (timeframe/higherTimeframe) がありません (planId=${planId})。TF 無しのトレードは作成しません。`,
+      };
+    }
+
     // 仮想トレードを作成
     const input: CreateVirtualTradeInput = {
       planId,
       scenarioId: scenario.id,
       symbol: plan.symbol,
+      timeframe: plan.timeframe,
+      higherTimeframe: plan.higherTimeframe,
       direction: scenario.direction,
       plannedEntry: entryPrice,
       stopLoss: slPrice,

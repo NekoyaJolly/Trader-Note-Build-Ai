@@ -38,6 +38,10 @@ export interface CreatePlanInput {
   researchOutputId?: string;
   targetDate: Date;
   symbol: string;
+  /** 執行足（current timeframe）。MTF 文脈の一級フィールド。TF 無しの plan 生成は許容しない。 */
+  timeframe: string;
+  /** 分析した上位足（higher timeframe）。deriveHigherTimeframe(timeframe) で算出。 */
+  higherTimeframe: string;
   marketAnalysis: PlanMarketAnalysis;
   scenarios: AITradeScenario[];
   overallConfidence?: number;
@@ -142,6 +146,8 @@ export class PlanRepository {
         researchOutputId,
         targetDate: input.targetDate,
         symbol: input.symbol,
+        timeframe: input.timeframe,
+        higherTimeframe: input.higherTimeframe,
         marketAnalysis: toInputJsonValue(input.marketAnalysis),
         scenarios: toInputJsonValue(input.scenarios),
         overallConfidence: input.overallConfidence,
@@ -176,6 +182,8 @@ export class PlanRepository {
       update: {
         researchId,
         researchOutputId,
+        timeframe: input.timeframe,
+        higherTimeframe: input.higherTimeframe,
         marketAnalysis: toInputJsonValue(input.marketAnalysis),
         scenarios: toInputJsonValue(input.scenarios),
         overallConfidence: input.overallConfidence,
@@ -188,6 +196,8 @@ export class PlanRepository {
         researchOutputId,
         targetDate: input.targetDate,
         symbol: input.symbol,
+        timeframe: input.timeframe,
+        higherTimeframe: input.higherTimeframe,
         marketAnalysis: toInputJsonValue(input.marketAnalysis),
         scenarios: toInputJsonValue(input.scenarios),
         overallConfidence: input.overallConfidence,
