@@ -42,6 +42,8 @@ import { serializeLensSnapshot, type LensFeatureSnapshot } from '../lenses';
 import { edgeLedger } from '../ledger';
 import { materializationService } from '../bridge';
 import { modelFor } from '../../config';
+import type { Prisma } from '@prisma/client';
+import { ReflectionOutputSchema } from '../../schemas/api/sideB';
 
 // ===== 設定 =====
 
@@ -75,6 +77,8 @@ interface VirtualTradeInput {
   enteredAt: Date | null;
   exitedAt: Date | null;
   pnlPips: number | null;
+  /** Step C-1: reflectionAI の分析結果 (VirtualTrade.reflection、未生成は null)。統合ノートに反映する。 */
+  reflection?: Prisma.JsonValue | null;
 }
 
 /** プラン（サービス入力用） */
@@ -130,7 +134,10 @@ export async function generateNoteFromTrade(
   const exitAnalysis = analyzeExit(trade);
   const planEvaluation = evaluatePlan(trade, plan);
   const marketReview = reviewMarket(trade, plan);
-  const learnings = extractLearnings(result, entryAnalysis, exitAnalysis, planEvaluation);
+  // Step C-1: 決定論的 learnings に reflectionAI の分析結果を統合する。
+  // reflection が null なら従来通り (= aiNoteService 単独分析)。
+  const baseLearnings = extractLearnings(result, entryAnalysis, exitAnalysis, planEvaluation);
+  const learnings = mergeReflectionIntoLearnings(baseLearnings, trade.reflection);
 
   // 類似パターンを検索
   const similarPatterns = await findSimilarPatterns(trade, result);
@@ -611,6 +618,69 @@ function extractLearnings(
     keyInsight,
     actionItems,
   };
+}
+
+/**
+ * Step C-1: reflectionAI の分析結果を決定論的 learnings に統合する。
+ *
+ * - reflection が ReflectionOutput (= reflection 成功) としてパースできる場合:
+ *   lessons / strategyAdjustment を actionItems に追記し、keyInsight に
+ *   outcomeAnalysis + overallScore を補足する。
+ * - reflection が簡易フォールバック構造 ({ fallback: true, summary }) の場合:
+ *   summary を keyInsight に補足する。
+ * - reflection が null / 不正な場合: 従来の learnings をそのまま返す。
+ *
+ * 決定論的処理 (= LLM 非使用) を維持。reflection は別途 reflectionAIService が生成済。
+ *
+ * `export` はユニットテスト用 (= generateNoteFromTrade 経由だと mock が重いため純粋関数を直接検証)。
+ */
+export function mergeReflectionIntoLearnings(
+  learnings: Learnings,
+  reflection: Prisma.JsonValue | null | undefined,
+): Learnings {
+  if (!reflection) return learnings;
+
+  const parsed = ReflectionOutputSchema.safeParse(reflection);
+  if (parsed.success) {
+    const r = parsed.data;
+    const reflectionActions = [...r.lessons];
+    if (r.strategyAdjustment) {
+      reflectionActions.push(r.strategyAdjustment);
+    }
+    return {
+      whatWorked: learnings.whatWorked,
+      whatDidntWork: learnings.whatDidntWork,
+      keyInsight: `${learnings.keyInsight}【Reflection (スコア ${String(r.overallScore)})】${r.outcomeAnalysis}`,
+      actionItems: [...learnings.actionItems, ...reflectionActions],
+    };
+  }
+
+  const fallbackSummary = extractReflectionFallbackSummary(reflection);
+  if (fallbackSummary) {
+    return {
+      ...learnings,
+      keyInsight: `${learnings.keyInsight}【Reflection (簡易)】${fallbackSummary}`,
+    };
+  }
+
+  return learnings;
+}
+
+/**
+ * reflection が簡易フォールバック構造 ({ fallback: true, summary: string }) の場合に
+ * summary を取り出す。それ以外は null。Prisma.JsonValue を型安全に narrow する。
+ */
+function extractReflectionFallbackSummary(reflection: Prisma.JsonValue): string | null {
+  if (
+    typeof reflection === 'object' &&
+    reflection !== null &&
+    !Array.isArray(reflection) &&
+    'summary' in reflection &&
+    typeof reflection.summary === 'string'
+  ) {
+    return reflection.summary;
+  }
+  return null;
 }
 
 /**

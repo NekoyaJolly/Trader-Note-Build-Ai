@@ -37,6 +37,8 @@ export interface VirtualTradeRecord {
   exitReason: string | null;
   pnlPips: number | null;
   pnlAmount: number | null;
+  /** Step C-1: reflectionAI の振り返り分析結果 (ReflectionOutput を JSON 化、未生成は null)。 */
+  reflection: Prisma.JsonValue | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -200,6 +202,23 @@ export async function closeTrade(
 }
 
 /**
+ * Step C-1: reflectionAI の振り返り分析結果を保存する。
+ *
+ * pdcaLoop の REFLECTING で reflection (成功時の ReflectionOutput / 失敗時の簡易構造) を
+ * 完了後に呼ばれる。aiNoteService はこの値が non-null になったトレードについて
+ * 「シナリオ + 実行内容 + reflection 分析」の統合ノートを生成する。
+ */
+export async function updateTradeReflection(
+  id: string,
+  reflection: Prisma.InputJsonValue,
+): Promise<void> {
+  await prisma.virtualTrade.update({
+    where: { id },
+    data: { reflection },
+  });
+}
+
+/**
  * 仮想トレードを期限切れに更新
  */
 export async function expireTrade(id: string): Promise<VirtualTradeRecord> {
@@ -322,6 +341,7 @@ function toVirtualTradeRecord(trade: {
   exitReason: string | null;
   pnlPips: Decimal | null;
   pnlAmount: Decimal | null;
+  reflection: Prisma.JsonValue | null;
   createdAt: Date;
   updatedAt: Date;
 }): VirtualTradeRecord {
@@ -352,6 +372,7 @@ function toVirtualTradeRecord(trade: {
     exitReason: trade.exitReason,
     pnlPips: trade.pnlPips?.toNumber() ?? null,
     pnlAmount: trade.pnlAmount?.toNumber() ?? null,
+    reflection: trade.reflection ?? null,
     createdAt: trade.createdAt,
     updatedAt: trade.updatedAt,
   };

@@ -1387,6 +1387,12 @@ model VirtualTrade {
   /// 損益（金額、仮想）
   pnlAmount Decimal? @db.Decimal(18, 8)
 
+  /// Step C-1: reflectionAI の振り返り分析結果 (ReflectionOutput を JSON 化)。
+  /// pdcaLoop の REFLECTING で生成され DB に永続化される。aiNoteService はこれを
+  /// 読んで「シナリオ + 実行内容 + reflection 分析」の統合ノートを生成する。
+  /// 決済直後はまだ null (= reflection は別 tick で走るため)。null の間はノート生成を待つ。
+  reflection Json?
+
   /// 作成日時
   createdAt DateTime @default(now()) @db.Timestamptz(6)
   /// 更新日時

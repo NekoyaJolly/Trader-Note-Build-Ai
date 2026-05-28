@@ -35,6 +35,8 @@ import {
 import type { MarketAnalysis } from '../models/marketAnalysis';
 import { isFXMarketOpen } from '../utils/marketHours';
 import { reflectionAI } from '../services/reflectionAIService';
+import { updateTradeReflection } from '../repositories/virtualTradeRepository';
+import type { JsonValue } from '../../utils/jsonValue';
 // P3b: PDCA state machine trace 配線
 import { randomUUID } from 'crypto';
 import {
@@ -489,6 +491,10 @@ export class PDCALoop {
                     await this.memory.addLesson(lesson, lastResult.symbol, lastResult.id);
                 }
 
+                // Step C-1: reflection 分析を VirtualTrade に永続化 (= aiNoteService が統合ノート化に使う)。
+                // lastResult.id は VirtualTrade.id と一致 (notifyTradeCompleted 経由)。
+                await this.persistReflection(lastResult.id, reflection.output);
+
                 this.addThinkingLog('REFLECTING',
                     `Reflection AI 完了: スコア${reflection.output.overallScore} / ${reflection.output.lessons.length}件の学び`,
                     `${reflection.output.outcomeAnalysis} | エントリー:${reflection.output.entryEvaluation.rating} | 決済:${reflection.output.exitEvaluation.rating}`);
@@ -501,6 +507,14 @@ export class PDCALoop {
                     ? `${lastResult.symbol} ${lastResult.direction} で ${lastResult.pnlPips.toFixed(1)}pips の損失。${lastResult.exitReason}による決済。`
                     : `${lastResult.symbol} ${lastResult.direction} で ${lastResult.pnlPips.toFixed(1)}pips の利益。戦略通りの展開。`;
                 lastResult.reflection = simpleReflection;
+
+                // Step C-1: reflection が失敗しても簡易構造を必ず DB に保存する。
+                // これにより aiNoteService は「reflection 完了済 (= 簡易でも)」を検知してノート生成に進める
+                // (= reflection が永遠に来ずノートが作られないのを防ぐ)。
+                await this.persistReflection(lastResult.id, {
+                    fallback: true,
+                    summary: simpleReflection,
+                });
             }
         }
 
@@ -515,6 +529,22 @@ export class PDCALoop {
             nextCheckMs: this.config.normalIntervalMs,
             details: { winRate, totalTrades: results.length },
         };
+    }
+
+    /**
+     * Step C-1: reflection 分析を VirtualTrade に永続化する。
+     *
+     * pdcaLoop は memory ベースの状態機械だが、aiNoteService が「シナリオ + 実行内容 +
+     * reflection 分析」の統合ノートを生成できるよう、reflection 結果だけは DB に書き戻す。
+     * DB 保存失敗はノート生成側で reflection=null として扱われる (= 次 tick で再生成待ち) ため、
+     * ここでは握りつぶさず警告ログのみ出して PDCA 本処理は続行する。
+     */
+    private async persistReflection(tradeId: string, reflection: JsonValue): Promise<void> {
+        try {
+            await updateTradeReflection(tradeId, reflection as Parameters<typeof updateTradeReflection>[1]);
+        } catch (err) {
+            console.warn(`[PDCALoop] reflection の DB 保存に失敗 (tradeId=${tradeId}):`, err);
+        }
     }
 
     /**

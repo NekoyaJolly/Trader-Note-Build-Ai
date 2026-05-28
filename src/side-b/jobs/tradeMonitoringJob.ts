@@ -385,6 +385,15 @@ export class TradeMonitoringJob
           continue;
         }
 
+        // Step C-1: reflectionAI の分析が DB に書き戻されるまでノート生成を待つ。
+        // reflection は pdcaLoop の REFLECTING (別 tick) で生成され VirtualTrade.reflection に
+        // 永続化される。null の間はスキップし、次 tick で再評価する (= reflection 込みノートを保証)。
+        // reflection 失敗時も簡易フォールバック構造が保存されるため、永久スキップにはならない。
+        if (trade.reflection === null || trade.reflection === undefined) {
+          this.deps.log(`[Note生成] Trade ${trade.id}: reflection 未生成のため次 tick まで待機`);
+          continue;
+        }
+
         const plan = await planRepository.findById(trade.planId);
         if (!plan) {
           this.deps.addError(`[Note生成] Trade ${trade.id}: プランが見つかりません`);
@@ -412,6 +421,8 @@ export class TradeMonitoringJob
               enteredAt: trade.enteredAt,
               exitedAt: trade.exitedAt,
               pnlPips: trade.pnlPips,
+              // Step C-1: reflection 分析を統合ノートに反映 (= 上のガードで non-null 保証済)
+              reflection: trade.reflection,
             },
             {
               id: plan.id,
