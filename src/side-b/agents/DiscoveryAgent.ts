@@ -21,6 +21,7 @@ import type { AITradeNote } from '../models/aiTradeNote';
 import { extractJson } from './llmJsonExtract';
 import type {
     EdgeHypothesis,
+    CreateEdgeHypothesisInput,
     EdgeCategory,
     MachineReadableCondition,
 } from '../models/edgeHypothesis';
@@ -240,6 +241,12 @@ export interface DiscoveryAgentConfig {
     minSeparationScore?: number;
     /** LLM に渡す上位 N 個の特徴量 */
     topFeatureCount?: number;
+    /**
+     * Step D-4a: 組成役として newHypotheses を EdgeLedger に登録するか。
+     * 既定は env `DISCOVERY_COMPOSE_ENABLED === 'true'`（未設定なら false）。
+     * 観測導線 / UI が整う D-4b まで本番は OFF。
+     */
+    composeEnabled?: boolean;
 }
 
 export class DiscoveryAgent {
@@ -249,6 +256,7 @@ export class DiscoveryAgent {
     private maxNotes: number;
     private minSeparationScore: number;
     private topFeatureCount: number;
+    private composeEnabled: boolean;
     private ledger: EdgeLedger;
 
     constructor(cfg?: DiscoveryAgentConfig, ledger?: EdgeLedger) {
@@ -267,6 +275,10 @@ export class DiscoveryAgent {
         this.maxNotes = cfg?.maxNotes ?? 1000;
         this.minSeparationScore = cfg?.minSeparationScore ?? 0.3;
         this.topFeatureCount = cfg?.topFeatureCount ?? 10;
+        this.composeEnabled =
+            cfg?.composeEnabled !== undefined
+                ? cfg.composeEnabled
+                : process.env.DISCOVERY_COMPOSE_ENABLED === 'true';
         this.ledger = ledger ?? defaultLedger;
     }
 
@@ -329,32 +341,79 @@ export class DiscoveryAgent {
             await recordAgentUsage('discovery', {}, llmSucceeded ? llmOutput : null);
         }
 
-        // STEP 5 Phase D (2026-05-16): Discovery が `llmOutput.newHypotheses` を
-        // EdgeLedger に直接挿入していたブロックを削除。
+        // Step D-4a (2026-05-29): Discovery を組成役に再活性。2026-05-16 に「調査員役」遵守の
+        // ため削除した newHypotheses→EdgeLedger 登録を復活させる (HG は dormant 維持)。
         //
-        // 設計違反だった経緯:
-        //   - `prompts/discovery.md` の役割定義: 「あなたは週次のレンズ有効性調査官」
-        //   - 同プロンプトの禁止事項: 「`newHypotheses` を出力しない。仮説生成は HG の責務」
-        //   - 設計書 §1.4: 「Discovery AI (週次): レジーム別に効いているレンズ/指標を
-        //     洗い出す **調査員**」 (= 仮説生成役ではない)
-        //   - にも関わらず本コードが `llmOutput.newHypotheses` を反復して
-        //     `ledger.create({source: 'discovery'})` で大量挿入していた
-        //   - 本番観察 (Phase D): EURUSD 仮説 95% 生成、AITradeNote が全件
-        //     XAU/USD なのに Discovery 仮説の symbols=['EURUSD'] という不整合
-        //   - PR #212 で削除した Evolution → EdgeLedger 自動登録ブロックと
-        //     同じパターンの設計違反 (役割侵食 + symbol/timeframe 担保なし)
+        // 過去の不整合 (XAUUSD データなのに symbols=['EURUSD'] 仮説を 95% 生成) を構造的に
+        // 防ぐため、**symbol/timeframe は LLM に選ばせず、分析対象ノートの実値から決定論的に
+        // クランプ**する。分析ノートが単一 (symbol, timeframe) でない場合は、どの仮説がどの
+        // グループ由来か決められないため組成をスキップする (per-group 呼び出しは DiscoveryJob
+        // 側の責務、D-4a 後続)。
         //
-        // 正しい役割分担:
-        //   - Discovery: `hintsForHG` を AgentMemory にキャッシュ (経路 5 → 経路 2)
-        //   - HypothesisGenerator (経路 2 PDCALoop 内): `hintsForHG` を読んで
-        //     現在の market context に応じて新仮説を生成 (= 経路 2 → EdgeHypothesis)
-        //
-        // 既存の Discovery 由来仮説 (本番 95 件程度) は touch しない。L 案
-        // (仮説ライフサイクル設計、PR #209 で記録) の archive 処理で別途整理。
-        //
-        // `llmOutput.newHypotheses` を返さない LLM 出力フォーマットへの統一は別 PR
-        // 候補 (現状は LLM 側で出力される可能性があるが、コードでは読まないだけ)。
+        // ゲート: `DISCOVERY_COMPOSE_ENABLED=true` のときのみ書き込む (既定 OFF)。観測導線 /
+        // UI が整う D-4b まで本番は OFF。
         const newHypotheses: EdgeHypothesis[] = [];
+        if (this.composeEnabled && llmOutput.newHypotheses.length > 0) {
+            const symbolsInNotes = Array.from(new Set(truncated.map((n) => n.symbol)));
+            const timeframesInNotes = Array.from(
+                new Set(truncated.map((n) => n.timeframe).filter((t): t is string => !!t)),
+            );
+            if (symbolsInNotes.length !== 1 || timeframesInNotes.length !== 1) {
+                console.warn(
+                    `[DiscoveryAgent] D-4a 組成スキップ: 分析ノートが単一 (symbol, timeframe) でない ` +
+                        `(symbols=${symbolsInNotes.length} timeframes=${timeframesInNotes.length})。` +
+                        `クランプの一意性を保てないため per-group 呼び出しが必要。`,
+                );
+            } else {
+                const clampSymbol = symbolsInNotes[0];
+                const clampTimeframe = timeframesInNotes[0];
+                const existing = await this.ledger.findByStatus('unverified');
+                const existingConfirmed = await this.ledger.findByStatus('confirmed');
+                const allExisting = [...existing, ...existingConfirmed];
+                let registered = 0;
+                let skippedDup = 0;
+                for (const h of llmOutput.newHypotheses) {
+                    if (this.isDuplicate(h.statement, allExisting)) {
+                        skippedDup++;
+                        continue;
+                    }
+                    const input: CreateEdgeHypothesisInput = {
+                        statement: h.statement,
+                        category: h.category,
+                        conditions: h.conditions,
+                        expectedDirection: h.expectedDirection,
+                        status: 'unverified',
+                        // symbol/timeframe は LLM 出力ではなく分析ノートの実値でクランプ
+                        symbols: [clampSymbol],
+                        timeframes: [clampTimeframe],
+                        observationCount: 0,
+                        winCount: 0,
+                        lossCount: 0,
+                        breakevenCount: 0,
+                        totalPnlPips: 0,
+                        avgRR: 0,
+                        source: 'discovery',
+                        lensRelevance: h.lensRelevance,
+                        parentIds: [],
+                        relatedNoteIds: [],
+                    };
+                    try {
+                        const created = await this.ledger.create(input);
+                        newHypotheses.push(created);
+                        registered++;
+                    } catch (err) {
+                        // HypothesisHardlimit 等で弾かれても定期実行は止めない (ログのみ)。
+                        console.warn(
+                            `[DiscoveryAgent] 仮説登録スキップ (source=discovery): ${safeStringify(err)}`,
+                        );
+                    }
+                }
+                console.info(
+                    `[DiscoveryAgent] D-4a 組成: symbol=${clampSymbol} timeframe=${clampTimeframe} ` +
+                        `candidates=${llmOutput.newHypotheses.length} registered=${registered} dup=${skippedDup}`,
+                );
+            }
+        }
 
         // 4. レポート整形
         const lensInsights = this.groupByLens(topSeparations, llmOutput.interpretations);
