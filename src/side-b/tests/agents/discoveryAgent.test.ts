@@ -7,7 +7,7 @@
 import { DiscoveryAgent, validateDiscoveryOutput } from '../../agents/DiscoveryAgent';
 import type { AITradeNote } from '../../models/aiTradeNote';
 import type { EdgeLedger } from '../../ledger/EdgeLedger';
-import type { EdgeHypothesis, CreateEdgeHypothesisInput } from '../../models/edgeHypothesis';
+import type { EdgeHypothesis, CreateEdgeHypothesisInput, EdgeStatus } from '../../models/edgeHypothesis';
 import { agentMemory } from '../../agent/agentMemory';
 
 global.fetch = jest.fn();
@@ -58,10 +58,22 @@ function mockFetchWith(output: unknown) {
     });
 }
 
-function makeLedgerStub(): { ledger: EdgeLedger; created: CreateEdgeHypothesisInput[] } {
+function makeLedgerStub(): {
+    ledger: EdgeLedger;
+    created: CreateEdgeHypothesisInput[];
+    findHypotheses: EdgeHypothesis[];
+} {
     const created: CreateEdgeHypothesisInput[] = [];
+    // Step D-4 feedback loop: find() が返す過去仮説をテストから差し込めるよう mutable 配列で保持。
+    const findHypotheses: EdgeHypothesis[] = [];
     const ledger = {
         findByStatus: async (): Promise<EdgeHypothesis[]> => [],
+        find: async () => ({
+            hypotheses: findHypotheses,
+            total: findHypotheses.length,
+            page: 1,
+            limit: 30,
+        }),
         create: async (input: CreateEdgeHypothesisInput): Promise<EdgeHypothesis> => {
             created.push(input);
             return {
@@ -91,7 +103,35 @@ function makeLedgerStub(): { ledger: EdgeLedger; created: CreateEdgeHypothesisIn
             };
         },
     } as unknown as EdgeLedger;
-    return { ledger, created };
+    return { ledger, created, findHypotheses };
+}
+
+/** Step D-4 feedback loop テスト用の最小 EdgeHypothesis ファクトリ。 */
+function makeEdgeHypothesis(status: EdgeStatus, statement: string): EdgeHypothesis {
+    return {
+        id: `eh-${Math.random()}`,
+        statement,
+        category: 'volatility',
+        conditions: [],
+        expectedDirection: 'either',
+        status,
+        statusUpdatedAt: new Date(),
+        symbols: ['XAUUSD'],
+        timeframes: ['15m'],
+        observationCount: 0,
+        winCount: 0,
+        lossCount: 0,
+        breakevenCount: 0,
+        totalPnlPips: 0,
+        avgRR: 0,
+        source: 'discovery',
+        firstObservedAt: new Date(),
+        lastObservedAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        parentIds: [],
+        relatedNoteIds: [],
+    };
 }
 
 describe('validateDiscoveryOutput', () => {
@@ -268,6 +308,46 @@ describe('DiscoveryAgent.analyze', () => {
         const report = await composer.analyze(mixed, new Date('2026-04-10'), new Date('2026-04-17'));
         expect(report.newHypotheses).toEqual([]);
         expect(stub.created).toHaveLength(0);
+    });
+
+    it('compose ゲート ON で過去 discovery 仮説の検証結果を prompt に注入する (feedback loop)', async () => {
+        mockFetchWith(composeFetchOutput);
+        // find() が返す過去の confirmed / rejected な discovery 仮説を設定
+        stub.findHypotheses.push(
+            makeEdgeHypothesis('confirmed', 'ゴトー日の押し目買いは勝率が高い'),
+            makeEdgeHypothesis('rejected', '高ボラ時の逆張りは負けやすい型'),
+        );
+        const composer = new DiscoveryAgent(
+            { minSeparationScore: 0.1, composeEnabled: true },
+            stub.ledger,
+        );
+        await composer.analyze(singleGroupNotes(), new Date('2026-04-10'), new Date('2026-04-17'));
+
+        // LLM に渡された user メッセージに feedback ブロックが含まれることを検証
+        const calls = (global.fetch as jest.Mock).mock.calls;
+        const lastCall = calls[calls.length - 1];
+        const body = JSON.parse(lastCall[1].body as string) as {
+            messages: Array<{ role: string; content: string }>;
+        };
+        const userMsg = body.messages.find((m) => m.role === 'user');
+        expect(userMsg).toBeDefined();
+        expect(userMsg?.content).toContain('過去に組成した仮説の検証結果');
+        expect(userMsg?.content).toContain('ゴトー日の押し目買い');
+        expect(userMsg?.content).toContain('✅ 採用');
+        expect(userMsg?.content).toContain('❌ 棄却');
+    });
+
+    it('compose ゲート OFF では feedback ブロックを注入しない', async () => {
+        mockFetchWith(composeFetchOutput);
+        stub.findHypotheses.push(makeEdgeHypothesis('confirmed', 'ゴトー日の押し目買いは勝率が高い'));
+        // 既定 agent は composeEnabled OFF
+        await agent.analyze(singleGroupNotes(), new Date('2026-04-10'), new Date('2026-04-17'));
+        const calls = (global.fetch as jest.Mock).mock.calls;
+        const body = JSON.parse(calls[calls.length - 1][1].body as string) as {
+            messages: Array<{ role: string; content: string }>;
+        };
+        const userMsg = body.messages.find((m) => m.role === 'user');
+        expect(userMsg?.content).not.toContain('過去に組成した仮説の検証結果');
     });
 
     it('解析後に hintsForHG を AgentMemory にキャッシュする (Critical-7)', async () => {

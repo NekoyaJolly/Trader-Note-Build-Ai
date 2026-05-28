@@ -314,16 +314,22 @@ export class DiscoveryAgent {
         let llmAttempted = false;
         let llmSucceeded = false;
 
+        // Step D-4 feedback loop: 組成有効時、同 symbol の過去 discovery 仮説の検証結果を
+        // prompt に注入し、採用 (confirmed) された方向は強化・棄却 (rejected) された型は回避する
+        // よう LLM を誘導する。組成 OFF 時は無駄なトークンを避けるため空。
+        const feedbackBlock = this.composeEnabled ? await this.buildFeedbackBlock(truncated) : '';
+
         if (topSeparations.length > 0 && this.apiKey) {
             llmAttempted = true;
             try {
                 const systemPrompt = await this.resolveSystemPrompt();
-                const userPrompt = this.buildUserPrompt(
-                    truncated.length,
-                    periodStart,
-                    periodEnd,
-                    topSeparations,
-                );
+                const userPrompt =
+                    this.buildUserPrompt(
+                        truncated.length,
+                        periodStart,
+                        periodEnd,
+                        topSeparations,
+                    ) + feedbackBlock;
                 const raw = await this.callAI(systemPrompt, userPrompt);
                 llmOutput = validateDiscoveryOutput(raw.content, availableLenses);
                 tokenUsage = raw.tokenUsage;
@@ -539,6 +545,54 @@ export class DiscoveryAgent {
             }
         }
         return false;
+    }
+
+    /**
+     * Step D-4 feedback loop: 同 symbol の過去 discovery 仮説の検証結果を prompt 注入用ブロックに整形する。
+     *
+     * EdgeLedger から source='discovery' の最近の仮説を取得し、確定 (confirmed) / 棄却 (rejected) /
+     * スクリーニング通過 (screening_passed) の結果を「採用すべき方向 / 避けるべき型」として LLM に渡す。
+     * 単一 symbol のノート群でのみ意味を持つ (混在時は空)。find 失敗時も空文字で継続する。
+     */
+    private async buildFeedbackBlock(notes: readonly AITradeNote[]): Promise<string> {
+        const symbols = Array.from(new Set(notes.map((n) => n.symbol)));
+        if (symbols.length !== 1) return '';
+        const symbol = symbols[0];
+        try {
+            // 評価済 status を find の filter に渡して DB 側で絞ってから limit を効かせる
+            // (limit を status フィルタ前にかけると、新しい unverified ばかりの時に評価済みが
+            // 落ちて feedback が空/不完全になるため)。
+            const { hypotheses: evaluated } = await this.ledger.find({
+                sources: ['discovery'],
+                symbols: [symbol],
+                statuses: ['confirmed', 'rejected', 'screening_passed'],
+                sortBy: 'newest',
+                limit: 10,
+            });
+            if (evaluated.length === 0) return '';
+            const lines = evaluated.map((h) => {
+                const label =
+                    h.status === 'confirmed'
+                        ? '✅ 採用 (confirmed)'
+                        : h.status === 'rejected'
+                          ? '❌ 棄却 (rejected)'
+                          : '🔎 スクリーニング通過';
+                const stmt =
+                    h.statement.length > 80 ? `${h.statement.slice(0, 80)}…` : h.statement;
+                return `- ${label}: ${stmt}`;
+            });
+            return (
+                `\n\n## 過去に組成した仮説の検証結果 (symbol=${symbol})\n` +
+                `以下はあなたが過去に組成した discovery 仮説の検証結果です。` +
+                `採用 (confirmed) された方向性は強化し、棄却 (rejected) された型は避けて新しい仮説を組成してください。\n` +
+                lines.join('\n')
+            );
+        } catch (err) {
+            console.warn(
+                `[DiscoveryAgent] feedback block 構築失敗 (継続): ${safeStringify(err)}`,
+            );
+            return '';
+        }
     }
 
     /**
