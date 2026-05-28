@@ -15,7 +15,7 @@
  */
 
 import { edgeLedger } from '../ledger';
-import { strategistAgent } from '../agents/StrategistAgent';
+import { validateHypothesis } from '../services/hypothesisValidationService';
 import { pdcaLoop } from '../agent';
 
 import type { SideBJobDeps, SideBJobName, SideBJobRunner } from './types';
@@ -96,7 +96,7 @@ export class FullValidationJob
         const hyp = limited[i];
         summary.processed++;
         try {
-          const verdict = await strategistAgent.validate(hyp.id);
+          const verdict = await validateHypothesis(hyp.id);
           if (verdict.verdict === 'confirmed') {
             summary.confirmed++;
             this.deps.log(`[FullValidation] confirmed: ${hyp.id}`);

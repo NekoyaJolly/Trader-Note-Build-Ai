@@ -30,7 +30,7 @@ export const AI_MAX_TOKENS = {
   /**
    * 重い生成: 10 件 JSON 戦略 / 仮説 N 件 / Strategy 構造化等。
    * 65536 → 100000 (10 万デフォルト)。reasoning model の思考分も含む。
-   * 適用先: MutationAgent / StrategistAgent / HypothesisGeneratorAgent /
+   * 適用先: MutationAgent / HypothesisGeneratorAgent /
    *   DiscoveryAgent / planAIService / BullBearDebateAgent
    */
   HEAVY: 100000,

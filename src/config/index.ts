@@ -82,7 +82,6 @@ console.log('[Config] サーバーポート:', process.env.BACKEND_PORT || proce
  * 未設定の場合はグローバル既定の `config.ai.model` にフォールバックする。
  */
 export type AIAgentKey =
-  | 'strategist'
   | 'discovery'
   | 'hypothesis_generator'
   | 'plan'
@@ -163,12 +162,12 @@ export const config = {
     // 非 reasoning モデル (gpt-4o, anthropic/* 等) では無視される。
     reasoningEffort: resolveReasoningEffort(),
     // エージェント別モデル既定値(Phase 6.5 確定)。
-    // - 最重要判断(Strategist/HypothesisGen/Discovery) → Opus 4.7
+    // - 最重要判断(HypothesisGen/Discovery) → Opus 4.7
     // - 中位生成系(Mutation/Crossover/StrategyThinker/Reflection) → Sonnet 4.6 or Haiku 4.5
     // - 下位専門家 + 軽量タスク → Gemini 3.1 Flash Lite Preview
     // 環境変数 `AI_MODEL_<KEY>` で上書き可。
+    // Step D-1: StrategistAgent 廃止 (= BT メトリクス機械判定に置換) により 'strategist' を削除。
     models: {
-      strategist: process.env.AI_MODEL_STRATEGIST || 'anthropic/claude-opus-4.7',
       discovery: process.env.AI_MODEL_DISCOVERY || 'anthropic/claude-opus-4.7',
       hypothesis_generator: process.env.AI_MODEL_HYPOTHESIS_GENERATOR || 'anthropic/claude-opus-4.7',
       plan: process.env.AI_MODEL_PLAN || 'anthropic/claude-sonnet-4.6',

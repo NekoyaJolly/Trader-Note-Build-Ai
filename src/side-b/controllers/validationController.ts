@@ -27,7 +27,7 @@ import {
     type EdgeLedger,
     type EdgeFindSortKey,
 } from '../ledger/EdgeLedger';
-import { strategistAgent as defaultStrategistAgent, type StrategistAgent } from '../agents/StrategistAgent';
+import { validateHypothesis } from '../services/hypothesisValidationService';
 import {
     EDGE_STATUSES,
     EDGE_CATEGORIES,
@@ -127,7 +127,8 @@ function toSortKey(raw: QueryValue): EdgeFindSortKey {
 export class ValidationController {
     constructor(
         private readonly edgeLedger: EdgeLedger = defaultEdgeLedger,
-        private readonly strategist: StrategistAgent = defaultStrategistAgent,
+        // Step D-1: StrategistAgent 廃止に伴い決定論検証関数を注入 (テスト差し替え可)。
+        private readonly validateFn: typeof validateHypothesis = validateHypothesis,
     ) {}
 
     /**
@@ -198,15 +199,15 @@ export class ValidationController {
         }
 
         try {
-            const verdict = await this.strategist.validate(id);
+            const verdict = await this.validateFn(id);
+            // Step D-1: StrategistAgent 廃止により interpretation / actionableInsights は撤廃
+            // (= confirmed/rejected は BT メトリクスで機械判定)。
             res.json({
                 success: true,
                 verdict: verdict.verdict,
                 hypothesisId: verdict.hypothesisId,
                 baseCriteriaReasons: verdict.baseCriteriaReasons,
                 report: verdict.report,
-                interpretation: verdict.interpretation,
-                actionableInsights: verdict.actionableInsights,
                 decidedAt: verdict.decidedAt,
             });
         } catch (err) {
@@ -456,7 +457,7 @@ export class ValidationController {
         try {
             for (const id of ids) {
                 try {
-                    const verdict = await this.strategist.validate(id);
+                    const verdict = await this.validateFn(id);
                     results.push({
                         hypothesisId: id,
                         ok: true,

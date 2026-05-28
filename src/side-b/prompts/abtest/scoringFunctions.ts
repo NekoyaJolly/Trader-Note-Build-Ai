@@ -8,7 +8,6 @@
  * 実装済みエージェント:
  * - hypothesis_generator (Phase 6 MVP)
  * - indicator_specialist (Phase 6.8 統合 = 旧 trend / oscillator / volatility_volume 統合)
- * - strategist (Critical-3)
  * - discovery (Critical-3)
  * - mutation (Critical-3)
  * - crossover (Critical-3)
@@ -128,42 +127,6 @@ function lengthScore(text: string | undefined, fullScoreLength: number): number 
   if (!text) return 0;
   return Math.min(text.length / fullScoreLength, 1);
 }
-
-/**
- * Strategist (PromotionVerdict): verdict 必須 + 解釈と改善提案の充実度。
- *
- * - verdict が 4 値のいずれかにある(必須)
- * - baseCriteriaReasons の存在(rejected/insufficient_data/not_testable では non-empty 期待)
- * - interpretation の長さ
- * - actionableInsights の数
- */
-export const strategistScoreFn: ScoringFunction<
-  object,
-  {
-    verdict?: string;
-    baseCriteriaReasons?: string[];
-    interpretation?: string;
-    actionableInsights?: string[];
-  }
-> = (_input, output) => {
-  const VALID_VERDICTS = new Set(['confirmed', 'rejected', 'insufficient_data', 'not_testable']);
-  const isValidVerdict =
-    typeof output?.verdict === 'string' && VALID_VERDICTS.has(output.verdict);
-  const verdictScore = isValidVerdict ? 1 : 0;
-  const reasons = output?.baseCriteriaReasons ?? [];
-  // verdict が不正なら理由を加点しない(verdict と reasons は独立評価しない)。
-  // confirmed は理由空でも OK、それ以外は >=1 で満点。
-  const reasonsScore = !isValidVerdict
-    ? 0
-    : output.verdict === 'confirmed'
-      ? 1
-      : Math.min(reasons.length, 1);
-  const interpScore = lengthScore(output?.interpretation, 80);
-  const insights = output?.actionableInsights ?? [];
-  const insightsScore = Math.min(insights.length / 2, 1);
-
-  return 0.3 * verdictScore + 0.2 * reasonsScore + 0.3 * interpScore + 0.2 * insightsScore;
-};
 
 /**
  * Discovery: 解釈の数 + 新仮説の数 + HG 向けヒント + 週次ノート。
@@ -321,12 +284,11 @@ export const bullBearDebateScoreFn: ScoringFunction<
   return 0.4 * sideAvgScore + 0.4 * synthesisScore + 0.2 * marketScore;
 };
 
-/** エージェント名 → スコア関数 のマッピング (Step F 整理後 = 7 体)。 */
+/** エージェント名 → スコア関数 のマッピング (Step D-1 で strategist 廃止後 = 6 体)。 */
 export const SCORING_FUNCTIONS: Record<string, ScoringFunction<object, object>> = {
   // Phase 6 MVP + Phase 6.8 統合 (indicator_specialist で旧 3 体を統合)
   hypothesis_generator: hypothesisGeneratorScoreFn,
   indicator_specialist: indicatorSpecialistScoreFn,
-  strategist: strategistScoreFn,
   discovery: discoveryScoreFn,
   // mutation/crossover は input 型が { count? } / { pairCount? } のため
   // Record<string, ScoringFunction<object, object>> に直接代入できず型アサーションが必要。

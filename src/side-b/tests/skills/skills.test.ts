@@ -20,7 +20,6 @@ import { createComputeLensFeaturesSkill } from '../../skills/lens/computeLensFea
 
 import type { EdgeLedger } from '../../ledger/EdgeLedger';
 import type { ScreeningOrchestrator } from '../../bridge/ScreeningOrchestrator';
-import type { StrategistAgent } from '../../agents/StrategistAgent';
 import type { AgentMemory } from '../../agent/agentMemory';
 
 // ヘルパー: 最小限のコンテキスト
@@ -173,23 +172,19 @@ describe('run_screening', () => {
 });
 
 describe('run_full_validation', () => {
-  it('StrategistAgent.validate に hypothesisId と options を渡す', async () => {
-    const validate = jest.fn().mockResolvedValue({
+  it('validateHypothesis に hypothesisId と period を渡す', async () => {
+    const validateFn = jest.fn().mockResolvedValue({
       verdict: 'confirmed',
       hypothesisId: 'h1',
       baseCriteriaReasons: [],
       decidedAt: new Date(),
     });
-    const skill = createRunFullValidationSkill({
-      validate,
-    } as unknown as StrategistAgent);
+     
+    const skill = createRunFullValidationSkill(validateFn as any);
 
-    await skill.execute({ hypothesisId: 'h1', skipLLM: true }, ctx);
+    await skill.execute({ hypothesisId: 'h1' }, ctx);
 
-    expect(validate).toHaveBeenCalledWith('h1', {
-      period: undefined,
-      skipLLM: true,
-    });
+    expect(validateFn).toHaveBeenCalledWith('h1', { period: undefined });
   });
 });
 

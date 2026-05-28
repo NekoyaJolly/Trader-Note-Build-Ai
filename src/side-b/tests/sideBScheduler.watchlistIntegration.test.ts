@@ -24,8 +24,8 @@ jest.mock('../ledger', () => ({
   edgeLedger: { findByStatus: jest.fn().mockResolvedValue([]) },
 }));
 
-jest.mock('../agents/StrategistAgent', () => ({
-  strategistAgent: { validate: jest.fn() },
+jest.mock('../services/hypothesisValidationService', () => ({
+  validateHypothesis: jest.fn(),
 }));
 
 jest.mock('../agents/CrossoverAgent', () => ({

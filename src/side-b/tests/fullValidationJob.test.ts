@@ -11,8 +11,8 @@ import type { EdgeHypothesis } from '../models/edgeHypothesis';
 jest.mock('../ledger', () => ({
   edgeLedger: { findByStatus: jest.fn() },
 }));
-jest.mock('../agents/StrategistAgent', () => ({
-  strategistAgent: { validate: jest.fn() },
+jest.mock('../services/hypothesisValidationService', () => ({
+  validateHypothesis: jest.fn(),
 }));
 jest.mock('../agent', () => ({
   pdcaLoop: { notifyValidationBatchComplete: jest.fn() },
@@ -20,12 +20,12 @@ jest.mock('../agent', () => ({
 
 import { FullValidationJob } from '../jobs/fullValidationJob';
 import { edgeLedger } from '../ledger';
-import { strategistAgent } from '../agents/StrategistAgent';
+import { validateHypothesis } from '../services/hypothesisValidationService';
 import { pdcaLoop } from '../agent';
 import type { SideBSchedulerConfig } from '../jobs/sideBScheduler';
 
 const mockEdgeLedger = edgeLedger as unknown as { findByStatus: jest.Mock };
-const mockStrategist = strategistAgent as unknown as { validate: jest.Mock };
+const mockValidate = validateHypothesis as unknown as jest.Mock;
 const mockPdcaLoop = pdcaLoop as unknown as { notifyValidationBatchComplete: jest.Mock };
 
 function mockSleepInstant() {
@@ -88,7 +88,7 @@ describe('FullValidationJob', () => {
 
   it('findByStatus に limit を渡し、verdict を集計', async () => {
     mockEdgeLedger.findByStatus.mockResolvedValue([makeHyp('h1'), makeHyp('h2')]);
-    mockStrategist.validate
+    mockValidate
       .mockResolvedValueOnce({ verdict: 'confirmed', hypothesisId: 'h1', baseCriteriaReasons: [], decidedAt: new Date() })
       .mockResolvedValueOnce({ verdict: 'rejected', hypothesisId: 'h2', baseCriteriaReasons: ['過学習'], decidedAt: new Date() });
     const onCompleted = jest.fn();
@@ -104,18 +104,18 @@ describe('FullValidationJob', () => {
 
   it('fullValidationMaxPerRun で件数制限 (Math.max(1, ...))', async () => {
     mockEdgeLedger.findByStatus.mockResolvedValue([makeHyp('h1'), makeHyp('h2'), makeHyp('h3'), makeHyp('h4')]);
-    mockStrategist.validate.mockResolvedValue({ verdict: 'confirmed', hypothesisId: 'x', baseCriteriaReasons: [], decidedAt: new Date() });
+    mockValidate.mockResolvedValue({ verdict: 'confirmed', hypothesisId: 'x', baseCriteriaReasons: [], decidedAt: new Date() });
     const { job } = makeJob();
 
     const result = await job.run(minimalConfig(2));
 
-    expect(mockStrategist.validate).toHaveBeenCalledTimes(2);
+    expect(mockValidate).toHaveBeenCalledTimes(2);
     expect(result.processed).toBe(2);
   });
 
   it('1 仮説 throw でも他は継続、errors に計上', async () => {
     mockEdgeLedger.findByStatus.mockResolvedValue([makeHyp('h1'), makeHyp('h2')]);
-    mockStrategist.validate
+    mockValidate
       .mockRejectedValueOnce(new Error('boom'))
       .mockResolvedValueOnce({ verdict: 'confirmed', hypothesisId: 'h2', baseCriteriaReasons: [], decidedAt: new Date() });
     const { job, addError } = makeJob();
@@ -126,13 +126,13 @@ describe('FullValidationJob', () => {
     expect(addError).toHaveBeenCalledWith(expect.stringContaining('h1 失敗'));
   });
 
-  it('対象 0 件なら StrategistAgent は呼ばれない', async () => {
+  it('対象 0 件なら validateHypothesis は呼ばれない', async () => {
     mockEdgeLedger.findByStatus.mockResolvedValue([]);
     const { job } = makeJob();
 
     const result = await job.run(minimalConfig(5));
 
-    expect(mockStrategist.validate).not.toHaveBeenCalled();
+    expect(mockValidate).not.toHaveBeenCalled();
     expect(result.processed).toBe(0);
   });
 

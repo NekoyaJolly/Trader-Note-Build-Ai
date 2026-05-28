@@ -1,14 +1,14 @@
 /**
- * ValidationController のテスト（Phase 4c Step G）
+ * ValidationController のテスト（Phase 4c Step G / Step D-1 で StrategistAgent 廃止）
  *
  * Express の Request/Response を最小実装のスタブで置き換え、
- * StrategistAgent と EdgeLedger をモックして 3 エンドポイントを検証する。
+ * validateHypothesis (決定論検証関数) と EdgeLedger をモックして検証する。
  */
 
 import { ValidationController } from '../../controllers/validationController';
 import type { Request, Response } from 'express';
 import type { EdgeHypothesis } from '../../models/edgeHypothesis';
-import type { PromotionVerdict } from '../../agents/StrategistAgent';
+import type { PromotionVerdict } from '../../services/hypothesisValidationService';
 
 function makeHypothesis(overrides?: Partial<EdgeHypothesis>): EdgeHypothesis {
     return {
@@ -49,48 +49,43 @@ function makeReqRes(
     res.status = jest.fn().mockImplementation((code: number) => {
         res.statusCode = code;
         return res;
-    }) as unknown as Response['status'];
+    });
     res.json = jest.fn().mockImplementation((payload: unknown) => {
         res.body = payload;
         return res;
-    }) as unknown as Response['json'];
+    });
     return { req, res: res as Response & { statusCode: number; body: unknown } };
 }
 
 describe('ValidationController.validate', () => {
     it('verdict=confirmed を返す', async () => {
-        const strategist = {
-            validate: jest.fn<Promise<PromotionVerdict>, [string]>().mockResolvedValue({
-                verdict: 'confirmed',
-                hypothesisId: 'hyp-api-1',
-                baseCriteriaReasons: [],
-                interpretation: '全ツール通過',
-                actionableInsights: [],
-                decidedAt: new Date('2026-01-01'),
-            }),
-        };
+        const validateFn = jest.fn<Promise<PromotionVerdict>, [string]>().mockResolvedValue({
+            verdict: 'confirmed',
+            hypothesisId: 'hyp-api-1',
+            baseCriteriaReasons: [],
+            decidedAt: new Date('2026-01-01'),
+        });
         const ledger = { get: jest.fn(), findByStatus: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const ctrl = new ValidationController(ledger as any, strategist as any);
+         
+        const ctrl = new ValidationController(ledger as any, validateFn as any);
         const { req, res } = makeReqRes({ id: 'hyp-api-1' });
 
         await ctrl.validate(req, res);
 
         expect(res.statusCode).toBe(200);
-        expect(strategist.validate).toHaveBeenCalledWith('hyp-api-1');
+        expect(validateFn).toHaveBeenCalledWith('hyp-api-1');
         const body = res.body as Record<string, unknown>;
         expect(body.success).toBe(true);
         expect(body.verdict).toBe('confirmed');
-        expect(body.interpretation).toBe('全ツール通過');
     });
 
     it('not found は 404', async () => {
-        const strategist = {
-            validate: jest.fn().mockRejectedValue(new Error('Hypothesis not found: hyp-missing')),
-        };
+        const validateFn = jest
+            .fn()
+            .mockRejectedValue(new Error('Hypothesis not found: hyp-missing'));
         const ledger = { get: jest.fn(), findByStatus: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const ctrl = new ValidationController(ledger as any, strategist as any);
+         
+        const ctrl = new ValidationController(ledger as any, validateFn as any);
         const { req, res } = makeReqRes({ id: 'hyp-missing' });
 
         await ctrl.validate(req, res);
@@ -102,12 +97,10 @@ describe('ValidationController.validate', () => {
     });
 
     it('その他の例外は 500', async () => {
-        const strategist = {
-            validate: jest.fn().mockRejectedValue(new Error('python container down')),
-        };
+        const validateFn = jest.fn().mockRejectedValue(new Error('python container down'));
         const ledger = { get: jest.fn(), findByStatus: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const ctrl = new ValidationController(ledger as any, strategist as any);
+         
+        const ctrl = new ValidationController(ledger as any, validateFn as any);
         const { req, res } = makeReqRes({ id: 'hyp-api-1' });
 
         await ctrl.validate(req, res);
@@ -116,16 +109,16 @@ describe('ValidationController.validate', () => {
     });
 
     it('id が欠落していれば 400', async () => {
-        const strategist = { validate: jest.fn() };
+        const validateFn = jest.fn();
         const ledger = { get: jest.fn(), findByStatus: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const ctrl = new ValidationController(ledger as any, strategist as any);
+         
+        const ctrl = new ValidationController(ledger as any, validateFn as any);
         const { req, res } = makeReqRes({});
 
         await ctrl.validate(req, res);
 
         expect(res.statusCode).toBe(400);
-        expect(strategist.validate).not.toHaveBeenCalled();
+        expect(validateFn).not.toHaveBeenCalled();
     });
 });
 
@@ -152,7 +145,7 @@ describe('ValidationController.getValidationStatus', () => {
             findByStatus: jest.fn(),
         };
         const strategist = { validate: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const ctrl = new ValidationController(ledger as any, strategist as any);
         const { req, res } = makeReqRes({ id: 'hyp-api-1' });
 
@@ -172,7 +165,7 @@ describe('ValidationController.getValidationStatus', () => {
             findByStatus: jest.fn(),
         };
         const strategist = { validate: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const ctrl = new ValidationController(ledger as any, strategist as any);
         const { req, res } = makeReqRes({ id: 'hyp-missing' });
 
@@ -187,7 +180,7 @@ describe('ValidationController.getValidationStatus', () => {
             findByStatus: jest.fn(),
         };
         const strategist = { validate: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const ctrl = new ValidationController(ledger as any, strategist as any);
         const { req, res } = makeReqRes({ id: 'hyp-api-1' });
 
@@ -207,7 +200,7 @@ describe('ValidationController.listPendingValidation', () => {
             findByStatus: jest.fn().mockResolvedValue(hyps),
         };
         const strategist = { validate: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const ctrl = new ValidationController(ledger as any, strategist as any);
         const { req, res } = makeReqRes({});
 
@@ -226,7 +219,7 @@ describe('ValidationController.listPendingValidation', () => {
             findByStatus: jest.fn().mockResolvedValue([]),
         };
         const strategist = { validate: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const ctrl = new ValidationController(ledger as any, strategist as any);
         const { req, res } = makeReqRes({});
 
@@ -243,7 +236,7 @@ describe('ValidationController.listPendingValidation', () => {
             findByStatus: jest.fn().mockRejectedValue(new Error('db error')),
         };
         const strategist = { validate: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const ctrl = new ValidationController(ledger as any, strategist as any);
         const { req, res } = makeReqRes({});
 
@@ -271,7 +264,7 @@ describe('ValidationController.listHypotheses', () => {
         });
         const ledger = { get: jest.fn(), findByStatus: jest.fn(), find: findMock };
         const strategist = { validate: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const ctrl = new ValidationController(ledger as any, strategist as any);
         return { ctrl, ledger, findMock, strategist };
     }
@@ -431,7 +424,7 @@ describe('ValidationController.listHypotheses', () => {
         const findMock = jest.fn().mockRejectedValue(new Error('db error'));
         const ledger = { get: jest.fn(), findByStatus: jest.fn(), find: findMock };
         const strategist = { validate: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const ctrl = new ValidationController(ledger as any, strategist as any);
         const { req, res } = makeReqRes({}, {});
 
@@ -453,7 +446,7 @@ describe('ValidationController.getHypothesis', () => {
             findByStatus: jest.fn(),
         };
         const strategist = { validate: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const ctrl = new ValidationController(ledger as any, strategist as any);
         const { req, res } = makeReqRes({ id: 'hyp-detail-1' });
 
@@ -472,7 +465,7 @@ describe('ValidationController.getHypothesis', () => {
             findByStatus: jest.fn(),
         };
         const strategist = { validate: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const ctrl = new ValidationController(ledger as any, strategist as any);
         const { req, res } = makeReqRes({ id: 'hyp-missing' });
 
@@ -484,7 +477,7 @@ describe('ValidationController.getHypothesis', () => {
     it('id が欠落していれば 400', async () => {
         const ledger = { get: jest.fn(), findByStatus: jest.fn() };
         const strategist = { validate: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const ctrl = new ValidationController(ledger as any, strategist as any);
         const { req, res } = makeReqRes({});
 
@@ -499,7 +492,7 @@ describe('ValidationController.getHypothesis', () => {
             findByStatus: jest.fn(),
         };
         const strategist = { validate: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const ctrl = new ValidationController(ledger as any, strategist as any);
         const { req, res } = makeReqRes({ id: 'hyp-1' });
 
@@ -523,7 +516,7 @@ describe('ValidationController.getValidationHistory', () => {
             findByStatus: jest.fn(),
         };
         const strategist = { validate: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const ctrl = new ValidationController(ledger as any, strategist as any);
         const { req, res } = makeReqRes({ id: 'hyp-api-1' });
 
@@ -545,7 +538,7 @@ describe('ValidationController.getValidationHistory', () => {
             findByStatus: jest.fn(),
         };
         const strategist = { validate: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const ctrl = new ValidationController(ledger as any, strategist as any);
         const { req, res } = makeReqRes({ id: 'hyp-api-1' });
 
@@ -581,7 +574,7 @@ describe('ValidationController.getValidationHistory', () => {
             findByStatus: jest.fn(),
         };
         const strategist = { validate: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const ctrl = new ValidationController(ledger as any, strategist as any);
         const { req, res } = makeReqRes({ id: 'hyp-api-1' });
 
@@ -600,7 +593,7 @@ describe('ValidationController.getValidationHistory', () => {
             findByStatus: jest.fn(),
         };
         const strategist = { validate: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const ctrl = new ValidationController(ledger as any, strategist as any);
         const { req, res } = makeReqRes({ id: 'hyp-missing' });
 
@@ -611,7 +604,7 @@ describe('ValidationController.getValidationHistory', () => {
     it('id が欠落していれば 400', async () => {
         const ledger = { get: jest.fn(), findByStatus: jest.fn() };
         const strategist = { validate: jest.fn() };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const ctrl = new ValidationController(ledger as any, strategist as any);
         const { req, res } = makeReqRes({});
 

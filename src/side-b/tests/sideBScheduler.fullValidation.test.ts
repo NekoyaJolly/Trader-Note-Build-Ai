@@ -17,10 +17,8 @@ jest.mock('../ledger', () => ({
     },
 }));
 
-jest.mock('../agents/StrategistAgent', () => ({
-    strategistAgent: {
-        validate: jest.fn(),
-    },
+jest.mock('../services/hypothesisValidationService', () => ({
+    validateHypothesis: jest.fn(),
 }));
 
 jest.mock('../agent', () => ({
@@ -80,11 +78,11 @@ jest.mock('../repositories/aiNoteRepository', () => ({
 
 import { SideBScheduler } from '../jobs/sideBScheduler';
 import { edgeLedger } from '../ledger';
-import { strategistAgent } from '../agents/StrategistAgent';
+import { validateHypothesis } from '../services/hypothesisValidationService';
 import { pdcaLoop } from '../agent';
 
 const mockEdgeLedger = edgeLedger as unknown as { findByStatus: jest.Mock };
-const mockStrategist = strategistAgent as unknown as { validate: jest.Mock };
+const mockValidate = validateHypothesis as unknown as jest.Mock;
 const mockPdcaLoop = pdcaLoop as unknown as { notifyValidationBatchComplete: jest.Mock };
 
 function makeHyp(id: string): EdgeHypothesis {
@@ -141,7 +139,7 @@ describe('SideBScheduler.runFullValidationNow', () => {
             makeHyp('h1'),
             makeHyp('h2'),
         ]);
-        mockStrategist.validate
+        mockValidate
             .mockResolvedValueOnce({
                 verdict: 'confirmed',
                 hypothesisId: 'h1',
@@ -161,7 +159,7 @@ describe('SideBScheduler.runFullValidationNow', () => {
         // PR #160 Copilot review #2: findByStatus に limit (fullValidationMaxPerRun=5) を渡して
         // DB 側で take を効かせる
         expect(mockEdgeLedger.findByStatus).toHaveBeenCalledWith('screening_passed', 5);
-        expect(mockStrategist.validate).toHaveBeenCalledTimes(2);
+        expect(mockValidate).toHaveBeenCalledTimes(2);
         expect(result).toEqual({
             processed: 2,
             confirmed: 1,
@@ -179,7 +177,7 @@ describe('SideBScheduler.runFullValidationNow', () => {
             makeHyp('h3'),
             makeHyp('h4'),
         ]);
-        mockStrategist.validate.mockResolvedValue({
+        mockValidate.mockResolvedValue({
             verdict: 'confirmed',
             hypothesisId: 'x',
             baseCriteriaReasons: [],
@@ -189,7 +187,7 @@ describe('SideBScheduler.runFullValidationNow', () => {
         const scheduler = new SideBScheduler({ fullValidationMaxPerRun: 2 });
         const result = await scheduler.runFullValidationNow();
 
-        expect(mockStrategist.validate).toHaveBeenCalledTimes(2);
+        expect(mockValidate).toHaveBeenCalledTimes(2);
         expect(result.processed).toBe(2);
     }, 30000);
 
@@ -198,7 +196,7 @@ describe('SideBScheduler.runFullValidationNow', () => {
             makeHyp('h1'),
             makeHyp('h2'),
         ]);
-        mockStrategist.validate
+        mockValidate
             .mockResolvedValueOnce({
                 verdict: 'not_testable',
                 hypothesisId: 'h1',
@@ -225,7 +223,7 @@ describe('SideBScheduler.runFullValidationNow', () => {
             makeHyp('h1'),
             makeHyp('h2'),
         ]);
-        mockStrategist.validate
+        mockValidate
             .mockRejectedValueOnce(new Error('boom'))
             .mockResolvedValueOnce({
                 verdict: 'confirmed',
@@ -251,7 +249,7 @@ describe('SideBScheduler.runFullValidationNow', () => {
         const scheduler = new SideBScheduler({ fullValidationMaxPerRun: 5 });
         const result = await scheduler.runFullValidationNow();
 
-        expect(mockStrategist.validate).not.toHaveBeenCalled();
+        expect(mockValidate).not.toHaveBeenCalled();
         expect(result.processed).toBe(0);
     }, 30000);
 
@@ -262,6 +260,6 @@ describe('SideBScheduler.runFullValidationNow', () => {
 
         // 対象取得失敗時は addError されるが、関数自体は例外を投げず集計0で返す
         expect(result.processed).toBe(0);
-        expect(mockStrategist.validate).not.toHaveBeenCalled();
+        expect(mockValidate).not.toHaveBeenCalled();
     }, 10000);
 });

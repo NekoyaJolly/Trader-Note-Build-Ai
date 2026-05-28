@@ -5,7 +5,6 @@
 import {
   hypothesisGeneratorScoreFn,
   indicatorSpecialistScoreFn,
-  strategistScoreFn,
   discoveryScoreFn,
   mutationScoreFn,
   crossoverScoreFn,
@@ -101,14 +100,17 @@ describe('indicatorSpecialistScoreFn (Phase 6.8 統合 = 旧 trend/oscillator/vo
 });
 
 describe('getScoringFunction', () => {
-  it('Step F 整理後の 7 エージェント分は取得できる', () => {
+  it('Step D-1 で strategist 廃止後の 6 エージェント分は取得できる', () => {
     expect(getScoringFunction('hypothesis_generator')).not.toBeNull();
     expect(getScoringFunction('indicator_specialist')).not.toBeNull();
-    expect(getScoringFunction('strategist')).not.toBeNull();
     expect(getScoringFunction('discovery')).not.toBeNull();
     expect(getScoringFunction('mutation')).not.toBeNull();
     expect(getScoringFunction('crossover')).not.toBeNull();
     expect(getScoringFunction('bull_bear_debate')).not.toBeNull();
+  });
+
+  it('廃止した strategist は null を返す', () => {
+    expect(getScoringFunction('strategist')).toBeNull();
   });
 
   it('未実装エージェントは null', () => {
@@ -118,59 +120,9 @@ describe('getScoringFunction', () => {
 });
 
 // ============================================================
-// Critical-3 残スコープ: 死蔵 8 体のスコア関数テスト
+// Critical-3 残スコープ: 死蔵エージェントのスコア関数テスト
+// (strategist は Step D-1 で廃止)
 // ============================================================
-
-describe('strategistScoreFn', () => {
-  it('verdict + reasons + interpretation + insights が揃って満点', () => {
-    const s = strategistScoreFn(
-      {},
-      {
-        verdict: 'rejected',
-        baseCriteriaReasons: ['PF 不足'],
-        interpretation: 'i'.repeat(80),
-        actionableInsights: ['SL を厳しく', '対象期間を広げる'],
-      },
-    );
-    expect(s).toBeCloseTo(1, 5);
-  });
-
-  it('verdict 不明はゼロ寄り', () => {
-    const s = strategistScoreFn({}, { verdict: 'wrong', interpretation: 'x'.repeat(80) });
-    // verdictScore=0、reasonsScore=0(verdict不明扱い)、interpScore=1、insightsScore=0
-    // = 0 + 0 + 0.3 + 0 = 0.3 ジャスト
-    expect(s).toBeCloseTo(0.3, 5);
-  });
-
-  it('verdict 不明は reasons があってもゼロ寄り(リグレッション防止)', () => {
-    // verdict が不正なら理由を加点しない(verdict と reasons は独立評価しない)。
-    // 旧実装は verdict 不明でも reasons 1 件で reasonsScore=1 になっていた。
-    const s = strategistScoreFn(
-      {},
-      {
-        verdict: 'wrong',
-        baseCriteriaReasons: ['x'],
-        interpretation: 'x'.repeat(80),
-      },
-    );
-    // verdictScore=0、reasonsScore=0、interpScore=1、insightsScore=0
-    // = 0 + 0 + 0.3 + 0 = 0.3
-    expect(s).toBeCloseTo(0.3, 5);
-  });
-
-  it('confirmed は reasons 空でも reasonsScore=1', () => {
-    const s = strategistScoreFn(
-      {},
-      {
-        verdict: 'confirmed',
-        baseCriteriaReasons: [],
-        interpretation: 'i'.repeat(80),
-        actionableInsights: ['x', 'y'],
-      },
-    );
-    expect(s).toBeCloseTo(1, 5);
-  });
-});
 
 describe('discoveryScoreFn', () => {
   it('全フィールド充実で満点', () => {
