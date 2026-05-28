@@ -274,6 +274,60 @@ export class LedgerDashboardController {
     };
 
     /**
+     * GET /api/side-b/discovery/funnel
+     *
+     * Step D-4b: DiscoveryAgent が組成した仮説 (source='discovery') のライフサイクル funnel。
+     * 「組成 (unverified) → screening_passed → confirmed / rejected」の status 分布 + 直近サンプル
+     * (symbol / timeframe 付き) を返す観測導線。組成は DISCOVERY_COMPOSE_ENABLED ゲート (既定 OFF)。
+     */
+    discoveryFunnel = async (_req: Request, res: Response): Promise<void> => {
+        try {
+            const grouped = await prisma.edgeHypothesis.groupBy({
+                by: ['status'],
+                where: { source: 'discovery' },
+                _count: true,
+            });
+            const byStatus: Record<string, number> = {};
+            let total = 0;
+            for (const g of grouped) {
+                byStatus[g.status] = g._count;
+                total += g._count;
+            }
+            const recent = await prisma.edgeHypothesis.findMany({
+                where: { source: 'discovery' },
+                orderBy: { createdAt: 'desc' },
+                take: 10,
+                select: {
+                    id: true,
+                    statement: true,
+                    status: true,
+                    symbols: true,
+                    timeframes: true,
+                    createdAt: true,
+                },
+            });
+            res.json({
+                success: true,
+                source: 'discovery',
+                total,
+                byStatus,
+                recent: recent.map((h) => ({
+                    id: h.id,
+                    statement: h.statement,
+                    status: h.status,
+                    symbols: h.symbols,
+                    timeframes: h.timeframes,
+                    createdAt: h.createdAt.toISOString(),
+                })),
+            });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error('[LedgerDashboardController] discoveryFunnel 失敗:', err);
+            res.status(500).json({ success: false, error: message });
+        }
+    };
+
+    /**
      * GET /api/side-b/system/health
      */
     systemHealth = async (_req: Request, res: Response): Promise<void> => {

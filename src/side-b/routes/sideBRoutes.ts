@@ -109,6 +109,7 @@ router.get('/stats/time-series', ledgerDashboardController.timeSeries);
 router.get('/stats/by-category', ledgerDashboardController.byCategory);
 router.get('/stats/validation-activity', ledgerDashboardController.validationActivity);
 router.get('/discovery/latest', ledgerDashboardController.latestDiscovery);
+router.get('/discovery/funnel', ledgerDashboardController.discoveryFunnel);
 router.get('/system/health', ledgerDashboardController.systemHealth);
 
 // ===========================================

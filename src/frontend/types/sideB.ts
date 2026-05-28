@@ -537,6 +537,28 @@ export interface DiscoveryLatestResponse {
   }>;
 }
 
+/**
+ * GET /discovery/funnel
+ *
+ * Step D-4b: DiscoveryAgent が組成した仮説 (source='discovery') のライフサイクル funnel。
+ * 「組成 (unverified) → screening_passed → confirmed / rejected」の status 分布 + 直近サンプル。
+ */
+export interface DiscoveryFunnelResponse {
+  success: true;
+  source: "discovery";
+  total: number;
+  /** status ごとの件数 (source=discovery 限定)。未出現の status はキー欠落。 */
+  byStatus: Partial<Record<EdgeStatus, number>>;
+  recent: Array<{
+    id: string;
+    statement: string;
+    status: EdgeStatus;
+    symbols: string[];
+    timeframes: string[];
+    createdAt: string;
+  }>;
+}
+
 /** GET /system/health */
 export interface SystemHealthResponse {
   success: true;
