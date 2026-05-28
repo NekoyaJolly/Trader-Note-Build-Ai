@@ -36,6 +36,9 @@ jest.mock('../agent', () => ({
 
 import { TradeMonitoringJob, type TradeMonitoringJobServices } from '../jobs/tradeMonitoringJob';
 import { isFXMarketOpen } from '../utils/marketHours';
+import { findVirtualTrades } from '../repositories';
+import { verifyTradeState } from '../services/tradeVerificationService';
+import { pdcaLoop } from '../agent';
 import type { SideBSchedulerConfig } from '../jobs/sideBScheduler';
 
 function makeServices(overrides?: Partial<TradeMonitoringJobServices>): TradeMonitoringJobServices {
@@ -132,5 +135,39 @@ describe('TradeMonitoringJob', () => {
     await job.run(minimalConfig);
     // 新しい services が使われる
     expect(currentServices.marketDataService.getRecentMinuteOHLCV).toHaveBeenCalledTimes(1);
+  });
+
+  it('exit 発生時、VirtualTrade の timeframe/higherTimeframe が notifyTradeCompleted に伝播する', async () => {
+    // open トレード (MTF 文脈付き) を返し、exit triggered で決済 → reflection ハンドオフへ伝播することを固定。
+    const openTrade = {
+      id: 'trade-mtf-1',
+      symbol: 'XAU/USD',
+      direction: 'long',
+      plannedEntry: 2600,
+      actualEntry: 2600,
+      stopLoss: 2590,
+      takeProfit: 2620,
+      timeframe: '15m',
+      higherTimeframe: '1h',
+    };
+    (findVirtualTrades as jest.Mock).mockImplementation((opts: { status?: string }) =>
+      Promise.resolve(opts?.status === 'open' ? [openTrade] : []),
+    );
+    (verifyTradeState as jest.Mock).mockReturnValue({
+      entry: undefined,
+      exit: { triggered: true, exitPrice: 2620, exitReason: 'take_profit', exitTime: new Date() },
+    });
+
+    const services = makeServices();
+    (services.marketDataService.getRecentMinuteOHLCV as jest.Mock).mockResolvedValue([
+      { timestamp: new Date(), open: 2600, high: 2625, low: 2595, close: 2620, volume: 100 },
+    ]);
+    const { job } = makeJob();
+
+    await job.runWithServices(minimalConfig, services);
+
+    expect(pdcaLoop.notifyTradeCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'trade-mtf-1', timeframe: '15m', higherTimeframe: '1h' }),
+    );
   });
 });
