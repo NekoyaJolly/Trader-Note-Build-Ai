@@ -536,14 +536,33 @@ export class PDCALoop {
      *
      * pdcaLoop は memory ベースの状態機械だが、aiNoteService が「シナリオ + 実行内容 +
      * reflection 分析」の統合ノートを生成できるよう、reflection 結果だけは DB に書き戻す。
-     * DB 保存失敗はノート生成側で reflection=null として扱われる (= 次 tick で再生成待ち) ため、
-     * ここでは握りつぶさず警告ログのみ出して PDCA 本処理は続行する。
+     *
+     * PR #273 Copilot review #3: 一時的な DB エラーで reflection が NULL のまま残ると
+     * tradeMonitoringJob が Note 生成を待ち続けるため、最大 3 回 (+exponential backoff)
+     * リトライしてから警告ログに落とす。全試行失敗時もノート生成側は TIMEOUT 後に
+     * reflection なしで生成するため、PDCA 本処理は止めない。
      */
     private async persistReflection(tradeId: string, reflection: JsonValue): Promise<void> {
-        try {
-            await updateTradeReflection(tradeId, reflection as Parameters<typeof updateTradeReflection>[1]);
-        } catch (err) {
-            console.warn(`[PDCALoop] reflection の DB 保存に失敗 (tradeId=${tradeId}):`, err);
+        const MAX_RETRY = 3;
+        const BASE_DELAY_MS = 500;
+        for (let attempt = 0; attempt <= MAX_RETRY; attempt++) {
+            try {
+                await updateTradeReflection(
+                    tradeId,
+                    reflection as Parameters<typeof updateTradeReflection>[1],
+                );
+                return;
+            } catch (err) {
+                if (attempt < MAX_RETRY) {
+                    const delay = BASE_DELAY_MS * Math.pow(2, attempt);
+                    await new Promise((resolve) => setTimeout(resolve, delay));
+                } else {
+                    console.warn(
+                        `[PDCALoop] reflection の DB 保存に失敗 (tradeId=${tradeId}, ${String(MAX_RETRY + 1)} 回試行):`,
+                        err,
+                    );
+                }
+            }
         }
     }
 

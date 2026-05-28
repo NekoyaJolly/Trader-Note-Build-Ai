@@ -376,6 +376,11 @@ export class TradeMonitoringJob
    * 旧 SideBScheduler.generateNotesForClosedTrades() を完全互換で移植。
    */
   private async generateNotesForClosedTrades(): Promise<void> {
+    // Step C-1: reflection 待ちの上限 (PR #273 Copilot review #2)。
+    // PDCA Loop 未起動 / 無効な環境では reflection が永遠に DB へ書き戻されないため、
+    // 決済から本値を超過したトレードは reflection を待たずに従来互換で Note を生成し、
+    // Note 自動生成が永久に止まるのを防ぐ。6h = 監視 cron 6 サイクル相当の安全マージン。
+    const REFLECTION_WAIT_TIMEOUT_MS = 6 * 60 * 60 * 1000;
     try {
       const closedTrades = await findVirtualTrades({ status: 'closed', limit: 10 });
 
@@ -388,10 +393,21 @@ export class TradeMonitoringJob
         // Step C-1: reflectionAI の分析が DB に書き戻されるまでノート生成を待つ。
         // reflection は pdcaLoop の REFLECTING (別 tick) で生成され VirtualTrade.reflection に
         // 永続化される。null の間はスキップし、次 tick で再評価する (= reflection 込みノートを保証)。
-        // reflection 失敗時も簡易フォールバック構造が保存されるため、永久スキップにはならない。
+        // reflection 失敗時も簡易フォールバック構造が保存されるため、PDCA 稼働中は永久スキップしない。
+        // ただし PDCA 未起動環境への保険として、決済から TIMEOUT 超過後は reflection なしで生成する。
         if (trade.reflection === null || trade.reflection === undefined) {
-          this.deps.log(`[Note生成] Trade ${trade.id}: reflection 未生成のため次 tick まで待機`);
-          continue;
+          const elapsedMs = trade.exitedAt ? Date.now() - trade.exitedAt.getTime() : Infinity;
+          if (elapsedMs < REFLECTION_WAIT_TIMEOUT_MS) {
+            this.deps.log(
+              `[Note生成] Trade ${trade.id}: reflection 未生成のため次 tick まで待機 ` +
+                `(決済から ${String(Math.round(elapsedMs / 60000))}分)`,
+            );
+            continue;
+          }
+          this.deps.log(
+            `[Note生成] Trade ${trade.id}: reflection 待ち TIMEOUT (6h 超過)、reflection なしで生成に進む`,
+          );
+          // フォールスルー: reflection=null のまま従来互換で Note 生成
         }
 
         const plan = await planRepository.findById(trade.planId);

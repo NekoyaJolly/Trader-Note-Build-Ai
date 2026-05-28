@@ -669,12 +669,17 @@ export function mergeReflectionIntoLearnings(
 /**
  * reflection が簡易フォールバック構造 ({ fallback: true, summary: string }) の場合に
  * summary を取り出す。それ以外は null。Prisma.JsonValue を型安全に narrow する。
+ *
+ * PR #273 Copilot review #1: `fallback === true` を必須条件にして、たまたま summary を
+ * 含む別構造を誤ってフォールバック扱いしないようにする。
  */
 function extractReflectionFallbackSummary(reflection: Prisma.JsonValue): string | null {
   if (
     typeof reflection === 'object' &&
     reflection !== null &&
     !Array.isArray(reflection) &&
+    'fallback' in reflection &&
+    reflection.fallback === true &&
     'summary' in reflection &&
     typeof reflection.summary === 'string'
   ) {

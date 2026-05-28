@@ -90,6 +90,20 @@ describe('mergeReflectionIntoLearnings', () => {
     expect(result).toEqual(baseLearnings());
   });
 
+  it('fallback フラグなしで summary だけ持つ構造は誤判定せず learnings をそのまま返す', () => {
+    // PR #273 Copilot review #1: { summary } のみの別構造を fallback と誤認しない
+    const result = mergeReflectionIntoLearnings(baseLearnings(), { summary: '無関係な summary' });
+    expect(result).toEqual(baseLearnings());
+  });
+
+  it('fallback: false + summary は fallback 扱いしない', () => {
+    const result = mergeReflectionIntoLearnings(baseLearnings(), {
+      fallback: false,
+      summary: '無関係',
+    });
+    expect(result).toEqual(baseLearnings());
+  });
+
   it('配列 / プリミティブの reflection は learnings をそのまま返す', () => {
     expect(mergeReflectionIntoLearnings(baseLearnings(), [1, 2, 3])).toEqual(baseLearnings());
     expect(mergeReflectionIntoLearnings(baseLearnings(), 'string')).toEqual(baseLearnings());
