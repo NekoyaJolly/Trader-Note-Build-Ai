@@ -282,30 +282,33 @@ export class LedgerDashboardController {
      */
     discoveryFunnel = async (_req: Request, res: Response): Promise<void> => {
         try {
-            const grouped = await prisma.edgeHypothesis.groupBy({
-                by: ['status'],
-                where: { source: 'discovery' },
-                _count: true,
-            });
+            // groupBy と findMany を並列化して DB 往復のレイテンシを短縮 (latestDiscovery と同様)。
+            const [grouped, recent] = await Promise.all([
+                prisma.edgeHypothesis.groupBy({
+                    by: ['status'],
+                    where: { source: 'discovery' },
+                    _count: true,
+                }),
+                prisma.edgeHypothesis.findMany({
+                    where: { source: 'discovery' },
+                    orderBy: { createdAt: 'desc' },
+                    take: 10,
+                    select: {
+                        id: true,
+                        statement: true,
+                        status: true,
+                        symbols: true,
+                        timeframes: true,
+                        createdAt: true,
+                    },
+                }),
+            ]);
             const byStatus: Record<string, number> = {};
             let total = 0;
             for (const g of grouped) {
                 byStatus[g.status] = g._count;
                 total += g._count;
             }
-            const recent = await prisma.edgeHypothesis.findMany({
-                where: { source: 'discovery' },
-                orderBy: { createdAt: 'desc' },
-                take: 10,
-                select: {
-                    id: true,
-                    statement: true,
-                    status: true,
-                    symbols: true,
-                    timeframes: true,
-                    createdAt: true,
-                },
-            });
             res.json({
                 success: true,
                 source: 'discovery',
