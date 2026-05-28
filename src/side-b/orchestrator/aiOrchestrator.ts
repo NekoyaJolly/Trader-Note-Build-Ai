@@ -555,6 +555,39 @@ export class AIOrchestrator {
       // フロー末尾の「削り落とし」役として再配置予定。
       const aggregatedWarnings: string[] = [...(planResult.output.warnings ?? [])];
 
+      // Step A-4: BullBearDebate の優勢判定を採用方向として PlanAI シナリオに hookup。
+      //
+      // Nekoさん 設計意図: 「ディベートが結果としてどっち優勢かを出してくる。その優勢な方向を
+      // そのままシナリオの採用方向として使う」。Debate output (preferredDirection) と
+      // 不一致のシナリオは confidence を 50% 抑制 + warning 付与、一致のシナリオはそのまま、
+      // neutral 判定なら全シナリオに「中立」warning。
+      //
+      // 旧 Devil's Advocate (Step F で削除済) と類似の confidence 調整パターンを採用。
+      if (debateResult) {
+        const preferred = debateResult.output.synthesis.preferredDirection;
+        const preferredConf = debateResult.output.synthesis.preferredConfidence;
+        for (const scenario of scenariosWithId) {
+          if (preferred === 'neutral') {
+            const warn = `BullBear Debate: 中立判定 (confidence ${String(preferredConf)}%)`;
+            scenario.warnings = [...(scenario.warnings ?? []), warn];
+            aggregatedWarnings.push(`[${scenario.name}] ${warn}`);
+          } else if (scenario.direction !== preferred) {
+            const oldConf = scenario.confidence;
+            scenario.confidence = Math.round(scenario.confidence * 0.5);
+            const warn =
+              `BullBear Debate 採用方向: ${preferred} (confidence ${String(preferredConf)}%) と不一致、` +
+              `confidence ${String(oldConf)} → ${String(scenario.confidence)} に抑制`;
+            scenario.warnings = [...(scenario.warnings ?? []), warn];
+            aggregatedWarnings.push(`[${scenario.name}] ${warn}`);
+            console.log(`[Orchestrator] Debate 不一致シナリオ抑制: ${scenario.name}`);
+          } else {
+            console.log(
+              `[Orchestrator] Debate 採用方向一致: ${scenario.name} (${preferred}, ${String(preferredConf)}%)`,
+            );
+          }
+        }
+      }
+
       // 5. DB保存（Plan AIが解釈を含む新設計）
       // cron 先行で同日 Plan が存在する場合 (POST /scheduler/run-daily-plan の
       // 手動再発火) に Unique constraint 衝突しないよう upsertByDateSymbol を使う。
