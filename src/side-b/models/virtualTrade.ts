@@ -100,6 +100,10 @@ export interface VirtualTrade {
   // 基本情報
   /** 対象シンボル */
   symbol: string;
+  /** 執行足（current timeframe）。plan から伝播。MTF 文脈の一級フィールド。既存行は未設定あり。 */
+  timeframe?: string;
+  /** 分析した上位足（higher timeframe）。plan から伝播。 */
+  higherTimeframe?: string;
   /** トレード方向 */
   direction: TradeDirection;
   /** ステータス */
@@ -136,6 +140,10 @@ export interface CreateVirtualTradeInput {
   planId: string;
   scenarioId: string;
   symbol: string;
+  /** 執行足（current timeframe）。plan から伝播。MTF 文脈の一級フィールド。 */
+  timeframe: string;
+  /** 分析した上位足（higher timeframe）。plan から伝播。 */
+  higherTimeframe: string;
   direction: TradeDirection;
   plannedEntry: number;
   stopLoss: number;

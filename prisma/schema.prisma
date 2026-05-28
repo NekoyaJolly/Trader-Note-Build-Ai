@@ -1308,6 +1308,10 @@ model AITradePlan {
   targetDate DateTime @db.Date
   /// 対象シンボル
   symbol     String
+  /// 執行足（current timeframe）。MTF 文脈の一級フィールド。既存行は null 許容。
+  timeframe       String?
+  /// 分析した上位足（higher timeframe）。deriveHigherTimeframe(timeframe) と整合。
+  higherTimeframe String?
 
   // 市場分析
   /// 市場分析結果（JSONB: regime, trendDirection, volatility, keyLevels, summary）
@@ -1354,6 +1358,10 @@ model VirtualTrade {
   scenarioId String
   /// 対象シンボル
   symbol     String
+  /// 執行足（current timeframe）。plan から伝播。MTF 文脈の一級フィールド。
+  timeframe       String?
+  /// 分析した上位足（higher timeframe）。plan から伝播。
+  higherTimeframe String?
 
   // ポジション情報
   /// 方向（long/short）
@@ -1474,6 +1482,10 @@ model AITradeNote {
   symbol    String
   /// 方向（long/short）
   direction String
+  /// 執行足（current timeframe）。trade から伝播。MTF 文脈の一級フィールド。
+  timeframe       String?
+  /// 分析した上位足（higher timeframe）。trade から伝播。
+  higherTimeframe String?
 
   // 結果
   /// 勝敗（win/loss/breakeven）

@@ -32,6 +32,8 @@ export async function createAITradeNote(
       planId: input.planId,
       date: new Date(input.date),
       symbol: input.symbol,
+      timeframe: input.timeframe,
+      higherTimeframe: input.higherTimeframe,
       direction: input.direction,
       outcome: input.result.outcome,
       pnlPips: input.result.pnlPips,
@@ -349,6 +351,8 @@ function mapPrismaToAITradeNote(note: NonNullable<PrismaAITradeNote>): AITradeNo
     planId: note.planId,
     date: note.date.toISOString().split('T')[0],
     symbol: note.symbol,
+    timeframe: note.timeframe ?? undefined,
+    higherTimeframe: note.higherTimeframe ?? undefined,
     direction: note.direction as 'long' | 'short',
     result: {
       outcome: note.outcome as TradeOutcome,

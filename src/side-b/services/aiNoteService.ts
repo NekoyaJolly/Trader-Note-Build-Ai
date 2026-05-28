@@ -67,6 +67,9 @@ interface VirtualTradeInput {
   id: string;
   planId: string;
   symbol: string;
+  /** MTF 文脈: 執行足 + 上位足 (VirtualTrade から伝播、legacy トレードは null)。 */
+  timeframe?: string | null;
+  higherTimeframe?: string | null;
   direction: 'long' | 'short';
   plannedEntry: number;
   actualEntry: number | null;
@@ -172,6 +175,8 @@ export async function generateNoteFromTrade(
     planId: trade.planId,
     date: trade.exitedAt.toISOString().split('T')[0],
     symbol: trade.symbol,
+    timeframe: trade.timeframe ?? undefined,
+    higherTimeframe: trade.higherTimeframe ?? undefined,
     direction: trade.direction,
     result,
     entryAnalysis,

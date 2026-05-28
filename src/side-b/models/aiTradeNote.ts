@@ -133,6 +133,10 @@ export interface AITradeNote {
   date: string;  // YYYY-MM-DD
   symbol: string;
   direction: 'long' | 'short';
+  /** 執行足（current timeframe）。trade から伝播。MTF 文脈の一級フィールド。既存ノートは未設定あり。 */
+  timeframe?: string;
+  /** 分析した上位足（higher timeframe）。trade から伝播。 */
+  higherTimeframe?: string;
 
   // 結果
   result: TradeResult;
@@ -189,6 +193,10 @@ export interface CreateAITradeNoteInput {
   date: string;
   symbol: string;
   direction: 'long' | 'short';
+  /** 執行足（current timeframe）。trade から伝播。MTF 文脈の一級フィールド。 */
+  timeframe?: string;
+  /** 分析した上位足（higher timeframe）。trade から伝播。 */
+  higherTimeframe?: string;
   result: TradeResult;
   entryAnalysis: EntryAnalysis;
   exitAnalysis: ExitAnalysis;
