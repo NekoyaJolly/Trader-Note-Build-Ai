@@ -1,9 +1,14 @@
 /**
- * 交配オペレーター（LLM）（Phase 5 + Filter Evolution M3）
+ * エッジ発見オペレーター（LLM）（Phase 5 + Filter Evolution M3 / Step D-3 で役割再定義）
+ *
+ * 親 A の負けトレードを除去する filter (= indicator / 条件) を 1 つ追加し、勝ちトレードを維持した
+ * ままエッジを発見する。既存 indicator のパラメータ (period / threshold 等) 最適化は MutationAgent
+ * の役割 (= Step D-2)。Crossover は構造に新しい条件を 1 つ足す点で Mutation と対になる。
  *
  * @see docs/design/archive/phase_5_specification.md §4.6 (旧仕様、archive 移動済み)
  * @see docs/design/phase_5a_specification.md (Phase 5A 進化探索基盤、現行)
  * @see docs/design/phase_filter_evolution_specification.md §3 (M3)
+ * @see docs/diagnostics/side_b_agent_map_2026-05-27.html (Side-B Action 再設計)
  *
  * Filter Evolution M3 (2026-05-09):
  * - prompt が「親 A の負けを除去する filter 追加器」に再設計された
