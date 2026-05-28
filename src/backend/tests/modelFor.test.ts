@@ -26,14 +26,14 @@ describe('modelFor() / resolveDefaultModel() - AI_MODEL_OVERRIDE_ALL', () => {
 
   it('AI_MODEL_OVERRIDE_ALL が未設定なら config.ai.models[key] のハードコード既定値を返す', () => {
     delete process.env.AI_MODEL_OVERRIDE_ALL;
-    expect(modelFor('strategist')).toBe(config.ai.models.strategist);
+    expect(modelFor('discovery')).toBe(config.ai.models.discovery);
     expect(modelFor('mutation')).toBe(config.ai.models.mutation);
     expect(modelFor('ai_note')).toBe(config.ai.models.ai_note);
   });
 
   it('AI_MODEL_OVERRIDE_ALL が設定されると全 key で同じモデル ID を返す', () => {
     process.env.AI_MODEL_OVERRIDE_ALL = 'gpt-4o-mini';
-    expect(modelFor('strategist')).toBe('gpt-4o-mini');
+    expect(modelFor('discovery')).toBe('gpt-4o-mini');
     expect(modelFor('mutation')).toBe('gpt-4o-mini');
     expect(modelFor('indicator_specialist')).toBe('gpt-4o-mini');
     expect(modelFor('ai_note')).toBe('gpt-4o-mini');
@@ -43,17 +43,17 @@ describe('modelFor() / resolveDefaultModel() - AI_MODEL_OVERRIDE_ALL', () => {
 
   it('AI_MODEL_OVERRIDE_ALL が空文字列のときは override されない', () => {
     process.env.AI_MODEL_OVERRIDE_ALL = '';
-    expect(modelFor('strategist')).toBe(config.ai.models.strategist);
+    expect(modelFor('discovery')).toBe(config.ai.models.discovery);
   });
 
   it('AI_MODEL_OVERRIDE_ALL が空白のみのときも override されない', () => {
     process.env.AI_MODEL_OVERRIDE_ALL = '   ';
-    expect(modelFor('strategist')).toBe(config.ai.models.strategist);
+    expect(modelFor('discovery')).toBe(config.ai.models.discovery);
   });
 
   it('AI_MODEL_OVERRIDE_ALL の前後空白は trim される (誤設定保護)', () => {
     process.env.AI_MODEL_OVERRIDE_ALL = '  gpt-4o-mini  ';
-    expect(modelFor('strategist')).toBe('gpt-4o-mini');
+    expect(modelFor('discovery')).toBe('gpt-4o-mini');
   });
 
   it('resolveDefaultModel() も同じ override を読む (modelFor を経由しない AIProvider 用)', () => {

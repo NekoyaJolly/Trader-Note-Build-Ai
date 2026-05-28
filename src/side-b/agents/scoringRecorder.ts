@@ -25,9 +25,9 @@
  *     全 12 エージェントで同期して score=0 が積み上がる → 環境問題の診断値として読める
  *
  * 想定使い方:
- *   const verdict = await this.buildVerdict(...);
- *   await recordAgentUsage('strategist', {}, verdict);
- *   return verdict;
+ *   const result = await agent.generate(...);
+ *   await recordAgentUsage('hypothesis_generator', input, result.output);
+ *   return result;
  */
 
 import { promptRegistry, type PromptRegistry } from '../prompts/registry/PromptRegistry';

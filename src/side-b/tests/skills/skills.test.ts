@@ -14,13 +14,13 @@ import { createGetHypothesisSkill } from '../../skills/ledger/getHypothesis';
 import { createRegisterHypothesisSkill } from '../../skills/ledger/registerHypothesis';
 import { createRunScreeningSkill } from '../../skills/validation/runScreening';
 import { createRunFullValidationSkill } from '../../skills/validation/runFullValidation';
+import type { validateHypothesis } from '../../services/hypothesisValidationService';
 import { createReadRecentNotesSkill } from '../../skills/notes/readRecentNotes';
 import { createRecordLessonSkill } from '../../skills/notes/recordLesson';
 import { createComputeLensFeaturesSkill } from '../../skills/lens/computeLensFeatures';
 
 import type { EdgeLedger } from '../../ledger/EdgeLedger';
 import type { ScreeningOrchestrator } from '../../bridge/ScreeningOrchestrator';
-import type { StrategistAgent } from '../../agents/StrategistAgent';
 import type { AgentMemory } from '../../agent/agentMemory';
 
 // ヘルパー: 最小限のコンテキスト
@@ -173,23 +173,20 @@ describe('run_screening', () => {
 });
 
 describe('run_full_validation', () => {
-  it('StrategistAgent.validate に hypothesisId と options を渡す', async () => {
-    const validate = jest.fn().mockResolvedValue({
+  it('validateHypothesis に hypothesisId と period を渡す', async () => {
+    const validateFn = jest.fn() as jest.MockedFunction<typeof validateHypothesis>;
+    validateFn.mockResolvedValue({
       verdict: 'confirmed',
       hypothesisId: 'h1',
       baseCriteriaReasons: [],
       decidedAt: new Date(),
     });
-    const skill = createRunFullValidationSkill({
-      validate,
-    } as unknown as StrategistAgent);
 
-    await skill.execute({ hypothesisId: 'h1', skipLLM: true }, ctx);
+    const skill = createRunFullValidationSkill(validateFn);
 
-    expect(validate).toHaveBeenCalledWith('h1', {
-      period: undefined,
-      skipLLM: true,
-    });
+    await skill.execute({ hypothesisId: 'h1' }, ctx);
+
+    expect(validateFn).toHaveBeenCalledWith('h1', { period: undefined });
   });
 });
 

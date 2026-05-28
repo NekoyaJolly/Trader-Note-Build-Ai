@@ -44,7 +44,6 @@ export const DEFAULT_SEED_ENTRIES: SeedEntry[] = [
     file: `${SPECIALIST_COMMON_AGENT_NAME}.md`,
     notes: 'Phase 6.7c Specialist Common Rules',
   },
-  { agentName: 'strategist', file: 'strategist.md', notes: 'Phase 4c StrategistAgent' },
   { agentName: 'discovery', file: 'discovery.md', notes: 'Phase 4a DiscoveryAgent' },
   { agentName: 'hypothesis_generator', file: 'hypothesis_generator.md', notes: 'Phase 4a HypothesisGenerator' },
   { agentName: 'strategy_thinker', file: 'strategy_thinker.md', notes: 'Phase 2 StrategyThinker(planAIService)' },

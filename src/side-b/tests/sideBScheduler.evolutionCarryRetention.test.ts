@@ -24,7 +24,7 @@ jest.mock('../../backend/repositories/evolutionInstanceCarryRepository', () => (
 
 // SideBScheduler の重い依存を全 stub 化
 jest.mock('../ledger', () => ({ edgeLedger: { findByStatus: jest.fn() } }));
-jest.mock('../agents/StrategistAgent', () => ({ strategistAgent: { validate: jest.fn() } }));
+jest.mock('../services/hypothesisValidationService', () => ({ validateHypothesis: jest.fn() }));
 jest.mock('../agents/CrossoverAgent', () => ({ CrossoverAgent: jest.fn().mockImplementation(() => ({})) }));
 jest.mock('../agents/MutationAgent', () => ({ MutationAgent: jest.fn().mockImplementation(() => ({})) }));
 jest.mock('../evolution/StrategyPopulation', () => ({
