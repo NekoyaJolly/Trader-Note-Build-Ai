@@ -1,7 +1,12 @@
 /**
- * 変異オペレーター（LLM）（Phase 5）
+ * インジケーターパラメータ最適化オペレーター（LLM）（Phase 5 / Step D-2 で役割再定義）
+ *
+ * 親エリート戦略で使われている indicator のパラメータ (period / threshold 等) を最適化する
+ * 変異体を生成する。戦略の構造 (= どの indicator を使うか) は大きく変えず、パラメータ空間を
+ * 探索する。新しい indicator の「追加」は CrossoverAgent の役割 (= Step D-3、エッジ発見)。
  *
  * @see docs/design/phase_5_specification.md §4.5
+ * @see docs/diagnostics/side_b_agent_map_2026-05-27.html (Side-B Action 再設計)
  */
 
 import { randomUUID } from 'crypto';
