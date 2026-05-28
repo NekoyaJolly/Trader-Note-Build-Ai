@@ -18,6 +18,7 @@
 import { discoveryAgent } from '../agents/DiscoveryAgent';
 import { findAITradeNotesInPeriod } from '../repositories/aiNoteRepository';
 
+import type { AITradeNote } from '../models/aiTradeNote';
 import type { SideBJobDeps, SideBJobName, SideBJobRunner } from './types';
 import type { SideBSchedulerConfig } from './sideBScheduler';
 
@@ -64,7 +65,7 @@ export class DiscoveryJob
     const periodStart = new Date(periodEnd.getTime() - 7 * 24 * 60 * 60 * 1000);
 
     this.deps.log(
-      `[Discovery] 週次エッジ分析を実行: ${periodStart.toISOString()} 〜 ${periodEnd.toISOString()}`,
+      `[Discovery] 日次エッジ分析を実行 (7日 rolling): ${periodStart.toISOString()} 〜 ${periodEnd.toISOString()}`,
     );
 
     const result: DiscoveryJobResult = {
@@ -81,7 +82,6 @@ export class DiscoveryJob
         periodEnd.toISOString().split('T')[0],
       );
       result.noteCount = notes.length;
-      this.deps.log(`[Discovery] 対象ノート数: ${notes.length}`);
 
       if (notes.length === 0) {
         this.deps.log('[Discovery] 分析対象ノートなし。スキップします。');
@@ -90,12 +90,32 @@ export class DiscoveryJob
         return result;
       }
 
-      const report = await discoveryAgent.analyze(notes, periodStart, periodEnd);
-      result.newHypothesesCount = report.newHypotheses.length;
-      result.lensInsightsCount = report.lensInsights.length;
-      result.tokenUsage = report.tokenUsage;
+      // Step D-4: (symbol, timeframe) ごとにグループ化して analyze を呼ぶ。
+      // DiscoveryAgent は単一 (symbol, timeframe) のノート群でのみ組成し、symbols/timeframes を
+      // その実値にクランプする。混在ノートを 1 回で渡すと組成スキップになるため、ここで分割する。
+      // timeframe 未設定 (legacy) のノートは 'none' グループに入り、組成側で安全にスキップされる。
+      const groups = new Map<string, AITradeNote[]>();
+      for (const n of notes) {
+        const key = `${n.symbol}__${n.timeframe ?? 'none'}`;
+        const arr = groups.get(key);
+        if (arr) arr.push(n);
+        else groups.set(key, [n]);
+      }
+      this.deps.log(`[Discovery] 対象ノート数: ${notes.length} / グループ数: ${groups.size}`);
+
+      for (const [key, groupNotes] of groups) {
+        const report = await discoveryAgent.analyze(groupNotes, periodStart, periodEnd);
+        result.newHypothesesCount += report.newHypotheses.length;
+        result.lensInsightsCount += report.lensInsights.length;
+        result.tokenUsage += report.tokenUsage;
+        this.deps.log(
+          `[Discovery] グループ ${key}: notes=${groupNotes.length} ` +
+            `新規仮説=${report.newHypotheses.length} レンズ=${report.lensInsights.length}`,
+        );
+      }
       this.deps.log(
-        `[Discovery] 完了: 新規仮説 ${report.newHypotheses.length}個 / レンズ ${report.lensInsights.length}件 / tokens ${report.tokenUsage}`,
+        `[Discovery] 完了: 新規仮説 ${result.newHypothesesCount}個 / ` +
+          `レンズ ${result.lensInsightsCount}件 / tokens ${result.tokenUsage}`,
       );
       this.onCompleted?.(new Date());
     } catch (err) {
