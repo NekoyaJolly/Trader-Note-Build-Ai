@@ -51,6 +51,7 @@ import {
 import { agentMemory } from '../agent/agentMemory';
 import { edgeLedger } from '../ledger';
 import { decideExistingPlanAction } from './existingPlanDecision';
+import { applyDebateDirectionToScenarios } from './debateDirectionHookup';
 import type { EdgeHypothesis } from '../models/edgeHypothesis';
 import { IndicatorSpecialist } from '../agents/specialists/IndicatorSpecialist';
 import { fetchIndicatorBundleForMTF } from '../agents/specialists/analysisEngineIndicatorFetch';
@@ -555,6 +556,29 @@ export class AIOrchestrator {
       // フロー末尾の「削り落とし」役として再配置予定。
       const aggregatedWarnings: string[] = [...(planResult.output.warnings ?? [])];
 
+      // Step A-4: BullBearDebate の優勢判定を採用方向として PlanAI シナリオに hookup。
+      //
+      // Nekoさん 設計意図: 「ディベートが結果としてどっち優勢かを出してくる。その優勢な方向を
+      // そのままシナリオの採用方向として使う」。実体は `debateDirectionHookup.ts` の純粋関数
+      // (= ユニットテスト可能 + NaN ガード組込) に委譲。
+      let adjustedScenarios = scenariosWithId;
+      if (debateResult) {
+        const { adjustedScenarios: adjusted, aggregatedWarnings: debateWarnings } =
+          applyDebateDirectionToScenarios(scenariosWithId, {
+            preferredDirection: debateResult.output.synthesis.preferredDirection,
+            preferredConfidence: debateResult.output.synthesis.preferredConfidence,
+          });
+        adjustedScenarios = adjusted;
+        aggregatedWarnings.push(...debateWarnings);
+        // 採用方向との照合結果をログ出力 (= warnings に反映されなかった一致ケースも観測可能に)
+        const preferred = debateResult.output.synthesis.preferredDirection;
+        for (const s of scenariosWithId) {
+          if (preferred !== 'neutral' && s.direction === preferred) {
+            console.log(`[Orchestrator] Debate 採用方向一致: ${s.name} (${preferred})`);
+          }
+        }
+      }
+
       // 5. DB保存（Plan AIが解釈を含む新設計）
       // cron 先行で同日 Plan が存在する場合 (POST /scheduler/run-daily-plan の
       // 手動再発火) に Unique constraint 衝突しないよう upsertByDateSymbol を使う。
@@ -562,7 +586,7 @@ export class AIOrchestrator {
       const saved = await tracePlanStep(
         traceCtx,
         'plan_persist',
-        { symbol, dateStr, scenarioCount: scenariosWithId.length },
+        { symbol, dateStr, scenarioCount: adjustedScenarios.length },
         () =>
           this.planRepo.upsertByDateSymbol({
             // Phase A: 新規 plan は ResearchOutput を参照 (旧 researchId は Deprecated)
@@ -570,7 +594,7 @@ export class AIOrchestrator {
             targetDate: date,
             symbol,
             marketAnalysis: planResult.output.marketAnalysis,
-            scenarios: scenariosWithId,
+            scenarios: adjustedScenarios,
             overallConfidence: planResult.output.overallConfidence,
             warnings: aggregatedWarnings,
             aiModel: planResult.model,
