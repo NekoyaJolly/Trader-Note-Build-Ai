@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Side-B エージェント・ハンドオフ・ループ図 (2026-05-29 / D-1〜D-4 完了後)</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    background: #1a1d21; color: #d4d4d4; margin: 0; padding: 24px;
+    line-height: 1.55; font-size: 13px;
+  }
+  .container { max-width: 1280px; margin: 0 auto; }
+  h1 { color: #61afef; border-bottom: 2px solid #61afef; padding-bottom: 8px; font-size: 22px; }
+  h2 { color: #e5c07b; border-left: 4px solid #e5c07b; padding-left: 10px; margin-top: 36px; font-size: 17px; }
+  .meta { color: #7f848e; font-size: 11px; margin-bottom: 16px; }
+  .summary-box { background: #21252b; padding: 14px 18px; border-radius: 6px; border-left: 3px solid #61afef; margin: 12px 0; }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 10px; margin-right: 4px; font-weight: 600; }
+  .tag-llm { background: #5c3737; color: #f08080; }
+  .tag-det { background: #2c3a4a; color: #56b6c2; }
+  .tag-gate { background: #4a4a2c; color: #e5c07b; }
+  .tag-on { background: #2c4a3a; color: #98c379; }
+  .tag-off { background: #3a3a3a; color: #9aa0a6; }
+  .tag-dormant { background: #3a3a4a; color: #ab8aff; }
+
+  /* flow diagram */
+  .flow { display: flex; flex-direction: column; align-items: center; gap: 0; margin: 8px 0 24px; }
+  .node {
+    width: 100%; max-width: 880px; background: #21252b; border: 1px solid #2c313a;
+    border-radius: 8px; padding: 12px 16px; position: relative;
+  }
+  .node.start { border-color: #98c379; background: #1f2a22; }
+  .node.plan { border-color: #61afef; }
+  .node.exec { border-color: #56b6c2; }
+  .node.compose { border-color: #e5c07b; }
+  .node.validate { border-color: #c678dd; }
+  .node.evolve { border-color: #d19a66; }
+  .node.ui { border-color: #98c379; background: #1f2a22; }
+  .node .title { font-weight: 700; font-size: 14px; color: #fff; margin-bottom: 4px; }
+  .node .io { font-size: 11px; color: #abb2bf; margin-top: 4px; }
+  .node .io b { color: #56b6c2; }
+  .node .io .out { color: #e5c07b; }
+  .node .agents { margin-top: 8px; display: flex; flex-direction: column; gap: 5px; }
+  .agent-row { background: #1a1d21; border: 1px solid #2c313a; border-radius: 5px; padding: 5px 9px; font-size: 11px; }
+  .agent-row .an { color: #fff; font-weight: 600; }
+  .arrow { color: #7f848e; font-size: 20px; line-height: 1; padding: 6px 0; }
+  .arrow .lbl { font-size: 10px; color: #7f848e; display: block; text-align: center; }
+  .loopback {
+    width: 100%; max-width: 880px; border: 1px dashed #5c6370; border-radius: 8px;
+    padding: 8px 14px; color: #98c379; font-size: 11px; text-align: center; margin-top: 6px;
+  }
+  .branch { display: flex; gap: 14px; width: 100%; max-width: 880px; }
+  .branch .node { max-width: none; flex: 1; }
+
+  table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 12px; }
+  th, td { padding: 6px 9px; text-align: left; border-bottom: 1px solid #2c313a; vertical-align: top; }
+  th { background: #21252b; color: #61afef; font-weight: 600; }
+  td code { color: #c678dd; font-size: 11px; }
+  .note { color: #7f848e; font-size: 11px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Side-B エージェント・ハンドオフ・ループ図</h1>
+<div class="meta">生成: 2026-05-29 ／ 対象: Side-B 自律トレーディング AI ／ 状態: Step D-1〜D-4 再設計完了後 ／ 前身: side_b_agent_map_2026-05-27.html</div>
+
+<div class="summary-box">
+  <b>このループの読み方</b><br>
+  各エージェントの<b style="color:#e5c07b">出力</b>が次のエージェントの<b style="color:#56b6c2">入力</b>になる連鎖を、起点 → 観測 UI → ループ戻りの順で示す。
+  実行は <code>sideBScheduler</code> の各ジョブ (周期駆動) がトリガー。組成 (DiscoveryAgent の EdgeLedger 書き込み) は
+  <span class="tag tag-gate">DISCOVERY_COMPOSE_ENABLED 既定 OFF</span> で、有効化すると本ループが完全に閉じる。
+</div>
+
+<div class="legend">
+  <span><span class="tag tag-llm">LLM</span>LLM 判定</span>
+  <span><span class="tag tag-det">決定論</span>決定論的処理</span>
+  <span><span class="tag tag-on">既定 ON</span>デフォルト有効</span>
+  <span><span class="tag tag-off">既定 OFF</span>デフォルト無効</span>
+  <span><span class="tag tag-gate">GATE</span>env フラグでゲート</span>
+  <span><span class="tag tag-dormant">dormant</span>休止 (呼び出し 0)</span>
+</div>
+
+<h2>① ループ全体図 (起点 → ハンドオフ連鎖 → UI → 戻り)</h2>
+<div class="flow">
+
+  <div class="node start">
+    <div class="title">⏱ 起点: sideBScheduler (FX 平日 24h)</div>
+    <div class="io"><b>入力源:</b> 市場開場時刻 / 各ジョブの周期タイマー。最初の実データ入力は <b>MarketDataService (EODHD All-In-One)</b> の OHLCV / indicators。</div>
+    <div class="io">監視ループ <code>TradeMonitoringJob</code> (1h) が常時稼働し、その約定→ノートが下流 (組成→検証→進化) の入力源になる。</div>
+  </div>
+
+  <div class="arrow">↓<span class="lbl">PlanGenerationJob (4h 周期 / 既定 ON)</span></div>
+
+  <div class="node plan">
+    <div class="title">② Plan フェーズ — AIOrchestrator.generatePlan</div>
+    <div class="io"><b>入力:</b> symbol / OHLCV / indicators (+ 上位足 higherTFData)　<span class="out">出力 →</span> AITradePlan + scenarios (DB 永続化、<b>MTF: 執行足+上位足を付与</b>)</div>
+    <div class="agents">
+      <div class="agent-row"><span class="an">ResearchAI</span> <span class="tag tag-llm">LLM</span> ← OHLCV/indicators ／ → marketAnalysis (regime/trend/levels)</div>
+      <div class="agent-row"><span class="an">Lens Aggregation</span> <span class="tag tag-det">決定論</span> ← OHLCV ／ → LensFeatureSnapshot (primaryTimeframe 付き)</div>
+      <div class="agent-row"><span class="an">EdgeLedger Matching</span> <span class="tag tag-det">決定論</span> ← lensSnapshot ／ → 成立中の既存仮説 ID 群</div>
+      <div class="agent-row"><span class="an">IndicatorSpecialist</span> <span class="tag tag-llm">LLM</span> ← MTF (執行足+上位足) bundle ／ → テクニカル解釈</div>
+      <div class="agent-row"><span class="an">PlanAI (StrategyThinker)</span> <span class="tag tag-llm">LLM</span> ← research + lens + indicator 解釈 ／ → scenarios (entry/SL/TP)</div>
+      <div class="agent-row"><span class="an">BullBearDebate</span> <span class="tag tag-llm">LLM</span> ← candidate scenarios ／ → 優勢方向 (preferredDirection)</div>
+      <div class="agent-row"><span class="an">Debate Hookup</span> <span class="tag tag-det">決定論</span> ← 優勢方向 ／ → 採用方向を付与した最終 scenarios</div>
+    </div>
+  </div>
+
+  <div class="arrow">↓<span class="lbl">createTradeFromPlan</span></div>
+
+  <div class="node exec">
+    <div class="title">③ 執行フェーズ — VirtualTrade → AITradeNote</div>
+    <div class="io"><b>入力:</b> AITradePlan の scenario　<span class="out">出力 →</span> AITradeNote (+ reflection)、<b>plan の MTF 文脈を継承</b></div>
+    <div class="agents">
+      <div class="agent-row"><span class="an">VirtualTrade 生成</span> <span class="tag tag-det">決定論</span> ← scenario ／ → pending トレード (timeframe/higherTimeframe 付き)</div>
+      <div class="agent-row"><span class="an">TradeMonitoringJob</span> <span class="tag tag-det">決定論</span> ← 1分足 OHLCV ／ → pending→open→closed の状態遷移 (高安値検証)</div>
+      <div class="agent-row"><span class="an">aiNoteService</span> <span class="tag tag-det">決定論</span> ← 決済済 trade + plan ／ → AITradeNote (MTF 付き)</div>
+      <div class="agent-row"><span class="an">reflectionAI</span> <span class="tag tag-llm">LLM</span> ← trade 結果 (時間足込み) ／ → 振り返り分析 (note.learnings に統合)</div>
+    </div>
+  </div>
+
+  <div class="arrow">↓<span class="lbl">DiscoveryJob (日次 / 7日 rolling lookback / 既定 ON)</span></div>
+
+  <div class="node compose">
+    <div class="title">④ 組成フェーズ — DiscoveryAgent (Step D-4) <span class="tag tag-gate">書き込みは DISCOVERY_COMPOSE_ENABLED 既定 OFF</span></div>
+    <div class="io"><b>入力:</b> 直近 7 日の AITradeNote を <b>(symbol, timeframe) ごとにグループ化</b>　<span class="out">出力 →</span> EdgeHypothesis (source='discovery', unverified)</div>
+    <div class="agents">
+      <div class="agent-row"><span class="an">aggregateFeatureValues / 特徴量分離</span> <span class="tag tag-det">決定論</span> ← AITradeNote 群 ／ → 勝敗を分ける特徴量</div>
+      <div class="agent-row"><span class="an">DiscoveryAgent.analyze</span> <span class="tag tag-llm">LLM</span> ← 特徴量 + <b>過去の confirmed/rejected (feedback loop)</b> ／ → 新規仮説。symbol/timeframe は<b>ノート実値からクランプ</b></div>
+      <div class="agent-row"><span class="an">HypothesisGenerator</span> <span class="tag tag-dormant">dormant</span> 旧組成役。再設計で Discovery に統合され休止 (呼び出し 0)</div>
+    </div>
+  </div>
+
+  <div class="arrow">↓<span class="lbl">EdgeLedger (status で進行管理)</span></div>
+
+  <div class="branch">
+    <div class="node validate">
+      <div class="title">⑤ 検証フェーズ — 2 段ゲート</div>
+      <div class="io"><b>入力:</b> EdgeHypothesis (unverified)　<span class="out">出力 →</span> confirmed / rejected</div>
+      <div class="agents">
+        <div class="agent-row"><span class="an">ScreeningJob</span> <span class="tag tag-on">既定 ON</span> 軽量 BT ／ unverified → screening_passed / rejected</div>
+        <div class="agent-row"><span class="an">FullValidationJob</span> <span class="tag tag-on">既定 ON</span> <span class="tag tag-det">機械判定</span> 本格 BT + WF + MonteCarlo + BuyHold ／ screening_passed → confirmed / rejected (旧 StrategistAgent の LLM 判定は<b>廃止</b>)</div>
+      </div>
+    </div>
+    <div class="node evolve">
+      <div class="title">⑥ 進化フェーズ — EvolutionLoop</div>
+      <div class="io"><b>入力:</b> confirmed 仮説 + 12 novelty seed　<span class="out">出力 →</span> promotion (採用戦略)　<span class="tag tag-off">EvolutionJob 既定 OFF</span></div>
+      <div class="agents">
+        <div class="agent-row"><span class="an">MutationAgent</span> <span class="tag tag-llm">LLM</span> ← 親戦略 ／ → インジ params 最適化変異体 (Step D-2)</div>
+        <div class="agent-row"><span class="an">CrossoverAgent</span> <span class="tag tag-llm">LLM</span> ← 親A の負けトレード ／ → フィルタ追加でエッジ発見 (Step D-3)</div>
+        <div class="agent-row"><span class="an">Surrogate → 本格 BT</span> <span class="tag tag-det">決定論</span> Rescue Lane で候補を ~7 件に絞り analysis-engine で本格 BT → promotionCandidates</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow">↓<span class="lbl">EdgeLedger / AITradeNote の集計を API が供給</span></div>
+
+  <div class="node ui">
+    <div class="title">⑦ UI 出力担当 — LedgerDashboardController / aiNoteController</div>
+    <div class="io"><b>入力:</b> EdgeLedger (status/category/source) + AITradeNote　<span class="out">出力 →</span> frontend dashboard (<code>/side-b/dashboard</code>)</div>
+    <div class="io">
+      <code>/stats/overview</code> 全体サマリ ／ <code>/stats/time-series</code> confirmed 推移 ／ <code>/stats/by-category</code> ／
+      <code>/stats/validation-activity</code> ／ <code>/discovery/latest</code> ／ <b><code>/discovery/funnel</code> = Discovery 組成 funnel (Step D-4b)</b> ／ <code>/system/health</code>
+    </div>
+  </div>
+
+  <div class="loopback">↺ ループ戻り: 採用戦略・確定仮説が次サイクルの Plan / EvolutionLoop の親プールに還流。新しい AITradeNote が翌日の Discovery 組成入力になり、組成仮説の検証結果が feedback loop で次回組成に注入される。</div>
+
+</div>
+
+<h2>② 起動条件 (トリガー) 一覧</h2>
+<table>
+  <tr><th>ジョブ</th><th>周期</th><th>既定</th><th>役割 (このループでの位置)</th></tr>
+  <tr><td>PlanGenerationJob</td><td>4h (planIntervalHours)</td><td><span class="tag tag-on">ON</span></td><td>② Plan 生成の起点 (市場開場時)</td></tr>
+  <tr><td>TradeMonitoringJob</td><td>1h (monitorIntervalMs)</td><td><span class="tag tag-on">ON</span></td><td>③ 執行監視・決済・ノート生成 (常時ループ)</td></tr>
+  <tr><td>DiscoveryJob</td><td>日次 (7日 rolling)</td><td><span class="tag tag-on">ON</span> / 書込は<span class="tag tag-gate">GATE OFF</span></td><td>④ 組成 (Step D-4 で週次→日次・per-group)</td></tr>
+  <tr><td>ScreeningJob</td><td>日次</td><td><span class="tag tag-on">ON</span></td><td>⑤ 軽量 BT 事前スクリーニング</td></tr>
+  <tr><td>FullValidationJob</td><td>日次</td><td><span class="tag tag-on">ON</span></td><td>⑤ 本格 BT/WF/MC/BuyHold で confirmed/rejected 機械判定</td></tr>
+  <tr><td>EvolutionJob</td><td>日次</td><td><span class="tag tag-off">OFF</span></td><td>⑥ Mutation/Crossover による戦略進化</td></tr>
+  <tr><td>CleanupJob</td><td>日次 (プラン成功時)</td><td><span class="tag tag-on">ON</span></td><td>古い plan/trade の retention 削除</td></tr>
+</table>
+
+<h2>③ エージェント入出力テーブル (誰の出力が誰の入力か)</h2>
+<table>
+  <tr><th>エージェント</th><th>種別</th><th>入力 (どこから)</th><th>出力 (どこへ)</th></tr>
+  <tr><td>ResearchAI</td><td><span class="tag tag-llm">LLM</span></td><td>OHLCV / indicators (EODHD)</td><td>marketAnalysis → PlanAI</td></tr>
+  <tr><td>Lens Aggregation</td><td><span class="tag tag-det">決定論</span></td><td>OHLCV</td><td>LensFeatureSnapshot → IndicatorSpecialist / EdgeLedger Matching / 組成</td></tr>
+  <tr><td>IndicatorSpecialist</td><td><span class="tag tag-llm">LLM</span></td><td>MTF (執行足+上位足) bundle</td><td>テクニカル解釈 → PlanAI</td></tr>
+  <tr><td>PlanAI (StrategyThinker)</td><td><span class="tag tag-llm">LLM</span></td><td>research + lens + indicator 解釈</td><td>scenarios → BullBearDebate / VirtualTrade</td></tr>
+  <tr><td>BullBearDebate</td><td><span class="tag tag-llm">LLM</span></td><td>candidate scenarios</td><td>優勢方向 → Debate Hookup → 最終 scenarios</td></tr>
+  <tr><td>aiNoteService</td><td><span class="tag tag-det">決定論</span></td><td>決済済 VirtualTrade + plan</td><td>AITradeNote → reflectionAI / Discovery</td></tr>
+  <tr><td>reflectionAI</td><td><span class="tag tag-llm">LLM</span></td><td>trade 結果 (時間足込み)</td><td>振り返り → AITradeNote.learnings</td></tr>
+  <tr><td>DiscoveryAgent</td><td><span class="tag tag-llm">LLM</span></td><td>AITradeNote 群 (symbol/tf 別) + 過去仮説結果 (feedback)</td><td>EdgeHypothesis(unverified) → EdgeLedger</td></tr>
+  <tr><td>ScreeningJob / FullValidationJob</td><td><span class="tag tag-det">機械判定</span></td><td>EdgeHypothesis</td><td>status 遷移 (confirmed/rejected) → EvolutionLoop / UI</td></tr>
+  <tr><td>MutationAgent</td><td><span class="tag tag-llm">LLM</span></td><td>親エリート戦略</td><td>params 最適化変異体 → BT</td></tr>
+  <tr><td>CrossoverAgent</td><td><span class="tag tag-llm">LLM</span></td><td>親A の負けトレード + フィルタ素材</td><td>フィルタ追加戦略 → BT</td></tr>
+  <tr><td>HypothesisGenerator</td><td><span class="tag tag-dormant">dormant</span></td><td>—</td><td>— (再設計で Discovery に統合、休止)</td></tr>
+  <tr><td>StrategistAgent</td><td><span class="tag tag-dormant">廃止</span></td><td>—</td><td>— (LLM 判定は BT メトリクス機械判定に置換)</td></tr>
+</table>
+
+<h2>④ 一貫して流れるもの: MTF 文脈 (執行足 + 上位足)</h2>
+<div class="summary-box">
+  Step D 前提の基盤修正 (#277/#278) で、<b>timeframe (執行足) + higherTimeframe (上位足)</b> が
+  <code>plan → trade → note → reflection ハンドオフ → 組成</code> を一貫して流れるようになった。
+  DiscoveryAgent はこの実 timeframe を仮説に<b>クランプ</b>するため、「分析した銘柄/足と無関係な仮説を組成する」過去の不整合が構造的に起きない。
+  原則は <code>src/side-b/AGENTS.md</code> に明文化済 (エージェント出力 / ハンドオフは symbol と同格で MTF 文脈を必須とする)。
+</div>
+
+<h2>⑤ 現状の閉ループ条件</h2>
+<div class="summary-box">
+  Plan→Trade→Note→検証→進化→UI の各ハンドオフは結線済。<b>唯一の開口部は組成の書き込みゲート</b>
+  <code>DISCOVERY_COMPOSE_ENABLED</code> (既定 OFF)。これを true にすると DiscoveryAgent が AITradeNote から仮説を組成して
+  EdgeLedger に流し込み、<code>/discovery/funnel</code> パネルで「組成 → screening → confirmed/rejected」を観測しながら
+  ループが完全に閉じる。有効化はデータと観測を見ながら判断する。
+</div>
+
+<div class="meta" style="margin-top:32px;">凡例: LLM=大規模言語モデル判定 / 決定論=純粋計算・機械判定 / GATE=env フラグ制御 / dormant=コード残置・呼び出し 0。本図は概念フローであり、行番号レベルの正本はソースを参照。</div>
+
+</div>
+</body>
+</html>
