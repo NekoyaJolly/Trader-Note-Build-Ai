@@ -51,6 +51,7 @@ import {
 import { agentMemory } from '../agent/agentMemory';
 import { edgeLedger } from '../ledger';
 import { decideExistingPlanAction } from './existingPlanDecision';
+import { applyDebateDirectionToScenarios } from './debateDirectionHookup';
 import type { EdgeHypothesis } from '../models/edgeHypothesis';
 import { IndicatorSpecialist } from '../agents/specialists/IndicatorSpecialist';
 import { fetchIndicatorBundleForMTF } from '../agents/specialists/analysisEngineIndicatorFetch';
@@ -558,32 +559,22 @@ export class AIOrchestrator {
       // Step A-4: BullBearDebate の優勢判定を採用方向として PlanAI シナリオに hookup。
       //
       // Nekoさん 設計意図: 「ディベートが結果としてどっち優勢かを出してくる。その優勢な方向を
-      // そのままシナリオの採用方向として使う」。Debate output (preferredDirection) と
-      // 不一致のシナリオは confidence を 50% 抑制 + warning 付与、一致のシナリオはそのまま、
-      // neutral 判定なら全シナリオに「中立」warning。
-      //
-      // 旧 Devil's Advocate (Step F で削除済) と類似の confidence 調整パターンを採用。
+      // そのままシナリオの採用方向として使う」。実体は `debateDirectionHookup.ts` の純粋関数
+      // (= ユニットテスト可能 + NaN ガード組込) に委譲。
+      let adjustedScenarios = scenariosWithId;
       if (debateResult) {
+        const { adjustedScenarios: adjusted, aggregatedWarnings: debateWarnings } =
+          applyDebateDirectionToScenarios(scenariosWithId, {
+            preferredDirection: debateResult.output.synthesis.preferredDirection,
+            preferredConfidence: debateResult.output.synthesis.preferredConfidence,
+          });
+        adjustedScenarios = adjusted;
+        aggregatedWarnings.push(...debateWarnings);
+        // 採用方向との照合結果をログ出力 (= warnings に反映されなかった一致ケースも観測可能に)
         const preferred = debateResult.output.synthesis.preferredDirection;
-        const preferredConf = debateResult.output.synthesis.preferredConfidence;
-        for (const scenario of scenariosWithId) {
-          if (preferred === 'neutral') {
-            const warn = `BullBear Debate: 中立判定 (confidence ${String(preferredConf)}%)`;
-            scenario.warnings = [...(scenario.warnings ?? []), warn];
-            aggregatedWarnings.push(`[${scenario.name}] ${warn}`);
-          } else if (scenario.direction !== preferred) {
-            const oldConf = scenario.confidence;
-            scenario.confidence = Math.round(scenario.confidence * 0.5);
-            const warn =
-              `BullBear Debate 採用方向: ${preferred} (confidence ${String(preferredConf)}%) と不一致、` +
-              `confidence ${String(oldConf)} → ${String(scenario.confidence)} に抑制`;
-            scenario.warnings = [...(scenario.warnings ?? []), warn];
-            aggregatedWarnings.push(`[${scenario.name}] ${warn}`);
-            console.log(`[Orchestrator] Debate 不一致シナリオ抑制: ${scenario.name}`);
-          } else {
-            console.log(
-              `[Orchestrator] Debate 採用方向一致: ${scenario.name} (${preferred}, ${String(preferredConf)}%)`,
-            );
+        for (const s of scenariosWithId) {
+          if (preferred !== 'neutral' && s.direction === preferred) {
+            console.log(`[Orchestrator] Debate 採用方向一致: ${s.name} (${preferred})`);
           }
         }
       }
@@ -595,7 +586,7 @@ export class AIOrchestrator {
       const saved = await tracePlanStep(
         traceCtx,
         'plan_persist',
-        { symbol, dateStr, scenarioCount: scenariosWithId.length },
+        { symbol, dateStr, scenarioCount: adjustedScenarios.length },
         () =>
           this.planRepo.upsertByDateSymbol({
             // Phase A: 新規 plan は ResearchOutput を参照 (旧 researchId は Deprecated)
@@ -603,7 +594,7 @@ export class AIOrchestrator {
             targetDate: date,
             symbol,
             marketAnalysis: planResult.output.marketAnalysis,
-            scenarios: scenariosWithId,
+            scenarios: adjustedScenarios,
             overallConfidence: planResult.output.overallConfidence,
             warnings: aggregatedWarnings,
             aiModel: planResult.model,
