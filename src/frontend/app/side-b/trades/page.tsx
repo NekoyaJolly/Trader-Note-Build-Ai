@@ -398,8 +398,7 @@ export default function TradesPage() {
             <div className="mt-2 pt-2 border-t border-slate-700/50 text-xs text-slate-400 space-y-1">
               <p>
                 プランID: <span className="text-slate-200 font-mono">{lastPlanResult.plan.id}</span>{" "}
-                / 信頼度: {String(lastPlanResult.plan.overallConfidence)} /{" "}
-                {lastPlanResult.cached ? "キャッシュ" : "新規生成"}{" "}
+                / {lastPlanResult.cached ? "キャッシュ" : "新規生成"}{" "}
                 {typeof lastPlanResult.tokenUsage === "number" ? ` / tokens ${lastPlanResult.tokenUsage}` : ""}
               </p>
               <div className="mt-2">

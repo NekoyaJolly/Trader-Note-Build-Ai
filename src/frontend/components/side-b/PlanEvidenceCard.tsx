@@ -42,18 +42,14 @@ export function PlanEvidenceCard({ plan, className }: PlanEvidenceCardProps) {
     const ma = plan.marketAnalysis;
     return (
         <article className={`rounded-xl border border-slate-700/60 bg-slate-900/30 p-3 ${className ?? ""}`}>
-            {/* ヘッダー: 銘柄 / 日付 / 全体信頼度 */}
-            <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
-                <div>
-                    <p className="text-sm font-semibold text-white">
-                        {plan.symbol} / {fmtDate(plan.targetDate)}
-                    </p>
-                    <p className="text-[11px] text-gray-500 font-mono">{plan.id}</p>
-                </div>
-                <div className="text-right">
-                    <p className="text-xs text-gray-500">全体信頼度</p>
-                    <p className="text-sm font-semibold text-cyan-300">{formatPercent(plan.overallConfidence)}</p>
-                </div>
+            {/* ヘッダー: 銘柄 / 日付。
+                「全体信頼度」は表示しない (旧実装は LLM が prompt 例の 0 をコピーするだけの無意味な値)。
+                プラン全体の信頼度は将来、過去統計ベースで再導入予定。シナリオ単位の confidence / RR は下に表示。 */}
+            <div className="mb-2">
+                <p className="text-sm font-semibold text-white">
+                    {plan.symbol} / {fmtDate(plan.targetDate)}
+                </p>
+                <p className="text-[11px] text-gray-500 font-mono">{plan.id}</p>
             </div>
 
             {/* 市場分析 */}
