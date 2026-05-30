@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { permanentRedirect } from "next/navigation";
 
 /**
  * /side-b/agent は運転席 (/side-b) に統合済み (2026-05-31)。
@@ -8,5 +8,5 @@ import { redirect } from "next/navigation";
  * 本ルートはナビ未接続の孤立ページだったため、旧ブックマーク救済として運転席へ恒久リダイレクトする。
  */
 export default function AgentDetailRedirect() {
-  redirect("/side-b");
+  permanentRedirect("/side-b");
 }

@@ -339,6 +339,8 @@ export default function SideBDashboard() {
     }
     setSelectedRunId(runId);
     activeRunIdRef.current = runId;
+    // 別 run の古い詳細が残って新 run の下に表示されるのを防ぐため、取得開始時にクリア
+    setSelectedRunDetail(null);
     setIsDetailLoading(true);
     try {
       const detail = await sideBApi.getOrchestratorRunDetail(runId);
@@ -347,6 +349,9 @@ export default function SideBDashboard() {
       }
     } catch (err) {
       console.error("fetchRunDetail error:", err);
+      if (activeRunIdRef.current === runId) {
+        setSelectedRunDetail(null);
+      }
     } finally {
       if (activeRunIdRef.current === runId) {
         setIsDetailLoading(false);
