@@ -21,9 +21,6 @@ import { isNavHrefActive } from "@/lib/navigation/navActive";
 // APIベースURL
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "") + "/api/side-b";
 
-// 自動更新間隔（ミリ秒）
-const REFRESH_INTERVAL = 15_000;
-
 // --- 型定義 ---
 
 interface TradeResult {
@@ -127,6 +124,7 @@ export default function SideBDashboard() {
   const [thinkingLog, setThinkingLog] = useState<ThinkingLogEntry[]>([]);
   const [lessons, setLessons] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -201,11 +199,22 @@ export default function SideBDashboard() {
     }
   }, []);
 
+  // 自動ポーリングは廃止 (2026-05-31)。
+  // 表示するのは PDCA ループのメモリ状態で、実 cadence は最速 5 分・通常 1h〜日次。
+  // プラン確定後の執行は決定論で AI が常時張り付く必要がないため、開いた時に 1 回 fetch +
+  // 手動「更新」ボタンに切替え、15 秒ポーリングによる Cloud Run / Supabase の無駄叩きを排除する。
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, REFRESH_INTERVAL);
-    return () => clearInterval(interval);
   }, [fetchData]);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await fetchData();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   // --- エージェント制御 ---
 
@@ -349,6 +358,17 @@ export default function SideBDashboard() {
                   <span>{isStopping ? "停止中..." : "Stop"}</span>
                 </button>
               )}
+
+              {/* 手動更新（自動ポーリング廃止に伴い追加） */}
+              <button
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 hover:border-white/30 text-gray-300 hover:text-white text-sm transition-colors disabled:opacity-50"
+                title="最新の状態を取得"
+              >
+                <span className={isRefreshing ? "animate-spin" : ""}>⟳</span>
+                <span>{isRefreshing ? "更新中..." : "更新"}</span>
+              </button>
             </div>
 
             {/* 右: メトリクス */}
@@ -588,10 +608,7 @@ export default function SideBDashboard() {
 
         {/* フッター */}
         <div className="text-center mt-6 text-xs text-gray-500">
-          <p>
-            TradeAssistant-AI • 自動更新 {REFRESH_INTERVAL / 1000}秒
-            <span className="ml-2 inline-block w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
-          </p>
+          <p>TradeAssistant-AI • 手動更新（右上の「更新」ボタン）</p>
         </div>
       </main>
     </div>
