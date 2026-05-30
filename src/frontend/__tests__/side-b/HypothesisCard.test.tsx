@@ -51,6 +51,26 @@ describe("HypothesisCard", () => {
         expect(screen.getByText("AI 生成")).toBeInTheDocument();
     });
 
+    it("statusNote を渡すと状態理由が表示される", () => {
+        render(
+            <HypothesisCard
+                hypothesis={{
+                    ...minimal,
+                    status: "rejected",
+                    statusNote: "検証期間 PF が 1.3 を下回ったため棄却",
+                }}
+            />,
+        );
+        const note = screen.getByTestId("status-note");
+        expect(note).toBeInTheDocument();
+        expect(note).toHaveTextContent("検証期間 PF が 1.3 を下回ったため棄却");
+    });
+
+    it("statusNote が無ければ状態理由は描画されない", () => {
+        render(<HypothesisCard hypothesis={minimal} />);
+        expect(screen.queryByTestId("status-note")).not.toBeInTheDocument();
+    });
+
     it("winCount/lossCount から観測勝率を算出して % 表示する", () => {
         render(
             <HypothesisCard

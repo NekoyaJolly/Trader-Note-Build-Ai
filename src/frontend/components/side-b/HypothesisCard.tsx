@@ -86,6 +86,8 @@ export interface HypothesisCardData {
     /** ISO8601 */
     statusUpdatedAt?: string;
     screeningResult?: ScreeningResult;
+    /** 状態変化の理由 (confirmed/rejected 等)。一覧でも「なぜこの状態か」を辿れるよう表示する。 */
+    statusNote?: string;
 }
 
 export interface HypothesisCardProps {
@@ -257,7 +259,18 @@ export function HypothesisCard({
                     )}
                 </div>
 
-                {/* 5行目: 日時 */}
+                {/* 5行目: 状態理由 (statusNote)。confirmed/rejected の「なぜ」を一覧で辿れるように。 */}
+                {hypothesis.statusNote && (
+                    <p
+                        className="text-[11px] text-gray-400 leading-snug"
+                        data-testid="status-note"
+                    >
+                        <span className="text-gray-500">状態理由: </span>
+                        {truncate(hypothesis.statusNote, isCompact ? 48 : 120)}
+                    </p>
+                )}
+
+                {/* 6行目: 日時 */}
                 {(lastTested || statusUpdated) && !isCompact && (
                     <div className="text-[11px] text-gray-500" data-testid="timestamps">
                         {lastTested && <span>最終検証: {lastTested}</span>}
