@@ -383,7 +383,7 @@ export default function AINotesPage() {
               </Link>
               <h1 className="text-xl font-bold flex items-center gap-2">
                 <span>📝</span>
-                <span>AI Trade Notes</span>
+                <span>ノート</span>
               </h1>
             </div>
             <button

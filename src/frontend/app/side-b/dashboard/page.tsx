@@ -152,7 +152,7 @@ export default function SideBDashboardPage() {
       <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-white">台帳ダッシュボード</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-white">統計</h1>
             <p className="text-xs text-gray-400 mt-0.5">
               エッジ台帳の成長・検証活動・システム状態の俯瞰
             </p>

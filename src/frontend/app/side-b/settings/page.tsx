@@ -239,7 +239,7 @@ export default function SettingsPage() {
               ← Dashboard
             </Link>
             <h1 className="text-xl font-bold bg-gradient-to-r from-purple-400 to-cyan-400 bg-clip-text text-transparent">
-              🔧 自動実行設定
+              🔧 設定
             </h1>
           </div>
 
