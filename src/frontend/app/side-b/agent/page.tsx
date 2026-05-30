@@ -580,6 +580,67 @@ export default function AgentDetailPage() {
                                             ))}
                                         </div>
                                     )}
+                                    {/* P0-a で永続化された討論 (BullBearDebate)。なぜ long/short かの根拠。 */}
+                                    {plan.debate && (
+                                        <details className="mt-3">
+                                            <summary className="text-[11px] text-fuchsia-300 cursor-pointer select-none">
+                                                🐂 強気 vs 🐻 弱気の討論 (優勢: {plan.debate.synthesis.preferredDirection} / 確信度 {formatPercent(plan.debate.synthesis.preferredConfidence)})
+                                            </summary>
+                                            <div className="mt-2 space-y-2 border-l-2 border-fuchsia-500/30 pl-2.5">
+                                                <p className="text-[11px] text-gray-300">{plan.debate.synthesis.reasoning}</p>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                    <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-2.5 py-2">
+                                                        <p className="text-[11px] text-emerald-300 mb-1">
+                                                            🐂 強気 (確信度 {formatPercent(plan.debate.bull.confidence)})
+                                                        </p>
+                                                        <p className="text-[11px] text-gray-300">{plan.debate.bull.scenario}</p>
+                                                        {plan.debate.bull.rationale.length > 0 && (
+                                                            <ul className="list-disc list-inside text-[11px] text-gray-400 mt-1">
+                                                                {plan.debate.bull.rationale.map((r, i) => (
+                                                                    <li key={i}>{r}</li>
+                                                                ))}
+                                                            </ul>
+                                                        )}
+                                                    </div>
+                                                    <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 px-2.5 py-2">
+                                                        <p className="text-[11px] text-rose-300 mb-1">
+                                                            🐻 弱気 (確信度 {formatPercent(plan.debate.bear.confidence)})
+                                                        </p>
+                                                        <p className="text-[11px] text-gray-300">{plan.debate.bear.scenario}</p>
+                                                        {plan.debate.bear.rationale.length > 0 && (
+                                                            <ul className="list-disc list-inside text-[11px] text-gray-400 mt-1">
+                                                                {plan.debate.bear.rationale.map((r, i) => (
+                                                                    <li key={i}>{r}</li>
+                                                                ))}
+                                                            </ul>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                {plan.debate.synthesis.actionableInsight && (
+                                                    <p className="text-[11px] text-cyan-300/90">
+                                                        <span className="text-gray-500">結論: </span>
+                                                        {plan.debate.synthesis.actionableInsight}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </details>
+                                    )}
+                                    {/* P0-a で永続化された IndicatorSpecialist の MTF テクニカル統合解釈。 */}
+                                    {plan.indicatorAnalysis && (
+                                        <details className="mt-2">
+                                            <summary className="text-[11px] text-amber-300 cursor-pointer select-none">
+                                                📊 テクニカル統合解釈 (確信度 {formatPercent(plan.indicatorAnalysis.confidence)})
+                                            </summary>
+                                            <div className="mt-2 space-y-1.5 border-l-2 border-amber-500/30 pl-2.5">
+                                                <p className="text-[11px] text-gray-300">{plan.indicatorAnalysis.interpretation}</p>
+                                                <div className="flex flex-wrap gap-2 text-[11px] text-gray-500">
+                                                    <span>トレンド: {plan.indicatorAnalysis.current.trendState}</span>
+                                                    <span>モメンタム: {plan.indicatorAnalysis.current.momentum}</span>
+                                                    <span>MTF整合: {plan.indicatorAnalysis.mtfAlignment.trendAlignment}</span>
+                                                </div>
+                                            </div>
+                                        </details>
+                                    )}
                                     {plan.warnings.length > 0 && (
                                         <p className="text-[11px] text-amber-300 mt-2">
                                             警告: {plan.warnings.slice(0, 2).join(" / ")}

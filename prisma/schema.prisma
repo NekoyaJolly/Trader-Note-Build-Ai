@@ -1318,6 +1318,10 @@ model AITradePlan {
   marketAnalysis Json
   /// トレードシナリオ配列（JSONB）
   scenarios      Json
+  /// BullBearDebate の全出力（JSONB: bull/bear シナリオ・論拠・synthesis）。LLM 生成根拠の永続化（P0-a）。既存行は null。
+  debate            Json?
+  /// IndicatorSpecialist の MTF テクニカル統合解釈（JSONB）。LLM 生成根拠の永続化（P0-a）。既存行は null。
+  indicatorAnalysis Json?
 
   // メタ情報
   /// 全体信頼度（0-100）

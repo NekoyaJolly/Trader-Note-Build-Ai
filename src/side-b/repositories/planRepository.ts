@@ -20,6 +20,8 @@ import type {
   AITradeScenario,
   PlanMarketAnalysis,
 } from '../models';
+import type { BullBearDebateOutput } from '../agents/BullBearDebateAgent';
+import type { IndicatorAnalysis } from '../agents/specialists/types';
 
 // ===========================================
 // 型定義
@@ -44,6 +46,10 @@ export interface CreatePlanInput {
   higherTimeframe: string;
   marketAnalysis: PlanMarketAnalysis;
   scenarios: AITradeScenario[];
+  /** BullBearDebate の全出力。LLM 生成根拠の永続化 (P0-a)。debate 失敗/スキップ時は undefined。 */
+  debate?: BullBearDebateOutput;
+  /** IndicatorSpecialist の MTF テクニカル統合解釈。LLM 生成根拠の永続化 (P0-a)。取得失敗時は undefined。 */
+  indicatorAnalysis?: IndicatorAnalysis;
   overallConfidence?: number;
   warnings?: string[];
   aiModel?: string;
@@ -65,9 +71,14 @@ export interface FindPlanOptions {
 /**
  * DBから取得したプランをアプリ型に変換した型
  */
-export interface AITradePlanWithTypes extends Omit<AITradePlan, 'marketAnalysis' | 'scenarios'> {
+export interface AITradePlanWithTypes
+  extends Omit<AITradePlan, 'marketAnalysis' | 'scenarios' | 'debate' | 'indicatorAnalysis'> {
   marketAnalysis: PlanMarketAnalysis;
   scenarios: AITradeScenario[];
+  /** P0-a で追加。旧プラン (列追加前) や debate スキップ時は null。 */
+  debate: BullBearDebateOutput | null;
+  /** P0-a で追加。旧プランや取得失敗時は null。 */
+  indicatorAnalysis: IndicatorAnalysis | null;
 }
 
 /**
@@ -186,6 +197,10 @@ export class PlanRepository {
         higherTimeframe: input.higherTimeframe,
         marketAnalysis: toInputJsonValue(input.marketAnalysis),
         scenarios: toInputJsonValue(input.scenarios),
+        // P0-a: debate / indicatorAnalysis は欠落時 undefined を渡して既存値を維持
+        // (= 上書き再生成で debate が失敗した場合に過去の根拠を誤って消さない)。
+        debate: input.debate ? toInputJsonValue(input.debate) : undefined,
+        indicatorAnalysis: input.indicatorAnalysis ? toInputJsonValue(input.indicatorAnalysis) : undefined,
         overallConfidence: input.overallConfidence,
         warnings: input.warnings || [],
         aiModel: input.aiModel,
@@ -200,6 +215,8 @@ export class PlanRepository {
         higherTimeframe: input.higherTimeframe,
         marketAnalysis: toInputJsonValue(input.marketAnalysis),
         scenarios: toInputJsonValue(input.scenarios),
+        debate: input.debate ? toInputJsonValue(input.debate) : undefined,
+        indicatorAnalysis: input.indicatorAnalysis ? toInputJsonValue(input.indicatorAnalysis) : undefined,
         overallConfidence: input.overallConfidence,
         warnings: input.warnings || [],
         aiModel: input.aiModel,
@@ -393,6 +410,11 @@ export class PlanRepository {
       marketAnalysis: plan.marketAnalysis as unknown as PlanMarketAnalysis,
       // eslint-disable-next-line no-restricted-syntax -- 同上
       scenarios: plan.scenarios as unknown as AITradeScenario[],
+      // P0-a: 旧プラン (列追加前) や debate スキップ時は DB が null。null はそのまま通す。
+      // eslint-disable-next-line no-restricted-syntax -- 同上 (JsonValue → アプリ型の検証境界)
+      debate: (plan.debate ?? null) as unknown as BullBearDebateOutput | null,
+      // eslint-disable-next-line no-restricted-syntax -- 同上
+      indicatorAnalysis: (plan.indicatorAnalysis ?? null) as unknown as IndicatorAnalysis | null,
     };
   }
 }

@@ -655,6 +655,53 @@ export interface AITradeScenarioPayload {
   warnings?: string[];
 }
 
+/**
+ * BullBearDebate の表示用サブセット (P0-a で永続化された debate 列の描画用)。
+ * バックエンドの BullBearDebateOutput 全体のうち、UI が描画するフィールドのみを型化する。
+ */
+export interface PlanDebateSidePayload {
+  scenario: string;
+  confidence: number;
+  rationale: string[];
+  keyConditions: string[];
+  risks: string[];
+}
+
+export interface PlanDebatePayload {
+  marketContext: {
+    summary: string;
+    dominantBias: string;
+    biasStrength: number;
+  };
+  bull: PlanDebateSidePayload;
+  bear: PlanDebateSidePayload;
+  synthesis: {
+    preferredDirection: string;
+    preferredConfidence: number;
+    reasoning: string;
+    consensusPoints: string[];
+    divergencePoints: string[];
+    actionableInsight: string;
+  };
+}
+
+/**
+ * IndicatorSpecialist の MTF テクニカル統合解釈の表示用サブセット (P0-a)。
+ */
+export interface PlanIndicatorAnalysisPayload {
+  interpretation: string;
+  confidence: number;
+  current: {
+    trendState: string;
+    momentum: string;
+  };
+  mtfAlignment: {
+    trendAlignment: string;
+    pullbackOpportunity: boolean;
+    counterTrendSignal: boolean;
+  };
+}
+
 export interface AITradePlanPayload {
   id: string;
   researchId: string;
@@ -662,6 +709,10 @@ export interface AITradePlanPayload {
   symbol: string;
   marketAnalysis: PlanMarketAnalysisPayload;
   scenarios: AITradeScenarioPayload[];
+  /** P0-a: 永続化された BullBearDebate 出力。旧プランや debate スキップ時は null。 */
+  debate?: PlanDebatePayload | null;
+  /** P0-a: 永続化された IndicatorSpecialist 解釈。旧プランや取得失敗時は null。 */
+  indicatorAnalysis?: PlanIndicatorAnalysisPayload | null;
   overallConfidence: number | null;
   warnings: string[];
   aiModel: string | null;
