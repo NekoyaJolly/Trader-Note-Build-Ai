@@ -7,16 +7,16 @@ describe("getSideBBreadcrumbSegments", () => {
     expect(getSideBBreadcrumbSegments("/")).toEqual([]);
   });
 
-  it("/side-b は運転席が末端", () => {
+  it("/side-b はプランが末端", () => {
     const s = getSideBBreadcrumbSegments("/side-b");
-    expect(s.map((x) => x.label)).toEqual(["Side-B", "エージェント（運転席）"]);
+    expect(s.map((x) => x.label)).toEqual(["Side-B", "プラン"]);
     expect(s[0].href).toBe("/side-b/dashboard");
     expect(s[1].href).toBeUndefined();
   });
 
-  it("/side-b/dashboard は台帳が末端", () => {
+  it("/side-b/dashboard は統計が末端", () => {
     const s = getSideBBreadcrumbSegments("/side-b/dashboard");
-    expect(s.map((x) => x.label)).toEqual(["Side-B", "台帳ダッシュボード"]);
+    expect(s.map((x) => x.label)).toEqual(["Side-B", "統計"]);
   });
 
   it("/side-b/dashboard では子として /side-b にマッチしない", () => {
@@ -26,7 +26,7 @@ describe("getSideBBreadcrumbSegments", () => {
 
   it("仮説詳細は 詳細 セグメント付き", () => {
     const s = getSideBBreadcrumbSegments("/side-b/hypotheses/abc-123");
-    expect(s.map((x) => x.label)).toEqual(["Side-B", "仮説一覧", "詳細"]);
+    expect(s.map((x) => x.label)).toEqual(["Side-B", "仮説", "詳細"]);
     expect(s[1].href).toBe("/side-b/hypotheses");
   });
 });

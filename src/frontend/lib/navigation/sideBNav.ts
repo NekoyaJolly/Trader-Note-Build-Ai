@@ -54,8 +54,8 @@ export const SIDE_B_WORKSPACE_ITEMS: readonly SideBNavEntry[] = [
   {
     id: "dashboard",
     href: "/side-b/dashboard",
-    labelSidebar: "台帳ダッシュボード",
-    labelTab: "台帳",
+    labelSidebar: "統計",
+    labelTab: "統計",
     icon: LayoutDashboard,
     order: 10,
     showInAgentTabStrip: true,
@@ -63,7 +63,7 @@ export const SIDE_B_WORKSPACE_ITEMS: readonly SideBNavEntry[] = [
   {
     id: "hypotheses",
     href: "/side-b/hypotheses",
-    labelSidebar: "仮説一覧",
+    labelSidebar: "仮説",
     labelTab: "仮説",
     icon: ClipboardList,
     order: 20,
@@ -72,7 +72,7 @@ export const SIDE_B_WORKSPACE_ITEMS: readonly SideBNavEntry[] = [
   {
     id: "validation",
     href: "/side-b/validation",
-    labelSidebar: "検証キュー",
+    labelSidebar: "検証",
     labelTab: "検証",
     icon: FlaskConical,
     order: 30,
@@ -81,8 +81,8 @@ export const SIDE_B_WORKSPACE_ITEMS: readonly SideBNavEntry[] = [
   {
     id: "agent",
     href: "/side-b",
-    labelSidebar: "エージェント（運転席）",
-    labelTab: "運転席",
+    labelSidebar: "プラン",
+    labelTab: "プラン",
     icon: Bot,
     order: 40,
     showInAgentTabStrip: true,
@@ -90,7 +90,7 @@ export const SIDE_B_WORKSPACE_ITEMS: readonly SideBNavEntry[] = [
   {
     id: "evolution",
     href: "/side-b/evolution",
-    labelSidebar: "進化トラッキング",
+    labelSidebar: "進化",
     labelTab: "進化",
     icon: Dna,
     order: 45,
@@ -99,8 +99,8 @@ export const SIDE_B_WORKSPACE_ITEMS: readonly SideBNavEntry[] = [
   {
     id: "ai-notes",
     href: "/side-b/ai-notes",
-    labelSidebar: "AIノート",
-    labelTab: "AIノート",
+    labelSidebar: "ノート",
+    labelTab: "ノート",
     icon: Brain,
     order: 50,
     showInAgentTabStrip: false,
@@ -108,8 +108,8 @@ export const SIDE_B_WORKSPACE_ITEMS: readonly SideBNavEntry[] = [
   {
     id: "trades",
     href: "/side-b/trades",
-    labelSidebar: "仮想トレード",
-    labelTab: "仮想",
+    labelSidebar: "トレード",
+    labelTab: "トレード",
     icon: TrendingUp,
     order: 60,
     showInAgentTabStrip: false,
@@ -117,7 +117,7 @@ export const SIDE_B_WORKSPACE_ITEMS: readonly SideBNavEntry[] = [
   {
     id: "comparison",
     href: "/side-b/comparison",
-    labelSidebar: "比較ダッシュボード",
+    labelSidebar: "比較",
     labelTab: "比較",
     icon: GitCompare,
     order: 70,
@@ -126,8 +126,8 @@ export const SIDE_B_WORKSPACE_ITEMS: readonly SideBNavEntry[] = [
   {
     id: "settings",
     href: "/side-b/settings",
-    labelSidebar: "AI 自動実行設定",
-    labelTab: "自動実行",
+    labelSidebar: "設定",
+    labelTab: "設定",
     icon: CalendarClock,
     order: 80,
     showInAgentTabStrip: false,
