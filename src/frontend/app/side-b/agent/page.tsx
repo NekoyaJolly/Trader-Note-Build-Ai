@@ -425,6 +425,41 @@ export default function AgentDetailPage() {
                                         <span>trend: {plan.marketAnalysis.trendDirection}</span>
                                         <span>vol: {plan.marketAnalysis.volatility}</span>
                                     </div>
+                                    {/* 市場分析の追加根拠 (型・API には届いているが従来未描画だったフィールド) */}
+                                    {plan.marketAnalysis.additionalInsights && plan.marketAnalysis.additionalInsights.length > 0 && (
+                                        <ul className="list-disc list-inside text-[11px] text-gray-400 mb-2 space-y-0.5">
+                                            {plan.marketAnalysis.additionalInsights.map((insight, i) => (
+                                                <li key={i}>{insight}</li>
+                                            ))}
+                                        </ul>
+                                    )}
+                                    {plan.marketAnalysis.macroAssessment && (
+                                        <div className="rounded-lg border border-slate-700/40 bg-slate-800/30 px-3 py-2 mb-2">
+                                            <p className="text-[11px] text-indigo-300 mb-1">マクロ環境</p>
+                                            <div className="flex flex-wrap gap-2 text-[11px] text-gray-500 mb-1">
+                                                <span>センチメント: {plan.marketAnalysis.macroAssessment.riskSentiment}</span>
+                                                <span>vol: {plan.marketAnalysis.macroAssessment.volatilityRegime}</span>
+                                                <span>金利: {plan.marketAnalysis.macroAssessment.yieldCurveSignal}</span>
+                                            </div>
+                                            <p className="text-[11px] text-gray-300">{plan.marketAnalysis.macroAssessment.macroSummary}</p>
+                                            <p className="text-[11px] text-gray-400 mt-1">
+                                                <span className="text-gray-500">トレード影響: </span>
+                                                {plan.marketAnalysis.macroAssessment.tradingImpact}
+                                            </p>
+                                        </div>
+                                    )}
+                                    {plan.marketAnalysis.mtfAnalysis && (
+                                        <div className="rounded-lg border border-slate-700/40 bg-slate-800/30 px-3 py-2 mb-2">
+                                            <p className="text-[11px] text-sky-300 mb-1">
+                                                上位足分析 ({plan.marketAnalysis.mtfAnalysis.higherTFTimeframe})
+                                            </p>
+                                            <div className="flex flex-wrap gap-2 text-[11px] text-gray-500 mb-1">
+                                                <span>バイアス: {plan.marketAnalysis.mtfAnalysis.higherTFBias}</span>
+                                                <span>整合性: {plan.marketAnalysis.mtfAnalysis.alignment}</span>
+                                            </div>
+                                            <p className="text-[11px] text-gray-300">{plan.marketAnalysis.mtfAnalysis.note}</p>
+                                        </div>
+                                    )}
                                     {plan.scenarios.length === 0 ? (
                                         <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2">
                                             <p className="text-xs text-amber-200">
@@ -463,9 +498,84 @@ export default function AgentDetailPage() {
                                                             <p className="text-emerald-300">{formatNumber(scenario.takeProfit.price, 2)}</p>
                                                         </div>
                                                     </div>
-                                                    <p className="text-[11px] text-gray-500 mt-2 line-clamp-2">
-                                                        {scenario.rationale}
-                                                    </p>
+                                                    {scenario.patternLabel && (
+                                                        <p className="text-[11px] text-purple-300 mt-2">
+                                                            パターン: {scenario.patternLabel}
+                                                        </p>
+                                                    )}
+                                                    <p className="text-[11px] text-gray-400 mt-2">{scenario.rationale}</p>
+                                                    {scenario.reasonForSelection && (
+                                                        <p className="text-[11px] text-emerald-300/90 mt-1">
+                                                            <span className="text-gray-500">採用理由: </span>
+                                                            {scenario.reasonForSelection}
+                                                        </p>
+                                                    )}
+                                                    {/* 深い根拠は折りたたみ (一覧のスキャン性を保ちつつ「なぜ」を辿れるように) */}
+                                                    <details className="mt-2">
+                                                        <summary className="text-[11px] text-cyan-400 cursor-pointer select-none">
+                                                            詳しい根拠を見る
+                                                        </summary>
+                                                        <div className="mt-2 space-y-1.5 border-l-2 border-slate-700/60 pl-2.5">
+                                                            {scenario.entry.condition && (
+                                                                <p className="text-[11px] text-gray-400">
+                                                                    <span className="text-gray-500">エントリー条件: </span>
+                                                                    {scenario.entry.condition}
+                                                                </p>
+                                                            )}
+                                                            {scenario.stopLoss.reason && (
+                                                                <p className="text-[11px] text-gray-400">
+                                                                    <span className="text-gray-500">SL 根拠: </span>
+                                                                    {scenario.stopLoss.reason}
+                                                                </p>
+                                                            )}
+                                                            {scenario.takeProfit.reason && (
+                                                                <p className="text-[11px] text-gray-400">
+                                                                    <span className="text-gray-500">TP 根拠: </span>
+                                                                    {scenario.takeProfit.reason}
+                                                                </p>
+                                                            )}
+                                                            {scenario.indicatorsUsed && scenario.indicatorsUsed.length > 0 && (
+                                                                <p className="text-[11px] text-gray-400">
+                                                                    <span className="text-gray-500">採用指標: </span>
+                                                                    {scenario.indicatorsUsed.join(", ")}
+                                                                </p>
+                                                            )}
+                                                            {scenario.indicatorsIgnored && scenario.indicatorsIgnored.length > 0 && (
+                                                                <p className="text-[11px] text-gray-400">
+                                                                    <span className="text-gray-500">不採用指標: </span>
+                                                                    {scenario.indicatorsIgnored.join(", ")}
+                                                                </p>
+                                                            )}
+                                                            {scenario.reasonForIgnoring && (
+                                                                <p className="text-[11px] text-gray-400">
+                                                                    <span className="text-gray-500">不採用理由: </span>
+                                                                    {scenario.reasonForIgnoring}
+                                                                </p>
+                                                            )}
+                                                            {scenario.invalidationConditions.length > 0 && (
+                                                                <div className="text-[11px] text-gray-400">
+                                                                    <span className="text-gray-500">無効化条件:</span>
+                                                                    <ul className="list-disc list-inside">
+                                                                        {scenario.invalidationConditions.map((c, i) => (
+                                                                            <li key={i}>{c}</li>
+                                                                        ))}
+                                                                    </ul>
+                                                                </div>
+                                                            )}
+                                                            {scenario.multipleTestingDefense && (
+                                                                <p className="text-[11px] text-gray-400">
+                                                                    <span className="text-gray-500">過学習でない根拠: </span>
+                                                                    {scenario.multipleTestingDefense}
+                                                                </p>
+                                                            )}
+                                                            {scenario.warnings && scenario.warnings.length > 0 && (
+                                                                <p className="text-[11px] text-amber-300/90">
+                                                                    <span className="text-gray-500">警告: </span>
+                                                                    {scenario.warnings.join(" / ")}
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                    </details>
                                                 </div>
                                             ))}
                                         </div>
