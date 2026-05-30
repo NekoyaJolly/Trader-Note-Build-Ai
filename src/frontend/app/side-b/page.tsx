@@ -138,19 +138,36 @@ export default function SideBDashboard() {
   const [planGenLoading, setPlanGenLoading] = useState(false);
   const [planGenError, setPlanGenError] = useState<string | null>(null);
 
+  // 本番耐用化: キルスイッチ + 容量監視 (旧 /side-b/agent から移設)
+  const [isEmergencyStopped, setIsEmergencyStopped] = useState(false);
+  const [consecutiveErrors, setConsecutiveErrors] = useState(0);
+  const [dbWarning, setDbWarning] = useState(false);
+  const [dbSizeBytes, setDbSizeBytes] = useState(0);
+  const [isEmergencyActionLoading, setIsEmergencyActionLoading] = useState(false);
+
   // --- データ取得 ---
 
   const fetchData = useCallback(async () => {
     try {
-      const [statusRes, logRes, lessonsRes, plansRes] = await Promise.allSettled([
+      const [statusRes, logRes, lessonsRes, plansRes, emergencyRes, healthRes] = await Promise.allSettled([
         fetch(`${API_BASE}/agent/status`, { cache: "no-store" }),
         fetch(`${API_BASE}/agent/thinking-log?limit=20`, { cache: "no-store" }),
         fetch(`${API_BASE}/agent/lessons`, { cache: "no-store" }),
         sideBApi.listPlans({ limit: 5 }),
+        sideBApi.getEmergencyStatus(),
+        sideBApi.getSystemHealth(),
       ]);
 
       if (plansRes.status === "fulfilled") {
         setRecentPlans(plansRes.value.plans);
+      }
+      if (emergencyRes.status === "fulfilled" && emergencyRes.value) {
+        setIsEmergencyStopped(emergencyRes.value.data.isEmergencyStopped);
+        setConsecutiveErrors(emergencyRes.value.data.consecutiveErrors);
+      }
+      if (healthRes.status === "fulfilled" && healthRes.value) {
+        setDbWarning(!!healthRes.value.dbWarning);
+        setDbSizeBytes(healthRes.value.dbSizeBytes || 0);
       }
 
       let hasError = false;
@@ -248,6 +265,43 @@ export default function SideBDashboard() {
     }
   };
 
+  // --- 緊急キルスイッチ (旧 /side-b/agent から移設) ---
+
+  const handleEmergencyStop = async () => {
+    if (!window.confirm("本当に緊急キルスイッチを作動させますか？\n保有しているすべての実ポジション（cTrader）及び仮想ポジションが強制決済され、システムが一時停止します。")) {
+      return;
+    }
+    setIsEmergencyActionLoading(true);
+    try {
+      const res = await sideBApi.triggerEmergencyStop();
+      const closeSummaryMsg = res.data.closeSummary.length > 0
+        ? "\n\n決済ログ:\n" + res.data.closeSummary.join("\n")
+        : "\n\n決済対象のポジションはありませんでした。";
+      alert(res.message + closeSummaryMsg);
+      await fetchData();
+    } catch (err) {
+      alert("緊急停止の実行中にエラーが発生しました: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsEmergencyActionLoading(false);
+    }
+  };
+
+  const handleEmergencyResume = async () => {
+    if (!window.confirm("緊急停止状態を解除して、自律取引サイクルを再開しますか？")) {
+      return;
+    }
+    setIsEmergencyActionLoading(true);
+    try {
+      const res = await sideBApi.triggerEmergencyResume();
+      alert(res.message);
+      await fetchData();
+    } catch (err) {
+      alert("緊急停止解除中にエラーが発生しました: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsEmergencyActionLoading(false);
+    }
+  };
+
   // --- エージェント制御 ---
 
   const startAgent = async () => {
@@ -307,6 +361,24 @@ export default function SideBDashboard() {
 
   return (
     <div className="min-h-screen">
+      {/* 緊急停止バー (旧 /side-b/agent から移設) */}
+      {isEmergencyStopped && (
+        <div className="bg-red-500/20 border-b border-red-500/30 text-red-200 px-4 py-3 text-center text-xs font-semibold flex items-center justify-center gap-3 animate-pulse">
+          <span>⚠️ システム緊急停止中（キルスイッチ作動中）です。意思決定サイクルおよび新規取引はすべて停止されています。{consecutiveErrors > 0 && `(連続エラー数: ${consecutiveErrors})`}</span>
+          <button
+            onClick={handleEmergencyResume}
+            disabled={isEmergencyActionLoading}
+            className="bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded font-bold text-[11px] transition-colors disabled:opacity-50"
+          >
+            {isEmergencyActionLoading ? "処理中..." : "停止状態を解除"}
+          </button>
+        </div>
+      )}
+      {dbWarning && (
+        <div className="bg-yellow-500/20 border-b border-yellow-500/30 text-yellow-200 px-4 py-3 text-center text-xs font-semibold">
+          ⚠️ データベース容量警告: Supabase の総使用量が 400MB を超過しています（現在: {(dbSizeBytes / (1024 * 1024)).toFixed(1)} MB）。
+        </div>
+      )}
       <main className="max-w-6xl w-full mx-auto px-3 sm:px-4 md:px-6 py-6 sm:py-8">
         {/* ===== ヘッダー ===== */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
@@ -401,6 +473,25 @@ export default function SideBDashboard() {
                 <span className={isRefreshing ? "animate-spin" : ""}>⟳</span>
                 <span>{isRefreshing ? "更新中..." : "更新"}</span>
               </button>
+
+              {/* 緊急キルスイッチ (旧 /side-b/agent から移設) */}
+              {isEmergencyStopped ? (
+                <button
+                  onClick={handleEmergencyResume}
+                  disabled={isEmergencyActionLoading}
+                  className="bg-red-600 hover:bg-red-500 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {isEmergencyActionLoading ? "処理中..." : "緊急停止を解除"}
+                </button>
+              ) : (
+                <button
+                  onClick={handleEmergencyStop}
+                  disabled={isEmergencyActionLoading}
+                  className="bg-red-950/40 hover:bg-red-900/60 border border-red-700/50 text-red-200 font-bold text-xs px-3 py-1.5 rounded-lg transition-all disabled:opacity-50"
+                >
+                  {isEmergencyActionLoading ? "処理中..." : "🚨 緊急停止 (KILL SWITCH)"}
+                </button>
+              )}
             </div>
 
             {/* 右: メトリクス */}
