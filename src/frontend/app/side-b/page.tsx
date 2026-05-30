@@ -12,14 +12,19 @@
 
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { getSideBAgentTabStripItems } from "@/lib/navigation/sideBNav";
 import { isNavHrefActive } from "@/lib/navigation/navActive";
 import { sideBApi, SideBApiError } from "@/lib/sideBApi";
 import { PlanEvidenceCard } from "@/components/side-b/PlanEvidenceCard";
-import type { AITradePlanPayload } from "@/types/sideB";
+import type { AITradePlanPayload, AgentRun, GetOrchestratorRunDetailResponse } from "@/types/sideB";
+
+interface ValidationVisibilityData {
+  pendingCount: number;
+  recentlyValidatedCount: number;
+}
 
 // APIベースURL
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "") + "/api/side-b";
@@ -145,17 +150,28 @@ export default function SideBDashboard() {
   const [dbSizeBytes, setDbSizeBytes] = useState(0);
   const [isEmergencyActionLoading, setIsEmergencyActionLoading] = useState(false);
 
+  // Orchestrator 意思決定履歴 + 検証可視化 (旧 /side-b/agent から移設)
+  const [orchestratorRuns, setOrchestratorRuns] = useState<AgentRun[]>([]);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selectedRunDetail, setSelectedRunDetail] = useState<GetOrchestratorRunDetailResponse | null>(null);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
+  const activeRunIdRef = useRef<string | null>(null);
+  const [validationVisibility, setValidationVisibility] = useState<ValidationVisibilityData | null>(null);
+
   // --- データ取得 ---
 
   const fetchData = useCallback(async () => {
     try {
-      const [statusRes, logRes, lessonsRes, plansRes, emergencyRes, healthRes] = await Promise.allSettled([
+      const [statusRes, logRes, lessonsRes, plansRes, emergencyRes, healthRes, runsRes, pendingValidationRes, recentlyValidatedRes] = await Promise.allSettled([
         fetch(`${API_BASE}/agent/status`, { cache: "no-store" }),
         fetch(`${API_BASE}/agent/thinking-log?limit=20`, { cache: "no-store" }),
         fetch(`${API_BASE}/agent/lessons`, { cache: "no-store" }),
         sideBApi.listPlans({ limit: 5 }),
         sideBApi.getEmergencyStatus(),
         sideBApi.getSystemHealth(),
+        sideBApi.getOrchestratorRuns(undefined, 10),
+        sideBApi.getPendingValidation(),
+        sideBApi.getRecentlyValidated(24),
       ]);
 
       if (plansRes.status === "fulfilled") {
@@ -169,6 +185,17 @@ export default function SideBDashboard() {
         setDbWarning(!!healthRes.value.dbWarning);
         setDbSizeBytes(healthRes.value.dbSizeBytes || 0);
       }
+      if (runsRes.status === "fulfilled") {
+        setOrchestratorRuns(runsRes.value.runs || []);
+      }
+      const nextValidation: ValidationVisibilityData = { pendingCount: 0, recentlyValidatedCount: 0 };
+      if (pendingValidationRes.status === "fulfilled") {
+        nextValidation.pendingCount = pendingValidationRes.value.length;
+      }
+      if (recentlyValidatedRes.status === "fulfilled") {
+        nextValidation.recentlyValidatedCount = recentlyValidatedRes.value.length;
+      }
+      setValidationVisibility(nextValidation);
 
       let hasError = false;
 
@@ -299,6 +326,36 @@ export default function SideBDashboard() {
       alert("緊急停止解除中にエラーが発生しました: " + (err instanceof Error ? err.message : String(err)));
     } finally {
       setIsEmergencyActionLoading(false);
+    }
+  };
+
+  // Orchestrator ステップ詳細のアコーディオン開閉 (旧 /side-b/agent から移設)
+  const fetchRunDetail = async (runId: string) => {
+    if (selectedRunId === runId) {
+      setSelectedRunId(null);
+      setSelectedRunDetail(null);
+      activeRunIdRef.current = null;
+      return;
+    }
+    setSelectedRunId(runId);
+    activeRunIdRef.current = runId;
+    // 別 run の古い詳細が残って新 run の下に表示されるのを防ぐため、取得開始時にクリア
+    setSelectedRunDetail(null);
+    setIsDetailLoading(true);
+    try {
+      const detail = await sideBApi.getOrchestratorRunDetail(runId);
+      if (activeRunIdRef.current === runId) {
+        setSelectedRunDetail(detail);
+      }
+    } catch (err) {
+      console.error("fetchRunDetail error:", err);
+      if (activeRunIdRef.current === runId) {
+        setSelectedRunDetail(null);
+      }
+    } finally {
+      if (activeRunIdRef.current === runId) {
+        setIsDetailLoading(false);
+      }
     }
   };
 
@@ -624,6 +681,127 @@ export default function SideBDashboard() {
             )}
           </div>
         </section>
+
+        {/* ===== 検証の見える化 (旧 /side-b/agent から移設) ===== */}
+        {validationVisibility && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+            <Link
+              href="/side-b/validation"
+              className="card-surface rounded-xl p-4 border border-slate-700/50 hover:border-purple-500/40 transition-colors"
+            >
+              <p className="text-xs text-gray-500">本格検証待ち</p>
+              <p className="text-2xl font-bold text-amber-300">{validationVisibility.pendingCount}</p>
+              <p className="text-[11px] text-gray-500 mt-1">screening_passed の仮説</p>
+            </Link>
+            <Link
+              href="/side-b/validation"
+              className="card-surface rounded-xl p-4 border border-slate-700/50 hover:border-purple-500/40 transition-colors"
+            >
+              <p className="text-xs text-gray-500">直近24hの検証完了</p>
+              <p className="text-2xl font-bold text-cyan-300">{validationVisibility.recentlyValidatedCount}</p>
+              <p className="text-[11px] text-gray-500 mt-1">confirmed / rejected</p>
+            </Link>
+          </div>
+        )}
+
+        {/* ===== Orchestrator 意思決定履歴 (旧 /side-b/agent から移設・既定折りたたみ) ===== */}
+        <details className="card-surface rounded-xl overflow-hidden mb-6">
+          <summary className="px-4 py-3 border-b border-slate-700/50 cursor-pointer select-none">
+            <span className="text-sm font-semibold text-white">🤖 Orchestrator 意思決定履歴 (直近10件)</span>
+            <span className="block text-[11px] text-gray-500 mt-0.5">
+              最上位のオーケストレーターが「次に回すループ」を LLM 判断した履歴です。
+            </span>
+          </summary>
+          <div className="px-4 py-3 space-y-3">
+            {orchestratorRuns.length === 0 ? (
+              <p className="text-sm text-gray-500 text-center py-6">意思決定履歴がありません</p>
+            ) : (
+              orchestratorRuns.map((run) => {
+                const isSelected = selectedRunId === run.id;
+                const statusColors: Record<string, string> = {
+                  succeeded: "text-green-400 bg-green-500/20",
+                  failed: "text-red-400 bg-red-500/20",
+                  running: "text-blue-400 bg-blue-500/20 animate-pulse",
+                  pending: "text-gray-400 bg-gray-500/20",
+                  cancelled: "text-yellow-400 bg-yellow-500/20",
+                };
+                return (
+                  <div key={run.id} className="rounded-xl border border-slate-700/60 bg-slate-900/30 p-3">
+                    <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[run.status] || "text-gray-400 bg-gray-500/20"}`}>
+                          {run.status.toUpperCase()}
+                        </span>
+                        <span className="text-sm font-semibold text-white font-mono">{run.kind}</span>
+                      </div>
+                      <span className="text-[10px] text-gray-500 font-mono">
+                        {new Date(run.startedAt).toLocaleString("ja-JP")}
+                      </span>
+                    </div>
+                    {run.summary && (
+                      <p className="text-xs text-gray-300 mb-2 whitespace-pre-wrap font-sans">{run.summary}</p>
+                    )}
+                    {run.errorMessage && (
+                      <p className="text-xs text-red-400 bg-red-950/20 border border-red-900/30 rounded p-2 mb-2 font-mono">
+                        エラー: {run.errorMessage}
+                      </p>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-gray-500">Trigger: {run.triggeredBy}</span>
+                      <button
+                        onClick={() => fetchRunDetail(run.id)}
+                        className="text-xs text-purple-400 hover:text-purple-300 transition-colors"
+                      >
+                        {isSelected ? "詳細を閉じる ▲" : "ステップ詳細を表示 ▼"}
+                      </button>
+                    </div>
+                    {isSelected && (
+                      <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-2">
+                        {isDetailLoading ? (
+                          <div className="flex items-center justify-center py-4">
+                            <div className="w-5 h-5 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                          </div>
+                        ) : selectedRunDetail && selectedRunDetail.steps.length === 0 ? (
+                          <p className="text-xs text-gray-500 text-center py-2">実行されたステップはありません</p>
+                        ) : selectedRunDetail ? (
+                          <div className="space-y-2">
+                            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">実行ステップ一覧</p>
+                            {selectedRunDetail.steps.map((step) => (
+                              <div
+                                key={step.id}
+                                className="text-xs rounded-lg border border-slate-800 bg-slate-900/50 p-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                              >
+                                <div>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-semibold text-white">{step.stepName}</span>
+                                    <span className="text-[10px] text-gray-500">(Attempt #{step.attempt})</span>
+                                    <span className={`px-1 rounded text-[10px] ${
+                                      step.status === "succeeded" ? "text-green-400 bg-green-950/20" :
+                                      step.status === "failed" ? "text-red-400 bg-red-950/20" : "text-gray-400 bg-slate-800"
+                                    }`}>
+                                      {step.status}
+                                    </span>
+                                  </div>
+                                  {step.summary && <p className="text-[11px] text-gray-400 mt-1 font-mono">{step.summary}</p>}
+                                  {step.errorMessage && <p className="text-[10px] text-red-400 mt-0.5 font-mono">Error: {step.errorMessage}</p>}
+                                </div>
+                                <div className="text-right shrink-0">
+                                  {step.durationMs !== null && (
+                                    <p className="text-[10px] text-gray-500 font-mono">{(step.durationMs / 1000).toFixed(2)}s</p>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </details>
 
         {/* ===== メインコンテンツ (2カラム) ===== */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
