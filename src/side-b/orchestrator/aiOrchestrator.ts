@@ -607,6 +607,11 @@ export class AIOrchestrator {
             higherTimeframe: planHigherTimeframe,
             marketAnalysis: planResult.output.marketAnalysis,
             scenarios: adjustedScenarios,
+            // P0-a: LLM 生成根拠 (debate / indicatorAnalysis) を永続化。
+            // 従来は返却 (L622) にしか乗らず保存されていなかったため、後でプランを
+            // 開くと根拠が消えていた。欠落時 undefined → repository 側で既存値維持。
+            debate: debateResult?.output,
+            indicatorAnalysis: indicatorAnalysis ?? undefined,
             overallConfidence: planResult.output.overallConfidence,
             warnings: aggregatedWarnings,
             aiModel: planResult.model,
