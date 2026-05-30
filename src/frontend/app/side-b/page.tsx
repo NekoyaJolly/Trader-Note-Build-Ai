@@ -17,6 +17,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { getSideBAgentTabStripItems } from "@/lib/navigation/sideBNav";
 import { isNavHrefActive } from "@/lib/navigation/navActive";
+import { sideBApi, SideBApiError } from "@/lib/sideBApi";
+import { PlanEvidenceCard } from "@/components/side-b/PlanEvidenceCard";
+import type { AITradePlanPayload } from "@/types/sideB";
 
 // APIベースURL
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "") + "/api/side-b";
@@ -123,21 +126,32 @@ export default function SideBDashboard() {
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [thinkingLog, setThinkingLog] = useState<ThinkingLogEntry[]>([]);
   const [lessons, setLessons] = useState<string[]>([]);
+  const [recentPlans, setRecentPlans] = useState<AITradePlanPayload[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // プラン生成 (運転席から直接トリガー)
+  const [planGenSymbol, setPlanGenSymbol] = useState("XAUUSD");
+  const [planGenLoading, setPlanGenLoading] = useState(false);
+  const [planGenError, setPlanGenError] = useState<string | null>(null);
+
   // --- データ取得 ---
 
   const fetchData = useCallback(async () => {
     try {
-      const [statusRes, logRes, lessonsRes] = await Promise.allSettled([
+      const [statusRes, logRes, lessonsRes, plansRes] = await Promise.allSettled([
         fetch(`${API_BASE}/agent/status`, { cache: "no-store" }),
         fetch(`${API_BASE}/agent/thinking-log?limit=20`, { cache: "no-store" }),
         fetch(`${API_BASE}/agent/lessons`, { cache: "no-store" }),
+        sideBApi.listPlans({ limit: 5 }),
       ]);
+
+      if (plansRes.status === "fulfilled") {
+        setRecentPlans(plansRes.value.plans);
+      }
 
       let hasError = false;
 
@@ -213,6 +227,24 @@ export default function SideBDashboard() {
       await fetchData();
     } finally {
       setIsRefreshing(false);
+    }
+  };
+
+  // プラン生成 → 完了後に一覧を再取得して最新プランをヒーロー表示
+  const handleGeneratePlan = async () => {
+    setPlanGenLoading(true);
+    setPlanGenError(null);
+    try {
+      await sideBApi.generatePlan({
+        symbol: planGenSymbol.trim() || "XAUUSD",
+        forceRefresh: true,
+        timeframe: "15m",
+      });
+      await fetchData();
+    } catch (err) {
+      setPlanGenError(err instanceof SideBApiError ? err.message : "プラン生成に失敗しました");
+    } finally {
+      setPlanGenLoading(false);
     }
   };
 
@@ -446,16 +478,72 @@ export default function SideBDashboard() {
           )}
         </div>
 
+        {/* ===== AI プラン (主役) ===== */}
+        <section className="card-surface rounded-xl overflow-hidden mb-6">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-slate-700/50">
+            <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+              <span>🎯</span> 最新のAIプラン
+            </h2>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={planGenSymbol}
+                onChange={(e) => setPlanGenSymbol(e.target.value)}
+                placeholder="銘柄 (例: XAUUSD)"
+                className="w-32 bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
+              />
+              <button
+                onClick={handleGeneratePlan}
+                disabled={planGenLoading}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-500 to-cyan-600 text-white text-xs font-medium hover:opacity-90 disabled:opacity-50 transition-all"
+              >
+                {planGenLoading ? (
+                  <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  "✨"
+                )}
+                <span>{planGenLoading ? "生成中..." : "プラン生成"}</span>
+              </button>
+            </div>
+          </div>
+          <div className="p-4">
+            {planGenError && <p className="text-xs text-rose-400 mb-3">{planGenError}</p>}
+            {recentPlans.length === 0 ? (
+              <p className="text-sm text-gray-500 text-center py-6">
+                まだプランがありません。右上の「プラン生成」で作成してください。
+              </p>
+            ) : (
+              <div className="space-y-4">
+                {/* 最新プラン = ヒーロー (根拠は各カード内で折りたたみ) */}
+                {recentPlans[0] && <PlanEvidenceCard plan={recentPlans[0]} />}
+                {/* 直近プラン履歴 (折りたたみ) */}
+                {recentPlans.length > 1 && (
+                  <details>
+                    <summary className="text-xs text-gray-400 hover:text-white cursor-pointer select-none">
+                      📋 直近プラン履歴 ({recentPlans.length - 1} 件)
+                    </summary>
+                    <div className="mt-3 space-y-3">
+                      {recentPlans.slice(1).map((plan) => (
+                        <PlanEvidenceCard key={plan.id} plan={plan} />
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+
         {/* ===== メインコンテンツ (2カラム) ===== */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          {/* 左: 思考ログ */}
-          <div className="card-surface rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50">
+          {/* 左: 思考ログ (既定で折りたたみ。主役はプランのため副次情報として下部に格納) */}
+          <details className="card-surface rounded-xl overflow-hidden self-start">
+            <summary className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50 cursor-pointer select-none">
               <h2 className="text-sm font-semibold text-white flex items-center gap-2">
                 <span>🧠</span> 思考ログ
               </h2>
               <span className="text-xs text-gray-500">{thinkingLog.length}件</span>
-            </div>
+            </summary>
             <div className="h-80 sm:h-96 overflow-y-auto">
               {thinkingLog.length === 0 ? (
                 <div className="flex items-center justify-center h-full">
@@ -487,7 +575,7 @@ export default function SideBDashboard() {
                 </div>
               )}
             </div>
-          </div>
+          </details>
 
           {/* 右: 現在の戦略 + オープンポジション */}
           <div className="card-surface rounded-xl overflow-hidden">
@@ -525,15 +613,15 @@ export default function SideBDashboard() {
                 </div>
               )}
 
-              {/* 学び */}
-              <div className="px-4 py-3">
-                <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">
+              {/* 学び (既定で折りたたみ) */}
+              <details className="px-4 py-3">
+                <summary className="text-xs text-gray-500 uppercase tracking-wider mb-2 cursor-pointer select-none">
                   💡 AIの学び ({lessons.length})
-                </p>
+                </summary>
                 {lessons.length === 0 ? (
-                  <p className="text-xs text-gray-500">まだ学びがありません</p>
+                  <p className="text-xs text-gray-500 mt-2">まだ学びがありません</p>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-2 mt-2">
                     {lessons.slice(-5).reverse().map((lesson, idx) => (
                       <div
                         key={idx}
@@ -545,7 +633,7 @@ export default function SideBDashboard() {
                     ))}
                   </div>
                 )}
-              </div>
+              </details>
             </div>
           </div>
         </div>
