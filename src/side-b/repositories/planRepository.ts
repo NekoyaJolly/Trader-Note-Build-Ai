@@ -161,6 +161,10 @@ export class PlanRepository {
         higherTimeframe: input.higherTimeframe,
         marketAnalysis: toInputJsonValue(input.marketAnalysis),
         scenarios: toInputJsonValue(input.scenarios),
+        // P0-a: upsertByDateSymbol と永続化経路を揃える (Copilot review PR #285)。
+        // create() 経由でも debate / indicatorAnalysis を取りこぼさない。
+        debate: input.debate ? toInputJsonValue(input.debate) : undefined,
+        indicatorAnalysis: input.indicatorAnalysis ? toInputJsonValue(input.indicatorAnalysis) : undefined,
         overallConfidence: input.overallConfidence,
         warnings: input.warnings || [],
         aiModel: input.aiModel,
