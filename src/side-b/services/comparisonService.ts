@@ -12,6 +12,38 @@
 
 import { prisma } from '../../backend/db/client';
 import type { Prisma } from '@prisma/client';
+import { z } from 'zod';
+
+/**
+ * AITradeNote の JSON (learnings / entryAnalysis) から「なぜ」を 1 行抽出するための
+ * 最小スキーマ。DB の JSON は外部入力相当のため Zod でランタイム検証する
+ * (AGENTS.md §2.1: unknown 禁止 + 外部入力は Zod で narrow)。表示に使う 1 フィールド
+ * だけを検証し、他フィールドは passthrough で無視する。
+ */
+const LearningsRationaleSchema = z.object({ keyInsight: z.string() }).passthrough();
+const EntryRationaleSchema = z.object({ evaluation: z.string() }).passthrough();
+
+/**
+ * AITradeNote の JSON から UI 比較用の「なぜ」を 1 行抽出する。
+ * 第一候補は learnings.keyInsight (最も簡潔な核心)、無ければ entryAnalysis.evaluation。
+ * いずれも trim 済みで返し、空文字なら次候補 / null にフォールバックする。
+ */
+export function extractAiRationale(
+  learnings: Prisma.JsonValue,
+  entryAnalysis: Prisma.JsonValue,
+): string | null {
+  const l = LearningsRationaleSchema.safeParse(learnings);
+  if (l.success) {
+    const keyInsight = l.data.keyInsight.trim();
+    if (keyInsight.length > 0) return keyInsight;
+  }
+  const e = EntryRationaleSchema.safeParse(entryAnalysis);
+  if (e.success) {
+    const evaluation = e.data.evaluation.trim();
+    if (evaluation.length > 0) return evaluation;
+  }
+  return null;
+}
 
 // ===== 型定義 =====
 
@@ -88,6 +120,8 @@ export interface ComparisonDashboardData {
       side: string;
       outcome: 'win' | 'loss' | 'breakeven';
       pnlPips: number | null;
+      /** 人間トレーダーの根拠 (TradeNote.userNotes)。無ければ null。 */
+      rationale: string | null;
     }>;
     ai: Array<{
       id: string;
@@ -96,6 +130,8 @@ export interface ComparisonDashboardData {
       direction: string;
       outcome: 'win' | 'loss' | 'breakeven';
       pnlPips: number;
+      /** AI の根拠 (AITradeNote.learnings.keyInsight、無ければ entryAnalysis.evaluation)。無ければ null。 */
+      rationale: string | null;
     }>;
   };
 }
@@ -457,6 +493,8 @@ export async function getComparisonDashboard(
       side: n.side,
       outcome: pnlPips !== null ? determineOutcome(pnlPips) : ('breakeven' as const),
       pnlPips,
+      // 空白のみの userNotes は「根拠なし」として null 正規化 (UI で「根拠:」だけが出るのを防ぐ)
+      rationale: n.userNotes?.trim() || null,
     };
   });
 
@@ -467,6 +505,7 @@ export async function getComparisonDashboard(
     direction: n.direction,
     outcome: n.outcome as 'win' | 'loss' | 'breakeven',
     pnlPips: n.pnlPips.toNumber(),
+    rationale: extractAiRationale(n.learnings, n.entryAnalysis),
   }));
 
   return {

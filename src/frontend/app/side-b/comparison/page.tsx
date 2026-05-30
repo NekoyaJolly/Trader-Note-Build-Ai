@@ -65,6 +65,8 @@ interface RecentTrade {
   direction?: string;
   outcome: "win" | "loss" | "breakeven";
   pnlPips: number | null;
+  /** 人間=TradeNote.userNotes / AI=AITradeNote の keyInsight 等。「なぜ」の比較用。 */
+  rationale?: string | null;
 }
 
 interface DashboardData {
@@ -363,22 +365,30 @@ function RecentTradesTable({ human, ai }: { human: RecentTrade[]; ai: RecentTrad
           ) : (
             <div className="space-y-2">
               {human.map(trade => (
-                <div key={trade.id} className="flex items-center justify-between bg-slate-800/50 rounded-lg px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-500">{trade.date}</span>
-                    <span className="text-sm font-medium text-white">{trade.symbol}</span>
-                    <span className="text-xs text-gray-400">{trade.side === "buy" ? "買い" : "売り"}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-xs ${outcomeColors[trade.outcome]}`}>
-                      {outcomeLabels[trade.outcome]}
-                    </span>
-                    {trade.pnlPips !== null && (
-                      <span className={`text-sm font-medium ${trade.pnlPips >= 0 ? "text-green-400" : "text-red-400"}`}>
-                        {trade.pnlPips >= 0 ? "+" : ""}{trade.pnlPips.toFixed(1)}
+                <div key={trade.id} className="bg-slate-800/50 rounded-lg px-3 py-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">{trade.date}</span>
+                      <span className="text-sm font-medium text-white">{trade.symbol}</span>
+                      <span className="text-xs text-gray-400">{trade.side === "buy" ? "買い" : "売り"}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs ${outcomeColors[trade.outcome]}`}>
+                        {outcomeLabels[trade.outcome]}
                       </span>
-                    )}
+                      {trade.pnlPips !== null && (
+                        <span className={`text-sm font-medium ${trade.pnlPips >= 0 ? "text-green-400" : "text-red-400"}`}>
+                          {trade.pnlPips >= 0 ? "+" : ""}{trade.pnlPips.toFixed(1)}
+                        </span>
+                      )}
+                    </div>
                   </div>
+                  {/* P2-c: 人間の根拠 (なぜこのトレードか) を AI と並べて比較できるよう表示 */}
+                  {trade.rationale?.trim() && (
+                    <p className="mt-1 text-[11px] text-purple-300/80 leading-snug">
+                      <span className="text-gray-500">根拠: </span>{trade.rationale.trim()}
+                    </p>
+                  )}
                 </div>
               ))}
             </div>
@@ -395,20 +405,28 @@ function RecentTradesTable({ human, ai }: { human: RecentTrade[]; ai: RecentTrad
           ) : (
             <div className="space-y-2">
               {ai.map(trade => (
-                <div key={trade.id} className="flex items-center justify-between bg-slate-800/50 rounded-lg px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-500">{trade.date}</span>
-                    <span className="text-sm font-medium text-white">{trade.symbol}</span>
-                    <span className="text-xs text-gray-400">{trade.direction === "long" ? "ロング" : "ショート"}</span>
+                <div key={trade.id} className="bg-slate-800/50 rounded-lg px-3 py-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">{trade.date}</span>
+                      <span className="text-sm font-medium text-white">{trade.symbol}</span>
+                      <span className="text-xs text-gray-400">{trade.direction === "long" ? "ロング" : "ショート"}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs ${outcomeColors[trade.outcome]}`}>
+                        {outcomeLabels[trade.outcome]}
+                      </span>
+                      <span className={`text-sm font-medium ${(trade.pnlPips ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>
+                        {(trade.pnlPips ?? 0) >= 0 ? "+" : ""}{(trade.pnlPips ?? 0).toFixed(1)}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-xs ${outcomeColors[trade.outcome]}`}>
-                      {outcomeLabels[trade.outcome]}
-                    </span>
-                    <span className={`text-sm font-medium ${(trade.pnlPips ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>
-                      {(trade.pnlPips ?? 0) >= 0 ? "+" : ""}{(trade.pnlPips ?? 0).toFixed(1)}
-                    </span>
-                  </div>
+                  {/* P2-c: AI の根拠 (keyInsight 等) を人間と並べて比較 */}
+                  {trade.rationale?.trim() && (
+                    <p className="mt-1 text-[11px] text-cyan-300/80 leading-snug">
+                      <span className="text-gray-500">根拠: </span>{trade.rationale.trim()}
+                    </p>
+                  )}
                 </div>
               ))}
             </div>
