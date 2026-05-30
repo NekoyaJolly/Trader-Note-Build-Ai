@@ -12,6 +12,25 @@
 
 import { prisma } from '../../backend/db/client';
 import type { Prisma } from '@prisma/client';
+import type { EntryAnalysis, Learnings } from '../models';
+
+/**
+ * AITradeNote の JSON (learnings / entryAnalysis) から、UI 比較用の「なぜ」を 1 行抽出する。
+ * 第一候補は learnings.keyInsight (最も簡潔な核心)、無ければ entryAnalysis.evaluation。
+ * 保存時に aiNoteService が型整合性を保証している DB JSON → アプリ型の境界キャスト。
+ */
+export function extractAiRationale(
+  learnings: Prisma.JsonValue,
+  entryAnalysis: Prisma.JsonValue,
+): string | null {
+  // eslint-disable-next-line no-restricted-syntax -- DB JsonValue → アプリ型の検証境界 (aiNoteService が書き込み時に型保証)
+  const l = learnings as unknown as Learnings | null;
+  if (l?.keyInsight && l.keyInsight.trim().length > 0) return l.keyInsight;
+  // eslint-disable-next-line no-restricted-syntax -- 同上
+  const e = entryAnalysis as unknown as EntryAnalysis | null;
+  if (e?.evaluation && e.evaluation.trim().length > 0) return e.evaluation;
+  return null;
+}
 
 // ===== 型定義 =====
 
@@ -88,6 +107,8 @@ export interface ComparisonDashboardData {
       side: string;
       outcome: 'win' | 'loss' | 'breakeven';
       pnlPips: number | null;
+      /** 人間トレーダーの根拠 (TradeNote.userNotes)。無ければ null。 */
+      rationale: string | null;
     }>;
     ai: Array<{
       id: string;
@@ -96,6 +117,8 @@ export interface ComparisonDashboardData {
       direction: string;
       outcome: 'win' | 'loss' | 'breakeven';
       pnlPips: number;
+      /** AI の根拠 (AITradeNote.learnings.keyInsight、無ければ entryAnalysis.evaluation)。無ければ null。 */
+      rationale: string | null;
     }>;
   };
 }
@@ -457,6 +480,7 @@ export async function getComparisonDashboard(
       side: n.side,
       outcome: pnlPips !== null ? determineOutcome(pnlPips) : ('breakeven' as const),
       pnlPips,
+      rationale: n.userNotes ?? null,
     };
   });
 
@@ -467,6 +491,7 @@ export async function getComparisonDashboard(
     direction: n.direction,
     outcome: n.outcome as 'win' | 'loss' | 'breakeven',
     pnlPips: n.pnlPips.toNumber(),
+    rationale: extractAiRationale(n.learnings, n.entryAnalysis),
   }));
 
   return {
