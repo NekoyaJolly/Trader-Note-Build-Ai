@@ -18,6 +18,7 @@ import { usePathname } from "next/navigation";
 import { getSideBAgentTabStripItems } from "@/lib/navigation/sideBNav";
 import { isNavHrefActive } from "@/lib/navigation/navActive";
 import { sideBApi, SideBApiError } from "@/lib/sideBApi";
+import { Button } from "@/components/ui/Button";
 import { PlanEvidenceCard } from "@/components/side-b/PlanEvidenceCard";
 import type { AITradePlanPayload, AgentRun, GetOrchestratorRunDetailResponse } from "@/types/sideB";
 
@@ -491,63 +492,42 @@ export default function SideBDashboard() {
                 )}
               </div>
 
-              {/* Start/Stop ボタン */}
+              {/* Start/Stop ボタン (共通 Button で形・高さ・幅を統一) */}
               {!isRunning ? (
-                <button
-                  onClick={startAgent}
-                  disabled={isStarting}
-                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-gradient-to-r from-green-500 to-emerald-600 text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-all"
-                >
+                <Button onClick={startAgent} disabled={isStarting} variant="secondary" size="sm">
                   {isStarting ? (
-                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
                   ) : (
                     "▶"
                   )}
                   <span>{isStarting ? "起動中..." : "Start"}</span>
-                </button>
+                </Button>
               ) : (
-                <button
-                  onClick={stopAgent}
-                  disabled={isStopping}
-                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-gradient-to-r from-red-500 to-rose-600 text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-all"
-                >
+                <Button onClick={stopAgent} disabled={isStopping} variant="destructive" size="sm">
                   {isStopping ? (
-                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
                   ) : (
                     "⏹"
                   )}
                   <span>{isStopping ? "停止中..." : "Stop"}</span>
-                </button>
+                </Button>
               )}
 
-              {/* 手動更新（自動ポーリング廃止に伴い追加） */}
-              <button
-                onClick={handleRefresh}
-                disabled={isRefreshing}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 hover:border-white/30 text-gray-300 hover:text-white text-sm transition-colors disabled:opacity-50"
-                title="最新の状態を取得"
-              >
+              {/* 手動更新 */}
+              <Button onClick={handleRefresh} disabled={isRefreshing} variant="outline" size="sm" title="最新の状態を取得">
                 <span className={isRefreshing ? "animate-spin" : ""}>⟳</span>
                 <span>{isRefreshing ? "更新中..." : "更新"}</span>
-              </button>
+              </Button>
 
               {/* 緊急キルスイッチ (旧 /side-b/agent から移設) */}
               {isEmergencyStopped ? (
-                <button
-                  onClick={handleEmergencyResume}
-                  disabled={isEmergencyActionLoading}
-                  className="bg-red-600 hover:bg-red-500 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
-                >
+                <Button onClick={handleEmergencyResume} disabled={isEmergencyActionLoading} variant="secondary" size="sm">
                   {isEmergencyActionLoading ? "処理中..." : "緊急停止を解除"}
-                </button>
+                </Button>
               ) : (
-                <button
-                  onClick={handleEmergencyStop}
-                  disabled={isEmergencyActionLoading}
-                  className="bg-red-950/40 hover:bg-red-900/60 border border-red-700/50 text-red-200 font-bold text-xs px-3 py-1.5 rounded-lg transition-all disabled:opacity-50"
-                >
-                  {isEmergencyActionLoading ? "処理中..." : "🚨 緊急停止 (KILL SWITCH)"}
-                </button>
+                <Button onClick={handleEmergencyStop} disabled={isEmergencyActionLoading} variant="destructive" size="sm">
+                  {isEmergencyActionLoading ? "処理中..." : "🚨 緊急停止"}
+                </Button>
               )}
             </div>
 
@@ -640,18 +620,14 @@ export default function SideBDashboard() {
                 placeholder="銘柄 (例: XAUUSD)"
                 className="w-32 bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white"
               />
-              <button
-                onClick={handleGeneratePlan}
-                disabled={planGenLoading}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-500 to-cyan-600 text-white text-xs font-medium hover:opacity-90 disabled:opacity-50 transition-all"
-              >
+              <Button onClick={handleGeneratePlan} disabled={planGenLoading} variant="default" size="sm">
                 {planGenLoading ? (
                   <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 ) : (
                   "✨"
                 )}
                 <span>{planGenLoading ? "生成中..." : "プラン生成"}</span>
-              </button>
+              </Button>
             </div>
           </div>
           <div className="p-4">
@@ -846,13 +822,13 @@ export default function SideBDashboard() {
             </div>
           </details>
 
-          {/* 右: 現在の戦略 + オープンポジション */}
-          <div className="card-surface rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50">
+          {/* 右: 現在の戦略 + オープンポジション (既定で折りたたみ。主役はプランのため副次情報として格納) */}
+          <details className="card-surface rounded-xl overflow-hidden self-start">
+            <summary className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50 cursor-pointer select-none">
               <h2 className="text-sm font-semibold text-white flex items-center gap-2">
                 <span>📋</span> ポジション & 戦略
               </h2>
-            </div>
+            </summary>
             <div className="h-80 sm:h-96 overflow-y-auto">
               {/* オープンポジション */}
               {(status?.memory?.openPositions?.length ?? 0) > 0 && (
@@ -904,7 +880,7 @@ export default function SideBDashboard() {
                 )}
               </details>
             </div>
-          </div>
+          </details>
         </div>
 
         {/* ===== 最近のトレード結果 ===== */}
