@@ -125,6 +125,7 @@ export default function AgentDetailPage() {
     const [recentPlans, setRecentPlans] = useState<AITradePlanPayload[]>([]);
     const [validationVisibility, setValidationVisibility] = useState<ValidationVisibilityData | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [isRefreshing, setIsRefreshing] = useState(false);
     const [logLimit, setLogLimit] = useState(50);
 
     const [orchestratorRuns, setOrchestratorRuns] = useState<AgentRun[]>([]);
@@ -257,11 +258,22 @@ export default function AgentDetailPage() {
         }
     };
 
+    // 自動ポーリングは廃止 (2026-05-31)。
+    // 表示するのは PDCA ループのメモリ状態で、実 cadence は最速 5 分・通常 1h〜日次。
+    // プラン確定後の執行は決定論で AI が常時張り付く必要がないため、開いた時に 1 回 fetch +
+    // 手動「更新」ボタンに切替え、10/15 秒ポーリングによる Cloud Run / Supabase の無駄叩きを排除する。
     useEffect(() => {
         fetchData();
-        const interval = setInterval(fetchData, 10_000);
-        return () => clearInterval(interval);
     }, [fetchData]);
+
+    const handleRefresh = async () => {
+        setIsRefreshing(true);
+        try {
+            await fetchData();
+        } finally {
+            setIsRefreshing(false);
+        }
+    };
 
     if (isLoading) {
         return (
@@ -310,6 +322,15 @@ export default function AgentDetailPage() {
                         </Link>
                         <span className="text-gray-600">|</span>
                         <h1 className="text-xl font-bold text-white">AI Agent 詳細</h1>
+                        <button
+                            onClick={handleRefresh}
+                            disabled={isRefreshing}
+                            className="ml-1 flex items-center gap-1 text-xs text-gray-400 hover:text-white border border-white/10 hover:border-white/30 rounded-lg px-2.5 py-1 transition-colors disabled:opacity-50"
+                            title="最新の状態を取得"
+                        >
+                            <span className={isRefreshing ? "animate-spin" : ""}>⟳</span>
+                            {isRefreshing ? "更新中..." : "更新"}
+                        </button>
                     </div>
                     <div>
                         {isEmergencyStopped ? (
