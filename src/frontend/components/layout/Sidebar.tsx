@@ -84,7 +84,7 @@ const sideATopNav: NavItem[] = [
 
 /** Side-B ワークスペース内の「ホーム」（ヘッダータブで Side-A に切替する） */
 const sideBTopNav: NavItem[] = [
-  { href: "/side-b/dashboard", label: "Side-B ホーム", icon: LayoutDashboard, color: "purple" },
+  { href: "/side-b", label: "Side-B ホーム", icon: LayoutDashboard, color: "purple" },
 ];
 
 /**

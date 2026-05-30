@@ -14,9 +14,6 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { getSideBAgentTabStripItems } from "@/lib/navigation/sideBNav";
-import { isNavHrefActive } from "@/lib/navigation/navActive";
 import { sideBApi, SideBApiError } from "@/lib/sideBApi";
 import { Button } from "@/components/ui/Button";
 import { PlanEvidenceCard } from "@/components/side-b/PlanEvidenceCard";
@@ -127,8 +124,6 @@ async function safeFetchJson<T>(res: Response): Promise<T | null> {
 }
 
 export default function SideBDashboard() {
-  const pathname = usePathname();
-  const agentTabNav = getSideBAgentTabStripItems();
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [thinkingLog, setThinkingLog] = useState<ThinkingLogEntry[]>([]);
   const [lessons, setLessons] = useState<string[]>([]);
@@ -450,30 +445,7 @@ export default function SideBDashboard() {
               自律型トレーディングAI ダッシュボード
             </p>
           </div>
-
-          {/* ナビゲーション（lib/navigation/sideBNav.ts とサイドバー共通定義） */}
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 justify-end">
-            {agentTabNav.map((link) => {
-              const Icon = link.icon;
-              const active = isNavHrefActive(pathname, link.href);
-              return (
-                <Link
-                  key={link.id}
-                  data-testid={`side-b-agent-tab-${link.id}`}
-                  href={link.href}
-                  aria-current={active ? "page" : undefined}
-                  className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs transition-colors ${
-                    active
-                      ? "text-white bg-slate-700/80 ring-1 ring-purple-500/40"
-                      : "text-gray-400 hover:text-white hover:bg-slate-700/50"
-                  }`}
-                >
-                  <Icon className="w-3.5 h-3.5 shrink-0 opacity-90" aria-hidden />
-                  <span className="hidden sm:inline">{link.labelTab}</span>
-                </Link>
-              );
-            })}
-          </div>
+          {/* 上部タブは廃止 (2026-05-31)。ナビは左サイドバーに一本化し二重ナビを解消。 */}
         </div>
 
         {/* ===== ステータスバー ===== */}

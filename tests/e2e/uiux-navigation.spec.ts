@@ -172,21 +172,16 @@ test.describe("Side-B ナビ（モック認証）", () => {
     await mockSideBAgentDashboardApis(page);
   });
 
-  test("/side-b では運転席タブのみ aria-current", async ({ page }) => {
-    await page.goto("/side-b");
-    const agentTab = page.getByTestId("side-b-agent-tab-agent");
-    await expect(agentTab).toHaveAttribute("aria-current", "page");
-    const dashTab = page.getByTestId("side-b-agent-tab-dashboard");
-    await expect(dashTab).not.toHaveAttribute("aria-current", "page");
-  });
+  // 旧「運転席タブのみ aria-current」テストは上部タブ strip 廃止 (2026-05-31) に伴い削除。
+  // ナビは左サイドバーに一本化されたため、タブ strip の testid (side-b-agent-tab-*) は存在しない。
 
-  test("/side-b/dashboard のパンくずは台帳（運転席のラベルではない）", async ({
+  test("/side-b/dashboard のパンくずは統計（プランのラベルではない）", async ({
     page,
   }) => {
     await page.goto("/side-b/dashboard");
     const bc = page.getByTestId("side-b-breadcrumb");
-    await expect(bc).toContainText("台帳ダッシュボード");
-    await expect(bc).not.toContainText("エージェント（運転席）");
+    await expect(bc).toContainText("統計");
+    await expect(bc).not.toContainText("プラン");
   });
 
   test("パンくずが表示される", async ({ page }) => {
@@ -194,7 +189,7 @@ test.describe("Side-B ナビ（モック認証）", () => {
     const bc = page.getByTestId("side-b-breadcrumb");
     await expect(bc).toBeVisible();
     await expect(bc).toContainText("Side-B");
-    await expect(bc).toContainText("検証キュー");
+    await expect(bc).toContainText("検証");
   });
 });
 
@@ -232,13 +227,12 @@ test.describe("主要ビューポートのレイアウト露出", () => {
   });
 
   for (const vp of viewports) {
-    test(`Side-B 運転席 ${vp.name} (${vp.w}px): ヘッダータブとエージェントタブが見える`, async ({
+    test(`Side-B 運転席 ${vp.name} (${vp.w}px): ヘッダーのワークスペースタブが見える`, async ({
       page,
     }) => {
       await page.setViewportSize({ width: vp.w, height: vp.h });
       await page.goto("/side-b");
       await expect(page.getByTestId("workspace-tabs")).toBeVisible();
-      await expect(page.getByTestId("side-b-agent-tab-agent")).toBeVisible();
     });
   }
 });
