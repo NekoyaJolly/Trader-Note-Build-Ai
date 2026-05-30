@@ -384,9 +384,9 @@ function RecentTradesTable({ human, ai }: { human: RecentTrade[]; ai: RecentTrad
                     </div>
                   </div>
                   {/* P2-c: 人間の根拠 (なぜこのトレードか) を AI と並べて比較できるよう表示 */}
-                  {trade.rationale && (
+                  {trade.rationale?.trim() && (
                     <p className="mt-1 text-[11px] text-purple-300/80 leading-snug">
-                      <span className="text-gray-500">根拠: </span>{trade.rationale}
+                      <span className="text-gray-500">根拠: </span>{trade.rationale.trim()}
                     </p>
                   )}
                 </div>
@@ -422,9 +422,9 @@ function RecentTradesTable({ human, ai }: { human: RecentTrade[]; ai: RecentTrad
                     </div>
                   </div>
                   {/* P2-c: AI の根拠 (keyInsight 等) を人間と並べて比較 */}
-                  {trade.rationale && (
+                  {trade.rationale?.trim() && (
                     <p className="mt-1 text-[11px] text-cyan-300/80 leading-snug">
-                      <span className="text-gray-500">根拠: </span>{trade.rationale}
+                      <span className="text-gray-500">根拠: </span>{trade.rationale.trim()}
                     </p>
                   )}
                 </div>

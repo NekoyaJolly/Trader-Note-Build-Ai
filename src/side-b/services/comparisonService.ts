@@ -12,23 +12,36 @@
 
 import { prisma } from '../../backend/db/client';
 import type { Prisma } from '@prisma/client';
-import type { EntryAnalysis, Learnings } from '../models';
+import { z } from 'zod';
 
 /**
- * AITradeNote の JSON (learnings / entryAnalysis) から、UI 比較用の「なぜ」を 1 行抽出する。
+ * AITradeNote の JSON (learnings / entryAnalysis) から「なぜ」を 1 行抽出するための
+ * 最小スキーマ。DB の JSON は外部入力相当のため Zod でランタイム検証する
+ * (AGENTS.md §2.1: unknown 禁止 + 外部入力は Zod で narrow)。表示に使う 1 フィールド
+ * だけを検証し、他フィールドは passthrough で無視する。
+ */
+const LearningsRationaleSchema = z.object({ keyInsight: z.string() }).passthrough();
+const EntryRationaleSchema = z.object({ evaluation: z.string() }).passthrough();
+
+/**
+ * AITradeNote の JSON から UI 比較用の「なぜ」を 1 行抽出する。
  * 第一候補は learnings.keyInsight (最も簡潔な核心)、無ければ entryAnalysis.evaluation。
- * 保存時に aiNoteService が型整合性を保証している DB JSON → アプリ型の境界キャスト。
+ * いずれも trim 済みで返し、空文字なら次候補 / null にフォールバックする。
  */
 export function extractAiRationale(
   learnings: Prisma.JsonValue,
   entryAnalysis: Prisma.JsonValue,
 ): string | null {
-  // eslint-disable-next-line no-restricted-syntax -- DB JsonValue → アプリ型の検証境界 (aiNoteService が書き込み時に型保証)
-  const l = learnings as unknown as Learnings | null;
-  if (l?.keyInsight && l.keyInsight.trim().length > 0) return l.keyInsight;
-  // eslint-disable-next-line no-restricted-syntax -- 同上
-  const e = entryAnalysis as unknown as EntryAnalysis | null;
-  if (e?.evaluation && e.evaluation.trim().length > 0) return e.evaluation;
+  const l = LearningsRationaleSchema.safeParse(learnings);
+  if (l.success) {
+    const keyInsight = l.data.keyInsight.trim();
+    if (keyInsight.length > 0) return keyInsight;
+  }
+  const e = EntryRationaleSchema.safeParse(entryAnalysis);
+  if (e.success) {
+    const evaluation = e.data.evaluation.trim();
+    if (evaluation.length > 0) return evaluation;
+  }
   return null;
 }
 
@@ -480,7 +493,8 @@ export async function getComparisonDashboard(
       side: n.side,
       outcome: pnlPips !== null ? determineOutcome(pnlPips) : ('breakeven' as const),
       pnlPips,
-      rationale: n.userNotes ?? null,
+      // 空白のみの userNotes は「根拠なし」として null 正規化 (UI で「根拠:」だけが出るのを防ぐ)
+      rationale: n.userNotes?.trim() || null,
     };
   });
 
