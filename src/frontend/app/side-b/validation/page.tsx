@@ -195,7 +195,7 @@ function ValidationPageInner() {
       <main className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-white">検証キュー</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-white">検証</h1>
             <p className="text-xs text-gray-400 mt-0.5">
               検証待ち・実行中・直近24時間の結果をまとめて表示します。
             </p>

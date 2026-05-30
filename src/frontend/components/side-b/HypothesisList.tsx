@@ -175,7 +175,7 @@ export function HypothesisList() {
                 <div className="flex items-center justify-between gap-3 mb-4">
                     <div>
                         <h1 className="text-xl sm:text-2xl font-bold text-white">
-                            仮説一覧
+                            仮説
                         </h1>
                         <p className="text-xs text-gray-400 mt-0.5">
                             エッジ台帳 (EdgeLedger) に登録された全仮説

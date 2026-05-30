@@ -68,7 +68,7 @@ export default function EvolutionPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">進化トラッキング (Evolution)</h1>
+          <h1 className="text-2xl font-bold tracking-tight">進化</h1>
           <p className="text-muted-foreground mt-1">
             AIが自律的に実行したバックテスト結果と、世代ごとの学習の軌跡を確認します。
           </p>

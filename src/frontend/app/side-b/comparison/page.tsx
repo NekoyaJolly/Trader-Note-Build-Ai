@@ -470,7 +470,7 @@ export default function ComparisonDashboardPage() {
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-white">
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-cyan-400">
-                🧑 vs 🤖 比較ダッシュボード
+                🧑 vs 🤖 比較
               </span>
             </h1>
             <p className="text-sm text-gray-400 mt-1">
