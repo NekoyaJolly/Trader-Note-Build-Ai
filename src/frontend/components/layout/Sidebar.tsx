@@ -4,7 +4,7 @@
  * サイドバーナビゲーションコンポーネント
  * 
  * ワークスペース別: pathname が /side-b のとき Side-B メニューのみ、それ以外は Side-A メニューのみ。
- * md 以上は常時表示、未満はオーバーレイ。
+ * md 以上は既定で開いて開始するが isOpen で開閉可能 (閉=md:hidden)、未満はオーバーレイ。
  *
  * @see docs/design/tradeassist_uiux_redesign_plan.md
  */
@@ -448,8 +448,10 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
     }));
   };
 
-  // ナビクリック時にサイドバーを閉じる
+  // ナビクリック時にサイドバーを閉じる (モバイルのオーバーレイのみ)。
+  // デスクトップ (md+) では md:hidden 化に伴い、ナビ操作のたびに閉じてしまうのを防ぐため閉じない。
   const handleNavClick = () => {
+    if (typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches) return;
     onClose?.();
   };
 
@@ -640,7 +642,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         />
       )}
 
-      {/* サイドバー: モバイルはオーバーレイ、md 以上は常時表示 */}
+      {/* サイドバー: モバイルはオーバーレイ。md 以上は開=in-flow (md:static)、閉=md:hidden で開閉可能 */}
       <aside
         className={`
           fixed top-0 left-0 z-50 md:z-auto
