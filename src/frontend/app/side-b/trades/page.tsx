@@ -429,18 +429,19 @@ export default function TradesPage() {
         {/* ポートフォリオサマリー */}
         {portfolio && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
-            {/* 残高 */}
+            {/* エクイティ（pips ベース）
+                仮想トレードに金額（pnlAmount）モデルが無くドル残高は動かないため、
+                pips ベースのエクイティ（初期 0 基準の累計 pips）で口座状況を表す。 */}
             <div className="card-surface rounded-xl p-4">
-              <p className="text-xs text-gray-400 mb-1">残高</p>
-              <p className="text-lg sm:text-xl font-bold text-white">
-                ${formatNumber(portfolio.portfolio.currentBalance, 0)}
+              <p className="text-xs text-gray-400 mb-1">エクイティ (pips)</p>
+              <p className={`text-lg sm:text-xl font-bold ${getPnLColor(portfolio.stats.totalPnlPips)}`}>
+                {portfolio.stats.totalPnlPips > 0 ? "+" : ""}
+                {formatNumber(portfolio.stats.totalPnlPips, 1)}
               </p>
-              <p className={`text-xs mt-1 ${portfolio.portfolio.currentBalance >= portfolio.portfolio.initialBalance
-                  ? "text-green-400"
-                  : "text-red-400"
-                }`}>
-                {portfolio.portfolio.currentBalance >= portfolio.portfolio.initialBalance ? "+" : ""}
-                ${formatNumber(portfolio.portfolio.currentBalance - portfolio.portfolio.initialBalance, 0)}
+              <p className="text-xs text-gray-500 mt-1">
+                {portfolio.stats.totalTrades > 0
+                  ? `平均 ${formatNumber(portfolio.stats.totalPnlPips / portfolio.stats.totalTrades, 1)} pips/取引`
+                  : "初期 0 基準"}
               </p>
             </div>
 

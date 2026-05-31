@@ -10,6 +10,7 @@ jest.mock('../utils/marketHours', () => ({
 }));
 jest.mock('../services/virtualTradeService', () => ({
   expirePendingTrades: jest.fn().mockResolvedValue(0),
+  refreshPortfolioStats: jest.fn().mockResolvedValue(undefined),
 }));
 jest.mock('../services/tradeVerificationService', () => ({
   verifyTradeState: jest.fn().mockReturnValue({ entry: undefined, exit: undefined }),
@@ -38,6 +39,7 @@ import { TradeMonitoringJob, type TradeMonitoringJobServices } from '../jobs/tra
 import { isFXMarketOpen } from '../utils/marketHours';
 import { findVirtualTrades } from '../repositories';
 import { verifyTradeState } from '../services/tradeVerificationService';
+import { refreshPortfolioStats } from '../services/virtualTradeService';
 import { pdcaLoop } from '../agent';
 import type { SideBSchedulerConfig } from '../jobs/sideBScheduler';
 
@@ -169,5 +171,46 @@ describe('TradeMonitoringJob', () => {
     expect(pdcaLoop.notifyTradeCompleted).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'trade-mtf-1', timeframe: '15m', higherTimeframe: '1h' }),
     );
+  });
+
+  it('決済が発生したらポートフォリオ統計を再集計する (UI 反映の要)', async () => {
+    // open トレードが exit triggered → 決済発生。決済後に refreshPortfolioStats が呼ばれること。
+    const openTrade = {
+      id: 'trade-refresh-1',
+      symbol: 'XAU/USD',
+      direction: 'long',
+      plannedEntry: 2600,
+      actualEntry: 2600,
+      stopLoss: 2590,
+      takeProfit: 2620,
+      timeframe: '15m',
+      higherTimeframe: '1h',
+    };
+    (findVirtualTrades as jest.Mock).mockImplementation((opts: { status?: string }) =>
+      Promise.resolve(opts?.status === 'open' ? [openTrade] : []),
+    );
+    (verifyTradeState as jest.Mock).mockReturnValue({
+      entry: undefined,
+      exit: { triggered: true, exitPrice: 2620, exitReason: 'take_profit', exitTime: new Date() },
+    });
+
+    const services = makeServices();
+    (services.marketDataService.getRecentMinuteOHLCV as jest.Mock).mockResolvedValue([
+      { timestamp: new Date(), open: 2600, high: 2625, low: 2595, close: 2620, volume: 100 },
+    ]);
+    const { job } = makeJob();
+
+    await job.runWithServices(minimalConfig, services);
+
+    expect(refreshPortfolioStats).toHaveBeenCalledTimes(1);
+  });
+
+  it('決済が無い場合はポートフォリオ統計を再集計しない', async () => {
+    // 既定 mock では verifyTradeState が triggers 無し → exits=0。
+    const { job } = makeJob();
+
+    await job.runWithServices(minimalConfig, makeServices());
+
+    expect(refreshPortfolioStats).not.toHaveBeenCalled();
   });
 });
