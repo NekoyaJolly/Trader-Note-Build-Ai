@@ -32,8 +32,15 @@ export default function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
 
   // クライアントサイドでのみ初期化（非同期で setState して react-hooks ルール準拠）
+  // デスクトップ (md 以上) はサイドバーを開いた状態で開始し、閉じたい時に閉じられる。
+  // モバイルは従来どおり閉じた状態 (オーバーレイ) で開始。
   useEffect(() => {
-    queueMicrotask(() => setMounted(true));
+    queueMicrotask(() => {
+      setMounted(true);
+      if (typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches) {
+        setIsSidebarOpen(true);
+      }
+    });
   }, []);
 
   // Side-A ホーム「前回の続き」用: pathname のみ（トースト用クエリ等を保存しない）
