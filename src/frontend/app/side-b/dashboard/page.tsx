@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/Button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/Alert";
 import { Card } from "@/components/ui/Card";
 import { NeonCard } from "@/components/ui/NeonCard";
+import type { GlowColor } from "@/components/ui/NeonCard";
+import { getSideBWorkspaceItemsSorted } from "@/lib/navigation/sideBNav";
 import { HypothesisCard } from "@/components/side-b/HypothesisCard";
 import { LedgerStats } from "@/components/side-b/LedgerStats";
 import { DashboardCharts } from "@/components/side-b/DashboardCharts";
@@ -39,6 +41,18 @@ const DevCopyAiDebugContextButton = dynamic(
   () => import("@last-mile-context/react-bridge").then((module) => module.CopyAiDebugContextButton),
   { ssr: false },
 );
+
+/**
+ * クイックリンクの絵文字/色のみを id 別に保持する。
+ * 表示ラベルと href は sideBNav (SIDE_B_WORKSPACE_ITEMS) を単一ソースとして引き、
+ * ここでハードコードしない (Copilot review PR #295: ラベル変更時のドリフト防止)。
+ */
+const QUICK_LINK_STYLE: Partial<Record<string, { icon: string; color: GlowColor }>> = {
+  hypotheses: { icon: "📋", color: "purple" },
+  validation: { icon: "⚙️", color: "cyan" },
+  agent: { icon: "🤖", color: "green" },
+  comparison: { icon: "📊", color: "pink" },
+};
 
 export default function SideBDashboardPage() {
   const [overview, setOverview] = React.useState<StatsOverviewResponse | null>(null);
@@ -167,21 +181,26 @@ export default function SideBDashboardPage() {
                 }}
               />
             )}
-            <Link href="/side-b">
-              <Button variant="outline" size="sm">
-                エージェントへ
-              </Button>
-            </Link>
+            {/* 「エージェントへ」ボタンは下のクイックリンク「プラン」と重複するため削除 (2026-05-31) */}
           </div>
         </div>
 
         <section>
           <h2 className="text-sm font-semibold text-gray-300 mb-3">クイックリンク</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <NeonCard icon="📋" title="仮説一覧" href="/side-b/hypotheses" color="purple" />
-            <NeonCard icon="⚙️" title="検証キュー" href="/side-b/validation" color="cyan" />
-            <NeonCard icon="🤖" title="AI エージェント" href="/side-b" color="green" />
-            <NeonCard icon="📊" title="比較ダッシュボード" href="/side-b/comparison" color="pink" />
+            {getSideBWorkspaceItemsSorted().map((e) => {
+              const style = QUICK_LINK_STYLE[e.id];
+              if (!style) return null;
+              return (
+                <NeonCard
+                  key={e.id}
+                  icon={style.icon}
+                  title={e.labelSidebar}
+                  href={e.href}
+                  color={style.color}
+                />
+              );
+            })}
           </div>
         </section>
 
