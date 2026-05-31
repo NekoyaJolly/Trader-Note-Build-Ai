@@ -56,6 +56,7 @@ import {
   SchedulerSummaryPeriodSchema,
   summarySchedulerService,
 } from '../services/summarySchedulerService';
+import { UpdateAINoteMatchingRequestSchema } from '../../schemas/api/sideB';
 
 // MarketDataService インスタンス（OHLCV自動取得用）
 const marketDataService = new MarketDataService();
@@ -822,28 +823,26 @@ export class SideBController {
    */
   listAINotes = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { from, to, outcome, symbol, limit, offset } = getValidatedQuery<{
+      // validateQuery(ListAINotesQuerySchema) 済みのため、limit/offset は number、
+      // usedForMatching は boolean に変換済み（未指定なら undefined）。
+      const { from, to, outcome, symbol, usedForMatching, limit, offset } = getValidatedQuery<{
         from?: string;
         to?: string;
-        outcome?: string;
+        outcome?: 'win' | 'loss' | 'breakeven';
         symbol?: string;
-        limit?: string;
-        offset?: string;
+        usedForMatching?: boolean;
+        limit?: number;
+        offset?: number;
       }>(res);
-
-      // outcomeのバリデーション
-      const validOutcomes = ['win', 'loss', 'breakeven'];
-      const outcomeFilter = outcome && validOutcomes.includes(outcome)
-        ? outcome as 'win' | 'loss' | 'breakeven'
-        : undefined;
 
       const result = await aiNoteService.listNotes({
         from: from,
         to: to,
-        outcome: outcomeFilter,
+        outcome: outcome,
         symbol: symbol,
-        limit: limit ? parseInt(limit, 10) : 20,
-        offset: offset ? parseInt(offset, 10) : 0,
+        usedForMatching: usedForMatching,
+        limit: limit ?? 20,
+        offset: offset ?? 0,
       });
 
       res.json({
@@ -855,6 +854,35 @@ export class SideBController {
     } catch (error) {
       console.error('[SideBController] listAINotes error:', error);
       res.status(500).json({ error: 'AIノート一覧取得に失敗しました' });
+    }
+  };
+
+  /**
+   * PATCH /api/side-b/ai-notes/:id/matching
+   * 本番運用フラグ（usedForMatching）を手動トグルする。
+   * true にしたノートだけが実行時のライブ照合（cross/cron）の対象になる。
+   */
+  updateAINoteMatching = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+
+      const parsedBody = UpdateAINoteMatchingRequestSchema.safeParse(req.body ?? {});
+      if (!parsedBody.success) {
+        res.status(400).json({ error: 'リクエストが不正です', details: parsedBody.error.format() });
+        return;
+      }
+
+      const note = await aiNoteService.setNoteUsedForMatching(id, parsedBody.data.usedForMatching);
+
+      if (!note) {
+        res.status(404).json({ error: 'AIノートが見つかりません' });
+        return;
+      }
+
+      res.json({ success: true, note });
+    } catch (error) {
+      console.error('[SideBController] updateAINoteMatching error:', error);
+      res.status(500).json({ error: '本番運用フラグの更新に失敗しました' });
     }
   };
 

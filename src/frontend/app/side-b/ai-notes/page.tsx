@@ -101,6 +101,8 @@ interface AITradeNote {
   planEvaluation: PlanEvaluation;
   marketReview: MarketReview;
   learnings: Learnings;
+  /** 本番運用フラグ（手動選別）。true のノートだけが実行時のライブ照合の対象になる。 */
+  usedForMatching: boolean;
   aiModel: string;
   createdAt: string;
 }
@@ -257,8 +259,10 @@ export default function AINotesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedNote, setSelectedNote] = useState<AITradeNote | null>(null);
-  const [activeTab, setActiveTab] = useState<"notes" | "summaries">("notes");
+  const [activeTab, setActiveTab] = useState<"notes" | "production" | "summaries">("notes");
   const [generatingSummary, setGeneratingSummary] = useState(false);
+  // 本番運用トグルの更新中ノートID（連打防止 + スピナー表示用）
+  const [togglingNoteId, setTogglingNoteId] = useState<string | null>(null);
 
   // API ベース URL
   const API_BASE = getPublicApiBaseUrl() + "/api";
@@ -337,6 +341,39 @@ export default function AINotesPage() {
       setGeneratingSummary(false);
     }
   };
+
+  // 本番運用フラグの手動トグル。
+  // 楽観更新はせず、PATCH 成功後にサーバー返却値で当該ノートを差し替える。
+  const handleToggleMatching = async (note: AITradeNote) => {
+    if (togglingNoteId) return;
+    setTogglingNoteId(note.id);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/side-b/ai-notes/${note.id}/matching`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ usedForMatching: !note.usedForMatching }),
+      });
+      if (!res.ok) {
+        throw new Error(`本番運用フラグの更新に失敗しました: ${res.status}`);
+      }
+      const data = await res.json();
+      const updated: AITradeNote = data.note;
+      setNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)));
+      setSelectedNote((prev) => (prev && prev.id === updated.id ? updated : prev));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "本番運用フラグの更新に失敗しました");
+    } finally {
+      setTogglingNoteId(null);
+    }
+  };
+
+  // 本番運用に選別されたノート（実行時のライブ照合の対象）。
+  // 統計カードは全ノート基準のまま（計算は全体）。
+  const productionNotes = notes.filter((n) => n.usedForMatching);
+
+  // 現在のタブで表示するノート集合
+  const visibleNotes = activeTab === "production" ? productionNotes : notes;
 
   // 統計サマリー（現在のノートから計算）
   const calculateCurrentStats = (): SummaryStatistics => {
@@ -461,6 +498,16 @@ export default function AINotesPage() {
             📝 ノート一覧 ({notes.length})
           </button>
           <button
+            onClick={() => setActiveTab("production")}
+            className={`px-6 py-3 font-medium transition-colors ${activeTab === "production"
+                ? "text-amber-400 border-b-2 border-amber-400"
+                : "text-slate-400 hover:text-white"
+              }`}
+            title="ここに入れたノートだけが、ライブ市場入力との類似度判定の対象になります"
+          >
+            ⭐ 本番運用 ({productionNotes.length})
+          </button>
+          <button
             onClick={() => setActiveTab("summaries")}
             className={`px-6 py-3 font-medium transition-colors ${activeTab === "summaries"
                 ? "text-cyan-400 border-b-2 border-cyan-400"
@@ -471,21 +518,37 @@ export default function AINotesPage() {
           </button>
         </div>
 
-        {/* ノート一覧タブ */}
-        {activeTab === "notes" && (
+        {/* ノート一覧タブ / 本番運用タブ（同じカード表示を共有） */}
+        {(activeTab === "notes" || activeTab === "production") && (
           <section className="space-y-4">
-            {notes.length === 0 ? (
+            {activeTab === "production" && (
+              <div className="bg-amber-500/10 border border-amber-500/30 text-amber-200/90 px-4 py-3 rounded-lg text-sm">
+                ⭐ ここに入れたノートだけが、ライブ市場入力との<strong>類似度判定の対象</strong>になります。
+                各カードの「本番運用」トグルで選別してください（ノート一覧・上部の統計は全ノートのまま）。
+              </div>
+            )}
+            {visibleNotes.length === 0 ? (
               <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-8 text-center">
-                <div className="text-4xl mb-4">📝</div>
+                <div className="text-4xl mb-4">{activeTab === "production" ? "⭐" : "📝"}</div>
                 <div className="text-slate-400">
-                  AIノートがありません。
-                  <br />
-                  仮想トレードを決済するとAIが自動でノートを生成します。
+                  {activeTab === "production" ? (
+                    <>
+                      本番運用に選別されたノートはまだありません。
+                      <br />
+                      「ノート一覧」で良いトレードのカードの「本番運用」トグルを ON にしてください。
+                    </>
+                  ) : (
+                    <>
+                      AIノートがありません。
+                      <br />
+                      仮想トレードを決済するとAIが自動でノートを生成します。
+                    </>
+                  )}
                 </div>
               </div>
             ) : (
               <div className="space-y-4">
-                {notes.map((note) => (
+                {visibleNotes.map((note) => (
                   <div
                     key={note.id}
                     className={`glass-surface hover-glow press-scale transition-smooth rounded-xl p-4 cursor-pointer ${selectedNote?.id === note.id ? "border-cyan-500" : ""
@@ -502,6 +565,25 @@ export default function AINotesPage() {
                         <span className={`text-sm ${note.direction === "long" ? "text-green-400" : "text-red-400"}`}>
                           {directionToJapanese(note.direction)}
                         </span>
+                        {/* 本番運用トグル（カード展開と独立させるため propagation を止める） */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleMatching(note);
+                          }}
+                          disabled={togglingNoteId === note.id}
+                          aria-pressed={note.usedForMatching}
+                          title={note.usedForMatching
+                            ? "本番運用中（ライブ照合の対象）。クリックで外す"
+                            : "クリックで本番運用に追加（ライブ照合の対象にする）"}
+                          className={`px-2 py-1 rounded text-xs font-medium border transition-colors disabled:opacity-50 ${note.usedForMatching
+                              ? "bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30"
+                              : "bg-slate-700/40 text-slate-400 border-slate-600/50 hover:text-white hover:border-slate-500"
+                            }`}
+                        >
+                          {togglingNoteId === note.id ? "…" : note.usedForMatching ? "⭐ 本番運用中" : "☆ 本番運用に追加"}
+                        </button>
                       </div>
                       <div className="text-right">
                         <div className="text-slate-400 text-sm">

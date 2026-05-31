@@ -249,10 +249,13 @@ export async function listNotes(options: {
   to?: string;
   outcome?: TradeOutcome;
   symbol?: string;
+  /** 本番運用フラグでの絞り込み。「本番運用」タブ表示で true を渡す。未指定なら全件。 */
+  usedForMatching?: boolean;
   limit?: number;
   offset?: number;
 }): Promise<{ notes: AITradeNote[]; total: number; stats: { winCount: number; lossCount: number; winRate: number } }> {
   const { notes, total } = await aiNoteRepository.findAITradeNotes(options);
+  // 統計は「全ノート」を対象に集計する（本番運用フィルタの影響を受けない＝計算は全体）
   const counts = await aiNoteRepository.countNotesByOutcome();
 
   const totalCounted = counts.win + counts.loss + counts.breakeven;
@@ -267,6 +270,19 @@ export async function listNotes(options: {
       winRate: Math.round(winRate * 10) / 10,
     },
   };
+}
+
+/**
+ * AIノートの本番運用フラグ（usedForMatching）を更新する
+ *
+ * 「本番運用」選別の手動トグルで呼ばれる。フラグを true にしたノートだけが
+ * 実行時のライブ照合（cross/cron）の対象になる。存在しない ID は null を返す。
+ */
+export async function setNoteUsedForMatching(
+  id: string,
+  usedForMatching: boolean
+): Promise<AITradeNote | null> {
+  return aiNoteRepository.setAITradeNoteUsedForMatching(id, usedForMatching);
 }
 
 // ===== サマリー生成 =====

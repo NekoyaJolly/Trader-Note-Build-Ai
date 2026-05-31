@@ -38,6 +38,11 @@ export interface CrossSearchParams {
   // 検索対象
   searchTradeNotes?: boolean;
   searchAITradeNotes?: boolean;
+
+  // AITradeNote（Side-B）の照合を「本番運用」選別済みノートのみに限定するか。
+  // 実行時のライブ照合（cron / similarity API）では true を渡し、手動で昇格させたノートだけを対象にする。
+  // 未指定（false）の場合は従来どおり全 AITradeNote を対象とする。
+  aiNotesUsedForMatchingOnly?: boolean;
 }
 
 /**
@@ -78,6 +83,7 @@ export class CrossSimilarityService {
       minSimilarity = 0.5,
       searchTradeNotes = true,
       searchAITradeNotes = true,
+      aiNotesUsedForMatchingOnly = false,
     } = params;
 
     // クエリベクトルを準備
@@ -97,7 +103,7 @@ export class CrossSimilarityService {
         ? this.searchTradeNotesWithStats(queryVector, symbol, minSimilarity)
         : Promise.resolve({ results: [], totalSearched: 0 }),
       searchAITradeNotes
-        ? this.searchAITradeNotesWithStats(queryVector, symbol, minSimilarity)
+        ? this.searchAITradeNotesWithStats(queryVector, symbol, minSimilarity, aiNotesUsedForMatchingOnly)
         : Promise.resolve({ results: [], totalSearched: 0 }),
     ]);
 
@@ -213,17 +219,22 @@ export class CrossSimilarityService {
   private async searchAITradeNotesWithStats(
     queryVector: number[],
     symbol?: string,
-    minSimilarity: number = 0.5
+    minSimilarity: number = 0.5,
+    usedForMatchingOnly: boolean = false
   ): Promise<{ results: SimilarNoteItem[]; totalSearched: number }> {
     // AITradeNoteはfeatureVectorを持たないため、簡易特徴量を抽出
     // 将来的には AITradeNote にも featureVector を保存する想定
-    
+
     // 検索条件を構築
-    const options: { limit: number; symbol?: string } = {
+    const options: { limit: number; symbol?: string; usedForMatching?: boolean } = {
       limit: 100, // 一旦多めに取得してフィルタ
     };
     if (symbol) {
       options.symbol = symbol;
+    }
+    // 実行時照合では「本番運用」選別済みノートだけを対象にする
+    if (usedForMatchingOnly) {
+      options.usedForMatching = true;
     }
 
     const { notes } = await aiNoteRepository.findAITradeNotes(options);

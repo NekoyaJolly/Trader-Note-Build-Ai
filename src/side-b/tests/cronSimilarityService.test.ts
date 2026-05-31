@@ -6,7 +6,7 @@
 
 import { CronSimilarityService } from '../services/cronSimilarityService';
 import { crossSimilarityService } from '../../services/crossSimilarityService';
-import { NotificationTriggerService } from '../../services/notification/notificationTriggerService';
+import type { NotificationTriggerService } from '../../services/notification/notificationTriggerService';
 import type { OHLCVData } from '../../services/indicators/indicatorService';
 import type { CrossSearchResult } from '../../services/crossSimilarityService';
 
@@ -178,7 +178,8 @@ describe('CronSimilarityService', () => {
         timeframe: '1h',
       });
 
-      // crossSimilarityService が呼ばれた
+      // crossSimilarityService が呼ばれた。
+      // 実行時のライブ照合では AIノートを「本番運用」選別済みのみに限定する。
       expect(crossSimilarityService.searchSimilarNotes).toHaveBeenCalledWith({
         ohlcvData: mockOHLCVData,
         symbol: 'EUR/USD',
@@ -186,6 +187,7 @@ describe('CronSimilarityService', () => {
         minSimilarity: 0.5,
         searchTradeNotes: true,
         searchAITradeNotes: true,
+        aiNotesUsedForMatchingOnly: true,
       });
 
       // 閾値85%以上の2件のみマッチ

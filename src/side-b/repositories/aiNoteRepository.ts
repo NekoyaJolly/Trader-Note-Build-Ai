@@ -76,6 +76,27 @@ export async function updateAITradeNoteTradeNoteId(
 }
 
 /**
+ * AIトレードノートの本番運用フラグ（usedForMatching）を更新する
+ *
+ * 「本番運用」選別の手動トグルから呼ばれる。存在しない ID の場合は null を返す。
+ */
+export async function setAITradeNoteUsedForMatching(
+  id: string,
+  usedForMatching: boolean
+): Promise<AITradeNote | null> {
+  const existing = await prisma.aITradeNote.findUnique({ where: { id } });
+  if (!existing) return null;
+
+  const note = await prisma.aITradeNote.update({
+    where: { id },
+    data: { usedForMatching },
+    // 更新後の表示用に約定/決済日時も合わせて返す
+    include: { virtualTrade: { select: { enteredAt: true, exitedAt: true } } },
+  });
+  return mapPrismaToAITradeNote(note);
+}
+
+/**
  * IDでAIトレードノートを取得
  */
 export async function findAITradeNoteById(id: string): Promise<AITradeNote | null> {
@@ -111,6 +132,8 @@ export async function findAITradeNotes(options: {
   to?: string;
   outcome?: TradeOutcome;
   symbol?: string;
+  /** 本番運用フラグでの絞り込み。true=選別済みのみ / false=未選別のみ / 未指定=全件。 */
+  usedForMatching?: boolean;
   limit?: number;
   offset?: number;
 }): Promise<{ notes: AITradeNote[]; total: number }> {
@@ -131,6 +154,11 @@ export async function findAITradeNotes(options: {
   // シンボルフィルター
   if (options.symbol) {
     where.symbol = options.symbol;
+  }
+
+  // 本番運用フラグフィルター（実行時照合の対象集合の取得や「本番運用」タブ表示で使用）
+  if (options.usedForMatching !== undefined) {
+    where.usedForMatching = options.usedForMatching;
   }
 
   const [notes, total] = await Promise.all([
@@ -382,6 +410,7 @@ function mapPrismaToAITradeNote(note: AITradeNoteRow): AITradeNote {
     lensSnapshot: fromPrismaJsonValue<AITradeNote['lensSnapshot']>(note.lensSnapshot),
     relatedHypothesisIds: note.relatedHypothesisIds ?? [],
     tradeNoteId: note.tradeNoteId ?? undefined,
+    usedForMatching: note.usedForMatching ?? false,
     aiModel: note.aiModel,
     createdAt: note.createdAt,
   };

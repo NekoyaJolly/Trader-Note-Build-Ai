@@ -76,6 +76,7 @@ import {
   ListAINotesQuerySchema,
   ListAINoteSummariesQuerySchema,
   GenerateAINoteSummaryRequestSchema,
+  UpdateAINoteMatchingRequestSchema,
   // スケジューラー
   UpdateSchedulerConfigRequestSchema,
   // PDCAエージェント
@@ -421,6 +422,20 @@ router.post(
   '/ai-notes/summaries/generate',
   validateBody(GenerateAINoteSummaryRequestSchema),
   sideBController.generateAINoteSummary
+);
+
+/**
+ * PATCH /api/side-b/ai-notes/:id/matching
+ * 本番運用フラグ（実行時照合の対象集合）を手動トグル
+ *
+ * Body:
+ * - usedForMatching: boolean (必須)
+ */
+router.patch(
+  '/ai-notes/:id/matching',
+  validateParams(IdParamSchema),
+  validateBody(UpdateAINoteMatchingRequestSchema),
+  sideBController.updateAINoteMatching
 );
 
 /**

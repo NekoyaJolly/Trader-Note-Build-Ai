@@ -60,6 +60,7 @@ router.post('/search-cross', async (req: Request, res: Response) => {
       minSimilarity: params.minSimilarity,
       searchTradeNotes: params.searchTradeNotes,
       searchAITradeNotes: params.searchAITradeNotes,
+      aiNotesUsedForMatchingOnly: params.aiNotesUsedForMatchingOnly,
     });
 
     // レスポンスバリデーション
