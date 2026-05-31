@@ -89,6 +89,10 @@ interface AITradeNote {
   virtualTradeId: string;
   planId: string;
   date: string;
+  /** エントリー(約定)日時 ISO。関連 VirtualTrade.enteredAt 由来。未約定/旧データは null。 */
+  enteredAt?: string | null;
+  /** クローズ(決済)日時 ISO。関連 VirtualTrade.exitedAt 由来。未決済/旧データは null。 */
+  exitedAt?: string | null;
   symbol: string;
   direction: "long" | "short";
   result: TradeResult;
@@ -218,6 +222,19 @@ const formatDate = (dateString: string): string => {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
+  });
+};
+
+// 日時を「MM/DD HH:mm」(分まで) で整形する。エントリー/クローズ日時の表示用。
+const formatDateTimeMinute = (value?: string | null): string => {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleString("ja-JP", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
   });
 };
 
@@ -486,8 +503,16 @@ export default function AINotesPage() {
                           {directionToJapanese(note.direction)}
                         </span>
                       </div>
-                      <div className="text-slate-400 text-sm">
-                        {formatDate(note.date)}
+                      <div className="text-right">
+                        <div className="text-slate-400 text-sm">
+                          {formatDate(note.date)}
+                        </div>
+                        {(note.enteredAt || note.exitedAt) && (
+                          <div className="text-[11px] text-slate-500 mt-0.5 flex flex-wrap gap-x-3 justify-end">
+                            {note.enteredAt && <span>エントリー {formatDateTimeMinute(note.enteredAt)}</span>}
+                            {note.exitedAt && <span>クローズ {formatDateTimeMinute(note.exitedAt)}</span>}
+                          </div>
+                        )}
                       </div>
                     </div>
 

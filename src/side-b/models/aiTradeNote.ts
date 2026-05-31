@@ -131,6 +131,10 @@ export interface AITradeNote {
 
   // 基本情報
   date: string;  // YYYY-MM-DD
+  /** エントリー(注文約定)日時。関連 VirtualTrade.enteredAt から付与。未約定/旧データは null。 */
+  enteredAt?: Date | null;
+  /** クローズ(決済)日時。関連 VirtualTrade.exitedAt から付与。未決済/旧データは null。 */
+  exitedAt?: Date | null;
   symbol: string;
   direction: 'long' | 'short';
   /** 執行足（current timeframe）。trade から伝播。MTF 文脈の一級フィールド。既存ノートは未設定あり。 */

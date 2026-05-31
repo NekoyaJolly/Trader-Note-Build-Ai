@@ -81,6 +81,8 @@ export async function updateAITradeNoteTradeNoteId(
 export async function findAITradeNoteById(id: string): Promise<AITradeNote | null> {
   const note = await prisma.aITradeNote.findUnique({
     where: { id },
+    // エントリー/クローズ日時を UI に出すため関連 VirtualTrade の約定/決済日時を join
+    include: { virtualTrade: { select: { enteredAt: true, exitedAt: true } } },
   });
 
   if (!note) return null;
@@ -137,6 +139,8 @@ export async function findAITradeNotes(options: {
       orderBy: { date: 'desc' },
       take: options.limit,
       skip: options.offset,
+      // エントリー/クローズ日時を UI に出すため関連 VirtualTrade の約定/決済日時を join
+      include: { virtualTrade: { select: { enteredAt: true, exitedAt: true } } },
     }),
     prisma.aITradeNote.count({ where }),
   ]);
@@ -344,12 +348,20 @@ export async function countNotesByOutcome(): Promise<{
 type PrismaAITradeNote = Awaited<ReturnType<typeof prisma.aITradeNote.findFirst>> & object;
 type PrismaAINoteSummary = Awaited<ReturnType<typeof prisma.aINoteSummary.findFirst>> & object;
 
-function mapPrismaToAITradeNote(note: NonNullable<PrismaAITradeNote>): AITradeNote {
+// virtualTrade を include したクエリ・しないクエリ双方を受けられるよう、関連は optional で受ける。
+type AITradeNoteRow = NonNullable<PrismaAITradeNote> & {
+  virtualTrade?: { enteredAt: Date | null; exitedAt: Date | null } | null;
+};
+
+function mapPrismaToAITradeNote(note: AITradeNoteRow): AITradeNote {
   return {
     id: note.id,
     virtualTradeId: note.virtualTradeId,
     planId: note.planId,
     date: note.date.toISOString().split('T')[0],
+    // include した場合のみ値が入る。未 include / 未約定は null。
+    enteredAt: note.virtualTrade?.enteredAt ?? null,
+    exitedAt: note.virtualTrade?.exitedAt ?? null,
     symbol: note.symbol,
     timeframe: note.timeframe ?? undefined,
     higherTimeframe: note.higherTimeframe ?? undefined,
