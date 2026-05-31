@@ -82,9 +82,10 @@ const sideATopNav: NavItem[] = [
   { href: "/", label: "Side-A ホーム", icon: Home, color: "cyan" },
 ];
 
-/** Side-B ワークスペース内の「ホーム」（ヘッダータブで Side-A に切替する） */
+/** Side-B ワークスペースのメインハブ（最上部）。/side-b = プラン。
+ *  グループ内にも同 href があると重複するため、グループ側は /side-b を除外して描画する。 */
 const sideBTopNav: NavItem[] = [
-  { href: "/side-b", label: "Side-B ホーム", icon: LayoutDashboard, color: "purple" },
+  { href: "/side-b", label: "プラン", icon: LayoutDashboard, color: "purple" },
 ];
 
 /**
@@ -175,12 +176,15 @@ const sideBNavCategories: NavCategory[] = [
     label: "AI・台帳",
     color: "purple",
     defaultOpen: true,
-    items: getSideBWorkspaceItemsSorted().map((e) => ({
-      href: e.href,
-      label: e.labelSidebar,
-      icon: e.icon,
-      color: "purple",
-    })),
+    // /side-b (プラン) は最上部 sideBTopNav に出すためグループからは除外 (重複回避)
+    items: getSideBWorkspaceItemsSorted()
+      .filter((e) => e.href !== "/side-b")
+      .map((e) => ({
+        href: e.href,
+        label: e.labelSidebar,
+        icon: e.icon,
+        color: "purple",
+      })),
   },
   {
     id: "settings",
@@ -639,13 +643,13 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
       {/* サイドバー: モバイルはオーバーレイ、md 以上は常時表示 */}
       <aside
         className={`
-          fixed md:static top-0 left-0 z-50 md:z-auto
+          fixed top-0 left-0 z-50 md:z-auto
           h-screen md:h-full md:min-h-0
           w-72 shrink-0
           flex flex-col
           glass-strong border-r border-slate-700/30
           transform transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]
-          ${isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}
+          ${isOpen ? "translate-x-0 md:static md:translate-x-0" : "-translate-x-full md:hidden"}
         `}
       >
         {/* ヘッダー */}
