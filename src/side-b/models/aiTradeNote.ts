@@ -188,9 +188,10 @@ export interface AITradeNote {
    * 全ノートは履歴として残しつつ、その中から手動で選んだ「良いトレード」だけを
    * 実行時のライブ市場入力との類似度判定（cross/cron 照合）の対象に限定するためのフラグ。
    * 一覧表示・統計集計は本フラグで絞らず全ノートを対象とする。
-   * 既定 false（既存ノートは未選別＝照合対象外）。
+   * DB 既定は false。既存型への追加のため optional（AGENTS.md §3.3 / 後方互換）。
+   * repository の mapper が常に boolean を埋めるため、API レスポンスでは実値が入る。
    */
-  usedForMatching: boolean;
+  usedForMatching?: boolean;
 
   // メタ情報
   aiModel: string;

@@ -370,6 +370,32 @@ export async function countNotesByOutcome(): Promise<{
   return counts;
 }
 
+/**
+ * 全ノートの損益（pips）を集計する
+ *
+ * ページング済み配列ではなく DB 集計で全件を対象にするため、
+ * 統計カード（勝率・PF・累計pips）を「全ノート基準」で表示できる。
+ * grossLossPips は絶対値（PF 計算用）。
+ */
+export async function aggregateAllNotesPnl(): Promise<{
+  totalPnlPips: number;
+  grossWinPips: number;
+  grossLossPips: number;
+}> {
+  const [winAgg, lossAgg, allAgg] = await Promise.all([
+    prisma.aITradeNote.aggregate({ where: { outcome: 'win' }, _sum: { pnlPips: true } }),
+    prisma.aITradeNote.aggregate({ where: { outcome: 'loss' }, _sum: { pnlPips: true } }),
+    prisma.aITradeNote.aggregate({ _sum: { pnlPips: true } }),
+  ]);
+
+  const grossWin = winAgg._sum.pnlPips?.toNumber() ?? 0;
+  // 負け側の pnlPips は負値で入るため絶対値に変換
+  const grossLoss = Math.abs(lossAgg._sum.pnlPips?.toNumber() ?? 0);
+  const total = allAgg._sum.pnlPips?.toNumber() ?? 0;
+
+  return { totalPnlPips: total, grossWinPips: grossWin, grossLossPips: grossLoss };
+}
+
 // ===== マッピング関数 =====
 
 // Prisma型からアプリ型へのマッピング（型アサーション）

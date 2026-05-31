@@ -253,13 +253,29 @@ export async function listNotes(options: {
   usedForMatching?: boolean;
   limit?: number;
   offset?: number;
-}): Promise<{ notes: AITradeNote[]; total: number; stats: { winCount: number; lossCount: number; winRate: number } }> {
+}): Promise<{
+  notes: AITradeNote[];
+  total: number;
+  stats: {
+    winCount: number;
+    lossCount: number;
+    winRate: number;
+    totalTrades: number;
+    profitFactor: number;
+    totalPnlPips: number;
+  };
+}> {
   const { notes, total } = await aiNoteRepository.findAITradeNotes(options);
-  // 統計は「全ノート」を対象に集計する（本番運用フィルタの影響を受けない＝計算は全体）
-  const counts = await aiNoteRepository.countNotesByOutcome();
+  // 統計は「全ノート」を DB 集計で対象にする（本番運用フィルタ・ページングの影響を受けない＝計算は全体）
+  const [counts, pnl] = await Promise.all([
+    aiNoteRepository.countNotesByOutcome(),
+    aiNoteRepository.aggregateAllNotesPnl(),
+  ]);
 
   const totalCounted = counts.win + counts.loss + counts.breakeven;
   const winRate = totalCounted > 0 ? (counts.win / totalCounted) * 100 : 0;
+  // PF は損失が無い場合 0 とする（既存フロント計算と同じ規約で表示の整合を保つ）
+  const profitFactor = pnl.grossLossPips > 0 ? pnl.grossWinPips / pnl.grossLossPips : 0;
 
   return {
     notes,
@@ -268,6 +284,9 @@ export async function listNotes(options: {
       winCount: counts.win,
       lossCount: counts.loss,
       winRate: Math.round(winRate * 10) / 10,
+      totalTrades: totalCounted,
+      profitFactor: Math.round(profitFactor * 100) / 100,
+      totalPnlPips: Math.round(pnl.totalPnlPips * 10) / 10,
     },
   };
 }

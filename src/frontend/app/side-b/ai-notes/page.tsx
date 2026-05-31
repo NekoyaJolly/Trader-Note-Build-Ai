@@ -252,9 +252,30 @@ const formatDuration = (minutes: number): string => {
 
 // ===== コンポーネント =====
 
+// ノート一覧 API が返す全ノート基準の統計（ページング・本番運用フィルタの影響を受けない）
+interface NoteListStats {
+  totalTrades: number;
+  winRate: number;
+  profitFactor: number;
+  totalPnlPips: number;
+}
+
+const EMPTY_NOTE_STATS: NoteListStats = {
+  totalTrades: 0,
+  winRate: 0,
+  profitFactor: 0,
+  totalPnlPips: 0,
+};
+
 export default function AINotesPage() {
   // 状態管理
   const [notes, setNotes] = useState<AITradeNote[]>([]);
+  // 本番運用タブ用: サーバー側で usedForMatching=true を絞って取得（メイン一覧のページングに依存しない）
+  const [productionNotes, setProductionNotes] = useState<AITradeNote[]>([]);
+  const [allTotal, setAllTotal] = useState(0);
+  const [productionTotal, setProductionTotal] = useState(0);
+  // 統計カードは API の全ノート集計を表示（計算は全体）
+  const [noteStats, setNoteStats] = useState<NoteListStats>(EMPTY_NOTE_STATS);
   const [summaries, setSummaries] = useState<AINoteSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -272,24 +293,35 @@ export default function AINotesPage() {
       setLoading(true);
       setError(null);
 
-      // ノートとサマリーを並行取得
-      const [notesRes, summariesRes] = await Promise.all([
+      // 全ノート / 本番運用ノート / サマリーを並行取得。
+      // 本番運用ノートはサーバー側で usedForMatching=true を絞って取得し、メイン一覧のページングに依存させない。
+      const [notesRes, productionRes, summariesRes] = await Promise.all([
         fetch(`${API_BASE}/side-b/ai-notes`),
+        fetch(`${API_BASE}/side-b/ai-notes?usedForMatching=true`),
         fetch(`${API_BASE}/side-b/ai-notes/summaries`),
       ]);
 
       if (!notesRes.ok) {
         throw new Error(`ノート取得エラー: ${notesRes.status}`);
       }
+      if (!productionRes.ok) {
+        throw new Error(`本番運用ノート取得エラー: ${productionRes.status}`);
+      }
       if (!summariesRes.ok) {
         throw new Error(`サマリー取得エラー: ${summariesRes.status}`);
       }
 
       const notesData = await notesRes.json();
+      const productionData = await productionRes.json();
       const summariesData = await summariesRes.json();
 
-      // APIレスポンスからノート配列とサマリー配列を抽出
+      // APIレスポンスからノート配列・統計・サマリー配列を抽出
       setNotes(notesData.notes || []);
+      setAllTotal(notesData.total ?? (notesData.notes?.length ?? 0));
+      // 統計カードは全ノート基準のサーバー集計を使う（計算は全体）
+      setNoteStats(notesData.stats ? { ...EMPTY_NOTE_STATS, ...notesData.stats } : EMPTY_NOTE_STATS);
+      setProductionNotes(productionData.notes || []);
+      setProductionTotal(productionData.total ?? (productionData.notes?.length ?? 0));
       setSummaries(summariesData.summaries || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "データの取得に失敗しました");
@@ -343,7 +375,7 @@ export default function AINotesPage() {
   };
 
   // 本番運用フラグの手動トグル。
-  // 楽観更新はせず、PATCH 成功後にサーバー返却値で当該ノートを差し替える。
+  // PATCH 成功後は一覧・本番運用件数・統計が連動して変わるため、全データを再取得して整合させる。
   const handleToggleMatching = async (note: AITradeNote) => {
     if (togglingNoteId) return;
     setTogglingNoteId(note.id);
@@ -357,10 +389,7 @@ export default function AINotesPage() {
       if (!res.ok) {
         throw new Error(`本番運用フラグの更新に失敗しました: ${res.status}`);
       }
-      const data = await res.json();
-      const updated: AITradeNote = data.note;
-      setNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)));
-      setSelectedNote((prev) => (prev && prev.id === updated.id ? updated : prev));
+      await fetchData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "本番運用フラグの更新に失敗しました");
     } finally {
@@ -368,50 +397,8 @@ export default function AINotesPage() {
     }
   };
 
-  // 本番運用に選別されたノート（実行時のライブ照合の対象）。
-  // 統計カードは全ノート基準のまま（計算は全体）。
-  const productionNotes = notes.filter((n) => n.usedForMatching);
-
-  // 現在のタブで表示するノート集合
+  // 現在のタブで表示するノート集合（本番運用タブはサーバー取得済みの選別集合）
   const visibleNotes = activeTab === "production" ? productionNotes : notes;
-
-  // 統計サマリー（現在のノートから計算）
-  const calculateCurrentStats = (): SummaryStatistics => {
-    if (notes.length === 0) {
-      return {
-        totalTrades: 0,
-        winRate: 0,
-        profitFactor: 0,
-        averageWin: 0,
-        averageLoss: 0,
-        largestWin: 0,
-        largestLoss: 0,
-        totalPnl: 0,
-      };
-    }
-
-    const wins = notes.filter(n => n.result.outcome === "win");
-    const losses = notes.filter(n => n.result.outcome === "loss");
-
-    const winPnls = wins.map(n => n.result.pnlPips);
-    const lossPnls = losses.map(n => Math.abs(n.result.pnlPips));
-
-    const totalWinPips = winPnls.reduce((sum, p) => sum + p, 0);
-    const totalLossPips = lossPnls.reduce((sum, p) => sum + p, 0);
-
-    return {
-      totalTrades: notes.length,
-      winRate: notes.length > 0 ? (wins.length / notes.length) * 100 : 0,
-      profitFactor: totalLossPips > 0 ? totalWinPips / totalLossPips : 0,
-      averageWin: wins.length > 0 ? totalWinPips / wins.length : 0,
-      averageLoss: losses.length > 0 ? totalLossPips / losses.length : 0,
-      largestWin: winPnls.length > 0 ? Math.max(...winPnls) : 0,
-      largestLoss: lossPnls.length > 0 ? Math.max(...lossPnls) : 0,
-      totalPnl: notes.reduce((sum, n) => sum + n.result.pnlPips, 0),
-    };
-  };
-
-  const currentStats = calculateCurrentStats();
 
   // ローディング表示
   if (loading) {
@@ -463,25 +450,25 @@ export default function AINotesPage() {
           <div className="glass-surface hover-glow transition-smooth rounded-xl p-4">
             <div className="text-slate-400 text-sm">総トレード数</div>
             <div className="text-2xl font-bold text-white">
-              {currentStats.totalTrades}
+              {noteStats.totalTrades}
             </div>
           </div>
           <div className="glass-surface hover-glow transition-smooth rounded-xl p-4">
             <div className="text-slate-400 text-sm">勝率</div>
-            <div className={`text-2xl font-bold ${currentStats.winRate >= 50 ? "text-green-400" : "text-red-400"}`}>
-              {formatNumber(currentStats.winRate, 1)}%
+            <div className={`text-2xl font-bold ${noteStats.winRate >= 50 ? "text-green-400" : "text-red-400"}`}>
+              {formatNumber(noteStats.winRate, 1)}%
             </div>
           </div>
           <div className="glass-surface hover-glow transition-smooth rounded-xl p-4">
             <div className="text-slate-400 text-sm">プロフィットファクター</div>
-            <div className={`text-2xl font-bold ${currentStats.profitFactor >= 1 ? "text-green-400" : "text-red-400"}`}>
-              {formatNumber(currentStats.profitFactor, 2)}
+            <div className={`text-2xl font-bold ${noteStats.profitFactor >= 1 ? "text-green-400" : "text-red-400"}`}>
+              {formatNumber(noteStats.profitFactor, 2)}
             </div>
           </div>
           <div className="glass-surface hover-glow transition-smooth rounded-xl p-4">
             <div className="text-slate-400 text-sm">累計損益 (pips)</div>
-            <div className={`text-2xl font-bold ${currentStats.totalPnl >= 0 ? "text-green-400" : "text-red-400"}`}>
-              {currentStats.totalPnl >= 0 ? "+" : ""}{formatNumber(currentStats.totalPnl, 1)}
+            <div className={`text-2xl font-bold ${noteStats.totalPnlPips >= 0 ? "text-green-400" : "text-red-400"}`}>
+              {noteStats.totalPnlPips >= 0 ? "+" : ""}{formatNumber(noteStats.totalPnlPips, 1)}
             </div>
           </div>
         </section>
@@ -495,7 +482,7 @@ export default function AINotesPage() {
                 : "text-slate-400 hover:text-white"
               }`}
           >
-            📝 ノート一覧 ({notes.length})
+            📝 ノート一覧 ({allTotal})
           </button>
           <button
             onClick={() => setActiveTab("production")}
@@ -505,7 +492,7 @@ export default function AINotesPage() {
               }`}
             title="ここに入れたノートだけが、ライブ市場入力との類似度判定の対象になります"
           >
-            ⭐ 本番運用 ({productionNotes.length})
+            ⭐ 本番運用 ({productionTotal})
           </button>
           <button
             onClick={() => setActiveTab("summaries")}
