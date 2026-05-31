@@ -42,6 +42,10 @@ export const CrossSimilaritySearchRequestSchema = z.object({
   // 検索対象の指定
   searchTradeNotes: z.boolean().default(true),    // Side-A TradeNote を検索
   searchAITradeNotes: z.boolean().default(true),  // Side-B AITradeNote を検索
+
+  // AITradeNote を「本番運用」選別済みのみに限定（実行時のライブ照合用）。
+  // 既定 false で従来どおり全 AITradeNote を対象にするため後方互換。
+  aiNotesUsedForMatchingOnly: z.boolean().default(false),
 }).refine(
   (data) => data.ohlcvData !== undefined || data.featureVector !== undefined,
   {

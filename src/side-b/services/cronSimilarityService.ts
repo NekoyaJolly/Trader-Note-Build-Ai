@@ -155,6 +155,8 @@ export class CronSimilarityService {
         minSimilarity: this.config.minSimilarity,
         searchTradeNotes: this.config.searchTradeNotes,
         searchAITradeNotes: this.config.searchAITradeNotes,
+        // 実行時のライブ照合では「本番運用」選別済み AIノートだけを対象にする
+        aiNotesUsedForMatchingOnly: true,
       });
 
       // 2. 閾値以上の類似ノートを抽出

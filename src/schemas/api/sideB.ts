@@ -244,6 +244,8 @@ export const ListAINotesQuerySchema = z.object({
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, { message: '日付はYYYY-MM-DD形式' }).optional(),
   outcome: z.enum(['win', 'loss', 'breakeven']).optional(),
   symbol: SymbolSchema.optional(),
+  // 本番運用フラグでの絞り込み（「本番運用」タブ）。クエリ文字列なので 'true'/'false' を boolean に変換。
+  usedForMatching: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
   limit: z.string().transform(Number).pipe(z.number().int().min(1).max(100)).optional(),
   offset: z.string().transform(Number).pipe(z.number().int().min(0)).optional(),
 });
@@ -302,6 +304,16 @@ export const IdParamSchema = z.object({
 });
 
 export type IdParam = z.infer<typeof IdParamSchema>;
+
+/**
+ * PATCH /api/side-b/ai-notes/:id/matching リクエストボディ
+ * 本番運用フラグ（実行時照合の対象集合）の手動トグル
+ */
+export const UpdateAINoteMatchingRequestSchema = z.object({
+  usedForMatching: z.boolean(),
+});
+
+export type UpdateAINoteMatchingRequest = z.infer<typeof UpdateAINoteMatchingRequestSchema>;
 
 /**
  * /api/side-b/research/valid/:symbol など、シンボルパラメータ

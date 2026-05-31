@@ -101,6 +101,8 @@ interface AITradeNote {
   planEvaluation: PlanEvaluation;
   marketReview: MarketReview;
   learnings: Learnings;
+  /** 本番運用フラグ（手動選別）。true のノートだけが実行時のライブ照合の対象になる。 */
+  usedForMatching: boolean;
   aiModel: string;
   createdAt: string;
 }
@@ -250,15 +252,38 @@ const formatDuration = (minutes: number): string => {
 
 // ===== コンポーネント =====
 
+// ノート一覧 API が返す全ノート基準の統計（ページング・本番運用フィルタの影響を受けない）
+interface NoteListStats {
+  totalTrades: number;
+  winRate: number;
+  profitFactor: number;
+  totalPnlPips: number;
+}
+
+const EMPTY_NOTE_STATS: NoteListStats = {
+  totalTrades: 0,
+  winRate: 0,
+  profitFactor: 0,
+  totalPnlPips: 0,
+};
+
 export default function AINotesPage() {
   // 状態管理
   const [notes, setNotes] = useState<AITradeNote[]>([]);
+  // 本番運用タブ用: サーバー側で usedForMatching=true を絞って取得（メイン一覧のページングに依存しない）
+  const [productionNotes, setProductionNotes] = useState<AITradeNote[]>([]);
+  const [allTotal, setAllTotal] = useState(0);
+  const [productionTotal, setProductionTotal] = useState(0);
+  // 統計カードは API の全ノート集計を表示（計算は全体）
+  const [noteStats, setNoteStats] = useState<NoteListStats>(EMPTY_NOTE_STATS);
   const [summaries, setSummaries] = useState<AINoteSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedNote, setSelectedNote] = useState<AITradeNote | null>(null);
-  const [activeTab, setActiveTab] = useState<"notes" | "summaries">("notes");
+  const [activeTab, setActiveTab] = useState<"notes" | "production" | "summaries">("notes");
   const [generatingSummary, setGeneratingSummary] = useState(false);
+  // 本番運用トグルの更新中ノートID（連打防止 + スピナー表示用）
+  const [togglingNoteId, setTogglingNoteId] = useState<string | null>(null);
 
   // API ベース URL
   const API_BASE = getPublicApiBaseUrl() + "/api";
@@ -268,24 +293,35 @@ export default function AINotesPage() {
       setLoading(true);
       setError(null);
 
-      // ノートとサマリーを並行取得
-      const [notesRes, summariesRes] = await Promise.all([
+      // 全ノート / 本番運用ノート / サマリーを並行取得。
+      // 本番運用ノートはサーバー側で usedForMatching=true を絞って取得し、メイン一覧のページングに依存させない。
+      const [notesRes, productionRes, summariesRes] = await Promise.all([
         fetch(`${API_BASE}/side-b/ai-notes`),
+        fetch(`${API_BASE}/side-b/ai-notes?usedForMatching=true`),
         fetch(`${API_BASE}/side-b/ai-notes/summaries`),
       ]);
 
       if (!notesRes.ok) {
         throw new Error(`ノート取得エラー: ${notesRes.status}`);
       }
+      if (!productionRes.ok) {
+        throw new Error(`本番運用ノート取得エラー: ${productionRes.status}`);
+      }
       if (!summariesRes.ok) {
         throw new Error(`サマリー取得エラー: ${summariesRes.status}`);
       }
 
       const notesData = await notesRes.json();
+      const productionData = await productionRes.json();
       const summariesData = await summariesRes.json();
 
-      // APIレスポンスからノート配列とサマリー配列を抽出
+      // APIレスポンスからノート配列・統計・サマリー配列を抽出
       setNotes(notesData.notes || []);
+      setAllTotal(notesData.total ?? (notesData.notes?.length ?? 0));
+      // 統計カードは全ノート基準のサーバー集計を使う（計算は全体）
+      setNoteStats(notesData.stats ? { ...EMPTY_NOTE_STATS, ...notesData.stats } : EMPTY_NOTE_STATS);
+      setProductionNotes(productionData.notes || []);
+      setProductionTotal(productionData.total ?? (productionData.notes?.length ?? 0));
       setSummaries(summariesData.summaries || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "データの取得に失敗しました");
@@ -338,43 +374,31 @@ export default function AINotesPage() {
     }
   };
 
-  // 統計サマリー（現在のノートから計算）
-  const calculateCurrentStats = (): SummaryStatistics => {
-    if (notes.length === 0) {
-      return {
-        totalTrades: 0,
-        winRate: 0,
-        profitFactor: 0,
-        averageWin: 0,
-        averageLoss: 0,
-        largestWin: 0,
-        largestLoss: 0,
-        totalPnl: 0,
-      };
+  // 本番運用フラグの手動トグル。
+  // PATCH 成功後は一覧・本番運用件数・統計が連動して変わるため、全データを再取得して整合させる。
+  const handleToggleMatching = async (note: AITradeNote) => {
+    if (togglingNoteId) return;
+    setTogglingNoteId(note.id);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/side-b/ai-notes/${note.id}/matching`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ usedForMatching: !note.usedForMatching }),
+      });
+      if (!res.ok) {
+        throw new Error(`本番運用フラグの更新に失敗しました: ${res.status}`);
+      }
+      await fetchData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "本番運用フラグの更新に失敗しました");
+    } finally {
+      setTogglingNoteId(null);
     }
-
-    const wins = notes.filter(n => n.result.outcome === "win");
-    const losses = notes.filter(n => n.result.outcome === "loss");
-
-    const winPnls = wins.map(n => n.result.pnlPips);
-    const lossPnls = losses.map(n => Math.abs(n.result.pnlPips));
-
-    const totalWinPips = winPnls.reduce((sum, p) => sum + p, 0);
-    const totalLossPips = lossPnls.reduce((sum, p) => sum + p, 0);
-
-    return {
-      totalTrades: notes.length,
-      winRate: notes.length > 0 ? (wins.length / notes.length) * 100 : 0,
-      profitFactor: totalLossPips > 0 ? totalWinPips / totalLossPips : 0,
-      averageWin: wins.length > 0 ? totalWinPips / wins.length : 0,
-      averageLoss: losses.length > 0 ? totalLossPips / losses.length : 0,
-      largestWin: winPnls.length > 0 ? Math.max(...winPnls) : 0,
-      largestLoss: lossPnls.length > 0 ? Math.max(...lossPnls) : 0,
-      totalPnl: notes.reduce((sum, n) => sum + n.result.pnlPips, 0),
-    };
   };
 
-  const currentStats = calculateCurrentStats();
+  // 現在のタブで表示するノート集合（本番運用タブはサーバー取得済みの選別集合）
+  const visibleNotes = activeTab === "production" ? productionNotes : notes;
 
   // ローディング表示
   if (loading) {
@@ -426,25 +450,25 @@ export default function AINotesPage() {
           <div className="glass-surface hover-glow transition-smooth rounded-xl p-4">
             <div className="text-slate-400 text-sm">総トレード数</div>
             <div className="text-2xl font-bold text-white">
-              {currentStats.totalTrades}
+              {noteStats.totalTrades}
             </div>
           </div>
           <div className="glass-surface hover-glow transition-smooth rounded-xl p-4">
             <div className="text-slate-400 text-sm">勝率</div>
-            <div className={`text-2xl font-bold ${currentStats.winRate >= 50 ? "text-green-400" : "text-red-400"}`}>
-              {formatNumber(currentStats.winRate, 1)}%
+            <div className={`text-2xl font-bold ${noteStats.winRate >= 50 ? "text-green-400" : "text-red-400"}`}>
+              {formatNumber(noteStats.winRate, 1)}%
             </div>
           </div>
           <div className="glass-surface hover-glow transition-smooth rounded-xl p-4">
             <div className="text-slate-400 text-sm">プロフィットファクター</div>
-            <div className={`text-2xl font-bold ${currentStats.profitFactor >= 1 ? "text-green-400" : "text-red-400"}`}>
-              {formatNumber(currentStats.profitFactor, 2)}
+            <div className={`text-2xl font-bold ${noteStats.profitFactor >= 1 ? "text-green-400" : "text-red-400"}`}>
+              {formatNumber(noteStats.profitFactor, 2)}
             </div>
           </div>
           <div className="glass-surface hover-glow transition-smooth rounded-xl p-4">
             <div className="text-slate-400 text-sm">累計損益 (pips)</div>
-            <div className={`text-2xl font-bold ${currentStats.totalPnl >= 0 ? "text-green-400" : "text-red-400"}`}>
-              {currentStats.totalPnl >= 0 ? "+" : ""}{formatNumber(currentStats.totalPnl, 1)}
+            <div className={`text-2xl font-bold ${noteStats.totalPnlPips >= 0 ? "text-green-400" : "text-red-400"}`}>
+              {noteStats.totalPnlPips >= 0 ? "+" : ""}{formatNumber(noteStats.totalPnlPips, 1)}
             </div>
           </div>
         </section>
@@ -458,7 +482,17 @@ export default function AINotesPage() {
                 : "text-slate-400 hover:text-white"
               }`}
           >
-            📝 ノート一覧 ({notes.length})
+            📝 ノート一覧 ({allTotal})
+          </button>
+          <button
+            onClick={() => setActiveTab("production")}
+            className={`px-6 py-3 font-medium transition-colors ${activeTab === "production"
+                ? "text-amber-400 border-b-2 border-amber-400"
+                : "text-slate-400 hover:text-white"
+              }`}
+            title="ここに入れたノートだけが、ライブ市場入力との類似度判定の対象になります"
+          >
+            ⭐ 本番運用 ({productionTotal})
           </button>
           <button
             onClick={() => setActiveTab("summaries")}
@@ -471,21 +505,37 @@ export default function AINotesPage() {
           </button>
         </div>
 
-        {/* ノート一覧タブ */}
-        {activeTab === "notes" && (
+        {/* ノート一覧タブ / 本番運用タブ（同じカード表示を共有） */}
+        {(activeTab === "notes" || activeTab === "production") && (
           <section className="space-y-4">
-            {notes.length === 0 ? (
+            {activeTab === "production" && (
+              <div className="bg-amber-500/10 border border-amber-500/30 text-amber-200/90 px-4 py-3 rounded-lg text-sm">
+                ⭐ ここに入れたノートだけが、ライブ市場入力との<strong>類似度判定の対象</strong>になります。
+                各カードの「本番運用」トグルで選別してください（ノート一覧・上部の統計は全ノートのまま）。
+              </div>
+            )}
+            {visibleNotes.length === 0 ? (
               <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-8 text-center">
-                <div className="text-4xl mb-4">📝</div>
+                <div className="text-4xl mb-4">{activeTab === "production" ? "⭐" : "📝"}</div>
                 <div className="text-slate-400">
-                  AIノートがありません。
-                  <br />
-                  仮想トレードを決済するとAIが自動でノートを生成します。
+                  {activeTab === "production" ? (
+                    <>
+                      本番運用に選別されたノートはまだありません。
+                      <br />
+                      「ノート一覧」で良いトレードのカードの「本番運用」トグルを ON にしてください。
+                    </>
+                  ) : (
+                    <>
+                      AIノートがありません。
+                      <br />
+                      仮想トレードを決済するとAIが自動でノートを生成します。
+                    </>
+                  )}
                 </div>
               </div>
             ) : (
               <div className="space-y-4">
-                {notes.map((note) => (
+                {visibleNotes.map((note) => (
                   <div
                     key={note.id}
                     className={`glass-surface hover-glow press-scale transition-smooth rounded-xl p-4 cursor-pointer ${selectedNote?.id === note.id ? "border-cyan-500" : ""
@@ -502,6 +552,25 @@ export default function AINotesPage() {
                         <span className={`text-sm ${note.direction === "long" ? "text-green-400" : "text-red-400"}`}>
                           {directionToJapanese(note.direction)}
                         </span>
+                        {/* 本番運用トグル（カード展開と独立させるため propagation を止める） */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleMatching(note);
+                          }}
+                          disabled={togglingNoteId === note.id}
+                          aria-pressed={note.usedForMatching}
+                          title={note.usedForMatching
+                            ? "本番運用中（ライブ照合の対象）。クリックで外す"
+                            : "クリックで本番運用に追加（ライブ照合の対象にする）"}
+                          className={`px-2 py-1 rounded text-xs font-medium border transition-colors disabled:opacity-50 ${note.usedForMatching
+                              ? "bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30"
+                              : "bg-slate-700/40 text-slate-400 border-slate-600/50 hover:text-white hover:border-slate-500"
+                            }`}
+                        >
+                          {togglingNoteId === note.id ? "…" : note.usedForMatching ? "⭐ 本番運用中" : "☆ 本番運用に追加"}
+                        </button>
                       </div>
                       <div className="text-right">
                         <div className="text-slate-400 text-sm">

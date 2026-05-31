@@ -249,14 +249,33 @@ export async function listNotes(options: {
   to?: string;
   outcome?: TradeOutcome;
   symbol?: string;
+  /** 本番運用フラグでの絞り込み。「本番運用」タブ表示で true を渡す。未指定なら全件。 */
+  usedForMatching?: boolean;
   limit?: number;
   offset?: number;
-}): Promise<{ notes: AITradeNote[]; total: number; stats: { winCount: number; lossCount: number; winRate: number } }> {
+}): Promise<{
+  notes: AITradeNote[];
+  total: number;
+  stats: {
+    winCount: number;
+    lossCount: number;
+    winRate: number;
+    totalTrades: number;
+    profitFactor: number;
+    totalPnlPips: number;
+  };
+}> {
   const { notes, total } = await aiNoteRepository.findAITradeNotes(options);
-  const counts = await aiNoteRepository.countNotesByOutcome();
+  // 統計は「全ノート」を DB 集計で対象にする（本番運用フィルタ・ページングの影響を受けない＝計算は全体）
+  const [counts, pnl] = await Promise.all([
+    aiNoteRepository.countNotesByOutcome(),
+    aiNoteRepository.aggregateAllNotesPnl(),
+  ]);
 
   const totalCounted = counts.win + counts.loss + counts.breakeven;
   const winRate = totalCounted > 0 ? (counts.win / totalCounted) * 100 : 0;
+  // PF は損失が無い場合 0 とする（既存フロント計算と同じ規約で表示の整合を保つ）
+  const profitFactor = pnl.grossLossPips > 0 ? pnl.grossWinPips / pnl.grossLossPips : 0;
 
   return {
     notes,
@@ -265,8 +284,24 @@ export async function listNotes(options: {
       winCount: counts.win,
       lossCount: counts.loss,
       winRate: Math.round(winRate * 10) / 10,
+      totalTrades: totalCounted,
+      profitFactor: Math.round(profitFactor * 100) / 100,
+      totalPnlPips: Math.round(pnl.totalPnlPips * 10) / 10,
     },
   };
+}
+
+/**
+ * AIノートの本番運用フラグ（usedForMatching）を更新する
+ *
+ * 「本番運用」選別の手動トグルで呼ばれる。フラグを true にしたノートだけが
+ * 実行時のライブ照合（cross/cron）の対象になる。存在しない ID は null を返す。
+ */
+export async function setNoteUsedForMatching(
+  id: string,
+  usedForMatching: boolean
+): Promise<AITradeNote | null> {
+  return aiNoteRepository.setAITradeNoteUsedForMatching(id, usedForMatching);
 }
 
 // ===== サマリー生成 =====

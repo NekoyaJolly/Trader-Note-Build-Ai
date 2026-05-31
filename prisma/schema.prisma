@@ -1524,6 +1524,13 @@ model AITradeNote {
   /// 対応する Side-A TradeNote の ID（Phase 4b: ブリッジ層で同時生成）
   tradeNoteId          String?  @db.Uuid
 
+  /// 本番運用フラグ（手動選別）。
+  /// 理由: ノート全体は履歴として残しつつ、その中から「良いトレード」だけを手動で選び、
+  /// 実行時のライブ市場入力との類似度判定（cross/cron 照合）の対象をこのフラグ付きに限定する。
+  /// 一覧表示・統計集計は従来どおり全ノートを対象とする（本フラグでは絞らない）。
+  /// 既定 false（既存ノートは未選別＝照合対象外。運用側で改めて昇格させる）。
+  usedForMatching Boolean @default(false)
+
   /// 使用したAIモデル
   aiModel String
 
@@ -1537,6 +1544,7 @@ model AITradeNote {
   @@index([date], map: "idx_ai_trade_note_date")
   @@index([outcome], map: "idx_ai_trade_note_outcome")
   @@index([symbol], map: "idx_ai_trade_note_symbol")
+  @@index([usedForMatching], map: "idx_ai_trade_note_used_for_matching")
 }
 
 /// AIノートサマリー（期間集計）
