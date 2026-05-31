@@ -140,11 +140,12 @@ const formatNumber = (value: number | null | undefined, decimals: number = 2): s
   });
 };
 
-// 日時を「MM/DD HH:mm」(分まで) で整形する。注文・エントリー・決済日時の表示用。
+// 日時を「MM/DD HH:mm」(分まで) で整形する日時表示用ヘルパー。
+// 未設定値のプレースホルダは本ファイル他箇所 (formatNumber 等) と同じ "-" に揃える。
 const formatDateTimeMinute = (value?: string | null): string => {
-  if (!value) return "—";
+  if (!value) return "-";
   const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "—";
+  if (Number.isNaN(d.getTime())) return "-";
   return d.toLocaleString("ja-JP", {
     month: "2-digit",
     day: "2-digit",
@@ -604,7 +605,7 @@ export default function TradesPage() {
                       {trade.status === "pending" ? (
                         <span>注文: {formatDateTimeMinute(trade.createdAt)}</span>
                       ) : (
-                        trade.entryTime && <span>エントリー: {formatDateTimeMinute(trade.entryTime)}</span>
+                        <span>エントリー: {formatDateTimeMinute(trade.entryTime)}</span>
                       )}
                       {trade.expiresAt && <span>有効期限: {formatDateTimeMinute(trade.expiresAt)}</span>}
                     </div>
