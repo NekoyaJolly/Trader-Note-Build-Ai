@@ -41,6 +41,8 @@ import {
   closeTrade,
 } from '../repositories';
 import * as aiNoteRepository from '../repositories/aiNoteRepository';
+// ポートフォリオ統計の再集計。自動決済後に呼ばないと永続化 stats / 残高が更新されず UI に反映されない。
+import { refreshPortfolioStats } from '../services/virtualTradeService';
 import {
   calculatePnL,
   type CloseVirtualTradeInput,
@@ -290,6 +292,19 @@ export class TradeMonitoringJob
         } catch (error) {
           const message = error instanceof Error ? error.message : '不明なエラー';
           results.errors.push(`${symbol}: ${message}`);
+        }
+      }
+
+      // 決済があった場合、ポートフォリオ統計を再集計する。
+      // これが無いと永続化された VirtualPortfolio.stats / currentBalance が更新されず、
+      // 決済が積み上がっても UI（getPortfolioSummary は永続 stats を読む）に反映されない。
+      if (results.exits > 0) {
+        try {
+          await refreshPortfolioStats();
+        } catch (error) {
+          const message = error instanceof Error ? error.message : '不明なエラー';
+          results.errors.push(`ポートフォリオ統計更新: ${message}`);
+          this.deps.log(`ポートフォリオ統計更新エラー: ${message}`);
         }
       }
 
