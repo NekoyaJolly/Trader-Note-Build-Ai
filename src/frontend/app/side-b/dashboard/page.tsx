@@ -167,21 +167,17 @@ export default function SideBDashboardPage() {
                 }}
               />
             )}
-            <Link href="/side-b">
-              <Button variant="outline" size="sm">
-                エージェントへ
-              </Button>
-            </Link>
+            {/* 「エージェントへ」ボタンは下のクイックリンク「プラン」と重複するため削除 (2026-05-31) */}
           </div>
         </div>
 
         <section>
           <h2 className="text-sm font-semibold text-gray-300 mb-3">クイックリンク</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <NeonCard icon="📋" title="仮説一覧" href="/side-b/hypotheses" color="purple" />
-            <NeonCard icon="⚙️" title="検証キュー" href="/side-b/validation" color="cyan" />
-            <NeonCard icon="🤖" title="AI エージェント" href="/side-b" color="green" />
-            <NeonCard icon="📊" title="比較ダッシュボード" href="/side-b/comparison" color="pink" />
+            <NeonCard icon="📋" title="仮説" href="/side-b/hypotheses" color="purple" />
+            <NeonCard icon="⚙️" title="検証" href="/side-b/validation" color="cyan" />
+            <NeonCard icon="🤖" title="プラン" href="/side-b" color="green" />
+            <NeonCard icon="📊" title="比較" href="/side-b/comparison" color="pink" />
           </div>
         </section>
 
