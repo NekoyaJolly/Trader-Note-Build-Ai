@@ -140,6 +140,20 @@ const formatNumber = (value: number | null | undefined, decimals: number = 2): s
   });
 };
 
+// 日時を「MM/DD HH:mm」(分まで) で整形する日時表示用ヘルパー。
+// 未設定値のプレースホルダは本ファイル他箇所 (formatNumber 等) と同じ "-" に揃える。
+const formatDateTimeMinute = (value?: string | null): string => {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleString("ja-JP", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
 // PnLの色を返す
 const getPnLColor = (pnl: number | null): string => {
   if (pnl === null) return "text-gray-400";
@@ -587,11 +601,14 @@ export default function TradesPage() {
                         <span className="text-white ml-1">1:{formatNumber(trade.riskRewardRatio, 1)}</span>
                       </div>
                     </div>
-                    {trade.expiresAt && (
-                      <div className="mt-2 text-xs text-gray-500">
-                        有効期限: {new Date(trade.expiresAt).toLocaleString("ja-JP")}
-                      </div>
-                    )}
+                    <div className="mt-2 text-xs text-gray-500 flex flex-wrap gap-x-4 gap-y-1">
+                      {trade.status === "pending" ? (
+                        <span>注文: {formatDateTimeMinute(trade.createdAt)}</span>
+                      ) : (
+                        <span>エントリー: {formatDateTimeMinute(trade.entryTime)}</span>
+                      )}
+                      {trade.expiresAt && <span>有効期限: {formatDateTimeMinute(trade.expiresAt)}</span>}
+                    </div>
                   </div>
                 ))}
               </div>
