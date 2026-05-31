@@ -10,7 +10,7 @@ describe("getSideBBreadcrumbSegments", () => {
   it("/side-b はプランが末端", () => {
     const s = getSideBBreadcrumbSegments("/side-b");
     expect(s.map((x) => x.label)).toEqual(["Side-B", "プラン"]);
-    expect(s[0].href).toBe("/side-b/dashboard");
+    expect(s[0].href).toBe("/side-b");
     expect(s[1].href).toBeUndefined();
   });
 

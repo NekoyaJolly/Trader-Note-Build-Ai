@@ -30,6 +30,6 @@ describe("getWorkspaceSideFromPathname", () => {
 describe("定数", () => {
   it("ホームパスは設計どおり", () => {
     expect(SIDE_A_HOME).toBe("/");
-    expect(SIDE_B_HOME).toBe("/side-b/dashboard");
+    expect(SIDE_B_HOME).toBe("/side-b");
   });
 });
