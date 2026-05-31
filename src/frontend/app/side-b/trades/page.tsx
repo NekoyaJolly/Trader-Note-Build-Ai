@@ -363,18 +363,22 @@ export default function TradesPage() {
           </div>
         )}
 
-        <section
-          className="mb-6 sm:mb-8 card-surface rounded-xl p-4 sm:p-5 border border-slate-700/50"
-          aria-labelledby="plan-bt-heading"
-        >
-          <h2 id="plan-bt-heading" className="text-sm font-semibold text-white flex items-center gap-2 mb-1">
+        <details className="group mb-6 sm:mb-8 card-surface rounded-xl border border-slate-700/50">
+          <summary className="cursor-pointer list-none p-4 sm:p-5 flex items-center gap-2 select-none">
+            <span aria-hidden className="text-slate-400 transition-transform group-open:rotate-90">▶</span>
             <span aria-hidden>📈</span>
-            即時BT付きプラン（試行）
-          </h2>
-          <p className="text-xs text-slate-500 mb-3">
-            POST /api/side-b/plans。プラン行は従来どおり DB に保存され、
-            <code className="text-cyan-400/90 mx-0.5">strategyBacktest</code>
-           （DSL 即時BTの要約）は本レスポンス内のみ同梱され、GET で取得したプラン JSON には含まれません。
+            <span className="text-sm font-semibold text-white">プランを手動で試す（即時バックテスト）</span>
+            <span className="ml-auto text-[11px] text-slate-500 px-2 py-0.5 rounded bg-slate-800/60 border border-slate-700/50">
+              開発・検証用
+            </span>
+          </summary>
+          <div className="px-4 sm:px-5 pb-4 sm:pb-5">
+          <p className="text-xs text-slate-400 mb-3 leading-relaxed">
+            シンボルを指定すると、その場で 1 件プランを生成し、戦略を過去データで即座にバックテスト（BT）した要約を表示します。
+            通常の自動運用とは別系統の「プランと BT の中身を手動で覗く」検証用の導線です。
+            <span className="text-slate-500">
+              （生成したプラン自体は DB に保存されますが、BT 要約はこの画面の応答内だけに表示され、保存はされません。）
+            </span>
           </p>
           <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:items-center mb-3">
             <label className="text-xs text-slate-400 flex items-center gap-2">
@@ -424,7 +428,8 @@ export default function TradesPage() {
               </div>
             </div>
           )}
-        </section>
+          </div>
+        </details>
 
         {/* ポートフォリオサマリー */}
         {portfolio && (
