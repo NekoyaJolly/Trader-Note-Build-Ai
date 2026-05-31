@@ -26,7 +26,9 @@
  */
 
 import { isFXMarketOpen } from '../utils/marketHours';
-import { expirePendingTrades } from '../services/virtualTradeService';
+// expirePendingTrades: 期限切れ pending の自動キャンセル。
+// refreshPortfolioStats: 自動決済後に呼ばないと永続化 stats / 残高が更新されず UI に反映されない。
+import { expirePendingTrades, refreshPortfolioStats } from '../services/virtualTradeService';
 import {
   verifyTradeState,
   summarizeVerificationResult,
@@ -41,8 +43,6 @@ import {
   closeTrade,
 } from '../repositories';
 import * as aiNoteRepository from '../repositories/aiNoteRepository';
-// ポートフォリオ統計の再集計。自動決済後に呼ばないと永続化 stats / 残高が更新されず UI に反映されない。
-import { refreshPortfolioStats } from '../services/virtualTradeService';
 import {
   calculatePnL,
   type CloseVirtualTradeInput,
