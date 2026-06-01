@@ -13,8 +13,9 @@ export type WorkspaceSide = "side-a" | "side-b";
 /** Side-A のホーム（ワークスペース切替の着地点） */
 export const SIDE_A_HOME = "/";
 
-/** Side-B のホーム（ワークスペース切替の着地点） */
-export const SIDE_B_HOME = "/side-b/dashboard";
+/** Side-B のホーム（ワークスペース切替の着地点）。
+ *  Side-B のメインハブは「プラン」(/side-b) のため、切替時はダッシュボードではなくプランに着地させる。 */
+export const SIDE_B_HOME = "/side-b";
 
 /**
  * 現在の pathname がどちらのワークスペースか。
