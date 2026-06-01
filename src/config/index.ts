@@ -158,8 +158,32 @@ function resolveMutationStrategy(): MutationStrategyValue {
   return 'llm';
 }
 
+/**
+ * Phase 3: crossover の方式（AI_CROSSOVER_STRATEGY）。
+ *   'llm'           = 従来の CrossoverAgent（LLM がフィルタ条件を提案）
+ *   'deterministic' = generateDeterministicCrossovers（~20 インジ系統スイープでエッジ発見）
+ * 既定 'llm'。許容値は mutation と独立に定義（将来ズレても誤受理しないため）。
+ */
+const VALID_CROSSOVER_STRATEGIES = ['llm', 'deterministic'] as const;
+export type CrossoverStrategyValue = (typeof VALID_CROSSOVER_STRATEGIES)[number];
+
+function resolveCrossoverStrategy(): CrossoverStrategyValue {
+  const raw = process.env.AI_CROSSOVER_STRATEGY;
+  if (!raw) return 'llm';
+  const trimmed = raw.trim().toLowerCase();
+  if ((VALID_CROSSOVER_STRATEGIES as readonly string[]).includes(trimmed)) {
+    return trimmed as CrossoverStrategyValue;
+  }
+  console.warn(
+    `[Config] AI_CROSSOVER_STRATEGY に不正な値: "${raw}". 'llm' にフォールバックします. ` +
+      `許容値: ${VALID_CROSSOVER_STRATEGIES.join(', ')}`,
+  );
+  return 'llm';
+}
+
 // typed const にして object literal の widening (string 化) を防ぎ、union 型のまま公開する。
 const MUTATION_STRATEGY: MutationStrategyValue = resolveMutationStrategy();
+const CROSSOVER_STRATEGY: MutationStrategyValue = resolveCrossoverStrategy();
 
 export const config = {
   server: {
@@ -187,6 +211,8 @@ export const config = {
     //                     インジ期間 + SL/TP を決定論最適化 (AGENTS.md 原則#3)
     // 既定 'llm' で従来挙動を維持。本番は観察後にフラグで 'deterministic' へ切替える。
     mutationStrategy: MUTATION_STRATEGY,
+    // Phase 3: crossover 方式。'deterministic' で ~20 インジ系統スイープのエッジ発見。
+    crossoverStrategy: CROSSOVER_STRATEGY,
     baseURL: process.env.AI_BASE_URL || 'https://openrouter.ai/api/v1',
     // reasoning モデル (gpt-5系 / o系) の思考レベル既定値。
     // AIProvider は isReasoningModel() で対象モデル時のみ送信するため、
