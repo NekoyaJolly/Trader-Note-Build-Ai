@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Side-B 進化ループ 再設計プラン (2026-06-02)</title>
+<style>
+  :root{--bg:#0f172a;--panel:#1e293b;--panel2:#273449;--ink:#e2e8f0;--muted:#94a3b8;--line:#334155;
+    --cyan:#22d3ee;--violet:#a78bfa;--green:#34d399;--amber:#fbbf24;--rose:#fb7185;--mono:ui-monospace,Menlo,monospace;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;line-height:1.7;padding:32px 20px 80px}
+  .wrap{max-width:1080px;margin:0 auto}
+  h1{font-size:24px;margin:0 0 4px}
+  h2{font-size:18px;margin:34px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--line);color:var(--cyan)}
+  h3{font-size:15px;margin:18px 0 8px;color:var(--violet)}
+  p,li{font-size:13.5px}
+  .sub{color:var(--muted);font-size:13px;margin-top:0}
+  code{font-family:var(--mono);font-size:12px;background:#0b1220;border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:#cbd5e1}
+  .ref{font-family:var(--mono);font-size:11px;color:#7dd3fc}
+  table{width:100%;border-collapse:collapse;margin:8px 0;font-size:12.5px}
+  th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:var(--muted)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 16px;margin:10px 0}
+  .as-is{border-left:4px solid var(--rose)}
+  .to-be{border-left:4px solid var(--green)}
+  .note{background:#0b1220;border:1px solid var(--line);border-radius:8px;padding:12px 14px;font-size:13px;margin:10px 0}
+  .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid;margin-right:4px}
+  .p1{color:var(--cyan);border-color:#155e75}.p2{color:var(--violet);border-color:#5b21b6}
+  .p3{color:var(--amber);border-color:#78350f}.p4{color:var(--green);border-color:#14532d}
+  ul{margin:6px 0 6px 18px;padding:0}.muted{color:var(--muted)}.small{font-size:12px}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:760px){.two{grid-template-columns:1fr}}
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin:8px 0}
+  .step .h{font-weight:700}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Side-B 進化ループ 再設計プラン</h1>
+  <p class="sub">現状の問題（実データ+コードで確認済）→ あるべき設計 → 段階的実装。2026-06-02。進化ループ限定。アーキテクチャ現状図は <code>evolution_loop_architecture_2026-06-02.html</code> 参照。</p>
+
+  <div class="note"><b>設計の北極星：</b>AGENTS.md ドメイン原則 #3 ＝「<b>数値最適化・統計処理・客観判定は Python/TS の決定論コードで実装する。安易に『LLMに判断させればいい』と設計しない</b>」。現状の進化ループはこの原則に反して LLM が数値最適化を担っている。本再設計は原則に沿って<b>最適化を決定論コード（backtesting.py）へ寄せ、LLM は構造発見だけ</b>に役割を絞る。</div>
+
+  <h2>1. 現状の問題（確認済み）</h2>
+  <table>
+    <tr><th>#</th><th>問題</th><th>根拠</th></tr>
+    <tr><td>P1</td><td><b>Mutation は LLM が数値を一個ずつナッジ</b>（総当たり最適化ではない）。冗長・重複・カーブフィット制御なし。</td><td class="ref">MutationAgent.ts（AIProvider+prompt, createdBy='llm_generated'）/ 実データ 764行431ユニーク</td></tr>
+    <tr><td>P2</td><td><b>Crossover も LLM 駆動で稀</b>。意図（インジ追加でエッジ探索）は正しいが系統的でない。</td><td class="ref">CrossoverAgent.ts / 実データ 34行18ラン</td></tr>
+    <tr><td>P3</td><td><b>最適化ツールが未配線</b>。analysis-engine は単発BTのみ（screening/oos/walk-forward）。<code>Backtest.optimize()</code>（backtesting.py 0.6.5 に存在）も <code>/v1/optimize</code> も無い。</td><td class="ref">analysis-engine/app/main.py / 0.6.5</td></tr>
+    <tr><td>P4</td><td><b>初期種12個を毎ラン再注入</b>。探索の起点が固定で収束・反復に見える。本来は初回だけのはず。</td><td class="ref">buildAllNoveltySeeds / 実データ 種241行12ユニーク</td></tr>
+    <tr><td>P5</td><td><b>正式BT合格が in-sample PF≥1.0 のみ</b>。OOS/WF は観測どまりで合否ゲートに未強制（過学習が残る）。</td><td class="ref">EvolutionLoop FORMAL_BT_MIN_PF=1.0 / applyOosAwarePromotion=観測</td></tr>
+    <tr><td>P6</td><td><b>起動が自動cron中心</b>。実質1日1回。手動トリガーが無い。</td><td class="ref">side-b-cron.yml / sideBScheduler.ts:925</td></tr>
+  </table>
+
+  <h2>2. あるべき設計（コンポーネント別）</h2>
+
+  <h3>2-1. 数値最適化（旧 Mutation の数値部分）= 決定論グリッドへ</h3>
+  <div class="two">
+    <div class="card as-is"><b>現状</b><ul>
+      <li>LLM が「RSI 30→35」のような単発変更を提案。</li>
+      <li>次世代も同じ値を少し動かす → 重複・無駄。</li>
+      <li>過学習(カーブフィット)の制御なし。</li>
+    </ul></div>
+    <div class="card to-be"><b>あるべき</b><ul>
+      <li>analysis-engine に <code>POST /v1/optimize</code> を追加し <code>Backtest.optimize(maximize, method='grid'|'sambo', constraint, max_tries)</code> を呼ぶ。</li>
+      <li>探索空間（各パラメータの range/step）を渡し、<b>決定論で総当たり/SAMBO 最適化</b>。</li>
+      <li><b>探索範囲の決め方（確定）</b>：<b>現在値 ±N%</b> を探索幅とし、その範囲内を<b>型(int/float)に応じた刻み</b>で探索する（int は整数刻み、float は適切な小数刻み）。
+        DSL に <code>ParameterDef.range</code> があればそれを上限/下限の参考にする。決定論コードで実装（LLM任せにしない）。</li>
+      <li><b>過学習ガード</b>：学習期間で最適化 → OOS/ウォークフォワードで検証し、OOS劣化が大きい組は棄却。</li>
+      <li>LLM の役割は「どのパラメータを探索対象にするか」「探索範囲のヒント」だけ（構造判断）。数値最適化はしない。</li>
+    </ul></div>
+  </div>
+
+  <h3>2-2. Crossover = インジ系統スイープでエッジ探索</h3>
+  <div class="two">
+    <div class="card as-is"><b>現状</b><ul>
+      <li>LLM に「負けを消すフィルタを1つ足して」と依頼。稀・非系統的。</li>
+    </ul></div>
+    <div class="card to-be"><b>あるべき</b><ul>
+      <li>registry.json の ~20 インジを<b>系統的に1つずつ親戦略へ追加</b>してBT。</li>
+      <li>判定：<b>負けトレードが減り、勝ちトレードが維持される</b>組み合わせ＝そのインジは当該戦略にエッジあり、として採用。</li>
+      <li><b>インジ自身のパラメータ問題（Nekoさん 指摘）</b>：追加インジ（例 EMA）も period 等の値を持つ。「誰がいつ決めるか」のネック。
+        → <b>Crossover も Phase 1 の <code>/v1/optimize</code> を呼べるようにし、有望インジが見つかったらそのインジのパラメータを最適化してエッジを確定</b>する（2段：スイープで候補発見 → 最適化で確定）。</li>
+      <li>決定論スイープが土台。LLM は候補インジの事前絞り込み（多すぎる場合）に限定。</li>
+    </ul></div>
+  </div>
+  <div class="note small"><b>Mutation と Crossover の関係（確定）：</b><b>Mutation＝既存戦略の“パラメータ”最適化（構造は変えない）</b>。<b>Crossover＝新しいインジを1つ追加し、その“追加したインジのパラメータだけ”を最適化（既存部分は触らない）</b>。
+  触る対象が分かれるので重複しない。共通の最適化エンジン（<code>/v1/optimize</code>）を両者が呼ぶ形でOK。</div>
+
+  <h3>2-3. LLM の役割再定義</h3>
+  <div class="card">LLM は <b>構造の発見・解釈・学習</b>のみ（原則#3）。具体的には：探索対象パラメータの選定 / 追加インジ候補の事前絞り込み / 世代の学び(GenerationLesson)の言語化。<b>数値最適化・エッジ判定・合否は決定論コード</b>。</div>
+
+  <h3>2-4. 種 / 起動</h3>
+  <div class="card"><ul>
+    <li><b>種は初回(コールドスタート)のみ注入</b>。population に履歴があれば再注入しない（毎ラン12個の再生成をやめる）。</li>
+    <li><b>手動「進化を実行」ボタン</b>を追加（既存 <code>/scheduler/run-*</code> と同パターンで admin endpoint）。自動cronは任意（OFF も選べる）。</li>
+  </ul></div>
+
+  <h3>2-5. 昇格ゲートの整理（Nekoさん 指摘：ゲートが乱立し条件がバラバラ）</h3>
+  <p class="small">現状、段階ゲートが複数あるが「どこに・どの条件で」あるかが分散し、しきい値も段ごとに不整合。まず棚卸しする。</p>
+  <table>
+    <tr><th>#</th><th>ゲート</th><th>場所</th><th>現在の条件</th></tr>
+    <tr><td>G1</td><td>Surrogate 通過（top-K選抜）</td><td class="ref">surrogateRescuePolicy.isNormalPass / evolutionPromotionThresholds.ts</td><td><b>学習PF&gt;1.5 / 検証PF&gt;1.3 / WF&lt;0.3</b>（厳格3条件）。+ Rescue Lane（緩和）で“惜しい”候補も正式BTへ。</td></tr>
+    <tr><td>G2</td><td>正式BT 合格（formalBtPassed）</td><td class="ref">EvolutionLoop verifyCandidatesWithFormalBacktest</td><td><b>in-sample PF≥1.0 かつ trades≥20 のみ</b>（← G1 より緩い。ここが不整合の中心）。</td></tr>
+    <tr><td>G3</td><td>PromotionGate ステージ判定</td><td class="ref">promotionGatePolicy.decidePromotionGateV1</td><td>formalBtPassed→<code>validation_candidate</code> / 失敗+repairable→<code>repairable</code> / その他 <code>repair_excluded / formal_bt_candidate / parent_eligible / hold</code>。</td></tr>
+    <tr><td>G4</td><td>OOS-aware（確証）</td><td class="ref">applyOosAwarePromotion</td><td>validation_candidate + oos_passed/wf_passed → <code>validation_confirmed</code> / 失敗→hold。<b>観測のみ・合否に未強制</b>。</td></tr>
+  </table>
+  <div class="note small"><b>不整合の核心：</b>「確証3条件(1.5/1.3/0.3)」は <b>G1(surrogate=近似)</b> でしか効かず、最終の <b>G2(正式BT)</b> は PF≥1.0 だけ。<b>近似で厳しく・本番で緩い</b>という逆転。さらに G4(OOS/WF) は観測どまり。</div>
+  <div class="card to-be"><b>統一案（確定方針）</b><ul>
+    <li><b>「探索ゲート」と「確証ゲート」の2段に集約</b>。探索ゲート(G1相当)＝多様性を残すため緩め（top-K 選抜）。確証ゲートは<b>必ずコスト込み</b>で評価（G1がコスト未計算で確証3条件を効かせても本番より弱く無意味、という逆転を解消）。</li>
+    <li><b>確証ゲートの評価指標を増やす（全てコスト込み・各々に閾値）</b>：
+      <b>PF（プロフィットファクター）／ 勝率 ／ トレード数 ／ 最大ドローダウン ／ シャープレシオ ／ リカバリーファクター</b>。
+      トレード数の下限は確証側にも必ず入れる（少数サンプルの過信防止）。</li>
+    <li><b>本番昇格（ユーザー判断）に必要な情報を1画面に揃える</b>：上記6指標の閾値クリア状況 ＋ <b>ウォークフォワード検証結果 ／ モンテカルロ検証結果 ／ バイ&ホールドとの整合比較</b>。これが「本番に上げてよいか」を人が判断するための最低セット。</li>
+    <li>各ゲートの<b>しきい値を1ファイルに集約</b>（validationThresholds / evolutionPromotionThresholds を単一の正に）。UI に「今どのゲートにいるか」「各指標が閾値を満たすか」を明示。</li>
+    <li>production への自動昇格は引き続きしない（最終はユーザー承認・Phase 5B）。</li>
+  </ul></div>
+  <div class="note small"><b>既存の部品は揃っている：</b>analysis-engine に <code>/v1/walk-forward</code>・<code>/v1/oos-validation</code>、screening BT が Sharpe/maxDD/recoveryFactor を返却、Monte Carlo / Buy&Hold ツールも存在（FullValidation 経路）。再設計は「これらを<b>確証ゲートとして強制＋UIに集約表示</b>」する話で、計算器を新規発明する必要は小さい。</div>
+  <div class="note small"><b>命名の注意（後日修正）：</b><b>recoveryFactor と profitFactor が両方「PF」と略され混同</b>している箇所がコード/表示に散見。確証ゲートで両方を並べる前に、略記を分離（例: PF=ProfitFactor / RF=RecoveryFactor）して取り違えを防ぐ。今回は把握のみ、別途修正。</div>
+
+  <h2>3. 段階的実装プラン（1 PR ずつ・マージ=承認）</h2>
+  <div class="step"><span class="tag p1">Phase 1</span><span class="h"> 最適化エンドポイント（土台）</span><br>
+    analysis-engine に <code>/v1/optimize</code>（<code>Backtest.optimize</code> + 学習/OOS 過学習ガード）を追加。TS クライアント + Zod スキーマ。単体で「戦略+探索空間→最適パラメータ+OOS検証」が返ることを確認。</div>
+  <div class="step"><span class="tag p2">Phase 2</span><span class="h"> Mutation を最適化呼び出しに置換</span><br>
+    数値最適化を <code>/v1/optimize</code> 経由の決定論処理に変更。LLM は探索対象/範囲の提案のみ。冗長な単発ナッジを廃止。</div>
+  <div class="step"><span class="tag p3">Phase 3</span><span class="h"> Crossover を系統スイープに</span><br>
+    ~20 インジを順に追加→BT→「負け減・勝ち維持」評価→エッジ採用。LLM は候補事前絞り込みのみ。</div>
+  <div class="step"><span class="tag p4">Phase 4</span><span class="h"> 種=初回のみ + 手動トリガー + ゲート整理</span><br>
+    種の再注入停止 / 手動実行ボタン / <b>ゲートを「探索/確証」2段に集約</b>し確証で OOS+WF を強制（2-5 統一案）。しきい値を単一ファイルに集約。自動cronの扱い（OFF含む）を確定。</div>
+
+  <h2>4. 決定事項 / 残る要決定</h2>
+  <h3>確定済み（2026-06-02）</h3>
+  <table>
+    <tr><th>項目</th><th>決定</th></tr>
+    <tr><td>Mutation 探索空間</td><td>現在値 <b>±N%</b> を、<b>型(int/float)に応じた刻み</b>で探索。決定論コードで。</td></tr>
+    <tr><td>Crossover の手順</td><td>インジを系統的に1つ追加→有望なら <code>/v1/optimize</code> を呼んで<b>追加インジのパラメータを最適化しエッジ確定</b>（2段）。</td></tr>
+    <tr><td>Mutation / Crossover の境界</td><td>Mutation=既存パラメータ最適化 / Crossover=<b>追加インジのみ</b>最適化（既存は触らない）。重複なし。</td></tr>
+    <tr><td>確証ゲートの評価指標</td><td>コスト込みで <b>PF / 勝率 / トレード数 / 最大DD / シャープ / リカバリーF</b> に閾値。＋ WF / モンテカルロ / Buy&amp;Hold 整合。本番昇格判断の最低セット。</td></tr>
+    <tr><td>ゲート構成</td><td>「探索ゲート（緩め）」「確証ゲート（コスト込み厳格）」の2段。production 自動昇格はしない。</td></tr>
+  </table>
+  <h3>残る要決定（Phase 着手前に詰める）</h3>
+  <table>
+    <tr><th>項目</th><th>論点</th></tr>
+    <tr><td>N% の値</td><td>探索幅 ±N% の N（例: ±20%？）。param 種別で変える？</td></tr>
+    <tr><td>確証しきい値の具体値</td><td>PF / 勝率 / トレード数 / 最大DD / シャープ / リカバリーF の各閾値の数値。</td></tr>
+    <tr><td>過学習ガードの方式</td><td>train→OOS 比較 / ウォークフォワード / SAMBO CV のどれを正に（既存 walk_forward.py と整合）。</td></tr>
+    <tr><td>最適化の最大化指標</td><td><code>Backtest.optimize</code> の maximize（PF / Sharpe / 複合）。カーブフィット回避と両立する指標。</td></tr>
+    <tr><td>自動cronの扱い</td><td>手動only か自動も残すか（残すなら頻度）。</td></tr>
+    <tr><td>Crossover のインジ数</td><td>~20 全部スイープ（重い）か事前絞り込みか。analysis-engine 負荷との兼ね合い。</td></tr>
+  </table>
+  <div class="note small"><b>命名修正(別件):</b> recoveryFactor と profitFactor の「PF」略記衝突を分離してから確証ゲートに両方を並べる。</div>
+
+  <h2>5. ベストプラクティス調査（推奨値・2026-06-02 Web調査）</h2>
+  <h3>確証ゲート閾値 —「優秀なEAの最低ライン」基準（全てコスト込み）</h3>
+  <table>
+    <tr><th>指標</th><th>推奨閾値</th><th>補足</th></tr>
+    <tr><td>プロフィットファクター (PF)</td><td><b>≥ 1.5</b>（プロ級は 2.0〜5.0）</td><td><b>&gt; 5.0 は過学習警告</b>。コスト込みで評価。</td></tr>
+    <tr><td>シャープレシオ</td><td><b>≥ 1.0</b>（&gt;2 で優秀）</td><td>リスク調整後リターン。</td></tr>
+    <tr><td>リカバリーファクター</td><td><b>≥ 2.0</b></td><td>純益 / 最大DD。プロ級ライン。</td></tr>
+    <tr><td>最大ドローダウン</td><td><b>≤ 20%</b></td><td>最重要のリスク指標。</td></tr>
+    <tr><td>トレード数</td><td><b>≥ 100（最低でも 50）</b></td><td>統計的有意性。365日で 100 に満たなければ<b>BT期間を延長して確保</b>（OHLCV は ~20年分取得可）。現状の 20 は緩い。</td></tr>
+    <tr><td>勝率</td><td>単独閾値は置かない</td><td>RR 次第で低勝率でも可。表示し PF と併せて見る。</td></tr>
+  </table>
+  <h3>過学習防止（best practice）</h3>
+  <ul>
+    <li><b>ウォークフォワード（rolling/anchored）＋ 触らない OOS を必ず確保</b>（gold standard）。リポジトリに <code>walk_forward.py</code> / OOS あり。</li>
+    <li><b>最適化の maximize は raw profit / PF ではなく risk-adjusted（シャープ等）</b>にすると過学習が減る（fitness 選択が結果を大きく左右する）。</li>
+    <li><b>Deflated Sharpe Ratio (DSR) を活用（確定）</b>：リポジトリに <code>computeDeflatedSharpeRatio</code>（<code>dsr.py</code>）が<b>実装済だが現状は観測ログのみ</b>（EvolutionLoop:898）。これを<b>確証ゲートに昇格</b>させる。</li>
+    <li><b>PBO・CPCV は未実装 → 今回は見送り</b>（「今あるものを活用」方針）。必要になれば将来追加。</li>
+    <li>モンテカルロでロバスト性、Buy&amp;Hold 整合で「相場に乗っただけ」でないか確認。</li>
+    <li>経済的合理性（バックテストを参照せず戦略を説明できるか）も red flag チェック。</li>
+  </ul>
+  <h3>その他（ご意向で確定）</h3>
+  <ul>
+    <li><b>±N% = まず ±30%</b>（将来プレースホルダ化可）。<b>パラメータ種別で変える</b>：SL/TP / 各インジ期間 / 閾値系で別レンジ（型(int/float)刻みも種別ごと）。</li>
+    <li><b>自動cron は既定ON</b>＋手動実行ボタンも用意（選択可能）。</li>
+    <li><b>Crossover の事前絞り込み</b>：AI が「既存インジと相性の良い候補」を選ぶ → 決定論で「<b>親の負けトレードを除去し勝ちを維持するか</b>」を評価（親の trade list ＋ 各エントリー時点のインジ値）→ <code>/v1/optimize</code> で確定。
+      ＝人が「チャートにエントリー/クローズを描画→インジを当てて優位性を探す→足して再BT」する流れの決定論版。</li>
+  </ul>
+  <div class="note small"><b>数値決定 = すべて確定（2026-06-02）：</b>
+  ±N% = <b>±30%</b>（種別ごと・将来プレースホルダ化可）／ トレード数下限 = <b>100</b>（最低50・足りなければ期間延長）／
+  過学習 = <b>既存 DSR をゲート化</b>（PBO・CPCV は見送り）＋ WF/OOS/MC/B&amp;H ／ cron = <b>既定ON＋手動</b>。
+  → <b>Phase 1 から実装着手可能</b>。</div>
+
+  <div class="note small"><b>注：</b>本再設計は #303(コスト配線)/#304(OOS永続化)/#305・#308(UI可視化) の上に乗る。コスト・可視化は完了済みで、本プランは「<b>探索/最適化のエンジンそのもの</b>」を決定論化する話。</div>
+
+  <p class="muted small" style="margin-top:26px">生成: 2026-06-02 / 進化ループ再設計プラン（self-contained・外部依存なし）。</p>
+</div>
+</body>
+</html>
