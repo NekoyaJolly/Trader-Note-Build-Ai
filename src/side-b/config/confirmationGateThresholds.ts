@@ -28,8 +28,9 @@ function parseNumber(name: string, fallback: number): number {
 function parseInteger(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined) return fallback;
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed)) {
+  // Number() で受けて整数チェック（parseInt の '1.5'→1 / '100abc'→100 黙過を防ぐ）。
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed)) {
     throw new Error(`Invalid integer env ${name}=${raw}`);
   }
   return parsed;

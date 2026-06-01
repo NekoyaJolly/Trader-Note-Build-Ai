@@ -34,7 +34,7 @@ export interface MetricCheck {
   /** 実測値（未取得は null）。 */
   value: number | null;
   threshold: number;
-  comparator: '>=' | '<=';
+  comparator: '>=' | '<=' | '>';
   /** メトリクスが取得できたか。 */
   available: boolean;
   /** 閾値クリアしたか（available=false なら false）。 */
@@ -104,13 +104,14 @@ export function evaluateConfirmationGate(
   const tradeCount = geCheck(metrics.tradeCount, thresholds.minTradeCount);
 
   // DSR: 計算不能（小サンプル / flat returns 等）は pass=false + note。
+  // 「N 試行補正後も有意」= dsr > minDsr の **厳密不等号**（dsr=minDsr は境界で不合格）。
   const dsrComputable = dsr !== null && dsr.notComputable == null;
   const dsrCheck: MetricCheck = {
     value: dsr ? dsr.dsr : null,
     threshold: thresholds.minDsr,
-    comparator: '>=',
+    comparator: '>',
     available: dsrComputable,
-    pass: dsr !== null && dsr.notComputable == null && dsr.dsr >= thresholds.minDsr,
+    pass: dsr !== null && dsr.notComputable == null && dsr.dsr > thresholds.minDsr,
   };
 
   const notes: string[] = [];
@@ -121,7 +122,9 @@ export function evaluateConfirmationGate(
       `PF=${(profitFactor.value as number).toFixed(2)} > ${thresholds.overfitProfitFactorWarning} は過学習警告`,
     );
   }
-  if (dsr && !dsrComputable) {
+  if (dsr === null) {
+    notes.push('DSR 未計算（trade pnl 不在）');
+  } else if (!dsrComputable) {
     notes.push(`DSR 計算不能: ${dsr.notComputable}`);
   }
   for (const [name, c] of Object.entries({

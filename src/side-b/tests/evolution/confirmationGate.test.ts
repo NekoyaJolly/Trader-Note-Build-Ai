@@ -36,6 +36,13 @@ describe('evaluateConfirmationGate', () => {
     expect(r.checks.dsr.pass).toBe(false);
   });
 
+  it('DSR は厳密不等号（dsr=minDsr=0 は境界で不合格）', () => {
+    const r = evaluateConfirmationGate(passingMetrics(), { dsr: 0 });
+    expect(r.checks.dsr.comparator).toBe('>');
+    expect(r.checks.dsr.pass).toBe(false);
+    expect(r.passed).toBe(false);
+  });
+
   it('PF 不足は profitFactor.pass=false + corePassed=false', () => {
     const r = evaluateConfirmationGate({ ...passingMetrics(), pf: 1.2 }, { dsr: 1 });
     expect(r.checks.profitFactor.pass).toBe(false);
@@ -87,11 +94,12 @@ describe('evaluateConfirmationGate', () => {
     expect(r.notes.some((n) => n.includes('DSR 計算不能'))).toBe(true);
   });
 
-  it('dsr=null（未計算）は passed=false だが corePassed は評価される', () => {
+  it('dsr=null（未計算）は passed=false だが corePassed は評価され、note が付く', () => {
     const r = evaluateConfirmationGate(passingMetrics(), null);
     expect(r.checks.dsr.available).toBe(false);
     expect(r.corePassed).toBe(true);
     expect(r.passed).toBe(false);
+    expect(r.notes.some((n) => n.includes('DSR 未計算'))).toBe(true);
   });
 
   it('winRate は閾値なしで値をそのまま surface', () => {
