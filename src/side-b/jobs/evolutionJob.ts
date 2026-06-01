@@ -41,6 +41,7 @@ import { SurrogateFitnessSimulator } from '../strategy_dsl/SurrogateFitnessSimul
 
 import type { SideBJobDeps, SideBJobName, SideBJobRunner } from './types';
 import type { SideBSchedulerConfig } from './sideBScheduler';
+import { config as appConfig } from '../../config';
 // PR #159 Copilot review #3 対応: 純粋関数 / 定数を別ファイルに分離 (テスト軽量化)
 import {
   EVOLUTION_CARRY_RETENTION_DAYS,
@@ -156,6 +157,9 @@ export class EvolutionJob implements SideBJobRunner<SideBSchedulerConfig, Evolut
       evolutionInstanceCarryRepo: evolutionInstanceCarryRepository,
       symbol: config.symbols[0],
       timeframe: config.timeframe,
+      // Phase 2: mutation 方式を config から注入（既定 'llm'）。
+      // 'deterministic' でインジ期間 + SL/TP を analysis-engine で決定論最適化する。
+      mutationStrategy: appConfig.ai.mutationStrategy,
     });
 
     // configOverride 経由で 0 や maxGenerations 超過の値が渡されたときの clamp。
