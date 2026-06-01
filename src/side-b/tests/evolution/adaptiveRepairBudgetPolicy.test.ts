@@ -212,6 +212,8 @@ function makeReport(
       warnings: [],
     },
     oosAwarePromotionDecisions: [],
+    confirmationGateSummary: { evaluated: 0, corePassed: 0, passed: 0, overfitWarnings: 0 },
+    confirmationGateResults: [],
   };
 }
 
