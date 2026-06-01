@@ -833,6 +833,10 @@ export interface EvolutionLesson {
   category: string;
   lesson: string;
   recordedAt: string;
+  /** 学びの根拠数値（dsr / lift / 親勝率→子勝率 等）。未記録は null。 */
+  metrics?: Record<string, number | string | boolean> | null;
+  /** LLM が報告した信頼度（0.0-1.0）。未記録は null。 */
+  confidence?: number | null;
 }
 
 export interface ListEvolutionLessonsResponse {
@@ -880,6 +884,22 @@ export interface GetEvolutionRunSummaryResponse {
  * 進化ループで評価された候補 1 件の UI 表示用形。
  * Prisma の EvolutionBacktestRun のうち、フロントが参照するフィールドのみ公開する。
  */
+/**
+ * 進化候補の戦略DSLスナップショット（before→action→after 可視化に必要な部分のみ）。
+ * candidates API が EvolutionBacktestRun.dslSnapshot を raw で返す。
+ */
+export interface EvolutionDslSnapshot {
+  id: string;
+  /** 親個体のDSL ID（mutation=1件 / crossover=2件）。種(seed)は空 or undefined。 */
+  parentIds?: string[];
+  /** 生成元（'mutation' / 'crossover' / 'seed' 等）。action の識別に使う。 */
+  metadata?: { createdBy?: string } | null;
+  entry?: { kind?: string } | null;
+  stopLoss?: { type?: string; value?: number; lookbackBars?: number } | null;
+  takeProfit?: { type?: string; value?: number } | null;
+  parameters?: Record<string, number> | null;
+}
+
 export interface EvolutionRunCandidate {
   id: string;
   generation: number;
@@ -892,6 +912,10 @@ export interface EvolutionRunCandidate {
     winRate?: number;
     tradeCount?: number;
   } | null;
+  /** DSLスナップショット（親→子の差分・由来表示用）。 */
+  dslSnapshot?: EvolutionDslSnapshot | null;
+  /** 進化候補のDSL ID（= EvolutionBacktestRun.candidateId）。親子の突き合わせに使う。 */
+  candidateId?: string;
   /**
    * OOS-aware 確証結果（観測）。in-sample 合格に加え OOS/WF も通過したか。
    * OOS未評価 / 対象外（validation_candidate 以外）は null。
