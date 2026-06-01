@@ -146,7 +146,8 @@ export async function optimizeIndicatorPeriods(
   params: OptimizeIndicatorPeriodsParams,
   deps: OptimizeIndicatorPeriodsDeps,
 ): Promise<OptimizeIndicatorPeriodsResult> {
-  const topK = params.topK ?? DEFAULT_TOP_K;
+  // topK は 1 未満だと stage-2 が一度も走らず無評価になるため 1 にクランプ。
+  const topK = Math.max(1, Math.floor(params.topK ?? DEFAULT_TOP_K));
   const minTrades = params.minScreeningTrades ?? DEFAULT_MIN_SCREENING_TRADES;
   const strategyUsed = params.strategy ?? 'two_stage';
 

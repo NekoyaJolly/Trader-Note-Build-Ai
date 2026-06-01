@@ -30,9 +30,12 @@ import {
 export interface IndicatorVariantOptions {
   /** 現在値からの相対振れ幅。既定 0.20（±20%）。 */
   pct?: number;
-  /** 1 軸あたりの探索点数（3 = 下/現/上、5 = ±pct を半分刻み）。既定 3。 */
+  /**
+   * 1 軸あたりの探索点数（3 = 下/現/上、5 = ±pct を半分刻み）。既定 3。
+   * 現在値を必ず中央点に含めるため内部で **奇数に正規化**する（偶数指定は +1）。
+   */
   pointsPerAxis?: number;
-  /** 総組合せ数の上限（必須のコスト上限）。既定 24。 */
+  /** 総組合せ数の上限（必須のコスト上限）。既定 24。1 未満は 1 にクランプ。 */
   maxCombos?: number;
 }
 
@@ -65,6 +68,12 @@ const DEFAULT_PCT = 0.2;
 const DEFAULT_POINTS = 3;
 const DEFAULT_MAX_COMBOS = 24;
 
+/** points を 1 以上の奇数に正規化（current を中央点に含めるため）。偶数指定は +1。 */
+function normalizePoints(points: number): number {
+  const n = Math.max(1, Math.floor(points));
+  return n % 2 === 0 ? n + 1 : n;
+}
+
 /** entry（immediate / wait_for_trigger）から trigger ConditionGroup を取り出す。 */
 function entryTriggerGroup(entry: StrategyDSL['entry']): ConditionGroup {
   return 'type' in entry && entry.type === 'wait_for_trigger'
@@ -83,16 +92,15 @@ function buildCandidates(
   const minP = entry?.paramConstraints.minPeriod ?? 1;
   const maxP = entry?.paramConstraints.maxPeriod ?? Number.MAX_SAFE_INTEGER;
 
-  // 相対係数を points 点で等間隔に（例 points=3 → [1-pct, 1, 1+pct]、
-  // points=5 → [1-pct, 1-pct/2, 1, 1+pct/2, 1+pct]）。
+  // points は奇数前提（呼び出し側で正規化済み）。中央 i=0 が factor 1 = current なので
+  // current は常に候補に含まれる（base variant 成立の前提）。
+  // 例 points=3 → [1-pct, 1, 1+pct]、points=5 → [1-pct, 1-pct/2, 1, 1+pct/2, 1+pct]。
+  const half = (points - 1) / 2;
   const factors: number[] = [];
-  if (points <= 1) {
+  if (half <= 0) {
     factors.push(1);
   } else {
-    const half = Math.floor(points / 2);
     for (let i = -half; i <= half; i += 1) {
-      // points が偶数なら 0 を含めず対称に振る
-      if (points % 2 === 0 && i === 0) continue;
       factors.push(1 + (pct * i) / half);
     }
   }
@@ -107,12 +115,6 @@ function buildCandidates(
       seen.add(v);
       out.push(v);
     }
-  }
-  // current 自体は必ず候補に入れる（クランプで外れていなければ）。
-  const curClamped = Math.min(Math.max(Math.round(current), minP), maxP);
-  if (curClamped >= 1 && !seen.has(curClamped)) {
-    seen.add(curClamped);
-    out.push(curClamped);
   }
   out.sort((a, b) => a - b);
   return out;
@@ -188,7 +190,6 @@ function applyAxisValue(group: ConditionGroup, axis: VariantAxis, value: number)
  * 必ず含めつつ均等ストライドで決定論的に間引く。
  */
 function selectComboIndices(
-  candidateCounts: number[],
   baseFlatIndex: number,
   total: number,
   maxCombos: number,
@@ -232,8 +233,8 @@ export function generateIndicatorPeriodVariants(
   options: IndicatorVariantOptions = {},
 ): IndicatorVariantResult {
   const pct = options.pct ?? DEFAULT_PCT;
-  const points = options.pointsPerAxis ?? DEFAULT_POINTS;
-  const maxCombos = options.maxCombos ?? DEFAULT_MAX_COMBOS;
+  const points = normalizePoints(options.pointsPerAxis ?? DEFAULT_POINTS);
+  const maxCombos = Math.max(1, Math.floor(options.maxCombos ?? DEFAULT_MAX_COMBOS));
 
   const baseGroup = entryTriggerGroup(dsl.entry);
   const axes: VariantAxis[] = [];
@@ -260,7 +261,7 @@ export function generateIndicatorPeriodVariants(
     baseFlat = baseFlat * candidateCounts[a] + choice;
   }
 
-  const indices = selectComboIndices(candidateCounts, baseFlat, total, maxCombos);
+  const indices = selectComboIndices(baseFlat, total, maxCombos);
   // base を先頭に並べ替え（呼び出し側が「無改変」を起点に扱えるように）。
   indices.sort((x, y) => (x === baseFlat ? -1 : y === baseFlat ? 1 : x - y));
 

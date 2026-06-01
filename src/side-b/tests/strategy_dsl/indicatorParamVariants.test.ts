@@ -141,6 +141,28 @@ describe('generateIndicatorPeriodVariants', () => {
     }
   });
 
+  it('偶数 pointsPerAxis は奇数に正規化され current が中央に含まれる', () => {
+    const dsl = makeDsl({
+      logic: 'AND',
+      conditions: [{ lens: 'ohlcv', feature: 'ema', op: '>', value: 2000, params: { period: 20 } }],
+    });
+    // pointsPerAxis=4 → 正規化で 5 点（[16,18,20,22,24]）。current=20 を含む。
+    const res = generateIndicatorPeriodVariants(dsl, { pointsPerAxis: 4 });
+    const periods = res.variants.map((v) => firstLeaf(v).params?.period ?? 0).sort((a, b) => a - b);
+    expect(periods).toEqual([16, 18, 20, 22, 24]);
+    expect(periods).toContain(20); // current が候補に含まれる
+  });
+
+  it('maxCombos<=0 でも 1 にクランプされ base を必ず返す（空にならない）', () => {
+    const dsl = makeDsl({ logic: 'AND', conditions: [emaCrossCondition(20, 50)] });
+    const res = generateIndicatorPeriodVariants(dsl, { maxCombos: 0 });
+    expect(res.returnedCount).toBe(1);
+    expect(res.truncated).toBe(true);
+    const c0 = firstLeaf(res.variants[0]);
+    expect(c0.params?.period).toBe(20); // base
+    expect(c0.compareTarget?.params?.period).toBe(50);
+  });
+
   it('base 以外の元 DSL を変更しない（structuredClone で隔離）', () => {
     const dsl = makeDsl({
       logic: 'AND',

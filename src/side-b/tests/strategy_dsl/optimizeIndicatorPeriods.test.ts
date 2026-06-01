@@ -168,6 +168,21 @@ describe('optimizeIndicatorPeriods (two_stage)', () => {
     expect(res.overfitGuard?.verdict).toBe('robust');
   });
 
+  it('topK<=0 でも 1 にクランプされ stage-2 が必ず走る', async () => {
+    const wfCalls: number[] = [];
+    const sharpeByPeriod: Record<number, number> = { 16: 0.5, 20: 1.0, 24: 1.5 };
+    const deps: OptimizeIndicatorPeriodsDeps = {
+      runScreeningBacktest: async (req) => screeningResp(sharpeByPeriod[periodOf(req)], 1.3, 100),
+      runOptimize: async (req) => {
+        wfCalls.push(periodOf(req));
+        return optimizeResp(overfitGuard('robust', 0.9, 1.4), periodOf(req));
+      },
+    };
+    const res = await optimizeIndicatorPeriods({ ...BASE_PARAMS, topK: 0 }, deps);
+    expect(wfCalls).toEqual([24]); // 1 にクランプ → top-1 のみ
+    expect(res.bestParams._period).toBe(24);
+  });
+
   it('eligible が皆無（全 variant が floor 未満）なら base にフォールバックして WF を 1 本回す', async () => {
     const wfCalls: number[] = [];
     const deps: OptimizeIndicatorPeriodsDeps = {
