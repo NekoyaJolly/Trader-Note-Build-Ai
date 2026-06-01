@@ -3,6 +3,8 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { sideBApi } from "@/lib/sideBApi";
 import type {
+  DslConditionGroup,
+  DslConditionLeaf,
   DslJsonValue,
   EvolutionDslSnapshot,
   EvolutionLesson,
@@ -13,6 +15,9 @@ import type {
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Loader2 } from "lucide-react";
+
+// run 一覧で既定表示する最新件数（過去はトグルで展開）。
+const RECENT_RUNS_COUNT = 3;
 
 // ===== 進化詳細(before→action→after)表示ヘルパー =====
 
@@ -39,20 +44,80 @@ function formatDslValue(v: DslJsonValue | undefined): string {
   return String(v);
 }
 
-// SL/TP 仕様を短い文字列に。value は ParamRef 文字列やオブジェクトになり得る。
+// SL/TP 仕様を平易な文字列に。value は ParamRef 文字列やオブジェクトになり得る。
 function riskSpecText(spec?: { type?: string; value?: DslJsonValue; lookbackBars?: DslJsonValue } | null): string {
   if (!spec || !spec.type) return "-";
-  if (spec.type === "swing_point") return `swing_point(${formatDslValue(spec.lookbackBars)}本)`;
-  return `${spec.type}(${formatDslValue(spec.value)})`;
+  switch (spec.type) {
+    case "atr_multiple":
+      return `ATR × ${formatDslValue(spec.value)}`;
+    case "fixed_pips":
+      return `固定 ${formatDslValue(spec.value)} pips`;
+    case "rr_ratio":
+      return `リスクリワード 1 : ${formatDslValue(spec.value)}`;
+    case "swing_point":
+      return `直近スイング（${formatDslValue(spec.lookbackBars)}本）`;
+    default:
+      return `${spec.type}(${formatDslValue(spec.value)})`;
+  }
 }
 
-// DSL の主要構造を「キー: 値」の比較しやすい形へ。
+const DIRECTION_LABEL: Record<string, string> = { long: "ロング（買い）", short: "ショート（売り）" };
+
+// 比較演算子を日本語に。
+function opLabel(op: string): string {
+  const m: Record<string, string> = {
+    "<": "<", "<=": "≤", ">": ">", ">=": "≥", "==": "=", "!=": "≠",
+    cross_above: "を上抜け", cross_below: "を下抜け",
+    between: "が範囲内", in: "がいずれか",
+    touch_close: "に終値タッチ", touch_wick: "にヒゲタッチ",
+    is_true: "が成立", is_false: "が不成立",
+  };
+  return m[op] ?? op;
+}
+
+// インジ参照を短く（例: ema(20) / rsi）。
+function operandLabel(feature: string, params?: Record<string, DslJsonValue> | null): string {
+  const period = params && params.period != null ? `(${formatDslValue(params.period)})` : "";
+  return `${feature}${period}`;
+}
+
+// 条件 leaf を平易な1行に（例: rsi < 30 / ema(20) を上抜け ema(50)）。
+function formatConditionLeaf(c: DslConditionLeaf): string {
+  const left = operandLabel(c.feature, c.params);
+  if (c.op === "is_true" || c.op === "is_false") return `${left}${opLabel(c.op)}`;
+  const right = c.compareTarget
+    ? operandLabel(c.compareTarget.feature, c.compareTarget.params)
+    : formatDslValue(c.value);
+  return `${left} ${opLabel(c.op)} ${right}`;
+}
+
+// 条件グループ（AND/OR 再帰）を平易な文に。
+// null/undefined（= 未取得・部分スナップショット）と空配列（= 本当に条件なし）を区別する。
+function conditionGroupToText(g?: DslConditionGroup | null): string {
+  if (g === null || g === undefined) return "-";
+  if (!Array.isArray(g.conditions) || g.conditions.length === 0) return "（条件なし）";
+  const join = g.logic === "AND" ? " かつ " : " または ";
+  return g.conditions
+    .map((c) => ("logic" in c ? `(${conditionGroupToText(c)})` : formatConditionLeaf(c)))
+    .join(join);
+}
+
+// エントリーの条件グループを取り出す。バックエンド実装に合わせ type で分岐する
+// （wait_for_trigger=triggerConditions / immediate=trigger）。両方入っていても type を優先。
+function entryConditionGroup(entry?: EvolutionDslSnapshot["entry"]): DslConditionGroup | null {
+  if (!entry) return null;
+  if (entry.type === "wait_for_trigger") return entry.triggerConditions ?? entry.trigger ?? null;
+  return entry.trigger ?? entry.triggerConditions ?? null;
+}
+
+// DSL の主要構造を「キー: 値」の比較しやすい形へ（差分用）。
 function describeDsl(dsl?: EvolutionDslSnapshot | null): Record<string, string> {
   if (!dsl) return {};
   const out: Record<string, string> = {
-    entry: dsl.entry?.kind ?? "-",
-    stopLoss: riskSpecText(dsl.stopLoss),
-    takeProfit: riskSpecText(dsl.takeProfit),
+    方向: dsl.entry?.direction ? DIRECTION_LABEL[dsl.entry.direction] ?? dsl.entry.direction : "-",
+    エントリー条件: conditionGroupToText(entryConditionGroup(dsl.entry)),
+    損切り: riskSpecText(dsl.stopLoss),
+    利確: riskSpecText(dsl.takeProfit),
   };
   if (dsl.parameters) {
     for (const [k, v] of Object.entries(dsl.parameters)) {
@@ -83,6 +148,8 @@ export default function EvolutionPage() {
   const [activeTab, setActiveTab] = useState<"runs" | "lessons">("runs");
   const [lessons, setLessons] = useState<EvolutionLesson[]>([]);
   const [runs, setRuns] = useState<EvolutionRunListItem[]>([]);
+  // 既定は最新数件のみ表示し、過去 run はトグルで展開（履歴は消さず非破壊で畳む）。
+  const [showAllRuns, setShowAllRuns] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [runSummary, setRunSummary] = useState<EvolutionRunSummary | null>(null);
   const [runCandidates, setRunCandidates] = useState<EvolutionRunCandidate[]>([]);
@@ -226,35 +293,48 @@ export default function EvolutionPage() {
       )}
 
       {activeTab === "runs" && !loading && !selectedRunId && (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <>
           {runs.length === 0 ? (
-            <div className="col-span-full p-8 text-center text-muted-foreground border border-dashed rounded-lg">
+            <div className="p-8 text-center text-muted-foreground border border-dashed rounded-lg">
               進化ループ履歴がまだありません
             </div>
           ) : (
-            runs.map((run) => (
-              <Card 
-                key={run.evolutionRunId} 
-                className="cursor-pointer hover:border-primary/50 transition-colors"
-                onClick={() => setSelectedRunId(run.evolutionRunId)}
-              >
-                <CardHeader className="pb-2 bg-muted/30">
-                  <CardTitle className="text-sm font-medium truncate" title={run.evolutionRunId}>
-                    Run: {run.evolutionRunId.split('-')[0]}...
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-4">
-                  <p className="text-xs text-muted-foreground">
-                    Started: {new Date(run.createdAt).toLocaleString()}
-                  </p>
-                  <div className="mt-4">
-                    <Button variant="secondary" className="w-full" size="sm">詳細を見る</Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))
+            <>
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {(showAllRuns ? runs : runs.slice(0, RECENT_RUNS_COUNT)).map((run, idx) => (
+                  <Card
+                    key={run.evolutionRunId}
+                    className="cursor-pointer hover:border-primary/50 transition-colors"
+                    onClick={() => setSelectedRunId(run.evolutionRunId)}
+                  >
+                    <CardHeader className="pb-2 bg-muted/30">
+                      <CardTitle className="text-sm font-medium truncate" title={run.evolutionRunId}>
+                        {idx === 0 ? "最新 Run" : "Run"}: {run.evolutionRunId.split("-")[0]}...
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-4">
+                      <p className="text-xs text-muted-foreground">
+                        実行日時: {new Date(run.createdAt).toLocaleString()}
+                      </p>
+                      <div className="mt-4">
+                        <Button variant="secondary" className="w-full" size="sm">詳細を見る</Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+              {runs.length > RECENT_RUNS_COUNT && (
+                <div className="mt-4 text-center">
+                  <Button variant="outline" size="sm" onClick={() => setShowAllRuns((v) => !v)}>
+                    {showAllRuns
+                      ? `最新 ${RECENT_RUNS_COUNT} 件だけ表示`
+                      : `過去の run を表示（+${runs.length - RECENT_RUNS_COUNT}）`}
+                  </Button>
+                </div>
+              )}
+            </>
           )}
-        </div>
+        </>
       )}
 
       {activeTab === "runs" && selectedRunId && (
@@ -400,60 +480,78 @@ export default function EvolutionPage() {
                               <tr className="border-b last:border-0 bg-muted/20">
                                 <td colSpan={9} className="p-4">
                                   <div className="space-y-4 text-xs">
-                                    {/* 由来(action) */}
+                                    {/* 1. 戦略の中身（主役） */}
                                     <div>
-                                      <div className="font-medium mb-1">由来</div>
-                                      <div className="text-muted-foreground">
-                                        {actionLabel(cand.dslSnapshot?.metadata?.createdBy)}
-                                        {parentIds.length > 0 && (
-                                          <span className="ml-2 font-mono">親: {parentIds.map((p) => p.substring(0, 8)).join(", ")}</span>
-                                        )}
-                                      </div>
+                                      <div className="font-medium mb-1">戦略の中身</div>
+                                      {cand.dslSnapshot ? (
+                                        <div className="space-y-1 text-muted-foreground">
+                                          <div>
+                                            <span className="inline-block w-28 text-foreground/70">方向</span>
+                                            {cand.dslSnapshot.entry?.direction
+                                              ? DIRECTION_LABEL[cand.dslSnapshot.entry.direction] ?? cand.dslSnapshot.entry.direction
+                                              : "-"}
+                                          </div>
+                                          <div>
+                                            <span className="inline-block w-28 text-foreground/70 align-top">エントリー条件</span>
+                                            <span className="font-mono">{conditionGroupToText(entryConditionGroup(cand.dslSnapshot.entry))}</span>
+                                          </div>
+                                          <div>
+                                            <span className="inline-block w-28 text-foreground/70">損切り (SL)</span>
+                                            {riskSpecText(cand.dslSnapshot.stopLoss)}
+                                          </div>
+                                          <div>
+                                            <span className="inline-block w-28 text-foreground/70">利確 (TP)</span>
+                                            {riskSpecText(cand.dslSnapshot.takeProfit)}
+                                          </div>
+                                          {cand.dslSnapshot.parameters &&
+                                            Object.keys(cand.dslSnapshot.parameters).length > 0 && (
+                                              <div className="flex flex-wrap gap-1.5 pt-1">
+                                                {Object.entries(cand.dslSnapshot.parameters).map(([k, v]) => (
+                                                  <span key={k} className="text-[11px] px-1.5 py-0.5 bg-muted rounded font-mono">
+                                                    {k}: {formatDslValue(v)}
+                                                  </span>
+                                                ))}
+                                              </div>
+                                            )}
+                                        </div>
+                                      ) : (
+                                        <div className="text-muted-foreground">戦略スナップショットがありません。</div>
+                                      )}
                                     </div>
-                                    {/* before → after 差分（crossover は親が2件になり得るため親ごとに表示） */}
+
+                                    {/* 2. この世代でしたこと（元戦略に何をしたか） */}
                                     <div>
-                                      <div className="font-medium mb-1">親 → (操作) → 子 の差分</div>
+                                      <div className="font-medium mb-1">この世代でしたこと</div>
+                                      <div className="text-muted-foreground mb-1">{actionLabel(cand.dslSnapshot?.metadata?.createdBy)}</div>
                                       {parents.length === 0 ? (
                                         <div className="text-muted-foreground">
                                           {parentIds.length === 0
-                                            ? "初期個体のため親なし。"
-                                            : "親候補がこの実行の一覧に含まれていないため差分は表示できません（親ID のみ上記参照）。"}
+                                            ? "初期個体のため変更なし（元戦略そのもの）。"
+                                            : "親候補がこの実行の一覧に無いため変更点は表示できません。"}
                                         </div>
                                       ) : (
-                                        <div className="space-y-3">
+                                        <div className="space-y-2">
                                           {parents.map((parent, pi) => {
                                             const changes = diffDsl(parent.dslSnapshot, cand.dslSnapshot);
-                                            const parentLabel =
-                                              parents.length > 1 ? `親${pi + 1} (` : "親 (";
                                             const parentId = (parent.candidateId ?? parent.dslSnapshot?.id ?? "").substring(0, 8);
                                             return (
                                               <div key={parent.id}>
                                                 {parents.length > 1 && (
-                                                  <div className="text-muted-foreground mb-1 font-mono">
-                                                    {parentLabel}{parentId}) との差分
-                                                  </div>
+                                                  <div className="text-muted-foreground mb-0.5 font-mono">親{pi + 1} ({parentId}) からの変更</div>
                                                 )}
                                                 {changes.length === 0 ? (
-                                                  <div className="text-muted-foreground">構造的な差分は検出されませんでした（パラメータ範囲外の変化の可能性）。</div>
+                                                  <div className="text-muted-foreground">構造的な変更は検出されませんでした。</div>
                                                 ) : (
-                                                  <table className="w-full border-collapse">
-                                                    <thead>
-                                                      <tr className="text-muted-foreground">
-                                                        <th className="text-left p-1 font-medium">項目</th>
-                                                        <th className="text-left p-1 font-medium">親 (before)</th>
-                                                        <th className="text-left p-1 font-medium">子 (after)</th>
-                                                      </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                      {changes.map((ch) => (
-                                                        <tr key={ch.key} className="border-t border-dashed">
-                                                          <td className="p-1 font-mono">{ch.key}</td>
-                                                          <td className="p-1 font-mono text-muted-foreground">{ch.before}</td>
-                                                          <td className="p-1 font-mono text-foreground">{ch.after}</td>
-                                                        </tr>
-                                                      ))}
-                                                    </tbody>
-                                                  </table>
+                                                  <ul className="space-y-0.5">
+                                                    {changes.map((ch) => (
+                                                      <li key={ch.key} className="font-mono">
+                                                        <span className="text-foreground/70">{ch.key}</span>:{" "}
+                                                        <span className="text-muted-foreground">{ch.before}</span>
+                                                        {" → "}
+                                                        <span className="text-foreground">{ch.after}</span>
+                                                      </li>
+                                                    ))}
+                                                  </ul>
                                                 )}
                                               </div>
                                             );
@@ -461,11 +559,36 @@ export default function EvolutionPage() {
                                         </div>
                                       )}
                                     </div>
-                                    {/* OOS確証 詳細 */}
+
+                                    {/* 3. 結果（良くなったか） */}
+                                    <div>
+                                      <div className="font-medium mb-1">結果</div>
+                                      {(() => {
+                                        const m = cand.formalBtMetrics;
+                                        if (!m) return <div className="text-muted-foreground">正式BT結果なし。</div>;
+                                        // 親が1件(変異)のときだけ親PF比較を出す。交叉(親2件)はどちらと比べたか恣意的になるため省く。
+                                        const parentPf = parents.length === 1 ? parents[0]?.formalBtMetrics?.pf : undefined;
+                                        return (
+                                          <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
+                                            <span>
+                                              PF: {m.pf != null ? m.pf.toFixed(2) : "-"}
+                                              {parentPf != null && m.pf != null
+                                                ? `（親 ${parentPf.toFixed(2)} → ${m.pf >= parentPf ? "改善" : "悪化"}）`
+                                                : ""}
+                                            </span>
+                                            <span>勝率: {m.winRate != null ? (m.winRate * 100).toFixed(1) + "%" : "-"}</span>
+                                            <span>トレード: {m.tradeCount != null ? m.tradeCount : "-"}</span>
+                                            <span>判定: {cand.formalBtPassed ? "合格" : "不合格"}</span>
+                                          </div>
+                                        );
+                                      })()}
+                                    </div>
+
+                                    {/* 4. OOS/WF 検証（現状はデータ未生成のことが多い） */}
                                     <div>
                                       <div className="font-medium mb-1">OOS / WF 検証</div>
                                       {!oos ? (
-                                        <div className="text-muted-foreground">OOS未評価。</div>
+                                        <div className="text-muted-foreground">OOS 未実行（今後の進化ループで確証が付きます）。</div>
                                       ) : (
                                         <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
                                           <span>状態: {oos.confirmed ? "✅ OOS確証" : "未確証"}</span>
