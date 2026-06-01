@@ -173,6 +173,21 @@ class BTResult:
     engine_version: str
 
 
+@dataclass(frozen=True)
+class BTOptimizeResult:
+    """最適化 (/v1/optimize) 結果 (engine 非依存)。
+
+    best_params: 最適化されたパラメータ（slValue / tpValue 等、探索対象のみ）。
+    summary/trades/equity: 最適パラメータでの BT 結果。
+    """
+
+    best_params: Dict[str, float]
+    summary: BTSummary
+    trades: List[BTTrade]
+    equity: Optional[List[float]]
+    engine_version: str
+
+
 # ---------------------------------------------------------------
 # エンジンの抽象インターフェイス
 # ---------------------------------------------------------------

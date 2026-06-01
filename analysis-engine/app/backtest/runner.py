@@ -18,6 +18,8 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from app.schemas import (
+    OptimizeRequest,
+    OptimizeResponse,
     ScreeningBacktestNotePayload,
     ScreeningBacktestRequest,
     ScreeningBacktestResponse,
@@ -25,8 +27,15 @@ from app.schemas import (
 )
 
 from . import adapter
-from .engine_protocol import BTEngine
+from .engine_protocol import BTEngine, BTResult
 from .runner_backtesting_py import BacktestingPyEngine
+
+# OptimizeRequest.maximize → backtesting.py の stat キーへの対応。
+_MAXIMIZE_KEY = {
+    "sharpe": "Sharpe Ratio",
+    "profit_factor": "Profit Factor",
+    "return": "Return [%]",
+}
 
 
 def _default_engine() -> BTEngine:
@@ -205,4 +214,98 @@ def run_screening_backtest(
         unsupportedConditions=adapter.describe_unsupported_conditions(
             req.notePayload.conditions, trigger_group=req.notePayload.triggerGroup
         ),
+    )
+
+
+def run_optimize(
+    sql_engine: Engine,
+    req: OptimizeRequest,
+    bt_engine: Optional[BTEngine] = None,
+) -> OptimizeResponse:
+    """`/v1/optimize` のコア処理（進化ループ再設計 Phase 1）。
+
+    SL/TP 値を backtesting.py の Backtest.optimize() で決定論探索し、最良パラメータと
+    その BT 結果（コスト込み）を返す。探索空間（候補値リスト）は呼び出し側が渡す。
+
+    司令塔の流れは run_screening_backtest と同じ:
+        1. unsupported ガード → 2. OHLCV 読込 → 3. adapter で engine 抽象へ
+        4. engine.optimize(...) → 5. BTOptimizeResult → response
+    """
+    engine = bt_engine or _default_engine()
+
+    def _empty() -> OptimizeResponse:
+        base = _empty_response(req.notePayload, engine_version=engine.version)
+        return OptimizeResponse(
+            bestParams={},
+            summary=base.summary,
+            trades=base.trades,
+            equity=base.equity,
+            engineVersion=base.engineVersion,
+        )
+
+    # (1) SL/TP の kind 等が engine 未対応なら早期 return（値は振れても kind は固定）。
+    if adapter.detect_unsupported_specs(req.notePayload):
+        return _empty()
+
+    # (2) OHLCV 読込
+    ohlcv = _load_ohlcv(sql_engine, req.symbol, req.timeframe, req.startDate, req.endDate)
+    if ohlcv.empty or len(ohlcv) < 30:
+        return _empty()
+
+    # (3) adapter で engine 抽象へ（MTF 上位足も run_screening_backtest と同様に解決）
+    spec = adapter.notepayload_to_btspec(req.notePayload)
+    config = adapter.config_to_btconfig(req.config)
+    upper_tf_ohlcv: Dict[str, pd.DataFrame] = {}
+    if spec.trigger_group is not None:
+        from .condition_evaluator import collect_required_timeframes
+
+        for tf in collect_required_timeframes(spec.trigger_group):
+            if tf == req.timeframe:
+                continue
+            upper_df = _load_ohlcv(sql_engine, req.symbol, tf, req.startDate, req.endDate)
+            if not upper_df.empty:
+                upper_tf_ohlcv[tf] = upper_df
+    if upper_tf_ohlcv:
+        spec = replace(spec, upper_timeframe_ohlcv=upper_tf_ohlcv, primary_timeframe=req.timeframe)
+    elif req.timeframe and spec.primary_timeframe is None:
+        spec = replace(spec, primary_timeframe=req.timeframe)
+
+    # (4) optimize（BacktestingPyEngine のみ対応。他 engine は単発 run に縮退）。
+    maximize_key = _MAXIMIZE_KEY.get(req.maximize, "Sharpe Ratio")
+    if not isinstance(engine, BacktestingPyEngine):
+        result = engine.run(spec, ohlcv, config)
+        parts = adapter.btresult_to_response_parts(result)
+        return OptimizeResponse(
+            bestParams={},
+            summary=parts["summary"],
+            trades=parts["trades"],
+            equity=parts["equity"],
+            engineVersion=parts["engineVersion"],
+        )
+
+    opt = engine.optimize(
+        spec,
+        ohlcv,
+        config,
+        req.slValues or None,
+        req.tpValues or None,
+        maximize_key,
+        req.method,
+        req.maxTries,
+    )
+
+    # (5) BTOptimizeResult → response（summary/trades/equity は BTResult と同型なので再利用）
+    bt_like = BTResult(
+        summary=opt.summary,
+        trades=opt.trades,
+        equity=opt.equity,
+        engine_version=opt.engine_version,
+    )
+    parts = adapter.btresult_to_response_parts(bt_like)
+    return OptimizeResponse(
+        bestParams=opt.best_params,
+        summary=parts["summary"],
+        trades=parts["trades"],
+        equity=parts["equity"],
+        engineVersion=parts["engineVersion"],
     )

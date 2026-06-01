@@ -13,6 +13,8 @@ import type {
   AnalysisEngineIndicatorSeriesResponse,
   AnalysisEngineOosValidationRequestInput,
   AnalysisEngineOosValidationResponse,
+  AnalysisEngineOptimizeRequestInput,
+  AnalysisEngineOptimizeResponse,
   AnalysisEngineScreeningBacktestRequest,
   AnalysisEngineScreeningBacktestResponse,
 } from '../../schemas/external/analysisEngine';
@@ -22,6 +24,8 @@ import {
   AnalysisEngineIndicatorSeriesResponseSchema,
   AnalysisEngineOosValidationRequestSchema,
   AnalysisEngineOosValidationResponseSchema,
+  AnalysisEngineOptimizeRequestSchema,
+  AnalysisEngineOptimizeResponseSchema,
   AnalysisEngineScreeningBacktestRequestSchema,
   AnalysisEngineScreeningBacktestResponseSchema,
 } from '../../schemas/external/analysisEngine';
@@ -197,6 +201,36 @@ export async function runScreeningBacktest(
   const parsed = AnalysisEngineScreeningBacktestResponseSchema.safeParse(res.data);
   if (!parsed.success) {
     throw new Error(`analysis-engine BT レスポンスが不正です: ${parsed.error.message}`);
+  }
+
+  return parsed.data;
+}
+
+/**
+ * 進化ループ再設計 Phase 1: `/v1/optimize` を呼ぶ薄い HTTP client。
+ *
+ * SL/TP 値の候補リスト (呼び出し側が現在値±N%・型刻みで生成) を渡し、
+ * backtesting.py の `Backtest.optimize()` で決定論的に最良値を探索させる。
+ * AGENTS.md ドメイン原則#3 (数値最適化は決定論コードで) に沿い、Mutation/Crossover の
+ * 数値最適化をこの経路に寄せる。インジ期間最適化・train/OOS 過学習ガードは Phase 1b。
+ *
+ * timeout は ScreeningBacktest と同じ 180s (grid 探索は単発 BT の N 倍かかりうるため、
+ * 呼び出し側は slValues / tpValues の組合せ数を抑えるか maxTries で打ち切ること)。
+ */
+export async function runOptimize(
+  input: AnalysisEngineOptimizeRequestInput,
+): Promise<AnalysisEngineOptimizeResponse> {
+  const baseUrl = getAnalysisEngineBaseUrl();
+  const payload = AnalysisEngineOptimizeRequestSchema.parse(input);
+
+  const res = await axios.post(`${baseUrl}/v1/optimize`, payload, {
+    timeout: 180_000,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  const parsed = AnalysisEngineOptimizeResponseSchema.safeParse(res.data);
+  if (!parsed.success) {
+    throw new Error(`analysis-engine optimize レスポンスが不正です: ${parsed.error.message}`);
   }
 
   return parsed.data;

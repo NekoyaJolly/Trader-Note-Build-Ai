@@ -444,6 +444,51 @@ export type AnalysisEngineScreeningBacktestResponse = z.infer<
 >;
 
 // ============================================
+// 進化ループ再設計 Phase 1: パラメータ最適化 (/v1/optimize)
+// ============================================
+//
+// 数値最適化は analysis-engine 側 (backtesting.py Backtest.optimize) の決定論処理に委ねる
+// (AGENTS.md ドメイン原則#3)。探索空間 (候補値リスト) は呼び出し側が「現在値±N%・型刻み」で生成。
+// MVP は SL/TP 値の最適化。インジ期間最適化・train/OOS 過学習ガードは Phase 1b。
+
+export const AnalysisEngineOptimizeRequestSchema = z.object({
+  hypothesisId: z.string().min(1),
+  symbol: z.string().min(1),
+  timeframe: z.string().min(1),
+  startDate: z.string().datetime(),
+  endDate: z.string().datetime(),
+  notePayload: ScreeningBacktestNotePayloadSchema,
+  config: ScreeningBacktestConfigSchema.optional().default(() => ({
+    initialCapital: 10_000,
+    leverage: 1,
+    tradingCost: 0,
+  })),
+  /** 探索する SL 値の候補（atr_multiple/fixed_pips の value）。空なら SL は最適化しない。 */
+  slValues: z.array(z.number().positive()).default([]),
+  /** 探索する TP 値の候補（rr_ratio/atr_multiple/fixed_pips の value）。空なら TP は最適化しない。 */
+  tpValues: z.array(z.number().positive()).default([]),
+  /** 最大化指標。過学習回避のため既定はリスク調整後（sharpe）。 */
+  maximize: z.enum(['sharpe', 'profit_factor', 'return']).default('sharpe'),
+  method: z.enum(['grid', 'sambo']).default('grid'),
+  maxTries: z.number().int().positive().optional(),
+});
+
+export type AnalysisEngineOptimizeRequest = z.infer<typeof AnalysisEngineOptimizeRequestSchema>;
+/** 呼び出し側用の入力型（default 付きフィールドは省略可）。 */
+export type AnalysisEngineOptimizeRequestInput = z.input<typeof AnalysisEngineOptimizeRequestSchema>;
+
+export const AnalysisEngineOptimizeResponseSchema = z.object({
+  /** 最適化されたパラメータ（探索対象のみ。例: { slValue: 1.8, tpValue: 2.2 }）。 */
+  bestParams: z.record(z.string(), z.number()).default({}),
+  summary: ScreeningBacktestSummarySchema,
+  trades: z.array(ScreeningBacktestTradeSchema).default([]),
+  equity: z.array(z.number()).nullable().default(null),
+  engineVersion: z.string().min(1),
+});
+
+export type AnalysisEngineOptimizeResponse = z.infer<typeof AnalysisEngineOptimizeResponseSchema>;
+
+// ============================================
 // Critical-4 PR #109/#110: OOS Validation
 // ============================================
 //

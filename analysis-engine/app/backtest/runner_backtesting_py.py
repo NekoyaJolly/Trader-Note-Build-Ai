@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 from .engine_protocol import (
     BTConfig,
+    BTOptimizeResult,
     BTResult,
     BTSpec,
     BTSummary,
@@ -118,6 +119,75 @@ class BacktestingPyEngine:
 
         return BTResult(summary=summary, trades=trades, equity=equity, engine_version=self.version)
 
+    def optimize(
+        self,
+        spec: BTSpec,
+        ohlcv: pd.DataFrame,
+        config: BTConfig,
+        sl_values: Optional[List[float]],
+        tp_values: Optional[List[float]],
+        maximize: str,
+        method: str,
+        max_tries: Optional[int],
+    ) -> "BTOptimizeResult":
+        """SL/TP 値を backtesting.py の Backtest.optimize() で決定論探索する。
+
+        - opt_sl_value / opt_tp_value（GeneratedStrategy のクラス属性）を候補リストで振る。
+        - maximize は backtesting.py の stat キー（例 'Sharpe Ratio' / 'Profit Factor'）。
+        - 探索対象が無い場合は通常 run と同じ単発実行に縮退する。
+        """
+        df = self._normalize_ohlcv(ohlcv)
+        if df.empty or len(df) < 30:
+            empty = self._empty_result()
+            return BTOptimizeResult(
+                best_params={},
+                summary=empty.summary,
+                trades=empty.trades,
+                equity=empty.equity,
+                engine_version=self.version,
+            )
+
+        StrategyClass = self._build_strategy_class(spec)
+        bt_kwargs = self._map_config(config)
+        if config.spread_pips > 0 and config.pip_size > 0:
+            avg_price = float(df["Close"].mean())
+            if avg_price > 0:
+                bt_kwargs["spread"] = (config.spread_pips * config.pip_size) / avg_price
+        bt = Backtest(df, StrategyClass, finalize_trades=True, **bt_kwargs)
+
+        opt_ranges: Dict[str, List[float]] = {}
+        if sl_values:
+            opt_ranges["opt_sl_value"] = [float(v) for v in sl_values if float(v) > 0]
+        if tp_values:
+            opt_ranges["opt_tp_value"] = [float(v) for v in tp_values if float(v) > 0]
+
+        if not opt_ranges:
+            # 探索対象なし → 単発 run（最適化スキップ）。
+            stats = bt.run()
+        else:
+            stats = bt.optimize(
+                maximize=maximize,
+                method=method if method in ("grid", "sambo") else "grid",
+                max_tries=max_tries,
+                **{k: list(v) for k, v in opt_ranges.items()},
+            )
+
+        best_strategy = getattr(stats, "_strategy", None)
+        best_params: Dict[str, float] = {}
+        if best_strategy is not None:
+            if "opt_sl_value" in opt_ranges:
+                best_params["slValue"] = float(getattr(best_strategy, "opt_sl_value", 0.0))
+            if "opt_tp_value" in opt_ranges:
+                best_params["tpValue"] = float(getattr(best_strategy, "opt_tp_value", 0.0))
+
+        return BTOptimizeResult(
+            best_params=best_params,
+            summary=self._summarize_stats(stats),
+            trades=self._extract_trades(stats, spec.max_holding_bars),
+            equity=self._extract_equity(stats),
+            engine_version=self.version,
+        )
+
     # -----------------------------------------
     # OHLCV 整形 (engine 依存)
     # -----------------------------------------
@@ -205,6 +275,20 @@ class BacktestingPyEngine:
             else 20
         )
 
+        # /v1/optimize 用: SL/TP の数値を backtesting.py optimize() で振れるよう
+        # クラス属性として露出する。既定値は spec の値（= 通常 run では従来挙動と同一）。
+        # value を持たない kind (swing_point SL) は 0.0（最適化対象外）。
+        sl_value_default = (
+            float(getattr(sl_spec, "value", 0.0))
+            if getattr(sl_spec, "kind", None) in ("atr_multiple", "fixed_pips")
+            else 0.0
+        )
+        tp_value_default = (
+            float(getattr(tp_spec, "value", 0.0))
+            if getattr(tp_spec, "kind", None) in ("rr_ratio", "atr_multiple", "fixed_pips")
+            else 0.0
+        )
+
         class GeneratedStrategy(Strategy):
             _spec_direction = direction
             _spec_sl = sl_spec
@@ -212,6 +296,10 @@ class BacktestingPyEngine:
             _trigger_group = trigger_group
             _max_holding_bars: Optional[int] = max_holding
             _swing_lookback_bars = swing_lookback_bars
+            # backtesting.py optimize() が変動させる最適化対象パラメータ（クラス属性）。
+            # 通常 run では既定値のまま使われ、SL/TP 距離は従来と一致する。
+            opt_sl_value = sl_value_default
+            opt_tp_value = tp_value_default
 
             def init(self) -> None:
                 high = pd.Series(self.data.High)
@@ -578,10 +666,11 @@ class BacktestingPyEngine:
 
             def _compute_sl_distance(self, atr_val: float, entry_price: float) -> Optional[float]:
                 spec = self._spec_sl
+                # 最適化対象の数値はクラス属性 opt_sl_value を使う（通常 run では spec.value と同値）。
                 if spec.kind == "atr_multiple":
-                    return float(atr_val) * float(spec.value)
+                    return float(atr_val) * float(self.opt_sl_value)
                 if spec.kind == "fixed_pips":
-                    pips = float(spec.value)
+                    pips = float(self.opt_sl_value)
                     if pips <= 0:
                         return None
                     return pips * self._pip_size(entry_price)
@@ -603,12 +692,13 @@ class BacktestingPyEngine:
                 self, atr_val: float, entry_price: float, sl_distance: float,
             ) -> Optional[float]:
                 spec = self._spec_tp
+                # 最適化対象の数値はクラス属性 opt_tp_value を使う（通常 run では spec.value と同値）。
                 if spec.kind == "rr_ratio":
-                    return sl_distance * float(spec.value)
+                    return sl_distance * float(self.opt_tp_value)
                 if spec.kind == "atr_multiple":
-                    return float(atr_val) * float(spec.value)
+                    return float(atr_val) * float(self.opt_tp_value)
                 if spec.kind == "fixed_pips":
-                    pips = float(spec.value)
+                    pips = float(self.opt_tp_value)
                     if pips <= 0:
                         return None
                     return pips * self._pip_size(entry_price)
