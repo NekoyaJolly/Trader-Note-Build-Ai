@@ -896,8 +896,24 @@ export type DslJsonValue =
   | { [key: string]: DslJsonValue }
   | DslJsonValue[];
 
+/** 戦略エントリーの条件（leaf）。例: rsi < 30 / ema cross_above ema(50)。 */
+export interface DslConditionLeaf {
+  lens: string;
+  feature: string;
+  op: string;
+  value?: DslJsonValue;
+  params?: Record<string, DslJsonValue> | null;
+  compareTarget?: { lens: string; feature: string; params?: Record<string, DslJsonValue> | null } | null;
+}
+
+/** 戦略エントリーの条件グループ（AND/OR の再帰ツリー）。 */
+export interface DslConditionGroup {
+  logic: 'AND' | 'OR';
+  conditions: Array<DslConditionLeaf | DslConditionGroup>;
+}
+
 /**
- * 進化候補の戦略DSLスナップショット（before→action→after 可視化に必要な部分のみ）。
+ * 進化候補の戦略DSLスナップショット（戦略の中身 + before→action→after 可視化に必要な部分）。
  * candidates API が EvolutionBacktestRun.dslSnapshot を raw で返す。
  * value/lookbackBars は ParamRef 文字列、parameters の値は range/structured オブジェクトに
  * なり得るため DslJsonValue で受ける。
@@ -908,7 +924,16 @@ export interface EvolutionDslSnapshot {
   parentIds?: string[];
   /** 生成元（'initial_random' / 'llm_generated' / 'mutation' / 'crossover' 等）。action の識別に使う。 */
   metadata?: { createdBy?: string } | null;
-  entry?: { kind?: string } | null;
+  /**
+   * エントリー定義。immediate は `trigger`、wait_for_trigger は `triggerConditions` に条件グループを持つ。
+   * 戦略の中身（方向・エントリー条件）の表示に使う。
+   */
+  entry?: {
+    type?: string;
+    direction?: 'long' | 'short';
+    trigger?: DslConditionGroup | null;
+    triggerConditions?: DslConditionGroup | null;
+  } | null;
   stopLoss?: { type?: string; value?: DslJsonValue; lookbackBars?: DslJsonValue } | null;
   takeProfit?: { type?: string; value?: DslJsonValue } | null;
   parameters?: Record<string, DslJsonValue> | null;
