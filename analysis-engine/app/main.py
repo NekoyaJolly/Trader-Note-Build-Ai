@@ -20,6 +20,8 @@ from app.schemas import (
     IndicatorSeriesResponse,
     OosValidationRequest,
     OosValidationResponse,
+    OptimizeRequest,
+    OptimizeResponse,
     ScreeningBacktestRequest,
     ScreeningBacktestResponse,
     WalkForwardRequest,
@@ -29,7 +31,7 @@ from app.chart_patterns import compute_chart_patterns
 from app.smc import compute_smc_structures
 from app.walk_forward import run_walk_forward
 from app.wyckoff import compute_wyckoff_phases
-from app.backtest import run_screening_backtest
+from app.backtest import run_screening_backtest, run_optimize
 from app.oos_validation import run_oos_validation
 
 app = FastAPI(title="TradeAssist Analysis Engine", version="0.1.0")
@@ -80,6 +82,18 @@ def screening_backtest(req: ScreeningBacktestRequest) -> ScreeningBacktestRespon
     `unsupportedConditions` に積んで「常時エントリー × SL/TP 約定」で BT する。
     """
     return run_screening_backtest(engine, req)
+
+
+@app.post("/v1/optimize", response_model=OptimizeResponse)
+def optimize(req: OptimizeRequest) -> OptimizeResponse:
+    """進化ループ再設計 Phase 1: パラメータ最適化（決定論）。
+
+    SL/TP 値の候補リスト（呼び出し側が現在値±N%・型刻みで生成）を受け取り、
+    backtesting.py の Backtest.optimize() で最良値を決定論探索する。
+    AGENTS.md ドメイン原則#3（数値最適化は決定論コードで）に沿い、LLM ではなく
+    ライブラリに最適化させる経路。インジ期間最適化・train/OOS 過学習ガードは Phase 1b。
+    """
+    return run_optimize(engine, req)
 
 
 @app.post("/v1/indicator-series", response_model=IndicatorSeriesResponse)

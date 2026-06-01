@@ -550,6 +550,44 @@ class ScreeningBacktestResponse(BaseModel):
 
 
 # ============================================
+# 進化ループ再設計 Phase 1: パラメータ最適化 (/v1/optimize)
+# ============================================
+#
+# 設計: docs/diagnostics/evolution_loop_redesign_plan_2026-06-02.html
+#   - 数値最適化は決定論コード（backtesting.py Backtest.optimize）で行う（AGENTS.md ドメイン原則#3）。
+#   - 探索空間（候補値リスト）は呼び出し側（TS）が「現在値 ±N% を型に応じた刻み」で生成して渡す。
+#   - 本 MVP は SL/TP 値の最適化。インジ期間の最適化・train/OOS 過学習ガードは Phase 1b。
+
+OptimizeMaximize = Literal["sharpe", "profit_factor", "return"]
+
+
+class OptimizeRequest(BaseModel):
+    hypothesisId: str
+    symbol: str
+    timeframe: str
+    startDate: datetime
+    endDate: datetime
+    notePayload: ScreeningBacktestNotePayload
+    config: ScreeningBacktestConfig = Field(default_factory=ScreeningBacktestConfig)
+    # 探索する SL/TP 値の候補リスト（呼び出し側が現在値±N%・型刻みで生成）。空なら最適化スキップ。
+    slValues: List[float] = Field(default_factory=list)
+    tpValues: List[float] = Field(default_factory=list)
+    # 最大化指標。過学習回避のため既定はリスク調整後（sharpe）。
+    maximize: OptimizeMaximize = "sharpe"
+    method: Literal["grid", "sambo"] = "grid"
+    maxTries: Optional[int] = Field(default=None, ge=1)
+
+
+class OptimizeResponse(BaseModel):
+    # 最適化されたパラメータ（探索対象のみ。例: {"slValue": 1.8, "tpValue": 2.2}）。
+    bestParams: Dict[str, float] = Field(default_factory=dict)
+    summary: ScreeningBacktestSummary
+    trades: List[ScreeningBacktestTrade] = Field(default_factory=list)
+    equity: Optional[List[float]] = None
+    engineVersion: str
+
+
+# ============================================
 # Critical-4 PR #109: OOS Validation
 # ============================================
 #

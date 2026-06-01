@@ -11,4 +11,4 @@
 re-export しない。
 """
 
-from .runner import run_screening_backtest  # noqa: F401
+from .runner import run_screening_backtest, run_optimize  # noqa: F401
