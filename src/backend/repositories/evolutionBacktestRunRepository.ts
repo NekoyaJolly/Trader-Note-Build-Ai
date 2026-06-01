@@ -45,6 +45,24 @@ export interface EvolutionBacktestTrade {
   outcome: 'win' | 'loss' | 'timeout';
 }
 
+/**
+ * OOS-aware 昇格判定の観測結果（永続化形式）。
+ * 循環 import を避けるため、side-b/evolution の型に依存せず構造を直接書く。
+ * confirmed=true は in-sample 合格に加え OOS/WF も通過した「OOS確証」候補。
+ */
+export interface EvolutionOosResultData {
+  /** finalStage === 'validation_confirmed'（in-sample 合格 + OOS/WF 通過）か */
+  confirmed: boolean;
+  /** OOS-aware 合成後の最終ステージ（validation_confirmed / validation_candidate 等） */
+  finalStage: string;
+  /** OOS verdict（oos_passed / walk_forward_passed / oos_failed / not_evaluated / ...）。未評価は null */
+  oosStatus: string | null;
+  /** OOS 期間の PF（観測用）。取得不能/未評価は null */
+  oosPf: number | null;
+  /** OOS 期間の勝率（観測用）。取得不能/未評価は null */
+  oosWinRate: number | null;
+}
+
 export interface EvolutionBacktestRunInsertData {
   evolutionRunId: string;
   generation: number;
@@ -62,6 +80,11 @@ export interface EvolutionBacktestRunInsertData {
    * BT 失敗 / response 取得不能の候補は undefined (= NULL 永続化、Phase B-1 以前の行と同等)。
    */
   trades?: ReadonlyArray<EvolutionBacktestTrade>;
+  /**
+   * OOS-aware 昇格判定の観測結果。OOS 未評価 / validation_candidate 以外は undefined（= NULL 永続化）。
+   * formalBtPassed の意味論は変えず、観測の可視化用に並列保持する。
+   */
+  oosResult?: EvolutionOosResultData;
 }
 
 export class EvolutionBacktestRunRepository {
@@ -88,6 +111,8 @@ export class EvolutionBacktestRunRepository {
       //   完全に同じ意味論にする。analysis-engine 例外で trades 取得不能だった候補は
       //   読み出し側で notComputable 経路に逃がす。
       trades: data.trades ? toPrismaJsonValue(data.trades) : Prisma.DbNull,
+      // OOS未評価 / validation_candidate 以外は SQL NULL（既存行と同じ意味論）。
+      oosResult: data.oosResult ? toPrismaJsonValue(data.oosResult) : Prisma.DbNull,
     };
     return prisma.evolutionBacktestRun.create({ data: createData });
   }

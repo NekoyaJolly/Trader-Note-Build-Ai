@@ -769,6 +769,11 @@ model EvolutionBacktestRun {
   /// 既存行 (Phase B-1 以前) は NULL のまま、計算側 helper は notComputable で逃げる。
   /// 設計書: docs/review/2026-05-09_agent_loop_diagnosis_and_plan.md §5.B.3
   trades                Json?
+  /// OOS-aware 昇格判定の観測結果（PR: OOS確証の永続化）。
+  /// { confirmed, finalStage, oosStatus, oosPf, oosWinRate }。
+  /// confirmed=true は in-sample 合格に加え OOS/WF も通過した「OOS確証」候補。
+  /// 既存行・OOS未評価は null。formalBtPassed の意味論は変えず、観測の可視化用に並列保持する。
+  oosResult             Json?
   createdAt             DateTime @default(now()) @db.Timestamptz(6)
 
   @@index([evolutionRunId, generation], map: "idx_evolution_bt_run_gen")
