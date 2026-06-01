@@ -556,9 +556,24 @@ class ScreeningBacktestResponse(BaseModel):
 # 設計: docs/diagnostics/evolution_loop_redesign_plan_2026-06-02.html
 #   - 数値最適化は決定論コード（backtesting.py Backtest.optimize）で行う（AGENTS.md ドメイン原則#3）。
 #   - 探索空間（候補値リスト）は呼び出し側（TS）が「現在値 ±N% を型に応じた刻み」で生成して渡す。
-#   - 本 MVP は SL/TP 値の最適化。インジ期間の最適化・train/OOS 過学習ガードは Phase 1b。
+#   - Phase 1: SL/TP 値の最適化（全期間）。
+#   - Phase 1b: アンカード・ウォークフォワード過学習ガード（複数 OOS 窓 + DSR + トレード数フロア）を追加。
+#     インジ期間の最適化は別メカニズム（variant DSL 生成）のため Phase 1c に分離。
 
 OptimizeMaximize = Literal["sharpe", "profit_factor", "return"]
+
+
+class WalkForwardConfig(BaseModel):
+    """Phase 1b: 過学習ガード (アンカード・ウォークフォワード) の設定。
+
+    enabled=False なら従来の全期間 1 回最適化 (Phase 1 互換、overfitGuard=null)。
+    """
+
+    enabled: bool = True
+    # OOS 窓の数 (= fold 数)。全期間を windows+1 ブロックに等分して anchored WF する。
+    windows: int = Field(default=4, ge=1, le=12)
+    # 各 OOS 窓で過学習判定に必要な最低トレード数。未満の窓は not_evaluated 扱い。
+    minTradesPerWindow: int = Field(default=25, ge=0)
 
 
 class OptimizeRequest(BaseModel):
@@ -576,15 +591,65 @@ class OptimizeRequest(BaseModel):
     maximize: OptimizeMaximize = "sharpe"
     method: Literal["grid", "sambo"] = "grid"
     maxTries: Optional[int] = Field(default=None, ge=1)
+    # Phase 1b: 過学習ガード設定。既定で WF 有効。
+    walkForward: WalkForwardConfig = Field(default_factory=WalkForwardConfig)
+
+
+WalkForwardVerdict = Literal["robust", "overfit_suspected", "not_evaluated"]
+
+
+class DsrMetricsModel(BaseModel):
+    """Deflated Sharpe Ratio の観測値 (Phase 1b)。notComputable!=null なら計算不能。"""
+
+    dsr: float
+    sharpeRatio: float
+    expectedMaxSr: float
+    sampleSize: int
+    notComputable: Optional[str] = None
+
+
+class WalkForwardFoldModel(BaseModel):
+    """ウォークフォワード 1 窓の OOS 結果 (Phase 1b)。"""
+
+    foldIndex: int
+    trainStartIndex: int
+    trainEndIndex: int
+    oosStartIndex: int
+    oosEndIndex: int
+    bestParams: Dict[str, float] = Field(default_factory=dict)
+    oosSummary: ScreeningBacktestSummary
+    oosTradeCount: int
+    evaluated: bool
+    skipReason: Optional[str] = None
+
+
+class OverfitGuardModel(BaseModel):
+    """Phase 1b: ウォークフォワード過学習ガードの観測結果。
+
+    verdict は助言 (observation)。合否強制は Side-B 確証ゲート (Phase 4)。
+    """
+
+    method: Literal["walk_forward"] = "walk_forward"
+    windows: int
+    minTradesPerWindow: int
+    trialCount: int
+    evaluatedFoldCount: int
+    folds: List[WalkForwardFoldModel] = Field(default_factory=list)
+    aggregateOos: ScreeningBacktestSummary
+    dsr: Optional[DsrMetricsModel] = None
+    verdict: WalkForwardVerdict
 
 
 class OptimizeResponse(BaseModel):
     # 最適化されたパラメータ（探索対象のみ。例: {"slValue": 1.8, "tpValue": 2.2}）。
+    # WF 有効時は全期間最適化 (デプロイ推奨) の結果。
     bestParams: Dict[str, float] = Field(default_factory=dict)
     summary: ScreeningBacktestSummary
     trades: List[ScreeningBacktestTrade] = Field(default_factory=list)
     equity: Optional[List[float]] = None
     engineVersion: str
+    # Phase 1b: WF 有効時のみ非 null。無効 (walkForward.enabled=false) なら null。
+    overfitGuard: Optional[OverfitGuardModel] = None
 
 
 # ============================================

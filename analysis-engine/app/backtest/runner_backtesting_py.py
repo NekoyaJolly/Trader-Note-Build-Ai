@@ -27,7 +27,11 @@ from .engine_protocol import (
     BTSpec,
     BTSummary,
     BTTrade,
+    BTWalkForwardFold,
+    BTWalkForwardResult,
+    DsrMetrics,
 )
+from app.statistics.dsr import compute_deflated_sharpe_ratio
 from .condition_evaluator import (
     collect_required_dynamic_indicator_keys,
     collect_required_ohlcv_features,
@@ -189,6 +193,328 @@ class BacktestingPyEngine:
         )
 
     # -----------------------------------------
+    # walk-forward 最適化 + 過学習ガード (Phase 1b)
+    # -----------------------------------------
+
+    def optimize_walk_forward(
+        self,
+        spec: BTSpec,
+        ohlcv: pd.DataFrame,
+        config: BTConfig,
+        sl_values: Optional[List[float]],
+        tp_values: Optional[List[float]],
+        maximize: str,
+        method: str,
+        max_tries: Optional[int],
+        windows: int,
+        min_trades_per_window: int,
+    ) -> "BTWalkForwardResult":
+        """アンカード・ウォークフォワードで SL/TP を最適化し過学習ガードを返す。
+
+        単一 train/OOS split は OOS が「1 回の引き」になり期間/データ量依存で
+        ガードが弱い。これを避けるため複数 OOS 窓 (anchored WF) で検証する:
+            - 全期間を windows+1 ブロックに等分。
+            - fold i: train = block[0..i-1] (anchored、累積)、OOS = block[i]。
+            - 各 fold で train を最適化 → best params を **次の OOS 窓**で評価。
+            - OOS トレード数が min_trades_per_window 未満の窓は not_evaluated。
+        連結 OOS のトレード別リターンに DSR (trial_count = grid 組合せ数で deflate)
+        を適用し、複数試行を補正した有意性を観測する。
+
+        full_best は全期間最適化したデプロイ推奨パラメータ (後方互換: 従来の単発
+        optimize 相当)。verdict は観測用の助言で、合否強制は Side-B Phase 4。
+        """
+        df = self._normalize_ohlcv(ohlcv)
+
+        sl_list = [float(v) for v in (sl_values or []) if float(v) > 0]
+        tp_list = [float(v) for v in (tp_values or []) if float(v) > 0]
+        has_grid = bool(sl_list or tp_list)
+        # trial_count = grid 組合せ数 (探索軸が無ければ 1)。max_tries で打ち切る場合は
+        # 実際に評価される試行数の上限に合わせる。
+        grid_combos = max(1, (len(sl_list) or 1) * (len(tp_list) or 1))
+        trial_count = grid_combos if has_grid else 1
+        if max_tries is not None and max_tries > 0:
+            trial_count = min(trial_count, max_tries)
+
+        # 全期間最適化 (デプロイ推奨 + 後方互換の summary/trades/equity)。
+        full_best = self.optimize(
+            spec, ohlcv, config, sl_values, tp_values, maximize, method, max_tries
+        )
+
+        folds: List[BTWalkForwardFold] = []
+        oos_returns_all: List[float] = []
+        n = len(df)
+        block = n // (windows + 1) if windows >= 1 else 0
+
+        if n >= 30 and windows >= 1 and block >= 1:
+            for i in range(1, windows + 1):
+                train_end = block * i
+                oos_start = train_end
+                oos_end = block * (i + 1) if i < windows else n
+                train_df = df.iloc[:train_end]
+                oos_df = df.iloc[oos_start:oos_end]
+
+                if len(train_df) < 30 or len(oos_df) < 1:
+                    folds.append(
+                        self._not_evaluated_fold(
+                            i, 0, train_end, oos_start, oos_end,
+                            reason="train/OOS バー不足 (< 30 / < 1)",
+                        )
+                    )
+                    continue
+
+                # (a) train で SL/TP 最適化
+                _train_stats, best_params = self._optimize_on_df(
+                    spec, train_df, config, sl_list, tp_list, maximize, method, max_tries
+                )
+                # (b) best params を OOS で評価
+                oos_stats = self._run_on_df_with_params(
+                    spec,
+                    oos_df,
+                    config,
+                    best_params.get("slValue"),
+                    best_params.get("tpValue"),
+                )
+                oos_summary = self._summarize_stats(oos_stats)
+                oos_returns = self._extract_trade_returns(oos_stats)
+                evaluated = oos_summary.trade_count >= min_trades_per_window
+                if evaluated:
+                    oos_returns_all.extend(oos_returns)
+
+                folds.append(
+                    BTWalkForwardFold(
+                        fold_index=i,
+                        train_start_index=0,
+                        train_end_index=train_end,
+                        oos_start_index=oos_start,
+                        oos_end_index=oos_end,
+                        best_params=best_params,
+                        oos_summary=oos_summary,
+                        oos_trade_count=oos_summary.trade_count,
+                        evaluated=evaluated,
+                        skip_reason=(
+                            None
+                            if evaluated
+                            else f"OOS トレード数 {oos_summary.trade_count} < フロア {min_trades_per_window}"
+                        ),
+                    )
+                )
+
+        evaluated_folds = [f for f in folds if f.evaluated]
+        aggregate_oos = self._aggregate_oos_summary(oos_returns_all)
+
+        dsr_metrics: Optional[DsrMetrics] = None
+        if oos_returns_all:
+            d = compute_deflated_sharpe_ratio(oos_returns_all, trial_count)
+            dsr_metrics = DsrMetrics(
+                dsr=d.dsr,
+                sharpe_ratio=d.sharpe_ratio,
+                expected_max_sr=d.expected_max_sr,
+                sample_size=d.sample_size,
+                not_computable=d.not_computable,
+            )
+
+        verdict = self._wf_verdict(evaluated_folds, aggregate_oos, dsr_metrics)
+
+        return BTWalkForwardResult(
+            full_best=full_best,
+            folds=folds,
+            aggregate_oos=aggregate_oos,
+            dsr=dsr_metrics,
+            trial_count=trial_count,
+            evaluated_fold_count=len(evaluated_folds),
+            windows=windows,
+            min_trades_per_window=min_trades_per_window,
+            verdict=verdict,
+        )
+
+    def _optimize_on_df(
+        self,
+        spec: BTSpec,
+        df: pd.DataFrame,
+        config: BTConfig,
+        sl_list: List[float],
+        tp_list: List[float],
+        maximize: str,
+        method: str,
+        max_tries: Optional[int],
+    ):
+        """正規化済み df 1 枚で SL/TP を最適化し (stats, best_params) を返す。"""
+        StrategyClass = self._build_strategy_class(spec)
+        bt = self._build_bt(StrategyClass, df, config)
+
+        opt_ranges: Dict[str, List[float]] = {}
+        if sl_list:
+            opt_ranges["opt_sl_value"] = list(sl_list)
+        if tp_list:
+            opt_ranges["opt_tp_value"] = list(tp_list)
+
+        if not opt_ranges:
+            stats = bt.run()
+        else:
+            stats = bt.optimize(
+                maximize=maximize,
+                method=method if method in ("grid", "sambo") else "grid",
+                max_tries=max_tries,
+                **{k: list(v) for k, v in opt_ranges.items()},
+            )
+
+        best_strategy = getattr(stats, "_strategy", None)
+        best_params: Dict[str, float] = {}
+        if best_strategy is not None:
+            if "opt_sl_value" in opt_ranges:
+                best_params["slValue"] = float(getattr(best_strategy, "opt_sl_value", 0.0))
+            if "opt_tp_value" in opt_ranges:
+                best_params["tpValue"] = float(getattr(best_strategy, "opt_tp_value", 0.0))
+        return stats, best_params
+
+    def _run_on_df_with_params(
+        self,
+        spec: BTSpec,
+        df: pd.DataFrame,
+        config: BTConfig,
+        sl_value: Optional[float],
+        tp_value: Optional[float],
+    ):
+        """正規化済み df 1 枚に対し、指定 SL/TP 値で単発 run して stats を返す。
+
+        SL/TP が None (= その軸を最適化していない) の場合はクラス既定値 (= spec 値) を使う。
+        """
+        StrategyClass = self._build_strategy_class(spec)
+        if sl_value is not None and sl_value > 0:
+            StrategyClass.opt_sl_value = float(sl_value)
+        if tp_value is not None and tp_value > 0:
+            StrategyClass.opt_tp_value = float(tp_value)
+        bt = self._build_bt(StrategyClass, df, config)
+        return bt.run()
+
+    def _build_bt(self, StrategyClass, df: pd.DataFrame, config: BTConfig) -> Backtest:
+        """正規化済み df + StrategyClass から spread 適用済みの Backtest を組む。"""
+        bt_kwargs = self._map_config(config)
+        if config.spread_pips > 0 and config.pip_size > 0:
+            avg_price = float(df["Close"].mean())
+            if avg_price > 0:
+                bt_kwargs["spread"] = (config.spread_pips * config.pip_size) / avg_price
+        return Backtest(df, StrategyClass, finalize_trades=True, **bt_kwargs)
+
+    @staticmethod
+    def _extract_trade_returns(stats) -> List[float]:
+        """stats からトレード別リターン (backtesting.py の trades 列 ReturnPct) を取り出す。
+
+        ReturnPct は **fraction** (例 0.05 = +5%)。summary の `Return [%]` / `Win Rate [%]`
+        など `[%]` 単位の stat とはスケールが異なる点に注意。DSR は returns 列の相対比だけを
+        見るため fraction のまま渡してよい（trial_count 補正と整合）。
+        """
+        trades_df = getattr(stats, "_trades", None)
+        if trades_df is None or trades_df.empty or "ReturnPct" not in trades_df.columns:
+            return []
+        out: List[float] = []
+        for v in trades_df["ReturnPct"].to_list():
+            fv = float(v)
+            if np.isfinite(fv):
+                out.append(fv)
+        return out
+
+    @staticmethod
+    def _not_evaluated_fold(
+        fold_index: int,
+        train_start: int,
+        train_end: int,
+        oos_start: int,
+        oos_end: int,
+        reason: str,
+    ) -> BTWalkForwardFold:
+        empty_summary = BTSummary(
+            pf=0.0,
+            win_rate=0.0,
+            trade_count=0,
+            max_dd=None,
+            sharpe=None,
+            return_pct=None,
+            recovery_factor=None,
+            risk_reward=None,
+        )
+        return BTWalkForwardFold(
+            fold_index=fold_index,
+            train_start_index=train_start,
+            train_end_index=train_end,
+            oos_start_index=oos_start,
+            oos_end_index=oos_end,
+            best_params={},
+            oos_summary=empty_summary,
+            oos_trade_count=0,
+            evaluated=False,
+            skip_reason=reason,
+        )
+
+    @staticmethod
+    def _aggregate_oos_summary(returns: List[float]) -> BTSummary:
+        """連結 OOS のトレード別リターンから集計サマリを作る。
+
+        窓ごとに equity 曲線が分断されるため max_dd / return_pct は意味が薄く None。
+        pf / win_rate / sharpe はトレード別リターンから直接算出できる。
+        """
+        n = len(returns)
+        if n == 0:
+            return BTSummary(0.0, 0.0, 0, None, None, None, None, None)
+        wins = [r for r in returns if r > 0]
+        losses = [r for r in returns if r < 0]
+        gross_profit = sum(wins)
+        gross_loss = abs(sum(losses))
+        pf = float(gross_profit / gross_loss) if gross_loss > 0 else 0.0
+        win_rate = len(wins) / n
+        sharpe: Optional[float] = None
+        if n >= 2:
+            mean = sum(returns) / n
+            var = sum((r - mean) ** 2 for r in returns) / (n - 1)
+            if var > 0:
+                sharpe = float(mean / (var ** 0.5))
+        avg_win = (gross_profit / len(wins)) if wins else None
+        avg_loss = (gross_loss / len(losses)) if losses else None
+        risk_reward = (
+            float(avg_win / avg_loss) if avg_win is not None and avg_loss not in (None, 0) else None
+        )
+        return BTSummary(
+            pf=pf,
+            win_rate=win_rate,
+            trade_count=n,
+            max_dd=None,
+            sharpe=sharpe,
+            return_pct=None,
+            recovery_factor=None,
+            risk_reward=risk_reward,
+        )
+
+    @staticmethod
+    def _wf_verdict(
+        evaluated_folds: List[BTWalkForwardFold],
+        aggregate_oos: BTSummary,
+        dsr: Optional[DsrMetrics],
+    ) -> str:
+        """観測用の助言 verdict。合否強制は Side-B 確証ゲート (Phase 4)。
+
+        WF の本質的シグナルは **複数 OOS 窓での一貫性** (= 最適化した params が
+        out-of-sample で安定して通用するか)。これを主判定にする:
+            - 評価対象窓が 2 未満 → not_evaluated (OOS 観測が複数取れず頑健性を語れない)。
+            - 評価窓の過半数で OOS PF>1.0、かつ集計 OOS が PF>1.0 / sharpe>0 → robust。
+            - それ以外 → overfit_suspected。
+
+        DSR (trial_count 補正後) は response に含めて Side-B に渡すが、トレード別
+        リターン尺度では simplified DSR が厳しく出る (= ほぼ常に負) ため、助言
+        verdict のハードゲートには使わない（既存 EvolutionLoop:898 も観測のみ）。
+        """
+        if len(evaluated_folds) < 2:
+            return "not_evaluated"
+        folds_pf_positive = sum(1 for f in evaluated_folds if f.oos_summary.pf > 1.0)
+        # strict majority (過半数): 同数 (例 2/4) は許容しない。
+        majority_consistent = folds_pf_positive * 2 > len(evaluated_folds)
+        aggregate_ok = aggregate_oos.pf > 1.0 and (
+            aggregate_oos.sharpe is not None and aggregate_oos.sharpe > 0
+        )
+        if majority_consistent and aggregate_ok:
+            return "robust"
+        return "overfit_suspected"
+
+    # -----------------------------------------
     # OHLCV 整形 (engine 依存)
     # -----------------------------------------
 
@@ -252,8 +578,13 @@ class BacktestingPyEngine:
         max_holding = spec.max_holding_bars
         trigger_group = spec.trigger_group
 
-        atr_length = 14  # ATR length は固定 14 (Phase 4b の慣行と整合)
-        rsi_length = 14  # RSI length は固定 14 (TS surrogate と整合)
+        # ATR/RSI length の既定値。従来は closure 定数としてハードコードしていたが、
+        # 進化ループ再設計 Phase 1b で GeneratedStrategy の **クラス属性** (atr_length /
+        # rsi_length) に昇格し、上書き可能な動的ノブにする（= 期間が戦略生成時に固定されない）。
+        # 既定 14 のままなので挙動は不変。DSL/spec 由来で期間を渡す配線は Phase 1c
+        # (variant DSL 生成) で対応する。
+        atr_length_default = 14  # Phase 4b の慣行と整合
+        rsi_length_default = 14  # TS surrogate と整合
         # PR #112: 必要 feature を事前抽出 (trigger_group が None なら空集合)
         required_features = collect_required_ohlcv_features(trigger_group)
         # PR #116c: params 付き indicator / compareTarget の operand を事前抽出。
@@ -300,8 +631,15 @@ class BacktestingPyEngine:
             # 通常 run では既定値のまま使われ、SL/TP 距離は従来と一致する。
             opt_sl_value = sl_value_default
             opt_tp_value = tp_value_default
+            # Phase 1b: ATR/RSI length をクラス属性化（ハードコード除去）。既定 14。
+            # 上書き可能だが現状の最適化 sweep 対象は SL/TP のみ（インジ期間は Phase 1c）。
+            atr_length = atr_length_default
+            rsi_length = rsi_length_default
 
             def init(self) -> None:
+                # クラス属性 (上書き可能) からローカルに取り出して以降の計算で使う。
+                atr_length = self.atr_length
+                rsi_length = self.rsi_length
                 high = pd.Series(self.data.High)
                 low = pd.Series(self.data.Low)
                 close = pd.Series(self.data.Close)

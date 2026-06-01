@@ -449,7 +449,31 @@ export type AnalysisEngineScreeningBacktestResponse = z.infer<
 //
 // 数値最適化は analysis-engine 側 (backtesting.py Backtest.optimize) の決定論処理に委ねる
 // (AGENTS.md ドメイン原則#3)。探索空間 (候補値リスト) は呼び出し側が「現在値±N%・型刻み」で生成。
-// MVP は SL/TP 値の最適化。インジ期間最適化・train/OOS 過学習ガードは Phase 1b。
+// Phase 1: SL/TP 値の最適化（全期間）。
+// Phase 1b: アンカード・ウォークフォワード過学習ガード（複数 OOS 窓 + DSR + トレード数フロア）。
+//           インジ期間最適化は別メカニズム（variant DSL 生成）のため Phase 1c に分離。
+
+/**
+ * Phase 1b: 過学習ガード（アンカード WF）の既定値。
+ * per-field default と request 側の object default の両方がここを参照し、単一の真実点にする
+ * （= 二重管理によるドリフト防止）。
+ */
+export const WALK_FORWARD_DEFAULTS = {
+  enabled: true,
+  windows: 4,
+  minTradesPerWindow: 25,
+} as const;
+
+/** Phase 1b: 過学習ガード（アンカード WF）の設定。enabled=false で Phase 1 互換（全期間1回）。 */
+export const AnalysisEngineWalkForwardConfigSchema = z.object({
+  enabled: z.boolean().default(WALK_FORWARD_DEFAULTS.enabled),
+  /** OOS 窓数（fold 数）。全期間を windows+1 ブロックに等分して anchored WF。 */
+  windows: z.number().int().min(1).max(12).default(WALK_FORWARD_DEFAULTS.windows),
+  /** 各 OOS 窓で過学習判定に必要な最低トレード数。未満は not_evaluated。 */
+  minTradesPerWindow: z.number().int().nonnegative().default(WALK_FORWARD_DEFAULTS.minTradesPerWindow),
+});
+
+export type AnalysisEngineWalkForwardConfig = z.infer<typeof AnalysisEngineWalkForwardConfigSchema>;
 
 export const AnalysisEngineOptimizeRequestSchema = z.object({
   hypothesisId: z.string().min(1),
@@ -471,19 +495,71 @@ export const AnalysisEngineOptimizeRequestSchema = z.object({
   maximize: z.enum(['sharpe', 'profit_factor', 'return']).default('sharpe'),
   method: z.enum(['grid', 'sambo']).default('grid'),
   maxTries: z.number().int().positive().optional(),
+  /**
+   * Phase 1b: 過学習ガード設定。既定で WF 有効。
+   * 既定値は `WALK_FORWARD_DEFAULTS` を単一の真実点として参照する（= ドリフト防止）。
+   */
+  walkForward: AnalysisEngineWalkForwardConfigSchema.default(() => ({ ...WALK_FORWARD_DEFAULTS })),
 });
 
 export type AnalysisEngineOptimizeRequest = z.infer<typeof AnalysisEngineOptimizeRequestSchema>;
 /** 呼び出し側用の入力型（default 付きフィールドは省略可）。 */
 export type AnalysisEngineOptimizeRequestInput = z.input<typeof AnalysisEngineOptimizeRequestSchema>;
 
+/** Phase 1b: Deflated Sharpe Ratio 観測値。notComputable!=null なら計算不能。 */
+export const AnalysisEngineDsrMetricsSchema = z.object({
+  dsr: z.number(),
+  sharpeRatio: z.number(),
+  expectedMaxSr: z.number(),
+  sampleSize: z.number().int().nonnegative(),
+  notComputable: z.string().nullable().default(null),
+});
+
+export type AnalysisEngineDsrMetrics = z.infer<typeof AnalysisEngineDsrMetricsSchema>;
+
+/** Phase 1b: ウォークフォワード 1 窓の OOS 結果。 */
+export const AnalysisEngineWalkForwardFoldSchema = z.object({
+  foldIndex: z.number().int(),
+  trainStartIndex: z.number().int().nonnegative(),
+  trainEndIndex: z.number().int().nonnegative(),
+  oosStartIndex: z.number().int().nonnegative(),
+  oosEndIndex: z.number().int().nonnegative(),
+  bestParams: z.record(z.string(), z.number()).default({}),
+  oosSummary: ScreeningBacktestSummarySchema,
+  oosTradeCount: z.number().int().nonnegative(),
+  evaluated: z.boolean(),
+  skipReason: z.string().nullable().default(null),
+});
+
+export type AnalysisEngineWalkForwardFold = z.infer<typeof AnalysisEngineWalkForwardFoldSchema>;
+
+/**
+ * Phase 1b: ウォークフォワード過学習ガードの観測結果。
+ * verdict は助言（observation）。合否強制は Side-B 確証ゲート（Phase 4）。
+ */
+export const AnalysisEngineOverfitGuardSchema = z.object({
+  method: z.literal('walk_forward'),
+  windows: z.number().int().min(1),
+  minTradesPerWindow: z.number().int().nonnegative(),
+  trialCount: z.number().int().nonnegative(),
+  evaluatedFoldCount: z.number().int().nonnegative(),
+  folds: z.array(AnalysisEngineWalkForwardFoldSchema).default([]),
+  aggregateOos: ScreeningBacktestSummarySchema,
+  dsr: AnalysisEngineDsrMetricsSchema.nullable().default(null),
+  verdict: z.enum(['robust', 'overfit_suspected', 'not_evaluated']),
+});
+
+export type AnalysisEngineOverfitGuard = z.infer<typeof AnalysisEngineOverfitGuardSchema>;
+
 export const AnalysisEngineOptimizeResponseSchema = z.object({
-  /** 最適化されたパラメータ（探索対象のみ。例: { slValue: 1.8, tpValue: 2.2 }）。 */
+  /** 最適化されたパラメータ（探索対象のみ。例: { slValue: 1.8, tpValue: 2.2 }）。WF 有効時は全期間最適化結果。 */
   bestParams: z.record(z.string(), z.number()).default({}),
   summary: ScreeningBacktestSummarySchema,
   trades: z.array(ScreeningBacktestTradeSchema).default([]),
   equity: z.array(z.number()).nullable().default(null),
   engineVersion: z.string().min(1),
+  /** Phase 1b: WF 有効時のみ非 null。無効（walkForward.enabled=false）なら null。 */
+  overfitGuard: AnalysisEngineOverfitGuardSchema.nullable().default(null),
 });
 
 export type AnalysisEngineOptimizeResponse = z.infer<typeof AnalysisEngineOptimizeResponseSchema>;
