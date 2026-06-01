@@ -92,17 +92,21 @@ function formatConditionLeaf(c: DslConditionLeaf): string {
 }
 
 // 条件グループ（AND/OR 再帰）を平易な文に。
+// null/undefined（= 未取得・部分スナップショット）と空配列（= 本当に条件なし）を区別する。
 function conditionGroupToText(g?: DslConditionGroup | null): string {
-  if (!g || !Array.isArray(g.conditions) || g.conditions.length === 0) return "（条件なし）";
+  if (g === null || g === undefined) return "-";
+  if (!Array.isArray(g.conditions) || g.conditions.length === 0) return "（条件なし）";
   const join = g.logic === "AND" ? " かつ " : " または ";
   return g.conditions
     .map((c) => ("logic" in c ? `(${conditionGroupToText(c)})` : formatConditionLeaf(c)))
     .join(join);
 }
 
-// エントリーの条件グループを取り出す（immediate=trigger / wait_for_trigger=triggerConditions）。
+// エントリーの条件グループを取り出す。バックエンド実装に合わせ type で分岐する
+// （wait_for_trigger=triggerConditions / immediate=trigger）。両方入っていても type を優先。
 function entryConditionGroup(entry?: EvolutionDslSnapshot["entry"]): DslConditionGroup | null {
   if (!entry) return null;
+  if (entry.type === "wait_for_trigger") return entry.triggerConditions ?? entry.trigger ?? null;
   return entry.trigger ?? entry.triggerConditions ?? null;
 }
 
@@ -562,7 +566,8 @@ export default function EvolutionPage() {
                                       {(() => {
                                         const m = cand.formalBtMetrics;
                                         if (!m) return <div className="text-muted-foreground">正式BT結果なし。</div>;
-                                        const parentPf = parents[0]?.formalBtMetrics?.pf;
+                                        // 親が1件(変異)のときだけ親PF比較を出す。交叉(親2件)はどちらと比べたか恣意的になるため省く。
+                                        const parentPf = parents.length === 1 ? parents[0]?.formalBtMetrics?.pf : undefined;
                                         return (
                                           <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
                                             <span>
