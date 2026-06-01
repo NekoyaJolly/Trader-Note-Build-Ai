@@ -160,6 +160,9 @@ export class EvolutionJob implements SideBJobRunner<SideBSchedulerConfig, Evolut
       // Phase 2: mutation 方式を config から注入（既定 'llm'）。
       // 'deterministic' でインジ期間 + SL/TP を analysis-engine で決定論最適化する。
       mutationStrategy: appConfig.ai.mutationStrategy,
+      // Phase 3: crossover 方式を config から注入（既定 'llm'）。
+      // 'deterministic' で ~20 インジ系統スイープのエッジ発見を行う。
+      crossoverStrategy: appConfig.ai.crossoverStrategy,
     });
 
     // configOverride 経由で 0 や maxGenerations 超過の値が渡されたときの clamp。

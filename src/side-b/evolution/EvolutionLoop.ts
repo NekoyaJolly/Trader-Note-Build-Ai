@@ -39,6 +39,7 @@ import {
   runOptimize as defaultRunOptimize,
 } from '../../backend/services/analysisEngineClient';
 import { generateDeterministicMutants } from './deterministicMutation';
+import { generateDeterministicCrossovers } from './deterministicCrossover';
 import { computeDeflatedSharpeRatio } from '../../shared/statistics/deflatedSharpeRatio';
 import { computeWinRateLift } from '../../shared/statistics/winRateLift';
 import { dslToBacktestNotePayload } from '../strategy_dsl/dslToBacktestNotePayload';
@@ -179,6 +180,13 @@ export interface EvolutionLoopDeps {
    * 省略時は 'llm'（従来挙動）。本番は config.ai.mutationStrategy を scheduler が注入する。
    */
   mutationStrategy?: 'llm' | 'deterministic';
+  /**
+   * Phase 3: crossover の方式。
+   *   'llm'           = 従来の CrossoverAgent（既定）
+   *   'deterministic' = generateDeterministicCrossovers（~20 インジ系統スイープでエッジ発見）
+   * 省略時は 'llm'（従来挙動）。本番は config.ai.crossoverStrategy を scheduler が注入する。
+   */
+  crossoverStrategy?: 'llm' | 'deterministic';
   /**
    * 段階 4a.3: 正式 BT を行う候補数の上限 (top K)。省略時は 5。
    * surrogate スコア降順で top K のみ analysis-engine に送る。
@@ -486,6 +494,7 @@ export class EvolutionLoop {
   private readonly runFormalBacktest: RunScreeningBacktestFn;
   private readonly runOptimize: RunOptimizeFn;
   private readonly mutationStrategy: 'llm' | 'deterministic';
+  private readonly crossoverStrategy: 'llm' | 'deterministic';
   private readonly formalBtTopK: number;
   private readonly evolutionBacktestRepo: EvolutionBacktestPersister | null;
   private readonly evolutionRunId: string;
@@ -544,6 +553,7 @@ export class EvolutionLoop {
     this.runFormalBacktest = deps.runFormalBacktest ?? defaultRunScreeningBacktest;
     this.runOptimize = deps.runOptimize ?? defaultRunOptimize;
     this.mutationStrategy = deps.mutationStrategy ?? 'llm';
+    this.crossoverStrategy = deps.crossoverStrategy ?? 'llm';
     this.formalBtTopK = deps.formalBtTopK ?? 5;
     // null が明示された場合は永続化スキップ、undefined なら既定の repo を使う。
     this.evolutionBacktestRepo =
@@ -854,19 +864,38 @@ export class EvolutionLoop {
     }
 
     try {
-      crosses = await crossoverAgent.generateCrossovers(
-        parentDsls,
-        parentScores,
-        crossoverCount,
-        // Filter Evolution M3 + M4: moduleParents (= フィルタ素材) と parentLossTrades
-        // (= 親 A の負けトレード一覧) を合わせて渡す。両方 / 片方 / 無しの全パターンが許容される。
-        moduleParents.length > 0 || parentLossTrades.size > 0
-          ? {
-              moduleParents: moduleParents.length > 0 ? moduleParents : undefined,
-              parentLossTrades: parentLossTrades.size > 0 ? parentLossTrades : undefined,
-            }
-          : undefined,
-      );
+      if (this.crossoverStrategy === 'deterministic') {
+        // Phase 3: ~20 インジを系統的に親へ 1 つずつ追加し「負け減・勝ち維持」でエッジ発見。
+        // 追加インジだけ最適化（既存条件・SL/TP は不変）。BT 窓は formal BT と同じ defaultPeriod。
+        crosses = await generateDeterministicCrossovers(
+          {
+            parents: parentDsls,
+            scores: parentScores,
+            count: crossoverCount,
+            startDate: toIsoDateTime(this.deps.defaultPeriod.start),
+            endDate: toIsoDateTime(this.deps.defaultPeriod.end),
+            log: (msg) => errors.push(msg),
+          },
+          { runScreeningBacktest: this.runFormalBacktest, runOptimize: this.runOptimize },
+        );
+        errors.push(
+          `[info] deterministic crossover: parents=${parentDsls.length} count=${crossoverCount} → crosses=${crosses.length}`,
+        );
+      } else {
+        crosses = await crossoverAgent.generateCrossovers(
+          parentDsls,
+          parentScores,
+          crossoverCount,
+          // Filter Evolution M3 + M4: moduleParents (= フィルタ素材) と parentLossTrades
+          // (= 親 A の負けトレード一覧) を合わせて渡す。両方 / 片方 / 無しの全パターンが許容される。
+          moduleParents.length > 0 || parentLossTrades.size > 0
+            ? {
+                moduleParents: moduleParents.length > 0 ? moduleParents : undefined,
+                parentLossTrades: parentLossTrades.size > 0 ? parentLossTrades : undefined,
+              }
+            : undefined,
+        );
+      }
     } catch (e) {
       errors.push(`crossover: ${e instanceof Error ? e.message : String(e)}`);
     }
