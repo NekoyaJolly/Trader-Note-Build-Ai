@@ -3,38 +3,47 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { sideBApi } from "@/lib/sideBApi";
 import type {
+  DslJsonValue,
+  EvolutionDslSnapshot,
   EvolutionLesson,
   EvolutionRunCandidate,
   EvolutionRunListItem,
   EvolutionRunSummary,
 } from "@/types/sideB";
-import type { EvolutionDslSnapshot } from "@/types/sideB";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Loader2 } from "lucide-react";
 
 // ===== 進化詳細(before→action→after)表示ヘルパー =====
 
-// 生成元(createdBy)を日本語の操作ラベルに。
+// 生成元(createdBy)を日本語の操作ラベルに（StrategyDSLSchema.metadata.createdBy の実値に合わせる）。
 function actionLabel(createdBy?: string | null): string {
   switch (createdBy) {
     case "mutation":
       return "変異 (mutation: パラメータ最適化)";
     case "crossover":
       return "交叉 (crossover: インジ/フィルタ追加)";
-    case "seed":
-    case "novelty_seed":
-      return "初期シード";
+    case "initial_random":
+      return "初期個体 (ランダム生成)";
+    case "llm_generated":
+      return "初期個体 (LLM 生成)";
     default:
       return createdBy ? `生成元: ${createdBy}` : "生成元: 不明";
   }
 }
 
-// SL/TP 仕様を短い文字列に。
-function riskSpecText(spec?: { type?: string; value?: number; lookbackBars?: number } | null): string {
+// JSON 値（数値 / ParamRef 文字列 / range・structured オブジェクト）を安全に文字列化する。
+function formatDslValue(v: DslJsonValue | undefined): string {
+  if (v === undefined || v === null) return "?";
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+}
+
+// SL/TP 仕様を短い文字列に。value は ParamRef 文字列やオブジェクトになり得る。
+function riskSpecText(spec?: { type?: string; value?: DslJsonValue; lookbackBars?: DslJsonValue } | null): string {
   if (!spec || !spec.type) return "-";
-  if (spec.type === "swing_point") return `swing_point(${spec.lookbackBars ?? "?"}本)`;
-  return `${spec.type}(${spec.value ?? "?"})`;
+  if (spec.type === "swing_point") return `swing_point(${formatDslValue(spec.lookbackBars)}本)`;
+  return `${spec.type}(${formatDslValue(spec.value)})`;
 }
 
 // DSL の主要構造を「キー: 値」の比較しやすい形へ。
@@ -47,7 +56,7 @@ function describeDsl(dsl?: EvolutionDslSnapshot | null): Record<string, string> 
   };
   if (dsl.parameters) {
     for (const [k, v] of Object.entries(dsl.parameters)) {
-      out[`param.${k}`] = typeof v === "number" ? String(v) : String(v);
+      out[`param.${k}`] = formatDslValue(v);
     }
   }
   return out;
@@ -181,18 +190,19 @@ export default function EvolutionPage() {
                     (lesson.metrics && Object.keys(lesson.metrics).length > 0)) && (
                     <div className="mt-3 pt-3 border-t border-dashed space-y-2">
                       <div className="text-xs font-medium text-muted-foreground">根拠</div>
-                      {typeof lesson.confidence === "number" && (
-                        <div className="flex items-center gap-2 text-xs">
-                          <span className="text-muted-foreground">信頼度</span>
-                          <span className="font-mono">{(lesson.confidence * 100).toFixed(0)}%</span>
-                          <span className="flex-1 h-1.5 bg-muted rounded overflow-hidden">
-                            <span
-                              className="block h-full bg-primary"
-                              style={{ width: `${Math.max(0, Math.min(1, lesson.confidence)) * 100}%` }}
-                            />
-                          </span>
-                        </div>
-                      )}
+                      {typeof lesson.confidence === "number" && (() => {
+                        // 数値表示とバー幅を同じクランプ結果で整合させる（範囲外データの 150% 等を防ぐ）。
+                        const clamped = Math.max(0, Math.min(1, lesson.confidence));
+                        return (
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="text-muted-foreground">信頼度</span>
+                            <span className="font-mono">{(clamped * 100).toFixed(0)}%</span>
+                            <span className="flex-1 h-1.5 bg-muted rounded overflow-hidden">
+                              <span className="block h-full bg-primary" style={{ width: `${clamped * 100}%` }} />
+                            </span>
+                          </div>
+                        );
+                      })()}
                       {lesson.metrics && Object.keys(lesson.metrics).length > 0 && (
                         <div className="flex flex-wrap gap-1.5">
                           {Object.entries(lesson.metrics).map(([k, v]) => (
@@ -329,16 +339,30 @@ export default function EvolutionPage() {
                           const metrics = cand.formalBtMetrics || {};
                           const oos = cand.oosResult;
                           const isOpen = expandedCandidateId === cand.id;
-                          // 親候補を同一実行の候補一覧から突き合わせる（parentId = 親のcandidateId/DSL id）。
+                          const toggle = () => setExpandedCandidateId(isOpen ? null : cand.id);
+                          // 親の突き合わせ（find）は展開時のみ実行する（全行で走らせない）。
+                          const parents = isOpen
+                            ? (cand.dslSnapshot?.parentIds ?? [])
+                                .map((pid) =>
+                                  runCandidates.find((c) => (c.candidateId ?? c.dslSnapshot?.id) === pid),
+                                )
+                                .filter((p): p is EvolutionRunCandidate => Boolean(p))
+                            : [];
                           const parentIds = cand.dslSnapshot?.parentIds ?? [];
-                          const parents = parentIds
-                            .map((pid) => runCandidates.find((c) => (c.candidateId ?? c.dslSnapshot?.id) === pid))
-                            .filter((p): p is EvolutionRunCandidate => Boolean(p));
                           return (
                             <Fragment key={cand.id}>
                             <tr
                               className="border-b last:border-0 hover:bg-muted/30 cursor-pointer"
-                              onClick={() => setExpandedCandidateId(isOpen ? null : cand.id)}
+                              role="button"
+                              tabIndex={0}
+                              aria-expanded={isOpen}
+                              onClick={toggle}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  toggle();
+                                }
+                              }}
                             >
                               <td className="p-2 text-center text-muted-foreground">{isOpen ? "▼" : "▶"}</td>
                               <td className="p-2 text-center">{cand.generation}</td>
@@ -368,9 +392,9 @@ export default function EvolutionPage() {
                                   </span>
                                 )}
                               </td>
-                              <td className="p-2">{metrics.pf?.toFixed(2) || '-'}</td>
-                              <td className="p-2">{metrics.winRate ? (metrics.winRate * 100).toFixed(1) + '%' : '-'}</td>
-                              <td className="p-2">{metrics.tradeCount || '-'}</td>
+                              <td className="p-2">{metrics.pf != null ? metrics.pf.toFixed(2) : '-'}</td>
+                              <td className="p-2">{metrics.winRate != null ? (metrics.winRate * 100).toFixed(1) + '%' : '-'}</td>
+                              <td className="p-2">{metrics.tradeCount != null ? metrics.tradeCount : '-'}</td>
                             </tr>
                             {isOpen && (
                               <tr className="border-b last:border-0 bg-muted/20">
@@ -386,41 +410,55 @@ export default function EvolutionPage() {
                                         )}
                                       </div>
                                     </div>
-                                    {/* before → after 差分 */}
+                                    {/* before → after 差分（crossover は親が2件になり得るため親ごとに表示） */}
                                     <div>
                                       <div className="font-medium mb-1">親 → (操作) → 子 の差分</div>
                                       {parents.length === 0 ? (
                                         <div className="text-muted-foreground">
                                           {parentIds.length === 0
-                                            ? "初期シードのため親なし。"
+                                            ? "初期個体のため親なし。"
                                             : "親候補がこの実行の一覧に含まれていないため差分は表示できません（親ID のみ上記参照）。"}
                                         </div>
                                       ) : (
-                                        (() => {
-                                          const changes = diffDsl(parents[0].dslSnapshot, cand.dslSnapshot);
-                                          return changes.length === 0 ? (
-                                            <div className="text-muted-foreground">構造的な差分は検出されませんでした（パラメータ範囲外の変化の可能性）。</div>
-                                          ) : (
-                                            <table className="w-full border-collapse">
-                                              <thead>
-                                                <tr className="text-muted-foreground">
-                                                  <th className="text-left p-1 font-medium">項目</th>
-                                                  <th className="text-left p-1 font-medium">親 (before)</th>
-                                                  <th className="text-left p-1 font-medium">子 (after)</th>
-                                                </tr>
-                                              </thead>
-                                              <tbody>
-                                                {changes.map((ch) => (
-                                                  <tr key={ch.key} className="border-t border-dashed">
-                                                    <td className="p-1 font-mono">{ch.key}</td>
-                                                    <td className="p-1 font-mono text-muted-foreground">{ch.before}</td>
-                                                    <td className="p-1 font-mono text-foreground">{ch.after}</td>
-                                                  </tr>
-                                                ))}
-                                              </tbody>
-                                            </table>
-                                          );
-                                        })()
+                                        <div className="space-y-3">
+                                          {parents.map((parent, pi) => {
+                                            const changes = diffDsl(parent.dslSnapshot, cand.dslSnapshot);
+                                            const parentLabel =
+                                              parents.length > 1 ? `親${pi + 1} (` : "親 (";
+                                            const parentId = (parent.candidateId ?? parent.dslSnapshot?.id ?? "").substring(0, 8);
+                                            return (
+                                              <div key={parent.id}>
+                                                {parents.length > 1 && (
+                                                  <div className="text-muted-foreground mb-1 font-mono">
+                                                    {parentLabel}{parentId}) との差分
+                                                  </div>
+                                                )}
+                                                {changes.length === 0 ? (
+                                                  <div className="text-muted-foreground">構造的な差分は検出されませんでした（パラメータ範囲外の変化の可能性）。</div>
+                                                ) : (
+                                                  <table className="w-full border-collapse">
+                                                    <thead>
+                                                      <tr className="text-muted-foreground">
+                                                        <th className="text-left p-1 font-medium">項目</th>
+                                                        <th className="text-left p-1 font-medium">親 (before)</th>
+                                                        <th className="text-left p-1 font-medium">子 (after)</th>
+                                                      </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                      {changes.map((ch) => (
+                                                        <tr key={ch.key} className="border-t border-dashed">
+                                                          <td className="p-1 font-mono">{ch.key}</td>
+                                                          <td className="p-1 font-mono text-muted-foreground">{ch.before}</td>
+                                                          <td className="p-1 font-mono text-foreground">{ch.after}</td>
+                                                        </tr>
+                                                      ))}
+                                                    </tbody>
+                                                  </table>
+                                                )}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
                                       )}
                                     </div>
                                     {/* OOS確証 詳細 */}

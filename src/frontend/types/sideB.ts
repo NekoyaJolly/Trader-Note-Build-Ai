@@ -885,19 +885,33 @@ export interface GetEvolutionRunSummaryResponse {
  * Prisma の EvolutionBacktestRun のうち、フロントが参照するフィールドのみ公開する。
  */
 /**
+ * DSL 内に現れる JSON 値（数値 / ParamRef 文字列 "$p1" / range・structured オブジェクト等）。
+ * raw JSON をそのまま受けるため再帰的に表現する（any/unknown は使わない）。
+ */
+export type DslJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: DslJsonValue }
+  | DslJsonValue[];
+
+/**
  * 進化候補の戦略DSLスナップショット（before→action→after 可視化に必要な部分のみ）。
  * candidates API が EvolutionBacktestRun.dslSnapshot を raw で返す。
+ * value/lookbackBars は ParamRef 文字列、parameters の値は range/structured オブジェクトに
+ * なり得るため DslJsonValue で受ける。
  */
 export interface EvolutionDslSnapshot {
   id: string;
-  /** 親個体のDSL ID（mutation=1件 / crossover=2件）。種(seed)は空 or undefined。 */
+  /** 親個体のDSL ID（mutation=1件 / crossover=2件）。初期個体は空 or undefined。 */
   parentIds?: string[];
-  /** 生成元（'mutation' / 'crossover' / 'seed' 等）。action の識別に使う。 */
+  /** 生成元（'initial_random' / 'llm_generated' / 'mutation' / 'crossover' 等）。action の識別に使う。 */
   metadata?: { createdBy?: string } | null;
   entry?: { kind?: string } | null;
-  stopLoss?: { type?: string; value?: number; lookbackBars?: number } | null;
-  takeProfit?: { type?: string; value?: number } | null;
-  parameters?: Record<string, number> | null;
+  stopLoss?: { type?: string; value?: DslJsonValue; lookbackBars?: DslJsonValue } | null;
+  takeProfit?: { type?: string; value?: DslJsonValue } | null;
+  parameters?: Record<string, DslJsonValue> | null;
 }
 
 export interface EvolutionRunCandidate {
