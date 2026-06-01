@@ -18,12 +18,15 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from app.schemas import (
+    DsrMetricsModel,
     OptimizeRequest,
     OptimizeResponse,
+    OverfitGuardModel,
     ScreeningBacktestNotePayload,
     ScreeningBacktestRequest,
     ScreeningBacktestResponse,
     ScreeningBacktestSummary,
+    WalkForwardFoldModel,
 )
 
 from . import adapter
@@ -281,8 +284,41 @@ def run_optimize(
             trades=parts["trades"],
             equity=parts["equity"],
             engineVersion=parts["engineVersion"],
+            overfitGuard=None,
         )
 
+    # (4a) Phase 1b: WF 有効なら過学習ガード経路。無効なら Phase 1 互換の単発最適化。
+    if req.walkForward.enabled:
+        wf = engine.optimize_walk_forward(
+            spec,
+            ohlcv,
+            config,
+            req.slValues or None,
+            req.tpValues or None,
+            maximize_key,
+            req.method,
+            req.maxTries,
+            req.walkForward.windows,
+            req.walkForward.minTradesPerWindow,
+        )
+        full = wf.full_best
+        bt_like = BTResult(
+            summary=full.summary,
+            trades=full.trades,
+            equity=full.equity,
+            engine_version=full.engine_version,
+        )
+        parts = adapter.btresult_to_response_parts(bt_like)
+        return OptimizeResponse(
+            bestParams=full.best_params,
+            summary=parts["summary"],
+            trades=parts["trades"],
+            equity=parts["equity"],
+            engineVersion=parts["engineVersion"],
+            overfitGuard=_build_overfit_guard(wf),
+        )
+
+    # (4b) WF 無効: Phase 1 互換（全期間 1 回最適化、overfitGuard=null）。
     opt = engine.optimize(
         spec,
         ohlcv,
@@ -308,4 +344,46 @@ def run_optimize(
         trades=parts["trades"],
         equity=parts["equity"],
         engineVersion=parts["engineVersion"],
+        overfitGuard=None,
+    )
+
+
+def _build_overfit_guard(wf) -> OverfitGuardModel:
+    """BTWalkForwardResult (engine 抽象) → OverfitGuardModel (response)。"""
+    folds = [
+        WalkForwardFoldModel(
+            foldIndex=f.fold_index,
+            trainStartIndex=f.train_start_index,
+            trainEndIndex=f.train_end_index,
+            oosStartIndex=f.oos_start_index,
+            oosEndIndex=f.oos_end_index,
+            bestParams=f.best_params,
+            oosSummary=adapter.btsummary_to_response(f.oos_summary),
+            oosTradeCount=f.oos_trade_count,
+            evaluated=f.evaluated,
+            skipReason=f.skip_reason,
+        )
+        for f in wf.folds
+    ]
+    dsr = (
+        DsrMetricsModel(
+            dsr=wf.dsr.dsr,
+            sharpeRatio=wf.dsr.sharpe_ratio,
+            expectedMaxSr=wf.dsr.expected_max_sr,
+            sampleSize=wf.dsr.sample_size,
+            notComputable=wf.dsr.not_computable,
+        )
+        if wf.dsr is not None
+        else None
+    )
+    return OverfitGuardModel(
+        method="walk_forward",
+        windows=wf.windows,
+        minTradesPerWindow=wf.min_trades_per_window,
+        trialCount=wf.trial_count,
+        evaluatedFoldCount=wf.evaluated_fold_count,
+        folds=folds,
+        aggregateOos=adapter.btsummary_to_response(wf.aggregate_oos),
+        dsr=dsr,
+        verdict=wf.verdict,
     )

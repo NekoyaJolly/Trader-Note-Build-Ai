@@ -86,12 +86,18 @@ def screening_backtest(req: ScreeningBacktestRequest) -> ScreeningBacktestRespon
 
 @app.post("/v1/optimize", response_model=OptimizeResponse)
 def optimize(req: OptimizeRequest) -> OptimizeResponse:
-    """進化ループ再設計 Phase 1: パラメータ最適化（決定論）。
+    """進化ループ再設計 Phase 1 / 1b: パラメータ最適化（決定論）+ 過学習ガード。
 
     SL/TP 値の候補リスト（呼び出し側が現在値±N%・型刻みで生成）を受け取り、
     backtesting.py の Backtest.optimize() で最良値を決定論探索する。
     AGENTS.md ドメイン原則#3（数値最適化は決定論コードで）に沿い、LLM ではなく
-    ライブラリに最適化させる経路。インジ期間最適化・train/OOS 過学習ガードは Phase 1b。
+    ライブラリに最適化させる経路。
+
+    Phase 1b: walkForward.enabled=true（既定）でアンカード・ウォークフォワード
+    過学習ガードを実行する。複数 OOS 窓で train 最適化→OOS 検証し、連結 OOS に
+    Deflated Sharpe Ratio（trial_count 補正）+ トレード数フロアを適用して
+    overfitGuard を返す。verdict は観測用の助言で、合否強制は Side-B 確証ゲート
+    (Phase 4)。インジ期間最適化は別メカニズム（variant DSL 生成）のため Phase 1c。
     """
     return run_optimize(engine, req)
 

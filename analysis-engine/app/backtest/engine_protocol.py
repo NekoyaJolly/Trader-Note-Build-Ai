@@ -188,6 +188,67 @@ class BTOptimizeResult:
     engine_version: str
 
 
+@dataclass(frozen=True)
+class DsrMetrics:
+    """Deflated Sharpe Ratio の観測値 (進化ループ再設計 Phase 1b)。
+
+    dsr.py の DsrResult をエンジン非依存型として運ぶ。`not_computable` が None
+    でなければ計算不能 (= サンプル不足 / flat returns 等) で dsr は 0。
+    """
+
+    dsr: float
+    sharpe_ratio: float
+    expected_max_sr: float
+    sample_size: int
+    not_computable: Optional[str]
+
+
+@dataclass(frozen=True)
+class BTWalkForwardFold:
+    """ウォークフォワード 1 窓の結果 (Phase 1b)。
+
+    各窓は train 期間で SL/TP を最適化し、その best params を **次の OOS 期間**で
+    評価する。`evaluated=False` は OOS トレード数がフロア未満 / バー不足で
+    過学習判定に使えない窓 (= not_evaluated)。
+    """
+
+    fold_index: int
+    train_start_index: int
+    train_end_index: int
+    oos_start_index: int
+    oos_end_index: int
+    best_params: Dict[str, float]
+    oos_summary: BTSummary
+    oos_trade_count: int
+    evaluated: bool
+    skip_reason: Optional[str]
+
+
+@dataclass(frozen=True)
+class BTWalkForwardResult:
+    """ウォークフォワード最適化 + 過学習ガードの結果 (Phase 1b)。
+
+    full_best: 全期間で最適化した推奨パラメータ (デプロイ用)。
+    folds: アンカード WF 各窓の OOS 結果。
+    aggregate_oos: 評価対象窓の OOS トレードを連結した集計サマリ。
+    dsr: 連結 OOS のトレード別リターンに対する Deflated Sharpe (trial_count 補正)。
+    trial_count: 最適化試行数 (= grid の組合せ数)。DSR の N に使う。
+    evaluated_fold_count: フロアを満たした OOS 窓数。
+    verdict: 'robust' / 'overfit_suspected' / 'not_evaluated' (観測用・助言。
+             実際の合否ゲートは Side-B 確証ゲート (Phase 4) で強制)。
+    """
+
+    full_best: BTOptimizeResult
+    folds: List["BTWalkForwardFold"]
+    aggregate_oos: BTSummary
+    dsr: Optional[DsrMetrics]
+    trial_count: int
+    evaluated_fold_count: int
+    windows: int
+    min_trades_per_window: int
+    verdict: Literal["robust", "overfit_suspected", "not_evaluated"]
+
+
 # ---------------------------------------------------------------
 # エンジンの抽象インターフェイス
 # ---------------------------------------------------------------
