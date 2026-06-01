@@ -136,6 +136,11 @@ export function resolveReasoningEffort(): ReasoningEffortValue {
   return 'high';
 }
 
+// Phase 2: mutation 数値最適化方式。typed const にして object literal の widening
+// (string 化) を防ぎ、config.ai.mutationStrategy を union 型のまま公開する。
+const MUTATION_STRATEGY: 'llm' | 'deterministic' =
+  process.env.AI_MUTATION_STRATEGY === 'deterministic' ? 'deterministic' : 'llm';
+
 export const config = {
   server: {
     // 優先度: BACKEND_PORT > PORT > 3100（env設定がある場合はそちらを優先）
@@ -156,6 +161,12 @@ export const config = {
     // 各エージェントは `config.ai.models[<key>]` に明示的なモデル ID を持つ(下記)。
     // グローバル既定 `config.ai.model` は安全網としてのみ使う(新エージェント追加時の忘れ対策)。
     model: process.env.AI_MODEL || 'anthropic/claude-sonnet-4.6',
+    // 進化ループ再設計 Phase 2: mutation の数値最適化方式。
+    //   'llm'           = 従来の MutationAgent (LLM が条件 + 数値を変異)
+    //   'deterministic' = optimizeIndicatorPeriods + /v1/optimize で
+    //                     インジ期間 + SL/TP を決定論最適化 (AGENTS.md 原則#3)
+    // 既定 'llm' で従来挙動を維持。本番は観察後にフラグで 'deterministic' へ切替える。
+    mutationStrategy: MUTATION_STRATEGY,
     baseURL: process.env.AI_BASE_URL || 'https://openrouter.ai/api/v1',
     // reasoning モデル (gpt-5系 / o系) の思考レベル既定値。
     // AIProvider は isReasoningModel() で対象モデル時のみ送信するため、

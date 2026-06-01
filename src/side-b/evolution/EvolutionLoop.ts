@@ -34,7 +34,11 @@ import { scoreFromValidationSummary } from './evolutionScore';
 // (= isNormalPass / isNearMiss) に集約されたため、本ファイルからは import 不要になった。
 // 閾値定義そのものは evolutionPromotionThresholds で一元管理を継続する。
 import type { StrategyPopulation } from './StrategyPopulation';
-import { runScreeningBacktest as defaultRunScreeningBacktest } from '../../backend/services/analysisEngineClient';
+import {
+  runScreeningBacktest as defaultRunScreeningBacktest,
+  runOptimize as defaultRunOptimize,
+} from '../../backend/services/analysisEngineClient';
+import { generateDeterministicMutants } from './deterministicMutation';
 import { computeDeflatedSharpeRatio } from '../../shared/statistics/deflatedSharpeRatio';
 import { computeWinRateLift } from '../../shared/statistics/winRateLift';
 import { dslToBacktestNotePayload } from '../strategy_dsl/dslToBacktestNotePayload';
@@ -140,6 +144,12 @@ export type EvolutionBacktestPersister = Pick<
  */
 export type RunScreeningBacktestFn = typeof defaultRunScreeningBacktest;
 
+/**
+ * Phase 2: analysis-engine の `/v1/optimize`（WF 過学習ガード）を呼ぶ関数 (DI 用)。
+ * 決定論 mutation（deterministicMutation）の stage-2 で使う。
+ */
+export type RunOptimizeFn = typeof defaultRunOptimize;
+
 // PR #105: OosBacktestRunnerFn は analysisEngineRobustnessAdapter.ts に移動済み。
 // analysis-engine の verdict (passed / failed / unknown) を含む runner result を運ぶ vehicle。
 
@@ -156,6 +166,19 @@ export interface EvolutionLoopDeps {
    * surrogate 厳格条件を満たした候補のみが呼び出される。
    */
   runFormalBacktest?: RunScreeningBacktestFn;
+  /**
+   * Phase 2: 決定論 mutation の stage-2 で使う `/v1/optimize` 関数。
+   * 省略時は analysis-engine の HTTP クライアント。`mutationStrategy='deterministic'`
+   * のときだけ呼ばれる。
+   */
+  runOptimize?: RunOptimizeFn;
+  /**
+   * Phase 2: mutation の数値最適化方式。
+   *   'llm'           = 従来の MutationAgent（既定）
+   *   'deterministic' = generateDeterministicMutants（インジ期間 + SL/TP を決定論最適化）
+   * 省略時は 'llm'（従来挙動）。本番は config.ai.mutationStrategy を scheduler が注入する。
+   */
+  mutationStrategy?: 'llm' | 'deterministic';
   /**
    * 段階 4a.3: 正式 BT を行う候補数の上限 (top K)。省略時は 5。
    * surrogate スコア降順で top K のみ analysis-engine に送る。
@@ -461,6 +484,8 @@ export interface RunOneGenerationOptions {
 
 export class EvolutionLoop {
   private readonly runFormalBacktest: RunScreeningBacktestFn;
+  private readonly runOptimize: RunOptimizeFn;
+  private readonly mutationStrategy: 'llm' | 'deterministic';
   private readonly formalBtTopK: number;
   private readonly evolutionBacktestRepo: EvolutionBacktestPersister | null;
   private readonly evolutionRunId: string;
@@ -517,6 +542,8 @@ export class EvolutionLoop {
 
   constructor(private readonly deps: EvolutionLoopDeps) {
     this.runFormalBacktest = deps.runFormalBacktest ?? defaultRunScreeningBacktest;
+    this.runOptimize = deps.runOptimize ?? defaultRunOptimize;
+    this.mutationStrategy = deps.mutationStrategy ?? 'llm';
     this.formalBtTopK = deps.formalBtTopK ?? 5;
     // null が明示された場合は永続化スキップ、undefined なら既定の repo を使う。
     this.evolutionBacktestRepo =
@@ -760,12 +787,30 @@ export class EvolutionLoop {
     let mutants: StrategyDSL[] = [];
     let crosses: StrategyDSL[] = [];
     try {
-      mutants = await mutationAgent.generateMutants(
-        parentDsls,
-        parentScores,
-        mutationCount,
-        repairHintsForMutation.size > 0 ? repairHintsForMutation : undefined,
-      );
+      if (this.mutationStrategy === 'deterministic') {
+        // Phase 2: LLM 数値変異の代わりに、各親のインジ期間 + SL/TP を analysis-engine で
+        // 決定論最適化（2 段階: screening ランク → 勝者 WF）。BT 窓は formal BT と同じ defaultPeriod。
+        mutants = await generateDeterministicMutants(
+          {
+            parents: parentDsls,
+            scores: parentScores,
+            count: mutationCount,
+            startDate: toIsoDateTime(this.deps.defaultPeriod.start),
+            endDate: toIsoDateTime(this.deps.defaultPeriod.end),
+          },
+          { runScreeningBacktest: this.runFormalBacktest, runOptimize: this.runOptimize },
+        );
+        errors.push(
+          `[info] deterministic mutation: parents=${parentDsls.length} count=${mutationCount} → mutants=${mutants.length}`,
+        );
+      } else {
+        mutants = await mutationAgent.generateMutants(
+          parentDsls,
+          parentScores,
+          mutationCount,
+          repairHintsForMutation.size > 0 ? repairHintsForMutation : undefined,
+        );
+      }
     } catch (e) {
       errors.push(`mutation: ${e instanceof Error ? e.message : String(e)}`);
     }
