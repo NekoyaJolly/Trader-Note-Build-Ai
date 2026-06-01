@@ -8,6 +8,9 @@
  *   npx tsx scripts/one-shot/reeval-evolution-cost.ts            # 既定 limit=500 (ユニーク候補)
  *   npx tsx scripts/one-shot/reeval-evolution-cost.ts --limit 20 # 小さく試す
  *   npx tsx scripts/one-shot/reeval-evolution-cost.ts --dry-run  # DBに書かず集計だけ
+ *   npx tsx scripts/one-shot/reeval-evolution-cost.ts --before 2026-06-01T00:00:00Z
+ *                                                               # #303(コスト配線)以前の cost=0 行に限定
+ *   ※ 未知の引数はエラー (打ち間違いで本番DBに書き込む事故を防ぐ)。
  * 作成日: 2026-06-01
  * 削除予定: 2026-07-31
  * 削除条件: 再評価を1回実施し結果を確認したら、本ファイルと scripts/README.md §3 の行を同時に削除する。
@@ -38,18 +41,40 @@ const FORMAL_BT_MIN_TRADES = VALIDATION_THRESHOLDS.common.minTradeCount;
 // analysis-engine への同時実行数 (負荷を抑えつつ多少並列化)。
 const CONCURRENCY = 3;
 
-function parseArgs(argv: string[]): { limit: number; dryRun: boolean } {
+function parseArgs(argv: string[]): { limit: number; dryRun: boolean; before?: Date } {
   let limit = 500;
   let dryRun = false;
+  let before: Date | undefined;
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--limit' && argv[i + 1]) {
+    const arg = argv[i];
+    if (arg === '--limit' && argv[i + 1]) {
       limit = Math.max(1, parseInt(argv[i + 1], 10) || 500);
       i++;
-    } else if (argv[i] === '--dry-run') {
+    } else if (arg === '--dry-run') {
       dryRun = true;
+    } else if (arg === '--before' && argv[i + 1]) {
+      // #303(コスト配線)デプロイ以前の cost=0 行だけを対象にしたいとき、その時刻を渡す。
+      const d = new Date(argv[i + 1]);
+      if (Number.isNaN(d.getTime())) {
+        throw new Error(`--before の値が不正な日時です: ${argv[i + 1]} (例: 2026-06-01T00:00:00Z)`);
+      }
+      before = d;
+      i++;
+    } else {
+      // 打ち間違い (--dryrun 等) で本番DBに書き込む事故を防ぐため未知引数はエラーにする。
+      throw new Error(`未知の引数: ${arg} (使用可能: --limit N / --dry-run / --before <ISO>)`);
     }
   }
-  return { limit, dryRun };
+  return { limit, dryRun, before };
+}
+
+// 「過去365日」を EvolutionJob と同じ日付境界 (YYYY-MM-DD → T00:00:00.000Z) で組み立てる。
+// now 時刻基準の toISOString() だと数時間ズレて再現性が落ちるため。
+function buildPeriodBoundaries(): { startDate: string; endDate: string } {
+  const end = new Date();
+  const start = new Date(end.getTime() - 365 * 24 * 60 * 60 * 1000);
+  const toBoundary = (d: Date): string => `${d.toISOString().slice(0, 10)}T00:00:00.000Z`;
+  return { startDate: toBoundary(start), endDate: toBoundary(end) };
 }
 
 interface ReevalOutcome {
@@ -65,6 +90,7 @@ interface ReevalOutcome {
 async function reevalOne(
   candidate: Awaited<ReturnType<typeof evolutionBacktestRunRepository.findRecentFormalBtPassed>>[number],
   reevalRunId: string,
+  period: { startDate: string; endDate: string },
 ): Promise<ReevalOutcome> {
   const base = {
     candidateId: candidate.candidateId,
@@ -85,10 +111,6 @@ async function reevalOne(
   const timeframe = normalizeTimeframe(dsl.timeframe);
   base.symbol = symbol;
 
-  // 評価期間は evolutionJob と同じ「過去365日」。
-  const end = new Date();
-  const start = new Date(end.getTime() - 365 * 24 * 60 * 60 * 1000);
-
   const resolvedParams = defaultParameterValues(dsl);
   const notePayload = dslToBacktestNotePayload(dsl, resolvedParams);
   const costProfile = getExecutionCostProfile(symbol);
@@ -98,8 +120,8 @@ async function reevalOne(
       hypothesisId: dsl.id,
       symbol,
       timeframe,
-      startDate: start.toISOString(),
-      endDate: end.toISOString(),
+      startDate: period.startDate,
+      endDate: period.endDate,
       notePayload,
       config: {
         initialCapital: 10_000,
@@ -152,20 +174,24 @@ async function reevalOne(
 }
 
 async function main(): Promise<void> {
-  const { limit, dryRun } = parseArgs(process.argv.slice(2));
+  const { limit, dryRun, before } = parseArgs(process.argv.slice(2));
   const reevalRunId = randomUUID();
+  const period = buildPeriodBoundaries();
 
   console.log('=== 進化候補 コスト込み再評価 (one-shot) ===');
-  console.log(`limit(ユニーク候補)=${limit} dryRun=${dryRun}`);
+  console.log(`limit(ユニーク候補)=${limit} dryRun=${dryRun} before=${before ? before.toISOString() : '(なし=全合格行)'}`);
+  console.log(`評価期間 = ${period.startDate} 〜 ${period.endDate}`);
   console.log(`新 evolutionRunId = ${reevalRunId}`);
 
-  const candidates = await evolutionBacktestRunRepository.findRecentFormalBtPassed(limit);
-  console.log(`再評価対象 (formalBtPassed=true, candidateHash 重複除去後): ${candidates.length} 件`);
+  const candidates = await evolutionBacktestRunRepository.findRecentFormalBtPassed(limit, before);
+  console.log(
+    `再評価対象 (formalBtPassed=true${before ? ' かつ createdAt < before' : ''}, candidateHash 重複除去後): ${candidates.length} 件`,
+  );
 
   const outcomes: ReevalOutcome[] = [];
   for (let i = 0; i < candidates.length; i += CONCURRENCY) {
     const batch = candidates.slice(i, i + CONCURRENCY);
-    const results = await Promise.all(batch.map((c) => reevalOne(c, reevalRunId)));
+    const results = await Promise.all(batch.map((c) => reevalOne(c, reevalRunId, period)));
     outcomes.push(...results);
     console.log(`  進捗 ${Math.min(i + CONCURRENCY, candidates.length)}/${candidates.length}`);
   }
