@@ -174,12 +174,19 @@ export class EvolutionBacktestRunRepository {
    *   重複率が極端に高くて over-fetch でも足りない場合は単に少ない件数を返す
    *   (= 呼び出し側は不足を受容して fallback 動作する想定 / 完全保証は paging が必要だが v1 では不要)。
    */
-  async findRecentFormalBtPassed(limit: number = 50): Promise<EvolutionBacktestRun[]> {
+  async findRecentFormalBtPassed(
+    limit: number = 50,
+    createdBefore?: Date,
+  ): Promise<EvolutionBacktestRun[]> {
     const requested = Math.max(1, Math.min(500, limit));
     // ユニーク件数を確保するため 4x まで over-fetch (cap 2000)
     const take = Math.min(2000, requested * 4);
+    // createdBefore 指定時は dedup より前に WHERE で絞る (= 古い世代の cost=0 行を正しく対象化できる)。
+    const where = createdBefore
+      ? { formalBtPassed: true, createdAt: { lt: createdBefore } }
+      : { formalBtPassed: true };
     const rows = await prisma.evolutionBacktestRun.findMany({
-      where: { formalBtPassed: true },
+      where,
       orderBy: { createdAt: 'desc' },
       take,
     });
