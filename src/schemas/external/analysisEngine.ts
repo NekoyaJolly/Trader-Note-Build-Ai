@@ -453,13 +453,24 @@ export type AnalysisEngineScreeningBacktestResponse = z.infer<
 // Phase 1b: アンカード・ウォークフォワード過学習ガード（複数 OOS 窓 + DSR + トレード数フロア）。
 //           インジ期間最適化は別メカニズム（variant DSL 生成）のため Phase 1c に分離。
 
+/**
+ * Phase 1b: 過学習ガード（アンカード WF）の既定値。
+ * per-field default と request 側の object default の両方がここを参照し、単一の真実点にする
+ * （= 二重管理によるドリフト防止）。
+ */
+export const WALK_FORWARD_DEFAULTS = {
+  enabled: true,
+  windows: 4,
+  minTradesPerWindow: 25,
+} as const;
+
 /** Phase 1b: 過学習ガード（アンカード WF）の設定。enabled=false で Phase 1 互換（全期間1回）。 */
 export const AnalysisEngineWalkForwardConfigSchema = z.object({
-  enabled: z.boolean().default(true),
+  enabled: z.boolean().default(WALK_FORWARD_DEFAULTS.enabled),
   /** OOS 窓数（fold 数）。全期間を windows+1 ブロックに等分して anchored WF。 */
-  windows: z.number().int().min(1).max(12).default(4),
+  windows: z.number().int().min(1).max(12).default(WALK_FORWARD_DEFAULTS.windows),
   /** 各 OOS 窓で過学習判定に必要な最低トレード数。未満は not_evaluated。 */
-  minTradesPerWindow: z.number().int().nonnegative().default(25),
+  minTradesPerWindow: z.number().int().nonnegative().default(WALK_FORWARD_DEFAULTS.minTradesPerWindow),
 });
 
 export type AnalysisEngineWalkForwardConfig = z.infer<typeof AnalysisEngineWalkForwardConfigSchema>;
@@ -484,12 +495,11 @@ export const AnalysisEngineOptimizeRequestSchema = z.object({
   maximize: z.enum(['sharpe', 'profit_factor', 'return']).default('sharpe'),
   method: z.enum(['grid', 'sambo']).default('grid'),
   maxTries: z.number().int().positive().optional(),
-  /** Phase 1b: 過学習ガード設定。既定で WF 有効。 */
-  walkForward: AnalysisEngineWalkForwardConfigSchema.optional().default(() => ({
-    enabled: true,
-    windows: 4,
-    minTradesPerWindow: 25,
-  })),
+  /**
+   * Phase 1b: 過学習ガード設定。既定で WF 有効。
+   * 既定値は `WALK_FORWARD_DEFAULTS` を単一の真実点として参照する（= ドリフト防止）。
+   */
+  walkForward: AnalysisEngineWalkForwardConfigSchema.default(() => ({ ...WALK_FORWARD_DEFAULTS })),
 });
 
 export type AnalysisEngineOptimizeRequest = z.infer<typeof AnalysisEngineOptimizeRequestSchema>;

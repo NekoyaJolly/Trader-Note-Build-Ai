@@ -398,7 +398,12 @@ class BacktestingPyEngine:
 
     @staticmethod
     def _extract_trade_returns(stats) -> List[float]:
-        """stats からトレード別リターン (ReturnPct, 小数) のリストを取り出す。"""
+        """stats からトレード別リターン (backtesting.py の trades 列 ReturnPct) を取り出す。
+
+        ReturnPct は **fraction** (例 0.05 = +5%)。summary の `Return [%]` / `Win Rate [%]`
+        など `[%]` 単位の stat とはスケールが異なる点に注意。DSR は returns 列の相対比だけを
+        見るため fraction のまま渡してよい（trial_count 補正と整合）。
+        """
         trades_df = getattr(stats, "_trades", None)
         if trades_df is None or trades_df.empty or "ReturnPct" not in trades_df.columns:
             return []
@@ -500,7 +505,8 @@ class BacktestingPyEngine:
         if len(evaluated_folds) < 2:
             return "not_evaluated"
         folds_pf_positive = sum(1 for f in evaluated_folds if f.oos_summary.pf > 1.0)
-        majority_consistent = folds_pf_positive * 2 >= len(evaluated_folds)
+        # strict majority (過半数): 同数 (例 2/4) は許容しない。
+        majority_consistent = folds_pf_positive * 2 > len(evaluated_folds)
         aggregate_ok = aggregate_oos.pf > 1.0 and (
             aggregate_oos.sharpe is not None and aggregate_oos.sharpe > 0
         )
