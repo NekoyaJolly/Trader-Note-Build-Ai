@@ -371,6 +371,15 @@ export const ScreeningBacktestConfigSchema = z.object({
   leverage: z.number().positive().default(1),
   /** 片道手数料 (%, 例: 0.05 = 0.05%) */
   tradingCost: z.number().min(0).default(0),
+  /**
+   * 往復スプレッド (pips)。analysis-engine 側で `pipSize` と期間平均価格を使って
+   * backtesting.py の `spread`（価格に対する率）に換算する。未指定/0 = スプレッドなし（後方互換）。
+   * 極小SL戦略がコスト無視で過大評価される問題への対処（シンボル別コスト配線）。
+   * 現状は進化ループの正式BTのみが指定し、他経路は未指定（= コスト0据え置き）。
+   */
+  spreadPips: z.number().min(0).optional(),
+  /** 1 pip の価格幅（pips→価格率の換算用）。未指定/0 の場合は spread を適用しない。 */
+  pipSize: z.number().min(0).optional(),
 });
 
 export const AnalysisEngineScreeningBacktestRequestSchema = z.object({

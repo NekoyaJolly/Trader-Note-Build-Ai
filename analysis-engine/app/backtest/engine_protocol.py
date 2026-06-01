@@ -125,6 +125,10 @@ class BTConfig:
     leverage: float = 1.0
     # 片道手数料 (%, 例: 0.05 = 0.05%)
     trading_cost_percent: float = 0.0
+    # 往復スプレッド (pips)。pip_size と期間平均価格で backtesting.py の spread (価格に対する率) に換算。
+    spread_pips: float = 0.0
+    # 1 pip の価格幅。0 の場合は spread を適用しない。
+    pip_size: float = 0.0
 
 
 # ---------------------------------------------------------------

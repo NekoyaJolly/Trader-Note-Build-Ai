@@ -100,6 +100,14 @@ class BacktestingPyEngine:
         StrategyClass = self._build_strategy_class(spec)
         bt_kwargs = self._map_config(config)
 
+        # 往復スプレッド (pips) を backtesting.py の spread (価格に対する一定率) に換算して適用する。
+        # spread は価格に対する率のため、固定 pips を期間平均終値で率に近似変換する (Option A)。
+        # これが無いと極小SL戦略がコスト0で過大評価される (勝率10-20%でも PF>1)。
+        if config.spread_pips > 0 and config.pip_size > 0:
+            avg_price = float(df["Close"].mean())
+            if avg_price > 0:
+                bt_kwargs["spread"] = (config.spread_pips * config.pip_size) / avg_price
+
         # finalize_trades=True: BT 期間末で未決済のトレードを強制 close して stats に含める。
         bt = Backtest(df, StrategyClass, finalize_trades=True, **bt_kwargs)
         stats = bt.run()

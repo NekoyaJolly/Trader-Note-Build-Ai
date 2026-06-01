@@ -99,6 +99,18 @@ function normalizeSymbol(symbol: string): string {
   return symbol.toUpperCase().replace(/[^A-Z]/g, '');
 }
 
+/**
+ * シンボルの 1 pip の価格幅を返す。
+ * 既存の L2 実行コスト換算（createL2ExecutionConfigFromSpreadBars）と同じ規約で、
+ * pips ↔ 価格の変換を行う箇所で唯一の正とする（GOLD/XAU=0.1, JPY ペア=0.01, その他=0.0001）。
+ */
+export function getPipSize(symbol: string): number {
+  const s = normalizeSymbol(symbol);
+  if (s.includes('XAU') || s.includes('GOLD')) return 0.1;
+  if (s.includes('JPY')) return 0.01;
+  return 0.0001;
+}
+
 export function getExecutionCostProfile(symbol: string): SymbolExecutionCostProfile {
   const normalized = normalizeSymbol(symbol);
   const exact = SYMBOL_EXECUTION_COST_PROFILES.find((p) => normalizeSymbol(p.symbol) === normalized);
@@ -136,12 +148,7 @@ export function createL2ExecutionConfigFromSpreadBars(
   }
   const avgP95Spread =
     spreadBars.reduce((sum, bar) => sum + Math.max(0, bar.p95Spread), 0) / spreadBars.length;
-  const pipSize = (() => {
-    const s = symbol.toUpperCase().replace(/[^A-Z]/g, '');
-    if (s.includes('XAU') || s.includes('GOLD')) return 0.1;
-    if (s.includes('JPY')) return 0.01;
-    return 0.0001;
-  })();
+  const pipSize = getPipSize(symbol);
   const spreadPips = pipSize > 0 ? avgP95Spread / pipSize : DEFAULT_L2_ROUND_TRIP_COST_PIPS;
   const fallback = getExecutionCostProfile(symbol);
   return {

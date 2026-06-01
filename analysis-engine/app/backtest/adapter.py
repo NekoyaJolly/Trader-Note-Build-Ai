@@ -80,6 +80,8 @@ def config_to_btconfig(config: ScreeningBacktestConfig) -> BTConfig:
         initial_capital=float(config.initialCapital),
         leverage=float(config.leverage),
         trading_cost_percent=float(config.tradingCost),
+        spread_pips=float(config.spreadPips),
+        pip_size=float(config.pipSize),
     )
 
 
