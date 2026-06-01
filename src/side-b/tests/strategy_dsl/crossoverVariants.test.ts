@@ -115,6 +115,19 @@ describe('generateCrossoverIndicatorVariants', () => {
     }
   });
 
+  it('variant は親や他 variant と ConditionGroup 参照を共有しない（隔離）', () => {
+    const parent = makeDsl('long');
+    const res = generateCrossoverIndicatorVariants(parent, { indicatorIds: ['rsi'], maxVariantsPerIndicator: 3 });
+    // 親の trigger 条件数は不変（追加されていない）。
+    expect(triggerConditions(parent)).toHaveLength(1);
+    // 各 variant の追加条件を書き換えても他 variant / 親に波及しない。
+    const v0 = res.variants[0].variant;
+    const v0conds = (v0.entry as { trigger: ConditionGroup }).trigger.conditions;
+    (v0conds[1] as Condition).value = 999;
+    expect((triggerConditions(res.variants[1].variant)[1] as Condition).value).not.toBe(999);
+    expect(triggerConditions(parent)).toHaveLength(1);
+  });
+
   it('OR ルートの trigger は sub-group 化して AND 追加（既存 OR 意味を保全）', () => {
     const dsl = makeDsl('long');
     (dsl.entry as { trigger: ConditionGroup }).trigger = {

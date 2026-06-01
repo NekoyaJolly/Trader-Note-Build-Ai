@@ -129,7 +129,7 @@ export function generateCrossoverIndicatorVariants(
 ): CrossoverVariantsResult {
   const maxPer = Math.max(1, Math.floor(options.maxVariantsPerIndicator ?? DEFAULT_MAX_PER_INDICATOR));
   const maxTotal = Math.max(1, Math.floor(options.maxTotalVariants ?? DEFAULT_MAX_TOTAL));
-  const { direction, group } = entryParts(parent.entry);
+  const { direction } = entryParts(parent.entry);
 
   const requested = options.indicatorIds ?? CROSSOVER_EDGE_TEMPLATES.map((t) => t.indicatorId);
   const skippedIndicators = requested.filter((id) => !TEMPLATED_INDICATOR_IDS.has(id));
@@ -146,7 +146,9 @@ export function generateCrossoverIndicatorVariants(
     if (taken.length > 0) indicatorsUsed.push(tpl.indicatorId);
     for (const { cond, label } of taken) {
       const variant = structuredClone(parent);
-      variant.entry = withTriggerGroup(variant.entry, andAdd(group, cond));
+      // clone 側の trigger group を使って AND 追加する（親や他 variant との参照共有を防ぐ）。
+      const clonedGroup = entryParts(variant.entry).group;
+      variant.entry = withTriggerGroup(variant.entry, andAdd(clonedGroup, cond));
       variants.push({ variant, indicatorId: tpl.indicatorId, label });
     }
   }
