@@ -219,6 +219,11 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
     const report = await loop.runOneGeneration('breakout');
 
     expect(runFormalBacktest).toHaveBeenCalledTimes(1);
+    // 正式BTにシンボル別の往復スプレッド(pips)と pipSize が渡る（コスト0過大評価の防止）。
+    // EURUSD: 往復1.2pips / pipSize 0.0001。
+    const formalBtArg = runFormalBacktest.mock.calls[0][0];
+    expect(formalBtArg.config?.spreadPips).toBeCloseTo(1.2);
+    expect(formalBtArg.config?.pipSize).toBeCloseTo(0.0001);
     expect(report.promotionCandidates.length).toBeGreaterThanOrEqual(1);
     const cand = report.promotionCandidates.find((c) => c.dslId === 'loop-test-promote');
     expect(cand).toBeDefined();

@@ -503,6 +503,11 @@ class ScreeningBacktestConfig(BaseModel):
     initialCapital: float = Field(default=10_000.0, gt=0)
     leverage: float = Field(default=1.0, gt=0)
     tradingCost: float = Field(default=0.0, ge=0)
+    # 往復スプレッド (pips)。pipSize と期間平均価格で backtesting.py の spread (価格に対する率) に換算する。
+    # 0 = スプレッドなし (後方互換)。極小SL戦略のコスト0過大評価への対処。
+    spreadPips: float = Field(default=0.0, ge=0)
+    # 1 pip の価格幅 (pips→価格率の換算用)。0 の場合は spread を適用しない。
+    pipSize: float = Field(default=0.0, ge=0)
 
 
 class ScreeningBacktestRequest(BaseModel):

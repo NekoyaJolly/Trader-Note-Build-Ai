@@ -39,6 +39,7 @@ import { computeDeflatedSharpeRatio } from '../../shared/statistics/deflatedShar
 import { computeWinRateLift } from '../../shared/statistics/winRateLift';
 import { dslToBacktestNotePayload } from '../strategy_dsl/dslToBacktestNotePayload';
 import { defaultParameterValues } from '../strategy_dsl/dslParameterUtils';
+import { getExecutionCostProfile, getPipSize } from '../strategy_dsl/executionSimulation';
 import { VALIDATION_THRESHOLDS } from '../config/validationThresholds';
 import { normalizeCTraderSymbol } from '../../utils/symbolNormalization';
 import { normalizeTimeframe } from '../constants/timeframes';
@@ -1490,6 +1491,10 @@ export class EvolutionLoop {
       const symbol = normalizeCTraderSymbol(dsl.symbol);
       const timeframe = normalizeTimeframe(dsl.timeframe);
 
+      // シンボル別の往復スプレッド (pips) を正式 BT に渡し、コスト 0 の過大評価を防ぐ。
+      // pips→価格率の換算は価格を持つ analysis-engine 側で行う（pipSize は既存規約を共有）。
+      const costProfile = getExecutionCostProfile(symbol);
+
       let response: AnalysisEngineScreeningBacktestResponse;
       try {
         response = await this.runFormalBacktest({
@@ -1501,7 +1506,13 @@ export class EvolutionLoop {
           startDate: toIsoDateTime(period.start),
           endDate: toIsoDateTime(period.end),
           notePayload,
-          config: { initialCapital: 10_000, leverage: 1, tradingCost: 0 },
+          config: {
+            initialCapital: 10_000,
+            leverage: 1,
+            tradingCost: 0,
+            spreadPips: costProfile.roundTripCostPips,
+            pipSize: getPipSize(symbol),
+          },
         });
       } catch (err) {
         out.push({
