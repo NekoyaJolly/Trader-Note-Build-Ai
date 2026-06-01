@@ -136,10 +136,30 @@ export function resolveReasoningEffort(): ReasoningEffortValue {
   return 'high';
 }
 
-// Phase 2: mutation 数値最適化方式。typed const にして object literal の widening
-// (string 化) を防ぎ、config.ai.mutationStrategy を union 型のまま公開する。
-const MUTATION_STRATEGY: 'llm' | 'deterministic' =
-  process.env.AI_MUTATION_STRATEGY === 'deterministic' ? 'deterministic' : 'llm';
+/**
+ * Phase 2: mutation 数値最適化方式の env 検証。
+ * 許容値: 'llm' | 'deterministic'。未設定 / 不正値は 'llm' にフォールバック。
+ * 不正値（typo / 大文字違い等）は warn を出して「フラグが効かない」運用事故を可視化する。
+ */
+const VALID_MUTATION_STRATEGIES = ['llm', 'deterministic'] as const;
+export type MutationStrategyValue = (typeof VALID_MUTATION_STRATEGIES)[number];
+
+function resolveMutationStrategy(): MutationStrategyValue {
+  const raw = process.env.AI_MUTATION_STRATEGY;
+  if (!raw) return 'llm';
+  const trimmed = raw.trim().toLowerCase();
+  if ((VALID_MUTATION_STRATEGIES as readonly string[]).includes(trimmed)) {
+    return trimmed as MutationStrategyValue;
+  }
+  console.warn(
+    `[Config] AI_MUTATION_STRATEGY に不正な値: "${raw}". 'llm' にフォールバックします. ` +
+      `許容値: ${VALID_MUTATION_STRATEGIES.join(', ')}`,
+  );
+  return 'llm';
+}
+
+// typed const にして object literal の widening (string 化) を防ぎ、union 型のまま公開する。
+const MUTATION_STRATEGY: MutationStrategyValue = resolveMutationStrategy();
 
 export const config = {
   server: {

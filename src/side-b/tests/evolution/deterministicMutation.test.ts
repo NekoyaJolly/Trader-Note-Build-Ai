@@ -161,11 +161,21 @@ describe('generateDeterministicMutants', () => {
       },
       runOptimize: async () => optimizeResp(),
     };
+    const logs: string[] = [];
     const mutants = await generateDeterministicMutants(
-      { parents, scores, count: 2, startDate: '2025-01-01T00:00:00.000Z', endDate: '2025-12-31T00:00:00.000Z' },
+      {
+        parents,
+        scores,
+        count: 2,
+        startDate: '2025-01-01T00:00:00.000Z',
+        endDate: '2025-12-31T00:00:00.000Z',
+        log: (m) => logs.push(m),
+      },
       deps,
     );
     expect(mutants).toHaveLength(1);
     expect(mutants[0].parentIds).toEqual(['p2']);
+    // スキップは黙殺せずログに残る（親 ID 付き）。
+    expect(logs.some((m) => m.includes('skipped parent=p1'))).toBe(true);
   });
 });

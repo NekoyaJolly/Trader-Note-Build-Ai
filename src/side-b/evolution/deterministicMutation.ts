@@ -38,6 +38,11 @@ export interface DeterministicMutationParams {
   sltpOptions?: SlTpCandidateOptions;
   /** stage-2 WF 設定（windows / minTradesPerWindow）。 */
   walkForward?: { windows?: number; minTradesPerWindow?: number };
+  /**
+   * 観測ログ出力口（optional）。個別 optimize 失敗（スキップ）を可視化する。
+   * EvolutionLoop からは generation の errors[] に push するコールバックを渡す。
+   */
+  log?: (message: string) => void;
 }
 
 export type DeterministicMutationDeps = OptimizeIndicatorPeriodsDeps;
@@ -112,8 +117,14 @@ export async function generateDeterministicMutants(
       );
       bestVariant = res.bestVariant;
       bestParams = res.bestParams;
-    } catch {
-      // 個別 optimize 失敗はスキップ（部分結果を返す）。loop 側 try/catch とは別に握りつぶさない。
+    } catch (err) {
+      // 個別 optimize 失敗はスキップ（部分結果を返す）が、黙殺せず親 ID + 理由をログに残す。
+      // 本番で deterministic 有効時に mutant がゼロ/減になった原因を追えるようにする。
+      params.log?.(
+        `[warn] deterministic mutation skipped parent=${parent.id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
       continue;
     }
 

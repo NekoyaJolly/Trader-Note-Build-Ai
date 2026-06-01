@@ -797,6 +797,7 @@ export class EvolutionLoop {
             count: mutationCount,
             startDate: toIsoDateTime(this.deps.defaultPeriod.start),
             endDate: toIsoDateTime(this.deps.defaultPeriod.end),
+            log: (msg) => errors.push(msg),
           },
           { runScreeningBacktest: this.runFormalBacktest, runOptimize: this.runOptimize },
         );

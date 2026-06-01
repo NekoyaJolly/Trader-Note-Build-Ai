@@ -78,4 +78,16 @@ describe('slTpCandidatesFromDsl', () => {
     expect(res.slValues).toContain(1.5);
     expect(res.slValues.length).toBe(5); // 4→5 に正規化
   });
+
+  it('非 finite な points / pct は既定にフォールバックしてハングしない', () => {
+    const res = slTpCandidatesFromDsl(makeDsl(), { points: Infinity, pct: Infinity });
+    // Infinity 混入や無限ループにならず、既定 ±20%/3点で生成される。
+    expect(res.slValues).toEqual([1.2, 1.5, 1.8]);
+    expect(res.slValues.every((v) => Number.isFinite(v))).toBe(true);
+  });
+
+  it('負の pct は既定にフォールバック（反転レンジを防ぐ）', () => {
+    const res = slTpCandidatesFromDsl(makeDsl(), { pct: -0.5 });
+    expect(res.slValues).toEqual([1.2, 1.5, 1.8]);
+  });
 });

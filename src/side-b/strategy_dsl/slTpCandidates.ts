@@ -24,10 +24,17 @@ export interface SlTpCandidates {
 const DEFAULT_PCT = 0.2;
 const DEFAULT_POINTS = 3;
 
-/** points を 1 以上の奇数に正規化（current を中央点に含めるため）。 */
+/** points を 1 以上の奇数に正規化（current を中央点に含めるため）。非 finite は既定にフォールバック。 */
 function normalizePoints(points: number): number {
+  if (!Number.isFinite(points)) return DEFAULT_POINTS;
   const n = Math.max(1, Math.floor(points));
   return n % 2 === 0 ? n + 1 : n;
+}
+
+/** pct を有限かつ 0 以上にクランプ（NaN/Infinity/負値による Infinity 混入・反転レンジを防ぐ）。 */
+function normalizePct(pct: number): number {
+  if (!Number.isFinite(pct) || pct < 0) return DEFAULT_PCT;
+  return pct;
 }
 
 /** number | ParamRef('$x') を resolvedParams で解決。数値でなければ null。 */
@@ -77,7 +84,7 @@ export function slTpCandidatesFromDsl(
   dsl: StrategyDSL,
   options: SlTpCandidateOptions = {},
 ): SlTpCandidates {
-  const pct = options.pct ?? DEFAULT_PCT;
+  const pct = normalizePct(options.pct ?? DEFAULT_PCT);
   const points = options.points ?? DEFAULT_POINTS;
   const resolved = defaultParameterValues(dsl);
 
