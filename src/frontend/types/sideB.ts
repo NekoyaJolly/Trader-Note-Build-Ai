@@ -892,6 +892,17 @@ export interface EvolutionRunCandidate {
     winRate?: number;
     tradeCount?: number;
   } | null;
+  /**
+   * OOS-aware 確証結果（観測）。in-sample 合格に加え OOS/WF も通過したか。
+   * OOS未評価 / 対象外（validation_candidate 以外）は null。
+   */
+  oosResult?: {
+    confirmed: boolean;
+    finalStage: string;
+    oosStatus: string | null;
+    oosPf: number | null;
+    oosWinRate: number | null;
+  } | null;
 }
 
 export interface GetEvolutionRunCandidatesResponse {

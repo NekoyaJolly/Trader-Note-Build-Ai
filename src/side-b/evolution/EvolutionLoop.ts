@@ -40,6 +40,8 @@ import { computeWinRateLift } from '../../shared/statistics/winRateLift';
 import { dslToBacktestNotePayload } from '../strategy_dsl/dslToBacktestNotePayload';
 import { defaultParameterValues } from '../strategy_dsl/dslParameterUtils';
 import { getExecutionCostProfile, getPipSize } from '../strategy_dsl/executionSimulation';
+import { buildOosResultByCandidate } from './oosConfirmation';
+import type { EvolutionOosResultData } from '../../backend/repositories/evolutionBacktestRunRepository';
 import { VALIDATION_THRESHOLDS } from '../config/validationThresholds';
 import { normalizeCTraderSymbol } from '../../utils/symbolNormalization';
 import { normalizeTimeframe } from '../constants/timeframes';
@@ -1056,8 +1058,13 @@ export class EvolutionLoop {
     const oosAwarePromotionSummary = summarizeOosAwarePromotion(oosAwarePromotionDecisions);
 
     // 段階 4a.4: 正式 BT 履歴を永続化 (passed/failed 全件、DSL 不在分岐は無いので欠損なし)。
+    // OOS-aware 判定（validation_confirmed = OOS確証）も候補ごとに並列保持する。
     if (this.evolutionBacktestRepo) {
-      await this.persistFormalBtHistory(verifyResults).catch(() => undefined);
+      const oosResultByCandidate = buildOosResultByCandidate(
+        oosAwarePromotionDecisions,
+        oosValidationResults,
+      );
+      await this.persistFormalBtHistory(verifyResults, oosResultByCandidate).catch(() => undefined);
     }
 
     // STEP 5 Phase D (2026-05-16): Evolution の EdgeLedger 自動登録ブロックを削除。
@@ -1800,6 +1807,8 @@ export class EvolutionLoop {
         outcome: 'win' | 'loss' | 'timeout';
       }>;
     }>,
+    // 候補ごとの OOS-aware 確証結果（candidateId = dslId で lookup）。OOS未評価/対象外は undefined。
+    oosResultByCandidate?: ReadonlyMap<string, EvolutionOosResultData>,
   ): Promise<void> {
     if (!this.evolutionBacktestRepo || verifyResults.length === 0) return;
 
@@ -1819,6 +1828,8 @@ export class EvolutionLoop {
       // repo 側で `Prisma.DbNull` (= SQL NULL) に解釈して既存行 (Phase B-1 以前) と同じ意味論にする。
       // `Prisma.JsonNull` (= JSON 値の null) ではない (PR #139 Copilot review 指摘対応)。
       trades: r.trades,
+      // OOS-aware 確証結果（validation_candidate のみ非 undefined）。未評価/対象外は repo 側で SQL NULL。
+      oosResult: oosResultByCandidate?.get(r.candidate.dslId),
     }));
 
     await this.evolutionBacktestRepo.createMany(rows);
