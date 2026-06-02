@@ -41,6 +41,13 @@ import {
 import { generateDeterministicMutants } from './deterministicMutation';
 import { generateDeterministicCrossovers } from './deterministicCrossover';
 import { computeDeflatedSharpeRatio } from '../../shared/statistics/deflatedSharpeRatio';
+import {
+  evaluateConfirmationGate,
+  summarizeConfirmationGate,
+  toConfirmationGateReportEntry,
+  type ConfirmationGateReportEntry,
+  type ConfirmationGateSummary,
+} from './confirmationGate';
 import { computeWinRateLift } from '../../shared/statistics/winRateLift';
 import { dslToBacktestNotePayload } from '../strategy_dsl/dslToBacktestNotePayload';
 import { defaultParameterValues } from '../strategy_dsl/dslParameterUtils';
@@ -416,6 +423,13 @@ export interface GenerationReport {
   oosAwarePromotionSummary: OosAwarePromotionSummary;
   /** PR #105: 候補ごとの OOS-aware Promotion 判定 (debug / smoke 用)。 */
   oosAwarePromotionDecisions: OosAwarePromotionDecision[];
+  /**
+   * Phase 4: 確証ゲート（コスト込み 6 指標 + DSR）の観測結果。
+   * 本 PR では promotion stage に影響させず観測のみ surface する（enforce は別 PR）。
+   */
+  confirmationGateSummary: ConfirmationGateSummary;
+  /** Phase 4: 候補ごとの確証ゲート判定（不合格メトリクス名付き）。 */
+  confirmationGateResults: ConfirmationGateReportEntry[];
 }
 
 /**
@@ -961,6 +975,10 @@ export class EvolutionLoop {
     // 試行回数 N = formalBtVerifiedCandidates.length (= 同 evolution_run の本格 BT
     // 試行数、local 定義)。Bailey & López de Prado 2014 の式で「N 試行を補正しても
     // 有意か」を評価。本番判定への組み込みは別 PR で対応予定。
+    // Phase 4: 確証ゲート（観測のみ）。DSR + コスト込み 6 指標で各 promotion candidate を
+    // 評価し、結果を GenerationReport に surface する。**stage は変えない**（enforce は別 PR で
+    // フラグ接続）。設計 §2-5: 探索/確証 2 段の確証側を可視化する第一歩。
+    const confirmationGateEntries: ConfirmationGateReportEntry[] = [];
     if (promotionCandidates.length > 0) {
       const dsrTrialCount = formalBtVerifiedCandidates.length;
       const tradePnlsByDslId = new Map<string, readonly number[]>();
@@ -969,16 +987,35 @@ export class EvolutionLoop {
       }
       for (const c of promotionCandidates) {
         const pnls = tradePnlsByDslId.get(c.dslId) ?? [];
-        if (pnls.length === 0) continue;
-        const result = computeDeflatedSharpeRatio({ returns: pnls, trialCount: dsrTrialCount });
-        const detail = result.notComputable
-          ? `notComputable=${result.notComputable}`
-          : `dsr=${result.dsr.toFixed(3)} sr=${result.sharpeRatio.toFixed(3)} maxSr=${result.expectedMaxSr.toFixed(3)} skew=${result.skewness.toFixed(3)} kurt=${result.kurtosis.toFixed(3)}`;
-        errors.push(
-          `[info] DSR observation dslId=${c.dslId} ${detail} T=${result.sampleSize} N=${dsrTrialCount}`,
-        );
+        const dsrResult =
+          pnls.length > 0
+            ? computeDeflatedSharpeRatio({ returns: pnls, trialCount: dsrTrialCount })
+            : null;
+        if (dsrResult) {
+          const detail = dsrResult.notComputable
+            ? `notComputable=${dsrResult.notComputable}`
+            : `dsr=${dsrResult.dsr.toFixed(3)} sr=${dsrResult.sharpeRatio.toFixed(3)} maxSr=${dsrResult.expectedMaxSr.toFixed(3)} skew=${dsrResult.skewness.toFixed(3)} kurt=${dsrResult.kurtosis.toFixed(3)}`;
+          errors.push(
+            `[info] DSR observation dslId=${c.dslId} ${detail} T=${dsrResult.sampleSize} N=${dsrTrialCount}`,
+          );
+        }
+        // Phase 4 確証ゲート（観測）: formalBtMetrics があれば 6 指標 + DSR を評価。
+        if (c.formalBtMetrics) {
+          const cg = evaluateConfirmationGate(
+            c.formalBtMetrics,
+            dsrResult ? { dsr: dsrResult.dsr, notComputable: dsrResult.notComputable } : null,
+          );
+          const entry = toConfirmationGateReportEntry(c.dslId, cg);
+          confirmationGateEntries.push(entry);
+          errors.push(
+            `[info] confirmation gate (観測) dslId=${c.dslId} passed=${cg.passed} ` +
+              `corePassed=${cg.corePassed} overfitWarning=${cg.overfitWarning} ` +
+              `failed=[${entry.failedMetrics.join(',')}]`,
+          );
+        }
       }
     }
+    const confirmationGateSummary = summarizeConfirmationGate(confirmationGateEntries);
 
     // Filter Evolution M2: winRateLift 観測ログ。各 verified candidate (passed/failed
     // 問わず) について、第一親 (= parentIds[0]) の trades と比較して winRateLift を
@@ -1212,6 +1249,8 @@ export class EvolutionLoop {
       oosValidationResults,
       oosAwarePromotionSummary,
       oosAwarePromotionDecisions,
+      confirmationGateSummary,
+      confirmationGateResults: confirmationGateEntries,
     };
     return report;
   }
