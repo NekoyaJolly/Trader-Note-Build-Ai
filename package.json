@@ -119,7 +119,9 @@
   },
   "overrides": {
     "axios": "^1.12.0",
-    "protobufjs": "^7.5.8",
+    "@reiryoku/ctrader-layer": {
+      "protobufjs": "^7.5.8"
+    },
     "@last-mile-context/schema": "$@last-mile-context/schema",
     "@last-mile-context/core": "$@last-mile-context/core",
     "@last-mile-context/cdp-collector": "$@last-mile-context/cdp-collector",

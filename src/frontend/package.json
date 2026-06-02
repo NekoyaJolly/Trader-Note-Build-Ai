@@ -50,7 +50,9 @@
     "vitest": "^4.1.4"
   },
   "overrides": {
-    "serialize-javascript": "^7.0.5",
+    "rollup-plugin-terser": {
+      "serialize-javascript": "^7.0.5"
+    },
     "@last-mile-context/schema": "$@last-mile-context/schema",
     "@last-mile-context/app-bridge": "$@last-mile-context/app-bridge",
     "@last-mile-context/react-bridge": "$@last-mile-context/react-bridge"
