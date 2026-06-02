@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
 /**
  * UI 再設計（P1〜P4）の導線・リダイレクト・ナビ整合 E2E
@@ -19,7 +19,189 @@ const mockUser = {
   ctraderAccounts: [] as unknown[],
 };
 
-async function mockAuthMe(page: import("@playwright/test").Page) {
+const sideAAuthToken = "e2e-side-a-token";
+
+interface ApiCallRecord {
+  readonly method: string;
+  readonly pathname: string;
+  readonly authorization: string | null;
+}
+
+const sideANote = {
+  id: "note-e2e-1",
+  symbol: "EURUSD",
+  side: "buy",
+  entryPrice: 1.082,
+  timestamp: "2026-06-02T09:00:00.000Z",
+  createdAt: "2026-06-02T09:00:00.000Z",
+  aiSummary: "E2E押し目ノート",
+  status: "draft",
+};
+
+const sideAStrategy = {
+  id: "strategy-e2e-1",
+  name: "E2E ブレイクアウト",
+  description: "E2E用の最小ストラテジー",
+  symbol: "EURUSD",
+  side: "buy",
+  status: "active",
+  currentVersionId: "strategy-version-e2e-1",
+  currentVersion: {
+    id: "strategy-version-e2e-1",
+    versionNumber: 1,
+    entryConditions: {
+      operator: "AND",
+      conditions: [],
+    },
+    exitSettings: {
+      stopLoss: { type: "atr_multiple", value: 1.5 },
+      takeProfit: { type: "rr_ratio", value: 2 },
+    },
+    entryTiming: {
+      type: "immediate",
+    },
+    createdAt: "2026-06-02T09:00:00.000Z",
+    changeNote: null,
+  },
+  versions: [],
+  createdAt: "2026-06-02T09:00:00.000Z",
+  updatedAt: "2026-06-02T09:00:00.000Z",
+  tags: ["e2e"],
+};
+
+const sideASettings = {
+  notification: {
+    enabled: true,
+    scoreThreshold: 75,
+    maxPerDay: 10,
+  },
+  timeframes: {
+    primary: "1h",
+    secondary: ["4h", "1d"],
+  },
+  display: {
+    darkMode: true,
+    compactView: false,
+    showAiSuggestions: true,
+  },
+  updatedAt: "2026-06-02T09:00:00.000Z",
+};
+
+function jsonResponse(body: object, status = 200): {
+  readonly status: number;
+  readonly contentType: string;
+  readonly body: string;
+} {
+  return {
+    status,
+    contentType: "application/json",
+    body: JSON.stringify(body),
+  };
+}
+
+async function mockSideAApi(page: Page): Promise<ApiCallRecord[]> {
+  const calls: ApiCallRecord[] = [];
+
+  await page.addInitScript((token) => {
+    localStorage.setItem("auth_token", token);
+  }, sideAAuthToken);
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const pathname = url.pathname;
+    const method = request.method();
+
+    calls.push({
+      method,
+      pathname,
+      authorization: request.headers().authorization ?? null,
+    });
+
+    if (method === "GET" && pathname === "/api/auth/me") {
+      await route.fulfill(jsonResponse({ user: mockUser }));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/trades/notes/status-counts") {
+      await route.fulfill(jsonResponse({ draft: 1, active: 0, archived: 0 }));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/trades/notes") {
+      await route.fulfill(jsonResponse({ notes: [sideANote] }));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/notifications/unread-count") {
+      await route.fulfill(jsonResponse({ data: { unreadCount: 1 } }));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/notifications") {
+      await route.fulfill(jsonResponse({
+        notifications: [
+          {
+            id: "notification-e2e-1",
+            matchResultId: "match-e2e-1",
+            sentAt: "2026-06-02T10:00:00.000Z",
+            channel: "in_app",
+            isRead: false,
+            readAt: null,
+            createdAt: "2026-06-02T10:00:00.000Z",
+            matchResult: {
+              score: 0.92,
+              evaluatedAt: "2026-06-02T10:00:00.000Z",
+            },
+            tradeNote: {
+              symbol: "EURUSD",
+              side: "BUY",
+              timeframe: "1h",
+            },
+            reasonSummary: "押し目条件が一致",
+          },
+        ],
+      }));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/side-b/hypotheses/pending-validation") {
+      await route.fulfill(jsonResponse({ hypotheses: [] }));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/daily-status") {
+      await route.fulfill(jsonResponse({ status: "EURUSDの押し目候補を確認" }));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/strategies") {
+      await route.fulfill(jsonResponse({ data: { strategies: [sideAStrategy] } }));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/settings") {
+      await route.fulfill(jsonResponse({ data: sideASettings }));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/indicators/metadata") {
+      await route.fulfill(jsonResponse({ data: { indicators: [], categories: [] } }));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/indicators/settings") {
+      await route.fulfill(jsonResponse({ data: { activeSet: { configs: [] } } }));
+      return;
+    }
+
+    await route.fulfill(jsonResponse({ error: `E2E未mock API: ${method} ${pathname}` }, 500));
+  });
+
+  return calls;
+}
+
+async function mockAuthMe(page: Page) {
   await page.route("**/api/auth/me", async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
@@ -50,7 +232,7 @@ const mockAgentStatusBody = JSON.stringify({
   },
 });
 
-async function mockSideBAgentDashboardApis(page: import("@playwright/test").Page) {
+async function mockSideBAgentDashboardApis(page: Page) {
   await page.route("**/api/side-b/agent/status", async (route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
@@ -210,6 +392,51 @@ test.describe("ホーム・lastSideAPath（モック認証）", () => {
     });
     await page.goto("/");
     await expect(page.getByTestId("home-last-continue")).toHaveCount(0);
+  });
+});
+
+test.describe("Side-A UX最小導線（モック認証）", () => {
+  test("ホームの主要CTAとKPIが表示され、Side-A APIに認証ヘッダーが付く", async ({ page }) => {
+    const apiCalls = await mockSideAApi(page);
+
+    await page.goto("/");
+
+    await expect(page.getByRole("heading", { name: /TradeAssist/ })).toBeVisible();
+    await expect(page.getByText("下書きノート")).toBeVisible();
+    await expect(page.getByText("未読通知")).toBeVisible();
+    await expect(page.getByText("AI 要確認")).toBeVisible();
+    await expect(page.getByText("EURUSDの押し目候補を確認")).toBeVisible();
+    await expect(page.getByRole("link", { name: /トレードノート/ }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: /市場を見る/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /ストラテジーを確認/ })).toBeVisible();
+    await expect(page.getByText("EURUSD").first()).toBeVisible();
+
+    const protectedCalls = apiCalls.filter((call) => call.pathname.startsWith("/api/"));
+    expect(protectedCalls.length).toBeGreaterThan(0);
+    expect(protectedCalls.every((call) => call.authorization === `Bearer ${sideAAuthToken}`)).toBe(true);
+    expect(protectedCalls.some((call) => call.pathname === "/api/trades/notes")).toBe(true);
+    expect(protectedCalls.some((call) => call.pathname === "/api/notifications/unread-count")).toBe(true);
+  });
+
+  test("主要Side-Aページが実DBなしのAPI mockで表示できる", async ({ page }) => {
+    await mockSideAApi(page);
+
+    await page.goto("/notes");
+    await expect(page.getByRole("heading", { name: /トレードノート/ })).toBeVisible();
+    await expect(page.getByText("EURUSD").first()).toBeVisible();
+
+    await page.goto("/strategies");
+    await expect(page.getByRole("heading", { name: /ストラテジー/ })).toBeVisible();
+    await expect(page.getByText("E2E ブレイクアウト")).toBeVisible();
+
+    await page.goto("/notifications");
+    await expect(page.getByRole("heading", { name: /通知一覧/ })).toBeVisible();
+    await expect(page.getByText("押し目条件が一致")).toBeVisible();
+
+    await page.goto("/settings");
+    await expect(page.getByRole("heading", { name: "設定" })).toBeVisible();
+    await expect(page.getByText("通知設定")).toBeVisible();
+    await expect(page.getByRole("button", { name: "設定を保存" })).toBeVisible();
   });
 });
 
