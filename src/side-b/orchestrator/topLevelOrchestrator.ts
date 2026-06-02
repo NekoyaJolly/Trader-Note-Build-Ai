@@ -101,11 +101,16 @@ export interface TopLevelOrchestratorInput {
  * 専門 Agent 起動 callback の集合。
  * scheduler 側で wire (= 既存 Job への委譲) する。テストでは mock 化可能。
  */
+export interface TopLevelOrchestratorJobContext {
+  /** HTTP 境界から渡された相関ID。Job 内部の外部呼び出しや report に任意で引き継ぐ。 */
+  correlationId?: string;
+}
+
 export interface TopLevelOrchestratorJobInvokers {
   runPlanGeneration: () => Promise<void>;
   runScreening: () => Promise<void>;
   runFullValidation: () => Promise<void>;
-  runEvolution: () => Promise<void>;
+  runEvolution: (context?: TopLevelOrchestratorJobContext) => Promise<void>;
 }
 
 export interface TopLevelOrchestratorExecutionOptions {
@@ -386,7 +391,7 @@ export class TopLevelOrchestrator {
       });
 
       // dispatchAction
-      const executedJobs = await this.dispatchAction(output);
+      const executedJobs = await this.dispatchAction(output, correlationId);
       this.log(`action=${output.action} 完了、executed=${executedJobs.join(',')}`);
 
       // AgentRun を 'succeeded' で閉じる
@@ -646,7 +651,10 @@ export class TopLevelOrchestrator {
    * `wait` は no-op、`run_all` は 3 つ並列 (= budget.maxParallel で clamp)。
    * 各 Job 内のエラーは捕捉して log のみ、スキップして次へ進む (= 1 個失敗で全停止しない)。
    */
-  private async dispatchAction(output: TopLevelOrchestratorOutput): Promise<string[]> {
+  private async dispatchAction(
+    output: TopLevelOrchestratorOutput,
+    correlationId: string | null,
+  ): Promise<string[]> {
     const executed: string[] = [];
     const safeInvoke = async (name: string, fn: () => Promise<void>): Promise<void> => {
       try {
@@ -668,7 +676,9 @@ export class TopLevelOrchestrator {
         await safeInvoke('fullValidation', () => this.jobInvokers.runFullValidation());
         return executed;
       case 'run_evolution':
-        await safeInvoke('evolution', () => this.jobInvokers.runEvolution());
+        await safeInvoke('evolution', () =>
+          this.jobInvokers.runEvolution(correlationId ? { correlationId } : undefined),
+        );
         return executed;
       case 'run_all': {
         // PR #248 Copilot review #5/#6/#9/#11 対応: runAllBudget は optional のまま
@@ -678,7 +688,10 @@ export class TopLevelOrchestrator {
         const tasks: Array<{ name: string; fn: () => Promise<void> }> = [
           { name: 'planGeneration', fn: () => this.jobInvokers.runPlanGeneration() },
           { name: 'screening', fn: () => this.jobInvokers.runScreening() },
-          { name: 'evolution', fn: () => this.jobInvokers.runEvolution() },
+          {
+            name: 'evolution',
+            fn: () => this.jobInvokers.runEvolution(correlationId ? { correlationId } : undefined),
+          },
         ];
         const limited = tasks.slice(0, Math.max(1, Math.min(budget.maxParallel, 3)));
         await Promise.all(limited.map((t) => safeInvoke(t.name, t.fn)));

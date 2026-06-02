@@ -264,10 +264,13 @@ describe('TopLevelOrchestratorOutputSchema', () => {
 describe('TopLevelOrchestrator.dispatchAction (= LLM mock で action 別 dispatch を pin)', () => {
   function makeInvokerMocks(): TopLevelOrchestratorJobInvokers & {
     counts: Record<string, number>;
+    contexts: { evolution: string[] };
   } {
     const counts = { plan: 0, screening: 0, fullValidation: 0, evolution: 0 };
+    const contexts = { evolution: [] as string[] };
     return {
       counts,
+      contexts,
       runPlanGeneration: async () => {
         counts.plan++;
       },
@@ -277,8 +280,9 @@ describe('TopLevelOrchestrator.dispatchAction (= LLM mock で action 別 dispatc
       runFullValidation: async () => {
         counts.fullValidation++;
       },
-      runEvolution: async () => {
+      runEvolution: async (context) => {
         counts.evolution++;
+        if (context?.correlationId) contexts.evolution.push(context.correlationId);
       },
     };
   }
@@ -365,7 +369,7 @@ describe('TopLevelOrchestrator.dispatchAction (= LLM mock で action 別 dispatc
     expect(result.executedJobs).toEqual(['screening', 'fullValidation']);
   });
 
-  it('action=run_evolution → evolution のみ呼ばれる', async () => {
+  it('action=run_evolution → evolution のみ呼ばれ、correlationId を渡す', async () => {
     const invokers = makeInvokerMocks();
     const orchestrator = new TopLevelOrchestrator({
       prisma: makePrismaMock() as never,
@@ -375,8 +379,11 @@ describe('TopLevelOrchestrator.dispatchAction (= LLM mock で action 別 dispatc
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       promptRegistry: { getCompositeActive: async () => 'sys' } as any,
     });
-    const result = await orchestrator.decideAndExecute('test');
+    const result = await orchestrator.decideAndExecute('test', {
+      correlationId: 'top-level-evolution-20260603',
+    });
     expect(invokers.counts.evolution).toBe(1);
+    expect(invokers.contexts.evolution).toEqual(['top-level-evolution-20260603']);
     expect(result.executedJobs).toEqual(['evolution']);
   });
 

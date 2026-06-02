@@ -51,6 +51,7 @@ import {
   DEFAULT_EVOLUTION_REGIMES,
   type EvolutionJobResult,
   type EvolutionCarryRetentionResult,
+  type EvolutionJobRunOptions,
 } from './evolutionJob';
 // PR-2 (sideb-refactor): FullValidation / Screening 系を切り出し
 import { FullValidationJob, type FullValidationJobResult } from './fullValidationJob';
@@ -740,8 +741,10 @@ export class SideBScheduler {
         runFullValidation: async () => {
           await this.runFullValidationNow();
         },
-        runEvolution: async () => {
-          await this.runEvolutionNow();
+        runEvolution: async (context) => {
+          await this.runEvolutionNow(
+            context?.correlationId ? { correlationId: context.correlationId } : undefined,
+          );
         },
       },
       log: (msg) => this.log(`[TopLevelOrchestrator] ${msg}`),
@@ -1006,11 +1009,11 @@ export class SideBScheduler {
    * 戻り値形 `{ regimeReports: number; errors: string[] }` は維持
    * (`evolutionMultiGen.test.ts` が直接検証)。
    */
-  async runEvolutionNow(): Promise<EvolutionJobResult> {
+  async runEvolutionNow(options?: EvolutionJobRunOptions): Promise<EvolutionJobResult> {
     if (await this.shouldSkipForEmergency('進化ループジョブ')) {
       return this.buildEvolutionEmergencySkipResult();
     }
-    return this.evolutionJob.run(this.config);
+    return this.evolutionJob.run(this.config, options);
   }
 
   /**

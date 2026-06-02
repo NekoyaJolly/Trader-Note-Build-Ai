@@ -97,6 +97,11 @@ export type OosBacktestRunnerFn = (args: {
   startDate: string;
   endDate: string;
   splitWindow?: OosSplitWindow;
+  /**
+   * HTTP / cron / AgentRun と analysis-engine robustness 呼び出しを突合する相関ID。
+   * default adapter は `X-Correlation-Id` として analysis-engine client に渡す。
+   */
+  correlationId?: string;
 }) => Promise<OosBacktestRunnerResult>;
 
 // =================================================================
@@ -215,6 +220,7 @@ export const defaultOosBacktestRunner: OosBacktestRunnerFn = async ({
   dsl,
   startDate,
   endDate,
+  correlationId,
 }) => {
   // DSL → analysis-engine notePayload (= ScreeningBacktest と同じ converter を流用)
   const params = defaultParameterValues(dsl);
@@ -225,14 +231,17 @@ export const defaultOosBacktestRunner: OosBacktestRunnerFn = async ({
   // PR #110 Copilot review #2 対応: `config` / `thresholds` は schema の `.default(...)` に
   // 任せて drift を防ぐ (= 単一の真実 = `AnalysisEngineOosValidationRequestSchema` の defaults)。
   // 将来閾値を変えるときは schema 側だけ更新すればよい。
-  const response = await runOosValidation({
-    hypothesisId: dsl.id,
-    symbol,
-    timeframe,
-    startDate: toIsoDateTimeForEngine(startDate),
-    endDate: toIsoDateTimeForEngine(endDate),
-    notePayload,
-  });
+  const response = await runOosValidation(
+    {
+      hypothesisId: dsl.id,
+      symbol,
+      timeframe,
+      startDate: toIsoDateTimeForEngine(startDate),
+      endDate: toIsoDateTimeForEngine(endDate),
+      notePayload,
+    },
+    correlationId ? { correlationId } : undefined,
+  );
 
   return {
     metrics: {

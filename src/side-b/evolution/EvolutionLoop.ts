@@ -37,10 +37,13 @@ import type { StrategyPopulation } from './StrategyPopulation';
 import {
   runScreeningBacktest as defaultRunScreeningBacktest,
   runOptimize as defaultRunOptimize,
+  type AnalysisEngineRequestOptions,
 } from '../../backend/services/analysisEngineClient';
+import { buildCorrelationId } from '../../middleware/correlationId';
 import { generateDeterministicMutants } from './deterministicMutation';
 import { generateDeterministicCrossovers } from './deterministicCrossover';
 import { generateHybridMutants, type HybridMutationSummary } from './hybridMutation';
+import type { OptimizeIndicatorPeriodsDeps } from '../strategy_dsl/optimizeIndicatorPeriods';
 import { computeDeflatedSharpeRatio } from '../../shared/statistics/deflatedSharpeRatio';
 import {
   evaluateConfirmationGate,
@@ -215,6 +218,11 @@ export interface EvolutionLoopDeps {
    */
   evolutionRunId?: string;
   /**
+   * HTTP / cron / AgentRun と Evolution 世代生成物を突合するための相関ID。
+   * DB schema は増やさず、analysis-engine ヘッダーと GenerationReport の観測面に残す。
+   */
+  correlationId?: string;
+  /**
    * PR #98: 親プール統合用の EdgeHypothesis ロード口。
    *   - undefined: 既定の `edgeLedger` を使う (= 本番経路)
    *   - null:      EdgeHypothesis 経路を完全に skip (= v1 互換、テスト用 / DB 切り離し運用)
@@ -337,6 +345,11 @@ export interface EvolutionPromotionCandidate {
 
 export interface GenerationReport {
   regime: string;
+  /**
+   * HTTP 境界から渡された相関ID。未指定時は従来通り省略する。
+   * DB 永続化専用列は追加せず、レポートと analysis-engine request の突合用に使う。
+   */
+  correlationId?: string;
   /** 検証スコア（戦略 ID → 合成スコア） */
   scores: Record<string, number>;
   eliteIds: string[];
@@ -525,6 +538,7 @@ export class EvolutionLoop {
   private readonly formalBtTopK: number;
   private readonly evolutionBacktestRepo: EvolutionBacktestPersister | null;
   private readonly evolutionRunId: string;
+  private readonly correlationId: string | null;
   private readonly edgeHypothesisLoader: EdgeHypothesisLoader | null;
   private readonly oosBacktestRunner: OosBacktestRunnerFn | null;
   /** Phase B-2: cron 起動を跨いだ in-memory cache の永続化口 (= null で skip)。 */
@@ -588,6 +602,7 @@ export class EvolutionLoop {
         ? null
         : (deps.evolutionBacktestRepo ?? defaultEvolutionBacktestRepo);
     this.evolutionRunId = deps.evolutionRunId ?? randomUUID();
+    this.correlationId = deps.correlationId ? buildCorrelationId(deps.correlationId) : null;
     // Phase B-2: 既定は null (= cron 跨ぎ復元スキップ)。scheduler 側で本番 repo を明示注入する経路を取る。
     // この既定値はテスト互換 (= prisma に触らない) と明示性を両立する (= oosBacktestRunner と同じ pattern)。
     this.evolutionInstanceCarryRepo = deps.evolutionInstanceCarryRepo ?? null;
@@ -598,6 +613,23 @@ export class EvolutionLoop {
         : (deps.edgeHypothesisLoader ?? defaultEdgeLedger);
     // PR #103: 既定は null (= OOS 評価スキップ → not_evaluated)。明示注入のみ実行。
     this.oosBacktestRunner = deps.oosBacktestRunner ?? null;
+  }
+
+  private buildAnalysisEngineRequestOptions(): AnalysisEngineRequestOptions | undefined {
+    return this.correlationId ? { correlationId: this.correlationId } : undefined;
+  }
+
+  private buildAnalysisEngineDeps(): OptimizeIndicatorPeriodsDeps {
+    return {
+      runScreeningBacktest: (input) =>
+        this.runFormalBacktest(input, this.buildAnalysisEngineRequestOptions()),
+      runOptimize: (input) =>
+        this.runOptimize(input, this.buildAnalysisEngineRequestOptions()),
+    };
+  }
+
+  private withCorrelationLog(message: string): string {
+    return this.correlationId ? `correlationId=${this.correlationId} ${message}` : message;
   }
 
   /**
@@ -616,6 +648,13 @@ export class EvolutionLoop {
     options?: RunOneGenerationOptions,
   ): Promise<GenerationReport> {
     const errors: string[] = [];
+    if (this.correlationId) {
+      errors.push(
+        this.withCorrelationLog(
+          `[info] evolution generation start: runId=${this.evolutionRunId} regime=${regime}`,
+        ),
+      );
+    }
     const { population, adapter, mutationAgent, crossoverAgent, enforcer } = this.deps;
     const period = this.deps.defaultPeriod;
 
@@ -825,6 +864,7 @@ export class EvolutionLoop {
     let crosses: StrategyDSL[] = [];
     let hybridMutationSummary: HybridMutationSummary | undefined;
     let edgeSweepSummary: GenerationReport['edgeSweepSummary'] | undefined;
+    const analysisEngineDeps = this.buildAnalysisEngineDeps();
     try {
       if (this.mutationStrategy === 'llm') {
         mutants = await mutationAgent.generateMutants(
@@ -845,7 +885,7 @@ export class EvolutionLoop {
             endDate: toIsoDateTime(this.deps.defaultPeriod.end),
             log: (msg) => errors.push(msg),
           },
-          { runScreeningBacktest: this.runFormalBacktest, runOptimize: this.runOptimize },
+          analysisEngineDeps,
         );
         errors.push(
           `[info] deterministic mutation: parents=${parentDsls.length} count=${mutationCount} → mutants=${mutants.length}`,
@@ -862,7 +902,7 @@ export class EvolutionLoop {
             repairHints: repairHintsForMutation.size > 0 ? repairHintsForMutation : undefined,
             log: (msg) => errors.push(msg),
           },
-          { runScreeningBacktest: this.runFormalBacktest, runOptimize: this.runOptimize },
+          analysisEngineDeps,
         );
         mutants = hybrid.mutants;
         hybridMutationSummary = hybrid.summary;
@@ -961,7 +1001,7 @@ export class EvolutionLoop {
               : undefined,
             log: (msg) => errors.push(msg),
           },
-          { runScreeningBacktest: this.runFormalBacktest, runOptimize: this.runOptimize },
+          analysisEngineDeps,
         );
         errors.push(
           `[info] ${this.crossoverStrategy} crossover edge sweep: parents=${parentDsls.length} count=${crossoverCount} → crosses=${crosses.length}`,
@@ -1292,6 +1332,7 @@ export class EvolutionLoop {
 
     const report: GenerationReport = {
       regime,
+      ...(this.correlationId ? { correlationId: this.correlationId } : {}),
       scores: Object.fromEntries(scores.entries()),
       eliteIds: elites.map((e) => e.id),
       mutantsReceived: mutants.length,
@@ -1415,6 +1456,7 @@ export class EvolutionLoop {
           startDate: splitWindow.oosStart,
           endDate: splitWindow.oosEnd,
           splitWindow,
+          ...(this.correlationId ? { correlationId: this.correlationId } : {}),
         });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -1683,23 +1725,26 @@ export class EvolutionLoop {
 
       let response: AnalysisEngineScreeningBacktestResponse;
       try {
-        response = await this.runFormalBacktest({
-          // hypothesisId は analysis-engine 側でトレース文字列として使われるだけ (UUID 強制なし)。
-          // 進化候補は EdgeHypothesis を持たないため、dslId を識別子として渡す。
-          hypothesisId: dsl.id,
-          symbol,
-          timeframe,
-          startDate: toIsoDateTime(period.start),
-          endDate: toIsoDateTime(period.end),
-          notePayload,
-          config: {
-            initialCapital: 10_000,
-            leverage: 1,
-            tradingCost: 0,
-            spreadPips: costProfile.roundTripCostPips,
-            pipSize: getPipSize(symbol),
+        response = await this.runFormalBacktest(
+          {
+            // hypothesisId は analysis-engine 側でトレース文字列として使われるだけ (UUID 強制なし)。
+            // 進化候補は EdgeHypothesis を持たないため、dslId を識別子として渡す。
+            hypothesisId: dsl.id,
+            symbol,
+            timeframe,
+            startDate: toIsoDateTime(period.start),
+            endDate: toIsoDateTime(period.end),
+            notePayload,
+            config: {
+              initialCapital: 10_000,
+              leverage: 1,
+              tradingCost: 0,
+              spreadPips: costProfile.roundTripCostPips,
+              pipSize: getPipSize(symbol),
+            },
           },
-        });
+          this.buildAnalysisEngineRequestOptions(),
+        );
       } catch (err) {
         out.push({
           candidate: {
@@ -1831,7 +1876,9 @@ export class EvolutionLoop {
     try {
       const carry = await this.evolutionInstanceCarryRepo.findLatestByRegime(regime);
       if (!carry) {
-        return `[info] B-2 carry: regime=${regime} 既存 carry なし (= 初回 cron / 該当 regime 履歴なし)`;
+        return this.withCorrelationLog(
+          `[info] B-2 carry: regime=${regime} 既存 carry なし (= 初回 cron / 該当 regime 履歴なし)`,
+        );
       }
       const { tradesByDslId, repairHints, repairBaselines } = carry.payload;
 
@@ -1878,15 +1925,15 @@ export class EvolutionLoop {
       }
       this.lastRepairBaselines = baselinesMap;
 
-      return (
+      return this.withCorrelationLog(
         `[info] B-2 carry restored: regime=${regime} carryId=${carry.id} ` +
         `gen=${carry.generation} prevRunId=${carry.evolutionRunId} ` +
         `trades=${this.tradesByDslId.size} hints=${this.lastRepairHints.size} ` +
-        `baselines=${this.lastRepairBaselines.size}`
+        `baselines=${this.lastRepairBaselines.size}`,
       );
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      return `[warn] B-2 carry load 失敗: regime=${regime} error=${msg}`;
+      return this.withCorrelationLog(`[warn] B-2 carry load 失敗: regime=${regime} error=${msg}`);
     }
   }
 
@@ -1962,14 +2009,14 @@ export class EvolutionLoop {
           repairBaselines: baselinesPayload,
         },
       });
-      return (
+      return this.withCorrelationLog(
         `[info] B-2 carry saved: regime=${regime} runId=${this.evolutionRunId} ` +
         `trades=${this.tradesByDslId.size} hints=${this.lastRepairHints.size} ` +
-        `baselines=${this.lastRepairBaselines.size}`
+        `baselines=${this.lastRepairBaselines.size}`,
       );
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      return `[warn] B-2 carry save 失敗: regime=${regime} error=${msg}`;
+      return this.withCorrelationLog(`[warn] B-2 carry save 失敗: regime=${regime} error=${msg}`);
     }
   }
 

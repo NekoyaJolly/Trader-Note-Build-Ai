@@ -317,12 +317,14 @@ router.get('/side-b/run-full-validation', async (_req: Request, res: Response) =
  *
  * 認証: cronAuth (CRON_SECRET Bearer)
  */
-router.post('/side-b/run-evolution', async (_req: Request, res: Response) => {
+router.post('/side-b/run-evolution', async (req: Request, res: Response) => {
   const startTime = Date.now();
   try {
     console.log('[Cron] 進化ループ手動実行を開始します');
     const scheduler = getSideBScheduler();
-    const result = await scheduler.runEvolutionNow();
+    const result = await scheduler.runEvolutionNow(
+      req.correlationId ? { correlationId: req.correlationId } : undefined,
+    );
     console.log('[Cron] 進化ループ手動実行完了:', result);
     res.json({
       success: result.errors.length === 0,
