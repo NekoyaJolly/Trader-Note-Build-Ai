@@ -103,6 +103,7 @@ const outcomeLabels: Record<string, string> = {
 // ===== APIクライアント =====
 
 import { getPublicApiBaseUrl } from "@/lib/publicApiBaseUrl";
+import { apiFetch } from "@/lib/apiClient";
 
 const API_BASE = getPublicApiBaseUrl() + "/api/side-b";
 
@@ -110,7 +111,7 @@ async function fetchDashboard(period: ComparisonPeriod, symbol?: string): Promis
   const params = new URLSearchParams({ period });
   if (symbol) params.append("symbol", symbol);
 
-  const response = await fetch(`${API_BASE}/comparison/dashboard?${params}`);
+  const response = await apiFetch(`${API_BASE}/comparison/dashboard?${params}`);
   if (!response.ok) {
     throw new Error("比較データの取得に失敗しました");
   }

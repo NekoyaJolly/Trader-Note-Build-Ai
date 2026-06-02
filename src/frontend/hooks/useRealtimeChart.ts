@@ -13,6 +13,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { EventSourcePolyfill } from 'event-source-polyfill';
+import { apiFetch } from '@/lib/apiClient';
 
 // ========================================
 // 型定義
@@ -217,9 +218,8 @@ export function useRealtimeChart(
 
     try {
       // 1. まず cTrader に接続
-      const connectRes = await fetch(`${apiBase}/api/realtime/connect?timeframe=${timeframe}`, {
+      const connectRes = await apiFetch(`${apiBase}/api/realtime/connect?timeframe=${timeframe}`, {
         method: 'POST',
-        credentials: 'include',
       });
 
       if (!connectRes.ok) {
@@ -236,11 +236,9 @@ export function useRealtimeChart(
       }
 
       // 2. シンボルを購読
-      const subscribeRes = await fetch(`${apiBase}/api/realtime/subscribe`, {
+      const subscribeRes = await apiFetch(`${apiBase}/api/realtime/subscribe`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbols: [symbol], timeframe }),
-        credentials: 'include',
       });
       const subscribeData = await subscribeRes.json();
 
@@ -249,12 +247,10 @@ export function useRealtimeChart(
       }
 
       // 3. SSE ストリームに接続（EventSourcePolyfill を使用して CORS 対応）
-      // ローカル環境では withCredentials は不要
-      const isLocalhost = apiBase.includes('localhost');
       const eventSource = new EventSourcePolyfill(
         `${apiBase}/api/realtime/stream/${symbol}?timeframe=${timeframe}`,
         {
-          withCredentials: !isLocalhost, // 本番環境のみ credentials を使用
+          withCredentials: true,
           heartbeatTimeout: 120000, // 2分のハートビートタイムアウト
         }
       );
@@ -380,9 +376,8 @@ export function useRealtimeChart(
    */
   const subscribe = useCallback(async (symbols: string[]) => {
     try {
-      const res = await fetch(`${apiBase}/api/realtime/subscribe`, {
+      const res = await apiFetch(`${apiBase}/api/realtime/subscribe`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbols }),
       });
       const data = await res.json();
@@ -495,4 +490,3 @@ export function useRealtimeChart(
     setAutoConnectEnabled,
   };
 }
-

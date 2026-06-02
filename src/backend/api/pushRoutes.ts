@@ -63,7 +63,7 @@ router.get('/vapid-public-key', (_req: Request, res: Response) => {
  * GET /api/push/status
  * Web Pushサービスの状態を取得
  */
-router.get('/status', (_req: Request, res: Response) => {
+router.get('/status', requireAuth, (_req: Request, res: Response) => {
   res.json({
     success: true,
     data: {

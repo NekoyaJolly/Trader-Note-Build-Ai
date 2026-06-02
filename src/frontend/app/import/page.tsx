@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Progress } from "@/components/ui/Progress";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/Alert";
 import { fetchProfileOptions, ProfileOption } from "@/lib/api";
+import { apiFetch } from "@/lib/apiClient";
 
 import { getPublicApiBaseUrl } from "@/lib/publicApiBaseUrl";
 
@@ -61,9 +62,8 @@ export default function ImportPage() {
 
   // CSV をテキストとして送信する（バックエンドで保存→取り込み→ノート生成）
   async function uploadCsvText(csvText: string, filename: string) {
-    const resp = await fetch(`${API_BASE_URL}/api/trades/import/upload-text`, {
+    const resp = await apiFetch(`${API_BASE_URL}/api/trades/import/upload-text`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         filename,
         csvText,

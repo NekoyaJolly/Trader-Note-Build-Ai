@@ -12,25 +12,23 @@
  */
 
 import type { Request, Response, NextFunction } from 'express';
+import { z } from 'zod';
+
+const CronSecretQuerySchema = z.object({
+  secret: z.string().optional(),
+});
 
 /**
  * Cronリクエスト認証ミドルウェア
  * 
  * CRON_SECRET環境変数と照合して認証
- * 開発環境ではCRON_SECRET未設定でもパススルー可能
  */
 export function cronAuth(req: Request, res: Response, next: NextFunction): void {
   const cronSecret = process.env.CRON_SECRET;
 
-  // 開発環境でCRON_SECRET未設定の場合は警告を出してパススルー
   if (!cronSecret) {
-    if (process.env.NODE_ENV === 'production') {
-      console.error('[CronAuth] CRON_SECRET が設定されていません');
-      res.status(500).json({ error: 'Cronシークレットが設定されていません' });
-      return;
-    }
-    console.warn('[CronAuth] CRON_SECRET が未設定です。開発環境のためパススルーします。');
-    next();
+    console.error('[CronAuth] CRON_SECRET が設定されていません');
+    res.status(500).json({ error: 'Cronシークレットが設定されていません' });
     return;
   }
 
@@ -43,8 +41,9 @@ export function cronAuth(req: Request, res: Response, next: NextFunction): void 
   }
 
   // クエリパラメータからも取得を試みる（外部cron用）
-  if (!providedSecret && req.query.secret) {
-    providedSecret = req.query.secret as string;
+  const queryResult = CronSecretQuerySchema.safeParse(req.query);
+  if (!providedSecret && queryResult.success) {
+    providedSecret = queryResult.data.secret;
   }
 
   // シークレットの検証

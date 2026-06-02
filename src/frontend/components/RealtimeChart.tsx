@@ -22,6 +22,7 @@ import { useTradingAccount } from "@/hooks/useTradingAccount";
 import { OrderPanel } from "@/components/chart/OrderPanel";
 import { ChartPaneContainer } from "@/components/chart/ChartPaneContainer";
 import { DrawingMode } from "@/components/chart/DrawingOverlay";
+import { apiFetch } from "@/lib/apiClient";
 
 interface RealtimeChartProps {
 	symbol: string;
@@ -198,9 +199,9 @@ export function RealtimeChart({
 		let isCancelled = false;
 		const loadLines = async () => {
 			try {
-				const res = await fetch(
+				const res = await apiFetch(
 					`${apiBase}/api/chart-drawings?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(String(timeframe))}`,
-					{ credentials: "include" }
+					{ cache: "no-store" }
 				);
 				if (!res.ok) {
 					throw new Error(`HTTP ${res.status}`);
@@ -257,7 +258,7 @@ export function RealtimeChart({
 		setFallbackLoading(true);
 		setFallbackError(null);
 		try {
-			const res = await fetch(
+			const res = await apiFetch(
 				`${apiBase}/api/market-analysis/${symbol}?timeframe=${apiTimeframe}&count=${dataCount}`
 			);
 			if (!res.ok) throw new Error(`APIエラー: ${res.status}`);
@@ -359,12 +360,8 @@ export function RealtimeChart({
 		} else {
 			window.localStorage.setItem(storageKey, JSON.stringify(lines));
 		}
-		void fetch(`${apiBase}/api/chart-drawings/sync`, {
+		void apiFetch(`${apiBase}/api/chart-drawings/sync`, {
 			method: "PUT",
-			headers: {
-				"Content-Type": "application/json",
-			},
-			credentials: "include",
 			body: JSON.stringify({
 				symbol,
 				timeframe: String(timeframe),

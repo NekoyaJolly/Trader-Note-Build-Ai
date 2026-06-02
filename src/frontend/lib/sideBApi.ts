@@ -67,7 +67,8 @@ import type {
   EmergencyStopResponse,
   EmergencyResumeResponse,
 } from "@/types/sideB";
-import { getPublicApiBaseUrl } from "./publicApiBaseUrl";
+import { ApiClientError, apiRequest } from "./apiClient";
+import type { ApiClientErrorKind } from "./apiClient";
 
 
 // ===========================================
@@ -82,6 +83,7 @@ export class SideBApiError extends Error {
     message: string,
     public readonly status: number,
     public readonly endpoint: string,
+    public readonly kind: ApiClientErrorKind = "http",
   ) {
     super(message);
     this.name = "SideBApiError";
@@ -100,61 +102,18 @@ async function request<T>(
   endpoint: string,
   init?: RequestInit,
 ): Promise<T> {
-  const url = `${getPublicApiBaseUrl()}/api/side-b${endpoint}`;
-  let response: Response;
   try {
-    response = await fetch(url, {
+    return await apiRequest<T>(`/api/side-b${endpoint}`, {
       cache: "no-store",
-      headers: {
-        "Content-Type": "application/json",
-        ...(init?.headers ?? {}),
-      },
       ...init,
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new SideBApiError(`ネットワークエラー: ${msg}`, 0, endpoint);
-  }
-
-  let body: unknown = null;
-  try {
-    body = await response.json();
-  } catch {
-    // JSON でないレスポンス（プロキシエラー HTML 等）
-    if (!response.ok) {
-      throw new SideBApiError(
-        `${response.status} ${response.statusText}`,
-        response.status,
-        endpoint,
-      );
+    if (err instanceof ApiClientError) {
+      throw new SideBApiError(err.message, err.status, endpoint, err.kind);
     }
-    throw new SideBApiError(
-      "レスポンスが JSON ではありません",
-      response.status,
-      endpoint,
-    );
+    const message = err instanceof Error ? err.message : "API リクエストに失敗しました";
+    throw new SideBApiError(message, 0, endpoint, "network");
   }
-
-  if (!response.ok) {
-    const msg =
-      (body as { error?: string })?.error ??
-      `${response.status} ${response.statusText}`;
-    throw new SideBApiError(msg, response.status, endpoint);
-  }
-
-  // バックエンドは `{ success: false, error }` の形でも 200 を返さない契約だが、
-  // 念のためガードする（Phase 4c 実装はエラー時は 4xx/5xx）。
-  if (
-    body &&
-    typeof body === "object" &&
-    "success" in body &&
-    (body as { success: unknown }).success === false
-  ) {
-    const msg = (body as { error?: string }).error ?? "API がエラーを返しました";
-    throw new SideBApiError(msg, response.status, endpoint);
-  }
-
-  return body as T;
 }
 
 // ===========================================

@@ -10,6 +10,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import { apiFetch } from '@/lib/apiClient';
 
 // ============================================
 // 型定義
@@ -52,7 +53,7 @@ interface DataPresetModalProps {
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 
 async function fetchPresets(): Promise<DataPreset[]> {
-    const response = await fetch(`${API_BASE_URL}/api/ohlcv/presets`, {
+    const response = await apiFetch(`${API_BASE_URL}/api/ohlcv/presets`, {
         cache: 'no-store',
     });
     if (!response.ok) throw new Error('プリセット一覧の取得に失敗しました');
@@ -73,7 +74,7 @@ async function importCSV(file: File, options?: {
     if (options?.presetName) formData.append('presetName', options.presetName);
     if (options?.description) formData.append('description', options.description);
 
-    const response = await fetch(`${API_BASE_URL}/api/ohlcv/import`, {
+    const response = await apiFetch(`${API_BASE_URL}/api/ohlcv/import`, {
         method: 'POST',
         body: formData,
     });
@@ -88,7 +89,7 @@ async function importCSV(file: File, options?: {
 }
 
 async function deletePreset(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/api/ohlcv/presets/${id}`, {
+    const response = await apiFetch(`${API_BASE_URL}/api/ohlcv/presets/${id}`, {
         method: 'DELETE',
     });
     if (!response.ok) {

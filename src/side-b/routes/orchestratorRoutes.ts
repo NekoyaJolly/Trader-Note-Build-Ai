@@ -36,6 +36,7 @@ import {
 import {
   createOrchestratorController,
 } from '../controllers/orchestratorController';
+import { requireRole } from '../../middleware/authMiddleware';
 
 export interface OrchestratorRouterOptions {
   /** RunLedgerService (省略時は default Prisma に接続) */
@@ -58,15 +59,16 @@ export function createOrchestratorRouter(
   const draftService = options?.draftService ?? createStrategyDraftService();
   const controller = createOrchestratorController({ ledger, draftService });
   const router = Router();
+  const requireAdmin = requireRole(['admin']);
 
   router.get('/runs', (req, res) => { void controller.listRuns(req, res); });
   router.get('/runs/:id', (req, res) => { void controller.getRunWithSteps(req, res); });
   router.get('/drafts', (req, res) => { void controller.listDrafts(req, res); });
   router.get('/drafts/:id', (req, res) => { void controller.getDraft(req, res); });
-  router.post('/drafts/:id/approve', (req, res) => { void controller.approveDraft(req, res); });
-  router.post('/drafts/:id/reject', (req, res) => { void controller.rejectDraft(req, res); });
-  router.post('/drafts/:id/queue', (req, res) => { void controller.queueDraft(req, res); });
-  router.post('/drafts/:id/archive', (req, res) => { void controller.archiveDraft(req, res); });
+  router.post('/drafts/:id/approve', requireAdmin, (req, res) => { void controller.approveDraft(req, res); });
+  router.post('/drafts/:id/reject', requireAdmin, (req, res) => { void controller.rejectDraft(req, res); });
+  router.post('/drafts/:id/queue', requireAdmin, (req, res) => { void controller.queueDraft(req, res); });
+  router.post('/drafts/:id/archive', requireAdmin, (req, res) => { void controller.archiveDraft(req, res); });
 
   return router;
 }
