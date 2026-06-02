@@ -20,8 +20,10 @@
 
 import { Router } from 'express';
 import { validationController } from '../controllers/validationController';
+import { requireRole } from '../../middleware/authMiddleware';
 
 const router = Router();
+const requireAdmin = requireRole(['admin']);
 
 // 静的パスは :id より先に置く（Express のルートマッチ優先度のため）
 router.get('/', validationController.listHypotheses);
@@ -30,9 +32,9 @@ router.get('/testing', validationController.listTesting);
 router.get('/recently-validated', validationController.listRecentlyValidated);
 router.get('/recent-confirmed', validationController.listRecentConfirmed);
 router.get('/recent-rejected', validationController.listRecentRejected);
-router.post('/batch-validate', validationController.batchValidate);
+router.post('/batch-validate', requireAdmin, validationController.batchValidate);
 
-router.post('/:id/validate', validationController.validate);
+router.post('/:id/validate', requireAdmin, validationController.validate);
 router.get('/:id', validationController.getHypothesis);
 router.get('/:id/validation-status', validationController.getValidationStatus);
 router.get('/:id/validation-history', validationController.getValidationHistory);

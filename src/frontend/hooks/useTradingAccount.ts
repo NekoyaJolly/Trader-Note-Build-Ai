@@ -24,6 +24,7 @@ import {
   PositionsResponseSchema,
   PositionUpdateEventSchema
 } from '@/schemas/api/trading';
+import { apiFetch } from '@/lib/apiClient';
 
 // ========================================
 // カスタムフック
@@ -52,9 +53,7 @@ export function useTradingAccount(enabled: boolean = true) {
      */
     const fetchAccountInfo = async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/trading/account`, {
-          credentials: 'include',
-        });
+        const response = await apiFetch(`${API_BASE}/api/trading/account`);
 
         const data = await response.json();
 
@@ -80,9 +79,7 @@ export function useTradingAccount(enabled: boolean = true) {
      */
     const fetchPositions = async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/trading/positions`, {
-          credentials: 'include',
-        });
+        const response = await apiFetch(`${API_BASE}/api/trading/positions`);
 
         const data = await response.json();
 
@@ -176,9 +173,7 @@ export function useTradingAccount(enabled: boolean = true) {
 
     try {
       // 口座情報を取得
-      const accountResponse = await fetch(`${API_BASE}/api/trading/account`, {
-        credentials: 'include',
-      });
+      const accountResponse = await apiFetch(`${API_BASE}/api/trading/account`);
       const accountData = await accountResponse.json();
       if (accountData.success) {
         const result = AccountInfoResponseSchema.safeParse(accountData.data);
@@ -188,9 +183,7 @@ export function useTradingAccount(enabled: boolean = true) {
       }
 
       // ポジション一覧を取得
-      const positionsResponse = await fetch(`${API_BASE}/api/trading/positions`, {
-        credentials: 'include',
-      });
+      const positionsResponse = await apiFetch(`${API_BASE}/api/trading/positions`);
       const positionsData = await positionsResponse.json();
       if (positionsData.success) {
         const result = PositionsResponseSchema.safeParse(positionsData.data);

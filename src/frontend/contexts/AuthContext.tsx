@@ -13,6 +13,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { isBrowserLocalDevOrigin } from '@/lib/isLocalDevOrigin';
 import { getPublicApiBaseUrl } from '@/lib/publicApiBaseUrl';
+import { apiFetch } from '@/lib/apiClient';
 
 // ========================================
 // 型定義
@@ -59,16 +60,6 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 // localStorage のキー名
 const AUTH_TOKEN_KEY = 'auth_token';
 
-/** localStorage から JWT トークンを取得 */
-function getStoredToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    return localStorage.getItem(AUTH_TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -92,18 +83,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchUser = async (): Promise<User | null> => {
     try {
       console.log('[AuthContext] ユーザー情報取得開始');
-      // Cookie に加えて、localStorage の JWT トークンも Authorization ヘッダーで送信
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      const storedToken = getStoredToken();
-      if (storedToken) {
-        headers['Authorization'] = `Bearer ${storedToken}`;
-      }
-      const response = await fetch(`${getPublicApiBaseUrl()}/api/auth/me`, {
+      const response = await apiFetch(`${getPublicApiBaseUrl()}/api/auth/me`, {
         method: 'GET',
-        credentials: 'include', // Cookie も送信（本番環境用）
-        headers,
       });
 
       console.log('[AuthContext] /api/auth/me レスポンス:', response.status, response.statusText);
@@ -208,15 +189,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    */
   const logout = async () => {
     try {
-      const headers: Record<string, string> = {};
-      const storedToken = getStoredToken();
-      if (storedToken) {
-        headers['Authorization'] = `Bearer ${storedToken}`;
-      }
-      await fetch(`${getPublicApiBaseUrl()}/api/auth/logout`, {
+      await apiFetch(`${getPublicApiBaseUrl()}/api/auth/logout`, {
         method: 'POST',
-        credentials: 'include',
-        headers,
       });
 
       // localStorage のトークンもクリア

@@ -13,6 +13,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import { apiFetch } from "@/lib/apiClient";
 
 // ============================================
 // 型定義
@@ -52,7 +53,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 
 /** プリセット一覧を取得 */
 async function fetchPresets(): Promise<DataPreset[]> {
-  const response = await fetch(`${API_BASE_URL}/api/ohlcv/presets`, {
+  const response = await apiFetch(`${API_BASE_URL}/api/ohlcv/presets`, {
     cache: 'no-store',
   });
 
@@ -89,7 +90,7 @@ async function importCSV(file: File, options?: {
   }
 
   console.log('[importCSV] Sending request to:', `${API_BASE_URL}/api/ohlcv/import`);
-  const response = await fetch(`${API_BASE_URL}/api/ohlcv/import`, {
+  const response = await apiFetch(`${API_BASE_URL}/api/ohlcv/import`, {
     method: 'POST',
     body: formData,
   });
@@ -108,7 +109,7 @@ async function importCSV(file: File, options?: {
 
 /** プリセットを削除 */
 async function deletePreset(id: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/ohlcv/presets/${id}`, {
+  const response = await apiFetch(`${API_BASE_URL}/api/ohlcv/presets/${id}`, {
     method: 'DELETE',
   });
 

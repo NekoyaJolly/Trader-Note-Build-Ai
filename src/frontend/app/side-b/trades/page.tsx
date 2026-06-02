@@ -13,6 +13,8 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { sideBApi, SideBApiError } from "@/lib/sideBApi";
+import { apiFetch } from "@/lib/apiClient";
+import type { JsonObject } from "@/lib/apiClient";
 import { StrategyBacktestSummary } from "@/components/side-b/StrategyBacktestSummary";
 import { toast } from "sonner";
 import type { GeneratePlanResponse } from "@/types/sideB";
@@ -167,11 +169,19 @@ const getPnLColor = (pnl: number | null): string => {
 // APIベースURL（同一オリジン: 相対パス）
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "") + "/api/side-b";
 
+async function readErrorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const error = (await res.json()) as JsonObject;
+    return typeof error.error === "string" ? error.error : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 async function fetchPortfolio(): Promise<PortfolioSummary> {
-  const res = await fetch(`${API_BASE}/portfolio`);
+  const res = await apiFetch(`${API_BASE}/portfolio`);
   if (!res.ok) {
-    const error = await res.json().catch(() => ({}));
-    throw new Error(error.error || "ポートフォリオの取得に失敗しました");
+    throw new Error(await readErrorMessage(res, "ポートフォリオの取得に失敗しました"));
   }
   return res.json();
 }
@@ -180,36 +190,33 @@ async function fetchTrades(status?: TradeStatus): Promise<{ trades: VirtualTrade
   const url = status
     ? `${API_BASE}/trades?status=${status}`
     : `${API_BASE}/trades`;
-  const res = await fetch(url);
+  const res = await apiFetch(url);
   if (!res.ok) {
-    const error = await res.json().catch(() => ({}));
-    throw new Error(error.error || "トレードの取得に失敗しました");
+    throw new Error(await readErrorMessage(res, "トレードの取得に失敗しました"));
   }
   return res.json();
 }
 
 async function closeTrade(tradeId: string, exitPrice: number): Promise<VirtualTrade> {
-  const res = await fetch(`${API_BASE}/trades/${tradeId}/close`, {
+  const res = await apiFetch(`${API_BASE}/trades/${tradeId}/close`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ exitPrice }),
   });
   if (!res.ok) {
-    const error = await res.json().catch(() => ({}));
-    throw new Error(error.error || "トレードの決済に失敗しました");
+    throw new Error(await readErrorMessage(res, "トレードの決済に失敗しました"));
   }
   const data = await res.json();
   return data.trade;
 }
 
 async function cancelTrade(tradeId: string): Promise<VirtualTrade> {
-  const res = await fetch(`${API_BASE}/trades/${tradeId}/cancel`, {
+  const res = await apiFetch(`${API_BASE}/trades/${tradeId}/cancel`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
   });
   if (!res.ok) {
-    const error = await res.json().catch(() => ({}));
-    throw new Error(error.error || "トレードのキャンセルに失敗しました");
+    throw new Error(await readErrorMessage(res, "トレードのキャンセルに失敗しました"));
   }
   const data = await res.json();
   return data.trade;

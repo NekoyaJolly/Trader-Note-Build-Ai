@@ -6,6 +6,7 @@ import {
   TradingOrderResponseSchema,
   type CreateOrderRequest,
 } from '@/schemas/api/trading';
+import { apiFetch } from '@/lib/apiClient';
 
 interface OrderPanelProps {
   symbol: string;
@@ -58,12 +59,8 @@ export function OrderPanel({ symbol, disabled = false, onOrderPlaced }: OrderPan
         return;
       }
 
-      const response = await fetch(`${apiBase}/api/trading/orders`, {
+      const response = await apiFetch(`${apiBase}/api/trading/orders`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
         body: JSON.stringify(parsedPayload.data),
       });
 

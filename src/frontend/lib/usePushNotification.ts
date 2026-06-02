@@ -10,6 +10,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { apiFetch } from "./apiClient";
 
 // バックエンドの API URL
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
@@ -142,7 +143,7 @@ export function usePushNotification(): UsePushNotificationResult {
       }
 
       // VAPID 公開鍵を取得
-      const vapidResponse = await fetch(`${API_BASE_URL}/api/push/vapid-public-key`);
+      const vapidResponse = await apiFetch(`${API_BASE_URL}/api/push/vapid-public-key`);
       if (!vapidResponse.ok) {
         const data = await vapidResponse.json();
         throw new Error(data.error || "VAPID鍵の取得に失敗しました");
@@ -161,13 +162,8 @@ export function usePushNotification(): UsePushNotificationResult {
       });
 
       // サーバーに購読を登録
-      const token = localStorage.getItem("accessToken");
-      const subscribeResponse = await fetch(`${API_BASE_URL}/api/push/subscribe`, {
+      const subscribeResponse = await apiFetch(`${API_BASE_URL}/api/push/subscribe`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token && { Authorization: `Bearer ${token}` }),
-        },
         body: JSON.stringify({
           subscription: {
             endpoint: subscription.endpoint,
@@ -221,13 +217,8 @@ export function usePushNotification(): UsePushNotificationResult {
       }
 
       // サーバーから購読を解除
-      const token = localStorage.getItem("accessToken");
-      await fetch(`${API_BASE_URL}/api/push/unsubscribe`, {
+      await apiFetch(`${API_BASE_URL}/api/push/unsubscribe`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token && { Authorization: `Bearer ${token}` }),
-        },
         body: JSON.stringify({ endpoint: subscription.endpoint }),
       });
 

@@ -22,6 +22,7 @@ import {
   resolveRedirectUriForAuthUrl,
   resolveRedirectUriForTokenExchange,
 } from '../utils/ctraderRedirectUri';
+import { requireAuth } from '../../middleware/authMiddleware';
 
 const router = Router();
 
@@ -187,13 +188,20 @@ router.post('/ctrader/callback', async (req: Request, res: Response) => {
  * 
  * cTrader 接続状態を取得
  */
-router.get('/ctrader/status', async (_req: Request, res: Response) => {
+router.get('/ctrader/status', requireAuth, async (req: Request, res: Response) => {
   try {
-    const status = await authService.getConnectionStatus();
+    const tokens = await prisma.cTraderToken.findMany({
+      where: { userId: req.user!.userId },
+      select: {
+        accountId: true,
+        expiresAt: true,
+        lastConnectedAt: true,
+      },
+    });
 
     return res.json({
-      connected: status.connected,
-      accounts: status.accounts.map((acc: { accountId: string; expiresAt: Date; lastConnectedAt: Date | null }) => ({
+      connected: tokens.length > 0,
+      accounts: tokens.map((acc) => ({
         accountId: acc.accountId,
         expiresAt: acc.expiresAt.toISOString(),
         lastConnectedAt: acc.lastConnectedAt?.toISOString() || null,
@@ -215,13 +223,26 @@ router.get('/ctrader/status', async (_req: Request, res: Response) => {
  * 
  * Body: { accountId: string } または空（全解除）
  */
-router.delete('/ctrader', async (req: Request, res: Response) => {
+router.delete('/ctrader', requireAuth, async (req: Request, res: Response) => {
   try {
     const bodyResult = DisconnectRequestSchema.safeParse(req.body);
 
     if (bodyResult.success) {
       // 特定アカウントの接続解除
       const { accountId } = bodyResult.data;
+      const ownedToken = await prisma.cTraderToken.findFirst({
+        where: {
+          userId: req.user!.userId,
+          accountId,
+        },
+      });
+
+      if (!ownedToken) {
+        return res.status(404).json({
+          error: '指定されたアカウントが見つかりません',
+        });
+      }
+
       await authService.disconnect(accountId);
 
       console.log(`cTrader 接続解除: アカウント ${accountId}`);
@@ -232,9 +253,11 @@ router.delete('/ctrader', async (req: Request, res: Response) => {
       });
     } else {
       // 全接続解除
-      await authService.disconnectAll();
+      await prisma.cTraderToken.deleteMany({
+        where: { userId: req.user!.userId },
+      });
 
-      console.log('cTrader 全接続解除');
+      console.log(`cTrader 全接続解除: ユーザー ${req.user!.userId}`);
 
       return res.json({
         success: true,
@@ -256,29 +279,8 @@ router.delete('/ctrader', async (req: Request, res: Response) => {
  *
  * Body: { accountId: string }
  */
-router.put('/ctrader/primary', async (req: Request, res: Response) => {
+router.put('/ctrader/primary', requireAuth, async (req: Request, res: Response) => {
   try {
-    // JWT を Cookie か Authorization ヘッダーから取得する。
-    // req.cookies は cookie-parser により Record<string, any> となるため、
-    // 直接アクセスせずに Record<string, string | undefined> として narrow してから扱う。
-    const cookieRecord = (req.cookies ?? {}) as Record<string, string | undefined>;
-    let token: string = cookieRecord.auth_token ?? '';
-
-    if (!token) {
-      const authHeader = req.headers.authorization;
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        token = authHeader.substring(7);
-      }
-    }
-
-    if (!token) {
-      return res.status(401).json({
-        error: '認証が必要です',
-      });
-    }
-
-    const payload = sessionService.verifyToken(token);
-
     const bodyResult = DisconnectRequestSchema.safeParse(req.body);
 
     if (!bodyResult.success) {
@@ -293,7 +295,7 @@ router.put('/ctrader/primary', async (req: Request, res: Response) => {
     // 指定されたアカウントがユーザーのものかを確認
     const tokenRecord = await prisma.cTraderToken.findFirst({
       where: {
-        userId: payload.userId,
+        userId: req.user!.userId,
         accountId,
       },
     });
@@ -306,11 +308,11 @@ router.put('/ctrader/primary', async (req: Request, res: Response) => {
 
     // ユーザーのプライマリアカウントを更新
     await prisma.user.update({
-      where: { id: payload.userId },
+      where: { id: req.user!.userId },
       data: { primaryAccountId: accountId },
     });
 
-    console.log(`プライマリアカウント変更: ユーザー ${payload.userId}, アカウント ${accountId}`);
+    console.log(`プライマリアカウント変更: ユーザー ${req.user!.userId}, アカウント ${accountId}`);
 
     return res.json({
       success: true,
@@ -331,7 +333,7 @@ router.put('/ctrader/primary', async (req: Request, res: Response) => {
  *
  * Body: { accountId: string }
  */
-router.post('/ctrader/refresh', async (req: Request, res: Response) => {
+router.post('/ctrader/refresh', requireAuth, async (req: Request, res: Response) => {
   try {
     const bodyResult = DisconnectRequestSchema.safeParse(req.body);
 
@@ -343,6 +345,19 @@ router.post('/ctrader/refresh', async (req: Request, res: Response) => {
     }
 
     const { accountId } = bodyResult.data;
+    const ownedToken = await prisma.cTraderToken.findFirst({
+      where: {
+        userId: req.user!.userId,
+        accountId,
+      },
+    });
+
+    if (!ownedToken) {
+      return res.status(404).json({
+        error: '指定されたアカウントが見つかりません',
+      });
+    }
+
     const token = await authService.refreshAccessToken(accountId);
 
     console.log(`cTrader トークン更新: アカウント ${accountId}`);
@@ -461,7 +476,7 @@ router.get('/me', async (req: Request, res: Response) => {
  * 
  * ログアウト（Cookie削除）
  */
-router.post('/logout', (_req: Request, res: Response) => {
+router.post('/logout', requireAuth, (_req: Request, res: Response) => {
   try {
     // Cookie を削除
     sessionService.clearTokenCookie(res);

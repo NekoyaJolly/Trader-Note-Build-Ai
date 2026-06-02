@@ -6,8 +6,17 @@
  */
 
 import nodemailer from 'nodemailer';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { createSystemStateRepository } from '../repositories/systemStateRepository';
 import type { InboundMail } from '../../schemas/api/sideB';
+
+function hashMailToken(token: string): Buffer {
+  return createHash('sha256').update(token, 'utf8').digest();
+}
+
+function isMailSecurityTokenValid(providedToken: string, expectedToken: string): boolean {
+  return timingSafeEqual(hashMailToken(providedToken), hashMailToken(expectedToken));
+}
 
 export class MailService {
   private readonly systemStateRepository = createSystemStateRepository();
@@ -81,7 +90,7 @@ export class MailService {
     }
 
     const providedToken = tokenMatch[1];
-    if (providedToken !== securityToken) {
+    if (!isMailSecurityTokenValid(providedToken, securityToken)) {
       return { success: false, message: 'セキュリティトークンが一致しません。' };
     }
 

@@ -55,6 +55,7 @@ import { validationRoutes } from './validationRoutes';
 import { createOrchestratorRouter } from './orchestratorRoutes';
 import { mailRouter } from './mailRoutes';
 import { emergencyRouter } from './emergencyRoutes';
+import { requireAuth, requireRole } from '../../middleware/authMiddleware';
 import { validateBody, validateQuery, validateParams } from '../../middleware/validateRequest';
 import {
   // リサーチ
@@ -89,6 +90,15 @@ import {
 } from '../../schemas/api/sideB';
 
 const router = Router();
+const requireAdmin = requireRole(['admin']);
+
+// ===========================================
+// Webhook は外部サービスから届くため JWT 認証の外側で token 検証する。
+// ===========================================
+router.use('/mail', mailRouter);
+
+// Side-B の通常 API は read 系も含めてログイン必須にする。
+router.use(requireAuth);
 
 // ===========================================
 // 仮説検証 (Phase 4c)
@@ -98,7 +108,6 @@ const router = Router();
 // ===========================================
 router.use('/hypotheses', validationRoutes);
 router.use('/orchestrator', createOrchestratorRouter());
-router.use('/mail', mailRouter);
 router.use('/emergency', emergencyRouter);
 
 
@@ -141,6 +150,7 @@ router.get('/evolution/runs/:runId/candidates', (req, res) => evolutionControlle
  */
 router.post(
   '/research',
+  requireAdmin,
   validateBody(GenerateResearchRequestSchema),
   sideBController.generateResearch
 );
@@ -199,6 +209,7 @@ router.get(
  */
 router.post(
   '/plans',
+  requireAdmin,
   validateBody(GeneratePlanRequestSchema),
   sideBController.generatePlan
 );
@@ -262,6 +273,7 @@ router.get(
  */
 router.post(
   '/pipeline',
+  requireAdmin,
   validateBody(RunPipelineBodyRequestSchema),
   sideBController.runPipeline
 );
@@ -274,7 +286,7 @@ router.post(
  * POST /api/side-b/cleanup
  * 期限切れリサーチを削除
  */
-router.post('/cleanup', sideBController.cleanup);
+router.post('/cleanup', requireAdmin, sideBController.cleanup);
 
 // ===========================================
 // 仮想トレード（Phase B）
@@ -290,6 +302,7 @@ router.post('/cleanup', sideBController.cleanup);
  */
 router.post(
   '/trades',
+  requireAdmin,
   validateBody(CreateVirtualTradeRequestSchema),
   sideBController.createVirtualTrade
 );
@@ -331,6 +344,7 @@ router.get(
  */
 router.post(
   '/trades/:id/close',
+  requireAdmin,
   validateParams(IdParamSchema),
   validateBody(CloseVirtualTradeRequestSchema),
   sideBController.closeVirtualTrade
@@ -342,6 +356,7 @@ router.post(
  */
 router.post(
   '/trades/:id/cancel',
+  requireAdmin,
   validateParams(IdParamSchema),
   sideBController.cancelVirtualTrade
 );
@@ -368,6 +383,7 @@ router.get('/portfolio', sideBController.getPortfolio);
  */
 router.put(
   '/portfolio/settings',
+  requireAdmin,
   validateBody(UpdatePortfolioSettingsRequestSchema),
   sideBController.updatePortfolioSettings
 );
@@ -420,6 +436,7 @@ router.get(
  */
 router.post(
   '/ai-notes/summaries/generate',
+  requireAdmin,
   validateBody(GenerateAINoteSummaryRequestSchema),
   sideBController.generateAINoteSummary
 );
@@ -433,6 +450,7 @@ router.post(
  */
 router.patch(
   '/ai-notes/:id/matching',
+  requireAdmin,
   validateParams(IdParamSchema),
   validateBody(UpdateAINoteMatchingRequestSchema),
   sideBController.updateAINoteMatching
@@ -462,13 +480,13 @@ router.get('/scheduler/status', sideBController.getSchedulerStatus);
  * POST /api/side-b/scheduler/start
  * スケジューラーを開始
  */
-router.post('/scheduler/start', sideBController.startScheduler);
+router.post('/scheduler/start', requireAdmin, sideBController.startScheduler);
 
 /**
  * POST /api/side-b/scheduler/stop
  * スケジューラーを停止
  */
-router.post('/scheduler/stop', sideBController.stopScheduler);
+router.post('/scheduler/stop', requireAdmin, sideBController.stopScheduler);
 
 /**
  * PUT /api/side-b/scheduler/config
@@ -484,6 +502,7 @@ router.post('/scheduler/stop', sideBController.stopScheduler);
  */
 router.put(
   '/scheduler/config',
+  requireAdmin,
   validateBody(UpdateSchedulerConfigRequestSchema),
   sideBController.updateSchedulerConfig
 );
@@ -492,13 +511,13 @@ router.put(
  * POST /api/side-b/scheduler/run-daily-plan
  * 日次プランを手動実行
  */
-router.post('/scheduler/run-daily-plan', sideBController.runDailyPlanNow);
+router.post('/scheduler/run-daily-plan', requireAdmin, sideBController.runDailyPlanNow);
 
 /**
  * POST /api/side-b/scheduler/run-monitor
  * 監視を手動実行
  */
-router.post('/scheduler/run-monitor', sideBController.runMonitorNow);
+router.post('/scheduler/run-monitor', requireAdmin, sideBController.runMonitorNow);
 
 // ===========================================
 // PDCA Loop（Phase 2: 自律エージェント）
@@ -516,6 +535,7 @@ router.get('/agent/status', sideBController.getAgentStatus);
  */
 router.post(
   '/agent/start',
+  requireAdmin,
   validateBody(StartAgentRequestSchema),
   sideBController.startAgent
 );
@@ -524,7 +544,7 @@ router.post(
  * POST /api/side-b/agent/stop
  * PDCAループを停止
  */
-router.post('/agent/stop', sideBController.stopAgent);
+router.post('/agent/stop', requireAdmin, sideBController.stopAgent);
 
 /**
  * GET /api/side-b/agent/thinking-log
@@ -606,7 +626,7 @@ router.get('/summaries', sideBController.listSummaries);
  * - startDate?: string (YYYY-MM-DD)
  * - endDate?: string (YYYY-MM-DD)
  */
-router.post('/summaries/generate', sideBController.generateSummary);
+router.post('/summaries/generate', requireAdmin, sideBController.generateSummary);
 
 /**
  * GET /api/side-b/summaries/scheduler
@@ -625,18 +645,18 @@ router.get('/summaries/scheduler', sideBController.getSummarySchedulerConfig);
  * - monthlyCronExpression?: string (cron形式)
  * - notifyOnGeneration?: boolean
  */
-router.put('/summaries/scheduler', sideBController.updateSummarySchedulerConfig);
+router.put('/summaries/scheduler', requireAdmin, sideBController.updateSummarySchedulerConfig);
 
 /**
  * POST /api/side-b/summaries/scheduler/start
  * サマリースケジューラーを開始
  */
-router.post('/summaries/scheduler/start', sideBController.startSummaryScheduler);
+router.post('/summaries/scheduler/start', requireAdmin, sideBController.startSummaryScheduler);
 
 /**
  * POST /api/side-b/summaries/scheduler/stop
  * サマリースケジューラーを停止
  */
-router.post('/summaries/scheduler/stop', sideBController.stopSummaryScheduler);
+router.post('/summaries/scheduler/stop', requireAdmin, sideBController.stopSummaryScheduler);
 
 export default router;

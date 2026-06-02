@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { ValidationTrigger } from "@/components/side-b/ValidationTrigger";
@@ -46,7 +46,7 @@ describe("ValidationTrigger", () => {
             vi.fn().mockResolvedValue({
                 ok: true,
                 status: 200,
-                json: () => Promise.resolve(body),
+                text: () => Promise.resolve(JSON.stringify(body)),
             }),
         );
 
@@ -57,7 +57,7 @@ describe("ValidationTrigger", () => {
             />,
         );
         await user.click(screen.getByRole("button", { name: "本格検証を実行" }));
-        expect(onComplete).toHaveBeenCalledTimes(1);
+        await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
         expect(onComplete.mock.calls[0][0]).toMatchObject({ verdict: "confirmed" });
         // Wave 1 G5-3 (Copilot #6): 成功時に toast.success が呼ばれる
         expect(vi.mocked(toast.success)).toHaveBeenCalledWith("本格検証を実行しました");

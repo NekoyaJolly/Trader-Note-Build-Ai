@@ -15,6 +15,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { sideBApi, SideBApiError } from "@/lib/sideBApi";
+import { apiFetch } from "@/lib/apiClient";
 import { Button } from "@/components/ui/Button";
 import { PlanEvidenceCard } from "@/components/side-b/PlanEvidenceCard";
 import type { AITradePlanPayload, AgentRun, GetOrchestratorRunDetailResponse } from "@/types/sideB";
@@ -159,9 +160,9 @@ export default function SideBDashboard() {
   const fetchData = useCallback(async () => {
     try {
       const [statusRes, logRes, lessonsRes, plansRes, emergencyRes, healthRes, runsRes, pendingValidationRes, recentlyValidatedRes] = await Promise.allSettled([
-        fetch(`${API_BASE}/agent/status`, { cache: "no-store" }),
-        fetch(`${API_BASE}/agent/thinking-log?limit=20`, { cache: "no-store" }),
-        fetch(`${API_BASE}/agent/lessons`, { cache: "no-store" }),
+        apiFetch(`${API_BASE}/agent/status`, { cache: "no-store" }),
+        apiFetch(`${API_BASE}/agent/thinking-log?limit=20`, { cache: "no-store" }),
+        apiFetch(`${API_BASE}/agent/lessons`, { cache: "no-store" }),
         sideBApi.listPlans({ limit: 5 }),
         sideBApi.getEmergencyStatus(),
         sideBApi.getSystemHealth(),
@@ -360,7 +361,7 @@ export default function SideBDashboard() {
   const startAgent = async () => {
     setIsStarting(true);
     try {
-      const res = await fetch(`${API_BASE}/agent/start`, {
+      const res = await apiFetch(`${API_BASE}/agent/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
@@ -379,7 +380,7 @@ export default function SideBDashboard() {
   const stopAgent = async () => {
     setIsStopping(true);
     try {
-      const res = await fetch(`${API_BASE}/agent/stop`, { method: "POST", cache: "no-store" });
+      const res = await apiFetch(`${API_BASE}/agent/stop`, { method: "POST", cache: "no-store" });
       if (res.ok) {
         await fetchData();
       }

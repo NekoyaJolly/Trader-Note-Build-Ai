@@ -13,6 +13,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { getPublicApiBaseUrl } from "@/lib/publicApiBaseUrl";
+import { apiFetch } from "@/lib/apiClient";
 
 // ===== 型定義 =====
 
@@ -296,9 +297,9 @@ export default function AINotesPage() {
       // 全ノート / 本番運用ノート / サマリーを並行取得。
       // 本番運用ノートはサーバー側で usedForMatching=true を絞って取得し、メイン一覧のページングに依存させない。
       const [notesRes, productionRes, summariesRes] = await Promise.all([
-        fetch(`${API_BASE}/side-b/ai-notes`),
-        fetch(`${API_BASE}/side-b/ai-notes?usedForMatching=true`),
-        fetch(`${API_BASE}/side-b/ai-notes/summaries`),
+        apiFetch(`${API_BASE}/side-b/ai-notes`),
+        apiFetch(`${API_BASE}/side-b/ai-notes?usedForMatching=true`),
+        apiFetch(`${API_BASE}/side-b/ai-notes/summaries`),
       ]);
 
       if (!notesRes.ok) {
@@ -351,7 +352,7 @@ export default function AINotesPage() {
         startDate.setMonth(endDate.getMonth() - 1);
       }
 
-      const res = await fetch(`${API_BASE}/side-b/ai-notes/summaries/generate`, {
+      const res = await apiFetch(`${API_BASE}/side-b/ai-notes/summaries/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -381,7 +382,7 @@ export default function AINotesPage() {
     setTogglingNoteId(note.id);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/side-b/ai-notes/${note.id}/matching`, {
+      const res = await apiFetch(`${API_BASE}/side-b/ai-notes/${note.id}/matching`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ usedForMatching: !note.usedForMatching }),

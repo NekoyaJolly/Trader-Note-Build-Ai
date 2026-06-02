@@ -25,6 +25,236 @@ http://localhost:3100
 - **Cookie**: `auth_token`（推奨）
 - **Authorization ヘッダー**: `Bearer <token>`
 
+### API 認証分類
+
+| 分類 | 意味 |
+|------|------|
+| `public` | 未ログインでもアクセス可能 |
+| `auth` | ログイン必須 |
+| `admin` | 管理者権限必須 |
+| `cron` | `CRON_SECRET` 必須 |
+| `webhook` | webhook token 必須 |
+| `internal` | 内部通信専用 |
+
+### API 認証マトリクス
+
+> P0-1 方針: Side-A 系 API は原則 `auth`、Side-B の read 系は `auth`、Side-B の状態変更・実行系は `admin`。ID 指定 API の完全な multi-tenant owner check は DB schema 変更を伴う箇所があるため、今回の実装では schema 変更なしで可能な範囲に限定し、未完了箇所は `TODO: confirm` として残す。
+
+| endpoint | method | classification | required auth | required role | required secret | rate limit required | audit log required | owner check required | notes |
+|----------|--------|----------------|---------------|---------------|-----------------|---------------------|--------------------|----------------------|-------|
+| `/health` | GET | public | none | none | none | no | no | no | プロセスヘルス。schedulerRunning を含む。 |
+| `/ready` | GET | public | none | none | none | no | no | no | 最小 readiness。DB 依存先確認との完全分離は TODO。 |
+| `/api/auth/ctrader/url` | GET | public | none | none | none | yes | no | no | OAuth 開始 URL。auth rate limit 対象。 |
+| `/api/auth/ctrader/callback` | POST | public | none | none | none | yes | yes | no | OAuth callback。JWT Cookie と token を返す。 |
+| `/api/auth/ctrader/status` | GET | auth | JWT | user/admin | none | no | no | yes | 認証ユーザーの cTrader token のみ返す。 |
+| `/api/auth/ctrader` | DELETE | auth | JWT | user/admin | none | no | yes | yes | 認証ユーザー所有 token のみ削除。 |
+| `/api/auth/ctrader/primary` | PUT | auth | JWT | user/admin | none | no | yes | yes | 認証ユーザー所有 accountId のみ設定可能。 |
+| `/api/auth/ctrader/refresh` | POST | auth | JWT | user/admin | none | no | yes | yes | 認証ユーザー所有 accountId のみ更新可能。 |
+| `/api/auth/me` | GET | auth | JWT | user/admin | none | no | no | self | ログインユーザー情報。 |
+| `/api/auth/logout` | POST | auth | JWT | user/admin | none | no | no | self | Cookie を削除する。 |
+| `/api/push/vapid-public-key` | GET | public | none | none | none | no | no | no | Push 購読に必要な公開鍵のみ返す。 |
+| `/api/push/status` | GET | auth | JWT | user/admin | none | no | no | no | Push service 状態。 |
+| `/api/push/subscribe` | POST | auth | JWT | user/admin | none | no | yes | self | 購読をログインユーザーに紐付ける。 |
+| `/api/push/unsubscribe` | POST | auth | JWT | user/admin | none | no | yes | self | endpoint 単位の解除。owner check は TODO: confirm。 |
+| `/api/push/test` | POST | auth | JWT | user/admin | none | no | yes | self | 自分宛テスト通知。 |
+| `/api/mail/receive` | POST | webhook | none | none | `MAIL_SECURITY_TOKEN` | yes | yes | no | 外部 mail webhook の正規パス。`Authorization: Bearer`, `x-mail-security-token`, `?token=` のいずれかで検証。 |
+| `/api/side-b/mail/receive` | POST | webhook | none | none | `MAIL_SECURITY_TOKEN` | yes | yes | no | 既存互換パス。新規連携は `/api/mail/receive` 推奨。 |
+| `/api/trades/import/csv` | POST | auth | JWT | user/admin | none | no | yes | TODO: confirm | CSV import。userId 付与を伴う完全分離は残課題。 |
+| `/api/trades/import/upload-text` | POST | auth | JWT | user/admin | none | no | yes | TODO: confirm | frontend import 主要導線。 |
+| `/api/trades/notes` | GET | auth | JWT | user/admin | none | no | no | TODO: confirm | ノート一覧。 |
+| `/api/trades/notes/status-counts` | GET | auth | JWT | user/admin | none | no | no | TODO: confirm | ノート集計。 |
+| `/api/trades/notes/:id` | GET/PUT | auth | JWT | user/admin | none | no | PUT yes | yes | ID 指定 owner check は TODO: confirm。 |
+| `/api/trades/notes/:id/approve` | POST | auth | JWT | user/admin | none | no | yes | yes | 状態変更。owner check は TODO: confirm。 |
+| `/api/trades/notes/:id/reject` | POST | auth | JWT | user/admin | none | no | yes | yes | 状態変更。owner check は TODO: confirm。 |
+| `/api/trades/notes/:id/revert-to-draft` | POST | auth | JWT | user/admin | none | no | yes | yes | 状態変更。owner check は TODO: confirm。 |
+| `/api/trades/notes/:id/priority` | PATCH | auth | JWT | user/admin | none | no | yes | yes | 優先度更新。owner check は TODO: confirm。 |
+| `/api/trades/notes/:id/enabled` | PATCH | auth | JWT | user/admin | none | no | yes | yes | 有効/無効更新。owner check は TODO: confirm。 |
+| `/api/trades/notes/:id/pause` | PATCH | auth | JWT | user/admin | none | no | yes | yes | pause 更新。owner check は TODO: confirm。 |
+| `/api/trades/notes/performance/ranking` | GET | auth | JWT | user/admin | none | no | no | TODO: confirm | performance read。 |
+| `/api/trades/notes/performance/bulk` | POST | auth | JWT | user/admin | none | no | yes | TODO: confirm | bulk performance。 |
+| `/api/trades/notes/:id/performance` | GET | auth | JWT | user/admin | none | no | no | yes | owner check は TODO: confirm。 |
+| `/api/matching/check` | POST | auth | JWT | user/admin | none | no | yes | TODO: confirm | 一致判定の手動実行。 |
+| `/api/matching/history` | GET | auth | JWT | user/admin | none | no | no | TODO: confirm | 履歴 read。 |
+| `/api/notifications` | GET/DELETE | auth | JWT | user/admin | none | no | DELETE yes | self | 通知一覧/全削除。 |
+| `/api/notifications/unread-count` | GET | auth | JWT | user/admin | none | no | no | self | 未読数。 |
+| `/api/notifications/read-all` | PUT | auth | JWT | user/admin | none | no | yes | self | 全既読。 |
+| `/api/notifications/:id` | GET/DELETE | auth | JWT | user/admin | none | no | DELETE yes | yes | owner check は TODO: confirm。 |
+| `/api/notifications/:id/read` | PUT | auth | JWT | user/admin | none | no | yes | yes | owner check は TODO: confirm。 |
+| `/api/notifications/check` | POST | auth | JWT | user/admin | none | no | yes | TODO: confirm | 通知チェック実行。 |
+| `/api/notifications/logs` | GET | auth | JWT | user/admin | none | no | no | TODO: confirm | 通知ログ read。 |
+| `/api/notifications/logs/:id` | GET/DELETE | auth | JWT | user/admin | none | no | DELETE yes | yes | owner check は TODO: confirm。 |
+| `/api/orders/preset/:noteId` | GET | auth | JWT | user/admin | none | no | no | yes | note owner check は TODO: confirm。 |
+| `/api/orders/confirmation` | POST | auth | JWT | user/admin | none | no | yes | yes | 発注支援の確認記録。 |
+| `/api/indicators/settings` | GET/POST | auth | JWT | user/admin | none | no | POST yes | TODO: confirm | indicator settings。 |
+| `/api/indicators/settings/:indicatorId` | DELETE | auth | JWT | user/admin | none | no | yes | TODO: confirm | 設定削除。 |
+| `/api/indicators/settings/:indicatorId/toggle` | PATCH | auth | JWT | user/admin | none | no | yes | TODO: confirm | 有効/無効切替。 |
+| `/api/indicators/metadata` | GET | auth | JWT | user/admin | none | no | no | no | metadata read。 |
+| `/api/indicators/settings/reset` | POST | auth | JWT | user/admin | none | no | yes | TODO: confirm | settings reset。 |
+| `/api/indicators/settings/setup-status` | GET | auth | JWT | user/admin | none | no | no | TODO: confirm | setup 状態。 |
+| `/api/profiles` | GET/POST | auth | JWT | user/admin | none | no | POST yes | TODO: confirm | profile list/create。 |
+| `/api/profiles/options` | GET | auth | JWT | user/admin | none | no | no | TODO: confirm | selector options。 |
+| `/api/profiles/:id` | GET/PUT/DELETE | auth | JWT | user/admin | none | no | PUT/DELETE yes | yes | owner check は TODO: confirm。 |
+| `/api/profiles/:id/default` | PUT | auth | JWT | user/admin | none | no | yes | yes | default profile 更新。 |
+| `/api/backtest/check-coverage` | POST | auth | JWT | user/admin | none | no | no | TODO: confirm | データカバレッジ確認。 |
+| `/api/settings` | GET/PUT | auth | JWT | user/admin | none | no | PUT yes | self | アプリ設定。 |
+| `/api/settings/reset` | POST | auth | JWT | user/admin | none | no | yes | self | 設定 reset。 |
+| `/api/bars/locate` | POST | auth | JWT | user/admin | none | no | no | TODO: confirm | bar locate。 |
+| `/api/bars/locate/:symbol/:timestamp/:timeframe` | GET | auth | JWT | user/admin | none | no | no | TODO: confirm | bar locate read。 |
+| `/api/strategies` | GET/POST | auth | JWT | user/admin | none | no | POST yes | TODO: confirm | strategy list/create。 |
+| `/api/strategies/filters/indicators` | GET | auth | JWT | user/admin | none | no | no | no | filter metadata。 |
+| `/api/strategies/symbols` | GET | auth | JWT | user/admin | none | no | no | TODO: confirm | symbol list。 |
+| `/api/strategies/ohlcv/fetch-and-cache` | POST | auth | JWT | user/admin | none | no | yes | TODO: confirm | data fetch job 起動。 |
+| `/api/strategies/ohlcv/fetch-progress/:jobId` | GET | auth | JWT | user/admin | none | no | no | TODO: confirm | job status。 |
+| `/api/strategies/:id` | GET/PUT/DELETE | auth | JWT | user/admin | none | no | PUT/DELETE yes | yes | owner check は TODO: confirm。 |
+| `/api/strategies/:id/versions/:versionNumber` | GET | auth | JWT | user/admin | none | no | no | yes | owner check は TODO: confirm。 |
+| `/api/strategies/:id/rollback/:versionNumber` | PUT | auth | JWT | user/admin | none | no | yes | yes | rollback。 |
+| `/api/strategies/:id/status` | PUT | auth | JWT | user/admin | none | no | yes | yes | status 更新。 |
+| `/api/strategies/:id/duplicate` | POST | auth | JWT | user/admin | none | no | yes | yes | duplicate。 |
+| `/api/strategies/:id/backtest` | POST | auth | JWT | user/admin | none | no | yes | yes | backtest 実行。 |
+| `/api/strategies/:id/backtest/history` | GET | auth | JWT | user/admin | none | no | no | yes | history read。 |
+| `/api/strategies/:id/backtest/:runId` | GET | auth | JWT | user/admin | none | no | no | yes | run read。 |
+| `/api/strategies/:id/backtest/:runId/filter-analysis` | GET | auth | JWT | user/admin | none | no | no | yes | filter analysis。 |
+| `/api/strategies/:id/backtest/:runId/filter-verify` | POST | auth | JWT | user/admin | none | no | yes | yes | filter verify 実行。 |
+| `/api/strategies/:id/notes` | GET/POST | auth | JWT | user/admin | none | no | POST yes | yes | strategy note。 |
+| `/api/strategies/:id/notes/stats` | GET | auth | JWT | user/admin | none | no | no | yes | note stats。 |
+| `/api/strategies/:id/notes/from-backtest/:runId` | POST | auth | JWT | user/admin | none | no | yes | yes | backtest から note 作成。 |
+| `/api/strategies/:id/notes/:noteId` | GET/PUT/DELETE | auth | JWT | user/admin | none | no | PUT/DELETE yes | yes | owner check は TODO: confirm。 |
+| `/api/strategies/:id/notes/:noteId/status` | PUT | auth | JWT | user/admin | none | no | yes | yes | note status。 |
+| `/api/strategies/:id/alerts` | GET/POST/PUT/DELETE | auth | JWT | user/admin | none | no | mutation yes | yes | alert settings。 |
+| `/api/strategies/:id/alerts/trigger` | POST | auth | JWT | user/admin | none | no | yes | yes | manual trigger。 |
+| `/api/strategies/:id/alerts/pause` | PUT | auth | JWT | user/admin | none | no | yes | yes | pause。 |
+| `/api/strategies/:id/alerts/resume` | PUT | auth | JWT | user/admin | none | no | yes | yes | resume。 |
+| `/api/strategies/:id/alerts/logs` | GET | auth | JWT | user/admin | none | no | no | yes | alert logs。 |
+| `/api/strategies/:id/alerts/stream` | GET | auth | JWT | user/admin | none | no | no | yes | SSE。Cookie 認証前提。 |
+| `/api/strategies/:id/walkforward` | POST | auth | JWT | user/admin | none | no | yes | yes | walkforward 実行。 |
+| `/api/strategies/:id/walkforward/history` | GET | auth | JWT | user/admin | none | no | no | yes | history。 |
+| `/api/strategies/:id/walkforward/:runId` | GET | auth | JWT | user/admin | none | no | no | yes | run read。 |
+| `/api/strategies/:id/montecarlo` | POST | auth | JWT | user/admin | none | no | yes | yes | Monte Carlo 実行。 |
+| `/api/strategies/:id/montecarlo/history` | GET | auth | JWT | user/admin | none | no | no | yes | history。 |
+| `/api/strategies/:id/versions/compare` | GET | auth | JWT | user/admin | none | no | no | yes | version compare。 |
+| `/api/strategy-comparison` | GET/POST | auth | JWT | user/admin | none | no | POST yes | TODO: confirm | comparison list/create。 |
+| `/api/strategy-comparison/:id` | GET/DELETE | auth | JWT | user/admin | none | no | DELETE yes | yes | owner check は TODO: confirm。 |
+| `/api/strategy-comparison/:id/optimize` | POST | auth | JWT | user/admin | none | no | yes | yes | optimize 実行。 |
+| `/api/pattern-analysis/analyze` | POST | auth | JWT | user/admin | none | no | yes | TODO: confirm | pattern analyze。 |
+| `/api/pattern-analysis/anomaly` | POST | auth | JWT | user/admin | none | no | yes | TODO: confirm | anomaly analyze。 |
+| `/api/pattern-analysis/patterns/:strategyId` | GET | auth | JWT | user/admin | none | no | no | yes | strategy owner check は TODO: confirm。 |
+| `/api/pattern-analysis/analyze-strategy` | POST | auth | JWT | user/admin | none | no | yes | yes | strategy analyze。 |
+| `/api/ohlcv/import` | POST | auth | JWT | user/admin | none | no | yes | TODO: confirm | CSV OHLCV import。 |
+| `/api/ohlcv/presets` | GET | auth | JWT | user/admin | none | no | no | TODO: confirm | preset list。 |
+| `/api/ohlcv/presets/:id` | DELETE | auth | JWT | user/admin | none | no | yes | yes | owner check は TODO: confirm。 |
+| `/api/ohlcv/coverage` | GET | auth | JWT | user/admin | none | no | no | TODO: confirm | coverage read。 |
+| `/api/ohlcv/candles` | GET | auth | JWT | user/admin | none | no | no | TODO: confirm | candle read。 |
+| `/api/watchlist` | GET/POST | auth | JWT | user/admin | none | no | POST yes | self | watchlist list/create。 |
+| `/api/watchlist/:id` | PUT/DELETE | auth | JWT | user/admin | none | no | yes | yes | owner check は route 内で userId を使用。 |
+| `/api/watchlist/active` | GET | auth | JWT | user/admin | none | no | no | self | scheduler 参照用にも使われるため owner 境界は TODO: confirm。 |
+| `/api/trading/account` | GET | auth | JWT | user/admin | none | no | no | self | cTrader account read。 |
+| `/api/trading/positions` | GET | auth | JWT | user/admin | none | no | no | self | cTrader positions read。 |
+| `/api/trading/stream` | GET | auth | JWT | user/admin | none | no | no | self | SSE。Cookie 認証前提。 |
+| `/api/trading/orders` | POST | auth | JWT | user/admin | none | no | yes | self | 実注文送信。今回は小ロット運用範囲外。 |
+| `/api/trading/orders/:id` | PUT/DELETE | auth | JWT | user/admin | none | no | yes | yes | order owner check は TODO: confirm。 |
+| `/api/trading/positions/:id/close` | POST | auth | JWT | user/admin | none | no | yes | yes | position owner check は TODO: confirm。 |
+| `/api/chart-drawings` | GET | auth | JWT | user/admin | none | no | no | self | chart drawing read。 |
+| `/api/chart-drawings/sync` | PUT | auth | JWT | user/admin | none | no | yes | self | chart drawing sync。 |
+| `/api/market-analysis/:symbol` | GET | auth | JWT | user/admin | none | no | no | TODO: confirm | market data read。外部 API key はサーバー内のみ。 |
+| `/api/realtime/status` | GET | auth | JWT | user/admin | none | no | no | self | realtime 状態。 |
+| `/api/realtime/connect` | POST | auth | JWT | user/admin | none | no | yes | self | cTrader 接続開始。 |
+| `/api/realtime/disconnect` | POST | auth | JWT | user/admin | none | no | yes | self | cTrader 切断。 |
+| `/api/realtime/subscribe` | POST | auth | JWT | user/admin | none | no | yes | self | symbol subscribe。 |
+| `/api/realtime/unsubscribe` | POST | auth | JWT | user/admin | none | no | yes | self | symbol unsubscribe。 |
+| `/api/realtime/clear-bars/:symbol` | POST | auth | JWT | user/admin | none | no | yes | TODO: confirm | cached bar clear。 |
+| `/api/realtime/clear-all-bars` | POST | auth | JWT | user/admin | none | no | yes | TODO: confirm | cached bar all clear。 |
+| `/api/realtime/bars/:symbol` | GET | auth | JWT | user/admin | none | no | no | TODO: confirm | bar read。 |
+| `/api/realtime/stream/:symbol` | GET | auth | JWT | user/admin | none | no | no | self | SSE。Cookie 認証前提。 |
+| `/api/similarity/search-cross` | POST | auth | JWT | user/admin | none | no | no | TODO: confirm | Side-A/Side-B 横断検索。 |
+| `/api/similarity/health` | GET | auth | JWT | user/admin | none | no | no | no | 類似度 service health。 |
+| `/api/side-b/stats/overview` | GET | auth | JWT | user/admin | none | no | no | no | Side-B dashboard read。 |
+| `/api/side-b/stats/time-series` | GET | auth | JWT | user/admin | none | no | no | no | Side-B dashboard read。 |
+| `/api/side-b/stats/by-category` | GET | auth | JWT | user/admin | none | no | no | no | Side-B dashboard read。 |
+| `/api/side-b/stats/validation-activity` | GET | auth | JWT | user/admin | none | no | no | no | Side-B dashboard read。 |
+| `/api/side-b/discovery/latest` | GET | auth | JWT | user/admin | none | no | no | no | Discovery read。 |
+| `/api/side-b/discovery/funnel` | GET | auth | JWT | user/admin | none | no | no | no | Discovery funnel read。 |
+| `/api/side-b/system/health` | GET | auth | JWT | user/admin | none | no | no | no | Side-B system read。 |
+| `/api/side-b/evolution/lessons` | GET | auth | JWT | user/admin | none | no | no | no | Evolution read。 |
+| `/api/side-b/evolution/runs` | GET | auth | JWT | user/admin | none | no | no | no | Evolution run list。 |
+| `/api/side-b/evolution/runs/:runId/summary` | GET | auth | JWT | user/admin | none | no | no | no | Evolution summary。 |
+| `/api/side-b/evolution/runs/:runId/candidates` | GET | auth | JWT | user/admin | none | no | no | no | Evolution candidates。 |
+| `/api/side-b/hypotheses` | GET | auth | JWT | user/admin | none | no | no | no | 仮説 read。 |
+| `/api/side-b/hypotheses/pending-validation` | GET | auth | JWT | user/admin | none | no | no | no | 検証待ち read。 |
+| `/api/side-b/hypotheses/testing` | GET | auth | JWT | user/admin | none | no | no | no | testing read。 |
+| `/api/side-b/hypotheses/recently-validated` | GET | auth | JWT | user/admin | none | no | no | no | recently validated read。 |
+| `/api/side-b/hypotheses/recent-confirmed` | GET | auth | JWT | user/admin | none | no | no | no | confirmed read。 |
+| `/api/side-b/hypotheses/recent-rejected` | GET | auth | JWT | user/admin | none | no | no | no | rejected read。 |
+| `/api/side-b/hypotheses/batch-validate` | POST | admin | JWT | admin | none | no | yes | no | バッチ検証実行。 |
+| `/api/side-b/hypotheses/:id/validate` | POST | admin | JWT | admin | none | no | yes | no | 検証実行。 |
+| `/api/side-b/hypotheses/:id` | GET | auth | JWT | user/admin | none | no | no | no | 仮説詳細 read。 |
+| `/api/side-b/hypotheses/:id/validation-status` | GET | auth | JWT | user/admin | none | no | no | no | status read。 |
+| `/api/side-b/hypotheses/:id/validation-history` | GET | auth | JWT | user/admin | none | no | no | no | history read。 |
+| `/api/side-b/orchestrator/runs` | GET | auth | JWT | user/admin | none | no | no | no | RunLedger read。 |
+| `/api/side-b/orchestrator/runs/:id` | GET | auth | JWT | user/admin | none | no | no | no | RunLedger detail。 |
+| `/api/side-b/orchestrator/drafts` | GET | auth | JWT | user/admin | none | no | no | no | StrategyDraft read。 |
+| `/api/side-b/orchestrator/drafts/:id` | GET | auth | JWT | user/admin | none | no | no | no | StrategyDraft detail。 |
+| `/api/side-b/orchestrator/drafts/:id/approve` | POST | admin | JWT | admin | none | no | yes | no | draft 承認。 |
+| `/api/side-b/orchestrator/drafts/:id/reject` | POST | admin | JWT | admin | none | no | yes | no | draft 却下。 |
+| `/api/side-b/orchestrator/drafts/:id/queue` | POST | admin | JWT | admin | none | no | yes | no | validation queue 投入。 |
+| `/api/side-b/orchestrator/drafts/:id/archive` | POST | admin | JWT | admin | none | no | yes | no | draft archive。 |
+| `/api/side-b/emergency/status` | GET | admin | JWT | admin | none | no | yes | no | emergency 状態。user read 化は TODO: confirm。 |
+| `/api/side-b/emergency/stop` | POST | admin | JWT | admin | none | no | yes | no | 緊急停止。 |
+| `/api/side-b/emergency/resume` | POST | admin | JWT | admin | none | no | yes | no | 緊急停止解除。 |
+| `/api/side-b/research` | GET | auth | JWT | user/admin | none | no | no | no | research list。 |
+| `/api/side-b/research` | POST | admin | JWT | admin | none | no | yes | no | research 生成。 |
+| `/api/side-b/research/valid/:symbol` | GET | auth | JWT | user/admin | none | no | no | no | valid research。 |
+| `/api/side-b/research/:id` | GET | auth | JWT | user/admin | none | no | no | no | research detail。 |
+| `/api/side-b/plans` | GET | auth | JWT | user/admin | none | no | no | no | plan list。 |
+| `/api/side-b/plans` | POST | admin | JWT | admin | none | no | yes | no | plan 生成。 |
+| `/api/side-b/plans/today/:symbol` | GET | auth | JWT | user/admin | none | no | no | no | today plan。 |
+| `/api/side-b/plans/:id` | GET | auth | JWT | user/admin | none | no | no | no | plan detail。 |
+| `/api/side-b/pipeline` | POST | admin | JWT | admin | none | no | yes | no | full pipeline 実行。 |
+| `/api/side-b/cleanup` | POST | admin | JWT | admin | none | no | yes | no | cleanup 実行。 |
+| `/api/side-b/trades` | GET | auth | JWT | user/admin | none | no | no | no | virtual trade list。 |
+| `/api/side-b/trades` | POST | admin | JWT | admin | none | no | yes | no | virtual trade 作成。 |
+| `/api/side-b/trades/:id` | GET | auth | JWT | user/admin | none | no | no | no | virtual trade detail。 |
+| `/api/side-b/trades/:id/close` | POST | admin | JWT | admin | none | no | yes | no | virtual trade close。 |
+| `/api/side-b/trades/:id/cancel` | POST | admin | JWT | admin | none | no | yes | no | virtual trade cancel。 |
+| `/api/side-b/portfolio` | GET | auth | JWT | user/admin | none | no | no | no | portfolio read。 |
+| `/api/side-b/portfolio/settings` | PUT | admin | JWT | admin | none | no | yes | no | portfolio 設定更新。 |
+| `/api/side-b/ai-notes` | GET | auth | JWT | user/admin | none | no | no | no | AI note list。 |
+| `/api/side-b/ai-notes/summaries` | GET | auth | JWT | user/admin | none | no | no | no | AI note summary read。 |
+| `/api/side-b/ai-notes/summaries/generate` | POST | admin | JWT | admin | none | no | yes | no | AI note summary 生成。 |
+| `/api/side-b/ai-notes/:id/matching` | PATCH | admin | JWT | admin | none | no | yes | no | matching 対象 toggle。 |
+| `/api/side-b/ai-notes/:id` | GET | auth | JWT | user/admin | none | no | no | no | AI note detail。 |
+| `/api/side-b/scheduler/status` | GET | auth | JWT | user/admin | none | no | no | no | scheduler status read。 |
+| `/api/side-b/scheduler/start` | POST | admin | JWT | admin | none | no | yes | no | scheduler start。 |
+| `/api/side-b/scheduler/stop` | POST | admin | JWT | admin | none | no | yes | no | scheduler stop。 |
+| `/api/side-b/scheduler/config` | PUT | admin | JWT | admin | none | no | yes | no | scheduler config 更新。 |
+| `/api/side-b/scheduler/run-daily-plan` | POST | admin | JWT | admin | none | no | yes | no | manual job 実行。 |
+| `/api/side-b/scheduler/run-monitor` | POST | admin | JWT | admin | none | no | yes | no | manual monitor 実行。 |
+| `/api/side-b/agent/status` | GET | auth | JWT | user/admin | none | no | no | no | agent status read。 |
+| `/api/side-b/agent/start` | POST | admin | JWT | admin | none | no | yes | no | agent start。 |
+| `/api/side-b/agent/stop` | POST | admin | JWT | admin | none | no | yes | no | agent stop。 |
+| `/api/side-b/agent/thinking-log` | GET | auth | JWT | user/admin | none | no | no | no | thinking log read。 |
+| `/api/side-b/agent/reflections` | GET | auth | JWT | user/admin | none | no | no | no | reflection read。 |
+| `/api/side-b/agent/lessons` | GET | auth | JWT | user/admin | none | no | no | no | lesson read。 |
+| `/api/side-b/comparison` | GET | auth | JWT | user/admin | none | no | no | no | comparison read。 |
+| `/api/side-b/comparison/dashboard` | GET | auth | JWT | user/admin | none | no | no | no | dashboard read。 |
+| `/api/side-b/summaries` | GET | auth | JWT | user/admin | none | no | no | no | summary read。 |
+| `/api/side-b/summaries/generate` | POST | admin | JWT | admin | none | no | yes | no | summary 生成。 |
+| `/api/side-b/summaries/scheduler` | GET | auth | JWT | user/admin | none | no | no | no | summary scheduler read。 |
+| `/api/side-b/summaries/scheduler` | PUT | admin | JWT | admin | none | no | yes | no | summary scheduler 更新。 |
+| `/api/side-b/summaries/scheduler/start` | POST | admin | JWT | admin | none | no | yes | no | summary scheduler start。 |
+| `/api/side-b/summaries/scheduler/stop` | POST | admin | JWT | admin | none | no | yes | no | summary scheduler stop。 |
+| `/api/cron/health` | GET | cron | none | none | `CRON_SECRET` | no | yes | no | cronAuth 必須。 |
+| `/api/cron/side-b/daily-plan` | GET | cron | none | none | `CRON_SECRET` | no | yes | no | cron daily plan。 |
+| `/api/cron/side-b/monitor` | GET | cron | none | none | `CRON_SECRET` | no | yes | no | cron monitor。 |
+| `/api/cron/side-b/run-screening` | GET | cron | none | none | `CRON_SECRET` | no | yes | no | cron screening。 |
+| `/api/cron/side-b/run-full-validation` | GET | cron | none | none | `CRON_SECRET` | no | yes | no | full validation。 |
+| `/api/cron/side-b/run-evolution` | POST | cron | none | none | `CRON_SECRET` | no | yes | no | evolution 実行。 |
+| `/api/cron/side-b/reset-not-testable` | POST | cron | none | none | `CRON_SECRET` | no | yes | no | reset job。 |
+| `/api/cron/matching-pipeline` | GET | cron | none | none | `CRON_SECRET` | no | yes | no | matching pipeline。 |
+| `/api/cron/matching-pipeline/test` | POST | cron | none | none | `CRON_SECRET` | no | yes | no | matching pipeline test。 |
+| `analysis-engine` 連携 | internal | internal | service-to-service | none | TODO: confirm | no | yes | no | `src/backend/services/analysisEngineClient` 等。現時点はネットワーク制限未実装。今後 Cloud Run / private network / shared secret などで外部直接公開を禁止する。 |
+| `/api/daily-status` | GET | TODO: confirm | TODO | TODO | TODO | TODO | TODO | TODO | frontend 参照あり。backend route は未確認。 |
+| `/api/auth/ctrader/exchange` | POST | TODO: confirm | TODO | TODO | TODO | TODO | TODO | TODO | docs 旧記載。現行 route は `/api/auth/ctrader/callback`。 |
+
 ### 認証エンドポイント
 
 ---

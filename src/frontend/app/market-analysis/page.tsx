@@ -19,6 +19,7 @@ import { IndicatorSelector, SelectedIndicator } from '@/components/IndicatorSele
 import { indicatorToChartConfigs } from '@/lib/chartIndicators';
 import { TradingModal } from '@/components/trading/TradingModal';
 import { DataPresetModal, DataPreset } from '@/components/DataPresetModal';
+import { apiFetch } from '@/lib/apiClient';
 
 // 12次元特徴量の詳細型
 interface FeatureDetail {
@@ -153,7 +154,7 @@ export default function MarketAnalysisPage() {
 
         try {
             const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
-            const response = await fetch(
+            const response = await apiFetch(
                 `${apiBase}/api/market-analysis/${selectedSymbol}?timeframe=${selectedTimeframe}&count=${selectedDataCount}`
             );
 
@@ -206,7 +207,7 @@ export default function MarketAnalysisPage() {
         setHistoricalLoading(true);
         try {
             const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
-            const res = await fetch(
+            const res = await apiFetch(
                 `${apiBase}/api/ohlcv/candles?symbol=${encodeURIComponent(preset.symbol)}&timeframe=${encodeURIComponent(preset.timeframe)}&limit=500`
             );
             if (!res.ok) throw new Error(`APIエラー: ${res.status}`);

@@ -31,6 +31,8 @@ import realtimeRoutes from './backend/api/realtimeRoutes';
 import similarityRoutes from './backend/api/similarityRoutes';
 import { MatchingScheduler } from './utils/scheduler';
 import { getSideBScheduler } from './side-b/jobs/sideBScheduler';
+import { requireAuth } from './middleware/authMiddleware';
+import { mailRouter } from './side-b/routes/mailRoutes';
 
 /**
  * TradeAssist Application
@@ -137,6 +139,15 @@ class App {
         });
       });
 
+      // readiness は現時点ではプロセス起動確認のみ。DB 等の完全な依存先確認は別 PR で分離する。
+      console.log('[App] /ready エンドポイントを登録中...');
+      this.app.get('/ready', (_req: Request, res: Response) => {
+        res.json({
+          status: 'ok',
+          timestamp: new Date().toISOString(),
+        });
+      });
+
       // 2026-05-24 (PR #250): auth route に rate-limit を適用 (= ログイン試行 / OAuth
       // callback 連打防止)。memory `feedback_codebase_review_skill.md` で P1「helmet +
       // rate-limit 導入」として追加。
@@ -164,6 +175,10 @@ class App {
       console.log('[App] /api/auth ルートを登録中 (rate-limit 適用)...');
       this.app.use('/api/auth', authRateLimiter, ctraderAuthRoutes);
 
+      // 外部メール webhook。既存 /api/side-b/mail/receive も後方互換で維持する。
+      console.log('[App] /api/mail ルートを登録中 (webhook token 必須)...');
+      this.app.use('/api/mail', mailRouter);
+
       // トレーディングルート（認証必須）
       console.log('[App] /api/trading ルートを登録中...');
       this.app.use('/api/trading', tradingRoutes);
@@ -182,43 +197,43 @@ class App {
 
       // データルート
       console.log('[App] /api/trades ルートを登録中...');
-      this.app.use('/api/trades', tradeRoutes);
+      this.app.use('/api/trades', requireAuth, tradeRoutes);
 
       console.log('[App] /api/matching ルートを登録中...');
-      this.app.use('/api/matching', matchingRoutes);
+      this.app.use('/api/matching', requireAuth, matchingRoutes);
 
       console.log('[App] /api/notifications ルートを登録中...');
-      this.app.use('/api/notifications', notificationRoutes);
+      this.app.use('/api/notifications', requireAuth, notificationRoutes);
 
       console.log('[App] /api/orders ルートを登録中...');
-      this.app.use('/api/orders', orderRoutes);
+      this.app.use('/api/orders', requireAuth, orderRoutes);
 
       console.log('[App] /api/indicators ルートを登録中...');
-      this.app.use('/api/indicators', indicatorRoutes);
+      this.app.use('/api/indicators', requireAuth, indicatorRoutes);
 
       console.log('[App] /api/profiles ルートを登録中...');
-      this.app.use('/api/profiles', profileRoutes);
+      this.app.use('/api/profiles', requireAuth, profileRoutes);
 
       console.log('[App] /api/backtest ルートを登録中...');
-      this.app.use('/api/backtest', backtestRoutes);
+      this.app.use('/api/backtest', requireAuth, backtestRoutes);
 
       console.log('[App] /api/settings ルートを登録中...');
-      this.app.use('/api/settings', settingsRoutes);
+      this.app.use('/api/settings', requireAuth, settingsRoutes);
 
       console.log('[App] /api/bars ルートを登録中...');
-      this.app.use('/api/bars', barLocatorRoutes);
+      this.app.use('/api/bars', requireAuth, barLocatorRoutes);
 
       console.log('[App] /api/strategies ルートを登録中...');
-      this.app.use('/api/strategies', strategyRoutes);
+      this.app.use('/api/strategies', requireAuth, strategyRoutes);
 
       console.log('[App] /api/strategy-comparison ルートを登録中...');
-      this.app.use('/api/strategy-comparison', strategyComparisonRoutes);
+      this.app.use('/api/strategy-comparison', requireAuth, strategyComparisonRoutes);
 
       console.log('[App] /api/pattern-analysis ルートを登録中...');
-      this.app.use('/api/pattern-analysis', patternAnalysisRoutes);
+      this.app.use('/api/pattern-analysis', requireAuth, patternAnalysisRoutes);
 
       console.log('[App] /api/ohlcv ルートを登録中...');
-      this.app.use('/api/ohlcv', ohlcvRoutes);
+      this.app.use('/api/ohlcv', requireAuth, ohlcvRoutes);
 
       // Side-B: AI トレードプラン生成
       console.log('[App] /api/side-b ルートを登録中...');
@@ -226,15 +241,15 @@ class App {
 
       // マーケット分析（OHLCV + 12次元特徴量）
       console.log('[App] /api/market-analysis ルートを登録中...');
-      this.app.use('/api/market-analysis', marketAnalysisRoutes);
+      this.app.use('/api/market-analysis', requireAuth, marketAnalysisRoutes);
 
       // リアルタイムデータ配信（cTrader WebSocket → SSE）
       console.log('[App] /api/realtime ルートを登録中...');
-      this.app.use('/api/realtime', realtimeRoutes);
+      this.app.use('/api/realtime', requireAuth, realtimeRoutes);
 
       // 横断類似ノート検索（Side-A/Side-B統合）
       console.log('[App] /api/similarity ルートを登録中...');
-      this.app.use('/api/similarity', similarityRoutes);
+      this.app.use('/api/similarity', requireAuth, similarityRoutes);
 
       // Cron エンドポイント（Cloud Run Cron用）
       console.log('[App] /api/cron ルートを登録中...');

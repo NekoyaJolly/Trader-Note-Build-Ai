@@ -15,6 +15,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/apiClient";
 
 // APIベースURL（同一オリジン: 相対パス）
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "") + "/api/side-b";
@@ -101,7 +102,7 @@ export default function SettingsPage() {
   // 状態取得 (初期化 + 30秒 polling、ユーザー操作起因ではないため toast は出さず inline のみ)
   async function fetchStatus() {
     try {
-      const res = await fetch(`${API_BASE}/scheduler/status`);
+      const res = await apiFetch(`${API_BASE}/scheduler/status`);
       if (!res.ok) throw new Error("状態の取得に失敗しました");
       const data = await res.json();
       setStatus(data);
@@ -120,7 +121,7 @@ export default function SettingsPage() {
   async function handleSaveConfig() {
     setSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/scheduler/config`, {
+      const res = await apiFetch(`${API_BASE}/scheduler/config`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(editConfig),
@@ -143,7 +144,7 @@ export default function SettingsPage() {
   async function handleStart() {
     setRunning(true);
     try {
-      const res = await fetch(`${API_BASE}/scheduler/start`, { method: "POST" });
+      const res = await apiFetch(`${API_BASE}/scheduler/start`, { method: "POST" });
       if (!res.ok) throw new Error("開始に失敗しました");
       const data = await res.json();
       setStatus(data);
@@ -162,7 +163,7 @@ export default function SettingsPage() {
   async function handleStop() {
     setRunning(true);
     try {
-      const res = await fetch(`${API_BASE}/scheduler/stop`, { method: "POST" });
+      const res = await apiFetch(`${API_BASE}/scheduler/stop`, { method: "POST" });
       if (!res.ok) throw new Error("停止に失敗しました");
       const data = await res.json();
       setStatus(data);
@@ -181,7 +182,7 @@ export default function SettingsPage() {
   async function handleRunDailyPlan() {
     setRunning(true);
     try {
-      const res = await fetch(`${API_BASE}/scheduler/run-daily-plan`, { method: "POST" });
+      const res = await apiFetch(`${API_BASE}/scheduler/run-daily-plan`, { method: "POST" });
       if (!res.ok) throw new Error("日次プラン実行に失敗しました");
       await fetchStatus();
       setError(null);
@@ -199,7 +200,7 @@ export default function SettingsPage() {
   async function handleRunMonitor() {
     setRunning(true);
     try {
-      const res = await fetch(`${API_BASE}/scheduler/run-monitor`, { method: "POST" });
+      const res = await apiFetch(`${API_BASE}/scheduler/run-monitor`, { method: "POST" });
       if (!res.ok) throw new Error("監視実行に失敗しました");
       await fetchStatus();
       setError(null);

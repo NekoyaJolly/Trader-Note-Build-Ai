@@ -13,6 +13,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useRouter } from 'next/navigation';
+import { apiFetch } from '@/lib/apiClient';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 
@@ -53,12 +54,8 @@ export default function AccountsPage() {
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/auth/ctrader`, {
+      const response = await apiFetch(`${API_BASE_URL}/api/auth/ctrader`, {
         method: 'DELETE',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({ accountId }),
       });
 
@@ -87,12 +84,8 @@ export default function AccountsPage() {
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/auth/ctrader/primary`, {
+      const response = await apiFetch(`${API_BASE_URL}/api/auth/ctrader/primary`, {
         method: 'PUT',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({ accountId }),
       });
 
