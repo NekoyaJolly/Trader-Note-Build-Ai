@@ -29,6 +29,7 @@ jest.mock('../repositories/systemStateRepository', () => ({
       Promise.resolve({ key, value: '1', updatedAt: new Date() })
     ),
     recordEmergencyAudit: jest.fn().mockResolvedValue(undefined),
+    recordEmergencyAuditBestEffort: jest.fn().mockResolvedValue(undefined),
   })),
 }));
 
@@ -361,6 +362,14 @@ describe('SideBScheduler 類似度チェック統合', () => {
   describe('emergency_stop 中の実行抑止', () => {
     it('スクリーニング / 本格検証 / 進化 / Discovery を副作用なしでスキップする', async () => {
       mockEmergencyStopped = true;
+      const screeningRun = jest.fn();
+      const fullValidationRun = jest.fn();
+      const evolutionRun = jest.fn();
+      const discoveryRun = jest.fn();
+      (scheduler as any).screeningJob = { runWithOptions: screeningRun };
+      (scheduler as any).fullValidationJob = { run: fullValidationRun };
+      (scheduler as any).evolutionJob = { run: evolutionRun };
+      (scheduler as any).discoveryJob = { run: discoveryRun };
 
       const screening = await scheduler.runScreeningNow();
       const fullValidation = await scheduler.runFullValidationNow();
@@ -385,6 +394,10 @@ describe('SideBScheduler 類似度チェック統合', () => {
         regimeReports: 0,
         errors: [],
       });
+      expect(screeningRun).not.toHaveBeenCalled();
+      expect(fullValidationRun).not.toHaveBeenCalled();
+      expect(evolutionRun).not.toHaveBeenCalled();
+      expect(discoveryRun).not.toHaveBeenCalled();
     });
   });
 });

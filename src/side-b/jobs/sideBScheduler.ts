@@ -1095,7 +1095,7 @@ export class SideBScheduler {
         if (currentErrors >= 3) {
           this.log('連続エラー回数がしきい値(3回)に達したため、緊急停止(キルスイッチ)を作動させます。');
           await this.systemStateRepository.setBoolean('emergency_stop', true);
-          await this.systemStateRepository.recordEmergencyAudit({
+          await this.systemStateRepository.recordEmergencyAuditBestEffort({
             action: 'auto_stop',
             source: 'scheduler',
             actor: 'side-b-scheduler',
@@ -1122,7 +1122,7 @@ export class SideBScheduler {
 
       if (currentErrors >= 3) {
         await this.systemStateRepository.setBoolean('emergency_stop', true);
-        await this.systemStateRepository.recordEmergencyAudit({
+        await this.systemStateRepository.recordEmergencyAuditBestEffort({
           action: 'auto_stop',
           source: 'scheduler',
           actor: 'side-b-scheduler',

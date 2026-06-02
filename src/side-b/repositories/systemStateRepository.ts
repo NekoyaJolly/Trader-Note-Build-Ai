@@ -115,6 +115,15 @@ export function createSystemStateRepository(client: SystemStatePrisma = defaultP
     ]);
   };
 
+  const recordEmergencyAuditBestEffort = async (input: EmergencyAuditInput): Promise<void> => {
+    try {
+      await recordEmergencyAudit(input);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[SystemStateRepository] 緊急停止監査の記録に失敗しましたが、主処理は継続します: ${message}`);
+    }
+  };
+
   return {
     get,
     getBoolean,
@@ -125,6 +134,7 @@ export function createSystemStateRepository(client: SystemStatePrisma = defaultP
     delete: deleteKey,
     increment,
     recordEmergencyAudit,
+    recordEmergencyAuditBestEffort,
   };
 }
 

@@ -94,7 +94,7 @@ export class MailService {
     if (action === 'STOP') {
       const alreadyStopped = await this.systemStateRepository.getBoolean('emergency_stop', false);
       if (alreadyStopped) {
-        await this.systemStateRepository.recordEmergencyAudit({
+        await this.systemStateRepository.recordEmergencyAuditBestEffort({
           action: 'stop',
           source: 'mail',
           actor: 'mail-webhook',
@@ -104,7 +104,7 @@ export class MailService {
       }
 
       await this.systemStateRepository.setBoolean('emergency_stop', true);
-      await this.systemStateRepository.recordEmergencyAudit({
+      await this.systemStateRepository.recordEmergencyAuditBestEffort({
         action: 'stop',
         source: 'mail',
         actor: 'mail-webhook',
@@ -119,7 +119,7 @@ export class MailService {
     } else if (action === 'RESUME') {
       const alreadyRunning = !(await this.systemStateRepository.getBoolean('emergency_stop', false));
       if (alreadyRunning) {
-        await this.systemStateRepository.recordEmergencyAudit({
+        await this.systemStateRepository.recordEmergencyAuditBestEffort({
           action: 'resume',
           source: 'mail',
           actor: 'mail-webhook',
@@ -130,7 +130,7 @@ export class MailService {
 
       await this.systemStateRepository.setBoolean('emergency_stop', false);
       await this.systemStateRepository.setInt('consecutive_errors', 0); // エラーカウントもリセット
-      await this.systemStateRepository.recordEmergencyAudit({
+      await this.systemStateRepository.recordEmergencyAuditBestEffort({
         action: 'resume',
         source: 'mail',
         actor: 'mail-webhook',

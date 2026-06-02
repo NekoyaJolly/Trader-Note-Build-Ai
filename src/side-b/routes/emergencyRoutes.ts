@@ -78,7 +78,7 @@ router.post('/stop', async (req, res) => {
   try {
     const alreadyStopped = await systemStateRepository.getBoolean('emergency_stop', false);
     if (alreadyStopped) {
-      await systemStateRepository.recordEmergencyAudit({
+      await systemStateRepository.recordEmergencyAuditBestEffort({
         action: 'stop',
         source: 'api',
         actor: getEmergencyActor(req),
@@ -98,7 +98,7 @@ router.post('/stop', async (req, res) => {
 
     // 1. キルスイッチをONに設定
     await systemStateRepository.setBoolean('emergency_stop', true);
-    await systemStateRepository.recordEmergencyAudit({
+    await systemStateRepository.recordEmergencyAuditBestEffort({
       action: 'stop',
       source: 'api',
       actor: getEmergencyActor(req),
@@ -210,7 +210,7 @@ router.post('/resume', async (req, res) => {
   try {
     const alreadyRunning = !(await systemStateRepository.getBoolean('emergency_stop', false));
     if (alreadyRunning) {
-      await systemStateRepository.recordEmergencyAudit({
+      await systemStateRepository.recordEmergencyAuditBestEffort({
         action: 'resume',
         source: 'api',
         actor: getEmergencyActor(req),
@@ -230,7 +230,7 @@ router.post('/resume', async (req, res) => {
     // 1. キルスイッチをOFFにし、エラーカウントをリセット
     await systemStateRepository.setBoolean('emergency_stop', false);
     await systemStateRepository.setInt('consecutive_errors', 0);
-    await systemStateRepository.recordEmergencyAudit({
+    await systemStateRepository.recordEmergencyAuditBestEffort({
       action: 'resume',
       source: 'api',
       actor: getEmergencyActor(req),

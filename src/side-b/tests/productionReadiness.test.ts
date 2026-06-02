@@ -83,6 +83,29 @@ describe('SystemStateRepository', () => {
     expect(mockState.emergency_last_action_reason).toBe('monitor_error_threshold');
     expect(mockState.emergency_last_action_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
+
+  it('緊急停止監査のベストエフォート記録は失敗しても例外を投げないこと', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const mockPrisma = {
+      systemState: {
+        findUnique: jest.fn(),
+        upsert: jest.fn().mockRejectedValue(new Error('audit write failed')),
+        deleteMany: jest.fn(),
+      },
+    } as any;
+
+    const repository = createSystemStateRepository(mockPrisma);
+
+    await expect(repository.recordEmergencyAuditBestEffort({
+      action: 'stop',
+      source: 'api',
+      actor: 'admin@example.com',
+      reason: 'manual_stop',
+    })).resolves.toBeUndefined();
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('緊急停止監査の記録に失敗しました'));
+    warnSpy.mockRestore();
+  });
 });
 
 describe('MailService', () => {
