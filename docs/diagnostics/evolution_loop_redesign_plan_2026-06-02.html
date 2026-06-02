@@ -40,6 +40,29 @@
 
   <div class="note"><b>設計の北極星：</b>AGENTS.md ドメイン原則 #3 ＝「<b>数値最適化・統計処理・客観判定は Python/TS の決定論コードで実装する。安易に『LLMに判断させればいい』と設計しない</b>」。現状の進化ループはこの原則に反して LLM が数値最適化を担っている。本再設計は原則に沿って<b>最適化を決定論コード（backtesting.py）へ寄せ、LLM は構造発見だけ</b>に役割を絞る。</div>
 
+  <div class="card to-be">
+    <b>✅ 実装状況（2026-06-02 更新）— Phase 1〜4 マージ済み（PR #310〜#317）</b>
+    <p class="small muted">本プランは設計時点のもの。下表が現在の実装状況。新規の決定論経路は<b>すべて flag 既定 OFF（'llm'）/ 観測のみ</b>で、既存挙動を壊さず本番はフラグで段階導入する。</p>
+    <table>
+      <tr><th>Phase</th><th>PR</th><th>状態</th><th>内容</th></tr>
+      <tr><td>1</td><td>#310</td><td>✅ 済</td><td><code>/v1/optimize</code>（backtesting.py <code>Backtest.optimize</code>）で SL/TP を決定論最適化。TS client + Zod。</td></tr>
+      <tr><td>1b</td><td>#311</td><td>✅ 済</td><td>アンカード・ウォークフォワード過学習ガード（複数OOS窓）＋ DSR ＋ トレード数フロアを <code>/v1/optimize</code> に追加。</td></tr>
+      <tr><td>1c</td><td>#312</td><td>✅ 済</td><td>インジ期間最適化＝variant DSL 生成 + 2段階評価（screening ランク→勝者 WF）。<code>optimizeIndicatorPeriods</code>。</td></tr>
+      <tr><td>2</td><td>#313</td><td>✅ 済</td><td>Mutation を決定論経路へ（<code>generateDeterministicMutants</code>: インジ期間+SL/TP を最適化）。<code>AI_MUTATION_STRATEGY</code> 既定 'llm'。</td></tr>
+      <tr><td>3</td><td>#314</td><td>✅ 済</td><td>Crossover 系統スイープ（テンプレ表で ~10 インジ×閾値×period を追加→「負け減・勝ち維持」評価→勝者 WF）。<code>AI_CROSSOVER_STRATEGY</code> 既定 'llm'。SL/TP 不可触。</td></tr>
+      <tr><td>4</td><td>#315</td><td>✅ 済（観測）</td><td>確証ゲート（コスト込み6指標+DSR）を <code>confirmationGate.ts</code> で評価し GenerationReport に surface。しきい値を <code>confirmationGateThresholds.ts</code> に単一集約。<b>stage 不変（観測のみ）</b>。</td></tr>
+      <tr><td>4</td><td>#316</td><td>✅ 済</td><td>手動トリガー <code>POST /api/cron/side-b/run-evolution</code>。自動 cron は <code>config.autoEvolution</code> 既定 false（OFF）で既に任意。</td></tr>
+      <tr><td>4</td><td>#317</td><td>✅ 済</td><td>population を <code>EvolutionPopulation</code> テーブルに DB 永続化（P4: ephemeral fs による種の毎ラン再注入を停止 → 種注入は真に初回のみ）。</td></tr>
+    </table>
+    <p class="small"><b>残り（設計上の「待ち」項目）：</b></p>
+    <ul class="small">
+      <li><b>確証ゲート enforce</b>：本番で観測ログを数サイクル見てしきい値を校正してから、フラグで <code>validation_confirmed</code> の前提条件に強制接続（DSR はトレード別リターン尺度で厳しく出るため校正必須）。</li>
+      <li><b>本番 deterministic 有効化</b>：<code>AI_MUTATION_STRATEGY</code> / <code>AI_CROSSOVER_STRATEGY</code> = <code>deterministic</code> を観察しながら切替。</li>
+      <li><b>PF/RF 略記分離</b>（§2-5 注）：確証ゲート UI で ProfitFactor と RecoveryFactor を並べて表示する時に対応（現状コード/データモデルは clean で前倒し不要）。</li>
+      <li><b>Crossover テンプレ拡張（Phase 3b）</b>：多出力/バンド系インジ（macd/bb/kc/stochastic 等）の field 別エッジ条件テンプレート追加。</li>
+    </ul>
+  </div>
+
   <h2>1. 現状の問題（確認済み）</h2>
   <table>
     <tr><th>#</th><th>問題</th><th>根拠</th></tr>
@@ -117,15 +140,15 @@
   <div class="note small"><b>既存の部品は揃っている：</b>analysis-engine に <code>/v1/walk-forward</code>・<code>/v1/oos-validation</code>、screening BT が Sharpe/maxDD/recoveryFactor を返却、Monte Carlo / Buy&Hold ツールも存在（FullValidation 経路）。再設計は「これらを<b>確証ゲートとして強制＋UIに集約表示</b>」する話で、計算器を新規発明する必要は小さい。</div>
   <div class="note small"><b>命名の注意（後日修正）：</b><b>recoveryFactor と profitFactor が両方「PF」と略され混同</b>している箇所がコード/表示に散見。確証ゲートで両方を並べる前に、略記を分離（例: PF=ProfitFactor / RF=RecoveryFactor）して取り違えを防ぐ。今回は把握のみ、別途修正。</div>
 
-  <h2>3. 段階的実装プラン（1 PR ずつ・マージ=承認）</h2>
-  <div class="step"><span class="tag p1">Phase 1</span><span class="h"> 最適化エンドポイント（土台）</span><br>
+  <h2>3. 段階的実装プラン（1 PR ずつ・マージ=承認）<span class="small muted"> ／ 全 Phase 実装済み（#310〜#317）</span></h2>
+  <div class="step"><span class="tag p1">Phase 1</span><span class="h"> 最適化エンドポイント（土台）</span> <b>✅ #310 / #311(WF+DSR) / #312(インジ期間)</b><br>
     analysis-engine に <code>/v1/optimize</code>（<code>Backtest.optimize</code> + 学習/OOS 過学習ガード）を追加。TS クライアント + Zod スキーマ。単体で「戦略+探索空間→最適パラメータ+OOS検証」が返ることを確認。</div>
-  <div class="step"><span class="tag p2">Phase 2</span><span class="h"> Mutation を最適化呼び出しに置換</span><br>
+  <div class="step"><span class="tag p2">Phase 2</span><span class="h"> Mutation を最適化呼び出しに置換</span> <b>✅ #313（flag 既定 'llm'）</b><br>
     数値最適化を <code>/v1/optimize</code> 経由の決定論処理に変更。LLM は探索対象/範囲の提案のみ。冗長な単発ナッジを廃止。</div>
-  <div class="step"><span class="tag p3">Phase 3</span><span class="h"> Crossover を系統スイープに</span><br>
-    ~20 インジを順に追加→BT→「負け減・勝ち維持」評価→エッジ採用。LLM は候補事前絞り込みのみ。</div>
-  <div class="step"><span class="tag p4">Phase 4</span><span class="h"> 種=初回のみ + 手動トリガー + ゲート整理</span><br>
-    種の再注入停止 / 手動実行ボタン / <b>ゲートを「探索/確証」2段に集約</b>し確証で OOS+WF を強制（2-5 統一案）。しきい値を単一ファイルに集約。自動cronの扱い（OFF含む）を確定。</div>
+  <div class="step"><span class="tag p3">Phase 3</span><span class="h"> Crossover を系統スイープに</span> <b>✅ #314（flag 既定 'llm'）</b><br>
+    ~20 インジを順に追加→BT→「負け減・勝ち維持」評価→エッジ採用。LLM は候補事前絞り込みのみ。<span class="small muted">（現状テンプレ済は ~10 インジ。多出力系は Phase 3b で拡張）</span></div>
+  <div class="step"><span class="tag p4">Phase 4</span><span class="h"> 種=初回のみ + 手動トリガー + ゲート整理</span> <b>✅ #315（確証ゲート観測）/ #316（手動トリガ）/ #317（種DB永続化）</b><br>
+    種の再注入停止 / 手動実行ボタン / <b>ゲートを「探索/確証」2段に集約</b>し確証で OOS+WF を強制（2-5 統一案）。しきい値を単一ファイルに集約。自動cronの扱い（OFF含む）を確定。<span class="small muted">確証ゲートは現状<b>観測のみ</b>（enforce=stage 強制は本番観測で校正後にフラグ接続）。cron OFF は <code>autoEvolution</code> 既定 false で対応済。</span></div>
 
   <h2>4. 決定事項 / 残る要決定</h2>
   <h3>確定済み（2026-06-02）</h3>

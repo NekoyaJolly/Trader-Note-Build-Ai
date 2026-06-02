@@ -58,6 +58,17 @@
 <div class="wrap">
   <h1>Side-B 進化ループ アーキテクチャ</h1>
   <p class="sub">入力 → 起動 → 候補生成 → 近似評価 → 正式BT → OOS判定 → 永続化 → API → UI。2026-06-02 時点のコード + 本番実データに基づく。進化ループ限定（全体レビューではない）。</p>
+
+  <div class="note">
+    <b>📌 本図は再設計前（診断時点）のフロー。</b>その後 <b>再設計 Phase 1〜4 が実装済み（PR #310〜#317）</b>。
+    変更点の詳細 → <code>evolution_loop_redesign_plan_2026-06-02.html</code> の「実装状況」表を参照。
+    <ul class="small">
+      <li><b>候補生成</b>：Mutation/Crossover の数値最適化が LLM から<b>決定論経路</b>（<code>/v1/optimize</code> = backtesting.py + WF + DSR、variant DSL 生成）へ。ただし <b>flag 既定 'llm' のため既定の実行フローは本図のまま</b>。<code>AI_MUTATION_STRATEGY</code> / <code>AI_CROSSOVER_STRATEGY</code> = <code>deterministic</code> で切替。</li>
+      <li><b>OOS/確証</b>：コスト込み6指標 + DSR の確証ゲートを GenerationReport に観測 surface（enforce は本番校正後）。</li>
+      <li><b>永続化</b>：population を <code>EvolutionPopulation</code> テーブルに DB 永続化（ephemeral fs による種の毎ラン再注入を停止）。</li>
+      <li><b>起動</b>：手動トリガー <code>POST /api/cron/side-b/run-evolution</code> 追加。自動 cron は <code>autoEvolution</code> 既定 false。</li>
+    </ul>
+  </div>
   <div class="legend">
     <span><i class="dot" style="background:var(--muted)"></i>入力/出力</span>
     <span><i class="dot" style="background:var(--violet)"></i>候補生成</span>
