@@ -104,49 +104,49 @@ else
   echo "レスポンス: $HEALTH_LAST_BODY"
   ((TESTS_FAILED++))
 fi
-test_endpoint "シンボル一覧" "GET" "/api/strategies/symbols" "200"
+test_endpoint "Ready チェック" "GET" "/ready" "200"
 
 echo ""
 
 # =========================================
-# トレードノートエンドポイントテスト
+# 認証境界テスト
 # =========================================
-echo -e "${YELLOW}[2] トレードノートエンドポイントテスト${NC}"
+echo -e "${YELLOW}[2] 認証境界テスト${NC}"
 echo ""
 
-test_endpoint "ノート一覧取得" "GET" "/api/trades/notes" "200"
-
-echo ""
-
-# =========================================
-# マッチングエンドポイントテスト
-# =========================================
-echo -e "${YELLOW}[3] マッチングエンドポイントテスト${NC}"
-echo ""
-
-test_endpoint "マッチング実行" "POST" "/api/matching/check" "200"
-test_endpoint "マッチング履歴取得" "GET" "/api/matching/history" "200"
+test_endpoint "ノート一覧は未認証で拒否" "GET" "/api/trades/notes" "401"
+test_endpoint "通知一覧は未認証で拒否" "GET" "/api/notifications" "401"
+test_endpoint "マッチング実行は未認証で拒否" "POST" "/api/matching/check" "401"
 
 echo ""
 
 # =========================================
-# 通知エンドポイントテスト
+# Webhook 境界テスト
 # =========================================
-echo -e "${YELLOW}[4] 通知エンドポイントテスト${NC}"
+echo -e "${YELLOW}[3] Webhook 境界テスト${NC}"
 echo ""
 
-test_endpoint "通知一覧取得" "GET" "/api/notifications" "200"
+test_endpoint "mail webhook は token なしで拒否" "POST" "/api/mail/receive" "401" '{"from":"smoke@example.com","subject":"smoke","text":"ACTION: STOP"}'
 
 echo ""
 
 # =========================================
-# BarLocator エンドポイントテスト
+# Cron 境界テスト
 # =========================================
-echo -e "${YELLOW}[5] BarLocator エンドポイントテスト${NC}"
+echo -e "${YELLOW}[4] Cron 境界テスト${NC}"
 echo ""
 
-test_endpoint "BarLocator (POST)" "POST" "/api/bars/locate" "400" '{}'
-test_endpoint "BarLocator (GET - 無効パラメータ)" "GET" "/api/bars/locate/INVALID/INVALID/INVALID" "400"
+test_endpoint "cron は secret なしで拒否" "GET" "/api/cron/matching-pipeline" "401"
+
+echo ""
+
+# =========================================
+# 存在しない公開ルート
+# =========================================
+echo -e "${YELLOW}[5] 存在しない公開ルート${NC}"
+echo ""
+
+test_endpoint "存在しないルートは404" "GET" "/api/not-found-smoke" "404"
 
 echo ""
 
