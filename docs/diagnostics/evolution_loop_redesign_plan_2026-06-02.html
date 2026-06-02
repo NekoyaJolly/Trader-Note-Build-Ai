@@ -206,7 +206,60 @@
 
   <div class="note small"><b>注：</b>本再設計は #303(コスト配線)/#304(OOS永続化)/#305・#308(UI可視化) の上に乗る。コスト・可視化は完了済みで、本プランは「<b>探索/最適化のエンジンそのもの</b>」を決定論化する話。</div>
 
-  <p class="muted small" style="margin-top:26px">生成: 2026-06-02 / 進化ループ再設計プラン（self-contained・外部依存なし）。</p>
+  <h2>6. LLM プロンプト回収プラン（Mutation / Crossover の役割再定義）<span class="small muted"> ／ 2026-06-02 追記・調査+提案（未実装）</span></h2>
+  <div class="note"><b>背景：</b>Phase 2/3 で数値最適化を決定論化したが、<b>deterministic モードは LLM エージェントを完全バイパス</b>する（<code>generateDeterministicMutants</code> / <code>generateDeterministicCrossovers</code> が seam で分岐し LLM を呼ばない）。一方 <code>mutation.md</code> / <code>crossover.md</code> は旧役割（LLM が数値最適化する）のまま。プロンプトと実装が噛み合っていないので「回収（再定義）」が必要。</div>
+
+  <h3>6-1. ズレの所在</h3>
+  <ul class="small">
+    <li><b>mutation.md</b>：自称「インジケーターパラメータ最適化器」。params/SL-TP の数値調整（保守的変異 #1-5）を指示 → <b>決定論エンジンが担う役割を名乗ったまま</b>。同時に<b>構造的探索</b>（新アーキタイプ/インジ/パターン/MTF/direction/AND-OR/lessons）も記述しており、こちらは LLM に残すべき価値。</li>
+    <li><b>crossover.md</b>：「フィルタ追加器」。<b>具体的な閾値まで決めて</b> 1 条件を構築 → 決定論スイープ（テンプレ表で閾値×period を振る）と<b>二重</b>。LLM が閾値を当てる必要はない。</li>
+    <li><b>構造探索の欠落</b>：deterministic 2 経路は「既存構造の数値調整(mutation)」「インジ1個追加(crossover)」のみで、<b>broad な構造多様化をしない</b>。現状その役割は LLM mutation プロンプトにしか無い → 全面 deterministic 化で構造探索力が失われる。</li>
+  </ul>
+
+  <h3>6-2. 責務マップ（あるべき）</h3>
+  <table>
+    <tr><th>対象</th><th>旧（LLM が全部）</th><th>新（責務分離）</th></tr>
+    <tr><td>数値最適化（period / SL・TP / 閾値）</td><td>LLM mutation / crossover</td><td><b>決定論</b>（<code>/v1/optimize</code> + テンプレスイープ）✅実装済</td></tr>
+    <tr><td>エッジ判定（負け減・勝ち維持 / DSR / WF）</td><td>（なし・LLM 主観）</td><td><b>決定論</b>（<code>deterministicCrossover</code> / 確証ゲート）✅実装済</td></tr>
+    <tr><td>構造の多様化（新アーキタイプ/インジ/MTF/direction/AND-OR）</td><td>LLM mutation</td><td><b>モデル依存</b>（下記 6-3）</td></tr>
+    <tr><td>追加インジ候補の事前絞り込み（相性のよいものを選ぶ）</td><td>LLM crossover（閾値まで）</td><td><b>LLM</b>（候補 ID のみ）→ 決定論スイープ</td></tr>
+  </table>
+
+  <h3>6-3. 2 つのモデル</h3>
+  <div class="two">
+    <div class="card to-be"><b>モデルA：ハイブリッド（LLM=構造探索器）</b>
+      <ul class="small">
+        <li>deterministic でも LLM を残し、役割を<b>構造提案のみ</b>に絞る。</li>
+        <li><b>Mutation LLM</b>＝新アーキタイプ/インジ/MTF/direction/AND-OR の<b>構造 variant を提案</b>（period/SL/TP は妥当な初期値でよい）→ 各提案を決定論エンジンが数値最適化。</li>
+        <li><b>Crossover LLM</b>＝親の負けトレードを分析し<b>相性のよい候補インジ ID を最大 N 個返す</b>（閾値は決めない）→ <code>variantOptions.indicatorIds</code> に流して決定論スイープ。</li>
+        <li>§2-3「LLM=構造発見」に忠実。構造多様性を維持。<b>要：配線追加 + LLM 呼び出しコスト（deterministic でも 1 回/世代）。</b></li>
+      </ul>
+    </div>
+    <div class="card as-is"><b>モデルB：バイパス（LLM は llm モード専用 legacy）</b>
+      <ul class="small">
+        <li>deterministic では LLM 不使用（現状実装のまま）。</li>
+        <li>構造多様性は <b>novelty seed + crossover のインジ追加</b>に依存。</li>
+        <li>プロンプトは llm fallback 用に<b>数値最適化記述を削って整理</b>（legacy 明示）。</li>
+        <li>シンプル・低コストだが、<b>broad な構造探索力は落ちる</b>（アーキタイプ転換・MTF 化等が起きにくい）。</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>6-4. プロンプト改稿の具体（モデルA 採用時）</h3>
+  <ul class="small">
+    <li><b>mutation.md → 「構造探索器」</b>：冒頭の「パラメータ最適化器」を削除。「<b>あなたは数値を最適化しない。構造を多様化する。period/SL/TP は妥当な初期値でよく、後段で決定論最適化される</b>」と明記。保守的数値変異（#1-5: param range / SL-TP 倍率 / period 微調整）の節を削除し、探索的変異（新インジ/パターン/MTF/direction/AND-OR/アーキタイプ転換/lessons）に集中。</li>
+    <li><b>crossover.md → 「候補インジ事前絞り込み」</b>：出力を <code>child_dsl</code>（具体条件）から <code>{ candidateIndicatorIds: string[], rationale }</code> に変更。「<b>閾値・period は決めない。負けパターンに効きそうな候補インジ ID を最大 N 個選ぶだけ</b>。閾値/period は決定論スイープが探索」。負けトレード分析の思考プロセスは残す（候補選定の根拠に使う）。</li>
+    <li><b>配線</b>：<code>generateDeterministicMutants</code> に「LLM 構造提案 → 各提案を最適化」を前段に挟む。<code>generateDeterministicCrossovers</code> の <code>variantOptions.indicatorIds</code> に LLM prefilter を接続（hook は実装済）。</li>
+  </ul>
+
+  <h3>6-5. 推奨 / 段階</h3>
+  <div class="note small">
+    <b>推奨＝モデルA</b>（§2-3 忠実・構造多様性維持）。ただし配線追加 + LLM コストが増える。<br>
+    <b>段階導入：</b>(1) crossover の <code>indicatorIds</code> 事前絞り込み（hook 済で軽い）→ (2) mutation 構造探索器化。<br>
+    <b>注意：</b>プロンプト改稿は <b>llm 既定モードの挙動も変える</b>（数値変異を促さなくなる）ため、<b>deterministic 有効化とセット</b>で行う（先にプロンプトだけ変えると llm 既定運用中に数値探索が止まる）。
+  </div>
+
+  <p class="muted small" style="margin-top:26px">生成: 2026-06-02 / 進化ループ再設計プラン（self-contained・外部依存なし）。§6 は 2026-06-02 追記（プロンプト回収・調査+提案）。</p>
 </div>
 </body>
 </html>
