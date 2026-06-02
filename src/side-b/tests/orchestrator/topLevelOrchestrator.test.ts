@@ -528,11 +528,9 @@ describe('TopLevelOrchestrator.dispatchAction (= LLM mock で action 別 dispatc
     };
     const orchestrator = new TopLevelOrchestrator({
       prisma: prismaMock as never,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      aiProvider: makeAiProviderMock('wait') as any,
+      aiProvider: makeAiProviderMock('wait') as never,
       jobInvokers: invokers,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      promptRegistry: { getCompositeActive: async () => 'sys' } as any,
+      promptRegistry: { getCompositeActive: () => Promise.resolve('sys') } as never,
     });
     await orchestrator.decideAndExecute('test');
 
@@ -560,6 +558,43 @@ describe('TopLevelOrchestrator.dispatchAction (= LLM mock で action 別 dispatc
         stepName: 'decide',
         status: 'succeeded',
         summary: expect.stringContaining('action=wait'),
+      }),
+    });
+  });
+
+  it('correlationId を AgentRun summary と戻り値へ引き継ぐ', async () => {
+    const invokers = makeInvokerMocks();
+    const prismaMock = makePrismaMock() as {
+      agentRun: { create: jest.Mock; update: jest.Mock };
+      agentRunStep: { create: jest.Mock };
+    };
+    const orchestrator = new TopLevelOrchestrator({
+      prisma: prismaMock as never,
+      aiProvider: makeAiProviderMock('wait') as never,
+      jobInvokers: invokers,
+      promptRegistry: { getCompositeActive: () => Promise.resolve('sys') } as never,
+    });
+
+    const result = await orchestrator.decideAndExecute('test', {
+      correlationId: 'cron-run-20260603',
+    });
+
+    expect(result.runId).toBe('00000000-0000-0000-0000-000000000001');
+    expect(result.correlationId).toBe('cron-run-20260603');
+    expect(prismaMock.agentRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        summary: expect.stringContaining('correlationId=cron-run-20260603'),
+      }),
+    });
+    expect(prismaMock.agentRun.update).toHaveBeenCalledWith({
+      where: { id: '00000000-0000-0000-0000-000000000001' },
+      data: expect.objectContaining({
+        summary: expect.stringContaining('correlationId=cron-run-20260603'),
+      }),
+    });
+    expect(prismaMock.agentRunStep.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        summary: expect.stringMatching(/^action=/),
       }),
     });
   });

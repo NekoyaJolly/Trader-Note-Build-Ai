@@ -32,7 +32,8 @@ http://localhost:3100
 - クライアントが `X-Correlation-Id` または `X-Request-Id` を送った場合、安全な形式（英数字、`.`、`_`、`:`、`-`、8〜128文字）の値だけを引き継ぎます。
 - 未指定または不正な値の場合はサーバー側で UUID を生成します。
 - CORS では `X-Correlation-Id` / `X-Request-Id` の送信と、`X-Correlation-Id` の読み取りを許可します。
-- 現時点では DB schema 変更なしで HTTP 境界とエラーログに付与します。Side-B RunLedger / AgentRun / Job / Evolution run への完全な統合は次PR以降の残課題です。
+- Side-B TopLevelOrchestrator 経由の cron 実行では、DB schema 変更なしで `AgentRun.summary` とレスポンス `data.correlationId` / `data.runId` にも引き継ぎます。
+- Side-B Job / Evolution generation / analysis-engine call への完全な correlationId 永続化は次PR以降の残課題です。
 
 ### API 認証分類
 
