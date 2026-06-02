@@ -8,6 +8,7 @@
  * - GET /api/cron/side-b/monitor - 監視実行（毎時）
  * - GET /api/cron/side-b/run-screening - 仮説スクリーニング手動実行（PDCA-2 検証用）
  * - GET /api/cron/side-b/run-full-validation - フル検証手動実行（screening_passed → confirmed/rejected）
+ * - POST /api/cron/side-b/run-evolution - 進化ループ手動実行（Phase 4 手動トリガー）
  * - POST /api/cron/side-b/reset-not-testable - not_testable 仮説を unverified に戻す救済操作
  * - GET /api/cron/matching-pipeline - マッチング＋通知パイプライン（15分間隔）
  * - GET /api/cron/health - ヘルスチェック
@@ -289,6 +290,45 @@ router.get('/side-b/run-full-validation', async (_req: Request, res: Response) =
   } catch (error) {
     const message = error instanceof Error ? error.message : '不明なエラー';
     console.error('[Cron] フル検証手動実行エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+      duration: Date.now() - startTime,
+    });
+  }
+});
+
+/**
+ * POST /api/cron/side-b/run-evolution
+ * 進化ループ手動実行（進化ループ再設計 Phase 4: 手動トリガー）。
+ *
+ * 動作:
+ *   - SideBScheduler.runEvolutionNow() を呼び、設定 regime ぶんの runOneGeneration /
+ *     multi-generation を実行する（mutation / crossover / 正式 BT / 確証ゲート観測）。
+ *   - 自動 cron（config.autoEvolution、既定 false = OFF）とは独立に、いつでも明示起動できる。
+ *     「自動 cron は任意（OFF も選べる）＋手動実行ボタン」という設計（HTML §2-4）を満たす。
+ *
+ * POST を要求する理由: LLM × 複数 regime × BT を伴う重い prod-write 操作のため、
+ * （reset-not-testable と同様）明示的な POST で誤発火を防ぐ。
+ *
+ * 認証: cronAuth (CRON_SECRET Bearer)
+ */
+router.post('/side-b/run-evolution', async (_req: Request, res: Response) => {
+  const startTime = Date.now();
+  try {
+    console.log('[Cron] 進化ループ手動実行を開始します');
+    const scheduler = getSideBScheduler();
+    const result = await scheduler.runEvolutionNow();
+    console.log('[Cron] 進化ループ手動実行完了:', result);
+    res.json({
+      success: result.errors.length === 0,
+      message: `regimeReports=${result.regimeReports} errors=${result.errors.length}`,
+      data: result,
+      duration: Date.now() - startTime,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラー';
+    console.error('[Cron] 進化ループ手動実行エラー:', message);
     res.status(500).json({
       success: false,
       error: message,
