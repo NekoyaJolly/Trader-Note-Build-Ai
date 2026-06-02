@@ -265,7 +265,7 @@ async function mockSideAApi(page: Page): Promise<ApiCallRecord[]> {
     }
 
     if (method === "GET" && pathname === `/api/trades/notes/${sideANote.id}/performance`) {
-      await route.fulfill(jsonResponse({ data: null }));
+      await route.fulfill(jsonResponse({ error: "パフォーマンスデータがありません" }, 404));
       return;
     }
 
@@ -276,7 +276,11 @@ async function mockSideAApi(page: Page): Promise<ApiCallRecord[]> {
 
     if (method === "POST" && pathname === `/api/trades/notes/${sideANote.id}/approve`) {
       noteStatus = "active";
-      await route.fulfill(jsonResponse({ ok: true }));
+      await route.fulfill(jsonResponse({
+        success: true,
+        status: noteStatus,
+        note: buildSideANoteDetail(noteStatus),
+      }));
       return;
     }
 
@@ -299,7 +303,7 @@ async function mockSideAApi(page: Page): Promise<ApiCallRecord[]> {
 
     if (method === "PUT" && pathname === "/api/notifications/notification-e2e-1/read") {
       notificationIsRead = true;
-      await route.fulfill(jsonResponse({ ok: true }));
+      await route.fulfill(jsonResponse({ success: true }));
       return;
     }
 
