@@ -60,10 +60,11 @@
   <p class="sub">入力 → 起動 → 候補生成 → 近似評価 → 正式BT → OOS判定 → 永続化 → API → UI。2026-06-02 時点のコード + 本番実データに基づく。進化ループ限定（全体レビューではない）。</p>
 
   <div class="note">
-    <b>📌 本図は再設計前（診断時点）のフロー。</b>その後 <b>再設計 Phase 1〜4 が実装済み（PR #310〜#317）</b>。
+    <b>📌 本図は再設計前（診断時点）のフロー。</b>その後 <b>再設計 Phase 1〜4 + Hybrid Redesign が実装済み</b>。
     変更点の詳細 → <code>evolution_loop_redesign_plan_2026-06-02.html</code> の「実装状況」表を参照。
     <ul class="small">
-      <li><b>候補生成</b>：Mutation/Crossover の数値最適化が LLM から<b>決定論経路</b>（<code>/v1/optimize</code> = backtesting.py + WF + DSR、variant DSL 生成）へ。ただし <b>flag 既定 'llm' のため既定の実行フローは本図のまま</b>。<code>AI_MUTATION_STRATEGY</code> / <code>AI_CROSSOVER_STRATEGY</code> = <code>deterministic</code> で切替。</li>
+      <li><b>候補生成</b>：標準経路は <code>hybrid</code>。Mutation は <code>baseline / optimizedBase / structuralVariant</code> の bundle 方式になり、LLM は構造変異案、analysis-engine は period / SL / TP 最適化を担当。Crossover は LLM が候補 indicator ID だけを選び、Python 対応20指標の field 別テンプレを決定論スイープする。</li>
+      <li><b>legacy fallback</b>：<code>AI_MUTATION_STRATEGY</code> / <code>AI_CROSSOVER_STRATEGY</code> は <code>hybrid</code> 既定。<code>llm</code> は旧 LLM 生成経路、<code>deterministic</code> は LLM 事前選定なしの決定論経路として残す。</li>
       <li><b>OOS/確証</b>：コスト込み6指標 + DSR の確証ゲートを GenerationReport に観測 surface（enforce は本番校正後）。</li>
       <li><b>永続化</b>：population を <code>EvolutionPopulation</code> テーブルに DB 永続化（ephemeral fs による種の毎ラン再注入を停止）。</li>
       <li><b>起動</b>：手動トリガー <code>POST /api/cron/side-b/run-evolution</code> 追加。自動 cron は <code>autoEvolution</code> 既定 false。</li>
@@ -164,7 +165,7 @@
   </div>
   <ul>
     <li><b>クロスオーバーは動作している</b>（18ランで生成・全件2親）が survivor が少ない（34件）。</li>
-    <li><b>mutation の <code>parentIds</code> は常に「エリート5体（プール）」</b>＝実際の単一親を記録していない。→ UIの「親→子」は近似（先頭エリートとの比較）。</li>
+    <li><b>診断時点の mutation <code>parentIds</code> は常に「エリート5体（プール）」</b>だった。Hybrid Redesign 後は optimizedBase が単一親、structuralVariant が LLM 構造案を経由して記録されるため、旧 LLM mutation より系譜は追いやすくなった。</li>
     <li>初期種が12固定で毎ラン再評価 → 「同系統(RSI等)を繰り返す」ように見える。</li>
     <li>OOS は <b>全行 null</b>（履歴は #304 以前 / 今回の再評価スクリプトは OOS 未実行）。今後の通常進化ループで埋まる。</li>
   </ul>
@@ -174,10 +175,10 @@
     <tr><th>論点</th><th>状態</th><th>影響</th></tr>
     <tr><td>正式BTのコスト</td><td><span class="tag ok">対応済 #303</span></td><td>旧コスト0 → シンボル別スプレッド配線。再評価で 355→合格91/転落264。</td></tr>
     <tr><td>OOS確証の永続化/可視化</td><td><span class="tag ok">対応済 #304/#305</span></td><td>確証バッジ + 詳細。ただし現状データ未生成（—）。</td></tr>
-    <tr><td>mutation の単一親系譜</td><td><span class="tag warn">未対応</span></td><td>parentIds=エリート群のため「どの1体から変異したか」が不明。真の親→子が描けない。</td></tr>
-    <tr><td>crossover の寄与の小ささ</td><td><span class="tag warn">要調査</span></td><td>エリート≥2要件・survivor 低。多様性/収束の問題の可能性。</td></tr>
-    <tr><td>種が12個固定</td><td><span class="tag warn">要検討</span></td><td>探索の起点が固定で収束しやすい。</td></tr>
-    <tr><td>in-sample 過学習ゲート未強制</td><td><span class="tag bad">未対応</span></td><td>正式BT合格が PF≥1.0(in-sample)のみ。OOS/WF は観測どまりで合否に効かない。</td></tr>
+    <tr><td>mutation の単一親系譜</td><td><span class="tag ok">改善済</span></td><td>Hybrid mutation は親1件ごとに bundle 化し、<code>optimizedBase</code> と <code>structuralVariant</code> を分けて記録する。旧 LLM mutation の「親プール丸ごと」問題は標準経路では回避。</td></tr>
+    <tr><td>crossover の寄与の小ささ</td><td><span class="tag warn">観測待ち</span></td><td>Python 対応20指標の field 別スイープへ拡張済み。今後は採用率・負け減・勝ち維持・計算コストを実データで観測する。</td></tr>
+    <tr><td>種が12個固定</td><td><span class="tag ok">対応済</span></td><td><code>EvolutionPopulation</code> 永続化により、ephemeral fs 起因の毎ラン再注入は停止済み。種注入は真の初回のみ。</td></tr>
+    <tr><td>in-sample 過学習ゲート未強制</td><td><span class="tag warn">観測中</span></td><td>確証ゲートは GenerationReport に surface 済み。enforce は実データでしきい値校正後に接続する。</td></tr>
   </table>
 
   <p class="muted small" style="margin-top:28px">生成: 2026-06-02 / 進化ループ限定の診断資料（self-contained・外部依存なし）。コード参照は当時点の行番号。</p>

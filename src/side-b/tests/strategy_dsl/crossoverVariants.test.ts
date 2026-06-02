@@ -6,11 +6,15 @@ import {
   generateCrossoverIndicatorVariants,
 } from '../../strategy_dsl/crossoverVariants';
 import {
+  CROSSOVER_EDGE_TEMPLATES,
+} from '../../strategy_dsl/crossoverIndicatorTemplates';
+import {
   StrategyDSLSchema,
   type Condition,
   type ConditionGroup,
   type StrategyDSL,
 } from '../../strategy_dsl/schema';
+import { getPythonSupportedIndicators } from '../../../shared/indicators/registry';
 
 function makeDsl(direction: 'long' | 'short' = 'long'): StrategyDSL {
   return {
@@ -100,12 +104,32 @@ describe('generateCrossoverIndicatorVariants', () => {
     expect(res.truncated).toBe(true);
   });
 
-  it('未テンプレートのインジ（macd 等）は skippedIndicators に入る', () => {
+  it('Python 対応20指標はすべて CrossoverEdgeTemplate でカバーされる', () => {
+    const pythonSupportedIds = getPythonSupportedIndicators().map((i) => i.id).sort();
+    const templatedIds = CROSSOVER_EDGE_TEMPLATES.map((tpl) => tpl.indicatorId).sort();
+    expect(templatedIds).toEqual(pythonSupportedIds);
+    expect(templatedIds).toHaveLength(20);
+  });
+
+  it('field 別 indicator は alias feature で variant 化され、SL/TP は変更されない', () => {
     const res = generateCrossoverIndicatorVariants(makeDsl('long'), {
-      indicatorIds: ['rsi', 'macd', 'bb'],
+      indicatorIds: ['macd', 'bb', 'kc', 'stochastic', 'ichimoku'],
+      maxVariantsPerIndicator: 99,
     });
-    expect(res.skippedIndicators).toEqual(['macd', 'bb']);
-    expect(res.indicatorsUsed).toEqual(['rsi']);
+    expect(res.skippedIndicators).toEqual([]);
+    expect(res.indicatorsUsed.sort()).toEqual(['bb', 'ichimoku', 'kc', 'macd', 'stochastic']);
+
+    const addedConditions = res.variants.map((v) => triggerConditions(v.variant)[1] as Condition);
+    expect(addedConditions.some((c) => c.feature === 'macd_histogram')).toBe(true);
+    expect(addedConditions.some((c) => c.feature === 'stochastic_k')).toBe(true);
+    expect(addedConditions.some((c) => c.compareTarget?.feature === 'bb_upper')).toBe(true);
+    expect(addedConditions.some((c) => c.compareTarget?.feature === 'kc_upper')).toBe(true);
+    expect(addedConditions.some((c) => c.compareTarget?.feature === 'ichimoku_kijun')).toBe(true);
+
+    for (const v of res.variants) {
+      expect(v.variant.stopLoss).toEqual({ type: 'atr_multiple', value: 1.5 });
+      expect(v.variant.takeProfit).toEqual({ type: 'rr_ratio', value: 2.0 });
+    }
   });
 
   it('生成 variant は全て schema-valid', () => {

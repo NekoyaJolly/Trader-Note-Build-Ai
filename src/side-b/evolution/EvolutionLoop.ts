@@ -40,6 +40,7 @@ import {
 } from '../../backend/services/analysisEngineClient';
 import { generateDeterministicMutants } from './deterministicMutation';
 import { generateDeterministicCrossovers } from './deterministicCrossover';
+import { generateHybridMutants, type HybridMutationSummary } from './hybridMutation';
 import { computeDeflatedSharpeRatio } from '../../shared/statistics/deflatedSharpeRatio';
 import {
   evaluateConfirmationGate,
@@ -158,6 +159,8 @@ export type RunScreeningBacktestFn = typeof defaultRunScreeningBacktest;
  */
 export type RunOptimizeFn = typeof defaultRunOptimize;
 
+export type EvolutionGenerationStrategy = 'hybrid' | 'llm' | 'deterministic';
+
 // PR #105: OosBacktestRunnerFn は analysisEngineRobustnessAdapter.ts に移動済み。
 // analysis-engine の verdict (passed / failed / unknown) を含む runner result を運ぶ vehicle。
 
@@ -181,19 +184,20 @@ export interface EvolutionLoopDeps {
    */
   runOptimize?: RunOptimizeFn;
   /**
-   * Phase 2: mutation の数値最適化方式。
-   *   'llm'           = 従来の MutationAgent（既定）
+   * Hybrid Redesign: mutation 方式。
+   *   'hybrid'        = LLM は構造案、数値最適化/評価は analysis-engine（標準）
+   *   'llm'           = 従来の MutationAgent（legacy fallback）
    *   'deterministic' = generateDeterministicMutants（インジ期間 + SL/TP を決定論最適化）
-   * 省略時は 'llm'（従来挙動）。本番は config.ai.mutationStrategy を scheduler が注入する。
+   * 本番は config.ai.mutationStrategy を scheduler が注入する。
    */
-  mutationStrategy?: 'llm' | 'deterministic';
+  mutationStrategy?: EvolutionGenerationStrategy;
   /**
-   * Phase 3: crossover の方式。
-   *   'llm'           = 従来の CrossoverAgent（既定）
-   *   'deterministic' = generateDeterministicCrossovers（~20 インジ系統スイープでエッジ発見）
-   * 省略時は 'llm'（従来挙動）。本番は config.ai.crossoverStrategy を scheduler が注入する。
+   * Hybrid Redesign: crossover 方式。
+   *   'hybrid' / 'deterministic' = Python 対応20指標の field 別エッジスイープ
+   *   'llm'                      = 従来の CrossoverAgent（legacy fallback）
+   * 本番は config.ai.crossoverStrategy を scheduler が注入する。
    */
-  crossoverStrategy?: 'llm' | 'deterministic';
+  crossoverStrategy?: EvolutionGenerationStrategy;
   /**
    * 段階 4a.3: 正式 BT を行う候補数の上限 (top K)。省略時は 5。
    * surrogate スコア降順で top K のみ analysis-engine に送る。
@@ -430,6 +434,15 @@ export interface GenerationReport {
   confirmationGateSummary: ConfirmationGateSummary;
   /** Phase 4: 候補ごとの確証ゲート判定（不合格メトリクス名付き）。 */
   confirmationGateResults: ConfirmationGateReportEntry[];
+  /** Hybrid mutation の親別 baseline / optimized / structural 生成集計。 */
+  hybridMutationSummary?: HybridMutationSummary;
+  /** Crossover edge sweep の観測集計。 */
+  edgeSweepSummary?: {
+    strategy: EvolutionGenerationStrategy;
+    parentCount: number;
+    childrenCreated: number;
+    templateCoverage: string;
+  };
 }
 
 /**
@@ -507,8 +520,8 @@ export interface RunOneGenerationOptions {
 export class EvolutionLoop {
   private readonly runFormalBacktest: RunScreeningBacktestFn;
   private readonly runOptimize: RunOptimizeFn;
-  private readonly mutationStrategy: 'llm' | 'deterministic';
-  private readonly crossoverStrategy: 'llm' | 'deterministic';
+  private readonly mutationStrategy: EvolutionGenerationStrategy;
+  private readonly crossoverStrategy: EvolutionGenerationStrategy;
   private readonly formalBtTopK: number;
   private readonly evolutionBacktestRepo: EvolutionBacktestPersister | null;
   private readonly evolutionRunId: string;
@@ -566,8 +579,8 @@ export class EvolutionLoop {
   constructor(private readonly deps: EvolutionLoopDeps) {
     this.runFormalBacktest = deps.runFormalBacktest ?? defaultRunScreeningBacktest;
     this.runOptimize = deps.runOptimize ?? defaultRunOptimize;
-    this.mutationStrategy = deps.mutationStrategy ?? 'llm';
-    this.crossoverStrategy = deps.crossoverStrategy ?? 'llm';
+    this.mutationStrategy = deps.mutationStrategy ?? 'hybrid';
+    this.crossoverStrategy = deps.crossoverStrategy ?? 'hybrid';
     this.formalBtTopK = deps.formalBtTopK ?? 5;
     // null が明示された場合は永続化スキップ、undefined なら既定の repo を使う。
     this.evolutionBacktestRepo =
@@ -810,8 +823,17 @@ export class EvolutionLoop {
 
     let mutants: StrategyDSL[] = [];
     let crosses: StrategyDSL[] = [];
+    let hybridMutationSummary: HybridMutationSummary | undefined;
+    let edgeSweepSummary: GenerationReport['edgeSweepSummary'] | undefined;
     try {
-      if (this.mutationStrategy === 'deterministic') {
+      if (this.mutationStrategy === 'llm') {
+        mutants = await mutationAgent.generateMutants(
+          parentDsls,
+          parentScores,
+          mutationCount,
+          repairHintsForMutation.size > 0 ? repairHintsForMutation : undefined,
+        );
+      } else if (this.mutationStrategy === 'deterministic') {
         // Phase 2: LLM 数値変異の代わりに、各親のインジ期間 + SL/TP を analysis-engine で
         // 決定論最適化（2 段階: screening ランク → 勝者 WF）。BT 窓は formal BT と同じ defaultPeriod。
         mutants = await generateDeterministicMutants(
@@ -829,11 +851,25 @@ export class EvolutionLoop {
           `[info] deterministic mutation: parents=${parentDsls.length} count=${mutationCount} → mutants=${mutants.length}`,
         );
       } else {
-        mutants = await mutationAgent.generateMutants(
-          parentDsls,
-          parentScores,
-          mutationCount,
-          repairHintsForMutation.size > 0 ? repairHintsForMutation : undefined,
+        const hybrid = await generateHybridMutants(
+          {
+            parents: parentDsls,
+            scores: parentScores,
+            count: mutationCount,
+            startDate: toIsoDateTime(this.deps.defaultPeriod.start),
+            endDate: toIsoDateTime(this.deps.defaultPeriod.end),
+            mutationAgent,
+            repairHints: repairHintsForMutation.size > 0 ? repairHintsForMutation : undefined,
+            log: (msg) => errors.push(msg),
+          },
+          { runScreeningBacktest: this.runFormalBacktest, runOptimize: this.runOptimize },
+        );
+        mutants = hybrid.mutants;
+        hybridMutationSummary = hybrid.summary;
+        errors.push(
+          `[info] hybrid mutation: parents=${hybrid.summary.parentCount} ` +
+            `baseline=${hybrid.summary.baselineEvaluated} optimized=${hybrid.summary.optimizedBaseCreated} ` +
+            `structural=${hybrid.summary.structuralVariantCreated} → mutants=${mutants.length}`,
         );
       }
     } catch (e) {
@@ -878,24 +914,7 @@ export class EvolutionLoop {
     }
 
     try {
-      if (this.crossoverStrategy === 'deterministic') {
-        // Phase 3: ~20 インジを系統的に親へ 1 つずつ追加し「負け減・勝ち維持」でエッジ発見。
-        // 追加インジだけ最適化（既存条件・SL/TP は不変）。BT 窓は formal BT と同じ defaultPeriod。
-        crosses = await generateDeterministicCrossovers(
-          {
-            parents: parentDsls,
-            scores: parentScores,
-            count: crossoverCount,
-            startDate: toIsoDateTime(this.deps.defaultPeriod.start),
-            endDate: toIsoDateTime(this.deps.defaultPeriod.end),
-            log: (msg) => errors.push(msg),
-          },
-          { runScreeningBacktest: this.runFormalBacktest, runOptimize: this.runOptimize },
-        );
-        errors.push(
-          `[info] deterministic crossover: parents=${parentDsls.length} count=${crossoverCount} → crosses=${crosses.length}`,
-        );
-      } else {
+      if (this.crossoverStrategy === 'llm') {
         crosses = await crossoverAgent.generateCrossovers(
           parentDsls,
           parentScores,
@@ -909,6 +928,50 @@ export class EvolutionLoop {
               }
             : undefined,
         );
+      } else {
+        const suggestedIndicatorIds =
+          this.crossoverStrategy === 'hybrid'
+            ? await crossoverAgent
+                .suggestIndicatorCandidates(parentDsls, parentScores, 8, {
+                  moduleParents: moduleParents.length > 0 ? moduleParents : undefined,
+                  parentLossTrades: parentLossTrades.size > 0 ? parentLossTrades : undefined,
+                })
+                .catch((err: Error) => {
+                  errors.push(`[warn] hybrid crossover LLM prefilter failed: ${err.message}`);
+                  return null;
+                })
+            : null;
+        if (suggestedIndicatorIds) {
+          errors.push(
+            `[info] hybrid crossover LLM prefilter indicators=${suggestedIndicatorIds.candidateIndicatorIds.join(',')} ` +
+              `rationale=${suggestedIndicatorIds.rationale}`,
+          );
+        }
+        // Phase 3: ~20 インジを系統的に親へ 1 つずつ追加し「負け減・勝ち維持」でエッジ発見。
+        // 追加インジだけ最適化（既存条件・SL/TP は不変）。BT 窓は formal BT と同じ defaultPeriod。
+        crosses = await generateDeterministicCrossovers(
+          {
+            parents: parentDsls,
+            scores: parentScores,
+            count: crossoverCount,
+            startDate: toIsoDateTime(this.deps.defaultPeriod.start),
+            endDate: toIsoDateTime(this.deps.defaultPeriod.end),
+            variantOptions: suggestedIndicatorIds
+              ? { indicatorIds: suggestedIndicatorIds.candidateIndicatorIds }
+              : undefined,
+            log: (msg) => errors.push(msg),
+          },
+          { runScreeningBacktest: this.runFormalBacktest, runOptimize: this.runOptimize },
+        );
+        errors.push(
+          `[info] ${this.crossoverStrategy} crossover edge sweep: parents=${parentDsls.length} count=${crossoverCount} → crosses=${crosses.length}`,
+        );
+        edgeSweepSummary = {
+          strategy: this.crossoverStrategy,
+          parentCount: parentDsls.length,
+          childrenCreated: crosses.length,
+          templateCoverage: 'python_supported_20',
+        };
       }
     } catch (e) {
       errors.push(`crossover: ${e instanceof Error ? e.message : String(e)}`);
@@ -1251,6 +1314,8 @@ export class EvolutionLoop {
       oosAwarePromotionDecisions,
       confirmationGateSummary,
       confirmationGateResults: confirmationGateEntries,
+      hybridMutationSummary,
+      edgeSweepSummary,
     };
     return report;
   }

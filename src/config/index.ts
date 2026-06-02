@@ -137,53 +137,53 @@ export function resolveReasoningEffort(): ReasoningEffortValue {
 }
 
 /**
- * Phase 2: mutation 数値最適化方式の env 検証。
- * 許容値: 'llm' | 'deterministic'。未設定 / 不正値は 'llm' にフォールバック。
+ * Hybrid Redesign: mutation 方式の env 検証。
+ * 許容値: 'hybrid' | 'llm' | 'deterministic'。未設定は標準の 'hybrid'。
  * 不正値（typo / 大文字違い等）は warn を出して「フラグが効かない」運用事故を可視化する。
  */
-const VALID_MUTATION_STRATEGIES = ['llm', 'deterministic'] as const;
+const VALID_MUTATION_STRATEGIES = ['hybrid', 'llm', 'deterministic'] as const;
 export type MutationStrategyValue = (typeof VALID_MUTATION_STRATEGIES)[number];
 
 function resolveMutationStrategy(): MutationStrategyValue {
   const raw = process.env.AI_MUTATION_STRATEGY;
-  if (!raw) return 'llm';
+  if (!raw) return 'hybrid';
   const trimmed = raw.trim().toLowerCase();
   if ((VALID_MUTATION_STRATEGIES as readonly string[]).includes(trimmed)) {
     return trimmed as MutationStrategyValue;
   }
   console.warn(
-    `[Config] AI_MUTATION_STRATEGY に不正な値: "${raw}". 'llm' にフォールバックします. ` +
+    `[Config] AI_MUTATION_STRATEGY に不正な値: "${raw}". 'hybrid' にフォールバックします. ` +
       `許容値: ${VALID_MUTATION_STRATEGIES.join(', ')}`,
   );
-  return 'llm';
+  return 'hybrid';
 }
 
 /**
- * Phase 3: crossover の方式（AI_CROSSOVER_STRATEGY）。
- *   'llm'           = 従来の CrossoverAgent（LLM がフィルタ条件を提案）
- *   'deterministic' = generateDeterministicCrossovers（~20 インジ系統スイープでエッジ発見）
- * 既定 'llm'。許容値は mutation と独立に定義（将来ズレても誤受理しないため）。
+ * Hybrid Redesign: crossover の方式（AI_CROSSOVER_STRATEGY）。
+ *   'hybrid' / 'deterministic' = field 別テンプレで Python 対応20指標をスイープ
+ *   'llm'                      = 従来の CrossoverAgent（legacy fallback）
+ * 既定 'hybrid'。許容値は mutation と独立に定義（将来ズレても誤受理しないため）。
  */
-const VALID_CROSSOVER_STRATEGIES = ['llm', 'deterministic'] as const;
+const VALID_CROSSOVER_STRATEGIES = ['hybrid', 'llm', 'deterministic'] as const;
 export type CrossoverStrategyValue = (typeof VALID_CROSSOVER_STRATEGIES)[number];
 
 function resolveCrossoverStrategy(): CrossoverStrategyValue {
   const raw = process.env.AI_CROSSOVER_STRATEGY;
-  if (!raw) return 'llm';
+  if (!raw) return 'hybrid';
   const trimmed = raw.trim().toLowerCase();
   if ((VALID_CROSSOVER_STRATEGIES as readonly string[]).includes(trimmed)) {
     return trimmed as CrossoverStrategyValue;
   }
   console.warn(
-    `[Config] AI_CROSSOVER_STRATEGY に不正な値: "${raw}". 'llm' にフォールバックします. ` +
+    `[Config] AI_CROSSOVER_STRATEGY に不正な値: "${raw}". 'hybrid' にフォールバックします. ` +
       `許容値: ${VALID_CROSSOVER_STRATEGIES.join(', ')}`,
   );
-  return 'llm';
+  return 'hybrid';
 }
 
 // typed const にして object literal の widening (string 化) を防ぎ、union 型のまま公開する。
 const MUTATION_STRATEGY: MutationStrategyValue = resolveMutationStrategy();
-const CROSSOVER_STRATEGY: MutationStrategyValue = resolveCrossoverStrategy();
+const CROSSOVER_STRATEGY: CrossoverStrategyValue = resolveCrossoverStrategy();
 
 export const config = {
   server: {
@@ -205,13 +205,11 @@ export const config = {
     // 各エージェントは `config.ai.models[<key>]` に明示的なモデル ID を持つ(下記)。
     // グローバル既定 `config.ai.model` は安全網としてのみ使う(新エージェント追加時の忘れ対策)。
     model: process.env.AI_MODEL || 'anthropic/claude-sonnet-4.6',
-    // 進化ループ再設計 Phase 2: mutation の数値最適化方式。
-    //   'llm'           = 従来の MutationAgent (LLM が条件 + 数値を変異)
-    //   'deterministic' = optimizeIndicatorPeriods + /v1/optimize で
-    //                     インジ期間 + SL/TP を決定論最適化 (AGENTS.md 原則#3)
-    // 既定 'llm' で従来挙動を維持。本番は観察後にフラグで 'deterministic' へ切替える。
+    // Hybrid Redesign: mutation は標準で hybrid。
+    // LLM は構造案、analysis-engine は数値最適化/評価を担当する。
+    // 'llm' / 'deterministic' は legacy fallback。
     mutationStrategy: MUTATION_STRATEGY,
-    // Phase 3: crossover 方式。'deterministic' で ~20 インジ系統スイープのエッジ発見。
+    // Hybrid Redesign: crossover は標準で Python 対応20指標の field 別エッジスイープ。
     crossoverStrategy: CROSSOVER_STRATEGY,
     baseURL: process.env.AI_BASE_URL || 'https://openrouter.ai/api/v1',
     // reasoning モデル (gpt-5系 / o系) の思考レベル既定値。

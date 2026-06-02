@@ -81,6 +81,7 @@ describe('EvolutionLoop crossover 配線 (Phase 3)', () => {
       edgeHypothesisLoader: null,
       runFormalBacktest,
       runOptimize,
+      mutationStrategy: 'llm',
       crossoverStrategy: 'deterministic',
     });
 

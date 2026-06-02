@@ -22,10 +22,33 @@ def make_cache_key(indicator_id: str, params: Dict[str, float], field: str) -> s
     return f"{indicator_id.lower()}_{stable_params_key(params)}_{field}"
 
 
+INDICATOR_FIELD_ALIASES: Dict[str, Tuple[str, str]] = {
+    "macd_signal": ("macd", "signal"),
+    "macd_histogram": ("macd", "histogram"),
+    "stochastic_k": ("stochastic", "value"),
+    "stochastic_d": ("stochastic", "d"),
+    "bb_middle": ("bb", "value"),
+    "bb_upper": ("bb", "upper"),
+    "bb_lower": ("bb", "lower"),
+    "bb_bandwidth": ("bb", "bandwidth"),
+    "kc_middle": ("kc", "value"),
+    "kc_upper": ("kc", "upper"),
+    "kc_lower": ("kc", "lower"),
+    "ichimoku_tenkan": ("ichimoku", "tenkan"),
+    "ichimoku_kijun": ("ichimoku", "kijun"),
+    "ichimoku_senkou_a": ("ichimoku", "senkouA"),
+    "ichimoku_senkou_b": ("ichimoku", "senkouB"),
+    "ichimoku_chikou": ("ichimoku", "chikou"),
+}
+
+
 def compute_indicator_series(df: pd.DataFrame, indicator_id: str, params: Dict[str, float], field: str) -> Tuple[str, List[Optional[float]]]:
     """pandas-ta でインジケーター系列を計算して返す。"""
 
     ind = indicator_id.lower()
+    alias = INDICATOR_FIELD_ALIASES.get(ind)
+    if alias is not None:
+        ind, field = alias
 
     close = df["close"]
     high = df["high"]

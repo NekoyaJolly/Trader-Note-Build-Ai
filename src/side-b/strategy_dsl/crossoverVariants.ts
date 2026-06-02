@@ -80,18 +80,21 @@ function buildCandidateConditions(
   direction: 'long' | 'short',
 ): Array<{ cond: Condition; label: string }> {
   const out: Array<{ cond: Condition; label: string }> = [];
+  const featureKey = tpl.featureKey ?? tpl.indicatorId;
+  const fixedParams = tpl.fixedParams ? { ...tpl.fixedParams } : {};
   if (tpl.kind === 'oscillator_threshold') {
     const spec = direction === 'long' ? tpl.long : tpl.short;
     const periods = tpl.periodCandidates ?? [undefined];
     for (const period of periods) {
       for (const threshold of spec.thresholds) {
-        const params =
-          tpl.periodParamKey && period !== undefined
-            ? { params: { [tpl.periodParamKey]: period } }
-            : {};
+        const paramsValue = { ...fixedParams };
+        if (tpl.periodParamKey && period !== undefined) {
+          paramsValue[tpl.periodParamKey] = period;
+        }
+        const params = Object.keys(paramsValue).length > 0 ? { params: paramsValue } : {};
         out.push({
-          cond: { lens: 'ohlcv', feature: tpl.indicatorId, op: spec.op, value: threshold, ...params },
-          label: `${tpl.indicatorId}${period !== undefined ? `(${period})` : ''} ${spec.op} ${threshold}`,
+          cond: { lens: 'ohlcv', feature: featureKey, op: spec.op, value: threshold, ...params },
+          label: `${featureKey}${period !== undefined ? `(${period})` : ''} ${spec.op} ${threshold}`,
         });
       }
     }
@@ -99,6 +102,7 @@ function buildCandidateConditions(
     // price_vs_ma: long=close>MA / short=close<MA
     const op = direction === 'long' ? '>' : '<';
     for (const period of tpl.periodCandidates) {
+      const params = { ...fixedParams, [tpl.periodParamKey]: period };
       out.push({
         cond: {
           lens: 'ohlcv',
@@ -106,11 +110,11 @@ function buildCandidateConditions(
           op,
           compareTarget: {
             lens: 'ohlcv',
-            feature: tpl.indicatorId,
-            params: { [tpl.periodParamKey]: period },
+            feature: featureKey,
+            params,
           },
         },
-        label: `close ${op} ${tpl.indicatorId}(${period})`,
+        label: `close ${op} ${featureKey}(${period})`,
       });
     }
   }
@@ -165,4 +169,3 @@ export function generateCrossoverIndicatorVariants(
     truncated: capped.length < totalCombos,
   };
 }
-

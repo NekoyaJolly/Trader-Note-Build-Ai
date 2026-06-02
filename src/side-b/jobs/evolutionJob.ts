@@ -161,11 +161,11 @@ export class EvolutionJob implements SideBJobRunner<SideBSchedulerConfig, Evolut
       evolutionInstanceCarryRepo: evolutionInstanceCarryRepository,
       symbol: config.symbols[0],
       timeframe: config.timeframe,
-      // Phase 2: mutation 方式を config から注入（既定 'llm'）。
-      // 'deterministic' でインジ期間 + SL/TP を analysis-engine で決定論最適化する。
+      // Hybrid Redesign: mutation 方式を config から注入（既定 'hybrid'）。
+      // hybrid では LLM が構造案、analysis-engine が数値最適化/評価を担当する。
       mutationStrategy: appConfig.ai.mutationStrategy,
-      // Phase 3: crossover 方式を config から注入（既定 'llm'）。
-      // 'deterministic' で ~20 インジ系統スイープのエッジ発見を行う。
+      // Hybrid Redesign: crossover 方式を config から注入（既定 'hybrid'）。
+      // hybrid では LLM が候補 ID を絞り、決定論スイープが採否を評価する。
       crossoverStrategy: appConfig.ai.crossoverStrategy,
     });
 

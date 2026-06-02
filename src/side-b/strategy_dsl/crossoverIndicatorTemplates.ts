@@ -9,13 +9,11 @@
  *
  * 本ファイルは純粋データ（テンプレート表）。条件の組み立て・スイープは crossoverVariants.ts。
  *
- * カバレッジ方針（正確性優先）:
- * - **単一 series ('value') で意味が明確なインジのみ**テンプレート化する。
- *   - oscillator_threshold: 値が閾値レンジを持つ（rsi / williamsR / mfi / cci / roc / cmf）。
- *   - price_vs_ma: 終値との比較で順張りフィルタになる MA（ema / sma / dema / tema）。
- * - 多出力 / バンド / フィールド依存（macd, bb, kc, stochastic, aroon, psar, ichimoku,
- *   atr, obv, vwap）は field 別評価が必要で、誤テンプレートは「常時 false」変異を生むため
- *   **本 Phase では除外**（crossoverVariants が「未テンプレート」としてログ）。拡張は Phase 3b。
+ * カバレッジ方針（Hybrid Redesign）:
+ * - Python 対応 20 指標をすべてテンプレート化する。
+ * - 多出力 / バンド / フィールド依存は `featureKey` alias
+ *   (例: macd_histogram / bb_upper / ichimoku_kijun) で表現し、
+ *   analysis-engine 側では indicatorId + field に解決する。
  */
 
 import type { IndicatorId } from '../../shared/indicators/registry';
@@ -24,6 +22,8 @@ import type { ConditionValue } from './schema';
 /** direction 別の閾値スイープ条件（feature 値 op 閾値）。 */
 export interface OscillatorThresholdSpec {
   kind: 'oscillator_threshold';
+  /** DSL に出す feature。未指定なら indicatorId をそのまま使う。 */
+  featureKey?: string;
   /** long エントリー向けエッジ（例 rsi `<` [25,30,35] = 売られ過ぎ）。 */
   long: { op: '<' | '>'; thresholds: number[] };
   /** short エントリー向けエッジ（例 rsi `>` [65,70,75] = 買われ過ぎ）。 */
@@ -32,24 +32,32 @@ export interface OscillatorThresholdSpec {
   periodParamKey?: string;
   /** スイープする period 候補。 */
   periodCandidates?: number[];
+  /** MACD / Stochastic など複数 param 系の固定値。 */
+  fixedParams?: Readonly<Record<string, number>>;
 }
 
 /** 終値 vs MA（compareTarget）の順張りフィルタ。long=close>MA / short=close<MA。 */
 export interface PriceVsMaSpec {
   kind: 'price_vs_ma';
+  /** compareTarget に使う DSL feature。未指定なら indicatorId をそのまま使う。 */
+  featureKey?: string;
   periodParamKey: string;
   periodCandidates: number[];
+  fixedParams?: Readonly<Record<string, number>>;
 }
 
 export type EdgeConditionTemplate = (OscillatorThresholdSpec | PriceVsMaSpec) & {
   indicatorId: IndicatorId;
 };
 
+/** Hybrid Redesign の公開名。既存 EdgeConditionTemplate と同じ構造。 */
+export type CrossoverEdgeTemplate = EdgeConditionTemplate;
+
 /**
  * エッジ条件テンプレート表（python 対応 + 単一 series で意味明確なインジのみ）。
  * 閾値・period はいずれも複数候補でスイープ対象。
  */
-export const CROSSOVER_EDGE_TEMPLATES: readonly EdgeConditionTemplate[] = Object.freeze([
+const CROSSOVER_EDGE_TEMPLATE_LIST: EdgeConditionTemplate[] = [
   // ---- oscillator_threshold（売られ/買われ過ぎ・モメンタム） ----
   {
     indicatorId: 'rsi',
@@ -58,6 +66,16 @@ export const CROSSOVER_EDGE_TEMPLATES: readonly EdgeConditionTemplate[] = Object
     short: { op: '>', thresholds: [65, 70, 75] },
     periodParamKey: 'period',
     periodCandidates: [9, 14, 21],
+  },
+  {
+    indicatorId: 'stochastic',
+    featureKey: 'stochastic_k',
+    kind: 'oscillator_threshold',
+    long: { op: '<', thresholds: [20, 30] },
+    short: { op: '>', thresholds: [70, 80] },
+    periodParamKey: 'kPeriod',
+    periodCandidates: [9, 14, 21],
+    fixedParams: { dPeriod: 3 },
   },
   {
     indicatorId: 'williamsR',
@@ -93,6 +111,22 @@ export const CROSSOVER_EDGE_TEMPLATES: readonly EdgeConditionTemplate[] = Object
     periodCandidates: [9, 14],
   },
   {
+    indicatorId: 'macd',
+    featureKey: 'macd_histogram',
+    kind: 'oscillator_threshold',
+    long: { op: '>', thresholds: [0] },
+    short: { op: '<', thresholds: [0] },
+    fixedParams: { fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
+  },
+  {
+    indicatorId: 'aroon',
+    kind: 'oscillator_threshold',
+    long: { op: '>', thresholds: [0, 20] },
+    short: { op: '<', thresholds: [-20, 0] },
+    periodParamKey: 'period',
+    periodCandidates: [14, 25],
+  },
+  {
     indicatorId: 'cmf',
     kind: 'oscillator_threshold',
     // 資金フロー: long=買い圧 (>0) / short=売り圧 (<0)。
@@ -101,12 +135,35 @@ export const CROSSOVER_EDGE_TEMPLATES: readonly EdgeConditionTemplate[] = Object
     periodParamKey: 'period',
     periodCandidates: [20],
   },
+  {
+    indicatorId: 'atr',
+    kind: 'oscillator_threshold',
+    long: { op: '<', thresholds: [0.001, 0.002, 0.005] },
+    short: { op: '<', thresholds: [0.001, 0.002, 0.005] },
+    periodParamKey: 'period',
+    periodCandidates: [14, 21],
+  },
+  {
+    indicatorId: 'obv',
+    kind: 'oscillator_threshold',
+    long: { op: '>', thresholds: [0] },
+    short: { op: '<', thresholds: [0] },
+  },
   // ---- price_vs_ma（順張りトレンドフィルタ: 終値 vs MA） ----
   { indicatorId: 'ema', kind: 'price_vs_ma', periodParamKey: 'period', periodCandidates: [20, 50, 100] },
   { indicatorId: 'sma', kind: 'price_vs_ma', periodParamKey: 'period', periodCandidates: [20, 50, 100] },
   { indicatorId: 'dema', kind: 'price_vs_ma', periodParamKey: 'period', periodCandidates: [20, 50] },
   { indicatorId: 'tema', kind: 'price_vs_ma', periodParamKey: 'period', periodCandidates: [20, 50] },
-]);
+  { indicatorId: 'psar', kind: 'price_vs_ma', periodParamKey: 'step', periodCandidates: [0.02], fixedParams: { maxStep: 0.2 } },
+  { indicatorId: 'ichimoku', featureKey: 'ichimoku_kijun', kind: 'price_vs_ma', periodParamKey: 'basePeriod', periodCandidates: [26, 52], fixedParams: { conversionPeriod: 9, spanBPeriod: 52 } },
+  { indicatorId: 'bb', featureKey: 'bb_upper', kind: 'price_vs_ma', periodParamKey: 'period', periodCandidates: [20, 30] },
+  { indicatorId: 'kc', featureKey: 'kc_upper', kind: 'price_vs_ma', periodParamKey: 'period', periodCandidates: [20, 30], fixedParams: { multiplier: 2 } },
+  { indicatorId: 'vwap', kind: 'price_vs_ma', periodParamKey: 'period', periodCandidates: [1] },
+];
+
+export const CROSSOVER_EDGE_TEMPLATES: readonly EdgeConditionTemplate[] = Object.freeze(
+  CROSSOVER_EDGE_TEMPLATE_LIST,
+);
 
 /** テンプレート化済みインジ ID 集合（crossoverVariants の skip ログ判定用）。 */
 export const TEMPLATED_INDICATOR_IDS: ReadonlySet<string> = new Set(

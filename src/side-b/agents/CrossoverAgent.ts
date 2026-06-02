@@ -18,6 +18,7 @@
  */
 
 import { randomUUID } from 'crypto';
+import { z } from 'zod';
 
 import { AIProvider, type ChatMessage } from '../agent/aiProvider';
 import { formatIndicatorMetadataTable } from '../../shared/indicators/promptTable';
@@ -31,6 +32,7 @@ import { modelFor } from '../../config';
 import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import type { JsonValue } from '../../utils/jsonValue';
 import { extractJson } from './llmJsonExtract';
+import { getPythonSupportedIndicators } from '../../shared/indicators/registry';
 // Phase C: lessons 注入の共有 helper。MutationAgent も同じ helper を使うため、
 // 両 agent 間の結合を避けるべく独立 module に切り出している (PR #141 Copilot review #1/#2)。
 import { buildLessonsPromptBlock } from './lessonsPrompt';
@@ -51,6 +53,16 @@ export interface LossTradeSummary {
   readonly side: 'long' | 'short';
   readonly pnl: number;
 }
+
+export interface IndicatorCandidateSuggestion {
+  readonly candidateIndicatorIds: readonly string[];
+  readonly rationale: string;
+}
+
+const IndicatorCandidateSuggestionSchema = z.object({
+  candidateIndicatorIds: z.array(z.string()).min(1),
+  rationale: z.string().optional().default(''),
+});
 
 /**
  * Filter Evolution M3: LLM 応答 wrapper 形式の最大件数（= 観測ログ用の上限）。
@@ -130,6 +142,26 @@ function normalizeRationale(v: JsonValue | undefined): string | null {
   const collapsed = v.replace(/\s+/g, ' ').trim();
   if (collapsed.length === 0) return null;
   return collapsed.length > 400 ? `${collapsed.slice(0, 397)}...` : collapsed;
+}
+
+function extractIndicatorCandidateSuggestion(
+  data: JsonValue,
+  allowedIds: ReadonlySet<string>,
+  limit: number,
+): IndicatorCandidateSuggestion | null {
+  const parsed = IndicatorCandidateSuggestionSchema.safeParse(data);
+  if (!parsed.success) return null;
+  const ids: string[] = [];
+  for (const item of parsed.data.candidateIndicatorIds) {
+    if (!allowedIds.has(item)) continue;
+    if (!ids.includes(item)) ids.push(item);
+    if (ids.length >= limit) break;
+  }
+  if (ids.length === 0) return null;
+  return {
+    candidateIndicatorIds: ids,
+    rationale: normalizeRationale(parsed.data.rationale) ?? '',
+  };
 }
 
 /**
@@ -362,5 +394,55 @@ export class CrossoverAgent {
       await recordAgentUsage('crossover', { pairCount }, out.length > 0 ? out : null);
     }
     return out;
+  }
+
+  /**
+   * Hybrid Redesign: Crossover 用の候補 indicator ID だけを LLM に選ばせる。
+   * 閾値・period・採否は generateDeterministicCrossovers 側で決定論評価する。
+   */
+  async suggestIndicatorCandidates(
+    elites: StrategyDSL[],
+    scores: Map<string, number>,
+    limit: number,
+    options?: {
+      readonly parentLossTrades?: ReadonlyMap<string, ReadonlyArray<LossTradeSummary>>;
+      readonly moduleParents?: readonly ModuleParent[];
+    },
+  ): Promise<IndicatorCandidateSuggestion | null> {
+    if (elites.length === 0) return null;
+    const allowed = getPythonSupportedIndicators().map((i) => i.id);
+    const allowedSet = new Set<string>(allowed);
+    const parent = elites[0];
+    const lossTradesRaw = options?.parentLossTrades?.get(parent.id) ?? [];
+    const lossTradesForPrompt = summarizeLossTradesForPrompt(lossTradesRaw, 30);
+    const moduleParents = options?.moduleParents ?? [];
+    const system = await this.resolveSystemPrompt();
+    const user =
+      `親戦略:\n${JSON.stringify(parent, null, 2)}\n\n` +
+      `親 score=${(scores.get(parent.id) ?? 0).toFixed(4)}\n\n` +
+      `親の負けトレード抜粋:\n${JSON.stringify(lossTradesForPrompt, null, 2)}\n\n` +
+      `module_parents:\n${JSON.stringify(moduleParents, null, 2)}\n\n` +
+      `利用可能 indicator IDs:\n${allowed.join(', ')}\n\n` +
+      `負けトレードを減らし勝ちを維持する候補 indicator ID を最大 ${limit} 個、` +
+      `JSON オブジェクト { "candidateIndicatorIds": string[], "rationale": string } のみで返してください。` +
+      `閾値・period・StrategyDSL は返さないでください。`;
+
+    const result = await withRetries(() =>
+      this.ai.chat(
+        [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ] as ChatMessage[],
+        { temperature: 0.2, maxTokens: AI_MAX_TOKENS.MEDIUM },
+      ),
+    );
+    if (!result.ok || !result.value?.content) return null;
+    const extracted = extractJson(result.value.content);
+    if (!extracted.ok) return null;
+    const suggestion = extractIndicatorCandidateSuggestion(extracted.data, allowedSet, limit);
+    if (suggestion) {
+      await recordAgentUsage('crossover', { pairCount: 0, indicatorSuggestionLimit: limit }, null);
+    }
+    return suggestion;
   }
 }
