@@ -206,8 +206,8 @@
 
   <div class="note small"><b>注：</b>本再設計は #303(コスト配線)/#304(OOS永続化)/#305・#308(UI可視化) の上に乗る。コスト・可視化は完了済みで、本プランは「<b>探索/最適化のエンジンそのもの</b>」を決定論化する話。</div>
 
-  <h2>6. LLM プロンプト回収プラン（Mutation / Crossover の役割再定義）<span class="small muted"> ／ 2026-06-02 追記・調査+提案（未実装）</span></h2>
-  <div class="note"><b>背景：</b>Phase 2/3 で数値最適化を決定論化したが、<b>deterministic モードは LLM エージェントを完全バイパス</b>する（<code>generateDeterministicMutants</code> / <code>generateDeterministicCrossovers</code> が seam で分岐し LLM を呼ばない）。一方 <code>mutation.md</code> / <code>crossover.md</code> は旧役割（LLM が数値最適化する）のまま。プロンプトと実装が噛み合っていないので「回収（再定義）」が必要。</div>
+  <h2>6. LLM プロンプト改修プラン（Mutation / Crossover の役割再定義）<span class="small muted"> ／ 2026-06-02 追記・調査+提案（未実装）</span></h2>
+  <div class="note"><b>背景：</b>Phase 2/3 で数値最適化を決定論化したが、<b>deterministic モードは LLM エージェントを完全バイパス</b>する（<code>generateDeterministicMutants</code> / <code>generateDeterministicCrossovers</code> が seam で分岐し LLM を呼ばない）。一方 <code>mutation.md</code> / <code>crossover.md</code> は旧役割（LLM が数値最適化する）のまま。プロンプトと実装が噛み合っていないので「改修（再定義）」が必要。</div>
 
   <h3>6-1. ズレの所在</h3>
   <ul class="small">
@@ -259,7 +259,7 @@
     <b>注意：</b>プロンプト改稿は <b>llm 既定モードの挙動も変える</b>（数値変異を促さなくなる）ため、<b>deterministic 有効化とセット</b>で行う（先にプロンプトだけ変えると llm 既定運用中に数値探索が止まる）。
   </div>
 
-  <p class="muted small" style="margin-top:26px">生成: 2026-06-02 / 進化ループ再設計プラン（self-contained・外部依存なし）。§6 は 2026-06-02 追記（プロンプト回収・調査+提案）。</p>
+  <p class="muted small" style="margin-top:26px">生成: 2026-06-02 / 進化ループ再設計プラン（self-contained・外部依存なし）。§6 は 2026-06-02 追記（プロンプト改修・調査+提案）。</p>
 </div>
 </body>
 </html>
