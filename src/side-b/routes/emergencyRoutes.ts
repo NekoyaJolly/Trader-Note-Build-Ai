@@ -7,7 +7,7 @@
  * - GET  /api/side-b/emergency/status - 現在の状態取得
  */
 
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { prisma } from '../../backend/db/client';
 import { createSystemStateRepository } from '../repositories/systemStateRepository';
 import { CTraderAuthService } from '../../backend/services/ctrader/ctraderAuthService';
@@ -24,6 +24,10 @@ router.use(requireRole(['admin']));
 
 const systemStateRepository = createSystemStateRepository();
 
+function getEmergencyActor(req: Request): string {
+  return req.user?.email ?? req.user?.userId ?? 'admin';
+}
+
 /**
  * GET /api/side-b/emergency/status
  * キルスイッチと連続エラー数を取得
@@ -32,12 +36,32 @@ router.get('/status', async (req, res) => {
   try {
     const isStopped = await systemStateRepository.getBoolean('emergency_stop', false);
     const consecutiveErrors = await systemStateRepository.getInt('consecutive_errors', 0);
+    const [
+      lastAction,
+      lastActionAt,
+      lastActionBy,
+      lastActionSource,
+      lastActionReason,
+    ] = await Promise.all([
+      systemStateRepository.get('emergency_last_action'),
+      systemStateRepository.get('emergency_last_action_at'),
+      systemStateRepository.get('emergency_last_action_by'),
+      systemStateRepository.get('emergency_last_action_source'),
+      systemStateRepository.get('emergency_last_action_reason'),
+    ]);
 
     return res.json({
       success: true,
       data: {
         isEmergencyStopped: isStopped,
         consecutiveErrors,
+        audit: {
+          lastAction,
+          lastActionAt,
+          lastActionBy,
+          lastActionSource,
+          lastActionReason,
+        },
       },
     });
   } catch (error) {
@@ -52,10 +76,34 @@ router.get('/status', async (req, res) => {
  */
 router.post('/stop', async (req, res) => {
   try {
+    const alreadyStopped = await systemStateRepository.getBoolean('emergency_stop', false);
+    if (alreadyStopped) {
+      await systemStateRepository.recordEmergencyAudit({
+        action: 'stop',
+        source: 'api',
+        actor: getEmergencyActor(req),
+        reason: 'already_stopped',
+      });
+      return res.json({
+        success: true,
+        message: '緊急停止は既に有効です。',
+        data: {
+          skipped: true,
+          closeSummary: [],
+        },
+      });
+    }
+
     console.log('[Emergency] 緊急キルスイッチがONになりました。一括決済を実行します。');
 
     // 1. キルスイッチをONに設定
     await systemStateRepository.setBoolean('emergency_stop', true);
+    await systemStateRepository.recordEmergencyAudit({
+      action: 'stop',
+      source: 'api',
+      actor: getEmergencyActor(req),
+      reason: 'manual_stop',
+    });
 
     const closeSummary: string[] = [];
 
@@ -160,11 +208,34 @@ router.post('/stop', async (req, res) => {
  */
 router.post('/resume', async (req, res) => {
   try {
+    const alreadyRunning = !(await systemStateRepository.getBoolean('emergency_stop', false));
+    if (alreadyRunning) {
+      await systemStateRepository.recordEmergencyAudit({
+        action: 'resume',
+        source: 'api',
+        actor: getEmergencyActor(req),
+        reason: 'already_running',
+      });
+      return res.json({
+        success: true,
+        message: '緊急停止状態は既に解除されています。',
+        data: {
+          skipped: true,
+        },
+      });
+    }
+
     console.log('[Emergency] 緊急キルスイッチを解除します。');
 
     // 1. キルスイッチをOFFにし、エラーカウントをリセット
     await systemStateRepository.setBoolean('emergency_stop', false);
     await systemStateRepository.setInt('consecutive_errors', 0);
+    await systemStateRepository.recordEmergencyAudit({
+      action: 'resume',
+      source: 'api',
+      actor: getEmergencyActor(req),
+      reason: 'manual_resume',
+    });
 
     // 2. メールで通知
     await mailService.sendAlertMail(

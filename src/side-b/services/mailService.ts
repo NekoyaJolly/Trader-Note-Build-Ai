@@ -92,7 +92,24 @@ export class MailService {
     const action = actionMatch[1].toUpperCase();
 
     if (action === 'STOP') {
+      const alreadyStopped = await this.systemStateRepository.getBoolean('emergency_stop', false);
+      if (alreadyStopped) {
+        await this.systemStateRepository.recordEmergencyAudit({
+          action: 'stop',
+          source: 'mail',
+          actor: 'mail-webhook',
+          reason: 'already_stopped',
+        });
+        return { success: true, message: '緊急停止は既に有効です。' };
+      }
+
       await this.systemStateRepository.setBoolean('emergency_stop', true);
+      await this.systemStateRepository.recordEmergencyAudit({
+        action: 'stop',
+        source: 'mail',
+        actor: 'mail-webhook',
+        reason: 'mail_stop_command',
+      });
       console.log('[MailService] インバウンドメールにより緊急停止(キルスイッチ)がONになりました。');
       await this.sendAlertMail(
         '緊急停止が実行されました (メール指示)',
@@ -100,8 +117,25 @@ export class MailService {
       );
       return { success: true, message: '緊急停止を実行しました。' };
     } else if (action === 'RESUME') {
+      const alreadyRunning = !(await this.systemStateRepository.getBoolean('emergency_stop', false));
+      if (alreadyRunning) {
+        await this.systemStateRepository.recordEmergencyAudit({
+          action: 'resume',
+          source: 'mail',
+          actor: 'mail-webhook',
+          reason: 'already_running',
+        });
+        return { success: true, message: '緊急停止は既に解除されています。' };
+      }
+
       await this.systemStateRepository.setBoolean('emergency_stop', false);
       await this.systemStateRepository.setInt('consecutive_errors', 0); // エラーカウントもリセット
+      await this.systemStateRepository.recordEmergencyAudit({
+        action: 'resume',
+        source: 'mail',
+        actor: 'mail-webhook',
+        reason: 'mail_resume_command',
+      });
       console.log('[MailService] インバウンドメールにより緊急停止が解除されました。');
       await this.sendAlertMail(
         '緊急停止が解除されました (メール指示)',
