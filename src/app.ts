@@ -194,7 +194,7 @@ class App {
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Correlation-Id', 'X-Request-Id'],
-      exposedHeaders: ['Set-Cookie', 'X-Correlation-Id'],
+      exposedHeaders: ['X-Correlation-Id'],
     }));
 
     console.log('[App] JSON パーサーを設定中...');

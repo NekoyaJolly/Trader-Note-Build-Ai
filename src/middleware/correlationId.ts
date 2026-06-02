@@ -35,7 +35,7 @@ function pickHeaderValue(value: string | string[] | undefined): string | undefin
   if (Array.isArray(value)) {
     return value[0];
   }
-  return value;
+  return value?.split(',')[0]?.trim();
 }
 
 export function buildCorrelationId(input?: string): string {

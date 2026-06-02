@@ -120,6 +120,12 @@ describe('correlationIdMiddleware', () => {
     expect(readIncomingCorrelationId(req)).toBe('request-id-20260603');
   });
 
+  it('カンマ区切りの複数値ヘッダーは先頭だけを候補にする', () => {
+    const req = createRequest({ 'x-correlation-id': 'first-id-20260603, second-id-20260603' });
+
+    expect(readIncomingCorrelationId(req)).toBe('first-id-20260603');
+  });
+
   it('不正な入力は引き継がず UUID を生成する', () => {
     const generated = buildCorrelationId('secret token with spaces');
 
