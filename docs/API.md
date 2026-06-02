@@ -42,8 +42,8 @@ http://localhost:3100
 
 | endpoint | method | classification | required auth | required role | required secret | rate limit required | audit log required | owner check required | notes |
 |----------|--------|----------------|---------------|---------------|-----------------|---------------------|--------------------|----------------------|-------|
-| `/health` | GET | public | none | none | none | no | no | no | プロセスヘルス。schedulerRunning を含む。 |
-| `/ready` | GET | public | none | none | none | no | no | no | 最小 readiness。DB 依存先確認との完全分離は TODO。 |
+| `/health` | GET | public | none | none | none | no | no | no | liveness。プロセスがHTTP応答可能かのみ確認し、依存先状態は含めない。 |
+| `/ready` | GET | public | none | none | none | no | no | no | readiness。DB疎通成功時は 200、失敗時は 503。秘密値や接続詳細は返さない。 |
 | `/api/auth/ctrader/url` | GET | public | none | none | none | yes | no | no | OAuth 開始 URL。auth rate limit 対象。 |
 | `/api/auth/ctrader/callback` | POST | public | none | none | none | yes | yes | no | OAuth callback。JWT Cookie と token を返す。 |
 | `/api/auth/ctrader/status` | GET | auth | JWT | user/admin | none | no | no | yes | 認証ユーザーの cTrader token のみ返す。 |
@@ -286,14 +286,41 @@ http://localhost:3100
 ### ヘルスチェック
 
 #### GET /health
-サーバーヘルスとスケジューラーステータスを確認します。
+サーバープロセスが HTTP 応答できることだけを確認します。
+DB などの依存先確認は `/ready` に分離します。
 
 **応答:**
 ```json
 {
   "status": "ok",
+  "check": "liveness",
+  "timestamp": "2024-01-01T00:00:00.000Z"
+}
+```
+
+#### GET /ready
+サーバーがトラフィックを受けられる状態か、DB 疎通を含めて確認します。
+失敗時も接続先やエラー詳細は返しません。
+
+**成功応答:**
+```json
+{
+  "status": "ready",
   "timestamp": "2024-01-01T00:00:00.000Z",
-  "schedulerRunning": true
+  "dependencies": {
+    "database": "ok"
+  }
+}
+```
+
+**失敗応答 (503):**
+```json
+{
+  "status": "not_ready",
+  "timestamp": "2024-01-01T00:00:00.000Z",
+  "dependencies": {
+    "database": "error"
+  }
 }
 ```
 
