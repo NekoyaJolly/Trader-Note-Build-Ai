@@ -16,6 +16,7 @@ const config: Config = {
   ],
   setupFiles: ['<rootDir>/jest.setup.ts'],
   globalSetup: '<rootDir>/src/backend/tests/setup/global-setup.ts',
+  globalTeardown: '<rootDir>/src/backend/tests/setup/global-teardown.ts',
   moduleFileExtensions: ['ts', 'js', 'json'],
   verbose: true,
   testTimeout: 30000, // 30秒（デフォルト5秒から延長）
