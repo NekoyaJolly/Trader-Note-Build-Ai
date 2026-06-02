@@ -7,7 +7,13 @@ import {
   buildReadinessResult,
   sanitizeRequestUrl,
 } from '../../app';
+import {
+  buildCorrelationId,
+  correlationIdMiddleware,
+  readIncomingCorrelationId,
+} from '../../middleware/correlationId';
 import { prisma } from '../db/client';
+import type { NextFunction, Request, Response } from 'express';
 
 jest.mock('../db/client', () => ({
   prisma: {
@@ -72,5 +78,54 @@ describe('/health /ready', () => {
     expect(result).toBe('GET /api/mail/receive?token=%5Bredacted%5D&code=%5Bredacted%5D&x=1');
     expect(result).not.toContain('abc');
     expect(result).not.toContain('oauth');
+  });
+});
+
+describe('correlationIdMiddleware', () => {
+  function createRequest(headers: Record<string, string | string[] | undefined> = {}): Request {
+    return { headers } as Request;
+  }
+
+  function createResponse(): Response {
+    const headers: Record<string, number | string | readonly string[]> = {};
+    return {
+      locals: {},
+      setHeader(name: string, value: number | string | readonly string[]) {
+        headers[name] = value;
+        return this;
+      },
+      getHeader(name: string) {
+        return headers[name];
+      },
+    } as Response;
+  }
+
+  it('安全な x-correlation-id をリクエストとレスポンスへ引き継ぐ', () => {
+    const req = createRequest({ 'x-correlation-id': 'sidea-e2e-20260603' });
+    const res = createResponse();
+    const next: jest.MockedFunction<NextFunction> = jest.fn();
+
+    correlationIdMiddleware(req, res, next);
+
+    expect(req.correlationId).toBe('sidea-e2e-20260603');
+    expect(req.requestId).toBe('sidea-e2e-20260603');
+    expect(res.locals.correlationId).toBe('sidea-e2e-20260603');
+    expect(res.getHeader('X-Correlation-Id')).toBe('sidea-e2e-20260603');
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it('x-correlation-id がなければ x-request-id を候補にする', () => {
+    const req = createRequest({ 'x-request-id': 'request-id-20260603' });
+
+    expect(readIncomingCorrelationId(req)).toBe('request-id-20260603');
+  });
+
+  it('不正な入力は引き継がず UUID を生成する', () => {
+    const generated = buildCorrelationId('secret token with spaces');
+
+    expect(generated).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(generated).not.toBe('secret token with spaces');
   });
 });
