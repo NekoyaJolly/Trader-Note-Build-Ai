@@ -112,8 +112,13 @@ export class StrategyPopulation {
     if (this.store) {
       try {
         await this.store.saveAll(Object.fromEntries(this.populations.entries()));
-      } catch {
-        // 保存失敗は次サイクルで再保存される（観測は EvolutionLoop 側ログ）。
+      } catch (err) {
+        // 保存失敗は次サイクルで再保存されるが、障害切り分けのため warn を残す。
+        console.warn(
+          `[StrategyPopulation] DB save 失敗（次サイクルで再保存）: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
       }
       return;
     }
@@ -128,16 +133,21 @@ export class StrategyPopulation {
   }
 
   async load(): Promise<void> {
-    // Phase 4: store 注入時は DB から復元（cron 跨ぎ durable）。失敗時は空のまま（種注入経路へ）。
+    // Phase 4: store 注入時は DB から復元（cron 跨ぎ durable）。失敗時は空集団で確定（種注入経路へ）。
     if (this.store) {
+      // 先に clear して「復元失敗 → 空集団」を決定的にする（複数回 load でも空 fallback が成立）。
+      this.populations.clear();
       try {
         const pops = await this.store.loadAll();
-        this.populations.clear();
         for (const [regime, arr] of Object.entries(pops)) {
           this.populations.set(regime, arr.slice(-this.maxSize));
         }
-      } catch {
-        // 復元失敗は空集団 → cold-start の種注入に倒れる（既存挙動と同じ安全側）。
+      } catch (err) {
+        console.warn(
+          `[StrategyPopulation] DB load 失敗、空集団で継続（cold-start 種注入へ）: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
       }
       return;
     }

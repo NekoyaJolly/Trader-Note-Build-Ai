@@ -77,6 +77,14 @@ describe('EvolutionPopulationRepository.loadAll', () => {
     const out = await repo.loadAll();
     expect(out.trend).toEqual([]);
   });
+
+  it('findMany が throw しても best-effort で空結果を返す（呼び出し元を壊さない）', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    mockFindMany.mockRejectedValue(new Error('db down'));
+    const repo = new EvolutionPopulationRepository();
+    await expect(repo.loadAll()).resolves.toEqual({});
+    jest.restoreAllMocks();
+  });
 });
 
 describe('EvolutionPopulationRepository.saveAll', () => {

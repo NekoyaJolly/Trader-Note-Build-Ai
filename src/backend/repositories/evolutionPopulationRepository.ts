@@ -26,13 +26,17 @@ export class EvolutionPopulationRepository {
    * 不正 JSON / Zod 不適合の member は除外し、regime は valid な member のみで復元する。
    */
   async loadAll(): Promise<Record<string, StrategyDSL[]>> {
-    const rows = await prisma.evolutionPopulation.findMany();
     const out: Record<string, StrategyDSL[]> = {};
-    for (const row of rows) {
-      const parsed = MembersSchema.safeParse(row.members);
-      if (parsed.success) {
-        out[row.regime] = parsed.data;
-      } else {
+    try {
+      // rows は prisma の戻り型から推論（members は JsonValue）。loop も try 内に置き、
+      // DB 例外を Repository 単体で握って best-effort（呼び出し元のループを壊さない）。
+      const rows = await prisma.evolutionPopulation.findMany();
+      for (const row of rows) {
+        const parsed = MembersSchema.safeParse(row.members);
+        if (parsed.success) {
+          out[row.regime] = parsed.data;
+          continue;
+        }
         // member 配列ごと不適合なら、要素単位で救済（壊れた 1 件で regime 全滅させない）。
         const arr = Array.isArray(row.members) ? row.members : [];
         const valid: StrategyDSL[] = [];
@@ -42,6 +46,12 @@ export class EvolutionPopulationRepository {
         }
         out[row.regime] = valid;
       }
+    } catch (err) {
+      console.warn(
+        `[EvolutionPopulationRepository] loadAll 失敗、空で継続: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
     }
     return out;
   }
