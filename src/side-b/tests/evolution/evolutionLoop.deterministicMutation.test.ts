@@ -89,5 +89,7 @@ describe('EvolutionLoop mutation 配線 (Phase 2)', () => {
     // 決定論経路: LLM mutation は呼ばれず、runOptimize（WF）が最低 1 回走る。
     expect(generateMutantsSpy).not.toHaveBeenCalled();
     expect(runOptimize).toHaveBeenCalled();
-  });
+    // 実 surrogate BT を回すため単体で 20-30s かかる。full-suite 並列負荷下で jest 既定
+    // per-test timeout を超えて flaky に落ちるのを防ぐため明示的に長め timeout を与える。
+  }, 60_000);
 });

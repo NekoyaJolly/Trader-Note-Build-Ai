@@ -847,6 +847,18 @@ model EvolutionInstanceCarry {
   @@index([recordedAt(sort: Desc)], map: "idx_evolution_carry_recorded")
 }
 
+/// 進化ループ再設計 Phase 4: regime 別の戦略集団スナップショットを DB 永続化する。
+/// 背景(P4): population は data/evolution/strategy-population.json に保存されていたが、
+///   コンテナの ephemeral fs では cron 再起動で消え、毎ラン population が空 → 初期種 12 個を
+///   再注入していた（探索の起点が固定で収束に見える）。本テーブルで durable に持ち越し、
+///   cold-start の種注入を真に「初回のみ」にする。
+/// 1 regime = 1 行（最新スナップショット）。members は StrategyDSL[]（最大 50）の JSON。
+model EvolutionPopulation {
+  regime    String   @id
+  members   Json
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+}
+
 /// ストラテジーアラート設定
 /// ストラテジー条件成立時のリアルタイム通知設定
 model StrategyAlert {
@@ -1305,14 +1317,14 @@ model ResearchOutput {
 
 /// AIトレードプラン（Plan AIが生成）
 model AITradePlan {
-  id         String   @id @default(uuid()) @db.Uuid
+  id              String   @id @default(uuid()) @db.Uuid
   /// 参照する MarketResearch.id (Deprecated, Phase A 以降の新規データは null)
   /// 物理削除は Phase D 相当 (memory: project_llm_output_persistence_principle)
-  researchId String?  @db.Uuid
+  researchId      String?  @db.Uuid
   /// 対象日（YYYY-MM-DD）
-  targetDate DateTime @db.Date
+  targetDate      DateTime @db.Date
   /// 対象シンボル
-  symbol     String
+  symbol          String
   /// 執行足（current timeframe）。MTF 文脈の一級フィールド。既存行は null 許容。
   timeframe       String?
   /// 分析した上位足（higher timeframe）。deriveHigherTimeframe(timeframe) と整合。
@@ -1320,9 +1332,9 @@ model AITradePlan {
 
   // 市場分析
   /// 市場分析結果（JSONB: regime, trendDirection, volatility, keyLevels, summary）
-  marketAnalysis Json
+  marketAnalysis    Json
   /// トレードシナリオ配列（JSONB）
-  scenarios      Json
+  scenarios         Json
   /// BullBearDebate の全出力（JSONB: bull/bear シナリオ・論拠・synthesis）。LLM 生成根拠の永続化（P0-a）。既存行は null。
   debate            Json?
   /// IndicatorSpecialist の MTF テクニカル統合解釈（JSONB）。LLM 生成根拠の永続化（P0-a）。既存行は null。
@@ -1360,13 +1372,13 @@ model AITradePlan {
 /// 仮想トレード（Phase B用）
 /// AIプランに基づく仮想的なトレード実行記録
 model VirtualTrade {
-  id         String @id @default(uuid()) @db.Uuid
+  id              String  @id @default(uuid()) @db.Uuid
   /// 参照するプランID
-  planId     String @db.Uuid
+  planId          String  @db.Uuid
   /// シナリオID（プラン内のシナリオを特定）
-  scenarioId String
+  scenarioId      String
   /// 対象シンボル
-  symbol     String
+  symbol          String
   /// 執行足（current timeframe）。plan から伝播。MTF 文脈の一級フィールド。
   timeframe       String?
   /// 分析した上位足（higher timeframe）。plan から伝播。
@@ -1486,11 +1498,11 @@ model AITradeNote {
 
   // 基本情報
   /// 日付（YYYY-MM-DD）
-  date      DateTime @db.Date
+  date            DateTime @db.Date
   /// シンボル
-  symbol    String
+  symbol          String
   /// 方向（long/short）
-  direction String
+  direction       String
   /// 執行足（current timeframe）。trade から伝播。MTF 文脈の一級フィールド。
   timeframe       String?
   /// 分析した上位足（higher timeframe）。trade から伝播。
@@ -2215,4 +2227,3 @@ model IndicatorSeriesCache {
 
   @@index([symbol, timeframe, indicatorId, paramsHash, field, fetchedAt(sort: Desc)], map: "idx_indicator_cache_lookup")
 }
-
