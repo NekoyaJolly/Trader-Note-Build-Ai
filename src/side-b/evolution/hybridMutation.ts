@@ -51,6 +51,7 @@ export interface HybridMutationSummary {
 export interface HybridMutationParams {
   parents: StrategyDSL[];
   scores: Map<string, number>;
+  /** 返却する mutant 数の上限。内部では最大2体/親を作るため親数へ変換して使う。 */
   count: number;
   startDate: string;
   endDate: string;
@@ -116,7 +117,9 @@ export async function generateHybridMutants(
   const ranked = [...params.parents].sort(
     (a, b) => (params.scores.get(b.id) ?? 0) - (params.scores.get(a.id) ?? 0),
   );
-  const targets = ranked.slice(0, Math.max(0, params.count));
+  const maxMutants = Math.max(0, params.count);
+  const targetParentCount = Math.ceil(maxMutants / 2);
+  const targets = ranked.slice(0, targetParentCount);
   const mutants: StrategyDSL[] = [];
   const bundles: EvolutionMutationBundle[] = [];
 
@@ -172,6 +175,5 @@ export async function generateHybridMutants(
     structuralVariantCreated: bundles.filter((b) => b.structuralVariant !== null).length,
   };
 
-  return { mutants, bundles, summary };
+  return { mutants: mutants.slice(0, maxMutants), bundles, summary };
 }
-

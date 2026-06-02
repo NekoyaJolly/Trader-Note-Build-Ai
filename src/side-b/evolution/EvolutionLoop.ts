@@ -851,12 +851,11 @@ export class EvolutionLoop {
           `[info] deterministic mutation: parents=${parentDsls.length} count=${mutationCount} → mutants=${mutants.length}`,
         );
       } else {
-        const hybridParentCount = Math.max(1, Math.ceil(mutationCount / 2));
         const hybrid = await generateHybridMutants(
           {
             parents: parentDsls,
             scores: parentScores,
-            count: hybridParentCount,
+            count: mutationCount,
             startDate: toIsoDateTime(this.deps.defaultPeriod.start),
             endDate: toIsoDateTime(this.deps.defaultPeriod.end),
             mutationAgent,

@@ -163,7 +163,7 @@ describe('EvolutionLoop mutation 配線 (Phase 2)', () => {
     // per-test timeout を超えて flaky に落ちるのを防ぐため明示的に長め timeout を与える。
   }, 60_000);
 
-  it('Hybrid mutation は baseline / optimizedBase / structuralVariant を1親から生成する', async () => {
+  it('Hybrid mutation は bundle を生成しつつ返却 mutants を count 以下に抑える', async () => {
     const parent = makeParentDsl();
     const mutationAgent = new MutationAgent();
     const generateMutantsSpy = jest
@@ -216,6 +216,8 @@ describe('EvolutionLoop mutation 配線 (Phase 2)', () => {
       : [];
     expect(optimizedConditions).toHaveLength(1);
     expect(structuralConditions).toHaveLength(2);
-    expect(result.mutants).toHaveLength(2);
+    // adaptive budget の count は返却 mutant 数の上限として守る。
+    // bundle には structuralVariant も残るため、観測情報は失われない。
+    expect(result.mutants).toHaveLength(1);
   });
 });
