@@ -11,6 +11,7 @@ import { MutationAgent } from '../../agents/MutationAgent';
 import { DiversityEnforcer } from '../../evolution/DiversityEnforcer';
 import {
   EvolutionLoop,
+  type EvolutionLoopDeps,
   type RunScreeningBacktestFn,
   type EvolutionBacktestPersister,
 } from '../../evolution/EvolutionLoop';
@@ -38,6 +39,15 @@ function makeFormalBtResponse(
     engineVersion: 'analysis-engine/backtesting.py@test',
     unsupportedConditions: [],
   };
+}
+
+function createTestEvolutionLoop(deps: EvolutionLoopDeps): EvolutionLoop {
+  // 本ファイルは旧 LLM 経路の回帰テストが中心のため、hybrid 既定値による外部 optimize 呼び出しを避ける。
+  return new EvolutionLoop({
+    ...deps,
+    mutationStrategy: deps.mutationStrategy ?? 'llm',
+    crossoverStrategy: deps.crossoverStrategy ?? 'llm',
+  });
 }
 
 describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
@@ -99,7 +109,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
       .mockResolvedValue(makeFormalBtResponse(2.0, 0.6, 30));
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population: new StrategyPopulation(undefined),
       adapter,
       mutationAgent,
@@ -204,7 +214,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
       .mockResolvedValue(makeFormalBtResponse(1.8, 0.55, 35));
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -325,7 +335,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
       .mockRejectedValue(new Error('analysis-engine unreachable'));
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -426,7 +436,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
       .mockResolvedValue(makeFormalBtResponse(0.8, 0.45, 30));
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -523,7 +533,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
       .mockResolvedValue(makeFormalBtResponse(1.5, 0.55, 30));
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -659,7 +669,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       .mockResolvedValue([]);
     const repoStub: EvolutionBacktestPersister = { createMany, findRecentFormalBtPassed };
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -832,7 +842,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       >()
       .mockResolvedValue([]);
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -940,7 +950,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
       .mockResolvedValue(makeFormalBtResponse(1.5, 0.55, 30));
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -1038,7 +1048,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
       .mockResolvedValue(makeFormalBtResponse(0.7, 0.4, 30));
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -1143,7 +1153,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
       .mockResolvedValue(makeFormalBtResponse(1.8, 0.55, 35));
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -1260,7 +1270,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         unsupportedConditions: [],
       });
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -1359,7 +1369,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
       .mockResolvedValue(makeFormalBtResponse(0.5, 0.4, 30));
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -1485,7 +1495,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
       .mockResolvedValue(makeFormalBtResponse(1.5, 0.6, 30));
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -1589,7 +1599,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
       .mockRejectedValue(new Error('socket hang up'));
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -1690,7 +1700,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
       .mockResolvedValue(makeFormalBtResponse(1.8, 0.55, 35));
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -1791,7 +1801,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
       .mockResolvedValue(makeFormalBtResponse(1.8, 0.55, 35));
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -1928,7 +1938,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         );
       });
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -2067,7 +2077,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
         );
       });
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -2188,7 +2198,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
       .mockResolvedValue(makeFormalBtResponse(1.8, 0.55, 35));
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -2285,7 +2295,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
       .mockResolvedValue(makeFormalBtResponse(1.8, 0.55, 35));
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -2399,7 +2409,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       evaluationKind: 'oos' as const,
     });
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -2501,7 +2511,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       .fn()
       .mockRejectedValue(new Error('analysis-engine OOS unreachable'));
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -2605,7 +2615,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       evaluationKind: 'oos' as const,
     });
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -2703,7 +2713,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
       .mockResolvedValue(makeFormalBtResponse(0.5, 0.4, 30));
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -2797,7 +2807,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
     const runFormalBacktest = jest
       .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
       .mockResolvedValue(makeFormalBtResponse(1.8, 0.55, 35));
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -2891,7 +2901,7 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
     const runFormalBacktest = jest
       .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
       .mockResolvedValue(makeFormalBtResponse(1.8, 0.55, 35));
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -3000,7 +3010,7 @@ describe('EvolutionLoop Phase B-2: carry state load/save', () => {
       .fn<ReturnType<RunScreeningBacktestFn>, Parameters<RunScreeningBacktestFn>>()
       .mockResolvedValue(makeFormalBtResponse(1.5, 0.6, 30));
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -3082,7 +3092,7 @@ describe('EvolutionLoop Phase B-2: carry state load/save', () => {
       deleteOlderThan,
     };
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -3194,7 +3204,7 @@ describe('EvolutionLoop Phase B-2: carry state load/save', () => {
       deleteOlderThan,
     };
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -3301,7 +3311,7 @@ describe('EvolutionLoop Phase B-2: carry state load/save', () => {
       EvolutionInstanceCarryPersister['deleteOlderThan']
     > = jest.fn();
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -3389,7 +3399,7 @@ describe('EvolutionLoop Phase B-2: carry state load/save', () => {
       EvolutionInstanceCarryPersister['deleteOlderThan']
     > = jest.fn();
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,
@@ -3477,7 +3487,7 @@ describe('EvolutionLoop Phase B-2: carry state load/save', () => {
       deleteOlderThan,
     };
 
-    const loop = new EvolutionLoop({
+    const loop = createTestEvolutionLoop({
       population,
       adapter,
       mutationAgent,

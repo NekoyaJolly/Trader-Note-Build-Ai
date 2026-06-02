@@ -214,7 +214,7 @@ lessons の具体内容を `rationale` に引用するのも推奨 (= ユーザ�
 - 自然言語のみの解答
 - JSON 配列で複数個体を返すこと
 - 通常の Hybrid 経路で `child_dsl` を返すこと
-- `candidateIndicatorIds` / `rationale` 以外のフィールドを返すこと
+- 通常の Hybrid 経路で `candidateIndicatorIds` / `rationale` 以外のフィールドを返すこと（legacy fallback で `child_dsl` を明示要求された場合のみ例外）
 - 上記「対応 lens / feature」表に **存在しない** lens / feature の出力
 - 数学的に常に true / false になる条件
 - 未来情報を使う条件
