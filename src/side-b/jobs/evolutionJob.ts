@@ -34,6 +34,7 @@ import {
   type MultiGenerationRunReport,
 } from '../evolution/multiGenerationRunner';
 import { evolutionInstanceCarryRepository } from '../../backend/repositories/evolutionInstanceCarryRepository';
+import { evolutionPopulationRepository } from '../../backend/repositories/evolutionPopulationRepository';
 import { generationReflectionAgent } from '../agents/GenerationReflectionAgent';
 import { generationLessonRepository } from '../../backend/repositories/generationLessonRepository';
 import { StrategyPopulation } from '../evolution/StrategyPopulation';
@@ -118,8 +119,11 @@ export class EvolutionJob implements SideBJobRunner<SideBSchedulerConfig, Evolut
     const regimes = config.evolutionRegimes?.length
       ? config.evolutionRegimes
       : [...DEFAULT_EVOLUTION_REGIMES];
+    // Phase 4: population を DB 永続化（cron 跨ぎ durable）。ephemeral fs で毎ラン種が
+    // 再注入されていた P4 を解消し、cold-start の種注入を真に「初回のみ」にする。
+    // file パスは後方互換のため残す（store 注入時は store が優先される）。
     const persistPath = path.join(process.cwd(), 'data', 'evolution', 'strategy-population.json');
-    const population = new StrategyPopulation(persistPath);
+    const population = new StrategyPopulation(persistPath, evolutionPopulationRepository);
     await population.load();
 
     const end = new Date();

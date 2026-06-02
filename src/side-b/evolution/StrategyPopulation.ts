@@ -18,13 +18,29 @@ export interface StrategyPopulationPersistShape {
   populations: Record<string, StrategyDSL[]>;
 }
 
+/**
+ * 進化ループ再設計 Phase 4: population の永続化バックエンド抽象。
+ * EvolutionPopulationRepository が構造的にこれを満たす（DB 永続化）。
+ * 注入されていれば load/save は file ではなく DB 経由になる（ephemeral fs 対策）。
+ */
+export interface PopulationStore {
+  loadAll(): Promise<Record<string, StrategyDSL[]>>;
+  saveAll(populations: Record<string, readonly StrategyDSL[]>): Promise<void>;
+}
+
 export class StrategyPopulation {
   private populations: Map<string, StrategyDSL[]> = new Map();
 
   readonly maxSize = DEFAULT_MAX;
 
-  /** 既定の永続化パス（リポジトリルート想定） */
-  constructor(private readonly persistPath?: string) {}
+  /**
+   * @param persistPath file 永続化パス（store 未注入時のみ使用、後方互換）
+   * @param store       DB 永続化ストア（注入時はこちらを優先、cron 跨ぎ durable）
+   */
+  constructor(
+    private readonly persistPath?: string,
+    private readonly store?: PopulationStore,
+  ) {}
 
   add(regime: string, strategy: StrategyDSL): void {
     const list = this.populations.get(regime) ?? [];
@@ -92,6 +108,20 @@ export class StrategyPopulation {
   }
 
   async save(): Promise<void> {
+    // Phase 4: store 注入時は DB 永続化（best-effort、失敗してもループは継続）。
+    if (this.store) {
+      try {
+        await this.store.saveAll(Object.fromEntries(this.populations.entries()));
+      } catch (err) {
+        // 保存失敗は次サイクルで再保存されるが、障害切り分けのため warn を残す。
+        console.warn(
+          `[StrategyPopulation] DB save 失敗（次サイクルで再保存）: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+      return;
+    }
     if (!this.persistPath) return;
     const dir = path.dirname(this.persistPath);
     await fs.mkdir(dir, { recursive: true });
@@ -103,6 +133,24 @@ export class StrategyPopulation {
   }
 
   async load(): Promise<void> {
+    // Phase 4: store 注入時は DB から復元（cron 跨ぎ durable）。失敗時は空集団で確定（種注入経路へ）。
+    if (this.store) {
+      // 先に clear して「復元失敗 → 空集団」を決定的にする（複数回 load でも空 fallback が成立）。
+      this.populations.clear();
+      try {
+        const pops = await this.store.loadAll();
+        for (const [regime, arr] of Object.entries(pops)) {
+          this.populations.set(regime, arr.slice(-this.maxSize));
+        }
+      } catch (err) {
+        console.warn(
+          `[StrategyPopulation] DB load 失敗、空集団で継続（cold-start 種注入へ）: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+      return;
+    }
     if (!this.persistPath) return;
     try {
       const raw = await fs.readFile(this.persistPath, 'utf-8');

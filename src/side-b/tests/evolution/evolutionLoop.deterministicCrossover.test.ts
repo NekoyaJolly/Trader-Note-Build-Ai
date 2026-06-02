@@ -89,5 +89,7 @@ describe('EvolutionLoop crossover 配線 (Phase 3)', () => {
     // 決定論 crossover: LLM crossover は呼ばれず、screening BT が走る（baseline + variants）。
     expect(generateCrossoversSpy).not.toHaveBeenCalled();
     expect(runFormalBacktest).toHaveBeenCalled();
-  });
+    // 実 surrogate BT を回すため単体で 20-30s かかる。full-suite 並列負荷下で jest 既定
+    // per-test timeout を超えて flaky に落ちるのを防ぐため明示的に長め timeout を与える。
+  }, 60_000);
 });
