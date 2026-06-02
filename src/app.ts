@@ -33,6 +33,87 @@ import { MatchingScheduler } from './utils/scheduler';
 import { getSideBScheduler } from './side-b/jobs/sideBScheduler';
 import { requireAuth } from './middleware/authMiddleware';
 import { mailRouter } from './side-b/routes/mailRoutes';
+import { prisma } from './backend/db/client';
+
+/**
+ * /health が返す liveness 応答。
+ */
+export interface HealthPayload {
+  readonly status: 'ok';
+  readonly check: 'liveness';
+  readonly timestamp: string;
+}
+
+/**
+ * /ready が返す readiness 応答。
+ */
+export interface ReadinessPayload {
+  readonly status: 'ready' | 'not_ready';
+  readonly timestamp: string;
+  readonly dependencies: {
+    readonly database: 'ok' | 'error';
+  };
+}
+
+/**
+ * /ready の HTTP ステータスと応答本文。
+ */
+export interface ReadinessResult {
+  readonly statusCode: 200 | 503;
+  readonly body: ReadinessPayload;
+}
+
+export function buildHealthPayload(now: Date = new Date()): HealthPayload {
+  return {
+    status: 'ok',
+    check: 'liveness',
+    timestamp: now.toISOString(),
+  };
+}
+
+export async function buildReadinessResult(now: Date = new Date()): Promise<ReadinessResult> {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    return {
+      statusCode: 200,
+      body: {
+        status: 'ready',
+        timestamp: now.toISOString(),
+        dependencies: {
+          database: 'ok',
+        },
+      },
+    };
+  } catch {
+    return {
+      statusCode: 503,
+      body: {
+        status: 'not_ready',
+        timestamp: now.toISOString(),
+        dependencies: {
+          database: 'error',
+        },
+      },
+    };
+  }
+}
+
+export function sanitizeRequestUrl(method: string, originalUrl: string): string {
+  const sensitiveKeys = ['token', 'secret', 'code', 'authorization'];
+  try {
+    const url = new URL(originalUrl, 'http://localhost');
+    sensitiveKeys.forEach((key) => {
+      url.searchParams.forEach((_value, paramKey) => {
+        if (paramKey.toLowerCase().includes(key)) {
+          url.searchParams.set(paramKey, '[redacted]');
+        }
+      });
+    });
+    return `${method} ${url.pathname}${url.search}`;
+  } catch {
+    return `${method} [unparseable-url]`;
+  }
+}
 
 /**
  * TradeAssist Application
@@ -41,6 +122,7 @@ class App {
   public app: Application;
   private scheduler: MatchingScheduler;
   private server: Server | null = null;
+  private routesInitialized = false;
 
   constructor() {
     console.log('[App] コンストラクタ開始');
@@ -125,27 +207,24 @@ class App {
    * Initialize routes
    */
   private initializeRoutes(): void {
+    if (this.routesInitialized) {
+      return;
+    }
     console.log('[App] ルート初期化開始...');
 
     try {
 
-      // Health check
+      // liveness: プロセスがHTTP応答できるかだけを返す。依存先確認は /ready に分離する。
       console.log('[App] /health エンドポイントを登録中...');
-      this.app.get('/health', (req: Request, res: Response) => {
-        res.json({
-          status: 'ok',
-          timestamp: new Date().toISOString(),
-          schedulerRunning: this.scheduler.isSchedulerRunning(),
-        });
+      this.app.get('/health', (_req: Request, res: Response) => {
+        res.json(buildHealthPayload());
       });
 
-      // readiness は現時点ではプロセス起動確認のみ。DB 等の完全な依存先確認は別 PR で分離する。
+      // readiness: Cloud Run がトラフィックを流してよいかを依存先込みで判定する。
       console.log('[App] /ready エンドポイントを登録中...');
-      this.app.get('/ready', (_req: Request, res: Response) => {
-        res.json({
-          status: 'ok',
-          timestamp: new Date().toISOString(),
-        });
+      this.app.get('/ready', async (_req: Request, res: Response) => {
+        const result = await buildReadinessResult();
+        res.status(result.statusCode).json(result.body);
       });
 
       // 2026-05-24 (PR #250): auth route に rate-limit を適用 (= ログイン試行 / OAuth
@@ -262,9 +341,11 @@ class App {
         console.error('═══════════════════════════════════════');
         console.error('  Express エラーハンドラーがエラーをキャッチしました');
         console.error('═══════════════════════════════════════');
-        console.error('URL:', req.method, req.url);
+        console.error('URL:', sanitizeRequestUrl(req.method, req.originalUrl || req.url));
         console.error('Error:', err.message);
-        console.error('Stack:', err.stack);
+        if (!config.server.isProduction) {
+          console.error('Stack:', err.stack);
+        }
         console.error('═══════════════════════════════════════');
 
         res.status(500).json({
@@ -279,6 +360,7 @@ class App {
         res.status(404).json({ error: 'Route not found' });
       });
 
+      this.routesInitialized = true;
       console.log('[App] ✅ ルート初期化完了');
     } catch (error) {
       console.error('═══════════════════════════════════════');
