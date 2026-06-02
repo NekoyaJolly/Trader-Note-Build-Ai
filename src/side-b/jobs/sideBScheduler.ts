@@ -675,6 +675,47 @@ export class SideBScheduler {
     return this.executeMonitorJob();
   }
 
+  private async shouldSkipForEmergency(jobLabel: string): Promise<boolean> {
+    try {
+      const isStopped = await this.systemStateRepository.getBoolean('emergency_stop', false);
+      if (isStopped) {
+        this.log(`緊急停止(キルスイッチ)がONのため、${jobLabel}の実行をスキップします。`);
+        return true;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.log(`緊急停止状態の確認に失敗したため、${jobLabel}を既存挙動で継続します: ${message}`);
+    }
+    return false;
+  }
+
+  private buildScreeningEmergencySkipResult(): ScreeningJobResult {
+    return {
+      processed: 0,
+      passed: 0,
+      rejected: 0,
+      notTestable: 0,
+      errors: 0,
+    };
+  }
+
+  private buildFullValidationEmergencySkipResult(): FullValidationJobResult {
+    return {
+      processed: 0,
+      confirmed: 0,
+      rejected: 0,
+      notTestable: 0,
+      errors: 0,
+    };
+  }
+
+  private buildEvolutionEmergencySkipResult(): EvolutionJobResult {
+    return {
+      regimeReports: 0,
+      errors: [],
+    };
+  }
+
   // ============================================
   // Phase B+ (2026-05-24): Top-Level Orchestrator 経由のサイクル実行
   // ============================================
@@ -858,6 +899,9 @@ export class SideBScheduler {
    * @param options.period BT 対象期間 override (env SCREENING_PERIOD_DAYS のデフォルトを上書き)
    */
   async runScreeningNow(options?: ScreeningJobOptions): Promise<ScreeningJobResult> {
+    if (await this.shouldSkipForEmergency('スクリーニングジョブ')) {
+      return this.buildScreeningEmergencySkipResult();
+    }
     return this.screeningJob.runWithOptions(this.config, options);
   }
 
@@ -898,6 +942,9 @@ export class SideBScheduler {
    * `sideBScheduler.fullValidation.test.ts` が直接検証。
    */
   async runFullValidationNow(): Promise<FullValidationJobResult> {
+    if (await this.shouldSkipForEmergency('本格検証ジョブ')) {
+      return this.buildFullValidationEmergencySkipResult();
+    }
     return this.fullValidationJob.run(this.config);
   }
 
@@ -952,6 +999,9 @@ export class SideBScheduler {
    * (`evolutionMultiGen.test.ts` が直接検証)。
    */
   async runEvolutionNow(): Promise<EvolutionJobResult> {
+    if (await this.shouldSkipForEmergency('進化ループジョブ')) {
+      return this.buildEvolutionEmergencySkipResult();
+    }
     return this.evolutionJob.run(this.config);
   }
 
@@ -972,6 +1022,9 @@ export class SideBScheduler {
    * DiscoveryAgent を手動実行（外部 API / デバッグ用）
    */
   async runDiscoveryNow(): Promise<void> {
+    if (await this.shouldSkipForEmergency('Discoveryジョブ')) {
+      return;
+    }
     await this.discoveryJob.run(this.config);
   }
 
@@ -1042,6 +1095,12 @@ export class SideBScheduler {
         if (currentErrors >= 3) {
           this.log('連続エラー回数がしきい値(3回)に達したため、緊急停止(キルスイッチ)を作動させます。');
           await this.systemStateRepository.setBoolean('emergency_stop', true);
+          await this.systemStateRepository.recordEmergencyAuditBestEffort({
+            action: 'auto_stop',
+            source: 'scheduler',
+            actor: 'side-b-scheduler',
+            reason: 'monitor_error_threshold',
+          });
           
           const errDetail = errors.join(', ') || result.message || '不明な例外';
           await mailService.sendAlertMail(
@@ -1063,6 +1122,12 @@ export class SideBScheduler {
 
       if (currentErrors >= 3) {
         await this.systemStateRepository.setBoolean('emergency_stop', true);
+        await this.systemStateRepository.recordEmergencyAuditBestEffort({
+          action: 'auto_stop',
+          source: 'scheduler',
+          actor: 'side-b-scheduler',
+          reason: 'monitor_exception_threshold',
+        });
         await mailService.sendAlertMail(
           '自動緊急停止(キルスイッチ)が作動しました',
           `システム監視ジョブ実行中に3回連続して例外が発生したため、安全のために自動緊急停止が実行されました。\n\n例外内容:\n${message}`

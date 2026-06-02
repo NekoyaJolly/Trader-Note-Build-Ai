@@ -14,11 +14,13 @@ import { isFXMarketOpen } from '../utils/marketHours';
 // モック
 // ========================================
 
+let mockEmergencyStopped = false;
+
 jest.mock('../repositories/systemStateRepository', () => ({
   createSystemStateRepository: jest.fn(() => ({
     get: jest.fn().mockResolvedValue(null),
     set: jest.fn().mockResolvedValue({}),
-    getBoolean: jest.fn().mockResolvedValue(false),
+    getBoolean: jest.fn().mockImplementation(() => Promise.resolve(mockEmergencyStopped)),
     setBoolean: jest.fn().mockResolvedValue({}),
     getInt: jest.fn().mockResolvedValue(0),
     setInt: jest.fn().mockResolvedValue({}),
@@ -26,6 +28,8 @@ jest.mock('../repositories/systemStateRepository', () => ({
     increment: jest.fn().mockImplementation((key: string) =>
       Promise.resolve({ key, value: '1', updatedAt: new Date() })
     ),
+    recordEmergencyAudit: jest.fn().mockResolvedValue(undefined),
+    recordEmergencyAuditBestEffort: jest.fn().mockResolvedValue(undefined),
   })),
 }));
 
@@ -140,6 +144,7 @@ describe('SideBScheduler 類似度チェック統合', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockEmergencyStopped = false;
 
     // デフォルトでは市場は開いている状態にリセット
     (isFXMarketOpen as jest.Mock).mockReturnValue(true);
@@ -351,6 +356,48 @@ describe('SideBScheduler 類似度チェック統合', () => {
 
       // 類似度チェックは呼ばれない
       expect(mockCronSimilarityService.checkSimilarityAndNotify).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('emergency_stop 中の実行抑止', () => {
+    it('スクリーニング / 本格検証 / 進化 / Discovery を副作用なしでスキップする', async () => {
+      mockEmergencyStopped = true;
+      const screeningRun = jest.fn();
+      const fullValidationRun = jest.fn();
+      const evolutionRun = jest.fn();
+      const discoveryRun = jest.fn();
+      (scheduler as any).screeningJob = { runWithOptions: screeningRun };
+      (scheduler as any).fullValidationJob = { run: fullValidationRun };
+      (scheduler as any).evolutionJob = { run: evolutionRun };
+      (scheduler as any).discoveryJob = { run: discoveryRun };
+
+      const screening = await scheduler.runScreeningNow();
+      const fullValidation = await scheduler.runFullValidationNow();
+      const evolution = await scheduler.runEvolutionNow();
+      await scheduler.runDiscoveryNow();
+
+      expect(screening).toEqual({
+        processed: 0,
+        passed: 0,
+        rejected: 0,
+        notTestable: 0,
+        errors: 0,
+      });
+      expect(fullValidation).toEqual({
+        processed: 0,
+        confirmed: 0,
+        rejected: 0,
+        notTestable: 0,
+        errors: 0,
+      });
+      expect(evolution).toEqual({
+        regimeReports: 0,
+        errors: [],
+      });
+      expect(screeningRun).not.toHaveBeenCalled();
+      expect(fullValidationRun).not.toHaveBeenCalled();
+      expect(evolutionRun).not.toHaveBeenCalled();
+      expect(discoveryRun).not.toHaveBeenCalled();
     });
   });
 });

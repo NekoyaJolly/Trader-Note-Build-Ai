@@ -8,7 +8,28 @@
 import type { PrismaClient, SystemState } from '@prisma/client';
 import { prisma as defaultPrisma } from '../../backend/db/client';
 
-export type SystemStateKey = 'emergency_stop' | 'consecutive_errors' | 'last_db_alert_sent';
+export type SystemStateKey =
+  | 'emergency_stop'
+  | 'consecutive_errors'
+  | 'last_db_alert_sent'
+  | 'emergency_last_action'
+  | 'emergency_last_action_at'
+  | 'emergency_last_action_by'
+  | 'emergency_last_action_source'
+  | 'emergency_last_action_reason';
+
+export type EmergencyAuditAction = 'stop' | 'resume' | 'auto_stop';
+
+export interface EmergencyAuditInput {
+  /** 緊急停止まわりで発生した操作種別 */
+  action: EmergencyAuditAction;
+  /** API / mail / scheduler など、操作の入口 */
+  source: string;
+  /** userId や mail sender など、秘密情報を含まない操作者識別子 */
+  actor: string;
+  /** 監査で追える範囲の理由。token や accountId は入れない */
+  reason: string;
+}
 
 type SystemStatePrisma = Pick<PrismaClient, 'systemState'> & {
   $queryRawUnsafe?: PrismaClient['$queryRawUnsafe'];
@@ -83,6 +104,26 @@ export function createSystemStateRepository(client: SystemStatePrisma = defaultP
     return rows[0];
   };
 
+  const recordEmergencyAudit = async (input: EmergencyAuditInput): Promise<void> => {
+    const recordedAt = new Date().toISOString();
+    await Promise.all([
+      set('emergency_last_action', input.action),
+      set('emergency_last_action_at', recordedAt),
+      set('emergency_last_action_by', input.actor),
+      set('emergency_last_action_source', input.source),
+      set('emergency_last_action_reason', input.reason),
+    ]);
+  };
+
+  const recordEmergencyAuditBestEffort = async (input: EmergencyAuditInput): Promise<void> => {
+    try {
+      await recordEmergencyAudit(input);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[SystemStateRepository] 緊急停止監査の記録に失敗しましたが、主処理は継続します: ${message}`);
+    }
+  };
+
   return {
     get,
     getBoolean,
@@ -92,6 +133,8 @@ export function createSystemStateRepository(client: SystemStatePrisma = defaultP
     setInt,
     delete: deleteKey,
     increment,
+    recordEmergencyAudit,
+    recordEmergencyAuditBestEffort,
   };
 }
 
