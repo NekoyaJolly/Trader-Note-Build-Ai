@@ -38,6 +38,36 @@ const sideANote = {
   status: "draft",
 };
 
+function buildSideANoteSummary(status: "draft" | "active" | "archived") {
+  return {
+    ...sideANote,
+    status,
+  };
+}
+
+function buildSideANoteDetail(status: "draft" | "active" | "archived") {
+  return {
+    ...buildSideANoteSummary(status),
+    tradeId: "trade-e2e-1",
+    quantity: 10000,
+    exitPrice: 1.087,
+    profitLoss: 50,
+    marketContext: {
+      timeframe: "1h",
+      trend: "bullish",
+      indicators: {
+        rsi: 42,
+        macd: 0.12,
+        volume: 1200,
+      },
+    },
+    features: [0.1, 0.2, 0.3],
+    activatedAt: status === "active" ? "2026-06-02T10:30:00.000Z" : undefined,
+    userNotes: "E2Eで確認する押し目シナリオ",
+    tags: ["e2e", "押し目"],
+  };
+}
+
 const sideAStrategy = {
   id: "strategy-e2e-1",
   name: "E2E ブレイクアウト",
@@ -87,6 +117,95 @@ const sideASettings = {
   updatedAt: "2026-06-02T09:00:00.000Z",
 };
 
+const sideAMarketSnapshot = {
+  id: "snapshot-e2e-15m",
+  symbol: "EURUSD",
+  timeframe: "15m",
+  timestamp: "2026-06-02T10:00:00.000Z",
+  open: 1.081,
+  high: 1.084,
+  low: 1.08,
+  close: 1.083,
+  volume: 1400,
+  rsi: 45,
+  macd: 0.11,
+  macdSignal: 0.09,
+  macdHistogram: 0.02,
+  atr: 0.0012,
+  ema20: 1.082,
+  ema50: 1.079,
+  bollingerUpper: 1.088,
+  bollingerMiddle: 1.082,
+  bollingerLower: 1.076,
+  createdAt: "2026-06-02T10:00:00.000Z",
+};
+
+function buildSideANotificationListItem(isRead: boolean) {
+  return {
+    id: "notification-e2e-1",
+    matchResultId: "match-e2e-1",
+    sentAt: "2026-06-02T10:00:00.000Z",
+    channel: "in_app",
+    isRead,
+    readAt: isRead ? "2026-06-02T10:05:00.000Z" : null,
+    createdAt: "2026-06-02T10:00:00.000Z",
+    matchResult: {
+      score: 0.92,
+      evaluatedAt: "2026-06-02T10:00:00.000Z",
+    },
+    tradeNote: {
+      symbol: "EURUSD",
+      side: "BUY",
+      timeframe: "1h",
+    },
+    reasonSummary: "押し目条件が一致",
+  };
+}
+
+function buildSideANotificationDetail(isRead: boolean) {
+  return {
+    ...buildSideANotificationListItem(isRead),
+    matchResult: {
+      id: "match-e2e-1",
+      tradeNoteId: sideANote.id,
+      evaluatedAt: "2026-06-02T10:00:00.000Z",
+      score: 0.92,
+      matched: true,
+      reasons: [
+        {
+          featureName: "rsi",
+          noteValue: 40,
+          currentValue: 42,
+          diff: 2,
+          weight: 0.3,
+          contribution: 0.28,
+          description: "RSIが押し目候補の範囲にあります",
+        },
+      ],
+      marketSnapshotId15m: "snapshot-e2e-15m",
+      marketSnapshotId60m: "snapshot-e2e-60m",
+      createdAt: "2026-06-02T10:00:00.000Z",
+    },
+    tradeNote: {
+      id: sideANote.id,
+      tradeId: "trade-e2e-1",
+      symbol: "EURUSD",
+      side: "BUY",
+      timeframe: "1h",
+      entryConditions: "{}",
+      exitConditions: "{}",
+      aiSummary: "E2E押し目ノート",
+      createdAt: "2026-06-02T09:00:00.000Z",
+    },
+    marketSnapshot15m: sideAMarketSnapshot,
+    marketSnapshot60m: {
+      ...sideAMarketSnapshot,
+      id: "snapshot-e2e-60m",
+      timeframe: "60m",
+    },
+  };
+}
+
 function jsonResponse(body: object, status = 200): {
   readonly status: number;
   readonly contentType: string;
@@ -101,9 +220,12 @@ function jsonResponse(body: object, status = 200): {
 
 async function mockSideAApi(page: Page): Promise<ApiCallRecord[]> {
   const calls: ApiCallRecord[] = [];
+  let noteStatus: "draft" | "active" | "archived" = "draft";
+  let notificationIsRead = false;
 
   await page.addInitScript((token) => {
     localStorage.setItem("auth_token", token);
+    localStorage.setItem("hasOnboarded", "true");
   }, sideAAuthToken);
 
   await page.route("**/api/**", async (route) => {
@@ -124,44 +246,60 @@ async function mockSideAApi(page: Page): Promise<ApiCallRecord[]> {
     }
 
     if (method === "GET" && pathname === "/api/trades/notes/status-counts") {
-      await route.fulfill(jsonResponse({ draft: 1, active: 0, archived: 0 }));
+      await route.fulfill(jsonResponse({
+        draft: noteStatus === "draft" ? 1 : 0,
+        active: noteStatus === "active" ? 1 : 0,
+        archived: noteStatus === "archived" ? 1 : 0,
+        total: 1,
+      }));
       return;
     }
 
     if (method === "GET" && pathname === "/api/trades/notes") {
-      await route.fulfill(jsonResponse({ notes: [sideANote] }));
+      const statusFilter = url.searchParams.get("status");
+      const notes = statusFilter === null || statusFilter === noteStatus
+        ? [buildSideANoteSummary(noteStatus)]
+        : [];
+      await route.fulfill(jsonResponse({ notes }));
+      return;
+    }
+
+    if (method === "GET" && pathname === `/api/trades/notes/${sideANote.id}/performance`) {
+      await route.fulfill(jsonResponse({ data: null }));
+      return;
+    }
+
+    if (method === "GET" && pathname === `/api/trades/notes/${sideANote.id}`) {
+      await route.fulfill(jsonResponse(buildSideANoteDetail(noteStatus)));
+      return;
+    }
+
+    if (method === "POST" && pathname === `/api/trades/notes/${sideANote.id}/approve`) {
+      noteStatus = "active";
+      await route.fulfill(jsonResponse({ ok: true }));
       return;
     }
 
     if (method === "GET" && pathname === "/api/notifications/unread-count") {
-      await route.fulfill(jsonResponse({ data: { unreadCount: 1 } }));
+      await route.fulfill(jsonResponse({ data: { unreadCount: notificationIsRead ? 0 : 1 } }));
       return;
     }
 
     if (method === "GET" && pathname === "/api/notifications") {
       await route.fulfill(jsonResponse({
-        notifications: [
-          {
-            id: "notification-e2e-1",
-            matchResultId: "match-e2e-1",
-            sentAt: "2026-06-02T10:00:00.000Z",
-            channel: "in_app",
-            isRead: false,
-            readAt: null,
-            createdAt: "2026-06-02T10:00:00.000Z",
-            matchResult: {
-              score: 0.92,
-              evaluatedAt: "2026-06-02T10:00:00.000Z",
-            },
-            tradeNote: {
-              symbol: "EURUSD",
-              side: "BUY",
-              timeframe: "1h",
-            },
-            reasonSummary: "押し目条件が一致",
-          },
-        ],
+        notifications: [buildSideANotificationListItem(notificationIsRead)],
       }));
+      return;
+    }
+
+    if (method === "GET" && pathname === "/api/notifications/notification-e2e-1") {
+      await route.fulfill(jsonResponse(buildSideANotificationDetail(notificationIsRead)));
+      return;
+    }
+
+    if (method === "PUT" && pathname === "/api/notifications/notification-e2e-1/read") {
+      notificationIsRead = true;
+      await route.fulfill(jsonResponse({ ok: true }));
       return;
     }
 
@@ -437,6 +575,50 @@ test.describe("Side-A UX最小導線（モック認証）", () => {
     await expect(page.getByRole("heading", { name: "設定" })).toBeVisible();
     await expect(page.getByText("通知設定")).toBeVisible();
     await expect(page.getByRole("button", { name: "設定を保存" })).toBeVisible();
+  });
+
+  test("ホームからノート承認と通知詳細確認まで進める", async ({ page }) => {
+    const apiCalls = await mockSideAApi(page);
+
+    await page.goto("/");
+    await page.getByRole("link", { name: /EURUSD/ }).first().click();
+
+    await expect(page).toHaveURL(/\/notes\/note-e2e-1/);
+    await expect(page.getByRole("heading", { name: "ノート詳細" })).toBeVisible();
+    await expect(page.getByText("E2E押し目ノート")).toBeVisible();
+    await expect(page.getByText("E2Eで確認する押し目シナリオ")).toBeVisible();
+
+    await page.getByRole("button", { name: "承認する" }).click();
+
+    await expect.poll(() =>
+      apiCalls.some((call) =>
+        call.method === "POST" && call.pathname === "/api/trades/notes/note-e2e-1/approve"
+      )
+    ).toBe(true);
+    await expect(page.getByText("承認済み").first()).toBeVisible();
+    await expect(page.getByText("評価ログがありません")).toBeVisible();
+
+    await page.getByRole("link", { name: /一覧に戻る/ }).click();
+    await expect(page).toHaveURL(/\/notes$/);
+    await expect(page.getByText("承認済み").first()).toBeVisible();
+
+    await page.getByRole("link", { name: "通知" }).first().click();
+    await expect(page).toHaveURL(/\/notifications$/);
+    await expect(page.getByRole("heading", { name: /通知一覧/ })).toBeVisible();
+    await expect(page.getByText("未読")).toBeVisible();
+
+    await page.getByRole("link", { name: "詳細" }).first().click();
+    await expect(page).toHaveURL(/\/notifications\/notification-e2e-1/);
+    await expect(page.getByRole("heading", { name: "通知詳細" })).toBeVisible();
+    await expect(page.getByText("通知サマリー")).toBeVisible();
+    await expect(page.getByText("RSIが押し目候補の範囲にあります")).toBeVisible();
+
+    await expect.poll(() =>
+      apiCalls.some((call) =>
+        call.method === "PUT" && call.pathname === "/api/notifications/notification-e2e-1/read"
+      )
+    ).toBe(true);
+    expect(apiCalls.every((call) => call.authorization === `Bearer ${sideAAuthToken}`)).toBe(true);
   });
 });
 
