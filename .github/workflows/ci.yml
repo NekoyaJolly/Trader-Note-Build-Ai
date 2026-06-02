@@ -19,6 +19,11 @@ on:
           - 'false'
           - 'true'
 
+# 同一ブランチで古い CI がハングしたまま残ると、Actions キューを圧迫するため新しい実行を優先する。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   NODE_VERSION: '22'
   NODE_ENV: test
@@ -29,6 +34,7 @@ jobs:
   lint-and-typecheck:
     name: Lint & TypeCheck
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
@@ -67,6 +73,7 @@ jobs:
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
@@ -104,6 +111,7 @@ jobs:
   frontend-tests:
     name: Frontend Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
@@ -127,6 +135,7 @@ jobs:
   db-integration-tests:
     name: DB Integration Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
@@ -199,6 +208,7 @@ jobs:
   e2e-tests:
     name: E2E Tests (Playwright)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [lint-and-typecheck, unit-tests, frontend-tests, db-integration-tests]
     steps:
       - name: リポジトリをチェックアウト
@@ -308,6 +318,7 @@ jobs:
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # PR またはスケジュール実行時のみ
     if: github.event_name == 'pull_request' || github.event_name == 'schedule'
     steps:
@@ -340,6 +351,7 @@ jobs:
   docker-build:
     name: Docker Build (root Dockerfile)
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
