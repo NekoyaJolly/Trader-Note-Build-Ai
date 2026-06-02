@@ -3,6 +3,10 @@ import { expect, test } from '@playwright/test';
 const productionApiUrl = process.env.PRODUCTION_API_URL ?? 'https://trader-note-571157808050.asia-northeast1.run.app';
 
 test.describe('本番公開面 smoke', () => {
+  test.beforeEach(({}, testInfo) => {
+    test.skip(testInfo.project.name !== 'production-chromium', 'production config 専用のため通常E2Eでは実行しない');
+  });
+
   test('API の health / ready が 200 を返す', async ({ request }) => {
     const health = await request.get(`${productionApiUrl}/health`);
     expect(health.status()).toBe(200);
