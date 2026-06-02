@@ -177,8 +177,8 @@ lessons の具体内容を `rationale` に引用するのも推奨 (= ユーザ�
 
 ```json
 {
-  "candidateIndicatorIds": ["atr", "volume"],
-  "rationale": "UTC 0-5h の負けが多いため、流動性低下や値幅不足を切り分ける候補として atr / volume を優先する。"
+  "candidateIndicatorIds": ["atr", "obv", "vwap"],
+  "rationale": "UTC 0-5h の負けが多いため、流動性低下や値幅不足を切り分ける候補として atr / obv / vwap を優先する。"
 }
 ```
 
@@ -186,8 +186,8 @@ lessons の具体内容を `rationale` に引用するのも推奨 (= ユーザ�
 
 ```json
 {
-  "candidateIndicatorIds": ["ema", "adx"],
-  "rationale": "1h 足の逆行中に負けが集中しているため、トレンド方向と強さを測る ema / adx を候補にする。"
+  "candidateIndicatorIds": ["ema", "aroon", "macd"],
+  "rationale": "1h 足の逆行中に負けが集中しているため、トレンド方向と勢いを測る ema / aroon / macd を候補にする。"
 }
 ```
 
