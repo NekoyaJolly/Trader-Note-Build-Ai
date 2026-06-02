@@ -35,6 +35,7 @@ import type {
     PythonJsonPayload,
 } from './types';
 import type { JsonValue } from '../../../utils/jsonValue';
+import { buildCorrelationId } from '../../../middleware/correlationId';
 
 /**
  * Python 側の応答 (任意の JsonValue) を `PythonJsonPayload` (Record<string, JsonValue>) に
@@ -46,6 +47,19 @@ import type { JsonValue } from '../../../utils/jsonValue';
  */
 function isPythonJsonPayload(value: JsonValue): value is PythonJsonPayload {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * HTTP モードで analysis-engine に渡すヘッダーを組み立てる。
+ *
+ * 理由: docker_exec ではファイル名の runId、HTTP では相関IDヘッダーが追跡の起点になるため。
+ */
+function buildHttpHeaders(correlationId: string | undefined): Record<string, string> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (correlationId) {
+        headers['X-Correlation-Id'] = buildCorrelationId(correlationId);
+    }
+    return headers;
 }
 
 // ===========================================
@@ -326,7 +340,7 @@ export class PythonBridge {
                 : '/v1/execute';
             const res = await fetch(`${baseUrl}${endpoint}`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: buildHttpHeaders(req.correlationId),
                 body: JSON.stringify(req.input),
                 signal: controller.signal,
             });

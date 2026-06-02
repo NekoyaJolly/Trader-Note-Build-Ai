@@ -19,6 +19,8 @@ export interface PythonExecutionRequest {
     input: PythonJsonPayload;
     /** このコール限定のタイムアウト上書き */
     timeoutMs?: number;
+    /** HTTP モードで analysis-engine へ渡す相関ID */
+    correlationId?: string;
 }
 
 export interface PythonExecutionResult {

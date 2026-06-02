@@ -12,6 +12,7 @@ import type {
   AgentRunStepNextAction,
 } from '@prisma/client';
 import type { JobPortContext, JobResultEnvelope } from './jobPort';
+import { withCorrelationSummary } from '../utils';
 
 /**
  * 既存 Job を呼ぶための spec。adapter は本 spec を作って runJobWithLedger に渡す。
@@ -112,7 +113,7 @@ async function recordStepOutcome(
 
   if (status === 'succeeded') {
     await ledger.succeedStep(runId, envelope.stepName, {
-      summary: envelope.summary,
+      summary: withCorrelationSummary(envelope.summary, context.correlationId),
       nextAction,
     });
     return;
@@ -122,7 +123,7 @@ async function recordStepOutcome(
     await ledger.failStep(runId, envelope.stepName, {
       errorCode: envelope.errorCode ?? null,
       errorMessage: envelope.errorMessage ?? null,
-      summary: envelope.summary,
+      summary: withCorrelationSummary(envelope.summary, context.correlationId),
       nextAction,
     });
     return;
@@ -130,7 +131,10 @@ async function recordStepOutcome(
 
   if (status === 'skipped') {
     await ledger.skipStep(runId, envelope.stepName, {
-      reason: envelope.summary ?? envelope.errorMessage ?? `${envelope.stepName} skipped`,
+      reason: withCorrelationSummary(
+        envelope.summary ?? envelope.errorMessage ?? `${envelope.stepName} skipped`,
+        context.correlationId,
+      ) ?? `${envelope.stepName} skipped`,
       nextAction,
     });
     return;

@@ -277,12 +277,14 @@ describe('PythonBridge (unit, docker runner mocked)', () => {
     it('healthCheckStatus: http モードで疎通 OK（res.ok=true, body.status=ok）なら ok', async () => {
         const runner: DockerRunner = jest.fn();
         // global.fetch をモックして正常レスポンスを返す
-        const mockFetch = jest.fn(async () => ({
-            ok: true,
-            json: async () => ({ status: 'ok' }),
-        }));
+        const mockFetch = jest.fn(async () =>
+            new Response(JSON.stringify({ status: 'ok' }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            }),
+        );
         const origFetch = global.fetch;
-        global.fetch = mockFetch as unknown as typeof fetch;
+        global.fetch = mockFetch;
         try {
             const bridge = new PythonBridge(
                 { mode: 'http', containerName: 'x', baseUrl: 'http://localhost:8000', sharedDir, defaultTimeoutMs: 5000 },
@@ -297,12 +299,14 @@ describe('PythonBridge (unit, docker runner mocked)', () => {
 
     it('healthCheckStatus: http モードで res.ok=false なら error', async () => {
         const runner: DockerRunner = jest.fn();
-        const mockFetch = jest.fn(async () => ({
-            ok: false,
-            json: async () => ({}),
-        }));
+        const mockFetch = jest.fn(async () =>
+            new Response(JSON.stringify({}), {
+                status: 503,
+                headers: { 'Content-Type': 'application/json' },
+            }),
+        );
         const origFetch = global.fetch;
-        global.fetch = mockFetch as unknown as typeof fetch;
+        global.fetch = mockFetch;
         try {
             const bridge = new PythonBridge(
                 { mode: 'http', containerName: 'x', baseUrl: 'http://localhost:8000', sharedDir, defaultTimeoutMs: 5000 },
@@ -320,7 +324,7 @@ describe('PythonBridge (unit, docker runner mocked)', () => {
             throw new Error('connect ECONNREFUSED');
         });
         const origFetch = global.fetch;
-        global.fetch = mockFetch as unknown as typeof fetch;
+        global.fetch = mockFetch;
         try {
             const bridge = new PythonBridge(
                 { mode: 'http', containerName: 'x', baseUrl: 'http://localhost:8000', sharedDir, defaultTimeoutMs: 5000 },
@@ -334,18 +338,56 @@ describe('PythonBridge (unit, docker runner mocked)', () => {
 
     it('healthCheckStatus: http モードで res.ok=true でも body.status が異常値なら error', async () => {
         const runner: DockerRunner = jest.fn();
-        const mockFetch = jest.fn(async () => ({
-            ok: true,
-            json: async () => ({ status: 'degraded' }),
-        }));
+        const mockFetch = jest.fn(async () =>
+            new Response(JSON.stringify({ status: 'degraded' }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            }),
+        );
         const origFetch = global.fetch;
-        global.fetch = mockFetch as unknown as typeof fetch;
+        global.fetch = mockFetch;
         try {
             const bridge = new PythonBridge(
                 { mode: 'http', containerName: 'x', baseUrl: 'http://localhost:8000', sharedDir, defaultTimeoutMs: 5000 },
                 runner,
             );
             expect(await bridge.healthCheckStatus()).toBe('error');
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+
+    it('execute: http モードでは correlationId を X-Correlation-Id ヘッダーに載せる', async () => {
+        const runner: DockerRunner = jest.fn();
+        let observedHeaders: RequestInit['headers'];
+        const mockFetch = jest.fn(async (
+            _input: Parameters<typeof fetch>[0],
+            init?: Parameters<typeof fetch>[1],
+        ) => {
+            observedHeaders = init?.headers;
+            return new Response(JSON.stringify({ result: 'ok' }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            });
+        });
+        const origFetch = global.fetch;
+        global.fetch = mockFetch;
+        try {
+            const bridge = new PythonBridge(
+                { mode: 'http', containerName: 'x', baseUrl: 'http://localhost:8000', sharedDir, defaultTimeoutMs: 5000 },
+                runner,
+            );
+            const result = await bridge.execute({
+                scriptPath: '/app/walk_forward/walk_forward.py',
+                input: { payload: 'test' },
+                correlationId: 'sideb-run-20260603',
+            });
+
+            expect(result.success).toBe(true);
+            expect(observedHeaders).toEqual({
+                'Content-Type': 'application/json',
+                'X-Correlation-Id': 'sideb-run-20260603',
+            });
         } finally {
             global.fetch = origFetch;
         }
