@@ -6,6 +6,7 @@
 
 import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { mailService } from '../services/mailService';
@@ -49,6 +50,14 @@ function extractMailSecurityToken(req: Request): string | undefined {
   return queryResult.success ? queryResult.data.token : undefined;
 }
 
+function hashMailToken(token: string): Buffer {
+  return createHash('sha256').update(token, 'utf8').digest();
+}
+
+function isMailSecurityTokenValid(providedToken: string, expectedToken: string): boolean {
+  return timingSafeEqual(hashMailToken(providedToken), hashMailToken(expectedToken));
+}
+
 export function requireMailSecurityToken(req: Request, res: Response, next: NextFunction): void {
   const expectedToken = process.env.MAIL_SECURITY_TOKEN;
   if (!expectedToken) {
@@ -68,7 +77,7 @@ export function requireMailSecurityToken(req: Request, res: Response, next: Next
     return;
   }
 
-  if (providedToken !== expectedToken) {
+  if (!isMailSecurityTokenValid(providedToken, expectedToken)) {
     res.status(403).json({
       success: false,
       error: 'Webhook token が不正です',

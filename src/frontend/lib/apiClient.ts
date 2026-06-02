@@ -44,15 +44,43 @@ function resolveUrl(input: RequestInfo | URL): RequestInfo | URL {
   return `${getPublicApiBaseUrl()}${input.startsWith("/") ? input : `/${input}`}`;
 }
 
+function getEndpointString(input: RequestInfo | URL): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.toString();
+  if (typeof Request !== "undefined" && input instanceof Request) return input.url;
+  return "";
+}
+
+function isHttpUrl(endpoint: string): boolean {
+  return endpoint.startsWith("http://") || endpoint.startsWith("https://");
+}
+
+function shouldAttachAuthHeader(endpoint: string): boolean {
+  if (!isHttpUrl(endpoint)) return true;
+
+  const apiBase = getPublicApiBaseUrl();
+  if (apiBase) {
+    return endpoint === apiBase || endpoint.startsWith(`${apiBase}/`);
+  }
+
+  if (typeof window === "undefined") return false;
+
+  try {
+    return new URL(endpoint).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
 function isFormDataBody(body: BodyInit | null | undefined): boolean {
   return typeof FormData !== "undefined" && body instanceof FormData;
 }
 
-function buildHeaders(init?: RequestInit): Headers {
+function buildHeaders(init: RequestInit | undefined, endpoint: string): Headers {
   const headers = new Headers(init?.headers);
   const token = getStoredAuthToken();
 
-  if (token && !headers.has("Authorization")) {
+  if (token && shouldAttachAuthHeader(endpoint) && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${token}`);
   }
 
@@ -108,10 +136,12 @@ async function parseJsonResponse(response: Response, endpoint: string): Promise<
 }
 
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  return fetch(resolveUrl(input), {
+  const resolvedInput = resolveUrl(input);
+  const endpoint = getEndpointString(resolvedInput);
+  return fetch(resolvedInput, {
     ...init,
     credentials: init?.credentials ?? "include",
-    headers: buildHeaders(init),
+    headers: buildHeaders(init, endpoint),
   });
 }
 
