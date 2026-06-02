@@ -111,9 +111,9 @@ export async function fetchGenerationIndicatorCaches(
   if ((primaryNeeds && primaryNeeds.size > 0) || primaryPatternNeeded) {
     const indicators = primaryNeeds
       ? Array.from(primaryNeeds.values()).map((n) => ({
-          indicatorId: n.feature,
+          indicatorId: n.indicatorId,
           params: n.params,
-          field: 'value' as const,
+          field: n.field,
         }))
       : [];
     const patternIds = primaryPatternNeeded ? [...ALL_CANDLE_PATTERN_IDS] : [];
@@ -127,7 +127,7 @@ export async function fetchGenerationIndicatorCaches(
     });
     if (primaryNeeds) {
       for (const need of primaryNeeds.values()) {
-        const httpKey = makeIndicatorCacheKey(need.feature, need.params, 'value');
+        const httpKey = makeIndicatorCacheKey(need.indicatorId, need.params, need.field);
         const arr = response.series[httpKey];
         if (arr) indicatorSeriesCache.set(need.snapshotKey, arr);
       }
@@ -249,9 +249,9 @@ async function fetchUpperTimeframeAndFill(
 
   // 上位足 indicator + pattern を 1 HTTP で取得
   const indicators = Array.from(tfNeeds.values()).map((n) => ({
-    indicatorId: n.feature,
+    indicatorId: n.indicatorId,
     params: n.params,
-    field: 'value' as const,
+    field: n.field,
   }));
   const patternIds = patternNeeded ? [...ALL_CANDLE_PATTERN_IDS] : [];
   if (indicators.length === 0 && patternIds.length === 0) return;
@@ -266,7 +266,7 @@ async function fetchUpperTimeframeAndFill(
 
   // indicator series を主バー長に forward fill
   for (const need of tfNeeds.values()) {
-    const httpKey = makeIndicatorCacheKey(need.feature, need.params, 'value');
+    const httpKey = makeIndicatorCacheKey(need.indicatorId, need.params, need.field);
     const arr = response.series[httpKey];
     if (!arr) continue;
     const filled = forwardFillSeriesToPrimary<number | null>(arr, alignment, null);

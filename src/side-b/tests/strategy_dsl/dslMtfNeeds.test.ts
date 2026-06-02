@@ -208,6 +208,37 @@ describe('collectDslIndicatorNeeds: MTF', () => {
     expect(needs).toHaveLength(1);
     expect(needs[0].snapshotKey).toBe('ohlcv@1h.rsi');
   });
+
+  it('field alias は snapshotKey を保ちつつ analysis-engine 用 indicatorId / field に解決する', () => {
+    const dsl = makeDsl('15m', [
+      {
+        lens: 'ohlcv',
+        feature: 'macd_histogram',
+        op: '>',
+        value: 0,
+        params: { fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 },
+      },
+      {
+        lens: 'ohlcv',
+        feature: 'close',
+        op: '>',
+        compareTarget: {
+          lens: 'ohlcv',
+          feature: 'bb_upper',
+          params: { period: 20 },
+        },
+      },
+    ]);
+    const needs = collectDslIndicatorNeeds(dsl);
+    expect(needs.map((n) => n.snapshotKey).sort()).toEqual([
+      'ohlcv.bb_upper(period=20)',
+      'ohlcv.macd_histogram(fastPeriod=12,signalPeriod=9,slowPeriod=26)',
+    ]);
+    expect(needs.map((n) => `${n.feature}:${n.indicatorId}:${n.field}`).sort()).toEqual([
+      'bb_upper:bb:upper',
+      'macd_histogram:macd:histogram',
+    ]);
+  });
 });
 
 describe('collectDslPatternNeeds: MTF', () => {

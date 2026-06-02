@@ -12,12 +12,12 @@
 // 全 indicator は analysis-engine 経由で取得可能 = registry の `pythonSeries=true`
 // に該当する 20 個全部が candidate。collect 段階では `isPythonSupportedIndicatorId`
 // で判定する。
-import { isPythonSupportedIndicatorId } from '../../shared/indicators/registry';
 import {
   type CanonicalTimeframe,
   isHigherTimeframe,
   normalizeTimeframe,
 } from '../../shared/timeframes';
+import { resolveIndicatorFeature } from './indicatorFeatureAlias';
 import type { Condition, ConditionGroup, ConditionParams } from './schema';
 import type { StrategyDSL } from './schema';
 import { buildSnapshotKeyWithPrimary } from './snapshotKey';
@@ -87,8 +87,12 @@ export function collectDslOhlcvFeatureNeeds(dsl: StrategyDSL): DslOhlcvFeatureNe
  * cache 取得が必要な series のみ取り扱うために使う。
  */
 export interface DslIndicatorNeed {
-  /** indicator feature 名 (ema, sma, rsi, atr, macd, bb 等) */
+  /** DSL feature 名 (ema, macd_histogram, bb_upper 等)。snapshot key に使う。 */
   feature: string;
+  /** analysis-engine に渡す canonical indicator ID。 */
+  indicatorId: string;
+  /** analysis-engine に渡す field 名。 */
+  field: string;
   /** 動的パラメータ。空なら指標のデフォルト値 */
   params: ConditionParams;
   /**
@@ -138,7 +142,8 @@ export function collectDslIndicatorNeeds(dsl: StrategyDSL): DslIndicatorNeed[] {
     conditionTimeframe: string | undefined,
   ) => {
     if (lens !== 'ohlcv') return;
-    if (!isPythonSupportedIndicatorId(feature)) return;
+    const resolved = resolveIndicatorFeature(feature);
+    if (!resolved) return;
     // PR ⑤: timeframe 解決。未指定なら主 timeframe、指定ありなら canonical 化。
     // 主より下位足の指定は不正 → collect しない (= 上流で未対応扱い)。
     let tf: CanonicalTimeframe = primaryTf;
@@ -167,7 +172,14 @@ export function collectDslIndicatorNeeds(dsl: StrategyDSL): DslIndicatorNeed[] {
     if (isPrimaryDefaultRsiOrAtr) return;
     const key = buildSnapshotKeyWithPrimary(lens, feature, params, tf, dsl.timeframe);
     if (!map.has(key)) {
-      map.set(key, { feature, params: params ?? {}, snapshotKey: key, timeframe: tf });
+      map.set(key, {
+        feature,
+        indicatorId: resolved.indicatorId,
+        field: resolved.field,
+        params: params ?? {},
+        snapshotKey: key,
+        timeframe: tf,
+      });
     }
   };
 

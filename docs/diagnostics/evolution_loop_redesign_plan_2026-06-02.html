@@ -41,25 +41,26 @@
   <div class="note"><b>設計の北極星：</b>AGENTS.md ドメイン原則 #3 ＝「<b>数値最適化・統計処理・客観判定は Python/TS の決定論コードで実装する。安易に『LLMに判断させればいい』と設計しない</b>」。現状の進化ループはこの原則に反して LLM が数値最適化を担っている。本再設計は原則に沿って<b>最適化を決定論コード（backtesting.py）へ寄せ、LLM は構造発見だけ</b>に役割を絞る。</div>
 
   <div class="card to-be">
-    <b>✅ 実装状況（2026-06-02 更新）— Phase 1〜4 マージ済み（PR #310〜#317）</b>
-    <p class="small muted">本プランは設計時点のもの。下表が現在の実装状況。新規の決定論経路は<b>すべて flag 既定 OFF（'llm'）/ 観測のみ</b>で、既存挙動を壊さず本番はフラグで段階導入する。</p>
+    <b>✅ 実装状況（2026-06-02 更新）— Phase 1〜4 + Hybrid Redesign 実装済み</b>
+    <p class="small muted">本プランは設計時点のもの。下表が現在の実装状況。標準経路は <b>hybrid</b> に更新済みで、LLM は構造案・候補選定、analysis-engine / TS は数値最適化・合否評価を担当する。既存 <code>llm</code> / <code>deterministic</code> は legacy fallback として残す。</p>
     <table>
       <tr><th>Phase</th><th>PR</th><th>状態</th><th>内容</th></tr>
       <tr><td>1</td><td>#310</td><td>✅ 済</td><td><code>/v1/optimize</code>（backtesting.py <code>Backtest.optimize</code>）で SL/TP を決定論最適化。TS client + Zod。</td></tr>
       <tr><td>1b</td><td>#311</td><td>✅ 済</td><td>アンカード・ウォークフォワード過学習ガード（複数OOS窓）＋ DSR ＋ トレード数フロアを <code>/v1/optimize</code> に追加。</td></tr>
       <tr><td>1c</td><td>#312</td><td>✅ 済</td><td>インジ期間最適化＝variant DSL 生成 + 2段階評価（screening ランク→勝者 WF）。<code>optimizeIndicatorPeriods</code>。</td></tr>
-      <tr><td>2</td><td>#313</td><td>✅ 済</td><td>Mutation を決定論経路へ（<code>generateDeterministicMutants</code>: インジ期間+SL/TP を最適化）。<code>AI_MUTATION_STRATEGY</code> 既定 'llm'。</td></tr>
-      <tr><td>3</td><td>#314</td><td>✅ 済</td><td>Crossover 系統スイープ（テンプレ表で ~10 インジ×閾値×period を追加→「負け減・勝ち維持」評価→勝者 WF）。<code>AI_CROSSOVER_STRATEGY</code> 既定 'llm'。SL/TP 不可触。</td></tr>
+      <tr><td>2</td><td>#313</td><td>✅ 済</td><td>Mutation を決定論経路へ（<code>generateDeterministicMutants</code>: インジ期間+SL/TP を最適化）。現標準は <code>hybrid</code> で、LLM 構造案と決定論最適化を組み合わせる。</td></tr>
+      <tr><td>3</td><td>#314</td><td>✅ 済</td><td>Crossover 系統スイープ（Python 対応20指標を field 別テンプレで追加→「負け減・勝ち維持」評価→勝者 WF）。現標準は <code>hybrid</code>。SL/TP 不可触。</td></tr>
       <tr><td>4</td><td>#315</td><td>✅ 済（観測）</td><td>確証ゲート（コスト込み6指標+DSR）を <code>confirmationGate.ts</code> で評価し GenerationReport に surface。しきい値を <code>confirmationGateThresholds.ts</code> に単一集約。<b>stage 不変（観測のみ）</b>。</td></tr>
       <tr><td>4</td><td>#316</td><td>✅ 済</td><td>手動トリガー <code>POST /api/cron/side-b/run-evolution</code>。自動 cron は <code>config.autoEvolution</code> 既定 false（OFF）で既に任意。</td></tr>
       <tr><td>4</td><td>#317</td><td>✅ 済</td><td>population を <code>EvolutionPopulation</code> テーブルに DB 永続化（P4: ephemeral fs による種の毎ラン再注入を停止 → 種注入は真に初回のみ）。</td></tr>
+      <tr><td>Hybrid</td><td>今回</td><td>✅ 済</td><td>Mutation を <code>baseline / optimizedBase / structuralVariant</code> の bundle 方式へ再定義。Crossover は Python 対応20指標の field 別テンプレをスイープし、LLM は <code>candidateIndicatorIds</code> の事前選定だけを担当。<code>AI_MUTATION_STRATEGY</code> / <code>AI_CROSSOVER_STRATEGY</code> 既定は <code>hybrid</code>。</td></tr>
     </table>
     <p class="small"><b>残り（設計上の「待ち」項目）：</b></p>
     <ul class="small">
       <li><b>確証ゲート enforce</b>：本番で観測ログを数サイクル見てしきい値を校正してから、フラグで <code>validation_confirmed</code> の前提条件に強制接続（DSR はトレード別リターン尺度で厳しく出るため校正必須）。</li>
-      <li><b>本番 deterministic 有効化</b>：<code>AI_MUTATION_STRATEGY</code> / <code>AI_CROSSOVER_STRATEGY</code> = <code>deterministic</code> を観察しながら切替。</li>
+      <li><b>本番 hybrid 観測</b>：<code>AI_MUTATION_STRATEGY</code> / <code>AI_CROSSOVER_STRATEGY</code> は標準 <code>hybrid</code>。実データで bundle 成功率・edge sweep 採用率・コストを観測して閾値を校正。</li>
       <li><b>PF/RF 略記分離</b>（§2-5 注）：確証ゲート UI で ProfitFactor と RecoveryFactor を並べて表示する時に対応（現状コード/データモデルは clean で前倒し不要）。</li>
-      <li><b>Crossover テンプレ拡張（Phase 3b）</b>：多出力/バンド系インジ（macd/bb/kc/stochastic 等）の field 別エッジ条件テンプレート追加。</li>
+      <li><b>Crossover テンプレの実測校正</b>：多出力/バンド系インジ（macd/bb/kc/stochastic/ichimoku 等）の field 別テンプレは実装済み。今後は採用率・trade 数・負け減/勝ち維持の実測で threshold 候補を調整。</li>
     </ul>
   </div>
 
@@ -143,10 +144,10 @@
   <h2>3. 段階的実装プラン（1 PR ずつ・マージ=承認）<span class="small muted"> ／ 全 Phase 実装済み（#310〜#317）</span></h2>
   <div class="step"><span class="tag p1">Phase 1</span><span class="h"> 最適化エンドポイント（土台）</span> <b>✅ #310 / #311(WF+DSR) / #312(インジ期間)</b><br>
     analysis-engine に <code>/v1/optimize</code>（<code>Backtest.optimize</code> + 学習/OOS 過学習ガード）を追加。TS クライアント + Zod スキーマ。単体で「戦略+探索空間→最適パラメータ+OOS検証」が返ることを確認。</div>
-  <div class="step"><span class="tag p2">Phase 2</span><span class="h"> Mutation を最適化呼び出しに置換</span> <b>✅ #313（flag 既定 'llm'）</b><br>
+  <div class="step"><span class="tag p2">Phase 2</span><span class="h"> Mutation を最適化呼び出しに置換</span> <b>✅ #313（現標準は hybrid）</b><br>
     数値最適化を <code>/v1/optimize</code> 経由の決定論処理に変更。LLM は探索対象/範囲の提案のみ。冗長な単発ナッジを廃止。</div>
-  <div class="step"><span class="tag p3">Phase 3</span><span class="h"> Crossover を系統スイープに</span> <b>✅ #314（flag 既定 'llm'）</b><br>
-    ~20 インジを順に追加→BT→「負け減・勝ち維持」評価→エッジ採用。LLM は候補事前絞り込みのみ。<span class="small muted">（現状テンプレ済は ~10 インジ。多出力系は Phase 3b で拡張）</span></div>
+  <div class="step"><span class="tag p3">Phase 3</span><span class="h"> Crossover を系統スイープに</span> <b>✅ #314 + Hybrid Redesign（現標準は hybrid）</b><br>
+    Python 対応20指標を順に追加→BT→「負け減・勝ち維持」評価→エッジ採用。LLM は候補 indicator ID の事前絞り込みのみ。多出力/バンド系は <code>macd_histogram</code> / <code>bb_upper</code> / <code>kc_upper</code> / <code>stochastic_k</code> / <code>ichimoku_kijun</code> などの field alias で評価。</div>
   <div class="step"><span class="tag p4">Phase 4</span><span class="h"> 種=初回のみ + 手動トリガー + ゲート整理</span> <b>✅ #315（確証ゲート観測）/ #316（手動トリガ）/ #317（種DB永続化）</b><br>
     種の再注入停止 / 手動実行ボタン / <b>ゲートを「探索/確証」2段に集約</b>し確証で OOS+WF を強制（2-5 統一案）。しきい値を単一ファイルに集約。自動cronの扱い（OFF含む）を確定。<span class="small muted">確証ゲートは現状<b>観測のみ</b>（enforce=stage 強制は本番観測で校正後にフラグ接続）。cron OFF は <code>autoEvolution</code> 既定 false で対応済。</span></div>
 
@@ -206,8 +207,8 @@
 
   <div class="note small"><b>注：</b>本再設計は #303(コスト配線)/#304(OOS永続化)/#305・#308(UI可視化) の上に乗る。コスト・可視化は完了済みで、本プランは「<b>探索/最適化のエンジンそのもの</b>」を決定論化する話。</div>
 
-  <h2>6. LLM プロンプト改修プラン（Mutation / Crossover の役割再定義）<span class="small muted"> ／ 2026-06-02 追記・調査+提案（未実装）</span></h2>
-  <div class="note"><b>背景：</b>Phase 2/3 で数値最適化を決定論化したが、<b>deterministic モードは LLM エージェントを完全バイパス</b>する（<code>generateDeterministicMutants</code> / <code>generateDeterministicCrossovers</code> が seam で分岐し LLM を呼ばない）。一方 <code>mutation.md</code> / <code>crossover.md</code> は旧役割（LLM が数値最適化する）のまま。プロンプトと実装が噛み合っていないので「改修（再定義）」が必要。</div>
+  <h2>6. LLM プロンプト改修プラン（Mutation / Crossover の役割再定義）<span class="small muted"> ／ 2026-06-02 実装済み</span></h2>
+  <div class="note"><b>実装サマリー：</b>標準経路を <b>hybrid</b> に変更し、<code>mutation.md</code> は「構造変異提案器」、<code>crossover.md</code> は「候補インジケーター選定器」へ更新した。LLM は PF/OOS/WF/DSR の合否を決めず、数値最適化と採否は analysis-engine / TypeScript の決定論コードが担う。</div>
 
   <h3>6-1. ズレの所在</h3>
   <ul class="small">
@@ -221,21 +222,21 @@
     <tr><th>対象</th><th>旧（LLM が全部）</th><th>新（責務分離）</th></tr>
     <tr><td>数値最適化（period / SL・TP / 閾値）</td><td>LLM mutation / crossover</td><td><b>決定論</b>（<code>/v1/optimize</code> + テンプレスイープ）✅実装済</td></tr>
     <tr><td>エッジ判定（負け減・勝ち維持 / DSR / WF）</td><td>（なし・LLM 主観）</td><td><b>決定論</b>（<code>deterministicCrossover</code> / 確証ゲート）✅実装済</td></tr>
-    <tr><td>構造の多様化（新アーキタイプ/インジ/MTF/direction/AND-OR）</td><td>LLM mutation</td><td><b>モデル依存</b>（下記 6-3）</td></tr>
-    <tr><td>追加インジ候補の事前絞り込み（相性のよいものを選ぶ）</td><td>LLM crossover（閾値まで）</td><td><b>LLM</b>（候補 ID のみ）→ 決定論スイープ</td></tr>
+    <tr><td>構造の多様化（新アーキタイプ/インジ/MTF/direction/AND-OR）</td><td>LLM mutation</td><td><b>hybrid mutation</b>（LLM 構造案 → 決定論最適化）✅実装済</td></tr>
+    <tr><td>追加インジ候補の事前絞り込み（相性のよいものを選ぶ）</td><td>LLM crossover（閾値まで）</td><td><b>LLM</b>（候補 ID のみ）→ Python対応20指標 field 別スイープ ✅実装済</td></tr>
   </table>
 
   <h3>6-3. 2 つのモデル</h3>
   <div class="two">
-    <div class="card to-be"><b>モデルA：ハイブリッド（LLM=構造探索器）</b>
+    <div class="card to-be"><b>モデルA：ハイブリッド（採用済み）</b>
       <ul class="small">
         <li>deterministic でも LLM を残し、役割を<b>構造提案のみ</b>に絞る。</li>
         <li><b>Mutation LLM</b>＝新アーキタイプ/インジ/MTF/direction/AND-OR の<b>構造 variant を提案</b>（period/SL/TP は妥当な初期値でよい）→ 各提案を決定論エンジンが数値最適化。</li>
         <li><b>Crossover LLM</b>＝親の負けトレードを分析し<b>相性のよい候補インジ ID を最大 N 個返す</b>（閾値は決めない）→ <code>variantOptions.indicatorIds</code> に流して決定論スイープ。</li>
-        <li>§2-3「LLM=構造発見」に忠実。構造多様性を維持。<b>要：配線追加 + LLM 呼び出しコスト（deterministic でも 1 回/世代）。</b></li>
+        <li>§2-3「LLM=構造発見」に忠実。構造多様性を維持。<b>標準経路として配線済み。</b></li>
       </ul>
     </div>
-    <div class="card as-is"><b>モデルB：バイパス（LLM は llm モード専用 legacy）</b>
+    <div class="card as-is"><b>モデルB：バイパス（legacy fallback）</b>
       <ul class="small">
         <li>deterministic では LLM 不使用（現状実装のまま）。</li>
         <li>構造多様性は <b>novelty seed + crossover のインジ追加</b>に依存。</li>
@@ -245,21 +246,21 @@
     </div>
   </div>
 
-  <h3>6-4. プロンプト改稿の具体（モデルA 採用時）</h3>
+  <h3>6-4. プロンプト改稿の具体（実装済み）</h3>
   <ul class="small">
-    <li><b>mutation.md → 「構造探索器」</b>：冒頭の「パラメータ最適化器」を削除。「<b>あなたは数値を最適化しない。構造を多様化する。period/SL/TP は妥当な初期値でよく、後段で決定論最適化される</b>」と明記。保守的数値変異（#1-5: param range / SL-TP 倍率 / period 微調整）の節を削除し、探索的変異（新インジ/パターン/MTF/direction/AND-OR/アーキタイプ転換/lessons）に集中。</li>
-    <li><b>crossover.md → 「候補インジ事前絞り込み」</b>：出力を <code>child_dsl</code>（具体条件）から <code>{ candidateIndicatorIds: string[], rationale }</code> に変更。「<b>閾値・period は決めない。負けパターンに効きそうな候補インジ ID を最大 N 個選ぶだけ</b>。閾値/period は決定論スイープが探索」。負けトレード分析の思考プロセスは残す（候補選定の根拠に使う）。</li>
-    <li><b>配線</b>：<code>generateDeterministicMutants</code> に「LLM 構造提案 → 各提案を最適化」を前段に挟む。<code>generateDeterministicCrossovers</code> の <code>variantOptions.indicatorIds</code> に LLM prefilter を接続（hook は実装済）。</li>
+    <li><b>mutation.md → 「構造変異提案器」</b>：数値最適化器の記述を削除し、<b>structuralVariant の初期 DSL だけを提案</b>する役割へ変更。optimizedBase は analysis-engine が親構造を保って最適化する。</li>
+    <li><b>crossover.md → 「候補インジ選定器」</b>：通常出力を <code>{ candidateIndicatorIds: string[], rationale }</code> に変更。<b>閾値・period・StrategyDSL は返さない</b>。legacy fallback として明示要求時のみ <code>child_dsl</code> を許可。</li>
+    <li><b>配線</b>：<code>generateHybridMutants</code> が「baseline → optimizedBase → LLM 構造案 → structuralVariant 最適化」を実行。<code>CrossoverAgent.suggestIndicatorCandidates</code> が Zod 検証済み候補 ID を返し、<code>generateDeterministicCrossovers</code> の <code>variantOptions.indicatorIds</code> に接続。</li>
   </ul>
 
   <h3>6-5. 推奨 / 段階</h3>
   <div class="note small">
-    <b>推奨＝モデルA</b>（§2-3 忠実・構造多様性維持）。ただし配線追加 + LLM コストが増える。<br>
-    <b>段階導入：</b>(1) crossover の <code>indicatorIds</code> 事前絞り込み（hook 済で軽い）→ (2) mutation 構造探索器化。<br>
-    <b>注意：</b>プロンプト改稿は <b>llm 既定モードの挙動も変える</b>（数値変異を促さなくなる）ため、<b>deterministic 有効化とセット</b>で行う（先にプロンプトだけ変えると llm 既定運用中に数値探索が止まる）。
+    <b>採用＝モデルA</b>（§2-3 忠実・構造多様性維持）。<br>
+    <b>標準経路：</b><code>AI_MUTATION_STRATEGY=hybrid</code> / <code>AI_CROSSOVER_STRATEGY=hybrid</code>。<br>
+    <b>legacy fallback：</b><code>llm</code> は旧 LLM 生成経路、<code>deterministic</code> は LLM 事前選定なしの決定論経路として残す。
   </div>
 
-  <p class="muted small" style="margin-top:26px">生成: 2026-06-02 / 進化ループ再設計プラン（self-contained・外部依存なし）。§6 は 2026-06-02 追記（プロンプト改修・調査+提案）。</p>
+  <p class="muted small" style="margin-top:26px">生成: 2026-06-02 / 進化ループ再設計プラン（self-contained・外部依存なし）。§6 は 2026-06-02 Hybrid Redesign 実装内容で更新。</p>
 </div>
 </body>
 </html>

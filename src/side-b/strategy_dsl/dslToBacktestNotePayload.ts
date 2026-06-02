@@ -22,6 +22,7 @@ import type {
     ScreeningBacktestConditionGroup,
     ScreeningBacktestNotePayload,
 } from '../../schemas/external/analysisEngine';
+import { resolveIndicatorFeature } from './indicatorFeatureAlias';
 
 type BacktestCondition = ScreeningBacktestNotePayload['conditions'][number];
 type BacktestStopLoss = ScreeningBacktestNotePayload['stopLoss'];
@@ -184,12 +185,14 @@ function collectIndicatorSpecsFromDslGroup(
         // params 無しは static feature (open/high/low/close/volume/rsi/atr) として扱い、
         // notePayload.indicators[] に積む必要は無い (= snapshot 構築側で常時計算済み)
         if (!params || Object.keys(params).length === 0) return;
+        const resolved = resolveIndicatorFeature(feature);
+        if (!resolved) return;
         const stableKey = `${feature}|${JSON.stringify(params, Object.keys(params).sort())}`;
         if (!map.has(stableKey)) {
             map.set(stableKey, {
-                indicatorId: feature,
+                indicatorId: resolved.indicatorId,
                 params: { ...params },
-                field: 'value',
+                field: resolved.field,
             });
         }
     };
