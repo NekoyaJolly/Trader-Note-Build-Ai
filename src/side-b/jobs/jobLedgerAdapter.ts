@@ -100,6 +100,21 @@ export function defaultMapError(error: Error): MappedEnvelope {
 }
 
 /**
+ * RunLedger に保存する要約へ相関IDを付与する。
+ *
+ * envelope 自体は既存契約のまま返し、永続化される summary/reason だけを拡張する。
+ */
+function withCorrelationSummary(
+  summary: string | null | undefined,
+  correlationId: string | undefined,
+): string | null {
+  const base = summary ?? null;
+  if (!correlationId) return base;
+  if (!base) return `correlationId=${correlationId}`;
+  return `correlationId=${correlationId} ${base}`;
+}
+
+/**
  * envelope.status に応じて RunLedger の終端 API を呼ぶ。
  */
 async function recordStepOutcome(
@@ -112,7 +127,7 @@ async function recordStepOutcome(
 
   if (status === 'succeeded') {
     await ledger.succeedStep(runId, envelope.stepName, {
-      summary: envelope.summary,
+      summary: withCorrelationSummary(envelope.summary, context.correlationId),
       nextAction,
     });
     return;
@@ -122,7 +137,7 @@ async function recordStepOutcome(
     await ledger.failStep(runId, envelope.stepName, {
       errorCode: envelope.errorCode ?? null,
       errorMessage: envelope.errorMessage ?? null,
-      summary: envelope.summary,
+      summary: withCorrelationSummary(envelope.summary, context.correlationId),
       nextAction,
     });
     return;
@@ -130,7 +145,10 @@ async function recordStepOutcome(
 
   if (status === 'skipped') {
     await ledger.skipStep(runId, envelope.stepName, {
-      reason: envelope.summary ?? envelope.errorMessage ?? `${envelope.stepName} skipped`,
+      reason: withCorrelationSummary(
+        envelope.summary ?? envelope.errorMessage ?? `${envelope.stepName} skipped`,
+        context.correlationId,
+      ) ?? `${envelope.stepName} skipped`,
       nextAction,
     });
     return;

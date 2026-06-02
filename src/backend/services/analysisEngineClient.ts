@@ -29,6 +29,7 @@ import {
   AnalysisEngineScreeningBacktestRequestSchema,
   AnalysisEngineScreeningBacktestResponseSchema,
 } from '../../schemas/external/analysisEngine';
+import { buildCorrelationId } from '../../middleware/correlationId';
 
 // ============================================
 // 設定
@@ -39,6 +40,29 @@ const AnalysisEngineUrlSchema = z.string().url();
 function getAnalysisEngineBaseUrl(): string {
   const raw = process.env.ANALYSIS_ENGINE_URL || 'http://analysis-engine:8000';
   return AnalysisEngineUrlSchema.parse(raw);
+}
+
+/**
+ * analysis-engine への内部 HTTP 呼び出しに付与する追加オプション。
+ */
+export interface AnalysisEngineRequestOptions {
+  /** HTTP/API/Job 境界を横断して同じ実行を追跡する相関ID */
+  readonly correlationId?: string;
+}
+
+/**
+ * analysis-engine 向け JSON ヘッダーを作る。
+ *
+ * 理由: 各 endpoint の axios 設定に直書きすると、相関IDの付与漏れが起きやすいため。
+ */
+export function buildAnalysisEngineJsonHeaders(
+  options?: AnalysisEngineRequestOptions,
+): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (options?.correlationId) {
+    headers['X-Correlation-Id'] = buildCorrelationId(options.correlationId);
+  }
+  return headers;
 }
 
 // ============================================
@@ -96,7 +120,7 @@ export async function fetchIndicatorSeries(params: {
   >;
   bbBandwidthWindow?: number;
   bbBandwidthThreshold?: number;
-}): Promise<AnalysisEngineIndicatorSeriesResponse> {
+}, options?: AnalysisEngineRequestOptions): Promise<AnalysisEngineIndicatorSeriesResponse> {
   const baseUrl = getAnalysisEngineBaseUrl();
 
   const payload = AnalysisEngineIndicatorSeriesRequestSchema.parse({
@@ -112,7 +136,7 @@ export async function fetchIndicatorSeries(params: {
 
   const res = await axios.post(`${baseUrl}/v1/indicator-series`, payload, {
     timeout: 60_000,
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildAnalysisEngineJsonHeaders(options),
   });
 
   const parsed = AnalysisEngineIndicatorSeriesResponseSchema.safeParse(res.data);
@@ -148,7 +172,7 @@ export async function fetchIndicatorSeriesByStrategyVersion(params: {
   >;
   bbBandwidthWindow?: number;
   bbBandwidthThreshold?: number;
-}): Promise<AnalysisEngineIndicatorSeriesResponse> {
+}, options?: AnalysisEngineRequestOptions): Promise<AnalysisEngineIndicatorSeriesResponse> {
   const baseUrl = getAnalysisEngineBaseUrl();
 
   const payload = AnalysisEngineIndicatorSeriesByVersionRequestSchema.parse({
@@ -165,7 +189,7 @@ export async function fetchIndicatorSeriesByStrategyVersion(params: {
 
   const res = await axios.post(`${baseUrl}/v1/indicator-series/by-version`, payload, {
     timeout: 60_000,
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildAnalysisEngineJsonHeaders(options),
   });
 
   const parsed = AnalysisEngineIndicatorSeriesResponseSchema.safeParse(res.data);
@@ -188,6 +212,7 @@ export async function fetchIndicatorSeriesByStrategyVersion(params: {
  */
 export async function runScreeningBacktest(
   input: AnalysisEngineScreeningBacktestRequest,
+  options?: AnalysisEngineRequestOptions,
 ): Promise<AnalysisEngineScreeningBacktestResponse> {
   const baseUrl = getAnalysisEngineBaseUrl();
   const payload = AnalysisEngineScreeningBacktestRequestSchema.parse(input);
@@ -195,7 +220,7 @@ export async function runScreeningBacktest(
   const res = await axios.post(`${baseUrl}/v1/screening-backtest`, payload, {
     // 1 年分の BT は数十秒かかりうるため余裕を持たせる
     timeout: 180_000,
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildAnalysisEngineJsonHeaders(options),
   });
 
   const parsed = AnalysisEngineScreeningBacktestResponseSchema.safeParse(res.data);
@@ -219,13 +244,14 @@ export async function runScreeningBacktest(
  */
 export async function runOptimize(
   input: AnalysisEngineOptimizeRequestInput,
+  options?: AnalysisEngineRequestOptions,
 ): Promise<AnalysisEngineOptimizeResponse> {
   const baseUrl = getAnalysisEngineBaseUrl();
   const payload = AnalysisEngineOptimizeRequestSchema.parse(input);
 
   const res = await axios.post(`${baseUrl}/v1/optimize`, payload, {
     timeout: 180_000,
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildAnalysisEngineJsonHeaders(options),
   });
 
   const parsed = AnalysisEngineOptimizeResponseSchema.safeParse(res.data);
@@ -251,13 +277,14 @@ export async function runOosValidation(
   // adapter 側で再ハードコードしないため、input 型を `z.input<>` 系に変える。
   // Zod parse 内で defaults が埋まり、call site では省略可能になる。
   input: AnalysisEngineOosValidationRequestInput,
+  options?: AnalysisEngineRequestOptions,
 ): Promise<AnalysisEngineOosValidationResponse> {
   const baseUrl = getAnalysisEngineBaseUrl();
   const payload = AnalysisEngineOosValidationRequestSchema.parse(input);
 
   const res = await axios.post(`${baseUrl}/v1/oos-validation`, payload, {
     timeout: 180_000,
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildAnalysisEngineJsonHeaders(options),
   });
 
   const parsed = AnalysisEngineOosValidationResponseSchema.safeParse(res.data);

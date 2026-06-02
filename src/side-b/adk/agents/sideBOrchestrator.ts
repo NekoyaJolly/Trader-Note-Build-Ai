@@ -23,7 +23,7 @@
  */
 
 import type { AgentRun, StrategyDraft } from '@prisma/client';
-import type { JobPort, JobResultEnvelope } from '../../jobs/jobPort';
+import type { JobPort, JobPortContext, JobResultEnvelope } from '../../jobs/jobPort';
 import type { RunLedgerService } from '../../services/runLedgerService';
 import type {
   StrategyDraftService,
@@ -33,6 +33,7 @@ import {
   RunLedgerDuplicateRunError,
   type TerminalRunStatus,
 } from '../../services/runLedgerService';
+import { buildCorrelationId } from '../../../middleware/correlationId';
 
 // ============================================================
 // Types
@@ -67,6 +68,8 @@ export interface SideBOrchestratorOptions {
   readonly kind?: string;
   readonly triggeredBy?: string;
   readonly idempotencyKey?: string;
+  /** API / scheduler / Job / analysis-engine 境界を横断して追跡する相関ID */
+  readonly correlationId?: string;
   readonly extractCandidates?: ExtractEvolutionCandidatesFn;
   readonly autoQueueApprovedDrafts?: boolean;
   /**
@@ -131,6 +134,9 @@ export async function runSideBOrchestratedCycle(
 ): Promise<SideBOrchestratorResult> {
   const { ledger, draftService, jobs } = options;
   const batchSize = options.draftBatchSize ?? 10;
+  const correlationId = options.correlationId
+    ? buildCorrelationId(options.correlationId)
+    : undefined;
 
   // ----- run 作成 (冪等性対応) -----
   let run: AgentRun;
@@ -140,6 +146,7 @@ export async function runSideBOrchestratedCycle(
       kind: options.kind ?? 'side_b_cycle',
       triggeredBy: options.triggeredBy ?? 'adk',
       idempotencyKey: options.idempotencyKey,
+      summary: correlationId ? withCorrelationSummary('started', correlationId) : null,
     });
   } catch (err) {
     if (err instanceof RunLedgerDuplicateRunError) {
@@ -158,7 +165,9 @@ export async function runSideBOrchestratedCycle(
     throw err;
   }
 
-  const ctx = { runId: run.id, ledger };
+  const ctx: JobPortContext = correlationId
+    ? { runId: run.id, ledger, correlationId }
+    : { runId: run.id, ledger };
   const stepEnvelopes: Array<JobResultEnvelope | OrchestratorSkipEnvelope> = [];
   const drafts: StrategyDraft[] = [];
   let shouldStop = false;
@@ -253,7 +262,7 @@ export async function runSideBOrchestratedCycle(
   const finalStatus: TerminalRunStatus = shouldStop ? 'failed' : 'succeeded';
   const finishedRun = await ledger.finishRun(run.id, {
     status: finalStatus,
-    summary: composeRunSummary(stepEnvelopes),
+    summary: withCorrelationSummary(composeRunSummary(stepEnvelopes), correlationId),
   });
 
   return {
@@ -275,12 +284,15 @@ export async function runSideBOrchestratedCycle(
  * Ledger 側エラーは catch せず伝播 (Orchestrator 本体の整合性を優先)。
  */
 async function recordSkipAsStep(
-  ctx: { runId: string; ledger: RunLedgerService },
+  ctx: JobPortContext,
   stepName: string,
   reason: string,
 ): Promise<OrchestratorSkipEnvelope> {
   await ctx.ledger.startStep(ctx.runId, { stepName, traceKind: 'orchestrator' });
-  await ctx.ledger.skipStep(ctx.runId, stepName, { reason, nextAction: 'proceed' });
+  await ctx.ledger.skipStep(ctx.runId, stepName, {
+    reason: withCorrelationSummary(reason, ctx.correlationId) ?? reason,
+    nextAction: 'proceed',
+  });
   return { kind: 'skipped', stepName, reason };
 }
 
@@ -291,7 +303,7 @@ async function recordSkipAsStep(
  *   (Copilot review #6 対応): `candidates=N, created=K, duplicate=D, failedAt=index`
  */
 async function runDraftStep(
-  ctx: { runId: string; ledger: RunLedgerService },
+  ctx: JobPortContext,
   evolutionEnvelope: JobResultEnvelope,
   extractCandidates: ExtractEvolutionCandidatesFn,
   draftService: StrategyDraftService,
@@ -342,7 +354,10 @@ async function runDraftStep(
       summaryParts.push(`truncatedFrom=${rawCandidates.length}`);
     }
     const summary = summaryParts.join(', ');
-    await ledger.succeedStep(runId, stepName, { summary, nextAction: 'proceed' });
+    await ledger.succeedStep(runId, stepName, {
+      summary: withCorrelationSummary(summary, ctx.correlationId),
+      nextAction: 'proceed',
+    });
     return {
       ok: true,
       status: 'succeeded',
@@ -361,7 +376,7 @@ async function runDraftStep(
     await ledger.failStep(runId, stepName, {
       errorCode: 'DRAFT_STEP_FAILED',
       errorMessage: message,
-      summary: partialSummary,
+      summary: withCorrelationSummary(partialSummary, ctx.correlationId),
       nextAction: 'stop',
     });
     return {
@@ -381,7 +396,7 @@ async function runDraftStep(
  * batchSize で 1 run の処理件数を制限。
  */
 async function runValidationQueueStep(
-  ctx: { runId: string; ledger: RunLedgerService },
+  ctx: JobPortContext,
   draftService: StrategyDraftService,
   batchSize: number,
 ): Promise<JobResultEnvelope> {
@@ -397,7 +412,10 @@ async function runValidationQueueStep(
       queued += 1;
     }
     const summary = `approvedScanned=${approved.length}, queued=${queued}`;
-    await ledger.succeedStep(runId, stepName, { summary, nextAction: 'proceed' });
+    await ledger.succeedStep(runId, stepName, {
+      summary: withCorrelationSummary(summary, ctx.correlationId),
+      nextAction: 'proceed',
+    });
     return {
       ok: true,
       status: 'succeeded',
@@ -422,6 +440,21 @@ async function runValidationQueueStep(
       nextAction: 'stop',
     };
   }
+}
+
+/**
+ * RunLedger に保存する要約へ相関IDを付与する。
+ *
+ * stepEnvelopes の戻り値は既存契約のままにし、永続化される summary/reason だけを拡張する。
+ */
+function withCorrelationSummary(
+  summary: string | null | undefined,
+  correlationId: string | undefined,
+): string | null {
+  const base = summary ?? null;
+  if (!correlationId) return base;
+  if (!base) return `correlationId=${correlationId}`;
+  return `correlationId=${correlationId} ${base}`;
 }
 
 /**

@@ -39,6 +39,8 @@ export interface JobPortContext {
   readonly runId: string;
   /** RunLedgerService (Phase 2) のインスタンス */
   readonly ledger: RunLedgerService;
+  /** API / scheduler / Job / analysis-engine 境界を横断して追跡する相関ID */
+  readonly correlationId?: string;
 }
 
 /**

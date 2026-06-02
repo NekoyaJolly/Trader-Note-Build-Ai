@@ -33,7 +33,8 @@ http://localhost:3100
 - 未指定または不正な値の場合はサーバー側で UUID を生成します。
 - CORS では `X-Correlation-Id` / `X-Request-Id` の送信と、`X-Correlation-Id` の読み取りを許可します。
 - Side-B TopLevelOrchestrator 経由の cron 実行では、DB schema 変更なしで `AgentRun.summary` とレスポンス `data.correlationId` / `data.runId` にも引き継ぎます。
-- Side-B Job / Evolution generation / analysis-engine call への完全な correlationId 永続化は次PR以降の残課題です。
+- Side-B ADK Orchestrator / JobPort / PythonBridge HTTP mode / analysis-engine client では、DB schema 変更なしで `correlationId` を context・RunLedger summary/reason・`X-Correlation-Id` ヘッダーへ引き継ぎます。
+- Side-B Evolution generation 内部の全生成物への correlationId 永続化は次PR以降の残課題です。
 
 ### API 認証分類
 

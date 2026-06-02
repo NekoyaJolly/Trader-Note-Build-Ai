@@ -71,6 +71,30 @@ describe('runJobWithLedger', () => {
     expect(calls.map((c) => c.fn)).toEqual(['startStep', 'succeedStep']);
   });
 
+  it('correlationId 指定時: RunLedger summary に相関IDを付与する', async () => {
+    const { ledger, calls } = createLedgerSpy();
+    const envelope = await runJobWithLedger(
+      { runId: 'run-1', ledger, correlationId: 'job-run-20260603' },
+      {
+        stepName: 'sample',
+        invoke: () => Promise.resolve({ count: 3 }),
+        mapResult: (r) => ({
+          ok: true,
+          status: 'succeeded',
+          summary: `count=${r.count}`,
+          nextAction: 'proceed',
+        }),
+      },
+    );
+
+    expect(envelope.summary).toBe('count=3');
+    const succeedCall = calls[1];
+    if (!succeedCall) throw new Error('expected succeedStep call');
+    expect((succeedCall.args as { summary?: string }).summary).toBe(
+      'correlationId=job-run-20260603 count=3',
+    );
+  });
+
   it('skipped 時: skipStep を呼ぶ', async () => {
     const { ledger, calls } = createLedgerSpy();
     await runJobWithLedger(ctx(ledger), {

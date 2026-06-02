@@ -274,6 +274,46 @@ describe('runSideBOrchestratedCycle', () => {
     expect(stepNames).toContain('draft');
   });
 
+  it('correlationId を JobPort context と RunLedger summary に引き継ぐ', async () => {
+    const ledger = createRunLedgerService({ repository: createInMemoryLedgerRepo() });
+    const draftService = createStrategyDraftService({ repository: createInMemoryDraftRepo() });
+    let observedCorrelationId: string | undefined;
+
+    const jobs: SideBOrchestratorJobs = {
+      readiness: {
+        stepName: 'readiness',
+        async execute(ctx) {
+          observedCorrelationId = ctx.correlationId;
+          await ledger.startStep(ctx.runId, { stepName: 'readiness', traceKind: 'job' });
+          await ledger.succeedStep(ctx.runId, 'readiness', {
+            summary: 'ready',
+            nextAction: 'proceed',
+          });
+          return {
+            ok: true,
+            status: 'succeeded',
+            stepName: 'readiness',
+            summary: 'ready',
+            nextAction: 'proceed',
+          };
+        },
+      },
+    };
+
+    const result = await runSideBOrchestratedCycle({
+      ledger,
+      draftService,
+      jobs,
+      correlationId: 'adk-run-20260603',
+    });
+
+    expect(observedCorrelationId).toBe('adk-run-20260603');
+    const detail = await ledger.findRunWithSteps(result.run.id);
+    expect(detail?.summary).toContain('correlationId=adk-run-20260603');
+    const planStep = detail?.steps.find((step) => step.stepName === 'plan');
+    expect(planStep?.summary).toBe('correlationId=adk-run-20260603 job not wired');
+  });
+
   it('readiness が stop を返すと後続 step がすべて skip され、finalStatus=failed', async () => {
     const ledger = createRunLedgerService({ repository: createInMemoryLedgerRepo() });
     const draftService = createStrategyDraftService({ repository: createInMemoryDraftRepo() });
