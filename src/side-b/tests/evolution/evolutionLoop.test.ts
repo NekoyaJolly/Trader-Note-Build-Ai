@@ -214,6 +214,8 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       evolutionBacktestRepo: null,
       edgeHypothesisLoader: null,
       runFormalBacktest,
+      mutationStrategy: 'llm',
+      crossoverStrategy: 'llm',
     });
 
     const report = await loop.runOneGeneration('breakout');
@@ -333,6 +335,8 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       evolutionBacktestRepo: null,
       edgeHypothesisLoader: null,
       runFormalBacktest,
+      mutationStrategy: 'llm',
+      crossoverStrategy: 'llm',
     });
 
     const report = await loop.runOneGeneration('breakout');
@@ -530,6 +534,8 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       edgeHypothesisLoader: null,
       runFormalBacktest,
       formalBtTopK: 3,
+      mutationStrategy: 'llm',
+      crossoverStrategy: 'llm',
     });
 
     const report = await loop.runOneGeneration('breakout');
@@ -944,6 +950,8 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       evolutionBacktestRepo: null,
       edgeHypothesisLoader: null,
       runFormalBacktest,
+      mutationStrategy: 'llm',
+      crossoverStrategy: 'llm',
     });
 
     // 永続化スキップ = DB へのアクセスは発生しない (mock 不要で完走できる)
@@ -1361,6 +1369,8 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       evolutionBacktestRepo: null,
       edgeHypothesisLoader: null,
       runFormalBacktest,
+      mutationStrategy: 'llm',
+      crossoverStrategy: 'llm',
     });
 
     // 1世代目: repairHints 引数も lastRepairHints も空 → 4 引数目は undefined
@@ -1928,6 +1938,8 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       evolutionBacktestRepo: null,
       edgeHypothesisLoader: null,
       runFormalBacktest,
+      mutationStrategy: 'llm',
+      crossoverStrategy: 'llm',
     });
 
     // 1世代目: outcome は trace なし (baseline / repairHints が空) で 0 件
@@ -2065,6 +2077,8 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
       evolutionBacktestRepo: null,
       edgeHypothesisLoader: null,
       runFormalBacktest,
+      mutationStrategy: 'llm',
+      crossoverStrategy: 'llm',
     });
 
     await loop.runOneGeneration('breakout');
