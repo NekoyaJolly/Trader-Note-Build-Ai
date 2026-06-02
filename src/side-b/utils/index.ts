@@ -10,3 +10,5 @@ export {
   getMarketStatusJST,
   isUSDaylightSavingTime,
 } from './marketHours';
+
+export { withCorrelationSummary } from './correlationSummary';

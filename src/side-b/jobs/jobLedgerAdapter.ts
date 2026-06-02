@@ -12,6 +12,7 @@ import type {
   AgentRunStepNextAction,
 } from '@prisma/client';
 import type { JobPortContext, JobResultEnvelope } from './jobPort';
+import { withCorrelationSummary } from '../utils';
 
 /**
  * 既存 Job を呼ぶための spec。adapter は本 spec を作って runJobWithLedger に渡す。
@@ -97,21 +98,6 @@ export function defaultMapError(error: Error): MappedEnvelope {
     errorMessage: error.message,
     nextAction: 'stop',
   };
-}
-
-/**
- * RunLedger に保存する要約へ相関IDを付与する。
- *
- * envelope 自体は既存契約のまま返し、永続化される summary/reason だけを拡張する。
- */
-function withCorrelationSummary(
-  summary: string | null | undefined,
-  correlationId: string | undefined,
-): string | null {
-  const base = summary ?? null;
-  if (!correlationId) return base;
-  if (!base) return `correlationId=${correlationId}`;
-  return `correlationId=${correlationId} ${base}`;
 }
 
 /**

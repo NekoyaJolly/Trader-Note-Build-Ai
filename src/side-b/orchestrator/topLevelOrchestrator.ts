@@ -27,6 +27,7 @@ import { buildCorrelationId } from '../../middleware/correlationId';
 import type { PromptRegistry } from '../prompts/registry/PromptRegistry';
 import { loadPromptWithGlobal } from '../prompts/loader';
 import { evaluateInputRules, checkLlmTokenBudget } from './topLevelOrchestratorRules';
+import { withCorrelationSummary } from '../utils';
 
 // ==========================================
 // 型定義
@@ -214,11 +215,6 @@ function stripCodeFence(content: string): string {
 function normalizeCorrelationId(correlationId: string | undefined): string | null {
   if (!correlationId) return null;
   return buildCorrelationId(correlationId);
-}
-
-function withCorrelationSummary(summary: string, correlationId: string | null): string {
-  if (!correlationId) return summary;
-  return `correlationId=${correlationId} ${summary}`;
 }
 
 // ==========================================

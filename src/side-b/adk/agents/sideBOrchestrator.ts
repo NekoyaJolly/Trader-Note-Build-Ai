@@ -34,6 +34,7 @@ import {
   type TerminalRunStatus,
 } from '../../services/runLedgerService';
 import { buildCorrelationId } from '../../../middleware/correlationId';
+import { withCorrelationSummary } from '../../utils';
 
 // ============================================================
 // Types
@@ -440,21 +441,6 @@ async function runValidationQueueStep(
       nextAction: 'stop',
     };
   }
-}
-
-/**
- * RunLedger に保存する要約へ相関IDを付与する。
- *
- * stepEnvelopes の戻り値は既存契約のままにし、永続化される summary/reason だけを拡張する。
- */
-function withCorrelationSummary(
-  summary: string | null | undefined,
-  correlationId: string | undefined,
-): string | null {
-  const base = summary ?? null;
-  if (!correlationId) return base;
-  if (!base) return `correlationId=${correlationId}`;
-  return `correlationId=${correlationId} ${base}`;
 }
 
 /**
