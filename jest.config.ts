@@ -15,6 +15,7 @@ const config: Config = {
     '**/side-b/tests/**/*.test.ts',  // Side-B テスト追加
   ],
   setupFiles: ['<rootDir>/jest.setup.ts'],
+  setupFilesAfterEnv: ['<rootDir>/src/backend/tests/setup/after-env.ts'],
   globalSetup: '<rootDir>/src/backend/tests/setup/global-setup.ts',
   globalTeardown: '<rootDir>/src/backend/tests/setup/global-teardown.ts',
   moduleFileExtensions: ['ts', 'js', 'json'],
