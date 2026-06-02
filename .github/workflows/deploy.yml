@@ -15,6 +15,7 @@ env:
   GCP_ANALYSIS_SERVICE_NAME: trader-note-analysis-engine
   GCP_ANALYSIS_IMAGE: gcr.io/ai-note-486020/trader-note-analysis-engine:latest
   PRODUCTION_API_URL: https://trader-note-571157808050.asia-northeast1.run.app
+  PRODUCTION_UI_URL: https://trader-note-build-ai.vercel.app
 
 jobs:
   # ── 0. analysis-engine（Python）を Cloud Run にデプロイ ──
@@ -226,6 +227,18 @@ jobs:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
 
+      - name: Node.js セットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: 依存関係をインストール
+        run: npm ci
+
+      - name: Playwright をインストール
+        run: npx playwright install --with-deps chromium
+
       - name: API ヘルスチェック
         run: |
           echo "⏳ API の到達確認中..."
@@ -239,11 +252,19 @@ jobs:
           done
           echo "⚠️ API に到達できませんが、E2E テストを続行します"
 
-      - name: 本番 E2E テスト実行
-        run: bash scripts/production-e2e-test.sh
+      - name: 本番公開面 Playwright smoke 実行
+        run: npm run test:e2e:production:public
         env:
           PRODUCTION_API_URL: ${{ env.PRODUCTION_API_URL }}
-          WAIT_TIME: 2
+          PRODUCTION_UI_URL: ${{ env.PRODUCTION_UI_URL }}
+
+      - name: Playwright レポートをアップロード
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-production-report
+          path: playwright-report-production/
+          retention-days: 14
 
       - name: デプロイ完了サマリー
         if: success()
@@ -253,9 +274,9 @@ jobs:
           echo "================================"
           echo ""
           echo "  ✅ API: ${{ env.PRODUCTION_API_URL }} (GCP Cloud Run)"
-          echo "  ✅ UI:  Vercel (自動デプロイ)"
+          echo "  ✅ UI:  ${{ env.PRODUCTION_UI_URL }} (Vercel)"
           echo "  ✅ DB:  Supabase"
-          echo "  ✅ E2E テスト: 合格"
+          echo "  ✅ 本番公開面 smoke: 合格"
 
       - name: E2E テスト失敗時の通知
         if: failure()

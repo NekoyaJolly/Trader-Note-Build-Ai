@@ -38,9 +38,15 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            src/frontend/package-lock.json
 
       - name: 依存関係をインストール
         run: npm ci
+
+      - name: フロントエンド依存関係をインストール
+        run: cd src/frontend && npm ci
 
       - name: Prisma クライアント生成
         run: npx prisma generate
@@ -48,8 +54,14 @@ jobs:
       - name: TypeScript コンパイル確認
         run: npx tsc --noEmit
 
-      - name: ESLint チェック
-        run: npm run lint --if-present || echo "ESLint スキップ"
+      - name: Backend ESLint チェック
+        run: npm run lint:backend
+
+      - name: Frontend TypeScript コンパイル確認
+        run: cd src/frontend && npx tsc --noEmit
+
+      - name: Frontend ESLint チェック
+        run: cd src/frontend && npm run lint
 
   # ── 2. ユニットテスト（DB/外部依存なし） ──
   unit-tests:
@@ -87,6 +99,29 @@ jobs:
           files: ./coverage/coverage-final.json
           flags: unittests
           fail_ci_if_error: false
+
+  # ── 2.5. フロントエンドテスト ──
+  frontend-tests:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Node.js セットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: src/frontend/package-lock.json
+
+      - name: フロントエンド依存関係をインストール
+        run: npm ci
+        working-directory: src/frontend
+
+      - name: Frontend ユニットテスト実行
+        run: npm test
+        working-directory: src/frontend
 
   # ── 3. DB 統合テスト（Supabase/Prisma、低並列） ──
   db-integration-tests:
@@ -164,7 +199,7 @@ jobs:
   e2e-tests:
     name: E2E Tests (Playwright)
     runs-on: ubuntu-latest
-    needs: [lint-and-typecheck, unit-tests, db-integration-tests]
+    needs: [lint-and-typecheck, unit-tests, frontend-tests, db-integration-tests]
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
@@ -322,4 +357,3 @@ jobs:
           cache-to: type=gha,mode=max
           # CI 上では tag 不要 (push しないため)
           tags: trader-note-build-ai:ci-check
-
