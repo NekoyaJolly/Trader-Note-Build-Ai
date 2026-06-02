@@ -19,6 +19,7 @@ export {
   type TopLevelOrchestratorInput,
   type TopLevelOrchestratorOutput,
   type TopLevelOrchestratorDeps,
+  type TopLevelOrchestratorExecutionOptions,
   type TopLevelOrchestratorJobInvokers,
   type TopLevelOrchestratorResult,
 } from './topLevelOrchestrator';

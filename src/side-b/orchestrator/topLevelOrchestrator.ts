@@ -23,6 +23,7 @@ import type { AgentRunStatus, PrismaClient } from '@prisma/client';
 
 import { AIProvider } from '../agent/aiProvider';
 import { modelFor } from '../../config';
+import { buildCorrelationId } from '../../middleware/correlationId';
 import type { PromptRegistry } from '../prompts/registry/PromptRegistry';
 import { loadPromptWithGlobal } from '../prompts/loader';
 import { evaluateInputRules, checkLlmTokenBudget } from './topLevelOrchestratorRules';
@@ -106,6 +107,11 @@ export interface TopLevelOrchestratorJobInvokers {
   runEvolution: () => Promise<void>;
 }
 
+export interface TopLevelOrchestratorExecutionOptions {
+  /** HTTP 境界から渡された相関ID。DB schema を増やさず AgentRun.summary にだけ残す。 */
+  correlationId?: string;
+}
+
 export interface TopLevelOrchestratorDeps {
   prisma: PrismaClient;
   aiProvider?: AIProvider;
@@ -120,6 +126,10 @@ export interface TopLevelOrchestratorDeps {
 export interface TopLevelOrchestratorResult {
   /** 強制 'wait' でスキップされた場合は output=null */
   output: TopLevelOrchestratorOutput | null;
+  /** AgentRun.id。emergency_stop で Run を作らなかった場合は null。 */
+  runId: string | null;
+  /** HTTP / CI ログと AgentRun を突合するための相関ID。 */
+  correlationId: string | null;
   /** strictBlocked の理由 (output=null 時のみ設定) */
   strictBlockedReason?: string;
   /** 実行された Job (= dispatchAction の結果、wait は空配列) */
@@ -201,6 +211,16 @@ function stripCodeFence(content: string): string {
   return trimmed;
 }
 
+function normalizeCorrelationId(correlationId: string | undefined): string | null {
+  if (!correlationId) return null;
+  return buildCorrelationId(correlationId);
+}
+
+function withCorrelationSummary(summary: string, correlationId: string | null): string {
+  if (!correlationId) return summary;
+  return `correlationId=${correlationId} ${summary}`;
+}
+
 // ==========================================
 // 本体
 // ==========================================
@@ -256,7 +276,9 @@ export class TopLevelOrchestrator {
    */
   async decideAndExecute(
     trigger: 'cron' | 'manual' | 'test' = 'cron',
+    options?: TopLevelOrchestratorExecutionOptions,
   ): Promise<TopLevelOrchestratorResult> {
+    const correlationId = normalizeCorrelationId(options?.correlationId);
     // Phase 2: サイクル開始時に AgentRun を作成 (status='pending')
     const agentRun = await this.prisma.agentRun.create({
       data: {
@@ -264,6 +286,7 @@ export class TopLevelOrchestrator {
         triggeredBy: trigger,
         status: 'pending',
         startedAt: new Date(),
+        summary: withCorrelationSummary('started', correlationId),
       },
     });
 
@@ -290,10 +313,16 @@ export class TopLevelOrchestrator {
           data: {
             status: 'cancelled',
             finishedAt: new Date(),
-            summary: `blocked: ${reason}`,
+            summary: withCorrelationSummary(`blocked: ${reason}`, correlationId),
           },
         });
-        return { output: null, strictBlockedReason: reason, executedJobs: [] };
+        return {
+          output: null,
+          runId: agentRun.id,
+          correlationId,
+          strictBlockedReason: reason,
+          executedJobs: [],
+        };
       }
 
       // blockedActions を input に反映
@@ -331,12 +360,20 @@ export class TopLevelOrchestrator {
           data: {
             status: 'cancelled',
             finishedAt: new Date(),
-            summary: `token-budget-exceeded: ${tokenCheck.reason}`,
+            summary: withCorrelationSummary(
+              `token-budget-exceeded: ${tokenCheck.reason}`,
+              correlationId,
+            ),
           },
         });
         // token budget 超過時の AgentRunStep は **記録しない** (= 実行されなかった判断は
         // recentDecisions に残さない、PR #252 Copilot review #2 対応)
-        return { output: tokenWait, executedJobs: [] };
+        return {
+          output: tokenWait,
+          runId: agentRun.id,
+          correlationId,
+          executedJobs: [],
+        };
       }
 
       // 判断結果を AgentRunStep に保存 (= recentDecisions 取得用)。
@@ -362,11 +399,14 @@ export class TopLevelOrchestrator {
         data: {
           status: 'succeeded',
           finishedAt: new Date(),
-          summary: `action=${output.action} executed=[${executedJobs.join(',')}]`,
+          summary: withCorrelationSummary(
+            `action=${output.action} executed=[${executedJobs.join(',')}]`,
+            correlationId,
+          ),
         },
       });
 
-      return { output, executedJobs };
+      return { output, runId: agentRun.id, correlationId, executedJobs };
     } catch (err) {
       // Phase 2: 例外時は 'failed' + errorCode='fatal_decideAndExecute' で AgentRun を閉じる。
       // 'fatal_' プレフィックスは禁止事項 #1 (連続 3 fatal) の判定に使われる。
@@ -383,6 +423,7 @@ export class TopLevelOrchestrator {
             finishedAt: new Date(),
             errorCode: 'fatal_decideAndExecute',
             errorMessage: errMessage.slice(0, 500),
+            summary: withCorrelationSummary('failed: fatal_decideAndExecute', correlationId),
           },
         });
       } catch (updateErr) {

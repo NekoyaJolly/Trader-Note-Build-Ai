@@ -36,6 +36,7 @@ import { CronSimilarityService } from '../services/cronSimilarityService';
 import { AIOrchestrator } from '../orchestrator/aiOrchestrator';
 import { MarketDataService } from '../../services/marketDataService';
 import { CTraderAuthService } from '../../backend/services/ctrader/ctraderAuthService';
+import { buildCorrelationId } from '../../middleware/correlationId';
 import type { PrismaClient } from '@prisma/client';
 // canonical singleton (PR #152)
 import { prisma as canonicalPrisma } from '../../backend/db/client';
@@ -70,6 +71,7 @@ import { normalizeCTraderSymbol } from '../../utils/symbolNormalization';
 // 実体は遅延 import (= 循環依存回避のため `import('../orchestrator')` を使用)
 import type {
   TopLevelOrchestrator as TopLevelOrchestratorType,
+  TopLevelOrchestratorExecutionOptions,
   TopLevelOrchestratorResult,
 } from '../orchestrator';
 // Phase 7 (orch): ADK Orchestrator Wrapper bridge
@@ -761,19 +763,25 @@ export class SideBScheduler {
    */
   async runOrchestratedCycle(
     trigger: 'cron' | 'manual' | 'test' = 'cron',
+    options?: TopLevelOrchestratorExecutionOptions,
   ): Promise<TopLevelOrchestratorResult> {
     const isStopped = await this.systemStateRepository.getBoolean('emergency_stop', false);
     if (isStopped) {
+      const correlationId = options?.correlationId
+        ? buildCorrelationId(options.correlationId)
+        : null;
       this.log('緊急停止(キルスイッチ)がONのため、Orchestratorサイクル実行をスキップします。');
       return {
         output: null,
+        runId: null,
+        correlationId,
         strictBlockedReason: 'emergency_stop',
         executedJobs: [],
       };
     }
 
     const orchestrator = await this.getTopLevelOrchestrator();
-    return orchestrator.decideAndExecute(trigger);
+    return orchestrator.decideAndExecute(trigger, options);
   }
 
 

@@ -66,7 +66,7 @@ router.get('/health', (_req: Request, res: Response) => {
  * 2. 各シンボルのOHLCVデータ取得
  * 3. Research AI → Plan AI → VirtualTrade作成
  */
-router.get('/side-b/daily-plan', async (_req: Request, res: Response) => {
+router.get('/side-b/daily-plan', async (req: Request, res: Response) => {
   const startTime = Date.now();
 
   try {
@@ -101,13 +101,17 @@ router.get('/side-b/daily-plan', async (_req: Request, res: Response) => {
     // 設計書: docs/architecture/TOP_LEVEL_ORCHESTRATOR_DESIGN.md
     if (orchestratorEnabled) {
       console.log('[Cron] TopLevelOrchestrator 経由でサイクル実行');
-      const orchResult = await scheduler.runOrchestratedCycle('cron');
+      const orchResult = await scheduler.runOrchestratedCycle('cron', {
+        correlationId: req.correlationId,
+      });
       res.json({
         success: true,
         message: orchResult.output
           ? `Orchestrator action=${orchResult.output.action} (${orchResult.executedJobs.length} jobs)`
           : `Orchestrator strictBlocked: ${orchResult.strictBlockedReason ?? 'unknown'}`,
         data: {
+          runId: orchResult.runId,
+          correlationId: orchResult.correlationId,
           action: orchResult.output?.action ?? null,
           reasoning: orchResult.output?.reasoning ?? null,
           executedJobs: orchResult.executedJobs,
