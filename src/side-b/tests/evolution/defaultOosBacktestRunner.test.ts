@@ -187,4 +187,24 @@ describe('defaultOosBacktestRunner', () => {
     expect(call?.thresholds).toBeUndefined();
     expect(call?.config).toBeUndefined();
   });
+
+  it('8. correlationId 指定時は analysis-engine client の options に引き継ぐ', async () => {
+    mockedRun.mockResolvedValue({
+      metrics: { pf: 1.2, tradeCount: 18, maxDrawdown: 6, expectancy: null, winRate: 0.52 },
+      verdict: 'unknown',
+      failureReasons: [],
+      evaluationKind: 'oos',
+      warnings: [],
+      engineVersion: 'analysis-engine/backtesting.py@0.6.5',
+      unsupportedConditions: [],
+    });
+    await defaultOosBacktestRunner({
+      dsl: makeDsl(),
+      startDate: '2024-10-01',
+      endDate: '2024-12-31',
+      correlationId: 'evolution-oos-20260603',
+    });
+    const options = mockedRun.mock.calls[0]?.[1];
+    expect(options?.correlationId).toBe('evolution-oos-20260603');
+  });
 });

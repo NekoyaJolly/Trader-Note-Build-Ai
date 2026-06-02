@@ -79,6 +79,15 @@ export interface EvolutionCarryRetentionResult {
   error?: string;
 }
 
+/**
+ * EvolutionJob.run の任意実行コンテキスト。
+ * 既存呼び出しは引数なしのまま動作し、HTTP/cron 経由だけ相関IDを注入する。
+ */
+export interface EvolutionJobRunOptions {
+  /** HTTP / cron / AgentRun と GenerationReport / analysis-engine request を突合する相関ID。 */
+  correlationId?: string;
+}
+
 // 環境変数解釈ヘルパー (parseStrictInt / parseStrictBool / readEvolutionEnvOverrides) は
 // `./evolutionJobConfig.ts` に分離 (PR #159 Copilot review #3 対応、テスト軽量化)。
 // 本ファイルからは上記の re-export 経由で参照可能。
@@ -115,7 +124,10 @@ export class EvolutionJob implements SideBJobRunner<SideBSchedulerConfig, Evolut
    * 戻り値形 `{ regimeReports: number; errors: string[] }` は変更しない。
    * 既存テスト `evolutionMultiGen.test.ts` が直接検証している。
    */
-  async run(config: SideBSchedulerConfig): Promise<EvolutionJobResult> {
+  async run(
+    config: SideBSchedulerConfig,
+    options?: EvolutionJobRunOptions,
+  ): Promise<EvolutionJobResult> {
     const regimes = config.evolutionRegimes?.length
       ? config.evolutionRegimes
       : [...DEFAULT_EVOLUTION_REGIMES];
@@ -167,6 +179,7 @@ export class EvolutionJob implements SideBJobRunner<SideBSchedulerConfig, Evolut
       // Hybrid Redesign: crossover 方式を config から注入（既定 'hybrid'）。
       // hybrid では LLM が候補 ID を絞り、決定論スイープが採否を評価する。
       crossoverStrategy: appConfig.ai.crossoverStrategy,
+      ...(options?.correlationId ? { correlationId: options.correlationId } : {}),
     });
 
     // configOverride 経由で 0 や maxGenerations 超過の値が渡されたときの clamp。

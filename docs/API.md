@@ -34,7 +34,7 @@ http://localhost:3100
 - CORS では `X-Correlation-Id` / `X-Request-Id` の送信と、`X-Correlation-Id` の読み取りを許可します。
 - Side-B TopLevelOrchestrator 経由の cron 実行では、DB schema 変更なしで `AgentRun.summary` とレスポンス `data.correlationId` / `data.runId` にも引き継ぎます。
 - Side-B ADK Orchestrator / JobPort / PythonBridge HTTP mode / analysis-engine client では、DB schema 変更なしで `correlationId` を context・RunLedger summary/reason・`X-Correlation-Id` ヘッダーへ引き継ぎます。
-- Side-B Evolution generation 内部の全生成物への correlationId 永続化は次PR以降の残課題です。
+- Side-B Evolution generation は、DB schema 変更なしで `GenerationReport.correlationId` / 観測ログ / analysis-engine `X-Correlation-Id` ヘッダーへ `correlationId` を引き継ぎます。EvolutionBacktestRun などの行単位 correlationId 専用列は今後のDB schema変更PRで検討します。
 
 ### API 認証分類
 
