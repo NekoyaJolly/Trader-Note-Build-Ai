@@ -25,6 +25,15 @@ http://localhost:3100
 - **Cookie**: `auth_token`（推奨）
 - **Authorization ヘッダー**: `Bearer <token>`
 
+## 共通リクエストID
+
+全 HTTP API はレスポンスヘッダー `X-Correlation-Id` を返します。
+
+- クライアントが `X-Correlation-Id` または `X-Request-Id` を送った場合、安全な形式（英数字、`.`、`_`、`:`、`-`、8〜128文字）の値だけを引き継ぎます。
+- 未指定または不正な値の場合はサーバー側で UUID を生成します。
+- CORS では `X-Correlation-Id` / `X-Request-Id` の送信と、`X-Correlation-Id` の読み取りを許可します。
+- 現時点では DB schema 変更なしで HTTP 境界とエラーログに付与します。Side-B RunLedger / AgentRun / Job / Evolution run への完全な統合は次PR以降の残課題です。
+
 ### API 認証分類
 
 | 分類 | 意味 |

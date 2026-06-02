@@ -32,6 +32,7 @@ import similarityRoutes from './backend/api/similarityRoutes';
 import { MatchingScheduler } from './utils/scheduler';
 import { getSideBScheduler } from './side-b/jobs/sideBScheduler';
 import { requireAuth } from './middleware/authMiddleware';
+import { correlationIdMiddleware } from './middleware/correlationId';
 import { mailRouter } from './side-b/routes/mailRoutes';
 import { prisma } from './backend/db/client';
 
@@ -161,6 +162,9 @@ class App {
       }),
     );
 
+    console.log('[App] correlationId ミドルウェアを設定中...');
+    this.app.use(correlationIdMiddleware);
+
     console.log('[App] CORS設定を初期化中...');
     // CORS設定: 開発環境と Vercel デプロイの両方を許可
     // 本番 Cloud Run 統合の同一オリジンリクエストは origin=undefined で自動許可
@@ -189,8 +193,8 @@ class App {
       },
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
-      exposedHeaders: ['Set-Cookie'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Correlation-Id', 'X-Request-Id'],
+      exposedHeaders: ['X-Correlation-Id'],
     }));
 
     console.log('[App] JSON パーサーを設定中...');
@@ -342,6 +346,7 @@ class App {
         console.error('  Express エラーハンドラーがエラーをキャッチしました');
         console.error('═══════════════════════════════════════');
         console.error('URL:', sanitizeRequestUrl(req.method, req.originalUrl || req.url));
+        console.error('CorrelationId:', req.correlationId ?? 'unavailable');
         console.error('Error:', err.message);
         if (!config.server.isProduction) {
           console.error('Stack:', err.stack);
