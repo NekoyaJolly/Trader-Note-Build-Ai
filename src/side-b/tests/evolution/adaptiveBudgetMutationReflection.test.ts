@@ -155,6 +155,8 @@ async function setupAndRun(opts: SetupOptions = {}) {
     evolutionBacktestRepo: null,
     edgeHypothesisLoader: null,
     runFormalBacktest,
+    mutationStrategy: 'llm',
+    crossoverStrategy: 'llm',
   });
   const report = await loop.runOneGeneration(
     'breakout',

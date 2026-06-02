@@ -112,7 +112,7 @@ describe('loadPrompt', () => {
             expect(content).toContain('戦略アーキタイプの広がり');
         });
 
-        it('crossover.md に静的 ohlcv feature 表 + macro 注入 + Filter Evolution M3 要素が含まれている', () => {
+        it('crossover.md に静的 ohlcv feature 表 + macro 注入 + Hybrid Crossover 要素が含まれている', () => {
             const content = loadPrompt('crossover');
             expect(content).toContain('利用可能なエントリー条件');
             expect(content).toContain('静的 ohlcv feature');
@@ -123,14 +123,20 @@ describe('loadPrompt', () => {
             expect(content).toContain('{{INDICATOR_METADATA_TABLE}}');
             expect(content).toContain('動的パラメータ付き indicator');
             expect(content).toContain('マルチタイムフレーム');
-            // Filter Evolution M3: filter 追加器再設計 / 親 A の負けトレード文脈 / wrapper 出力 / ModuleParent
-            expect(content).toContain('フィルタ追加器');
+            // Hybrid Crossover: 候補選定器 / 親 A の負けトレード文脈 / 決定論スイープ / ModuleParent
+            expect(content).toContain('候補インジケーター選定器');
             expect(content).toContain('親A_loss_trades');
             expect(content).toContain('module_parents');
-            expect(content).toContain('child_dsl');
-            expect(content).toContain('rejected_loss_count');
-            expect(content).toContain('preserved_win_count');
+            expect(content).toContain('candidateIndicatorIds');
+            expect(content).toContain('決定論スイープ');
+            expect(content).toContain('合否、PF、OOS、WF、DSR の判定はあなたが行わない');
+            expect(content).toContain('field / period / threshold / StrategyDSL は返さない');
+            expect(content).toContain('採否は決定論ゲートが担う');
             expect(content).toContain('rationale');
+            // legacy fallback は残すが、標準経路の数値予想フィールドは prompt から外す。
+            expect(content).toContain('child_dsl');
+            expect(content).not.toContain('rejected_loss_count');
+            expect(content).not.toContain('preserved_win_count');
         });
     });
 });

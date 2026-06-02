@@ -52,11 +52,13 @@
 | **大損失偏り** | 大きい abs(pnl) の負けが特定条件で発生 | Volatility filter（例: ATR 高すぎを除外） |
 | **連続損失** | entryTime が短期間に集中（= レンジ往復の連続騙し） | Market Structure filter（例: trend_state == 'unclear' を除外） |
 
-### filter 選定の優先順位
+### candidate indicator 選定の優先順位
 
 1. **ModuleParent 候補から選ぶ**（= 後述）。registry に整備された素材を優先。
-2. ModuleParent で適切なものが無ければ、**親 B から条件 1 つを抽出** して filter 化。
-3. 最後の手段として、汎用 lens（time_session / dow_theory / volatility_regime）から新規構成。
+2. ModuleParent で適切なものが無ければ、**親 B の条件から有効そうな indicator ID を抽出**する。
+3. 最後の手段として、汎用 lens（time_session / dow_theory / volatility_regime）に近い indicator ID を候補化する。
+
+ここで選ぶのは indicator ID だけです。field / period / threshold / 条件 leaf は後段の決定論スイープが展開します。
 
 ## 利用可能なエントリー条件 (lens / feature)
 
@@ -122,7 +124,7 @@
 - **💡 他銘柄の確信ルール (クロスシンボル学習)** は同一構造のパターンなら採用検討
 - **💬 直近の負けトレード振り返り** は filter 設計の根拠 (rationale) として明示的に引用すると良い
 
-lessons の具体内容を child の `rationale` (wrapper 出力) に引用するのも推奨 (= ユーザーが「なぜこの filter を選んだか」を後追いできる)。
+lessons の具体内容を `rationale` に引用するのも推奨 (= ユーザーが「なぜこの indicator 候補を選んだか」を後追いできる)。
 
 ## ModuleParent 候補（= フィルタ素材ライブラリ）
 
@@ -141,7 +143,7 @@ lessons の具体内容を child の `rationale` (wrapper 出力) に引用す�
 }
 ```
 
-`module_parents` から、親 A の負けパターンに最も合致する素材を **1 つ選び**、その `lensName` / `featureKey` / `typicalOps` / `typicalValueHint` に従って filter 条件 leaf を 1 個構築する。`lensName` が `'ohlcv@1h'` のように `@TIMEFRAME` を含む場合は `lens='ohlcv'` + `timeframe='1h'` に分解する。
+`module_parents` から、親 A の負けパターンに最も合致する素材を選び、その `lensName` / `featureKey` / `typicalValueHint` をヒントに `candidateIndicatorIds` へ落とし込む。通常の Hybrid 経路では filter 条件 leaf を構築しない。
 
 ## 比較演算子 (op)
 
@@ -169,87 +171,54 @@ lessons の具体内容を child の `rationale` (wrapper 出力) に引用す�
 - timeframe 未指定 → 主時間足扱い。
 - 上位足の値は close 確定後にのみ参照可（look-ahead bias 防止）。
 
-## filter 追加の典型例
+## candidate 選定の典型例
 
-### 例 1: TimeSession filter（流動性が低い時間帯の騙しを除去）
+### 例 1: TimeSession 系の騙し（流動性が低い時間帯の負けを除去したい）
 
 ```json
-// 親 A: 15m 足 RSI 過売り反転 entry (logic=AND, conditions=[rsi<30, engulfing_bull])
-// 親 A の負け 30 件中 12 件が UTC 0-5h（= 流動性低）に集中
-// → ロンドン NY オーバーラップのみに限定
 {
-  "logic": "AND",
-  "conditions": [
-    { "lens": "ohlcv", "feature": "rsi", "op": "<", "value": 30 },
-    { "lens": "pattern", "feature": "engulfing_bull", "op": "is_true" },
-    { "lens": "time_session", "feature": "overlap_london_ny", "op": "is_true" }
-  ]
+  "candidateIndicatorIds": ["atr", "obv", "vwap"],
+  "rationale": "UTC 0-5h の負けが多いため、流動性低下や値幅不足を切り分ける候補として atr / obv / vwap を優先する。"
 }
 ```
 
-### 例 2: MTF filter（上位足トレンド整合のみで取る）
+### 例 2: MTF / トレンド逆行系の騙し（上位足に逆らう負けを除去したい）
 
 ```json
-// 親 A: 15m 足 EMA(7) cross_above EMA(21) で long entry
-// 親 A の負け 25 件中 18 件が 1h 足下降トレンド中で発生
-// → 1h 足の close > ema(50)@1h を AND 追加
 {
-  "logic": "AND",
-  "conditions": [
-    {
-      "lens": "ohlcv", "feature": "ema", "op": "cross_above", "params": { "period": 7 },
-      "compareTarget": { "lens": "ohlcv", "feature": "ema", "params": { "period": 21 } }
-    },
-    {
-      "lens": "ohlcv", "feature": "close", "op": ">",
-      "compareTarget": { "lens": "ohlcv", "feature": "ema", "params": { "period": 50 }, "timeframe": "1h" },
-      "timeframe": "1h"
-    }
-  ]
+  "candidateIndicatorIds": ["ema", "aroon", "macd"],
+  "rationale": "1h 足の逆行中に負けが集中しているため、トレンド方向と勢いを測る ema / aroon / macd を候補にする。"
 }
 ```
 
-### 例 3: Volatility filter（高ボラスパイク時の早撃ち騙しを除去）
+### 例 3: Volatility 系の騙し（高ボラスパイク時の早撃ちを除去したい）
 
 ```json
-// 親 A: BB upper ブレイク entry
-// 親 A の負けの大損失（pnl < -50）が ATR 急騰時に集中
-// → ATR が elevated/expanding でないときのみ
 {
-  "logic": "AND",
-  "conditions": [
-    {
-      "lens": "ohlcv", "feature": "close", "op": "cross_above",
-      "compareTarget": { "lens": "ohlcv", "feature": "bb_upper", "params": { "period": 20 } }
-    },
-    { "lens": "volatility_regime", "feature": "regime_label", "op": "==", "value": "normal" }
-  ]
+  "candidateIndicatorIds": ["atr", "bb"],
+  "rationale": "大損失がボラ急拡大時に偏るため、atr と bb で過熱状態を決定論スイープに渡す。"
 }
 ```
 
 ## 制約
 
-- `metadata.createdBy` は `'crossover'` で固定。
-- `parentIds` は **エージェントが自動付与する** ので LLM が出力する必要はない（出力されても実行時に上書きされる）。
-- `id` も実行時に上書きされる（= LLM が UUID を当てる必要なし）。
-- `generation` は実行時に `max(parentA.generation, parentB.generation) + 1` で上書きされる。
-- 親 A の **direction**（long/short）を維持する。filter で direction を反転させない。
-- 親 A の `regimeTarget` / `symbol` / `timeframe` を維持する。
-- 親 A の `stopLoss` / `takeProfit` 構造は **そのまま継承**（filter で改変しない）。
-- 親 A の `parameters` は維持し、filter で新しいパラメーター（= ParamRef）を追加する場合のみ extend する。
-- LLM が出した `rejected_loss_count` / `preserved_win_count` は **正の整数**、親 A の trade 数を超えない範囲で予想する。
+- 出力する indicator ID は registry / Python 側で評価可能なものに限定する。
+- 親 A の **direction**（long/short）を反転させる提案はしない。
+- 親 A の `regimeTarget` / `symbol` / `timeframe` を変える提案はしない。
+- 親 A の `stopLoss` / `takeProfit` 数値や構造を変える提案はしない。
+- rationale は「どの負けパターンに対して、なぜその indicator ID が効きそうか」に限定する。
+- 合否や数値メトリクスの判定は書かない。採否は決定論ゲートが担う。
 
 ## 禁止
 
 - 自然言語のみの解答
 - JSON 配列で複数個体を返すこと
-- スキーマ外フィールドの追加（child_dsl 内）
+- 通常の Hybrid 経路で `child_dsl` を返すこと
+- `candidateIndicatorIds` / `rationale` 以外のフィールドを返すこと
 - 上記「対応 lens / feature」表に **存在しない** lens / feature の出力
 - 数学的に常に true / false になる条件
 - 未来情報を使う条件
 - 親 A の direction を反転させること
-- 親 A の主時間足より **下位足** を `Condition.timeframe` に指定すること
-- 未知 timeframe (`'2h'` など canonical 外) を `Condition.timeframe` に指定すること
-- 親 A の entry 構造を **大きく改変** すること（= filter 追加に徹する、setup 自体を作り直さない）
+- field / period / threshold を直接指定すること
+- 親 A の entry 構造を作り直すこと
 - 親 A の SL/TP 数値を変更すること
-- LLM が新しい parentIds 配列を出力すること（= エージェントが付与）
