@@ -411,11 +411,11 @@ test.describe("Side-A UX最小導線（モック認証）", () => {
     await expect(page.getByRole("link", { name: /ストラテジーを確認/ })).toBeVisible();
     await expect(page.getByText("EURUSD").first()).toBeVisible();
 
-    const protectedCalls = apiCalls.filter((call) => call.pathname.startsWith("/api/"));
-    expect(protectedCalls.length).toBeGreaterThan(0);
-    expect(protectedCalls.every((call) => call.authorization === `Bearer ${sideAAuthToken}`)).toBe(true);
-    expect(protectedCalls.some((call) => call.pathname === "/api/trades/notes")).toBe(true);
-    expect(protectedCalls.some((call) => call.pathname === "/api/notifications/unread-count")).toBe(true);
+    await expect.poll(() => apiCalls.some((call) => call.pathname === "/api/trades/notes")).toBe(true);
+    await expect.poll(() => apiCalls.some((call) => call.pathname === "/api/notifications/unread-count")).toBe(true);
+
+    expect(apiCalls.length).toBeGreaterThan(0);
+    expect(apiCalls.every((call) => call.authorization === `Bearer ${sideAAuthToken}`)).toBe(true);
   });
 
   test("主要Side-Aページが実DBなしのAPI mockで表示できる", async ({ page }) => {
