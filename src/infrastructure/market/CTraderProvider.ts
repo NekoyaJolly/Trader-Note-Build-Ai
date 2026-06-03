@@ -105,6 +105,18 @@ const DEFAULT_RECONNECT_CONFIG: ReconnectConfig = {
   maxDelay: 60000,
 };
 
+/**
+ * cTrader Open API の Protobuf WebSocket は 5035 番ポートを使う。
+ * wsUrl にポートが含まれていない場合、既定の 443 ではなく設定済みポートを明示する。
+ */
+export function resolveCTraderWebSocketUrl(wsUrl: string, wsPort: number): string {
+  const url = new URL(wsUrl);
+  if (!url.port) {
+    url.port = String(wsPort);
+  }
+  return url.toString();
+}
+
 // ========================================
 // CTraderProvider クラス
 // ========================================
@@ -210,7 +222,7 @@ export class CTraderProvider extends BaseMarketDataProvider {
     try {
       const accessToken = await this.authService.getValidAccessToken(this.accountId);
       const WebSocket = (await import('ws')).default;
-      this.ws = new WebSocket(config.ctrader.wsUrl);
+      this.ws = new WebSocket(resolveCTraderWebSocketUrl(config.ctrader.wsUrl, config.ctrader.wsPort));
 
       return new Promise((resolve, reject) => {
         if (!this.ws) {
