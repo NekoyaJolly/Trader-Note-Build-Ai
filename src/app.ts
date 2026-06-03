@@ -20,6 +20,8 @@ import patternAnalysisRoutes from './backend/api/patternAnalysisRoutes';
 import watchlistRoutes from './backend/api/watchlistRoutes';
 import pushRoutes from './backend/api/pushRoutes';
 import ohlcvRoutes from './backend/api/ohlcvRoutes';
+import chartRoutes from './backend/api/chartRoutes';
+import brokerRoutes from './backend/api/brokerRoutes';
 import profileRoutes from './backend/api/profileRoutes';
 import { sideBRoutes } from './side-b/routes';
 import cronRoutes from './backend/api/cronRoutes';
@@ -317,6 +319,14 @@ class App {
 
       console.log('[App] /api/ohlcv ルートを登録中...');
       this.app.use('/api/ohlcv', requireAuth, ohlcvRoutes);
+
+      // チャート OHLCV (EODHD 主体、cTrader 非依存)
+      console.log('[App] /api/chart ルートを登録中...');
+      this.app.use('/api/chart', requireAuth, chartRoutes);
+
+      // ブローカー overlay (cTrader bid/ask・スプレッド)
+      console.log('[App] /api/broker ルートを登録中...');
+      this.app.use('/api/broker', requireAuth, brokerRoutes);
 
       // Side-B: AI トレードプラン生成
       console.log('[App] /api/side-b ルートを登録中...');
