@@ -177,4 +177,20 @@ describe('API 認証境界', () => {
     expect(wrongRes.statusCode).toBe(403);
     expect(validNext).toHaveBeenCalled();
   });
+
+  it('mail webhook token 設定漏れは 500 で検出する', () => {
+    delete process.env.MAIL_SECURITY_TOKEN;
+
+    const res = createMockResponse();
+    const next = jest.fn();
+
+    requireMailSecurityToken(createRequest(), res, next);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual({
+      success: false,
+      error: 'MAIL_SECURITY_TOKEN が設定されていません',
+    });
+    expect(next).not.toHaveBeenCalled();
+  });
 });
