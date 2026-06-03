@@ -13,9 +13,9 @@ env:
   GCP_SERVICE_NAME: trader-note
   GCP_IMAGE: gcr.io/ai-note-486020/trader-note:latest
   GCP_ANALYSIS_SERVICE_NAME: trader-note-analysis-engine
-  GCP_ANALYSIS_IMAGE: gcr.io/ai-note-486020/trader-note-analysis-engine:latest
-  PRODUCTION_API_URL: https://trader-note-571157808050.asia-northeast1.run.app
-  PRODUCTION_UI_URL: https://trader-note-build-ai.vercel.app
+  GCP_ANALYSIS_IMAGE: gcr.io/ai-note-486020/trader-note-analysis-engine:latest
+  PRODUCTION_API_URL: https://trader-note-571157808050.asia-northeast1.run.app
+  PRODUCTION_UI_URL: https://trader-note-build-ai.vercel.app
 
 jobs:
   # ── 0. analysis-engine（Python）を Cloud Run にデプロイ ──
@@ -122,7 +122,7 @@ jobs:
           docker push ${{ env.GCP_IMAGE }}
 
       - name: Cloud Run へデプロイ
-        # GCP Secret Manager の全 15 件 + plain env を Cloud Run に反映。
+        # GCP Secret Manager の全 16 件 + plain env を Cloud Run に反映。
         # サービス再作成時の災害復旧でこの workflow 1 回で本番設定が完全再現できるようにする。
         #
         # 設計判断:
@@ -150,7 +150,7 @@ jobs:
             --quiet \
             --max-instances=5 \
             --set-env-vars NODE_ENV=production,ANALYSIS_ENGINE_URL=${{ needs.deploy-analysis-engine.outputs.analysis_url }},PYTHON_VALIDATION_MODE=http,EVOLUTION_GENERATIONS=2,AUTO_EVOLUTION=${{ vars.AUTO_EVOLUTION || 'false' }},SIDE_B_SCHEDULER_ENABLED=true,DISCOVERY_COMPOSE_ENABLED=true,MARKET_API_URL=https://api.twelvedata.com,TWELVE_DATA_API_URL=https://api.twelvedata.com,EODHD_BASE_URL=https://eodhd.com/api \
-            --set-secrets AI_API_KEY=AI_API_KEY:latest,AI_MODEL=AI_MODEL:latest,AI_BASE_URL=AI_BASE_URL:latest,AI_MODEL_OVERRIDE_ALL=AI_MODEL_OVERRIDE_ALL:latest,CRON_SECRET=CRON_SECRET:latest,MAIL_SECURITY_TOKEN=MAIL_SECURITY_TOKEN:latest,DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,CTRADER_CLIENT_ID=CTRADER_CLIENT_ID:latest,CTRADER_CLIENT_SECRET=CTRADER_CLIENT_SECRET:latest,CTRADER_REDIRECT_URI=CTRADER_REDIRECT_URI:latest,VAPID_PUBLIC_KEY=VAPID_PUBLIC_KEY:latest,VAPID_PRIVATE_KEY=VAPID_PRIVATE_KEY:latest,TWELVE_DATA_API_KEY=TWELVE_DATA_API_KEY:latest,EODHD_API_KEY=EODHD_API_KEY:latest
+            --set-secrets AI_API_KEY=AI_API_KEY:latest,AI_MODEL=AI_MODEL:latest,AI_BASE_URL=AI_BASE_URL:latest,AI_MODEL_OVERRIDE_ALL=AI_MODEL_OVERRIDE_ALL:latest,CRON_SECRET=CRON_SECRET:latest,MAIL_SECURITY_TOKEN=MAIL_SECURITY_TOKEN:latest,DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,CTRADER_CLIENT_ID=CTRADER_CLIENT_ID:latest,CTRADER_CLIENT_SECRET=CTRADER_CLIENT_SECRET:latest,CTRADER_REDIRECT_URI=CTRADER_REDIRECT_URI:latest,VAPID_PUBLIC_KEY=VAPID_PUBLIC_KEY:latest,VAPID_PRIVATE_KEY=VAPID_PRIVATE_KEY:latest,TWELVE_DATA_API_KEY=TWELVE_DATA_API_KEY:latest,EODHD_API_KEY=EODHD_API_KEY:latest
 
       - name: デプロイ後の動作確認（最大5分待機）
         run: |
@@ -219,29 +219,29 @@ jobs:
           echo "✅ マイグレーション完了"
 
   # ── 4. 本番 E2E テスト ──
-  e2e-production:
-    name: Production E2E Tests
-    runs-on: ubuntu-latest
-    needs: [deploy-gcp, run-migration]
-    steps:
-      - name: リポジトリをチェックアウト
-        uses: actions/checkout@v4
-
-      - name: Node.js セットアップ
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: 依存関係をインストール
-        run: npm ci
-
-      - name: Playwright をインストール
-        run: npx playwright install --with-deps chromium
-
-      - name: API ヘルスチェック
-        run: |
-          echo "⏳ API の到達確認中..."
+  e2e-production:
+    name: Production E2E Tests
+    runs-on: ubuntu-latest
+    needs: [deploy-gcp, run-migration]
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Node.js セットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: 依存関係をインストール
+        run: npm ci
+
+      - name: Playwright をインストール
+        run: npx playwright install --with-deps chromium
+
+      - name: API ヘルスチェック
+        run: |
+          echo "⏳ API の到達確認中..."
           for i in {1..6}; do
             if curl -s -f ${{ env.PRODUCTION_API_URL }}/health > /dev/null 2>&1; then
               echo "✅ API 到達確認: OK"
@@ -252,31 +252,31 @@ jobs:
           done
           echo "⚠️ API に到達できませんが、E2E テストを続行します"
 
-      - name: 本番公開面 Playwright smoke 実行
-        run: npm run test:e2e:production:public
-        env:
-          PRODUCTION_API_URL: ${{ env.PRODUCTION_API_URL }}
-          PRODUCTION_UI_URL: ${{ env.PRODUCTION_UI_URL }}
+      - name: 本番公開面 Playwright smoke 実行
+        run: npm run test:e2e:production:public
+        env:
+          PRODUCTION_API_URL: ${{ env.PRODUCTION_API_URL }}
+          PRODUCTION_UI_URL: ${{ env.PRODUCTION_UI_URL }}
 
-      - name: Playwright レポートをアップロード
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-production-report
-          path: playwright-report-production/
-          retention-days: 14
-
+      - name: Playwright レポートをアップロード
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-production-report
+          path: playwright-report-production/
+          retention-days: 14
+
       - name: デプロイ完了サマリー
         if: success()
         run: |
           echo "================================"
           echo "🚀 本番デプロイ完了"
           echo "================================"
-          echo ""
-          echo "  ✅ API: ${{ env.PRODUCTION_API_URL }} (GCP Cloud Run)"
-          echo "  ✅ UI:  ${{ env.PRODUCTION_UI_URL }} (Vercel)"
-          echo "  ✅ DB:  Supabase"
-          echo "  ✅ 本番公開面 smoke: 合格"
+          echo ""
+          echo "  ✅ API: ${{ env.PRODUCTION_API_URL }} (GCP Cloud Run)"
+          echo "  ✅ UI:  ${{ env.PRODUCTION_UI_URL }} (Vercel)"
+          echo "  ✅ DB:  Supabase"
+          echo "  ✅ 本番公開面 smoke: 合格"
 
       - name: E2E テスト失敗時の通知
         if: failure()
