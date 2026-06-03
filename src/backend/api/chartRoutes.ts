@@ -19,36 +19,20 @@
 
 import type { Request, Response } from 'express';
 import { Router } from 'express';
-import { z } from 'zod';
 import { chartDataService } from '../../services/chartDataService';
 import { ChartDataError } from '../../infrastructure/market/chart-data.types';
+import { validateQuery, getValidatedQuery } from '../../middleware/validateRequest';
+import { ChartCandlesQuerySchema, type ChartCandlesQuery } from '../../schemas/api/chart';
 
 const router = Router();
 
-/** クエリパラメータの境界バリデーション (Zod で具体型に narrow) */
-const CandlesQuerySchema = z.object({
-  symbol: z.string().min(1, 'symbol は必須です'),
-  timeframe: z.string().min(1, 'timeframe は必須です'),
-  from: z.string().datetime().optional(),
-  to: z.string().datetime().optional(),
-  limit: z.coerce.number().int().positive().max(5000).optional(),
-});
-
 /**
  * GET /api/chart/candles?symbol=&timeframe=&from=&to=&limit=
+ *
+ * クエリ検証は validateQuery ミドルウェアに委譲 (不正時は 400 + details を返す)。
  */
-router.get('/candles', async (req: Request, res: Response) => {
-  const parsed = CandlesQuerySchema.safeParse(req.query);
-  if (!parsed.success) {
-    res.status(400).json({
-      success: false,
-      error: '必須パラメータが不足/不正です: symbol, timeframe',
-      detail: parsed.error.format(),
-    });
-    return;
-  }
-
-  const { symbol, timeframe, from, to, limit } = parsed.data;
+router.get('/candles', validateQuery(ChartCandlesQuerySchema), async (_req: Request, res: Response) => {
+  const { symbol, timeframe, from, to, limit } = getValidatedQuery<ChartCandlesQuery>(res);
 
   try {
     const result = await chartDataService.getCandles({

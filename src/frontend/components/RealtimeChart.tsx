@@ -94,6 +94,43 @@ interface BrokerQuoteResponse {
 	warning?: string;
 }
 
+// /api/chart/candles レスポンス (ChartCandlesResponse) の最小ランタイム検証用。
+// frontend に Zod 依存が無いため、外部レスポンスは型ガードで narrow し盲目的な as を避ける。
+interface ChartCandlePayload {
+	time: number;
+	open: number;
+	high: number;
+	low: number;
+	close: number;
+	volume: number | null;
+}
+interface ChartCandlesPayload {
+	candles: ChartCandlePayload[];
+	warning?: string;
+}
+
+function isChartCandlesPayload(value: unknown): value is ChartCandlesPayload {
+	if (typeof value !== "object" || value === null) return false;
+	const candles = (value as { candles?: unknown }).candles;
+	if (!Array.isArray(candles)) return false;
+	return candles.every(
+		(c) =>
+			typeof c === "object" &&
+			c !== null &&
+			typeof (c as { time?: unknown }).time === "number" &&
+			typeof (c as { open?: unknown }).open === "number" &&
+			typeof (c as { high?: unknown }).high === "number" &&
+			typeof (c as { low?: unknown }).low === "number" &&
+			typeof (c as { close?: unknown }).close === "number"
+	);
+}
+
+function isBrokerQuoteResponse(value: unknown): value is BrokerQuoteResponse {
+	if (typeof value !== "object" || value === null) return false;
+	const status = (value as { status?: unknown }).status;
+	return status === "connected" || status === "degraded" || status === "disconnected";
+}
+
 interface PricePanelProps {
 	bar: PendingBar | OHLCVBar | null;
 	dailyHigh: number | null;
@@ -246,6 +283,8 @@ export function RealtimeChart({
 	const [fallbackData, setFallbackData] = useState<OHLCVDataPoint[]>([]);
 	const [fallbackLoading, setFallbackLoading] = useState(false);
 	const [fallbackError, setFallbackError] = useState<string | null>(null);
+	// データ無し/遅延などの「警告」はエラーと分けて扱う (再試行を促さない)
+	const [fallbackWarning, setFallbackWarning] = useState<string | null>(null);
 	const fallbackTimerRef = useRef<NodeJS.Timeout | null>(null);
 
 	// ブローカー (cTrader) overlay 用ステート。ローソ足とは別レイヤーで bid/ask を扱う。
@@ -321,21 +360,22 @@ export function RealtimeChart({
 		const apiTimeframe = TIMEFRAME_TO_API[timeframe] || '1m';
 		setFallbackLoading(true);
 		setFallbackError(null);
+		setFallbackWarning(null);
 		try {
 			const res = await apiFetch(
 				`${apiBase}/api/chart/candles?symbol=${encodeURIComponent(symbol)}&timeframe=${apiTimeframe}&limit=${dataCount}`
 			);
 			if (!res.ok) {
 				// 404=symbol未対応 / 503=外部プロバイダー障害 をサーバーのメッセージで区別する
-				const errBody = await res.json().catch(() => ({} as { error?: string }));
-				throw new Error(errBody.error || `APIエラー: ${res.status}`);
+				const errBody = await res.json().catch(() => null) as { error?: string } | null;
+				throw new Error(errBody?.error || `APIエラー: ${res.status}`);
 			}
-			// ChartCandlesResponse: { candles: [{ time(秒), open, high, low, close, volume|null }], meta, warning }
-			const result = await res.json() as {
-				candles?: { time: number; open: number; high: number; low: number; close: number; volume: number | null }[];
-				warning?: string;
-			};
-			const candles = result.candles ?? [];
+			// ChartCandlesResponse を型ガードで検証してから利用する (盲目的な as を避ける)
+			const payload: unknown = await res.json();
+			if (!isChartCandlesPayload(payload)) {
+				throw new Error('チャートデータの形式が不正です');
+			}
+			const candles = payload.candles;
 			const ohlcv: OHLCVDataPoint[] = candles.map((c) => ({
 				timestamp: c.time * 1000, // Unix 秒 → ms (lightweight-charts 用)
 				open: c.open,
@@ -345,9 +385,10 @@ export function RealtimeChart({
 				volume: c.volume ?? 0,
 			}));
 			setFallbackData(ohlcv);
-			// データが空でも 200 で返る (symbol 有効・データ無し)。warning をそのまま表示する。
-			if (candles.length === 0 && result.warning) {
-				setFallbackError(result.warning);
+			// データが空でも 200 で返る (symbol 有効・データ無し)。これはエラーではなく「警告」。
+			// 再試行を促す赤表示にせず、注意表示として扱う。
+			if (candles.length === 0 && payload.warning) {
+				setFallbackWarning(payload.warning);
 			}
 		} catch (err) {
 			setFallbackError(err instanceof Error ? err.message : 'チャートデータ取得失敗');
@@ -403,15 +444,16 @@ export function RealtimeChart({
 			const res = await apiFetch(
 				`${apiBase}/api/broker/quote?symbol=${encodeURIComponent(symbol)}`
 			);
-			// 503 (disconnected) でも body は BrokerQuoteResponse 形式で返る
-			const result = await res.json().catch(() => null) as BrokerQuoteResponse | null;
-			if (!result) {
+			// 503 (disconnected) でも body は BrokerQuoteResponse 形式で返るが、
+			// 401 等の想定外レスポンスは形が異なるため、型ガードで検証してから採用する。
+			const payload: unknown = await res.json().catch(() => null);
+			if (!isBrokerQuoteResponse(payload)) {
 				setBrokerStatus("disconnected");
 				setBrokerQuote(null);
 				return;
 			}
-			setBrokerStatus(result.status);
-			setBrokerQuote(result.quote);
+			setBrokerStatus(payload.status);
+			setBrokerQuote(payload.quote);
 		} catch {
 			// ネットワークエラー時はブローカー未接続扱い (チャート表示には影響しない)
 			setBrokerStatus("disconnected");
@@ -935,6 +977,13 @@ export function RealtimeChart({
 								<button onClick={fetchFallbackData} className="px-4 py-1.5 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white transition">
 									再試行
 								</button>
+							</>
+						) : fallbackWarning ? (
+							/* データ無し/遅延などの警告。エラーではないので赤表示・再試行は出さない */
+							<>
+								<div className="text-5xl mb-3">🕒</div>
+								<p className="text-sm mb-1 text-blue-300">{fallbackWarning}</p>
+								<p className="text-xs text-gray-500">データが蓄積されると自動で表示されます</p>
 							</>
 						) : (
 							<>

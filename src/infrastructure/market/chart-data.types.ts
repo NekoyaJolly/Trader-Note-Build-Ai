@@ -55,7 +55,8 @@ export interface ChartDataMeta {
   provider: string;
   priceBasis: PriceBasis;
   symbol: string;
-  timeframe: string;
+  /** 未対応の時間足を型レベルで弾くため Timeframe に固定 */
+  timeframe: Timeframe;
   isRealtime: boolean;
   /** 想定遅延 (ミリ秒)。不明な場合は null */
   delayMs: number | null;

@@ -17,29 +17,19 @@
 
 import type { Request, Response } from 'express';
 import { Router } from 'express';
-import { z } from 'zod';
 import { ctraderQuoteProvider } from '../services/ctrader/ctraderQuoteProvider';
+import { validateQuery, getValidatedQuery } from '../../middleware/validateRequest';
+import { BrokerQuoteQuerySchema, type BrokerQuoteQuery } from '../../schemas/api/chart';
 
 const router = Router();
 
-const QuoteQuerySchema = z.object({
-  symbol: z.string().min(1, 'symbol は必須です'),
-});
-
 /**
  * GET /api/broker/quote?symbol=
+ *
+ * クエリ検証は validateQuery ミドルウェアに委譲 (不正時は 400 + details を返す)。
  */
-router.get('/quote', async (req: Request, res: Response) => {
-  const parsed = QuoteQuerySchema.safeParse(req.query);
-  if (!parsed.success) {
-    res.status(400).json({
-      success: false,
-      error: '必須パラメータが不足しています: symbol',
-    });
-    return;
-  }
-
-  const { symbol } = parsed.data;
+router.get('/quote', validateQuery(BrokerQuoteQuerySchema), async (_req: Request, res: Response) => {
+  const { symbol } = getValidatedQuery<BrokerQuoteQuery>(res);
   try {
     const result = await ctraderQuoteProvider.getQuote(symbol);
     // disconnected のみ 503 (発注不可を呼び出し側へ明示)。degraded/connected は 200。
