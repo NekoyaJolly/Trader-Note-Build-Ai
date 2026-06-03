@@ -10,22 +10,15 @@
 const mockCreateMany = jest.fn();
 const mockUpsert = jest.fn();
 
-jest.mock('@prisma/client', () => {
-  class MockPrismaClient {
-    oHLCVCandle = {
+jest.mock('../db/client', () => ({
+  prisma: {
+    oHLCVCandle: {
       createMany: mockCreateMany,
       upsert: mockUpsert,
-    };
-  }
-  return {
-    PrismaClient: MockPrismaClient,
-    Prisma: {
-      Decimal: class {
-        constructor(public v: number) {}
-      },
     },
-  };
-});
+    $disconnect: jest.fn(),
+  },
+}));
 
 import { OHLCVRepository, followsFXMarketCalendar } from '../repositories/ohlcvRepository';
 

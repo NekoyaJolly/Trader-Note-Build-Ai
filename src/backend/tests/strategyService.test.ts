@@ -8,10 +8,32 @@
  */
 
 import type { StrategyStatus, StrategyDirection } from '@prisma/client';
-import { PrismaClient } from '@prisma/client';
 import type {
   CreateStrategyInput,
   UpdateStrategyInput} from '../services/strategyService';
+
+// strategyService は canonical Prisma singleton を読むため、同じ import 先を差し替える。
+const mockPrisma = {
+  strategy: {
+    findMany: jest.fn(),
+    findUnique: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    delete: jest.fn(),
+  },
+  strategyVersion: {
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+  },
+  $transaction: jest.fn(),
+  $disconnect: jest.fn(),
+};
+
+jest.mock('../db/client', () => ({
+  prisma: mockPrisma,
+}));
+
 import {
   listStrategies,
   getStrategy,
@@ -22,38 +44,6 @@ import {
   updateStrategyStatus,
   duplicateStrategy
 } from '../services/strategyService';
-
-// Prismaクライアントをモック
-jest.mock('@prisma/client', () => {
-  const mockPrismaClient = {
-    strategy: {
-      findMany: jest.fn(),
-      findUnique: jest.fn(),
-      create: jest.fn(),
-      update: jest.fn(),
-      delete: jest.fn(),
-    },
-    strategyVersion: {
-      findFirst: jest.fn(),
-      findMany: jest.fn(),
-      create: jest.fn(),
-    },
-    $transaction: jest.fn(),
-  };
-  return {
-    PrismaClient: jest.fn(() => mockPrismaClient),
-    StrategyStatus: {
-      draft: 'draft',
-      active: 'active',
-      archived: 'archived',
-    },
-    StrategyDirection: {
-      buy: 'buy',
-      sell: 'sell',
-      both: 'both',
-    },
-  };
-});
 
 // UUIDをモック
 jest.mock('uuid', () => ({
@@ -119,7 +109,7 @@ describe('strategyService', () => {
   describe('listStrategies', () => {
     it('ストラテジー一覧を取得できること', async () => {
       // モックの設定
-      const prisma = new PrismaClient() as jest.Mocked<PrismaClient>;
+      const prisma = mockPrisma;
       (prisma.strategy.findMany as jest.Mock).mockResolvedValue([
         { ...mockStrategy, _count: { versions: 2 } },
       ]);
@@ -133,7 +123,7 @@ describe('strategyService', () => {
     });
 
     it('ステータスでフィルタリングできること', async () => {
-      const prisma = new PrismaClient() as jest.Mocked<PrismaClient>;
+      const prisma = mockPrisma;
       (prisma.strategy.findMany as jest.Mock).mockResolvedValue([]);
 
       await listStrategies({ status: 'active' });
@@ -146,7 +136,7 @@ describe('strategyService', () => {
     });
 
     it('シンボルでフィルタリングできること', async () => {
-      const prisma = new PrismaClient() as jest.Mocked<PrismaClient>;
+      const prisma = mockPrisma;
       (prisma.strategy.findMany as jest.Mock).mockResolvedValue([]);
 
       await listStrategies({ symbol: 'USDJPY' });
@@ -161,7 +151,7 @@ describe('strategyService', () => {
 
   describe('getStrategy', () => {
     it('ストラテジー詳細を取得できること', async () => {
-      const prisma = new PrismaClient() as jest.Mocked<PrismaClient>;
+      const prisma = mockPrisma;
       (prisma.strategy.findUnique as jest.Mock).mockResolvedValue({
         ...mockStrategy,
         versions: [mockVersion],
@@ -176,7 +166,7 @@ describe('strategyService', () => {
     });
 
     it('存在しないストラテジーの場合はnullを返すこと', async () => {
-      const prisma = new PrismaClient() as jest.Mocked<PrismaClient>;
+      const prisma = mockPrisma;
       (prisma.strategy.findUnique as jest.Mock).mockResolvedValue(null);
 
       const result = await getStrategy('non-existent-id');
@@ -187,7 +177,7 @@ describe('strategyService', () => {
 
   describe('getStrategyVersion', () => {
     it('特定バージョンを取得できること', async () => {
-      const prisma = new PrismaClient() as jest.Mocked<PrismaClient>;
+      const prisma = mockPrisma;
       (prisma.strategyVersion.findFirst as jest.Mock).mockResolvedValue(mockVersion);
 
       const result = await getStrategyVersion(mockStrategy.id, 1);
@@ -198,7 +188,7 @@ describe('strategyService', () => {
     });
 
     it('存在しないバージョンの場合はnullを返すこと', async () => {
-      const prisma = new PrismaClient() as jest.Mocked<PrismaClient>;
+      const prisma = mockPrisma;
       (prisma.strategyVersion.findFirst as jest.Mock).mockResolvedValue(null);
 
       const result = await getStrategyVersion(mockStrategy.id, 999);
@@ -209,7 +199,7 @@ describe('strategyService', () => {
 
   describe('createStrategy', () => {
     it('ストラテジーを作成できること', async () => {
-      const prisma = new PrismaClient() as jest.Mocked<PrismaClient>;
+      const prisma = mockPrisma;
       (prisma.$transaction as jest.Mock).mockImplementation(async (fn) => {
         return fn({
           strategy: {
@@ -259,7 +249,7 @@ describe('strategyService', () => {
 
   describe('updateStrategy', () => {
     it('ストラテジーを更新すると新バージョンが作成されること', async () => {
-      const prisma = new PrismaClient() as jest.Mocked<PrismaClient>;
+      const prisma = mockPrisma;
       const updatedVersion = { ...mockVersion, id: 'version-2', versionNumber: 2 };
 
       (prisma.strategy.findUnique as jest.Mock)
@@ -288,7 +278,7 @@ describe('strategyService', () => {
     });
 
     it('存在しないストラテジーの場合はエラーになること', async () => {
-      const prisma = new PrismaClient() as jest.Mocked<PrismaClient>;
+      const prisma = mockPrisma;
       (prisma.strategy.findUnique as jest.Mock).mockResolvedValue(null);
 
       await expect(
@@ -299,7 +289,7 @@ describe('strategyService', () => {
 
   describe('deleteStrategy', () => {
     it('ストラテジーを削除できること', async () => {
-      const prisma = new PrismaClient() as jest.Mocked<PrismaClient>;
+      const prisma = mockPrisma;
       (prisma.strategy.findUnique as jest.Mock).mockResolvedValue(mockStrategy);
       (prisma.strategy.delete as jest.Mock).mockResolvedValue(mockStrategy);
 
@@ -311,7 +301,7 @@ describe('strategyService', () => {
     });
 
     it('存在しないストラテジーの場合はエラーになること', async () => {
-      const prisma = new PrismaClient() as jest.Mocked<PrismaClient>;
+      const prisma = mockPrisma;
       (prisma.strategy.findUnique as jest.Mock).mockResolvedValue(null);
 
       await expect(deleteStrategy('non-existent-id')).rejects.toThrow(
@@ -322,7 +312,7 @@ describe('strategyService', () => {
 
   describe('updateStrategyStatus', () => {
     it('ステータスを更新できること', async () => {
-      const prisma = new PrismaClient() as jest.Mocked<PrismaClient>;
+      const prisma = mockPrisma;
       const updatedStrategy = { ...mockStrategy, status: 'active' as StrategyStatus };
       
       (prisma.strategy.findUnique as jest.Mock)
@@ -339,7 +329,7 @@ describe('strategyService', () => {
 
   describe('duplicateStrategy', () => {
     it('ストラテジーを複製できること', async () => {
-      const prisma = new PrismaClient() as jest.Mocked<PrismaClient>;
+      const prisma = mockPrisma;
       const duplicatedStrategy = {
         ...mockStrategy,
         id: 'duplicated-id',

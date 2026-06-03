@@ -462,7 +462,7 @@ const dataFetchEmitter = new EventEmitter();
 const dataFetchJobs = new Map<string, DataFetchJob>();
 
 // 定期クリーンアップ（30分以上前のジョブ）
-setInterval(() => {
+const dataFetchCleanupInterval = setInterval(() => {
   const now = Date.now();
   for (const [jobId, job] of dataFetchJobs.entries()) {
     if (now - job.startedAt.getTime() > 30 * 60 * 1000) {
@@ -471,6 +471,8 @@ setInterval(() => {
     }
   }
 }, 5 * 60 * 1000);
+// この掃除用 interval だけで Jest / CLI プロセスが残らないようにする。
+dataFetchCleanupInterval.unref();
 
 /**
  * POST /api/strategies/ohlcv/fetch-and-cache
