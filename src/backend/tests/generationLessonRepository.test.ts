@@ -9,22 +9,18 @@ const mockCreate = jest.fn();
 const mockFindMany = jest.fn();
 const mockDeleteMany = jest.fn();
 
-jest.mock('@prisma/client', () => {
-  class MockPrismaClient {
-    generationLesson = {
+jest.mock('../db/client', () => ({
+  prisma: {
+    generationLesson: {
       create: mockCreate,
       findMany: mockFindMany,
       deleteMany: mockDeleteMany,
-    };
-    $connect = jest.fn();
-    $disconnect = jest.fn();
-  }
-  return {
-    PrismaClient: MockPrismaClient,
-    Prisma: { JsonNull: 'JsonNull', DbNull: 'DbNull' },
-  };
-});
+    },
+    $disconnect: jest.fn(),
+  },
+}));
 
+import { Prisma } from '@prisma/client';
 import { GenerationLessonRepository } from '../repositories/generationLessonRepository';
 
 beforeEach(() => {
@@ -54,7 +50,7 @@ describe('GenerationLessonRepository.create', () => {
     const arg = mockCreate.mock.calls[0][0] as {
       data: { metrics: unknown; confidence: number | null; lesson: string };
     };
-    expect(arg.data.metrics).toBe('DbNull');
+    expect(arg.data.metrics).toBe(Prisma.DbNull);
     expect(arg.data.confidence).toBeNull();
     expect(arg.data.lesson).toContain('time_session filter');
   });

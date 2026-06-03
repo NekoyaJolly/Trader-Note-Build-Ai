@@ -9,21 +9,16 @@ const mockCreate = jest.fn();
 const mockFindFirst = jest.fn();
 const mockDeleteMany = jest.fn();
 
-jest.mock('@prisma/client', () => {
-  class MockPrismaClient {
-    evolutionInstanceCarry = {
+jest.mock('../db/client', () => ({
+  prisma: {
+    evolutionInstanceCarry: {
       create: mockCreate,
       findFirst: mockFindFirst,
       deleteMany: mockDeleteMany,
-    };
-    $connect = jest.fn();
-    $disconnect = jest.fn();
-  }
-  return {
-    PrismaClient: MockPrismaClient,
-    Prisma: { JsonNull: 'JsonNull', DbNull: 'DbNull' },
-  };
-});
+    },
+    $disconnect: jest.fn(),
+  },
+}));
 
 import {
   EvolutionInstanceCarryRepository,

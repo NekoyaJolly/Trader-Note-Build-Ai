@@ -7,25 +7,18 @@
 const mockFindMany = jest.fn();
 const mockCreate = jest.fn();
 
-jest.mock('@prisma/client', () => {
-  class MockPrismaClient {
-    evolutionBacktestRun = {
+jest.mock('../db/client', () => ({
+  prisma: {
+    evolutionBacktestRun: {
       findMany: mockFindMany,
       findUnique: jest.fn(),
       create: mockCreate,
-    };
-    $connect = jest.fn();
-    $disconnect = jest.fn();
-  }
-  return {
-    PrismaClient: MockPrismaClient,
-    // PR #139 Copilot review: Prisma.JsonNull は JSON 値としての null、Prisma.DbNull は SQL NULL。
-    // Phase B-1 では未指定値を SQL NULL にしたいので Prisma.DbNull に統一。テスト mock も両者を
-    // 区別可能な sentinel 文字列で表現して、production 挙動と一致させる。
-    Prisma: { JsonNull: 'JsonNull', DbNull: 'DbNull' },
-  };
-});
+    },
+    $disconnect: jest.fn(),
+  },
+}));
 
+import { Prisma } from '@prisma/client';
 import {
   EvolutionBacktestRunRepository,
   classifyFailureReason,
@@ -194,8 +187,7 @@ describe('EvolutionBacktestRunRepository.create (Phase B-1: trades 永続化)', 
     });
 
     const createArg = mockCreate.mock.calls[0][0] as { data: { trades: unknown } };
-    // Prisma.DbNull は本ファイルの mock で 'DbNull' sentinel に解決される (= SQL NULL 意味論)
-    expect(createArg.data.trades).toBe('DbNull');
+    expect(createArg.data.trades).toBe(Prisma.DbNull);
   });
 
   it('formalBtMetrics が null のときも Prisma.DbNull (= SQL NULL) で永続化される', async () => {
@@ -220,8 +212,8 @@ describe('EvolutionBacktestRunRepository.create (Phase B-1: trades 永続化)', 
     const createArg = mockCreate.mock.calls[0][0] as {
       data: { formalBtMetrics: unknown; trades: unknown };
     };
-    expect(createArg.data.formalBtMetrics).toBe('DbNull');
-    expect(createArg.data.trades).toBe('DbNull');
+    expect(createArg.data.formalBtMetrics).toBe(Prisma.DbNull);
+    expect(createArg.data.trades).toBe(Prisma.DbNull);
   });
 
   it('trades が空配列のときは [] を JSONB に書き込む (= 取引 0 件の正規ケース)', async () => {

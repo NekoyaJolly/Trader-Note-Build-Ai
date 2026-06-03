@@ -6,20 +6,15 @@
 const mockFindMany = jest.fn();
 const mockUpsert = jest.fn();
 
-jest.mock('@prisma/client', () => {
-  class MockPrismaClient {
-    evolutionPopulation = {
+jest.mock('../db/client', () => ({
+  prisma: {
+    evolutionPopulation: {
       findMany: mockFindMany,
       upsert: mockUpsert,
-    };
-    $connect = jest.fn();
-    $disconnect = jest.fn();
-  }
-  return {
-    PrismaClient: MockPrismaClient,
-    Prisma: { JsonNull: 'JsonNull', DbNull: 'DbNull' },
-  };
-});
+    },
+    $disconnect: jest.fn(),
+  },
+}));
 
 import { EvolutionPopulationRepository } from '../repositories/evolutionPopulationRepository';
 import type { StrategyDSL } from '../../side-b/strategy_dsl/schema';
