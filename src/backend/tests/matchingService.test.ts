@@ -211,7 +211,7 @@ describe('MatchingService', () => {
 
       const pipeline = new MatchingService({
         inAppNotificationSender: { sendInApp },
-        notificationTriggerService: { evaluateWithPersistence },
+        notificationTriggerService: { evaluateWithPersistence, invalidateNotificationLog: jest.fn<(id: string) => Promise<void>>() },
         simultaneousHitControl: buildHitControl(),
       });
       jest
@@ -234,17 +234,24 @@ describe('MatchingService', () => {
       expect(result.skipped).toBe(0);
     });
 
-    it('sendInApp が success:false のとき notified に数えず skipped + errors にする', async () => {
+    it('sendInApp が success:false のとき skipped + errors にし、先行ログを無効化して再試行可能にする', async () => {
       const sendInApp = jest
         .fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>()
         .mockResolvedValue({ success: false });
+      // 配信前に書かれた NotificationLog の id を返す = 失敗時に無効化対象になる
       const evaluateWithPersistence = jest
-        .fn<() => Promise<{ shouldNotify: boolean; status: 'sent'; reasonSummary: string }>>()
-        .mockResolvedValue({ shouldNotify: true, status: 'sent', reasonSummary: 'スコア: 0.900' });
+        .fn<() => Promise<{ shouldNotify: boolean; status: 'sent'; reasonSummary: string; notificationLogId: string }>>()
+        .mockResolvedValue({
+          shouldNotify: true,
+          status: 'sent',
+          reasonSummary: 'スコア: 0.900',
+          notificationLogId: 'log_1',
+        });
+      const invalidateNotificationLog = jest.fn<(id: string) => Promise<void>>().mockResolvedValue();
 
       const pipeline = new MatchingService({
         inAppNotificationSender: { sendInApp },
-        notificationTriggerService: { evaluateWithPersistence },
+        notificationTriggerService: { evaluateWithPersistence, invalidateNotificationLog },
         simultaneousHitControl: buildHitControl(),
       });
       jest
@@ -254,6 +261,34 @@ describe('MatchingService', () => {
       const result = await pipeline.runMatchingPipeline();
 
       expect(sendInApp).toHaveBeenCalledTimes(1);
+      // 先行ログを無効化して次回再試行できるようにする
+      expect(invalidateNotificationLog).toHaveBeenCalledWith('log_1');
+      expect(result.notified).toBe(0);
+      expect(result.skipped).toBe(1);
+      expect(result.errors.length).toBeGreaterThan(0);
+    });
+
+    it('marketSnapshotId 欠落時は sendInApp を呼ばず skip + errors にする', async () => {
+      const sendInApp = jest
+        .fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>()
+        .mockResolvedValue({ success: true, id: 'notif_1' });
+      const evaluateWithPersistence = jest
+        .fn<() => Promise<{ shouldNotify: boolean; status: 'sent'; reasonSummary: string }>>()
+        .mockResolvedValue({ shouldNotify: true, status: 'sent', reasonSummary: 'スコア: 0.900' });
+
+      const pipeline = new MatchingService({
+        inAppNotificationSender: { sendInApp },
+        notificationTriggerService: { evaluateWithPersistence, invalidateNotificationLog: jest.fn<(id: string) => Promise<void>>() },
+        simultaneousHitControl: buildHitControl(),
+      });
+      // marketSnapshotId を空にしたマッチ (= 紐づく MatchResult が無いケース)
+      jest
+        .spyOn(pipeline, 'checkForAllMatches')
+        .mockResolvedValue([{ ...createSideBMatch(), marketSnapshotId: '' }]);
+
+      const result = await pipeline.runMatchingPipeline();
+
+      expect(sendInApp).not.toHaveBeenCalled();
       expect(result.notified).toBe(0);
       expect(result.skipped).toBe(1);
       expect(result.errors.length).toBeGreaterThan(0);
@@ -269,7 +304,7 @@ describe('MatchingService', () => {
 
       const pipeline = new MatchingService({
         inAppNotificationSender: { sendInApp },
-        notificationTriggerService: { evaluateWithPersistence },
+        notificationTriggerService: { evaluateWithPersistence, invalidateNotificationLog: jest.fn<(id: string) => Promise<void>>() },
         simultaneousHitControl: buildHitControl(),
       });
       jest
