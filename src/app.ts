@@ -253,6 +253,10 @@ class App {
         standardHeaders: true,
         legacyHeaders: false,
         message: { error: 'Too many auth requests, try again later' },
+        // GET /me は認証状態チェックで全ページ回遊のたびに呼ばれ、abuse 対象ではない。
+        // strict limiter に含めると通常操作で 30/15min を枯渇させ、クライアントが 429 を
+        // 未認証と解釈して強制ログアウトする事故になる (本番で観測)。/me は除外する。
+        skip: (req) => req.method === 'GET' && req.path.endsWith('/me'),
       });
 
       // API routes

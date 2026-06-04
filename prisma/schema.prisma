@@ -31,9 +31,58 @@ model User {
   ctraderTokens     CTraderToken[]     @relation("UserCTraderTokens")
   pushSubscriptions PushSubscription[] @relation("UserPushSubscriptions")
   watchlists        Watchlist[]
+  userSettings      UserSettings?      @relation("UserSettings")
+  indicatorProfiles IndicatorProfile[] @relation("UserIndicatorProfiles")
 
   @@index([primaryAccountId], map: "idx_user_primary_account")
   @@index([active], map: "idx_user_active")
+}
+
+/// ユーザー別アプリ設定（通知・時間足・表示）
+/// 従来は data/user-settings.json にファイル保存していたが、Cloud Run の揮発FSで
+/// 永続しない・インスタンス間不整合・ユーザー別でない問題があったため DB へ移行。
+model UserSettings {
+  id           String   @id @default(uuid()) @db.Uuid
+  /// ユーザー ID（1ユーザー1設定）
+  userId       String   @unique @db.Uuid
+  /// 通知設定 { enabled, scoreThreshold, maxPerDay }
+  notification Json
+  /// 時間足設定 { primary, secondary }
+  timeframes   Json
+  /// 表示設定 { darkMode, compactView, showAiSuggestions }
+  display      Json
+  /// 作成日時
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt    DateTime @updatedAt @db.Timestamptz(6)
+  user         User     @relation("UserSettings", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_user_settings_user")
+}
+
+/// ユーザー別インジケータープロファイル（CSV取込時のインジケーター設定セット）
+/// 従来は data/indicator-profiles.json にファイル保存していたが、Cloud Run の揮発FSで
+/// 永続しない・インスタンス間不整合・ユーザー別でない問題があったため DB へ移行。
+model IndicatorProfile {
+  id          String   @id @default(uuid()) @db.Uuid
+  /// ユーザー ID
+  userId      String   @db.Uuid
+  /// プロファイル名（ユーザー内で一意）
+  name        String
+  /// 説明（任意）
+  description String?
+  /// インジケーター設定の配列 (IndicatorConfig[])
+  indicators  Json
+  /// デフォルトプロファイルフラグ（取込時の初期選択）
+  isDefault   Boolean  @default(false)
+  /// 作成日時
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
+  user        User     @relation("UserIndicatorProfiles", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name], map: "uq_indicator_profile_user_name")
+  @@index([userId], map: "idx_indicator_profile_user")
 }
 
 /// ウォッチリスト（監視対象シンボル）

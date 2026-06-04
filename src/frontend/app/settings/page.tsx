@@ -32,7 +32,7 @@ interface Settings {
   // 時間足設定
   timeframes: {
     primary: Timeframe;
-    secondary: Timeframe[];
+    secondary: Timeframe;
   };
   // 表示設定
   display: {
@@ -153,7 +153,7 @@ export default function SettingsPage() {
     },
     timeframes: {
       primary: "1h",
-      secondary: ["4h", "1d"],
+      secondary: "4h",
     },
     display: {
       darkMode: true,
@@ -184,7 +184,7 @@ export default function SettingsPage() {
           notification: data.notification,
           timeframes: {
             primary: data.timeframes.primary as Timeframe,
-            secondary: data.timeframes.secondary as Timeframe[],
+            secondary: data.timeframes.secondary as Timeframe,
           },
           display: data.display,
         });
@@ -227,7 +227,7 @@ export default function SettingsPage() {
         notification: settings.notification,
         timeframes: {
           primary: settings.timeframes.primary as SettingsTimeframe,
-          secondary: settings.timeframes.secondary as SettingsTimeframe[],
+          secondary: settings.timeframes.secondary as SettingsTimeframe,
         },
         display: settings.display,
       });
@@ -256,7 +256,7 @@ export default function SettingsPage() {
         notification: data.notification,
         timeframes: {
           primary: data.timeframes.primary as Timeframe,
-          secondary: data.timeframes.secondary as Timeframe[],
+          secondary: data.timeframes.secondary as Timeframe,
         },
         display: data.display,
       });
@@ -351,22 +351,16 @@ export default function SettingsPage() {
           
           <div>
             <label className="block text-sm font-medium text-white mb-2">
-              サブ時間足（複数選択可）
+              サブ時間足
             </label>
             <TimeframePicker
               timeframes={["15m", "30m", "1h", "4h", "1d", "1w"]}
-              value={settings.timeframes.secondary[0] || "4h"}
-              onChange={(tf) => {
-                const current = settings.timeframes.secondary;
-                const updated = current.includes(tf)
-                  ? current.filter((t) => t !== tf)
-                  : [...current, tf];
-                updateSettings("timeframes", { secondary: updated });
-              }}
+              value={settings.timeframes.secondary}
+              onChange={(tf) => updateSettings("timeframes", { secondary: tf })}
               variant="pills"
             />
             <p className="text-xs text-gray-500 mt-2">
-              選択中: {settings.timeframes.secondary.join(", ") || "なし"}
+              選択中: {settings.timeframes.secondary || "なし"}
             </p>
           </div>
         </CardContent>

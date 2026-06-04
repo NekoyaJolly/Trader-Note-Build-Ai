@@ -100,23 +100,26 @@ describe('ChartDataService', () => {
         throw new ChartDataError('upstream_unavailable', 'EODHD 障害');
       }),
       localStore: mockLocalStore([chartCandle(4000, 4)]),
+      retry: { delayMs: 0 },
     });
 
     const result = await service.getCandles({ symbol: 'XAUUSD', timeframe: '1m' });
     expect(result.meta.source).toBe('local');
   });
 
-  it('EODHD 障害かつローカルも空なら upstream_unavailable を投げる', async () => {
+  it('EODHD 障害かつローカルも空なら 503 を投げず空 candles + 一過性 warning に縮退する', async () => {
+    // F4: 一過性障害でハード 503 エラー画面化するのを防ぐためソフト縮退する
     const service = new ChartDataService({
       chartProvider: mockProvider(async () => {
         throw new ChartDataError('upstream_unavailable', 'EODHD 障害');
       }),
       localStore: mockLocalStore([]),
+      retry: { delayMs: 0 },
     });
 
-    await expect(service.getCandles({ symbol: 'XAUUSD', timeframe: '1m' })).rejects.toMatchObject({
-      kind: 'upstream_unavailable',
-    });
+    const result = await service.getCandles({ symbol: 'XAUUSD', timeframe: '1m' });
+    expect(result.candles).toHaveLength(0);
+    expect(result.warning).toContain('一時的に取得できません');
   });
 
   it('symbol 有効・データ無しは空 candles + warning で返す (404 にしない)', async () => {

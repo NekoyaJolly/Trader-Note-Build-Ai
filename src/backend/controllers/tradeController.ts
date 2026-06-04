@@ -190,6 +190,7 @@ export class TradeController {
       }
       const { filename, csvText, profileId, userComment } = parsedBody.data;
       // applyMode は将来の bulk / individual 分岐用。現状未使用だがAPI互換のためスキーマでは受け付ける。
+      const userId = req.user!.userId; // プロファイル参照に使用 (requireAuth 配下)
 
       // 入力検証（技術用語を避けたメッセージはフロント側で実施）
       const savePath = path.join(process.cwd(), config.paths.trades, filename);
@@ -233,7 +234,7 @@ export class TradeController {
                 side: t.side,
                 price,
                 quantity,
-              }, profileId, '15m', userComment)
+              }, profileId, userId, '15m', userComment)
             : await this.noteService.generateNoteWithUserIndicators({
                 id: t.id,
                 timestamp: new Date(t.timestamp),

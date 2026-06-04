@@ -328,20 +328,6 @@ export async function fetchHealth(): Promise<{ status: string }> {
 }
 
 /**
- * 日次ステータス
- * GET /api/daily-status
- */
-export async function fetchDailyStatus(): Promise<{ status: string }> {
-  const response = await apiFetch(`${getPublicApiBaseUrl()}/api/daily-status`, { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(
-      `日次ステータス取得に失敗しました: ${response.status} ${response.statusText}`
-    );
-  }
-  return response.json();
-}
-
-/**
  * 注文プリセットの型定義
  */
 export interface OrderPreset {
@@ -584,7 +570,7 @@ export interface UserSettings {
   };
   timeframes: {
     primary: SettingsTimeframe;
-    secondary: SettingsTimeframe[];
+    secondary: SettingsTimeframe;
   };
   display: {
     darkMode: boolean;

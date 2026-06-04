@@ -10,6 +10,7 @@
  */
 
 import { Router } from 'express';
+import type { Request, Response } from 'express';
 import type { UserSettings } from '../../services/userSettingsService';
 import { userSettingsService } from '../../services/userSettingsService';
 import { validateBody } from '../../middleware/validateRequest';
@@ -21,9 +22,9 @@ const router = Router();
  * GET /api/settings
  * 現在のユーザー設定を取得
  */
-router.get('/', async (_req, res) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
-    const settings = await userSettingsService.loadSettings();
+    const settings = await userSettingsService.loadSettings(req.user!.userId);
     res.json({
       success: true,
       data: settings,
@@ -53,11 +54,11 @@ router.get('/', async (_req, res) => {
 router.put(
   '/',
   validateBody(UpdateSettingsRequestSchema),
-  async (req, res) => {
+  async (req: Request, res: Response) => {
     try {
       const updates = req.body as Partial<UserSettings>;
-      
-      const savedSettings = await userSettingsService.saveSettings(updates);
+
+      const savedSettings = await userSettingsService.saveSettings(req.user!.userId, updates);
       res.json({
         success: true,
         data: savedSettings,
@@ -77,9 +78,9 @@ router.put(
  * POST /api/settings/reset
  * 設定をデフォルトにリセット
  */
-router.post('/reset', async (_req, res) => {
+router.post('/reset', async (req: Request, res: Response) => {
   try {
-    const settings = await userSettingsService.resetToDefault();
+    const settings = await userSettingsService.resetToDefault(req.user!.userId);
     res.json({
       success: true,
       data: settings,

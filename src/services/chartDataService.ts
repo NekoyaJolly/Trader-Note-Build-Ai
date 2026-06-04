@@ -52,6 +52,8 @@ const NO_DATA_WARNING =
   'このシンボル・時間足の OHLCV データがまだありません。データ取得後に表示されます。';
 const LOCAL_FALLBACK_WARNING =
   'EODHD から取得できなかったため、ローカルキャッシュのローソク足を表示しています。';
+const TRANSIENT_UNAVAILABLE_WARNING =
+  'チャートデータを一時的に取得できませんでした。しばらくして再試行してください。';
 
 /**
  * OHLCVCandle テーブルを用いた LocalCandleStore 実装。
@@ -99,15 +101,30 @@ export interface ChartDataServiceDeps {
   chartProvider?: ChartDataProvider;
   /** フォールバック用ローカルストア (省略時 OHLCVCandle テーブル) */
   localStore?: LocalCandleStore;
+  /** 一過性 EODHD 障害に対するリトライ設定 (省略時 3 回 / 400ms) */
+  retry?: { maxAttempts?: number; delayMs?: number };
 }
+
+/** 既定リトライ: 初回 + 2 リトライ */
+const DEFAULT_MAX_ATTEMPTS = 3;
+const DEFAULT_RETRY_DELAY_MS = 400;
+
+const sleep = (ms: number): Promise<void> =>
+  ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
 
 export class ChartDataService {
   private readonly chartProvider: ChartDataProvider;
   private readonly localStore: LocalCandleStore;
+  private readonly maxAttempts: number;
+  private readonly retryDelayMs: number;
 
   constructor(deps: ChartDataServiceDeps = {}) {
     this.chartProvider = deps.chartProvider ?? new EODHDChartDataProvider();
     this.localStore = deps.localStore ?? new OhlcvRepositoryCandleStore();
+    // maxAttempts は最低 1 回 (= provider を必ず一度は試行)、delayMs は 0 以上に丸める。
+    // 0/負数が渡ると一度も試行せず「データ無し」を返す等、挙動が崩れるのを防ぐ (Copilot review PR #338)。
+    this.maxAttempts = Math.max(1, Math.floor(deps.retry?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS));
+    this.retryDelayMs = Math.max(0, deps.retry?.delayMs ?? DEFAULT_RETRY_DELAY_MS);
   }
 
   /**
@@ -134,24 +151,36 @@ export class ChartDataService {
       limit,
     };
 
-    // 1. EODHD を主データソースとして試行
+    // 1. EODHD を主データソースとして試行 (一過性障害はリトライ)
+    //    EODHD intraday は瞬間的に upstream_unavailable を返すことがあり (本番で観測)、
+    //    1 回で諦めるとデフォルト 1 分足の初期表示がエラー画面化する。数百 ms 空けて
+    //    数回リトライすることで一過性ブリップを吸収する。
     let upstreamFailed = false;
     let upstreamDetail: string | undefined;
-    try {
-      const result = await this.chartProvider.getCandles(providerParams);
-      // 閉場 (土日) バーを除去してから判定・返却する
-      const tradingCandles = filterTradingHours(result.candles, symbol);
-      if (tradingCandles.length > 0) {
-        return { ...result, candles: tradingCandles };
-      }
-      // EODHD は応答したがデータ 0 件 → ローカルフォールバックを試す
-    } catch (error) {
-      if (error instanceof ChartDataError && error.kind === 'upstream_unavailable') {
-        upstreamFailed = true;
-        upstreamDetail = error.detail;
-      } else {
-        // invalid_symbol / invalid_timeframe など想定済みエラーはそのまま伝播
-        throw error;
+    for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
+      try {
+        const result = await this.chartProvider.getCandles(providerParams);
+        // 閉場 (土日) バーを除去してから判定・返却する
+        const tradingCandles = filterTradingHours(result.candles, symbol);
+        if (tradingCandles.length > 0) {
+          return { ...result, candles: tradingCandles };
+        }
+        // EODHD は応答したがデータ 0 件 → 障害ではないのでリトライせずローカルフォールバックへ
+        upstreamFailed = false;
+        break;
+      } catch (error) {
+        if (error instanceof ChartDataError && error.kind === 'upstream_unavailable') {
+          upstreamFailed = true;
+          upstreamDetail = error.detail;
+          // 最終試行でなければ待機して再試行
+          if (attempt < this.maxAttempts) {
+            await sleep(this.retryDelayMs);
+            continue;
+          }
+        } else {
+          // invalid_symbol / invalid_timeframe など想定済みエラーはそのまま伝播
+          throw error;
+        }
       }
     }
 
@@ -178,16 +207,14 @@ export class ChartDataService {
     }
 
     // 3. ローカルにも無い場合
+    //    リトライ後も EODHD が一過性障害でキャッシュも無いときは、ハードな 503 エラー画面を
+    //    出さず 200 + 空 candles + 一過性 warning へソフト縮退する。フロントは warning を
+    //    表示して再試行できるため、デフォルト初期表示が赤いエラー画面で固まるのを防ぐ。
     if (upstreamFailed) {
-      // 外部障害かつキャッシュ無し → 503 相当
-      throw new ChartDataError(
-        'upstream_unavailable',
-        'チャートデータの外部プロバイダーに接続できず、キャッシュもありません',
-        upstreamDetail,
+      console.warn(
+        `[ChartDataService] EODHD 一過性障害でソフト縮退 (symbol=${symbol}, timeframe=${timeframe}): ${upstreamDetail ?? 'detail なし'}`,
       );
     }
-
-    // symbol は有効だがデータが無いだけ → 200 + 空 candles + warning
     return {
       candles: [],
       meta: {
@@ -200,7 +227,7 @@ export class ChartDataService {
         delayMs: null,
         generatedAt: new Date().toISOString(),
       },
-      warning: NO_DATA_WARNING,
+      warning: upstreamFailed ? TRANSIENT_UNAVAILABLE_WARNING : NO_DATA_WARNING,
     };
   }
 
