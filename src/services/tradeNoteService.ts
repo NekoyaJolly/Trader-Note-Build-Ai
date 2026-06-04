@@ -306,6 +306,7 @@ export class TradeNoteService {
    * 
    * @param trade - トレードデータ
    * @param profileId - プロファイルID（予約IDまたはUUID）
+   * @param userId - 所有ユーザーID（プロファイル参照に必要）
    * @param timeframe - 時間足（デフォルト: 15m）
    * @param userComment - ユーザーコメント（任意）
    * @returns 生成されたトレードノート
@@ -313,6 +314,7 @@ export class TradeNoteService {
   async generateNoteWithProfile(
     trade: Trade,
     profileId: string,
+    userId: string,
     timeframe: string = '15m',
     userComment?: string
   ): Promise<TradeNote> {
@@ -330,7 +332,7 @@ export class TradeNoteService {
 
     // === ユーザー定義プロファイルの場合 ===
     const profileService = getIndicatorProfileService();
-    const profile = profileService.getProfileById(profileId);
+    const profile = await profileService.getProfileById(profileId, userId);
 
     if (!profile) {
       console.warn(`[TradeNoteService] プロファイルが見つかりません: ${profileId}、デフォルト処理を使用`);

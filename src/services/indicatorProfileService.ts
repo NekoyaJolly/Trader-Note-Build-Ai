@@ -1,37 +1,36 @@
 /**
  * インジケータープロファイルサービス
- * 
+ *
  * 目的:
- * - 複数のインジケータープロファイルをファイルベースで永続化
- * - プロファイルの作成・取得・更新・削除を提供
- * - CSVインポート時のプロファイル選択をサポート
- * 
+ * - インジケータープロファイル (CSV取込時のインジケーター設定セット) をユーザー別に永続化
+ * - 作成・取得・更新・削除と、取込時のプロファイル選択 (options/default) を提供
+ *
  * ストレージ:
- * - data/indicator-profiles.json にJSON形式で保存
- * - MVPでは単一ユーザー前提
+ * - DB `IndicatorProfile` テーブル (userId 別、(userId,name) 一意)。
+ * - 旧実装は data/indicator-profiles.json にファイル保存していたが、Cloud Run の揮発FSで
+ *   永続しない・インスタンス間不整合・ユーザー別でない問題があったため DB へ移行した。
+ *
+ * 設計:
+ * - indicators(JSON カラム) は DB 由来の外部入力として Zod で検証してから返す (any/unknown 不使用)。
+ * - 予約ID (__AI_AUTO__ / __NONE__) は DB に持たず、呼び出し側で特別扱いする。
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
 import { z } from 'zod';
-import { v4 as uuidv4 } from 'uuid';
+import { Prisma } from '@prisma/client';
+import { prisma } from '../backend/db/client';
 import type { IndicatorConfig, IndicatorId } from '../models/indicatorConfig';
 import { INDICATOR_METADATA } from '../models/indicatorConfig';
 import type {
   IndicatorProfile,
   CreateProfileRequest,
   UpdateProfileRequest,
-  ProfileStorage,
-  ProfileOption} from '../models/indicatorProfile';
+  ProfileOption,
+} from '../models/indicatorProfile';
 import {
-  createDefaultProfileStorage,
   buildProfileOptions,
   RESERVED_PROFILE_IDS,
   isReservedProfileId,
 } from '../models/indicatorProfile';
-
-// 設定ファイルのパス
-const PROFILES_FILE = path.join(process.cwd(), 'data', 'indicator-profiles.json');
 
 const IndicatorIdSchema = z.string().refine(
   (s): s is IndicatorId => INDICATOR_METADATA.some((m) => m.id === s),
@@ -46,239 +45,173 @@ const IndicatorConfigJsonSchema = z.object({
   enabled: z.boolean(),
 });
 
-const IndicatorProfileJsonSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  description: z.string().optional(),
-  indicators: z.array(IndicatorConfigJsonSchema),
-  isDefault: z.boolean(),
-  createdAt: z.string().min(1),
-  updatedAt: z.string().min(1),
-});
+const IndicatorsJsonSchema = z.array(IndicatorConfigJsonSchema);
 
-const ProfileStorageJsonSchema = z.object({
-  profiles: z.array(IndicatorProfileJsonSchema),
-  version: z.number(),
-  updatedAt: z.string().min(1),
-});
+/** Prisma JSON 行 → IndicatorConfig[] (検証付き)。不正なら空配列にフォールバック。 */
+function parseIndicators(value: Prisma.JsonValue): IndicatorConfig[] {
+  const parsed = IndicatorsJsonSchema.safeParse(value);
+  if (!parsed.success) {
+    console.warn('[IndicatorProfileService] indicators JSON の形式エラー:', parsed.error.format());
+    return [];
+  }
+  return parsed.data.map((ind): IndicatorConfig => ({ ...ind, params: ind.params }));
+}
 
-/** 保存失敗時に元エラーを cause へ載せる（ES2020 未満のためプロパティで付与） */
-function saveErrorWithCause(message: string, error: Error): Error {
-  const e = new Error(message);
-  (e as Error & { cause?: Error }).cause = error;
-  return e;
+/** IndicatorConfig[] → Prisma InputJsonValue (undefined param を落としつつプレーン化、キャスト不使用)。 */
+function toIndicatorsJson(configs: IndicatorConfig[]): Prisma.InputJsonValue {
+  return configs.map((c) => {
+    const params: Record<string, number> = {};
+    for (const [key, val] of Object.entries(c.params)) {
+      if (typeof val === 'number') params[key] = val;
+    }
+    const obj: Prisma.InputJsonObject = {
+      configId: c.configId,
+      indicatorId: c.indicatorId,
+      params,
+      enabled: c.enabled,
+      ...(c.label !== undefined ? { label: c.label } : {}),
+    };
+    return obj;
+  });
+}
+
+/** Prisma 行 → ドメイン型 IndicatorProfile */
+function toDomain(row: {
+  id: string;
+  name: string;
+  description: string | null;
+  indicators: Prisma.JsonValue;
+  isDefault: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}): IndicatorProfile {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description ?? undefined,
+    indicators: parseIndicators(row.indicators),
+    isDefault: row.isDefault,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
 }
 
 /**
- * インジケータープロファイルサービスクラス
+ * インジケータープロファイルサービス (ユーザー別・DB 永続化)
  */
 export class IndicatorProfileService {
-  /**
-   * ストレージを読み込む
-   */
-  loadStorage(): ProfileStorage {
+  /** 全プロファイルを取得 (作成日時降順) */
+  async getAllProfiles(userId: string): Promise<IndicatorProfile[]> {
+    const rows = await prisma.indicatorProfile.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map(toDomain);
+  }
+
+  /** プロファイルを ID で取得 (予約IDは null、他ユーザーのものも null) */
+  async getProfileById(id: string, userId: string): Promise<IndicatorProfile | null> {
+    if (isReservedProfileId(id)) return null;
+    const row = await prisma.indicatorProfile.findFirst({ where: { id, userId } });
+    return row ? toDomain(row) : null;
+  }
+
+  /** デフォルトプロファイルを取得 */
+  async getDefaultProfile(userId: string): Promise<IndicatorProfile | null> {
+    const row = await prisma.indicatorProfile.findFirst({ where: { userId, isDefault: true } });
+    return row ? toDomain(row) : null;
+  }
+
+  /** プロファイルを作成 */
+  async createProfile(userId: string, request: CreateProfileRequest): Promise<IndicatorProfile> {
+    const isDefault = request.isDefault ?? false;
     try {
-      if (!fs.existsSync(PROFILES_FILE)) {
-        return createDefaultProfileStorage();
-      }
-
-      const content = fs.readFileSync(PROFILES_FILE, 'utf-8');
-      const parsed = ProfileStorageJsonSchema.safeParse(JSON.parse(content));
-      if (!parsed.success) {
-        console.error('プロファイル設定の形式エラー:', parsed.error.format());
-        return createDefaultProfileStorage();
-      }
-
-      return {
-        profiles: parsed.data.profiles.map(
-          (p): IndicatorProfile => ({
-            ...p,
-            createdAt: new Date(p.createdAt),
-            updatedAt: new Date(p.updatedAt),
-            indicators: p.indicators.map(
-              (ind): IndicatorConfig => ({
-                ...ind,
-                params: ind.params,
-              }),
-            ),
-          }),
-        ),
-        version: parsed.data.version,
-        updatedAt: new Date(parsed.data.updatedAt),
-      };
+      const row = await prisma.$transaction(async (tx) => {
+        // デフォルト指定時は既存デフォルトを解除
+        if (isDefault) {
+          await tx.indicatorProfile.updateMany({ where: { userId, isDefault: true }, data: { isDefault: false } });
+        }
+        return tx.indicatorProfile.create({
+          data: {
+            userId,
+            name: request.name,
+            description: request.description ?? null,
+            indicators: toIndicatorsJson(request.indicators),
+            isDefault,
+          },
+        });
+      });
+      return toDomain(row);
     } catch (error) {
-      console.error('プロファイル設定の読み込みエラー:', error);
-      return createDefaultProfileStorage();
-    }
-  }
-
-  /**
-   * ストレージを保存
-   */
-  saveStorage(storage: ProfileStorage): void {
-    try {
-      const dataDir = path.dirname(PROFILES_FILE);
-      if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir, { recursive: true });
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new Error(`同じ名前のプロファイルが既に存在します: ${request.name}`, { cause: error });
       }
-
-      storage.updatedAt = new Date();
-      fs.writeFileSync(PROFILES_FILE, JSON.stringify(storage, null, 2), 'utf-8');
-    } catch (error) {
-      console.error('プロファイル設定の保存エラー:', error);
-      const cause = error instanceof Error ? error : new Error(String(error));
-      throw saveErrorWithCause('プロファイル設定の保存に失敗しました', cause);
+      throw error;
     }
   }
 
-  /**
-   * 全プロファイルを取得
-   */
-  getAllProfiles(): IndicatorProfile[] {
-    const storage = this.loadStorage();
-    return storage.profiles;
-  }
-
-  /**
-   * プロファイルをIDで取得
-   */
-  getProfileById(id: string): IndicatorProfile | null {
-    // 予約IDの場合はnullを返す（特殊処理は呼び出し側で）
-    if (isReservedProfileId(id)) {
-      return null;
-    }
-
-    const storage = this.loadStorage();
-    return storage.profiles.find(p => p.id === id) || null;
-  }
-
-  /**
-   * デフォルトプロファイルを取得
-   */
-  getDefaultProfile(): IndicatorProfile | null {
-    const storage = this.loadStorage();
-    return storage.profiles.find(p => p.isDefault) || null;
-  }
-
-  /**
-   * プロファイルを作成
-   */
-  createProfile(request: CreateProfileRequest): IndicatorProfile {
-    const storage = this.loadStorage();
-
-    // 名前の重複チェック
-    if (storage.profiles.some(p => p.name === request.name)) {
-      throw new Error(`同じ名前のプロファイルが既に存在します: ${request.name}`);
-    }
-
-    const newProfile: IndicatorProfile = {
-      id: uuidv4(),
-      name: request.name,
-      description: request.description,
-      indicators: request.indicators,
-      isDefault: request.isDefault ?? false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-
-    // デフォルト設定時は他のデフォルトを解除
-    if (newProfile.isDefault) {
-      storage.profiles.forEach(p => p.isDefault = false);
-    }
-
-    storage.profiles.push(newProfile);
-    this.saveStorage(storage);
-
-    return newProfile;
-  }
-
-  /**
-   * プロファイルを更新
-   */
-  updateProfile(id: string, request: UpdateProfileRequest): IndicatorProfile {
-    // 予約IDは更新不可
+  /** プロファイルを更新 */
+  async updateProfile(id: string, userId: string, request: UpdateProfileRequest): Promise<IndicatorProfile> {
     if (isReservedProfileId(id)) {
       throw new Error('特殊プロファイルは更新できません');
     }
-
-    const storage = this.loadStorage();
-    const index = storage.profiles.findIndex(p => p.id === id);
-
-    if (index === -1) {
+    const existing = await prisma.indicatorProfile.findFirst({ where: { id, userId } });
+    if (!existing) {
       throw new Error(`プロファイルが見つかりません: ${id}`);
     }
 
-    // 名前の重複チェック（自分以外）
-    if (request.name && storage.profiles.some(p => p.id !== id && p.name === request.name)) {
-      throw new Error(`同じ名前のプロファイルが既に存在します: ${request.name}`);
-    }
+    const data: Prisma.IndicatorProfileUpdateInput = {};
+    if (request.name !== undefined) data.name = request.name;
+    if (request.description !== undefined) data.description = request.description;
+    if (request.indicators !== undefined) data.indicators = toIndicatorsJson(request.indicators);
 
-    const profile = storage.profiles[index];
-
-    // 更新
-    if (request.name !== undefined) profile.name = request.name;
-    if (request.description !== undefined) profile.description = request.description;
-    if (request.indicators !== undefined) profile.indicators = request.indicators;
-    if (request.isDefault !== undefined) {
-      // デフォルト設定時は他のデフォルトを解除
-      if (request.isDefault) {
-        storage.profiles.forEach(p => p.isDefault = false);
+    try {
+      const row = await prisma.$transaction(async (tx) => {
+        if (request.isDefault !== undefined) {
+          if (request.isDefault) {
+            await tx.indicatorProfile.updateMany({ where: { userId, isDefault: true }, data: { isDefault: false } });
+          }
+          data.isDefault = request.isDefault;
+        }
+        return tx.indicatorProfile.update({ where: { id }, data });
+      });
+      return toDomain(row);
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new Error(`同じ名前のプロファイルが既に存在します: ${request.name ?? ''}`, { cause: error });
       }
-      profile.isDefault = request.isDefault;
+      throw error;
     }
-    profile.updatedAt = new Date();
-
-    this.saveStorage(storage);
-    return profile;
   }
 
-  /**
-   * プロファイルを削除
-   */
-  deleteProfile(id: string): void {
-    // 予約IDは削除不可
+  /** プロファイルを削除 */
+  async deleteProfile(id: string, userId: string): Promise<void> {
     if (isReservedProfileId(id)) {
       throw new Error('特殊プロファイルは削除できません');
     }
-
-    const storage = this.loadStorage();
-    const index = storage.profiles.findIndex(p => p.id === id);
-
-    if (index === -1) {
+    const result = await prisma.indicatorProfile.deleteMany({ where: { id, userId } });
+    if (result.count === 0) {
       throw new Error(`プロファイルが見つかりません: ${id}`);
     }
-
-    storage.profiles.splice(index, 1);
-    this.saveStorage(storage);
   }
 
-  /**
-   * プロファイル選択オプションを取得（UI用）
-   *
-   * 特殊オプション（AIに任せる、プロファイルなし）を含む
-   */
-  getProfileOptions(): ProfileOption[] {
-    const profiles = this.getAllProfiles();
+  /** プロファイル選択オプション (予約オプション含む) を取得 */
+  async getProfileOptions(userId: string): Promise<ProfileOption[]> {
+    const profiles = await this.getAllProfiles(userId);
     return buildProfileOptions(profiles);
   }
 
-  /**
-   * デフォルトプロファイルIDを取得
-   *
-   * デフォルトが設定されていない場合は AI_AUTO を返す
-   */
-  getDefaultProfileId(): string {
-    const defaultProfile = this.getDefaultProfile();
-    return defaultProfile?.id || RESERVED_PROFILE_IDS.AI_AUTO;
+  /** デフォルトプロファイルID (未設定時は AI_AUTO) を取得 */
+  async getDefaultProfileId(userId: string): Promise<string> {
+    const defaultProfile = await this.getDefaultProfile(userId);
+    return defaultProfile?.id ?? RESERVED_PROFILE_IDS.AI_AUTO;
   }
 }
 
 // シングルトンインスタンス
 let profileServiceInstance: IndicatorProfileService | null = null;
 
-/**
- * プロファイルサービスのシングルトンを取得
- */
+/** プロファイルサービスのシングルトンを取得 */
 export function getIndicatorProfileService(): IndicatorProfileService {
   if (!profileServiceInstance) {
     profileServiceInstance = new IndicatorProfileService();

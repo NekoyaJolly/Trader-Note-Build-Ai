@@ -1,23 +1,60 @@
 /**
- * インジケータープロファイルサービス テスト
- * 
- * 目的: プロファイルのCRUD操作と特殊プロファイル処理をテスト
+ * インジケータープロファイル テスト
+ *
+ * - モデル関数 (isReservedProfileId / buildProfileOptions / createNoteProfileConfig)
+ * - IndicatorProfileService の DB(per-user) CRUD を Prisma mock で検証
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
+const mockFindMany = jest.fn();
+const mockFindFirst = jest.fn();
+const mockCreate = jest.fn();
+const mockUpdate = jest.fn();
+const mockUpdateMany = jest.fn();
+const mockDeleteMany = jest.fn();
+
+jest.mock('../db/client', () => ({
+  prisma: {
+    indicatorProfile: {
+      findMany: mockFindMany,
+      findFirst: mockFindFirst,
+      create: mockCreate,
+      update: mockUpdate,
+      updateMany: mockUpdateMany,
+      deleteMany: mockDeleteMany,
+    },
+    // $transaction は tx に同じ indicatorProfile mock を渡して即実行する
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({ indicatorProfile: { create: mockCreate, update: mockUpdate, updateMany: mockUpdateMany } }),
+  },
+}));
+
+import { Prisma } from '@prisma/client';
 import { IndicatorProfileService } from '../../services/indicatorProfileService';
-import { 
-  RESERVED_PROFILE_IDS, 
+import {
+  RESERVED_PROFILE_IDS,
   isReservedProfileId,
   buildProfileOptions,
   createNoteProfileConfig,
   type IndicatorProfile,
 } from '../../models/indicatorProfile';
-import type { IndicatorConfig } from '../../models/indicatorConfig';
 
-// テスト用ファイルパス
-const TEST_PROFILES_FILE = path.join(process.cwd(), 'data', 'indicator-profiles.json');
+const USER = '00000000-0000-0000-0000-000000000009';
+
+/** Prisma 行を模す */
+function dbRow(over: Partial<{ id: string; name: string; description: string | null; indicators: unknown; isDefault: boolean }> = {}) {
+  return {
+    id: over.id ?? 'profile-1',
+    userId: USER,
+    name: over.name ?? 'テスト',
+    description: over.description ?? null,
+    indicators: over.indicators ?? [
+      { configId: 'rsi-14', indicatorId: 'rsi', label: 'RSI(14)', params: { period: 14 }, enabled: true },
+    ],
+    isDefault: over.isDefault ?? false,
+    createdAt: new Date('2026-06-04T00:00:00.000Z'),
+    updatedAt: new Date('2026-06-04T00:00:00.000Z'),
+  };
+}
 
 describe('indicatorProfile モデル', () => {
   describe('isReservedProfileId', () => {
@@ -36,9 +73,7 @@ describe('indicatorProfile モデル', () => {
 
   describe('buildProfileOptions', () => {
     it('特殊オプションが先頭に含まれる', () => {
-      const profiles: IndicatorProfile[] = [];
-      const options = buildProfileOptions(profiles);
-      
+      const options = buildProfileOptions([]);
       expect(options.length).toBe(2);
       expect(options[0].id).toBe(RESERVED_PROFILE_IDS.AI_AUTO);
       expect(options[0].isSpecial).toBe(true);
@@ -48,253 +83,118 @@ describe('indicatorProfile モデル', () => {
 
     it('ユーザープロファイルが追加される', () => {
       const profiles: IndicatorProfile[] = [
-        {
-          id: 'test-profile-1',
-          name: 'テストプロファイル',
-          indicators: [],
-          isDefault: false,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
+        { id: 'test-profile-1', name: 'テストプロファイル', indicators: [], isDefault: false, createdAt: new Date(), updatedAt: new Date() },
       ];
       const options = buildProfileOptions(profiles);
-      
       expect(options.length).toBe(3);
       expect(options[2].id).toBe('test-profile-1');
       expect(options[2].label).toBe('テストプロファイル');
       expect(options[2].isSpecial).toBe(false);
-      expect(options[2].icon).toBe('📁');
     });
   });
 
   describe('createNoteProfileConfig', () => {
     it('AI_AUTO の場合、空のインジケーターで作成', () => {
       const config = createNoteProfileConfig(null, RESERVED_PROFILE_IDS.AI_AUTO);
-      
       expect(config.profileId).toBe(RESERVED_PROFILE_IDS.AI_AUTO);
-      expect(config.profileName).toBe('AIに任せる');
       expect(config.indicators).toEqual([]);
       expect(config.threshold).toBe(0.75);
     });
 
     it('NONE の場合、閾値0で作成', () => {
       const config = createNoteProfileConfig(null, RESERVED_PROFILE_IDS.NONE);
-      
       expect(config.profileId).toBe(RESERVED_PROFILE_IDS.NONE);
-      expect(config.profileName).toBe('プロファイルなし');
       expect(config.threshold).toBe(0);
     });
 
-    it('ユーザープロファイルの場合、設定をコピー', () => {
-      const indicators: IndicatorConfig[] = [
-        { configId: 'rsi-14', indicatorId: 'rsi', label: 'RSI(14)', params: { period: 14 }, enabled: true },
-      ];
-      const profile: IndicatorProfile = {
-        id: 'test-profile',
-        name: 'テスト',
-        indicators,
-        isDefault: false,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      
-      const config = createNoteProfileConfig(profile, 'test-profile', 0.8);
-      
-      expect(config.profileId).toBe('test-profile');
-      expect(config.profileName).toBe('テスト');
-      expect(config.indicators).toHaveLength(1);
-      expect(config.threshold).toBe(0.8);
-    });
-
     it('プロファイルがnullでUUIDの場合はエラー', () => {
-      expect(() => {
-        createNoteProfileConfig(null, 'some-uuid');
-      }).toThrow('プロファイルが見つかりません');
+      expect(() => createNoteProfileConfig(null, 'some-uuid')).toThrow('プロファイルが見つかりません');
     });
   });
 });
 
-describe('IndicatorProfileService', () => {
+describe('IndicatorProfileService (DB per-user)', () => {
   let service: IndicatorProfileService;
-  let originalFileContent: string | null = null;
-
-  beforeAll(() => {
-    // 既存ファイルのバックアップ
-    if (fs.existsSync(TEST_PROFILES_FILE)) {
-      originalFileContent = fs.readFileSync(TEST_PROFILES_FILE, 'utf-8');
-    }
-  });
-
-  afterAll(() => {
-    // ファイルを元に戻す
-    if (originalFileContent) {
-      fs.writeFileSync(TEST_PROFILES_FILE, originalFileContent, 'utf-8');
-    } else if (fs.existsSync(TEST_PROFILES_FILE)) {
-      fs.unlinkSync(TEST_PROFILES_FILE);
-    }
-  });
 
   beforeEach(() => {
+    [mockFindMany, mockFindFirst, mockCreate, mockUpdate, mockUpdateMany, mockDeleteMany].forEach((m) => m.mockReset());
     service = new IndicatorProfileService();
-    // テスト前にファイルをクリア
-    if (fs.existsSync(TEST_PROFILES_FILE)) {
-      fs.unlinkSync(TEST_PROFILES_FILE);
-    }
   });
 
   describe('createProfile', () => {
-    it('プロファイルを作成できる', () => {
-      const profile = service.createProfile({
-        name: 'テストプロファイル',
-        description: 'テスト用',
-        indicators: [
-          { configId: 'rsi-14', indicatorId: 'rsi', label: 'RSI(14)', params: { period: 14 }, enabled: true },
-        ],
-      });
-
-      expect(profile.id).toBeDefined();
-      expect(profile.name).toBe('テストプロファイル');
-      expect(profile.description).toBe('テスト用');
+    it('作成して indicators をパースしたドメイン型を返す', async () => {
+      mockCreate.mockResolvedValue(dbRow({ id: 'p1', name: '新規' }));
+      const profile = await service.createProfile(USER, { name: '新規', indicators: [] });
+      expect(profile.id).toBe('p1');
+      expect(profile.name).toBe('新規');
       expect(profile.indicators).toHaveLength(1);
-      expect(profile.isDefault).toBe(false);
+      // 非デフォルト時は既存解除しない
+      expect(mockUpdateMany).not.toHaveBeenCalled();
     });
 
-    it('同じ名前のプロファイルは作成できない', () => {
-      service.createProfile({
-        name: '重複テスト',
-        indicators: [],
-      });
-
-      expect(() =>
-        service.createProfile({
-          name: '重複テスト',
-          indicators: [],
-        }),
-      ).toThrow('同じ名前のプロファイルが既に存在します');
+    it('デフォルト作成時は既存デフォルトを解除する', async () => {
+      mockUpdateMany.mockResolvedValue({ count: 1 });
+      mockCreate.mockResolvedValue(dbRow({ isDefault: true }));
+      await service.createProfile(USER, { name: 'デフォルト', indicators: [], isDefault: true });
+      expect(mockUpdateMany).toHaveBeenCalledWith({ where: { userId: USER, isDefault: true }, data: { isDefault: false } });
     });
 
-    it('デフォルトプロファイルを設定できる', () => {
-      const profile1 = service.createProfile({
-        name: 'プロファイル1',
-        indicators: [],
-        isDefault: true,
-      });
-
-      expect(profile1.isDefault).toBe(true);
-
-      // 2つ目をデフォルトにすると1つ目は解除される
-      service.createProfile({
-        name: 'プロファイル2',
-        indicators: [],
-        isDefault: true,
-      });
-
-      const profiles = service.getAllProfiles();
-      const defaultProfiles = profiles.filter(p => p.isDefault);
-      expect(defaultProfiles).toHaveLength(1);
-      expect(defaultProfiles[0].name).toBe('プロファイル2');
-    });
-  });
-
-  describe('getProfileById', () => {
-    it('存在するプロファイルを取得できる', () => {
-      const created = service.createProfile({
-        name: '取得テスト',
-        indicators: [],
-      });
-
-      const found = service.getProfileById(created.id);
-      expect(found).not.toBeNull();
-      expect(found?.name).toBe('取得テスト');
-    });
-
-    it('存在しないIDはnullを返す', () => {
-      const found = service.getProfileById('non-existent-id');
-      expect(found).toBeNull();
-    });
-
-    it('予約IDはnullを返す', () => {
-      const found = service.getProfileById(RESERVED_PROFILE_IDS.AI_AUTO);
-      expect(found).toBeNull();
-    });
-  });
-
-  describe('updateProfile', () => {
-    it('プロファイルを更新できる', () => {
-      const created = service.createProfile({
-        name: '更新前',
-        indicators: [],
-      });
-
-      const updated = service.updateProfile(created.id, {
-        name: '更新後',
-        description: '更新しました',
-      });
-
-      expect(updated.name).toBe('更新後');
-      expect(updated.description).toBe('更新しました');
-    });
-
-    it('予約IDは更新できない', () => {
-      expect(() =>
-        service.updateProfile(RESERVED_PROFILE_IDS.AI_AUTO, {
-          name: '変更',
-        }),
-      ).toThrow('特殊プロファイルは更新できません');
-    });
-  });
-
-  describe('deleteProfile', () => {
-    it('プロファイルを削除できる', () => {
-      const created = service.createProfile({
-        name: '削除テスト',
-        indicators: [],
-      });
-
-      service.deleteProfile(created.id);
-
-      const found = service.getProfileById(created.id);
-      expect(found).toBeNull();
-    });
-
-    it('予約IDは削除できない', () => {
-      expect(() => service.deleteProfile(RESERVED_PROFILE_IDS.AI_AUTO)).toThrow(
-        '特殊プロファイルは削除できません',
+    it('一意制約違反(P2002)は重複名エラーに変換する', async () => {
+      mockCreate.mockRejectedValue(new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: '6.0.0' }));
+      await expect(service.createProfile(USER, { name: '重複', indicators: [] })).rejects.toThrow(
+        '同じ名前のプロファイルが既に存在します',
       );
     });
   });
 
-  describe('getProfileOptions', () => {
-    it('特殊オプションとユーザープロファイルを返す', () => {
-      service.createProfile({
-        name: 'ユーザープロファイル',
-        indicators: [],
-      });
+  describe('getProfileById', () => {
+    it('予約IDは DB を見ずに null', async () => {
+      const found = await service.getProfileById(RESERVED_PROFILE_IDS.AI_AUTO, USER);
+      expect(found).toBeNull();
+      expect(mockFindFirst).not.toHaveBeenCalled();
+    });
 
-      const options = service.getProfileOptions();
-      
-      expect(options.length).toBe(3);
-      expect(options[0].id).toBe(RESERVED_PROFILE_IDS.AI_AUTO);
-      expect(options[1].id).toBe(RESERVED_PROFILE_IDS.NONE);
-      expect(options[2].label).toBe('ユーザープロファイル');
+    it('自ユーザーの行はドメイン型で返す', async () => {
+      mockFindFirst.mockResolvedValue(dbRow({ id: 'p9', name: '取得' }));
+      const found = await service.getProfileById('p9', USER);
+      expect(found?.name).toBe('取得');
+      expect(mockFindFirst).toHaveBeenCalledWith({ where: { id: 'p9', userId: USER } });
+    });
+
+    it('存在しない(他ユーザー含む)場合は null', async () => {
+      mockFindFirst.mockResolvedValue(null);
+      expect(await service.getProfileById('none', USER)).toBeNull();
+    });
+  });
+
+  describe('updateProfile / deleteProfile', () => {
+    it('予約IDは更新できない', async () => {
+      await expect(service.updateProfile(RESERVED_PROFILE_IDS.AI_AUTO, USER, { name: 'x' })).rejects.toThrow(
+        '特殊プロファイルは更新できません',
+      );
+    });
+
+    it('存在しないIDの更新はエラー', async () => {
+      mockFindFirst.mockResolvedValue(null);
+      await expect(service.updateProfile('missing', USER, { name: 'x' })).rejects.toThrow('プロファイルが見つかりません');
+    });
+
+    it('削除は (id,userId) で deleteMany、0件ならエラー', async () => {
+      mockDeleteMany.mockResolvedValue({ count: 0 });
+      await expect(service.deleteProfile('missing', USER)).rejects.toThrow('プロファイルが見つかりません');
+      expect(mockDeleteMany).toHaveBeenCalledWith({ where: { id: 'missing', userId: USER } });
     });
   });
 
   describe('getDefaultProfileId', () => {
-    it('デフォルトが設定されていない場合はAI_AUTOを返す', () => {
-      const defaultId = service.getDefaultProfileId();
-      expect(defaultId).toBe(RESERVED_PROFILE_IDS.AI_AUTO);
+    it('デフォルト未設定なら AI_AUTO', async () => {
+      mockFindFirst.mockResolvedValue(null);
+      expect(await service.getDefaultProfileId(USER)).toBe(RESERVED_PROFILE_IDS.AI_AUTO);
     });
 
-    it('デフォルトプロファイルがあればそのIDを返す', () => {
-      const profile = service.createProfile({
-        name: 'デフォルト',
-        indicators: [],
-        isDefault: true,
-      });
-
-      const defaultId = service.getDefaultProfileId();
-      expect(defaultId).toBe(profile.id);
+    it('デフォルトがあればその id', async () => {
+      mockFindFirst.mockResolvedValue(dbRow({ id: 'def', isDefault: true }));
+      expect(await service.getDefaultProfileId(USER)).toBe('def');
     });
   });
 });

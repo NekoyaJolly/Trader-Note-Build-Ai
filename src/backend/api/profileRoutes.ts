@@ -39,10 +39,10 @@ const IdParamSchema = z.object({
  * GET /api/profiles
  * 全プロファイルを取得
  */
-router.get('/', (_req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
     const profileService = getIndicatorProfileService();
-    const profiles = profileService.getAllProfiles();
+    const profiles = await profileService.getAllProfiles(req.user!.userId);
 
     res.json({
       success: true,
@@ -63,11 +63,12 @@ router.get('/', (_req: Request, res: Response) => {
  * 
  * CSVインポートUIのドロップダウンで使用
  */
-router.get('/options', (_req: Request, res: Response) => {
+router.get('/options', async (req: Request, res: Response) => {
   try {
+    const userId = req.user!.userId;
     const profileService = getIndicatorProfileService();
-    const options = profileService.getProfileOptions();
-    const defaultId = profileService.getDefaultProfileId();
+    const options = await profileService.getProfileOptions(userId);
+    const defaultId = await profileService.getDefaultProfileId(userId);
 
     res.json({
       success: true,
@@ -92,7 +93,7 @@ router.get('/options', (_req: Request, res: Response) => {
 router.get(
   '/:id',
   validateParams(IdParamSchema),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
 
@@ -110,7 +111,7 @@ router.get(
       }
 
       const profileService = getIndicatorProfileService();
-      const profile = profileService.getProfileById(id);
+      const profile = await profileService.getProfileById(id, req.user!.userId);
 
       if (!profile) {
         res.status(404).json({
@@ -149,12 +150,12 @@ router.get(
 router.post(
   '/',
   validateBody(CreateProfileRequestSchema),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     try {
       const request = CreateProfileRequestSchema.parse(req.body);
 
       const profileService = getIndicatorProfileService();
-      const profile = profileService.createProfile(request as CreateProfileRequest);
+      const profile = await profileService.createProfile(req.user!.userId, request as CreateProfileRequest);
 
       res.status(201).json({
         success: true,
@@ -188,13 +189,13 @@ router.put(
   '/:id',
   validateParams(IdParamSchema),
   validateBody(UpdateProfileRequestSchema),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
       const request = UpdateProfileRequestSchema.parse(req.body);
 
       const profileService = getIndicatorProfileService();
-      const profile = profileService.updateProfile(id, request as UpdateProfileRequest);
+      const profile = await profileService.updateProfile(id, req.user!.userId, request as UpdateProfileRequest);
 
       res.json({
         success: true,
@@ -219,12 +220,12 @@ router.put(
 router.delete(
   '/:id',
   validateParams(IdParamSchema),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
 
       const profileService = getIndicatorProfileService();
-      profileService.deleteProfile(id);
+      await profileService.deleteProfile(id, req.user!.userId);
 
       res.json({
         success: true,
@@ -248,12 +249,12 @@ router.delete(
 router.put(
   '/:id/default',
   validateParams(IdParamSchema),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
 
       const profileService = getIndicatorProfileService();
-      const profile = profileService.updateProfile(id, { isDefault: true });
+      const profile = await profileService.updateProfile(id, req.user!.userId, { isDefault: true });
 
       res.json({
         success: true,
