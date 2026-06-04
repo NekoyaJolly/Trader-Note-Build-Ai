@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from 'react';
+import React, { useId, useMemo, useState } from 'react';
 import {
   CreateOrderRequestSchema,
   TradingOrderResponseSchema,
@@ -14,11 +14,15 @@ interface OrderPanelProps {
   onOrderPlaced?: () => void;
   /** チャート上オーバーレイ用のコンパクト表示 (余白・文字を詰め、TP/SL は詳細で折りたたむ) */
   compact?: boolean;
+  /** 無効化されている理由 (市場閉場 / ブローカー未接続 等)。disabled 時に表示する */
+  disabledReason?: string;
 }
 
 type Side = 'BUY' | 'SELL';
 
-export function OrderPanel({ symbol, disabled = false, onOrderPlaced, compact = false }: OrderPanelProps) {
+export function OrderPanel({ symbol, disabled = false, onOrderPlaced, compact = false, disabledReason }: OrderPanelProps) {
+  // 詳細領域の id (同一ページに複数 OrderPanel が並んでも衝突しないよう useId で生成)
+  const detailsId = useId();
   const [volume, setVolume] = useState<number>(0.01);
   const [takeProfit, setTakeProfit] = useState<string>('');
   const [stopLoss, setStopLoss] = useState<string>('');
@@ -133,13 +137,15 @@ export function OrderPanel({ symbol, disabled = false, onOrderPlaced, compact = 
       <button
         type="button"
         onClick={() => setShowDetails((v) => !v)}
+        aria-expanded={showDetails}
+        aria-controls={detailsId}
         className="text-[11px] text-gray-400 hover:text-gray-200 transition"
       >
         詳細 (TP/SL/コメント) {showDetails ? '▴' : '▾'}
       </button>
 
       {showDetails && (
-        <div className="space-y-2">
+        <div id={detailsId} className="space-y-2">
           <div className="grid grid-cols-2 gap-2">
             <label className="text-[11px] text-gray-400">
               TP（任意）
@@ -180,7 +186,7 @@ export function OrderPanel({ symbol, disabled = false, onOrderPlaced, compact = 
       {message && <p className="text-[11px] text-green-400">{message}</p>}
       {error && <p className="text-[11px] text-red-400">{error}</p>}
       {disabled && !message && !error && (
-        <p className="text-[11px] text-gray-500">ブローカー未接続のため発注できません</p>
+        <p className="text-[11px] text-gray-500">{disabledReason ?? '現在は発注できません'}</p>
       )}
     </div>
   );

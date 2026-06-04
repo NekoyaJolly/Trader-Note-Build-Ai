@@ -141,8 +141,17 @@ interface PricePanelProps {
 	brokerQuote: BrokerQuote | null;
 }
 
-// スプレッドの表示整形。FX (小さい値) は 5 桁、貴金属等 (大きい値) は 2 桁で表示する。
-const formatSpread = (spread: number): string => (spread < 0.1 ? spread.toFixed(5) : spread.toFixed(2));
+// 価格の小数桁数を価格帯から推定する (cTrader digits 情報が無いため近似)。
+// 例: EURUSD(1.08)→5桁 / USDJPY(150)→3桁 / XAUUSD(4458)→2桁。
+const priceDigits = (value: number): number => {
+	const v = Math.abs(value);
+	if (v >= 1000) return 2;
+	if (v >= 100) return 3;
+	return 5;
+};
+// 価格を整形する。Bid/Ask/スプレッドは桁数を揃えたいので refForDigits に基準価格を渡す。
+const formatPrice = (value: number, refForDigits?: number): string =>
+	value.toFixed(priceDigits(refForDigits ?? value));
 
 const StatusBadge = ({ status }: { status: ConnectionStatus }) => {
 	const colorClass = {
@@ -174,7 +183,7 @@ const PricePanel = ({ bar, dailyHigh, dailyLow, previousClose, brokerStatus, bro
 	const dayChange = previousClose != null ? bar.close - previousClose : null;
 	const dayChangePercent = previousClose != null && previousClose !== 0 && dayChange != null ? (dayChange / previousClose) * 100 : null;
 	const changeColor = dayChange != null ? (dayChange >= 0 ? "text-green-400" : "text-red-400") : "text-gray-400";
-	const formatNullable = (val: number | null) => (val == null ? "-" : val.toFixed(2));
+	const formatNullable = (val: number | null) => (val == null ? "-" : formatPrice(val, bar.close));
 	const dayChangePercentLabel = dayChangePercent == null ? "--%" : `${dayChangePercent >= 0 ? "+" : ""}${dayChangePercent.toFixed(2)}%`;
 
 	return (
@@ -182,7 +191,7 @@ const PricePanel = ({ bar, dailyHigh, dailyLow, previousClose, brokerStatus, bro
 			<div className="flex flex-nowrap items-center gap-1.5 text-sm overflow-x-auto">
 				<div className="flex-none w-[90px] bg-gray-900/60 rounded px-2 py-1">
 					<div className="text-[10px] text-gray-400 whitespace-nowrap">現在価格</div>
-					<div className="text-base font-mono font-bold text-green-400 leading-tight whitespace-nowrap">{bar.close.toFixed(2)}</div>
+					<div className="text-base font-mono font-bold text-green-400 leading-tight whitespace-nowrap">{formatPrice(bar.close)}</div>
 				</div>
 
 				<div className="flex-none w-[90px] bg-gray-900/60 rounded px-2 py-1">
@@ -193,7 +202,7 @@ const PricePanel = ({ bar, dailyHigh, dailyLow, previousClose, brokerStatus, bro
 				<div className="flex-none w-[90px] bg-gray-900/60 rounded px-2 py-1">
 					<div className="text-[10px] text-gray-400 whitespace-nowrap">前日比（{dayChangePercentLabel}）</div>
 					<div className={`font-mono text-xs ${changeColor} leading-tight whitespace-nowrap`}>
-						{dayChange == null ? "-" : `${dayChange >= 0 ? "+" : ""}${dayChange.toFixed(2)}`}
+						{dayChange == null ? "-" : `${dayChange >= 0 ? "+" : ""}${formatPrice(dayChange, bar.close)}`}
 					</div>
 				</div>
 
@@ -213,15 +222,16 @@ const PricePanel = ({ bar, dailyHigh, dailyLow, previousClose, brokerStatus, bro
 					<>
 						<div className="flex-none w-[100px] bg-gray-900/60 rounded px-2 py-1 border border-emerald-700/30">
 							<div className="text-[10px] text-gray-400 whitespace-nowrap">Bid</div>
-							<div className="font-mono text-xs text-red-400 leading-tight whitespace-nowrap">{brokerQuote.bid.toFixed(2)}</div>
+							<div className="font-mono text-xs text-red-400 leading-tight whitespace-nowrap">{formatPrice(brokerQuote.bid)}</div>
 						</div>
 						<div className="flex-none w-[100px] bg-gray-900/60 rounded px-2 py-1 border border-emerald-700/30">
 							<div className="text-[10px] text-gray-400 whitespace-nowrap">Ask</div>
-							<div className="font-mono text-xs text-green-400 leading-tight whitespace-nowrap">{brokerQuote.ask.toFixed(2)}</div>
+							<div className="font-mono text-xs text-green-400 leading-tight whitespace-nowrap">{formatPrice(brokerQuote.ask, brokerQuote.bid)}</div>
 						</div>
-						<div className="flex-none w-[80px] bg-gray-900/60 rounded px-2 py-1">
-							<div className="text-[10px] text-gray-400 whitespace-nowrap">スプレッド</div>
-							<div className="font-mono text-xs text-yellow-400 leading-tight whitespace-nowrap">{formatSpread(brokerQuote.spread)}</div>
+						<div className="flex-none w-[90px] bg-gray-900/60 rounded px-2 py-1">
+							{/* スプレッドは価格差 (生値)。Bid/Ask と桁数を揃えて単位 (建値通貨の価格差) を明確にする */}
+							<div className="text-[10px] text-gray-400 whitespace-nowrap">スプレッド(価格差)</div>
+							<div className="font-mono text-xs text-yellow-400 leading-tight whitespace-nowrap">{formatPrice(brokerQuote.spread, brokerQuote.bid)}</div>
 						</div>
 					</>
 				) : (
@@ -680,6 +690,14 @@ export function RealtimeChart({
 		[tradingPositions, symbol]
 	);
 
+	// 発注の無効化理由 (市場閉場 / ブローカー未接続)。OrderPanel に渡して誤案内を防ぐ。
+	const orderDisabled = !marketStatus.isOpen || brokerStatus !== "connected";
+	const orderDisabledReason = !marketStatus.isOpen
+		? "市場閉場のため発注できません"
+		: brokerStatus !== "connected"
+			? "ブローカー未接続のため発注できません"
+			: undefined;
+
 	const positionOverlays: PositionOverlay[] = useMemo(
 		() =>
 			symbolPositions.map((position) => ({
@@ -842,7 +860,8 @@ export function RealtimeChart({
 									<OrderPanel
 										symbol={symbol}
 										compact
-										disabled={!marketStatus.isOpen || brokerStatus !== "connected"}
+										disabled={orderDisabled}
+										disabledReason={orderDisabledReason}
 										onOrderPlaced={() => {
 											void refetchTrading();
 										}}
@@ -864,7 +883,8 @@ export function RealtimeChart({
 								<div className="mt-2">
 									<OrderPanel
 										symbol={symbol}
-										disabled={!marketStatus.isOpen || brokerStatus !== "connected"}
+										disabled={orderDisabled}
+										disabledReason={orderDisabledReason}
 										onOrderPlaced={() => {
 											void refetchTrading();
 										}}
