@@ -10,12 +10,14 @@
  * - Service は NoteEvaluator.evaluate() を呼ぶだけ
  * - similarity を直接計算しない
  */
-import { describe, it, expect, beforeEach } from '@jest/globals';
+import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import { MatchingService } from '../../services/matchingService';
 import type { TradeNote, MarketData } from '../../models/types';
-import { 
-  createNoteEvaluatorFromFSNote, 
-  convertMarketDataToSnapshot 
+import type { MatchResultDTO } from '../../domain/matching/MatchResultDTO';
+import { SimultaneousHitControlService } from '../../services/notification/simultaneousHitControlService';
+import {
+  createNoteEvaluatorFromFSNote,
+  convertMarketDataToSnapshot
 } from '../../services/legacyNoteEvaluatorAdapter';
 
 describe('MatchingService', () => {
@@ -162,6 +164,123 @@ describe('MatchingService', () => {
       const history = await service.getMatchHistory({ limit: 10 });
 
       expect(Array.isArray(history)).toBe(true);
+    });
+  });
+
+  /**
+   * 通知パイプラインの配線テスト (確定P0: マッチ通知が UI に届かない問題)
+   *
+   * 旧実装は通知許可後に NotificationLog(監査ログ)を upsert するだけで、
+   * UI 表示用の Notification 行を作る sendInApp が一度も呼ばれていなかった。
+   * このブロックは「shouldNotify=true のとき sendInApp が呼ばれ Notification が作られる」
+   * ことを固定する。
+   */
+  describe('runMatchingPipeline 通知配線', () => {
+    // Side-B 接頭辞付きノートを使うと getNotePriority の DB アクセスを回避できる
+    const createSideBMatch = (): MatchResultDTO => ({
+      id: 'match_test_1',
+      matchScore: 0.9,
+      historicalNoteId: 'sideb:note_abc',
+      marketSnapshot: {},
+      marketSnapshotId: 'snap_123',
+      symbol: 'EURUSD',
+      reasons: ['トレンド一致'],
+      evaluatedAt: new Date(),
+    });
+
+    // control は対象ノートをそのまま通知対象に通すモック
+    const buildHitControl = (): SimultaneousHitControlService => {
+      const hitControl = new SimultaneousHitControlService();
+      jest
+        .spyOn(hitControl, 'control')
+        .mockImplementation(async (hits) => ({
+          toNotify: hits,
+          toSkip: [],
+          groupedBySymbol: new Map(),
+        }));
+      return hitControl;
+    };
+
+    it('shouldNotify=true のとき sendInApp が呼ばれ notified にカウントされる', async () => {
+      const sendInApp = jest
+        .fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>()
+        .mockResolvedValue({ success: true, id: 'notif_1' });
+      const evaluateWithPersistence = jest
+        .fn<() => Promise<{ shouldNotify: boolean; status: 'sent'; reasonSummary: string }>>()
+        .mockResolvedValue({ shouldNotify: true, status: 'sent', reasonSummary: 'スコア: 0.900' });
+
+      const pipeline = new MatchingService({
+        inAppNotificationSender: { sendInApp },
+        notificationTriggerService: { evaluateWithPersistence },
+        simultaneousHitControl: buildHitControl(),
+      });
+      jest
+        .spyOn(pipeline, 'checkForAllMatches')
+        .mockResolvedValue([createSideBMatch()]);
+
+      const result = await pipeline.runMatchingPipeline();
+
+      // sendInApp が正しい payload で 1 回呼ばれている
+      expect(sendInApp).toHaveBeenCalledTimes(1);
+      expect(sendInApp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          noteId: 'sideb:note_abc',
+          marketSnapshotId: 'snap_123',
+          symbol: 'EURUSD',
+          score: 0.9,
+        })
+      );
+      expect(result.notified).toBe(1);
+      expect(result.skipped).toBe(0);
+    });
+
+    it('sendInApp が success:false のとき notified に数えず skipped + errors にする', async () => {
+      const sendInApp = jest
+        .fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>()
+        .mockResolvedValue({ success: false });
+      const evaluateWithPersistence = jest
+        .fn<() => Promise<{ shouldNotify: boolean; status: 'sent'; reasonSummary: string }>>()
+        .mockResolvedValue({ shouldNotify: true, status: 'sent', reasonSummary: 'スコア: 0.900' });
+
+      const pipeline = new MatchingService({
+        inAppNotificationSender: { sendInApp },
+        notificationTriggerService: { evaluateWithPersistence },
+        simultaneousHitControl: buildHitControl(),
+      });
+      jest
+        .spyOn(pipeline, 'checkForAllMatches')
+        .mockResolvedValue([createSideBMatch()]);
+
+      const result = await pipeline.runMatchingPipeline();
+
+      expect(sendInApp).toHaveBeenCalledTimes(1);
+      expect(result.notified).toBe(0);
+      expect(result.skipped).toBe(1);
+      expect(result.errors.length).toBeGreaterThan(0);
+    });
+
+    it('shouldNotify=false のとき sendInApp は呼ばれない', async () => {
+      const sendInApp = jest
+        .fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>()
+        .mockResolvedValue({ success: true, id: 'notif_1' });
+      const evaluateWithPersistence = jest
+        .fn<() => Promise<{ shouldNotify: boolean; status: 'skipped'; skipReason: string }>>()
+        .mockResolvedValue({ shouldNotify: false, status: 'skipped', skipReason: 'スコア不足' });
+
+      const pipeline = new MatchingService({
+        inAppNotificationSender: { sendInApp },
+        notificationTriggerService: { evaluateWithPersistence },
+        simultaneousHitControl: buildHitControl(),
+      });
+      jest
+        .spyOn(pipeline, 'checkForAllMatches')
+        .mockResolvedValue([createSideBMatch()]);
+
+      const result = await pipeline.runMatchingPipeline();
+
+      expect(sendInApp).not.toHaveBeenCalled();
+      expect(result.notified).toBe(0);
+      expect(result.skipped).toBe(1);
     });
   });
 });
