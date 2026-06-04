@@ -25,6 +25,7 @@ import type {
   PositionResponse,
 } from '../../../schemas/api/trading';
 import type { JsonValue } from '../../../utils/jsonValue';
+import { config } from '../../../config';
 
 // ========================================
 // cTrader API レスポンス用Zodスキーマ
@@ -153,7 +154,9 @@ export class CTraderAccountService extends EventEmitter {
       freeMargin: balance,
       marginLevel: 0,
       currency: 'USD',
-      isLive: false,
+      // 接続先 (config.ctrader.wsUrl) が live か demo かで判定する。固定 false だと
+      // live 接続でも UI が常に DEMO 表示になるため (Copilot review PR #339)。
+      isLive: config.ctrader.wsUrl.includes('live'),
       leverage: (trader.leverageInCents ?? 10000) / 100,
     };
 

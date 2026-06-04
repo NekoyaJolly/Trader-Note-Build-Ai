@@ -81,6 +81,14 @@ export const CTraderMessageType = {
 } as const;
 
 /**
+ * cTrader ProtoOAErrorRes ペイロード（クライアント向け短文生成用）
+ */
+const CTraderErrorPayloadSchema = z.object({
+  errorCode: z.string().optional(),
+  description: z.string().optional(),
+});
+
+/**
  * cTrader Spot Event（Tick データ）
  */
 export const CTraderSpotEventSchema = z.object({
@@ -439,7 +447,14 @@ export class CTraderProvider extends BaseMarketDataProvider {
           const pending = this.pendingRequests.get(reqId);
           if (pending) {
             this.pendingRequests.delete(reqId);
-            pending.reject(new Error(`[cTrader] APIエラー: ${JSON.stringify(message.payload)}`));
+            // 全文 JSON を Error.message に入れると上位 API 経由でクライアントへ内部情報が
+            // 露出するため、errorCode/description のみの短い文言にする。詳細は上の console.error
+            // でサーバログに残す (Copilot review PR #339)。
+            const parsed = CTraderErrorPayloadSchema.safeParse(message.payload);
+            const detail = parsed.success
+              ? [parsed.data.errorCode, parsed.data.description].filter(Boolean).join(': ')
+              : '';
+            pending.reject(new Error(detail ? `[cTrader] APIエラー (${detail})` : '[cTrader] APIエラー'));
           }
         }
         return;
