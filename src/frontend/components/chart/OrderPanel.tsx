@@ -91,14 +91,111 @@ export function OrderPanel({ symbol, disabled = false, onOrderPlaced, compact = 
     }
   };
 
+  // TP/SL/コメント (compact・通常で共通。▾ トグルで開閉)
+  const detailsSection = showDetails ? (
+    <div id={detailsId} className="space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        <label className="text-[11px] text-gray-400">
+          TP（任意）
+          <input
+            type="number"
+            step="0.01"
+            value={takeProfit}
+            onChange={(e) => setTakeProfit(e.target.value)}
+            className="mt-0.5 w-full rounded bg-gray-900 border border-gray-700 px-2 py-1 text-sm text-white"
+            placeholder="例: 2350.25"
+          />
+        </label>
+        <label className="text-[11px] text-gray-400">
+          SL（任意）
+          <input
+            type="number"
+            step="0.01"
+            value={stopLoss}
+            onChange={(e) => setStopLoss(e.target.value)}
+            className="mt-0.5 w-full rounded bg-gray-900 border border-gray-700 px-2 py-1 text-sm text-white"
+            placeholder="例: 2320.75"
+          />
+        </label>
+      </div>
+      <label className="block text-[11px] text-gray-400">
+        コメント
+        <input
+          type="text"
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          className="mt-0.5 w-full rounded bg-gray-900 border border-gray-700 px-2 py-1 text-sm text-white"
+          placeholder="任意"
+        />
+      </label>
+    </div>
+  ) : null;
+
+  // 送信結果 / 無効化理由 (compact・通常で共通)
+  const statusMessages = (
+    <>
+      {message && <p className="text-[11px] text-green-400">{message}</p>}
+      {error && <p className="text-[11px] text-red-400">{error}</p>}
+      {disabled && !message && !error && (
+        <p className="text-[11px] text-gray-500">{disabledReason ?? '現在は発注できません'}</p>
+      )}
+    </>
+  );
+
+  // コンパクト (チャート上オーバーレイ): [BUY][ロット][SELL][▾] を 1 行に収める
+  if (compact) {
+    return (
+      <div className="bg-gray-800/90 border border-gray-700 rounded-lg p-1.5 backdrop-blur-sm shadow-lg space-y-1">
+        <div className="flex items-stretch gap-1">
+          <button
+            type="button"
+            disabled={!canSubmit}
+            onClick={() => void submitOrder('BUY')}
+            className="flex-1 rounded bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:text-gray-400 text-white text-xs font-semibold py-1.5"
+          >
+            BUY
+          </button>
+          <input
+            type="number"
+            min={0.01}
+            step={0.01}
+            value={volume}
+            onChange={(e) => setVolume(Number(e.target.value))}
+            aria-label="ロット数"
+            title="ロット数"
+            className="w-14 text-center rounded bg-gray-900 border border-gray-700 px-1 py-1 text-xs text-white"
+          />
+          <button
+            type="button"
+            disabled={!canSubmit}
+            onClick={() => void submitOrder('SELL')}
+            className="flex-1 rounded bg-red-600 hover:bg-red-700 disabled:bg-gray-700 disabled:text-gray-400 text-white text-xs font-semibold py-1.5"
+          >
+            SELL
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowDetails((v) => !v)}
+            aria-expanded={showDetails}
+            aria-controls={detailsId}
+            aria-label="TP/SL/コメントを開閉"
+            title="TP / SL / コメント"
+            className="px-1 text-gray-400 hover:text-gray-200 transition text-xs"
+          >
+            {showDetails ? '▴' : '▾'}
+          </button>
+        </div>
+        {detailsSection}
+        {statusMessages}
+      </div>
+    );
+  }
+
+  // 通常 (モバイルシート等): 余白を取った縦並びレイアウト
   return (
-    <div
-      className={`bg-gray-800/90 border border-gray-700 rounded-lg ${
-        compact ? 'p-2 space-y-2 backdrop-blur-sm shadow-lg' : 'p-3 space-y-3'
-      }`}
-    >
+    <div className="bg-gray-800/90 border border-gray-700 rounded-lg p-3 space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className={`font-semibold text-white ${compact ? 'text-xs' : 'text-sm'}`}>ワンクリック注文</h3>
+        <h3 className="font-semibold text-white text-sm">ワンクリック注文</h3>
         <span className="text-[11px] text-gray-400">{symbol}</span>
       </div>
 
@@ -133,7 +230,6 @@ export function OrderPanel({ symbol, disabled = false, onOrderPlaced, compact = 
         </button>
       </div>
 
-      {/* TP/SL/コメントは普段折りたたみ、必要時のみ展開してパネルを小さく保つ */}
       <button
         type="button"
         onClick={() => setShowDetails((v) => !v)}
@@ -144,50 +240,8 @@ export function OrderPanel({ symbol, disabled = false, onOrderPlaced, compact = 
         詳細 (TP/SL/コメント) {showDetails ? '▴' : '▾'}
       </button>
 
-      {showDetails && (
-        <div id={detailsId} className="space-y-2">
-          <div className="grid grid-cols-2 gap-2">
-            <label className="text-[11px] text-gray-400">
-              TP（任意）
-              <input
-                type="number"
-                step="0.01"
-                value={takeProfit}
-                onChange={(e) => setTakeProfit(e.target.value)}
-                className="mt-0.5 w-full rounded bg-gray-900 border border-gray-700 px-2 py-1 text-sm text-white"
-                placeholder="例: 2350.25"
-              />
-            </label>
-            <label className="text-[11px] text-gray-400">
-              SL（任意）
-              <input
-                type="number"
-                step="0.01"
-                value={stopLoss}
-                onChange={(e) => setStopLoss(e.target.value)}
-                className="mt-0.5 w-full rounded bg-gray-900 border border-gray-700 px-2 py-1 text-sm text-white"
-                placeholder="例: 2320.75"
-              />
-            </label>
-          </div>
-          <label className="block text-[11px] text-gray-400">
-            コメント
-            <input
-              type="text"
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              className="mt-0.5 w-full rounded bg-gray-900 border border-gray-700 px-2 py-1 text-sm text-white"
-              placeholder="任意"
-            />
-          </label>
-        </div>
-      )}
-
-      {message && <p className="text-[11px] text-green-400">{message}</p>}
-      {error && <p className="text-[11px] text-red-400">{error}</p>}
-      {disabled && !message && !error && (
-        <p className="text-[11px] text-gray-500">{disabledReason ?? '現在は発注できません'}</p>
-      )}
+      {detailsSection}
+      {statusMessages}
     </div>
   );
 }

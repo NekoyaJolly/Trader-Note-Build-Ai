@@ -1009,12 +1009,7 @@ export function RealtimeChart({
 					</div>
 				) : (
 					<div className="flex flex-col items-center justify-center py-16 text-gray-400">
-						{fallbackLoading ? (
-							<>
-								<div className="text-5xl mb-3 animate-pulse">📊</div>
-								<p className="text-sm">データを取得中...</p>
-							</>
-						) : fallbackError ? (
+						{fallbackError ? (
 							<>
 								<div className="text-5xl mb-3">⚠️</div>
 								<p className="text-sm mb-2 text-red-400">{fallbackError}</p>
@@ -1022,12 +1017,19 @@ export function RealtimeChart({
 									再試行
 								</button>
 							</>
-						) : fallbackWarning ? (
-							/* データ無し/遅延などの警告。エラーではないので赤表示・再試行は出さない */
+						) : (fallbackLoading || fallbackWarning) ? (
+							/* 「取得中」と「空(自動再取得待ち)」を 1 つの状態にまとめ、
+							   くるくる回るスピナーで動作中であることを明示する。
+							   実態は 30 秒ごとの自動再取得なのでその旨を伝える。 */
 							<>
-								<div className="text-5xl mb-3">🕒</div>
-								<p className="text-sm mb-1 text-blue-300">{fallbackWarning}</p>
-								<p className="text-xs text-gray-500">データが蓄積されると自動で表示されます</p>
+								<div
+									className="w-10 h-10 mb-3 border-4 border-gray-600 border-t-blue-400 rounded-full animate-spin"
+									aria-hidden="true"
+								/>
+								<p className="text-sm text-blue-300">
+									{fallbackLoading ? "データを取得中…" : "データを自動取得中…（まだ受信できていません）"}
+								</p>
+								<p className="text-xs text-gray-500 mt-1">30秒ごとに自動で再取得します</p>
 							</>
 						) : (
 							<>
