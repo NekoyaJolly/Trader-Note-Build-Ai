@@ -312,10 +312,6 @@ async function mockSideAApi(page: Page): Promise<ApiCallRecord[]> {
       return;
     }
 
-    if (method === "GET" && pathname === "/api/daily-status") {
-      await route.fulfill(jsonResponse({ status: "EURUSDの押し目候補を確認" }));
-      return;
-    }
 
     if (method === "GET" && pathname === "/api/strategies") {
       await route.fulfill(jsonResponse({ data: { strategies: [sideAStrategy] } }));
@@ -547,7 +543,8 @@ test.describe("Side-A UX最小導線（モック認証）", () => {
     await expect(page.getByText("下書きノート")).toBeVisible();
     await expect(page.getByText("未読通知")).toBeVisible();
     await expect(page.getByText("AI 要確認")).toBeVisible();
-    await expect(page.getByText("EURUSDの押し目候補を確認")).toBeVisible();
+    // 「今日の注目」KPI カードは daily-status 機能撤去 (F1) 後は静的文言を表示する
+    await expect(page.getByText("今日の注目")).toBeVisible();
     await expect(page.getByRole("link", { name: /トレードノート/ }).first()).toBeVisible();
     await expect(page.getByRole("link", { name: /市場を見る/ })).toBeVisible();
     await expect(page.getByRole("link", { name: /ストラテジーを確認/ })).toBeVisible();
