@@ -8,6 +8,24 @@ import { CTraderAuthService } from '../backend/services/ctrader/ctraderAuthServi
 import { prisma } from '../backend/db/client';
 
 /**
+ * cTrader データ取得が応答しない場合の上限時間 (ms)。
+ * CTraderDataService は接続/認証にタイムアウトを持たず、接続できても応答が無いと
+ * await が永久に返らない。これを超えたら reject させ、呼び出し側のフォールバック
+ * ([] 返却 / 例外) へ高速に抜ける (cTrader 履歴取得失敗時の無限ハング防止)。
+ */
+const CTRADER_FETCH_TIMEOUT_MS = 8000;
+
+/** promise が ms 以内に解決しなければ reject する。 */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`[MarketDataService] ${label} がタイムアウト (${ms}ms)`)), ms),
+    ),
+  ]);
+}
+
+/**
  * 市場データサービス
  *
  * 目的: **cTrader Open API** を用いてブローカーと同一の価格・足区切りでデータを取得する。
@@ -129,11 +147,15 @@ export class MarketDataService {
     if (this.isCTraderAvailable()) {
       try {
         console.log(`[MarketDataService] cTrader優先: ${symbol} ${timeframe} ×1`);
-        const bars = await this.ctraderDataService!.fetchTrendbars(
-          this.ctraderAccountId!,
-          symbol,
-          timeframe,
-          1,
+        const bars = await withTimeout(
+          this.ctraderDataService!.fetchTrendbars(
+            this.ctraderAccountId!,
+            symbol,
+            timeframe,
+            1,
+          ),
+          CTRADER_FETCH_TIMEOUT_MS,
+          'cTrader現在値取得',
         );
         if (bars.length > 0) {
           const marketData = this.convertCTraderBars(bars, symbol, timeframe)[0];
@@ -295,11 +317,15 @@ export class MarketDataService {
     if (this.isCTraderAvailable()) {
       try {
         console.log(`[MarketDataService] cTrader優先: ${symbol} ${timeframe} ×${limit}`);
-        const bars = await this.ctraderDataService!.fetchTrendbars(
-          this.ctraderAccountId!,
-          symbol,
-          timeframe,
-          limit,
+        const bars = await withTimeout(
+          this.ctraderDataService!.fetchTrendbars(
+            this.ctraderAccountId!,
+            symbol,
+            timeframe,
+            limit,
+          ),
+          CTRADER_FETCH_TIMEOUT_MS,
+          'cTrader履歴取得',
         );
         if (bars.length > 0) {
           return this.convertCTraderBars(bars, symbol, timeframe);
