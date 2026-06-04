@@ -1085,11 +1085,13 @@ export class TradeNoteService {
     return {
       id: dbNote.id,
       tradeId: dbNote.tradeId,
-      timestamp: dbNote.createdAt,
+      // エントリー時刻・数量は紐づく元トレード (include 時) から取る。
+      // 未 include 時は従来通り createdAt / 0 にフォールバック (F6)。
+      timestamp: dbNote.trade?.timestamp ?? dbNote.createdAt,
       symbol: dbNote.symbol,
       side: dbNote.side.toLowerCase() as 'buy' | 'sell',
       entryPrice: Number(dbNote.entryPrice),
-      quantity: 0, // DBには数量が保存されていない場合のデフォルト
+      quantity: dbNote.trade ? Number(dbNote.trade.quantity) : 0,
       marketContext,
       aiSummary: dbNote.aiSummary?.summary || '',
       features: dbNote.featureVector || [],
