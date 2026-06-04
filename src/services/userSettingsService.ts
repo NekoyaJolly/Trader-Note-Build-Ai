@@ -1,33 +1,37 @@
 /**
  * ユーザー設定サービス
- * 
- * 目的: ユーザーのアプリ設定をファイルベースで永続化
- * - 通知設定（閾値、最大数）
- * - 時間足設定
- * - 表示設定
- * 
- * 保存先: data/user-settings.json
+ *
+ * 目的:
+ * - 通知 / 時間足 / 表示 の各設定をユーザー別に永続化する。
+ *
+ * ストレージ:
+ * - DB `UserSettings` テーブル (userId 一意)。
+ * - 旧実装は data/user-settings.json にファイル保存していたが、Cloud Run の揮発FSで
+ *   永続しない・インスタンス間不整合・ユーザー別でない問題があったため DB へ移行した。
+ *
+ * 設計:
+ * - JSON カラム (notification/timeframes/display) は DB 由来の外部入力として扱い、
+ *   読み出し時に必ず Zod でデフォルト値マージ込みのバリデーションを行う (any/unknown 不使用)。
  */
 
-import * as fs from 'fs/promises';
-import * as path from 'path';
+import { z } from 'zod';
+import type { Prisma } from '@prisma/client';
+import { prisma } from '../backend/db/client';
+
+/** 時間足の許容値 */
+export type Timeframe = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d' | '1w';
 
 /**
  * 通知設定
  */
 export interface NotificationSettings {
-  /** 通知有効化フラグ */
+  /** 通知の有効化 */
   enabled: boolean;
-  /** 通知するスコア閾値（%） */
+  /** 一致スコア閾値 (0-100) */
   scoreThreshold: number;
   /** 1日の最大通知数 */
   maxPerDay: number;
 }
-
-/**
- * 時間足タイプ
- */
-export type Timeframe = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d' | '1w';
 
 /**
  * 時間足設定
@@ -61,12 +65,9 @@ export interface UserSettings {
   timeframes: TimeframeSettings;
   /** 表示設定 */
   display: DisplaySettings;
-  /** 最終更新日時 */
+  /** 最終更新日時 (ISO文字列) */
   updatedAt: string;
 }
-
-// 設定ファイルのパス
-const SETTINGS_FILE = path.join(process.cwd(), 'data', 'user-settings.json');
 
 /**
  * デフォルト設定
@@ -88,80 +89,121 @@ const DEFAULT_SETTINGS: Omit<UserSettings, 'updatedAt'> = {
   },
 };
 
+const TimeframeSchema = z.enum(['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w']);
+
+// DB の JSON カラムは欠損フィールドをデフォルトで補完しつつ検証する (catch で堅牢化)。
+const NotificationSchema = z.object({
+  enabled: z.boolean().catch(DEFAULT_SETTINGS.notification.enabled),
+  scoreThreshold: z.number().catch(DEFAULT_SETTINGS.notification.scoreThreshold),
+  maxPerDay: z.number().catch(DEFAULT_SETTINGS.notification.maxPerDay),
+}).catch(DEFAULT_SETTINGS.notification);
+
+const TimeframesSchema = z.object({
+  primary: TimeframeSchema.catch(DEFAULT_SETTINGS.timeframes.primary),
+  secondary: TimeframeSchema.catch(DEFAULT_SETTINGS.timeframes.secondary),
+}).catch(DEFAULT_SETTINGS.timeframes);
+
+const DisplaySchema = z.object({
+  darkMode: z.boolean().catch(DEFAULT_SETTINGS.display.darkMode),
+  compactView: z.boolean().catch(DEFAULT_SETTINGS.display.compactView),
+  showAiSuggestions: z.boolean().catch(DEFAULT_SETTINGS.display.showAiSuggestions),
+}).catch(DEFAULT_SETTINGS.display);
+
+/**
+ * 設定を Prisma の JSON カラム入力 (InputJsonObject) へ変換する。
+ * プリミティブのみのリテラルを構築することで any/unknown キャストを避ける。
+ */
+function toSettingsData(s: Omit<UserSettings, 'updatedAt'>): {
+  notification: Prisma.InputJsonObject;
+  timeframes: Prisma.InputJsonObject;
+  display: Prisma.InputJsonObject;
+} {
+  return {
+    notification: {
+      enabled: s.notification.enabled,
+      scoreThreshold: s.notification.scoreThreshold,
+      maxPerDay: s.notification.maxPerDay,
+    },
+    timeframes: {
+      primary: s.timeframes.primary,
+      secondary: s.timeframes.secondary,
+    },
+    display: {
+      darkMode: s.display.darkMode,
+      compactView: s.display.compactView,
+      showAiSuggestions: s.display.showAiSuggestions,
+    },
+  };
+}
+
 /**
  * ユーザー設定サービス
  */
 export class UserSettingsService {
   /**
-   * 設定を読み込む
+   * 設定を読み込む。未保存ユーザーはデフォルトを返す。
    */
-  async loadSettings(): Promise<UserSettings> {
-    try {
-      const content = await fs.readFile(SETTINGS_FILE, 'utf-8');
-      const settings = JSON.parse(content) as UserSettings;
-      // デフォルト値でマージ（新しいフィールドが追加された場合に対応）
-      return {
-        ...DEFAULT_SETTINGS,
-        ...settings,
-        notification: { ...DEFAULT_SETTINGS.notification, ...settings.notification },
-        timeframes: { ...DEFAULT_SETTINGS.timeframes, ...settings.timeframes },
-        display: { ...DEFAULT_SETTINGS.display, ...settings.display },
-      };
-    } catch {
-      // ファイルがない場合はデフォルト設定を返す
-      console.log('[UserSettingsService] 設定ファイルが見つかりません。デフォルト設定を使用します。');
-      return {
-        ...DEFAULT_SETTINGS,
-        updatedAt: new Date().toISOString(),
-      };
+  async loadSettings(userId: string): Promise<UserSettings> {
+    const row = await prisma.userSettings.findUnique({ where: { userId } });
+    if (!row) {
+      return { ...DEFAULT_SETTINGS, updatedAt: new Date().toISOString() };
     }
+    return {
+      notification: NotificationSchema.parse(row.notification),
+      timeframes: TimeframesSchema.parse(row.timeframes),
+      display: DisplaySchema.parse(row.display),
+      updatedAt: row.updatedAt.toISOString(),
+    };
   }
 
   /**
-   * 設定を保存する
+   * 設定を保存する (部分更新)。既存値とマージして upsert する。
    */
-  async saveSettings(settings: Partial<UserSettings>): Promise<UserSettings> {
-    // 既存設定を読み込み
-    const currentSettings = await this.loadSettings();
-    
-    // マージして更新
-    const updatedSettings: UserSettings = {
-      notification: settings.notification 
-        ? { ...currentSettings.notification, ...settings.notification }
-        : currentSettings.notification,
-      timeframes: settings.timeframes 
-        ? { ...currentSettings.timeframes, ...settings.timeframes }
-        : currentSettings.timeframes,
-      display: settings.display 
-        ? { ...currentSettings.display, ...settings.display }
-        : currentSettings.display,
-      updatedAt: new Date().toISOString(),
+  async saveSettings(userId: string, settings: Partial<UserSettings>): Promise<UserSettings> {
+    const current = await this.loadSettings(userId);
+    const merged: Omit<UserSettings, 'updatedAt'> = {
+      notification: settings.notification
+        ? { ...current.notification, ...settings.notification }
+        : current.notification,
+      timeframes: settings.timeframes
+        ? { ...current.timeframes, ...settings.timeframes }
+        : current.timeframes,
+      display: settings.display
+        ? { ...current.display, ...settings.display }
+        : current.display,
     };
 
-    // ファイルに保存
-    const dir = path.dirname(SETTINGS_FILE);
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(SETTINGS_FILE, JSON.stringify(updatedSettings, null, 2), 'utf-8');
-    
-    console.log('[UserSettingsService] 設定を保存しました');
-    return updatedSettings;
+    const data = toSettingsData(merged);
+    const row = await prisma.userSettings.upsert({
+      where: { userId },
+      create: { userId, ...data },
+      update: { ...data },
+    });
+
+    return {
+      notification: NotificationSchema.parse(row.notification),
+      timeframes: TimeframesSchema.parse(row.timeframes),
+      display: DisplaySchema.parse(row.display),
+      updatedAt: row.updatedAt.toISOString(),
+    };
   }
 
   /**
-   * 設定をデフォルトにリセット
+   * 設定をデフォルトにリセットする。
    */
-  async resetToDefault(): Promise<UserSettings> {
-    const defaultWithTimestamp: UserSettings = {
-      ...DEFAULT_SETTINGS,
-      updatedAt: new Date().toISOString(),
+  async resetToDefault(userId: string): Promise<UserSettings> {
+    const data = toSettingsData({ ...DEFAULT_SETTINGS });
+    const row = await prisma.userSettings.upsert({
+      where: { userId },
+      create: { userId, ...data },
+      update: { ...data },
+    });
+    return {
+      notification: NotificationSchema.parse(row.notification),
+      timeframes: TimeframesSchema.parse(row.timeframes),
+      display: DisplaySchema.parse(row.display),
+      updatedAt: row.updatedAt.toISOString(),
     };
-    
-    const dir = path.dirname(SETTINGS_FILE);
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(SETTINGS_FILE, JSON.stringify(defaultWithTimestamp, null, 2), 'utf-8');
-    
-    console.log('[UserSettingsService] 設定をデフォルトにリセットしました');
-    return defaultWithTimestamp;
   }
 }
 
