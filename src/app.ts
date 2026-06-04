@@ -267,6 +267,11 @@ class App {
       // 緩い上限にし、暴走スクリプト / 連打のみを弾く。authRateLimiter と同じく
       // MemoryStore のため水平スケール時はインスタンス間で分断される best-effort ゲート
       // (本格対応は Redis store / Cloud Armor を別途。authRateLimiter のコメント参照)。
+      //
+      // 適用順は `requireAuth` → 本 limiter とする (PR #344 Copilot review)。未認証
+      // リクエストは requireAuth で 401 として早期に弾かれ limiter を消費しない。重い計算は
+      // 認証の先にあるため、保護対象は「認証済みリクエストの連打」であり、他の認証必須
+      // ルート (requireAuth が先) と挙動を揃える。
       const heavyComputeRateLimiter = rateLimit({
         windowMs: 60 * 1000,
         max: 30,
@@ -320,7 +325,7 @@ class App {
       this.app.use('/api/profiles', requireAuth, profileRoutes);
 
       console.log('[App] /api/backtest ルートを登録中 (rate-limit 適用)...');
-      this.app.use('/api/backtest', heavyComputeRateLimiter, requireAuth, backtestRoutes);
+      this.app.use('/api/backtest', requireAuth, heavyComputeRateLimiter, backtestRoutes);
 
       console.log('[App] /api/settings ルートを登録中...');
       this.app.use('/api/settings', requireAuth, settingsRoutes);
@@ -332,10 +337,10 @@ class App {
       this.app.use('/api/strategies', requireAuth, strategyRoutes);
 
       console.log('[App] /api/strategy-comparison ルートを登録中 (rate-limit 適用)...');
-      this.app.use('/api/strategy-comparison', heavyComputeRateLimiter, requireAuth, strategyComparisonRoutes);
+      this.app.use('/api/strategy-comparison', requireAuth, heavyComputeRateLimiter, strategyComparisonRoutes);
 
       console.log('[App] /api/pattern-analysis ルートを登録中 (rate-limit 適用)...');
-      this.app.use('/api/pattern-analysis', heavyComputeRateLimiter, requireAuth, patternAnalysisRoutes);
+      this.app.use('/api/pattern-analysis', requireAuth, heavyComputeRateLimiter, patternAnalysisRoutes);
 
       console.log('[App] /api/ohlcv ルートを登録中...');
       this.app.use('/api/ohlcv', requireAuth, ohlcvRoutes);
