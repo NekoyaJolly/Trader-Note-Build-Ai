@@ -24,7 +24,21 @@ import {
 } from '../infrastructure/market/chart-data.types';
 import { EODHDChartDataProvider } from '../infrastructure/market/EODHDChartDataProvider';
 import { normalizeCTraderSymbol, toTwelveDataSymbol } from '../utils/symbolNormalization';
-import { ohlcvRepository } from '../backend/repositories/ohlcvRepository';
+import { ohlcvRepository, followsFXMarketCalendar } from '../backend/repositories/ohlcvRepository';
+import { isFXMarketOpen } from '../side-b/utils/marketHours';
+
+/**
+ * 閉場 (土日・FX休場) バーを除去する。
+ *
+ * EODHD は XAUUSD 等で土日に sparse な閉場バーを返すことがあり、これがチャート上で
+ * ほぼ横ばいの平坦バー (= 細い線) として描画され、市場が動いていないのに線が走って見える。
+ * MT4 / TradingView と同様に FX/貴金属は閉場バーを描かない。
+ * 暗号通貨 (BTC 等) は 24/7 稼働なので除外しない。
+ */
+function filterTradingHours(candles: ChartCandle[], symbol: string): ChartCandle[] {
+  if (!followsFXMarketCalendar(symbol)) return candles;
+  return candles.filter((c) => isFXMarketOpen(new Date(c.time * 1000)));
+}
 
 /** LocalCandleStore: ローカル保存済み OHLCV の読み出し抽象 (将来の保存経路と分離) */
 export interface LocalCandleStore {
@@ -125,8 +139,10 @@ export class ChartDataService {
     let upstreamDetail: string | undefined;
     try {
       const result = await this.chartProvider.getCandles(providerParams);
-      if (result.candles.length > 0) {
-        return result;
+      // 閉場 (土日) バーを除去してから判定・返却する
+      const tradingCandles = filterTradingHours(result.candles, symbol);
+      if (tradingCandles.length > 0) {
+        return { ...result, candles: tradingCandles };
       }
       // EODHD は応答したがデータ 0 件 → ローカルフォールバックを試す
     } catch (error) {
@@ -140,7 +156,10 @@ export class ChartDataService {
     }
 
     // 2. ローカルキャッシュ (OHLCVCandle) フォールバック
-    const localCandles = await this.localStore.getCandles(symbol, timeframe, limit);
+    const localCandles = filterTradingHours(
+      await this.localStore.getCandles(symbol, timeframe, limit),
+      symbol,
+    );
     if (localCandles.length > 0) {
       return {
         candles: localCandles,
