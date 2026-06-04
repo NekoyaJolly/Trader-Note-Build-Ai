@@ -10,7 +10,6 @@ import { useEffect, useState } from "react";
 import OnboardingIntro from "@/components/OnboardingIntro";
 import { NeonCard, GlowColor } from "@/components/ui/NeonCard";
 import {
-  fetchDailyStatus,
   fetchNoteStatusCounts,
   fetchNotes,
   fetchUnreadNotificationCount,
@@ -32,7 +31,6 @@ export default function HomeWorkbench() {
   const [draftCount, setDraftCount] = useState<number | null>(null);
   const [unreadCount, setUnreadCount] = useState<number | null>(null);
   const [aiPendingCount, setAiPendingCount] = useState<number | null>(null);
-  const [dailyLine, setDailyLine] = useState<string | null>(null);
   const [recentNotes, setRecentNotes] = useState<NoteSummary[]>([]);
   const [lastPath, setLastPath] = useState<ReturnType<typeof readLastSideAPath>>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -54,11 +52,10 @@ export default function HomeWorkbench() {
         fetchUnreadNotificationCount(),
         sideBApi.getPendingValidation(),
         fetchNotes({ limit: 5 }),
-        fetchDailyStatus(),
       ]);
       if (cancelled) return;
 
-      const [countsR, unreadR, pendingR, notesR, dailyR] = settled;
+      const [countsR, unreadR, pendingR, notesR] = settled;
 
       if (countsR.status === "fulfilled") {
         setDraftCount(countsR.value.draft ?? 0);
@@ -86,13 +83,6 @@ export default function HomeWorkbench() {
       } else {
         setRecentNotes([]);
         console.error(notesR.reason);
-      }
-
-      if (dailyR.status === "fulfilled") {
-        setDailyLine(dailyR.value?.status ?? null);
-      } else {
-        setDailyLine(null);
-        console.error(dailyR.reason);
       }
 
       const failed = settled.filter((s) => s.status === "rejected").length;
@@ -166,7 +156,7 @@ export default function HomeWorkbench() {
             <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 backdrop-blur-sm">
               <p className="text-xs text-gray-500 mb-1">今日の注目</p>
               <p className="text-sm text-gray-200 leading-snug line-clamp-3">
-                {dailyLine ?? "市場の状態はチャートで確認できます"}
+                市場の状態はチャートで確認できます
               </p>
               <Link
                 href="/market-analysis"

@@ -25,6 +25,11 @@ import {
   PositionUpdateEventSchema
 } from '@/schemas/api/trading';
 import { apiFetch } from '@/lib/apiClient';
+import { z } from 'zod';
+
+// バックエンドは cTrader 障害時に { error } イベントを同一 SSE ストリームへ流す。
+// これは PositionUpdate ではないため、ポジション更新として parse せず区別する。
+const StreamErrorEventSchema = z.object({ error: z.string() });
 
 // ========================================
 // カスタムフック
@@ -113,6 +118,13 @@ export function useTradingAccount(enabled: boolean = true) {
     eventSource.onmessage = (event) => {
       try {
         const parsedData = JSON.parse(event.data);
+
+        // エラーイベント ({ error }) は PositionUpdate として扱わず警告ログのみ
+        const errorEvent = StreamErrorEventSchema.safeParse(parsedData);
+        if (errorEvent.success) {
+          console.warn('[useTradingAccount] SSE エラーイベント:', errorEvent.data.error);
+          return;
+        }
 
         // Zodバリデーション
         const result = PositionUpdateEventSchema.safeParse(parsedData);
