@@ -584,7 +584,7 @@ export interface UserSettings {
   };
   timeframes: {
     primary: SettingsTimeframe;
-    secondary: SettingsTimeframe[];
+    secondary: SettingsTimeframe;
   };
   display: {
     darkMode: boolean;

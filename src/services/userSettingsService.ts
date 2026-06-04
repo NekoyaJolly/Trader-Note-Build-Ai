@@ -35,8 +35,8 @@ export type Timeframe = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d' | '1w';
 export interface TimeframeSettings {
   /** メイン時間足 */
   primary: Timeframe;
-  /** サブ時間足（複数） */
-  secondary: Timeframe[];
+  /** サブ時間足 */
+  secondary: Timeframe;
 }
 
 /**
@@ -79,7 +79,7 @@ const DEFAULT_SETTINGS: Omit<UserSettings, 'updatedAt'> = {
   },
   timeframes: {
     primary: '1h',
-    secondary: ['4h', '1d'],
+    secondary: '4h',
   },
   display: {
     darkMode: true,
