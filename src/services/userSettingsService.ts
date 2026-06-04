@@ -92,10 +92,12 @@ const DEFAULT_SETTINGS: Omit<UserSettings, 'updatedAt'> = {
 const TimeframeSchema = z.enum(['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w']);
 
 // DB の JSON カラムは欠損フィールドをデフォルトで補完しつつ検証する (catch で堅牢化)。
+// 読み出し側も API リクエストと同じ範囲制約 (scoreThreshold 0-100 / maxPerDay 1-100) で
+// パースする。DB に異常値が入っても範囲外は catch でデフォルトへ補正する (Copilot review PR #338)。
 const NotificationSchema = z.object({
   enabled: z.boolean().catch(DEFAULT_SETTINGS.notification.enabled),
-  scoreThreshold: z.number().catch(DEFAULT_SETTINGS.notification.scoreThreshold),
-  maxPerDay: z.number().catch(DEFAULT_SETTINGS.notification.maxPerDay),
+  scoreThreshold: z.number().min(0).max(100).catch(DEFAULT_SETTINGS.notification.scoreThreshold),
+  maxPerDay: z.number().min(1).max(100).catch(DEFAULT_SETTINGS.notification.maxPerDay),
 }).catch(DEFAULT_SETTINGS.notification);
 
 const TimeframesSchema = z.object({

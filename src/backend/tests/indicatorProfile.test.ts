@@ -139,6 +139,18 @@ describe('IndicatorProfileService (DB per-user)', () => {
       expect(mockUpdateMany).toHaveBeenCalledWith({ where: { userId: USER, isDefault: true }, data: { isDefault: false } });
     });
 
+    it('string param (pivotType 等) を欠落させずに保存する (PR #338)', async () => {
+      mockCreate.mockResolvedValue(dbRow());
+      await service.createProfile(USER, {
+        name: 'pivot',
+        indicators: [
+          { configId: 'piv', indicatorId: 'rsi', label: 'x', params: { pivotType: 'fibonacci', period: 14 }, enabled: true },
+        ],
+      });
+      const createArg = mockCreate.mock.calls[0][0];
+      expect(createArg.data.indicators[0].params).toEqual({ pivotType: 'fibonacci', period: 14 });
+    });
+
     it('一意制約違反(P2002)は重複名エラーに変換する', async () => {
       mockCreate.mockRejectedValue(new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: '6.0.0' }));
       await expect(service.createProfile(USER, { name: '重複', indicators: [] })).rejects.toThrow(

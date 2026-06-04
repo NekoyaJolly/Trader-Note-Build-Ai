@@ -121,8 +121,10 @@ export class ChartDataService {
   constructor(deps: ChartDataServiceDeps = {}) {
     this.chartProvider = deps.chartProvider ?? new EODHDChartDataProvider();
     this.localStore = deps.localStore ?? new OhlcvRepositoryCandleStore();
-    this.maxAttempts = deps.retry?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
-    this.retryDelayMs = deps.retry?.delayMs ?? DEFAULT_RETRY_DELAY_MS;
+    // maxAttempts は最低 1 回 (= provider を必ず一度は試行)、delayMs は 0 以上に丸める。
+    // 0/負数が渡ると一度も試行せず「データ無し」を返す等、挙動が崩れるのを防ぐ (Copilot review PR #338)。
+    this.maxAttempts = Math.max(1, Math.floor(deps.retry?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS));
+    this.retryDelayMs = Math.max(0, deps.retry?.delayMs ?? DEFAULT_RETRY_DELAY_MS);
   }
 
   /**

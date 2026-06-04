@@ -37,11 +37,14 @@ const IndicatorIdSchema = z.string().refine(
   { message: '不正な indicatorId です' },
 );
 
+// params は number だけでなく string (例: pivotType) / boolean も取りうる。
+// number 限定にすると string/boolean param を持つプロファイルが parse で弾かれ
+// 空配列にフォールバックする (Copilot review PR #338)。プリミティブを広く許容する。
 const IndicatorConfigJsonSchema = z.object({
   configId: z.string(),
   indicatorId: IndicatorIdSchema,
   label: z.string().optional(),
-  params: z.record(z.string(), z.union([z.number(), z.undefined()])).default({}),
+  params: z.record(z.string(), z.union([z.number(), z.string(), z.boolean()])).default({}),
   enabled: z.boolean(),
 });
 
@@ -57,12 +60,17 @@ function parseIndicators(value: Prisma.JsonValue): IndicatorConfig[] {
   return parsed.data.map((ind): IndicatorConfig => ({ ...ind, params: ind.params }));
 }
 
-/** IndicatorConfig[] → Prisma InputJsonValue (undefined param を落としつつプレーン化、キャスト不使用)。 */
+/** IndicatorConfig[] → Prisma InputJsonValue (undefined param のみ落としつつプレーン化、キャスト不使用)。 */
 function toIndicatorsJson(configs: IndicatorConfig[]): Prisma.InputJsonValue {
   return configs.map((c) => {
-    const params: Record<string, number> = {};
+    // number だけでなく string (pivotType 等) / boolean も保持する。undefined のみ除外
+    // (number 限定だと string/boolean param が DB 保存時に黙って欠落する: Copilot review PR #338)。
+    const params: Record<string, number | string | boolean> = {};
     for (const [key, val] of Object.entries(c.params)) {
-      if (typeof val === 'number') params[key] = val;
+      // number / string(pivotType等) / boolean のみ保持。undefined や非プリミティブは除外
+      if (typeof val === 'number' || typeof val === 'string' || typeof val === 'boolean') {
+        params[key] = val;
+      }
     }
     const obj: Prisma.InputJsonObject = {
       configId: c.configId,

@@ -96,6 +96,18 @@ describe('ChartDataService 一過性障害耐性', () => {
     expect(res.meta.source).toBe('local');
   });
 
+  it('maxAttempts=0 でも最低1回は provider を試行する (clamp, PR #338)', async () => {
+    const provider = new FakeProvider(() => candle(1780_000_000));
+    const svc = new ChartDataService({
+      chartProvider: provider,
+      localStore: emptyStore,
+      retry: { maxAttempts: 0, delayMs: -100 },
+    });
+    const res = await svc.getCandles({ symbol: SYMBOL, timeframe: '1m', limit: 10 });
+    expect(provider.calls).toBe(1);
+    expect(res.candles).toHaveLength(1);
+  });
+
   it('invalid_timeframe はリトライせず即伝播する', async () => {
     const provider = new FakeProvider(() => candle(1));
     const svc = new ChartDataService({
