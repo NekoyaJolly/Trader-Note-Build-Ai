@@ -150,6 +150,33 @@ describe('ChartDataService', () => {
       kind: 'invalid_symbol',
     });
   });
+
+  // 2026-05-28 12:00Z = 木 (開場) / 2026-05-30 12:00Z = 土 (閉場)
+  const THU_OPEN = 1779969600;
+  const SAT_CLOSED = 1780142400;
+
+  it('FX/貴金属は閉場(土日)バーを除去する (細い線対策)', async () => {
+    const service = new ChartDataService({
+      chartProvider: mockProvider(async () =>
+        eodhdResponse([chartCandle(THU_OPEN, 1), chartCandle(SAT_CLOSED, 2)]),
+      ),
+      localStore: mockLocalStore([]),
+    });
+    const result = await service.getCandles({ symbol: 'XAUUSD', timeframe: '1h' });
+    expect(result.candles).toHaveLength(1);
+    expect(result.candles[0].time).toBe(THU_OPEN);
+  });
+
+  it('暗号通貨 (24/7) は土日バーを除去しない', async () => {
+    const service = new ChartDataService({
+      chartProvider: mockProvider(async () =>
+        eodhdResponse([chartCandle(THU_OPEN, 1), chartCandle(SAT_CLOSED, 2)]),
+      ),
+      localStore: mockLocalStore([]),
+    });
+    const result = await service.getCandles({ symbol: 'BTCUSD', timeframe: '1h' });
+    expect(result.candles).toHaveLength(2);
+  });
 });
 
 // ========================================

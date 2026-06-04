@@ -11,7 +11,8 @@
 
 import type { Request, Response } from 'express';
 import { Router } from 'express';
-import { MarketDataService } from '../../services/marketDataService';
+import { chartDataService } from '../../services/chartDataService';
+import { ChartDataError } from '../../infrastructure/market/chart-data.types';
 import type { OHLCVData } from '../../services/indicators';
 import { indicatorService } from '../../services/indicators';
 import type {
@@ -22,7 +23,6 @@ import {
 } from '../../services/featureVectorService';
 
 const router = Router();
-const marketDataService = new MarketDataService();
 
 /**
  * 表示・URL互換用にスラッシュ区切りへ正規化（例: XAUUSD → XAU/USD）
@@ -112,15 +112,21 @@ router.get('/:symbol', async (req: Request, res: Response) => {
     console.log(`[MarketAnalysis] ${symbol} → ${normalizedSymbol} ${timeframe} × ${count}本 取得開始`);
 
     // OHLCVデータを取得
-    // すべての時間足に対応（1m専用メソッドは廃止）
-    const marketData = await marketDataService.getHistoricalData(normalizedSymbol, timeframe, count);
-    const ohlcvData: OHLCVData[] = marketData.map(d => ({
-      timestamp: d.timestamp,
-      open: d.open,
-      high: d.high,
-      low: d.low,
-      close: d.close,
-      volume: d.volume,
+    // チャート (/api/chart/candles) と同一の EODHD 主体ソースから取得し、分析を「チャートベース」にする。
+    // これにより、チャートに表示されているローソク足と 12 次元特徴量・インジケーターの計算元が一致する。
+    const chartResponse = await chartDataService.getCandles({
+      symbol: normalizedSymbol,
+      timeframe,
+      limit: count,
+    });
+    const ohlcvData: OHLCVData[] = chartResponse.candles.map(c => ({
+      // ChartCandle.time は Unix 秒。indicator/feature 計算は Date を期待するため変換する。
+      timestamp: new Date(c.time * 1000),
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+      volume: c.volume ?? 0,
     }));
 
     if (ohlcvData.length === 0) {
@@ -265,6 +271,13 @@ router.get('/:symbol', async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
+    // チャートデータ取得由来のエラーは種別ごとに HTTP ステータスを分ける (404 を乱用しない)
+    if (error instanceof ChartDataError) {
+      const status =
+        error.kind === 'invalid_symbol' ? 404 : error.kind === 'invalid_timeframe' ? 400 : 503;
+      console.warn(`[MarketAnalysis] ${error.kind}: ${error.message} detail=${error.detail ?? '-'}`);
+      return res.status(status).json({ success: false, error: error.message, kind: error.kind });
+    }
     console.error('[MarketAnalysis] エラー:', error);
     res.status(500).json({
       success: false,
