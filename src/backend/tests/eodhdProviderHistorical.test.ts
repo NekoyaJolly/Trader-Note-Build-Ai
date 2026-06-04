@@ -126,6 +126,36 @@ describe('EodhdProvider.getHistoricalData (intraday native)', () => {
     expect(sdkMocks.intraday.mock.calls[0][1].interval).toBe('5m');
   });
 
+  it('フォールバック: native intraday が空の銘柄 (XAUUSD 等) は 1m を取得して目的足に集約する', async () => {
+    // EODHD は XAUUSD で 5m を空配列で返すが 1m は配信される実挙動の再現
+    sdkMocks.intraday.mockImplementation((_sym, params) => {
+      if (params.interval === '1m') {
+        return Promise.resolve([
+          intradayPoint('2026-05-22T10:00:00Z', 100, 105, 99, 101, 10),
+          intradayPoint('2026-05-22T10:01:00Z', 101, 106, 100, 102, 20),
+          intradayPoint('2026-05-22T10:02:00Z', 102, 107, 101, 103, 30),
+          intradayPoint('2026-05-22T10:03:00Z', 103, 108, 102, 104, 40),
+          intradayPoint('2026-05-22T10:04:00Z', 104, 109, 103, 105, 50),
+        ]);
+      }
+      // 5m 等の native はゴールドで空
+      return Promise.resolve([]);
+    });
+
+    const provider = new EodhdProvider({ apiToken: 'test-token' });
+    const result = await provider.getHistoricalData('XAU/USD', '5m', 10);
+
+    // native(5m) が空 → 1m で再取得していること
+    const intervals = sdkMocks.intraday.mock.calls.map((c) => c[1].interval);
+    expect(intervals).toContain('5m');
+    expect(intervals).toContain('1m');
+
+    // 1m×5 本が 1 本の 5m バーに集約される (open=先頭, close=末尾, high=最大, low=最小)
+    expect(result.bars).toHaveLength(1);
+    expect(result.bars[0]).toMatchObject({ open: 100, close: 105, high: 109, low: 99 });
+    expect(result.bars[0].timestamp.toISOString()).toBe('2026-05-22T10:00:00.000Z');
+  });
+
   it('1h: SDK の intraday を interval=1h で呼ぶ', async () => {
     sdkMocks.intraday.mockResolvedValueOnce([
       intradayPoint('2026-05-22T10:00:00Z', 100, 102, 99, 101, 10),
@@ -282,7 +312,8 @@ describe('EodhdProvider.getCurrentPrice', () => {
   });
 
   it('bars が空なら null を返す', async () => {
-    sdkMocks.intraday.mockResolvedValueOnce([]);
+    // native(1h) も 1m フォールバックも空 = 真にデータ無しのケース
+    sdkMocks.intraday.mockResolvedValue([]);
 
     const provider = new EodhdProvider({ apiToken: 'test-token' });
     const bar = await provider.getCurrentPrice('XAU/USD', '1h');

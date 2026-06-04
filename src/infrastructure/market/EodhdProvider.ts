@@ -144,10 +144,16 @@ export class EodhdProvider extends BaseMarketDataProvider {
       // factor=1 (native) 経路でも明示的に timestamp 昇順にソートしてから slice する。
       // 集約経路 (factor>1) は aggregateOHLCV() 内で sort 済のため不要。
       const nativeBars = raw.map((p) => this.intradayPointToBar(p));
-      const aggregated =
+      let aggregated =
         plan.factor === 1
           ? [...nativeBars].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
           : aggregateOHLCV(nativeBars, TIMEFRAME_MS[timeframe]);
+
+      // フォールバック: EODHD は一部銘柄 (例 XAUUSD/ゴールド) で 1m 以外の intraday が空を返す。
+      // native 取得が空なら 1m を取得して目的の timeframe に集約し直す。
+      if (aggregated.length === 0 && plan.interval !== '1m') {
+        aggregated = await this.fetchOneMinuteAggregated(providerSymbol, timeframe, limit);
+      }
 
       const limited = aggregated.slice(-limit);
       return {
@@ -221,10 +227,21 @@ export class EodhdProvider extends BaseMarketDataProvider {
       // Copilot review (PR #245) 指摘: SDK 返却順が保証されないため、factor=1 経路も明示 sort。
       // 集約経路 (factor>1) は aggregateOHLCV() 内で sort 済。
       const nativeBars = raw.map((p) => this.intradayPointToBar(p));
-      const aggregated =
+      let aggregated =
         plan.factor === 1
           ? [...nativeBars].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
           : aggregateOHLCV(nativeBars, TIMEFRAME_MS[timeframe]);
+
+      // フォールバック: native intraday が空の銘柄 (例 XAUUSD) は 1m を取得して集約し直す。
+      if (aggregated.length === 0 && plan.interval !== '1m') {
+        const rawOneMin = await this.client!.intraday(providerSymbol, {
+          interval: '1m',
+          from: fromSec,
+          to: toSec,
+        });
+        const oneMinBars = rawOneMin.map((p) => this.intradayPointToBar(p));
+        aggregated = aggregateOHLCV(oneMinBars, TIMEFRAME_MS[timeframe]);
+      }
 
       // 集約後にレンジ内に絞り込む (= バケット端で範囲外に出ることがあるため)
       const inRange = aggregated.filter(
@@ -258,6 +275,36 @@ export class EodhdProvider extends BaseMarketDataProvider {
       provider: this.name,
       fetchedAt: new Date(),
     };
+  }
+
+  /**
+   * 1m intraday を取得して目的の timeframe に集約するフォールバック。
+   *
+   * EODHD は一部銘柄 (確認済み: XAUUSD/ゴールド) で 5m / 15m / 30m / 1h / 4h の
+   * intraday が空配列を返すが、1m は配信されている。native 取得が空のときに本メソッドで
+   * 1m から再構築することで、全銘柄でチャートが表示できるようにする。
+   *
+   * 取得レンジは目的バー数ぶん + 安全係数 2.5。ただし 1m の過大取得を避けるため 60 日で上限。
+   */
+  private async fetchOneMinuteAggregated(
+    providerSymbol: string,
+    timeframe: Timeframe,
+    limit: number,
+  ): Promise<OHLCVBar[]> {
+    const targetMs = TIMEFRAME_MS[timeframe];
+    const MAX_LOOKBACK_MS = 60 * 24 * 60 * 60 * 1000; // 60 日
+    const lookbackMs = Math.min(limit * targetMs * 2.5, MAX_LOOKBACK_MS);
+    const toSec = Math.floor(Date.now() / 1000);
+    const fromSec = toSec - Math.ceil(lookbackMs / 1000);
+
+    const raw = await this.client!.intraday(providerSymbol, {
+      interval: '1m',
+      from: fromSec,
+      to: toSec,
+    });
+    // 1m もデータが無い場合 (真に空 / 想定外レスポンス) は空配列で安全に返す
+    const oneMinBars = (raw ?? []).map((p) => this.intradayPointToBar(p));
+    return aggregateOHLCV(oneMinBars, targetMs);
   }
 
   /**
