@@ -54,23 +54,28 @@ type WebSocketType = {
 /**
  * cTrader メッセージタイプ（Open API Protocol）
  */
+// cTrader Open API ProtoOAPayloadType の正規値 (OpenApiModelMessages.proto)。
+// 旧定義は RECONCILE/EXECUTION/SPOT/AMEND/CLOSE 等が誤値で、口座/ポジション取得が
+// 別メッセージ(SymbolsForConversion 等)として解釈され失敗していた (PR で修正)。
 export const CTraderMessageType = {
   PROTO_OA_APPLICATION_AUTH_REQ: 2100,
   PROTO_OA_APPLICATION_AUTH_RES: 2101,
   PROTO_OA_ACCOUNT_AUTH_REQ: 2102,
   PROTO_OA_ACCOUNT_AUTH_RES: 2103,
   PROTO_OA_NEW_ORDER_REQ: 2106,
-  PROTO_OA_AMEND_ORDER_REQ: 2107,
   PROTO_OA_CANCEL_ORDER_REQ: 2108,
-  PROTO_OA_CLOSE_POSITION_REQ: 2109,
-  PROTO_OA_SUBSCRIBE_SPOTS_REQ: 2124,
-  PROTO_OA_SUBSCRIBE_SPOTS_RES: 2125,
-  PROTO_OA_UNSUBSCRIBE_SPOTS_REQ: 2126,
-  PROTO_OA_UNSUBSCRIBE_SPOTS_RES: 2127,
-  PROTO_OA_SPOT_EVENT: 2128,
-  PROTO_OA_RECONCILE_REQ: 2118,
-  PROTO_OA_RECONCILE_RES: 2119,
-  PROTO_OA_EXECUTION_EVENT: 2141,
+  PROTO_OA_AMEND_ORDER_REQ: 2109,
+  PROTO_OA_CLOSE_POSITION_REQ: 2111,
+  PROTO_OA_TRADER_REQ: 2121,
+  PROTO_OA_TRADER_RES: 2122,
+  PROTO_OA_RECONCILE_REQ: 2124,
+  PROTO_OA_RECONCILE_RES: 2125,
+  PROTO_OA_EXECUTION_EVENT: 2126,
+  PROTO_OA_SUBSCRIBE_SPOTS_REQ: 2127,
+  PROTO_OA_SUBSCRIBE_SPOTS_RES: 2128,
+  PROTO_OA_UNSUBSCRIBE_SPOTS_REQ: 2129,
+  PROTO_OA_UNSUBSCRIBE_SPOTS_RES: 2130,
+  PROTO_OA_SPOT_EVENT: 2131,
   PROTO_OA_ERROR_RES: 2142,
   HEARTBEAT_EVENT: 51,
 } as const;
@@ -350,9 +355,12 @@ export class CTraderProvider extends BaseMarketDataProvider {
   }
 
   private async authenticateAccount(accessToken: string): Promise<void> {
+    // ProtoOAAccountAuthReq は accessToken に加えて ctidTraderAccountId が必須。
+    // 欠落すると cTrader が INVALID_REQUEST ("Message missing required fields:
+    // ctidTraderAccountId") を返し、認証が完了せず口座/ポジション取得がタイムアウトしていた。
     const message = {
       payloadType: CTraderMessageType.PROTO_OA_ACCOUNT_AUTH_REQ,
-      payload: { accessToken },
+      payload: { ctidTraderAccountId: parseInt(this.accountId, 10), accessToken },
     };
     await this.sendRequest(message);
   }
@@ -423,6 +431,17 @@ export class CTraderProvider extends BaseMarketDataProvider {
       if (message.payloadType === CTraderMessageType.HEARTBEAT_EVENT) return;
       if (message.payloadType === CTraderMessageType.PROTO_OA_ERROR_RES) {
         console.error('[cTrader] エラー:', message.payload);
+        // エラー応答に clientMsgId があれば、対応する pending リクエストを reject する。
+        // 従来はログのみで pending を放置していたため、認証/Reconcile がエラー応答を受けても
+        // 10 秒タイムアウトまで宙吊りになり「リクエストタイムアウト」で本当の原因がマスクされていた。
+        if (message.clientMsgId) {
+          const reqId = parseInt(message.clientMsgId, 10);
+          const pending = this.pendingRequests.get(reqId);
+          if (pending) {
+            this.pendingRequests.delete(reqId);
+            pending.reject(new Error(`[cTrader] APIエラー: ${JSON.stringify(message.payload)}`));
+          }
+        }
         return;
       }
       if (message.clientMsgId) {
@@ -509,6 +528,7 @@ export class CTraderProvider extends BaseMarketDataProvider {
   async sendCommand<TPayload extends object>(command: string, payload: TPayload): Promise<JsonValue | undefined> {
     // コマンド名からメッセージタイプを解決
     const messageTypeMap: Record<string, number> = {
+      'ProtoOATraderReq': CTraderMessageType.PROTO_OA_TRADER_REQ,
       'ProtoOAReconcileReq': CTraderMessageType.PROTO_OA_RECONCILE_REQ,
       'ProtoOANewOrderReq': CTraderMessageType.PROTO_OA_NEW_ORDER_REQ,
       'ProtoOAAmendOrderReq': CTraderMessageType.PROTO_OA_AMEND_ORDER_REQ,

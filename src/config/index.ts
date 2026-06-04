@@ -280,7 +280,10 @@ export const config = {
     // WebSocket接続設定（ホストとポート）
     wsLiveHost: process.env.CTRADER_WS_LIVE_HOST || 'live.ctraderapi.com',
     wsDemoHost: process.env.CTRADER_WS_DEMO_HOST || 'demo.ctraderapi.com',
-    wsPort: parseInt(process.env.CTRADER_WS_PORT || '5035', 10),
+    // cTrader Open API のポート: 5035=Protobuf / 5036=JSON。
+    // CTraderProvider は JSON プロトコル (JSON.stringify 送信) のため 5036 が正。
+    // 5035 だと JSON が解釈されず無応答になり認証/口座取得がタイムアウトする。
+    wsPort: parseInt(process.env.CTRADER_WS_PORT || '5036', 10),
     // Redirect URI（Vercel）
     redirectUri: process.env.CTRADER_REDIRECT_URI || 'https://trader-note-build-ai.vercel.app/auth/ctrader/callback',
   },

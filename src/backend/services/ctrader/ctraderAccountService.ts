@@ -58,19 +58,28 @@ const CTraderPositionSchema = z.object({
 });
 
 /**
- * cTrader ProtoOAReconcileRes スキーマ
+ * cTrader ProtoOAReconcileRes スキーマ。
+ * Reconcile は口座残高ではなく position[] / order[] を返す (残高は ProtoOATraderRes 側)。
+ * ポジション 0 件のときは position 自体が省略されるため optional とする。
  */
 const CTraderReconcileResponseSchema = z.object({
   ctidTraderAccountId: z.number(),
-  balance: z.number(),        // cent単位
-  equity: z.number().optional(),        // cent単位
-  margin: z.number().optional(),        // cent単位
-  freeMargin: z.number().optional(),    // cent単位
-  marginLevel: z.number().optional(),   // パーセント
-  currency: z.string().optional(),
-  isLive: z.boolean().optional(),
-  leverage: z.number().optional(),
   position: z.array(CTraderPositionSchema).optional(),
+});
+
+/**
+ * cTrader ProtoOATraderRes スキーマ (口座残高・レバレッジ等)。
+ * 金額は moneyDigits 桁の整数 (例 moneyDigits=2 なら cent)。
+ */
+const CTraderTraderResponseSchema = z.object({
+  ctidTraderAccountId: z.number(),
+  trader: z.object({
+    balance: z.number(),
+    depositAssetId: z.number().optional(),
+    leverageInCents: z.number().optional(),
+    moneyDigits: z.number().optional(),
+    accountType: z.number().optional(),
+  }),
 });
 
 type CTraderPosition = z.infer<typeof CTraderPositionSchema>;
@@ -114,31 +123,38 @@ export class CTraderAccountService extends EventEmitter {
    * @returns 口座残高・証拠金情報
    */
   async getAccountInfo(): Promise<AccountInfoResponse> {
-    // CTraderProvider経由でProtoOAReconcileReqを送信
-    const rawResponse = await this.provider.sendCommand('ProtoOAReconcileReq', {
+    // 残高・レバレッジは ProtoOATraderReq で取得する (ProtoOAReconcileReq は
+    // position/order を返すだけで残高を含まないため、従来は誤った口座情報になっていた)。
+    const rawResponse = await this.provider.sendCommand('ProtoOATraderReq', {
       ctidTraderAccountId: parseInt(this.accountId, 10),
     });
 
     // Zodバリデーション
-    const result = CTraderReconcileResponseSchema.safeParse(rawResponse);
+    const result = CTraderTraderResponseSchema.safeParse(rawResponse);
     if (!result.success) {
       console.error('[CTraderAccountService] レスポンスバリデーションエラー:', result.error);
       throw new Error('cTrader API レスポンスの形式が不正です');
     }
 
-    const response = result.data;
+    const trader = result.data.trader;
+    // 金額は moneyDigits 桁の整数。レバレッジは cent 単位 (leverageInCents)。
+    const divisor = Math.pow(10, trader.moneyDigits ?? 2);
+    const balance = trader.balance / divisor;
 
+    // ProtoOATrader は equity/margin/freeMargin を直接持たない。含み損益を加味した
+    // 正確な equity 計算は別途必要なため、ここでは残高ベースの近似値を返す
+    // (建玉なしのフラット時は balance と一致する)。
     const accountInfo: AccountInfoResponse = {
       accountId: this.accountId,
-      ctidTraderAccountId: response.ctidTraderAccountId,
-      balance: response.balance / 100, // centから変換
-      equity: (response.equity || response.balance) / 100,
-      margin: (response.margin || 0) / 100,
-      freeMargin: (response.freeMargin || response.balance) / 100,
-      marginLevel: response.marginLevel || 0,
-      currency: response.currency || 'USD',
-      isLive: response.isLive ?? false,
-      leverage: response.leverage ?? 100,
+      ctidTraderAccountId: result.data.ctidTraderAccountId,
+      balance,
+      equity: balance,
+      margin: 0,
+      freeMargin: balance,
+      marginLevel: 0,
+      currency: 'USD',
+      isLive: false,
+      leverage: (trader.leverageInCents ?? 10000) / 100,
     };
 
     // レスポンススキーマでバリデーション
