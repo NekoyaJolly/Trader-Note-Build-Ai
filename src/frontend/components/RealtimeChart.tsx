@@ -73,6 +73,63 @@ const TIMEFRAME_TO_API: Record<number, string> = {
 };
 
 const FALLBACK_REFRESH_INTERVAL = 30000; // 30秒
+const BROKER_QUOTE_REFRESH_INTERVAL = 30000; // 30秒 (cTrader bid/ask overlay)
+
+// ブローカー (cTrader) overlay 用の型。ローソ足 (EODHD/local) とは別レイヤー。
+type BrokerConnectionStatus = "connected" | "degraded" | "disconnected";
+
+interface BrokerQuote {
+	symbol: string;
+	broker: "cTrader";
+	bid: number;
+	ask: number;
+	spread: number;
+	timestamp: string;
+	isRealtime: boolean;
+}
+
+interface BrokerQuoteResponse {
+	quote: BrokerQuote | null;
+	status: BrokerConnectionStatus;
+	warning?: string;
+}
+
+// /api/chart/candles レスポンス (ChartCandlesResponse) の最小ランタイム検証用。
+// frontend に Zod 依存が無いため、外部レスポンスは型ガードで narrow し盲目的な as を避ける。
+interface ChartCandlePayload {
+	time: number;
+	open: number;
+	high: number;
+	low: number;
+	close: number;
+	volume: number | null;
+}
+interface ChartCandlesPayload {
+	candles: ChartCandlePayload[];
+	warning?: string;
+}
+
+function isChartCandlesPayload(value: unknown): value is ChartCandlesPayload {
+	if (typeof value !== "object" || value === null) return false;
+	const candles = (value as { candles?: unknown }).candles;
+	if (!Array.isArray(candles)) return false;
+	return candles.every(
+		(c) =>
+			typeof c === "object" &&
+			c !== null &&
+			typeof (c as { time?: unknown }).time === "number" &&
+			typeof (c as { open?: unknown }).open === "number" &&
+			typeof (c as { high?: unknown }).high === "number" &&
+			typeof (c as { low?: unknown }).low === "number" &&
+			typeof (c as { close?: unknown }).close === "number"
+	);
+}
+
+function isBrokerQuoteResponse(value: unknown): value is BrokerQuoteResponse {
+	if (typeof value !== "object" || value === null) return false;
+	const status = (value as { status?: unknown }).status;
+	return status === "connected" || status === "degraded" || status === "disconnected";
+}
 
 interface PricePanelProps {
 	bar: PendingBar | OHLCVBar | null;
@@ -158,6 +215,44 @@ const PricePanel = ({ bar, dailyHigh, dailyLow, previousClose }: PricePanelProps
 	);
 };
 
+/**
+ * ブローカー (cTrader) bid/ask overlay パネル。
+ * - connected: bid/ask/スプレッドを表示
+ * - degraded / disconnected: 「ブローカー未接続」を明示し、発注不可状態を伝える
+ * チャートのローソ足状態とは独立した「ブローカー接続状態」の表示。
+ */
+const BrokerQuotePanel = ({ status, quote }: { status: BrokerConnectionStatus; quote: BrokerQuote | null }) => {
+	if (status === "connected" && quote) {
+		const spreadPips = (quote.spread * 10000).toFixed(1);
+		return (
+			<div className="bg-gray-800 rounded-lg p-2 flex flex-nowrap items-center gap-1.5 text-sm overflow-x-auto border border-emerald-700/40">
+				<span className="flex-none text-[10px] px-1.5 py-0.5 rounded bg-emerald-700/40 text-emerald-200 whitespace-nowrap">ブローカー接続</span>
+				<div className="flex-none w-[90px] bg-gray-900/60 rounded px-2 py-1">
+					<div className="text-[10px] text-gray-400">Bid</div>
+					<div className="font-mono text-xs text-red-400 leading-tight">{quote.bid.toFixed(5)}</div>
+				</div>
+				<div className="flex-none w-[90px] bg-gray-900/60 rounded px-2 py-1">
+					<div className="text-[10px] text-gray-400">Ask</div>
+					<div className="font-mono text-xs text-green-400 leading-tight">{quote.ask.toFixed(5)}</div>
+				</div>
+				<div className="flex-none w-[90px] bg-gray-900/60 rounded px-2 py-1">
+					<div className="text-[10px] text-gray-400">スプレッド</div>
+					<div className="font-mono text-xs text-yellow-400 leading-tight">{spreadPips}p</div>
+				</div>
+			</div>
+		);
+	}
+
+	const label = status === "degraded" ? "ブローカー気配を取得できません" : "ブローカー未接続（発注不可）";
+	return (
+		<div className="bg-gray-800/60 rounded-lg px-2 py-1.5 text-xs text-gray-400 border border-gray-700/60 flex items-center gap-2">
+			<span className="inline-block w-2 h-2 rounded-full bg-gray-500" />
+			<span>{label}</span>
+			<span className="text-gray-600">ローソク足は表示できます</span>
+		</div>
+	);
+};
+
 export function RealtimeChart({
 	symbol,
 	height = 400,
@@ -184,11 +279,18 @@ export function RealtimeChart({
 		return () => clearInterval(timer);
 	}, []);
 
-	// Twelve Data API フォールバック用ステート
+	// チャート OHLCV フォールバック用ステート
 	const [fallbackData, setFallbackData] = useState<OHLCVDataPoint[]>([]);
 	const [fallbackLoading, setFallbackLoading] = useState(false);
 	const [fallbackError, setFallbackError] = useState<string | null>(null);
+	// データ無し/遅延などの「警告」はエラーと分けて扱う (再試行を促さない)
+	const [fallbackWarning, setFallbackWarning] = useState<string | null>(null);
 	const fallbackTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+	// ブローカー (cTrader) overlay 用ステート。ローソ足とは別レイヤーで bid/ask を扱う。
+	const [brokerQuote, setBrokerQuote] = useState<BrokerQuote | null>(null);
+	const [brokerStatus, setBrokerStatus] = useState<BrokerConnectionStatus>("disconnected");
+	const brokerTimerRef = useRef<NodeJS.Timeout | null>(null);
 
 	const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 
@@ -250,34 +352,46 @@ export function RealtimeChart({
 	}, [isConnected]);
 
 	// ============================================
-	// Twelve Data API フォールバック
-	// cTrader 未接続時に REST API から OHLCV データを取得
+	// チャート OHLCV フォールバック (EODHD 主体)
+	// SSE (cTrader/EODHD WebSocket) 未接続時に /api/chart/candles から OHLCV を取得する。
+	// この経路は cTrader に依存しないため、ブローカー障害時もローソ足を表示できる。
 	// ============================================
 	const fetchFallbackData = useCallback(async () => {
 		const apiTimeframe = TIMEFRAME_TO_API[timeframe] || '1m';
 		setFallbackLoading(true);
 		setFallbackError(null);
+		setFallbackWarning(null);
 		try {
 			const res = await apiFetch(
-				`${apiBase}/api/market-analysis/${symbol}?timeframe=${apiTimeframe}&count=${dataCount}`
+				`${apiBase}/api/chart/candles?symbol=${encodeURIComponent(symbol)}&timeframe=${apiTimeframe}&limit=${dataCount}`
 			);
-			if (!res.ok) throw new Error(`APIエラー: ${res.status}`);
-			const result = await res.json();
-			if (!result.success) throw new Error(result.error || 'データ取得に失敗');
-
-			const ohlcv: OHLCVDataPoint[] = (result.data.ohlcv || []).map(
-				(d: { timestamp: string; open: number; high: number; low: number; close: number; volume: number }) => ({
-					timestamp: new Date(d.timestamp).getTime(),
-					open: d.open,
-					high: d.high,
-					low: d.low,
-					close: d.close,
-					volume: d.volume,
-				})
-			);
+			if (!res.ok) {
+				// 404=symbol未対応 / 503=外部プロバイダー障害 をサーバーのメッセージで区別する
+				const errBody = await res.json().catch(() => null) as { error?: string } | null;
+				throw new Error(errBody?.error || `APIエラー: ${res.status}`);
+			}
+			// ChartCandlesResponse を型ガードで検証してから利用する (盲目的な as を避ける)
+			const payload: unknown = await res.json();
+			if (!isChartCandlesPayload(payload)) {
+				throw new Error('チャートデータの形式が不正です');
+			}
+			const candles = payload.candles;
+			const ohlcv: OHLCVDataPoint[] = candles.map((c) => ({
+				timestamp: c.time * 1000, // Unix 秒 → ms (lightweight-charts 用)
+				open: c.open,
+				high: c.high,
+				low: c.low,
+				close: c.close,
+				volume: c.volume ?? 0,
+			}));
 			setFallbackData(ohlcv);
+			// データが空でも 200 で返る (symbol 有効・データ無し)。これはエラーではなく「警告」。
+			// 再試行を促す赤表示にせず、注意表示として扱う。
+			if (candles.length === 0 && payload.warning) {
+				setFallbackWarning(payload.warning);
+			}
 		} catch (err) {
-			setFallbackError(err instanceof Error ? err.message : 'フォールバックデータ取得失敗');
+			setFallbackError(err instanceof Error ? err.message : 'チャートデータ取得失敗');
 		} finally {
 			setFallbackLoading(false);
 		}
@@ -319,6 +433,56 @@ export function RealtimeChart({
 			}
 		};
 	}, [isConnected, hasEverConnected, fetchFallbackData, marketStatus.isOpen]);
+
+	// ============================================
+	// ブローカー (cTrader) quote overlay
+	// チャートのローソ足とは独立して bid/ask/スプレッドを取得する。
+	// cTrader 障害時は status=degraded/disconnected を受け取り、発注ボタンを無効化する。
+	// ============================================
+	const fetchBrokerQuote = useCallback(async () => {
+		try {
+			const res = await apiFetch(
+				`${apiBase}/api/broker/quote?symbol=${encodeURIComponent(symbol)}`
+			);
+			// 503 (disconnected) でも body は BrokerQuoteResponse 形式で返るが、
+			// 401 等の想定外レスポンスは形が異なるため、型ガードで検証してから採用する。
+			const payload: unknown = await res.json().catch(() => null);
+			if (!isBrokerQuoteResponse(payload)) {
+				setBrokerStatus("disconnected");
+				setBrokerQuote(null);
+				return;
+			}
+			setBrokerStatus(payload.status);
+			setBrokerQuote(payload.quote);
+		} catch {
+			// ネットワークエラー時はブローカー未接続扱い (チャート表示には影響しない)
+			setBrokerStatus("disconnected");
+			setBrokerQuote(null);
+		}
+	}, [apiBase, symbol]);
+
+	// シンボル変更時に即時取得 + 市場開場中は定期更新
+	useEffect(() => {
+		if (!marketStatus.isOpen) {
+			if (brokerTimerRef.current) {
+				clearInterval(brokerTimerRef.current);
+				brokerTimerRef.current = null;
+			}
+			setBrokerStatus("disconnected");
+			setBrokerQuote(null);
+			return;
+		}
+		void fetchBrokerQuote();
+		brokerTimerRef.current = setInterval(() => {
+			void fetchBrokerQuote();
+		}, BROKER_QUOTE_REFRESH_INTERVAL);
+		return () => {
+			if (brokerTimerRef.current) {
+				clearInterval(brokerTimerRef.current);
+				brokerTimerRef.current = null;
+			}
+		};
+	}, [fetchBrokerQuote, marketStatus.isOpen]);
 
 	const handleTimeframeChange = async (newTimeframe: number) => {
 		const wasConnected = isConnected;
@@ -656,8 +820,9 @@ export function RealtimeChart({
 							</div>
 						)}
 
-						<div className="px-2">
+						<div className="px-2 space-y-1">
 							<PricePanel bar={pricePanelBar} dailyHigh={dailyHigh} dailyLow={dailyLow} previousClose={previousClose} />
+							<BrokerQuotePanel status={brokerStatus} quote={brokerQuote} />
 						</div>
 
 						<div className="relative" style={{ marginBottom: '60px' }}>
@@ -675,9 +840,10 @@ export function RealtimeChart({
 							/>
 						</div>
 
+						{/* 発注はブローカー接続中 (broker quote connected) のみ許可する */}
 						<OrderPanel
 							symbol={symbol}
-							disabled={!marketStatus.isOpen}
+							disabled={!marketStatus.isOpen || brokerStatus !== "connected"}
 							onOrderPlaced={() => {
 								void refetchTrading();
 							}}
@@ -811,6 +977,13 @@ export function RealtimeChart({
 								<button onClick={fetchFallbackData} className="px-4 py-1.5 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white transition">
 									再試行
 								</button>
+							</>
+						) : fallbackWarning ? (
+							/* データ無し/遅延などの警告。エラーではないので赤表示・再試行は出さない */
+							<>
+								<div className="text-5xl mb-3">🕒</div>
+								<p className="text-sm mb-1 text-blue-300">{fallbackWarning}</p>
+								<p className="text-xs text-gray-500">データが蓄積されると自動で表示されます</p>
 							</>
 						) : (
 							<>

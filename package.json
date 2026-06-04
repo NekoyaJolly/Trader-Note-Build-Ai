@@ -120,7 +120,7 @@
   "overrides": {
     "axios": "^1.12.0",
     "@reiryoku/ctrader-layer": {
-      "protobufjs": "^7.5.8"
+      "protobufjs": "5.0.1"
     },
     "@last-mile-context/schema": "$@last-mile-context/schema",
     "@last-mile-context/core": "$@last-mile-context/core",

@@ -18,6 +18,14 @@ import type { CTraderAuthService } from './ctraderAuthService';
 import type { CTraderConnectionType } from './types/connection';
 
 // @reiryoku/ctrader-layer は型定義がないため、コンストラクタ型を明示してから取り出す。
+//
+// SECURITY_EXCEPTION (一時例外): @reiryoku/ctrader-layer は protobuf.loadProtoFile を
+// 呼ぶため protobufjs@5.0.1 を必要とする。セキュリティ対応でルートは protobufjs v7 系を
+// 使うが、package.json の `overrides["@reiryoku/ctrader-layer"].protobufjs = "5.0.1"` で
+// **このパッケージ配下にのみ** v5 を隔離している (グローバルには戻していない)。
+// 隔離の回帰検証は src/backend/tests/ctraderLayerDependency.test.ts。
+// TODO(恒久対応): @reiryoku/ctrader-layer を fork して protobufjs v7/v8 対応へ移行し、
+//   override を撤廃する。これにより v5 系の既知脆弱性への依存を解消する。
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const ctraderLayer = require('@reiryoku/ctrader-layer') as {
   CTraderConnection: new (config: { host: string; port: number }) => CTraderConnectionType;

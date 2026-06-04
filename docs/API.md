@@ -926,6 +926,81 @@ ID で特定のトレードノートを取得します。
 
 ---
 
+### チャート・ブローカー
+
+チャートのローソク足 (OHLCV) は **EODHD を主データソース**とし、cTrader 障害時もチャートを表示できる設計。cTrader は bid/ask・スプレッド等の broker overlay に分離する。分析結果 (12次元特徴量) は従来通り `/api/market-analysis/:symbol` が担い、本セクションのチャート API とは責務を分ける。
+
+#### GET /api/chart/candles
+チャート用ローソ足を取得します。EODHD を主データソースとし、障害時はローカルキャッシュ (OHLCVCandle) にフォールバックします。**cTrader には依存しません。**
+
+**クエリパラメータ:**
+- `symbol` (必須): 銘柄シンボル (例: `XAUUSD`)
+- `timeframe` (必須): 時間足 (`1m`/`5m`/`15m`/`30m`/`1h`/`4h`/`1d`/`1w`)
+- `from` (任意): 開始日時 (ISO 8601)
+- `to` (任意): 終了日時 (ISO 8601)
+- `limit` (任意): 取得本数 (最大 5000)
+
+**HTTP ステータス方針 (404 を乱用しない):**
+- symbol 不正/未対応 → `404`
+- timeframe 不正/必須パラメータ不足 → `400`
+- 外部プロバイダー障害かつキャッシュ無し → `503`
+- symbol は有効だがデータ無し → `200` (`candles: []` + `warning`)
+
+**応答 (200):**
+```json
+{
+  "candles": [
+    { "time": 1717239600, "open": 2345.12, "high": 2347.22, "low": 2344.80, "close": 2346.31, "volume": null }
+  ],
+  "meta": {
+    "source": "EODHD",
+    "provider": "EODHD",
+    "priceBasis": "unknown",
+    "symbol": "XAUUSD",
+    "timeframe": "1m",
+    "isRealtime": false,
+    "delayMs": 60000,
+    "generatedAt": "2026-06-03T00:00:00.000Z"
+  },
+  "warning": "EODHDのOHLCVはリアルタイムではない可能性があります。"
+}
+```
+`time` は Unix 秒 (UTC)。`source` は `"EODHD"` | `"local"` | `"cTrader"`。フォールバック時は `source: "local"`。
+
+---
+
+#### GET /api/broker/quote
+チャート上に重ねるブローカー (cTrader) の現在 bid/ask・スプレッドを取得します。ローソ足とは別レイヤーで、cTrader 障害時もチャート API には影響しません。
+
+**クエリパラメータ:**
+- `symbol` (必須): 銘柄シンボル
+
+**HTTP ステータス方針:**
+- 正常取得 → `200` (`status: "connected"`)
+- 設定済だが取得失敗 → `200` (`status: "degraded"`, `quote: null`)
+- 未接続 → `503` (`status: "disconnected"`, `quote: null`)
+- symbol 不足 → `400`
+
+**応答 (200):**
+```json
+{
+  "quote": {
+    "symbol": "EURUSD",
+    "broker": "cTrader",
+    "bid": 1.23450,
+    "ask": 1.23470,
+    "spread": 0.00020,
+    "timestamp": "2026-06-03T00:00:00.000Z",
+    "isRealtime": true
+  },
+  "status": "connected"
+}
+```
+
+> 注: 約定履歴 (deal) マーカー用の `/api/broker/executions` は後続対応 (cTrader 側 deal 取得が未実装のため)。
+
+---
+
 ## CORS 設定
 
 デフォルトで以下のオリジンからのリクエストを許可しています:
