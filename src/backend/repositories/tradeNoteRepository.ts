@@ -14,7 +14,7 @@
  * - ビジネスロジックは含まない (サービス層の責務)
  */
 
-import type { PrismaClient, TradeNote, AISummary, TradeSide, NoteStatus, Prisma } from '@prisma/client';
+import type { PrismaClient, TradeNote, AISummary, Trade, TradeSide, NoteStatus, Prisma } from '@prisma/client';
 import { prisma } from '../db/client';
 // 注意: JSON フィールドの型変換はアプリケーション層で行う
 // toIndicatorJson(), toMarketContextJson() を使用
@@ -69,6 +69,8 @@ export interface CreateAISummaryInput {
  */
 export interface TradeNoteWithSummary extends TradeNote {
   aiSummary: AISummary | null;
+  /** 紐づく元トレード (数量・エントリー時刻の表示用、include 時のみ) */
+  trade?: Trade | null;
 }
 
 /**
@@ -158,7 +160,8 @@ export class TradeNoteRepository {
   async findById(id: string): Promise<TradeNoteWithSummary | null> {
     return await this.prisma.tradeNote.findUnique({
       where: { id },
-      include: { aiSummary: true },
+      // trade を含めて数量・エントリー時刻を実値表示できるようにする (F6)
+      include: { aiSummary: true, trade: true },
     });
   }
 
