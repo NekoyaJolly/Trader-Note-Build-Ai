@@ -249,7 +249,12 @@ describe('validateHypothesis 実ゲート統合 (statusManager をモックし�
 
     expect(verdict.verdict).toBe('rejected');
     expect(verdict.baseCriteriaReasons.some((r) => r.includes('過学習'))).toBe(true);
-    expect(mocks.ledger.markRejectedFull).toHaveBeenCalled();
+    // 結線の回帰を検知するため id / reason(過学習) / report まで固定する
+    expect(mocks.ledger.markRejectedFull).toHaveBeenCalledWith(
+      'hyp-st-1',
+      expect.stringContaining('過学習'),
+      report,
+    );
     expect(mocks.ledger.markConfirmedFull).not.toHaveBeenCalled();
   });
 
@@ -264,6 +269,12 @@ describe('validateHypothesis 実ゲート統合 (statusManager をモックし�
 
     expect(verdict.verdict).toBe('rejected');
     expect(verdict.baseCriteriaReasons.some((r) => r.includes('WalkForward'))).toBe(true);
+    // rejected 分岐の結線を固定: id / reason(WalkForward) / report まで検証する
+    expect(mocks.ledger.markRejectedFull).toHaveBeenCalledWith(
+      'hyp-st-1',
+      expect.stringContaining('WalkForward'),
+      report,
+    );
     expect(mocks.ledger.markConfirmedFull).not.toHaveBeenCalled();
   });
 
