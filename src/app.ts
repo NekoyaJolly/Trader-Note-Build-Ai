@@ -259,6 +259,22 @@ class App {
         skip: (req) => req.method === 'GET' && req.path.endsWith('/me'),
       });
 
+      // 2026-06-05 (#11): 重い計算エンドポイント (バックテスト / 戦略比較 / パターン分析)
+      // への rate-limit 拡大。これらは 1 リクエストで analysis-engine への重い計算を伴う
+      // ため、認証済みユーザーであっても連打されると CPU / 外部エンジンを枯渇させうる。
+      //
+      // 制限: 1 分窓で 30 req/IP。通常 UI 操作 (ボタン押下で 1 回実行) では到達しない
+      // 緩い上限にし、暴走スクリプト / 連打のみを弾く。authRateLimiter と同じく
+      // MemoryStore のため水平スケール時はインスタンス間で分断される best-effort ゲート
+      // (本格対応は Redis store / Cloud Armor を別途。authRateLimiter のコメント参照)。
+      const heavyComputeRateLimiter = rateLimit({
+        windowMs: 60 * 1000,
+        max: 30,
+        standardHeaders: true,
+        legacyHeaders: false,
+        message: { error: 'Too many heavy compute requests, slow down' },
+      });
+
       // API routes
       // cTrader OAuth 認証ルート（認証不要、rate-limit 適用）
       console.log('[App] /api/auth ルートを登録中 (rate-limit 適用)...');
@@ -303,8 +319,8 @@ class App {
       console.log('[App] /api/profiles ルートを登録中...');
       this.app.use('/api/profiles', requireAuth, profileRoutes);
 
-      console.log('[App] /api/backtest ルートを登録中...');
-      this.app.use('/api/backtest', requireAuth, backtestRoutes);
+      console.log('[App] /api/backtest ルートを登録中 (rate-limit 適用)...');
+      this.app.use('/api/backtest', heavyComputeRateLimiter, requireAuth, backtestRoutes);
 
       console.log('[App] /api/settings ルートを登録中...');
       this.app.use('/api/settings', requireAuth, settingsRoutes);
@@ -315,11 +331,11 @@ class App {
       console.log('[App] /api/strategies ルートを登録中...');
       this.app.use('/api/strategies', requireAuth, strategyRoutes);
 
-      console.log('[App] /api/strategy-comparison ルートを登録中...');
-      this.app.use('/api/strategy-comparison', requireAuth, strategyComparisonRoutes);
+      console.log('[App] /api/strategy-comparison ルートを登録中 (rate-limit 適用)...');
+      this.app.use('/api/strategy-comparison', heavyComputeRateLimiter, requireAuth, strategyComparisonRoutes);
 
-      console.log('[App] /api/pattern-analysis ルートを登録中...');
-      this.app.use('/api/pattern-analysis', requireAuth, patternAnalysisRoutes);
+      console.log('[App] /api/pattern-analysis ルートを登録中 (rate-limit 適用)...');
+      this.app.use('/api/pattern-analysis', heavyComputeRateLimiter, requireAuth, patternAnalysisRoutes);
 
       console.log('[App] /api/ohlcv ルートを登録中...');
       this.app.use('/api/ohlcv', requireAuth, ohlcvRoutes);
