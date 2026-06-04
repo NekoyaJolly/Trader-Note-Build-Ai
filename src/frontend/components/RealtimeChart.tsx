@@ -136,7 +136,13 @@ interface PricePanelProps {
 	dailyHigh: number | null;
 	dailyLow: number | null;
 	previousClose: number | null;
+	// ブローカー (cTrader) の現在気配。価格情報と同じ行に Bid/Ask/スプレッドとして並べる。
+	brokerStatus: BrokerConnectionStatus;
+	brokerQuote: BrokerQuote | null;
 }
+
+// スプレッドの表示整形。FX (小さい値) は 5 桁、貴金属等 (大きい値) は 2 桁で表示する。
+const formatSpread = (spread: number): string => (spread < 0.1 ? spread.toFixed(5) : spread.toFixed(2));
 
 const StatusBadge = ({ status }: { status: ConnectionStatus }) => {
 	const colorClass = {
@@ -158,7 +164,7 @@ const StatusBadge = ({ status }: { status: ConnectionStatus }) => {
 	return <span className={`text-xs px-2 py-1 rounded ${colorClass}`}>{label}</span>;
 };
 
-const PricePanel = ({ bar, dailyHigh, dailyLow, previousClose }: PricePanelProps) => {
+const PricePanel = ({ bar, dailyHigh, dailyLow, previousClose, brokerStatus, brokerQuote }: PricePanelProps) => {
 	if (!bar) {
 		return <div className="bg-gray-800 rounded-lg p-3 text-sm text-gray-500 border border-gray-700">データ未取得</div>;
 	}
@@ -192,16 +198,6 @@ const PricePanel = ({ bar, dailyHigh, dailyLow, previousClose }: PricePanelProps
 				</div>
 
 				<div className="flex-none w-[90px] bg-gray-900/60 rounded px-2 py-1">
-					<div className="text-[10px] text-gray-400 whitespace-nowrap">高値</div>
-					<div className="font-mono text-xs text-green-400 leading-tight whitespace-nowrap">{bar.high.toFixed(2)}</div>
-				</div>
-
-				<div className="flex-none w-[90px] bg-gray-900/60 rounded px-2 py-1">
-					<div className="text-[10px] text-gray-400 whitespace-nowrap">安値</div>
-					<div className="font-mono text-xs text-red-400 leading-tight whitespace-nowrap">{bar.low.toFixed(2)}</div>
-				</div>
-
-				<div className="flex-none w-[90px] bg-gray-900/60 rounded px-2 py-1">
 					<div className="text-[10px] text-gray-400 whitespace-nowrap">当日高値</div>
 					<div className="font-mono text-xs text-green-300 leading-tight whitespace-nowrap">{formatNullable(dailyHigh)}</div>
 				</div>
@@ -210,45 +206,33 @@ const PricePanel = ({ bar, dailyHigh, dailyLow, previousClose }: PricePanelProps
 					<div className="text-[10px] text-gray-400 whitespace-nowrap">当日安値</div>
 					<div className="font-mono text-xs text-red-300 leading-tight whitespace-nowrap">{formatNullable(dailyLow)}</div>
 				</div>
-			</div>
-		</div>
-	);
-};
 
-/**
- * ブローカー (cTrader) bid/ask overlay パネル。
- * - connected: bid/ask/スプレッドを表示
- * - degraded / disconnected: 「ブローカー未接続」を明示し、発注不可状態を伝える
- * チャートのローソ足状態とは独立した「ブローカー接続状態」の表示。
- */
-const BrokerQuotePanel = ({ status, quote }: { status: BrokerConnectionStatus; quote: BrokerQuote | null }) => {
-	if (status === "connected" && quote) {
-		const spreadPips = (quote.spread * 10000).toFixed(1);
-		return (
-			<div className="bg-gray-800 rounded-lg p-2 flex flex-nowrap items-center gap-1.5 text-sm overflow-x-auto border border-emerald-700/40">
-				<span className="flex-none text-[10px] px-1.5 py-0.5 rounded bg-emerald-700/40 text-emerald-200 whitespace-nowrap">ブローカー接続</span>
-				<div className="flex-none w-[90px] bg-gray-900/60 rounded px-2 py-1">
-					<div className="text-[10px] text-gray-400">Bid</div>
-					<div className="font-mono text-xs text-red-400 leading-tight">{quote.bid.toFixed(5)}</div>
-				</div>
-				<div className="flex-none w-[90px] bg-gray-900/60 rounded px-2 py-1">
-					<div className="text-[10px] text-gray-400">Ask</div>
-					<div className="font-mono text-xs text-green-400 leading-tight">{quote.ask.toFixed(5)}</div>
-				</div>
-				<div className="flex-none w-[90px] bg-gray-900/60 rounded px-2 py-1">
-					<div className="text-[10px] text-gray-400">スプレッド</div>
-					<div className="font-mono text-xs text-yellow-400 leading-tight">{spreadPips}p</div>
-				</div>
+				{/* ブローカー (cTrader) 気配。価格情報と同じ行に並べ、UX 上まとめて把握できるようにする */}
+				<div className="flex-none w-px self-stretch bg-gray-700 mx-0.5" />
+				{brokerStatus === "connected" && brokerQuote ? (
+					<>
+						<div className="flex-none w-[100px] bg-gray-900/60 rounded px-2 py-1 border border-emerald-700/30">
+							<div className="text-[10px] text-gray-400 whitespace-nowrap">Bid</div>
+							<div className="font-mono text-xs text-red-400 leading-tight whitespace-nowrap">{brokerQuote.bid.toFixed(2)}</div>
+						</div>
+						<div className="flex-none w-[100px] bg-gray-900/60 rounded px-2 py-1 border border-emerald-700/30">
+							<div className="text-[10px] text-gray-400 whitespace-nowrap">Ask</div>
+							<div className="font-mono text-xs text-green-400 leading-tight whitespace-nowrap">{brokerQuote.ask.toFixed(2)}</div>
+						</div>
+						<div className="flex-none w-[80px] bg-gray-900/60 rounded px-2 py-1">
+							<div className="text-[10px] text-gray-400 whitespace-nowrap">スプレッド</div>
+							<div className="font-mono text-xs text-yellow-400 leading-tight whitespace-nowrap">{formatSpread(brokerQuote.spread)}</div>
+						</div>
+					</>
+				) : (
+					<div className="flex-none flex items-center gap-1.5 bg-gray-900/40 rounded px-2 py-1 border border-gray-700/60">
+						<span className="inline-block w-2 h-2 rounded-full bg-gray-500" />
+						<span className="text-[11px] text-gray-400 whitespace-nowrap">
+							{brokerStatus === "degraded" ? "気配取得不可" : "ブローカー未接続"}
+						</span>
+					</div>
+				)}
 			</div>
-		);
-	}
-
-	const label = status === "degraded" ? "ブローカー気配を取得できません" : "ブローカー未接続（発注不可）";
-	return (
-		<div className="bg-gray-800/60 rounded-lg px-2 py-1.5 text-xs text-gray-400 border border-gray-700/60 flex items-center gap-2">
-			<span className="inline-block w-2 h-2 rounded-full bg-gray-500" />
-			<span>{label}</span>
-			<span className="text-gray-600">ローソク足は表示できます</span>
 		</div>
 	);
 };
@@ -291,6 +275,9 @@ export function RealtimeChart({
 	const [brokerQuote, setBrokerQuote] = useState<BrokerQuote | null>(null);
 	const [brokerStatus, setBrokerStatus] = useState<BrokerConnectionStatus>("disconnected");
 	const brokerTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+	// モバイル発注シートの開閉
+	const [showMobileOrder, setShowMobileOrder] = useState(false);
 
 	const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 
@@ -708,8 +695,11 @@ export function RealtimeChart({
 
 	return (
 		<div className="bg-gray-900 rounded-lg overflow-hidden">
-			{/* デスクトップ用ヘッダー */}
-			<div className="bg-gray-800 px-3 py-2 hidden md:flex items-center gap-3 border-b border-gray-700">
+			{/* デスクトップ用ヘッダー
+			    中間幅でも各コントロールを縮ませず (shrink-0)・文字を横維持 (whitespace-nowrap) し、
+			    収まらない時は縦に折り返さず横スクロール (overflow-x-auto) させる。
+			    スペーサー (flex-1) は余白がある時だけ伸び、狭い時は 0 に畳まれて右側要素を寄せる。 */}
+			<div className="bg-gray-800 px-3 py-2 hidden md:flex items-center gap-2 border-b border-gray-700 overflow-x-auto [&>*]:shrink-0 [&>*]:whitespace-nowrap">
 				<select value={symbol} onChange={(e) => handleSymbolChange(e.target.value)} className="bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 font-semibold hover:border-gray-500">
 					{SYMBOL_OPTIONS.map((opt) => (
 						<option key={opt.value} value={opt.value}>
@@ -820,9 +810,15 @@ export function RealtimeChart({
 							</div>
 						)}
 
-						<div className="px-2 space-y-1">
-							<PricePanel bar={pricePanelBar} dailyHigh={dailyHigh} dailyLow={dailyLow} previousClose={previousClose} />
-							<BrokerQuotePanel status={brokerStatus} quote={brokerQuote} />
+						<div className="px-2">
+							<PricePanel
+								bar={pricePanelBar}
+								dailyHigh={dailyHigh}
+								dailyLow={dailyLow}
+								previousClose={previousClose}
+								brokerStatus={brokerStatus}
+								brokerQuote={brokerQuote}
+							/>
 						</div>
 
 						<div className="relative" style={{ marginBottom: '60px' }}>
@@ -838,16 +834,44 @@ export function RealtimeChart({
 								onDeleteLine={handleDeleteLine}
 								onExitDrawing={handleExitDrawing}
 							/>
+
+							{/* PC: チャート右上にコンパクトな発注パネルをオーバーレイ。
+							    描画モード中は誤クリック防止のため隠す。発注はブローカー接続中のみ許可。 */}
+							{drawingMode === "none" && (
+								<div className="hidden md:block absolute top-2 right-2 z-20 w-56">
+									<OrderPanel
+										symbol={symbol}
+										compact
+										disabled={!marketStatus.isOpen || brokerStatus !== "connected"}
+										onOrderPlaced={() => {
+											void refetchTrading();
+										}}
+									/>
+								</div>
+							)}
 						</div>
 
-						{/* 発注はブローカー接続中 (broker quote connected) のみ許可する */}
-						<OrderPanel
-							symbol={symbol}
-							disabled={!marketStatus.isOpen || brokerStatus !== "connected"}
-							onOrderPlaced={() => {
-								void refetchTrading();
-							}}
-						/>
+						{/* モバイル: 下からスライドする発注シート。FAB で開閉する。 */}
+						<div className="md:hidden">
+							<button
+								type="button"
+								onClick={() => setShowMobileOrder((v) => !v)}
+								className="w-full rounded-lg bg-gray-800 border border-gray-700 text-sm text-gray-200 py-2 hover:bg-gray-700 transition"
+							>
+								{showMobileOrder ? "▼ 注文パネルを閉じる" : "▲ ワンクリック注文"}
+							</button>
+							{showMobileOrder && (
+								<div className="mt-2">
+									<OrderPanel
+										symbol={symbol}
+										disabled={!marketStatus.isOpen || brokerStatus !== "connected"}
+										onOrderPlaced={() => {
+											void refetchTrading();
+										}}
+									/>
+								</div>
+							)}
+						</div>
 
 						<div className="bg-gray-800/50 border border-gray-700/50 rounded-lg p-2">
 							<div className="flex items-center justify-between mb-2">

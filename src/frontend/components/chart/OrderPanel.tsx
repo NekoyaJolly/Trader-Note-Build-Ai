@@ -12,11 +12,13 @@ interface OrderPanelProps {
   symbol: string;
   disabled?: boolean;
   onOrderPlaced?: () => void;
+  /** チャート上オーバーレイ用のコンパクト表示 (余白・文字を詰め、TP/SL は詳細で折りたたむ) */
+  compact?: boolean;
 }
 
 type Side = 'BUY' | 'SELL';
 
-export function OrderPanel({ symbol, disabled = false, onOrderPlaced }: OrderPanelProps) {
+export function OrderPanel({ symbol, disabled = false, onOrderPlaced, compact = false }: OrderPanelProps) {
   const [volume, setVolume] = useState<number>(0.01);
   const [takeProfit, setTakeProfit] = useState<string>('');
   const [stopLoss, setStopLoss] = useState<string>('');
@@ -24,6 +26,8 @@ export function OrderPanel({ symbol, disabled = false, onOrderPlaced }: OrderPan
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // TP/SL/コメントは既定で折りたたむ (コンパクト・通常どちらも「詳細」で展開)
+  const [showDetails, setShowDetails] = useState(false);
 
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
 
@@ -84,60 +88,27 @@ export function OrderPanel({ symbol, disabled = false, onOrderPlaced }: OrderPan
   };
 
   return (
-    <div className="bg-gray-800/80 border border-gray-700 rounded-lg p-3 space-y-3">
+    <div
+      className={`bg-gray-800/90 border border-gray-700 rounded-lg ${
+        compact ? 'p-2 space-y-2 backdrop-blur-sm shadow-lg' : 'p-3 space-y-3'
+      }`}
+    >
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-white">ワンクリック注文</h3>
-        <span className="text-xs text-gray-400">{symbol}</span>
+        <h3 className={`font-semibold text-white ${compact ? 'text-xs' : 'text-sm'}`}>ワンクリック注文</h3>
+        <span className="text-[11px] text-gray-400">{symbol}</span>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
-        <label className="text-xs text-gray-400">
-          ロット数
-          <input
-            type="number"
-            min={0.01}
-            step={0.01}
-            value={volume}
-            onChange={(e) => setVolume(Number(e.target.value))}
-            className="mt-1 w-full rounded bg-gray-900 border border-gray-700 px-2 py-1 text-sm text-white"
-          />
-        </label>
-        <label className="text-xs text-gray-400">
-          コメント
-          <input
-            type="text"
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-            className="mt-1 w-full rounded bg-gray-900 border border-gray-700 px-2 py-1 text-sm text-white"
-            placeholder="任意"
-          />
-        </label>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        <label className="text-xs text-gray-400">
-          TP（任意）
-          <input
-            type="number"
-            step="0.01"
-            value={takeProfit}
-            onChange={(e) => setTakeProfit(e.target.value)}
-            className="mt-1 w-full rounded bg-gray-900 border border-gray-700 px-2 py-1 text-sm text-white"
-            placeholder="例: 2350.25"
-          />
-        </label>
-        <label className="text-xs text-gray-400">
-          SL（任意）
-          <input
-            type="number"
-            step="0.01"
-            value={stopLoss}
-            onChange={(e) => setStopLoss(e.target.value)}
-            className="mt-1 w-full rounded bg-gray-900 border border-gray-700 px-2 py-1 text-sm text-white"
-            placeholder="例: 2320.75"
-          />
-        </label>
-      </div>
+      <label className="block text-[11px] text-gray-400">
+        ロット数
+        <input
+          type="number"
+          min={0.01}
+          step={0.01}
+          value={volume}
+          onChange={(e) => setVolume(Number(e.target.value))}
+          className="mt-0.5 w-full rounded bg-gray-900 border border-gray-700 px-2 py-1 text-sm text-white"
+        />
+      </label>
 
       <div className="grid grid-cols-2 gap-2">
         <button
@@ -158,8 +129,59 @@ export function OrderPanel({ symbol, disabled = false, onOrderPlaced }: OrderPan
         </button>
       </div>
 
-      {message && <p className="text-xs text-green-400">{message}</p>}
-      {error && <p className="text-xs text-red-400">{error}</p>}
+      {/* TP/SL/コメントは普段折りたたみ、必要時のみ展開してパネルを小さく保つ */}
+      <button
+        type="button"
+        onClick={() => setShowDetails((v) => !v)}
+        className="text-[11px] text-gray-400 hover:text-gray-200 transition"
+      >
+        詳細 (TP/SL/コメント) {showDetails ? '▴' : '▾'}
+      </button>
+
+      {showDetails && (
+        <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-[11px] text-gray-400">
+              TP（任意）
+              <input
+                type="number"
+                step="0.01"
+                value={takeProfit}
+                onChange={(e) => setTakeProfit(e.target.value)}
+                className="mt-0.5 w-full rounded bg-gray-900 border border-gray-700 px-2 py-1 text-sm text-white"
+                placeholder="例: 2350.25"
+              />
+            </label>
+            <label className="text-[11px] text-gray-400">
+              SL（任意）
+              <input
+                type="number"
+                step="0.01"
+                value={stopLoss}
+                onChange={(e) => setStopLoss(e.target.value)}
+                className="mt-0.5 w-full rounded bg-gray-900 border border-gray-700 px-2 py-1 text-sm text-white"
+                placeholder="例: 2320.75"
+              />
+            </label>
+          </div>
+          <label className="block text-[11px] text-gray-400">
+            コメント
+            <input
+              type="text"
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              className="mt-0.5 w-full rounded bg-gray-900 border border-gray-700 px-2 py-1 text-sm text-white"
+              placeholder="任意"
+            />
+          </label>
+        </div>
+      )}
+
+      {message && <p className="text-[11px] text-green-400">{message}</p>}
+      {error && <p className="text-[11px] text-red-400">{error}</p>}
+      {disabled && !message && !error && (
+        <p className="text-[11px] text-gray-500">ブローカー未接続のため発注できません</p>
+      )}
     </div>
   );
 }
