@@ -239,7 +239,8 @@ export class EodhdProvider extends BaseMarketDataProvider {
           from: fromSec,
           to: toSec,
         });
-        const oneMinBars = rawOneMin.map((p) => this.intradayPointToBar(p));
+        // 1m も空 / 想定外レスポンスの場合に備えて防御 (fetchOneMinuteAggregated と同様)
+        const oneMinBars = (rawOneMin ?? []).map((p) => this.intradayPointToBar(p));
         aggregated = aggregateOHLCV(oneMinBars, TIMEFRAME_MS[timeframe]);
       }
 

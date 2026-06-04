@@ -149,15 +149,13 @@ export default function MarketAnalysisPage() {
 
     // リアルタイムチャート側の時間足変更を分析に同期する (チャートを単一ソースにする)。
     // 受け取るのは秒単位。分析 API 用の文字列に変換し、変わったら分析データを破棄して再取得させる。
+    // updater 内に副作用を入れると StrictMode で多重評価されうるため、現在値と比較してから通常 setState する。
     const handleRealtimeTimeframeChange = useCallback((seconds: number) => {
         const tf = SECONDS_TO_TIMEFRAME[seconds];
-        if (!tf) return;
-        setSelectedTimeframe((prev) => {
-            if (prev === tf) return prev;
-            setAnalysisData(null);
-            return tf;
-        });
-    }, []);
+        if (!tf || tf === selectedTimeframe) return;
+        setSelectedTimeframe(tf);
+        setAnalysisData(null);
+    }, [selectedTimeframe]);
 
     // データ取得
     const fetchAnalysis = useCallback(async () => {

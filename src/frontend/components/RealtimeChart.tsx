@@ -1030,6 +1030,10 @@ export function RealtimeChart({
 									{fallbackLoading ? "データを取得中…" : "データを自動取得中…（まだ受信できていません）"}
 								</p>
 								<p className="text-xs text-gray-500 mt-1">30秒ごとに自動で再取得します</p>
+								{/* API から返る警告 (データ欠損理由等) を欠落させず表示する */}
+								{fallbackWarning && !fallbackLoading && (
+									<p className="text-xs text-gray-500 mt-1 max-w-md text-center">{fallbackWarning}</p>
+								)}
 							</>
 						) : (
 							<>
