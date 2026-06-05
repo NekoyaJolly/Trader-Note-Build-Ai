@@ -341,8 +341,11 @@ export function RealtimeChart({
 	}, [apiBase, onLinesChange, storageKey, symbol, timeframe]);
 
 	// autoConnect: ログイン済みでチャートを開いたら、手動ボタンを待たずに
-	// リアルタイム SSE (EODHD WebSocket) へ自動接続する。realtime 経路は cTrader 非依存
-	// (EODHD_API_KEY 共通) なので、ログイン状態さえあれば即接続できる。
+	// リアルタイム SSE へ自動接続する。connect() は POST /api/realtime/connect を叩くが、
+	// この API は名前に反して EodhdRealtimeOrchestrator (EODHD WebSocket) を呼ぶ実装で、
+	// userId を使わず EODHD_API_KEY 共通認証のため cTrader には依存しない
+	// (eodhdRealtimeOrchestrator.ts: connect は `void _userId`)。よってログイン状態さえ
+	// あれば即接続できる。bid/ask overlay (cTrader 依存) は /api/broker/quote の別経路。
 	// 偽接続防止は useRealtimeChart 側の readyState チェック (PR #355) で担保。
 	const { bars, pendingBar, latestTick, status, error, isConnected, isLoading, isMarketClosed, connect, disconnect } = useRealtimeChart(symbol, { timeframe, persistConnection: true, autoConnect: true });
 	const { positions: tradingPositions, refetch: refetchTrading } = useTradingAccount(true);
