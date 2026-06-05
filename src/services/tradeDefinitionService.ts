@@ -94,9 +94,16 @@ export class TradeDefinitionService {
       );
       
       if (marketData.length === 0) {
-        warnings.push('市場データを取得できませんでした。モックデータを使用します');
-        // モックデータを生成
-        ohlcvData = this.generateMockOHLCV(normalizedTrade);
+        if (process.env.NODE_ENV === 'test') {
+          warnings.push('TEST ONLY: モック OHLCV を使用');
+          ohlcvData = this.generateMockOHLCV(normalizedTrade);
+        } else {
+          return {
+            success: false,
+            errors: [`市場データを取得できませんでした (symbol=${normalizedTrade.symbol}, timeframe=${request.timeframe})。TradeDefinition 生成をスキップします`],
+            warnings,
+          };
+        }
       } else {
         // MarketData[] を OHLCVData[] に変換
         ohlcvData = marketData.map(md => ({
@@ -121,19 +128,27 @@ export class TradeDefinitionService {
         volume: latestData.volume,
       };
     } catch (error) {
-      // 市場データ取得失敗時はモックを使用
-      warnings.push(`市場データ取得エラー: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      ohlcvData = this.generateMockOHLCV(normalizedTrade);
-      const latestData = ohlcvData[ohlcvData.length - 1];
-      marketSnapshot = {
-        timestamp: latestData.timestamp instanceof Date ? latestData.timestamp : new Date(latestData.timestamp),
-        timeframe: request.timeframe,
-        open: latestData.open,
-        high: latestData.high,
-        low: latestData.low,
-        close: latestData.close,
-        volume: latestData.volume,
-      };
+      const errMsg = error instanceof Error ? error.message : 'Unknown error';
+      if (process.env.NODE_ENV === 'test') {
+        warnings.push(`TEST ONLY: 市場データ取得エラー、モック使用: ${errMsg}`);
+        ohlcvData = this.generateMockOHLCV(normalizedTrade);
+        const latestData = ohlcvData[ohlcvData.length - 1];
+        marketSnapshot = {
+          timestamp: latestData.timestamp instanceof Date ? latestData.timestamp : new Date(latestData.timestamp),
+          timeframe: request.timeframe,
+          open: latestData.open,
+          high: latestData.high,
+          low: latestData.low,
+          close: latestData.close,
+          volume: latestData.volume,
+        };
+      } else {
+        return {
+          success: false,
+          errors: [`市場データ取得エラー (symbol=${normalizedTrade.symbol}, timeframe=${request.timeframe}): ${errMsg}`],
+          warnings,
+        };
+      }
     }
 
     // === インジケーターの計算 ===

@@ -210,7 +210,7 @@ describe('MatchingService', () => {
         .mockResolvedValue({ shouldNotify: true, status: 'sent', reasonSummary: 'スコア: 0.900' });
 
       const pipeline = new MatchingService({
-        inAppNotificationSender: { sendInApp },
+        inAppNotificationSender: { sendInApp, sendPush: jest.fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>().mockResolvedValue({ success: true }) },
         notificationTriggerService: { evaluateWithPersistence, invalidateNotificationLog: jest.fn<(id: string) => Promise<void>>() },
         simultaneousHitControl: buildHitControl(),
       });
@@ -250,7 +250,7 @@ describe('MatchingService', () => {
       const invalidateNotificationLog = jest.fn<(id: string) => Promise<void>>().mockResolvedValue();
 
       const pipeline = new MatchingService({
-        inAppNotificationSender: { sendInApp },
+        inAppNotificationSender: { sendInApp, sendPush: jest.fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>().mockResolvedValue({ success: true }) },
         notificationTriggerService: { evaluateWithPersistence, invalidateNotificationLog },
         simultaneousHitControl: buildHitControl(),
       });
@@ -277,7 +277,7 @@ describe('MatchingService', () => {
         .mockResolvedValue({ shouldNotify: true, status: 'sent', reasonSummary: 'スコア: 0.900' });
 
       const pipeline = new MatchingService({
-        inAppNotificationSender: { sendInApp },
+        inAppNotificationSender: { sendInApp, sendPush: jest.fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>().mockResolvedValue({ success: true }) },
         notificationTriggerService: { evaluateWithPersistence, invalidateNotificationLog: jest.fn<(id: string) => Promise<void>>() },
         simultaneousHitControl: buildHitControl(),
       });
@@ -303,7 +303,7 @@ describe('MatchingService', () => {
         .mockResolvedValue({ shouldNotify: false, status: 'skipped', skipReason: 'スコア不足' });
 
       const pipeline = new MatchingService({
-        inAppNotificationSender: { sendInApp },
+        inAppNotificationSender: { sendInApp, sendPush: jest.fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>().mockResolvedValue({ success: true }) },
         notificationTriggerService: { evaluateWithPersistence, invalidateNotificationLog: jest.fn<(id: string) => Promise<void>>() },
         simultaneousHitControl: buildHitControl(),
       });

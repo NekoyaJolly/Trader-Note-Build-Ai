@@ -42,7 +42,7 @@ export interface MatchingServiceDeps {
     NotificationTriggerService,
     'evaluateWithPersistence' | 'invalidateNotificationLog'
   >;
-  inAppNotificationSender?: Pick<InAppNotificationSender, 'sendInApp'>;
+  inAppNotificationSender?: Pick<InAppNotificationSender, 'sendInApp' | 'sendPush'>;
   simultaneousHitControl?: SimultaneousHitControlService;
 }
 
@@ -74,7 +74,7 @@ export class MatchingService {
   // 通知許可後に UI 表示用 Notification 行を生成する送信器。
   // 理由: 旧パイプラインは NotificationLog(監査ログ)のみ upsert しており、
   // ユーザーが見る通知フィード(Notification)が永続化されず通知が UI に届かなかった。
-  private inAppNotificationSender: Pick<InAppNotificationSender, 'sendInApp'>;
+  private inAppNotificationSender: Pick<InAppNotificationSender, 'sendInApp' | 'sendPush'>;
 
   constructor(deps: MatchingServiceDeps = {}) {
     this.marketDataService = new MarketDataService();
@@ -812,6 +812,25 @@ export class MatchingService {
                 `[MatchingPipeline] 通知送信: noteId=${match.historicalNoteId}, ` +
                 `symbol=${match.symbol}, score=${match.matchScore.toFixed(3)}, notificationId=${sendResult.id}`
               );
+              // In-App Notification 行を作成できたら Web-Push でも配信する。
+              // VAPID 未設定 / 購読 0 の場合は WebPushService が空結果を返すため
+              // pipeline は安全に継続する。Push 失敗はパイプライン失敗にしない。
+              void this.inAppNotificationSender
+                .sendPush({
+                  noteId: match.historicalNoteId,
+                  marketSnapshotId: match.marketSnapshotId,
+                  symbol: match.symbol || '',
+                  score: match.matchScore,
+                  title: `一致検出: ${match.symbol || 'シンボル不明'}`,
+                  message: match.reasons?.[0] || 'ノートと現在の市場が一致しました',
+                  reasonSummary: triggerResult.reasonSummary || `スコア: ${match.matchScore.toFixed(3)}`,
+                })
+                .catch((pushError) => {
+                  console.warn(
+                    `[MatchingPipeline] Push 配信失敗 (継続): noteId=${match.historicalNoteId}, ` +
+                    `${pushError instanceof Error ? pushError.message : String(pushError)}`
+                  );
+                });
             } else {
               // 通知判定は許可されたが Notification 行を作れなかった場合 (MatchResult 不在 等)。
               // evaluateWithPersistence が先に status='sent' ログを書いており、isDuplicate は

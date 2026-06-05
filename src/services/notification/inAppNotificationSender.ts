@@ -1,26 +1,28 @@
 import type { PrismaClient } from '@prisma/client';
 import type { NotificationSender, NotificationPayload } from './notificationSender';
 import { prisma } from '../../backend/db/client';
+import { WebPushService } from '../../backend/services/webPushService';
 
 /**
  * In-App Notification Sender
- * 
+ *
  * 目的: Notification テーブルに通知レコードを保存する
  * 前提: MatchResult と Notification のリレーションを使用
  */
 export class InAppNotificationSender implements NotificationSender {
   private prisma: PrismaClient;
-  // 本番環境かどうかを判定（ログ出力制御用）
+  private webPushService: WebPushService;
   private isProduction: boolean;
 
-  constructor(prismaClient?: PrismaClient) {
+  constructor(prismaClient?: PrismaClient, webPushService?: WebPushService) {
     this.prisma = prismaClient || prisma;
+    this.webPushService = webPushService || new WebPushService(this.prisma);
     this.isProduction = process.env.NODE_ENV === 'production';
   }
 
   /**
    * In-App 通知をデータベースに保存
-   * 
+   *
    * @param payload 通知ペイロード
    * @returns 保存された通知 ID、または失敗情報
    */
@@ -77,20 +79,43 @@ export class InAppNotificationSender implements NotificationSender {
   }
 
   /**
-   * Push 通知（スタブ実装）
-   * Phase4 では実装は不要。Phase5 以降で FCM/APNs を統合する想定
+   * Web Push 通知を全アクティブ購読に配信する。
+   *
+   * 単一ユーザー / 限定ユーザー運用 (TradeNote/Trade に userId 列が無い) のため
+   * broadcast() で全アクティブ購読に送る。VAPID 鍵未設定時は WebPushService が
+   * 内部で空結果を返すので呼び出し側は気にしなくて良い。
    */
-  sendPush(payload: NotificationPayload): Promise<{ success: boolean; id?: string }> {
-    // 本番環境ではスタブログを抑制
-    if (!this.isProduction) {
-      console.log(
-        `[スタブ] Push 通知: ${payload.symbol} - ${payload.title} (score=${payload.score})`
-      );
+  async sendPush(payload: NotificationPayload): Promise<{ success: boolean; id?: string }> {
+    try {
+      const result = await this.webPushService.broadcast({
+        title: payload.title,
+        body: payload.message,
+        url: `/notifications`,
+        tag: `note-match-${payload.noteId}`,
+        notificationId: payload.noteId,
+        data: {
+          noteId: payload.noteId,
+          marketSnapshotId: payload.marketSnapshotId,
+          symbol: payload.symbol,
+          score: payload.score,
+        },
+      });
+
+      if (!this.isProduction) {
+        console.log(
+          `[WebPush] broadcast: symbol=${payload.symbol}, success=${result.successCount}, fail=${result.failureCount}`
+        );
+      }
+
+      const ok = result.failureCount === 0 || result.successCount > 0;
+      return {
+        success: ok,
+        id: ok ? `webpush_${payload.noteId}_${result.successCount}` : undefined,
+      };
+    } catch (error) {
+      console.error('[WebPush] 配信エラー:', error);
+      return { success: false };
     }
-    return Promise.resolve({
-      success: true,
-      id: `push_stub_${Date.now()}`,
-    });
   }
 
   /**
