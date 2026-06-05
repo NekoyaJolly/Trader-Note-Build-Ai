@@ -53,6 +53,15 @@ export class MarketDataService {
    * @param authService - 認証サービス
    */
   configureCTrader(accountId: string, authService: CTraderAuthService): void {
+    // Nekoさん 方針 (2026-06-06): EODHD 移行後、cTrader の常時利用は bid/ask quote
+    // (ctraderQuoteProvider, チャート overlay) のみに集約する。市場データ (OHLCV) は
+    // EODHD を第一・唯一とし、cTrader 二次フォールバックは既定 OFF。複数経路が同一
+    // アカウントで WebSocket を張り 1006 競合切断ループになるのを防ぐ
+    // (project_ctrader_multi_connection_bug)。env で明示 ON のときのみ配線する。
+    if (process.env.MARKETDATA_CTRADER_FALLBACK !== 'true') {
+      console.log('[MarketDataService] cTrader フォールバック無効 (MARKETDATA_CTRADER_FALLBACK!=true) → EODHD のみ使用');
+      return;
+    }
     this.ctraderDataService = new CTraderDataService(authService);
     this.ctraderAccountId = accountId;
     console.log('[MarketDataService] cTrader データソース設定完了');
