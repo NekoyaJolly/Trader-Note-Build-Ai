@@ -508,6 +508,14 @@ class ScreeningBacktestConfig(BaseModel):
     spreadPips: float = Field(default=0.0, ge=0)
     # 1 pip の価格幅 (pips→価格率の換算用)。0 の場合は spread を適用しない。
     pipSize: float = Field(default=0.0, ge=0)
+    # SL 最小フロア (pips)。低ボラ局面で ATR 基準 SL が往復コストに飲まれるほど
+    # 小さくなる過大評価を防ぐ。実効SL = max(生SL, minStopLossPips × pipSize)。
+    # 0 = フロアなし (後方互換)。pipSize<=0 のときは換算できないため無効。
+    minStopLossPips: float = Field(default=0.0, ge=0)
+    # SL 最大キャップ (pips)。高ボラ局面で ATR 基準 SL が過大になりポジションが極小化
+    # するのを抑える。実効SL = min(生SL, maxStopLossPips × pipSize)。
+    # None / 0 = 上限なし (attach_sl_clamp は maxStopLossPips<=0 を None 扱いにする)。
+    maxStopLossPips: Optional[float] = Field(default=None, ge=0)
 
 
 class ScreeningBacktestRequest(BaseModel):

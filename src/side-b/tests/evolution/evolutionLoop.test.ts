@@ -228,6 +228,10 @@ describe('EvolutionLoop.runOneGeneration（Phase 5A）', () => {
     const formalBtOptions = runFormalBacktest.mock.calls[0][1];
     expect(formalBtArg.config?.spreadPips).toBeCloseTo(1.2);
     expect(formalBtArg.config?.pipSize).toBeCloseTo(0.0001);
+    // SL 最小フロア(=2×往復コスト1.2pips=2.4) / 最大キャップ(EURUSD=40pips) も正式BTに渡る。
+    // 低ボラで ATR 基準 SL が往復コストに飲まれて縮みすぎる過大評価を engine 側で clamp する。
+    expect(formalBtArg.config?.minStopLossPips).toBeCloseTo(2.4);
+    expect(formalBtArg.config?.maxStopLossPips).toBe(40);
     expect(formalBtOptions?.correlationId).toBe('evolution-test-20260603');
     expect(report.correlationId).toBe('evolution-test-20260603');
     expect(report.errors.some((e) => e.includes('correlationId=evolution-test-20260603'))).toBe(true);

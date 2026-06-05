@@ -123,6 +123,63 @@ export function getExecutionCostProfile(symbol: string): SymbolExecutionCostProf
   };
 }
 
+/**
+ * env 値を「文字列全体が数値のときだけ」受理する厳密パース。
+ * `parseFloat` は `'2abc'` を 2 として受理してしまい誤設定を silent に通すため、
+ * Side-B の他の env 解釈 (parseStrictInt 等) と揃えて trim + 全体一致で検証する。
+ * 不正値は null を返し、呼び出し側が既定値へフォールバックする。
+ */
+function parseStrictFloat(raw: string | undefined): number | null {
+  if (raw === undefined) return null;
+  const trimmed = raw.trim();
+  if (!/^-?\d+(?:\.\d+)?$/.test(trimmed)) return null;
+  const n = Number(trimmed);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * SL 最小フロアを「往復コスト pips の何倍にするか」の係数。
+ * ATR 基準 SL が低ボラ局面で往復コストに飲まれるのを防ぐ最低マージン。
+ * env `SL_FLOOR_COST_MULT` で調整可 (既定 2 = コストの 2 倍を最低 SL とする)。
+ */
+function getSlFloorCostMultiplier(): number {
+  const parsed = parseStrictFloat(process.env.SL_FLOOR_COST_MULT);
+  return parsed !== null && parsed >= 0 ? parsed : 2;
+}
+
+/**
+ * SL 最大キャップ (pips) のシンボル別表。高ボラ局面で ATR 基準 SL が過大になり
+ * ポジションが極小化するのを抑える。コスト比は銘柄間の「妥当な最大SL」とスケールが
+ * 合わないため、銘柄の実動き幅に合わせた絶対 pips で持つ (Nekoさん 決定)。
+ */
+export const SYMBOL_MAX_STOP_LOSS_PIPS: Readonly<Record<string, number>> = {
+  XAUUSD: 80,
+  EURUSD: 40,
+  USDJPY: 40,
+};
+
+/** 未定義シンボルの SL 最大キャップ (pips)。env `SL_MAX_PIPS_DEFAULT` で調整可。 */
+function getDefaultMaxStopLossPips(): number {
+  const parsed = parseStrictFloat(process.env.SL_MAX_PIPS_DEFAULT);
+  return parsed !== null && parsed > 0 ? parsed : 60;
+}
+
+/**
+ * シンボルの SL clamp 境界 (pips) を返す。
+ * - minPips: 往復コスト pips × フロア係数 (低ボラで SL が縮みすぎるのを防ぐ)
+ * - maxPips: シンボル別の絶対上限 (高ボラで SL が過大になるのを抑える)
+ *
+ * analysis-engine には pips で渡し、向こうで pipSize と掛けて価格距離に換算する
+ * (= コスト spreadPips と同じ pipSize 基準で整合させる)。
+ */
+export function getStopLossClampPips(symbol: string): { minPips: number; maxPips: number } {
+  const profile = getExecutionCostProfile(symbol);
+  const minPips = profile.roundTripCostPips * getSlFloorCostMultiplier();
+  const normalized = normalizeSymbol(symbol);
+  const maxPips = SYMBOL_MAX_STOP_LOSS_PIPS[normalized] ?? getDefaultMaxStopLossPips();
+  return { minPips, maxPips };
+}
+
 export function createDefaultL2ExecutionConfig(symbol: string): ExecutionSimulationConfig {
   const profile = getExecutionCostProfile(symbol);
   return {

@@ -115,6 +115,18 @@ class BTSpec:
     # canonical 化して詰める。未設定なら BacktestingPyEngine 側で OHLCV index 間隔
     # から推定する。
     primary_timeframe: Optional[str] = None
+    # SL 最小フロア / 最大キャップを **絶対価格距離** で持つ (= pips × pip_size を
+    # runner.py 側で事前換算済み)。strategy 内で pip_size を再推定せずそのまま
+    # clamp(生SL距離, min_stop_loss_price, max_stop_loss_price) に使える。
+    # コスト(spread_pips)と同じ config.pip_size 基準で換算するため整合する。
+    # 0.0 / None = clamp 無効 (後方互換)。
+    min_stop_loss_price: float = 0.0
+    max_stop_loss_price: Optional[float] = None
+    # config.pipSize (権威ある 1pip 価格幅)。fixed_pips の SL/TP 距離換算を
+    # strategy 内の価格レンジ推定 (_pip_size) ではなくこの値で行い、cost(spread)/clamp と
+    # 同一 pip 基準に統一する (例: XAUUSD は 0.1 であって価格レンジ推定の 0.01 ではない)。
+    # 0.0 = 未指定 → strategy は従来の _pip_size 推定にフォールバック (後方互換)。
+    effective_pip_size: float = 0.0
 
 
 @dataclass(frozen=True)
