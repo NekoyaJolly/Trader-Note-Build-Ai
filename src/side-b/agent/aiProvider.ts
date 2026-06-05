@@ -114,6 +114,41 @@ interface OpenAIToolDef {
 }
 
 /**
+ * Anthropic prompt caching 用のキャッシュブレークポイント (OpenRouter pass-through)。
+ * content パートに付与すると、そこまでを ephemeral キャッシュ対象にする。
+ */
+interface CacheControlEphemeral {
+    type: 'ephemeral';
+}
+
+/** prompt caching 対応のテキスト content パート (OpenRouter / Anthropic 互換)。 */
+interface TextContentPart {
+    type: 'text';
+    text: string;
+    cache_control?: CacheControlEphemeral;
+}
+
+/**
+ * 送信用メッセージ。content は通常は string (従来通り) だが、prompt caching 有効時のみ
+ * cache_control 付きの content パート配列に変換して送る。ChatMessage(呼び出し側の型) は
+ * string のまま保ち、配列化は chat() 内の送信直前変換に閉じる。
+ */
+interface OutgoingChatMessage {
+    role: 'system' | 'user' | 'assistant' | 'tool';
+    content: string | null | TextContentPart[];
+    tool_calls?: ToolCall[];
+    tool_call_id?: string;
+}
+
+/**
+ * OpenRouter 統一 reasoning パラメータ (Anthropic extended thinking 等にマップされる)。
+ * `max_tokens` = 思考トークン予算。
+ */
+interface ReasoningParam {
+    max_tokens: number;
+}
+
+/**
  * Chat Completions API へ送るリクエスト body の型。
  *
  * オプション送信のフィールドは optional とし、`Record<string, unknown>` を
@@ -122,12 +157,14 @@ interface OpenAIToolDef {
  */
 interface ChatRequestBody {
     model: string;
-    messages: ChatMessage[];
+    messages: OutgoingChatMessage[];
     temperature?: number;
     max_tokens?: number;
     max_completion_tokens?: number;
     response_format?: { type: 'json_object' } | { type: 'text' };
     reasoning_effort?: ReasoningEffort;
+    // P2 (2026-06-05): OpenRouter 経由 Anthropic 向け extended thinking。opt-in 時のみ送る。
+    reasoning?: ReasoningParam;
     tools?: OpenAIToolDef[];
     tool_choice?: 'auto' | 'none';
 }
@@ -153,6 +190,19 @@ export interface ChatOptions {
     tools?: McpToolDefinition[];
     responseFormat?: { type: 'json_object' } | { type: 'text' };
     reasoningEffort?: ReasoningEffort;
+    /**
+     * P2 (2026-06-05): Anthropic extended thinking の思考トークン予算。
+     * **opt-in**: 指定があり、かつ Anthropic モデル (OpenRouter 経由) のときのみ
+     * `reasoning: { max_tokens }` を送る。非 Anthropic モデルや未指定では無視 (既存挙動不変)。
+     * Anthropic は thinking 有効時に temperature≠1 を拒否するため、有効時は temperature を送らない。
+     */
+    thinkingBudgetTokens?: number;
+    /**
+     * P2 (2026-06-05): Anthropic prompt caching。**opt-in**。
+     * true かつ Anthropic モデルのとき、system メッセージに cache_control(ephemeral) を付与して
+     * system プロンプトをキャッシュ対象にする。非 Anthropic や false では無視 (既存挙動不変)。
+     */
+    cacheSystemPrompt?: boolean;
 }
 
 // ===========================================
@@ -186,6 +236,16 @@ export class AIProvider {
     }
 
     /**
+     * OpenRouter エンドポイント経由かを判定する (baseURL のみ判定)。
+     * P2 の extended thinking (`reasoning`) / prompt caching (`cache_control`) は
+     * **OpenRouter の pass-through 仕様**前提のため、他の OpenAI 互換エンドポイント
+     * (Gemini 互換等) に送ると 400 になりうる。OpenRouter 経由のときだけ有効化する。
+     */
+    private usesOpenRouterEndpoint(): boolean {
+        return this.baseURL.toLowerCase().includes('openrouter.ai');
+    }
+
+    /**
      * OpenAI 新パラメータ形式 (temperature 抑止 + max_completion_tokens) を要求するかを判定する。
      *
      * 条件: **OpenAI 直エンドポイント (api.openai.com) かつ reasoning モデル (gpt-5系 / o系)** の時のみ true。
@@ -210,6 +270,37 @@ export class AIProvider {
         // "openai/" プレフィックスを剥がして判定 (OpenRouter 経由対応)
         const stripped = m.startsWith('openai/') ? m.slice('openai/'.length) : m;
         return /^gpt-5/.test(stripped) || /^o\d/.test(stripped);
+    }
+
+    /**
+     * Anthropic (Claude) モデルかを判定する。P2 の extended thinking / prompt caching は
+     * Anthropic 系のみ対象 (OpenRouter 経由を含む)。OpenAI 直エンドポイントでは適用しない。
+     */
+    private isAnthropicModel(model: string): boolean {
+        const m = model.toLowerCase();
+        return m.includes('anthropic/') || m.includes('claude');
+    }
+
+    /**
+     * P2: prompt caching 有効時、各 system メッセージの content を
+     * cache_control(ephemeral) 付きの content パート配列に変換して返す。
+     *
+     * - 変換は **送信 body 内に閉じる** (呼び出し側の ChatMessage は string のまま不変)。
+     * - system 以外のメッセージは無変換でそのまま通す。
+     * - content が空/null の system メッセージは変換しない (cache 対象にならない)。
+     */
+    private applySystemPromptCache(messages: ChatMessage[]): OutgoingChatMessage[] {
+        return messages.map((msg) => {
+            if (msg.role !== 'system' || !msg.content) {
+                return msg;
+            }
+            return {
+                ...msg,
+                content: [
+                    { type: 'text', text: msg.content, cache_control: { type: 'ephemeral' } },
+                ],
+            };
+        });
     }
 
     /**
@@ -241,18 +332,36 @@ export class AIProvider {
         messages: ChatMessage[],
         options: ChatOptions = {},
     ): Promise<AIResponse> {
+        // P2: Anthropic extended thinking の有効判定 (opt-in + Anthropic + OpenRouter 経由)。
+        // reasoning は OpenRouter pass-through 仕様前提のため、他の互換エンドポイントには送らない
+        // (PR #348 review)。有効時は temperature を送らない (Anthropic は thinking 時に temperature≠1 を拒否)。
+        const thinkingEnabled =
+            options.thinkingBudgetTokens !== undefined &&
+            options.thinkingBudgetTokens > 0 &&
+            this.isAnthropicModel(this.model) &&
+            this.usesOpenRouterEndpoint();
+
+        // P2: Anthropic prompt caching の有効判定 (opt-in + Anthropic + OpenRouter 経由)。
+        // cache_control も OpenRouter pass-through 前提のため OpenRouter 限定にする (PR #348 review)。
+        const cacheEnabled =
+            options.cacheSystemPrompt === true &&
+            this.isAnthropicModel(this.model) &&
+            this.usesOpenRouterEndpoint();
+
         // OpenAI 互換 API へ送る JSON body。
         // 値は number / string / boolean / 配列 / オブジェクトのいずれかで、
         // 最終的に JSON.stringify される。型は ChatRequestBody (union) で表現する。
         const body: ChatRequestBody = {
             model: this.model,
-            messages,
+            // caching 有効時のみ system メッセージを cache_control 付き content パートに変換する。
+            messages: cacheEnabled ? this.applySystemPromptCache(messages) : messages,
         };
 
         // OpenAI 直 + reasoning モデル (gpt-5系/o系) は temperature 非対応 (デフォルト 1 のみ受理)。
         // 同じ OpenAI 直でも gpt-4o 等は temperature を受け付けるため、モデルもセットで判定する。
         // OpenRouter / Gemini OpenAI 互換 / その他は常に temperature を尊重。
-        if (!this.requiresOpenAINewParamFormat()) {
+        // ただし Anthropic extended thinking 有効時は temperature を送らない (上記制約)。
+        if (!this.requiresOpenAINewParamFormat() && !thinkingEnabled) {
             body.temperature = options.temperature ?? 0.3;
         }
 
@@ -280,6 +389,12 @@ export class AIProvider {
             if (effort) {
                 body.reasoning_effort = effort;
             }
+        }
+
+        // P2: Anthropic extended thinking — opt-in 時のみ OpenRouter 統一 reasoning パラメータで送る。
+        // 多段因果推論を要する認知層 (将来の FundamentalsResearcher 等) で思考予算を与える。
+        if (thinkingEnabled && options.thinkingBudgetTokens !== undefined) {
+            body.reasoning = { max_tokens: options.thinkingBudgetTokens };
         }
 
         // ツール定義がある場合のみ追加

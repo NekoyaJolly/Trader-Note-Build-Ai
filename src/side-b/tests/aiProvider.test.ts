@@ -173,4 +173,103 @@ describe('AIProvider request body', () => {
       await expect(provider.chat([{ role: 'user', content: 'hi' }])).rejects.toThrow(/レスポンス形式エラー/);
     });
   });
+
+  // P2 (2026-06-05): Anthropic extended thinking / prompt caching の opt-in 配線。
+  const OPENROUTER = 'https://openrouter.ai/api/v1';
+  const CLAUDE = 'anthropic/claude-sonnet-4.6';
+
+  describe('extended thinking (reasoning)', () => {
+    it('Anthropic + thinkingBudgetTokens で body.reasoning を送り、temperature は送らない', async () => {
+      mockFetchOnce();
+      const provider = new AIProvider({ apiKey: 'test', model: CLAUDE, baseURL: OPENROUTER });
+      await provider.chat([{ role: 'user', content: 'hi' }], { thinkingBudgetTokens: 4000 });
+      const body = lastRequestBody();
+      expect(body.reasoning).toEqual({ max_tokens: 4000 });
+      expect(body).not.toHaveProperty('temperature');
+    });
+
+    it('非 Anthropic モデル (gpt-4o-mini) では thinkingBudgetTokens を無視し temperature は通常通り', async () => {
+      mockFetchOnce();
+      const provider = new AIProvider({ apiKey: 'test', model: 'gpt-4o-mini', baseURL: 'https://api.openai.com/v1' });
+      await provider.chat([{ role: 'user', content: 'hi' }], { thinkingBudgetTokens: 4000 });
+      const body = lastRequestBody();
+      expect(body).not.toHaveProperty('reasoning');
+      expect(body.temperature).toBe(0.3);
+    });
+
+    it('未指定なら reasoning を送らず既存挙動 (temperature あり)', async () => {
+      mockFetchOnce();
+      const provider = new AIProvider({ apiKey: 'test', model: CLAUDE, baseURL: OPENROUTER });
+      await provider.chat([{ role: 'user', content: 'hi' }]);
+      const body = lastRequestBody();
+      expect(body).not.toHaveProperty('reasoning');
+      expect(body.temperature).toBe(0.3);
+    });
+
+    it('Anthropic でも OpenRouter 以外の baseURL では reasoning を送らない (PR #348)', async () => {
+      mockFetchOnce();
+      const provider = new AIProvider({
+        apiKey: 'test',
+        model: CLAUDE,
+        baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
+      });
+      await provider.chat([{ role: 'user', content: 'hi' }], { thinkingBudgetTokens: 4000 });
+      const body = lastRequestBody();
+      expect(body).not.toHaveProperty('reasoning');
+      expect(body.temperature).toBe(0.3);
+    });
+  });
+
+  describe('prompt caching (cache_control)', () => {
+    it('Anthropic + cacheSystemPrompt で system メッセージに cache_control を付与する', async () => {
+      mockFetchOnce();
+      const provider = new AIProvider({ apiKey: 'test', model: CLAUDE, baseURL: OPENROUTER });
+      await provider.chat(
+        [
+          { role: 'system', content: 'システムプロンプト' },
+          { role: 'user', content: 'hi' },
+        ],
+        { cacheSystemPrompt: true },
+      );
+      const body = lastRequestBody();
+      const messages = body.messages as Array<{ role: string; content: unknown }>;
+      expect(messages[0].content).toEqual([
+        { type: 'text', text: 'システムプロンプト', cache_control: { type: 'ephemeral' } },
+      ]);
+      // user メッセージは string のまま不変
+      expect(messages[1].content).toBe('hi');
+    });
+
+    it('非 Anthropic では cacheSystemPrompt を無視し system content は string のまま', async () => {
+      mockFetchOnce();
+      const provider = new AIProvider({ apiKey: 'test', model: 'gpt-4o-mini', baseURL: 'https://api.openai.com/v1' });
+      await provider.chat(
+        [
+          { role: 'system', content: 'システムプロンプト' },
+          { role: 'user', content: 'hi' },
+        ],
+        { cacheSystemPrompt: true },
+      );
+      const messages = lastRequestBody().messages as Array<{ role: string; content: unknown }>;
+      expect(messages[0].content).toBe('システムプロンプト');
+    });
+
+    it('Anthropic でも OpenRouter 以外の baseURL では cache_control を付けない (PR #348)', async () => {
+      mockFetchOnce();
+      const provider = new AIProvider({
+        apiKey: 'test',
+        model: CLAUDE,
+        baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
+      });
+      await provider.chat(
+        [
+          { role: 'system', content: 'システムプロンプト' },
+          { role: 'user', content: 'hi' },
+        ],
+        { cacheSystemPrompt: true },
+      );
+      const messages = lastRequestBody().messages as Array<{ role: string; content: unknown }>;
+      expect(messages[0].content).toBe('システムプロンプト');
+    });
+  });
 });
