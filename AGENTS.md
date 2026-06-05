@@ -620,7 +620,7 @@ npm run dev
 | **Auth** | cTrader OAuth 2.0 + JWT (Cookie ベース, 7 日間有効、マルチアカウント対応) |
 | **Secrets** | GCP Secret Manager (16 件、deploy.yml の `--set-secrets` 列挙が正本) |
 | **CI/CD** | GitHub Actions (`.github/workflows/deploy.yml` `ci.yml` 等)。本番 deploy は main マージで自動発火 |
-| **Test** | Jest (unit, ~2800 件) + Playwright (E2E、本番 smoke 含む) |
+| **Test** | Jest (backend unit, ~2,800 件) + Vitest (frontend, 141 件) + Playwright (E2E、本番 smoke 含む)。計 ~2,950 件 (2026-06-06 実測) |
 | **Cron** | GitHub Actions Cron + `/api/cron/*` (Bearer `CRON_SECRET` 認証必須)。15 分間隔の matching pipeline 等 |
 
 ## テスト手順
@@ -714,8 +714,8 @@ npm test -- --testTimeout=30000
 
 ## 補足: 現在のテスト状況
 
-- 最新値は CI / `npm test` で確認すること
-- 既知 fail (2026-06-05 時点): Side-B 進化スケジューラ系の一部スイート (`sideBScheduler.evolutionMultiGen` / `evolutionLoop` 等) は main でも timeout 系の既存 fail として認識済 (8 件、pre-existing flake)
+- 規模感 (2026-06-06 実測): **Backend (Jest) 約 2,800 件 + Frontend (Vitest) 141 件 = 計 ~2,950 件**。正確な最新値は CI / `npm test` (backend) + `cd src/frontend && npm test` (frontend) で確認すること
+- 既知 fail (2026-06-06 時点): Side-B 進化スケジューラ系の一部スイート (`sideBScheduler.evolutionMultiGen` / `evolutionLoop` 等) は main でも timeout 系の既存 fail として認識済 (8 件、pre-existing flake)。Frontend は全 141 件 pass
 - cTrader OAuth は本番稼働中 (旧 AGENTS.md の「審査待ち」表記は完了済み)
 
 ---
