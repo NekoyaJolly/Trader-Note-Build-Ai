@@ -98,7 +98,9 @@ export type AIAgentKey =
   // Filter Evolution Phase D-1b (2026-05-09): 世代単位 reflection 専用 — 軽量サマリ系で十分
   | 'generation_reflection'
   // パターン分析 (patternAnalysisService) — チャートパターン抽出 + アノマリー検知、低コスト想定
-  | 'pattern_analysis';
+  | 'pattern_analysis'
+  // P1 (2026-06-05): 認知層出力の LLM-as-judge 評価。各次元採点のみさせ集計は決定論。
+  | 'cognitive_judge';
 
 /**
  * `AI_REASONING_EFFORT` env のホワイトリスト検証。
@@ -245,6 +247,9 @@ export const config = {
       // Phase B+ (2026-05-24): Top-Level Orchestrator — 「次にどのループを回すか」だけ判断する軽量層、Haiku 4.5 既定
       top_level_orchestrator:
         process.env.AI_MODEL_TOP_LEVEL_ORCHESTRATOR || 'anthropic/claude-haiku-4.5',
+      // P1 (2026-06-05): 認知層 LLM-as-judge。採点の一貫性重視で中位の推論モデル既定。
+      cognitive_judge:
+        process.env.AI_MODEL_COGNITIVE_JUDGE || 'anthropic/claude-sonnet-4.6',
     } as Record<AIAgentKey, string>,
   },
   market: {
