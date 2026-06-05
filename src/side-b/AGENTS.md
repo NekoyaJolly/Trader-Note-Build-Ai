@@ -10,7 +10,7 @@
 # AGENTS.md (side-b) - Side-B 自律トレーディング AI 固有ルール
 
 > **位置づけ**: 本ファイルは `/src/side-b/` 配下での作業に適用される**特化ルール**である。汎用ルールは ルート `/AGENTS.md` (正本)、ADK 採用範囲・不可侵領域の詳細は `docs/architecture/ADK_ADOPTION.md` を参照。
-> **設計の正本**: `docs/design/DESIGN_DOC_autonomous_trading_architecture.md` および `docs/design/phase_N_specification.md`
+> **設計の正本**: `docs/architecture/side-b-architecture.html` (HTML 正本) および `docs/architecture/ADK_ADOPTION.md` / `docs/architecture/TOP_LEVEL_ORCHESTRATOR_DESIGN.md`。過去フェーズ仕様は `docs/_archive/` にアーカイブ済 (phase_N_specification.md は現存せず)
 
 ---
 
@@ -18,7 +18,7 @@
 
 `/src/side-b/` は Side-B (自律トレーディング AI) の中核実装ディレクトリ。**AI が自律的に市場を観察し、仮説を立て、検証し、エッジ台帳を育てながら運用する**システムへの段階的進化を目指す (詳細はルート `/AGENTS.md` ドメイン原則を参照)。
 
-不明点があれば必ず `docs/design/DESIGN_DOC_autonomous_trading_architecture.md` に戻る。
+不明点があれば必ず `docs/architecture/side-b-architecture.html` (設計正本) および `docs/architecture/ADK_ADOPTION.md` に戻る。
 
 ---
 
@@ -58,7 +58,7 @@
 
 > **由来**: 旧 `/CLAUDE.md` の「実装の基本作法 > 既存との統合ポイント」を文言保持で移植 (Ticket A4)。
 
-- PDCA ループ (`src/side-b/agent/pdcaLoop.ts`): 新エージェントを統合する場合はここに呼び出しを追加
+- PDCA ループ (`src/side-b/agent/pdcaLoop.ts`): 新エージェントを統合する場合はここに呼び出しを追加。**ただし 2026-06-05 時点で `enabled=false` 既定・UI 起動のみ → 本番では休眠中**。本番統合の現実的経路は `src/side-b/jobs/` の SideBScheduler 配下ジョブ群、または Top-Level Orchestrator (`TOP_LEVEL_ORCHESTRATOR_ENABLED=true` で有効化、PR #353 で deploy.yml に追加済)
 - AgentMemory (`src/side-b/agent/agentMemory.ts`): EdgeHypothesis 型の保存先はここに統合
 - strategyBacktestService: Edge Validator は必ずこれを経由する
 - walkForwardService: エッジ検証は必ずこれを経由する
@@ -119,7 +119,7 @@ ADK (Google Agent Development Kit) の段階導入中、以下の領域は**既�
 | PromptRegistry | `src/side-b/prompts/` 周辺 | 進化的探索でプロンプト自体を変異対象にするため |
 | SkillRegistry API | `src/side-b/skills/` | スキル登録 API は ADK 採用しない |
 | AgentLoop / PDCALoop 内部 | `src/side-b/agent/pdcaLoop.ts` | 中核ループ、ADK でラップは可だが内部書き換え禁止 |
-| AIProvider 内部 | AI 呼び出しラッパー | OpenRouter 経由の reasoning_effort 等を保つ |
+| AIProvider 内部 | AI 呼び出しラッパー | OpenRouter pass-through 経由の reasoning_effort / Anthropic extended thinking (`thinkingBudgetTokens`) / prompt caching (`cacheSystemPrompt`) の opt-in 経路を保つ (PR #348 配線) |
 | strategy_dsl | `src/side-b/strategy_dsl/` | 戦略 DSL の仕様は独立 |
 | EdgeLedger | `src/side-b/ledger/` | エッジ台帳昇格判定 (PF / WF) を保つ |
 | Lens 群 | `src/side-b/lenses/` | 副作用なし・依存なし・決定性ありの純粋関数特性 |
@@ -139,4 +139,5 @@ ADK 領域 (`/src/side-b/adk/`) に触れる場合は、追加で `/src/side-b/a
 
 ---
 
-> **最終更新**: 2026-05-12 (Ticket A4 で新規作成、旧 /CLAUDE.md からの移植を文言保持で実施)
+> **最終更新**: 2026-06-06 (設計正本パス更新 / AIProvider Anthropic 配線追記 / PDCALoop 本番状況を実コード verify で反映)
+> **初版**: 2026-05-12 (Ticket A4 で新規作成、旧 /CLAUDE.md からの移植を文言保持で実施)
