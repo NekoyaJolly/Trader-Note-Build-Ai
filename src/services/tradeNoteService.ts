@@ -199,12 +199,15 @@ export class TradeNoteService {
         }));
       }
     } catch (error) {
-      console.warn('[TradeNoteService] 市場データ取得失敗、モックデータを使用:', error);
+      console.warn('[TradeNoteService] 市場データ取得失敗:', error);
     }
 
-    // 市場データがない場合はモックデータを生成
     if (ohlcvData.length === 0) {
-      ohlcvData = this.generateMockOHLCV(trade, 50);
+      if (process.env.NODE_ENV === 'test') {
+        ohlcvData = this.generateMockOHLCV(trade, 50);
+      } else {
+        throw new Error(`市場データを取得できませんでした (symbol=${trade.symbol}, timeframe=${timeframe})。ノート生成をスキップします`);
+      }
     }
 
     // === ユーザー設定のインジケーターを計算 ===
@@ -350,7 +353,11 @@ export class TradeNoteService {
     // === 市場データを取得 ===
     let ohlcvData = await this.fetchOHLCVData(trade, timeframe);
     if (ohlcvData.length === 0) {
-      ohlcvData = this.generateMockOHLCV(trade, 50);
+      if (process.env.NODE_ENV === 'test') {
+        ohlcvData = this.generateMockOHLCV(trade, 50);
+      } else {
+        throw new Error(`市場データを取得できませんでした (symbol=${trade.symbol}, timeframe=${timeframe})。ノート生成をスキップします`);
+      }
     }
 
     // === インジケーターを計算 ===
@@ -492,7 +499,11 @@ export class TradeNoteService {
     // 市場データを取得
     let ohlcvData = await this.fetchOHLCVData(trade, timeframe);
     if (ohlcvData.length === 0) {
-      ohlcvData = this.generateMockOHLCV(trade, 50);
+      if (process.env.NODE_ENV === 'test') {
+        ohlcvData = this.generateMockOHLCV(trade, 50);
+      } else {
+        throw new Error(`市場データを取得できませんでした (symbol=${trade.symbol}, timeframe=${timeframe})。ノート生成をスキップします`);
+      }
     }
 
     // 12次元特徴量用のインジケーターを計算
