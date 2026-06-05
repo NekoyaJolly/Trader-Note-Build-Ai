@@ -87,6 +87,11 @@ export class MarketDataService {
    * サーバー起動後に OAuth 接続が完了/更新された場合でも自動的に拾える。
    */
   async ensureCTraderConfigured(): Promise<void> {
+    // cTrader フォールバックが既定 OFF (MARKETDATA_CTRADER_FALLBACK != 'true') のときは、
+    // configureCTrader() が no-op になるため DB token 読み込みも不要。早期 return しないと
+    // isCTraderAvailable() が常に false → ctraderConfigPromise が finally で破棄され、毎回
+    // 「DB token 読み込み + no-op ログ」を繰り返すムダなループになる (Copilot review 指摘)。
+    if (process.env.MARKETDATA_CTRADER_FALLBACK !== 'true') return;
     if (this.isCTraderAvailable()) return;
     if (this.ctraderConfigPromise) return this.ctraderConfigPromise;
 
