@@ -23,7 +23,7 @@ import {
   type GetCandlesParams,
 } from '../infrastructure/market/chart-data.types';
 import { EODHDChartDataProvider } from '../infrastructure/market/EODHDChartDataProvider';
-import { normalizeCTraderSymbol, toTwelveDataSymbol } from '../utils/symbolNormalization';
+import { normalizeCTraderSymbol, toSlashSymbol } from '../utils/symbolNormalization';
 import { ohlcvRepository, followsFXMarketCalendar } from '../backend/repositories/ohlcvRepository';
 import { isFXMarketOpen } from '../side-b/utils/marketHours';
 
@@ -90,7 +90,7 @@ class OhlcvRepositoryCandleStore implements LocalCandleStore {
 
   private symbolCandidates(symbol: string): string[] {
     const normalized = normalizeCTraderSymbol(symbol); // XAUUSD
-    const slashed = toTwelveDataSymbol(symbol); // XAU/USD
+    const slashed = toSlashSymbol(symbol); // XAU/USD
     // 重複排除しつつ、呼び出し元が渡した raw も候補に含める
     return Array.from(new Set([normalized, slashed, symbol.trim()]));
   }

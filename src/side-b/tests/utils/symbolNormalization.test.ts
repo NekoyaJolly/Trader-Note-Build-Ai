@@ -4,7 +4,7 @@
 
 import {
   normalizeCTraderSymbol,
-  toTwelveDataSymbol,
+  toSlashSymbol,
   toEodhdSymbol,
   fromEodhdSymbol,
   isEodhdFundamentalsSupported,
@@ -21,17 +21,17 @@ describe('symbolNormalization (Phase A: EODHD 拡張)', () => {
     });
   });
 
-  describe('toTwelveDataSymbol', () => {
+  describe('toSlashSymbol', () => {
     it('XAUUSD → XAU/USD', () => {
-      expect(toTwelveDataSymbol('XAUUSD')).toBe('XAU/USD');
+      expect(toSlashSymbol('XAUUSD')).toBe('XAU/USD');
     });
 
     it('既にスラッシュ区切りでも正規化される', () => {
-      expect(toTwelveDataSymbol('EUR/USD')).toBe('EUR/USD');
+      expect(toSlashSymbol('EUR/USD')).toBe('EUR/USD');
     });
 
     it('未知の通貨ペアはそのまま返す', () => {
-      expect(toTwelveDataSymbol('UNKNOWN')).toBe('UNKNOWN');
+      expect(toSlashSymbol('UNKNOWN')).toBe('UNKNOWN');
     });
   });
 

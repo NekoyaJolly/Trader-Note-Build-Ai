@@ -1,10 +1,11 @@
 import type { MarketData } from '../models/types';
-import { config } from '../config';
 import type { OHLCVData} from './indicators';
 import { indicatorService } from './indicators';
 import type { OHLCVBarResult } from '../backend/services/ctrader/ctraderDataService';
 import { CTraderDataService } from '../backend/services/ctrader/ctraderDataService';
 import { CTraderAuthService } from '../backend/services/ctrader/ctraderAuthService';
+import { EodhdProvider } from '../infrastructure/market/EodhdProvider';
+import { TimeframeSchema, type Timeframe } from '../infrastructure/market/IMarketDataProvider';
 import { prisma } from '../backend/db/client';
 
 /**
@@ -28,26 +29,21 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 /**
  * 市場データサービス
  *
- * 目的: **cTrader Open API** を用いてブローカーと同一の価格・足区切りでデータを取得する。
- *（Twelve Data へのフォールバックは廃止: 正は cTrader に統一）
+ * 目的: ヒストリカル / 現在値 OHLCV を取得する。
  *
- * 制約: OAuth 済み cTrader 口座が未設定の環境では履歴・現在値は取得できない。
+ * データソース方針 (確定ルール): **EODHD を第一選択**にする。EODHD が空 / 未設定の
+ * ときのみ **cTrader を二次フォールバック**として使う。実 bid/ask が必要な用途
+ * (ブローカー overlay) は別経路 (broker quote) が担い、本サービスは OHLCV 専用。
  */
 
 /**
  * 市場データサービスクラス
  */
 export class MarketDataService {
-  private apiUrl: string;
-  private apiKey: string;
   private ctraderDataService: CTraderDataService | null = null;
   private ctraderAccountId: string | null = null;
   private ctraderConfigPromise: Promise<void> | null = null;
-
-  constructor() {
-    this.apiUrl = config.market.apiUrl;
-    this.apiKey = config.market.apiKey;
-  }
+  private eodhdProvider: EodhdProvider | null = null;
 
   /**
    * cTrader データソースを設定
@@ -121,10 +117,72 @@ export class MarketDataService {
   }
 
   /**
-   * 旧 Twelve Data 用。互換のため残す（新規利用は cTrader 前提）
+   * EODHD Provider を遅延生成して返す (第一データソース)。
    */
-  isApiConfigured(): boolean {
-    return !!(this.apiUrl && this.apiKey);
+  private getEodhdProvider(): EodhdProvider {
+    if (!this.eodhdProvider) {
+      this.eodhdProvider = new EodhdProvider();
+    }
+    return this.eodhdProvider;
+  }
+
+  /**
+   * 内部の timeframe 文字列を EODHD が扱う Timeframe enum に変換する。
+   *
+   * cTrader 系の表記ゆれ ('60m' / '240m' 等) を EODHD enum ('1h' / '4h') に正規化する。
+   * これをしないと '60m' 等が EODHD をスキップして cTrader にしか流れず、
+   * 「EODHD 第一選択」のルールから漏れる。未対応の足のみ null を返す。
+   */
+  private toEodhdTimeframe(timeframe: string): Timeframe | null {
+    const ALIASES: Record<string, Timeframe> = {
+      '60m': '1h',
+      '240m': '4h',
+      '1hr': '1h',
+      '4hr': '4h',
+      '1day': '1d',
+      '1week': '1w',
+    };
+    const candidate = ALIASES[timeframe.toLowerCase()] ?? timeframe;
+    const parsed = TimeframeSchema.safeParse(candidate);
+    return parsed.success ? parsed.data : null;
+  }
+
+  /**
+   * EODHD から履歴 OHLCV を取得して MarketData[] に変換する (第一選択)。
+   * 取得不可 (未設定 / 非対応足 / API エラー / 空) の場合は空配列を返し、
+   * 呼び出し側の cTrader フォールバックに委ねる。
+   */
+  private async fetchHistoricalFromEodhd(
+    symbol: string,
+    timeframe: string,
+    limit: number,
+  ): Promise<MarketData[]> {
+    const tf = this.toEodhdTimeframe(timeframe);
+    if (!tf) {
+      console.warn(`[MarketDataService] EODHD 非対応の timeframe のためスキップ: ${timeframe}`);
+      return [];
+    }
+    const provider = this.getEodhdProvider();
+    if (!provider.isConfigured()) {
+      console.warn('[MarketDataService] EODHD_API_KEY 未設定のため EODHD をスキップ');
+      return [];
+    }
+    try {
+      const result = await provider.getHistoricalData(symbol, tf, limit);
+      return result.bars.map(b => ({
+        symbol,
+        timestamp: b.timestamp,
+        timeframe,
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: b.volume,
+      }));
+    } catch (error) {
+      console.warn(`[MarketDataService] EODHD 履歴エラー (${symbol} ${timeframe}):`, error);
+      return [];
+    }
   }
 
   /**
@@ -142,11 +200,19 @@ export class MarketDataService {
     symbol: string,
     timeframe: string = '15m'
   ): Promise<MarketData> {
+    // 1. EODHD 第一選択 (最新 1 本)
+    const eodhdBars = await this.fetchHistoricalFromEodhd(symbol, timeframe, 1);
+    if (eodhdBars.length > 0) {
+      const marketData = eodhdBars[eodhdBars.length - 1];
+      this.calculateIndicators(marketData);
+      return marketData;
+    }
+
+    // 2. cTrader フォールバック (EODHD が空 / 未設定時のみ)
     await this.ensureCTraderConfigured();
-    // 1. cTrader 利用可能なら優先
     if (this.isCTraderAvailable()) {
       try {
-        console.log(`[MarketDataService] cTrader優先: ${symbol} ${timeframe} ×1`);
+        console.log(`[MarketDataService] cTrader フォールバック現在値: ${symbol} ${timeframe} ×1`);
         const bars = await withTimeout(
           this.ctraderDataService!.fetchTrendbars(
             this.ctraderAccountId!,
@@ -162,14 +228,14 @@ export class MarketDataService {
           this.calculateIndicators(marketData);
           return marketData;
         }
-        console.warn(`[MarketDataService] cTrader から空データ: ${symbol} ${timeframe}`);
+        console.warn(`[MarketDataService] cTrader からも空データ: ${symbol} ${timeframe}`);
       } catch (error) {
         console.warn(`[MarketDataService] cTrader 取得エラー:`, error);
       }
     }
 
     throw new Error(
-      'cTrader 接続（OAuth 済み口座）が必要です。価格・足区切りは cTrader のみ使用します。'
+      `${symbol} の現在値を EODHD・cTrader いずれからも取得できませんでした。`
     );
   }
 
@@ -312,11 +378,18 @@ export class MarketDataService {
     timeframe: string,
     limit: number = 100
   ): Promise<MarketData[]> {
+    // 1. EODHD 第一選択 (確定ルール: 全データ取得は EODHD を一次ソースにする)
+    const eodhdBars = await this.fetchHistoricalFromEodhd(symbol, timeframe, limit);
+    if (eodhdBars.length > 0) {
+      console.log(`[MarketDataService] EODHD: ${symbol} ${timeframe} ×${eodhdBars.length}`);
+      return eodhdBars;
+    }
+
+    // 2. cTrader フォールバック (EODHD が空 / 未設定 / 非対応足のときのみ)
     await this.ensureCTraderConfigured();
-    // 1. cTrader 利用可能なら優先
     if (this.isCTraderAvailable()) {
       try {
-        console.log(`[MarketDataService] cTrader優先: ${symbol} ${timeframe} ×${limit}`);
+        console.log(`[MarketDataService] cTrader フォールバック: ${symbol} ${timeframe} ×${limit}`);
         const bars = await withTimeout(
           this.ctraderDataService!.fetchTrendbars(
             this.ctraderAccountId!,
@@ -330,16 +403,14 @@ export class MarketDataService {
         if (bars.length > 0) {
           return this.convertCTraderBars(bars, symbol, timeframe);
         }
-        console.warn(`[MarketDataService] cTrader から空データ: ${symbol} ${timeframe}`);
-        return [];
+        console.warn(`[MarketDataService] cTrader からも空データ: ${symbol} ${timeframe}`);
       } catch (error) {
         console.warn(`[MarketDataService] cTrader 履歴エラー:`, error);
-        return [];
       }
     }
 
     console.warn(
-      '[MarketDataService] cTrader 未設定のため履歴を返しません（cTrader OAuth で接続してください）',
+      `[MarketDataService] EODHD・cTrader いずれからも ${symbol} ${timeframe} の履歴を取得できませんでした`,
     );
     return [];
   }
@@ -380,27 +451,39 @@ export class MarketDataService {
     symbol: string,
     count: number = 60
   ): Promise<MarketData[]> {
+    // 1. EODHD 第一選択 (1分足)
+    const eodhdBars = await this.fetchHistoricalFromEodhd(symbol, '1m', count);
+    if (eodhdBars.length > 0) {
+      console.log(`[MarketDataService] EODHD 1分足: ${symbol} ×${eodhdBars.length}`);
+      return eodhdBars;
+    }
+
+    // 2. cTrader フォールバック (EODHD が空 / 未設定時のみ)
     await this.ensureCTraderConfigured();
     if (this.isCTraderAvailable()) {
       try {
-        console.log(`[MarketDataService] cTrader 1分足取得: ${symbol} × ${count}本`);
-        const bars = await this.ctraderDataService!.fetchTrendbars(
-          this.ctraderAccountId!,
-          symbol,
-          '1m',
-          count,
+        console.log(`[MarketDataService] cTrader 1分足フォールバック: ${symbol} × ${count}本`);
+        const bars = await withTimeout(
+          this.ctraderDataService!.fetchTrendbars(
+            this.ctraderAccountId!,
+            symbol,
+            '1m',
+            count,
+          ),
+          CTRADER_FETCH_TIMEOUT_MS,
+          'cTrader1分足取得',
         );
         if (bars.length > 0) {
           return this.convertCTraderBars(bars, symbol, '1m');
         }
-        console.warn(`[MarketDataService] cTrader 1分足が空: ${symbol}`);
+        console.warn(`[MarketDataService] cTrader 1分足も空: ${symbol}`);
       } catch (error) {
         console.warn(`[MarketDataService] cTrader 1分足エラー:`, error);
       }
     }
 
     throw new Error(
-      'cTrader 接続（OAuth 済み口座）が必要です。1分足は cTrader のみ使用します。'
+      `${symbol} の1分足を EODHD・cTrader いずれからも取得できませんでした。`
     );
   }
 }
