@@ -179,7 +179,8 @@ const PricePanel = ({ bar, dailyHigh, dailyLow, previousClose, brokerStatus, bro
 	}
 
 	const timestamp = "startTime" in bar ? bar.startTime : bar.timestamp;
-	const timeLabel = new Date(timestamp).toLocaleTimeString("ja-JP", { hour12: false });
+	// JST 固定 + 24 時間制で表示し、チャート横軸 (JST 化済み) と時刻基準を揃える
+	const timeLabel = new Date(timestamp).toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour12: false }) + " JST";
 	const dayChange = previousClose != null ? bar.close - previousClose : null;
 	const dayChangePercent = previousClose != null && previousClose !== 0 && dayChange != null ? (dayChange / previousClose) * 100 : null;
 	const changeColor = dayChange != null ? (dayChange >= 0 ? "text-green-400" : "text-red-400") : "text-gray-400";
@@ -339,7 +340,14 @@ export function RealtimeChart({
 		};
 	}, [apiBase, onLinesChange, storageKey, symbol, timeframe]);
 
-	const { bars, pendingBar, latestTick, status, error, isConnected, isLoading, isMarketClosed, connect, disconnect } = useRealtimeChart(symbol, { timeframe, persistConnection: true });
+	// autoConnect: ログイン済みでチャートを開いたら、手動ボタンを待たずに
+	// リアルタイム SSE へ自動接続する。connect() は POST /api/realtime/connect を叩くが、
+	// この API は名前に反して EodhdRealtimeOrchestrator (EODHD WebSocket) を呼ぶ実装で、
+	// userId を使わず EODHD_API_KEY 共通認証のため cTrader には依存しない
+	// (eodhdRealtimeOrchestrator.ts: connect は `void _userId`)。よってログイン状態さえ
+	// あれば即接続できる。bid/ask overlay (cTrader 依存) は /api/broker/quote の別経路。
+	// 偽接続防止は useRealtimeChart 側の readyState チェック (PR #355) で担保。
+	const { bars, pendingBar, latestTick, status, error, isConnected, isLoading, isMarketClosed, connect, disconnect } = useRealtimeChart(symbol, { timeframe, persistConnection: true, autoConnect: true });
 	const { positions: tradingPositions, refetch: refetchTrading } = useTradingAccount(true);
 
 	useEffect(() => {
@@ -970,7 +978,7 @@ export function RealtimeChart({
 							<div className="bg-gray-800/50 rounded-lg p-2 text-xs border border-gray-700/50">
 								<div className="flex items-center justify-between mb-1">
 									<span className="text-gray-400">最新Tick</span>
-									<span className="text-gray-500 text-xs">{new Date(latestTick.timestamp).toLocaleTimeString("ja-JP")}</span>
+									<span className="text-gray-500 text-xs">{new Date(latestTick.timestamp).toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour12: false })} JST</span>
 								</div>
 								<div className="grid grid-cols-4 gap-2">
 									<div>

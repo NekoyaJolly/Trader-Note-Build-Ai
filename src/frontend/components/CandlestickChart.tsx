@@ -254,6 +254,52 @@ function timeToSeconds(time: Time): number {
   return Math.floor(date / 1000);
 }
 
+/**
+ * lightweight-charts の横軸 / crosshair を JST 表示にする formatter 群。
+ *
+ * 背景: lightweight-charts v5 は TimeScaleOptions に timeZone を持たず、内部は全て UTC で
+ * 処理する。データ・描画ツール・DB は UTC のまま保ち、表示だけ formatter で JST に変換する
+ * (データ側に +9h オフセットを足す方式は描画ツールの time や DB 保存値とズレるため採らない)。
+ */
+function timeToJstDate(time: Time): Date {
+  // 内部の time は UTC 基準の秒数。これを JST 表示するのは toLocaleString の timeZone に委ねる。
+  return new Date(timeToSeconds(time) * 1000);
+}
+
+// Intl.DateTimeFormat はモジュールスコープで一度だけ生成してキャッシュする。
+// tickMarkFormatter (パン/ズーム) と timeFormatter (crosshair マウス移動) は高頻度で
+// 呼ばれるため、toLocaleString のように呼び出しごとに Intl フォーマッタを生成すると
+// 描画オーバーヘッドになる。format() の再利用で抑える。
+const JST_AXIS_FORMATTER = new Intl.DateTimeFormat("ja-JP", {
+  timeZone: "Asia/Tokyo",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+const JST_CROSSHAIR_FORMATTER = new Intl.DateTimeFormat("ja-JP", {
+  timeZone: "Asia/Tokyo",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+
+/** 横軸の目盛ラベル (月/日 + 時:分、JST) */
+function formatJstAxisTick(time: Time): string {
+  return JST_AXIS_FORMATTER.format(timeToJstDate(time));
+}
+
+/** crosshair の時刻ラベル (年月日 + 時:分:秒、JST) */
+function formatJstCrosshair(time: Time): string {
+  return JST_CROSSHAIR_FORMATTER.format(timeToJstDate(time)) + " JST";
+}
+
 // ========================================
 // Neon Dark テーマカラー
 // ========================================
@@ -360,11 +406,17 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
           labelBackgroundColor: "#3f3f46",
         },
       },
+      localization: {
+        // crosshair にぶら下がる時刻ラベルを JST 表示にする
+        timeFormatter: (time: Time) => formatJstCrosshair(time),
+      },
       timeScale: {
         borderColor: CHART_THEME.borderColor,
         timeVisible: true,
         secondsVisible: true,
-        // v5 の TimeScaleOptions に timeZone が無いため削除（データ側で UTC に正規化済み）
+        // v5 の TimeScaleOptions に timeZone が無いため、横軸目盛は formatter で JST 表示にする
+        // (データ・描画ツール・DB は UTC のまま、表示だけ JST に変換)
+        tickMarkFormatter: (time: Time) => formatJstAxisTick(time),
       },
       rightPriceScale: {
         borderColor: CHART_THEME.borderColor,
@@ -1185,7 +1237,7 @@ export const CandlestickChart: React.FC<CandlestickChartProps> = ({
         <div className="mt-2 md:hidden rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-2 text-[11px]">
           <div className="flex items-center justify-between">
             <span className="text-zinc-400">
-              {new Date(fallbackBar.timestamp).toLocaleTimeString('ja-JP', { hour12: false })}
+              {new Date(fallbackBar.timestamp).toLocaleTimeString('ja-JP', { timeZone: 'Asia/Tokyo', hour12: false })} JST
             </span>
             <span
               className={`font-mono font-semibold ${fallbackBar.close >= fallbackBar.open ? 'text-green-400' : 'text-red-400'
