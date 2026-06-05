@@ -264,7 +264,7 @@
 <div class="wrap">
 
 <header class="hero">
-  <span class="eyebrow">Architecture Reference / 2026-05-15</span>
+  <span class="eyebrow">Architecture Reference / 最終更新 2026-06-05 (初版 2026-05-15)</span>
   <h1>Side-B アーキテクチャ詳細</h1>
   <p class="lede">
     Trader-Note-Build-Ai の Side-B — 自律トレーディング AI のサブシステム。
@@ -1070,7 +1070,7 @@
 
 <hr class="divider"/>
 
-<section>
+<section id="s15">
   <div class="sec-head"><span class="sec-num">15</span><h2>重要な設計上の禁止事項</h2></div>
   <p class="sec-tagline">実装時に絶対に侵犯してはならない 8 原則。1 件でも違反するとシステムの意味論が崩壊する。</p>
 
@@ -1095,7 +1095,7 @@
 
 <hr class="divider"/>
 
-<section>
+<section id="s16">
   <div class="sec-head"><span class="sec-num">16</span><h2>成功の指標</h2></div>
   <p class="sec-tagline">本アーキテクチャが機能しているかを測る KPI。勝率や PnL は副次的指標、主要指標は「エッジ台帳の成長と再現性」。</p>
 
@@ -1117,7 +1117,7 @@
 
 <hr class="divider"/>
 
-<section>
+<section id="s17">
   <div class="sec-head"><span class="sec-num">17</span><h2>設計教訓 (実装を通じて得た知見)</h2></div>
   <p class="sec-tagline">過去フェーズで実装中に直面した教訓。これらを忘れると同じ過ちを繰り返す。</p>
 
@@ -1214,7 +1214,7 @@
   </p>
 
   <div class="callout">
-    <strong>原則:</strong> 曖昧な委譲は「重複・抜け・取りこぼし」を生む。委譲は必ず下記 4 要素を**明示的に**持つこと。
+    <strong>原則:</strong> 曖昧な委譲は「重複・抜け・取りこぼし」を生む。委譲は必ず下記 4 要素を<strong>明示的に</strong>持つこと。
     Anthropic の知見「If a human engineer can't say which tool to use, an agent can't either」に従い、境界を曖昧にしない。
   </div>
 
@@ -1251,7 +1251,7 @@
     <strong>第 1 実証 = FundamentalsResearcher:</strong>
     本契約を最初に満たす認知エージェント。read-only EODHD ツールのみ (③)、有界 tool-use ループ (有界化)、
     <code class="mono">FundamentalsThesis</code> を Zod 検証して返す (②)、EdgeLedger に直接書かず提案止まり (④)。
-    実装は Phase 5B/6 ホールド明け。評価は §認知層評価ハーネス (LLM-as-judge) で行う。
+    実装は Phase 5B/6 ホールド明け。評価は認知層評価ハーネス (LLM-as-judge, <span class="path">src/side-b/evaluation/cognitiveOutputEvaluator.ts</span>) で行う。
   </div>
 </section>
 
@@ -1276,7 +1276,7 @@
 </section>
 
 <footer>
-  Generated 2026-05-15 · main @ <code>9ae4dc8</code> · Side-B 設計正本 (ローリング運用)
+  Last updated 2026-06-05 (§19 サブエージェント委譲契約 追加) · 初版 2026-05-15 · Side-B 設計正本 (ローリング運用)
 </footer>
 
 </div>
