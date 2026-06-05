@@ -598,16 +598,27 @@ npm run dev
 
 ## 技術スタック
 
+> **重要**: agent はこの表を **本番構成の正本** として扱うこと。「PostgreSQL = Cloud SQL」「AI = OpenAI」など training data の連想で hallucinate しないこと。
+> **最終更新**: 2026-06-05 (Supabase / Anthropic / EODHD / Cloud Run / Vercel 明示化)
+
 | カテゴリ | 技術 |
 |----------|------|
 | **Backend** | Node.js + Express + TypeScript |
 | **Frontend** | Next.js 15+ (App Router) + TypeScript |
-| **Database** | PostgreSQL + Prisma ORM |
+| **Database** | **Supabase PostgreSQL (managed, asia-northeast-1, project `rmsylwmqxyeqgplysqoa`)** + Prisma ORM。本番接続は Supavisor Transaction Pooler (`aws-0-asia-northeast-1.pooler.supabase.com:6543`) 経由、DIRECT_URL (migration 専用) は `db.[ProjectRef].supabase.co:5432`。**Cloud SQL は使っていない** |
 | **Validation** | Zod (ランタイムバリデーション必須) |
-| **AI** | OpenAI API (軽量モデル優先) |
-| **Market Data** | Twelve Data API |
-| **Notification** | Web Push (web-push) |
+| **AI** | **Anthropic Claude API** (extended thinking + prompt caching 配線済、PR #348)。モデルは `config.ai.models.<key>` + `modelFor()` + `AI_MODEL_<KEY>` env で per-agent 切替可能 |
+| **Market Data** | **EODHD (本番第一選択)**。Twelve Data は 2026-06-05 (PR #351) で物理削除済 |
+| **Notification** | Web Push (`web-push`, VAPID) + In-App Notification (`Notification` テーブル経由) |
 | **Task Queue** | BullMQ |
+| **Hosting (Backend)** | **GCP Cloud Run** (asia-northeast1, service `trader-note`, max-instances=5)。env は `.github/workflows/deploy.yml` の `--set-env-vars` 列挙が **唯一の真実のソース** (列挙忘れの env は silently OFF になる罠あり) |
+| **Hosting (Frontend)** | **Vercel** (`trader-note-build-ai.vercel.app`) |
+| **Hosting (Analysis Engine)** | GCP Cloud Run (asia-northeast1, service `trader-note-analysis-engine`、Python FastAPI) |
+| **Auth** | cTrader OAuth 2.0 + JWT (Cookie ベース, 7 日間有効、マルチアカウント対応) |
+| **Secrets** | GCP Secret Manager (16 件、deploy.yml の `--set-secrets` 列挙が正本) |
+| **CI/CD** | GitHub Actions (`.github/workflows/deploy.yml` `ci.yml` 等)。本番 deploy は main マージで自動発火 |
+| **Test** | Jest (unit, ~2800 件) + Playwright (E2E、本番 smoke 含む) |
+| **Cron** | GitHub Actions Cron + `/api/cron/*` (Bearer `CRON_SECRET` 認証必須)。15 分間隔の matching pipeline 等 |
 
 ## テスト手順
 
