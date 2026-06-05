@@ -280,7 +280,7 @@
 </header>
 
 <nav class="toc" aria-label="Table of contents">
-  <div class="toc-title">Contents · 17 sections</div>
+  <div class="toc-title">Contents · 19 sections</div>
   <a href="#s01"><span class="num">01</span> ポジショニング</a>
   <a href="#s02"><span class="num">02</span> ディレクトリ構成</a>
   <a href="#s03"><span class="num">03</span> PDCA ループ</a>
@@ -298,6 +298,8 @@
   <a href="#s15"><span class="num">15</span> 重要な設計上の禁止事項</a>
   <a href="#s16"><span class="num">16</span> 成功の指標</a>
   <a href="#s17"><span class="num">17</span> 設計教訓</a>
+  <a href="#s18"><span class="num">18</span> 本番運用と障害耐性</a>
+  <a href="#s19"><span class="num">19</span> サブエージェント委譲契約</a>
 </nav>
 
 <!-- ============================================================== -->
@@ -1198,6 +1200,58 @@
         React の <code>useRef</code> を用いて直近のリクエストIDをトラッキング。先行リクエストの遅延解決による誤った上書きを防ぎます。
       </p>
     </div>
+  </div>
+</section>
+
+<hr class="divider"/>
+
+<section id="s19">
+  <div class="sec-head"><span class="sec-num">19</span><h2>サブエージェント委譲契約 (Delegation Contract)</h2></div>
+  <p class="sec-tagline">
+    認知層 (Discovery / HypothesisGen / Mutation / Crossover / Reflection / specialists / 将来 FundamentalsResearcher) が
+    別エージェントへタスクを委譲する際の必須フォーマット。AI オーケストレーション整合監査 (2026-06-05) で
+    Anthropic「Building Effective Agents」/「Multi-agent research system」と照合した結果を正規化したもの。
+  </p>
+
+  <div class="callout">
+    <strong>原則:</strong> 曖昧な委譲は「重複・抜け・取りこぼし」を生む。委譲は必ず下記 4 要素を**明示的に**持つこと。
+    Anthropic の知見「If a human engineer can't say which tool to use, an agent can't either」に従い、境界を曖昧にしない。
+  </div>
+
+  <h3>委譲が必ず持つ 4 要素</h3>
+  <table>
+    <thead><tr><th>要素</th><th>内容</th><th>本 Side-B での担保</th></tr></thead>
+    <tbody>
+      <tr><td><strong>① 目的 (Objective)</strong></td><td>委譲タスクのゴールを 1 文で。何を達成したら完了かを明示</td><td>prompt の冒頭 + 終了条件</td></tr>
+      <tr><td><strong>② 出力契約 (Output Contract)</strong></td><td>戻り値の型と必須フィールド。受け手が解釈で迷わない形</td><td><strong>Zod スキーマで検証された具体型</strong>を返す (例: <code class="mono">FundamentalsThesis</code> / <code class="mono">CognitiveEvalVerdict</code>)。<code class="mono">any/unknown</code> 禁止</td></tr>
+      <tr><td><strong>③ 使用ツール (Tools / Sources)</strong></td><td>使ってよいツール・データ源を限定列挙。どれを使うべきかの指針</td><td>認知層には <strong>read-only ツールのみ</strong>渡す (EODHD 6 スキル等)。発注/台帳書込/DB 変更ツールは絶対に渡さない</td></tr>
+      <tr><td><strong>④ 境界 (Boundaries)</strong></td><td>やってよい/いけないことの線引き。スコープ外への逸脱を禁止</td><td>提案 (thesis/hint) 止まりで副作用なし。採否は決定論ゲート (PF&gt;1.5 / OOS&gt;1.3 / WF&lt;0.3) が行う</td></tr>
+    </tbody>
+  </table>
+
+  <h3>労力スケーリング (タスク複雑度に応じて prompt で明示)</h3>
+  <table>
+    <thead><tr><th>タスク種別</th><th>サブエージェント数</th><th>ツール呼び出し目安</th></tr></thead>
+    <tbody>
+      <tr><td>単純な事実取得</td><td>1</td><td>3–10</td></tr>
+      <tr><td>直接比較</td><td>2–4</td><td>各 10–15</td></tr>
+      <tr><td>複雑な多段調査</td><td>10+ (責務を明確分割)</td><td>個別に有界化</td></tr>
+    </tbody>
+  </table>
+
+  <h3>有界化 (暴走防止ガードレール)</h3>
+  <div class="callout warn">
+    <strong>すべての委譲ループに停止条件を持たせる:</strong>
+    <code>MAX_ROUNDS</code> (例 6) / トークン予算 / per-tool timeout / 総 wall-clock / 外部 API call 予算。
+    「明示的失敗」を一級の結末とし、上限到達時は構造化された「未達」を返してエスカレーションする
+    (Anthropic: runaway spawning / hallucinated sources の緩和)。
+  </div>
+
+  <div class="callout ok">
+    <strong>第 1 実証 = FundamentalsResearcher:</strong>
+    本契約を最初に満たす認知エージェント。read-only EODHD ツールのみ (③)、有界 tool-use ループ (有界化)、
+    <code class="mono">FundamentalsThesis</code> を Zod 検証して返す (②)、EdgeLedger に直接書かず提案止まり (④)。
+    実装は Phase 5B/6 ホールド明け。評価は §認知層評価ハーネス (LLM-as-judge) で行う。
   </div>
 </section>
 
