@@ -27,16 +27,33 @@ import type { TradeNote as PrismaTradeNote, MatchResult, MarketSnapshot } from '
 import { SideBMatchingAdapter } from './sideBMatchingAdapter';
 import type { SideBNoteMatchingData } from '../domain/matching/sideBNoteEvaluator';
 import { NotificationTriggerService } from './notification/notificationTriggerService';
+import { InAppNotificationSender } from './notification/inAppNotificationSender';
 import type { JsonValue } from '../utils/jsonValue';
 
 /**
+ * MatchingService の依存性注入オプション。
+ *
+ * 通知パイプライン(runMatchingPipeline)のコラボレータをテストから差し替えられるようにする。
+ * 本サービスが実際に使うメソッドのみ Pick で要求し、軽量モックが型契約を満たせるようにする
+ * (= テストで `as any` を避ける。最優先5原則 §2)。未指定時は既定の実装を使う。
+ */
+export interface MatchingServiceDeps {
+  notificationTriggerService?: Pick<
+    NotificationTriggerService,
+    'evaluateWithPersistence' | 'invalidateNotificationLog'
+  >;
+  inAppNotificationSender?: Pick<InAppNotificationSender, 'sendInApp'>;
+  simultaneousHitControl?: SimultaneousHitControlService;
+}
+
+/**
  * マッチングサービス
- * 
+ *
  * 責務:
  * - 過去トレードノートと現在の市場状態の一致判定
  * - NoteEvaluator に評価を委譲（Service は similarity を直接計算しない）
  * - MatchResult の DB 永続化
- * 
+ *
  * 設計方針（Task 6）:
  * - Service は「今の市場」を渡すだけ
  * - 類似度計算、閾値判定は NoteEvaluator の責務
@@ -50,17 +67,25 @@ export class MatchingService {
   private evaluationLogRepository: EvaluationLogRepository;
   private simultaneousHitControl: SimultaneousHitControlService;
   private sideBAdapter: SideBMatchingAdapter;
-  private notificationTriggerService: NotificationTriggerService;
+  private notificationTriggerService: Pick<
+    NotificationTriggerService,
+    'evaluateWithPersistence' | 'invalidateNotificationLog'
+  >;
+  // 通知許可後に UI 表示用 Notification 行を生成する送信器。
+  // 理由: 旧パイプラインは NotificationLog(監査ログ)のみ upsert しており、
+  // ユーザーが見る通知フィード(Notification)が永続化されず通知が UI に届かなかった。
+  private inAppNotificationSender: Pick<InAppNotificationSender, 'sendInApp'>;
 
-  constructor() {
+  constructor(deps: MatchingServiceDeps = {}) {
     this.marketDataService = new MarketDataService();
     this.noteService = new TradeNoteService();
     this.matchResultRepository = new MatchResultRepository();
     this.marketSnapshotRepository = new MarketSnapshotRepository();
     this.evaluationLogRepository = new EvaluationLogRepository();
-    this.simultaneousHitControl = new SimultaneousHitControlService();
+    this.simultaneousHitControl = deps.simultaneousHitControl ?? new SimultaneousHitControlService();
     this.sideBAdapter = new SideBMatchingAdapter();
-    this.notificationTriggerService = new NotificationTriggerService();
+    this.notificationTriggerService = deps.notificationTriggerService ?? new NotificationTriggerService();
+    this.inAppNotificationSender = deps.inAppNotificationSender ?? new InAppNotificationSender();
   }
 
   /**
@@ -755,11 +780,54 @@ export class MatchingService {
           });
 
           if (triggerResult.shouldNotify) {
-            notifiedCount++;
-            console.log(
-              `[MatchingPipeline] 通知送信: noteId=${match.historicalNoteId}, ` +
-              `symbol=${match.symbol}, score=${match.matchScore.toFixed(3)}`
-            );
+            // marketSnapshotId が無いと sendInApp は MatchResult を引けず、空文字での
+            // 無駄な DB クエリ + catch ログのノイズになる。さらに MatchResult 永続化は
+            // marketSnapshotId がある場合のみ行われる (= snapshotId 無し = 紐づく
+            // MatchResult も無い) ため、明示的に skip して理由を残す。
+            if (!match.marketSnapshotId) {
+              skippedCount++;
+              const warnMsg = `通知スキップ(marketSnapshotId 欠落で Notification 作成不可): noteId=${match.historicalNoteId}, symbol=${match.symbol}`;
+              errors.push(warnMsg);
+              console.warn(`[MatchingPipeline] ${warnMsg}`);
+              continue;
+            }
+
+            // 通知が許可されたら UI 表示用 Notification 行を実際に作成する。
+            // sendInApp は (noteId, marketSnapshotId) で永続化済み MatchResult を引き、
+            // それに紐づく Notification を upsert する。MatchResult が無い等で
+            // 失敗しても例外にせず success:false を返すため、パイプラインは継続する。
+            const sendResult = await this.inAppNotificationSender.sendInApp({
+              noteId: match.historicalNoteId,
+              marketSnapshotId: match.marketSnapshotId,
+              symbol: match.symbol || '',
+              score: match.matchScore,
+              title: `一致検出: ${match.symbol || 'シンボル不明'}`,
+              message: match.reasons?.[0] || 'ノートと現在の市場が一致しました',
+              reasonSummary: triggerResult.reasonSummary || `スコア: ${match.matchScore.toFixed(3)}`,
+            });
+
+            if (sendResult.success) {
+              notifiedCount++;
+              console.log(
+                `[MatchingPipeline] 通知送信: noteId=${match.historicalNoteId}, ` +
+                `symbol=${match.symbol}, score=${match.matchScore.toFixed(3)}, notificationId=${sendResult.id}`
+              );
+            } else {
+              // 通知判定は許可されたが Notification 行を作れなかった場合 (MatchResult 不在 等)。
+              // evaluateWithPersistence が先に status='sent' ログを書いており、isDuplicate は
+              // status 不問で重複判定するため、このままだと次回以降のパイプラインが永久に
+              // スキップして Notification が作られないままになる。先行ログを無効化(削除)して
+              // 次回パイプラインで再評価・再配信できるようにする。
+              if (triggerResult.notificationLogId) {
+                await this.notificationTriggerService.invalidateNotificationLog(
+                  triggerResult.notificationLogId,
+                );
+              }
+              skippedCount++;
+              const warnMsg = `通知送信失敗(Notification未作成・再試行可能化): noteId=${match.historicalNoteId}, symbol=${match.symbol}`;
+              errors.push(warnMsg);
+              console.warn(`[MatchingPipeline] ${warnMsg}`);
+            }
           } else {
             skippedCount++;
             console.log(

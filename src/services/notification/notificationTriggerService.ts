@@ -199,6 +199,24 @@ export class NotificationTriggerService {
   }
 
   /**
+   * 配信失敗時に、先行して書き込んだ NotificationLog を無効化(削除)する。
+   *
+   * 理由: evaluateWithPersistence は配信前に status='sent' のログを永続化するが、
+   * `isDuplicate` は status を問わずレコードの存在だけで重複判定する。そのため
+   * 実際の配信(sendInApp)が失敗した場合、ログだけ残って次回以降の再試行が冪等性
+   * チェックで永久にブロックされ、Notification が作られないまま放置される。
+   * 配信失敗時はこのログを削除し、次回パイプラインで再評価・再配信できるようにする。
+   */
+  async invalidateNotificationLog(notificationLogId: string): Promise<void> {
+    try {
+      await this.notificationLogRepository.deleteLogById(notificationLogId);
+    } catch (error) {
+      // 削除失敗自体は配信本体をブロックしない(次回 cooldown 満了後に再評価される)
+      console.error('NotificationLog 無効化エラー:', error);
+    }
+  }
+
+  /**
    * NotificationLog を DB に記録
    */
   private async logNotification(params: {
