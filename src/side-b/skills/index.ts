@@ -74,9 +74,16 @@ import { createRunFullValidationSkill } from './validation/runFullValidation';
 import { createReadRecentNotesSkill } from './notes/readRecentNotes';
 import { createRecordLessonSkill } from './notes/recordLesson';
 import { createComputeLensFeaturesSkill } from './lens/computeLensFeatures';
+import { registerEodhdResearchSkills } from './research/eodhdResearchSkills';
+
+export * from './research/eodhdResearchSkills';
 
 /**
- * MVP の全 8 スキルを登録済み Registry を返す。
+ * 全スキルを登録済み Registry を返す。
+ *
+ * 内訳: コア 8 スキル + EODHD read-only リサーチ 6 スキル (P3)。
+ * EODHD 6 種はすべて read-only で、将来 FundamentalsResearcher が有界 tool-use ループで
+ * 使う「read-only ツールのみ」を構成する (発注/書込系は認知層に絶対渡さない)。
  *
  * 依存オブジェクトは内部でデフォルト値(シングルトン)を使う。
  * テストや特殊用途で依存を差し替えたい場合は、個別 factory を直接使って
@@ -94,5 +101,7 @@ export function buildDefaultSkillRegistry(): SkillRegistry {
   registry.register(createReadRecentNotesSkill());
   registry.register(createRecordLessonSkill());
   registry.register(createComputeLensFeaturesSkill());
+  // P3: EODHD read-only リサーチスキル 6 種 (news/sentiment/economic_events/macro/earnings/fundamentals)
+  registerEodhdResearchSkills(registry);
   return registry;
 }
