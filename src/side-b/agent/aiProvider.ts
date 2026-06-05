@@ -236,6 +236,16 @@ export class AIProvider {
     }
 
     /**
+     * OpenRouter エンドポイント経由かを判定する (baseURL のみ判定)。
+     * P2 の extended thinking (`reasoning`) / prompt caching (`cache_control`) は
+     * **OpenRouter の pass-through 仕様**前提のため、他の OpenAI 互換エンドポイント
+     * (Gemini 互換等) に送ると 400 になりうる。OpenRouter 経由のときだけ有効化する。
+     */
+    private usesOpenRouterEndpoint(): boolean {
+        return this.baseURL.toLowerCase().includes('openrouter.ai');
+    }
+
+    /**
      * OpenAI 新パラメータ形式 (temperature 抑止 + max_completion_tokens) を要求するかを判定する。
      *
      * 条件: **OpenAI 直エンドポイント (api.openai.com) かつ reasoning モデル (gpt-5系 / o系)** の時のみ true。
@@ -322,16 +332,21 @@ export class AIProvider {
         messages: ChatMessage[],
         options: ChatOptions = {},
     ): Promise<AIResponse> {
-        // P2: Anthropic extended thinking の有効判定 (opt-in + Anthropic + OpenAI 直でない)。
-        // 有効時は temperature を送らない (Anthropic は thinking 時に temperature≠1 を拒否するため)。
+        // P2: Anthropic extended thinking の有効判定 (opt-in + Anthropic + OpenRouter 経由)。
+        // reasoning は OpenRouter pass-through 仕様前提のため、他の互換エンドポイントには送らない
+        // (PR #348 review)。有効時は temperature を送らない (Anthropic は thinking 時に temperature≠1 を拒否)。
         const thinkingEnabled =
             options.thinkingBudgetTokens !== undefined &&
             options.thinkingBudgetTokens > 0 &&
             this.isAnthropicModel(this.model) &&
-            !this.usesOpenAIDirectEndpoint();
+            this.usesOpenRouterEndpoint();
 
-        // P2: Anthropic prompt caching の有効判定 (opt-in + Anthropic)。
-        const cacheEnabled = options.cacheSystemPrompt === true && this.isAnthropicModel(this.model);
+        // P2: Anthropic prompt caching の有効判定 (opt-in + Anthropic + OpenRouter 経由)。
+        // cache_control も OpenRouter pass-through 前提のため OpenRouter 限定にする (PR #348 review)。
+        const cacheEnabled =
+            options.cacheSystemPrompt === true &&
+            this.isAnthropicModel(this.model) &&
+            this.usesOpenRouterEndpoint();
 
         // OpenAI 互換 API へ送る JSON body。
         // 値は number / string / boolean / 配列 / オブジェクトのいずれかで、

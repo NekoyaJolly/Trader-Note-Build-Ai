@@ -205,6 +205,19 @@ describe('AIProvider request body', () => {
       expect(body).not.toHaveProperty('reasoning');
       expect(body.temperature).toBe(0.3);
     });
+
+    it('Anthropic でも OpenRouter 以外の baseURL では reasoning を送らない (PR #348)', async () => {
+      mockFetchOnce();
+      const provider = new AIProvider({
+        apiKey: 'test',
+        model: CLAUDE,
+        baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
+      });
+      await provider.chat([{ role: 'user', content: 'hi' }], { thinkingBudgetTokens: 4000 });
+      const body = lastRequestBody();
+      expect(body).not.toHaveProperty('reasoning');
+      expect(body.temperature).toBe(0.3);
+    });
   });
 
   describe('prompt caching (cache_control)', () => {
@@ -230,6 +243,24 @@ describe('AIProvider request body', () => {
     it('非 Anthropic では cacheSystemPrompt を無視し system content は string のまま', async () => {
       mockFetchOnce();
       const provider = new AIProvider({ apiKey: 'test', model: 'gpt-4o-mini', baseURL: 'https://api.openai.com/v1' });
+      await provider.chat(
+        [
+          { role: 'system', content: 'システムプロンプト' },
+          { role: 'user', content: 'hi' },
+        ],
+        { cacheSystemPrompt: true },
+      );
+      const messages = lastRequestBody().messages as Array<{ role: string; content: unknown }>;
+      expect(messages[0].content).toBe('システムプロンプト');
+    });
+
+    it('Anthropic でも OpenRouter 以外の baseURL では cache_control を付けない (PR #348)', async () => {
+      mockFetchOnce();
+      const provider = new AIProvider({
+        apiKey: 'test',
+        model: CLAUDE,
+        baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
+      });
       await provider.chat(
         [
           { role: 'system', content: 'システムプロンプト' },
