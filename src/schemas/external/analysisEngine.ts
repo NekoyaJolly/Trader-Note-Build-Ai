@@ -389,7 +389,8 @@ export const ScreeningBacktestConfigSchema = z.object({
   minStopLossPips: z.number().min(0).optional(),
   /**
    * SL 最大キャップ (pips)。高ボラ局面で ATR 基準 SL が過大になりポジションが
-   * 極小化するのを抑える。実効SL = min(生SL, maxStopLossPips × pipSize)。未指定 = 上限なし。
+   * 極小化するのを抑える。実効SL = min(生SL, maxStopLossPips × pipSize)。
+   * 未指定 / 0 = 上限なし (analysis-engine の attach_sl_clamp は maxStopLossPips<=0 を None 扱い)。
    */
   maxStopLossPips: z.number().min(0).optional(),
 });

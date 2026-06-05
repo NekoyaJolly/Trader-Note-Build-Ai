@@ -122,6 +122,11 @@ class BTSpec:
     # 0.0 / None = clamp 無効 (後方互換)。
     min_stop_loss_price: float = 0.0
     max_stop_loss_price: Optional[float] = None
+    # config.pipSize (権威ある 1pip 価格幅)。fixed_pips の SL/TP 距離換算を
+    # strategy 内の価格レンジ推定 (_pip_size) ではなくこの値で行い、cost(spread)/clamp と
+    # 同一 pip 基準に統一する (例: XAUUSD は 0.1 であって価格レンジ推定の 0.01 ではない)。
+    # 0.0 = 未指定 → strategy は従来の _pip_size 推定にフォールバック (後方互換)。
+    effective_pip_size: float = 0.0
 
 
 @dataclass(frozen=True)

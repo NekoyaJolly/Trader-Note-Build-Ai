@@ -22,6 +22,7 @@ from app.backtest.adapter import attach_sl_clamp  # noqa: E402
 from app.backtest.engine_protocol import (  # noqa: E402
     BTSpec,
     BTStopLossAtrMultiple,
+    BTStopLossFixedPips,
     BTTakeProfitRrRatio,
 )
 from app.backtest.runner_backtesting_py import BacktestingPyEngine  # noqa: E402
@@ -65,6 +66,15 @@ class TestAttachSlClamp:
         out = attach_sl_clamp(_spec(), _config(maxStopLossPips=None))
         assert out.min_stop_loss_price == 2.0 * 0.01
         assert out.max_stop_loss_price is None
+
+    def test_sets_effective_pip_size(self):
+        # pipSize が与えられたら clamp の有無に関わらず effective_pip_size を spec に乗せる
+        out = attach_sl_clamp(_spec(), _config(pipSize=0.1, minStopLossPips=0.0, maxStopLossPips=None))
+        assert out.effective_pip_size == 0.1
+
+    def test_effective_pip_size_zero_when_disabled(self):
+        out = attach_sl_clamp(_spec(), _config(pipSize=0.0))
+        assert out.effective_pip_size == 0.0
 
 
 def _bind_compute(spec: BTSpec):
@@ -111,3 +121,40 @@ class TestStrategyClampWiring:
         spec = attach_sl_clamp(_spec(), _config(pipSize=0.0))
         _, compute = _bind_compute(spec)
         assert compute(atr_val=0.005, entry_price=150.0) == 0.005 * 1.5
+
+
+class TestFixedPipsPipSize:
+    """fixed_pips の SL 距離が config.pipSize (effective_pip_size) で換算され、
+    価格レンジ推定 (_pip_size) の単位ズレを起こさないことを固定する。"""
+
+    def _fixed_pips_spec(self) -> BTSpec:
+        return BTSpec(
+            direction="long",
+            stop_loss=BTStopLossFixedPips(value=10.0),
+            take_profit=BTTakeProfitRrRatio(value=2.0),
+        )
+
+    def _bind_raw(self, spec: BTSpec):
+        gs = BacktestingPyEngine._build_strategy_class(spec)
+        dummy = types.SimpleNamespace(
+            _spec_sl=spec.stop_loss,
+            opt_sl_value=spec.stop_loss.value,
+            _effective_pip_size=gs._effective_pip_size,
+        )
+        # _resolved_pip_size / _pip_size / _raw_sl_distance を dummy にバインド
+        dummy._pip_size = types.MethodType(gs._pip_size, dummy)
+        dummy._resolved_pip_size = types.MethodType(gs._resolved_pip_size, dummy)
+        return types.MethodType(gs._raw_sl_distance, dummy)
+
+    def test_uses_config_pip_size(self):
+        # XAUUSD: pipSize=0.1。fixed_pips 10pips → 10 × 0.1 = 1.0 価格距離。
+        # 価格レンジ推定 (entry_price=2000 → 0.01) のままだと 0.1 になり 10 倍ズレる。
+        spec = attach_sl_clamp(self._fixed_pips_spec(), _config(pipSize=0.1))
+        raw = self._bind_raw(spec)
+        assert raw(atr_val=1.0, entry_price=2000.0) == pytest.approx(10.0 * 0.1)
+
+    def test_falls_back_to_heuristic_when_pip_size_unset(self):
+        # pipSize 未指定 (effective_pip_size=0) → 従来の _pip_size 推定 (entry=2000→0.01)
+        spec = self._fixed_pips_spec()  # clamp 未付与 = effective_pip_size 0.0
+        raw = self._bind_raw(spec)
+        assert raw(atr_val=1.0, entry_price=2000.0) == pytest.approx(10.0 * 0.01)

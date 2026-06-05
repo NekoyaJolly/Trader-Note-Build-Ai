@@ -67,6 +67,13 @@ describe('getStopLossClampPips', () => {
     expect(getStopLossClampPips('GBPCHF')).toEqual({ minPips: 4, maxPips: 60 });
   });
 
+  it('部分的に数値の誤設定 (2abc / 60pips) は受理せず既定値にフォールバックする', () => {
+    // parseFloat なら 2 / 60 と誤受理してしまうケースを厳密パースで弾く
+    process.env.SL_FLOOR_COST_MULT = '2abc';
+    process.env.SL_MAX_PIPS_DEFAULT = '60pips';
+    expect(getStopLossClampPips('GBPCHF')).toEqual({ minPips: 4, maxPips: 60 });
+  });
+
   it('SYMBOL_MAX_STOP_LOSS_PIPS は Nekoさん 決定の絶対 pips 表と一致する', () => {
     expect(SYMBOL_MAX_STOP_LOSS_PIPS).toEqual({ XAUUSD: 80, EURUSD: 40, USDJPY: 40 });
   });

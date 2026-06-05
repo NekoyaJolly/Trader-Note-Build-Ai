@@ -624,6 +624,9 @@ class BacktestingPyEngine:
         # 全 SL type (atr_multiple / fixed_pips / swing_point) の算出距離に共通適用する。
         sl_floor_price = float(getattr(spec, "min_stop_loss_price", 0.0) or 0.0)
         sl_cap_price = getattr(spec, "max_stop_loss_price", None)
+        # config.pipSize (権威 pip 幅)。fixed_pips の SL/TP 換算を cost/clamp と同一基準に
+        # 統一する。0.0 のときは strategy 内 _pip_size 推定にフォールバック (後方互換)。
+        effective_pip_size = float(getattr(spec, "effective_pip_size", 0.0) or 0.0)
 
         class GeneratedStrategy(Strategy):
             _spec_direction = direction
@@ -635,6 +638,8 @@ class BacktestingPyEngine:
             # SL clamp 境界 (価格距離)。0.0 / None = 無効 (後方互換)。
             _sl_floor_price = sl_floor_price
             _sl_cap_price = sl_cap_price
+            # config.pipSize (fixed_pips 換算用)。0.0 = _pip_size 推定にフォールバック。
+            _effective_pip_size = effective_pip_size
             # backtesting.py optimize() が変動させる最適化対象パラメータ（クラス属性）。
             # 通常 run では既定値のまま使われ、SL/TP 距離は従来と一致する。
             opt_sl_value = sl_value_default
@@ -1010,6 +1015,17 @@ class BacktestingPyEngine:
                     return 0.01
                 return 0.0001
 
+            def _resolved_pip_size(self, entry_price: float) -> float:
+                """fixed_pips の pips→価格換算に使う pip 幅。
+
+                config.pipSize (= _effective_pip_size) が与えられていればそれを使い、
+                cost(spread) / SL clamp と同一 pip 基準に統一する (例: XAUUSD=0.1)。
+                未指定 (0.0) のときのみ価格レンジ推定 _pip_size にフォールバックする。
+                """
+                if self._effective_pip_size > 0:
+                    return self._effective_pip_size
+                return self._pip_size(entry_price)
+
             def _compute_sl_distance(self, atr_val: float, entry_price: float) -> Optional[float]:
                 """生 SL 距離を算出し、最小フロア / 最大キャップで clamp した実効距離を返す。
 
@@ -1038,7 +1054,7 @@ class BacktestingPyEngine:
                     pips = float(self.opt_sl_value)
                     if pips <= 0:
                         return None
-                    return pips * self._pip_size(entry_price)
+                    return pips * self._resolved_pip_size(entry_price)
                 if spec.kind == "swing_point":
                     # 直近 lookback_bars の最安値 (long) / 最高値 (short) からの距離
                     lookback = max(2, int(self._swing_lookback_bars))
@@ -1066,7 +1082,7 @@ class BacktestingPyEngine:
                     pips = float(self.opt_tp_value)
                     if pips <= 0:
                         return None
-                    return pips * self._pip_size(entry_price)
+                    return pips * self._resolved_pip_size(entry_price)
                 return None
 
         return GeneratedStrategy

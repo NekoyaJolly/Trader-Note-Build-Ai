@@ -124,13 +124,27 @@ export function getExecutionCostProfile(symbol: string): SymbolExecutionCostProf
 }
 
 /**
+ * env 値を「文字列全体が数値のときだけ」受理する厳密パース。
+ * `parseFloat` は `'2abc'` を 2 として受理してしまい誤設定を silent に通すため、
+ * Side-B の他の env 解釈 (parseStrictInt 等) と揃えて trim + 全体一致で検証する。
+ * 不正値は null を返し、呼び出し側が既定値へフォールバックする。
+ */
+function parseStrictFloat(raw: string | undefined): number | null {
+  if (raw === undefined) return null;
+  const trimmed = raw.trim();
+  if (!/^-?\d+(?:\.\d+)?$/.test(trimmed)) return null;
+  const n = Number(trimmed);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
  * SL 最小フロアを「往復コスト pips の何倍にするか」の係数。
  * ATR 基準 SL が低ボラ局面で往復コストに飲まれるのを防ぐ最低マージン。
  * env `SL_FLOOR_COST_MULT` で調整可 (既定 2 = コストの 2 倍を最低 SL とする)。
  */
 function getSlFloorCostMultiplier(): number {
-  const raw = Number.parseFloat(process.env.SL_FLOOR_COST_MULT ?? '');
-  return Number.isFinite(raw) && raw >= 0 ? raw : 2;
+  const parsed = parseStrictFloat(process.env.SL_FLOOR_COST_MULT);
+  return parsed !== null && parsed >= 0 ? parsed : 2;
 }
 
 /**
@@ -146,8 +160,8 @@ export const SYMBOL_MAX_STOP_LOSS_PIPS: Readonly<Record<string, number>> = {
 
 /** 未定義シンボルの SL 最大キャップ (pips)。env `SL_MAX_PIPS_DEFAULT` で調整可。 */
 function getDefaultMaxStopLossPips(): number {
-  const raw = Number.parseFloat(process.env.SL_MAX_PIPS_DEFAULT ?? '');
-  return Number.isFinite(raw) && raw > 0 ? raw : 60;
+  const parsed = parseStrictFloat(process.env.SL_MAX_PIPS_DEFAULT);
+  return parsed !== null && parsed > 0 ? parsed : 60;
 }
 
 /**

@@ -513,7 +513,8 @@ class ScreeningBacktestConfig(BaseModel):
     # 0 = フロアなし (後方互換)。pipSize<=0 のときは換算できないため無効。
     minStopLossPips: float = Field(default=0.0, ge=0)
     # SL 最大キャップ (pips)。高ボラ局面で ATR 基準 SL が過大になりポジションが極小化
-    # するのを抑える。実効SL = min(生SL, maxStopLossPips × pipSize)。None = 上限なし。
+    # するのを抑える。実効SL = min(生SL, maxStopLossPips × pipSize)。
+    # None / 0 = 上限なし (attach_sl_clamp は maxStopLossPips<=0 を None 扱いにする)。
     maxStopLossPips: Optional[float] = Field(default=None, ge=0)
 
 

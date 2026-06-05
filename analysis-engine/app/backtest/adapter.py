@@ -106,9 +106,14 @@ def attach_sl_clamp(spec: BTSpec, config: ScreeningBacktestConfig) -> BTSpec:
         if config.maxStopLossPips is not None and config.maxStopLossPips > 0
         else None
     )
-    if min_price <= 0 and max_price is None:
-        return spec
-    return replace(spec, min_stop_loss_price=min_price, max_stop_loss_price=max_price)
+    # pip_size が与えられたら、clamp の有無に関わらず fixed_pips の換算統一のため
+    # effective_pip_size を spec に乗せる (= cost/spread と同じ pip 基準に揃える)。
+    return replace(
+        spec,
+        min_stop_loss_price=min_price,
+        max_stop_loss_price=max_price,
+        effective_pip_size=pip,
+    )
 
 
 # ---------------------------------------------------------------
