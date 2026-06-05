@@ -130,10 +130,11 @@ export class EodhdProvider extends BaseMarketDataProvider {
       // 必要な native bar 数 (集約後 limit 件を確保)
       const requiredNativeBars = limit * plan.factor;
       // 週末・休場日を含めて余裕を持って取得 (FX は週末 ~2 日 / 計 7 日中 5 営業日 ≈ 2.4x が安全)。
-      // ただし limit が小さい (例 limit=1 の現在値取得) と窓が数十分まで縮み、EODHD intraday の
-      // 配信遅延 (直近数十分は未確定) と短レンジで空が返る現象に当たる。最低 12h の窓を保証して
-      // 小 limit でも確実に直近バーを拾えるようにする (取得後 slice(-limit) で件数は絞る)。
-      const MIN_INTRADAY_LOOKBACK_MS = 12 * 60 * 60 * 1000;
+      // ただし limit が小さい (例 limit=1) や週末・連休 (FX は土日閉場) では直近窓が空になり
+      // 0 件が返る。例: 土曜に XAUUSD 1m を要求すると EODHD の配信は金曜午前止まりで直近 12h に
+      // bar が無く、チャートが描けない (2026-06-06 実機で確認)。最低 7 日の窓を保証して、週末・
+      // 連休・配信遅延でも直近営業日のバーを確実に拾う (取得後 slice(-limit) で件数は絞る)。
+      const MIN_INTRADAY_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
       const lookbackMs = Math.max(requiredNativeBars * nativeTfMs * 2.5, MIN_INTRADAY_LOOKBACK_MS);
       const toSec = Math.floor(Date.now() / 1000);
       const fromSec = toSec - Math.ceil(lookbackMs / 1000);
@@ -298,8 +299,9 @@ export class EodhdProvider extends BaseMarketDataProvider {
   ): Promise<OHLCVBar[]> {
     const targetMs = TIMEFRAME_MS[timeframe];
     const MAX_LOOKBACK_MS = 60 * 24 * 60 * 60 * 1000; // 60 日
-    // 最低 12h の窓を保証 (小 limit で窓が縮み、直近の配信遅延帯で空が返るのを防ぐ)。
-    const MIN_LOOKBACK_MS = 12 * 60 * 60 * 1000;
+    // 最低 7 日の窓を保証 (週末・連休・配信遅延で直近窓が空になり 0 件が返るのを防ぐ。
+    // getHistoricalData と同じ理由。MAX_LOOKBACK_MS=60日 を超えない)。
+    const MIN_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
     const lookbackMs = Math.min(
       Math.max(limit * targetMs * 2.5, MIN_LOOKBACK_MS),
       MAX_LOOKBACK_MS,

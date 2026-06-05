@@ -201,7 +201,22 @@ export class CTraderAccountService extends EventEmitter {
    * 現時点ではポーリングによる定期更新を推奨。
    */
   subscribeToUpdates(): void {
-    this.startPollingUpdates({ intervalMs: 5000 });
+    // ポジション更新ポーリング間隔。5 秒は過剰で cTrader WebSocket を頻繁に張り直し、
+    // 他経路 (bid/ask quote 等) と同一アカウント複数接続→1006 競合切断ループの一因になる
+    // (project_ctrader_multi_connection_bug)。env で調整可、既定 15 秒に緩和。
+    // 負数 / NaN / 極端に小さい値をそのまま setInterval に渡すと高頻度ループ → cTrader 負荷・
+    // レート制限の原因になるため、「有限かつ MIN_POLL_MS 以上」を検証し、無効値は既定へフォールバック。
+    const DEFAULT_POLL_MS = 15000;
+    const MIN_POLL_MS = 1000;
+    const raw = process.env.CTRADER_POSITION_POLL_MS;
+    const parsed = Number(raw);
+    const intervalMs = Number.isFinite(parsed) && parsed >= MIN_POLL_MS ? parsed : DEFAULT_POLL_MS;
+    if (raw !== undefined && intervalMs !== parsed) {
+      console.warn(
+        `[CTraderAccountService] CTRADER_POSITION_POLL_MS=${raw} は無効 (有限かつ ${MIN_POLL_MS}ms 以上が必要) → 既定 ${DEFAULT_POLL_MS}ms を使用`,
+      );
+    }
+    this.startPollingUpdates({ intervalMs });
   }
 
   /**

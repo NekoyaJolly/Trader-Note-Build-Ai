@@ -53,6 +53,15 @@ export class MarketDataService {
    * @param authService - 認証サービス
    */
   configureCTrader(accountId: string, authService: CTraderAuthService): void {
+    // Nekoさん 方針 (2026-06-06): EODHD 移行後、cTrader の常時利用は bid/ask quote
+    // (ctraderQuoteProvider, チャート overlay) のみに集約する。市場データ (OHLCV) は
+    // EODHD を第一・唯一とし、cTrader 二次フォールバックは既定 OFF。複数経路が同一
+    // アカウントで WebSocket を張り 1006 競合切断ループになるのを防ぐ
+    // (project_ctrader_multi_connection_bug)。env で明示 ON のときのみ配線する。
+    if (process.env.MARKETDATA_CTRADER_FALLBACK !== 'true') {
+      console.log('[MarketDataService] cTrader フォールバック無効 (MARKETDATA_CTRADER_FALLBACK!=true) → EODHD のみ使用');
+      return;
+    }
     this.ctraderDataService = new CTraderDataService(authService);
     this.ctraderAccountId = accountId;
     console.log('[MarketDataService] cTrader データソース設定完了');
@@ -78,6 +87,11 @@ export class MarketDataService {
    * サーバー起動後に OAuth 接続が完了/更新された場合でも自動的に拾える。
    */
   async ensureCTraderConfigured(): Promise<void> {
+    // cTrader フォールバックが既定 OFF (MARKETDATA_CTRADER_FALLBACK != 'true') のときは、
+    // configureCTrader() が no-op になるため DB token 読み込みも不要。早期 return しないと
+    // isCTraderAvailable() が常に false → ctraderConfigPromise が finally で破棄され、毎回
+    // 「DB token 読み込み + no-op ログ」を繰り返すムダなループになる (Copilot review 指摘)。
+    if (process.env.MARKETDATA_CTRADER_FALLBACK !== 'true') return;
     if (this.isCTraderAvailable()) return;
     if (this.ctraderConfigPromise) return this.ctraderConfigPromise;
 
