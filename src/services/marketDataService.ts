@@ -142,7 +142,10 @@ export class MarketDataService {
       '1day': '1d',
       '1week': '1w',
     };
-    const candidate = ALIASES[timeframe.toLowerCase()] ?? timeframe;
+    // 大文字・前後空白を含む入力 ('1H' / ' 15m ' 等) でも EODHD をスキップしないよう、
+    // 先に trim + lowercase してから alias 解決 / enum パースする。
+    const key = timeframe.trim().toLowerCase();
+    const candidate = ALIASES[key] ?? key;
     const parsed = TimeframeSchema.safeParse(candidate);
     return parsed.success ? parsed.data : null;
   }
