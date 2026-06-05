@@ -266,32 +266,38 @@ function timeToJstDate(time: Time): Date {
   return new Date(timeToSeconds(time) * 1000);
 }
 
+// Intl.DateTimeFormat はモジュールスコープで一度だけ生成してキャッシュする。
+// tickMarkFormatter (パン/ズーム) と timeFormatter (crosshair マウス移動) は高頻度で
+// 呼ばれるため、toLocaleString のように呼び出しごとに Intl フォーマッタを生成すると
+// 描画オーバーヘッドになる。format() の再利用で抑える。
+const JST_AXIS_FORMATTER = new Intl.DateTimeFormat("ja-JP", {
+  timeZone: "Asia/Tokyo",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+const JST_CROSSHAIR_FORMATTER = new Intl.DateTimeFormat("ja-JP", {
+  timeZone: "Asia/Tokyo",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+
 /** 横軸の目盛ラベル (月/日 + 時:分、JST) */
 function formatJstAxisTick(time: Time): string {
-  return timeToJstDate(time).toLocaleString("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+  return JST_AXIS_FORMATTER.format(timeToJstDate(time));
 }
 
 /** crosshair の時刻ラベル (年月日 + 時:分:秒、JST) */
 function formatJstCrosshair(time: Time): string {
-  return (
-    timeToJstDate(time).toLocaleString("ja-JP", {
-      timeZone: "Asia/Tokyo",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    }) + " JST"
-  );
+  return JST_CROSSHAIR_FORMATTER.format(timeToJstDate(time)) + " JST";
 }
 
 // ========================================
