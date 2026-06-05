@@ -195,9 +195,14 @@ export function useRealtimeChart(
    */
   const connect = useCallback(async () => {
     if (sharedEventSource) {
-      // 同じシンボル・時間足ならそのまま利用
-      if (sharedState.symbol === symbol && sharedState.timeframe === timeframe) {
-        console.log('[useRealtimeChart] 既に接続中です（共有接続）');
+      // 実際に OPEN している接続だけを「接続済み」として再利用する。
+      // バグ修正 (2026-06-06): 過去の connect で EventSource は生成されたが onopen 未達
+      // (readyState=0 CONNECTING) / 切断済み (readyState=2 CLOSED) の残骸が残っていると、
+      // symbol/timeframe 一致だけで無条件に status='connected' にしていた。これが
+      // 「実態は未接続なのに接続済み表示」になる原因。OPEN(1) のみ再利用する。
+      const isOpen = sharedEventSource.readyState === 1; // 0=CONNECTING, 1=OPEN, 2=CLOSED
+      if (isOpen && sharedState.symbol === symbol && sharedState.timeframe === timeframe) {
+        console.log('[useRealtimeChart] 既に接続中です（共有接続・OPEN 確認済み）');
         sharedState = { ...sharedState, isLoading: false, status: 'connected' };
         emitSharedState();
         return;

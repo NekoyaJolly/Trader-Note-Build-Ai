@@ -179,7 +179,8 @@ const PricePanel = ({ bar, dailyHigh, dailyLow, previousClose, brokerStatus, bro
 	}
 
 	const timestamp = "startTime" in bar ? bar.startTime : bar.timestamp;
-	const timeLabel = new Date(timestamp).toLocaleTimeString("ja-JP", { hour12: false });
+	// JST 固定 + 24 時間制で表示し、チャート横軸 (JST 化済み) と時刻基準を揃える
+	const timeLabel = new Date(timestamp).toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour12: false }) + " JST";
 	const dayChange = previousClose != null ? bar.close - previousClose : null;
 	const dayChangePercent = previousClose != null && previousClose !== 0 && dayChange != null ? (dayChange / previousClose) * 100 : null;
 	const changeColor = dayChange != null ? (dayChange >= 0 ? "text-green-400" : "text-red-400") : "text-gray-400";
@@ -970,7 +971,7 @@ export function RealtimeChart({
 							<div className="bg-gray-800/50 rounded-lg p-2 text-xs border border-gray-700/50">
 								<div className="flex items-center justify-between mb-1">
 									<span className="text-gray-400">最新Tick</span>
-									<span className="text-gray-500 text-xs">{new Date(latestTick.timestamp).toLocaleTimeString("ja-JP")}</span>
+									<span className="text-gray-500 text-xs">{new Date(latestTick.timestamp).toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour12: false })} JST</span>
 								</div>
 								<div className="grid grid-cols-4 gap-2">
 									<div>
