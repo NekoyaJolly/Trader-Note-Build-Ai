@@ -9,10 +9,15 @@ import {
   aggregateVerdict,
   buildJudgeUserPrompt,
   evaluateCognitiveOutput,
+  AIProviderCognitiveJudge,
   MARKET_ANALYSIS_RUBRIC,
   type CognitiveJudge,
 } from '../../evaluation/cognitiveOutputEvaluator';
-import type { CognitiveRubric, JudgeRawOutput } from '../../models/cognitiveEval';
+import {
+  JudgeRawOutputSchema,
+  type CognitiveRubric,
+  type JudgeRawOutput,
+} from '../../models/cognitiveEval';
 
 const TWO_DIM_RUBRIC: CognitiveRubric = {
   name: 'test_v1',
@@ -106,6 +111,46 @@ describe('aggregateVerdict (決定論集計)', () => {
     // 0*.3 + .4*(.25+.2+.15+.1)=.4*.7=0.28
     expect(grounded0.overallScore).toBeCloseTo(0.28);
     expect(grounded0.passed).toBe(false);
+  });
+});
+
+describe('JudgeRawOutputSchema (PR #346 #3: 生採点は finite を許容し clamp に委ねる)', () => {
+  it('範囲外でも finite なら parse 成功 (1.2 / -0.5)', () => {
+    const r = JudgeRawOutputSchema.safeParse({
+      dimensionScores: [
+        { dimension: 'a', score: 1.2, reason: '' },
+        { dimension: 'b', score: -0.5, reason: '' },
+      ],
+      summary: '',
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('NaN / Infinity は parse で弾く', () => {
+    const nan = JudgeRawOutputSchema.safeParse({
+      dimensionScores: [{ dimension: 'a', score: Number.NaN, reason: '' }],
+    });
+    const inf = JudgeRawOutputSchema.safeParse({
+      dimensionScores: [{ dimension: 'a', score: Number.POSITIVE_INFINITY, reason: '' }],
+    });
+    expect(nan.success).toBe(false);
+    expect(inf.success).toBe(false);
+  });
+});
+
+describe('AIProviderCognitiveJudge (PR #346 #2: キー未設定を明示エラー)', () => {
+  it('AI_API_KEY 未設定なら network 前に throw する', async () => {
+    const saved = process.env.AI_API_KEY;
+    delete process.env.AI_API_KEY;
+    try {
+      const judge = new AIProviderCognitiveJudge();
+      await expect(
+        judge.scoreDimensions({ systemPrompt: 's', userPrompt: 'u' }),
+      ).rejects.toThrow(/AI_API_KEY/);
+    } finally {
+      if (saved === undefined) delete process.env.AI_API_KEY;
+      else process.env.AI_API_KEY = saved;
+    }
   });
 });
 

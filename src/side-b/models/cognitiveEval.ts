@@ -37,7 +37,7 @@ export const CognitiveRubricSchema = z.object({
 });
 export type CognitiveRubric = z.infer<typeof CognitiveRubricSchema>;
 
-/** judge が 1 次元に付ける採点。 */
+/** 集計後の確定スコア (clamp 済みのため 0..1 を保証)。 */
 export const DimensionScoreSchema = z.object({
   dimension: z.string().min(1),
   /** 0.0 (不可) 〜 1.0 (理想) */
@@ -48,11 +48,25 @@ export const DimensionScoreSchema = z.object({
 export type DimensionScore = z.infer<typeof DimensionScoreSchema>;
 
 /**
+ * judge LLM の**生**採点。
+ * judge の揺れ (1.0 超や負値) で Zod parse 例外にならないよう、ここでは **finite な数値なら
+ * 許容**し、範囲外は集計側 (`aggregateVerdict`) で 0..1 に clamp する (PR #346 Copilot review:
+ * 0..1 厳格だと judge スリップで parse 例外になり clamp が活きない不整合を解消)。
+ * NaN / Infinity だけは parse 段階で弾く。
+ */
+export const RawDimensionScoreSchema = z.object({
+  dimension: z.string().min(1),
+  score: z.number().finite(),
+  reason: z.string().default(''),
+});
+export type RawDimensionScore = z.infer<typeof RawDimensionScoreSchema>;
+
+/**
  * judge LLM の生出力スキーマ。**dimensionScores のみ** を LLM に出させ、
  * overall / passed は決定論集計するため judge には出させない (出しても無視)。
  */
 export const JudgeRawOutputSchema = z.object({
-  dimensionScores: z.array(DimensionScoreSchema).min(1),
+  dimensionScores: z.array(RawDimensionScoreSchema).min(1),
   /** 全体所感 (人間が読むサマリ、判定には使わない) */
   summary: z.string().default(''),
 });

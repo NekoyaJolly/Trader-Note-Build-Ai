@@ -11,47 +11,76 @@
 import { config, modelFor } from '../../config';
 import { AI_MAX_TOKENS } from '../../config/aiTokenLimits';
 import { AIProvider } from '../agent/aiProvider';
+import { extractJson } from '../agents/llmJsonExtract';
 import { loadPrompt } from '../prompts/loader';
+import { safeStringify } from '../../utils/safeStringify';
 import type { JsonValue } from '../../utils/jsonValue';
 import {
   type CognitiveRubric,
   type CognitiveEvalVerdict,
   type DimensionScore,
+  type RawDimensionScore,
   type JudgeRawOutput,
   JudgeRawOutputSchema,
 } from '../models/cognitiveEval';
 
 const JUDGE_PROMPT_NAME = 'cognitive_output_judge';
+/** judge 応答のパース/検証失敗時の最大試行回数 (既存サービスと同様の堅牢化)。 */
+const JUDGE_MAX_ATTEMPTS = 3;
 
 /** judge LLM の抽象 (テスト差し替え用 DI)。 */
 export interface CognitiveJudge {
   scoreDimensions(input: { systemPrompt: string; userPrompt: string }): Promise<JudgeRawOutput>;
 }
 
-/** 既定 judge: AIProvider で `cognitive_judge` モデルを呼び、JudgeRawOutputSchema で Zod 検証。 */
+/**
+ * 既定 judge: AIProvider で `cognitive_judge` モデルを呼び、応答から JSON を堅牢抽出して
+ * JudgeRawOutputSchema で Zod 検証する。
+ * - AI_API_KEY 未設定は空文字で叩かず明示エラー。
+ * - パース/検証失敗は最大 JUDGE_MAX_ATTEMPTS 回リトライ (extractJson で fence/前置き混入を吸収)。
+ */
 export class AIProviderCognitiveJudge implements CognitiveJudge {
   async scoreDimensions(input: {
     systemPrompt: string;
     userPrompt: string;
   }): Promise<JudgeRawOutput> {
+    const apiKey = process.env.AI_API_KEY || '';
+    if (!apiKey) {
+      throw new Error('cognitive judge: AI_API_KEY が未設定です');
+    }
     const provider = new AIProvider({
-      apiKey: process.env.AI_API_KEY || '',
+      apiKey,
       model: modelFor('cognitive_judge'),
       baseURL: process.env.AI_BASE_URL || config.ai.baseURL || 'https://api.openai.com/v1',
     });
-    // temperature=0: 採点の再現性を最大化する。
-    const res = await provider.chat(
-      [
-        { role: 'system', content: input.systemPrompt },
-        { role: 'user', content: input.userPrompt },
-      ],
-      { temperature: 0, maxTokens: AI_MAX_TOKENS.MEDIUM, responseFormat: { type: 'json_object' } },
-    );
-    if (!res.content) {
-      throw new Error('cognitive judge: AI 応答が空です');
+
+    let lastError = '';
+    for (let attempt = 1; attempt <= JUDGE_MAX_ATTEMPTS; attempt++) {
+      // temperature=0: 採点の再現性を最大化する。
+      const res = await provider.chat(
+        [
+          { role: 'system', content: input.systemPrompt },
+          { role: 'user', content: input.userPrompt },
+        ],
+        { temperature: 0, maxTokens: AI_MAX_TOKENS.MEDIUM, responseFormat: { type: 'json_object' } },
+      );
+      if (!res.content) {
+        lastError = 'AI 応答が空';
+        continue;
+      }
+      // 生 JSON → fence → bracket の 3 段で堅牢抽出 (前置き/Markdown フェンス混入に耐性)。
+      const extracted = extractJson(res.content);
+      if (!extracted.ok) {
+        lastError = `JSON 抽出失敗: ${extracted.error}`;
+        continue;
+      }
+      const validated = JudgeRawOutputSchema.safeParse(extracted.data);
+      if (validated.success) {
+        return validated.data;
+      }
+      lastError = `スキーマ検証失敗: ${safeStringify(validated.error.issues)}`;
     }
-    const parsed = JSON.parse(res.content) as JsonValue;
-    return JudgeRawOutputSchema.parse(parsed);
+    throw new Error(`cognitive judge: ${JUDGE_MAX_ATTEMPTS} 回試行しても有効な採点を得られず (${lastError})`);
   }
 }
 
@@ -97,7 +126,7 @@ export function aggregateVerdict(
   rubric: CognitiveRubric,
   raw: JudgeRawOutput,
 ): CognitiveEvalVerdict {
-  const byDim = new Map<string, DimensionScore>(
+  const byDim = new Map<string, RawDimensionScore>(
     raw.dimensionScores.map((d) => [d.dimension, d]),
   );
   const dimensionScores: DimensionScore[] = [];
