@@ -52,7 +52,7 @@
 
 - **SkillRegistry API** (`src/side-b/skills/`)
 - **AgentLoop / PDCALoop 内部** (`src/side-b/agent/pdcaLoop.ts`)
-- **AIProvider 内部** (OpenRouter 経由の reasoning_effort 等)
+- **AIProvider 内部** (OpenRouter pass-through 経由の reasoning_effort / Anthropic extended thinking (`thinkingBudgetTokens`) / prompt caching (`cacheSystemPrompt`) の opt-in 経路、PR #348 配線済)
 - **PromptRegistry** (`src/side-b/prompts/` 周辺)
 
 **実装方針**:
@@ -80,11 +80,11 @@
 
 ### サブディレクトリの目的
 
-| サブディレクトリ | 用途 | 配置 (2026-05-13 時点) |
+| サブディレクトリ | 用途 | 配置 (2026-06-05 時点) |
 |------------------|------|--------|
-| `adapters/` | 既存実装を ADK インターフェイスに適合させるアダプター | **Step 1 で実装済み**: `jsonSchemaToZod.ts` / `skillContext.ts` / `skillRegistryToAdkTools.ts` / `README.md` / `_testHelpers.ts` (テスト専用) |
-| `tracing/` | ADK の Tracing / Telemetry 統合 | 未実装 (Step 2 で対応) |
-| `agents/` | ADK ベースの Custom Agent / Sequential / Parallel / Loop Agent 実装 | 未実装 (Step 3〜5 で対応) |
+| `adapters/` | 既存実装を ADK インターフェイスに適合させるアダプター | **Step 1 で実装済み (2026-05-12)**: `jsonSchemaToZod.ts` / `skillContext.ts` / `skillRegistryToAdkTools.ts` / `README.md` / `_testHelpers.ts` (テスト専用) |
+| `tracing/` | ADK の Tracing / Telemetry 統合 | **Step 2 で実装済み (2026-05-13)**: `traceSink.ts` (interface) / `noopTraceSink.ts` / `inMemoryTraceSink.ts` / `traceTypes.ts` / `traceSummaries.ts` / `planStepTrace.ts` / `pdcaStateTrace.ts` / `runLedgerTraceSink.ts` / `safeRecord.ts` / `index.ts` |
+| `agents/` | ADK ベースの Custom Agent / Sequential / Parallel / Loop Agent 実装 | **Step 3-4 + ORCH WBS Phase 0-10 で実装済み (〜2026-05-17)**: `runnerSmoke.ts` / `sequentialSmoke.ts` / `pdcaDryRunWrapper.ts` (Step 3) / `lensParallelSmoke.ts` (Step 4) / `sideBOrchestrator.ts` (ORCH WBS Phase 6) / `README.md`。Step 5 (LoopAgent) と Step 6 (継続/撤退判断) のみ未着手。本番接続は env default OFF |
 
 #### adapters/ の使用例 (Step 1 完了)
 
@@ -103,23 +103,27 @@ const tools = skillRegistryToAdkTools(registry);
 
 ## 撤退手順
 
-ADK 採用を撤退する場合の手順:
+ADK 採用を撤退する場合の手順 (ORCH WBS で削除対象が増えたため `docs/architecture/ADK_ADOPTION.md` §7 を正本とする):
 
 ```bash
-# 1. このディレクトリを完全削除
+# 1. ADK サイドカー + テスト + Bridge を削除
 git rm -rf src/side-b/adk/
+git rm -rf src/side-b/tests/adk/
+git rm src/side-b/bridge/sideBSchedulerOrchestratorBridge.ts
 
-# 2. 既存 side-b/ から adk/ への参照がないことを確認
-#    (依存方向の制約により無いはずだが念のため)
+# 2. Scheduler の Bridge 連携メソッドを撤去
+#    src/side-b/jobs/sideBScheduler.ts の runOrchestratedCycleNow + Bridge import を削除
+
+# 3. 既存 side-b/ から adk/ への参照がないことを確認
 grep -rn "side-b/adk" src/side-b/ --exclude-dir=adk
 
-# 3. package.json から @google/adk を削除
+# 4. package.json / package-lock.json から @google/adk を削除
 npm uninstall @google/adk
 
-# 4. docs/architecture/ADK_ADOPTION.md §7 実装状況に「撤退」を記録
-
-# 5. 完了
+# 5. docs/architecture/ADK_ADOPTION.md §7 実装状況に「撤退」を記録
 ```
+
+詳細は `docs/architecture/ADK_ADOPTION.md` §7 ORCH WBS および `docs/architecture/adk_run_ledger_summary.md` §6.1 を参照。
 
 撤退基準 (定量的) は `docs/architecture/ADK_ADOPTION.md` §5 を参照。
 
@@ -137,4 +141,5 @@ npm uninstall @google/adk
 
 ---
 
-> **最終更新**: 2026-05-12 (Ticket A5 で新規作成、ADK 段階導入の Step 0 として scaffold)
+> **最終更新**: 2026-06-06 (Step 2/3/4 + ORCH WBS Phase 0-10 完了反映 / AIProvider Anthropic 配線追記 / 撤退手順を ADK_ADOPTION.md §7 と整合)
+> **初版**: 2026-05-12 (Ticket A5 で新規作成、ADK 段階導入の Step 0 として scaffold)

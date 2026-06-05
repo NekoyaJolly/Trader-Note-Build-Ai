@@ -35,7 +35,7 @@
 1. **本ファイル** (`/AGENTS.md`) — 全エージェント共通の正本
 2. **作業対象ディレクトリの `AGENTS.md`** — 該当する場合 (例: `/src/side-b/AGENTS.md`、`/src/side-b/adk/AGENTS.md`)
 3. **`docs/architecture/ADK_ADOPTION.md`** — ADK 領域に触れる場合
-4. **該当フェーズの設計書** — `docs/design/phase_N_specification.md` 等
+4. **該当フェーズの設計書** — `docs/architecture/side-b-architecture.html` (Side-B 設計正本) または進行中フェーズの PR description / GitHub Issue (旧 `docs/design/phase_N_specification.md` 形式は 2026-05-15 整理で廃止)
 
 ### 1.2 ディレクトリ跨ぎ時
 
@@ -118,7 +118,9 @@ src/schemas/
 │   ├── profile.ts
 │   └── sideB.ts
 └── external/      # 外部 API レスポンススキーマ
-    ├── twelveData.ts
+    ├── analysisEngine.ts
+    ├── ctrader.ts
+    ├── eodhd.ts
     └── openai.ts
 ```
 
@@ -190,12 +192,11 @@ router.post('/', async (req, res) => {
 #### 構成 (常にこの 3 つだけ)
 
 1. **設計正本** (1 件、不変):
-   - HTML: `docs/architecture/side-b-architecture.html` (整備中)
-   - 暫定 Markdown: `docs/design/DESIGN_DOC_autonomous_trading_architecture.md`
+   - HTML: `docs/architecture/side-b-architecture.html` (Side-B 設計正本、1302 行)
 2. **現在進行中フェーズの指示書** (0〜1 件):
-   - 例: `docs/design/phase_N_specification.md`
+   - 進行中フェーズの PR description / GitHub Issue / KICKOFF.md に集約
 3. **直近完了フェーズのサマリー** (1 件、ローリング):
-   - 例: `docs/design/CURRENT_PHASE_SUMMARY.md`
+   - 進捗管理は GitHub Issue + memory ファイル (`project_phase_*.md`) で運用
    - 次フェーズエージェントが起動時に読む唯一の引き継ぎ
 
 #### フェーズ完了時のフロー (必須)
@@ -204,7 +205,7 @@ router.post('/', async (req, res) => {
 2. **HTML 正本に該当フェーズの変更を記述** (これがないと完了とみなさない)
 3. 完了フェーズの **新サマリー** を作成 (1 件)
 4. 前回サマリーを **削除**
-5. 指示書 (`phase_N_specification.md`) は **削除またはアーカイブ移動**
+5. 指示書 (`docs/design/phase_N_specification.md` 形式は 2026-05-15 で廃止、現在は PR description / Issue に集約) を運用上保留しているなら **削除またはアーカイブ移動**
 6. KICKOFF / NOTES / AUDIT 等の作業ノートも **全部削除**
 
 #### 禁止パターン
@@ -228,7 +229,7 @@ router.post('/', async (req, res) => {
 | ノート仕様変更 | `NOTE.md` |
 | アーキテクチャ変更 | HTML 設計正本 (`side-b-architecture.html`) |
 | API 変更 | `docs/API.md` |
-| Side-B 関連 | HTML 設計正本、暫定で `DESIGN_DOC_autonomous_trading_architecture.md` |
+| Side-B 関連 | HTML 設計正本 (`side-b-architecture.html`) |
 | ADK 採用範囲・実装状況 | `docs/architecture/ADK_ADOPTION.md` |
 
 ### 5.3 新規ファイル作成は最終手段 (2026-05-17 制定)
@@ -301,7 +302,7 @@ UI / フロントエンド変更時は dev サーバーを起動し、ブラウ�
 新機能は**ラッパー**や**拡張**として足す。既存の MarketAnalysis, featureVector, AgentMemory, AITradeNote 等のデータ構造を破壊的に変更してはならない。後方互換は必須。
 
 ### 2. 指定されたフェーズ範囲を超えない
-各フェーズには `phase_N_specification.md` がある。その **完了条件** を超える実装を勝手にしてはならない。「これもついでに作りました」は禁止。余計な作り込みはレビューコストを増やすだけ。
+各フェーズには明確な完了条件がある (PR description / Issue / 進行中なら KICKOFF.md などに記載)。その **完了条件** を超える実装を勝手にしてはならない。「これもついでに作りました」は禁止。余計な作り込みはレビューコストを増やすだけ。
 
 ### 3. LLM の役割を拡張しすぎない
 LLM には「構造の発見」「解釈」「学習」だけをさせる。「数値最適化」「統計処理」「客観判定」は Python または TypeScript の決定論的コードで実装する。安易に「LLMに判断させればいい」と設計しない。
@@ -347,13 +348,13 @@ AIが発見したパターンを記録する際、必ず人間語の `label` と
 - `__AI_DEBUG_CONTEXT__` に token / cTrader OAuth token / JWT / refresh token / cTrader accountId / 取引額 / 実残高 を入れない (redaction は最終防衛線、そもそも入れない方が安全)
 - production 環境への collect は禁止 (`lastmile.config.json` の `environment: 'development'` 固定)
 
-由来: `last-mile-shared-context` Phase 11 で導入。テンプレ正本は `vendor/last-mile-context/templates/AGENTS.last-mile.md`。上流: https://github.com/NekoyaJolly/last-mile-shared-context
+由来: `last-mile-shared-context` Phase 11 (PR #229) で導入。詳細仕様は `docs/architecture/LAST_MILE_INTEGRATION.md` を参照。vendor 配下は `.tgz` パッケージ 8 件のみで `templates/` ディレクトリは未展開。上流: https://github.com/NekoyaJolly/last-mile-shared-context
 
 ---
 
 ## CI で強制されているルール (参考)
 
-本セクションは**概要のみ**を記述する。具体的なルール一覧と詳細レポートは Phase B 完了後に `docs/architecture/STEP_0_ESLINT_AUDIT.md` および `docs/architecture/STEP_0_TSCONFIG_AUDIT.md` を参照。
+本セクションは**概要のみ**を記述する。Step 0 監査レポート群 (STEP_0_ESLINT_AUDIT.md 等) は 2026-05-15 の整理で削除済。CI ルールの正本は `eslint.config.mjs` および `tsconfig.json` を直接参照。
 
 CI で `error` レベルで強制 (PR ゲート):
 - TypeScript: `tsc --noEmit` (`strict: true` を含む型安全オプションフル装備)
@@ -474,8 +475,8 @@ Panel コンポーネントを X 軸に並べた表示を意図していると�
 
 > **由来**: 旧 `/CLAUDE.md` の「困った時」セクションを文言保持で移植。
 
-- 設計の意図が分からない → `docs/design/DESIGN_DOC_autonomous_trading_architecture.md` を読む
-- フェーズの範囲が不明確 → `docs/design/phase_N_specification.md` を読む
+- 設計の意図が分からない → `docs/architecture/side-b-architecture.html` (Side-B 設計正本) または `docs/architecture/ADK_ADOPTION.md` を読む
+- フェーズの範囲が不明確 → 進行中フェーズの PR description / GitHub Issue / KICKOFF.md を確認、または Nekoさん に確認
 - 既存コードの構造が分からない → 勝手に推測せず、ユーザーに確認する
 - 新しい設計判断が必要 → 勝手に決めず、ユーザーに確認する
 
@@ -497,7 +498,7 @@ cd src/frontend && npm install && cd ../..
 
 # 2. 環境変数設定
 cp .env.example .env
-# .env を編集: DATABASE_URL, AI_API_KEY, MARKET_API_KEY
+# .env を編集: DATABASE_URL, EODHD_API_KEY, ANTHROPIC_API_KEY (必要に応じ OPENAI_API_KEY / AI_API_KEY / MARKET_API_KEY)
 
 # 3. DB セットアップ
 npm run prisma:generate
@@ -530,11 +531,12 @@ npm run dev
 - リアルタイム市場データとの**一致判定**
 - 通知 + **発注支援 UI**
 
-### Side-B: TradeAssistant-AI (AI 用・計画中)
+### Side-B: TradeAssistant-AI (AI 用・本番稼働中 / 自己改善ループ進化中)
 - AI による日次トレードプラン生成
 - 仮想トレード実行・記録
 - AI 用トレードノートによる学習ループ
-- **AI が自律的に市場を観察し、仮説を立て、検証し、エッジ台帳を育てながら運用する**システムへ段階的に進化させる (ドメイン原則を参照)
+- **AI が自律的に市場を観察し、仮説を立て、検証し、エッジ台帳を育てる** ループの骨格は実装済み (Phase 6 プロンプト進化 / Phase A EODHD All-In-One + ResearchOutput 永続化 / Phase B Twelve Data → EODHD OHLCV 切替 + 評価ハーネス + EODHD リサーチスキル 6 種)
+- SideBScheduler の planGeneration / tradeMonitoring / screening / fullValidation / discovery が本番 LIVE。Top-Level Orchestrator (PR #248 MVP) は env default OFF で段階的に通電中
 
 ## プロジェクト構造
 
@@ -553,29 +555,30 @@ npm run dev
 ├── src/
 │   ├── index.ts
 │   ├── app.ts
-│   ├── backend/           # Side-A バックエンド
-│   ├── controllers/
+│   ├── backend/           # Side-A バックエンド (controllers / routes はこの配下)
 │   ├── services/
 │   ├── models/
 │   ├── domain/
 │   ├── infrastructure/
-│   ├── routes/
 │   ├── middleware/
 │   ├── utils/
 │   ├── config/
 │   ├── schemas/           # Zod スキーマ
+│   ├── shared/            # 横断共有ユーティリティ (indicators, marketdata, timeframes 等)
 │   ├── frontend/          # Next.js フロントエンド
-│   └── side-b/            # Side-B 実装 (AGENTS.md あり)
+│   └── side-b/            # Side-B 実装 (controllers / routes 含む、AGENTS.md あり)
 │       └── adk/           # ADK サイドカー (AGENTS.md あり)
 ├── docs/
 │   ├── ARCHITECTURE.md
 │   ├── API.md
-│   ├── architecture/      # ADK 採用関連・Step 0 レポート群
+│   ├── architecture/      # ADK 採用関連・Side-B 設計 HTML 正本・ORCH 設計
 │   │   ├── ADK_ADOPTION.md
-│   │   └── STEP_0_*.md
-│   ├── design/            # 設計書
-│   │   └── DESIGN_DOC_autonomous_trading_architecture.md
-│   └── side-b/            # Side-B 設計ドキュメント
+│   │   ├── side-b-architecture.html
+│   │   ├── TOP_LEVEL_ORCHESTRATOR_DESIGN.md
+│   │   └── EODHD_INTEGRATION.md
+│   ├── diagnostics/       # コードベースレビュー / 棚卸し HTML
+│   ├── research/
+│   └── _archive/          # 過去フェーズ設計 (design/ と side-b/ はアーカイブ済)
 ├── indicators/
 ├── scripts/
 └── data/                  # ローカルデータ (Git 管理外)
@@ -588,9 +591,9 @@ npm run dev
 | [NOTE.md](NOTE.md) | ノートのドメイン仕様 | ★最優先 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | NoteEvaluator・Service 連携 | 高 |
 | [docs/API.md](docs/API.md) | REST API 仕様 | 高 |
-| [docs/design/DESIGN_DOC_autonomous_trading_architecture.md](docs/design/DESIGN_DOC_autonomous_trading_architecture.md) | Side-B 自律 AI 設計の正本 | 高 (Side-B 作業時) |
+| [docs/architecture/side-b-architecture.html](docs/architecture/side-b-architecture.html) | Side-B 自律 AI 設計の正本 (HTML) | 高 (Side-B 作業時) |
 | [docs/architecture/ADK_ADOPTION.md](docs/architecture/ADK_ADOPTION.md) | ADK 段階導入の採用範囲・撤退基準 | 高 (ADK 領域作業時) |
-| [docs/side-b/](docs/side-b/) | Side-B 設計ドキュメント群 | 中 |
+| [docs/architecture/TOP_LEVEL_ORCHESTRATOR_DESIGN.md](docs/architecture/TOP_LEVEL_ORCHESTRATOR_DESIGN.md) | Top-Level Orchestrator 設計 | 中 (Side-B 作業時) |
 | [DESIGN.md](DESIGN.md) | フロントエンドデザイン仕様 | 中 (フロント作業時) |
 | [indicators/README.md](indicators/README.md) | インジケーター概念思想 | 参考 |
 
@@ -598,16 +601,27 @@ npm run dev
 
 ## 技術スタック
 
+> **重要**: agent はこの表を **本番構成の正本** として扱うこと。「PostgreSQL = Cloud SQL」「AI = OpenAI」など training data の連想で hallucinate しないこと。
+> **最終更新**: 2026-06-05 (Supabase / Anthropic / EODHD / Cloud Run / Vercel 明示化)
+
 | カテゴリ | 技術 |
 |----------|------|
 | **Backend** | Node.js + Express + TypeScript |
 | **Frontend** | Next.js 15+ (App Router) + TypeScript |
-| **Database** | PostgreSQL + Prisma ORM |
+| **Database** | **Supabase PostgreSQL (managed, asia-northeast-1, project `rmsylwmqxyeqgplysqoa`)** + Prisma ORM。本番接続は Supavisor Transaction Pooler (`aws-0-asia-northeast-1.pooler.supabase.com:6543`) 経由、DIRECT_URL (migration 専用) は `db.[ProjectRef].supabase.co:5432`。**Cloud SQL は使っていない** |
 | **Validation** | Zod (ランタイムバリデーション必須) |
-| **AI** | OpenAI API (軽量モデル優先) |
-| **Market Data** | Twelve Data API |
-| **Notification** | Web Push (web-push) |
+| **AI** | **Anthropic Claude API** (extended thinking + prompt caching 配線済、PR #348)。モデルは `config.ai.models.<key>` + `modelFor()` + `AI_MODEL_<KEY>` env で per-agent 切替可能 |
+| **Market Data** | **EODHD (本番第一選択)**。Twelve Data は 2026-06-05 (PR #351) で物理削除済 |
+| **Notification** | Web Push (`web-push`, VAPID) + In-App Notification (`Notification` テーブル経由) |
 | **Task Queue** | BullMQ |
+| **Hosting (Backend)** | **GCP Cloud Run** (asia-northeast1, service `trader-note`, max-instances=5)。env は `.github/workflows/deploy.yml` の `--set-env-vars` 列挙が **唯一の真実のソース** (列挙忘れの env は silently OFF になる罠あり) |
+| **Hosting (Frontend)** | **Vercel** (`trader-note-build-ai.vercel.app`) |
+| **Hosting (Analysis Engine)** | GCP Cloud Run (asia-northeast1, service `trader-note-analysis-engine`、Python FastAPI) |
+| **Auth** | cTrader OAuth 2.0 + JWT (Cookie ベース, 7 日間有効、マルチアカウント対応) |
+| **Secrets** | GCP Secret Manager (16 件、deploy.yml の `--set-secrets` 列挙が正本) |
+| **CI/CD** | GitHub Actions (`.github/workflows/deploy.yml` `ci.yml` 等)。本番 deploy は main マージで自動発火 |
+| **Test** | Jest (unit, ~2800 件) + Playwright (E2E、本番 smoke 含む) |
+| **Cron** | GitHub Actions Cron + `/api/cron/*` (Bearer `CRON_SECRET` 認証必須)。15 分間隔の matching pipeline 等 |
 
 ## テスト手順
 
@@ -690,19 +704,22 @@ npm test -- --testTimeout=30000
   - `GET /api/auth/me` - ログインユーザー情報取得
   - `POST /api/auth/logout` - ログアウト
 
-## リアルタイム通知関連 (Phase 2 完了)
+## リアルタイム通知関連 (Phase 2 完了: in-memory 層)
 
 - `CTraderProvider`: cTrader WebSocket 接続
 - `RollingWindowService`: Tick → OHLCV 集約
-- `RealtimeSimilarityService`: リアルタイム類似度チェック
+- `RealtimeSimilarityService`: リアルタイム類似度チェック (常駐 Worker 用、in-memory + callback のみ)
+- ※ 現状 production の matching 通知は 15 分 cron (`runMatchingPipeline`) 経由。RealtimeSimilarityService の DB / Push 接続は Phase 3 で対応予定
 - 詳細: [docs/realtime_similarity_notification_architecture.md](docs/realtime_similarity_notification_architecture.md)
 
 ## 補足: 現在のテスト状況
 
-- 最終確認: 設計書再編時に旧 AGENTS.md から引き継いだ情報。最新値は CI / `npm test` で確認すること
-- 引き継ぎ値: 全 566 テスト中 541 パス、25 失敗 (cTrader 審査待ち、2026/01/06 時点)
+- 最新値は CI / `npm test` で確認すること
+- 既知 fail (2026-06-05 時点): Side-B 進化スケジューラ系の一部スイート (`sideBScheduler.evolutionMultiGen` / `evolutionLoop` 等) は main でも timeout 系の既存 fail として認識済 (8 件、pre-existing flake)
+- cTrader OAuth は本番稼働中 (旧 AGENTS.md の「審査待ち」表記は完了済み)
 
 ---
 
-> **最終更新**: 2026-05-12 (Ticket A2 で全面再編、旧 AGENTS.md / CLAUDE.md からの統合・移植を実施)
+> **最終更新**: 2026-06-06 (技術スタック / Side-B 本番稼働中 / docs/design 廃止 / ADK 進捗 / Twelve Data 物理削除 / Anthropic Claude 配線 を実コード verify で反映)
+> **初版**: 2026-05-12 (Ticket A2 で全面再編、旧 AGENTS.md / CLAUDE.md からの統合・移植を実施)
 > **このファイルを信頼し、情報が不足している場合のみ追加の検索を行うこと。**
