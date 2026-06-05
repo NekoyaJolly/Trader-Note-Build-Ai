@@ -38,6 +38,7 @@ import type {
   ExecutionModel,
   ExecutionSimulationMetadata,
 } from './executionSimulation';
+import { getStopLossClampPips } from './executionSimulation';
 // PR ④F: 旧 `computeTsSurrogateIndicator` (= TS で indicator を計算する経路) は撤廃。
 // 全 indicator は analysis-engine `/v1/indicator-series` から取得し、
 // `DslSimulationOptions.indicatorSeriesCache` 経由で本ファイルに渡される。
@@ -331,7 +332,11 @@ function resolveNum(
   return typeof x === 'number' ? x : Number(x);
 }
 
-/** ストップ幅（価格差・ロング基準で正） */
+/** ストップ幅（価格差・ロング基準で正）。SL 最小フロア / 最大キャップで clamp する。
+ *
+ * clamp 境界 (slFloorPips / slCapPips) は呼び出し側で 1 回計算して渡す (= ホットループで
+ * env 読みを繰り返さない)。正式 BT (analysis-engine) と同じ「実効SL = clamp(生SL, floor, cap)」
+ * をサロゲート側でも適用し、低ボラ極小SL候補の過大評価ランキングを正式 BT と整合させる。 */
 function stopDistance(
   dsl: StrategyDSL,
   table: BarFeatureTable,
@@ -339,25 +344,34 @@ function stopDistance(
   pipSize: number,
   paramValues: Record<string, number>,
   evalr: DSLEvaluator,
+  slFloorPips: number,
+  slCapPips: number,
 ): number {
   const sl = dsl.stopLoss;
+  let raw: number;
   if (sl.type === 'fixed_pips') {
-    const pips = resolveNum(dsl, sl.value, paramValues, evalr);
-    return pips * pipSize;
-  }
-  if (sl.type === 'atr_multiple') {
+    raw = resolveNum(dsl, sl.value, paramValues, evalr) * pipSize;
+  } else if (sl.type === 'atr_multiple') {
     const atr = table.atr?.[i];
-    if (atr === undefined || Number.isNaN(atr)) return table.close[i] * 0.01;
-    const mult = resolveNum(dsl, sl.value, paramValues, evalr);
-    return atr * mult;
+    if (atr === undefined || Number.isNaN(atr)) {
+      raw = table.close[i] * 0.01;
+    } else {
+      const mult = resolveNum(dsl, sl.value, paramValues, evalr);
+      raw = atr * mult;
+    }
+  } else {
+    // swing_point: 過去バーの安値との距離（ロング）
+    const lb = Math.floor(resolveNum(dsl, sl.lookbackBars, paramValues, evalr));
+    let windowLow = table.low[i];
+    for (let k = Math.max(0, i - lb); k < i; k++) {
+      windowLow = Math.min(windowLow, table.low[k]);
+    }
+    raw = table.close[i] - windowLow;
   }
-  // swing_point: 過去バーの安値との距離（ロング）
-  const lb = Math.floor(resolveNum(dsl, sl.lookbackBars, paramValues, evalr));
-  let windowLow = table.low[i];
-  for (let k = Math.max(0, i - lb); k < i; k++) {
-    windowLow = Math.min(windowLow, table.low[k]);
-  }
-  return table.close[i] - windowLow;
+  if (raw <= 0) return raw;
+  if (slFloorPips > 0) raw = Math.max(raw, slFloorPips * pipSize);
+  if (slCapPips > 0) raw = Math.min(raw, slCapPips * pipSize);
+  return raw;
 }
 
 function takeProfitDistance(
@@ -618,6 +632,9 @@ export function runDslSimulation(
   );
   const pipSize = defaultPipSizeForSymbol(dsl.symbol);
   const symbolNorm = dsl.symbol.replace(/\//g, '');
+  // SL clamp 境界 (pips) を 1 回だけ解決し、stopDistance のホットループへ渡す。
+  // 正式 BT (analysis-engine) と同じ clamp をサロゲートにも効かせて整合させる。
+  const { minPips: slFloorPips, maxPips: slCapPips } = getStopLossClampPips(dsl.symbol);
 
   const events: BacktestTradeEvent[] = [];
   let totalCost = 0;
@@ -659,7 +676,7 @@ export function runDslSimulation(
       }
       const j = i;
       const openPx = bars[j].open;
-      const stopDist = stopDistance(dsl, table, j, pipSize, paramValues, evaluator);
+      const stopDist = stopDistance(dsl, table, j, pipSize, paramValues, evaluator, slFloorPips, slCapPips);
       const tpDist = takeProfitDistance(dsl, stopDist, table, j, pipSize, paramValues, evaluator);
       if (deferredImmediate.isLong) {
         const halfCost = executionModel === 'bar_l2_v1'
@@ -782,7 +799,7 @@ export function runDslSimulation(
         const j = i + 1;
         const openPx = bars[j].open;
         const slIx = j;
-        const stopDist = stopDistance(dsl, table, slIx, pipSize, paramValues, evaluator);
+        const stopDist = stopDistance(dsl, table, slIx, pipSize, paramValues, evaluator, slFloorPips, slCapPips);
         const tpDist = takeProfitDistance(dsl, stopDist, table, slIx, pipSize, paramValues, evaluator);
         if (wEntry.direction === 'long') {
           const halfCost = executionModel === 'bar_l2_v1'
@@ -834,7 +851,7 @@ export function runDslSimulation(
           deferredImmediate = { openAtIndex: i + 1, isLong: e.direction === 'long' };
         } else {
           const closePx = bars[i].close;
-          const stopDist = stopDistance(dsl, table, i, pipSize, paramValues, evaluator);
+          const stopDist = stopDistance(dsl, table, i, pipSize, paramValues, evaluator, slFloorPips, slCapPips);
           const tpDist = takeProfitDistance(dsl, stopDist, table, i, pipSize, paramValues, evaluator);
           if (e.direction === 'long') {
             const halfCost = executionModel === 'bar_l2_v1'

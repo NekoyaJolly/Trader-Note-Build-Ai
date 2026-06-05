@@ -123,6 +123,49 @@ export function getExecutionCostProfile(symbol: string): SymbolExecutionCostProf
   };
 }
 
+/**
+ * SL 最小フロアを「往復コスト pips の何倍にするか」の係数。
+ * ATR 基準 SL が低ボラ局面で往復コストに飲まれるのを防ぐ最低マージン。
+ * env `SL_FLOOR_COST_MULT` で調整可 (既定 2 = コストの 2 倍を最低 SL とする)。
+ */
+function getSlFloorCostMultiplier(): number {
+  const raw = Number.parseFloat(process.env.SL_FLOOR_COST_MULT ?? '');
+  return Number.isFinite(raw) && raw >= 0 ? raw : 2;
+}
+
+/**
+ * SL 最大キャップ (pips) のシンボル別表。高ボラ局面で ATR 基準 SL が過大になり
+ * ポジションが極小化するのを抑える。コスト比は銘柄間の「妥当な最大SL」とスケールが
+ * 合わないため、銘柄の実動き幅に合わせた絶対 pips で持つ (Nekoさん 決定)。
+ */
+export const SYMBOL_MAX_STOP_LOSS_PIPS: Readonly<Record<string, number>> = {
+  XAUUSD: 80,
+  EURUSD: 40,
+  USDJPY: 40,
+};
+
+/** 未定義シンボルの SL 最大キャップ (pips)。env `SL_MAX_PIPS_DEFAULT` で調整可。 */
+function getDefaultMaxStopLossPips(): number {
+  const raw = Number.parseFloat(process.env.SL_MAX_PIPS_DEFAULT ?? '');
+  return Number.isFinite(raw) && raw > 0 ? raw : 60;
+}
+
+/**
+ * シンボルの SL clamp 境界 (pips) を返す。
+ * - minPips: 往復コスト pips × フロア係数 (低ボラで SL が縮みすぎるのを防ぐ)
+ * - maxPips: シンボル別の絶対上限 (高ボラで SL が過大になるのを抑える)
+ *
+ * analysis-engine には pips で渡し、向こうで pipSize と掛けて価格距離に換算する
+ * (= コスト spreadPips と同じ pipSize 基準で整合させる)。
+ */
+export function getStopLossClampPips(symbol: string): { minPips: number; maxPips: number } {
+  const profile = getExecutionCostProfile(symbol);
+  const minPips = profile.roundTripCostPips * getSlFloorCostMultiplier();
+  const normalized = normalizeSymbol(symbol);
+  const maxPips = SYMBOL_MAX_STOP_LOSS_PIPS[normalized] ?? getDefaultMaxStopLossPips();
+  return { minPips, maxPips };
+}
+
 export function createDefaultL2ExecutionConfig(symbol: string): ExecutionSimulationConfig {
   const profile = getExecutionCostProfile(symbol);
   return {

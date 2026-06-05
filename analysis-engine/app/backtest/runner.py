@@ -179,6 +179,9 @@ def run_screening_backtest(
     # (3) ノート schema → engine 抽象
     spec = adapter.notepayload_to_btspec(req.notePayload)
     config = adapter.config_to_btconfig(req.config)
+    # SL 最小フロア / 最大キャップ (pips) を pip_size で価格距離に換算し spec に付与。
+    # optimize / walk-forward も同じ spec を使うため、ここで一括付与すれば全経路に適用される。
+    spec = adapter.attach_sl_clamp(spec, req.config)
 
     # PR ⑤B (MTF): trigger_group を walk して必要な上位足 timeframe を集め、
     # それぞれ OHLCV を別 SQL で読んで spec.upper_timeframe_ohlcv に詰める。
@@ -258,6 +261,9 @@ def run_optimize(
     # (3) adapter で engine 抽象へ（MTF 上位足も run_screening_backtest と同様に解決）
     spec = adapter.notepayload_to_btspec(req.notePayload)
     config = adapter.config_to_btconfig(req.config)
+    # SL 最小フロア / 最大キャップ (pips) を pip_size で価格距離に換算し spec に付与。
+    # optimize / walk-forward も同じ spec を使うため、ここで一括付与すれば全経路に適用される。
+    spec = adapter.attach_sl_clamp(spec, req.config)
     upper_tf_ohlcv: Dict[str, pd.DataFrame] = {}
     if spec.trigger_group is not None:
         from .condition_evaluator import collect_required_timeframes

@@ -380,6 +380,18 @@ export const ScreeningBacktestConfigSchema = z.object({
   spreadPips: z.number().min(0).optional(),
   /** 1 pip の価格幅（pips→価格率の換算用）。未指定/0 の場合は spread を適用しない。 */
   pipSize: z.number().min(0).optional(),
+  /**
+   * SL 最小フロア (pips)。低ボラ局面で ATR 基準 SL が往復コストに飲まれるほど
+   * 小さくなる過大評価を防ぐ。analysis-engine 側で `pipSize` と掛けて価格距離に換算し
+   * 実効SL = max(生SL, minStopLossPips × pipSize) とする。未指定/0 = フロアなし。
+   * pipSize 未指定/0 のときは換算できないため無効。
+   */
+  minStopLossPips: z.number().min(0).optional(),
+  /**
+   * SL 最大キャップ (pips)。高ボラ局面で ATR 基準 SL が過大になりポジションが
+   * 極小化するのを抑える。実効SL = min(生SL, maxStopLossPips × pipSize)。未指定 = 上限なし。
+   */
+  maxStopLossPips: z.number().min(0).optional(),
 });
 
 export const AnalysisEngineScreeningBacktestRequestSchema = z.object({

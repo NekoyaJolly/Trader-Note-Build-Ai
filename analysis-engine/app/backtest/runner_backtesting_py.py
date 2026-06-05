@@ -620,6 +620,11 @@ class BacktestingPyEngine:
             else 0.0
         )
 
+        # SL 最小フロア / 最大キャップ (絶対価格距離、runner.py で pips×pip_size 換算済)。
+        # 全 SL type (atr_multiple / fixed_pips / swing_point) の算出距離に共通適用する。
+        sl_floor_price = float(getattr(spec, "min_stop_loss_price", 0.0) or 0.0)
+        sl_cap_price = getattr(spec, "max_stop_loss_price", None)
+
         class GeneratedStrategy(Strategy):
             _spec_direction = direction
             _spec_sl = sl_spec
@@ -627,6 +632,9 @@ class BacktestingPyEngine:
             _trigger_group = trigger_group
             _max_holding_bars: Optional[int] = max_holding
             _swing_lookback_bars = swing_lookback_bars
+            # SL clamp 境界 (価格距離)。0.0 / None = 無効 (後方互換)。
+            _sl_floor_price = sl_floor_price
+            _sl_cap_price = sl_cap_price
             # backtesting.py optimize() が変動させる最適化対象パラメータ（クラス属性）。
             # 通常 run では既定値のまま使われ、SL/TP 距離は従来と一致する。
             opt_sl_value = sl_value_default
@@ -1003,6 +1011,25 @@ class BacktestingPyEngine:
                 return 0.0001
 
             def _compute_sl_distance(self, atr_val: float, entry_price: float) -> Optional[float]:
+                """生 SL 距離を算出し、最小フロア / 最大キャップで clamp した実効距離を返す。
+
+                フロア: 低ボラ局面で ATR 基準 SL が往復コストに飲まれるほど小さくなる
+                過大評価を防ぐ。キャップ: 高ボラ局面で SL が過大になりポジションが極小化
+                するのを抑える。clamp 境界は価格距離 (runner.py で pips×pip_size 換算済)。
+                TP が rr_ratio の場合は clamp 後の実効 SL を基準に距離計算されるため RR は保たれる。
+                """
+                dist = self._raw_sl_distance(atr_val, entry_price)
+                if dist is None or dist <= 0:
+                    return dist
+                floor = self._sl_floor_price
+                cap = self._sl_cap_price
+                if floor and floor > 0:
+                    dist = max(dist, floor)
+                if cap is not None and cap > 0:
+                    dist = min(dist, cap)
+                return dist
+
+            def _raw_sl_distance(self, atr_val: float, entry_price: float) -> Optional[float]:
                 spec = self._spec_sl
                 # 最適化対象の数値はクラス属性 opt_sl_value を使う（通常 run では spec.value と同値）。
                 if spec.kind == "atr_multiple":

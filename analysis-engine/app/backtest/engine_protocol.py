@@ -115,6 +115,13 @@ class BTSpec:
     # canonical 化して詰める。未設定なら BacktestingPyEngine 側で OHLCV index 間隔
     # から推定する。
     primary_timeframe: Optional[str] = None
+    # SL 最小フロア / 最大キャップを **絶対価格距離** で持つ (= pips × pip_size を
+    # runner.py 側で事前換算済み)。strategy 内で pip_size を再推定せずそのまま
+    # clamp(生SL距離, min_stop_loss_price, max_stop_loss_price) に使える。
+    # コスト(spread_pips)と同じ config.pip_size 基準で換算するため整合する。
+    # 0.0 / None = clamp 無効 (後方互換)。
+    min_stop_loss_price: float = 0.0
+    max_stop_loss_price: Optional[float] = None
 
 
 @dataclass(frozen=True)

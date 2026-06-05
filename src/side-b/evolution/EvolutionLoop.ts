@@ -55,7 +55,7 @@ import {
 import { computeWinRateLift } from '../../shared/statistics/winRateLift';
 import { dslToBacktestNotePayload } from '../strategy_dsl/dslToBacktestNotePayload';
 import { defaultParameterValues } from '../strategy_dsl/dslParameterUtils';
-import { getExecutionCostProfile, getPipSize } from '../strategy_dsl/executionSimulation';
+import { getExecutionCostProfile, getPipSize, getStopLossClampPips } from '../strategy_dsl/executionSimulation';
 import { buildOosResultByCandidate } from './oosConfirmation';
 import type { EvolutionOosResultData } from '../../backend/repositories/evolutionBacktestRunRepository';
 import { VALIDATION_THRESHOLDS } from '../config/validationThresholds';
@@ -1722,6 +1722,10 @@ export class EvolutionLoop {
       // シンボル別の往復スプレッド (pips) を正式 BT に渡し、コスト 0 の過大評価を防ぐ。
       // pips→価格率の換算は価格を持つ analysis-engine 側で行う（pipSize は既存規約を共有）。
       const costProfile = getExecutionCostProfile(symbol);
+      // SL 最小フロア / 最大キャップ (pips)。低ボラで ATR 基準 SL が往復コストに飲まれて
+      // 縮みすぎる過大評価、高ボラで SL 過大になる極小ポジションを抑える。
+      // フロア = 往復コスト × 係数、キャップ = シンボル別絶対 pips (executionSimulation が正)。
+      const slClamp = getStopLossClampPips(symbol);
 
       let response: AnalysisEngineScreeningBacktestResponse;
       try {
@@ -1741,6 +1745,8 @@ export class EvolutionLoop {
               tradingCost: 0,
               spreadPips: costProfile.roundTripCostPips,
               pipSize: getPipSize(symbol),
+              minStopLossPips: slClamp.minPips,
+              maxStopLossPips: slClamp.maxPips,
             },
           },
           this.buildAnalysisEngineRequestOptions(),

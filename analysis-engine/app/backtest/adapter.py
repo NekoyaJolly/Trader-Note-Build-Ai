@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import List, Optional
 
 from app.schemas import (
@@ -83,6 +84,31 @@ def config_to_btconfig(config: ScreeningBacktestConfig) -> BTConfig:
         spread_pips=float(config.spreadPips),
         pip_size=float(config.pipSize),
     )
+
+
+def attach_sl_clamp(spec: BTSpec, config: ScreeningBacktestConfig) -> BTSpec:
+    """config の minStopLossPips / maxStopLossPips を pip_size で **絶対価格距離** に
+    換算して spec に付与する。
+
+    フロアは「2 × 往復コストpips」由来 (呼び出し側 TS が決定) なので、コスト(spreadPips)
+    と同じ config.pipSize 基準で価格換算しないと不整合になる。そのため strategy 内の
+    pip_size ヒューリスティックではなく、ここで config.pipSize を使って事前換算する。
+
+    pipSize <= 0 (= spread 適用なしの後方互換ケース) のときは換算できないため clamp を
+    付与しない (= 無効)。
+    """
+    pip = float(config.pipSize)
+    if pip <= 0:
+        return spec
+    min_price = float(config.minStopLossPips) * pip if config.minStopLossPips > 0 else 0.0
+    max_price = (
+        float(config.maxStopLossPips) * pip
+        if config.maxStopLossPips is not None and config.maxStopLossPips > 0
+        else None
+    )
+    if min_price <= 0 and max_price is None:
+        return spec
+    return replace(spec, min_stop_loss_price=min_price, max_stop_loss_price=max_price)
 
 
 # ---------------------------------------------------------------
