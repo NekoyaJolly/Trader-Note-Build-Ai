@@ -249,7 +249,15 @@ export function createFetchEodhdEarningsSkill(
 // 6. ファンダメンタルズ (US/ETF/INDX のみ)
 // ============================================================
 const FundamentalsInputSchema = z.object({
-  symbol: z.string().min(1),
+  // poka-yoke を Zod refine で表現し、非対応シンボルを **入力エラー(ZodError)** として弾く。
+  // (手動 throw だと Registry が SKILL_EXECUTION_ERROR 扱いになり入力不正と区別できない: PR #347 review)
+  symbol: z
+    .string()
+    .min(1)
+    .refine(isEodhdFundamentalsSupported, {
+      message:
+        'EODHD fundamentals は .US / .ETF / .INDX のみ対応 (FX/コモディティは news/sentiment/macro を使う)',
+    }),
   filter: z.string().optional(),
   historical: z.union([z.literal(0), z.literal(1)]).optional(),
 });
@@ -276,13 +284,9 @@ export function createFetchEodhdFundamentalsSkill(
       required: ['symbol'],
     },
     async execute(raw) {
+      // 非対応シンボル (FX/コモディティ等) は FundamentalsInputSchema の refine が
+      // ZodError として弾くため、API は叩かれない (poka-yoke)。
       const input = FundamentalsInputSchema.parse(raw ?? {});
-      // poka-yoke: 非対応シンボル (FX/コモディティ等) は API を叩かず明示エラーにする。
-      if (!isEodhdFundamentalsSupported(input.symbol)) {
-        throw new Error(
-          `fetch_eodhd_fundamentals: '${input.symbol}' は非対応。EODHD fundamentals は .US / .ETF / .INDX のみ対応 (FX/コモディティは news/sentiment/macro を使う)`,
-        );
-      }
       return fn(input);
     },
   };
