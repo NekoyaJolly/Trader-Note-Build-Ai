@@ -2,9 +2,12 @@
  * テスト環境のシークレット存在チェック＆条件付きスキップヘルパー
  * 
  * 目的:
- * - 料金が発生するAPI（AI_API_KEY, MARKET_API_KEY）のテストを最小限に抑える
+ * - 料金が発生するAPI（AI_API_KEY, EODHD_API_KEY）のテストを最小限に抑える
  * - シークレット未設定時にテストをスキップしてCI/CDを継続可能にする
  * - cTrader APIは料金がかからないため全テスト実行
+ *
+ * 注: 市場データは EODHD を第一選択とするため、市場データ系テストの判定キーは
+ *     旧 MARKET_API_KEY (Twelve Data) ではなく EODHD_API_KEY を見る。
  */
 
 /**
@@ -12,6 +15,7 @@
  */
 export type SecretCheckResult = {
   hasAiApiKey: boolean;
+  /** 市場データ (EODHD) API キーの有無。market data 系テストの実行可否判定に使う。 */
   hasMarketApiKey: boolean;
   hasCtraderClientId: boolean;
   hasCtraderClientSecret: boolean;
@@ -19,13 +23,14 @@ export type SecretCheckResult = {
 
 /**
  * 必須シークレットの存在チェック
- * 
+ *
  * @returns シークレットの存在状態を示すオブジェクト
  */
 export const checkRequiredSecrets = (): SecretCheckResult => {
   return {
     hasAiApiKey: !!process.env.AI_API_KEY,
-    hasMarketApiKey: !!process.env.MARKET_API_KEY,
+    // 市場データソースは EODHD に統一済 (Twelve Data 撤去)。EODHD_API_KEY を見る。
+    hasMarketApiKey: !!process.env.EODHD_API_KEY,
     hasCtraderClientId: !!process.env.CTRADER_CLIENT_ID,
     hasCtraderClientSecret: !!process.env.CTRADER_CLIENT_SECRET,
   };

@@ -26,7 +26,6 @@ export * from './api/order';
 // ========================================
 // 外部APIスキーマ
 // ========================================
-export * from './external/twelveData';
 export * from './external/openai';
 export * from './external/ctrader';
 export * from './external/analysisEngine';

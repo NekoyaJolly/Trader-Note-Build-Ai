@@ -27,13 +27,6 @@ export {
   ProviderFactoryConfig,
 } from './IMarketDataProvider';
 
-// Twelve Data プロバイダー（Side-B 用）
-export {
-  TwelveDataProvider,
-  TwelveDataConfigSchema,
-  TwelveDataConfig,
-} from './TwelveDataProvider';
-
 // CTrader プロバイダー（Side-A 用）
 export {
   CTraderProvider,

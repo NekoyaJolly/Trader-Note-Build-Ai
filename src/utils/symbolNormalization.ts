@@ -2,8 +2,8 @@
  * 市場データ用シンボル正規化ユーティリティ。
  *
  * cTrader / DB 保存ではスラッシュなし大文字（例: XAUUSD）を正とする。
- * 各データプロバイダ向けに以下のフォーマット変換を提供する:
- * - Twelve Data: スラッシュ区切り (XAU/USD)
+ * 各用途向けに以下のフォーマット変換を提供する:
+ * - スラッシュ区切り (XAU/USD): ローカルキャンドルストアのキー等
  * - EODHD: 市場タイプサフィックス (XAUUSD.FOREX / AAPL.US 等)
  */
 
@@ -19,7 +19,11 @@ export function normalizeCTraderSymbol(symbol: string): string {
   return symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
-export function toTwelveDataSymbol(symbol: string): string {
+/**
+ * スラッシュ区切り形式 (例: XAUUSD → XAU/USD) に変換する。
+ * ローカルキャンドルストアのキーなど、スラッシュ表記を要する用途で使う。
+ */
+export function toSlashSymbol(symbol: string): string {
   const normalized = normalizeCTraderSymbol(symbol);
   for (const quote of KNOWN_QUOTES) {
     if (normalized.endsWith(quote) && normalized.length > quote.length) {

@@ -12,7 +12,8 @@ export default (): Promise<void> => {
 
   const secrets = {
     AI_API_KEY: !!process.env.AI_API_KEY,
-    MARKET_API_KEY: !!process.env.MARKET_API_KEY,
+    // 市場データは EODHD を第一選択とするため EODHD_API_KEY を見る (旧 MARKET_API_KEY は撤去)
+    EODHD_API_KEY: !!process.env.EODHD_API_KEY,
     CTRADER_CLIENT_ID: !!process.env.CTRADER_CLIENT_ID,
     CTRADER_CLIENT_SECRET: !!process.env.CTRADER_CLIENT_SECRET,
   };
@@ -32,14 +33,14 @@ export default (): Promise<void> => {
     console.warn('⚠️  AI_API_KEY not set - AI tests will be skipped');
   }
   
-  if (secrets.MARKET_API_KEY) {
+  if (secrets.EODHD_API_KEY) {
     if (isMinimalMode) {
-      console.log('✅ MARKET_API_KEY configured - Running MINIMAL tests (1-2 API calls)');
+      console.log('✅ EODHD_API_KEY configured - Running MINIMAL Market Data tests (1-2 API calls)');
     } else {
-      console.log('✅ MARKET_API_KEY configured - Running FULL tests (multiple API calls)');
+      console.log('✅ EODHD_API_KEY configured - Running FULL Market Data tests (multiple API calls)');
     }
   } else {
-    console.warn('⚠️  MARKET_API_KEY not set - Market Data tests will be skipped');
+    console.warn('⚠️  EODHD_API_KEY not set - Market Data tests will be skipped');
   }
   
   if (secrets.CTRADER_CLIENT_ID && secrets.CTRADER_CLIENT_SECRET) {

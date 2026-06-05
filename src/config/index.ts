@@ -36,7 +36,6 @@ if (!databaseUrl) {
     'JWT_SECRET',
     'JWT_REFRESH_SECRET',
     'AI_API_KEY',
-    'MARKET_API_KEY',
   ];
   requiredVars.forEach(varName => {
     const isSet = !!process.env[varName];
@@ -251,12 +250,6 @@ export const config = {
       cognitive_judge:
         process.env.AI_MODEL_COGNITIVE_JUDGE || 'anthropic/claude-sonnet-4.6',
     } as Record<AIAgentKey, string>,
-  },
-  market: {
-    // Twelve Data API のデフォルトURL を設定 (Phase D で撤去予定)
-    apiUrl: process.env.MARKET_API_URL || process.env.TWELVE_DATA_API_URL || 'https://api.twelvedata.com',
-    // TWELVE_DATA_API_KEY も MARKET_API_KEY のエイリアスとして使用可能
-    apiKey: process.env.MARKET_API_KEY || process.env.TWELVE_DATA_API_KEY || '',
   },
   // Phase A 新設: EODHD All-In-One ($99.99/月、2026-05-19 確定)
   eodhd: {

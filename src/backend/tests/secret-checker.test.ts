@@ -29,7 +29,7 @@ describe('Secret Checker Helper', () => {
   describe('checkRequiredSecrets', () => {
     it('全てのシークレットが設定されている場合は全てtrueを返す', () => {
       process.env.AI_API_KEY = 'test-ai-key';
-      process.env.MARKET_API_KEY = 'test-market-key';
+      process.env.EODHD_API_KEY = 'test-eodhd-key';
       process.env.CTRADER_CLIENT_ID = 'test-ctrader-id';
       process.env.CTRADER_CLIENT_SECRET = 'test-ctrader-secret';
 
@@ -43,7 +43,7 @@ describe('Secret Checker Helper', () => {
 
     it('シークレットが未設定の場合はfalseを返す', () => {
       delete process.env.AI_API_KEY;
-      delete process.env.MARKET_API_KEY;
+      delete process.env.EODHD_API_KEY;
       delete process.env.CTRADER_CLIENT_ID;
       delete process.env.CTRADER_CLIENT_SECRET;
 

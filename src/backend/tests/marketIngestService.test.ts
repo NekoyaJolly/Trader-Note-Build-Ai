@@ -3,7 +3,9 @@
  * 対象: 15m/60m の丸め処理と upsert 冪等性
  * ルール: コメントは日本語、DB スナップショットの状態を直接確認
  *
- * 市場データは **cTrader のみ**（Twelve Data 廃止）。CTRADER_CLIENT_* と DB の OAuth トークンが揃う場合のみ実行。
+ * 市場データは **EODHD を第一選択**とし、cTrader を二次フォールバックとする。
+ * 本テストは cTrader 配線経路の回帰も兼ねるため、CTRADER_CLIENT_* と DB の OAuth トークンが
+ * 揃う場合のみ実行する (EODHD 単独でも getCurrentMarketData は成立する)。
  */
 import { PrismaClient } from '@prisma/client';
 import { MarketIngestService } from '../../backend/services/ingest/marketIngestService';

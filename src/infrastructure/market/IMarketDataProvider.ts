@@ -1,11 +1,11 @@
 /**
  * 市場データプロバイダー抽象インターフェース
  * 
- * 目的: Twelve Data、cTrader Open API 等の市場データソースを統一インターフェースで扱う
- * 
+ * 目的: EODHD、cTrader Open API 等の市場データソースを統一インターフェースで扱う
+ *
  * 設計方針:
- * - Side-A (リアルタイム通知): cTrader Open API（WebSocket）
- * - Side-B (バックテスト): Twelve Data（REST API）
+ * - OHLCV ヒストリカル / 現在値: EODHD (REST) を第一選択
+ * - Side-A (リアルタイム通知): EODHD WebSocket / cTrader Open API
  * - 共通の型定義でデータソースを切り替え可能にする
  * 
  * 参照: docs/realtime_similarity_notification_architecture.md
@@ -90,9 +90,8 @@ export type Timeframe = z.infer<typeof TimeframeSchema>;
  * プロバイダー種別
  */
 export const ProviderTypeSchema = z.enum([
-  'twelve_data',  // 旧 Side-B 用 (REST、Phase D で撤去予定)
   'ctrader',      // 旧 Side-A Tick + 実売買 (Phase A PR #3 以降は発注/決済 only に縮小)
-  'eodhd',        // Phase A 新設 (WebSocket Tick + ヒストリカル + 外部要因 API)
+  'eodhd',        // Phase A 新設 (WebSocket Tick + ヒストリカル + 外部要因 API)。OHLCV の第一選択
 ]);
 
 export type ProviderType = z.infer<typeof ProviderTypeSchema>;
@@ -131,7 +130,7 @@ export type ConnectionStateCallback = (state: ConnectionState, error?: Error) =>
 /**
  * 市場データプロバイダーの抽象インターフェース
  * 
- * REST API（Twelve Data）と WebSocket（cTrader）の両方をサポート
+ * REST API（EODHD）と WebSocket（EODHD / cTrader）の両方をサポート
  */
 export interface IMarketDataProvider {
   /** プロバイダー名 */
@@ -221,7 +220,7 @@ export interface IMarketDataProvider {
    * シンボルを内部形式に正規化
    * 
    * 例:
-   * - Twelve Data: 'XAU/USD' → 'XAU/USD'（そのまま）
+   * - EODHD: 'XAUUSD.FOREX' → 'XAU/USD'
    * - cTrader: 'XAUUSD' → 'XAU/USD'
    * 
    * @param symbol - プロバイダー固有のシンボル形式
@@ -341,8 +340,6 @@ export abstract class BaseMarketDataProvider implements IMarketDataProvider {
 export interface ProviderFactoryConfig {
   /** 優先プロバイダー */
   preferredProvider: ProviderType;
-  /** Twelve Data API キー（Side-B用） */
-  twelveDataApiKey?: string;
   /** cTrader クライアントID（Side-A用） */
   ctraderClientId?: string;
   /** cTrader クライアントシークレット（Side-A用） */
