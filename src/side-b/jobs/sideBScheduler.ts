@@ -1104,19 +1104,15 @@ export class SideBScheduler {
         this.log(`監視ジョブでエラーが検出されました。連続エラー回数: ${currentErrors}`);
 
         if (currentErrors >= 3) {
-          this.log('連続エラー回数がしきい値(3回)に達したため、緊急停止(キルスイッチ)を作動させます。');
-          await this.systemStateRepository.setBoolean('emergency_stop', true);
-          await this.systemStateRepository.recordEmergencyAuditBestEffort({
-            action: 'auto_stop',
-            source: 'scheduler',
-            actor: 'side-b-scheduler',
-            reason: 'monitor_error_threshold',
-          });
-          
+          // 2026-06-06 Nekoさん 指示で自動緊急停止(全システム停止)を撤去。
+          // 理由: 監視の一過性データエラーで全ジョブを止め自動復帰しない設計は過剰反応で、
+          // 「全動作の停止」は決定論で自動判断すべきでなく、最終的にユーザーが UI ボタンで
+          // 判断すること(emergencyRoutes /stop = 手動のみ)。ここは通知のみ行い停止はしない。
+          this.log('監視ジョブで連続エラー(3回以上)を検出。自動緊急停止はしません(停止は UI ボタンのみ)。通知します。');
           const errDetail = errors.join(', ') || result.message || '不明な例外';
           await mailService.sendAlertMail(
-            '自動緊急停止(キルスイッチ)が作動しました',
-            `システム監視ジョブで3回連続してエラーが発生したため、安全のために自動緊急停止が実行されました。\n\nエラー内容:\n${errDetail}`
+            '監視ジョブで連続エラーが発生しています(自動停止はしません)',
+            `システム監視ジョブで3回以上連続してエラーが発生しています。自動緊急停止は行いません。必要なら UI から緊急停止してください。\n\nエラー内容:\n${errDetail}`
           );
         }
       } else {
@@ -1132,16 +1128,12 @@ export class SideBScheduler {
       this.log(`監視ジョブ実行中に例外が発生しました。連続エラー回数: ${currentErrors} - ${message}`);
 
       if (currentErrors >= 3) {
-        await this.systemStateRepository.setBoolean('emergency_stop', true);
-        await this.systemStateRepository.recordEmergencyAuditBestEffort({
-          action: 'auto_stop',
-          source: 'scheduler',
-          actor: 'side-b-scheduler',
-          reason: 'monitor_exception_threshold',
-        });
+        // 2026-06-06 Nekoさん 指示で自動緊急停止を撤去 (上の error 検知側と同理由)。
+        // 全動作の停止はユーザーが UI ボタンで判断すること。ここは通知のみ。
+        this.log('監視ジョブ実行中の連続例外(3回以上)を検出。自動緊急停止はしません(停止は UI ボタンのみ)。');
         await mailService.sendAlertMail(
-          '自動緊急停止(キルスイッチ)が作動しました',
-          `システム監視ジョブ実行中に3回連続して例外が発生したため、安全のために自動緊急停止が実行されました。\n\n例外内容:\n${message}`
+          '監視ジョブで連続例外が発生しています(自動停止はしません)',
+          `システム監視ジョブ実行中に3回以上連続して例外が発生しています。自動緊急停止は行いません。必要なら UI から緊急停止してください。\n\n例外内容:\n${message}`
         );
       }
 
