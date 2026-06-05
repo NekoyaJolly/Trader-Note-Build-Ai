@@ -1103,7 +1103,7 @@ export class SideBScheduler {
         const currentErrors = parseInt(state.value, 10);
         this.log(`監視ジョブでエラーが検出されました。連続エラー回数: ${currentErrors}`);
 
-        if (currentErrors >= 3) {
+        if (currentErrors === 3) {
           // 2026-06-06 Nekoさん 指示で自動緊急停止(全システム停止)を撤去。
           // 理由: 監視の一過性データエラーで全ジョブを止め自動復帰しない設計は過剰反応で、
           // 「全動作の停止」は決定論で自動判断すべきでなく、最終的にユーザーが UI ボタンで
@@ -1127,7 +1127,7 @@ export class SideBScheduler {
       const currentErrors = parseInt(state.value, 10);
       this.log(`監視ジョブ実行中に例外が発生しました。連続エラー回数: ${currentErrors} - ${message}`);
 
-      if (currentErrors >= 3) {
+      if (currentErrors === 3) {
         // 2026-06-06 Nekoさん 指示で自動緊急停止を撤去 (上の error 検知側と同理由)。
         // 全動作の停止はユーザーが UI ボタンで判断すること。ここは通知のみ。
         this.log('監視ジョブ実行中の連続例外(3回以上)を検出。自動緊急停止はしません(停止は UI ボタンのみ)。');
