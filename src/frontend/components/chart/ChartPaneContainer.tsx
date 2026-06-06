@@ -17,8 +17,11 @@ import {
   Time,
   UTCTimestamp,
   createChart,
+  createSeriesMarkers,
+  ISeriesMarkersPluginApi,
 } from "lightweight-charts";
 import type {
+  ChartMarker,
   DrawnLine,
   IndicatorLineConfig,
   OHLCVDataPoint,
@@ -30,6 +33,8 @@ import { normalizeLineSegment } from "@/lib/chartLineSegment";
 interface ChartPaneContainerProps {
   ohlcvData: OHLCVDataPoint[];
   indicators?: IndicatorLineConfig[];
+  /** メインペインのローソク足に重ねるマーカー (例: エントリー条件の成立バー) */
+  markers?: ChartMarker[];
   height?: number;
   drawingMode?: DrawingMode;
   drawnLines?: DrawnLine[];
@@ -130,6 +135,7 @@ function paneTitleFromKey(key: string): string {
 export function ChartPaneContainer({
   ohlcvData,
   indicators = [],
+  markers = [],
   height = 500,
   drawingMode = "none",
   drawnLines = [],
@@ -146,6 +152,9 @@ export function ChartPaneContainer({
 
   const mainChartRef = useRef<IChartApi | null>(null);
   const mainSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  // メインローソク足に重ねるマーカープラグイン (v5 API)。init effect でチャート再生成時に
+  // 作り直されるため、markers 反映 effect は paneSignature にも依存して再投入する。
+  const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   // DrawingOverlay には ref.current の値そのものを渡す必要があるため、
   // render 中に ref を読まずに済むよう state で同期する (react-hooks/refs 対策)。
   const [drawingChart, setDrawingChart] = useState<IChartApi | null>(null);
@@ -212,6 +221,7 @@ export function ChartPaneContainer({
     subChartsRef.current.clear();
     allSeriesRef.current.clear();
     drawnSeriesRef.current.clear();
+    markersPluginRef.current = null;
 
     const createBaseChart = (container: HTMLDivElement, paneHeight: number): IChartApi => {
       return createChart(container, {
@@ -264,6 +274,9 @@ export function ChartPaneContainer({
     });
     mainSeriesRef.current = candleSeries;
     setDrawingSeries(candleSeries);
+
+    // マーカープラグインをメインローソク足に紐付ける (空で初期化し、別 effect で setMarkers)。
+    markersPluginRef.current = createSeriesMarkers(candleSeries, []);
 
     const volumeSeries = mainChart.addSeries(HistogramSeries, {
       color: "#26a69a",
@@ -380,6 +393,7 @@ export function ChartPaneContainer({
       resizeObserver?.disconnect();
       safeRemoveChart(mainChartRef.current);
       mainChartRef.current = null;
+      markersPluginRef.current = null;
       setDrawingChart(null);
       setDrawingSeries(null);
       subCharts.forEach((chart) => safeRemoveChart(chart));
@@ -496,6 +510,28 @@ export function ChartPaneContainer({
       });
     }
   }, [barMs, paneDefs]);
+
+  // マーカー反映 (エントリー成立バー等)。
+  // paneSignature も依存に含める: サブpane 増減で init effect がチャート (とプラグイン) を
+  // 作り直すと markersPluginRef が新インスタンスになるため、再投入しないとマーカーが消える。
+  useEffect(() => {
+    if (!markersPluginRef.current) return;
+
+    if (markers.length === 0) {
+      markersPluginRef.current.setMarkers([]);
+      return;
+    }
+
+    markersPluginRef.current.setMarkers(
+      markers.map((m) => ({
+        time: toChartTime(m.timestamp) as Time,
+        position: m.position,
+        color: m.color,
+        shape: m.shape,
+        text: m.text ?? "",
+      })),
+    );
+  }, [markers, paneSignature]);
 
   // BB・一目の塗り
   useEffect(() => {

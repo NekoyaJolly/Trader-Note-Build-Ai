@@ -28,6 +28,7 @@ import {
   updateStrategy,
   fetchIndicatorMetadata,
 } from "@/lib/api";
+import { TIMEFRAME_OPTIONS, DEFAULT_TIMEFRAME_API } from "@/lib/marketConstants";
 
 // ============================================
 // 定数
@@ -105,6 +106,8 @@ export default function StrategyForm({
   const [symbol, setSymbol] = useState<SupportedSymbol>(
     (strategy?.symbol as SupportedSymbol) || "USDJPY"
   );
+  // プレビュー専用の時間足 (ストラテジー本体には保存しない、成立箇所の可視化用)
+  const [previewTimeframe, setPreviewTimeframe] = useState<string>(DEFAULT_TIMEFRAME_API);
   const [side, setSide] = useState<StrategyDirection>(strategy?.side || "buy");
   const [entryConditions, setEntryConditions] = useState<ConditionGroup>(
     (strategy?.currentVersion?.entryConditions as ConditionGroup) || createDefaultConditionGroup()
@@ -371,7 +374,25 @@ export default function StrategyForm({
         />
 
         <div className="mt-4">
-          <EntryPreviewMiniChart entryConditions={entryConditions} />
+          <div className="flex items-center justify-end mb-2">
+            <label className="text-[11px] text-gray-400 mr-2">プレビュー時間足</label>
+            <select
+              className="px-2 py-1 rounded bg-slate-700 text-gray-200 border border-slate-600 text-xs focus:border-blue-500 focus:outline-none"
+              value={previewTimeframe}
+              onChange={(e) => setPreviewTimeframe(e.target.value)}
+            >
+              {TIMEFRAME_OPTIONS.map((tf) => (
+                <option key={tf.api} value={tf.api}>
+                  {tf.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <EntryPreviewMiniChart
+            entryConditions={entryConditions}
+            symbol={symbol}
+            timeframe={previewTimeframe}
+          />
         </div>
       </div>
 

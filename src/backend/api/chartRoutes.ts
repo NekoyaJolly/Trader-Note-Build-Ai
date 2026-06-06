@@ -21,8 +21,14 @@ import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { chartDataService } from '../../services/chartDataService';
 import { ChartDataError } from '../../infrastructure/market/chart-data.types';
-import { validateQuery, getValidatedQuery } from '../../middleware/validateRequest';
-import { ChartCandlesQuerySchema, type ChartCandlesQuery } from '../../schemas/api/chart';
+import { validateQuery, getValidatedQuery, validateBody } from '../../middleware/validateRequest';
+import {
+  ChartCandlesQuerySchema,
+  type ChartCandlesQuery,
+  ChartIndicatorSeriesRequestSchema,
+  type ChartIndicatorSeriesRequest,
+} from '../../schemas/api/chart';
+import { fetchIndicatorSeries } from '../services/analysisEngineClient';
 import { prisma } from '../db/client';
 import { ohlcvRepository } from '../repositories/ohlcvRepository';
 import { normalizeCTraderSymbol, toSlashSymbol } from '../../utils/symbolNormalization';
@@ -72,6 +78,58 @@ router.get('/candles', validateQuery(ChartCandlesQuerySchema), async (_req: Requ
     });
   }
 });
+
+/**
+ * POST /api/chart/indicator-series
+ *
+ * 指定シンボル・時間足・期間について、analysis-engine (pandas-ta) が計算した指標系列
+ * (+ ローソク足パターンフラグ) を返す。指標計算をフロントで自前実装せず analysis-engine に
+ * 一元化するための公開ルート。バックテスト・進化ループが使う `fetchIndicatorSeries` を
+ * そのままブラウザに公開する薄いプロキシ。
+ *
+ * OHLCV は analysis-engine が DB (OHLCVCandle) を直読みする設計のため、呼び出し側は
+ * 事前に GET /api/chart/candles で同一期間のローソク足を取得 (= DB へキャッシュ) しておく。
+ *
+ * レスポンスは AnalysisEngineIndicatorSeriesResponse ({ symbol, timeframe, timestamps,
+ * series: Record<cacheKey, (number|null)[]>, patterns: Record<patternId, boolean[]> }) を
+ * そのまま返す。cacheKey 規約は Node/Python 共通 (makeIndicatorCacheKey)。
+ *
+ * HTTP ステータス方針:
+ *   - body 不正                   → 400 (validateBody)
+ *   - analysis-engine 障害・不正応答 → 502 (upstream 依存の失敗)
+ */
+router.post(
+  '/indicator-series',
+  validateBody(ChartIndicatorSeriesRequestSchema),
+  async (req: Request, res: Response) => {
+    const body = req.body as ChartIndicatorSeriesRequest;
+
+    try {
+      const result = await fetchIndicatorSeries({
+        symbol: body.symbol,
+        timeframe: body.timeframe,
+        startDate: new Date(body.startDate),
+        endDate: new Date(body.endDate),
+        indicators: body.indicators,
+        patterns: body.patterns,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error(
+        `[ChartIndicatorSeries] 取得失敗 symbol=${body.symbol} timeframe=${body.timeframe} ` +
+          `indicators=${body.indicators.length} patterns=${body.patterns.length}:`,
+        error,
+      );
+      res.status(502).json({
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : '指標系列の取得に失敗しました (analysis-engine)',
+      });
+    }
+  },
+);
 
 // ============================================
 // GET /api/chart/symbols

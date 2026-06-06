@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import { AnalysisEngineIndicatorSpecSchema } from '../external/analysisEngine';
 
 /**
  * GET /api/chart/candles のクエリ。
@@ -41,3 +42,50 @@ export const BrokerQuoteQuerySchema = z.object({
 });
 
 export type BrokerQuoteQuery = z.infer<typeof BrokerQuoteQuerySchema>;
+
+/**
+ * POST /api/chart/indicator-series のリクエストボディ。
+ *
+ * フロント (例: /strategies/new のプレビュー) が「条件で使うインジ + ローソク足パターン」を
+ * 指定し、analysis-engine (pandas-ta) が計算した系列を取得するための公開ルート用スキーマ。
+ *
+ * 計算ロジックは analysis-engine に一元化し、フロントの自前計算 (chartIndicators.ts) との
+ * 乖離をなくす狙い。指標 spec の形 ({ indicatorId, params, field }) と cacheKey 規約は
+ * analysis-engine / backtest と完全に共有するため、spec は external スキーマを再利用する。
+ *
+ * patterns は analysis-engine の indicator-series が対応するローソク足パターン ID 集合。
+ * フロントの CandlePatternId と互換 (bb_bandwidth はインジ的用途で superset)。
+ */
+const ChartPatternIdSchema = z.enum([
+  'pinbar',
+  'pinbar_bull',
+  'pinbar_bear',
+  'hammer',
+  'hammer_bull',
+  'hammer_bear',
+  'shooting_star',
+  'engulfing_bull',
+  'engulfing_bear',
+  'doji',
+  'thrust_bull',
+  'thrust_bear',
+  'bb_bandwidth',
+]);
+
+export const ChartIndicatorSeriesRequestSchema = z
+  .object({
+    symbol: z.string().min(1, 'symbol は必須です'),
+    timeframe: z.string().min(1, 'timeframe は必須です'),
+    startDate: z.string().datetime(),
+    endDate: z.string().datetime(),
+    // 1 リクエストで計算する指標数の上限。条件ビルダーの現実的な上限を大きく上回る値で、
+    // 悪意ある巨大ペイロードによる analysis-engine 過負荷を防ぐためのガード。
+    indicators: z.array(AnalysisEngineIndicatorSpecSchema).max(64).default([]),
+    patterns: z.array(ChartPatternIdSchema).max(13).default([]),
+  })
+  .refine((d) => new Date(d.startDate) <= new Date(d.endDate), {
+    message: 'startDate は endDate 以前である必要があります',
+    path: ['startDate'],
+  });
+
+export type ChartIndicatorSeriesRequest = z.infer<typeof ChartIndicatorSeriesRequestSchema>;
