@@ -10,7 +10,11 @@ import { describe, it, expect, beforeEach } from "vitest";
 
 import {
 	loadPersistedIndicators,
+	loadPersistedTimeframe,
+	loadPersistedDataCount,
 	SELECTED_INDICATORS_STORAGE_KEY,
+	SELECTED_TIMEFRAME_STORAGE_KEY,
+	SELECTED_DATA_COUNT_STORAGE_KEY,
 } from "@/components/RealtimeChart";
 
 describe("loadPersistedIndicators (条件6: インジケーター永続化)", () => {
@@ -63,5 +67,59 @@ describe("loadPersistedIndicators (条件6: インジケーター永続化)", ()
 		expect(second).toHaveLength(1);
 		// 何度呼んでも localStorage の中身は元のまま (破棄されない)
 		expect(window.localStorage.getItem(SELECTED_INDICATORS_STORAGE_KEY)).toBe(JSON.stringify(saved));
+	});
+});
+
+describe("loadPersistedTimeframe (時間足の永続化)", () => {
+	beforeEach(() => {
+		window.localStorage.clear();
+	});
+
+	it("localStorage が空なら fallback を返す", () => {
+		expect(loadPersistedTimeframe(60)).toBe(60);
+	});
+
+	it("許容集合内の保存値 (秒) を復元する", () => {
+		// 3600 = 1時間足 (TIMEFRAME_OPTIONS に存在)
+		window.localStorage.setItem(SELECTED_TIMEFRAME_STORAGE_KEY, "3600");
+		expect(loadPersistedTimeframe(60)).toBe(3600);
+	});
+
+	it("許容集合外の値は fallback に落とす", () => {
+		// 12345 は TIMEFRAME_OPTIONS に無い → fallback
+		window.localStorage.setItem(SELECTED_TIMEFRAME_STORAGE_KEY, "12345");
+		expect(loadPersistedTimeframe(60)).toBe(60);
+	});
+
+	it("数値化できない壊れた値は fallback に落とす", () => {
+		window.localStorage.setItem(SELECTED_TIMEFRAME_STORAGE_KEY, "abc");
+		expect(loadPersistedTimeframe(300)).toBe(300);
+	});
+});
+
+describe("loadPersistedDataCount (取得本数の永続化)", () => {
+	beforeEach(() => {
+		window.localStorage.clear();
+	});
+
+	it("localStorage が空なら fallback を返す", () => {
+		expect(loadPersistedDataCount(1000)).toBe(1000);
+	});
+
+	it("許容集合内の保存値を復元する", () => {
+		// 5000 本 (DATA_COUNT_OPTIONS に存在)
+		window.localStorage.setItem(SELECTED_DATA_COUNT_STORAGE_KEY, "5000");
+		expect(loadPersistedDataCount(1000)).toBe(5000);
+	});
+
+	it("許容集合外の値は fallback に落とす", () => {
+		// 333 は DATA_COUNT_OPTIONS に無い → fallback
+		window.localStorage.setItem(SELECTED_DATA_COUNT_STORAGE_KEY, "333");
+		expect(loadPersistedDataCount(1000)).toBe(1000);
+	});
+
+	it("数値化できない壊れた値は fallback に落とす", () => {
+		window.localStorage.setItem(SELECTED_DATA_COUNT_STORAGE_KEY, "{bad");
+		expect(loadPersistedDataCount(500)).toBe(500);
 	});
 });
