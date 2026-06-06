@@ -11,7 +11,6 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
 	loadPersistedIndicators,
 	SELECTED_INDICATORS_STORAGE_KEY,
-	INDICATORS_RESTORE_SENTINEL_KEY,
 } from "@/components/RealtimeChart";
 
 describe("loadPersistedIndicators (条件6: インジケーター永続化)", () => {
@@ -52,24 +51,16 @@ describe("loadPersistedIndicators (条件6: インジケーター永続化)", ()
 		expect(loadPersistedIndicators()).toEqual([]);
 	});
 
-	it("復元時に描画試行 sentinel を立てる", () => {
-		window.localStorage.setItem(
-			SELECTED_INDICATORS_STORAGE_KEY,
-			JSON.stringify([{ id: "sma", params: { period: 20 } }]),
-		);
-		loadPersistedIndicators();
-		expect(window.localStorage.getItem(INDICATORS_RESTORE_SENTINEL_KEY)).toBe("1");
-	});
-
-	it("前回クラッシュ形跡 (sentinel 残存) があれば復元せず設定を破棄する (ループ断絶)", () => {
-		window.localStorage.setItem(
-			SELECTED_INDICATORS_STORAGE_KEY,
-			JSON.stringify([{ id: "sma", params: { period: 20 } }]),
-		);
-		window.localStorage.setItem(INDICATORS_RESTORE_SENTINEL_KEY, "1");
-		expect(loadPersistedIndicators()).toEqual([]);
-		// 危険な設定と sentinel の両方が破棄される
-		expect(window.localStorage.getItem(SELECTED_INDICATORS_STORAGE_KEY)).toBeNull();
-		expect(window.localStorage.getItem(INDICATORS_RESTORE_SENTINEL_KEY)).toBeNull();
+	it("純粋な read で副作用を持たない (複数回呼んでも localStorage を変更しない)", () => {
+		// React StrictMode は useState lazy initializer を 2 回呼ぶ。副作用があると
+		// 2 回目で設定が壊れる (旧 sentinel バグ)。複数回呼んでも同じ結果・無変更を保証する。
+		const saved = [{ id: "sma", params: { period: 20 }, displaySettings: { color: "#fbbf24", lineWidth: 2 } }];
+		window.localStorage.setItem(SELECTED_INDICATORS_STORAGE_KEY, JSON.stringify(saved));
+		const first = loadPersistedIndicators();
+		const second = loadPersistedIndicators();
+		expect(first).toHaveLength(1);
+		expect(second).toHaveLength(1);
+		// 何度呼んでも localStorage の中身は元のまま (破棄されない)
+		expect(window.localStorage.getItem(SELECTED_INDICATORS_STORAGE_KEY)).toBe(JSON.stringify(saved));
 	});
 });
