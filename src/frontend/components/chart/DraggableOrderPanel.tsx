@@ -28,6 +28,9 @@ const PositionSchema = z.object({ left: z.number(), top: z.number() });
 type Position = z.infer<typeof PositionSchema>;
 
 const POSITION_STORAGE_KEY = "chart-order-panel-position";
+// 本体(BUY/SELL 以下)を開いているかの永続化キー。
+// 既定は折りたたみ (発注ラベルのみ) にして、線描画時にチャートを邪魔しないようにする。
+const BODY_OPEN_STORAGE_KEY = "chart-order-panel-body-open";
 const EDGE_MARGIN = 8; // コンテナ端からの最小余白 px
 
 /**
@@ -61,11 +64,45 @@ function loadPersistedPosition(): Position | null {
 	}
 }
 
+/** 本体の開閉状態を復元する。未保存・壊れた値は false (折りたたみ=発注のみ) を既定とする。 */
+function loadPersistedBodyOpen(): boolean {
+	if (typeof window === "undefined") return false;
+	try {
+		return window.localStorage.getItem(BODY_OPEN_STORAGE_KEY) === "true";
+	} catch {
+		return false;
+	}
+}
+
 export function DraggableOrderPanel({ symbol, disabled, disabledReason, onOrderPlaced }: DraggableOrderPanelProps) {
 	const panelRef = useRef<HTMLDivElement>(null);
 	const [position, setPosition] = useState<Position | null>(null);
+	// 本体 (BUY/SELL 以下) の開閉。アコーディオン 3 段の 1 段目↔2 段目を制御する。
+	// (2 段目↔3 段目=TP/SL 等の詳細は OrderPanel 内部の ▾ トグルが担当)
+	// 既定は折りたたみ。SSR との不整合を避けるためマウント後に localStorage から復元する。
+	const [bodyOpen, setBodyOpen] = useState(false);
 	// ドラッグ開始時のポインタ座標とパネル位置を記録する基準値
 	const dragState = useRef<{ startX: number; startY: number; startLeft: number; startTop: number } | null>(null);
+
+	// マウント後に開閉状態を復元する (既定: 折りたたみ=発注のみ)
+	useEffect(() => {
+		setBodyOpen(loadPersistedBodyOpen());
+	}, []);
+
+	// 開閉トグル。状態を localStorage に永続化する。ハンドルのドラッグとは独立。
+	const toggleBody = useCallback(() => {
+		setBodyOpen((prev) => {
+			const next = !prev;
+			if (typeof window !== "undefined") {
+				try {
+					window.localStorage.setItem(BODY_OPEN_STORAGE_KEY, String(next));
+				} catch {
+					// localStorage 不可は無視
+				}
+			}
+			return next;
+		});
+	}, []);
 
 	// 親 (offsetParent) の内側に収まるよう left/top をクランプする
 	const clampToParent = useCallback((left: number, top: number): Position => {
@@ -178,30 +215,48 @@ export function DraggableOrderPanel({ symbol, disabled, disabledReason, onOrderP
 					: { top: EDGE_MARGIN, right: EDGE_MARGIN, visibility: "hidden" }
 			}
 		>
-			{/* ドラッグハンドル: BUY/SELL ボタンやロット入力と干渉しないよう、専用バーをつまんで動かす */}
+			{/* ドラッグハンドル兼アコーディオンのヘッダー。
+			    バー自体をつまんでドラッグ移動、右端の ▸/▾ ボタンで本体を開閉する (発注のみ↔BUY/SELL)。
+			    本体を閉じている時は単独カードなので全角丸、開いている時は本体と連結するので上だけ角丸。 */}
 			<div
 				onPointerDown={handlePointerDown}
 				onPointerMove={handlePointerMove}
 				onPointerUp={handlePointerUp}
 				onPointerCancel={handlePointerUp}
-				className="flex items-center justify-center gap-1 cursor-move select-none touch-none rounded-t-lg border border-b-0 border-gray-700 bg-gray-800/90 py-0.5 text-[10px] text-gray-300 backdrop-blur-sm"
+				className={`flex items-center justify-between gap-1 cursor-move select-none touch-none border border-gray-700 bg-gray-800/90 px-2 py-0.5 text-[10px] text-gray-300 backdrop-blur-sm ${bodyOpen ? "rounded-t-lg border-b-0" : "rounded-lg"}`}
 				role="button"
 				// ドラッグ操作のハンドル。キーボードでも到達できるようフォーカス可能にする (a11y)
 				tabIndex={0}
 				aria-label="発注パネルを移動"
 				title="ドラッグで移動"
 			>
-				<span aria-hidden="true">⋮⋮</span>
-				<span>発注</span>
+				<span className="flex items-center gap-1">
+					<span aria-hidden="true">⋮⋮</span>
+					<span>発注</span>
+				</span>
+				{/* 開閉トグル。onPointerDown を止めてドラッグ開始と干渉させない (クリックは開閉のみ) */}
+				<button
+					type="button"
+					onPointerDown={(e) => e.stopPropagation()}
+					onClick={toggleBody}
+					aria-expanded={bodyOpen}
+					aria-label={bodyOpen ? "発注パネルを折りたたむ" : "発注パネルを展開"}
+					title={bodyOpen ? "折りたたむ" : "展開"}
+					className="px-1 text-gray-400 hover:text-gray-200 transition"
+				>
+					{bodyOpen ? "▾" : "▸"}
+				</button>
 			</div>
-			<OrderPanel
-				symbol={symbol}
-				compact
-				attachedTop
-				disabled={disabled}
-				disabledReason={disabledReason}
-				onOrderPlaced={onOrderPlaced}
-			/>
+			{bodyOpen && (
+				<OrderPanel
+					symbol={symbol}
+					compact
+					attachedTop
+					disabled={disabled}
+					disabledReason={disabledReason}
+					onOrderPlaced={onOrderPlaced}
+				/>
+			)}
 		</div>
 	);
 }
