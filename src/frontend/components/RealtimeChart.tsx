@@ -23,6 +23,7 @@ import { OrderPanel } from "@/components/chart/OrderPanel";
 import { ChartPaneContainer } from "@/components/chart/ChartPaneContainer";
 import { DrawingMode } from "@/components/chart/DrawingOverlay";
 import { apiFetch } from "@/lib/apiClient";
+import { ChartSymbolsResponseSchema, type ChartSymbolOption } from "@/schemas/api/chartSymbols";
 
 interface RealtimeChartProps {
 	symbol: string;
@@ -108,25 +109,8 @@ function isBrokerQuoteResponse(value: unknown): value is BrokerQuoteResponse {
 	return status === "connected" || status === "degraded" || status === "disconnected";
 }
 
-// /api/chart/symbols のレスポンス (動的シンボル候補)。フロントにシンボルをハードコード
-// させないため、cTrader (接続時) ∪ DB 既知銘柄 ∪ シード をサーバーから受け取る (条件7)。
-interface ChartSymbolOption {
-	value: string; // 正規化シンボル (例 XAUUSD)。API パラメータにそのまま使う
-	label: string; // 表示用ラベル (例 XAU/USD)
-}
-
-function isChartSymbolOptionArray(value: unknown): value is ChartSymbolOption[] {
-	return (
-		Array.isArray(value) &&
-		value.every(
-			(v) =>
-				typeof v === "object" &&
-				v !== null &&
-				typeof (v as { value?: unknown }).value === "string" &&
-				typeof (v as { label?: unknown }).label === "string",
-		)
-	);
-}
+// /api/chart/symbols のレスポンス (動的シンボル候補) は @/schemas/api/chartSymbols の
+// Zod スキーマでランタイム検証する (フロントにシンボルをハードコードさせない動的供給, 条件7)。
 
 /** フロントでのシンボル正規化 (英数字のみ・大文字化)。backend の normalizeCTraderSymbol と整合。 */
 const normalizeSymbolInput = (raw: string): string =>
@@ -357,10 +341,10 @@ export function RealtimeChart({
 			try {
 				const res = await apiFetch(`${apiBaseForSymbols}/api/chart/symbols`);
 				if (!res.ok) return;
-				const json = (await res.json()) as { success?: boolean; data?: { symbols?: unknown } };
-				const list = json?.data?.symbols;
-				if (!cancelled && isChartSymbolOptionArray(list) && list.length > 0) {
-					setSymbolOptions(list);
+				// 外部レスポンスは Zod でランタイム検証してから採用する (盲目的な as を避ける)
+				const parsed = ChartSymbolsResponseSchema.safeParse(await res.json());
+				if (!cancelled && parsed.success && parsed.data.data.symbols.length > 0) {
+					setSymbolOptions(parsed.data.data.symbols);
 				}
 			} catch {
 				// ネットワークエラー時は marketConstants の最終フォールバックを維持する

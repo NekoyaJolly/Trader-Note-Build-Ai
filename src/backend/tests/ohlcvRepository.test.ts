@@ -365,4 +365,29 @@ describe('OHLCVRepository', () => {
       });
     });
   });
+
+  describe('getDistinctSymbols', () => {
+    it('distinct な symbol 一覧を返す (timeframe 軸は畳む)', async () => {
+      const ts = new Date('2024-01-05T00:00:00Z'); // 金曜 (開場)
+      // 同一 symbol を複数 timeframe で入れても 1 件に畳まれることを確認
+      for (const timeframe of ['1h', '4h']) {
+        await repository.upsert({
+          symbol: TEST_SYMBOL,
+          timeframe,
+          timestamp: ts,
+          open: 100,
+          high: 105,
+          low: 98,
+          close: 103,
+          volume: 1000,
+        });
+      }
+
+      const symbols = await repository.getDistinctSymbols();
+
+      // timeframe 分だけ重複せず、symbol は 1 件にまとまる
+      const occurrences = symbols.filter((s) => s === TEST_SYMBOL).length;
+      expect(occurrences).toBe(1);
+    });
+  });
 });

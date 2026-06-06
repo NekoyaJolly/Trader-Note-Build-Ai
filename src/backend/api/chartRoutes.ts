@@ -171,12 +171,14 @@ router.get('/symbols', async (_req: Request, res: Response) => {
   }
 
   // 2. これまで OHLCV を取得・永続化した symbol を結合 (利用に応じて候補が増える)
+  //    symbol だけ欲しいので distinct: ['symbol'] に寄せた getDistinctSymbols を使う
+  //    (getAvailablePairs だと timeframe 分だけ symbol が重複し転送が無駄になる)。
   try {
-    const pairs = await ohlcvRepository.getAvailablePairs();
-    for (const pair of pairs) {
-      const value = normalizeCTraderSymbol(pair.symbol);
+    const dbSymbols = await ohlcvRepository.getDistinctSymbols();
+    for (const dbSymbol of dbSymbols) {
+      const value = normalizeCTraderSymbol(dbSymbol);
       if (value.length >= 3 && !byValue.has(value)) {
-        byValue.set(value, toSlashSymbol(pair.symbol));
+        byValue.set(value, toSlashSymbol(dbSymbol));
       }
     }
   } catch (error) {
