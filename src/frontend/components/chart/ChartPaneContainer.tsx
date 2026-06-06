@@ -25,6 +25,7 @@ import type {
   PositionOverlay,
 } from "@/components/CandlestickChart";
 import { DrawingMode, DrawingOverlay } from "@/components/chart/DrawingOverlay";
+import { normalizeLineSegment } from "@/lib/chartLineSegment";
 
 interface ChartPaneContainerProps {
   ohlcvData: OHLCVDataPoint[];
@@ -490,7 +491,16 @@ export function ChartPaneContainer({
     const start = ohlcvData[0].timestamp;
     const end = ohlcvData[ohlcvData.length - 1].timestamp;
 
+    // lightweight-charts は LineSeries data に「時刻が昇順かつ重複なし」を要求し、違反すると
+    // setData が throw してチャート全体の描画が壊れる (ローソク足が消える)。手描きライン
+    // (水平線=単発クリックで start==end / トレンド=右→左で降順) はこの条件を破りやすいため、
+    // normalizeLineSegment で昇順・別時刻に正規化し、念のため try/catch で全体を守る。
     const addLine = (id: string, p1: { time: number; value: number }, p2: { time: number; value: number }, color: string, width = 2, dashed = false) => {
+      const [n1, n2] = normalizeLineSegment(
+        { time: toChartTime(p1.time), value: p1.value },
+        { time: toChartTime(p2.time), value: p2.value },
+        Math.floor(barMs / 1000),
+      );
       const series = chart.addSeries(LineSeries, {
         color,
         lineWidth: width as LineWidth,
@@ -498,16 +508,24 @@ export function ChartPaneContainer({
         priceLineVisible: false,
         crosshairMarkerVisible: false,
       });
-      series.setData([
-        { time: toChartTime(p1.time), value: p1.value },
-        { time: toChartTime(p2.time), value: p2.value },
-      ]);
+      try {
+        series.setData([
+          { time: n1.time as UTCTimestamp, value: n1.value },
+          { time: n2.time as UTCTimestamp, value: n2.value },
+        ]);
+      } catch {
+        // 想定外データでも 1 本のラインのためにチャート全体を壊さない
+        chart.removeSeries(series);
+        return;
+      }
       drawnSeriesRef.current.set(id, series);
     };
 
     for (const line of drawnLines) {
       if (line.type === "horizontal") {
-        addLine(line.id, { time: line.startTime, value: line.price }, { time: line.endTime, value: line.price }, line.color ?? "#fbbf24", line.lineWidth ?? 2);
+        // 水平線はチャート全幅に描く (TradingView 同様)。クリック範囲でなくデータ全期間を使う
+        // ことで、単発クリック (start==end) でも線が潰れず常に水平線として表示される。
+        addLine(line.id, { time: start, value: line.price }, { time: end, value: line.price }, line.color ?? "#fbbf24", line.lineWidth ?? 2);
       } else if (line.type === "trend") {
         addLine(line.id, { time: line.startTime, value: line.startPrice }, { time: line.endTime, value: line.endPrice }, line.color ?? "#fbbf24", line.lineWidth ?? 2);
       } else if (line.type === "rectangle") {

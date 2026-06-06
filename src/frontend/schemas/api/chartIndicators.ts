@@ -10,14 +10,19 @@ import { z } from "zod";
  * 構造的に一致させる。
  */
 export const IndicatorDisplaySettingsSchema = z.object({
-  color: z.string(),
-  lineWidth: z.number(),
-  label: z.string().optional(),
+  // color は HEX (#RGB / #RRGGBB / #RRGGBBAA)。壊れた値を弾くため形式を制約する。
+  color: z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/),
+  // 線の太さは現実的な範囲 (1-10) に収め、壊れた値での極端な描画を防ぐ。
+  lineWidth: z.number().int().min(1).max(10),
+  label: z.string().max(100).optional(),
 });
 
 export const SelectedIndicatorSchema = z.object({
-  id: z.string().min(1),
-  params: z.record(z.string(), z.number()),
+  id: z.string().min(1).max(64),
+  // params は有限かつ現実的な範囲 (±100000) に制約する。
+  // 壊れた localStorage に極端な period 等が入ると、インジケーター計算のループが
+  // 過大化してフリーズ/極端な遅延を招くため、復元時にここで弾く。
+  params: z.record(z.string(), z.number().finite().gte(-100000).lte(100000)),
   displaySettings: IndicatorDisplaySettingsSchema.optional(),
 });
 
