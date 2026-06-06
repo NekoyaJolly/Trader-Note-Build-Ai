@@ -3,6 +3,16 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 /**
+ * ポート番号を環境変数から安全に解釈する。数値以外/範囲外/未設定なら既定値にフォールバックする。
+ * 理由: 不正値で parseInt が NaN になると、そのまま WS 接続に渡って実行時に接続不能になるため
+ * (cTrader ログイン障害の再発防止。env のタイプミス等で静かに壊れないようガードする)。
+ */
+function parsePort(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isInteger(parsed) && parsed > 0 && parsed <= 65535 ? parsed : fallback;
+}
+
+/**
  * アプリケーション設定
  * 環境変数から設定値を取得し、型安全に提供する
  * 注意: DATABASE_URL は Prisma が直接参照するため、ここでの定義は参考用
@@ -284,8 +294,8 @@ export const config = {
     //   ctraderDataService は Protobuf のため 5035 が必須。5036 (JSON ポート) に繋ぐと WS は張れるが
     //   ProtoOAApplicationAuthReq に応答が返らず無限ハングする (PR #339 で wsPort を 5036 に変えた際、
     //   両者が wsPort を共有していたため Protobuf 経路=ログインが巻き添えで壊れた。本 split で恒久解消)。
-    wsPort: parseInt(process.env.CTRADER_WS_PORT || '5036', 10),
-    wsPortProtobuf: parseInt(process.env.CTRADER_WS_PORT_PROTOBUF || '5035', 10),
+    wsPort: parsePort(process.env.CTRADER_WS_PORT, 5036),
+    wsPortProtobuf: parsePort(process.env.CTRADER_WS_PORT_PROTOBUF, 5035),
     // Redirect URI（Vercel）
     redirectUri: process.env.CTRADER_REDIRECT_URI || 'https://trader-note-build-ai.vercel.app/auth/ctrader/callback',
   },
