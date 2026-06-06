@@ -731,6 +731,9 @@ export function EntryPreviewMiniChart({
     setCandlesLoading(true);
     setCandlesError(null);
     setCandlesWarning(null);
+    // symbol/tf 変更時は旧シンボルのローソク足を即クリアする。残すとヘッダーは新 symbol/tf
+    // なのに本体は旧データ・loading も出ない不整合になる (取得完了まで読み込み中表示にする)。
+    setRealCandles(null);
     void (async () => {
       try {
         const res = await apiFetch(
@@ -789,6 +792,9 @@ export function EntryPreviewMiniChart({
     let aborted = false;
     const controller = new AbortController();
     setSeriesError(null);
+    // 条件/symbol/tf 変更で再取得する間は旧系列キャッシュをクリアする。残すと「古い系列 × 新条件」で
+    // 評価して成立マーカー/件数が一時的に誤る。取得完了までは空キャッシュ (= 指標なし) で評価させる。
+    setRealAligned(null);
     void (async () => {
       try {
         const startDate = new Date(realCandles[0].timestamp).toISOString();
