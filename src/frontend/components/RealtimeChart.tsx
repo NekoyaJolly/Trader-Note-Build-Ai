@@ -35,45 +35,22 @@ interface RealtimeChartProps {
 	rightAction?: ReactNode;
 }
 
-const SYMBOL_OPTIONS = [
-	{ value: "XAUUSD", label: "XAU/USD" },
-	{ value: "EURUSD", label: "EUR/USD" },
-	{ value: "USDJPY", label: "USD/JPY" },
-	{ value: "GBPUSD", label: "GBP/USD" },
-];
-
-const TIMEFRAME_OPTIONS = [
-	{ value: 60, label: "1分" },
-	{ value: 300, label: "5分" },
-	{ value: 900, label: "15分" },
-	{ value: 1800, label: "30分" },
-	{ value: 3600, label: "1時間" },
-	{ value: 14400, label: "4時間" },
-];
-
-const DATA_COUNT_OPTIONS = [
-	{ value: 500, label: "500本" },
-	{ value: 1000, label: "1000本" },
-	{ value: 2000, label: "2000本" },
-	{ value: 5000, label: "5000本" },
-];
+// 市場関連定数 (シンボル / TF / 本数) は marketConstants.ts に集約。
+// page.tsx 等と重複させない (ハードコード重複の再発防止 2026-06-06)。
+import {
+	SYMBOL_OPTIONS,
+	TIMEFRAME_OPTIONS,
+	DATA_COUNT_OPTIONS,
+	DEFAULT_DATA_COUNT,
+	secondsToApiTimeframe,
+	DEFAULT_TIMEFRAME_API,
+	FALLBACK_REFRESH_INTERVAL_MS as FALLBACK_REFRESH_INTERVAL,
+	BROKER_QUOTE_REFRESH_INTERVAL_MS as BROKER_QUOTE_REFRESH_INTERVAL,
+} from '@/lib/marketConstants';
 
 const DEFAULT_LINE_COLOR = "#fbbf24";
 const DEFAULT_LINE_WIDTH = 2;
 const LINE_WIDTH_OPTIONS = [1, 2, 3, 4];
-
-// 時間足（秒）を API パラメータ形式に変換
-const TIMEFRAME_TO_API: Record<number, string> = {
-	60: '1m',
-	300: '5m',
-	900: '15m',
-	1800: '30m',
-	3600: '1h',
-	14400: '4h',
-};
-
-const FALLBACK_REFRESH_INTERVAL = 30000; // 30秒
-const BROKER_QUOTE_REFRESH_INTERVAL = 30000; // 30秒 (cTrader bid/ask overlay)
 
 // ブローカー (cTrader) overlay 用の型。ローソ足 (EODHD/local) とは別レイヤー。
 type BrokerConnectionStatus = "connected" | "degraded" | "disconnected";
@@ -258,7 +235,7 @@ export function RealtimeChart({
 	rightAction,
 }: RealtimeChartProps) {
 	const [timeframe, setTimeframe] = useState(initialTimeframe);
-	const [dataCount, setDataCount] = useState(1000); // データ本数
+	const [dataCount, setDataCount] = useState<number>(DEFAULT_DATA_COUNT); // データ本数 (marketConstants.ts)
 	const [drawingMode, setDrawingMode] = useState<DrawingMode>("none");
 	const [drawnLines, setDrawnLines] = useState<DrawnLine[]>([]);
 	const [hasEverConnected, setHasEverConnected] = useState(false);
@@ -362,7 +339,7 @@ export function RealtimeChart({
 	// この経路は cTrader に依存しないため、ブローカー障害時もローソ足を表示できる。
 	// ============================================
 	const fetchFallbackData = useCallback(async () => {
-		const apiTimeframe = TIMEFRAME_TO_API[timeframe] || '1m';
+		const apiTimeframe = secondsToApiTimeframe(timeframe) ?? DEFAULT_TIMEFRAME_API;
 		setFallbackLoading(true);
 		setFallbackError(null);
 		setFallbackWarning(null);

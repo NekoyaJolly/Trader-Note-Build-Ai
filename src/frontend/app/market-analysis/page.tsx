@@ -20,6 +20,15 @@ import { indicatorToChartConfigs } from '@/lib/chartIndicators';
 import { TradingModal } from '@/components/trading/TradingModal';
 import { DataPresetModal, DataPreset } from '@/components/DataPresetModal';
 import { apiFetch } from '@/lib/apiClient';
+// 市場関連の選択肢・デフォルト値は共有定数から取る (RealtimeChart と二重持ちしない)
+import {
+    DEFAULT_SYMBOL,
+    DEFAULT_TIMEFRAME_API,
+    DEFAULT_DATA_COUNT,
+    TIMEFRAME_OPTIONS as REALTIME_TIMEFRAME_OPTIONS,
+    DATA_COUNT_OPTIONS as MARKET_DATA_COUNT_OPTIONS,
+    secondsToApiTimeframe,
+} from '@/lib/marketConstants';
 
 // 12次元特徴量の詳細型
 interface FeatureDetail {
@@ -69,26 +78,18 @@ interface MarketAnalysisData {
     };
 }
 
-// 時間足選択肢
+// 時間足選択肢: RealtimeChart と同じ集合 (API 文字列形式に変換) + 日足/週足を追加。
+// 共有定数 TIMEFRAME_OPTIONS (秒・API 文字列・ラベルを 1 つに統合) からマッピングし、
+// 分析パネル独自の 1d/1w もここでまとめる (将来共有定数側に統合してよい)。
 const TIMEFRAMES = [
-    { value: '1m', label: '1分' },
-    { value: '5m', label: '5分' },
-    { value: '15m', label: '15分' },
-    { value: '30m', label: '30分' },
-    { value: '1h', label: '1時間' },
-    { value: '4h', label: '4時間' },
+    ...REALTIME_TIMEFRAME_OPTIONS.map((tf) => ({ value: tf.api, label: tf.label })),
     { value: '1d', label: '1日' },
     { value: '1w', label: '1週' },
-];
+] as const;
 
-// データ本数選択肢
-const DATA_COUNTS = [
-    { value: 60, label: '60本' },
-    { value: 120, label: '120本' },
-    { value: 240, label: '240本' },
-    { value: 500, label: '500本' },
-    { value: 1000, label: '1000本' },
-];
+// データ本数選択肢: RealtimeChart と同じ集合に統一 (旧 60/120/240/500/1000 の重複定義を撤去)。
+// 分析パネルだけ少ない本数が欲しい場合はここに追加する (60 本デフォルトの過去経緯は撤廃)。
+const DATA_COUNTS = MARKET_DATA_COUNT_OPTIONS;
 
 // 特徴量の色分け
 function getFeatureColor(value: number, index: number): string {
@@ -112,20 +113,10 @@ function getFeatureColor(value: number, index: number): string {
     return 'bg-yellow-500';
 }
 
-// RealtimeChart の内部時間足 (秒) → 分析 API 用の文字列。チャートを単一ソースに分析と同期する。
-const SECONDS_TO_TIMEFRAME: Record<number, string> = {
-    60: '1m',
-    300: '5m',
-    900: '15m',
-    1800: '30m',
-    3600: '1h',
-    14400: '4h',
-};
-
 export default function MarketAnalysisPage() {
-    const [selectedSymbol, setSelectedSymbol] = useState('XAUUSD');
-    const [selectedTimeframe, setSelectedTimeframe] = useState('1m');
-    const [selectedDataCount, setSelectedDataCount] = useState(60);
+    const [selectedSymbol, setSelectedSymbol] = useState<string>(DEFAULT_SYMBOL);
+    const [selectedTimeframe, setSelectedTimeframe] = useState<string>(DEFAULT_TIMEFRAME_API);
+    const [selectedDataCount, setSelectedDataCount] = useState<number>(DEFAULT_DATA_COUNT);
     // 分析パネルの開閉。リアルタイムチャートは常時マウントしたまま、その下にパネルを展開する。
     const [showAnalysis, setShowAnalysis] = useState(false);
     const [analysisData, setAnalysisData] = useState<MarketAnalysisData | null>(null);
@@ -151,7 +142,7 @@ export default function MarketAnalysisPage() {
     // 受け取るのは秒単位。分析 API 用の文字列に変換し、変わったら分析データを破棄して再取得させる。
     // updater 内に副作用を入れると StrictMode で多重評価されうるため、現在値と比較してから通常 setState する。
     const handleRealtimeTimeframeChange = useCallback((seconds: number) => {
-        const tf = SECONDS_TO_TIMEFRAME[seconds];
+        const tf = secondsToApiTimeframe(seconds);
         if (!tf || tf === selectedTimeframe) return;
         setSelectedTimeframe(tf);
         setAnalysisData(null);

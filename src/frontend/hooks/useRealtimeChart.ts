@@ -194,20 +194,37 @@ export function useRealtimeChart(
    * SSE 接続を開始
    */
   const connect = useCallback(async () => {
+    // ガード1: 同条件で接続処理が進行中なら何もしない (StrictMode 二重 mount 対策)。
+    // React StrictMode (Next.js prod 含む) は意図的にコンポーネントを 2 回マウントし
+    // バグを暴く。本フックは autoConnect 経路でこの 2 回 mount を受けて 2 つの connect()
+    // が並走し、1 つ目が EventSource を確立 (readyState=0 CONNECTING) する裏で
+    // 2 つ目が「OPEN じゃない残骸だ」と判定して disconnectShared() で殺してしまっていた。
+    // これが "Sent before connected" と切断→再接続ループの根本原因 (2026-06-06)。
+    if (
+      (sharedState.status === 'connecting' || sharedState.status === 'authenticating') &&
+      sharedState.symbol === symbol &&
+      sharedState.timeframe === timeframe
+    ) {
+      console.log('[useRealtimeChart] 同条件で接続処理が進行中、二重起動をスキップ');
+      return;
+    }
+
     if (sharedEventSource) {
-      // 実際に OPEN している接続だけを「接続済み」として再利用する。
-      // バグ修正 (2026-06-06): 過去の connect で EventSource は生成されたが onopen 未達
-      // (readyState=0 CONNECTING) / 切断済み (readyState=2 CLOSED) の残骸が残っていると、
-      // symbol/timeframe 一致だけで無条件に status='connected' にしていた。これが
-      // 「実態は未接続なのに接続済み表示」になる原因。OPEN(1) のみ再利用する。
-      const isOpen = sharedEventSource.readyState === 1; // 0=CONNECTING, 1=OPEN, 2=CLOSED
-      if (isOpen && sharedState.symbol === symbol && sharedState.timeframe === timeframe) {
+      // EventSource の readyState: 0=CONNECTING, 1=OPEN, 2=CLOSED
+      const readyState = sharedEventSource.readyState;
+      // ガード2-OPEN: 既に確立済みで同条件なら再利用 (二重で確認応答だけ流す)
+      if (readyState === 1 && sharedState.symbol === symbol && sharedState.timeframe === timeframe) {
         console.log('[useRealtimeChart] 既に接続中です（共有接続・OPEN 確認済み）');
         sharedState = { ...sharedState, isLoading: false, status: 'connected' };
         emitSharedState();
         return;
       }
-      // 異なる場合は切断して張り直し
+      // ガード2-CONNECTING: 確立中の正常な接続が同条件なら待つ (殺さない)
+      if (readyState === 0 && sharedState.symbol === symbol && sharedState.timeframe === timeframe) {
+        console.log('[useRealtimeChart] 接続確立中、二重起動をスキップ');
+        return;
+      }
+      // CLOSED 残骸 or 別 symbol/timeframe: 切断して張り直す
       disconnectShared();
     }
 
