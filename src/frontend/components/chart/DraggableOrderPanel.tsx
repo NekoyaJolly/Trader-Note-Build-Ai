@@ -184,7 +184,7 @@ export function DraggableOrderPanel({ symbol, disabled, disabledReason, onOrderP
 				onPointerMove={handlePointerMove}
 				onPointerUp={handlePointerUp}
 				onPointerCancel={handlePointerUp}
-				className="flex items-center justify-center gap-1 cursor-move select-none touch-none rounded-t-lg border border-b-0 border-gray-600 bg-gray-700/90 py-0.5 text-[10px] text-gray-300 backdrop-blur-sm"
+				className="flex items-center justify-center gap-1 cursor-move select-none touch-none rounded-t-lg border border-b-0 border-gray-700 bg-gray-800/90 py-0.5 text-[10px] text-gray-300 backdrop-blur-sm"
 				role="button"
 				// ドラッグ操作のハンドル。キーボードでも到達できるようフォーカス可能にする (a11y)
 				tabIndex={0}
@@ -197,6 +197,7 @@ export function DraggableOrderPanel({ symbol, disabled, disabledReason, onOrderP
 			<OrderPanel
 				symbol={symbol}
 				compact
+				attachedTop
 				disabled={disabled}
 				disabledReason={disabledReason}
 				onOrderPlaced={onOrderPlaced}

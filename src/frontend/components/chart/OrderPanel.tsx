@@ -16,11 +16,17 @@ interface OrderPanelProps {
   compact?: boolean;
   /** 無効化されている理由 (市場閉場 / ブローカー未接続 等)。disabled 時に表示する */
   disabledReason?: string;
+  /**
+   * 上にドラッグハンドル等の別要素が密着する場合に true。
+   * 本体上端の角丸を落として (rounded-b-lg のみ) ハンドルと 1 枚の角丸カードに見せ、
+   * 二重角丸による「欠け」感を防ぐ。compact 時のみ有効。
+   */
+  attachedTop?: boolean;
 }
 
 type Side = 'BUY' | 'SELL';
 
-export function OrderPanel({ symbol, disabled = false, onOrderPlaced, compact = false, disabledReason }: OrderPanelProps) {
+export function OrderPanel({ symbol, disabled = false, onOrderPlaced, compact = false, disabledReason, attachedTop = false }: OrderPanelProps) {
   // 詳細領域の id (同一ページに複数 OrderPanel が並んでも衝突しないよう useId で生成)
   const detailsId = useId();
   const [volume, setVolume] = useState<number>(0.01);
@@ -145,7 +151,7 @@ export function OrderPanel({ symbol, disabled = false, onOrderPlaced, compact = 
   // コンパクト (チャート上オーバーレイ): [BUY][ロット][SELL][▾] を 1 行に収める
   if (compact) {
     return (
-      <div className="bg-gray-800/90 border border-gray-700 rounded-lg p-1.5 backdrop-blur-sm shadow-lg space-y-1">
+      <div className={`bg-gray-800/90 border border-gray-700 ${attachedTop ? 'rounded-b-lg' : 'rounded-lg'} p-1.5 backdrop-blur-sm shadow-lg space-y-1`}>
         <div className="flex items-stretch gap-1">
           <button
             type="button"

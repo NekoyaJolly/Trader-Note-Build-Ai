@@ -297,7 +297,7 @@ const StatusBadge = ({ status }: { status: ConnectionStatus }) => {
 		error: "エラー",
 	}[status];
 
-	return <span className={`text-xs px-2 py-1 rounded ${colorClass}`}>{label}</span>;
+	return <span className={`text-xs px-2 h-7 inline-flex items-center rounded ${colorClass}`}>{label}</span>;
 };
 
 const PricePanel = ({ bar, dailyHigh, dailyLow, previousClose, brokerStatus, brokerQuote }: PricePanelProps) => {
@@ -918,10 +918,10 @@ export function RealtimeChart({
 					options={symbolOptions}
 					onCommit={handleSymbolChange}
 					listId="chart-symbols-desktop"
-					className="bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 font-semibold hover:border-gray-500 w-24"
+					className="bg-gray-700 text-white text-xs rounded px-2 h-7 border border-gray-600 hover:border-gray-500 w-24"
 				/>
 
-				<select value={timeframe} onChange={(e) => handleTimeframeChange(parseInt(e.target.value, 10))} className="bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 hover:border-gray-500">
+				<select value={timeframe} onChange={(e) => handleTimeframeChange(parseInt(e.target.value, 10))} className="bg-gray-700 text-white text-xs rounded px-2 h-7 border border-gray-600 hover:border-gray-500">
 					{TIMEFRAME_OPTIONS.map((opt) => (
 						<option key={opt.value} value={opt.value}>
 							{opt.label}
@@ -929,7 +929,7 @@ export function RealtimeChart({
 					))}
 				</select>
 
-				<select value={dataCount} onChange={(e) => setDataCount(parseInt(e.target.value, 10))} className="bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 hover:border-gray-500">
+				<select value={dataCount} onChange={(e) => setDataCount(parseInt(e.target.value, 10))} className="bg-gray-700 text-white text-xs rounded px-2 h-7 border border-gray-600 hover:border-gray-500">
 					{DATA_COUNT_OPTIONS.map((opt) => (
 						<option key={opt.value} value={opt.value}>
 							{opt.label}
@@ -937,24 +937,24 @@ export function RealtimeChart({
 					))}
 				</select>
 
-				<button onClick={() => setDrawingMode(drawingMode === "horizontal" ? "none" : "horizontal")} className={`p-1.5 text-xs rounded transition ${drawingMode === "horizontal" ? "bg-yellow-600 text-black" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} title="水平線">
+				<button onClick={() => setDrawingMode(drawingMode === "horizontal" ? "none" : "horizontal")} className={`h-7 w-7 inline-flex items-center justify-center text-xs rounded transition ${drawingMode === "horizontal" ? "bg-yellow-600 text-black" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} aria-label="水平線" title="水平線">
 					↔︎
 				</button>
 
-				<button onClick={() => setDrawingMode(drawingMode === "trend" ? "none" : "trend")} className={`p-1.5 text-xs rounded transition ${drawingMode === "trend" ? "bg-yellow-600 text-black" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} title="トレンドライン">
+				<button onClick={() => setDrawingMode(drawingMode === "trend" ? "none" : "trend")} className={`h-7 w-7 inline-flex items-center justify-center text-xs rounded transition ${drawingMode === "trend" ? "bg-yellow-600 text-black" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} aria-label="トレンドライン" title="トレンドライン">
 					↗︎
 				</button>
-				<button onClick={() => setDrawingMode(drawingMode === "rectangle" ? "none" : "rectangle")} className={`p-1.5 text-xs rounded transition ${drawingMode === "rectangle" ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} title="矩形">
+				<button onClick={() => setDrawingMode(drawingMode === "rectangle" ? "none" : "rectangle")} className={`h-7 w-7 inline-flex items-center justify-center text-xs rounded transition ${drawingMode === "rectangle" ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} aria-label="矩形" title="矩形">
 					▭
 				</button>
-				<button onClick={() => setDrawingMode(drawingMode === "fibonacci" ? "none" : "fibonacci")} className={`p-1.5 text-xs rounded transition ${drawingMode === "fibonacci" ? "bg-purple-600 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} title="フィボナッチ">
+				<button onClick={() => setDrawingMode(drawingMode === "fibonacci" ? "none" : "fibonacci")} className={`h-7 w-7 inline-flex items-center justify-center text-xs rounded transition ${drawingMode === "fibonacci" ? "bg-purple-600 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} aria-label="フィボナッチ" title="フィボナッチ">
 					F
 				</button>
-				<button onClick={() => setDrawingMode(drawingMode === "text" ? "none" : "text")} className={`p-1.5 text-xs rounded transition ${drawingMode === "text" ? "bg-indigo-600 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} title="テキスト">
+				<button onClick={() => setDrawingMode(drawingMode === "text" ? "none" : "text")} className={`h-7 w-7 inline-flex items-center justify-center text-xs rounded transition ${drawingMode === "text" ? "bg-indigo-600 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} aria-label="テキスト" title="テキスト">
 					T
 				</button>
 
-				<button onClick={handleClearLines} className="px-2 py-1 text-xs rounded bg-gray-700 text-gray-200 hover:bg-gray-600">
+				<button onClick={handleClearLines} className="px-2 h-7 inline-flex items-center text-xs rounded bg-gray-700 text-gray-200 hover:bg-gray-600">
 					クリア
 				</button>
 
@@ -972,12 +972,12 @@ export function RealtimeChart({
 					{isConnected ? (
 						<button
 							onClick={disconnect}
-							className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition"
+							className="px-3 h-7 inline-flex items-center bg-red-600 hover:bg-red-700 text-white text-xs rounded transition"
 						>
 							切断
 						</button>
 					) : (
-						<button onClick={connect} disabled={isLoading} className={`px-3 py-1 text-white text-xs rounded transition ${isLoading ? "bg-gray-600 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"}`}>
+						<button onClick={connect} disabled={isLoading} className={`px-3 h-7 inline-flex items-center text-white text-xs rounded transition ${isLoading ? "bg-gray-600 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"}`}>
 							{isLoading ? "接続中..." : "接続"}
 						</button>
 					)}

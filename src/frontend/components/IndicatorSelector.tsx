@@ -154,9 +154,9 @@ export function IndicatorSelector({
         <button
           ref={buttonRef}
           onClick={handleToggleOpen}
-          className="bg-gray-700 hover:bg-gray-600 text-white text-xs px-3 py-1.5 rounded border border-gray-600 hover:border-gray-500 font-semibold flex items-center gap-2"
+          className="bg-gray-700 hover:bg-gray-600 text-white text-xs px-3 h-7 rounded border border-gray-600 hover:border-gray-500 font-semibold flex items-center gap-2"
         >
-          <span>📈 インジケーター</span>
+          <span>インジケーター</span>
           {selectedIndicators.length > 0 && (
             <span className="bg-cyan-500 text-white text-xs px-1.5 py-0.5 rounded">
               {selectedIndicators.length}
