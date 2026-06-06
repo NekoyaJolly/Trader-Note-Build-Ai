@@ -23,6 +23,9 @@ import { chartDataService } from '../../services/chartDataService';
 import { ChartDataError } from '../../infrastructure/market/chart-data.types';
 import { validateQuery, getValidatedQuery } from '../../middleware/validateRequest';
 import { ChartCandlesQuerySchema, type ChartCandlesQuery } from '../../schemas/api/chart';
+import { prisma } from '../db/client';
+import { ohlcvRepository } from '../repositories/ohlcvRepository';
+import { normalizeCTraderSymbol, toSlashSymbol } from '../../utils/symbolNormalization';
 
 const router = Router();
 
@@ -68,6 +71,133 @@ router.get('/candles', validateQuery(ChartCandlesQuerySchema), async (_req: Requ
       error: error instanceof Error ? error.message : 'チャートデータの取得に失敗しました',
     });
   }
+});
+
+// ============================================
+// GET /api/chart/symbols
+//
+// チャートの銘柄ピッカーを動的に埋めるためのシンボル候補。
+// 出所を結合して返す (フロントにシンボル一覧をハードコードさせないため = 条件7):
+//   1. cTrader getAvailableSymbols (接続できる場合。30 分キャッシュで接続頻度を抑制し
+//      複数接続競合を避ける。失敗・タイムアウトは握りつぶして次へ)
+//   2. OHLCVCandle DB に存在する symbol (これまで取得・永続化した銘柄。利用に応じて増える)
+//   3. 1+2 が空のコールドスタート時のみ最小シード (majors)
+// フロント側は free-text 入力 + この候補の datalist で、任意シンボルを動的に選べる。
+// ============================================
+
+interface ChartSymbolOption {
+  /** 正規化シンボル (例 XAUUSD)。API パラメータにそのまま使う */
+  value: string;
+  /** 表示用ラベル (例 XAU/USD) */
+  label: string;
+}
+interface ChartSymbolsPayload {
+  symbols: ChartSymbolOption[];
+  source: 'ctrader' | 'db' | 'seed';
+}
+
+// majors を候補の先頭に出すための表示優先度
+const MAJOR_ORDER = [
+  'XAUUSD', 'EURUSD', 'USDJPY', 'GBPUSD', 'AUDUSD',
+  'USDCHF', 'USDCAD', 'NZDUSD', 'XAGUSD',
+];
+// コールドスタート (broker 未接続 & DB 空) 時のみ使う最小シード
+const SEED_SYMBOLS = ['XAUUSD', 'EURUSD', 'USDJPY', 'GBPUSD'];
+
+const SYMBOLS_CACHE_TTL_MS = 30 * 60 * 1000; // 30 分
+let symbolsCache: { payload: ChartSymbolsPayload; fetchedAt: number } | null = null;
+
+/** majors 優先 + 残りはアルファベット順に並べる */
+function sortChartSymbols(options: ChartSymbolOption[]): ChartSymbolOption[] {
+  return options.sort((a, b) => {
+    const ia = MAJOR_ORDER.indexOf(a.value);
+    const ib = MAJOR_ORDER.indexOf(b.value);
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1;
+    if (ib !== -1) return 1;
+    return a.value.localeCompare(b.value);
+  });
+}
+
+/** cTrader 利用可能シンボルを timeout 付きで取得 (未接続・失敗・タイムアウトは空配列)。 */
+async function fetchCtraderSymbolNames(timeoutMs: number): Promise<string[]> {
+  const token = await prisma.cTraderToken.findFirst({
+    where: { NOT: { accountId: { startsWith: 'ctrader_' } } },
+    orderBy: { lastConnectedAt: 'desc' },
+  });
+  if (!token) return [];
+  const numericAccountId = parseInt(token.accountId, 10);
+  if (Number.isNaN(numericAccountId) || numericAccountId <= 0) return [];
+
+  const { CTraderAuthService } = await import('../services/ctrader/ctraderAuthService');
+  const { CTraderDataService } = await import('../services/ctrader/ctraderDataService');
+  const dataService = new CTraderDataService(new CTraderAuthService(prisma));
+
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('cTrader symbols timeout')), timeoutMs),
+  );
+  const symbols = await Promise.race([
+    dataService.getAvailableSymbols(token.accountId),
+    timeout,
+  ]);
+  return symbols.map((s) => s.symbolName);
+}
+
+router.get('/symbols', async (_req: Request, res: Response) => {
+  // 30 分キャッシュ: cTrader 接続を頻繁に張らない (複数接続競合の回避)
+  if (symbolsCache && Date.now() - symbolsCache.fetchedAt < SYMBOLS_CACHE_TTL_MS) {
+    res.json({ success: true, data: symbolsCache.payload });
+    return;
+  }
+
+  const byValue = new Map<string, string>(); // value(正規化) -> label(スラッシュ)
+  let source: ChartSymbolsPayload['source'] = 'db';
+
+  // 1. cTrader (接続できれば最優先)。失敗・タイムアウトは握りつぶして DB/シードへ。
+  try {
+    const names = await fetchCtraderSymbolNames(6000);
+    if (names.length > 0) {
+      source = 'ctrader';
+      for (const name of names) {
+        const value = normalizeCTraderSymbol(name);
+        if (value.length >= 3) byValue.set(value, toSlashSymbol(name));
+      }
+    }
+  } catch (error) {
+    console.warn(
+      '[ChartSymbols] cTrader シンボル取得に失敗 (DB/シードにフォールバック):',
+      error instanceof Error ? error.message : error,
+    );
+  }
+
+  // 2. これまで OHLCV を取得・永続化した symbol を結合 (利用に応じて候補が増える)
+  try {
+    const pairs = await ohlcvRepository.getAvailablePairs();
+    for (const pair of pairs) {
+      const value = normalizeCTraderSymbol(pair.symbol);
+      if (value.length >= 3 && !byValue.has(value)) {
+        byValue.set(value, toSlashSymbol(pair.symbol));
+      }
+    }
+  } catch (error) {
+    console.warn(
+      '[ChartSymbols] DB シンボル取得に失敗:',
+      error instanceof Error ? error.message : error,
+    );
+  }
+
+  // 3. コールドスタート (broker 未接続 & DB 空) のみ最小シード
+  if (byValue.size === 0) {
+    source = 'seed';
+    for (const value of SEED_SYMBOLS) byValue.set(value, toSlashSymbol(value));
+  }
+
+  const symbols = sortChartSymbols(
+    Array.from(byValue.entries()).map(([value, label]) => ({ value, label })),
+  );
+  const payload: ChartSymbolsPayload = { symbols, source };
+  symbolsCache = { payload, fetchedAt: Date.now() };
+  res.json({ success: true, data: payload });
 });
 
 /** ChartDataError.kind → HTTP ステータス */
