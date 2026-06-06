@@ -937,20 +937,20 @@ export function RealtimeChart({
 					))}
 				</select>
 
-				<button onClick={() => setDrawingMode(drawingMode === "horizontal" ? "none" : "horizontal")} className={`h-7 w-7 inline-flex items-center justify-center text-xs rounded transition ${drawingMode === "horizontal" ? "bg-yellow-600 text-black" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} title="水平線">
+				<button onClick={() => setDrawingMode(drawingMode === "horizontal" ? "none" : "horizontal")} className={`h-7 w-7 inline-flex items-center justify-center text-xs rounded transition ${drawingMode === "horizontal" ? "bg-yellow-600 text-black" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} aria-label="水平線" title="水平線">
 					↔︎
 				</button>
 
-				<button onClick={() => setDrawingMode(drawingMode === "trend" ? "none" : "trend")} className={`h-7 w-7 inline-flex items-center justify-center text-xs rounded transition ${drawingMode === "trend" ? "bg-yellow-600 text-black" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} title="トレンドライン">
+				<button onClick={() => setDrawingMode(drawingMode === "trend" ? "none" : "trend")} className={`h-7 w-7 inline-flex items-center justify-center text-xs rounded transition ${drawingMode === "trend" ? "bg-yellow-600 text-black" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} aria-label="トレンドライン" title="トレンドライン">
 					↗︎
 				</button>
-				<button onClick={() => setDrawingMode(drawingMode === "rectangle" ? "none" : "rectangle")} className={`h-7 w-7 inline-flex items-center justify-center text-xs rounded transition ${drawingMode === "rectangle" ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} title="矩形">
+				<button onClick={() => setDrawingMode(drawingMode === "rectangle" ? "none" : "rectangle")} className={`h-7 w-7 inline-flex items-center justify-center text-xs rounded transition ${drawingMode === "rectangle" ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} aria-label="矩形" title="矩形">
 					▭
 				</button>
-				<button onClick={() => setDrawingMode(drawingMode === "fibonacci" ? "none" : "fibonacci")} className={`h-7 w-7 inline-flex items-center justify-center text-xs rounded transition ${drawingMode === "fibonacci" ? "bg-purple-600 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} title="フィボナッチ">
+				<button onClick={() => setDrawingMode(drawingMode === "fibonacci" ? "none" : "fibonacci")} className={`h-7 w-7 inline-flex items-center justify-center text-xs rounded transition ${drawingMode === "fibonacci" ? "bg-purple-600 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} aria-label="フィボナッチ" title="フィボナッチ">
 					F
 				</button>
-				<button onClick={() => setDrawingMode(drawingMode === "text" ? "none" : "text")} className={`h-7 w-7 inline-flex items-center justify-center text-xs rounded transition ${drawingMode === "text" ? "bg-indigo-600 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} title="テキスト">
+				<button onClick={() => setDrawingMode(drawingMode === "text" ? "none" : "text")} className={`h-7 w-7 inline-flex items-center justify-center text-xs rounded transition ${drawingMode === "text" ? "bg-indigo-600 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`} aria-label="テキスト" title="テキスト">
 					T
 				</button>
 
