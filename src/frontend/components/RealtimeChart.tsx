@@ -125,12 +125,12 @@ export const SELECTED_INDICATORS_STORAGE_KEY = "chart-selected-indicators";
  * localStorage から選択インジケーターを復元する (条件6: 再起動でも消えない)。
  * 壊れた値・旧形式は Zod で弾いて空配列にフォールバックする。
  *
- * **副作用を持たせないこと**: 本関数は useState の lazy initializer として呼ばれ、React
- * StrictMode (本番含む) は initializer を 2 回実行する。以前ここに「描画試行中」sentinel の
- * setItem を入れていたが、1 回目で sentinel を立て→2 回目が「前回クラッシュ」と誤判定して
- * 復元を破棄し、リロードでインジが毎回消える不具合を起こした。よって本関数は純粋な read のみ。
- * クラッシュ自体は描画側 (ChartPaneContainer の setVisibleRange / データ再投入 try/catch) で
- * 根治済みのため、復元ループ用の sentinel は不要。
+ * **副作用を持たせないこと**: 本関数は useState の lazy initializer として呼ばれる。
+ * initializer は開発時の React StrictMode による二重実行や再マウント等で複数回呼ばれうる。
+ * 以前ここに「描画試行中」sentinel の setItem を入れていたが、複数回呼ばれると 1 回目で
+ * sentinel を立て→2 回目が「前回クラッシュ」と誤判定して復元を破棄し、インジが消える不具合を
+ * 起こした。よって本関数は純粋な read のみにする。クラッシュ自体は描画側 (ChartPaneContainer の
+ * setVisibleRange / データ再投入 try/catch) で根治済みのため、復元ループ用の sentinel は不要。
  */
 export function loadPersistedIndicators(): SelectedIndicator[] {
 	if (typeof window === "undefined") return [];
