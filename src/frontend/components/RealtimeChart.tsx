@@ -24,6 +24,7 @@ import { ChartPaneContainer } from "@/components/chart/ChartPaneContainer";
 import { DrawingMode } from "@/components/chart/DrawingOverlay";
 import { apiFetch } from "@/lib/apiClient";
 import { ChartSymbolsResponseSchema, type ChartSymbolOption } from "@/schemas/api/chartSymbols";
+import { SelectedIndicatorArraySchema } from "@/schemas/api/chartIndicators";
 
 interface RealtimeChartProps {
 	symbol: string;
@@ -115,6 +116,26 @@ function isBrokerQuoteResponse(value: unknown): value is BrokerQuoteResponse {
 /** フロントでのシンボル正規化 (英数字のみ・大文字化)。backend の normalizeCTraderSymbol と整合。 */
 const normalizeSymbolInput = (raw: string): string =>
 	raw.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+// 選択インジケーターは銘柄横断のユーザー設定として localStorage にグローバル保存する。
+// (描画ラインは銘柄×足ごと=ChartDrawing だが、インジケーターは銘柄に依らず適用したいため)
+export const SELECTED_INDICATORS_STORAGE_KEY = "chart-selected-indicators";
+
+/**
+ * localStorage から選択インジケーターを復元する (条件6: 再起動でも消えない)。
+ * 壊れた値・旧形式は Zod で弾いて空配列にフォールバックする。
+ */
+export function loadPersistedIndicators(): SelectedIndicator[] {
+	if (typeof window === "undefined") return [];
+	try {
+		const raw = window.localStorage.getItem(SELECTED_INDICATORS_STORAGE_KEY);
+		if (!raw) return [];
+		const parsed = SelectedIndicatorArraySchema.safeParse(JSON.parse(raw));
+		return parsed.success ? parsed.data : [];
+	} catch {
+		return [];
+	}
+}
 
 /**
  * 銘柄ピッカー (検索可能な free-text 入力 + 動的候補 datalist)。
@@ -315,7 +336,8 @@ export function RealtimeChart({
 	const [dataCount, setDataCount] = useState<number>(DEFAULT_DATA_COUNT); // データ本数 (marketConstants.ts)
 	const [drawingMode, setDrawingMode] = useState<DrawingMode>("none");
 	const [drawnLines, setDrawnLines] = useState<DrawnLine[]>([]);
-	const [selectedIndicators, setSelectedIndicators] = useState<SelectedIndicator[]>([]);
+	// 初期値は localStorage から復元 (条件6: 再起動でインジケーターが消えない)
+	const [selectedIndicators, setSelectedIndicators] = useState<SelectedIndicator[]>(loadPersistedIndicators);
 
 	// シンボル候補 (動的)。初期値は marketConstants の最終フォールバック。
 	// マウント後に /api/chart/symbols (cTrader ∪ DB ∪ シード) で上書きする (条件7)。
@@ -355,6 +377,19 @@ export function RealtimeChart({
 			cancelled = true;
 		};
 	}, [apiBaseForSymbols]);
+
+	// 選択インジケーターを localStorage に永続化する (条件6: 再起動でも消えない)
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+		try {
+			window.localStorage.setItem(
+				SELECTED_INDICATORS_STORAGE_KEY,
+				JSON.stringify(selectedIndicators),
+			);
+		} catch {
+			// localStorage 不可 (容量超過 / プライベートモード) は無視
+		}
+	}, [selectedIndicators]);
 
 	// チャート OHLCV フォールバック用ステート
 	const [fallbackData, setFallbackData] = useState<OHLCVDataPoint[]>([]);
