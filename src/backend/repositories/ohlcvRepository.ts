@@ -326,7 +326,7 @@ export class OHLCVRepository {
 
   /**
    * 利用可能な銘柄・時間足の組み合わせを取得
-   * 
+   *
    * @returns 銘柄・時間足のペア配列
    */
   async getAvailablePairs(): Promise<{ symbol: string; timeframe: string }[]> {
@@ -337,8 +337,25 @@ export class OHLCVRepository {
       },
       distinct: ['symbol', 'timeframe'],
     });
-    
+
     return result;
+  }
+
+  /**
+   * 永続化済みの distinct な symbol 一覧を取得する (timeframe 軸は畳む)。
+   *
+   * チャートの銘柄候補供給用。getAvailablePairs は symbol×timeframe を返すため
+   * 同一 symbol が timeframe 分だけ重複し行スキャン/転送が無駄になる。symbol だけが
+   * 欲しい用途では本メソッドで distinct: ['symbol'] に寄せて取得行数を抑える。
+   *
+   * @returns 重複なしの symbol 配列
+   */
+  async getDistinctSymbols(): Promise<string[]> {
+    const rows = await prisma.oHLCVCandle.findMany({
+      select: { symbol: true },
+      distinct: ['symbol'],
+    });
+    return rows.map((row) => row.symbol);
   }
 }
 

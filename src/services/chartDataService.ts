@@ -24,7 +24,7 @@ import {
 } from '../infrastructure/market/chart-data.types';
 import { EODHDChartDataProvider } from '../infrastructure/market/EODHDChartDataProvider';
 import { normalizeCTraderSymbol, toSlashSymbol } from '../utils/symbolNormalization';
-import { ohlcvRepository, followsFXMarketCalendar } from '../backend/repositories/ohlcvRepository';
+import { ohlcvRepository, followsFXMarketCalendar, type OHLCVInsertData } from '../backend/repositories/ohlcvRepository';
 import { isFXMarketOpen } from '../side-b/utils/marketHours';
 
 /**
@@ -40,9 +40,19 @@ function filterTradingHours(candles: ChartCandle[], symbol: string): ChartCandle
   return candles.filter((c) => isFXMarketOpen(new Date(c.time * 1000)));
 }
 
-/** LocalCandleStore: ローカル保存済み OHLCV の読み出し抽象 (将来の保存経路と分離) */
+/** LocalCandleStore: ローカル保存済み OHLCV の読み出し・保存抽象 */
 export interface LocalCandleStore {
   getCandles(symbol: string, timeframe: string, limit: number): Promise<ChartCandle[]>;
+  /**
+   * EODHD 等から取得したローソ足を OHLCVCandle に永続化する (条件3)。
+   * テスト用モックでは未実装でよいため optional。
+   */
+  saveCandles?(
+    symbol: string,
+    timeframe: string,
+    candles: ChartCandle[],
+    source: string,
+  ): Promise<void>;
 }
 
 /** デフォルト取得本数 (route の limit 未指定時) */
@@ -86,6 +96,42 @@ class OhlcvRepositoryCandleStore implements LocalCandleStore {
       }
     }
     return [];
+  }
+
+  /**
+   * EODHD 取得分を OHLCVCandle に永続化する (条件3)。
+   *
+   * - 内部正規化形 (例 XAUUSD) で保存し、読み出し時の symbolCandidates と整合させる。
+   * - 既存の最新足より新しいバーだけを書き込む。チャートの 30 秒ポーリングで毎回
+   *   全 1000 本を送らないための差分書き込み (DB 負荷・ログ抑制)。
+   * - 休場日バーは bulkInsert 内 (shouldPersistBar) で更にスキップされる。
+   */
+  async saveCandles(
+    symbol: string,
+    timeframe: string,
+    candles: ChartCandle[],
+    source: string,
+  ): Promise<void> {
+    if (candles.length === 0) return;
+    const normalized = normalizeCTraderSymbol(symbol);
+    const latest = await ohlcvRepository.findLatest(normalized, timeframe);
+    const latestSec = latest
+      ? Math.floor(latest.timestamp.getTime() / 1000)
+      : Number.NEGATIVE_INFINITY;
+    const fresh = candles.filter((c) => c.time > latestSec);
+    if (fresh.length === 0) return;
+    const rows: OHLCVInsertData[] = fresh.map((c) => ({
+      symbol: normalized,
+      timeframe,
+      timestamp: new Date(c.time * 1000),
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+      volume: c.volume ?? 0,
+      source,
+    }));
+    await ohlcvRepository.bulkInsert(rows);
   }
 
   private symbolCandidates(symbol: string): string[] {
@@ -163,6 +209,9 @@ export class ChartDataService {
         // 閉場 (土日) バーを除去してから判定・返却する
         const tradingCandles = filterTradingHours(result.candles, symbol);
         if (tradingCandles.length > 0) {
+          // EODHD 取得分を非ブロッキングで永続化 (条件3)。失敗してもチャート応答には影響させない。
+          // これにより EODHD 障害時の DB フォールバック (条件2) も自然に充填される。
+          void this.persistFetchedCandles(symbol, timeframe, tradingCandles, result.meta.source);
           return { ...result, candles: tradingCandles };
         }
         // EODHD は応答したがデータ 0 件 → 障害ではないのでリトライせずローカルフォールバックへ
@@ -229,6 +278,24 @@ export class ChartDataService {
       },
       warning: upstreamFailed ? TRANSIENT_UNAVAILABLE_WARNING : NO_DATA_WARNING,
     };
+  }
+
+  /** EODHD 取得分をローカルへ非ブロッキングで永続化する (条件3)。例外はログのみ。 */
+  private persistFetchedCandles(
+    symbol: string,
+    timeframe: string,
+    candles: ChartCandle[],
+    source: string,
+  ): Promise<void> {
+    if (!this.localStore.saveCandles) return Promise.resolve();
+    return this.localStore
+      .saveCandles(symbol, timeframe, candles, (source ?? 'eodhd').toLowerCase())
+      .catch((err) => {
+        console.warn(
+          `[ChartDataService] OHLCV 永続化に失敗 (symbol=${symbol}, timeframe=${timeframe}):`,
+          err,
+        );
+      });
   }
 
   /** 時間足を検証し内部 Timeframe に narrow する */

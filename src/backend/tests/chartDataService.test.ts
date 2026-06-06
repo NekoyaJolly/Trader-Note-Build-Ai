@@ -180,6 +180,63 @@ describe('ChartDataService', () => {
     const result = await service.getCandles({ symbol: 'BTCUSD', timeframe: '1h' });
     expect(result.candles).toHaveLength(2);
   });
+
+  it('EODHD 取得分を localStore.saveCandles で永続化する (条件3)', async () => {
+    // 条件3: EODHD から取得した OHLCV を DB へ永続化する。ChartDataService は
+    // EODHD 成功時に saveCandles を非ブロッキングで呼ぶ (source は小文字 eodhd)。
+    const localStore: LocalCandleStore = {
+      getCandles: async () => [],
+      saveCandles: async () => {},
+    };
+    const saveSpy = jest.spyOn(localStore, 'saveCandles');
+    const candles = [chartCandle(THU_OPEN, 1)];
+    const service = new ChartDataService({
+      chartProvider: mockProvider(async () => eodhdResponse(candles)),
+      localStore,
+    });
+
+    const result = await service.getCandles({ symbol: 'XAUUSD', timeframe: '1h' });
+
+    expect(result.candles).toHaveLength(1);
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    // 閉場フィルタ後の candles + source 'eodhd' で呼ばれる
+    expect(saveSpy).toHaveBeenCalledWith('XAUUSD', '1h', candles, 'eodhd');
+  });
+
+  it('ローカルフォールバック (EODHD 空) では saveCandles を呼ばない', async () => {
+    // EODHD が空でローカルから返す場合は新規取得が無いので永続化しない
+    const localStore: LocalCandleStore = {
+      getCandles: async () => [chartCandle(THU_OPEN, 3)],
+      saveCandles: async () => {},
+    };
+    const saveSpy = jest.spyOn(localStore, 'saveCandles');
+    const service = new ChartDataService({
+      chartProvider: mockProvider(async () => eodhdResponse([])),
+      localStore,
+    });
+
+    const result = await service.getCandles({ symbol: 'XAUUSD', timeframe: '1h' });
+
+    expect(result.meta.source).toBe('local');
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it('永続化 (saveCandles) が失敗してもチャート応答は壊さない (非ブロッキング)', async () => {
+    const localStore: LocalCandleStore = {
+      getCandles: async () => [],
+      saveCandles: async () => {
+        throw new Error('DB 書き込み失敗');
+      },
+    };
+    const service = new ChartDataService({
+      chartProvider: mockProvider(async () => eodhdResponse([chartCandle(THU_OPEN, 1)])),
+      localStore,
+    });
+
+    const result = await service.getCandles({ symbol: 'XAUUSD', timeframe: '1h' });
+    expect(result.candles).toHaveLength(1);
+    expect(result.meta.source).toBe('EODHD');
+  });
 });
 
 // ========================================

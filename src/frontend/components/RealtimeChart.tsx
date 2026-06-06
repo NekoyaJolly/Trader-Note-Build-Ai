@@ -23,6 +23,7 @@ import { OrderPanel } from "@/components/chart/OrderPanel";
 import { ChartPaneContainer } from "@/components/chart/ChartPaneContainer";
 import { DrawingMode } from "@/components/chart/DrawingOverlay";
 import { apiFetch } from "@/lib/apiClient";
+import { ChartSymbolsResponseSchema, type ChartSymbolOption } from "@/schemas/api/chartSymbols";
 
 interface RealtimeChartProps {
 	symbol: string;
@@ -106,6 +107,82 @@ function isBrokerQuoteResponse(value: unknown): value is BrokerQuoteResponse {
 	if (typeof value !== "object" || value === null) return false;
 	const status = (value as { status?: unknown }).status;
 	return status === "connected" || status === "degraded" || status === "disconnected";
+}
+
+// /api/chart/symbols のレスポンス (動的シンボル候補) は @/schemas/api/chartSymbols の
+// Zod スキーマでランタイム検証する (フロントにシンボルをハードコードさせない動的供給, 条件7)。
+
+/** フロントでのシンボル正規化 (英数字のみ・大文字化)。backend の normalizeCTraderSymbol と整合。 */
+const normalizeSymbolInput = (raw: string): string =>
+	raw.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+/**
+ * 銘柄ピッカー (検索可能な free-text 入力 + 動的候補 datalist)。
+ *
+ * TradingView / MT5 / cTrader と同様、任意シンボルを打ち込めて、候補からも選べる。
+ * - 候補一致を選んだ場合: 即確定
+ * - free-text を打った場合: Enter / blur で確定 (3 文字以上 & 現在値と異なる時のみ)
+ * - 無効入力 (空・短すぎ) は元の symbol に戻す
+ */
+export function SymbolPicker({
+	symbol,
+	options,
+	onCommit,
+	listId,
+	className,
+}: {
+	symbol: string;
+	options: ChartSymbolOption[];
+	onCommit: (symbol: string) => void;
+	listId: string;
+	className: string;
+}) {
+	const [input, setInput] = useState(symbol);
+
+	// 外部 (親) で symbol が変わったら入力欄も同期する
+	useEffect(() => {
+		setInput(symbol);
+	}, [symbol]);
+
+	const commit = (raw: string) => {
+		const normalized = normalizeSymbolInput(raw);
+		if (normalized.length >= 3 && normalized !== symbol) {
+			onCommit(normalized);
+		} else {
+			setInput(symbol); // 無効入力は元に戻す
+		}
+	};
+
+	return (
+		<>
+			<input
+				list={listId}
+				value={input}
+				onChange={(e) => {
+					const v = e.target.value;
+					setInput(v);
+					// datalist 候補を選んだ場合 (value 完全一致) は即確定する
+					if (options.some((o) => o.value === v)) commit(v);
+				}}
+				onKeyDown={(e) => {
+					if (e.key === "Enter") e.currentTarget.blur();
+				}}
+				onBlur={() => commit(input)}
+				className={className}
+				placeholder="シンボル"
+				spellCheck={false}
+				autoComplete="off"
+				aria-label="シンボル"
+			/>
+			<datalist id={listId}>
+				{options.map((opt) => (
+					<option key={opt.value} value={opt.value}>
+						{opt.label}
+					</option>
+				))}
+			</datalist>
+		</>
+	);
 }
 
 interface PricePanelProps {
@@ -238,8 +315,13 @@ export function RealtimeChart({
 	const [dataCount, setDataCount] = useState<number>(DEFAULT_DATA_COUNT); // データ本数 (marketConstants.ts)
 	const [drawingMode, setDrawingMode] = useState<DrawingMode>("none");
 	const [drawnLines, setDrawnLines] = useState<DrawnLine[]>([]);
-	const [hasEverConnected, setHasEverConnected] = useState(false);
 	const [selectedIndicators, setSelectedIndicators] = useState<SelectedIndicator[]>([]);
+
+	// シンボル候補 (動的)。初期値は marketConstants の最終フォールバック。
+	// マウント後に /api/chart/symbols (cTrader ∪ DB ∪ シード) で上書きする (条件7)。
+	const [symbolOptions, setSymbolOptions] = useState<ChartSymbolOption[]>(() =>
+		SYMBOL_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+	);
 
 	// 市場時間判定ステート
 	const [marketStatus, setMarketStatus] = useState<MarketStatus>(() => getMarketStatus());
@@ -250,6 +332,29 @@ export function RealtimeChart({
 		const timer = setInterval(checkMarket, 60000);
 		return () => clearInterval(timer);
 	}, []);
+
+	// シンボル候補を API から動的取得して上書きする (失敗時はフォールバックを維持)。
+	const apiBaseForSymbols = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
+	useEffect(() => {
+		let cancelled = false;
+		const loadSymbols = async () => {
+			try {
+				const res = await apiFetch(`${apiBaseForSymbols}/api/chart/symbols`);
+				if (!res.ok) return;
+				// 外部レスポンスは Zod でランタイム検証してから採用する (盲目的な as を避ける)
+				const parsed = ChartSymbolsResponseSchema.safeParse(await res.json());
+				if (!cancelled && parsed.success && parsed.data.data.symbols.length > 0) {
+					setSymbolOptions(parsed.data.data.symbols);
+				}
+			} catch {
+				// ネットワークエラー時は marketConstants の最終フォールバックを維持する
+			}
+		};
+		void loadSymbols();
+		return () => {
+			cancelled = true;
+		};
+	}, [apiBaseForSymbols]);
 
 	// チャート OHLCV フォールバック用ステート
 	const [fallbackData, setFallbackData] = useState<OHLCVDataPoint[]>([]);
@@ -317,21 +422,14 @@ export function RealtimeChart({
 		};
 	}, [apiBase, onLinesChange, storageKey, symbol, timeframe]);
 
-	// autoConnect: ログイン済みでチャートを開いたら、手動ボタンを待たずに
-	// リアルタイム SSE へ自動接続する。connect() は POST /api/realtime/connect を叩くが、
-	// この API は名前に反して EodhdRealtimeOrchestrator (EODHD WebSocket) を呼ぶ実装で、
-	// userId を使わず EODHD_API_KEY 共通認証のため cTrader には依存しない
-	// (eodhdRealtimeOrchestrator.ts: connect は `void _userId`)。よってログイン状態さえ
-	// あれば即接続できる。bid/ask overlay (cTrader 依存) は /api/broker/quote の別経路。
-	// 偽接続防止は useRealtimeChart 側の readyState チェック (PR #355) で担保。
-	const { bars, pendingBar, latestTick, status, error, isConnected, isLoading, isMarketClosed, connect, disconnect } = useRealtimeChart(symbol, { timeframe, persistConnection: true, autoConnect: true });
+	// realtime SSE は「進行中の足を重ねるオーバーレイ」。チャート本体 (ヒストリカル
+	// ローソク足) は接続状態に依存せず常に表示する (下の fetchFallbackData 経路)。
+	// autoConnect は市場開場中のみ true。閉場中 (週末・祝日等) は配信が無く、接続前
+	// send による "Sent before connected" エラーの温床になるため SSE を張らない。
+	// connect() は POST /api/realtime/connect → EodhdRealtimeOrchestrator (EODHD WS) で
+	// EODHD_API_KEY 共通認証 (cTrader 非依存)。bid/ask overlay は /api/broker/quote の別経路。
+	const { bars, pendingBar, latestTick, status, error, isConnected, isLoading, isMarketClosed, connect, disconnect } = useRealtimeChart(symbol, { timeframe, persistConnection: true, autoConnect: marketStatus.isOpen });
 	const { positions: tradingPositions, refetch: refetchTrading } = useTradingAccount(true);
-
-	useEffect(() => {
-		if (isConnected) {
-			setHasEverConnected(true);
-		}
-	}, [isConnected]);
 
 	// ============================================
 	// チャート OHLCV フォールバック (EODHD 主体)
@@ -379,34 +477,25 @@ export function RealtimeChart({
 		}
 	}, [apiBase, symbol, timeframe, dataCount]);
 
-	// cTrader 未接続 & 市場開場中にフォールバックデータを取得 & 定期リフレッシュ
+	// ヒストリカルローソク足は「常に」取得する。
+	//
+	// **設計方針 (2026-06-06 全面修正)**: TradingView / MT5 / cTrader と同様、チャートは
+	// 市場の開閉やリアルタイム接続状態に関係なく、まずヒストリカルローソク足
+	// (EODHD → 障害時 DB) を土台として常時表示する。realtime SSE はこの上に進行中の足を
+	// 重ねるだけのオーバーレイ。以前は本取得を marketStatus.isOpen / 接続状態でゲートして
+	// いたため、週末 (FX 閉場) にローソク足が 1 本も出ず「市場は閉場しています」だけが
+	// 出る不具合があった (条件1/2 違反)。
 	useEffect(() => {
-		// cTrader 接続中の場合はフォールバック不要
-		if (isConnected || hasEverConnected) {
-			if (fallbackTimerRef.current) {
-				clearInterval(fallbackTimerRef.current);
-				fallbackTimerRef.current = null;
-			}
-			return;
-		}
-
-		// 市場閉場中はフォールバック取得しない
-		if (!marketStatus.isOpen) {
-			if (fallbackTimerRef.current) {
-				clearInterval(fallbackTimerRef.current);
-				fallbackTimerRef.current = null;
-			}
-			setFallbackData([]);
-			return;
-		}
-
-		// 初回取得
+		// マウント時・symbol/timeframe/dataCount 変更時に必ず 1 回取得する。
 		void fetchFallbackData();
 
-		// 定期リフレッシュ（30秒間隔）
-		fallbackTimerRef.current = setInterval(() => {
-			void fetchFallbackData();
-		}, FALLBACK_REFRESH_INTERVAL);
+		// 定期リフレッシュは「市場開場中 かつ realtime 未接続」の時だけ行う。
+		// 閉場中は価格が動かず、realtime 接続中は SSE が最新足を更新するため、無駄な再取得を避ける。
+		if (marketStatus.isOpen && !isConnected) {
+			fallbackTimerRef.current = setInterval(() => {
+				void fetchFallbackData();
+			}, FALLBACK_REFRESH_INTERVAL);
+		}
 
 		return () => {
 			if (fallbackTimerRef.current) {
@@ -414,7 +503,7 @@ export function RealtimeChart({
 				fallbackTimerRef.current = null;
 			}
 		};
-	}, [isConnected, hasEverConnected, fetchFallbackData, marketStatus.isOpen]);
+	}, [fetchFallbackData, marketStatus.isOpen, isConnected]);
 
 	// ============================================
 	// ブローカー (cTrader) quote overlay
@@ -564,22 +653,23 @@ export function RealtimeChart({
 	const chartData: OHLCVDataPoint[] = useMemo(() => {
 		const dataMap = new Map<number, OHLCVDataPoint>();
 
-		// cTrader 接続中のデータを優先
-		if (bars.length > 0) {
-			for (const bar of bars) {
-				const timestamp = new Date(bar.timestamp).getTime();
-				dataMap.set(timestamp, { timestamp, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume });
-			}
+		// ベース: ヒストリカルローソク足 (EODHD → 障害時 DB)。深い本数 (dataCount) を土台にする。
+		for (const d of fallbackData) {
+			dataMap.set(d.timestamp, d);
+		}
 
-			if (pendingBar) {
-				const timestamp = new Date(pendingBar.startTime).getTime();
-				dataMap.set(timestamp, { timestamp, open: pendingBar.open, high: pendingBar.high, low: pendingBar.low, close: pendingBar.close, volume: pendingBar.volume });
-			}
-		} else if (fallbackData.length > 0) {
-			// フォールバックデータを使用
-			for (const d of fallbackData) {
-				dataMap.set(d.timestamp, d);
-			}
+		// オーバーレイ: realtime SSE の確定バー。同一時刻足は上書き、新しい足は追加する。
+		// これによりヒストリカルの深さを保ったまま最新足だけがライブ更新される
+		// (以前は SSE 接続時にヒストリカルを丸ごと捨てて ≤60 本に縮んでいた)。
+		for (const bar of bars) {
+			const timestamp = new Date(bar.timestamp).getTime();
+			dataMap.set(timestamp, { timestamp, open: bar.open, high: bar.high, low: bar.low, close: bar.close, volume: bar.volume });
+		}
+
+		// 進行中バー (未確定) を最後に重ねる。
+		if (pendingBar) {
+			const timestamp = new Date(pendingBar.startTime).getTime();
+			dataMap.set(timestamp, { timestamp, open: pendingBar.open, high: pendingBar.high, low: pendingBar.low, close: pendingBar.close, volume: pendingBar.volume });
 		}
 
 		return Array.from(dataMap.values()).sort((a, b) => a.timestamp - b.timestamp);
@@ -703,13 +793,13 @@ export function RealtimeChart({
 			    収まらない時は縦に折り返さず横スクロール (overflow-x-auto) させる。
 			    スペーサー (flex-1) は余白がある時だけ伸び、狭い時は 0 に畳まれて右側要素を寄せる。 */}
 			<div className="bg-gray-800 px-3 py-2 hidden md:flex items-center gap-2 border-b border-gray-700 overflow-x-auto [&>*]:shrink-0 [&>*]:whitespace-nowrap">
-				<select value={symbol} onChange={(e) => handleSymbolChange(e.target.value)} className="bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 font-semibold hover:border-gray-500">
-					{SYMBOL_OPTIONS.map((opt) => (
-						<option key={opt.value} value={opt.value}>
-							{opt.label}
-						</option>
-					))}
-				</select>
+				<SymbolPicker
+					symbol={symbol}
+					options={symbolOptions}
+					onCommit={handleSymbolChange}
+					listId="chart-symbols-desktop"
+					className="bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 font-semibold hover:border-gray-500 w-24"
+				/>
 
 				<select value={timeframe} onChange={(e) => handleTimeframeChange(parseInt(e.target.value, 10))} className="bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 hover:border-gray-500">
 					{TIMEFRAME_OPTIONS.map((opt) => (
@@ -761,10 +851,7 @@ export function RealtimeChart({
 
 					{isConnected ? (
 						<button
-							onClick={() => {
-								setHasEverConnected(false);
-								disconnect();
-							}}
+							onClick={disconnect}
 							className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition"
 						>
 							切断
@@ -788,7 +875,10 @@ export function RealtimeChart({
 				/>
 			</div>
 
-			{error && (
+			{/* realtime SSE のエラーは「ローソク足が 1 本も無い」時だけ目立たせる。
+			    ヒストリカルが表示できていれば realtime はオプションのオーバーレイなので、
+			    ヘッダーの StatusBadge (エラー) のみで十分 (チャートは隠さない)。 */}
+			{error && chartData.length === 0 && (
 				<div className="bg-red-900/50 border-b border-red-500 px-4 py-2">
 					<p className="text-red-300 text-sm">⚠️ {error}</p>
 				</div>
@@ -801,17 +891,23 @@ export function RealtimeChart({
 			)}
 
 			<div className="p-0.5 space-y-2">
-				{hasEverConnected || isConnected || bars.length > 0 || chartData.length > 0 ? (
+				{chartData.length > 0 ? (
 					<div className="space-y-2">
-						{/* フォールバックモード表示 */}
-						{!isConnected && !hasEverConnected && fallbackData.length > 0 && (
+						{/* ステータスバッジ: ローソク足は常に表示し、ここで状態を補足する。
+						    閉場中 → 🌙 ヒストリカル表示中 / 開場中だが realtime 未接続 → 接続ボタン付き案内。 */}
+						{!marketStatus.isOpen ? (
+							<div className="bg-gray-800/60 border-b border-gray-700 px-4 py-1.5 flex items-center gap-2">
+								<span className="text-base" aria-hidden="true">🌙</span>
+								<p className="text-xs text-gray-300">{marketStatus.message}（ヒストリカルデータを表示中）</p>
+							</div>
+						) : !isConnected ? (
 							<div className="bg-blue-900/30 border-b border-blue-500/50 px-4 py-1.5 flex items-center justify-between">
-								<p className="text-blue-300 text-xs">📊 REST APIからデータを表示中（30秒ごとに自動更新）</p>
+								<p className="text-blue-300 text-xs">📊 ヒストリカルデータを表示中（30秒ごとに自動更新）</p>
 								<button onClick={connect} disabled={isLoading} className={`px-3 py-1 text-white text-xs rounded transition ${isLoading ? "bg-gray-600 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"}`}>
 									{isLoading ? "接続中..." : "リアルタイム接続"}
 								</button>
 							</div>
-						)}
+						) : null}
 
 						<div className="px-2">
 							<PricePanel
@@ -978,23 +1074,18 @@ export function RealtimeChart({
 							</div>
 						)}
 					</div>
-				) : !marketStatus.isOpen && !isConnected ? (
-					/* 市場閉場中の専用表示 */
-					<div className="flex flex-col items-center justify-center py-16 text-gray-400">
-						<div className="text-6xl mb-4">🌙</div>
-						<h3 className="text-xl font-semibold text-gray-200 mb-2">市場は閉場しています</h3>
-						<p className="text-sm text-gray-400 mb-1">{marketStatus.message}</p>
-						{marketStatus.currentSession === null && marketStatus.nextOpenTime && (
-							<p className="text-xs text-gray-500 mt-2">Forex市場は平日のみ取引可能です</p>
-						)}
-						<div className="mt-6 px-4 py-3 bg-gray-800/60 rounded-lg border border-gray-700/50 text-center">
-							<p className="text-xs text-gray-500 mb-1">分析タブでは保存済みの過去データで分析可能です</p>
-							<p className="text-xs text-gray-600">「分析 →」ボタンから切り替えてください</p>
-						</div>
-					</div>
 				) : (
+					/* ローソク足がまだ 1 本も無い時の状態表示。
+					   ヒストリカル取得は市場の開閉に関係なく走るので、通常はここに来ない
+					   (取得中 / 取得失敗 / EODHD・DB 双方が空 のいずれか)。
+					   loading → error → 市場閉場 → 空 の順で出し分ける。 */
 					<div className="flex flex-col items-center justify-center py-16 text-gray-400">
-						{fallbackError ? (
+						{fallbackLoading ? (
+							<>
+								<div className="w-10 h-10 mb-3 border-4 border-gray-600 border-t-blue-400 rounded-full animate-spin" aria-hidden="true" />
+								<p className="text-sm text-blue-300">ローソク足データを取得中…</p>
+							</>
+						) : fallbackError ? (
 							<>
 								<div className="text-5xl mb-3">⚠️</div>
 								<p className="text-sm mb-2 text-red-400">{fallbackError}</p>
@@ -1002,30 +1093,28 @@ export function RealtimeChart({
 									再試行
 								</button>
 							</>
-						) : (fallbackLoading || fallbackWarning) ? (
-							/* 「取得中」と「空(自動再取得待ち)」を 1 つの状態にまとめ、
-							   くるくる回るスピナーで動作中であることを明示する。
-							   実態は 30 秒ごとの自動再取得なのでその旨を伝える。 */
+						) : !marketStatus.isOpen ? (
 							<>
-								<div
-									className="w-10 h-10 mb-3 border-4 border-gray-600 border-t-blue-400 rounded-full animate-spin"
-									aria-hidden="true"
-								/>
-								<p className="text-sm text-blue-300">
-									{fallbackLoading ? "データを取得中…" : "データを自動取得中…（まだ受信できていません）"}
+								<div className="text-6xl mb-4">🌙</div>
+								<h3 className="text-xl font-semibold text-gray-200 mb-2">市場は閉場しています</h3>
+								<p className="text-sm text-gray-400 mb-1">{marketStatus.message}</p>
+								<p className="text-xs text-gray-500 mt-2 max-w-md text-center">
+									保存済みのヒストリカルデータが見つかりませんでした。市場開場後に自動取得されます。
 								</p>
-								<p className="text-xs text-gray-500 mt-1">30秒ごとに自動で再取得します</p>
-								{/* API から返る警告 (データ欠損理由等) を欠落させず表示する */}
-								{fallbackWarning && !fallbackLoading && (
+								{fallbackWarning && (
 									<p className="text-xs text-gray-500 mt-1 max-w-md text-center">{fallbackWarning}</p>
 								)}
 							</>
 						) : (
 							<>
-								<div className="text-5xl mb-3">📡</div>
-								<p className="text-sm mb-3">未接続</p>
-								<button onClick={connect} disabled={isLoading} className={`px-4 py-1.5 rounded-lg text-sm transition ${isLoading ? "bg-gray-600 cursor-not-allowed" : "bg-green-600 hover:bg-green-700 text-white"}`}>
-									{isLoading ? "接続中..." : "接続開始"}
+								<div className="w-10 h-10 mb-3 border-4 border-gray-600 border-t-blue-400 rounded-full animate-spin" aria-hidden="true" />
+								<p className="text-sm text-blue-300">データを自動取得中…（まだ受信できていません）</p>
+								<p className="text-xs text-gray-500 mt-1">30秒ごとに自動で再取得します</p>
+								{fallbackWarning && (
+									<p className="text-xs text-gray-500 mt-1 max-w-md text-center">{fallbackWarning}</p>
+								)}
+								<button onClick={fetchFallbackData} className="mt-3 px-4 py-1.5 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white transition">
+									再取得
 								</button>
 							</>
 						)}
@@ -1035,13 +1124,13 @@ export function RealtimeChart({
 
 			<div className="md:hidden sticky bottom-0 z-20 bg-gray-900 border-t border-gray-800 px-3 py-2 space-y-2">
 				<div className="flex items-center gap-2">
-					<select value={symbol} onChange={(e) => handleSymbolChange(e.target.value)} className="bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700 flex-1 min-w-0 hover:border-gray-600">
-						{SYMBOL_OPTIONS.map((opt) => (
-							<option key={opt.value} value={opt.value}>
-								{opt.label}
-							</option>
-						))}
-					</select>
+					<SymbolPicker
+						symbol={symbol}
+						options={symbolOptions}
+						onCommit={handleSymbolChange}
+						listId="chart-symbols-mobile"
+						className="bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700 flex-1 min-w-0 hover:border-gray-600"
+					/>
 
 					<select value={timeframe} onChange={(e) => handleTimeframeChange(parseInt(e.target.value, 10))} className="bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700 w-20 hover:border-gray-600">
 						{TIMEFRAME_OPTIONS.map((opt) => (
@@ -1061,10 +1150,7 @@ export function RealtimeChart({
 
 					{isConnected ? (
 						<button
-							onClick={() => {
-								setHasEverConnected(false);
-								disconnect();
-							}}
+							onClick={disconnect}
 							className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition"
 						>
 							切断
