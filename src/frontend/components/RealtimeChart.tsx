@@ -20,6 +20,7 @@ import { indicatorToChartConfigs } from "@/lib/chartIndicators";
 import { getMarketStatus, MarketStatus } from "@/lib/marketHours";
 import { useTradingAccount } from "@/hooks/useTradingAccount";
 import { OrderPanel } from "@/components/chart/OrderPanel";
+import { DraggableOrderPanel } from "@/components/chart/DraggableOrderPanel";
 import { ChartPaneContainer } from "@/components/chart/ChartPaneContainer";
 import { DrawingMode } from "@/components/chart/DrawingOverlay";
 import { apiFetch } from "@/lib/apiClient";
@@ -141,6 +142,39 @@ export function loadPersistedIndicators(): SelectedIndicator[] {
 		return parsed.success ? parsed.data : [];
 	} catch {
 		return [];
+	}
+}
+
+// 時間足 (秒) と取得本数も銘柄横断のユーザー設定として localStorage に保存する。
+// 理由: リロード / 一旦離れて再訪したときにデフォルト (1分足 / 1000本) に戻ってしまい、
+// 5000本や1時間足にした選択が毎回失われて不便だったため (Side-A UI 改善)。
+// 値は marketConstants の許容集合で検証し、壊れた / 旧形式の値は fallback に落とす。
+export const SELECTED_TIMEFRAME_STORAGE_KEY = "chart-selected-timeframe";
+export const SELECTED_DATA_COUNT_STORAGE_KEY = "chart-selected-data-count";
+
+/** localStorage から時間足 (秒) を復元する。許容外・壊れた値は fallback を返す。 */
+export function loadPersistedTimeframe(fallback: number): number {
+	if (typeof window === "undefined") return fallback;
+	try {
+		const raw = window.localStorage.getItem(SELECTED_TIMEFRAME_STORAGE_KEY);
+		if (!raw) return fallback;
+		const value = Number(raw);
+		return TIMEFRAME_OPTIONS.some((opt) => opt.value === value) ? value : fallback;
+	} catch {
+		return fallback;
+	}
+}
+
+/** localStorage から取得本数を復元する。許容外・壊れた値は fallback を返す。 */
+export function loadPersistedDataCount(fallback: number): number {
+	if (typeof window === "undefined") return fallback;
+	try {
+		const raw = window.localStorage.getItem(SELECTED_DATA_COUNT_STORAGE_KEY);
+		if (!raw) return fallback;
+		const value = Number(raw);
+		return DATA_COUNT_OPTIONS.some((opt) => opt.value === value) ? value : fallback;
+	} catch {
+		return fallback;
 	}
 }
 
@@ -339,8 +373,9 @@ export function RealtimeChart({
 	onLinesChange,
 	rightAction,
 }: RealtimeChartProps) {
-	const [timeframe, setTimeframe] = useState(initialTimeframe);
-	const [dataCount, setDataCount] = useState<number>(DEFAULT_DATA_COUNT); // データ本数 (marketConstants.ts)
+	// 時間足・本数は localStorage から復元 (なければ初期値)。リロードでデフォルトに戻さない。
+	const [timeframe, setTimeframe] = useState<number>(() => loadPersistedTimeframe(initialTimeframe));
+	const [dataCount, setDataCount] = useState<number>(() => loadPersistedDataCount(DEFAULT_DATA_COUNT)); // データ本数 (marketConstants.ts)
 	const [drawingMode, setDrawingMode] = useState<DrawingMode>("none");
 	const [drawnLines, setDrawnLines] = useState<DrawnLine[]>([]);
 	// 初期値は localStorage から復元 (条件6: 再起動でインジケーターが消えない)
@@ -397,6 +432,38 @@ export function RealtimeChart({
 			// localStorage 不可 (容量超過 / プライベートモード) は無視
 		}
 	}, [selectedIndicators]);
+
+	// 時間足を localStorage に永続化する (リロードでデフォルトに戻さない)
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+		try {
+			window.localStorage.setItem(SELECTED_TIMEFRAME_STORAGE_KEY, String(timeframe));
+		} catch {
+			// localStorage 不可は無視
+		}
+	}, [timeframe]);
+
+	// 取得本数を localStorage に永続化する (リロードでデフォルトに戻さない)
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+		try {
+			window.localStorage.setItem(SELECTED_DATA_COUNT_STORAGE_KEY, String(dataCount));
+		} catch {
+			// localStorage 不可は無視
+		}
+	}, [dataCount]);
+
+	// 復元した時間足を親 (市場分析パネル) にも一度だけ反映する。
+	// 親は自前の selectedTimeframe をデフォルトで初期化するため、child の復元値と
+	// ズレたまま分析パネルだけ別 TF を表示してしまうのを防ぐ。ref で初回のみ実行。
+	const didNotifyInitialTimeframe = useRef(false);
+	useEffect(() => {
+		if (didNotifyInitialTimeframe.current) return;
+		didNotifyInitialTimeframe.current = true;
+		if (timeframe !== initialTimeframe) {
+			onTimeframeChange?.(timeframe);
+		}
+	}, [timeframe, initialTimeframe, onTimeframeChange]);
 
 	// チャート OHLCV フォールバック用ステート
 	const [fallbackData, setFallbackData] = useState<OHLCVDataPoint[]>([]);
@@ -976,20 +1043,18 @@ export function RealtimeChart({
 								onExitDrawing={handleExitDrawing}
 							/>
 
-							{/* PC: チャート右上にコンパクトな発注パネルをオーバーレイ。
+							{/* PC: チャート上にコンパクトな発注パネルをオーバーレイ。
+							    ハンドルをドラッグして任意位置へ移動でき、位置は localStorage に保存される。
 							    描画モード中は誤クリック防止のため隠す。発注はブローカー接続中のみ許可。 */}
 							{drawingMode === "none" && (
-								<div className="hidden md:block absolute top-2 right-2 z-20 w-56">
-									<OrderPanel
-										symbol={symbol}
-										compact
-										disabled={orderDisabled}
-										disabledReason={orderDisabledReason}
-										onOrderPlaced={() => {
-											void refetchTrading();
-										}}
-									/>
-								</div>
+								<DraggableOrderPanel
+									symbol={symbol}
+									disabled={orderDisabled}
+									disabledReason={orderDisabledReason}
+									onOrderPlaced={() => {
+										void refetchTrading();
+									}}
+								/>
 							)}
 						</div>
 

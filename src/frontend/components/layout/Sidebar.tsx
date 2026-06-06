@@ -654,20 +654,14 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           ${isOpen ? "translate-x-0 md:static md:translate-x-0" : "-translate-x-full md:hidden"}
         `}
       >
-        {/* ヘッダー */}
-        <div className="flex items-center justify-between p-4 border-b border-slate-700/30">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-purple-500 flex items-center justify-center shadow-lg shadow-cyan-500/30 animate-pulse-glow">
-              <span className="text-white text-sm font-bold">T</span>
-            </div>
-            <span className="text-lg font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
-              TradeAssist
-            </span>
-          </div>
+        {/* ヘッダー: アプリタイトル (TradeAssist) はグローバルヘッダーに既出のため
+            サイドバーには重複表示しない。モバイルのオーバーレイを閉じる X だけを残し、
+            デスクトップ (md 以上) ではこの帯ごと省いてナビ (Side-A ホーム) を最上段から始める。 */}
+        <div className="md:hidden flex items-center justify-end p-3 border-b border-slate-700/30">
           <button
             type="button"
             onClick={onClose}
-            className="md:hidden p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700/50 transition-all duration-200 press-scale"
+            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-slate-700/50 transition-all duration-200 press-scale"
             aria-label="閉じる"
           >
             <X className="w-5 h-5" strokeWidth={1.5} />

@@ -348,7 +348,10 @@ export function ChartPaneContainer({
 
     const handleResize = () => {
       if (!containerRef.current || !mainPaneRef.current || !mainChartRef.current) return;
-      mainChartRef.current.applyOptions({ width: mainPaneRef.current.clientWidth, height: mainHeight });
+      // 折りたたみ途中などで幅 0 を渡すと描画が壊れることがあるため 0 はスキップする。
+      const mainWidth = mainPaneRef.current.clientWidth;
+      if (mainWidth <= 0) return;
+      mainChartRef.current.applyOptions({ width: mainWidth, height: mainHeight });
       subChartsRef.current.forEach((chart, key) => {
         const pane = subPaneRefs.current[key];
         if (!pane) return;
@@ -357,6 +360,13 @@ export function ChartPaneContainer({
     };
 
     window.addEventListener("resize", handleResize);
+
+    // window resize だけでなくコンテナ自身の幅変化も監視する。
+    // 理由: サイドバーを折りたたむとウィンドウサイズは変わらずコンテナ幅だけが広がる。
+    // window.resize しか見ていないと lightweight-charts が元の狭い幅のまま残り、
+    // 空白が出てチャートが見づらくなる (Side-A UI 改善)。ResizeObserver で追従させる。
+    const resizeObserver = new ResizeObserver(() => handleResize());
+    if (containerRef.current) resizeObserver.observe(containerRef.current);
     // クリーンアップ時に ref.current が別チャートに差し替わっている可能性があるため、
     // effect 内で参照を固定してから cleanup で使う (react-hooks/exhaustive-deps 警告対策)。
     const subCharts = subChartsRef.current;
@@ -364,6 +374,7 @@ export function ChartPaneContainer({
     const drawnSeries = drawnSeriesRef.current;
     return () => {
       window.removeEventListener("resize", handleResize);
+      resizeObserver.disconnect();
       safeRemoveChart(mainChartRef.current);
       mainChartRef.current = null;
       setDrawingChart(null);
