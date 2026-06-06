@@ -693,9 +693,11 @@ export class CTraderDataService {
 
         for (const env of environments) {
             try {
+                // Protobuf プロトコル (@reiryoku/ctrader-layer) のため wsPortProtobuf(5035) を使う。
+                // wsPort(5036) は JSON 用 (CTraderProvider)。混在すると無応答ハングする。
                 const connection = new CTraderConnection({
                     host: env.host,
-                    port: config.ctrader.wsPort,
+                    port: config.ctrader.wsPortProtobuf,
                 });
 
                 await connection.open();

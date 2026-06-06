@@ -278,10 +278,14 @@ export const config = {
     // WebSocket接続設定（ホストとポート）
     wsLiveHost: process.env.CTRADER_WS_LIVE_HOST || 'live.ctraderapi.com',
     wsDemoHost: process.env.CTRADER_WS_DEMO_HOST || 'demo.ctraderapi.com',
-    // cTrader Open API のポート: 5035=Protobuf / 5036=JSON。
-    // CTraderProvider は JSON プロトコル (JSON.stringify 送信) のため 5036 が正。
-    // 5035 だと JSON が解釈されず無応答になり認証/口座取得がタイムアウトする。
+    // cTrader Open API のポート: 5035=Protobuf / 5036=JSON。プロトコルごとに別ポートが必要。
+    // - wsPort (5036/JSON): CTraderProvider は JSON プロトコル (JSON.stringify 送信) のため 5036 が正。
+    // - wsPortProtobuf (5035/Protobuf): @reiryoku/ctrader-layer を使う ctraderAuthService(ログイン) /
+    //   ctraderDataService は Protobuf のため 5035 が必須。5036 (JSON ポート) に繋ぐと WS は張れるが
+    //   ProtoOAApplicationAuthReq に応答が返らず無限ハングする (PR #339 で wsPort を 5036 に変えた際、
+    //   両者が wsPort を共有していたため Protobuf 経路=ログインが巻き添えで壊れた。本 split で恒久解消)。
     wsPort: parseInt(process.env.CTRADER_WS_PORT || '5036', 10),
+    wsPortProtobuf: parseInt(process.env.CTRADER_WS_PORT_PROTOBUF || '5035', 10),
     // Redirect URI（Vercel）
     redirectUri: process.env.CTRADER_REDIRECT_URI || 'https://trader-note-build-ai.vercel.app/auth/ctrader/callback',
   },

@@ -39,6 +39,29 @@ function errorWithCause(message: string, cause?: Error): Error {
   return e;
 }
 
+// cTrader WS の open / sendCommand 1 回あたりの上限待ち時間 (ミリ秒)。
+// 理由: ポート不一致やブローカー無応答時に Protobuf の応答が永久に返らず、ログインが
+// 「認証中」のまま無限ハングする事故があった (PR #339 のポート巻き添え)。タイムアウトで
+// 必ず失敗に倒し、UI を「認証エラー → 再ログイン」へ流せるようにする (固まらせない)。
+const CTRADER_WS_OP_TIMEOUT_MS = 10_000;
+
+/**
+ * Promise にタイムアウトを付ける。期限内に解決しなければ reject する。
+ * 元の処理はキャンセルできない (WS ライブラリ仕様) が、呼び出し側の待機は必ず打ち切られる。
+ * Promise.race を使うことで元 Promise の reject 値はそのまま伝播する (型注釈 unknown 不要)。
+ */
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} がタイムアウトしました (${timeoutMs}ms)`));
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
+
 // ========================================
 // Zod スキーマ
 // ========================================
@@ -468,32 +491,41 @@ export class CTraderAuthService {
 
     try {
       // 1. Live環境でWebSocket接続を試行
+      // Protobuf プロトコル (@reiryoku/ctrader-layer) のため wsPortProtobuf(5035) を使う。
       console.log('[CTraderAuth] WebSocket接続開始 (Live環境):', {
         host: config.ctrader.wsLiveHost,
-        port: config.ctrader.wsPort,
+        port: config.ctrader.wsPortProtobuf,
       });
 
       connection = new CTraderConnection({
         host: config.ctrader.wsLiveHost,
-        port: config.ctrader.wsPort,
+        port: config.ctrader.wsPortProtobuf,
       });
 
-      await connection.open();
+      await withTimeout(connection.open(), CTRADER_WS_OP_TIMEOUT_MS, 'WS接続(Live)');
       console.log('[CTraderAuth] WebSocket 接続成功 (Live環境)');
 
       // 2. アプリケーション認証
       console.log('[CTraderAuth] アプリケーション認証開始 (Live環境)');
-      await connection.sendCommand('ProtoOAApplicationAuthReq', {
-        clientId: config.ctrader.clientId,
-        clientSecret: config.ctrader.clientSecret,
-      });
+      await withTimeout(
+        connection.sendCommand('ProtoOAApplicationAuthReq', {
+          clientId: config.ctrader.clientId,
+          clientSecret: config.ctrader.clientSecret,
+        }),
+        CTRADER_WS_OP_TIMEOUT_MS,
+        'アプリ認証(Live)',
+      );
       console.log('[CTraderAuth] アプリケーション認証成功 (Live環境)');
 
       // 3. アカウント一覧を取得してZodでバリデーション
       console.log('[CTraderAuth] アカウント一覧取得開始 (Live環境)');
-      const accountListRaw = await connection.sendCommand('ProtoOAGetAccountListByAccessTokenReq', {
-        accessToken,
-      });
+      const accountListRaw = await withTimeout(
+        connection.sendCommand('ProtoOAGetAccountListByAccessTokenReq', {
+          accessToken,
+        }),
+        CTRADER_WS_OP_TIMEOUT_MS,
+        'アカウント一覧取得(Live)',
+      );
 
       const parseResult = CTraderAccountListResponseSchema.safeParse(accountListRaw);
       if (!parseResult.success) {
@@ -543,32 +575,40 @@ export class CTraderAuthService {
       }
 
       try {
-        // Demo環境で接続
+        // Demo環境で接続 (Live と同じく Protobuf なので wsPortProtobuf(5035))
         console.log('[CTraderAuth] WebSocket接続開始 (Demo環境):', {
           host: config.ctrader.wsDemoHost,
-          port: config.ctrader.wsPort,
+          port: config.ctrader.wsPortProtobuf,
         });
 
         connection = new CTraderConnection({
           host: config.ctrader.wsDemoHost,
-          port: config.ctrader.wsPort,
+          port: config.ctrader.wsPortProtobuf,
         });
 
-        await connection.open();
+        await withTimeout(connection.open(), CTRADER_WS_OP_TIMEOUT_MS, 'WS接続(Demo)');
         console.log('[CTraderAuth] WebSocket 接続成功 (Demo環境)');
 
         console.log('[CTraderAuth] アプリケーション認証開始 (Demo環境)');
-        await connection.sendCommand('ProtoOAApplicationAuthReq', {
-          clientId: config.ctrader.clientId,
-          clientSecret: config.ctrader.clientSecret,
-        });
+        await withTimeout(
+          connection.sendCommand('ProtoOAApplicationAuthReq', {
+            clientId: config.ctrader.clientId,
+            clientSecret: config.ctrader.clientSecret,
+          }),
+          CTRADER_WS_OP_TIMEOUT_MS,
+          'アプリ認証(Demo)',
+        );
         console.log('[CTraderAuth] アプリケーション認証成功 (Demo環境)');
 
         // アカウント一覧を取得してZodでバリデーション
         console.log('[CTraderAuth] アカウント一覧取得開始 (Demo環境)');
-        const accountListRaw = await connection.sendCommand('ProtoOAGetAccountListByAccessTokenReq', {
-          accessToken,
-        });
+        const accountListRaw = await withTimeout(
+          connection.sendCommand('ProtoOAGetAccountListByAccessTokenReq', {
+            accessToken,
+          }),
+          CTRADER_WS_OP_TIMEOUT_MS,
+          'アカウント一覧取得(Demo)',
+        );
 
         const parseResult = CTraderAccountListResponseSchema.safeParse(accountListRaw);
         if (!parseResult.success) {
