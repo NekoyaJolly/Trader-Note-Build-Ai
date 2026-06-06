@@ -26,6 +26,7 @@ import { DrawingMode } from "@/components/chart/DrawingOverlay";
 import { apiFetch } from "@/lib/apiClient";
 import { ChartSymbolsResponseSchema, type ChartSymbolOption } from "@/schemas/api/chartSymbols";
 import { SelectedIndicatorArraySchema } from "@/schemas/api/chartIndicators";
+import { z } from "zod";
 
 interface RealtimeChartProps {
 	symbol: string;
@@ -152,14 +153,24 @@ export function loadPersistedIndicators(): SelectedIndicator[] {
 export const SELECTED_TIMEFRAME_STORAGE_KEY = "chart-selected-timeframe";
 export const SELECTED_DATA_COUNT_STORAGE_KEY = "chart-selected-data-count";
 
+// localStorage 由来の値も外部入力としてインジ復元 (SelectedIndicatorArraySchema) と同様に Zod で検証する。
+// z.coerce.number で文字列→数値化し、許容集合 (marketConstants) に含まれる値のみ通す。
+// 文字列化不能 (NaN) / 集合外 / 空文字はすべて refine で弾かれ、呼び出し側で fallback に落ちる。
+const PersistedTimeframeSchema = z.coerce
+	.number()
+	.refine((value) => TIMEFRAME_OPTIONS.some((opt) => opt.value === value));
+const PersistedDataCountSchema = z.coerce
+	.number()
+	.refine((value) => DATA_COUNT_OPTIONS.some((opt) => opt.value === value));
+
 /** localStorage から時間足 (秒) を復元する。許容外・壊れた値は fallback を返す。 */
 export function loadPersistedTimeframe(fallback: number): number {
 	if (typeof window === "undefined") return fallback;
 	try {
 		const raw = window.localStorage.getItem(SELECTED_TIMEFRAME_STORAGE_KEY);
-		if (!raw) return fallback;
-		const value = Number(raw);
-		return TIMEFRAME_OPTIONS.some((opt) => opt.value === value) ? value : fallback;
+		if (raw === null) return fallback;
+		const parsed = PersistedTimeframeSchema.safeParse(raw);
+		return parsed.success ? parsed.data : fallback;
 	} catch {
 		return fallback;
 	}
@@ -170,9 +181,9 @@ export function loadPersistedDataCount(fallback: number): number {
 	if (typeof window === "undefined") return fallback;
 	try {
 		const raw = window.localStorage.getItem(SELECTED_DATA_COUNT_STORAGE_KEY);
-		if (!raw) return fallback;
-		const value = Number(raw);
-		return DATA_COUNT_OPTIONS.some((opt) => opt.value === value) ? value : fallback;
+		if (raw === null) return fallback;
+		const parsed = PersistedDataCountSchema.safeParse(raw);
+		return parsed.success ? parsed.data : fallback;
 	} catch {
 		return fallback;
 	}

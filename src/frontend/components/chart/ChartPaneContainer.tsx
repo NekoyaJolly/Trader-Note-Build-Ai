@@ -365,8 +365,11 @@ export function ChartPaneContainer({
     // 理由: サイドバーを折りたたむとウィンドウサイズは変わらずコンテナ幅だけが広がる。
     // window.resize しか見ていないと lightweight-charts が元の狭い幅のまま残り、
     // 空白が出てチャートが見づらくなる (Side-A UI 改善)。ResizeObserver で追従させる。
-    const resizeObserver = new ResizeObserver(() => handleResize());
-    if (containerRef.current) resizeObserver.observe(containerRef.current);
+    // ResizeObserver 未対応環境 (古いブラウザ / 一部テスト環境) では生成せず、
+    // window.resize のみで動かす (new ResizeObserver の ReferenceError を回避)。
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => handleResize()) : null;
+    if (resizeObserver && containerRef.current) resizeObserver.observe(containerRef.current);
     // クリーンアップ時に ref.current が別チャートに差し替わっている可能性があるため、
     // effect 内で参照を固定してから cleanup で使う (react-hooks/exhaustive-deps 警告対策)。
     const subCharts = subChartsRef.current;
@@ -374,7 +377,7 @@ export function ChartPaneContainer({
     const drawnSeries = drawnSeriesRef.current;
     return () => {
       window.removeEventListener("resize", handleResize);
-      resizeObserver.disconnect();
+      resizeObserver?.disconnect();
       safeRemoveChart(mainChartRef.current);
       mainChartRef.current = null;
       setDrawingChart(null);

@@ -88,8 +88,12 @@ export function DraggableOrderPanel({ symbol, disabled, disabledReason, onOrderP
 	// パネルの実寸が必要なのでマウント後 (offsetParent / offsetWidth 確定後) に 1 回実行する。
 	// setState はマイクロタスクに逃がして effect 本体での同期 setState (cascading renders) を避ける
 	// (AppShell と同じ React Compiler 対策パターン)。
+	// cancelled フラグ: StrictMode の再マウント等でアンマウント直後にマイクロタスクが走っても
+	// setState しないようにする (アンマウント済みコンポーネントへの更新を防ぐ)。
 	useEffect(() => {
+		let cancelled = false;
 		queueMicrotask(() => {
+			if (cancelled) return;
 			const el = panelRef.current;
 			const parent = el?.offsetParent as HTMLElement | null;
 			if (!el || !parent) return;
@@ -101,6 +105,9 @@ export function DraggableOrderPanel({ symbol, disabled, disabledReason, onOrderP
 				setPosition({ left, top: EDGE_MARGIN });
 			}
 		});
+		return () => {
+			cancelled = true;
+		};
 	}, [clampToParent]);
 
 	const persist = useCallback((pos: Position) => {
@@ -142,7 +149,15 @@ export function DraggableOrderPanel({ symbol, disabled, disabledReason, onOrderP
 		(e: React.PointerEvent<HTMLDivElement>) => {
 			if (!dragState.current) return;
 			dragState.current = null;
-			e.currentTarget.releasePointerCapture(e.pointerId);
+			// pointercancel / OS ジェスチャでキャプチャが既に失われていると releasePointerCapture が
+			// 例外を投げることがあるため、保持確認 + try/catch でドラッグ状態のスタックを防ぐ。
+			try {
+				if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+					e.currentTarget.releasePointerCapture(e.pointerId);
+				}
+			} catch {
+				// キャプチャ喪失時の例外は無視 (状態は上で既にリセット済み)
+			}
 			// ドラッグ確定位置を保存する
 			setPosition((prev) => {
 				if (prev) persist(prev);
@@ -168,8 +183,11 @@ export function DraggableOrderPanel({ symbol, disabled, disabledReason, onOrderP
 				onPointerDown={handlePointerDown}
 				onPointerMove={handlePointerMove}
 				onPointerUp={handlePointerUp}
+				onPointerCancel={handlePointerUp}
 				className="flex items-center justify-center gap-1 cursor-move select-none touch-none rounded-t-lg border border-b-0 border-gray-600 bg-gray-700/90 py-0.5 text-[10px] text-gray-300 backdrop-blur-sm"
 				role="button"
+				// ドラッグ操作のハンドル。キーボードでも到達できるようフォーカス可能にする (a11y)
+				tabIndex={0}
 				aria-label="発注パネルを移動"
 				title="ドラッグで移動"
 			>
