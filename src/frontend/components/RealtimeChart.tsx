@@ -120,18 +120,34 @@ const normalizeSymbolInput = (raw: string): string =>
 // 選択インジケーターは銘柄横断のユーザー設定として localStorage にグローバル保存する。
 // (描画ラインは銘柄×足ごと=ChartDrawing だが、インジケーターは銘柄に依らず適用したいため)
 export const SELECTED_INDICATORS_STORAGE_KEY = "chart-selected-indicators";
+// 復元したインジケーターの「描画試行中」フラグ。正常なページ離脱 (pagehide) で下ろす。
+// 下りていないまま再マウント = 前回その設定で描画中にクラッシュした疑い → 復元せず破棄して
+// クラッシュループを断つ (条件6 永続化の安全網)。pagehide はクラッシュ時に発火しないのが要点。
+export const INDICATORS_RESTORE_SENTINEL_KEY = "chart-selected-indicators-restoring";
 
 /**
  * localStorage から選択インジケーターを復元する (条件6: 再起動でも消えない)。
  * 壊れた値・旧形式は Zod で弾いて空配列にフォールバックする。
+ * 前回復元時にクラッシュした形跡 (sentinel 残存) があれば、その設定は破棄して復元しない。
  */
 export function loadPersistedIndicators(): SelectedIndicator[] {
 	if (typeof window === "undefined") return [];
 	try {
+		// 前回の復元描画が完了しなかった (クラッシュ) 形跡 → 危険な設定として破棄しループを断つ
+		if (window.localStorage.getItem(INDICATORS_RESTORE_SENTINEL_KEY)) {
+			window.localStorage.removeItem(SELECTED_INDICATORS_STORAGE_KEY);
+			window.localStorage.removeItem(INDICATORS_RESTORE_SENTINEL_KEY);
+			return [];
+		}
 		const raw = window.localStorage.getItem(SELECTED_INDICATORS_STORAGE_KEY);
 		if (!raw) return [];
 		const parsed = SelectedIndicatorArraySchema.safeParse(JSON.parse(raw));
-		return parsed.success ? parsed.data : [];
+		const indicators = parsed.success ? parsed.data : [];
+		// 復元する場合のみ「描画試行中」フラグを立てる (正常離脱で pagehide が下ろす)
+		if (indicators.length > 0) {
+			window.localStorage.setItem(INDICATORS_RESTORE_SENTINEL_KEY, "1");
+		}
+		return indicators;
 	} catch {
 		return [];
 	}
@@ -390,6 +406,22 @@ export function RealtimeChart({
 			// localStorage 不可 (容量超過 / プライベートモード) は無視
 		}
 	}, [selectedIndicators]);
+
+	// 正常なページ離脱 (リロード/タブ閉じ) で復元 sentinel を下ろす。
+	// クラッシュ時は pagehide が発火しないため sentinel が残り、次回マウントで
+	// loadPersistedIndicators が復元をスキップしてクラッシュループを断つ。
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+		const clearSentinel = () => {
+			try {
+				window.localStorage.removeItem(INDICATORS_RESTORE_SENTINEL_KEY);
+			} catch {
+				// noop
+			}
+		};
+		window.addEventListener("pagehide", clearSentinel);
+		return () => window.removeEventListener("pagehide", clearSentinel);
+	}, []);
 
 	// チャート OHLCV フォールバック用ステート
 	const [fallbackData, setFallbackData] = useState<OHLCVDataPoint[]>([]);
