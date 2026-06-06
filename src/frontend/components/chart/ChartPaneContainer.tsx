@@ -63,6 +63,16 @@ function toChartTime(timestamp: number): UTCTimestamp {
   return Math.floor(timestamp / 1000) as UTCTimestamp;
 }
 
+// 破棄済みチャートの再 remove は lightweight-charts が throw するため、再生成時の
+// teardown は必ずこの helper 経由にして例外をレンダラまで伝播させない。
+function safeRemoveChart(chart: IChartApi | null | undefined): void {
+  try {
+    chart?.remove();
+  } catch {
+    // 既に破棄済み等は無視
+  }
+}
+
 function toCandleData(ohlcvData: OHLCVDataPoint[]): CandlestickData<Time>[] {
   return ohlcvData.map((d) => ({
     time: toChartTime(d.timestamp),
@@ -181,12 +191,24 @@ export function ChartPaneContainer({
   const subHeight = paneDefs.length > 1 ? Math.max(120, Math.floor((height - mainHeight) / (paneDefs.length - 1))) : 0;
   const barMs = ohlcvData.length >= 2 ? Math.max(1000, ohlcvData[1].timestamp - ohlcvData[0].timestamp) : 60_000;
 
+  // 最新 paneDefs を ref で保持し、init effect は「構造 (pane キー列)」が変わった時だけ
+  // チャートを作り直す。init を paneDefs 全体に依存させると、インジケーター内容が変わる
+  // たびに全チャートを破棄・再生成し、sub-pane 生存中の再生成でレンダラがクラッシュする
+  // (メイン+サブ両方のインジ同時表示でクラッシュしていた根本原因)。
+  const paneDefsRef = useRef(paneDefs);
+  // ref 更新は render 中に行うと react-hooks/refs に抵触するため effect で同期する。
+  // init effect より前に宣言することで、構造変化時に init より先に最新 paneDefs を反映する。
+  useEffect(() => {
+    paneDefsRef.current = paneDefs;
+  });
+  const paneSignature = useMemo(() => paneDefs.map((p) => p.key).join("|"), [paneDefs]);
+
   // チャート初期化
   useEffect(() => {
     if (!mainPaneRef.current) return;
 
-    mainChartRef.current?.remove();
-    subChartsRef.current.forEach((chart) => chart.remove());
+    safeRemoveChart(mainChartRef.current);
+    subChartsRef.current.forEach((chart) => safeRemoveChart(chart));
     subChartsRef.current.clear();
     allSeriesRef.current.clear();
     drawnSeriesRef.current.clear();
@@ -253,7 +275,7 @@ export function ChartPaneContainer({
     });
     allSeriesRef.current.set("main-volume", volumeSeries);
 
-    for (const pane of paneDefs.filter((p) => p.key !== "main")) {
+    for (const pane of paneDefsRef.current.filter((p) => p.key !== "main")) {
       const ref = subPaneRefs.current[pane.key];
       if (!ref) continue;
       const chart = createBaseChart(ref, subHeight);
@@ -331,16 +353,18 @@ export function ChartPaneContainer({
     const drawnSeries = drawnSeriesRef.current;
     return () => {
       window.removeEventListener("resize", handleResize);
-      mainChartRef.current?.remove();
+      safeRemoveChart(mainChartRef.current);
       mainChartRef.current = null;
       setDrawingChart(null);
       setDrawingSeries(null);
-      subCharts.forEach((chart) => chart.remove());
+      subCharts.forEach((chart) => safeRemoveChart(chart));
       subCharts.clear();
       allSeries.clear();
       drawnSeries.clear();
     };
-  }, [mainHeight, paneDefs, subHeight]);
+    // 依存は「pane 構造 (キー列) + 高さ」のみ。インジケーター内容変化では再生成しない
+    // (内容反映は別の indicator 反映 effect が担当)。これが多重チャート破棄クラッシュの根治。
+  }, [mainHeight, subHeight, paneSignature]);
 
   // データ反映
   useEffect(() => {

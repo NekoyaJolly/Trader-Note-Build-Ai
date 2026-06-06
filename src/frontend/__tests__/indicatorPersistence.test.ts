@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
 	loadPersistedIndicators,
 	SELECTED_INDICATORS_STORAGE_KEY,
+	INDICATORS_RESTORE_SENTINEL_KEY,
 } from "@/components/RealtimeChart";
 
 describe("loadPersistedIndicators (条件6: インジケーター永続化)", () => {
@@ -49,5 +50,26 @@ describe("loadPersistedIndicators (条件6: インジケーター永続化)", ()
 			JSON.stringify([{ params: { period: "twenty" } }]),
 		);
 		expect(loadPersistedIndicators()).toEqual([]);
+	});
+
+	it("復元時に描画試行 sentinel を立てる", () => {
+		window.localStorage.setItem(
+			SELECTED_INDICATORS_STORAGE_KEY,
+			JSON.stringify([{ id: "sma", params: { period: 20 } }]),
+		);
+		loadPersistedIndicators();
+		expect(window.localStorage.getItem(INDICATORS_RESTORE_SENTINEL_KEY)).toBe("1");
+	});
+
+	it("前回クラッシュ形跡 (sentinel 残存) があれば復元せず設定を破棄する (ループ断絶)", () => {
+		window.localStorage.setItem(
+			SELECTED_INDICATORS_STORAGE_KEY,
+			JSON.stringify([{ id: "sma", params: { period: 20 } }]),
+		);
+		window.localStorage.setItem(INDICATORS_RESTORE_SENTINEL_KEY, "1");
+		expect(loadPersistedIndicators()).toEqual([]);
+		// 危険な設定と sentinel の両方が破棄される
+		expect(window.localStorage.getItem(SELECTED_INDICATORS_STORAGE_KEY)).toBeNull();
+		expect(window.localStorage.getItem(INDICATORS_RESTORE_SENTINEL_KEY)).toBeNull();
 	});
 });
