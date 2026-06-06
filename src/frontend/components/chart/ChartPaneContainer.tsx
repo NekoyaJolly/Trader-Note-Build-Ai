@@ -290,10 +290,21 @@ export function ChartPaneContainer({
     const syncVisibleRangeFromMain = (range: { from: Time; to: Time } | null) => {
       if (!range || syncingRef.current) return;
       syncingRef.current = true;
-      subChartsRef.current.forEach((chart) => {
-        chart.timeScale().setVisibleRange(range);
-      });
-      syncingRef.current = false;
+      try {
+        subChartsRef.current.forEach((chart) => {
+          // データ未投入のサブチャートに setVisibleRange すると lightweight-charts が
+          // "Value is null" を throw し、メイン+サブ同時表示でチャート全体がクラッシュする。
+          // try/catch で同期をスキップ (データ投入後の次回 range 変化で揃う) し全体を守る。
+          try {
+            chart.timeScale().setVisibleRange(range);
+          } catch {
+            // サブチャート未準備時はスキップ
+          }
+        });
+      } finally {
+        // 例外発生時も同期ガードを必ず解除する (解除漏れで以降の同期が止まるのを防ぐ)
+        syncingRef.current = false;
+      }
     };
 
     mainChart.timeScale().subscribeVisibleTimeRangeChange(syncVisibleRangeFromMain);
@@ -452,6 +463,20 @@ export function ChartPaneContainer({
           renderOnChart(chart, `sub-indicator-${pane.key}-${indicator.id}`, indicator);
         }
       }
+    }
+
+    // サブチャートにデータを投入した直後、メインの現在表示範囲へ揃える。
+    // (range 同期の購読は range 変化時のみ発火するため、データ投入直後は手動で 1 回揃える)
+    // setVisibleRange はデータ未準備時に throw しうるので try/catch で個別に保護する。
+    const currentRange = mainChartRef.current.timeScale().getVisibleRange();
+    if (currentRange) {
+      subChartsRef.current.forEach((chart) => {
+        try {
+          chart.timeScale().setVisibleRange(currentRange);
+        } catch {
+          // 未準備サブチャートはスキップ (次回 range 変化で揃う)
+        }
+      });
     }
   }, [barMs, paneDefs]);
 
