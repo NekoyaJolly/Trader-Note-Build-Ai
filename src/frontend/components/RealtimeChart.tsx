@@ -407,9 +407,11 @@ export function RealtimeChart({
 		}
 	}, [selectedIndicators]);
 
-	// 正常なページ離脱 (リロード/タブ閉じ) で復元 sentinel を下ろす。
-	// クラッシュ時は pagehide が発火しないため sentinel が残り、次回マウントで
-	// loadPersistedIndicators が復元をスキップしてクラッシュループを断つ。
+	// 正常な離脱で復元 sentinel を下ろす。クラッシュ時は下記いずれも走らないため sentinel が
+	// 残り、次回マウントで loadPersistedIndicators が復元をスキップしてクラッシュループを断つ。
+	// - pagehide: タブ閉じ / リロード (React cleanup が走らないケース) をカバー
+	// - cleanup: SPA ルート遷移での RealtimeChart アンマウントをカバー (pagehide は非発火)
+	//   → 正常遷移で sentinel が残って誤判定 (設定破棄) するのを防ぐ (Copilot review #360)
 	useEffect(() => {
 		if (typeof window === "undefined") return;
 		const clearSentinel = () => {
@@ -420,7 +422,10 @@ export function RealtimeChart({
 			}
 		};
 		window.addEventListener("pagehide", clearSentinel);
-		return () => window.removeEventListener("pagehide", clearSentinel);
+		return () => {
+			window.removeEventListener("pagehide", clearSentinel);
+			clearSentinel();
+		};
 	}, []);
 
 	// チャート OHLCV フォールバック用ステート
