@@ -84,9 +84,17 @@ export function DraggableOrderPanel({ symbol, disabled, disabledReason, onOrderP
 	// ドラッグ開始時のポインタ座標とパネル位置を記録する基準値
 	const dragState = useRef<{ startX: number; startY: number; startLeft: number; startTop: number } | null>(null);
 
-	// マウント後に開閉状態を復元する (既定: 折りたたみ=発注のみ)
+	// マウント後に開閉状態を復元する (既定: 折りたたみ=発注のみ)。
+	// effect 本体での同期 setState (cascading renders) を避けるためマイクロタスクに逃がす
+	// (位置復元 effect と同じ React Compiler 対策パターン)。
 	useEffect(() => {
-		setBodyOpen(loadPersistedBodyOpen());
+		let cancelled = false;
+		queueMicrotask(() => {
+			if (!cancelled) setBodyOpen(loadPersistedBodyOpen());
+		});
+		return () => {
+			cancelled = true;
+		};
 	}, []);
 
 	// 開閉トグル。状態を localStorage に永続化する。ハンドルのドラッグとは独立。
@@ -146,6 +154,20 @@ export function DraggableOrderPanel({ symbol, disabled, disabledReason, onOrderP
 			cancelled = true;
 		};
 	}, [clampToParent]);
+
+	// bodyOpen の変化 (復元 / 開閉トグル) でパネル実寸 (高さ) が変わるため、現在位置を再クランプする。
+	// これがないと「閉」基準でクランプされた位置のまま「開」になり、パネル下部がコンテナ外へはみ出す。
+	// レンダー確定後に新しい offsetHeight で測り直すためマイクロタスクに逃がす (同期 setState 回避)。
+	useEffect(() => {
+		let cancelled = false;
+		queueMicrotask(() => {
+			if (cancelled) return;
+			setPosition((prev) => (prev ? clampToParent(prev.left, prev.top) : prev));
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [bodyOpen, clampToParent]);
 
 	const persist = useCallback((pos: Position) => {
 		if (typeof window === "undefined") return;
@@ -217,17 +239,16 @@ export function DraggableOrderPanel({ symbol, disabled, disabledReason, onOrderP
 		>
 			{/* ドラッグハンドル兼アコーディオンのヘッダー。
 			    バー自体をつまんでドラッグ移動、右端の ▸/▾ ボタンで本体を開閉する (発注のみ↔BUY/SELL)。
-			    本体を閉じている時は単独カードなので全角丸、開いている時は本体と連結するので上だけ角丸。 */}
+			    本体を閉じている時は単独カードなので全角丸、開いている時は本体と連結するので上だけ角丸。
+			    ドラッグ移動はポインタ専用ジェスチャーのため role="button"/tabIndex は付けない
+			    (キーボード操作を伴わない偽ボタンは a11y 上むしろ有害)。キーボード操作する開閉は右端の
+			    実 <button>、発注 (BUY/SELL) も実ボタンなので到達可能。 */}
 			<div
 				onPointerDown={handlePointerDown}
 				onPointerMove={handlePointerMove}
 				onPointerUp={handlePointerUp}
 				onPointerCancel={handlePointerUp}
 				className={`flex items-center justify-between gap-1 cursor-move select-none touch-none border border-gray-700 bg-gray-800/90 px-2 py-0.5 text-[10px] text-gray-300 backdrop-blur-sm ${bodyOpen ? "rounded-t-lg border-b-0" : "rounded-lg"}`}
-				role="button"
-				// ドラッグ操作のハンドル。キーボードでも到達できるようフォーカス可能にする (a11y)
-				tabIndex={0}
-				aria-label="発注パネルを移動"
 				title="ドラッグで移動"
 			>
 				<span className="flex items-center gap-1">
