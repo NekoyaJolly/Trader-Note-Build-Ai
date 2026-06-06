@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { CandlePatternId } from '../../shared/patterns';
 
 /**
  * analysis-engine（Python）との通信スキーマ
@@ -16,31 +17,43 @@ export const AnalysisEngineIndicatorSpecSchema = z.object({
 
 export type AnalysisEngineIndicatorSpec = z.infer<typeof AnalysisEngineIndicatorSpecSchema>;
 
+/**
+ * analysis-engine `/v1/indicator-series` の `patterns` 引数に渡せる ID 集合の単一情報源。
+ *
+ * = ローソク足パターン (`shared/patterns` の `CandlePatternId` と同一集合) + `bb_bandwidth`。
+ * `bb_bandwidth` は BB 帯幅の収縮判定で、ローソク足パターンではなく volatility flag だが、
+ * pattern-flag 取得 API の引数としては同じ口で受けるため superset として持つ。
+ * この 1 か所だけで定義し、indicator-series / by-version / フロント公開ルートが共有する
+ * (リテラルの重複定義によるドリフトを防ぐ)。
+ */
+export const AnalysisEnginePatternIdSchema = z.enum([
+  'pinbar',
+  'pinbar_bull',
+  'pinbar_bear',
+  'hammer',
+  'hammer_bull',
+  'hammer_bear',
+  'shooting_star',
+  'engulfing_bull',
+  'engulfing_bear',
+  'doji',
+  'thrust_bull',
+  'thrust_bear',
+  'bb_bandwidth',
+]);
+export type AnalysisEnginePatternId = z.infer<typeof AnalysisEnginePatternIdSchema>;
+
+// 型ドリフトガード: ローソク足パターンの単一情報源 (shared/patterns) に pattern を追加して
+// こちらの enum を更新し忘れると、この代入で型エラーになる (CandlePatternId ⊆ AnalysisEnginePatternId)。
+const _assertCandlePatternSubset = (p: CandlePatternId): AnalysisEnginePatternId => p;
+
 export const AnalysisEngineIndicatorSeriesRequestSchema = z.object({
   symbol: z.string().min(1),
   timeframe: z.string().min(1),
   startDate: z.string().datetime(),
   endDate: z.string().datetime(),
   indicators: z.array(AnalysisEngineIndicatorSpecSchema).default([]),
-  patterns: z
-    .array(
-      z.enum([
-        'pinbar',
-        'pinbar_bull',
-        'pinbar_bear',
-        'hammer',
-        'hammer_bull',
-        'hammer_bear',
-        'shooting_star',
-        'engulfing_bull',
-        'engulfing_bear',
-        'doji',
-        'thrust_bull',
-        'thrust_bear',
-        'bb_bandwidth',
-      ])
-    )
-    .default([]),
+  patterns: z.array(AnalysisEnginePatternIdSchema).default([]),
   bbBandwidthWindow: z.number().int().min(2).max(500).default(20),
   bbBandwidthThreshold: z.number().min(0).max(10).default(0.2),
   // Phase 7a: SMC structures 取得フラグ。default false で既存挙動互換。
@@ -66,25 +79,7 @@ export const AnalysisEngineIndicatorSeriesByVersionRequestSchema = z.object({
   timeframe: z.string().min(1),
   startDate: z.string().datetime(),
   endDate: z.string().datetime(),
-  patterns: z
-    .array(
-      z.enum([
-        'pinbar',
-        'pinbar_bull',
-        'pinbar_bear',
-        'hammer',
-        'hammer_bull',
-        'hammer_bear',
-        'shooting_star',
-        'engulfing_bull',
-        'engulfing_bear',
-        'doji',
-        'thrust_bull',
-        'thrust_bear',
-        'bb_bandwidth',
-      ])
-    )
-    .default([]),
+  patterns: z.array(AnalysisEnginePatternIdSchema).default([]),
   bbBandwidthWindow: z.number().int().min(2).max(500).default(20),
   bbBandwidthThreshold: z.number().min(0).max(10).default(0.2),
 });

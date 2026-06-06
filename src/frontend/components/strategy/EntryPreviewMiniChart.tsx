@@ -1,19 +1,24 @@
 "use client";
 
 /**
- * エントリー条件プレビュー（固定サンプル）
+ * エントリー条件プレビュー（実データ）
  *
  * 目的:
- * - 初学者が「条件を作ると、どの状態でエントリーになるのか」を直感的に理解できるようにする
- * - 実相場データの有無に依存せず、常にヒット例が出る固定サンプルで学習できるようにする
+ * - ユーザーが組んだエントリー条件が「選択シンボル・時間足の実相場でどこで・どれくらい成立するか」を
+ *   チャート上にマーカー表示して直感的に確認できるようにする (Issue #368)。
  *
  * 方針:
- * - 指標計算はプレビュー用途としてフロント側で簡易計算（本番バックテストは analysis-engine が正）
- * - UIは最小限（ラインチャート + エントリーマーカー + 件数表示）
+ * - ローソク足は /api/chart/candles の実データ (EODHD 主体 + DB キャッシュ)。
+ * - 指標計算は analysis-engine に一元化 (/api/chart/indicator-series 経由)。フロント自前計算は
+ *   実データが取れない場合の固定サンプル fallback でのみ使う。
+ * - 描画はメインチャートと同じ ChartPaneContainer を再利用 (RSI 等のサブペイン・本数無制限・
+ *   見た目統一を一括で解決)。条件評価エンジン (evalGroup) は cacheKey で系列を引くため、
+ *   analysis-engine の系列を timestamp 整列するだけで無改造で実データを評価できる。
  */
 
 import React, { useEffect, useMemo, useState } from "react";
-import CandlestickChart, {
+import ChartPaneContainer from "@/components/chart/ChartPaneContainer";
+import type {
   ChartMarker,
   IndicatorLineConfig,
   OHLCVDataPoint,
@@ -25,8 +30,18 @@ import type {
   IndicatorCondition,
   PatternCondition,
 } from "@/types/strategy";
-import { isConditionGroup, isIndicatorCondition, isPatternCondition } from "@/types/strategy";
+import { isIndicatorCondition, isPatternCondition } from "@/types/strategy";
 import type { IndicatorParams } from "@/types/indicator";
+import { apiFetch } from "@/lib/apiClient";
+import { DEFAULT_DATA_COUNT, DEFAULT_TIMEFRAME_API } from "@/lib/marketConstants";
+import {
+  alignSeriesToCandles,
+  buildPreviewIndicatorLines,
+  extractConditionRequirements,
+  fetchChartIndicatorSeries,
+  makeIndicatorCacheKey,
+  type AlignedSeries,
+} from "@/lib/previewIndicatorSeries";
 
 type PriceType = "open" | "high" | "low" | "close";
 
@@ -66,17 +81,6 @@ type EvalContext = {
   sequenceState?: { currentStep: number; lastStepIndex: number };
   ifThenState?: { triggered: boolean; triggeredIndex: number };
 };
-
-function stableParamsKey(params: Record<string, number>): string {
-  const keys = Object.keys(params).sort();
-  const normalized: Record<string, number> = {};
-  for (const k of keys) normalized[k] = params[k];
-  return JSON.stringify(normalized);
-}
-
-function makeIndicatorCacheKey(indicatorId: string, params: Record<string, number>, field: string): string {
-  return `${indicatorId.toLowerCase()}_${stableParamsKey(params)}_${field}`;
-}
 
 function getPrice(bar: OHLCV, priceType: PriceType): number {
   switch (priceType) {
@@ -613,138 +617,238 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
   return debounced;
 }
 
+/**
+ * 指標のウォームアップ本数 (条件評価を開始する前にスキップするバー数) を見積もる。
+ * 移動平均などは初期 N 本が安定しないため、条件に含まれる指標の最大ルックバックを採る。
+ */
+function estimateLookback(indicatorId: string, params: Record<string, number>): number {
+  const id = indicatorId.toLowerCase();
+
+  const pick = (keys: string[], fallback: number): number => {
+    for (const k of keys) {
+      const v = params[k];
+      if (typeof v === "number" && Number.isFinite(v) && v > 0) return Math.floor(v);
+    }
+    return fallback;
+  };
+
+  if (id === "sma" || id === "ema" || id === "rsi" || id === "atr" || id === "cci" || id === "roc" || id === "mfi" || id === "cmf" || id === "dema" || id === "tema") {
+    return pick(["period", "length"], 20);
+  }
+  if (id === "bb" || id === "bollinger" || id === "bbands" || id === "kc") {
+    return pick(["period", "length"], 20);
+  }
+  if (id === "stochastic" || id === "stoch") {
+    return Math.max(pick(["kPeriod", "k"], 14), pick(["dPeriod", "d"], 3));
+  }
+  if (id === "macd") {
+    const fast = pick(["fastPeriod", "fast"], 12);
+    const slow = pick(["slowPeriod", "slow"], 26);
+    const signal = pick(["signalPeriod", "signal"], 9);
+    return Math.max(slow, fast) + signal;
+  }
+  if (id === "aroon") {
+    return pick(["period", "length"], 25);
+  }
+  if (id === "psar") {
+    // PSAR は厳密には期間で決まらないが、初期安定化のため最低限の本数を要求
+    return 30;
+  }
+  if (id === "ichimoku") {
+    return Math.max(pick(["spanBPeriod", "senkou"], 52), pick(["basePeriod", "kijun"], 26));
+  }
+  if (id === "vwap" || id === "obv" || id === "willr") {
+    return pick(["period", "length"], 20);
+  }
+
+  return 50;
+}
+
+/** /api/chart/candles レスポンス (ChartCandlesResponse) の最小ランタイム検証用。 */
+interface ChartCandlePayload {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number | null;
+}
+function isChartCandlesPayload(value: unknown): value is { candles: ChartCandlePayload[]; warning?: string } {
+  if (typeof value !== "object" || value === null) return false;
+  const candles = (value as { candles?: unknown }).candles;
+  if (!Array.isArray(candles)) return false;
+  return candles.every(
+    (c) =>
+      typeof c === "object" &&
+      c !== null &&
+      typeof (c as { time?: unknown }).time === "number" &&
+      typeof (c as { open?: unknown }).open === "number" &&
+      typeof (c as { high?: unknown }).high === "number" &&
+      typeof (c as { low?: unknown }).low === "number" &&
+      typeof (c as { close?: unknown }).close === "number",
+  );
+}
+
+/** プレビューに供給する統一データ (実データ or サンプルのどちらでも同じ形)。 */
+interface ResolvedPreview {
+  /** チャート描画用 (timestamp は ms) */
+  ohlcvData: OHLCVDataPoint[];
+  /** 条件評価用 (eval は o/h/l/c のみ参照、timestamp は未使用) */
+  evalData: OHLCV[];
+  /** cacheKey → 値配列 (ohlcvData と同じ index) */
+  indicatorCache: Map<string, number[]>;
+  /** patternId → フラグ配列 (ohlcvData と同じ index) */
+  patternCache: Map<CandlePatternId, boolean[]>;
+  /** 固定サンプルで描画しているか (= 実データ取得不可) */
+  isSample: boolean;
+}
+
 export function EntryPreviewMiniChart({
   entryConditions,
-  height = 260,
+  symbol,
+  timeframe,
+  height = 360,
 }: {
   entryConditions: ConditionGroup;
+  /** プレビュー対象シンボル (例: USDJPY)。実データ取得に使う。 */
+  symbol: string;
+  /** プレビュー対象の時間足 (API 文字列、例: 1h)。未指定時は既定 TF。 */
+  timeframe?: string;
   height?: number;
 }) {
-  const sampleData = useMemo(() => generateFixedSampleData(300), []);
+  const tf = timeframe ?? DEFAULT_TIMEFRAME_API;
   const debouncedConditions = useDebouncedValue(entryConditions, 400);
 
-  const { indicatorCache, patternCache, warmupBars } = useMemo(() => {
-    // 条件から必要な指標specを抽出（左辺＋右辺indicator）
-    const specs = new Map<string, { indicatorId: string; params: Record<string, number>; field: string }>();
+  // ---- 実ローソク足 (symbol/timeframe ごとに取得) ----
+  const [realCandles, setRealCandles] = useState<OHLCVDataPoint[] | null>(null);
+  const [candlesLoading, setCandlesLoading] = useState(true);
+  const [candlesError, setCandlesError] = useState<string | null>(null);
+  const [candlesWarning, setCandlesWarning] = useState<string | null>(null);
 
-    const visit = (node: ConditionGroup | IndicatorCondition | PatternCondition) => {
-      if (isConditionGroup(node)) {
-        for (const c of node.conditions) visit(c);
-        if (node.operator === "IF_THEN") {
-          if (node.ifCondition) visit(node.ifCondition);
-          if (node.thenCondition) visit(node.thenCondition);
+  useEffect(() => {
+    let aborted = false;
+    const controller = new AbortController();
+    setCandlesLoading(true);
+    setCandlesError(null);
+    setCandlesWarning(null);
+    // symbol/tf 変更時は旧シンボルのローソク足を即クリアする。残すとヘッダーは新 symbol/tf
+    // なのに本体は旧データ・loading も出ない不整合になる (取得完了まで読み込み中表示にする)。
+    setRealCandles(null);
+    void (async () => {
+      try {
+        const res = await apiFetch(
+          `/api/chart/candles?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(tf)}&limit=${DEFAULT_DATA_COUNT}`,
+          { signal: controller.signal },
+        );
+        if (!res.ok) {
+          const errBody = (await res.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(errBody?.error || `APIエラー: ${res.status}`);
         }
-        return;
+        const payload: unknown = await res.json();
+        if (!isChartCandlesPayload(payload)) throw new Error("チャートデータの形式が不正です");
+        if (aborted) return;
+        const ohlcv: OHLCVDataPoint[] = payload.candles.map((c) => ({
+          timestamp: c.time * 1000, // Unix 秒 → ms
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+          volume: c.volume ?? 0,
+        }));
+        setRealCandles(ohlcv);
+        if (ohlcv.length === 0 && payload.warning) setCandlesWarning(payload.warning);
+      } catch (err) {
+        if (aborted || (err instanceof DOMException && err.name === "AbortError")) return;
+        setRealCandles(null);
+        setCandlesError(err instanceof Error ? err.message : "チャートデータ取得に失敗しました");
+      } finally {
+        if (!aborted) setCandlesLoading(false);
       }
-
-      if (isPatternCondition(node)) return;
-      if (!isIndicatorCondition(node)) return;
-
-      const cond = node;
-      const leftParams: Record<string, number> = {};
-      for (const [k, v] of Object.entries(cond.params ?? {})) {
-        if (typeof v === "number" && Number.isFinite(v)) leftParams[k] = v;
-      }
-      const leftKey = makeIndicatorCacheKey(cond.indicatorId, leftParams, cond.field);
-      specs.set(leftKey, { indicatorId: cond.indicatorId, params: leftParams, field: cond.field });
-
-      if (cond.compareTarget.type === "indicator") {
-        const rightParams: Record<string, number> = {};
-        for (const [k, v] of Object.entries(cond.compareTarget.params ?? {})) {
-          if (typeof v === "number" && Number.isFinite(v)) rightParams[k] = v;
-        }
-        const rightKey = makeIndicatorCacheKey(cond.compareTarget.indicatorId, rightParams, cond.compareTarget.field);
-        specs.set(rightKey, { indicatorId: cond.compareTarget.indicatorId, params: rightParams, field: cond.compareTarget.field });
-      }
+    })();
+    return () => {
+      aborted = true;
+      controller.abort();
     };
+  }, [symbol, tf]);
 
-    visit(debouncedConditions);
+  // ---- 実指標系列 (条件 + 期間ごとに analysis-engine から取得 → ローソク足へ整列) ----
+  const [realAligned, setRealAligned] = useState<AlignedSeries | null>(null);
+  const [seriesError, setSeriesError] = useState<string | null>(null);
 
-    const cache = new Map<string, number[]>();
-    for (const spec of specs.values()) {
-      const series = computeIndicatorSeries(sampleData, spec.indicatorId, spec.params);
-      const key = makeIndicatorCacheKey(spec.indicatorId, spec.params, spec.field);
-      cache.set(key, series);
+  useEffect(() => {
+    if (!realCandles || realCandles.length === 0) {
+      setRealAligned(null);
+      setSeriesError(null);
+      return;
+    }
+    const { specs, patternIds } = extractConditionRequirements(debouncedConditions);
+    // 条件が空 (指標もパターンも無い) なら取得不要。空キャッシュで「指標なし」を即確定させる。
+    if (specs.length === 0 && patternIds.length === 0) {
+      setRealAligned({ indicatorCache: new Map(), patternCache: new Map() });
+      setSeriesError(null);
+      return;
     }
 
-    const estimateLookback = (indicatorId: string, params: Record<string, number>): number => {
-      const id = indicatorId.toLowerCase();
+    let aborted = false;
+    const controller = new AbortController();
+    setSeriesError(null);
+    // 条件/symbol/tf 変更で再取得する間は旧系列キャッシュをクリアする。残すと「古い系列 × 新条件」で
+    // 評価して成立マーカー/件数が一時的に誤る。取得完了までは空キャッシュ (= 指標なし) で評価させる。
+    setRealAligned(null);
+    void (async () => {
+      try {
+        const startDate = new Date(realCandles[0].timestamp).toISOString();
+        const endDate = new Date(realCandles[realCandles.length - 1].timestamp).toISOString();
+        const response = await fetchChartIndicatorSeries({
+          symbol,
+          timeframe: tf,
+          startDate,
+          endDate,
+          specs,
+          patternIds,
+          signal: controller.signal,
+        });
+        if (aborted) return;
+        const aligned = alignSeriesToCandles(response, realCandles.map((c) => c.timestamp));
+        setRealAligned(aligned);
+      } catch (err) {
+        if (aborted || (err instanceof DOMException && err.name === "AbortError")) return;
+        setRealAligned(null);
+        setSeriesError(err instanceof Error ? err.message : "指標計算の取得に失敗しました");
+      }
+    })();
+    return () => {
+      aborted = true;
+      controller.abort();
+    };
+  }, [realCandles, debouncedConditions, symbol, tf]);
 
-      const pick = (keys: string[], fallback: number): number => {
-        for (const k of keys) {
-          const v = params[k];
-          if (typeof v === "number" && Number.isFinite(v) && v > 0) return Math.floor(v);
-        }
-        return fallback;
+  // ローソク足が取得できた時のみ実データ。取れない (エラー / 空) ときは固定サンプルへ。
+  const isRealReady = realCandles !== null && realCandles.length > 0;
+
+  // 実データ or サンプルを同じ形に解決する。
+  const resolved = useMemo<ResolvedPreview>(() => {
+    if (isRealReady && realCandles) {
+      const evalData: OHLCV[] = realCandles.map((d) => ({
+        timestamp: String(d.timestamp),
+        open: d.open,
+        high: d.high,
+        low: d.low,
+        close: d.close,
+        volume: d.volume ?? 0,
+      }));
+      return {
+        ohlcvData: realCandles,
+        evalData,
+        indicatorCache: realAligned?.indicatorCache ?? new Map<string, number[]>(),
+        patternCache: realAligned?.patternCache ?? new Map<CandlePatternId, boolean[]>(),
+        isSample: false,
       };
-
-      if (id === "sma" || id === "ema" || id === "rsi" || id === "atr" || id === "cci" || id === "roc" || id === "mfi" || id === "cmf" || id === "dema" || id === "tema") {
-        return pick(["period", "length"], 20);
-      }
-      if (id === "bb" || id === "bollinger" || id === "bbands" || id === "kc") {
-        return pick(["period", "length"], 20);
-      }
-      if (id === "stochastic" || id === "stoch") {
-        return Math.max(pick(["kPeriod", "k"], 14), pick(["dPeriod", "d"], 3));
-      }
-      if (id === "macd") {
-        const fast = pick(["fastPeriod", "fast"], 12);
-        const slow = pick(["slowPeriod", "slow"], 26);
-        const signal = pick(["signalPeriod", "signal"], 9);
-        return Math.max(slow, fast) + signal;
-      }
-      if (id === "aroon") {
-        return pick(["period", "length"], 25);
-      }
-      if (id === "psar") {
-        // PSAR は厳密には期間で決まらないが、初期安定化のため最低限の本数を要求
-        return 30;
-      }
-      if (id === "ichimoku") {
-        return Math.max(pick(["spanBPeriod", "senkou"], 52), pick(["basePeriod", "kijun"], 26));
-      }
-      if (id === "vwap" || id === "obv" || id === "willr") {
-        return pick(["period", "length"], 20);
-      }
-
-      return 50;
-    };
-
-    let maxLookback = 50;
-    for (const spec of specs.values()) {
-      maxLookback = Math.max(maxLookback, estimateLookback(spec.indicatorId, spec.params));
     }
 
-    // 余裕を少し足してから判定開始（移動平均の安定化）
-    const warmup = Math.min(sampleData.length - 1, Math.max(30, maxLookback + 10));
-
-    const patterns = computeCandlestickPatterns(sampleData);
-    return { indicatorCache: cache, patternCache: patterns, warmupBars: warmup };
-  }, [debouncedConditions, sampleData]);
-
-  // 300本のうち、エントリー成立バーを抽出する純粋計算。
-  // 入力 (debouncedConditions / indicatorCache / patternCache / sampleData / warmupBars) は
-  // すべて派生・固定値なので、effect + setState ではなく useMemo で同期的に導出する。
-  const entryIndices = useMemo(() => {
-    const indices: number[] = [];
-    const ctx: EvalContext = {
-      data: sampleData,
-      currentIndex: 0,
-      indicatorCache,
-      patternCache,
-    };
-
-    // 指標のウォームアップ（条件に応じて）を考慮して前半をスキップ
-    for (let i = warmupBars; i < sampleData.length; i++) {
-      ctx.currentIndex = i;
-      const hit = evalGroup(ctx, debouncedConditions);
-      if (hit) indices.push(i);
-    }
-    return indices;
-  }, [debouncedConditions, indicatorCache, patternCache, sampleData, warmupBars]);
-
-  const ohlcvData: OHLCVDataPoint[] = useMemo(() => {
-    return sampleData.map((d) => ({
+    // フォールバック: 固定サンプル + フロント自前計算 (実データが無い時のみ)
+    const sample = generateFixedSampleData(300);
+    const ohlcvData: OHLCVDataPoint[] = sample.map((d) => ({
       timestamp: Date.parse(d.timestamp),
       open: d.open,
       high: d.high,
@@ -752,114 +856,121 @@ export function EntryPreviewMiniChart({
       close: d.close,
       volume: d.volume,
     }));
-  }, [sampleData]);
-
-  const overlayIndicatorKeys = useMemo(() => {
-    // プレビューで計算済みのうち、価格スケールで重ねられるものだけを表示
-    const keys: string[] = [];
-    for (const key of indicatorCache.keys()) {
-      const id = key.split("_")[0] ?? "";
-      if (["ema", "sma", "vwap", "bb", "kc", "psar"].includes(id)) {
-        keys.push(key);
-      }
+    const { specs } = extractConditionRequirements(debouncedConditions);
+    const indicatorCache = new Map<string, number[]>();
+    for (const spec of specs) {
+      indicatorCache.set(
+        makeIndicatorCacheKey(spec.indicatorId, spec.params, spec.field),
+        computeIndicatorSeries(sample, spec.indicatorId, spec.params),
+      );
     }
-    return keys.slice(0, 3);
-  }, [indicatorCache]);
+    return {
+      ohlcvData,
+      evalData: sample,
+      indicatorCache,
+      patternCache: computeCandlestickPatterns(sample),
+      isSample: true,
+    };
+  }, [isRealReady, realCandles, realAligned, debouncedConditions]);
 
-  const indicatorLines: IndicatorLineConfig[] = useMemo(() => {
-    // 既存で使っている色のみ（新規の色を増やさない）
-    const palette = ["#06b6d4", "#8b5cf6", "#f59e0b"];
-
-    const lines: IndicatorLineConfig[] = [];
-    for (let idx = 0; idx < overlayIndicatorKeys.length; idx++) {
-      const key = overlayIndicatorKeys[idx]!;
-      const series = indicatorCache.get(key);
-      if (!series) continue;
-
-      const [rawId, rawParams, rawField] = key.split("_");
-      const indicatorId = rawId ?? "";
-      const field = rawField ?? "value";
-
-      let name = indicatorId.toUpperCase();
-      if (rawParams) {
-        try {
-          const params = JSON.parse(rawParams) as Record<string, number>;
-          const values = Object.values(params);
-          if (values.length > 0) name = `${name}(${values.join(",")})`;
-        } catch {
-          // 失敗時は最小表示
-        }
-      }
-      if (field !== "value") name = `${name}.${field}`;
-
-      const data: { timestamp: number; value: number }[] = [];
-      for (let i = 0; i < ohlcvData.length; i++) {
-        const v = series[i];
-        if (v === undefined || !Number.isFinite(v)) continue;
-        data.push({ timestamp: ohlcvData[i]!.timestamp, value: v });
-      }
-
-      lines.push({
-        id: key,
-        name,
-        data,
-        color: palette[idx % palette.length]!,
-        lineWidth: 2,
-        pane: "main",
-      });
+  // ウォームアップ本数 (条件の最大ルックバック + 余裕)
+  const warmupBars = useMemo(() => {
+    const { specs } = extractConditionRequirements(debouncedConditions);
+    let maxLookback = 50;
+    for (const spec of specs) {
+      maxLookback = Math.max(maxLookback, estimateLookback(spec.indicatorId, spec.params));
     }
+    return Math.min(Math.max(resolved.evalData.length - 1, 0), Math.max(30, maxLookback + 10));
+  }, [debouncedConditions, resolved.evalData.length]);
 
-    return lines;
-  }, [indicatorCache, ohlcvData, overlayIndicatorKeys]);
+  // 成立バーを抽出する純粋計算 (effect + setState ではなく同期 useMemo)。
+  const entryIndices = useMemo(() => {
+    const indices: number[] = [];
+    const ctx: EvalContext = {
+      data: resolved.evalData,
+      currentIndex: 0,
+      indicatorCache: resolved.indicatorCache,
+      patternCache: resolved.patternCache,
+    };
+    for (let i = warmupBars; i < resolved.evalData.length; i++) {
+      ctx.currentIndex = i;
+      if (evalGroup(ctx, debouncedConditions)) indices.push(i);
+    }
+    return indices;
+  }, [resolved, warmupBars, debouncedConditions]);
 
+  // 成立バーの緑マーカー
   const markers: ChartMarker[] = useMemo(() => {
     const out: ChartMarker[] = [];
     for (const i of entryIndices) {
-      const bar = ohlcvData[i];
+      const bar = resolved.ohlcvData[i];
       if (!bar) continue;
-      out.push({
-        timestamp: bar.timestamp,
-        position: "aboveBar",
-        color: "#22c55e",
-        shape: "circle",
-      });
+      out.push({ timestamp: bar.timestamp, position: "aboveBar", color: "#22c55e", shape: "circle" });
     }
     return out;
-  }, [entryIndices, ohlcvData]);
+  }, [entryIndices, resolved.ohlcvData]);
 
-  const focusTimestamp = useMemo(() => {
-    const idx = entryIndices[0] ?? 222;
-    const bar = ohlcvData[Math.max(0, Math.min(idx, ohlcvData.length - 1))];
-    return bar?.timestamp ?? null;
-  }, [entryIndices, ohlcvData]);
+  // 条件で使う指標を漏れなくオーバーレイ (価格系=メイン / オシレーター系=サブペイン)
+  const indicatorLines: IndicatorLineConfig[] = useMemo(
+    () => buildPreviewIndicatorLines(resolved.indicatorCache, resolved.ohlcvData.map((d) => d.timestamp)),
+    [resolved],
+  );
+
+  const showLoadingBox = candlesLoading && realCandles === null && candlesError === null;
+  const seriesPending = isRealReady && realAligned === null && seriesError === null;
 
   return (
     <div className="bg-slate-900/40 rounded-lg border border-slate-700 p-3">
-      <div className="flex items-center justify-between mb-2">
-        <div>
-          <div className="text-sm font-semibold text-gray-200">プレビュー（固定サンプル）</div>
-          <div className="text-[11px] text-gray-400">上昇→押し目→レンジ→ブレイク→押し目（300本）</div>
+      <div className="flex items-center justify-between mb-2 gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-gray-200">プレビュー</span>
+            {resolved.isSample ? (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/50 border border-amber-700 text-amber-300">
+                サンプル
+              </span>
+            ) : (
+              <>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-gray-300">{symbol}</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-gray-300">{tf}</span>
+              </>
+            )}
+          </div>
+          <div className="text-[11px] text-gray-400">
+            {resolved.isSample
+              ? "実データを取得できないため固定サンプルで表示しています"
+              : "選択シンボル・時間足の実データで条件の成立箇所を表示"}
+          </div>
         </div>
-        <div className="text-[11px] text-gray-300">
+        <div className="text-[11px] text-gray-300 whitespace-nowrap">
           エントリー候補: <span className="text-green-300 font-semibold">{entryIndices.length}</span>
         </div>
       </div>
 
-      <div className="rounded bg-slate-950/40 border border-slate-800">
-        <CandlestickChart
-          ohlcvData={ohlcvData}
-          indicators={indicatorLines}
-          markers={markers}
-          height={height}
-          focusTimestamp={focusTimestamp}
-        />
-      </div>
+      {showLoadingBox ? (
+        <div
+          className="flex items-center justify-center rounded bg-slate-950/40 border border-slate-800 text-[12px] text-gray-400"
+          style={{ height: `${height}px` }}
+        >
+          実データを読み込み中…
+        </div>
+      ) : (
+        <div className="rounded bg-slate-950/40 border border-slate-800 overflow-hidden">
+          <ChartPaneContainer
+            ohlcvData={resolved.ohlcvData}
+            indicators={indicatorLines}
+            markers={markers}
+            height={height}
+          />
+        </div>
+      )}
 
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-gray-500">
         <div>条件を変更すると「成立バー」が緑点で表示されます（デバウンス更新）。</div>
-        {overlayIndicatorKeys.length > 0 && (
-          <div className="text-gray-400">表示中の指標: {overlayIndicatorKeys.map((k) => k.split('_')[0]?.toUpperCase()).join(', ')}</div>
-        )}
+        {seriesPending && <div className="text-cyan-300">指標を計算中…</div>}
+        {seriesError && <div className="text-amber-300">指標の取得に失敗（ローソク足のみ表示）</div>}
+        {candlesWarning && <div className="text-amber-300">{candlesWarning}</div>}
+        {resolved.isSample && candlesError && <div className="text-amber-400">{candlesError}</div>}
       </div>
     </div>
   );
