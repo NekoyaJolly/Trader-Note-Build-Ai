@@ -378,6 +378,9 @@ export function ChartPaneContainer({
   }, [mainHeight, subHeight, paneSignature]);
 
   // データ反映
+  // paneSignature も依存に含める: サブpane の増減で init effect がチャートを作り直すと
+  // ローソク足/出来高の series は空の新インスタンスになるため、データを再投入しないと
+  // 「サブインジ (RSI 等) を足すとローソク足が消える」状態になる。再生成のたびに再投入する。
   useEffect(() => {
     if (!mainSeriesRef.current || !mainChartRef.current) return;
     mainSeriesRef.current.setData(toCandleData(ohlcvData));
@@ -386,7 +389,7 @@ export function ChartPaneContainer({
       (volumeSeries as ISeriesApi<"Histogram">).setData(toVolumeData(ohlcvData));
     }
     mainChartRef.current.timeScale().fitContent();
-  }, [ohlcvData]);
+  }, [ohlcvData, paneSignature]);
 
   // インジケーター反映
   useEffect(() => {
@@ -611,7 +614,9 @@ export function ChartPaneContainer({
         addLine(`pos-${position.positionId}-sl`, { time: start, value: position.stopLoss }, { time: end, value: position.stopLoss }, "rgba(239,68,68,0.85)", 1, true);
       }
     }
-  }, [barMs, drawnLines, ohlcvData, positionOverlays]);
+    // paneSignature も依存に含める: サブpane 増減でチャートが作り直されると drawnSeriesRef が
+    // クリアされるため、描画ライン/ポジションラインを再投入しないと消えてしまう。
+  }, [barMs, drawnLines, ohlcvData, positionOverlays, paneSignature]);
 
   return (
     <div ref={containerRef} className="w-full rounded-lg overflow-hidden border border-zinc-800 bg-zinc-950">
