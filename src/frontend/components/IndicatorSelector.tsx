@@ -6,7 +6,8 @@
  * チャートヘッダーに配置し、ユーザーがインジケーターを選択できるUIを提供
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   INDICATOR_DEFINITIONS,
   getAllCategories,
@@ -56,6 +57,10 @@ export function IndicatorSelector({
   const [isOpen, setIsOpen] = useState(false);
   const [editingIndicatorId, setEditingIndicatorId] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
+  // ドロップダウンはツールバーの overflow に切り取られないよう body へ portal + fixed 配置する。
+  // 開いた瞬間にボタン位置 (rect) から表示座標を決める。
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   // 画面サイズを監視
   useEffect(() => {
@@ -65,6 +70,20 @@ export function IndicatorSelector({
     checkMobile();
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // インジケーターボタンの開閉。開く時にボタンの位置からドロップダウン座標を算出する。
+  const handleToggleOpen = useCallback(() => {
+    setIsOpen((prev) => {
+      if (prev) return false;
+      const rect = buttonRef.current?.getBoundingClientRect();
+      if (rect && typeof window !== 'undefined') {
+        const width = Math.min(window.innerWidth - 16, 500);
+        const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+        setMenuPos({ top: rect.bottom + 4, left, width });
+      }
+      return true;
+    });
   }, []);
 
   /**
@@ -133,7 +152,8 @@ export function IndicatorSelector({
     return (
       <div className="relative">
         <button
-          onClick={() => setIsOpen(!isOpen)}
+          ref={buttonRef}
+          onClick={handleToggleOpen}
           className="bg-gray-700 hover:bg-gray-600 text-white text-xs px-3 py-1.5 rounded border border-gray-600 hover:border-gray-500 font-semibold flex items-center gap-2"
         >
           <span>📈 インジケーター</span>
@@ -144,13 +164,19 @@ export function IndicatorSelector({
           )}
         </button>
 
-        {isOpen && (
+        {isOpen && typeof document !== 'undefined' && createPortal(
           <>
+            {/* 背景クリックで閉じる */}
             <div
-              className="fixed inset-0 z-10"
+              className="fixed inset-0 z-[60]"
               onClick={() => setIsOpen(false)}
             />
-            <div className={`${isMobile ? 'fixed bottom-16 left-0 right-0 mb-2 mx-2' : 'absolute top-full left-0 mt-1'} bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-20 max-h-[600px] overflow-y-auto min-w-[300px] ${isMobile ? 'w-auto' : 'w-[90vw] max-w-[500px]'} ${isMobile ? '' : 'resize'} ${isMobile ? '' : 'overflow-auto'}`}>
+            {/* ドロップダウン本体: ツールバーの overflow に切られないよう body へ portal + fixed 配置。
+                モバイルは下からのシート、デスクトップはボタン直下に表示する。 */}
+            <div
+              className={`fixed z-[61] bg-gray-800 border border-gray-700 rounded-lg shadow-xl max-h-[70vh] overflow-y-auto ${isMobile ? 'left-2 right-2 bottom-16' : ''}`}
+              style={isMobile ? undefined : { top: menuPos?.top ?? 60, left: menuPos?.left ?? 16, width: menuPos?.width ?? 500 }}
+            >
               <div className="p-3 space-y-3">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-sm font-semibold text-white">インジケーター設定</h3>
@@ -175,13 +201,13 @@ export function IndicatorSelector({
                 ))}
               </div>
             </div>
-            
+
             {/* 設定モーダル */}
             {editingIndicatorId && (() => {
               const indicator = INDICATOR_DEFINITIONS.find((ind) => ind.id === editingIndicatorId);
               const selected = selectedIndicators.find((sel) => sel.id === editingIndicatorId);
               if (!indicator) return null;
-              
+
               return (
                 <IndicatorSettingsModal
                   indicator={indicator}
@@ -192,7 +218,8 @@ export function IndicatorSelector({
                 />
               );
             })()}
-          </>
+          </>,
+          document.body
         )}
       </div>
     );
