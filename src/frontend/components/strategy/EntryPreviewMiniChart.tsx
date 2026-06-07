@@ -39,8 +39,8 @@ import {
   buildPreviewIndicatorLines,
   extractConditionRequirements,
   fetchChartIndicatorSeries,
-  isChartCandlesPayload,
   makeIndicatorCacheKey,
+  parseCandlesResponse,
   toOhlcvPoints,
   type AlignedSeries,
 } from "@/lib/previewIndicatorSeries";
@@ -722,11 +722,12 @@ export function EntryPreviewMiniChart({
           throw new Error(errBody?.error || `APIエラー: ${res.status}`);
         }
         const payload: unknown = await res.json();
-        if (!isChartCandlesPayload(payload)) throw new Error("チャートデータの形式が不正です");
+        const parsed = parseCandlesResponse(payload);
+        if (!parsed) throw new Error("チャートデータの形式が不正です");
         if (aborted) return;
-        const ohlcv = toOhlcvPoints(payload.candles);
+        const ohlcv = toOhlcvPoints(parsed.candles);
         setRealCandles(ohlcv);
-        if (ohlcv.length === 0 && payload.warning) setCandlesWarning(payload.warning);
+        if (ohlcv.length === 0 && parsed.warning) setCandlesWarning(parsed.warning);
       } catch (err) {
         if (aborted || (err instanceof DOMException && err.name === "AbortError")) return;
         setRealCandles(null);

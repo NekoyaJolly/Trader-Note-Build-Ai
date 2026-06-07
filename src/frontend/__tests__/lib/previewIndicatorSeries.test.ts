@@ -12,13 +12,13 @@ import {
   buildPreviewIndicatorLines,
   canonicalizeCacheKey,
   extractConditionRequirements,
-  isChartCandlesPayload,
   makeIndicatorCacheKey,
+  parseCandlesResponse,
   stableParamsKey,
   toOhlcvPoints,
-  type ChartCandlePayload,
   type IndicatorSeriesResponse,
 } from "@/lib/previewIndicatorSeries";
+import type { ChartCandle } from "@/schemas/api/chartCandles";
 
 const BASE = Date.parse("2026-01-01T00:00:00.000Z");
 const HOUR = 3_600_000;
@@ -75,25 +75,26 @@ describe("extractConditionRequirements", () => {
   });
 });
 
-describe("ローソク足ペイロード (欠損足の扱い)", () => {
-  it("isChartCandlesPayload: OHLC が null の欠損足を含んでも payload 自体は有効 (構造のみ検証)", () => {
+describe("ローソク足ペイロード (Zod 検証 + 欠損足の扱い)", () => {
+  it("parseCandlesResponse: OHLC が null の欠損足を含んでも有効 (欠損は許容)", () => {
     const payload = {
       candles: [
         { time: 1, open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 },
         { time: 2, open: null, high: null, low: null, close: null, volume: 0 }, // 休場ギャップ
       ],
     };
-    expect(isChartCandlesPayload(payload)).toBe(true);
+    expect(parseCandlesResponse(payload)).not.toBeNull();
   });
 
-  it("isChartCandlesPayload: candles が配列でない / time が数値でないなら false", () => {
-    expect(isChartCandlesPayload({ candles: "x" })).toBe(false);
-    expect(isChartCandlesPayload({ candles: [{ open: 1 }] })).toBe(false);
-    expect(isChartCandlesPayload(null)).toBe(false);
+  it("parseCandlesResponse: OHLC が文字列/未定義、candles 非配列、null は弾く (型安全)", () => {
+    expect(parseCandlesResponse({ candles: [{ time: 1, open: "x", high: 2, low: 1, close: 1 }] })).toBeNull();
+    expect(parseCandlesResponse({ candles: [{ open: 1 }] })).toBeNull(); // time 欠落
+    expect(parseCandlesResponse({ candles: "x" })).toBeNull();
+    expect(parseCandlesResponse(null)).toBeNull();
   });
 
   it("toOhlcvPoints: 欠損足を除外し、time を ms 化、volume null→0 にする", () => {
-    const candles: ChartCandlePayload[] = [
+    const candles: ChartCandle[] = [
       { time: 100, open: 1, high: 2, low: 0.5, close: 1.5, volume: null },
       { time: 200, open: null, high: null, low: null, close: null, volume: 0 }, // 除外される
       { time: 300, open: 3, high: 4, low: 2.5, close: 3.5, volume: 7 },
@@ -103,6 +104,17 @@ describe("ローソク足ペイロード (欠損足の扱い)", () => {
     expect(points[0]).toEqual({ timestamp: 100_000, open: 1, high: 2, low: 0.5, close: 1.5, volume: 0 });
     expect(points[1].timestamp).toBe(300_000);
     expect(points[1].volume).toBe(7);
+  });
+
+  it("toOhlcvPoints: time が NaN/Infinity の足も除外する (timestamp 不正回避)", () => {
+    const candles: ChartCandle[] = [
+      { time: Number.NaN, open: 1, high: 2, low: 0.5, close: 1.5, volume: 0 },
+      { time: Number.POSITIVE_INFINITY, open: 1, high: 2, low: 0.5, close: 1.5, volume: 0 },
+      { time: 300, open: 3, high: 4, low: 2.5, close: 3.5, volume: 7 },
+    ];
+    const points = toOhlcvPoints(candles);
+    expect(points).toHaveLength(1);
+    expect(points[0].timestamp).toBe(300_000);
   });
 });
 
