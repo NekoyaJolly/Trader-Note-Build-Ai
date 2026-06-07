@@ -14,7 +14,12 @@
  */
 
 import { apiFetch } from "./apiClient";
-import type { IndicatorLineConfig } from "@/components/CandlestickChart";
+import type { IndicatorLineConfig, OHLCVDataPoint } from "@/components/CandlestickChart";
+import {
+  ChartCandlesResponseSchema,
+  type ChartCandle,
+  type ChartCandlesResponse,
+} from "@/schemas/api/chartCandles";
 import type {
   CandlePatternId,
   ConditionGroup,
@@ -133,6 +138,43 @@ export function extractConditionRequirements(group: ConditionGroup): {
 
   visit(group);
   return { specs: Array.from(specByKey.values()), patternIds: Array.from(patternIds) };
+}
+
+// ============================================
+// ローソク足ペイロード (GET /api/chart/candles)
+// ============================================
+
+/**
+ * /api/chart/candles レスポンスを Zod でランタイム検証する (手動 type guard を使わない)。
+ * 失敗時は null を返す (呼び出し側でフォールバック判断)。
+ */
+export function parseCandlesResponse(value: unknown): ChartCandlesResponse | null {
+  const parsed = ChartCandlesResponseSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+/**
+ * 欠損足 (time / OHLC のいずれかが非有限) を除外し、OHLCVDataPoint (timestamp は ms) に変換する。
+ * time が NaN/Infinity の足は timestamp 不正になるため除外する。
+ */
+export function toOhlcvPoints(candles: ChartCandle[]): OHLCVDataPoint[] {
+  return candles
+    .filter(
+      (c): c is { time: number; open: number; high: number; low: number; close: number; volume: number | null } =>
+        Number.isFinite(c.time) &&
+        Number.isFinite(c.open) &&
+        Number.isFinite(c.high) &&
+        Number.isFinite(c.low) &&
+        Number.isFinite(c.close),
+    )
+    .map((c) => ({
+      timestamp: c.time * 1000, // Unix 秒 → ms
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+      volume: c.volume ?? 0,
+    }));
 }
 
 // ============================================
