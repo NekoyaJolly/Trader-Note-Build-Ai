@@ -14,7 +14,7 @@
  */
 
 import { apiFetch } from "./apiClient";
-import type { IndicatorLineConfig } from "@/components/CandlestickChart";
+import type { IndicatorLineConfig, OHLCVDataPoint } from "@/components/CandlestickChart";
 import type {
   CandlePatternId,
   ConditionGroup,
@@ -133,6 +133,55 @@ export function extractConditionRequirements(group: ConditionGroup): {
 
   visit(group);
   return { specs: Array.from(specByKey.values()), patternIds: Array.from(patternIds) };
+}
+
+// ============================================
+// ローソク足ペイロード (GET /api/chart/candles)
+// ============================================
+
+/**
+ * /api/chart/candles レスポンスの 1 足。
+ *
+ * OHLC は **null を許容**する: 5m 以上の FX OHLCV には市場休場等の欠損足 (open〜close が null)
+ * が含まれる。これを「不正」として弾くと payload 全体が捨てられ、データはあるのに固定サンプルへ
+ * フォールバックしてしまう (実機検証で発覚)。欠損足は toOhlcvPoints で除外する。
+ */
+export interface ChartCandlePayload {
+  time: number;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  close: number | null;
+  volume: number | null;
+}
+
+/** /api/chart/candles レスポンスの最小ランタイム検証 (構造のみ。OHLC の欠損は許容)。 */
+export function isChartCandlesPayload(
+  value: unknown,
+): value is { candles: ChartCandlePayload[]; warning?: string } {
+  if (typeof value !== "object" || value === null) return false;
+  const candles = (value as { candles?: unknown }).candles;
+  if (!Array.isArray(candles)) return false;
+  return candles.every(
+    (c) => typeof c === "object" && c !== null && typeof (c as { time?: unknown }).time === "number",
+  );
+}
+
+/** 欠損足 (OHLC のいずれかが非数値) を除外し、OHLCVDataPoint (timestamp は ms) に変換する。 */
+export function toOhlcvPoints(candles: ChartCandlePayload[]): OHLCVDataPoint[] {
+  return candles
+    .filter(
+      (c): c is { time: number; open: number; high: number; low: number; close: number; volume: number | null } =>
+        Number.isFinite(c.open) && Number.isFinite(c.high) && Number.isFinite(c.low) && Number.isFinite(c.close),
+    )
+    .map((c) => ({
+      timestamp: c.time * 1000, // Unix 秒 → ms
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+      volume: c.volume ?? 0,
+    }));
 }
 
 // ============================================

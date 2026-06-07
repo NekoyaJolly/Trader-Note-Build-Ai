@@ -39,7 +39,9 @@ import {
   buildPreviewIndicatorLines,
   extractConditionRequirements,
   fetchChartIndicatorSeries,
+  isChartCandlesPayload,
   makeIndicatorCacheKey,
+  toOhlcvPoints,
   type AlignedSeries,
 } from "@/lib/previewIndicatorSeries";
 
@@ -664,31 +666,6 @@ function estimateLookback(indicatorId: string, params: Record<string, number>): 
   return 50;
 }
 
-/** /api/chart/candles レスポンス (ChartCandlesResponse) の最小ランタイム検証用。 */
-interface ChartCandlePayload {
-  time: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number | null;
-}
-function isChartCandlesPayload(value: unknown): value is { candles: ChartCandlePayload[]; warning?: string } {
-  if (typeof value !== "object" || value === null) return false;
-  const candles = (value as { candles?: unknown }).candles;
-  if (!Array.isArray(candles)) return false;
-  return candles.every(
-    (c) =>
-      typeof c === "object" &&
-      c !== null &&
-      typeof (c as { time?: unknown }).time === "number" &&
-      typeof (c as { open?: unknown }).open === "number" &&
-      typeof (c as { high?: unknown }).high === "number" &&
-      typeof (c as { low?: unknown }).low === "number" &&
-      typeof (c as { close?: unknown }).close === "number",
-  );
-}
-
 /** プレビューに供給する統一データ (実データ or サンプルのどちらでも同じ形)。 */
 interface ResolvedPreview {
   /** チャート描画用 (timestamp は ms) */
@@ -747,14 +724,7 @@ export function EntryPreviewMiniChart({
         const payload: unknown = await res.json();
         if (!isChartCandlesPayload(payload)) throw new Error("チャートデータの形式が不正です");
         if (aborted) return;
-        const ohlcv: OHLCVDataPoint[] = payload.candles.map((c) => ({
-          timestamp: c.time * 1000, // Unix 秒 → ms
-          open: c.open,
-          high: c.high,
-          low: c.low,
-          close: c.close,
-          volume: c.volume ?? 0,
-        }));
+        const ohlcv = toOhlcvPoints(payload.candles);
         setRealCandles(ohlcv);
         if (ohlcv.length === 0 && payload.warning) setCandlesWarning(payload.warning);
       } catch (err) {

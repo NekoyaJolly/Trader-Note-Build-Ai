@@ -12,8 +12,11 @@ import {
   buildPreviewIndicatorLines,
   canonicalizeCacheKey,
   extractConditionRequirements,
+  isChartCandlesPayload,
   makeIndicatorCacheKey,
   stableParamsKey,
+  toOhlcvPoints,
+  type ChartCandlePayload,
   type IndicatorSeriesResponse,
 } from "@/lib/previewIndicatorSeries";
 
@@ -69,6 +72,37 @@ describe("extractConditionRequirements", () => {
       ],
     };
     expect(extractConditionRequirements(group).specs).toHaveLength(1);
+  });
+});
+
+describe("ローソク足ペイロード (欠損足の扱い)", () => {
+  it("isChartCandlesPayload: OHLC が null の欠損足を含んでも payload 自体は有効 (構造のみ検証)", () => {
+    const payload = {
+      candles: [
+        { time: 1, open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 },
+        { time: 2, open: null, high: null, low: null, close: null, volume: 0 }, // 休場ギャップ
+      ],
+    };
+    expect(isChartCandlesPayload(payload)).toBe(true);
+  });
+
+  it("isChartCandlesPayload: candles が配列でない / time が数値でないなら false", () => {
+    expect(isChartCandlesPayload({ candles: "x" })).toBe(false);
+    expect(isChartCandlesPayload({ candles: [{ open: 1 }] })).toBe(false);
+    expect(isChartCandlesPayload(null)).toBe(false);
+  });
+
+  it("toOhlcvPoints: 欠損足を除外し、time を ms 化、volume null→0 にする", () => {
+    const candles: ChartCandlePayload[] = [
+      { time: 100, open: 1, high: 2, low: 0.5, close: 1.5, volume: null },
+      { time: 200, open: null, high: null, low: null, close: null, volume: 0 }, // 除外される
+      { time: 300, open: 3, high: 4, low: 2.5, close: 3.5, volume: 7 },
+    ];
+    const points = toOhlcvPoints(candles);
+    expect(points).toHaveLength(2); // null 足は除外
+    expect(points[0]).toEqual({ timestamp: 100_000, open: 1, high: 2, low: 0.5, close: 1.5, volume: 0 });
+    expect(points[1].timestamp).toBe(300_000);
+    expect(points[1].volume).toBe(7);
   });
 });
 
