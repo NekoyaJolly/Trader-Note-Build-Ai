@@ -10,6 +10,7 @@ import type { ConditionGroup } from "@/types/strategy";
 import {
   alignSeriesToCandles,
   buildPreviewIndicatorLines,
+  canonicalizeCacheKey,
   extractConditionRequirements,
   makeIndicatorCacheKey,
   stableParamsKey,
@@ -71,6 +72,30 @@ describe("extractConditionRequirements", () => {
   });
 });
 
+describe("canonicalizeCacheKey (Python float キー ↔ JS int キーの吸収)", () => {
+  it("整数パラメータの float 表記 (14.0) を JS 正規形 (14) に揃える", () => {
+    // analysis-engine (Pydantic float) が返すキー → 評価エンジンが引ける JS キーに一致させる
+    expect(canonicalizeCacheKey('rsi_{"period":14.0}_value')).toBe(
+      makeIndicatorCacheKey("rsi", { period: 14 }, "value"),
+    );
+    expect(canonicalizeCacheKey('rsi_{"period":14.0}_value')).toBe('rsi_{"period":14}_value');
+  });
+
+  it("非整数の float (0.02) はそのまま保持する", () => {
+    expect(canonicalizeCacheKey('psar_{"step":0.02}_value')).toBe('psar_{"step":0.02}_value');
+  });
+
+  it("id_params_field 形でない不正キーは元キーをそのまま返す (化けさせない)", () => {
+    // 区切り `_` が無い / 足りないキーは正規化対象外
+    expect(canonicalizeCacheKey("foo")).toBe("foo");
+    expect(canonicalizeCacheKey("foo_bar")).toBe("foo_bar");
+  });
+
+  it("params JSON がパース不能なら元キーをそのまま返す", () => {
+    expect(canonicalizeCacheKey("rsi_notjson_value")).toBe("rsi_notjson_value");
+  });
+});
+
 describe("alignSeriesToCandles", () => {
   const response: IndicatorSeriesResponse = {
     timestamps: [
@@ -98,6 +123,19 @@ describe("alignSeriesToCandles", () => {
   it("pattern を ローソク足 index に揃え、欠損は false にする", () => {
     const { patternCache } = alignSeriesToCandles(response, candleTs);
     expect(patternCache.get("hammer")).toEqual([false, true, false, false]);
+  });
+
+  it("Python float キーの series を JS 正規キーで引ける (評価エンジン互換)", () => {
+    // analysis-engine が返す実際のキー形式 (period が float 14.0)
+    const floatKeyed: IndicatorSeriesResponse = {
+      timestamps: response.timestamps,
+      series: { 'rsi_{"period":14.0}_value': [10, 20, 30] },
+      patterns: {},
+    };
+    const { indicatorCache } = alignSeriesToCandles(floatKeyed, [BASE, BASE + HOUR, BASE + 2 * HOUR]);
+    // 評価エンジンが makeIndicatorCacheKey('rsi',{period:14},'value') で引くキーで取得できる
+    const evalKey = makeIndicatorCacheKey("rsi", { period: 14 }, "value");
+    expect(indicatorCache.get(evalKey)).toEqual([10, 20, 30]);
   });
 
   it("ローソク足の順序が基準。response の余分な timestamp は無視する", () => {

@@ -52,6 +52,33 @@ export function makeIndicatorCacheKey(
   return `${indicatorId.toLowerCase()}_${stableParamsKey(params)}_${field}`;
 }
 
+/**
+ * analysis-engine が返した cacheKey を JS 正規形に揃える。
+ *
+ * **なぜ必要か**: analysis-engine (Python/Pydantic) は params を float として扱うため、
+ * 整数パラメータ (period=14) が `{"period":14.0}` とシリアライズされる。一方 JS の
+ * `JSON.stringify({period:14})` は `{"period":14}` で、評価エンジン (evalGroup) が
+ * 再構築するキーと一致せず、系列を引けず成立判定が常に false になる (実機で発覚)。
+ * params JSON を JSON.parse → makeIndicatorCacheKey で再シリアライズし、14.0→14 等の
+ * 差や順序差を吸収して評価側のキーと一致させる。パース不能時は元キーを返す。
+ */
+export function canonicalizeCacheKey(rawKey: string): string {
+  // `id_paramsJson_field` の 3 分割が成立しないキー (区切り `_` が足りない) は正規化対象外。
+  // parseCacheKey はフォーマット不正時に fallback ({}/value) を返すため、ここで明示的に弾かないと
+  // 例: "foo" が "foo_{}_value" に化ける (JSDoc の「パース不能時は元キーを返す」契約を守る)。
+  const first = rawKey.indexOf("_");
+  const last = rawKey.lastIndexOf("_");
+  if (first < 0 || last <= first) return rawKey;
+
+  const { indicatorId, paramsJson, field } = parseCacheKey(rawKey);
+  try {
+    const params = JSON.parse(paramsJson) as Record<string, number>;
+    return makeIndicatorCacheKey(indicatorId, params, field);
+  } catch {
+    return rawKey;
+  }
+}
+
 /** IndicatorParams (全 optional number) を finite number のみの Record に絞る (NaN/undefined を除外)。 */
 function toNumberParams(raw: IndicatorParams | undefined): Record<string, number> {
   const out: Record<string, number> = {};
@@ -213,7 +240,9 @@ export function alignSeriesToCandles(
       const v = series[ri];
       return v === null || v === undefined ? Number.NaN : v;
     });
-    indicatorCache.set(cacheKey, aligned);
+    // Python の float キー (例 {"period":14.0}) を JS 正規形 ({"period":14}) に揃えてから
+    // 格納する。これで評価エンジンが makeIndicatorCacheKey で再構築するキーと一致する。
+    indicatorCache.set(canonicalizeCacheKey(cacheKey), aligned);
   }
 
   const patternCache = new Map<CandlePatternId, boolean[]>();
