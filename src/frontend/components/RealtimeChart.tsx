@@ -17,6 +17,7 @@ import { useRealtimeChart, OHLCVBar, PendingBar, ConnectionStatus } from "@/hook
 import { DrawnLine, OHLCVDataPoint, IndicatorLineConfig, PositionOverlay } from "./CandlestickChart";
 import { IndicatorSelector, SelectedIndicator } from "./IndicatorSelector";
 import { indicatorToChartConfigs } from "@/lib/chartIndicators";
+import { parseCandlesResponse, toOhlcvPoints } from "@/lib/previewIndicatorSeries";
 import { getMarketStatus, MarketStatus } from "@/lib/marketHours";
 import { useTradingAccount } from "@/hooks/useTradingAccount";
 import { OrderPanel } from "@/components/chart/OrderPanel";
@@ -75,36 +76,10 @@ interface BrokerQuoteResponse {
 	warning?: string;
 }
 
-// /api/chart/candles レスポンス (ChartCandlesResponse) の最小ランタイム検証用。
-// frontend に Zod 依存が無いため、外部レスポンスは型ガードで narrow し盲目的な as を避ける。
-interface ChartCandlePayload {
-	time: number;
-	open: number;
-	high: number;
-	low: number;
-	close: number;
-	volume: number | null;
-}
-interface ChartCandlesPayload {
-	candles: ChartCandlePayload[];
-	warning?: string;
-}
-
-function isChartCandlesPayload(value: unknown): value is ChartCandlesPayload {
-	if (typeof value !== "object" || value === null) return false;
-	const candles = (value as { candles?: unknown }).candles;
-	if (!Array.isArray(candles)) return false;
-	return candles.every(
-		(c) =>
-			typeof c === "object" &&
-			c !== null &&
-			typeof (c as { time?: unknown }).time === "number" &&
-			typeof (c as { open?: unknown }).open === "number" &&
-			typeof (c as { high?: unknown }).high === "number" &&
-			typeof (c as { low?: unknown }).low === "number" &&
-			typeof (c as { close?: unknown }).close === "number"
-	);
-}
+// /api/chart/candles レスポンスの検証・変換は @/lib/previewIndicatorSeries に一元化する
+// (parseCandlesResponse = Zod 構造検証 / toOhlcvPoints = 欠損足除外 + OHLCVDataPoint 変換)。
+// 5m 以上の FX OHLCV には市場休場等で OHLC が null の欠損足が混じるため、ここで OHLC を
+// 全足数値前提でガードすると null 足 1 本でフォールバック表示が落ちる (EntryPreviewMiniChart と同方式に統一)。
 
 function isBrokerQuoteResponse(value: unknown): value is BrokerQuoteResponse {
 	if (typeof value !== "object" || value === null) return false;
@@ -570,25 +545,20 @@ export function RealtimeChart({
 				const errBody = await res.json().catch(() => null) as { error?: string } | null;
 				throw new Error(errBody?.error || `APIエラー: ${res.status}`);
 			}
-			// ChartCandlesResponse を型ガードで検証してから利用する (盲目的な as を避ける)
+			// ChartCandlesResponse を Zod で構造検証 (parseCandlesResponse) してから利用する。
+			// OHLC が null の欠損足 (5m 以上の FX で市場休場等) は toOhlcvPoints が除外するため、
+			// 欠損足が混じっても throw せずローソク足を描画できる (盲目的な as も避ける)。
 			const payload: unknown = await res.json();
-			if (!isChartCandlesPayload(payload)) {
+			const parsed = parseCandlesResponse(payload);
+			if (!parsed) {
 				throw new Error('チャートデータの形式が不正です');
 			}
-			const candles = payload.candles;
-			const ohlcv: OHLCVDataPoint[] = candles.map((c) => ({
-				timestamp: c.time * 1000, // Unix 秒 → ms (lightweight-charts 用)
-				open: c.open,
-				high: c.high,
-				low: c.low,
-				close: c.close,
-				volume: c.volume ?? 0,
-			}));
+			const ohlcv: OHLCVDataPoint[] = toOhlcvPoints(parsed.candles);
 			setFallbackData(ohlcv);
-			// データが空でも 200 で返る (symbol 有効・データ無し)。これはエラーではなく「警告」。
-			// 再試行を促す赤表示にせず、注意表示として扱う。
-			if (candles.length === 0 && payload.warning) {
-				setFallbackWarning(payload.warning);
+			// 有効足が 0 本でも 200 で返る (symbol 有効・データ無し / 全足欠損)。これはエラーではなく
+			// 「警告」。再試行を促す赤表示にせず、注意表示として扱う。
+			if (ohlcv.length === 0 && parsed.warning) {
+				setFallbackWarning(parsed.warning);
 			}
 		} catch (err) {
 			setFallbackError(err instanceof Error ? err.message : 'チャートデータ取得失敗');
