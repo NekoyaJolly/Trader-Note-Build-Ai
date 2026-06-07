@@ -63,6 +63,13 @@ export function makeIndicatorCacheKey(
  * 差や順序差を吸収して評価側のキーと一致させる。パース不能時は元キーを返す。
  */
 export function canonicalizeCacheKey(rawKey: string): string {
+  // `id_paramsJson_field` の 3 分割が成立しないキー (区切り `_` が足りない) は正規化対象外。
+  // parseCacheKey はフォーマット不正時に fallback ({}/value) を返すため、ここで明示的に弾かないと
+  // 例: "foo" が "foo_{}_value" に化ける (JSDoc の「パース不能時は元キーを返す」契約を守る)。
+  const first = rawKey.indexOf("_");
+  const last = rawKey.lastIndexOf("_");
+  if (first < 0 || last <= first) return rawKey;
+
   const { indicatorId, paramsJson, field } = parseCacheKey(rawKey);
   try {
     const params = JSON.parse(paramsJson) as Record<string, number>;

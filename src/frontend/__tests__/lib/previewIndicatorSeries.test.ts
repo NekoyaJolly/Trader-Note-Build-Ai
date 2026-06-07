@@ -84,6 +84,16 @@ describe("canonicalizeCacheKey (Python float キー ↔ JS int キーの吸収)"
   it("非整数の float (0.02) はそのまま保持する", () => {
     expect(canonicalizeCacheKey('psar_{"step":0.02}_value')).toBe('psar_{"step":0.02}_value');
   });
+
+  it("id_params_field 形でない不正キーは元キーをそのまま返す (化けさせない)", () => {
+    // 区切り `_` が無い / 足りないキーは正規化対象外
+    expect(canonicalizeCacheKey("foo")).toBe("foo");
+    expect(canonicalizeCacheKey("foo_bar")).toBe("foo_bar");
+  });
+
+  it("params JSON がパース不能なら元キーをそのまま返す", () => {
+    expect(canonicalizeCacheKey("rsi_notjson_value")).toBe("rsi_notjson_value");
+  });
 });
 
 describe("alignSeriesToCandles", () => {
