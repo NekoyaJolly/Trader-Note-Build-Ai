@@ -10,6 +10,7 @@
  */
 
 import type { IndicatorId, IndicatorParams } from './indicator';
+import type { TimeframeApi } from '@/lib/marketConstants';
 
 // ============================================
 // 対応シンボル
@@ -350,9 +351,14 @@ export interface ExitSettings {
 export type StrategyDirection = 'buy' | 'sell' | 'both';
 
 /**
- * ストラテジーの対象時間足（API 文字列）。BacktestTimeframe と同集合。
+ * ストラテジーの対象時間足（API 文字列）。
+ *
+ * **単一ソース**: UI の時間足セレクタ (`marketConstants.TIMEFRAME_OPTIONS`) の `api` 値に一致させる
+ * （= フロントで選べる集合そのもの）。手書きユニオンだと UI と齟齬が出る（例: 型に 1d があるのに
+ * セレクタに無い）ため `TimeframeApi` を参照する。バックテストのステージ足 (`BacktestTimeframe`) は
+ * 1d を含む別集合なので、こことは意図的に分離している。
  */
-export type StrategyTimeframe = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d';
+export type StrategyTimeframe = TimeframeApi;
 
 /**
  * トレード方向（バックテスト/イベント用）

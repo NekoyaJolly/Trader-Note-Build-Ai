@@ -118,8 +118,9 @@ const SUPPORTED_SYMBOLS = [
   'EURUSD', 'GBPUSD', 'AUDUSD', 'XAUUSD',
 ];
 
-// 対応時間足（API 文字列）。strategyRoutes の zod enum / BacktestTimeframe と一致させる。
-const SUPPORTED_TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
+// 対応時間足（API 文字列）。フロントの時間足セレクタ / strategyRoutes の zod enum と一致させる
+// （UI で選べる集合に揃える。1d は含めない。バックテストのステージ足とは別集合）。
+const SUPPORTED_TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '4h'];
 
 // ============================================
 // サービス関数

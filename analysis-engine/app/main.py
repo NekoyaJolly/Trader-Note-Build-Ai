@@ -334,8 +334,14 @@ def indicator_series_by_version(req: IndicatorSeriesByVersionRequest) -> Indicat
     try:
         with engine.connect() as conn:
             row = conn.execute(version_sql, params).mappings().first()
-    except Exception:
-        # shortEntryConditions 列が未追加（マイグレーション未適用）の環境向けフォールバック
+    except Exception as err:
+        # shortEntryConditions 列が未追加（マイグレーション未適用）の場合に「限って」legacy SELECT へ
+        # フォールバックする。接続断/権限/構文/タイムアウト等の障害まで握りつぶすと原因特定が困難に
+        # なるため、PostgreSQL の undefined_column (SQLSTATE 42703) 以外は再送出する。
+        pgcode = getattr(getattr(err, "orig", None), "pgcode", None)
+        is_undefined_column = pgcode == "42703" or "shortentryconditions" in str(err).lower()
+        if not is_undefined_column:
+            raise
         with engine.connect() as conn:
             row = conn.execute(version_sql_legacy, params).mappings().first()
 

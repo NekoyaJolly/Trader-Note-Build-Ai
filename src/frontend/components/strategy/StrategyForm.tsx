@@ -83,6 +83,15 @@ const createDefaultConditionGroup = (): ConditionGroup => ({
   ],
 });
 
+// 売り用条件の初期値は「空グループ」にする（買い側の RSI<30 デフォルトを流用しない）。
+// 理由: 編集モードで legacy both（売り条件未設定）を開いたとき、デフォルト条件を自動補完すると
+// ユーザーが気付かないまま戦略挙動が変わる。空にして、売り条件はユーザーが明示的に追加させる。
+const createEmptyConditionGroup = (): ConditionGroup => ({
+  groupId: `group_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+  operator: 'AND',
+  conditions: [],
+});
+
 const createDefaultExitSettings = (): ExitSettings => ({
   takeProfit: { value: 1.0, unit: 'percent' },
   stopLoss: { value: 0.5, unit: 'percent' },
@@ -116,8 +125,9 @@ export default function StrategyForm({
     (strategy?.currentVersion?.entryConditions as ConditionGroup) || createDefaultConditionGroup()
   );
   // 売り用エントリー条件（side=both のときのみ送信）。買い=entryConditions と対。
+  // 未設定（新規 / legacy both）は空グループで開始し、デフォルト条件を自動注入しない。
   const [shortEntryConditions, setShortEntryConditions] = useState<ConditionGroup>(
-    (strategy?.currentVersion?.shortEntryConditions as ConditionGroup) || createDefaultConditionGroup()
+    (strategy?.currentVersion?.shortEntryConditions as ConditionGroup) || createEmptyConditionGroup()
   );
   const [exitSettings, setExitSettings] = useState<ExitSettings>(
     (strategy?.currentVersion?.exitSettings as ExitSettings) || createDefaultExitSettings()
