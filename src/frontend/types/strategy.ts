@@ -10,6 +10,7 @@
  */
 
 import type { IndicatorId, IndicatorParams } from './indicator';
+import type { TimeframeApi } from '@/lib/marketConstants';
 
 // ============================================
 // 対応シンボル
@@ -341,9 +342,23 @@ export interface ExitSettings {
 
 /**
  * トレード方向（ストラテジー用）
- * - BOTH は「両建て許容」を意味する（現時点のバックテストは暫定で片側のみ実行）
+ * - 'buy'  : 買いのみ（Buy Only）。entryConditions を買い条件として使う
+ * - 'sell' : 売りのみ（Sell Only）。entryConditions を売り条件として使う
+ * - 'both' : 買い+売り（Buy & Sell）。entryConditions=買い条件 / shortEntryConditions=売り条件 を
+ *            それぞれ独立に評価し、発火した側でエントリーする。
+ *            ※「両建て」（逆ポジ同時保有によるヘッジ）とは別概念。本モデルは同時保有を前提にしない。
  */
 export type StrategyDirection = 'buy' | 'sell' | 'both';
+
+/**
+ * ストラテジーの対象時間足（API 文字列）。
+ *
+ * **単一ソース**: UI の時間足セレクタ (`marketConstants.TIMEFRAME_OPTIONS`) の `api` 値に一致させる
+ * （= フロントで選べる集合そのもの）。手書きユニオンだと UI と齟齬が出る（例: 型に 1d があるのに
+ * セレクタに無い）ため `TimeframeApi` を参照する。バックテストのステージ足 (`BacktestTimeframe`) は
+ * 1d を含む別集合なので、こことは意図的に分離している。
+ */
+export type StrategyTimeframe = TimeframeApi;
 
 /**
  * トレード方向（バックテスト/イベント用）
@@ -363,8 +378,10 @@ export interface StrategyVersion {
   id: string;
   /** バージョン番号（1, 2, 3...） */
   versionNumber: number;
-  /** エントリー条件 */
+  /** エントリー条件（side=both では「買い用」） */
   entryConditions: ConditionGroup;
+  /** 売り用エントリー条件（side=both のときのみ。買い=entryConditions と対） */
+  shortEntryConditions?: ConditionGroup | null;
   /** イグジット設定 */
   exitSettings: ExitSettings;
   /** エントリータイミング */
@@ -387,6 +404,8 @@ export interface Strategy {
   description?: string;
   /** 対象シンボル */
   symbol: SupportedSymbol;
+  /** 対象時間足（レガシーストラテジーは null） */
+  timeframe: StrategyTimeframe | null;
   /** トレード方向 */
   side: StrategyDirection;
   /** ステータス */
@@ -416,8 +435,11 @@ export interface CreateStrategyRequest {
   name: string;
   description?: string;
   symbol: SupportedSymbol;
+  timeframe: StrategyTimeframe;
   side: StrategyDirection;
   entryConditions: ConditionGroup;
+  /** side=both のときのみ必須（売り用条件） */
+  shortEntryConditions?: ConditionGroup;
   exitSettings: ExitSettings;
   entryTiming?: EntryTiming;
   tags?: string[];
@@ -430,8 +452,10 @@ export interface UpdateStrategyRequest {
   name?: string;
   description?: string;
   symbol?: SupportedSymbol;
+  timeframe?: StrategyTimeframe;
   side?: StrategyDirection;
   entryConditions?: ConditionGroup;
+  shortEntryConditions?: ConditionGroup;
   exitSettings?: ExitSettings;
   entryTiming?: EntryTiming;
   status?: StrategyStatus;
@@ -446,6 +470,7 @@ export interface StrategySummary {
   id: string;
   name: string;
   symbol: SupportedSymbol;
+  timeframe: StrategyTimeframe | null;
   side: StrategyDirection;
   status: StrategyStatus;
   versionCount: number;

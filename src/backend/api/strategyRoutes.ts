@@ -154,26 +154,45 @@ const OhlcvFetchBodySchema = z
   })
   .strict();
 
+// ストラテジー時間足。フロントの時間足セレクタ (marketConstants.TIMEFRAME_OPTIONS) と
+// strategyService.SUPPORTED_TIMEFRAMES に一致させる（UI で選べる集合と齟齬を作らない。1d は含めない）。
+const StrategyTimeframeSchema = z.enum(['1m', '5m', '15m', '30m', '1h', '4h']);
+
 const CreateStrategyBodySchema = z
   .object({
     name: z.string().min(1),
     description: z.string().optional(),
     symbol: z.string().min(1),
+    timeframe: StrategyTimeframeSchema,
     side: z.enum(['buy', 'sell', 'both']),
     entryConditions: objectJsonField,
+    // side=both のときのみ使用する売り用条件。
+    shortEntryConditions: objectJsonField.optional(),
     exitSettings: objectJsonField,
     entryTiming: z.string().optional(),
     tags: z.array(z.string()).optional(),
   })
-  .strict();
+  .strict()
+  // both（Buy & Sell）は作成時に売り用条件が必須。入力契約をルート層で明示し 400 で返す。
+  .superRefine((data, ctx) => {
+    if (data.side === 'both' && !data.shortEntryConditions) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['shortEntryConditions'],
+        message: 'Buy & Sell では売り用エントリー条件（shortEntryConditions）が必須です',
+      });
+    }
+  });
 
 const UpdateStrategyBodySchema = z
   .object({
     name: z.string().optional(),
     description: z.string().optional(),
     symbol: z.string().optional(),
+    timeframe: StrategyTimeframeSchema.optional(),
     side: z.enum(['buy', 'sell', 'both']).optional(),
     entryConditions: objectJsonField.optional(),
+    shortEntryConditions: objectJsonField.optional(),
     exitSettings: objectJsonField.optional(),
     entryTiming: z.string().optional(),
     status: z.enum(['draft', 'active', 'archived']).optional(),
@@ -759,8 +778,10 @@ router.post('/', async (req: Request, res: Response) => {
       name,
       description,
       symbol,
+      timeframe,
       side,
       entryConditions,
+      shortEntryConditions,
       exitSettings,
       entryTiming,
       tags,
@@ -770,8 +791,10 @@ router.post('/', async (req: Request, res: Response) => {
       name,
       description,
       symbol,
+      timeframe,
       side,
       entryConditions,
+      shortEntryConditions,
       exitSettings,
       entryTiming,
       tags,
@@ -810,8 +833,10 @@ router.put('/:id', async (req: Request, res: Response) => {
       name,
       description,
       symbol,
+      timeframe,
       side,
       entryConditions,
+      shortEntryConditions,
       exitSettings,
       entryTiming,
       status,
@@ -823,8 +848,10 @@ router.put('/:id', async (req: Request, res: Response) => {
       name,
       description,
       symbol,
+      timeframe,
       side,
       entryConditions,
+      shortEntryConditions,
       exitSettings,
       entryTiming,
       status,

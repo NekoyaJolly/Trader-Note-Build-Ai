@@ -21,8 +21,12 @@ export interface CreateStrategyInput {
   name: string;
   description?: string;
   symbol: string;
+  /** 対象時間足（1m/5m/15m/30m/1h/4h/1d）。ストラテジーの基準足。 */
+  timeframe: string;
   side: StrategyDirection;
-  entryConditions: object; // ConditionGroup JSON
+  entryConditions: object; // ConditionGroup JSON（side=both では「買い用」）
+  /** 売り用エントリー条件（side=both のときのみ使用） */
+  shortEntryConditions?: object;
   exitSettings: object;    // ExitSettings JSON
   entryTiming?: string;
   tags?: string[];
@@ -35,8 +39,10 @@ export interface UpdateStrategyInput {
   name?: string;
   description?: string;
   symbol?: string;
+  timeframe?: string;
   side?: StrategyDirection;
   entryConditions?: object;
+  shortEntryConditions?: object;
   exitSettings?: object;
   entryTiming?: string;
   status?: StrategyStatus;
@@ -61,6 +67,7 @@ export interface StrategySummary {
   id: string;
   name: string;
   symbol: string;
+  timeframe: string | null;
   side: StrategyDirection;
   status: StrategyStatus;
   versionCount: number;
@@ -77,6 +84,7 @@ export interface StrategyDetail {
   name: string;
   description: string | null;
   symbol: string;
+  timeframe: string | null;
   side: StrategyDirection;
   status: StrategyStatus;
   currentVersionId: string | null;
@@ -87,6 +95,7 @@ export interface StrategyDetail {
     id: string;
     versionNumber: number;
     entryConditions: object;
+    shortEntryConditions: object | null;
     exitSettings: object;
     entryTiming: string;
     changeNote: string | null;
@@ -108,6 +117,10 @@ const SUPPORTED_SYMBOLS = [
   'USDJPY', 'EURJPY', 'GBPJPY', 'AUDJPY',
   'EURUSD', 'GBPUSD', 'AUDUSD', 'XAUUSD',
 ];
+
+// 対応時間足（API 文字列）。フロントの時間足セレクタ / strategyRoutes の zod enum と一致させる
+// （UI で選べる集合に揃える。1d は含めない。バックテストのステージ足とは別集合）。
+const SUPPORTED_TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '4h'];
 
 // ============================================
 // サービス関数
@@ -143,6 +156,7 @@ export async function listStrategies(params: ListStrategiesParams = {}): Promise
     id: s.id,
     name: s.name,
     symbol: s.symbol,
+    timeframe: s.timeframe,
     side: s.side,
     status: s.status,
     versionCount: s._count.versions,
@@ -177,6 +191,7 @@ export async function getStrategy(id: string): Promise<StrategyDetail | null> {
     name: strategy.name,
     description: strategy.description,
     symbol: strategy.symbol,
+    timeframe: strategy.timeframe,
     side: strategy.side,
     status: strategy.status,
     currentVersionId: strategy.currentVersionId,
@@ -187,6 +202,7 @@ export async function getStrategy(id: string): Promise<StrategyDetail | null> {
       id: currentVersion.id,
       versionNumber: currentVersion.versionNumber,
       entryConditions: currentVersion.entryConditions as object,
+      shortEntryConditions: (currentVersion.shortEntryConditions as object | null) ?? null,
       exitSettings: currentVersion.exitSettings as object,
       entryTiming: currentVersion.entryTiming,
       changeNote: currentVersion.changeNote,
@@ -218,6 +234,7 @@ export async function getStrategyVersion(strategyId: string, versionNumber: numb
     id: version.id,
     versionNumber: version.versionNumber,
     entryConditions: version.entryConditions as object,
+    shortEntryConditions: (version.shortEntryConditions as object | null) ?? null,
     exitSettings: version.exitSettings as object,
     entryTiming: version.entryTiming,
     changeNote: version.changeNote,
@@ -260,6 +277,7 @@ export async function rollbackStrategyVersion(params: {
   const newVersionNumber = latestVersionNumber + 1;
 
   const rollbackSymbol = target.symbol ?? strategy.symbol;
+  const rollbackTimeframe = target.timeframe ?? strategy.timeframe;
   const rollbackSide = target.side ?? strategy.side;
 
   await prisma.$transaction(async (tx) => {
@@ -268,8 +286,10 @@ export async function rollbackStrategyVersion(params: {
         strategyId,
         versionNumber: newVersionNumber,
         symbol: rollbackSymbol,
+        timeframe: rollbackTimeframe,
         side: rollbackSide,
         entryConditions: target.entryConditions as object,
+        shortEntryConditions: (target.shortEntryConditions as object | null) ?? undefined,
         exitSettings: target.exitSettings as object,
         entryTiming: target.entryTiming,
         changeNote: changeNote?.trim() || `ロールバック: v${versionNumber} → v${newVersionNumber}`,
@@ -280,6 +300,7 @@ export async function rollbackStrategyVersion(params: {
       where: { id: strategyId },
       data: {
         symbol: rollbackSymbol,
+        timeframe: rollbackTimeframe,
         side: rollbackSide,
         currentVersionId: newVersion.id,
       },
@@ -302,8 +323,15 @@ export async function createStrategy(input: CreateStrategyInput): Promise<Strate
   if (!SUPPORTED_SYMBOLS.includes(input.symbol)) {
     throw new Error(`対応していないシンボルです: ${input.symbol}`);
   }
+  if (!SUPPORTED_TIMEFRAMES.includes(input.timeframe)) {
+    throw new Error(`対応していない時間足です: ${input.timeframe}`);
+  }
   if (!['buy', 'sell', 'both'].includes(input.side)) {
     throw new Error('売買方向は buy / sell / both を指定してください');
+  }
+  // both（買い+売り）は売り用条件が必須（買い=entryConditions と対）。
+  if (input.side === 'both' && !input.shortEntryConditions) {
+    throw new Error('Buy & Sell では売り用エントリー条件（shortEntryConditions）が必須です');
   }
 
   // トランザクションで作成
@@ -314,6 +342,7 @@ export async function createStrategy(input: CreateStrategyInput): Promise<Strate
         name: input.name.trim(),
         description: input.description?.trim() || null,
         symbol: input.symbol,
+        timeframe: input.timeframe,
         side: input.side,
         status: 'draft',
         tags: input.tags || [],
@@ -326,8 +355,11 @@ export async function createStrategy(input: CreateStrategyInput): Promise<Strate
         strategyId: strategy.id,
         versionNumber: 1,
         symbol: input.symbol,
+        timeframe: input.timeframe,
         side: input.side,
         entryConditions: input.entryConditions,
+        // both 以外では売り用条件を保存しない（buy/sell は entryConditions のみ使用）
+        shortEntryConditions: input.side === 'both' ? input.shortEntryConditions : undefined,
         exitSettings: input.exitSettings,
         entryTiming: input.entryTiming || 'next_open',
         changeNote: '初期バージョン',
@@ -372,12 +404,26 @@ export async function updateStrategy(id: string, input: UpdateStrategyInput): Pr
   if (input.symbol && !SUPPORTED_SYMBOLS.includes(input.symbol)) {
     throw new Error(`対応していないシンボルです: ${input.symbol}`);
   }
+  if (input.timeframe && !SUPPORTED_TIMEFRAMES.includes(input.timeframe)) {
+    throw new Error(`対応していない時間足です: ${input.timeframe}`);
+  }
   if (input.side && !['buy', 'sell', 'both'].includes(input.side)) {
     throw new Error('売買方向は buy / sell / both を指定してください');
   }
 
   const latestVersion = existing.versions[0];
-  const needsNewVersion = input.entryConditions || input.exitSettings || input.entryTiming;
+
+  // 更新後の方向が both になる場合、売り用条件が（今回 or 既存バージョンに）存在する必要がある。
+  const effectiveSide = input.side ?? existing.side;
+  if (effectiveSide === 'both') {
+    const hasShort = input.shortEntryConditions ?? (latestVersion?.shortEntryConditions ?? null);
+    if (!hasShort) {
+      throw new Error('Buy & Sell では売り用エントリー条件（shortEntryConditions）が必須です');
+    }
+  }
+
+  const needsNewVersion =
+    input.entryConditions || input.shortEntryConditions || input.exitSettings || input.entryTiming;
 
   // トランザクションで更新
   await prisma.$transaction(async (tx) => {
@@ -386,15 +432,17 @@ export async function updateStrategy(id: string, input: UpdateStrategyInput): Pr
       name?: string;
       description?: string | null;
       symbol?: string;
+      timeframe?: string;
       side?: StrategyDirection;
       status?: StrategyStatus;
       tags?: string[];
       currentVersionId?: string;
     } = {};
-    
+
     if (input.name !== undefined) updateData.name = input.name.trim();
     if (input.description !== undefined) updateData.description = input.description?.trim() || null;
     if (input.symbol !== undefined) updateData.symbol = input.symbol;
+    if (input.timeframe !== undefined) updateData.timeframe = input.timeframe;
     if (input.side !== undefined) updateData.side = input.side;
     if (input.status !== undefined) updateData.status = input.status;
     if (input.tags !== undefined) updateData.tags = input.tags;
@@ -403,14 +451,21 @@ export async function updateStrategy(id: string, input: UpdateStrategyInput): Pr
     let newVersion = null;
     if (needsNewVersion && latestVersion) {
       const newVersionNumber = latestVersion.versionNumber + 1;
+      // both 以外では売り用条件を保持しない。both のときは今回入力 → 既存値の順で引き継ぐ。
+      const nextShort =
+        effectiveSide === 'both'
+          ? (input.shortEntryConditions ?? (latestVersion.shortEntryConditions as object | null) ?? undefined)
+          : undefined;
       newVersion = await tx.strategyVersion.create({
         data: {
           strategyId: id,
           versionNumber: newVersionNumber,
-          // 変更履歴として symbol/side も保持（ロールバック用途）
+          // 変更履歴として symbol/timeframe/side も保持（ロールバック用途）
           symbol: input.symbol ?? existing.symbol,
+          timeframe: input.timeframe ?? existing.timeframe,
           side: input.side ?? existing.side,
           entryConditions: input.entryConditions || (latestVersion.entryConditions as object),
+          shortEntryConditions: nextShort,
           exitSettings: input.exitSettings || (latestVersion.exitSettings as object),
           entryTiming: input.entryTiming || latestVersion.entryTiming,
           changeNote: input.changeNote || `バージョン ${newVersionNumber}`,
@@ -489,8 +544,12 @@ export async function duplicateStrategy(id: string, newName?: string): Promise<S
     name,
     description: existing.description || undefined,
     symbol: existing.symbol,
+    // レガシー（timeframe 未設定）の複製はデフォルト足にフォールバックする
+    timeframe: existing.timeframe ?? '1h',
     side: existing.side,
     entryConditions: existing.currentVersion.entryConditions,
+    // both の複製では売り用条件も引き継ぐ
+    shortEntryConditions: existing.currentVersion.shortEntryConditions ?? undefined,
     exitSettings: existing.currentVersion.exitSettings,
     entryTiming: existing.currentVersion.entryTiming,
     tags: existing.tags,

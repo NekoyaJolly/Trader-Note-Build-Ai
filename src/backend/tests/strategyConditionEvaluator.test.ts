@@ -26,6 +26,7 @@ const mockStrategy = {
   name: 'テストストラテジー',
   description: 'テスト用のストラテジー',
   symbol: 'USDJPY',
+  timeframe: '1h' as const,
   side: 'buy' as const,
   status: 'draft' as const,
   currentVersionId: 'v1',
