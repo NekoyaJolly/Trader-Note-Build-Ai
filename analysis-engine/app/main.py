@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import timezone
 from typing import Dict, List
 
@@ -303,8 +304,24 @@ def _collect_indicator_specs_from_condition_group(group: object) -> tuple[list[d
 def indicator_series_by_version(req: IndicatorSeriesByVersionRequest) -> IndicatorSeriesResponse:
     """IDベースで指標系列を返す（Node → Python は最小情報のみ）。"""
 
-    # 1) StrategyVersion から entryConditions を取得
+    # 1) StrategyVersion から entryConditions と shortEntryConditions を取得。
+    #    shortEntryConditions は side=both（Buy & Sell）のときの「売り用」条件で、
+    #    買い(entryConditions)と別指標を参照しうるため、両方の指標系列を返す必要がある。
+    #
+    #    デプロイ順序耐性: shortEntryConditions 列はマイグレーションで追加されるため、
+    #    本サービスが先にデプロイされて列が未追加の環境がありうる。その場合 SELECT は
+    #    列不存在で失敗するので、entryConditions のみの SELECT にフォールバックする
+    #    （売り条件は未取得＝従来挙動。列追加後は自動で両取得に切り替わる）。
     version_sql = text(
+        """
+        SELECT \"entryConditions\" AS \"entryConditions\",
+               \"shortEntryConditions\" AS \"shortEntryConditions\"
+        FROM \"StrategyVersion\"
+        WHERE id = :version_id
+                    AND \"strategyId\" = :strategy_id
+        """
+    )
+    version_sql_legacy = text(
         """
         SELECT \"entryConditions\" AS \"entryConditions\"
         FROM \"StrategyVersion\"
@@ -312,12 +329,15 @@ def indicator_series_by_version(req: IndicatorSeriesByVersionRequest) -> Indicat
                     AND \"strategyId\" = :strategy_id
         """
     )
+    params = {"version_id": req.versionId, "strategy_id": req.strategyId}
 
-    with engine.connect() as conn:
-        row = conn.execute(
-            version_sql,
-            {"version_id": req.versionId, "strategy_id": req.strategyId},
-        ).mappings().first()
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(version_sql, params).mappings().first()
+    except Exception:
+        # shortEntryConditions 列が未追加（マイグレーション未適用）の環境向けフォールバック
+        with engine.connect() as conn:
+            row = conn.execute(version_sql_legacy, params).mappings().first()
 
     if not row:
         return IndicatorSeriesResponse(
@@ -329,8 +349,17 @@ def indicator_series_by_version(req: IndicatorSeriesByVersionRequest) -> Indicat
         )
 
     entry_conditions = row.get("entryConditions")
-    specs, patterns_from_conditions = _collect_indicator_specs_from_condition_group(entry_conditions)
-    merged_patterns = list(dict.fromkeys([*req.patterns, *patterns_from_conditions]))
+    short_entry_conditions = row.get("shortEntryConditions")
+
+    # 買い条件・売り条件の両方から指標 spec / パターンを集約（cacheKey で重複排除）。
+    long_specs, long_patterns = _collect_indicator_specs_from_condition_group(entry_conditions)
+    short_specs, short_patterns = _collect_indicator_specs_from_condition_group(short_entry_conditions)
+    specs_by_key: dict[str, dict] = {}
+    for spec in [*long_specs, *short_specs]:
+        key = f"{str(spec['indicatorId']).lower()}_{json.dumps(spec['params'], sort_keys=True, separators=(',', ':'), ensure_ascii=False)}_{spec['field']}"
+        specs_by_key[key] = spec
+    specs = list(specs_by_key.values())
+    merged_patterns = list(dict.fromkeys([*req.patterns, *long_patterns, *short_patterns]))
 
     # 2) 通常の計算処理へ合流
     series_req = IndicatorSeriesRequest(

@@ -550,7 +550,21 @@ async function executeBacktestStage(
   }
 
   const entryConditions = strategy.currentVersion!.entryConditions as ConditionGroup;
+  // side=both（Buy & Sell）のときのみ使う「売り用」条件。buy/sell では未使用。
+  const shortEntryConditions = (strategy.currentVersion?.shortEntryConditions ?? null) as ConditionGroup | null;
   const exitSettings = strategy.currentVersion!.exitSettings as ExitSettings;
+
+  // 評価する (方向, 条件) のリスト（バックテスト全体で不変）。
+  // - buy/sell: entryConditions をその方向の条件として評価
+  // - both: entryConditions=買い条件 / shortEntryConditions=売り条件 を別々に評価し、
+  //   発火した側を建てる（同一足で両方発火時は買いを優先。同時保有数は maxPositions で制限）
+  const entryPlans: { side: TradeSide; group: ConditionGroup | null }[] =
+    strategy.side === 'both'
+      ? [
+          { side: 'buy', group: entryConditions },
+          { side: 'sell', group: shortEntryConditions },
+        ]
+      : [{ side: strategy.side, group: entryConditions }];
 
   // analysis-engine（Python）から指標系列を一括取得
   // 理由: Node 側での指標計算を廃止し、pandas-ta を正とする
@@ -754,8 +768,11 @@ async function executeBacktestStage(
     }
 
     // ============ Phase 2: 新規エントリー判定 ============
-    if (openPositions.size < maxPositions) {
-      const shouldEnter = await evaluateConditionGroup(ctx, entryConditions);
+    // 方向ごとに条件を評価する（both は買い→売りの順、買い優先）。
+    for (const plan of entryPlans) {
+      if (openPositions.size >= maxPositions) break;
+      if (!plan.group) continue;
+      const shouldEnter = await evaluateConditionGroup(ctx, plan.group);
 
       if (shouldEnter) {
         const entryTiming = (strategy.currentVersion?.entryTiming || 'next_open').toLowerCase();
@@ -828,9 +845,8 @@ async function executeBacktestStage(
         }
 
         const ticketId = uuidv4();
-        // direction=both の場合、現時点のバックテストは片側のみを実行（暫定: buy）
-        // 理由: 条件JSONに「買い用/売り用」を分ける仕様が未導入のため
-        const entrySide: TradeSide = (strategy.side === 'both' ? 'buy' : strategy.side);
+        // この plan の方向で建てる（both は買い/売りを別 plan として評価済み）
+        const entrySide: TradeSide = plan.side;
         openPositions.set(ticketId, {
           ticketId,
           entryPrice,
@@ -1050,6 +1066,8 @@ async function saveBacktestResult(
         runId: result.id,
         entryTime: new Date(trade.entryTime),
         entryPrice: trade.entryPrice,
+        // both で買い/売りを区別できるよう各トレードの方向を保存する
+        side: trade.side,
         exitTime: new Date(trade.exitTime),
         exitPrice: trade.exitPrice,
         outcome: toBacktestOutcome(trade.exitReason),
@@ -1083,21 +1101,23 @@ export async function getBacktestResult(runId: string): Promise<BacktestResult |
   if (!run) return null;
 
   // トレードイベントを先に構築
-  // direction=both は現時点では片側のみ表示（暫定: buy）
-  const side: TradeSide = (run.strategy.side === 'both' ? 'buy' : run.strategy.side);
+  // both は各イベントの side（買い/売り）を保存済み。legacy(null) は当時の strategy.side から復元
+  // （both の legacy は片側のみ記録されていたため buy にフォールバック）。
+  const fallbackSide: TradeSide = (run.strategy.side === 'both' ? 'buy' : run.strategy.side);
   const trades: BacktestTradeEvent[] = run.events.map(e => {
+    const eventSide: TradeSide = e.side === 'buy' || e.side === 'sell' ? e.side : fallbackSide;
     const entryPrice = e.entryPrice.toNumber();
     const exitPrice = e.exitPrice?.toNumber() || 0;
     const pnl = e.pnl?.toNumber() || 0;
-    // pnlPercent: エントリー価格に対する変動率（%）
-    const pnlPercent = entryPrice > 0 ? ((exitPrice - entryPrice) / entryPrice) * 100 * (side === 'buy' ? 1 : -1) : 0;
+    // pnlPercent: エントリー価格に対する変動率（%）。売りは符号反転。
+    const pnlPercent = entryPrice > 0 ? ((exitPrice - entryPrice) / entryPrice) * 100 * (eventSide === 'buy' ? 1 : -1) : 0;
     return {
       eventId: e.id,
       entryTime: e.entryTime.toISOString(),
       entryPrice,
       exitTime: e.exitTime?.toISOString() || '',
       exitPrice,
-      side,
+      side: eventSide,
       lotSize: 10000, // DB未保存のためデフォルト値
       pnl,
       pnlPercent,
@@ -1170,20 +1190,21 @@ export async function getBacktestHistory(
   });
 
   return runs.map(run => {
-    // トレードイベントを構築
-    const side: TradeSide = (run.strategy.side === 'both' ? 'buy' : run.strategy.side);
+    // トレードイベントを構築（side は各イベント保存値を優先、legacy は strategy.side から復元）
+    const fallbackSide: TradeSide = (run.strategy.side === 'both' ? 'buy' : run.strategy.side);
     const trades: BacktestTradeEvent[] = run.events.map(e => {
+      const eventSide: TradeSide = e.side === 'buy' || e.side === 'sell' ? e.side : fallbackSide;
       const entryPrice = e.entryPrice.toNumber();
       const exitPrice = e.exitPrice?.toNumber() || 0;
       const pnl = e.pnl?.toNumber() || 0;
-      const pnlPercent = entryPrice > 0 ? ((exitPrice - entryPrice) / entryPrice) * 100 * (side === 'buy' ? 1 : -1) : 0;
+      const pnlPercent = entryPrice > 0 ? ((exitPrice - entryPrice) / entryPrice) * 100 * (eventSide === 'buy' ? 1 : -1) : 0;
       return {
         eventId: e.id,
         entryTime: e.entryTime.toISOString(),
         entryPrice,
         exitTime: e.exitTime?.toISOString() || '',
         exitPrice,
-        side,
+        side: eventSide,
         lotSize: 10000,
         pnl,
         pnlPercent,

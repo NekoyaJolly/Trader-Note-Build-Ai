@@ -334,10 +334,11 @@ export default function StrategyBacktestPage() {
       const strategyData = await fetchStrategy(strategyId);
       setStrategy(strategyData);
 
-      // シンボル初期値をストラテジーから設定
+      // シンボル・時間足の初期値をストラテジーから設定（時間足は正式属性。レガシーは既定維持）
       setBacktestParams(prev => ({
         ...prev,
         symbol: prev.symbol || strategyData.symbol || '',
+        stage1Timeframe: strategyData.timeframe ?? prev.stage1Timeframe,
       }));
       setSymbolSearch(strategyData.symbol || '');
 

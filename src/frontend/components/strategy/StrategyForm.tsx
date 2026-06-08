@@ -19,6 +19,7 @@ import type {
   ConditionGroup,
   ExitSettings,
   StrategyDirection,
+  StrategyTimeframe,
   SupportedSymbol,
   EntryTiming,
 } from "@/types/strategy";
@@ -106,11 +107,17 @@ export default function StrategyForm({
   const [symbol, setSymbol] = useState<SupportedSymbol>(
     (strategy?.symbol as SupportedSymbol) || "USDJPY"
   );
-  // プレビュー専用の時間足 (ストラテジー本体には保存しない、成立箇所の可視化用)
-  const [previewTimeframe, setPreviewTimeframe] = useState<string>(DEFAULT_TIMEFRAME_API);
+  // ストラテジーの対象時間足（基本情報の正式項目）。バックテスト/プレビューの基準足になる。
+  const [timeframe, setTimeframe] = useState<StrategyTimeframe>(
+    (strategy?.timeframe as StrategyTimeframe) || (DEFAULT_TIMEFRAME_API as StrategyTimeframe)
+  );
   const [side, setSide] = useState<StrategyDirection>(strategy?.side || "buy");
   const [entryConditions, setEntryConditions] = useState<ConditionGroup>(
     (strategy?.currentVersion?.entryConditions as ConditionGroup) || createDefaultConditionGroup()
+  );
+  // 売り用エントリー条件（side=both のときのみ送信）。買い=entryConditions と対。
+  const [shortEntryConditions, setShortEntryConditions] = useState<ConditionGroup>(
+    (strategy?.currentVersion?.shortEntryConditions as ConditionGroup) || createDefaultConditionGroup()
   );
   const [exitSettings, setExitSettings] = useState<ExitSettings>(
     (strategy?.currentVersion?.exitSettings as ExitSettings) || createDefaultExitSettings()
@@ -174,14 +181,19 @@ export default function StrategyForm({
     try {
       let savedStrategy: Strategy;
 
+      // Buy & Sell のときだけ売り用条件を送る（buy/sell では entryConditions のみ）
+      const shortConditionsPayload = side === "both" ? shortEntryConditions : undefined;
+
       if (isEditMode && strategy) {
         // 更新
         const request: UpdateStrategyRequest = {
           name: name.trim(),
           description: description.trim() || undefined,
           symbol,
+          timeframe,
           side,
           entryConditions,
+          shortEntryConditions: shortConditionsPayload,
           exitSettings,
           entryTiming,
           tags,
@@ -194,8 +206,10 @@ export default function StrategyForm({
           name: name.trim(),
           description: description.trim() || undefined,
           symbol,
+          timeframe,
           side,
           entryConditions,
+          shortEntryConditions: shortConditionsPayload,
           exitSettings,
           entryTiming,
           tags,
@@ -269,8 +283,26 @@ export default function StrategyForm({
             </select>
           </div>
 
-          {/* 売買方向 */}
+          {/* 時間足（ストラテジーの基準足。バックテスト/プレビューに使われる） */}
           <div>
+            <label className="block text-sm text-gray-400 mb-1">
+              時間足 <span className="text-red-400">*</span>
+            </label>
+            <select
+              className="w-full px-4 py-2 rounded-lg bg-slate-700 text-gray-200 border border-slate-600 focus:border-blue-500 focus:outline-none"
+              value={timeframe}
+              onChange={(e) => setTimeframe(e.target.value as StrategyTimeframe)}
+            >
+              {TIMEFRAME_OPTIONS.map((tf) => (
+                <option key={tf.api} value={tf.api}>
+                  {tf.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* 売買方向 */}
+          <div className="md:col-span-2">
             <label className="block text-sm text-gray-400 mb-1">
               売買方向 <span className="text-red-400">*</span>
             </label>
@@ -306,9 +338,16 @@ export default function StrategyForm({
                 }`}
                 onClick={() => setSide("both")}
               >
-                両建て (Both)
+                両方 (Buy &amp; Sell)
               </button>
             </div>
+            <p className="text-xs text-gray-500 mt-1">
+              {side === "both"
+                ? "買い条件・売り条件をそれぞれ設定します（発火した側でエントリー）。逆ポジ同時保有によるヘッジではありません。"
+                : side === "buy"
+                  ? "下のエントリー条件が成立したら買い（ロング）でエントリーします。"
+                  : "下のエントリー条件が成立したら売り（ショート）でエントリーします。"}
+            </p>
           </div>
 
           {/* 説明 */}
@@ -364,34 +403,39 @@ export default function StrategyForm({
         </div>
       </div>
 
-      {/* エントリー条件 */}
+      {/* エントリー条件（買い、または buy/sell 単方向の条件） */}
       <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
-        <h3 className="text-lg font-semibold text-gray-200 mb-4">エントリー条件</h3>
+        <h3 className="text-lg font-semibold text-gray-200 mb-4">
+          {side === "sell" ? "エントリー条件（売り）" : "エントリー条件（買い）"}
+        </h3>
         <ConditionBuilder
           value={entryConditions}
           onChange={setEntryConditions}
           indicatorMetadata={indicatorMetadata}
         />
 
-        <div className="mt-4">
-          <div className="flex items-center justify-end mb-2">
-            <label className="text-[11px] text-gray-400 mr-2">プレビュー時間足</label>
-            <select
-              className="px-2 py-1 rounded bg-slate-700 text-gray-200 border border-slate-600 text-xs focus:border-blue-500 focus:outline-none"
-              value={previewTimeframe}
-              onChange={(e) => setPreviewTimeframe(e.target.value)}
-            >
-              {TIMEFRAME_OPTIONS.map((tf) => (
-                <option key={tf.api} value={tf.api}>
-                  {tf.label}
-                </option>
-              ))}
-            </select>
+        {/* 売り用エントリー条件は Buy & Sell のときのみ表示する */}
+        {side === "both" && (
+          <div className="mt-6 pt-6 border-t border-slate-700">
+            <h3 className="text-lg font-semibold text-gray-200 mb-4">エントリー条件（売り）</h3>
+            <ConditionBuilder
+              value={shortEntryConditions}
+              onChange={setShortEntryConditions}
+              indicatorMetadata={indicatorMetadata}
+            />
           </div>
+        )}
+
+        {/* プレビューはストラテジーの時間足を使う（成立箇所の可視化）。
+            Buy & Sell では買い条件を表示する。 */}
+        <div className="mt-4">
+          <p className="text-[11px] text-gray-400 mb-2 text-right">
+            プレビュー（{timeframe} / {side === "sell" ? "売り条件" : "買い条件"}）
+          </p>
           <EntryPreviewMiniChart
             entryConditions={entryConditions}
             symbol={symbol}
-            timeframe={previewTimeframe}
+            timeframe={timeframe}
           />
         </div>
       </div>

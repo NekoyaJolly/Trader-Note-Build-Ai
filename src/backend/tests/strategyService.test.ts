@@ -96,6 +96,7 @@ describe('strategyService', () => {
     name: 'テスト戦略',
     description: 'RSI逆張り戦略',
     symbol: 'USDJPY',
+    timeframe: '1h',
     side: 'buy',
     entryConditions: mockVersion.entryConditions,
     exitSettings: mockVersion.exitSettings,
@@ -243,6 +244,58 @@ describe('strategyService', () => {
 
         await expect(createStrategy(invalidInput)).rejects.toThrow(
         '売買方向は buy / sell / both を指定してください'
+      );
+    });
+
+    it('対応していない時間足の場合はエラーになること', async () => {
+      const invalidInput = { ...validCreateInput, timeframe: '3h' };
+
+      await expect(createStrategy(invalidInput)).rejects.toThrow(
+        '対応していない時間足です'
+      );
+    });
+
+    it('side=both で売り用条件が無い場合はエラーになること', async () => {
+      const invalidInput = { ...validCreateInput, side: 'both' as StrategyDirection };
+
+      await expect(createStrategy(invalidInput)).rejects.toThrow(
+        'Buy & Sell では売り用エントリー条件'
+      );
+    });
+
+    it('side=both で売り用条件があれば作成でき、shortEntryConditions が保存されること', async () => {
+      const prisma = mockPrisma;
+      const versionCreate = jest.fn().mockResolvedValue(mockVersion);
+      (prisma.$transaction as jest.Mock).mockImplementation(async (fn) => {
+        return fn({
+          strategy: {
+            create: jest.fn().mockResolvedValue(mockStrategy),
+            update: jest.fn().mockResolvedValue(mockStrategy),
+          },
+          strategyVersion: { create: versionCreate },
+        });
+      });
+      (prisma.strategy.findUnique as jest.Mock).mockResolvedValue({
+        ...mockStrategy,
+        versions: [mockVersion],
+      });
+
+      const shortConditions = { groupId: 'g2', operator: 'AND', conditions: [] };
+      await createStrategy({
+        ...validCreateInput,
+        side: 'both',
+        shortEntryConditions: shortConditions,
+      });
+
+      // 初期バージョン作成時に売り用条件が渡ること（買い=entryConditions と対）
+      expect(versionCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            side: 'both',
+            timeframe: '1h',
+            shortEntryConditions: shortConditions,
+          }),
+        })
       );
     });
   });

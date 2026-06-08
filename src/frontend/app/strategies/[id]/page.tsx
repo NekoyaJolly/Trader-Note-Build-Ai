@@ -535,7 +535,7 @@ export default function StrategyDetailPage() {
                 >
                   <option value="buy">買い</option>
                   <option value="sell">売り</option>
-                  <option value="both">両建て</option>
+                  <option value="both">両方 (Buy &amp; Sell)</option>
                 </select>
               </div>
             ) : (
@@ -549,8 +549,11 @@ export default function StrategyDetailPage() {
                 </div>
                 <div className="flex items-center gap-2 text-xs text-gray-400">
                   <span className="font-mono text-cyan-400">{strategy.symbol}</span>
+                  {strategy.timeframe && (
+                    <span className="font-mono text-sky-400">{strategy.timeframe}</span>
+                  )}
                   <span className={strategy.side === "buy" ? "text-green-400" : strategy.side === "sell" ? "text-red-400" : "text-amber-400"}>
-                    {strategy.side === "buy" ? "買い" : strategy.side === "sell" ? "売り" : "両建て"}
+                    {strategy.side === "buy" ? "買い" : strategy.side === "sell" ? "売り" : "両方"}
                   </span>
                   {currentVersion && (
                     <span className="text-gray-500">v{currentVersion.versionNumber}</span>
