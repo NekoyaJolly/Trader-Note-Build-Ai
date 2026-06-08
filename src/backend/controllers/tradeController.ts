@@ -23,6 +23,8 @@ const UploadCsvTextBodySchema = z
     filename: z.string().min(1),
     csvText: z.string(),
     profileId: z.string().optional(),
+    // 後方互換のための受け口。individual は未実装で UI からは送られない (一括適用のみ)。
+    // サーバー処理では未使用 (uploadCSVText 参照)。
     applyMode: z.enum(['bulk', 'individual']).optional(),
     userComment: z.string().optional(),
   })
@@ -189,7 +191,10 @@ export class TradeController {
         return;
       }
       const { filename, csvText, profileId, userComment } = parsedBody.data;
-      // applyMode は将来の bulk / individual 分岐用。現状未使用だがAPI互換のためスキーマでは受け付ける。
+      // applyMode は後方互換のための受け口。個別選択(individual)は未実装のため UI からは
+      // 送信されなくなった (現在は一括適用のみ)。古いクライアントが送ってきても 400 にしない
+      // ようスキーマでは optional で受け付けるが、サーバー処理では使用しない。
+      // individual を実装する場合は P0 の範囲外として別 PR で扱う。
       const userId = req.user!.userId; // プロファイル参照に使用 (requireAuth 配下)
 
       // 入力検証（技術用語を避けたメッセージはフロント側で実施）

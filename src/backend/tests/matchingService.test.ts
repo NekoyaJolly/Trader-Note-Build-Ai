@@ -188,6 +188,19 @@ describe('MatchingService', () => {
       evaluatedAt: new Date(),
     });
 
+    // Side-A ノート (sideb: 接頭辞なし)。getNotePriority が DB を引くため、テストでは
+    // getNotePriority をモックして DB アクセスを回避する。
+    const createSideAMatch = (): MatchResultDTO => ({
+      id: 'match_test_a1',
+      matchScore: 0.88,
+      historicalNoteId: 'note_side_a_1',
+      marketSnapshot: {},
+      marketSnapshotId: 'snap_a1',
+      symbol: 'USDJPY',
+      reasons: ['価格帯一致'],
+      evaluatedAt: new Date(),
+    });
+
     // control は対象ノートをそのまま通知対象に通すモック
     const buildHitControl = (): SimultaneousHitControlService => {
       const hitControl = new SimultaneousHitControlService();
@@ -228,6 +241,43 @@ describe('MatchingService', () => {
           marketSnapshotId: 'snap_123',
           symbol: 'EURUSD',
           score: 0.9,
+        })
+      );
+      expect(result.notified).toBe(1);
+      expect(result.skipped).toBe(0);
+    });
+
+    it('Side-A note ID でも shouldNotify=true なら sendInApp が呼ばれ notified にカウントされる', async () => {
+      // ゴールデンパス保証: Side-A ノート(sideb: 接頭辞なし)の通知が UI 行作成まで届くことを固定する
+      const sendInApp = jest
+        .fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>()
+        .mockResolvedValue({ success: true, id: 'notif_a1' });
+      const evaluateWithPersistence = jest
+        .fn<() => Promise<{ shouldNotify: boolean; status: 'sent'; reasonSummary: string }>>()
+        .mockResolvedValue({ shouldNotify: true, status: 'sent', reasonSummary: 'スコア: 0.880' });
+
+      const pipeline = new MatchingService({
+        inAppNotificationSender: { sendInApp, sendPush: jest.fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>().mockResolvedValue({ success: true }) },
+        notificationTriggerService: { evaluateWithPersistence, invalidateNotificationLog: jest.fn<(id: string) => Promise<void>>() },
+        simultaneousHitControl: buildHitControl(),
+      });
+      // Side-A ノートは getNotePriority が DB を引くためモックして DB アクセスを回避する
+      jest
+        .spyOn(pipeline as unknown as { getNotePriority: (id: string) => Promise<number> }, 'getNotePriority')
+        .mockResolvedValue(5);
+      jest
+        .spyOn(pipeline, 'checkForAllMatches')
+        .mockResolvedValue([createSideAMatch()]);
+
+      const result = await pipeline.runMatchingPipeline();
+
+      expect(sendInApp).toHaveBeenCalledTimes(1);
+      expect(sendInApp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          noteId: 'note_side_a_1',
+          marketSnapshotId: 'snap_a1',
+          symbol: 'USDJPY',
+          score: 0.88,
         })
       );
       expect(result.notified).toBe(1);

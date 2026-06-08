@@ -215,17 +215,47 @@ export async function fetchNoteDetail(id: string): Promise<NoteDetail> {
 }
 
 /**
+ * CSV アップロードの任意オプション。
+ * - profileId: 適用するインジケータープロファイル ID（予約 ID __AI_AUTO__ / __NONE__ も可）
+ * - userComment: このインポートに付けるメモ（任意）
+ *
+ * applyMode は含めない。individual は未実装で UI からは送らない方針のため
+ * (一括適用のみ。backend は後方互換で optional 受け付けだが未使用)。
+ */
+export interface UploadCsvTextOptions {
+  profileId?: string;
+  userComment?: string;
+}
+
+/**
  * CSV テキストをアップロードして取り込み＆ノート生成
  * POST /api/trades/import/upload-text
+ *
+ * @param options - profileId / userComment（省略時は従来どおり filename / csvText のみ送信）
  */
 export async function uploadCsvText(
   filename: string,
-  csvText: string
+  csvText: string,
+  options?: UploadCsvTextOptions
 ): Promise<{ tradesImported: number; noteIds: string[] }> {
+  // 送信 payload を型付きで組み立てる（unknown を使わない。最優先5原則 §2）
+  const payload: {
+    filename: string;
+    csvText: string;
+    profileId?: string;
+    userComment?: string;
+  } = { filename, csvText };
+  if (options?.profileId) {
+    payload.profileId = options.profileId;
+  }
+  if (options?.userComment) {
+    payload.userComment = options.userComment;
+  }
+
   const response = await apiFetch(`${getPublicApiBaseUrl()}/api/trades/import/upload-text`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ filename, csvText }),
+    body: JSON.stringify(payload),
   });
   if (!response.ok) {
     throw new Error(
