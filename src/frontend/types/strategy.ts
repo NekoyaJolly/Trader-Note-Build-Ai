@@ -796,8 +796,9 @@ export function flattenConditionGroup(group: ConditionGroup): FlatConditionList 
  * - 複数ランなら OR グループ。長さ 1 のアームは AND で包まず子要素を直接 OR の下に置く。
  *
  * 評価器は `operator` と `conditions` のみ読むため、この標準形なら従来どおり正しく評価される。
- * AND ラッパーの groupId は内容から決定的に導出し、編集のたびに ID が変わってツリーが
- * 無用に差し替わるのを防ぐ（リーフの conditionId は保持されるので入力フォーカスは維持される）。
+ * AND ラッパーの groupId は `${baseGroupId}__and${armIndex}` で armIndex から決定的に導出する
+ * （= 同じフラット構成なら毎回同じ ID。接合点の切り替え等でアーム構成が変わると ID も変わるが、
+ * このラッパー ID は React key には使わず（key はリーフの conditionId）、評価にも影響しないため無害）。
  *
  * @param flat - フラット表現
  * @param baseGroupId - 生成するルートグループの groupId（元グループのものを引き継ぐ）

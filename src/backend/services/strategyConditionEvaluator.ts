@@ -293,7 +293,10 @@ async function resolveCompareTarget(
   target: IndicatorCondition['compareTargetUpper'],
 ): Promise<number | undefined> {
   if (!target) return undefined;
-  if (target.type === 'fixed') return target.value ?? 0;
+  if (target.type === 'fixed') {
+    // 値欠落 (undefined / NaN) はサイレントに 0 扱いせず undefined を返し、範囲判定を不成立にする
+    return typeof target.value === 'number' && Number.isFinite(target.value) ? target.value : undefined;
+  }
   if (target.type === 'price') return getPriceValue(ctx, target.priceType || 'close');
   return getIndicatorValue(ctx, target.indicatorId || '', target.params || {}, target.field || 'value');
 }
@@ -524,13 +527,8 @@ async function evaluateIfThen(
     };
   }
   
-  // IF条件をチェック
-  let ifResult: boolean;
-  if ('indicatorId' in ifCondition) {
-    ifResult = await evaluateCondition(ctx, ifCondition);
-  } else {
-    ifResult = await evaluateConditionGroup(ctx, ifCondition as ConditionGroup);
-  }
+  // IF条件をチェック（indicator/pattern/time/group + lookback を evaluateChildNode で統一処理）
+  const ifResult = await evaluateChildNode(ctx, ifCondition);
   
   if (ifResult && !ctx.ifThenState.triggered) {
     ctx.ifThenState.triggered = true;
@@ -547,12 +545,7 @@ async function evaluateIfThen(
       return false;
     }
     
-    let thenResult: boolean;
-    if ('indicatorId' in thenCondition) {
-      thenResult = await evaluateCondition(ctx, thenCondition);
-    } else {
-      thenResult = await evaluateConditionGroup(ctx, thenCondition as ConditionGroup);
-    }
+    const thenResult = await evaluateChildNode(ctx, thenCondition);
     
     if (thenResult) {
       // THEN条件成立 - リセット
@@ -604,15 +597,9 @@ async function evaluateSequence(
     return false;
   }
   
-  // 現在のステップを評価
+  // 現在のステップを評価（indicator/pattern/time/group + lookback を evaluateChildNode で統一処理）
   const currentCondition = sequence[currentStep];
-  let stepResult: boolean;
-  
-  if ('indicatorId' in currentCondition) {
-    stepResult = await evaluateCondition(ctx, currentCondition);
-  } else {
-    stepResult = await evaluateConditionGroup(ctx, currentCondition as ConditionGroup);
-  }
+  const stepResult = await evaluateChildNode(ctx, currentCondition);
   
   if (stepResult) {
     ctx.sequenceState.currentStep++;

@@ -133,6 +133,15 @@ export function extractConditionRequirements(group: ConditionGroup): {
         node.compareTarget.field,
       );
     }
+    // between / not_between の上限が別指標の場合も系列を取得対象にする
+    // (収集漏れがあるとプレビューで系列未取得→常に false になる)
+    if (node.compareTargetUpper?.type === "indicator") {
+      addIndicator(
+        node.compareTargetUpper.indicatorId,
+        toNumberParams(node.compareTargetUpper.params),
+        node.compareTargetUpper.field,
+      );
+    }
   };
 
   visit(group);

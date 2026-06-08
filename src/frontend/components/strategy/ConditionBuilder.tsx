@@ -304,7 +304,7 @@ function SingleCondition({
   };
 
   return (
-    <div className={`flex flex-wrap items-center gap-${compact ? '1' : '2'} ${compact ? 'p-2' : 'p-3'} bg-slate-800 rounded-lg border border-slate-700`}>
+    <div className={`flex flex-wrap items-center ${compact ? 'gap-1' : 'gap-2'} ${compact ? 'p-2' : 'p-3'} bg-slate-800 rounded-lg border border-slate-700`}>
       {/* インジケーター選択 */}
       <select
         className={`${baseSelectClass} ${compact ? 'min-w-[80px]' : 'min-w-[120px]'}`}
@@ -644,7 +644,7 @@ function SinglePatternCondition({
   ];
 
   return (
-    <div className={`flex flex-wrap items-center gap-${compact ? '1' : '2'} ${compact ? 'p-2' : 'p-3'} bg-slate-800 rounded-lg border border-slate-700`}>
+    <div className={`flex flex-wrap items-center ${compact ? 'gap-1' : 'gap-2'} ${compact ? 'p-2' : 'p-3'} bg-slate-800 rounded-lg border border-slate-700`}>
       <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-400`}>パターン</span>
 
       <select
@@ -853,7 +853,7 @@ function SingleTimeCondition({
   };
 
   return (
-    <div className={`flex flex-wrap items-center gap-${compact ? '1' : '2'} ${compact ? 'p-2' : 'p-3'} bg-slate-800 rounded-lg border border-slate-700`}>
+    <div className={`flex flex-wrap items-center ${compact ? 'gap-1' : 'gap-2'} ${compact ? 'p-2' : 'p-3'} bg-slate-800 rounded-lg border border-slate-700`}>
       <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-amber-300/80`}>時間</span>
 
       {/* 種別 */}
@@ -1212,7 +1212,7 @@ function ConditionGroupComponent({
       {flat ? (
         // 通常モード: 接合点ごとに AND/OR を選べる。AND ラン（かつ で繋がる塊）を枠で囲み、
         // 枠の境界が または（OR）になる = ブール優先順位（AND を内、OR を外）を視覚化する。
-        <div className={`space-y-${compact ? '1' : '2'}`}>
+        <div className={compact ? 'space-y-1' : 'space-y-2'}>
           {flat.items.length === 0 && (
             <p className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-500 italic`}>
               条件がありません。下のボタンで追加してください。
@@ -1264,7 +1264,7 @@ function ConditionGroupComponent({
         </div>
       ) : (
         // 高度モード（NOT / IF_THEN / SEQUENCE）: 従来の単一演算子表示
-        <div className={`space-y-${compact ? '1' : '2'}`}>
+        <div className={compact ? 'space-y-1' : 'space-y-2'}>
           {group.conditions.map((condition, index) => (
             <React.Fragment key={childKey(condition)}>
               {index > 0 && (
