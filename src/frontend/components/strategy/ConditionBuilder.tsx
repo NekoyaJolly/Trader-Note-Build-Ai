@@ -533,6 +533,16 @@ function SingleCondition({
         ))}
       </select>
 
+      {/* 直近ルックバック */}
+      {(!readOnly || (condition.lookbackBars ?? 0) > 1) && (
+        <LookbackControl
+          value={condition.lookbackBars}
+          onChange={(bars) => onChange({ ...condition, lookbackBars: bars })}
+          readOnly={readOnly}
+          compact={compact}
+        />
+      )}
+
       {/* 削除ボタン */}
       {!readOnly && canRemove && (
         <button
@@ -708,6 +718,16 @@ function SinglePatternCondition({
         ))}
       </select>
 
+      {/* 直近ルックバック */}
+      {(!readOnly || (condition.lookbackBars ?? 0) > 1) && (
+        <LookbackControl
+          value={condition.lookbackBars}
+          onChange={(bars) => onChange({ ...condition, lookbackBars: bars })}
+          readOnly={readOnly}
+          compact={compact}
+        />
+      )}
+
       {!readOnly && canRemove && (
         <button
           type="button"
@@ -726,6 +746,52 @@ function SinglePatternCondition({
           {criteriaText}
         </div>
       )}
+    </div>
+  );
+}
+
+// ============================================
+// 直近ルックバック（直近N本以内に成立）モディファイア
+// ============================================
+
+interface LookbackControlProps {
+  /** 現在の本数（undefined / 1 なら無効） */
+  value: number | undefined;
+  /** 変更コールバック（無効化は undefined） */
+  onChange: (bars: number | undefined) => void;
+  readOnly?: boolean;
+  compact?: boolean;
+}
+
+/**
+ * 条件に「直近 N 本以内のどこかで成立すれば OK」を付与する小さなコントロール。
+ * チェックで有効化（既定 3 本）、数値で本数指定（最小 2）。
+ */
+function LookbackControl({ value, onChange, readOnly = false, compact = false }: LookbackControlProps) {
+  const active = !!value && value > 1;
+  const inputClass = compact ? 'w-10 px-1 py-0.5 text-xs' : 'w-12 px-1.5 py-0.5 text-sm';
+  return (
+    <div className="flex items-center gap-1" title="直近 N 本以内のどこかで成立すれば成立とみなす">
+      <input
+        type="checkbox"
+        checked={active}
+        onChange={(e) => onChange(e.target.checked ? 3 : undefined)}
+        disabled={readOnly}
+        className="accent-amber-500"
+      />
+      <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-400`}>直近</span>
+      <input
+        type="number"
+        min={2}
+        className={`${inputClass} rounded bg-slate-700 text-gray-200 border border-slate-600 disabled:opacity-40`}
+        value={active ? value : ''}
+        onChange={(e) => {
+          const n = parseInt(e.target.value, 10);
+          onChange(Number.isFinite(n) ? Math.max(2, n) : 2);
+        }}
+        disabled={readOnly || !active}
+      />
+      <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-400`}>本以内</span>
     </div>
   );
 }

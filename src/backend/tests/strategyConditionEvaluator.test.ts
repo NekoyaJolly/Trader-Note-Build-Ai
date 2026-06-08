@@ -11,6 +11,7 @@ import type {
   IndicatorCondition,
   PatternCondition,
   TimeCondition,
+  CandlePatternId,
   ConditionGroup,
   OHLCV} from '../services/strategyConditionEvaluator';
 import {
@@ -708,5 +709,32 @@ describe('範囲条件（between / not_between）', () => {
   test('上限未指定なら不成立', async () => {
     const noUpper: IndicatorCondition = { ...between, compareTargetUpper: undefined };
     expect(await evaluateCondition(makeCtx(50), noUpper)).toBe(false);
+  });
+});
+
+describe('直近ルックバック（lookbackBars）', () => {
+  const data: OHLCV[] = Array.from({ length: 5 }, () => ({
+    timestamp: new Date(), open: 1, high: 1, low: 1, close: 1, volume: 0,
+  }));
+  // hammer は index 1 でのみ出現
+  const patternCache = new Map<CandlePatternId, boolean[]>();
+  patternCache.set('hammer', [false, true, false, false, false]);
+  const ctxAt = (i: number): EvaluationContext => ({
+    data, currentIndex: i, indicatorCache: new Map(), patternCache, strategy: mockStrategy,
+  });
+  const hammer: PatternCondition = { conditionId: 'p', type: 'pattern', patternId: 'hammer', operator: 'is_true', lookbackBars: 3 };
+
+  test('パターンが直近N本以内に出現で成立、窓外なら不成立', async () => {
+    const group: ConditionGroup = { groupId: 'g', operator: 'AND', conditions: [hammer] };
+    // index 3: 窓 [1,3] に hammer(index1) を含む → true
+    expect(await evaluateConditionGroup(ctxAt(3), group)).toBe(true);
+    // index 4: 窓 [2,4] に hammer なし → false
+    expect(await evaluateConditionGroup(ctxAt(4), group)).toBe(false);
+  });
+
+  test('lookback 無しは現在足のみで判定する', async () => {
+    const group: ConditionGroup = { groupId: 'g', operator: 'AND', conditions: [{ ...hammer, lookbackBars: undefined }] };
+    expect(await evaluateConditionGroup(ctxAt(1), group)).toBe(true);
+    expect(await evaluateConditionGroup(ctxAt(3), group)).toBe(false);
   });
 });

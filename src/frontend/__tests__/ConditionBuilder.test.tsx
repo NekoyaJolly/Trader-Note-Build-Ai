@@ -138,6 +138,15 @@ describe("ConditionBuilder（接合点ごとの AND/OR）", () => {
     expect(screen.getByTitle("上限")).toBeTruthy();
   });
 
+  it("直近ルックバックを有効化すると lookbackBars=3 が入る", () => {
+    render(<Harness />);
+    // 単一条件には lookback のチェックボックスが1つだけ存在する
+    const checkbox = screen.getByRole("checkbox");
+    fireEvent.click(checkbox);
+    const cond = currentGroup().conditions[0] as { lookbackBars?: number };
+    expect(cond.lookbackBars).toBe(3);
+  });
+
   it("条件を削除すると接合点も連動して減る", () => {
     render(<Harness />);
     fireEvent.click(screen.getByText("条件を追加")); // 2件・接合点1

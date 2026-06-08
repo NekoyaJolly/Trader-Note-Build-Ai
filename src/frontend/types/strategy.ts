@@ -121,6 +121,11 @@ export interface PatternCondition {
   type: 'pattern';
   patternId: CandlePatternId;
   operator: PatternOperator;
+  /**
+   * 直近ルックバック: 「直近 N 本以内（現在足含む）にこのパターンが出現したら成立」。
+   * 未指定 / 1 なら現在足のみ（通常挙動）。
+   */
+  lookbackBars?: number;
 }
 
 // ============================================
@@ -379,6 +384,11 @@ export interface IndicatorCondition {
   compareTarget: CompareTarget;
   /** between / not_between 専用: 上限。未指定なら範囲判定は不成立 */
   compareTargetUpper?: CompareTarget;
+  /**
+   * 直近ルックバック: 「直近 N 本以内（現在足含む）にこの条件が成立したら成立」。
+   * 未指定 / 1 なら現在足のみ（通常挙動）。
+   */
+  lookbackBars?: number;
 }
 
 // ============================================

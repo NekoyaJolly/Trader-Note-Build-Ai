@@ -83,6 +83,8 @@ export interface IndicatorCondition {
     field?: string;
     priceType?: 'open' | 'high' | 'low' | 'close';
   };
+  // 直近ルックバック: 直近 N 本以内（現在足含む）に成立で true。未指定/1 は現在足のみ
+  lookbackBars?: number;
 }
 
 /** ローソク足パターン条件 */
@@ -91,6 +93,8 @@ export interface PatternCondition {
   type: 'pattern';
   patternId: CandlePatternId;
   operator: PatternOperator;
+  // 直近ルックバック: 直近 N 本以内（現在足含む）に出現で true。未指定/1 は現在足のみ
+  lookbackBars?: number;
 }
 
 // ============================================
@@ -402,9 +406,47 @@ export function evaluatePatternCondition(
   return Promise.resolve(condition.operator === 'is_false' ? !flag : !!flag);
 }
 
+type ConditionChildItem = IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup;
+
+/** item の基本評価（ルックバックは考慮しない）。種別ごとに適切な評価関数へ振り分ける。 */
+async function evaluateBaseNode(ctx: EvaluationContext, item: ConditionChildItem): Promise<boolean> {
+  if ('indicatorId' in item) {
+    return evaluateCondition(ctx, item);
+  }
+  const type = (item as { type?: string }).type;
+  if (type === 'pattern') {
+    return evaluatePatternCondition(ctx, item as PatternCondition);
+  }
+  if (type === 'time') {
+    // 時間条件: 当該バーの timestamp を JST 換算して判定（指標キャッシュ不要）
+    const bar = ctx.data[ctx.currentIndex];
+    return bar ? evaluateTimeConditionAt(item as TimeCondition, bar.timestamp.getTime()) : false;
+  }
+  return evaluateConditionGroup(ctx, item as ConditionGroup);
+}
+
+/**
+ * item を評価する。indicator / pattern 条件に lookbackBars>1 があれば
+ * 「直近 N 本以内（現在足含む）のどこかで成立」で true を返す。
+ */
+async function evaluateChildNode(ctx: EvaluationContext, item: ConditionChildItem): Promise<boolean> {
+  const isLeafWithLookback =
+    'indicatorId' in item || (item as { type?: string }).type === 'pattern';
+  const lookbackBars = isLeafWithLookback ? (item as { lookbackBars?: number }).lookbackBars : undefined;
+
+  if (lookbackBars && lookbackBars > 1) {
+    const start = Math.max(0, ctx.currentIndex - (lookbackBars - 1));
+    for (let j = ctx.currentIndex; j >= start; j--) {
+      if (await evaluateBaseNode({ ...ctx, currentIndex: j }, item)) return true;
+    }
+    return false;
+  }
+  return evaluateBaseNode(ctx, item);
+}
+
 /**
  * 条件グループを評価
- * 
+ *
  * @param ctx - 評価コンテキスト
  * @param group - 条件グループ
  * @returns 条件成立の場合 true
@@ -440,23 +482,11 @@ export async function evaluateConditionGroup(
   
   // 通常の論理演算子（AND, OR, NOT）
   const results: boolean[] = [];
-  
+
   for (const item of group.conditions) {
-    let result: boolean;
-    if ('indicatorId' in item) {
-      result = await evaluateCondition(ctx, item);
-    } else if ((item as { type?: string }).type === 'pattern') {
-      result = await evaluatePatternCondition(ctx, item as PatternCondition);
-    } else if ((item as { type?: string }).type === 'time') {
-      // 時間条件: 当該バーの timestamp を JST 換算して判定（指標キャッシュ不要）
-      const bar = ctx.data[ctx.currentIndex];
-      result = bar ? evaluateTimeConditionAt(item as TimeCondition, bar.timestamp.getTime()) : false;
-    } else {
-      result = await evaluateConditionGroup(ctx, item as ConditionGroup);
-    }
-    results.push(result);
+    results.push(await evaluateChildNode(ctx, item));
   }
-  
+
   switch (group.operator) {
     case 'AND':
       return results.every(r => r);

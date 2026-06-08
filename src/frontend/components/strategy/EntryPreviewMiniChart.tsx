@@ -339,13 +339,28 @@ function evalTimeCondition(ctx: EvalContext, condition: TimeCondition): boolean 
   return evaluateTimeConditionAt(condition, Date.parse(bar.timestamp));
 }
 
-// ノード（指標 / パターン / 時間 / グループ）を評価する共通関数。
+// ノード（指標 / パターン / 時間 / グループ）の基本評価（ルックバックは考慮しない）。
 // SEQUENCE / IF_THEN / AND-OR-NOT の各所で同じ分類をするため集約する（時間条件の入れ忘れ防止）。
-function evalNode(ctx: EvalContext, node: ConditionChild): boolean {
+function evalBaseNode(ctx: EvalContext, node: ConditionChild): boolean {
   if (isIndicatorCondition(node)) return evalIndicatorCondition(ctx, normalizeIndicatorCondition(node));
   if (isPatternCondition(node)) return evalPatternCondition(ctx, normalizePatternCondition(node));
   if (isTimeCondition(node)) return evalTimeCondition(ctx, node);
   return evalGroup(ctx, node);
+}
+
+// ノード評価。indicator / pattern に lookbackBars>1 があれば
+// 「直近 N 本以内（現在足含む）のどこかで成立」で true。
+function evalNode(ctx: EvalContext, node: ConditionChild): boolean {
+  const lookbackBars =
+    isIndicatorCondition(node) || isPatternCondition(node) ? node.lookbackBars : undefined;
+  if (lookbackBars && lookbackBars > 1) {
+    const start = Math.max(0, ctx.currentIndex - (lookbackBars - 1));
+    for (let j = ctx.currentIndex; j >= start; j--) {
+      if (evalBaseNode({ ...ctx, currentIndex: j }, node)) return true;
+    }
+    return false;
+  }
+  return evalBaseNode(ctx, node);
 }
 
 function evalGroup(ctx: EvalContext, group: ConditionGroup): boolean {
