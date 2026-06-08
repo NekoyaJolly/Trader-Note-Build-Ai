@@ -215,6 +215,64 @@ export async function fetchNoteDetail(id: string): Promise<NoteDetail> {
 }
 
 /**
+ * matching pipeline run（cron 実行単位）の最小 DTO（observability）。
+ * 内部 DB 行ではなく API が整形した形を受け取る。
+ */
+export interface PipelineRunDTO {
+  runId: string;
+  trigger: string;
+  status: "success" | "skipped" | "partial_failure" | "failed";
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  totalMatches: number;
+  notified: number;
+  skipped: number;
+  errorCount: number;
+  errors: string[];
+  /** reason code -> 件数（run が無い/未集計なら null） */
+  skipReasons: Record<string, number> | null;
+  /** 休場スキップ理由など（通常実行時は null） */
+  marketStatus: string | null;
+}
+
+/**
+ * 最新の matching pipeline run を取得
+ * GET /api/matching/pipeline-runs/latest
+ * @returns 最新 run。まだ run が無い場合は null。
+ */
+export async function fetchLatestPipelineRun(): Promise<PipelineRunDTO | null> {
+  const response = await apiFetch(
+    `${getPublicApiBaseUrl()}/api/matching/pipeline-runs/latest`,
+    { cache: "no-store" }
+  );
+  if (!response.ok) {
+    throw new Error(
+      `最新パイプライン実行状態の取得に失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+  const data: { run?: PipelineRunDTO | null } = await response.json();
+  return data.run ?? null;
+}
+
+/**
+ * matching pipeline run 一覧を最新順で取得
+ * GET /api/matching/pipeline-runs?limit=N
+ */
+export async function fetchPipelineRuns(limit = 20): Promise<PipelineRunDTO[]> {
+  const url = new URL(`${getPublicApiBaseUrl()}/api/matching/pipeline-runs`);
+  url.searchParams.set("limit", String(limit));
+  const response = await apiFetch(url.toString(), { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(
+      `パイプライン実行履歴の取得に失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+  const data: { runs?: PipelineRunDTO[] } = await response.json();
+  return Array.isArray(data.runs) ? data.runs : [];
+}
+
+/**
  * CSV アップロードの任意オプション。
  * - profileId: 適用するインジケータープロファイル ID（予約 ID __AI_AUTO__ / __NONE__ も可）
  * - userComment: このインポートに付けるメモ（任意）

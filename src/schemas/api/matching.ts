@@ -30,3 +30,14 @@ export const GetMatchHistoryQuerySchema = z.object({
 });
 
 export type GetMatchHistoryQuery = z.infer<typeof GetMatchHistoryQuerySchema>;
+
+// ========================================
+// GET /api/matching/pipeline-runs クエリ
+// ========================================
+
+/** matching pipeline run 一覧取得クエリ（observability） */
+export const GetPipelineRunsQuerySchema = z.object({
+  limit: z.string().regex(/^\d+$/, '数値を指定してください').optional(),
+});
+
+export type GetPipelineRunsQuery = z.infer<typeof GetPipelineRunsQuerySchema>;

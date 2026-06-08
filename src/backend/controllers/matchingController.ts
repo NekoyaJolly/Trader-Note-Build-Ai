@@ -1,8 +1,49 @@
 import type { Request, Response } from 'express';
+import type { MatchingPipelineRun } from '@prisma/client';
 import { getValidatedQuery } from '../../middleware/validateRequest';
 import { MatchingService } from '../../services/matchingService';
 import { NotificationService } from '../../services/notificationService';
 import { TradeNoteService } from '../../services/tradeNoteService';
+
+/**
+ * MatchingPipelineRun の API レスポンス DTO（内部 DB 行をそのまま返さない）。
+ */
+interface PipelineRunDTO {
+  runId: string;
+  trigger: string;
+  status: string;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  totalMatches: number;
+  notified: number;
+  skipped: number;
+  errorCount: number;
+  errors: string[];
+  skipReasons: MatchingPipelineRun['skipReasons'];
+  marketStatus: string | null;
+}
+
+/**
+ * DB 行を API DTO に整形する。
+ */
+function toPipelineRunDTO(row: MatchingPipelineRun): PipelineRunDTO {
+  return {
+    runId: row.id,
+    trigger: row.trigger,
+    status: row.status,
+    startedAt: row.startedAt.toISOString(),
+    finishedAt: row.finishedAt.toISOString(),
+    durationMs: row.durationMs,
+    totalMatches: row.totalMatches,
+    notified: row.notified,
+    skipped: row.skipped,
+    errorCount: row.errorCount,
+    errors: row.errors,
+    skipReasons: row.skipReasons,
+    marketStatus: row.marketStatus,
+  };
+}
 
 /**
  * マッチングコントローラー
@@ -113,6 +154,51 @@ export class MatchingController {
       console.error('マッチ履歴取得エラー:', error);
       // 本番環境では内部エラーの詳細を隠蔽
       res.status(500).json({ error: 'マッチ履歴の取得に失敗しました' });
+    }
+  };
+
+  /**
+   * matching pipeline run 一覧を取得（observability）
+   * GET /api/matching/pipeline-runs?limit=N
+   *
+   * 運用者が「いつ動いたか / 何件マッチ・通知・スキップしたか」を最新順で確認する。
+   */
+  getPipelineRuns = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { limit } = getValidatedQuery<{ limit?: string }>(res);
+      // 1〜100 件にクランプ（デフォルト 20）
+      const parsedLimit = limit ? parseInt(limit, 10) : 20;
+      const safeLimit = Math.min(Math.max(parsedLimit, 1), 100);
+
+      const runs = await this.matchingService.getPipelineRuns(safeLimit);
+
+      res.json({
+        success: true,
+        count: runs.length,
+        runs: runs.map(toPipelineRunDTO),
+      });
+    } catch (error) {
+      console.error('pipeline run 一覧取得エラー:', error);
+      res.status(500).json({ error: 'パイプライン実行履歴の取得に失敗しました' });
+    }
+  };
+
+  /**
+   * 最新の matching pipeline run を取得（observability）
+   * GET /api/matching/pipeline-runs/latest
+   *
+   * run がまだ無い場合は run: null を返す。
+   */
+  getLatestPipelineRun = async (_req: Request, res: Response): Promise<void> => {
+    try {
+      const run = await this.matchingService.getLatestPipelineRun();
+      res.json({
+        success: true,
+        run: run ? toPipelineRunDTO(run) : null,
+      });
+    } catch (error) {
+      console.error('最新 pipeline run 取得エラー:', error);
+      res.status(500).json({ error: '最新のパイプライン実行状態の取得に失敗しました' });
     }
   };
 }

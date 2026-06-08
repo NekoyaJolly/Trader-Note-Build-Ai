@@ -15,6 +15,7 @@ import { MatchingService } from '../../services/matchingService';
 import type { TradeNote, MarketData } from '../../models/types';
 import type { MatchResultDTO } from '../../domain/matching/MatchResultDTO';
 import { SimultaneousHitControlService } from '../../services/notification/simultaneousHitControlService';
+import type { MatchingPipelineRunRepository } from '../repositories/matchingPipelineRunRepository';
 import {
   createNoteEvaluatorFromFSNote,
   convertMarketDataToSnapshot
@@ -214,6 +215,21 @@ describe('MatchingService', () => {
       return hitControl;
     };
 
+    // run 永続化リポジトリのモック。テストで DB 書き込みを発生させないために注入する。
+    // create の戻り値は finalizePipelineRun で使わないため空オブジェクトで足りる（テストのため cast 許容）。
+    const buildRunRepo = (): Pick<
+      MatchingPipelineRunRepository,
+      'create' | 'findLatest' | 'findMany'
+    > =>
+      ({
+        create: jest.fn<(input: unknown) => Promise<unknown>>().mockResolvedValue({}),
+        findLatest: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
+        findMany: jest.fn<() => Promise<unknown[]>>().mockResolvedValue([]),
+      }) as unknown as Pick<
+        MatchingPipelineRunRepository,
+        'create' | 'findLatest' | 'findMany'
+      >;
+
     it('shouldNotify=true のとき sendInApp が呼ばれ notified にカウントされる', async () => {
       const sendInApp = jest
         .fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>()
@@ -222,16 +238,18 @@ describe('MatchingService', () => {
         .fn<() => Promise<{ shouldNotify: boolean; status: 'sent'; reasonSummary: string }>>()
         .mockResolvedValue({ shouldNotify: true, status: 'sent', reasonSummary: 'スコア: 0.900' });
 
+      const runRepo = buildRunRepo();
       const pipeline = new MatchingService({
         inAppNotificationSender: { sendInApp, sendPush: jest.fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>().mockResolvedValue({ success: true }) },
         notificationTriggerService: { evaluateWithPersistence, invalidateNotificationLog: jest.fn<(id: string) => Promise<void>>() },
         simultaneousHitControl: buildHitControl(),
+        matchingPipelineRunRepository: runRepo,
       });
       jest
         .spyOn(pipeline, 'checkForAllMatches')
         .mockResolvedValue([createSideBMatch()]);
 
-      const result = await pipeline.runMatchingPipeline();
+      const result = await pipeline.runMatchingPipeline({ trigger: 'manual_test' });
 
       // sendInApp が正しい payload で 1 回呼ばれている
       expect(sendInApp).toHaveBeenCalledTimes(1);
@@ -245,6 +263,18 @@ describe('MatchingService', () => {
       );
       expect(result.notified).toBe(1);
       expect(result.skipped).toBe(0);
+      // P1 observability: runId が返り、run が success として永続化される
+      expect(result.runId).toBeTruthy();
+      expect(result.status).toBe('success');
+      expect(runRepo.create).toHaveBeenCalledTimes(1);
+      expect(runRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: result.runId,
+          trigger: 'manual_test',
+          status: 'success',
+          notified: 1,
+        })
+      );
     });
 
     it('Side-A note ID でも shouldNotify=true なら sendInApp が呼ばれ notified にカウントされる', async () => {
@@ -260,6 +290,7 @@ describe('MatchingService', () => {
         inAppNotificationSender: { sendInApp, sendPush: jest.fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>().mockResolvedValue({ success: true }) },
         notificationTriggerService: { evaluateWithPersistence, invalidateNotificationLog: jest.fn<(id: string) => Promise<void>>() },
         simultaneousHitControl: buildHitControl(),
+        matchingPipelineRunRepository: buildRunRepo(),
       });
       // Side-A ノートは getNotePriority が DB を引くためモックして DB アクセスを回避する
       jest
@@ -303,6 +334,7 @@ describe('MatchingService', () => {
         inAppNotificationSender: { sendInApp, sendPush: jest.fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>().mockResolvedValue({ success: true }) },
         notificationTriggerService: { evaluateWithPersistence, invalidateNotificationLog },
         simultaneousHitControl: buildHitControl(),
+        matchingPipelineRunRepository: buildRunRepo(),
       });
       jest
         .spyOn(pipeline, 'checkForAllMatches')
@@ -330,6 +362,7 @@ describe('MatchingService', () => {
         inAppNotificationSender: { sendInApp, sendPush: jest.fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>().mockResolvedValue({ success: true }) },
         notificationTriggerService: { evaluateWithPersistence, invalidateNotificationLog: jest.fn<(id: string) => Promise<void>>() },
         simultaneousHitControl: buildHitControl(),
+        matchingPipelineRunRepository: buildRunRepo(),
       });
       // marketSnapshotId を空にしたマッチ (= 紐づく MatchResult が無いケース)
       jest
@@ -344,28 +377,56 @@ describe('MatchingService', () => {
       expect(result.errors.length).toBeGreaterThan(0);
     });
 
-    it('shouldNotify=false のとき sendInApp は呼ばれない', async () => {
+    it('shouldNotify=false のとき sendInApp は呼ばれず skipReasonCode が集計される', async () => {
       const sendInApp = jest
         .fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>()
         .mockResolvedValue({ success: true, id: 'notif_1' });
+      // skipReasonCode を返すと skipReasons 集計に reason code 別で反映される (P1 observability)
       const evaluateWithPersistence = jest
-        .fn<() => Promise<{ shouldNotify: boolean; status: 'skipped'; skipReason: string }>>()
-        .mockResolvedValue({ shouldNotify: false, status: 'skipped', skipReason: 'スコア不足' });
+        .fn<() => Promise<{ shouldNotify: boolean; status: 'skipped'; skipReason: string; skipReasonCode: 'cooldown' }>>()
+        .mockResolvedValue({ shouldNotify: false, status: 'skipped', skipReason: 'クールダウン中', skipReasonCode: 'cooldown' });
 
+      const runRepo = buildRunRepo();
       const pipeline = new MatchingService({
         inAppNotificationSender: { sendInApp, sendPush: jest.fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>().mockResolvedValue({ success: true }) },
         notificationTriggerService: { evaluateWithPersistence, invalidateNotificationLog: jest.fn<(id: string) => Promise<void>>() },
         simultaneousHitControl: buildHitControl(),
+        matchingPipelineRunRepository: runRepo,
       });
       jest
         .spyOn(pipeline, 'checkForAllMatches')
         .mockResolvedValue([createSideBMatch()]);
 
-      const result = await pipeline.runMatchingPipeline();
+      const result = await pipeline.runMatchingPipeline({ trigger: 'cron' });
 
       expect(sendInApp).not.toHaveBeenCalled();
       expect(result.notified).toBe(0);
       expect(result.skipped).toBe(1);
+      // reason code 別の集計が戻り値と永続化の両方に乗る
+      expect(result.skipReasons).toEqual({ cooldown: 1 });
+      expect(runRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ trigger: 'cron', skipReasons: { cooldown: 1 } })
+      );
+    });
+
+    it('recordMarketClosedRun は status=skipped の run を記録し runId を返す', async () => {
+      const runRepo = buildRunRepo();
+      const pipeline = new MatchingService({ matchingPipelineRunRepository: runRepo });
+
+      const runId = await pipeline.recordMarketClosedRun({
+        trigger: 'cron',
+        marketStatus: '土日休場',
+      });
+
+      expect(runId).toBeTruthy();
+      expect(runRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: runId,
+          trigger: 'cron',
+          status: 'skipped',
+          marketStatus: '土日休場',
+        })
+      );
     });
   });
 });
