@@ -671,3 +671,42 @@ describe('時間条件（JST基準、フロント types/strategy とミラー）
     expect(await evaluateConditionGroup(ctx, group)).toBe(false);
   });
 });
+
+describe('範囲条件（between / not_between）', () => {
+  const makeCtx = (rsi: number): EvaluationContext => {
+    const ctx: EvaluationContext = {
+      data: [{ timestamp: new Date(), open: 1, high: 1, low: 1, close: 1, volume: 0 }],
+      currentIndex: 0,
+      indicatorCache: new Map(),
+      strategy: mockStrategy,
+    };
+    ctx.indicatorCache.set(makeIndicatorCacheKey('rsi', { period: 14 }, 'value'), [rsi]);
+    return ctx;
+  };
+  const between: IndicatorCondition = {
+    conditionId: 'c', indicatorId: 'rsi', params: { period: 14 }, field: 'value',
+    operator: 'between',
+    compareTarget: { type: 'fixed', value: 30 },
+    compareTargetUpper: { type: 'fixed', value: 70 },
+  };
+
+  test('範囲内: between=true / not_between=false', async () => {
+    expect(await evaluateCondition(makeCtx(50), between)).toBe(true);
+    expect(await evaluateCondition(makeCtx(50), { ...between, operator: 'not_between' })).toBe(false);
+  });
+
+  test('範囲外: between=false / not_between=true', async () => {
+    expect(await evaluateCondition(makeCtx(80), between)).toBe(false);
+    expect(await evaluateCondition(makeCtx(80), { ...between, operator: 'not_between' })).toBe(true);
+  });
+
+  test('下限・上限が逆順でも min/max で正規化される', async () => {
+    const reversed: IndicatorCondition = { ...between, compareTarget: { type: 'fixed', value: 70 }, compareTargetUpper: { type: 'fixed', value: 30 } };
+    expect(await evaluateCondition(makeCtx(50), reversed)).toBe(true);
+  });
+
+  test('上限未指定なら不成立', async () => {
+    const noUpper: IndicatorCondition = { ...between, compareTargetUpper: undefined };
+    expect(await evaluateCondition(makeCtx(50), noUpper)).toBe(false);
+  });
+});

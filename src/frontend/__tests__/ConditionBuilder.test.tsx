@@ -119,6 +119,25 @@ describe("ConditionBuilder（接合点ごとの AND/OR）", () => {
     expect(currentGroup().operator).toBe("AND");
   });
 
+  it("演算子を範囲内(between)にすると上限が設定され、下限〜上限の2入力になる", () => {
+    render(<Harness />);
+    const opSelect = screen.getByDisplayValue("より小さい") as HTMLSelectElement;
+    fireEvent.change(opSelect, { target: { value: "between" } });
+
+    const cond = currentGroup().conditions[0] as {
+      operator: string;
+      compareTarget: { type: string; value: number };
+      compareTargetUpper?: { type: string; value: number };
+    };
+    expect(cond.operator).toBe("between");
+    expect(cond.compareTarget.type).toBe("fixed");
+    expect(cond.compareTargetUpper?.type).toBe("fixed");
+
+    // 下限・上限の number 入力が出る（比較対象タイプの select は消える）
+    expect(screen.getByTitle("下限")).toBeTruthy();
+    expect(screen.getByTitle("上限")).toBeTruthy();
+  });
+
   it("条件を削除すると接合点も連動して減る", () => {
     render(<Harness />);
     fireEvent.click(screen.getByText("条件を追加")); // 2件・接合点1

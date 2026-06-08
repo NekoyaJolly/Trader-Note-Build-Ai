@@ -69,6 +69,8 @@ type EvalIndicatorCondition = {
   field: string;
   operator: ComparisonOperator;
   compareTarget: CompareTarget;
+  /** between / not_between 専用: 上限 */
+  compareTargetUpper?: CompareTarget;
 };
 
 type EvalPatternCondition = {
@@ -252,11 +254,31 @@ function compareValues(left: number, right: number, operator: ComparisonOperator
   }
 }
 
+// 比較対象（固定値 / 価格 / 別指標）を index 位置の数値に解決する
+function resolvePreviewTarget(ctx: EvalContext, target: CompareTarget, index: number): number | undefined {
+  if (target.type === "fixed") return target.value;
+  if (target.type === "price") return getPrice(ctx.data[index], target.priceType);
+  const key = makeIndicatorCacheKey(target.indicatorId, target.params as Record<string, number>, target.field);
+  const v = ctx.indicatorCache.get(key)?.[index];
+  return v !== undefined && Number.isFinite(v) ? v : undefined;
+}
+
 function evalIndicatorCondition(ctx: EvalContext, condition: EvalIndicatorCondition): boolean {
   const leftKey = makeIndicatorCacheKey(condition.indicatorId, condition.params, condition.field);
   const leftSeries = ctx.indicatorCache.get(leftKey);
   const leftValue = leftSeries?.[ctx.currentIndex];
   if (leftValue === undefined || !Number.isFinite(leftValue)) return false;
+
+  // 範囲（between / not_between）: 下限 compareTarget・上限 compareTargetUpper を解決して判定
+  if (condition.operator === "between" || condition.operator === "not_between") {
+    const lo = resolvePreviewTarget(ctx, condition.compareTarget, ctx.currentIndex);
+    const hi = condition.compareTargetUpper
+      ? resolvePreviewTarget(ctx, condition.compareTargetUpper, ctx.currentIndex)
+      : undefined;
+    if (lo === undefined || hi === undefined) return false;
+    const inRange = leftValue >= Math.min(lo, hi) && leftValue <= Math.max(lo, hi);
+    return condition.operator === "between" ? inRange : !inRange;
+  }
 
   // ヒゲタッチ（価格が線に触れるイメージ）
   if (condition.operator === "touch_wick") {
@@ -427,12 +449,30 @@ function normalizeIndicatorCondition(condition: IndicatorCondition): EvalIndicat
     };
   }
 
+  // between の上限。v1 UI は固定値のみだが、価格/別指標も一応変換しておく。
+  let compareTargetUpper: CompareTarget | undefined;
+  const upper = condition.compareTargetUpper;
+  if (upper) {
+    if (upper.type === "fixed") {
+      compareTargetUpper = { type: "fixed", value: upper.value };
+    } else if (upper.type === "price") {
+      compareTargetUpper = { type: "price", priceType: upper.priceType };
+    } else {
+      const upParams: Record<string, number> = {};
+      for (const [k, v] of Object.entries(upper.params ?? {})) {
+        if (typeof v === "number" && Number.isFinite(v)) upParams[k] = v;
+      }
+      compareTargetUpper = { type: "indicator", indicatorId: upper.indicatorId, params: upParams, field: upper.field };
+    }
+  }
+
   return {
     indicatorId: condition.indicatorId,
     params,
     field: condition.field,
     operator: condition.operator,
     compareTarget,
+    compareTargetUpper,
   };
 }
 

@@ -216,6 +216,34 @@ function SingleCondition({
     }
   };
 
+  // 範囲（between / not_between）かどうか
+  const isBetween = condition.operator === 'between' || condition.operator === 'not_between';
+
+  // 演算子変更。範囲に切り替えるときは下限・上限を固定値で初期化する（v1 は固定値のみ）
+  const handleOperatorChange = (op: ComparisonOperator) => {
+    if (op === 'between' || op === 'not_between') {
+      const lower = condition.compareTarget.type === 'fixed' ? condition.compareTarget.value : 0;
+      const upper = condition.compareTargetUpper?.type === 'fixed' ? condition.compareTargetUpper.value : 100;
+      onChange({
+        ...condition,
+        operator: op,
+        compareTarget: { type: 'fixed', value: lower },
+        compareTargetUpper: { type: 'fixed', value: upper },
+      });
+      return;
+    }
+    onChange({ ...condition, operator: op });
+  };
+
+  // 範囲の下限・上限（固定値）変更
+  const handleBetweenBoundChange = (which: 'lower' | 'upper', value: number) => {
+    if (which === 'lower') {
+      onChange({ ...condition, compareTarget: { type: 'fixed', value } });
+    } else {
+      onChange({ ...condition, compareTargetUpper: { type: 'fixed', value } });
+    }
+  };
+
   const handleCompareTargetTypeChange = (type: CompareTarget['type']) => {
     if (type === 'fixed') {
       onChange({
@@ -344,6 +372,33 @@ function SingleCondition({
 
       <span className="text-xs text-gray-500">が</span>
 
+      {/* 範囲（between / not_between）: 下限〜上限の固定値2つ */}
+      {isBetween && (
+        <div className="flex items-center gap-1">
+          <input
+            type="number"
+            className={`${compact ? 'w-14' : 'w-20'} ${baseInputClass}`}
+            value={condition.compareTarget.type === 'fixed' ? condition.compareTarget.value : 0}
+            onChange={(e) => handleBetweenBoundChange('lower', Number(e.target.value) || 0)}
+            step="any"
+            disabled={readOnly}
+            title="下限"
+          />
+          <span className="text-xs text-gray-500">〜</span>
+          <input
+            type="number"
+            className={`${compact ? 'w-14' : 'w-20'} ${baseInputClass}`}
+            value={condition.compareTargetUpper?.type === 'fixed' ? condition.compareTargetUpper.value : 0}
+            onChange={(e) => handleBetweenBoundChange('upper', Number(e.target.value) || 0)}
+            step="any"
+            disabled={readOnly}
+            title="上限"
+          />
+        </div>
+      )}
+
+      {!isBetween && (
+        <>
       {/* 比較対象タイプ */}
       <select
         className={baseSelectClass}
@@ -461,12 +516,14 @@ function SingleCondition({
           )}
         </>
       )}
+        </>
+      )}
 
       {/* 比較演算子 */}
       <select
         className={baseSelectClass}
         value={condition.operator}
-        onChange={(e) => onChange({ ...condition, operator: e.target.value as ComparisonOperator })}
+        onChange={(e) => handleOperatorChange(e.target.value as ComparisonOperator)}
         disabled={readOnly}
       >
         {Object.entries(COMPARISON_OPERATOR_INFO).map(([op, info]) => (

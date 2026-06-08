@@ -60,12 +60,14 @@ export type LogicalOperator = 'AND' | 'OR' | 'NOT' | 'IF_THEN' | 'SEQUENCE';
 /**
  * 比較演算子
  */
-export type ComparisonOperator = 
+export type ComparisonOperator =
   | '<'           // より小さい
   | '<='          // 以下
   | '='           // 等しい
   | '>='          // 以上
   | '>'           // より大きい
+  | 'between'     // 範囲内（下限〜上限の間）
+  | 'not_between' // 範囲外（下限〜上限の外）
   | 'cross_above' // 上抜け（クロスアップ）
   | 'cross_below' // 下抜け（クロスダウン）
   | 'GC'          // ゴールデンクロス（上抜けの別名）
@@ -83,6 +85,8 @@ export const COMPARISON_OPERATOR_INFO: Record<ComparisonOperator, { label: strin
   '=': { label: '等しい', description: '左辺と右辺が等しい（誤差許容あり）' },
   '>=': { label: '以上', description: '左辺が右辺以上' },
   '>': { label: 'より大きい', description: '左辺が右辺より大きい' },
+  'between': { label: '範囲内', description: '左辺が下限〜上限の間（両端含む）' },
+  'not_between': { label: '範囲外', description: '左辺が下限〜上限の外' },
   'cross_above': { label: '上抜け', description: '前回は下、今回は上（クロスアップ）' },
   'cross_below': { label: '下抜け', description: '前回は上、今回は下（クロスダウン）' },
   GC: { label: 'ゴールデンクロス', description: '上抜け（別名）' },
@@ -371,8 +375,10 @@ export interface IndicatorCondition {
   field: IndicatorField;
   /** 比較演算子 */
   operator: ComparisonOperator;
-  /** 右辺: 比較対象 */
+  /** 右辺: 比較対象（between では下限） */
   compareTarget: CompareTarget;
+  /** between / not_between 専用: 上限。未指定なら範囲判定は不成立 */
+  compareTargetUpper?: CompareTarget;
 }
 
 // ============================================

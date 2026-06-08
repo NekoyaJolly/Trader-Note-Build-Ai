@@ -30,6 +30,8 @@ export type ComparisonOperator =
   | '='
   | '>='
   | '>'
+  | 'between'
+  | 'not_between'
   | 'cross_above'
   | 'cross_below'
   | 'touch_close'
@@ -65,6 +67,15 @@ export interface IndicatorCondition {
   field: string;
   operator: ComparisonOperator;
   compareTarget: {
+    type: 'fixed' | 'indicator' | 'price';
+    value?: number;
+    indicatorId?: string;
+    params?: Record<string, number>;
+    field?: string;
+    priceType?: 'open' | 'high' | 'low' | 'close';
+  };
+  // between / not_between 専用: 上限（compareTarget は下限）
+  compareTargetUpper?: {
     type: 'fixed' | 'indicator' | 'price';
     value?: number;
     indicatorId?: string;
@@ -265,8 +276,22 @@ function compareValues(
   prevLeft?: number,
   prevRight?: number,
 ): boolean {
+  // between / not_between は専用経路（evaluateCondition）で 2 値を解決して判定するため、
+  // 単一 right の本関数では扱わない（ここに来たら不成立）。
+  if (operator === 'between' || operator === 'not_between') return false;
   // Side-A の op は shared op の subset なので as キャスト相当で渡せる
   return sharedCompareValues(left, right, operator, prevLeft, prevRight);
+}
+
+/** 比較対象（固定値 / 価格 / 別指標）を数値に解決する（between の下限・上限用） */
+async function resolveCompareTarget(
+  ctx: EvaluationContext,
+  target: IndicatorCondition['compareTargetUpper'],
+): Promise<number | undefined> {
+  if (!target) return undefined;
+  if (target.type === 'fixed') return target.value ?? 0;
+  if (target.type === 'price') return getPriceValue(ctx, target.priceType || 'close');
+  return getIndicatorValue(ctx, target.indicatorId || '', target.params || {}, target.field || 'value');
 }
 
 /**
@@ -289,7 +314,16 @@ export async function evaluateCondition(
   );
   
   if (leftValue === undefined) return false;
-  
+
+  // 範囲（between / not_between）: 下限 compareTarget・上限 compareTargetUpper を解決して判定
+  if (condition.operator === 'between' || condition.operator === 'not_between') {
+    const lo = await resolveCompareTarget(ctx, condition.compareTarget);
+    const hi = await resolveCompareTarget(ctx, condition.compareTargetUpper);
+    if (lo === undefined || hi === undefined) return false;
+    const inRange = leftValue >= Math.min(lo, hi) && leftValue <= Math.max(lo, hi);
+    return condition.operator === 'between' ? inRange : !inRange;
+  }
+
   // 右辺を取得
   let rightValue: number;
   
