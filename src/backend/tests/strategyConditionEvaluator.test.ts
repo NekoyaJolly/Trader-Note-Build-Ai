@@ -10,11 +10,13 @@ import type {
   EvaluationContext,
   IndicatorCondition,
   PatternCondition,
+  TimeCondition,
   ConditionGroup,
   OHLCV} from '../services/strategyConditionEvaluator';
 import {
   evaluateCondition,
   evaluateConditionGroup,
+  evaluateTimeConditionAt,
   getIndicatorValue,
   getPriceValue
 } from '../services/strategyConditionEvaluator';
@@ -617,5 +619,55 @@ describe('StrategyConditionEvaluator', () => {
 
       expect(await evaluateConditionGroup(ctx, group)).toBe(true);
     });
+  });
+});
+
+describe('時間条件（JST基準、フロント types/strategy とミラー）', () => {
+  // UTC で epoch を組み立てる。evaluateTimeConditionAt は内部で +9h して JST にする。
+  const utc = (y: number, mo: number, d: number, h: number, mi = 0) => Date.UTC(y, mo, d, h, mi);
+
+  test('時間帯・日跨ぎ・曜日・セッション・negate を正しく判定する', () => {
+    // 時間帯 09:00–15:00 JST
+    const range: TimeCondition = { conditionId: 't', type: 'time', kind: 'time_range', startMinutes: 9 * 60, endMinutes: 15 * 60 };
+    expect(evaluateTimeConditionAt(range, utc(2026, 0, 1, 0))).toBe(true); // JST 09:00
+    expect(evaluateTimeConditionAt(range, utc(2026, 0, 1, 10))).toBe(false); // JST 19:00
+
+    // 日跨ぎ 22:00–翌05:00 JST
+    const overnight: TimeCondition = { conditionId: 't', type: 'time', kind: 'time_range', startMinutes: 22 * 60, endMinutes: 5 * 60 };
+    expect(evaluateTimeConditionAt(overnight, utc(2026, 0, 1, 14))).toBe(true); // JST 23:00
+    expect(evaluateTimeConditionAt(overnight, utc(2026, 0, 1, 3))).toBe(false); // JST 12:00
+
+    // negate（以外で成立）
+    const negated: TimeCondition = { ...range, negate: true };
+    expect(evaluateTimeConditionAt(negated, utc(2026, 0, 1, 0))).toBe(false);
+
+    // 曜日（月〜金）: 2026-01-01 は木曜
+    const weekdays: TimeCondition = { conditionId: 't', type: 'time', kind: 'day_of_week', days: [1, 2, 3, 4, 5] };
+    expect(evaluateTimeConditionAt(weekdays, utc(2026, 0, 1, 1))).toBe(true);
+    expect(evaluateTimeConditionAt(weekdays, utc(2026, 0, 3, 1))).toBe(false); // 土曜
+
+    // セッション（NY 21:00–翌06:00 JST、日跨ぎ）
+    const ny: TimeCondition = { conditionId: 't', type: 'time', kind: 'session', session: 'newyork' };
+    expect(evaluateTimeConditionAt(ny, utc(2026, 0, 1, 14))).toBe(true); // JST 23:00
+    expect(evaluateTimeConditionAt(ny, utc(2026, 0, 1, 3))).toBe(false); // JST 12:00
+  });
+
+  test('evaluateConditionGroup が AND グループ内の時間条件をバー timestamp で評価する', async () => {
+    const data: OHLCV[] = [
+      { timestamp: new Date(utc(2026, 0, 1, 0)), open: 1, high: 1, low: 1, close: 1, volume: 0 }, // JST 09:00
+    ];
+    const ctx: EvaluationContext = {
+      data,
+      currentIndex: 0,
+      indicatorCache: new Map(),
+      strategy: mockStrategy,
+    };
+    const inSession: TimeCondition = { conditionId: 't', type: 'time', kind: 'time_range', startMinutes: 9 * 60, endMinutes: 15 * 60 };
+    const group: ConditionGroup = { groupId: 'g', operator: 'AND', conditions: [inSession] };
+    expect(await evaluateConditionGroup(ctx, group)).toBe(true);
+
+    // 時間外（JST 19:00）のバーでは false
+    ctx.data[0].timestamp = new Date(utc(2026, 0, 1, 10));
+    expect(await evaluateConditionGroup(ctx, group)).toBe(false);
   });
 });

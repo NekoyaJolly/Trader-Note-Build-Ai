@@ -82,11 +82,66 @@ export interface PatternCondition {
   operator: PatternOperator;
 }
 
+// ============================================
+// 時間条件（時間帯 / 曜日 / セッション、JST 基準）
+//
+// 注意: 本ロジックはフロント types/strategy.ts の evaluateTimeConditionAt と同等。
+// フロントは src/shared を import しない構成のため二重化している（compareValues と同じ方針）。
+// 仕様変更時は両方を同時に直すこと。
+// ============================================
+
+export type SessionId = 'tokyo' | 'london' | 'newyork';
+
+export type TimeCondition =
+  | { conditionId: string; type: 'time'; kind: 'time_range'; startMinutes: number; endMinutes: number; negate?: boolean }
+  | { conditionId: string; type: 'time'; kind: 'day_of_week'; days: number[]; negate?: boolean }
+  | { conditionId: string; type: 'time'; kind: 'session'; session: SessionId; negate?: boolean };
+
+/** セッションのプリセット時間帯（JST、DST 非考慮の目安。Neko 判断 2026-06-08） */
+const SESSION_PRESETS_JST: Record<SessionId, { startMinutes: number; endMinutes: number }> = {
+  tokyo: { startMinutes: 8 * 60, endMinutes: 17 * 60 },
+  london: { startMinutes: 16 * 60, endMinutes: 1 * 60 },
+  newyork: { startMinutes: 21 * 60, endMinutes: 6 * 60 },
+};
+
+const JST_OFFSET_MINUTES = 9 * 60;
+
+function jstPartsOf(epochMs: number): { minutes: number; day: number } {
+  const shifted = new Date(epochMs + JST_OFFSET_MINUTES * 60_000);
+  return {
+    minutes: shifted.getUTCHours() * 60 + shifted.getUTCMinutes(),
+    day: shifted.getUTCDay(),
+  };
+}
+
+function minutesInRange(minutes: number, startMinutes: number, endMinutes: number): boolean {
+  if (startMinutes === endMinutes) return false;
+  if (startMinutes < endMinutes) return minutes >= startMinutes && minutes < endMinutes;
+  return minutes >= startMinutes || minutes < endMinutes; // 日跨ぎ
+}
+
+/** 時間条件を、あるバーの timestamp(epoch ms) に対して評価する純粋関数 */
+export function evaluateTimeConditionAt(condition: TimeCondition, epochMs: number): boolean {
+  if (!Number.isFinite(epochMs)) return false;
+  const { minutes, day } = jstPartsOf(epochMs);
+
+  let hit: boolean;
+  if (condition.kind === 'time_range') {
+    hit = minutesInRange(minutes, condition.startMinutes, condition.endMinutes);
+  } else if (condition.kind === 'day_of_week') {
+    hit = condition.days.includes(day);
+  } else {
+    const preset = SESSION_PRESETS_JST[condition.session];
+    hit = minutesInRange(minutes, preset.startMinutes, preset.endMinutes);
+  }
+  return condition.negate ? !hit : hit;
+}
+
 /** 条件グループ */
 export interface ConditionGroup {
   groupId: string;
   operator: LogicalOperator;
-  conditions: (IndicatorCondition | PatternCondition | ConditionGroup)[];
+  conditions: (IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup)[];
   // IF-THEN専用
   ifCondition?: ConditionGroup | IndicatorCondition | PatternCondition;
   thenCondition?: ConditionGroup | IndicatorCondition | PatternCondition;
@@ -358,6 +413,10 @@ export async function evaluateConditionGroup(
       result = await evaluateCondition(ctx, item);
     } else if ((item as { type?: string }).type === 'pattern') {
       result = await evaluatePatternCondition(ctx, item as PatternCondition);
+    } else if ((item as { type?: string }).type === 'time') {
+      // 時間条件: 当該バーの timestamp を JST 換算して判定（指標キャッシュ不要）
+      const bar = ctx.data[ctx.currentIndex];
+      result = bar ? evaluateTimeConditionAt(item as TimeCondition, bar.timestamp.getTime()) : false;
     } else {
       result = await evaluateConditionGroup(ctx, item as ConditionGroup);
     }

@@ -13,8 +13,10 @@ import {
   flattenConditionGroup,
   normalizeFlatConditions,
   isFlattenableGroup,
+  evaluateTimeConditionAt,
   type ConditionGroup,
   type IndicatorCondition,
+  type TimeCondition,
 } from "@/types/strategy";
 
 // テスト用のリーフ条件を作る（ID で同一性を追えるようにする）
@@ -159,6 +161,48 @@ describe("往復安定性 (flatten → normalize → flatten)", () => {
       expect(ids(reflat.items)).toEqual(items);
       expect(reflat.junctions).toEqual(junctions);
     });
+  });
+});
+
+describe("evaluateTimeConditionAt（JST基準）", () => {
+  // epoch(ms) を UTC で組み立てるヘルパー。evaluateTimeConditionAt は内部で +9h して JST にする。
+  // 例: UTC 2026-01-01 00:00 → JST 2026-01-01 09:00（木曜）
+  const utc = (y: number, mo: number, d: number, h: number, mi = 0) => Date.UTC(y, mo, d, h, mi);
+
+  it("時間帯（09:00–15:00 JST）: 範囲内 true / 終端は排他 / 範囲外 false", () => {
+    const c: TimeCondition = { conditionId: "t", type: "time", kind: "time_range", startMinutes: 9 * 60, endMinutes: 15 * 60 };
+    expect(evaluateTimeConditionAt(c, utc(2026, 0, 1, 0))).toBe(true); // JST 09:00
+    expect(evaluateTimeConditionAt(c, utc(2026, 0, 1, 6))).toBe(false); // JST 15:00（end 排他）
+    expect(evaluateTimeConditionAt(c, utc(2026, 0, 1, 10))).toBe(false); // JST 19:00
+  });
+
+  it("時間帯の日跨ぎ（22:00–翌05:00 JST）", () => {
+    const c: TimeCondition = { conditionId: "t", type: "time", kind: "time_range", startMinutes: 22 * 60, endMinutes: 5 * 60 };
+    expect(evaluateTimeConditionAt(c, utc(2026, 0, 1, 14))).toBe(true); // JST 23:00
+    expect(evaluateTimeConditionAt(c, utc(2025, 11, 31, 18))).toBe(true); // JST 2026-01-01 03:00
+    expect(evaluateTimeConditionAt(c, utc(2026, 0, 1, 3))).toBe(false); // JST 12:00
+  });
+
+  it("negate（以外で成立）は真偽を反転する", () => {
+    const c: TimeCondition = { conditionId: "t", type: "time", kind: "time_range", startMinutes: 9 * 60, endMinutes: 15 * 60, negate: true };
+    expect(evaluateTimeConditionAt(c, utc(2026, 0, 1, 0))).toBe(false); // JST 09:00 は範囲内→反転
+    expect(evaluateTimeConditionAt(c, utc(2026, 0, 1, 10))).toBe(true); // JST 19:00 は範囲外→反転
+  });
+
+  it("曜日（月〜金）: 木曜 true / 土曜 false", () => {
+    const c: TimeCondition = { conditionId: "t", type: "time", kind: "day_of_week", days: [1, 2, 3, 4, 5] };
+    expect(evaluateTimeConditionAt(c, utc(2026, 0, 1, 1))).toBe(true); // JST 2026-01-01 木曜
+    expect(evaluateTimeConditionAt(c, utc(2026, 0, 3, 1))).toBe(false); // JST 2026-01-03 土曜
+  });
+
+  it("セッション: 東京(8-17) と NY(21-翌6, 日跨ぎ)", () => {
+    const tokyo: TimeCondition = { conditionId: "t", type: "time", kind: "session", session: "tokyo" };
+    expect(evaluateTimeConditionAt(tokyo, utc(2026, 0, 1, 1))).toBe(true); // JST 10:00
+    expect(evaluateTimeConditionAt(tokyo, utc(2026, 0, 1, 11))).toBe(false); // JST 20:00
+
+    const ny: TimeCondition = { conditionId: "t", type: "time", kind: "session", session: "newyork" };
+    expect(evaluateTimeConditionAt(ny, utc(2026, 0, 1, 14))).toBe(true); // JST 23:00
+    expect(evaluateTimeConditionAt(ny, utc(2026, 0, 1, 3))).toBe(false); // JST 12:00
   });
 });
 

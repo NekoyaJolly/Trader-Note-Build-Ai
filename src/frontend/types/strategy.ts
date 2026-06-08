@@ -119,6 +119,127 @@ export interface PatternCondition {
   operator: PatternOperator;
 }
 
+// ============================================
+// 時間条件（時間帯 / 曜日 / セッション）
+// ============================================
+
+/**
+ * セッションID（プリセット）。時間帯は JST 基準（後述 SESSION_PRESETS_JST）。
+ */
+export type SessionId = 'tokyo' | 'london' | 'newyork';
+
+/**
+ * 時間条件の種別。
+ * - time_range: 時間帯（HH:MM〜HH:MM、JST。日跨ぎ対応）
+ * - day_of_week: 曜日の集合（JST。0=日〜6=土）
+ * - session: セッションプリセット（東京 / ロンドン / NY）
+ */
+export type TimeConditionKind = 'time_range' | 'day_of_week' | 'session';
+
+interface TimeConditionBase {
+  conditionId: string;
+  type: 'time';
+  /** true なら「その時間帯/曜日を除外（= 時間外で成立）」 */
+  negate?: boolean;
+}
+
+/** 時間帯条件（JST、分単位 0-1439。start>end は日跨ぎ） */
+export interface TimeRangeCondition extends TimeConditionBase {
+  kind: 'time_range';
+  startMinutes: number;
+  endMinutes: number;
+}
+
+/** 曜日条件（JST、0=日〜6=土の集合） */
+export interface DayOfWeekCondition extends TimeConditionBase {
+  kind: 'day_of_week';
+  days: number[];
+}
+
+/** セッション条件（プリセット） */
+export interface SessionCondition extends TimeConditionBase {
+  kind: 'session';
+  session: SessionId;
+}
+
+export type TimeCondition = TimeRangeCondition | DayOfWeekCondition | SessionCondition;
+
+/**
+ * セッションのプリセット時間帯（JST、DST 非考慮の目安）。
+ * 由来: Neko 判断 2026-06-08。ロンドン/NY は DST で ±1h ずれるが v1 は固定 JST。
+ * UI には label とともに実時間を併記して透明化する。
+ */
+export const SESSION_PRESETS_JST: Record<SessionId, { label: string; startMinutes: number; endMinutes: number }> = {
+  tokyo: { label: '東京', startMinutes: 8 * 60, endMinutes: 17 * 60 },        // 08:00–17:00
+  london: { label: 'ロンドン', startMinutes: 16 * 60, endMinutes: 1 * 60 },   // 16:00–翌01:00
+  newyork: { label: 'ニューヨーク', startMinutes: 21 * 60, endMinutes: 6 * 60 }, // 21:00–翌06:00
+};
+
+/** 曜日ラベル（JST、0=日〜6=土） */
+export const DAY_OF_WEEK_LABELS: readonly string[] = ['日', '月', '火', '水', '木', '金', '土'];
+
+// JST は UTC+9（DST なし）
+const JST_OFFSET_MINUTES = 9 * 60;
+
+/** epoch(ms) から JST の「0時からの分」と「曜日(0=日)」を取り出す */
+function jstPartsOf(epochMs: number): { minutes: number; day: number } {
+  // UTC に +9h して getUTC* で読むと、サーバ TZ に依存せず JST の壁時計が得られる
+  const shifted = new Date(epochMs + JST_OFFSET_MINUTES * 60_000);
+  return {
+    minutes: shifted.getUTCHours() * 60 + shifted.getUTCMinutes(),
+    day: shifted.getUTCDay(),
+  };
+}
+
+/** 時間帯メンバーシップ（start<end は通常、start>end は日跨ぎ、start==end は常に false） */
+function minutesInRange(minutes: number, startMinutes: number, endMinutes: number): boolean {
+  if (startMinutes === endMinutes) return false;
+  if (startMinutes < endMinutes) return minutes >= startMinutes && minutes < endMinutes;
+  // 日跨ぎ: 22:00〜翌05:00 のように end が start より小さい
+  return minutes >= startMinutes || minutes < endMinutes;
+}
+
+/**
+ * 時間条件を、あるバーの timestamp(epoch ms) に対して評価する純粋関数。
+ *
+ * **重要**: 同一ロジックがプレビュー（本ファイル経由）とバックテスト（backend
+ * strategyConditionEvaluator）で必要。フロントは src/shared を import しない構成のため、
+ * backend 側にも同等のロジックを置く（compareValues の二重化と同じ方針。ドリフト注意）。
+ */
+export function evaluateTimeConditionAt(condition: TimeCondition, epochMs: number): boolean {
+  if (!Number.isFinite(epochMs)) return false;
+  const { minutes, day } = jstPartsOf(epochMs);
+
+  let hit: boolean;
+  if (condition.kind === 'time_range') {
+    hit = minutesInRange(minutes, condition.startMinutes, condition.endMinutes);
+  } else if (condition.kind === 'day_of_week') {
+    hit = condition.days.includes(day);
+  } else {
+    const preset = SESSION_PRESETS_JST[condition.session];
+    hit = minutesInRange(minutes, preset.startMinutes, preset.endMinutes);
+  }
+  return condition.negate ? !hit : hit;
+}
+
+/** 分(0-1439) を "HH:MM" にする表示ヘルパー */
+export function minutesToHHMM(minutes: number): string {
+  const m = ((minutes % 1440) + 1440) % 1440;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+/** "HH:MM" を分(0-1439) にする。失敗時は null */
+export function hhmmToMinutes(hhmm: string): number | null {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!match) return null;
+  const h = Number(match[1]);
+  const m = Number(match[2]);
+  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+  return h * 60 + m;
+}
+
 /**
  * 論理演算子の表示情報
  */
@@ -267,7 +388,7 @@ export interface ConditionGroup {
   /** 論理演算子 */
   operator: LogicalOperator;
   /** 子要素（条件 or サブグループ） */
-  conditions: (IndicatorCondition | PatternCondition | ConditionGroup)[];
+  conditions: (IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup)[];
 
   /** SEQUENCE専用: 各ステップ間の最大バー数（未指定なら evaluator 側のデフォルト） */
   maxBarsBetweenSteps?: number;
@@ -282,22 +403,33 @@ export interface ConditionGroup {
  * 条件がIndicatorConditionかどうかを判定する型ガード
  */
 export function isIndicatorCondition(
-  condition: IndicatorCondition | PatternCondition | ConditionGroup
+  condition: IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup
 ): condition is IndicatorCondition {
   return 'indicatorId' in condition;
 }
 
 export function isPatternCondition(
-  condition: IndicatorCondition | PatternCondition | ConditionGroup
+  condition: IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup
 ): condition is PatternCondition {
   return 'type' in condition && (condition as { type?: string }).type === 'pattern';
+}
+
+/**
+ * 条件が TimeCondition かどうかを判定する型ガード。
+ * 注意: indicator/pattern/group のいずれにも該当しないので、評価・描画では
+ * group フォールバックより前に必ずこのガードを通すこと。
+ */
+export function isTimeCondition(
+  condition: IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup
+): condition is TimeCondition {
+  return 'type' in condition && (condition as { type?: string }).type === 'time';
 }
 
 /**
  * 条件がConditionGroupかどうかを判定する型ガード
  */
 export function isConditionGroup(
-  condition: IndicatorCondition | PatternCondition | ConditionGroup
+  condition: IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup
 ): condition is ConditionGroup {
   return 'conditions' in condition;
 }
@@ -550,7 +682,7 @@ export function createDefaultExitSettings(): ExitSettings {
  * 子要素（条件 / パターン / サブグループ）の共用型。
  * ConditionGroup.conditions の要素と同じ。
  */
-export type ConditionChild = IndicatorCondition | PatternCondition | ConditionGroup;
+export type ConditionChild = IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup;
 
 /**
  * 接合点ごとに AND/OR を選べるフラット表現。

@@ -26,11 +26,13 @@ import type {
 import type {
   CandlePatternId,
   ComparisonOperator,
+  ConditionChild,
   ConditionGroup,
   IndicatorCondition,
   PatternCondition,
+  TimeCondition,
 } from "@/types/strategy";
-import { isIndicatorCondition, isPatternCondition } from "@/types/strategy";
+import { evaluateTimeConditionAt, isIndicatorCondition, isPatternCondition, isTimeCondition } from "@/types/strategy";
 import type { IndicatorParams } from "@/types/indicator";
 import { apiFetch } from "@/lib/apiClient";
 import { DEFAULT_DATA_COUNT, DEFAULT_TIMEFRAME_API } from "@/lib/marketConstants";
@@ -308,6 +310,22 @@ function evalPatternCondition(ctx: EvalContext, condition: EvalPatternCondition)
   return condition.operator === "is_false" ? !flag : !!flag;
 }
 
+// 時間条件はバーの timestamp を JST に変換して判定する（共通ロジックは types/strategy 側）。
+function evalTimeCondition(ctx: EvalContext, condition: TimeCondition): boolean {
+  const bar = ctx.data[ctx.currentIndex];
+  if (!bar) return false;
+  return evaluateTimeConditionAt(condition, Date.parse(bar.timestamp));
+}
+
+// ノード（指標 / パターン / 時間 / グループ）を評価する共通関数。
+// SEQUENCE / IF_THEN / AND-OR-NOT の各所で同じ分類をするため集約する（時間条件の入れ忘れ防止）。
+function evalNode(ctx: EvalContext, node: ConditionChild): boolean {
+  if (isIndicatorCondition(node)) return evalIndicatorCondition(ctx, normalizeIndicatorCondition(node));
+  if (isPatternCondition(node)) return evalPatternCondition(ctx, normalizePatternCondition(node));
+  if (isTimeCondition(node)) return evalTimeCondition(ctx, node);
+  return evalGroup(ctx, node);
+}
+
 function evalGroup(ctx: EvalContext, group: ConditionGroup): boolean {
   if (group.operator === "SEQUENCE") {
     const sequence = group.conditions;
@@ -323,11 +341,7 @@ function evalGroup(ctx: EvalContext, group: ConditionGroup): boolean {
     if (step >= sequence.length) return false;
 
     const node = sequence[step];
-    const ok = isIndicatorCondition(node)
-      ? evalIndicatorCondition(ctx, normalizeIndicatorCondition(node))
-      : isPatternCondition(node)
-        ? evalPatternCondition(ctx, normalizePatternCondition(node))
-        : evalGroup(ctx, node as ConditionGroup);
+    const ok = evalNode(ctx, node);
 
     if (ok) {
       ctx.sequenceState.currentStep++;
@@ -347,11 +361,7 @@ function evalGroup(ctx: EvalContext, group: ConditionGroup): boolean {
     const maxBars = group.maxBarsToWait ?? 5;
     if (!ctx.ifThenState) ctx.ifThenState = { triggered: false, triggeredIndex: -1 };
 
-    const ifOk = isIndicatorCondition(ifNode)
-      ? evalIndicatorCondition(ctx, normalizeIndicatorCondition(ifNode))
-      : isPatternCondition(ifNode)
-        ? evalPatternCondition(ctx, normalizePatternCondition(ifNode))
-        : evalGroup(ctx, ifNode as ConditionGroup);
+    const ifOk = evalNode(ctx, ifNode);
 
     if (ifOk && !ctx.ifThenState.triggered) {
       ctx.ifThenState.triggered = true;
@@ -365,11 +375,7 @@ function evalGroup(ctx: EvalContext, group: ConditionGroup): boolean {
       return false;
     }
 
-    const thenOk = isIndicatorCondition(thenNode)
-      ? evalIndicatorCondition(ctx, normalizeIndicatorCondition(thenNode))
-      : isPatternCondition(thenNode)
-        ? evalPatternCondition(ctx, normalizePatternCondition(thenNode))
-        : evalGroup(ctx, thenNode as ConditionGroup);
+    const thenOk = evalNode(ctx, thenNode);
 
     if (thenOk) {
       ctx.ifThenState.triggered = false;
@@ -381,12 +387,7 @@ function evalGroup(ctx: EvalContext, group: ConditionGroup): boolean {
 
   const results: boolean[] = [];
   for (const node of group.conditions) {
-    const ok = isIndicatorCondition(node)
-      ? evalIndicatorCondition(ctx, normalizeIndicatorCondition(node))
-      : isPatternCondition(node)
-        ? evalPatternCondition(ctx, normalizePatternCondition(node))
-        : evalGroup(ctx, node as ConditionGroup);
-    results.push(ok);
+    results.push(evalNode(ctx, node));
   }
 
   switch (group.operator) {

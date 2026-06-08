@@ -13,21 +13,29 @@ import React, { useMemo } from "react";
 import {
   COMPARISON_OPERATOR_INFO,
   createDefaultCondition,
+  DAY_OF_WEEK_LABELS,
   FIELD_LABELS,
   flattenConditionGroup,
   generateConditionId,
   generateGroupId,
+  hhmmToMinutes,
   INDICATOR_FIELDS,
   isConditionGroup,
   isFlattenableGroup,
   isIndicatorCondition,
   isPatternCondition,
+  isTimeCondition,
   LOGICAL_OPERATOR_INFO,
+  minutesToHHMM,
   normalizeFlatConditions,
+  SESSION_PRESETS_JST,
 } from "@/types/strategy";
 import type {
   IndicatorCondition,
   PatternCondition,
+  TimeCondition,
+  TimeConditionKind,
+  SessionId,
   ConditionGroup,
   ConditionChild,
   LogicalOperator,
@@ -37,6 +45,16 @@ import type {
   CandlePatternId,
   PatternOperator,
 } from "@/types/strategy";
+
+/** 時間条件の初期値（セッション=東京）。追加ボタンと種別切替で使う。 */
+function createDefaultTimeCondition(): TimeCondition {
+  return {
+    conditionId: generateConditionId(),
+    type: 'time',
+    kind: 'session',
+    session: 'tokyo',
+  };
+}
 import type { IndicatorId, IndicatorParams, IndicatorMetadata } from "@/types/indicator";
 
 // ============================================
@@ -656,6 +674,175 @@ function SinglePatternCondition({
 }
 
 // ============================================
+// 時間条件コンポーネント
+// ============================================
+
+interface TimeConditionProps {
+  condition: TimeCondition;
+  onChange: (condition: TimeCondition) => void;
+  onRemove: () => void;
+  readOnly?: boolean;
+  canRemove?: boolean;
+  compact?: boolean;
+}
+
+/**
+ * 時間条件（時間帯 / 曜日 / セッション）の入力 UI。すべて JST 基準。
+ * 「に成立 / 以外で成立」で時間内・時間外を切り替える（negate）。
+ */
+function SingleTimeCondition({
+  condition,
+  onChange,
+  onRemove,
+  readOnly = false,
+  canRemove = true,
+  compact = false,
+}: TimeConditionProps) {
+  const baseSelectClass = compact
+    ? "px-1 py-0.5 rounded bg-slate-700 text-gray-200 border border-slate-600 text-xs"
+    : "px-2 py-1.5 rounded bg-slate-700 text-gray-200 border border-slate-600 text-sm";
+  const baseInputClass = compact
+    ? "px-1 py-0.5 rounded bg-slate-700 text-gray-200 border border-slate-600 text-xs"
+    : "px-2 py-1.5 rounded bg-slate-700 text-gray-200 border border-slate-600 text-sm";
+
+  // 種別を切り替える（種別ごとのデフォルト値で作り直す。negate は引き継ぐ）
+  const handleKindChange = (kind: TimeConditionKind) => {
+    const negate = condition.negate;
+    if (kind === 'time_range') {
+      // 既定 09:00〜15:00
+      onChange({ conditionId: condition.conditionId, type: 'time', kind: 'time_range', startMinutes: 9 * 60, endMinutes: 15 * 60, negate });
+      return;
+    }
+    if (kind === 'day_of_week') {
+      // 既定 月〜金
+      onChange({ conditionId: condition.conditionId, type: 'time', kind: 'day_of_week', days: [1, 2, 3, 4, 5], negate });
+      return;
+    }
+    onChange({ conditionId: condition.conditionId, type: 'time', kind: 'session', session: 'tokyo', negate });
+  };
+
+  const toggleDay = (day: number) => {
+    if (condition.kind !== 'day_of_week') return;
+    const set = new Set(condition.days);
+    if (set.has(day)) set.delete(day);
+    else set.add(day);
+    onChange({ ...condition, days: Array.from(set).sort((a, b) => a - b) });
+  };
+
+  return (
+    <div className={`flex flex-wrap items-center gap-${compact ? '1' : '2'} ${compact ? 'p-2' : 'p-3'} bg-slate-800 rounded-lg border border-slate-700`}>
+      <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-amber-300/80`}>時間</span>
+
+      {/* 種別 */}
+      <select
+        className={baseSelectClass}
+        value={condition.kind}
+        onChange={(e) => handleKindChange(e.target.value as TimeConditionKind)}
+        disabled={readOnly}
+      >
+        <option value="session">セッション</option>
+        <option value="time_range">時間帯</option>
+        <option value="day_of_week">曜日</option>
+      </select>
+
+      {/* セッション */}
+      {condition.kind === 'session' && (
+        <select
+          className={`${baseSelectClass} ${compact ? 'min-w-[120px]' : 'min-w-[180px]'}`}
+          value={condition.session}
+          onChange={(e) => onChange({ ...condition, session: e.target.value as SessionId })}
+          disabled={readOnly}
+        >
+          {Object.entries(SESSION_PRESETS_JST).map(([id, preset]) => (
+            <option key={id} value={id}>
+              {preset.label}（{minutesToHHMM(preset.startMinutes)}–{minutesToHHMM(preset.endMinutes)} JST）
+            </option>
+          ))}
+        </select>
+      )}
+
+      {/* 時間帯 */}
+      {condition.kind === 'time_range' && (
+        <div className="flex items-center gap-1">
+          <input
+            type="time"
+            className={`${compact ? 'w-20' : 'w-24'} ${baseInputClass}`}
+            value={minutesToHHMM(condition.startMinutes)}
+            onChange={(e) => {
+              const m = hhmmToMinutes(e.target.value);
+              if (m !== null) onChange({ ...condition, startMinutes: m });
+            }}
+            disabled={readOnly}
+          />
+          <span className="text-xs text-gray-500">〜</span>
+          <input
+            type="time"
+            className={`${compact ? 'w-20' : 'w-24'} ${baseInputClass}`}
+            value={minutesToHHMM(condition.endMinutes)}
+            onChange={(e) => {
+              const m = hhmmToMinutes(e.target.value);
+              if (m !== null) onChange({ ...condition, endMinutes: m });
+            }}
+            disabled={readOnly}
+          />
+          <span className="text-[10px] text-gray-500">JST</span>
+        </div>
+      )}
+
+      {/* 曜日 */}
+      {condition.kind === 'day_of_week' && (
+        <div className="flex items-center gap-0.5">
+          {DAY_OF_WEEK_LABELS.map((label, day) => {
+            const selected = condition.days.includes(day);
+            return (
+              <button
+                type="button"
+                key={day}
+                onClick={() => toggleDay(day)}
+                disabled={readOnly}
+                className={`${compact ? 'w-5 h-5 text-[10px]' : 'w-7 h-7 text-xs'} rounded border transition-colors ${
+                  selected
+                    ? 'bg-amber-600 border-amber-500 text-white'
+                    : 'bg-slate-700 border-slate-600 text-gray-400 hover:border-amber-500'
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+          <span className="ml-1 text-[10px] text-gray-500">JST</span>
+        </div>
+      )}
+
+      {/* 時間内 / 時間外 */}
+      <select
+        className={baseSelectClass}
+        value={condition.negate ? 'outside' : 'inside'}
+        onChange={(e) => onChange({ ...condition, negate: e.target.value === 'outside' })}
+        disabled={readOnly}
+        title="この時間に成立させるか、この時間以外で成立させるか"
+      >
+        <option value="inside">に成立</option>
+        <option value="outside">以外で成立</option>
+      </select>
+
+      {!readOnly && canRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          className={`${compact ? 'p-0.5' : 'p-1.5'} text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded transition-colors`}
+          title="条件を削除"
+        >
+          <svg className={`${compact ? 'w-3 h-3' : 'w-4 h-4'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ============================================
 // 接合点セレクタ（かつ / または を接合点ごとに選ぶ）
 // ============================================
 
@@ -767,6 +954,7 @@ function ConditionGroupComponent({
   const handleAddCondition = () => appendChild(createDefaultCondition());
   const handleAddPatternCondition = () =>
     appendChild({ conditionId: generateConditionId(), type: 'pattern', patternId: 'pinbar', operator: 'is_true' });
+  const handleAddTimeCondition = () => appendChild(createDefaultTimeCondition());
   const handleAddSubGroup = () =>
     appendChild({ groupId: generateGroupId(), operator: 'AND', conditions: [] });
 
@@ -822,6 +1010,18 @@ function ConditionGroupComponent({
     if (isPatternCondition(child)) {
       return (
         <SinglePatternCondition
+          condition={child}
+          onChange={onChildChange}
+          onRemove={onChildRemove}
+          readOnly={readOnly}
+          canRemove={canRemove}
+          compact={compact}
+        />
+      );
+    }
+    if (isTimeCondition(child)) {
+      return (
+        <SingleTimeCondition
           condition={child}
           onChange={onChildChange}
           onRemove={onChildRemove}
@@ -1018,6 +1218,17 @@ function ConditionGroupComponent({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
             {compact ? '+パターン' : 'パターンを追加'}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleAddTimeCondition}
+            className={`flex items-center gap-1 ${compact ? 'px-2 py-1 text-xs' : 'px-3 py-1.5 text-sm'} bg-amber-600 hover:bg-amber-500 text-white rounded transition-colors`}
+          >
+            <svg className={`${compact ? 'w-3 h-3' : 'w-4 h-4'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {compact ? '+時間' : '時間条件を追加'}
           </button>
 
           {depth < 2 && ( // ネストは2階層まで

@@ -22,9 +22,8 @@ import {
 } from "@/schemas/api/chartCandles";
 import type {
   CandlePatternId,
+  ConditionChild,
   ConditionGroup,
-  IndicatorCondition,
-  PatternCondition,
 } from "@/types/strategy";
 import { isConditionGroup, isIndicatorCondition, isPatternCondition } from "@/types/strategy";
 import type { IndicatorParams } from "@/types/indicator";
@@ -112,7 +111,7 @@ export function extractConditionRequirements(group: ConditionGroup): {
     specByKey.set(makeIndicatorCacheKey(indicatorId, params, field), { indicatorId, params, field });
   };
 
-  const visit = (node: ConditionGroup | IndicatorCondition | PatternCondition) => {
+  const visit = (node: ConditionChild) => {
     if (isConditionGroup(node)) {
       for (const c of node.conditions) visit(c);
       // IF_THEN は ifCondition / thenCondition が conditions に含まれない場合があるため明示的に辿る
