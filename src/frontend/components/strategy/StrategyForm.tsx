@@ -21,7 +21,6 @@ import type {
   StrategyDirection,
   StrategyTimeframe,
   SupportedSymbol,
-  EntryTiming,
 } from "@/types/strategy";
 import type { IndicatorMetadata } from "@/types/indicator";
 import {
@@ -132,9 +131,11 @@ export default function StrategyForm({
   const [exitSettings, setExitSettings] = useState<ExitSettings>(
     (strategy?.currentVersion?.exitSettings as ExitSettings) || createDefaultExitSettings()
   );
-  const [entryTiming, setEntryTiming] = useState<EntryTiming>(
-    (strategy?.currentVersion?.entryTiming as EntryTiming) || "next_open"
-  );
+  // エントリータイミングは「次足始値（確定足エントリー）」に一本化した。
+  // 理由: 旧 UI の current_close（現足終値）は next_open とほぼ同タイミング（close[i] ≈ open[i+1]）で
+  // 紛らわしく、評価も両者とも確定足ベースで実質同じだったため（Neko 判断 2026-06-08）。
+  // 既存の current_close ストラテジーを編集保存すると next_open に正規化される（価格差は無視できる範囲）。
+  const entryTiming = "next_open" as const;
   const [tags, setTags] = useState<string[]>(strategy?.tags || []);
   const [tagInput, setTagInput] = useState("");
   const [changeNote, setChangeNote] = useState("");
@@ -435,24 +436,23 @@ export default function StrategyForm({
             />
           </div>
         )}
-
-        {/* プレビューはストラテジーの時間足を使う（成立箇所の可視化）。
-            Buy & Sell では買い条件を表示する。 */}
-        <div className="mt-4">
-          <p className="text-[11px] text-gray-400 mb-2 text-right">
-            プレビュー（{timeframe} / {side === "sell" ? "売り条件" : "買い条件"}）
-          </p>
-          <EntryPreviewMiniChart
-            entryConditions={entryConditions}
-            symbol={symbol}
-            timeframe={timeframe}
-          />
-        </div>
       </div>
 
-      {/* イグジット設定 */}
+      {/* エントリー / イグジット ロジック（タイミング・TP/SL・最大保有）。
+          プレビューより前に置き、ロジックを全部決めてから結果を見る流れにする。 */}
       <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
-        <h3 className="text-lg font-semibold text-gray-200 mb-4">イグジット設定</h3>
+        <h3 className="text-lg font-semibold text-gray-200 mb-4">エントリー / イグジット ロジック</h3>
+
+        {/* エントリータイミング（次足始値に一本化。確定足エントリー） */}
+        <div className="mb-4">
+          <label className="block text-sm text-gray-400 mb-1">エントリータイミング</label>
+          <div className="px-4 py-2 rounded bg-slate-700/60 text-gray-200 border border-slate-600 inline-block text-sm">
+            次足始値（確定足エントリー）
+          </div>
+          <p className="text-xs text-gray-500 mt-1">
+            シグナルが出た足が確定したあと、次の足の始値でエントリーします（リペイントなし）
+          </p>
+        </div>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* 利確（Take Profit） */}
@@ -540,21 +540,22 @@ export default function StrategyForm({
           </div>
         </div>
 
-        {/* エントリータイミング */}
-        <div className="mt-4">
-          <label className="block text-sm text-gray-400 mb-1">エントリータイミング</label>
-          <select
-            className="px-4 py-2 rounded bg-slate-700 text-gray-200 border border-slate-600"
-            value={entryTiming}
-            onChange={(e) => setEntryTiming(e.target.value as EntryTiming)}
-          >
-            <option value="next_open">次足始値</option>
-            <option value="current_close">現足終値（現足エントリー）</option>
-          </select>
-          <p className="text-xs text-gray-500 mt-1">
-            条件成立後のエントリー価格の扱いを指定します（バックテストは近似）
+      </div>
+
+      {/* プレビュー（全ロジック確定後の結果）。ストラテジーの時間足を使う。
+          Buy & Sell では買い条件を表示する。 */}
+      <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-lg font-semibold text-gray-200">プレビュー</h3>
+          <p className="text-[11px] text-gray-400">
+            {timeframe} / {side === "sell" ? "売り条件" : "買い条件"}
           </p>
         </div>
+        <EntryPreviewMiniChart
+          entryConditions={entryConditions}
+          symbol={symbol}
+          timeframe={timeframe}
+        />
       </div>
 
       {/* 編集時の変更メモ */}
