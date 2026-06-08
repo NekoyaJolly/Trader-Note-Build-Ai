@@ -464,15 +464,21 @@ class App {
         console.log('  GET  /api/bars/locate/:symbol/:timestamp/:timeframe');
         console.log('═══════════════════════════════════════\n');
 
-        // スケジューラー起動: 本番運用ルールに従い、CRON_ENABLED が true の場合のみ起動
-        // 理由: 開発環境では通知ファイルの更新が再起動ループの原因となるため、デフォルト無効化
+        // レガシー MatchingScheduler 起動: CRON_ENABLED が true の場合のみ起動。
+        //
+        // ⚠️ これは **開発専用の旧経路** であり、本番の正規マッチング経路ではない。本番は
+        // Cloud Scheduler → GET /api/cron/matching-pipeline → MatchingService.runMatchingPipeline()
+        // が唯一の推奨経路 (deploy.yml が 15 分間隔ジョブを作成)。本番では CRON_ENABLED を
+        // 設定しないため、この in-process スケジューラは起動しない。
+        // 旧経路は通知の冪等性/クールダウン/上限/UI 行作成を持たないため (scheduler.ts の
+        // JSDoc 参照)、本番で有効化してはならない。開発時のローカル通知確認のみに使う。
         const cronEnabled = process.env.CRON_ENABLED === 'true';
         if (cronEnabled) {
           this.scheduler.start();
         } else {
           // 本番環境ではデバッグログを抑制
           if (!config.server.isProduction) {
-            console.log('スケジューラーはCRON_ENABLEDがtrueの時のみ起動（現在は無効）');
+            console.log('レガシー MatchingScheduler は CRON_ENABLED=true の時のみ起動（現在は無効・本番は matching-pipeline cron が正規経路）');
           }
         }
 

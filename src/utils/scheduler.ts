@@ -3,8 +3,23 @@ import { NotificationService } from '../services/notificationService';
 import { config } from '../config';
 
 /**
- * マッチングスケジューラー
- * 定期的に市場マッチングチェックを実行する
+ * マッチングスケジューラー（**レガシー / 開発専用**）
+ *
+ * ⚠️ 本番の正規マッチング経路ではない。本番は
+ * **Cloud Scheduler → `GET /api/cron/matching-pipeline` → `MatchingService.runMatchingPipeline()`**
+ * が唯一の推奨経路である (`deploy.yml` が 15 分間隔の Cloud Scheduler ジョブを作成する)。
+ *
+ * 本クラスは in-process の `setInterval` で `checkForMatches()` + 旧 `NotificationService.trigger()`
+ * を呼ぶ旧経路で、`app.ts` の `CRON_ENABLED=true` のときだけ起動する。本番では `CRON_ENABLED`
+ * を設定していないため起動しない (= 開発時にローカルで通知挙動を試す用途のみ)。
+ *
+ * 旧経路 `NotificationService.trigger()` は冪等性チェック / クールダウン / 24時間上限 /
+ * 重複抑制 / NotificationLog 永続化 / UI 表示用 Notification 作成 / Web Push を**持たない**。
+ * これらは正規経路 `runMatchingPipeline()`(`NotificationTriggerService.evaluateWithPersistence`
+ * + `InAppNotificationSender`)のみが備える。挙動差があるため、本番でこのスケジューラを
+ * 有効化してはならない。
+ *
+ * @deprecated 開発専用。本番マッチング/通知は `runMatchingPipeline()` を使うこと。
  */
 export class MatchingScheduler {
   private matchingService: MatchingService;

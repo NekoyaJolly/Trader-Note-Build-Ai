@@ -5,20 +5,16 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
 import { Progress } from "@/components/ui/Progress";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/Alert";
-import { fetchProfileOptions, ProfileOption } from "@/lib/api";
-import { apiFetch } from "@/lib/apiClient";
-
-import { getPublicApiBaseUrl } from "@/lib/publicApiBaseUrl";
-
-const API_BASE_URL = getPublicApiBaseUrl();
+import { fetchProfileOptions, ProfileOption, uploadCsvText } from "@/lib/api";
 
 /**
  * 履歴インポート導線ページ
- * - CSV アップロード（テキスト送信）
+ * - CSV アップロード（テキスト送信、共通 API クライアント lib/api.ts を使用）
  * - プロファイル選択（AIに任せる / プロファイルなし / ユーザープロファイル）
- * - 適用モード選択（一括 / 個別）
  * - 進捗表示、成功/失敗フィードバック
  * - 成功後は Draft ノート詳細へ自動遷移
+ *
+ * 注: 適用モードは現在「一括適用」のみ。個別選択(individual)は未実装のため UI から外している。
  */
 export default function ImportPage() {
   const router = useRouter();
@@ -31,7 +27,6 @@ export default function ImportPage() {
   // プロファイル選択
   const [profileOptions, setProfileOptions] = useState<ProfileOption[]>([]);
   const [selectedProfileId, setSelectedProfileId] = useState<string>("__AI_AUTO__");
-  const [applyMode, setApplyMode] = useState<"bulk" | "individual">("bulk");
   const [userComment, setUserComment] = useState("");
   const [isLoadingProfiles, setIsLoadingProfiles] = useState(true);
 
@@ -60,24 +55,6 @@ export default function ImportPage() {
     setError(null);
   }, [file]);
 
-  // CSV をテキストとして送信する（バックエンドで保存→取り込み→ノート生成）
-  async function uploadCsvText(csvText: string, filename: string) {
-    const resp = await apiFetch(`${API_BASE_URL}/api/trades/import/upload-text`, {
-      method: "POST",
-      body: JSON.stringify({
-        filename,
-        csvText,
-        profileId: selectedProfileId,
-        applyMode,
-        userComment: userComment.trim() || undefined,
-      }),
-    });
-    if (!resp.ok) {
-      throw new Error(`アップロードに失敗しました: ${resp.status} ${resp.statusText}`);
-    }
-    return resp.json();
-  }
-
   const handleSelect: React.ChangeEventHandler<HTMLInputElement> = (e) => {
     const f = e.target.files?.[0] ?? null;
     setFile(f);
@@ -95,7 +72,11 @@ export default function ImportPage() {
       const text = await file.text();
       setProgress(40);
 
-      const result = await uploadCsvText(text, file.name);
+      // 共通 API クライアント経由で送信（プロファイル ID とコメントを渡す。一括適用のみ）
+      const result = await uploadCsvText(file.name, text, {
+        profileId: selectedProfileId,
+        userComment: userComment.trim() || undefined,
+      });
       setProgress(80);
 
       const imported = result?.tradesImported ?? 0;
@@ -192,37 +173,14 @@ export default function ImportPage() {
                 )}
               </div>
 
-              {/* 適用モード選択 */}
+              {/* 適用モード: 現在は一括適用のみ（個別選択は未実装のため表示しない） */}
               <div>
                 <label className="block text-xs text-gray-400 mb-2">
                   適用モード
                 </label>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setApplyMode("bulk")}
-                    className={`flex-1 px-3 py-2 rounded-lg text-sm transition-colors ${applyMode === "bulk"
-                        ? "bg-violet-500/20 border border-violet-500 text-white"
-                        : "bg-slate-700/50 border border-slate-600 text-gray-400 hover:border-slate-500"
-                      }`}
-                  >
-                    一括適用
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setApplyMode("individual")}
-                    className={`flex-1 px-3 py-2 rounded-lg text-sm transition-colors ${applyMode === "individual"
-                        ? "bg-violet-500/20 border border-violet-500 text-white"
-                        : "bg-slate-700/50 border border-slate-600 text-gray-400 hover:border-slate-500"
-                      }`}
-                  >
-                    個別選択
-                  </button>
-                </div>
+                <p className="text-sm text-gray-300">一括適用</p>
                 <p className="text-xs text-gray-500 mt-1">
-                  {applyMode === "bulk"
-                    ? "全てのトレードに同じプロファイルを適用"
-                    : "ノート作成後に各ノートで個別にプロファイルを選択"}
+                  全てのトレードに同じプロファイルを適用します。
                 </p>
               </div>
 

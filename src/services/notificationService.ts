@@ -74,7 +74,19 @@ export class NotificationService {
   }
 
   /**
-   * MatchResultDTO を受け取り、通知判定→保存を行う
+   * MatchResultDTO を受け取り、通知判定→保存を行う（**レガシー / 開発専用**）
+   *
+   * ⚠️ 本番の正規通知経路ではない。本メソッドは旧 `MatchingScheduler`(開発専用、
+   * `CRON_ENABLED=true` 時のみ起動)からのみ呼ばれる。`triggerService.evaluate()` の
+   * スコア閾値判定しか行わず、冪等性チェック / クールダウン / 24時間上限 / 重複抑制 /
+   * NotificationLog 永続化を**持たない**。
+   *
+   * 本番の正規経路は `MatchingService.runMatchingPipeline()` で、
+   * `NotificationTriggerService.evaluateWithPersistence()`(上記の各制御を実装)+
+   * `InAppNotificationSender`(UI 表示用 Notification 行 + Web Push)を使う。新規実装・
+   * 本番運用ではそちらを使うこと。
+   *
+   * @deprecated 開発専用。本番通知は `runMatchingPipeline()` 経路を使うこと。
    */
   async trigger(matchResults: MatchResultDTO[]): Promise<void> {
     await this.ensureLoaded();
