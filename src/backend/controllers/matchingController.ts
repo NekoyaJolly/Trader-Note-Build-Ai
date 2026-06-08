@@ -165,12 +165,10 @@ export class MatchingController {
    */
   getPipelineRuns = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { limit } = getValidatedQuery<{ limit?: string }>(res);
-      // 1〜100 件にクランプ（デフォルト 20）
-      const parsedLimit = limit ? parseInt(limit, 10) : 20;
-      const safeLimit = Math.min(Math.max(parsedLimit, 1), 100);
+      // limit は Zod 側で数値化・1〜100 範囲制約・デフォルト 20 まで済み（GetPipelineRunsQuerySchema）
+      const { limit } = getValidatedQuery<{ limit: number }>(res);
 
-      const runs = await this.matchingService.getPipelineRuns(safeLimit);
+      const runs = await this.matchingService.getPipelineRuns(limit);
 
       res.json({
         success: true,

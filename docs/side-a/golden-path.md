@@ -95,7 +95,7 @@
 |---|---|
 | 記録タイミング | `runMatchingPipeline()` 完了時 / 市場休場スキップ時(`recordMarketClosedRun`) |
 | 主要フィールド | `runId` / `trigger`(cron, manual_test, scheduler, unknown) / `status`(success, skipped, partial_failure, failed) / `startedAt` / `finishedAt` / `durationMs` / `totalMatches` / `notified` / `skipped` / `errorCount` / `errors` / `skipReasons` / `marketStatus` |
-| `skipReasons` | reason code → 件数 の集計。code: `simultaneous_hit` / `missing_market_snapshot_id` / `send_failed` / `notify_error` / `score_below_threshold` / `duplicate` / `recent_duplicate` / `cooldown` / `daily_limit` |
+| `skipReasons` | reason code → 件数 の集計。code: `simultaneous_hit` / `missing_market_snapshot_id` / `send_failed` / `notify_error` / `score_below_threshold` / `duplicate` / `recent_duplicate` / `cooldown` / `daily_limit` / `other`（防御的フォールバック。`NotificationTriggerService.evaluateWithPersistence` は全 skip 経路で reason code を返すため通常は出ない） |
 | 永続化失敗時 | パイプライン本体は継続(non-fatal)。`runId` は in-memory で確定済みのため API レスポンスには返る |
 
 ### 取得 API（requireAuth 配下）

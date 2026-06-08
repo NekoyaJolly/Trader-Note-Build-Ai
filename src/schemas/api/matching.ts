@@ -35,9 +35,14 @@ export type GetMatchHistoryQuery = z.infer<typeof GetMatchHistoryQuerySchema>;
 // GET /api/matching/pipeline-runs クエリ
 // ========================================
 
-/** matching pipeline run 一覧取得クエリ（observability） */
+/**
+ * matching pipeline run 一覧取得クエリ（observability）
+ *
+ * limit は数値化・範囲制約・デフォルトを Zod に集約する（コントローラ側で手動 parse/clamp しない）。
+ * 1〜100 の範囲外は 400 で弾く。未指定時は 20。
+ */
 export const GetPipelineRunsQuerySchema = z.object({
-  limit: z.string().regex(/^\d+$/, '数値を指定してください').optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
 export type GetPipelineRunsQuery = z.infer<typeof GetPipelineRunsQuerySchema>;
