@@ -26,11 +26,13 @@ import type {
 import type {
   CandlePatternId,
   ComparisonOperator,
+  ConditionChild,
   ConditionGroup,
   IndicatorCondition,
   PatternCondition,
+  TimeCondition,
 } from "@/types/strategy";
-import { isIndicatorCondition, isPatternCondition } from "@/types/strategy";
+import { evaluateTimeConditionAt, isIndicatorCondition, isPatternCondition, isTimeCondition } from "@/types/strategy";
 import type { IndicatorParams } from "@/types/indicator";
 import { apiFetch } from "@/lib/apiClient";
 import { DEFAULT_DATA_COUNT, DEFAULT_TIMEFRAME_API } from "@/lib/marketConstants";
@@ -67,6 +69,8 @@ type EvalIndicatorCondition = {
   field: string;
   operator: ComparisonOperator;
   compareTarget: CompareTarget;
+  /** between / not_between 専用: 上限 */
+  compareTargetUpper?: CompareTarget;
 };
 
 type EvalPatternCondition = {
@@ -250,11 +254,31 @@ function compareValues(left: number, right: number, operator: ComparisonOperator
   }
 }
 
+// 比較対象（固定値 / 価格 / 別指標）を index 位置の数値に解決する
+function resolvePreviewTarget(ctx: EvalContext, target: CompareTarget, index: number): number | undefined {
+  if (target.type === "fixed") return target.value;
+  if (target.type === "price") return getPrice(ctx.data[index], target.priceType);
+  const key = makeIndicatorCacheKey(target.indicatorId, target.params as Record<string, number>, target.field);
+  const v = ctx.indicatorCache.get(key)?.[index];
+  return v !== undefined && Number.isFinite(v) ? v : undefined;
+}
+
 function evalIndicatorCondition(ctx: EvalContext, condition: EvalIndicatorCondition): boolean {
   const leftKey = makeIndicatorCacheKey(condition.indicatorId, condition.params, condition.field);
   const leftSeries = ctx.indicatorCache.get(leftKey);
   const leftValue = leftSeries?.[ctx.currentIndex];
   if (leftValue === undefined || !Number.isFinite(leftValue)) return false;
+
+  // 範囲（between / not_between）: 下限 compareTarget・上限 compareTargetUpper を解決して判定
+  if (condition.operator === "between" || condition.operator === "not_between") {
+    const lo = resolvePreviewTarget(ctx, condition.compareTarget, ctx.currentIndex);
+    const hi = condition.compareTargetUpper
+      ? resolvePreviewTarget(ctx, condition.compareTargetUpper, ctx.currentIndex)
+      : undefined;
+    if (lo === undefined || hi === undefined) return false;
+    const inRange = leftValue >= Math.min(lo, hi) && leftValue <= Math.max(lo, hi);
+    return condition.operator === "between" ? inRange : !inRange;
+  }
 
   // ヒゲタッチ（価格が線に触れるイメージ）
   if (condition.operator === "touch_wick") {
@@ -308,6 +332,37 @@ function evalPatternCondition(ctx: EvalContext, condition: EvalPatternCondition)
   return condition.operator === "is_false" ? !flag : !!flag;
 }
 
+// 時間条件はバーの timestamp を JST に変換して判定する（共通ロジックは types/strategy 側）。
+function evalTimeCondition(ctx: EvalContext, condition: TimeCondition): boolean {
+  const bar = ctx.data[ctx.currentIndex];
+  if (!bar) return false;
+  return evaluateTimeConditionAt(condition, Date.parse(bar.timestamp));
+}
+
+// ノード（指標 / パターン / 時間 / グループ）の基本評価（ルックバックは考慮しない）。
+// SEQUENCE / IF_THEN / AND-OR-NOT の各所で同じ分類をするため集約する（時間条件の入れ忘れ防止）。
+function evalBaseNode(ctx: EvalContext, node: ConditionChild): boolean {
+  if (isIndicatorCondition(node)) return evalIndicatorCondition(ctx, normalizeIndicatorCondition(node));
+  if (isPatternCondition(node)) return evalPatternCondition(ctx, normalizePatternCondition(node));
+  if (isTimeCondition(node)) return evalTimeCondition(ctx, node);
+  return evalGroup(ctx, node);
+}
+
+// ノード評価。indicator / pattern に lookbackBars>1 があれば
+// 「直近 N 本以内（現在足含む）のどこかで成立」で true。
+function evalNode(ctx: EvalContext, node: ConditionChild): boolean {
+  const lookbackBars =
+    isIndicatorCondition(node) || isPatternCondition(node) ? node.lookbackBars : undefined;
+  if (lookbackBars && lookbackBars > 1) {
+    const start = Math.max(0, ctx.currentIndex - (lookbackBars - 1));
+    for (let j = ctx.currentIndex; j >= start; j--) {
+      if (evalBaseNode({ ...ctx, currentIndex: j }, node)) return true;
+    }
+    return false;
+  }
+  return evalBaseNode(ctx, node);
+}
+
 function evalGroup(ctx: EvalContext, group: ConditionGroup): boolean {
   if (group.operator === "SEQUENCE") {
     const sequence = group.conditions;
@@ -323,11 +378,7 @@ function evalGroup(ctx: EvalContext, group: ConditionGroup): boolean {
     if (step >= sequence.length) return false;
 
     const node = sequence[step];
-    const ok = isIndicatorCondition(node)
-      ? evalIndicatorCondition(ctx, normalizeIndicatorCondition(node))
-      : isPatternCondition(node)
-        ? evalPatternCondition(ctx, normalizePatternCondition(node))
-        : evalGroup(ctx, node as ConditionGroup);
+    const ok = evalNode(ctx, node);
 
     if (ok) {
       ctx.sequenceState.currentStep++;
@@ -347,11 +398,7 @@ function evalGroup(ctx: EvalContext, group: ConditionGroup): boolean {
     const maxBars = group.maxBarsToWait ?? 5;
     if (!ctx.ifThenState) ctx.ifThenState = { triggered: false, triggeredIndex: -1 };
 
-    const ifOk = isIndicatorCondition(ifNode)
-      ? evalIndicatorCondition(ctx, normalizeIndicatorCondition(ifNode))
-      : isPatternCondition(ifNode)
-        ? evalPatternCondition(ctx, normalizePatternCondition(ifNode))
-        : evalGroup(ctx, ifNode as ConditionGroup);
+    const ifOk = evalNode(ctx, ifNode);
 
     if (ifOk && !ctx.ifThenState.triggered) {
       ctx.ifThenState.triggered = true;
@@ -365,11 +412,7 @@ function evalGroup(ctx: EvalContext, group: ConditionGroup): boolean {
       return false;
     }
 
-    const thenOk = isIndicatorCondition(thenNode)
-      ? evalIndicatorCondition(ctx, normalizeIndicatorCondition(thenNode))
-      : isPatternCondition(thenNode)
-        ? evalPatternCondition(ctx, normalizePatternCondition(thenNode))
-        : evalGroup(ctx, thenNode as ConditionGroup);
+    const thenOk = evalNode(ctx, thenNode);
 
     if (thenOk) {
       ctx.ifThenState.triggered = false;
@@ -381,12 +424,7 @@ function evalGroup(ctx: EvalContext, group: ConditionGroup): boolean {
 
   const results: boolean[] = [];
   for (const node of group.conditions) {
-    const ok = isIndicatorCondition(node)
-      ? evalIndicatorCondition(ctx, normalizeIndicatorCondition(node))
-      : isPatternCondition(node)
-        ? evalPatternCondition(ctx, normalizePatternCondition(node))
-        : evalGroup(ctx, node as ConditionGroup);
-    results.push(ok);
+    results.push(evalNode(ctx, node));
   }
 
   switch (group.operator) {
@@ -426,12 +464,30 @@ function normalizeIndicatorCondition(condition: IndicatorCondition): EvalIndicat
     };
   }
 
+  // between の上限。v1 UI は固定値のみだが、価格/別指標も一応変換しておく。
+  let compareTargetUpper: CompareTarget | undefined;
+  const upper = condition.compareTargetUpper;
+  if (upper) {
+    if (upper.type === "fixed") {
+      compareTargetUpper = { type: "fixed", value: upper.value };
+    } else if (upper.type === "price") {
+      compareTargetUpper = { type: "price", priceType: upper.priceType };
+    } else {
+      const upParams: Record<string, number> = {};
+      for (const [k, v] of Object.entries(upper.params ?? {})) {
+        if (typeof v === "number" && Number.isFinite(v)) upParams[k] = v;
+      }
+      compareTargetUpper = { type: "indicator", indicatorId: upper.indicatorId, params: upParams, field: upper.field };
+    }
+  }
+
   return {
     indicatorId: condition.indicatorId,
     params,
     field: condition.field,
     operator: condition.operator,
     compareTarget,
+    compareTargetUpper,
   };
 }
 

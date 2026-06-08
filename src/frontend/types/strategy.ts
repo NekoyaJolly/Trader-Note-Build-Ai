@@ -60,12 +60,14 @@ export type LogicalOperator = 'AND' | 'OR' | 'NOT' | 'IF_THEN' | 'SEQUENCE';
 /**
  * 比較演算子
  */
-export type ComparisonOperator = 
+export type ComparisonOperator =
   | '<'           // より小さい
   | '<='          // 以下
   | '='           // 等しい
   | '>='          // 以上
   | '>'           // より大きい
+  | 'between'     // 範囲内（下限〜上限の間）
+  | 'not_between' // 範囲外（下限〜上限の外）
   | 'cross_above' // 上抜け（クロスアップ）
   | 'cross_below' // 下抜け（クロスダウン）
   | 'GC'          // ゴールデンクロス（上抜けの別名）
@@ -83,6 +85,8 @@ export const COMPARISON_OPERATOR_INFO: Record<ComparisonOperator, { label: strin
   '=': { label: '等しい', description: '左辺と右辺が等しい（誤差許容あり）' },
   '>=': { label: '以上', description: '左辺が右辺以上' },
   '>': { label: 'より大きい', description: '左辺が右辺より大きい' },
+  'between': { label: '範囲内', description: '左辺が下限〜上限の間（両端含む）' },
+  'not_between': { label: '範囲外', description: '左辺が下限〜上限の外' },
   'cross_above': { label: '上抜け', description: '前回は下、今回は上（クロスアップ）' },
   'cross_below': { label: '下抜け', description: '前回は上、今回は下（クロスダウン）' },
   GC: { label: 'ゴールデンクロス', description: '上抜け（別名）' },
@@ -117,6 +121,132 @@ export interface PatternCondition {
   type: 'pattern';
   patternId: CandlePatternId;
   operator: PatternOperator;
+  /**
+   * 直近ルックバック: 「直近 N 本以内（現在足含む）にこのパターンが出現したら成立」。
+   * 未指定 / 1 なら現在足のみ（通常挙動）。
+   */
+  lookbackBars?: number;
+}
+
+// ============================================
+// 時間条件（時間帯 / 曜日 / セッション）
+// ============================================
+
+/**
+ * セッションID（プリセット）。時間帯は JST 基準（後述 SESSION_PRESETS_JST）。
+ */
+export type SessionId = 'tokyo' | 'london' | 'newyork';
+
+/**
+ * 時間条件の種別。
+ * - time_range: 時間帯（HH:MM〜HH:MM、JST。日跨ぎ対応）
+ * - day_of_week: 曜日の集合（JST。0=日〜6=土）
+ * - session: セッションプリセット（東京 / ロンドン / NY）
+ */
+export type TimeConditionKind = 'time_range' | 'day_of_week' | 'session';
+
+interface TimeConditionBase {
+  conditionId: string;
+  type: 'time';
+  /** true なら「その時間帯/曜日を除外（= 時間外で成立）」 */
+  negate?: boolean;
+}
+
+/** 時間帯条件（JST、分単位 0-1439。start>end は日跨ぎ） */
+export interface TimeRangeCondition extends TimeConditionBase {
+  kind: 'time_range';
+  startMinutes: number;
+  endMinutes: number;
+}
+
+/** 曜日条件（JST、0=日〜6=土の集合） */
+export interface DayOfWeekCondition extends TimeConditionBase {
+  kind: 'day_of_week';
+  days: number[];
+}
+
+/** セッション条件（プリセット） */
+export interface SessionCondition extends TimeConditionBase {
+  kind: 'session';
+  session: SessionId;
+}
+
+export type TimeCondition = TimeRangeCondition | DayOfWeekCondition | SessionCondition;
+
+/**
+ * セッションのプリセット時間帯（JST、DST 非考慮の目安）。
+ * 由来: Neko 判断 2026-06-08。ロンドン/NY は DST で ±1h ずれるが v1 は固定 JST。
+ * UI には label とともに実時間を併記して透明化する。
+ */
+export const SESSION_PRESETS_JST: Record<SessionId, { label: string; startMinutes: number; endMinutes: number }> = {
+  tokyo: { label: '東京', startMinutes: 8 * 60, endMinutes: 17 * 60 },        // 08:00–17:00
+  london: { label: 'ロンドン', startMinutes: 16 * 60, endMinutes: 1 * 60 },   // 16:00–翌01:00
+  newyork: { label: 'ニューヨーク', startMinutes: 21 * 60, endMinutes: 6 * 60 }, // 21:00–翌06:00
+};
+
+/** 曜日ラベル（JST、0=日〜6=土） */
+export const DAY_OF_WEEK_LABELS: readonly string[] = ['日', '月', '火', '水', '木', '金', '土'];
+
+// JST は UTC+9（DST なし）
+const JST_OFFSET_MINUTES = 9 * 60;
+
+/** epoch(ms) から JST の「0時からの分」と「曜日(0=日)」を取り出す */
+function jstPartsOf(epochMs: number): { minutes: number; day: number } {
+  // UTC に +9h して getUTC* で読むと、サーバ TZ に依存せず JST の壁時計が得られる
+  const shifted = new Date(epochMs + JST_OFFSET_MINUTES * 60_000);
+  return {
+    minutes: shifted.getUTCHours() * 60 + shifted.getUTCMinutes(),
+    day: shifted.getUTCDay(),
+  };
+}
+
+/** 時間帯メンバーシップ（start<end は通常、start>end は日跨ぎ、start==end は常に false） */
+function minutesInRange(minutes: number, startMinutes: number, endMinutes: number): boolean {
+  if (startMinutes === endMinutes) return false;
+  if (startMinutes < endMinutes) return minutes >= startMinutes && minutes < endMinutes;
+  // 日跨ぎ: 22:00〜翌05:00 のように end が start より小さい
+  return minutes >= startMinutes || minutes < endMinutes;
+}
+
+/**
+ * 時間条件を、あるバーの timestamp(epoch ms) に対して評価する純粋関数。
+ *
+ * **重要**: 同一ロジックがプレビュー（本ファイル経由）とバックテスト（backend
+ * strategyConditionEvaluator）で必要。フロントは src/shared を import しない構成のため、
+ * backend 側にも同等のロジックを置く（compareValues の二重化と同じ方針。ドリフト注意）。
+ */
+export function evaluateTimeConditionAt(condition: TimeCondition, epochMs: number): boolean {
+  if (!Number.isFinite(epochMs)) return false;
+  const { minutes, day } = jstPartsOf(epochMs);
+
+  let hit: boolean;
+  if (condition.kind === 'time_range') {
+    hit = minutesInRange(minutes, condition.startMinutes, condition.endMinutes);
+  } else if (condition.kind === 'day_of_week') {
+    hit = condition.days.includes(day);
+  } else {
+    const preset = SESSION_PRESETS_JST[condition.session];
+    hit = minutesInRange(minutes, preset.startMinutes, preset.endMinutes);
+  }
+  return condition.negate ? !hit : hit;
+}
+
+/** 分(0-1439) を "HH:MM" にする表示ヘルパー */
+export function minutesToHHMM(minutes: number): string {
+  const m = ((minutes % 1440) + 1440) % 1440;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+/** "HH:MM" を分(0-1439) にする。失敗時は null */
+export function hhmmToMinutes(hhmm: string): number | null {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!match) return null;
+  const h = Number(match[1]);
+  const m = Number(match[2]);
+  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+  return h * 60 + m;
 }
 
 /**
@@ -250,8 +380,15 @@ export interface IndicatorCondition {
   field: IndicatorField;
   /** 比較演算子 */
   operator: ComparisonOperator;
-  /** 右辺: 比較対象 */
+  /** 右辺: 比較対象（between では下限） */
   compareTarget: CompareTarget;
+  /** between / not_between 専用: 上限。未指定なら範囲判定は不成立 */
+  compareTargetUpper?: CompareTarget;
+  /**
+   * 直近ルックバック: 「直近 N 本以内（現在足含む）にこの条件が成立したら成立」。
+   * 未指定 / 1 なら現在足のみ（通常挙動）。
+   */
+  lookbackBars?: number;
 }
 
 // ============================================
@@ -267,7 +404,7 @@ export interface ConditionGroup {
   /** 論理演算子 */
   operator: LogicalOperator;
   /** 子要素（条件 or サブグループ） */
-  conditions: (IndicatorCondition | PatternCondition | ConditionGroup)[];
+  conditions: (IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup)[];
 
   /** SEQUENCE専用: 各ステップ間の最大バー数（未指定なら evaluator 側のデフォルト） */
   maxBarsBetweenSteps?: number;
@@ -282,22 +419,33 @@ export interface ConditionGroup {
  * 条件がIndicatorConditionかどうかを判定する型ガード
  */
 export function isIndicatorCondition(
-  condition: IndicatorCondition | PatternCondition | ConditionGroup
+  condition: IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup
 ): condition is IndicatorCondition {
   return 'indicatorId' in condition;
 }
 
 export function isPatternCondition(
-  condition: IndicatorCondition | PatternCondition | ConditionGroup
+  condition: IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup
 ): condition is PatternCondition {
   return 'type' in condition && (condition as { type?: string }).type === 'pattern';
+}
+
+/**
+ * 条件が TimeCondition かどうかを判定する型ガード。
+ * 注意: indicator/pattern/group のいずれにも該当しないので、評価・描画では
+ * group フォールバックより前に必ずこのガードを通すこと。
+ */
+export function isTimeCondition(
+  condition: IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup
+): condition is TimeCondition {
+  return 'type' in condition && (condition as { type?: string }).type === 'time';
 }
 
 /**
  * 条件がConditionGroupかどうかを判定する型ガード
  */
 export function isConditionGroup(
-  condition: IndicatorCondition | PatternCondition | ConditionGroup
+  condition: IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup
 ): condition is ConditionGroup {
   return 'conditions' in condition;
 }
@@ -539,6 +687,158 @@ export function createDefaultExitSettings(): ExitSettings {
     takeProfit: { value: 1.0, unit: 'percent' },
     stopLoss: { value: 0.5, unit: 'percent' },
     maxHoldingMinutes: undefined,
+  };
+}
+
+// ============================================
+// 接合点ごとの論理演算子（フラット ⇄ ツリー変換）
+// ============================================
+
+/**
+ * 子要素（条件 / パターン / サブグループ）の共用型。
+ * ConditionGroup.conditions の要素と同じ。
+ */
+export type ConditionChild = IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup;
+
+/**
+ * 接合点ごとに AND/OR を選べるフラット表現。
+ *
+ * - `items[i]` と `items[i+1]` の結合子が `junctions[i]`（長さは items.length - 1）。
+ * - ここで扱う結合子は AND / OR のみ。NOT / IF_THEN / SEQUENCE はグループ単位の
+ *   意味を持つため接合点モデルには載せず、編集 UI 側で従来の単一演算子表示にフォールバックする。
+ *
+ * 目的: UI 上は「接合点ごとに AND/OR」を見せつつ、保存・評価は従来どおりツリー
+ * （OR を外・AND を内とする標準的なブール優先順位）に正規化することで、評価器・DB・API を無改修に保つ。
+ */
+export interface FlatConditionList {
+  items: ConditionChild[];
+  /** AND / OR のみ。長さは items.length - 1 */
+  junctions: ('AND' | 'OR')[];
+}
+
+/**
+ * フラット表現に展開可能なグループかどうか。
+ * AND / OR のみ展開可能（NOT / IF_THEN / SEQUENCE は従来 UI で扱う）。
+ */
+export function isFlattenableGroup(group: ConditionGroup): boolean {
+  return group.operator === 'AND' || group.operator === 'OR';
+}
+
+/**
+ * AND グループの子要素を結合則で平坦化して列挙する。
+ * 理由: `AND(A, AND(B, C))` は `AND(A, B, C)` と等価なので、入れ子の AND は 1 列に潰す。
+ * OR グループや NOT/IF_THEN/SEQUENCE、リーフ条件はそのまま 1 要素（ブロック）として残す。
+ */
+function collectAndItems(group: ConditionGroup): ConditionChild[] {
+  const items: ConditionChild[] = [];
+  for (const child of group.conditions) {
+    if (isConditionGroup(child) && child.operator === 'AND') {
+      items.push(...collectAndItems(child));
+    } else {
+      items.push(child);
+    }
+  }
+  return items;
+}
+
+/**
+ * OR グループを「AND ラン（= AND で繋がった要素の並び）」の配列に展開する。
+ * 各 AND ランが OR の 1 アームに対応する。
+ * 理由: 表示・編集では OR を最外（低優先）、AND を内（高優先）に固定したいため。
+ */
+function collectOrArms(group: ConditionGroup): ConditionChild[][] {
+  const arms: ConditionChild[][] = [];
+  for (const child of group.conditions) {
+    if (isConditionGroup(child) && child.operator === 'OR') {
+      // OR の入れ子は結合則で平坦化
+      arms.push(...collectOrArms(child));
+    } else if (isConditionGroup(child) && child.operator === 'AND') {
+      // AND サブグループ → 1 つの AND ラン
+      arms.push(collectAndItems(child));
+    } else {
+      // リーフ / OR ブロック / NOT 等 → 単独アーム
+      arms.push([child]);
+    }
+  }
+  return arms;
+}
+
+/**
+ * 条件グループを接合点ごとの AND/OR を持つフラット表現に変換する。
+ *
+ * AND/OR ツリー（OR-of-AND 標準形を含む）を、`items` の一次元列 + 接合点 `junctions` に展開する。
+ * 同じ AND ラン内は 'AND'、ラン境界（OR アームの切れ目）は 'OR' になる。
+ * 空アームは捨てる（編集途中の空グループでも phantom な接合点を作らない）。
+ */
+export function flattenConditionGroup(group: ConditionGroup): FlatConditionList {
+  const arms = (group.operator === 'OR' ? collectOrArms(group) : [collectAndItems(group)])
+    .filter((arm) => arm.length > 0);
+
+  const items: ConditionChild[] = [];
+  const junctions: ('AND' | 'OR')[] = [];
+  arms.forEach((arm) => {
+    arm.forEach((item, indexInArm) => {
+      if (items.length > 0) {
+        // アーム先頭は OR（前アームとの境界）、それ以外は AND
+        junctions.push(indexInArm === 0 ? 'OR' : 'AND');
+      }
+      items.push(item);
+    });
+  });
+  return { items, junctions };
+}
+
+/**
+ * フラット表現を標準形ツリー（OR を外・AND を内）に正規化する。
+ *
+ * - OR で区切って AND ランに分割し、ラン内を AND グループ、ラン同士を OR グループで束ねる。
+ * - 単一ランなら AND グループ 1 つ（リーフ 1 個でも AND グループで包む）。
+ * - 複数ランなら OR グループ。長さ 1 のアームは AND で包まず子要素を直接 OR の下に置く。
+ *
+ * 評価器は `operator` と `conditions` のみ読むため、この標準形なら従来どおり正しく評価される。
+ * AND ラッパーの groupId は `${baseGroupId}__and${armIndex}` で armIndex から決定的に導出する
+ * （= 同じフラット構成なら毎回同じ ID。接合点の切り替え等でアーム構成が変わると ID も変わるが、
+ * このラッパー ID は React key には使わず（key はリーフの conditionId）、評価にも影響しないため無害）。
+ *
+ * @param flat - フラット表現
+ * @param baseGroupId - 生成するルートグループの groupId（元グループのものを引き継ぐ）
+ */
+export function normalizeFlatConditions(
+  flat: FlatConditionList,
+  baseGroupId: string,
+): ConditionGroup {
+  const { items, junctions } = flat;
+
+  // OR を境界に AND ランへ分割
+  const arms: ConditionChild[][] = [];
+  let current: ConditionChild[] = [];
+  items.forEach((item, i) => {
+    if (i > 0 && junctions[i - 1] === 'OR') {
+      arms.push(current);
+      current = [];
+    }
+    current.push(item);
+  });
+  if (current.length > 0) arms.push(current);
+
+  // 空 or 単一ラン → AND グループ（空グループも許容）
+  if (arms.length <= 1) {
+    return { groupId: baseGroupId, operator: 'AND', conditions: arms[0] ?? [] };
+  }
+
+  // 複数ラン → OR グループ。各アームは長さ>1なら AND サブグループ、1ならそのまま子に置く。
+  return {
+    groupId: baseGroupId,
+    operator: 'OR',
+    conditions: arms.map((arm, armIndex) =>
+      arm.length === 1
+        ? arm[0]
+        : {
+            groupId: `${baseGroupId}__and${armIndex}`,
+            operator: 'AND' as LogicalOperator,
+            conditions: arm,
+          },
+    ),
   };
 }
 

@@ -22,9 +22,8 @@ import {
 } from "@/schemas/api/chartCandles";
 import type {
   CandlePatternId,
+  ConditionChild,
   ConditionGroup,
-  IndicatorCondition,
-  PatternCondition,
 } from "@/types/strategy";
 import { isConditionGroup, isIndicatorCondition, isPatternCondition } from "@/types/strategy";
 import type { IndicatorParams } from "@/types/indicator";
@@ -112,7 +111,7 @@ export function extractConditionRequirements(group: ConditionGroup): {
     specByKey.set(makeIndicatorCacheKey(indicatorId, params, field), { indicatorId, params, field });
   };
 
-  const visit = (node: ConditionGroup | IndicatorCondition | PatternCondition) => {
+  const visit = (node: ConditionChild) => {
     if (isConditionGroup(node)) {
       for (const c of node.conditions) visit(c);
       // IF_THEN は ifCondition / thenCondition が conditions に含まれない場合があるため明示的に辿る
@@ -132,6 +131,15 @@ export function extractConditionRequirements(group: ConditionGroup): {
         node.compareTarget.indicatorId,
         toNumberParams(node.compareTarget.params),
         node.compareTarget.field,
+      );
+    }
+    // between / not_between の上限が別指標の場合も系列を取得対象にする
+    // (収集漏れがあるとプレビューで系列未取得→常に false になる)
+    if (node.compareTargetUpper?.type === "indicator") {
+      addIndicator(
+        node.compareTargetUpper.indicatorId,
+        toNumberParams(node.compareTargetUpper.params),
+        node.compareTargetUpper.field,
       );
     }
   };

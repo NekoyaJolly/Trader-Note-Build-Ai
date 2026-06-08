@@ -30,6 +30,8 @@ export type ComparisonOperator =
   | '='
   | '>='
   | '>'
+  | 'between'
+  | 'not_between'
   | 'cross_above'
   | 'cross_below'
   | 'touch_close'
@@ -72,6 +74,17 @@ export interface IndicatorCondition {
     field?: string;
     priceType?: 'open' | 'high' | 'low' | 'close';
   };
+  // between / not_between 専用: 上限（compareTarget は下限）
+  compareTargetUpper?: {
+    type: 'fixed' | 'indicator' | 'price';
+    value?: number;
+    indicatorId?: string;
+    params?: Record<string, number>;
+    field?: string;
+    priceType?: 'open' | 'high' | 'low' | 'close';
+  };
+  // 直近ルックバック: 直近 N 本以内（現在足含む）に成立で true。未指定/1 は現在足のみ
+  lookbackBars?: number;
 }
 
 /** ローソク足パターン条件 */
@@ -80,13 +93,70 @@ export interface PatternCondition {
   type: 'pattern';
   patternId: CandlePatternId;
   operator: PatternOperator;
+  // 直近ルックバック: 直近 N 本以内（現在足含む）に出現で true。未指定/1 は現在足のみ
+  lookbackBars?: number;
+}
+
+// ============================================
+// 時間条件（時間帯 / 曜日 / セッション、JST 基準）
+//
+// 注意: 本ロジックはフロント types/strategy.ts の evaluateTimeConditionAt と同等。
+// フロントは src/shared を import しない構成のため二重化している（compareValues と同じ方針）。
+// 仕様変更時は両方を同時に直すこと。
+// ============================================
+
+export type SessionId = 'tokyo' | 'london' | 'newyork';
+
+export type TimeCondition =
+  | { conditionId: string; type: 'time'; kind: 'time_range'; startMinutes: number; endMinutes: number; negate?: boolean }
+  | { conditionId: string; type: 'time'; kind: 'day_of_week'; days: number[]; negate?: boolean }
+  | { conditionId: string; type: 'time'; kind: 'session'; session: SessionId; negate?: boolean };
+
+/** セッションのプリセット時間帯（JST、DST 非考慮の目安。Neko 判断 2026-06-08） */
+const SESSION_PRESETS_JST: Record<SessionId, { startMinutes: number; endMinutes: number }> = {
+  tokyo: { startMinutes: 8 * 60, endMinutes: 17 * 60 },
+  london: { startMinutes: 16 * 60, endMinutes: 1 * 60 },
+  newyork: { startMinutes: 21 * 60, endMinutes: 6 * 60 },
+};
+
+const JST_OFFSET_MINUTES = 9 * 60;
+
+function jstPartsOf(epochMs: number): { minutes: number; day: number } {
+  const shifted = new Date(epochMs + JST_OFFSET_MINUTES * 60_000);
+  return {
+    minutes: shifted.getUTCHours() * 60 + shifted.getUTCMinutes(),
+    day: shifted.getUTCDay(),
+  };
+}
+
+function minutesInRange(minutes: number, startMinutes: number, endMinutes: number): boolean {
+  if (startMinutes === endMinutes) return false;
+  if (startMinutes < endMinutes) return minutes >= startMinutes && minutes < endMinutes;
+  return minutes >= startMinutes || minutes < endMinutes; // 日跨ぎ
+}
+
+/** 時間条件を、あるバーの timestamp(epoch ms) に対して評価する純粋関数 */
+export function evaluateTimeConditionAt(condition: TimeCondition, epochMs: number): boolean {
+  if (!Number.isFinite(epochMs)) return false;
+  const { minutes, day } = jstPartsOf(epochMs);
+
+  let hit: boolean;
+  if (condition.kind === 'time_range') {
+    hit = minutesInRange(minutes, condition.startMinutes, condition.endMinutes);
+  } else if (condition.kind === 'day_of_week') {
+    hit = condition.days.includes(day);
+  } else {
+    const preset = SESSION_PRESETS_JST[condition.session];
+    hit = minutesInRange(minutes, preset.startMinutes, preset.endMinutes);
+  }
+  return condition.negate ? !hit : hit;
 }
 
 /** 条件グループ */
 export interface ConditionGroup {
   groupId: string;
   operator: LogicalOperator;
-  conditions: (IndicatorCondition | PatternCondition | ConditionGroup)[];
+  conditions: (IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup)[];
   // IF-THEN専用
   ifCondition?: ConditionGroup | IndicatorCondition | PatternCondition;
   thenCondition?: ConditionGroup | IndicatorCondition | PatternCondition;
@@ -210,8 +280,25 @@ function compareValues(
   prevLeft?: number,
   prevRight?: number,
 ): boolean {
+  // between / not_between は専用経路（evaluateCondition）で 2 値を解決して判定するため、
+  // 単一 right の本関数では扱わない（ここに来たら不成立）。
+  if (operator === 'between' || operator === 'not_between') return false;
   // Side-A の op は shared op の subset なので as キャスト相当で渡せる
   return sharedCompareValues(left, right, operator, prevLeft, prevRight);
+}
+
+/** 比較対象（固定値 / 価格 / 別指標）を数値に解決する（between の下限・上限用） */
+async function resolveCompareTarget(
+  ctx: EvaluationContext,
+  target: IndicatorCondition['compareTargetUpper'],
+): Promise<number | undefined> {
+  if (!target) return undefined;
+  if (target.type === 'fixed') {
+    // 値欠落 (undefined / NaN) はサイレントに 0 扱いせず undefined を返し、範囲判定を不成立にする
+    return typeof target.value === 'number' && Number.isFinite(target.value) ? target.value : undefined;
+  }
+  if (target.type === 'price') return getPriceValue(ctx, target.priceType || 'close');
+  return getIndicatorValue(ctx, target.indicatorId || '', target.params || {}, target.field || 'value');
 }
 
 /**
@@ -234,7 +321,16 @@ export async function evaluateCondition(
   );
   
   if (leftValue === undefined) return false;
-  
+
+  // 範囲（between / not_between）: 下限 compareTarget・上限 compareTargetUpper を解決して判定
+  if (condition.operator === 'between' || condition.operator === 'not_between') {
+    const lo = await resolveCompareTarget(ctx, condition.compareTarget);
+    const hi = await resolveCompareTarget(ctx, condition.compareTargetUpper);
+    if (lo === undefined || hi === undefined) return false;
+    const inRange = leftValue >= Math.min(lo, hi) && leftValue <= Math.max(lo, hi);
+    return condition.operator === 'between' ? inRange : !inRange;
+  }
+
   // 右辺を取得
   let rightValue: number;
   
@@ -313,9 +409,47 @@ export function evaluatePatternCondition(
   return Promise.resolve(condition.operator === 'is_false' ? !flag : !!flag);
 }
 
+type ConditionChildItem = IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup;
+
+/** item の基本評価（ルックバックは考慮しない）。種別ごとに適切な評価関数へ振り分ける。 */
+async function evaluateBaseNode(ctx: EvaluationContext, item: ConditionChildItem): Promise<boolean> {
+  if ('indicatorId' in item) {
+    return evaluateCondition(ctx, item);
+  }
+  const type = (item as { type?: string }).type;
+  if (type === 'pattern') {
+    return evaluatePatternCondition(ctx, item as PatternCondition);
+  }
+  if (type === 'time') {
+    // 時間条件: 当該バーの timestamp を JST 換算して判定（指標キャッシュ不要）
+    const bar = ctx.data[ctx.currentIndex];
+    return bar ? evaluateTimeConditionAt(item as TimeCondition, bar.timestamp.getTime()) : false;
+  }
+  return evaluateConditionGroup(ctx, item as ConditionGroup);
+}
+
+/**
+ * item を評価する。indicator / pattern 条件に lookbackBars>1 があれば
+ * 「直近 N 本以内（現在足含む）のどこかで成立」で true を返す。
+ */
+async function evaluateChildNode(ctx: EvaluationContext, item: ConditionChildItem): Promise<boolean> {
+  const isLeafWithLookback =
+    'indicatorId' in item || (item as { type?: string }).type === 'pattern';
+  const lookbackBars = isLeafWithLookback ? (item as { lookbackBars?: number }).lookbackBars : undefined;
+
+  if (lookbackBars && lookbackBars > 1) {
+    const start = Math.max(0, ctx.currentIndex - (lookbackBars - 1));
+    for (let j = ctx.currentIndex; j >= start; j--) {
+      if (await evaluateBaseNode({ ...ctx, currentIndex: j }, item)) return true;
+    }
+    return false;
+  }
+  return evaluateBaseNode(ctx, item);
+}
+
 /**
  * 条件グループを評価
- * 
+ *
  * @param ctx - 評価コンテキスト
  * @param group - 条件グループ
  * @returns 条件成立の場合 true
@@ -351,19 +485,11 @@ export async function evaluateConditionGroup(
   
   // 通常の論理演算子（AND, OR, NOT）
   const results: boolean[] = [];
-  
+
   for (const item of group.conditions) {
-    let result: boolean;
-    if ('indicatorId' in item) {
-      result = await evaluateCondition(ctx, item);
-    } else if ((item as { type?: string }).type === 'pattern') {
-      result = await evaluatePatternCondition(ctx, item as PatternCondition);
-    } else {
-      result = await evaluateConditionGroup(ctx, item as ConditionGroup);
-    }
-    results.push(result);
+    results.push(await evaluateChildNode(ctx, item));
   }
-  
+
   switch (group.operator) {
     case 'AND':
       return results.every(r => r);
@@ -401,13 +527,8 @@ async function evaluateIfThen(
     };
   }
   
-  // IF条件をチェック
-  let ifResult: boolean;
-  if ('indicatorId' in ifCondition) {
-    ifResult = await evaluateCondition(ctx, ifCondition);
-  } else {
-    ifResult = await evaluateConditionGroup(ctx, ifCondition as ConditionGroup);
-  }
+  // IF条件をチェック（indicator/pattern/time/group + lookback を evaluateChildNode で統一処理）
+  const ifResult = await evaluateChildNode(ctx, ifCondition);
   
   if (ifResult && !ctx.ifThenState.triggered) {
     ctx.ifThenState.triggered = true;
@@ -424,12 +545,7 @@ async function evaluateIfThen(
       return false;
     }
     
-    let thenResult: boolean;
-    if ('indicatorId' in thenCondition) {
-      thenResult = await evaluateCondition(ctx, thenCondition);
-    } else {
-      thenResult = await evaluateConditionGroup(ctx, thenCondition as ConditionGroup);
-    }
+    const thenResult = await evaluateChildNode(ctx, thenCondition);
     
     if (thenResult) {
       // THEN条件成立 - リセット
@@ -481,15 +597,9 @@ async function evaluateSequence(
     return false;
   }
   
-  // 現在のステップを評価
+  // 現在のステップを評価（indicator/pattern/time/group + lookback を evaluateChildNode で統一処理）
   const currentCondition = sequence[currentStep];
-  let stepResult: boolean;
-  
-  if ('indicatorId' in currentCondition) {
-    stepResult = await evaluateCondition(ctx, currentCondition);
-  } else {
-    stepResult = await evaluateConditionGroup(ctx, currentCondition as ConditionGroup);
-  }
+  const stepResult = await evaluateChildNode(ctx, currentCondition);
   
   if (stepResult) {
     ctx.sequenceState.currentStep++;

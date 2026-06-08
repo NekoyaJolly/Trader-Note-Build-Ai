@@ -13,18 +13,31 @@ import React, { useMemo } from "react";
 import {
   COMPARISON_OPERATOR_INFO,
   createDefaultCondition,
+  DAY_OF_WEEK_LABELS,
   FIELD_LABELS,
+  flattenConditionGroup,
   generateConditionId,
   generateGroupId,
+  hhmmToMinutes,
   INDICATOR_FIELDS,
+  isConditionGroup,
+  isFlattenableGroup,
   isIndicatorCondition,
   isPatternCondition,
+  isTimeCondition,
   LOGICAL_OPERATOR_INFO,
+  minutesToHHMM,
+  normalizeFlatConditions,
+  SESSION_PRESETS_JST,
 } from "@/types/strategy";
 import type {
   IndicatorCondition,
   PatternCondition,
+  TimeCondition,
+  TimeConditionKind,
+  SessionId,
   ConditionGroup,
+  ConditionChild,
   LogicalOperator,
   ComparisonOperator,
   IndicatorField,
@@ -32,6 +45,16 @@ import type {
   CandlePatternId,
   PatternOperator,
 } from "@/types/strategy";
+
+/** 時間条件の初期値（セッション=東京）。追加ボタンと種別切替で使う。 */
+function createDefaultTimeCondition(): TimeCondition {
+  return {
+    conditionId: generateConditionId(),
+    type: 'time',
+    kind: 'session',
+    session: 'tokyo',
+  };
+}
 import type { IndicatorId, IndicatorParams, IndicatorMetadata } from "@/types/indicator";
 
 // ============================================
@@ -193,6 +216,34 @@ function SingleCondition({
     }
   };
 
+  // 範囲（between / not_between）かどうか
+  const isBetween = condition.operator === 'between' || condition.operator === 'not_between';
+
+  // 演算子変更。範囲に切り替えるときは下限・上限を固定値で初期化する（v1 は固定値のみ）
+  const handleOperatorChange = (op: ComparisonOperator) => {
+    if (op === 'between' || op === 'not_between') {
+      const lower = condition.compareTarget.type === 'fixed' ? condition.compareTarget.value : 0;
+      const upper = condition.compareTargetUpper?.type === 'fixed' ? condition.compareTargetUpper.value : 100;
+      onChange({
+        ...condition,
+        operator: op,
+        compareTarget: { type: 'fixed', value: lower },
+        compareTargetUpper: { type: 'fixed', value: upper },
+      });
+      return;
+    }
+    onChange({ ...condition, operator: op });
+  };
+
+  // 範囲の下限・上限（固定値）変更
+  const handleBetweenBoundChange = (which: 'lower' | 'upper', value: number) => {
+    if (which === 'lower') {
+      onChange({ ...condition, compareTarget: { type: 'fixed', value } });
+    } else {
+      onChange({ ...condition, compareTargetUpper: { type: 'fixed', value } });
+    }
+  };
+
   const handleCompareTargetTypeChange = (type: CompareTarget['type']) => {
     if (type === 'fixed') {
       onChange({
@@ -253,7 +304,7 @@ function SingleCondition({
   };
 
   return (
-    <div className={`flex flex-wrap items-center gap-${compact ? '1' : '2'} ${compact ? 'p-2' : 'p-3'} bg-slate-800 rounded-lg border border-slate-700`}>
+    <div className={`flex flex-wrap items-center ${compact ? 'gap-1' : 'gap-2'} ${compact ? 'p-2' : 'p-3'} bg-slate-800 rounded-lg border border-slate-700`}>
       {/* インジケーター選択 */}
       <select
         className={`${baseSelectClass} ${compact ? 'min-w-[80px]' : 'min-w-[120px]'}`}
@@ -321,6 +372,33 @@ function SingleCondition({
 
       <span className="text-xs text-gray-500">が</span>
 
+      {/* 範囲（between / not_between）: 下限〜上限の固定値2つ */}
+      {isBetween && (
+        <div className="flex items-center gap-1">
+          <input
+            type="number"
+            className={`${compact ? 'w-14' : 'w-20'} ${baseInputClass}`}
+            value={condition.compareTarget.type === 'fixed' ? condition.compareTarget.value : 0}
+            onChange={(e) => handleBetweenBoundChange('lower', Number(e.target.value) || 0)}
+            step="any"
+            disabled={readOnly}
+            title="下限"
+          />
+          <span className="text-xs text-gray-500">〜</span>
+          <input
+            type="number"
+            className={`${compact ? 'w-14' : 'w-20'} ${baseInputClass}`}
+            value={condition.compareTargetUpper?.type === 'fixed' ? condition.compareTargetUpper.value : 0}
+            onChange={(e) => handleBetweenBoundChange('upper', Number(e.target.value) || 0)}
+            step="any"
+            disabled={readOnly}
+            title="上限"
+          />
+        </div>
+      )}
+
+      {!isBetween && (
+        <>
       {/* 比較対象タイプ */}
       <select
         className={baseSelectClass}
@@ -438,12 +516,14 @@ function SingleCondition({
           )}
         </>
       )}
+        </>
+      )}
 
       {/* 比較演算子 */}
       <select
         className={baseSelectClass}
         value={condition.operator}
-        onChange={(e) => onChange({ ...condition, operator: e.target.value as ComparisonOperator })}
+        onChange={(e) => handleOperatorChange(e.target.value as ComparisonOperator)}
         disabled={readOnly}
       >
         {Object.entries(COMPARISON_OPERATOR_INFO).map(([op, info]) => (
@@ -452,6 +532,16 @@ function SingleCondition({
           </option>
         ))}
       </select>
+
+      {/* 直近ルックバック */}
+      {(!readOnly || (condition.lookbackBars ?? 0) > 1) && (
+        <LookbackControl
+          value={condition.lookbackBars}
+          onChange={(bars) => onChange({ ...condition, lookbackBars: bars })}
+          readOnly={readOnly}
+          compact={compact}
+        />
+      )}
 
       {/* 削除ボタン */}
       {!readOnly && canRemove && (
@@ -554,7 +644,7 @@ function SinglePatternCondition({
   ];
 
   return (
-    <div className={`flex flex-wrap items-center gap-${compact ? '1' : '2'} ${compact ? 'p-2' : 'p-3'} bg-slate-800 rounded-lg border border-slate-700`}>
+    <div className={`flex flex-wrap items-center ${compact ? 'gap-1' : 'gap-2'} ${compact ? 'p-2' : 'p-3'} bg-slate-800 rounded-lg border border-slate-700`}>
       <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-400`}>パターン</span>
 
       <select
@@ -628,6 +718,16 @@ function SinglePatternCondition({
         ))}
       </select>
 
+      {/* 直近ルックバック */}
+      {(!readOnly || (condition.lookbackBars ?? 0) > 1) && (
+        <LookbackControl
+          value={condition.lookbackBars}
+          onChange={(bars) => onChange({ ...condition, lookbackBars: bars })}
+          readOnly={readOnly}
+          compact={compact}
+        />
+      )}
+
       {!readOnly && canRemove && (
         <button
           type="button"
@@ -646,6 +746,260 @@ function SinglePatternCondition({
           {criteriaText}
         </div>
       )}
+    </div>
+  );
+}
+
+// ============================================
+// 直近ルックバック（直近N本以内に成立）モディファイア
+// ============================================
+
+interface LookbackControlProps {
+  /** 現在の本数（undefined / 1 なら無効） */
+  value: number | undefined;
+  /** 変更コールバック（無効化は undefined） */
+  onChange: (bars: number | undefined) => void;
+  readOnly?: boolean;
+  compact?: boolean;
+}
+
+/**
+ * 条件に「直近 N 本以内のどこかで成立すれば OK」を付与する小さなコントロール。
+ * チェックで有効化（既定 3 本）、数値で本数指定（最小 2）。
+ */
+function LookbackControl({ value, onChange, readOnly = false, compact = false }: LookbackControlProps) {
+  const active = !!value && value > 1;
+  const inputClass = compact ? 'w-10 px-1 py-0.5 text-xs' : 'w-12 px-1.5 py-0.5 text-sm';
+  return (
+    <div className="flex items-center gap-1" title="直近 N 本以内のどこかで成立すれば成立とみなす">
+      <input
+        type="checkbox"
+        checked={active}
+        onChange={(e) => onChange(e.target.checked ? 3 : undefined)}
+        disabled={readOnly}
+        className="accent-amber-500"
+      />
+      <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-400`}>直近</span>
+      <input
+        type="number"
+        min={2}
+        className={`${inputClass} rounded bg-slate-700 text-gray-200 border border-slate-600 disabled:opacity-40`}
+        value={active ? value : ''}
+        onChange={(e) => {
+          const n = parseInt(e.target.value, 10);
+          onChange(Number.isFinite(n) ? Math.max(2, n) : 2);
+        }}
+        disabled={readOnly || !active}
+      />
+      <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-400`}>本以内</span>
+    </div>
+  );
+}
+
+// ============================================
+// 時間条件コンポーネント
+// ============================================
+
+interface TimeConditionProps {
+  condition: TimeCondition;
+  onChange: (condition: TimeCondition) => void;
+  onRemove: () => void;
+  readOnly?: boolean;
+  canRemove?: boolean;
+  compact?: boolean;
+}
+
+/**
+ * 時間条件（時間帯 / 曜日 / セッション）の入力 UI。すべて JST 基準。
+ * 「に成立 / 以外で成立」で時間内・時間外を切り替える（negate）。
+ */
+function SingleTimeCondition({
+  condition,
+  onChange,
+  onRemove,
+  readOnly = false,
+  canRemove = true,
+  compact = false,
+}: TimeConditionProps) {
+  const baseSelectClass = compact
+    ? "px-1 py-0.5 rounded bg-slate-700 text-gray-200 border border-slate-600 text-xs"
+    : "px-2 py-1.5 rounded bg-slate-700 text-gray-200 border border-slate-600 text-sm";
+  const baseInputClass = compact
+    ? "px-1 py-0.5 rounded bg-slate-700 text-gray-200 border border-slate-600 text-xs"
+    : "px-2 py-1.5 rounded bg-slate-700 text-gray-200 border border-slate-600 text-sm";
+
+  // 種別を切り替える（種別ごとのデフォルト値で作り直す。negate は引き継ぐ）
+  const handleKindChange = (kind: TimeConditionKind) => {
+    const negate = condition.negate;
+    if (kind === 'time_range') {
+      // 既定 09:00〜15:00
+      onChange({ conditionId: condition.conditionId, type: 'time', kind: 'time_range', startMinutes: 9 * 60, endMinutes: 15 * 60, negate });
+      return;
+    }
+    if (kind === 'day_of_week') {
+      // 既定 月〜金
+      onChange({ conditionId: condition.conditionId, type: 'time', kind: 'day_of_week', days: [1, 2, 3, 4, 5], negate });
+      return;
+    }
+    onChange({ conditionId: condition.conditionId, type: 'time', kind: 'session', session: 'tokyo', negate });
+  };
+
+  const toggleDay = (day: number) => {
+    if (condition.kind !== 'day_of_week') return;
+    const set = new Set(condition.days);
+    if (set.has(day)) set.delete(day);
+    else set.add(day);
+    onChange({ ...condition, days: Array.from(set).sort((a, b) => a - b) });
+  };
+
+  return (
+    <div className={`flex flex-wrap items-center ${compact ? 'gap-1' : 'gap-2'} ${compact ? 'p-2' : 'p-3'} bg-slate-800 rounded-lg border border-slate-700`}>
+      <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-amber-300/80`}>時間</span>
+
+      {/* 種別 */}
+      <select
+        className={baseSelectClass}
+        value={condition.kind}
+        onChange={(e) => handleKindChange(e.target.value as TimeConditionKind)}
+        disabled={readOnly}
+      >
+        <option value="session">セッション</option>
+        <option value="time_range">時間帯</option>
+        <option value="day_of_week">曜日</option>
+      </select>
+
+      {/* セッション */}
+      {condition.kind === 'session' && (
+        <select
+          className={`${baseSelectClass} ${compact ? 'min-w-[120px]' : 'min-w-[180px]'}`}
+          value={condition.session}
+          onChange={(e) => onChange({ ...condition, session: e.target.value as SessionId })}
+          disabled={readOnly}
+        >
+          {Object.entries(SESSION_PRESETS_JST).map(([id, preset]) => (
+            <option key={id} value={id}>
+              {preset.label}（{minutesToHHMM(preset.startMinutes)}–{minutesToHHMM(preset.endMinutes)} JST）
+            </option>
+          ))}
+        </select>
+      )}
+
+      {/* 時間帯 */}
+      {condition.kind === 'time_range' && (
+        <div className="flex items-center gap-1">
+          <input
+            type="time"
+            className={`${compact ? 'w-20' : 'w-24'} ${baseInputClass}`}
+            value={minutesToHHMM(condition.startMinutes)}
+            onChange={(e) => {
+              const m = hhmmToMinutes(e.target.value);
+              if (m !== null) onChange({ ...condition, startMinutes: m });
+            }}
+            disabled={readOnly}
+          />
+          <span className="text-xs text-gray-500">〜</span>
+          <input
+            type="time"
+            className={`${compact ? 'w-20' : 'w-24'} ${baseInputClass}`}
+            value={minutesToHHMM(condition.endMinutes)}
+            onChange={(e) => {
+              const m = hhmmToMinutes(e.target.value);
+              if (m !== null) onChange({ ...condition, endMinutes: m });
+            }}
+            disabled={readOnly}
+          />
+          <span className="text-[10px] text-gray-500">JST</span>
+        </div>
+      )}
+
+      {/* 曜日 */}
+      {condition.kind === 'day_of_week' && (
+        <div className="flex items-center gap-0.5">
+          {DAY_OF_WEEK_LABELS.map((label, day) => {
+            const selected = condition.days.includes(day);
+            return (
+              <button
+                type="button"
+                key={day}
+                onClick={() => toggleDay(day)}
+                disabled={readOnly}
+                className={`${compact ? 'w-5 h-5 text-[10px]' : 'w-7 h-7 text-xs'} rounded border transition-colors ${
+                  selected
+                    ? 'bg-amber-600 border-amber-500 text-white'
+                    : 'bg-slate-700 border-slate-600 text-gray-400 hover:border-amber-500'
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+          <span className="ml-1 text-[10px] text-gray-500">JST</span>
+        </div>
+      )}
+
+      {/* 時間内 / 時間外 */}
+      <select
+        className={baseSelectClass}
+        value={condition.negate ? 'outside' : 'inside'}
+        onChange={(e) => onChange({ ...condition, negate: e.target.value === 'outside' })}
+        disabled={readOnly}
+        title="この時間に成立させるか、この時間以外で成立させるか"
+      >
+        <option value="inside">に成立</option>
+        <option value="outside">以外で成立</option>
+      </select>
+
+      {!readOnly && canRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          className={`${compact ? 'p-0.5' : 'p-1.5'} text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded transition-colors`}
+          title="条件を削除"
+        >
+          <svg className={`${compact ? 'w-3 h-3' : 'w-4 h-4'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ============================================
+// 接合点セレクタ（かつ / または を接合点ごとに選ぶ）
+// ============================================
+
+interface JunctionSelectProps {
+  /** 現在の結合子 */
+  value: 'AND' | 'OR';
+  /** この接合点のグローバル index（items[index] と items[index+1] の間） */
+  junctionIndex: number;
+  /** 変更コールバック */
+  onChange: (junctionIndex: number, op: 'AND' | 'OR') => void;
+  readOnly?: boolean;
+  compact?: boolean;
+}
+
+/**
+ * 接合点ごとの「かつ / または」を切り替える小さなセレクタ。
+ * 値に応じて色を変え、AND（青）/ OR（緑）で視覚的に区別する。
+ */
+function JunctionSelect({ value, junctionIndex, onChange, readOnly = false, compact = false }: JunctionSelectProps) {
+  const colorClass = value === 'AND'
+    ? 'bg-blue-900/50 text-blue-200 border-blue-700'
+    : 'bg-green-900/50 text-green-200 border-green-700';
+  return (
+    <div className={`flex items-center justify-center ${compact ? 'py-0.5' : 'py-1'}`}>
+      <select
+        className={`${compact ? 'px-1.5 py-0.5 text-[10px]' : 'px-2.5 py-0.5 text-xs'} rounded-full font-medium border ${colorClass} ${readOnly ? 'pointer-events-none opacity-80' : 'cursor-pointer'}`}
+        value={value}
+        onChange={(e) => onChange(junctionIndex, e.target.value as 'AND' | 'OR')}
+        disabled={readOnly}
+        title="この接合点の論理条件（かつ / または）"
+      >
+        <option value="AND">かつ (AND)</option>
+        <option value="OR">または (OR)</option>
+      </select>
     </div>
   );
 }
@@ -673,73 +1027,159 @@ function ConditionGroupComponent({
   depth = 0,
   compact = false,
 }: ConditionGroupComponentProps) {
-  // 条件を追加
-  const handleAddCondition = () => {
-    onChange({
-      ...group,
-      conditions: [...group.conditions, createDefaultCondition()],
-    });
+  // AND/OR グループは「接合点ごとに AND/OR を選べる」フラット UI で表示する。
+  // NOT / IF_THEN / SEQUENCE はグループ単位の意味を持つため、従来の単一演算子 UI にフォールバックする。
+  const flattenable = isFlattenableGroup(group);
+  const flat = flattenable ? flattenConditionGroup(group) : null;
+
+  // フラット表現を標準形ツリー（OR 外・AND 内）に正規化して親へ通知する。
+  // これにより評価器・DB・API は無改修のまま、UI だけ接合点モデルにできる。
+  const emitFlat = (items: ConditionChild[], junctions: ('AND' | 'OR')[]) => {
+    onChange(normalizeFlatConditions({ items, junctions }, group.groupId));
   };
 
-  // パターン条件を追加
-  const handleAddPatternCondition = () => {
-    const cond: PatternCondition = {
-      conditionId: generateConditionId(),
-      type: 'pattern',
-      patternId: 'pinbar',
-      operator: 'is_true',
-    };
-
-    onChange({
-      ...group,
-      conditions: [...group.conditions, cond],
-    });
+  // --- 通常モード（AND/OR 個別指定）の編集ハンドラ ---
+  const handleItemChange = (index: number, updated: ConditionChild) => {
+    if (!flat) return;
+    const items = [...flat.items];
+    items[index] = updated;
+    emitFlat(items, flat.junctions);
   };
 
-  // サブグループを追加
-  const handleAddSubGroup = () => {
-    onChange({
-      ...group,
-      conditions: [
-        ...group.conditions,
-        {
-          groupId: generateGroupId(),
-          operator: 'AND' as LogicalOperator,
-          // 追加直後に親と同じデフォルト条件が増えると「自由度がない」印象になるため、空で作る
-          // 必要な条件/パターンはこのグループ内でユーザーが追加する
-          conditions: [],
-        },
-      ],
-    });
+  const handleItemRemove = (index: number) => {
+    if (!flat) return;
+    const items = flat.items.filter((_, i) => i !== index);
+    // 削除した要素に隣接する接合点を 1 つ落とす（先頭なら後ろ側、それ以外は前側）
+    const dropAt = index === 0 ? 0 : index - 1;
+    const junctions = flat.junctions.filter((_, j) => j !== dropAt);
+    emitFlat(items, junctions);
   };
 
-  // 条件を更新
-  const handleConditionChange = (index: number, updated: IndicatorCondition | PatternCondition | ConditionGroup) => {
-    const newConditions = [...group.conditions];
-    newConditions[index] = updated;
-    onChange({ ...group, conditions: newConditions });
+  const handleJunctionChange = (junctionIndex: number, op: 'AND' | 'OR') => {
+    if (!flat) return;
+    const junctions = [...flat.junctions];
+    junctions[junctionIndex] = op;
+    emitFlat(flat.items, junctions);
   };
 
-  // 条件を削除
-  const handleRemoveCondition = (index: number) => {
-    if (group.conditions.length <= 1) return; // 最低1つは残す
-    const newConditions = group.conditions.filter((_, i) => i !== index);
-    onChange({ ...group, conditions: newConditions });
+  // 末尾に要素を 1 つ足す（直前との接合点はデフォルト AND）
+  const appendChild = (child: ConditionChild) => {
+    if (!flat) {
+      // 高度モード（NOT/IF_THEN/SEQUENCE）はツリーへ直接追加
+      onChange({ ...group, conditions: [...group.conditions, child] });
+      return;
+    }
+    const items = [...flat.items, child];
+    const junctions = flat.items.length === 0 ? [] : [...flat.junctions, 'AND' as const];
+    emitFlat(items, junctions);
   };
 
-  // 論理演算子を変更
-  const handleOperatorChange = (operator: LogicalOperator) => {
-    onChange({ ...group, operator });
+  const handleAddCondition = () => appendChild(createDefaultCondition());
+  const handleAddPatternCondition = () =>
+    appendChild({ conditionId: generateConditionId(), type: 'pattern', patternId: 'pinbar', operator: 'is_true' });
+  const handleAddTimeCondition = () => appendChild(createDefaultTimeCondition());
+  const handleAddSubGroup = () =>
+    appendChild({ groupId: generateGroupId(), operator: 'AND', conditions: [] });
+
+  // --- 結合モード切替（通常 = AND/OR 個別 / 高度 = SEQUENCE・IF_THEN・NOT） ---
+  const combineMode: 'MIXED' | LogicalOperator = flattenable ? 'MIXED' : group.operator;
+  const handleCombineModeChange = (mode: 'MIXED' | LogicalOperator) => {
+    // 通常へ戻すときは operator を AND に寄せて接合点モデルに復帰（conditions はそのまま）
+    onChange({ ...group, operator: mode === 'MIXED' ? 'AND' : mode });
   };
-
-
   const handleMaxBarsBetweenStepsChange = (value: number) => {
     const next = Number.isFinite(value) ? Math.max(1, Math.min(value, 500)) : 10;
     onChange({ ...group, maxBarsBetweenSteps: next });
   };
 
+  // --- 高度モード（NOT/IF_THEN/SEQUENCE）の編集ハンドラ（従来挙動を維持） ---
+  const handleLegacyChange = (index: number, updated: ConditionChild) => {
+    const newConditions = [...group.conditions];
+    newConditions[index] = updated;
+    onChange({ ...group, conditions: newConditions });
+  };
+  const handleLegacyRemove = (index: number) => {
+    if (group.conditions.length <= 1) return; // 最低1つは残す
+    onChange({ ...group, conditions: group.conditions.filter((_, i) => i !== index) });
+  };
+
   const bgColors = ['bg-slate-900', 'bg-slate-800/50', 'bg-slate-700/30'];
   const borderColors = ['border-slate-700', 'border-slate-600', 'border-slate-500'];
+
+  // 子要素（条件 / パターン / サブグループ）の React key
+  const childKey = (child: ConditionChild): string =>
+    isConditionGroup(child) ? child.groupId : child.conditionId;
+
+  // 子要素を描画する共通関数（通常モード・高度モードで共有）
+  const renderChild = (
+    child: ConditionChild,
+    onChildChange: (updated: ConditionChild) => void,
+    onChildRemove: () => void,
+    canRemove: boolean,
+  ) => {
+    if (isIndicatorCondition(child)) {
+      return (
+        <SingleCondition
+          condition={child}
+          onChange={onChildChange}
+          onRemove={onChildRemove}
+          indicatorMetadata={indicatorMetadata}
+          readOnly={readOnly}
+          canRemove={canRemove}
+          compact={compact}
+        />
+      );
+    }
+    if (isPatternCondition(child)) {
+      return (
+        <SinglePatternCondition
+          condition={child}
+          onChange={onChildChange}
+          onRemove={onChildRemove}
+          readOnly={readOnly}
+          canRemove={canRemove}
+          compact={compact}
+        />
+      );
+    }
+    if (isTimeCondition(child)) {
+      return (
+        <SingleTimeCondition
+          condition={child}
+          onChange={onChildChange}
+          onRemove={onChildRemove}
+          readOnly={readOnly}
+          canRemove={canRemove}
+          compact={compact}
+        />
+      );
+    }
+    return (
+      <ConditionGroupComponent
+        group={child}
+        onChange={onChildChange}
+        onRemove={onChildRemove}
+        indicatorMetadata={indicatorMetadata}
+        readOnly={readOnly}
+        depth={depth + 1}
+        compact={compact}
+      />
+    );
+  };
+
+  // 通常モードの AND ラン分割（枠で囲むための index グルーピング）
+  const arms: number[][] = [];
+  if (flat) {
+    let current: number[] = [];
+    flat.items.forEach((_, i) => {
+      if (i > 0 && flat.junctions[i - 1] === 'OR') {
+        arms.push(current);
+        current = [];
+      }
+      current.push(i);
+    });
+    if (current.length > 0) arms.push(current);
+  }
 
   return (
     <div className={`${compact ? 'p-2' : 'p-4'} rounded-lg border ${bgColors[Math.min(depth, 2)]} ${borderColors[Math.min(depth, 2)]}`}>
@@ -769,74 +1209,99 @@ function ConditionGroupComponent({
       </div>
 
       {/* 条件一覧 */}
-      <div className={`space-y-${compact ? '1' : '2'}`}>
-        {group.conditions.map((condition, index) => (
-          <React.Fragment key={isIndicatorCondition(condition) || isPatternCondition(condition) ? (condition as { conditionId: string }).conditionId : (condition as ConditionGroup).groupId}>
-            {/* 論理演算子の区切り */}
-            {index > 0 && (
-              <div className={`flex items-center justify-center ${compact ? 'py-0.5' : 'py-1'}`}>
-                <span className={`${compact ? 'px-2 text-[10px]' : 'px-3 text-xs'} py-0.5 font-medium rounded-full ${
-                  group.operator === 'AND' ? 'bg-blue-900/50 text-blue-300' :
-                  group.operator === 'OR' ? 'bg-green-900/50 text-green-300' :
-                  'bg-orange-900/50 text-orange-300'
-                }`}
-                title={`このグループ内の結合: ${LOGICAL_OPERATOR_INFO[group.operator].description}`}
-                >
-                  {LOGICAL_OPERATOR_INFO[group.operator].label}
-                </span>
+      {flat ? (
+        // 通常モード: 接合点ごとに AND/OR を選べる。AND ラン（かつ で繋がる塊）を枠で囲み、
+        // 枠の境界が または（OR）になる = ブール優先順位（AND を内、OR を外）を視覚化する。
+        <div className={compact ? 'space-y-1' : 'space-y-2'}>
+          {flat.items.length === 0 && (
+            <p className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-500 italic`}>
+              条件がありません。下のボタンで追加してください。
+            </p>
+          )}
+          {arms.map((arm, armIdx) => (
+            <React.Fragment key={`arm-${armIdx}-${childKey(flat.items[arm[0]])}`}>
+              {/* アーム間の境界 = または（OR、編集可能） */}
+              {armIdx > 0 && (
+                <JunctionSelect
+                  value="OR"
+                  junctionIndex={arm[0] - 1}
+                  onChange={handleJunctionChange}
+                  readOnly={readOnly}
+                  compact={compact}
+                />
+              )}
+              {/* AND ラン（2 件以上のときだけ枠で囲んで「ひと塊」を強調） */}
+              <div
+                className={
+                  arm.length > 1
+                    ? `rounded-lg border border-blue-800/60 bg-blue-950/20 ${compact ? 'p-1.5 space-y-1' : 'p-2 space-y-2'}`
+                    : ''
+                }
+              >
+                {arm.map((itemIndex, posInArm) => (
+                  <React.Fragment key={childKey(flat.items[itemIndex])}>
+                    {/* ラン内の接合点 = かつ（AND、編集可能） */}
+                    {posInArm > 0 && (
+                      <JunctionSelect
+                        value="AND"
+                        junctionIndex={itemIndex - 1}
+                        onChange={handleJunctionChange}
+                        readOnly={readOnly}
+                        compact={compact}
+                      />
+                    )}
+                    {renderChild(
+                      flat.items[itemIndex],
+                      (updated) => handleItemChange(itemIndex, updated),
+                      () => handleItemRemove(itemIndex),
+                      flat.items.length > 1,
+                    )}
+                  </React.Fragment>
+                ))}
               </div>
-            )}
+            </React.Fragment>
+          ))}
+        </div>
+      ) : (
+        // 高度モード（NOT / IF_THEN / SEQUENCE）: 従来の単一演算子表示
+        <div className={compact ? 'space-y-1' : 'space-y-2'}>
+          {group.conditions.map((condition, index) => (
+            <React.Fragment key={childKey(condition)}>
+              {index > 0 && (
+                <div className={`flex items-center justify-center ${compact ? 'py-0.5' : 'py-1'}`}>
+                  <span
+                    className={`${compact ? 'px-2 text-[10px]' : 'px-3 text-xs'} py-0.5 font-medium rounded-full bg-orange-900/50 text-orange-300`}
+                    title={`このグループ内の結合: ${LOGICAL_OPERATOR_INFO[group.operator].description}`}
+                  >
+                    {LOGICAL_OPERATOR_INFO[group.operator].label}
+                  </span>
+                </div>
+              )}
+              {renderChild(
+                condition,
+                (updated) => handleLegacyChange(index, updated),
+                () => handleLegacyRemove(index),
+                group.conditions.length > 1,
+              )}
+            </React.Fragment>
+          ))}
+        </div>
+      )}
 
-            {/* 単一条件またはサブグループ */}
-            {isIndicatorCondition(condition) ? (
-              <SingleCondition
-                condition={condition}
-                onChange={(updated) => handleConditionChange(index, updated)}
-                onRemove={() => handleRemoveCondition(index)}
-                indicatorMetadata={indicatorMetadata}
-                readOnly={readOnly}
-                canRemove={group.conditions.length > 1}
-                compact={compact}
-              />
-            ) : isPatternCondition(condition) ? (
-              <SinglePatternCondition
-                condition={condition}
-                onChange={(updated) => handleConditionChange(index, updated)}
-                onRemove={() => handleRemoveCondition(index)}
-                readOnly={readOnly}
-                canRemove={group.conditions.length > 1}
-                compact={compact}
-              />
-            ) : (
-              <ConditionGroupComponent
-                group={condition as ConditionGroup}
-                onChange={(updated) => handleConditionChange(index, updated)}
-                onRemove={() => handleRemoveCondition(index)}
-                indicatorMetadata={indicatorMetadata}
-                readOnly={readOnly}
-                depth={depth + 1}
-                compact={compact}
-              />
-            )}
-          </React.Fragment>
-        ))}
-      </div>
-
-      {/* 追加ボタン */}
+      {/* 追加ボタン + 結合モード */}
       {!readOnly && (
         <div className={`${compact ? 'mt-2 pt-2' : 'mt-3 pt-3'} border-t border-slate-700`}>
           <div className={`flex flex-wrap items-center gap-2 ${compact ? 'mb-2' : 'mb-3'}`}>
-            <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-400`}>このグループの論理条件</span>
+            <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-400`}>結合モード</span>
             <select
               className={`${compact ? 'px-1.5 py-0.5 text-xs' : 'px-3 py-1.5 text-sm'} rounded bg-slate-700 text-gray-200 border border-slate-600 font-medium`}
-              value={group.operator}
-              onChange={(e) => handleOperatorChange(e.target.value as LogicalOperator)}
+              value={combineMode}
+              onChange={(e) => handleCombineModeChange(e.target.value as 'MIXED' | LogicalOperator)}
             >
-              {Object.entries(LOGICAL_OPERATOR_INFO).map(([op, info]) => (
-                <option key={op} value={op}>
-                  {compact ? info.label : `${info.label}（${info.description}）`}
-                </option>
-              ))}
+              <option value="MIXED">AND / OR を個別に指定（推奨）</option>
+              <option value="SEQUENCE">順序（{LOGICAL_OPERATOR_INFO.SEQUENCE.description}）</option>
+              <option value="IF_THEN">IF → THEN（{LOGICAL_OPERATOR_INFO.IF_THEN.description}）</option>
+              <option value="NOT">〜でない（{LOGICAL_OPERATOR_INFO.NOT.description}）</option>
             </select>
 
             {group.operator === 'SEQUENCE' && (
@@ -876,6 +1341,17 @@ function ConditionGroupComponent({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
             {compact ? '+パターン' : 'パターンを追加'}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleAddTimeCondition}
+            className={`flex items-center gap-1 ${compact ? 'px-2 py-1 text-xs' : 'px-3 py-1.5 text-sm'} bg-amber-600 hover:bg-amber-500 text-white rounded transition-colors`}
+          >
+            <svg className={`${compact ? 'w-3 h-3' : 'w-4 h-4'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {compact ? '+時間' : '時間条件を追加'}
           </button>
 
           {depth < 2 && ( // ネストは2階層まで
