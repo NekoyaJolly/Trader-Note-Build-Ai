@@ -14,17 +14,22 @@ import {
   COMPARISON_OPERATOR_INFO,
   createDefaultCondition,
   FIELD_LABELS,
+  flattenConditionGroup,
   generateConditionId,
   generateGroupId,
   INDICATOR_FIELDS,
+  isConditionGroup,
+  isFlattenableGroup,
   isIndicatorCondition,
   isPatternCondition,
   LOGICAL_OPERATOR_INFO,
+  normalizeFlatConditions,
 } from "@/types/strategy";
 import type {
   IndicatorCondition,
   PatternCondition,
   ConditionGroup,
+  ConditionChild,
   LogicalOperator,
   ComparisonOperator,
   IndicatorField,
@@ -651,6 +656,45 @@ function SinglePatternCondition({
 }
 
 // ============================================
+// 接合点セレクタ（かつ / または を接合点ごとに選ぶ）
+// ============================================
+
+interface JunctionSelectProps {
+  /** 現在の結合子 */
+  value: 'AND' | 'OR';
+  /** この接合点のグローバル index（items[index] と items[index+1] の間） */
+  junctionIndex: number;
+  /** 変更コールバック */
+  onChange: (junctionIndex: number, op: 'AND' | 'OR') => void;
+  readOnly?: boolean;
+  compact?: boolean;
+}
+
+/**
+ * 接合点ごとの「かつ / または」を切り替える小さなセレクタ。
+ * 値に応じて色を変え、AND（青）/ OR（緑）で視覚的に区別する。
+ */
+function JunctionSelect({ value, junctionIndex, onChange, readOnly = false, compact = false }: JunctionSelectProps) {
+  const colorClass = value === 'AND'
+    ? 'bg-blue-900/50 text-blue-200 border-blue-700'
+    : 'bg-green-900/50 text-green-200 border-green-700';
+  return (
+    <div className={`flex items-center justify-center ${compact ? 'py-0.5' : 'py-1'}`}>
+      <select
+        className={`${compact ? 'px-1.5 py-0.5 text-[10px]' : 'px-2.5 py-0.5 text-xs'} rounded-full font-medium border ${colorClass} ${readOnly ? 'pointer-events-none opacity-80' : 'cursor-pointer'}`}
+        value={value}
+        onChange={(e) => onChange(junctionIndex, e.target.value as 'AND' | 'OR')}
+        disabled={readOnly}
+        title="この接合点の論理条件（かつ / または）"
+      >
+        <option value="AND">かつ (AND)</option>
+        <option value="OR">または (OR)</option>
+      </select>
+    </div>
+  );
+}
+
+// ============================================
 // 条件グループコンポーネント（再帰的）
 // ============================================
 
@@ -673,73 +717,146 @@ function ConditionGroupComponent({
   depth = 0,
   compact = false,
 }: ConditionGroupComponentProps) {
-  // 条件を追加
-  const handleAddCondition = () => {
-    onChange({
-      ...group,
-      conditions: [...group.conditions, createDefaultCondition()],
-    });
+  // AND/OR グループは「接合点ごとに AND/OR を選べる」フラット UI で表示する。
+  // NOT / IF_THEN / SEQUENCE はグループ単位の意味を持つため、従来の単一演算子 UI にフォールバックする。
+  const flattenable = isFlattenableGroup(group);
+  const flat = flattenable ? flattenConditionGroup(group) : null;
+
+  // フラット表現を標準形ツリー（OR 外・AND 内）に正規化して親へ通知する。
+  // これにより評価器・DB・API は無改修のまま、UI だけ接合点モデルにできる。
+  const emitFlat = (items: ConditionChild[], junctions: ('AND' | 'OR')[]) => {
+    onChange(normalizeFlatConditions({ items, junctions }, group.groupId));
   };
 
-  // パターン条件を追加
-  const handleAddPatternCondition = () => {
-    const cond: PatternCondition = {
-      conditionId: generateConditionId(),
-      type: 'pattern',
-      patternId: 'pinbar',
-      operator: 'is_true',
-    };
-
-    onChange({
-      ...group,
-      conditions: [...group.conditions, cond],
-    });
+  // --- 通常モード（AND/OR 個別指定）の編集ハンドラ ---
+  const handleItemChange = (index: number, updated: ConditionChild) => {
+    if (!flat) return;
+    const items = [...flat.items];
+    items[index] = updated;
+    emitFlat(items, flat.junctions);
   };
 
-  // サブグループを追加
-  const handleAddSubGroup = () => {
-    onChange({
-      ...group,
-      conditions: [
-        ...group.conditions,
-        {
-          groupId: generateGroupId(),
-          operator: 'AND' as LogicalOperator,
-          // 追加直後に親と同じデフォルト条件が増えると「自由度がない」印象になるため、空で作る
-          // 必要な条件/パターンはこのグループ内でユーザーが追加する
-          conditions: [],
-        },
-      ],
-    });
+  const handleItemRemove = (index: number) => {
+    if (!flat) return;
+    const items = flat.items.filter((_, i) => i !== index);
+    // 削除した要素に隣接する接合点を 1 つ落とす（先頭なら後ろ側、それ以外は前側）
+    const dropAt = index === 0 ? 0 : index - 1;
+    const junctions = flat.junctions.filter((_, j) => j !== dropAt);
+    emitFlat(items, junctions);
   };
 
-  // 条件を更新
-  const handleConditionChange = (index: number, updated: IndicatorCondition | PatternCondition | ConditionGroup) => {
-    const newConditions = [...group.conditions];
-    newConditions[index] = updated;
-    onChange({ ...group, conditions: newConditions });
+  const handleJunctionChange = (junctionIndex: number, op: 'AND' | 'OR') => {
+    if (!flat) return;
+    const junctions = [...flat.junctions];
+    junctions[junctionIndex] = op;
+    emitFlat(flat.items, junctions);
   };
 
-  // 条件を削除
-  const handleRemoveCondition = (index: number) => {
-    if (group.conditions.length <= 1) return; // 最低1つは残す
-    const newConditions = group.conditions.filter((_, i) => i !== index);
-    onChange({ ...group, conditions: newConditions });
+  // 末尾に要素を 1 つ足す（直前との接合点はデフォルト AND）
+  const appendChild = (child: ConditionChild) => {
+    if (!flat) {
+      // 高度モード（NOT/IF_THEN/SEQUENCE）はツリーへ直接追加
+      onChange({ ...group, conditions: [...group.conditions, child] });
+      return;
+    }
+    const items = [...flat.items, child];
+    const junctions = flat.items.length === 0 ? [] : [...flat.junctions, 'AND' as const];
+    emitFlat(items, junctions);
   };
 
-  // 論理演算子を変更
-  const handleOperatorChange = (operator: LogicalOperator) => {
-    onChange({ ...group, operator });
+  const handleAddCondition = () => appendChild(createDefaultCondition());
+  const handleAddPatternCondition = () =>
+    appendChild({ conditionId: generateConditionId(), type: 'pattern', patternId: 'pinbar', operator: 'is_true' });
+  const handleAddSubGroup = () =>
+    appendChild({ groupId: generateGroupId(), operator: 'AND', conditions: [] });
+
+  // --- 結合モード切替（通常 = AND/OR 個別 / 高度 = SEQUENCE・IF_THEN・NOT） ---
+  const combineMode: 'MIXED' | LogicalOperator = flattenable ? 'MIXED' : group.operator;
+  const handleCombineModeChange = (mode: 'MIXED' | LogicalOperator) => {
+    // 通常へ戻すときは operator を AND に寄せて接合点モデルに復帰（conditions はそのまま）
+    onChange({ ...group, operator: mode === 'MIXED' ? 'AND' : mode });
   };
-
-
   const handleMaxBarsBetweenStepsChange = (value: number) => {
     const next = Number.isFinite(value) ? Math.max(1, Math.min(value, 500)) : 10;
     onChange({ ...group, maxBarsBetweenSteps: next });
   };
 
+  // --- 高度モード（NOT/IF_THEN/SEQUENCE）の編集ハンドラ（従来挙動を維持） ---
+  const handleLegacyChange = (index: number, updated: ConditionChild) => {
+    const newConditions = [...group.conditions];
+    newConditions[index] = updated;
+    onChange({ ...group, conditions: newConditions });
+  };
+  const handleLegacyRemove = (index: number) => {
+    if (group.conditions.length <= 1) return; // 最低1つは残す
+    onChange({ ...group, conditions: group.conditions.filter((_, i) => i !== index) });
+  };
+
   const bgColors = ['bg-slate-900', 'bg-slate-800/50', 'bg-slate-700/30'];
   const borderColors = ['border-slate-700', 'border-slate-600', 'border-slate-500'];
+
+  // 子要素（条件 / パターン / サブグループ）の React key
+  const childKey = (child: ConditionChild): string =>
+    isConditionGroup(child) ? child.groupId : child.conditionId;
+
+  // 子要素を描画する共通関数（通常モード・高度モードで共有）
+  const renderChild = (
+    child: ConditionChild,
+    onChildChange: (updated: ConditionChild) => void,
+    onChildRemove: () => void,
+    canRemove: boolean,
+  ) => {
+    if (isIndicatorCondition(child)) {
+      return (
+        <SingleCondition
+          condition={child}
+          onChange={onChildChange}
+          onRemove={onChildRemove}
+          indicatorMetadata={indicatorMetadata}
+          readOnly={readOnly}
+          canRemove={canRemove}
+          compact={compact}
+        />
+      );
+    }
+    if (isPatternCondition(child)) {
+      return (
+        <SinglePatternCondition
+          condition={child}
+          onChange={onChildChange}
+          onRemove={onChildRemove}
+          readOnly={readOnly}
+          canRemove={canRemove}
+          compact={compact}
+        />
+      );
+    }
+    return (
+      <ConditionGroupComponent
+        group={child}
+        onChange={onChildChange}
+        onRemove={onChildRemove}
+        indicatorMetadata={indicatorMetadata}
+        readOnly={readOnly}
+        depth={depth + 1}
+        compact={compact}
+      />
+    );
+  };
+
+  // 通常モードの AND ラン分割（枠で囲むための index グルーピング）
+  const arms: number[][] = [];
+  if (flat) {
+    let current: number[] = [];
+    flat.items.forEach((_, i) => {
+      if (i > 0 && flat.junctions[i - 1] === 'OR') {
+        arms.push(current);
+        current = [];
+      }
+      current.push(i);
+    });
+    if (current.length > 0) arms.push(current);
+  }
 
   return (
     <div className={`${compact ? 'p-2' : 'p-4'} rounded-lg border ${bgColors[Math.min(depth, 2)]} ${borderColors[Math.min(depth, 2)]}`}>
@@ -769,74 +886,99 @@ function ConditionGroupComponent({
       </div>
 
       {/* 条件一覧 */}
-      <div className={`space-y-${compact ? '1' : '2'}`}>
-        {group.conditions.map((condition, index) => (
-          <React.Fragment key={isIndicatorCondition(condition) || isPatternCondition(condition) ? (condition as { conditionId: string }).conditionId : (condition as ConditionGroup).groupId}>
-            {/* 論理演算子の区切り */}
-            {index > 0 && (
-              <div className={`flex items-center justify-center ${compact ? 'py-0.5' : 'py-1'}`}>
-                <span className={`${compact ? 'px-2 text-[10px]' : 'px-3 text-xs'} py-0.5 font-medium rounded-full ${
-                  group.operator === 'AND' ? 'bg-blue-900/50 text-blue-300' :
-                  group.operator === 'OR' ? 'bg-green-900/50 text-green-300' :
-                  'bg-orange-900/50 text-orange-300'
-                }`}
-                title={`このグループ内の結合: ${LOGICAL_OPERATOR_INFO[group.operator].description}`}
-                >
-                  {LOGICAL_OPERATOR_INFO[group.operator].label}
-                </span>
+      {flat ? (
+        // 通常モード: 接合点ごとに AND/OR を選べる。AND ラン（かつ で繋がる塊）を枠で囲み、
+        // 枠の境界が または（OR）になる = ブール優先順位（AND を内、OR を外）を視覚化する。
+        <div className={`space-y-${compact ? '1' : '2'}`}>
+          {flat.items.length === 0 && (
+            <p className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-500 italic`}>
+              条件がありません。下のボタンで追加してください。
+            </p>
+          )}
+          {arms.map((arm, armIdx) => (
+            <React.Fragment key={`arm-${armIdx}-${childKey(flat.items[arm[0]])}`}>
+              {/* アーム間の境界 = または（OR、編集可能） */}
+              {armIdx > 0 && (
+                <JunctionSelect
+                  value="OR"
+                  junctionIndex={arm[0] - 1}
+                  onChange={handleJunctionChange}
+                  readOnly={readOnly}
+                  compact={compact}
+                />
+              )}
+              {/* AND ラン（2 件以上のときだけ枠で囲んで「ひと塊」を強調） */}
+              <div
+                className={
+                  arm.length > 1
+                    ? `rounded-lg border border-blue-800/60 bg-blue-950/20 ${compact ? 'p-1.5 space-y-1' : 'p-2 space-y-2'}`
+                    : ''
+                }
+              >
+                {arm.map((itemIndex, posInArm) => (
+                  <React.Fragment key={childKey(flat.items[itemIndex])}>
+                    {/* ラン内の接合点 = かつ（AND、編集可能） */}
+                    {posInArm > 0 && (
+                      <JunctionSelect
+                        value="AND"
+                        junctionIndex={itemIndex - 1}
+                        onChange={handleJunctionChange}
+                        readOnly={readOnly}
+                        compact={compact}
+                      />
+                    )}
+                    {renderChild(
+                      flat.items[itemIndex],
+                      (updated) => handleItemChange(itemIndex, updated),
+                      () => handleItemRemove(itemIndex),
+                      flat.items.length > 1,
+                    )}
+                  </React.Fragment>
+                ))}
               </div>
-            )}
+            </React.Fragment>
+          ))}
+        </div>
+      ) : (
+        // 高度モード（NOT / IF_THEN / SEQUENCE）: 従来の単一演算子表示
+        <div className={`space-y-${compact ? '1' : '2'}`}>
+          {group.conditions.map((condition, index) => (
+            <React.Fragment key={childKey(condition)}>
+              {index > 0 && (
+                <div className={`flex items-center justify-center ${compact ? 'py-0.5' : 'py-1'}`}>
+                  <span
+                    className={`${compact ? 'px-2 text-[10px]' : 'px-3 text-xs'} py-0.5 font-medium rounded-full bg-orange-900/50 text-orange-300`}
+                    title={`このグループ内の結合: ${LOGICAL_OPERATOR_INFO[group.operator].description}`}
+                  >
+                    {LOGICAL_OPERATOR_INFO[group.operator].label}
+                  </span>
+                </div>
+              )}
+              {renderChild(
+                condition,
+                (updated) => handleLegacyChange(index, updated),
+                () => handleLegacyRemove(index),
+                group.conditions.length > 1,
+              )}
+            </React.Fragment>
+          ))}
+        </div>
+      )}
 
-            {/* 単一条件またはサブグループ */}
-            {isIndicatorCondition(condition) ? (
-              <SingleCondition
-                condition={condition}
-                onChange={(updated) => handleConditionChange(index, updated)}
-                onRemove={() => handleRemoveCondition(index)}
-                indicatorMetadata={indicatorMetadata}
-                readOnly={readOnly}
-                canRemove={group.conditions.length > 1}
-                compact={compact}
-              />
-            ) : isPatternCondition(condition) ? (
-              <SinglePatternCondition
-                condition={condition}
-                onChange={(updated) => handleConditionChange(index, updated)}
-                onRemove={() => handleRemoveCondition(index)}
-                readOnly={readOnly}
-                canRemove={group.conditions.length > 1}
-                compact={compact}
-              />
-            ) : (
-              <ConditionGroupComponent
-                group={condition as ConditionGroup}
-                onChange={(updated) => handleConditionChange(index, updated)}
-                onRemove={() => handleRemoveCondition(index)}
-                indicatorMetadata={indicatorMetadata}
-                readOnly={readOnly}
-                depth={depth + 1}
-                compact={compact}
-              />
-            )}
-          </React.Fragment>
-        ))}
-      </div>
-
-      {/* 追加ボタン */}
+      {/* 追加ボタン + 結合モード */}
       {!readOnly && (
         <div className={`${compact ? 'mt-2 pt-2' : 'mt-3 pt-3'} border-t border-slate-700`}>
           <div className={`flex flex-wrap items-center gap-2 ${compact ? 'mb-2' : 'mb-3'}`}>
-            <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-400`}>このグループの論理条件</span>
+            <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-400`}>結合モード</span>
             <select
               className={`${compact ? 'px-1.5 py-0.5 text-xs' : 'px-3 py-1.5 text-sm'} rounded bg-slate-700 text-gray-200 border border-slate-600 font-medium`}
-              value={group.operator}
-              onChange={(e) => handleOperatorChange(e.target.value as LogicalOperator)}
+              value={combineMode}
+              onChange={(e) => handleCombineModeChange(e.target.value as 'MIXED' | LogicalOperator)}
             >
-              {Object.entries(LOGICAL_OPERATOR_INFO).map(([op, info]) => (
-                <option key={op} value={op}>
-                  {compact ? info.label : `${info.label}（${info.description}）`}
-                </option>
-              ))}
+              <option value="MIXED">AND / OR を個別に指定（推奨）</option>
+              <option value="SEQUENCE">順序（{LOGICAL_OPERATOR_INFO.SEQUENCE.description}）</option>
+              <option value="IF_THEN">IF → THEN（{LOGICAL_OPERATOR_INFO.IF_THEN.description}）</option>
+              <option value="NOT">〜でない（{LOGICAL_OPERATOR_INFO.NOT.description}）</option>
             </select>
 
             {group.operator === 'SEQUENCE' && (

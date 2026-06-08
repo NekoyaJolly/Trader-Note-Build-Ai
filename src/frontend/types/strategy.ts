@@ -543,6 +543,157 @@ export function createDefaultExitSettings(): ExitSettings {
 }
 
 // ============================================
+// 接合点ごとの論理演算子（フラット ⇄ ツリー変換）
+// ============================================
+
+/**
+ * 子要素（条件 / パターン / サブグループ）の共用型。
+ * ConditionGroup.conditions の要素と同じ。
+ */
+export type ConditionChild = IndicatorCondition | PatternCondition | ConditionGroup;
+
+/**
+ * 接合点ごとに AND/OR を選べるフラット表現。
+ *
+ * - `items[i]` と `items[i+1]` の結合子が `junctions[i]`（長さは items.length - 1）。
+ * - ここで扱う結合子は AND / OR のみ。NOT / IF_THEN / SEQUENCE はグループ単位の
+ *   意味を持つため接合点モデルには載せず、編集 UI 側で従来の単一演算子表示にフォールバックする。
+ *
+ * 目的: UI 上は「接合点ごとに AND/OR」を見せつつ、保存・評価は従来どおりツリー
+ * （OR を外・AND を内とする標準的なブール優先順位）に正規化することで、評価器・DB・API を無改修に保つ。
+ */
+export interface FlatConditionList {
+  items: ConditionChild[];
+  /** AND / OR のみ。長さは items.length - 1 */
+  junctions: ('AND' | 'OR')[];
+}
+
+/**
+ * フラット表現に展開可能なグループかどうか。
+ * AND / OR のみ展開可能（NOT / IF_THEN / SEQUENCE は従来 UI で扱う）。
+ */
+export function isFlattenableGroup(group: ConditionGroup): boolean {
+  return group.operator === 'AND' || group.operator === 'OR';
+}
+
+/**
+ * AND グループの子要素を結合則で平坦化して列挙する。
+ * 理由: `AND(A, AND(B, C))` は `AND(A, B, C)` と等価なので、入れ子の AND は 1 列に潰す。
+ * OR グループや NOT/IF_THEN/SEQUENCE、リーフ条件はそのまま 1 要素（ブロック）として残す。
+ */
+function collectAndItems(group: ConditionGroup): ConditionChild[] {
+  const items: ConditionChild[] = [];
+  for (const child of group.conditions) {
+    if (isConditionGroup(child) && child.operator === 'AND') {
+      items.push(...collectAndItems(child));
+    } else {
+      items.push(child);
+    }
+  }
+  return items;
+}
+
+/**
+ * OR グループを「AND ラン（= AND で繋がった要素の並び）」の配列に展開する。
+ * 各 AND ランが OR の 1 アームに対応する。
+ * 理由: 表示・編集では OR を最外（低優先）、AND を内（高優先）に固定したいため。
+ */
+function collectOrArms(group: ConditionGroup): ConditionChild[][] {
+  const arms: ConditionChild[][] = [];
+  for (const child of group.conditions) {
+    if (isConditionGroup(child) && child.operator === 'OR') {
+      // OR の入れ子は結合則で平坦化
+      arms.push(...collectOrArms(child));
+    } else if (isConditionGroup(child) && child.operator === 'AND') {
+      // AND サブグループ → 1 つの AND ラン
+      arms.push(collectAndItems(child));
+    } else {
+      // リーフ / OR ブロック / NOT 等 → 単独アーム
+      arms.push([child]);
+    }
+  }
+  return arms;
+}
+
+/**
+ * 条件グループを接合点ごとの AND/OR を持つフラット表現に変換する。
+ *
+ * AND/OR ツリー（OR-of-AND 標準形を含む）を、`items` の一次元列 + 接合点 `junctions` に展開する。
+ * 同じ AND ラン内は 'AND'、ラン境界（OR アームの切れ目）は 'OR' になる。
+ * 空アームは捨てる（編集途中の空グループでも phantom な接合点を作らない）。
+ */
+export function flattenConditionGroup(group: ConditionGroup): FlatConditionList {
+  const arms = (group.operator === 'OR' ? collectOrArms(group) : [collectAndItems(group)])
+    .filter((arm) => arm.length > 0);
+
+  const items: ConditionChild[] = [];
+  const junctions: ('AND' | 'OR')[] = [];
+  arms.forEach((arm) => {
+    arm.forEach((item, indexInArm) => {
+      if (items.length > 0) {
+        // アーム先頭は OR（前アームとの境界）、それ以外は AND
+        junctions.push(indexInArm === 0 ? 'OR' : 'AND');
+      }
+      items.push(item);
+    });
+  });
+  return { items, junctions };
+}
+
+/**
+ * フラット表現を標準形ツリー（OR を外・AND を内）に正規化する。
+ *
+ * - OR で区切って AND ランに分割し、ラン内を AND グループ、ラン同士を OR グループで束ねる。
+ * - 単一ランなら AND グループ 1 つ（リーフ 1 個でも AND グループで包む）。
+ * - 複数ランなら OR グループ。長さ 1 のアームは AND で包まず子要素を直接 OR の下に置く。
+ *
+ * 評価器は `operator` と `conditions` のみ読むため、この標準形なら従来どおり正しく評価される。
+ * AND ラッパーの groupId は内容から決定的に導出し、編集のたびに ID が変わってツリーが
+ * 無用に差し替わるのを防ぐ（リーフの conditionId は保持されるので入力フォーカスは維持される）。
+ *
+ * @param flat - フラット表現
+ * @param baseGroupId - 生成するルートグループの groupId（元グループのものを引き継ぐ）
+ */
+export function normalizeFlatConditions(
+  flat: FlatConditionList,
+  baseGroupId: string,
+): ConditionGroup {
+  const { items, junctions } = flat;
+
+  // OR を境界に AND ランへ分割
+  const arms: ConditionChild[][] = [];
+  let current: ConditionChild[] = [];
+  items.forEach((item, i) => {
+    if (i > 0 && junctions[i - 1] === 'OR') {
+      arms.push(current);
+      current = [];
+    }
+    current.push(item);
+  });
+  if (current.length > 0) arms.push(current);
+
+  // 空 or 単一ラン → AND グループ（空グループも許容）
+  if (arms.length <= 1) {
+    return { groupId: baseGroupId, operator: 'AND', conditions: arms[0] ?? [] };
+  }
+
+  // 複数ラン → OR グループ。各アームは長さ>1なら AND サブグループ、1ならそのまま子に置く。
+  return {
+    groupId: baseGroupId,
+    operator: 'OR',
+    conditions: arms.map((arm, armIndex) =>
+      arm.length === 1
+        ? arm[0]
+        : {
+            groupId: `${baseGroupId}__and${armIndex}`,
+            operator: 'AND' as LogicalOperator,
+            conditions: arm,
+          },
+    ),
+  };
+}
+
+// ============================================
 // IF-THEN / SEQUENCE 専用型（Phase B）
 // ============================================
 
