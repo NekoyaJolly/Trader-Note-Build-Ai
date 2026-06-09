@@ -189,6 +189,10 @@ export async function fetchNotes(params?: NoteStatus | FetchNotesParams): Promis
     createdAt: String(n.createdAt ?? new Date().toISOString()),
     aiSummary: (n.aiSummary as string | null) ?? null,
     status: (n.status as NoteStatus) ?? "draft",
+    // フェーズ8: 運用フィールド（一覧で監視状態バッジ/優先度を表示）
+    priority: typeof n.priority === "number" ? n.priority : undefined,
+    enabled: typeof n.enabled === "boolean" ? n.enabled : undefined,
+    pausedUntil: typeof n.pausedUntil === "string" ? n.pausedUntil : null,
   }));
 
   return { notes: normalized };
@@ -381,6 +385,60 @@ export async function updateNote(id: string, payload: NoteUpdatePayload): Promis
   if (!response.ok) {
     throw new Error(
       `ノート更新に失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+}
+
+/**
+ * ノートの優先度を更新（フェーズ8: 運用操作）
+ * PATCH /api/trades/notes/:id/priority
+ * @param priority 1-10 の整数（高いほど優先）
+ */
+export async function updateNotePriority(id: string, priority: number): Promise<void> {
+  const response = await apiFetch(`${getPublicApiBaseUrl()}/api/trades/notes/${id}/priority`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ priority }),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `優先度の更新に失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+}
+
+/**
+ * ノートの有効/無効を切り替え（フェーズ8: 運用操作）
+ * PATCH /api/trades/notes/:id/enabled
+ * @param enabled true=監視対象に含める / false=一時的に監視から外す
+ */
+export async function setNoteEnabled(id: string, enabled: boolean): Promise<void> {
+  const response = await apiFetch(`${getPublicApiBaseUrl()}/api/trades/notes/${id}/enabled`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `有効/無効の切り替えに失敗しました: ${response.status} ${response.statusText}`
+    );
+  }
+}
+
+/**
+ * ノートを一時停止 / 停止解除（フェーズ8: 運用操作）
+ * PATCH /api/trades/notes/:id/pause
+ * @param pausedUntil ISO 8601 形式の日時（この日時まで監視停止）、または null で停止解除
+ */
+export async function pauseNote(id: string, pausedUntil: string | null): Promise<void> {
+  const response = await apiFetch(`${getPublicApiBaseUrl()}/api/trades/notes/${id}/pause`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pausedUntil }),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `一時停止の設定に失敗しました: ${response.status} ${response.statusText}`
     );
   }
 }

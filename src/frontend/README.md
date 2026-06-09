@@ -166,8 +166,9 @@ npm run dev
 * `PUT /api/notifications/read-all` - 全通知既読化
 
 ### バックテスト
-* `POST /api/backtest` - バックテスト実行
-* `GET /api/backtest/results` - バックテスト結果取得
+* `POST /api/backtest/check-coverage` - データカバレッジ確認のみ（ストラテジー BT 画面の OHLCV 整合チェック用）
+* 実バックテスト実行はストラテジー側 `POST /api/strategies/:id/backtest` 系を使う（旧 `POST /api/backtest` / `GET /api/backtest/results` は撤去済み）
+* 詳細は [docs/side-a/backtest-flow.md](../../docs/side-a/backtest-flow.md)
 
 ### 注文
 * `GET /api/orders/preset/:noteId` - 注文プリセット取得

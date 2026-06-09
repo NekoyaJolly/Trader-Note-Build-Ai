@@ -36,6 +36,11 @@ export interface NoteSummary {
   createdAt: string;
   aiSummary?: string | null;
   status: NoteStatus;
+  // フェーズ8: 運用フィールド（一覧で監視状態を表示するため）
+  priority?: number;
+  enabled?: boolean;
+  /** 一時停止期限（ISO 8601）。null/未設定は停止なし */
+  pausedUntil?: string | null;
 }
 
 /**
@@ -71,6 +76,13 @@ export interface NoteDetail {
   lastEditedAt?: string; // 最終編集日時（ISO 8601）
   userNotes?: string; // ユーザーによる追記
   tags?: string[]; // タグ
+  // フェーズ8: 運用フィールド（詳細で監視状態を表示・操作するため）
+  /** 優先度（1-10、高いほど優先。同時ヒット時のソートに使用） */
+  priority?: number;
+  /** 有効フラグ（false の場合、マッチング対象から除外） */
+  enabled?: boolean;
+  /** 一時停止期限（ISO 8601）。null/未設定は停止なし */
+  pausedUntil?: string | null;
 }
 
 /**

@@ -13,7 +13,9 @@ import {
   fetchNoteStatusCounts,
   fetchNotes,
   fetchUnreadNotificationCount,
+  fetchLatestPipelineRun,
 } from "@/lib/api";
+import type { PipelineRunDTO } from "@/lib/api";
 import { readLastSideAPath } from "@/lib/lastSideAPath";
 import { sideBApi } from "@/lib/sideBApi";
 import type { NoteSummary } from "@/types/note";
@@ -32,6 +34,7 @@ export default function HomeWorkbench() {
   const [unreadCount, setUnreadCount] = useState<number | null>(null);
   const [aiPendingCount, setAiPendingCount] = useState<number | null>(null);
   const [recentNotes, setRecentNotes] = useState<NoteSummary[]>([]);
+  const [latestRun, setLatestRun] = useState<PipelineRunDTO | null>(null);
   const [lastPath, setLastPath] = useState<ReturnType<typeof readLastSideAPath>>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -52,10 +55,11 @@ export default function HomeWorkbench() {
         fetchUnreadNotificationCount(),
         sideBApi.getPendingValidation(),
         fetchNotes({ limit: 5 }),
+        fetchLatestPipelineRun(),
       ]);
       if (cancelled) return;
 
-      const [countsR, unreadR, pendingR, notesR] = settled;
+      const [countsR, unreadR, pendingR, notesR, runR] = settled;
 
       if (countsR.status === "fulfilled") {
         setDraftCount(countsR.value.draft ?? 0);
@@ -83,6 +87,13 @@ export default function HomeWorkbench() {
       } else {
         setRecentNotes([]);
         console.error(notesR.reason);
+      }
+
+      if (runR.status === "fulfilled") {
+        setLatestRun(runR.value);
+      } else {
+        setLatestRun(null);
+        console.error(runR.reason);
       }
 
       const failed = settled.filter((s) => s.status === "rejected").length;
@@ -166,6 +177,12 @@ export default function HomeWorkbench() {
               </Link>
             </div>
           </div>
+        </section>
+
+        {/* マッチング稼働状況（最新 pipeline run） */}
+        <section className="mb-8" aria-label="マッチング稼働状況">
+          <h2 className="text-sm font-semibold text-gray-400 mb-3 px-1">マッチングの稼働状況</h2>
+          <PipelineRunCard run={latestRun} />
         </section>
 
         {/* 中段: 主要3導線 */}
@@ -293,6 +310,57 @@ function KpiCard({
         {value === null ? "—" : value}
       </p>
       <p className="text-[10px] text-gray-600 mt-0.5">{hint}</p>
+    </div>
+  );
+}
+
+/** pipeline run の status を非エンジニア向けラベルと色に変換 */
+function runStatusMeta(status: PipelineRunDTO["status"]): { label: string; className: string } {
+  switch (status) {
+    case "success":
+      return { label: "正常", className: "text-green-400 border-green-600/30 bg-green-600/10" };
+    case "skipped":
+      return { label: "休場でスキップ", className: "text-slate-300 border-slate-500/30 bg-slate-600/10" };
+    case "partial_failure":
+      return { label: "一部失敗", className: "text-yellow-400 border-yellow-600/30 bg-yellow-600/10" };
+    case "failed":
+      return { label: "失敗", className: "text-red-400 border-red-600/30 bg-red-600/10" };
+    default:
+      return { label: status, className: "text-gray-300 border-white/10 bg-white/5" };
+  }
+}
+
+/** 最新のマッチング実行状況カード（run が無ければプレースホルダ） */
+function PipelineRunCard({ run }: { run: PipelineRunDTO | null }) {
+  if (!run) {
+    return (
+      <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm text-gray-500">
+        まだ実行記録がありません。市場が開いている時間に自動でマッチングが実行されると、ここに最新状況が表示されます。
+      </div>
+    );
+  }
+
+  const meta = runStatusMeta(run.status);
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <span className="text-sm text-gray-300">
+          最終実行 {formatDateShort(run.startedAt)}
+        </span>
+        <span className={`text-xs px-2 py-0.5 rounded-full border ${meta.className}`}>
+          {meta.label}
+        </span>
+      </div>
+      {run.status === "skipped" ? (
+        <p className="text-sm text-gray-400">{run.marketStatus ?? "市場休場のためスキップしました"}</p>
+      ) : (
+        <p className="text-sm text-gray-300 tabular-nums">
+          マッチ {run.totalMatches} 件 ・ 通知 {run.notified} 件 ・ スキップ {run.skipped} 件
+        </p>
+      )}
+      {run.errorCount > 0 && run.errors.length > 0 && (
+        <p className="mt-1 text-xs text-red-400/90 line-clamp-2">{run.errors[0]}</p>
+      )}
     </div>
   );
 }

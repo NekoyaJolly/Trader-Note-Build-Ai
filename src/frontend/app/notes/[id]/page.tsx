@@ -4,7 +4,16 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import type { NoteDetail, NoteStatus } from "@/types/note";
-import { fetchNoteDetail, approveNote, rejectNote, revertNoteToDraft, updateNote } from "@/lib/api";
+import {
+  fetchNoteDetail,
+  approveNote,
+  rejectNote,
+  revertNoteToDraft,
+  updateNote,
+  updateNotePriority,
+  setNoteEnabled,
+  pauseNote,
+} from "@/lib/api";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/Alert";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
@@ -37,6 +46,10 @@ export default function NoteDetailPage() {
   const [editedUserNotes, setEditedUserNotes] = useState("");
   const [editedTags, setEditedTags] = useState("");
 
+  // 運用設定（優先度・一時停止）の入力状態
+  const [priorityInput, setPriorityInput] = useState(5);
+  const [pauseInput, setPauseInput] = useState("");
+
   const loadNote = useCallback(async () => {
     try {
       setIsLoading(true);
@@ -46,6 +59,7 @@ export default function NoteDetailPage() {
       setEditedSummary(data.aiSummary);
       setEditedUserNotes(data.userNotes ?? "");
       setEditedTags(data.tags?.join(", ") ?? "");
+      setPriorityInput(data.priority ?? 5);
     } catch (err) {
       setError(err instanceof Error ? err.message : "ノート詳細の取得に失敗しました");
     } finally {
@@ -148,6 +162,77 @@ export default function NoteDetailPage() {
     }
   }
 
+  /**
+   * 有効/無効を切り替え
+   */
+  async function handleToggleEnabled() {
+    if (!note || actionLoading) return;
+    try {
+      setActionLoading(true);
+      await setNoteEnabled(id, !(note.enabled ?? true));
+      await loadNote();
+    } catch (_e) {
+      alert("有効/無効の切り替えに失敗しました。時間をおいて再試行してください。");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  /**
+   * 優先度を保存
+   */
+  async function handleSavePriority() {
+    if (!note || actionLoading) return;
+    try {
+      setActionLoading(true);
+      await updateNotePriority(id, priorityInput);
+      await loadNote();
+    } catch (_e) {
+      alert("優先度の更新に失敗しました。時間をおいて再試行してください。");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  /**
+   * 一時停止を設定（指定日時まで監視を止める）
+   */
+  async function handlePause() {
+    if (!note || actionLoading) return;
+    if (!pauseInput) {
+      alert("停止する日時を指定してください。");
+      return;
+    }
+    // datetime-local はローカル時刻。ISO 文字列に変換して送る。
+    const iso = new Date(pauseInput).toISOString();
+    try {
+      setActionLoading(true);
+      await pauseNote(id, iso);
+      setPauseInput("");
+      await loadNote();
+    } catch (_e) {
+      alert("一時停止の設定に失敗しました。時間をおいて再試行してください。");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  /**
+   * 一時停止を解除
+   */
+  async function handleClearPause() {
+    if (!note || actionLoading) return;
+    try {
+      setActionLoading(true);
+      await pauseNote(id, null);
+      await loadNote();
+    } catch (_e) {
+      alert("一時停止の解除に失敗しました。時間をおいて再試行してください。");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   // ローディング表示
   if (isLoading) {
     return (
@@ -176,6 +261,26 @@ export default function NoteDetailPage() {
   }
 
   const currentStatus = note.status ?? "draft";
+  const isEnabled = note.enabled ?? true;
+  const isPaused = !!note.pausedUntil && new Date(note.pausedUntil).getTime() > Date.now();
+
+  // 監視状態を非エンジニア向けの一言で表す
+  function getMonitoringLabel(): { text: string; className: string } {
+    if (currentStatus !== "active") {
+      return {
+        text: currentStatus === "draft" ? "監視対象外（下書き）" : "監視対象外（アーカイブ）",
+        className: "bg-slate-600/20 text-slate-300 border-slate-500/30",
+      };
+    }
+    if (!isEnabled) {
+      return { text: "無効（監視から外しています）", className: "bg-orange-600/20 text-orange-400 border-orange-600/30" };
+    }
+    if (isPaused) {
+      return { text: "一時停止中", className: "bg-yellow-600/20 text-yellow-400 border-yellow-600/30" };
+    }
+    return { text: "監視中", className: "bg-green-600/20 text-green-400 border-green-600/30" };
+  }
+  const monitoring = getMonitoringLabel();
 
   return (
     <div className="space-y-6">
@@ -456,6 +561,112 @@ export default function NoteDetailPage() {
               {note.lastEditedAt && (
                 <div>最終編集: {new Date(note.lastEditedAt).toLocaleString("ja-JP")}</div>
               )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 監視設定（運用） */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>監視設定</CardTitle>
+            <Badge variant="outline" className={monitoring.className}>{monitoring.text}</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-5">
+            <p className="text-sm text-gray-400">
+              承認済み（監視中）のノートは、現在の市場と条件が一致すると通知されます。ここでは「一時的に監視から外す」「指定日時まで止める」「同時にヒットしたときの優先度」を設定できます。
+              {currentStatus !== "active" && (
+                <span className="block mt-1 text-gray-500">
+                  ※ これらの設定が効くのは<span className="text-green-400">承認済み</span>のノートです。まず承認してください。
+                </span>
+              )}
+            </p>
+
+            {/* 有効/無効 */}
+            <div className="flex items-center justify-between gap-4 border-t border-slate-700 pt-4">
+              <div>
+                <div className="text-sm font-semibold text-gray-300">有効 / 無効</div>
+                <div className="text-xs text-gray-500">
+                  無効にすると、承認済みでも一時的に監視・通知の対象から外れます。
+                </div>
+              </div>
+              <Button
+                variant={isEnabled ? "destructive" : "secondary"}
+                size="sm"
+                onClick={handleToggleEnabled}
+                disabled={actionLoading}
+              >
+                {actionLoading ? "処理中..." : isEnabled ? "無効にする" : "有効にする"}
+              </Button>
+            </div>
+
+            {/* 一時停止 */}
+            <div className="border-t border-slate-700 pt-4">
+              <div className="text-sm font-semibold text-gray-300">一時停止</div>
+              <div className="text-xs text-gray-500 mb-2">
+                指定した日時まで通知を止めます。期限が過ぎると自動で監視に戻ります。
+              </div>
+              {isPaused ? (
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-sm text-yellow-400">
+                    {note.pausedUntil ? new Date(note.pausedUntil).toLocaleString("ja-JP") : ""} まで停止中
+                  </span>
+                  <Button variant="outline" size="sm" onClick={handleClearPause} disabled={actionLoading}>
+                    {actionLoading ? "処理中..." : "停止を解除"}
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-3">
+                  <input
+                    type="datetime-local"
+                    className="p-2 rounded-lg bg-slate-800 text-gray-200 border border-slate-600 focus:border-blue-500 focus:outline-none text-sm"
+                    value={pauseInput}
+                    onChange={(e) => setPauseInput(e.target.value)}
+                  />
+                  <Button variant="outline" size="sm" onClick={handlePause} disabled={actionLoading || !pauseInput}>
+                    {actionLoading ? "処理中..." : "この日時まで停止"}
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {/* 優先度 */}
+            <div className="border-t border-slate-700 pt-4">
+              <div className="text-sm font-semibold text-gray-300">優先度</div>
+              <div className="text-xs text-gray-500 mb-2">
+                同じタイミングで複数のノートがヒットしたとき、どれを優先して通知するかに使われます（1〜10、大きいほど優先）。
+              </div>
+              <div className="flex items-center gap-3">
+                <select
+                  className="p-2 rounded-lg bg-slate-800 text-gray-200 border border-slate-600 focus:border-blue-500 focus:outline-none text-sm"
+                  value={priorityInput}
+                  onChange={(e) => setPriorityInput(Number(e.target.value))}
+                >
+                  {Array.from({ length: 10 }, (_, i) => i + 1).map((v) => (
+                    <option key={v} value={v}>{v}</option>
+                  ))}
+                </select>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSavePriority}
+                  disabled={actionLoading || priorityInput === (note.priority ?? 5)}
+                >
+                  {actionLoading ? "処理中..." : "優先度を保存"}
+                </Button>
+              </div>
+            </div>
+
+            {/* 通知条件の説明 */}
+            <div className="border-t border-slate-700 pt-4 text-xs text-gray-500 space-y-1">
+              <div className="font-semibold text-gray-400">通知されない主な理由</div>
+              <div>・一致度がしきい値に届かない</div>
+              <div>・同じノートの通知が短時間に続かないよう制限中（クールダウン）</div>
+              <div>・1日の通知件数が上限に達している</div>
+              <div>・このノートが無効、または一時停止中</div>
             </div>
           </div>
         </CardContent>
