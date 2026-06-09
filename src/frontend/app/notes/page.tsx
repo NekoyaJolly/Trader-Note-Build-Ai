@@ -57,6 +57,21 @@ export default function NotesPage() {
   }, [loadData]);
 
   /**
+   * 承認済みノートの監視状態を非エンジニア向けの一言で表す
+   * （無効 / 一時停止中 / 監視中）。active 以外は null（状態バッジで十分なため）。
+   */
+  function getMonitoringLabel(note: NoteSummary): { text: string; className: string } | null {
+    if (note.status !== "active") return null;
+    if (note.enabled === false) {
+      return { text: "無効", className: "text-orange-400" };
+    }
+    if (note.pausedUntil && new Date(note.pausedUntil).getTime() > Date.now()) {
+      return { text: "一時停止中", className: "text-yellow-400" };
+    }
+    return { text: "監視中", className: "text-green-400" };
+  }
+
+  /**
    * ステータスに応じたバッジスタイル
    */
   function getStatusBadge(status: NoteStatus) {
@@ -195,7 +210,19 @@ export default function NotesPage() {
                       {new Date(note.timestamp).toLocaleString("ja-JP")}
                     </td>
                     <td className="px-4 py-3 text-sm">
-                      {getStatusBadge(note.status ?? "draft")}
+                      <div className="flex flex-col gap-1">
+                        {getStatusBadge(note.status ?? "draft")}
+                        {(() => {
+                          const monitoring = getMonitoringLabel(note);
+                          if (!monitoring) return null;
+                          return (
+                            <span className={`text-xs ${monitoring.className}`}>
+                              {monitoring.text}
+                              {typeof note.priority === "number" ? ` ・ 優先度 ${note.priority}` : ""}
+                            </span>
+                          );
+                        })()}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-center">
                       <NeonButton href={`/notes/${note.id}`} color="blue" size="sm">

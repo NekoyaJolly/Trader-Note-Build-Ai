@@ -1113,6 +1113,10 @@ export class TradeNoteService {
       lastEditedAt: dbNote.lastEditedAt || undefined,
       userNotes: dbNote.userNotes || undefined,
       tags: dbNote.tags || undefined,
+      // フェーズ8: 運用フィールド（一覧/詳細で監視状態を表示・操作するため露出）
+      priority: dbNote.priority,
+      enabled: dbNote.enabled,
+      pausedUntil: dbNote.pausedUntil || undefined,
     };
   }
 

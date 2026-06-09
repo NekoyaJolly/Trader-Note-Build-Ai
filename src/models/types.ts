@@ -75,6 +75,14 @@ export interface TradeNote {
   // ユーザーによる編集内容（AI要約の上書き等）
   userNotes?: string;
   tags?: string[];
+
+  // フェーズ8: 複数ノート運用フィールド（マッチング対象の制御）
+  /** 優先度（1-10、高いほど優先。同時ヒット時のソートに使用） */
+  priority?: number;
+  /** 有効フラグ（false の場合、マッチング対象から除外） */
+  enabled?: boolean;
+  /** 一時停止期限（この日時まで監視対象外。未設定 (undefined) は停止なし） */
+  pausedUntil?: Date;
 }
 
 /**
