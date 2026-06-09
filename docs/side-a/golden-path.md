@@ -95,7 +95,8 @@
 |---|---|
 | 記録タイミング | `runMatchingPipeline()` 完了時 / 市場休場スキップ時(`recordMarketClosedRun`) |
 | 主要フィールド | `runId` / `trigger`(cron, manual_test, scheduler, unknown) / `status`(success, skipped, partial_failure, failed) / `startedAt` / `finishedAt` / `durationMs` / `totalMatches` / `notified` / `skipped` / `errorCount` / `errors` / `skipReasons` / `marketStatus` |
-| `skipReasons` | reason code → 件数 の集計。code: `simultaneous_hit` / `missing_market_snapshot_id` / `send_failed` / `notify_error` / `score_below_threshold` / `duplicate` / `recent_duplicate` / `cooldown` / `daily_limit` / `other`（防御的フォールバック。`NotificationTriggerService.evaluateWithPersistence` は全 skip 経路で reason code を返すため通常は出ない） |
+| `skipReasons` | reason code → 件数 の集計。code: `side_b_excluded` / `simultaneous_hit` / `missing_market_snapshot_id` / `send_failed` / `notify_error` / `score_below_threshold` / `duplicate` / `recent_duplicate` / `cooldown` / `daily_limit` / `other`（防御的フォールバック。`NotificationTriggerService.evaluateWithPersistence` は全 skip 経路で reason code を返すため通常は出ない） |
+| Side-A / Side-B の切り分け | `MatchResult` / `NotificationLog` / `Notification` は `noteId` が `TradeNote`(UUID) への FK で **Side-A 専用**。Side-B のマッチ(`sideb:` 接頭辞・非 UUID)はこの通知経路では `side_b_excluded` として除外される(UUID パースエラー回避)。Side-B 専用の通知経路は未設計(将来課題)。`checkForSideBMatches` 内の Side-A テーブルへの `EvaluationLog`/`MatchResult` 書き込みは現状 try/catch で失敗握り潰し(= 行は作られない)で、Side-B 永続化設計時に整理予定 |
 | 永続化失敗時 | パイプライン本体は継続(non-fatal)。`runId` は in-memory で確定済みのため API レスポンスには返る |
 
 ### 取得 API（requireAuth 配下）

@@ -230,7 +230,10 @@ describe('MatchingService', () => {
         'create' | 'findLatest' | 'findMany'
       >;
 
-    it('shouldNotify=true のとき sendInApp が呼ばれ notified にカウントされる', async () => {
+    it('Side-B (sideb:) マッチは Side-A 通知経路の対象外として skip され error にならない', async () => {
+      // Side-A/Side-B 切り分け: MatchResult/NotificationLog/Notification は noteId が
+      // TradeNote(UUID) への FK で Side-A 専用。Side-B (sideb: 非UUID) を通すと UUID パース
+      // エラーで毎回 notify_error になっていた。通知段階で明示的に除外する。
       const sendInApp = jest
         .fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>()
         .mockResolvedValue({ success: true, id: 'notif_1' });
@@ -249,30 +252,24 @@ describe('MatchingService', () => {
         .spyOn(pipeline, 'checkForAllMatches')
         .mockResolvedValue([createSideBMatch()]);
 
-      const result = await pipeline.runMatchingPipeline({ trigger: 'manual_test' });
+      const result = await pipeline.runMatchingPipeline({ trigger: 'cron' });
 
-      // sendInApp が正しい payload で 1 回呼ばれている
-      expect(sendInApp).toHaveBeenCalledTimes(1);
-      expect(sendInApp).toHaveBeenCalledWith(
-        expect.objectContaining({
-          noteId: 'sideb:note_abc',
-          marketSnapshotId: 'snap_123',
-          symbol: 'EURUSD',
-          score: 0.9,
-        })
-      );
-      expect(result.notified).toBe(1);
-      expect(result.skipped).toBe(0);
-      // P1 observability: runId が返り、run が success として永続化される
-      expect(result.runId).toBeTruthy();
+      // Side-B は通知判定 (evaluateWithPersistence) にも sendInApp にも渡らない = UUID エラーを起こさない
+      expect(evaluateWithPersistence).not.toHaveBeenCalled();
+      expect(sendInApp).not.toHaveBeenCalled();
+      expect(result.notified).toBe(0);
+      expect(result.skipped).toBe(1);
+      // 除外は error ではないので skipReasons に side_b_excluded、status は success
+      expect(result.skipReasons).toEqual({ side_b_excluded: 1 });
+      expect(result.errors).toEqual([]);
       expect(result.status).toBe('success');
-      expect(runRepo.create).toHaveBeenCalledTimes(1);
       expect(runRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          id: result.runId,
-          trigger: 'manual_test',
           status: 'success',
-          notified: 1,
+          totalMatches: 1,
+          skipped: 1,
+          errorCount: 0,
+          skipReasons: { side_b_excluded: 1 },
         })
       );
     });
@@ -337,8 +334,11 @@ describe('MatchingService', () => {
         matchingPipelineRunRepository: buildRunRepo(),
       });
       jest
+        .spyOn(pipeline as unknown as { getNotePriority: (id: string) => Promise<number> }, 'getNotePriority')
+        .mockResolvedValue(5);
+      jest
         .spyOn(pipeline, 'checkForAllMatches')
-        .mockResolvedValue([createSideBMatch()]);
+        .mockResolvedValue([createSideAMatch()]);
 
       const result = await pipeline.runMatchingPipeline();
 
@@ -366,8 +366,11 @@ describe('MatchingService', () => {
       });
       // marketSnapshotId を空にしたマッチ (= 紐づく MatchResult が無いケース)
       jest
+        .spyOn(pipeline as unknown as { getNotePriority: (id: string) => Promise<number> }, 'getNotePriority')
+        .mockResolvedValue(5);
+      jest
         .spyOn(pipeline, 'checkForAllMatches')
-        .mockResolvedValue([{ ...createSideBMatch(), marketSnapshotId: '' }]);
+        .mockResolvedValue([{ ...createSideAMatch(), marketSnapshotId: '' }]);
 
       const result = await pipeline.runMatchingPipeline();
 
@@ -394,8 +397,11 @@ describe('MatchingService', () => {
         matchingPipelineRunRepository: runRepo,
       });
       jest
+        .spyOn(pipeline as unknown as { getNotePriority: (id: string) => Promise<number> }, 'getNotePriority')
+        .mockResolvedValue(5);
+      jest
         .spyOn(pipeline, 'checkForAllMatches')
-        .mockResolvedValue([createSideBMatch()]);
+        .mockResolvedValue([createSideAMatch()]);
 
       const result = await pipeline.runMatchingPipeline({ trigger: 'cron' });
 

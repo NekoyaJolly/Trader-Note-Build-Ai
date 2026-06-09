@@ -788,12 +788,26 @@ export class MatchingService {
         });
       }
 
-      // 2. 同時ヒット制御
+      // Side-A / Side-B の切り分け:
+      // MatchResult / NotificationLog / Notification は noteId が TradeNote(UUID) への FK で
+      // **Side-A 専用**。Side-B のマッチ ID は `sideb:<uuid>` という非 UUID 文字列のため、
+      // この通知経路に通すと UUID パースエラーになり Notification も作成できない。
+      // よって Side-B はここでは通知対象外として明示的に切り分ける (= UUID エラーで毎回
+      // notify_error になる不具合の解消)。Side-B 専用の通知経路は別途設計する (本修正の範囲外)。
+      const sideAMatches = allMatches.filter((m) => !m.historicalNoteId.startsWith('sideb:'));
+      const sideBExcluded = allMatches.length - sideAMatches.length;
+      if (sideBExcluded > 0) {
+        skippedCount += sideBExcluded;
+        skipReasons['side_b_excluded'] = (skipReasons['side_b_excluded'] ?? 0) + sideBExcluded;
+        console.log(
+          `[MatchingPipeline] Side-B マッチ ${sideBExcluded} 件は Side-A 通知経路の対象外として除外 (切り分け)`
+        );
+      }
+
+      // 2. 同時ヒット制御 (Side-A のみ)
       const hits: MatchHit[] = await Promise.all(
-        allMatches.map(async (match) => {
-          const priority = match.historicalNoteId.startsWith('sideb:')
-            ? 5  // Side-B はデフォルト優先度
-            : await this.getNotePriority(match.historicalNoteId);
+        sideAMatches.map(async (match) => {
+          const priority = await this.getNotePriority(match.historicalNoteId);
           return {
             noteId: match.historicalNoteId,
             symbol: match.symbol || '',
@@ -808,8 +822,8 @@ export class MatchingService {
       const controlResult = await this.simultaneousHitControl.control(hits);
       const toNotifyNoteIds = new Set(controlResult.toNotify.map(h => h.noteId));
 
-      // 3. 通知判定 & 送信
-      for (const match of allMatches) {
+      // 3. 通知判定 & 送信 (Side-A のみ)
+      for (const match of sideAMatches) {
         if (!toNotifyNoteIds.has(match.historicalNoteId)) {
           skippedCount++;
           bumpSkipReason('simultaneous_hit');
@@ -917,7 +931,7 @@ export class MatchingService {
       if (controlResult.toSkip.length > 0) {
         await this.simultaneousHitControl.logSkippedHits(
           controlResult.toSkip,
-          allMatches.length,
+          sideAMatches.length,
           'max_simultaneous'
         );
       }
