@@ -12,7 +12,7 @@
  * @see docs/ARCHITECTURE.md
  */
 
-import type { Prisma, PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient, NotificationSkipReason } from '@prisma/client';
 import { prisma } from '../../backend/db/client';
 
 /**
@@ -237,7 +237,10 @@ export class SimultaneousHitControlService {
   async logSkippedHits(
     skippedHits: MatchHit[],
     totalHits: number,
-    skipReason: string = 'max_simultaneous'
+    // NotificationSkipLog.reason は Prisma enum NotificationSkipReason。string で受けて
+    // 不正値を cast すると DB insert が enum 不一致で throw し、skip ログが記録されない
+    // (握り潰される) ため、enum 型で受けて不正値をコンパイル時に弾く。
+    skipReason: NotificationSkipReason = 'max_simultaneous_exceeded'
   ): Promise<void> {
     if (skippedHits.length === 0) return;
 
@@ -245,7 +248,7 @@ export class SimultaneousHitControlService {
       const skipLogs = skippedHits.map((hit, index) => ({
         noteId: hit.noteId,
         matchResultId: null, // 必要に応じて設定
-        reason: skipReason as 'max_simultaneous_exceeded' | 'cooldown_active' | 'note_disabled' | 'note_paused' | 'lower_priority',
+        reason: skipReason,
         details: {
           symbol: hit.symbol,
           similarity: hit.similarity,

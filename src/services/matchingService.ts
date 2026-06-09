@@ -330,7 +330,7 @@ export class MatchingService {
       await this.simultaneousHitControl.logSkippedHits(
         controlResult.toSkip,
         allMatches.length,
-        'max_simultaneous'
+        'max_simultaneous_exceeded'
       );
     }
 
@@ -932,7 +932,7 @@ export class MatchingService {
         await this.simultaneousHitControl.logSkippedHits(
           controlResult.toSkip,
           sideAMatches.length,
-          'max_simultaneous'
+          'max_simultaneous_exceeded'
         );
       }
 
