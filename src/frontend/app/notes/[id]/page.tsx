@@ -263,6 +263,9 @@ export default function NoteDetailPage() {
   const currentStatus = note.status ?? "draft";
   const isEnabled = note.enabled ?? true;
   const isPaused = !!note.pausedUntil && new Date(note.pausedUntil).getTime() > Date.now();
+  // 運用設定が実際に効くのは承認済み(active)のみ。それ以外では操作 UI を無効化し、
+  // 説明文（「効くのは承認済み」）と挙動を一致させる（無駄な API 呼び出し/失敗アラート防止）。
+  const opsDisabled = currentStatus !== "active";
 
   // 監視状態を非エンジニア向けの一言で表す
   function getMonitoringLabel(): { text: string; className: string } {
@@ -597,7 +600,7 @@ export default function NoteDetailPage() {
                 variant={isEnabled ? "destructive" : "secondary"}
                 size="sm"
                 onClick={handleToggleEnabled}
-                disabled={actionLoading}
+                disabled={actionLoading || opsDisabled}
               >
                 {actionLoading ? "処理中..." : isEnabled ? "無効にする" : "有効にする"}
               </Button>
@@ -614,7 +617,7 @@ export default function NoteDetailPage() {
                   <span className="text-sm text-yellow-400">
                     {note.pausedUntil ? new Date(note.pausedUntil).toLocaleString("ja-JP") : ""} まで停止中
                   </span>
-                  <Button variant="outline" size="sm" onClick={handleClearPause} disabled={actionLoading}>
+                  <Button variant="outline" size="sm" onClick={handleClearPause} disabled={actionLoading || opsDisabled}>
                     {actionLoading ? "処理中..." : "停止を解除"}
                   </Button>
                 </div>
@@ -622,11 +625,12 @@ export default function NoteDetailPage() {
                 <div className="flex flex-wrap items-center gap-3">
                   <input
                     type="datetime-local"
-                    className="p-2 rounded-lg bg-slate-800 text-gray-200 border border-slate-600 focus:border-blue-500 focus:outline-none text-sm"
+                    className="p-2 rounded-lg bg-slate-800 text-gray-200 border border-slate-600 focus:border-blue-500 focus:outline-none text-sm disabled:opacity-50"
                     value={pauseInput}
                     onChange={(e) => setPauseInput(e.target.value)}
+                    disabled={actionLoading || opsDisabled}
                   />
-                  <Button variant="outline" size="sm" onClick={handlePause} disabled={actionLoading || !pauseInput}>
+                  <Button variant="outline" size="sm" onClick={handlePause} disabled={actionLoading || opsDisabled || !pauseInput}>
                     {actionLoading ? "処理中..." : "この日時まで停止"}
                   </Button>
                 </div>
@@ -641,9 +645,10 @@ export default function NoteDetailPage() {
               </div>
               <div className="flex items-center gap-3">
                 <select
-                  className="p-2 rounded-lg bg-slate-800 text-gray-200 border border-slate-600 focus:border-blue-500 focus:outline-none text-sm"
+                  className="p-2 rounded-lg bg-slate-800 text-gray-200 border border-slate-600 focus:border-blue-500 focus:outline-none text-sm disabled:opacity-50"
                   value={priorityInput}
                   onChange={(e) => setPriorityInput(Number(e.target.value))}
+                  disabled={actionLoading || opsDisabled}
                 >
                   {Array.from({ length: 10 }, (_, i) => i + 1).map((v) => (
                     <option key={v} value={v}>{v}</option>
@@ -653,7 +658,7 @@ export default function NoteDetailPage() {
                   variant="outline"
                   size="sm"
                   onClick={handleSavePriority}
-                  disabled={actionLoading || priorityInput === (note.priority ?? 5)}
+                  disabled={actionLoading || opsDisabled || priorityInput === (note.priority ?? 5)}
                 >
                   {actionLoading ? "処理中..." : "優先度を保存"}
                 </Button>

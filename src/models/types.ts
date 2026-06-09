@@ -81,7 +81,7 @@ export interface TradeNote {
   priority?: number;
   /** 有効フラグ（false の場合、マッチング対象から除外） */
   enabled?: boolean;
-  /** 一時停止期限（この日時まで監視対象外。null/未設定は停止なし） */
+  /** 一時停止期限（この日時まで監視対象外。未設定 (undefined) は停止なし） */
   pausedUntil?: Date;
 }
 
