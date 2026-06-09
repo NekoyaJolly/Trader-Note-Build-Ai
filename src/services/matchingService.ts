@@ -29,6 +29,31 @@ import type { SideBNoteMatchingData } from '../domain/matching/sideBNoteEvaluato
 import { NotificationTriggerService } from './notification/notificationTriggerService';
 import { InAppNotificationSender } from './notification/inAppNotificationSender';
 import type { JsonValue } from '../utils/jsonValue';
+import { MatchingPipelineRunRepository } from '../backend/repositories/matchingPipelineRunRepository';
+import type { MatchingPipelineRunStatus } from '@prisma/client';
+
+/**
+ * matching pipeline の起動元（observability 用）。
+ */
+export type PipelineRunTrigger = 'cron' | 'manual_test' | 'scheduler' | 'unknown';
+
+/**
+ * runMatchingPipeline() の戻り値（P1: observability）。
+ *
+ * 既存フィールド（totalMatches / notified / skipped / errors）は後方互換のため維持し、
+ * runId（実行単位 ID）・skipReasons（reason code -> 件数）・status を追加する。
+ */
+export interface MatchingPipelineRunResult {
+  /// 実行単位 ID（DB の MatchingPipelineRun.id と一致）
+  runId: string;
+  totalMatches: number;
+  notified: number;
+  skipped: number;
+  errors: string[];
+  /// スキップ理由の集計（reason code -> 件数）
+  skipReasons: Record<string, number>;
+  status: MatchingPipelineRunStatus;
+}
 
 /**
  * MatchingService の依存性注入オプション。
@@ -44,6 +69,10 @@ export interface MatchingServiceDeps {
   >;
   inAppNotificationSender?: Pick<InAppNotificationSender, 'sendInApp' | 'sendPush'>;
   simultaneousHitControl?: SimultaneousHitControlService;
+  matchingPipelineRunRepository?: Pick<
+    MatchingPipelineRunRepository,
+    'create' | 'findLatest' | 'findMany'
+  >;
 }
 
 /**
@@ -75,6 +104,11 @@ export class MatchingService {
   // 理由: 旧パイプラインは NotificationLog(監査ログ)のみ upsert しており、
   // ユーザーが見る通知フィード(Notification)が永続化されず通知が UI に届かなかった。
   private inAppNotificationSender: Pick<InAppNotificationSender, 'sendInApp' | 'sendPush'>;
+  // run 単位 observability の永続化先 (P1)。runMatchingPipeline の各実行を 1 行記録する。
+  private matchingPipelineRunRepository: Pick<
+    MatchingPipelineRunRepository,
+    'create' | 'findLatest' | 'findMany'
+  >;
 
   constructor(deps: MatchingServiceDeps = {}) {
     this.marketDataService = new MarketDataService();
@@ -86,6 +120,8 @@ export class MatchingService {
     this.sideBAdapter = new SideBMatchingAdapter();
     this.notificationTriggerService = deps.notificationTriggerService ?? new NotificationTriggerService();
     this.inAppNotificationSender = deps.inAppNotificationSender ?? new InAppNotificationSender();
+    this.matchingPipelineRunRepository =
+      deps.matchingPipelineRunRepository ?? new MatchingPipelineRunRepository();
   }
 
   /**
@@ -723,23 +759,33 @@ export class MatchingService {
    *
    * Side-A & Side-B の全マッチを収集 → 同時ヒット制御 → 通知判定 → 送信
    */
-  async runMatchingPipeline(): Promise<{
-    totalMatches: number;
-    notified: number;
-    skipped: number;
-    errors: string[];
-  }> {
+  async runMatchingPipeline(
+    options: { trigger?: PipelineRunTrigger } = {},
+  ): Promise<MatchingPipelineRunResult> {
+    const runId = uuidv4();
+    const trigger = options.trigger ?? 'unknown';
+    const startedAt = new Date();
     const errors: string[] = [];
+    // スキップ理由の reason code -> 件数 集計 (P1 observability)
+    const skipReasons: Record<string, number> = {};
+    const bumpSkipReason = (code: string): void => {
+      skipReasons[code] = (skipReasons[code] ?? 0) + 1;
+    };
     let notifiedCount = 0;
     let skippedCount = 0;
+    let totalMatches = 0;
 
     try {
       // 1. 統合マッチング（Side-A + Side-B）
       const allMatches = await this.checkForAllMatches();
+      totalMatches = allMatches.length;
 
       if (allMatches.length === 0) {
         console.log('[MatchingPipeline] マッチなし。パイプライン終了。');
-        return { totalMatches: 0, notified: 0, skipped: 0, errors: [] };
+        return await this.finalizePipelineRun({
+          runId, trigger, startedAt,
+          totalMatches: 0, notified: 0, skipped: 0, errors: [], skipReasons: {},
+        });
       }
 
       // 2. 同時ヒット制御
@@ -766,6 +812,7 @@ export class MatchingService {
       for (const match of allMatches) {
         if (!toNotifyNoteIds.has(match.historicalNoteId)) {
           skippedCount++;
+          bumpSkipReason('simultaneous_hit');
           continue;
         }
 
@@ -786,6 +833,7 @@ export class MatchingService {
             // MatchResult も無い) ため、明示的に skip して理由を残す。
             if (!match.marketSnapshotId) {
               skippedCount++;
+              bumpSkipReason('missing_market_snapshot_id');
               const warnMsg = `通知スキップ(marketSnapshotId 欠落で Notification 作成不可): noteId=${match.historicalNoteId}, symbol=${match.symbol}`;
               errors.push(warnMsg);
               console.warn(`[MatchingPipeline] ${warnMsg}`);
@@ -843,18 +891,22 @@ export class MatchingService {
                 );
               }
               skippedCount++;
+              bumpSkipReason('send_failed');
               const warnMsg = `通知送信失敗(Notification未作成・再試行可能化): noteId=${match.historicalNoteId}, symbol=${match.symbol}`;
               errors.push(warnMsg);
               console.warn(`[MatchingPipeline] ${warnMsg}`);
             }
           } else {
             skippedCount++;
+            // trigger 側の reason code を集計に反映 (なければ other)
+            bumpSkipReason(triggerResult.skipReasonCode ?? 'other');
             console.log(
               `[MatchingPipeline] 通知スキップ: noteId=${match.historicalNoteId}, ` +
               `reason=${triggerResult.skipReason}`
             );
           }
         } catch (notifyError) {
+          bumpSkipReason('notify_error');
           const errMsg = `通知エラー: noteId=${match.historicalNoteId}, ${notifyError instanceof Error ? notifyError.message : String(notifyError)}`;
           errors.push(errMsg);
           console.error(`[MatchingPipeline] ${errMsg}`);
@@ -870,18 +922,136 @@ export class MatchingService {
         );
       }
 
-      return {
-        totalMatches: allMatches.length,
+      return await this.finalizePipelineRun({
+        runId, trigger, startedAt,
+        totalMatches,
         notified: notifiedCount,
         skipped: skippedCount,
         errors,
-      };
+        skipReasons,
+      });
     } catch (error) {
       const errMsg = `パイプライン全体エラー: ${error instanceof Error ? error.message : String(error)}`;
       errors.push(errMsg);
       console.error(`[MatchingPipeline] ${errMsg}`);
-      return { totalMatches: 0, notified: 0, skipped: 0, errors };
+      return await this.finalizePipelineRun({
+        runId, trigger, startedAt,
+        totalMatches,
+        notified: notifiedCount,
+        skipped: skippedCount,
+        errors,
+        skipReasons,
+        forcedStatus: 'failed',
+      });
     }
+  }
+
+  /**
+   * パイプライン run の終了処理: status / durationMs を確定し、MatchingPipelineRun を
+   * 1 行永続化してから結果を返す（P1 observability）。
+   *
+   * 永続化失敗はパイプライン本体の成否に影響させない（runId は in-memory で確定済みのため
+   * API レスポンスには返せる）。status は強制指定がなければエラー有無で partial_failure /
+   * success を決める。
+   */
+  private async finalizePipelineRun(params: {
+    runId: string;
+    trigger: PipelineRunTrigger;
+    startedAt: Date;
+    totalMatches: number;
+    notified: number;
+    skipped: number;
+    errors: string[];
+    skipReasons: Record<string, number>;
+    forcedStatus?: MatchingPipelineRunStatus;
+  }): Promise<MatchingPipelineRunResult> {
+    const finishedAt = new Date();
+    const durationMs = finishedAt.getTime() - params.startedAt.getTime();
+    const errorCount = params.errors.length;
+    const status: MatchingPipelineRunStatus =
+      params.forcedStatus ?? (errorCount > 0 ? 'partial_failure' : 'success');
+
+    try {
+      await this.matchingPipelineRunRepository.create({
+        id: params.runId,
+        trigger: params.trigger,
+        status,
+        startedAt: params.startedAt,
+        finishedAt,
+        durationMs,
+        totalMatches: params.totalMatches,
+        notified: params.notified,
+        skipped: params.skipped,
+        errorCount,
+        errors: params.errors,
+        skipReasons: params.skipReasons,
+        marketStatus: null,
+      });
+    } catch (persistError) {
+      console.error(
+        `[MatchingPipeline] run 永続化失敗 (継続): runId=${params.runId}, ` +
+        `${persistError instanceof Error ? persistError.message : String(persistError)}`
+      );
+    }
+
+    return {
+      runId: params.runId,
+      totalMatches: params.totalMatches,
+      notified: params.notified,
+      skipped: params.skipped,
+      errors: params.errors,
+      skipReasons: params.skipReasons,
+      status,
+    };
+  }
+
+  /**
+   * 市場休場などで matching pipeline 本体を実行せずスキップした場合に、
+   * status='skipped' の run を 1 行記録する（P1 observability）。runId を返す。
+   */
+  async recordMarketClosedRun(params: {
+    trigger: PipelineRunTrigger;
+    marketStatus: string;
+  }): Promise<string> {
+    const runId = uuidv4();
+    const now = new Date();
+    try {
+      await this.matchingPipelineRunRepository.create({
+        id: runId,
+        trigger: params.trigger,
+        status: 'skipped',
+        startedAt: now,
+        finishedAt: now,
+        durationMs: 0,
+        totalMatches: 0,
+        notified: 0,
+        skipped: 0,
+        errorCount: 0,
+        errors: [],
+        skipReasons: {},
+        marketStatus: params.marketStatus,
+      });
+    } catch (persistError) {
+      console.error(
+        `[MatchingPipeline] 休場 run 永続化失敗 (継続): runId=${runId}, ` +
+        `${persistError instanceof Error ? persistError.message : String(persistError)}`
+      );
+    }
+    return runId;
+  }
+
+  /**
+   * 最新の matching pipeline run を 1 件取得する（診断 API 用）。
+   */
+  async getLatestPipelineRun() {
+    return this.matchingPipelineRunRepository.findLatest();
+  }
+
+  /**
+   * matching pipeline run を最新順に取得する（診断 API 用）。
+   */
+  async getPipelineRuns(limit: number) {
+    return this.matchingPipelineRunRepository.findMany(limit);
   }
 
   /**

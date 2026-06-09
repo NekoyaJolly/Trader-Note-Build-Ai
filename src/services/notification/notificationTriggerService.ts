@@ -20,10 +20,25 @@ export interface NotificationTriggerInput {
   channel?: 'in_app' | 'push' | 'webhook';
 }
 
+/**
+ * 通知スキップ理由の内部 reason code（集計用）。
+ *
+ * 日本語の `skipReason` 文字列は人間向け表示用で集計に向かないため、機械集計用の
+ * 安定したコードを別途付与する（後方互換: 既存 `skipReason` 文字列はそのまま維持）。
+ */
+export type NotificationSkipReasonCode =
+  | 'daily_limit'           // 24時間上限到達
+  | 'score_below_threshold' // スコア閾値未満
+  | 'duplicate'             // 冪等性: 同一条件で既に通知済み
+  | 'recent_duplicate'      // 直近数秒以内の重複抑制
+  | 'cooldown';             // クールダウン中
+
 export interface NotificationTriggerResult {
   shouldNotify: boolean;
   status: 'sent' | 'skipped' | 'failed';
   skipReason?: string;
+  /// 機械集計用のスキップ理由コード（skip 時のみ設定）
+  skipReasonCode?: NotificationSkipReasonCode;
   reasonSummary?: string;
   notificationLogId?: string;
 }
@@ -107,6 +122,7 @@ export class NotificationTriggerService {
         shouldNotify: false,
         status: 'skipped',
         skipReason: `24時間上限到達: ${dailyCount}/${DAILY_NOTIFICATION_LIMIT}件`,
+        skipReasonCode: 'daily_limit',
         reasonSummary: `スコア: ${score.toFixed(3)} (上限到達)`,
       };
     }
@@ -128,6 +144,7 @@ export class NotificationTriggerService {
         shouldNotify: false,
         status: 'skipped',
         skipReason,
+        skipReasonCode: 'score_below_threshold',
         reasonSummary: `スコア: ${score.toFixed(3)}`,
       };
     }
@@ -144,6 +161,7 @@ export class NotificationTriggerService {
           shouldNotify: false,
           status: 'skipped',
           skipReason: '冪等性チェック: 同一条件で既に通知済み',
+          skipReasonCode: 'duplicate',
           reasonSummary: `スコア: ${score.toFixed(3)}`,
         };
       }
@@ -159,6 +177,7 @@ export class NotificationTriggerService {
           shouldNotify: false,
           status: 'skipped',
           skipReason: `重複抑制: ${DUPLICATE_TOLERANCE_SEC}秒以内に同一通知あり`,
+          skipReasonCode: 'recent_duplicate',
           reasonSummary: `スコア: ${score.toFixed(3)}`,
         };
       }
@@ -175,6 +194,7 @@ export class NotificationTriggerService {
         shouldNotify: false,
         status: 'skipped',
         skipReason: `クールダウン中: 次回通知可能時刻 ${cooldownUntil}`,
+        skipReasonCode: 'cooldown',
         reasonSummary: `スコア: ${score.toFixed(3)}`,
       };
     }

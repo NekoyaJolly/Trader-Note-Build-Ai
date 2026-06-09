@@ -405,25 +405,32 @@ router.get('/matching-pipeline', async (_req: Request, res: Response) => {
   try {
     console.log('[Cron] マッチングパイプラインを開始します');
 
+    const matchingService = new MatchingService();
+
     // 市場開場チェック
     if (!isFXMarketOpen()) {
       const marketStatus = getMarketStatusJST();
       console.log('[Cron] 市場休場のためマッチングスキップ:', marketStatus.message);
+      // 休場スキップも run として記録し、runId を返す (P1 observability)
+      const runId = await matchingService.recordMarketClosedRun({
+        trigger: 'cron',
+        marketStatus: marketStatus.message,
+      });
       res.json({
         success: true,
         skipped: true,
         reason: '市場休場',
         market: marketStatus.message,
+        runId,
         duration: Date.now() - startTime,
       });
       return;
     }
 
-    const matchingService = new MatchingService();
-    const result = await matchingService.runMatchingPipeline();
+    const result = await matchingService.runMatchingPipeline({ trigger: 'cron' });
 
     console.log(
-      `[Cron] マッチングパイプライン完了: ` +
+      `[Cron] マッチングパイプライン完了: runId=${result.runId}, ` +
       `matches=${result.totalMatches}, notified=${result.notified}, ` +
       `skipped=${result.skipped}, errors=${result.errors.length}`
     );
@@ -431,6 +438,7 @@ router.get('/matching-pipeline', async (_req: Request, res: Response) => {
     res.json({
       success: result.errors.length === 0,
       message: `マッチ${result.totalMatches}件, 通知${result.notified}件, スキップ${result.skipped}件`,
+      runId: result.runId,
       data: result,
       duration: Date.now() - startTime,
     });
@@ -492,10 +500,11 @@ router.post('/matching-pipeline/test', async (req: Request, res: Response) => {
       });
     } else {
       // 全パイプラインテスト
-      const result = await matchingService.runMatchingPipeline();
+      const result = await matchingService.runMatchingPipeline({ trigger: 'manual_test' });
       res.json({
         success: true,
         mode: 'full',
+        runId: result.runId,
         data: result,
         duration: Date.now() - startTime,
       });

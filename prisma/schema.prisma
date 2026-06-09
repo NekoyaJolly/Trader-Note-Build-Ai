@@ -1259,6 +1259,56 @@ enum NotificationSkipReason {
   lower_priority
 }
 
+/// マッチングパイプライン実行単位の記録（P1: observability）
+/// MatchingService.runMatchingPipeline() の 1 実行 = 1 行。
+/// cron 実行ごとに「いつ動いたか / 何件マッチ・通知・スキップしたか / なぜ通知されなかったか」
+/// を runId 単位で追跡できるようにする。マッチ単位の証跡は MatchResult / NotificationLog /
+/// EvaluationLog が担い、本テーブルは run（cron サイクル）単位の集計を担う。
+model MatchingPipelineRun {
+  id           String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// 起動元（cron / manual_test / scheduler / unknown）
+  trigger      String                    @default("unknown")
+  /// 実行全体の状態
+  status       MatchingPipelineRunStatus @default(success)
+  /// 開始時刻
+  startedAt    DateTime                  @db.Timestamptz(6)
+  /// 終了時刻
+  finishedAt   DateTime                  @db.Timestamptz(6)
+  /// 実行時間（ミリ秒）
+  durationMs   Int
+  /// マッチ総数
+  totalMatches Int                       @default(0)
+  /// 通知作成成功数
+  notified     Int                       @default(0)
+  /// 通知スキップ数
+  skipped      Int                       @default(0)
+  /// エラー数
+  errorCount   Int                       @default(0)
+  /// エラー要約（短縮テキストの配列。raw payload は保存しない）
+  errors       String[]
+  /// スキップ理由の集計（reason code -> 件数。例: {"cooldown":2,"score_below_threshold":3}）
+  skipReasons  Json?
+  /// 市場状態（休場スキップ理由など。通常実行時は null）
+  marketStatus String?
+  /// レコード作成日時
+  createdAt    DateTime                  @default(now()) @db.Timestamptz(6)
+
+  @@index([startedAt(sort: Desc)], map: "idx_pipeline_run_started")
+  @@index([status, startedAt(sort: Desc)], map: "idx_pipeline_run_status_started")
+}
+
+/// MatchingPipelineRun の状態
+enum MatchingPipelineRunStatus {
+  /// 全マッチを処理し、通知エラーなし
+  success
+  /// 市場休場などで実行自体をスキップ
+  skipped
+  /// 一部の通知でエラーが発生したが処理は継続
+  partial_failure
+  /// パイプライン全体が失敗
+  failed
+}
+
 // ============================================================
 // Side-B: TradeAssistant-AI
 // ============================================================

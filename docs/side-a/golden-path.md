@@ -81,11 +81,34 @@
      -H "Authorization: Bearer $CRON_SECRET" \
      -H "Content-Type: application/json" -d '{}'
    ```
-   レスポンスの `data`(`totalMatches` / `notified` / `skipped` / `errors`)を確認する。
+   レスポンスの `runId` と `data`(`totalMatches` / `notified` / `skipped` / `errors` / `skipReasons`)を確認する。
    ※ 本番相当の経路は `GET /api/cron/matching-pipeline`(市場開場チェックあり)。
 5. **Notification 確認**: `GET /api/notifications`(requireAuth) または通知フィード UI で、`shouldNotify=true` だったマッチに対し Notification 行が作成されていることを確認する。
+6. **run 確認(P1)**: `GET /api/matching/pipeline-runs/latest`(requireAuth) で 4 の実行が run として記録されていることを確認する。
+
+## 6. observability — pipeline run の追跡（P1）
+
+`runMatchingPipeline()` の実行単位（cron サイクル）は `MatchingPipelineRun` テーブルに 1 run = 1 行で永続化される。
+マッチ単位の証跡(`MatchResult` / `NotificationLog` / `EvaluationLog`)に対し、本テーブルは **run 単位の集計**を担う。
+
+| 項目 | 内容 |
+|---|---|
+| 記録タイミング | `runMatchingPipeline()` 完了時 / 市場休場スキップ時(`recordMarketClosedRun`) |
+| 主要フィールド | `runId` / `trigger`(cron, manual_test, scheduler, unknown) / `status`(success, skipped, partial_failure, failed) / `startedAt` / `finishedAt` / `durationMs` / `totalMatches` / `notified` / `skipped` / `errorCount` / `errors` / `skipReasons` / `marketStatus` |
+| `skipReasons` | reason code → 件数 の集計。code: `simultaneous_hit` / `missing_market_snapshot_id` / `send_failed` / `notify_error` / `score_below_threshold` / `duplicate` / `recent_duplicate` / `cooldown` / `daily_limit` / `other`（防御的フォールバック。`NotificationTriggerService.evaluateWithPersistence` は全 skip 経路で reason code を返すため通常は出ない） |
+| 永続化失敗時 | パイプライン本体は継続(non-fatal)。`runId` は in-memory で確定済みのため API レスポンスには返る |
+
+### 取得 API（requireAuth 配下）
+
+| API | 内容 |
+|---|---|
+| `GET /api/matching/pipeline-runs/latest` | 最新 run を 1 件返す(`{ run: PipelineRunDTO \| null }`) |
+| `GET /api/matching/pipeline-runs?limit=N` | 最新順に run 一覧を返す(N は 1〜100、既定 20) |
+
+フロントは `src/frontend/lib/api.ts` の `fetchLatestPipelineRun()` / `fetchPipelineRuns(limit)`(返り値 `PipelineRunDTO`)を使う。内部 DB 行はそのまま返さず DTO に整形する。
 
 ### 自動テスト
 
 - 通知配線の固定: `src/backend/tests/matchingService.test.ts` の `runMatchingPipeline 通知配線`。
   `shouldNotify=true` のとき `sendInApp` が呼ばれ `notified` にカウントされることを Side-B / **Side-A** 両方の note ID で保証している。
+- observability の固定: 同スイートで `runId` 返却・`status` 確定・`MatchingPipelineRun` への永続化・`skipReasons` 集計・`recordMarketClosedRun` の `status=skipped` 記録を保証している。
