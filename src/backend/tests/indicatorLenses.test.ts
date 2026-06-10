@@ -13,6 +13,7 @@ import {
   DESIRED_VALID_BARS,
   computeIndicatorLens,
   detectDivergence,
+  parseIndicatorLensId,
   resolveIndicatorLensSpecs,
   type IndicatorLensComputeInput,
   type IndicatorLensSpec,
@@ -90,6 +91,40 @@ describe('resolveIndicatorLensSpecs(Profile → レンズ仕様の解決)', () =
     const lensIds = specs.map((s) => s.lensId);
     expect(lensIds).toContain('ind:rsi#p14');
     expect(lensIds).toContain('ind:macd#f12s26g9');
+  });
+});
+
+describe('parseIndicatorLensId(lensId → 仕様の逆解決)', () => {
+  test('resolveIndicatorLensSpecs が生成した全 lensId をラウンドトリップできる', () => {
+    const specs = resolveIndicatorLensSpecs([
+      { indicatorId: 'rsi', params: { period: 7 }, enabled: true },
+      {
+        indicatorId: 'macd',
+        params: { fastPeriod: 5, slowPeriod: 35, signalPeriod: 5 },
+        enabled: true,
+      },
+      { indicatorId: 'bb', params: { period: 25 }, enabled: true },
+      { indicatorId: 'ema', params: { period: 20 }, enabled: true },
+      { indicatorId: 'sma', params: { period: 200 }, enabled: true },
+    ]);
+    expect(specs.length).toBeGreaterThan(0);
+    for (const spec of specs) {
+      const parsed = parseIndicatorLensId(spec.lensId);
+      expect(parsed).not.toBeNull();
+      // lensId・必要系列が完全に一致する(= 市場側で同じ params の計算が再現できる)
+      expect(parsed!.lensId).toBe(spec.lensId);
+      expect(parsed!.kind).toBe(spec.kind);
+      expect(parsed!.requiredSeries).toEqual(spec.requiredSeries);
+    }
+  });
+
+  test('不正・未知の lensId は null を返す(例外にしない)', () => {
+    expect(parseIndicatorLensId('dow_theory')).toBeNull();
+    expect(parseIndicatorLensId('ind:rsi')).toBeNull();
+    expect(parseIndicatorLensId('ind:rsi#unknown')).toBeNull();
+    expect(parseIndicatorLensId('ind:stochastic#p14')).toBeNull();
+    expect(parseIndicatorLensId('ind:ma#wma20')).toBeNull();
+    expect(parseIndicatorLensId('ind:ma_cross#ema20')).toBeNull();
   });
 });
 

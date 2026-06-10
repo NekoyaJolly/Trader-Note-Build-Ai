@@ -50,6 +50,8 @@ const createMockNoteWithSummary = (overrides?: Record<string, unknown>) => ({
   priority: 5,
   enabled: true,
   pausedUntil: null,
+  // マルチユーザー化 Phase α: テストモックはユーザー帰属なし
+  userId: null,
   aiSummary: {
     id: 'test-summary-id',
     noteId: 'test-note-id',
@@ -85,6 +87,8 @@ describe('TradeNoteGeneratorService', () => {
     quantity: new Prisma.Decimal(1.5),
     fee: null,
     exchange: null,
+    // マルチユーザー化 Phase α: テストモックはユーザー帰属なし
+    userId: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,

@@ -254,6 +254,114 @@ export function resolveIndicatorLensSpecs(
   return [...specs.values()];
 }
 
+/**
+ * lensId からインジケーターレンズ仕様を逆解決する(resolveIndicatorLensSpecs の逆関数)。
+ *
+ * 用途: マッチング時の市場側スナップショット生成。ノート側 lensSnapshot に保存された
+ * lensId 集合から「同じ Profile・同じ params」(§5.3)の計算仕様を復元することで、
+ * 市場側生成が IndicatorProfile の参照に依存しない(プロファイル削除にも頑健)。
+ *
+ * 不正・未知の lensId は null(呼び出し側がスキップ)。
+ */
+export function parseIndicatorLensId(lensId: string): IndicatorLensSpec | null {
+  if (!lensId.startsWith(INDICATOR_LENS_PREFIX)) {
+    return null;
+  }
+  const body = lensId.slice(INDICATOR_LENS_PREFIX.length);
+  const hashIndex = body.indexOf('#');
+  if (hashIndex < 0) {
+    return null;
+  }
+  const kind = body.slice(0, hashIndex);
+  const paramKey = body.slice(hashIndex + 1);
+
+  switch (kind) {
+    case 'rsi': {
+      const period = matchInt(paramKey, /^p(\d+)$/);
+      if (period === null) {
+        return null;
+      }
+      return single({ indicatorId: 'rsi', params: { period }, enabled: true }, lensId);
+    }
+    case 'macd': {
+      const match = /^f(\d+)s(\d+)g(\d+)$/.exec(paramKey);
+      if (!match) {
+        return null;
+      }
+      return single(
+        {
+          indicatorId: 'macd',
+          params: {
+            fastPeriod: Number.parseInt(match[1], 10),
+            slowPeriod: Number.parseInt(match[2], 10),
+            signalPeriod: Number.parseInt(match[3], 10),
+          },
+          enabled: true,
+        },
+        lensId
+      );
+    }
+    case 'bb': {
+      const period = matchInt(paramKey, /^p(\d+)$/);
+      if (period === null) {
+        return null;
+      }
+      return single({ indicatorId: 'bb', params: { period }, enabled: true }, lensId);
+    }
+    case 'ma': {
+      const match = /^(sma|ema)(\d+)$/.exec(paramKey);
+      if (!match) {
+        return null;
+      }
+      return single(
+        { indicatorId: match[1], params: { period: Number.parseInt(match[2], 10) }, enabled: true },
+        lensId
+      );
+    }
+    case 'ma_cross': {
+      const match = /^(sma|ema)(\d+)x(sma|ema)(\d+)$/.exec(paramKey);
+      if (!match) {
+        return null;
+      }
+      const fastType = match[1] as 'sma' | 'ema';
+      const fastPeriod = Number.parseInt(match[2], 10);
+      const slowType = match[3] as 'sma' | 'ema';
+      const slowPeriod = Number.parseInt(match[4], 10);
+      return {
+        lensId,
+        kind: 'ma_cross',
+        lensVersion: INDICATOR_LENS_VERSION,
+        requiredSeries: [
+          { seriesKey: 'fast', indicatorId: fastType, params: { period: fastPeriod }, field: 'value' },
+          { seriesKey: 'slow', indicatorId: slowType, params: { period: slowPeriod }, field: 'value' },
+        ],
+        maSpecs: [
+          { maType: fastType, period: fastPeriod },
+          { maType: slowType, period: slowPeriod },
+        ],
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+/** 正規表現で 1 つの整数キャプチャを取り出す */
+function matchInt(text: string, pattern: RegExp): number | null {
+  const match = pattern.exec(text);
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
+/**
+ * 単一設定からレンズ仕様を 1 件解決し、期待した lensId と一致することを保証する。
+ * (resolveIndicatorLensSpecs を再利用して生成ロジックの単一性を保つ)
+ */
+function single(config: IndicatorLensSourceConfig, expectedLensId: string): IndicatorLensSpec | null {
+  const specs = resolveIndicatorLensSpecs([config]);
+  const found = specs.find((spec) => spec.lensId === expectedLensId);
+  return found ?? null;
+}
+
 /** 期間パラメータの正規化(未指定・不正値は既定値、整数化) */
 function normalizePeriod(value: number | undefined, fallback: number): number {
   if (value === undefined || !Number.isFinite(value) || value < 1) {

@@ -13,6 +13,10 @@ import { FeatureService } from '../../services/featureService';
 import type { PerformanceReportOptions } from '../../services/performance';
 import { NotePerformanceService } from '../../services/performance';
 import { z } from 'zod';
+import { LensNoteCoreService } from '../../services/lensNoteCoreService';
+import { getIndicatorProfileService } from '../../services/indicatorProfileService';
+import { isReservedProfileId } from '../../models/indicatorProfile';
+import type { IndicatorConfig } from '../../models/indicatorConfig';
 
 const ImportCsvFilenameSchema = z.object({
   filename: z.string().min(1, 'ファイル名が必要です'),
@@ -77,6 +81,8 @@ export class TradeController {
   private noteService: TradeNoteService;
   private featureService: FeatureService;
   private performanceService: NotePerformanceService;
+  // Note コア行(lensSnapshot)の生成 (Phase α-2、NOTE_SIMILARITY_FOUNDATION.md §9-1)
+  private lensNoteCoreService: LensNoteCoreService;
 
   constructor() {
     this.importService = new TradeImportService();
@@ -84,6 +90,7 @@ export class TradeController {
     this.noteService = new TradeNoteService();
     this.featureService = new FeatureService();
     this.performanceService = new NotePerformanceService();
+    this.lensNoteCoreService = new LensNoteCoreService();
   }
 
   /**
@@ -223,6 +230,18 @@ export class TradeController {
         // DB 未接続時は parsedTrades を使ってノート生成を継続
         trades = result.parsedTrades;
       }
+      // Note コア(lensSnapshot)生成用に、プロファイルのインジケーター設定を 1 回だけ解決する。
+      // 予約 ID(__AI_AUTO__/__NONE__)・プロファイル未指定・参照失敗は「状態レンズのみ」(空配列)。
+      let lensIndicatorConfigs: IndicatorConfig[] = [];
+      if (profileId && !isReservedProfileId(profileId)) {
+        try {
+          const lensProfile = await getIndicatorProfileService().getProfileById(profileId, userId);
+          lensIndicatorConfigs = lensProfile?.indicators.filter((i) => i.enabled) ?? [];
+        } catch (profileError) {
+          console.warn('[TradeController] レンズ用プロファイル解決失敗(状態レンズのみで継続):', profileError);
+        }
+      }
+
       const generatedNoteIds: string[] = [];
       for (const t of trades) {
         try {
@@ -252,6 +271,33 @@ export class TradeController {
           // saveNote はDBに保存された実際のノートIDを返す
           const savedNoteId = await this.noteService.saveNote(note);
           generatedNoteIds.push(savedNoteId);
+
+          // Note コア行(lensSnapshot)を生成 (Phase α-2)。
+          // トレード時刻(eventTime)起点で「その瞬間の市場」を特徴化する。
+          // 失敗しても取り込みフローは継続する(lensSnapshot=null で登録 → バックフィル対象)。
+          try {
+            const lensResult = await this.lensNoteCoreService.createForSideATradeNote({
+              tradeNoteId: savedNoteId,
+              userId,
+              symbol: t.symbol,
+              side: t.side,
+              timeframe: '15m',
+              entryPrice: price,
+              eventTime: new Date(t.timestamp),
+              indicatorConfigs: lensIndicatorConfigs,
+            });
+            if (!lensResult.snapshotGenerated || lensResult.warnings.length > 0) {
+              console.warn(
+                `[TradeController] lensSnapshot 生成警告 (noteId=${savedNoteId}): ` +
+                  lensResult.warnings.join(' / ')
+              );
+            }
+          } catch (lensError) {
+            console.warn(
+              `[TradeController] Note コア生成失敗 (noteId=${savedNoteId}、取り込みは継続):`,
+              lensError
+            );
+          }
         } catch (noteError) {
           console.error('Error generating note for trade:', (noteError as Error).message);
           result.errors.push(`ノート生成失敗: ${(noteError as Error).message}`);
