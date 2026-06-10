@@ -14,6 +14,7 @@
       ▼
 [backend] tradeController.uploadCSVText
       │  CSV 取り込み → トレード保存 → Draft ノート生成 (profileId 適用)
+      │  + Note コア行生成 (lensSnapshot をトレード時刻起点で生成。Phase α-2、失敗しても取込継続)
       ▼
 [ユーザー] ノート確認 → 承認 (/notes/:id)
       │  POST /api/trades/notes/:id/approve   → status: draft → active
@@ -83,6 +84,10 @@
    ```
    レスポンスの `runId` と `data`(`totalMatches` / `notified` / `skipped` / `errors` / `skipReasons`)を確認する。
    ※ 本番相当の経路は `GET /api/cron/matching-pipeline`(市場開場チェックあり)。
+   ※ Phase α-2 以降、レスポンスにレンズ類似度シャドー評価の `lensShadow`
+     (`activeNotes` / `notesWithSnapshot` / `comparable` / `triggered` / `averageScore`)が
+     additive に含まれる(観測のみ、通知挙動には影響しない。詳細:
+     `docs/architecture/NOTE_SIMILARITY_FOUNDATION.md` §11)。
 5. **Notification 確認**: `GET /api/notifications`(requireAuth) または通知フィード UI で、`shouldNotify=true` だったマッチに対し Notification 行が作成されていることを確認する。
 6. **run 確認(P1)**: `GET /api/matching/pipeline-runs/latest`(requireAuth) で 4 の実行が run として記録されていることを確認する。
 

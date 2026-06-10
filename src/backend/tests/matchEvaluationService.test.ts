@@ -59,6 +59,8 @@ describe('MatchEvaluationService', () => {
     priority: 5,
     enabled: true,
     pausedUntil: null,
+    // マルチユーザー化 Phase α: テストモックはユーザー帰属なし
+    userId: null,
   };
 
   // 市場スナップショット（平均出来高や前日終値を含め、FeatureExtractor と同スケールにする）
@@ -101,6 +103,8 @@ describe('MatchEvaluationService', () => {
           evaluatedAt: input.evaluatedAt,
           decidedAt: input.evaluatedAt,
           createdAt: input.evaluatedAt,
+          // マルチユーザー化 Phase α: テストモックはユーザー帰属なし
+          userId: null,
         };
         return stored;
       }),

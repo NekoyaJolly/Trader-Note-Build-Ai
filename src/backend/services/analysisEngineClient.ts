@@ -120,6 +120,12 @@ export async function fetchIndicatorSeries(params: {
   >;
   bbBandwidthWindow?: number;
   bbBandwidthThreshold?: number;
+  /// Phase 7a/7b/7c の末尾バー snapshot 取得フラグ (default false = 既存挙動互換)。
+  /// レンズ類似度基盤 (Phase α-2) の LensSnapshotBuilder が SMC / ChartPattern / Wyckoff
+  /// レンズの precomputed payload を 1 呼び出しで取得するために配線した。
+  includeSmc?: boolean;
+  includeChartPatterns?: boolean;
+  includeWyckoff?: boolean;
 }, options?: AnalysisEngineRequestOptions): Promise<AnalysisEngineIndicatorSeriesResponse> {
   const baseUrl = getAnalysisEngineBaseUrl();
 
@@ -132,6 +138,9 @@ export async function fetchIndicatorSeries(params: {
     patterns: params.patterns ?? [],
     bbBandwidthWindow: params.bbBandwidthWindow,
     bbBandwidthThreshold: params.bbBandwidthThreshold,
+    includeSmc: params.includeSmc ?? false,
+    includeChartPatterns: params.includeChartPatterns ?? false,
+    includeWyckoff: params.includeWyckoff ?? false,
   });
 
   const res = await axios.post(`${baseUrl}/v1/indicator-series`, payload, {
