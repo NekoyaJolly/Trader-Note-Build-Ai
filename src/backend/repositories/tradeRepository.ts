@@ -13,6 +13,13 @@ export interface TradeCreateInput {
 }
 
 /**
+ * ユーザー分離 (Phase α-4) の方針:
+ * - HTTP 経路 (requireAuth 配下) からは必ず userId を渡し、所有ユーザーのデータのみ扱う
+ * - cron / pipeline 経路 (ユーザー横断処理) は userId を渡さず全件を対象にする
+ * - userId 未指定時は従来挙動 (フィルタなし) を維持し後方互換を保つ
+ */
+
+/**
  * bulkInsert の戻り値型
  * count: 実際にinsertされた件数
  * insertedIds: 実際にinsertされたトレードのID配列
@@ -31,11 +38,13 @@ export class TradeRepository {
    * timestamp + symbol + side の組み合わせで重複を判定
    * @returns 実際にinsertされた件数とID配列
    */
-  async bulkInsert(trades: TradeCreateInput[]): Promise<BulkInsertResult> {
+  async bulkInsert(trades: TradeCreateInput[], userId?: string): Promise<BulkInsertResult> {
     if (trades.length === 0) return { count: 0, insertedIds: [] };
 
     // 既存のトレードを取得して重複チェック
+    // ユーザー分離: 重複判定も所有ユーザー内に閉じる (他ユーザーの同一トレードと衝突させない)
     const existingTrades = await prisma.trade.findMany({
+      where: userId ? { userId } : undefined,
       select: { timestamp: true, symbol: true, side: true },
     });
     
@@ -65,6 +74,7 @@ export class TradeRepository {
         quantity: t.quantity,
         fee: t.fee ?? undefined,
         exchange: t.exchange ?? undefined,
+        userId: userId ?? undefined,
       })),
       skipDuplicates: true,
     });
@@ -74,24 +84,24 @@ export class TradeRepository {
   }
 
   // 登録済み件数を確認するためのヘルパー
-  async countAll(): Promise<number> {
-    return prisma.trade.count();
+  async countAll(userId?: string): Promise<number> {
+    return prisma.trade.count({ where: userId ? { userId } : undefined });
   }
 
   // ノート未生成のトレードを取得（古い順）
-  async findTradesWithoutNotes(limit: number = 500): Promise<PrismaTrade[]> {
+  async findTradesWithoutNotes(limit: number = 500, userId?: string): Promise<PrismaTrade[]> {
     return prisma.trade.findMany({
-      where: { note: null },
+      where: { note: null, ...(userId ? { userId } : {}) },
       orderBy: { timestamp: 'asc' },
       take: limit,
     });
   }
 
   // 指定した ID 群のトレードを取得（順序はDB任せ）
-  async findByIds(ids: string[]): Promise<PrismaTrade[]> {
+  async findByIds(ids: string[], userId?: string): Promise<PrismaTrade[]> {
     if (ids.length === 0) return [];
     return prisma.trade.findMany({
-      where: { id: { in: ids } },
+      where: { id: { in: ids }, ...(userId ? { userId } : {}) },
       orderBy: { timestamp: 'asc' },
     });
   }

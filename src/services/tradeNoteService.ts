@@ -860,13 +860,14 @@ export class TradeNoteService {
    * Phase 8: DBモードでは TradeNoteRepository を使用
    * FSモードでは従来の JSON ファイル保存を使用
    * 
+   * @param userId - 所有ユーザー (Phase α-4 マルチユーザー分離)。HTTP 経路では必ず渡す
    * @returns DBに保存された場合はDB上のノートID、FSのみの場合は渡されたノートのIDを返す
    */
-  async saveNote(note: TradeNote): Promise<string> {
+  async saveNote(note: TradeNote, userId?: string): Promise<string> {
     let savedNoteId = note.id;
 
     if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
-      savedNoteId = await this.saveNoteToDb(note);
+      savedNoteId = await this.saveNoteToDb(note, userId);
     }
 
     if (this.storageMode === 'fs' || this.storageMode === 'hybrid') {
@@ -880,9 +881,9 @@ export class TradeNoteService {
    * DBにノートを保存する
    * @returns DBに保存されたノートのID（既存の場合はそのID、新規の場合はDB生成のID）
    */
-  private async saveNoteToDb(note: TradeNote): Promise<string> {
-    // 既存のノートを確認
-    const existing = await this.repository.findByTradeId(note.tradeId);
+  private async saveNoteToDb(note: TradeNote, userId?: string): Promise<string> {
+    // 既存のノートを確認 (userId 指定時は所有ノートのみが更新対象)
+    const existing = await this.repository.findByTradeId(note.tradeId, userId);
 
     if (existing) {
       // 既存ノートの更新
@@ -934,6 +935,8 @@ export class TradeNoteService {
             : undefined,
           userNotes: note.userNotes,
           tags: note.tags,
+          // Phase α-4: 所有ユーザーを設定 (マルチユーザー分離)
+          userId,
         },
         {
           summary: note.aiSummary || '',
@@ -968,14 +971,14 @@ export class TradeNoteService {
    * 
    * Phase 8: DBモードでは TradeNoteRepository を使用
    */
-  async loadAllNotes(): Promise<TradeNote[]> {
+  async loadAllNotes(userId?: string): Promise<TradeNote[]> {
     if (this.storageMode === 'db') {
-      return this.loadAllNotesFromDb();
+      return this.loadAllNotesFromDb(userId);
     }
 
     if (this.storageMode === 'hybrid') {
       // DB優先で取得、なければFSにフォールバック
-      const dbNotes = await this.loadAllNotesFromDb();
+      const dbNotes = await this.loadAllNotesFromDb(userId);
       if (dbNotes.length > 0) {
         return dbNotes;
       }
@@ -989,8 +992,8 @@ export class TradeNoteService {
   /**
    * DBから全ノートを取得
    */
-  private async loadAllNotesFromDb(): Promise<TradeNote[]> {
-    const dbNotes = await this.repository.findAll(1000, 0);
+  private async loadAllNotesFromDb(userId?: string): Promise<TradeNote[]> {
+    const dbNotes = await this.repository.findAll(1000, 0, userId);
     return dbNotes.map((n) => this.convertDbNoteToTradeNote(n));
   }
 
@@ -1026,13 +1029,13 @@ export class TradeNoteService {
    * 
    * Phase 8: DBモードでは TradeNoteRepository を使用
    */
-  async getNoteById(noteId: string): Promise<TradeNote | null> {
+  async getNoteById(noteId: string, userId?: string): Promise<TradeNote | null> {
     if (this.storageMode === 'db') {
-      return this.getNoteByIdFromDb(noteId);
+      return this.getNoteByIdFromDb(noteId, userId);
     }
 
     if (this.storageMode === 'hybrid') {
-      const dbNote = await this.getNoteByIdFromDb(noteId);
+      const dbNote = await this.getNoteByIdFromDb(noteId, userId);
       if (dbNote) {
         return dbNote;
       }
@@ -1046,8 +1049,8 @@ export class TradeNoteService {
   /**
    * DBから単一ノートを取得
    */
-  private async getNoteByIdFromDb(noteId: string): Promise<TradeNote | null> {
-    const dbNote = await this.repository.findById(noteId);
+  private async getNoteByIdFromDb(noteId: string, userId?: string): Promise<TradeNote | null> {
+    const dbNote = await this.repository.findById(noteId, userId);
     if (!dbNote) {
       return null;
     }
@@ -1176,9 +1179,9 @@ export class TradeNoteService {
    * 
    * Phase 8: DBモードではリポジトリの専用メソッドを使用
    */
-  async loadActiveNotes(): Promise<TradeNote[]> {
+  async loadActiveNotes(userId?: string): Promise<TradeNote[]> {
     if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
-      const dbNotes = await this.repository.findApproved();
+      const dbNotes = await this.repository.findApproved(userId ? { userId } : {});
       return dbNotes.map(n => this.convertDbNoteToTradeNote(n));
     }
 
@@ -1196,9 +1199,9 @@ export class TradeNoteService {
    * 
    * 優先度の高い順にソート
    */
-  async loadActiveNotesForMatching(): Promise<TradeNote[]> {
+  async loadActiveNotesForMatching(userId?: string): Promise<TradeNote[]> {
     if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
-      const dbNotes = await this.repository.findActiveForMatching();
+      const dbNotes = await this.repository.findActiveForMatching(userId ? { userId } : {});
       return dbNotes.map(n => this.convertDbNoteToTradeNote(n));
     }
 
@@ -1215,8 +1218,9 @@ export class TradeNoteService {
    * 
    * @returns PrismaのTradeNoteレコード配列
    */
-  async loadActiveNotesForMatchingAsPrisma(): Promise<TradeNoteWithSummary[]> {
-    return this.repository.findActiveForMatching();
+  async loadActiveNotesForMatchingAsPrisma(userId?: string): Promise<TradeNoteWithSummary[]> {
+    // userId 未指定 = ユーザー横断 (cron パイプライン)。指定時は所有ノートのみ (手動チェック等)
+    return this.repository.findActiveForMatching(userId ? { userId } : {});
   }
 
   /**
@@ -1226,12 +1230,13 @@ export class TradeNoteService {
    * @param status - 取得したいステータス（draft, active, archived）
    * 注意: Prisma enum は小文字で定義されている（draft, active, archived）
    */
-  async loadNotesByStatus(status: NoteStatus): Promise<TradeNote[]> {
+  async loadNotesByStatus(status: NoteStatus, userId?: string): Promise<TradeNote[]> {
     if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
       // Prisma enum は小文字で定義されているため、toLowerCase() で正規化
       const normalizedStatus = status.toLowerCase() as PrismaNoteStatus;
       const dbNotes = await this.repository.findWithOptions({
         status: normalizedStatus,
+        userId,
       });
       return dbNotes.map(n => this.convertDbNoteToTradeNote(n));
     }
@@ -1248,9 +1253,9 @@ export class TradeNoteService {
    * @param noteId - 承認するノートのID
    * @returns 承認後のノート
    */
-  async approveNote(noteId: string): Promise<TradeNote> {
+  async approveNote(noteId: string, userId?: string): Promise<TradeNote> {
     if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
-      await this.repository.approve(noteId);
+      await this.repository.approve(noteId, userId);
       const updated = await this.getNoteByIdFromDb(noteId);
       if (!updated) {
         throw new Error(`ノートが見つかりませんでした: ${noteId}`);
@@ -1289,9 +1294,9 @@ export class TradeNoteService {
    * @param noteId - 非承認にするノートのID
    * @returns 非承認後のノート
    */
-  async rejectNote(noteId: string): Promise<TradeNote> {
+  async rejectNote(noteId: string, userId?: string): Promise<TradeNote> {
     if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
-      await this.repository.reject(noteId);
+      await this.repository.reject(noteId, userId);
       const updated = await this.getNoteByIdFromDb(noteId);
       if (!updated) {
         throw new Error(`ノートが見つかりませんでした: ${noteId}`);
@@ -1329,9 +1334,9 @@ export class TradeNoteService {
    * @param noteId - 下書きに戻すノートのID
    * @returns 下書き状態のノート
    */
-  async revertToDraft(noteId: string): Promise<TradeNote> {
+  async revertToDraft(noteId: string, userId?: string): Promise<TradeNote> {
     if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
-      await this.repository.revertToDraft(noteId);
+      await this.repository.revertToDraft(noteId, userId);
       const updated = await this.getNoteByIdFromDb(noteId);
       if (!updated) {
         throw new Error(`ノートが見つかりませんでした: ${noteId}`);
@@ -1370,12 +1375,12 @@ export class TradeNoteService {
    * @param updates - 更新内容
    * @returns 更新後のノート
    */
-  async updateNote(noteId: string, updates: NoteUpdatePayload): Promise<TradeNote> {
+  async updateNote(noteId: string, updates: NoteUpdatePayload, userId?: string): Promise<TradeNote> {
     if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
       await this.repository.updateUserContent(noteId, {
         userNotes: updates.userNotes,
         tags: updates.tags,
-      });
+      }, userId);
       const updated = await this.getNoteByIdFromDb(noteId);
       if (!updated) {
         throw new Error(`ノートが見つかりませんでした: ${noteId}`);
@@ -1418,9 +1423,9 @@ export class TradeNoteService {
    * 
    * Phase 8: DBモードではリポジトリのグループ化クエリを使用
    */
-  async getStatusCounts(): Promise<{ draft: number; active: number; archived: number; total: number }> {
+  async getStatusCounts(userId?: string): Promise<{ draft: number; active: number; archived: number; total: number }> {
     if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
-      const statusCounts = await this.repository.countByStatus();
+      const statusCounts = await this.repository.countByStatus(userId);
       const counts = {
         draft: 0,
         active: 0,
@@ -1478,9 +1483,9 @@ export class TradeNoteService {
    * @param noteId ノートID
    * @param priority 優先度（1-10）
    */
-  async updateNotePriority(noteId: string, priority: number): Promise<void> {
+  async updateNotePriority(noteId: string, priority: number, userId?: string): Promise<void> {
     if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
-      await this.repository.updatePriority(noteId, priority);
+      await this.repository.updatePriority(noteId, priority, userId);
       return;
     }
     // ファイルモードでは非対応
@@ -1492,9 +1497,9 @@ export class TradeNoteService {
    * @param noteId ノートID
    * @param enabled 有効フラグ
    */
-  async setNoteEnabled(noteId: string, enabled: boolean): Promise<void> {
+  async setNoteEnabled(noteId: string, enabled: boolean, userId?: string): Promise<void> {
     if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
-      await this.repository.setEnabled(noteId, enabled);
+      await this.repository.setEnabled(noteId, enabled, userId);
       return;
     }
     // ファイルモードでは非対応
@@ -1506,9 +1511,9 @@ export class TradeNoteService {
    * @param noteId ノートID
    * @param until 停止終了日時（null で停止解除）
    */
-  async setNotePausedUntil(noteId: string, until: Date | null): Promise<void> {
+  async setNotePausedUntil(noteId: string, until: Date | null, userId?: string): Promise<void> {
     if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
-      await this.repository.setPausedUntil(noteId, until);
+      await this.repository.setPausedUntil(noteId, until, userId);
       return;
     }
     // ファイルモードでは非対応

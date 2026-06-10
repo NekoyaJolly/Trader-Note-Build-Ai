@@ -17,6 +17,8 @@ const mockPrisma = {
   strategy: {
     findMany: jest.fn(),
     findUnique: jest.fn(),
+    // Phase α-4: ユーザー分離で取得系は findFirst (id + userId 条件) に変更
+    findFirst: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
@@ -148,12 +150,39 @@ describe('strategyService', () => {
         })
       );
     });
+
+    // Phase α-4: マルチユーザー分離
+    it('userId 指定時は所有ユーザーで絞り込まれること (Phase α-4)', async () => {
+      const prisma = mockPrisma;
+      (prisma.strategy.findMany as jest.Mock).mockResolvedValue([]);
+
+      await listStrategies({ userId: 'user-a-uuid' });
+
+      expect(prisma.strategy.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { userId: 'user-a-uuid' },
+        })
+      );
+    });
+
+    it('userId 未指定時は userId フィルタが付かないこと (cron 等の後方互換)', async () => {
+      const prisma = mockPrisma;
+      (prisma.strategy.findMany as jest.Mock).mockResolvedValue([]);
+
+      await listStrategies({});
+
+      expect(prisma.strategy.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {},
+        })
+      );
+    });
   });
 
   describe('getStrategy', () => {
     it('ストラテジー詳細を取得できること', async () => {
       const prisma = mockPrisma;
-      (prisma.strategy.findUnique as jest.Mock).mockResolvedValue({
+      (prisma.strategy.findFirst as jest.Mock).mockResolvedValue({
         ...mockStrategy,
         versions: [mockVersion],
       });
@@ -168,11 +197,27 @@ describe('strategyService', () => {
 
     it('存在しないストラテジーの場合はnullを返すこと', async () => {
       const prisma = mockPrisma;
-      (prisma.strategy.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.strategy.findFirst as jest.Mock).mockResolvedValue(null);
 
       const result = await getStrategy('non-existent-id');
 
       expect(result).toBeNull();
+    });
+
+    // Phase α-4: マルチユーザー分離
+    it('userId 指定時は id + userId の複合条件で取得すること (Phase α-4)', async () => {
+      const prisma = mockPrisma;
+      (prisma.strategy.findFirst as jest.Mock).mockResolvedValue(null);
+
+      // 他ユーザーのストラテジーは findFirst が null を返し「存在しない」扱いになる
+      const result = await getStrategy(mockStrategy.id, 'user-a-uuid');
+
+      expect(result).toBeNull();
+      expect(prisma.strategy.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: mockStrategy.id, userId: 'user-a-uuid' },
+        })
+      );
     });
   });
 
@@ -212,7 +257,7 @@ describe('strategyService', () => {
           },
         });
       });
-      (prisma.strategy.findUnique as jest.Mock).mockResolvedValue({
+      (prisma.strategy.findFirst as jest.Mock).mockResolvedValue({
         ...mockStrategy,
         versions: [mockVersion],
       });
@@ -275,7 +320,7 @@ describe('strategyService', () => {
           strategyVersion: { create: versionCreate },
         });
       });
-      (prisma.strategy.findUnique as jest.Mock).mockResolvedValue({
+      (prisma.strategy.findFirst as jest.Mock).mockResolvedValue({
         ...mockStrategy,
         versions: [mockVersion],
       });
@@ -305,7 +350,7 @@ describe('strategyService', () => {
       const prisma = mockPrisma;
       const updatedVersion = { ...mockVersion, id: 'version-2', versionNumber: 2 };
 
-      (prisma.strategy.findUnique as jest.Mock)
+      (prisma.strategy.findFirst as jest.Mock)
         .mockResolvedValueOnce({ ...mockStrategy, versions: [mockVersion] })
         .mockResolvedValueOnce({ ...mockStrategy, versions: [updatedVersion, mockVersion] });
       
@@ -332,7 +377,7 @@ describe('strategyService', () => {
 
     it('存在しないストラテジーの場合はエラーになること', async () => {
       const prisma = mockPrisma;
-      (prisma.strategy.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.strategy.findFirst as jest.Mock).mockResolvedValue(null);
 
       await expect(
         updateStrategy('non-existent-id', { name: 'updated' })
@@ -343,7 +388,7 @@ describe('strategyService', () => {
   describe('deleteStrategy', () => {
     it('ストラテジーを削除できること', async () => {
       const prisma = mockPrisma;
-      (prisma.strategy.findUnique as jest.Mock).mockResolvedValue(mockStrategy);
+      (prisma.strategy.findFirst as jest.Mock).mockResolvedValue(mockStrategy);
       (prisma.strategy.delete as jest.Mock).mockResolvedValue(mockStrategy);
 
       await deleteStrategy(mockStrategy.id);
@@ -355,7 +400,7 @@ describe('strategyService', () => {
 
     it('存在しないストラテジーの場合はエラーになること', async () => {
       const prisma = mockPrisma;
-      (prisma.strategy.findUnique as jest.Mock).mockResolvedValue(null);
+      (prisma.strategy.findFirst as jest.Mock).mockResolvedValue(null);
 
       await expect(deleteStrategy('non-existent-id')).rejects.toThrow(
         'ストラテジーが見つかりません'
@@ -368,7 +413,7 @@ describe('strategyService', () => {
       const prisma = mockPrisma;
       const updatedStrategy = { ...mockStrategy, status: 'active' as StrategyStatus };
       
-      (prisma.strategy.findUnique as jest.Mock)
+      (prisma.strategy.findFirst as jest.Mock)
         .mockResolvedValueOnce(mockStrategy)
         .mockResolvedValueOnce({ ...updatedStrategy, versions: [mockVersion] });
       (prisma.strategy.update as jest.Mock).mockResolvedValue(updatedStrategy);
@@ -390,7 +435,7 @@ describe('strategyService', () => {
       };
       const duplicatedVersion = { ...mockVersion, id: 'version-dup', strategyId: 'duplicated-id' };
 
-      (prisma.strategy.findUnique as jest.Mock)
+      (prisma.strategy.findFirst as jest.Mock)
         .mockResolvedValueOnce({ ...mockStrategy, versions: [mockVersion] })
         .mockResolvedValueOnce({ ...duplicatedStrategy, versions: [duplicatedVersion] });
 

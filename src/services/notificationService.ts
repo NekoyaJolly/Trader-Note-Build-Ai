@@ -57,8 +57,9 @@ export class NotificationService {
     this.loadPromise = this.loadFromRepository();
   }
 
-  private async loadFromRepository(): Promise<void> {
-    this.notifications = await this.repository.loadAll();
+  private async loadFromRepository(userId?: string): Promise<void> {
+    // Phase α-4: userId 指定時は宛先ユーザーの通知のみロード (DB モードで分離)
+    this.notifications = await this.repository.loadAll(userId);
   }
 
   /**
@@ -72,21 +73,21 @@ export class NotificationService {
    * 通知が届かない既存不具合）。そのため DB モードでは読み取りのたびに最新を
    * 再ロードする。FS モードは本サービスが単一の書き込み者なので初回ロードで足りる。
    */
-  private async ensureLoaded(): Promise<void> {
+  private async ensureLoaded(userId?: string): Promise<void> {
     // まずコンストラクタで開始した初期ロードの完了を保証する。
     // これを待たずに loadFromRepository() を走らせると、初期ロードが後から解決して
     // this.notifications を古い配列で上書きするレースが起こり得る。
     await this.loadPromise;
     if (this.storageMode === 'db') {
-      await this.loadFromRepository();
+      await this.loadFromRepository(userId);
     }
   }
 
   /**
-   * ID から通知を取得する
+   * ID から通知を取得する (userId 指定時は宛先ユーザーの通知のみ。Phase α-4)
    */
-  async getNotificationById(id: string): Promise<Notification | undefined> {
-    await this.ensureLoaded();
+  async getNotificationById(id: string, userId?: string): Promise<Notification | undefined> {
+    await this.ensureLoaded(userId);
     return this.notifications.find((n) => n.id === id);
   }
 
@@ -169,10 +170,10 @@ export class NotificationService {
   }
 
   /**
-   * Get all notifications
+   * Get all notifications (userId 指定時は宛先ユーザーの通知のみ。Phase α-4)
    */
-  async getNotifications(unreadOnly: boolean = false): Promise<Notification[]> {
-    await this.ensureLoaded();
+  async getNotifications(unreadOnly: boolean = false, userId?: string): Promise<Notification[]> {
+    await this.ensureLoaded(userId);
     if (unreadOnly) {
       return this.notifications.filter(n => !n.read);
     }
@@ -189,46 +190,46 @@ export class NotificationService {
   // 解決して this.notifications を永続化前の古い配列で上書きするレースが起こり得る。
 
   /**
-   * Mark notification as read
+   * Mark notification as read (userId 指定時は宛先ユーザーの通知のみ。Phase α-4)
    */
-  async markAsRead(notificationId: string): Promise<void> {
+  async markAsRead(notificationId: string, userId?: string): Promise<void> {
     await this.loadPromise;
-    await this.repository.markAsRead(notificationId);
-    await this.loadFromRepository();
+    await this.repository.markAsRead(notificationId, userId);
+    await this.loadFromRepository(userId);
   }
 
   /**
-   * Mark all notifications as read
+   * Mark all notifications as read (userId 指定時は宛先ユーザーの通知のみ。Phase α-4)
    */
-  async markAllAsRead(): Promise<void> {
+  async markAllAsRead(userId?: string): Promise<void> {
     await this.loadPromise;
-    await this.repository.markAllAsRead();
-    await this.loadFromRepository();
+    await this.repository.markAllAsRead(userId);
+    await this.loadFromRepository(userId);
   }
 
   /**
-   * Delete a notification
+   * Delete a notification (userId 指定時は宛先ユーザーの通知のみ。Phase α-4)
    */
-  async deleteNotification(notificationId: string): Promise<void> {
+  async deleteNotification(notificationId: string, userId?: string): Promise<void> {
     await this.loadPromise;
-    await this.repository.delete(notificationId);
-    await this.loadFromRepository();
+    await this.repository.delete(notificationId, userId);
+    await this.loadFromRepository(userId);
   }
 
   /**
-   * Clear all notifications
+   * Clear all notifications (userId 指定時は宛先ユーザーの通知のみ。Phase α-4)
    */
-  async clearAll(): Promise<void> {
+  async clearAll(userId?: string): Promise<void> {
     await this.loadPromise;
-    await this.repository.deleteAll();
-    await this.loadFromRepository();
+    await this.repository.deleteAll(userId);
+    await this.loadFromRepository(userId);
   }
 
   /**
-   * 未読通知数を取得
+   * 未読通知数を取得 (userId 指定時は宛先ユーザーの通知のみ。Phase α-4)
    */
-  async countUnread(): Promise<number> {
-    await this.ensureLoaded();
+  async countUnread(userId?: string): Promise<number> {
+    await this.ensureLoaded(userId);
     return this.notifications.filter(n => !n.read).length;
   }
 

@@ -111,9 +111,10 @@ export class NotificationController {
   getNotifications = async (req: Request, res: Response): Promise<void> => {
     try {
       // NotificationService が扱うファイルストアの通知を取得し、UI で必要な形へ変換する
+      // Phase α-4: 認証ユーザー宛の通知のみ返す
       const { unreadOnly } = getValidatedQuery<{ unreadOnly?: string }>(res);
       const isUnreadOnly = unreadOnly === 'true';
-      const notifications = await this.notificationService.getNotifications(isUnreadOnly);
+      const notifications = await this.notificationService.getNotifications(isUnreadOnly, req.user!.userId);
       const result = notifications
         .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
         .map((n) => this.buildListItem(n));
@@ -136,7 +137,8 @@ export class NotificationController {
   getNotificationById = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const notification = await this.notificationService.getNotificationById(id);
+      // Phase α-4: 他ユーザー宛の通知は存在しない扱い (404)
+      const notification = await this.notificationService.getNotificationById(id, req.user!.userId);
 
       if (!notification) {
         res.status(404).json({ error: '通知が見つかりませんでした' });
@@ -157,13 +159,14 @@ export class NotificationController {
   markAsRead = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const notification = await this.notificationService.getNotificationById(id);
+      const userId = req.user!.userId;
+      const notification = await this.notificationService.getNotificationById(id, userId);
       if (!notification) {
         res.status(404).json({ error: '通知が見つかりませんでした' });
         return;
       }
 
-      await this.notificationService.markAsRead(id);
+      await this.notificationService.markAsRead(id, userId);
       res.json({ success: true });
     } catch (error) {
       console.error('Error marking notification as read:', error);
@@ -176,7 +179,7 @@ export class NotificationController {
    */
   markAllAsRead = async (req: Request, res: Response): Promise<void> => {
     try {
-      await this.notificationService.markAllAsRead();
+      await this.notificationService.markAllAsRead(req.user!.userId);
       res.json({ success: true });
     } catch (error) {
       console.error('Error marking all as read:', error);
@@ -190,13 +193,14 @@ export class NotificationController {
   deleteNotification = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const notification = await this.notificationService.getNotificationById(id);
+      const userId = req.user!.userId;
+      const notification = await this.notificationService.getNotificationById(id, userId);
       if (!notification) {
         res.status(404).json({ error: '通知が見つかりませんでした' });
         return;
       }
 
-      await this.notificationService.deleteNotification(id);
+      await this.notificationService.deleteNotification(id, userId);
       res.json({ success: true });
     } catch (error) {
       console.error('Error deleting notification:', error);
@@ -209,7 +213,7 @@ export class NotificationController {
    */
   clearAll = async (req: Request, res: Response): Promise<void> => {
     try {
-      await this.notificationService.clearAll();
+      await this.notificationService.clearAll(req.user!.userId);
       res.json({ success: true });
     } catch (error) {
       console.error('Error clearing notifications:', error);
@@ -221,9 +225,9 @@ export class NotificationController {
    * GET /api/notifications/unread-count
    * 未読通知数を取得
    */
-  getUnreadCount = async (_req: Request, res: Response): Promise<void> => {
+  getUnreadCount = async (req: Request, res: Response): Promise<void> => {
     try {
-      const count = await this.notificationService.countUnread();
+      const count = await this.notificationService.countUnread(req.user!.userId);
       res.json({ success: true, data: { unreadCount: count } });
     } catch (error) {
       console.error('Error getting unread count:', error);
@@ -256,8 +260,8 @@ export class NotificationController {
    */
   checkAndNotify = async (req: Request, res: Response): Promise<void> => {
     try {
-      // 1. マッチング判定を実行
-      const matches = await this.matchingService.checkForMatches();
+      // 1. マッチング判定を実行 (Phase α-4: 認証ユーザーの所有ノートのみ)
+      const matches = await this.matchingService.checkForMatches(req.user!.userId);
 
       const results: Array<{
         noteId: string;

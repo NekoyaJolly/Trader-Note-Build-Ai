@@ -183,9 +183,11 @@ export class MatchingService {
    * フェーズ8: loadActiveNotesForMatchingAsPrisma を使用し、enabled/pausedUntil をフィルタ
    * DB統一: Prisma型を直接使用（FS型への変換をスキップ）
    */
-  async checkForMatches(): Promise<MatchResultDTO[]> {
-    // 有効なノートのみを取得（Prisma型で直接取得）
-    const notes = await this.noteService.loadActiveNotesForMatchingAsPrisma();
+  async checkForMatches(userId?: string): Promise<MatchResultDTO[]> {
+    // 有効なノートのみを取得（Prisma型で直接取得）。
+    // Phase α-4: userId 指定時 (手動チェック等の HTTP 経路) は所有ノートのみ評価。
+    // cron パイプラインは未指定で全ユーザーのノートを評価する。
+    const notes = await this.noteService.loadActiveNotesForMatchingAsPrisma(userId);
 
     // マッチング対象がない場合は早期リターン
     if (notes.length === 0) {
@@ -312,6 +314,8 @@ export class MatchingService {
                 priceRangeMatched,
                 reasons,
                 evaluatedAt,
+                // Phase α-4: 由来ノートの所有ユーザーを伝播 (通知のユーザー分離の起点)
+                userId: note.userId,
               });
             } catch (persistError) {
               console.warn('MatchResult 永続化をスキップ:', persistError);
@@ -501,6 +505,8 @@ export class MatchingService {
                   priceRangeMatched,
                   reasons,
                   evaluatedAt,
+                  // Phase α-4: 由来ノートの所有ユーザーを伝播 (通知のユーザー分離の起点)
+                  userId: note.userId,
                 });
               } catch (persistError) {
                 console.warn('MatchResult 永続化をスキップ:', persistError);
@@ -684,6 +690,8 @@ export class MatchingService {
     limit?: number;
     offset?: number;
     minScore?: number;
+    /** 所有ユーザーで絞り込み (Phase α-4)。HTTP 経路では必ず指定 */
+    userId?: string;
   } = {}): Promise<MatchResultDTO[]> {
     try {
       const results = await this.matchResultRepository.findHistory(options);

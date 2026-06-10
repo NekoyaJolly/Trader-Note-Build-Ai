@@ -230,12 +230,12 @@ export async function listEnabledAlerts(): Promise<AlertWithStrategy[]> {
 export async function triggerAlert(request: TriggerAlertRequest): Promise<TriggerAlertResult> {
   const { strategyId, matchScore, indicatorValues } = request;
 
-  // 1. アラート設定を取得
+  // 1. アラート設定を取得 (userId は通知の宛先ユーザー伝播に使う。Phase α-4)
   const alert = await prisma.strategyAlert.findUnique({
     where: { strategyId },
     include: {
       strategy: {
-        select: { name: true, symbol: true },
+        select: { name: true, symbol: true, userId: true },
       },
     },
   });
@@ -290,6 +290,8 @@ export async function triggerAlert(request: TriggerAlertRequest): Promise<Trigge
         symbol: alert.strategy.symbol,
         matchScore,
         indicatorValues,
+        // Phase α-4: ストラテジーの所有ユーザーを通知の宛先に伝播
+        userId: alert.strategy.userId,
       });
 
       // ログ記録
@@ -351,6 +353,8 @@ interface SendNotificationParams {
   symbol: string;
   matchScore: number;
   indicatorValues: Record<string, JsonValue | undefined>;
+  /** 通知の宛先ユーザー (= ストラテジーの所有ユーザー。Phase α-4) */
+  userId?: string | null;
 }
 
 /**
@@ -382,7 +386,7 @@ async function sendAlertNotification(params: SendNotificationParams): Promise<bo
  * 既存の通知フィード UI / 既読管理にそのまま乗せる。
  */
 async function sendInAppNotification(params: SendNotificationParams): Promise<boolean> {
-  const { strategyName, symbol, matchScore } = params;
+  const { strategyName, symbol, matchScore, userId } = params;
 
   try {
     await dbNotificationRepository.create({
@@ -390,6 +394,8 @@ async function sendInAppNotification(params: SendNotificationParams): Promise<bo
       type: 'strategy_alert',
       title: `ストラテジー条件成立: ${strategyName}`,
       message: `${symbol}でストラテジー条件が成立しました（一致度: ${(matchScore * 100).toFixed(1)}%）`,
+      // Phase α-4: 通知をストラテジーの所有ユーザー宛にする (ユーザー分離)
+      userId,
     });
     console.log(`[StrategyAlertService] アプリ内通知送信(DB): ${strategyName} (${symbol})`);
     return true;

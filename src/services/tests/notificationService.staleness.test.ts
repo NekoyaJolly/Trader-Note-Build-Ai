@@ -22,32 +22,34 @@ import { TradeNoteService } from '../tradeNoteService';
  */
 function makeRepoMock(initial: Notification[] = []): {
   repo: NotificationRepository;
-  loadAll: jest.Mock<Promise<Notification[]>, []>;
+  loadAll: jest.Mock<Promise<Notification[]>, [string?]>;
   saveAll: jest.Mock<Promise<void>, [Notification[]]>;
   save: jest.Mock<Promise<void>, [Notification]>;
-  markAsRead: jest.Mock<Promise<void>, [string]>;
-  markAllAsRead: jest.Mock<Promise<void>, []>;
-  deleteOne: jest.Mock<Promise<void>, [string]>;
-  deleteAll: jest.Mock<Promise<void>, []>;
+  markAsRead: jest.Mock<Promise<void>, [string, string?]>;
+  markAllAsRead: jest.Mock<Promise<void>, [string?]>;
+  deleteOne: jest.Mock<Promise<void>, [string, string?]>;
+  deleteAll: jest.Mock<Promise<void>, [string?]>;
   setNext: (rows: Notification[]) => void;
 } {
   let current = initial;
-  const loadAll = jest.fn<Promise<Notification[]>, []>(() => Promise.resolve(current));
+  // Phase α-4: 各メソッドは宛先ユーザー (userId) を受け取れる。モックは挙動検証用に
+  // 引数を記録するだけで、分離フィルタ自体は DB 実装側の責務 (リポジトリテストで担保)。
+  const loadAll = jest.fn<Promise<Notification[]>, [string?]>(() => Promise.resolve(current));
   const saveAll = jest.fn<Promise<void>, [Notification[]]>().mockResolvedValue(undefined);
   const save = jest.fn<Promise<void>, [Notification]>().mockResolvedValue(undefined);
-  const markAsRead = jest.fn<Promise<void>, [string]>((id) => {
+  const markAsRead = jest.fn<Promise<void>, [string, string?]>((id) => {
     current = current.map((n) => (n.id === id ? { ...n, read: true } : n));
     return Promise.resolve();
   });
-  const markAllAsRead = jest.fn<Promise<void>, []>(() => {
+  const markAllAsRead = jest.fn<Promise<void>, [string?]>(() => {
     current = current.map((n) => ({ ...n, read: true }));
     return Promise.resolve();
   });
-  const deleteOne = jest.fn<Promise<void>, [string]>((id) => {
+  const deleteOne = jest.fn<Promise<void>, [string, string?]>((id) => {
     current = current.filter((n) => n.id !== id);
     return Promise.resolve();
   });
-  const deleteAll = jest.fn<Promise<void>, []>(() => {
+  const deleteAll = jest.fn<Promise<void>, [string?]>(() => {
     current = [];
     return Promise.resolve();
   });
@@ -148,7 +150,8 @@ describe('NotificationService 既読・削除の永続化委譲', () => {
     await service.markAsRead('n1');
 
     // 専用 UPDATE 経路に委譲され、複製を起こす saveAll/save は呼ばれない
-    expect(markAsRead).toHaveBeenCalledWith('n1');
+    // (第2引数は Phase α-4 の宛先ユーザー。未指定経路では undefined が委譲される)
+    expect(markAsRead).toHaveBeenCalledWith('n1', undefined);
     expect(saveAll).not.toHaveBeenCalled();
     expect(save).not.toHaveBeenCalled();
 
@@ -167,7 +170,7 @@ describe('NotificationService 既読・削除の永続化委譲', () => {
 
     await service.markAsRead('alert1');
 
-    expect(markAsRead).toHaveBeenCalledWith('alert1');
+    expect(markAsRead).toHaveBeenCalledWith('alert1', undefined);
     expect((await service.getNotifications())[0].read).toBe(true);
   });
 
@@ -210,7 +213,7 @@ describe('NotificationService 既読・削除の永続化委譲', () => {
     // 後勝ちで既読が失われない
     const after = await service.getNotifications();
     expect(after.find((n) => n.id === 'n1')?.read).toBe(true);
-    expect(markAsRead).toHaveBeenCalledWith('n1');
+    expect(markAsRead).toHaveBeenCalledWith('n1', undefined);
   });
 
   test('markAllAsRead / deleteNotification / clearAll も専用メソッドへ委譲する', async () => {
@@ -226,7 +229,7 @@ describe('NotificationService 既読・削除の永続化委譲', () => {
     expect(await service.countUnread()).toBe(0);
 
     await service.deleteNotification('n1');
-    expect(deleteOne).toHaveBeenCalledWith('n1');
+    expect(deleteOne).toHaveBeenCalledWith('n1', undefined);
     expect(await service.getNotifications()).toHaveLength(1);
 
     await service.clearAll();
@@ -235,5 +238,51 @@ describe('NotificationService 既読・削除の永続化委譲', () => {
 
     // いずれの操作も複製を起こす saveAll を使わない
     expect(saveAll).not.toHaveBeenCalled();
+  });
+});
+
+describe('NotificationService ユーザー分離 (Phase α-4)', () => {
+  test('userId 指定の読み取りはリポジトリへ userId を渡す (DB モードで宛先分離)', async () => {
+    const { repo, loadAll } = makeRepoMock([makeNotification('n1')]);
+    const { trigger, note } = deps();
+    const service = new NotificationService(repo, trigger, note, 'db');
+
+    await service.getNotifications(false, 'user-a-uuid');
+    expect(loadAll).toHaveBeenLastCalledWith('user-a-uuid');
+
+    await service.countUnread('user-a-uuid');
+    expect(loadAll).toHaveBeenLastCalledWith('user-a-uuid');
+  });
+
+  test('userId 指定の更新系はリポジトリへ userId を渡す (他ユーザー宛の操作を防ぐ)', async () => {
+    const { repo, markAsRead, markAllAsRead, deleteOne, deleteAll } = makeRepoMock([
+      makeNotification('n1'),
+    ]);
+    const { trigger, note } = deps();
+    const service = new NotificationService(repo, trigger, note, 'db');
+
+    await service.markAsRead('n1', 'user-a-uuid');
+    expect(markAsRead).toHaveBeenCalledWith('n1', 'user-a-uuid');
+
+    await service.markAllAsRead('user-a-uuid');
+    expect(markAllAsRead).toHaveBeenCalledWith('user-a-uuid');
+
+    await service.deleteNotification('n1', 'user-a-uuid');
+    expect(deleteOne).toHaveBeenCalledWith('n1', 'user-a-uuid');
+
+    await service.clearAll('user-a-uuid');
+    expect(deleteAll).toHaveBeenCalledWith('user-a-uuid');
+  });
+
+  test('userId 未指定は従来挙動 (引数なし委譲) を維持する (後方互換)', async () => {
+    const { repo, loadAll, markAsRead } = makeRepoMock([makeNotification('n1')]);
+    const { trigger, note } = deps();
+    const service = new NotificationService(repo, trigger, note, 'db');
+
+    await service.getNotifications();
+    expect(loadAll).toHaveBeenLastCalledWith(undefined);
+
+    await service.markAsRead('n1');
+    expect(markAsRead).toHaveBeenCalledWith('n1', undefined);
   });
 });

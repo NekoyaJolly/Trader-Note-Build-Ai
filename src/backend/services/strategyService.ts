@@ -30,6 +30,8 @@ export interface CreateStrategyInput {
   exitSettings: object;    // ExitSettings JSON
   entryTiming?: string;
   tags?: string[];
+  /** 所有ユーザー (Phase α-4 マルチユーザー分離)。HTTP 経路では必ず設定 */
+  userId?: string;
 }
 
 /**
@@ -58,6 +60,8 @@ export interface ListStrategiesParams {
   symbol?: string;
   limit?: number;
   offset?: number;
+  /** 所有ユーザーで絞り込み (Phase α-4)。HTTP 経路では必ず指定 */
+  userId?: string;
 }
 
 /**
@@ -130,15 +134,17 @@ const SUPPORTED_TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '4h'];
  * ストラテジー一覧を取得
  */
 export async function listStrategies(params: ListStrategiesParams = {}): Promise<StrategySummary[]> {
-  const { status, symbol, limit = 50, offset = 0 } = params;
+  const { status, symbol, limit = 50, offset = 0, userId } = params;
 
   // フィルタ条件を構築
   const where: {
     status?: StrategyStatus;
     symbol?: string;
+    userId?: string;
   } = {};
   if (status) where.status = status;
   if (symbol) where.symbol = symbol;
+  if (userId) where.userId = userId;
 
   const strategies = await prisma.strategy.findMany({
     where,
@@ -168,10 +174,12 @@ export async function listStrategies(params: ListStrategiesParams = {}): Promise
 
 /**
  * ストラテジー詳細を取得
+ *
+ * @param userId - 所有ユーザー (Phase α-4)。指定時は他ユーザーのストラテジーを null (404 相当) にする
  */
-export async function getStrategy(id: string): Promise<StrategyDetail | null> {
-  const strategy = await prisma.strategy.findUnique({
-    where: { id },
+export async function getStrategy(id: string, userId?: string): Promise<StrategyDetail | null> {
+  const strategy = await prisma.strategy.findFirst({
+    where: { id, ...(userId ? { userId } : {}) },
     include: {
       versions: {
         orderBy: { versionNumber: 'desc' },
@@ -218,9 +226,26 @@ export async function getStrategy(id: string): Promise<StrategyDetail | null> {
 }
 
 /**
+ * ストラテジーの所有権チェック (Phase α-4 マルチユーザー分離)。
+ * userId 指定時、対象が所有ユーザーのものでなければ「見つかりません」エラーを投げる。
+ * ルート層の事前チェック (バックテスト・アラート・ノート等のネスト資源) でも使う。
+ */
+export async function assertStrategyOwnership(strategyId: string, userId?: string): Promise<void> {
+  if (!userId) return;
+  const owned = await prisma.strategy.findFirst({
+    where: { id: strategyId, userId },
+    select: { id: true },
+  });
+  if (!owned) {
+    throw new Error('ストラテジーが見つかりません');
+  }
+}
+
+/**
  * 特定バージョンの詳細を取得
  */
-export async function getStrategyVersion(strategyId: string, versionNumber: number) {
+export async function getStrategyVersion(strategyId: string, versionNumber: number, userId?: string) {
+  await assertStrategyOwnership(strategyId, userId);
   const version = await prisma.strategyVersion.findFirst({
     where: {
       strategyId,
@@ -253,11 +278,13 @@ export async function rollbackStrategyVersion(params: {
   strategyId: string;
   versionNumber: number;
   changeNote?: string;
+  /** 所有ユーザー (Phase α-4)。指定時は所有ストラテジーのみロールバック可 */
+  userId?: string;
 }): Promise<StrategyDetail> {
-  const { strategyId, versionNumber, changeNote } = params;
+  const { strategyId, versionNumber, changeNote, userId } = params;
 
-  const strategy = await prisma.strategy.findUnique({
-    where: { id: strategyId },
+  const strategy = await prisma.strategy.findFirst({
+    where: { id: strategyId, ...(userId ? { userId } : {}) },
     include: {
       versions: { orderBy: { versionNumber: 'desc' }, take: 1 },
     },
@@ -346,6 +373,8 @@ export async function createStrategy(input: CreateStrategyInput): Promise<Strate
         side: input.side,
         status: 'draft',
         tags: input.tags || [],
+        // Phase α-4: 所有ユーザーを設定 (マルチユーザー分離)
+        userId: input.userId,
       },
     });
 
@@ -384,10 +413,10 @@ export async function createStrategy(input: CreateStrategyInput): Promise<Strate
 /**
  * ストラテジーを更新（常に新バージョンを作成）
  */
-export async function updateStrategy(id: string, input: UpdateStrategyInput): Promise<StrategyDetail> {
-  // 既存ストラテジーを取得
-  const existing = await prisma.strategy.findUnique({
-    where: { id },
+export async function updateStrategy(id: string, input: UpdateStrategyInput, userId?: string): Promise<StrategyDetail> {
+  // 既存ストラテジーを取得 (userId 指定時は所有チェックを兼ねる。Phase α-4)
+  const existing = await prisma.strategy.findFirst({
+    where: { id, ...(userId ? { userId } : {}) },
     include: {
       versions: {
         orderBy: { versionNumber: 'desc' },
@@ -491,9 +520,9 @@ export async function updateStrategy(id: string, input: UpdateStrategyInput): Pr
 /**
  * ストラテジーを削除
  */
-export async function deleteStrategy(id: string): Promise<void> {
-  const existing = await prisma.strategy.findUnique({
-    where: { id },
+export async function deleteStrategy(id: string, userId?: string): Promise<void> {
+  const existing = await prisma.strategy.findFirst({
+    where: { id, ...(userId ? { userId } : {}) },
   });
 
   if (!existing) {
@@ -509,9 +538,9 @@ export async function deleteStrategy(id: string): Promise<void> {
 /**
  * ストラテジーのステータスを変更
  */
-export async function updateStrategyStatus(id: string, status: StrategyStatus): Promise<StrategyDetail> {
-  const existing = await prisma.strategy.findUnique({
-    where: { id },
+export async function updateStrategyStatus(id: string, status: StrategyStatus, userId?: string): Promise<StrategyDetail> {
+  const existing = await prisma.strategy.findFirst({
+    where: { id, ...(userId ? { userId } : {}) },
   });
 
   if (!existing) {
@@ -531,8 +560,9 @@ export async function updateStrategyStatus(id: string, status: StrategyStatus): 
 /**
  * ストラテジーを複製
  */
-export async function duplicateStrategy(id: string, newName?: string): Promise<StrategyDetail> {
-  const existing = await getStrategy(id);
+export async function duplicateStrategy(id: string, newName?: string, userId?: string): Promise<StrategyDetail> {
+  // userId 指定時は所有ストラテジーのみ複製可 (Phase α-4)
+  const existing = await getStrategy(id, userId);
   if (!existing || !existing.currentVersion) {
     throw new Error('複製元のストラテジーが見つかりません');
   }
@@ -553,5 +583,7 @@ export async function duplicateStrategy(id: string, newName?: string): Promise<S
     exitSettings: existing.currentVersion.exitSettings,
     entryTiming: existing.currentVersion.entryTiming,
     tags: existing.tags,
+    // 複製先も同じ所有ユーザーに帰属させる
+    userId,
   });
 }

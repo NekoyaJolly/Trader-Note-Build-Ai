@@ -15,7 +15,7 @@
  * - GET    /api/strategies/:id/backtest/:runId - バックテスト結果詳細
  */
 
-import type { Request, Response } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import { Router } from 'express';
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
@@ -35,6 +35,7 @@ import {
   updateStrategyStatus,
   duplicateStrategy,
   rollbackStrategyVersion,
+  assertStrategyOwnership,
 } from '../services/strategyService';
 import {
   runBacktest,
@@ -347,6 +348,8 @@ router.get('/', async (req: Request, res: Response) => {
       symbol: getOptionalStringParam(symbol),
       limit: getNumberParam(limit),
       offset: getNumberParam(offset),
+      // Phase α-4: 認証ユーザーのストラテジーのみ返す (requireAuth 配下)
+      userId: req.user!.userId,
     });
 
     res.json({
@@ -651,13 +654,34 @@ router.get('/ohlcv/fetch-progress/:jobId', (req: Request, res: Response) => {
   });
 });
 /**
+ * Phase α-4 (マルチユーザー分離): `/:id` 配下の全ルート (詳細/更新/削除/バックテスト/
+ * ノート/アラート/WF/モンテカルロ等) に、ストラテジーの所有チェックを一括適用する。
+ * 他ユーザーのストラテジーは存在しない扱い (404)。
+ * `:id` がストラテジー ID でない静的パス (上で定義済みの filters/symbols/ohlcv) は
+ * このミドルウェアより前に登録されているため到達しない。
+ * 認証コンテキストが無い場合 (req.user 未設定) は従来挙動 (チェックなし) を維持する。
+ */
+router.use('/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await assertStrategyOwnership(req.params.id, req.user?.userId);
+    next();
+  } catch {
+    res.status(404).json({
+      success: false,
+      error: 'ストラテジーが見つかりません',
+    });
+  }
+});
+
+/**
  * GET /api/strategies/:id
  * ストラテジー詳細を取得
  */
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const strategy = await getStrategy(getStringParam(id));
+    // Phase α-4: 他ユーザーのストラテジーは存在しない扱い (404)
+    const strategy = await getStrategy(getStringParam(id), req.user!.userId);
 
     if (!strategy) {
       return res.status(404).json({
@@ -687,7 +711,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.get('/:id/versions/:versionNumber', async (req: Request, res: Response) => {
   try {
     const { id, versionNumber } = req.params;
-    const version = await getStrategyVersion(getStringParam(id), parseInt(getStringParam(versionNumber), 10));
+    const version = await getStrategyVersion(getStringParam(id), parseInt(getStringParam(versionNumber), 10), req.user!.userId);
 
     if (!version) {
       return res.status(404).json({
@@ -744,6 +768,7 @@ router.put('/:id/rollback/:versionNumber', async (req: Request, res: Response) =
       strategyId: id,
       versionNumber,
       changeNote,
+      userId: req.user!.userId,
     });
 
     res.json({
@@ -798,6 +823,8 @@ router.post('/', async (req: Request, res: Response) => {
       exitSettings,
       entryTiming,
       tags,
+      // Phase α-4: 作成したストラテジーを認証ユーザーに帰属させる
+      userId: req.user!.userId,
     });
 
     res.status(201).json({
@@ -857,7 +884,7 @@ router.put('/:id', async (req: Request, res: Response) => {
       status,
       tags,
       changeNote,
-    });
+    }, req.user!.userId);
 
     res.json({
       success: true,
@@ -888,7 +915,7 @@ router.put('/:id', async (req: Request, res: Response) => {
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    await deleteStrategy(id);
+    await deleteStrategy(id, req.user!.userId);
 
     res.json({
       success: true,
@@ -929,7 +956,7 @@ router.put('/:id/status', async (req: Request, res: Response) => {
     }
     const { status } = parsed.data;
 
-    const strategy = await updateStrategyStatus(id, status);
+    const strategy = await updateStrategyStatus(id, status, req.user!.userId);
 
     res.json({
       success: true,
@@ -970,7 +997,7 @@ router.post('/:id/duplicate', async (req: Request, res: Response) => {
     }
     const { name } = parsed.data;
 
-    const strategy = await duplicateStrategy(id, name);
+    const strategy = await duplicateStrategy(id, name, req.user!.userId);
 
     res.status(201).json({
       success: true,

@@ -38,6 +38,8 @@ export interface CreateTradeNoteInput {
   marketContext?: Prisma.InputJsonValue;  // JSON: trend, calculatedIndicators 等
   userNotes?: string;
   tags?: string[];
+  /** 所有ユーザー (Phase α-4 マルチユーザー分離)。HTTP 経路では必ず設定する */
+  userId?: string;
 }
 
 /**
@@ -82,6 +84,11 @@ export interface FindNotesOptions {
   tags?: string[];
   limit?: number;
   offset?: number;
+  /**
+   * 所有ユーザーで絞り込む (Phase α-4 マルチユーザー分離)。
+   * HTTP 経路では必ず指定する。cron / pipeline 等のユーザー横断処理では未指定 (全件)。
+   */
+  userId?: string;
 }
 
 /**
@@ -130,6 +137,8 @@ export class TradeNoteRepository {
           marketContext: noteInput.marketContext,
           userNotes: noteInput.userNotes,
           tags: noteInput.tags,
+          // Phase α-4: 所有ユーザーを設定 (マルチユーザー分離)
+          userId: noteInput.userId,
         },
       });
 
@@ -157,9 +166,10 @@ export class TradeNoteRepository {
    * @param id - TradeNote の ID
    * @returns TradeNote (AISummary を含む)、存在しない場合は null
    */
-  async findById(id: string): Promise<TradeNoteWithSummary | null> {
-    return await this.prisma.tradeNote.findUnique({
-      where: { id },
+  async findById(id: string, userId?: string): Promise<TradeNoteWithSummary | null> {
+    // ユーザー分離: userId 指定時は所有ノートのみ返す (他ユーザーのノートは null)
+    return await this.prisma.tradeNote.findFirst({
+      where: { id, ...(userId ? { userId } : {}) },
       // trade を含めて数量・エントリー時刻を実値表示できるようにする (F6)
       include: { aiSummary: true, trade: true },
     });
@@ -171,9 +181,9 @@ export class TradeNoteRepository {
    * @param tradeId - Trade の ID
    * @returns TradeNote (AISummary を含む)、存在しない場合は null
    */
-  async findByTradeId(tradeId: string): Promise<TradeNoteWithSummary | null> {
-    return await this.prisma.tradeNote.findUnique({
-      where: { tradeId },
+  async findByTradeId(tradeId: string, userId?: string): Promise<TradeNoteWithSummary | null> {
+    return await this.prisma.tradeNote.findFirst({
+      where: { tradeId, ...(userId ? { userId } : {}) },
       include: { aiSummary: true },
     });
   }
@@ -188,11 +198,11 @@ export class TradeNoteRepository {
    * 制約:
    * - 最大 1000 件まで取得可能 (過負荷防止)
    */
-  async findBySymbol(symbol: string, limit: number = 100): Promise<TradeNoteWithSummary[]> {
+  async findBySymbol(symbol: string, limit: number = 100, userId?: string): Promise<TradeNoteWithSummary[]> {
     const safeLimit = Math.min(limit, 1000); // 最大 1000 件に制限
 
     return await this.prisma.tradeNote.findMany({
-      where: { symbol },
+      where: { symbol, ...(userId ? { userId } : {}) },
       include: { aiSummary: true },
       orderBy: { createdAt: 'desc' },
       take: safeLimit,
@@ -209,10 +219,11 @@ export class TradeNoteRepository {
    * 制約:
    * - 最大 1000 件まで取得可能 (過負荷防止)
    */
-  async findAll(limit: number = 100, offset: number = 0): Promise<TradeNoteWithSummary[]> {
+  async findAll(limit: number = 100, offset: number = 0, userId?: string): Promise<TradeNoteWithSummary[]> {
     const safeLimit = Math.min(limit, 1000); // 最大 1000 件に制限
 
     return await this.prisma.tradeNote.findMany({
+      where: userId ? { userId } : undefined,
       include: { aiSummary: true },
       orderBy: { createdAt: 'desc' },
       take: safeLimit,
@@ -247,7 +258,8 @@ export class TradeNoteRepository {
    * - TradeNote と関連する AISummary が DB から削除される
    * - MatchResult が存在する場合は削除が失敗する可能性がある (外部キー制約)
    */
-  async delete(id: string): Promise<TradeNote> {
+  async delete(id: string, userId?: string): Promise<TradeNote> {
+    await this.assertOwnership(id, userId);
     return await this.prisma.tradeNote.delete({
       where: { id },
     });
@@ -259,9 +271,12 @@ export class TradeNoteRepository {
    * @param symbol - シンボルで絞り込む (オプション)
    * @returns TradeNote の件数
    */
-  async count(symbol?: string): Promise<number> {
+  async count(symbol?: string, userId?: string): Promise<number> {
+    const where: Prisma.TradeNoteWhereInput = {};
+    if (symbol) where.symbol = symbol;
+    if (userId) where.userId = userId;
     return await this.prisma.tradeNote.count({
-      where: symbol ? { symbol } : undefined,
+      where: Object.keys(where).length > 0 ? where : undefined,
     });
   }
 
@@ -276,7 +291,8 @@ export class TradeNoteRepository {
   async findByDateRange(
     startDate: Date,
     endDate: Date,
-    limit: number = 100
+    limit: number = 100,
+    userId?: string
   ): Promise<TradeNoteWithSummary[]> {
     const safeLimit = Math.min(limit, 1000);
 
@@ -286,6 +302,7 @@ export class TradeNoteRepository {
           gte: startDate,
           lte: endDate,
         },
+        ...(userId ? { userId } : {}),
       },
       include: { aiSummary: true },
       orderBy: { createdAt: 'desc' },
@@ -316,7 +333,7 @@ export class TradeNoteRepository {
    * 優先度の高い順にソート
    */
   async findActiveForMatching(options: Omit<FindNotesOptions, 'status'> = {}): Promise<TradeNoteWithSummary[]> {
-    const { symbol, tags, limit = 100, offset = 0 } = options;
+    const { symbol, tags, limit = 100, offset = 0, userId } = options;
     const safeLimit = Math.min(limit, 1000);
     const now = new Date();
 
@@ -335,6 +352,9 @@ export class TradeNoteRepository {
     if (tags && tags.length > 0) {
       where.tags = { hasSome: tags };
     }
+    if (userId) {
+      where.userId = userId;
+    }
 
     return await this.prisma.tradeNote.findMany({
       where,
@@ -349,9 +369,26 @@ export class TradeNoteRepository {
   }
 
   /**
+   * 更新系操作の所有権チェック (Phase α-4 マルチユーザー分離)。
+   * userId 指定時、対象ノートが所有ユーザーのものでなければエラーを投げる。
+   * エラーメッセージはコントローラの 404 マッピング(「見つかりませんでした」)に合わせる。
+   */
+  private async assertOwnership(noteId: string, userId?: string): Promise<void> {
+    if (!userId) return;
+    const owned = await this.prisma.tradeNote.findFirst({
+      where: { id: noteId, userId },
+      select: { id: true },
+    });
+    if (!owned) {
+      throw new Error(`ノートが見つかりませんでした: ${noteId}`);
+    }
+  }
+
+  /**
    * ノートの優先度を更新する（フェーズ8）
    */
-  async updatePriority(noteId: string, priority: number): Promise<void> {
+  async updatePriority(noteId: string, priority: number, userId?: string): Promise<void> {
+    await this.assertOwnership(noteId, userId);
     const clampedPriority = Math.max(1, Math.min(10, priority));
     await this.prisma.tradeNote.update({
       where: { id: noteId },
@@ -362,7 +399,8 @@ export class TradeNoteRepository {
   /**
    * ノートの有効/無効を切り替える（フェーズ8）
    */
-  async setEnabled(noteId: string, enabled: boolean): Promise<void> {
+  async setEnabled(noteId: string, enabled: boolean, userId?: string): Promise<void> {
+    await this.assertOwnership(noteId, userId);
     await this.prisma.tradeNote.update({
       where: { id: noteId },
       data: { enabled },
@@ -371,11 +409,12 @@ export class TradeNoteRepository {
 
   /**
    * ノートを一時停止する（フェーズ8）
-   * 
+   *
    * @param noteId ノートID
    * @param until 停止終了日時（null で停止解除）
    */
-  async setPausedUntil(noteId: string, until: Date | null): Promise<void> {
+  async setPausedUntil(noteId: string, until: Date | null, userId?: string): Promise<void> {
+    await this.assertOwnership(noteId, userId);
     await this.prisma.tradeNote.update({
       where: { id: noteId },
       data: { pausedUntil: until },
@@ -393,12 +432,12 @@ export class TradeNoteRepository {
    * オプションを指定してノートを取得する
    */
   async findWithOptions(options: FindNotesOptions = {}): Promise<TradeNoteWithSummary[]> {
-    const { status, symbol, tags, limit = 100, offset = 0 } = options;
+    const { status, symbol, tags, limit = 100, offset = 0, userId } = options;
     const safeLimit = Math.min(limit, 1000);
 
     // where 条件を構築（Prisma の生成型を使用）
     const where: Prisma.TradeNoteWhereInput = {};
-    
+
     if (status) {
       // status は文字列または配列で指定可能
       if (Array.isArray(status)) {
@@ -412,6 +451,9 @@ export class TradeNoteRepository {
     }
     if (tags && tags.length > 0) {
       where.tags = { hasSome: tags };
+    }
+    if (userId) {
+      where.userId = userId;
     }
 
     return await this.prisma.tradeNote.findMany({
@@ -429,7 +471,8 @@ export class TradeNoteRepository {
    * @param id - TradeNote の ID
    * @returns 更新された TradeNote
    */
-  async approve(id: string): Promise<TradeNote> {
+  async approve(id: string, userId?: string): Promise<TradeNote> {
+    await this.assertOwnership(id, userId);
     return await this.prisma.tradeNote.update({
       where: { id },
       data: {
@@ -446,7 +489,8 @@ export class TradeNoteRepository {
    * @param id - TradeNote の ID
    * @returns 更新された TradeNote
    */
-  async reject(id: string): Promise<TradeNote> {
+  async reject(id: string, userId?: string): Promise<TradeNote> {
+    await this.assertOwnership(id, userId);
     return await this.prisma.tradeNote.update({
       where: { id },
       data: {
@@ -462,7 +506,8 @@ export class TradeNoteRepository {
    * @param id - TradeNote の ID
    * @returns 更新された TradeNote
    */
-  async revertToDraft(id: string): Promise<TradeNote> {
+  async revertToDraft(id: string, userId?: string): Promise<TradeNote> {
+    await this.assertOwnership(id, userId);
     return await this.prisma.tradeNote.update({
       where: { id },
       data: {
@@ -480,7 +525,8 @@ export class TradeNoteRepository {
    * @param input - 更新内容
    * @returns 更新された TradeNote
    */
-  async updateUserContent(id: string, input: UpdateTradeNoteInput): Promise<TradeNote> {
+  async updateUserContent(id: string, input: UpdateTradeNoteInput, userId?: string): Promise<TradeNote> {
+    await this.assertOwnership(id, userId);
     return await this.prisma.tradeNote.update({
       where: { id },
       data: {
@@ -507,9 +553,10 @@ export class TradeNoteRepository {
   /**
    * ステータス別の件数を取得する
    */
-  async countByStatus(): Promise<{ status: NoteStatus; count: number }[]> {
+  async countByStatus(userId?: string): Promise<{ status: NoteStatus; count: number }[]> {
     const results = await this.prisma.tradeNote.groupBy({
       by: ['status'],
+      where: userId ? { userId } : undefined,
       _count: true,
     });
 
