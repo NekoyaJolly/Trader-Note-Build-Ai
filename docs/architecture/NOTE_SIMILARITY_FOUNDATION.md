@@ -273,6 +273,29 @@ similarity(noteSnapshot, marketSnapshot):
 
 ---
 
+## 11. 実装状況(追補)
+
+| 日付 | 内容 |
+|---|---|
+| 2026-06-10 | **基盤コア実装(移行戦略 §9-1、非破壊・並行)**: `src/shared/similarity/` に正準型・インジケーターレンズ・類似度エンジンを新設。配線(ノート生成・マッチング)は次段階。 |
+
+### 実装のローカル詳細(2026-06-10、正本への追補)
+
+- **実装配置**: `src/shared/similarity/`(横断共有層。side-b への依存なし、状態レンズの出力キーはカタログとしてデータ定義)
+  - `lensSnapshotTypes.ts` — `NoteLensSnapshot` 正準型 + Zod 検証(`parseNoteLensSnapshot` は破損/旧形式で null = 比較対象外に倒す)
+  - `indicatorLenses.ts` — コア 4 種 + `ind:ma_cross`(複数 MA の期間昇順・隣接ペアから自動生成)
+  - `lensComparators.ts` — レンズ別比較カタログ(状態 8 種 + 指標 5 種)
+  - `similarityEngine.ts` — `compareLensSnapshots`(レンズ単位類似度 → 2 段集計 → 閾値発火)
+- **lensId 形式**: `ind:rsi#p14` / `ind:macd#f12s26g9` / `ind:ma#ema20` / `ind:ma_cross#ema20xsma75` / `ind:bb#p20`(`#` 以降がパラメータ識別子。比較定義は `#` より前で解決)
+- **層重みの集計は 2 段**(§6.3 の実装詳細): 層内で confidence 連動の加重平均 → 層間でプリセット加重平均。レンズ数の多寡(状態 8 vs 指標数本)で層バランスが崩れないようにするため。片層しか無い場合は存在する層で再正規化。
+- **プリセット値**: 指標重視 0.65/0.35(既定)、バランス 0.5/0.5、状態重視 0.35/0.65。
+- **既定しきい値**: 発火 0.75、レベル帯 strong 0.9 / medium 0.8 / weak 0.7(既存 `noteEvaluator` 定数を踏襲)。
+- **イベント比較の none×方向 = 0.25**(§6.2 表の「レンズ定義」部分を一律値で確定)。
+- **カタログ未定義キーのフォールバック**: boolean のみ一致/不一致で比較、数値・文字列は比較対象外(新キーを効かせる場合はカタログ追記 = 加算的拡張)。
+- **比較対象外(skip)を明示したキー**: 絶対価格(`last_high_price` 等)、絶対ボラ値(`bb_width`/`atr` 生値)、メタ確度(`confidence_pct`/`wyckoff_phase_confidence`/`pattern_confidence`)、細粒度時刻(`utc_minute`/`day_of_month`)。
+
+---
+
 ## 付録: 現状資産の再利用マップ
 
 | 本設計の要素 | 再利用する現状資産 | 新規 |
