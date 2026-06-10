@@ -24,6 +24,8 @@ import {
   IndicatorProfile,
   ProfileIndicatorConfig,
 } from "@/lib/api";
+// インジケーター別のパラメータ定義はインジケーター設定モーダルと共有する (Phase α-4b)
+import { getParamFields } from "@/components/IndicatorConfigModal";
 
 /**
  * プロファイルカードコンポーネント
@@ -168,6 +170,23 @@ function ProfileEditModal({
     }
   };
 
+  // 選択中インジケーターのパラメータを更新する (Phase α-4b)。
+  // プロファイルはインジケーター設定とは独立に params を持つため、
+  // ここでの編集は元のインジケーター設定 (activeSet) には影響しない。
+  const updateIndicatorParam = (
+    configId: string,
+    key: keyof ProfileIndicatorConfig["params"],
+    value: number
+  ) => {
+    setSelectedIndicators((prev) =>
+      prev.map((i) =>
+        i.configId === configId
+          ? { ...i, params: { ...i.params, [key]: value } }
+          : i
+      )
+    );
+  };
+
   // 保存ハンドラ
   const handleSave = async () => {
     if (!name.trim()) {
@@ -271,6 +290,63 @@ function ProfileEditModal({
               選択中: {selectedIndicators.length}個
             </p>
           </div>
+
+          {/* 選択中インジケーターのパラメータ編集 (Phase α-4b) */}
+          {selectedIndicators.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                パラメータ
+              </label>
+              <div className="space-y-2">
+                {selectedIndicators.map((indicator) => {
+                  const fields = getParamFields(indicator.indicatorId);
+                  // OBV / VWAP 等のパラメータなしインジケーターは行を出さない
+                  if (fields.length === 0) return null;
+                  return (
+                    <div
+                      key={indicator.configId}
+                      className="flex flex-wrap items-center gap-x-4 gap-y-2 p-3 bg-slate-900/50 border border-slate-700/50 rounded-lg"
+                    >
+                      <span className="text-sm text-white w-32 flex-shrink-0 truncate">
+                        {indicator.label}
+                      </span>
+                      {fields.map((field) => {
+                        // index signature 由来で string | boolean も型上は混ざるため number に narrow する
+                        const paramValue = indicator.params?.[field.key];
+                        return (
+                          <label
+                            key={field.key}
+                            className="flex items-center gap-2 text-xs text-gray-400"
+                          >
+                            {field.label}
+                            <input
+                              type="number"
+                              value={typeof paramValue === "number" ? paramValue : ""}
+                              onChange={(e) =>
+                                updateIndicatorParam(
+                                  indicator.configId,
+                                  field.key,
+                                  parseFloat(e.target.value) || 0
+                                )
+                              }
+                              min={field.min}
+                              max={field.max}
+                              step={field.step || 1}
+                              className="w-20 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-sm text-white focus:border-violet-500 focus:outline-none"
+                              aria-label={`${indicator.label} ${field.label}`}
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                ここでの変更はこのプロファイルにのみ保存されます（元のインジケーター設定は変わりません）
+              </p>
+            </div>
+          )}
         </div>
 
         {/* ボタン */}

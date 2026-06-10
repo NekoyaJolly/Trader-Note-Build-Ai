@@ -27,8 +27,10 @@ interface IndicatorConfigModalProps {
 
 /**
  * パラメータ入力フィールドの設定
+ *
+ * プロファイル編集モーダル (settings/profiles) でも再利用するため export する (Phase α-4b)
  */
-interface ParamFieldConfig {
+export interface ParamFieldConfig {
   key: keyof IndicatorParams;
   label: string;
   min?: number;
@@ -38,8 +40,11 @@ interface ParamFieldConfig {
 
 /**
  * インジケーターIDからパラメータフィールド設定を取得
+ *
+ * プロファイル編集モーダルでも再利用するため export する (Phase α-4b)。
+ * インジケーター別のパラメータ定義はこの 1 箇所に集約する (DRY)。
  */
-function getParamFields(indicatorId: string): ParamFieldConfig[] {
+export function getParamFields(indicatorId: string): ParamFieldConfig[] {
   switch (indicatorId) {
     case 'rsi':
     case 'sma':
