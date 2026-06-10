@@ -5,6 +5,24 @@
  */
 import type { Config } from 'jest';
 
+/**
+ * 実 DB (PostgreSQL) に接続する統合テストの一覧。
+ *
+ * これらは TRUNCATE / deleteMany を含む破壊的操作を行うため、既定の `npm test` から
+ * 除外し、`npm run test:integration:db` (jest.db.config.ts) 経由でのみ実行する。
+ * 理由: ローカル .env / CI secrets の DATABASE_URL が本番 Supabase を指した状態で
+ * 実行され、本番テーブルが TRUNCATE される事故が発生した (2026-06-11 調査で確定)。
+ */
+export const dbIntegrationTestFiles = [
+  'src/backend/tests/tradeImportService.test.ts',
+  'src/backend/tests/tradeNoteIntegration.test.ts',
+  'src/backend/tests/revaluationJobService.test.ts',
+  'src/backend/tests/marketIngestService.test.ts',
+  'src/backend/tests/ohlcvRepository.test.ts',
+  'src/backend/tests/featureService.test.ts',
+  'src/backend/tests/crossSimilarityService.test.ts',
+];
+
 const config: Config = {
   preset: 'ts-jest',
   testEnvironment: 'node',
@@ -14,6 +32,8 @@ const config: Config = {
     '**/services/tests/**/*.test.ts',
     '**/side-b/tests/**/*.test.ts',  // Side-B テスト追加
   ],
+  // 実 DB 接続スイートを既定実行から除外 (実行経路は jest.db.config.ts のみ)
+  testPathIgnorePatterns: ['/node_modules/', ...dbIntegrationTestFiles],
   setupFiles: ['<rootDir>/jest.setup.ts'],
   setupFilesAfterEnv: ['<rootDir>/src/backend/tests/setup/after-env.ts'],
   globalSetup: '<rootDir>/src/backend/tests/setup/global-setup.ts',
