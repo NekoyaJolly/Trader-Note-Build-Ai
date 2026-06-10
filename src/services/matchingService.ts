@@ -225,18 +225,30 @@ export class MatchingService {
       );
     }
 
-    // シンボル別にグループ化し、市場データ取得 + MarketSnapshot upsert を 1 回に抑える
-    const evaluationsBySymbol = new Map<string, LensNoteEvaluation[]>();
+    // シンボル × 時間足でグループ化し、市場データ取得 + MarketSnapshot upsert を 1 回に抑える。
+    // 時間足もキーに含めるのは、市場データを評価時間足と揃えるため
+    // (symbol だけだと getCurrentMarketDataWithIndicators が既定 '15m' に固定され、
+    // 1h 等のノートで MarketSnapshot / トレンド・価格帯チェックが評価と不整合になる)
+    const evaluationGroups = new Map<
+      string,
+      { symbol: string; timeframe: string; evaluations: LensNoteEvaluation[] }
+    >();
     for (const evaluation of detail.evaluations) {
-      const list = evaluationsBySymbol.get(evaluation.note.symbol) ?? [];
-      list.push(evaluation);
-      evaluationsBySymbol.set(evaluation.note.symbol, list);
+      const key = `${evaluation.note.symbol}__${evaluation.timeframe}`;
+      const group =
+        evaluationGroups.get(key) ??
+        { symbol: evaluation.note.symbol, timeframe: evaluation.timeframe, evaluations: [] };
+      group.evaluations.push(evaluation);
+      evaluationGroups.set(key, group);
     }
 
-    for (const [symbol, evaluations] of evaluationsBySymbol.entries()) {
+    for (const { symbol, timeframe, evaluations } of evaluationGroups.values()) {
       try {
-        // 現在の市場データを取得（MarketSnapshot 永続化と通知 UI 表示用）
-        const currentMarket = await this.marketDataService.getCurrentMarketDataWithIndicators(symbol);
+        // 現在の市場データを評価時間足で取得（MarketSnapshot 永続化と通知 UI 表示用）
+        const currentMarket = await this.marketDataService.getCurrentMarketDataWithIndicators(
+          symbol,
+          timeframe
+        );
 
         // MarketSnapshot を DB に保存（EvaluationLog / MatchResult の FK 用）
         let marketSnapshotId: string | undefined;
@@ -254,7 +266,7 @@ export class MatchingService {
           console.warn('MarketSnapshot 保存をスキップ:', snapshotError);
         }
 
-        for (const { note, timeframe, comparison } of evaluations) {
+        for (const { note, comparison } of evaluations) {
           // 比較不能(共通レンズなし等)は記録せずスキップ(理由はレンズ評価コアがログ済み)
           if (!comparison.comparable || comparison.score === null) {
             continue;

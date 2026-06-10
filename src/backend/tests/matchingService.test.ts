@@ -715,6 +715,8 @@ describe('MatchingService lens エンジン (Phase α-3)', () => {
     const matches = await service.checkForMatches();
 
     expect(mocks.evaluateNotesForMatching).toHaveBeenCalledWith([note]);
+    // 市場データは評価時間足で取得される(15m 固定にしない。Copilot レビュー #385 対応)
+    expect(mocks.getCurrentMarketDataWithIndicators).toHaveBeenCalledWith('USDJPY', '15m');
     expect(matches).toHaveLength(1);
     // score はレンズ類似度そのまま(旧経路のルール補正を適用しない)
     expect(matches[0]?.matchScore).toBe(0.86);
@@ -793,6 +795,33 @@ describe('MatchingService lens エンジン (Phase α-3)', () => {
     expect(matches).toHaveLength(0);
     expect(mocks.upsertLog).not.toHaveBeenCalled();
     expect(mocks.upsertByNoteAndSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('時間足が異なるノートはグループごとに評価時間足で市場データを取得する', async () => {
+    const note15m = createPrismaNote({ id: 'note_lens_15m', timeframe: '15m' });
+    const note1h = createPrismaNote({ id: 'note_lens_1h', timeframe: '1h' });
+    const { service, mocks } = buildLensService(note15m, {
+      activeNotes: 2,
+      notesWithSnapshot: 2,
+      symbols: 2,
+      evaluations: [
+        { note: note15m, timeframe: '15m', comparison: triggeredComparison },
+        { note: note1h, timeframe: '1h', comparison: triggeredComparison },
+      ],
+      errors: [],
+    });
+
+    const matches = await service.checkForMatches();
+
+    // 1h ノートの市場データが既定 '15m' に固定されず、評価時間足で取得される
+    expect(mocks.getCurrentMarketDataWithIndicators).toHaveBeenCalledTimes(2);
+    expect(mocks.getCurrentMarketDataWithIndicators).toHaveBeenCalledWith('USDJPY', '15m');
+    expect(mocks.getCurrentMarketDataWithIndicators).toHaveBeenCalledWith('USDJPY', '1h');
+    expect(matches).toHaveLength(2);
+    // EvaluationLog もそれぞれの評価時間足で記録される
+    expect(mocks.upsertLog).toHaveBeenCalledWith(
+      expect.objectContaining({ noteId: 'note_lens_1h', timeframe: '1h' })
+    );
   });
 
   it('MATCHING_ENGINE=legacy のときは旧経路が使われ lens 評価は呼ばれない', async () => {
