@@ -61,7 +61,22 @@ export class NotificationService {
     this.notifications = await this.repository.loadAll();
   }
 
+  /**
+   * 読み取り前にキャッシュの鮮度を保証する。
+   *
+   * DB モードでは本サービス以外の経路（マッチングパイプラインの
+   * `InAppNotificationSender.sendInApp` / ストラテジーアラートの
+   * `strategyAlertService` など）が Notification テーブルに**直接**書き込む。
+   * コンストラクタ時に 1 度ロードしたインメモリキャッシュのままだと、起動後に
+   * それらの経路で作られた通知が UI 一覧に出ない（= プロセスを再起動するまで
+   * 通知が届かない既存不具合）。そのため DB モードでは読み取りのたびに最新を
+   * 再ロードする。FS モードは本サービスが単一の書き込み者なので初回ロードで足りる。
+   */
   private async ensureLoaded(): Promise<void> {
+    if (this.storageMode === 'db') {
+      await this.loadFromRepository();
+      return;
+    }
     await this.loadPromise;
   }
 
@@ -162,43 +177,41 @@ export class NotificationService {
     return this.notifications;
   }
 
+  // 既読・削除はリポジトリの専用メソッドに委譲して永続化する。
+  // 旧実装は in-memory 配列を書き換えて saveAll で保存していたが、DB モードでは
+  // saveAll が「全件 create」になり既読/削除が反映されず通知が複製されていた
+  // （2026-06-10 実機検証で発見）。永続化後に in-memory を最新化してキャッシュ整合を保つ。
+
   /**
    * Mark notification as read
    */
   async markAsRead(notificationId: string): Promise<void> {
-    await this.ensureLoaded();
-    const notification = this.notifications.find(n => n.id === notificationId);
-    if (notification) {
-      notification.read = true;
-      await this.persist();
-    }
+    await this.repository.markAsRead(notificationId);
+    await this.loadFromRepository();
   }
 
   /**
    * Mark all notifications as read
    */
   async markAllAsRead(): Promise<void> {
-    await this.ensureLoaded();
-    this.notifications.forEach(n => n.read = true);
-    await this.persist();
+    await this.repository.markAllAsRead();
+    await this.loadFromRepository();
   }
 
   /**
    * Delete a notification
    */
   async deleteNotification(notificationId: string): Promise<void> {
-    await this.ensureLoaded();
-    this.notifications = this.notifications.filter(n => n.id !== notificationId);
-    await this.persist();
+    await this.repository.delete(notificationId);
+    await this.loadFromRepository();
   }
 
   /**
    * Clear all notifications
    */
   async clearAll(): Promise<void> {
-    await this.ensureLoaded();
-    this.notifications = [];
-    await this.persist();
+    await this.repository.deleteAll();
+    await this.loadFromRepository();
   }
 
   /**

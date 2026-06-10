@@ -103,6 +103,33 @@ export class FileNotificationRepository implements NotificationRepository {
     );
   }
 
+  // FS モードはファイル配列が単一の真実なので、対象を書き換えてファイルへ保存する。
+  async markAsRead(id: string): Promise<void> {
+    const all = await this.loadAll();
+    const target = all.find((n) => n.id === id);
+    if (target) {
+      target.read = true;
+      await this.saveAll(all);
+    }
+  }
+
+  async markAllAsRead(): Promise<void> {
+    const all = await this.loadAll();
+    for (const n of all) {
+      n.read = true;
+    }
+    await this.saveAll(all);
+  }
+
+  async delete(id: string): Promise<void> {
+    const all = await this.loadAll();
+    await this.saveAll(all.filter((n) => n.id !== id));
+  }
+
+  async deleteAll(): Promise<void> {
+    await this.saveAll([]);
+  }
+
   /**
    * 生データを Notification 型に変換する
    * 日付文字列を Date オブジェクトに変換
