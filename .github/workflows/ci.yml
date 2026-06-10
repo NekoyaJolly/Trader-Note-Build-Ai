@@ -131,11 +131,32 @@ jobs:
         run: npm test
         working-directory: src/frontend
 
-  # ── 3. DB 統合テスト（Supabase/Prisma、低並列） ──
+  # ── 3. DB 統合テスト（使い捨て service container、低並列） ──
+  # テストは TRUNCATE を含む破壊的操作を行うため、本番 Supabase ではなく
+  # ジョブ内で起動する PostgreSQL service container に対して実行する。
+  # (本番 DB に対して実行され本番データが TRUNCATE された事故の再発防止、2026-06-11)
+  # 本番 secrets.DATABASE_URL への接続は「未適用マイグレーション自己回復」ステップのみに限定する。
   db-integration-tests:
     name: DB Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: tradeassist_test
+          POSTGRES_PASSWORD: tradeassist_test
+          POSTGRES_DB: tradeassist_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tradeassist_test -d tradeassist_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # テスト専用のローカル接続文字列 (ジョブ終了とともに破棄される)
+      TEST_DATABASE_URL: postgresql://tradeassist_test:tradeassist_test@localhost:5432/tradeassist_test
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
@@ -149,10 +170,9 @@ jobs:
       - name: 依存関係をインストール
         run: npm ci
 
+      # prisma generate は DB 接続不要のため本番 URL を渡さない
       - name: Prisma セットアップ
         run: npx prisma generate
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       # push 時のみ未適用マイグレーションを自己回復的に適用。
       - name: 未適用マイグレーションを検出（push 時のみ）
@@ -184,11 +204,18 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
 
+      # service container に全マイグレーションを適用してテスト用スキーマを構築する
+      - name: テスト用 DB にマイグレーション適用（service container）
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+          DIRECT_URL: ${{ env.TEST_DATABASE_URL }}
+
       - name: DB 統合テスト実行（低並列）
         run: npm run test:integration:db -- --passWithNoTests
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+          DIRECT_URL: ${{ env.TEST_DATABASE_URL }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}

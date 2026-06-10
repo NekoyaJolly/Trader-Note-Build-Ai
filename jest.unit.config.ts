@@ -3,22 +3,14 @@
  *
  * DB/Supabase に触る重い統合テストは `jest.db.config.ts` に分離し、
  * PR の主要チェックを外部依存なしで安定させる。
+ * 除外リストは jest.config.ts の `dbIntegrationTestFiles` を単一の正本とする。
  */
 import type { Config } from 'jest';
-import baseConfig from './jest.config';
+import baseConfig, { dbIntegrationTestFiles } from './jest.config';
 
 const config: Config = {
   ...baseConfig,
-  testPathIgnorePatterns: [
-    '/node_modules/',
-    'src/backend/tests/tradeImportService.test.ts',
-    'src/backend/tests/tradeNoteIntegration.test.ts',
-    'src/backend/tests/revaluationJobService.test.ts',
-    'src/backend/tests/marketIngestService.test.ts',
-    'src/backend/tests/ohlcvRepository.test.ts',
-    'src/backend/tests/featureService.test.ts',
-    'src/backend/tests/crossSimilarityService.test.ts',
-  ],
+  testPathIgnorePatterns: ['/node_modules/', ...dbIntegrationTestFiles],
 };
 
 export default config;
