@@ -71,6 +71,20 @@ describe('NoteLensSnapshot 正準型(生成・検証)', () => {
     ).toBeNull();
   });
 
+  test('スキーマ版はメジャー一致のみ受理(マイナー差は通し、メジャー差は null)', () => {
+    const base = {
+      symbol: 'USDJPY',
+      timeframe: '15m',
+      eventTime: '2026-06-01T12:00:00Z',
+      lenses: { pattern: { lensVersion: '1.0.0', confidence: 1, features: { doji: true } } },
+    };
+    // マイナー/パッチ差(加算的拡張)は解釈可能なので受理
+    expect(parseNoteLensSnapshot({ ...base, snapshotSchemaVersion: '1.5.2' })).not.toBeNull();
+    // メジャー差(破壊的変更)・不正形式は比較対象外に落とす
+    expect(parseNoteLensSnapshot({ ...base, snapshotSchemaVersion: '2.0.0' })).toBeNull();
+    expect(parseNoteLensSnapshot({ ...base, snapshotSchemaVersion: 'invalid' })).toBeNull();
+  });
+
   test('lensEntryFromLensFeature は confidence 未申告を 1.0、逸脱値をクランプする', () => {
     expect(lensEntryFromLensFeature({ lensVersion: '1.0.0', features: {} }).confidence).toBe(1);
     expect(
@@ -188,6 +202,17 @@ describe('compareLensSnapshots — 層重みプリセット(§6.3)', () => {
     expect(result.score).toBeCloseTo(1, 5);
   });
 
+  test('lensWeightOverrides の Infinity/NaN は無効としてレンズごと除外(スコアが NaN 化しない)', () => {
+    const infinityResult = compareLensSnapshots(note, market, {
+      lensWeightOverrides: { 'ind:rsi#p14': Number.POSITIVE_INFINITY },
+    });
+    expect(infinityResult.score).toBeCloseTo(1, 5);
+    const nanResult = compareLensSnapshots(note, market, {
+      lensWeightOverrides: { 'ind:rsi#p14': Number.NaN },
+    });
+    expect(nanResult.score).toBeCloseTo(1, 5);
+  });
+
   test('confidence が低いレンズの寄与は自動的に下がる(w *= min(conf))', () => {
     // 状態層内: 一致レンズ(conf 1.0)と不一致レンズ(conf 0.1)
     const noteSnapshot = snapshotWith({
@@ -288,6 +313,14 @@ describe('compareFeatureValue — 型別ルール(§6.2)', () => {
     expect(compareFeatureValue(comparator, 23, 1)).toBeCloseTo(1 - 2 / 12, 5);
     expect(compareFeatureValue(comparator, 0, 12)).toBeCloseTo(0, 5);
     expect(compareFeatureValue(comparator, 9, 9)).toBeCloseTo(1, 5);
+  });
+
+  test('cyclic の奇数 modulo(曜日等)でも最遠点で類似度が 0 になる', () => {
+    const comparator = { kind: 'cyclic', modulo: 7 } as const;
+    // 月曜(1) vs 木曜(4): 整数値の最遠距離 3 → 0
+    expect(compareFeatureValue(comparator, 1, 4)).toBeCloseTo(0, 5);
+    // 土曜(6) vs 日曜(0): 周回距離 1 → 1 - 1/3
+    expect(compareFeatureValue(comparator, 6, 0)).toBeCloseTo(1 - 1 / 3, 5);
   });
 
   test('型不一致(数値 vs 文字列等)は例外を投げずスキップ(null)', () => {

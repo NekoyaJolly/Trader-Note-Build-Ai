@@ -181,6 +181,18 @@ describe('computeIndicatorLens — ind:macd', () => {
     expect(entry.features['macd_bars_since_cross']).toBe(10);
   });
 
+  test('ちょうど遡り上限(20本前)のクロスも bars_since=20 として拾える(境界値)', () => {
+    const n = 60;
+    // 20 本前にゴールデンクロス
+    const macd = [...constantSeries(-1, n - 21), ...constantSeries(1, 21)];
+    const input: IndicatorLensComputeInput = {
+      close: constantSeries(100, n),
+      series: { macd, signal: constantSeries(0, n), histogram: constantSeries(0, n) },
+    };
+    const entry = computeIndicatorLens(spec, input);
+    expect(entry.features['macd_bars_since_cross']).toBe(20);
+  });
+
   test('遡り範囲内にクロスが無い場合は sentinel(-1)', () => {
     const n = 40;
     const input: IndicatorLensComputeInput = {

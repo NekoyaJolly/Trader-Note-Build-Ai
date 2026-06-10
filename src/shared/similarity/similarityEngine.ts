@@ -135,7 +135,8 @@ export function compareLensSnapshots(
       continue;
     }
     const override = overrides[lensId] ?? 1;
-    if (!(override > 0)) {
+    // Infinity / NaN の override は集計を NaN 化させるため、有限の正数のみ許可する
+    if (!Number.isFinite(override) || override <= 0) {
       continue;
     }
     const lensResult = compareLensFeatures(lensId, noteEntry.features, marketEntry.features);
@@ -406,13 +407,15 @@ export function compareFeatureValue(
       if (!isFiniteNumber(noteValue) || !isFiniteNumber(marketValue)) {
         return null;
       }
-      if (comparator.modulo <= 0) {
+      if (comparator.modulo <= 1) {
         return null;
       }
-      const half = comparator.modulo / 2;
+      // 奇数 modulo(例: day_of_week=7)では整数値の最大距離が floor(modulo/2) になるため、
+      // 最遠点で類似度がちょうど 0 になるよう分母も floor を使う(連続値の僅かな超過は 0 に丸める)
+      const maxDistance = Math.floor(comparator.modulo / 2);
       const rawDistance = Math.abs(noteValue - marketValue) % comparator.modulo;
       const distance = Math.min(rawDistance, comparator.modulo - rawDistance);
-      return 1 - distance / half;
+      return clamp01(1 - distance / maxDistance);
     }
   }
 }

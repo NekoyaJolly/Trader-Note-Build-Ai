@@ -69,13 +69,29 @@ export type NoteLensSnapshot = z.infer<typeof NoteLensSnapshotSchema>;
  * DB(JSONB) から読んだ値を NoteLensSnapshot に検証付きで変換する。
  * 検証失敗(旧形式・破損)は null を返し、呼び出し側が「特徴なし」として
  * 比較対象外に倒す(設計書 §2-⑤ 欠損に強い)。
+ *
+ * バージョン互換(設計書 §8): スキーマ版はメジャー一致のみ受理する。
+ * マイナー/パッチ差(加算的拡張)は解釈可能なので通し、メジャー差(破壊的変更)は
+ * null = 比較対象外に落とす。
  */
 export function parseNoteLensSnapshot(value: JsonLike | undefined): NoteLensSnapshot | null {
   if (value === null || value === undefined) {
     return null;
   }
   const result = NoteLensSnapshotSchema.safeParse(value);
-  return result.success ? result.data : null;
+  if (!result.success) {
+    return null;
+  }
+  if (majorVersionOf(result.data.snapshotSchemaVersion) !== majorVersionOf(LENS_SNAPSHOT_SCHEMA_VERSION)) {
+    return null;
+  }
+  return result.data;
+}
+
+/** semver 文字列のメジャー番号を取り出す(不正形式は -1 = 不一致扱い) */
+function majorVersionOf(version: string): number {
+  const major = Number.parseInt(version.split('.')[0] ?? '', 10);
+  return Number.isFinite(major) ? major : -1;
 }
 
 /** createNoteLensSnapshot に渡す組み立てパラメータ */

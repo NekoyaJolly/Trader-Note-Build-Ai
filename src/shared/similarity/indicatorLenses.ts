@@ -518,7 +518,9 @@ function detectRecentCross(
   let direction: DirectionalEventValue = 'none';
   let previousSign: number | null = null;
   let stepsBack = 0;
-  for (let i = length - 1; i >= 0 && stepsBack <= CROSS_SEARCH_LOOKBACK_BARS; i -= 1) {
+  // 検出時の barsSince は stepsBack - 1 になるため、「ちょうど LOOKBACK 本前」の
+  // クロス(barsSince = LOOKBACK)まで拾えるよう探索は +1 本ぶん広げる
+  for (let i = length - 1; i >= 0 && stepsBack <= CROSS_SEARCH_LOOKBACK_BARS + 1; i -= 1) {
     const a = lineA[i];
     const b = lineB[i];
     if (a === null || b === null || !Number.isFinite(a) || !Number.isFinite(b)) {
