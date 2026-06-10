@@ -12,6 +12,8 @@ import type { StrategyAlert, StrategyAlertLog } from '@prisma/client';
 import { AlertChannel, AlertStatus } from '@prisma/client';
 import type { JsonValue } from '../../utils/jsonValue';
 import { prisma } from '../db/client';
+import { dbNotificationRepository } from '../repositories/notificationRepository';
+import { createWebPushService } from './webPushService';
 
 // ============================================
 // 型定義
@@ -372,53 +374,24 @@ async function sendAlertNotification(params: SendNotificationParams): Promise<bo
 
 /**
  * アプリ内通知を送信
- * data/notifications.json に追記
+ *
+ * Phase γ-1 で FS(data/notifications.json) 書き込みから Notification テーブルへ変更。
+ * 理由: Cloud Run の揮発 FS では JSON ファイルが永続せず、本番でストラテジー通知が
+ * ユーザーの通知フィードに一切届かなかった(既存の不具合)。ノートマッチ通知と同じ
+ * Notification テーブル(type='strategy_alert', matchResultId=null)に保存し、
+ * 既存の通知フィード UI / 既読管理にそのまま乗せる。
  */
 async function sendInAppNotification(params: SendNotificationParams): Promise<boolean> {
-  const { strategyName, symbol, matchScore, indicatorValues } = params;
-  
-  try {
-    // data/notifications.json に追記
-    const fs = await import('fs/promises');
-    const path = await import('path');
-    
-    const notificationsPath = path.join(process.cwd(), 'data', 'notifications.json');
-    
-    let notifications: JsonValue[] = [];
-    try {
-      const content = await fs.readFile(notificationsPath, 'utf-8');
-      const parsed: JsonValue = JSON.parse(content) as JsonValue;
-      notifications = Array.isArray(parsed) ? parsed : [];
-    } catch {
-      // ファイルが存在しない場合は空配列で開始
-      notifications = [];
-    }
+  const { strategyName, symbol, matchScore } = params;
 
-    const newNotification = {
-      id: crypto.randomUUID(),
+  try {
+    await dbNotificationRepository.create({
+      matchResultId: null,
       type: 'strategy_alert',
       title: `ストラテジー条件成立: ${strategyName}`,
       message: `${symbol}でストラテジー条件が成立しました（一致度: ${(matchScore * 100).toFixed(1)}%）`,
-      strategyAlert: {
-        strategyName,
-        symbol,
-        matchScore,
-        indicatorValues,
-      },
-      timestamp: new Date().toISOString(),
-      read: false,
-    };
-
-    notifications.push(newNotification);
-    
-    // 最新100件のみ保持
-    if (notifications.length > 100) {
-      notifications = notifications.slice(-100);
-    }
-
-    await fs.writeFile(notificationsPath, JSON.stringify(notifications, null, 2), 'utf-8');
-    
-    console.log(`[StrategyAlertService] アプリ内通知送信: ${strategyName} (${symbol})`);
+    });
+    console.log(`[StrategyAlertService] アプリ内通知送信(DB): ${strategyName} (${symbol})`);
     return true;
   } catch (error) {
     console.error('[StrategyAlertService] アプリ内通知エラー:', error);
@@ -428,35 +401,26 @@ async function sendInAppNotification(params: SendNotificationParams): Promise<bo
 
 /**
  * Web Push通知を送信
- * 既存のPushSubscriptionを使用
+ *
+ * Phase γ-1 でログのみのスタブから実配信(既存 WebPushService.broadcast)へ変更。
+ * VAPID 未設定・購読 0 件の場合は WebPushService が安全に空結果を返す。
  */
 async function sendWebPushNotification(params: SendNotificationParams): Promise<boolean> {
   const { strategyName, symbol, matchScore } = params;
-  
+
   try {
-    // 有効なPush購読を取得
-    const subscriptions = await prisma.pushSubscription.findMany({
-      where: { active: true },
+    const webPushService = createWebPushService(prisma);
+    const result = await webPushService.broadcast({
+      title: `ストラテジー条件成立: ${strategyName}`,
+      body: `${symbol}で条件が成立しました（一致度: ${(matchScore * 100).toFixed(1)}%）`,
+      url: '/notifications',
+      tag: `strategy-alert-${params.strategyName}`,
     });
-
-    if (subscriptions.length === 0) {
-      console.log('[StrategyAlertService] 有効なPush購読がありません');
-      return true; // エラーではないのでtrueを返す
-    }
-
-    // Web Push送信（webpush ライブラリを使用）
-    // 注: 実際の実装では web-push パッケージを使用
-    // ここではログのみ出力（MVPでは簡易実装）
-    console.log(`[StrategyAlertService] Web Push送信: ${subscriptions.length}件の購読に送信`);
-    console.log(`  - ストラテジー: ${strategyName}`);
-    console.log(`  - シンボル: ${symbol}`);
-    console.log(`  - 一致度: ${(matchScore * 100).toFixed(1)}%`);
-
-    // 実際のPush送信は将来実装
-    // const webpush = await import('web-push');
-    // for (const sub of subscriptions) { ... }
-
-    return true;
+    console.log(
+      `[StrategyAlertService] Web Push送信: 成功=${result.successCount} 失敗=${result.failureCount}`
+    );
+    // 購読 0 件(successCount=failureCount=0)も「送信処理としては成功」と扱う
+    return result.failureCount === 0 || result.successCount > 0;
   } catch (error) {
     console.error('[StrategyAlertService] Web Push通知エラー:', error);
     return false;

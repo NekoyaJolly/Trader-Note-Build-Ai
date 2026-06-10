@@ -123,7 +123,8 @@ export interface MatchResult {
  */
 export interface Notification {
   id: string;
-  type: 'match' | 'info' | 'warning';
+  /// strategy_alert はストラテジー条件成立通知 (Phase γ-1 で追加。matchResult を持たない)
+  type: 'match' | 'info' | 'warning' | 'strategy_alert';
   title: string;
   message: string;
   matchResult?: MatchResult;

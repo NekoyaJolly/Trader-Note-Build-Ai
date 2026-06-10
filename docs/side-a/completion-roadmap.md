@@ -113,17 +113,17 @@ Side-A は「人間トレーダーのノーコード相棒」。完成形は **2
 > **着手順の確定(決定4)**: 「**似たら通知(柱1)→ 条件で通知(柱2)**」の順。マルチユーザー化は特徴量基盤に触れる Phase α と同時期に migration(二重移行回避)。実発注は柱1/柱2 完成後(通知 → 実行の自然な流れ)。
 
 ### Phase α — 基盤（最優先・他が乗る土台）+ マルチユーザー化
-- [ ] **レンズ類似度基盤の実装**（NOTE_SIMILARITY_FOUNDATION.md を確定 → 実装）〔L〕 ← 柱1と柱2の合流土台
-- [ ] インジケーターレンズ新設 + IndicatorProfile 接続 + パラメータ UI〔M〕
-- [ ] 旧特徴量経路の廃止 + 既存ノート LensSnapshot バックフィル〔M〕
-- [ ] **マルチユーザー化**: Trade/TradeNote/派生に userId 追加 migration + 全 query のユーザー分離〔L〕（schema を触る Phase α と同時に行い二重移行を避ける）
+- [x] **レンズ類似度基盤の実装**（NOTE_SIMILARITY_FOUNDATION.md を確定 → 実装）〔L〕 ← 柱1と柱2の合流土台 — 2026-06-10 実装 (PR α-1 基盤コア / PR α-2 Note コア+生成配線+シャドー評価。切替 §9-3 と旧経路廃止は α-3 で)
+- [x] インジケーターレンズ新設 + IndicatorProfile 接続〔M〕 — 2026-06-10 実装 (PR α-1/α-2)。パラメータ編集 UI は α-4 で
+- [ ] 旧特徴量経路の廃止 + 既存ノート LensSnapshot バックフィル〔M〕（バックフィルスクリプトは α-2 で実装済み、実行とレガシー廃止は α-3）
+- [ ] **マルチユーザー化**: Trade/TradeNote/派生に userId 追加 migration + 全 query のユーザー分離〔L〕（migration + バックフィルは α-2 で実施済み。全 query のユーザー分離は α-4）
 
 ### Phase β — 柱1 を“似たら通知”として完成 + 通知粒度
 - [ ] 類似度→通知が意味を持って出る（柱1の完成判定）+ per-user 通知/Push
 - [ ] **通知粒度をユーザーが選べる(決定4)**〔M〕: 一致レベル(strong/medium/weak)、しきい値、重視するレンズ/重み、頻度・クールダウン、シンボル単位の集約 or ノート単位 等を、ノート/プロファイル単位で設定可能に。→ 類似度基盤(§NOTE_SIMILARITY_FOUNDATION §6 重み・閾値)の上に「ユーザー設定層」を載せる
 
 ### Phase γ — 柱2 をライブに（条件で通知）
-- [ ] **ライブ条件評価エンジン**（バックテスト評価器をライブ共用、定期/リアルタイム評価→発火）〔L〕
+- [x] **ライブ条件評価エンジン**（バックテスト評価器をライブ共用、定期/リアルタイム評価→発火）〔L〕 — 2026-06-10 実装 (PR γ-1): `strategyLiveEvaluationService` が `evaluateConditionGroup` + `buildEvaluationCaches` をライブ共用(評価1経路化)。Cloud Scheduler `strategy-alerts-15min`(7分オフセット) → `GET /api/cron/strategy-alerts`。アラート通知は Notification テーブル(type=strategy_alert)に統合し UI 到達を修正(旧実装は揮発FSで本番不達)、Web Push スタブも実配信化
 - [ ] 条件ツリーに **レンズ条件タイプ**追加（柱1基盤を流用）〔M〕
 - [ ] マルチタイムフレーム条件〔M〕 / ルックバック UI〔S〕
 - [ ] 条件アラートにも通知粒度設定を適用（柱1と共通の通知設定層）
