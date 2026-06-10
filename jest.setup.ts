@@ -18,3 +18,11 @@ if (!process.env.DATABASE_URL) {
 if (process.env.LENS_SHADOW_EVALUATION === undefined) {
   process.env.LENS_SHADOW_EVALUATION = 'false';
 }
+
+// マッチングエンジン (Phase α-3) はテストでは既定 legacy にする。
+// 理由: 既存ユニットテスト群は旧 12 次元経路の挙動を検証しており、本番既定 (lens) のまま
+// 走らせると外部依存 (lensSnapshot/市場データ) が必要になるため。lens 経路のテストは
+// 明示的な 'lens' 上書き + モック注入で行う (matchingService.test.ts 参照)。
+if (process.env.MATCHING_ENGINE === undefined) {
+  process.env.MATCHING_ENGINE = 'legacy';
+}

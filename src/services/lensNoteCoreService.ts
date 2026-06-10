@@ -33,6 +33,7 @@ import {
 import {
   compareLensSnapshots,
   type SimilarityMatchLevel,
+  type SnapshotSimilarityResult,
 } from '../shared/similarity/similarityEngine';
 
 /** Side-A ノート作成時の Note コア生成入力 */
@@ -67,6 +68,30 @@ export interface LensShadowNoteResult {
   readonly level: SimilarityMatchLevel | null;
   readonly triggered: boolean;
   readonly skipReason?: string;
+}
+
+/** ノート単位のレンズ評価詳細(マッチング/シャドー共用。Phase α-3) */
+export interface LensNoteEvaluation {
+  /** 評価対象ノート(マッチング側で MatchResult/EvaluationLog 永続化に使う) */
+  readonly note: PrismaTradeNote;
+  /** 評価に使った時間足(ノート未設定時は '15m' 既定) */
+  readonly timeframe: string;
+  /** レンズ比較結果(score/level/triggered/threshold/breakdown) */
+  readonly comparison: SnapshotSimilarityResult;
+}
+
+/** レンズ評価実行全体の詳細結果(Phase α-3 マッチング切替の入力) */
+export interface LensEvaluationDetail {
+  /** 対象になったアクティブノート数 */
+  readonly activeNotes: number;
+  /** lensSnapshot を持っていたノート数 */
+  readonly notesWithSnapshot: number;
+  /** 評価したシンボル × 時間足グループ数 */
+  readonly symbols: number;
+  /** ノート単位の評価結果(lensSnapshot 無しのノートは含まれない) */
+  readonly evaluations: LensNoteEvaluation[];
+  /** シンボル単位の評価エラー(非致命) */
+  readonly errors: string[];
 }
 
 /** シャドー評価のサマリー(MatchingPipelineRunResult に additive に載せる) */
@@ -159,6 +184,22 @@ export class LensNoteCoreService {
   }
 
   /**
+   * 【マッチング評価】渡されたノート群をレンズ類似度で評価し、ノート単位の詳細を返す。
+   *
+   * Phase α-3(移行戦略 §9-3): MatchingService の本番マッチング経路(MATCHING_ENGINE=lens)
+   * がこの結果から MatchResult/EvaluationLog/通知を生成する。
+   * 評価エラーはシンボル単位で握り、他シンボルの評価を継続する。
+   */
+  async evaluateNotesForMatching(
+    notes: ReadonlyArray<PrismaTradeNote>
+  ): Promise<LensEvaluationDetail> {
+    return this.evaluateNotesDetailed(notes, {
+      logPrefix: '[LensMatching]',
+      ensureCoverage: process.env.LENS_MATCHING_ENSURE_COVERAGE !== 'false',
+    });
+  }
+
+  /**
    * 【シャドー評価】アクティブノート(マッチング対象)をレンズ類似度で評価する。
    *
    * 旧マッチングの通知判定には影響しない。観測ログ(console)とサマリーを返すのみ。
@@ -166,7 +207,6 @@ export class LensNoteCoreService {
    */
   async shadowEvaluateActiveNotes(): Promise<LensShadowSummary> {
     const notes = await this.tradeNoteService.loadActiveNotesForMatchingAsPrisma();
-    const errors: string[] = [];
     if (notes.length === 0) {
       return {
         activeNotes: 0,
@@ -175,9 +215,47 @@ export class LensNoteCoreService {
         triggered: 0,
         symbols: 0,
         averageScore: null,
-        errors,
+        errors: [],
       };
     }
+
+    const detail = await this.evaluateNotesDetailed(notes, {
+      logPrefix: '[LensShadow]',
+      ensureCoverage: process.env.LENS_SHADOW_ENSURE_COVERAGE !== 'false',
+    });
+
+    const comparableResults = detail.evaluations.filter(
+      (e) => e.comparison.comparable && e.comparison.score !== null
+    );
+    const averageScore =
+      comparableResults.length > 0
+        ? comparableResults.reduce((sum, e) => sum + (e.comparison.score ?? 0), 0) /
+          comparableResults.length
+        : null;
+
+    return {
+      activeNotes: detail.activeNotes,
+      notesWithSnapshot: detail.notesWithSnapshot,
+      comparable: comparableResults.length,
+      triggered: detail.evaluations.filter((e) => e.comparison.triggered).length,
+      symbols: detail.symbols,
+      averageScore,
+      errors: detail.errors,
+    };
+  }
+
+  /**
+   * マッチング/シャドー共用のレンズ評価コア。
+   *
+   * 1. Note コア行から lensSnapshot を一括取得
+   * 2. シンボル × 時間足でグループ化(市場側 snapshot を 1 回だけ生成するため)
+   * 3. ノート側 lensId 集合から市場側に必要な指標レンズ仕様を逆解決して比較
+   */
+  private async evaluateNotesDetailed(
+    notes: ReadonlyArray<PrismaTradeNote>,
+    options: { logPrefix: string; ensureCoverage: boolean }
+  ): Promise<LensEvaluationDetail> {
+    const errors: string[] = [];
 
     // Note コア行(lensSnapshot)をまとめて取得
     const coreRows = await this.noteCoreRepository.findByTradeNoteIds(notes.map((n) => n.id));
@@ -202,7 +280,7 @@ export class LensNoteCoreService {
       groups.set(key, group);
     }
 
-    const results: LensShadowNoteResult[] = [];
+    const evaluations: LensNoteEvaluation[] = [];
     let notesWithSnapshot = 0;
 
     for (const group of groups.values()) {
@@ -235,14 +313,15 @@ export class LensNoteCoreService {
         // 市場側のカバレッジ/鮮度の自己回復は既定 ON。
         // builder の補完フェッチは「最終バー以降のギャップ分のみ」(15 分 cron なら数本)で、
         // 旧マッチング経路が毎サイクル行う EODHD 取得と同等以下の負荷。レート制限が
-        // 問題になった場合は LENS_SHADOW_ENSURE_COVERAGE=false で DB キャッシュのみの
-        // 評価に切り替えられる(その場合は鮮度低下が warnings/精度に現れる)。
+        // 問題になった場合は LENS_SHADOW_ENSURE_COVERAGE / LENS_MATCHING_ENSURE_COVERAGE
+        // =false で DB キャッシュのみの評価に切り替えられる
+        // (その場合は鮮度低下が warnings/精度に現れる)。
         const marketResult = await this.builder.build({
           symbol: group.symbol,
           timeframe: group.timeframe,
           eventTime: new Date(),
           indicatorSpecs: [...specsByLensId.values()],
-          ensureCoverage: process.env.LENS_SHADOW_ENSURE_COVERAGE !== 'false',
+          ensureCoverage: options.ensureCoverage,
         });
         if (marketResult.snapshot === null) {
           errors.push(
@@ -254,17 +333,9 @@ export class LensNoteCoreService {
 
         for (const { note, snapshot } of groupSnapshots) {
           const comparison = compareLensSnapshots(snapshot, marketResult.snapshot);
-          results.push({
-            tradeNoteId: note.id,
-            symbol: group.symbol,
-            comparable: comparison.comparable,
-            score: comparison.score,
-            level: comparison.level,
-            triggered: comparison.triggered,
-            ...(comparison.skipReason !== undefined ? { skipReason: comparison.skipReason } : {}),
-          });
+          evaluations.push({ note, timeframe: group.timeframe, comparison });
           console.log(
-            `[LensShadow] noteId=${note.id} symbol=${group.symbol} ` +
+            `${options.logPrefix} noteId=${note.id} symbol=${group.symbol} ` +
               `score=${comparison.score === null ? 'n/a' : comparison.score.toFixed(3)} ` +
               `level=${comparison.level ?? 'n/a'} triggered=${comparison.triggered} ` +
               `lenses=${comparison.breakdown.length}/${comparison.commonLensCount}` +
@@ -273,25 +344,17 @@ export class LensNoteCoreService {
         }
       } catch (error) {
         errors.push(
-          `${group.symbol} ${group.timeframe} のシャドー評価に失敗: ` +
+          `${group.symbol} ${group.timeframe} のレンズ評価に失敗: ` +
             `${error instanceof Error ? error.message : String(error)}`
         );
       }
     }
 
-    const comparableResults = results.filter((r) => r.comparable && r.score !== null);
-    const averageScore =
-      comparableResults.length > 0
-        ? comparableResults.reduce((sum, r) => sum + (r.score ?? 0), 0) / comparableResults.length
-        : null;
-
     return {
       activeNotes: notes.length,
       notesWithSnapshot,
-      comparable: comparableResults.length,
-      triggered: results.filter((r) => r.triggered).length,
       symbols: groups.size,
-      averageScore,
+      evaluations,
       errors,
     };
   }
