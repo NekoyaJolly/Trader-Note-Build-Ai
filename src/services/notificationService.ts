@@ -73,22 +73,40 @@ export class NotificationService {
    * 通知が届かない既存不具合）。そのため DB モードでは読み取りのたびに最新を
    * 再ロードする。FS モードは本サービスが単一の書き込み者なので初回ロードで足りる。
    */
-  private async ensureLoaded(userId?: string): Promise<void> {
+  private async ensureLoaded(): Promise<void> {
     // まずコンストラクタで開始した初期ロードの完了を保証する。
     // これを待たずに loadFromRepository() を走らせると、初期ロードが後から解決して
     // this.notifications を古い配列で上書きするレースが起こり得る。
     await this.loadPromise;
     if (this.storageMode === 'db') {
-      await this.loadFromRepository(userId);
+      await this.loadFromRepository();
     }
+  }
+
+  /**
+   * 読み取り系の共通取得 (Phase α-4 マルチユーザー分離)。
+   *
+   * DB モードでは共有インメモリキャッシュ (this.notifications) を経由せず、
+   * リポジトリから直接ユーザースコープの結果を返す。NotificationService の
+   * インスタンスは全リクエストで共有されるため、キャッシュを userId ごとに
+   * 上書きすると同時リクエストで別ユーザーの通知が混ざる競合が起き得る
+   * (PR #386 Copilot レビュー指摘)。
+   * FS モードは開発専用・単一ユーザー前提のため従来のキャッシュを返す。
+   */
+  private async readAll(userId?: string): Promise<Notification[]> {
+    await this.loadPromise;
+    if (this.storageMode === 'db') {
+      return this.repository.loadAll(userId);
+    }
+    return this.notifications;
   }
 
   /**
    * ID から通知を取得する (userId 指定時は宛先ユーザーの通知のみ。Phase α-4)
    */
   async getNotificationById(id: string, userId?: string): Promise<Notification | undefined> {
-    await this.ensureLoaded(userId);
-    return this.notifications.find((n) => n.id === id);
+    const notifications = await this.readAll(userId);
+    return notifications.find((n) => n.id === id);
   }
 
   /**
@@ -173,11 +191,11 @@ export class NotificationService {
    * Get all notifications (userId 指定時は宛先ユーザーの通知のみ。Phase α-4)
    */
   async getNotifications(unreadOnly: boolean = false, userId?: string): Promise<Notification[]> {
-    await this.ensureLoaded(userId);
+    const notifications = await this.readAll(userId);
     if (unreadOnly) {
-      return this.notifications.filter(n => !n.read);
+      return notifications.filter(n => !n.read);
     }
-    return this.notifications;
+    return notifications;
   }
 
   // 既読・削除はリポジトリの専用メソッドに委譲して永続化する。
@@ -229,8 +247,8 @@ export class NotificationService {
    * 未読通知数を取得 (userId 指定時は宛先ユーザーの通知のみ。Phase α-4)
    */
   async countUnread(userId?: string): Promise<number> {
-    await this.ensureLoaded(userId);
-    return this.notifications.filter(n => !n.read).length;
+    const notifications = await this.readAll(userId);
+    return notifications.filter(n => !n.read).length;
   }
 
   private async persist(): Promise<void> {

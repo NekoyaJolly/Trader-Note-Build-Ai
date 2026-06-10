@@ -36,6 +36,7 @@ import {
   duplicateStrategy,
   rollbackStrategyVersion,
   assertStrategyOwnership,
+  StrategyNotFoundError,
 } from '../services/strategyService';
 import {
   runBacktest,
@@ -665,11 +666,18 @@ router.use('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     await assertStrategyOwnership(req.params.id, req.user?.userId);
     next();
-  } catch {
-    res.status(404).json({
-      success: false,
-      error: 'ストラテジーが見つかりません',
-    });
+  } catch (error) {
+    // 所有権エラー (見つからない扱い) のみ 404 へ写像する。
+    // DB 接続不良等の予期せぬ例外まで 404 にすると障害が「存在しない」に
+    // 見えて検知できなくなるため、上位のエラーハンドラへ流す (Copilot レビュー対応)
+    if (error instanceof StrategyNotFoundError) {
+      res.status(404).json({
+        success: false,
+        error: 'ストラテジーが見つかりません',
+      });
+      return;
+    }
+    next(error);
   }
 });
 

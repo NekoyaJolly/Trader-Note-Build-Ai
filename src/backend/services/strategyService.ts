@@ -226,8 +226,20 @@ export async function getStrategy(id: string, userId?: string): Promise<Strategy
 }
 
 /**
+ * 所有権チェック失敗 (= ストラテジーが存在しない or 他ユーザー所有) を表すエラー。
+ * ルート層はこの型のみ 404 へ写像し、DB 障害等のその他の例外は通常のエラー
+ * ハンドリング (500 / 上位ハンドラ) に流す (PR #386 Copilot レビュー対応)。
+ */
+export class StrategyNotFoundError extends Error {
+  constructor(message: string = 'ストラテジーが見つかりません') {
+    super(message);
+    this.name = 'StrategyNotFoundError';
+  }
+}
+
+/**
  * ストラテジーの所有権チェック (Phase α-4 マルチユーザー分離)。
- * userId 指定時、対象が所有ユーザーのものでなければ「見つかりません」エラーを投げる。
+ * userId 指定時、対象が所有ユーザーのものでなければ StrategyNotFoundError を投げる。
  * ルート層の事前チェック (バックテスト・アラート・ノート等のネスト資源) でも使う。
  */
 export async function assertStrategyOwnership(strategyId: string, userId?: string): Promise<void> {
@@ -237,7 +249,7 @@ export async function assertStrategyOwnership(strategyId: string, userId?: strin
     select: { id: true },
   });
   if (!owned) {
-    throw new Error('ストラテジーが見つかりません');
+    throw new StrategyNotFoundError();
   }
 }
 

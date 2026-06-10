@@ -14,7 +14,7 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { z } from 'zod';
-import { assertStrategyOwnership } from '../services/strategyService';
+import { assertStrategyOwnership, StrategyNotFoundError } from '../services/strategyService';
 import type {
   CreateComparisonRequest,
   OptimizeRequest} from '../services/strategyComparisonService';
@@ -136,16 +136,20 @@ router.post('/', async (req: Request, res: Response) => {
     }
     
     // Phase α-4: 比較対象は認証ユーザーの所有ストラテジーに限定する
-    // (他ユーザーのストラテジー ID を混ぜた比較セッション作成を拒否)
+    // (他ユーザーのストラテジー ID を混ぜた比較セッション作成を拒否)。
+    // 所有権エラーのみ 404、DB 障害等は外側 catch (500) に流す (Copilot レビュー対応)
     try {
       for (const strategyId of request.strategyIds) {
         await assertStrategyOwnership(strategyId, req.user?.userId);
       }
-    } catch {
-      return res.status(404).json({
-        success: false,
-        error: 'ストラテジーが見つかりません',
-      });
+    } catch (error) {
+      if (error instanceof StrategyNotFoundError) {
+        return res.status(404).json({
+          success: false,
+          error: 'ストラテジーが見つかりません',
+        });
+      }
+      throw error;
     }
 
     console.log(`[StrategyComparisonRoutes] 比較セッション作成: ${request.name}, ${request.strategyIds.length}ストラテジー`);
