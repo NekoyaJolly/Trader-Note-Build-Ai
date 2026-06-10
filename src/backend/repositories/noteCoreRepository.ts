@@ -37,9 +37,10 @@ export class NoteCoreRepository {
    */
   async upsertForTradeNote(input: UpsertSideANoteCoreInput): Promise<Note> {
     // NoteLensSnapshot は Zod 検証済みの JSON 互換オブジェクトなので
-    // そのまま InputJsonValue として保存できる(`unknown` 経由のキャストは規約 §2 で不可)
-    const snapshotJson: Prisma.InputJsonValue | typeof Prisma.JsonNull =
-      input.lensSnapshot === null ? Prisma.JsonNull : input.lensSnapshot;
+    // そのまま InputJsonValue として保存できる(`unknown` 経由のキャストは規約 §2 で不可)。
+    // 「未生成」は本コードベースの慣行(src/utils/prismaJson.ts)に合わせ SQL NULL(DbNull)で保存する
+    const snapshotJson: Prisma.InputJsonValue | typeof Prisma.DbNull =
+      input.lensSnapshot === null ? Prisma.DbNull : input.lensSnapshot;
     const common = {
       userId: input.userId,
       symbol: input.symbol,

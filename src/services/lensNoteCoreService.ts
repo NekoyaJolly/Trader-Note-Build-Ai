@@ -232,12 +232,17 @@ export class LensNoteCoreService {
           }
         }
 
+        // 市場側のカバレッジ/鮮度の自己回復は既定 ON。
+        // builder の補完フェッチは「最終バー以降のギャップ分のみ」(15 分 cron なら数本)で、
+        // 旧マッチング経路が毎サイクル行う EODHD 取得と同等以下の負荷。レート制限が
+        // 問題になった場合は LENS_SHADOW_ENSURE_COVERAGE=false で DB キャッシュのみの
+        // 評価に切り替えられる(その場合は鮮度低下が warnings/精度に現れる)。
         const marketResult = await this.builder.build({
           symbol: group.symbol,
           timeframe: group.timeframe,
           eventTime: new Date(),
           indicatorSpecs: [...specsByLensId.values()],
-          ensureCoverage: true,
+          ensureCoverage: process.env.LENS_SHADOW_ENSURE_COVERAGE !== 'false',
         });
         if (marketResult.snapshot === null) {
           errors.push(

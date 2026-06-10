@@ -327,6 +327,11 @@ export function parseIndicatorLensId(lensId: string): IndicatorLensSpec | null {
       const fastPeriod = Number.parseInt(match[2], 10);
       const slowType = match[3] as 'sma' | 'ema';
       const slowPeriod = Number.parseInt(match[4], 10);
+      // 不正な期間(0 等)は analysis-engine へ不正 params を流さないよう null で握る
+      // (他分岐は single() 経由の正規化照合で弾かれるが、本分岐は手組みのため明示チェック)
+      if (fastPeriod < 1 || slowPeriod < 1) {
+        return null;
+      }
       return {
         lensId,
         kind: 'ma_cross',

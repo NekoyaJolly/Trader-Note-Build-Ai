@@ -20,6 +20,7 @@
  */
 
 import { Prisma } from '@prisma/client';
+import { z } from 'zod';
 import { prisma } from '../../src/backend/db/client';
 import { LensNoteCoreService } from '../../src/services/lensNoteCoreService';
 import type { IndicatorLensSourceConfig } from '../../src/shared/similarity/indicatorLenses';
@@ -53,40 +54,44 @@ function parseArgs(argv: string[]): CliOptions {
 }
 
 /**
+ * NoteProfileConfig(JSON)からレンズ生成に必要な部分だけを抜き出す Zod スキーマ。
+ * 形式ドリフト(古い形式・破損)時は safeParse 失敗 → 空配列(状態レンズのみ)に倒す。
+ */
+const StoredIndicatorConfigSchema = z.object({
+  indicatorId: z.string().min(1),
+  enabled: z.boolean().optional(),
+  params: z
+    .object({
+      period: z.number().optional(),
+      fastPeriod: z.number().optional(),
+      slowPeriod: z.number().optional(),
+      signalPeriod: z.number().optional(),
+    })
+    // 他のパラメータキー(step 等)はレンズ解決に不要なので無視して通す
+    .passthrough()
+    .optional(),
+});
+
+const StoredNoteProfileConfigSchema = z.object({
+  indicators: z.array(StoredIndicatorConfigSchema).default([]),
+});
+
+/**
  * TradeNote.indicatorConfig(NoteProfileConfig JSON)から有効なインジケーター設定を復元する。
  * 形式が想定外なら空配列(状態レンズのみ)に倒す。
  */
 function extractIndicatorConfigs(indicatorConfig: unknown): IndicatorLensSourceConfig[] {
-  if (indicatorConfig === null || typeof indicatorConfig !== 'object') {
+  const parsed = StoredNoteProfileConfigSchema.safeParse(indicatorConfig);
+  if (!parsed.success) {
     return [];
   }
-  const indicators = (indicatorConfig as { indicators?: unknown }).indicators;
-  if (!Array.isArray(indicators)) {
-    return [];
-  }
-  const configs: IndicatorLensSourceConfig[] = [];
-  for (const item of indicators) {
-    if (item === null || typeof item !== 'object') {
-      continue;
-    }
-    const candidate = item as {
-      indicatorId?: unknown;
-      params?: unknown;
-      enabled?: unknown;
-    };
-    if (typeof candidate.indicatorId !== 'string') {
-      continue;
-    }
-    if (candidate.enabled === false) {
-      continue;
-    }
-    const params =
-      candidate.params !== null && typeof candidate.params === 'object'
-        ? (candidate.params as IndicatorLensSourceConfig['params'])
-        : {};
-    configs.push({ indicatorId: candidate.indicatorId, params, enabled: true });
-  }
-  return configs;
+  return parsed.data.indicators
+    .filter((config) => config.enabled !== false)
+    .map((config) => ({
+      indicatorId: config.indicatorId,
+      params: config.params ?? {},
+      enabled: true,
+    }));
 }
 
 async function main(): Promise<void> {

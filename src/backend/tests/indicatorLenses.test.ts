@@ -126,6 +126,14 @@ describe('parseIndicatorLensId(lensId → 仕様の逆解決)', () => {
     expect(parseIndicatorLensId('ind:ma#wma20')).toBeNull();
     expect(parseIndicatorLensId('ind:ma_cross#ema20')).toBeNull();
   });
+
+  test('不正な期間(0)を含む lensId は null を返し analysis-engine へ流さない', () => {
+    expect(parseIndicatorLensId('ind:ma_cross#ema0xsma75')).toBeNull();
+    expect(parseIndicatorLensId('ind:ma_cross#ema20xsma0')).toBeNull();
+    // 他分岐は正規化照合で弾かれる(p0 → 正規化後 p14 と不一致 → null)
+    expect(parseIndicatorLensId('ind:rsi#p0')).toBeNull();
+    expect(parseIndicatorLensId('ind:ma#ema0')).toBeNull();
+  });
 });
 
 describe('computeIndicatorLens — ind:rsi', () => {
