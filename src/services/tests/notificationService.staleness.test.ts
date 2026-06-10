@@ -171,6 +171,48 @@ describe('NotificationService 既読・削除の永続化委譲', () => {
     expect((await service.getNotifications())[0].read).toBe(true);
   });
 
+  test('初期ロード未完了で markAsRead が呼ばれても、初期ロードの後勝ち上書きで既読が消えない', async () => {
+    // コンストラクタの初期ロード(loadAll 1回目)を手動解決できるよう gate する。
+    // FS モードは getNotifications がキャッシュ(this.notifications)を返すため、
+    // 初期ロードが永続化後に解決して上書きするレースが顕在化しやすい。
+    let current = [makeNotification('n1')];
+    let resolveInitial!: (rows: Notification[]) => void;
+    const initialGate = new Promise<Notification[]>((res) => {
+      resolveInitial = res;
+    });
+    let calls = 0;
+    const loadAll = jest.fn<Promise<Notification[]>, []>(() => {
+      calls += 1;
+      return calls === 1 ? initialGate : Promise.resolve(current.map((n) => ({ ...n })));
+    });
+    const markAsRead = jest.fn<Promise<void>, [string]>((id) => {
+      current = current.map((n) => (n.id === id ? { ...n, read: true } : n));
+      return Promise.resolve();
+    });
+    const repo: NotificationRepository = {
+      loadAll,
+      saveAll: jest.fn<Promise<void>, [Notification[]]>().mockResolvedValue(undefined),
+      save: jest.fn<Promise<void>, [Notification]>().mockResolvedValue(undefined),
+      markAsRead,
+      markAllAsRead: jest.fn<Promise<void>, []>().mockResolvedValue(undefined),
+      delete: jest.fn<Promise<void>, [string]>().mockResolvedValue(undefined),
+      deleteAll: jest.fn<Promise<void>, []>().mockResolvedValue(undefined),
+    };
+    const { trigger, note } = deps();
+    const service = new NotificationService(repo, trigger, note, 'fs');
+
+    // 初期ロード未完了のまま markAsRead を開始 → その後で初期ロードを解決
+    const op = service.markAsRead('n1');
+    resolveInitial([makeNotification('n1')]);
+    await op;
+
+    // markAsRead が loadPromise を待ってから永続化+再ロードするため、初期ロードの
+    // 後勝ちで既読が失われない
+    const after = await service.getNotifications();
+    expect(after.find((n) => n.id === 'n1')?.read).toBe(true);
+    expect(markAsRead).toHaveBeenCalledWith('n1');
+  });
+
   test('markAllAsRead / deleteNotification / clearAll も専用メソッドへ委譲する', async () => {
     const { repo, markAllAsRead, deleteOne, deleteAll, saveAll } = makeRepoMock([
       makeNotification('n1'),

@@ -73,11 +73,13 @@ export class NotificationService {
    * 再ロードする。FS モードは本サービスが単一の書き込み者なので初回ロードで足りる。
    */
   private async ensureLoaded(): Promise<void> {
+    // まずコンストラクタで開始した初期ロードの完了を保証する。
+    // これを待たずに loadFromRepository() を走らせると、初期ロードが後から解決して
+    // this.notifications を古い配列で上書きするレースが起こり得る。
+    await this.loadPromise;
     if (this.storageMode === 'db') {
       await this.loadFromRepository();
-      return;
     }
-    await this.loadPromise;
   }
 
   /**
@@ -181,11 +183,16 @@ export class NotificationService {
   // 旧実装は in-memory 配列を書き換えて saveAll で保存していたが、DB モードでは
   // saveAll が「全件 create」になり既読/削除が反映されず通知が複製されていた
   // （2026-06-10 実機検証で発見）。永続化後に in-memory を最新化してキャッシュ整合を保つ。
+  //
+  // 各メソッドは冒頭で `await this.loadPromise`（初期ロード完了の保証）を行う。
+  // これを省くと、コンストラクタで開始した初期ロードが loadFromRepository() の後に
+  // 解決して this.notifications を永続化前の古い配列で上書きするレースが起こり得る。
 
   /**
    * Mark notification as read
    */
   async markAsRead(notificationId: string): Promise<void> {
+    await this.loadPromise;
     await this.repository.markAsRead(notificationId);
     await this.loadFromRepository();
   }
@@ -194,6 +201,7 @@ export class NotificationService {
    * Mark all notifications as read
    */
   async markAllAsRead(): Promise<void> {
+    await this.loadPromise;
     await this.repository.markAllAsRead();
     await this.loadFromRepository();
   }
@@ -202,6 +210,7 @@ export class NotificationService {
    * Delete a notification
    */
   async deleteNotification(notificationId: string): Promise<void> {
+    await this.loadPromise;
     await this.repository.delete(notificationId);
     await this.loadFromRepository();
   }
@@ -210,6 +219,7 @@ export class NotificationService {
    * Clear all notifications
    */
   async clearAll(): Promise<void> {
+    await this.loadPromise;
     await this.repository.deleteAll();
     await this.loadFromRepository();
   }
