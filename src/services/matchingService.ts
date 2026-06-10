@@ -31,12 +31,35 @@ import { InAppNotificationSender } from './notification/inAppNotificationSender'
 import type { JsonValue } from '../utils/jsonValue';
 import { MatchingPipelineRunRepository } from '../backend/repositories/matchingPipelineRunRepository';
 import type { MatchingPipelineRunStatus } from '@prisma/client';
-import { LensNoteCoreService, type LensShadowSummary } from './lensNoteCoreService';
+import {
+  LensNoteCoreService,
+  type LensShadowSummary,
+  type LensNoteEvaluation,
+} from './lensNoteCoreService';
+import type { LensSimilarityBreakdownEntry } from '../shared/similarity/similarityEngine';
 
 /**
  * matching pipeline の起動元（observability 用）。
  */
 export type PipelineRunTrigger = 'cron' | 'manual_test' | 'scheduler' | 'unknown';
+
+/**
+ * マッチング評価エンジンの選択（Phase α-3、移行戦略 §9-3）。
+ *
+ * - 'lens': レンズ類似度(lensSnapshot 比較)で score/triggered を決める新経路（既定）
+ * - 'legacy': 旧 12 次元特徴量ベクトル + NoteEvaluator の経路（ロールバック用に 1 リリース併存）
+ */
+export type MatchingEngineMode = 'lens' | 'legacy';
+
+/**
+ * 環境変数 MATCHING_ENGINE からエンジンを解決する。
+ *
+ * 既定は 'lens'（α-3 の切替本体）。問題発生時は MATCHING_ENGINE=legacy で
+ * デプロイなしに旧経路へロールバックできる。
+ */
+export function resolveMatchingEngine(): MatchingEngineMode {
+  return process.env.MATCHING_ENGINE === 'legacy' ? 'legacy' : 'lens';
+}
 
 /**
  * runMatchingPipeline() の戻り値（P1: observability）。
@@ -77,7 +100,17 @@ export interface MatchingServiceDeps {
     MatchingPipelineRunRepository,
     'create' | 'findLatest' | 'findMany'
   >;
-  lensNoteCoreService?: Pick<LensNoteCoreService, 'shadowEvaluateActiveNotes'>;
+  lensNoteCoreService?: Pick<
+    LensNoteCoreService,
+    'shadowEvaluateActiveNotes' | 'evaluateNotesForMatching'
+  >;
+  // Phase α-3: lens エンジン経路のユニットテストで外部依存(市場データ/DB)を
+  // 差し替えるための追加 DI。未指定時は既定実装を使う。
+  tradeNoteService?: Pick<TradeNoteService, 'loadActiveNotesForMatchingAsPrisma' | 'getNoteById'>;
+  marketDataService?: Pick<MarketDataService, 'getCurrentMarketDataWithIndicators'>;
+  marketSnapshotRepository?: Pick<MarketSnapshotRepository, 'upsertSnapshot'>;
+  evaluationLogRepository?: Pick<EvaluationLogRepository, 'upsertLog'>;
+  matchResultRepository?: Pick<MatchResultRepository, 'upsertByNoteAndSnapshot' | 'findHistory'>;
 }
 
 /**
@@ -94,11 +127,11 @@ export interface MatchingServiceDeps {
  * - ノートA（UserIndicator）もノートB（Legacy）も同じフローで評価
  */
 export class MatchingService {
-  private marketDataService: MarketDataService;
-  private noteService: TradeNoteService;
-  private matchResultRepository: MatchResultRepository;
-  private marketSnapshotRepository: MarketSnapshotRepository;
-  private evaluationLogRepository: EvaluationLogRepository;
+  private marketDataService: Pick<MarketDataService, 'getCurrentMarketDataWithIndicators'>;
+  private noteService: Pick<TradeNoteService, 'loadActiveNotesForMatchingAsPrisma' | 'getNoteById'>;
+  private matchResultRepository: Pick<MatchResultRepository, 'upsertByNoteAndSnapshot' | 'findHistory'>;
+  private marketSnapshotRepository: Pick<MarketSnapshotRepository, 'upsertSnapshot'>;
+  private evaluationLogRepository: Pick<EvaluationLogRepository, 'upsertLog'>;
   private simultaneousHitControl: SimultaneousHitControlService;
   private sideBAdapter: SideBMatchingAdapter;
   private notificationTriggerService: Pick<
@@ -114,15 +147,18 @@ export class MatchingService {
     MatchingPipelineRunRepository,
     'create' | 'findLatest' | 'findMany'
   >;
-  // レンズ類似度シャドー評価 (Phase α-2、移行戦略 §9-2)。観測のみで通知に影響しない。
-  private lensNoteCoreService: Pick<LensNoteCoreService, 'shadowEvaluateActiveNotes'>;
+  // レンズ類似度評価 (Phase α-2 シャドー / Phase α-3 マッチング本経路)。
+  private lensNoteCoreService: Pick<
+    LensNoteCoreService,
+    'shadowEvaluateActiveNotes' | 'evaluateNotesForMatching'
+  >;
 
   constructor(deps: MatchingServiceDeps = {}) {
-    this.marketDataService = new MarketDataService();
-    this.noteService = new TradeNoteService();
-    this.matchResultRepository = new MatchResultRepository();
-    this.marketSnapshotRepository = new MarketSnapshotRepository();
-    this.evaluationLogRepository = new EvaluationLogRepository();
+    this.marketDataService = deps.marketDataService ?? new MarketDataService();
+    this.noteService = deps.tradeNoteService ?? new TradeNoteService();
+    this.matchResultRepository = deps.matchResultRepository ?? new MatchResultRepository();
+    this.marketSnapshotRepository = deps.marketSnapshotRepository ?? new MarketSnapshotRepository();
+    this.evaluationLogRepository = deps.evaluationLogRepository ?? new EvaluationLogRepository();
     this.simultaneousHitControl = deps.simultaneousHitControl ?? new SimultaneousHitControlService();
     this.sideBAdapter = new SideBMatchingAdapter();
     this.notificationTriggerService = deps.notificationTriggerService ?? new NotificationTriggerService();
@@ -150,13 +186,214 @@ export class MatchingService {
   async checkForMatches(): Promise<MatchResultDTO[]> {
     // 有効なノートのみを取得（Prisma型で直接取得）
     const notes = await this.noteService.loadActiveNotesForMatchingAsPrisma();
-    const matches: MatchResultDTO[] = [];
 
     // マッチング対象がない場合は早期リターン
     if (notes.length === 0) {
       console.log('[MatchingService] 承認済みノートがありません。マッチングをスキップします。');
-      return matches;
+      return [];
     }
+
+    // Phase α-3: 既定はレンズ類似度エンジン。MATCHING_ENGINE=legacy でロールバック可
+    if (resolveMatchingEngine() === 'lens') {
+      return this.checkForMatchesWithLensEngine(notes);
+    }
+    return this.checkForMatchesWithLegacyEngine(notes);
+  }
+
+  /**
+   * 【Phase α-3】レンズ類似度エンジンによるマッチング評価。
+   *
+   * - score / triggered / threshold は LensNoteCoreService のレンズ比較結果をそのまま使う
+   *   (旧経路のルール補正 applyRuleAdjustment は適用しない。score = レンズ類似度)
+   * - MarketSnapshot 行は EvaluationLog / MatchResult の FK 充足と通知 UI 表示のため
+   *   旧経路と同じく upsert を継続する
+   * - トレンド/価格帯チェックは観測情報として記録するが、スコアには影響させない
+   */
+  private async checkForMatchesWithLensEngine(
+    notes: PrismaTradeNote[]
+  ): Promise<MatchResultDTO[]> {
+    const matches: MatchResultDTO[] = [];
+
+    const detail = await this.lensNoteCoreService.evaluateNotesForMatching(notes);
+    for (const evalError of detail.errors) {
+      console.error('[MatchingService/Lens] 評価エラー:', evalError);
+    }
+    if (detail.notesWithSnapshot < detail.activeNotes) {
+      console.warn(
+        `[MatchingService/Lens] lensSnapshot 未生成のノートが ${detail.activeNotes - detail.notesWithSnapshot} 件あります` +
+          ' (バックフィル scripts/migrate/backfill-lens-snapshots.ts の実行対象)'
+      );
+    }
+
+    // シンボル別にグループ化し、市場データ取得 + MarketSnapshot upsert を 1 回に抑える
+    const evaluationsBySymbol = new Map<string, LensNoteEvaluation[]>();
+    for (const evaluation of detail.evaluations) {
+      const list = evaluationsBySymbol.get(evaluation.note.symbol) ?? [];
+      list.push(evaluation);
+      evaluationsBySymbol.set(evaluation.note.symbol, list);
+    }
+
+    for (const [symbol, evaluations] of evaluationsBySymbol.entries()) {
+      try {
+        // 現在の市場データを取得（MarketSnapshot 永続化と通知 UI 表示用）
+        const currentMarket = await this.marketDataService.getCurrentMarketDataWithIndicators(symbol);
+
+        // MarketSnapshot を DB に保存（EvaluationLog / MatchResult の FK 用）
+        let marketSnapshotId: string | undefined;
+        try {
+          const savedSnapshot = await this.marketSnapshotRepository.upsertSnapshot({
+            symbol: currentMarket.symbol,
+            timeframe: currentMarket.timeframe,
+            close: currentMarket.close,
+            volume: currentMarket.volume,
+            indicators: currentMarket.indicators || {},
+            fetchedAt: currentMarket.timestamp,
+          });
+          marketSnapshotId = savedSnapshot.id;
+        } catch (snapshotError) {
+          console.warn('MarketSnapshot 保存をスキップ:', snapshotError);
+        }
+
+        for (const { note, timeframe, comparison } of evaluations) {
+          // 比較不能(共通レンズなし等)は記録せずスキップ(理由はレンズ評価コアがログ済み)
+          if (!comparison.comparable || comparison.score === null) {
+            continue;
+          }
+
+          // ★ EvaluationLog を記録（triggered=false も含む、勝率計算の分母となる）
+          if (marketSnapshotId) {
+            try {
+              await this.evaluationLogRepository.upsertLog({
+                noteId: note.id,
+                marketSnapshotId,
+                symbol,
+                timeframe,
+                evaluationResult: this.toEvaluationResultFromLens(note.id, comparison),
+              });
+            } catch (logError) {
+              // EvaluationLog 記録の失敗はマッチング処理をブロックしない
+              console.warn('[MatchingService/Lens] EvaluationLog 記録をスキップ:', logError);
+            }
+          }
+
+          if (!comparison.triggered) {
+            continue;
+          }
+
+          // トレンド・価格帯は観測情報として記録（スコア補正には使わない）
+          const trendMatched = this.checkTrendMatchPrisma(note, currentMarket);
+          const priceRangeMatched = this.checkPriceRangePrisma(note, currentMarket);
+          const reasons = this.generateLensMatchReasons(comparison, trendMatched, priceRangeMatched);
+          const warnings = this.checkIndicatorAnomaliesPrisma(note, currentMarket);
+          const evaluatedAt = new Date();
+
+          // MatchResult を DB に永続化（marketSnapshotId がある場合のみ）
+          if (marketSnapshotId) {
+            try {
+              await this.matchResultRepository.upsertByNoteAndSnapshot({
+                noteId: note.id,
+                marketSnapshotId,
+                symbol,
+                score: comparison.score,
+                threshold: comparison.threshold,
+                trendMatched,
+                priceRangeMatched,
+                reasons,
+                evaluatedAt,
+              });
+            } catch (persistError) {
+              console.warn('MatchResult 永続化をスキップ:', persistError);
+            }
+          }
+
+          matches.push({
+            id: uuidv4(),
+            matchScore: comparison.score,
+            historicalNoteId: note.id,
+            marketSnapshot: currentMarket,
+            marketSnapshotId,
+            symbol,
+            threshold: comparison.threshold,
+            trendMatched,
+            priceRangeMatched,
+            reasons,
+            warnings,
+            evaluatedAt,
+          });
+        }
+      } catch (error) {
+        console.error(`${symbol} のマッチチェックエラー (lens):`, error);
+      }
+    }
+
+    return matches;
+  }
+
+  /**
+   * レンズ比較結果を EvaluationLog 用の EvaluationResult に変換する。
+   *
+   * vectorDimension はベクトル次元の代わりに「比較に寄与したレンズ数」を入れる
+   * (レンズ経路にはベクトルが存在しないため。分析時は usedIndicators の lensId で判別可能)。
+   */
+  private toEvaluationResultFromLens(
+    noteId: string,
+    comparison: LensNoteEvaluation['comparison']
+  ): EvaluationResult {
+    return {
+      noteId,
+      similarity: comparison.score ?? 0,
+      level: comparison.level ?? 'none',
+      triggered: comparison.triggered,
+      vectorDimension: comparison.breakdown.length,
+      usedIndicators: comparison.breakdown.map((entry) => entry.lensId),
+      evaluatedAt: new Date(),
+    };
+  }
+
+  /**
+   * レンズ比較結果から人間可読な判定理由を生成する。
+   * 寄与度(類似度 × 重み)の高い上位レンズを明示し、説明可能性を担保する。
+   */
+  private generateLensMatchReasons(
+    comparison: LensNoteEvaluation['comparison'],
+    trendMatched: boolean,
+    priceRangeMatched: boolean
+  ): string[] {
+    const reasons: string[] = [];
+    if (comparison.score !== null) {
+      reasons.push(
+        `レンズ類似度 ${(comparison.score * 100).toFixed(1)}% ` +
+          `(レベル: ${comparison.level ?? 'none'}、しきい値 ${(comparison.threshold * 100).toFixed(0)}%)`
+      );
+    }
+    const topLenses = [...comparison.breakdown]
+      .sort(
+        (a: LensSimilarityBreakdownEntry, b: LensSimilarityBreakdownEntry) =>
+          b.similarity * b.weight - a.similarity * a.weight
+      )
+      .slice(0, 3);
+    for (const lens of topLenses) {
+      reasons.push(`${lens.lensId}: 類似度 ${(lens.similarity * 100).toFixed(1)}%`);
+    }
+    if (trendMatched) {
+      reasons.push('トレンド方向が一致しています');
+    }
+    if (priceRangeMatched) {
+      reasons.push('価格帯が一致しています');
+    }
+    return reasons;
+  }
+
+  /**
+   * 【旧経路】12 次元特徴量ベクトル + NoteEvaluator によるマッチング評価。
+   *
+   * Phase α-3 のロールバック用に 1 リリース併存させる (MATCHING_ENGINE=legacy で有効化)。
+   * レンズ経路の安定稼働確認後に削除予定。
+   */
+  private async checkForMatchesWithLegacyEngine(
+    notes: PrismaTradeNote[]
+  ): Promise<MatchResultDTO[]> {
+    const matches: MatchResultDTO[] = [];
 
     // ノートをシンボル別にグループ化
     const notesBySymbol = this.groupNotesBySymbolPrisma(notes);
@@ -793,7 +1030,9 @@ export class MatchingService {
       // 1.5 レンズ類似度シャドー評価 (Phase α-2、NOTE_SIMILARITY_FOUNDATION.md §9-2)
       // 旧マッチングと並行してレンズ基盤のスコアを観測する。通知挙動には一切影響せず、
       // 失敗してもパイプラインは継続する。LENS_SHADOW_EVALUATION=false で無効化できる。
-      if (process.env.LENS_SHADOW_EVALUATION !== 'false') {
+      // Phase α-3: 本経路が lens エンジンの場合は同じ評価の二重実行になるためスキップする
+      // (シャドーは legacy ロールバック運用時の観測手段として残す)。
+      if (resolveMatchingEngine() === 'legacy' && process.env.LENS_SHADOW_EVALUATION !== 'false') {
         try {
           lensShadow = await this.lensNoteCoreService.shadowEvaluateActiveNotes();
           console.log(

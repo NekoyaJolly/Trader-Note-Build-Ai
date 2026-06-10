@@ -279,6 +279,7 @@ similarity(noteSnapshot, marketSnapshot):
 |---|---|
 | 2026-06-10 | **基盤コア実装(移行戦略 §9-1、非破壊・並行)**: `src/shared/similarity/` に正準型・インジケーターレンズ・類似度エンジンを新設。配線(ノート生成・マッチング)は次段階。 |
 | 2026-06-10 | **Note コア + 生成配線 + シャドー評価(§9-1〜§9-2)**: `Note` テーブル新設(戦略B) + Trade/TradeNote/MatchResult/Notification/Strategy へ userId 追加(マルチユーザー化 Phase α、nullable+バックフィル)。`LensSnapshotBuilder`(eventTime 起点の同一生成口) + CSV 取込配線 + マッチングパイプラインのシャドー評価 + バックフィルスクリプト。通知挙動は不変。 |
+| 2026-06-11 | **マッチング切替(§9-3、Phase α-3 第1弾)**: `MATCHING_ENGINE=lens|legacy` フラグ導入(既定 lens、deploy.yml に明示)。lens 経路は `LensNoteCoreService.evaluateNotesForMatching`(シャドー評価とコア共用)の比較結果から score=レンズ類似度・threshold=レンズ閾値で MatchResult/EvaluationLog/通知を生成(旧ルール補正は不適用、トレンド/価格帯は観測情報のみ)。MarketSnapshot upsert は FK 充足のため継続。lens 稼働時はシャドー評価を自動スキップ(二重評価防止)。旧 12 次元経路は legacy ロールバック用に 1 リリース併存 → 安定確認後に削除予定(第2弾)。 |
 
 ### 実装のローカル詳細(2026-06-10、正本への追補)
 
