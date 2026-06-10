@@ -27,9 +27,15 @@ import type {
 
 /**
  * 通知作成用の入力データ
+ *
+ * Phase γ-1: ストラテジーアラート通知(matchResult を持たない)に対応するため
+ * matchResultId は nullable、type で通知種別を区別する。
  */
 export interface CreateNotificationInput {
-  matchResultId: string;
+  /** 由来 MatchResult(ノートマッチ通知のみ。ストラテジーアラートは null) */
+  matchResultId: string | null;
+  /** 通知種別(note_match / strategy_alert)。省略時は note_match */
+  type?: 'note_match' | 'strategy_alert';
   title: string;
   message: string;
   status?: NotificationStatus;
@@ -37,6 +43,7 @@ export interface CreateNotificationInput {
 
 /**
  * Notification と MatchResult を含む完全なデータ
+ * (matchResult はストラテジーアラート通知では null)
  */
 export interface NotificationWithMatch extends Notification {
   matchResult: {
@@ -55,7 +62,7 @@ export interface NotificationWithMatch extends Notification {
       entryPrice: Prisma.Decimal | number;
       aiSummary?: { summary: string } | null;
     };
-  };
+  } | null;
 }
 
 /**
@@ -86,6 +93,7 @@ export class DbNotificationRepository {
     return await this.prisma.notification.create({
       data: {
         matchResultId: input.matchResultId,
+        type: input.type ?? 'note_match',
         title: input.title,
         message: input.message,
         status: input.status || 'unread',

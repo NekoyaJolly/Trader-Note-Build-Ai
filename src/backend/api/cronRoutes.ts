@@ -25,6 +25,7 @@ import { cronAuth } from '../../middleware/cronAuth';
 import { getSideBScheduler } from '../../side-b/jobs/sideBScheduler';
 import { isFXMarketOpen, getMarketStatusJST } from '../../side-b/utils/marketHours';
 import { MatchingService } from '../../services/matchingService';
+import { LiveStrategyEvaluationService } from '../services/strategyLiveEvaluationService';
 import { edgeLedger } from '../../side-b/ledger';
 import { validateBody, validateQuery, getValidatedQuery } from '../../middleware/validateRequest';
 import {
@@ -445,6 +446,86 @@ router.get('/matching-pipeline', async (_req: Request, res: Response) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : '不明なエラー';
     console.error('[Cron] マッチングパイプラインエラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+      duration: Date.now() - startTime,
+    });
+  }
+});
+
+/**
+ * GET /api/cron/strategy-alerts
+ * ストラテジー ライブ条件評価 + アラート発火 (Phase γ-1、柱2)
+ *
+ * 推奨実行間隔: 15分 (Cloud Scheduler `strategy-alerts-15min`)
+ *
+ * 動作:
+ * 1. 市場開場チェック（休場時はスキップ）
+ * 2. アラート有効 + active なストラテジーの条件ツリーを現在市場で評価
+ *    （バックテストと同じ評価器 = 評価 1 経路化）
+ * 3. 条件成立で StrategyAlert 発火（クールダウン・チャネル送信・ログは既存 triggerAlert）
+ */
+router.get('/strategy-alerts', async (_req: Request, res: Response) => {
+  const startTime = Date.now();
+
+  try {
+    console.log('[Cron] ストラテジーライブ評価を開始します');
+
+    // 市場開場チェック（マッチングパイプラインと同じ判定）
+    if (!isFXMarketOpen()) {
+      const marketStatus = getMarketStatusJST();
+      console.log('[Cron] 市場休場のためストラテジーライブ評価をスキップ:', marketStatus.message);
+      res.json({
+        success: true,
+        skipped: true,
+        reason: '市場休場',
+        market: marketStatus.message,
+        duration: Date.now() - startTime,
+      });
+      return;
+    }
+
+    const service = new LiveStrategyEvaluationService();
+    const result = await service.evaluateActiveStrategyAlerts();
+
+    res.json({
+      success: result.errors.length === 0,
+      message:
+        `評価${result.alertsEvaluated}件, 条件成立${result.conditionMet}件, ` +
+        `通知${result.triggered}件`,
+      data: result,
+      duration: Date.now() - startTime,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラー';
+    console.error('[Cron] ストラテジーライブ評価エラー:', message);
+    res.status(500).json({
+      success: false,
+      error: message,
+      duration: Date.now() - startTime,
+    });
+  }
+});
+
+/**
+ * POST /api/cron/strategy-alerts/test
+ * ストラテジーライブ評価の手動テスト（市場チェックなし、デバッグ・smoke 用）
+ */
+router.post('/strategy-alerts/test', async (_req: Request, res: Response) => {
+  const startTime = Date.now();
+  try {
+    console.log('[Cron/Test] ストラテジーライブ評価テストを開始');
+    const service = new LiveStrategyEvaluationService();
+    const result = await service.evaluateActiveStrategyAlerts();
+    res.json({
+      success: true,
+      data: result,
+      duration: Date.now() - startTime,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '不明なエラー';
+    console.error('[Cron/Test] ストラテジーライブ評価テストエラー:', message);
     res.status(500).json({
       success: false,
       error: message,

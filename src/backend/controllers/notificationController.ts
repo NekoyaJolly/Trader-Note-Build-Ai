@@ -28,6 +28,10 @@ interface DetailedMatchReason {
 interface NotificationData {
   id: string;
   timestamp: Date;
+  /// 通知種別(match / strategy_alert 等。Phase γ-1 でストラテジーアラートを追加)
+  type?: string;
+  /// 通知タイトル(strategy_alert ではストラテジー名を含む)
+  title?: string;
   message?: string;
   read?: boolean;
   matchResult?: MatchResultData;
@@ -418,6 +422,11 @@ export class NotificationController {
 
     return {
       id: notification.id,
+      // 通知種別とタイトル(strategy_alert の UI 表示分岐用。Phase γ-1)。
+      // API 返却値は 'match' / 'strategy_alert' の 2 値に正規化する
+      // (DB の 'note_match' や FS モードの 'info'/'warning' をフロントに漏らさない)
+      type: notification.type === 'strategy_alert' ? ('strategy_alert' as const) : ('match' as const),
+      title: notification.title ?? '',
       matchResultId: match?.noteId || notification.id,
       sentAt: notification.timestamp.toISOString(),
       channel: 'in_app' as const,

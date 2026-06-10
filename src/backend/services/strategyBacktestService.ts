@@ -33,6 +33,7 @@ import {
   evaluateCondition,
   evaluateConditionGroup
 } from './strategyConditionEvaluator';
+import { ALL_CANDLE_PATTERN_IDS } from '../../shared/patterns';
 import { CTraderDataService } from './ctrader/ctraderDataService';
 import { CTraderAuthService } from './ctrader/ctraderAuthService';
 import { calculateLotSize, slValueToPips, getPipValue } from './positionSizeCalculator';
@@ -527,6 +528,50 @@ export async function runBacktest(request: BacktestRequest): Promise<BacktestRes
 }
 
 /**
+ * analysis-engine の指標系列レスポンスを evaluator 用キャッシュに変換する。
+ *
+ * バックテスト(executeBacktestStage)とライブ条件評価(strategyLiveEvaluationService)が
+ * **同じ変換**を通ることで「評価 1 経路化」を保証する(completion-roadmap §3)。
+ *
+ * - null(欠損)は NaN に寄せて evaluator 側で undefined 扱いにする
+ * - Python 側キーを正規化して格納(Python float "14.0" → JS int "14" 互換)。
+ *   理由: Python は JSON で数値を float (14.0) として出力し、Node は int (14) として出力する。
+ *   evaluateCondition → getIndicatorValue は makeIndicatorCacheKey で Node 形式のキーを生成するため、
+ *   Python 形式のキーのままではキャッシュルックアップが常に失敗し 0 トレードになる。
+ */
+export function buildEvaluationCaches(indicatorSeries: {
+  series: Record<string, Array<number | null>>;
+  patterns?: Record<string, boolean[]>;
+}): { indicatorCache: Map<string, number[]>; patternCache: Map<CandlePatternId, boolean[]> } {
+  const indicatorCache = new Map<string, number[]>();
+  for (const [key, values] of Object.entries(indicatorSeries.series)) {
+    const mappedValues = values.map(v => (v === null ? Number.NaN : v));
+    const normalizedKey = key.replace(
+      /(\d+)\.0(?=[,}])/g,
+      '$1'
+    );
+    indicatorCache.set(normalizedKey, mappedValues);
+
+    // 元のキー（Python形式）でもセットしておく（安全策: 他のコードパスからの参照用）
+    if (normalizedKey !== key) {
+      indicatorCache.set(key, mappedValues);
+    }
+  }
+
+  // patterns（bool系列）を evaluator が使えるように格納
+  // 注意: analysis-engine は patterns を任意計算にしているため、未指定の場合は空。
+  // パターン ID の単一情報源は shared/patterns の ALL_CANDLE_PATTERN_IDS(ドリフト防止)
+  const patternCache = new Map<CandlePatternId, boolean[]>();
+  for (const [patternId, flags] of Object.entries(indicatorSeries.patterns ?? {})) {
+    if ((ALL_CANDLE_PATTERN_IDS as readonly string[]).includes(patternId)) {
+      patternCache.set(patternId as CandlePatternId, flags);
+    }
+  }
+
+  return { indicatorCache, patternCache };
+}
+
+/**
  * バックテストステージを実行
  */
 async function executeBacktestStage(
@@ -593,50 +638,7 @@ async function executeBacktestStage(
     throw wrapped;
   }
 
-  const indicatorCache = new Map<string, number[]>();
-  for (const [key, values] of Object.entries(indicatorSeries.series)) {
-    // null（欠損）は NaN に寄せて evaluator 側で undefined 扱いにする
-    const mappedValues = values.map(v => (v === null ? Number.NaN : v));
-
-    // Python 側のキーを正規化して格納（Python float "14.0" → JS int "14" 互換）
-    // 理由: Python は JSON で数値を float (14.0) として出力し、Node は int (14) として出力する。
-    //        evaluateCondition → getIndicatorValue は makeIndicatorCacheKey で Node 形式のキーを生成するため、
-    //        Python 形式のキーのままではキャッシュルックアップが常に失敗し 0 トレードになる。
-    const normalizedKey = key.replace(
-      /(\d+)\.0(?=[,}])/g,
-      '$1'
-    );
-    indicatorCache.set(normalizedKey, mappedValues);
-
-    // 元のキー（Python形式）でもセットしておく（安全策: 他のコードパスからの参照用）
-    if (normalizedKey !== key) {
-      indicatorCache.set(key, mappedValues);
-    }
-  }
-
-  // patterns（bool系列）を evaluator が使えるように格納
-  // 注意: analysis-engine は patterns を任意計算にしているため、未指定の場合は空
-  const patternCache = new Map<CandlePatternId, boolean[]>();
-  const allowedPatternIds: readonly CandlePatternId[] = [
-    'pinbar',
-    'pinbar_bull',
-    'pinbar_bear',
-    'hammer',
-    'hammer_bull',
-    'hammer_bear',
-    'shooting_star',
-    'engulfing_bull',
-    'engulfing_bear',
-    'doji',
-    'thrust_bull',
-    'thrust_bear',
-  ] as const;
-
-  for (const [patternId, flags] of Object.entries(indicatorSeries.patterns ?? {})) {
-    if ((allowedPatternIds as readonly string[]).includes(patternId)) {
-      patternCache.set(patternId as CandlePatternId, flags);
-    }
-  }
+  const { indicatorCache, patternCache } = buildEvaluationCaches(indicatorSeries);
 
   // 評価コンテキストを初期化
   const ctx: EvaluationContext = {

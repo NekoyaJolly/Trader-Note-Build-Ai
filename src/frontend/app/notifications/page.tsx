@@ -211,35 +211,47 @@ export default function NotificationsPage() {
                       {new Date(notification.sentAt).toLocaleString("ja-JP")}
                     </td>
 
-                    {/* 通貨ペア */}
+                    {/* 通貨ペア（ストラテジーアラートはタイトルで代替表示） */}
                     <td className="px-4 py-3 text-sm font-semibold text-white">
-                      {notification.tradeNote.symbol}
+                      {notification.type === "strategy_alert"
+                        ? (notification.title || "ストラテジー条件成立")
+                        : notification.tradeNote.symbol}
                     </td>
 
                     {/* 時間足 */}
                     <td className="px-4 py-3 text-sm text-gray-300">
-                      {notification.tradeNote.timeframe}
+                      {notification.type === "strategy_alert" ? "—" : notification.tradeNote.timeframe}
                     </td>
 
-                    {/* 売買方向 */}
+                    {/* 売買方向 / 通知種別 */}
                     <td className="px-4 py-3 text-sm">
-                      <Badge 
-                        variant={notification.tradeNote.side === "BUY" ? "secondary" : "destructive"}
-                        className={notification.tradeNote.side === "BUY" 
-                          ? "bg-green-500/20 text-green-400" 
-                          : "bg-red-500/20 text-red-400"
-                        }
-                      >
-                        {notification.tradeNote.side}
-                      </Badge>
+                      {notification.type === "strategy_alert" ? (
+                        <Badge variant="secondary" className="bg-violet-500/20 text-violet-300">
+                          条件成立
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant={notification.tradeNote.side === "BUY" ? "secondary" : "destructive"}
+                          className={notification.tradeNote.side === "BUY"
+                            ? "bg-green-500/20 text-green-400"
+                            : "bg-red-500/20 text-red-400"
+                          }
+                        >
+                          {notification.tradeNote.side}
+                        </Badge>
+                      )}
                     </td>
 
-                    {/* スコアゲージ */}
+                    {/* スコアゲージ（ストラテジーアラートは真偽判定のため非表示） */}
                     <td className="px-4 py-3">
-                      <ScoreGauge
-                        score={notification.matchResult.score}
-                        size="small"
-                      />
+                      {notification.type === "strategy_alert" ? (
+                        <span className="text-sm text-gray-500">—</span>
+                      ) : (
+                        <ScoreGauge
+                          score={notification.matchResult.score}
+                          size="small"
+                        />
+                      )}
                     </td>
 
                     {/* 判定理由要約 */}

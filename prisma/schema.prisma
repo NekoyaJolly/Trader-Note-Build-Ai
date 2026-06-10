@@ -267,7 +267,10 @@ model MatchResult {
 
 model Notification {
   id            String             @id @default(uuid()) @db.Uuid
-  matchResultId String             @db.Uuid
+  /// 由来 MatchResult（ノートマッチ通知のみ。ストラテジーアラート通知は null。Phase γ-1 で nullable 化）
+  matchResultId String?            @db.Uuid
+  /// 通知種別（note_match: ノート類似マッチ / strategy_alert: ストラテジー条件成立）
+  type          String             @default("note_match")
   title         String
   message       String
   status        NotificationStatus @default(unread)
@@ -276,10 +279,11 @@ model Notification {
   createdAt     DateTime           @default(now()) @db.Timestamptz(6)
   /// 宛先ユーザー（per-user 通知のための帰属。マルチユーザー化 Phase α）
   userId        String?            @db.Uuid
-  matchResult   MatchResult        @relation(fields: [matchResultId], references: [id])
+  matchResult   MatchResult?       @relation(fields: [matchResultId], references: [id])
 
   @@index([status, sentAt], map: "idx_notification_status_sent")
   @@index([userId, status], map: "idx_notification_user_status")
+  @@index([type, sentAt], map: "idx_notification_type_sent")
 }
 
 model OrderPreset {
