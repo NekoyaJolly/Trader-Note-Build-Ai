@@ -90,7 +90,7 @@ export interface TradeNote {
  */
 export interface NotificationListItem extends NotificationLog {
   /** 通知種別（match: ノート類似マッチ / strategy_alert: ストラテジー条件成立。Phase γ-1） */
-  type?: "match" | "strategy_alert" | string;
+  type?: "match" | "strategy_alert";
   /** 通知タイトル（strategy_alert ではストラテジー名を含む） */
   title?: string;
   matchResult: {

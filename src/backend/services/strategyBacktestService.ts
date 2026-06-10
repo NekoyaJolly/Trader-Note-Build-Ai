@@ -33,6 +33,7 @@ import {
   evaluateCondition,
   evaluateConditionGroup
 } from './strategyConditionEvaluator';
+import { ALL_CANDLE_PATTERN_IDS } from '../../shared/patterns';
 import { CTraderDataService } from './ctrader/ctraderDataService';
 import { CTraderAuthService } from './ctrader/ctraderAuthService';
 import { calculateLotSize, slValueToPips, getPipValue } from './positionSizeCalculator';
@@ -527,9 +528,6 @@ export async function runBacktest(request: BacktestRequest): Promise<BacktestRes
 }
 
 /**
- * バックテストステージを実行
- */
-/**
  * analysis-engine の指標系列レスポンスを evaluator 用キャッシュに変換する。
  *
  * バックテスト(executeBacktestStage)とライブ条件評価(strategyLiveEvaluationService)が
@@ -561,25 +559,11 @@ export function buildEvaluationCaches(indicatorSeries: {
   }
 
   // patterns（bool系列）を evaluator が使えるように格納
-  // 注意: analysis-engine は patterns を任意計算にしているため、未指定の場合は空
+  // 注意: analysis-engine は patterns を任意計算にしているため、未指定の場合は空。
+  // パターン ID の単一情報源は shared/patterns の ALL_CANDLE_PATTERN_IDS(ドリフト防止)
   const patternCache = new Map<CandlePatternId, boolean[]>();
-  const allowedPatternIds: readonly CandlePatternId[] = [
-    'pinbar',
-    'pinbar_bull',
-    'pinbar_bear',
-    'hammer',
-    'hammer_bull',
-    'hammer_bear',
-    'shooting_star',
-    'engulfing_bull',
-    'engulfing_bear',
-    'doji',
-    'thrust_bull',
-    'thrust_bear',
-  ] as const;
-
   for (const [patternId, flags] of Object.entries(indicatorSeries.patterns ?? {})) {
-    if ((allowedPatternIds as readonly string[]).includes(patternId)) {
+    if ((ALL_CANDLE_PATTERN_IDS as readonly string[]).includes(patternId)) {
       patternCache.set(patternId as CandlePatternId, flags);
     }
   }
@@ -587,6 +571,9 @@ export function buildEvaluationCaches(indicatorSeries: {
   return { indicatorCache, patternCache };
 }
 
+/**
+ * バックテストステージを実行
+ */
 async function executeBacktestStage(
   strategy: StrategyDetail,
   request: BacktestRequest,
