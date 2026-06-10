@@ -1,0 +1,298 @@
+/**
+ * LensNoteCoreService — Note コア行の生成とレンズ類似度シャドー評価
+ *
+ * 正本設計: docs/architecture/NOTE_SIMILARITY_FOUNDATION.md §7-§9
+ *
+ * 責務:
+ * 1. Side-A ノート作成時に Note コア行(lensSnapshot + userId + 来歴)を生成する
+ * 2. 【移行戦略 §9-2 シャドー評価】アクティブノートをレンズ類似度で評価し、
+ *    結果を観測ログとして出力する。**通知挙動には一切影響しない**(旧マッチングと並行)。
+ *    切替(§9-3)の妥当性判断材料になる
+ *
+ * 市場側スナップショットの指標レンズは、ノート側 lensSnapshot に保存された lensId
+ * 集合から逆解決する(parseIndicatorLensId)。これにより「同じ Profile・同じ params」
+ * (§5.3)の比較がプロファイルの現在状態に依存せず成立する。
+ */
+
+import type { TradeNote as PrismaTradeNote, TradeSide } from '@prisma/client';
+import { LensSnapshotBuilder } from './lensSnapshotBuilder';
+import { NoteCoreRepository } from '../backend/repositories/noteCoreRepository';
+import { TradeNoteService } from './tradeNoteService';
+import {
+  parseIndicatorLensId,
+  resolveIndicatorLensSpecs,
+  INDICATOR_LENS_PREFIX,
+  type IndicatorLensSourceConfig,
+  type IndicatorLensSpec,
+} from '../shared/similarity/indicatorLenses';
+import {
+  parseNoteLensSnapshot,
+  type JsonLike,
+  type NoteLensSnapshot,
+} from '../shared/similarity/lensSnapshotTypes';
+import {
+  compareLensSnapshots,
+  type SimilarityMatchLevel,
+} from '../shared/similarity/similarityEngine';
+
+/** Side-A ノート作成時の Note コア生成入力 */
+export interface CreateSideANoteCoreInput {
+  readonly tradeNoteId: string;
+  readonly userId: string | null;
+  readonly symbol: string;
+  readonly side: TradeSide;
+  readonly timeframe: string;
+  readonly entryPrice?: number;
+  /** トレード時刻(= lensSnapshot.eventTime) */
+  readonly eventTime: Date;
+  /** プロファイルのインジケーター設定(空 = 状態レンズのみ) */
+  readonly indicatorConfigs: ReadonlyArray<IndicatorLensSourceConfig>;
+  readonly correlationId?: string;
+}
+
+/** Note コア生成の結果 */
+export interface CreateSideANoteCoreResult {
+  readonly noteCoreId: string;
+  /** lensSnapshot が生成できたか(false = null で登録、バックフィル対象) */
+  readonly snapshotGenerated: boolean;
+  readonly warnings: string[];
+}
+
+/** シャドー評価のノート単位の結果 */
+export interface LensShadowNoteResult {
+  readonly tradeNoteId: string;
+  readonly symbol: string;
+  readonly comparable: boolean;
+  readonly score: number | null;
+  readonly level: SimilarityMatchLevel | null;
+  readonly triggered: boolean;
+  readonly skipReason?: string;
+}
+
+/** シャドー評価のサマリー(MatchingPipelineRunResult に additive に載せる) */
+export interface LensShadowSummary {
+  /** 対象になったアクティブノート数 */
+  readonly activeNotes: number;
+  /** lensSnapshot を持っていたノート数 */
+  readonly notesWithSnapshot: number;
+  /** 比較が成立したノート数 */
+  readonly comparable: number;
+  /** しきい値を超えた(レンズ基盤なら通知候補になっていた)ノート数 */
+  readonly triggered: number;
+  /** 評価したシンボル数 */
+  readonly symbols: number;
+  /** 比較成立ノートの平均スコア(なければ null) */
+  readonly averageScore: number | null;
+  /** シンボル単位の評価エラー(非致命) */
+  readonly errors: string[];
+}
+
+/** LensNoteCoreService の依存(テスト差し替え用) */
+export interface LensNoteCoreServiceDeps {
+  builder?: Pick<LensSnapshotBuilder, 'build'>;
+  noteCoreRepository?: Pick<
+    NoteCoreRepository,
+    'upsertForTradeNote' | 'findByTradeNoteIds'
+  >;
+  tradeNoteService?: Pick<TradeNoteService, 'loadActiveNotesForMatchingAsPrisma'>;
+}
+
+export class LensNoteCoreService {
+  private readonly builder: Pick<LensSnapshotBuilder, 'build'>;
+  private readonly noteCoreRepository: Pick<
+    NoteCoreRepository,
+    'upsertForTradeNote' | 'findByTradeNoteIds'
+  >;
+  private readonly tradeNoteService: Pick<TradeNoteService, 'loadActiveNotesForMatchingAsPrisma'>;
+
+  constructor(deps: LensNoteCoreServiceDeps = {}) {
+    this.builder = deps.builder ?? new LensSnapshotBuilder();
+    this.noteCoreRepository = deps.noteCoreRepository ?? new NoteCoreRepository();
+    this.tradeNoteService = deps.tradeNoteService ?? new TradeNoteService();
+  }
+
+  /**
+   * Side-A TradeNote に対応する Note コア行を生成する(冪等)。
+   * snapshot 生成に失敗しても Note 行は lensSnapshot=null で登録し、
+   * 後からバックフィルできるようにする(取り込みフローを止めない)。
+   */
+  async createForSideATradeNote(
+    input: CreateSideANoteCoreInput
+  ): Promise<CreateSideANoteCoreResult> {
+    const specs = resolveIndicatorLensSpecs(input.indicatorConfigs);
+    let snapshot: NoteLensSnapshot | null = null;
+    const warnings: string[] = [];
+    try {
+      const buildResult = await this.builder.build({
+        symbol: input.symbol,
+        timeframe: input.timeframe,
+        eventTime: input.eventTime,
+        indicatorSpecs: specs,
+        ensureCoverage: true,
+        ...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
+      });
+      snapshot = buildResult.snapshot;
+      warnings.push(...buildResult.warnings);
+    } catch (error) {
+      warnings.push(
+        `lensSnapshot 生成に失敗(null で登録、バックフィル対象): ` +
+          `${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+
+    const row = await this.noteCoreRepository.upsertForTradeNote({
+      tradeNoteId: input.tradeNoteId,
+      userId: input.userId,
+      symbol: input.symbol,
+      side: input.side,
+      timeframe: input.timeframe,
+      ...(input.entryPrice !== undefined ? { entryPrice: input.entryPrice } : {}),
+      eventTime: input.eventTime,
+      lensSnapshot: snapshot,
+    });
+
+    return {
+      noteCoreId: row.id,
+      snapshotGenerated: snapshot !== null,
+      warnings,
+    };
+  }
+
+  /**
+   * 【シャドー評価】アクティブノート(マッチング対象)をレンズ類似度で評価する。
+   *
+   * 旧マッチングの通知判定には影響しない。観測ログ(console)とサマリーを返すのみ。
+   * 評価エラーはシンボル単位で握り、他シンボルの評価を継続する。
+   */
+  async shadowEvaluateActiveNotes(): Promise<LensShadowSummary> {
+    const notes = await this.tradeNoteService.loadActiveNotesForMatchingAsPrisma();
+    const errors: string[] = [];
+    if (notes.length === 0) {
+      return {
+        activeNotes: 0,
+        notesWithSnapshot: 0,
+        comparable: 0,
+        triggered: 0,
+        symbols: 0,
+        averageScore: null,
+        errors,
+      };
+    }
+
+    // Note コア行(lensSnapshot)をまとめて取得
+    const coreRows = await this.noteCoreRepository.findByTradeNoteIds(notes.map((n) => n.id));
+    const snapshotByTradeNoteId = new Map<string, NoteLensSnapshot>();
+    for (const row of coreRows) {
+      if (row.tradeNoteId === null) {
+        continue;
+      }
+      const parsed = parseNoteLensSnapshot(row.lensSnapshot as JsonLike);
+      if (parsed !== null) {
+        snapshotByTradeNoteId.set(row.tradeNoteId, parsed);
+      }
+    }
+
+    // シンボル × 時間足でグループ化(市場側 snapshot を 1 回だけ生成するため)
+    const groups = new Map<string, { symbol: string; timeframe: string; notes: PrismaTradeNote[] }>();
+    for (const note of notes) {
+      const timeframe = note.timeframe ?? '15m';
+      const key = `${note.symbol}__${timeframe}`;
+      const group = groups.get(key) ?? { symbol: note.symbol, timeframe, notes: [] };
+      group.notes.push(note);
+      groups.set(key, group);
+    }
+
+    const results: LensShadowNoteResult[] = [];
+    let notesWithSnapshot = 0;
+
+    for (const group of groups.values()) {
+      const groupSnapshots = group.notes
+        .map((note) => ({ note, snapshot: snapshotByTradeNoteId.get(note.id) }))
+        .filter(
+          (item): item is { note: PrismaTradeNote; snapshot: NoteLensSnapshot } =>
+            item.snapshot !== undefined
+        );
+      notesWithSnapshot += groupSnapshots.length;
+      if (groupSnapshots.length === 0) {
+        continue;
+      }
+
+      try {
+        // ノート側 lensId 集合から市場側に必要な指標レンズ仕様を逆解決
+        const specsByLensId = new Map<string, IndicatorLensSpec>();
+        for (const { snapshot } of groupSnapshots) {
+          for (const lensId of Object.keys(snapshot.lenses)) {
+            if (!lensId.startsWith(INDICATOR_LENS_PREFIX) || specsByLensId.has(lensId)) {
+              continue;
+            }
+            const spec = parseIndicatorLensId(lensId);
+            if (spec !== null) {
+              specsByLensId.set(lensId, spec);
+            }
+          }
+        }
+
+        // 市場側のカバレッジ/鮮度の自己回復は既定 ON。
+        // builder の補完フェッチは「最終バー以降のギャップ分のみ」(15 分 cron なら数本)で、
+        // 旧マッチング経路が毎サイクル行う EODHD 取得と同等以下の負荷。レート制限が
+        // 問題になった場合は LENS_SHADOW_ENSURE_COVERAGE=false で DB キャッシュのみの
+        // 評価に切り替えられる(その場合は鮮度低下が warnings/精度に現れる)。
+        const marketResult = await this.builder.build({
+          symbol: group.symbol,
+          timeframe: group.timeframe,
+          eventTime: new Date(),
+          indicatorSpecs: [...specsByLensId.values()],
+          ensureCoverage: process.env.LENS_SHADOW_ENSURE_COVERAGE !== 'false',
+        });
+        if (marketResult.snapshot === null) {
+          errors.push(
+            `市場側 snapshot を生成できませんでした: ${group.symbol} ${group.timeframe}` +
+              (marketResult.warnings.length > 0 ? ` (${marketResult.warnings[0]})` : '')
+          );
+          continue;
+        }
+
+        for (const { note, snapshot } of groupSnapshots) {
+          const comparison = compareLensSnapshots(snapshot, marketResult.snapshot);
+          results.push({
+            tradeNoteId: note.id,
+            symbol: group.symbol,
+            comparable: comparison.comparable,
+            score: comparison.score,
+            level: comparison.level,
+            triggered: comparison.triggered,
+            ...(comparison.skipReason !== undefined ? { skipReason: comparison.skipReason } : {}),
+          });
+          console.log(
+            `[LensShadow] noteId=${note.id} symbol=${group.symbol} ` +
+              `score=${comparison.score === null ? 'n/a' : comparison.score.toFixed(3)} ` +
+              `level=${comparison.level ?? 'n/a'} triggered=${comparison.triggered} ` +
+              `lenses=${comparison.breakdown.length}/${comparison.commonLensCount}` +
+              (comparison.skipReason ? ` skip=${comparison.skipReason}` : '')
+          );
+        }
+      } catch (error) {
+        errors.push(
+          `${group.symbol} ${group.timeframe} のシャドー評価に失敗: ` +
+            `${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
+
+    const comparableResults = results.filter((r) => r.comparable && r.score !== null);
+    const averageScore =
+      comparableResults.length > 0
+        ? comparableResults.reduce((sum, r) => sum + (r.score ?? 0), 0) / comparableResults.length
+        : null;
+
+    return {
+      activeNotes: notes.length,
+      notesWithSnapshot,
+      comparable: comparableResults.length,
+      triggered: results.filter((r) => r.triggered).length,
+      symbols: groups.size,
+      averageScore,
+      errors,
+    };
+  }
+}

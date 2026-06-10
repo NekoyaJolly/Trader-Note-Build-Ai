@@ -31,6 +31,7 @@ import { InAppNotificationSender } from './notification/inAppNotificationSender'
 import type { JsonValue } from '../utils/jsonValue';
 import { MatchingPipelineRunRepository } from '../backend/repositories/matchingPipelineRunRepository';
 import type { MatchingPipelineRunStatus } from '@prisma/client';
+import { LensNoteCoreService, type LensShadowSummary } from './lensNoteCoreService';
 
 /**
  * matching pipeline の起動元（observability 用）。
@@ -53,6 +54,9 @@ export interface MatchingPipelineRunResult {
   /// スキップ理由の集計（reason code -> 件数）
   skipReasons: Record<string, number>;
   status: MatchingPipelineRunStatus;
+  /// レンズ類似度シャドー評価のサマリー（Phase α-2、観測のみ・通知挙動に影響しない。
+  /// 無効化時・評価失敗時は undefined）
+  lensShadow?: LensShadowSummary;
 }
 
 /**
@@ -73,6 +77,7 @@ export interface MatchingServiceDeps {
     MatchingPipelineRunRepository,
     'create' | 'findLatest' | 'findMany'
   >;
+  lensNoteCoreService?: Pick<LensNoteCoreService, 'shadowEvaluateActiveNotes'>;
 }
 
 /**
@@ -109,6 +114,8 @@ export class MatchingService {
     MatchingPipelineRunRepository,
     'create' | 'findLatest' | 'findMany'
   >;
+  // レンズ類似度シャドー評価 (Phase α-2、移行戦略 §9-2)。観測のみで通知に影響しない。
+  private lensNoteCoreService: Pick<LensNoteCoreService, 'shadowEvaluateActiveNotes'>;
 
   constructor(deps: MatchingServiceDeps = {}) {
     this.marketDataService = new MarketDataService();
@@ -122,6 +129,7 @@ export class MatchingService {
     this.inAppNotificationSender = deps.inAppNotificationSender ?? new InAppNotificationSender();
     this.matchingPipelineRunRepository =
       deps.matchingPipelineRunRepository ?? new MatchingPipelineRunRepository();
+    this.lensNoteCoreService = deps.lensNoteCoreService ?? new LensNoteCoreService();
   }
 
   /**
@@ -774,18 +782,38 @@ export class MatchingService {
     let notifiedCount = 0;
     let skippedCount = 0;
     let totalMatches = 0;
+    // レンズ類似度シャドー評価の結果 (Phase α-2)。失敗時・無効時は undefined のまま
+    let lensShadow: LensShadowSummary | undefined;
 
     try {
       // 1. 統合マッチング（Side-A + Side-B）
       const allMatches = await this.checkForAllMatches();
       totalMatches = allMatches.length;
 
+      // 1.5 レンズ類似度シャドー評価 (Phase α-2、NOTE_SIMILARITY_FOUNDATION.md §9-2)
+      // 旧マッチングと並行してレンズ基盤のスコアを観測する。通知挙動には一切影響せず、
+      // 失敗してもパイプラインは継続する。LENS_SHADOW_EVALUATION=false で無効化できる。
+      if (process.env.LENS_SHADOW_EVALUATION !== 'false') {
+        try {
+          lensShadow = await this.lensNoteCoreService.shadowEvaluateActiveNotes();
+          console.log(
+            `[LensShadow] active=${lensShadow.activeNotes} withSnapshot=${lensShadow.notesWithSnapshot} ` +
+            `comparable=${lensShadow.comparable} triggered=${lensShadow.triggered} ` +
+            `avg=${lensShadow.averageScore === null ? 'n/a' : lensShadow.averageScore.toFixed(3)} ` +
+            `errors=${lensShadow.errors.length}`
+          );
+        } catch (shadowError) {
+          console.warn('[LensShadow] シャドー評価失敗 (パイプライン継続):', shadowError);
+        }
+      }
+
       if (allMatches.length === 0) {
         console.log('[MatchingPipeline] マッチなし。パイプライン終了。');
-        return await this.finalizePipelineRun({
+        const emptyResult = await this.finalizePipelineRun({
           runId, trigger, startedAt,
           totalMatches: 0, notified: 0, skipped: 0, errors: [], skipReasons: {},
         });
+        return lensShadow ? { ...emptyResult, lensShadow } : emptyResult;
       }
 
       // Side-A / Side-B の切り分け:
@@ -936,7 +964,7 @@ export class MatchingService {
         );
       }
 
-      return await this.finalizePipelineRun({
+      const result = await this.finalizePipelineRun({
         runId, trigger, startedAt,
         totalMatches,
         notified: notifiedCount,
@@ -944,11 +972,12 @@ export class MatchingService {
         errors,
         skipReasons,
       });
+      return lensShadow ? { ...result, lensShadow } : result;
     } catch (error) {
       const errMsg = `パイプライン全体エラー: ${error instanceof Error ? error.message : String(error)}`;
       errors.push(errMsg);
       console.error(`[MatchingPipeline] ${errMsg}`);
-      return await this.finalizePipelineRun({
+      const failedResult = await this.finalizePipelineRun({
         runId, trigger, startedAt,
         totalMatches,
         notified: notifiedCount,
@@ -957,6 +986,7 @@ export class MatchingService {
         skipReasons,
         forcedStatus: 'failed',
       });
+      return lensShadow ? { ...failedResult, lensShadow } : failedResult;
     }
   }
 

@@ -25,6 +25,8 @@ describe('FeatureExtractor', () => {
     quantity: new Prisma.Decimal(1.5),
     fee: null,
     exchange: null,
+    // マルチユーザー化 Phase α: テストモックはユーザー帰属なし
+    userId: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,

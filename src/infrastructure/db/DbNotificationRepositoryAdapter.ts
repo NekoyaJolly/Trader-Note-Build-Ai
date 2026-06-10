@@ -77,12 +77,13 @@ export class DbNotificationRepositoryAdapter implements NotificationRepository {
    */
   private convertToNotification(dbNotification: NotificationWithMatch): Notification {
     const matchResult = dbNotification.matchResult;
-    
+
     // MatchResult がない場合は matchResult なしの通知として返す
+    // (ストラテジーアラート通知は DB の type をそのまま引き継ぐ。Phase γ-1)
     if (!matchResult) {
       return {
         id: dbNotification.id,
-        type: 'match',
+        type: dbNotification.type === 'strategy_alert' ? 'strategy_alert' : 'match',
         title: dbNotification.title,
         message: dbNotification.message,
         timestamp: dbNotification.sentAt,

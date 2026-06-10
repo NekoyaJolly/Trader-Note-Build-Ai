@@ -43,6 +43,7 @@
 | `check/run-cognitive-eval.ts` | 認知層評価ハーネス(P1)を代表ケース(接地良/捏造/矛盾)で実 judge 採点し rubric 集計の妥当性を目視確認。本番観測ケースを追記して ~20 件に育てる eval セットの種 | `AI_API_KEY=... npx tsx scripts/check/run-cognitive-eval.ts` | check | 認知層 eval が CI/定期ジョブに組み込まれ手動目視が不要になった場合 |
 | `production-e2e-test.sh` | 本番公開API / 認証境界 / Vercel UI配信のcurl smokeを実行する手動確認用スクリプト | `PRODUCTION_API_URL=https://... PRODUCTION_UI_URL=https://... bash scripts/production-e2e-test.sh` | check | Playwright の production public smoke に完全移行し、手動curl確認が不要になった場合 |
 | `one-shot/reeval-evolution-cost.ts` | コスト0で合格した既存進化候補をシンボル別コスト込みで再評価し、新 evolutionRunId の新規行として追加 (#303/#304 反映後の遡及評価)。`--before <ISO>` で #303 以前の cost=0 行に限定可。未知引数はエラー | `npx tsx scripts/one-shot/reeval-evolution-cost.ts [--limit N] [--dry-run] [--before <ISO>]` | one-shot | 再評価を1回実施し結果確認後 (削除予定 2026-07-31) |
+| `migrate/backfill-lens-snapshots.ts` | 既存 TradeNote へ Note コア行 + lensSnapshot をトレード時刻起点で遡及生成 (NOTE_SIMILARITY_FOUNDATION.md §9-5)。lensSnapshot=null の再試行も兼ねる | `npx tsx scripts/migrate/backfill-lens-snapshots.ts [--limit N] [--dry-run] [--include-archived]` | migrate | 全既存ノートのバックフィル完了 + マッチング経路切替 (§9-3) 後に再生成ニーズが無くなった場合 |
 | (既存 40+ scripts) | ルール制定以前の資産、§7 に従い段階的に整理 | — | — | — |
 
 ## 4. one-shot スクリプトの制限

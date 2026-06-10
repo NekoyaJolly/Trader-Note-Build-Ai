@@ -278,6 +278,7 @@ similarity(noteSnapshot, marketSnapshot):
 | 日付 | 内容 |
 |---|---|
 | 2026-06-10 | **基盤コア実装(移行戦略 §9-1、非破壊・並行)**: `src/shared/similarity/` に正準型・インジケーターレンズ・類似度エンジンを新設。配線(ノート生成・マッチング)は次段階。 |
+| 2026-06-10 | **Note コア + 生成配線 + シャドー評価(§9-1〜§9-2)**: `Note` テーブル新設(戦略B) + Trade/TradeNote/MatchResult/Notification/Strategy へ userId 追加(マルチユーザー化 Phase α、nullable+バックフィル)。`LensSnapshotBuilder`(eventTime 起点の同一生成口) + CSV 取込配線 + マッチングパイプラインのシャドー評価 + バックフィルスクリプト。通知挙動は不変。 |
 
 ### 実装のローカル詳細(2026-06-10、正本への追補)
 
@@ -293,6 +294,17 @@ similarity(noteSnapshot, marketSnapshot):
 - **イベント比較の none×方向 = 0.25**(§6.2 表の「レンズ定義」部分を一律値で確定)。
 - **カタログ未定義キーのフォールバック**: boolean のみ一致/不一致で比較、数値・文字列は比較対象外(新キーを効かせる場合はカタログ追記 = 加算的拡張)。
 - **比較対象外(skip)を明示したキー**: 絶対価格(`last_high_price` 等)、絶対ボラ値(`bb_width`/`atr` 生値)、メタ確度(`confidence_pct`/`wyckoff_phase_confidence`/`pattern_confidence`)、細粒度時刻(`utc_minute`/`day_of_month`)。
+
+### 実装のローカル詳細・追補2(2026-06-10、§9-1〜§9-2 配線)
+
+- **Note コアテーブル(§8 戦略B)の段階移行上の役割分担**: 本段階の `Note` は「同一性 + lensSnapshot + 来歴 + userId」のみを持つ。**運用フィールド(status/enabled/pausedUntil/priority)の正は引き続き `TradeNote`**(運用統一は Phase ε のノート統一仕上げで扱う)。userId は nullable + migration で最古ユーザーへバックフィル(必須化・FK 付与はクエリ分離完了後の Phase α-4 で検討)。
+- **生成の唯一の入口 = `LensSnapshotBuilder`**(`src/services/lensSnapshotBuilder.ts`): ノート作成時(eventTime=トレード時刻)も照合時(eventTime=now)も同じ build() を通る(§2-① の構造的保証)。旧実装は「ノート生成時に現在の市場データ」で特徴を計算しており「その瞬間の市場」を捉えていなかった(根本欠陥)→ eventTime 起点の取得で解消。
+- **カバレッジ/鮮度の自己回復**: バー不足(<100本) または鮮度切れ(最終バーが eventTime から max(3 バー, 30 分) 超離れ)のとき、`fetchAndCacheOhlcv` で期間指定フェッチを 1 回だけ試行。cron 照合では毎サイクル直近ギャップ分のみ取得され、OHLCVCandle が自己維持される。
+- **市場側の指標レンズ仕様はノート側 lensId から逆解決**(`parseIndicatorLensId`): IndicatorProfile の現在状態に依存せず「同じ params」の比較が成立(プロファイル削除・変更に頑健)。
+- **シャドー評価(§9-2)**: `runMatchingPipeline` 内で旧マッチングと並行実行。通知挙動への影響ゼロ・失敗してもパイプライン継続。結果は `[LensShadow]` ログ + `MatchingPipelineRunResult.lensShadow`(additive)で観測。`LENS_SHADOW_EVALUATION=false` で無効化可(既定 ON。テストでは jest.setup.ts が既定 OFF)。
+- **`current_analysis` レンズは Side-A 生成経路では対象外**(MarketAnalysis = Research AI 出力が必須のため)。Side-B 側スナップショットとの比較では共通レンズに含まれない=自動スキップ。
+- **バックフィル**: `scripts/migrate/backfill-lens-snapshots.ts`(§9-5)。ノート保存時の `TradeNote.indicatorConfig` スナップショットから設定を復元し、トレード時刻起点で再生成。
+- **同一スナップショット同士でもスコアは必ずしも 1.0 にならない**: イベント系 featureKey の none 同士は 0.5(§6.2 表)のため。「どちらも何も起きていない」は「同じ強いシグナル」より弱い類似として扱う(仕様)。
 
 ---
 

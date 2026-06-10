@@ -33,6 +33,7 @@ model User {
   watchlists        Watchlist[]
   userSettings      UserSettings?      @relation("UserSettings")
   indicatorProfiles IndicatorProfile[] @relation("UserIndicatorProfiles")
+  notes             Note[]             @relation("UserNotes")
 
   @@index([primaryAccountId], map: "idx_user_primary_account")
   @@index([active], map: "idx_user_active")
@@ -140,11 +141,16 @@ model Trade {
   quantity  Decimal    @db.Decimal(18, 8)
   fee       Decimal?   @db.Decimal(18, 8)
   exchange  String?
+  /// 所有ユーザー（マルチユーザー化 Phase α、completion-roadmap §7 決定1）。
+  /// 既存行は migration で最古ユーザーへバックフィル済み。nullable は段階移行のため
+  /// （クエリのユーザー分離完了後の必須化は Phase α-4 で扱う）。FK は分離完了まで保留。
+  userId    String?    @db.Uuid
   createdAt DateTime   @default(now()) @db.Timestamptz(6)
   updatedAt DateTime   @updatedAt @db.Timestamptz(6)
   note      TradeNote?
 
   @@index([symbol, timestamp], map: "idx_trade_symbol_timestamp")
+  @@index([userId], map: "idx_trade_user")
 }
 
 model TradeNote {
@@ -176,6 +182,10 @@ model TradeNote {
   /// グローバル設定とは別に、このノート独自の評価ロジックを定義可能
   indicatorConfig Json?
 
+  /// 所有ユーザー（マルチユーザー化 Phase α）。既存行は migration でバックフィル済み。
+  /// nullable は段階移行のため（必須化・FK 付与は全クエリ分離後の Phase α-4 で検討）。
+  userId String? @db.Uuid
+
   // === フェーズ8: 複数ノート運用UX ===
   /// ノート優先度（1-10、高いほど優先。同時ヒット時のソートに使用）
   priority    Int       @default(5)
@@ -190,12 +200,14 @@ model TradeNote {
   notificationLogs     NotificationLog[]     @relation("NotificationLogNote")
   notificationSkipLogs NotificationSkipLog[] @relation("NotificationSkipLogNote")
   trade                Trade                 @relation(fields: [tradeId], references: [id])
+  coreNote             Note?
 
   @@index([symbol], map: "idx_tradenote_symbol")
   @@index([status], map: "idx_tradenote_status")
   @@index([symbol, status], map: "idx_tradenote_symbol_status")
   @@index([enabled, status], map: "idx_tradenote_enabled_status")
   @@index([priority], map: "idx_tradenote_priority")
+  @@index([userId], map: "idx_tradenote_user")
 }
 
 model AISummary {
@@ -239,6 +251,9 @@ model MatchResult {
   createdAt            DateTime              @default(now()) @db.Timestamptz(6)
   evaluatedAt          DateTime              @default(now()) @db.Timestamptz(6)
   reasons              Json
+  /// 所有ユーザー（マルチユーザー化 Phase α）。note 経由でも辿れるが、
+  /// 一覧クエリのユーザー分離を JOIN なしで行うため非正規化して持つ。
+  userId               String?               @db.Uuid
   marketSnapshot       MarketSnapshot        @relation(fields: [marketSnapshotId], references: [id])
   note                 TradeNote             @relation(fields: [noteId], references: [id])
   notifications        Notification[]
@@ -247,20 +262,28 @@ model MatchResult {
 
   @@unique([noteId, marketSnapshotId], map: "uq_match_note_snapshot")
   @@index([symbol, decidedAt], map: "idx_match_symbol_decided")
+  @@index([userId], map: "idx_match_user")
 }
 
 model Notification {
   id            String             @id @default(uuid()) @db.Uuid
-  matchResultId String             @db.Uuid
+  /// 由来 MatchResult（ノートマッチ通知のみ。ストラテジーアラート通知は null。Phase γ-1 で nullable 化）
+  matchResultId String?            @db.Uuid
+  /// 通知種別（note_match: ノート類似マッチ / strategy_alert: ストラテジー条件成立）
+  type          String             @default("note_match")
   title         String
   message       String
   status        NotificationStatus @default(unread)
   sentAt        DateTime           @default(now()) @db.Timestamptz(6)
   readAt        DateTime?          @db.Timestamptz(6)
   createdAt     DateTime           @default(now()) @db.Timestamptz(6)
-  matchResult   MatchResult        @relation(fields: [matchResultId], references: [id])
+  /// 宛先ユーザー（per-user 通知のための帰属。マルチユーザー化 Phase α）
+  userId        String?            @db.Uuid
+  matchResult   MatchResult?       @relation(fields: [matchResultId], references: [id])
 
   @@index([status, sentAt], map: "idx_notification_status_sent")
+  @@index([userId, status], map: "idx_notification_user_status")
+  @@index([type, sentAt], map: "idx_notification_type_sent")
 }
 
 model OrderPreset {
@@ -571,6 +594,8 @@ model Strategy {
   currentVersionId String?               @db.Uuid
   /// タグ（検索・分類用）
   tags             String[]              @default([])
+  /// 所有ユーザー（マルチユーザー化 Phase α）。既存行は migration でバックフィル済み。
+  userId           String?               @db.Uuid
   /// 作成日時
   createdAt        DateTime              @default(now()) @db.Timestamptz(6)
   /// 更新日時
@@ -585,6 +610,7 @@ model Strategy {
   @@index([symbol], map: "idx_strategy_symbol")
   @@index([status], map: "idx_strategy_status")
   @@index([symbol, status], map: "idx_strategy_symbol_status")
+  @@index([userId], map: "idx_strategy_user")
 }
 
 /// ストラテジーバージョン（変更履歴）
@@ -1259,6 +1285,65 @@ enum NotificationSkipReason {
   lower_priority
 }
 
+/// ノート統一コア（NOTE_SIMILARITY_FOUNDATION.md §7/§8 テーブル戦略B、Phase α-2 新設）
+///
+/// Side-A(TradeNote) / Side-B(AITradeNote) 共通の「マッチング・監視単位」のコア。
+/// ノート特徴の正準形 lensSnapshot(JSONB) と所有ユーザー(userId)を持ち、
+/// マルチユーザー化(completion-roadmap §7 決定1)とノート統一を同じ migration で実現する。
+///
+/// 段階移行(同設計書 §9)中の役割分担:
+/// - 本テーブル = 特徴(lensSnapshot) + 同一性 + 来歴 + ユーザー帰属
+/// - 運用フィールド(status/enabled/pausedUntil/priority)の正は引き続き TradeNote
+///   (運用統一は Phase ε のノート統一仕上げで扱う)
+model Note {
+  id                    String     @id @default(uuid()) @db.Uuid
+  /// 所有ユーザー。既存データは migration で最古ユーザーへバックフィル済み。
+  /// nullable は段階移行のため（新規作成経路では必ず設定する）
+  userId                String?    @db.Uuid
+  /// ノートの出自（side_a_human = 人間の実トレード / side_b_ai = AI の仮想トレード）
+  source                NoteSource
+  /// 銘柄シンボル（例: USDJPY）
+  symbol                String
+  /// 売買方向（Side-B の long/short は buy/sell に正規化して保持。設計書 §7）
+  side                  TradeSide
+  /// 主時間足（例: 15m）
+  timeframe             String
+  /// 上位足（任意、MTF 文脈）
+  higherTimeframe       String?
+  /// エントリー価格
+  entryPrice            Decimal?   @db.Decimal(18, 8)
+  /// ノート＝トレード時刻（lensSnapshot.eventTime と一致）
+  eventTime             DateTime   @db.Timestamptz(6)
+  /// ノート特徴の正準形（NoteLensSnapshot JSON）。null = 未生成 or 生成失敗（比較対象外）
+  lensSnapshot          Json?
+  /// lensSnapshot 内 snapshotSchemaVersion の写し（再生成対象の抽出など SQL フィルタ用）
+  snapshotSchemaVersion String?
+  /// 来歴: Side-A TradeNote へのブリッジ（1:1）
+  tradeNoteId           String?    @unique @db.Uuid
+  /// 来歴: Side-B AITradeNote へのブリッジ（1:1）
+  aiTradeNoteId         String?    @unique @db.Uuid
+  /// 作成日時
+  createdAt             DateTime   @default(now()) @db.Timestamptz(6)
+  /// 更新日時
+  updatedAt             DateTime   @updatedAt @db.Timestamptz(6)
+
+  user        User?        @relation("UserNotes", fields: [userId], references: [id])
+  tradeNote   TradeNote?   @relation(fields: [tradeNoteId], references: [id])
+  aiTradeNote AITradeNote? @relation(fields: [aiTradeNoteId], references: [id])
+
+  @@index([userId], map: "idx_note_user")
+  @@index([symbol, source], map: "idx_note_symbol_source")
+  @@index([eventTime], map: "idx_note_event_time")
+}
+
+/// Note コアの出自
+enum NoteSource {
+  /// Side-A: 人間の実トレード由来
+  side_a_human
+  /// Side-B: AI の仮想トレード由来
+  side_b_ai
+}
+
 /// マッチングパイプライン実行単位の記録（P1: observability）
 /// MatchingService.runMatchingPipeline() の 1 実行 = 1 行。
 /// cron 実行ごとに「いつ動いたか / 何件マッチ・通知・スキップしたか / なぜ通知されなかったか」
@@ -1666,6 +1751,7 @@ model AITradeNote {
   // リレーション
   virtualTrade VirtualTrade @relation(fields: [virtualTradeId], references: [id])
   plan         AITradePlan  @relation(fields: [planId], references: [id])
+  coreNote     Note?
 
   @@index([date], map: "idx_ai_trade_note_date")
   @@index([outcome], map: "idx_ai_trade_note_outcome")

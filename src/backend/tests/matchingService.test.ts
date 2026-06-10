@@ -434,5 +434,80 @@ describe('MatchingService', () => {
         })
       );
     });
+
+    // ============================================================
+    // レンズ類似度シャドー評価 (Phase α-2、NOTE_SIMILARITY_FOUNDATION.md §9-2)
+    // ============================================================
+    describe('レンズシャドー評価の配線', () => {
+      const originalShadowEnv = process.env.LENS_SHADOW_EVALUATION;
+      afterEach(() => {
+        process.env.LENS_SHADOW_EVALUATION = originalShadowEnv;
+      });
+
+      const shadowSummary = {
+        activeNotes: 2,
+        notesWithSnapshot: 1,
+        comparable: 1,
+        triggered: 0,
+        symbols: 1,
+        averageScore: 0.62,
+        errors: [],
+      };
+
+      it('シャドー評価のサマリーが結果に additive に含まれる(マッチ 0 件でも実行される)', async () => {
+        process.env.LENS_SHADOW_EVALUATION = 'true';
+        const shadowEvaluateActiveNotes = jest
+          .fn<() => Promise<typeof shadowSummary>>()
+          .mockResolvedValue(shadowSummary);
+        const runRepo = buildRunRepo();
+        const pipeline = new MatchingService({
+          matchingPipelineRunRepository: runRepo,
+          lensNoteCoreService: { shadowEvaluateActiveNotes },
+        });
+        jest.spyOn(pipeline, 'checkForAllMatches').mockResolvedValue([]);
+
+        const result = await pipeline.runMatchingPipeline({ trigger: 'manual_test' });
+
+        // 旧マッチングが 0 件でもシャドー評価は走る(レンズ基盤の観測が目的のため)
+        expect(shadowEvaluateActiveNotes).toHaveBeenCalledTimes(1);
+        expect(result.lensShadow).toEqual(shadowSummary);
+        expect(result.status).toBe('success');
+      });
+
+      it('シャドー評価の失敗はパイプラインの成否に影響しない', async () => {
+        process.env.LENS_SHADOW_EVALUATION = 'true';
+        const shadowEvaluateActiveNotes = jest
+          .fn<() => Promise<typeof shadowSummary>>()
+          .mockRejectedValue(new Error('shadow down'));
+        const pipeline = new MatchingService({
+          matchingPipelineRunRepository: buildRunRepo(),
+          lensNoteCoreService: { shadowEvaluateActiveNotes },
+        });
+        jest.spyOn(pipeline, 'checkForAllMatches').mockResolvedValue([]);
+
+        const result = await pipeline.runMatchingPipeline();
+
+        expect(result.status).toBe('success');
+        expect(result.errors).toEqual([]);
+        expect(result.lensShadow).toBeUndefined();
+      });
+
+      it('LENS_SHADOW_EVALUATION=false で無効化できる', async () => {
+        process.env.LENS_SHADOW_EVALUATION = 'false';
+        const shadowEvaluateActiveNotes = jest
+          .fn<() => Promise<typeof shadowSummary>>()
+          .mockResolvedValue(shadowSummary);
+        const pipeline = new MatchingService({
+          matchingPipelineRunRepository: buildRunRepo(),
+          lensNoteCoreService: { shadowEvaluateActiveNotes },
+        });
+        jest.spyOn(pipeline, 'checkForAllMatches').mockResolvedValue([]);
+
+        const result = await pipeline.runMatchingPipeline();
+
+        expect(shadowEvaluateActiveNotes).not.toHaveBeenCalled();
+        expect(result.lensShadow).toBeUndefined();
+      });
+    });
   });
 });

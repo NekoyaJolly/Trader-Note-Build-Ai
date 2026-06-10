@@ -15,7 +15,11 @@ describe('@reiryoku/ctrader-layer dependency resolution', () => {
       loadProtoFile?: (file: string, builder?: object) => object;
     };
 
-    expect(resolvedProtobufPackage).toContain('@reiryoku/ctrader-layer/node_modules/protobufjs');
+    // Windows ではパス区切りが \ になるため、比較前に / へ正規化する
+    // (Mac→Windows 開発環境移行で顕在化したクロスプラットフォーム問題の修正)
+    expect(resolvedProtobufPackage.split('\\').join('/')).toContain(
+      '@reiryoku/ctrader-layer/node_modules/protobufjs'
+    );
     expect(typeof protobuf.loadProtoFile).toBe('function');
   });
 
