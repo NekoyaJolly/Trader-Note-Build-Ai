@@ -188,6 +188,20 @@ export class DbNotificationRepository {
   }
 
   /**
+   * UI フィードに表示する通知（ソフトデリート済みを除く未読/既読）を新しい順に取得する。
+   * delete はソフトデリート（status=deleted）のため、フィードからは本メソッドで除外する。
+   * 物理削除は deleteOlderThan の定期クリーンアップが担う。
+   */
+  async findActiveForFeed(limit: number = 500, offset: number = 0): Promise<NotificationWithMatch[]> {
+    return await this.findWithOptions({
+      status: ['unread', 'read'],
+      limit,
+      offset,
+      includeMatch: true,
+    }) as NotificationWithMatch[];
+  }
+
+  /**
    * 通知を既読にする
    */
   async markAsRead(id: string): Promise<Notification> {
@@ -236,6 +250,18 @@ export class DbNotificationRepository {
       where: { id },
       data: { status: 'deleted' },
     });
+  }
+
+  /**
+   * すべての未読/既読通知をソフトデリート（status=deleted）する。返り値は対象件数。
+   * 「全クリア」操作（DELETE /api/notifications）の DB 永続化に使う。
+   */
+  async softDeleteAll(): Promise<number> {
+    const result = await this.prisma.notification.updateMany({
+      where: { status: { in: ['unread', 'read'] } },
+      data: { status: 'deleted' },
+    });
+    return result.count;
   }
 
   /**

@@ -23,12 +23,42 @@ export class DbNotificationRepositoryAdapter implements NotificationRepository {
 
   /**
    * 全通知を読み込む
-   * DBから取得したデータを Notification 型に変換
+   * DBから取得したデータを Notification 型に変換。
+   * ソフトデリート済み（status=deleted）は UI フィードから除外する。
    */
   async loadAll(): Promise<Notification[]> {
-    const dbNotifications = await this.dbRepo.findAll(500, 0);
-    
+    const dbNotifications = await this.dbRepo.findActiveForFeed(500, 0);
+
     return dbNotifications.map((n) => this.convertToNotification(n));
+  }
+
+  /**
+   * 1 件を既読にする（DB を直接 UPDATE して永続化）。
+   * 旧 saveAll 経由は「全件 create」で既読が反映されず通知が複製されていた。
+   */
+  async markAsRead(id: string): Promise<void> {
+    await this.dbRepo.markAsRead(id);
+  }
+
+  /**
+   * 全未読を既読にする（updateMany で永続化）。
+   */
+  async markAllAsRead(): Promise<void> {
+    await this.dbRepo.markAllAsRead();
+  }
+
+  /**
+   * 1 件をソフトデリート（status=deleted）。loadAll で除外され UI から消える。
+   */
+  async delete(id: string): Promise<void> {
+    await this.dbRepo.softDelete(id);
+  }
+
+  /**
+   * 全件をソフトデリート。「全クリア」操作の永続化に使う。
+   */
+  async deleteAll(): Promise<void> {
+    await this.dbRepo.softDeleteAll();
   }
 
   /**
