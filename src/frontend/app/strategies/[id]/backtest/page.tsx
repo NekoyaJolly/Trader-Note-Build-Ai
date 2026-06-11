@@ -635,7 +635,7 @@ export default function StrategyBacktestPage() {
                 </div>
               ) : (
                 <p className="text-sm text-gray-400">
-                  「APIからデータ取得」で不足データを自動取得できます（cTrader優先）。
+                  「APIからデータ取得」で不足データを自動取得できます（EODHD優先 / cTrader フォールバック）。
                 </p>
               )}
             </div>
