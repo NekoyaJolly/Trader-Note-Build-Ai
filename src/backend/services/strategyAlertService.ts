@@ -409,19 +409,25 @@ async function sendInAppNotification(params: SendNotificationParams): Promise<bo
  * Web Push通知を送信
  *
  * Phase γ-1 でログのみのスタブから実配信(既存 WebPushService.broadcast)へ変更。
+ * Phase β (per-user Push): ストラテジーの所有ユーザー (userId、α-4a で伝播) が
+ * 分かる場合はそのユーザーの購読のみに送信し、不明なレガシー行は broadcast に
+ * フォールバックする。
  * VAPID 未設定・購読 0 件の場合は WebPushService が安全に空結果を返す。
  */
 async function sendWebPushNotification(params: SendNotificationParams): Promise<boolean> {
-  const { strategyName, symbol, matchScore } = params;
+  const { strategyName, symbol, matchScore, userId } = params;
 
   try {
     const webPushService = createWebPushService(prisma);
-    const result = await webPushService.broadcast({
+    const pushPayload = {
       title: `ストラテジー条件成立: ${strategyName}`,
       body: `${symbol}で条件が成立しました（一致度: ${(matchScore * 100).toFixed(1)}%）`,
       url: '/notifications',
       tag: `strategy-alert-${params.strategyName}`,
-    });
+    };
+    const result = userId
+      ? await webPushService.sendToUser(userId, pushPayload)
+      : await webPushService.broadcast(pushPayload);
     console.log(
       `[StrategyAlertService] Web Push送信: 成功=${result.successCount} 失敗=${result.failureCount}`
     );
