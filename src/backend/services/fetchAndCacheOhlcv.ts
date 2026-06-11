@@ -234,10 +234,15 @@ async function fetchFromEodhd(
             .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
         if (allData.length === 0) {
+            // 「真にデータ無し (result.bars 空)」と「全件ギャップ足で除外」を出し分ける
+            // (Copilot review PR #394: 一律「ギャップ足」だと真のデータ無しを誤誘導する)
+            const reason = result.bars.length === 0
+                ? 'EODHD がバーを返しませんでした (銘柄/期間/上流都合でデータ無し)'
+                : `取得 ${result.bars.length} 件が全て OHLC=null/ギャップ足でした`;
             return {
                 success: false,
                 cachedCount: 0,
-                error: `EODHD: ${symbol}/${timeframe} の有効なバーが取得できませんでした (全件 OHLC=null/ギャップ足の可能性)`,
+                error: `EODHD: ${symbol}/${timeframe} の有効なバーが取得できませんでした (${reason})`,
             };
         }
 
