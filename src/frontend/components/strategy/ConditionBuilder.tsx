@@ -56,6 +56,7 @@ function createDefaultTimeCondition(): TimeCondition {
   };
 }
 import type { IndicatorId, IndicatorParams, IndicatorMetadata } from "@/types/indicator";
+import { MTF_TIMEFRAME_OPTIONS, type MtfTimeframeApi } from "@/lib/marketConstants";
 
 // ============================================
 // 型定義
@@ -818,14 +819,18 @@ function LookbackControl({ value, onChange, readOnly = false, compact = false }:
 
 interface TimeframeOverrideControlProps {
   /** 現在の上書き時間足（undefined = ストラテジーの基準足） */
-  value: string | undefined;
-  onChange: (timeframe: string | undefined) => void;
+  value: MtfTimeframeApi | undefined;
+  onChange: (timeframe: MtfTimeframeApi | undefined) => void;
   readOnly?: boolean;
   compact?: boolean;
 }
 
-/** 条件単位で選べる時間足（ストラテジー基準足と同じ集合） */
-const OVERRIDE_TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '4h'] as const;
+/**
+ * 条件単位で選べる時間足。MTF は「上位足を見る」用途のため基準足(1m〜4h)に加え
+ * 1d/1w を含む単一ソース MTF_TIMEFRAME_OPTIONS から api 値を生成する
+ * (重複定義を避け、TF 追加/削除に追従。Copilot レビュー対応)。
+ */
+const OVERRIDE_TIMEFRAMES: readonly MtfTimeframeApi[] = MTF_TIMEFRAME_OPTIONS.map((tf) => tf.api);
 
 /**
  * マルチタイムフレーム条件 (Phase γ): この条件だけ別の時間足で評価する小さなセレクタ。
@@ -841,7 +846,7 @@ function TimeframeOverrideControl({ value, onChange, readOnly = false, compact =
       <select
         className={`${compact ? 'px-1 py-0.5 text-xs' : 'px-1.5 py-0.5 text-sm'} rounded bg-slate-700 text-gray-200 border border-slate-600 disabled:opacity-40`}
         value={value ?? ''}
-        onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)}
+        onChange={(e) => onChange(e.target.value === '' ? undefined : (e.target.value as MtfTimeframeApi))}
         disabled={readOnly}
         aria-label="条件の時間足"
       >

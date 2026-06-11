@@ -511,7 +511,10 @@ function resolveViewContext(
   item: ConditionChildItem
 ): EvaluationContext | null {
   const tf = (item as { timeframeOverride?: string }).timeframeOverride;
-  if (!tf) return ctx;
+  // 未指定、または基準足と同値は「上書きなし」として基準コンテキストで評価する。
+  // collect 側も基準足を除外するためビューは準備されない。両者を一致させて
+  // 「同じ足を選ぶと常に不成立」を防ぐ (UI でも基準足と同じ足を選べる。Copilot レビュー対応)
+  if (!tf || tf === ctx.strategy.timeframe) return ctx;
 
   const view = ctx.timeframeViews?.get(tf);
   if (!view) {

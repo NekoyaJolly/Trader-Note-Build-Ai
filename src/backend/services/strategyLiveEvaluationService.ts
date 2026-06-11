@@ -28,7 +28,7 @@ import { evaluateConditionGroup,
 import type { StrategyDetail } from './strategyService';
 import { getStrategy } from './strategyService';
 import type { BacktestTimeframe } from './strategyBacktestService';
-import { buildEvaluationCaches, fetchHistoricalData } from './strategyBacktestService';
+import { buildEvaluationCaches, fetchHistoricalData, isBacktestTimeframe } from './strategyBacktestService';
 import { fetchIndicatorSeriesByStrategyVersion } from './analysisEngineClient';
 import { fetchAndCacheOhlcv } from './fetchAndCacheOhlcv';
 import type { AlertWithStrategy, TriggerAlertResult } from './strategyAlertService';
@@ -255,14 +255,17 @@ export class LiveStrategyEvaluationService {
     const timeframeViews = new Map<string, TimeframeView>();
     for (const tf of overrideTimeframes) {
       const parsedViewTf = TimeframeSchema.safeParse(tf);
-      if (!parsedViewTf.success) {
+      // TimeframeSchema は '1M' 等も許容するが、loadFreshBars / 指標取得が対応する
+      // BacktestTimeframe 集合 (MTF override は 1d/1w まで) 以外は安全にスキップする
+      // (手動編集 JSON で未対応足が紛れても誤判定しない。Copilot レビュー対応)
+      if (!parsedViewTf.success || !isBacktestTimeframe(tf)) {
         return { ...base, timeframe, evaluations: [], triggered: false, skipReason: 'mtf_unsupported_timeframe' };
       }
       const viewBarMs = TIMEFRAME_MS[parsedViewTf.data];
       const viewCacheKey = `${strategy.symbol}__${tf}`;
       let viewCached = barsCache.get(viewCacheKey);
       if (!viewCached) {
-        viewCached = await this.loadFreshBars(strategy.symbol, tf as BacktestTimeframe, viewBarMs, now);
+        viewCached = await this.loadFreshBars(strategy.symbol, tf, viewBarMs, now);
         barsCache.set(viewCacheKey, viewCached);
       }
       const viewBars = viewCached.bars;
@@ -285,7 +288,11 @@ export class LiveStrategyEvaluationService {
         patterns: [],
       });
       const viewCaches = buildEvaluationCaches(viewSeries);
-      const viewLengths = [...viewCaches.indicatorCache.values()].map((v) => v.length);
+      // パターン条件のみのストラテジーは indicatorCache が空のため patternCache も検証する
+      const viewLengths = [
+        ...viewCaches.indicatorCache.values(),
+        ...viewCaches.patternCache.values(),
+      ].map((v) => v.length);
       if (viewLengths.some((len) => len !== viewBars.length)) {
         return { ...base, timeframe, evaluations: [], triggered: false, skipReason: 'mtf_series_alignment_mismatch' };
       }

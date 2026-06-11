@@ -835,7 +835,9 @@ describe('マルチタイムフレーム条件（timeframeOverride、Phase γ）
         data: base,
         currentIndex,
         indicatorCache: new Map(), // 基準足側には RSI を入れない (ビュー参照の証明)
-        strategy: mockStrategy,
+        // 基準足は 15m。override '1h' は上位足なのでビュー参照される
+        // (基準足同値ロジックと衝突しないよう timeframe を 15m に揃える)
+        strategy: { ...mockStrategy, timeframe: '15m' as const },
         timeframeViews,
       };
     };
@@ -885,6 +887,31 @@ describe('マルチタイムフレーム条件（timeframeOverride、Phase γ）
       };
       const ctx = buildMtfCtx(8, 7, [60, 40]);
       expect(await evaluateConditionGroup(ctx, withLookback)).toBe(true);
+    });
+
+    test('timeframeOverride が基準足と同値なら基準コンテキストで評価する (Copilot 指摘1)', async () => {
+      // 基準足 15m と同じ '15m' を override 指定。ビューは準備されないが、
+      // 基準コンテキスト(基準足側の指標)で評価され「常に不成立」にはならない。
+      // 基準足側 RSI を 60 にしておけば RSI>50 で true になる。
+      const base = makeBars(T0, M15, Array.from({ length: 8 }, () => 1));
+      const baseIndicatorCache = new Map<string, number[]>();
+      baseIndicatorCache.set(
+        makeIndicatorCacheKey('rsi', { period: 14 }, 'value'),
+        Array.from({ length: 8 }, () => 60)
+      );
+      const ctx: EvaluationContext = {
+        data: base,
+        currentIndex: 7,
+        indicatorCache: baseIndicatorCache,
+        strategy: mockStrategy, // timeframe '1h'
+        timeframeViews: new Map(), // ビューは空
+      };
+      const sameTf: ConditionGroup = {
+        ...rsiOver50On1h,
+        // mockStrategy.timeframe は '1h' なので '1h' を override 指定 = 基準足同値
+        conditions: [{ ...(rsiOver50On1h.conditions[0] as IndicatorCondition), timeframeOverride: '1h' }],
+      };
+      expect(await evaluateConditionGroup(ctx, sameTf)).toBe(true);
     });
   });
 });

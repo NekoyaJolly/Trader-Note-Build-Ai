@@ -10,7 +10,7 @@
  */
 
 import type { IndicatorId, IndicatorParams } from './indicator';
-import type { TimeframeApi } from '@/lib/marketConstants';
+import type { TimeframeApi, MtfTimeframeApi } from '@/lib/marketConstants';
 
 // ============================================
 // 対応シンボル
@@ -128,9 +128,9 @@ export interface PatternCondition {
   lookbackBars?: number;
   /**
    * マルチタイムフレーム条件 (Phase γ): この条件だけ別の時間足で評価する。
-   * 未指定 = ストラテジーの基準足。上位足は確定バーのみ参照される。
+   * 未指定 = ストラテジーの基準足。上位足 (1d/1w 含む) は確定バーのみ参照される。
    */
-  timeframeOverride?: string;
+  timeframeOverride?: MtfTimeframeApi;
 }
 
 // ============================================
@@ -396,9 +396,9 @@ export interface IndicatorCondition {
   lookbackBars?: number;
   /**
    * マルチタイムフレーム条件 (Phase γ): この条件だけ別の時間足で評価する。
-   * 未指定 = ストラテジーの基準足。上位足は確定バーのみ参照される。
+   * 未指定 = ストラテジーの基準足。上位足 (1d/1w 含む) は確定バーのみ参照される。
    */
-  timeframeOverride?: string;
+  timeframeOverride?: MtfTimeframeApi;
 }
 
 // ============================================
