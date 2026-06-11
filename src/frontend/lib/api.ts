@@ -2443,42 +2443,83 @@ export async function fetchAndCacheOhlcvData(
   const { jobId } = await startOhlcvFetchJob(symbol, timeframe, startDate, endDate);
 
   // 2. SSEで完了を待つ
+  //
+  // SSE 接続は Cloud Run / Vercel のストリーミングプロキシのタイムアウトや一過性の
+  // ネットワーク断で `onerror` が発火しうるが、その裏でサーバー側のジョブは継続・完走する
+  // (dataFetchJobs は 30 分保持、再接続すると現在/最終状態を即再送する)。
+  // よって onerror で即「切断失敗」にせず、ジョブが決着 (completed/error) するまで再接続する。
+  // 旧実装は一過性断を即失敗にしていたため、実際は取得成功しているのに UI が
+  // 「切断されました」と表示し、古いカバレッジのまま「失敗」になる事故があった (2026-06-11 本番調査)。
   return new Promise<FetchOhlcvResult>((resolve) => {
-    const es = subscribeOhlcvFetchProgress(
-      jobId,
-      (data) => {
-        onProgress?.(data);
-        if (data.status === 'completed') {
-          resolve({
-            success: true,
-            cachedCount: data.result?.cachedCount ?? 0,
-          });
-        } else if (data.status === 'error') {
-          resolve({
-            success: false,
-            cachedCount: 0,
-            error: data.result?.error ?? 'データ取得に失敗しました',
-          });
-        }
-      },
-      () => {
-        resolve({
-          success: false,
-          cachedCount: 0,
-          error: 'データ取得の接続が切断されました',
-        });
-      }
-    );
+    const MAX_RECONNECTS = 5;
+    let reconnectAttempts = 0;
+    let settled = false;
+    let currentEs: EventSource | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
-    // タイムアウト（10分）
-    setTimeout(() => {
-      es.close();
-      resolve({
+    const timeoutTimer = setTimeout(() => {
+      settle({
         success: false,
         cachedCount: 0,
         error: 'データ取得がタイムアウトしました（10分）',
       });
     }, 10 * 60 * 1000);
+
+    function settle(result: FetchOhlcvResult): void {
+      if (settled) return;
+      settled = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      clearTimeout(timeoutTimer);
+      currentEs?.close();
+      resolve(result);
+    }
+
+    function connect(): void {
+      if (settled) return;
+      currentEs = subscribeOhlcvFetchProgress(
+        jobId,
+        (data) => {
+          onProgress?.(data);
+          if (data.status === 'completed') {
+            settle({ success: true, cachedCount: data.result?.cachedCount ?? 0 });
+          } else if (data.status === 'error') {
+            settle({
+              success: false,
+              cachedCount: 0,
+              error: data.result?.error ?? 'データ取得に失敗しました',
+            });
+          } else {
+            // running の進捗 (再接続直後の現在状態スナップショット含む) を受信できた
+            // = 接続は健全。連続切断カウンタをリセットし、決着まで監視を継続する。
+            reconnectAttempts = 0;
+          }
+        },
+        () => {
+          // 接続断: ジョブはサーバー側で継続している可能性が高いので再接続を試みる。
+          // メッセージを 1 度も受け取れない連続切断が上限に達したときのみ失敗で決着する
+          // (ジョブ消滅 / 404 / 即時切断ループの保険)。
+          if (settled) return;
+          // onerror は同一切断で複数回発火しうる。既に再接続予約済みなら二重スケジュール
+          // しない (古いタイマーが残って複数接続が並走するのを防ぐ。Copilot review PR #396)。
+          if (reconnectTimer) return;
+          if (reconnectAttempts >= MAX_RECONNECTS) {
+            settle({
+              success: false,
+              cachedCount: 0,
+              error: 'データ取得の接続が繰り返し切断されました',
+            });
+            return;
+          }
+          reconnectAttempts += 1;
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = undefined;
+            connect();
+          }, 1000 * reconnectAttempts);
+        }
+      );
+    }
+
+    connect();
   });
 }
 
