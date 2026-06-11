@@ -321,10 +321,10 @@ model NotificationPreference {
   note            TradeNote?                  @relation(fields: [noteId], references: [id], onDelete: Cascade)
   strategy        Strategy?                   @relation(fields: [strategyId], references: [id], onDelete: Cascade)
 
-  /// PostgreSQL は NULL 同士を distinct 扱いするため、この複合 unique が実際に防ぐのは
-  /// note/profile/strategy スコープの重複のみ。user スコープ (対象列が全 NULL) の一意性は
-  /// サービス層の upsert (findFirst → update/create) で担保する
-  @@unique([userId, scope, profileId, noteId, strategyId], map: "uq_notification_pref_scope")
+  /// scope 別の一意性は migration の partial unique index
+  /// (uq_notification_pref_{user|note|profile|strategy}_singleton) で担保する。
+  /// 複合 unique は PostgreSQL の NULL distinct 仕様で機能しないため使わない
+  /// (Prisma は partial index を表現できないため raw SQL が正本)
   @@index([userId, scope], map: "idx_notification_pref_user_scope")
   @@index([noteId], map: "idx_notification_pref_note")
 }

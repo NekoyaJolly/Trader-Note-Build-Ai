@@ -31,7 +31,15 @@ CREATE TABLE "NotificationPreference" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "uq_notification_pref_scope" ON "NotificationPreference"("userId", "scope", "profileId", "noteId", "strategyId");
+-- scope 別の一意性は partial unique index で担保する。
+-- 複合 unique ("userId","scope","profileId","noteId","strategyId") では PostgreSQL が
+-- NULL 同士を distinct 扱いするため (対象外スコープの列が常に NULL)、実質何も防げない
+-- (PR #389 Copilot レビュー指摘)。Prisma schema は partial index を表現できないため
+-- 本 migration の raw SQL が正本。
+CREATE UNIQUE INDEX "uq_notification_pref_user_singleton" ON "NotificationPreference"("userId") WHERE "scope" = 'user';
+CREATE UNIQUE INDEX "uq_notification_pref_note_singleton" ON "NotificationPreference"("userId", "noteId") WHERE "scope" = 'note';
+CREATE UNIQUE INDEX "uq_notification_pref_profile_singleton" ON "NotificationPreference"("userId", "profileId") WHERE "scope" = 'profile';
+CREATE UNIQUE INDEX "uq_notification_pref_strategy_singleton" ON "NotificationPreference"("userId", "strategyId") WHERE "scope" = 'strategy';
 
 -- CreateIndex
 CREATE INDEX "idx_notification_pref_user_scope" ON "NotificationPreference"("userId", "scope");

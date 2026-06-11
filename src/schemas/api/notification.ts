@@ -89,6 +89,10 @@ export const UpsertNotificationPreferenceSchema = z
   .refine((d) => d.scope !== 'note' || d.noteId !== undefined, {
     message: 'scope=note では noteId が必須です',
     path: ['noteId'],
+  })
+  .refine((d) => d.scope !== 'user' || d.noteId === undefined, {
+    message: 'scope=user では noteId は指定できません',
+    path: ['noteId'],
   });
 
 export type UpsertNotificationPreferenceRequest = z.infer<typeof UpsertNotificationPreferenceSchema>;

@@ -16,14 +16,18 @@
  */
 
 import type { PrismaClient, NotificationPreference, SimilarityMatchLevel } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../backend/db/client';
 import {
   DEFAULT_SIMILARITY_TRIGGER_THRESHOLD,
   DEFAULT_SIMILARITY_LEVELS,
 } from '../../shared/similarity/similarityEngine';
 
-/** クールダウン既定 (NotificationTriggerService と同じ env を参照して一貫させる) */
-const DEFAULT_COOLDOWN_MS = parseInt(process.env.NOTIFICATION_COOLDOWN_MS || '3600000', 10);
+/** クールダウン既定 (NotificationTriggerService と同じ env を参照して一貫させる)。
+ * env が不正値 (NaN / 非正数) の場合は安全な既定 1 時間にフォールバックする */
+const PARSED_COOLDOWN_MS = parseInt(process.env.NOTIFICATION_COOLDOWN_MS || '3600000', 10);
+const DEFAULT_COOLDOWN_MS =
+  Number.isFinite(PARSED_COOLDOWN_MS) && PARSED_COOLDOWN_MS > 0 ? PARSED_COOLDOWN_MS : 3600000;
 
 /**
  * 階層解決後の「実際に効く」通知設定。
@@ -117,8 +121,13 @@ export class NotificationPreferenceService {
    * findFirst → update/create で一意性をサービス層が担保する。
    */
   async upsertPreference(userId: string, input: UpsertPreferenceInput): Promise<NotificationPreference> {
-    // scope=note は対象ノートの所有チェック (他ユーザーのノートへの設定登録を防ぐ。Phase α-4 と同方針)
+    // scope=note は noteId 必須 (Zod でも検証するが、サービス単体でも安全にする。
+    // 未指定のまま進むと findFirst の id 条件が落ちて所有チェックをすり抜ける)
     if (input.scope === 'note') {
+      if (input.noteId === undefined) {
+        throw new Error('scope=note では noteId が必須です');
+      }
+      // 対象ノートの所有チェック (他ユーザーのノートへの設定登録を防ぐ。Phase α-4 と同方針)
       const ownedNote = await this.prisma.tradeNote.findFirst({
         where: { id: input.noteId, userId },
         select: { id: true },
@@ -130,14 +139,16 @@ export class NotificationPreferenceService {
 
     const where =
       input.scope === 'note'
-        ? { userId, scope: 'note' as const, noteId: input.noteId ?? null }
+        ? { userId, scope: 'note' as const, noteId: input.noteId }
         : { userId, scope: 'user' as const };
 
+    // 省略 (undefined) は「現状維持」、明示 null は「既定に戻す」。
+    // 省略フィールドまで null 上書きすると既存設定が意図せず消える (Copilot レビュー対応)
     const data = {
-      threshold: input.threshold ?? null,
-      minMatchLevel: input.minMatchLevel ?? null,
-      cooldownMinutes: input.cooldownMinutes ?? null,
-      maxPerDay: input.maxPerDay ?? null,
+      ...(input.threshold !== undefined ? { threshold: input.threshold } : {}),
+      ...(input.minMatchLevel !== undefined ? { minMatchLevel: input.minMatchLevel } : {}),
+      ...(input.cooldownMinutes !== undefined ? { cooldownMinutes: input.cooldownMinutes } : {}),
+      ...(input.maxPerDay !== undefined ? { maxPerDay: input.maxPerDay } : {}),
     };
 
     const existing = await this.prisma.notificationPreference.findFirst({ where, select: { id: true } });
@@ -147,14 +158,26 @@ export class NotificationPreferenceService {
         data,
       });
     }
-    return this.prisma.notificationPreference.create({
-      data: {
-        userId,
-        scope: input.scope,
-        noteId: input.scope === 'note' ? input.noteId : undefined,
-        ...data,
-      },
-    });
+    try {
+      return await this.prisma.notificationPreference.create({
+        data: {
+          userId,
+          scope: input.scope,
+          noteId: input.scope === 'note' ? input.noteId : undefined,
+          ...data,
+        },
+      });
+    } catch (error) {
+      // 同時リクエストの競合: scope 別 partial unique index (migration 参照) に
+      // 弾かれたら、勝った行への update にフォールバックする
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const winner = await this.prisma.notificationPreference.findFirst({ where, select: { id: true } });
+        if (winner) {
+          return this.prisma.notificationPreference.update({ where: { id: winner.id }, data });
+        }
+      }
+      throw error;
+    }
   }
 
   /**

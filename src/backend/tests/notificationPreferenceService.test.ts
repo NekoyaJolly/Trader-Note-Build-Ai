@@ -111,4 +111,35 @@ describe('NotificationPreferenceService.upsertPreference (Phase β-2a)', () => {
       service.upsertPreference('user-a', { scope: 'note', noteId: 'others-note', threshold: 0.9 })
     ).rejects.toThrow('ノートが見つかりませんでした');
   });
+
+  it('scope=note で noteId 未指定はエラー (異常系・所有チェックすり抜け防止)', async () => {
+    const findFirst = jest.fn();
+    const prismaMock = { tradeNote: { findFirst } } as unknown as PrismaClient;
+    const service = new NotificationPreferenceService(prismaMock);
+
+    await expect(
+      service.upsertPreference('user-a', { scope: 'note', threshold: 0.9 })
+    ).rejects.toThrow('noteId が必須です');
+    // 所有チェックのクエリにすら到達しない
+    expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it('省略フィールドは現状維持され、明示 null のみクリアされる (部分更新)', async () => {
+    const update = jest.fn<() => Promise<{ id: string }>>().mockResolvedValue({ id: 'pref-1' });
+    const prismaMock = {
+      notificationPreference: {
+        findFirst: jest.fn<() => Promise<{ id: string }>>().mockResolvedValue({ id: 'pref-1' }),
+        update,
+      },
+    } as unknown as PrismaClient;
+    const service = new NotificationPreferenceService(prismaMock);
+
+    // threshold は明示 null (クリア)、cooldownMinutes は省略 (維持)
+    await service.upsertPreference('user-a', { scope: 'user', threshold: null });
+
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 'pref-1' },
+      data: { threshold: null },
+    });
+  });
 });
