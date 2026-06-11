@@ -63,13 +63,19 @@ describe('InAppNotificationSender.sendPush の per-user ルーティング (Phas
     reasonSummary: 'score 0.9',
   };
 
-  const makeSender = (matchResultUserId: string | null | undefined) => {
-    // sendPush が参照するのは matchResult.findFirst のみ
+  const makeSender = (
+    matchResultUserId: string | null | undefined,
+    noteUserId: string | null = null
+  ) => {
+    // sendPush が参照するのは matchResult.findUnique (複合ユニークキー) のみ。
+    // note.userId は MatchResult.userId が NULL のレガシー行のフォールバック先
     const prismaMock = {
       matchResult: {
-        findFirst: jest.fn<() => Promise<{ userId: string | null } | null>>()
+        findUnique: jest.fn<() => Promise<{ userId: string | null; note: { userId: string | null } } | null>>()
           .mockResolvedValue(
-            matchResultUserId === undefined ? null : { userId: matchResultUserId }
+            matchResultUserId === undefined
+              ? null
+              : { userId: matchResultUserId, note: { userId: noteUserId } }
           ),
       },
     } as unknown as PrismaClient;
@@ -94,8 +100,20 @@ describe('InAppNotificationSender.sendPush の per-user ルーティング (Phas
     expect(webPush.broadcast).not.toHaveBeenCalled();
   });
 
-  it('MatchResult.userId が null (レガシー行) は broadcast にフォールバックする (境界値)', async () => {
-    const { sender, webPush } = makeSender(null);
+  it('MatchResult.userId が null でも由来ノートの userId があればそのユーザーへ送信する (フォールバック)', async () => {
+    const { sender, webPush } = makeSender(null, 'note-owner-uuid');
+
+    await sender.sendPush(payload);
+
+    expect(webPush.sendToUser).toHaveBeenCalledWith(
+      'note-owner-uuid',
+      expect.objectContaining({ tag: 'note-match-note-1' })
+    );
+    expect(webPush.broadcast).not.toHaveBeenCalled();
+  });
+
+  it('MatchResult.userId もノート userId も null (レガシー行) は broadcast にフォールバックする (境界値)', async () => {
+    const { sender, webPush } = makeSender(null, null);
 
     await sender.sendPush(payload);
 

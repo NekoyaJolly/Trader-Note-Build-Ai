@@ -91,15 +91,19 @@ export class InAppNotificationSender implements NotificationSender {
    */
   async sendPush(payload: NotificationPayload): Promise<{ success: boolean; id?: string }> {
     try {
-      // 宛先ユーザーを由来 MatchResult から解決する (sendInApp と同じ参照キー)
-      const matchResult = await this.prisma.matchResult.findFirst({
+      // 宛先ユーザーを由来 MatchResult から解決する (複合ユニークキーで一意参照)。
+      // MatchResult.userId が NULL のレガシー行は由来ノートの userId にフォールバック
+      // して不要な broadcast (誤配送リスク) を避ける (PR #388 Copilot レビュー対応)
+      const matchResult = await this.prisma.matchResult.findUnique({
         where: {
-          noteId: payload.noteId,
-          marketSnapshotId: payload.marketSnapshotId,
+          noteId_marketSnapshotId: {
+            noteId: payload.noteId,
+            marketSnapshotId: payload.marketSnapshotId,
+          },
         },
-        select: { userId: true },
+        select: { userId: true, note: { select: { userId: true } } },
       });
-      const targetUserId = matchResult?.userId ?? null;
+      const targetUserId = matchResult?.userId ?? matchResult?.note?.userId ?? null;
 
       const pushPayload = {
         title: payload.title,
