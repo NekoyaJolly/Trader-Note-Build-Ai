@@ -201,7 +201,28 @@ async function fetchFromEodhd(
             endDate,
         );
 
-        const allData = result.bars
+        // EODHD は週末/休場のギャップ足で OHLC を null で返す (FX で確認: 例 金曜夜の
+        // バーが open/high/low/close=null)。OHLCVBar の型は number だが実体が null のため、
+        // そのまま batchUpsertOhlcv に渡すと Prisma が必須 Decimal 列 `open` の null で
+        // 失敗し EODHD 主経路が丸ごと cTrader へフォールバックしていた (PR #393 の診断ログで特定)。
+        // 価格の無いギャップ足は永続化対象外なので除外する (cTrader も返さない)。
+        // Number.isFinite は null/NaN/undefined を false にするため型を崩さず安全に弾ける。
+        const validBars = result.bars.filter(
+            (b) =>
+                Number.isFinite(b.open) &&
+                Number.isFinite(b.high) &&
+                Number.isFinite(b.low) &&
+                Number.isFinite(b.close),
+        );
+        const droppedCount = result.bars.length - validBars.length;
+        if (droppedCount > 0) {
+            console.log(
+                `[fetchFromEodhd] OHLC が null/非数のギャップ足を ${droppedCount} 件スキップ: ` +
+                `${symbol}/${timeframe} (取得 ${result.bars.length} 件 → 有効 ${validBars.length} 件)`,
+            );
+        }
+
+        const allData = validBars
             .map((b) => ({
                 timestamp: b.timestamp,
                 open: b.open,
@@ -216,7 +237,7 @@ async function fetchFromEodhd(
             return {
                 success: false,
                 cachedCount: 0,
-                error: `EODHD: ${symbol}/${timeframe} のデータが取得できませんでした`,
+                error: `EODHD: ${symbol}/${timeframe} の有効なバーが取得できませんでした (全件 OHLC=null/ギャップ足の可能性)`,
             };
         }
 
