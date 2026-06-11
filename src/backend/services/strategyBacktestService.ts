@@ -31,7 +31,10 @@ import type {
   CandlePatternId} from './strategyConditionEvaluator';
 import {
   evaluateCondition,
-  evaluateConditionGroup
+  evaluateConditionGroup,
+  collectTimeframeOverrides,
+  buildTimeframeIndexMap,
+  type TimeframeView,
 } from './strategyConditionEvaluator';
 import { ALL_CANDLE_PATTERN_IDS } from '../../shared/patterns';
 import { CTraderDataService } from './ctrader/ctraderDataService';
@@ -39,6 +42,7 @@ import { CTraderAuthService } from './ctrader/ctraderAuthService';
 import { calculateLotSize, slValueToPips, getPipValue } from './positionSizeCalculator';
 import { fetchAndCacheOhlcv, isOhlcvRemoteFetchAvailable } from './fetchAndCacheOhlcv';
 import { fetchIndicatorSeriesByStrategyVersion } from './analysisEngineClient';
+import { TIMEFRAME_MS } from '../../infrastructure/market/ohlcvAggregation';
 
 // 計算関数を再エクスポート（後方互換性のため）
 export { calculatePnl, calculateSummary, createEmptySummary };
@@ -57,7 +61,18 @@ const ctraderDataService = new CTraderDataService(ctraderAuthService);
 // ============================================
 
 /** バックテストの時間足 */
-export type BacktestTimeframe = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d';
+export type BacktestTimeframe = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d' | '1w';
+
+/**
+ * BacktestTimeframe として安全に扱える時間足か (downstream の getIntervalMinutes /
+ * fetchHistoricalData / EODHD fetch が対応する集合)。
+ * MTF override では上位足 (1d/1w) も対象。'1M' 等の未対応足や手動編集 JSON の
+ * 不正値はここで弾く (Copilot レビュー対応)。
+ */
+const BACKTEST_TIMEFRAMES: readonly BacktestTimeframe[] = ['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'];
+export function isBacktestTimeframe(tf: string): tf is BacktestTimeframe {
+  return (BACKTEST_TIMEFRAMES as readonly string[]).includes(tf);
+}
 
 /** バックテストステージ */
 export type BacktestStage = 'stage1' | 'stage2';
@@ -434,6 +449,7 @@ function getIntervalMinutes(timeframe: BacktestTimeframe): number {
     '1h': 60,
     '4h': 240,
     '1d': 1440,
+    '1w': 10080,
   };
   return map[timeframe];
 }
@@ -640,6 +656,63 @@ async function executeBacktestStage(
 
   const { indicatorCache, patternCache } = buildEvaluationCaches(indicatorSeries);
 
+  // === MTF: timeframeOverride 条件用の別時間足ビューを準備 (Phase γ) ===
+  // 条件ツリーから使用時間足を収集し、足ごとにバー列 + 指標系列を取得して
+  // 「基準足 index → 確定バー index」の対応表ごと evaluator に渡す。
+  const overrideTimeframes = new Set<string>();
+  for (const plan of entryPlans) {
+    for (const tf of collectTimeframeOverrides(plan.group, timeframe)) {
+      overrideTimeframes.add(tf);
+    }
+  }
+  const timeframeViews = new Map<string, TimeframeView>();
+  for (const tf of overrideTimeframes) {
+    // downstream (getIntervalMinutes / fetchHistoricalData) が対応する BacktestTimeframe
+    // 以外 (例: 手動編集 JSON の '1w') は弾く (Copilot レビュー対応)
+    if (!isBacktestTimeframe(tf)) {
+      throw new Error(`timeframeOverride に未対応の時間足が指定されています: ${tf}`);
+    }
+    const viewTfMs = TIMEFRAME_MS[tf];
+    const viewData = await fetchHistoricalData(
+      symbol,
+      tf,
+      new Date(request.startDate),
+      new Date(request.endDate),
+      true
+    );
+    if (viewData.length === 0) {
+      throw new Error(`timeframeOverride=${tf} のヒストリカルデータが取得できませんでした`);
+    }
+    const viewSeries = await fetchIndicatorSeriesByStrategyVersion({
+      strategyId: strategy.id,
+      versionId: strategy.currentVersion!.id,
+      symbol,
+      timeframe: tf,
+      startDate,
+      endDate,
+      patterns: [],
+    });
+    const viewCaches = buildEvaluationCaches(viewSeries);
+    // バー列と指標/パターン系列の index 整合ガード (live 評価と同じ事故防止)。
+    // パターン条件のみのストラテジーは indicatorCache が空のため patternCache も検証する
+    const viewLengths = [
+      ...viewCaches.indicatorCache.values(),
+      ...viewCaches.patternCache.values(),
+    ].map((v) => v.length);
+    if (viewLengths.some((len) => len !== viewData.length)) {
+      throw new Error(
+        `timeframeOverride=${tf} のバー列(${viewData.length}本)と指標/パターン系列の長さが一致しません。` +
+          `誤った時点の値で判定する事故を防ぐため中断します`
+      );
+    }
+    timeframeViews.set(tf, {
+      data: viewData,
+      indicatorCache: viewCaches.indicatorCache,
+      patternCache: viewCaches.patternCache,
+      indexMap: buildTimeframeIndexMap(data, TIMEFRAME_MS[timeframe], viewData, viewTfMs),
+    });
+  }
+
   // 評価コンテキストを初期化
   const ctx: EvaluationContext = {
     data,
@@ -647,6 +720,7 @@ async function executeBacktestStage(
     indicatorCache,
     patternCache,
     strategy,
+    ...(timeframeViews.size > 0 ? { timeframeViews } : {}),
   };
 
   // エントリー条件のバリデーション

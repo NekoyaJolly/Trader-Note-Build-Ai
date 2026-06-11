@@ -42,6 +42,20 @@ export const TIMEFRAME_OPTIONS = [
 export type TimeframeSeconds = (typeof TIMEFRAME_OPTIONS)[number]['value'];
 export type TimeframeApi = (typeof TIMEFRAME_OPTIONS)[number]['api'];
 
+/**
+ * マルチタイムフレーム条件 (Phase γ) で選べる時間足。
+ * 基準足 (1m〜4h) に加え、上位足 1d / 1w を含む。MTF は「上位足を見る」用途のため
+ * 基準足セレクタ (TIMEFRAME_OPTIONS) より広い集合を持つ。重複定義を避けるため
+ * 基準足集合を spread して拡張する (単一ソース)。
+ */
+export const MTF_TIMEFRAME_OPTIONS = [
+  ...TIMEFRAME_OPTIONS,
+  { value: 86400, label: '1日', api: '1d' },
+  { value: 604800, label: '1週', api: '1w' },
+] as const;
+
+export type MtfTimeframeApi = (typeof MTF_TIMEFRAME_OPTIONS)[number]['api'];
+
 /** デフォルト TF (秒) */
 export const DEFAULT_TIMEFRAME_SECONDS: TimeframeSeconds = 60;
 /** デフォルト TF (API 文字列) */

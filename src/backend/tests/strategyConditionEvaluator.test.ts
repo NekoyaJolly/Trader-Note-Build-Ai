@@ -19,7 +19,10 @@ import {
   evaluateConditionGroup,
   evaluateTimeConditionAt,
   getIndicatorValue,
-  getPriceValue
+  getPriceValue,
+  buildTimeframeIndexMap,
+  collectTimeframeOverrides,
+  type TimeframeView,
 } from '../services/strategyConditionEvaluator';
 import { makeIndicatorCacheKey } from '../services/analysisEngineClient';
 
@@ -736,5 +739,179 @@ describe('直近ルックバック（lookbackBars）', () => {
     const group: ConditionGroup = { groupId: 'g', operator: 'AND', conditions: [{ ...hammer, lookbackBars: undefined }] };
     expect(await evaluateConditionGroup(ctxAt(1), group)).toBe(true);
     expect(await evaluateConditionGroup(ctxAt(3), group)).toBe(false);
+  });
+});
+
+describe('マルチタイムフレーム条件（timeframeOverride、Phase γ）', () => {
+  /** 連続バー列を作る (timestamp は startMs から tfMs 間隔、close は値配列) */
+  const makeBars = (startMs: number, tfMs: number, closes: number[]): OHLCV[] =>
+    closes.map((close, i) => ({
+      timestamp: new Date(startMs + i * tfMs),
+      open: close, high: close, low: close, close, volume: 0,
+    }));
+
+  const M15 = 15 * 60_000;
+  const H1 = 60 * 60_000;
+  const T0 = Date.UTC(2026, 0, 5, 0, 0, 0); // 月曜 00:00 UTC
+
+  describe('buildTimeframeIndexMap (lookahead 防止の核)', () => {
+    test('上位足は「確定した直前バー」のみを指す (進行中バーを見ない)', () => {
+      // 基準 15m × 8 本 (00:00〜01:45)、ビュー 1h × 2 本 (00:00, 01:00)
+      const base = makeBars(T0, M15, [1, 2, 3, 4, 5, 6, 7, 8]);
+      const view = makeBars(T0, H1, [10, 20]);
+      const map = buildTimeframeIndexMap(base, M15, view, H1);
+
+      // 00:00〜00:30 の 15m バー (close 00:15〜00:45) では 1h バーは未確定 → -1
+      expect(map[0]).toBe(-1);
+      expect(map[1]).toBe(-1);
+      expect(map[2]).toBe(-1);
+      // 00:45 の 15m バー (close 01:00) で最初の 1h バー (close 01:00) が確定 → index 0
+      expect(map[3]).toBe(0);
+      // 01:00〜01:30 はまだ 2 本目の 1h が進行中 → 引き続き index 0
+      expect(map[4]).toBe(0);
+      expect(map[6]).toBe(0);
+      // 01:45 (close 02:00) で 2 本目 (close 02:00) が確定 → index 1
+      expect(map[7]).toBe(1);
+    });
+
+    test('下位足ビュー (基準より細かい足) は基準バー終了時点までの最新バーを指す', () => {
+      // 基準 1h × 2 本、ビュー 15m × 8 本
+      const base = makeBars(T0, H1, [1, 2]);
+      const view = makeBars(T0, M15, [1, 2, 3, 4, 5, 6, 7, 8]);
+      const map = buildTimeframeIndexMap(base, H1, view, M15);
+
+      // 1h バー 0 (close 01:00) → 15m index 3 (close 01:00) まで参照可
+      expect(map[0]).toBe(3);
+      expect(map[1]).toBe(7);
+    });
+  });
+
+  describe('collectTimeframeOverrides', () => {
+    test('ネスト・IF_THEN・SEQUENCE から重複なく収集し、基準足は除外する', () => {
+      const leaf = (tf?: string): IndicatorCondition => ({
+        conditionId: 'c', indicatorId: 'rsi', params: { period: 14 }, field: 'value',
+        operator: '>', compareTarget: { type: 'fixed', value: 50 },
+        ...(tf !== undefined ? { timeframeOverride: tf } : {}),
+      });
+      const group: ConditionGroup = {
+        groupId: 'root', operator: 'AND',
+        conditions: [
+          leaf('1h'),
+          leaf('15m'), // 基準足と同じ → 除外
+          { groupId: 'nested', operator: 'OR', conditions: [leaf('4h'), leaf()] },
+        ],
+        ifCondition: leaf('1h'),
+        sequence: [leaf('30m')],
+      };
+
+      const tfs = collectTimeframeOverrides(group, '15m');
+      expect([...tfs].sort()).toEqual(['1h', '30m', '4h']);
+      expect(collectTimeframeOverrides(null, '15m').size).toBe(0);
+    });
+  });
+
+  describe('evaluateConditionGroup のビュー参照', () => {
+    /** RSI 系列をビュー側にだけ持たせた MTF コンテキストを組む */
+    const buildMtfCtx = (
+      baseLen: number,
+      currentIndex: number,
+      viewRsi: number[],
+      indexMapOverride?: number[]
+    ): EvaluationContext => {
+      const base = makeBars(T0, M15, Array.from({ length: baseLen }, () => 1));
+      const view = makeBars(T0, H1, Array.from({ length: viewRsi.length }, () => 1));
+      const viewIndicatorCache = new Map<string, number[]>();
+      viewIndicatorCache.set(
+        makeIndicatorCacheKey('rsi', { period: 14 }, 'value'),
+        viewRsi
+      );
+      const timeframeViews = new Map<string, TimeframeView>();
+      timeframeViews.set('1h', {
+        data: view,
+        indicatorCache: viewIndicatorCache,
+        indexMap: indexMapOverride ?? buildTimeframeIndexMap(base, M15, view, H1),
+      });
+      return {
+        data: base,
+        currentIndex,
+        indicatorCache: new Map(), // 基準足側には RSI を入れない (ビュー参照の証明)
+        // 基準足は 15m。override '1h' は上位足なのでビュー参照される
+        // (基準足同値ロジックと衝突しないよう timeframe を 15m に揃える)
+        strategy: { ...mockStrategy, timeframe: '15m' as const },
+        timeframeViews,
+      };
+    };
+
+    const rsiOver50On1h: ConditionGroup = {
+      groupId: 'g', operator: 'AND',
+      conditions: [{
+        conditionId: 'c1', indicatorId: 'rsi', params: { period: 14 }, field: 'value',
+        operator: '>', compareTarget: { type: 'fixed', value: 50 },
+        timeframeOverride: '1h',
+      }],
+    };
+
+    test('override 条件はビュー側の確定バーの指標値で判定される (正常系)', async () => {
+      // 1h RSI: [40, 60]。基準 15m index 7 (close 02:00) → 1h index 1 (RSI 60) → true
+      const ctx = buildMtfCtx(8, 7, [40, 60]);
+      expect(await evaluateConditionGroup(ctx, rsiOver50On1h)).toBe(true);
+      // 基準 index 4 (close 01:15) → 1h index 0 (RSI 40) → false
+      const ctx2 = buildMtfCtx(8, 4, [40, 60]);
+      expect(await evaluateConditionGroup(ctx2, rsiOver50On1h)).toBe(false);
+    });
+
+    test('対応する確定バーがまだ無い場合は不成立 (lookahead 防止の境界値)', async () => {
+      // 基準 index 0 (close 00:15) → 1h バー未確定 (indexMap=-1) → false
+      const ctx = buildMtfCtx(8, 0, [99, 99]);
+      expect(await evaluateConditionGroup(ctx, rsiOver50On1h)).toBe(false);
+    });
+
+    test('ビューが未準備 (timeframeViews に無い足) は不成立として安全に倒す (異常系)', async () => {
+      const ctx = buildMtfCtx(8, 7, [40, 60]);
+      const groupOn4h: ConditionGroup = {
+        ...rsiOver50On1h,
+        conditions: [{ ...(rsiOver50On1h.conditions[0] as IndicatorCondition), timeframeOverride: '4h' }],
+      };
+      expect(await evaluateConditionGroup(ctx, groupOn4h)).toBe(false);
+    });
+
+    test('lookback は override した足の本数で数える', async () => {
+      // 1h RSI: [60, 40]。基準 index 7 → 1h index 1 (RSI 40)。
+      // lookback 無しなら false、lookbackBars=2 なら 1h 2 本以内に RSI>50 (index 0) があり true
+      const noLookback = buildMtfCtx(8, 7, [60, 40]);
+      expect(await evaluateConditionGroup(noLookback, rsiOver50On1h)).toBe(false);
+
+      const withLookback: ConditionGroup = {
+        ...rsiOver50On1h,
+        conditions: [{ ...(rsiOver50On1h.conditions[0] as IndicatorCondition), lookbackBars: 2 }],
+      };
+      const ctx = buildMtfCtx(8, 7, [60, 40]);
+      expect(await evaluateConditionGroup(ctx, withLookback)).toBe(true);
+    });
+
+    test('timeframeOverride が基準足と同値なら基準コンテキストで評価する (Copilot 指摘1)', async () => {
+      // 基準足 15m と同じ '15m' を override 指定。ビューは準備されないが、
+      // 基準コンテキスト(基準足側の指標)で評価され「常に不成立」にはならない。
+      // 基準足側 RSI を 60 にしておけば RSI>50 で true になる。
+      const base = makeBars(T0, M15, Array.from({ length: 8 }, () => 1));
+      const baseIndicatorCache = new Map<string, number[]>();
+      baseIndicatorCache.set(
+        makeIndicatorCacheKey('rsi', { period: 14 }, 'value'),
+        Array.from({ length: 8 }, () => 60)
+      );
+      const ctx: EvaluationContext = {
+        data: base,
+        currentIndex: 7,
+        indicatorCache: baseIndicatorCache,
+        strategy: mockStrategy, // timeframe '1h'
+        timeframeViews: new Map(), // ビューは空
+      };
+      const sameTf: ConditionGroup = {
+        ...rsiOver50On1h,
+        // mockStrategy.timeframe は '1h' なので '1h' を override 指定 = 基準足同値
+        conditions: [{ ...(rsiOver50On1h.conditions[0] as IndicatorCondition), timeframeOverride: '1h' }],
+      };
+      expect(await evaluateConditionGroup(ctx, sameTf)).toBe(true);
+    });
   });
 });
