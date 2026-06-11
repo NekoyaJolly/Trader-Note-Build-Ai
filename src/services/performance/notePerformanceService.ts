@@ -59,23 +59,27 @@ export class NotePerformanceService {
     noteId: string,
     options: PerformanceReportOptions = {}
   ): Promise<NotePerformanceReport | null> {
-    const { from, to, weakThreshold = DEFAULT_WEAK_THRESHOLD, timeframe } = options;
+    const { from, to, weakThreshold = DEFAULT_WEAK_THRESHOLD, timeframe, userId } = options;
+
+    // ノート情報を取得（シンボル）。userId 指定時は所有チェックを兼ねる (Phase α-4):
+    // 他ユーザーのノートはレポートなし (null = 404) として扱う
+    const note = await this.prisma.tradeNote.findFirst({
+      where: { id: noteId, ...(userId ? { userId } : {}) },
+      select: { symbol: true },
+    });
+    if (userId && !note) {
+      return null;
+    }
 
     // 評価ログを取得
     const logs = await this.fetchEvaluationLogs(noteId, { from, to, timeframe });
-    
+
     if (logs.length === 0) {
       return null;
     }
 
     // 基本統計を計算
     const basicStats = this.calculateBasicStats(logs);
-    
-    // ノート情報を取得（シンボル）
-    const note = await this.prisma.tradeNote.findUnique({
-      where: { id: noteId },
-      select: { symbol: true },
-    });
 
     return {
       noteId,
@@ -116,13 +120,14 @@ export class NotePerformanceService {
     limit: number = 20,
     options: PerformanceReportOptions = {}
   ): Promise<NoteRankingEntry[]> {
-    const { from, to, timeframe } = options;
+    const { from, to, timeframe, userId } = options;
 
-    // アクティブなノートを取得
+    // アクティブなノートを取得 (userId 指定時は所有ノートのみ。Phase α-4)
     const notes = await this.prisma.tradeNote.findMany({
       where: {
         status: 'active',
         enabled: true,
+        ...(userId ? { userId } : {}),
       },
       select: { id: true, symbol: true },
     });
@@ -173,8 +178,19 @@ export class NotePerformanceService {
     options: PerformanceReportOptions = {}
   ): Promise<Map<string, { triggerRate: number; avgSimilarity: number; totalEvaluations: number }>> {
     const result = new Map();
-    
-    for (const noteId of noteIds) {
+
+    // userId 指定時はリクエストされた ID 群を所有ノートに絞る (Phase α-4)。
+    // 他ユーザーのノート ID はサマリーに含めない (存在自体を漏らさない)
+    let targetNoteIds = noteIds;
+    if (options.userId) {
+      const ownedNotes = await this.prisma.tradeNote.findMany({
+        where: { id: { in: noteIds }, userId: options.userId },
+        select: { id: true },
+      });
+      targetNoteIds = ownedNotes.map((n) => n.id);
+    }
+
+    for (const noteId of targetNoteIds) {
       const logs = await this.fetchEvaluationLogs(noteId, options);
       
       if (logs.length === 0) {

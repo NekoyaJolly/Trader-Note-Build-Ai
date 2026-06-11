@@ -15,7 +15,8 @@ const mockPrisma = {
     count: jest.fn(),
   },
   tradeNote: {
-    findUnique: jest.fn(),
+    // Phase α-4: 所有チェック込みの取得は findFirst (id + userId 条件) に変更
+    findFirst: jest.fn(),
     findMany: jest.fn(),
   },
 };
@@ -45,7 +46,7 @@ describe('NotePerformanceService', () => {
       // モックデータ: 10件の評価ログ、4件が triggered
       const mockLogs = createMockLogs(10, 4);
       mockPrisma.evaluationLog.findMany.mockResolvedValue(mockLogs);
-      mockPrisma.tradeNote.findUnique.mockResolvedValue({ symbol: mockSymbol });
+      mockPrisma.tradeNote.findFirst.mockResolvedValue({ symbol: mockSymbol });
 
       const result = await service.generateReport(mockNoteId);
 
@@ -60,7 +61,7 @@ describe('NotePerformanceService', () => {
     it('時間帯別パフォーマンスを24時間分返す', async () => {
       const mockLogs = createMockLogs(24, 12); // 24件、12件 triggered
       mockPrisma.evaluationLog.findMany.mockResolvedValue(mockLogs);
-      mockPrisma.tradeNote.findUnique.mockResolvedValue({ symbol: mockSymbol });
+      mockPrisma.tradeNote.findFirst.mockResolvedValue({ symbol: mockSymbol });
 
       const result = await service.generateReport(mockNoteId);
 
@@ -76,7 +77,7 @@ describe('NotePerformanceService', () => {
     it('相場状況別パフォーマンスを4種類返す', async () => {
       const mockLogs = createMockLogs(20, 10);
       mockPrisma.evaluationLog.findMany.mockResolvedValue(mockLogs);
-      mockPrisma.tradeNote.findUnique.mockResolvedValue({ symbol: mockSymbol });
+      mockPrisma.tradeNote.findFirst.mockResolvedValue({ symbol: mockSymbol });
 
       const result = await service.generateReport(mockNoteId);
 
@@ -93,7 +94,7 @@ describe('NotePerformanceService', () => {
       // 低類似度のログを多く含むモックデータ
       const mockLogs = createMockLogsWithWeakPatterns();
       mockPrisma.evaluationLog.findMany.mockResolvedValue(mockLogs);
-      mockPrisma.tradeNote.findUnique.mockResolvedValue({ symbol: mockSymbol });
+      mockPrisma.tradeNote.findFirst.mockResolvedValue({ symbol: mockSymbol });
 
       const result = await service.generateReport(mockNoteId, { weakThreshold: 0.5 });
 
@@ -111,7 +112,7 @@ describe('NotePerformanceService', () => {
     it('期間指定で集計をフィルタリングする', async () => {
       const mockLogs = createMockLogs(10, 5);
       mockPrisma.evaluationLog.findMany.mockResolvedValue(mockLogs);
-      mockPrisma.tradeNote.findUnique.mockResolvedValue({ symbol: mockSymbol });
+      mockPrisma.tradeNote.findFirst.mockResolvedValue({ symbol: mockSymbol });
 
       const from = new Date('2026-01-01');
       const to = new Date('2026-01-31');

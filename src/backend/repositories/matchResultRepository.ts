@@ -51,6 +51,8 @@ export interface MatchReasonsData {
 export interface MatchResultWhereInput {
   symbol?: string;
   score?: { gte: number };
+  /** 所有ユーザー (Phase α-4 マルチユーザー分離) */
+  userId?: string;
 }
 
 export interface MatchResultUpsertInput {
@@ -63,6 +65,12 @@ export interface MatchResultUpsertInput {
   priceRangeMatched: boolean; // 価格レンジ一致の有無
   reasons: string[] | MatchReasonsData; // 理由（旧形式: string[]、新形式: MatchReasonsData）
   evaluatedAt: Date;      // 判定実行時刻（UTC 前提）
+  /**
+   * 所有ユーザー (Phase α-4 マルチユーザー分離)。
+   * 由来ノート (TradeNote) の userId を伝播させる。Side-B 由来等の
+   * ユーザー非帰属マッチは null のまま (ユーザー別 UI には出さない)。
+   */
+  userId?: string | null;
 }
 
 export type MatchResultWithRelations = MatchResult & {
@@ -106,6 +114,7 @@ export class MatchResultRepository {
         reasons: reasonsData,
         evaluatedAt: input.evaluatedAt,
         decidedAt: input.evaluatedAt,
+        userId: input.userId ?? undefined,
       },
       update: {
         score: input.score,
@@ -115,6 +124,8 @@ export class MatchResultRepository {
         reasons: reasonsData,
         evaluatedAt: input.evaluatedAt,
         decidedAt: input.evaluatedAt,
+        // 再評価時も所有ユーザーを同期 (α-2 以前に NULL で作られた行の自己修復を兼ねる)
+        ...(input.userId ? { userId: input.userId } : {}),
       },
     });
   }
@@ -142,8 +153,10 @@ export class MatchResultRepository {
     limit?: number;
     offset?: number;
     minScore?: number;
+    /** 所有ユーザーで絞り込み (Phase α-4)。HTTP 経路では必ず指定 */
+    userId?: string;
   } = {}): Promise<MatchResult[]> {
-    const { symbol, limit = 50, offset = 0, minScore } = options;
+    const { symbol, limit = 50, offset = 0, minScore, userId } = options;
 
     const where: MatchResultWhereInput = {};
     if (symbol) {
@@ -151,6 +164,9 @@ export class MatchResultRepository {
     }
     if (minScore !== undefined) {
       where.score = { gte: minScore };
+    }
+    if (userId) {
+      where.userId = userId;
     }
 
     return this.prisma.matchResult.findMany({
@@ -178,8 +194,8 @@ export class MatchResultRepository {
   /**
    * マッチ履歴の総数を取得
    */
-  async countHistory(options: { symbol?: string; minScore?: number } = {}): Promise<number> {
-    const { symbol, minScore } = options;
+  async countHistory(options: { symbol?: string; minScore?: number; userId?: string } = {}): Promise<number> {
+    const { symbol, minScore, userId } = options;
 
     const where: MatchResultWhereInput = {};
     if (symbol) {
@@ -187,6 +203,9 @@ export class MatchResultRepository {
     }
     if (minScore !== undefined) {
       where.score = { gte: minScore };
+    }
+    if (userId) {
+      where.userId = userId;
     }
 
     return this.prisma.matchResult.count({ where });

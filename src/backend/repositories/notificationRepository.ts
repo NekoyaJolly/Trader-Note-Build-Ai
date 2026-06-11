@@ -39,6 +39,11 @@ export interface CreateNotificationInput {
   title: string;
   message: string;
   status?: NotificationStatus;
+  /**
+   * 通知の宛先ユーザー (Phase α-4 マルチユーザー分離)。
+   * 由来エンティティ (TradeNote / Strategy) の所有ユーザーを伝播させる。
+   */
+  userId?: string | null;
 }
 
 /**
@@ -74,6 +79,8 @@ export interface FindNotificationsOptions {
   limit?: number;
   offset?: number;
   includeMatch?: boolean;
+  /** 宛先ユーザーで絞り込み (Phase α-4)。HTTP 経路では必ず指定 */
+  userId?: string;
 }
 
 /**
@@ -97,6 +104,7 @@ export class DbNotificationRepository {
         title: input.title,
         message: input.message,
         status: input.status || 'unread',
+        userId: input.userId ?? undefined,
       },
     });
   }
@@ -125,12 +133,12 @@ export class DbNotificationRepository {
    * オプションを指定して通知を取得する
    */
   async findWithOptions(options: FindNotificationsOptions = {}): Promise<Notification[] | NotificationWithMatch[]> {
-    const { status, symbol, limit = 50, offset = 0, includeMatch = false } = options;
+    const { status, symbol, limit = 50, offset = 0, includeMatch = false, userId } = options;
     const safeLimit = Math.min(limit, 500);
 
     // where 条件を構築（Prisma の生成型を使用）
     const where: Prisma.NotificationWhereInput = {};
-    
+
     if (status) {
       // status は文字列または配列で指定可能
       if (Array.isArray(status)) {
@@ -139,11 +147,15 @@ export class DbNotificationRepository {
         where.status = status;
       }
     }
-    
+
     if (symbol) {
       where.matchResult = {
         symbol,
       };
+    }
+
+    if (userId) {
+      where.userId = userId;
     }
 
     return await this.prisma.notification.findMany({
@@ -168,22 +180,24 @@ export class DbNotificationRepository {
   /**
    * 未読通知を取得する
    */
-  async findUnread(limit: number = 50): Promise<NotificationWithMatch[]> {
+  async findUnread(limit: number = 50, userId?: string): Promise<NotificationWithMatch[]> {
     return await this.findWithOptions({
       status: 'unread',
       limit,
       includeMatch: true,
+      userId,
     }) as NotificationWithMatch[];
   }
 
   /**
    * 全通知を取得する（ページング付き）
    */
-  async findAll(limit: number = 50, offset: number = 0): Promise<NotificationWithMatch[]> {
+  async findAll(limit: number = 50, offset: number = 0, userId?: string): Promise<NotificationWithMatch[]> {
     return await this.findWithOptions({
       limit,
       offset,
       includeMatch: true,
+      userId,
     }) as NotificationWithMatch[];
   }
 
@@ -192,19 +206,36 @@ export class DbNotificationRepository {
    * delete はソフトデリート（status=deleted）のため、フィードからは本メソッドで除外する。
    * 物理削除は deleteOlderThan の定期クリーンアップが担う。
    */
-  async findActiveForFeed(limit: number = 500, offset: number = 0): Promise<NotificationWithMatch[]> {
+  async findActiveForFeed(limit: number = 500, offset: number = 0, userId?: string): Promise<NotificationWithMatch[]> {
     return await this.findWithOptions({
       status: ['unread', 'read'],
       limit,
       offset,
       includeMatch: true,
+      userId,
     }) as NotificationWithMatch[];
+  }
+
+  /**
+   * 更新系操作の宛先ユーザーチェック (Phase α-4 マルチユーザー分離)。
+   * userId 指定時、対象通知が宛先ユーザーのものでなければエラーを投げる。
+   */
+  private async assertOwnership(id: string, userId?: string): Promise<void> {
+    if (!userId) return;
+    const owned = await this.prisma.notification.findFirst({
+      where: { id, userId },
+      select: { id: true },
+    });
+    if (!owned) {
+      throw new Error(`通知が見つかりませんでした: ${id}`);
+    }
   }
 
   /**
    * 通知を既読にする
    */
-  async markAsRead(id: string): Promise<Notification> {
+  async markAsRead(id: string, userId?: string): Promise<Notification> {
+    await this.assertOwnership(id, userId);
     return await this.prisma.notification.update({
       where: { id },
       data: {
@@ -231,9 +262,9 @@ export class DbNotificationRepository {
   /**
    * すべての通知を既読にする
    */
-  async markAllAsRead(): Promise<number> {
+  async markAllAsRead(userId?: string): Promise<number> {
     const result = await this.prisma.notification.updateMany({
-      where: { status: 'unread' },
+      where: { status: 'unread', ...(userId ? { userId } : {}) },
       data: {
         status: 'read',
         readAt: new Date(),
@@ -245,7 +276,8 @@ export class DbNotificationRepository {
   /**
    * 通知を削除（ソフトデリート）
    */
-  async softDelete(id: string): Promise<Notification> {
+  async softDelete(id: string, userId?: string): Promise<Notification> {
+    await this.assertOwnership(id, userId);
     return await this.prisma.notification.update({
       where: { id },
       data: { status: 'deleted' },
@@ -256,9 +288,9 @@ export class DbNotificationRepository {
    * すべての未読/既読通知をソフトデリート（status=deleted）する。返り値は対象件数。
    * 「全クリア」操作（DELETE /api/notifications）の DB 永続化に使う。
    */
-  async softDeleteAll(): Promise<number> {
+  async softDeleteAll(userId?: string): Promise<number> {
     const result = await this.prisma.notification.updateMany({
-      where: { status: { in: ['unread', 'read'] } },
+      where: { status: { in: ['unread', 'read'] }, ...(userId ? { userId } : {}) },
       data: { status: 'deleted' },
     });
     return result.count;
@@ -286,9 +318,9 @@ export class DbNotificationRepository {
   /**
    * 未読通知数を取得する
    */
-  async countUnread(): Promise<number> {
+  async countUnread(userId?: string): Promise<number> {
     return await this.prisma.notification.count({
-      where: { status: 'unread' },
+      where: { status: 'unread', ...(userId ? { userId } : {}) },
     });
   }
 

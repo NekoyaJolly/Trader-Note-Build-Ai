@@ -69,7 +69,9 @@ export class MatchingController {
    */
   checkMatches = async (req: Request, res: Response): Promise<void> => {
     try {
-      const matches = await this.matchingService.checkForMatches();
+      // Phase α-4: 手動チェックは認証ユーザーの所有ノートのみ評価する
+      const userId = req.user!.userId;
+      const matches = await this.matchingService.checkForMatches(userId);
       await this.notificationService.trigger(matches);
 
       res.json({
@@ -77,7 +79,7 @@ export class MatchingController {
         matchesFound: matches.length,
         matches: await Promise.all(
           matches.map(async (m) => {
-            const note = await this.noteService.getNoteById(m.historicalNoteId);
+            const note = await this.noteService.getNoteById(m.historicalNoteId, userId);
             return {
               id: m.id,
               matchScore: m.matchScore,
@@ -131,6 +133,8 @@ export class MatchingController {
         limit: limit ? parseInt(limit, 10) : 50,
         offset: offset ? parseInt(offset, 10) : 0,
         minScore: minScore ? parseFloat(minScore) : undefined,
+        // Phase α-4: 認証ユーザーのマッチ履歴のみ返す
+        userId: req.user!.userId,
       });
 
       res.json({

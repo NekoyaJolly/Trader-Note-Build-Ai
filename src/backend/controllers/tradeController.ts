@@ -117,14 +117,16 @@ export class TradeController {
       }
 
       const filepath = path.join(process.cwd(), config.paths.trades, filename);
-      
+
       // CSV ファイルの存在確認
       if (!fs.existsSync(filepath)) {
         res.status(404).json({ error: `CSVファイルが見つかりません: ${filename}` });
         return;
       }
 
-      const result = await this.importService.importFromCSV(filepath);
+      // Phase α-4: 取り込みデータを認証ユーザーに帰属させる (requireAuth 配下)
+      const userId = req.user!.userId;
+      const result = await this.importService.importFromCSV(filepath, userId);
 
       // 取り込んだトレードからノートを生成
       const generatedNoteIds: string[] = [];
@@ -134,7 +136,7 @@ export class TradeController {
       let trades: TradeData[] = [];
       try {
         if (result.insertedIds.length > 0) {
-          trades = await this.tradeRepository.findByIds(result.insertedIds);
+          trades = await this.tradeRepository.findByIds(result.insertedIds, userId);
         }
       } catch {
         // DB 未接続時は parsedTrades を使ってノート生成を継続
@@ -156,7 +158,7 @@ export class TradeController {
             price: Number(t.price),
             quantity: Number(t.quantity),
           }, '15m');
-          await this.noteService.saveNote(note);
+          await this.noteService.saveNote(note, userId);
           generatedNoteIds.push(note.id);
         } catch (noteError) {
           const errorMsg = `ノート生成失敗 (trade: ${t.id}): ${(noteError as Error).message}`;
@@ -202,7 +204,8 @@ export class TradeController {
       // 送信されなくなった (現在は一括適用のみ)。古いクライアントが送ってきても 400 にしない
       // ようスキーマでは optional で受け付けるが、サーバー処理では使用しない。
       // individual を実装する場合は P0 の範囲外として別 PR で扱う。
-      const userId = req.user!.userId; // プロファイル参照に使用 (requireAuth 配下)
+      // プロファイル参照と取り込みデータの帰属に使用 (requireAuth 配下、Phase α-4)
+      const userId = req.user!.userId;
 
       // 入力検証（技術用語を避けたメッセージはフロント側で実施）
       const savePath = path.join(process.cwd(), config.paths.trades, filename);
@@ -210,14 +213,14 @@ export class TradeController {
       fs.writeFileSync(savePath, csvText, 'utf-8');
 
       // 取り込みを実行
-      const result = await this.importService.importFromCSV(savePath);
+      const result = await this.importService.importFromCSV(savePath, userId);
 
       // 取り込んだトレードから Draft ノートを作成（DB 未設定でも parsedTrades を用いて生成可能）
       // ユーザー設定のインジケーターを適用してノートを生成
       type TradeRecord = { id: string; timestamp: Date; symbol: string; side: 'buy' | 'sell'; price: number | { toNumber(): number }; quantity: number | { toNumber(): number } };
       let trades: TradeRecord[] = [];
       try {
-        const dbTrades = await this.tradeRepository.findByIds(result.insertedIds);
+        const dbTrades = await this.tradeRepository.findByIds(result.insertedIds, userId);
         trades = dbTrades.map(t => ({
           id: t.id,
           timestamp: t.timestamp,
@@ -268,8 +271,8 @@ export class TradeController {
                 quantity,
               }, '15m');
           
-          // saveNote はDBに保存された実際のノートIDを返す
-          const savedNoteId = await this.noteService.saveNote(note);
+          // saveNote はDBに保存された実際のノートIDを返す (Phase α-4: 所有ユーザー付き)
+          const savedNoteId = await this.noteService.saveNote(note, userId);
           generatedNoteIds.push(savedNoteId);
 
           // Note コア行(lensSnapshot)を生成 (Phase α-2)。
@@ -330,14 +333,16 @@ export class TradeController {
    */
   getAllNotes = async (req: Request, res: Response): Promise<void> => {
     const { status: statusParam } = getValidatedQuery<{ status?: string }>(res);
-    
+    // Phase α-4: 認証ユーザーのノートのみ返す
+    const userId = req.user!.userId;
+
     let notes;
     if (statusParam && ['draft', 'active', 'archived'].includes(statusParam)) {
-      notes = await this.noteService.loadNotesByStatus(statusParam as NoteStatus);
+      notes = await this.noteService.loadNotesByStatus(statusParam as NoteStatus, userId);
     } else {
-      notes = await this.noteService.loadAllNotes();
+      notes = await this.noteService.loadAllNotes(userId);
     }
-    
+
     res.json({ notes });
   };
 
@@ -346,7 +351,7 @@ export class TradeController {
    */
   getStatusCounts = async (req: Request, res: Response): Promise<void> => {
     try {
-      const counts = await this.noteService.getStatusCounts();
+      const counts = await this.noteService.getStatusCounts(req.user!.userId);
       res.json(counts);
     } catch (error) {
       console.error('Error getting status counts:', error);
@@ -359,7 +364,8 @@ export class TradeController {
    */
   getNoteById = async (req: Request, res: Response): Promise<void> => {
     const noteId = String(req.params.id);
-    const note = await this.noteService.getNoteById(noteId);
+    // Phase α-4: 他ユーザーのノートは存在しない扱い (404)
+    const note = await this.noteService.getNoteById(noteId, req.user!.userId);
     if (!note) {
       res.status(404).json({ error: 'ノートが見つかりませんでした' });
       return;
@@ -371,7 +377,7 @@ export class TradeController {
   approveNote = async (req: Request, res: Response): Promise<void> => {
     const noteId = String(req.params.id);
     try {
-      const note = await this.noteService.approveNote(noteId);
+      const note = await this.noteService.approveNote(noteId, req.user!.userId);
       res.json({ success: true, status: note.status, note });
     } catch (error) {
       const message = (error as Error).message;
@@ -388,7 +394,7 @@ export class TradeController {
   rejectNote = async (req: Request, res: Response): Promise<void> => {
     const noteId = String(req.params.id);
     try {
-      const note = await this.noteService.rejectNote(noteId);
+      const note = await this.noteService.rejectNote(noteId, req.user!.userId);
       res.json({ success: true, status: note.status, note });
     } catch (error) {
       const message = (error as Error).message;
@@ -405,7 +411,7 @@ export class TradeController {
   revertToDraft = async (req: Request, res: Response): Promise<void> => {
     const noteId = String(req.params.id);
     try {
-      const note = await this.noteService.revertToDraft(noteId);
+      const note = await this.noteService.revertToDraft(noteId, req.user!.userId);
       res.json({ success: true, status: note.status, note });
     } catch (error) {
       const message = (error as Error).message;
@@ -428,7 +434,7 @@ export class TradeController {
         aiSummary,
         userNotes,
         tags,
-      });
+      }, req.user!.userId);
       res.json({ success: true, note });
     } catch (error) {
       const message = (error as Error).message;
@@ -466,7 +472,7 @@ export class TradeController {
       }
       const { priority } = parsed.data;
 
-      await this.noteService.updateNotePriority(id, priority);
+      await this.noteService.updateNotePriority(id, priority, req.user!.userId);
 
       res.json({
         success: true,
@@ -504,7 +510,7 @@ export class TradeController {
       }
       const { enabled } = parsed.data;
 
-      await this.noteService.setNoteEnabled(id, enabled);
+      await this.noteService.setNoteEnabled(id, enabled, req.user!.userId);
 
       res.json({
         success: true,
@@ -554,7 +560,7 @@ export class TradeController {
         }
       }
 
-      await this.noteService.setNotePausedUntil(id, parsedDate);
+      await this.noteService.setNotePausedUntil(id, parsedDate, req.user!.userId);
 
       res.json({
         success: true,
@@ -597,9 +603,9 @@ export class TradeController {
         weakThreshold?: string;
       }>(res);
 
-      // オプション構築
-      const options: PerformanceReportOptions = {};
-      
+      // オプション構築 (Phase α-4: 認証ユーザーのノートのみ対象)
+      const options: PerformanceReportOptions = { userId: req.user!.userId };
+
       if (from) {
         const fromDate = new Date(from);
         if (!isNaN(fromDate.getTime())) {
@@ -665,9 +671,9 @@ export class TradeController {
         timeframe?: string;
       }>(res);
 
-      // オプション構築
-      const options: PerformanceReportOptions = {};
-      
+      // オプション構築 (Phase α-4: 認証ユーザーのノートのみ対象)
+      const options: PerformanceReportOptions = { userId: req.user!.userId };
+
       if (from) {
         const fromDate = new Date(from);
         if (!isNaN(fromDate.getTime())) {
@@ -727,8 +733,8 @@ export class TradeController {
       }
       const { noteIds, from, to, timeframe } = parsed.data;
 
-      // オプション構築
-      const options: PerformanceReportOptions = {};
+      // オプション構築 (Phase α-4: 認証ユーザーの所有ノートに絞り込み)
+      const options: PerformanceReportOptions = { userId: req.user!.userId };
 
       if (from) {
         const fromDate = new Date(from);

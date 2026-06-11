@@ -49,6 +49,7 @@ export class InAppNotificationSender implements NotificationSender {
       }
 
       // Notification レコードを作成
+      // Phase α-4: MatchResult の所有ユーザーを通知にも伝播 (通知フィードのユーザー分離)
       const notification = await this.prisma.notification.create({
         data: {
           matchResultId: matchResult.id,
@@ -56,6 +57,7 @@ export class InAppNotificationSender implements NotificationSender {
           message: payload.message,
           status: 'unread',
           sentAt: new Date(),
+          userId: matchResult.userId ?? undefined,
         },
       });
 

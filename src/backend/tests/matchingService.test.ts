@@ -746,6 +746,78 @@ describe('MatchingService lens エンジン (Phase α-3)', () => {
     );
   });
 
+  // ============ Phase α-4: マルチユーザー分離 ============
+
+  it('ノートの userId が MatchResult へ伝播する (Phase α-4 正常系)', async () => {
+    const note = createPrismaNote({ userId: 'user-a-uuid' });
+    const { service, mocks } = buildLensService(note, {
+      activeNotes: 1,
+      notesWithSnapshot: 1,
+      symbols: 1,
+      evaluations: [{ note, timeframe: '15m', comparison: triggeredComparison }],
+      errors: [],
+    });
+
+    await service.checkForMatches();
+
+    // MatchResult に由来ノートの所有ユーザーが設定される (通知のユーザー分離の起点)
+    expect(mocks.upsertByNoteAndSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        noteId: note.id,
+        userId: 'user-a-uuid',
+      })
+    );
+  });
+
+  it('userId 未設定ノート (レガシー行) は MatchResult.userId=null で永続化される (Phase α-4 境界値)', async () => {
+    const note = createPrismaNote({ userId: null });
+    const { service, mocks } = buildLensService(note, {
+      activeNotes: 1,
+      notesWithSnapshot: 1,
+      symbols: 1,
+      evaluations: [{ note, timeframe: '15m', comparison: triggeredComparison }],
+      errors: [],
+    });
+
+    await service.checkForMatches();
+
+    expect(mocks.upsertByNoteAndSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: null })
+    );
+  });
+
+  it('checkForMatches(userId) は所有ノートの取得に userId を渡す (Phase α-4 手動チェック経路)', async () => {
+    const note = createPrismaNote({ userId: 'user-a-uuid' });
+    const { service, mocks } = buildLensService(note, {
+      activeNotes: 1,
+      notesWithSnapshot: 1,
+      symbols: 1,
+      evaluations: [{ note, timeframe: '15m', comparison: triggeredComparison }],
+      errors: [],
+    });
+
+    await service.checkForMatches('user-a-uuid');
+
+    // HTTP 経路 (手動チェック) では所有ノートのみ評価対象になる
+    expect(mocks.loadActiveNotesForMatchingAsPrisma).toHaveBeenCalledWith('user-a-uuid');
+  });
+
+  it('checkForMatches() 引数なし (cron 経路) はユーザー横断でノートを取得する (Phase α-4 異常系防止)', async () => {
+    const note = createPrismaNote();
+    const { service, mocks } = buildLensService(note, {
+      activeNotes: 1,
+      notesWithSnapshot: 1,
+      symbols: 1,
+      evaluations: [{ note, timeframe: '15m', comparison: triggeredComparison }],
+      errors: [],
+    });
+
+    await service.checkForMatches();
+
+    // cron パイプラインは従来通り全ユーザーのノートを評価する (userId フィルタなし)
+    expect(mocks.loadActiveNotesForMatchingAsPrisma).toHaveBeenCalledWith(undefined);
+  });
+
   it('triggered=false の評価は EvaluationLog のみ記録し DTO を返さない(勝率の分母)', async () => {
     const note = createPrismaNote();
     const notTriggered: SnapshotSimilarityResult = {

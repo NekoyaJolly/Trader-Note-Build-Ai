@@ -138,6 +138,8 @@ export interface PerformanceReportOptions {
   weakThreshold?: number;
   /** 時間足で絞り込み */
   timeframe?: string;
+  /** 所有ユーザーで絞り込み (Phase α-4 マルチユーザー分離)。HTTP 経路では必ず指定 */
+  userId?: string;
 }
 
 /**
