@@ -109,6 +109,37 @@ describe('OHLCVRepository.bulkInsert 休場日フィルタ', () => {
     const call = mockCreateMany.mock.calls[0][0];
     expect(call.data.length).toBe(2);
   });
+
+  // EODHD は週末/休場のギャップ足で OHLC を null で返す。型は number だが実体が
+  // null/非数のため、Number.isFinite で弾かないと new Prisma.Decimal(null) で
+  // バッチ全体が落ちる (PR #394 と同方針)。null も NaN も Number.isFinite=false の
+  // 同一分岐なので、型を崩さない NaN で代表検証する。
+  it('OHLC が非数(NaN)のギャップ足は skip される(平日でも)', async () => {
+    const monday = new Date('2026-04-27T10:00:00Z'); // 月曜・市場開場中
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    await repo.bulkInsert([
+      { symbol: 'EURUSD', timeframe: '1h', timestamp: monday, open: NaN, high: NaN, low: NaN, close: NaN, volume: 0 },
+      { symbol: 'EURUSD', timeframe: '1h', timestamp: monday, open: 1.1, high: 1.2, low: 1.0, close: 1.15, volume: 0 },
+    ]);
+    expect(mockCreateMany).toHaveBeenCalledTimes(1);
+    const call = mockCreateMany.mock.calls[0][0];
+    expect(call.data.length).toBe(1); // 有効バーのみ
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('OHLC=null/非数のギャップ足 1 本をスキップ'),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('全件が非数なら createMany を呼ばずに 0 を返す', async () => {
+    const monday = new Date('2026-04-27T10:00:00Z');
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = await repo.bulkInsert([
+      { symbol: 'EURUSD', timeframe: '1h', timestamp: monday, open: NaN, high: NaN, low: NaN, close: NaN, volume: 0 },
+    ]);
+    expect(result).toBe(0);
+    expect(mockCreateMany).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
 });
 
 describe('OHLCVRepository.upsert 休場日フィルタ', () => {
@@ -163,5 +194,26 @@ describe('OHLCVRepository.upsert 休場日フィルタ', () => {
       volume: 1,
     });
     expect(mockUpsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('OHLC が非数(NaN)のバーは null を返し upsert を呼ばない', async () => {
+    const monday = new Date('2026-04-27T10:00:00Z'); // 市場開場中だが OHLC=非数
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = await repo.upsert({
+      symbol: 'EURUSD',
+      timeframe: '1h',
+      timestamp: monday,
+      open: NaN,
+      high: NaN,
+      low: NaN,
+      close: NaN,
+      volume: 0,
+    });
+    expect(result).toBeNull();
+    expect(mockUpsert).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('OHLC=null/非数のギャップ足のため保存スキップ'),
+    );
+    warnSpy.mockRestore();
   });
 });

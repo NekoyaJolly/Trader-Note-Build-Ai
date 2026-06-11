@@ -57,6 +57,24 @@ export interface OHLCVInsertData {
 }
 
 /**
+ * OHLC が全て有限数か。
+ *
+ * EODHD は週末/休場のギャップ足で OHLC を null で返す (型は number だが実体 null)。
+ * そのまま `new Prisma.Decimal(null)` に渡すと `[DecimalError] Invalid argument: null` で
+ * バッチ全体が落ちるため、永続化前に弾く (バックテスト側 fetchFromEodhd と同方針。PR #394)。
+ * 休場判定 (shouldPersistBar) が拾えない null 足 (祝日/配信遅延等) の保険でもある。
+ * Number.isFinite は null/NaN/undefined を false にするため number 型を崩さず安全。
+ */
+function hasFiniteOhlc(data: Pick<OHLCVInsertData, 'open' | 'high' | 'low' | 'close'>): boolean {
+  return (
+    Number.isFinite(data.open) &&
+    Number.isFinite(data.high) &&
+    Number.isFinite(data.low) &&
+    Number.isFinite(data.close)
+  );
+}
+
+/**
  * OHLCV クエリフィルター
  */
 export interface OHLCVQueryFilter {
@@ -85,6 +103,12 @@ export class OHLCVRepository {
     if (!shouldPersistBar(data.symbol, data.timestamp)) {
       console.warn(
         `[OHLCVRepository] 休場日バーのため保存スキップ: ${data.symbol} ${data.timeframe} ${data.timestamp.toISOString()}`,
+      );
+      return null;
+    }
+    if (!hasFiniteOhlc(data)) {
+      console.warn(
+        `[OHLCVRepository] OHLC=null/非数のギャップ足のため保存スキップ: ${data.symbol} ${data.timeframe} ${data.timestamp.toISOString()}`,
       );
       return null;
     }
@@ -130,25 +154,36 @@ export class OHLCVRepository {
     }
 
     // Phase 6.7a: 休場日バーを事前にフィルタ(FX シンボルのみ)。
-    // shouldPersistBar を一度だけ評価し、filter と集計ログで共有する(二重評価回避)。
+    // 併せて OHLC=null/非数のギャップ足も弾く (EODHD 由来。new Prisma.Decimal(null) で
+    // バッチ全体が [DecimalError] で落ちるのを防ぐ。PR #394 と同方針)。
+    // shouldPersistBar / hasFiniteOhlc を一度だけ評価し、filter と集計ログで共有する(二重評価回避)。
     const evaluated = dataList.map((d) => ({
       data: d,
       shouldPersist: shouldPersistBar(d.symbol, d.timestamp),
+      hasOhlc: hasFiniteOhlc(d),
     }));
-    const filtered = evaluated.filter((e) => e.shouldPersist).map((e) => e.data);
+    const filtered = evaluated.filter((e) => e.shouldPersist && e.hasOhlc).map((e) => e.data);
     const skipped = dataList.length - filtered.length;
     if (skipped > 0) {
-      const skippedBySymbol = new Map<string, number>();
+      const closedBySymbol = new Map<string, number>();
+      const nullOhlcBySymbol = new Map<string, number>();
       for (const e of evaluated) {
+        const key = `${e.data.symbol}/${e.data.timeframe}`;
         if (!e.shouldPersist) {
-          const key = `${e.data.symbol}/${e.data.timeframe}`;
-          skippedBySymbol.set(key, (skippedBySymbol.get(key) ?? 0) + 1);
+          closedBySymbol.set(key, (closedBySymbol.get(key) ?? 0) + 1);
+        } else if (!e.hasOhlc) {
+          // 休場で既に弾かれた分と二重計上しないよう else if
+          nullOhlcBySymbol.set(key, (nullOhlcBySymbol.get(key) ?? 0) + 1);
         }
       }
-      const detail = Array.from(skippedBySymbol.entries())
-        .map(([k, v]) => `${k}=${v}`)
-        .join(', ');
-      console.warn(`[OHLCVRepository] 休場日バー ${skipped} 本をスキップ (${detail})`);
+      const fmt = (m: Map<string, number>) =>
+        Array.from(m.entries()).map(([k, v]) => `${k}=${v}`).join(', ');
+      if (closedBySymbol.size > 0) {
+        console.warn(`[OHLCVRepository] 休場日バー ${[...closedBySymbol.values()].reduce((a, b) => a + b, 0)} 本をスキップ (${fmt(closedBySymbol)})`);
+      }
+      if (nullOhlcBySymbol.size > 0) {
+        console.warn(`[OHLCVRepository] OHLC=null/非数のギャップ足 ${[...nullOhlcBySymbol.values()].reduce((a, b) => a + b, 0)} 本をスキップ (${fmt(nullOhlcBySymbol)})`);
+      }
     }
     if (filtered.length === 0) {
       return 0;
