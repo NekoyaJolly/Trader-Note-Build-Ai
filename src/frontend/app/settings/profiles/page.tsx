@@ -25,7 +25,7 @@ import {
   ProfileIndicatorConfig,
 } from "@/lib/api";
 // インジケーター別のパラメータ定義はインジケーター設定モーダルと共有する (Phase α-4b)
-import { getParamFields } from "@/components/IndicatorConfigModal";
+import { getParamFields } from "@/lib/indicatorParamFields";
 
 /**
  * プロファイルカードコンポーネント
@@ -176,8 +176,12 @@ function ProfileEditModal({
   const updateIndicatorParam = (
     configId: string,
     key: keyof ProfileIndicatorConfig["params"],
-    value: number
+    value: number | undefined
   ) => {
+    // NaN (数値として解釈できない入力) は state を更新しない。
+    // 空入力は undefined として保持し、保存ペイロードからキーごと落とす
+    // (parseFloat(...) || 0 だと入力クリアで 0 が保存され min 制約を破る。Copilot レビュー対応)
+    if (value !== undefined && Number.isNaN(value)) return;
     setSelectedIndicators((prev) =>
       prev.map((i) =>
         i.configId === configId
@@ -326,7 +330,9 @@ function ProfileEditModal({
                                 updateIndicatorParam(
                                   indicator.configId,
                                   field.key,
-                                  parseFloat(e.target.value) || 0
+                                  e.target.value === ""
+                                    ? undefined
+                                    : Number(e.target.value)
                                 )
                               }
                               min={field.min}

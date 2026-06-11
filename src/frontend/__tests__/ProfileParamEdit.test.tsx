@@ -124,4 +124,23 @@ describe("ProfileEditModal パラメータ編集 (Phase α-4b)", () => {
     );
     expect(obv?.params).toEqual({});
   });
+
+  it("入力をクリアして保存しても 0 は保存されない (空 = 未設定として扱う)", async () => {
+    await openEditModal();
+
+    const input = screen.getByLabelText("RSI(14) 期間") as HTMLInputElement;
+    // 入力欄をクリア → parseFloat||0 だと 0 が混入していたケース (Copilot レビュー対応)
+    fireEvent.change(input, { target: { value: "" } });
+    expect(input.value).toBe("");
+
+    fireEvent.click(screen.getByText("保存"));
+
+    await waitFor(() => expect(updateProfile).toHaveBeenCalledTimes(1));
+    const [, payload] = vi.mocked(updateProfile).mock.calls[0];
+    const rsi = payload.indicators?.find(
+      (i: { configId: string }) => i.configId === "cfg-rsi"
+    );
+    // 0 ではなく未設定 (undefined) として渡る
+    expect(rsi?.params?.period).toBeUndefined();
+  });
 });
