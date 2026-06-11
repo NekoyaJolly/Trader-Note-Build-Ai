@@ -20,7 +20,7 @@
 import { CTraderDataService } from './ctrader/ctraderDataService';
 import { CTraderAuthService } from './ctrader/ctraderAuthService';
 import { splitDateRange } from '../../utils/dateRangeChunks';
-import { normalizeCTraderSymbol } from '../../utils/symbolNormalization';
+import { fromEodhdSymbol } from '../../utils/symbolNormalization';
 import { EodhdProvider } from '../../infrastructure/market/EodhdProvider';
 import { TimeframeSchema } from '../../infrastructure/market/IMarketDataProvider';
 import { prisma } from '../db/client';
@@ -120,7 +120,11 @@ export async function fetchAndCacheOhlcv(
     onProgress?: OnProgressCallback
 ): Promise<FetchAndCacheResult> {
     try {
-        const normalizedSymbol = normalizeCTraderSymbol(symbol);
+        // サフィックス安全な正規化 (例: USDJPY.FOREX → USDJPY, USD/JPY → USDJPY)。
+        // normalizeCTraderSymbol は "." も除去するため USDJPY.FOREX → USDJPYFOREX と潰れ、
+        // EODHD 主経路の toEodhdSymbol() で誤った銘柄 (USDJPYFOREX.FOREX) に変換される。
+        // fromEodhdSymbol はサフィックスを先に剥がしてから正規化するため EODHD/cTrader/DB キーで一貫。
+        const normalizedSymbol = fromEodhdSymbol(symbol);
         let lastError = 'EODHD / cTrader いずれも利用できません (API キー / OAuth トークン未設定)';
 
         // 1. EODHD 優先 (Phase A All-In-One / チャート・リアルタイムとデータ源統一)
