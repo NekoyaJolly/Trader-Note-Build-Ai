@@ -265,11 +265,16 @@ async function fetchFromEodhd(
         const status = err?.status ?? err?.response?.status;
         const code = err?.code;
         const cause = err?.cause;
+        // cause を構造化オブジェクトに直接入れると JSON.stringify が Error の非列挙
+        // プロパティ (message/stack) を落として `{}` 化するため、事前に safeStringify で
+        // 文字列化しておく (safeStringify は Error をトップレベル時のみ `name: message` 整形)。
+        // Copilot review (PR #393) 指摘。
+        const causeText = cause != null ? safeStringify(cause) : null;
 
         // 真因診断用に構造化して 1 行で出す (Cloud Run logs で grep しやすい形)
         console.error(
             `[fetchFromEodhd] 取得失敗 ${symbol}/${timeframe}: ` +
-            safeStringify({ name, ctor, message: rawMsg, status, code, cause: cause ?? null, stack: err?.stack })
+            safeStringify({ name, ctor, message: rawMsg, status, code, cause: causeText, stack: err?.stack })
         );
 
         // message が空でも返却エラーが無意味にならないよう、name/status/code でフォールバック表現
@@ -277,7 +282,7 @@ async function fetchFromEodhd(
           || [ctor ?? name, status != null ? `status=${status}` : '', code ? `code=${code}` : '']
                .filter(Boolean).join(' ')
           || '空エラー (詳細はサーバーログ参照)';
-        const causeStr = cause ? ` (cause: ${safeStringify(cause)})` : '';
+        const causeStr = causeText ? ` (cause: ${causeText})` : '';
         return { success: false, cachedCount: 0, error: `EODHD 取得エラー: ${detail}${causeStr}` };
     }
 }
