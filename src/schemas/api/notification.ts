@@ -66,3 +66,40 @@ export const NotificationLogIdParamSchema = z.object({
 });
 
 export type NotificationLogIdParam = z.infer<typeof NotificationLogIdParamSchema>;
+
+// ========================================
+// GET/PUT/DELETE /api/notifications/preferences (Phase β-2a)
+// ========================================
+
+/**
+ * 通知粒度設定の upsert リクエスト。
+ * β-2a で受け付けるのは user / note スコープのみ (profile/strategy は後続フェーズで配線)。
+ * null は「この項目の設定を消して上位スコープ / システム既定に戻す」を意味する。
+ */
+export const UpsertNotificationPreferenceSchema = z
+  .object({
+    scope: z.enum(['user', 'note']),
+    noteId: z.string().uuid('有効なUUIDを指定してください').optional(),
+    threshold: z.number().min(0, '0以上で指定してください').max(1, '1以下で指定してください').nullable().optional(),
+    minMatchLevel: z.enum(['strong', 'medium', 'weak']).nullable().optional(),
+    cooldownMinutes: z.number().int().min(1, '1分以上で指定してください').max(10080, '1週間以内で指定してください').nullable().optional(),
+    maxPerDay: z.number().int().min(1).max(1000).nullable().optional(),
+  })
+  .strict()
+  .refine((d) => d.scope !== 'note' || d.noteId !== undefined, {
+    message: 'scope=note では noteId が必須です',
+    path: ['noteId'],
+  })
+  .refine((d) => d.scope !== 'user' || d.noteId === undefined, {
+    message: 'scope=user では noteId は指定できません',
+    path: ['noteId'],
+  });
+
+export type UpsertNotificationPreferenceRequest = z.infer<typeof UpsertNotificationPreferenceSchema>;
+
+/** 通知粒度設定の削除パラメータ */
+export const NotificationPreferenceIdParamSchema = z.object({
+  id: z.string().uuid('有効なUUIDを指定してください'),
+});
+
+export type NotificationPreferenceIdParam = z.infer<typeof NotificationPreferenceIdParamSchema>;

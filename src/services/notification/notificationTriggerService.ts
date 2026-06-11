@@ -18,6 +18,14 @@ export interface NotificationTriggerInput {
   marketSnapshotId?: string;
   symbol?: string;
   channel?: 'in_app' | 'push' | 'webhook';
+  /**
+   * ユーザー設定によるスコア閾値 (Phase β-2a)。評価エンジン側で発火判定に使った
+   * しきい値を渡し、本サービスの既定 (NOTIFY_THRESHOLD) との二重判定のズレを防ぐ。
+   * 未設定時は従来の既定値
+   */
+  scoreThresholdOverride?: number;
+  /** ユーザー設定による再通知クールダウン (ミリ秒、Phase β-2a)。未設定時は既定値 */
+  cooldownMsOverride?: number;
 }
 
 /**
@@ -127,9 +135,10 @@ export class NotificationTriggerService {
       };
     }
 
-    // 1. スコア閾値判定
-    if (score < NOTIFICATION_THRESHOLD) {
-      const skipReason = `スコア不足: ${score.toFixed(3)} < ${NOTIFICATION_THRESHOLD}`;
+    // 1. スコア閾値判定 (ユーザー設定があればそれを優先。Phase β-2a)
+    const scoreThreshold = input.scoreThresholdOverride ?? NOTIFICATION_THRESHOLD;
+    if (score < scoreThreshold) {
+      const skipReason = `スコア不足: ${score.toFixed(3)} < ${scoreThreshold}`;
       // スキップでもログは記録（デバッグ用）
       await this.logNotification({
         noteId,
@@ -184,9 +193,11 @@ export class NotificationTriggerService {
     }
 
     // 4. クールダウン検査（同一 noteId について1時間以内の再通知を抑止）
+    // クールダウンはユーザー設定があればそれを優先 (Phase β-2a)
+    const cooldownMs = input.cooldownMsOverride ?? COOLDOWN_MS;
     const cooldownResult: CooldownCheckResult = await this.notificationLogRepository.checkCooldown(
       noteId,
-      COOLDOWN_MS
+      cooldownMs
     );
     if (cooldownResult.isInCooldown) {
       const cooldownUntil = cooldownResult.cooldownUntil?.toISOString() || 'unknown';

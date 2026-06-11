@@ -78,6 +78,48 @@ describe('NotificationTriggerService - 拡張テスト', () => {
     });
   });
 
+  describe('1b. ユーザー設定オーバーライド (Phase β-2a)', () => {
+    it('scoreThresholdOverride が既定閾値より優先される (ユーザーが低いしきい値を設定)', async () => {
+      // 既定 0.75 ではスキップされるスコア 0.7 が、ユーザー設定 0.65 なら通知される
+      const result = await triggerService.evaluateWithPersistence(
+        createInput({ matchScore: 0.7, scoreThresholdOverride: 0.65 })
+      );
+
+      expect(result.shouldNotify).toBe(true);
+      expect(result.status).toBe('sent');
+    });
+
+    it('scoreThresholdOverride が既定より高い場合はそのしきい値で弾く', async () => {
+      const result = await triggerService.evaluateWithPersistence(
+        createInput({ matchScore: 0.8, scoreThresholdOverride: 0.9 })
+      );
+
+      expect(result.shouldNotify).toBe(false);
+      expect(result.skipReason).toContain('スコア不足');
+      expect(result.skipReasonCode).toBe('score_below_threshold');
+    });
+
+    it('cooldownMsOverride がクールダウン判定に渡される', async () => {
+      await triggerService.evaluateWithPersistence(
+        createInput({ cooldownMsOverride: 30 * 60 * 1000 })
+      );
+
+      expect(mockNotificationLogRepository.checkCooldown).toHaveBeenCalledWith(
+        'note_test_123',
+        30 * 60 * 1000
+      );
+    });
+
+    it('オーバーライド未指定は従来の既定値で判定する (後方互換)', async () => {
+      const result = await triggerService.evaluateWithPersistence(createInput({ matchScore: 0.7 }));
+
+      expect(result.shouldNotify).toBe(false);
+      // クールダウンには既定の NOTIFICATION_COOLDOWN_MS (3600000) が使われる…のは
+      // スコアで先に弾かれるため checkCooldown 自体が呼ばれない
+      expect(mockNotificationLogRepository.checkCooldown).not.toHaveBeenCalled();
+    });
+  });
+
   describe('2. 冪等性チェック（同一条件の重複防止）', () => {
     it('2-1: 同一 noteId × marketSnapshotId × channel で既に通知済みの場合、スキップする', async () => {
       mockNotificationLogRepository.isDuplicate.mockResolvedValue(true);
