@@ -245,17 +245,40 @@ async function fetchFromEodhd(
             },
         };
     } catch (error) {
-        // fetch() の失敗は `error.message='fetch failed'` で実体は `error.cause` にあるため、
-        // cause も含めてログする (DNS / 接続 / Timeout 等の切り分けに必要)。
-        // safeStringify で BigInt / 循環参照 / toJSON throw に対応 (PR #152 review)。
-        // cause の型は環境により異なる (Error / string / 任意オブジェクト) ため
-        // safeStringify に渡す前提で Error の cause を取り出す。
-        const msg = error instanceof Error ? error.message : '不明なエラー';
-        const cause = error instanceof Error
-          ? (error as Error & { cause?: Error | string }).cause
+        // EODHD SDK / HTTP エラーは `error.message` が空になることがある
+        // (HTTP/2 の statusText は常に空のため、SDK が `new Error(res.statusText)` 相当を
+        //  投げると message='' になる)。空メッセージだと真因 (レート制限 / auth / timeout /
+        //  非2xx) が潰せないため、name / status / code / cause / stack を広く拾って診断する。
+        // fetch() 失敗は `error.message='fetch failed'` で実体が `error.cause` にあるのと同様、
+        // 属性は環境により異なるため safeStringify 前提で取り出す (PR #152 review)。
+        const err = error instanceof Error
+          ? (error as Error & {
+              cause?: Error | string;
+              status?: number;
+              code?: string;
+              response?: { status?: number };
+            })
           : undefined;
+        const name = err?.name ?? typeof error;
+        const ctor = err?.constructor?.name;
+        const rawMsg = error instanceof Error ? error.message : String(error);
+        const status = err?.status ?? err?.response?.status;
+        const code = err?.code;
+        const cause = err?.cause;
+
+        // 真因診断用に構造化して 1 行で出す (Cloud Run logs で grep しやすい形)
+        console.error(
+            `[fetchFromEodhd] 取得失敗 ${symbol}/${timeframe}: ` +
+            safeStringify({ name, ctor, message: rawMsg, status, code, cause: cause ?? null, stack: err?.stack })
+        );
+
+        // message が空でも返却エラーが無意味にならないよう、name/status/code でフォールバック表現
+        const detail = rawMsg
+          || [ctor ?? name, status != null ? `status=${status}` : '', code ? `code=${code}` : '']
+               .filter(Boolean).join(' ')
+          || '空エラー (詳細はサーバーログ参照)';
         const causeStr = cause ? ` (cause: ${safeStringify(cause)})` : '';
-        return { success: false, cachedCount: 0, error: `EODHD 取得エラー: ${msg}${causeStr}` };
+        return { success: false, cachedCount: 0, error: `EODHD 取得エラー: ${detail}${causeStr}` };
     }
 }
 
