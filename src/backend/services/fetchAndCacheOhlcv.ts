@@ -201,7 +201,28 @@ async function fetchFromEodhd(
             endDate,
         );
 
-        const allData = result.bars
+        // EODHD は週末/休場のギャップ足で OHLC を null で返す (FX で確認: 例 金曜夜の
+        // バーが open/high/low/close=null)。OHLCVBar の型は number だが実体が null のため、
+        // そのまま batchUpsertOhlcv に渡すと Prisma が必須 Decimal 列 `open` の null で
+        // 失敗し EODHD 主経路が丸ごと cTrader へフォールバックしていた (PR #393 の診断ログで特定)。
+        // 価格の無いギャップ足は永続化対象外なので除外する (cTrader も返さない)。
+        // Number.isFinite は null/NaN/undefined を false にするため型を崩さず安全に弾ける。
+        const validBars = result.bars.filter(
+            (b) =>
+                Number.isFinite(b.open) &&
+                Number.isFinite(b.high) &&
+                Number.isFinite(b.low) &&
+                Number.isFinite(b.close),
+        );
+        const droppedCount = result.bars.length - validBars.length;
+        if (droppedCount > 0) {
+            console.log(
+                `[fetchFromEodhd] OHLC が null/非数のギャップ足を ${droppedCount} 件スキップ: ` +
+                `${symbol}/${timeframe} (取得 ${result.bars.length} 件 → 有効 ${validBars.length} 件)`,
+            );
+        }
+
+        const allData = validBars
             .map((b) => ({
                 timestamp: b.timestamp,
                 open: b.open,
@@ -213,10 +234,15 @@ async function fetchFromEodhd(
             .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
         if (allData.length === 0) {
+            // 「真にデータ無し (result.bars 空)」と「全件ギャップ足で除外」を出し分ける
+            // (Copilot review PR #394: 一律「ギャップ足」だと真のデータ無しを誤誘導する)
+            const reason = result.bars.length === 0
+                ? 'EODHD がバーを返しませんでした (銘柄/期間/上流都合でデータ無し)'
+                : `取得 ${result.bars.length} 件が全て OHLC=null/ギャップ足でした`;
             return {
                 success: false,
                 cachedCount: 0,
-                error: `EODHD: ${symbol}/${timeframe} のデータが取得できませんでした`,
+                error: `EODHD: ${symbol}/${timeframe} の有効なバーが取得できませんでした (${reason})`,
             };
         }
 
