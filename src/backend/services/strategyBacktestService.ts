@@ -31,7 +31,10 @@ import type {
   CandlePatternId} from './strategyConditionEvaluator';
 import {
   evaluateCondition,
-  evaluateConditionGroup
+  evaluateConditionGroup,
+  collectTimeframeOverrides,
+  buildTimeframeIndexMap,
+  type TimeframeView,
 } from './strategyConditionEvaluator';
 import { ALL_CANDLE_PATTERN_IDS } from '../../shared/patterns';
 import { CTraderDataService } from './ctrader/ctraderDataService';
@@ -39,6 +42,7 @@ import { CTraderAuthService } from './ctrader/ctraderAuthService';
 import { calculateLotSize, slValueToPips, getPipValue } from './positionSizeCalculator';
 import { fetchAndCacheOhlcv, isOhlcvRemoteFetchAvailable } from './fetchAndCacheOhlcv';
 import { fetchIndicatorSeriesByStrategyVersion } from './analysisEngineClient';
+import { TIMEFRAME_MS } from '../../infrastructure/market/ohlcvAggregation';
 
 // 計算関数を再エクスポート（後方互換性のため）
 export { calculatePnl, calculateSummary, createEmptySummary };
@@ -640,6 +644,57 @@ async function executeBacktestStage(
 
   const { indicatorCache, patternCache } = buildEvaluationCaches(indicatorSeries);
 
+  // === MTF: timeframeOverride 条件用の別時間足ビューを準備 (Phase γ) ===
+  // 条件ツリーから使用時間足を収集し、足ごとにバー列 + 指標系列を取得して
+  // 「基準足 index → 確定バー index」の対応表ごと evaluator に渡す。
+  const overrideTimeframes = new Set<string>();
+  for (const plan of entryPlans) {
+    for (const tf of collectTimeframeOverrides(plan.group, timeframe)) {
+      overrideTimeframes.add(tf);
+    }
+  }
+  const timeframeViews = new Map<string, TimeframeView>();
+  for (const tf of overrideTimeframes) {
+    const viewTfMs = TIMEFRAME_MS[tf as keyof typeof TIMEFRAME_MS];
+    if (!viewTfMs) {
+      throw new Error(`timeframeOverride に未対応の時間足が指定されています: ${tf}`);
+    }
+    const viewData = await fetchHistoricalData(
+      symbol,
+      tf as BacktestTimeframe,
+      new Date(request.startDate),
+      new Date(request.endDate),
+      true
+    );
+    if (viewData.length === 0) {
+      throw new Error(`timeframeOverride=${tf} のヒストリカルデータが取得できませんでした`);
+    }
+    const viewSeries = await fetchIndicatorSeriesByStrategyVersion({
+      strategyId: strategy.id,
+      versionId: strategy.currentVersion!.id,
+      symbol,
+      timeframe: tf,
+      startDate,
+      endDate,
+      patterns: [],
+    });
+    const viewCaches = buildEvaluationCaches(viewSeries);
+    // バー列と指標系列の index 整合ガード (live 評価と同じ事故防止)
+    const viewLengths = [...viewCaches.indicatorCache.values()].map((v) => v.length);
+    if (viewLengths.some((len) => len !== viewData.length)) {
+      throw new Error(
+        `timeframeOverride=${tf} のバー列(${viewData.length}本)と指標系列の長さが一致しません。` +
+          `誤った時点の指標値で判定する事故を防ぐため中断します`
+      );
+    }
+    timeframeViews.set(tf, {
+      data: viewData,
+      indicatorCache: viewCaches.indicatorCache,
+      patternCache: viewCaches.patternCache,
+      indexMap: buildTimeframeIndexMap(data, TIMEFRAME_MS[timeframe], viewData, viewTfMs),
+    });
+  }
+
   // 評価コンテキストを初期化
   const ctx: EvaluationContext = {
     data,
@@ -647,6 +702,7 @@ async function executeBacktestStage(
     indicatorCache,
     patternCache,
     strategy,
+    ...(timeframeViews.size > 0 ? { timeframeViews } : {}),
   };
 
   // エントリー条件のバリデーション

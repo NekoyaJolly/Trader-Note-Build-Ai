@@ -543,6 +543,16 @@ function SingleCondition({
         />
       )}
 
+      {/* マルチタイムフレーム (この条件だけ別の足で評価。Phase γ) */}
+      {(!readOnly || condition.timeframeOverride !== undefined) && (
+        <TimeframeOverrideControl
+          value={condition.timeframeOverride}
+          onChange={(tf) => onChange({ ...condition, timeframeOverride: tf })}
+          readOnly={readOnly}
+          compact={compact}
+        />
+      )}
+
       {/* 削除ボタン */}
       {!readOnly && canRemove && (
         <button
@@ -728,6 +738,16 @@ function SinglePatternCondition({
         />
       )}
 
+      {/* マルチタイムフレーム (この条件だけ別の足で評価。Phase γ) */}
+      {(!readOnly || condition.timeframeOverride !== undefined) && (
+        <TimeframeOverrideControl
+          value={condition.timeframeOverride}
+          onChange={(tf) => onChange({ ...condition, timeframeOverride: tf })}
+          readOnly={readOnly}
+          compact={compact}
+        />
+      )}
+
       {!readOnly && canRemove && (
         <button
           type="button"
@@ -792,6 +812,44 @@ function LookbackControl({ value, onChange, readOnly = false, compact = false }:
         disabled={readOnly || !active}
       />
       <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-400`}>本以内</span>
+    </div>
+  );
+}
+
+interface TimeframeOverrideControlProps {
+  /** 現在の上書き時間足（undefined = ストラテジーの基準足） */
+  value: string | undefined;
+  onChange: (timeframe: string | undefined) => void;
+  readOnly?: boolean;
+  compact?: boolean;
+}
+
+/** 条件単位で選べる時間足（ストラテジー基準足と同じ集合） */
+const OVERRIDE_TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '4h'] as const;
+
+/**
+ * マルチタイムフレーム条件 (Phase γ): この条件だけ別の時間足で評価する小さなセレクタ。
+ * 「基準足」(= 未指定) が既定。上位足を選んだ場合、評価は確定バーのみ参照される。
+ */
+function TimeframeOverrideControl({ value, onChange, readOnly = false, compact = false }: TimeframeOverrideControlProps) {
+  return (
+    <div
+      className="flex items-center gap-1"
+      title="この条件だけ別の時間足で評価します（未指定はストラテジーの基準足）"
+    >
+      <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-400`}>足</span>
+      <select
+        className={`${compact ? 'px-1 py-0.5 text-xs' : 'px-1.5 py-0.5 text-sm'} rounded bg-slate-700 text-gray-200 border border-slate-600 disabled:opacity-40`}
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)}
+        disabled={readOnly}
+        aria-label="条件の時間足"
+      >
+        <option value="">基準足</option>
+        {OVERRIDE_TIMEFRAMES.map((tf) => (
+          <option key={tf} value={tf}>{tf}</option>
+        ))}
+      </select>
     </div>
   );
 }

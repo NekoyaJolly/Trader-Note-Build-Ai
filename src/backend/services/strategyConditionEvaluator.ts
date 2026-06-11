@@ -84,7 +84,14 @@ export interface IndicatorCondition {
     priceType?: 'open' | 'high' | 'low' | 'close';
   };
   // 直近ルックバック: 直近 N 本以内（現在足含む）に成立で true。未指定/1 は現在足のみ
+  // (timeframeOverride 指定時はその足の本数で数える)
   lookbackBars?: number;
+  /**
+   * マルチタイムフレーム条件 (Phase γ): この条件だけ別の時間足で評価する。
+   * 未指定 = ストラテジーの基準足。上位足は「確定バーのみ」参照する
+   * (進行中の上位足バーは見ない = lookahead 防止)。
+   */
+  timeframeOverride?: string;
 }
 
 /** ローソク足パターン条件 */
@@ -94,7 +101,10 @@ export interface PatternCondition {
   patternId: CandlePatternId;
   operator: PatternOperator;
   // 直近ルックバック: 直近 N 本以内（現在足含む）に出現で true。未指定/1 は現在足のみ
+  // (timeframeOverride 指定時はその足の本数で数える)
   lookbackBars?: number;
+  /** マルチタイムフレーム条件 (Phase γ)。IndicatorCondition と同義 */
+  timeframeOverride?: string;
 }
 
 // ============================================
@@ -176,6 +186,19 @@ export interface OHLCV {
   volume: number;
 }
 
+/**
+ * マルチタイムフレーム条件用の別時間足ビュー (Phase γ)。
+ * 基準足とは別の時間足のバー列・指標/パターン系列と、
+ * 「基準足 index → このビューで参照してよい確定バー index」の対応表を持つ。
+ */
+export interface TimeframeView {
+  data: OHLCV[];
+  indicatorCache: Map<string, number[]>;
+  patternCache?: Map<CandlePatternId, boolean[]>;
+  /** 基準足 index → ビュー側 index。対応する確定バーがまだ無い場合は -1 */
+  indexMap: number[];
+}
+
 /** 条件評価コンテキスト */
 export interface EvaluationContext {
   data: OHLCV[];
@@ -183,6 +206,8 @@ export interface EvaluationContext {
   indicatorCache: Map<string, number[]>;
   patternCache?: Map<CandlePatternId, boolean[]>;
   strategy: StrategyDetail;
+  /** timeframeOverride 条件が参照する別時間足ビュー (キー = 時間足文字列。Phase γ) */
+  timeframeViews?: Map<string, TimeframeView>;
   // IF-THEN用の状態管理
   ifThenState?: {
     triggered: boolean;
@@ -412,6 +437,103 @@ export function evaluatePatternCondition(
 type ConditionChildItem = IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup;
 
 /** item の基本評価（ルックバックは考慮しない）。種別ごとに適切な評価関数へ振り分ける。 */
+/**
+ * 基準足 index → 別時間足ビューの「確定バー」index の対応表を作る (Phase γ MTF)。
+ *
+ * 対応規則: ビュー側バー j の終了時刻 (timestamp + viewTfMs) が、基準足バー i の
+ * 終了時刻 (timestamp + baseTfMs) 以下である最大の j。該当が無ければ -1。
+ * これにより上位足は「確定した直前バー」だけを参照し、進行中バーによる
+ * lookahead (バックテストの将来参照) を構造的に防ぐ。
+ * 両バー列は timestamp 昇順前提 (2 ポインタ、O(n+m))。
+ */
+export function buildTimeframeIndexMap(
+  baseBars: ReadonlyArray<OHLCV>,
+  baseTfMs: number,
+  viewBars: ReadonlyArray<OHLCV>,
+  viewTfMs: number
+): number[] {
+  const indexMap: number[] = new Array<number>(baseBars.length).fill(-1);
+  let j = -1;
+  for (let i = 0; i < baseBars.length; i++) {
+    const baseClose = baseBars[i].timestamp.getTime() + baseTfMs;
+    while (
+      j + 1 < viewBars.length &&
+      viewBars[j + 1].timestamp.getTime() + viewTfMs <= baseClose
+    ) {
+      j++;
+    }
+    indexMap[i] = j;
+  }
+  return indexMap;
+}
+
+/**
+ * 条件ツリーから timeframeOverride に使われている時間足を収集する (Phase γ MTF)。
+ * backtest / live がどの時間足のバー・指標系列を準備すべきかの単一情報源。
+ * baseTimeframe と同じ値は「上書きなし」と同義なので含めない。
+ */
+export function collectTimeframeOverrides(
+  group: ConditionGroup | null | undefined,
+  baseTimeframe: string
+): Set<string> {
+  const result = new Set<string>();
+  const visitItem = (item: ConditionChildItem | undefined | null): void => {
+    if (!item) return;
+    if ('indicatorId' in item || (item as { type?: string }).type === 'pattern') {
+      const tf = (item as { timeframeOverride?: string }).timeframeOverride;
+      if (tf && tf !== baseTimeframe) {
+        result.add(tf);
+      }
+      return;
+    }
+    if ((item as { type?: string }).type === 'time') return;
+    visitGroup(item as ConditionGroup);
+  };
+  const visitGroup = (g: ConditionGroup | null | undefined): void => {
+    if (!g) return;
+    for (const child of g.conditions ?? []) visitItem(child);
+    visitItem(g.ifCondition);
+    visitItem(g.thenCondition);
+    for (const step of g.sequence ?? []) visitItem(step);
+  };
+  visitGroup(group);
+  return result;
+}
+
+/**
+ * timeframeOverride 付き条件の評価ビューを解決する (Phase γ MTF)。
+ * - override 無し → 基準コンテキストをそのまま返す
+ * - override あり → 対応する TimeframeView の確定バー位置に切り替えたコンテキストを返す
+ * - ビュー未準備 / 確定バーがまだ無い → null (= 条件不成立として扱う)
+ */
+function resolveViewContext(
+  ctx: EvaluationContext,
+  item: ConditionChildItem
+): EvaluationContext | null {
+  const tf = (item as { timeframeOverride?: string }).timeframeOverride;
+  if (!tf) return ctx;
+
+  const view = ctx.timeframeViews?.get(tf);
+  if (!view) {
+    console.warn(
+      `[ConditionEvaluator] timeframeOverride=${tf} のビューが未準備のため条件を不成立として扱います`
+    );
+    return null;
+  }
+  const viewIndex = view.indexMap[ctx.currentIndex] ?? -1;
+  if (viewIndex < 0) return null;
+
+  return {
+    ...ctx,
+    data: view.data,
+    indicatorCache: view.indicatorCache,
+    patternCache: view.patternCache,
+    currentIndex: viewIndex,
+    // ビュー内での再 override は許可しない (条件は leaf 単位の 1 段のみ)
+    timeframeViews: undefined,
+  };
+}
+
 async function evaluateBaseNode(ctx: EvaluationContext, item: ConditionChildItem): Promise<boolean> {
   if ('indicatorId' in item) {
     return evaluateCondition(ctx, item);
@@ -433,18 +555,28 @@ async function evaluateBaseNode(ctx: EvaluationContext, item: ConditionChildItem
  * 「直近 N 本以内（現在足含む）のどこかで成立」で true を返す。
  */
 async function evaluateChildNode(ctx: EvaluationContext, item: ConditionChildItem): Promise<boolean> {
-  const isLeafWithLookback =
-    'indicatorId' in item || (item as { type?: string }).type === 'pattern';
-  const lookbackBars = isLeafWithLookback ? (item as { lookbackBars?: number }).lookbackBars : undefined;
+  const isLeaf = 'indicatorId' in item || (item as { type?: string }).type === 'pattern';
+
+  // MTF: leaf の timeframeOverride を先に解決する (Phase γ)。
+  // 解決後のコンテキストで lookback を回すため、「直近 N 本」は override した
+  // 時間足の本数として数えられる (例: 1h override + 直近3本 = 1h 足 3 本以内)
+  let evalCtx = ctx;
+  if (isLeaf) {
+    const resolved = resolveViewContext(ctx, item);
+    if (resolved === null) return false;
+    evalCtx = resolved;
+  }
+
+  const lookbackBars = isLeaf ? (item as { lookbackBars?: number }).lookbackBars : undefined;
 
   if (lookbackBars && lookbackBars > 1) {
-    const start = Math.max(0, ctx.currentIndex - (lookbackBars - 1));
-    for (let j = ctx.currentIndex; j >= start; j--) {
-      if (await evaluateBaseNode({ ...ctx, currentIndex: j }, item)) return true;
+    const start = Math.max(0, evalCtx.currentIndex - (lookbackBars - 1));
+    for (let j = evalCtx.currentIndex; j >= start; j--) {
+      if (await evaluateBaseNode({ ...evalCtx, currentIndex: j }, item)) return true;
     }
     return false;
   }
-  return evaluateBaseNode(ctx, item);
+  return evaluateBaseNode(evalCtx, item);
 }
 
 /**

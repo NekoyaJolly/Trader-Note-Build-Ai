@@ -20,7 +20,11 @@
 import type { TradeSide } from '@prisma/client';
 import type { CandlePatternId } from '../../shared/patterns';
 import type { ConditionGroup, EvaluationContext, OHLCV } from './strategyConditionEvaluator';
-import { evaluateConditionGroup } from './strategyConditionEvaluator';
+import { evaluateConditionGroup,
+  collectTimeframeOverrides,
+  buildTimeframeIndexMap,
+  type TimeframeView,
+} from './strategyConditionEvaluator';
 import type { StrategyDetail } from './strategyService';
 import { getStrategy } from './strategyService';
 import type { BacktestTimeframe } from './strategyBacktestService';
@@ -239,6 +243,60 @@ export class LiveStrategyEvaluationService {
           ]
         : [{ side: strategy.side === 'sell' ? 'sell' : 'buy', group: entryConditions }];
 
+    // === MTF: timeframeOverride 条件用の別時間足ビューを準備 (Phase γ) ===
+    // バー列はバックテストと同じ「確定バーのみ参照」の indexMap で整列し、
+    // 進行中の上位足バーによる早すぎる発火 (lookahead) を防ぐ。
+    const overrideTimeframes = new Set<string>();
+    for (const plan of entryPlans) {
+      for (const tf of collectTimeframeOverrides(plan.group, timeframe)) {
+        overrideTimeframes.add(tf);
+      }
+    }
+    const timeframeViews = new Map<string, TimeframeView>();
+    for (const tf of overrideTimeframes) {
+      const parsedViewTf = TimeframeSchema.safeParse(tf);
+      if (!parsedViewTf.success) {
+        return { ...base, timeframe, evaluations: [], triggered: false, skipReason: 'mtf_unsupported_timeframe' };
+      }
+      const viewBarMs = TIMEFRAME_MS[parsedViewTf.data];
+      const viewCacheKey = `${strategy.symbol}__${tf}`;
+      let viewCached = barsCache.get(viewCacheKey);
+      if (!viewCached) {
+        viewCached = await this.loadFreshBars(strategy.symbol, tf as BacktestTimeframe, viewBarMs, now);
+        barsCache.set(viewCacheKey, viewCached);
+      }
+      const viewBars = viewCached.bars;
+      if (viewBars.length < MIN_REQUIRED_BARS) {
+        return { ...base, timeframe, evaluations: [], triggered: false, skipReason: 'mtf_insufficient_data' };
+      }
+      // 鮮度ガード (基準足と同じ規則をビューの足幅でスケール)
+      const viewStaleLimitMs = Math.max(6 * viewBarMs, 2 * 60 * 60 * 1000);
+      const viewLastBarTime = viewBars[viewBars.length - 1].timestamp.getTime();
+      if (now.getTime() - viewLastBarTime > viewStaleLimitMs) {
+        return { ...base, timeframe, evaluations: [], triggered: false, skipReason: 'mtf_stale_market_data' };
+      }
+      const viewSeries = await this.fetchIndicatorSeriesFn({
+        strategyId: strategy.id,
+        versionId: strategy.currentVersion.id,
+        symbol: strategy.symbol,
+        timeframe: tf,
+        startDate: viewBars[0].timestamp,
+        endDate: viewBars[viewBars.length - 1].timestamp,
+        patterns: [],
+      });
+      const viewCaches = buildEvaluationCaches(viewSeries);
+      const viewLengths = [...viewCaches.indicatorCache.values()].map((v) => v.length);
+      if (viewLengths.some((len) => len !== viewBars.length)) {
+        return { ...base, timeframe, evaluations: [], triggered: false, skipReason: 'mtf_series_alignment_mismatch' };
+      }
+      timeframeViews.set(tf, {
+        data: viewBars,
+        indicatorCache: viewCaches.indicatorCache,
+        patternCache: viewCaches.patternCache,
+        indexMap: buildTimeframeIndexMap(bars, barMs, viewBars, viewBarMs),
+      });
+    }
+
     const evaluations: { side: TradeSide; conditionMet: boolean }[] = [];
     for (const plan of entryPlans) {
       if (!plan.group) {
@@ -250,7 +308,8 @@ export class LiveStrategyEvaluationService {
         bars,
         indicatorCache,
         patternCache,
-        plan.group
+        plan.group,
+        timeframeViews.size > 0 ? timeframeViews : undefined
       );
       evaluations.push({ side: plan.side, conditionMet: met });
     }
@@ -302,7 +361,8 @@ export class LiveStrategyEvaluationService {
     bars: OHLCV[],
     indicatorCache: Map<string, number[]>,
     patternCache: Map<CandlePatternId, boolean[]>,
-    group: ConditionGroup
+    group: ConditionGroup,
+    timeframeViews?: Map<string, TimeframeView>
   ): Promise<boolean> {
     const ctx: EvaluationContext = {
       data: bars,
@@ -310,6 +370,7 @@ export class LiveStrategyEvaluationService {
       indicatorCache,
       patternCache,
       strategy,
+      ...(timeframeViews !== undefined ? { timeframeViews } : {}),
     };
     const lastIndex = bars.length - 1;
     if (!isStatefulConditionGroup(group)) {
