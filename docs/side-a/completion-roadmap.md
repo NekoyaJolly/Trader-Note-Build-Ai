@@ -125,8 +125,10 @@ Side-A は「人間トレーダーのノーコード相棒」。完成形は **2
 ### Phase γ — 柱2 をライブに（条件で通知）
 - [x] **ライブ条件評価エンジン**（バックテスト評価器をライブ共用、定期/リアルタイム評価→発火）〔L〕 — 2026-06-10 実装 (PR γ-1): `strategyLiveEvaluationService` が `evaluateConditionGroup` + `buildEvaluationCaches` をライブ共用(評価1経路化)。Cloud Scheduler `strategy-alerts-15min`(7分オフセット) → `GET /api/cron/strategy-alerts`。アラート通知は Notification テーブル(type=strategy_alert)に統合し UI 到達を修正(旧実装は揮発FSで本番不達)、Web Push スタブも実配信化
 - [ ] 条件ツリーに **レンズ条件タイプ**追加（柱1基盤を流用）〔M〕
-- [ ] マルチタイムフレーム条件〔M〕 / ~~ルックバック UI〔S〕~~ (PR #374 で実装済み)
-- [ ] 条件アラートにも通知粒度設定を適用（柱1と共通の通知設定層）
+- [x] ~~マルチタイムフレーム条件〔M〕~~ (PR #391、2026-06-11 実装・本番実機検証済: `timeframeOverride`、確定バーのみ参照で lookahead 防止、1w 対応。条件ビルダー/評価器/backtest/live 共用) / ~~ルックバック UI〔S〕~~ (PR #374)
+- [ ] 条件アラートにも通知粒度設定を適用（柱1と共通の通知設定層）= NotificationPreference の strategy スコープ配線。**DB 基盤(scope=strategy + strategyId 列 + partial unique index)は β-2a で完備済、migration 不要**。残=`resolveForStrategy` 追加 + `triggerAlert` でゲート/cooldown 適用 + scope=strategy upsert 配線
+
+> **支える基盤メモ (2026-06-11, PR #392-394)**: バックテスト履歴 OHLCV 取得を **cTrader 優先 → EODHD 優先**に切替 (Phase A All-In-One 統一。§4 市場データ参照)。本番実機検証済。EODHD intraday は週末/休場で OHLC=null のギャップ足を返すため `Number.isFinite` で除外。詳細 memory `project_eodhd_backtest_primary`。
 
 ### Phase δ — リアルタイム & 通知の完成
 - [ ] リアルタイム類似度 Phase3（DB/Push/UI 配線、常駐ワーカー本番化）〔L〕
