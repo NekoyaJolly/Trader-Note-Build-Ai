@@ -437,6 +437,35 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
+      {/* 通知粒度設定 (Phase β-2b) */}
+      <Card>
+        <CardHeader>
+          <CardTitle>通知粒度</CardTitle>
+          <CardDescription>
+            ノートマッチ通知のしきい値・一致レベル・再通知頻度を調整
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="p-4 bg-slate-900/50 rounded-lg">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-medium text-white">通知粒度設定</h4>
+                <p className="text-xs text-gray-500 mt-1">
+                  全体の既定と、ノート単位の上書きを管理できます
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.location.href = "/settings/notifications"}
+              >
+                管理画面へ →
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* cTrader アカウント管理 */}
       <Card>
         <CardHeader>
