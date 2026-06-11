@@ -268,7 +268,7 @@ export class MatchingService {
           console.warn('MarketSnapshot 保存をスキップ:', snapshotError);
         }
 
-        for (const { note, comparison } of evaluations) {
+        for (const { note, comparison, preference } of evaluations) {
           // 比較不能(共通レンズなし等)は記録せずスキップ(理由はレンズ評価コアがログ済み)
           if (!comparison.comparable || comparison.score === null) {
             continue;
@@ -330,6 +330,8 @@ export class MatchingService {
             marketSnapshotId,
             symbol,
             threshold: comparison.threshold,
+            // ユーザー設定のクールダウンを通知トリガ判定へ引き渡す (Phase β-2a)
+            ...(preference !== undefined ? { cooldownMsOverride: preference.cooldownMs } : {}),
             trendMatched,
             priceRangeMatched,
             reasons,
@@ -1125,6 +1127,10 @@ export class MatchingService {
             marketSnapshotId: match.marketSnapshotId,
             symbol: match.symbol,
             channel: 'in_app',
+            // 評価エンジンが発火判定に使ったしきい値とユーザー設定クールダウンを
+            // トリガ層にも引き渡し、二重判定のズレを防ぐ (Phase β-2a)
+            scoreThresholdOverride: match.threshold,
+            cooldownMsOverride: match.cooldownMsOverride,
           });
 
           if (triggerResult.shouldNotify) {

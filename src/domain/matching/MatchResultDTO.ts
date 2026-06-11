@@ -37,6 +37,11 @@ export interface MatchResultDTO {
   symbol?: string;
   /** 判定に使用した閾値 */
   threshold?: number;
+  /**
+   * ユーザー設定による再通知クールダウン (ミリ秒、Phase β-2a)。
+   * 未設定時はトリガ判定側の既定 (NOTIFICATION_COOLDOWN_MS) を使う
+   */
+  cooldownMsOverride?: number;
   /** トレンド一致の有無 */
   trendMatched?: boolean;
   /** 価格レンジ一致の有無 */

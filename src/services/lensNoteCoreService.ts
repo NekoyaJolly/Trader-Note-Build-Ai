@@ -35,6 +35,8 @@ import {
   type SimilarityMatchLevel,
   type SnapshotSimilarityResult,
 } from '../shared/similarity/similarityEngine';
+import { NotificationPreferenceService } from './notification/notificationPreferenceService';
+import type { EffectiveNotificationPreference } from './notification/notificationPreferenceService';
 
 /** Side-A ノート作成時の Note コア生成入力 */
 export interface CreateSideANoteCoreInput {
@@ -78,6 +80,11 @@ export interface LensNoteEvaluation {
   readonly timeframe: string;
   /** レンズ比較結果(score/level/triggered/threshold/breakdown) */
   readonly comparison: SnapshotSimilarityResult;
+  /**
+   * 解決済みの通知粒度設定 (Phase β-2a)。マッチング側がクールダウン等を
+   * 通知トリガ判定へ引き渡すために載せる。解決失敗時は undefined (既定動作)
+   */
+  readonly preference?: EffectiveNotificationPreference;
 }
 
 /** レンズ評価実行全体の詳細結果(Phase α-3 マッチング切替の入力) */
@@ -120,6 +127,8 @@ export interface LensNoteCoreServiceDeps {
     'upsertForTradeNote' | 'findByTradeNoteIds'
   >;
   tradeNoteService?: Pick<TradeNoteService, 'loadActiveNotesForMatchingAsPrisma'>;
+  /** 通知粒度設定の解決 (Phase β-2a)。テストで差し替え可能 */
+  preferenceService?: Pick<NotificationPreferenceService, 'resolveForNotes'>;
 }
 
 export class LensNoteCoreService {
@@ -129,11 +138,13 @@ export class LensNoteCoreService {
     'upsertForTradeNote' | 'findByTradeNoteIds'
   >;
   private readonly tradeNoteService: Pick<TradeNoteService, 'loadActiveNotesForMatchingAsPrisma'>;
+  private readonly preferenceService: Pick<NotificationPreferenceService, 'resolveForNotes'>;
 
   constructor(deps: LensNoteCoreServiceDeps = {}) {
     this.builder = deps.builder ?? new LensSnapshotBuilder();
     this.noteCoreRepository = deps.noteCoreRepository ?? new NoteCoreRepository();
     this.tradeNoteService = deps.tradeNoteService ?? new TradeNoteService();
+    this.preferenceService = deps.preferenceService ?? new NotificationPreferenceService();
   }
 
   /**
@@ -257,6 +268,20 @@ export class LensNoteCoreService {
   ): Promise<LensEvaluationDetail> {
     const errors: string[] = [];
 
+    // 通知粒度設定 (しきい値 / 一致レベル) をノート単位で一括解決する (Phase β-2a)。
+    // 解決失敗時はシステム既定 (従来挙動) で評価を継続する
+    let preferenceByNoteId = new Map<string, EffectiveNotificationPreference>();
+    try {
+      preferenceByNoteId = await this.preferenceService.resolveForNotes(
+        notes.map((n) => ({ id: n.id, userId: n.userId }))
+      );
+    } catch (prefError) {
+      console.warn(
+        `${options.logPrefix} 通知設定の解決に失敗(システム既定で継続):`,
+        prefError
+      );
+    }
+
     // Note コア行(lensSnapshot)をまとめて取得
     const coreRows = await this.noteCoreRepository.findByTradeNoteIds(notes.map((n) => n.id));
     const snapshotByTradeNoteId = new Map<string, NoteLensSnapshot>();
@@ -332,8 +357,20 @@ export class LensNoteCoreService {
         }
 
         for (const { note, snapshot } of groupSnapshots) {
-          const comparison = compareLensSnapshots(snapshot, marketResult.snapshot);
-          evaluations.push({ note, timeframe: group.timeframe, comparison });
+          // ユーザー設定の有効しきい値 (threshold と一致レベル帯下限の大きい方) で発火判定する。
+          // 設定が無いノートはシステム既定 = 従来挙動 (Phase β-2a)
+          const preference = preferenceByNoteId.get(note.id);
+          const comparison = compareLensSnapshots(
+            snapshot,
+            marketResult.snapshot,
+            preference !== undefined ? { threshold: preference.effectiveThreshold } : undefined
+          );
+          evaluations.push({
+            note,
+            timeframe: group.timeframe,
+            comparison,
+            ...(preference !== undefined ? { preference } : {}),
+          });
           console.log(
             `${options.logPrefix} noteId=${note.id} symbol=${group.symbol} ` +
               `score=${comparison.score === null ? 'n/a' : comparison.score.toFixed(3)} ` +

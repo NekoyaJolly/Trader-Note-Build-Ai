@@ -11,29 +11,30 @@ datasource db {
 
 /// ユーザー（cTrader OAuth 認証用）
 model User {
-  id                String             @id @default(uuid()) @db.Uuid
+  id                      String                   @id @default(uuid()) @db.Uuid
   /// プライマリcTraderアカウントID（初回ログイン時に設定）
-  primaryAccountId  String             @unique
+  primaryAccountId        String                   @unique
   /// 表示名（cTrader から取得、またはユーザーが設定）
-  displayName       String?
+  displayName             String?
   /// メールアドレス（cTrader から取得、任意）
-  email             String?
+  email                   String?
   /// ロール
-  role              UserRole           @default(user)
+  role                    UserRole                 @default(user)
   /// アカウント有効フラグ
-  active            Boolean            @default(true)
+  active                  Boolean                  @default(true)
   /// 最終ログイン日時
-  lastLoginAt       DateTime?          @db.Timestamptz(6)
+  lastLoginAt             DateTime?                @db.Timestamptz(6)
   /// 作成日時
-  createdAt         DateTime           @default(now()) @db.Timestamptz(6)
+  createdAt               DateTime                 @default(now()) @db.Timestamptz(6)
   /// 更新日時
-  updatedAt         DateTime           @updatedAt @db.Timestamptz(6)
-  ctraderTokens     CTraderToken[]     @relation("UserCTraderTokens")
-  pushSubscriptions PushSubscription[] @relation("UserPushSubscriptions")
-  watchlists        Watchlist[]
-  userSettings      UserSettings?      @relation("UserSettings")
-  indicatorProfiles IndicatorProfile[] @relation("UserIndicatorProfiles")
-  notes             Note[]             @relation("UserNotes")
+  updatedAt               DateTime                 @updatedAt @db.Timestamptz(6)
+  ctraderTokens           CTraderToken[]           @relation("UserCTraderTokens")
+  pushSubscriptions       PushSubscription[]       @relation("UserPushSubscriptions")
+  watchlists              Watchlist[]
+  userSettings            UserSettings?            @relation("UserSettings")
+  indicatorProfiles       IndicatorProfile[]       @relation("UserIndicatorProfiles")
+  notes                   Note[]                   @relation("UserNotes")
+  notificationPreferences NotificationPreference[] @relation("UserNotificationPreferences")
 
   @@index([primaryAccountId], map: "idx_user_primary_account")
   @@index([active], map: "idx_user_active")
@@ -65,22 +66,23 @@ model UserSettings {
 /// 従来は data/indicator-profiles.json にファイル保存していたが、Cloud Run の揮発FSで
 /// 永続しない・インスタンス間不整合・ユーザー別でない問題があったため DB へ移行。
 model IndicatorProfile {
-  id          String   @id @default(uuid()) @db.Uuid
+  id                      String                   @id @default(uuid()) @db.Uuid
   /// ユーザー ID
-  userId      String   @db.Uuid
+  userId                  String                   @db.Uuid
   /// プロファイル名（ユーザー内で一意）
-  name        String
+  name                    String
   /// 説明（任意）
-  description String?
+  description             String?
   /// インジケーター設定の配列 (IndicatorConfig[])
-  indicators  Json
+  indicators              Json
   /// デフォルトプロファイルフラグ（取込時の初期選択）
-  isDefault   Boolean  @default(false)
+  isDefault               Boolean                  @default(false)
   /// 作成日時
-  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  createdAt               DateTime                 @default(now()) @db.Timestamptz(6)
   /// 更新日時
-  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
-  user        User     @relation("UserIndicatorProfiles", fields: [userId], references: [id], onDelete: Cascade)
+  updatedAt               DateTime                 @updatedAt @db.Timestamptz(6)
+  user                    User                     @relation("UserIndicatorProfiles", fields: [userId], references: [id], onDelete: Cascade)
+  notificationPreferences NotificationPreference[]
 
   @@unique([userId, name], map: "uq_indicator_profile_user_name")
   @@index([userId], map: "idx_indicator_profile_user")
@@ -194,13 +196,14 @@ model TradeNote {
   /// 一時停止（この日時まで無効。null の場合は停止なし）
   pausedUntil DateTime? @db.Timestamptz(6)
 
-  aiSummary            AISummary?
-  evaluationLogs       EvaluationLog[]       @relation("EvaluationLogNote")
-  matchResult          MatchResult[]
-  notificationLogs     NotificationLog[]     @relation("NotificationLogNote")
-  notificationSkipLogs NotificationSkipLog[] @relation("NotificationSkipLogNote")
-  trade                Trade                 @relation(fields: [tradeId], references: [id])
-  coreNote             Note?
+  aiSummary               AISummary?
+  evaluationLogs          EvaluationLog[]          @relation("EvaluationLogNote")
+  matchResult             MatchResult[]
+  notificationLogs        NotificationLog[]        @relation("NotificationLogNote")
+  notificationSkipLogs    NotificationSkipLog[]    @relation("NotificationSkipLogNote")
+  trade                   Trade                    @relation(fields: [tradeId], references: [id])
+  coreNote                Note?
+  notificationPreferences NotificationPreference[]
 
   @@index([symbol], map: "idx_tradenote_symbol")
   @@index([status], map: "idx_tradenote_status")
@@ -284,6 +287,61 @@ model Notification {
   @@index([status, sentAt], map: "idx_notification_status_sent")
   @@index([userId, status], map: "idx_notification_user_status")
   @@index([type, sentAt], map: "idx_notification_type_sent")
+}
+
+/// 通知粒度のユーザー設定 (Phase β-2、completion-roadmap 決定4 / NOTE_SIMILARITY_FOUNDATION §6.3-6.4)
+/// しきい値・一致レベル・クールダウン等を階層 (note/strategy > profile > user > システム既定) で解決する。
+/// β-2a 時点で配線済みなのは note / user スコープ (マッチングパイプライン)。
+/// profile スコープはノート→プロファイル紐付けの導入後、strategy スコープは Phase γ で配線する。
+/// maxPerDay はスキーマ/API のみ先行 (per-user 通知カウント源の整備後に配線)。
+model NotificationPreference {
+  id              String                      @id @default(uuid()) @db.Uuid
+  /// 所有ユーザー (必須)
+  userId          String                      @db.Uuid
+  /// 設定の適用範囲
+  scope           NotificationPreferenceScope
+  /// scope=profile のときの対象プロファイル
+  profileId       String?                     @db.Uuid
+  /// scope=note のときの対象ノート
+  noteId          String?                     @db.Uuid
+  /// scope=strategy のときの対象ストラテジー
+  strategyId      String?                     @db.Uuid
+  /// 類似度スコアしきい値 (0〜1)。null = 上位スコープ / システム既定
+  threshold       Float?
+  /// 通知する最小一致レベル。null = 既定 (weak)
+  minMatchLevel   SimilarityMatchLevel?
+  /// 同一ノートの再通知クールダウン (分)。null = 既定 (NOTIFICATION_COOLDOWN_MS)
+  cooldownMinutes Int?
+  /// 24 時間あたりの通知上限。null = 既定 (β-2a では未配線)
+  maxPerDay       Int?
+  createdAt       DateTime                    @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime                    @updatedAt @db.Timestamptz(6)
+  user            User                        @relation("UserNotificationPreferences", fields: [userId], references: [id], onDelete: Cascade)
+  profile         IndicatorProfile?           @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  note            TradeNote?                  @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  strategy        Strategy?                   @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  /// PostgreSQL は NULL 同士を distinct 扱いするため、この複合 unique が実際に防ぐのは
+  /// note/profile/strategy スコープの重複のみ。user スコープ (対象列が全 NULL) の一意性は
+  /// サービス層の upsert (findFirst → update/create) で担保する
+  @@unique([userId, scope, profileId, noteId, strategyId], map: "uq_notification_pref_scope")
+  @@index([userId, scope], map: "idx_notification_pref_user_scope")
+  @@index([noteId], map: "idx_notification_pref_note")
+}
+
+/// NotificationPreference の適用範囲
+enum NotificationPreferenceScope {
+  user
+  profile
+  note
+  strategy
+}
+
+/// 類似度の一致レベル (similarityEngine の SimilarityMatchLevel と対応。none は通知対象外のため持たない)
+enum SimilarityMatchLevel {
+  strong
+  medium
+  weak
 }
 
 model OrderPreset {
@@ -576,36 +634,37 @@ model MatchDetail {
 
 /// ストラテジー（売買戦略の定義）
 model Strategy {
-  id               String                @id @default(uuid()) @db.Uuid
+  id                      String                   @id @default(uuid()) @db.Uuid
   /// ストラテジー名
-  name             String
+  name                    String
   /// 説明
-  description      String?
+  description             String?
   /// 対象シンボル（USDJPY, EURUSD, XAUUSD 等）
-  symbol           String
+  symbol                  String
   /// 対象時間足（1m/5m/15m/30m/1h/4h/1d 等の API 文字列）。
   /// 既存行は null（レガシー）。新規はフォーム必須。バックテスト/プレビューの基準足になる。
-  timeframe        String?
+  timeframe               String?
   /// トレード方向（buy=買いのみ / sell=売りのみ / both=買い+売り両方）
-  side             StrategyDirection
+  side                    StrategyDirection
   /// ステータス
-  status           StrategyStatus        @default(draft)
+  status                  StrategyStatus           @default(draft)
   /// 現在のバージョン ID
-  currentVersionId String?               @db.Uuid
+  currentVersionId        String?                  @db.Uuid
   /// タグ（検索・分類用）
-  tags             String[]              @default([])
+  tags                    String[]                 @default([])
   /// 所有ユーザー（マルチユーザー化 Phase α）。既存行は migration でバックフィル済み。
-  userId           String?               @db.Uuid
+  userId                  String?                  @db.Uuid
   /// 作成日時
-  createdAt        DateTime              @default(now()) @db.Timestamptz(6)
+  createdAt               DateTime                 @default(now()) @db.Timestamptz(6)
   /// 更新日時
-  updatedAt        DateTime              @updatedAt @db.Timestamptz(6)
-  alert            StrategyAlert?
-  backtestRuns     StrategyBacktestRun[]
-  monteCarloRuns   MonteCarloRun[]
-  strategyNotes    StrategyNote[]
-  versions         StrategyVersion[]
-  walkForwardRuns  WalkForwardRun[]
+  updatedAt               DateTime                 @updatedAt @db.Timestamptz(6)
+  alert                   StrategyAlert?
+  backtestRuns            StrategyBacktestRun[]
+  monteCarloRuns          MonteCarloRun[]
+  strategyNotes           StrategyNote[]
+  versions                StrategyVersion[]
+  walkForwardRuns         WalkForwardRun[]
+  notificationPreferences NotificationPreference[]
 
   @@index([symbol], map: "idx_strategy_symbol")
   @@index([status], map: "idx_strategy_status")

@@ -1,16 +1,22 @@
+import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { NotificationController } from '../controllers/notificationController';
-import { validateBody, validateParams, validateQuery } from '../../middleware/validateRequest';
+import { validateBody, validateParams, validateQuery, getValidatedParams } from '../../middleware/validateRequest';
 import {
   NotificationIdParamSchema,
   GetNotificationsQuerySchema,
   CheckNotificationRequestSchema,
   GetNotificationLogsQuerySchema,
   NotificationLogIdParamSchema,
+  UpsertNotificationPreferenceSchema,
+  NotificationPreferenceIdParamSchema,
 } from '../../schemas/api/notification';
+import type { UpsertNotificationPreferenceRequest, NotificationPreferenceIdParam } from '../../schemas/api/notification';
+import { NotificationPreferenceService } from '../../services/notification/notificationPreferenceService';
 
 const router = Router();
 const notificationController = new NotificationController();
+const preferenceService = new NotificationPreferenceService();
 
 // ========================================
 // 既存エンドポイント（Phase0-Phase3）
@@ -39,6 +45,74 @@ router.get('/unread-count', notificationController.getUnreadCount);
  * 注意: /:id より前に定義する必要がある（固定パス優先）
  */
 router.put('/read-all', notificationController.markAllAsRead);
+
+// ========================================
+// 通知粒度設定 (Phase β-2a)
+// 注意: /:id より前に定義する必要がある（固定パス優先）
+// ========================================
+
+/**
+ * GET /api/notifications/preferences
+ * 認証ユーザーの通知粒度設定 (全スコープ) を取得
+ */
+router.get('/preferences', async (req: Request, res: Response) => {
+  try {
+    const preferences = await preferenceService.listPreferences(req.user!.userId);
+    res.json({ success: true, data: { preferences } });
+  } catch (error) {
+    console.error('[NotificationPreference] 一覧取得エラー:', error);
+    res.status(500).json({ success: false, error: '通知設定の取得に失敗しました' });
+  }
+});
+
+/**
+ * PUT /api/notifications/preferences
+ * 通知粒度設定を upsert (scope=user / note)。
+ * 項目に null を渡すと「上位スコープ / システム既定に戻す」。
+ */
+router.put(
+  '/preferences',
+  validateBody(UpsertNotificationPreferenceSchema),
+  async (req: Request, res: Response) => {
+    try {
+      // validateBody はパース済みデータで req.body を置き換える
+      const body = req.body as UpsertNotificationPreferenceRequest;
+      const preference = await preferenceService.upsertPreference(req.user!.userId, body);
+      res.json({ success: true, data: { preference } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '通知設定の保存に失敗しました';
+      if (message.includes('見つかりませんでした')) {
+        res.status(404).json({ success: false, error: message });
+        return;
+      }
+      console.error('[NotificationPreference] 保存エラー:', error);
+      res.status(500).json({ success: false, error: '通知設定の保存に失敗しました' });
+    }
+  }
+);
+
+/**
+ * DELETE /api/notifications/preferences/:id
+ * 通知粒度設定の行を削除 (所有ユーザーのもののみ)
+ */
+router.delete(
+  '/preferences/:id',
+  validateParams(NotificationPreferenceIdParamSchema),
+  async (req: Request, res: Response) => {
+    try {
+      const { id } = getValidatedParams<NotificationPreferenceIdParam>(res);
+      const deleted = await preferenceService.deletePreference(req.user!.userId, id);
+      if (!deleted) {
+        res.status(404).json({ success: false, error: '通知設定が見つかりませんでした' });
+        return;
+      }
+      res.json({ success: true });
+    } catch (error) {
+      console.error('[NotificationPreference] 削除エラー:', error);
+      res.status(500).json({ success: false, error: '通知設定の削除に失敗しました' });
+    }
+  }
+);
 
 /**
  * GET /api/notifications/:id

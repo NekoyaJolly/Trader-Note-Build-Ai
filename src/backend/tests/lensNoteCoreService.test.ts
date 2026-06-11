@@ -201,3 +201,62 @@ describe('LensNoteCoreService.shadowEvaluateActiveNotes', () => {
     expect(build).not.toHaveBeenCalled();
   });
 });
+
+describe('LensNoteCoreService 通知粒度設定の配線 (Phase β-2a)', () => {
+  // 共通 deps: ノート 1 件 + 同一 snapshot (自己比較 = score 1.0)
+  const buildDeps = (preferenceService: LensNoteCoreServiceDeps['preferenceService']) =>
+    ({
+      builder: {
+        build: jest
+          .fn()
+          .mockResolvedValue({ snapshot: makeNoteSnapshot(), warnings: [], barsUsed: 130 }),
+      },
+      noteCoreRepository: {
+        upsertForTradeNote: jest.fn(),
+        findByTradeNoteIds: jest.fn().mockResolvedValue([makeCoreRow('note_1', makeNoteSnapshot())]),
+      },
+      tradeNoteService: {
+        loadActiveNotesForMatchingAsPrisma: jest.fn().mockResolvedValue([makeActiveNote('note_1')]),
+      },
+      preferenceService,
+    }) as LensNoteCoreServiceDeps;
+
+  test('解決済み有効しきい値が比較エンジンに渡される (comparison.threshold に反映)', async () => {
+    const resolveForNotes = jest.fn().mockResolvedValue(
+      new Map([
+        [
+          'note_1',
+          { threshold: 0.95, minMatchLevel: 'medium', cooldownMs: 60000, effectiveThreshold: 0.95 },
+        ],
+      ])
+    );
+    const service = new LensNoteCoreService(
+      buildDeps({ resolveForNotes })
+    );
+
+    const detail = await service.evaluateNotesForMatching([makeActiveNote('note_1')]);
+
+    expect(resolveForNotes).toHaveBeenCalledWith([{ id: 'note_1', userId: undefined }]);
+    expect(detail.evaluations).toHaveLength(1);
+    // ユーザー設定の有効しきい値 0.95 が比較エンジンにそのまま渡る
+    // (発火可否は score 次第。自己比較でもイベント型 none 同士は 0.5 のため score<1。§6.2)
+    expect(detail.evaluations[0]?.comparison.threshold).toBe(0.95);
+    expect(detail.evaluations[0]?.comparison.comparable).toBe(true);
+    // 解決済み設定が評価結果に同梱される (マッチング側のクールダウン伝播用)
+    expect(detail.evaluations[0]?.preference?.cooldownMs).toBe(60000);
+  });
+
+  test('設定解決が失敗してもシステム既定で評価を継続する (異常系)', async () => {
+    const resolveForNotes = jest.fn().mockRejectedValue(new Error('db down'));
+    const service = new LensNoteCoreService(
+      buildDeps({ resolveForNotes })
+    );
+
+    const detail = await service.evaluateNotesForMatching([makeActiveNote('note_1')]);
+
+    // 失敗しても評価は止まらず、既定しきい値 (0.75) で比較される
+    expect(detail.evaluations).toHaveLength(1);
+    expect(detail.evaluations[0]?.comparison.threshold).toBe(0.75);
+    expect(detail.evaluations[0]?.preference).toBeUndefined();
+  });
+});
