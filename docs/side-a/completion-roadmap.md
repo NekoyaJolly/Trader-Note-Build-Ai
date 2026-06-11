@@ -114,9 +114,9 @@ Side-A は「人間トレーダーのノーコード相棒」。完成形は **2
 
 ### Phase α — 基盤（最優先・他が乗る土台）+ マルチユーザー化
 - [x] **レンズ類似度基盤の実装**（NOTE_SIMILARITY_FOUNDATION.md を確定 → 実装）〔L〕 ← 柱1と柱2の合流土台 — 2026-06-10 実装 (PR α-1 基盤コア / PR α-2 Note コア+生成配線+シャドー評価。切替 §9-3 と旧経路廃止は α-3 で)
-- [x] インジケーターレンズ新設 + IndicatorProfile 接続〔M〕 — 2026-06-10 実装 (PR α-1/α-2)。パラメータ編集 UI は α-4 で
+- [x] インジケーターレンズ新設 + IndicatorProfile 接続〔M〕 — 2026-06-10 実装 (PR α-1/α-2)。**パラメータ編集 UI は α-4b (PR #387、2026-06-11) で実装済み** (ProfileEditModal にインジケーター別パラメータ入力、定義は `lib/indicatorParamFields.ts` に集約)
 - [ ] 旧特徴量経路の廃止 + 既存ノート LensSnapshot バックフィル〔M〕（バックフィルスクリプトは α-2 で実装済み、実行とレガシー廃止は α-3）— **α-3 第1弾 2026-06-11 実装**: マッチングを `MATCHING_ENGINE=lens` でレンズ類似度に切替 (score=レンズ類似度、legacy はロールバック用に 1 リリース併存)。残: バックフィル本番実行 + 旧 12 次元経路の物理削除 (第2弾、lens 安定確認後)
-- [ ] **マルチユーザー化**: Trade/TradeNote/派生に userId 追加 migration + 全 query のユーザー分離〔L〕（migration + バックフィルは α-2 で実施済み。全 query のユーザー分離は α-4）
+- [x] **マルチユーザー化**: Trade/TradeNote/派生に userId 追加 migration + 全 query のユーザー分離〔L〕— migration + バックフィルは α-2、**全 query のユーザー分離は α-4a (PR #386、2026-06-11) で実装済み**: HTTP 経路は `req.user.userId` で分離 + mutation 所有権チェック、cron はソースエンティティ (note/strategy) の userId を MatchResult/Notification へ伝播、cron 生成 NULL 行の再バックフィル migration 同梱。残: per-user Web Push (Phase β)、userId 必須化 + FK 付与 (分離安定確認後)
 
 ### Phase β — 柱1 を“似たら通知”として完成 + 通知粒度
 - [ ] 類似度→通知が意味を持って出る（柱1の完成判定）+ per-user 通知/Push
