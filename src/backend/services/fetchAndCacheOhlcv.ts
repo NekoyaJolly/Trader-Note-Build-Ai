@@ -2,20 +2,25 @@
  * OHLCV データ取得・キャッシュサービス
  *
  * 目的:
- * - **cTrader Open API 優先** (ブローカーと同一の価格・足区切りを正とする)
- * - cTrader が使えない/失敗した場合のみ EODHD にフォールバック (Phase B、2026-05-22 切替)
- * - cTrader API の時間範囲制限に対応した分割リクエスト
+ * - **EODHD 優先** (Phase A All-In-One 方針。チャート/リアルタイムと同一のデータ源に統一)
+ * - EODHD が使えない/失敗した場合のみ cTrader Open API にフォールバック
  * - 取得データを DB に永続化 (upsert)
  * - 進捗コールバック対応 (SSE 配信用)
  *
- * 旧 Twelve Data 経路は Phase B で廃止。EODHD の `intraday / eod` API を Provider 経由で利用し、
- * 15m / 30m / 4h は `EodhdProvider.getHistoricalRange()` 内でクライアント側集約される。
+ * EODHD は `intraday / eod` API を Provider 経由で利用し、15m / 30m / 4h は
+ * `EodhdProvider.getHistoricalRange()` 内でクライアント側集約、1d / 1w は eod API (period=d/w)。
+ *
+ * 優先順位の経緯:
+ * - 旧 Twelve Data 経路は Phase B (2026-05-22) で廃止。
+ * - Phase B は cTrader 優先 (ブローカー同一価格を正とする) だったが、cTrader 接続の脆弱性
+ *   (複数接続競合・SSE 切断の誤表示) で取得が不安定なため、2026-06-11 に EODHD 優先へ反転。
+ *   cTrader はフォールバックとして残す (broker-aligned 価格が必要な場面の保険)。
  */
 
 import { CTraderDataService } from './ctrader/ctraderDataService';
 import { CTraderAuthService } from './ctrader/ctraderAuthService';
 import { splitDateRange } from '../../utils/dateRangeChunks';
-import { normalizeCTraderSymbol } from '../../utils/symbolNormalization';
+import { fromEodhdSymbol } from '../../utils/symbolNormalization';
 import { EodhdProvider } from '../../infrastructure/market/EodhdProvider';
 import { TimeframeSchema } from '../../infrastructure/market/IMarketDataProvider';
 import { prisma } from '../db/client';
@@ -26,11 +31,13 @@ const ctraderDataService = new CTraderDataService(ctraderAuthService);
 const eodhdProvider = new EodhdProvider();
 
 /**
- * 期間外データを cTrader から補完取得できるか
+ * 期間外データを遠隔 API から補完取得できるか
  *（バックテスト・DSL 検証で、キャッシュ未充足時に API を呼ぶ判断に使う）
+ *
+ * EODHD 優先 + cTrader フォールバックのため、どちらかが設定済みなら true。
  */
 export function isOhlcvRemoteFetchAvailable(): boolean {
-  return ctraderDataService.isConfigured();
+  return eodhdProvider.isConfigured() || ctraderDataService.isConfigured();
 }
 
 // ========================================
@@ -113,20 +120,38 @@ export async function fetchAndCacheOhlcv(
     onProgress?: OnProgressCallback
 ): Promise<FetchAndCacheResult> {
     try {
-        const normalizedSymbol = normalizeCTraderSymbol(symbol);
-        if (!ctraderDataService.isConfigured()) {
-            console.warn('[fetchAndCacheOhlcv] cTrader API が未設定のため EODHD フォールバックを試行します');
-            return await fetchFromEodhdFallback(normalizedSymbol, timeframe, startDate, endDate, onProgress);
+        // サフィックス安全な正規化 (例: USDJPY.FOREX → USDJPY, USD/JPY → USDJPY)。
+        // normalizeCTraderSymbol は "." も除去するため USDJPY.FOREX → USDJPYFOREX と潰れ、
+        // EODHD 主経路の toEodhdSymbol() で誤った銘柄 (USDJPYFOREX.FOREX) に変換される。
+        // fromEodhdSymbol はサフィックスを先に剥がしてから正規化するため EODHD/cTrader/DB キーで一貫。
+        const normalizedSymbol = fromEodhdSymbol(symbol);
+        let lastError = 'EODHD / cTrader いずれも利用できません (API キー / OAuth トークン未設定)';
+
+        // 1. EODHD 優先 (Phase A All-In-One / チャート・リアルタイムとデータ源統一)
+        if (eodhdProvider.isConfigured()) {
+            const eodhdResult = await fetchFromEodhd(normalizedSymbol, timeframe, startDate, endDate, onProgress);
+            if (eodhdResult.success) {
+                // updateDataPresetMetadata は fetchFromEodhd 内で実行済み
+                return eodhdResult;
+            }
+            lastError = eodhdResult.error ?? 'EODHD 取得失敗';
+            console.warn(`[fetchAndCacheOhlcv] EODHD 取得失敗、cTrader フォールバックを試行: ${lastError}`);
+        } else {
+            console.warn('[fetchAndCacheOhlcv] EODHD API が未設定のため cTrader を試行します');
         }
 
-        const ctraderResult = await fetchFromCTrader(normalizedSymbol, timeframe, startDate, endDate, onProgress);
-        if (ctraderResult.success) {
-            await updateDataPresetMetadata(normalizedSymbol, timeframe);
+        // 2. cTrader フォールバック (broker-aligned 価格が必要な場面の保険)
+        if (ctraderDataService.isConfigured()) {
+            const ctraderResult = await fetchFromCTrader(normalizedSymbol, timeframe, startDate, endDate, onProgress);
+            if (ctraderResult.success) {
+                await updateDataPresetMetadata(normalizedSymbol, timeframe);
+                return ctraderResult;
+            }
+            console.warn(`[fetchAndCacheOhlcv] cTrader フォールバックも失敗: ${ctraderResult.error}`);
             return ctraderResult;
         }
 
-        console.warn(`[fetchAndCacheOhlcv] cTrader 取得失敗、EODHD フォールバックを試行: ${ctraderResult.error}`);
-        return await fetchFromEodhdFallback(normalizedSymbol, timeframe, startDate, endDate, onProgress);
+        return { success: false, cachedCount: 0, error: lastError };
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : '不明なエラー';
         console.error(`[fetchAndCacheOhlcv] エラー:`, error);
@@ -138,7 +163,7 @@ export async function fetchAndCacheOhlcv(
     }
 }
 
-async function fetchFromEodhdFallback(
+async function fetchFromEodhd(
     symbol: string,
     timeframe: string,
     startDate: Date,
@@ -159,7 +184,7 @@ async function fetchFromEodhdFallback(
         onProgress?.({
             current: 0,
             total: 1,
-            message: 'EODHD フォールバックで OHLCV 取得中...',
+            message: 'EODHD で OHLCV 取得中...',
             source: 'eodhd',
             percent: 10,
         });
@@ -230,7 +255,7 @@ async function fetchFromEodhdFallback(
           ? (error as Error & { cause?: Error | string }).cause
           : undefined;
         const causeStr = cause ? ` (cause: ${safeStringify(cause)})` : '';
-        return { success: false, cachedCount: 0, error: `EODHD フォールバックエラー: ${msg}${causeStr}` };
+        return { success: false, cachedCount: 0, error: `EODHD 取得エラー: ${msg}${causeStr}` };
     }
 }
 

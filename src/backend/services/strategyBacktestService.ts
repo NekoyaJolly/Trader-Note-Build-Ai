@@ -371,7 +371,7 @@ export async function fetchHistoricalData(
     console.log(`[fetchHistoricalData] DBキャッシュなし: ${symbol}/${timeframe}`);
   }
 
-  // 3. 期間未充足時: cTrader のみで補完（Twelve Data は廃止）
+  // 3. 期間未充足時: 遠隔 API で補完（EODHD 優先 → cTrader フォールバック。Twelve Data は廃止）
   const needsRemoteFill = cachedData.length === 0 || !coversStart || !coversEnd;
   const canRemoteFetch = isOhlcvRemoteFetchAvailable();
   if (forceApiFetch || (needsRemoteFill && canRemoteFetch)) {
@@ -410,8 +410,8 @@ export async function fetchHistoricalData(
     }
   } else if (needsRemoteFill && !canRemoteFetch) {
     console.log(
-      `[fetchHistoricalData] cTrader 未設定のため補完取得をスキップ: ${symbol}/${timeframe} ` +
-      `（CTRADER_CLIENT_ID/SECRET および DB の OAuth トークン）`
+      `[fetchHistoricalData] 遠隔 API 未設定のため補完取得をスキップ: ${symbol}/${timeframe} ` +
+      `（EODHD_API_KEY、または cTrader CLIENT_ID/SECRET + DB の OAuth トークン）`
     );
   }
 
