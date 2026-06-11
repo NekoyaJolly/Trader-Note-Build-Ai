@@ -98,6 +98,45 @@ describe('NotificationPreferenceService.resolveForNotes (Phase β-2a)', () => {
   });
 });
 
+describe('NotificationPreferenceService.resolveForStrategy (Phase γ)', () => {
+  it('strategy スコープが user スコープより優先される (cooldown)', async () => {
+    const rows = [
+      { scope: 'strategy', strategyId: 'strat-1', userId: 'user-a', threshold: null, minMatchLevel: null, cooldownMinutes: 15 },
+      { scope: 'user', strategyId: null, userId: 'user-a', threshold: null, minMatchLevel: null, cooldownMinutes: 120 },
+    ];
+    const findMany = jest.fn<() => Promise<typeof rows>>().mockResolvedValue(rows);
+    const prismaMock = { notificationPreference: { findMany } } as unknown as PrismaClient;
+    const service = new NotificationPreferenceService(prismaMock);
+
+    const resolved = await service.resolveForStrategy('strat-1', 'user-a');
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(resolved.cooldownMinutes).toBe(15); // strategy 優先
+  });
+
+  it('strategy スコープ未設定なら user スコープの cooldown を使う', async () => {
+    const rows = [
+      { scope: 'user', strategyId: null, userId: 'user-a', threshold: null, minMatchLevel: null, cooldownMinutes: 90 },
+    ];
+    const findMany = jest.fn<() => Promise<typeof rows>>().mockResolvedValue(rows);
+    const prismaMock = { notificationPreference: { findMany } } as unknown as PrismaClient;
+    const service = new NotificationPreferenceService(prismaMock);
+
+    const resolved = await service.resolveForStrategy('strat-1', 'user-a');
+    expect(resolved.cooldownMinutes).toBe(90);
+  });
+
+  it('どちらも未設定なら cooldownMinutes は null (呼び出し側が alert 固有値にフォールバック)', async () => {
+    const rows: NotificationPreference[] = [];
+    const findMany = jest.fn<() => Promise<typeof rows>>().mockResolvedValue(rows);
+    const prismaMock = { notificationPreference: { findMany } } as unknown as PrismaClient;
+    const service = new NotificationPreferenceService(prismaMock);
+
+    const resolved = await service.resolveForStrategy('strat-1', 'user-a');
+    expect(resolved.cooldownMinutes).toBeNull();
+    expect(resolved.effective).toEqual(systemDefaultPreference());
+  });
+});
+
 describe('NotificationPreferenceService.upsertPreference (Phase β-2a)', () => {
   it('scope=note で他ユーザーのノートを指定するとエラー (異常系・所有チェック)', async () => {
     const prismaMock = {
@@ -121,6 +160,30 @@ describe('NotificationPreferenceService.upsertPreference (Phase β-2a)', () => {
       service.upsertPreference('user-a', { scope: 'note', threshold: 0.9 })
     ).rejects.toThrow('noteId が必須です');
     // 所有チェックのクエリにすら到達しない
+    expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it('scope=strategy で他ユーザーのストラテジーを指定するとエラー (異常系・所有チェック)', async () => {
+    const prismaMock = {
+      strategy: {
+        findFirst: jest.fn<() => Promise<null>>().mockResolvedValue(null),
+      },
+    } as unknown as PrismaClient;
+    const service = new NotificationPreferenceService(prismaMock);
+
+    await expect(
+      service.upsertPreference('user-a', { scope: 'strategy', strategyId: 'others-strat', cooldownMinutes: 30 })
+    ).rejects.toThrow('ストラテジーが見つかりませんでした');
+  });
+
+  it('scope=strategy で strategyId 未指定はエラー (異常系・所有チェックすり抜け防止)', async () => {
+    const findFirst = jest.fn();
+    const prismaMock = { strategy: { findFirst } } as unknown as PrismaClient;
+    const service = new NotificationPreferenceService(prismaMock);
+
+    await expect(
+      service.upsertPreference('user-a', { scope: 'strategy', cooldownMinutes: 30 })
+    ).rejects.toThrow('strategyId が必須です');
     expect(findFirst).not.toHaveBeenCalled();
   });
 

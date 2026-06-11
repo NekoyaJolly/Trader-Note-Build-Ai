@@ -51,13 +51,25 @@ export interface EffectiveNotificationPreference {
 
 /** upsert 入力 (scope と対象 ID の組はルート層で検証済みであること) */
 export interface UpsertPreferenceInput {
-  scope: 'user' | 'note';
+  scope: 'user' | 'note' | 'strategy';
   /** scope=note のときの対象ノート ID */
   noteId?: string;
+  /** scope=strategy のときの対象ストラテジー ID (Phase γ: 条件アラート粒度) */
+  strategyId?: string;
   threshold?: number | null;
   minMatchLevel?: SimilarityMatchLevel | null;
   cooldownMinutes?: number | null;
   maxPerDay?: number | null;
+}
+
+/** 条件アラート (柱2) 向けの解決結果。柱2 は二値判定 (matchScore=1.0) のため
+ *  threshold/minMatchLevel は実質 no-op で、cooldown のみ通知粒度として効く。
+ *  cooldownMinutes が null のときは呼び出し側で StrategyAlert 固有値にフォールバックする。 */
+export interface StrategyEffectivePreference {
+  /** strategy/user スコープで明示設定された再通知クールダウン (分)。未設定は null */
+  cooldownMinutes: number | null;
+  /** 全項目解決済みの有効設定 (将来 柱1/柱2 合流時に threshold 等も使う) */
+  effective: EffectiveNotificationPreference;
 }
 
 /** システム既定の解決値 (設定行が 1 つも無いときの挙動 = 従来挙動) */
@@ -136,11 +148,26 @@ export class NotificationPreferenceService {
         throw new Error('ノートが見つかりませんでした');
       }
     }
+    // scope=strategy は strategyId 必須 + 所有チェック (Phase γ: 条件アラート粒度)
+    if (input.scope === 'strategy') {
+      if (input.strategyId === undefined) {
+        throw new Error('scope=strategy では strategyId が必須です');
+      }
+      const ownedStrategy = await this.prisma.strategy.findFirst({
+        where: { id: input.strategyId, userId },
+        select: { id: true },
+      });
+      if (!ownedStrategy) {
+        throw new Error('ストラテジーが見つかりませんでした');
+      }
+    }
 
     const where =
       input.scope === 'note'
         ? { userId, scope: 'note' as const, noteId: input.noteId }
-        : { userId, scope: 'user' as const };
+        : input.scope === 'strategy'
+          ? { userId, scope: 'strategy' as const, strategyId: input.strategyId }
+          : { userId, scope: 'user' as const };
 
     // 省略 (undefined) は「現状維持」、明示 null は「既定に戻す」。
     // 省略フィールドまで null 上書きすると既存設定が意図せず消える (Copilot レビュー対応)
@@ -164,6 +191,7 @@ export class NotificationPreferenceService {
           userId,
           scope: input.scope,
           noteId: input.scope === 'note' ? input.noteId : undefined,
+          strategyId: input.scope === 'strategy' ? input.strategyId : undefined,
           ...data,
         },
       });
@@ -231,5 +259,43 @@ export class NotificationPreferenceService {
       result.set(note.id, mergePreferences(notePref, userPref));
     }
     return result;
+  }
+
+  /**
+   * 条件アラート (柱2) 向けの「有効設定」を解決する (Phase γ)。
+   * strategy スコープ > user スコープ の順でマージする。
+   *
+   * 柱2 は条件成立=二値判定 (triggerAlert に matchScore=1.0 が渡る) のため、
+   * threshold/minMatchLevel は実質 no-op。意味を持つのは cooldown なので、
+   * 明示設定された cooldownMinutes を生値で返し (未設定は null)、呼び出し側で
+   * StrategyAlert 固有の cooldownMinutes にフォールバックさせる (既存挙動を壊さない)。
+   */
+  async resolveForStrategy(
+    strategyId: string,
+    userId: string | null,
+  ): Promise<StrategyEffectivePreference> {
+    const rows = await this.prisma.notificationPreference.findMany({
+      where: {
+        OR: [
+          { scope: 'strategy', strategyId },
+          ...(userId !== null ? [{ scope: 'user' as const, userId }] : []),
+        ],
+      },
+    });
+
+    let strategyPref: NotificationPreference | null = null;
+    let userPref: NotificationPreference | null = null;
+    for (const row of rows) {
+      if (row.scope === 'strategy' && row.strategyId === strategyId) {
+        strategyPref = row;
+      } else if (row.scope === 'user') {
+        userPref = row;
+      }
+    }
+
+    return {
+      cooldownMinutes: strategyPref?.cooldownMinutes ?? userPref?.cooldownMinutes ?? null,
+      effective: mergePreferences(strategyPref, userPref),
+    };
   }
 }

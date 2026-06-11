@@ -73,13 +73,14 @@ export type NotificationLogIdParam = z.infer<typeof NotificationLogIdParamSchema
 
 /**
  * 通知粒度設定の upsert リクエスト。
- * β-2a で受け付けるのは user / note スコープのみ (profile/strategy は後続フェーズで配線)。
+ * user / note スコープ (β-2a) に加え、strategy スコープ (Phase γ: 条件アラート粒度) を受け付ける。
  * null は「この項目の設定を消して上位スコープ / システム既定に戻す」を意味する。
  */
 export const UpsertNotificationPreferenceSchema = z
   .object({
-    scope: z.enum(['user', 'note']),
+    scope: z.enum(['user', 'note', 'strategy']),
     noteId: z.string().uuid('有効なUUIDを指定してください').optional(),
+    strategyId: z.string().uuid('有効なUUIDを指定してください').optional(),
     threshold: z.number().min(0, '0以上で指定してください').max(1, '1以下で指定してください').nullable().optional(),
     minMatchLevel: z.enum(['strong', 'medium', 'weak']).nullable().optional(),
     cooldownMinutes: z.number().int().min(1, '1分以上で指定してください').max(10080, '1週間以内で指定してください').nullable().optional(),
@@ -90,9 +91,17 @@ export const UpsertNotificationPreferenceSchema = z
     message: 'scope=note では noteId が必須です',
     path: ['noteId'],
   })
-  .refine((d) => d.scope !== 'user' || d.noteId === undefined, {
-    message: 'scope=user では noteId は指定できません',
+  .refine((d) => d.scope !== 'strategy' || d.strategyId !== undefined, {
+    message: 'scope=strategy では strategyId が必須です',
+    path: ['strategyId'],
+  })
+  .refine((d) => d.scope === 'note' || d.noteId === undefined, {
+    message: 'noteId は scope=note のときのみ指定できます',
     path: ['noteId'],
+  })
+  .refine((d) => d.scope === 'strategy' || d.strategyId === undefined, {
+    message: 'strategyId は scope=strategy のときのみ指定できます',
+    path: ['strategyId'],
   });
 
 export type UpsertNotificationPreferenceRequest = z.infer<typeof UpsertNotificationPreferenceSchema>;
