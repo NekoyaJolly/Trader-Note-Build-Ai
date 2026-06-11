@@ -11,6 +11,8 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/Button";
 import type { IndicatorMetadata, IndicatorParams, IndicatorConfig } from "@/types/indicator";
+// パラメータ定義は UI 非依存の lib に集約 (PR #387 Copilot レビュー対応)
+import { getParamFields } from "@/lib/indicatorParamFields";
 
 interface IndicatorConfigModalProps {
   // 選択されたインジケーターのメタデータ
@@ -23,72 +25,6 @@ interface IndicatorConfigModalProps {
   onClose: () => void;
   // 削除時のコールバック（既存設定の場合）
   onDelete?: () => Promise<void>;
-}
-
-/**
- * パラメータ入力フィールドの設定
- */
-interface ParamFieldConfig {
-  key: keyof IndicatorParams;
-  label: string;
-  min?: number;
-  max?: number;
-  step?: number;
-}
-
-/**
- * インジケーターIDからパラメータフィールド設定を取得
- */
-function getParamFields(indicatorId: string): ParamFieldConfig[] {
-  switch (indicatorId) {
-    case 'rsi':
-    case 'sma':
-    case 'ema':
-    case 'dema':
-    case 'tema':
-    case 'atr':
-    case 'williamsR':
-    case 'roc':
-    case 'mfi':
-    case 'cmf':
-    case 'aroon':
-    case 'cci':
-      return [{ key: 'period', label: '期間', min: 1, max: 500 }];
-    case 'macd':
-      return [
-        { key: 'fastPeriod', label: '短期EMA', min: 1, max: 100 },
-        { key: 'slowPeriod', label: '長期EMA', min: 1, max: 100 },
-        { key: 'signalPeriod', label: 'シグナル', min: 1, max: 100 },
-      ];
-    case 'stochastic':
-      return [
-        { key: 'kPeriod', label: '%K期間', min: 1, max: 100 },
-        { key: 'dPeriod', label: '%D期間', min: 1, max: 100 },
-      ];
-    case 'bb':
-    case 'kc':
-      // BB/KCの標準偏差はindicatortsライブラリの制約により2固定
-      return [
-        { key: 'period', label: '期間', min: 1, max: 100 },
-      ];
-    case 'psar':
-      return [
-        { key: 'step', label: 'ステップ', min: 0.01, max: 0.5, step: 0.01 },
-        { key: 'maxStep', label: '最大ステップ', min: 0.1, max: 1, step: 0.01 },
-      ];
-    case 'ichimoku':
-      return [
-        { key: 'conversionPeriod', label: '転換線', min: 1, max: 100 },
-        { key: 'basePeriod', label: '基準線', min: 1, max: 100 },
-        { key: 'spanBPeriod', label: '先行スパンB', min: 1, max: 200 },
-        { key: 'displacement', label: '遅行スパン', min: 1, max: 100 },
-      ];
-    case 'obv':
-    case 'vwap':
-      return []; // パラメータなし
-    default:
-      return [{ key: 'period', label: '期間', min: 1, max: 500 }];
-  }
 }
 
 export default function IndicatorConfigModal({
