@@ -2448,8 +2448,8 @@ export async function fetchAndCacheOhlcvData(
   // ネットワーク断で `onerror` が発火しうるが、その裏でサーバー側のジョブは継続・完走する
   // (dataFetchJobs は 30 分保持、再接続すると現在/最終状態を即再送する)。
   // よって onerror で即「切断失敗」にせず、ジョブが決着 (completed/error) するまで再接続する。
-  // 旧実装は一過性断を即失敗にし、実際は取得成功しているのに UI が「切断されました」+
-  // 古いカバレッジで「失敗」表示になる事故があった (2026-06-11 本番調査)。
+  // 旧実装は一過性断を即失敗にしていたため、実際は取得成功しているのに UI が
+  // 「切断されました」と表示し、古いカバレッジのまま「失敗」になる事故があった (2026-06-11 本番調査)。
   return new Promise<FetchOhlcvResult>((resolve) => {
     const MAX_RECONNECTS = 5;
     let reconnectAttempts = 0;
@@ -2499,6 +2499,9 @@ export async function fetchAndCacheOhlcvData(
           // メッセージを 1 度も受け取れない連続切断が上限に達したときのみ失敗で決着する
           // (ジョブ消滅 / 404 / 即時切断ループの保険)。
           if (settled) return;
+          // onerror は同一切断で複数回発火しうる。既に再接続予約済みなら二重スケジュール
+          // しない (古いタイマーが残って複数接続が並走するのを防ぐ。Copilot review PR #396)。
+          if (reconnectTimer) return;
           if (reconnectAttempts >= MAX_RECONNECTS) {
             settle({
               success: false,
@@ -2508,7 +2511,10 @@ export async function fetchAndCacheOhlcvData(
             return;
           }
           reconnectAttempts += 1;
-          reconnectTimer = setTimeout(connect, 1000 * reconnectAttempts);
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = undefined;
+            connect();
+          }, 1000 * reconnectAttempts);
         }
       );
     }
