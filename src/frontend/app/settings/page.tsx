@@ -449,7 +449,7 @@ export default function SettingsPage() {
           <div className="p-4 bg-slate-900/50 rounded-lg">
             <div className="flex items-center justify-between">
               <div>
-                <h4 className="text-sm font-medium text-white">通知粒度設定</h4>
+                <h4 className="text-sm font-medium text-white">通知粒度の管理</h4>
                 <p className="text-xs text-gray-500 mt-1">
                   全体の既定と、ノート単位の上書きを管理できます
                 </p>
