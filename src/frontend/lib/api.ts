@@ -9,6 +9,7 @@ import type {
 } from "@/types/notification";
 import type { NoteDetail, NoteUpdatePayload, NoteStatusCounts, NoteStatus, NoteSummary } from "@/types/note";
 import { getPublicApiBaseUrl } from "./publicApiBaseUrl";
+import { z } from "zod";
 import { apiFetch } from "./apiClient";
 
 /**
@@ -3129,14 +3130,47 @@ export interface NotificationPreference {
   updatedAt: string;
 }
 
-/** 通知粒度設定の upsert リクエスト (null = この項目を既定に戻す) */
-export interface UpsertNotificationPreferenceInput {
-  scope: "user" | "note";
-  noteId?: string;
+/** 通知粒度設定の項目 (null = この項目を既定に戻す) */
+interface NotificationPreferenceFields {
   threshold?: number | null;
   minMatchLevel?: "strong" | "medium" | "weak" | null;
   cooldownMinutes?: number | null;
 }
+
+/**
+ * 通知粒度設定の upsert リクエスト。
+ * scope ごとの必須/禁止フィールドを discriminated union で型表現する
+ * (scope=note は noteId 必須、scope=user は noteId 禁止。PR #390 Copilot レビュー対応)
+ */
+export type UpsertNotificationPreferenceInput =
+  | ({ scope: "user"; noteId?: never } & NotificationPreferenceFields)
+  | ({ scope: "note"; noteId: string } & NotificationPreferenceFields);
+
+/**
+ * 通知粒度フォーム入力の Zod スキーマ (AGENTS §2: ユーザー入力はランタイム検証)。
+ * 入力欄の文字列をそのまま受け、空文字 = null (既定に戻す) へ変換して範囲検証する。
+ * /settings/notifications と NoteNotificationPreference の両方で共有する。
+ */
+export const NotificationPreferenceFormSchema = z.object({
+  threshold: z
+    .string()
+    .transform((v) => (v === "" ? null : Number(v)))
+    .refine((v) => v === null || (!Number.isNaN(v) && v >= 0 && v <= 1), {
+      message: "しきい値は 0〜1 の数値で指定してください",
+    }),
+  minMatchLevel: z
+    .union([z.literal(""), z.enum(["strong", "medium", "weak"])])
+    .transform((v) => (v === "" ? null : v)),
+  cooldownMinutes: z
+    .string()
+    .transform((v) => (v === "" ? null : Number(v)))
+    .refine((v) => v === null || (Number.isInteger(v) && v >= 1 && v <= 10080), {
+      message: "クールダウンは 1〜10080 分の整数で指定してください",
+    }),
+});
+
+/** フォーム検証後の値 (API ペイロードにそのまま使える形) */
+export type NotificationPreferenceFormValues = z.output<typeof NotificationPreferenceFormSchema>;
 
 /**
  * 通知粒度設定の一覧を取得

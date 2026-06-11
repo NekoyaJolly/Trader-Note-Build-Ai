@@ -14,13 +14,19 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
-vi.mock("@/lib/api", () => ({
-  fetchNotificationPreferences: vi.fn(),
-  upsertNotificationPreference: vi.fn(),
-  deleteNotificationPreference: vi.fn(),
-}));
+// API 関数のみモックし、NotificationPreferenceFormSchema (Zod) は実物を使う
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return {
+    ...actual,
+    fetchNotificationPreferences: vi.fn(),
+    upsertNotificationPreference: vi.fn(),
+    deleteNotificationPreference: vi.fn(),
+  };
+});
 
 import NotificationPreferencesPage from "@/app/settings/notifications/page";
+import NoteNotificationPreference from "@/components/NoteNotificationPreference";
 import {
   fetchNotificationPreferences,
   upsertNotificationPreference,
@@ -148,5 +154,60 @@ describe("通知粒度設定ページ (Phase β-2b)", () => {
     fireEvent.click(screen.getByText("削除"));
 
     await waitFor(() => expect(deleteNotificationPreference).toHaveBeenCalledWith("pref-note-1"));
+  });
+});
+
+describe("NoteNotificationPreference (ノート詳細の上書きセクション)", () => {
+  const NOTE_ID = NOTE_PREF.noteId as string;
+
+  async function renderComponent() {
+    render(<NoteNotificationPreference noteId={NOTE_ID} />);
+    await waitFor(() => expect(screen.getByLabelText("ノートしきい値")).toBeDefined());
+  }
+
+  it("既存のノート上書きを初期表示する", async () => {
+    await renderComponent();
+
+    const threshold = screen.getByLabelText("ノートしきい値") as HTMLInputElement;
+    expect(threshold.value).toBe("0.9");
+    // 未設定項目は空欄 (= 既定)
+    expect((screen.getByLabelText("ノートクールダウン") as HTMLInputElement).value).toBe("");
+  });
+
+  it("保存すると scope=note + noteId で upsert API に渡る (空欄は null)", async () => {
+    await renderComponent();
+
+    fireEvent.change(screen.getByLabelText("ノートしきい値"), { target: { value: "0.8" } });
+    fireEvent.change(screen.getByLabelText("ノート一致レベル"), { target: { value: "strong" } });
+    fireEvent.click(screen.getByText("保存"));
+
+    await waitFor(() => expect(upsertNotificationPreference).toHaveBeenCalledTimes(1));
+    expect(upsertNotificationPreference).toHaveBeenCalledWith({
+      scope: "note",
+      noteId: NOTE_ID,
+      threshold: 0.8,
+      minMatchLevel: "strong",
+      cooldownMinutes: null,
+    });
+  });
+
+  it("範囲外入力は Zod 検証で弾かれ送信されない (境界値)", async () => {
+    await renderComponent();
+
+    fireEvent.change(screen.getByLabelText("ノートクールダウン"), { target: { value: "0" } });
+    fireEvent.click(screen.getByText("保存"));
+
+    await waitFor(() =>
+      expect(screen.getByText("クールダウンは 1〜10080 分の整数で指定してください")).toBeDefined()
+    );
+    expect(upsertNotificationPreference).not.toHaveBeenCalled();
+  });
+
+  it("上書きを解除すると delete API が呼ばれる", async () => {
+    await renderComponent();
+
+    fireEvent.click(screen.getByText("上書きを解除"));
+
+    await waitFor(() => expect(deleteNotificationPreference).toHaveBeenCalledWith(NOTE_PREF.id));
   });
 });

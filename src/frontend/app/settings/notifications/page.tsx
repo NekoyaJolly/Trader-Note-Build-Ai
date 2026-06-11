@@ -19,6 +19,7 @@ import {
   upsertNotificationPreference,
   deleteNotificationPreference,
   NotificationPreference,
+  NotificationPreferenceFormSchema,
 } from "@/lib/api";
 
 /** 一致レベルの表示ラベル (システム既定 = weak 帯から通知) */
@@ -55,15 +56,14 @@ function UserPreferenceForm({
   const [saved, setSaved] = useState(false);
 
   const handleSave = async () => {
-    // 入力値の検証 (空 = 既定に戻す)
-    const thresholdValue = threshold === "" ? null : Number(threshold);
-    if (thresholdValue !== null && (Number.isNaN(thresholdValue) || thresholdValue < 0 || thresholdValue > 1)) {
-      setError("しきい値は 0〜1 の数値で指定してください");
-      return;
-    }
-    const cooldownValue = cooldownMinutes === "" ? null : Number(cooldownMinutes);
-    if (cooldownValue !== null && (!Number.isInteger(cooldownValue) || cooldownValue < 1 || cooldownValue > 10080)) {
-      setError("クールダウンは 1〜10080 分の整数で指定してください");
+    // 入力値のランタイム検証 (AGENTS §2: Zod で検証。空 = 既定に戻す)
+    const parsed = NotificationPreferenceFormSchema.safeParse({
+      threshold,
+      minMatchLevel,
+      cooldownMinutes,
+    });
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? "入力値が不正です");
       return;
     }
 
@@ -71,12 +71,7 @@ function UserPreferenceForm({
     setError(null);
     setSaved(false);
     try {
-      await upsertNotificationPreference({
-        scope: "user",
-        threshold: thresholdValue,
-        minMatchLevel: minMatchLevel === "" ? null : (minMatchLevel as "strong" | "medium" | "weak"),
-        cooldownMinutes: cooldownValue,
-      });
+      await upsertNotificationPreference({ scope: "user", ...parsed.data });
       setSaved(true);
       await onSaved();
     } catch (err) {
