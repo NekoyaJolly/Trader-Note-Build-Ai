@@ -3105,3 +3105,90 @@ export async function fetchWinningPatterns(
   const payload = await response.json();
   return payload.data;
 }
+
+// ============================================
+// 通知粒度設定 (Phase β-2)
+// ============================================
+
+/** 通知粒度設定の 1 行 (API レスポンス) */
+export interface NotificationPreference {
+  id: string;
+  scope: "user" | "profile" | "note" | "strategy";
+  noteId: string | null;
+  profileId: string | null;
+  strategyId: string | null;
+  /** 類似度スコアしきい値 (0〜1)。null = 既定 */
+  threshold: number | null;
+  /** 通知する最小一致レベル。null = 既定 (weak) */
+  minMatchLevel: "strong" | "medium" | "weak" | null;
+  /** 再通知クールダウン (分)。null = 既定 */
+  cooldownMinutes: number | null;
+  /** 24h 通知上限。null = 既定 (現状未配線) */
+  maxPerDay: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 通知粒度設定の upsert リクエスト (null = この項目を既定に戻す) */
+export interface UpsertNotificationPreferenceInput {
+  scope: "user" | "note";
+  noteId?: string;
+  threshold?: number | null;
+  minMatchLevel?: "strong" | "medium" | "weak" | null;
+  cooldownMinutes?: number | null;
+}
+
+/**
+ * 通知粒度設定の一覧を取得
+ * GET /api/notifications/preferences
+ */
+export async function fetchNotificationPreferences(): Promise<NotificationPreference[]> {
+  const response = await apiFetch(
+    `${getPublicApiBaseUrl()}/api/notifications/preferences`,
+    { cache: "no-store" }
+  );
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "通知設定の取得に失敗しました");
+  }
+  const payload = await response.json();
+  return payload.data?.preferences || [];
+}
+
+/**
+ * 通知粒度設定を upsert
+ * PUT /api/notifications/preferences
+ */
+export async function upsertNotificationPreference(
+  input: UpsertNotificationPreferenceInput
+): Promise<NotificationPreference> {
+  const response = await apiFetch(
+    `${getPublicApiBaseUrl()}/api/notifications/preferences`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }
+  );
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "通知設定の保存に失敗しました");
+  }
+  const payload = await response.json();
+  return payload.data.preference;
+}
+
+/**
+ * 通知粒度設定の行を削除 (既定に戻す)
+ * DELETE /api/notifications/preferences/:id
+ */
+export async function deleteNotificationPreference(id: string): Promise<void> {
+  const response = await apiFetch(
+    `${getPublicApiBaseUrl()}/api/notifications/preferences/${encodeURIComponent(id)}`,
+    { method: "DELETE" }
+  );
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "通知設定の削除に失敗しました");
+  }
+}

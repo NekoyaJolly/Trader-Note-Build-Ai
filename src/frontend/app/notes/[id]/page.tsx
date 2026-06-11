@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 // 直接インポートに変更（index.ts経由でのモジュール解決問題を回避）
 import PerformancePanel from "@/components/PerformancePanel";
+import NoteNotificationPreference from "@/components/NoteNotificationPreference";
 
 /**
  * ノート詳細画面
@@ -663,6 +664,12 @@ export default function NoteDetailPage() {
                   {actionLoading ? "処理中..." : "優先度を保存"}
                 </Button>
               </div>
+            </div>
+
+            {/* 通知粒度の上書き (Phase β-2b) */}
+            <div className="border-t border-slate-700 pt-4">
+              <div className="text-sm font-semibold text-gray-300 mb-2">通知粒度 (このノートのみ)</div>
+              <NoteNotificationPreference noteId={id} />
             </div>
 
             {/* 通知条件の説明 */}
