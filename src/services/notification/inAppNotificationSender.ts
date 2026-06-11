@@ -81,15 +81,31 @@ export class InAppNotificationSender implements NotificationSender {
   }
 
   /**
-   * Web Push 通知を全アクティブ購読に配信する。
+   * Web Push 通知を配信する。
    *
-   * 単一ユーザー / 限定ユーザー運用 (TradeNote/Trade に userId 列が無い) のため
-   * broadcast() で全アクティブ購読に送る。VAPID 鍵未設定時は WebPushService が
-   * 内部で空結果を返すので呼び出し側は気にしなくて良い。
+   * Phase β (per-user Push): 由来 MatchResult の所有ユーザー (userId、α-4a で伝播済み)
+   * が分かる場合は、そのユーザーのアクティブ購読のみに送信する。userId が無い
+   * レガシー行 / MatchResult 不在の場合は従来通り broadcast にフォールバックする
+   * (単一ユーザー運用では挙動は実質同じ)。
+   * VAPID 鍵未設定時は WebPushService が内部で空結果を返すので呼び出し側は気にしなくて良い。
    */
   async sendPush(payload: NotificationPayload): Promise<{ success: boolean; id?: string }> {
     try {
-      const result = await this.webPushService.broadcast({
+      // 宛先ユーザーを由来 MatchResult から解決する (複合ユニークキーで一意参照)。
+      // MatchResult.userId が NULL のレガシー行は由来ノートの userId にフォールバック
+      // して不要な broadcast (誤配送リスク) を避ける (PR #388 Copilot レビュー対応)
+      const matchResult = await this.prisma.matchResult.findUnique({
+        where: {
+          noteId_marketSnapshotId: {
+            noteId: payload.noteId,
+            marketSnapshotId: payload.marketSnapshotId,
+          },
+        },
+        select: { userId: true, note: { select: { userId: true } } },
+      });
+      const targetUserId = matchResult?.userId ?? matchResult?.note?.userId ?? null;
+
+      const pushPayload = {
         title: payload.title,
         body: payload.message,
         url: `/notifications`,
@@ -101,11 +117,16 @@ export class InAppNotificationSender implements NotificationSender {
           symbol: payload.symbol,
           score: payload.score,
         },
-      });
+      };
+
+      const result = targetUserId
+        ? await this.webPushService.sendToUser(targetUserId, pushPayload)
+        : await this.webPushService.broadcast(pushPayload);
 
       if (!this.isProduction) {
         console.log(
-          `[WebPush] broadcast: symbol=${payload.symbol}, success=${result.successCount}, fail=${result.failureCount}`
+          `[WebPush] ${targetUserId ? `sendToUser(${targetUserId})` : 'broadcast'}: ` +
+            `symbol=${payload.symbol}, success=${result.successCount}, fail=${result.failureCount}`
         );
       }
 
