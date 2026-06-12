@@ -174,6 +174,11 @@ async function buildLensSeriesForPreview(
       symbol: body.symbol,
       timeframe: body.timeframe,
       bars: validBars,
+      engineSeries: {
+        startDate: new Date(body.startDate),
+        endDate: new Date(body.endDate),
+        fetchIndicatorSeriesFn: fetchIndicatorSeries,
+      },
     });
     // 有効バー軸 → response.timestamps 軸へ秒精度で整列
     const barIndexBySecond = new Map<number, number>();

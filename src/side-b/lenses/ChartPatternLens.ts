@@ -68,7 +68,7 @@ export class ChartPatternLens implements Lens {
     return {
       lensName: this.name,
       lensVersion: this.version,
-      features: payloadToFeatures(payload),
+      features: chartPatternPayloadToFeatures(payload),
       computedAt,
       computeDurationMs: Date.now() - start,
       // パターン検出失敗時 (NONE) は confidence 0、それ以外は payload.patternConfidence
@@ -80,7 +80,7 @@ export class ChartPatternLens implements Lens {
 /**
  * `ChartPatternsPayload` を `LensFeature.features` 形式にマッピングする。
  */
-function payloadToFeatures(
+export function chartPatternPayloadToFeatures(
   payload: ChartPatternsPayload,
 ): Record<string, number | string | boolean> {
   return {

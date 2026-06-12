@@ -131,6 +131,35 @@ jobs:
         run: npm test
         working-directory: src/frontend
 
+  # ── analysis-engine (Python) ユニットテスト ──
+  # レンズ条件タイプ #3 第2段 (PR #402) で per-bar 系列ロジックが本番経路に増えたため配線。
+  # DB には接続しない (app.main が import 時に env を要求するためダミー URL を与える)
+  analysis-engine-tests:
+    name: Analysis Engine Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Python セットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: analysis-engine/requirements.txt
+
+      - name: 依存関係をインストール
+        run: pip install -r requirements.txt pytest
+        working-directory: analysis-engine
+
+      - name: pytest 実行
+        run: python -m pytest tests/ -v
+        working-directory: analysis-engine
+        env:
+          # app.main の import 時チェック用ダミー (テストは DB 非依存)
+          ANALYSIS_DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
+
   # ── 3. DB 統合テスト（使い捨て service container、低並列） ──
   # テストは TRUNCATE を含む破壊的操作を行うため、本番 Supabase ではなく
   # ジョブ内で起動する PostgreSQL service container に対して実行する。

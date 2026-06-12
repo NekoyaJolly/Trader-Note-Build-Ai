@@ -812,13 +812,14 @@ async function executeBacktestStage(
     endDate,
     closes: data.map((bar) => bar.close),
   });
-  // 状態レンズ (#3 第2弾): TS 側計算のみ・analysis-engine 不要
+  // 状態レンズ (#3 第2弾): TS 計算 3 種 + engine 計算 3 種 (smc/chart_pattern/wyckoff)
   await appendStateLensSeriesToCache({
     indicatorCache,
     lensConditions: baseLensConditions,
     symbol,
     timeframe,
     bars: data,
+    engineSeries: { startDate, endDate, fetchIndicatorSeriesFn: fetchIndicatorSeries },
   });
 
   // === MTF: timeframeOverride 条件用の別時間足ビューを準備 (Phase γ) ===
@@ -887,6 +888,7 @@ async function executeBacktestStage(
       symbol,
       timeframe: tf,
       bars: viewData,
+      engineSeries: { startDate, endDate, fetchIndicatorSeriesFn: fetchIndicatorSeries },
     });
     timeframeViews.set(tf, {
       data: viewData,

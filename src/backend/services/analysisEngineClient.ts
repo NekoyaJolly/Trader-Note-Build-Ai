@@ -126,6 +126,8 @@ export async function fetchIndicatorSeries(params: {
   includeSmc?: boolean;
   includeChartPatterns?: boolean;
   includeWyckoff?: boolean;
+  /// レンズ条件タイプ #3 第2段: 状態レンズの per-bar 系列の要求 (窓 150 本、lookahead なし)
+  stateLensSeries?: Array<'smc' | 'chart_pattern' | 'wyckoff'>;
 }, options?: AnalysisEngineRequestOptions): Promise<AnalysisEngineIndicatorSeriesResponse> {
   const baseUrl = getAnalysisEngineBaseUrl();
 
@@ -141,10 +143,15 @@ export async function fetchIndicatorSeries(params: {
     includeSmc: params.includeSmc ?? false,
     includeChartPatterns: params.includeChartPatterns ?? false,
     includeWyckoff: params.includeWyckoff ?? false,
+    stateLensSeries: params.stateLensSeries ?? [],
   });
 
+  // 状態レンズの per-bar 系列 (#3 第2段) は窓 150 本 × 全バーの計算で、長期間の
+  // バックテストでは 60s を超え得る (実測: 3 レンズ × 2,000 本 ≈ 12s)。
+  // 要求時のみ screening BT と同じ 180s に引き上げる (通常リクエストは従来どおり 60s)
+  const timeoutMs = payload.stateLensSeries.length > 0 ? 180_000 : 60_000;
   const res = await axios.post(`${baseUrl}/v1/indicator-series`, payload, {
-    timeout: 60_000,
+    timeout: timeoutMs,
     headers: buildAnalysisEngineJsonHeaders(options),
   });
 

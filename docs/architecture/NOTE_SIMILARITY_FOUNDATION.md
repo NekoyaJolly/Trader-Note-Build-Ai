@@ -283,6 +283,7 @@ similarity(noteSnapshot, marketSnapshot):
 | 2026-06-13 | **レンズ条件タイプ 第1弾(§12、インジケーター系)**: `LensCondition`(type='lens') を条件ツリーの leaf 条件に追加。per-bar レンズ系列化 + 数値エンコード + 評価器分岐 + ConditionBuilder UI(`SingleLensCondition`)。backtest/live は `appendLensSeriesToCache` 共用で評価1経路を維持、MTF(`timeframeOverride`)・lookbackBars も既存機構で対応。詳細は下の追補3。 |
 | 2026-06-13 | **レンズ条件タイプ フォローアップ(§12)**: orderedEnum の順序範囲演算子 + エントリープレビュー対応(`/api/chart/indicator-series` に lensIds、backend 計算の数値エンコード済み lensSeries をフロントで整列・評価)。詳細は追補4。 |
 | 2026-06-13 | **状態系レンズ per-bar 化 第1段(§12.3、TS 計算可能 3 種)**: time_session / dow_theory / volatility_regime をレンズ条件タイプで使用可能に(analysis-engine 変更なし)。窓 150 本固定でスナップショットと同じ「見え方」を per-bar 化。詳細は追補5。 |
+| 2026-06-13 | **状態系レンズ per-bar 化 第2段(§12.3/§12.6、engine 計算 3 種) = レンズ条件タイプ フルスコープ完了**: smc / chart_pattern / wyckoff を analysis-engine の per-bar 系列 API(`stateLensSeries`)で条件タイプ対応。これで全 8 状態レンズ + コア指標レンズが条件ツリーに合流。詳細は追補6。 |
 
 ### 実装のローカル詳細(2026-06-10、正本への追補)
 
@@ -335,7 +336,15 @@ similarity(noteSnapshot, marketSnapshot):
 - **categoricalEnum の条件対応**: comparator 定義に `values`(正準値リスト)を追加し、その index で数値エンコード(`encodeLensFeatureValueAsNumber`)。**`values` を宣言したカテゴリ enum だけが条件で使える**(現状 `trend_state` のみ。加算的拡張)。フロントは valueKind `category`(等価演算子のみ。options 順 = values 順、ドリフト注意)。
 - **state lensId 形式**: 種別名そのまま(例 `dow_theory`、`#` パラメータなし)。`appendLensSeriesToCache` は `ind:` 以外を無視し、状態系は `appendStateLensSeriesToCache` の担当(担当分離)。
 - **プレビュー経路**: 欠損足(EODHD 由来 OHLC=null ギャップ)を除外した有効バー軸で計算し、response.timestamps 軸へ秒精度で整列(`chart/candles 欠損足の消費規約`と同方針)。
-- **残(第2段)**: smc / chart_pattern / wyckoff — analysis-engine の payload 配列化(§12.6 確定方針)が前提。
+- **残(第2段)**: smc / chart_pattern / wyckoff — analysis-engine の payload 配列化(§12.6 確定方針)が前提。→ **同日 第2段で対応済(追補6)**
+
+### 実装のローカル詳細・追補6(2026-06-13、§12.3 状態系レンズ per-bar 化 第2段 = フルスコープ完了)
+
+- **analysis-engine 拡張(§12.6 確定方針どおり既存 `/v1/indicator-series` の拡張)**: リクエスト `stateLensSeries: ['smc'|'chart_pattern'|'wyckoff']` で、指定レンズの payload を**バー i を末尾とする窓 150 本**(`STATE_LENS_WINDOW_BARS`、Node 側と同期)で全バー計算し、`smcSeries` / `chartPatternsSeries` / `wyckoffSeries`(timestamps と 1:1)として additive に返す。wyckoff は同じ窓の SMC payload を文脈として内部計算(精度向上、Phase 7c と同方針)。
+- **lookahead 禁止**: 窓がバー i で終わる + `_detect_pivots` が末尾 right_bars 本を候補から除外するため、未来参照は構造的に不可能。Python 側にも lookahead 不変テスト(`tests/test_state_lens_series.py`。CI 未配線のため手動/コンテナ実行)。
+- **TS 側**: `appendStateLensSeriesToCache` に `engineSeries`(取得設定)を追加。payload→features 変換は各レンズの `smcPayloadToFeatures` 等を export して再利用(変換の単一情報源)。**旧バージョン engine(配列なし)は警告スキップ = 条件不成立**(graceful degrade、エンジンと Node のデプロイ順序に依存しない)。系列長とバー列の不一致は中断。
+- **categoricalEnum の values 宣言を追加**: `last_structure_event` / `wyckoff_phase` / `pattern_detected` / `pattern_direction_bias`(analysis-engine の Literal と同期、ドリフト注意)。フロント UI カタログ(SMC ゾーン/構造イベント/OB 距離/流動性/FVG、チャートパターン 12 種、ワイコフフェーズ 7 種/Spring/SOS 等)も同並びで追加。
+- **コスト**: per-bar 計算は O(n × 窓150)。要求されたレンズのみ計算(未要求はゼロコスト)。**実測: 3 レンズ同時 × 2,000 本 ≈ 12s**(Python 3.12)。長期間バックテスト対策として `stateLensSeries` 要求時は Node 側タイムアウトを 180s に引き上げ(screening BT と同水準)。それでも不足する場合の最適化(ピボットを全系列 1 回計算 → causal 参照化で定数倍削減)は運用観察後の後続とする。
 
 ---
 

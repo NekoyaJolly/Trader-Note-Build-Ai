@@ -296,7 +296,12 @@ const SMC_DEFINITION: LensComparisonDefinition = {
     liquidity_below_count: { kind: 'normalizedLinear', cap: 5, sentinel: -1 },
     fvg_bull_count_last_20: { kind: 'normalizedLinear', cap: 5 },
     fvg_bear_count_last_20: { kind: 'normalizedLinear', cap: 5 },
-    last_structure_event: { kind: 'categoricalEnum', table: buildStructureEventTable() },
+    last_structure_event: {
+      kind: 'categoricalEnum',
+      table: buildStructureEventTable(),
+      // 条件タイプ用の正準値リスト (analysis-engine smc.py の出力と同期)
+      values: ['NONE', 'BOS_BULL', 'BOS_BEAR', 'CHOCH_BULL', 'CHOCH_BEAR'],
+    },
     bars_since_last_structure_event: { kind: 'normalizedLinear', cap: 20, sentinel: -1 },
     current_zone: { kind: 'orderedEnum', order: ['DISCOUNT', 'EQUILIBRIUM', 'PREMIUM'] },
     zone_position_pct: { kind: 'normalizedLinear', cap: 1, sentinel: -1 },
@@ -306,7 +311,21 @@ const SMC_DEFINITION: LensComparisonDefinition = {
 const WYCKOFF_DEFINITION: LensComparisonDefinition = {
   layer: 'state',
   features: {
-    wyckoff_phase: { kind: 'categoricalEnum', table: buildWyckoffTable(), skipValues: ['UNKNOWN'] },
+    wyckoff_phase: {
+      kind: 'categoricalEnum',
+      table: buildWyckoffTable(),
+      skipValues: ['UNKNOWN'],
+      // 条件タイプ用の正準値リスト (analysis-engine wyckoff.py の出力と同期)
+      values: [
+        'ACCUMULATION',
+        'MARKUP',
+        'DISTRIBUTION',
+        'MARKDOWN',
+        'RE_ACCUMULATION',
+        'RE_DISTRIBUTION',
+        'UNKNOWN',
+      ],
+    },
     // メタ情報(レンズ confidence の写像)は重み側で扱うため比較しない
     wyckoff_phase_confidence: { kind: 'skip' },
     spring_detected_in_last_20_bars: { kind: 'bool' },
@@ -319,11 +338,33 @@ const WYCKOFF_DEFINITION: LensComparisonDefinition = {
 const CHART_PATTERN_DEFINITION: LensComparisonDefinition = {
   layer: 'state',
   features: {
-    pattern_detected: { kind: 'categoricalEnum', table: buildChartPatternTable() },
+    pattern_detected: {
+      kind: 'categoricalEnum',
+      table: buildChartPatternTable(),
+      // 条件タイプ用の正準値リスト (analysis-engine chart_patterns.py の出力と同期)
+      values: [
+        'NONE',
+        'FLAG',
+        'PENNANT',
+        'TRIANGLE_ASC',
+        'TRIANGLE_DESC',
+        'TRIANGLE_SYM',
+        'WEDGE_RISE',
+        'WEDGE_FALL',
+        'DOUBLE_TOP',
+        'DOUBLE_BOTTOM',
+        'HEAD_SHOULDER',
+        'INV_HEAD_SHOULDER',
+      ],
+    },
     pattern_confidence: { kind: 'skip' },
     pattern_break_imminent: { kind: 'bool' },
     pattern_bars_count: { kind: 'normalizedLinear', cap: 50 },
-    pattern_direction_bias: { kind: 'categoricalEnum', table: buildBiasTable() },
+    pattern_direction_bias: {
+      kind: 'categoricalEnum',
+      table: buildBiasTable(),
+      values: ['BULL', 'BEAR', 'NEUTRAL'],
+    },
   },
 };
 

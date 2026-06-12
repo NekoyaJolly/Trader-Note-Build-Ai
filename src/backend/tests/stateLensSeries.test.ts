@@ -146,7 +146,7 @@ describe('appendStateLensSeriesToCache(状態レンズ系列のキャッシュ�
     expect(lastHighPrice && Number.isNaN(lastHighPrice[bars.length - 1])).toBe(true);
   });
 
-  test('未対応の状態レンズ (smc) はスキップし、ind: レンズは無視する (担当分離)', async () => {
+  test('engine 系レンズは engineSeries 未指定だとスキップし、ind: レンズは無視する (担当分離)', async () => {
     const bars = makeUptrendBars(60);
     const cache = new Map<string, number[]>();
     await appendStateLensSeriesToCache({
@@ -157,5 +157,102 @@ describe('appendStateLensSeriesToCache(状態レンズ系列のキャッシュ�
       bars,
     });
     expect(cache.size).toBe(0);
+  });
+
+  test('engine 系レンズ: per-bar payload 配列を features に変換し数値エンコードして格納する', async () => {
+    const bars = makeUptrendBars(3);
+    const cache = new Map<string, number[]>();
+    /** バー i の payload (current_zone を変えて per-bar 値の対応を確認する) */
+    const smcPayload = (zone: 'DISCOUNT' | 'EQUILIBRIUM' | 'PREMIUM', event: string) => ({
+      nearestObBullDistancePips: 12.5,
+      nearestObBearDistancePips: -1,
+      liquidityAboveCount: 2,
+      liquidityBelowCount: 1,
+      fvgBullCountLast20: 1,
+      fvgBearCountLast20: 0,
+      lastStructureEvent: event,
+      barsSinceLastStructureEvent: 3,
+      currentZone: zone,
+      zonePositionPct: 0.25,
+    });
+    const fetchFn = jest.fn().mockResolvedValue({
+      timestamps: [],
+      series: {},
+      smcSeries: [
+        smcPayload('DISCOUNT', 'NONE'),
+        smcPayload('EQUILIBRIUM', 'BOS_BULL'),
+        smcPayload('PREMIUM', 'CHOCH_BEAR'),
+      ],
+    });
+    await appendStateLensSeriesToCache({
+      indicatorCache: cache,
+      lensConditions: [{ lensId: 'smc' }],
+      symbol: 'USDJPY',
+      timeframe: '15m',
+      bars,
+      engineSeries: {
+        startDate: bars[0].timestamp,
+        endDate: bars[2].timestamp,
+        fetchIndicatorSeriesFn: fetchFn,
+      },
+    });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn).toHaveBeenCalledWith(expect.objectContaining({ stateLensSeries: ['smc'] }));
+    // current_zone は orderedEnum ['DISCOUNT','EQUILIBRIUM','PREMIUM'] の index
+    expect(cache.get(makeLensCacheKey('smc', 'current_zone'))).toEqual([0, 1, 2]);
+    // last_structure_event は categoricalEnum values ['NONE','BOS_BULL','BOS_BEAR','CHOCH_BULL','CHOCH_BEAR'] の index
+    expect(cache.get(makeLensCacheKey('smc', 'last_structure_event'))).toEqual([0, 1, 4]);
+    // 数値はそのまま
+    expect(cache.get(makeLensCacheKey('smc', 'zone_position_pct'))).toEqual([0.25, 0.25, 0.25]);
+  });
+
+  test('engine 系レンズ: 旧バージョン engine (配列なし) は警告スキップ = 条件不成立に倒す', async () => {
+    const bars = makeUptrendBars(3);
+    const cache = new Map<string, number[]>();
+    const fetchFn = jest.fn().mockResolvedValue({ timestamps: [], series: {} });
+    await appendStateLensSeriesToCache({
+      indicatorCache: cache,
+      lensConditions: [{ lensId: 'wyckoff' }],
+      symbol: 'USDJPY',
+      timeframe: '15m',
+      bars,
+      engineSeries: {
+        startDate: bars[0].timestamp,
+        endDate: bars[2].timestamp,
+        fetchIndicatorSeriesFn: fetchFn,
+      },
+    });
+    expect(cache.size).toBe(0);
+  });
+
+  test('engine 系レンズ: 系列長がバー列と一致しない場合は中断する (誤時点判定の防止)', async () => {
+    const bars = makeUptrendBars(3);
+    const fetchFn = jest.fn().mockResolvedValue({
+      timestamps: [],
+      series: {},
+      chartPatternsSeries: [
+        {
+          patternDetected: 'NONE',
+          patternConfidence: 0,
+          patternBreakImminent: false,
+          patternBarsCount: 0,
+          patternDirectionBias: 'NEUTRAL',
+        },
+      ], // バー 3 本に対し 1 要素
+    });
+    await expect(
+      appendStateLensSeriesToCache({
+        indicatorCache: new Map(),
+        lensConditions: [{ lensId: 'chart_pattern' }],
+        symbol: 'USDJPY',
+        timeframe: '15m',
+        bars,
+        engineSeries: {
+          startDate: bars[0].timestamp,
+          endDate: bars[2].timestamp,
+          fetchIndicatorSeriesFn: fetchFn,
+        },
+      })
+    ).rejects.toThrow('一致しません');
   });
 });
