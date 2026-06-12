@@ -27,7 +27,6 @@ import {
   markNotificationAsRead,
   markAllNotificationsAsRead,
 } from "@/lib/api";
-import { useNotificationStream } from "@/hooks/useNotificationStream";
 
 /**
  * 通知一覧画面コンポーネント
@@ -48,13 +47,6 @@ export default function NotificationsPage() {
   useEffect(() => {
     loadNotifications();
   }, []);
-
-  // 新着通知の SSE 到着で一覧を再取得する (Phase δ-4 自動更新)。
-  // SSE ペイロードを直接 prepend せず再取得するのは、一覧の形 (matchResult 込み) の
-  // 正が REST 側にあるため (二重の整形ロジックを作らない)
-  useNotificationStream(() => {
-    void loadNotifications();
-  });
 
   /**
    * 通知一覧をAPIから取得

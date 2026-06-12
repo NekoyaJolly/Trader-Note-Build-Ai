@@ -325,23 +325,6 @@ export class DbNotificationRepository {
   }
 
   /**
-   * 指定時刻より後に作成された宛先ユーザーの通知を古い順に返す (Phase δ-3 通知 SSE 用)。
-   * SSE のサーバ側ポーリングが「前回カーソル以降の新着」を差分取得するために使う。
-   * 一覧 (findActiveForFeed) と同じく userId 厳密一致で他ユーザーへ漏らさない。
-   */
-  async findCreatedSince(userId: string, since: Date, limit: number = 50): Promise<Notification[]> {
-    return await this.prisma.notification.findMany({
-      where: {
-        userId,
-        createdAt: { gt: since },
-        status: { in: ['unread', 'read'] },
-      },
-      orderBy: { createdAt: 'asc' },
-      take: limit,
-    });
-  }
-
-  /**
    * ステータス別の件数を取得する
    */
   async countByStatus(): Promise<{ status: NotificationStatus; count: number }[]> {
