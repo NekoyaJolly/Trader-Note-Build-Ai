@@ -274,11 +274,19 @@ export class NotificationPreferenceService {
     strategyId: string,
     userId: string | null,
   ): Promise<StrategyEffectivePreference> {
+    // 所有者不明 (レガシー行で userId=null) は設定行を引けないので既定で返す。
+    // NotificationPreference.userId は必須列のため、所有者不明では設定が存在し得ない。
+    // (DB 問い合わせ自体を省くことで、所有者なしアラートの発火経路を軽量に保つ)
+    if (userId === null) {
+      return { cooldownMinutes: null, effective: mergePreferences(null, null) };
+    }
+    // strategy スコープも userId で絞る: partial unique index (userId, strategyId) を活かし、
+    // かつ他ユーザーの strategy 設定を誤って拾わないようにする (Copilot review PR #397)。
     const rows = await this.prisma.notificationPreference.findMany({
       where: {
         OR: [
-          { scope: 'strategy', strategyId },
-          ...(userId !== null ? [{ scope: 'user' as const, userId }] : []),
+          { scope: 'strategy', strategyId, userId },
+          { scope: 'user', userId },
         ],
       },
     });

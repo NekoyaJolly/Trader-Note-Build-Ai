@@ -135,6 +135,17 @@ describe('NotificationPreferenceService.resolveForStrategy (Phase γ)', () => {
     expect(resolved.cooldownMinutes).toBeNull();
     expect(resolved.effective).toEqual(systemDefaultPreference());
   });
+
+  it('userId=null (所有者不明) は DB に問い合わせず既定を返す (Copilot review PR #397)', async () => {
+    const findMany = jest.fn();
+    const prismaMock = { notificationPreference: { findMany } } as unknown as PrismaClient;
+    const service = new NotificationPreferenceService(prismaMock);
+
+    const resolved = await service.resolveForStrategy('strat-1', null);
+    expect(findMany).not.toHaveBeenCalled();
+    expect(resolved.cooldownMinutes).toBeNull();
+    expect(resolved.effective).toEqual(systemDefaultPreference());
+  });
 });
 
 describe('NotificationPreferenceService.upsertPreference (Phase β-2a)', () => {

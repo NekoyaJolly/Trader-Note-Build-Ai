@@ -26,6 +26,12 @@ const mockAlertPrisma = {
   strategyAlertLog: {
     create: jest.fn(),
   },
+  // triggerAlert は Phase γ で NotificationPreference の cooldown を解決する
+  // (resolveForStrategy)。userId=null のレガシー行では早期 return で findMany を
+  // 呼ばないが、非 null ケースも安全に通るよう空配列を返すモックを用意する。
+  notificationPreference: {
+    findMany: jest.fn(() => Promise.resolve([])),
+  },
 };
 
 jest.mock('../db/client', () => ({
