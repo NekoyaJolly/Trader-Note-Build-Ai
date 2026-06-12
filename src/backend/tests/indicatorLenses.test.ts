@@ -12,6 +12,7 @@ import {
   BARS_SINCE_SENTINEL,
   DESIRED_VALID_BARS,
   computeIndicatorLens,
+  computeIndicatorLensFeatureSeries,
   detectDivergence,
   parseIndicatorLensId,
   resolveIndicatorLensSpecs,
@@ -367,5 +368,89 @@ describe('detectDivergence(ダイバージェンス検出)', () => {
 
   test('データ不足(10 本未満)では none', () => {
     expect(detectDivergence([1, 2, 3], [1, 2, 3])).toBe('none');
+  });
+});
+
+describe('computeIndicatorLensFeatureSeries(per-bar 系列化、レンズ条件タイプ #3)', () => {
+  /** lensId からレンズ仕様を取り出す(不正なら fail させる) */
+  function mustParse(lensId: string): IndicatorLensSpec {
+    const spec = parseIndicatorLensId(lensId);
+    if (!spec) {
+      throw new Error(`lensId が解決できません: ${lensId}`);
+    }
+    return spec;
+  }
+
+  /** 先頭 warmup 本が null、それ以降は決定論的に振動する RSI 入力を作る */
+  function makeRsiInput(length: number, warmup = 14): IndicatorLensComputeInput {
+    const close = Array.from({ length }, (_, i) => 100 + Math.sin(i / 5) * 2);
+    const rsi = Array.from({ length }, (_, i) =>
+      i < warmup ? null : 50 + Math.sin(i / 3) * 30
+    );
+    return { close, series: { rsi } };
+  }
+
+  test('末尾バーの per-bar 値は computeIndicatorLens(全系列)と一致する(snapshot 経路との整合)', () => {
+    const spec = mustParse('ind:rsi#p14');
+    const input = makeRsiInput(60);
+    const series = computeIndicatorLensFeatureSeries(spec, input);
+    const tail = computeIndicatorLens(spec, input);
+    for (const key of ['rsi_zone', 'rsi_value', 'rsi_divergence']) {
+      expect(series[key][59]).toEqual(tail.features[key]);
+    }
+  });
+
+  test('lookahead 禁止: 未来バーを追加しても過去バーの値が一切変わらない(§12.2 不変条件)', () => {
+    const spec = mustParse('ind:rsi#p14');
+    const longInput = makeRsiInput(80);
+    const shortInput: IndicatorLensComputeInput = {
+      close: longInput.close.slice(0, 50),
+      series: { rsi: longInput.series['rsi'].slice(0, 50) },
+    };
+    const longSeries = computeIndicatorLensFeatureSeries(spec, longInput);
+    const shortSeries = computeIndicatorLensFeatureSeries(spec, shortInput);
+    for (const key of Object.keys(shortSeries)) {
+      expect(longSeries[key].slice(0, 50)).toEqual(shortSeries[key]);
+    }
+  });
+
+  test('ウォームアップ不足のバーは null(評価側で条件不成立に倒す素材)', () => {
+    const spec = mustParse('ind:rsi#p14');
+    const series = computeIndicatorLensFeatureSeries(spec, makeRsiInput(60, 14));
+    expect(series['rsi_zone'][0]).toBeNull();
+    expect(series['rsi_zone'][13]).toBeNull();
+    expect(series['rsi_zone'][59]).not.toBeNull();
+  });
+
+  test('決定性: 同じ入力からは同じ系列を返す', () => {
+    const spec = mustParse('ind:rsi#p14');
+    const input = makeRsiInput(60);
+    expect(computeIndicatorLensFeatureSeries(spec, input)).toEqual(
+      computeIndicatorLensFeatureSeries(spec, input)
+    );
+  });
+
+  test('ma_cross: クロス発生バーで bull、イベント窓(5本)を過ぎると none に戻る', () => {
+    const spec = mustParse('ind:ma_cross#ema20xema75');
+    const length = 60;
+    const crossAt = 40;
+    // index=crossAt で fast が slow(=2) を下から上へ抜ける
+    const fast = Array.from({ length }, (_, i) => (i < crossAt ? 1 : 3));
+    const slow = Array.from({ length }, () => 2);
+    const close = Array.from({ length }, () => 100);
+    const series = computeIndicatorLensFeatureSeries(spec, { close, series: { fast, slow } });
+
+    expect(series['ma_cross'][crossAt - 1]).toBe('none');
+    expect(series['ma_bars_since_cross'][crossAt - 1]).toBe(BARS_SINCE_SENTINEL);
+    expect(series['ma_fast_above_slow'][crossAt - 1]).toBe(false);
+
+    expect(series['ma_cross'][crossAt]).toBe('bull');
+    expect(series['ma_bars_since_cross'][crossAt]).toBe(0);
+    expect(series['ma_fast_above_slow'][crossAt]).toBe(true);
+
+    // イベント窓(CROSS_EVENT_WINDOW_BARS=5)の内側は bull、外側は none に戻る
+    expect(series['ma_cross'][crossAt + 5]).toBe('bull');
+    expect(series['ma_cross'][crossAt + 6]).toBe('none');
+    expect(series['ma_bars_since_cross'][crossAt + 10]).toBe(10);
   });
 });

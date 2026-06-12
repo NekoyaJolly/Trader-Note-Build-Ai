@@ -254,6 +254,350 @@ export function hhmmToMinutes(hhmm: string): number | null {
   return h * 60 + m;
 }
 
+// ============================================
+// レンズ条件（レンズ条件タイプ #3。柱1/柱2 合流の核）
+//
+// 正本設計: docs/architecture/NOTE_SIMILARITY_FOUNDATION.md §12
+// 注意: lensId の形式・featureKey 集合・値種別は backend のレンズ基盤
+// (src/shared/similarity/indicatorLenses.ts / lensComparators.ts) が単一情報源。
+// フロントは src/shared を import しない構成のため本ファイルに UI 用カタログを
+// 二重化している（evaluateTimeConditionAt と同じ方針。仕様変更時は両方を同時に直すこと）。
+// ============================================
+
+/** インジケーターレンズ条件の対象レンズ種別（コア4種 + MA クロス） */
+export type LensConditionKind = 'rsi' | 'macd' | 'ma' | 'ma_cross' | 'bb';
+
+/**
+ * レンズ条件の比較演算子。
+ * featureKey の値種別ごとに使える演算子を制限する（enum/event/bool は =/!=、数値は </<=/>=/>）。
+ */
+export type LensConditionOperator = '=' | '!=' | '<' | '<=' | '>=' | '>';
+
+/**
+ * レンズ条件。柱1（ノート類似）のインジケーターレンズが出す正規化済み特徴
+ * （例: `ind:rsi#p14` の `rsi_zone`）を、条件ツリーの leaf 条件として評価する。
+ */
+export interface LensCondition {
+  /** 条件の一意ID */
+  conditionId: string;
+  type: 'lens';
+  /** レンズ ID（パラメータ識別子込み。例 `ind:rsi#p14` / `ind:ma_cross#ema20xsma75`） */
+  lensId: string;
+  /** 比較する featureKey（例 `rsi_zone`） */
+  featureKey: string;
+  operator: LensConditionOperator;
+  /** enum/event は文字列、bool は真偽値、数値系は number */
+  value: number | string | boolean;
+  /**
+   * 直近ルックバック: 「直近 N 本以内（現在足含む）にこの条件が成立したら成立」。
+   * 未指定 / 1 なら現在足のみ。timeframeOverride 指定時はその足の本数。
+   */
+  lookbackBars?: number;
+  /** マルチタイムフレーム条件: この条件だけ別の時間足で評価する（確定バーのみ参照） */
+  timeframeOverride?: MtfTimeframeApi;
+}
+
+/** レンズ条件 featureKey の値種別（使える演算子と入力 UI を決める） */
+export type LensFeatureValueKind = 'enum' | 'event' | 'bool' | 'number';
+
+/** enum / event 値の選択肢 */
+export interface LensFeatureOption {
+  value: string;
+  label: string;
+}
+
+/** featureKey 1 つ分の UI 用メタデータ */
+export interface LensFeatureInfo {
+  key: string;
+  label: string;
+  valueKind: LensFeatureValueKind;
+  /** enum / event の選択肢（valueKind が enum/event のとき必須） */
+  options?: LensFeatureOption[];
+  /** number の入力範囲・刻み */
+  min?: number;
+  max?: number;
+  step?: number;
+  /** 条件作成時の既定値 */
+  defaultValue: number | string | boolean;
+  /** 値の意味の補足説明 */
+  description?: string;
+}
+
+/** 方向イベント（クロス / ダイバージェンス）の共通選択肢 */
+const LENS_EVENT_OPTIONS: LensFeatureOption[] = [
+  { value: 'bull', label: '強気（上抜け/強気ダイバー）' },
+  { value: 'none', label: 'なし' },
+  { value: 'bear', label: '弱気（下抜け/弱気ダイバー）' },
+];
+
+/** レンズ種別の表示情報 */
+export const LENS_CONDITION_KIND_INFO: Record<LensConditionKind, { label: string }> = {
+  rsi: { label: 'RSI レンズ' },
+  macd: { label: 'MACD レンズ' },
+  ma: { label: '移動平均レンズ' },
+  ma_cross: { label: 'MA クロスレンズ' },
+  bb: { label: 'ボリンジャーバンドレンズ' },
+};
+
+/**
+ * レンズ種別ごとの featureKey カタログ（backend lensComparators の
+ * IND_*_DEFINITION / INDICATOR_LENS_FEATURE_KEYS と同期。ドリフト注意）。
+ */
+export const LENS_FEATURE_INFO: Record<LensConditionKind, LensFeatureInfo[]> = {
+  rsi: [
+    {
+      key: 'rsi_zone',
+      label: 'RSI ゾーン',
+      valueKind: 'enum',
+      options: [
+        { value: 'oversold', label: '売られすぎ（≤30）' },
+        { value: 'neutral', label: '中立' },
+        { value: 'overbought', label: '買われすぎ（≥70）' },
+      ],
+      defaultValue: 'oversold',
+    },
+    {
+      key: 'rsi_value',
+      label: 'RSI 値（0〜1 正規化）',
+      valueKind: 'number',
+      min: 0,
+      max: 1,
+      step: 0.01,
+      defaultValue: 0.3,
+      description: 'RSI を 100 で割った値（例: RSI 30 = 0.3）',
+    },
+    { key: 'rsi_divergence', label: 'RSI ダイバージェンス', valueKind: 'event', options: LENS_EVENT_OPTIONS, defaultValue: 'bull' },
+  ],
+  macd: [
+    {
+      key: 'macd_cross',
+      label: 'MACD クロス（直近5本以内）',
+      valueKind: 'event',
+      options: [
+        { value: 'bull', label: 'ゴールデンクロス' },
+        { value: 'none', label: 'なし' },
+        { value: 'bear', label: 'デッドクロス' },
+      ],
+      defaultValue: 'bull',
+    },
+    {
+      key: 'macd_bars_since_cross',
+      label: 'クロスからの経過バー数',
+      valueKind: 'number',
+      min: 0,
+      max: 20,
+      step: 1,
+      defaultValue: 5,
+      description: '直近 20 本以内にクロスが無い場合は条件不成立',
+    },
+    {
+      key: 'macd_hist_slope',
+      label: 'ヒストグラム傾き（-1〜1）',
+      valueKind: 'number',
+      min: -1,
+      max: 1,
+      step: 0.05,
+      defaultValue: 0,
+    },
+    { key: 'macd_divergence', label: 'MACD ダイバージェンス', valueKind: 'event', options: LENS_EVENT_OPTIONS, defaultValue: 'bull' },
+  ],
+  ma: [
+    {
+      key: 'ma_slope',
+      label: 'MA 傾き（-1〜1）',
+      valueKind: 'number',
+      min: -1,
+      max: 1,
+      step: 0.05,
+      defaultValue: 0,
+      description: 'プラス = 上向き、マイナス = 下向き',
+    },
+    {
+      key: 'ma_distance_norm',
+      label: '価格と MA の乖離（-1〜1）',
+      valueKind: 'number',
+      min: -1,
+      max: 1,
+      step: 0.05,
+      defaultValue: 0,
+      description: 'プラス = 価格が MA より上、マイナス = 下',
+    },
+  ],
+  ma_cross: [
+    {
+      key: 'ma_cross',
+      label: 'MA クロス（直近5本以内）',
+      valueKind: 'event',
+      options: [
+        { value: 'bull', label: 'ゴールデンクロス' },
+        { value: 'none', label: 'なし' },
+        { value: 'bear', label: 'デッドクロス' },
+      ],
+      defaultValue: 'bull',
+    },
+    {
+      key: 'ma_bars_since_cross',
+      label: 'クロスからの経過バー数',
+      valueKind: 'number',
+      min: 0,
+      max: 20,
+      step: 1,
+      defaultValue: 5,
+      description: '直近 20 本以内にクロスが無い場合は条件不成立',
+    },
+    { key: 'ma_fast_above_slow', label: '短期線が長期線より上', valueKind: 'bool', defaultValue: true },
+  ],
+  bb: [
+    {
+      key: 'bb_position',
+      label: 'バンド内位置（0〜1）',
+      valueKind: 'number',
+      min: 0,
+      max: 1,
+      step: 0.05,
+      defaultValue: 0.2,
+      description: '0 = 下限バンド、0.5 = 中央、1 = 上限バンド',
+    },
+    {
+      key: 'bb_width_norm',
+      label: 'バンド幅（0〜1 正規化）',
+      valueKind: 'number',
+      min: 0,
+      max: 1,
+      step: 0.05,
+      defaultValue: 0.5,
+      description: '0 に近いほどスクイーズ（収縮）',
+    },
+  ],
+};
+
+/** 値種別ごとに許可する演算子（設計書 §12.4-6。enum の順序範囲は後続拡張） */
+export function lensOperatorsForValueKind(valueKind: LensFeatureValueKind): LensConditionOperator[] {
+  if (valueKind === 'number') {
+    return ['<', '<=', '>=', '>'];
+  }
+  return ['=', '!='];
+}
+
+/** レンズ条件演算子の表示ラベル */
+export const LENS_OPERATOR_INFO: Record<LensConditionOperator, string> = {
+  '=': 'が一致',
+  '!=': 'が不一致',
+  '<': 'より小さい',
+  '<=': '以下',
+  '>=': '以上',
+  '>': 'より大きい',
+};
+
+/** MA 種別（lensId のパラメータ識別子に使う） */
+export type LensMaType = 'sma' | 'ema';
+
+/** lensId 組み立てに使うパラメータ群（種別ごとに使うキーが異なる） */
+export interface LensIdParams {
+  period?: number;
+  fastPeriod?: number;
+  slowPeriod?: number;
+  signalPeriod?: number;
+  maType?: LensMaType;
+  fastMaType?: LensMaType;
+  fastMaPeriod?: number;
+  slowMaType?: LensMaType;
+  slowMaPeriod?: number;
+}
+
+/** 期間入力の正規化（不正値は fallback、整数化。backend normalizePeriod と同じ規則） */
+function normalizeLensPeriod(value: number | undefined, fallback: number): number {
+  if (value === undefined || !Number.isFinite(value) || value < 1) return fallback;
+  return Math.round(value);
+}
+
+/**
+ * レンズ種別 + パラメータから lensId を組み立てる。
+ * backend resolveIndicatorLensSpecs / parseIndicatorLensId の形式と一致させること（ドリフト注意）:
+ * `ind:rsi#p14` / `ind:macd#f12s26g9` / `ind:ma#ema20` / `ind:ma_cross#ema20xsma75` / `ind:bb#p20`
+ */
+export function buildLensId(kind: LensConditionKind, params: LensIdParams): string {
+  switch (kind) {
+    case 'rsi':
+      return `ind:rsi#p${normalizeLensPeriod(params.period, 14)}`;
+    case 'macd':
+      return (
+        `ind:macd#f${normalizeLensPeriod(params.fastPeriod, 12)}` +
+        `s${normalizeLensPeriod(params.slowPeriod, 26)}` +
+        `g${normalizeLensPeriod(params.signalPeriod, 9)}`
+      );
+    case 'ma':
+      return `ind:ma#${params.maType ?? 'ema'}${normalizeLensPeriod(params.period, 20)}`;
+    case 'ma_cross':
+      return (
+        `ind:ma_cross#${params.fastMaType ?? 'ema'}${normalizeLensPeriod(params.fastMaPeriod, 20)}` +
+        `x${params.slowMaType ?? 'ema'}${normalizeLensPeriod(params.slowMaPeriod, 75)}`
+      );
+    case 'bb':
+      return `ind:bb#p${normalizeLensPeriod(params.period, 20)}`;
+  }
+}
+
+/** lensId を編集 UI 用に分解する。不正な形式は null（UI はフォールバック表示） */
+export function parseLensIdForEdit(
+  lensId: string
+): { kind: LensConditionKind; params: LensIdParams } | null {
+  const match = /^ind:([a-z_]+)#(.+)$/.exec(lensId);
+  if (!match) return null;
+  const kind = match[1];
+  const paramKey = match[2];
+  switch (kind) {
+    case 'rsi':
+    case 'bb': {
+      const m = /^p(\d+)$/.exec(paramKey);
+      return m ? { kind, params: { period: Number.parseInt(m[1], 10) } } : null;
+    }
+    case 'macd': {
+      const m = /^f(\d+)s(\d+)g(\d+)$/.exec(paramKey);
+      return m
+        ? {
+            kind,
+            params: {
+              fastPeriod: Number.parseInt(m[1], 10),
+              slowPeriod: Number.parseInt(m[2], 10),
+              signalPeriod: Number.parseInt(m[3], 10),
+            },
+          }
+        : null;
+    }
+    case 'ma': {
+      const m = /^(sma|ema)(\d+)$/.exec(paramKey);
+      return m
+        ? { kind, params: { maType: m[1] as LensMaType, period: Number.parseInt(m[2], 10) } }
+        : null;
+    }
+    case 'ma_cross': {
+      const m = /^(sma|ema)(\d+)x(sma|ema)(\d+)$/.exec(paramKey);
+      return m
+        ? {
+            kind,
+            params: {
+              fastMaType: m[1] as LensMaType,
+              fastMaPeriod: Number.parseInt(m[2], 10),
+              slowMaType: m[3] as LensMaType,
+              slowMaPeriod: Number.parseInt(m[4], 10),
+            },
+          }
+        : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/** featureKey の UI メタデータを引く（未知キーは undefined） */
+export function getLensFeatureInfo(
+  kind: LensConditionKind,
+  featureKey: string
+): LensFeatureInfo | undefined {
+  return LENS_FEATURE_INFO[kind].find((info) => info.key === featureKey);
+}
+
 /**
  * 論理演算子の表示情報
  */
@@ -414,14 +758,14 @@ export interface ConditionGroup {
   /** 論理演算子 */
   operator: LogicalOperator;
   /** 子要素（条件 or サブグループ） */
-  conditions: (IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup)[];
+  conditions: (IndicatorCondition | PatternCondition | TimeCondition | LensCondition | ConditionGroup)[];
 
   /** SEQUENCE専用: 各ステップ間の最大バー数（未指定なら evaluator 側のデフォルト） */
   maxBarsBetweenSteps?: number;
 
   /** IF-THEN専用（将来拡張） */
-  ifCondition?: ConditionGroup | IndicatorCondition | PatternCondition;
-  thenCondition?: ConditionGroup | IndicatorCondition | PatternCondition;
+  ifCondition?: ConditionGroup | IndicatorCondition | PatternCondition | LensCondition;
+  thenCondition?: ConditionGroup | IndicatorCondition | PatternCondition | LensCondition;
   maxBarsToWait?: number;
 }
 
@@ -429,13 +773,13 @@ export interface ConditionGroup {
  * 条件がIndicatorConditionかどうかを判定する型ガード
  */
 export function isIndicatorCondition(
-  condition: IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup
+  condition: IndicatorCondition | PatternCondition | TimeCondition | LensCondition | ConditionGroup
 ): condition is IndicatorCondition {
   return 'indicatorId' in condition;
 }
 
 export function isPatternCondition(
-  condition: IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup
+  condition: IndicatorCondition | PatternCondition | TimeCondition | LensCondition | ConditionGroup
 ): condition is PatternCondition {
   return 'type' in condition && (condition as { type?: string }).type === 'pattern';
 }
@@ -446,16 +790,26 @@ export function isPatternCondition(
  * group フォールバックより前に必ずこのガードを通すこと。
  */
 export function isTimeCondition(
-  condition: IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup
+  condition: IndicatorCondition | PatternCondition | TimeCondition | LensCondition | ConditionGroup
 ): condition is TimeCondition {
   return 'type' in condition && (condition as { type?: string }).type === 'time';
+}
+
+/**
+ * 条件が LensCondition かどうかを判定する型ガード（レンズ条件タイプ #3）。
+ * time 条件と同様、group フォールバックより前に必ずこのガードを通すこと。
+ */
+export function isLensCondition(
+  condition: IndicatorCondition | PatternCondition | TimeCondition | LensCondition | ConditionGroup
+): condition is LensCondition {
+  return 'type' in condition && (condition as { type?: string }).type === 'lens';
 }
 
 /**
  * 条件がConditionGroupかどうかを判定する型ガード
  */
 export function isConditionGroup(
-  condition: IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup
+  condition: IndicatorCondition | PatternCondition | TimeCondition | LensCondition | ConditionGroup
 ): condition is ConditionGroup {
   return 'conditions' in condition;
 }
@@ -679,6 +1033,20 @@ export function createDefaultCondition(): IndicatorCondition {
 }
 
 /**
+ * デフォルトのレンズ条件を生成（RSI ゾーン = 売られすぎ）
+ */
+export function createDefaultLensCondition(): LensCondition {
+  return {
+    conditionId: generateConditionId(),
+    type: 'lens',
+    lensId: buildLensId('rsi', { period: 14 }),
+    featureKey: 'rsi_zone',
+    operator: '=',
+    value: 'oversold',
+  };
+}
+
+/**
  * デフォルトの条件グループを生成
  */
 export function createDefaultConditionGroup(): ConditionGroup {
@@ -708,7 +1076,7 @@ export function createDefaultExitSettings(): ExitSettings {
  * 子要素（条件 / パターン / サブグループ）の共用型。
  * ConditionGroup.conditions の要素と同じ。
  */
-export type ConditionChild = IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup;
+export type ConditionChild = IndicatorCondition | PatternCondition | TimeCondition | LensCondition | ConditionGroup;
 
 /**
  * 接合点ごとに AND/OR を選べるフラット表現。

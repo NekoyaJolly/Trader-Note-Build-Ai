@@ -11,6 +11,11 @@ import type { StrategyDetail } from './strategyService';
 import { makeIndicatorCacheKey } from './analysisEngineClient';
 // post-Phase 5A: Side-A / Side-B 共通の比較演算ライブラリを使う (drift 防止)。
 import { compareValues as sharedCompareValues } from '../../shared/strategy-evaluator/operators';
+// レンズ条件タイプ (#3): featureKey の比較種別と数値エンコードはレンズ基盤カタログが単一情報源
+import {
+  encodeLensFeatureValueAsNumber,
+  getLensFeatureComparator,
+} from '../../shared/similarity/lensComparators';
 
 // ============================================
 // 型定義
@@ -107,6 +112,42 @@ export interface PatternCondition {
   timeframeOverride?: string;
 }
 
+/**
+ * レンズ条件の比較演算子。
+ * featureKey の比較種別(lensComparators カタログ)ごとに UI 側で使える演算子を制限する
+ * (enum/event/bool は =/!=、数値系は </<=/>=/>)。評価器は全演算子を防御的に処理する。
+ */
+export type LensConditionOperator = '=' | '!=' | '<' | '<=' | '>=' | '>';
+
+/**
+ * レンズ条件 (レンズ条件タイプ #3。設計書 NOTE_SIMILARITY_FOUNDATION.md §12.4)。
+ *
+ * 柱1(ノート類似)のインジケーターレンズが出す正規化済み特徴
+ * (例: `ind:rsi#p14` の `rsi_zone`)を、柱2(条件ツリー)の leaf 条件として評価する。
+ * 系列は appendLensSeriesToCache が per-bar 数値エンコード済みで
+ * `lens:<lensId>:<featureKey>` キーに格納したものを参照する。
+ */
+export interface LensCondition {
+  conditionId: string;
+  type: 'lens';
+  /** レンズ ID(パラメータ識別子込み。例 `ind:rsi#p14` / `ind:ma_cross#ema20xsma75`) */
+  lensId: string;
+  /** 比較する featureKey(例 `rsi_zone`)。比較種別は lensComparators カタログで解決 */
+  featureKey: string;
+  operator: LensConditionOperator;
+  /** enum/event は文字列、bool は真偽値、数値系は number */
+  value: number | string | boolean;
+  // 直近ルックバック: 直近 N 本以内（現在足含む）に成立で true。未指定/1 は現在足のみ
+  lookbackBars?: number;
+  /** マルチタイムフレーム条件。IndicatorCondition と同義(確定バーのみ参照) */
+  timeframeOverride?: string;
+}
+
+/** レンズ系列のキャッシュキー規約(設計書 §12.6 確定: `lens:<lensId>:<featureKey>`) */
+export function makeLensCacheKey(lensId: string, featureKey: string): string {
+  return `lens:${lensId}:${featureKey}`;
+}
+
 // ============================================
 // 時間条件（時間帯 / 曜日 / セッション、JST 基準）
 //
@@ -166,13 +207,13 @@ export function evaluateTimeConditionAt(condition: TimeCondition, epochMs: numbe
 export interface ConditionGroup {
   groupId: string;
   operator: LogicalOperator;
-  conditions: (IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup)[];
+  conditions: (IndicatorCondition | PatternCondition | TimeCondition | LensCondition | ConditionGroup)[];
   // IF-THEN専用
-  ifCondition?: ConditionGroup | IndicatorCondition | PatternCondition;
-  thenCondition?: ConditionGroup | IndicatorCondition | PatternCondition;
+  ifCondition?: ConditionGroup | IndicatorCondition | PatternCondition | LensCondition;
+  thenCondition?: ConditionGroup | IndicatorCondition | PatternCondition | LensCondition;
   maxBarsToWait?: number;
   // SEQUENCE専用
-  sequence?: (ConditionGroup | IndicatorCondition | PatternCondition)[];
+  sequence?: (ConditionGroup | IndicatorCondition | PatternCondition | LensCondition)[];
   maxBarsBetweenSteps?: number;
 }
 
@@ -434,7 +475,7 @@ export function evaluatePatternCondition(
   return Promise.resolve(condition.operator === 'is_false' ? !flag : !!flag);
 }
 
-type ConditionChildItem = IndicatorCondition | PatternCondition | TimeCondition | ConditionGroup;
+type ConditionChildItem = IndicatorCondition | PatternCondition | TimeCondition | LensCondition | ConditionGroup;
 
 /** item の基本評価（ルックバックは考慮しない）。種別ごとに適切な評価関数へ振り分ける。 */
 /**
@@ -479,14 +520,15 @@ export function collectTimeframeOverrides(
   const result = new Set<string>();
   const visitItem = (item: ConditionChildItem | undefined | null): void => {
     if (!item) return;
-    if ('indicatorId' in item || (item as { type?: string }).type === 'pattern') {
+    const itemType = (item as { type?: string }).type;
+    if ('indicatorId' in item || itemType === 'pattern' || itemType === 'lens') {
       const tf = (item as { timeframeOverride?: string }).timeframeOverride;
       if (tf && tf !== baseTimeframe) {
         result.add(tf);
       }
       return;
     }
-    if ((item as { type?: string }).type === 'time') return;
+    if (itemType === 'time') return;
     visitGroup(item as ConditionGroup);
   };
   const visitGroup = (g: ConditionGroup | null | undefined): void => {
@@ -498,6 +540,91 @@ export function collectTimeframeOverrides(
   };
   visitGroup(group);
   return result;
+}
+
+/**
+ * 条件ツリーからレンズ条件を収集する (レンズ条件タイプ #3)。
+ * backtest / live が「どのレンズ系列を準備すべきか」を決める単一情報源。
+ * timeframeOverride 付きの条件も含めて返す(呼び出し側が足ごとに振り分ける)。
+ */
+export function collectLensConditions(
+  group: ConditionGroup | null | undefined
+): LensCondition[] {
+  const result: LensCondition[] = [];
+  const visitItem = (item: ConditionChildItem | undefined | null): void => {
+    if (!item) return;
+    if ('indicatorId' in item) return;
+    const itemType = (item as { type?: string }).type;
+    if (itemType === 'lens') {
+      result.push(item as LensCondition);
+      return;
+    }
+    if (itemType === 'pattern' || itemType === 'time') return;
+    visitGroup(item as ConditionGroup);
+  };
+  const visitGroup = (g: ConditionGroup | null | undefined): void => {
+    if (!g) return;
+    for (const child of g.conditions ?? []) visitItem(child);
+    visitItem(g.ifCondition);
+    visitItem(g.thenCondition);
+    for (const step of g.sequence ?? []) visitItem(step);
+  };
+  visitGroup(group);
+  return result;
+}
+
+/**
+ * レンズ条件を評価する (レンズ条件タイプ #3。設計書 §12.4)。
+ *
+ * 系列は appendLensSeriesToCache が `lens:<lensId>:<featureKey>` キーで
+ * indicatorCache に格納した「数値エンコード済み per-bar 系列」を参照する。
+ * 欠損バー(NaN)・sentinel(イベント未発生)・エンコード不能な条件値は
+ * すべて「条件不成立」に倒す(誤発火より発火しない側へ。§12.4-4)。
+ */
+export function evaluateLensCondition(
+  ctx: EvaluationContext,
+  condition: LensCondition
+): boolean {
+  const cacheKey = makeLensCacheKey(condition.lensId, condition.featureKey);
+  const series = ctx.indicatorCache.get(cacheKey);
+  if (!series) {
+    console.warn(
+      `[ConditionEvaluator] レンズ系列がキャッシュに存在しません(レンズ系列の準備漏れの可能性): ${cacheKey}`
+    );
+    return false;
+  }
+  const left = series[ctx.currentIndex];
+  if (left === undefined || !Number.isFinite(left)) return false;
+
+  const comparator = getLensFeatureComparator(condition.lensId, condition.featureKey);
+  // sentinel(例: bars_since = -1 「イベント未発生」)を数値比較すると
+  // 「-1 < 5 = true」のような誤判定になるため、比較せず不成立に倒す
+  if (
+    comparator?.kind === 'normalizedLinear' &&
+    comparator.sentinel !== undefined &&
+    left === comparator.sentinel
+  ) {
+    return false;
+  }
+  const right = encodeLensFeatureValueAsNumber(comparator, condition.value);
+  if (right === null) return false;
+
+  switch (condition.operator) {
+    case '=':
+      return left === right;
+    case '!=':
+      return left !== right;
+    case '<':
+      return left < right;
+    case '<=':
+      return left <= right;
+    case '>=':
+      return left >= right;
+    case '>':
+      return left > right;
+    default:
+      return false;
+  }
 }
 
 /**
@@ -545,6 +672,10 @@ async function evaluateBaseNode(ctx: EvaluationContext, item: ConditionChildItem
   if (type === 'pattern') {
     return evaluatePatternCondition(ctx, item as PatternCondition);
   }
+  if (type === 'lens') {
+    // レンズ条件 (#3): per-bar 数値エンコード済み系列をキャッシュから引いて判定
+    return evaluateLensCondition(ctx, item as LensCondition);
+  }
   if (type === 'time') {
     // 時間条件: 当該バーの timestamp を JST 換算して判定（指標キャッシュ不要）
     const bar = ctx.data[ctx.currentIndex];
@@ -558,7 +689,8 @@ async function evaluateBaseNode(ctx: EvaluationContext, item: ConditionChildItem
  * 「直近 N 本以内（現在足含む）のどこかで成立」で true を返す。
  */
 async function evaluateChildNode(ctx: EvaluationContext, item: ConditionChildItem): Promise<boolean> {
-  const isLeaf = 'indicatorId' in item || (item as { type?: string }).type === 'pattern';
+  const childType = (item as { type?: string }).type;
+  const isLeaf = 'indicatorId' in item || childType === 'pattern' || childType === 'lens';
 
   // MTF: leaf の timeframeOverride を先に解決する (Phase γ)。
   // 解決後のコンテキストで lookback を回すため、「直近 N 本」は override した

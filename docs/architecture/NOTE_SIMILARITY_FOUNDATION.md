@@ -280,6 +280,7 @@ similarity(noteSnapshot, marketSnapshot):
 | 2026-06-10 | **基盤コア実装(移行戦略 §9-1、非破壊・並行)**: `src/shared/similarity/` に正準型・インジケーターレンズ・類似度エンジンを新設。配線(ノート生成・マッチング)は次段階。 |
 | 2026-06-10 | **Note コア + 生成配線 + シャドー評価(§9-1〜§9-2)**: `Note` テーブル新設(戦略B) + Trade/TradeNote/MatchResult/Notification/Strategy へ userId 追加(マルチユーザー化 Phase α、nullable+バックフィル)。`LensSnapshotBuilder`(eventTime 起点の同一生成口) + CSV 取込配線 + マッチングパイプラインのシャドー評価 + バックフィルスクリプト。通知挙動は不変。 |
 | 2026-06-11 | **マッチング切替(§9-3、Phase α-3 第1弾)**: `MATCHING_ENGINE=lens|legacy` フラグ導入(既定 lens、deploy.yml に明示)。lens 経路は `LensNoteCoreService.evaluateNotesForMatching`(シャドー評価とコア共用)の比較結果から score=レンズ類似度・threshold=レンズ閾値で MatchResult/EvaluationLog/通知を生成(旧ルール補正は不適用、トレンド/価格帯は観測情報のみ)。MarketSnapshot upsert は FK 充足のため継続。lens 稼働時はシャドー評価を自動スキップ(二重評価防止)。旧 12 次元経路は legacy ロールバック用に 1 リリース併存 → 安定確認後に削除予定(第2弾)。 |
+| 2026-06-13 | **レンズ条件タイプ 第1弾(§12、インジケーター系)**: `LensCondition`(type='lens') を条件ツリーの leaf 条件に追加。per-bar レンズ系列化 + 数値エンコード + 評価器分岐 + ConditionBuilder UI(`SingleLensCondition`)。backtest/live は `appendLensSeriesToCache` 共用で評価1経路を維持、MTF(`timeframeOverride`)・lookbackBars も既存機構で対応。詳細は下の追補3。 |
 
 ### 実装のローカル詳細(2026-06-10、正本への追補)
 
@@ -306,6 +307,16 @@ similarity(noteSnapshot, marketSnapshot):
 - **`current_analysis` レンズは Side-A 生成経路では対象外**(MarketAnalysis = Research AI 出力が必須のため)。Side-B 側スナップショットとの比較では共通レンズに含まれない=自動スキップ。
 - **バックフィル**: `scripts/migrate/backfill-lens-snapshots.ts`(§9-5)。ノート保存時の `TradeNote.indicatorConfig` スナップショットから設定を復元し、トレード時刻起点で再生成。
 - **同一スナップショット同士でもスコアは必ずしも 1.0 にならない**: イベント系 featureKey の none 同士は 0.5(§6.2 表)のため。「どちらも何も起きていない」は「同じ強いシグナル」より弱い類似として扱う(仕様)。
+
+### 実装のローカル詳細・追補3(2026-06-13、§12 レンズ条件タイプ 第1弾)
+
+- **per-bar 系列化**: `computeIndicatorLensFeatureSeries`(indicatorLenses.ts)。バー i を末尾とする**有界窓 `LENS_SERIES_CONTEXT_BARS`=40 本**で `computeIndicatorLens` を適用(内部ヘルパの遡り幅 divergence30/cross23/confidence30 を全て覆うため、全 prefix 計算と同一結果 = **先読みなし**を構造的に保証)。計算不能バーは null。
+- **数値エンコード**: `encodeLensFeatureValueAsNumber`(lensComparators.ts)。bool=1/0、orderedEnum=順序 index、event は bull=1/none=0/bear=-1、数値系はそのまま。**系列側と条件右辺が同一関数を通る**ことでエンコードのドリフトを防ぐ。categoricalEnum/cyclic は第1弾対象外(null = 不成立)。
+- **キャッシュ準備**: `appendLensSeriesToCache`(strategyBacktestService.ts、backtest/live 共用)。by-version API(Python 側抽出)はレンズ条件を知らないため、`parseIndicatorLensId` で必要系列を逆解決し**明示指定 `/v1/indicator-series` を 1 回**追加で呼ぶ(レンズ条件が無ければ呼ばない)。系列長とバー列の不一致は中断(誤時点判定の事故防止)。MTF はビュー側キャッシュに override 足の系列を積む。
+- **評価**: `evaluateLensCondition`(strategyConditionEvaluator.ts)。欠損(NaN)・sentinel(`bars_since`=-1)・エンコード不能は**すべて不成立に倒す**(§12.4-4)。演算子は enum/event/bool=`=`/`!=`、数値=`<`/`<=`/`>=`/`>`(UI 側 `lensOperatorsForValueKind` で制限)。
+- **UI**: `SingleLensCondition`(ConditionBuilder.tsx)。レンズ種別→パラメータ→featureKey→演算子→値。フロントは src/shared を import しない構成のため、featureKey カタログと lensId 組立(`buildLensId`/`parseLensIdForEdit`)を types/strategy.ts に**二重化**(時間条件と同じ方針、ドリフト注意)。
+- **エントリープレビューは第1弾では未対応**: プレビューのフロント評価器はレンズ系列を計算できないため**不成立扱い**(楽観表示しない)+ UI に明記。
+- **第2弾(残)**: 状態系レンズの per-bar 化(analysis-engine の smc/chartPatterns/wyckoff payload 配列化、§12.6)、orderedEnum の順序範囲演算子、プレビュー対応(`extractConditionRequirements` 新設)。
 
 ---
 

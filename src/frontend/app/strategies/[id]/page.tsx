@@ -24,10 +24,15 @@ import {
 import {
   COMPARISON_OPERATOR_INFO,
   LOGICAL_OPERATOR_INFO,
+  LENS_CONDITION_KIND_INFO,
+  LENS_OPERATOR_INFO,
+  getLensFeatureInfo,
   isIndicatorCondition,
+  isLensCondition,
   isPatternCondition,
+  parseLensIdForEdit,
 } from "@/types/strategy";
-import type { Strategy, StrategyStatus, ConditionGroup, IndicatorCondition, PatternCondition, ExitSettings, StrategyDirection, SupportedSymbol, UpdateStrategyRequest, CandlePatternId, PatternOperator } from "@/types/strategy";
+import type { Strategy, StrategyStatus, ConditionGroup, IndicatorCondition, PatternCondition, LensCondition, ExitSettings, StrategyDirection, SupportedSymbol, UpdateStrategyRequest, CandlePatternId, PatternOperator } from "@/types/strategy";
 import type { IndicatorMetadata } from "@/types/indicator";
 import ConditionBuilder from "@/components/strategy/ConditionBuilder";
 import { NeonButton } from "@/components/ui/NeonButton";
@@ -112,6 +117,34 @@ function PatternConditionDisplay({ condition }: { condition: PatternCondition })
   );
 }
 
+/** レンズ条件を表示（コンパクト版。レンズ条件タイプ #3） */
+function LensConditionDisplay({ condition }: { condition: LensCondition }) {
+  const parsed = parseLensIdForEdit(condition.lensId);
+  const kindLabel = parsed ? LENS_CONDITION_KIND_INFO[parsed.kind].label : condition.lensId;
+  const featureInfo = parsed ? getLensFeatureInfo(parsed.kind, condition.featureKey) : undefined;
+  const featureLabel = featureInfo?.label ?? condition.featureKey;
+  // enum/event/bool は選択肢ラベル、数値はそのまま表示する
+  const valueLabel =
+    typeof condition.value === 'boolean'
+      ? condition.value
+        ? 'はい'
+        : 'いいえ'
+      : featureInfo?.options?.find((o) => o.value === condition.value)?.label ?? String(condition.value);
+  // lensId のパラメータ識別子（# 以降）を補足表示して「どの設定のレンズか」を判別可能にする
+  const paramSuffix = condition.lensId.includes('#') ? condition.lensId.slice(condition.lensId.indexOf('#') + 1) : '';
+
+  return (
+    <span className="inline-flex items-center gap-1 text-xs">
+      <span className="text-emerald-300">レンズ</span>
+      <span className="text-cyan-400">{kindLabel}</span>
+      {paramSuffix && <span className="text-gray-500">({paramSuffix})</span>}
+      <span className="text-purple-400">{featureLabel}</span>
+      <span className="text-yellow-400 mx-0.5">{LENS_OPERATOR_INFO[condition.operator] ?? condition.operator}</span>
+      <span className="text-green-400">{valueLabel}</span>
+    </span>
+  );
+}
+
 /** 条件グループを再帰的に表示（コンパクト版） */
 function ConditionGroupDisplay({ group, depth = 0 }: { group: ConditionGroup; depth?: number }) {
   const operatorLabel = LOGICAL_OPERATOR_INFO[group.operator]?.label || group.operator;
@@ -129,6 +162,10 @@ function ConditionGroupDisplay({ group, depth = 0 }: { group: ConditionGroup; de
             ) : isPatternCondition(item) ? (
               <div className="bg-slate-700/50 px-2 py-1 rounded">
                 <PatternConditionDisplay condition={item as PatternCondition} />
+              </div>
+            ) : isLensCondition(item) ? (
+              <div className="bg-slate-700/50 px-2 py-1 rounded">
+                <LensConditionDisplay condition={item as LensCondition} />
               </div>
             ) : (
               <ConditionGroupDisplay group={item as ConditionGroup} depth={depth + 1} />

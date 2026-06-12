@@ -33,7 +33,10 @@ import {
   evaluateCondition,
   evaluateConditionGroup,
   collectTimeframeOverrides,
+  collectLensConditions,
+  makeLensCacheKey,
   buildTimeframeIndexMap,
+  type LensCondition,
   type TimeframeView,
 } from './strategyConditionEvaluator';
 import { ALL_CANDLE_PATTERN_IDS } from '../../shared/patterns';
@@ -41,7 +44,22 @@ import { CTraderDataService } from './ctrader/ctraderDataService';
 import { CTraderAuthService } from './ctrader/ctraderAuthService';
 import { calculateLotSize, slValueToPips, getPipValue } from './positionSizeCalculator';
 import { fetchAndCacheOhlcv, isOhlcvRemoteFetchAvailable } from './fetchAndCacheOhlcv';
-import { fetchIndicatorSeriesByStrategyVersion } from './analysisEngineClient';
+import {
+  fetchIndicatorSeries,
+  fetchIndicatorSeriesByStrategyVersion,
+  makeIndicatorCacheKey,
+} from './analysisEngineClient';
+import type { AnalysisEngineIndicatorSpec } from '../../schemas/external/analysisEngine';
+// レンズ条件タイプ (#3): lensId → 計算仕様の逆解決と per-bar 系列化はレンズ基盤を使う
+import {
+  computeIndicatorLensFeatureSeries,
+  parseIndicatorLensId,
+  type IndicatorLensSpec,
+} from '../../shared/similarity/indicatorLenses';
+import {
+  encodeLensFeatureValueAsNumber,
+  getLensFeatureComparator,
+} from '../../shared/similarity/lensComparators';
 import { TIMEFRAME_MS } from '../../infrastructure/market/ohlcvAggregation';
 
 // 計算関数を再エクスポート（後方互換性のため）
@@ -588,6 +606,122 @@ export function buildEvaluationCaches(indicatorSeries: {
 }
 
 /**
+ * レンズ条件 (#3) の per-bar 系列を evaluator キャッシュに追加する。
+ *
+ * 流れ:
+ * 1. 条件ツリーから収集したレンズ条件の lensId を parseIndicatorLensId で計算仕様へ逆解決
+ *    (不正な lensId は警告してスキップ = 当該条件は評価時に不成立)
+ * 2. 必要な指標系列を重複排除し、analysis-engine の明示指定 API で 1 回取得
+ *    (by-version API は Python 側抽出がレンズ条件を知らないため、別途この 1 呼び出しを足す)
+ * 3. computeIndicatorLensFeatureSeries で per-bar 化(先読み禁止。設計書 §12.2)
+ * 4. 数値エンコードして `lens:<lensId>:<featureKey>` キーで格納(§12.6 確定規約)
+ *
+ * バックテストとライブ条件評価が**同じ本関数**を通ることで評価 1 経路を維持する。
+ * レンズ条件が無ければ何もしない(analysis-engine の追加呼び出しも発生しない)。
+ */
+export async function appendLensSeriesToCache(params: {
+  indicatorCache: Map<string, number[]>;
+  lensConditions: ReadonlyArray<LensCondition>;
+  symbol: string;
+  timeframe: string;
+  startDate: Date;
+  endDate: Date;
+  /** 評価バー列の終値(レンズ系列はこの長さ・並びに index 整合していなければならない) */
+  closes: ReadonlyArray<number>;
+  /** テスト用 DI(未指定なら analysis-engine 実呼び出し) */
+  fetchIndicatorSeriesFn?: typeof fetchIndicatorSeries;
+}): Promise<void> {
+  if (params.lensConditions.length === 0) {
+    return;
+  }
+
+  // 1. lensId → 計算仕様(重複 lensId は 1 回だけ解決)
+  const specs = new Map<string, IndicatorLensSpec>();
+  for (const condition of params.lensConditions) {
+    if (specs.has(condition.lensId)) continue;
+    const spec = parseIndicatorLensId(condition.lensId);
+    if (!spec) {
+      console.warn(`[LensSeries] 不正な lensId のためレンズ条件をスキップします: ${condition.lensId}`);
+      continue;
+    }
+    specs.set(condition.lensId, spec);
+  }
+  if (specs.size === 0) {
+    return;
+  }
+
+  // 2. 必要系列をキャッシュキーで重複排除し、**未取得分のみ**一括取得する
+  //    (指標条件とレンズ条件が同じ系列を使う場合、by-version 経由で既に
+  //     indicatorCache に入っているため再取得しない。Copilot レビュー対応 PR #399)
+  const indicatorSpecs = new Map<string, AnalysisEngineIndicatorSpec>();
+  for (const spec of specs.values()) {
+    for (const required of spec.requiredSeries) {
+      const key = makeIndicatorCacheKey(required.indicatorId, { ...required.params }, required.field);
+      if (params.indicatorCache.has(key) || indicatorSpecs.has(key)) {
+        continue;
+      }
+      indicatorSpecs.set(key, {
+        indicatorId: required.indicatorId,
+        params: { ...required.params },
+        field: required.field,
+      });
+    }
+  }
+  // Python キーの正規化(buildEvaluationCaches と同じ変換)を通して Node 形式キーで引けるようにする
+  let fetchedByKey = new Map<string, number[]>();
+  if (indicatorSpecs.size > 0) {
+    const fetchFn = params.fetchIndicatorSeriesFn ?? fetchIndicatorSeries;
+    const response = await fetchFn({
+      symbol: params.symbol,
+      timeframe: params.timeframe,
+      startDate: params.startDate,
+      endDate: params.endDate,
+      indicators: [...indicatorSpecs.values()],
+    });
+    fetchedByKey = buildEvaluationCaches({ series: response.series }).indicatorCache;
+  }
+
+  // 3-4. レンズごとに per-bar 系列化 → 数値エンコード → キャッシュ格納
+  for (const [lensId, spec] of specs) {
+    const seriesInput: Record<string, ReadonlyArray<number | null>> = {};
+    let missing = false;
+    for (const required of spec.requiredSeries) {
+      const key = makeIndicatorCacheKey(required.indicatorId, { ...required.params }, required.field);
+      // 取得済みキャッシュ(by-version 等)を優先し、無ければ今回フェッチした系列を使う
+      const series = params.indicatorCache.get(key) ?? fetchedByKey.get(key);
+      if (!series) {
+        console.warn(`[LensSeries] 必要系列が analysis-engine から取得できませんでした: ${key}`);
+        missing = true;
+        break;
+      }
+      if (series.length !== params.closes.length) {
+        // バー列と系列の index がズレると誤った時点の値で判定する事故になるため中断する
+        throw new Error(
+          `レンズ系列(${key})の長さ(${series.length})がバー列(${params.closes.length})と一致しません`
+        );
+      }
+      seriesInput[required.seriesKey] = series;
+    }
+    if (missing) continue;
+
+    const featureSeries = computeIndicatorLensFeatureSeries(spec, {
+      close: params.closes,
+      series: seriesInput,
+    });
+    for (const [featureKey, values] of Object.entries(featureSeries)) {
+      const comparator = getLensFeatureComparator(lensId, featureKey);
+      const encoded = values.map((value) => {
+        if (value === null) return Number.NaN;
+        const numeric = encodeLensFeatureValueAsNumber(comparator, value);
+        // エンコード不能(カタログ未定義等)は欠損と同じ扱い = 条件不成立に倒す
+        return numeric === null ? Number.NaN : numeric;
+      });
+      params.indicatorCache.set(makeLensCacheKey(lensId, featureKey), encoded);
+    }
+  }
+}
+
+/**
  * バックテストステージを実行
  */
 async function executeBacktestStage(
@@ -656,6 +790,21 @@ async function executeBacktestStage(
 
   const { indicatorCache, patternCache } = buildEvaluationCaches(indicatorSeries);
 
+  // === レンズ条件 (#3): per-bar レンズ系列を基準足キャッシュに追加 ===
+  // timeframeOverride 付きのレンズ条件は後段の各ビュー側キャッシュに積む
+  const allLensConditions = entryPlans.flatMap((plan) => collectLensConditions(plan.group));
+  await appendLensSeriesToCache({
+    indicatorCache,
+    lensConditions: allLensConditions.filter(
+      (c) => !c.timeframeOverride || c.timeframeOverride === timeframe
+    ),
+    symbol,
+    timeframe,
+    startDate,
+    endDate,
+    closes: data.map((bar) => bar.close),
+  });
+
   // === MTF: timeframeOverride 条件用の別時間足ビューを準備 (Phase γ) ===
   // 条件ツリーから使用時間足を収集し、足ごとにバー列 + 指標系列を取得して
   // 「基準足 index → 確定バー index」の対応表ごと evaluator に渡す。
@@ -705,6 +854,16 @@ async function executeBacktestStage(
           `誤った時点の値で判定する事故を防ぐため中断します`
       );
     }
+    // レンズ条件 (#3): この足を override に指定したレンズ条件の系列をビュー側キャッシュへ
+    await appendLensSeriesToCache({
+      indicatorCache: viewCaches.indicatorCache,
+      lensConditions: allLensConditions.filter((c) => c.timeframeOverride === tf),
+      symbol,
+      timeframe: tf,
+      startDate,
+      endDate,
+      closes: viewData.map((bar) => bar.close),
+    });
     timeframeViews.set(tf, {
       data: viewData,
       indicatorCache: viewCaches.indicatorCache,

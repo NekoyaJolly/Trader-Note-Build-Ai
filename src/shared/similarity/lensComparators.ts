@@ -473,3 +473,67 @@ export function getLensLayer(lensId: string): LensLayer {
   }
   return lensId.startsWith(INDICATOR_LENS_PREFIX) ? 'indicator' : 'state';
 }
+
+// ============================================================
+// レンズ条件タイプ (#3) 用の数値エンコード(設計書 §12.4)
+// ============================================================
+
+/**
+ * lensId + featureKey から比較方法を 1 キー分解決する(レンズ条件タイプ #3 用)。
+ * 未知の lensId / featureKey は undefined(呼び出し側が条件不成立に倒す)。
+ */
+export function getLensFeatureComparator(
+  lensId: string,
+  featureKey: string
+): FeatureComparator | undefined {
+  return getLensComparisonDefinition(lensId)?.features[featureKey];
+}
+
+/** 方向イベント値(bull/none/bear)の数値エンコード表 */
+const EVENT_VALUE_ENCODING: Readonly<Record<string, number>> = {
+  bull: 1,
+  none: 0,
+  bear: -1,
+};
+
+/**
+ * レンズ特徴値を、条件評価器の数値キャッシュ(number[])に載せるための数値へ
+ * エンコードする(レンズ条件タイプ #3。設計書 §12.4-2「列挙の数値化」)。
+ *
+ * - bool: true=1 / false=0
+ * - orderedEnum: 順序リストの index(等価比較・順序比較の両方が成立する)
+ * - event: bull=1 / none=0 / bear=-1
+ * - linear / normalizedLinear / tanhLinear: 数値をそのまま
+ * - 上記以外(categoricalEnum / cyclic / skip)・型不一致: null(= 比較不能 → 条件不成立)
+ *
+ * 系列側のエンコードと条件右辺(ユーザー指定値)のエンコードが必ず本関数を通ることで、
+ * 「キャッシュと条件で別エンコード」というドリフトを構造的に防ぐ。
+ */
+export function encodeLensFeatureValueAsNumber(
+  comparator: FeatureComparator | undefined,
+  value: number | string | boolean
+): number | null {
+  if (!comparator) {
+    return null;
+  }
+  switch (comparator.kind) {
+    case 'bool':
+      return typeof value === 'boolean' ? (value ? 1 : 0) : null;
+    case 'orderedEnum': {
+      if (typeof value !== 'string') {
+        return null;
+      }
+      const index = comparator.order.indexOf(value);
+      return index >= 0 ? index : null;
+    }
+    case 'event':
+      return typeof value === 'string' ? (EVENT_VALUE_ENCODING[value] ?? null) : null;
+    case 'linear':
+    case 'normalizedLinear':
+    case 'tanhLinear':
+      return typeof value === 'number' && Number.isFinite(value) ? value : null;
+    default:
+      // categoricalEnum / cyclic / skip は条件タイプ第1弾では対象外(加算的に拡張する)
+      return null;
+  }
+}
