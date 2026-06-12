@@ -430,6 +430,26 @@ describe('appendLensSeriesToCache(レンズ系列のキャッシュ準備)', () 
     expect(cache.get(makeLensCacheKey('ind:rsi#p14', 'rsi_value'))?.[length - 1]).toBeCloseTo(0.25);
   });
 
+  test('必要系列が既に indicatorCache にある場合は analysis-engine を再取得しない(二重取得防止)', async () => {
+    const length = 60;
+    const fetchFn = makeLensFetch(25, length);
+    // 指標条件との併用を想定: by-version 経由で rsi 系列が取得済み
+    const cache = new Map<string, number[]>([[RSI_KEY, Array.from({ length }, () => 25)]]);
+    await appendLensSeriesToCache({
+      indicatorCache: cache,
+      lensConditions: [makeLensCondition()],
+      symbol: 'USDJPY',
+      timeframe: '15m',
+      startDate: new Date(NOW - length * BAR_MS),
+      endDate: new Date(NOW),
+      closes: Array.from({ length }, () => 100),
+      fetchIndicatorSeriesFn: fetchFn,
+    });
+    expect(fetchFn).not.toHaveBeenCalled();
+    // 既存系列からレンズ系列は生成される
+    expect(cache.get(makeLensCacheKey('ind:rsi#p14', 'rsi_zone'))?.[length - 1]).toBe(0);
+  });
+
   test('系列長がバー列と一致しない場合は中断する(誤った時点の値で判定する事故防止)', async () => {
     const fetchFn = makeLensFetch(25, 50); // バー列 60 に対し系列 50
     await expect(

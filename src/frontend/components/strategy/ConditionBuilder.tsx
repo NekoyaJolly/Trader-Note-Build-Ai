@@ -1088,14 +1088,21 @@ function SingleLensCondition({
         ))}
       </select>
 
-      {/* 演算子（値種別に応じて制限） */}
+      {/* 演算子（値種別に応じて制限）。保存値が不正な場合(手動 JSON 編集等)は
+          先頭の演算子へ見た目だけ差し替えず、実際の値を「無効」と明示して
+          ユーザーが正しい値へ直せるようにする(Copilot レビュー対応 PR #399) */}
       <select
-        className={baseSelectClass}
-        value={allowedOperators.includes(condition.operator) ? condition.operator : allowedOperators[0]}
+        className={`${baseSelectClass} ${allowedOperators.includes(condition.operator) ? '' : 'border-red-600 text-red-300'}`}
+        value={condition.operator}
         onChange={(e) => onChange({ ...condition, operator: e.target.value as LensConditionOperator })}
         disabled={readOnly}
         aria-label="比較演算子"
       >
+        {!allowedOperators.includes(condition.operator) && (
+          <option value={condition.operator} disabled>
+            {`${condition.operator}（無効な演算子）`}
+          </option>
+        )}
         {allowedOperators.map((op) => (
           <option key={op} value={op}>
             {LENS_OPERATOR_INFO[op]}

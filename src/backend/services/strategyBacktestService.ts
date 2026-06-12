@@ -650,30 +650,36 @@ export async function appendLensSeriesToCache(params: {
     return;
   }
 
-  // 2. 必要系列をキャッシュキーで重複排除して一括取得
+  // 2. 必要系列をキャッシュキーで重複排除し、**未取得分のみ**一括取得する
+  //    (指標条件とレンズ条件が同じ系列を使う場合、by-version 経由で既に
+  //     indicatorCache に入っているため再取得しない。Copilot レビュー対応 PR #399)
   const indicatorSpecs = new Map<string, AnalysisEngineIndicatorSpec>();
   for (const spec of specs.values()) {
     for (const required of spec.requiredSeries) {
       const key = makeIndicatorCacheKey(required.indicatorId, { ...required.params }, required.field);
-      if (!indicatorSpecs.has(key)) {
-        indicatorSpecs.set(key, {
-          indicatorId: required.indicatorId,
-          params: { ...required.params },
-          field: required.field,
-        });
+      if (params.indicatorCache.has(key) || indicatorSpecs.has(key)) {
+        continue;
       }
+      indicatorSpecs.set(key, {
+        indicatorId: required.indicatorId,
+        params: { ...required.params },
+        field: required.field,
+      });
     }
   }
-  const fetchFn = params.fetchIndicatorSeriesFn ?? fetchIndicatorSeries;
-  const response = await fetchFn({
-    symbol: params.symbol,
-    timeframe: params.timeframe,
-    startDate: params.startDate,
-    endDate: params.endDate,
-    indicators: [...indicatorSpecs.values()],
-  });
   // Python キーの正規化(buildEvaluationCaches と同じ変換)を通して Node 形式キーで引けるようにする
-  const { indicatorCache: seriesByKey } = buildEvaluationCaches({ series: response.series });
+  let fetchedByKey = new Map<string, number[]>();
+  if (indicatorSpecs.size > 0) {
+    const fetchFn = params.fetchIndicatorSeriesFn ?? fetchIndicatorSeries;
+    const response = await fetchFn({
+      symbol: params.symbol,
+      timeframe: params.timeframe,
+      startDate: params.startDate,
+      endDate: params.endDate,
+      indicators: [...indicatorSpecs.values()],
+    });
+    fetchedByKey = buildEvaluationCaches({ series: response.series }).indicatorCache;
+  }
 
   // 3-4. レンズごとに per-bar 系列化 → 数値エンコード → キャッシュ格納
   for (const [lensId, spec] of specs) {
@@ -681,7 +687,8 @@ export async function appendLensSeriesToCache(params: {
     let missing = false;
     for (const required of spec.requiredSeries) {
       const key = makeIndicatorCacheKey(required.indicatorId, { ...required.params }, required.field);
-      const series = seriesByKey.get(key);
+      // 取得済みキャッシュ(by-version 等)を優先し、無ければ今回フェッチした系列を使う
+      const series = params.indicatorCache.get(key) ?? fetchedByKey.get(key);
       if (!series) {
         console.warn(`[LensSeries] 必要系列が analysis-engine から取得できませんでした: ${key}`);
         missing = true;
