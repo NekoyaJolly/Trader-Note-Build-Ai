@@ -314,8 +314,8 @@ similarity(noteSnapshot, marketSnapshot):
 > **位置づけ**: 完成形ロードマップ §5「2本の柱の合流」の技術的核。柱1(ノート類似)で作ったレンズを、柱2(条件ツリー)の**条件タイプ**としても使えるようにする。「過去の勝ちトレードに似たら通知」と「自分のルール条件が成立したら通知」を**同一のレンズ言語・同一の評価器**で扱う。
 
 ### 12.1 現状の土台（調査 2026-06-12）
-- **条件ツリーは拡張可能**: 条件タイプは `type`/`indicatorId` で判別(`src/frontend/types/strategy.ts`)。評価器 `evaluateConditionGroup` → `evaluateBaseNode`(`src/backend/services/strategyConditionEvaluator.ts:540`)に分岐を1つ足すだけ。backtest/live は**評価1経路**共用、MTF(`timeframeOverride`)も leaf 条件なら自動対応。
-- **レンズは単一時点で真偽判定可能な粒度**: `LensSnapshotEntry.features` は `Record<string, value>` で `rsi_zone=oversold` / `ma_cross=bull` のようにキー参照で評価できる(§3.1)。
+- **条件ツリーは拡張可能**: 条件タイプは `type`/`indicatorId` で判別(`src/frontend/types/strategy.ts`)。評価器 `evaluateConditionGroup` → `evaluateBaseNode`(`src/backend/services/strategyConditionEvaluator.ts`)に分岐を1つ足すだけ。backtest/live は**評価1経路**共用、MTF(`timeframeOverride`)も leaf 条件なら自動対応。
+- **レンズは単一時点で真偽判定可能な粒度**: `LensSnapshotEntry.features` は `Record<string, LensFeatureValue>`(`LensFeatureValue = number | string | boolean`) で `rsi_zone=oversold` / `ma_cross=bull` のようにキー参照で評価できる(§3.1)。
 
 ### 12.2 核心の設計判断: レンズの per-bar 系列化
 評価器は**バー系列を per-bar 評価**する(`indicatorCache: Map<string, number[]>`)。一方レンズ生成(`lensSnapshotBuilder`)は**1 時点の snapshot** を作る重い処理(analysis-engine 呼び出し)。バックテスト数千バーで毎バー snapshot 生成は非現実的。
@@ -356,7 +356,7 @@ similarity(noteSnapshot, marketSnapshot):
 - **リアルタイム類似度は callback 止まり**(`src/services/realtime/realtimeSimilarityService.ts`)。かつ**独自の簡易 12 次元ベクトル**を使用しており、**レンズ基盤と別経路**(=柱1で潰したはずの「二重特徴表現」がリアルタイムに残存)。
 - **起動は 15 分 cron のみ**(`matching-pipeline-15min` / `strategy-alerts-15min`)。常駐ワーカー(`scripts/run-realtime-worker.ts`)は**未本番化**。
 - **通知 UI はポーリング/手動更新**。SSE インフラ(`/api/realtime/stream/:symbol`)はチャートのバー配信に存在 → **通知イベント配信に流用可能**。
-- リアルタイム供給は **EODHD WebSocket**(Phase A 切替済)。cTrader 複数接続競合バグ([[project-ctrader-multi-connection-bug]])を避けるため、リアルタイム市場データは EODHD・cTrader OAuth は認証/ポジション操作に限定。
+- リアルタイム供給は **EODHD WebSocket**(Phase A 切替済)。cTrader 複数接続競合バグ(memory: project_ctrader_multi_connection_bug / `src/infrastructure/market/CTraderProvider.ts`)を避けるため、リアルタイム市場データは EODHD・cTrader OAuth は認証/ポジション操作に限定。
 
 ### 13.2 設計原則: リアルタイムもレンズエンジンに統一
 §2 原則(作成時=照合時=リアルタイムで同一の特徴生成)に従い、**簡易 12 次元を廃し `lensSnapshotBuilder`/レンズ系列(§12.2)に統一**する。これにより柱1のノート照合とリアルタイム照合が同一の類似度エンジンを通る。
@@ -366,7 +366,7 @@ similarity(noteSnapshot, marketSnapshot):
 |---|---|---|
 | δ-1 | リアルタイムをレンズエンジンに統一 + callback→`evaluateWithPersistence`(DB永続化) | M |
 | δ-2 | 通知粒度(`NotificationPreference`)をリアルタイムにも適用 | M |
-| δ-3 | SSE(`/api/realtime/stream`)で Notification イベント emit | S |
+| δ-3 | SSE(`/api/realtime/stream/:symbol`)で Notification イベント emit | S |
 | δ-4 | フロント通知フィードの SSE 購読(自動更新) | S |
 | δ-5 | 常駐ワーカー本番化 | L |
 
