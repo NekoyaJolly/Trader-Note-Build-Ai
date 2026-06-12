@@ -1218,9 +1218,17 @@ export class TradeNoteService {
    * 
    * @returns PrismaのTradeNoteレコード配列
    */
-  async loadActiveNotesForMatchingAsPrisma(userId?: string): Promise<TradeNoteWithSummary[]> {
-    // userId 未指定 = ユーザー横断 (cron パイプライン)。指定時は所有ノートのみ (手動チェック等)
-    return this.repository.findActiveForMatching(userId ? { userId } : {});
+  async loadActiveNotesForMatchingAsPrisma(
+    userId?: string,
+    symbol?: string
+  ): Promise<TradeNoteWithSummary[]> {
+    // userId 未指定 = ユーザー横断 (cron パイプライン)。指定時は所有ノートのみ (手動チェック等)。
+    // symbol 指定時 (Phase δ-1 リアルタイムのシンボルスコープ評価) は DB 側で絞り込み、
+    // 毎バーの全ノート読み込みコストを避ける。
+    return this.repository.findActiveForMatching({
+      ...(userId ? { userId } : {}),
+      ...(symbol ? { symbol } : {}),
+    });
   }
 
   /**

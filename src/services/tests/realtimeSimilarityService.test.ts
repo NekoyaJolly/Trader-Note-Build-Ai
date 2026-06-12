@@ -20,7 +20,7 @@ import type {
   BarCompleteCallback,
 } from '../realtime/rollingWindowService';
 import type { OHLCVBar } from '../../infrastructure/market/IMarketDataProvider';
-import type { MatchingPipelineRunResult } from '../matchingService';
+import type { MatchingPipelineRunResult, MatchingService } from '../matchingService';
 
 /** onBarComplete で登録されたコールバックを捕捉し、テストから手動でバーを流せる fake */
 function makeFakeRollingWindow(): {
@@ -186,6 +186,27 @@ describe('RealtimeSimilarityService (Phase δ-1 レンズ統一)', () => {
     expect(result.notified).toBe(2);
     expect(result.errors).toEqual(['e1']);
     expect(seen).toEqual([{ symbol: 'USDJPY', totalMatches: 5, notified: 2 }]);
+  });
+
+  test('matchingService を注入すると同一インスタンスの runMatchingPipeline を再利用する', async () => {
+    const { rollingWindow, emitBar } = makeFakeRollingWindow();
+    const runMatchingPipeline = jest.fn().mockResolvedValue(makeRunResult());
+    // MatchingService の最小モック (バー確定ごとに new されず再利用されることを確認)
+    const matchingService = { runMatchingPipeline } as unknown as MatchingService;
+    const service = new RealtimeSimilarityService(
+      rollingWindow,
+      { minEvaluationIntervalSeconds: 0 },
+      { matchingService }
+    );
+
+    service.start();
+    emitBar(makeBar('XAUUSD'));
+    await flush();
+    emitBar(makeBar('EURUSD'));
+    await flush();
+
+    expect(runMatchingPipeline).toHaveBeenCalledTimes(2);
+    expect(runMatchingPipeline).toHaveBeenNthCalledWith(1, { trigger: 'realtime', symbolFilter: 'XAUUSD' });
   });
 
   test('stop 後はバー確定で評価が起動しない', async () => {

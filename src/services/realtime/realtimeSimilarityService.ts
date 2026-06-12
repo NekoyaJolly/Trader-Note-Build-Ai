@@ -83,7 +83,7 @@ export class RealtimeSimilarityService {
   constructor(
     rollingWindow: RollingWindowService,
     config?: Partial<RealtimeSimilarityConfig>,
-    deps?: { runPipelineFn?: RunMatchingPipelineFn }
+    deps?: { runPipelineFn?: RunMatchingPipelineFn; matchingService?: MatchingService }
   ) {
     const result = RealtimeSimilarityConfigSchema.safeParse(config || {});
     if (!result.success) {
@@ -91,10 +91,13 @@ export class RealtimeSimilarityService {
     }
     this.config = result.data;
     this.rollingWindow = rollingWindow;
-    // 既定は正規パイプライン (cron と同一コード)。テストではモックを注入する
+    // 既定は正規パイプライン (cron と同一コード)。
+    // MatchingService は**1 インスタンスを再利用**する (バー確定ごとの再初期化を避ける。
+    // δ-5 常駐化時の無駄なオーバーヘッド防止。Copilot レビュー対応 PR #404)。
+    // テストでは runPipelineFn / matchingService いずれかを注入してモックする。
+    const matchingService = deps?.matchingService ?? new MatchingService();
     this.runPipelineFn =
-      deps?.runPipelineFn ??
-      ((options) => new MatchingService().runMatchingPipeline(options));
+      deps?.runPipelineFn ?? ((options) => matchingService.runMatchingPipeline(options));
 
     // バー完了時のコールバック
     this.barCallback = (bar: OHLCVBar) => this.onBarComplete(bar);

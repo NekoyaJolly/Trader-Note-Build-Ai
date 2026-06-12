@@ -187,13 +187,9 @@ export class MatchingService {
     // 有効なノートのみを取得（Prisma型で直接取得）。
     // Phase α-4: userId 指定時 (手動チェック等の HTTP 経路) は所有ノートのみ評価。
     // cron パイプラインは未指定で全ユーザーのノートを評価する。
-    const allNotes = await this.noteService.loadActiveNotesForMatchingAsPrisma(userId);
-
     // Phase δ-1: symbolFilter 指定時 (リアルタイムのシンボルスコープ評価) は
-    // そのシンボルのノートだけを評価対象にする (毎バー全シンボル評価を避ける)。
-    const notes = symbolFilter
-      ? allNotes.filter((note) => note.symbol === symbolFilter)
-      : allNotes;
+    // **DB 側で symbol 絞り込み**し、毎バーの全ノート読み込みコストを避ける。
+    const notes = await this.noteService.loadActiveNotesForMatchingAsPrisma(userId, symbolFilter);
 
     // マッチング対象がない場合は早期リターン
     if (notes.length === 0) {
