@@ -19,6 +19,11 @@ import { CTraderProvider } from '../../infrastructure/market/CTraderProvider';
 import { CTraderAccountService } from '../services/ctrader/ctraderAccountService';
 import { getPrismaClient } from '../../infrastructure/prismaClient';
 import {
+  isTradingOrderExecutionEnabled,
+  TRADING_ORDER_EXECUTION_DISABLED_CODE,
+  TRADING_ORDER_EXECUTION_DISABLED_MESSAGE,
+} from '../services/tradingOrderExecutionGate';
+import {
   ClosePositionRequestSchema,
   CreateOrderRequestSchema,
   TradingOrderResponseSchema,
@@ -49,6 +54,19 @@ async function createTradingRouteContext(primaryAccountId: string): Promise<Trad
   const accountService = new CTraderAccountService(provider, primaryAccountId);
 
   return { provider, accountService };
+}
+
+function rejectDisabledOrderExecution(res: Response): boolean {
+  if (isTradingOrderExecutionEnabled()) {
+    return false;
+  }
+
+  res.status(403).json({
+    success: false,
+    code: TRADING_ORDER_EXECUTION_DISABLED_CODE,
+    error: TRADING_ORDER_EXECUTION_DISABLED_MESSAGE,
+  });
+  return true;
 }
 
 /**
@@ -217,6 +235,10 @@ router.post('/orders', requireAuth, async (req: Request, res: Response) => {
   let provider: CTraderProvider | null = null;
 
   try {
+    if (rejectDisabledOrderExecution(res)) {
+      return;
+    }
+
     const parsed = CreateOrderRequestSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({
@@ -264,6 +286,10 @@ router.put('/orders/:id', requireAuth, async (req: Request, res: Response) => {
   let provider: CTraderProvider | null = null;
 
   try {
+    if (rejectDisabledOrderExecution(res)) {
+      return;
+    }
+
     const parsed = UpdateOrderRequestSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({
@@ -311,6 +337,10 @@ router.delete('/orders/:id', requireAuth, async (req: Request, res: Response) =>
   let provider: CTraderProvider | null = null;
 
   try {
+    if (rejectDisabledOrderExecution(res)) {
+      return;
+    }
+
     const context = await createTradingRouteContext(req.user!.primaryAccountId);
     provider = context.provider;
     await context.accountService.cancelOrder(req.params.id);
@@ -350,6 +380,10 @@ router.post('/positions/:id/close', requireAuth, async (req: Request, res: Respo
   let provider: CTraderProvider | null = null;
 
   try {
+    if (rejectDisabledOrderExecution(res)) {
+      return;
+    }
+
     const parsed = ClosePositionRequestSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       return res.status(400).json({

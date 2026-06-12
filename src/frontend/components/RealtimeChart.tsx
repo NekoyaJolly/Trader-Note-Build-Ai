@@ -56,6 +56,7 @@ import {
 const DEFAULT_LINE_COLOR = "#fbbf24";
 const DEFAULT_LINE_WIDTH = 2;
 const LINE_WIDTH_OPTIONS = [1, 2, 3, 4];
+const orderExecutionEnabled = process.env.NEXT_PUBLIC_TRADING_ORDER_EXECUTION_ENABLED === "true";
 
 // ブローカー (cTrader) overlay 用の型。ローソ足 (EODHD/local) とは別レイヤー。
 type BrokerConnectionStatus = "connected" | "degraded" | "disconnected";
@@ -855,13 +856,15 @@ export function RealtimeChart({
 		[tradingPositions, symbol]
 	);
 
-	// 発注の無効化理由 (市場閉場 / ブローカー未接続)。OrderPanel に渡して誤案内を防ぐ。
-	const orderDisabled = !marketStatus.isOpen || brokerStatus !== "connected";
-	const orderDisabledReason = !marketStatus.isOpen
-		? "市場閉場のため発注できません"
-		: brokerStatus !== "connected"
-			? "ブローカー未接続のため発注できません"
-			: undefined;
+	// 発注の無効化理由 (実発注ゲート / 市場閉場 / ブローカー未接続)。OrderPanel に渡して誤案内を防ぐ。
+	const orderDisabled = !orderExecutionEnabled || !marketStatus.isOpen || brokerStatus !== "connected";
+	const orderDisabledReason = !orderExecutionEnabled
+		? "実発注は安全ガード実装まで停止中です"
+		: !marketStatus.isOpen
+			? "市場閉場のため発注できません"
+			: brokerStatus !== "connected"
+				? "ブローカー未接続のため発注できません"
+				: undefined;
 
 	const positionOverlays: PositionOverlay[] = useMemo(
 		() =>
