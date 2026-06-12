@@ -149,8 +149,11 @@ export interface UseNotificationStreamResult {
 export function useNotificationStream(onNotification?: () => void): UseNotificationStreamResult {
   const [unreadCount, setUnreadCount] = useState<number>(sharedUnread);
   // コールバックの identity 変化で再購読しないよう ref 経由で参照する
+  // (render 中の ref 更新は react-hooks/refs 違反のため effect 内で同期する)
   const onNotificationRef = useRef(onNotification);
-  onNotificationRef.current = onNotification;
+  useEffect(() => {
+    onNotificationRef.current = onNotification;
+  }, [onNotification]);
 
   useEffect(() => {
     const subscriber: NotificationStreamSubscriber = {
