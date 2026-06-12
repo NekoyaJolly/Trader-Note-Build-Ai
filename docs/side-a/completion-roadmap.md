@@ -124,7 +124,7 @@ Side-A は「人間トレーダーのノーコード相棒」。完成形は **2
 
 ### Phase γ — 柱2 をライブに（条件で通知）
 - [x] **ライブ条件評価エンジン**（バックテスト評価器をライブ共用、定期/リアルタイム評価→発火）〔L〕 — 2026-06-10 実装 (PR γ-1): `strategyLiveEvaluationService` が `evaluateConditionGroup` + `buildEvaluationCaches` をライブ共用(評価1経路化)。Cloud Scheduler `strategy-alerts-15min`(7分オフセット) → `GET /api/cron/strategy-alerts`。アラート通知は Notification テーブル(type=strategy_alert)に統合し UI 到達を修正(旧実装は揮発FSで本番不達)、Web Push スタブも実配信化
-- [ ] 条件ツリーに **レンズ条件タイプ**追加（柱1基盤を流用）〔M〕
+- [ ] 条件ツリーに **レンズ条件タイプ**追加（柱1基盤を流用）〔L、**設計確定**〕 — 設計は `NOTE_SIMILARITY_FOUNDATION.md §12`。**フルスコープ確定 (2026-06-12 Neko): 状態系レンズ含む** → レンズの per-bar 系列化 + analysis-engine の per-bar 系列 API 追加が必要。実装は「インジケーター系先行 → 状態系追加」で段階化可
 - [x] ~~マルチタイムフレーム条件〔M〕~~ (PR #391、2026-06-11 実装・本番実機検証済: `timeframeOverride`、確定バーのみ参照で lookahead 防止、1w 対応。条件ビルダー/評価器/backtest/live 共用) / ~~ルックバック UI〔S〕~~ (PR #374)
 - [x] ~~条件アラートにも通知粒度設定を適用（柱1と共通の通知設定層）~~ (PR #397、2026-06-12): NotificationPreference の strategy スコープを `triggerAlert` の cooldown に配線 (`strategy pref > user pref > StrategyAlert 固有値`)。柱2 は二値判定 (matchScore=1.0) のため threshold/minMatchLevel は no-op、cooldown のみ層化。`resolveForStrategy` + scope=strategy upsert/schema 配線。DB 基盤は β-2a 完備済で migration 不要。**残=per-strategy 上書き UI (follow-up)、maxPerDay 配線**
 
@@ -135,8 +135,9 @@ Side-A は「人間トレーダーのノーコード相棒」。完成形は **2
 > - **(2026-06-12, PR #396)**: OHLCV 取得 SSE の一過性切断で誤「失敗」表示していた UX を修正 (ジョブ決着まで再接続。バックエンドは 30 分ジョブ保持で再接続時に最終状態を再送)。
 
 ### Phase δ — リアルタイム & 通知の完成
-- [ ] リアルタイム類似度 Phase3（DB/Push/UI 配線、常駐ワーカー本番化）〔L〕
-- [ ] 通知のリアルタイム UI(WebSocket/SSE)〔M〕 / Web Push 購読状態 UI〔S〕
+> 設計は `NOTE_SIMILARITY_FOUNDATION.md §13`（δ-1〜δ-5 配線 + 常駐ワーカー選択肢）。**重要**: 現状リアルタイムは簡易12次元ベクトルでレンズ基盤と別経路 → δ-1 でレンズエンジンに統一する（#3 §12 のレンズ系列化資産を共有）。
+- [ ] リアルタイム類似度 Phase3（レンズ統一→DB/Push/UI 配線、常駐ワーカー本番化）〔L〕 — 常駐ワーカーは別 Cloud Run サービス案を推奨（要決定、§13.4）
+- [ ] 通知のリアルタイム UI(SSE `/api/realtime/stream/:symbol` 流用)〔M〕 / Web Push 購読状態 UI〔S〕
 
 ### Phase ε — 実発注 & 仕上げ
 - [ ] **実発注(決定2)**: cTrader Open API 発注。**安全ガード必須**（都度の明示確認なしに発注しない / サイレント自動売買禁止 / 数量・価格の最終確認 / 失敗時状態の明確化）〔L・高リスク〕

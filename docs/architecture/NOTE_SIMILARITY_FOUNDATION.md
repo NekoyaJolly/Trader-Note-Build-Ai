@@ -309,6 +309,82 @@ similarity(noteSnapshot, marketSnapshot):
 
 ---
 
+## 12. レンズ条件タイプ（柱2 への合流）〔設計確定 2026-06-12〕
+
+> **位置づけ**: 完成形ロードマップ §5「2本の柱の合流」の技術的核。柱1(ノート類似)で作ったレンズを、柱2(条件ツリー)の**条件タイプ**としても使えるようにする。「過去の勝ちトレードに似たら通知」と「自分のルール条件が成立したら通知」を**同一のレンズ言語・同一の評価器**で扱う。
+
+### 12.1 現状の土台（調査 2026-06-12）
+- **条件ツリーは拡張可能**: 条件タイプは `type`/`indicatorId` で判別(`src/frontend/types/strategy.ts`)。評価器 `evaluateConditionGroup` → `evaluateBaseNode`(`src/backend/services/strategyConditionEvaluator.ts`)に分岐を1つ足すだけ。backtest/live は**評価1経路**共用、MTF(`timeframeOverride`)も leaf 条件なら自動対応。
+- **レンズは単一時点で真偽判定可能な粒度**: `LensSnapshotEntry.features` は `Record<string, LensFeatureValue>`(`LensFeatureValue = number | string | boolean`) で `rsi_zone=oversold` / `ma_cross=bull` のようにキー参照で評価できる(§3.1)。
+
+### 12.2 核心の設計判断: レンズの per-bar 系列化
+評価器は**バー系列を per-bar 評価**する(`indicatorCache: Map<string, number[]>`)。一方レンズ生成(`lensSnapshotBuilder`)は**1 時点の snapshot** を作る重い処理(analysis-engine 呼び出し)。バックテスト数千バーで毎バー snapshot 生成は非現実的。
+
+→ **レンズ特徴を「1 バー1 値」の系列に変換し、評価器のキャッシュに載せる**のが核(指標系列と同じ扱い)。これにより:
+- backtest/live で同じ評価器がレンズ条件を per-bar 評価できる(評価1経路の維持)
+- MTF も既存の `timeframeOverride` 機構で自動対応(leaf 条件のため)
+- **#3 とリアルタイム類似度(§13)が同じ「レンズ系列化」資産を共有**する(後戻り最小)
+
+### 12.3 スコープ決定（2026-06-12 Neko）: 状態系レンズも含むフルスコープ
+- **インジケーター系レンズ**(rsi_zone / ma_cross / macd / bb_position 等): 既存の指標系列から**安価に per-bar 計算可能**(`computeIndicatorLens` は系列入力の純関数を per-index 適用)。analysis-engine 変更不要。
+- **状態系レンズ**(SMC / Wyckoff / ChartPattern / DowTheory / VolatilityRegime / TimeSession / Pattern): analysis-engine が現状**単一時点 payload** を返すため、**per-bar 系列を返す API 拡張が必要**(Python 側 + TS 側)。
+- 実装は「インジケーター系を先行 → 状態系を追加」と段階化してよいが、**到達目標は全レンズ**。
+
+### 12.4 設計要素
+1. **`LensCondition` 型**(`strategy.ts`): `type: 'lens'` + `lensId`(例 `ind:rsi#p14`, `smc`) + `featureKey`(例 `rsi_zone`) + `operator`/`value`(featureKey の比較種別=`lensComparators` の kind に応じて allowed operator を制限) + `lookbackBars?` + `timeframeOverride?`。型ガード `isLensCondition`。
+2. **レンズ系列の供給**: `buildEvaluationCaches` を拡張し、`lens:<lensId>:<featureKey>` を per-bar 系列(数値/列挙の数値化)としてキャッシュ。
+   - インジケーター系: 既存 `indicatorCache` の指標系列から per-index 算出。
+   - 状態系: analysis-engine 新 API(`/v1/lens-series` 等。`indicator-series` の lens 版)から per-bar 系列取得。
+3. **評価器分岐**: `evaluateBaseNode` に `if (type === 'lens') return evaluateLensCondition(ctx, item)`。`collectTimeframeOverrides`/`resolveViewContext` は lens も自動カバー。
+4. **sentinel/欠損**: `bars_since_event=-1`(イベントなし)等は比較前に skip 判定(§6.2 normalizedLinear と同方針)。confidence 低/欠損バーは条件不成立側に倒す。
+5. **ConditionBuilder UI**: `SingleLensCondition` 新設(lensId セレクタ → featureKey セレクタ → operator/value)。`extractConditionRequirements` に lens の必要系列登録を追加(プレビュー対応)。
+6. **operator 制約**: featureKey の kind 別に UI/zod で許可演算子を限定(bool=`==/!=`、orderedEnum=`==/!=`+順序範囲、linear=`</<=/>/>=`)。
+
+### 12.5 触る箇所
+型(`strategy.ts` + 評価器側) / 評価器(`evaluateLensCondition` + `buildEvaluationCaches` 拡張) / analysis-engine(状態系の per-bar 系列 API) / UI(`ConditionBuilder`) / プレビュー(`previewIndicatorSeries`) / テスト。**backtest/live サービスは評価器共用のため原則無変更**。
+
+### 12.6 残決定
+- analysis-engine の per-bar 系列 API の形(全レンズ一括 vs lens 指定) と warmup/コスト。
+- 列挙 featureKey の条件 UX(等価のみ vs 順序範囲)。
+- レンズ系列のキャッシュ cacheKey 規約(指標系列の `${id}_${params}_${field}` と整合)。
+
+---
+
+## 13. リアルタイム類似度のレンズ統一 + 常駐ワーカー（Phase δ）〔設計 2026-06-12〕
+
+### 13.1 現状（調査 2026-06-12）
+- **リアルタイム類似度は callback 止まり**(`src/services/realtime/realtimeSimilarityService.ts`)。かつ**独自の簡易 12 次元ベクトル**を使用しており、**レンズ基盤と別経路**(=柱1で潰したはずの「二重特徴表現」がリアルタイムに残存)。
+- **起動は 15 分 cron のみ**(`matching-pipeline-15min` / `strategy-alerts-15min`)。常駐ワーカー(`scripts/run-realtime-worker.ts`)は**未本番化**。
+- **通知 UI はポーリング/手動更新**。SSE インフラ(`/api/realtime/stream/:symbol`)はチャートのバー配信に存在 → **通知イベント配信に流用可能**。
+- リアルタイム供給は **EODHD WebSocket**(Phase A 切替済)。cTrader 複数接続競合バグ(memory: project_ctrader_multi_connection_bug / `src/infrastructure/market/CTraderProvider.ts`)を避けるため、リアルタイム市場データは EODHD・cTrader OAuth は認証/ポジション操作に限定。
+
+### 13.2 設計原則: リアルタイムもレンズエンジンに統一
+§2 原則(作成時=照合時=リアルタイムで同一の特徴生成)に従い、**簡易 12 次元を廃し `lensSnapshotBuilder`/レンズ系列(§12.2)に統一**する。これにより柱1のノート照合とリアルタイム照合が同一の類似度エンジンを通る。
+
+### 13.3 配線計画（δ-1〜δ-5）
+| 手順 | 内容 | 規模 |
+|---|---|---|
+| δ-1 | リアルタイムをレンズエンジンに統一 + callback→`evaluateWithPersistence`(DB永続化) | M |
+| δ-2 | 通知粒度(`NotificationPreference`)をリアルタイムにも適用 | M |
+| δ-3 | SSE(`/api/realtime/stream/:symbol`)で Notification イベント emit | S |
+| δ-4 | フロント通知フィードの SSE 購読(自動更新) | S |
+| δ-5 | 常駐ワーカー本番化 | L |
+
+### 13.4 常駐ワーカー本番化の選択肢〔要決定〕
+| 選択肢 | メリット | デメリット | コスト |
+|---|---|---|---|
+| **別 Cloud Run サービス(推奨)** | リソース独立・接続専有・スケール制御可 | インスタンス増・サービス間認証 | +¥数千/月 |
+| Cloud Run sidecar | 認証不要・低遅延 | main とリソース共有(pool 枯渇リスク) | 既存内 |
+| Railway 常駐 | 安価 | 別インフラ管理コスト | ¥数百/月 |
+| 15 分 cron 維持 | 現状延長 | リアルタイム性を捨てる | 無料枠 |
+
+> 推奨は**別 Cloud Run サービス**(`--min-instances=1`)。`deploy.yml` に worker サービスのデプロイを追加し、EODHD WS 接続を専有させる。最終決定は本設計レビュー後。
+
+### 13.5 完成判定
+承認ノート × ライブ市場がリアルタイム(数秒以内)でレンズ類似度評価 → マッチ時に通知粒度を適用して Notification 生成 → SSE で UI 通知フィードに自動反映 + per-user Web Push。
+
+---
+
 ## 付録: 現状資産の再利用マップ
 
 | 本設計の要素 | 再利用する現状資産 | 新規 |
