@@ -1,26 +1,34 @@
 /**
- * Realtime Worker - リアルタイム類似度監視ワーカー
- * 
- * 目的: cTrader WebSocket でリアルタイムデータを受信し、類似度チェックを実行
- * 
+ * Realtime Worker - リアルタイム類似度監視ワーカー (Phase δ-1: レンズエンジン統一)
+ *
+ * 目的: cTrader WebSocket でリアルタイムデータを受信し、バー確定ごとに
+ *       正規マッチングパイプライン (レンズ類似度) をシンボルスコープで起動する。
+ *
+ * 設計 (NOTE_SIMILARITY_FOUNDATION.md §13):
+ * - 評価・永続化・通知は全て RealtimeSimilarityService → MatchingService.runMatchingPipeline
+ *   が行う (cron と同一コード)。本ワーカーはノート管理も通知も持たない薄い殻。
+ * - **未本番化** (deploy.yml に worker サービスなし)。常駐ワーカー本番化 (δ-5) は
+ *   15 分 cron 維持の決定 (2026-06-13) により当面見送り。
+ * - ⚠️ δ-5 本番化時の必須作業: データ源を cTrader → EODHD WS に差し替える
+ *   (cTrader 複数接続競合バグ回避、§13.4 注意書き / memory: project_ctrader_multi_connection_bug)。
+ *   本スクリプトは現状 cTrader のままだが、本番常駐させる前に EODHD へ移行すること。
+ *
  * 起動方法:
  *   npx ts-node scripts/run-realtime-worker.ts
- * 
+ *
  * 環境変数:
  *   - CTRADER_ACCOUNT_ID: cTrader アカウントID
- *   - SIMILARITY_THRESHOLD: 類似度閾値（デフォルト: 0.85）
- *   - WINDOW_SECONDS: 時間窓（デフォルト: 60）
+ *   - MIN_EVAL_INTERVAL_SECONDS: 同一シンボルの最小評価間隔（デフォルト: 60）
+ *   - WINDOW_SECONDS: Tick→バー集約の時間窓（デフォルト: 60）
  *   - WATCH_SYMBOLS: 監視シンボル（カンマ区切り、デフォルト: XAUUSD）
- * 
- * 参照: docs/realtime_similarity_notification_architecture.md
+ *   - DEBUG: 'true' で詳細ログ
  */
 
 import { PrismaClient } from '@prisma/client';
 import { CTraderAuthService } from '../src/backend/services/ctrader/ctraderAuthService';
 import { CTraderProvider } from '../src/infrastructure/market/CTraderProvider';
 import { RollingWindowService } from '../src/services/realtime/rollingWindowService';
-import { RealtimeSimilarityService, NoteForSimilarity } from '../src/services/realtime/realtimeSimilarityService';
-import { sendSimilarityNotification } from '../src/services/notification/notificationTriggerService';
+import { RealtimeSimilarityService } from '../src/services/realtime/realtimeSimilarityService';
 
 // ========================================
 // 設定
@@ -29,16 +37,16 @@ import { sendSimilarityNotification } from '../src/services/notification/notific
 const CONFIG = {
   // cTrader アカウントID（環境変数またはDB から取得）
   accountId: process.env.CTRADER_ACCOUNT_ID || '',
-  
-  // 類似度閾値
-  similarityThreshold: parseFloat(process.env.SIMILARITY_THRESHOLD || '0.85'),
-  
+
+  // 同一シンボルの最小評価間隔（秒）
+  minEvalIntervalSeconds: parseInt(process.env.MIN_EVAL_INTERVAL_SECONDS || '60', 10),
+
   // 時間窓（秒）
   windowSeconds: parseInt(process.env.WINDOW_SECONDS || '60', 10),
-  
+
   // 監視シンボル
   watchSymbols: (process.env.WATCH_SYMBOLS || 'XAUUSD').split(',').map(s => s.trim()),
-  
+
   // ログレベル
   debug: process.env.DEBUG === 'true',
 };
@@ -49,9 +57,9 @@ const CONFIG = {
 
 async function main(): Promise<void> {
   console.log('═══════════════════════════════════════');
-  console.log('  Realtime Worker 起動');
+  console.log('  Realtime Worker 起動 (レンズエンジン統一)');
   console.log('═══════════════════════════════════════');
-  console.log(`  閾値: ${CONFIG.similarityThreshold}`);
+  console.log(`  最小評価間隔: ${CONFIG.minEvalIntervalSeconds}秒`);
   console.log(`  時間窓: ${CONFIG.windowSeconds}秒`);
   console.log(`  監視シンボル: ${CONFIG.watchSymbols.join(', ')}`);
   console.log('═══════════════════════════════════════');
@@ -61,7 +69,7 @@ async function main(): Promise<void> {
   try {
     // 1. cTrader 接続確認
     const authService = new CTraderAuthService(prisma);
-    
+
     // アカウントID を取得（環境変数 または DB から最初のトークン）
     let accountId = CONFIG.accountId;
     if (!accountId) {
@@ -73,72 +81,47 @@ async function main(): Promise<void> {
       }
       accountId = status.accounts[0].accountId;
     }
-    
+
     console.log(`✓ cTrader アカウント: ${accountId}`);
 
-    // 2. 比較対象のノートを読み込み
-    const notes = await loadNotesForSimilarity(prisma);
-    if (notes.length === 0) {
-      console.warn('⚠️ 比較対象のノートがありません');
-      console.warn('   ノートを作成してから再実行してください');
-    } else {
-      console.log(`✓ ノート読み込み: ${notes.length}件`);
-    }
-
-    // 3. サービス初期化
+    // 2. サービス初期化 (ノートのロード・通知・永続化はパイプライン側が行う)
     const rollingWindow = new RollingWindowService({
       windowSeconds: CONFIG.windowSeconds,
       autoFlush: true,
     });
 
     const similarityService = new RealtimeSimilarityService(rollingWindow, {
-      similarityThreshold: CONFIG.similarityThreshold,
+      minEvaluationIntervalSeconds: CONFIG.minEvalIntervalSeconds,
       debug: CONFIG.debug,
     });
-    similarityService.setNotes(notes);
 
-    // 4. 通知コールバック設定
-    similarityService.onSimilarityAlert(async (result) => {
-      console.log('🔔 類似度アラート:', {
-        noteTitle: result.noteTitle,
-        symbol: result.symbol,
-        similarity: `${(result.similarity * 100).toFixed(1)}%`,
-      });
-
-      try {
-        // Push 通知を送信
-        await sendSimilarityNotification({
-          noteId: result.noteId,
-          noteTitle: result.noteTitle,
-          symbol: result.symbol,
-          similarity: result.similarity,
-        });
-        console.log('✓ 通知送信完了');
-      } catch (error) {
-        console.error('通知送信エラー:', error);
+    // 3. 評価完了の観測ログ (永続化・通知はパイプラインの責務)
+    similarityService.onEvaluation((result) => {
+      if (result.totalMatches > 0 || result.notified > 0) {
+        console.log(
+          `🔔 [${result.symbol}] matches=${result.totalMatches} notified=${result.notified}` +
+            (result.errors.length > 0 ? ` errors=${result.errors.length}` : '')
+        );
       }
     });
 
-    // 5. cTrader Provider 初期化
+    // 4. cTrader Provider 初期化
     const provider = new CTraderProvider(authService, accountId);
 
-    // 接続状態変更を監視
     provider.onConnectionStateChange((state) => {
       console.log(`[Worker] cTrader 接続状態: ${state}`);
     });
 
-    // 6. WebSocket 接続
+    // 5. WebSocket 接続
     console.log('cTrader WebSocket 接続中...');
     await provider.connect();
 
-    // 7. 類似度監視開始
+    // 6. 類似度監視開始 (バー確定ごとにパイプラインが自動起動)
     similarityService.start();
 
-    // 8. Tick データ購読
+    // 7. Tick データ購読
     await provider.subscribeTicks(CONFIG.watchSymbols, (tick) => {
-      // Tick を RollingWindow に追加
       rollingWindow.addTick(tick);
-      
       if (CONFIG.debug) {
         console.log(`[Tick] ${tick.symbol}: ${tick.price} @ ${tick.timestamp.toISOString()}`);
       }
@@ -149,15 +132,13 @@ async function main(): Promise<void> {
     console.log('  Ctrl+C で終了');
     console.log('═══════════════════════════════════════');
 
-    // 9. シグナルハンドラ
+    // 8. シグナルハンドラ
     const shutdown = async () => {
       console.log('\nシャットダウン中...');
-      
       similarityService.stop();
       rollingWindow.stop();
       await provider.disconnect();
       await prisma.$disconnect();
-      
       console.log('シャットダウン完了');
       process.exit(0);
     };
@@ -165,23 +146,14 @@ async function main(): Promise<void> {
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
 
-    // 10. 定期的にノートを再読み込み（10分ごと）
-    setInterval(async () => {
-      try {
-        const refreshedNotes = await loadNotesForSimilarity(prisma);
-        similarityService.setNotes(refreshedNotes);
-        console.log(`[Worker] ノート更新: ${refreshedNotes.length}件`);
-      } catch (error) {
-        console.error('[Worker] ノート更新エラー:', error);
-      }
-    }, 10 * 60 * 1000);
-
-    // 11. 定期的に統計を表示（5分ごと）
+    // 9. 定期的に統計を表示（5分ごと）
     setInterval(() => {
       const stats = similarityService.getStats();
       const windowStats = rollingWindow.getStats();
-      console.log(`[Stats] ノート: ${stats.noteCount}件, シンボル: ${windowStats.symbols.join(',')}`, 
-                  `pending: ${windowStats.pendingCount}`);
+      console.log(
+        `[Stats] 評価済みシンボル: ${stats.symbolCount}, 走行中: ${stats.inFlightCount}, ` +
+          `窓シンボル: ${windowStats.symbols.join(',')}, pending: ${windowStats.pendingCount}`
+      );
     }, 5 * 60 * 1000);
 
   } catch (error) {
@@ -189,43 +161,6 @@ async function main(): Promise<void> {
     await prisma.$disconnect();
     process.exit(1);
   }
-}
-
-// ========================================
-// ヘルパー関数
-// ========================================
-
-/**
- * 類似度チェック用のノートを読み込み
- */
-async function loadNotesForSimilarity(prisma: PrismaClient): Promise<NoteForSimilarity[]> {
-  // StrategyNote から特徴ベクトルを持つノートを取得
-  const strategyNotes = await prisma.strategyNote.findMany({
-    where: {
-      featureVector: {
-        not: null,
-      },
-    },
-    select: {
-      id: true,
-      symbol: true,
-      featureVector: true,
-      strategy: {
-        select: {
-          name: true,
-        },
-      },
-    },
-  });
-
-  return strategyNotes
-    .filter(note => note.featureVector && Array.isArray(note.featureVector))
-    .map(note => ({
-      id: note.id,
-      title: `${note.strategy.name} - ${note.symbol}`,
-      symbol: note.symbol,
-      featureVector: note.featureVector as number[],
-    }));
 }
 
 // ========================================

@@ -1,4 +1,12 @@
-# リアルタイム類似度通知アーキテクチャ設計（確定版）
+# リアルタイム類似度通知アーキテクチャ設計（旧・参考）
+
+> ⚠️ **本ドキュメントは旧設計（2026-05 時点）で内容が古い**（Twelve Data 等は既に廃止）。
+> リアルタイム類似度の**正本は `docs/architecture/NOTE_SIMILARITY_FOUNDATION.md` §13**。
+> 2026-06-13 の Phase δ で次の通り変更済み（§13 追補7・追補8）:
+> - 特徴量は簡易12次元を廃し**レンズ基盤に統一**（`realtimeSimilarityService` は正規マッチングパイプラインの薄いトリガーに）
+> - 評価・永続化・通知は 15 分 cron と**同一コード**（`runMatchingPipeline`）
+> - 通知配信は**認証付き per-user SSE**（`/api/notifications/stream`）
+> - 常駐ワーカーは**15 分 cron 維持で当面見送り**（データ源 cTrader→EODHD 差し替えは本番化時）
 
 ## 1. 前提・目的
 

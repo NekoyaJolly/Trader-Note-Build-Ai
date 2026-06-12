@@ -1,27 +1,29 @@
 /**
- * Realtime Similarity Service
- * 
- * 目的: リアルタイムバーデータと過去ノートの類似度をチェック
- * 
- * 機能:
- * - 新規バー受信時に全ノートとの類似度を計算
- * - 閾値（デフォルト0.85）を超えた場合に通知トリガー
- * - 24時間あたりの通知制限（30件）
- * - プロファイル別のインジケーター設定対応
- * 
- * フロー:
- * 1. RollingWindowService からバー受信
- * 2. featureVectorService で特徴ベクトル計算
- * 3. 全ノートと類似度比較
- * 4. 閾値超過 → notificationTriggerService で通知
- * 
- * 参照: docs/realtime_similarity_notification_architecture.md
+ * Realtime Similarity Service (Phase δ-1: レンズエンジン統一)
+ *
+ * 目的: リアルタイムのバー確定をトリガーに、ノート類似マッチングを実行する。
+ *
+ * 設計 (NOTE_SIMILARITY_FOUNDATION.md §13.2、2026-06-13 実装):
+ * - **本サービスは評価ロジックを持たない**。バー確定ごとに正規マッチングパイプライン
+ *   (`MatchingService.runMatchingPipeline`) を対象シンボルにスコープして起動する
+ *   「薄いトリガー」である。これにより:
+ *   - 特徴量はレンズ基盤 (LensSnapshot + compareLensSnapshots) に完全統一
+ *     (旧実装の簡易 12 次元ベクトル + cosine は廃止 = §13.2 の二重特徴表現を解消)
+ *   - MatchResult / EvaluationLog / Notification の永続化、通知粒度
+ *     (NotificationPreference)、Web Push、通知 SSE (δ-3) まで全て正規経路に乗る
+ *     (= 設計 δ-1 の「callback → evaluateWithPersistence」)
+ * - 15 分 cron と同じコードが走るため、cron とリアルタイムで評価結果が食い違わない
+ *
+ * 運用上の位置づけ: 常駐ワーカー (δ-5) は 15 分 cron 維持の決定 (2026-06-13) により
+ * 当面未デプロイ。本サービスは δ-5 再判断時にワーカーがそのまま使える状態を保つ。
+ * データ源の cTrader → EODHD 差し替えは δ-5 本番化時の必須作業 (§13.4 注意書き)。
  */
 
 import { z } from 'zod';
 import type { OHLCVBar } from '../../infrastructure/market/IMarketDataProvider';
 import type { RollingWindowService, BarCompleteCallback } from './rollingWindowService';
-import { calculateCosineSimilarity } from '../featureVectorService';
+import { MatchingService } from '../matchingService';
+import type { MatchingPipelineRunResult, PipelineRunTrigger } from '../matchingService';
 
 // ========================================
 // 型定義
@@ -31,12 +33,9 @@ import { calculateCosineSimilarity } from '../featureVectorService';
  * サービス設定
  */
 export const RealtimeSimilarityConfigSchema = z.object({
-  // 類似度閾値（0-1、この値以上で通知）
-  similarityThreshold: z.number().min(0).max(1).default(0.85),
-  // 特徴ベクトルの計算に使用するバー数
-  featureWindowBars: z.number().min(1).default(20),
-  // 通知間の最小インターバル（秒）
-  minNotificationIntervalSeconds: z.number().min(0).default(300),
+  // 同一シンボルの評価間の最小インターバル（秒）。
+  // 1m 足等でバー確定が密な場合にパイプラインの連続起動を抑制する
+  minEvaluationIntervalSeconds: z.number().min(0).default(60),
   // デバッグモード
   debug: z.boolean().default(false),
 });
@@ -44,33 +43,28 @@ export const RealtimeSimilarityConfigSchema = z.object({
 export type RealtimeSimilarityConfig = z.infer<typeof RealtimeSimilarityConfigSchema>;
 
 /**
- * 類似度チェック結果
+ * リアルタイム評価 1 回分の結果（正規パイプラインの実行サマリー）
  */
-export interface SimilarityCheckResult {
-  noteId: string;
-  noteTitle: string;
+export interface RealtimeEvaluationResult {
   symbol: string;
-  similarity: number;
-  timestamp: Date;
-  featureVector: number[];
-  matchedAt: Date;
+  startedAt: Date;
+  /** パイプラインが検出したマッチ総数 */
+  totalMatches: number;
+  /** 実際に通知されたマッチ数 */
+  notified: number;
+  errors: string[];
 }
 
 /**
- * 通知トリガーコールバック
+ * 評価完了コールバック（観測用。永続化・通知はパイプライン側の責務）
  */
-export type SimilarityAlertCallback = (result: SimilarityCheckResult) => void;
+export type RealtimeEvaluationCallback = (result: RealtimeEvaluationResult) => void;
 
-/**
- * ノート情報（類似度チェック用）
- */
-export interface NoteForSimilarity {
-  id: string;
-  title: string;
-  symbol: string;
-  featureVector: number[];
-  profileId?: string;
-}
+/** パイプライン起動関数の契約（テストで差し替えるための DI） */
+export type RunMatchingPipelineFn = (options: {
+  trigger?: PipelineRunTrigger;
+  symbolFilter?: string;
+}) => Promise<MatchingPipelineRunResult>;
 
 // ========================================
 // RealtimeSimilarityService クラス
@@ -79,16 +73,17 @@ export interface NoteForSimilarity {
 export class RealtimeSimilarityService {
   private config: RealtimeSimilarityConfig;
   private rollingWindow: RollingWindowService;
-  private notes: NoteForSimilarity[] = [];
-  private recentBars: Map<string, OHLCVBar[]> = new Map();
-  private lastNotificationTime: Map<string, Date> = new Map();
-  private alertCallbacks: SimilarityAlertCallback[] = [];
+  private runPipelineFn: RunMatchingPipelineFn;
+  private lastEvaluationTime: Map<string, Date> = new Map();
+  private inFlightSymbols: Set<string> = new Set();
+  private evaluationCallbacks: RealtimeEvaluationCallback[] = [];
   private barCallback: BarCompleteCallback;
   private isRunning = false;
 
   constructor(
     rollingWindow: RollingWindowService,
-    config?: Partial<RealtimeSimilarityConfig>
+    config?: Partial<RealtimeSimilarityConfig>,
+    deps?: { runPipelineFn?: RunMatchingPipelineFn; matchingService?: MatchingService }
   ) {
     const result = RealtimeSimilarityConfigSchema.safeParse(config || {});
     if (!result.success) {
@@ -96,11 +91,20 @@ export class RealtimeSimilarityService {
     }
     this.config = result.data;
     this.rollingWindow = rollingWindow;
+    // 既定は正規パイプライン (cron と同一コード)。
+    // MatchingService は**1 インスタンスを再利用**する (バー確定ごとの再初期化を避ける。
+    // δ-5 常駐化時の無駄なオーバーヘッド防止。Copilot レビュー対応 PR #404)。
+    // テストでは runPipelineFn / matchingService いずれかを注入してモックする。
+    const matchingService = deps?.matchingService ?? new MatchingService();
+    this.runPipelineFn =
+      deps?.runPipelineFn ?? ((options) => matchingService.runMatchingPipeline(options));
 
     // バー完了時のコールバック
     this.barCallback = (bar: OHLCVBar) => this.onBarComplete(bar);
 
-    console.log(`[RealtimeSimilarity] 初期化: 閾値=${this.config.similarityThreshold}`);
+    console.log(
+      `[RealtimeSimilarity] 初期化 (レンズ統一): 最小評価間隔=${this.config.minEvaluationIntervalSeconds}s`
+    );
   }
 
   // ========================================
@@ -135,47 +139,17 @@ export class RealtimeSimilarityService {
   }
 
   /**
-   * 類似度アラートのコールバックを登録
+   * 評価完了コールバックを登録（観測用）
    */
-  onSimilarityAlert(callback: SimilarityAlertCallback): void {
-    this.alertCallbacks.push(callback);
+  onEvaluation(callback: RealtimeEvaluationCallback): void {
+    this.evaluationCallbacks.push(callback);
   }
 
   /**
    * コールバックを解除
    */
-  offSimilarityAlert(callback: SimilarityAlertCallback): void {
-    this.alertCallbacks = this.alertCallbacks.filter(cb => cb !== callback);
-  }
-
-  /**
-   * 比較対象のノートを設定
-   * 
-   * @param notes - ノート一覧
-   */
-  setNotes(notes: NoteForSimilarity[]): void {
-    this.notes = notes;
-    console.log(`[RealtimeSimilarity] ノート設定: ${notes.length}件`);
-  }
-
-  /**
-   * ノートを追加
-   */
-  addNote(note: NoteForSimilarity): void {
-    // 重複チェック
-    const existing = this.notes.findIndex(n => n.id === note.id);
-    if (existing >= 0) {
-      this.notes[existing] = note;
-    } else {
-      this.notes.push(note);
-    }
-  }
-
-  /**
-   * ノートを削除
-   */
-  removeNote(noteId: string): void {
-    this.notes = this.notes.filter(n => n.id !== noteId);
+  offEvaluation(callback: RealtimeEvaluationCallback): void {
+    this.evaluationCallbacks = this.evaluationCallbacks.filter((cb) => cb !== callback);
   }
 
   /**
@@ -190,7 +164,9 @@ export class RealtimeSimilarityService {
       throw new Error(`設定エラー: ${result.error.message}`);
     }
     this.config = result.data;
-    console.log(`[RealtimeSimilarity] 設定更新: 閾値=${this.config.similarityThreshold}`);
+    console.log(
+      `[RealtimeSimilarity] 設定更新: 最小評価間隔=${this.config.minEvaluationIntervalSeconds}s`
+    );
   }
 
   /**
@@ -198,60 +174,51 @@ export class RealtimeSimilarityService {
    */
   getStats(): {
     isRunning: boolean;
-    noteCount: number;
     symbolCount: number;
-    similarityThreshold: number;
+    inFlightCount: number;
+    minEvaluationIntervalSeconds: number;
   } {
     return {
       isRunning: this.isRunning,
-      noteCount: this.notes.length,
-      symbolCount: this.recentBars.size,
-      similarityThreshold: this.config.similarityThreshold,
+      symbolCount: this.lastEvaluationTime.size,
+      inFlightCount: this.inFlightSymbols.size,
+      minEvaluationIntervalSeconds: this.config.minEvaluationIntervalSeconds,
     };
   }
 
   /**
-   * 手動で類似度チェック実行
-   * 
-   * @param symbol - シンボル
-   * @param featureVector - 特徴ベクトル
+   * 指定シンボルをレンズエンジンで評価し、結果を永続化する (δ-1 の evaluateWithPersistence)。
+   *
+   * 実体は正規マッチングパイプラインのシンボルスコープ起動。
+   * MatchResult / EvaluationLog / Notification の生成、通知粒度・クールダウン・Push は
+   * 全てパイプライン側 (cron と同一コード) が行う。
    */
-  checkSimilarity(symbol: string, featureVector: number[]): SimilarityCheckResult[] {
-    const results: SimilarityCheckResult[] = [];
-    const now = new Date();
-
-    // 同じシンボルのノートのみ比較
-    const targetNotes = this.notes.filter(n => n.symbol === symbol);
-
-    for (const note of targetNotes) {
-      const similarity = calculateCosineSimilarity(featureVector, note.featureVector);
-
-      if (this.config.debug) {
-        console.log(`[RealtimeSimilarity] ${note.title}: similarity=${similarity.toFixed(4)}`);
-      }
-
-      if (similarity >= this.config.similarityThreshold) {
-        results.push({
-          noteId: note.id,
-          noteTitle: note.title,
-          symbol,
-          similarity,
-          timestamp: now,
-          featureVector,
-          matchedAt: now,
-        });
+  async evaluateWithPersistence(symbol: string): Promise<RealtimeEvaluationResult> {
+    const startedAt = new Date();
+    const run = await this.runPipelineFn({ trigger: 'realtime', symbolFilter: symbol });
+    const result: RealtimeEvaluationResult = {
+      symbol,
+      startedAt,
+      totalMatches: run.totalMatches,
+      notified: run.notified,
+      errors: [...run.errors],
+    };
+    for (const callback of this.evaluationCallbacks) {
+      try {
+        callback(result);
+      } catch (callbackError) {
+        console.warn('[RealtimeSimilarity] コールバックエラー (継続):', callbackError);
       }
     }
-
-    return results;
+    return result;
   }
 
   // ========================================
-  // 内部メソッド
+  // 内部処理
   // ========================================
 
   /**
-   * バー完了時の処理
+   * バー確定時: クールダウンと多重起動を抑制した上でシンボル評価を起動する
    */
   private onBarComplete(bar: OHLCVBar): void {
     const symbol = bar.symbol;
@@ -260,189 +227,43 @@ export class RealtimeSimilarityService {
       return;
     }
 
-    // 最近のバーを保存
-    let bars = this.recentBars.get(symbol);
-    if (!bars) {
-      bars = [];
-      this.recentBars.set(symbol, bars);
-    }
-    bars.push(bar);
-
-    // 窓サイズを超えたら古いバーを削除
-    while (bars.length > this.config.featureWindowBars) {
-      bars.shift();
-    }
-
-    // 必要なバー数が揃っていない場合はスキップ
-    if (bars.length < this.config.featureWindowBars) {
+    // 同一シンボルの評価が走行中なら多重起動しない
+    if (this.inFlightSymbols.has(symbol)) {
       if (this.config.debug) {
-        console.log(`[RealtimeSimilarity] ${symbol}: バー不足 (${bars.length}/${this.config.featureWindowBars})`);
+        console.log(`[RealtimeSimilarity] ${symbol}: 評価走行中のためスキップ`);
       }
       return;
     }
 
-    // 特徴ベクトルを計算
-    const featureVector = this.calculateFeatureVector(bars);
-    if (!featureVector || featureVector.length === 0) {
+    // クールダウン (1m 足等での連続起動を抑制)
+    const last = this.lastEvaluationTime.get(symbol);
+    const intervalMs = this.config.minEvaluationIntervalSeconds * 1000;
+    if (last && Date.now() - last.getTime() < intervalMs) {
+      if (this.config.debug) {
+        console.log(`[RealtimeSimilarity] ${symbol}: クールダウン中のためスキップ`);
+      }
       return;
     }
 
-    // 類似度チェック
-    const matches = this.checkSimilarity(symbol, featureVector);
-
-    // マッチしたノートごとに通知
-    for (const match of matches) {
-      this.triggerAlert(match);
-    }
-  }
-
-  /**
-   * 特徴ベクトルを計算
-   * 
-   * 注意: 実際の実装では featureVectorService を使用
-   *       ここでは簡易版として OHLCV から直接計算
-   */
-  private calculateFeatureVector(bars: OHLCVBar[]): number[] {
-    if (bars.length === 0) {
-      return [];
-    }
-
-    // 簡易特徴ベクトル（12次元）
-    // 実際は featureVectorService.calculateFeatureVector() を使用
-    const closes = bars.map(b => b.close);
-    const highs = bars.map(b => b.high);
-    const lows = bars.map(b => b.low);
-    const volumes = bars.map(b => b.volume);
-
-    // 価格変化率（正規化）
-    const priceChanges: number[] = [];
-    for (let i = 1; i < closes.length; i++) {
-      priceChanges.push((closes[i] - closes[i - 1]) / closes[i - 1]);
-    }
-
-    // ボラティリティ
-    const volatility = this.calculateVolatility(closes);
-
-    // ATR（簡易版）
-    const atr = this.calculateATR(highs, lows, closes);
-
-    // ボリューム変化
-    const volumeChange = volumes.length > 1
-      ? (volumes[volumes.length - 1] - volumes[0]) / (volumes[0] || 1)
-      : 0;
-
-    // 12次元ベクトルを構築
-    const vector = [
-      ...priceChanges.slice(-5),                    // 直近5期間の価格変化率
-      volatility,                                    // ボラティリティ
-      atr,                                           // ATR
-      volumeChange,                                  // ボリューム変化
-      (closes[closes.length - 1] - closes[0]) / closes[0],  // 全体の価格変化率
-      Math.max(...highs) / Math.min(...lows) - 1,   // 高低差比率
-      this.calculateTrend(closes),                  // トレンド強度
-      this.calculateMomentum(closes),               // モメンタム
-    ];
-
-    // 12次元に調整
-    while (vector.length < 12) {
-      vector.push(0);
-    }
-
-    return vector.slice(0, 12);
-  }
-
-  /**
-   * ボラティリティを計算
-   */
-  private calculateVolatility(closes: number[]): number {
-    if (closes.length < 2) return 0;
-    const returns = [];
-    for (let i = 1; i < closes.length; i++) {
-      returns.push(Math.log(closes[i] / closes[i - 1]));
-    }
-    const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
-    const variance = returns.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / returns.length;
-    return Math.sqrt(variance);
-  }
-
-  /**
-   * ATR を計算
-   */
-  private calculateATR(highs: number[], lows: number[], closes: number[]): number {
-    if (highs.length < 2) return 0;
-    const trs = [];
-    for (let i = 1; i < highs.length; i++) {
-      const tr = Math.max(
-        highs[i] - lows[i],
-        Math.abs(highs[i] - closes[i - 1]),
-        Math.abs(lows[i] - closes[i - 1])
-      );
-      trs.push(tr);
-    }
-    return trs.reduce((a, b) => a + b, 0) / trs.length / closes[closes.length - 1];
-  }
-
-  /**
-   * トレンド強度を計算
-   */
-  private calculateTrend(closes: number[]): number {
-    if (closes.length < 2) return 0;
-    const n = closes.length;
-    let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
-    for (let i = 0; i < n; i++) {
-      sumX += i;
-      sumY += closes[i];
-      sumXY += i * closes[i];
-      sumX2 += i * i;
-    }
-    const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
-    return slope / closes[0];
-  }
-
-  /**
-   * モメンタムを計算
-   */
-  private calculateMomentum(closes: number[]): number {
-    if (closes.length < 10) return 0;
-    const current = closes[closes.length - 1];
-    const past = closes[closes.length - 10];
-    return (current - past) / past;
-  }
-
-  /**
-   * アラートをトリガー
-   */
-  private triggerAlert(result: SimilarityCheckResult): void {
-    // 通知間隔チェック
-    const lastTime = this.lastNotificationTime.get(result.noteId);
-    if (lastTime) {
-      const elapsed = (Date.now() - lastTime.getTime()) / 1000;
-      if (elapsed < this.config.minNotificationIntervalSeconds) {
-        if (this.config.debug) {
-          console.log(`[RealtimeSimilarity] ${result.noteTitle}: 通知スキップ（間隔不足: ${elapsed.toFixed(0)}s）`);
+    this.inFlightSymbols.add(symbol);
+    this.lastEvaluationTime.set(symbol, new Date());
+    void this.evaluateWithPersistence(symbol)
+      .then((result) => {
+        if (this.config.debug || result.totalMatches > 0) {
+          console.log(
+            `[RealtimeSimilarity] ${symbol}: matches=${result.totalMatches} notified=${result.notified}` +
+              (result.errors.length > 0 ? ` errors=${result.errors.length}` : '')
+          );
         }
-        return;
-      }
-    }
-
-    // 通知時刻を記録
-    this.lastNotificationTime.set(result.noteId, new Date());
-
-    console.log(`[RealtimeSimilarity] アラート: ${result.noteTitle} (類似度: ${(result.similarity * 100).toFixed(1)}%)`);
-
-    // コールバック呼び出し
-    for (const callback of this.alertCallbacks) {
-      try {
-        callback(result);
-      } catch (error) {
-        console.error('[RealtimeSimilarity] コールバックエラー:', error);
-      }
-    }
+      })
+      .catch((error) => {
+        // 評価失敗は次のバー確定で自己回復する (サービスは止めない)
+        console.error(`[RealtimeSimilarity] ${symbol}: 評価失敗 (継続):`, error);
+      })
+      .finally(() => {
+        this.inFlightSymbols.delete(symbol);
+      });
   }
 }
-
-// ========================================
-// エクスポート
-// ========================================
 
 export default RealtimeSimilarityService;

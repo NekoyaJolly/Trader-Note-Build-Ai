@@ -41,7 +41,7 @@ import type { LensSimilarityBreakdownEntry } from '../shared/similarity/similari
 /**
  * matching pipeline の起動元（observability 用）。
  */
-export type PipelineRunTrigger = 'cron' | 'manual_test' | 'scheduler' | 'unknown';
+export type PipelineRunTrigger = 'cron' | 'manual_test' | 'scheduler' | 'realtime' | 'unknown';
 
 /**
  * マッチング評価エンジンの選択（Phase α-3、移行戦略 §9-3）。
@@ -183,11 +183,13 @@ export class MatchingService {
    * フェーズ8: loadActiveNotesForMatchingAsPrisma を使用し、enabled/pausedUntil をフィルタ
    * DB統一: Prisma型を直接使用（FS型への変換をスキップ）
    */
-  async checkForMatches(userId?: string): Promise<MatchResultDTO[]> {
+  async checkForMatches(userId?: string, symbolFilter?: string): Promise<MatchResultDTO[]> {
     // 有効なノートのみを取得（Prisma型で直接取得）。
     // Phase α-4: userId 指定時 (手動チェック等の HTTP 経路) は所有ノートのみ評価。
     // cron パイプラインは未指定で全ユーザーのノートを評価する。
-    const notes = await this.noteService.loadActiveNotesForMatchingAsPrisma(userId);
+    // Phase δ-1: symbolFilter 指定時 (リアルタイムのシンボルスコープ評価) は
+    // **DB 側で symbol 絞り込み**し、毎バーの全ノート読み込みコストを避ける。
+    const notes = await this.noteService.loadActiveNotesForMatchingAsPrisma(userId, symbolFilter);
 
     // マッチング対象がない場合は早期リターン
     if (notes.length === 0) {
@@ -891,7 +893,7 @@ export class MatchingService {
    * Side-A の checkForMatches() と同じ MatchResultDTO 形式で返すため、
    * 通知パイプラインに統一的に流せる。
    */
-  async checkForSideBMatches(): Promise<MatchResultDTO[]> {
+  async checkForSideBMatches(symbolFilter?: string): Promise<MatchResultDTO[]> {
     const matches: MatchResultDTO[] = [];
 
     try {
@@ -905,6 +907,10 @@ export class MatchingService {
 
       // 2. シンボルごとに市場データを取得して評価
       for (const [symbol, evaluatorEntries] of evaluatorsBySymbol.entries()) {
+        // Phase δ-1: symbolFilter 指定時はそのシンボルのみ評価
+        if (symbolFilter && symbol !== symbolFilter) {
+          continue;
+        }
         try {
           const currentMarket = await this.marketDataService.getCurrentMarketDataWithIndicators(symbol);
           const snapshot = convertMarketDataToSnapshot(currentMarket);
@@ -1007,11 +1013,12 @@ export class MatchingService {
    * 両方のノートソースからマッチを収集し、統一された MatchResultDTO[] を返す。
    * 通知パイプラインは checkForMatchesWithControl() から統一的に呼ばれる。
    */
-  async checkForAllMatches(): Promise<MatchResultDTO[]> {
+  async checkForAllMatches(symbolFilter?: string): Promise<MatchResultDTO[]> {
     // Side-A と Side-B を並行実行
+    // Phase δ-1: symbolFilter 指定時 (リアルタイム) は両サイドをそのシンボルに絞る
     const [sideAMatches, sideBMatches] = await Promise.all([
-      this.checkForMatches(),
-      this.checkForSideBMatches(),
+      this.checkForMatches(undefined, symbolFilter),
+      this.checkForSideBMatches(symbolFilter),
     ]);
 
     console.log(
@@ -1027,7 +1034,7 @@ export class MatchingService {
    * Side-A & Side-B の全マッチを収集 → 同時ヒット制御 → 通知判定 → 送信
    */
   async runMatchingPipeline(
-    options: { trigger?: PipelineRunTrigger } = {},
+    options: { trigger?: PipelineRunTrigger; symbolFilter?: string } = {},
   ): Promise<MatchingPipelineRunResult> {
     const runId = uuidv4();
     const trigger = options.trigger ?? 'unknown';
@@ -1045,8 +1052,8 @@ export class MatchingService {
     let lensShadow: LensShadowSummary | undefined;
 
     try {
-      // 1. 統合マッチング（Side-A + Side-B）
-      const allMatches = await this.checkForAllMatches();
+      // 1. 統合マッチング（Side-A + Side-B）。Phase δ-1: symbolFilter でシンボルスコープ可
+      const allMatches = await this.checkForAllMatches(options.symbolFilter);
       totalMatches = allMatches.length;
 
       // 1.5 レンズ類似度シャドー評価 (Phase α-2、NOTE_SIMILARITY_FOUNDATION.md §9-2)

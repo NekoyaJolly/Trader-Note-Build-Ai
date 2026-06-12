@@ -12,12 +12,12 @@ export {
   BarCompleteCallback,
 } from './rollingWindowService';
 
-// Realtime Similarity Service
+// Realtime Similarity Service (Phase δ-1: レンズエンジン統一)
 export {
   RealtimeSimilarityService,
   RealtimeSimilarityConfigSchema,
   RealtimeSimilarityConfig,
-  SimilarityCheckResult,
-  SimilarityAlertCallback,
-  NoteForSimilarity,
+  RealtimeEvaluationResult,
+  RealtimeEvaluationCallback,
+  RunMatchingPipelineFn,
 } from './realtimeSimilarityService';

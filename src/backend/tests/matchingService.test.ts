@@ -798,8 +798,8 @@ describe('MatchingService lens エンジン (Phase α-3)', () => {
 
     await service.checkForMatches('user-a-uuid');
 
-    // HTTP 経路 (手動チェック) では所有ノートのみ評価対象になる
-    expect(mocks.loadActiveNotesForMatchingAsPrisma).toHaveBeenCalledWith('user-a-uuid');
+    // HTTP 経路 (手動チェック) では所有ノートのみ評価対象になる (symbolFilter は未指定)
+    expect(mocks.loadActiveNotesForMatchingAsPrisma).toHaveBeenCalledWith('user-a-uuid', undefined);
   });
 
   it('checkForMatches() 引数なし (cron 経路) はユーザー横断でノートを取得する (Phase α-4 異常系防止)', async () => {
@@ -814,8 +814,24 @@ describe('MatchingService lens エンジン (Phase α-3)', () => {
 
     await service.checkForMatches();
 
-    // cron パイプラインは従来通り全ユーザーのノートを評価する (userId フィルタなし)
-    expect(mocks.loadActiveNotesForMatchingAsPrisma).toHaveBeenCalledWith(undefined);
+    // cron パイプラインは従来通り全ユーザーのノートを評価する (userId / symbolFilter なし)
+    expect(mocks.loadActiveNotesForMatchingAsPrisma).toHaveBeenCalledWith(undefined, undefined);
+  });
+
+  it('checkForMatches(undefined, symbol) は DB 側で symbol 絞り込みする (Phase δ-1 リアルタイム)', async () => {
+    const note = createPrismaNote({ symbol: 'XAUUSD' });
+    const { service, mocks } = buildLensService(note, {
+      activeNotes: 1,
+      notesWithSnapshot: 1,
+      symbols: 1,
+      evaluations: [{ note, timeframe: '15m', comparison: triggeredComparison }],
+      errors: [],
+    });
+
+    await service.checkForMatches(undefined, 'XAUUSD');
+
+    // メモリ filter ではなく DB クエリに symbol を渡す (毎バーの全ノート読み込みを避ける)
+    expect(mocks.loadActiveNotesForMatchingAsPrisma).toHaveBeenCalledWith(undefined, 'XAUUSD');
   });
 
   it('triggered=false の評価は EvaluationLog のみ記録し DTO を返さない(勝率の分母)', async () => {
