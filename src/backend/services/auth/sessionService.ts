@@ -9,14 +9,36 @@ import jwt from 'jsonwebtoken';
 import type { CookieOptions, Response } from 'express';
 import { z } from 'zod';
 
-// 環境変数から秘密鍵を取得（必須）
-const JWT_SECRET = process.env.JWT_SECRET || 'development-secret-change-in-production';
-if (!JWT_SECRET || JWT_SECRET === 'development-secret-change-in-production') {
-  console.warn('[SessionService] 警告: JWT_SECRET が設定されていません。本番環境では必ず設定してください。');
-}
-
 // 本番環境かどうかを判定
 const isProduction = process.env.NODE_ENV === 'production';
+
+const DEVELOPMENT_JWT_SECRET = 'development-secret-change-in-production';
+const SAMPLE_JWT_SECRET = 'your-jwt-secret-change-in-production';
+
+function isInsecureJwtSecret(secret: string): boolean {
+  return secret === DEVELOPMENT_JWT_SECRET || secret === SAMPLE_JWT_SECRET;
+}
+
+/**
+ * JWT 署名鍵を解決する。
+ *
+ * 本番で既知の既定値を使うと任意の JWT を作れるため、設定漏れは起動時に止める。
+ */
+export function resolveJwtSecret(env: NodeJS.ProcessEnv = process.env): string {
+  const secret = env.JWT_SECRET?.trim() || DEVELOPMENT_JWT_SECRET;
+  const production = env.NODE_ENV === 'production';
+
+  if (production && isInsecureJwtSecret(secret)) {
+    throw new Error('JWT_SECRET が本番環境用に設定されていません');
+  }
+
+  return secret;
+}
+
+const JWT_SECRET = resolveJwtSecret();
+if (!isProduction && isInsecureJwtSecret(JWT_SECRET)) {
+  console.warn('[SessionService] 警告: JWT_SECRET が設定されていません。本番環境では必ず設定してください。');
+}
 
 // トークンの有効期限
 const ACCESS_TOKEN_EXPIRES_IN = '7d'; // アクセストークン: 7日（cTrader連携なので長め）

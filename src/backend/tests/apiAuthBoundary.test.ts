@@ -8,7 +8,8 @@
 import type { NextFunction, Request, Response } from 'express';
 import { requireAuth, requireRole } from '../../middleware/authMiddleware';
 import { cronAuth } from '../../middleware/cronAuth';
-import { sessionService } from '../services/auth/sessionService';
+import { resolveJwtSecret, sessionService } from '../services/auth/sessionService';
+import { isTradingOrderExecutionEnabled } from '../services/tradingOrderExecutionGate';
 import { requireMailSecurityToken } from '../../side-b/routes/mailRoutes';
 
 interface MockResponse extends Response {
@@ -81,6 +82,7 @@ function runRequireRole(req: Request, role: 'admin' = 'admin'): { readonly res: 
 describe('API 認証境界', () => {
   const originalCronSecret = process.env.CRON_SECRET;
   const originalMailSecurityToken = process.env.MAIL_SECURITY_TOKEN;
+  const originalTradingOrderExecutionEnabled = process.env.TRADING_ORDER_EXECUTION_ENABLED;
 
   afterEach(() => {
     if (originalCronSecret === undefined) {
@@ -93,6 +95,12 @@ describe('API 認証境界', () => {
       delete process.env.MAIL_SECURITY_TOKEN;
     } else {
       process.env.MAIL_SECURITY_TOKEN = originalMailSecurityToken;
+    }
+
+    if (originalTradingOrderExecutionEnabled === undefined) {
+      delete process.env.TRADING_ORDER_EXECUTION_ENABLED;
+    } else {
+      process.env.TRADING_ORDER_EXECUTION_ENABLED = originalTradingOrderExecutionEnabled;
     }
   });
 
@@ -192,5 +200,29 @@ describe('API 認証境界', () => {
       error: 'MAIL_SECURITY_TOKEN が設定されていません',
     });
     expect(next).not.toHaveBeenCalled();
+  });
+
+  it('本番の JWT_SECRET 設定漏れは起動前に拒否する', () => {
+    expect(() => resolveJwtSecret({ NODE_ENV: 'production' })).toThrow(
+      'JWT_SECRET が本番環境用に設定されていません',
+    );
+    expect(() =>
+      resolveJwtSecret({
+        NODE_ENV: 'production',
+        JWT_SECRET: 'your-jwt-secret-change-in-production',
+      }),
+    ).toThrow('JWT_SECRET が本番環境用に設定されていません');
+  });
+
+  it('開発環境の JWT_SECRET 未設定は開発用秘密鍵で継続する', () => {
+    expect(resolveJwtSecret({ NODE_ENV: 'development' })).toBe(
+      'development-secret-change-in-production',
+    );
+  });
+
+  it('実発注ゲートは true 明示時だけ有効になる', () => {
+    expect(isTradingOrderExecutionEnabled({})).toBe(false);
+    expect(isTradingOrderExecutionEnabled({ TRADING_ORDER_EXECUTION_ENABLED: 'false' })).toBe(false);
+    expect(isTradingOrderExecutionEnabled({ TRADING_ORDER_EXECUTION_ENABLED: 'true' })).toBe(true);
   });
 });
