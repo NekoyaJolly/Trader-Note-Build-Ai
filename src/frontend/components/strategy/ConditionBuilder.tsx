@@ -1111,7 +1111,7 @@ function SingleLensCondition({
       </select>
 
       {/* 値（値種別に応じた入力） */}
-      {(featureInfo.valueKind === 'enum' || featureInfo.valueKind === 'event') && (
+      {(featureInfo.valueKind === 'enum' || featureInfo.valueKind === 'category' || featureInfo.valueKind === 'event') && (
         <select
           className={baseSelectClass}
           value={typeof condition.value === 'string' ? condition.value : String(featureInfo.defaultValue)}

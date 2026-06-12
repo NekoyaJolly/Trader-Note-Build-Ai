@@ -48,6 +48,12 @@ export type FeatureComparator =
       readonly kind: 'categoricalEnum';
       readonly table?: Readonly<Record<string, Readonly<Record<string, number>>>>;
       readonly skipValues?: ReadonlyArray<string>;
+      /**
+       * 取り得る値の正準リスト (レンズ条件タイプ #3 の数値エンコード = この index)。
+       * 宣言されたカテゴリ enum のみ条件タイプで比較可能になる (加算的拡張)。
+       * フロント UI の選択肢の並びはこのリストと同期させること (ドリフト注意)。
+       */
+      readonly values?: ReadonlyArray<string>;
     }
   | { readonly kind: 'bool' }
   | { readonly kind: 'event' }
@@ -237,7 +243,13 @@ function buildBiasTable(): Readonly<Record<string, Readonly<Record<string, numbe
 const DOW_THEORY_DEFINITION: LensComparisonDefinition = {
   layer: 'state',
   features: {
-    trend_state: { kind: 'categoricalEnum', table: buildTrendStateTable(), skipValues: ['unclear'] },
+    trend_state: {
+      kind: 'categoricalEnum',
+      table: buildTrendStateTable(),
+      skipValues: ['unclear'],
+      // 条件タイプ用の正準値リスト (DowTheoryLens の TrendState と同期)
+      values: ['uptrend', 'downtrend', 'range', 'unclear'],
+    },
     trend_phase: { kind: 'orderedEnum', order: ['early', 'middle', 'late'], skipValues: ['unknown'] },
     recent_higher_high: { kind: 'bool' },
     recent_higher_low: { kind: 'bool' },
@@ -537,8 +549,16 @@ export function encodeLensFeatureValueAsNumber(
     case 'normalizedLinear':
     case 'tanhLinear':
       return typeof value === 'number' && Number.isFinite(value) ? value : null;
+    case 'categoricalEnum': {
+      // 正準値リスト (values) を宣言したカテゴリ enum のみ index で数値化する (#3 第2弾)
+      if (typeof value !== 'string' || !comparator.values) {
+        return null;
+      }
+      const index = comparator.values.indexOf(value);
+      return index >= 0 ? index : null;
+    }
     default:
-      // categoricalEnum / cyclic / skip は条件タイプ第1弾では対象外(加算的に拡張する)
+      // cyclic / skip は条件タイプ対象外(加算的に拡張する)
       return null;
   }
 }

@@ -36,6 +36,8 @@ import {
   isBacktestTimeframe,
 } from './strategyBacktestService';
 import { fetchIndicatorSeries, fetchIndicatorSeriesByStrategyVersion } from './analysisEngineClient';
+// 状態レンズ (#3 第2弾): TS 側計算の per-bar 系列化
+import { appendStateLensSeriesToCache } from '../../services/stateLensSeries';
 import { fetchAndCacheOhlcv } from './fetchAndCacheOhlcv';
 import type { AlertWithStrategy, TriggerAlertResult } from './strategyAlertService';
 import { listEnabledAlerts, triggerAlert } from './strategyAlertService';
@@ -255,17 +257,26 @@ export class LiveStrategyEvaluationService {
 
     // === レンズ条件 (#3): per-bar レンズ系列を基準足キャッシュに追加(バックテストと同じ経路) ===
     const allLensConditions = entryPlans.flatMap((plan) => collectLensConditions(plan.group));
+    const baseLensConditions = allLensConditions.filter(
+      (c) => !c.timeframeOverride || c.timeframeOverride === timeframe
+    );
     await appendLensSeriesToCache({
       indicatorCache,
-      lensConditions: allLensConditions.filter(
-        (c) => !c.timeframeOverride || c.timeframeOverride === timeframe
-      ),
+      lensConditions: baseLensConditions,
       symbol: strategy.symbol,
       timeframe,
       startDate: bars[0].timestamp,
       endDate: bars[bars.length - 1].timestamp,
       closes: bars.map((bar) => bar.close),
       fetchIndicatorSeriesFn: this.fetchLensSeriesFn,
+    });
+    // 状態レンズ (#3 第2弾): TS 側計算のみ・analysis-engine 不要
+    await appendStateLensSeriesToCache({
+      indicatorCache,
+      lensConditions: baseLensConditions,
+      symbol: strategy.symbol,
+      timeframe,
+      bars,
     });
 
     // === MTF: timeframeOverride 条件用の別時間足ビューを準備 (Phase γ) ===
@@ -322,15 +333,23 @@ export class LiveStrategyEvaluationService {
         return { ...base, timeframe, evaluations: [], triggered: false, skipReason: 'mtf_series_alignment_mismatch' };
       }
       // レンズ条件 (#3): この足を override に指定したレンズ条件の系列をビュー側キャッシュへ
+      const viewLensConditions = allLensConditions.filter((c) => c.timeframeOverride === tf);
       await appendLensSeriesToCache({
         indicatorCache: viewCaches.indicatorCache,
-        lensConditions: allLensConditions.filter((c) => c.timeframeOverride === tf),
+        lensConditions: viewLensConditions,
         symbol: strategy.symbol,
         timeframe: tf,
         startDate: viewBars[0].timestamp,
         endDate: viewBars[viewBars.length - 1].timestamp,
         closes: viewBars.map((bar) => bar.close),
         fetchIndicatorSeriesFn: this.fetchLensSeriesFn,
+      });
+      await appendStateLensSeriesToCache({
+        indicatorCache: viewCaches.indicatorCache,
+        lensConditions: viewLensConditions,
+        symbol: strategy.symbol,
+        timeframe: tf,
+        bars: viewBars,
       });
       timeframeViews.set(tf, {
         data: viewBars,
