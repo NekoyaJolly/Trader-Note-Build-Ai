@@ -36,6 +36,9 @@ import {
   getLensFeatureComparator,
 } from '../shared/similarity/lensComparators';
 import { makeLensCacheKey, type LensCondition } from '../backend/services/strategyConditionEvaluator';
+// `import type` した値識別子への typeof 型クエリは TS 3.8+ で合法 (型位置での参照のみ。
+// tsc / ESLint とも通過することを検証済み。`typeof import(...)` 形式は本リポの
+// @typescript-eslint/consistent-type-imports が import() 型注釈を禁止するため使わない)
 import type { fetchIndicatorSeries } from '../backend/services/analysisEngineClient';
 
 /**
