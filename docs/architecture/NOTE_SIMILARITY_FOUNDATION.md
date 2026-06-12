@@ -284,6 +284,7 @@ similarity(noteSnapshot, marketSnapshot):
 | 2026-06-13 | **レンズ条件タイプ フォローアップ(§12)**: orderedEnum の順序範囲演算子 + エントリープレビュー対応(`/api/chart/indicator-series` に lensIds、backend 計算の数値エンコード済み lensSeries をフロントで整列・評価)。詳細は追補4。 |
 | 2026-06-13 | **状態系レンズ per-bar 化 第1段(§12.3、TS 計算可能 3 種)**: time_session / dow_theory / volatility_regime をレンズ条件タイプで使用可能に(analysis-engine 変更なし)。窓 150 本固定でスナップショットと同じ「見え方」を per-bar 化。詳細は追補5。 |
 | 2026-06-13 | **状態系レンズ per-bar 化 第2段(§12.3/§12.6、engine 計算 3 種) = レンズ条件タイプ フルスコープ完了**: smc / chart_pattern / wyckoff を analysis-engine の per-bar 系列 API(`stateLensSeries`)で条件タイプ対応。これで全 8 状態レンズ + コア指標レンズが条件ツリーに合流。詳細は追補6。 |
+| 2026-06-13 | **Phase δ-3/δ-4 実装(§13.3)**: 認証付き per-user 通知 SSE(`GET /api/notifications/stream`)+ フロント購読(`useNotificationStream`)。未読バッジと通知一覧がページ更新なしで自動更新。詳細は追補7。 |
 
 ### 実装のローカル詳細(2026-06-10、正本への追補)
 
@@ -345,6 +346,14 @@ similarity(noteSnapshot, marketSnapshot):
 - **TS 側**: `appendStateLensSeriesToCache` に `engineSeries`(取得設定)を追加。payload→features 変換は各レンズの `smcPayloadToFeatures` 等を export して再利用(変換の単一情報源)。**旧バージョン engine(配列なし)は警告スキップ = 条件不成立**(graceful degrade、エンジンと Node のデプロイ順序に依存しない)。系列長とバー列の不一致は中断。
 - **categoricalEnum の values 宣言を追加**: `last_structure_event` / `wyckoff_phase` / `pattern_detected` / `pattern_direction_bias`(analysis-engine の Literal と同期、ドリフト注意)。フロント UI カタログ(SMC ゾーン/構造イベント/OB 距離/流動性/FVG、チャートパターン 12 種、ワイコフフェーズ 7 種/Spring/SOS 等)も同並びで追加。
 - **コスト**: per-bar 計算は O(n × 窓150)。要求されたレンズのみ計算(未要求はゼロコスト)。**実測: 3 レンズ同時 × 2,000 本 ≈ 12s**(Python 3.12)。長期間バックテスト対策として `stateLensSeries` 要求時は Node 側タイムアウトを 180s に引き上げ(screening BT と同水準)。それでも不足する場合の最適化(ピボットを全系列 1 回計算 → causal 参照化で定数倍削減)は運用観察後の後続とする。
+
+### 実装のローカル詳細・追補7(2026-06-13、§13.3 Phase δ-3/δ-4 通知 SSE)
+
+- **`GET /api/notifications/stream`**(認証付き per-user SSE、δ-3 の 2026-06-13 決定どおり新設): `requireAuth` 配下で `req.user.userId` フィルタ。URL にユーザー ID を含めない(パス不一致チェック自体を不要化)。イベント: `notification`(新着 1 件ごと)/ `unread_count`(接続時 + 新着時)/ `heartbeat`(30 秒)。
+- **配信 = サーバ側 DB ポーリング(10 秒)**: Cloud Run max-instances=5 では in-process EventEmitter は「cron を受けたインスタンス ≠ SSE 接続中のインスタンス」で届かないため、**DB をインスタンス間のバスにする**。Postgres LISTEN/NOTIFY は本番接続が Supavisor transaction pooler 経由のため不可、Supabase Realtime は RLS 未整備(認証は cTrader JWT)で per-user 分離を保証できず不採用。通知の主生成源が 15 分 cron のため 10 秒遅延は十分(δ-5 の決定と整合)。
+- **フロント `useNotificationStream`**: 接続はモジュール内 1 本を共有(Header バッジと通知一覧が同時購読しても EventSource は 1 つ)。StrictMode 二重マウント対策は readyState ガード(PR #357 の教訓)。SSE 断時は 30 秒間隔の REST フォールバック + 自動再接続。新着イベントでは一覧を**再取得**する(SSE ペイロードを正としない。一覧の形は REST が正)。
+- Header の未読バッジ 30 秒ポーリングは SSE 購読に置換(初期値と断絶時のみ REST)。
+- **残**: δ-1(休眠中 `realtimeSimilarityService` の簡易 12 次元をレンズエンジンへ統一。常駐ワーカー δ-5 の再判断までは本番経路に乗らないが、§13.2 の二重特徴表現の解消として実施予定)。δ-2 は cron 経路で適用済(ノート=β-2、ストラテジー=#397)のため実質完了。
 
 ---
 

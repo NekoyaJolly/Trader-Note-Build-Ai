@@ -1,10 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import Link from "next/link";
 import NotificationBell from "@/components/NotificationBell";
 import WorkspaceTabs from "./WorkspaceTabs";
-import { fetchUnreadNotificationCount } from "@/lib/api";
+import { useNotificationStream } from "@/hooks/useNotificationStream";
 
 /**
  * アプリ共通ヘッダー
@@ -25,24 +24,8 @@ interface HeaderProps {
 }
 
 export default function Header({ isSidebarOpen, onToggleSidebar }: HeaderProps) {
-  // 未読通知数をAPIから取得
-  const [unreadCount, setUnreadCount] = useState<number>(0);
-
-  useEffect(() => {
-    // 初回読み込み
-    fetchUnreadNotificationCount()
-      .then(setUnreadCount)
-      .catch(console.error);
-
-    // 30秒ごとに更新（ポーリング）
-    const interval = setInterval(() => {
-      fetchUnreadNotificationCount()
-        .then(setUnreadCount)
-        .catch(console.error);
-    }, 30000);
-
-    return () => clearInterval(interval);
-  }, []);
+  // 未読通知数: 通知 SSE で自動更新 (Phase δ-4。初期値と SSE 断時は REST フォールバック)
+  const { unreadCount } = useNotificationStream();
 
   return (
     <header className="sticky top-0 z-30 w-full glass-strong">
