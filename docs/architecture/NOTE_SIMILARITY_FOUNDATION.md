@@ -282,6 +282,7 @@ similarity(noteSnapshot, marketSnapshot):
 | 2026-06-11 | **マッチング切替(§9-3、Phase α-3 第1弾)**: `MATCHING_ENGINE=lens|legacy` フラグ導入(既定 lens、deploy.yml に明示)。lens 経路は `LensNoteCoreService.evaluateNotesForMatching`(シャドー評価とコア共用)の比較結果から score=レンズ類似度・threshold=レンズ閾値で MatchResult/EvaluationLog/通知を生成(旧ルール補正は不適用、トレンド/価格帯は観測情報のみ)。MarketSnapshot upsert は FK 充足のため継続。lens 稼働時はシャドー評価を自動スキップ(二重評価防止)。旧 12 次元経路は legacy ロールバック用に 1 リリース併存 → 安定確認後に削除予定(第2弾)。 |
 | 2026-06-13 | **レンズ条件タイプ 第1弾(§12、インジケーター系)**: `LensCondition`(type='lens') を条件ツリーの leaf 条件に追加。per-bar レンズ系列化 + 数値エンコード + 評価器分岐 + ConditionBuilder UI(`SingleLensCondition`)。backtest/live は `appendLensSeriesToCache` 共用で評価1経路を維持、MTF(`timeframeOverride`)・lookbackBars も既存機構で対応。詳細は下の追補3。 |
 | 2026-06-13 | **レンズ条件タイプ フォローアップ(§12)**: orderedEnum の順序範囲演算子 + エントリープレビュー対応(`/api/chart/indicator-series` に lensIds、backend 計算の数値エンコード済み lensSeries をフロントで整列・評価)。詳細は追補4。 |
+| 2026-06-13 | **状態系レンズ per-bar 化 第1段(§12.3、TS 計算可能 3 種)**: time_session / dow_theory / volatility_regime をレンズ条件タイプで使用可能に(analysis-engine 変更なし)。窓 150 本固定でスナップショットと同じ「見え方」を per-bar 化。詳細は追補5。 |
 
 ### 実装のローカル詳細(2026-06-10、正本への追補)
 
@@ -325,6 +326,16 @@ similarity(noteSnapshot, marketSnapshot):
 - **プレビュー対応**: レンズ特徴系列は**backend で計算して返す**(計算一元化 §2-⑦、フロントにレンズ計算を二重実装しない)。`POST /api/chart/indicator-series` に `lensIds` を追加し、`appendLensSeriesToCache`(backtest/live と同一経路 = 評価1経路)で数値エンコード済み系列を `lensSeries` フィールドとして additive に返す。closes は OHLCVCandle から response.timestamps へ秒精度整列。
 - フロント側: `extractConditionRequirements` が lensId を収集 → `alignSeriesToCandles` が `lens:` キーを**そのまま**整列(lensId は `_`/`#` を含むため canonicalize しない) → `evalLensCondition`(backend `evaluateLensCondition` のミラー。sentinel/欠損/エンコード不能は不成立)。backend 失敗時は lensSeries なし = レンズ条件不成立で描画(安全側)。
 - **フロント二重化(ドリフト注意)**: 値エンコード `encodeLensConditionValue`(enum は LENS_FEATURE_INFO の options 順 = backend orderedEnum の order と同期必須)、キー規約 `makeLensConditionCacheKey`、sentinel は LENS_FEATURE_INFO に宣言。
+
+### 実装のローカル詳細・追補5(2026-06-13、§12.3 状態系レンズ per-bar 化 第1段)
+
+- **対象**: TS 側だけで計算可能な 3 種(`time_session` / `dow_theory` / `volatility_regime`)。analysis-engine 変更なし。`pattern`(ローソク足12種)は既存 PatternCondition と同機能のため条件 UI 対象外。
+- **新設 `src/services/stateLensSeries.ts`**(恒久。lensSnapshotBuilder = 1 時点 snapshot / 本モジュール = per-bar 系列という責務分離): `computeStateLensFeatureSeries` + `appendStateLensSeriesToCache`。後者を backtest / live / プレビューの 3 経路が共用(インジ系 `appendLensSeriesToCache` と対、評価1経路)。
+- **窓 = `STATE_LENS_CONTEXT_BARS` = 150 本固定**(lensSnapshotBuilder の DEFAULT_WINDOW_BARS と同期。ドリフト注意)。per-bar 値は「その瞬間にスナップショットを作ったら見えたはずの状態」と一致し、**柱1(ノート類似)と柱2(条件)が同じ状態定義を共有**する。lookahead 禁止は窓がバー i で終わることで構造的に保証(ピボットの rightBars 本確定遅延も窓内で自然に表現される)。
+- **categoricalEnum の条件対応**: comparator 定義に `values`(正準値リスト)を追加し、その index で数値エンコード(`encodeLensFeatureValueAsNumber`)。**`values` を宣言したカテゴリ enum だけが条件で使える**(現状 `trend_state` のみ。加算的拡張)。フロントは valueKind `category`(等価演算子のみ。options 順 = values 順、ドリフト注意)。
+- **state lensId 形式**: 種別名そのまま(例 `dow_theory`、`#` パラメータなし)。`appendLensSeriesToCache` は `ind:` 以外を無視し、状態系は `appendStateLensSeriesToCache` の担当(担当分離)。
+- **プレビュー経路**: 欠損足(EODHD 由来 OHLC=null ギャップ)を除外した有効バー軸で計算し、response.timestamps 軸へ秒精度で整列(`chart/candles 欠損足の消費規約`と同方針)。
+- **残(第2段)**: smc / chart_pattern / wyckoff — analysis-engine の payload 配列化(§12.6 確定方針)が前提。
 
 ---
 

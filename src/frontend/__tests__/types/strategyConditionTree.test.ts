@@ -255,6 +255,25 @@ describe("レンズ条件ヘルパ（レンズ条件タイプ #3）", () => {
     expect(parseLensIdForEdit("ind:rsi")).toBeNull();
     expect(parseLensIdForEdit("ind:unknown#p14")).toBeNull();
     expect(parseLensIdForEdit("rsi#p14")).toBeNull();
+    // 未対応の状態レンズ (smc 等) も null (第2弾後半で追加)
+    expect(parseLensIdForEdit("smc")).toBeNull();
+  });
+
+  it("状態系レンズは lensId = 種別名そのままで往復安定（#3 第2弾）", () => {
+    for (const kind of ["time_session", "dow_theory", "volatility_regime"] as const) {
+      const lensId = buildLensId(kind, {});
+      expect(lensId).toBe(kind);
+      expect(parseLensIdForEdit(lensId)).toEqual({ kind, params: {} });
+    }
+  });
+
+  it("category（順序なし列挙）は等価演算子のみ、エンコードは options 順 index", () => {
+    expect(lensOperatorsForValueKind("category")).toEqual(["=", "!="]);
+    const trendState = LENS_FEATURE_INFO.dow_theory.find((i) => i.key === "trend_state");
+    // backend lensComparators の values = ['uptrend','downtrend','range','unclear'] と同期
+    expect(trendState && encodeLensConditionValue(trendState, "uptrend")).toBe(0);
+    expect(trendState && encodeLensConditionValue(trendState, "range")).toBe(2);
+    expect(trendState && encodeLensConditionValue(trendState, "sideways")).toBeNull();
   });
 
   it("isLensCondition は lens のみ true、group とは排他", () => {
@@ -305,10 +324,10 @@ describe("レンズ条件ヘルパ（レンズ条件タイプ #3）", () => {
     expect(maBars?.sentinel).toBe(-1);
   });
 
-  it("featureKey カタログ: enum/event は選択肢必須、既定値が選択肢に含まれる", () => {
+  it("featureKey カタログ: enum/category/event は選択肢必須、既定値が選択肢に含まれる", () => {
     for (const infos of Object.values(LENS_FEATURE_INFO)) {
       for (const info of infos) {
-        if (info.valueKind === "enum" || info.valueKind === "event") {
+        if (info.valueKind === "enum" || info.valueKind === "category" || info.valueKind === "event") {
           expect(info.options && info.options.length > 0).toBe(true);
           expect(info.options?.some((o) => o.value === info.defaultValue)).toBe(true);
         }

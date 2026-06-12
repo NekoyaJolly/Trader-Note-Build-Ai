@@ -264,8 +264,33 @@ export function hhmmToMinutes(hhmm: string): number | null {
 // 二重化している（evaluateTimeConditionAt と同じ方針。仕様変更時は両方を同時に直すこと）。
 // ============================================
 
-/** インジケーターレンズ条件の対象レンズ種別（コア4種 + MA クロス） */
-export type LensConditionKind = 'rsi' | 'macd' | 'ma' | 'ma_cross' | 'bb';
+/**
+ * レンズ条件の対象レンズ種別。
+ * - インジケーター系（コア4種 + MA クロス）: lensId にパラメータ識別子を含む（例 `ind:rsi#p14`）
+ * - 状態系（#3 第2弾、TS 計算可能な 3 種）: lensId = 種別名そのまま（例 `time_session`）
+ *   ※ smc / chart_pattern / wyckoff は analysis-engine 拡張後に追加（加算的拡張）
+ */
+export type LensConditionKind =
+  | 'rsi'
+  | 'macd'
+  | 'ma'
+  | 'ma_cross'
+  | 'bb'
+  | 'time_session'
+  | 'dow_theory'
+  | 'volatility_regime';
+
+/** 状態系レンズの種別集合（lensId = 種別名そのまま） */
+export const STATE_LENS_CONDITION_KINDS = [
+  'time_session',
+  'dow_theory',
+  'volatility_regime',
+] as const;
+
+/** 種別が状態系レンズかどうか（パラメータ入力なし・lensId に `#` を含まない） */
+export function isStateLensKind(kind: LensConditionKind): boolean {
+  return (STATE_LENS_CONDITION_KINDS as readonly string[]).includes(kind);
+}
 
 /**
  * レンズ条件の比較演算子。
@@ -297,8 +322,14 @@ export interface LensCondition {
   timeframeOverride?: MtfTimeframeApi;
 }
 
-/** レンズ条件 featureKey の値種別（使える演算子と入力 UI を決める） */
-export type LensFeatureValueKind = 'enum' | 'event' | 'bool' | 'number';
+/**
+ * レンズ条件 featureKey の値種別（使える演算子と入力 UI を決める）。
+ * - enum: 順序付き列挙（等価 + 順序範囲比較可。backend orderedEnum）
+ * - category: 順序なし列挙（等価のみ。backend categoricalEnum、options 順 = backend values 順）
+ * - event: 方向イベント bull/none/bear（等価のみ）
+ * - bool / number
+ */
+export type LensFeatureValueKind = 'enum' | 'category' | 'event' | 'bool' | 'number';
 
 /** enum / event 値の選択肢 */
 export interface LensFeatureOption {
@@ -346,6 +377,9 @@ export const LENS_CONDITION_KIND_INFO: Record<LensConditionKind, { label: string
   ma: { label: '移動平均レンズ' },
   ma_cross: { label: 'MA クロスレンズ' },
   bb: { label: 'ボリンジャーバンドレンズ' },
+  time_session: { label: '時間帯レンズ（状態）' },
+  dow_theory: { label: 'ダウ理論レンズ（状態）' },
+  volatility_regime: { label: 'ボラティリティレンズ（状態）' },
 };
 
 /**
@@ -480,6 +514,181 @@ export const LENS_FEATURE_INFO: Record<LensConditionKind, LensFeatureInfo[]> = {
       description: '0 に近いほどスクイーズ（収縮）',
     },
   ],
+  // --- 状態系レンズ (#3 第2弾、TS 計算可能な 3 種。値は直近 150 本の窓で見た状態) ---
+  time_session: [
+    { key: 'tokyo_active', label: '東京時間', valueKind: 'bool', defaultValue: true },
+    { key: 'london_active', label: 'ロンドン時間', valueKind: 'bool', defaultValue: true },
+    { key: 'ny_active', label: 'NY 時間', valueKind: 'bool', defaultValue: true },
+    { key: 'overlap_london_ny', label: 'ロンドン×NY 重複時間', valueKind: 'bool', defaultValue: true },
+    { key: 'overlap_tokyo_london', label: '東京×ロンドン 重複時間', valueKind: 'bool', defaultValue: true },
+    { key: 'is_weekend', label: '週末', valueKind: 'bool', defaultValue: false },
+    { key: 'is_monday_open', label: '月曜オープン直後', valueKind: 'bool', defaultValue: true },
+    { key: 'is_friday_close', label: '金曜クローズ前', valueKind: 'bool', defaultValue: false },
+    { key: 'is_tokyo_lunch', label: '東京ランチタイム', valueKind: 'bool', defaultValue: false },
+    {
+      key: 'minutes_since_tokyo_open',
+      label: '東京オープンからの分数',
+      valueKind: 'number',
+      min: 0,
+      max: 480,
+      step: 5,
+      defaultValue: 60,
+      sentinel: -1,
+      description: 'セッション外は条件不成立',
+    },
+    {
+      key: 'minutes_since_london_open',
+      label: 'ロンドンオープンからの分数',
+      valueKind: 'number',
+      min: 0,
+      max: 480,
+      step: 5,
+      defaultValue: 60,
+      sentinel: -1,
+      description: 'セッション外は条件不成立',
+    },
+    {
+      key: 'minutes_since_ny_open',
+      label: 'NY オープンからの分数',
+      valueKind: 'number',
+      min: 0,
+      max: 480,
+      step: 5,
+      defaultValue: 60,
+      sentinel: -1,
+      description: 'セッション外は条件不成立',
+    },
+  ],
+  dow_theory: [
+    {
+      key: 'trend_state',
+      label: 'トレンド状態',
+      valueKind: 'category',
+      // 並びは backend lensComparators の values と同期 (ドリフト注意)
+      options: [
+        { value: 'uptrend', label: '上昇トレンド' },
+        { value: 'downtrend', label: '下降トレンド' },
+        { value: 'range', label: 'レンジ' },
+        { value: 'unclear', label: '不明確' },
+      ],
+      defaultValue: 'uptrend',
+    },
+    {
+      key: 'trend_phase',
+      label: 'トレンド段階',
+      valueKind: 'enum',
+      options: [
+        { value: 'early', label: '初期' },
+        { value: 'middle', label: '中期' },
+        { value: 'late', label: '後期' },
+      ],
+      defaultValue: 'early',
+      description: 'トレンドが不明確なバーは条件不成立',
+    },
+    { key: 'recent_higher_high', label: '直近の高値切り上げ', valueKind: 'bool', defaultValue: true },
+    { key: 'recent_higher_low', label: '直近の安値切り上げ', valueKind: 'bool', defaultValue: true },
+    { key: 'recent_lower_high', label: '直近の高値切り下げ', valueKind: 'bool', defaultValue: true },
+    { key: 'recent_lower_low', label: '直近の安値切り下げ', valueKind: 'bool', defaultValue: true },
+    {
+      key: 'bars_since_last_high',
+      label: '直近ピボット高値からのバー数',
+      valueKind: 'number',
+      min: 0,
+      max: 50,
+      step: 1,
+      defaultValue: 5,
+      sentinel: -1,
+      description: 'ピボット未検出のバーは条件不成立',
+    },
+    {
+      key: 'bars_since_last_low',
+      label: '直近ピボット安値からのバー数',
+      valueKind: 'number',
+      min: 0,
+      max: 50,
+      step: 1,
+      defaultValue: 5,
+      sentinel: -1,
+      description: 'ピボット未検出のバーは条件不成立',
+    },
+    {
+      key: 'trend_duration_bars',
+      label: 'トレンド継続バー数',
+      valueKind: 'number',
+      min: 0,
+      max: 60,
+      step: 1,
+      defaultValue: 10,
+    },
+    { key: 'pullback_active', label: '押し目/戻り目 形成中', valueKind: 'bool', defaultValue: true },
+    {
+      key: 'pullback_depth_pct',
+      label: '押し/戻りの深さ（%）',
+      valueKind: 'number',
+      min: 0,
+      max: 100,
+      step: 1,
+      defaultValue: 30,
+      description: '直近トレンド幅に対する割合',
+    },
+  ],
+  volatility_regime: [
+    {
+      key: 'regime_label',
+      label: 'ボラティリティ状態',
+      valueKind: 'enum',
+      // 並びは backend orderedEnum の order と同期 (ドリフト注意)
+      options: [
+        { value: 'contracting', label: '収縮' },
+        { value: 'low', label: '低' },
+        { value: 'normal', label: '通常' },
+        { value: 'elevated', label: '高' },
+        { value: 'expanding', label: '拡大' },
+      ],
+      defaultValue: 'contracting',
+      description: 'BB 幅パーセンタイルによる区分',
+    },
+    {
+      key: 'bb_width_percentile',
+      label: 'BB 幅パーセンタイル（0〜100）',
+      valueKind: 'number',
+      min: 0,
+      max: 100,
+      step: 1,
+      defaultValue: 20,
+      description: '直近 100 本の中での現在 BB 幅の位置',
+    },
+    {
+      key: 'atr_percentile',
+      label: 'ATR パーセンタイル（0〜100）',
+      valueKind: 'number',
+      min: 0,
+      max: 100,
+      step: 1,
+      defaultValue: 50,
+    },
+    {
+      key: 'atr_change_rate',
+      label: 'ATR 変化率',
+      valueKind: 'number',
+      min: -1,
+      max: 1,
+      step: 0.05,
+      defaultValue: 0.1,
+      description: '直近 5 本前との比（0.1 = +10%）',
+    },
+    { key: 'is_squeeze', label: 'スクイーズ中', valueKind: 'bool', defaultValue: true },
+    { key: 'is_expanding', label: '拡大中', valueKind: 'bool', defaultValue: true },
+    {
+      key: 'bars_in_current_regime',
+      label: '現在の状態の継続バー数',
+      valueKind: 'number',
+      min: 0,
+      max: 100,
+      step: 1,
+      defaultValue: 10,
+    },
+  ],
 };
 
 /** 値種別ごとに許可する演算子（設計書 §12.4-6） */
@@ -492,7 +701,8 @@ export function lensOperatorsForValueKind(valueKind: LensFeatureValueKind): Lens
     // 数値エンコードが選択肢 index（= backend orderedEnum の順序 index）のため大小比較が成立する
     return ['=', '!=', '<', '<=', '>=', '>'];
   }
-  // event（方向イベント）/ bool は等価比較のみ（bull=1/none=0/bear=-1 の大小に意味を持たせない）
+  // category（順序なし列挙）/ event（方向イベント）/ bool は等価比較のみ
+  // （カテゴリ index や bull=1/none=0/bear=-1 の大小に意味を持たせない）
   return ['=', '!='];
 }
 
@@ -535,6 +745,11 @@ function normalizeLensPeriod(value: number | undefined, fallback: number): numbe
  */
 export function buildLensId(kind: LensConditionKind, params: LensIdParams): string {
   switch (kind) {
+    // 状態系レンズは lensId = 種別名そのまま（パラメータなし。backend カタログのキーと一致）
+    case 'time_session':
+    case 'dow_theory':
+    case 'volatility_regime':
+      return kind;
     case 'rsi':
       return `ind:rsi#p${normalizeLensPeriod(params.period, 14)}`;
     case 'macd':
@@ -559,6 +774,10 @@ export function buildLensId(kind: LensConditionKind, params: LensIdParams): stri
 export function parseLensIdForEdit(
   lensId: string
 ): { kind: LensConditionKind; params: LensIdParams } | null {
+  // 状態系レンズ（lensId = 種別名そのまま、パラメータなし）
+  if ((STATE_LENS_CONDITION_KINDS as readonly string[]).includes(lensId)) {
+    return { kind: lensId as LensConditionKind, params: {} };
+  }
   const match = /^ind:([a-z_]+)#(.+)$/.exec(lensId);
   if (!match) return null;
   const kind = match[1];
@@ -642,7 +861,10 @@ export function encodeLensConditionValue(
   switch (info.valueKind) {
     case 'bool':
       return typeof value === 'boolean' ? (value ? 1 : 0) : null;
-    case 'enum': {
+    case 'enum':
+    case 'category': {
+      // enum = backend orderedEnum の order 順 / category = backend categoricalEnum の values 順。
+      // どちらも options の index がエンコード値（並びの同期が前提。ドリフト注意）
       if (typeof value !== 'string' || !info.options) return null;
       const index = info.options.findIndex((o) => o.value === value);
       return index >= 0 ? index : null;

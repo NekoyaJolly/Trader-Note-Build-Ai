@@ -56,6 +56,8 @@ import {
   parseIndicatorLensId,
   type IndicatorLensSpec,
 } from '../../shared/similarity/indicatorLenses';
+// 状態レンズ (#3 第2弾): TS 側計算の per-bar 系列化
+import { appendStateLensSeriesToCache } from '../../services/stateLensSeries';
 import {
   encodeLensFeatureValueAsNumber,
   getLensFeatureComparator,
@@ -639,6 +641,10 @@ export async function appendLensSeriesToCache(params: {
   // 1. lensId → 計算仕様(重複 lensId は 1 回だけ解決)
   const specs = new Map<string, IndicatorLensSpec>();
   for (const condition of params.lensConditions) {
+    if (!condition.lensId.startsWith('ind:')) {
+      // 状態レンズ (time_session 等) は appendStateLensSeriesToCache の担当 (#3 第2弾)
+      continue;
+    }
     if (specs.has(condition.lensId)) continue;
     const spec = parseIndicatorLensId(condition.lensId);
     if (!spec) {
@@ -794,16 +800,25 @@ async function executeBacktestStage(
   // === レンズ条件 (#3): per-bar レンズ系列を基準足キャッシュに追加 ===
   // timeframeOverride 付きのレンズ条件は後段の各ビュー側キャッシュに積む
   const allLensConditions = entryPlans.flatMap((plan) => collectLensConditions(plan.group));
+  const baseLensConditions = allLensConditions.filter(
+    (c) => !c.timeframeOverride || c.timeframeOverride === timeframe
+  );
   await appendLensSeriesToCache({
     indicatorCache,
-    lensConditions: allLensConditions.filter(
-      (c) => !c.timeframeOverride || c.timeframeOverride === timeframe
-    ),
+    lensConditions: baseLensConditions,
     symbol,
     timeframe,
     startDate,
     endDate,
     closes: data.map((bar) => bar.close),
+  });
+  // 状態レンズ (#3 第2弾): TS 側計算のみ・analysis-engine 不要
+  await appendStateLensSeriesToCache({
+    indicatorCache,
+    lensConditions: baseLensConditions,
+    symbol,
+    timeframe,
+    bars: data,
   });
 
   // === MTF: timeframeOverride 条件用の別時間足ビューを準備 (Phase γ) ===
@@ -856,14 +871,22 @@ async function executeBacktestStage(
       );
     }
     // レンズ条件 (#3): この足を override に指定したレンズ条件の系列をビュー側キャッシュへ
+    const viewLensConditions = allLensConditions.filter((c) => c.timeframeOverride === tf);
     await appendLensSeriesToCache({
       indicatorCache: viewCaches.indicatorCache,
-      lensConditions: allLensConditions.filter((c) => c.timeframeOverride === tf),
+      lensConditions: viewLensConditions,
       symbol,
       timeframe: tf,
       startDate,
       endDate,
       closes: viewData.map((bar) => bar.close),
+    });
+    await appendStateLensSeriesToCache({
+      indicatorCache: viewCaches.indicatorCache,
+      lensConditions: viewLensConditions,
+      symbol,
+      timeframe: tf,
+      bars: viewData,
     });
     timeframeViews.set(tf, {
       data: viewData,

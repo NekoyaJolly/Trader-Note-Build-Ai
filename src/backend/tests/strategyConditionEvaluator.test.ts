@@ -1032,6 +1032,33 @@ describe('レンズ条件(レンズ条件タイプ #3。設計書 §12.4)', () =
     expect(await evaluateConditionGroup({ ...ctx }, lookbackGroup)).toBe(true);
   });
 
+  test('状態レンズ条件 (#3 第2弾): categoricalEnum は values 順 index で等価判定できる', () => {
+    const key = makeLensCacheKey('dow_theory', 'trend_state');
+    // values = ['uptrend','downtrend','range','unclear'] → uptrend=0 / range=2
+    const cond = lensCond({ lensId: 'dow_theory', featureKey: 'trend_state', operator: '=', value: 'uptrend' });
+    expect(evaluateLensCondition(lensCtx({ [key]: [0] }), cond)).toBe(true);
+    expect(evaluateLensCondition(lensCtx({ [key]: [2] }), cond)).toBe(false);
+    const notRange = lensCond({ lensId: 'dow_theory', featureKey: 'trend_state', operator: '!=', value: 'range' });
+    expect(evaluateLensCondition(lensCtx({ [key]: [0] }), notRange)).toBe(true);
+    expect(evaluateLensCondition(lensCtx({ [key]: [2] }), notRange)).toBe(false);
+    // values 未定義のカテゴリ値・未知値はエンコード不能 = 不成立
+    const unknown = lensCond({ lensId: 'dow_theory', featureKey: 'trend_state', operator: '=', value: 'sideways' });
+    expect(evaluateLensCondition(lensCtx({ [key]: [0] }), unknown)).toBe(false);
+  });
+
+  test('状態レンズ条件: orderedEnum (regime_label) は順序範囲演算子が使える', () => {
+    const key = makeLensCacheKey('volatility_regime', 'regime_label');
+    // order = ['contracting','low','normal','elevated','expanding'] → normal=2
+    const cond = lensCond({
+      lensId: 'volatility_regime',
+      featureKey: 'regime_label',
+      operator: '<=',
+      value: 'normal',
+    });
+    expect(evaluateLensCondition(lensCtx({ [key]: [0] }), cond)).toBe(true); // contracting
+    expect(evaluateLensCondition(lensCtx({ [key]: [4] }), cond)).toBe(false); // expanding
+  });
+
   test('collectLensConditions が入れ子グループ・ifCondition・sequence から収集する', () => {
     const group: ConditionGroup = {
       groupId: 'root',

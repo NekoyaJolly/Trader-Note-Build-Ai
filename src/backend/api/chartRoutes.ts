@@ -32,6 +32,7 @@ import { fetchIndicatorSeries } from '../services/analysisEngineClient';
 import type { AnalysisEngineIndicatorSeriesResponse } from '../../schemas/external/analysisEngine';
 // レンズ条件 (#3) プレビュー: backtest/live と同じレンズ系列計算を通す(評価1経路)
 import { appendLensSeriesToCache, buildEvaluationCaches } from '../services/strategyBacktestService';
+import { appendStateLensSeriesToCache, type StateLensBar } from '../../services/stateLensSeries';
 import { prisma } from '../db/client';
 import { ohlcvRepository } from '../repositories/ohlcvRepository';
 import { normalizeCTraderSymbol, toSlashSymbol } from '../../utils/symbolNormalization';
@@ -137,9 +138,10 @@ async function buildLensSeriesForPreview(
 
     // 今回のレスポンスに含まれる系列はキャッシュ経由で再利用される(同系列の二重取得防止)
     const { indicatorCache } = buildEvaluationCaches({ series: result.series });
+    const lensConditions = body.lensIds.map((lensId) => ({ lensId }));
     await appendLensSeriesToCache({
       indicatorCache,
-      lensConditions: body.lensIds.map((lensId) => ({ lensId })),
+      lensConditions,
       symbol: body.symbol,
       timeframe: body.timeframe,
       startDate: new Date(body.startDate),
@@ -147,12 +149,64 @@ async function buildLensSeriesForPreview(
       closes,
     });
 
+    // 状態レンズ (#3 第2弾): 欠損足を除外した有効バー列で計算し、後段で response 軸へ整列する
+    // (EODHD 由来の OHLC=null ギャップ足を含めるとレンズ計算が壊れるため除外が規約)
+    const validBars: StateLensBar[] = candles
+      .filter(
+        (candle) =>
+          Number.isFinite(Number(candle.open)) &&
+          Number.isFinite(Number(candle.high)) &&
+          Number.isFinite(Number(candle.low)) &&
+          Number.isFinite(Number(candle.close))
+      )
+      .map((candle) => ({
+        timestamp: candle.timestamp,
+        open: Number(candle.open),
+        high: Number(candle.high),
+        low: Number(candle.low),
+        close: Number(candle.close),
+        volume: Number(candle.volume ?? 0),
+      }));
+    const stateCache = new Map<string, number[]>();
+    await appendStateLensSeriesToCache({
+      indicatorCache: stateCache,
+      lensConditions,
+      symbol: body.symbol,
+      timeframe: body.timeframe,
+      bars: validBars,
+    });
+    // 有効バー軸 → response.timestamps 軸へ秒精度で整列
+    const barIndexBySecond = new Map<number, number>();
+    validBars.forEach((bar, index) => {
+      barIndexBySecond.set(Math.floor(bar.timestamp.getTime() / 1000), index);
+    });
+
     const lensSeries: Record<string, (number | null)[]> = {};
+    // 全区間 null の系列 (skip/cyclic 等のエンコード不能キー) はレスポンスに含めない
+    // (肥大化防止。フロントはキー欠落 = 条件不成立として同じ安全側挙動。Copilot レビュー対応 PR #401)
+    const putIfAnyFinite = (key: string, values: (number | null)[]): void => {
+      if (values.some((v) => v !== null)) {
+        lensSeries[key] = values;
+      }
+    };
     for (const [key, values] of indicatorCache) {
       if (key.startsWith('lens:')) {
         // JSON は NaN を表現できないため null に明示変換する(フロントは null→NaN で復元)
-        lensSeries[key] = values.map((v) => (Number.isFinite(v) ? v : null));
+        putIfAnyFinite(key, values.map((v) => (Number.isFinite(v) ? v : null)));
       }
+    }
+    for (const [key, values] of stateCache) {
+      putIfAnyFinite(
+        key,
+        result.timestamps.map((ts) => {
+          const ms = Date.parse(ts);
+          if (!Number.isFinite(ms)) return null;
+          const index = barIndexBySecond.get(Math.floor(ms / 1000));
+          if (index === undefined) return null;
+          const v = values[index];
+          return Number.isFinite(v) ? v : null;
+        })
+      );
     }
     return lensSeries;
   } catch (error) {
