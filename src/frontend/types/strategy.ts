@@ -648,7 +648,12 @@ export function encodeLensConditionValue(
       return index >= 0 ? index : null;
     }
     case 'event':
-      return typeof value === 'string' ? (LENS_EVENT_VALUE_ENCODING[value] ?? null) : null;
+      // own property のみ許可 (constructor/toString 等の継承プロパティを拾うと
+      // 未知値が null にならず比較が誤成立するため。Copilot レビュー対応 PR #400)
+      return typeof value === 'string' &&
+        Object.prototype.hasOwnProperty.call(LENS_EVENT_VALUE_ENCODING, value)
+        ? LENS_EVENT_VALUE_ENCODING[value]
+        : null;
     case 'number':
       return typeof value === 'number' && Number.isFinite(value) ? value : null;
   }

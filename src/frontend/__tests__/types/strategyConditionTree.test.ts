@@ -285,6 +285,9 @@ describe("レンズ条件ヘルパ（レンズ条件タイプ #3）", () => {
     expect(macdCross && encodeLensConditionValue(macdCross, "bull")).toBe(1);
     expect(macdCross && encodeLensConditionValue(macdCross, "none")).toBe(0);
     expect(macdCross && encodeLensConditionValue(macdCross, "bear")).toBe(-1);
+    // 継承プロパティ名 (prototype 汚染) は own property チェックで必ず null になる
+    expect(macdCross && encodeLensConditionValue(macdCross, "constructor")).toBeNull();
+    expect(macdCross && encodeLensConditionValue(macdCross, "toString")).toBeNull();
     expect(fastAbove && encodeLensConditionValue(fastAbove, true)).toBe(1);
     expect(fastAbove && encodeLensConditionValue(fastAbove, false)).toBe(0);
     expect(bbPos && encodeLensConditionValue(bbPos, 0.25)).toBe(0.25);

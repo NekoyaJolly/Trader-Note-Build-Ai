@@ -993,6 +993,9 @@ describe('レンズ条件(レンズ条件タイプ #3。設計書 §12.4)', () =
     expect(evaluateLensCondition(lensCtx({ [key]: [1] }), cond)).toBe(true);
     expect(evaluateLensCondition(lensCtx({ [key]: [0] }), cond)).toBe(false);
     expect(evaluateLensCondition(lensCtx({ [key]: [-1] }), cond)).toBe(false);
+    // 継承プロパティ名 (constructor 等) はエンコード不能 = 不成立 (prototype 汚染防御)
+    const polluted = lensCond({ lensId: 'ind:macd#f12s26g9', featureKey: 'macd_cross', operator: '!=', value: 'constructor' });
+    expect(evaluateLensCondition(lensCtx({ [key]: [1] }), polluted)).toBe(false);
   });
 
   test('sentinel(-1 = イベント未発生)は数値比較せず不成立に倒す(誤判定防止)', () => {
