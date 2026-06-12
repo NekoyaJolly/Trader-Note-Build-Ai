@@ -29,6 +29,9 @@ import {
   type ChartIndicatorSeriesRequest,
 } from '../../schemas/api/chart';
 import { fetchIndicatorSeries } from '../services/analysisEngineClient';
+import type { AnalysisEngineIndicatorSeriesResponse } from '../../schemas/external/analysisEngine';
+// レンズ条件 (#3) プレビュー: backtest/live と同じレンズ系列計算を通す(評価1経路)
+import { appendLensSeriesToCache, buildEvaluationCaches } from '../services/strategyBacktestService';
 import { prisma } from '../db/client';
 import { ohlcvRepository } from '../repositories/ohlcvRepository';
 import { normalizeCTraderSymbol, toSlashSymbol } from '../../utils/symbolNormalization';
@@ -98,6 +101,70 @@ router.get('/candles', validateQuery(ChartCandlesQuerySchema), async (_req: Requ
  *   - body 不正                   → 400 (validateBody)
  *   - analysis-engine 障害・不正応答 → 502 (upstream 依存の失敗)
  */
+/**
+ * プレビュー用レンズ特徴系列 (#3) を計算する。
+ *
+ * バックテスト/ライブと同じ appendLensSeriesToCache を通すことで評価 1 経路を維持する。
+ * closes は analysis-engine が読んだのと同じ DB (OHLCVCandle) から取得し、
+ * response.timestamps へ timestamp 一致(秒精度)で整列する。
+ * 失敗時は undefined を返し、プレビューはレンズ条件を不成立として描画する(安全側)。
+ */
+async function buildLensSeriesForPreview(
+  body: ChartIndicatorSeriesRequest,
+  result: AnalysisEngineIndicatorSeriesResponse,
+): Promise<Record<string, (number | null)[]> | undefined> {
+  try {
+    const candles = await ohlcvRepository.findMany({
+      symbol: body.symbol,
+      timeframe: body.timeframe,
+      startTime: new Date(body.startDate),
+      endTime: new Date(body.endDate),
+      orderBy: 'asc',
+    });
+    const closeBySecond = new Map<number, number>();
+    for (const candle of candles) {
+      const close = Number(candle.close);
+      if (Number.isFinite(close)) {
+        closeBySecond.set(Math.floor(candle.timestamp.getTime() / 1000), close);
+      }
+    }
+    const closes = result.timestamps.map((ts) => {
+      const ms = Date.parse(ts);
+      return Number.isFinite(ms)
+        ? (closeBySecond.get(Math.floor(ms / 1000)) ?? Number.NaN)
+        : Number.NaN;
+    });
+
+    // 今回のレスポンスに含まれる系列はキャッシュ経由で再利用される(同系列の二重取得防止)
+    const { indicatorCache } = buildEvaluationCaches({ series: result.series });
+    await appendLensSeriesToCache({
+      indicatorCache,
+      lensConditions: body.lensIds.map((lensId) => ({ lensId })),
+      symbol: body.symbol,
+      timeframe: body.timeframe,
+      startDate: new Date(body.startDate),
+      endDate: new Date(body.endDate),
+      closes,
+    });
+
+    const lensSeries: Record<string, (number | null)[]> = {};
+    for (const [key, values] of indicatorCache) {
+      if (key.startsWith('lens:')) {
+        // JSON は NaN を表現できないため null に明示変換する(フロントは null→NaN で復元)
+        lensSeries[key] = values.map((v) => (Number.isFinite(v) ? v : null));
+      }
+    }
+    return lensSeries;
+  } catch (error) {
+    console.warn(
+      `[ChartIndicatorSeries] レンズ系列の計算に失敗 (プレビューはレンズ条件を不成立扱い) ` +
+        `symbol=${body.symbol} timeframe=${body.timeframe} lensIds=${body.lensIds.join(',')}:`,
+      error,
+    );
+    return undefined;
+  }
+}
+
 router.post(
   '/indicator-series',
   validateBody(ChartIndicatorSeriesRequestSchema),
@@ -113,7 +180,10 @@ router.post(
         indicators: body.indicators,
         patterns: body.patterns,
       });
-      res.json(result);
+      // レンズ条件 (#3): 要求があればレンズ特徴系列(数値エンコード済み)を additive に付与
+      const lensSeries =
+        body.lensIds.length > 0 ? await buildLensSeriesForPreview(body, result) : undefined;
+      res.json(lensSeries ? { ...result, lensSeries } : result);
     } catch (error) {
       console.error(
         `[ChartIndicatorSeries] 取得失敗 symbol=${body.symbol} timeframe=${body.timeframe} ` +

@@ -1185,12 +1185,9 @@ function SingleLensCondition({
         </button>
       )}
 
-      <div className="w-full mt-1 text-[11px] text-gray-400">
-        {featureInfo.description && <span>{featureInfo.description}　</span>}
-        <span className="text-gray-500">
-          ※ エントリープレビューはレンズ条件未対応（不成立扱い）。バックテスト・ライブ評価では有効
-        </span>
-      </div>
+      {featureInfo.description && (
+        <div className="w-full mt-1 text-[11px] text-gray-400">{featureInfo.description}</div>
+      )}
     </div>
   );
 }

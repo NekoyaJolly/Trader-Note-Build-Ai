@@ -621,7 +621,8 @@ export function buildEvaluationCaches(indicatorSeries: {
  */
 export async function appendLensSeriesToCache(params: {
   indicatorCache: Map<string, number[]>;
-  lensConditions: ReadonlyArray<LensCondition>;
+  /** レンズ条件 (lensId のみ参照するため、プレビュー経路は {lensId} の最小形で渡せる) */
+  lensConditions: ReadonlyArray<Pick<LensCondition, 'lensId'>>;
   symbol: string;
   timeframe: string;
   startDate: Date;

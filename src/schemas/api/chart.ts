@@ -70,6 +70,9 @@ export const ChartIndicatorSeriesRequestSchema = z
     // 悪意ある巨大ペイロードによる analysis-engine 過負荷を防ぐためのガード。
     indicators: z.array(AnalysisEngineIndicatorSpecSchema).max(64).default([]),
     patterns: z.array(AnalysisEnginePatternIdSchema).max(13).default([]),
+    // レンズ条件 (#3) のプレビュー用: レンズ特徴系列を計算する lensId 群 (例 `ind:rsi#p14`)。
+    // 形式の妥当性は parseIndicatorLensId が判定し、不正 ID は警告ログの上スキップされる
+    lensIds: z.array(z.string().min(1).max(64)).max(16).default([]),
   })
   .refine((d) => new Date(d.startDate) <= new Date(d.endDate), {
     message: 'startDate は endDate 以前である必要があります',

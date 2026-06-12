@@ -20,6 +20,8 @@ import {
   isConditionGroup,
   lensOperatorsForValueKind,
   createDefaultLensCondition,
+  encodeLensConditionValue,
+  makeLensConditionCacheKey,
   LENS_FEATURE_INFO,
   type ConditionGroup,
   type IndicatorCondition,
@@ -263,11 +265,41 @@ describe("レンズ条件ヘルパ（レンズ条件タイプ #3）", () => {
     expect(isLensCondition({ groupId: "g", operator: "AND", conditions: [] })).toBe(false);
   });
 
-  it("値種別ごとの演算子制限: enum/event/bool は =/!=、数値は大小比較のみ", () => {
-    expect(lensOperatorsForValueKind("enum")).toEqual(["=", "!="]);
+  it("値種別ごとの演算子制限: enum は等価+順序範囲、event/bool は =/!=、数値は大小比較のみ", () => {
+    // 順序付き enum は順序範囲演算子も許可（数値エンコード = 順序 index のため大小比較が成立）
+    expect(lensOperatorsForValueKind("enum")).toEqual(["=", "!=", "<", "<=", ">=", ">"]);
     expect(lensOperatorsForValueKind("event")).toEqual(["=", "!="]);
     expect(lensOperatorsForValueKind("bool")).toEqual(["=", "!="]);
     expect(lensOperatorsForValueKind("number")).toEqual(["<", "<=", ">=", ">"]);
+  });
+
+  it("encodeLensConditionValue が backend と同じ規約で数値化する（ドリフト検知）", () => {
+    const rsiZone = LENS_FEATURE_INFO.rsi.find((i) => i.key === "rsi_zone");
+    const macdCross = LENS_FEATURE_INFO.macd.find((i) => i.key === "macd_cross");
+    const fastAbove = LENS_FEATURE_INFO.ma_cross.find((i) => i.key === "ma_fast_above_slow");
+    const bbPos = LENS_FEATURE_INFO.bb.find((i) => i.key === "bb_position");
+    expect(rsiZone && encodeLensConditionValue(rsiZone, "oversold")).toBe(0);
+    expect(rsiZone && encodeLensConditionValue(rsiZone, "neutral")).toBe(1);
+    expect(rsiZone && encodeLensConditionValue(rsiZone, "overbought")).toBe(2);
+    expect(rsiZone && encodeLensConditionValue(rsiZone, "unknown")).toBeNull();
+    expect(macdCross && encodeLensConditionValue(macdCross, "bull")).toBe(1);
+    expect(macdCross && encodeLensConditionValue(macdCross, "none")).toBe(0);
+    expect(macdCross && encodeLensConditionValue(macdCross, "bear")).toBe(-1);
+    expect(fastAbove && encodeLensConditionValue(fastAbove, true)).toBe(1);
+    expect(fastAbove && encodeLensConditionValue(fastAbove, false)).toBe(0);
+    expect(bbPos && encodeLensConditionValue(bbPos, 0.25)).toBe(0.25);
+    expect(bbPos && encodeLensConditionValue(bbPos, "oops")).toBeNull();
+  });
+
+  it("makeLensConditionCacheKey が backend の lens:<lensId>:<featureKey> 規約と一致する", () => {
+    expect(makeLensConditionCacheKey("ind:rsi#p14", "rsi_zone")).toBe("lens:ind:rsi#p14:rsi_zone");
+  });
+
+  it("bars_since 系の featureKey に sentinel(-1) が定義されている（イベント未発生の誤判定防止）", () => {
+    const macdBars = LENS_FEATURE_INFO.macd.find((i) => i.key === "macd_bars_since_cross");
+    const maBars = LENS_FEATURE_INFO.ma_cross.find((i) => i.key === "ma_bars_since_cross");
+    expect(macdBars?.sentinel).toBe(-1);
+    expect(maBars?.sentinel).toBe(-1);
   });
 
   it("featureKey カタログ: enum/event は選択肢必須、既定値が選択肢に含まれる", () => {

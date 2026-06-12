@@ -281,6 +281,7 @@ similarity(noteSnapshot, marketSnapshot):
 | 2026-06-10 | **Note コア + 生成配線 + シャドー評価(§9-1〜§9-2)**: `Note` テーブル新設(戦略B) + Trade/TradeNote/MatchResult/Notification/Strategy へ userId 追加(マルチユーザー化 Phase α、nullable+バックフィル)。`LensSnapshotBuilder`(eventTime 起点の同一生成口) + CSV 取込配線 + マッチングパイプラインのシャドー評価 + バックフィルスクリプト。通知挙動は不変。 |
 | 2026-06-11 | **マッチング切替(§9-3、Phase α-3 第1弾)**: `MATCHING_ENGINE=lens|legacy` フラグ導入(既定 lens、deploy.yml に明示)。lens 経路は `LensNoteCoreService.evaluateNotesForMatching`(シャドー評価とコア共用)の比較結果から score=レンズ類似度・threshold=レンズ閾値で MatchResult/EvaluationLog/通知を生成(旧ルール補正は不適用、トレンド/価格帯は観測情報のみ)。MarketSnapshot upsert は FK 充足のため継続。lens 稼働時はシャドー評価を自動スキップ(二重評価防止)。旧 12 次元経路は legacy ロールバック用に 1 リリース併存 → 安定確認後に削除予定(第2弾)。 |
 | 2026-06-13 | **レンズ条件タイプ 第1弾(§12、インジケーター系)**: `LensCondition`(type='lens') を条件ツリーの leaf 条件に追加。per-bar レンズ系列化 + 数値エンコード + 評価器分岐 + ConditionBuilder UI(`SingleLensCondition`)。backtest/live は `appendLensSeriesToCache` 共用で評価1経路を維持、MTF(`timeframeOverride`)・lookbackBars も既存機構で対応。詳細は下の追補3。 |
+| 2026-06-13 | **レンズ条件タイプ フォローアップ(§12)**: orderedEnum の順序範囲演算子 + エントリープレビュー対応(`/api/chart/indicator-series` に lensIds、backend 計算の数値エンコード済み lensSeries をフロントで整列・評価)。詳細は追補4。 |
 
 ### 実装のローカル詳細(2026-06-10、正本への追補)
 
@@ -315,8 +316,15 @@ similarity(noteSnapshot, marketSnapshot):
 - **キャッシュ準備**: `appendLensSeriesToCache`(strategyBacktestService.ts、backtest/live 共用)。by-version API(Python 側抽出)はレンズ条件を知らないため、`parseIndicatorLensId` で必要系列を逆解決し**明示指定 `/v1/indicator-series` を 1 回**追加で呼ぶ(レンズ条件が無ければ呼ばない)。系列長とバー列の不一致は中断(誤時点判定の事故防止)。MTF はビュー側キャッシュに override 足の系列を積む。
 - **評価**: `evaluateLensCondition`(strategyConditionEvaluator.ts)。欠損(NaN)・sentinel(`bars_since`=-1)・エンコード不能は**すべて不成立に倒す**(§12.4-4)。演算子は enum/event/bool=`=`/`!=`、数値=`<`/`<=`/`>=`/`>`(UI 側 `lensOperatorsForValueKind` で制限)。
 - **UI**: `SingleLensCondition`(ConditionBuilder.tsx)。レンズ種別→パラメータ→featureKey→演算子→値。フロントは src/shared を import しない構成のため、featureKey カタログと lensId 組立(`buildLensId`/`parseLensIdForEdit`)を types/strategy.ts に**二重化**(時間条件と同じ方針、ドリフト注意)。
-- **エントリープレビューは第1弾では未対応**: プレビューのフロント評価器はレンズ系列を計算できないため**不成立扱い**(楽観表示しない)+ UI に明記。
-- **第2弾(残)**: 状態系レンズの per-bar 化(analysis-engine の smc/chartPatterns/wyckoff payload 配列化、§12.6)、orderedEnum の順序範囲演算子、プレビュー対応(`extractConditionRequirements` 新設)。
+- **エントリープレビューは第1弾では未対応**: プレビューのフロント評価器はレンズ系列を計算できないため**不成立扱い**(楽観表示しない)+ UI に明記。→ **同日フォローアップで対応済(追補4)**
+- **第2弾(残)**: 状態系レンズの per-bar 化(analysis-engine の smc/chartPatterns/wyckoff payload 配列化、§12.6)。orderedEnum 順序範囲演算子・プレビュー対応はフォローアップ(追補4)で実装済。
+
+### 実装のローカル詳細・追補4(2026-06-13、§12 フォローアップ: 順序範囲演算子 + プレビュー対応)
+
+- **順序範囲演算子**: orderedEnum の featureKey(例 rsi_zone)に `<`/`<=`/`>=`/`>` を許可(UI 側 `lensOperatorsForValueKind`)。数値エンコードが順序 index のため**評価器は無変更**で成立。event/bool は等価のみ維持(bull=1/none=0/bear=-1 の大小に意味を持たせない)。
+- **プレビュー対応**: レンズ特徴系列は**backend で計算して返す**(計算一元化 §2-⑦、フロントにレンズ計算を二重実装しない)。`POST /api/chart/indicator-series` に `lensIds` を追加し、`appendLensSeriesToCache`(backtest/live と同一経路 = 評価1経路)で数値エンコード済み系列を `lensSeries` フィールドとして additive に返す。closes は OHLCVCandle から response.timestamps へ秒精度整列。
+- フロント側: `extractConditionRequirements` が lensId を収集 → `alignSeriesToCandles` が `lens:` キーを**そのまま**整列(lensId は `_`/`#` を含むため canonicalize しない) → `evalLensCondition`(backend `evaluateLensCondition` のミラー。sentinel/欠損/エンコード不能は不成立)。backend 失敗時は lensSeries なし = レンズ条件不成立で描画(安全側)。
+- **フロント二重化(ドリフト注意)**: 値エンコード `encodeLensConditionValue`(enum は LENS_FEATURE_INFO の options 順 = backend orderedEnum の order と同期必須)、キー規約 `makeLensConditionCacheKey`、sentinel は LENS_FEATURE_INFO に宣言。
 
 ---
 
@@ -350,7 +358,7 @@ similarity(noteSnapshot, marketSnapshot):
    - 状態系: analysis-engine 新 API(`/v1/lens-series` 等。`indicator-series` の lens 版)から per-bar 系列取得。
 3. **評価器分岐**: `evaluateBaseNode` に `if (type === 'lens') return evaluateLensCondition(ctx, item)`。`collectTimeframeOverrides`/`resolveViewContext` は lens も自動カバー。
 4. **sentinel/欠損**: `bars_since_event=-1`(イベントなし)等は比較前に skip 判定(§6.2 normalizedLinear と同方針)。confidence 低/欠損バーは条件不成立側に倒す。
-5. **ConditionBuilder UI**: `SingleLensCondition` 新設(lensId セレクタ → featureKey セレクタ → operator/value)。プレビューの必要系列登録は `extractConditionRequirements` を**新規実装**して行う(〔2026-06-13 訂正〕この名前の既存関数は無い。現状プレビューは個別に必要系列を組み立てている)。
+5. **ConditionBuilder UI**: `SingleLensCondition` 新設(lensId セレクタ → featureKey セレクタ → operator/value)。プレビューの必要系列登録は既存の `extractConditionRequirements`(`src/frontend/lib/previewIndicatorSeries.ts`)に lensId 収集を追加して行う(〔2026-06-13 再訂正〕同名関数はフロント lib に実在した。初回レビューの「存在しない」は調査誤り)。
 6. **operator 制約**: featureKey の kind 別に許可演算子を限定(bool/event=`==/!=`、orderedEnum=`==/!=`(順序範囲は後続)、linear=`</<=/>/>=`)。〔2026-06-13 精査〕条件ツリーは API 入口で深い zod 検証をしていない(envelope の `objectJsonField` のみ)ため、制約の強制は **UI + 評価器の防御**で行う(既存条件タイプと同じ流儀)。
 
 ### 12.5 触る箇所

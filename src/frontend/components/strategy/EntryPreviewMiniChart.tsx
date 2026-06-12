@@ -32,7 +32,18 @@ import type {
   PatternCondition,
   TimeCondition,
 } from "@/types/strategy";
-import { evaluateTimeConditionAt, isIndicatorCondition, isLensCondition, isPatternCondition, isTimeCondition } from "@/types/strategy";
+import {
+  encodeLensConditionValue,
+  evaluateTimeConditionAt,
+  getLensFeatureInfo,
+  isIndicatorCondition,
+  isLensCondition,
+  isPatternCondition,
+  isTimeCondition,
+  makeLensConditionCacheKey,
+  parseLensIdForEdit,
+  type LensCondition,
+} from "@/types/strategy";
 import type { IndicatorParams } from "@/types/indicator";
 import { apiFetch } from "@/lib/apiClient";
 import { DEFAULT_DATA_COUNT, DEFAULT_TIMEFRAME_API } from "@/lib/marketConstants";
@@ -339,16 +350,54 @@ function evalTimeCondition(ctx: EvalContext, condition: TimeCondition): boolean 
   return evaluateTimeConditionAt(condition, Date.parse(bar.timestamp));
 }
 
+/**
+ * レンズ条件の評価（backend evaluateLensCondition のミラー。仕様変更時は両方を直すこと）。
+ * 系列は backend が数値エンコード済みで返したもの（alignSeriesToCandles が
+ * `lens:<lensId>:<featureKey>` キーで indicatorCache に整列済み）を参照する。
+ * 欠損(NaN)・sentinel(イベント未発生)・エンコード不能は不成立に倒す。
+ */
+function evalLensCondition(ctx: EvalContext, condition: LensCondition): boolean {
+  const series = ctx.indicatorCache.get(
+    makeLensConditionCacheKey(condition.lensId, condition.featureKey),
+  );
+  const left = series?.[ctx.currentIndex];
+  if (left === undefined || !Number.isFinite(left)) return false;
+
+  const parsed = parseLensIdForEdit(condition.lensId);
+  const info = parsed ? getLensFeatureInfo(parsed.kind, condition.featureKey) : undefined;
+  if (!info) return false;
+  // sentinel（例 bars_since=-1「イベント未発生」）は数値比較すると誤判定するため不成立に倒す
+  if (info.sentinel !== undefined && left === info.sentinel) return false;
+
+  const right = encodeLensConditionValue(info, condition.value);
+  if (right === null) return false;
+
+  switch (condition.operator) {
+    case "=":
+      return left === right;
+    case "!=":
+      return left !== right;
+    case "<":
+      return left < right;
+    case "<=":
+      return left <= right;
+    case ">=":
+      return left >= right;
+    case ">":
+      return left > right;
+    default:
+      return false;
+  }
+}
+
 // ノード（指標 / パターン / 時間 / グループ）の基本評価（ルックバックは考慮しない）。
 // SEQUENCE / IF_THEN / AND-OR-NOT の各所で同じ分類をするため集約する（時間条件の入れ忘れ防止）。
 function evalBaseNode(ctx: EvalContext, node: ConditionChild): boolean {
   if (isIndicatorCondition(node)) return evalIndicatorCondition(ctx, normalizeIndicatorCondition(node));
   if (isPatternCondition(node)) return evalPatternCondition(ctx, normalizePatternCondition(node));
   if (isTimeCondition(node)) return evalTimeCondition(ctx, node);
-  // レンズ条件 (#3) はレンズ系列の per-bar 計算が backend 側(analysis-engine + レンズ基盤)に
-  // あるためプレビューでは計算できない。誤って楽観表示しないよう「不成立」に倒す
-  // (バックテスト・ライブ評価では正しく評価される。SingleLensCondition にも明記)
-  if (isLensCondition(node)) return false;
+  // レンズ条件 (#3): backend が数値エンコード済みで返したレンズ特徴系列を評価する
+  if (isLensCondition(node)) return evalLensCondition(ctx, node);
   return evalGroup(ctx, node);
 }
 
@@ -356,7 +405,9 @@ function evalBaseNode(ctx: EvalContext, node: ConditionChild): boolean {
 // 「直近 N 本以内（現在足含む）のどこかで成立」で true。
 function evalNode(ctx: EvalContext, node: ConditionChild): boolean {
   const lookbackBars =
-    isIndicatorCondition(node) || isPatternCondition(node) ? node.lookbackBars : undefined;
+    isIndicatorCondition(node) || isPatternCondition(node) || isLensCondition(node)
+      ? node.lookbackBars
+      : undefined;
   if (lookbackBars && lookbackBars > 1) {
     const start = Math.max(0, ctx.currentIndex - (lookbackBars - 1));
     for (let j = ctx.currentIndex; j >= start; j--) {
@@ -812,9 +863,9 @@ export function EntryPreviewMiniChart({
       setSeriesError(null);
       return;
     }
-    const { specs, patternIds } = extractConditionRequirements(debouncedConditions);
-    // 条件が空 (指標もパターンも無い) なら取得不要。空キャッシュで「指標なし」を即確定させる。
-    if (specs.length === 0 && patternIds.length === 0) {
+    const { specs, patternIds, lensIds } = extractConditionRequirements(debouncedConditions);
+    // 条件が空 (指標もパターンもレンズも無い) なら取得不要。空キャッシュで「指標なし」を即確定させる。
+    if (specs.length === 0 && patternIds.length === 0 && lensIds.length === 0) {
       setRealAligned({ indicatorCache: new Map(), patternCache: new Map() });
       setSeriesError(null);
       return;
@@ -837,6 +888,7 @@ export function EntryPreviewMiniChart({
           endDate,
           specs,
           patternIds,
+          lensIds,
           signal: controller.signal,
         });
         if (aborted) return;
