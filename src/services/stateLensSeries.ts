@@ -25,6 +25,9 @@
 import { DowTheoryLens } from '../side-b/lenses/DowTheoryLens';
 import { TimeSessionLens } from '../side-b/lenses/TimeSessionLens';
 import { VolatilityRegimeLens } from '../side-b/lenses/VolatilityRegimeLens';
+import { smcPayloadToFeatures } from '../side-b/lenses/SMCLens';
+import { chartPatternPayloadToFeatures } from '../side-b/lenses/ChartPatternLens';
+import { wyckoffPayloadToFeatures } from '../side-b/lenses/WyckoffLens';
 import type { Lens, LensInput } from '../side-b/lenses/types';
 import type { LensFeatureValue } from '../shared/similarity/lensSnapshotTypes';
 import {
@@ -33,6 +36,7 @@ import {
   getLensFeatureComparator,
 } from '../shared/similarity/lensComparators';
 import { makeLensCacheKey, type LensCondition } from '../backend/services/strategyConditionEvaluator';
+import type { fetchIndicatorSeries } from '../backend/services/analysisEngineClient';
 
 /**
  * per-bar 計算の窓幅。lensSnapshotBuilder の DEFAULT_WINDOW_BARS と同値に保つこと
@@ -52,6 +56,16 @@ export type TsComputableStateLensId = (typeof TS_COMPUTABLE_STATE_LENS_IDS)[numb
 /** lensId が TS 側で per-bar 計算可能な状態レンズかどうか */
 export function isTsComputableStateLensId(lensId: string): lensId is TsComputableStateLensId {
   return (TS_COMPUTABLE_STATE_LENS_IDS as readonly string[]).includes(lensId);
+}
+
+/** analysis-engine の per-bar 系列 API が必要な状態レンズの lensId 集合 (#3 第2段) */
+export const ENGINE_STATE_LENS_IDS = ['smc', 'chart_pattern', 'wyckoff'] as const;
+
+export type EngineStateLensId = (typeof ENGINE_STATE_LENS_IDS)[number];
+
+/** lensId が analysis-engine 計算の状態レンズかどうか */
+export function isEngineStateLensId(lensId: string): lensId is EngineStateLensId {
+  return (ENGINE_STATE_LENS_IDS as readonly string[]).includes(lensId);
 }
 
 /** 評価バー (条件評価器の OHLCV / side-b の OHLCVBar と構造互換) */
@@ -130,16 +144,35 @@ export async function computeStateLensFeatureSeries(
   return result;
 }
 
+/** features 系列を数値エンコードしてキャッシュへ格納する (TS 系 / engine 系で共通) */
+function encodeAndStoreFeatureSeries(
+  indicatorCache: Map<string, number[]>,
+  lensId: string,
+  featureSeries: Record<string, Array<LensFeatureValue | null>>
+): void {
+  for (const [featureKey, values] of Object.entries(featureSeries)) {
+    const comparator = getLensFeatureComparator(lensId, featureKey);
+    const encoded = values.map((value) => {
+      if (value === null) return Number.NaN;
+      const numeric = encodeLensFeatureValueAsNumber(comparator, value);
+      // エンコード不能 (skip kind 等) は欠損と同じ扱い = 条件不成立に倒す
+      return numeric === null ? Number.NaN : numeric;
+    });
+    indicatorCache.set(makeLensCacheKey(lensId, featureKey), encoded);
+  }
+}
+
 /**
  * 状態レンズ条件 (#3 第2弾) の per-bar 系列を evaluator キャッシュに追加する。
  *
  * インジケーターレンズの appendLensSeriesToCache (strategyBacktestService) と対になる
  * 状態レンズ版。backtest / live / プレビューが同じ本関数を通ることで評価 1 経路を維持する。
- * analysis-engine は呼ばない (TS 側計算のみ)。
  *
- * - 対応レンズ: time_session / dow_theory / volatility_regime
- * - 未対応の状態レンズ (smc / chart_pattern / wyckoff = analysis-engine 拡張待ち、
- *   pattern = 既存 PatternCondition と同機能) は警告してスキップ (= 条件は不成立評価)
+ * - TS 計算レンズ (time_session / dow_theory / volatility_regime): analysis-engine 不要
+ * - engine 計算レンズ (smc / chart_pattern / wyckoff): `engineSeries` 指定時のみ
+ *   analysis-engine の per-bar 系列 API (stateLensSeries) を 1 回呼んで取得。
+ *   未指定・旧バージョン engine (配列なし) は警告してスキップ (= 条件は不成立評価)
+ * - pattern (ローソク足12種) は既存 PatternCondition と同機能のため対象外 (警告)
  */
 export async function appendStateLensSeriesToCache(params: {
   indicatorCache: Map<string, number[]>;
@@ -148,36 +181,102 @@ export async function appendStateLensSeriesToCache(params: {
   symbol: string;
   timeframe: string;
   bars: ReadonlyArray<StateLensBar>;
+  /**
+   * engine 系状態レンズ (smc / chart_pattern / wyckoff) の取得設定。
+   * 未指定の場合、engine 系レンズ条件は警告の上スキップ (= 不成立評価)
+   */
+  engineSeries?: {
+    startDate: Date;
+    endDate: Date;
+    fetchIndicatorSeriesFn: typeof fetchIndicatorSeries;
+  };
 }): Promise<void> {
   const stateLensIds = new Set<TsComputableStateLensId>();
+  const engineLensIds = new Set<EngineStateLensId>();
   for (const condition of params.lensConditions) {
     if (condition.lensId.startsWith('ind:')) {
       continue; // インジケーターレンズは appendLensSeriesToCache の担当
     }
     if (isTsComputableStateLensId(condition.lensId)) {
       stateLensIds.add(condition.lensId);
+    } else if (isEngineStateLensId(condition.lensId)) {
+      engineLensIds.add(condition.lensId);
     } else {
       console.warn(
-        `[StateLensSeries] 未対応の状態レンズのため条件をスキップします (第2弾後半で対応予定): ${condition.lensId}`
+        `[StateLensSeries] 未対応の状態レンズのため条件をスキップします: ${condition.lensId}`
       );
     }
   }
 
+  // --- TS 計算レンズ ---
   for (const lensId of stateLensIds) {
     const featureSeries = await computeStateLensFeatureSeries(lensId, {
       symbol: params.symbol,
       timeframe: params.timeframe,
       bars: params.bars,
     });
-    for (const [featureKey, values] of Object.entries(featureSeries)) {
-      const comparator = getLensFeatureComparator(lensId, featureKey);
-      const encoded = values.map((value) => {
-        if (value === null) return Number.NaN;
-        const numeric = encodeLensFeatureValueAsNumber(comparator, value);
-        // エンコード不能 (skip kind 等) は欠損と同じ扱い = 条件不成立に倒す
-        return numeric === null ? Number.NaN : numeric;
-      });
-      params.indicatorCache.set(makeLensCacheKey(lensId, featureKey), encoded);
+    encodeAndStoreFeatureSeries(params.indicatorCache, lensId, featureSeries);
+  }
+
+  // --- engine 計算レンズ (smc / chart_pattern / wyckoff) ---
+  if (engineLensIds.size === 0) {
+    return;
+  }
+  if (!params.engineSeries) {
+    console.warn(
+      `[StateLensSeries] engine 系レンズの取得設定が無いため条件をスキップします: ${[...engineLensIds].join(',')}`
+    );
+    return;
+  }
+  const response = await params.engineSeries.fetchIndicatorSeriesFn({
+    symbol: params.symbol,
+    timeframe: params.timeframe,
+    startDate: params.engineSeries.startDate,
+    endDate: params.engineSeries.endDate,
+    indicators: [],
+    stateLensSeries: [...engineLensIds],
+  });
+
+  for (const lensId of engineLensIds) {
+    // payload 配列 → features 配列 (payload→features 変換は各レンズの export を再利用 = 単一情報源)
+    const featuresPerBar: Array<Record<string, number | string | boolean>> | null = (() => {
+      if (lensId === 'smc') {
+        return response.smcSeries ? response.smcSeries.map(smcPayloadToFeatures) : null;
+      }
+      if (lensId === 'chart_pattern') {
+        return response.chartPatternsSeries
+          ? response.chartPatternsSeries.map(chartPatternPayloadToFeatures)
+          : null;
+      }
+      return response.wyckoffSeries ? response.wyckoffSeries.map(wyckoffPayloadToFeatures) : null;
+    })();
+
+    if (!featuresPerBar) {
+      // 旧バージョンの analysis-engine (per-bar 系列未対応) → 当該レンズ条件は不成立評価
+      console.warn(
+        `[StateLensSeries] analysis-engine が per-bar 系列を返しませんでした (旧バージョンの可能性)。条件をスキップします: ${lensId}`
+      );
+      continue;
     }
+    if (featuresPerBar.length !== params.bars.length) {
+      // バー列と系列の index がズレると誤った時点の値で判定する事故になるため中断する
+      throw new Error(
+        `状態レンズ系列(${lensId})の長さ(${featuresPerBar.length})がバー列(${params.bars.length})と一致しません`
+      );
+    }
+
+    // features 配列を featureKey → per-bar 系列へ転置 (カタログ定義キーのみ)
+    const definition = getLensComparisonDefinition(lensId);
+    const featureKeys = definition ? Object.keys(definition.features) : [];
+    const featureSeries: Record<string, Array<LensFeatureValue | null>> = {};
+    for (const key of featureKeys) {
+      featureSeries[key] = featuresPerBar.map((features) => {
+        const value = features[key];
+        return typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean'
+          ? value
+          : null;
+      });
+    }
+    encodeAndStoreFeatureSeries(params.indicatorCache, lensId, featureSeries);
   }
 }

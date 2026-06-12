@@ -267,8 +267,8 @@ export function hhmmToMinutes(hhmm: string): number | null {
 /**
  * レンズ条件の対象レンズ種別。
  * - インジケーター系（コア4種 + MA クロス）: lensId にパラメータ識別子を含む（例 `ind:rsi#p14`）
- * - 状態系（#3 第2弾、TS 計算可能な 3 種）: lensId = 種別名そのまま（例 `time_session`）
- *   ※ smc / chart_pattern / wyckoff は analysis-engine 拡張後に追加（加算的拡張）
+ * - 状態系（#3 第2弾）: lensId = 種別名そのまま（例 `time_session`）。
+ *   TS 計算 3 種 + analysis-engine 計算 3 種（smc / chart_pattern / wyckoff）
  */
 export type LensConditionKind =
   | 'rsi'
@@ -278,13 +278,19 @@ export type LensConditionKind =
   | 'bb'
   | 'time_session'
   | 'dow_theory'
-  | 'volatility_regime';
+  | 'volatility_regime'
+  | 'smc'
+  | 'chart_pattern'
+  | 'wyckoff';
 
 /** 状態系レンズの種別集合（lensId = 種別名そのまま） */
 export const STATE_LENS_CONDITION_KINDS = [
   'time_session',
   'dow_theory',
   'volatility_regime',
+  'smc',
+  'chart_pattern',
+  'wyckoff',
 ] as const;
 
 /** 種別が状態系レンズかどうか（パラメータ入力なし・lensId に `#` を含まない） */
@@ -380,6 +386,9 @@ export const LENS_CONDITION_KIND_INFO: Record<LensConditionKind, { label: string
   time_session: { label: '時間帯レンズ（状態）' },
   dow_theory: { label: 'ダウ理論レンズ（状態）' },
   volatility_regime: { label: 'ボラティリティレンズ（状態）' },
+  smc: { label: 'SMC レンズ（状態）' },
+  chart_pattern: { label: 'チャートパターンレンズ（状態）' },
+  wyckoff: { label: 'ワイコフレンズ（状態）' },
 };
 
 /**
@@ -689,6 +698,215 @@ export const LENS_FEATURE_INFO: Record<LensConditionKind, LensFeatureInfo[]> = {
       defaultValue: 10,
     },
   ],
+  // --- analysis-engine 計算の状態系レンズ (#3 第2段後半。category の並びは backend values と同期) ---
+  smc: [
+    {
+      key: 'current_zone',
+      label: '価格ゾーン',
+      valueKind: 'enum',
+      options: [
+        { value: 'DISCOUNT', label: 'ディスカウント（割安側）' },
+        { value: 'EQUILIBRIUM', label: '中立' },
+        { value: 'PREMIUM', label: 'プレミアム（割高側）' },
+      ],
+      defaultValue: 'DISCOUNT',
+      description: '直近 50 本のスイングレンジ内での現在位置',
+    },
+    {
+      key: 'zone_position_pct',
+      label: 'レンジ内位置（0〜1）',
+      valueKind: 'number',
+      min: 0,
+      max: 1,
+      step: 0.05,
+      defaultValue: 0.3,
+      sentinel: -1,
+      description: '0 = レンジ下限、1 = レンジ上限',
+    },
+    {
+      key: 'last_structure_event',
+      label: '直近の構造イベント',
+      valueKind: 'category',
+      options: [
+        { value: 'NONE', label: 'なし' },
+        { value: 'BOS_BULL', label: 'BOS（強気・トレンド継続）' },
+        { value: 'BOS_BEAR', label: 'BOS（弱気・トレンド継続）' },
+        { value: 'CHOCH_BULL', label: 'CHoCH（強気転換）' },
+        { value: 'CHOCH_BEAR', label: 'CHoCH（弱気転換）' },
+      ],
+      defaultValue: 'BOS_BULL',
+    },
+    {
+      key: 'bars_since_last_structure_event',
+      label: '構造イベントからのバー数',
+      valueKind: 'number',
+      min: 0,
+      max: 20,
+      step: 1,
+      defaultValue: 5,
+      sentinel: -1,
+      description: 'イベント未検出のバーは条件不成立',
+    },
+    {
+      key: 'nearest_ob_bull_distance_pips',
+      label: '直近 Bull OB との距離（pips）',
+      valueKind: 'number',
+      min: 0,
+      max: 100,
+      step: 1,
+      defaultValue: 20,
+      sentinel: -1,
+      description: 'OB 未検出のバーは条件不成立',
+    },
+    {
+      key: 'nearest_ob_bear_distance_pips',
+      label: '直近 Bear OB との距離（pips）',
+      valueKind: 'number',
+      min: 0,
+      max: 100,
+      step: 1,
+      defaultValue: 20,
+      sentinel: -1,
+      description: 'OB 未検出のバーは条件不成立',
+    },
+    {
+      key: 'liquidity_above_count',
+      label: '上方の流動性（スイング高値数）',
+      valueKind: 'number',
+      min: 0,
+      max: 5,
+      step: 1,
+      defaultValue: 2,
+      sentinel: -1,
+    },
+    {
+      key: 'liquidity_below_count',
+      label: '下方の流動性（スイング安値数）',
+      valueKind: 'number',
+      min: 0,
+      max: 5,
+      step: 1,
+      defaultValue: 2,
+      sentinel: -1,
+    },
+    {
+      key: 'fvg_bull_count_last_20',
+      label: 'Bull FVG 数（直近20本）',
+      valueKind: 'number',
+      min: 0,
+      max: 5,
+      step: 1,
+      defaultValue: 1,
+    },
+    {
+      key: 'fvg_bear_count_last_20',
+      label: 'Bear FVG 数（直近20本）',
+      valueKind: 'number',
+      min: 0,
+      max: 5,
+      step: 1,
+      defaultValue: 1,
+    },
+  ],
+  chart_pattern: [
+    {
+      key: 'pattern_detected',
+      label: '検出パターン',
+      valueKind: 'category',
+      options: [
+        { value: 'NONE', label: 'なし' },
+        { value: 'FLAG', label: 'フラッグ' },
+        { value: 'PENNANT', label: 'ペナント' },
+        { value: 'TRIANGLE_ASC', label: '上昇トライアングル' },
+        { value: 'TRIANGLE_DESC', label: '下降トライアングル' },
+        { value: 'TRIANGLE_SYM', label: '対称トライアングル' },
+        { value: 'WEDGE_RISE', label: '上昇ウェッジ' },
+        { value: 'WEDGE_FALL', label: '下降ウェッジ' },
+        { value: 'DOUBLE_TOP', label: 'ダブルトップ' },
+        { value: 'DOUBLE_BOTTOM', label: 'ダブルボトム' },
+        { value: 'HEAD_SHOULDER', label: 'ヘッドアンドショルダー' },
+        { value: 'INV_HEAD_SHOULDER', label: '逆ヘッドアンドショルダー' },
+      ],
+      defaultValue: 'DOUBLE_BOTTOM',
+    },
+    {
+      key: 'pattern_direction_bias',
+      label: 'パターンの方向バイアス',
+      valueKind: 'category',
+      options: [
+        { value: 'BULL', label: '強気' },
+        { value: 'BEAR', label: '弱気' },
+        { value: 'NEUTRAL', label: '中立' },
+      ],
+      defaultValue: 'BULL',
+    },
+    {
+      key: 'pattern_break_imminent',
+      label: 'ブレイク間近（直近3本以内）',
+      valueKind: 'bool',
+      defaultValue: true,
+    },
+    {
+      key: 'pattern_bars_count',
+      label: 'パターン形成バー数',
+      valueKind: 'number',
+      min: 0,
+      max: 50,
+      step: 1,
+      defaultValue: 10,
+    },
+  ],
+  wyckoff: [
+    {
+      key: 'wyckoff_phase',
+      label: 'ワイコフフェーズ',
+      valueKind: 'category',
+      options: [
+        { value: 'ACCUMULATION', label: '蓄積' },
+        { value: 'MARKUP', label: '上昇' },
+        { value: 'DISTRIBUTION', label: '分配' },
+        { value: 'MARKDOWN', label: '下落' },
+        { value: 'RE_ACCUMULATION', label: '再蓄積' },
+        { value: 'RE_DISTRIBUTION', label: '再分配' },
+        { value: 'UNKNOWN', label: '不明' },
+      ],
+      defaultValue: 'ACCUMULATION',
+    },
+    {
+      key: 'spring_detected_in_last_20_bars',
+      label: 'スプリング検出（直近20本）',
+      valueKind: 'bool',
+      defaultValue: true,
+    },
+    {
+      key: 'upthrust_detected_in_last_20_bars',
+      label: 'アップスラスト検出（直近20本）',
+      valueKind: 'bool',
+      defaultValue: true,
+    },
+    {
+      key: 'last_sos_bars_ago',
+      label: 'SOS（強さの兆候）からのバー数',
+      valueKind: 'number',
+      min: 0,
+      max: 20,
+      step: 1,
+      defaultValue: 5,
+      sentinel: -1,
+      description: '未検出のバーは条件不成立',
+    },
+    {
+      key: 'last_sow_bars_ago',
+      label: 'SOW（弱さの兆候）からのバー数',
+      valueKind: 'number',
+      min: 0,
+      max: 20,
+      step: 1,
+      defaultValue: 5,
+      sentinel: -1,
+      description: '未検出のバーは条件不成立',
+    },
+  ],
 };
 
 /** 値種別ごとに許可する演算子（設計書 §12.4-6） */
@@ -749,6 +967,9 @@ export function buildLensId(kind: LensConditionKind, params: LensIdParams): stri
     case 'time_session':
     case 'dow_theory':
     case 'volatility_regime':
+    case 'smc':
+    case 'chart_pattern':
+    case 'wyckoff':
       return kind;
     case 'rsi':
       return `ind:rsi#p${normalizeLensPeriod(params.period, 14)}`;

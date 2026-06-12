@@ -67,6 +67,10 @@ export const AnalysisEngineIndicatorSeriesRequestSchema = z.object({
   // SMC context (Phase 7a) を Wyckoff phase 判定に活用するため、includeSmc も
   // 同時に True にすると精度が上がる (互いに独立に設定可)。
   includeWyckoff: z.boolean().default(false),
+  // レンズ条件タイプ #3 第2段: 状態レンズの per-bar 系列の要求 (default 空で既存挙動互換)。
+  // 指定レンズの payload を「バー i を末尾とする直近 150 本の窓」で全バー計算し、
+  // response の smcSeries / chartPatternsSeries / wyckoffSeries に timestamps と 1:1 で返す
+  stateLensSeries: z.array(z.enum(['smc', 'chart_pattern', 'wyckoff'])).max(3).default([]),
 });
 
 export type AnalysisEngineIndicatorSeriesRequest = z.infer<typeof AnalysisEngineIndicatorSeriesRequestSchema>;
@@ -200,6 +204,12 @@ export const AnalysisEngineIndicatorSeriesResponseSchema = z.object({
   chartPatterns: AnalysisEngineChartPatternsPayloadSchema.nullable().optional(),
   // Phase 7c: Wyckoff phases snapshot (request.includeWyckoff=true 時のみ Python 側で詰まる)
   wyckoff: AnalysisEngineWyckoffPhasesPayloadSchema.nullable().optional(),
+  // レンズ条件タイプ #3 第2段: 状態レンズの per-bar 系列 (request.stateLensSeries 指定時のみ)。
+  // 各配列は timestamps と 1:1。旧バージョンの engine は本フィールドを返さない
+  // (消費側は欠落時に当該レンズ条件を不成立に倒す graceful degrade 必須)
+  smcSeries: z.array(AnalysisEngineSmcStructuresPayloadSchema).nullable().optional(),
+  chartPatternsSeries: z.array(AnalysisEngineChartPatternsPayloadSchema).nullable().optional(),
+  wyckoffSeries: z.array(AnalysisEngineWyckoffPhasesPayloadSchema).nullable().optional(),
 });
 
 export type AnalysisEngineIndicatorSeriesResponse = z.infer<typeof AnalysisEngineIndicatorSeriesResponseSchema>;

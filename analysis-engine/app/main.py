@@ -213,6 +213,11 @@ def indicator_series(req: IndicatorSeriesRequest) -> IndicatorSeriesResponse:
     if req.includeWyckoff:
         wyckoff_payload = compute_wyckoff_phases(df, smc_context=smc_payload)
 
+    # 状態レンズの per-bar 系列 (レンズ条件タイプ #3 第2段、req.stateLensSeries 指定時のみ)
+    smc_series, chart_patterns_series, wyckoff_series = _compute_state_lens_series(
+        df, set(req.stateLensSeries)
+    )
+
     return IndicatorSeriesResponse(
         symbol=req.symbol,
         timeframe=req.timeframe,
@@ -222,7 +227,57 @@ def indicator_series(req: IndicatorSeriesRequest) -> IndicatorSeriesResponse:
         smc=smc_payload,
         chartPatterns=chart_patterns_payload,
         wyckoff=wyckoff_payload,
+        smcSeries=smc_series,
+        chartPatternsSeries=chart_patterns_series,
+        wyckoffSeries=wyckoff_series,
     )
+
+
+# 状態レンズ per-bar 系列の窓幅。Node 側 STATE_LENS_CONTEXT_BARS /
+# lensSnapshotBuilder の DEFAULT_WINDOW_BARS と同値に保つこと (ドリフト注意)。
+# per-bar 値 = 「そのバーの瞬間にスナップショットを作ったら見えたはずの状態」になり、
+# 柱1 (ノート類似) と柱2 (条件) が同じ状態定義を共有する。
+STATE_LENS_WINDOW_BARS = 150
+
+
+def _compute_state_lens_series(df: pd.DataFrame, lenses: set) -> tuple:
+    """要求された状態レンズの payload を全バーについて per-bar 計算する。
+
+    各バー i は「バー i を末尾とする直近 STATE_LENS_WINDOW_BARS 本の窓」で計算する。
+    窓がバー i で終わるため未来バーは構造的に参照されない (lookahead 禁止、
+    NOTE_SIMILARITY_FOUNDATION.md §12.2 不変条件)。ピボットの「right_bars 本後に確定」
+    という遅延も、窓内の _detect_pivots がそのまま表現する。
+
+    wyckoff は SMC context で精度が上がるため、wyckoff 要求時は同じ窓の SMC payload を
+    文脈として渡す (smc が未要求でも内部計算する。返すのは要求されたものだけ)。
+    """
+    if not lenses:
+        return None, None, None
+
+    want_smc = "smc" in lenses
+    want_chart = "chart_pattern" in lenses
+    want_wyckoff = "wyckoff" in lenses
+
+    smc_series = [] if want_smc else None
+    chart_series = [] if want_chart else None
+    wyckoff_series = [] if want_wyckoff else None
+
+    n = len(df)
+    for i in range(n):
+        start = max(0, i - STATE_LENS_WINDOW_BARS + 1)
+        window = df.iloc[start : i + 1]
+
+        smc_payload = None
+        if want_smc or want_wyckoff:
+            smc_payload = compute_smc_structures(window)
+        if want_smc and smc_series is not None:
+            smc_series.append(smc_payload)
+        if want_chart and chart_series is not None:
+            chart_series.append(compute_chart_patterns(window))
+        if want_wyckoff and wyckoff_series is not None:
+            wyckoff_series.append(compute_wyckoff_phases(window, smc_context=smc_payload))
+
+    return smc_series, chart_series, wyckoff_series
 
 
 def _collect_indicator_specs_from_condition_group(group: object) -> tuple[list[dict], list[str]]:

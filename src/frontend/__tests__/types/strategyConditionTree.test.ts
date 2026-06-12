@@ -255,12 +255,19 @@ describe("レンズ条件ヘルパ（レンズ条件タイプ #3）", () => {
     expect(parseLensIdForEdit("ind:rsi")).toBeNull();
     expect(parseLensIdForEdit("ind:unknown#p14")).toBeNull();
     expect(parseLensIdForEdit("rsi#p14")).toBeNull();
-    // 未対応の状態レンズ (smc 等) も null (第2弾後半で追加)
-    expect(parseLensIdForEdit("smc")).toBeNull();
+    // 条件タイプ対象外の状態レンズ (pattern は PatternCondition と同機能) は null
+    expect(parseLensIdForEdit("pattern")).toBeNull();
   });
 
-  it("状態系レンズは lensId = 種別名そのままで往復安定（#3 第2弾）", () => {
-    for (const kind of ["time_session", "dow_theory", "volatility_regime"] as const) {
+  it("状態系レンズは lensId = 種別名そのままで往復安定（#3 第2弾、TS 3 種 + engine 3 種）", () => {
+    for (const kind of [
+      "time_session",
+      "dow_theory",
+      "volatility_regime",
+      "smc",
+      "chart_pattern",
+      "wyckoff",
+    ] as const) {
       const lensId = buildLensId(kind, {});
       expect(lensId).toBe(kind);
       expect(parseLensIdForEdit(lensId)).toEqual({ kind, params: {} });
@@ -274,6 +281,12 @@ describe("レンズ条件ヘルパ（レンズ条件タイプ #3）", () => {
     expect(trendState && encodeLensConditionValue(trendState, "uptrend")).toBe(0);
     expect(trendState && encodeLensConditionValue(trendState, "range")).toBe(2);
     expect(trendState && encodeLensConditionValue(trendState, "sideways")).toBeNull();
+    // engine 系レンズの category も values 順 index (backend と同期)
+    const wyckoffPhase = LENS_FEATURE_INFO.wyckoff.find((i) => i.key === "wyckoff_phase");
+    expect(wyckoffPhase && encodeLensConditionValue(wyckoffPhase, "ACCUMULATION")).toBe(0);
+    expect(wyckoffPhase && encodeLensConditionValue(wyckoffPhase, "RE_DISTRIBUTION")).toBe(5);
+    const structureEvent = LENS_FEATURE_INFO.smc.find((i) => i.key === "last_structure_event");
+    expect(structureEvent && encodeLensConditionValue(structureEvent, "CHOCH_BEAR")).toBe(4);
   });
 
   it("isLensCondition は lens のみ true、group とは排他", () => {

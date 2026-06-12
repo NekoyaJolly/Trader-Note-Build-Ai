@@ -124,11 +124,11 @@ Side-A は「人間トレーダーのノーコード相棒」。完成形は **2
 
 ### Phase γ — 柱2 をライブに（条件で通知）
 - [x] **ライブ条件評価エンジン**（バックテスト評価器をライブ共用、定期/リアルタイム評価→発火）〔L〕 — 2026-06-10 実装 (PR γ-1): `strategyLiveEvaluationService` が `evaluateConditionGroup` + `buildEvaluationCaches` をライブ共用(評価1経路化)。Cloud Scheduler `strategy-alerts-15min`(7分オフセット) → `GET /api/cron/strategy-alerts`。アラート通知は Notification テーブル(type=strategy_alert)に統合し UI 到達を修正(旧実装は揮発FSで本番不達)、Web Push スタブも実配信化
-- [ ] 条件ツリーに **レンズ条件タイプ**追加（柱1基盤を流用）〔L、**設計確定**〕 — 設計は `NOTE_SIMILARITY_FOUNDATION.md §12`。**フルスコープ確定 (2026-06-12 Neko): 状態系レンズ含む** → レンズの per-bar 系列化 + analysis-engine の per-bar 系列 API 追加が必要。実装は「インジケーター系先行 → 状態系追加」で段階化可。**第1弾（インジケーター系 rsi/macd/ma/ma_cross/bb）は 2026-06-13 実装済**（per-bar 系列化 + 評価器 + UI、backtest/live 共用、lookahead 禁止不変条件、詳細 §12 追補3）。順序範囲演算子・プレビュー対応も同日フォローアップで実装済（§12 追補4）。TS 計算可能な状態系 3 種（time_session/dow_theory/volatility_regime）も 2026-06-13 実装済（§12 追補5、窓150本でスナップショットと同じ見え方）。**残 = smc / chart_pattern / wyckoff（analysis-engine payload 配列化）のみ**
+- [x] 条件ツリーに **レンズ条件タイプ**追加（柱1基盤を流用）〔L、**設計確定**〕 — 設計は `NOTE_SIMILARITY_FOUNDATION.md §12`。**フルスコープ確定 (2026-06-12 Neko): 状態系レンズ含む** → **2026-06-13 フルスコープ完了**: 第1弾=インジケーター系 rsi/macd/ma/ma_cross/bb（§12 追補3）、フォローアップ=順序範囲演算子+プレビュー対応（追補4）、第2弾=状態系 8 種（TS 計算 3 種は追補5、smc/chart_pattern/wyckoff は analysis-engine per-bar 系列 API `stateLensSeries` で追補6）。全経路 backtest/live/プレビュー共用・lookahead 禁止不変条件・テストで固定
 - [x] ~~マルチタイムフレーム条件〔M〕~~ (PR #391、2026-06-11 実装・本番実機検証済: `timeframeOverride`、確定バーのみ参照で lookahead 防止、1w 対応。条件ビルダー/評価器/backtest/live 共用) / ~~ルックバック UI〔S〕~~ (PR #374)
 - [x] ~~条件アラートにも通知粒度設定を適用（柱1と共通の通知設定層）~~ (PR #397、2026-06-12): NotificationPreference の strategy スコープを `triggerAlert` の cooldown に配線 (`strategy pref > user pref > StrategyAlert 固有値`)。柱2 は二値判定 (matchScore=1.0) のため threshold/minMatchLevel は no-op、cooldown のみ層化。`resolveForStrategy` + scope=strategy upsert/schema 配線。DB 基盤は β-2a 完備済で migration 不要。**残=per-strategy 上書き UI (follow-up)、maxPerDay 配線**
 
-> **Phase γ 残**: レンズ条件タイプ追加 (柱1/柱2 合流の核、規模大) のみ。MTF (#391) / ライブ条件評価 (γ-1) / 通知粒度 (#397) は完了。
+> **Phase γ 完了 (2026-06-13)**: レンズ条件タイプ (柱1/柱2 合流の核) のフルスコープ完了をもって Phase γ の全項目が完了。MTF (#391) / ライブ条件評価 (γ-1) / 通知粒度 (#397) / レンズ条件タイプ (#399-#401 + 第2段) 。次は Phase δ (δ-5 常駐ワーカーは 15 分 cron 維持で当面見送り、δ-3 は per-user SSE 新設。§13)。
 
 > **支える基盤メモ**:
 > - **(2026-06-11, PR #392-394)**: バックテスト履歴 OHLCV 取得を **cTrader 優先 → EODHD 優先**に切替 (Phase A All-In-One 統一。§4 市場データ参照)。本番実機検証済。EODHD intraday は週末/休場で OHLC=null のギャップ足を返すため `Number.isFinite` で除外 (チャート保存経路の同型 DecimalError も PR #395 で除外)。詳細 memory `project_eodhd_backtest_primary`。

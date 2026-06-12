@@ -65,7 +65,7 @@ export class WyckoffLens implements Lens {
     return {
       lensName: this.name,
       lensVersion: this.version,
-      features: payloadToFeatures(payload),
+      features: wyckoffPayloadToFeatures(payload),
       computedAt,
       computeDurationMs: Date.now() - start,
       // phase が UNKNOWN なら confidence 0、それ以外は payload.wyckoffPhaseConfidence
@@ -77,7 +77,7 @@ export class WyckoffLens implements Lens {
 /**
  * `WyckoffPhasesPayload` を `LensFeature.features` 形式にマッピングする。
  */
-function payloadToFeatures(
+export function wyckoffPayloadToFeatures(
   payload: WyckoffPhasesPayload,
 ): Record<string, number | string | boolean> {
   return {

@@ -67,7 +67,7 @@ export class SMCLens implements Lens {
     return {
       lensName: this.name,
       lensVersion: this.version,
-      features: payloadToFeatures(payload),
+      features: smcPayloadToFeatures(payload),
       computedAt,
       computeDurationMs: Date.now() - start,
       confidence: 1.0,
@@ -79,7 +79,7 @@ export class SMCLens implements Lens {
  * `SmcStructuresPayload` を `LensFeature.features` (`Record<string, number | string | boolean>`)
  * 形式にマッピングする。snake_case key で TS 側 SMCLens features の標準を確立する。
  */
-function payloadToFeatures(
+export function smcPayloadToFeatures(
   payload: SmcStructuresPayload,
 ): Record<string, number | string | boolean> {
   return {

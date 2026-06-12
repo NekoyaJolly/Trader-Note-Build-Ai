@@ -270,13 +270,18 @@ export class LiveStrategyEvaluationService {
       closes: bars.map((bar) => bar.close),
       fetchIndicatorSeriesFn: this.fetchLensSeriesFn,
     });
-    // 状態レンズ (#3 第2弾): TS 側計算のみ・analysis-engine 不要
+    // 状態レンズ (#3 第2弾): TS 計算 3 種 + engine 計算 3 種 (smc/chart_pattern/wyckoff)
     await appendStateLensSeriesToCache({
       indicatorCache,
       lensConditions: baseLensConditions,
       symbol: strategy.symbol,
       timeframe,
       bars,
+      engineSeries: {
+        startDate: bars[0].timestamp,
+        endDate: bars[bars.length - 1].timestamp,
+        fetchIndicatorSeriesFn: this.fetchLensSeriesFn,
+      },
     });
 
     // === MTF: timeframeOverride 条件用の別時間足ビューを準備 (Phase γ) ===
@@ -350,6 +355,11 @@ export class LiveStrategyEvaluationService {
         symbol: strategy.symbol,
         timeframe: tf,
         bars: viewBars,
+        engineSeries: {
+          startDate: viewBars[0].timestamp,
+          endDate: viewBars[viewBars.length - 1].timestamp,
+          fetchIndicatorSeriesFn: this.fetchLensSeriesFn,
+        },
       });
       timeframeViews.set(tf, {
         data: viewBars,

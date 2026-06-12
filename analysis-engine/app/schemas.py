@@ -68,6 +68,17 @@ class IndicatorSeriesRequest(BaseModel):
     # includeSmc も True にすると精度が上がる (互いに独立に True/False 設定可)。
     includeWyckoff: bool = False
 
+    # 状態レンズの per-bar 系列の要求（レンズ条件タイプ #3 第2段、default 空で既存挙動互換）。
+    # 指定したレンズの payload を「バー i を末尾とする直近 150 本の窓」で全バーについて計算し、
+    # IndicatorSeriesResponse.smcSeries / chartPatternsSeries / wyckoffSeries に
+    # timestamps と 1:1 で格納して返す。
+    # 窓がバー i で終わるため未来バーは構造的に参照されない（lookahead 禁止、
+    # NOTE_SIMILARITY_FOUNDATION.md §12.2）。窓幅 150 は Node 側
+    # STATE_LENS_CONTEXT_BARS / lensSnapshotBuilder の DEFAULT_WINDOW_BARS と同期（ドリフト注意）。
+    stateLensSeries: List[Literal["smc", "chart_pattern", "wyckoff"]] = Field(
+        default_factory=list
+    )
+
 
 class IndicatorSeriesByVersionRequest(BaseModel):
     """Node 側から最小情報（ID + 期間）だけを受け取り、
@@ -280,6 +291,13 @@ class IndicatorSeriesResponse(BaseModel):
 
     # Wyckoff phases snapshot (Phase 7c 追加、`request.includeWyckoff=True` 時のみ格納)
     wyckoff: Optional[WyckoffPhasesPayload] = None
+
+    # --- 状態レンズの per-bar 系列 (レンズ条件タイプ #3 第2段) ---
+    # `request.stateLensSeries` で要求されたレンズのみ格納。各配列は timestamps と 1:1。
+    # 各要素は「そのバーを末尾とする直近 150 本の窓」で計算した payload (= lookahead なし)
+    smcSeries: Optional[List[SmcStructuresPayload]] = None
+    chartPatternsSeries: Optional[List[ChartPatternsPayload]] = None
+    wyckoffSeries: Optional[List[WyckoffPhasesPayload]] = None
 
 
 class WalkForwardEvent(BaseModel):
