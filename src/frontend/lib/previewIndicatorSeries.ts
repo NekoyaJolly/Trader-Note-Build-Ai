@@ -25,7 +25,7 @@ import type {
   ConditionChild,
   ConditionGroup,
 } from "@/types/strategy";
-import { isConditionGroup, isIndicatorCondition, isPatternCondition } from "@/types/strategy";
+import { isConditionGroup, isIndicatorCondition, isLensCondition, isPatternCondition } from "@/types/strategy";
 import type { IndicatorParams } from "@/types/indicator";
 
 /** analysis-engine に渡す単一指標の指定 (cacheKey 規約と 1:1) */
@@ -97,15 +97,20 @@ function toNumberParams(raw: IndicatorParams | undefined): Record<string, number
 // ============================================
 
 /**
- * エントリー条件木を走査し、計算が必要な指標 spec とローソク足パターン ID を収集する。
+ * エントリー条件木を走査し、計算が必要な指標 spec とローソク足パターン ID、
+ * レンズ条件の lensId を収集する。
  * 左辺指標・右辺 indicator ターゲットの両方を spec として集め、cacheKey で重複排除する。
+ * lensId はバックエンド (POST /api/chart/indicator-series の lensIds) がレンズ特徴系列
+ * (数値エンコード済み) の計算に使う (レンズ計算をフロントで自前実装しない = 計算一元化)。
  */
 export function extractConditionRequirements(group: ConditionGroup): {
   specs: IndicatorSpec[];
   patternIds: CandlePatternId[];
+  lensIds: string[];
 } {
   const specByKey = new Map<string, IndicatorSpec>();
   const patternIds = new Set<CandlePatternId>();
+  const lensIds = new Set<string>();
 
   const addIndicator = (indicatorId: string, params: Record<string, number>, field: string) => {
     specByKey.set(makeIndicatorCacheKey(indicatorId, params, field), { indicatorId, params, field });
@@ -121,6 +126,10 @@ export function extractConditionRequirements(group: ConditionGroup): {
     }
     if (isPatternCondition(node)) {
       patternIds.add(node.patternId);
+      return;
+    }
+    if (isLensCondition(node)) {
+      lensIds.add(node.lensId);
       return;
     }
     if (!isIndicatorCondition(node)) return;
@@ -145,7 +154,11 @@ export function extractConditionRequirements(group: ConditionGroup): {
   };
 
   visit(group);
-  return { specs: Array.from(specByKey.values()), patternIds: Array.from(patternIds) };
+  return {
+    specs: Array.from(specByKey.values()),
+    patternIds: Array.from(patternIds),
+    lensIds: Array.from(lensIds),
+  };
 }
 
 // ============================================
@@ -194,17 +207,28 @@ export interface IndicatorSeriesResponse {
   timestamps: string[];
   series: Record<string, (number | null)[]>;
   patterns: Record<string, boolean[]>;
+  /**
+   * レンズ特徴系列 (数値エンコード済み、キーは `lens:<lensId>:<featureKey>`)。
+   * lensIds を要求した場合のみ backend が付与する (additive、旧レスポンスとも互換)。
+   */
+  lensSeries?: Record<string, (number | null)[]>;
 }
 
 function isIndicatorSeriesResponse(value: unknown): value is IndicatorSeriesResponse {
   if (typeof value !== "object" || value === null) return false;
-  const v = value as { timestamps?: unknown; series?: unknown; patterns?: unknown };
+  const v = value as {
+    timestamps?: unknown;
+    series?: unknown;
+    patterns?: unknown;
+    lensSeries?: unknown;
+  };
   return (
     Array.isArray(v.timestamps) &&
     typeof v.series === "object" &&
     v.series !== null &&
     typeof v.patterns === "object" &&
-    v.patterns !== null
+    v.patterns !== null &&
+    (v.lensSeries === undefined || (typeof v.lensSeries === "object" && v.lensSeries !== null))
   );
 }
 
@@ -219,6 +243,8 @@ export async function fetchChartIndicatorSeries(params: {
   endDate: string;
   specs: IndicatorSpec[];
   patternIds: CandlePatternId[];
+  /** レンズ条件の lensId 群 (レンズ特徴系列を backend で計算してもらう) */
+  lensIds?: string[];
   signal?: AbortSignal;
 }): Promise<IndicatorSeriesResponse> {
   const res = await apiFetch("/api/chart/indicator-series", {
@@ -230,6 +256,7 @@ export async function fetchChartIndicatorSeries(params: {
       endDate: params.endDate,
       indicators: params.specs,
       patterns: params.patternIds,
+      lensIds: params.lensIds ?? [],
     }),
     signal: params.signal,
   });
@@ -293,6 +320,17 @@ export function alignSeriesToCandles(
     // Python の float キー (例 {"period":14.0}) を JS 正規形 ({"period":14}) に揃えてから
     // 格納する。これで評価エンジンが makeIndicatorCacheKey で再構築するキーと一致する。
     indicatorCache.set(canonicalizeCacheKey(cacheKey), aligned);
+  }
+
+  // レンズ特徴系列 (キーは `lens:<lensId>:<featureKey>` で Node が生成済み)。
+  // lensId は `_` や `#` を含むため canonicalizeCacheKey を通すとキーが壊れる。そのまま格納する
+  for (const [lensKey, series] of Object.entries(response.lensSeries ?? {})) {
+    const aligned = responseIndexForCandle.map((ri) => {
+      if (ri < 0) return Number.NaN;
+      const v = series[ri];
+      return v === null || v === undefined ? Number.NaN : v;
+    });
+    indicatorCache.set(lensKey, aligned);
   }
 
   const patternCache = new Map<CandlePatternId, boolean[]>();

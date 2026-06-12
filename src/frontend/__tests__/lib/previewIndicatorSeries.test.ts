@@ -73,6 +73,22 @@ describe("extractConditionRequirements", () => {
     };
     expect(extractConditionRequirements(group).specs).toHaveLength(1);
   });
+
+  it("レンズ条件の lensId を収集し重複排除する（レンズ条件タイプ #3）", () => {
+    const group: ConditionGroup = {
+      groupId: "g1",
+      operator: "AND",
+      conditions: [
+        { conditionId: "l1", type: "lens", lensId: "ind:rsi#p14", featureKey: "rsi_zone", operator: "=", value: "oversold" },
+        { conditionId: "l2", type: "lens", lensId: "ind:rsi#p14", featureKey: "rsi_value", operator: "<", value: 0.3 },
+        { conditionId: "l3", type: "lens", lensId: "ind:bb#p20", featureKey: "bb_position", operator: "<", value: 0.2 },
+      ],
+    };
+    const { lensIds, specs } = extractConditionRequirements(group);
+    expect(lensIds.sort()).toEqual(["ind:bb#p20", "ind:rsi#p14"]);
+    // レンズ条件は指標 spec には乗らない（必要系列の解決は backend が行う）
+    expect(specs).toHaveLength(0);
+  });
 });
 
 describe("ローソク足ペイロード (Zod 検証 + 欠損足の扱い)", () => {
@@ -182,6 +198,23 @@ describe("alignSeriesToCandles", () => {
     // 評価エンジンが makeIndicatorCacheKey('rsi',{period:14},'value') で引くキーで取得できる
     const evalKey = makeIndicatorCacheKey("rsi", { period: 14 }, "value");
     expect(indicatorCache.get(evalKey)).toEqual([10, 20, 30]);
+  });
+
+  it("lensSeries はキーをそのまま保ち、ローソク足 index に揃える（canonicalize しない）", () => {
+    const withLens: IndicatorSeriesResponse = {
+      timestamps: response.timestamps,
+      series: {},
+      patterns: {},
+      // lensId は `_` や `#` を含むため、canonicalizeCacheKey を通すとキーが壊れる
+      lensSeries: { "lens:ind:ma_cross#ema20xsma75:ma_cross": [null, 1, 0] },
+    };
+    const { indicatorCache } = alignSeriesToCandles(withLens, candleTs);
+    const lens = indicatorCache.get("lens:ind:ma_cross#ema20xsma75:ma_cross");
+    expect(lens).toBeDefined();
+    expect(Number.isNaN(lens![0])).toBe(true); // null → NaN
+    expect(lens![1]).toBe(1);
+    expect(lens![2]).toBe(0);
+    expect(Number.isNaN(lens![3])).toBe(true); // response に無い bar → NaN
   });
 
   it("ローソク足の順序が基準。response の余分な timestamp は無視する", () => {

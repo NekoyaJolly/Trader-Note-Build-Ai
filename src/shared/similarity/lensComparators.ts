@@ -527,7 +527,12 @@ export function encodeLensFeatureValueAsNumber(
       return index >= 0 ? index : null;
     }
     case 'event':
-      return typeof value === 'string' ? (EVENT_VALUE_ENCODING[value] ?? null) : null;
+      // own property のみ許可 (constructor/toString 等の継承プロパティを拾うと
+      // 未知値が null にならず比較が誤成立するため。フロントミラーと同修正。PR #400)
+      return typeof value === 'string' &&
+        Object.prototype.hasOwnProperty.call(EVENT_VALUE_ENCODING, value)
+        ? EVENT_VALUE_ENCODING[value]
+        : null;
     case 'linear':
     case 'normalizedLinear':
     case 'tanhLinear':

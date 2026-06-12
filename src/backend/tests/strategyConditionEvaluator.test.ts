@@ -968,6 +968,18 @@ describe('レンズ条件(レンズ条件タイプ #3。設計書 §12.4)', () =
     expect(evaluateLensCondition(lensCtx({ [key]: [0] }), lensCond({ operator: '!=' }))).toBe(false);
   });
 
+  test('orderedEnum は順序 index で大小比較できる(順序範囲演算子)', () => {
+    const key = makeLensCacheKey('ind:rsi#p14', 'rsi_zone');
+    // エンコード規約: oversold=0 / neutral=1 / overbought=2
+    const lte = lensCond({ operator: '<=', value: 'neutral' });
+    expect(evaluateLensCondition(lensCtx({ [key]: [0] }), lte)).toBe(true); // 売られすぎ ≤ 中立
+    expect(evaluateLensCondition(lensCtx({ [key]: [1] }), lte)).toBe(true); // 中立 ≤ 中立
+    expect(evaluateLensCondition(lensCtx({ [key]: [2] }), lte)).toBe(false); // 買われすぎ > 中立
+    const gt = lensCond({ operator: '>', value: 'neutral' });
+    expect(evaluateLensCondition(lensCtx({ [key]: [2] }), gt)).toBe(true);
+    expect(evaluateLensCondition(lensCtx({ [key]: [1] }), gt)).toBe(false);
+  });
+
   test('数値系 featureKey は比較演算子で判定する(bb_position < 0.2)', () => {
     const key = makeLensCacheKey('ind:bb#p20', 'bb_position');
     const cond = lensCond({ lensId: 'ind:bb#p20', featureKey: 'bb_position', operator: '<', value: 0.2 });
@@ -981,6 +993,9 @@ describe('レンズ条件(レンズ条件タイプ #3。設計書 §12.4)', () =
     expect(evaluateLensCondition(lensCtx({ [key]: [1] }), cond)).toBe(true);
     expect(evaluateLensCondition(lensCtx({ [key]: [0] }), cond)).toBe(false);
     expect(evaluateLensCondition(lensCtx({ [key]: [-1] }), cond)).toBe(false);
+    // 継承プロパティ名 (constructor 等) はエンコード不能 = 不成立 (prototype 汚染防御)
+    const polluted = lensCond({ lensId: 'ind:macd#f12s26g9', featureKey: 'macd_cross', operator: '!=', value: 'constructor' });
+    expect(evaluateLensCondition(lensCtx({ [key]: [1] }), polluted)).toBe(false);
   });
 
   test('sentinel(-1 = イベント未発生)は数値比較せず不成立に倒す(誤判定防止)', () => {

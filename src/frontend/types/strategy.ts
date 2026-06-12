@@ -311,7 +311,11 @@ export interface LensFeatureInfo {
   key: string;
   label: string;
   valueKind: LensFeatureValueKind;
-  /** enum / event の選択肢（valueKind が enum/event のとき必須） */
+  /**
+   * enum / event の選択肢（valueKind が enum/event のとき必須）。
+   * **enum の並び順は backend lensComparators の orderedEnum `order` と同期させること**
+   * （プレビュー評価の数値エンコードが選択肢 index を使うため。ドリフト注意）。
+   */
   options?: LensFeatureOption[];
   /** number の入力範囲・刻み */
   min?: number;
@@ -319,6 +323,11 @@ export interface LensFeatureInfo {
   step?: number;
   /** 条件作成時の既定値 */
   defaultValue: number | string | boolean;
+  /**
+   * 「該当なし」を表す番兵値（例 bars_since 系の -1 = イベント未発生）。
+   * プレビュー評価で系列値がこの値のとき比較せず不成立に倒す（backend と同挙動）。
+   */
+  sentinel?: number;
   /** 値の意味の補足説明 */
   description?: string;
 }
@@ -388,6 +397,7 @@ export const LENS_FEATURE_INFO: Record<LensConditionKind, LensFeatureInfo[]> = {
       max: 20,
       step: 1,
       defaultValue: 5,
+      sentinel: -1,
       description: '直近 20 本以内にクロスが無い場合は条件不成立',
     },
     {
@@ -443,6 +453,7 @@ export const LENS_FEATURE_INFO: Record<LensConditionKind, LensFeatureInfo[]> = {
       max: 20,
       step: 1,
       defaultValue: 5,
+      sentinel: -1,
       description: '直近 20 本以内にクロスが無い場合は条件不成立',
     },
     { key: 'ma_fast_above_slow', label: '短期線が長期線より上', valueKind: 'bool', defaultValue: true },
@@ -471,11 +482,17 @@ export const LENS_FEATURE_INFO: Record<LensConditionKind, LensFeatureInfo[]> = {
   ],
 };
 
-/** 値種別ごとに許可する演算子（設計書 §12.4-6。enum の順序範囲は後続拡張） */
+/** 値種別ごとに許可する演算子（設計書 §12.4-6） */
 export function lensOperatorsForValueKind(valueKind: LensFeatureValueKind): LensConditionOperator[] {
   if (valueKind === 'number') {
     return ['<', '<=', '>=', '>'];
   }
+  if (valueKind === 'enum') {
+    // 順序付き enum（例 RSI ゾーン: 売られすぎ < 中立 < 買われすぎ）は順序範囲比較も許可する。
+    // 数値エンコードが選択肢 index（= backend orderedEnum の順序 index）のため大小比較が成立する
+    return ['=', '!=', '<', '<=', '>=', '>'];
+  }
+  // event（方向イベント）/ bool は等価比較のみ（bull=1/none=0/bear=-1 の大小に意味を持たせない）
   return ['=', '!='];
 }
 
@@ -596,6 +613,50 @@ export function getLensFeatureInfo(
   featureKey: string
 ): LensFeatureInfo | undefined {
   return LENS_FEATURE_INFO[kind].find((info) => info.key === featureKey);
+}
+
+/**
+ * レンズ系列のキャッシュキー（backend `makeLensCacheKey` と同一規約 `lens:<lensId>:<featureKey>`。
+ * フロントは src/shared を import しない構成のためミラー。仕様変更時は両方を直すこと）。
+ */
+export function makeLensConditionCacheKey(lensId: string, featureKey: string): string {
+  return `lens:${lensId}:${featureKey}`;
+}
+
+/** 方向イベント値の数値エンコード表（backend と同一: bull=1 / none=0 / bear=-1） */
+const LENS_EVENT_VALUE_ENCODING: Record<string, number> = { bull: 1, none: 0, bear: -1 };
+
+/**
+ * レンズ条件の比較値を、バックエンドが返す「数値エンコード済みレンズ系列」と同じ規約で
+ * 数値化する（プレビュー評価用。backend `encodeLensFeatureValueAsNumber` のミラー。ドリフト注意）。
+ * - enum: 選択肢 options の index（並びは backend orderedEnum の order と同期している前提）
+ * - event: bull=1 / none=0 / bear=-1
+ * - bool: true=1 / false=0
+ * - number: 有限値をそのまま
+ * エンコード不能（型不一致・未知値）は null = 比較不能（条件不成立に倒す）。
+ */
+export function encodeLensConditionValue(
+  info: LensFeatureInfo,
+  value: number | string | boolean
+): number | null {
+  switch (info.valueKind) {
+    case 'bool':
+      return typeof value === 'boolean' ? (value ? 1 : 0) : null;
+    case 'enum': {
+      if (typeof value !== 'string' || !info.options) return null;
+      const index = info.options.findIndex((o) => o.value === value);
+      return index >= 0 ? index : null;
+    }
+    case 'event':
+      // own property のみ許可 (constructor/toString 等の継承プロパティを拾うと
+      // 未知値が null にならず比較が誤成立するため。Copilot レビュー対応 PR #400)
+      return typeof value === 'string' &&
+        Object.prototype.hasOwnProperty.call(LENS_EVENT_VALUE_ENCODING, value)
+        ? LENS_EVENT_VALUE_ENCODING[value]
+        : null;
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  }
 }
 
 /**

@@ -67,3 +67,7 @@ __pycache__/
 # 個別の issue 共有時は redaction 適用後にチャット/Issueへ貼り付ける運用。
 .last-mile/
 .chrome-lastmile-*/
+
+# 本番 smoke (playwright.production.config.ts) の成果物
+playwright-report-production/
+test-results-production.xml
