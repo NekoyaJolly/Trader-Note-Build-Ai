@@ -77,12 +77,12 @@ describe('createNotificationStreamHandler(通知 SSE、Phase δ-3)', () => {
   }
 
   test('接続時に SSE ヘッダ + 初期 unread_count、新着はポーリングで配信されカーソルが進む', async () => {
-    const calls: Array<{ userId: string; since: Date }> = [];
+    const calls: Array<{ userId: string; since: Date; sinceId: string | undefined }> = [];
     let batch: ReturnType<typeof makeRow>[] = [];
     const repo: NotificationStreamRepo = {
       countUnread: jest.fn().mockResolvedValue(3),
-      findCreatedSince: (userId, since) => {
-        calls.push({ userId, since });
+      findCreatedSince: (userId, since, sinceId) => {
+        calls.push({ userId, since, sinceId });
         const result = batch;
         batch = [];
         return Promise.resolve(result);
@@ -109,10 +109,12 @@ describe('createNotificationStreamHandler(通知 SSE、Phase δ-3)', () => {
     // per-user 分離: クエリは常に認証ユーザーの userId
     expect(calls.every((c) => c.userId === 'user-1')).toBe(true);
 
-    // 2 回目のポーリング: カーソルが最後の createdAt まで進んでいる
+    // 2 回目のポーリング: 複合カーソル (createdAt, id) が最後の通知まで進んでいる
+    // (同一 createdAt の複数行を取りこぼさないための id タイブレーク)
     await jest.advanceTimersByTimeAsync(10_000);
     expect(calls).toHaveLength(2);
     expect(calls[1].since.toISOString()).toBe('2026-06-13T00:00:11.000Z');
+    expect(calls[1].sinceId).toBe('n2');
 
     req.emit('close');
   });

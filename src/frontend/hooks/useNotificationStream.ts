@@ -21,10 +21,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import { EventSourcePolyfill } from "event-source-polyfill";
+import { z } from "zod";
 import { fetchUnreadNotificationCount } from "@/lib/api";
 
 /** SSE 再接続 / REST フォールバックの間隔 (ms) */
 const RECONNECT_INTERVAL_MS = 30_000;
+
+/** notification イベントの coalesce 窓 (ms)。サーバの連続送信を 1 回の再取得にまとめる */
+const NOTIFY_COALESCE_MS = 100;
+
+/** unread_count イベントのペイロード (外部入力のため Zod でランタイム検証する) */
+const UnreadCountEventSchema = z.object({ count: z.number().int().min(0) });
 
 interface NotificationStreamSubscriber {
   onUnread: (count: number) => void;
@@ -45,8 +52,17 @@ const emitUnread = (count: number): void => {
   subscribers.forEach((sub) => sub.onUnread(count));
 };
 
-const emitNotification = (): void => {
-  subscribers.forEach((sub) => sub.onNotification());
+// notification イベントの発火 coalesce 用 (サーバは 1 ポーリングで新着の件数ぶん
+// イベントを連続送信するため、イベントごとに購読側の REST 再取得が連打されないよう
+// 短い窓でまとめて 1 回だけ発火する)
+let notifyCoalesceTimer: ReturnType<typeof setTimeout> | null = null;
+
+const emitNotificationCoalesced = (): void => {
+  if (notifyCoalesceTimer) return; // 既にスケジュール済み = 同バッチ内の後続イベントは集約
+  notifyCoalesceTimer = setTimeout(() => {
+    notifyCoalesceTimer = null;
+    subscribers.forEach((sub) => sub.onNotification());
+  }, NOTIFY_COALESCE_MS);
 };
 
 /** REST で未読数を 1 回同期する (SSE 接続前 / フォールバック用) */
@@ -85,17 +101,22 @@ const ensureConnected = (): void => {
 
   source.addEventListener("unread_count", (event) => {
     try {
-      const data = JSON.parse((event as MessageEvent).data as string) as { count: number };
-      if (typeof data.count === "number") emitUnread(data.count);
+      // 外部入力のため Zod でランタイム検証し、不正ペイロードは無視する
+      // (壊れた値でバッジを誤更新しない。リポジトリ規約: 外部入力は Zod で narrow)
+      const parsed = UnreadCountEventSchema.safeParse(
+        JSON.parse((event as MessageEvent).data as string)
+      );
+      if (parsed.success) emitUnread(parsed.data.count);
     } catch {
-      /* 不正ペイロードは無視 */
+      /* JSON 不正は無視 (次のイベント / REST フォールバックで自己回復) */
     }
   });
 
   source.addEventListener("notification", () => {
     // ペイロードは使わず「新着があった」事実だけ通知する。
-    // 一覧の形 (matchResult 込み) は REST が正のため、購読側が再取得する
-    emitNotification();
+    // 一覧の形 (matchResult 込み) は REST が正のため、購読側が再取得する。
+    // 連続イベントは coalesce して再取得を 1 回にまとめる
+    emitNotificationCoalesced();
   });
 
   source.onerror = () => {

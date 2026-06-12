@@ -325,18 +325,31 @@ export class DbNotificationRepository {
   }
 
   /**
-   * 指定時刻より後に作成された宛先ユーザーの通知を古い順に返す (Phase δ-3 通知 SSE 用)。
-   * SSE のサーバ側ポーリングが「前回カーソル以降の新着」を差分取得するために使う。
-   * 一覧 (findActiveForFeed) と同じく userId 厳密一致で他ユーザーへ漏らさない。
+   * カーソル (createdAt, id) より後に作成された宛先ユーザーの通知を古い順に返す
+   * (Phase δ-3 通知 SSE 用)。SSE のサーバ側ポーリングが「前回カーソル以降の新着」を
+   * 差分取得するために使う。一覧 (findActiveForFeed) と同じく userId 厳密一致で
+   * 他ユーザーへ漏らさない。
+   *
+   * カーソルを複合 (createdAt, id) にする理由: createdAt のみの `gt` だと、同一
+   * createdAt の通知が複数行ある場合に「前回最後と同時刻の残り」を取りこぼす。
+   * id (uuid) は時系列ではないが、(createdAt, id) の辞書順で安定・完全に走査できる。
    */
-  async findCreatedSince(userId: string, since: Date, limit: number = 50): Promise<Notification[]> {
+  async findCreatedSince(
+    userId: string,
+    since: Date,
+    sinceId: string = '',
+    limit: number = 50
+  ): Promise<Notification[]> {
     return await this.prisma.notification.findMany({
       where: {
         userId,
-        createdAt: { gt: since },
         status: { in: ['unread', 'read'] },
+        OR: [
+          { createdAt: { gt: since } },
+          { createdAt: since, id: { gt: sinceId } },
+        ],
       },
-      orderBy: { createdAt: 'asc' },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       take: limit,
     });
   }

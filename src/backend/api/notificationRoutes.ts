@@ -75,6 +75,7 @@ export interface NotificationStreamRepo {
   findCreatedSince(
     userId: string,
     since: Date,
+    sinceId?: string,
     limit?: number
   ): Promise<Array<{ id: string; type: string; title: string; message: string; sentAt: Date; createdAt: Date }>>;
 }
@@ -90,19 +91,21 @@ export function createNotificationStreamHandler(
     const userId = req.user!.userId;
 
     res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  // nginx 系プロキシのバッファリング無効化 (チャート SSE と同じ)
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    // nginx 系プロキシのバッファリング無効化 (チャート SSE と同じ)
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
 
-  const sendEvent = (event: string, data: object): void => {
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  };
+    const sendEvent = (event: string, data: object): void => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
 
     // 接続時: 現在の未読数を即時送信 (バッジの初期同期)
     let closed = false;
+    // 複合カーソル (createdAt, id): 同一 createdAt の複数行を取りこぼさない (repository の JSDoc 参照)
     let cursor = new Date();
+    let cursorId = '';
     try {
       const initialUnread = await repo.countUnread(userId);
       sendEvent('unread_count', { count: initialUnread });
@@ -110,11 +113,11 @@ export function createNotificationStreamHandler(
       console.warn('[NotificationStream] 初期未読数の取得に失敗:', error);
     }
 
-    // 新着の差分配信 (カーソル = 最後に配信した通知の createdAt)
+    // 新着の差分配信 (カーソル = 最後に配信した通知の createdAt + id)
     const poll = async (): Promise<void> => {
       if (closed) return;
       try {
-        const fresh = await repo.findCreatedSince(userId, cursor);
+        const fresh = await repo.findCreatedSince(userId, cursor, cursorId);
         if (fresh.length === 0) return;
         for (const notification of fresh) {
           sendEvent('notification', {
@@ -125,7 +128,9 @@ export function createNotificationStreamHandler(
             sentAt: notification.sentAt.toISOString(),
           });
         }
-        cursor = fresh[fresh.length - 1].createdAt;
+        const last = fresh[fresh.length - 1];
+        cursor = last.createdAt;
+        cursorId = last.id;
         const unread = await repo.countUnread(userId);
         sendEvent('unread_count', { count: unread });
       } catch (error) {
