@@ -126,9 +126,13 @@ Side-A は「人間トレーダーのノーコード相棒」。完成形は **2
 - [x] **ライブ条件評価エンジン**（バックテスト評価器をライブ共用、定期/リアルタイム評価→発火）〔L〕 — 2026-06-10 実装 (PR γ-1): `strategyLiveEvaluationService` が `evaluateConditionGroup` + `buildEvaluationCaches` をライブ共用(評価1経路化)。Cloud Scheduler `strategy-alerts-15min`(7分オフセット) → `GET /api/cron/strategy-alerts`。アラート通知は Notification テーブル(type=strategy_alert)に統合し UI 到達を修正(旧実装は揮発FSで本番不達)、Web Push スタブも実配信化
 - [ ] 条件ツリーに **レンズ条件タイプ**追加（柱1基盤を流用）〔M〕
 - [x] ~~マルチタイムフレーム条件〔M〕~~ (PR #391、2026-06-11 実装・本番実機検証済: `timeframeOverride`、確定バーのみ参照で lookahead 防止、1w 対応。条件ビルダー/評価器/backtest/live 共用) / ~~ルックバック UI〔S〕~~ (PR #374)
-- [ ] 条件アラートにも通知粒度設定を適用（柱1と共通の通知設定層）= NotificationPreference の strategy スコープ配線。**DB 基盤(scope=strategy + strategyId 列 + partial unique index)は β-2a で完備済、migration 不要**。残=`resolveForStrategy` 追加 + `triggerAlert` でゲート/cooldown 適用 + scope=strategy upsert 配線
+- [x] ~~条件アラートにも通知粒度設定を適用（柱1と共通の通知設定層）~~ (PR #397、2026-06-12): NotificationPreference の strategy スコープを `triggerAlert` の cooldown に配線 (`strategy pref > user pref > StrategyAlert 固有値`)。柱2 は二値判定 (matchScore=1.0) のため threshold/minMatchLevel は no-op、cooldown のみ層化。`resolveForStrategy` + scope=strategy upsert/schema 配線。DB 基盤は β-2a 完備済で migration 不要。**残=per-strategy 上書き UI (follow-up)、maxPerDay 配線**
 
-> **支える基盤メモ (2026-06-11, PR #392-394)**: バックテスト履歴 OHLCV 取得を **cTrader 優先 → EODHD 優先**に切替 (Phase A All-In-One 統一。§4 市場データ参照)。本番実機検証済。EODHD intraday は週末/休場で OHLC=null のギャップ足を返すため `Number.isFinite` で除外。詳細 memory `project_eodhd_backtest_primary`。
+> **Phase γ 残**: レンズ条件タイプ追加 (柱1/柱2 合流の核、規模大) のみ。MTF (#391) / ライブ条件評価 (γ-1) / 通知粒度 (#397) は完了。
+
+> **支える基盤メモ**:
+> - **(2026-06-11, PR #392-394)**: バックテスト履歴 OHLCV 取得を **cTrader 優先 → EODHD 優先**に切替 (Phase A All-In-One 統一。§4 市場データ参照)。本番実機検証済。EODHD intraday は週末/休場で OHLC=null のギャップ足を返すため `Number.isFinite` で除外 (チャート保存経路の同型 DecimalError も PR #395 で除外)。詳細 memory `project_eodhd_backtest_primary`。
+> - **(2026-06-12, PR #396)**: OHLCV 取得 SSE の一過性切断で誤「失敗」表示していた UX を修正 (ジョブ決着まで再接続。バックエンドは 30 分ジョブ保持で再接続時に最終状態を再送)。
 
 ### Phase δ — リアルタイム & 通知の完成
 - [ ] リアルタイム類似度 Phase3（DB/Push/UI 配線、常駐ワーカー本番化）〔L〕
