@@ -182,21 +182,31 @@ async function buildLensSeriesForPreview(
     });
 
     const lensSeries: Record<string, (number | null)[]> = {};
+    // 全区間 null の系列 (skip/cyclic 等のエンコード不能キー) はレスポンスに含めない
+    // (肥大化防止。フロントはキー欠落 = 条件不成立として同じ安全側挙動。Copilot レビュー対応 PR #401)
+    const putIfAnyFinite = (key: string, values: (number | null)[]): void => {
+      if (values.some((v) => v !== null)) {
+        lensSeries[key] = values;
+      }
+    };
     for (const [key, values] of indicatorCache) {
       if (key.startsWith('lens:')) {
         // JSON は NaN を表現できないため null に明示変換する(フロントは null→NaN で復元)
-        lensSeries[key] = values.map((v) => (Number.isFinite(v) ? v : null));
+        putIfAnyFinite(key, values.map((v) => (Number.isFinite(v) ? v : null)));
       }
     }
     for (const [key, values] of stateCache) {
-      lensSeries[key] = result.timestamps.map((ts) => {
-        const ms = Date.parse(ts);
-        if (!Number.isFinite(ms)) return null;
-        const index = barIndexBySecond.get(Math.floor(ms / 1000));
-        if (index === undefined) return null;
-        const v = values[index];
-        return Number.isFinite(v) ? v : null;
-      });
+      putIfAnyFinite(
+        key,
+        result.timestamps.map((ts) => {
+          const ms = Date.parse(ts);
+          if (!Number.isFinite(ms)) return null;
+          const index = barIndexBySecond.get(Math.floor(ms / 1000));
+          if (index === undefined) return null;
+          const v = values[index];
+          return Number.isFinite(v) ? v : null;
+        })
+      );
     }
     return lensSeries;
   } catch (error) {

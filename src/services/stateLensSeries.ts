@@ -99,10 +99,15 @@ export async function computeStateLensFeatureSeries(
     return result;
   }
 
+  // ローリング窓 (同一配列を使い回して per-bar の配列割り当てを避ける。Copilot レビュー対応 PR #401)。
+  // レンズは純粋関数で配列の参照を compute() 後に保持しないため、await 後に窓を進めても安全
+  const windowBars: StateLensBar[] = [];
   for (let i = 0; i < length; i += 1) {
     // バー i を末尾とする有界窓 (先読みなし。窓幅の根拠は STATE_LENS_CONTEXT_BARS 参照)
-    const from = Math.max(0, i - STATE_LENS_CONTEXT_BARS + 1);
-    const windowBars = params.bars.slice(from, i + 1);
+    windowBars.push(params.bars[i]);
+    if (windowBars.length > STATE_LENS_CONTEXT_BARS) {
+      windowBars.shift();
+    }
     const input: LensInput = {
       symbol: params.symbol,
       timeframe: params.timeframe,
