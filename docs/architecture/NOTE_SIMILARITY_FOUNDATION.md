@@ -285,6 +285,7 @@ similarity(noteSnapshot, marketSnapshot):
 | 2026-06-13 | **状態系レンズ per-bar 化 第1段(§12.3、TS 計算可能 3 種)**: time_session / dow_theory / volatility_regime をレンズ条件タイプで使用可能に(analysis-engine 変更なし)。窓 150 本固定でスナップショットと同じ「見え方」を per-bar 化。詳細は追補5。 |
 | 2026-06-13 | **状態系レンズ per-bar 化 第2段(§12.3/§12.6、engine 計算 3 種) = レンズ条件タイプ フルスコープ完了**: smc / chart_pattern / wyckoff を analysis-engine の per-bar 系列 API(`stateLensSeries`)で条件タイプ対応。これで全 8 状態レンズ + コア指標レンズが条件ツリーに合流。詳細は追補6。 |
 | 2026-06-13 | **Phase δ-3/δ-4 実装(§13.3)**: 認証付き per-user 通知 SSE(`GET /api/notifications/stream`)+ フロント購読(`useNotificationStream`)。未読バッジと通知一覧がページ更新なしで自動更新。詳細は追補7。 |
+| 2026-06-13 | **Phase δ-1 実装(§13.2)**: `realtimeSimilarityService` の簡易12次元+cosine を廃止し、正規マッチングパイプライン(レンズ類似度、cron と同一コード)のシンボルスコープ起動に統一。§13.2 の二重特徴表現を解消。詳細は追補8。 |
 
 ### 実装のローカル詳細(2026-06-10、正本への追補)
 
@@ -353,7 +354,16 @@ similarity(noteSnapshot, marketSnapshot):
 - **配信 = サーバ側 DB ポーリング(10 秒)**: Cloud Run max-instances=5 では in-process EventEmitter は「cron を受けたインスタンス ≠ SSE 接続中のインスタンス」で届かないため、**DB をインスタンス間のバスにする**。Postgres LISTEN/NOTIFY は本番接続が Supavisor transaction pooler 経由のため不可、Supabase Realtime は RLS 未整備(認証は cTrader JWT)で per-user 分離を保証できず不採用。通知の主生成源が 15 分 cron のため 10 秒遅延は十分(δ-5 の決定と整合)。
 - **フロント `useNotificationStream`**: 接続はモジュール内 1 本を共有(Header バッジと通知一覧が同時購読しても EventSource は 1 つ)。StrictMode 二重マウント対策は readyState ガード(PR #357 の教訓)。SSE 断時は 30 秒間隔の REST フォールバック + 自動再接続。新着イベントでは一覧を**再取得**する(SSE ペイロードを正としない。一覧の形は REST が正)。
 - Header の未読バッジ 30 秒ポーリングは SSE 購読に置換(初期値と断絶時のみ REST)。
-- **残**: δ-1(休眠中 `realtimeSimilarityService` の簡易 12 次元をレンズエンジンへ統一。常駐ワーカー δ-5 の再判断までは本番経路に乗らないが、§13.2 の二重特徴表現の解消として実施予定)。δ-2 は cron 経路で適用済(ノート=β-2、ストラテジー=#397)のため実質完了。
+- **残**: δ-1(下の追補8 で実装済)。δ-2 は cron 経路で適用済(ノート=β-2、ストラテジー=#397)のため実質完了。
+
+### 実装のローカル詳細・追補8(2026-06-13、§13.2 Phase δ-1 リアルタイムのレンズ統一)
+
+- **`realtimeSimilarityService` を「薄いトリガー」に書き換え**: 簡易 12 次元ベクトル + cosine(`calculateFeatureVector` / `checkSimilarity` 等)を**全廃**し、バー確定ごとに `MatchingService.runMatchingPipeline({ trigger: 'realtime', symbolFilter })` を起動するだけにした。これにより:
+  - 特徴量がレンズ基盤(LensSnapshot + compareLensSnapshots)に**完全統一**(§13.2 の二重特徴表現を解消)。リアルタイムと 15 分 cron が同一コードで評価するため結果が食い違わない。
+  - MatchResult / EvaluationLog / Notification 永続化、通知粒度(NotificationPreference)、Web Push、通知 SSE(δ-3)まで全て正規経路に乗る(= 設計 δ-1 の「callback → `evaluateWithPersistence`」を、新メソッド `evaluateWithPersistence(symbol)` として実体化)。
+- **`runMatchingPipeline` に `symbolFilter` を追加**(`checkForAllMatches` → `checkForMatches` はノートロード後に symbol フィルタ、`checkForSideBMatches` は symbol ループでフィルタ)。リアルタイムは「確定したシンボルのノートだけ」評価し、毎バー全シンボル評価を避ける。`PipelineRunTrigger` に `'realtime'` を追加(observability)。
+- **多重起動・クールダウン制御**: 同一シンボルの評価が走行中(in-flight)なら多重起動しない + `minEvaluationIntervalSeconds`(既定 60s)のクールダウン(1m 足でバー確定が密でもパイプライン連打を防ぐ)。
+- **`scripts/run-realtime-worker.ts` を新 API に追従**(ノート管理・通知コールバックを撤去し、cTrader → RollingWindow → service.start() の薄い殻に)。**未本番化のまま**(deploy.yml に worker サービスなし。δ-5 = 15 分 cron 維持の決定により当面見送り)。δ-5 本番化時の必須作業はデータ源を cTrader → EODHD WS へ差し替え(§13.4 注意書き、worker のコメントにも明記)。
 
 ---
 
@@ -412,13 +422,13 @@ similarity(noteSnapshot, marketSnapshot):
 §2 原則(作成時=照合時=リアルタイムで同一の特徴生成)に従い、**簡易 12 次元を廃し `lensSnapshotBuilder`/レンズ系列(§12.2)に統一**する。これにより柱1のノート照合とリアルタイム照合が同一の類似度エンジンを通る。
 
 ### 13.3 配線計画（δ-1〜δ-5）
-| 手順 | 内容 | 規模 |
-|---|---|---|
-| δ-1 | リアルタイムをレンズエンジンに統一 + callback→`evaluateWithPersistence`(DB永続化) | M |
-| δ-2 | 通知粒度(`NotificationPreference`)をリアルタイムにも適用 | M |
-| δ-3 | **認証付き per-user 通知 SSE(`/api/notifications/stream` 等)を新設**して Notification イベント emit〔2026-06-13 Neko 決定〕。既存チャート SSE(`/api/realtime/stream/:symbol`)は**認証なし・symbol 単位のため流用しない**(他ユーザー通知の漏洩防止) | S〜M |
-| δ-4 | フロント通知フィードの SSE 購読(自動更新) | S |
-| δ-5 | 常駐ワーカー本番化 | L |
+| 手順 | 内容 | 規模 | 状態 |
+|---|---|---|---|
+| δ-1 | リアルタイムをレンズエンジンに統一 + callback→`evaluateWithPersistence`(DB永続化) | M | ✅ 実装済(追補8) |
+| δ-2 | 通知粒度(`NotificationPreference`)をリアルタイムにも適用 | M | ✅ 実質完了(δ-1 が正規パイプライン共用 = 通知粒度も自動適用) |
+| δ-3 | **認証付き per-user 通知 SSE(`/api/notifications/stream` 等)を新設**して Notification イベント emit〔2026-06-13 Neko 決定〕。既存チャート SSE(`/api/realtime/stream/:symbol`)は**認証なし・symbol 単位のため流用しない**(他ユーザー通知の漏洩防止) | S〜M | ✅ 実装済(追補7) |
+| δ-4 | フロント通知フィードの SSE 購読(自動更新) | S | ✅ 実装済(追補7) |
+| δ-5 | 常駐ワーカー本番化 | L | ⏸ 見送り(15分 cron 維持、2026-06-13 Neko 決定) |
 
 ### 13.4 常駐ワーカー本番化の選択肢〔要決定〕
 | 選択肢 | メリット | デメリット | コスト |
