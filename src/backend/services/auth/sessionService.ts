@@ -37,7 +37,9 @@ export function resolveJwtSecret(env: NodeJS.ProcessEnv = process.env): string {
 
 const JWT_SECRET = resolveJwtSecret();
 if (!isProduction && isInsecureJwtSecret(JWT_SECRET)) {
-  console.warn('[SessionService] 警告: JWT_SECRET が設定されていません。本番環境では必ず設定してください。');
+  console.warn(
+    '[SessionService] 警告: JWT_SECRET が未設定またはサンプル値です。本番環境では必ず安全な秘密鍵を設定してください。',
+  );
 }
 
 // トークンの有効期限
