@@ -17,7 +17,7 @@
  * - 値の計算自体は analysis-engine が正(ここでは再計算しない。§2-⑦)
  */
 
-import type { LensSnapshotEntry } from './lensSnapshotTypes';
+import type { LensFeatureValue, LensSnapshotEntry } from './lensSnapshotTypes';
 
 /** インジケーターレンズ実装のバージョン(挙動変更時に上げる) */
 export const INDICATOR_LENS_VERSION = '1.0.0';
@@ -749,6 +749,75 @@ export function detectDivergence(
     return 'bear';
   }
   return 'bull';
+}
+
+// ============================================================
+// per-bar 系列化(レンズ条件タイプ #3。設計書 §12.2)
+// ============================================================
+
+/**
+ * per-bar 計算が参照する過去バー数の上限(窓幅)。
+ *
+ * 内部ヘルパの遡り幅(divergence 30 / cross 20+3 / confidence 30 / slope 6)を
+ * すべて覆う値にしているため、「バー i を末尾とする直近この本数の窓で計算した結果」と
+ * 「先頭からバー i までの全 prefix で計算した結果」は同一になる。
+ */
+export const LENS_SERIES_CONTEXT_BARS = 40;
+
+/**
+ * インジケーターレンズ種別ごとの出力 featureKey 一覧。
+ * lensComparators のカタログ(IND_*_DEFINITION)と同期させること(比較定義の単一情報源は向こう)。
+ */
+export const INDICATOR_LENS_FEATURE_KEYS: Readonly<
+  Record<IndicatorLensKind, ReadonlyArray<string>>
+> = {
+  rsi: ['rsi_zone', 'rsi_value', 'rsi_divergence'],
+  macd: ['macd_cross', 'macd_bars_since_cross', 'macd_hist_slope', 'macd_divergence'],
+  ma: ['ma_slope', 'ma_distance_norm'],
+  ma_cross: ['ma_cross', 'ma_bars_since_cross', 'ma_fast_above_slow'],
+  bb: ['bb_position', 'bb_width_norm'],
+};
+
+/**
+ * インジケーターレンズ特徴を「1 バー 1 値」の per-bar 系列として計算する(設計書 §12.2)。
+ *
+ * **先読み(lookahead)禁止の不変条件(§12.2 確定 2026-06-13)**: バー i の値は
+ * bars[0..i] のみから計算する(確定バー原則)。実装上はバー i を末尾とする直近
+ * LENS_SERIES_CONTEXT_BARS 本の窓で computeIndicatorLens を呼ぶ。内部ヘルパの
+ * 遡り幅は全て窓内に収まるため全 prefix を渡した場合と同一結果になり、
+ * 未来バーは構造的に一切参照されない。
+ *
+ * 計算不能バー(ウォームアップ不足・欠損等)の featureKey は null
+ * (呼び出し側が「条件不成立」に倒す。§12.4-4)。
+ */
+export function computeIndicatorLensFeatureSeries(
+  spec: IndicatorLensSpec,
+  input: IndicatorLensComputeInput
+): Record<string, Array<LensFeatureValue | null>> {
+  const length = input.close.length;
+  const featureKeys = INDICATOR_LENS_FEATURE_KEYS[spec.kind];
+  const result: Record<string, Array<LensFeatureValue | null>> = {};
+  for (const key of featureKeys) {
+    result[key] = new Array<LensFeatureValue | null>(length).fill(null);
+  }
+  const seriesEntries = Object.entries(input.series);
+  for (let i = 0; i < length; i += 1) {
+    // バー i を末尾とする有界窓(先読みなし)。窓幅の根拠は LENS_SERIES_CONTEXT_BARS 参照
+    const from = Math.max(0, i - LENS_SERIES_CONTEXT_BARS + 1);
+    const windowSeries: Record<string, ReadonlyArray<number | null>> = {};
+    for (const [seriesKey, series] of seriesEntries) {
+      windowSeries[seriesKey] = series.slice(from, i + 1);
+    }
+    const entry = computeIndicatorLens(spec, {
+      close: input.close.slice(from, i + 1),
+      series: windowSeries,
+    });
+    for (const key of featureKeys) {
+      const value = entry.features[key];
+      result[key][i] = value === undefined ? null : value;
+    }
+  }
+  return result;
 }
 
 /**

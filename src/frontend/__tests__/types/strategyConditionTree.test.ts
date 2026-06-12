@@ -14,8 +14,16 @@ import {
   normalizeFlatConditions,
   isFlattenableGroup,
   evaluateTimeConditionAt,
+  buildLensId,
+  parseLensIdForEdit,
+  isLensCondition,
+  isConditionGroup,
+  lensOperatorsForValueKind,
+  createDefaultLensCondition,
+  LENS_FEATURE_INFO,
   type ConditionGroup,
   type IndicatorCondition,
+  type LensConditionKind,
   type TimeCondition,
 } from "@/types/strategy";
 
@@ -215,5 +223,64 @@ describe("isFlattenableGroup", () => {
     expect(isFlattenableGroup({ groupId: "g", operator: "NOT", conditions: [] })).toBe(false);
     expect(isFlattenableGroup({ groupId: "g", operator: "IF_THEN", conditions: [] })).toBe(false);
     expect(isFlattenableGroup({ groupId: "g", operator: "SEQUENCE", conditions: [] })).toBe(false);
+  });
+});
+
+describe("レンズ条件ヘルパ（レンズ条件タイプ #3）", () => {
+  it("buildLensId ⇄ parseLensIdForEdit が全種別で往復安定（backend 形式と同期）", () => {
+    const cases: Array<{ kind: LensConditionKind; params: Parameters<typeof buildLensId>[1]; expected: string }> = [
+      { kind: "rsi", params: { period: 14 }, expected: "ind:rsi#p14" },
+      { kind: "macd", params: { fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }, expected: "ind:macd#f12s26g9" },
+      { kind: "ma", params: { maType: "ema", period: 20 }, expected: "ind:ma#ema20" },
+      {
+        kind: "ma_cross",
+        params: { fastMaType: "ema", fastMaPeriod: 20, slowMaType: "sma", slowMaPeriod: 75 },
+        expected: "ind:ma_cross#ema20xsma75",
+      },
+      { kind: "bb", params: { period: 20 }, expected: "ind:bb#p20" },
+    ];
+    for (const c of cases) {
+      const lensId = buildLensId(c.kind, c.params);
+      expect(lensId).toBe(c.expected);
+      const parsed = parseLensIdForEdit(lensId);
+      expect(parsed?.kind).toBe(c.kind);
+      // 往復: parse 結果から再構築しても同じ lensId になる
+      expect(parsed && buildLensId(parsed.kind, parsed.params)).toBe(c.expected);
+    }
+  });
+
+  it("不正な lensId は null（UI はフォールバック表示）", () => {
+    expect(parseLensIdForEdit("ind:rsi")).toBeNull();
+    expect(parseLensIdForEdit("ind:unknown#p14")).toBeNull();
+    expect(parseLensIdForEdit("rsi#p14")).toBeNull();
+  });
+
+  it("isLensCondition は lens のみ true、group とは排他", () => {
+    const lens = createDefaultLensCondition();
+    expect(isLensCondition(lens)).toBe(true);
+    expect(isConditionGroup(lens)).toBe(false);
+    expect(isLensCondition(cond("a"))).toBe(false);
+    expect(isLensCondition({ groupId: "g", operator: "AND", conditions: [] })).toBe(false);
+  });
+
+  it("値種別ごとの演算子制限: enum/event/bool は =/!=、数値は大小比較のみ", () => {
+    expect(lensOperatorsForValueKind("enum")).toEqual(["=", "!="]);
+    expect(lensOperatorsForValueKind("event")).toEqual(["=", "!="]);
+    expect(lensOperatorsForValueKind("bool")).toEqual(["=", "!="]);
+    expect(lensOperatorsForValueKind("number")).toEqual(["<", "<=", ">=", ">"]);
+  });
+
+  it("featureKey カタログ: enum/event は選択肢必須、既定値が選択肢に含まれる", () => {
+    for (const infos of Object.values(LENS_FEATURE_INFO)) {
+      for (const info of infos) {
+        if (info.valueKind === "enum" || info.valueKind === "event") {
+          expect(info.options && info.options.length > 0).toBe(true);
+          expect(info.options?.some((o) => o.value === info.defaultValue)).toBe(true);
+        }
+        if (info.valueKind === "number") {
+          expect(typeof info.defaultValue).toBe("number");
+        }
+      }
+    }
   });
 });

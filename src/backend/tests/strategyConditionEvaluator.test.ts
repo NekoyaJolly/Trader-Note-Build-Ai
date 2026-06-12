@@ -17,11 +17,15 @@ import type {
 import {
   evaluateCondition,
   evaluateConditionGroup,
+  evaluateLensCondition,
   evaluateTimeConditionAt,
   getIndicatorValue,
   getPriceValue,
   buildTimeframeIndexMap,
+  collectLensConditions,
   collectTimeframeOverrides,
+  makeLensCacheKey,
+  type LensCondition,
   type TimeframeView,
 } from '../services/strategyConditionEvaluator';
 import { makeIndicatorCacheKey } from '../services/analysisEngineClient';
@@ -913,5 +917,163 @@ describe('マルチタイムフレーム条件（timeframeOverride、Phase γ）
       };
       expect(await evaluateConditionGroup(ctx, sameTf)).toBe(true);
     });
+  });
+});
+
+describe('レンズ条件(レンズ条件タイプ #3。設計書 §12.4)', () => {
+  /** 3 バーのダミーデータ */
+  const lensBars: OHLCV[] = [0, 1, 2].map((i) => ({
+    timestamp: new Date(Date.UTC(2026, 0, 1, i)),
+    open: 100,
+    high: 101,
+    low: 99,
+    close: 100,
+    volume: 1000,
+  }));
+
+  /** lens キャッシュ入りの評価コンテキストを作る(系列は数値エンコード済み前提) */
+  function lensCtx(series: Record<string, number[]>, currentIndex = 0): EvaluationContext {
+    return {
+      data: lensBars,
+      currentIndex,
+      indicatorCache: new Map(Object.entries(series)),
+      strategy: mockStrategy,
+    };
+  }
+
+  /** rsi_zone = oversold を既定とするレンズ条件 */
+  function lensCond(overrides: Partial<LensCondition> = {}): LensCondition {
+    return {
+      conditionId: 'lc1',
+      type: 'lens',
+      lensId: 'ind:rsi#p14',
+      featureKey: 'rsi_zone',
+      operator: '=',
+      value: 'oversold',
+      ...overrides,
+    };
+  }
+
+  // orderedEnum のエンコード規約: order の index(oversold=0 / neutral=1 / overbought=2)
+
+  test('enum 一致(=)で成立、不一致なら不成立', () => {
+    const key = makeLensCacheKey('ind:rsi#p14', 'rsi_zone');
+    expect(evaluateLensCondition(lensCtx({ [key]: [0] }), lensCond())).toBe(true);
+    expect(evaluateLensCondition(lensCtx({ [key]: [1] }), lensCond())).toBe(false);
+  });
+
+  test('enum 不一致(!=)で成立', () => {
+    const key = makeLensCacheKey('ind:rsi#p14', 'rsi_zone');
+    expect(evaluateLensCondition(lensCtx({ [key]: [1] }), lensCond({ operator: '!=' }))).toBe(true);
+    expect(evaluateLensCondition(lensCtx({ [key]: [0] }), lensCond({ operator: '!=' }))).toBe(false);
+  });
+
+  test('数値系 featureKey は比較演算子で判定する(bb_position < 0.2)', () => {
+    const key = makeLensCacheKey('ind:bb#p20', 'bb_position');
+    const cond = lensCond({ lensId: 'ind:bb#p20', featureKey: 'bb_position', operator: '<', value: 0.2 });
+    expect(evaluateLensCondition(lensCtx({ [key]: [0.1] }), cond)).toBe(true);
+    expect(evaluateLensCondition(lensCtx({ [key]: [0.5] }), cond)).toBe(false);
+  });
+
+  test('イベント値(macd_cross)は bull=1/none=0/bear=-1 エンコードで一致判定できる', () => {
+    const key = makeLensCacheKey('ind:macd#f12s26g9', 'macd_cross');
+    const cond = lensCond({ lensId: 'ind:macd#f12s26g9', featureKey: 'macd_cross', operator: '=', value: 'bull' });
+    expect(evaluateLensCondition(lensCtx({ [key]: [1] }), cond)).toBe(true);
+    expect(evaluateLensCondition(lensCtx({ [key]: [0] }), cond)).toBe(false);
+    expect(evaluateLensCondition(lensCtx({ [key]: [-1] }), cond)).toBe(false);
+  });
+
+  test('sentinel(-1 = イベント未発生)は数値比較せず不成立に倒す(誤判定防止)', () => {
+    const key = makeLensCacheKey('ind:macd#f12s26g9', 'macd_bars_since_cross');
+    const cond = lensCond({
+      lensId: 'ind:macd#f12s26g9',
+      featureKey: 'macd_bars_since_cross',
+      operator: '<',
+      value: 5,
+    });
+    // sentinel(-1) は「-1 < 5 = true」になってしまうため、比較前に弾かれること
+    expect(evaluateLensCondition(lensCtx({ [key]: [-1] }), cond)).toBe(false);
+    expect(evaluateLensCondition(lensCtx({ [key]: [3] }), cond)).toBe(true);
+  });
+
+  test('欠損バー(NaN)・キャッシュ未登録は不成立に倒す(§12.4-4)', () => {
+    const key = makeLensCacheKey('ind:rsi#p14', 'rsi_zone');
+    expect(evaluateLensCondition(lensCtx({ [key]: [Number.NaN] }), lensCond())).toBe(false);
+    expect(evaluateLensCondition(lensCtx({}), lensCond())).toBe(false);
+  });
+
+  test('evaluateConditionGroup 経由でも判定でき、lookbackBars(直近N本)が効く', async () => {
+    const key = makeLensCacheKey('ind:rsi#p14', 'rsi_zone');
+    // index=0 だけ oversold(0)、以降は neutral(1)
+    const ctx = lensCtx({ [key]: [0, 1, 1] }, 2);
+    const group: ConditionGroup = { groupId: 'g', operator: 'AND', conditions: [lensCond()] };
+    expect(await evaluateConditionGroup(ctx, group)).toBe(false);
+
+    const lookbackGroup: ConditionGroup = {
+      groupId: 'g',
+      operator: 'AND',
+      conditions: [lensCond({ lookbackBars: 3 })],
+    };
+    expect(await evaluateConditionGroup({ ...ctx }, lookbackGroup)).toBe(true);
+  });
+
+  test('collectLensConditions が入れ子グループ・ifCondition・sequence から収集する', () => {
+    const group: ConditionGroup = {
+      groupId: 'root',
+      operator: 'AND',
+      conditions: [
+        lensCond({ conditionId: 'a' }),
+        {
+          groupId: 'sub',
+          operator: 'OR',
+          conditions: [lensCond({ conditionId: 'b' })],
+        },
+      ],
+      ifCondition: lensCond({ conditionId: 'c' }),
+      sequence: [lensCond({ conditionId: 'd' })],
+    };
+    const collected = collectLensConditions(group).map((c) => c.conditionId);
+    expect(collected.sort()).toEqual(['a', 'b', 'c', 'd']);
+    expect(collectLensConditions(null)).toEqual([]);
+  });
+
+  test('collectTimeframeOverrides がレンズ条件の timeframeOverride も収集する', () => {
+    const group: ConditionGroup = {
+      groupId: 'g',
+      operator: 'AND',
+      conditions: [lensCond({ timeframeOverride: '4h' })],
+    };
+    expect([...collectTimeframeOverrides(group, '1h')]).toEqual(['4h']);
+  });
+
+  test('timeframeOverride 付きレンズ条件はビュー側のレンズ系列で判定する(確定バーのみ)', async () => {
+    const key = makeLensCacheKey('ind:rsi#p14', 'rsi_zone');
+    const viewBars: OHLCV[] = [
+      { timestamp: new Date(Date.UTC(2026, 0, 1, 0)), open: 100, high: 101, low: 99, close: 100, volume: 1000 },
+    ];
+    const view: TimeframeView = {
+      data: viewBars,
+      indicatorCache: new Map([[key, [0]]]), // ビュー側は oversold
+      indexMap: [0, 0, 0],
+    };
+    const ctx: EvaluationContext = {
+      data: lensBars,
+      currentIndex: 2,
+      // 基準足側は neutral(=不成立)にして、ビュー側が参照されたことを判別する
+      indicatorCache: new Map([[key, [1, 1, 1]]]),
+      strategy: mockStrategy, // timeframe '1h'
+      timeframeViews: new Map([['4h', view]]),
+    };
+    const group: ConditionGroup = {
+      groupId: 'g',
+      operator: 'AND',
+      conditions: [lensCond({ timeframeOverride: '4h' })],
+    };
+    expect(await evaluateConditionGroup(ctx, group)).toBe(true);
+
+    // 対応する確定バーがまだ無い(indexMap=-1)場合は不成立
+    const noBarView: TimeframeView = { ...view, indexMap: [-1, -1, -1] };
+    const ctx2: EvaluationContext = { ...ctx, timeframeViews: new Map([['4h', noBarView]]) };
+    expect(await evaluateConditionGroup(ctx2, group)).toBe(false);
   });
 });

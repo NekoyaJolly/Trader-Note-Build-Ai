@@ -32,7 +32,7 @@ import type {
   PatternCondition,
   TimeCondition,
 } from "@/types/strategy";
-import { evaluateTimeConditionAt, isIndicatorCondition, isPatternCondition, isTimeCondition } from "@/types/strategy";
+import { evaluateTimeConditionAt, isIndicatorCondition, isLensCondition, isPatternCondition, isTimeCondition } from "@/types/strategy";
 import type { IndicatorParams } from "@/types/indicator";
 import { apiFetch } from "@/lib/apiClient";
 import { DEFAULT_DATA_COUNT, DEFAULT_TIMEFRAME_API } from "@/lib/marketConstants";
@@ -345,6 +345,10 @@ function evalBaseNode(ctx: EvalContext, node: ConditionChild): boolean {
   if (isIndicatorCondition(node)) return evalIndicatorCondition(ctx, normalizeIndicatorCondition(node));
   if (isPatternCondition(node)) return evalPatternCondition(ctx, normalizePatternCondition(node));
   if (isTimeCondition(node)) return evalTimeCondition(ctx, node);
+  // レンズ条件 (#3) はレンズ系列の per-bar 計算が backend 側(analysis-engine + レンズ基盤)に
+  // あるためプレビューでは計算できない。誤って楽観表示しないよう「不成立」に倒す
+  // (バックテスト・ライブ評価では正しく評価される。SingleLensCondition にも明記)
+  if (isLensCondition(node)) return false;
   return evalGroup(ctx, node);
 }
 

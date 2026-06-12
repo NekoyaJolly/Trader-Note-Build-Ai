@@ -11,23 +11,32 @@
 
 import React, { useMemo } from "react";
 import {
+  buildLensId,
   COMPARISON_OPERATOR_INFO,
   createDefaultCondition,
+  createDefaultLensCondition,
   DAY_OF_WEEK_LABELS,
   FIELD_LABELS,
   flattenConditionGroup,
   generateConditionId,
   generateGroupId,
+  getLensFeatureInfo,
   hhmmToMinutes,
   INDICATOR_FIELDS,
   isConditionGroup,
   isFlattenableGroup,
   isIndicatorCondition,
+  isLensCondition,
   isPatternCondition,
   isTimeCondition,
+  LENS_CONDITION_KIND_INFO,
+  LENS_FEATURE_INFO,
+  LENS_OPERATOR_INFO,
+  lensOperatorsForValueKind,
   LOGICAL_OPERATOR_INFO,
   minutesToHHMM,
   normalizeFlatConditions,
+  parseLensIdForEdit,
   SESSION_PRESETS_JST,
 } from "@/types/strategy";
 import type {
@@ -38,6 +47,11 @@ import type {
   SessionId,
   ConditionGroup,
   ConditionChild,
+  LensCondition,
+  LensConditionKind,
+  LensConditionOperator,
+  LensIdParams,
+  LensMaType,
   LogicalOperator,
   ComparisonOperator,
   IndicatorField,
@@ -860,6 +874,321 @@ function TimeframeOverrideControl({ value, onChange, readOnly = false, compact =
 }
 
 // ============================================
+// レンズ条件コンポーネント（レンズ条件タイプ #3）
+// ============================================
+
+interface LensConditionProps {
+  condition: LensCondition;
+  onChange: (condition: LensCondition) => void;
+  onRemove: () => void;
+  readOnly?: boolean;
+  canRemove?: boolean;
+  compact?: boolean;
+}
+
+/** MA 種別セレクタの選択肢（表示は大文字） */
+const LENS_MA_TYPE_OPTIONS: Array<{ value: LensMaType; label: string }> = [
+  { value: 'ema', label: 'EMA' },
+  { value: 'sma', label: 'SMA' },
+];
+
+/**
+ * レンズ条件の入力 UI（設計書 §12.4-5）。
+ * レンズ種別 → パラメータ → featureKey → 演算子 → 値 の順に選ぶ。
+ * featureKey の値種別（enum/event/bool/number）に応じて演算子と値入力を制限する（§12.4-6）。
+ */
+function SingleLensCondition({
+  condition,
+  onChange,
+  onRemove,
+  readOnly = false,
+  canRemove = true,
+  compact = false,
+}: LensConditionProps) {
+  const baseSelectClass = compact
+    ? "px-1 py-0.5 rounded bg-slate-700 text-gray-200 border border-slate-600 text-xs"
+    : "px-2 py-1.5 rounded bg-slate-700 text-gray-200 border border-slate-600 text-sm";
+  const numberInputClass = compact
+    ? "w-16 px-1 py-0.5 rounded bg-slate-700 text-gray-200 border border-slate-600 text-xs"
+    : "w-20 px-2 py-1.5 rounded bg-slate-700 text-gray-200 border border-slate-600 text-sm";
+
+  const parsed = useMemo(() => parseLensIdForEdit(condition.lensId), [condition.lensId]);
+
+  // 不正な lensId（手動編集 JSON 等）は編集 UI を出せないため、警告 + 削除のみ提供する
+  if (!parsed) {
+    return (
+      <div className={`flex flex-wrap items-center ${compact ? 'gap-1 p-2' : 'gap-2 p-3'} bg-slate-800 rounded-lg border border-red-800`}>
+        <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-red-400`}>
+          不正なレンズ ID のため編集できません: {condition.lensId}
+        </span>
+        {!readOnly && canRemove && (
+          <button
+            type="button"
+            onClick={onRemove}
+            className={`${compact ? 'p-0.5' : 'p-1.5'} text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded transition-colors`}
+            title="条件を削除"
+          >
+            <svg className={`${compact ? 'w-3 h-3' : 'w-4 h-4'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  const { kind, params } = parsed;
+  const featureInfos = LENS_FEATURE_INFO[kind];
+  const featureInfo = getLensFeatureInfo(kind, condition.featureKey) ?? featureInfos[0];
+  const allowedOperators = lensOperatorsForValueKind(featureInfo.valueKind);
+
+  // レンズ種別の切替: lensId を既定パラメータで再構築し、featureKey / 演算子 / 値を先頭既定へ
+  const handleKindChange = (nextKind: LensConditionKind) => {
+    const firstFeature = LENS_FEATURE_INFO[nextKind][0];
+    onChange({
+      ...condition,
+      lensId: buildLensId(nextKind, {}),
+      featureKey: firstFeature.key,
+      operator: lensOperatorsForValueKind(firstFeature.valueKind)[0],
+      value: firstFeature.defaultValue,
+    });
+  };
+
+  // パラメータ変更: lensId のみ再構築（featureKey 等は維持）
+  const handleParamsChange = (nextParams: LensIdParams) => {
+    onChange({ ...condition, lensId: buildLensId(kind, { ...params, ...nextParams }) });
+  };
+
+  const handleFeatureChange = (featureKey: string) => {
+    const info = getLensFeatureInfo(kind, featureKey);
+    if (!info) return;
+    onChange({
+      ...condition,
+      featureKey,
+      operator: lensOperatorsForValueKind(info.valueKind)[0],
+      value: info.defaultValue,
+    });
+  };
+
+  const handleNumberValueChange = (raw: string) => {
+    const n = Number.parseFloat(raw);
+    if (!Number.isFinite(n)) return;
+    const lo = featureInfo.min ?? Number.NEGATIVE_INFINITY;
+    const hi = featureInfo.max ?? Number.POSITIVE_INFINITY;
+    onChange({ ...condition, value: Math.min(hi, Math.max(lo, n)) });
+  };
+
+  const periodInput = (
+    value: number | undefined,
+    fallback: number,
+    onChangePeriod: (period: number) => void,
+    label: string,
+  ) => (
+    <div className="flex items-center gap-1">
+      <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-gray-400`}>{label}</span>
+      <input
+        type="number"
+        min={1}
+        className={numberInputClass}
+        value={value ?? fallback}
+        onChange={(e) => {
+          const n = Number.parseInt(e.target.value, 10);
+          if (Number.isFinite(n) && n >= 1) onChangePeriod(n);
+        }}
+        disabled={readOnly}
+      />
+    </div>
+  );
+
+  return (
+    <div className={`flex flex-wrap items-center ${compact ? 'gap-1' : 'gap-2'} ${compact ? 'p-2' : 'p-3'} bg-slate-800 rounded-lg border border-slate-700`}>
+      <span className={`${compact ? 'text-[10px]' : 'text-xs'} text-emerald-400`}>レンズ</span>
+
+      {/* レンズ種別 */}
+      <select
+        className={baseSelectClass}
+        value={kind}
+        onChange={(e) => handleKindChange(e.target.value as LensConditionKind)}
+        disabled={readOnly}
+      >
+        {Object.entries(LENS_CONDITION_KIND_INFO).map(([id, info]) => (
+          <option key={id} value={id}>
+            {info.label}
+          </option>
+        ))}
+      </select>
+
+      {/* パラメータ（種別ごと） */}
+      {(kind === 'rsi' || kind === 'bb') &&
+        periodInput(params.period, kind === 'rsi' ? 14 : 20, (period) => handleParamsChange({ period }), '期間')}
+      {kind === 'macd' && (
+        <>
+          {periodInput(params.fastPeriod, 12, (fastPeriod) => handleParamsChange({ fastPeriod }), '短期')}
+          {periodInput(params.slowPeriod, 26, (slowPeriod) => handleParamsChange({ slowPeriod }), '長期')}
+          {periodInput(params.signalPeriod, 9, (signalPeriod) => handleParamsChange({ signalPeriod }), 'シグナル')}
+        </>
+      )}
+      {kind === 'ma' && (
+        <>
+          <select
+            className={baseSelectClass}
+            value={params.maType ?? 'ema'}
+            onChange={(e) => handleParamsChange({ maType: e.target.value as LensMaType })}
+            disabled={readOnly}
+            aria-label="MA 種別"
+          >
+            {LENS_MA_TYPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          {periodInput(params.period, 20, (period) => handleParamsChange({ period }), '期間')}
+        </>
+      )}
+      {kind === 'ma_cross' && (
+        <>
+          <select
+            className={baseSelectClass}
+            value={params.fastMaType ?? 'ema'}
+            onChange={(e) => handleParamsChange({ fastMaType: e.target.value as LensMaType })}
+            disabled={readOnly}
+            aria-label="短期 MA 種別"
+          >
+            {LENS_MA_TYPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          {periodInput(params.fastMaPeriod, 20, (fastMaPeriod) => handleParamsChange({ fastMaPeriod }), '短期')}
+          <select
+            className={baseSelectClass}
+            value={params.slowMaType ?? 'ema'}
+            onChange={(e) => handleParamsChange({ slowMaType: e.target.value as LensMaType })}
+            disabled={readOnly}
+            aria-label="長期 MA 種別"
+          >
+            {LENS_MA_TYPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          {periodInput(params.slowMaPeriod, 75, (slowMaPeriod) => handleParamsChange({ slowMaPeriod }), '長期')}
+        </>
+      )}
+
+      {/* featureKey */}
+      <select
+        className={`${baseSelectClass} ${compact ? 'min-w-[110px]' : 'min-w-[180px]'}`}
+        value={featureInfo.key}
+        onChange={(e) => handleFeatureChange(e.target.value)}
+        disabled={readOnly}
+        aria-label="レンズ特徴"
+      >
+        {featureInfos.map((info) => (
+          <option key={info.key} value={info.key}>
+            {info.label}
+          </option>
+        ))}
+      </select>
+
+      {/* 演算子（値種別に応じて制限） */}
+      <select
+        className={baseSelectClass}
+        value={allowedOperators.includes(condition.operator) ? condition.operator : allowedOperators[0]}
+        onChange={(e) => onChange({ ...condition, operator: e.target.value as LensConditionOperator })}
+        disabled={readOnly}
+        aria-label="比較演算子"
+      >
+        {allowedOperators.map((op) => (
+          <option key={op} value={op}>
+            {LENS_OPERATOR_INFO[op]}
+          </option>
+        ))}
+      </select>
+
+      {/* 値（値種別に応じた入力） */}
+      {(featureInfo.valueKind === 'enum' || featureInfo.valueKind === 'event') && (
+        <select
+          className={baseSelectClass}
+          value={typeof condition.value === 'string' ? condition.value : String(featureInfo.defaultValue)}
+          onChange={(e) => onChange({ ...condition, value: e.target.value })}
+          disabled={readOnly}
+          aria-label="比較値"
+        >
+          {(featureInfo.options ?? []).map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      )}
+      {featureInfo.valueKind === 'bool' && (
+        <select
+          className={baseSelectClass}
+          value={condition.value === true ? 'true' : 'false'}
+          onChange={(e) => onChange({ ...condition, value: e.target.value === 'true' })}
+          disabled={readOnly}
+          aria-label="比較値"
+        >
+          <option value="true">はい</option>
+          <option value="false">いいえ</option>
+        </select>
+      )}
+      {featureInfo.valueKind === 'number' && (
+        <input
+          type="number"
+          className={numberInputClass}
+          value={typeof condition.value === 'number' ? condition.value : Number(featureInfo.defaultValue)}
+          min={featureInfo.min}
+          max={featureInfo.max}
+          step={featureInfo.step}
+          onChange={(e) => handleNumberValueChange(e.target.value)}
+          disabled={readOnly}
+          aria-label="比較値"
+        />
+      )}
+
+      {/* 直近ルックバック */}
+      {(!readOnly || (condition.lookbackBars ?? 0) > 1) && (
+        <LookbackControl
+          value={condition.lookbackBars}
+          onChange={(bars) => onChange({ ...condition, lookbackBars: bars })}
+          readOnly={readOnly}
+          compact={compact}
+        />
+      )}
+
+      {/* マルチタイムフレーム (この条件だけ別の足で評価) */}
+      {(!readOnly || condition.timeframeOverride !== undefined) && (
+        <TimeframeOverrideControl
+          value={condition.timeframeOverride}
+          onChange={(tf) => onChange({ ...condition, timeframeOverride: tf })}
+          readOnly={readOnly}
+          compact={compact}
+        />
+      )}
+
+      {!readOnly && canRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          className={`${compact ? 'p-0.5' : 'p-1.5'} text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded transition-colors`}
+          title="条件を削除"
+        >
+          <svg className={`${compact ? 'w-3 h-3' : 'w-4 h-4'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      )}
+
+      <div className="w-full mt-1 text-[11px] text-gray-400">
+        {featureInfo.description && <span>{featureInfo.description}　</span>}
+        <span className="text-gray-500">
+          ※ エントリープレビューはレンズ条件未対応（不成立扱い）。バックテスト・ライブ評価では有効
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
 // 時間条件コンポーネント
 // ============================================
 
@@ -1141,6 +1470,7 @@ function ConditionGroupComponent({
   const handleAddPatternCondition = () =>
     appendChild({ conditionId: generateConditionId(), type: 'pattern', patternId: 'pinbar', operator: 'is_true' });
   const handleAddTimeCondition = () => appendChild(createDefaultTimeCondition());
+  const handleAddLensCondition = () => appendChild(createDefaultLensCondition());
   const handleAddSubGroup = () =>
     appendChild({ groupId: generateGroupId(), operator: 'AND', conditions: [] });
 
@@ -1208,6 +1538,18 @@ function ConditionGroupComponent({
     if (isTimeCondition(child)) {
       return (
         <SingleTimeCondition
+          condition={child}
+          onChange={onChildChange}
+          onRemove={onChildRemove}
+          readOnly={readOnly}
+          canRemove={canRemove}
+          compact={compact}
+        />
+      );
+    }
+    if (isLensCondition(child)) {
+      return (
+        <SingleLensCondition
           condition={child}
           onChange={onChildChange}
           onRemove={onChildRemove}
@@ -1415,6 +1757,18 @@ function ConditionGroupComponent({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             {compact ? '+時間' : '時間条件を追加'}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleAddLensCondition}
+            className={`flex items-center gap-1 ${compact ? 'px-2 py-1 text-xs' : 'px-3 py-1.5 text-sm'} bg-emerald-600 hover:bg-emerald-500 text-white rounded transition-colors`}
+            title="レンズ（正規化済みの市場特徴: RSI ゾーン / MA クロス等）を条件として使う"
+          >
+            <svg className={`${compact ? 'w-3 h-3' : 'w-4 h-4'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 10a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            {compact ? '+レンズ' : 'レンズ条件を追加'}
           </button>
 
           {depth < 2 && ( // ネストは2階層まで

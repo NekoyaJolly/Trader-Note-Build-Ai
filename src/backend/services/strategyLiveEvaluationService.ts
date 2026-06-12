@@ -22,14 +22,20 @@ import type { CandlePatternId } from '../../shared/patterns';
 import type { ConditionGroup, EvaluationContext, OHLCV } from './strategyConditionEvaluator';
 import { evaluateConditionGroup,
   collectTimeframeOverrides,
+  collectLensConditions,
   buildTimeframeIndexMap,
   type TimeframeView,
 } from './strategyConditionEvaluator';
 import type { StrategyDetail } from './strategyService';
 import { getStrategy } from './strategyService';
 import type { BacktestTimeframe } from './strategyBacktestService';
-import { buildEvaluationCaches, fetchHistoricalData, isBacktestTimeframe } from './strategyBacktestService';
-import { fetchIndicatorSeriesByStrategyVersion } from './analysisEngineClient';
+import {
+  appendLensSeriesToCache,
+  buildEvaluationCaches,
+  fetchHistoricalData,
+  isBacktestTimeframe,
+} from './strategyBacktestService';
+import { fetchIndicatorSeries, fetchIndicatorSeriesByStrategyVersion } from './analysisEngineClient';
 import { fetchAndCacheOhlcv } from './fetchAndCacheOhlcv';
 import type { AlertWithStrategy, TriggerAlertResult } from './strategyAlertService';
 import { listEnabledAlerts, triggerAlert } from './strategyAlertService';
@@ -87,6 +93,8 @@ export interface LiveStrategyEvaluationDeps {
   fetchHistoricalDataFn?: typeof fetchHistoricalData;
   fetchAndCacheOhlcvFn?: typeof fetchAndCacheOhlcv;
   fetchIndicatorSeriesFn?: typeof fetchIndicatorSeriesByStrategyVersion;
+  /** レンズ条件 (#3) の必要系列取得(明示指定 API)。テストで差し替え */
+  fetchLensSeriesFn?: typeof fetchIndicatorSeries;
   triggerAlertFn?: typeof triggerAlert;
 }
 
@@ -96,6 +104,7 @@ export class LiveStrategyEvaluationService {
   private readonly fetchHistoricalDataFn: typeof fetchHistoricalData;
   private readonly fetchAndCacheOhlcvFn: typeof fetchAndCacheOhlcv;
   private readonly fetchIndicatorSeriesFn: typeof fetchIndicatorSeriesByStrategyVersion;
+  private readonly fetchLensSeriesFn: typeof fetchIndicatorSeries;
   private readonly triggerAlertFn: typeof triggerAlert;
 
   constructor(deps: LiveStrategyEvaluationDeps = {}) {
@@ -104,6 +113,7 @@ export class LiveStrategyEvaluationService {
     this.fetchHistoricalDataFn = deps.fetchHistoricalDataFn ?? fetchHistoricalData;
     this.fetchAndCacheOhlcvFn = deps.fetchAndCacheOhlcvFn ?? fetchAndCacheOhlcv;
     this.fetchIndicatorSeriesFn = deps.fetchIndicatorSeriesFn ?? fetchIndicatorSeriesByStrategyVersion;
+    this.fetchLensSeriesFn = deps.fetchLensSeriesFn ?? fetchIndicatorSeries;
     this.triggerAlertFn = deps.triggerAlertFn ?? triggerAlert;
   }
 
@@ -243,6 +253,21 @@ export class LiveStrategyEvaluationService {
           ]
         : [{ side: strategy.side === 'sell' ? 'sell' : 'buy', group: entryConditions }];
 
+    // === レンズ条件 (#3): per-bar レンズ系列を基準足キャッシュに追加(バックテストと同じ経路) ===
+    const allLensConditions = entryPlans.flatMap((plan) => collectLensConditions(plan.group));
+    await appendLensSeriesToCache({
+      indicatorCache,
+      lensConditions: allLensConditions.filter(
+        (c) => !c.timeframeOverride || c.timeframeOverride === timeframe
+      ),
+      symbol: strategy.symbol,
+      timeframe,
+      startDate: bars[0].timestamp,
+      endDate: bars[bars.length - 1].timestamp,
+      closes: bars.map((bar) => bar.close),
+      fetchIndicatorSeriesFn: this.fetchLensSeriesFn,
+    });
+
     // === MTF: timeframeOverride 条件用の別時間足ビューを準備 (Phase γ) ===
     // バー列はバックテストと同じ「確定バーのみ参照」の indexMap で整列し、
     // 進行中の上位足バーによる早すぎる発火 (lookahead) を防ぐ。
@@ -296,6 +321,17 @@ export class LiveStrategyEvaluationService {
       if (viewLengths.some((len) => len !== viewBars.length)) {
         return { ...base, timeframe, evaluations: [], triggered: false, skipReason: 'mtf_series_alignment_mismatch' };
       }
+      // レンズ条件 (#3): この足を override に指定したレンズ条件の系列をビュー側キャッシュへ
+      await appendLensSeriesToCache({
+        indicatorCache: viewCaches.indicatorCache,
+        lensConditions: allLensConditions.filter((c) => c.timeframeOverride === tf),
+        symbol: strategy.symbol,
+        timeframe: tf,
+        startDate: viewBars[0].timestamp,
+        endDate: viewBars[viewBars.length - 1].timestamp,
+        closes: viewBars.map((bar) => bar.close),
+        fetchIndicatorSeriesFn: this.fetchLensSeriesFn,
+      });
       timeframeViews.set(tf, {
         data: viewBars,
         indicatorCache: viewCaches.indicatorCache,

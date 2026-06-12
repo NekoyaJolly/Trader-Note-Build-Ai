@@ -15,7 +15,9 @@ import {
   isStatefulConditionGroup,
   type LiveStrategyEvaluationDeps,
 } from '../services/strategyLiveEvaluationService';
-import type { ConditionGroup, OHLCV } from '../services/strategyConditionEvaluator';
+import type { ConditionGroup, LensCondition, OHLCV } from '../services/strategyConditionEvaluator';
+import { makeLensCacheKey } from '../services/strategyConditionEvaluator';
+import { appendLensSeriesToCache } from '../services/strategyBacktestService';
 import type { StrategyDetail } from '../services/strategyService';
 import type { AlertWithStrategy } from '../services/strategyAlertService';
 import { makeIndicatorCacheKey } from '../services/analysisEngineClient';
@@ -347,5 +349,175 @@ describe('isStatefulConditionGroup', () => {
         conditions: [makeRsiCondition()],
       })
     ).toBe(false);
+  });
+});
+
+// ============================================
+// レンズ条件 (レンズ条件タイプ #3) のライブ評価とキャッシュ準備
+// ============================================
+
+/** rsi_zone = oversold のレンズ条件 */
+function makeLensCondition(overrides: Partial<LensCondition> = {}): LensCondition {
+  return {
+    conditionId: 'lc1',
+    type: 'lens',
+    lensId: 'ind:rsi#p14',
+    featureKey: 'rsi_zone',
+    operator: '=',
+    value: 'oversold',
+    ...overrides,
+  };
+}
+
+/** レンズ条件のみの条件グループ */
+function makeLensConditionGroup(): ConditionGroup {
+  return { groupId: 'g-lens', operator: 'AND', conditions: [makeLensCondition()] };
+}
+
+describe('appendLensSeriesToCache(レンズ系列のキャッシュ準備)', () => {
+  const RSI_KEY = makeIndicatorCacheKey('rsi', { period: 14 }, 'value');
+
+  /** rsi 系列(全バー同値)を返す明示指定 API のモック */
+  function makeLensFetch(rsiValue: number, length: number) {
+    return jest.fn().mockResolvedValue({
+      timestamps: [],
+      series: { [RSI_KEY]: Array.from({ length }, () => rsiValue) },
+    });
+  }
+
+  test('レンズ条件が無ければ analysis-engine を呼ばない', async () => {
+    const fetchFn = makeLensFetch(25, 10);
+    const cache = new Map<string, number[]>();
+    await appendLensSeriesToCache({
+      indicatorCache: cache,
+      lensConditions: [],
+      symbol: 'USDJPY',
+      timeframe: '15m',
+      startDate: new Date(NOW - 10 * BAR_MS),
+      endDate: new Date(NOW),
+      closes: Array.from({ length: 10 }, () => 100),
+      fetchIndicatorSeriesFn: fetchFn,
+    });
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(cache.size).toBe(0);
+  });
+
+  test('レンズ系列が数値エンコードされて lens:<lensId>:<featureKey> キーで格納される', async () => {
+    const length = 60;
+    const fetchFn = makeLensFetch(25, length); // RSI 25 = oversold
+    const cache = new Map<string, number[]>();
+    await appendLensSeriesToCache({
+      indicatorCache: cache,
+      lensConditions: [makeLensCondition()],
+      symbol: 'USDJPY',
+      timeframe: '15m',
+      startDate: new Date(NOW - length * BAR_MS),
+      endDate: new Date(NOW),
+      closes: Array.from({ length }, () => 100),
+      fetchIndicatorSeriesFn: fetchFn,
+    });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        indicators: [{ indicatorId: 'rsi', params: { period: 14 }, field: 'value' }],
+      })
+    );
+    const zoneSeries = cache.get(makeLensCacheKey('ind:rsi#p14', 'rsi_zone'));
+    expect(zoneSeries).toHaveLength(length);
+    // orderedEnum エンコード: oversold = order index 0
+    expect(zoneSeries?.[length - 1]).toBe(0);
+    // rsi_value は線形値そのまま(25/100)
+    expect(cache.get(makeLensCacheKey('ind:rsi#p14', 'rsi_value'))?.[length - 1]).toBeCloseTo(0.25);
+  });
+
+  test('系列長がバー列と一致しない場合は中断する(誤った時点の値で判定する事故防止)', async () => {
+    const fetchFn = makeLensFetch(25, 50); // バー列 60 に対し系列 50
+    await expect(
+      appendLensSeriesToCache({
+        indicatorCache: new Map(),
+        lensConditions: [makeLensCondition()],
+        symbol: 'USDJPY',
+        timeframe: '15m',
+        startDate: new Date(NOW - 60 * BAR_MS),
+        endDate: new Date(NOW),
+        closes: Array.from({ length: 60 }, () => 100),
+        fetchIndicatorSeriesFn: fetchFn,
+      })
+    ).rejects.toThrow('一致しません');
+  });
+
+  test('不正な lensId はスキップして他のレンズ処理を続ける', async () => {
+    const length = 60;
+    const fetchFn = makeLensFetch(25, length);
+    const cache = new Map<string, number[]>();
+    await appendLensSeriesToCache({
+      indicatorCache: cache,
+      lensConditions: [
+        makeLensCondition({ conditionId: 'bad', lensId: 'ind:unknown#xxx' }),
+        makeLensCondition(),
+      ],
+      symbol: 'USDJPY',
+      timeframe: '15m',
+      startDate: new Date(NOW - length * BAR_MS),
+      endDate: new Date(NOW),
+      closes: Array.from({ length }, () => 100),
+      fetchIndicatorSeriesFn: fetchFn,
+    });
+    expect(cache.has(makeLensCacheKey('ind:rsi#p14', 'rsi_zone'))).toBe(true);
+    expect([...cache.keys()].some((k) => k.includes('unknown'))).toBe(false);
+  });
+});
+
+describe('レンズ条件のライブ評価(レンズ条件タイプ #3、評価1経路)', () => {
+  const RSI_KEY = makeIndicatorCacheKey('rsi', { period: 14 }, 'value');
+
+  function makeLensService(rsiValue: number) {
+    const bars = makeBars();
+    const strategy = makeStrategy();
+    (strategy.currentVersion as unknown as { entryConditions: ConditionGroup }).entryConditions =
+      makeLensConditionGroup();
+
+    const listEnabledAlertsFn = jest.fn().mockResolvedValue([makeAlert()]);
+    const getStrategyFn = jest.fn().mockResolvedValue(strategy);
+    const fetchHistoricalDataFn = jest.fn().mockResolvedValue(bars);
+    const fetchAndCacheOhlcvFn = jest.fn().mockResolvedValue({ success: true, cachedCount: 0 });
+    // by-version API はレンズ条件の必要系列を返さない(指標条件なし = 空)
+    const fetchIndicatorSeriesFn = jest.fn().mockResolvedValue({ series: {}, patterns: {} });
+    // レンズ用の明示指定 API が rsi 系列を返す
+    const fetchLensSeriesFn = jest.fn().mockResolvedValue({
+      timestamps: [],
+      series: { [RSI_KEY]: Array.from({ length: bars.length }, () => rsiValue) },
+    });
+    const triggerAlertFn = jest
+      .fn()
+      .mockResolvedValue({ triggered: true, sentChannels: ['in_app'], logIds: ['log1'] });
+
+    const deps = {
+      listEnabledAlertsFn,
+      getStrategyFn,
+      fetchHistoricalDataFn,
+      fetchAndCacheOhlcvFn,
+      fetchIndicatorSeriesFn,
+      fetchLensSeriesFn,
+      triggerAlertFn,
+    } as LiveStrategyEvaluationDeps;
+    return { service: new LiveStrategyEvaluationService(deps), fetchLensSeriesFn, triggerAlertFn };
+  }
+
+  test('レンズ条件成立(RSI 25 = oversold)で triggerAlert が呼ばれる', async () => {
+    const { service, fetchLensSeriesFn, triggerAlertFn } = makeLensService(25);
+    const result = await service.evaluateActiveStrategyAlerts();
+    expect(fetchLensSeriesFn).toHaveBeenCalledTimes(1);
+    expect(result.conditionMet).toBe(1);
+    expect(result.triggered).toBe(1);
+    expect(triggerAlertFn).toHaveBeenCalledTimes(1);
+  });
+
+  test('レンズ条件不成立(RSI 50 = neutral)なら発火しない', async () => {
+    const { service, triggerAlertFn } = makeLensService(50);
+    const result = await service.evaluateActiveStrategyAlerts();
+    expect(result.conditionMet).toBe(0);
+    expect(result.triggered).toBe(0);
+    expect(triggerAlertFn).not.toHaveBeenCalled();
   });
 });
