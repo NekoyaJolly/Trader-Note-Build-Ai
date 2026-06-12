@@ -14,6 +14,10 @@ import type { JsonValue } from '../../utils/jsonValue';
 import { prisma } from '../db/client';
 import { dbNotificationRepository } from '../repositories/notificationRepository';
 import { createWebPushService } from './webPushService';
+import { NotificationPreferenceService } from '../../services/notification/notificationPreferenceService';
+
+// 通知粒度設定の解決サービス (Phase γ: 条件アラートのクールダウンに strategy/user スコープを適用)
+const preferenceService = new NotificationPreferenceService();
 
 // ============================================
 // 型定義
@@ -264,10 +268,19 @@ export async function triggerAlert(request: TriggerAlertRequest): Promise<Trigge
   }
 
   // 4. クールダウンチェック
+  // Phase γ: 通知粒度設定 (NotificationPreference) の cooldown を適用。
+  // strategy スコープ > user スコープ > StrategyAlert 固有値 の優先で解決する
+  // (柱1 と共通の通知設定層。柱2 は二値判定のため threshold/minMatchLevel は適用しない)。
+  // pref 未設定なら従来どおり alert.cooldownMinutes を使い、既存挙動を壊さない。
+  const { cooldownMinutes: prefCooldownMinutes } = await preferenceService.resolveForStrategy(
+    strategyId,
+    alert.strategy.userId,
+  );
+  const effectiveCooldownMinutes = prefCooldownMinutes ?? alert.cooldownMinutes;
   if (alert.lastTriggeredAt) {
-    const cooldownMs = alert.cooldownMinutes * 60 * 1000;
+    const cooldownMs = effectiveCooldownMinutes * 60 * 1000;
     const timeSinceLastTrigger = Date.now() - alert.lastTriggeredAt.getTime();
-    
+
     if (timeSinceLastTrigger < cooldownMs) {
       const remainingMs = cooldownMs - timeSinceLastTrigger;
       const remainingMinutes = Math.ceil(remainingMs / 60000);
