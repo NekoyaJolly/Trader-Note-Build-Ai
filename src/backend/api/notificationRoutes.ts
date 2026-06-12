@@ -13,6 +13,10 @@ import {
 } from '../../schemas/api/notification';
 import type { UpsertNotificationPreferenceRequest, NotificationPreferenceIdParam } from '../../schemas/api/notification';
 import { NotificationPreferenceService } from '../../services/notification/notificationPreferenceService';
+import { dbNotificationRepository } from '../repositories/notificationRepository';
+// req.user の型拡張 (declare module 'express'、authMiddleware 内) を単独コンパイル
+// (ts-jest) でも適用するための型のみ import (ランタイム import は発生しない)
+import type {} from '../../middleware/authMiddleware';
 
 const router = Router();
 const notificationController = new NotificationController();
@@ -38,6 +42,118 @@ router.get(
  * 注意: /:id より前に定義する必要がある（固定パス優先）
  */
 router.get('/unread-count', notificationController.getUnreadCount);
+
+// ========================================
+// 通知 SSE (Phase δ-3、NOTE_SIMILARITY_FOUNDATION.md §13.3)
+// ========================================
+
+/** SSE のサーバ側 DB ポーリング間隔 (ms)。通知の主生成源は 15 分 cron のため 10 秒で十分 */
+const NOTIFICATION_STREAM_POLL_MS = 10_000;
+
+/** SSE の keep-alive heartbeat 間隔 (ms)。realtimeRoutes のチャート SSE と同じ 30 秒 */
+const NOTIFICATION_STREAM_HEARTBEAT_MS = 30_000;
+
+/**
+ * GET /api/notifications/stream
+ * ログインユーザー宛の通知をリアルタイム配信する認証付き per-user SSE (Phase δ-3)。
+ *
+ * 設計判断 (2026-06-13 Neko 決定 + 実装時確定):
+ * - 既存チャート SSE (/api/realtime/stream/:symbol) は認証なし・symbol 単位のため
+ *   **流用しない** (他ユーザー通知の漏洩防止)。本ルートは requireAuth 配下 (app.ts の
+ *   mount で適用) + `req.user.userId` でフィルタし、URL にユーザー ID を含めない
+ * - **配信はサーバ側 DB ポーリング (10 秒)**: Cloud Run max-instances=5 の複数インスタンス
+ *   構成では in-process EventEmitter は「cron を受けたインスタンス ≠ SSE 接続中のインスタンス」
+ *   で届かない。DB をバスにすることでインスタンス間を自然に跨ぐ。
+ *   Postgres LISTEN/NOTIFY は本番接続が Supavisor transaction pooler 経由のため使えず、
+ *   Supabase Realtime は RLS 未整備 (認証は cTrader JWT) のため per-user 分離が保証できない
+ * - イベント: `notification` (新着 1 件ごと) / `unread_count` (接続時 + 新着時) / `heartbeat`
+ * - 注意: /:id より前に定義する必要がある（固定パス優先）
+ */
+/** SSE ハンドラが使う repository の最小契約 (テストで差し替え可能にするための DI) */
+export interface NotificationStreamRepo {
+  countUnread(userId?: string): Promise<number>;
+  findCreatedSince(
+    userId: string,
+    since: Date,
+    sinceId?: string,
+    limit?: number
+  ): Promise<Array<{ id: string; type: string; title: string; message: string; sentAt: Date; createdAt: Date }>>;
+}
+
+/**
+ * 通知 SSE ハンドラを生成する (repo を DI 可能にしてユニットテストで実 DB を不要にする)。
+ * 挙動の説明は GET /stream の JSDoc を参照。
+ */
+export function createNotificationStreamHandler(
+  repo: NotificationStreamRepo = dbNotificationRepository
+) {
+  return async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user!.userId;
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    // nginx 系プロキシのバッファリング無効化 (チャート SSE と同じ)
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    const sendEvent = (event: string, data: object): void => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    // 接続時: 現在の未読数を即時送信 (バッジの初期同期)
+    let closed = false;
+    // 複合カーソル (createdAt, id): 同一 createdAt の複数行を取りこぼさない (repository の JSDoc 参照)
+    let cursor = new Date();
+    let cursorId = '';
+    try {
+      const initialUnread = await repo.countUnread(userId);
+      sendEvent('unread_count', { count: initialUnread });
+    } catch (error) {
+      console.warn('[NotificationStream] 初期未読数の取得に失敗:', error);
+    }
+
+    // 新着の差分配信 (カーソル = 最後に配信した通知の createdAt + id)
+    const poll = async (): Promise<void> => {
+      if (closed) return;
+      try {
+        const fresh = await repo.findCreatedSince(userId, cursor, cursorId);
+        if (fresh.length === 0) return;
+        for (const notification of fresh) {
+          sendEvent('notification', {
+            id: notification.id,
+            type: notification.type,
+            title: notification.title,
+            message: notification.message,
+            sentAt: notification.sentAt.toISOString(),
+          });
+        }
+        const last = fresh[fresh.length - 1];
+        cursor = last.createdAt;
+        cursorId = last.id;
+        const unread = await repo.countUnread(userId);
+        sendEvent('unread_count', { count: unread });
+      } catch (error) {
+        // 一過性の DB エラーで接続を切らない (次回ポーリングで自己回復)
+        console.warn('[NotificationStream] ポーリング失敗 (継続):', error);
+      }
+    };
+    const pollTimer = setInterval(() => { void poll(); }, NOTIFICATION_STREAM_POLL_MS);
+
+    const heartbeatTimer = setInterval(() => {
+      if (!closed) sendEvent('heartbeat', { timestamp: new Date().toISOString() });
+    }, NOTIFICATION_STREAM_HEARTBEAT_MS);
+
+    req.on('close', () => {
+      closed = true;
+      clearInterval(pollTimer);
+      clearInterval(heartbeatTimer);
+      res.end();
+    });
+  };
+}
+
+router.get('/stream', createNotificationStreamHandler());
 
 /**
  * PUT /api/notifications/read-all
