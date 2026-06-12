@@ -325,9 +325,11 @@ similarity(noteSnapshot, marketSnapshot):
 - MTF も既存の `timeframeOverride` 機構で自動対応(leaf 条件のため)
 - **#3 とリアルタイム類似度(§13)が同じ「レンズ系列化」資産を共有**する(後戻り最小)
 
+> **不変条件: 先読み(lookahead)禁止〔2026-06-13 設計レビューで追加〕**: per-bar 系列のバー i の値は **bars[0..i] のみから計算**する(確定バー原則、MTF #391 と同方針)。状態レンズはピボット確認・構造イベント・フェーズ判定など「後のバーで確定する」性質を持つため、全系列を見てから per-bar 値を埋めると **backtest だけ live より良く見える先読みバグ**になる。TS 側の per-bar 化も analysis-engine の per-bar 系列 API も、この規約を必須とする。
+
 ### 12.3 スコープ決定（2026-06-12 Neko）: 状態系レンズも含むフルスコープ
 - **インジケーター系レンズ**(rsi_zone / ma_cross / macd / bb_position 等): 既存の指標系列から**安価に per-bar 計算可能**(`computeIndicatorLens` は系列入力の純関数を per-index 適用)。analysis-engine 変更不要。
-- **状態系レンズ**(SMC / Wyckoff / ChartPattern / DowTheory / VolatilityRegime / TimeSession / Pattern): analysis-engine が現状**単一時点 payload** を返すため、**per-bar 系列を返す API 拡張が必要**(Python 側 + TS 側)。
+- **状態系レンズ**(SMC / Wyckoff / ChartPattern / DowTheory / VolatilityRegime / TimeSession / Pattern): analysis-engine が現状**単一時点 payload** を返すため、**per-bar 系列を返す API 拡張が必要**(Python 側 + TS 側)。〔2026-06-13 精査〕API 拡張が必須なのは **smc / chart_pattern / wyckoff の 3 種のみ**。`time_session`(時刻のみで決定) / `dow_theory`(OHLCV ピボット) / `volatility_regime`(BB幅 percentile) は **TS 側だけで per-bar 化可能**、`pattern` は既に bool[] 系列で取得済み。
 - 実装は「インジケーター系を先行 → 状態系を追加」と段階化してよいが、**到達目標は全レンズ**。
 
 ### 12.4 設計要素
@@ -337,16 +339,16 @@ similarity(noteSnapshot, marketSnapshot):
    - 状態系: analysis-engine 新 API(`/v1/lens-series` 等。`indicator-series` の lens 版)から per-bar 系列取得。
 3. **評価器分岐**: `evaluateBaseNode` に `if (type === 'lens') return evaluateLensCondition(ctx, item)`。`collectTimeframeOverrides`/`resolveViewContext` は lens も自動カバー。
 4. **sentinel/欠損**: `bars_since_event=-1`(イベントなし)等は比較前に skip 判定(§6.2 normalizedLinear と同方針)。confidence 低/欠損バーは条件不成立側に倒す。
-5. **ConditionBuilder UI**: `SingleLensCondition` 新設(lensId セレクタ → featureKey セレクタ → operator/value)。`extractConditionRequirements` に lens の必要系列登録を追加(プレビュー対応)。
-6. **operator 制約**: featureKey の kind 別に UI/zod で許可演算子を限定(bool=`==/!=`、orderedEnum=`==/!=`+順序範囲、linear=`</<=/>/>=`)。
+5. **ConditionBuilder UI**: `SingleLensCondition` 新設(lensId セレクタ → featureKey セレクタ → operator/value)。プレビューの必要系列登録は `extractConditionRequirements` を**新規実装**して行う(〔2026-06-13 訂正〕この名前の既存関数は無い。現状プレビューは個別に必要系列を組み立てている)。
+6. **operator 制約**: featureKey の kind 別に許可演算子を限定(bool/event=`==/!=`、orderedEnum=`==/!=`(順序範囲は後続)、linear=`</<=/>/>=`)。〔2026-06-13 精査〕条件ツリーは API 入口で深い zod 検証をしていない(envelope の `objectJsonField` のみ)ため、制約の強制は **UI + 評価器の防御**で行う(既存条件タイプと同じ流儀)。
 
 ### 12.5 触る箇所
 型(`strategy.ts` + 評価器側) / 評価器(`evaluateLensCondition` + `buildEvaluationCaches` 拡張) / analysis-engine(状態系の per-bar 系列 API) / UI(`ConditionBuilder`) / プレビュー(`previewIndicatorSeries`) / テスト。**backtest/live サービスは評価器共用のため原則無変更**。
 
-### 12.6 残決定
-- analysis-engine の per-bar 系列 API の形(全レンズ一括 vs lens 指定) と warmup/コスト。
-- 列挙 featureKey の条件 UX(等価のみ vs 順序範囲)。
-- レンズ系列のキャッシュ cacheKey 規約(指標系列の `${id}_${params}_${field}` と整合)。
+### 12.6 残決定 → 確定(2026-06-13 設計レビュー)
+- analysis-engine の per-bar 系列 API の形 = **新エンドポイントではなく既存 `/v1/indicator-series` の状態系 payload(smc/chartPatterns/wyckoff)を配列化**(第2弾・状態系レンズ着手時に実施)。warmup/コストは実装時に計測して追補。
+- 列挙 featureKey の条件 UX = **第1弾は等価(`==`/`!=`)のみ**。順序範囲は後続で加算的に追加。
+- レンズ系列のキャッシュ cacheKey 規約 = **`lens:<lensId>:<featureKey>`**(例 `lens:ind:rsi#p14:rsi_zone`)。
 
 ---
 
@@ -366,7 +368,7 @@ similarity(noteSnapshot, marketSnapshot):
 |---|---|---|
 | δ-1 | リアルタイムをレンズエンジンに統一 + callback→`evaluateWithPersistence`(DB永続化) | M |
 | δ-2 | 通知粒度(`NotificationPreference`)をリアルタイムにも適用 | M |
-| δ-3 | SSE(`/api/realtime/stream/:symbol`)で Notification イベント emit | S |
+| δ-3 | **認証付き per-user 通知 SSE(`/api/notifications/stream` 等)を新設**して Notification イベント emit〔2026-06-13 Neko 決定〕。既存チャート SSE(`/api/realtime/stream/:symbol`)は**認証なし・symbol 単位のため流用しない**(他ユーザー通知の漏洩防止) | S〜M |
 | δ-4 | フロント通知フィードの SSE 購読(自動更新) | S |
 | δ-5 | 常駐ワーカー本番化 | L |
 
@@ -378,10 +380,12 @@ similarity(noteSnapshot, marketSnapshot):
 | Railway 常駐 | 安価 | 別インフラ管理コスト | ¥数百/月 |
 | 15 分 cron 維持 | 現状延長 | リアルタイム性を捨てる | 無料枠 |
 
-> 推奨は**別 Cloud Run サービス**(`--min-instances=1`)。`deploy.yml` に worker サービスのデプロイを追加し、EODHD WS 接続を専有させる。最終決定は本設計レビュー後。
+> **決定(2026-06-13 Neko)**: **15 分 cron 維持**を採用し、δ-5(常駐ワーカー本番化)は当面見送る。理由: 15 分 cron は 15m 足の確定タイミング(毎時 :00/:15/:30/:45)と揃っており、**15m 以上の時間足のノートは実質バー単位で評価される**(リアルタイム化が効くのは 5m 以下のノートのみ)。リアルタイム性が最優先なのはチャート表示であり、類似度判定のリアルタイム化は最後に改めて判断する。
+> 将来 δ-5 を本番化する場合の注意〔2026-06-13 設計レビュー〕: 現行 `scripts/run-realtime-worker.ts` は **CTraderProvider で Tick を取得しており、既知の cTrader 複数接続競合バグの経路**(memory: project_ctrader_multi_connection_bug)。本番化時はデータ源を EODHD WS(`eodhdRealtimeOrchestrator`)へ差し替えること(§13.1 の方針どおり)。また δ-1 の `evaluateWithPersistence` は既存関数ではなく**新設**である。
 
 ### 13.5 完成判定
 承認ノート × ライブ市場がリアルタイム(数秒以内)でレンズ類似度評価 → マッチ時に通知粒度を適用して Notification 生成 → SSE で UI 通知フィードに自動反映 + per-user Web Push。
+〔2026-06-13 注記〕δ-5 見送り中の到達点は「足確定単位(15 分 cron)の評価 + per-user SSE による通知フィード自動反映」。「数秒以内」の判定は δ-5 再判断時に復活させる。
 
 ---
 
