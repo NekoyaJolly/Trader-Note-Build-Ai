@@ -161,9 +161,9 @@ http://localhost:3100
 | `/api/trading/account` | GET | auth | JWT | user/admin | none | no | no | self | cTrader account read。 |
 | `/api/trading/positions` | GET | auth | JWT | user/admin | none | no | no | self | cTrader positions read。 |
 | `/api/trading/stream` | GET | auth | JWT | user/admin | none | no | no | self | SSE。Cookie 認証前提。 |
-| `/api/trading/orders` | POST | auth | JWT | user/admin | none | no | yes | self | 実注文送信。今回は小ロット運用範囲外。 |
-| `/api/trading/orders/:id` | PUT/DELETE | auth | JWT | user/admin | none | no | yes | yes | order owner check は TODO: confirm。 |
-| `/api/trading/positions/:id/close` | POST | auth | JWT | user/admin | none | no | yes | yes | position owner check は TODO: confirm。 |
+| `/api/trading/orders` | POST | auth | JWT | user/admin | none | no | yes | self | Phase 0 の実発注ゲートで既定停止。再開条件は `docs/side-a/order-execution-safety.md`。 |
+| `/api/trading/orders/:id` | PUT/DELETE | auth | JWT | user/admin | none | no | yes | yes | Phase 0 の実発注ゲートで既定停止。再開時は action 別確認トークンと owner/account check 必須。 |
+| `/api/trading/positions/:id/close` | POST | auth | JWT | user/admin | none | no | yes | yes | Phase 0 の実発注ゲートで既定停止。再開時は action 別確認トークンと owner/account check 必須。 |
 | `/api/chart-drawings` | GET | auth | JWT | user/admin | none | no | no | self | chart drawing read。 |
 | `/api/chart-drawings/sync` | PUT | auth | JWT | user/admin | none | no | yes | self | chart drawing sync。 |
 | `/api/market-analysis/:symbol` | GET | auth | JWT | user/admin | none | no | no | TODO: confirm | market data read。外部 API key はサーバー内のみ。 |
@@ -898,7 +898,7 @@ ID で特定のトレードノートを取得します。
 #### POST /api/orders/confirmation
 注文確認情報を取得します（参考値）。
 
-> **重要**: 本システムは自動売買を行いません。以下は参考情報です。
+> **重要**: このエンドポイントは参考値の確認用です。実発注を許可する confirmation token は発行しません。Phase 2 以降の実発注用確認契約は `docs/side-a/order-execution-safety.md` の `POST /api/trading/order-confirmations` に分離します。
 
 **リクエストボディ:**
 ```json
@@ -925,6 +925,32 @@ ID で特定のトレードノートを取得します。
   }
 }
 ```
+
+---
+
+#### 実発注 API の安全契約 (Phase 1)
+
+Phase 0 以降、`POST /api/trading/orders`、`PUT /api/trading/orders/:id`、`DELETE /api/trading/orders/:id`、`POST /api/trading/positions/:id/close` は `TRADING_ORDER_EXECUTION_ENABLED=true` でない限り `403 TRADING_ORDER_EXECUTION_DISABLED` を返します。production でこの gate を解除する前に、`docs/side-a/order-execution-safety.md` の安全契約を実装する必要があります。
+
+Phase 2 で新設する実発注用確認エンドポイントは以下です。
+
+| Endpoint | Method | 状態 | 責務 |
+|---|---|---|---|
+| `/api/trading/order-confirmations` | POST | Phase 2 予定 | 最終確認モーダルで表示する検証済みサマリーと短時間 confirmation token を発行する。実発注はしない。 |
+| `/api/trading/orders` | POST | 現在は gate 停止 | confirmation token、`Idempotency-Key`、symbol/volume/risk 検証、監査ログを通過した場合だけ成行注文を送信する。 |
+| `/api/trading/orders/:id` | PUT/DELETE | 現在は gate 停止 | action 別 confirmation token と owner/account check を必須にして注文変更またはキャンセルを行う。 |
+| `/api/trading/positions/:id/close` | POST | 現在は gate 停止 | action 別 confirmation token と owner/account check を必須にしてポジション決済を行う。 |
+
+実発注系 mutation はすべて以下を必須にします。
+
+- `X-Order-Confirmation-Token`
+- `Idempotency-Key`
+- accountId と口座種別のサーバー側解決
+- cTrader symbolId と volume min/max/step のサーバー側検証
+- live 口座での SL 必須化
+- 注文監査ログ
+
+失敗時の status code とユーザー表示文言は `docs/side-a/order-execution-safety.md` の失敗時ステータス表を正本とします。
 
 ---
 
