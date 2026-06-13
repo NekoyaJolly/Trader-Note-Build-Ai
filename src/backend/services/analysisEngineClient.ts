@@ -36,10 +36,27 @@ import { buildCorrelationId } from '../../middleware/correlationId';
 // ============================================
 
 const AnalysisEngineUrlSchema = z.string().url();
+const AnalysisEngineSharedSecretSchema = z.string().min(32);
+const ANALYSIS_ENGINE_SHARED_SECRET_HEADER = 'X-Analysis-Engine-Secret';
 
 function getAnalysisEngineBaseUrl(): string {
   const raw = process.env.ANALYSIS_ENGINE_URL || 'http://analysis-engine:8000';
   return AnalysisEngineUrlSchema.parse(raw);
+}
+
+function getAnalysisEngineSharedSecret(): string | null {
+  const raw = process.env.ANALYSIS_ENGINE_SHARED_SECRET?.trim();
+  if (raw) {
+    const parsed = AnalysisEngineSharedSecretSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new Error('ANALYSIS_ENGINE_SHARED_SECRET は32文字以上で設定してください');
+    }
+    return parsed.data;
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('ANALYSIS_ENGINE_SHARED_SECRET は production で必須です');
+  }
+  return null;
 }
 
 /**
@@ -59,6 +76,10 @@ export function buildAnalysisEngineJsonHeaders(
   options?: AnalysisEngineRequestOptions,
 ): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const sharedSecret = getAnalysisEngineSharedSecret();
+  if (sharedSecret) {
+    headers[ANALYSIS_ENGINE_SHARED_SECRET_HEADER] = sharedSecret;
+  }
   if (options?.correlationId) {
     headers['X-Correlation-Id'] = buildCorrelationId(options.correlationId);
   }

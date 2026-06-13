@@ -35,7 +35,7 @@ import type {
     PythonJsonPayload,
 } from './types';
 import type { JsonValue } from '../../../utils/jsonValue';
-import { buildCorrelationId } from '../../../middleware/correlationId';
+import { buildAnalysisEngineJsonHeaders } from '../../../backend/services/analysisEngineClient';
 
 /**
  * Python 側の応答 (任意の JsonValue) を `PythonJsonPayload` (Record<string, JsonValue>) に
@@ -55,11 +55,7 @@ function isPythonJsonPayload(value: JsonValue): value is PythonJsonPayload {
  * 理由: docker_exec ではファイル名の runId、HTTP では相関IDヘッダーが追跡の起点になるため。
  */
 function buildHttpHeaders(correlationId: string | undefined): Record<string, string> {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (correlationId) {
-        headers['X-Correlation-Id'] = buildCorrelationId(correlationId);
-    }
-    return headers;
+    return buildAnalysisEngineJsonHeaders(correlationId ? { correlationId } : undefined);
 }
 
 // ===========================================

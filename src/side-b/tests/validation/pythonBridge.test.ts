@@ -22,9 +22,26 @@ async function makeTempDir(): Promise<string> {
 
 describe('PythonBridge (unit, docker runner mocked)', () => {
     let sharedDir: string;
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalSharedSecret = process.env.ANALYSIS_ENGINE_SHARED_SECRET;
 
     beforeEach(async () => {
         sharedDir = await makeTempDir();
+        process.env.NODE_ENV = 'test';
+        delete process.env.ANALYSIS_ENGINE_SHARED_SECRET;
+    });
+
+    afterEach(() => {
+        if (originalNodeEnv === undefined) {
+            delete process.env.NODE_ENV;
+        } else {
+            process.env.NODE_ENV = originalNodeEnv;
+        }
+        if (originalSharedSecret === undefined) {
+            delete process.env.ANALYSIS_ENGINE_SHARED_SECRET;
+        } else {
+            process.env.ANALYSIS_ENGINE_SHARED_SECRET = originalSharedSecret;
+        }
     });
 
     it('execute: runner が stdout 成功を返し、output ファイルを書いてくれた場合 success=true', async () => {
@@ -386,6 +403,44 @@ describe('PythonBridge (unit, docker runner mocked)', () => {
             expect(result.success).toBe(true);
             expect(observedHeaders).toEqual({
                 'Content-Type': 'application/json',
+                'X-Correlation-Id': 'sideb-run-20260603',
+            });
+        } finally {
+            global.fetch = origFetch;
+        }
+    });
+
+    it('execute: shared secret 設定時は analysis-engine 認証ヘッダーも載せる', async () => {
+        process.env.ANALYSIS_ENGINE_SHARED_SECRET = 'analysis-engine-secret-for-tests-456';
+        const runner: DockerRunner = jest.fn();
+        let observedHeaders: RequestInit['headers'];
+        const mockFetch = jest.fn(async (
+            _input: Parameters<typeof fetch>[0],
+            init?: Parameters<typeof fetch>[1],
+        ) => {
+            observedHeaders = init?.headers;
+            return new Response(JSON.stringify({ result: 'ok' }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            });
+        });
+        const origFetch = global.fetch;
+        global.fetch = mockFetch;
+        try {
+            const bridge = new PythonBridge(
+                { mode: 'http', containerName: 'x', baseUrl: 'http://localhost:8000', sharedDir, defaultTimeoutMs: 5000 },
+                runner,
+            );
+            const result = await bridge.execute({
+                scriptPath: '/app/walk_forward/walk_forward.py',
+                input: { payload: 'test' },
+                correlationId: 'sideb-run-20260603',
+            });
+
+            expect(result.success).toBe(true);
+            expect(observedHeaders).toEqual({
+                'Content-Type': 'application/json',
+                'X-Analysis-Engine-Secret': 'analysis-engine-secret-for-tests-456',
                 'X-Correlation-Id': 'sideb-run-20260603',
             });
         } finally {
