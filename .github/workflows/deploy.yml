@@ -53,7 +53,7 @@ jobs:
         # API 側と同じく --set-* で完全置換 + --quiet で非対話化。
         # 列挙外の env/secrets は削除されるため、deploy.yml が真実の唯一のソースになる。
         # Phase 3: analysis-engine は暫定 shared secret header で内部サービス化する。
-        # `/health` は Cloud Run 起動確認のため public、`/v1/*` は secret 必須。
+        # `/health` は Cloud Run 起動確認のため public、それ以外は secret 必須。
         run: |
           gcloud run deploy ${{ env.GCP_ANALYSIS_SERVICE_NAME }} \
             --image ${{ env.GCP_ANALYSIS_IMAGE }} \

@@ -264,7 +264,7 @@ http://localhost:3100
 | `/api/cron/matching-pipeline/test` | POST | cron | none | none | `CRON_SECRET` | no | yes | no | matching pipeline test。 |
 | `/api/cron/strategy-alerts` | GET | cron | none | none | `CRON_SECRET` | no | yes | no | ストラテジー条件ライブ評価+アラート発火 (Phase γ-1)。市場休場時スキップ。 |
 | `/api/cron/strategy-alerts/test` | POST | cron | none | none | `CRON_SECRET` | no | yes | no | ストラテジーライブ評価の手動テスト (市場チェックなし)。 |
-| `analysis-engine` 連携 | internal | internal | service-to-service | `X-Analysis-Engine-Secret` | shared secret | no | yes | no | `src/backend/services/analysisEngineClient` / PythonBridge HTTP mode からのみ呼び出す。`/health` 以外の `/v1/*` は secret なしで `401`。 |
+| `analysis-engine` 連携 | internal | internal | service-to-service | `X-Analysis-Engine-Secret` | shared secret | no | yes | no | `src/backend/services/analysisEngineClient` / PythonBridge HTTP mode からのみ呼び出す。`/health` 以外は secret なしで `401`。 |
 | `/api/daily-status` | GET | TODO: confirm | TODO | TODO | TODO | TODO | TODO | TODO | frontend 参照あり。backend route は未確認。 |
 | `/api/auth/ctrader/exchange` | POST | TODO: confirm | TODO | TODO | TODO | TODO | TODO | TODO | docs 旧記載。現行 route は `/api/auth/ctrader/callback`。 |
 

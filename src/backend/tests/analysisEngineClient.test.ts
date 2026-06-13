@@ -71,4 +71,13 @@ describe('analysisEngineClient', () => {
       'ANALYSIS_ENGINE_SHARED_SECRET は production で必須です',
     );
   });
+
+  it('shared secret が短すぎる場合は env 名付きで fail-fast する', () => {
+    process.env.NODE_ENV = 'test';
+    process.env.ANALYSIS_ENGINE_SHARED_SECRET = 'short-secret';
+
+    expect(() => buildAnalysisEngineJsonHeaders()).toThrow(
+      'ANALYSIS_ENGINE_SHARED_SECRET は32文字以上で設定してください',
+    );
+  });
 });

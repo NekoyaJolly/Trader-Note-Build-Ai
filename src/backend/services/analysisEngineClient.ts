@@ -47,7 +47,11 @@ function getAnalysisEngineBaseUrl(): string {
 function getAnalysisEngineSharedSecret(): string | null {
   const raw = process.env.ANALYSIS_ENGINE_SHARED_SECRET?.trim();
   if (raw) {
-    return AnalysisEngineSharedSecretSchema.parse(raw);
+    const parsed = AnalysisEngineSharedSecretSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new Error('ANALYSIS_ENGINE_SHARED_SECRET は32文字以上で設定してください');
+    }
+    return parsed.data;
   }
   if (process.env.NODE_ENV === 'production') {
     throw new Error('ANALYSIS_ENGINE_SHARED_SECRET は production で必須です');

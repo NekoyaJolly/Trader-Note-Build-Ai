@@ -49,6 +49,7 @@ ANALYSIS_ENGINE_SHARED_SECRET_ENV = "ANALYSIS_ENGINE_SHARED_SECRET"
 ANALYSIS_ENGINE_MAX_REQUEST_BYTES_ENV = "ANALYSIS_ENGINE_MAX_REQUEST_BYTES"
 ANALYSIS_ENGINE_RATE_LIMIT_PER_MINUTE_ENV = "ANALYSIS_ENGINE_RATE_LIMIT_PER_MINUTE"
 DEFAULT_MAX_REQUEST_BYTES = 2 * 1024 * 1024
+MIN_SHARED_SECRET_LENGTH = 32
 PUBLIC_PATHS = {"/health"}
 _RATE_LIMIT_BUCKETS: dict[tuple[str, int], int] = {}
 
@@ -62,10 +63,15 @@ def _load_shared_secret() -> str | None:
     """analysis-engine の内部呼び出し用 shared secret を読み込む。
 
     production では secret 未設定を fail-fast にする。設定なしで起動すると
-    `/v1/*` が公開状態に戻るため、起動時点で止める。
+    内部 endpoint が公開状態に戻るため、起動時点で止める。
     """
     raw = os.getenv(ANALYSIS_ENGINE_SHARED_SECRET_ENV, "").strip()
     if raw:
+        if len(raw) < MIN_SHARED_SECRET_LENGTH:
+            raise RuntimeError(
+                f"{ANALYSIS_ENGINE_SHARED_SECRET_ENV} must be at least "
+                f"{MIN_SHARED_SECRET_LENGTH} characters"
+            )
         return raw
     if _is_production_runtime():
         raise RuntimeError(f"{ANALYSIS_ENGINE_SHARED_SECRET_ENV} is required in production")
@@ -73,11 +79,14 @@ def _load_shared_secret() -> str | None:
 
 
 def _parse_positive_int_env(name: str, default_value: int) -> int:
-    """正の整数 env を読む。壊れた値は fail-fast で検知する。"""
+    """0以上の整数 env を読む。壊れた値は fail-fast で検知する。"""
     raw = os.getenv(name, "").strip()
     if not raw:
         return default_value
-    parsed = int(raw)
+    try:
+        parsed = int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer") from exc
     if parsed < 0:
         raise RuntimeError(f"{name} must be >= 0")
     return parsed
@@ -112,7 +121,7 @@ _RATE_LIMIT_PER_MINUTE = _parse_positive_int_env(
 async def protect_internal_endpoints(request: Request, call_next):
     """内部計算 API の直叩きを shared secret で止める。
 
-    `/health` は Cloud Run の起動確認用に public のまま残す。`/v1/*` は
+    `/health` は Cloud Run の起動確認用に public のまま残す。それ以外は
     Content-Length 上限、任意の per-minute 上限、shared secret を通過した場合だけ処理する。
     """
     path = request.url.path
