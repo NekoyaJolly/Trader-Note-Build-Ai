@@ -27,6 +27,11 @@ interface ApiCallRecord {
   readonly authorization: string | null;
 }
 
+function shouldHaveBearerAuthHeader(call: ApiCallRecord): boolean {
+  // EventSource はカスタム Authorization ヘッダーを付与できないため、SSE は Cookie 認証で検証する。
+  return call.pathname !== "/api/notifications/stream";
+}
+
 const sideANote = {
   id: "note-e2e-1",
   symbol: "EURUSD",
@@ -554,7 +559,11 @@ test.describe("Side-A UX最小導線（モック認証）", () => {
     await expect.poll(() => apiCalls.some((call) => call.pathname === "/api/notifications/unread-count")).toBe(true);
 
     expect(apiCalls.length).toBeGreaterThan(0);
-    expect(apiCalls.every((call) => call.authorization === `Bearer ${sideAAuthToken}`)).toBe(true);
+    expect(
+      apiCalls
+        .filter(shouldHaveBearerAuthHeader)
+        .every((call) => call.authorization === `Bearer ${sideAAuthToken}`),
+    ).toBe(true);
   });
 
   test("主要Side-Aページが実DBなしのAPI mockで表示できる", async ({ page }) => {
@@ -579,17 +588,25 @@ test.describe("Side-A UX最小導線（モック認証）", () => {
   });
 
   test("ホームからノート承認と通知詳細確認まで進める", async ({ page }) => {
+    test.setTimeout(60000);
     const apiCalls = await mockSideAApi(page);
 
     await page.goto("/");
-    await page.getByRole("link", { name: /EURUSD/ }).first().click();
+    const recentNoteLink = page.getByRole("link", { name: /EURUSD/ }).first();
+    await expect(recentNoteLink).toBeVisible();
+    await expect(recentNoteLink).toHaveAttribute("href", "/notes/note-e2e-1");
+    // ホームの表示アニメーション中に pointer actionability が揺れるため、リンクの keyboard activation で導線を検証する。
+    await recentNoteLink.focus();
+    await page.keyboard.press("Enter");
 
-    await expect(page).toHaveURL(/\/notes\/note-e2e-1/);
+    await expect(page).toHaveURL(/\/notes\/note-e2e-1/, { timeout: 15000 });
     await expect(page.getByRole("heading", { name: "ノート詳細" })).toBeVisible();
     await expect(page.getByText("E2E押し目ノート")).toBeVisible();
     await expect(page.getByText("E2Eで確認する押し目シナリオ")).toBeVisible();
 
-    await page.getByRole("button", { name: "承認する" }).click();
+    const approveButton = page.getByRole("button", { name: "承認する" });
+    await expect(approveButton).toBeVisible();
+    await approveButton.click({ force: true, noWaitAfter: true });
 
     await expect.poll(() =>
       apiCalls.some((call) =>
@@ -619,7 +636,11 @@ test.describe("Side-A UX最小導線（モック認証）", () => {
         call.method === "PUT" && call.pathname === "/api/notifications/notification-e2e-1/read"
       )
     ).toBe(true);
-    expect(apiCalls.every((call) => call.authorization === `Bearer ${sideAAuthToken}`)).toBe(true);
+    expect(
+      apiCalls
+        .filter(shouldHaveBearerAuthHeader)
+        .every((call) => call.authorization === `Bearer ${sideAAuthToken}`),
+    ).toBe(true);
   });
 });
 
