@@ -1,4 +1,4 @@
-import type { NotificationLog, NotificationLogStatus, PrismaClient } from '@prisma/client';
+import type { NotificationLog, NotificationLogStatus, Prisma, PrismaClient } from '@prisma/client';
 import { prisma } from '../db/client';
 
 /**
@@ -42,6 +42,13 @@ export class NotificationLogRepository {
 
   constructor(prismaClient?: PrismaClient) {
     this.prisma = prismaClient || prisma;
+  }
+
+  /**
+   * NotificationLog は userId を直接持たないため、TradeNote 経由で所有者を絞る。
+   */
+  private buildOwnerWhere(userId?: string): Prisma.NotificationLogWhereInput {
+    return userId ? { note: { userId } } : {};
   }
 
   /**
@@ -186,18 +193,24 @@ export class NotificationLogRepository {
   /**
    * 通知ログを取得（ID で）
    */
-  async getLogById(id: string): Promise<NotificationLog | null> {
-    return this.prisma.notificationLog.findUnique({
-      where: { id },
+  async getLogById(id: string, userId?: string): Promise<NotificationLog | null> {
+    return this.prisma.notificationLog.findFirst({
+      where: {
+        id,
+        ...this.buildOwnerWhere(userId),
+      },
     });
   }
 
   /**
    * noteId でログを取得（複数）
    */
-  async getLogsByNoteId(noteId: string, limit: number = 10): Promise<NotificationLog[]> {
+  async getLogsByNoteId(noteId: string, limit: number = 10, userId?: string): Promise<NotificationLog[]> {
     return this.prisma.notificationLog.findMany({
-      where: { noteId },
+      where: {
+        noteId,
+        ...this.buildOwnerWhere(userId),
+      },
       orderBy: { sentAt: 'desc' },
       take: limit,
     });
@@ -206,9 +219,12 @@ export class NotificationLogRepository {
   /**
    * symbol でログを取得（複数）
    */
-  async getLogsBySymbol(symbol: string, limit: number = 50): Promise<NotificationLog[]> {
+  async getLogsBySymbol(symbol: string, limit: number = 50, userId?: string): Promise<NotificationLog[]> {
     return this.prisma.notificationLog.findMany({
-      where: { symbol },
+      where: {
+        symbol,
+        ...this.buildOwnerWhere(userId),
+      },
       orderBy: { sentAt: 'desc' },
       take: limit,
     });
@@ -217,10 +233,14 @@ export class NotificationLogRepository {
   /**
    * 通知ログを削除（ID で）
    */
-  async deleteLogById(id: string): Promise<void> {
-    await this.prisma.notificationLog.delete({
-      where: { id },
+  async deleteLogById(id: string, userId?: string): Promise<boolean> {
+    const result = await this.prisma.notificationLog.deleteMany({
+      where: {
+        id,
+        ...this.buildOwnerWhere(userId),
+      },
     });
+    return result.count > 0;
   }
 
   /**
@@ -228,10 +248,14 @@ export class NotificationLogRepository {
    */
   async getLogsByStatus(
     status: NotificationLogStatus,
-    limit: number = 100
+    limit: number = 100,
+    userId?: string
   ): Promise<NotificationLog[]> {
     return this.prisma.notificationLog.findMany({
-      where: { status },
+      where: {
+        status,
+        ...this.buildOwnerWhere(userId),
+      },
       orderBy: { sentAt: 'desc' },
       take: limit,
     });
@@ -240,8 +264,8 @@ export class NotificationLogRepository {
   /**
    * 失敗ログを取得（リトライ対象）
    */
-  async getFailedLogs(limit: number = 50): Promise<NotificationLog[]> {
-    return this.getLogsByStatus('failed', limit);
+  async getFailedLogs(limit: number = 50, userId?: string): Promise<NotificationLog[]> {
+    return this.getLogsByStatus('failed', limit, userId);
   }
 
   /**

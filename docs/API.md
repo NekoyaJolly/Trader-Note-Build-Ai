@@ -92,9 +92,9 @@ http://localhost:3100
 | `/api/notifications/:id` | GET/DELETE | auth | JWT | user/admin | none | no | DELETE yes | yes | owner check は TODO: confirm。 |
 | `/api/notifications/:id/read` | PUT | auth | JWT | user/admin | none | no | yes | yes | owner check は TODO: confirm。 |
 | `/api/notifications/check` | POST | auth | JWT | user/admin | none | no | yes | TODO: confirm | 通知チェック実行。 |
-| `/api/notifications/logs` | GET | auth | JWT | user/admin | none | no | no | TODO: confirm | 通知ログ read。 |
-| `/api/notifications/logs/:id` | GET/DELETE | auth | JWT | user/admin | none | no | DELETE yes | yes | owner check は TODO: confirm。 |
-| `/api/orders/preset/:noteId` | GET | auth | JWT | user/admin | none | no | no | yes | note owner check は TODO: confirm。 |
+| `/api/notifications/logs` | GET | auth | JWT | user/admin | none | no | no | yes | TradeNote.userId 経由で認証ユーザーの通知ログのみ返す。 |
+| `/api/notifications/logs/:id` | GET/DELETE | auth | JWT | user/admin | none | no | DELETE yes | yes | TradeNote.userId 経由で所有チェック。他ユーザー logId は 404。 |
+| `/api/orders/preset/:noteId` | GET | auth | JWT | user/admin | none | no | no | yes | noteId を認証ユーザーで絞る。他ユーザー noteId は 404。 |
 | `/api/orders/confirmation` | POST | auth | JWT | user/admin | none | no | yes | yes | 発注支援の確認記録。 |
 | `/api/indicators/settings` | GET/POST | auth | JWT | user/admin | none | no | POST yes | TODO: confirm | indicator settings。 |
 | `/api/indicators/settings/:indicatorId` | DELETE | auth | JWT | user/admin | none | no | yes | TODO: confirm | 設定削除。 |
@@ -839,6 +839,8 @@ ID で特定のトレードノートを取得します。
 #### GET /api/notifications/logs
 通知ログを取得します。
 
+認証ユーザーが所有する `TradeNote` に紐づくログのみ返します。
+
 **クエリパラメータ:**
 - `symbol`: シンボルでフィルタ
 - `noteId`: ノート ID でフィルタ
@@ -873,10 +875,14 @@ ID で特定のトレードノートを取得します。
 #### GET /api/notifications/logs/:id
 指定 ID の通知ログを取得します。
 
+他ユーザーの通知ログ ID を指定した場合は `404` を返します。
+
 ---
 
 #### DELETE /api/notifications/logs/:id
 指定 ID の通知ログを削除します。
+
+他ユーザーの通知ログ ID を指定した場合は `404` を返します。
 
 ---
 
@@ -886,6 +892,7 @@ ID で特定のトレードノートを取得します。
 マッチしたトレードノートに基づいて注文プリセットを生成します。
 
 > **重要**: 本システムは自動売買を行いません。参考情報のみを提供します。
+> 他ユーザーの `noteId` を指定した場合は `404` を返します。
 
 **応答:**
 ```json

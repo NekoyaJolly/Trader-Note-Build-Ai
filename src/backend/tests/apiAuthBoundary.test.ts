@@ -6,25 +6,38 @@
  */
 
 import type { NextFunction, Request, Response } from 'express';
+import type { Router } from 'express';
 import { requireAuth, requireRole } from '../../middleware/authMiddleware';
 import { cronAuth } from '../../middleware/cronAuth';
 import { resolveJwtSecret, sessionService } from '../services/auth/sessionService';
 import { isTradingOrderExecutionEnabled } from '../services/tradingOrderExecutionGate';
 import { requireMailSecurityToken } from '../../side-b/routes/mailRoutes';
+import { OrderController } from '../controllers/orderController';
+import { NotificationController } from '../controllers/notificationController';
+import notificationRoutes from '../api/notificationRoutes';
 
 interface MockResponse extends Response {
   statusCode: number;
   body?: object;
 }
 
+interface RouteLayer {
+  route?: {
+    path: string | RegExp | Array<string | RegExp>;
+    methods: Record<string, boolean>;
+  };
+}
+
 function createMockResponse(): MockResponse {
   const response: {
     statusCode: number;
     body?: object;
+    locals: Record<string, object | string | undefined>;
     status(code: number): typeof response;
     json(body: object): typeof response;
   } = {
     statusCode: 200,
+    locals: {},
     status(code: number) {
       this.statusCode = code;
       return this;
@@ -41,6 +54,8 @@ function createRequest(input: {
   readonly authorization?: string;
   readonly query?: Record<string, string>;
   readonly headers?: Record<string, string>;
+  readonly params?: Record<string, string>;
+  readonly userId?: string;
 } = {}): Request {
   return {
     headers: {
@@ -49,7 +64,16 @@ function createRequest(input: {
     },
     query: input.query ?? {},
     cookies: {},
-    params: {},
+    params: input.params ?? {},
+    user: input.userId
+      ? {
+        userId: input.userId,
+        primaryAccountId: 'demo-account',
+        email: 'user@example.com',
+        displayName: '一般ユーザー',
+        role: 'user',
+      }
+      : undefined,
   } as Request;
 }
 
@@ -224,5 +248,91 @@ describe('API 認証境界', () => {
     expect(isTradingOrderExecutionEnabled({})).toBe(false);
     expect(isTradingOrderExecutionEnabled({ TRADING_ORDER_EXECUTION_ENABLED: 'false' })).toBe(false);
     expect(isTradingOrderExecutionEnabled({ TRADING_ORDER_EXECUTION_ENABLED: 'true' })).toBe(true);
+  });
+
+  it('通知ログ固定パスは /:id より前に定義されている', () => {
+    const routes = (notificationRoutes as Router & { stack: RouteLayer[] }).stack
+      .map((layer) => layer.route?.path)
+      .filter((path): path is string => typeof path === 'string');
+
+    const idRouteIndex = routes.indexOf('/:id');
+
+    expect(routes.indexOf('/check')).toBeLessThan(idRouteIndex);
+    expect(routes.indexOf('/logs')).toBeLessThan(idRouteIndex);
+    expect(routes.indexOf('/logs/:id')).toBeLessThan(idRouteIndex);
+  });
+
+  it('注文プリセットは認証ユーザーの noteId として取得する', async () => {
+    const userId = '00000000-0000-4000-8000-000000000111';
+    const noteId = '00000000-0000-4000-8000-000000000222';
+    const controller = new OrderController();
+    const getNoteById = jest.fn<Promise<null>, [string, string?]>().mockResolvedValue(null);
+
+    Object.defineProperty(controller, 'noteService', {
+      value: { getNoteById },
+      configurable: true,
+    });
+
+    const res = createMockResponse();
+    await controller.generatePreset(createRequest({ params: { noteId }, userId }), res);
+
+    expect(getNoteById).toHaveBeenCalledWith(noteId, userId);
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('通知ログ一覧は認証ユーザーの所有ログだけを問い合わせる', async () => {
+    const userId = '00000000-0000-4000-8000-000000000111';
+    const controller = new NotificationController();
+    const getLogsBySymbol = jest.fn<Promise<never[]>, [string, number?, string?]>()
+      .mockResolvedValue([]);
+
+    Object.defineProperty(controller, 'notificationLogRepository', {
+      value: { getLogsBySymbol },
+      configurable: true,
+    });
+
+    const res = createMockResponse();
+    res.locals.validatedQuery = { symbol: 'USDJPY', limit: '25' };
+
+    await controller.getNotificationLogs(createRequest({ userId }), res);
+
+    expect(getLogsBySymbol).toHaveBeenCalledWith('USDJPY', 25, userId);
+    expect(res.body).toEqual({ logs: [] });
+  });
+
+  it('他ユーザーの通知ログ詳細は 404 として扱う', async () => {
+    const userId = '00000000-0000-4000-8000-000000000111';
+    const logId = '00000000-0000-4000-8000-000000000333';
+    const controller = new NotificationController();
+    const getLogById = jest.fn<Promise<null>, [string, string?]>().mockResolvedValue(null);
+
+    Object.defineProperty(controller, 'notificationLogRepository', {
+      value: { getLogById },
+      configurable: true,
+    });
+
+    const res = createMockResponse();
+    await controller.getNotificationLogById(createRequest({ params: { id: logId }, userId }), res);
+
+    expect(getLogById).toHaveBeenCalledWith(logId, userId);
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('他ユーザーの通知ログ削除は 404 として扱う', async () => {
+    const userId = '00000000-0000-4000-8000-000000000111';
+    const logId = '00000000-0000-4000-8000-000000000333';
+    const controller = new NotificationController();
+    const deleteLogById = jest.fn<Promise<boolean>, [string, string?]>().mockResolvedValue(false);
+
+    Object.defineProperty(controller, 'notificationLogRepository', {
+      value: { deleteLogById },
+      configurable: true,
+    });
+
+    const res = createMockResponse();
+    await controller.deleteNotificationLog(createRequest({ params: { id: logId }, userId }), res);
+
+    expect(deleteLogById).toHaveBeenCalledWith(logId, userId);
+    expect(res.statusCode).toBe(404);
   });
 });

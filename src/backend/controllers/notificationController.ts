@@ -346,21 +346,23 @@ export class NotificationController {
         limit?: string;
       }>(res);
       const limitNum = parseInt(limit || '') || 50;
+      const userId = req.user!.userId;
 
       let logs;
 
       if (symbol) {
-        logs = await this.notificationLogRepository.getLogsBySymbol(symbol, limitNum);
+        logs = await this.notificationLogRepository.getLogsBySymbol(symbol, limitNum, userId);
       } else if (noteId) {
-        logs = await this.notificationLogRepository.getLogsByNoteId(noteId, limitNum);
+        logs = await this.notificationLogRepository.getLogsByNoteId(noteId, limitNum, userId);
       } else if (status) {
         logs = await this.notificationLogRepository.getLogsByStatus(
           status as NotificationLogStatus,
-          limitNum
+          limitNum,
+          userId
         );
       } else {
         // デフォルト: 失敗ログを返す
-        logs = await this.notificationLogRepository.getFailedLogs(limitNum);
+        logs = await this.notificationLogRepository.getFailedLogs(limitNum, userId);
       }
 
       res.json({ logs });
@@ -378,7 +380,11 @@ export class NotificationController {
   deleteNotificationLog = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      await this.notificationLogRepository.deleteLogById(id);
+      const deleted = await this.notificationLogRepository.deleteLogById(id, req.user!.userId);
+      if (!deleted) {
+        res.status(404).json({ error: 'Notification log not found' });
+        return;
+      }
 
       res.json({ success: true });
     } catch (error) {
@@ -395,7 +401,7 @@ export class NotificationController {
   getNotificationLogById = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const log = await this.notificationLogRepository.getLogById(id);
+      const log = await this.notificationLogRepository.getLogById(id, req.user!.userId);
 
       if (!log) {
         res.status(404).json({ error: 'Notification log not found' });

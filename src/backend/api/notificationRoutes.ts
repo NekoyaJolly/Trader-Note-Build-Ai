@@ -230,44 +230,9 @@ router.delete(
   }
 );
 
-/**
- * GET /api/notifications/:id
- * 通知の詳細を取得
- */
-router.get(
-  '/:id',
-  validateParams(NotificationIdParamSchema),
-  notificationController.getNotificationById
-);
-
-/**
- * PUT /api/notifications/:id/read
- * 通知を既読にマーク
- */
-router.put(
-  '/:id/read',
-  validateParams(NotificationIdParamSchema),
-  notificationController.markAsRead
-);
-
-/**
- * DELETE /api/notifications/:id
- * 通知を削除
- */
-router.delete(
-  '/:id',
-  validateParams(NotificationIdParamSchema),
-  notificationController.deleteNotification
-);
-
-/**
- * DELETE /api/notifications
- * すべての通知をクリア
- */
-router.delete('/', notificationController.clearAll);
-
 // ========================================
-// Phase4 新規エンドポイント（通知トリガ・ログ）
+// Phase4 エンドポイント（通知トリガ・ログ）
+// 注意: /:id より前に定義する必要がある（固定パス優先）
 // ========================================
 
 /**
@@ -321,5 +286,41 @@ router.delete(
   validateParams(NotificationLogIdParamSchema),
   notificationController.deleteNotificationLog
 );
+
+/**
+ * GET /api/notifications/:id
+ * 通知の詳細を取得
+ */
+router.get(
+  '/:id',
+  validateParams(NotificationIdParamSchema),
+  notificationController.getNotificationById
+);
+
+/**
+ * PUT /api/notifications/:id/read
+ * 通知を既読にマーク
+ */
+router.put(
+  '/:id/read',
+  validateParams(NotificationIdParamSchema),
+  notificationController.markAsRead
+);
+
+/**
+ * DELETE /api/notifications/:id
+ * 通知を削除
+ */
+router.delete(
+  '/:id',
+  validateParams(NotificationIdParamSchema),
+  notificationController.deleteNotification
+);
+
+/**
+ * DELETE /api/notifications
+ * すべての通知をクリア
+ */
+router.delete('/', notificationController.clearAll);
 
 export default router;
