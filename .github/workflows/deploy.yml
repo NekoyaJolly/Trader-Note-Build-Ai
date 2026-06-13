@@ -52,6 +52,8 @@ jobs:
       - name: Cloud Run へデプロイ（analysis-engine）
         # API 側と同じく --set-* で完全置換 + --quiet で非対話化。
         # 列挙外の env/secrets は削除されるため、deploy.yml が真実の唯一のソースになる。
+        # Phase 3: analysis-engine は暫定 shared secret header で内部サービス化する。
+        # `/health` は Cloud Run 起動確認のため public、`/v1/*` は secret 必須。
         run: |
           gcloud run deploy ${{ env.GCP_ANALYSIS_SERVICE_NAME }} \
             --image ${{ env.GCP_ANALYSIS_IMAGE }} \
@@ -59,8 +61,8 @@ jobs:
             --platform managed \
             --allow-unauthenticated \
             --quiet \
-            --set-env-vars NODE_ENV=production \
-            --set-secrets ANALYSIS_DATABASE_URL=ANALYSIS_DATABASE_URL:latest
+            --set-env-vars NODE_ENV=production,ANALYSIS_ENGINE_MAX_REQUEST_BYTES=2097152,ANALYSIS_ENGINE_RATE_LIMIT_PER_MINUTE=300 \
+            --set-secrets ANALYSIS_DATABASE_URL=ANALYSIS_DATABASE_URL:latest,ANALYSIS_ENGINE_SHARED_SECRET=ANALYSIS_ENGINE_SHARED_SECRET:latest
 
       - name: analysis-engine のURLを取得
         id: outputs
@@ -86,6 +88,31 @@ jobs:
           done
           echo "❌ analysis-engine の起動確認がタイムアウトしました"
           exit 1
+
+      - name: analysis-engine 認証 smoke
+        run: |
+          URL=$(gcloud run services describe ${{ env.GCP_ANALYSIS_SERVICE_NAME }} \
+            --region ${{ env.GCP_REGION }} \
+            --format='value(status.url)')
+          NO_AUTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "$URL/v1/indicator-series" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+          if [ "$NO_AUTH_CODE" != "401" ]; then
+            echo "❌ analysis-engine の未認証リクエストが 401 ではありません: $NO_AUTH_CODE"
+            exit 1
+          fi
+          ANALYSIS_SECRET=$(gcloud secrets versions access latest --secret=ANALYSIS_ENGINE_SHARED_SECRET)
+          AUTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "$URL/v1/indicator-series" \
+            -H "Content-Type: application/json" \
+            -H "X-Analysis-Engine-Secret: $ANALYSIS_SECRET" \
+            -d '{}')
+          if [ "$AUTH_CODE" != "422" ]; then
+            echo "❌ analysis-engine の認証付きリクエストが validation まで到達していません: $AUTH_CODE"
+            exit 1
+          fi
+          echo "✅ analysis-engine 認証 smoke 完了"
 
   # ── 1. GCP Cloud Run（API）へのデプロイ ──
   deploy-gcp:
@@ -122,7 +149,7 @@ jobs:
           docker push ${{ env.GCP_IMAGE }}
 
       - name: Cloud Run へデプロイ
-        # GCP Secret Manager の全 16 件 + plain env を Cloud Run に反映。
+        # GCP Secret Manager の runtime secrets + plain env を Cloud Run に反映。
         # サービス再作成時の災害復旧でこの workflow 1 回で本番設定が完全再現できるようにする。
         #
         # 設計判断:
@@ -150,7 +177,7 @@ jobs:
             --quiet \
             --max-instances=5 \
             --set-env-vars NODE_ENV=production,MATCHING_ENGINE=lens,ANALYSIS_ENGINE_URL=${{ needs.deploy-analysis-engine.outputs.analysis_url }},PYTHON_VALIDATION_MODE=http,EVOLUTION_GENERATIONS=2,AUTO_EVOLUTION=${{ vars.AUTO_EVOLUTION || 'false' }},SIDE_B_SCHEDULER_ENABLED=true,TOP_LEVEL_ORCHESTRATOR_ENABLED=${{ vars.TOP_LEVEL_ORCHESTRATOR_ENABLED || 'true' }},DISCOVERY_COMPOSE_ENABLED=true,TRADING_ORDER_EXECUTION_ENABLED=false,MARKET_API_URL=https://api.twelvedata.com,TWELVE_DATA_API_URL=https://api.twelvedata.com,EODHD_BASE_URL=https://eodhd.com/api \
-            --set-secrets AI_API_KEY=AI_API_KEY:latest,AI_MODEL=AI_MODEL:latest,AI_BASE_URL=AI_BASE_URL:latest,AI_MODEL_OVERRIDE_ALL=AI_MODEL_OVERRIDE_ALL:latest,CRON_SECRET=CRON_SECRET:latest,MAIL_SECURITY_TOKEN=MAIL_SECURITY_TOKEN:latest,DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,CTRADER_CLIENT_ID=CTRADER_CLIENT_ID:latest,CTRADER_CLIENT_SECRET=CTRADER_CLIENT_SECRET:latest,CTRADER_REDIRECT_URI=CTRADER_REDIRECT_URI:latest,VAPID_PUBLIC_KEY=VAPID_PUBLIC_KEY:latest,VAPID_PRIVATE_KEY=VAPID_PRIVATE_KEY:latest,TWELVE_DATA_API_KEY=TWELVE_DATA_API_KEY:latest,EODHD_API_KEY=EODHD_API_KEY:latest
+            --set-secrets AI_API_KEY=AI_API_KEY:latest,AI_MODEL=AI_MODEL:latest,AI_BASE_URL=AI_BASE_URL:latest,AI_MODEL_OVERRIDE_ALL=AI_MODEL_OVERRIDE_ALL:latest,CRON_SECRET=CRON_SECRET:latest,MAIL_SECURITY_TOKEN=MAIL_SECURITY_TOKEN:latest,DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,CTRADER_CLIENT_ID=CTRADER_CLIENT_ID:latest,CTRADER_CLIENT_SECRET=CTRADER_CLIENT_SECRET:latest,CTRADER_REDIRECT_URI=CTRADER_REDIRECT_URI:latest,VAPID_PUBLIC_KEY=VAPID_PUBLIC_KEY:latest,VAPID_PRIVATE_KEY=VAPID_PRIVATE_KEY:latest,TWELVE_DATA_API_KEY=TWELVE_DATA_API_KEY:latest,EODHD_API_KEY=EODHD_API_KEY:latest,ANALYSIS_ENGINE_SHARED_SECRET=ANALYSIS_ENGINE_SHARED_SECRET:latest
 
       - name: デプロイ後の動作確認（最大5分待機）
         run: |

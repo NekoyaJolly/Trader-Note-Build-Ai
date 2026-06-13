@@ -264,7 +264,7 @@ http://localhost:3100
 | `/api/cron/matching-pipeline/test` | POST | cron | none | none | `CRON_SECRET` | no | yes | no | matching pipeline test。 |
 | `/api/cron/strategy-alerts` | GET | cron | none | none | `CRON_SECRET` | no | yes | no | ストラテジー条件ライブ評価+アラート発火 (Phase γ-1)。市場休場時スキップ。 |
 | `/api/cron/strategy-alerts/test` | POST | cron | none | none | `CRON_SECRET` | no | yes | no | ストラテジーライブ評価の手動テスト (市場チェックなし)。 |
-| `analysis-engine` 連携 | internal | internal | service-to-service | none | TODO: confirm | no | yes | no | `src/backend/services/analysisEngineClient` 等。現時点はネットワーク制限未実装。今後 Cloud Run / private network / shared secret などで外部直接公開を禁止する。 |
+| `analysis-engine` 連携 | internal | internal | service-to-service | `X-Analysis-Engine-Secret` | shared secret | no | yes | no | `src/backend/services/analysisEngineClient` / PythonBridge HTTP mode からのみ呼び出す。`/health` 以外の `/v1/*` は secret なしで `401`。 |
 | `/api/daily-status` | GET | TODO: confirm | TODO | TODO | TODO | TODO | TODO | TODO | frontend 参照あり。backend route は未確認。 |
 | `/api/auth/ctrader/exchange` | POST | TODO: confirm | TODO | TODO | TODO | TODO | TODO | TODO | docs 旧記載。現行 route は `/api/auth/ctrader/callback`。 |
 
@@ -291,6 +291,14 @@ http://localhost:3100
 | `DAILY_NOTIFICATION_LIMIT` | 24時間あたりの通知上限 | `30` |
 | `CRON_ENABLED` | スケジューラ有効化フラグ | `true` |
 | `PUSH_NOTIFICATION_KEY` | プッシュ通知サービスキー | （空文字） |
+| `ANALYSIS_ENGINE_URL` | backend から analysis-engine を呼ぶ base URL | `http://analysis-engine:8000` |
+| `ANALYSIS_ENGINE_SHARED_SECRET` | backend/PythonBridge → analysis-engine の内部認証 secret。production 必須 | （必須） |
+| `ANALYSIS_ENGINE_MAX_REQUEST_BYTES` | analysis-engine `/v1/*` の Content-Length 上限 | `2097152` |
+| `ANALYSIS_ENGINE_RATE_LIMIT_PER_MINUTE` | analysis-engine `/v1/*` の per-minute 上限。`0` で無効 | `300` |
+
+> Phase 3 以降の production deploy 前提: GCP Secret Manager に
+> `ANALYSIS_ENGINE_SHARED_SECRET` を作成し、backend と analysis-engine の両 Cloud Run
+> service に同じ値を注入する。未作成の場合、deploy は安全側に失敗する。
 
 ---
 

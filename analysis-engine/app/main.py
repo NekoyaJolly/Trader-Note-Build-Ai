@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import hmac
+import os
+import time
 from datetime import timezone
 from typing import Dict, List
 
 import pandas as pd
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.db import create_db_engine, load_db_config
@@ -39,6 +43,118 @@ app = FastAPI(title="TradeAssist Analysis Engine", version="0.1.0")
 
 cfg = load_db_config()
 engine = create_db_engine(cfg)
+
+INTERNAL_SECRET_HEADER = "x-analysis-engine-secret"
+ANALYSIS_ENGINE_SHARED_SECRET_ENV = "ANALYSIS_ENGINE_SHARED_SECRET"
+ANALYSIS_ENGINE_MAX_REQUEST_BYTES_ENV = "ANALYSIS_ENGINE_MAX_REQUEST_BYTES"
+ANALYSIS_ENGINE_RATE_LIMIT_PER_MINUTE_ENV = "ANALYSIS_ENGINE_RATE_LIMIT_PER_MINUTE"
+DEFAULT_MAX_REQUEST_BYTES = 2 * 1024 * 1024
+PUBLIC_PATHS = {"/health"}
+_RATE_LIMIT_BUCKETS: dict[tuple[str, int], int] = {}
+
+
+def _is_production_runtime() -> bool:
+    """Cloud Run 本番で secret 未設定のまま起動しないための判定。"""
+    return os.getenv("NODE_ENV") == "production"
+
+
+def _load_shared_secret() -> str | None:
+    """analysis-engine の内部呼び出し用 shared secret を読み込む。
+
+    production では secret 未設定を fail-fast にする。設定なしで起動すると
+    `/v1/*` が公開状態に戻るため、起動時点で止める。
+    """
+    raw = os.getenv(ANALYSIS_ENGINE_SHARED_SECRET_ENV, "").strip()
+    if raw:
+        return raw
+    if _is_production_runtime():
+        raise RuntimeError(f"{ANALYSIS_ENGINE_SHARED_SECRET_ENV} is required in production")
+    return None
+
+
+def _parse_positive_int_env(name: str, default_value: int) -> int:
+    """正の整数 env を読む。壊れた値は fail-fast で検知する。"""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default_value
+    parsed = int(raw)
+    if parsed < 0:
+        raise RuntimeError(f"{name} must be >= 0")
+    return parsed
+
+
+def _requires_internal_secret(path: str) -> bool:
+    """Cloud Run の health check 以外は内部 secret を要求する。"""
+    return path not in PUBLIC_PATHS
+
+
+def _is_authorized_internal_request(configured_secret: str | None, provided_secret: str | None) -> bool:
+    """secret 未設定の dev/test では通し、設定済み環境では完全一致のみ許可する。"""
+    if configured_secret is None:
+        return True
+    if provided_secret is None:
+        return False
+    return hmac.compare_digest(provided_secret, configured_secret)
+
+
+_SHARED_SECRET = _load_shared_secret()
+_MAX_REQUEST_BYTES = _parse_positive_int_env(
+    ANALYSIS_ENGINE_MAX_REQUEST_BYTES_ENV,
+    DEFAULT_MAX_REQUEST_BYTES,
+)
+_RATE_LIMIT_PER_MINUTE = _parse_positive_int_env(
+    ANALYSIS_ENGINE_RATE_LIMIT_PER_MINUTE_ENV,
+    0,
+)
+
+
+@app.middleware("http")
+async def protect_internal_endpoints(request: Request, call_next):
+    """内部計算 API の直叩きを shared secret で止める。
+
+    `/health` は Cloud Run の起動確認用に public のまま残す。`/v1/*` は
+    Content-Length 上限、任意の per-minute 上限、shared secret を通過した場合だけ処理する。
+    """
+    path = request.url.path
+    if not _requires_internal_secret(path):
+        return await call_next(request)
+
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > _MAX_REQUEST_BYTES:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": "analysis-engine request body is too large"},
+                )
+        except ValueError:
+            return JSONResponse(
+                status_code=400,
+                content={"detail": "content-length header is invalid"},
+            )
+
+    provided_secret = request.headers.get(INTERNAL_SECRET_HEADER)
+    if not _is_authorized_internal_request(_SHARED_SECRET, provided_secret):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "analysis-engine internal authentication failed"},
+        )
+
+    if _RATE_LIMIT_PER_MINUTE > 0:
+        now_bucket = int(time.time() // 60)
+        client_host = request.client.host if request.client else "unknown"
+        bucket_key = (client_host, now_bucket)
+        _RATE_LIMIT_BUCKETS[bucket_key] = _RATE_LIMIT_BUCKETS.get(bucket_key, 0) + 1
+        for key in list(_RATE_LIMIT_BUCKETS.keys()):
+            if key[1] < now_bucket:
+                del _RATE_LIMIT_BUCKETS[key]
+        if _RATE_LIMIT_BUCKETS[bucket_key] > _RATE_LIMIT_PER_MINUTE:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "analysis-engine rate limit exceeded"},
+            )
+
+    return await call_next(request)
 
 
 @app.get("/health")
