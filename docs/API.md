@@ -930,7 +930,7 @@ ID で特定のトレードノートを取得します。
 
 #### 実発注 API の安全契約 (Phase 1)
 
-Phase 0 以降、`POST /api/trading/orders`、`PUT /api/trading/orders/:id`、`DELETE /api/trading/orders/:id`、`POST /api/trading/positions/:id/close` は `TRADING_ORDER_EXECUTION_ENABLED=true` でない限り `403 ORDER_EXECUTION_DISABLED` を返します。production でこの gate を解除する前に、`docs/side-a/order-execution-safety.md` の安全契約を実装する必要があります。
+Phase 0 以降、`POST /api/trading/orders`、`PUT /api/trading/orders/:id`、`DELETE /api/trading/orders/:id`、`POST /api/trading/positions/:id/close` は `TRADING_ORDER_EXECUTION_ENABLED=true` でない限り `403 TRADING_ORDER_EXECUTION_DISABLED` を返します。production でこの gate を解除する前に、`docs/side-a/order-execution-safety.md` の安全契約を実装する必要があります。
 
 Phase 2 で新設する実発注用確認エンドポイントは以下です。
 

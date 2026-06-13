@@ -1,6 +1,6 @@
 # Side-A 実発注安全仕様
 
-> **ステータス**: Phase 1 仕様確定案 (2026-06-13)
+> **ステータス**: Phase 1 仕様確定 (2026-06-13)
 > **対象**: Side-A の cTrader 実発注、注文変更、注文キャンセル、ポジション決済
 > **非対象**: Phase 2 の実発注再実装、DB migration、cTrader 実発注の通電
 
@@ -171,7 +171,7 @@ Phase 2 ではユーザー向けエラーと監査ログの `statusCode` を以�
 
 | code | HTTP | 意味 | ユーザー向け表示 |
 |---|---:|---|---|
-| `ORDER_EXECUTION_DISABLED` | 403 | 実発注ゲートが OFF | 現在、実発注は無効です |
+| `TRADING_ORDER_EXECUTION_DISABLED` | 403 | 実発注ゲートが OFF | 現在、実発注は無効です |
 | `CONFIRMATION_REQUIRED` | 403 | 確認トークンなし | 最終確認をやり直してください |
 | `CONFIRMATION_EXPIRED` | 409 | 確認トークン期限切れ | 確認の有効期限が切れました |
 | `CONFIRMATION_PAYLOAD_MISMATCH` | 409 | 確認後に payload が変化 | 入力内容が変わったため再確認してください |
@@ -224,7 +224,7 @@ Phase 2 実装時は Playwright で実クリック確認を行う。broker 実�
 | scenario | 期待結果 |
 |---|---|
 | feature flag OFF で注文パネルを開く | BUY/SELL が disabled、理由が表示される |
-| feature flag OFF で `POST /api/trading/orders` を直叩き | `403 ORDER_EXECUTION_DISABLED` |
+| feature flag OFF で `POST /api/trading/orders` を直叩き | `403 TRADING_ORDER_EXECUTION_DISABLED` |
 | 最終確認なしで注文 API を送信 | `403 CONFIRMATION_REQUIRED` |
 | 確認トークン期限切れ後に送信 | `409 CONFIRMATION_EXPIRED` |
 | 確認後に volume を変更して送信 | `409 CONFIRMATION_PAYLOAD_MISMATCH` |
