@@ -141,6 +141,9 @@ Side-A は「人間トレーダーのノーコード相棒」。完成形は **2
 
 ### Phase ε — 実発注 & 仕上げ
 - [ ] **実発注(決定2)**: cTrader Open API 発注。**安全ガード必須**（都度の明示確認なしに発注しない / サイレント自動売買禁止 / 数量・価格の最終確認 / 失敗時状態の明確化）〔L・高リスク〕
+  - **Phase 0 完了 (2026-06-13, PR #405 + #406)**: 実発注系 API と UI を feature flag で既定停止、production `JWT_SECRET` fail-fast を導入。
+  - **Phase 1 仕様**: 実発注再開条件、confirmation token、idempotency、demo/live 表示、risk limit、symbol/volume 検証、失敗時ステータス、E2E シナリオは `docs/side-a/order-execution-safety.md` を正本とする。
+  - **残**: Phase 2 の実発注再実装は今回のロードマップ実行範囲外。Phase 3/4/5 完了後に別途着手判断する。
 - [ ] OrderPreset 信頼度の動的算出〔M〕
 - [ ] 市場データ失敗時のユーザー通知・カバレッジ可視化〔M〕
 - [ ] バックテスト可視化強化 / 複数シンボル / ローリングWF〔M〕
