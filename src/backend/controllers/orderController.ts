@@ -28,7 +28,7 @@ export class OrderController {
   generatePreset = async (req: Request, res: Response): Promise<void> => {
     try {
       const { noteId } = req.params;
-      const note = await this.noteService.getNoteById(noteId);
+      const note = await this.noteService.getNoteById(noteId, req.user!.userId);
 
       if (!note) {
         res.status(404).json({ error: 'Note not found' });
