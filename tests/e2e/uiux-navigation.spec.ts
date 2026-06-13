@@ -27,6 +27,11 @@ interface ApiCallRecord {
   readonly authorization: string | null;
 }
 
+function shouldHaveBearerAuthHeader(call: ApiCallRecord): boolean {
+  // EventSource はカスタム Authorization ヘッダーを付与できないため、SSE は Cookie 認証で検証する。
+  return call.pathname !== "/api/notifications/stream";
+}
+
 const sideANote = {
   id: "note-e2e-1",
   symbol: "EURUSD",
@@ -554,7 +559,11 @@ test.describe("Side-A UX最小導線（モック認証）", () => {
     await expect.poll(() => apiCalls.some((call) => call.pathname === "/api/notifications/unread-count")).toBe(true);
 
     expect(apiCalls.length).toBeGreaterThan(0);
-    expect(apiCalls.every((call) => call.authorization === `Bearer ${sideAAuthToken}`)).toBe(true);
+    expect(
+      apiCalls
+        .filter(shouldHaveBearerAuthHeader)
+        .every((call) => call.authorization === `Bearer ${sideAAuthToken}`),
+    ).toBe(true);
   });
 
   test("主要Side-Aページが実DBなしのAPI mockで表示できる", async ({ page }) => {
@@ -619,7 +628,11 @@ test.describe("Side-A UX最小導線（モック認証）", () => {
         call.method === "PUT" && call.pathname === "/api/notifications/notification-e2e-1/read"
       )
     ).toBe(true);
-    expect(apiCalls.every((call) => call.authorization === `Bearer ${sideAAuthToken}`)).toBe(true);
+    expect(
+      apiCalls
+        .filter(shouldHaveBearerAuthHeader)
+        .every((call) => call.authorization === `Bearer ${sideAAuthToken}`),
+    ).toBe(true);
   });
 });
 
