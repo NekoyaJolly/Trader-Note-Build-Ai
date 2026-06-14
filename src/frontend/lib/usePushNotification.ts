@@ -269,19 +269,31 @@ export function usePushNotification(): UsePushNotificationResult {
         applicationServerKey: urlBase64ToUint8Array(vapidPublicKey) as BufferSource,
       });
 
-      // サーバーに購読を登録
-      await apiRequest<PushSubscribeResponse>("/api/push/subscribe", {
-        method: "POST",
-        body: JSON.stringify({
-          subscription: {
-            endpoint: subscription.endpoint,
-            keys: {
-              p256dh: encodeSubscriptionKey(subscription.getKey("p256dh"), "p256dh"),
-              auth: encodeSubscriptionKey(subscription.getKey("auth"), "auth"),
+      try {
+        // サーバーに購読を登録
+        await apiRequest<PushSubscribeResponse>("/api/push/subscribe", {
+          method: "POST",
+          body: JSON.stringify({
+            subscription: {
+              endpoint: subscription.endpoint,
+              keys: {
+                p256dh: encodeSubscriptionKey(subscription.getKey("p256dh"), "p256dh"),
+                auth: encodeSubscriptionKey(subscription.getKey("auth"), "auth"),
+              },
             },
-          },
-        }),
-      });
+          }),
+        });
+      } catch (serverError) {
+        // サーバー登録に失敗した場合、ブラウザ側だけ購読済みになる不整合を残さない
+        await subscription.unsubscribe().catch((rollbackError) => {
+          console.error(
+            "[usePushNotification] サーバー登録失敗後の購読ロールバックに失敗:",
+            rollbackError
+          );
+        });
+        setIsSubscribed(false);
+        throw serverError;
+      }
 
       setIsSubscribed(true);
       setTestMessage(null);

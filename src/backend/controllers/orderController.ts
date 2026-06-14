@@ -156,7 +156,7 @@ function hasIndicatorEvidence(note: TradeNote): boolean {
 function finiteFeatureRatio(features: number[]): number {
   if (features.length === 0) return 0;
   const validCount = features.filter((value) => Number.isFinite(value)).length;
-  return Math.min(1, validCount / 12);
+  return validCount / features.length;
 }
 
 function priceProximityScore(noteEntryPrice: number, currentPrice: number): number {
