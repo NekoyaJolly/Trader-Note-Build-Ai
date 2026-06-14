@@ -860,13 +860,16 @@ export class TradeNoteService {
    * Phase 8: DBモードでは TradeNoteRepository を使用
    * FSモードでは従来の JSON ファイル保存を使用
    * 
-   * @param userId - 所有ユーザー (Phase α-4 マルチユーザー分離)。HTTP 経路では必ず渡す
+   * @param userId - 所有ユーザー。DB / hybrid 保存では Phase 6 以降必須
    * @returns DBに保存された場合はDB上のノートID、FSのみの場合は渡されたノートのIDを返す
    */
   async saveNote(note: TradeNote, userId?: string): Promise<string> {
     let savedNoteId = note.id;
 
     if (this.storageMode === 'db' || this.storageMode === 'hybrid') {
+      if (!userId) {
+        throw new Error('DB への TradeNote 保存には userId が必要です');
+      }
       savedNoteId = await this.saveNoteToDb(note, userId);
     }
 
@@ -881,12 +884,8 @@ export class TradeNoteService {
    * DBにノートを保存する
    * @returns DBに保存されたノートのID（既存の場合はそのID、新規の場合はDB生成のID）
    */
-  private async saveNoteToDb(note: TradeNote, userId?: string): Promise<string> {
-    if (!userId) {
-      throw new Error('DB への TradeNote 保存には userId が必要です');
-    }
-
-    // 既存のノートを確認 (userId 指定時は所有ノートのみが更新対象)
+  private async saveNoteToDb(note: TradeNote, userId: string): Promise<string> {
+    // 既存のノートを確認 (所有ノートのみが更新対象)
     const existing = await this.repository.findByTradeId(note.tradeId, userId);
 
     if (existing) {
@@ -939,7 +938,7 @@ export class TradeNoteService {
             : undefined,
           userNotes: note.userNotes,
           tags: note.tags,
-          // Phase α-4: 所有ユーザーを設定 (マルチユーザー分離)
+          // Phase 6: DB 保存時は所有ユーザーを必ず設定する
           userId,
         },
         {
