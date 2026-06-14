@@ -2,7 +2,7 @@
  * ノート単位の通知粒度上書きセクション (Phase β-2b)
  *
  * 目的:
- * - ノート詳細ページに置き、このノートだけのしきい値 / 一致レベル / クールダウンを設定する
+ * - ノート詳細ページに置き、このノートだけのしきい値 / 一致レベル / クールダウン / 24h 上限を設定する
  * - 全体設定 (scope=user) よりこのノートの設定が優先される
  *
  * 新規コンポーネントの理由: ノート詳細ページ (app/notes/[id]/page.tsx) は既に大きく、
@@ -30,6 +30,7 @@ export default function NoteNotificationPreference({ noteId }: { noteId: string 
   const [threshold, setThreshold] = useState("");
   const [minMatchLevel, setMinMatchLevel] = useState("");
   const [cooldownMinutes, setCooldownMinutes] = useState("");
+  const [maxPerDay, setMaxPerDay] = useState("");
 
   const loadData = useCallback(async () => {
     try {
@@ -43,6 +44,7 @@ export default function NoteNotificationPreference({ noteId }: { noteId: string 
           ? String(notePref.cooldownMinutes)
           : ""
       );
+      setMaxPerDay(notePref?.maxPerDay !== null && notePref?.maxPerDay !== undefined ? String(notePref.maxPerDay) : "");
     } catch (err) {
       console.error("ノート通知設定の読み込みに失敗:", err);
       // 読み込み失敗時はセクション自体は出すが、未設定として扱う
@@ -66,6 +68,14 @@ export default function NoteNotificationPreference({ noteId }: { noteId: string 
       setError("クールダウンは 1〜10080 分の整数で指定してください");
       return;
     }
+    const maxPerDayValue = maxPerDay === "" ? null : Number(maxPerDay);
+    if (
+      maxPerDayValue !== null &&
+      (!Number.isInteger(maxPerDayValue) || maxPerDayValue < 1 || maxPerDayValue > 1000)
+    ) {
+      setError("24h 通知上限は 1〜1000 件の整数で指定してください");
+      return;
+    }
 
     setIsSaving(true);
     setError(null);
@@ -77,6 +87,7 @@ export default function NoteNotificationPreference({ noteId }: { noteId: string 
         threshold: thresholdValue,
         minMatchLevel: minMatchLevel === "" ? null : (minMatchLevel as "strong" | "medium" | "weak"),
         cooldownMinutes: cooldownValue,
+        maxPerDay: maxPerDayValue,
       });
       setSaved(true);
       await loadData();
@@ -163,6 +174,20 @@ export default function NoteNotificationPreference({ noteId }: { noteId: string 
             onChange={(e) => setCooldownMinutes(e.target.value)}
             placeholder="既定"
             aria-label="ノートクールダウン"
+            className="mt-1 block w-28 px-2 py-1.5 bg-slate-900 border border-slate-700 rounded text-sm text-white focus:border-violet-500 focus:outline-none"
+          />
+        </label>
+        <label className="text-xs text-gray-400">
+          24h 上限 (件)
+          <input
+            type="number"
+            min={1}
+            max={1000}
+            step={1}
+            value={maxPerDay}
+            onChange={(e) => setMaxPerDay(e.target.value)}
+            placeholder="既定"
+            aria-label="ノート24h通知上限"
             className="mt-1 block w-28 px-2 py-1.5 bg-slate-900 border border-slate-700 rounded text-sm text-white focus:border-violet-500 focus:outline-none"
           />
         </label>

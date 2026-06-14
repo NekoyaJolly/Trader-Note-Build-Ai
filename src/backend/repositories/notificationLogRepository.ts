@@ -269,18 +269,21 @@ export class NotificationLogRepository {
   }
 
   /**
-   * 24時間以内の通知件数をカウント
+   * 指定ユーザーの24時間以内の通知件数をカウント
    * 
-   * リアルタイム類似度通知の rate limit（24時間あたり最大30件）に使用
+   * リアルタイム類似度通知の per-user rate limit に使用する。
+   * NotificationLog は userId を直接持たないため、TradeNote 経由で所有者を絞る。
    * 
+   * @param userId - 通知の所有ユーザー ID
    * @param hours - 過去何時間をカウント対象とするか（デフォルト: 24）
-   * @returns sent ステータスの通知件数
+   * @returns 指定ユーザーに属する sent ステータスの通知件数
    */
-  async countRecentNotifications(hours: number = 24): Promise<number> {
+  async countRecentNotifications(userId: string, hours: number = 24): Promise<number> {
     const since = new Date(Date.now() - hours * 60 * 60 * 1000);
     
     const count = await this.prisma.notificationLog.count({
       where: {
+        ...this.buildOwnerWhere(userId),
         status: 'sent',
         sentAt: {
           gte: since,

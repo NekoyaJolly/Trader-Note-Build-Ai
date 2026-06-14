@@ -3164,7 +3164,7 @@ export interface NotificationPreference {
   minMatchLevel: "strong" | "medium" | "weak" | null;
   /** 再通知クールダウン (分)。null = 既定 */
   cooldownMinutes: number | null;
-  /** 24h 通知上限。null = 既定 (現状未配線) */
+  /** 24h 通知上限。null = 既定 */
   maxPerDay: number | null;
   createdAt: string;
   updatedAt: string;
@@ -3177,6 +3177,7 @@ export interface UpsertNotificationPreferenceInput {
   threshold?: number | null;
   minMatchLevel?: "strong" | "medium" | "weak" | null;
   cooldownMinutes?: number | null;
+  maxPerDay?: number | null;
 }
 
 /**

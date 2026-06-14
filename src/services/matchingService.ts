@@ -328,12 +328,20 @@ export class MatchingService {
             id: uuidv4(),
             matchScore: comparison.score,
             historicalNoteId: note.id,
+            userId: note.userId,
             marketSnapshot: currentMarket,
             marketSnapshotId,
             symbol,
             threshold: comparison.threshold,
             // ユーザー設定のクールダウンを通知トリガ判定へ引き渡す (Phase β-2a)
             ...(preference !== undefined ? { cooldownMsOverride: preference.cooldownMs } : {}),
+            // maxPerDay は NotificationLog 側で user 単位に数える (Phase 5)。
+            ...(preference !== undefined
+              ? {
+                  maxPerDayOverride: preference.maxPerDay,
+                  maxPerDaySource: preference.maxPerDaySource,
+                }
+              : {}),
             trendMatched,
             priceRangeMatched,
             reasons,
@@ -521,6 +529,7 @@ export class MatchingService {
               id: matchId,
               matchScore: adjustedScore,
               historicalNoteId: note.id,
+              userId: note.userId,
               marketSnapshot: currentMarket,
               marketSnapshotId,
               symbol,
@@ -1130,6 +1139,7 @@ export class MatchingService {
           const triggerResult = await this.notificationTriggerService.evaluateWithPersistence({
             matchScore: match.matchScore,
             historicalNoteId: match.historicalNoteId,
+            userId: match.userId,
             marketSnapshot: match.marketSnapshot,
             marketSnapshotId: match.marketSnapshotId,
             symbol: match.symbol,
@@ -1138,6 +1148,8 @@ export class MatchingService {
             // トリガ層にも引き渡し、二重判定のズレを防ぐ (Phase β-2a)
             scoreThresholdOverride: match.threshold,
             cooldownMsOverride: match.cooldownMsOverride,
+            maxPerDayOverride: match.maxPerDayOverride,
+            maxPerDaySource: match.maxPerDaySource,
           });
 
           if (triggerResult.shouldNotify) {

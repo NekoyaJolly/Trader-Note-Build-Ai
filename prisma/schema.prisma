@@ -291,9 +291,9 @@ model Notification {
 
 /// 通知粒度のユーザー設定 (Phase β-2、completion-roadmap 決定4 / NOTE_SIMILARITY_FOUNDATION §6.3-6.4)
 /// しきい値・一致レベル・クールダウン等を階層 (note/strategy > profile > user > システム既定) で解決する。
-/// β-2a 時点で配線済みなのは note / user スコープ (マッチングパイプライン)。
-/// profile スコープはノート→プロファイル紐付けの導入後、strategy スコープは Phase γ で配線する。
-/// maxPerDay はスキーマ/API のみ先行 (per-user 通知カウント源の整備後に配線)。
+/// ノートマッチは note > user > システム既定、条件アラートは strategy > user > システム既定で解決する。
+/// profile スコープはノート→プロファイル紐付けの導入後に配線する。
+/// maxPerDay は per-user 通知カウントに適用する (null = システム既定)。
 model NotificationPreference {
   id              String                      @id @default(uuid()) @db.Uuid
   /// 所有ユーザー (必須)

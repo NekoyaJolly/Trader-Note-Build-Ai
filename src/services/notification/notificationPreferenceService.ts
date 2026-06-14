@@ -4,12 +4,15 @@
  * 目的:
  * - NotificationPreference (scope=user/profile/note/strategy) の CRUD
  * - マッチングパイプライン向けの「有効設定」解決 (note > user > システム既定)
+ * - 条件アラート向けの「有効設定」解決 (strategy > user > システム既定)
  *
  * 階層解決の方針 (completion-roadmap 決定4 / NOTE_SIMILARITY_FOUNDATION §6.3-6.4):
  * - 項目ごとに最も近いスコープの非 NULL 値を採用する (部分上書き)
- * - β-2a で配線するのは note / user スコープ。profile スコープはノート→プロファイル
- *   紐付けの導入後、strategy スコープは Phase γ (条件アラート) で配線する
- * - maxPerDay は保存/取得のみ (per-user 通知カウント源の整備後に配線)
+ * - ノートマッチ: note > user > システム既定
+ * - 条件アラート: strategy > user > システム既定
+ * - profile スコープは DB には存在するが、TradeNote に profileId が永続されていないため
+ *   現時点では解決対象外。ノート→プロファイル紐付け導入後に note/profile/user の順へ拡張する
+ * - maxPerDay は per-user 通知カウントで実際に適用する
  *
  * 新規ファイルの理由: 通知設定の解決は柱1 (ノートマッチ) と柱2 (条件アラート) の
  * 共通層になる恒久的な責務で、既存サービス (トリガ判定/送信) とは関心が異なる。
@@ -28,6 +31,20 @@ import {
 const PARSED_COOLDOWN_MS = parseInt(process.env.NOTIFICATION_COOLDOWN_MS || '3600000', 10);
 const DEFAULT_COOLDOWN_MS =
   Number.isFinite(PARSED_COOLDOWN_MS) && PARSED_COOLDOWN_MS > 0 ? PARSED_COOLDOWN_MS : 3600000;
+/** 24時間あたり通知上限のシステム既定。env が不正な場合は従来値 30 に戻す。 */
+const PARSED_MAX_PER_DAY = parseInt(process.env.DAILY_NOTIFICATION_LIMIT || '30', 10);
+export const DEFAULT_MAX_NOTIFICATIONS_PER_DAY =
+  Number.isFinite(PARSED_MAX_PER_DAY) && PARSED_MAX_PER_DAY > 0 ? PARSED_MAX_PER_DAY : 30;
+
+/** maxPerDay をどの scope から採用したかを skip reason に残すための値。 */
+export type NotificationPreferenceLimitSource = 'note' | 'profile' | 'strategy' | 'user' | 'system';
+
+type MergePreferenceScope = 'note' | 'strategy';
+
+type PreferenceMergeFields = Pick<
+  NotificationPreference,
+  'threshold' | 'minMatchLevel' | 'cooldownMinutes' | 'maxPerDay'
+>;
 
 /**
  * 階層解決後の「実際に効く」通知設定。
@@ -40,6 +57,10 @@ export interface EffectiveNotificationPreference {
   minMatchLevel: SimilarityMatchLevel;
   /** 再通知クールダウン (ミリ秒) */
   cooldownMs: number;
+  /** 24時間あたりの通知上限。null はここに来る前にシステム既定で埋める */
+  maxPerDay: number;
+  /** maxPerDay を採用した scope。運用時の skip reason に残す */
+  maxPerDaySource: NotificationPreferenceLimitSource;
   /**
    * レンズ比較エンジンへ渡す有効しきい値。
    * minMatchLevel の帯下限 (strong 0.9 / medium 0.8 / weak 0.7) と threshold の
@@ -78,6 +99,8 @@ export function systemDefaultPreference(): EffectiveNotificationPreference {
     threshold: DEFAULT_SIMILARITY_TRIGGER_THRESHOLD,
     minMatchLevel: 'weak',
     cooldownMs: DEFAULT_COOLDOWN_MS,
+    maxPerDay: DEFAULT_MAX_NOTIFICATIONS_PER_DAY,
+    maxPerDaySource: 'system',
     effectiveThreshold: Math.max(
       DEFAULT_SIMILARITY_TRIGGER_THRESHOLD,
       DEFAULT_SIMILARITY_LEVELS.weak
@@ -90,21 +113,29 @@ export function systemDefaultPreference(): EffectiveNotificationPreference {
  * テスト容易性のため DB アクセスから分離。
  */
 export function mergePreferences(
-  notePref: Pick<NotificationPreference, 'threshold' | 'minMatchLevel' | 'cooldownMinutes'> | null,
-  userPref: Pick<NotificationPreference, 'threshold' | 'minMatchLevel' | 'cooldownMinutes'> | null
+  scopedPref: PreferenceMergeFields | null,
+  userPref: PreferenceMergeFields | null,
+  scopedPrefScope: MergePreferenceScope = 'note'
 ): EffectiveNotificationPreference {
   const defaults = systemDefaultPreference();
 
-  const threshold = notePref?.threshold ?? userPref?.threshold ?? defaults.threshold;
-  const minMatchLevel = notePref?.minMatchLevel ?? userPref?.minMatchLevel ?? defaults.minMatchLevel;
-  const cooldownMinutes = notePref?.cooldownMinutes ?? userPref?.cooldownMinutes ?? null;
+  const threshold = scopedPref?.threshold ?? userPref?.threshold ?? defaults.threshold;
+  const minMatchLevel = scopedPref?.minMatchLevel ?? userPref?.minMatchLevel ?? defaults.minMatchLevel;
+  const cooldownMinutes = scopedPref?.cooldownMinutes ?? userPref?.cooldownMinutes ?? null;
   const cooldownMs = cooldownMinutes !== null ? cooldownMinutes * 60 * 1000 : defaults.cooldownMs;
+  const maxPerDay = scopedPref?.maxPerDay ?? userPref?.maxPerDay ?? defaults.maxPerDay;
+  const maxPerDaySource =
+    scopedPref?.maxPerDay !== null && scopedPref?.maxPerDay !== undefined
+      ? scopedPrefScope
+      : userPref?.maxPerDay !== null && userPref?.maxPerDay !== undefined
+        ? 'user'
+        : defaults.maxPerDaySource;
 
   // 一致レベルの帯下限としきい値の大きい方をエンジンへ渡す (§6.4)
   const levelFloor = DEFAULT_SIMILARITY_LEVELS[minMatchLevel];
   const effectiveThreshold = Math.max(threshold, levelFloor);
 
-  return { threshold, minMatchLevel, cooldownMs, effectiveThreshold };
+  return { threshold, minMatchLevel, cooldownMs, maxPerDay, maxPerDaySource, effectiveThreshold };
 }
 
 /**
@@ -224,6 +255,9 @@ export class NotificationPreferenceService {
    * 1 クエリで関係する全設定行 (対象ノートの note スコープ + 関係ユーザーの user スコープ)
    * を取得し、ノート ID → 解決済み設定 の Map を返す。設定が無いノートはシステム既定。
    * cron (ユーザー横断) でも N+1 にならない。
+   *
+   * profile スコープは現時点では対象外。TradeNote に profileId が永続されていないため、
+   * ここで推測解決すると別プロファイルの設定を誤適用するリスクがある。
    */
   async resolveForNotes(
     notes: ReadonlyArray<{ id: string; userId: string | null }>
@@ -303,7 +337,7 @@ export class NotificationPreferenceService {
 
     return {
       cooldownMinutes: strategyPref?.cooldownMinutes ?? userPref?.cooldownMinutes ?? null,
-      effective: mergePreferences(strategyPref, userPref),
+      effective: mergePreferences(strategyPref, userPref, 'strategy'),
     };
   }
 }
