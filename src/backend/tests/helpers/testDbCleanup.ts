@@ -7,6 +7,8 @@
 
 import { prisma } from '../../db/client';
 
+export const TRADE_IMPORT_TEST_USER_ID = '00000000-0000-0000-0000-000000000001';
+
 /**
  * TRUNCATE 実行直前の最終ガード。DATABASE_URL がローカル DB 以外を指す場合は拒否する。
  *
@@ -45,4 +47,16 @@ export async function cleanupTradeImportRelatedTestData(): Promise<void> {
       "Trade"
     RESTART IDENTITY CASCADE
   `);
+}
+
+export async function ensureTradeImportTestUser(): Promise<void> {
+  await prisma.user.upsert({
+    where: { id: TRADE_IMPORT_TEST_USER_ID },
+    update: {},
+    create: {
+      id: TRADE_IMPORT_TEST_USER_ID,
+      primaryAccountId: 'trade-import-test-account',
+      displayName: 'Trade import integration test user',
+    },
+  });
 }

@@ -7,16 +7,21 @@ import path from 'path';
 import fs from 'fs';
 import { TradeImportService } from '../../services/tradeImportService';
 import { TradeRepository } from '../../backend/repositories/tradeRepository';
-import { cleanupTradeImportRelatedTestData } from './helpers/testDbCleanup';
+import {
+  cleanupTradeImportRelatedTestData,
+  ensureTradeImportTestUser,
+  TRADE_IMPORT_TEST_USER_ID,
+} from './helpers/testDbCleanup';
 
 describe('TradeImportService', () => {
   const service = new TradeImportService();
   const _repo = new TradeRepository();
-  const testUserId = '00000000-0000-0000-0000-000000000001';
+  const testUserId = TRADE_IMPORT_TEST_USER_ID;
 
   // 各テスト前にDBをクリーンアップ（重複チェックに影響されないようにする）
   beforeEach(async () => {
     await cleanupTradeImportRelatedTestData();
+    await ensureTradeImportTestUser();
   });
 
   test('CSV 正常系: sample_trades.csv を取り込み、5件保存される', async () => {
