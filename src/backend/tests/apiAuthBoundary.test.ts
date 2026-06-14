@@ -15,6 +15,8 @@ import { requireMailSecurityToken } from '../../side-b/routes/mailRoutes';
 import { OrderController } from '../controllers/orderController';
 import { NotificationController } from '../controllers/notificationController';
 import notificationRoutes from '../api/notificationRoutes';
+import type { LatestMatchForNote } from '../repositories/matchResultRepository';
+import type { MarketData, OrderPreset, TradeNote } from '../../models/types';
 
 interface MockResponse extends Response {
   statusCode: number;
@@ -87,6 +89,45 @@ function createToken(role: 'user' | 'admin'): string {
     displayName: role === 'admin' ? '管理者' : '一般ユーザー',
     role,
   });
+}
+
+function createTradeNoteForPreset(overrides: Partial<TradeNote> = {}): TradeNote {
+  return {
+    id: '00000000-0000-4000-8000-000000000222',
+    tradeId: 'trade-1',
+    timestamp: new Date('2026-06-15T00:00:00Z'),
+    symbol: 'USDJPY',
+    side: 'buy',
+    entryPrice: 150,
+    quantity: 1,
+    marketContext: {
+      timeframe: '1h',
+      trend: 'bullish',
+      indicators: {
+        rsi: 52,
+        macd: 0.2,
+        volume: 1000,
+      },
+    },
+    aiSummary: '上昇トレンド内の押し目買い',
+    features: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+    createdAt: new Date('2026-06-15T00:00:00Z'),
+    status: 'active',
+    ...overrides,
+  };
+}
+
+function createMarketDataForPreset(close: number): MarketData {
+  return {
+    symbol: 'USDJPY',
+    timestamp: new Date('2026-06-15T01:00:00Z'),
+    timeframe: '1h',
+    open: close,
+    high: close,
+    low: close,
+    close,
+    volume: 1000,
+  };
 }
 
 function runRequireAuth(req: Request): { readonly res: MockResponse; readonly next: jest.MockedFunction<NextFunction> } {
@@ -278,6 +319,74 @@ describe('API 認証境界', () => {
 
     expect(getNoteById).toHaveBeenCalledWith(noteId, userId);
     expect(res.statusCode).toBe(404);
+  });
+
+  it('注文プリセットの信頼度は最新マッチスコアを優先する', async () => {
+    const userId = '00000000-0000-4000-8000-000000000111';
+    const note = createTradeNoteForPreset();
+    const latestMatch: LatestMatchForNote = {
+      score: 0.92,
+      threshold: 0.8,
+      trendMatched: true,
+      priceRangeMatched: true,
+      evaluatedAt: new Date('2026-06-15T01:00:00Z'),
+    };
+    const controller = new OrderController();
+    const getNoteById = jest.fn<Promise<TradeNote | null>, [string, string?]>().mockResolvedValue(note);
+    const getCurrentMarketData = jest.fn<Promise<MarketData>, [string]>()
+      .mockResolvedValue(createMarketDataForPreset(151));
+    const findLatestForNote = jest.fn<Promise<LatestMatchForNote | null>, [string, string]>()
+      .mockResolvedValue(latestMatch);
+
+    Object.defineProperty(controller, 'noteService', {
+      value: { getNoteById },
+      configurable: true,
+    });
+    Object.defineProperty(controller, 'marketService', {
+      value: { getCurrentMarketData },
+      configurable: true,
+    });
+    Object.defineProperty(controller, 'matchResultRepository', {
+      value: { findLatestForNote },
+      configurable: true,
+    });
+
+    const res = createMockResponse();
+    await controller.generatePreset(createRequest({ params: { noteId: note.id }, userId }), res);
+
+    const body = res.body as { preset: OrderPreset };
+    expect(findLatestForNote).toHaveBeenCalledWith(note.id, userId);
+    expect(body.preset.confidence).toBe(0.92);
+  });
+
+  it('最新マッチが無い注文プリセットはノート情報量から保守的に信頼度を算出する', async () => {
+    const userId = '00000000-0000-4000-8000-000000000111';
+    const note = createTradeNoteForPreset();
+    const controller = new OrderController();
+    const getNoteById = jest.fn<Promise<TradeNote | null>, [string, string?]>().mockResolvedValue(note);
+    const getCurrentMarketData = jest.fn<Promise<MarketData>, [string]>()
+      .mockResolvedValue(createMarketDataForPreset(150));
+    const findLatestForNote = jest.fn<Promise<LatestMatchForNote | null>, [string, string]>()
+      .mockResolvedValue(null);
+
+    Object.defineProperty(controller, 'noteService', {
+      value: { getNoteById },
+      configurable: true,
+    });
+    Object.defineProperty(controller, 'marketService', {
+      value: { getCurrentMarketData },
+      configurable: true,
+    });
+    Object.defineProperty(controller, 'matchResultRepository', {
+      value: { findLatestForNote },
+      configurable: true,
+    });
+
+    const res = createMockResponse();
+    await controller.generatePreset(createRequest({ params: { noteId: note.id }, userId }), res);
+
+    const body = res.body as { preset: OrderPreset };
+    expect(body.preset.confidence).toBe(0.85);
   });
 
   it('通知ログ一覧は認証ユーザーの所有ログだけを問い合わせる', async () => {

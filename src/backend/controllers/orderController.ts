@@ -1,8 +1,12 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import type { OrderPreset } from '../../models/types';
+import type { OrderPreset, TradeNote } from '../../models/types';
 import { TradeNoteService } from '../../services/tradeNoteService';
 import { MarketDataService } from '../../services/marketDataService';
+import {
+  MatchResultRepository,
+  type LatestMatchForNote,
+} from '../repositories/matchResultRepository';
 
 // 注文確認リクエストボディ（参考情報生成用）
 // 自動売買ではなく、フロント表示用の概算計算用のため緩めの検証に留める。
@@ -16,14 +20,16 @@ const ConfirmationBodySchema = z.object({
 export class OrderController {
   private noteService: TradeNoteService;
   private marketService: MarketDataService;
+  private matchResultRepository: MatchResultRepository;
 
   constructor() {
     this.noteService = new TradeNoteService();
     this.marketService = new MarketDataService();
+    this.matchResultRepository = new MatchResultRepository();
   }
 
   /**
-   * Generate order presets based on a matched note
+   * 一致ノートをもとに注文プリセットを生成する
    */
   generatePreset = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -35,8 +41,13 @@ export class OrderController {
         return;
       }
 
-      // Get current market data
+      // 現在の市場データを取得
       const currentMarket = await this.marketService.getCurrentMarketData(note.symbol);
+
+      const latestMatch = await this.matchResultRepository.findLatestForNote(
+        note.id,
+        req.user!.userId
+      );
 
       // 過去ノートと現在市場データに基づいてプリセットを生成
       const preset: OrderPreset = {
@@ -45,7 +56,11 @@ export class OrderController {
         suggestedPrice: currentMarket.close,
         suggestedQuantity: note.quantity,
         basedOnNoteId: note.id,
-        confidence: 0.8, // 信頼度スコア（将来的に算出ロジックを追加予定）
+        confidence: calculateOrderPresetConfidence({
+          note,
+          currentPrice: currentMarket.close,
+          latestMatch,
+        }),
       };
 
       res.json({ preset });
@@ -100,4 +115,88 @@ export class OrderController {
     }
     return Promise.resolve();
   };
+}
+
+function clampConfidence(value: number, max: number): number {
+  if (!Number.isFinite(value)) return 0.05;
+  return Math.min(max, Math.max(0.05, value));
+}
+
+function roundConfidence(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+function statusAdjustment(status: TradeNote['status']): number {
+  switch (status) {
+    case 'active':
+      return 0;
+    case 'draft':
+      return -0.1;
+    case 'archived':
+      return -0.2;
+  }
+}
+
+function hasIndicatorEvidence(note: TradeNote): boolean {
+  const baseIndicatorFound = note.marketContext.indicators
+    ? Object.values(note.marketContext.indicators).some(
+      (value) => typeof value === 'number' && Number.isFinite(value)
+    )
+    : false;
+
+  const customIndicatorFound = note.marketContext.calculatedIndicators
+    ? Object.values(note.marketContext.calculatedIndicators).some(
+      (value) => typeof value === 'number' && Number.isFinite(value)
+    )
+    : false;
+
+  return baseIndicatorFound || customIndicatorFound;
+}
+
+function finiteFeatureRatio(features: number[]): number {
+  if (features.length === 0) return 0;
+  const validCount = features.filter((value) => Number.isFinite(value)).length;
+  return Math.min(1, validCount / 12);
+}
+
+function priceProximityScore(noteEntryPrice: number, currentPrice: number): number {
+  if (noteEntryPrice <= 0 || currentPrice <= 0) return 0;
+  const deviation = Math.abs(currentPrice - noteEntryPrice) / noteEntryPrice;
+  // 10% 以上乖離している場合は価格近接度を加点しない
+  return Math.max(0, 1 - deviation / 0.1);
+}
+
+/**
+ * 注文プリセットの信頼度を算出する。
+ * 最新マッチがある場合は一致判定スコアを主軸にし、無い場合はノートの情報量から保守的に推定する。
+ */
+export function calculateOrderPresetConfidence(input: {
+  readonly note: TradeNote;
+  readonly currentPrice: number;
+  readonly latestMatch: LatestMatchForNote | null;
+}): number {
+  const { note, currentPrice, latestMatch } = input;
+
+  if (latestMatch) {
+    let confidence = latestMatch.score;
+    if (latestMatch.score < latestMatch.threshold) {
+      confidence = Math.min(confidence, 0.49);
+    }
+    if (!latestMatch.trendMatched) confidence -= 0.05;
+    if (!latestMatch.priceRangeMatched) confidence -= 0.05;
+    confidence += statusAdjustment(note.status);
+    return roundConfidence(clampConfidence(confidence, 0.95));
+  }
+
+  let confidence = 0.35;
+  confidence += note.status === 'active' ? 0.15 : 0;
+  confidence += note.quantity > 0 ? 0.05 : 0;
+  confidence += note.aiSummary.trim().length > 0 ? 0.05 : 0;
+  confidence += finiteFeatureRatio(note.features) * 0.2;
+  confidence += hasIndicatorEvidence(note) ? 0.1 : 0;
+  confidence += priceProximityScore(note.entryPrice, currentPrice) * 0.2;
+  confidence += statusAdjustment(note.status);
+
+  // 最新マッチが無い推定値は過信しない。実際の一致スコアが出たら上限 0.95 まで使う。
+  return roundConfidence(clampConfidence(confidence, 0.85));
 }

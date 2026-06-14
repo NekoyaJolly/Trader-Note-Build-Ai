@@ -11,9 +11,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { Bell, BellOff, RefreshCw, Send } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import TimeframePicker, { Timeframe } from "@/components/TimeframePicker";
+import { usePushNotification, type PushPermissionState, type PushServerStatus } from "@/lib/usePushNotification";
 import {
   fetchUserSettings,
   saveUserSettings,
@@ -135,6 +137,221 @@ function Slider({
       <div className="flex justify-between text-xs text-gray-500 mt-1">
         <span>{min}{unit}</span>
         <span>{max}{unit}</span>
+      </div>
+    </div>
+  );
+}
+
+type StatusTone = "success" | "warning" | "danger" | "muted";
+
+/**
+ * 設定画面内の小さな状態表示
+ */
+function StatusPill({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: StatusTone;
+}) {
+  const toneClass = {
+    success: "border-green-500/40 bg-green-500/10 text-green-300",
+    warning: "border-yellow-500/40 bg-yellow-500/10 text-yellow-300",
+    danger: "border-red-500/40 bg-red-500/10 text-red-300",
+    muted: "border-slate-600 bg-slate-900/60 text-gray-300",
+  }[tone];
+
+  return (
+    <div className={`flex min-w-0 items-center justify-between rounded-lg border px-3 py-2 ${toneClass}`}>
+      <span className="text-xs text-gray-400">{label}</span>
+      <span className="ml-3 truncate text-sm font-semibold">{value}</span>
+    </div>
+  );
+}
+
+function permissionLabel(permission: PushPermissionState): string {
+  switch (permission) {
+    case "granted":
+      return "許可済み";
+    case "denied":
+      return "ブロック";
+    case "unsupported":
+      return "非対応";
+    case "default":
+      return "未許可";
+  }
+}
+
+function permissionTone(permission: PushPermissionState): StatusTone {
+  switch (permission) {
+    case "granted":
+      return "success";
+    case "denied":
+    case "unsupported":
+      return "danger";
+    case "default":
+      return "warning";
+  }
+}
+
+function serverStatusLabel(
+  serverStatus: PushServerStatus | null,
+  isCheckingStatus: boolean
+): string {
+  if (isCheckingStatus) return "確認中";
+  if (!serverStatus) return "未確認";
+  if (!serverStatus.enabled) return "無効";
+  return "有効";
+}
+
+function serverStatusTone(
+  serverStatus: PushServerStatus | null,
+  isCheckingStatus: boolean
+): StatusTone {
+  if (isCheckingStatus) return "muted";
+  if (!serverStatus) return "warning";
+  return serverStatus.enabled ? "success" : "danger";
+}
+
+/**
+ * Web Push の購読状態をユーザーが確認・操作するパネル
+ */
+function PushSubscriptionControl() {
+  const {
+    permission,
+    isSubscribed,
+    isLoading,
+    error,
+    serverStatus,
+    serverStatusError,
+    isCheckingStatus,
+    testMessage,
+    isSupported,
+    subscribe,
+    unsubscribe,
+    sendTestNotification,
+    refreshStatus,
+  } = usePushNotification();
+
+  const canSubscribe =
+    isSupported &&
+    permission !== "denied" &&
+    !isSubscribed &&
+    serverStatus?.enabled !== false &&
+    !isLoading;
+  const canUnsubscribe = isSupported && isSubscribed && !isLoading;
+  const canSendTest =
+    isSupported &&
+    isSubscribed &&
+    serverStatus?.enabled !== false &&
+    !isLoading;
+
+  function handleSubscribe() {
+    subscribe().catch((err) => {
+      console.error("Push通知の購読開始に失敗しました:", err);
+    });
+  }
+
+  function handleUnsubscribe() {
+    unsubscribe().catch((err) => {
+      console.error("Push通知の購読解除に失敗しました:", err);
+    });
+  }
+
+  function handleSendTest() {
+    sendTestNotification().catch((err) => {
+      console.error("Push通知のテスト送信に失敗しました:", err);
+    });
+  }
+
+  function handleRefreshStatus() {
+    refreshStatus().catch((err) => {
+      console.error("Push通知状態の再確認に失敗しました:", err);
+    });
+  }
+
+  return (
+    <div className="space-y-4 py-4">
+      <div>
+        <div className="text-sm font-medium text-white">Web Push 購読状態</div>
+        <div className="text-xs text-gray-500 mt-0.5">
+          この端末でブラウザ通知を受け取るかを管理します
+        </div>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-3">
+        <StatusPill
+          label="ブラウザ"
+          value={permissionLabel(permission)}
+          tone={permissionTone(permission)}
+        />
+        <StatusPill
+          label="サーバー"
+          value={serverStatusLabel(serverStatus, isCheckingStatus)}
+          tone={serverStatusTone(serverStatus, isCheckingStatus)}
+        />
+        <StatusPill
+          label="購読"
+          value={isSubscribed ? "購読中" : "未購読"}
+          tone={isSubscribed ? "success" : "muted"}
+        />
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {isSubscribed ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleUnsubscribe}
+            disabled={!canUnsubscribe}
+          >
+            <BellOff />
+            購読を解除
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            onClick={handleSubscribe}
+            disabled={!canSubscribe}
+          >
+            <Bell />
+            購読する
+          </Button>
+        )}
+
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handleSendTest}
+          disabled={!canSendTest}
+        >
+          <Send />
+          テスト通知
+        </Button>
+
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={handleRefreshStatus}
+          disabled={isCheckingStatus}
+        >
+          <RefreshCw className={isCheckingStatus ? "animate-spin" : ""} />
+          状態更新
+        </Button>
+      </div>
+
+      <div aria-live="polite" className="min-h-5 text-xs">
+        {serverStatusError && (
+          <span className="text-yellow-300">{serverStatusError}</span>
+        )}
+        {error && <span className="text-red-300">{error}</span>}
+        {testMessage && <span className="text-green-300">{testMessage}</span>}
       </div>
     </div>
   );
@@ -327,6 +544,8 @@ export default function SettingsPage() {
             description="過剰な通知を防止"
             unit="件"
           />
+
+          <PushSubscriptionControl />
         </CardContent>
       </Card>
 

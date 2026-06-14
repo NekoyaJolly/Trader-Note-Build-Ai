@@ -77,6 +77,14 @@ export type MatchResultWithRelations = MatchResult & {
   marketSnapshot: MarketSnapshot;
 };
 
+/**
+ * 注文プリセットの信頼度算出に使う最新マッチの最小情報
+ */
+export type LatestMatchForNote = Pick<
+  MatchResult,
+  'score' | 'threshold' | 'trendMatched' | 'priceRangeMatched' | 'evaluatedAt'
+>;
+
 export class MatchResultRepository {
   private prisma: PrismaClient;
 
@@ -187,6 +195,24 @@ export class MatchResultRepository {
     return this.prisma.matchResult.findUnique({
       where: { id },
       include: { note: true, marketSnapshot: true },
+    });
+  }
+
+  /**
+   * 指定ノートの最新マッチを所有ユーザーで絞って取得する。
+   * 注文プリセットは実発注ではなく参考情報だが、他ユーザーの一致履歴を混ぜないため userId を必須にする。
+   */
+  async findLatestForNote(noteId: string, userId: string): Promise<LatestMatchForNote | null> {
+    return this.prisma.matchResult.findFirst({
+      where: { noteId, userId },
+      orderBy: { evaluatedAt: 'desc' },
+      select: {
+        score: true,
+        threshold: true,
+        trendMatched: true,
+        priceRangeMatched: true,
+        evaluatedAt: true,
+      },
     });
   }
 
