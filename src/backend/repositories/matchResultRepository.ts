@@ -123,7 +123,7 @@ export class MatchResultRepository {
         reasons: reasonsData,
         evaluatedAt: input.evaluatedAt,
         decidedAt: input.evaluatedAt,
-        // 再評価時も所有ユーザーを同期 (α-2 以前に NULL で作られた行の自己修復を兼ねる)
+        // 再評価時も由来 TradeNote の所有ユーザーと同期する
         userId: input.userId,
       },
     });

@@ -111,6 +111,79 @@ BEGIN
   END IF;
 END $$;
 
+-- 既存の非 NULL userId が User に存在しない場合、FK 追加前に原因付きで止める。
+DO $$
+DECLARE
+  orphan_summary JSONB;
+BEGIN
+  SELECT jsonb_build_object(
+    'Trade', (
+      SELECT COUNT(*) FROM "Trade" AS t
+      LEFT JOIN "User" AS u ON u."id" = t."userId"
+      WHERE t."userId" IS NOT NULL AND u."id" IS NULL
+    ),
+    'TradeNote', (
+      SELECT COUNT(*) FROM "TradeNote" AS tn
+      LEFT JOIN "User" AS u ON u."id" = tn."userId"
+      WHERE tn."userId" IS NOT NULL AND u."id" IS NULL
+    ),
+    'MatchResult', (
+      SELECT COUNT(*) FROM "MatchResult" AS mr
+      LEFT JOIN "User" AS u ON u."id" = mr."userId"
+      WHERE mr."userId" IS NOT NULL AND u."id" IS NULL
+    ),
+    'Notification', (
+      SELECT COUNT(*) FROM "Notification" AS n
+      LEFT JOIN "User" AS u ON u."id" = n."userId"
+      WHERE n."userId" IS NOT NULL AND u."id" IS NULL
+    ),
+    'Strategy', (
+      SELECT COUNT(*) FROM "Strategy" AS s
+      LEFT JOIN "User" AS u ON u."id" = s."userId"
+      WHERE s."userId" IS NOT NULL AND u."id" IS NULL
+    ),
+    'Note', (
+      SELECT COUNT(*) FROM "Note" AS n
+      LEFT JOIN "User" AS u ON u."id" = n."userId"
+      WHERE n."userId" IS NOT NULL AND u."id" IS NULL
+    )
+  )
+  INTO orphan_summary;
+
+  IF EXISTS (
+    SELECT 1 FROM "Trade" AS t
+    LEFT JOIN "User" AS u ON u."id" = t."userId"
+    WHERE t."userId" IS NOT NULL AND u."id" IS NULL
+  )
+    OR EXISTS (
+      SELECT 1 FROM "TradeNote" AS tn
+      LEFT JOIN "User" AS u ON u."id" = tn."userId"
+      WHERE tn."userId" IS NOT NULL AND u."id" IS NULL
+    )
+    OR EXISTS (
+      SELECT 1 FROM "MatchResult" AS mr
+      LEFT JOIN "User" AS u ON u."id" = mr."userId"
+      WHERE mr."userId" IS NOT NULL AND u."id" IS NULL
+    )
+    OR EXISTS (
+      SELECT 1 FROM "Notification" AS n
+      LEFT JOIN "User" AS u ON u."id" = n."userId"
+      WHERE n."userId" IS NOT NULL AND u."id" IS NULL
+    )
+    OR EXISTS (
+      SELECT 1 FROM "Strategy" AS s
+      LEFT JOIN "User" AS u ON u."id" = s."userId"
+      WHERE s."userId" IS NOT NULL AND u."id" IS NULL
+    )
+    OR EXISTS (
+      SELECT 1 FROM "Note" AS n
+      LEFT JOIN "User" AS u ON u."id" = n."userId"
+      WHERE n."userId" IS NOT NULL AND u."id" IS NULL
+    ) THEN
+    RAISE EXCEPTION 'Phase 6 userId FK validation failed. Orphan userId counts: %', orphan_summary;
+  END IF;
+END $$;
+
 -- Note は既存 FK が ON DELETE SET NULL のため、必須化前に張り替える。
 ALTER TABLE "Note" DROP CONSTRAINT IF EXISTS "Note_userId_fkey";
 
