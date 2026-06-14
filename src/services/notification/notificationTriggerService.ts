@@ -17,7 +17,7 @@ export interface NotificationTriggerInput {
   matchScore: number;
   historicalNoteId: string;
   /** 通知ログの 24h 上限を user 単位で判定するための所有ユーザー ID */
-  userId?: string | null;
+  userId: string | null;
   marketSnapshot: MarketSnapshotInput;
   marketSnapshotId?: string;
   symbol?: string;
@@ -79,6 +79,13 @@ const NOTIFICATION_THRESHOLD = parseFloat(process.env.NOTIFY_THRESHOLD || '0.75'
 const COOLDOWN_MS = parseInt(process.env.NOTIFICATION_COOLDOWN_MS || '3600000', 10);
 // 重複抑制: 5秒以内の同一条件を抑止
 const DUPLICATE_TOLERANCE_SEC = 5;
+
+function resolveMaxPerDayLimit(value: number | undefined): number {
+  // API/UI/DB 経由の不正値で通知が全停止しないよう、トリガ層でも最後に防御する
+  return typeof value === 'number' && Number.isInteger(value) && value > 0
+    ? value
+    : DEFAULT_MAX_NOTIFICATIONS_PER_DAY;
+}
 /**
  * 通知トリガサービス
  * 
@@ -127,7 +134,11 @@ export class NotificationTriggerService {
     const channel = input.channel || 'in_app';
     const symbol = input.symbol || '';
     const score = input.matchScore;
-    const maxPerDay = input.maxPerDayOverride ?? DEFAULT_MAX_NOTIFICATIONS_PER_DAY;
+    if (input.userId === undefined) {
+      throw new Error('NotificationTriggerInput.userId は必須です。所有者不明の場合は null を明示してください');
+    }
+
+    const maxPerDay = resolveMaxPerDayLimit(input.maxPerDayOverride);
     const maxPerDaySource = input.maxPerDaySource ?? 'system';
 
     // 0. 24時間上限チェック（per-user。所有者不明のレガシー行では他ユーザーを巻き込む
@@ -301,6 +312,7 @@ export class NotificationTriggerService {
     return Promise.resolve(this.evaluate({
       matchScore: matchResult?.score ?? matchResult?.matchScore ?? 0,
       historicalNoteId: matchResult?.noteId ?? matchResult?.historicalNoteId ?? '',
+      userId: null,
       marketSnapshot: matchResult?.marketSnapshot ?? matchResult?.currentMarket ?? {},
     }));
   }

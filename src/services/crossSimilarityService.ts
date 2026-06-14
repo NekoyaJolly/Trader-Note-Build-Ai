@@ -194,6 +194,7 @@ export class CrossSimilarityService {
         results.push({
           noteId: note.id,
           noteType: 'tradeNote',
+          userId: note.userId,
           similarity,
           distance,
           symbol: note.symbol,
@@ -253,6 +254,7 @@ export class CrossSimilarityService {
         results.push({
           noteId: note.id,
           noteType: 'aiTradeNote',
+          userId: null,
           similarity,
           distance,
           symbol: note.symbol,

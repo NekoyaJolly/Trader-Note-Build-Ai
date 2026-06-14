@@ -65,6 +65,8 @@ export interface SimilarityCheckInput {
 export interface SimilarNoteMatch {
   noteId: string;
   noteType: 'tradeNote' | 'aiTradeNote';
+  /** 通知上限を user 単位で判定するための所有ユーザー。所有者不明の AI ノートは null。 */
+  userId?: string | null;
   similarity: number;
   symbol: string;
   date: string;
@@ -172,6 +174,7 @@ export class CronSimilarityService {
       const matches: SimilarNoteMatch[] = highSimilarityMatches.map((note) => ({
         noteId: note.noteId,
         noteType: note.noteType,
+        userId: note.userId ?? null,
         similarity: note.similarity,
         symbol: note.symbol,
         date: note.date,
@@ -281,6 +284,7 @@ export class CronSimilarityService {
     const triggerResult = await this.notificationTrigger.evaluateWithPersistence({
       matchScore: match.similarity,
       historicalNoteId: match.noteId,
+      userId: match.userId ?? null,
       marketSnapshot: {
         symbol,
         timestamp: new Date(),

@@ -50,6 +50,7 @@ const mockSearchResult: CrossSearchResult = {
     {
       noteId: 'note-1',
       noteType: 'aiTradeNote',
+      userId: null,
       similarity: 0.90,
       distance: 0.1,
       symbol: 'EUR/USD',
@@ -62,6 +63,7 @@ const mockSearchResult: CrossSearchResult = {
     {
       noteId: 'note-2',
       noteType: 'tradeNote',
+      userId: 'user-note-2',
       similarity: 0.87,
       distance: 0.13,
       symbol: 'EUR/USD',
@@ -74,6 +76,7 @@ const mockSearchResult: CrossSearchResult = {
     {
       noteId: 'note-3',
       noteType: 'aiTradeNote',
+      userId: null,
       similarity: 0.70,
       distance: 0.3,
       symbol: 'EUR/USD',
@@ -221,6 +224,7 @@ describe('CronSimilarityService', () => {
       expect(mockNotificationTrigger.evaluateWithPersistence).toHaveBeenNthCalledWith(1, {
         matchScore: 0.90,
         historicalNoteId: 'note-1',
+        userId: null,
         marketSnapshot: expect.objectContaining({
           symbol: 'EUR/USD',
           similarity: 0.90,

@@ -131,6 +131,7 @@ export class NotificationService {
       const evaluation = this.triggerService.evaluate({
         matchScore: match.matchScore,
         historicalNoteId: match.historicalNoteId,
+        userId: match.userId ?? null,
         marketSnapshot: match.marketSnapshot,
       });
 

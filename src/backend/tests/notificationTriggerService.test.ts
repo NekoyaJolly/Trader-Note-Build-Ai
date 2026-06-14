@@ -8,6 +8,7 @@ import { NotificationTriggerService } from '../../services/notification/notifica
 const createDto = (overrides?: Partial<NotificationTriggerInput>): NotificationTriggerInput => ({
   matchScore: 0.8,
   historicalNoteId: 'note_1',
+  userId: null,
   marketSnapshot: { symbol: 'BTCUSDT', timeframe: '1h' },
   ...overrides,
 });

@@ -1139,7 +1139,7 @@ export class MatchingService {
           const triggerResult = await this.notificationTriggerService.evaluateWithPersistence({
             matchScore: match.matchScore,
             historicalNoteId: match.historicalNoteId,
-            userId: match.userId,
+            userId: match.userId ?? null,
             marketSnapshot: match.marketSnapshot,
             marketSnapshotId: match.marketSnapshotId,
             symbol: match.symbol,

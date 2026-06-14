@@ -196,7 +196,7 @@ function UserPreferenceForm({
             step={1}
             value={maxPerDay}
             onChange={(e) => setMaxPerDay(e.target.value)}
-            placeholder="既定 (30)"
+            placeholder="既定"
             className="w-40 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:border-violet-500 focus:outline-none"
           />
           <p className="text-xs text-gray-500 mt-1">

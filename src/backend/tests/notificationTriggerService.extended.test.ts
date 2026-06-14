@@ -152,6 +152,23 @@ describe('NotificationTriggerService - 拡張テスト', () => {
       expect(result.shouldNotify).toBe(true);
       expect(mockNotificationLogRepository.countRecentNotifications).not.toHaveBeenCalled();
     });
+
+    it('userId が undefined の呼び出しはプログラミングエラーとして検知する', async () => {
+      await expect(
+        triggerService.evaluateWithPersistence(createInput({ userId: undefined }))
+      ).rejects.toThrow('userId は必須です');
+    });
+
+    it('maxPerDayOverride が不正値の場合は既定値へフォールバックする', async () => {
+      mockNotificationLogRepository.countRecentNotifications.mockResolvedValue(1);
+
+      const result = await triggerService.evaluateWithPersistence(
+        createInput({ maxPerDayOverride: 0 })
+      );
+
+      expect(result.shouldNotify).toBe(true);
+      expect(mockNotificationLogRepository.isDuplicate).toHaveBeenCalled();
+    });
   });
 
   describe('2. 冪等性チェック（同一条件の重複防止）', () => {

@@ -8,6 +8,7 @@
  */
 
 import type { MatchResult, MarketSnapshot, Prisma } from '@prisma/client';
+import type { NotificationPreferenceLimitSource } from '../../services/notification/notificationPreferenceService';
 
 /**
  * DB から取得した MatchResult の型（関連テーブル含む）
@@ -47,7 +48,7 @@ export interface MatchResultDTO {
   /** ユーザー設定による 24h 通知上限。未設定時はトリガ判定側の既定を使う */
   maxPerDayOverride?: number;
   /** maxPerDayOverride を採用した scope。skip reason の監査情報に使う */
-  maxPerDaySource?: 'note' | 'profile' | 'strategy' | 'user' | 'system';
+  maxPerDaySource?: NotificationPreferenceLimitSource;
   /** トレンド一致の有無 */
   trendMatched?: boolean;
   /** 価格レンジ一致の有無 */
