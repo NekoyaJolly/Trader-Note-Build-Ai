@@ -68,7 +68,7 @@ function createPushState(
     unsubscribe: vi.fn(async () => true),
     sendTestNotification: vi.fn(async () => true),
     refreshStatus: vi.fn(async () => undefined),
-    requestPermission: vi.fn(async () => "granted"),
+    requestPermission: vi.fn(async (): Promise<NotificationPermission> => "granted"),
     isSupported: true,
     ...overrides,
   };

@@ -45,18 +45,21 @@ class MockPushSubscription implements PushSubscription {
 function installPushEnvironment(subscription: PushSubscription): void {
   const subscribeMock = vi.fn(async (): Promise<PushSubscription> => subscription);
   const getSubscriptionMock = vi.fn(async (): Promise<PushSubscription | null> => null);
+  const permissionStateMock = vi.fn(async (): Promise<PermissionState> => "granted");
+  const pushManager: Pick<PushManager, "subscribe" | "getSubscription" | "permissionState"> = {
+    subscribe: subscribeMock,
+    getSubscription: getSubscriptionMock,
+    permissionState: permissionStateMock,
+  };
   const registration = {
-    pushManager: {
-      subscribe: subscribeMock,
-      getSubscription: getSubscriptionMock,
-    } as PushManager,
-  } as ServiceWorkerRegistration;
+    pushManager,
+  };
 
   const serviceWorker = {
-    register: vi.fn(async (): Promise<ServiceWorkerRegistration> => registration),
-    getRegistration: vi.fn(async (): Promise<ServiceWorkerRegistration> => registration),
+    register: vi.fn(async () => registration),
+    getRegistration: vi.fn(async () => registration),
     ready: Promise.resolve(registration),
-  } as ServiceWorkerContainer;
+  };
 
   const notificationApi = {
     permission: "granted" as NotificationPermission,
