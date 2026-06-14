@@ -15,13 +15,14 @@ const mockNotificationLogRepository = {
   hasRecentDuplicate: jest.fn<() => Promise<boolean>>(),
   checkCooldown: jest.fn<() => Promise<{ isInCooldown: boolean; lastNotificationTime?: Date; cooldownUntil?: Date }>>(),
   upsertLog: jest.fn<() => Promise<{ id: string }>>(),
-  countRecentNotifications: jest.fn<() => Promise<number>>(),
+  countRecentNotifications: jest.fn<(userId: string, hours?: number) => Promise<number>>(),
 };
 
 // テスト用の入力データを生成
 const createInput = (overrides?: Partial<NotificationTriggerInput>): NotificationTriggerInput => ({
   matchScore: 0.8,
   historicalNoteId: 'note_test_123',
+  userId: 'user-a',
   marketSnapshot: { symbol: 'BTCUSDT', timeframe: '1h' },
   marketSnapshotId: 'snapshot_test_123',
   symbol: 'BTCUSDT',
@@ -117,6 +118,56 @@ describe('NotificationTriggerService - 拡張テスト', () => {
       // クールダウンには既定の NOTIFICATION_COOLDOWN_MS (3600000) が使われる…のは
       // スコアで先に弾かれるため checkCooldown 自体が呼ばれない
       expect(mockNotificationLogRepository.checkCooldown).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('1c. per-user 24h 通知上限 (Phase 5)', () => {
+    it('daily limit は userId で countRecentNotifications に渡される', async () => {
+      await triggerService.evaluateWithPersistence(
+        createInput({ maxPerDayOverride: 10, maxPerDaySource: 'user' })
+      );
+
+      expect(mockNotificationLogRepository.countRecentNotifications).toHaveBeenCalledWith('user-a', 24);
+    });
+
+    it('解決済み maxPerDay を超えている場合は適用上限を skip reason に残してスキップする', async () => {
+      mockNotificationLogRepository.countRecentNotifications.mockResolvedValue(5);
+
+      const result = await triggerService.evaluateWithPersistence(
+        createInput({ maxPerDayOverride: 5, maxPerDaySource: 'note' })
+      );
+
+      expect(result.shouldNotify).toBe(false);
+      expect(result.skipReasonCode).toBe('daily_limit');
+      expect(result.skipReason).toContain('5/5件');
+      expect(result.skipReason).toContain('scope=note');
+      expect(mockNotificationLogRepository.isDuplicate).not.toHaveBeenCalled();
+    });
+
+    it('userId が無いレガシー行ではグローバル集計に戻さず daily limit 判定をスキップする', async () => {
+      const result = await triggerService.evaluateWithPersistence(
+        createInput({ userId: null, maxPerDayOverride: 1 })
+      );
+
+      expect(result.shouldNotify).toBe(true);
+      expect(mockNotificationLogRepository.countRecentNotifications).not.toHaveBeenCalled();
+    });
+
+    it('userId が undefined の呼び出しはプログラミングエラーとして検知する', async () => {
+      await expect(
+        triggerService.evaluateWithPersistence(createInput({ userId: undefined }))
+      ).rejects.toThrow('userId は必須です');
+    });
+
+    it('maxPerDayOverride が不正値の場合は既定値へフォールバックする', async () => {
+      mockNotificationLogRepository.countRecentNotifications.mockResolvedValue(1);
+
+      const result = await triggerService.evaluateWithPersistence(
+        createInput({ maxPerDayOverride: 0 })
+      );
+
+      expect(result.shouldNotify).toBe(true);
+      expect(mockNotificationLogRepository.isDuplicate).toHaveBeenCalled();
     });
   });
 

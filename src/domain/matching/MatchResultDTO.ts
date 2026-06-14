@@ -8,6 +8,7 @@
  */
 
 import type { MatchResult, MarketSnapshot, Prisma } from '@prisma/client';
+import type { NotificationPreferenceLimitSource } from '../../services/notification/notificationPreferenceService';
 
 /**
  * DB から取得した MatchResult の型（関連テーブル含む）
@@ -23,6 +24,8 @@ export interface MatchResultDTO {
   matchScore: number;
   /** 過去トレードノート ID */
   historicalNoteId: string;
+  /** 由来ノートの所有ユーザー ID。通知上限を user 単位で判定するために使う */
+  userId?: string | null;
   /**
    * 市場スナップショット（Layer1 データ）。
    * - Prisma の MarketSnapshot リレーション (取得済みの場合)
@@ -42,6 +45,10 @@ export interface MatchResultDTO {
    * 未設定時はトリガ判定側の既定 (NOTIFICATION_COOLDOWN_MS) を使う
    */
   cooldownMsOverride?: number;
+  /** ユーザー設定による 24h 通知上限。未設定時はトリガ判定側の既定を使う */
+  maxPerDayOverride?: number;
+  /** maxPerDayOverride を採用した scope。skip reason の監査情報に使う */
+  maxPerDaySource?: NotificationPreferenceLimitSource;
   /** トレンド一致の有無 */
   trendMatched?: boolean;
   /** 価格レンジ一致の有無 */
@@ -76,6 +83,7 @@ export function toMatchResultDTO(dbRecord: MatchResultWithSnapshot): MatchResult
     id: dbRecord.id,
     matchScore: dbRecord.score,
     historicalNoteId: dbRecord.noteId,
+    userId: dbRecord.userId,
     marketSnapshot: dbRecord.marketSnapshot || {},
     marketSnapshotId: dbRecord.marketSnapshotId,
     symbol: dbRecord.symbol,

@@ -14,6 +14,7 @@ describe('NotificationLogRepository', () => {
       findMany: jest.fn<(args: object) => Promise<[]>>().mockResolvedValue([]),
       findFirst: jest.fn<(args: object) => Promise<null>>().mockResolvedValue(null),
       deleteMany: jest.fn<(args: object) => Promise<{ count: number }>>().mockResolvedValue({ count: 0 }),
+      count: jest.fn<(args: object) => Promise<number>>().mockResolvedValue(0),
     };
     const prismaClient = { notificationLog } as unknown as PrismaClient;
     return {
@@ -142,6 +143,23 @@ describe('NotificationLogRepository', () => {
         where: {
           id: '00000000-0000-4000-8000-000000000333',
           note: { userId: '00000000-0000-4000-8000-000000000222' },
+        },
+      });
+    });
+
+    it('24h 通知件数も所有ユーザーで絞る (Phase 5)', async () => {
+      const { repository, notificationLog } = createRepository();
+
+      const count = await repository.countRecentNotifications('00000000-0000-4000-8000-000000000222', 24);
+
+      expect(count).toBe(0);
+      expect(notificationLog.count).toHaveBeenCalledWith({
+        where: {
+          note: { userId: '00000000-0000-4000-8000-000000000222' },
+          status: 'sent',
+          sentAt: {
+            gte: expect.any(Date),
+          },
         },
       });
     });

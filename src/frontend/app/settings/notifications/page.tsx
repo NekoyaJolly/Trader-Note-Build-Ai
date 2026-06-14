@@ -3,7 +3,7 @@
  * /settings/notifications
  *
  * 機能:
- * - ユーザー全体 (scope=user) の通知粒度設定: しきい値 / 一致レベル / クールダウン
+ * - ユーザー全体 (scope=user) の通知粒度設定: しきい値 / 一致レベル / クールダウン / 24h 上限
  * - ノート単位上書き (scope=note) の一覧と削除 (作成はノート詳細ページから)
  *
  * 設定が無い項目はシステム既定で動作する (null = 既定に戻す)。
@@ -50,6 +50,11 @@ function UserPreferenceForm({
       ? String(preference.cooldownMinutes)
       : ""
   );
+  const [maxPerDay, setMaxPerDay] = useState<string>(
+    preference?.maxPerDay !== null && preference?.maxPerDay !== undefined
+      ? String(preference.maxPerDay)
+      : ""
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -66,6 +71,14 @@ function UserPreferenceForm({
       setError("クールダウンは 1〜10080 分の整数で指定してください");
       return;
     }
+    const maxPerDayValue = maxPerDay === "" ? null : Number(maxPerDay);
+    if (
+      maxPerDayValue !== null &&
+      (!Number.isInteger(maxPerDayValue) || maxPerDayValue < 1 || maxPerDayValue > 1000)
+    ) {
+      setError("24h 通知上限は 1〜1000 件の整数で指定してください");
+      return;
+    }
 
     setIsSaving(true);
     setError(null);
@@ -76,6 +89,7 @@ function UserPreferenceForm({
         threshold: thresholdValue,
         minMatchLevel: minMatchLevel === "" ? null : (minMatchLevel as "strong" | "medium" | "weak"),
         cooldownMinutes: cooldownValue,
+        maxPerDay: maxPerDayValue,
       });
       setSaved(true);
       await onSaved();
@@ -169,6 +183,27 @@ function UserPreferenceForm({
           </p>
         </div>
 
+        {/* 24h 通知上限 */}
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-1" htmlFor="pref-max-per-day">
+            24h 通知上限 (件)
+          </label>
+          <input
+            id="pref-max-per-day"
+            type="number"
+            min={1}
+            max={1000}
+            step={1}
+            value={maxPerDay}
+            onChange={(e) => setMaxPerDay(e.target.value)}
+            placeholder="既定"
+            className="w-40 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:border-violet-500 focus:outline-none"
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            1ユーザーあたりの24時間通知上限です。空欄 = システム既定
+          </p>
+        </div>
+
         <div className="pt-2">
           <Button onClick={handleSave} disabled={isSaving}>
             {isSaving ? "保存中..." : "保存"}
@@ -239,6 +274,7 @@ function NoteOverrideList({
                     {pref.threshold !== null && `しきい値 ${pref.threshold} `}
                     {pref.minMatchLevel !== null && `/ ${pref.minMatchLevel} 以上 `}
                     {pref.cooldownMinutes !== null && `/ クールダウン ${pref.cooldownMinutes}分`}
+                    {pref.maxPerDay !== null && `/ 24h上限 ${pref.maxPerDay}件`}
                   </span>
                 </div>
                 <Button

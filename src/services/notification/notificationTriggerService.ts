@@ -1,6 +1,8 @@
 import type { Prisma } from '@prisma/client';
 import type { CooldownCheckResult } from '../../backend/repositories/notificationLogRepository';
 import { NotificationLogRepository } from '../../backend/repositories/notificationLogRepository';
+import type { NotificationPreferenceLimitSource } from './notificationPreferenceService';
+import { DEFAULT_MAX_NOTIFICATIONS_PER_DAY } from './notificationPreferenceService';
 
 /**
  * 市場スナップショットを表す型。
@@ -14,6 +16,8 @@ type MarketSnapshotInput = Prisma.JsonValue | Record<string, Prisma.JsonValue> |
 export interface NotificationTriggerInput {
   matchScore: number;
   historicalNoteId: string;
+  /** 通知ログの 24h 上限を user 単位で判定するための所有ユーザー ID */
+  userId: string | null;
   marketSnapshot: MarketSnapshotInput;
   marketSnapshotId?: string;
   symbol?: string;
@@ -26,6 +30,10 @@ export interface NotificationTriggerInput {
   scoreThresholdOverride?: number;
   /** ユーザー設定による再通知クールダウン (ミリ秒、Phase β-2a)。未設定時は既定値 */
   cooldownMsOverride?: number;
+  /** ユーザー設定で解決済みの 24h 通知上限。未指定時はシステム既定 */
+  maxPerDayOverride?: number;
+  /** maxPerDayOverride をどの scope から採用したか。skip reason の監査情報に使う */
+  maxPerDaySource?: NotificationPreferenceLimitSource;
 }
 
 /**
@@ -71,9 +79,13 @@ const NOTIFICATION_THRESHOLD = parseFloat(process.env.NOTIFY_THRESHOLD || '0.75'
 const COOLDOWN_MS = parseInt(process.env.NOTIFICATION_COOLDOWN_MS || '3600000', 10);
 // 重複抑制: 5秒以内の同一条件を抑止
 const DUPLICATE_TOLERANCE_SEC = 5;
-// 24時間あたりの通知上限（リアルタイム類似度通知用）
-const DAILY_NOTIFICATION_LIMIT = parseInt(process.env.DAILY_NOTIFICATION_LIMIT || '30', 10);
 
+function resolveMaxPerDayLimit(value: number | undefined): number {
+  // API/UI/DB 経由の不正値で通知が全停止しないよう、トリガ層でも最後に防御する
+  return typeof value === 'number' && Number.isInteger(value) && value > 0
+    ? value
+    : DEFAULT_MAX_NOTIFICATIONS_PER_DAY;
+}
 /**
  * 通知トリガサービス
  * 
@@ -122,17 +134,26 @@ export class NotificationTriggerService {
     const channel = input.channel || 'in_app';
     const symbol = input.symbol || '';
     const score = input.matchScore;
+    if (input.userId === undefined) {
+      throw new Error('NotificationTriggerInput.userId は必須です。所有者不明の場合は null を明示してください');
+    }
 
-    // 0. 24時間上限チェック（リアルタイム通知の過負荷防止）
-    const dailyCount = await this.notificationLogRepository.countRecentNotifications(24);
-    if (dailyCount >= DAILY_NOTIFICATION_LIMIT) {
-      return {
-        shouldNotify: false,
-        status: 'skipped',
-        skipReason: `24時間上限到達: ${dailyCount}/${DAILY_NOTIFICATION_LIMIT}件`,
-        skipReasonCode: 'daily_limit',
-        reasonSummary: `スコア: ${score.toFixed(3)} (上限到達)`,
-      };
+    const maxPerDay = resolveMaxPerDayLimit(input.maxPerDayOverride);
+    const maxPerDaySource = input.maxPerDaySource ?? 'system';
+
+    // 0. 24時間上限チェック（per-user。所有者不明のレガシー行では他ユーザーを巻き込む
+    // グローバル集計に戻さず、上限判定をスキップする）
+    if (input.userId !== null && input.userId !== undefined) {
+      const dailyCount = await this.notificationLogRepository.countRecentNotifications(input.userId, 24);
+      if (dailyCount >= maxPerDay) {
+        return {
+          shouldNotify: false,
+          status: 'skipped',
+          skipReason: `24時間上限到達: ${dailyCount}/${maxPerDay}件 (適用上限: ${maxPerDay}/24h, scope=${maxPerDaySource})`,
+          skipReasonCode: 'daily_limit',
+          reasonSummary: `スコア: ${score.toFixed(3)} (上限到達: ${dailyCount}/${maxPerDay}件, scope=${maxPerDaySource})`,
+        };
+      }
     }
 
     // 1. スコア閾値判定 (ユーザー設定があればそれを優先。Phase β-2a)
@@ -218,7 +239,7 @@ export class NotificationTriggerService {
       score,
       channel,
       status: 'sent',
-      reasonSummary: `スコア: ${score.toFixed(3)} (閾値: ${NOTIFICATION_THRESHOLD})`,
+      reasonSummary: `スコア: ${score.toFixed(3)} (閾値: ${scoreThreshold})`,
     });
 
     return {
@@ -291,6 +312,7 @@ export class NotificationTriggerService {
     return Promise.resolve(this.evaluate({
       matchScore: matchResult?.score ?? matchResult?.matchScore ?? 0,
       historicalNoteId: matchResult?.noteId ?? matchResult?.historicalNoteId ?? '',
+      userId: null,
       marketSnapshot: matchResult?.marketSnapshot ?? matchResult?.currentMarket ?? {},
     }));
   }

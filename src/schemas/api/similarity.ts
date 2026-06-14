@@ -65,6 +65,8 @@ export const SimilarNoteItemSchema = z.object({
   // 共通フィールド
   noteId: z.string(),
   noteType: NoteTypeSchema,
+  // 通知上限を user 単位で判定するための所有ユーザー。所有者不明のレガシー/AIノートは null。
+  userId: z.string().nullable().optional(),
   similarity: z.number().min(0).max(1),
   distance: z.number().nonnegative(),
   

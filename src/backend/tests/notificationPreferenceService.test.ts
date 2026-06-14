@@ -2,8 +2,9 @@
  * NotificationPreferenceService (Phase β-2a) のユニットテスト
  *
  * 検証観点:
- * - mergePreferences: note > user > システム既定 の項目別マージ (正常系/境界値)
+ * - mergePreferences: note/strategy > user > システム既定 の項目別マージ (正常系/境界値)
  * - effectiveThreshold: しきい値と一致レベル帯下限の大きい方 (§6.4)
+ * - maxPerDay: null はシステム既定、note/strategy/user の優先順位どおりに解決
  * - resolveForNotes: 1 クエリでの一括解決とノート別マッピング
  * - upsertPreference: note スコープの所有チェック (異常系)
  */
@@ -13,16 +14,18 @@ import {
   NotificationPreferenceService,
   mergePreferences,
   systemDefaultPreference,
+  DEFAULT_MAX_NOTIFICATIONS_PER_DAY,
 } from '../../services/notification/notificationPreferenceService';
 
 /** テスト用の設定行スタブ (マージに使うフィールドのみ意味を持つ) */
 function makePref(
-  over: Partial<Pick<NotificationPreference, 'threshold' | 'minMatchLevel' | 'cooldownMinutes'>>
-): Pick<NotificationPreference, 'threshold' | 'minMatchLevel' | 'cooldownMinutes'> {
+  over: Partial<Pick<NotificationPreference, 'threshold' | 'minMatchLevel' | 'cooldownMinutes' | 'maxPerDay'>>
+): Pick<NotificationPreference, 'threshold' | 'minMatchLevel' | 'cooldownMinutes' | 'maxPerDay'> {
   return {
     threshold: null,
     minMatchLevel: null,
     cooldownMinutes: null,
+    maxPerDay: null,
     ...over,
   };
 }
@@ -34,16 +37,41 @@ describe('mergePreferences (Phase β-2a)', () => {
     // 既定: threshold 0.75 / weak 帯下限 0.7 → 有効しきい値 0.75
     expect(merged.effectiveThreshold).toBe(0.75);
     expect(merged.minMatchLevel).toBe('weak');
+    expect(merged.maxPerDay).toBe(DEFAULT_MAX_NOTIFICATIONS_PER_DAY);
+    expect(merged.maxPerDaySource).toBe('system');
   });
 
   it('note スコープが user スコープより優先される (項目別)', () => {
     const merged = mergePreferences(
-      makePref({ threshold: 0.85 }),
-      makePref({ threshold: 0.6, cooldownMinutes: 120 })
+      makePref({ threshold: 0.85, maxPerDay: 8 }),
+      makePref({ threshold: 0.6, cooldownMinutes: 120, maxPerDay: 30 })
     );
     // threshold は note 側、cooldown は note に無いので user 側が効く (部分上書き)
     expect(merged.threshold).toBe(0.85);
     expect(merged.cooldownMs).toBe(120 * 60 * 1000);
+    expect(merged.maxPerDay).toBe(8);
+    expect(merged.maxPerDaySource).toBe('note');
+  });
+
+  it('note 側の maxPerDay が null なら user スコープの上限を使う', () => {
+    const merged = mergePreferences(
+      makePref({ threshold: 0.85, maxPerDay: null }),
+      makePref({ maxPerDay: 12 })
+    );
+
+    expect(merged.maxPerDay).toBe(12);
+    expect(merged.maxPerDaySource).toBe('user');
+  });
+
+  it('strategy スコープの maxPerDay は user スコープより優先される', () => {
+    const merged = mergePreferences(
+      makePref({ maxPerDay: 6 }),
+      makePref({ maxPerDay: 30 }),
+      'strategy'
+    );
+
+    expect(merged.maxPerDay).toBe(6);
+    expect(merged.maxPerDaySource).toBe('strategy');
   });
 
   it('minMatchLevel の帯下限がしきい値を持ち上げる (§6.4 一致レベル)', () => {

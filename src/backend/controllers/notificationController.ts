@@ -279,6 +279,7 @@ export class NotificationController {
         const triggerResult = await this.triggerService.evaluateWithPersistence({
           matchScore: match.matchScore,
           historicalNoteId: match.historicalNoteId,
+          userId: match.userId ?? req.user!.userId,
           marketSnapshot: match.marketSnapshot,
           marketSnapshotId: match.marketSnapshotId,
           symbol: match.symbol,
