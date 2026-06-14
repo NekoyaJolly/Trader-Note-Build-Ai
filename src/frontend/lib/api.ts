@@ -2259,6 +2259,11 @@ export interface CoverageCheckResult {
   missingBars: number;
   expectedBars: number;
   actualBars: number;
+  presetExists: boolean;
+  missingStart: string | null;
+  missingEnd: string | null;
+  severity: "ok" | "warning" | "critical";
+  message: string;
 }
 
 /**

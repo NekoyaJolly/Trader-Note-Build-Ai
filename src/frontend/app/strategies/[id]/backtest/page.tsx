@@ -92,6 +92,40 @@ function MetricCard({
   );
 }
 
+function formatCoverageDate(value: string | null): string {
+  if (!value) return "不明";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "不明";
+  return date.toLocaleString("ja-JP", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function coverageSeverityClass(severity: CoverageCheckResult["severity"]): string {
+  switch (severity) {
+    case "ok":
+      return "border-green-500/40 bg-green-500/10 text-green-300";
+    case "warning":
+      return "border-yellow-500/40 bg-yellow-500/10 text-yellow-300";
+    case "critical":
+      return "border-red-500/40 bg-red-500/10 text-red-300";
+  }
+}
+
+function coverageSeverityLabel(severity: CoverageCheckResult["severity"]): string {
+  switch (severity) {
+    case "ok":
+      return "十分";
+    case "warning":
+      return "一部不足";
+    case "critical":
+      return "要取得";
+  }
+}
+
 /** トレード結果テーブル */
 function TradeResultTable({ trades }: { trades: BacktestTradeEvent[] }) {
   if (!trades || trades.length === 0) {
@@ -600,13 +634,26 @@ export default function StrategyBacktestPage() {
             </h3>
             <div className="text-gray-300 mb-4 space-y-2">
               <p>
-                選択した期間のヒストリカルデータが不足しています（カバレッジ率95%未満）。
+                {coverageCheckResult.message}
               </p>
               <div className="bg-slate-700 rounded p-3 text-sm">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <span className={`rounded border px-2 py-0.5 text-xs font-semibold ${coverageSeverityClass(coverageCheckResult.severity)}`}>
+                    {coverageSeverityLabel(coverageCheckResult.severity)}
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    プリセット: {coverageCheckResult.presetExists ? "登録済み" : "未登録"}
+                  </span>
+                </div>
                 <p>カバレッジ率: <span className="font-bold text-yellow-400">{(coverageCheckResult.coverageRatio * 100).toFixed(1)}%</span></p>
                 <p>期待バー数: {coverageCheckResult.expectedBars}</p>
                 <p>実際のバー数: {coverageCheckResult.actualBars}</p>
                 <p>不足バー数: <span className="text-red-400">{coverageCheckResult.missingBars}</span></p>
+                <p>
+                  不足期間: {formatCoverageDate(coverageCheckResult.missingStart)}
+                  {" 〜 "}
+                  {formatCoverageDate(coverageCheckResult.missingEnd)}
+                </p>
               </div>
               {fetchingOhlcv ? (
                 <div className="bg-cyan-600/20 border border-cyan-500/50 rounded p-3 text-sm">

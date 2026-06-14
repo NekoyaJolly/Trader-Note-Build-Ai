@@ -27,6 +27,35 @@ const CheckCoverageBodySchema = z.object({
   endDate: z.string().min(1, 'endDate は必須です'),
 });
 
+type CoverageSeverity = 'ok' | 'warning' | 'critical';
+
+function resolveCoverageSeverity(input: {
+  readonly hasCoverage: boolean;
+  readonly presetExists: boolean;
+  readonly coverageRatio: number;
+}): CoverageSeverity {
+  if (input.hasCoverage) return 'ok';
+  if (!input.presetExists || input.coverageRatio < 0.8) return 'critical';
+  return 'warning';
+}
+
+function buildCoverageMessage(input: {
+  readonly hasCoverage: boolean;
+  readonly presetExists: boolean;
+  readonly coverageRatio: number;
+}): string {
+  if (input.hasCoverage) {
+    return '要求期間をカバーする市場データがあります';
+  }
+  if (!input.presetExists) {
+    return '対象シンボル/時間足のデータプリセットが未登録です';
+  }
+  if (input.coverageRatio === 0) {
+    return '要求期間内の市場データが見つかりません';
+  }
+  return '要求期間の一部に市場データの不足があります';
+}
+
 /**
  * バックテストコントローラークラス (coverage check 専用)
  */
@@ -75,9 +104,14 @@ export class BacktestController {
         data: {
           hasEnoughData: coverage.hasCoverage,
           coverageRatio: coverage.coverageRatio,
-          missingBars: coverage.expectedCount - coverage.dataCount,
+          missingBars: Math.max(0, coverage.expectedCount - coverage.dataCount),
           expectedBars: coverage.expectedCount,
           actualBars: coverage.dataCount,
+          presetExists: coverage.presetExists,
+          missingStart: coverage.missingStart?.toISOString() ?? null,
+          missingEnd: coverage.missingEnd?.toISOString() ?? null,
+          severity: resolveCoverageSeverity(coverage),
+          message: buildCoverageMessage(coverage),
         },
       });
     } catch (error) {
