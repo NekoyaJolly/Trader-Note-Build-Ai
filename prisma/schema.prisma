@@ -30,6 +30,11 @@ model User {
   updatedAt               DateTime                 @updatedAt @db.Timestamptz(6)
   ctraderTokens           CTraderToken[]           @relation("UserCTraderTokens")
   pushSubscriptions       PushSubscription[]       @relation("UserPushSubscriptions")
+  trades                  Trade[]                  @relation("UserTrades")
+  tradeNotes              TradeNote[]              @relation("UserTradeNotes")
+  matchResults            MatchResult[]            @relation("UserMatchResults")
+  notifications           Notification[]           @relation("UserNotifications")
+  strategies              Strategy[]               @relation("UserStrategies")
   watchlists              Watchlist[]
   userSettings            UserSettings?            @relation("UserSettings")
   indicatorProfiles       IndicatorProfile[]       @relation("UserIndicatorProfiles")
@@ -143,13 +148,12 @@ model Trade {
   quantity  Decimal    @db.Decimal(18, 8)
   fee       Decimal?   @db.Decimal(18, 8)
   exchange  String?
-  /// 所有ユーザー（マルチユーザー化 Phase α、completion-roadmap §7 決定1）。
-  /// 既存行は migration で最古ユーザーへバックフィル済み。nullable は段階移行のため
-  /// （クエリのユーザー分離完了後の必須化は Phase α-4 で扱う）。FK は分離完了まで保留。
-  userId    String?    @db.Uuid
+  /// 所有ユーザー（Phase 6 で必須化）。過去の NULL 行は migration でバックフィル済み。
+  userId    String     @db.Uuid
   createdAt DateTime   @default(now()) @db.Timestamptz(6)
   updatedAt DateTime   @updatedAt @db.Timestamptz(6)
   note      TradeNote?
+  user      User       @relation("UserTrades", fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([symbol, timestamp], map: "idx_trade_symbol_timestamp")
   @@index([userId], map: "idx_trade_user")
@@ -184,9 +188,8 @@ model TradeNote {
   /// グローバル設定とは別に、このノート独自の評価ロジックを定義可能
   indicatorConfig Json?
 
-  /// 所有ユーザー（マルチユーザー化 Phase α）。既存行は migration でバックフィル済み。
-  /// nullable は段階移行のため（必須化・FK 付与は全クエリ分離後の Phase α-4 で検討）。
-  userId String? @db.Uuid
+  /// 所有ユーザー（Phase 6 で必須化）。過去の NULL 行は migration でバックフィル済み。
+  userId String @db.Uuid
 
   // === フェーズ8: 複数ノート運用UX ===
   /// ノート優先度（1-10、高いほど優先。同時ヒット時のソートに使用）
@@ -204,6 +207,7 @@ model TradeNote {
   trade                   Trade                    @relation(fields: [tradeId], references: [id])
   coreNote                Note?
   notificationPreferences NotificationPreference[]
+  user                    User                     @relation("UserTradeNotes", fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([symbol], map: "idx_tradenote_symbol")
   @@index([status], map: "idx_tradenote_status")
@@ -256,12 +260,13 @@ model MatchResult {
   reasons              Json
   /// 所有ユーザー（マルチユーザー化 Phase α）。note 経由でも辿れるが、
   /// 一覧クエリのユーザー分離を JOIN なしで行うため非正規化して持つ。
-  userId               String?               @db.Uuid
+  userId               String                @db.Uuid
   marketSnapshot       MarketSnapshot        @relation(fields: [marketSnapshotId], references: [id])
   note                 TradeNote             @relation(fields: [noteId], references: [id])
   notifications        Notification[]
   notificationSkipLogs NotificationSkipLog[] @relation("NotificationSkipLogMatch")
   orderPresets         OrderPreset[]
+  user                 User                  @relation("UserMatchResults", fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@unique([noteId, marketSnapshotId], map: "uq_match_note_snapshot")
   @@index([symbol, decidedAt], map: "idx_match_symbol_decided")
@@ -281,8 +286,9 @@ model Notification {
   readAt        DateTime?          @db.Timestamptz(6)
   createdAt     DateTime           @default(now()) @db.Timestamptz(6)
   /// 宛先ユーザー（per-user 通知のための帰属。マルチユーザー化 Phase α）
-  userId        String?            @db.Uuid
+  userId        String             @db.Uuid
   matchResult   MatchResult?       @relation(fields: [matchResultId], references: [id])
+  user          User               @relation("UserNotifications", fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([status, sentAt], map: "idx_notification_status_sent")
   @@index([userId, status], map: "idx_notification_user_status")
@@ -652,8 +658,8 @@ model Strategy {
   currentVersionId        String?                  @db.Uuid
   /// タグ（検索・分類用）
   tags                    String[]                 @default([])
-  /// 所有ユーザー（マルチユーザー化 Phase α）。既存行は migration でバックフィル済み。
-  userId                  String?                  @db.Uuid
+  /// 所有ユーザー（Phase 6 で必須化）。過去の NULL 行は migration でバックフィル済み。
+  userId                  String                   @db.Uuid
   /// 作成日時
   createdAt               DateTime                 @default(now()) @db.Timestamptz(6)
   /// 更新日時
@@ -665,6 +671,7 @@ model Strategy {
   versions                StrategyVersion[]
   walkForwardRuns         WalkForwardRun[]
   notificationPreferences NotificationPreference[]
+  user                    User                     @relation("UserStrategies", fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([symbol], map: "idx_strategy_symbol")
   @@index([status], map: "idx_strategy_status")
@@ -1356,9 +1363,8 @@ enum NotificationSkipReason {
 ///   (運用統一は Phase ε のノート統一仕上げで扱う)
 model Note {
   id                    String     @id @default(uuid()) @db.Uuid
-  /// 所有ユーザー。既存データは migration で最古ユーザーへバックフィル済み。
-  /// nullable は段階移行のため（新規作成経路では必ず設定する）
-  userId                String?    @db.Uuid
+  /// 所有ユーザー（Phase 6 で必須化）。過去の NULL 行は migration でバックフィル済み。
+  userId                String     @db.Uuid
   /// ノートの出自（side_a_human = 人間の実トレード / side_b_ai = AI の仮想トレード）
   source                NoteSource
   /// 銘柄シンボル（例: USDJPY）
@@ -1386,7 +1392,7 @@ model Note {
   /// 更新日時
   updatedAt             DateTime   @updatedAt @db.Timestamptz(6)
 
-  user        User?        @relation("UserNotes", fields: [userId], references: [id])
+  user        User         @relation("UserNotes", fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   tradeNote   TradeNote?   @relation(fields: [tradeNoteId], references: [id])
   aiTradeNote AITradeNote? @relation(fields: [aiTradeNoteId], references: [id])
 

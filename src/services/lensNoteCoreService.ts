@@ -41,7 +41,7 @@ import type { EffectiveNotificationPreference } from './notification/notificatio
 /** Side-A ノート作成時の Note コア生成入力 */
 export interface CreateSideANoteCoreInput {
   readonly tradeNoteId: string;
-  readonly userId: string | null;
+  readonly userId: string;
   readonly symbol: string;
   readonly side: TradeSide;
   readonly timeframe: string;

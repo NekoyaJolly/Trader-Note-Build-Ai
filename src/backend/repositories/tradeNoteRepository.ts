@@ -38,8 +38,8 @@ export interface CreateTradeNoteInput {
   marketContext?: Prisma.InputJsonValue;  // JSON: trend, calculatedIndicators 等
   userNotes?: string;
   tags?: string[];
-  /** 所有ユーザー (Phase α-4 マルチユーザー分離)。HTTP 経路では必ず設定する */
-  userId?: string;
+  /** 所有ユーザー (Phase 6 以降は DB 永続化時に必須) */
+  userId: string;
 }
 
 /**

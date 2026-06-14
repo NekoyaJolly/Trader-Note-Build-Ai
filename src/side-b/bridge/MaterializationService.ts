@@ -4,8 +4,8 @@
  * 旧責務 (`materializeForValidation` = 仮説 → Side-A TradeNote 変換 + 旧 BT 入力組立) は
  * 段階 1 で screening が analysis-engine 経由になり、段階 3b でこのメソッドは完全削除。
  *
- * 残る責務: VirtualTrade 完了時に AITradeNote と並行して **TradeNote** を作成する経路
- * (`materializeFromVirtualTrade` のみ)。aiNoteService から呼ばれる。
+ * 残る責務: 明示 userId を受け取った VirtualTrade を **TradeNote** として昇格する経路
+ * (`materializeFromVirtualTrade` のみ)。Phase 6 以降は自動同時生成では呼ばない。
  *
  * @see docs/design/critical_4_bt_unification.md §3 段階 3
  */
@@ -21,6 +21,8 @@ import { prisma } from '../../backend/db/client';
  * VirtualTrade 完了時に TradeNote として記録するための入力
  */
 export interface MaterializeFromVirtualTradeInput {
+    /** Side-A Trade/TradeNote の所有ユーザー。Phase 6 以降は必須。 */
+    userId: string;
     symbol: string;
     side: 'long' | 'short';
     entryPrice: number;
@@ -36,7 +38,7 @@ export interface MaterializeFromVirtualTradeInput {
 
 export class MaterializationService {
     /**
-     * VirtualTrade 完了時に AITradeNote と並行して TradeNote を作成する。
+     * VirtualTrade を Side-A TradeNote として明示的に昇格する。
      *
      * **best-effort**: 失敗しても呼び出し側の AITradeNote 作成は継続させる。
      * 例外を投げるのは呼び出し側の判断に任せる。
@@ -56,6 +58,7 @@ export class MaterializationService {
             timeframe: input.timeframe,
             featureVector,
             tradedAt: input.enteredAt,
+            userId: input.userId,
         });
 
         return tradeNoteId;
@@ -73,6 +76,7 @@ export class MaterializationService {
         indicatorConfig?: Prisma.InputJsonValue | null;
         hypothesisId?: string;
         tradedAt?: Date;
+        userId: string;
     }): Promise<{ tradeId: string; tradeNoteId: string }> {
         return await prisma.$transaction(async (tx) => {
             const trade = await tx.trade.create({
@@ -82,6 +86,7 @@ export class MaterializationService {
                     side: args.side,
                     price: args.entryPrice,
                     quantity: 1, // 検証用は数量1で固定
+                    userId: args.userId,
                 },
             });
 
@@ -99,6 +104,7 @@ export class MaterializationService {
                             ? undefined
                             : args.indicatorConfig,
                     status: 'archived', // Side-A の UI に表示しない (汚染防止)
+                    userId: args.userId,
                     tags: args.hypothesisId
                         ? ['edge_hypothesis_temp', `hyp:${args.hypothesisId}`]
                         : ['side_b_materialized'],

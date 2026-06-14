@@ -116,6 +116,7 @@ export class TradeNoteGeneratorService {
         indicators: indicatorsPayload,
         featureVector: featureVector.values,
         timeframe: primaryTimeframe,
+        userId: trade.userId,
       },
       {
         summary: aiResult.summary,

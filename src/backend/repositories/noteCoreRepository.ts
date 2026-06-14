@@ -19,7 +19,7 @@ import type { NoteLensSnapshot } from '../../shared/similarity/lensSnapshotTypes
 /** Side-A TradeNote 由来の Note コア行の作成・更新入力 */
 export interface UpsertSideANoteCoreInput {
   readonly tradeNoteId: string;
-  readonly userId: string | null;
+  readonly userId: string;
   readonly symbol: string;
   readonly side: TradeSide;
   readonly timeframe: string;

@@ -36,7 +36,7 @@ Side-A は「人間トレーダーのノーコード相棒」。完成形は **2
 | バックテスト | ✅ WF/モンテカルロ実装 | ✅ 動く | 中〜高 |
 | 発注支援 | ✅ 参考表示 | ⚠️ 参考のみ → **完成形では実発注追加(確定)** | 要実装(安全ガード必須) |
 | 認証(cTrader OAuth) | ✅ | ✅ 本番稼働 | 高 |
-| マルチユーザー | ⚠️ User表は有 | ❌ Trade/TradeNote に userId なし → **完成形では複数ユーザー化(確定)** | 要実装 |
+| マルチユーザー | ✅ User表 + Side-A 中核テーブル userId | ✅ HTTP/cron のユーザー分離済み。Phase 6 で Trade/TradeNote/MatchResult/Notification/Strategy/Note の userId 必須化 + FK 付与 | 高 |
 | 市場データ供給 | — | ⚠️ EODHD+fallback+cache、失敗時のユーザー通知なし | 中 |
 | 観測性(MatchingPipelineRun) | ✅(P1) | ✅ 動く | 高 |
 
@@ -89,7 +89,7 @@ Side-A は「人間トレーダーのノーコード相棒」。完成形は **2
 | **Web Push** | VAPID/購読/broadcast 実装。本番配信可 | 購読状態 UI(購読/未購読/拒否)、マルチユーザー時の per-user 送信 | S〜M |
 | **市場データ** | EODHD主+fallback+OHLCVキャッシュ | データ取得失敗時のユーザー通知/フォールバック表示、カバレッジ可視化、ノート生成の堅牢化(取得失敗で生成スキップを減らす) | M |
 | **発注支援(実発注)** 〔確定: 追加〕 | 参考プリセットのみ | cTrader Open API で**実発注**を追加。**安全ガード必須**(都度の明示確認なしに発注しない / サイレント自動売買禁止 / 数量・価格の最終確認 UI / 失敗時の明確な状態)。信頼度の動的算出 | L(高リスク) |
-| **マルチユーザー** 〔確定: 化する〕 | OAuth稼働。User表有だが Trade/TradeNote に userId 無し=単一前提 | Trade/TradeNote(及び派生: MatchResult/Notification/Strategy 等)に userId 追加 migration + 全 query のユーザー分離 + per-user 通知/Push。**特徴量基盤に触れる Phase α と同時期に migration するのが効率的(二重移行回避)** | L |
+| **マルチユーザー** 〔確定: 化する〕 | OAuth稼働。User表 + Side-A 中核テーブル userId | Trade/TradeNote(及び派生: MatchResult/Notification/Strategy/Note 等)の userId 必須化 + FK 付与、全 query のユーザー分離、per-user 通知/Push は実装済み。残: Web Push 購読状態 UI | L |
 | **観測性** | MatchingPipelineRun(P1)で run 追跡可 | 柱2ライブ評価・リアルタイムも同様に run/alert 追跡。既知の Side-B UUID バグ(PR #378)解消 | S |
 
 ---
@@ -116,7 +116,7 @@ Side-A は「人間トレーダーのノーコード相棒」。完成形は **2
 - [x] **レンズ類似度基盤の実装**（NOTE_SIMILARITY_FOUNDATION.md を確定 → 実装）〔L〕 ← 柱1と柱2の合流土台 — 2026-06-10 実装 (PR α-1 基盤コア / PR α-2 Note コア+生成配線+シャドー評価。切替 §9-3 と旧経路廃止は α-3 で)
 - [x] インジケーターレンズ新設 + IndicatorProfile 接続〔M〕 — 2026-06-10 実装 (PR α-1/α-2)。**パラメータ編集 UI は α-4b (PR #387、2026-06-11) で実装済み** (ProfileEditModal にインジケーター別パラメータ入力、定義は `lib/indicatorParamFields.ts` に集約)
 - [ ] 旧特徴量経路の廃止 + 既存ノート LensSnapshot バックフィル〔M〕（バックフィルスクリプトは α-2 で実装済み、実行とレガシー廃止は α-3）— **α-3 第1弾 2026-06-11 実装**: マッチングを `MATCHING_ENGINE=lens` でレンズ類似度に切替 (score=レンズ類似度、legacy はロールバック用に 1 リリース併存)。残: バックフィル本番実行 + 旧 12 次元経路の物理削除 (第2弾、lens 安定確認後)
-- [x] **マルチユーザー化**: Trade/TradeNote/派生に userId 追加 migration + 全 query のユーザー分離〔L〕— migration + バックフィルは α-2、**全 query のユーザー分離は α-4a (PR #386、2026-06-11) で実装済み**: HTTP 経路は `req.user.userId` で分離 + mutation 所有権チェック、cron はソースエンティティ (note/strategy) の userId を MatchResult/Notification へ伝播、cron 生成 NULL 行の再バックフィル migration 同梱。残: per-user Web Push (Phase β)、userId 必須化 + FK 付与 (分離安定確認後)
+- [x] **マルチユーザー化**: Trade/TradeNote/派生に userId 追加 migration + 全 query のユーザー分離〔L〕— migration + バックフィルは α-2、**全 query のユーザー分離は α-4a (PR #386、2026-06-11) で実装済み**: HTTP 経路は `req.user.userId` で分離 + mutation 所有権チェック、cron はソースエンティティ (note/strategy) の userId を MatchResult/Notification へ伝播。**Phase 6 (2026-06-15) で Trade/TradeNote/MatchResult/Notification/Strategy/Note の userId 必須化 + FK 付与を実装**し、新規作成経路も userId 必須に統一。
 
 ### Phase β — 柱1 を“似たら通知”として完成 + 通知粒度
 - [ ] 類似度→通知が意味を持って出る（柱1の完成判定）+ per-user 通知/Push — **per-user Web Push は β-1 (PR #388、2026-06-11) で実装済み** (MatchResult/Strategy の userId から sendToUser、レガシー NULL 行は broadcast フォールバック)。「意味のある通知が出る」判定は lens エンジン (α-3) の本番運用観察で確認する

@@ -40,10 +40,10 @@ export interface CreateNotificationInput {
   message: string;
   status?: NotificationStatus;
   /**
-   * 通知の宛先ユーザー (Phase α-4 マルチユーザー分離)。
+   * 通知の宛先ユーザー (Phase 6 以降は必須)。
    * 由来エンティティ (TradeNote / Strategy) の所有ユーザーを伝播させる。
    */
-  userId?: string | null;
+  userId: string;
 }
 
 /**
@@ -104,7 +104,7 @@ export class DbNotificationRepository {
         title: input.title,
         message: input.message,
         status: input.status || 'unread',
-        userId: input.userId ?? undefined,
+        userId: input.userId,
       },
     });
   }

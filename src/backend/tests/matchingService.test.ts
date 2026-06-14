@@ -582,7 +582,7 @@ describe('MatchingService lens エンジン (Phase α-3)', () => {
     createdAt: new Date(),
     updatedAt: new Date(),
     indicatorConfig: null,
-    userId: null,
+    userId: 'user_1',
     priority: 5,
     enabled: true,
     pausedUntil: null,
@@ -769,8 +769,8 @@ describe('MatchingService lens エンジン (Phase α-3)', () => {
     );
   });
 
-  it('userId 未設定ノート (レガシー行) は MatchResult.userId=null で永続化される (Phase α-4 境界値)', async () => {
-    const note = createPrismaNote({ userId: null });
+  it('Phase 6 以降は必須 userId を MatchResult へ伝播する', async () => {
+    const note = createPrismaNote({ userId: 'user-required-uuid' });
     const { service, mocks } = buildLensService(note, {
       activeNotes: 1,
       notesWithSnapshot: 1,
@@ -782,7 +782,7 @@ describe('MatchingService lens エンジン (Phase α-3)', () => {
     await service.checkForMatches();
 
     expect(mocks.upsertByNoteAndSnapshot).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: null })
+      expect.objectContaining({ userId: 'user-required-uuid' })
     );
   });
 

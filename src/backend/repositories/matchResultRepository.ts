@@ -66,11 +66,10 @@ export interface MatchResultUpsertInput {
   reasons: string[] | MatchReasonsData; // 理由（旧形式: string[]、新形式: MatchReasonsData）
   evaluatedAt: Date;      // 判定実行時刻（UTC 前提）
   /**
-   * 所有ユーザー (Phase α-4 マルチユーザー分離)。
-   * 由来ノート (TradeNote) の userId を伝播させる。Side-B 由来等の
-   * ユーザー非帰属マッチは null のまま (ユーザー別 UI には出さない)。
+   * 所有ユーザー (Phase 6 以降は必須)。
+   * 由来ノート (TradeNote) の userId を伝播させる。
    */
-  userId?: string | null;
+  userId: string;
 }
 
 export type MatchResultWithRelations = MatchResult & {
@@ -114,7 +113,7 @@ export class MatchResultRepository {
         reasons: reasonsData,
         evaluatedAt: input.evaluatedAt,
         decidedAt: input.evaluatedAt,
-        userId: input.userId ?? undefined,
+        userId: input.userId,
       },
       update: {
         score: input.score,
@@ -124,8 +123,8 @@ export class MatchResultRepository {
         reasons: reasonsData,
         evaluatedAt: input.evaluatedAt,
         decidedAt: input.evaluatedAt,
-        // 再評価時も所有ユーザーを同期 (α-2 以前に NULL で作られた行の自己修復を兼ねる)
-        ...(input.userId ? { userId: input.userId } : {}),
+        // 再評価時も由来 TradeNote の所有ユーザーと同期する
+        userId: input.userId,
       },
     });
   }

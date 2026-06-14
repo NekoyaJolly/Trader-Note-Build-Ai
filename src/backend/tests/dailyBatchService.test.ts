@@ -12,6 +12,7 @@ class MockTradeRepository {
 
   constructor() {
     const base: Partial<Trade> = {
+      userId: 'user_1',
       symbol: 'BTCUSDT',
       side: 'buy',
       price: 42000 as any,
@@ -99,7 +100,7 @@ describe('DailyBatchService', () => {
 
   test('正常系: 全ステップが成功し、サマリが返る', async () => {
     const service = buildService();
-    const report = await service.run({ csvFilePath: 'dummy.csv' });
+    const report = await service.run({ csvFilePath: 'dummy.csv', userId: 'user_1' });
 
     expect(report.importSummary?.tradesImported).toBe(2);
     expect(report.noteSummary.generated).toBe(2);
@@ -107,6 +108,26 @@ describe('DailyBatchService', () => {
     expect(report.matchSummary.evaluated).toBe(1);
     expect(report.notificationSummary.sent).toBe(1);
     expect(report.errors).toHaveLength(0);
+  });
+
+  test('異常系: CSV 取り込み時に userId が無い場合は import を行わずエラーに記録する', async () => {
+    const importService = new MockTradeImportService();
+    const service = new DailyBatchService(
+      importService as any,
+      new MockTradeRepository() as any,
+      new MockTradeNoteGeneratorService() as any,
+      new MockMarketIngestService() as any,
+      new MockMatchEvaluationService() as any,
+      new MockNotificationTriggerService() as any,
+      new MockMatchResultRepository() as any,
+      new MockMarketDataService() as any,
+    );
+
+    const report = await service.run({ csvFilePath: 'dummy.csv' });
+
+    expect(importService.importFromCSV).not.toHaveBeenCalled();
+    expect(report.importSummary).toBeUndefined();
+    expect(report.errors).toContain('CSV 取り込み失敗: CSV 取り込みには userId が必要です');
   });
 
   test('部分失敗: ノート生成が失敗しても処理を継続する', async () => {

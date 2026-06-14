@@ -64,24 +64,15 @@ export class DbNotificationRepositoryAdapter implements NotificationRepository {
 
   /**
    * 単一の通知を保存
-   * 注意: DB版は MatchResult 紐付けが前提のため、matchResult がない場合は警告
+   * 注意: Phase 6 以降の DB Notification は userId 必須。
+   * 旧 domain Notification 型には宛先 userId が無いため、DB 保存は trigger 経路に集約する。
    */
-  async save(notification: Notification): Promise<void> {
-    // matchResult から matchResultId を取得
-    const matchResultId = notification.matchResult?.noteId;
-    
-    if (!matchResultId) {
-      // MatchResult なしの通知はDBには保存できない（スキップ）
-      console.warn('[DbNotificationRepositoryAdapter] matchResult がないため DB 保存をスキップ:', notification.id);
-      return;
-    }
-
-    await this.dbRepo.create({
-      matchResultId,
-      title: notification.title,
-      message: notification.message,
-      status: notification.read ? 'read' : 'unread',
-    });
+  save(notification: Notification): Promise<void> {
+    const reason = notification.matchResult
+      ? '旧 domain Notification 型では宛先 userId を解決できないため'
+      : 'matchResult がなく宛先 userId も解決できないため';
+    console.warn(`[DbNotificationRepositoryAdapter] ${reason} DB 保存をスキップ:`, notification.id);
+    return Promise.resolve();
   }
 
   /**

@@ -445,6 +445,7 @@ export class MatchEvaluationService {
       priceRangeMatched: evaluation.priceRangeMatched,
       reasons: evaluation.reasons,
       evaluatedAt,
+      userId: note.userId,
     });
   }
 

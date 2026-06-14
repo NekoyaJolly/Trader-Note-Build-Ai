@@ -40,7 +40,6 @@ import {
 import * as aiNoteRepository from '../repositories/aiNoteRepository';
 import { serializeLensSnapshot, type LensFeatureSnapshot } from '../lenses';
 import { edgeLedger } from '../ledger';
-import { materializationService } from '../bridge';
 import { modelFor } from '../../config';
 import type { Prisma } from '@prisma/client';
 import { ReflectionOutputSchema } from '../../schemas/api/sideB';
@@ -193,23 +192,8 @@ export async function generateNoteFromTrade(
   // ノートを保存
   const note = await aiNoteRepository.createAITradeNote(input);
 
-  // Phase 4b ブリッジ層: Side-A TradeNote を同時生成（best-effort）
-  //   失敗時は AITradeNote 作成は成功扱いのまま継続し、warning ログのみ残す。
-  if (trade.enteredAt) {
-    const entryPrice = trade.actualEntry ?? trade.plannedEntry;
-    try {
-      const tradeNoteId = await materializationService.materializeFromVirtualTrade({
-        symbol: trade.symbol,
-        side: trade.direction,
-        entryPrice,
-        enteredAt: trade.enteredAt,
-      });
-      await aiNoteRepository.updateAITradeNoteTradeNoteId(note.id, tradeNoteId);
-      note.tradeNoteId = tradeNoteId;
-    } catch (err) {
-      console.warn('[aiNoteService] TradeNote 同時生成失敗 (継続):', err);
-    }
-  }
+  // Phase 6: Side-A Trade/TradeNote は userId 必須。AITradeNote 経路には所有ユーザーが無いため、
+  // 無帰属の Side-A 行を作らない。将来の双方向昇格では明示ユーザーを渡して materialize する。
 
   // Phase 4a: 成立仮説に対して観測結果を反映（failure は warnings に留めてノート作成は成功扱い）
   for (const hypothesisId of matchedHypothesisIds) {
