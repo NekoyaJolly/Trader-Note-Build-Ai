@@ -882,6 +882,10 @@ export class TradeNoteService {
    * @returns DBに保存されたノートのID（既存の場合はそのID、新規の場合はDB生成のID）
    */
   private async saveNoteToDb(note: TradeNote, userId?: string): Promise<string> {
+    if (!userId) {
+      throw new Error('DB への TradeNote 保存には userId が必要です');
+    }
+
     // 既存のノートを確認 (userId 指定時は所有ノートのみが更新対象)
     const existing = await this.repository.findByTradeId(note.tradeId, userId);
 

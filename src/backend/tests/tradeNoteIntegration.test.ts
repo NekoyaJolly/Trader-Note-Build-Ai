@@ -18,6 +18,7 @@ describe('CSV取込 → ノート生成 統合テスト', () => {
   // Phase 8: テストではFSモードを使用（統合テストの互換性維持）
   const noteService = new TradeNoteService('fs');
   const _tradeRepo = new TradeRepository();
+  const testUserId = '00000000-0000-0000-0000-000000000001';
   
   // テスト用の一時 CSV ファイルパス
   const tmpCsvPath = path.join(process.cwd(), 'data', 'trades', 'test_integration_temp.csv');
@@ -45,7 +46,7 @@ describe('CSV取込 → ノート生成 統合テスト', () => {
 
   describe('importFromCSV', () => {
     it('CSV を取り込み、トレードが DB に保存される', async () => {
-      const result = await importService.importFromCSV(tmpCsvPath);
+      const result = await importService.importFromCSV(tmpCsvPath, testUserId);
       
       expect(result.tradesImported).toBe(2);
       expect(result.insertedIds).toHaveLength(2);
@@ -60,7 +61,7 @@ describe('CSV取込 → ノート生成 統合テスト', () => {
       const csvContent = 'timestamp,symbol,side,price,quantity,fee,exchange\n';
       fs.writeFileSync(emptyCsvPath, csvContent);
 
-      const result = await importService.importFromCSV(emptyCsvPath);
+      const result = await importService.importFromCSV(emptyCsvPath, testUserId);
       
       expect(result.tradesImported).toBe(0);
       expect(result.insertedIds).toHaveLength(0);

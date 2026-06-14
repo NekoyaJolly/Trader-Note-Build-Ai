@@ -524,7 +524,7 @@ export function createNoteEvaluatorFromFSNote(note: FSTradeNote): NoteEvaluator 
     createdAt: note.createdAt,
     updatedAt: note.createdAt, // FS型にはないので createdAt で代用
     indicatorConfig: null, // FS型ノートは従来のレガシーモード
-    userId: null, // FS型ノートにはユーザー帰属がない (マルチユーザー化 Phase α 以前の資産)
+    userId: 'legacy-fs-user', // DB保存しない擬似ノート用。Phase 6 の必須型を満たすためのラベル
     // フェーズ8: 複数ノート運用UX
     priority: 5, // デフォルト優先度
     enabled: true, // デフォルト有効

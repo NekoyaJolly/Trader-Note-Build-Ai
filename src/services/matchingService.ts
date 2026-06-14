@@ -970,24 +970,8 @@ export class MatchingService {
               const evaluatedAt = new Date();
               const threshold = evaluator.getThresholds().weak;
 
-              // MatchResult を DB に永続化
-              if (marketSnapshotId) {
-                try {
-                  await this.matchResultRepository.upsertByNoteAndSnapshot({
-                    noteId: `sideb:${evaluator.noteId}`,
-                    marketSnapshotId,
-                    symbol,
-                    score: adjustedScore,
-                    threshold,
-                    trendMatched: true,  // Side-B は条件ベクトルに含む
-                    priceRangeMatched: false,
-                    reasons: this.generateSideBMatchReasons(evalResult, data, adjustedScore),
-                    evaluatedAt,
-                  });
-                } catch (persistError) {
-                  console.warn('[MatchingService] Side-B MatchResult 永続化スキップ:', persistError);
-                }
-              }
+              // Side-B 仮想ノートは TradeNote FK を持たないため、MatchResult には永続化しない。
+              // Phase 6 以降は userId 必須 + TradeNote FK が前提なので、疑似 noteId の保存試行を避ける。
 
               matches.push({
                 id: matchId,

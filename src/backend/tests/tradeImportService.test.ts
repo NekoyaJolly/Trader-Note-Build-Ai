@@ -12,6 +12,7 @@ import { cleanupTradeImportRelatedTestData } from './helpers/testDbCleanup';
 describe('TradeImportService', () => {
   const service = new TradeImportService();
   const _repo = new TradeRepository();
+  const testUserId = '00000000-0000-0000-0000-000000000001';
 
   // 各テスト前にDBをクリーンアップ（重複チェックに影響されないようにする）
   beforeEach(async () => {
@@ -21,7 +22,7 @@ describe('TradeImportService', () => {
   test('CSV 正常系: sample_trades.csv を取り込み、5件保存される', async () => {
     const file = path.join(process.cwd(), 'data', 'trades', 'sample_trades.csv');
 
-    const result = await service.importFromCSV(file);
+    const result = await service.importFromCSV(file, testUserId);
     // 取り込み件数が 5 件であり、重複スキップなしで挿入されること
     expect(result.tradesImported).toBe(5);
     expect(result.insertedIds).toHaveLength(5);
@@ -41,7 +42,7 @@ describe('TradeImportService', () => {
     ].join('\n');
 
     fs.writeFileSync(tmpFile, csvContent);
-    const result = await service.importFromCSV(tmpFile);
+    const result = await service.importFromCSV(tmpFile, testUserId);
 
     // 有効行は 1 行のみ保存される
     expect(result.tradesImported).toBe(1);

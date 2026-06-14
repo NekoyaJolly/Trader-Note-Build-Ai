@@ -57,7 +57,7 @@ export class InAppNotificationSender implements NotificationSender {
           message: payload.message,
           status: 'unread',
           sentAt: new Date(),
-          userId: matchResult.userId ?? undefined,
+          userId: matchResult.userId,
         },
       });
 
@@ -92,8 +92,8 @@ export class InAppNotificationSender implements NotificationSender {
   async sendPush(payload: NotificationPayload): Promise<{ success: boolean; id?: string }> {
     try {
       // 宛先ユーザーを由来 MatchResult から解決する (複合ユニークキーで一意参照)。
-      // MatchResult.userId が NULL のレガシー行は由来ノートの userId にフォールバック
-      // して不要な broadcast (誤配送リスク) を避ける (PR #388 Copilot レビュー対応)
+      // Phase 6 後は MatchResult.userId が必須。念のため由来ノートも取得し、
+      // 古いテスト fixture では note.userId にフォールバックする。
       const matchResult = await this.prisma.matchResult.findUnique({
         where: {
           noteId_marketSnapshotId: {

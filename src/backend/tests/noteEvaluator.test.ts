@@ -62,8 +62,8 @@ function createMockNote(overrides: Partial<{
     priority: 5,
     enabled: true,
     pausedUntil: null,
-    // マルチユーザー化 Phase α: テストモックはユーザー帰属なし
-    userId: null,
+    // Phase 6: 永続化対象 TradeNote は所有ユーザー必須
+    userId: 'user_1',
   };
 }
 

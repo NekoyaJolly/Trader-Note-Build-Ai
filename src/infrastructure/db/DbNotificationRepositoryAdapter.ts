@@ -66,22 +66,20 @@ export class DbNotificationRepositoryAdapter implements NotificationRepository {
    * 単一の通知を保存
    * 注意: DB版は MatchResult 紐付けが前提のため、matchResult がない場合は警告
    */
-  async save(notification: Notification): Promise<void> {
+  save(notification: Notification): Promise<void> {
     // matchResult から matchResultId を取得
     const matchResultId = notification.matchResult?.noteId;
     
     if (!matchResultId) {
       // MatchResult なしの通知はDBには保存できない（スキップ）
       console.warn('[DbNotificationRepositoryAdapter] matchResult がないため DB 保存をスキップ:', notification.id);
-      return;
+      return Promise.resolve();
     }
 
-    await this.dbRepo.create({
-      matchResultId,
-      title: notification.title,
-      message: notification.message,
-      status: notification.read ? 'read' : 'unread',
-    });
+    // Phase 6 以降 Notification.userId は必須。旧 domain 型には宛先 userId が無いため、
+    // 誤配送リスクのある DB 保存は行わない。新規通知は trigger 経路で userId 付き保存する。
+    console.warn('[DbNotificationRepositoryAdapter] userId を解決できないため DB 保存をスキップ:', notification.id);
+    return Promise.resolve();
   }
 
   /**

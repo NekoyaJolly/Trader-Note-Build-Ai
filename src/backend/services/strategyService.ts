@@ -30,8 +30,8 @@ export interface CreateStrategyInput {
   exitSettings: object;    // ExitSettings JSON
   entryTiming?: string;
   tags?: string[];
-  /** 所有ユーザー (Phase α-4 マルチユーザー分離)。HTTP 経路では必ず設定 */
-  userId?: string;
+  /** 所有ユーザー (Phase 6 以降は作成時に必須) */
+  userId: string;
 }
 
 /**
@@ -572,7 +572,7 @@ export async function updateStrategyStatus(id: string, status: StrategyStatus, u
 /**
  * ストラテジーを複製
  */
-export async function duplicateStrategy(id: string, newName?: string, userId?: string): Promise<StrategyDetail> {
+export async function duplicateStrategy(id: string, newName: string | undefined, userId: string): Promise<StrategyDetail> {
   // userId 指定時は所有ストラテジーのみ複製可 (Phase α-4)
   const existing = await getStrategy(id, userId);
   if (!existing || !existing.currentVersion) {

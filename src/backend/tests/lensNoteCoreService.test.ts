@@ -46,6 +46,7 @@ function makeActiveNote(id: string): PrismaTradeNote {
     timeframe: '15m',
     status: 'active',
     enabled: true,
+    userId: 'user_1',
   } as unknown as PrismaTradeNote;
 }
 
@@ -103,7 +104,7 @@ describe('LensNoteCoreService.createForSideATradeNote', () => {
 
     const result = await service.createForSideATradeNote({
       tradeNoteId: 'note_2',
-      userId: null,
+      userId: 'user_1',
       symbol: 'USDJPY',
       side: 'sell',
       timeframe: '15m',
@@ -236,7 +237,7 @@ describe('LensNoteCoreService 通知粒度設定の配線 (Phase β-2a)', () => 
 
     const detail = await service.evaluateNotesForMatching([makeActiveNote('note_1')]);
 
-    expect(resolveForNotes).toHaveBeenCalledWith([{ id: 'note_1', userId: undefined }]);
+    expect(resolveForNotes).toHaveBeenCalledWith([{ id: 'note_1', userId: 'user_1' }]);
     expect(detail.evaluations).toHaveLength(1);
     // ユーザー設定の有効しきい値 0.95 が比較エンジンにそのまま渡る
     // (発火可否は score 次第。自己比較でもイベント型 none 同士は 0.5 のため score<1。§6.2)

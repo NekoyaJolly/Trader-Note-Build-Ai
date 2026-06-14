@@ -15,8 +15,8 @@ export interface TradeCreateInput {
 /**
  * ユーザー分離 (Phase α-4) の方針:
  * - HTTP 経路 (requireAuth 配下) からは必ず userId を渡し、所有ユーザーのデータのみ扱う
- * - cron / pipeline 経路 (ユーザー横断処理) は userId を渡さず全件を対象にする
- * - userId 未指定時は従来挙動 (フィルタなし) を維持し後方互換を保つ
+ * - cron / pipeline 経路 (ユーザー横断処理) は読み取りでは userId 未指定で全件を対象にする
+ * - create 経路では Phase 6 以降 userId を必須にし、所有者不明の行を作らない
  */
 
 /**
@@ -38,7 +38,7 @@ export class TradeRepository {
    * timestamp + symbol + side の組み合わせで重複を判定
    * @returns 実際にinsertされた件数とID配列
    */
-  async bulkInsert(trades: TradeCreateInput[], userId?: string): Promise<BulkInsertResult> {
+  async bulkInsert(trades: TradeCreateInput[], userId: string): Promise<BulkInsertResult> {
     if (trades.length === 0) return { count: 0, insertedIds: [] };
 
     // 既存のトレードを取得して重複チェック
@@ -74,7 +74,7 @@ export class TradeRepository {
         quantity: t.quantity,
         fee: t.fee ?? undefined,
         exchange: t.exchange ?? undefined,
-        userId: userId ?? undefined,
+        userId,
       })),
       skipDuplicates: true,
     });

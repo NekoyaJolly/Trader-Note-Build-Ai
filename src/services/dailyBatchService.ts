@@ -11,6 +11,7 @@ import type { MarketContext } from './note-generator/featureExtractor';
 
 export interface DailyBatchOptions {
   csvFilePath?: string;      // 処理対象の CSV ファイル（省略時はインポートをスキップ）
+  userId?: string;           // CSV 取り込み時の所有ユーザー（Phase 6 以降は必須）
   failFast?: boolean;        // 致命エラー発生時に即時終了するか
   maxNotes?: number;         // 1 回のバッチで生成するノート数の上限
 }
@@ -80,7 +81,10 @@ export class DailyBatchService {
     // Step 1: CSV 取り込み（任意）
     if (options.csvFilePath) {
       try {
-        report.importSummary = await this.tradeImportService.importFromCSV(options.csvFilePath);
+        if (!options.userId) {
+          throw new Error('CSV 取り込みには userId が必要です');
+        }
+        report.importSummary = await this.tradeImportService.importFromCSV(options.csvFilePath, options.userId);
       } catch (error) {
         const message = `CSV 取り込み失敗: ${(error as Error).message}`;
         // failFast の場合は原因例外を cause として伝播させる

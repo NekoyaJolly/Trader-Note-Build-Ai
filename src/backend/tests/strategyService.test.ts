@@ -53,6 +53,7 @@ jest.mock('uuid', () => ({
 }));
 
 describe('strategyService', () => {
+  const testUserId = 'test-user-1';
   // テスト用データ
   const mockStrategy = {
     id: 'test-strategy-id',
@@ -103,6 +104,7 @@ describe('strategyService', () => {
     entryConditions: mockVersion.entryConditions,
     exitSettings: mockVersion.exitSettings,
     tags: ['逆張り', 'RSI'],
+    userId: testUserId,
   };
 
   beforeEach(() => {
@@ -451,7 +453,7 @@ describe('strategyService', () => {
         });
       });
 
-      const result = await duplicateStrategy(mockStrategy.id);
+      const result = await duplicateStrategy(mockStrategy.id, undefined, testUserId);
 
       expect(result).not.toBeNull();
       expect(result.name).toContain('コピー');

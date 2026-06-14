@@ -366,8 +366,8 @@ interface SendNotificationParams {
   symbol: string;
   matchScore: number;
   indicatorValues: Record<string, JsonValue | undefined>;
-  /** 通知の宛先ユーザー (= ストラテジーの所有ユーザー。Phase α-4) */
-  userId?: string | null;
+  /** 通知の宛先ユーザー (= ストラテジーの所有ユーザー。Phase 6 以降は必須) */
+  userId: string;
 }
 
 /**

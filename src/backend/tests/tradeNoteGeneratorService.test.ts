@@ -50,8 +50,8 @@ const createMockNoteWithSummary = (overrides?: Record<string, unknown>) => ({
   priority: 5,
   enabled: true,
   pausedUntil: null,
-  // マルチユーザー化 Phase α: テストモックはユーザー帰属なし
-  userId: null,
+  // Phase 6: 永続化対象ノートは所有ユーザー必須
+  userId: 'user_1',
   aiSummary: {
     id: 'test-summary-id',
     noteId: 'test-note-id',
@@ -87,8 +87,8 @@ describe('TradeNoteGeneratorService', () => {
     quantity: new Prisma.Decimal(1.5),
     fee: null,
     exchange: null,
-    // マルチユーザー化 Phase α: テストモックはユーザー帰属なし
-    userId: null,
+    // Phase 6: Trade から TradeNote へ所有ユーザーを伝播する
+    userId: 'user_1',
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -169,6 +169,7 @@ describe('TradeNoteGeneratorService', () => {
           entryPrice: 50000,
           side: TradeSide.buy,
           timeframe: '15m',
+          userId: 'user_1',
         }),
         expect.objectContaining({
           summary: 'テスト要約',
@@ -199,6 +200,7 @@ describe('TradeNoteGeneratorService', () => {
           tradeId: 'test-trade-id',
           indicators: expect.objectContaining({ inferredMode: 'trend' }),
           timeframe: '15m',
+          userId: 'user_1',
         }),
         expect.any(Object)
       );
@@ -215,6 +217,7 @@ describe('TradeNoteGeneratorService', () => {
       expect(mockRepository.createWithSummary).toHaveBeenCalledWith(
         expect.objectContaining({
           side: TradeSide.sell,
+          userId: 'user_1',
         }),
         expect.any(Object)
       );

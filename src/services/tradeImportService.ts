@@ -36,7 +36,7 @@ export class TradeImportService {
    * @param userId - 取り込んだトレードの所有ユーザー (Phase α-4 ユーザー分離)。
    *                 HTTP 経路では必ず渡す。未指定時は userId なしで保存 (後方互換)。
    */
-  async importFromCSV(filePath: string, userId?: string): Promise<{ tradesImported: number; skipped: number; errors: string[]; file: string; insertedIds: string[]; parsedTrades: Array<{ id: string; timestamp: Date; symbol: string; side: TradeSide; price: number; quantity: number; fee?: number; exchange?: string }> }> {
+  async importFromCSV(filePath: string, userId: string): Promise<{ tradesImported: number; skipped: number; errors: string[]; file: string; insertedIds: string[]; parsedTrades: Array<{ id: string; timestamp: Date; symbol: string; side: TradeSide; price: number; quantity: number; fee?: number; exchange?: string }> }> {
     this.validateFile(filePath);
 
     const { trades, skipped, errors } = await this.parseCSV(filePath);
