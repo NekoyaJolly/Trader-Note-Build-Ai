@@ -7,7 +7,7 @@
  * - Note コア行はあるが lensSnapshot=null のもの(生成失敗・データ未到達)も再試行する
  *
  * 実行コマンド:
- *   npx tsx scripts/migrate/backfill-lens-snapshots.ts [--limit N] [--dry-run] [--include-archived]
+ *   npx tsx scripts/migrate/backfill-lens-snapshots.ts --dry-run [--limit N] [--include-archived]
  *   npx tsx scripts/migrate/backfill-lens-snapshots.ts --confirm-write [--limit N] [--include-archived]
  *
  * 挙動:

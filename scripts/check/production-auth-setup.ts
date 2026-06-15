@@ -46,7 +46,7 @@ async function main(): Promise<void> {
     await page.goto(PRODUCTION_UI_URL, { waitUntil: 'domcontentloaded' });
     await waitForEnter('ログイン完了後に Enter: ');
 
-    await page.goto(PRODUCTION_UI_URL, { waitUntil: 'networkidle' });
+    await page.goto(PRODUCTION_UI_URL, { waitUntil: 'domcontentloaded' });
     const hasLocalStorageToken = await page.evaluate(() => {
       try {
         return Boolean(window.localStorage.getItem('auth_token'));
@@ -58,10 +58,13 @@ async function main(): Promise<void> {
     const cookies = await context.cookies();
     const hasCookieToken = cookies.some((cookie) => cookie.name === 'auth_token');
 
-    if (!hasLocalStorageToken && !hasCookieToken) {
+    if (!hasLocalStorageToken) {
       throw new Error(
-        'auth_token が localStorage / Cookie のどちらにも見つかりません。ログイン完了後に再実行してください。'
+        'localStorage の auth_token が見つかりません。後続の production functional smoke が使うため、ログイン完了後に再実行してください。'
       );
+    }
+    if (!hasCookieToken) {
+      console.warn('auth_token Cookie は見つかりませんでした。localStorage token は保存済みのため後続 smoke は続行できます。');
     }
 
     await context.storageState({ path: AUTH_STATE_PATH });

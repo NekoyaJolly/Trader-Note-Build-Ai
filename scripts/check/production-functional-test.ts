@@ -87,7 +87,7 @@ async function main(): Promise<void> {
   const page = await context.newPage();
 
   try {
-    await page.goto(PRODUCTION_UI_URL, { waitUntil: 'networkidle' });
+    await page.goto(PRODUCTION_UI_URL, { waitUntil: 'domcontentloaded' });
     const token = await readAuthToken(page);
 
     const me = await apiRequest(page, token, '/api/auth/me');

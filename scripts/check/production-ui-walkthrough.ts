@@ -55,7 +55,7 @@ async function main(): Promise<void> {
     for (const pathName of TARGET_PATHS) {
       const url = `${PRODUCTION_UI_URL}${pathName}`;
       console.log(`確認中: ${url}`);
-      const response = await page.goto(url, { waitUntil: 'networkidle' });
+      const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
       if (!response || response.status() >= 400) {
         throw new Error(`${pathName} の配信ステータスが不正です: ${response?.status() ?? 'no response'}`);
       }

@@ -33,7 +33,7 @@ async function main(): Promise<void> {
   const page = await context.newPage();
 
   try {
-    await page.goto(`${PRODUCTION_UI_URL}/strategies`, { waitUntil: 'networkidle' });
+    await page.goto(`${PRODUCTION_UI_URL}/strategies`, { waitUntil: 'domcontentloaded' });
     await page.locator('body').waitFor({ state: 'visible', timeout: 10000 });
 
     const strategyLinks = page.locator('a[href^="/strategies/"]');
@@ -54,7 +54,7 @@ async function main(): Promise<void> {
       return;
     }
 
-    await page.goto(`${PRODUCTION_UI_URL}/strategies/${strategyId}/backtest`, { waitUntil: 'networkidle' });
+    await page.goto(`${PRODUCTION_UI_URL}/strategies/${strategyId}/backtest`, { waitUntil: 'domcontentloaded' });
     await page.locator('body').waitFor({ state: 'visible', timeout: 10000 });
     if (!page.url().includes('/backtest')) {
       throw new Error('バックテスト画面に到達できませんでした。');
