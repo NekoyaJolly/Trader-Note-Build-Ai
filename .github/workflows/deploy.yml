@@ -29,7 +29,7 @@ jobs:
       analysis_url: ${{ steps.outputs.outputs.analysis_url }}
     steps:
       - name: リポジトリをチェックアウト
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: GCP 認証
         uses: google-github-actions/auth@v2
@@ -128,7 +128,7 @@ jobs:
       url: ${{ env.PRODUCTION_API_URL }}
     steps:
       - name: リポジトリをチェックアウト
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: GCP 認証
         uses: google-github-actions/auth@v2
@@ -202,7 +202,7 @@ jobs:
       migration_ran: ${{ steps.check.outputs.should_migrate }}
     steps:
       - name: リポジトリをチェックアウト
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 2
 
@@ -252,10 +252,10 @@ jobs:
     needs: [deploy-gcp, run-migration]
     steps:
       - name: リポジトリをチェックアウト
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Node.js セットアップ
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: 'npm'
