@@ -102,9 +102,9 @@ http://localhost:3100
 | `/api/indicators/metadata` | GET | auth | JWT | user/admin | none | no | no | no | metadata read。 |
 | `/api/indicators/settings/reset` | POST | auth | JWT | user/admin | none | no | yes | TODO: confirm | settings reset。 |
 | `/api/indicators/settings/setup-status` | GET | auth | JWT | user/admin | none | no | no | TODO: confirm | setup 状態。 |
-| `/api/profiles` | GET/POST | auth | JWT | user/admin | none | no | POST yes | TODO: confirm | profile list/create。 |
-| `/api/profiles/options` | GET | auth | JWT | user/admin | none | no | no | TODO: confirm | selector options。 |
-| `/api/profiles/:id` | GET/PUT/DELETE | auth | JWT | user/admin | none | no | PUT/DELETE yes | yes | owner check は TODO: confirm。 |
+| `/api/profiles` | GET/POST | auth | JWT | user/admin | none | no | POST yes | self | `req.user.userId` を IndicatorProfileService に渡し、一覧/作成をユーザー別に処理する。 |
+| `/api/profiles/options` | GET | auth | JWT | user/admin | none | no | no | self | `req.user.userId` で selector options と default profile を取得する。 |
+| `/api/profiles/:id` | GET/PUT/DELETE | auth | JWT | user/admin | none | no | PUT/DELETE yes | yes | `id + req.user.userId` で取得/更新/削除。他ユーザー profile は 404/エラー扱い。 |
 | `/api/profiles/:id/default` | PUT | auth | JWT | user/admin | none | no | yes | yes | default profile 更新。 |
 | `/api/backtest/check-coverage` | POST | auth | JWT | user/admin | none | no | no | TODO: confirm | データカバレッジ確認。 |
 | `/api/settings` | GET/PUT | auth | JWT | user/admin | none | no | PUT yes | self | アプリ設定。 |
