@@ -266,6 +266,32 @@ http://localhost:3100
 | `/api/cron/strategy-alerts/test` | POST | cron | none | none | `CRON_SECRET` | no | yes | no | ストラテジーライブ評価の手動テスト (市場チェックなし)。データ不足/鮮度切れは `data.errors`、補完フェッチ警告は `data.marketDataWarnings` に反映。 |
 | `analysis-engine` 連携 | internal | internal | service-to-service | `X-Analysis-Engine-Secret` | shared secret | no | yes | no | `src/backend/services/analysisEngineClient` / PythonBridge HTTP mode からのみ呼び出す。`/health` 以外は secret なしで `401`。 |
 
+### ストラテジーバックテスト / ウォークフォワード
+
+#### POST `/api/strategies/:id/backtest`
+
+レスポンス `data.symbol` は実行に使ったシンボルを返す。リクエスト body の `symbol` が指定された場合はその値、未指定の場合はストラテジー本体の `symbol`。
+
+#### POST `/api/strategies/:id/walkforward`
+
+リクエスト body:
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---:|---|
+| `type` | `"fixed_split"` \| `"rolling_window"` | no | 未指定は `fixed_split`。 |
+| `symbol` | `string` | no | 検証対象シンボル。未指定はストラテジー本体の `symbol`。 |
+| `startDate` | `string` | yes | 検証開始日。 |
+| `endDate` | `string` | yes | 検証終了日。 |
+| `splitCount` | `number` | no | 固定分割の分割数。 |
+| `inSampleDays` | `number` | rolling のみ yes | ローリング方式の In-Sample 日数。 |
+| `outOfSampleDays` | `number` | rolling のみ yes | ローリング方式の Out-of-Sample 日数。 |
+| `timeframe` | `"1m"` \| `"5m"` \| `"15m"` \| `"30m"` \| `"1h"` \| `"4h"` \| `"1d"` | no | 検証時間足。 |
+| `initialCapital` | `number` | no | 初期資金。 |
+| `lotSize` | `number` | no | 固定ロット入力。 |
+| `leverage` | `number` | no | レバレッジ。 |
+
+`rolling_window` は `inSampleDays` の学習期間を取り、その後ろの `outOfSampleDays` を検証期間にし、次の split は `outOfSampleDays` 日ぶん前進する。
+
 ### 認証エンドポイント
 
 ---

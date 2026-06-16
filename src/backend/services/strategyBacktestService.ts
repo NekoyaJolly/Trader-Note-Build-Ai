@@ -162,6 +162,8 @@ export type BacktestTradeEvent = BaseBacktestTradeEvent;
 export interface BacktestResult {
   id: string;
   strategyId: string;
+  /** 実行に使ったシンボル（リクエスト override があればその値） */
+  symbol: string;
   versionNumber: number;
   executedAt: string;
   startDate: string;
@@ -485,6 +487,7 @@ function getIntervalMinutes(timeframe: BacktestTimeframe): number {
 export async function runBacktest(request: BacktestRequest): Promise<BacktestResult> {
   const resultId = uuidv4();
   const executedAt = new Date().toISOString();
+  let effectiveSymbol = request.symbol?.trim() || '';
 
   try {
     // ストラテジーを取得
@@ -494,7 +497,7 @@ export async function runBacktest(request: BacktestRequest): Promise<BacktestRes
     }
 
     // 使用するシンボル（リクエストで指定されていれば上書き）
-    const effectiveSymbol = (request.symbol?.trim() || strategy.symbol);
+    effectiveSymbol = request.symbol?.trim() || strategy.symbol;
     if (!effectiveSymbol) {
       throw new Error('シンボルが指定されていません');
     }
@@ -526,6 +529,7 @@ export async function runBacktest(request: BacktestRequest): Promise<BacktestRes
       ...finalResult,
       id: resultId,
       strategyId: request.strategyId,
+      symbol: effectiveSymbol,
       versionNumber: strategy.currentVersion.versionNumber,
       executedAt,
       startDate: request.startDate,
@@ -549,6 +553,7 @@ export async function runBacktest(request: BacktestRequest): Promise<BacktestRes
     return {
       id: resultId,
       strategyId: request.strategyId,
+      symbol: effectiveSymbol,
       versionNumber: 0,
       executedAt,
       startDate: request.startDate,
@@ -737,7 +742,7 @@ async function executeBacktestStage(
   symbol: string,
   stage: BacktestStage,
   timeframe: BacktestTimeframe
-): Promise<Omit<BacktestResult, 'id' | 'strategyId' | 'versionNumber' | 'executedAt' | 'startDate' | 'endDate' | 'status'>> {
+): Promise<Omit<BacktestResult, 'id' | 'strategyId' | 'symbol' | 'versionNumber' | 'executedAt' | 'startDate' | 'endDate' | 'status'>> {
   // ヒストリカルデータを取得
   const data = await fetchHistoricalData(
     symbol,
@@ -1403,6 +1408,7 @@ export async function getBacktestResult(runId: string): Promise<BacktestResult |
   return {
     id: run.id,
     strategyId: run.strategyId,
+    symbol: run.symbol,
     versionNumber: run.strategy.versions[0]?.versionNumber || 1,
     executedAt: run.createdAt.toISOString(),
     startDate: run.startDate.toISOString(),
@@ -1489,6 +1495,7 @@ export async function getBacktestHistory(
     return {
       id: run.id,
       strategyId: run.strategyId,
+      symbol: run.symbol,
       versionNumber: run.strategy.versions[0]?.versionNumber || 1,
       executedAt: run.createdAt.toISOString(),
       startDate: run.startDate.toISOString(),

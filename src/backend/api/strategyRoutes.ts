@@ -268,6 +268,8 @@ const AlertTriggerBodySchema = z
 
 const WalkForwardBodySchema = z
   .object({
+    type: z.enum(['fixed_split', 'rolling_window']).optional(),
+    symbol: z.string().trim().min(1).max(32).optional(),
     startDate: z.string().min(1),
     endDate: z.string().min(1),
     splitCount: z.number().int().min(2).max(12).optional(),
@@ -278,7 +280,24 @@ const WalkForwardBodySchema = z
     lotSize: z.number().positive().optional(),
     leverage: z.number().min(1).max(1000).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((data, ctx) => {
+    if (data.type !== 'rolling_window') return;
+    if (!data.inSampleDays) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['inSampleDays'],
+        message: 'ローリングWFではIn-Sample日数が必須です',
+      });
+    }
+    if (!data.outOfSampleDays) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['outOfSampleDays'],
+        message: 'ローリングWFではOut-of-Sample日数が必須です',
+      });
+    }
+  });
 
 const MonteCarloBodySchema = z
   .object({
@@ -1818,6 +1837,8 @@ router.post('/:id/walkforward', async (req: Request, res: Response) => {
     const {
       startDate,
       endDate,
+      type,
+      symbol,
       splitCount,
       inSampleDays,
       outOfSampleDays,
@@ -1829,6 +1850,8 @@ router.post('/:id/walkforward', async (req: Request, res: Response) => {
 
     const result = await runWalkForwardTest({
       strategyId: id,
+      type,
+      symbol,
       startDate,
       endDate,
       splitCount,

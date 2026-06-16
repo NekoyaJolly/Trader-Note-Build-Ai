@@ -296,7 +296,7 @@ export default function BacktestChartTab({ result, strategy }: BacktestChartTabP
     const [showIndicators, setShowIndicators] = useState(true);
 
     const trades = result.trades;
-    const symbol = strategy.symbol;
+    const symbol = result.symbol || strategy.symbol;
 
     // ストラテジーで使用されたインジケーターを抽出
     const strategyIndicators = useMemo(() => {

@@ -1653,6 +1653,8 @@ export interface WalkForwardResult {
 export async function runWalkForwardTest(
   strategyId: string,
   params: {
+    type?: 'fixed_split' | 'rolling_window';
+    symbol?: string;
     startDate: string;
     endDate: string;
     splitCount?: number;
@@ -1665,6 +1667,8 @@ export async function runWalkForwardTest(
 ): Promise<WalkForwardResult> {
   // フロントエンドの positionSize をバックエンドの lotSize にマッピング
   const requestBody = {
+    type: params.type,
+    symbol: params.symbol,
     startDate: params.startDate,
     endDate: params.endDate,
     splitCount: params.splitCount,

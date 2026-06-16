@@ -30,6 +30,10 @@ import { prisma } from '../db/client';
 export interface WalkForwardRequest {
   /** 対象ストラテジーID */
   strategyId: string;
+  /** テスト種別 */
+  type?: WalkForwardType;
+  /** 検証対象シンボル（省略時はストラテジーのシンボル） */
+  symbol?: string;
   /** テスト開始日 (YYYY-MM-DD) */
   startDate: string;
   /** テスト終了日 (YYYY-MM-DD) */
@@ -331,6 +335,59 @@ function calculatePeriodSplitsByDays(
 }
 
 /**
+ * ローリングウィンドウ方式で期間を分割する。
+ *
+ * 例: IS=30日 / OOS=10日の場合、次の split は10日だけ前進する。
+ * これにより学習期間を重ねながら、検証期間だけを順に進めて安定性を見る。
+ */
+export function calculateRollingPeriodSplitsByDays(
+  startDate: Date,
+  endDate: Date,
+  inSampleDays: number,
+  outOfSampleDays: number
+): PeriodSplit[] {
+  if (inSampleDays < 1 || outOfSampleDays < 1 || startDate >= endDate) {
+    return [];
+  }
+
+  const splits: PeriodSplit[] = [];
+  let inSampleStart = new Date(startDate);
+
+  while (inSampleStart < endDate) {
+    const inSampleEnd = new Date(inSampleStart);
+    inSampleEnd.setDate(inSampleEnd.getDate() + inSampleDays - 1);
+
+    const outOfSampleStart = new Date(inSampleEnd);
+    outOfSampleStart.setDate(outOfSampleStart.getDate() + 1);
+    if (outOfSampleStart > endDate) {
+      break;
+    }
+
+    const outOfSampleEnd = new Date(outOfSampleStart);
+    outOfSampleEnd.setDate(outOfSampleEnd.getDate() + outOfSampleDays - 1);
+    if (outOfSampleEnd > endDate) {
+      outOfSampleEnd.setTime(endDate.getTime());
+    }
+
+    splits.push({
+      inSampleStart: new Date(inSampleStart),
+      inSampleEnd,
+      outOfSampleStart,
+      outOfSampleEnd,
+    });
+
+    if (outOfSampleEnd >= endDate) {
+      break;
+    }
+
+    inSampleStart = new Date(inSampleStart);
+    inSampleStart.setDate(inSampleStart.getDate() + outOfSampleDays);
+  }
+
+  return splits;
+}
+
+/**
  * 過学習スコアを計算
  * 
  * 計算方法:
@@ -376,6 +433,8 @@ export async function runWalkForwardTest(
 ): Promise<WalkForwardResult> {
   const {
     strategyId,
+    type = WalkForwardType.fixed_split,
+    symbol,
     startDate,
     endDate,
     splitCount = 4,
@@ -407,12 +466,17 @@ export async function runWalkForwardTest(
     throw new Error(`ストラテジー ${strategyId} にバージョンがありません`);
   }
 
+  const effectiveSymbol = symbol?.trim() || strategy.symbol;
+  if (!effectiveSymbol) {
+    throw new Error('シンボルが指定されていません');
+  }
+
   // WalkForwardRun を作成
   const run = await prisma.walkForwardRun.create({
     data: {
       strategyId,
       versionId: currentVersion.id,
-      type: WalkForwardType.fixed_split,
+      type,
       splitCount,
       inSampleDays: inSampleDays ?? 0, // 後で更新
       outOfSampleDays: outOfSampleDays ?? 0, // 後で更新
@@ -424,11 +488,11 @@ export async function runWalkForwardTest(
   });
 
   try {
-    console.log(`[WalkForward] 実行開始: ${strategy.name} (${splitCount}分割)`);
+    console.log(`[WalkForward] 実行開始: ${strategy.name} (${effectiveSymbol}, ${type}, ${splitCount}分割)`);
 
     // プリセットデータのタイムスタンプを取得して、データ基準で分割
     const timestamps = await getPresetTimestamps(
-      strategy.symbol,
+      effectiveSymbol,
       timeframe,
       new Date(startDate),
       new Date(endDate)
@@ -437,7 +501,18 @@ export async function runWalkForwardTest(
     let periodSplits: PeriodSplit[];
     let actualSplitCount = splitCount;
     
-    if (timestamps.length > 0) {
+    if (type === WalkForwardType.rolling_window) {
+      const rollingInSampleDays = inSampleDays ?? 30;
+      const rollingOutOfSampleDays = outOfSampleDays ?? 10;
+      console.log(`[WalkForward] ローリング分割: IS=${rollingInSampleDays}日, OOS=${rollingOutOfSampleDays}日`);
+      periodSplits = calculateRollingPeriodSplitsByDays(
+        new Date(startDate),
+        new Date(endDate),
+        rollingInSampleDays,
+        rollingOutOfSampleDays
+      );
+      actualSplitCount = periodSplits.length;
+    } else if (timestamps.length > 0) {
       // プリセットデータがある場合: データ基準で分割（休場日を自動スキップ）
       // calculatePeriodSplitsFromTimestamps 内で分割数が自動調整される
       console.log(`[WalkForward] プリセットデータ ${timestamps.length} 件を基準に分割`);
@@ -477,6 +552,7 @@ export async function runWalkForwardTest(
         initialCapital,
         lotSize,
         leverage,
+        symbol: effectiveSymbol,
         source: 'walkforward',
       };
       const inSampleResult = await runBacktest(inSampleRequest);
@@ -492,6 +568,7 @@ export async function runWalkForwardTest(
         initialCapital,
         lotSize,
         leverage,
+        symbol: effectiveSymbol,
         source: 'walkforward',
       };
       const outOfSampleResult = await runBacktest(outOfSampleRequest);
@@ -584,7 +661,7 @@ export async function runWalkForwardTest(
     return {
       id: run.id,
       strategyId,
-      type: WalkForwardType.fixed_split,
+      type,
       splitCount: actualSplitCount, // 実際に使用された分割数を返す
       splits: splitResults,
       overfitScore,
@@ -614,7 +691,7 @@ export async function runWalkForwardTest(
     return {
       id: run.id,
       strategyId,
-      type: WalkForwardType.fixed_split,
+      type,
       splitCount,
       splits: [],
       overfitScore: 0,
