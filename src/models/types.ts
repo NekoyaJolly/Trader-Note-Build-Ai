@@ -133,7 +133,15 @@ export interface Notification {
 }
 
 /**
+ * 注文プリセット信頼度の主な算出元
+ * - latest_match: 最新の一致判定スコアを主軸にした信頼度
+ * - note_quality: 最新マッチが無い場合にノート情報量から推定した信頼度
+ */
+export type OrderPresetConfidenceSource = 'latest_match' | 'note_quality';
+
+/**
  * Order preset for UI
+ * 発注支援画面に表示する参考プリセット。実発注は行わない。
  */
 export interface OrderPreset {
   symbol: string;
@@ -141,5 +149,10 @@ export interface OrderPreset {
   suggestedPrice: number;
   suggestedQuantity: number;
   basedOnNoteId: string;
+  /** 0.0〜1.0 の参考信頼度 */
   confidence: number;
+  /** 信頼度がどの情報を主軸に算出されたか */
+  confidenceSource: OrderPresetConfidenceSource;
+  /** ユーザーに表示する信頼度算出の主要根拠 */
+  confidenceReasons: string[];
 }

@@ -384,6 +384,10 @@ describe('API 認証境界', () => {
     const body = res.body as { preset: OrderPreset };
     expect(findLatestForNote).toHaveBeenCalledWith(note.id, userId);
     expect(body.preset.confidence).toBe(0.92);
+    expect(body.preset.confidenceSource).toBe('latest_match');
+    expect(body.preset.confidenceReasons).toEqual([
+      '最新マッチスコア 92.0% を主軸に算出',
+    ]);
   });
 
   it('最新マッチが無い注文プリセットはノート情報量から保守的に信頼度を算出する', async () => {
@@ -414,6 +418,17 @@ describe('API 認証境界', () => {
 
     const body = res.body as { preset: OrderPreset };
     expect(body.preset.confidence).toBe(0.85);
+    expect(body.preset.confidenceSource).toBe('note_quality');
+    expect(body.preset.confidenceReasons).toEqual([
+      '最新マッチが無いためノート情報量から保守的に推定',
+      '有効ノートのため信頼度を15.0%加点',
+      '数量が記録されているため信頼度を5.0%加点',
+      'AI要約が記録されているため信頼度を5.0%加点',
+      '特徴量カバレッジ 100.0% を反映',
+      'インジケーター根拠があるため信頼度を10.0%加点',
+      '現在価格とノート価格の近接度 100.0% を反映',
+      '最新マッチが無い推定値のため上限を85.0%に制限',
+    ]);
   });
 
   it('通知ログ一覧は認証ユーザーの所有ログだけを問い合わせる', async () => {

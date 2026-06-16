@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import type { OrderPreset, TradeNote } from '../../models/types';
+import type { OrderPreset, OrderPresetConfidenceSource, TradeNote } from '../../models/types';
 import { TradeNoteService } from '../../services/tradeNoteService';
 import { MarketDataService } from '../../services/marketDataService';
 import {
@@ -49,6 +49,12 @@ export class OrderController {
         req.user!.userId
       );
 
+      const confidenceDetail = calculateOrderPresetConfidenceDetail({
+        note,
+        currentPrice: currentMarket.close,
+        latestMatch,
+      });
+
       // 過去ノートと現在市場データに基づいてプリセットを生成
       const preset: OrderPreset = {
         symbol: note.symbol,
@@ -56,11 +62,9 @@ export class OrderController {
         suggestedPrice: currentMarket.close,
         suggestedQuantity: note.quantity,
         basedOnNoteId: note.id,
-        confidence: calculateOrderPresetConfidence({
-          note,
-          currentPrice: currentMarket.close,
-          latestMatch,
-        }),
+        confidence: confidenceDetail.confidence,
+        confidenceSource: confidenceDetail.source,
+        confidenceReasons: confidenceDetail.reasons,
       };
 
       res.json({ preset });
@@ -126,6 +130,10 @@ function roundConfidence(value: number): number {
   return Math.round(value * 1000) / 1000;
 }
 
+function confidencePercent(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
 function statusAdjustment(status: TradeNote['status']): number {
   switch (status) {
     case 'active':
@@ -134,6 +142,17 @@ function statusAdjustment(status: TradeNote['status']): number {
       return -0.1;
     case 'archived':
       return -0.2;
+  }
+}
+
+function statusAdjustmentReason(status: TradeNote['status']): string | null {
+  switch (status) {
+    case 'active':
+      return null;
+    case 'draft':
+      return '下書きノートのため信頼度を10.0%減点';
+    case 'archived':
+      return 'アーカイブ済みノートのため信頼度を20.0%減点';
   }
 }
 
@@ -166,37 +185,115 @@ function priceProximityScore(noteEntryPrice: number, currentPrice: number): numb
   return Math.max(0, 1 - deviation / 0.1);
 }
 
+interface OrderPresetConfidenceDetail {
+  readonly confidence: number;
+  readonly source: OrderPresetConfidenceSource;
+  readonly reasons: string[];
+}
+
 /**
- * 注文プリセットの信頼度を算出する。
+ * 注文プリセットの信頼度と表示用の算出根拠を返す。
  * 最新マッチがある場合は一致判定スコアを主軸にし、無い場合はノートの情報量から保守的に推定する。
+ */
+export function calculateOrderPresetConfidenceDetail(input: {
+  readonly note: TradeNote;
+  readonly currentPrice: number;
+  readonly latestMatch: LatestMatchForNote | null;
+}): OrderPresetConfidenceDetail {
+  const { note, currentPrice, latestMatch } = input;
+
+  if (latestMatch) {
+    let confidence = latestMatch.score;
+    const reasons = [
+      `最新マッチスコア ${confidencePercent(latestMatch.score)} を主軸に算出`,
+    ];
+    if (latestMatch.score < latestMatch.threshold) {
+      confidence = Math.min(confidence, 0.49);
+      reasons.push(`一致しきい値 ${confidencePercent(latestMatch.threshold)} 未満のため上限を49.0%に制限`);
+    }
+    if (!latestMatch.trendMatched) {
+      confidence -= 0.05;
+      reasons.push('トレンド不一致のため信頼度を5.0%減点');
+    }
+    if (!latestMatch.priceRangeMatched) {
+      confidence -= 0.05;
+      reasons.push('価格レンジ不一致のため信頼度を5.0%減点');
+    }
+
+    const noteStatusAdjustment = statusAdjustment(note.status);
+    confidence += noteStatusAdjustment;
+    const noteStatusReason = statusAdjustmentReason(note.status);
+    if (noteStatusReason) reasons.push(noteStatusReason);
+
+    if (confidence > 0.95) {
+      reasons.push('最新マッチ由来の信頼度上限を95.0%に制限');
+    }
+
+    return {
+      confidence: roundConfidence(clampConfidence(confidence, 0.95)),
+      source: 'latest_match',
+      reasons,
+    };
+  }
+
+  let confidence = 0.35;
+  const reasons = ['最新マッチが無いためノート情報量から保守的に推定'];
+  if (note.status === 'active') {
+    confidence += 0.15;
+    reasons.push('有効ノートのため信頼度を15.0%加点');
+  }
+  if (note.quantity > 0) {
+    confidence += 0.05;
+    reasons.push('数量が記録されているため信頼度を5.0%加点');
+  }
+  if (note.aiSummary.trim().length > 0) {
+    confidence += 0.05;
+    reasons.push('AI要約が記録されているため信頼度を5.0%加点');
+  }
+
+  const featureCoverage = finiteFeatureRatio(note.features);
+  confidence += featureCoverage * 0.2;
+  if (featureCoverage > 0) {
+    reasons.push(`特徴量カバレッジ ${confidencePercent(featureCoverage)} を反映`);
+  }
+
+  if (hasIndicatorEvidence(note)) {
+    confidence += 0.1;
+    reasons.push('インジケーター根拠があるため信頼度を10.0%加点');
+  }
+
+  const proximityScore = priceProximityScore(note.entryPrice, currentPrice);
+  confidence += proximityScore * 0.2;
+  if (proximityScore > 0) {
+    reasons.push(`現在価格とノート価格の近接度 ${confidencePercent(proximityScore)} を反映`);
+  } else {
+    reasons.push('現在価格とノート価格の乖離が大きいため価格近接の加点なし');
+  }
+
+  const noteStatusAdjustment = statusAdjustment(note.status);
+  confidence += noteStatusAdjustment;
+  const noteStatusReason = statusAdjustmentReason(note.status);
+  if (noteStatusReason) reasons.push(noteStatusReason);
+
+  // 最新マッチが無い推定値は過信しない。実際の一致スコアが出たら上限 0.95 まで使う。
+  if (confidence > 0.85) {
+    reasons.push('最新マッチが無い推定値のため上限を85.0%に制限');
+  }
+
+  return {
+    confidence: roundConfidence(clampConfidence(confidence, 0.85)),
+    source: 'note_quality',
+    reasons,
+  };
+}
+
+/**
+ * 注文プリセットの信頼度だけを返す後方互換ヘルパー。
  */
 export function calculateOrderPresetConfidence(input: {
   readonly note: TradeNote;
   readonly currentPrice: number;
   readonly latestMatch: LatestMatchForNote | null;
 }): number {
-  const { note, currentPrice, latestMatch } = input;
-
-  if (latestMatch) {
-    let confidence = latestMatch.score;
-    if (latestMatch.score < latestMatch.threshold) {
-      confidence = Math.min(confidence, 0.49);
-    }
-    if (!latestMatch.trendMatched) confidence -= 0.05;
-    if (!latestMatch.priceRangeMatched) confidence -= 0.05;
-    confidence += statusAdjustment(note.status);
-    return roundConfidence(clampConfidence(confidence, 0.95));
-  }
-
-  let confidence = 0.35;
-  confidence += note.status === 'active' ? 0.15 : 0;
-  confidence += note.quantity > 0 ? 0.05 : 0;
-  confidence += note.aiSummary.trim().length > 0 ? 0.05 : 0;
-  confidence += finiteFeatureRatio(note.features) * 0.2;
-  confidence += hasIndicatorEvidence(note) ? 0.1 : 0;
-  confidence += priceProximityScore(note.entryPrice, currentPrice) * 0.2;
-  confidence += statusAdjustment(note.status);
-
-  // 最新マッチが無い推定値は過信しない。実際の一致スコアが出たら上限 0.95 まで使う。
-  return roundConfidence(clampConfidence(confidence, 0.85));
+  return calculateOrderPresetConfidenceDetail(input).confidence;
 }
