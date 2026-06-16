@@ -17,6 +17,11 @@ import {
 } from "@/lib/api";
 import type { PipelineRunDTO } from "@/lib/api";
 import { readLastSideAPath } from "@/lib/lastSideAPath";
+import {
+  buildPipelineCoverageSummary,
+  buildSkipReasonItems,
+  type PipelineRunCoverageSeverity,
+} from "@/lib/pipelineRunPresentation";
 import { sideBApi } from "@/lib/sideBApi";
 import type { NoteSummary } from "@/types/note";
 
@@ -330,6 +335,29 @@ function runStatusMeta(status: PipelineRunDTO["status"]): { label: string; class
   }
 }
 
+/** 市場データカバレッジの状態を色に変換 */
+function coverageSeverityClass(severity: PipelineRunCoverageSeverity): string {
+  switch (severity) {
+    case "ok":
+      return "text-green-300 border-green-500/30 bg-green-500/10";
+    case "warning":
+      return "text-yellow-300 border-yellow-500/30 bg-yellow-500/10";
+    case "critical":
+      return "text-red-300 border-red-500/30 bg-red-500/10";
+  }
+}
+
+function skipReasonClass(severity: PipelineRunCoverageSeverity): string {
+  switch (severity) {
+    case "ok":
+      return "border-slate-600/50 bg-slate-700/30 text-slate-300";
+    case "warning":
+      return "border-yellow-500/30 bg-yellow-500/10 text-yellow-200";
+    case "critical":
+      return "border-red-500/30 bg-red-500/10 text-red-200";
+  }
+}
+
 /** 最新のマッチング実行状況カード（run が無ければプレースホルダ） */
 function PipelineRunCard({ run }: { run: PipelineRunDTO | null }) {
   if (!run) {
@@ -341,6 +369,8 @@ function PipelineRunCard({ run }: { run: PipelineRunDTO | null }) {
   }
 
   const meta = runStatusMeta(run.status);
+  const coverage = buildPipelineCoverageSummary(run);
+  const skipReasonItems = buildSkipReasonItems(run.skipReasons);
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
       <div className="flex items-center justify-between gap-3 mb-2">
@@ -361,6 +391,30 @@ function PipelineRunCard({ run }: { run: PipelineRunDTO | null }) {
       {run.errorCount > 0 && run.errors.length > 0 && (
         <p className="mt-1 text-xs text-red-400/90 line-clamp-2">{run.errors[0]}</p>
       )}
+      <div className="mt-3 border-t border-white/10 pt-3">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs font-semibold text-gray-400">市場データカバレッジ</span>
+          <span className={`text-[11px] px-2 py-0.5 rounded-full border ${coverageSeverityClass(coverage.severity)}`}>
+            {coverage.label}
+          </span>
+        </div>
+        <p className="mt-1 text-xs text-gray-400 leading-relaxed">
+          {coverage.message}
+        </p>
+        {skipReasonItems.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5" aria-label="スキップ理由の内訳">
+            {skipReasonItems.slice(0, 5).map((item) => (
+              <span
+                key={item.code}
+                className={`rounded-full border px-2 py-0.5 text-[11px] tabular-nums ${skipReasonClass(item.severity)}`}
+                title={item.code}
+              >
+                {item.label} {item.count}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
