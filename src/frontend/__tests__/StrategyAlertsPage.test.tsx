@@ -87,6 +87,7 @@ const STRATEGY_PREF: NotificationPreference = {
   strategyId: "strategy-1",
   threshold: null,
   minMatchLevel: null,
+  weightPreset: null,
   cooldownMinutes: 45,
   maxPerDay: null,
   createdAt: "2026-06-11T00:00:00Z",
