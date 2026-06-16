@@ -334,6 +334,11 @@ function calculatePeriodSplitsByDays(
   return splits;
 }
 
+function calculateInclusiveDays(startDate: Date, endDate: Date): number {
+  const diffMs = endDate.getTime() - startDate.getTime();
+  return Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1);
+}
+
 /**
  * ローリングウィンドウ方式で期間を分割する。
  *
@@ -490,14 +495,6 @@ export async function runWalkForwardTest(
   try {
     console.log(`[WalkForward] 実行開始: ${strategy.name} (${effectiveSymbol}, ${type}, ${splitCount}分割)`);
 
-    // プリセットデータのタイムスタンプを取得して、データ基準で分割
-    const timestamps = await getPresetTimestamps(
-      effectiveSymbol,
-      timeframe,
-      new Date(startDate),
-      new Date(endDate)
-    );
-
     let periodSplits: PeriodSplit[];
     let actualSplitCount = splitCount;
     
@@ -512,22 +509,32 @@ export async function runWalkForwardTest(
         rollingOutOfSampleDays
       );
       actualSplitCount = periodSplits.length;
-    } else if (timestamps.length > 0) {
-      // プリセットデータがある場合: データ基準で分割（休場日を自動スキップ）
-      // calculatePeriodSplitsFromTimestamps 内で分割数が自動調整される
-      console.log(`[WalkForward] プリセットデータ ${timestamps.length} 件を基準に分割`);
-      periodSplits = calculatePeriodSplitsFromTimestamps(timestamps, splitCount);
-      actualSplitCount = periodSplits.length; // 実際に作成された分割数
     } else {
-      // プリセットデータなし: 日数ベースで分割（フォールバック）
-      console.log(`[WalkForward] プリセットデータなし、日数ベースで分割`);
-      periodSplits = calculatePeriodSplitsByDays(
+      // 固定分割のみ、プリセットデータのタイムスタンプを取得してデータ基準で分割する。
+      const timestamps = await getPresetTimestamps(
+        effectiveSymbol,
+        timeframe,
         new Date(startDate),
-        new Date(endDate),
-        splitCount,
-        inSampleDays,
-        outOfSampleDays
+        new Date(endDate)
       );
+
+      if (timestamps.length > 0) {
+        // プリセットデータがある場合: データ基準で分割（休場日を自動スキップ）
+        // calculatePeriodSplitsFromTimestamps 内で分割数が自動調整される
+        console.log(`[WalkForward] プリセットデータ ${timestamps.length} 件を基準に分割`);
+        periodSplits = calculatePeriodSplitsFromTimestamps(timestamps, splitCount);
+        actualSplitCount = periodSplits.length; // 実際に作成された分割数
+      } else {
+        // プリセットデータなし: 日数ベースで分割（フォールバック）
+        console.log(`[WalkForward] プリセットデータなし、日数ベースで分割`);
+        periodSplits = calculatePeriodSplitsByDays(
+          new Date(startDate),
+          new Date(endDate),
+          splitCount,
+          inSampleDays,
+          outOfSampleDays
+        );
+      }
     }
     
     if (periodSplits.length === 0) {
@@ -641,17 +648,16 @@ export async function runWalkForwardTest(
       where: { id: run.id },
       data: {
         status: BacktestStatus.completed,
+        splitCount: actualSplitCount,
         overfitScore,
         overfitWarning,
-        inSampleDays: inSampleDays ?? Math.floor(
-          (new Date(periodSplits[0]?.inSampleEnd || startDate).getTime() -
-           new Date(periodSplits[0]?.inSampleStart || startDate).getTime()) /
-          (1000 * 60 * 60 * 24)
+        inSampleDays: inSampleDays ?? calculateInclusiveDays(
+          periodSplits[0]?.inSampleStart ?? new Date(startDate),
+          periodSplits[0]?.inSampleEnd ?? new Date(startDate)
         ),
-        outOfSampleDays: outOfSampleDays ?? Math.floor(
-          (new Date(periodSplits[0]?.outOfSampleEnd || endDate).getTime() -
-           new Date(periodSplits[0]?.outOfSampleStart || endDate).getTime()) /
-          (1000 * 60 * 60 * 24)
+        outOfSampleDays: outOfSampleDays ?? calculateInclusiveDays(
+          periodSplits[0]?.outOfSampleStart ?? new Date(endDate),
+          periodSplits[0]?.outOfSampleEnd ?? new Date(endDate)
         ),
       },
     });

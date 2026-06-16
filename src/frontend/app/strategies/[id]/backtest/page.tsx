@@ -61,7 +61,7 @@ interface BacktestParams {
   maxPositions: number;
 }
 
-type WalkForwardMode = 'fixed_split' | 'rolling_window';
+type WalkForwardMode = WalkForwardResult["type"];
 
 interface WalkForwardParams {
   type: WalkForwardMode;
