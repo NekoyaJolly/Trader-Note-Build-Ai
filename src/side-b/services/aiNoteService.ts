@@ -40,6 +40,7 @@ import {
 import * as aiNoteRepository from '../repositories/aiNoteRepository';
 import { serializeLensSnapshot, type LensFeatureSnapshot } from '../lenses';
 import { edgeLedger } from '../ledger';
+import { materializationService } from '../bridge/MaterializationService';
 import { modelFor } from '../../config';
 import type { Prisma } from '@prisma/client';
 import { ReflectionOutputSchema } from '../../schemas/api/sideB';
@@ -283,8 +284,42 @@ export async function listNotes(options: {
  */
 export async function setNoteUsedForMatching(
   id: string,
-  usedForMatching: boolean
+  usedForMatching: boolean,
+  userId: string
 ): Promise<AITradeNote | null> {
+  const source = await aiNoteRepository.findAITradeNoteMaterializationSource(id);
+  if (!source) {
+    return null;
+  }
+
+  if (usedForMatching) {
+    if (!source.enteredAt) {
+      throw new Error('Side-B AIノートを昇格できません: エントリー日時がありません');
+    }
+    await materializationService.materializeFromVirtualTrade({
+      userId,
+      aiTradeNoteId: source.id,
+      symbol: source.symbol,
+      side: source.direction,
+      entryPrice: source.entryPrice,
+      enteredAt: source.enteredAt,
+      timeframe: source.timeframe,
+      higherTimeframe: source.higherTimeframe,
+      lensSnapshot: source.lensSnapshot,
+      existingTradeNoteId: source.tradeNoteId,
+      status: 'active',
+      usedForMatching: true,
+    });
+    return aiNoteRepository.findAITradeNoteById(id);
+  } else if (source.tradeNoteId) {
+    await materializationService.archiveMaterializedTradeNote({
+      aiTradeNoteId: source.id,
+      tradeNoteId: source.tradeNoteId,
+      userId,
+    });
+    return aiNoteRepository.findAITradeNoteById(id);
+  }
+
   return aiNoteRepository.setAITradeNoteUsedForMatching(id, usedForMatching);
 }
 
