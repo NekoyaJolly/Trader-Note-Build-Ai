@@ -45,6 +45,8 @@ export interface MaterializeFromVirtualTradeInput {
     lensSnapshot?: AITradeNote['lensSnapshot'];
     /** Side-A 監視対象にする場合は active、履歴だけ残す場合は archived を指定する。 */
     status?: NoteStatus;
+    /** AITradeNote.usedForMatching も同一トランザクションで更新する場合に指定する。 */
+    usedForMatching?: boolean;
     /** 既に紐づく TradeNote がある場合は重複作成せず再有効化する。 */
     existingTradeNoteId?: string;
 }
@@ -109,6 +111,7 @@ export class MaterializationService {
                 featureVector,
                 tradedAt: input.enteredAt,
                 lensSnapshot: noteLensSnapshot,
+                usedForMatching: input.usedForMatching,
             });
         }
 
@@ -124,6 +127,7 @@ export class MaterializationService {
             aiTradeNoteId: input.aiTradeNoteId,
             lensSnapshot: noteLensSnapshot,
             status: input.status ?? 'archived',
+            usedForMatching: input.usedForMatching,
         });
 
         return tradeNoteId;
@@ -134,24 +138,32 @@ export class MaterializationService {
      * human ノートの誤アーカイブを避けるため、Side-B materialize タグ付きだけを対象にする。
      */
     async archiveMaterializedTradeNote(input: {
+        aiTradeNoteId: string;
         tradeNoteId: string;
         userId: string;
     }): Promise<void> {
-        const result = await prisma.tradeNote.updateMany({
-            where: {
-                id: input.tradeNoteId,
-                userId: input.userId,
-                tags: { has: 'side_b_materialized' },
-            },
-            data: {
-                status: 'archived',
-                archivedAt: new Date(),
-            },
-        });
+        await prisma.$transaction(async (tx) => {
+            const result = await tx.tradeNote.updateMany({
+                where: {
+                    id: input.tradeNoteId,
+                    userId: input.userId,
+                    tags: { has: 'side_b_materialized' },
+                },
+                data: {
+                    status: 'archived',
+                    archivedAt: new Date(),
+                },
+            });
 
-        if (result.count === 0) {
-            throw new Error('Side-B 昇格ノートの所有者確認またはタグ確認に失敗しました');
-        }
+            if (result.count === 0) {
+                throw new Error('Side-B 昇格ノートの所有者確認またはタグ確認に失敗しました');
+            }
+
+            await tx.aITradeNote.update({
+                where: { id: input.aiTradeNoteId },
+                data: { usedForMatching: false },
+            });
+        });
     }
 
     /**
@@ -171,6 +183,7 @@ export class MaterializationService {
         aiTradeNoteId?: string;
         lensSnapshot: NoteLensSnapshot | null;
         status: NoteStatus;
+        usedForMatching?: boolean;
     }): Promise<{ tradeId: string; tradeNoteId: string }> {
         return await prisma.$transaction(async (tx) => {
             const trade = await tx.trade.create({
@@ -210,7 +223,12 @@ export class MaterializationService {
             if (args.aiTradeNoteId !== undefined) {
                 await tx.aITradeNote.update({
                     where: { id: args.aiTradeNoteId },
-                    data: { tradeNoteId: note.id },
+                    data: {
+                        tradeNoteId: note.id,
+                        ...(args.usedForMatching !== undefined
+                            ? { usedForMatching: args.usedForMatching }
+                            : {}),
+                    },
                 });
 
                 await this.upsertSideBNoteCore(tx, {
@@ -243,6 +261,7 @@ export class MaterializationService {
         featureVector: number[];
         tradedAt: Date;
         lensSnapshot: NoteLensSnapshot | null;
+        usedForMatching?: boolean;
     }): Promise<string> {
         return await prisma.$transaction(async (tx) => {
             const result = await tx.tradeNote.updateMany({
@@ -271,7 +290,12 @@ export class MaterializationService {
             if (args.aiTradeNoteId !== undefined) {
                 await tx.aITradeNote.update({
                     where: { id: args.aiTradeNoteId },
-                    data: { tradeNoteId: args.tradeNoteId },
+                    data: {
+                        tradeNoteId: args.tradeNoteId,
+                        ...(args.usedForMatching !== undefined
+                            ? { usedForMatching: args.usedForMatching }
+                            : {}),
+                    },
                 });
 
                 await this.upsertSideBNoteCore(tx, {

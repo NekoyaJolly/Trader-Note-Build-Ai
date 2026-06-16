@@ -308,12 +308,16 @@ export async function setNoteUsedForMatching(
       lensSnapshot: source.lensSnapshot,
       existingTradeNoteId: source.tradeNoteId,
       status: 'active',
+      usedForMatching: true,
     });
+    return aiNoteRepository.findAITradeNoteById(id);
   } else if (source.tradeNoteId) {
     await materializationService.archiveMaterializedTradeNote({
+      aiTradeNoteId: source.id,
       tradeNoteId: source.tradeNoteId,
       userId,
     });
+    return aiNoteRepository.findAITradeNoteById(id);
   }
 
   return aiNoteRepository.setAITradeNoteUsedForMatching(id, usedForMatching);
