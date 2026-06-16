@@ -458,3 +458,5 @@ similarity(noteSnapshot, marketSnapshot):
 | 類似度 | （cosine は廃止）`getSimilarityLevel`/閾値定数は流用可 | レンズ単位類似度 + 重み付き集計エンジン |
 | 通知 | `NotificationTriggerService` / `InAppNotificationSender` / 観測性 `MatchingPipelineRun` | — |
 | ブリッジ | `AITradeNote.tradeNoteId` / `MaterializationService` | materialize に実 lensSnapshot を渡す（placeholder 解消） |
+
+〔2026-06-17 実装補足〕Side-B AIノートの本番運用トグル true 時は、操作した認証ユーザーの Side-A `TradeNote(status=active)` として冪等に昇格する。`AITradeNote.tradeNoteId` と `Note.tradeNoteId` / `Note.aiTradeNoteId` を同一トランザクションで結び、Side-B 既存 `lensSnapshot` は正準 `NoteLensSnapshot` に変換して保存する。legacy `TradeNote.featureVector` は保存済み lensSnapshot から決定論的に派生し、snapshot も featureVector も無い場合は仮値を作らず昇格を失敗させる。トグル false 時は `side_b_materialized` タグ付きのリンク済み TradeNote を archived に戻す。

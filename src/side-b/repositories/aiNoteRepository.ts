@@ -18,6 +18,19 @@ import type {
   SummaryPeriod,
 } from '../models';
 
+/** Side-B AITradeNote を Side-A TradeNote へ昇格するための最小入力 */
+export interface AITradeNoteMaterializationSource {
+  readonly id: string;
+  readonly symbol: string;
+  readonly direction: 'long' | 'short';
+  readonly timeframe?: string;
+  readonly higherTimeframe?: string;
+  readonly entryPrice: number;
+  readonly enteredAt: Date | null;
+  readonly tradeNoteId?: string;
+  readonly lensSnapshot?: AITradeNote['lensSnapshot'];
+}
+
 // ===== AITradeNote CRUD =====
 
 /**
@@ -108,6 +121,50 @@ export async function findAITradeNoteById(id: string): Promise<AITradeNote | nul
 
   if (!note) return null;
   return mapPrismaToAITradeNote(note);
+}
+
+/**
+ * Side-B AITradeNote を Side-A TradeNote へ昇格するための材料を取得する。
+ *
+ * 一覧・詳細 API のレスポンス形は変えず、昇格処理内部だけで必要な
+ * VirtualTrade.actualEntry / enteredAt / lensSnapshot を select する。
+ */
+export async function findAITradeNoteMaterializationSource(
+  id: string
+): Promise<AITradeNoteMaterializationSource | null> {
+  const note = await prisma.aITradeNote.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      symbol: true,
+      direction: true,
+      timeframe: true,
+      higherTimeframe: true,
+      tradeNoteId: true,
+      lensSnapshot: true,
+      virtualTrade: {
+        select: {
+          actualEntry: true,
+          plannedEntry: true,
+          enteredAt: true,
+        },
+      },
+    },
+  });
+
+  if (!note) return null;
+
+  return {
+    id: note.id,
+    symbol: note.symbol,
+    direction: normalizeTradeDirection(note.direction),
+    timeframe: note.timeframe ?? undefined,
+    higherTimeframe: note.higherTimeframe ?? undefined,
+    entryPrice: (note.virtualTrade.actualEntry ?? note.virtualTrade.plannedEntry).toNumber(),
+    enteredAt: note.virtualTrade.enteredAt,
+    tradeNoteId: note.tradeNoteId ?? undefined,
+    lensSnapshot: fromPrismaJsonValue<AITradeNote['lensSnapshot']>(note.lensSnapshot),
+  };
 }
 
 /**
@@ -440,6 +497,13 @@ function mapPrismaToAITradeNote(note: AITradeNoteRow): AITradeNote {
     aiModel: note.aiModel,
     createdAt: note.createdAt,
   };
+}
+
+function normalizeTradeDirection(direction: string): 'long' | 'short' {
+  if (direction === 'long' || direction === 'short') {
+    return direction;
+  }
+  throw new Error(`AITradeNote.direction が不正です: ${direction}`);
 }
 
 function mapPrismaToAINoteSummary(summary: NonNullable<PrismaAINoteSummary>): AINoteSummary {

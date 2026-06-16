@@ -872,7 +872,11 @@ export class SideBController {
         return;
       }
 
-      const note = await aiNoteService.setNoteUsedForMatching(id, parsedBody.data.usedForMatching);
+      const note = await aiNoteService.setNoteUsedForMatching(
+        id,
+        parsedBody.data.usedForMatching,
+        req.user!.userId
+      );
 
       if (!note) {
         res.status(404).json({ error: 'AIノートが見つかりません' });

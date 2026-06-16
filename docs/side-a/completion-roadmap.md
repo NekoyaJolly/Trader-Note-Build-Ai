@@ -147,7 +147,7 @@ Side-A は「人間トレーダーのノーコード相棒」。完成形は **2
 - [x] OrderPreset 信頼度の動的算出〔M〕 — **2026-06-16 実装**: 最新 MatchResult がある場合は一致スコアを主軸に、無い場合はノート情報量・特徴量カバレッジ・インジケーター根拠・価格近接度から保守的に算出。API/UI に `confidenceSource` / `confidenceReasons` を追加し、固定値ではなく算出根拠を確認できるようにした。
 - [x] 市場データ失敗時のユーザー通知・カバレッジ可視化〔M〕 — **2026-06-16 実装**: matching pipeline の `skipReasons` / `errors` を Home の稼働状況カードでユーザー向けに翻訳表示。`market_data_unavailable` を「市場データ未取得」、`lens_snapshot_missing` 等を評価カバレッジ注意として表示し、どの理由で通知・評価が欠落したかを確認できるようにした。
 - [x] バックテスト可視化強化 / 複数シンボル / ローリングWF〔M〕 — **2026-06-16 実装**: バックテスト結果 DTO に実行シンボルを追加し、チャート表示も `result.symbol` を優先。WF は固定分割 / ローリング方式を UI から選択可能にし、rolling は `inSampleDays/outOfSampleDays` で IS を重ねながら OOS 日数ぶん前進。WF 結果に方式・IS/OOS平均勝率・平均乖離・総トレード数を表示し、単一ストラテジーを複数シンボルで検証しやすくした。
-- [ ] ノート統一(双方向昇格、Side-B materialize 実値化)〔M〕
+- [x] ノート統一(双方向昇格、Side-B materialize 実値化)〔M〕 — **2026-06-17 実装**: Side-B AIノートの本番運用トグル true 時に、認証ユーザー所有の Side-A active TradeNote へ冪等昇格。AITradeNote.tradeNoteId / Note.tradeNoteId / Note.aiTradeNoteId を同時に結び、保存済み Side-B lensSnapshot から legacy 12D featureVector を派生して全 0.5 placeholder を廃止。トグル false 時はリンク済み Side-B materialized TradeNote を archived に戻す。
 
 ---
 
