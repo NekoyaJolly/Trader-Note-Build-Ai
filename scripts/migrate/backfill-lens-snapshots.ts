@@ -7,7 +7,8 @@
  * - Note コア行はあるが lensSnapshot=null のもの(生成失敗・データ未到達)も再試行する
  *
  * 実行コマンド:
- *   npx tsx scripts/migrate/backfill-lens-snapshots.ts [--limit N] [--dry-run] [--include-archived]
+ *   npx tsx scripts/migrate/backfill-lens-snapshots.ts --dry-run [--limit N] [--include-archived]
+ *   npx tsx scripts/migrate/backfill-lens-snapshots.ts --confirm-write [--limit N] [--include-archived]
  *
  * 挙動:
  * - 対象: status が draft / active の TradeNote(--include-archived で archived も対象)
@@ -21,18 +22,17 @@
 
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
-import { prisma } from '../../src/backend/db/client';
-import { LensNoteCoreService } from '../../src/services/lensNoteCoreService';
 import type { IndicatorLensSourceConfig } from '../../src/shared/similarity/indicatorLenses';
 
 interface CliOptions {
   limit: number;
   dryRun: boolean;
   includeArchived: boolean;
+  confirmWrite: boolean;
 }
 
 function parseArgs(argv: string[]): CliOptions {
-  const options: CliOptions = { limit: 1000, dryRun: false, includeArchived: false };
+  const options: CliOptions = { limit: 1000, dryRun: false, includeArchived: false, confirmWrite: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--limit') {
@@ -46,6 +46,8 @@ function parseArgs(argv: string[]): CliOptions {
       options.dryRun = true;
     } else if (arg === '--include-archived') {
       options.includeArchived = true;
+    } else if (arg === '--confirm-write') {
+      options.confirmWrite = true;
     } else {
       throw new Error(`未知の引数です: ${arg}`);
     }
@@ -98,81 +100,91 @@ async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   console.log(
     `[backfill-lens-snapshots] 開始: limit=${options.limit} dryRun=${options.dryRun} ` +
-      `includeArchived=${options.includeArchived}`
+      `includeArchived=${options.includeArchived} confirmWrite=${options.confirmWrite}`
   );
 
-  const statuses: Array<'draft' | 'active' | 'archived'> = options.includeArchived
-    ? ['draft', 'active', 'archived']
-    : ['draft', 'active'];
-
-  // Note コア行が無い、または lensSnapshot=null のノートを対象にする
-  const notes = await prisma.tradeNote.findMany({
-    where: {
-      status: { in: statuses },
-      OR: [{ coreNote: null }, { coreNote: { lensSnapshot: { equals: Prisma.AnyNull } } }],
-    },
-    include: { trade: { select: { timestamp: true } } },
-    orderBy: { createdAt: 'asc' },
-    take: options.limit,
-  });
-
-  console.log(`[backfill-lens-snapshots] 対象ノート: ${notes.length} 件`);
-  if (options.dryRun) {
-    for (const note of notes) {
-      console.log(
-        `  - ${note.id} ${note.symbol} ${note.status} eventTime=${note.trade.timestamp.toISOString()}`
-      );
-    }
-    console.log('[backfill-lens-snapshots] dry-run のため終了');
-    return;
+  if (!options.dryRun && !options.confirmWrite) {
+    throw new Error(
+      '書き込み実行には --confirm-write が必要です。まず --dry-run と scripts/check/lens-snapshot-backfill-status.ts で対象を確認してください。'
+    );
   }
 
-  const service = new LensNoteCoreService();
-  let succeeded = 0;
-  let withoutSnapshot = 0;
-  let failed = 0;
+  const { prisma } = await import('../../src/backend/db/client');
+  try {
 
-  for (let i = 0; i < notes.length; i += 1) {
-    const note = notes[i];
-    try {
-      const result = await service.createForSideATradeNote({
-        tradeNoteId: note.id,
-        userId: note.userId,
-        symbol: note.symbol,
-        side: note.side,
-        timeframe: note.timeframe ?? '15m',
-        entryPrice: note.entryPrice.toNumber(),
-        eventTime: note.trade.timestamp,
-        indicatorConfigs: extractIndicatorConfigs(note.indicatorConfig),
-      });
-      if (result.snapshotGenerated) {
-        succeeded += 1;
-      } else {
-        withoutSnapshot += 1;
-        console.warn(
-          `  [${i + 1}/${notes.length}] snapshot 生成できず(null 登録): ${note.id} ${note.symbol} ` +
-            result.warnings.join(' / ')
+    const statuses: Array<'draft' | 'active' | 'archived'> = options.includeArchived
+      ? ['draft', 'active', 'archived']
+      : ['draft', 'active'];
+
+    // Note コア行が無い、または lensSnapshot=null のノートを対象にする
+    const notes = await prisma.tradeNote.findMany({
+      where: {
+        status: { in: statuses },
+        OR: [{ coreNote: null }, { coreNote: { lensSnapshot: { equals: Prisma.AnyNull } } }],
+      },
+      include: { trade: { select: { timestamp: true } } },
+      orderBy: { createdAt: 'asc' },
+      take: options.limit,
+    });
+
+    console.log(`[backfill-lens-snapshots] 対象ノート: ${notes.length} 件`);
+    if (options.dryRun) {
+      for (const note of notes) {
+        console.log(
+          `  - ${note.id} ${note.symbol} ${note.status} eventTime=${note.trade.timestamp.toISOString()}`
         );
       }
-      if ((i + 1) % 10 === 0) {
-        console.log(`  進捗: ${i + 1}/${notes.length}`);
-      }
-    } catch (error) {
-      failed += 1;
-      console.error(`  [${i + 1}/${notes.length}] 失敗: ${note.id}`, error);
+      console.log('[backfill-lens-snapshots] dry-run のため終了');
+      return;
     }
-  }
 
-  console.log(
-    `[backfill-lens-snapshots] 完了: snapshot 生成=${succeeded} / null 登録=${withoutSnapshot} / 失敗=${failed}`
-  );
+    const { LensNoteCoreService } = await import('../../src/services/lensNoteCoreService');
+    const service = new LensNoteCoreService();
+    let succeeded = 0;
+    let withoutSnapshot = 0;
+    let failed = 0;
+
+    for (let i = 0; i < notes.length; i += 1) {
+      const note = notes[i];
+      try {
+        const result = await service.createForSideATradeNote({
+          tradeNoteId: note.id,
+          userId: note.userId,
+          symbol: note.symbol,
+          side: note.side,
+          timeframe: note.timeframe ?? '15m',
+          entryPrice: note.entryPrice.toNumber(),
+          eventTime: note.trade.timestamp,
+          indicatorConfigs: extractIndicatorConfigs(note.indicatorConfig),
+        });
+        if (result.snapshotGenerated) {
+          succeeded += 1;
+        } else {
+          withoutSnapshot += 1;
+          console.warn(
+            `  [${i + 1}/${notes.length}] snapshot 生成できず(null 登録): ${note.id} ${note.symbol} ` +
+              result.warnings.join(' / ')
+          );
+        }
+        if ((i + 1) % 10 === 0) {
+          console.log(`  進捗: ${i + 1}/${notes.length}`);
+        }
+      } catch (error) {
+        failed += 1;
+        console.error(`  [${i + 1}/${notes.length}] 失敗: ${note.id}`, error);
+      }
+    }
+
+    console.log(
+      `[backfill-lens-snapshots] 完了: snapshot 生成=${succeeded} / null 登録=${withoutSnapshot} / 失敗=${failed}`
+    );
+  } finally {
+    await prisma.$disconnect();
+  }
 }
 
 main()
   .catch((error) => {
     console.error('[backfill-lens-snapshots] 致命的エラー:', error);
     process.exitCode = 1;
-  })
-  .finally(() => {
-    void prisma.$disconnect();
   });

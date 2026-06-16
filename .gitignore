@@ -69,5 +69,6 @@ __pycache__/
 .chrome-lastmile-*/
 
 # 本番 smoke (playwright.production.config.ts) の成果物
+.auth/
 playwright-report-production/
 test-results-production.xml

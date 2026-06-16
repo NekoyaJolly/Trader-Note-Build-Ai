@@ -4,7 +4,7 @@ const productionUiUrl = process.env.PRODUCTION_UI_URL ?? 'https://trader-note-bu
 
 /**
  * 本番公開面 smoke 用の Playwright 設定。
- * 認証済みゴールデンパスは別PRで専用の認証セットアップを整備する。
+ * 認証済み smoke は scripts/check/production-*.ts で手動ログイン済み storageState を使う。
  */
 export default defineConfig({
   testDir: './tests/e2e',
