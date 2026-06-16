@@ -265,8 +265,6 @@ http://localhost:3100
 | `/api/cron/strategy-alerts` | GET | cron | none | none | `CRON_SECRET` | no | yes | no | ストラテジー条件ライブ評価+アラート発火 (Phase γ-1)。市場休場時スキップ。 |
 | `/api/cron/strategy-alerts/test` | POST | cron | none | none | `CRON_SECRET` | no | yes | no | ストラテジーライブ評価の手動テスト (市場チェックなし)。 |
 | `analysis-engine` 連携 | internal | internal | service-to-service | `X-Analysis-Engine-Secret` | shared secret | no | yes | no | `src/backend/services/analysisEngineClient` / PythonBridge HTTP mode からのみ呼び出す。`/health` 以外は secret なしで `401`。 |
-| `/api/daily-status` | GET | TODO: confirm | TODO | TODO | TODO | TODO | TODO | TODO | frontend 参照あり。backend route は未確認。 |
-| `/api/auth/ctrader/exchange` | POST | TODO: confirm | TODO | TODO | TODO | TODO | TODO | TODO | docs 旧記載。現行 route は `/api/auth/ctrader/callback`。 |
 
 ### 認証エンドポイント
 
@@ -361,7 +359,7 @@ cTrader OAuth 認証 URL を取得します。
 
 ---
 
-#### POST /api/auth/ctrader/exchange
+#### POST /api/auth/ctrader/callback
 認可コードをアクセストークンに交換します。
 
 **リクエストボディ:**
@@ -371,13 +369,34 @@ cTrader OAuth 認証 URL を取得します。
 }
 ```
 
+ローカル開発時のみ `redirect_uri` を任意で指定できます。指定する場合は、認可 URL 生成時の redirect URI と完全一致させる必要があります。
+
+```json
+{
+  "code": "string",
+  "redirect_uri": "http://localhost:3102/auth/ctrader/callback"
+}
+```
+
 **応答:**
 ```json
 {
   "success": true,
-  "expiresAt": "2024-01-01T00:00:00.000Z"
+  "user": {
+    "id": "string",
+    "primaryAccountId": "string",
+    "displayName": "string",
+    "email": "string",
+    "role": "user"
+  },
+  "token": "string",
+  "accountId": "string",
+  "isNewUser": false,
+  "message": "cTrader 連携が完了しました"
 }
 ```
+
+`role` は `user` または `admin` を返します。
 
 ---
 

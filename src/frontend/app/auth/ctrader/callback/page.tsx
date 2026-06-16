@@ -6,7 +6,7 @@
  * フロー:
  * 1. cTrader が ?code=xxx&state=yyy で リダイレクト
  * 2. このページで code を取得
- * 3. バックエンド API /api/auth/ctrader/exchange に POST
+ * 3. バックエンド API /api/auth/ctrader/callback に POST
  * 4. 成功したら /settings?ctrader=connected にリダイレクト
  * 5. 失敗したら /settings?ctrader=error にリダイレクト
  */
