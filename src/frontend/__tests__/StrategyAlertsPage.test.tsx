@@ -45,7 +45,22 @@ const STRATEGY = {
   side: "buy",
   status: "active",
   currentVersionId: "version-1",
-  currentVersion: {},
+  currentVersion: {
+    id: "version-1",
+    versionNumber: 1,
+    entryConditions: {
+      groupId: "group-1",
+      operator: "AND",
+      conditions: [],
+    },
+    exitSettings: {
+      takeProfit: { value: 1, unit: "percent" },
+      stopLoss: { value: 1, unit: "percent" },
+    },
+    entryTiming: "next_open",
+    createdAt: "2026-06-11T00:00:00Z",
+    changeNote: null,
+  },
   versions: [],
   createdAt: "2026-06-11T00:00:00Z",
   updatedAt: "2026-06-11T00:00:00Z",
