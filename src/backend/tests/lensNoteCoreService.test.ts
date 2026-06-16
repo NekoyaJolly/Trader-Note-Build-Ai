@@ -133,12 +133,20 @@ describe('LensNoteCoreService 通知粒度設定の配線 (Phase β-2a)', () => 
       preferenceService,
     }) as LensNoteCoreServiceDeps;
 
-  test('解決済み有効しきい値が比較エンジンに渡される (comparison.threshold に反映)', async () => {
+  test('解決済み有効しきい値と重みプリセットが比較エンジンに渡される', async () => {
     const resolveForNotes = jest.fn().mockResolvedValue(
       new Map([
         [
           'note_1',
-          { threshold: 0.95, minMatchLevel: 'medium', cooldownMs: 60000, effectiveThreshold: 0.95 },
+          {
+            threshold: 0.95,
+            minMatchLevel: 'medium',
+            weightPreset: 'state_focused',
+            cooldownMs: 60000,
+            maxPerDay: 10,
+            maxPerDaySource: 'user',
+            effectiveThreshold: 0.95,
+          },
         ],
       ])
     );
@@ -153,6 +161,7 @@ describe('LensNoteCoreService 通知粒度設定の配線 (Phase β-2a)', () => 
     // ユーザー設定の有効しきい値 0.95 が比較エンジンにそのまま渡る
     // (発火可否は score 次第。自己比較でもイベント型 none 同士は 0.5 のため score<1。§6.2)
     expect(detail.evaluations[0]?.comparison.threshold).toBe(0.95);
+    expect(detail.evaluations[0]?.comparison.preset).toBe('state_focused');
     expect(detail.evaluations[0]?.comparison.comparable).toBe(true);
     // 解決済み設定が評価結果に同梱される (マッチング側のクールダウン伝播用)
     expect(detail.evaluations[0]?.preference?.cooldownMs).toBe(60000);

@@ -316,6 +316,8 @@ model NotificationPreference {
   threshold       Float?
   /// 通知する最小一致レベル。null = 既定 (weak)
   minMatchLevel   SimilarityMatchLevel?
+  /// レンズ層の重みプリセット。null = 既定 (indicator_focused)
+  weightPreset    LensWeightPreset?
   /// 同一ノートの再通知クールダウン (分)。null = 既定 (NOTIFICATION_COOLDOWN_MS)
   cooldownMinutes Int?
   /// 24 時間あたりの通知上限。null = 既定。ノートマッチ通知では per-user カウントに適用する。
@@ -348,6 +350,13 @@ enum SimilarityMatchLevel {
   strong
   medium
   weak
+}
+
+/// レンズ類似度の層重みプリセット (similarityEngine の LensWeightPreset と対応)
+enum LensWeightPreset {
+  indicator_focused
+  balanced
+  state_focused
 }
 
 model OrderPreset {

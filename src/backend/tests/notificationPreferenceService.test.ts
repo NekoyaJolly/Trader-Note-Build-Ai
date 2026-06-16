@@ -4,6 +4,7 @@
  * 検証観点:
  * - mergePreferences: note/strategy > user > システム既定 の項目別マージ (正常系/境界値)
  * - effectiveThreshold: しきい値と一致レベル帯下限の大きい方 (§6.4)
+ * - weightPreset: レンズ層重みプリセットの階層解決 (§6.3)
  * - maxPerDay: null はシステム既定、note/strategy/user の優先順位どおりに解決
  * - resolveForNotes: 1 クエリでの一括解決とノート別マッピング
  * - upsertPreference: note スコープの所有チェック (異常系)
@@ -16,14 +17,16 @@ import {
   systemDefaultPreference,
   DEFAULT_MAX_NOTIFICATIONS_PER_DAY,
 } from '../../services/notification/notificationPreferenceService';
+import { UpsertNotificationPreferenceSchema } from '../../schemas/api/notification';
 
 /** テスト用の設定行スタブ (マージに使うフィールドのみ意味を持つ) */
 function makePref(
-  over: Partial<Pick<NotificationPreference, 'threshold' | 'minMatchLevel' | 'cooldownMinutes' | 'maxPerDay'>>
-): Pick<NotificationPreference, 'threshold' | 'minMatchLevel' | 'cooldownMinutes' | 'maxPerDay'> {
+  over: Partial<Pick<NotificationPreference, 'threshold' | 'minMatchLevel' | 'weightPreset' | 'cooldownMinutes' | 'maxPerDay'>>
+): Pick<NotificationPreference, 'threshold' | 'minMatchLevel' | 'weightPreset' | 'cooldownMinutes' | 'maxPerDay'> {
   return {
     threshold: null,
     minMatchLevel: null,
+    weightPreset: null,
     cooldownMinutes: null,
     maxPerDay: null,
     ...over,
@@ -37,6 +40,7 @@ describe('mergePreferences (Phase β-2a)', () => {
     // 既定: threshold 0.75 / weak 帯下限 0.7 → 有効しきい値 0.75
     expect(merged.effectiveThreshold).toBe(0.75);
     expect(merged.minMatchLevel).toBe('weak');
+    expect(merged.weightPreset).toBe('indicator_focused');
     expect(merged.maxPerDay).toBe(DEFAULT_MAX_NOTIFICATIONS_PER_DAY);
     expect(merged.maxPerDaySource).toBe('system');
   });
@@ -72,6 +76,24 @@ describe('mergePreferences (Phase β-2a)', () => {
 
     expect(merged.maxPerDay).toBe(6);
     expect(merged.maxPerDaySource).toBe('strategy');
+  });
+
+  it('weightPreset は note スコープが user スコープより優先される', () => {
+    const merged = mergePreferences(
+      makePref({ weightPreset: 'state_focused' }),
+      makePref({ weightPreset: 'balanced' })
+    );
+
+    expect(merged.weightPreset).toBe('state_focused');
+  });
+
+  it('note 側の weightPreset が null なら user スコープのプリセットを使う', () => {
+    const merged = mergePreferences(
+      makePref({ weightPreset: null }),
+      makePref({ weightPreset: 'balanced' })
+    );
+
+    expect(merged.weightPreset).toBe('balanced');
   });
 
   it('minMatchLevel の帯下限がしきい値を持ち上げる (§6.4 一致レベル)', () => {
@@ -123,6 +145,26 @@ describe('NotificationPreferenceService.resolveForNotes (Phase β-2a)', () => {
 
     expect(resolved.size).toBe(0);
     expect(findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('UpsertNotificationPreferenceSchema (通知粒度 API contract)', () => {
+  it('weightPreset の有効値を受け付ける', () => {
+    const result = UpsertNotificationPreferenceSchema.safeParse({
+      scope: 'user',
+      weightPreset: 'balanced',
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('weightPreset の未知値は拒否する', () => {
+    const result = UpsertNotificationPreferenceSchema.safeParse({
+      scope: 'user',
+      weightPreset: 'price_action_only',
+    });
+
+    expect(result.success).toBe(false);
   });
 });
 
@@ -237,11 +279,11 @@ describe('NotificationPreferenceService.upsertPreference (Phase β-2a)', () => {
     const service = new NotificationPreferenceService(prismaMock);
 
     // threshold は明示 null (クリア)、cooldownMinutes は省略 (維持)
-    await service.upsertPreference('user-a', { scope: 'user', threshold: null });
+    await service.upsertPreference('user-a', { scope: 'user', threshold: null, weightPreset: 'balanced' });
 
     expect(update).toHaveBeenCalledWith({
       where: { id: 'pref-1' },
-      data: { threshold: null },
+      data: { threshold: null, weightPreset: 'balanced' },
     });
   });
 });

@@ -277,13 +277,15 @@ export class LensNoteCoreService {
         }
 
         for (const { note, snapshot } of groupSnapshots) {
-          // ユーザー設定の有効しきい値 (threshold と一致レベル帯下限の大きい方) で発火判定する。
+          // ユーザー設定の有効しきい値と層重みプリセットで発火判定する。
           // 設定が無いノートはシステム既定 = 従来挙動 (Phase β-2a)
           const preference = preferenceByNoteId.get(note.id);
           const comparison = compareLensSnapshots(
             snapshot,
             marketResult.snapshot,
-            preference !== undefined ? { threshold: preference.effectiveThreshold } : undefined
+            preference !== undefined
+              ? { threshold: preference.effectiveThreshold, preset: preference.weightPreset }
+              : undefined
           );
           evaluations.push({
             note,

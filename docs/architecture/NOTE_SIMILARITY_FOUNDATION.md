@@ -194,7 +194,7 @@ similarity(noteSnapshot, marketSnapshot):
 
 - **既定プリセット = 指標層重め**（Neko 決定）。状態層 / 指標層の 2 層に層重みを置き、既定は指標層を重くする。
 - **ユーザー設定可・かつ分かりやすさ必須**: 生の数値だけでなく、**理解しやすいプリセット**（例: 「指標重視 / バランス / 状態重視」）を用意し、上級者は per-レンズ重みを微調整できる 2 段構成。「何を重視して通知しているか」がユーザーに伝わる UI にする。
-- 設定は `IndicatorProfile`（or ノート設定）単位で保持。
+- 層重みプリセットは `NotificationPreference.weightPreset` に保持する（2026-06-17 実装）。scope=user/note はノートマッチで `note > user > システム既定` の順に解決し、`null` は既定 `indicator_focused` を意味する。profile スコープはノート→プロファイル紐付け導入後に配線する。
 - **confidence 連動**: 低 confidence のレンズは自動的に寄与が下がる（`w *= min(conf)`）。
 - これは完成形の「**通知粒度のユーザー設定層**」の一部（completion-roadmap Phase β）。柱2 の条件アラートとも共通の設定層にする。
 

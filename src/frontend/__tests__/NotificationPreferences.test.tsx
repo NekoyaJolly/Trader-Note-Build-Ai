@@ -5,6 +5,7 @@
  * - 全体設定フォームが既存値を初期表示し、保存で upsert API に正しい値が渡る
  * - 空欄は null (= 既定に戻す) として送信される
  * - 24h 通知上限を表示・保存できる
+ * - レンズ層の重みプリセットを表示・保存できる
  * - ノート単位上書きの一覧表示と削除
  */
 
@@ -37,6 +38,7 @@ const USER_PREF: NotificationPreference = {
   strategyId: null,
   threshold: 0.85,
   minMatchLevel: "medium",
+  weightPreset: "balanced",
   cooldownMinutes: 120,
   maxPerDay: 20,
   createdAt: "2026-06-11T00:00:00Z",
@@ -51,6 +53,7 @@ const NOTE_PREF: NotificationPreference = {
   strategyId: null,
   threshold: 0.9,
   minMatchLevel: null,
+  weightPreset: "state_focused",
   cooldownMinutes: null,
   maxPerDay: 5,
   createdAt: "2026-06-11T00:00:00Z",
@@ -65,6 +68,7 @@ const STRATEGY_PREF: NotificationPreference = {
   strategyId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
   threshold: null,
   minMatchLevel: null,
+  weightPreset: null,
   cooldownMinutes: 45,
   maxPerDay: null,
   createdAt: "2026-06-11T00:00:00Z",
@@ -89,11 +93,13 @@ describe("通知粒度設定ページ (Phase β-2b)", () => {
 
     const threshold = screen.getByLabelText("類似度しきい値 (0〜1)") as HTMLInputElement;
     const level = screen.getByLabelText("通知する一致レベル") as HTMLSelectElement;
+    const weightPreset = screen.getByLabelText("重みプリセット") as HTMLSelectElement;
     const cooldown = screen.getByLabelText("再通知クールダウン (分)") as HTMLInputElement;
     const maxPerDay = screen.getByLabelText("24h 通知上限 (件)") as HTMLInputElement;
 
     expect(threshold.value).toBe("0.85");
     expect(level.value).toBe("medium");
+    expect(weightPreset.value).toBe("balanced");
     expect(cooldown.value).toBe("120");
     expect(maxPerDay.value).toBe("20");
   });
@@ -107,6 +113,9 @@ describe("通知粒度設定ページ (Phase β-2b)", () => {
     fireEvent.change(screen.getByLabelText("通知する一致レベル"), {
       target: { value: "strong" },
     });
+    fireEvent.change(screen.getByLabelText("重みプリセット"), {
+      target: { value: "state_focused" },
+    });
     fireEvent.change(screen.getByLabelText("24h 通知上限 (件)"), {
       target: { value: "10" },
     });
@@ -117,6 +126,7 @@ describe("通知粒度設定ページ (Phase β-2b)", () => {
       scope: "user",
       threshold: 0.9,
       minMatchLevel: "strong",
+      weightPreset: "state_focused",
       cooldownMinutes: 120,
       maxPerDay: 10,
     });
@@ -134,6 +144,9 @@ describe("通知粒度設定ページ (Phase β-2b)", () => {
     fireEvent.change(screen.getByLabelText("通知する一致レベル"), {
       target: { value: "" },
     });
+    fireEvent.change(screen.getByLabelText("重みプリセット"), {
+      target: { value: "" },
+    });
     fireEvent.change(screen.getByLabelText("24h 通知上限 (件)"), {
       target: { value: "" },
     });
@@ -144,6 +157,7 @@ describe("通知粒度設定ページ (Phase β-2b)", () => {
       scope: "user",
       threshold: null,
       minMatchLevel: null,
+      weightPreset: null,
       cooldownMinutes: null,
       maxPerDay: null,
     });
@@ -169,6 +183,7 @@ describe("通知粒度設定ページ (Phase β-2b)", () => {
     // ノート ID 先頭 8 文字のリンクが出る
     expect(screen.getByText(/11111111…/)).toBeDefined();
     expect(screen.getByText(/しきい値 0\.9/)).toBeDefined();
+    expect(screen.getByText(/\/ 状態重視/)).toBeDefined();
     expect(screen.getByText(/24h上限 5件/)).toBeDefined();
 
     fireEvent.click(

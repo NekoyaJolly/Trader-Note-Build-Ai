@@ -16,8 +16,16 @@ import {
   fetchNotificationPreferences,
   upsertNotificationPreference,
   deleteNotificationPreference,
-  NotificationPreference,
+  type NotificationPreference,
+  type NotificationWeightPreset,
 } from "@/lib/api";
+
+/** レンズ層の重みプリセット表示 */
+const WEIGHT_PRESET_LABELS: Record<NotificationWeightPreset, string> = {
+  indicator_focused: "指標重視",
+  balanced: "バランス",
+  state_focused: "状態重視",
+};
 
 export default function NoteNotificationPreference({ noteId }: { noteId: string }) {
   const [preference, setPreference] = useState<NotificationPreference | null>(null);
@@ -29,6 +37,7 @@ export default function NoteNotificationPreference({ noteId }: { noteId: string 
   // 入力は「空 = 既定」を表現するため文字列で保持する
   const [threshold, setThreshold] = useState("");
   const [minMatchLevel, setMinMatchLevel] = useState("");
+  const [weightPreset, setWeightPreset] = useState<"" | NotificationWeightPreset>("");
   const [cooldownMinutes, setCooldownMinutes] = useState("");
   const [maxPerDay, setMaxPerDay] = useState("");
 
@@ -39,6 +48,7 @@ export default function NoteNotificationPreference({ noteId }: { noteId: string 
       setPreference(notePref);
       setThreshold(notePref?.threshold !== null && notePref?.threshold !== undefined ? String(notePref.threshold) : "");
       setMinMatchLevel(notePref?.minMatchLevel ?? "");
+      setWeightPreset(notePref?.weightPreset ?? "");
       setCooldownMinutes(
         notePref?.cooldownMinutes !== null && notePref?.cooldownMinutes !== undefined
           ? String(notePref.cooldownMinutes)
@@ -86,6 +96,7 @@ export default function NoteNotificationPreference({ noteId }: { noteId: string 
         noteId,
         threshold: thresholdValue,
         minMatchLevel: minMatchLevel === "" ? null : (minMatchLevel as "strong" | "medium" | "weak"),
+        weightPreset: weightPreset === "" ? null : weightPreset,
         cooldownMinutes: cooldownValue,
         maxPerDay: maxPerDayValue,
       });
@@ -161,6 +172,20 @@ export default function NoteNotificationPreference({ noteId }: { noteId: string 
             <option value="strong">Strong のみ</option>
             <option value="medium">Medium 以上</option>
             <option value="weak">Weak 以上</option>
+          </select>
+        </label>
+        <label className="text-xs text-gray-400">
+          重みプリセット
+          <select
+            value={weightPreset}
+            onChange={(e) => setWeightPreset(e.target.value as "" | NotificationWeightPreset)}
+            aria-label="ノート重みプリセット"
+            className="mt-1 block w-40 px-2 py-1.5 bg-slate-900 border border-slate-700 rounded text-sm text-white focus:border-violet-500 focus:outline-none"
+          >
+            <option value="">既定</option>
+            <option value="indicator_focused">{WEIGHT_PRESET_LABELS.indicator_focused}</option>
+            <option value="balanced">{WEIGHT_PRESET_LABELS.balanced}</option>
+            <option value="state_focused">{WEIGHT_PRESET_LABELS.state_focused}</option>
           </select>
         </label>
         <label className="text-xs text-gray-400">
