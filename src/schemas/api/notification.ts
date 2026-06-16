@@ -4,6 +4,7 @@
  * notificationRoutes.ts で使用するリクエストバリデーション
  */
 import { z } from 'zod';
+import { NOTIFICATION_PREFERENCE_NUMERIC_RULES } from '../../shared/notificationPreferenceValidation';
 
 // ========================================
 // 共通スキーマ
@@ -84,8 +85,32 @@ export const UpsertNotificationPreferenceSchema = z
     threshold: z.number().min(0, '0以上で指定してください').max(1, '1以下で指定してください').nullable().optional(),
     minMatchLevel: z.enum(['strong', 'medium', 'weak']).nullable().optional(),
     weightPreset: z.enum(['indicator_focused', 'balanced', 'state_focused']).nullable().optional(),
-    cooldownMinutes: z.number().int().min(1, '1分以上で指定してください').max(10080, '1週間以内で指定してください').nullable().optional(),
-    maxPerDay: z.number().int('整数で指定してください').min(1, '1件以上で指定してください').max(1000, '1000件以下で指定してください').nullable().optional(),
+    cooldownMinutes: z
+      .number()
+      .int(NOTIFICATION_PREFERENCE_NUMERIC_RULES.cooldownMinutes.integerMessage)
+      .min(
+        NOTIFICATION_PREFERENCE_NUMERIC_RULES.cooldownMinutes.min,
+        NOTIFICATION_PREFERENCE_NUMERIC_RULES.cooldownMinutes.minMessage
+      )
+      .max(
+        NOTIFICATION_PREFERENCE_NUMERIC_RULES.cooldownMinutes.max,
+        NOTIFICATION_PREFERENCE_NUMERIC_RULES.cooldownMinutes.maxMessage
+      )
+      .nullable()
+      .optional(),
+    maxPerDay: z
+      .number()
+      .int(NOTIFICATION_PREFERENCE_NUMERIC_RULES.maxPerDay.integerMessage)
+      .min(
+        NOTIFICATION_PREFERENCE_NUMERIC_RULES.maxPerDay.min,
+        NOTIFICATION_PREFERENCE_NUMERIC_RULES.maxPerDay.minMessage
+      )
+      .max(
+        NOTIFICATION_PREFERENCE_NUMERIC_RULES.maxPerDay.max,
+        NOTIFICATION_PREFERENCE_NUMERIC_RULES.maxPerDay.maxMessage
+      )
+      .nullable()
+      .optional(),
   })
   .strict()
   .refine((d) => d.scope !== 'note' || d.noteId !== undefined, {

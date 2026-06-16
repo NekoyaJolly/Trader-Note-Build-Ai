@@ -30,7 +30,10 @@ import {
   type NotificationPreference,
   type UpsertNotificationPreferenceInput,
 } from "@/lib/api";
-import { UpsertNotificationPreferenceSchema } from "../../../../../schemas/api/notification";
+import {
+  validateNotificationPreferenceCooldownMinutes,
+  validateNotificationPreferenceMaxPerDay,
+} from "../../../../../shared/notificationPreferenceValidation";
 import type { Strategy } from "@/types/strategy";
 
 export default function StrategyAlertsPage() {
@@ -167,10 +170,12 @@ export default function StrategyAlertsPage() {
       cooldownMinutes: cooldownValue,
       maxPerDay: maxPerDayValue,
     };
-    const validation = UpsertNotificationPreferenceSchema.safeParse(preferencePayload);
-    if (!validation.success) {
+    const validationMessage =
+      validateNotificationPreferenceCooldownMinutes(preferencePayload.cooldownMinutes ?? null) ??
+      validateNotificationPreferenceMaxPerDay(preferencePayload.maxPerDay ?? null);
+    if (validationMessage !== null) {
       setSuccess(null);
-      setError(validation.error.issues[0]?.message ?? "通知粒度の入力値が不正です");
+      setError(validationMessage);
       return;
     }
 
