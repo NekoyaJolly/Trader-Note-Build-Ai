@@ -922,10 +922,16 @@ ID で特定のトレードノートを取得します。
     "suggestedPrice": 42500.00,
     "suggestedQuantity": 0.1,
     "basedOnNoteId": "uuid",
-    "confidence": 0.8
+    "confidence": 0.8,
+    "confidenceSource": "latest_match",
+    "confidenceReasons": [
+      "最新マッチスコア 80.0% を主軸に算出"
+    ]
   }
 }
 ```
+
+`confidenceSource` は `latest_match`（最新の一致判定スコア由来）または `note_quality`（最新マッチが無い場合のノート情報量推定）です。`confidence` は従来通り 0.0〜1.0 の数値で返します。
 
 ---
 

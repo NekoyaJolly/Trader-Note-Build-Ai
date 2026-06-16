@@ -55,6 +55,20 @@ function OrderPresetLoadingFallback() {
 }
 
 /**
+ * 信頼度の算出元を短い表示名に変換する。
+ */
+function getConfidenceSourceLabel(source: OrderPreset["confidenceSource"]): string {
+  switch (source) {
+    case "latest_match":
+      return "最新マッチ";
+    case "note_quality":
+      return "ノート情報";
+    default:
+      return "算出元未取得";
+  }
+}
+
+/**
  * 発注支援画面コンテンツ（実際のロジック）
  */
 function OrderPresetContent() {
@@ -159,6 +173,8 @@ function OrderPresetContent() {
 
   // side を正規化（大文字小文字統一）
   const normalizedSide = preset.side.toUpperCase() as "BUY" | "SELL";
+  const confidenceReasons = preset.confidenceReasons ?? [];
+  const confidenceSourceLabel = getConfidenceSourceLabel(preset.confidenceSource);
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-4xl">
@@ -236,9 +252,23 @@ function OrderPresetContent() {
 
               <div>
                 <div className="text-sm text-gray-400 mb-1">信頼度</div>
-                <div className="text-base text-gray-300">
-                  {(preset.confidence * 100).toFixed(1)}%
+                <div className="flex items-center gap-2">
+                  <div className="text-base text-gray-300">
+                    {(preset.confidence * 100).toFixed(1)}%
+                  </div>
+                  <Badge
+                    variant={preset.confidenceSource === "latest_match" ? "secondary" : "outline"}
+                  >
+                    {confidenceSourceLabel}
+                  </Badge>
                 </div>
+                {confidenceReasons.length > 0 && (
+                  <ul className="mt-2 space-y-1 text-xs text-gray-400">
+                    {confidenceReasons.map((reason) => (
+                      <li key={reason}>・{reason}</li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </div>
           </div>

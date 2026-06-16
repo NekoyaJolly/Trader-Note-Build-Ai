@@ -483,6 +483,10 @@ export interface OrderPreset {
   suggestedQuantity: number;
   basedOnNoteId: string;
   confidence: number;
+  /** 信頼度の主な算出元。旧APIレスポンスでは未設定の場合がある。 */
+  confidenceSource?: "latest_match" | "note_quality";
+  /** 信頼度算出の表示用根拠。旧APIレスポンスでは未設定の場合がある。 */
+  confidenceReasons?: string[];
 }
 
 /**
