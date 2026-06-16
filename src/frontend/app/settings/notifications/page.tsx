@@ -283,6 +283,11 @@ function NoteOverrideList({
                   size="sm"
                   onClick={() => handleDelete(pref.id)}
                   disabled={deletingId === pref.id}
+                  aria-label={
+                    pref.noteId
+                      ? `ノート ${pref.noteId.slice(0, 8)} の通知粒度上書きを削除`
+                      : "未紐付けノートの通知粒度上書きを削除"
+                  }
                   className="text-gray-400 hover:text-red-400"
                 >
                   {deletingId === pref.id ? "..." : "削除"}
@@ -367,6 +372,11 @@ function StrategyOverrideList({
                   size="sm"
                   onClick={() => handleDelete(pref.id)}
                   disabled={deletingId === pref.id}
+                  aria-label={
+                    pref.strategyId
+                      ? `ストラテジー ${pref.strategyId.slice(0, 8)} の通知粒度上書きを削除`
+                      : "未紐付けストラテジーの通知粒度上書きを削除"
+                  }
                   className="text-gray-400 hover:text-red-400"
                 >
                   {deletingId === pref.id ? "..." : "削除"}

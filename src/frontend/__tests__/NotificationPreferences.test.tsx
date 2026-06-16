@@ -171,7 +171,9 @@ describe("通知粒度設定ページ (Phase β-2b)", () => {
     expect(screen.getByText(/しきい値 0\.9/)).toBeDefined();
     expect(screen.getByText(/24h上限 5件/)).toBeDefined();
 
-    fireEvent.click(screen.getAllByText("削除")[0]);
+    fireEvent.click(
+      screen.getByRole("button", { name: "ノート 11111111 の通知粒度上書きを削除" })
+    );
 
     await waitFor(() => expect(deleteNotificationPreference).toHaveBeenCalledWith("pref-note-1"));
   });
@@ -182,7 +184,9 @@ describe("通知粒度設定ページ (Phase β-2b)", () => {
     expect(screen.getByText(/aaaaaaaa…/)).toBeDefined();
     expect(screen.getByText("クールダウン 45分")).toBeDefined();
 
-    fireEvent.click(screen.getAllByText("削除")[1]);
+    fireEvent.click(
+      screen.getByRole("button", { name: "ストラテジー aaaaaaaa の通知粒度上書きを削除" })
+    );
 
     await waitFor(() => expect(deleteNotificationPreference).toHaveBeenCalledWith("pref-strategy-1"));
   });
