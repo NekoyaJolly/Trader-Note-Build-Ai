@@ -260,10 +260,10 @@ http://localhost:3100
 | `/api/cron/side-b/run-full-validation` | GET | cron | none | none | `CRON_SECRET` | no | yes | no | full validation。 |
 | `/api/cron/side-b/run-evolution` | POST | cron | none | none | `CRON_SECRET` | no | yes | no | evolution 実行。 |
 | `/api/cron/side-b/reset-not-testable` | POST | cron | none | none | `CRON_SECRET` | no | yes | no | reset job。 |
-| `/api/cron/matching-pipeline` | GET | cron | none | none | `CRON_SECRET` | no | yes | no | matching pipeline。 |
-| `/api/cron/matching-pipeline/test` | POST | cron | none | none | `CRON_SECRET` | no | yes | no | matching pipeline test。 |
-| `/api/cron/strategy-alerts` | GET | cron | none | none | `CRON_SECRET` | no | yes | no | ストラテジー条件ライブ評価+アラート発火 (Phase γ-1)。市場休場時スキップ。 |
-| `/api/cron/strategy-alerts/test` | POST | cron | none | none | `CRON_SECRET` | no | yes | no | ストラテジーライブ評価の手動テスト (市場チェックなし)。 |
+| `/api/cron/matching-pipeline` | GET | cron | none | none | `CRON_SECRET` | no | yes | no | matching pipeline。市場データ取得失敗は `data.errors` と `data.skipReasons.market_data_unavailable` に反映され、`MatchingPipelineRun.status=partial_failure` で永続化。 |
+| `/api/cron/matching-pipeline/test` | POST | cron | none | none | `CRON_SECRET` | no | yes | no | matching pipeline test。市場データ取得失敗は `data.errors` と `data.skipReasons.market_data_unavailable` に反映。 |
+| `/api/cron/strategy-alerts` | GET | cron | none | none | `CRON_SECRET` | no | yes | no | ストラテジー条件ライブ評価+アラート発火 (Phase γ-1)。市場休場時スキップ。データ不足/鮮度切れは `data.errors`、補完フェッチ警告は `data.marketDataWarnings` に反映。 |
+| `/api/cron/strategy-alerts/test` | POST | cron | none | none | `CRON_SECRET` | no | yes | no | ストラテジーライブ評価の手動テスト (市場チェックなし)。データ不足/鮮度切れは `data.errors`、補完フェッチ警告は `data.marketDataWarnings` に反映。 |
 | `analysis-engine` 連携 | internal | internal | service-to-service | `X-Analysis-Engine-Secret` | shared secret | no | yes | no | `src/backend/services/analysisEngineClient` / PythonBridge HTTP mode からのみ呼び出す。`/health` 以外は secret なしで `401`。 |
 
 ### 認証エンドポイント

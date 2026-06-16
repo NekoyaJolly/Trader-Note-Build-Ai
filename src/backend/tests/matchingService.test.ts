@@ -242,6 +242,32 @@ describe('MatchingService', () => {
         'create' | 'findLatest' | 'findMany'
       >;
 
+    type MatchCollectionForTest = {
+      matches: MatchResultDTO[];
+      errors: string[];
+      skipReasons: Record<string, number>;
+    };
+
+    const mockPipelineMatches = (
+      pipeline: MatchingService,
+      matches: MatchResultDTO[],
+      overrides: Partial<Omit<MatchCollectionForTest, 'matches'>> = {}
+    ): void => {
+      jest
+        .spyOn(
+          pipeline as unknown as {
+            checkForAllMatchesDetailed: () => Promise<MatchCollectionForTest>;
+          },
+          'checkForAllMatchesDetailed'
+        )
+        .mockResolvedValue({
+          matches,
+          errors: [],
+          skipReasons: {},
+          ...overrides,
+        });
+    };
+
     it('Side-B (sideb:) マッチは Side-A 通知経路の対象外として skip され error にならない', async () => {
       // Side-A/Side-B 切り分け: MatchResult/NotificationLog/Notification は noteId が
       // TradeNote(UUID) への FK で Side-A 専用。Side-B (sideb: 非UUID) を通すと UUID パース
@@ -260,9 +286,7 @@ describe('MatchingService', () => {
         simultaneousHitControl: buildHitControl(),
         matchingPipelineRunRepository: runRepo,
       });
-      jest
-        .spyOn(pipeline, 'checkForAllMatches')
-        .mockResolvedValue([createSideBMatch()]);
+      mockPipelineMatches(pipeline, [createSideBMatch()]);
 
       const result = await pipeline.runMatchingPipeline({ trigger: 'cron' });
 
@@ -305,9 +329,7 @@ describe('MatchingService', () => {
       jest
         .spyOn(pipeline as unknown as { getNotePriority: (id: string) => Promise<number> }, 'getNotePriority')
         .mockResolvedValue(5);
-      jest
-        .spyOn(pipeline, 'checkForAllMatches')
-        .mockResolvedValue([createSideAMatch()]);
+      mockPipelineMatches(pipeline, [createSideAMatch()]);
 
       const result = await pipeline.runMatchingPipeline();
 
@@ -348,9 +370,7 @@ describe('MatchingService', () => {
       jest
         .spyOn(pipeline as unknown as { getNotePriority: (id: string) => Promise<number> }, 'getNotePriority')
         .mockResolvedValue(5);
-      jest
-        .spyOn(pipeline, 'checkForAllMatches')
-        .mockResolvedValue([createSideAMatch()]);
+      mockPipelineMatches(pipeline, [createSideAMatch()]);
 
       const result = await pipeline.runMatchingPipeline();
 
@@ -380,9 +400,7 @@ describe('MatchingService', () => {
       jest
         .spyOn(pipeline as unknown as { getNotePriority: (id: string) => Promise<number> }, 'getNotePriority')
         .mockResolvedValue(5);
-      jest
-        .spyOn(pipeline, 'checkForAllMatches')
-        .mockResolvedValue([{ ...createSideAMatch(), marketSnapshotId: '' }]);
+      mockPipelineMatches(pipeline, [{ ...createSideAMatch(), marketSnapshotId: '' }]);
 
       const result = await pipeline.runMatchingPipeline();
 
@@ -411,9 +429,7 @@ describe('MatchingService', () => {
       jest
         .spyOn(pipeline as unknown as { getNotePriority: (id: string) => Promise<number> }, 'getNotePriority')
         .mockResolvedValue(5);
-      jest
-        .spyOn(pipeline, 'checkForAllMatches')
-        .mockResolvedValue([createSideAMatch()]);
+      mockPipelineMatches(pipeline, [createSideAMatch()]);
 
       const result = await pipeline.runMatchingPipeline({ trigger: 'cron' });
 
@@ -424,6 +440,34 @@ describe('MatchingService', () => {
       expect(result.skipReasons).toEqual({ cooldown: 1 });
       expect(runRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ trigger: 'cron', skipReasons: { cooldown: 1 } })
+      );
+    });
+
+    it('市場データ取得失敗でマッチ0件でも partial_failure として run に残す', async () => {
+      const runRepo = buildRunRepo();
+      const pipeline = new MatchingService({
+        simultaneousHitControl: buildHitControl(),
+        matchingPipelineRunRepository: runRepo,
+      });
+      mockPipelineMatches(pipeline, [], {
+        errors: ['市場データ取得エラー(lens): symbol=USDJPY, timeframe=15m, EODHD timeout'],
+        skipReasons: { market_data_unavailable: 1 },
+      });
+
+      const result = await pipeline.runMatchingPipeline({ trigger: 'cron' });
+
+      expect(result.totalMatches).toBe(0);
+      expect(result.errors).toEqual([
+        '市場データ取得エラー(lens): symbol=USDJPY, timeframe=15m, EODHD timeout',
+      ]);
+      expect(result.skipReasons).toEqual({ market_data_unavailable: 1 });
+      expect(result.status).toBe('partial_failure');
+      expect(runRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'partial_failure',
+          errorCount: 1,
+          skipReasons: { market_data_unavailable: 1 },
+        })
       );
     });
 
@@ -781,6 +825,33 @@ describe('MatchingService lens エンジン (Phase α-3)', () => {
     expect(mocks.upsertLog).toHaveBeenCalledWith(
       expect.objectContaining({ noteId: 'note_lens_1h', timeframe: '1h' })
     );
+  });
+
+  it('市場データ取得例外は詳細結果の errors / skipReasons に変換される', async () => {
+    const note = createPrismaNote();
+    const { service, mocks } = buildLensService(note, {
+      activeNotes: 1,
+      notesWithSnapshot: 1,
+      symbols: 1,
+      evaluations: [{ note, timeframe: '15m', comparison: triggeredComparison }],
+      errors: [],
+    });
+    mocks.getCurrentMarketDataWithIndicators.mockRejectedValueOnce(new Error('EODHD timeout'));
+
+    const detail = await (
+      service as unknown as {
+        checkForMatchesDetailed: () => Promise<{
+          matches: MatchResultDTO[];
+          errors: string[];
+          skipReasons: Record<string, number>;
+        }>;
+      }
+    ).checkForMatchesDetailed();
+
+    expect(detail.matches).toHaveLength(0);
+    expect(detail.errors[0]).toContain('市場データ取得エラー(lens): symbol=USDJPY, timeframe=15m');
+    expect(detail.errors[0]).toContain('EODHD timeout');
+    expect(detail.skipReasons).toEqual({ market_data_unavailable: 1 });
   });
 
 });
