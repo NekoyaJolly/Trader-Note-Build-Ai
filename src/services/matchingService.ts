@@ -7,7 +7,9 @@ import { MatchResultRepository } from '../backend/repositories/matchResultReposi
 import { MarketSnapshotRepository } from '../backend/repositories/marketSnapshotRepository';
 import { EvaluationLogRepository } from '../backend/repositories/evaluationLogRepository';
 import type {
-  MatchHit} from './notification/simultaneousHitControlService';
+  BatchControlResult,
+  MatchHit,
+} from './notification/simultaneousHitControlService';
 import {
   SimultaneousHitControlService
 } from './notification/simultaneousHitControlService';
@@ -69,6 +71,27 @@ interface MatchCollectionResult {
   matches: MatchResultDTO[];
   errors: string[];
   skipReasons: Record<string, number>;
+}
+
+/**
+ * 同一 symbol で複数ノートが通知対象になった場合に、通知本文へ集約情報を載せるための要約。
+ * Notification 自体は既存の note 単位 FK を維持し、DB/API の意味論は変えない。
+ */
+interface SymbolNotificationSummary {
+  symbol: string;
+  totalCount: number;
+  notifyCount: number;
+  skippedCount: number;
+  scoreLabels: string[];
+}
+
+/**
+ * In-App / Web Push に共通で渡す通知テキスト。
+ */
+interface MatchNotificationText {
+  title: string;
+  message: string;
+  reasonSummary: string;
 }
 
 function emptyMatchCollection(): MatchCollectionResult {
@@ -827,6 +850,7 @@ export class MatchingService {
 
       const controlResult = await this.simultaneousHitControl.control(hits);
       const toNotifyNoteIds = new Set(controlResult.toNotify.map(h => h.noteId));
+      const symbolNotificationSummaries = this.buildSymbolNotificationSummaries(controlResult);
 
       // 3. 通知判定 & 送信 (Side-A のみ)
       for (const match of sideAMatches) {
@@ -871,14 +895,19 @@ export class MatchingService {
             // sendInApp は (noteId, marketSnapshotId) で永続化済み MatchResult を引き、
             // それに紐づく Notification を upsert する。MatchResult が無い等で
             // 失敗しても例外にせず success:false を返すため、パイプラインは継続する。
+            const notificationText = this.buildMatchNotificationText(
+              match,
+              triggerResult.reasonSummary,
+              symbolNotificationSummaries.get(match.symbol || '')
+            );
             const sendResult = await this.inAppNotificationSender.sendInApp({
               noteId: match.historicalNoteId,
               marketSnapshotId: match.marketSnapshotId,
               symbol: match.symbol || '',
               score: match.matchScore,
-              title: `一致検出: ${match.symbol || 'シンボル不明'}`,
-              message: match.reasons?.[0] || 'ノートと現在の市場が一致しました',
-              reasonSummary: triggerResult.reasonSummary || `スコア: ${match.matchScore.toFixed(3)}`,
+              title: notificationText.title,
+              message: notificationText.message,
+              reasonSummary: notificationText.reasonSummary,
             });
 
             if (sendResult.success) {
@@ -896,9 +925,9 @@ export class MatchingService {
                   marketSnapshotId: match.marketSnapshotId,
                   symbol: match.symbol || '',
                   score: match.matchScore,
-                  title: `一致検出: ${match.symbol || 'シンボル不明'}`,
-                  message: match.reasons?.[0] || 'ノートと現在の市場が一致しました',
-                  reasonSummary: triggerResult.reasonSummary || `スコア: ${match.matchScore.toFixed(3)}`,
+                  title: notificationText.title,
+                  message: notificationText.message,
+                  reasonSummary: notificationText.reasonSummary,
                 })
                 .catch((pushError) => {
                   console.warn(
@@ -972,6 +1001,70 @@ export class MatchingService {
         forcedStatus: 'failed',
       });
     }
+  }
+
+  /**
+   * 同時ヒット制御結果から、同一 symbol の複数通知にだけ集約要約を作る。
+   * 通知行は note 単位のまま維持し、本文で「同じ symbol に複数ヒットしている」ことを伝える。
+   */
+  private buildSymbolNotificationSummaries(
+    controlResult: BatchControlResult
+  ): Map<string, SymbolNotificationSummary> {
+    const summaries = new Map<string, SymbolNotificationSummary>();
+    const toNotifyNoteIds = new Set(controlResult.toNotify.map((hit) => hit.noteId));
+
+    for (const [symbol, symbolHits] of controlResult.groupedBySymbol) {
+      const notifiedHits = symbolHits.filter((hit) => toNotifyNoteIds.has(hit.noteId));
+      if (notifiedHits.length <= 1) {
+        continue;
+      }
+
+      summaries.set(symbol, {
+        symbol,
+        totalCount: symbolHits.length,
+        notifyCount: notifiedHits.length,
+        skippedCount: Math.max(symbolHits.length - notifiedHits.length, 0),
+        scoreLabels: notifiedHits.slice(0, 3).map((hit) => `${(hit.similarity * 100).toFixed(0)}%`),
+      });
+    }
+
+    return summaries;
+  }
+
+  /**
+   * 通知本文を組み立てる。
+   * 通常時は従来文面を維持し、同一 symbol の複数通知時だけ集約文面に切り替える。
+   */
+  private buildMatchNotificationText(
+    match: MatchResultDTO,
+    triggerReasonSummary: string | undefined,
+    symbolSummary: SymbolNotificationSummary | undefined
+  ): MatchNotificationText {
+    const symbol = match.symbol || 'シンボル不明';
+    const baseReason = match.reasons?.[0] || 'ノートと現在の市場が一致しました';
+    const baseReasonSummary = triggerReasonSummary || `スコア: ${match.matchScore.toFixed(3)}`;
+
+    if (!symbolSummary) {
+      return {
+        title: `一致検出: ${symbol}`,
+        message: baseReason,
+        reasonSummary: baseReasonSummary,
+      };
+    }
+
+    const skippedText =
+      symbolSummary.skippedCount > 0
+        ? `同時通知上限で${symbolSummary.skippedCount}件を保留。`
+        : '';
+
+    return {
+      title: `同時ヒット: ${symbol}`,
+      message:
+        `${symbolSummary.symbol}で${symbolSummary.totalCount}件のノートが同時ヒットしました。` +
+        `通知対象${symbolSummary.notifyCount}件。代表スコア: ${symbolSummary.scoreLabels.join(', ')}。` +
+        `${skippedText}この通知: ${baseReason}`,
+      reasonSummary: `同時ヒット ${symbolSummary.notifyCount}/${symbolSummary.totalCount}件 | ${baseReasonSummary}`,
+    };
   }
 
   /**

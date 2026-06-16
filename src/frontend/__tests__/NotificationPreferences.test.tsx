@@ -18,6 +18,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/api", () => ({
   fetchNotificationPreferences: vi.fn(),
+  fetchProfiles: vi.fn(),
   upsertNotificationPreference: vi.fn(),
   deleteNotificationPreference: vi.fn(),
 }));
@@ -25,8 +26,10 @@ vi.mock("@/lib/api", () => ({
 import NotificationPreferencesPage from "@/app/settings/notifications/page";
 import {
   fetchNotificationPreferences,
+  fetchProfiles,
   upsertNotificationPreference,
   deleteNotificationPreference,
+  type IndicatorProfile,
   type NotificationPreference,
 } from "@/lib/api";
 
@@ -60,6 +63,31 @@ const NOTE_PREF: NotificationPreference = {
   updatedAt: "2026-06-11T00:00:00Z",
 };
 
+const PROFILE: IndicatorProfile = {
+  id: "99999999-9999-4999-8999-999999999999",
+  name: "押し目プロファイル",
+  description: "通知粒度テスト用",
+  indicators: [],
+  isDefault: false,
+  createdAt: "2026-06-11T00:00:00Z",
+  updatedAt: "2026-06-11T00:00:00Z",
+};
+
+const PROFILE_PREF: NotificationPreference = {
+  id: "pref-profile-1",
+  scope: "profile",
+  noteId: null,
+  profileId: PROFILE.id,
+  strategyId: null,
+  threshold: 0.82,
+  minMatchLevel: "medium",
+  weightPreset: "balanced",
+  cooldownMinutes: 90,
+  maxPerDay: 9,
+  createdAt: "2026-06-11T00:00:00Z",
+  updatedAt: "2026-06-11T00:00:00Z",
+};
+
 const STRATEGY_PREF: NotificationPreference = {
   id: "pref-strategy-1",
   scope: "strategy",
@@ -77,7 +105,8 @@ const STRATEGY_PREF: NotificationPreference = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(fetchNotificationPreferences).mockResolvedValue([USER_PREF, NOTE_PREF, STRATEGY_PREF]);
+  vi.mocked(fetchNotificationPreferences).mockResolvedValue([USER_PREF, PROFILE_PREF, NOTE_PREF, STRATEGY_PREF]);
+  vi.mocked(fetchProfiles).mockResolvedValue([PROFILE]);
   vi.mocked(upsertNotificationPreference).mockResolvedValue(USER_PREF);
   vi.mocked(deleteNotificationPreference).mockResolvedValue(undefined);
 });
@@ -87,15 +116,27 @@ async function renderPage() {
   await waitFor(() => expect(screen.getByText("全体設定")).toBeDefined());
 }
 
+function inputById(id: string): HTMLInputElement {
+  const element = document.getElementById(id);
+  expect(element).not.toBeNull();
+  return element as HTMLInputElement;
+}
+
+function selectById(id: string): HTMLSelectElement {
+  const element = document.getElementById(id);
+  expect(element).not.toBeNull();
+  return element as HTMLSelectElement;
+}
+
 describe("通知粒度設定ページ (Phase β-2b)", () => {
   it("全体設定が既存値を初期表示する", async () => {
     await renderPage();
 
-    const threshold = screen.getByLabelText("類似度しきい値 (0〜1)") as HTMLInputElement;
-    const level = screen.getByLabelText("通知する一致レベル") as HTMLSelectElement;
-    const weightPreset = screen.getByLabelText("重みプリセット") as HTMLSelectElement;
-    const cooldown = screen.getByLabelText("再通知クールダウン (分)") as HTMLInputElement;
-    const maxPerDay = screen.getByLabelText("24h 通知上限 (件)") as HTMLInputElement;
+    const threshold = inputById("pref-threshold");
+    const level = selectById("pref-level");
+    const weightPreset = selectById("pref-weight-preset");
+    const cooldown = inputById("pref-cooldown");
+    const maxPerDay = inputById("pref-max-per-day");
 
     expect(threshold.value).toBe("0.85");
     expect(level.value).toBe("medium");
@@ -107,16 +148,16 @@ describe("通知粒度設定ページ (Phase β-2b)", () => {
   it("値を変更して保存すると upsert API に scope=user で渡る", async () => {
     await renderPage();
 
-    fireEvent.change(screen.getByLabelText("類似度しきい値 (0〜1)"), {
+    fireEvent.change(inputById("pref-threshold"), {
       target: { value: "0.9" },
     });
-    fireEvent.change(screen.getByLabelText("通知する一致レベル"), {
+    fireEvent.change(selectById("pref-level"), {
       target: { value: "strong" },
     });
-    fireEvent.change(screen.getByLabelText("重みプリセット"), {
+    fireEvent.change(selectById("pref-weight-preset"), {
       target: { value: "state_focused" },
     });
-    fireEvent.change(screen.getByLabelText("24h 通知上限 (件)"), {
+    fireEvent.change(inputById("pref-max-per-day"), {
       target: { value: "10" },
     });
     fireEvent.click(screen.getByText("保存"));
@@ -135,19 +176,19 @@ describe("通知粒度設定ページ (Phase β-2b)", () => {
   it("空欄は null (既定に戻す) として送信される", async () => {
     await renderPage();
 
-    fireEvent.change(screen.getByLabelText("類似度しきい値 (0〜1)"), {
+    fireEvent.change(inputById("pref-threshold"), {
       target: { value: "" },
     });
-    fireEvent.change(screen.getByLabelText("再通知クールダウン (分)"), {
+    fireEvent.change(inputById("pref-cooldown"), {
       target: { value: "" },
     });
-    fireEvent.change(screen.getByLabelText("通知する一致レベル"), {
+    fireEvent.change(selectById("pref-level"), {
       target: { value: "" },
     });
-    fireEvent.change(screen.getByLabelText("重みプリセット"), {
+    fireEvent.change(selectById("pref-weight-preset"), {
       target: { value: "" },
     });
-    fireEvent.change(screen.getByLabelText("24h 通知上限 (件)"), {
+    fireEvent.change(inputById("pref-max-per-day"), {
       target: { value: "" },
     });
     fireEvent.click(screen.getByText("保存"));
@@ -166,7 +207,7 @@ describe("通知粒度設定ページ (Phase β-2b)", () => {
   it("しきい値の範囲外入力はバリデーションエラーで送信しない (境界値)", async () => {
     await renderPage();
 
-    fireEvent.change(screen.getByLabelText("類似度しきい値 (0〜1)"), {
+    fireEvent.change(inputById("pref-threshold"), {
       target: { value: "1.5" },
     });
     fireEvent.click(screen.getByText("保存"));
@@ -191,6 +232,52 @@ describe("通知粒度設定ページ (Phase β-2b)", () => {
     );
 
     await waitFor(() => expect(deleteNotificationPreference).toHaveBeenCalledWith("pref-note-1"));
+  });
+
+  it("プロファイル単位上書きを表示・保存できる", async () => {
+    await renderPage();
+
+    expect(screen.getAllByText("押し目プロファイル").length).toBeGreaterThan(0);
+    expect(screen.getByText(/しきい値 0\.82/)).toBeDefined();
+    expect(screen.getByText(/24h上限 9件/)).toBeDefined();
+
+    fireEvent.change(inputById("profile-pref-threshold"), {
+      target: { value: "0.88" },
+    });
+    fireEvent.change(selectById("profile-pref-level"), {
+      target: { value: "strong" },
+    });
+    fireEvent.change(selectById("profile-pref-weight"), {
+      target: { value: "state_focused" },
+    });
+    fireEvent.change(inputById("profile-pref-cooldown"), {
+      target: { value: "45" },
+    });
+    fireEvent.change(inputById("profile-pref-max-per-day"), {
+      target: { value: "4" },
+    });
+    fireEvent.click(screen.getByText("プロファイル上書きを保存"));
+
+    await waitFor(() => expect(upsertNotificationPreference).toHaveBeenCalledTimes(1));
+    expect(upsertNotificationPreference).toHaveBeenCalledWith({
+      scope: "profile",
+      profileId: PROFILE.id,
+      threshold: 0.88,
+      minMatchLevel: "strong",
+      weightPreset: "state_focused",
+      cooldownMinutes: 45,
+      maxPerDay: 4,
+    });
+  });
+
+  it("プロファイル単位上書きが削除できる", async () => {
+    await renderPage();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "押し目プロファイル の通知粒度上書きを削除" })
+    );
+
+    await waitFor(() => expect(deleteNotificationPreference).toHaveBeenCalledWith("pref-profile-1"));
   });
 
   it("ストラテジー単位上書きが一覧され、削除で API が呼ばれる", async () => {

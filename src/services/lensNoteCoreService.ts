@@ -193,7 +193,7 @@ export class LensNoteCoreService {
     let preferenceByNoteId = new Map<string, EffectiveNotificationPreference>();
     try {
       preferenceByNoteId = await this.preferenceService.resolveForNotes(
-        notes.map((n) => ({ id: n.id, userId: n.userId }))
+        notes.map((n) => ({ id: n.id, userId: n.userId, indicatorConfig: n.indicatorConfig }))
       );
     } catch (prefError) {
       console.warn(

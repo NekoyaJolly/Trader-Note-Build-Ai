@@ -3,15 +3,14 @@
  *
  * 目的:
  * - NotificationPreference (scope=user/profile/note/strategy) の CRUD
- * - マッチングパイプライン向けの「有効設定」解決 (note > user > システム既定)
+ * - マッチングパイプライン向けの「有効設定」解決 (note > profile > user > システム既定)
  * - 条件アラート向けの「有効設定」解決 (strategy > user > システム既定)
  *
  * 階層解決の方針 (completion-roadmap 決定4 / NOTE_SIMILARITY_FOUNDATION §6.3-6.4):
  * - 項目ごとに最も近いスコープの非 NULL 値を採用する (部分上書き)
- * - ノートマッチ: note > user > システム既定
+ * - ノートマッチ: note > profile > user > システム既定
  * - 条件アラート: strategy > user > システム既定
- * - profile スコープは DB には存在するが、TradeNote に profileId が永続されていないため
- *   現時点では解決対象外。ノート→プロファイル紐付け導入後に note/profile/user の順へ拡張する
+ * - profile スコープは TradeNote.indicatorConfig.profileId を根拠に解決する
  * - maxPerDay は per-user 通知カウントで実際に適用する
  *
  * 新規ファイルの理由: 通知設定の解決は柱1 (ノートマッチ) と柱2 (条件アラート) の
@@ -21,6 +20,7 @@
 import type { PrismaClient, NotificationPreference, SimilarityMatchLevel } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../backend/db/client';
+import { isReservedProfileId } from '../../models/indicatorProfile';
 import {
   DEFAULT_WEIGHT_PRESET,
   DEFAULT_SIMILARITY_TRIGGER_THRESHOLD,
@@ -30,7 +30,7 @@ import {
 
 type NotificationPreferencePrismaClient = Pick<
   PrismaClient,
-  'notificationPreference' | 'tradeNote' | 'strategy'
+  'notificationPreference' | 'tradeNote' | 'indicatorProfile' | 'strategy'
 >;
 
 /** クールダウン既定 (NotificationTriggerService と同じ env を参照して一貫させる)。
@@ -46,7 +46,7 @@ export const DEFAULT_MAX_NOTIFICATIONS_PER_DAY =
 /** maxPerDay をどの scope から採用したかを skip reason に残すための値。 */
 export type NotificationPreferenceLimitSource = 'note' | 'profile' | 'strategy' | 'user' | 'system';
 
-type MergePreferenceScope = 'note' | 'strategy';
+type MergePreferenceScope = 'note' | 'profile' | 'strategy';
 
 type PreferenceMergeFields = Pick<
   NotificationPreference,
@@ -81,7 +81,9 @@ export interface EffectiveNotificationPreference {
 
 /** upsert 入力 (scope と対象 ID の組はルート層で検証済みであること) */
 export interface UpsertPreferenceInput {
-  scope: 'user' | 'note' | 'strategy';
+  scope: 'user' | 'profile' | 'note' | 'strategy';
+  /** scope=profile のときの対象プロファイル ID */
+  profileId?: string;
   /** scope=note のときの対象ノート ID */
   noteId?: string;
   /** scope=strategy のときの対象ストラテジー ID (Phase γ: 条件アラート粒度) */
@@ -119,26 +121,71 @@ export function systemDefaultPreference(): EffectiveNotificationPreference {
   };
 }
 
-/**
- * note スコープ → user スコープ → システム既定 の順で項目ごとにマージする (純粋関数)。
- * テスト容易性のため DB アクセスから分離。
- */
-export function mergePreferences(
-  scopedPref: PreferenceMergeFields | null,
+type ScopedPreferenceEntry = {
+  readonly scope: MergePreferenceScope;
+  readonly preference: PreferenceMergeFields | null;
+};
+
+function firstScopedValue<T>(
+  entries: ReadonlyArray<ScopedPreferenceEntry>,
+  selector: (preference: PreferenceMergeFields) => T | null | undefined
+): T | undefined {
+  for (const entry of entries) {
+    if (entry.preference === null) {
+      continue;
+    }
+    const value = selector(entry.preference);
+    if (value !== null && value !== undefined) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function firstScopedValueWithSource<T>(
+  entries: ReadonlyArray<ScopedPreferenceEntry>,
+  selector: (preference: PreferenceMergeFields) => T | null | undefined
+): { readonly value: T; readonly scope: MergePreferenceScope } | null {
+  for (const entry of entries) {
+    if (entry.preference === null) {
+      continue;
+    }
+    const value = selector(entry.preference);
+    if (value !== null && value !== undefined) {
+      return { value, scope: entry.scope };
+    }
+  }
+  return null;
+}
+
+function mergePreferenceChain(
+  scopedEntries: ReadonlyArray<ScopedPreferenceEntry>,
   userPref: PreferenceMergeFields | null,
-  scopedPrefScope: MergePreferenceScope = 'note'
 ): EffectiveNotificationPreference {
   const defaults = systemDefaultPreference();
 
-  const threshold = scopedPref?.threshold ?? userPref?.threshold ?? defaults.threshold;
-  const minMatchLevel = scopedPref?.minMatchLevel ?? userPref?.minMatchLevel ?? defaults.minMatchLevel;
-  const weightPreset = scopedPref?.weightPreset ?? userPref?.weightPreset ?? defaults.weightPreset;
-  const cooldownMinutes = scopedPref?.cooldownMinutes ?? userPref?.cooldownMinutes ?? null;
+  const threshold =
+    firstScopedValue(scopedEntries, (pref) => pref.threshold) ??
+    userPref?.threshold ??
+    defaults.threshold;
+  const minMatchLevel =
+    firstScopedValue(scopedEntries, (pref) => pref.minMatchLevel) ??
+    userPref?.minMatchLevel ??
+    defaults.minMatchLevel;
+  const weightPreset =
+    firstScopedValue(scopedEntries, (pref) => pref.weightPreset) ??
+    userPref?.weightPreset ??
+    defaults.weightPreset;
+  const cooldownMinutes =
+    firstScopedValue(scopedEntries, (pref) => pref.cooldownMinutes) ??
+    userPref?.cooldownMinutes ??
+    null;
   const cooldownMs = cooldownMinutes !== null ? cooldownMinutes * 60 * 1000 : defaults.cooldownMs;
-  const maxPerDay = scopedPref?.maxPerDay ?? userPref?.maxPerDay ?? defaults.maxPerDay;
+  const scopedMaxPerDay = firstScopedValueWithSource(scopedEntries, (pref) => pref.maxPerDay);
+  const maxPerDay = scopedMaxPerDay?.value ?? userPref?.maxPerDay ?? defaults.maxPerDay;
   const maxPerDaySource =
-    scopedPref?.maxPerDay !== null && scopedPref?.maxPerDay !== undefined
-      ? scopedPrefScope
+    scopedMaxPerDay !== null
+      ? scopedMaxPerDay.scope
       : userPref?.maxPerDay !== null && userPref?.maxPerDay !== undefined
         ? 'user'
         : defaults.maxPerDaySource;
@@ -156,6 +203,44 @@ export function mergePreferences(
     maxPerDaySource,
     effectiveThreshold,
   };
+}
+
+/**
+ * note スコープ → user スコープ → システム既定 の順で項目ごとにマージする (純粋関数)。
+ * テスト容易性のため DB アクセスから分離。
+ */
+export function mergePreferences(
+  scopedPref: PreferenceMergeFields | null,
+  userPref: PreferenceMergeFields | null,
+  scopedPrefScope: MergePreferenceScope = 'note'
+): EffectiveNotificationPreference {
+  return mergePreferenceChain([{ scope: scopedPrefScope, preference: scopedPref }], userPref);
+}
+
+function mergeNotePreferences(
+  notePref: PreferenceMergeFields | null,
+  profilePref: PreferenceMergeFields | null,
+  userPref: PreferenceMergeFields | null,
+): EffectiveNotificationPreference {
+  return mergePreferenceChain(
+    [
+      { scope: 'note', preference: notePref },
+      { scope: 'profile', preference: profilePref },
+    ],
+    userPref
+  );
+}
+
+function extractProfileIdFromIndicatorConfig(value: Prisma.JsonValue | null | undefined): string | null {
+  if (value === null || value === undefined || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, Prisma.JsonValue | undefined>;
+  const profileId = record.profileId;
+  if (typeof profileId !== 'string' || profileId.length === 0 || isReservedProfileId(profileId)) {
+    return null;
+  }
+  return profileId;
 }
 
 /**
@@ -199,6 +284,20 @@ export class NotificationPreferenceService {
         throw new Error('ノートが見つかりませんでした');
       }
     }
+    // scope=profile は profileId 必須 + 所有チェック。
+    // profile 設定は複数ノートへ横断適用されるため、他ユーザーの profileId を受け付けない。
+    if (input.scope === 'profile') {
+      if (input.profileId === undefined) {
+        throw new Error('scope=profile では profileId が必須です');
+      }
+      const ownedProfile = await this.prisma.indicatorProfile.findFirst({
+        where: { id: input.profileId, userId },
+        select: { id: true },
+      });
+      if (!ownedProfile) {
+        throw new Error('プロファイルが見つかりませんでした');
+      }
+    }
     // scope=strategy は strategyId 必須 + 所有チェック (Phase γ: 条件アラート粒度)
     if (input.scope === 'strategy') {
       if (input.strategyId === undefined) {
@@ -216,9 +315,11 @@ export class NotificationPreferenceService {
     const where =
       input.scope === 'note'
         ? { userId, scope: 'note' as const, noteId: input.noteId }
-        : input.scope === 'strategy'
-          ? { userId, scope: 'strategy' as const, strategyId: input.strategyId }
-          : { userId, scope: 'user' as const };
+        : input.scope === 'profile'
+          ? { userId, scope: 'profile' as const, profileId: input.profileId }
+          : input.scope === 'strategy'
+            ? { userId, scope: 'strategy' as const, strategyId: input.strategyId }
+            : { userId, scope: 'user' as const };
 
     // 省略 (undefined) は「現状維持」、明示 null は「既定に戻す」。
     // 省略フィールドまで null 上書きすると既存設定が意図せず消える (Copilot レビュー対応)
@@ -242,6 +343,7 @@ export class NotificationPreferenceService {
         data: {
           userId,
           scope: input.scope,
+          profileId: input.scope === 'profile' ? input.profileId : undefined,
           noteId: input.scope === 'note' ? input.noteId : undefined,
           strategyId: input.scope === 'strategy' ? input.strategyId : undefined,
           ...data,
@@ -273,36 +375,50 @@ export class NotificationPreferenceService {
   /**
    * マッチング対象ノート群の「有効設定」を一括解決する (パイプライン用)。
    *
-   * 1 クエリで関係する全設定行 (対象ノートの note スコープ + 関係ユーザーの user スコープ)
+   * 1 クエリで関係する全設定行 (対象ノートの note スコープ + profile スコープ + 関係ユーザーの user スコープ)
    * を取得し、ノート ID → 解決済み設定 の Map を返す。設定が無いノートはシステム既定。
    * cron (ユーザー横断) でも N+1 にならない。
-   *
-   * profile スコープは現時点では対象外。TradeNote に profileId が永続されていないため、
-   * ここで推測解決すると別プロファイルの設定を誤適用するリスクがある。
    */
   async resolveForNotes(
-    notes: ReadonlyArray<{ id: string; userId: string | null }>
+    notes: ReadonlyArray<{ id: string; userId: string | null; indicatorConfig?: Prisma.JsonValue | null }>
   ): Promise<Map<string, EffectiveNotificationPreference>> {
     const result = new Map<string, EffectiveNotificationPreference>();
     if (notes.length === 0) return result;
 
     const noteIds = notes.map((n) => n.id);
     const userIds = [...new Set(notes.map((n) => n.userId).filter((u): u is string => u !== null))];
+    const profileIdByNoteId = new Map<string, string>();
+    for (const note of notes) {
+      if (note.userId === null) {
+        continue;
+      }
+      const profileId = extractProfileIdFromIndicatorConfig(note.indicatorConfig);
+      if (profileId !== null) {
+        profileIdByNoteId.set(note.id, profileId);
+      }
+    }
+    const profileIds = [...new Set(profileIdByNoteId.values())];
 
     const rows = await this.prisma.notificationPreference.findMany({
       where: {
         OR: [
           { scope: 'note', noteId: { in: noteIds } },
+          ...(profileIds.length > 0 && userIds.length > 0
+            ? [{ scope: 'profile' as const, profileId: { in: profileIds }, userId: { in: userIds } }]
+            : []),
           ...(userIds.length > 0 ? [{ scope: 'user' as const, userId: { in: userIds } }] : []),
         ],
       },
     });
 
     const noteScoped = new Map<string, NotificationPreference>();
+    const profileScoped = new Map<string, NotificationPreference>();
     const userScoped = new Map<string, NotificationPreference>();
     for (const row of rows) {
       if (row.scope === 'note' && row.noteId !== null) {
         noteScoped.set(row.noteId, row);
+      } else if (row.scope === 'profile' && row.profileId !== null) {
+        profileScoped.set(`${row.userId}:${row.profileId}`, row);
       } else if (row.scope === 'user') {
         userScoped.set(row.userId, row);
       }
@@ -310,8 +426,13 @@ export class NotificationPreferenceService {
 
     for (const note of notes) {
       const notePref = noteScoped.get(note.id) ?? null;
+      const profileId = profileIdByNoteId.get(note.id) ?? null;
+      const profilePref =
+        note.userId !== null && profileId !== null
+          ? profileScoped.get(`${note.userId}:${profileId}`) ?? null
+          : null;
       const userPref = note.userId !== null ? userScoped.get(note.userId) ?? null : null;
-      result.set(note.id, mergePreferences(notePref, userPref));
+      result.set(note.id, mergeNotePreferences(notePref, profilePref, userPref));
     }
     return result;
   }
