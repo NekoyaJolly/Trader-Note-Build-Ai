@@ -97,22 +97,24 @@ export function buildPipelineCoverageSummary(run: PipelineRunDTO): PipelineRunCo
   const totalReasonCount = buildSkipReasonItems(run.skipReasons)
     .reduce((sum, item) => sum + item.count, 0);
 
-  if (marketDataUnavailableCount > 0) {
+  if (run.status === "failed") {
     return {
       severity: "critical",
-      label: "要確認",
-      message: `市場データを取得できなかった評価が ${marketDataUnavailableCount} 件あります。該当シンボルは今回のマッチング対象から外れています。`,
+      label: "失敗",
+      message: marketDataUnavailableCount > 0
+        ? `マッチング実行が失敗しました。市場データを取得できなかった評価も ${marketDataUnavailableCount} 件あります。`
+        : "マッチング実行が失敗しました。市場データ以外のエラーも含めて確認してください。",
       marketDataUnavailableCount,
       degradedEvaluationCount,
       totalReasonCount,
     };
   }
 
-  if (run.status === "failed") {
+  if (marketDataUnavailableCount > 0) {
     return {
       severity: "critical",
-      label: "失敗",
-      message: "マッチング実行が失敗しました。市場データ以外のエラーも含めて確認してください。",
+      label: "要確認",
+      message: `市場データを取得できなかった評価が ${marketDataUnavailableCount} 件あります。該当シンボルは今回のマッチング対象から外れています。`,
       marketDataUnavailableCount,
       degradedEvaluationCount,
       totalReasonCount,

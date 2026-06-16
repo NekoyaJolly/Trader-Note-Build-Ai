@@ -61,6 +61,22 @@ describe("pipelineRunPresentation", () => {
     expect(summary.message).toContain("特徴量");
   });
 
+  it("failed と市場データ未取得が同時に立つ場合は failed を優先する", () => {
+    const run = makeRun({
+      status: "failed",
+      errorCount: 2,
+      skipReasons: { market_data_unavailable: 1 },
+    });
+
+    const summary = buildPipelineCoverageSummary(run);
+
+    expect(summary.severity).toBe("critical");
+    expect(summary.label).toBe("失敗");
+    expect(summary.marketDataUnavailableCount).toBe(1);
+    expect(summary.message).toContain("マッチング実行が失敗しました");
+    expect(summary.message).toContain("市場データを取得できなかった評価も 1 件");
+  });
+
   it("skipReasons を日本語ラベルと件数順に変換する", () => {
     const items = buildSkipReasonItems({
       cooldown: 1,
