@@ -514,7 +514,9 @@ export default function SettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle>通知設定</CardTitle>
-          <CardDescription>一致通知の条件を設定します</CardDescription>
+          <CardDescription>
+            主要な通知条件を保存します。詳細な上書きは通知粒度画面で管理します
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-1 divide-y divide-slate-700">
           <Toggle

@@ -13,10 +13,45 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import type { UserSettings } from '../../services/userSettingsService';
 import { userSettingsService } from '../../services/userSettingsService';
+import {
+  NotificationPreferenceService,
+  type UpsertPreferenceInput,
+} from '../../services/notification/notificationPreferenceService';
 import { validateBody } from '../../middleware/validateRequest';
 import { UpdateSettingsRequestSchema } from '../../schemas/api/settings';
 
 const router = Router();
+const notificationPreferenceService = new NotificationPreferenceService();
+
+/**
+ * 旧 /api/settings の通知スライダーを、現在の通知判定で実際に参照される
+ * NotificationPreference(user scope) へ同期する。
+ *
+ * enabled は NotificationPreference に対応フィールドが無いため、ここでは既存互換の
+ * UserSettings にのみ保存する。実際の通知粒度は threshold / maxPerDay を同期する。
+ */
+export function buildNotificationPreferenceSyncInput(
+  notification: Partial<UserSettings['notification']> | undefined
+): UpsertPreferenceInput | null {
+  if (!notification) {
+    return null;
+  }
+
+  const input: UpsertPreferenceInput = { scope: 'user' };
+  let shouldSync = false;
+
+  if (notification.scoreThreshold !== undefined) {
+    input.threshold = notification.scoreThreshold / 100;
+    shouldSync = true;
+  }
+
+  if (notification.maxPerDay !== undefined) {
+    input.maxPerDay = notification.maxPerDay;
+    shouldSync = true;
+  }
+
+  return shouldSync ? input : null;
+}
 
 /**
  * GET /api/settings
@@ -57,8 +92,13 @@ router.put(
   async (req: Request, res: Response) => {
     try {
       const updates = req.body as Partial<UserSettings>;
+      const userId = req.user!.userId;
+      const preferenceSyncInput = buildNotificationPreferenceSyncInput(updates.notification);
 
-      const savedSettings = await userSettingsService.saveSettings(req.user!.userId, updates);
+      const savedSettings = await userSettingsService.saveSettings(userId, updates);
+      if (preferenceSyncInput !== null) {
+        await notificationPreferenceService.upsertPreference(userId, preferenceSyncInput);
+      }
       res.json({
         success: true,
         data: savedSettings,
