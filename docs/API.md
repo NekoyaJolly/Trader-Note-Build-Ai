@@ -92,7 +92,7 @@ http://localhost:3100
 | `/api/notifications/:id` | GET/DELETE | auth | JWT | user/admin | none | no | DELETE yes | yes | owner check は TODO: confirm。 |
 | `/api/notifications/:id/read` | PUT | auth | JWT | user/admin | none | no | yes | yes | owner check は TODO: confirm。 |
 | `/api/notifications/check` | POST | auth | JWT | user/admin | none | no | yes | TODO: confirm | 通知チェック実行。 |
-| `/api/notifications/preferences` | GET/PUT | auth | JWT | user/admin | none | no | PUT yes | self | 通知粒度設定。GET は全スコープを返す。PUT は scope=user/note/strategy のみ受け付け、threshold/minMatchLevel/weightPreset/cooldownMinutes/maxPerDay を保存。 |
+| `/api/notifications/preferences` | GET/PUT | auth | JWT | user/admin | none | no | PUT yes | self | 通知粒度設定。GET は全スコープを返す。PUT は scope=user/profile/note/strategy を受け付け、threshold/minMatchLevel/weightPreset/cooldownMinutes/maxPerDay を保存。 |
 | `/api/notifications/preferences/:id` | DELETE | auth | JWT | user/admin | none | no | yes | yes | 認証ユーザー所有の通知粒度設定のみ削除。 |
 | `/api/notifications/logs` | GET | auth | JWT | user/admin | none | no | no | yes | TradeNote.userId 経由で認証ユーザーの通知ログのみ返す。 |
 | `/api/notifications/logs/:id` | GET/DELETE | auth | JWT | user/admin | none | no | DELETE yes | yes | TradeNote.userId 経由で所有チェック。他ユーザー logId は 404。 |
@@ -912,7 +912,7 @@ Home では主に以下の `skipReasons` を市場データカバレッジ表示
 
 #### PUT /api/notifications/preferences
 通知粒度設定を upsert します。`null` はその項目を上位スコープ / システム既定へ戻す指定です。
-GET は既存の全スコープを返しますが、PUT で作成・更新できる scope は `user` / `note` / `strategy` のみです。`profile` はノート→プロファイル紐付け導入後に更新 API を開放します。
+PUT で作成・更新できる scope は `user` / `profile` / `note` / `strategy` です。ノートマッチでは `note > profile > user > システム既定`、条件アラートでは `strategy > user > システム既定` の順に解決します。`profile` は `TradeNote.indicatorConfig.profileId` で紐づくノートに適用します。
 
 **リクエストボディ:**
 ```json
@@ -926,7 +926,7 @@ GET は既存の全スコープを返しますが、PUT で作成・更新でき
 }
 ```
 
-`scope=note` の場合は `noteId`、`scope=strategy` の場合は `strategyId` が必須です。
+`scope=profile` の場合は `profileId`、`scope=note` の場合は `noteId`、`scope=strategy` の場合は `strategyId` が必須です。
 条件アラート (`scope=strategy`) で実際に発火制御へ適用されるのは `cooldownMinutes` と `maxPerDay` です。`threshold` / `minMatchLevel` / `weightPreset` は保存可能ですが、条件成立が二値判定の現行実装では no-op です。
 
 ---

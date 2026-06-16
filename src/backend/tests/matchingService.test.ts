@@ -201,7 +201,7 @@ describe('MatchingService', () => {
 
     // Side-A ノート (sideb: 接頭辞なし)。getNotePriority が DB を引くため、テストでは
     // getNotePriority をモックして DB アクセスを回避する。
-    const createSideAMatch = (): MatchResultDTO => ({
+    const createSideAMatch = (overrides?: Partial<MatchResultDTO>): MatchResultDTO => ({
       id: 'match_test_a1',
       matchScore: 0.88,
       historicalNoteId: 'note_side_a_1',
@@ -210,6 +210,7 @@ describe('MatchingService', () => {
       symbol: 'USDJPY',
       reasons: ['価格帯一致'],
       evaluatedAt: new Date(),
+      ...overrides,
     });
 
     // control は対象ノートをそのまま通知対象に通すモック
@@ -344,6 +345,124 @@ describe('MatchingService', () => {
       );
       expect(result.notified).toBe(1);
       expect(result.skipped).toBe(0);
+    });
+
+    it('同一 symbol の複数通知では通知本文に集約情報を載せる', async () => {
+      // Notification 行は note 単位のまま維持しつつ、ユーザーが同一 symbol の同時ヒットを把握できるようにする
+      const sendInApp = jest
+        .fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>()
+        .mockResolvedValue({ success: true, id: 'notif_symbol_1' });
+      const sendPush = jest
+        .fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>()
+        .mockResolvedValue({ success: true });
+      const evaluateWithPersistence = jest
+        .fn<() => Promise<{ shouldNotify: boolean; status: 'sent'; reasonSummary: string }>>()
+        .mockResolvedValue({ shouldNotify: true, status: 'sent', reasonSummary: 'スコア: 0.880' });
+      const hitControl = new SimultaneousHitControlService();
+      jest.spyOn(hitControl, 'control').mockImplementation((hits) =>
+        Promise.resolve({
+          toNotify: hits,
+          toSkip: [],
+          groupedBySymbol: new Map([['USDJPY', hits]]),
+        })
+      );
+
+      const pipeline = new MatchingService({
+        inAppNotificationSender: { sendInApp, sendPush },
+        notificationTriggerService: {
+          evaluateWithPersistence,
+          invalidateNotificationLog: jest.fn<(id: string) => Promise<void>>(),
+        },
+        simultaneousHitControl: hitControl,
+        matchingPipelineRunRepository: buildRunRepo(),
+      });
+      jest
+        .spyOn(pipeline as unknown as { getNotePriority: (id: string) => Promise<number> }, 'getNotePriority')
+        .mockResolvedValue(5);
+      mockPipelineMatches(pipeline, [
+        createSideAMatch(),
+        createSideAMatch({
+          id: 'match_test_a2',
+          matchScore: 0.81,
+          historicalNoteId: 'note_side_a_2',
+          marketSnapshotId: 'snap_a2',
+          reasons: ['RSI一致'],
+        }),
+      ]);
+
+      const result = await pipeline.runMatchingPipeline();
+
+      expect(sendInApp).toHaveBeenCalledTimes(2);
+      expect(sendInApp).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          title: '同時ヒット: USDJPY',
+          message: expect.stringContaining('USDJPYで2件のノートが同時ヒットしました'),
+          reasonSummary: expect.stringContaining('同時ヒット 2/2件'),
+        })
+      );
+      expect(sendInApp).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          title: '同時ヒット: USDJPY',
+          message: expect.stringContaining('代表スコア: 88%, 81%'),
+          reasonSummary: expect.stringContaining('同時ヒット 2/2件'),
+        })
+      );
+      expect(result.notified).toBe(2);
+      expect(result.skipped).toBe(0);
+    });
+
+    it('symbol が空でも集約通知本文にフォールバック名を表示する', async () => {
+      // symbol 欠落時も title/message の表示名を揃え、空文字の通知本文を出さない
+      const sendInApp = jest
+        .fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>()
+        .mockResolvedValue({ success: true, id: 'notif_symbol_empty' });
+      const evaluateWithPersistence = jest
+        .fn<() => Promise<{ shouldNotify: boolean; status: 'sent'; reasonSummary: string }>>()
+        .mockResolvedValue({ shouldNotify: true, status: 'sent', reasonSummary: 'スコア: 0.880' });
+      const hitControl = new SimultaneousHitControlService();
+      jest.spyOn(hitControl, 'control').mockImplementation((hits) =>
+        Promise.resolve({
+          toNotify: hits,
+          toSkip: [],
+          groupedBySymbol: new Map([['', hits]]),
+        })
+      );
+
+      const pipeline = new MatchingService({
+        inAppNotificationSender: {
+          sendInApp,
+          sendPush: jest.fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>().mockResolvedValue({ success: true }),
+        },
+        notificationTriggerService: {
+          evaluateWithPersistence,
+          invalidateNotificationLog: jest.fn<(id: string) => Promise<void>>(),
+        },
+        simultaneousHitControl: hitControl,
+        matchingPipelineRunRepository: buildRunRepo(),
+      });
+      jest
+        .spyOn(pipeline as unknown as { getNotePriority: (id: string) => Promise<number> }, 'getNotePriority')
+        .mockResolvedValue(5);
+      mockPipelineMatches(pipeline, [
+        createSideAMatch({ symbol: undefined }),
+        createSideAMatch({
+          id: 'match_test_empty_symbol_2',
+          historicalNoteId: 'note_side_a_empty_2',
+          marketSnapshotId: 'snap_empty_2',
+          symbol: undefined,
+        }),
+      ]);
+
+      await pipeline.runMatchingPipeline();
+
+      expect(sendInApp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: '同時ヒット: シンボル不明',
+          message: expect.stringContaining('シンボル不明で2件のノートが同時ヒットしました'),
+        })
+      );
     });
 
     it('sendInApp が success:false のとき skipped + errors にし、先行ログを無効化して再試行可能にする', async () => {

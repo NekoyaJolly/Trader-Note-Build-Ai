@@ -6,7 +6,7 @@
  * - effectiveThreshold: しきい値と一致レベル帯下限の大きい方 (§6.4)
  * - weightPreset: レンズ層重みプリセットの階層解決 (§6.3)
  * - maxPerDay: null はシステム既定、note/strategy/user の優先順位どおりに解決
- * - resolveForNotes: 1 クエリでの一括解決とノート別マッピング
+ * - resolveForNotes: 1 クエリでの一括解決と note > profile > user のノート別マッピング
  * - upsertPreference: note スコープの所有チェック (異常系)
  */
 import { describe, it, expect, jest } from '@jest/globals';
@@ -78,6 +78,17 @@ describe('mergePreferences (Phase β-2a)', () => {
     expect(merged.maxPerDaySource).toBe('strategy');
   });
 
+  it('profile スコープの maxPerDay は user スコープより優先される', () => {
+    const merged = mergePreferences(
+      makePref({ maxPerDay: 9 }),
+      makePref({ maxPerDay: 30 }),
+      'profile'
+    );
+
+    expect(merged.maxPerDay).toBe(9);
+    expect(merged.maxPerDaySource).toBe('profile');
+  });
+
   it('weightPreset は note スコープが user スコープより優先される', () => {
     const merged = mergePreferences(
       makePref({ weightPreset: 'state_focused' }),
@@ -111,10 +122,20 @@ describe('mergePreferences (Phase β-2a)', () => {
 });
 
 describe('NotificationPreferenceService.resolveForNotes (Phase β-2a)', () => {
-  it('note / user スコープを 1 クエリで取得しノート別にマージする', async () => {
+  it('note / profile / user スコープを 1 クエリで取得しノート別にマージする', async () => {
     const rows = [
       { scope: 'note', noteId: 'note-1', userId: 'user-a', threshold: 0.9, minMatchLevel: null, cooldownMinutes: null },
-      { scope: 'user', noteId: null, userId: 'user-a', threshold: 0.8, minMatchLevel: null, cooldownMinutes: 30 },
+      {
+        scope: 'profile',
+        profileId: 'profile-1',
+        noteId: null,
+        userId: 'user-a',
+        threshold: 0.82,
+        minMatchLevel: 'medium',
+        cooldownMinutes: 45,
+        maxPerDay: 9,
+      },
+      { scope: 'user', noteId: null, userId: 'user-a', threshold: 0.8, minMatchLevel: null, cooldownMinutes: 30, maxPerDay: 20 },
     ];
     const findMany = jest.fn<() => Promise<typeof rows>>().mockResolvedValue(rows);
     const prismaMock = { notificationPreference: { findMany } } as unknown as PrismaClient;
@@ -122,7 +143,7 @@ describe('NotificationPreferenceService.resolveForNotes (Phase β-2a)', () => {
 
     const resolved = await service.resolveForNotes([
       { id: 'note-1', userId: 'user-a' },
-      { id: 'note-2', userId: 'user-a' },
+      { id: 'note-2', userId: 'user-a', indicatorConfig: { profileId: 'profile-1' } },
       { id: 'note-3', userId: null },
     ]);
 
@@ -130,10 +151,36 @@ describe('NotificationPreferenceService.resolveForNotes (Phase β-2a)', () => {
     // note-1: note スコープの threshold 0.9 + user スコープの cooldown 30 分
     expect(resolved.get('note-1')?.threshold).toBe(0.9);
     expect(resolved.get('note-1')?.cooldownMs).toBe(30 * 60 * 1000);
-    // note-2: note スコープなし → user スコープの threshold 0.8
-    expect(resolved.get('note-2')?.threshold).toBe(0.8);
+    // note-2: note スコープなし → profile スコープが user より優先
+    expect(resolved.get('note-2')?.threshold).toBe(0.82);
+    expect(resolved.get('note-2')?.cooldownMs).toBe(45 * 60 * 1000);
+    expect(resolved.get('note-2')?.maxPerDay).toBe(9);
+    expect(resolved.get('note-2')?.maxPerDaySource).toBe('profile');
     // note-3: userId なし (レガシー) → システム既定
     expect(resolved.get('note-3')).toEqual(systemDefaultPreference());
+  });
+
+  it('予約 profileId は profile スコープ解決に使わない', async () => {
+    const rows = [
+      { scope: 'user', noteId: null, userId: 'user-a', threshold: 0.8, minMatchLevel: null, cooldownMinutes: null },
+    ];
+    const findMany = jest.fn<() => Promise<typeof rows>>().mockResolvedValue(rows);
+    const prismaMock = { notificationPreference: { findMany } } as unknown as PrismaClient;
+    const service = new NotificationPreferenceService(prismaMock);
+
+    const resolved = await service.resolveForNotes([
+      { id: 'note-1', userId: 'user-a', indicatorConfig: { profileId: '__AI_AUTO__' } },
+    ]);
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        OR: [
+          { scope: 'note', noteId: { in: ['note-1'] } },
+          { scope: 'user', userId: { in: ['user-a'] } },
+        ],
+      },
+    });
+    expect(resolved.get('note-1')?.threshold).toBe(0.8);
   });
 
   it('対象ノートが空なら DB に問い合わせない', async () => {
@@ -165,6 +212,21 @@ describe('UpsertNotificationPreferenceSchema (通知粒度 API contract)', () =>
     });
 
     expect(result.success).toBe(false);
+  });
+
+  it('scope=profile では profileId が必須', () => {
+    const missingProfileId = UpsertNotificationPreferenceSchema.safeParse({
+      scope: 'profile',
+      threshold: 0.8,
+    });
+    const withProfileId = UpsertNotificationPreferenceSchema.safeParse({
+      scope: 'profile',
+      profileId: '99999999-9999-4999-8999-999999999999',
+      threshold: 0.8,
+    });
+
+    expect(missingProfileId.success).toBe(false);
+    expect(withProfileId.success).toBe(true);
   });
 });
 
@@ -255,6 +317,30 @@ describe('NotificationPreferenceService.upsertPreference (Phase β-2a)', () => {
     await expect(
       service.upsertPreference('user-a', { scope: 'strategy', strategyId: 'others-strat', cooldownMinutes: 30 })
     ).rejects.toThrow('ストラテジーが見つかりませんでした');
+  });
+
+  it('scope=profile で他ユーザーのプロファイルを指定するとエラー (異常系・所有チェック)', async () => {
+    const prismaMock = {
+      indicatorProfile: {
+        findFirst: jest.fn<() => Promise<null>>().mockResolvedValue(null),
+      },
+    } as unknown as PrismaClient;
+    const service = new NotificationPreferenceService(prismaMock);
+
+    await expect(
+      service.upsertPreference('user-a', { scope: 'profile', profileId: 'others-profile', threshold: 0.9 })
+    ).rejects.toThrow('プロファイルが見つかりませんでした');
+  });
+
+  it('scope=profile で profileId 未指定はエラー (異常系・所有チェックすり抜け防止)', async () => {
+    const findFirst = jest.fn();
+    const prismaMock = { indicatorProfile: { findFirst } } as unknown as PrismaClient;
+    const service = new NotificationPreferenceService(prismaMock);
+
+    await expect(
+      service.upsertPreference('user-a', { scope: 'profile', threshold: 0.9 })
+    ).rejects.toThrow('profileId が必須です');
+    expect(findFirst).not.toHaveBeenCalled();
   });
 
   it('scope=strategy で strategyId 未指定はエラー (異常系・所有チェックすり抜け防止)', async () => {

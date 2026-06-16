@@ -3200,16 +3200,25 @@ interface UpsertNotificationPreferenceFields {
 export type UpsertNotificationPreferenceInput =
   | (UpsertNotificationPreferenceFields & {
       scope: "user";
+      profileId?: never;
+      noteId?: never;
+      strategyId?: never;
+    })
+  | (UpsertNotificationPreferenceFields & {
+      scope: "profile";
+      profileId: string;
       noteId?: never;
       strategyId?: never;
     })
   | (UpsertNotificationPreferenceFields & {
       scope: "note";
+      profileId?: never;
       noteId: string;
       strategyId?: never;
     })
   | (UpsertNotificationPreferenceFields & {
       scope: "strategy";
+      profileId?: never;
       noteId?: never;
       strategyId: string;
     });
