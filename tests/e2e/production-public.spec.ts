@@ -36,6 +36,14 @@ test.describe('本番公開面 smoke', () => {
     expect(response.status()).toBe(401);
   });
 
+  test('cron API は secret なしで拒否される', async ({ request }) => {
+    const matchingPipeline = await request.get(`${productionApiUrl}/api/cron/matching-pipeline`);
+    expect(matchingPipeline.status()).toBe(401);
+
+    const strategyAlerts = await request.get(`${productionApiUrl}/api/cron/strategy-alerts`);
+    expect(strategyAlerts.status()).toBe(401);
+  });
+
   test('本番UIのHTMLが配信される', async ({ page }) => {
     const response = await page.goto('/');
     expect(response?.status()).toBe(200);
