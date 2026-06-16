@@ -146,12 +146,14 @@ export default function StrategyAlertsPage() {
       cooldownValue !== null &&
       (!Number.isInteger(cooldownValue) || cooldownValue < 1 || cooldownValue > 10080)
     ) {
+      setSuccess(null);
       setError("通知粒度クールダウンは 1〜10080 分の整数で指定してください");
       return;
     }
 
     // 未作成かつ空欄の場合は、保存する上書きが無いので API を呼ばない
     if (cooldownValue === null && strategyPreference === null) {
+      setError(null);
       setSuccess("通知粒度はアラート設定値を使用します");
       return;
     }

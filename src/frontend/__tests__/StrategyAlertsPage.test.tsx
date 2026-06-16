@@ -107,4 +107,21 @@ describe("ストラテジーアラート設定画面", () => {
       cooldownMinutes: 30,
     });
   });
+
+  it("バリデーションエラー時は古い成功メッセージを残さない", async () => {
+    vi.mocked(fetchNotificationPreferences).mockResolvedValue([]);
+
+    render(<StrategyAlertsPage />);
+
+    const cooldownInput = await screen.findByLabelText("ストラテジー通知粒度クールダウン");
+    fireEvent.click(screen.getByText("通知粒度を保存"));
+    expect(screen.getByText("通知粒度はアラート設定値を使用します")).toBeDefined();
+
+    fireEvent.change(cooldownInput, { target: { value: "0" } });
+    fireEvent.click(screen.getByText("通知粒度を保存"));
+
+    expect(screen.getByText("通知粒度クールダウンは 1〜10080 分の整数で指定してください")).toBeDefined();
+    expect(screen.queryByText("通知粒度はアラート設定値を使用します")).toBeNull();
+    expect(upsertNotificationPreference).not.toHaveBeenCalled();
+  });
 });
