@@ -927,6 +927,7 @@ GET は既存の全スコープを返しますが、PUT で作成・更新でき
 ```
 
 `scope=note` の場合は `noteId`、`scope=strategy` の場合は `strategyId` が必須です。
+条件アラート (`scope=strategy`) で実際に発火制御へ適用されるのは `cooldownMinutes` と `maxPerDay` です。`threshold` / `minMatchLevel` / `weightPreset` は保存可能ですが、条件成立が二値判定の現行実装では no-op です。
 
 ---
 
