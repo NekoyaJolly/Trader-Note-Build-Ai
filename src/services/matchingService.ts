@@ -1,4 +1,4 @@
-import type { TradeNote, MarketData } from '../models/types';
+import type { MarketData } from '../models/types';
 import { MarketDataService } from './marketDataService';
 import { TradeNoteService } from './tradeNoteService';
 import { v4 as uuidv4 } from 'uuid';
@@ -19,7 +19,6 @@ import {
   DEFAULT_ANOMALY_THRESHOLD
 } from '../utils/indicatorNormalizer';
 import {
-  createNoteEvaluator,
   convertMarketDataToSnapshot,
 } from './legacyNoteEvaluatorAdapter';
 import type { EvaluationResult } from '../domain/noteEvaluator';
@@ -33,7 +32,6 @@ import { MatchingPipelineRunRepository } from '../backend/repositories/matchingP
 import type { MatchingPipelineRunStatus } from '@prisma/client';
 import {
   LensNoteCoreService,
-  type LensShadowSummary,
   type LensNoteEvaluation,
 } from './lensNoteCoreService';
 import type { LensSimilarityBreakdownEntry } from '../shared/similarity/similarityEngine';
@@ -42,24 +40,6 @@ import type { LensSimilarityBreakdownEntry } from '../shared/similarity/similari
  * matching pipeline の起動元（observability 用）。
  */
 export type PipelineRunTrigger = 'cron' | 'manual_test' | 'scheduler' | 'realtime' | 'unknown';
-
-/**
- * マッチング評価エンジンの選択（Phase α-3、移行戦略 §9-3）。
- *
- * - 'lens': レンズ類似度(lensSnapshot 比較)で score/triggered を決める新経路（既定）
- * - 'legacy': 旧 12 次元特徴量ベクトル + NoteEvaluator の経路（ロールバック用に 1 リリース併存）
- */
-export type MatchingEngineMode = 'lens' | 'legacy';
-
-/**
- * 環境変数 MATCHING_ENGINE からエンジンを解決する。
- *
- * 既定は 'lens'（α-3 の切替本体）。問題発生時は MATCHING_ENGINE=legacy で
- * デプロイなしに旧経路へロールバックできる。
- */
-export function resolveMatchingEngine(): MatchingEngineMode {
-  return process.env.MATCHING_ENGINE === 'legacy' ? 'legacy' : 'lens';
-}
 
 /**
  * runMatchingPipeline() の戻り値（P1: observability）。
@@ -77,9 +57,6 @@ export interface MatchingPipelineRunResult {
   /// スキップ理由の集計（reason code -> 件数）
   skipReasons: Record<string, number>;
   status: MatchingPipelineRunStatus;
-  /// レンズ類似度シャドー評価のサマリー（Phase α-2、観測のみ・通知挙動に影響しない。
-  /// 無効化時・評価失敗時は undefined）
-  lensShadow?: LensShadowSummary;
 }
 
 /**
@@ -102,7 +79,7 @@ export interface MatchingServiceDeps {
   >;
   lensNoteCoreService?: Pick<
     LensNoteCoreService,
-    'shadowEvaluateActiveNotes' | 'evaluateNotesForMatching'
+    'evaluateNotesForMatching'
   >;
   // Phase α-3: lens エンジン経路のユニットテストで外部依存(市場データ/DB)を
   // 差し替えるための追加 DI。未指定時は既定実装を使う。
@@ -150,7 +127,7 @@ export class MatchingService {
   // レンズ類似度評価 (Phase α-2 シャドー / Phase α-3 マッチング本経路)。
   private lensNoteCoreService: Pick<
     LensNoteCoreService,
-    'shadowEvaluateActiveNotes' | 'evaluateNotesForMatching'
+    'evaluateNotesForMatching'
   >;
 
   constructor(deps: MatchingServiceDeps = {}) {
@@ -197,20 +174,18 @@ export class MatchingService {
       return [];
     }
 
-    // Phase α-3: 既定はレンズ類似度エンジン。MATCHING_ENGINE=legacy でロールバック可
-    if (resolveMatchingEngine() === 'lens') {
-      return this.checkForMatchesWithLensEngine(notes);
-    }
-    return this.checkForMatchesWithLegacyEngine(notes);
+    // Phase α-3 第2弾: 旧 12 次元ロールバック経路を廃止し、
+    // Side-A の本番マッチングは LensSnapshot 類似度へ一本化する。
+    return this.checkForMatchesWithLensEngine(notes);
   }
 
   /**
    * 【Phase α-3】レンズ類似度エンジンによるマッチング評価。
    *
    * - score / triggered / threshold は LensNoteCoreService のレンズ比較結果をそのまま使う
-   *   (旧経路のルール補正 applyRuleAdjustment は適用しない。score = レンズ類似度)
+   *   (score = レンズ類似度)
    * - MarketSnapshot 行は EvaluationLog / MatchResult の FK 充足と通知 UI 表示のため
-   *   旧経路と同じく upsert を継続する
+   *   これまで通り upsert を継続する
    * - トレンド/価格帯チェックは観測情報として記録するが、スコアには影響させない
    */
   private async checkForMatchesWithLensEngine(
@@ -413,144 +388,6 @@ export class MatchingService {
   }
 
   /**
-   * 【旧経路】12 次元特徴量ベクトル + NoteEvaluator によるマッチング評価。
-   *
-   * Phase α-3 のロールバック用に 1 リリース併存させる (MATCHING_ENGINE=legacy で有効化)。
-   * レンズ経路の安定稼働確認後に削除予定。
-   */
-  private async checkForMatchesWithLegacyEngine(
-    notes: PrismaTradeNote[]
-  ): Promise<MatchResultDTO[]> {
-    const matches: MatchResultDTO[] = [];
-
-    // ノートをシンボル別にグループ化
-    const notesBySymbol = this.groupNotesBySymbolPrisma(notes);
-
-    for (const [symbol, symbolNotes] of notesBySymbol.entries()) {
-      try {
-        // 現在の市場データを取得（インジケーター計算付き）
-        const currentMarket = await this.marketDataService.getCurrentMarketDataWithIndicators(symbol);
-
-        // MarketData → MarketSnapshot に変換（NoteEvaluator用）
-        const snapshot = convertMarketDataToSnapshot(currentMarket);
-
-        // MarketSnapshot を DB に保存
-        let marketSnapshotId: string | undefined;
-        try {
-          const savedSnapshot = await this.marketSnapshotRepository.upsertSnapshot({
-            symbol: currentMarket.symbol,
-            timeframe: currentMarket.timeframe,
-            close: currentMarket.close,
-            volume: currentMarket.volume,
-            indicators: currentMarket.indicators || {},
-            fetchedAt: currentMarket.timestamp,
-          });
-          marketSnapshotId = savedSnapshot.id;
-        } catch (snapshotError) {
-          console.warn('MarketSnapshot 保存をスキップ:', snapshotError);
-        }
-
-        // 各ノートに対して NoteEvaluator で評価
-        for (const note of symbolNotes) {
-          // ノートから NoteEvaluator を生成（Prisma型を直接使用）
-          const evaluator = createNoteEvaluator(note);
-
-          // NoteEvaluator.evaluate() で評価（Service は類似度を直接計算しない）
-          const evalResult = evaluator.evaluate(snapshot);
-
-          // ★ EvaluationLog を記録（triggered=false も含む、勝率計算の分母となる）
-          // marketSnapshotId が取得できている場合のみ記録
-          if (marketSnapshotId) {
-            try {
-              await this.evaluationLogRepository.upsertLog({
-                noteId: note.id,
-                marketSnapshotId,
-                symbol,
-                timeframe: currentMarket.timeframe,
-                evaluationResult: evalResult,
-              });
-            } catch (logError) {
-              // EvaluationLog 記録の失敗はマッチング処理をブロックしない
-              console.warn('[MatchingService] EvaluationLog 記録をスキップ:', logError);
-            }
-          }
-
-          // 追加のルールベースチェック（トレンド・価格帯）
-          const trendMatched = this.checkTrendMatchPrisma(note, currentMarket);
-          const priceRangeMatched = this.checkPriceRangePrisma(note, currentMarket);
-
-          // 補正スコア（評価結果のsimilarityをベースに補正）
-          const adjustedScore = this.applyRuleAdjustment(evalResult.similarity, trendMatched, priceRangeMatched);
-
-          // 理由を生成
-          const reasons = this.generateMatchReasonsFromEvaluation(
-            evalResult,
-            currentMarket,
-            trendMatched,
-            priceRangeMatched
-          );
-
-          // NoteEvaluator の閾値で発火判定
-          const isMatch = evaluator.isTriggered(adjustedScore);
-
-          // 無界インジケーターの異常値チェック（マッチした場合のみ警告を生成）
-          let warnings: string[] = [];
-          if (isMatch) {
-            warnings = this.checkIndicatorAnomaliesPrisma(note, currentMarket);
-          }
-
-          if (isMatch) {
-            const matchId = uuidv4();
-            const evaluatedAt = new Date();
-            const threshold = evaluator.getThresholds().weak; // 発火に使用した閾値
-
-            // MatchResult を DB に永続化（marketSnapshotId がある場合のみ）
-            if (marketSnapshotId) {
-              try {
-                await this.matchResultRepository.upsertByNoteAndSnapshot({
-                  noteId: note.id,
-                  marketSnapshotId,
-                  symbol,
-                  score: adjustedScore,
-                  threshold,
-                  trendMatched,
-                  priceRangeMatched,
-                  reasons,
-                  evaluatedAt,
-                  // Phase α-4: 由来ノートの所有ユーザーを伝播 (通知のユーザー分離の起点)
-                  userId: note.userId,
-                });
-              } catch (persistError) {
-                console.warn('MatchResult 永続化をスキップ:', persistError);
-              }
-            }
-
-            matches.push({
-              id: matchId,
-              matchScore: adjustedScore,
-              historicalNoteId: note.id,
-              userId: note.userId,
-              marketSnapshot: currentMarket,
-              marketSnapshotId,
-              symbol,
-              threshold,
-              trendMatched,
-              priceRangeMatched,
-              reasons,
-              warnings,
-              evaluatedAt,
-            });
-          }
-        }
-      } catch (error) {
-        console.error(`${symbol} のマッチチェックエラー:`, error);
-      }
-    }
-
-    return matches;
-  }
-
-  /**
    * 同時ヒット制御付きでマッチをチェック（フェーズ8）
    * 
    * 1. checkForMatches() で全マッチを取得
@@ -639,63 +476,6 @@ export class MatchingService {
   }
 
   /**
-   * ルールベースの補正を適用
-   * 
-   * 類似度スコアにトレンド一致・価格帯一致の補正を加える
-   * 
-   * @param baseSimilarity NoteEvaluator から得た類似度
-   * @param trendMatched トレンド一致フラグ
-   * @param priceRangeMatched 価格帯一致フラグ
-   * @returns 補正後スコア（0〜1）
-   */
-  private applyRuleAdjustment(
-    baseSimilarity: number,
-    trendMatched: boolean,
-    priceRangeMatched: boolean
-  ): number {
-    // 重み付け: 類似度60% + トレンド30% + 価格帯10%
-    const finalScore = (
-      baseSimilarity * 0.6 +
-      (trendMatched ? 0.3 : 0) +
-      (priceRangeMatched ? 0.1 : 0)
-    );
-    return Math.min(finalScore, 1);
-  }
-
-  /**
-   * 評価結果からマッチ理由を生成（日本語）
-   */
-  private generateMatchReasonsFromEvaluation(
-    evalResult: EvaluationResult,
-    market: MarketData,
-    trendMatched: boolean,
-    priceRangeMatched: boolean
-  ): string[] {
-    const reasons: string[] = [];
-
-    // 類似度レベルに応じたメッセージ
-    const levelMessages: Record<string, string> = {
-      strong: '非常に高い類似度',
-      medium: '高い類似度',
-      weak: '中程度の類似度',
-      none: '低い類似度',
-    };
-    reasons.push(`${levelMessages[evalResult.level]}: ${(evalResult.similarity * 100).toFixed(1)}%`);
-
-    if (trendMatched) {
-      reasons.push(`トレンド一致: ${market.indicators?.trend || 'neutral'}`);
-    } else {
-      reasons.push(`トレンド不一致: 現在=${market.indicators?.trend || 'neutral'}`);
-    }
-
-    if (priceRangeMatched) {
-      reasons.push('価格レンジ一致');
-    }
-
-    return reasons;
-  }
-
-  /**
    * マッチ履歴を DB から取得
    */
   async getMatchHistory(options: {
@@ -728,102 +508,9 @@ export class MatchingService {
     }
   }
 
-  /**
-   * トレンド一致をチェック
-   */
-  private checkTrendMatch(note: TradeNote, market: MarketData): boolean {
-    const noteTrend = note.marketContext.trend;
-    const currentTrend = market.indicators?.trend;
-
-    return noteTrend === currentTrend;
-  }
-
-  /**
-   * 価格が過去ノートの価格帯内かチェック（5%以内）
-   */
-  private checkPriceRange(note: TradeNote, market: MarketData): boolean {
-    const priceDeviation = Math.abs(market.close - note.entryPrice) / note.entryPrice;
-    return priceDeviation < 0.05;
-  }
-
-  /**
-   * ノートをシンボル別にグループ化
-   */
-  private groupNotesBySymbol(notes: TradeNote[]): Map<string, TradeNote[]> {
-    const grouped = new Map<string, TradeNote[]>();
-
-    for (const note of notes) {
-      const existing = grouped.get(note.symbol) || [];
-      existing.push(note);
-      grouped.set(note.symbol, existing);
-    }
-
-    return grouped;
-  }
-
-  /**
-   * 無界インジケーターの異常値をチェック
-   * 
-   * ノートの過去インジケーター値を基準に、現在の市場データが
-   * ±3σ以上乖離している場合に警告を生成する
-   */
-  private checkIndicatorAnomalies(note: TradeNote, market: MarketData): string[] {
-    // 現在の市場インジケーター値を抽出
-    const currentIndicators: Record<string, number | undefined> = {};
-    if (market.indicators) {
-      for (const [key, value] of Object.entries(market.indicators)) {
-        if (typeof value === 'number') {
-          currentIndicators[key] = value;
-        }
-      }
-    }
-
-    // ノートの過去インジケーター値を取得
-    const historicalIndicators: Record<string, number | undefined>[] = [];
-
-    if (note.marketContext && typeof note.marketContext === 'object') {
-      const noteIndicators: Record<string, number | undefined> = {};
-      for (const [key, value] of Object.entries(note.marketContext)) {
-        if (typeof value === 'number') {
-          noteIndicators[key] = value;
-        }
-      }
-      if (Object.keys(noteIndicators).length > 0) {
-        historicalIndicators.push(noteIndicators);
-      }
-    }
-
-    if (historicalIndicators.length === 0) {
-      return [];
-    }
-
-    const result: NormalizedIndicators = normalizeIndicators(
-      currentIndicators,
-      historicalIndicators,
-      DEFAULT_ANOMALY_THRESHOLD
-    );
-
-    return result.warnings;
-  }
-
   // ============================================================================
   // Prisma型用ヘルパーメソッド (DB統一対応)
   // ============================================================================
-
-  /**
-   * Prisma型ノートをシンボル別にグループ化
-   */
-  private groupNotesBySymbolPrisma(notes: PrismaTradeNote[]): Map<string, PrismaTradeNote[]> {
-    const grouped = new Map<string, PrismaTradeNote[]>();
-
-    for (const note of notes) {
-      const existing = grouped.get(note.symbol) || [];
-      existing.push(note);
-      grouped.set(note.symbol, existing);
-    }
-
-    return grouped;
-  }
 
   /**
    * Prisma型ノートでトレンド一致をチェック
@@ -1041,40 +728,18 @@ export class MatchingService {
     let notifiedCount = 0;
     let skippedCount = 0;
     let totalMatches = 0;
-    // レンズ類似度シャドー評価の結果 (Phase α-2)。失敗時・無効時は undefined のまま
-    let lensShadow: LensShadowSummary | undefined;
 
     try {
       // 1. 統合マッチング（Side-A + Side-B）。Phase δ-1: symbolFilter でシンボルスコープ可
       const allMatches = await this.checkForAllMatches(options.symbolFilter);
       totalMatches = allMatches.length;
 
-      // 1.5 レンズ類似度シャドー評価 (Phase α-2、NOTE_SIMILARITY_FOUNDATION.md §9-2)
-      // 旧マッチングと並行してレンズ基盤のスコアを観測する。通知挙動には一切影響せず、
-      // 失敗してもパイプラインは継続する。LENS_SHADOW_EVALUATION=false で無効化できる。
-      // Phase α-3: 本経路が lens エンジンの場合は同じ評価の二重実行になるためスキップする
-      // (シャドーは legacy ロールバック運用時の観測手段として残す)。
-      if (resolveMatchingEngine() === 'legacy' && process.env.LENS_SHADOW_EVALUATION !== 'false') {
-        try {
-          lensShadow = await this.lensNoteCoreService.shadowEvaluateActiveNotes();
-          console.log(
-            `[LensShadow] active=${lensShadow.activeNotes} withSnapshot=${lensShadow.notesWithSnapshot} ` +
-            `comparable=${lensShadow.comparable} triggered=${lensShadow.triggered} ` +
-            `avg=${lensShadow.averageScore === null ? 'n/a' : lensShadow.averageScore.toFixed(3)} ` +
-            `errors=${lensShadow.errors.length}`
-          );
-        } catch (shadowError) {
-          console.warn('[LensShadow] シャドー評価失敗 (パイプライン継続):', shadowError);
-        }
-      }
-
       if (allMatches.length === 0) {
         console.log('[MatchingPipeline] マッチなし。パイプライン終了。');
-        const emptyResult = await this.finalizePipelineRun({
+        return this.finalizePipelineRun({
           runId, trigger, startedAt,
           totalMatches: 0, notified: 0, skipped: 0, errors: [], skipReasons: {},
         });
-        return lensShadow ? { ...emptyResult, lensShadow } : emptyResult;
       }
 
       // Side-A / Side-B の切り分け:
@@ -1240,12 +905,12 @@ export class MatchingService {
         errors,
         skipReasons,
       });
-      return lensShadow ? { ...result, lensShadow } : result;
+      return result;
     } catch (error) {
       const errMsg = `パイプライン全体エラー: ${error instanceof Error ? error.message : String(error)}`;
       errors.push(errMsg);
       console.error(`[MatchingPipeline] ${errMsg}`);
-      const failedResult = await this.finalizePipelineRun({
+      return this.finalizePipelineRun({
         runId, trigger, startedAt,
         totalMatches,
         notified: notifiedCount,
@@ -1254,7 +919,6 @@ export class MatchingService {
         skipReasons,
         forcedStatus: 'failed',
       });
-      return lensShadow ? { ...failedResult, lensShadow } : failedResult;
     }
   }
 

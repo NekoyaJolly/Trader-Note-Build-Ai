@@ -3,10 +3,9 @@
  *
  * 検証観点:
  * - Note コア生成: snapshot 生成成否に関わらず Note 行が登録される(取り込みを止めない)
- * - シャドー評価(§9-2): ノート側 lensId から市場側仕様を逆解決し、比較サマリーを返す。
- *   通知系には一切触れない(観測のみ)
+ * - マッチング評価: ノート側 lensId から市場側仕様を逆解決し、比較詳細を返す。
  *
- * 外部依存(builder / リポジトリ / ノート読込)は全て DI モックで遮断する。
+ * 外部依存(builder / リポジトリ)は全て DI モックで遮断する。
  */
 
 import type { TradeNote as PrismaTradeNote, Note as PrismaNote } from '@prisma/client';
@@ -66,7 +65,6 @@ describe('LensNoteCoreService.createForSideATradeNote', () => {
     const deps = {
       builder: { build: jest.fn().mockResolvedValue({ snapshot, warnings: [], barsUsed: 130 }) },
       noteCoreRepository: { upsertForTradeNote, findByTradeNoteIds: jest.fn() },
-      tradeNoteService: { loadActiveNotesForMatchingAsPrisma: jest.fn() },
     } as LensNoteCoreServiceDeps;
     const service = new LensNoteCoreService(deps);
 
@@ -98,7 +96,6 @@ describe('LensNoteCoreService.createForSideATradeNote', () => {
     const deps = {
       builder: { build: jest.fn().mockRejectedValue(new Error('engine down')) },
       noteCoreRepository: { upsertForTradeNote, findByTradeNoteIds: jest.fn() },
-      tradeNoteService: { loadActiveNotesForMatchingAsPrisma: jest.fn() },
     } as LensNoteCoreServiceDeps;
     const service = new LensNoteCoreService(deps);
 
@@ -120,89 +117,6 @@ describe('LensNoteCoreService.createForSideATradeNote', () => {
   });
 });
 
-describe('LensNoteCoreService.shadowEvaluateActiveNotes', () => {
-  test('snapshot を持つノートだけ比較され、lensId から市場側仕様が逆解決される', async () => {
-    const noteSnapshot = makeNoteSnapshot();
-    // 市場側はノートと同一の特徴 → スコア 1.0 / triggered
-    const build = jest
-      .fn()
-      .mockResolvedValue({ snapshot: makeNoteSnapshot(), warnings: [], barsUsed: 130 });
-    const deps = {
-      builder: { build },
-      noteCoreRepository: {
-        upsertForTradeNote: jest.fn(),
-        findByTradeNoteIds: jest.fn().mockResolvedValue([
-          makeCoreRow('note_with_snapshot', noteSnapshot),
-          makeCoreRow('note_without_snapshot', null),
-        ]),
-      },
-      tradeNoteService: {
-        loadActiveNotesForMatchingAsPrisma: jest
-          .fn()
-          .mockResolvedValue([makeActiveNote('note_with_snapshot'), makeActiveNote('note_without_snapshot')]),
-      },
-    } as LensNoteCoreServiceDeps;
-    const service = new LensNoteCoreService(deps);
-
-    const summary = await service.shadowEvaluateActiveNotes();
-
-    expect(summary.activeNotes).toBe(2);
-    expect(summary.notesWithSnapshot).toBe(1);
-    expect(summary.comparable).toBe(1);
-    expect(summary.triggered).toBe(1);
-    expect(summary.symbols).toBe(1);
-    // 同一スナップショット同士でも rsi_divergence='none' 同士は 0.5(§6.2 イベント表)のため
-    // ind:rsi = (1 + 1 + 0.5)/3 = 5/6、全体 = 0.35×1.0(状態) + 0.65×5/6(指標) ≈ 0.8917
-    expect(summary.averageScore).toBeCloseTo(0.35 + 0.65 * (5 / 6), 5);
-    expect(summary.errors).toEqual([]);
-    // 市場側 build にはノート側 lensId (ind:rsi#p14) から逆解決した仕様が渡る
-    const buildArgs = build.mock.calls[0][0] as {
-      symbol: string;
-      indicatorSpecs: Array<{ lensId: string }>;
-    };
-    expect(buildArgs.symbol).toBe('USDJPY');
-    expect(buildArgs.indicatorSpecs.map((s) => s.lensId)).toEqual(['ind:rsi#p14']);
-  });
-
-  test('市場側 snapshot が生成できないシンボルは errors に記録し他を継続する', async () => {
-    const deps = {
-      builder: {
-        build: jest.fn().mockResolvedValue({ snapshot: null, warnings: ['データなし'], barsUsed: 0 }),
-      },
-      noteCoreRepository: {
-        upsertForTradeNote: jest.fn(),
-        findByTradeNoteIds: jest
-          .fn()
-          .mockResolvedValue([makeCoreRow('note_1', makeNoteSnapshot())]),
-      },
-      tradeNoteService: {
-        loadActiveNotesForMatchingAsPrisma: jest.fn().mockResolvedValue([makeActiveNote('note_1')]),
-      },
-    } as LensNoteCoreServiceDeps;
-    const service = new LensNoteCoreService(deps);
-
-    const summary = await service.shadowEvaluateActiveNotes();
-    expect(summary.comparable).toBe(0);
-    expect(summary.errors.length).toBe(1);
-  });
-
-  test('アクティブノート 0 件なら何もせず空サマリーを返す', async () => {
-    const build = jest.fn();
-    const deps = {
-      builder: { build },
-      noteCoreRepository: { upsertForTradeNote: jest.fn(), findByTradeNoteIds: jest.fn() },
-      tradeNoteService: {
-        loadActiveNotesForMatchingAsPrisma: jest.fn().mockResolvedValue([]),
-      },
-    } as LensNoteCoreServiceDeps;
-    const service = new LensNoteCoreService(deps);
-
-    const summary = await service.shadowEvaluateActiveNotes();
-    expect(summary.activeNotes).toBe(0);
-    expect(build).not.toHaveBeenCalled();
-  });
-});
-
 describe('LensNoteCoreService 通知粒度設定の配線 (Phase β-2a)', () => {
   // 共通 deps: ノート 1 件 + 同一 snapshot (自己比較 = score 1.0)
   const buildDeps = (preferenceService: LensNoteCoreServiceDeps['preferenceService']) =>
@@ -215,9 +129,6 @@ describe('LensNoteCoreService 通知粒度設定の配線 (Phase β-2a)', () => 
       noteCoreRepository: {
         upsertForTradeNote: jest.fn(),
         findByTradeNoteIds: jest.fn().mockResolvedValue([makeCoreRow('note_1', makeNoteSnapshot())]),
-      },
-      tradeNoteService: {
-        loadActiveNotesForMatchingAsPrisma: jest.fn().mockResolvedValue([makeActiveNote('note_1')]),
       },
       preferenceService,
     }) as LensNoteCoreServiceDeps;

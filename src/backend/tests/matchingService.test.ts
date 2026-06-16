@@ -10,8 +10,8 @@
  * - Service は NoteEvaluator.evaluate() を呼ぶだけ
  * - similarity を直接計算しない
  */
-import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
-import { MatchingService, resolveMatchingEngine } from '../../services/matchingService';
+import { describe, it, expect, beforeEach, jest } from '@jest/globals';
+import { MatchingService } from '../../services/matchingService';
 import type { TradeNote, MarketData } from '../../models/types';
 import type { MatchResultDTO } from '../../domain/matching/MatchResultDTO';
 import { SimultaneousHitControlService } from '../../services/notification/simultaneousHitControlService';
@@ -217,11 +217,13 @@ describe('MatchingService', () => {
       const hitControl = new SimultaneousHitControlService();
       jest
         .spyOn(hitControl, 'control')
-        .mockImplementation(async (hits) => ({
-          toNotify: hits,
-          toSkip: [],
-          groupedBySymbol: new Map(),
-        }));
+        .mockImplementation((hits) =>
+          Promise.resolve({
+            toNotify: hits,
+            toSkip: [],
+            groupedBySymbol: new Map(),
+          })
+        );
       return hitControl;
     };
 
@@ -445,108 +447,6 @@ describe('MatchingService', () => {
       );
     });
 
-    // ============================================================
-    // レンズ類似度シャドー評価 (Phase α-2、NOTE_SIMILARITY_FOUNDATION.md §9-2)
-    // ============================================================
-    describe('レンズシャドー評価の配線', () => {
-      const originalShadowEnv = process.env.LENS_SHADOW_EVALUATION;
-      afterEach(() => {
-        process.env.LENS_SHADOW_EVALUATION = originalShadowEnv;
-      });
-
-      // Pick 型が evaluateNotesForMatching も要求するため、シャドーテストでは未使用のスタブを渡す
-      const lensMatchingStub = jest.fn<
-        (notes: ReadonlyArray<PrismaTradeNote>) => Promise<LensEvaluationDetail>
-      >();
-
-      const shadowSummary = {
-        activeNotes: 2,
-        notesWithSnapshot: 1,
-        comparable: 1,
-        triggered: 0,
-        symbols: 1,
-        averageScore: 0.62,
-        errors: [],
-      };
-
-      it('シャドー評価のサマリーが結果に additive に含まれる(マッチ 0 件でも実行される)', async () => {
-        process.env.LENS_SHADOW_EVALUATION = 'true';
-        const shadowEvaluateActiveNotes = jest
-          .fn<() => Promise<typeof shadowSummary>>()
-          .mockResolvedValue(shadowSummary);
-        const runRepo = buildRunRepo();
-        const pipeline = new MatchingService({
-          matchingPipelineRunRepository: runRepo,
-          lensNoteCoreService: { shadowEvaluateActiveNotes, evaluateNotesForMatching: lensMatchingStub },
-        });
-        jest.spyOn(pipeline, 'checkForAllMatches').mockResolvedValue([]);
-
-        const result = await pipeline.runMatchingPipeline({ trigger: 'manual_test' });
-
-        // 旧マッチングが 0 件でもシャドー評価は走る(レンズ基盤の観測が目的のため)
-        expect(shadowEvaluateActiveNotes).toHaveBeenCalledTimes(1);
-        expect(result.lensShadow).toEqual(shadowSummary);
-        expect(result.status).toBe('success');
-      });
-
-      it('シャドー評価の失敗はパイプラインの成否に影響しない', async () => {
-        process.env.LENS_SHADOW_EVALUATION = 'true';
-        const shadowEvaluateActiveNotes = jest
-          .fn<() => Promise<typeof shadowSummary>>()
-          .mockRejectedValue(new Error('shadow down'));
-        const pipeline = new MatchingService({
-          matchingPipelineRunRepository: buildRunRepo(),
-          lensNoteCoreService: { shadowEvaluateActiveNotes, evaluateNotesForMatching: lensMatchingStub },
-        });
-        jest.spyOn(pipeline, 'checkForAllMatches').mockResolvedValue([]);
-
-        const result = await pipeline.runMatchingPipeline();
-
-        expect(result.status).toBe('success');
-        expect(result.errors).toEqual([]);
-        expect(result.lensShadow).toBeUndefined();
-      });
-
-      it('LENS_SHADOW_EVALUATION=false で無効化できる', async () => {
-        process.env.LENS_SHADOW_EVALUATION = 'false';
-        const shadowEvaluateActiveNotes = jest
-          .fn<() => Promise<typeof shadowSummary>>()
-          .mockResolvedValue(shadowSummary);
-        const pipeline = new MatchingService({
-          matchingPipelineRunRepository: buildRunRepo(),
-          lensNoteCoreService: { shadowEvaluateActiveNotes, evaluateNotesForMatching: lensMatchingStub },
-        });
-        jest.spyOn(pipeline, 'checkForAllMatches').mockResolvedValue([]);
-
-        const result = await pipeline.runMatchingPipeline();
-
-        expect(shadowEvaluateActiveNotes).not.toHaveBeenCalled();
-        expect(result.lensShadow).toBeUndefined();
-      });
-
-      it('MATCHING_ENGINE=lens のときはシャドー評価がスキップされる(本経路と二重評価しない)', async () => {
-        process.env.LENS_SHADOW_EVALUATION = 'true';
-        const originalEngine = process.env.MATCHING_ENGINE;
-        process.env.MATCHING_ENGINE = 'lens';
-        try {
-          const shadowEvaluateActiveNotes = jest
-            .fn<() => Promise<typeof shadowSummary>>()
-            .mockResolvedValue(shadowSummary);
-          const pipeline = new MatchingService({
-            matchingPipelineRunRepository: buildRunRepo(),
-            lensNoteCoreService: { shadowEvaluateActiveNotes, evaluateNotesForMatching: lensMatchingStub },
-          });
-          jest.spyOn(pipeline, 'checkForAllMatches').mockResolvedValue([]);
-
-          const result = await pipeline.runMatchingPipeline();
-
-          expect(shadowEvaluateActiveNotes).not.toHaveBeenCalled();
-          expect(result.lensShadow).toBeUndefined();
-        } finally {
-          process.env.MATCHING_ENGINE = originalEngine;
-        }
-      });
-    });
   });
 });
 
@@ -554,14 +454,6 @@ describe('MatchingService', () => {
 // レンズマッチングエンジン (Phase α-3、NOTE_SIMILARITY_FOUNDATION.md §9-3)
 // ============================================================
 describe('MatchingService lens エンジン (Phase α-3)', () => {
-  const originalEngine = process.env.MATCHING_ENGINE;
-  beforeEach(() => {
-    process.env.MATCHING_ENGINE = 'lens';
-  });
-  afterEach(() => {
-    process.env.MATCHING_ENGINE = originalEngine;
-  });
-
   // テスト用の Prisma 型ノートを生成 (loadActiveNotesForMatchingAsPrisma の戻り値型に合わせる)
   const createPrismaNote = (overrides?: Partial<TradeNoteWithSummary>): TradeNoteWithSummary => ({
     id: 'note_lens_1',
@@ -659,25 +551,13 @@ describe('MatchingService lens エンジン (Phase α-3)', () => {
     const evaluateNotesForMatching = jest
       .fn<(notes: ReadonlyArray<PrismaTradeNote>) => Promise<LensEvaluationDetail>>()
       .mockResolvedValue(detail);
-    const shadowEvaluateActiveNotes = jest.fn<
-      () => Promise<{
-        activeNotes: number;
-        notesWithSnapshot: number;
-        comparable: number;
-        triggered: number;
-        symbols: number;
-        averageScore: number | null;
-        errors: string[];
-      }>
-    >();
-
     const service = new MatchingService({
       tradeNoteService: { loadActiveNotesForMatchingAsPrisma, getNoteById },
       marketDataService: { getCurrentMarketDataWithIndicators },
       marketSnapshotRepository: { upsertSnapshot },
       evaluationLogRepository: { upsertLog },
       matchResultRepository: { upsertByNoteAndSnapshot, findHistory },
-      lensNoteCoreService: { shadowEvaluateActiveNotes, evaluateNotesForMatching },
+      lensNoteCoreService: { evaluateNotesForMatching },
     });
 
     return {
@@ -692,15 +572,6 @@ describe('MatchingService lens エンジン (Phase α-3)', () => {
       },
     };
   };
-
-  it('resolveMatchingEngine は既定で lens、MATCHING_ENGINE=legacy で legacy を返す', () => {
-    delete process.env.MATCHING_ENGINE;
-    expect(resolveMatchingEngine()).toBe('lens');
-    process.env.MATCHING_ENGINE = 'legacy';
-    expect(resolveMatchingEngine()).toBe('legacy');
-    process.env.MATCHING_ENGINE = 'lens';
-    expect(resolveMatchingEngine()).toBe('lens');
-  });
 
   it('triggered なレンズ評価から MatchResult が永続化され score/threshold がレンズ値になる', async () => {
     const note = createPrismaNote();
@@ -912,21 +783,4 @@ describe('MatchingService lens エンジン (Phase α-3)', () => {
     );
   });
 
-  it('MATCHING_ENGINE=legacy のときは旧経路が使われ lens 評価は呼ばれない', async () => {
-    process.env.MATCHING_ENGINE = 'legacy';
-    const note = createPrismaNote();
-    const { service, mocks } = buildLensService(note, {
-      activeNotes: 1,
-      notesWithSnapshot: 1,
-      symbols: 1,
-      evaluations: [{ note, timeframe: '15m', comparison: triggeredComparison }],
-      errors: [],
-    });
-
-    // 旧経路: featureVector が空なので cosine 類似度 0 → マッチなしで正常終了する
-    const matches = await service.checkForMatches();
-
-    expect(mocks.evaluateNotesForMatching).not.toHaveBeenCalled();
-    expect(matches).toHaveLength(0);
-  });
 });
