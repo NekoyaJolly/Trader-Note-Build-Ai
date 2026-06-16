@@ -25,12 +25,13 @@ const mockAlertPrisma = {
   },
   strategyAlertLog: {
     create: jest.fn(),
+    count: jest.fn(),
   },
   // triggerAlert は Phase γ で NotificationPreference の cooldown を解決する
   // (resolveForStrategy)。userId=null のレガシー行では早期 return で findMany を
   // 呼ばないが、非 null ケースも安全に通るよう空配列を返すモックを用意する。
   notificationPreference: {
-    findMany: jest.fn(() => Promise.resolve([])),
+    findMany: jest.fn(),
   },
 };
 
@@ -156,7 +157,9 @@ describe('strategyAlertService の Web Push per-user ルーティング (Phase �
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockAlertPrisma.notificationPreference.findMany.mockResolvedValue([] as never);
     mockAlertPrisma.strategyAlertLog.create.mockResolvedValue({ id: 'log-1' } as never);
+    mockAlertPrisma.strategyAlertLog.count.mockResolvedValue(0 as never);
     mockAlertPrisma.strategyAlert.update.mockResolvedValue({} as never);
     mockWebPushForAlert.sendToUser.mockResolvedValue(emptyResult);
     mockWebPushForAlert.broadcast.mockResolvedValue(emptyResult);
@@ -179,6 +182,40 @@ describe('strategyAlertService の Web Push per-user ルーティング (Phase �
     expect(mockWebPushForAlert.broadcast).not.toHaveBeenCalled();
   });
 
+  it('strategy scope の24h上限に到達している場合は送信前にスキップする', async () => {
+    mockAlertPrisma.strategyAlert.findUnique.mockResolvedValue(makeAlert('user-a-uuid') as never);
+    mockAlertPrisma.notificationPreference.findMany.mockResolvedValue([
+      {
+        id: 'pref-strategy-1',
+        userId: 'user-a-uuid',
+        scope: 'strategy',
+        noteId: null,
+        profileId: null,
+        strategyId: 'strategy-1',
+        threshold: null,
+        minMatchLevel: null,
+        weightPreset: null,
+        cooldownMinutes: null,
+        maxPerDay: 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ] as never);
+    mockAlertPrisma.strategyAlertLog.count.mockResolvedValue(1 as never);
+
+    const result = await triggerAlert({
+      strategyId: 'strategy-1',
+      matchScore: 1.0,
+      indicatorValues: {},
+    });
+
+    expect(result.triggered).toBe(false);
+    expect(result.skipReason).toContain('24時間上限到達');
+    expect(mockAlertPrisma.strategyAlertLog.count).toHaveBeenCalledTimes(1);
+    expect(mockWebPushForAlert.sendToUser).not.toHaveBeenCalled();
+    expect(mockWebPushForAlert.broadcast).not.toHaveBeenCalled();
+  });
+
   it('strategy.userId が null (レガシー行) は broadcast にフォールバックする (境界値)', async () => {
     mockAlertPrisma.strategyAlert.findUnique.mockResolvedValue(makeAlert(null) as never);
 
@@ -189,6 +226,7 @@ describe('strategyAlertService の Web Push per-user ルーティング (Phase �
     });
 
     expect(result.triggered).toBe(true);
+    expect(mockAlertPrisma.strategyAlertLog.count).not.toHaveBeenCalled();
     expect(mockWebPushForAlert.broadcast).toHaveBeenCalledTimes(1);
     expect(mockWebPushForAlert.sendToUser).not.toHaveBeenCalled();
   });

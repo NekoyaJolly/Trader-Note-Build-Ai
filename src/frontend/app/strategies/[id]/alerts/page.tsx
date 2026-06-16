@@ -23,6 +23,7 @@ import {
   resumeAlert,
   fetchNotificationPreferences,
   upsertNotificationPreference,
+  deleteNotificationPreference,
   type StrategyAlert,
   type AlertLog,
   type AlertChannel,
@@ -48,8 +49,9 @@ export default function StrategyAlertsPage() {
     minMatchScore: 0.7,
     channels: ['in_app'] as AlertChannel[],
   });
-  // 空欄は StrategyAlert 本体の cooldownMinutes を使う。strategy scope は既存サービス側で適用済み。
+  // 空欄は StrategyAlert 本体 / 全体設定 / システム既定を使う。strategy scope はサービス側で適用済み。
   const [preferenceCooldownMinutes, setPreferenceCooldownMinutes] = useState("");
+  const [preferenceMaxPerDay, setPreferenceMaxPerDay] = useState("");
   
   // アラート履歴
   const [logs, setLogs] = useState<AlertLog[]>([]);
@@ -89,11 +91,17 @@ export default function StrategyAlertsPage() {
             ? String(strategyScopedPreference.cooldownMinutes)
             : ""
         );
+        setPreferenceMaxPerDay(
+          strategyScopedPreference?.maxPerDay !== null && strategyScopedPreference?.maxPerDay !== undefined
+            ? String(strategyScopedPreference.maxPerDay)
+            : ""
+        );
       } catch (preferenceError) {
         // 通知粒度の取得失敗だけでアラート設定編集を止めない
         console.warn("通知粒度上書きの読み込みに失敗:", preferenceError);
         setStrategyPreference(null);
         setPreferenceCooldownMinutes("");
+        setPreferenceMaxPerDay("");
       }
 
       if (alertData) {
@@ -142,6 +150,7 @@ export default function StrategyAlertsPage() {
   const handlePreferenceSave = async () => {
     const cooldownValue =
       preferenceCooldownMinutes === "" ? null : Number(preferenceCooldownMinutes);
+    const maxPerDayValue = preferenceMaxPerDay === "" ? null : Number(preferenceMaxPerDay);
     if (
       cooldownValue !== null &&
       (!Number.isInteger(cooldownValue) || cooldownValue < 1 || cooldownValue > 10080)
@@ -150,9 +159,17 @@ export default function StrategyAlertsPage() {
       setError("通知粒度クールダウンは 1〜10080 分の整数で指定してください");
       return;
     }
+    if (
+      maxPerDayValue !== null &&
+      (!Number.isInteger(maxPerDayValue) || maxPerDayValue < 1 || maxPerDayValue > 1000)
+    ) {
+      setSuccess(null);
+      setError("ストラテジー24h通知上限は 1〜1000 件の整数で指定してください");
+      return;
+    }
 
     // 未作成かつ空欄の場合は、保存する上書きが無いので API を呼ばない
-    if (cooldownValue === null && strategyPreference === null) {
+    if (cooldownValue === null && maxPerDayValue === null && strategyPreference === null) {
       setError(null);
       setSuccess("通知粒度はアラート設定値を使用します");
       return;
@@ -166,12 +183,35 @@ export default function StrategyAlertsPage() {
         scope: "strategy",
         strategyId,
         cooldownMinutes: cooldownValue,
+        maxPerDay: maxPerDayValue,
       });
       setStrategyPreference(savedPreference);
       setSuccess("通知粒度の上書きを保存しました");
       await loadData();
     } catch (err) {
       const message = err instanceof Error ? err.message : "通知粒度の保存に失敗しました";
+      setError(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /** strategy scope の通知粒度上書きを削除 */
+  const handlePreferenceReset = async () => {
+    if (!strategyPreference) return;
+
+    try {
+      setSaving(true);
+      setError(null);
+      setSuccess(null);
+      await deleteNotificationPreference(strategyPreference.id);
+      setStrategyPreference(null);
+      setPreferenceCooldownMinutes("");
+      setPreferenceMaxPerDay("");
+      setSuccess("通知粒度の上書きを解除しました");
+      await loadData();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "通知粒度の解除に失敗しました";
       setError(message);
     } finally {
       setSaving(false);
@@ -416,23 +456,38 @@ export default function StrategyAlertsPage() {
                     通知粒度上書き
                   </div>
                   <p className="mt-1 text-xs text-gray-500">
-                    空欄の場合は上のクールダウン時間を使います
+                    空欄の場合はアラート設定値 / 全体設定 / システム既定を使います
                   </p>
                 </div>
-                <label className="block text-sm text-gray-400 mb-1">
-                  上書きクールダウン（分）
-                </label>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                  <input
-                    type="number"
-                    min="1"
-                    max="10080"
-                    value={preferenceCooldownMinutes}
-                    onChange={(e) => setPreferenceCooldownMinutes(e.target.value)}
-                    placeholder={`${formData.cooldownMinutes}`}
-                    aria-label="ストラテジー通知粒度クールダウン"
-                    className="w-full sm:w-40 bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white"
-                  />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block text-sm text-gray-400">
+                    上書きクールダウン（分）
+                    <input
+                      type="number"
+                      min="1"
+                      max="10080"
+                      value={preferenceCooldownMinutes}
+                      onChange={(e) => setPreferenceCooldownMinutes(e.target.value)}
+                      placeholder={`${formData.cooldownMinutes}`}
+                      aria-label="ストラテジー通知粒度クールダウン"
+                      className="mt-1 w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white"
+                    />
+                  </label>
+                  <label className="block text-sm text-gray-400">
+                    24h 通知上限（件）
+                    <input
+                      type="number"
+                      min="1"
+                      max="1000"
+                      value={preferenceMaxPerDay}
+                      onChange={(e) => setPreferenceMaxPerDay(e.target.value)}
+                      placeholder="全体/既定"
+                      aria-label="ストラテジー24h通知上限"
+                      className="mt-1 w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white"
+                    />
+                  </label>
+                </div>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
                   <button
                     onClick={handlePreferenceSave}
                     disabled={saving}
@@ -444,9 +499,23 @@ export default function StrategyAlertsPage() {
                   >
                     通知粒度を保存
                   </button>
+                  {strategyPreference && (
+                    <button
+                      onClick={handlePreferenceReset}
+                      disabled={saving}
+                      className={`px-4 py-2 rounded font-medium transition-colors ${
+                        saving
+                          ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                          : 'bg-slate-800 hover:bg-slate-700 text-gray-300'
+                      }`}
+                    >
+                      上書きを解除
+                    </button>
+                  )}
                 </div>
                 <p className="text-xs text-gray-500 mt-2">
-                  現在の有効値: {preferenceCooldownMinutes === "" ? formData.cooldownMinutes : preferenceCooldownMinutes}分
+                  現在のクールダウン: {preferenceCooldownMinutes === "" ? formData.cooldownMinutes : preferenceCooldownMinutes}分
+                  / 24h上限: {preferenceMaxPerDay === "" ? "全体設定または既定" : `${preferenceMaxPerDay}件`}
                 </p>
               </div>
 

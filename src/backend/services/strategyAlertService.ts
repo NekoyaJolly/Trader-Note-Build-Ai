@@ -16,8 +16,26 @@ import { dbNotificationRepository } from '../repositories/notificationRepository
 import { createWebPushService } from './webPushService';
 import { NotificationPreferenceService } from '../../services/notification/notificationPreferenceService';
 
-// 通知粒度設定の解決サービス (Phase γ: 条件アラートのクールダウンに strategy/user スコープを適用)
+// 通知粒度設定の解決サービス (Phase γ: 条件アラートのクールダウン/24h上限に strategy/user スコープを適用)
 const preferenceService = new NotificationPreferenceService();
+
+/** 指定ユーザーのストラテジーアラート成功ログを 24h 上限判定用に数える */
+async function countRecentSuccessfulStrategyAlerts(userId: string, hours: number): Promise<number> {
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+  return await prisma.strategyAlertLog.count({
+    where: {
+      success: true,
+      triggeredAt: {
+        gte: since,
+      },
+      alert: {
+        strategy: {
+          userId,
+        },
+      },
+    },
+  });
+}
 
 // ============================================
 // 型定義
@@ -267,15 +285,26 @@ export async function triggerAlert(request: TriggerAlertRequest): Promise<Trigge
     };
   }
 
-  // 4. クールダウンチェック
-  // Phase γ: 通知粒度設定 (NotificationPreference) の cooldown を適用。
-  // strategy スコープ > user スコープ > StrategyAlert 固有値 の優先で解決する
-  // (柱1 と共通の通知設定層。柱2 は二値判定のため threshold/minMatchLevel は適用しない)。
+  // 4. 通知粒度チェック
+  // Phase γ: 通知粒度設定 (NotificationPreference) の cooldown / maxPerDay を適用。
+  // strategy スコープ > user スコープ > StrategyAlert 固有値/システム既定 の優先で解決する
+  // (柱1 と共通の通知設定層。柱2 は二値判定のため threshold/minMatchLevel/weightPreset は適用しない)。
   // pref 未設定なら従来どおり alert.cooldownMinutes を使い、既存挙動を壊さない。
-  const { cooldownMinutes: prefCooldownMinutes } = await preferenceService.resolveForStrategy(
+  const { cooldownMinutes: prefCooldownMinutes, effective } = await preferenceService.resolveForStrategy(
     strategyId,
     alert.strategy.userId,
   );
+
+  if (alert.strategy.userId) {
+    const dailyCount = await countRecentSuccessfulStrategyAlerts(alert.strategy.userId, 24);
+    if (dailyCount >= effective.maxPerDay) {
+      return {
+        triggered: false,
+        skipReason: `24時間上限到達: ${dailyCount}/${effective.maxPerDay}件 (scope=${effective.maxPerDaySource})`,
+      };
+    }
+  }
+
   const effectiveCooldownMinutes = prefCooldownMinutes ?? alert.cooldownMinutes;
   if (alert.lastTriggeredAt) {
     const cooldownMs = effectiveCooldownMinutes * 60 * 1000;

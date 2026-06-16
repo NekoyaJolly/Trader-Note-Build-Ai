@@ -3,7 +3,7 @@
  *
  * 目的:
  * - strategy scope の NotificationPreference を読み込み、画面に反映する
- * - クールダウン上書き保存時に strategyId 付きで upsert API を呼ぶ
+ * - クールダウン / 24h 上限の上書き保存時に strategyId 付きで upsert API を呼ぶ
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -26,6 +26,7 @@ vi.mock("@/lib/api", () => ({
   resumeAlert: vi.fn(),
   fetchNotificationPreferences: vi.fn(),
   upsertNotificationPreference: vi.fn(),
+  deleteNotificationPreference: vi.fn(),
 }));
 
 import StrategyAlertsPage from "@/app/strategies/[id]/alerts/page";
@@ -35,6 +36,7 @@ import {
   fetchAlertLogs,
   fetchNotificationPreferences,
   upsertNotificationPreference,
+  deleteNotificationPreference,
 } from "@/lib/api";
 
 const STRATEGY = {
@@ -89,7 +91,7 @@ const STRATEGY_PREF: NotificationPreference = {
   minMatchLevel: null,
   weightPreset: null,
   cooldownMinutes: 45,
-  maxPerDay: null,
+  maxPerDay: 8,
   createdAt: "2026-06-11T00:00:00Z",
   updatedAt: "2026-06-11T00:00:00Z",
 };
@@ -103,17 +105,22 @@ beforeEach(() => {
   vi.mocked(upsertNotificationPreference).mockResolvedValue({
     ...STRATEGY_PREF,
     cooldownMinutes: 30,
+    maxPerDay: 6,
   });
+  vi.mocked(deleteNotificationPreference).mockResolvedValue(undefined);
 });
 
 describe("ストラテジーアラート設定画面", () => {
-  it("strategy scope のクールダウン上書きを表示し、保存できる", async () => {
+  it("strategy scope のクールダウンと24h上限を表示し、保存できる", async () => {
     render(<StrategyAlertsPage />);
 
     const cooldownInput = await screen.findByLabelText("ストラテジー通知粒度クールダウン");
+    const maxPerDayInput = screen.getByLabelText("ストラテジー24h通知上限");
     expect((cooldownInput as HTMLInputElement).value).toBe("45");
+    expect((maxPerDayInput as HTMLInputElement).value).toBe("8");
 
     fireEvent.change(cooldownInput, { target: { value: "30" } });
+    fireEvent.change(maxPerDayInput, { target: { value: "6" } });
     fireEvent.click(screen.getByText("通知粒度を保存"));
 
     await waitFor(() => expect(upsertNotificationPreference).toHaveBeenCalledTimes(1));
@@ -121,6 +128,7 @@ describe("ストラテジーアラート設定画面", () => {
       scope: "strategy",
       strategyId: "strategy-1",
       cooldownMinutes: 30,
+      maxPerDay: 6,
     });
   });
 
@@ -139,5 +147,25 @@ describe("ストラテジーアラート設定画面", () => {
     expect(screen.getByText("通知粒度クールダウンは 1〜10080 分の整数で指定してください")).toBeDefined();
     expect(screen.queryByText("通知粒度はアラート設定値を使用します")).toBeNull();
     expect(upsertNotificationPreference).not.toHaveBeenCalled();
+  });
+
+  it("24h上限のバリデーションエラー時は保存しない", async () => {
+    render(<StrategyAlertsPage />);
+
+    const maxPerDayInput = await screen.findByLabelText("ストラテジー24h通知上限");
+    fireEvent.change(maxPerDayInput, { target: { value: "0" } });
+    fireEvent.click(screen.getByText("通知粒度を保存"));
+
+    expect(screen.getByText("ストラテジー24h通知上限は 1〜1000 件の整数で指定してください")).toBeDefined();
+    expect(upsertNotificationPreference).not.toHaveBeenCalled();
+  });
+
+  it("strategy scope の上書きを解除できる", async () => {
+    render(<StrategyAlertsPage />);
+
+    await screen.findByLabelText("ストラテジー通知粒度クールダウン");
+    fireEvent.click(screen.getByText("上書きを解除"));
+
+    await waitFor(() => expect(deleteNotificationPreference).toHaveBeenCalledWith("pref-strategy-1"));
   });
 });
