@@ -27,12 +27,12 @@ Side-A は「人間トレーダーのノーコード相棒」。完成形は **2
 |---|---|---|---|
 | インポート(CSV→Draft) | ✅ 充実 | ✅ 動く(市場データ取得が前提) | 高 |
 | ノート運用 UX(承認/有効/停止/優先度) | ✅ 充実(P2) | ✅ 動く | 高 |
-| **柱1: 類似マッチング** | ✅ 画面は充実 | ❌ **特徴量基盤が壊れていて実質マッチしない** | **低(要再構築)** |
+| **柱1: 類似マッチング** | ✅ 画面は充実 | ⚠️ レンズ基盤は稼働。残: 既存ノート LensSnapshot バックフィル + 旧12次元ロールバック経路の廃止 | 中 |
 | 通知(アプリ内・中核) | ✅ | ✅ 動く(マッチが出れば) | 中〜高 |
-| 通知(Web Push) | ⚠️ 購読状態UIなし | ✅ 配信は動く(broadcast) | 中 |
-| 通知(リアルタイム) | ❌ 自動更新なし | ❌ Phase3 未配線(15分cronのみ) | 低 |
+| 通知(Web Push) | ✅ `/settings` で購読状態UIあり | ✅ per-user 配信・購読/解除/テスト通知が動く | 高 |
+| 通知(リアルタイム) | ✅ SSE 自動更新あり | ✅ `GET /api/notifications/stream` + REST フォールバック | 高 |
 | **柱2: 条件ビルダー(作成+BT)** | ✅ 充実 | ✅ バックテスト評価は動く | 中〜高 |
-| **柱2: ライブ条件評価/アラート** | ⚠️ 設定UIのみ | ❌ **条件をライブ評価する実体がない** | 低 |
+| **柱2: ライブ条件評価/アラート** | ✅ 設定UI + cron 評価経路あり | ✅ `strategy-alerts-15min` で条件成立通知が動く | 高 |
 | バックテスト | ✅ WF/モンテカルロ実装 | ✅ 動く | 中〜高 |
 | 発注支援 | ✅ 参考表示 | ⚠️ 参考のみ → **完成形では実発注追加(確定)** | 要実装(安全ガード必須) |
 | 認証(cTrader OAuth) | ✅ | ✅ 本番稼働 | 高 |
@@ -86,10 +86,10 @@ Side-A は「人間トレーダーのノーコード相棒」。完成形は **2
 |---|---|---|---|
 | **リアルタイム類似度** | Phase2(in-memory)完。`RealtimeSimilarityService`/`RollingWindow`/`CTraderProvider` 実装済みだが callback 止まり | Phase3: callback→DB永続化→Push→UI 自動更新。常駐ワーカーを本番常駐化(Cloud Run sidecar/別サービス) | L |
 | **リアルタイム UI** | 通知一覧はポーリング/手動更新 | WebSocket/SSE で通知・スコアをライブ更新 | M |
-| **Web Push** | VAPID/購読/broadcast 実装。本番配信可 | 購読状態 UI(購読/未購読/拒否)、マルチユーザー時の per-user 送信 | S〜M |
+| **Web Push** | VAPID/購読/per-user 配信、`/settings` の購読状態 UI(購読/未購読/拒否)、テスト通知まで実装済み | 残: 実機・本番での購読/解除/テスト通知 smoke を継続 | S |
 | **市場データ** | EODHD主+fallback+OHLCVキャッシュ | データ取得失敗時のユーザー通知/フォールバック表示、カバレッジ可視化、ノート生成の堅牢化(取得失敗で生成スキップを減らす) | M |
 | **発注支援(実発注)** 〔確定: 追加〕 | 参考プリセットのみ | cTrader Open API で**実発注**を追加。**安全ガード必須**(都度の明示確認なしに発注しない / サイレント自動売買禁止 / 数量・価格の最終確認 UI / 失敗時の明確な状態)。信頼度の動的算出 | L(高リスク) |
-| **マルチユーザー** 〔確定: 化する〕 | OAuth稼働。User表 + Side-A 中核テーブル userId | Trade/TradeNote(及び派生: MatchResult/Notification/Strategy/Note 等)の userId 必須化 + FK 付与、全 query のユーザー分離、per-user 通知/Push は実装済み。残: Web Push 購読状態 UI | L |
+| **マルチユーザー** 〔確定: 化する〕 | OAuth稼働。User表 + Side-A 中核テーブル userId | Trade/TradeNote(及び派生: MatchResult/Notification/Strategy/Note 等)の userId 必須化 + FK 付与、全 query のユーザー分離、per-user 通知/Push、Web Push 購読状態 UI は実装済み | L |
 | **観測性** | MatchingPipelineRun(P1)で run 追跡可 | 柱2ライブ評価・リアルタイムも同様に run/alert 追跡。既知の Side-B UUID バグ(PR #378)解消 | S |
 
 ---
@@ -120,13 +120,13 @@ Side-A は「人間トレーダーのノーコード相棒」。完成形は **2
 
 ### Phase β — 柱1 を“似たら通知”として完成 + 通知粒度
 - [ ] 類似度→通知が意味を持って出る（柱1の完成判定）+ per-user 通知/Push — **per-user Web Push は β-1 (PR #388、2026-06-11) で実装済み** (MatchResult/Strategy の userId から sendToUser、レガシー NULL 行は broadcast フォールバック)。「意味のある通知が出る」判定は lens エンジン (α-3) の本番運用観察で確認する
-- [ ] **通知粒度をユーザーが選べる(決定4)**〔M〕 — **MVP (しきい値 / 一致レベル / クールダウン) は β-2 (PR #389 基盤 + PR #390 UI、2026-06-11) で実装済み**。`NotificationPreference` テーブル (Neko 決定: 案2、scope=user/profile/note/strategy 階層) + 解決サービス + `/settings/notifications` UI + ノート詳細の per-note 上書き。残: 重視するレンズ/層重みプリセット (指標重視/バランス/状態重視)、シンボル単位の集約、maxPerDay 配線 (per-user 通知カウント源が前提)、profile スコープ配線 (ノート→プロファイル紐付けが前提)、strategy スコープ配線 (Phase γ)
+- [ ] **通知粒度をユーザーが選べる(決定4)**〔M〕 — **MVP (しきい値 / 一致レベル / クールダウン / maxPerDay) は β-2 (PR #389 基盤 + PR #390 UI、2026-06-11) と Phase 5 で実装済み**。`NotificationPreference` テーブル (Neko 決定: 案2、scope=user/profile/note/strategy 階層) + 解決サービス + `/settings/notifications` UI + ノート詳細の per-note 上書き。2026-06-16 追記: 旧 `/api/settings` の `scoreThreshold` / `maxPerDay` も user scope の NotificationPreference に同一 transaction で同期し、scoreThreshold は通知粒度基盤の weak 下限に合わせて 70% 未満を実効値 70% へ正規化。残: 重視するレンズ/層重みプリセット (指標重視/バランス/状態重視)、シンボル単位の集約、profile スコープ配線 (ノート→プロファイル紐付けが前提)、per-strategy 上書き UI
 
 ### Phase γ — 柱2 をライブに（条件で通知）
 - [x] **ライブ条件評価エンジン**（バックテスト評価器をライブ共用、定期/リアルタイム評価→発火）〔L〕 — 2026-06-10 実装 (PR γ-1): `strategyLiveEvaluationService` が `evaluateConditionGroup` + `buildEvaluationCaches` をライブ共用(評価1経路化)。Cloud Scheduler `strategy-alerts-15min`(7分オフセット) → `GET /api/cron/strategy-alerts`。アラート通知は Notification テーブル(type=strategy_alert)に統合し UI 到達を修正(旧実装は揮発FSで本番不達)、Web Push スタブも実配信化
 - [x] 条件ツリーに **レンズ条件タイプ**追加（柱1基盤を流用）〔L、**設計確定**〕 — 設計は `NOTE_SIMILARITY_FOUNDATION.md §12`。**フルスコープ確定 (2026-06-12 Neko): 状態系レンズ含む** → **2026-06-13 フルスコープ完了**: 第1弾=インジケーター系 rsi/macd/ma/ma_cross/bb（§12 追補3）、フォローアップ=順序範囲演算子+プレビュー対応（追補4）、第2弾=状態系 8 種（TS 計算 3 種は追補5、smc/chart_pattern/wyckoff は analysis-engine per-bar 系列 API `stateLensSeries` で追補6）。全経路 backtest/live/プレビュー共用・lookahead 禁止不変条件・テストで固定
 - [x] ~~マルチタイムフレーム条件〔M〕~~ (PR #391、2026-06-11 実装・本番実機検証済: `timeframeOverride`、確定バーのみ参照で lookahead 防止、1w 対応。条件ビルダー/評価器/backtest/live 共用) / ~~ルックバック UI〔S〕~~ (PR #374)
-- [x] ~~条件アラートにも通知粒度設定を適用（柱1と共通の通知設定層）~~ (PR #397、2026-06-12): NotificationPreference の strategy スコープを `triggerAlert` の cooldown に配線 (`strategy pref > user pref > StrategyAlert 固有値`)。柱2 は二値判定 (matchScore=1.0) のため threshold/minMatchLevel は no-op、cooldown のみ層化。`resolveForStrategy` + scope=strategy upsert/schema 配線。DB 基盤は β-2a 完備済で migration 不要。**残=per-strategy 上書き UI (follow-up)、maxPerDay 配線**
+- [x] ~~条件アラートにも通知粒度設定を適用（柱1と共通の通知設定層）~~ (PR #397、2026-06-12): NotificationPreference の strategy スコープを `triggerAlert` の cooldown に配線 (`strategy pref > user pref > StrategyAlert 固有値`)。柱2 は二値判定 (matchScore=1.0) のため threshold/minMatchLevel は no-op、cooldown のみ層化。`resolveForStrategy` + scope=strategy upsert/schema 配線。DB 基盤は β-2a 完備済で migration 不要。**残=per-strategy 上書き UI (follow-up)**
 
 > **Phase γ 完了 (2026-06-13)**: レンズ条件タイプ (柱1/柱2 合流の核) のフルスコープ完了をもって Phase γ の全項目が完了。MTF (#391) / ライブ条件評価 (γ-1) / 通知粒度 (#397) / レンズ条件タイプ (#399-#401 + 第2段) 。次は Phase δ (δ-5 常駐ワーカーは 15 分 cron 維持で当面見送り、δ-3 は per-user SSE 新設。§13)。
 
@@ -137,7 +137,7 @@ Side-A は「人間トレーダーのノーコード相棒」。完成形は **2
 ### Phase δ — リアルタイム & 通知の完成
 > 設計は `NOTE_SIMILARITY_FOUNDATION.md §13`（δ-1〜δ-5 配線 + 常駐ワーカー選択肢）。**重要**: 現状リアルタイムは簡易12次元ベクトルでレンズ基盤と別経路 → δ-1 でレンズエンジンに統一する（#3 §12 のレンズ系列化資産を共有）。
 - [x] リアルタイム類似度 Phase3（レンズ統一→DB/Push/UI 配線）〔L〕 — **2026-06-13 実装完了**: δ-1（`realtimeSimilarityService` の簡易12次元を廃し正規パイプラインのシンボルスコープ起動に統一、§13 追補8）/ δ-2（正規経路共用で通知粒度も自動適用）/ δ-3・δ-4（per-user 通知 SSE + フロント購読、追補7）。**常駐ワーカー本番化(δ-5)は当面見送り、15 分 cron 維持（2026-06-13 Neko 決定、§13.4）**。15m 以上の時間足は実質バー単位評価のため、リアルタイム化は 5m 以下が必要になった時点で再判断（その際は worker のデータ源を cTrader→EODHD に差し替え）
-- [x] 通知のリアルタイム UI〔M〕 — **2026-06-13 実装（§13 追補7）**: 認証付き per-user 通知 SSE `GET /api/notifications/stream`（サーバ側 DB ポーリング 10 秒 = マルチインスタンス安全）+ `useNotificationStream`（未読バッジ・通知一覧の自動更新、SSE 断時は REST フォールバック）。/ Web Push 購読状態 UI〔S〕は残
+- [x] 通知のリアルタイム UI〔M〕 — **2026-06-13 実装（§13 追補7）**: 認証付き per-user 通知 SSE `GET /api/notifications/stream`（サーバ側 DB ポーリング 10 秒 = マルチインスタンス安全）+ `useNotificationStream`（未読バッジ・通知一覧の自動更新、SSE 断時は REST フォールバック）。**Web Push 購読状態 UI は `/settings` に実装済み** (購読/解除/テスト通知/状態更新)
 
 ### Phase ε — 実発注 & 仕上げ
 - [ ] **実発注(決定2)**: cTrader Open API 発注。**安全ガード必須**（都度の明示確認なしに発注しない / サイレント自動売買禁止 / 数量・価格の最終確認 / 失敗時状態の明確化）〔L・高リスク〕

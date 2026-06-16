@@ -514,7 +514,9 @@ export default function SettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle>通知設定</CardTitle>
-          <CardDescription>一致通知の条件を設定します</CardDescription>
+          <CardDescription>
+            主要な通知条件を保存します。詳細な上書きは通知粒度画面で管理します
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-1 divide-y divide-slate-700">
           <Toggle
@@ -527,11 +529,11 @@ export default function SettingsPage() {
           <Slider
             value={settings.notification.scoreThreshold}
             onChange={(value) => updateSettings("notification", { scoreThreshold: value })}
-            min={50}
+            min={70}
             max={95}
             step={5}
             label="スコア閾値"
-            description="この値以上の一致度で通知"
+            description="通知粒度基盤の実効下限は70%"
             unit="%"
           />
           

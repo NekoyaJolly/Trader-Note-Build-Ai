@@ -53,12 +53,26 @@ describe('UserSettingsService', () => {
     expect(settings.updatedAt).toBe('2026-06-04T00:00:00.000Z');
   });
 
+  it('旧UI由来の低い通知閾値は実効下限 70 に補正する', async () => {
+    mockFindUnique.mockResolvedValue({
+      userId: USER,
+      notification: { enabled: true, scoreThreshold: 50, maxPerDay: 3 },
+      timeframes: { primary: '15m', secondary: '1d' },
+      display: { darkMode: false, compactView: true, showAiSuggestions: false },
+      updatedAt: new Date('2026-06-04T00:00:00.000Z'),
+    });
+
+    const settings = await userSettingsService.loadSettings(USER);
+
+    expect(settings.notification).toEqual({ enabled: true, scoreThreshold: 70, maxPerDay: 3 });
+  });
+
   it('部分更新は既存値とマージして upsert される', async () => {
     // 既存値（loadSettings 経由で読まれる）
     mockFindUnique.mockResolvedValue({
       userId: USER,
       notification: { enabled: true, scoreThreshold: 70, maxPerDay: 10 },
-      timeframes: { primary: '1h', secondary: '4h' },
+      timeframes: { primary: '15m', secondary: '1d' },
       display: { darkMode: true, compactView: false, showAiSuggestions: true },
       updatedAt: new Date('2026-06-04T00:00:00.000Z'),
     });
@@ -80,6 +94,30 @@ describe('UserSettingsService', () => {
     // upsert に渡された JSON も検証
     const callArg = mockUpsert.mock.calls[0][0];
     expect(callArg.where).toEqual({ userId: USER });
+    expect(callArg.update.timeframes).toEqual({ primary: '15m', secondary: '1d' });
+  });
+
+  it('保存前に設定値を正規化して無効な timeframes を DB に入れない', async () => {
+    mockFindUnique.mockResolvedValue({
+      userId: USER,
+      notification: { enabled: true, scoreThreshold: 70, maxPerDay: 10 },
+      timeframes: { primary: '15m', secondary: '1d' },
+      display: { darkMode: true, compactView: false, showAiSuggestions: true },
+      updatedAt: new Date('2026-06-04T00:00:00.000Z'),
+    });
+    mockUpsert.mockImplementation(({ create }: { create: Record<string, unknown> }) => ({
+      ...create,
+      updatedAt: new Date('2026-06-04T01:00:00.000Z'),
+    }));
+
+    // 外部入力由来の不正値を模擬する。実運用では API 層の Zod とサービス層の二段で守る。
+    const invalidUpdate = {
+      timeframes: { primary: 'invalid-timeframe' },
+    } as unknown as Parameters<typeof userSettingsService.saveSettings>[1];
+
+    await userSettingsService.saveSettings(USER, invalidUpdate);
+
+    const callArg = mockUpsert.mock.calls[0][0];
     expect(callArg.update.timeframes).toEqual({ primary: '15m', secondary: '1d' });
   });
 });
