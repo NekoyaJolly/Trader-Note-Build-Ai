@@ -280,6 +280,7 @@ similarity(noteSnapshot, marketSnapshot):
 | 2026-06-10 | **基盤コア実装(移行戦略 §9-1、非破壊・並行)**: `src/shared/similarity/` に正準型・インジケーターレンズ・類似度エンジンを新設。配線(ノート生成・マッチング)は次段階。 |
 | 2026-06-10 | **Note コア + 生成配線 + シャドー評価(§9-1〜§9-2)**: `Note` テーブル新設(戦略B) + Trade/TradeNote/MatchResult/Notification/Strategy へ userId 追加(マルチユーザー化 Phase α、nullable+バックフィル)。`LensSnapshotBuilder`(eventTime 起点の同一生成口) + CSV 取込配線 + マッチングパイプラインのシャドー評価 + バックフィルスクリプト。通知挙動は不変。 |
 | 2026-06-11 | **マッチング切替(§9-3、Phase α-3 第1弾)**: `MATCHING_ENGINE=lens|legacy` フラグ導入(既定 lens、deploy.yml に明示)。lens 経路は `LensNoteCoreService.evaluateNotesForMatching`(シャドー評価とコア共用)の比較結果から score=レンズ類似度・threshold=レンズ閾値で MatchResult/EvaluationLog/通知を生成(旧ルール補正は不適用、トレンド/価格帯は観測情報のみ)。MarketSnapshot upsert は FK 充足のため継続。lens 稼働時はシャドー評価を自動スキップ(二重評価防止)。旧 12 次元経路は legacy ロールバック用に 1 リリース併存 → 安定確認後に削除予定(第2弾)。 |
+| 2026-06-16 | **マッチング切替(§9-3、Phase α-3 第2弾)**: `MATCHING_ENGINE=legacy` ロールバック経路と `LENS_SHADOW_EVALUATION` シャドー評価レスポンスを廃止し、Side-A の本番マッチングを `LensNoteCoreService.evaluateNotesForMatching` に一本化。Cloud Run deploy の `MATCHING_ENGINE=lens` 明示も削除。ロールバックは旧環境変数ではなく deploy rollback で扱う。残るバックフィル実行は本番 DB 書き込みを伴うため別承認で実施する。 |
 | 2026-06-13 | **レンズ条件タイプ 第1弾(§12、インジケーター系)**: `LensCondition`(type='lens') を条件ツリーの leaf 条件に追加。per-bar レンズ系列化 + 数値エンコード + 評価器分岐 + ConditionBuilder UI(`SingleLensCondition`)。backtest/live は `appendLensSeriesToCache` 共用で評価1経路を維持、MTF(`timeframeOverride`)・lookbackBars も既存機構で対応。詳細は下の追補3。 |
 | 2026-06-13 | **レンズ条件タイプ フォローアップ(§12)**: orderedEnum の順序範囲演算子 + エントリープレビュー対応(`/api/chart/indicator-series` に lensIds、backend 計算の数値エンコード済み lensSeries をフロントで整列・評価)。詳細は追補4。 |
 | 2026-06-13 | **状態系レンズ per-bar 化 第1段(§12.3、TS 計算可能 3 種)**: time_session / dow_theory / volatility_regime をレンズ条件タイプで使用可能に(analysis-engine 変更なし)。窓 150 本固定でスナップショットと同じ「見え方」を per-bar 化。詳細は追補5。 |
@@ -308,7 +309,7 @@ similarity(noteSnapshot, marketSnapshot):
 - **生成の唯一の入口 = `LensSnapshotBuilder`**(`src/services/lensSnapshotBuilder.ts`): ノート作成時(eventTime=トレード時刻)も照合時(eventTime=now)も同じ build() を通る(§2-① の構造的保証)。旧実装は「ノート生成時に現在の市場データ」で特徴を計算しており「その瞬間の市場」を捉えていなかった(根本欠陥)→ eventTime 起点の取得で解消。
 - **カバレッジ/鮮度の自己回復**: バー不足(<100本) または鮮度切れ(最終バーが eventTime から max(3 バー, 30 分) 超離れ)のとき、`fetchAndCacheOhlcv` で期間指定フェッチを 1 回だけ試行。cron 照合では毎サイクル直近ギャップ分のみ取得され、OHLCVCandle が自己維持される。
 - **市場側の指標レンズ仕様はノート側 lensId から逆解決**(`parseIndicatorLensId`): IndicatorProfile の現在状態に依存せず「同じ params」の比較が成立(プロファイル削除・変更に頑健)。
-- **シャドー評価(§9-2)**: `runMatchingPipeline` 内で旧マッチングと並行実行。通知挙動への影響ゼロ・失敗してもパイプライン継続。結果は `[LensShadow]` ログ + `MatchingPipelineRunResult.lensShadow`(additive)で観測。`LENS_SHADOW_EVALUATION=false` で無効化可(既定 ON。テストでは jest.setup.ts が既定 OFF)。
+- **シャドー評価(§9-2)**: 2026-06-16 の Phase α-3 第2弾で廃止。旧 12 次元経路との並行観測は完了し、`runMatchingPipeline` はレンズ本経路のみを実行する。
 - **`current_analysis` レンズは Side-A 生成経路では対象外**(MarketAnalysis = Research AI 出力が必須のため)。Side-B 側スナップショットとの比較では共通レンズに含まれない=自動スキップ。
 - **バックフィル**: `scripts/migrate/backfill-lens-snapshots.ts`(§9-5)。ノート保存時の `TradeNote.indicatorConfig` スナップショットから設定を復元し、トレード時刻起点で再生成。
 - **同一スナップショット同士でもスコアは必ずしも 1.0 にならない**: イベント系 featureKey の none 同士は 0.5(§6.2 表)のため。「どちらも何も起きていない」は「同じ強いシグナル」より弱い類似として扱う(仕様)。

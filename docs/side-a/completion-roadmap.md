@@ -115,7 +115,7 @@ Side-A は「人間トレーダーのノーコード相棒」。完成形は **2
 ### Phase α — 基盤（最優先・他が乗る土台）+ マルチユーザー化
 - [x] **レンズ類似度基盤の実装**（NOTE_SIMILARITY_FOUNDATION.md を確定 → 実装）〔L〕 ← 柱1と柱2の合流土台 — 2026-06-10 実装 (PR α-1 基盤コア / PR α-2 Note コア+生成配線+シャドー評価。切替 §9-3 と旧経路廃止は α-3 で)
 - [x] インジケーターレンズ新設 + IndicatorProfile 接続〔M〕 — 2026-06-10 実装 (PR α-1/α-2)。**パラメータ編集 UI は α-4b (PR #387、2026-06-11) で実装済み** (ProfileEditModal にインジケーター別パラメータ入力、定義は `lib/indicatorParamFields.ts` に集約)
-- [ ] 旧特徴量経路の廃止 + 既存ノート LensSnapshot バックフィル〔M〕（バックフィルスクリプトは α-2 で実装済み、実行とレガシー廃止は α-3）— **α-3 第1弾 2026-06-11 実装**: マッチングを `MATCHING_ENGINE=lens` でレンズ類似度に切替 (score=レンズ類似度、legacy はロールバック用に 1 リリース併存)。**2026-06-15 追記**: 本番誤実行防止として backfill は `--confirm-write` 必須化、read-only 状態確認 `scripts/check/lens-snapshot-backfill-status.ts` を追加。残: バックフィル本番実行 + 旧 12 次元経路の物理削除 (第2弾、lens 安定確認後)
+- [ ] 旧特徴量経路の廃止 + 既存ノート LensSnapshot バックフィル〔M〕（バックフィルスクリプトは α-2 で実装済み、実行とレガシー廃止は α-3）— **α-3 第1弾 2026-06-11 実装**: マッチングをレンズ類似度に切替。**2026-06-15 追記**: 本番誤実行防止として backfill は `--confirm-write` 必須化、read-only 状態確認 `scripts/check/lens-snapshot-backfill-status.ts` を追加。**2026-06-16 追記**: `MATCHING_ENGINE=legacy` ロールバック経路と `LENS_SHADOW_EVALUATION` シャドー評価レスポンスを廃止し、Side-A 本番マッチングは LensSnapshot 類似度へ一本化。残: read-only 状態確認後の本番バックフィル実行（本番 DB 書き込みのため別承認）
 - [x] **マルチユーザー化**: Trade/TradeNote/派生に userId 追加 migration + 全 query のユーザー分離〔L〕— migration + バックフィルは α-2、**全 query のユーザー分離は α-4a (PR #386、2026-06-11) で実装済み**: HTTP 経路は `req.user.userId` で分離 + mutation 所有権チェック、cron はソースエンティティ (note/strategy) の userId を MatchResult/Notification へ伝播。**Phase 6 (2026-06-15) で Trade/TradeNote/MatchResult/Notification/Strategy/Note の userId 必須化 + FK 付与を実装**し、新規作成経路も userId 必須に統一。
 
 ### Phase β — 柱1 を“似たら通知”として完成 + 通知粒度

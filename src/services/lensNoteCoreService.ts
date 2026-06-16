@@ -1,13 +1,12 @@
 /**
- * LensNoteCoreService — Note コア行の生成とレンズ類似度シャドー評価
+ * LensNoteCoreService — Note コア行の生成とレンズ類似度評価
  *
  * 正本設計: docs/architecture/NOTE_SIMILARITY_FOUNDATION.md §7-§9
  *
  * 責務:
  * 1. Side-A ノート作成時に Note コア行(lensSnapshot + userId + 来歴)を生成する
- * 2. 【移行戦略 §9-2 シャドー評価】アクティブノートをレンズ類似度で評価し、
- *    結果を観測ログとして出力する。**通知挙動には一切影響しない**(旧マッチングと並行)。
- *    切替(§9-3)の妥当性判断材料になる
+ * 2. MatchingService から渡されたアクティブノートをレンズ類似度で評価し、
+ *    MatchResult / EvaluationLog / 通知判定へ渡せる詳細を返す
  *
  * 市場側スナップショットの指標レンズは、ノート側 lensSnapshot に保存された lensId
  * 集合から逆解決する(parseIndicatorLensId)。これにより「同じ Profile・同じ params」
@@ -17,7 +16,6 @@
 import type { TradeNote as PrismaTradeNote, TradeSide } from '@prisma/client';
 import { LensSnapshotBuilder } from './lensSnapshotBuilder';
 import { NoteCoreRepository } from '../backend/repositories/noteCoreRepository';
-import { TradeNoteService } from './tradeNoteService';
 import {
   parseIndicatorLensId,
   resolveIndicatorLensSpecs,
@@ -32,7 +30,6 @@ import {
 } from '../shared/similarity/lensSnapshotTypes';
 import {
   compareLensSnapshots,
-  type SimilarityMatchLevel,
   type SnapshotSimilarityResult,
 } from '../shared/similarity/similarityEngine';
 import { NotificationPreferenceService } from './notification/notificationPreferenceService';
@@ -61,18 +58,7 @@ export interface CreateSideANoteCoreResult {
   readonly warnings: string[];
 }
 
-/** シャドー評価のノート単位の結果 */
-export interface LensShadowNoteResult {
-  readonly tradeNoteId: string;
-  readonly symbol: string;
-  readonly comparable: boolean;
-  readonly score: number | null;
-  readonly level: SimilarityMatchLevel | null;
-  readonly triggered: boolean;
-  readonly skipReason?: string;
-}
-
-/** ノート単位のレンズ評価詳細(マッチング/シャドー共用。Phase α-3) */
+/** ノート単位のレンズ評価詳細(Phase α-3) */
 export interface LensNoteEvaluation {
   /** 評価対象ノート(マッチング側で MatchResult/EvaluationLog 永続化に使う) */
   readonly note: PrismaTradeNote;
@@ -101,24 +87,6 @@ export interface LensEvaluationDetail {
   readonly errors: string[];
 }
 
-/** シャドー評価のサマリー(MatchingPipelineRunResult に additive に載せる) */
-export interface LensShadowSummary {
-  /** 対象になったアクティブノート数 */
-  readonly activeNotes: number;
-  /** lensSnapshot を持っていたノート数 */
-  readonly notesWithSnapshot: number;
-  /** 比較が成立したノート数 */
-  readonly comparable: number;
-  /** しきい値を超えた(レンズ基盤なら通知候補になっていた)ノート数 */
-  readonly triggered: number;
-  /** 評価したシンボル数 */
-  readonly symbols: number;
-  /** 比較成立ノートの平均スコア(なければ null) */
-  readonly averageScore: number | null;
-  /** シンボル単位の評価エラー(非致命) */
-  readonly errors: string[];
-}
-
 /** LensNoteCoreService の依存(テスト差し替え用) */
 export interface LensNoteCoreServiceDeps {
   builder?: Pick<LensSnapshotBuilder, 'build'>;
@@ -126,7 +94,6 @@ export interface LensNoteCoreServiceDeps {
     NoteCoreRepository,
     'upsertForTradeNote' | 'findByTradeNoteIds'
   >;
-  tradeNoteService?: Pick<TradeNoteService, 'loadActiveNotesForMatchingAsPrisma'>;
   /** 通知粒度設定の解決 (Phase β-2a)。テストで差し替え可能 */
   preferenceService?: Pick<NotificationPreferenceService, 'resolveForNotes'>;
 }
@@ -137,13 +104,11 @@ export class LensNoteCoreService {
     NoteCoreRepository,
     'upsertForTradeNote' | 'findByTradeNoteIds'
   >;
-  private readonly tradeNoteService: Pick<TradeNoteService, 'loadActiveNotesForMatchingAsPrisma'>;
   private readonly preferenceService: Pick<NotificationPreferenceService, 'resolveForNotes'>;
 
   constructor(deps: LensNoteCoreServiceDeps = {}) {
     this.builder = deps.builder ?? new LensSnapshotBuilder();
     this.noteCoreRepository = deps.noteCoreRepository ?? new NoteCoreRepository();
-    this.tradeNoteService = deps.tradeNoteService ?? new TradeNoteService();
     this.preferenceService = deps.preferenceService ?? new NotificationPreferenceService();
   }
 
@@ -197,8 +162,8 @@ export class LensNoteCoreService {
   /**
    * 【マッチング評価】渡されたノート群をレンズ類似度で評価し、ノート単位の詳細を返す。
    *
-   * Phase α-3(移行戦略 §9-3): MatchingService の本番マッチング経路(MATCHING_ENGINE=lens)
-   * がこの結果から MatchResult/EvaluationLog/通知を生成する。
+   * Phase α-3: MatchingService の本番マッチング経路がこの結果から
+   * MatchResult/EvaluationLog/通知を生成する。
    * 評価エラーはシンボル単位で握り、他シンボルの評価を継続する。
    */
   async evaluateNotesForMatching(
@@ -211,52 +176,7 @@ export class LensNoteCoreService {
   }
 
   /**
-   * 【シャドー評価】アクティブノート(マッチング対象)をレンズ類似度で評価する。
-   *
-   * 旧マッチングの通知判定には影響しない。観測ログ(console)とサマリーを返すのみ。
-   * 評価エラーはシンボル単位で握り、他シンボルの評価を継続する。
-   */
-  async shadowEvaluateActiveNotes(): Promise<LensShadowSummary> {
-    const notes = await this.tradeNoteService.loadActiveNotesForMatchingAsPrisma();
-    if (notes.length === 0) {
-      return {
-        activeNotes: 0,
-        notesWithSnapshot: 0,
-        comparable: 0,
-        triggered: 0,
-        symbols: 0,
-        averageScore: null,
-        errors: [],
-      };
-    }
-
-    const detail = await this.evaluateNotesDetailed(notes, {
-      logPrefix: '[LensShadow]',
-      ensureCoverage: process.env.LENS_SHADOW_ENSURE_COVERAGE !== 'false',
-    });
-
-    const comparableResults = detail.evaluations.filter(
-      (e) => e.comparison.comparable && e.comparison.score !== null
-    );
-    const averageScore =
-      comparableResults.length > 0
-        ? comparableResults.reduce((sum, e) => sum + (e.comparison.score ?? 0), 0) /
-          comparableResults.length
-        : null;
-
-    return {
-      activeNotes: detail.activeNotes,
-      notesWithSnapshot: detail.notesWithSnapshot,
-      comparable: comparableResults.length,
-      triggered: detail.evaluations.filter((e) => e.comparison.triggered).length,
-      symbols: detail.symbols,
-      averageScore,
-      errors: detail.errors,
-    };
-  }
-
-  /**
-   * マッチング/シャドー共用のレンズ評価コア。
+   * マッチング評価のレンズ評価コア。
    *
    * 1. Note コア行から lensSnapshot を一括取得
    * 2. シンボル × 時間足でグループ化(市場側 snapshot を 1 回だけ生成するため)
@@ -338,8 +258,8 @@ export class LensNoteCoreService {
         // 市場側のカバレッジ/鮮度の自己回復は既定 ON。
         // builder の補完フェッチは「最終バー以降のギャップ分のみ」(15 分 cron なら数本)で、
         // 旧マッチング経路が毎サイクル行う EODHD 取得と同等以下の負荷。レート制限が
-        // 問題になった場合は LENS_SHADOW_ENSURE_COVERAGE / LENS_MATCHING_ENSURE_COVERAGE
-        // =false で DB キャッシュのみの評価に切り替えられる
+        // 問題になった場合は LENS_MATCHING_ENSURE_COVERAGE=false で
+        // DB キャッシュのみの評価に切り替えられる
         // (その場合は鮮度低下が warnings/精度に現れる)。
         const marketResult = await this.builder.build({
           symbol: group.symbol,
