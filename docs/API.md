@@ -369,7 +369,14 @@ cTrader OAuth 認証 URL を取得します。
 }
 ```
 
-`redirect_uri` はローカル開発時のみ optional で指定します。指定する場合は、認可 URL 生成時の redirect URI と完全一致させる必要があります。
+ローカル開発時のみ `redirect_uri` を任意で指定できます。指定する場合は、認可 URL 生成時の redirect URI と完全一致させる必要があります。
+
+```json
+{
+  "code": "string",
+  "redirect_uri": "http://localhost:3102/auth/ctrader/callback"
+}
+```
 
 **応答:**
 ```json
@@ -388,6 +395,8 @@ cTrader OAuth 認証 URL を取得します。
   "message": "cTrader 連携が完了しました"
 }
 ```
+
+`role` は `user` または `admin` を返します。
 
 ---
 
