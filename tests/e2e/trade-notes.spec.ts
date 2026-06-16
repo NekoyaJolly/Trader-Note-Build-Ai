@@ -47,7 +47,8 @@ test.describe('トレードノート機能', () => {
   test('トレードノート作成導線がある場合はフォーム要素を確認できる', async ({ page }) => {
     await page.goto('/notes');
 
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
+    await expect(page.locator('body')).toBeVisible();
 
     const createEntryPoints = page.locator(
       '[data-testid="new-trade-note"], a:has-text("新規"), a:has-text("作成"), button:has-text("新規"), button:has-text("作成")'
@@ -62,11 +63,9 @@ test.describe('トレードノート機能', () => {
     }
 
     await createEntryPoints.first().click();
-    await page.waitForLoadState('networkidle');
 
     // フォーム要素を探す（モーダル / 遷移先のどちらでも可）
-    const formElements = await page.locator('input, select, textarea').count();
-    expect(formElements).toBeGreaterThan(0);
+    await expect(page.locator('input, select, textarea').first()).toBeVisible();
   });
 
   test('ノート一覧の表示確認', async ({ page }) => {

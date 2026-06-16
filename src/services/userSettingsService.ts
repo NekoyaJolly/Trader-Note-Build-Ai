@@ -192,7 +192,30 @@ export class UserSettingsService {
         : current.display,
     };
 
-    const data = toSettingsData(merged);
+    // API 層の型キャストや将来の呼び出し元の不備で無効値が混入しても、
+    // DB には正規化済みの設定だけを保存する。更新時の異常値はデフォルトではなく
+    // 現在値へ戻し、保存済みのユーザー設定を意図せず初期化しない。
+    const NotificationSaveSchema = z.object({
+      enabled: z.boolean().catch(current.notification.enabled),
+      scoreThreshold: z.number().min(70).max(100).catch(current.notification.scoreThreshold),
+      maxPerDay: z.number().min(1).max(100).catch(current.notification.maxPerDay),
+    }).catch(current.notification);
+    const TimeframesSaveSchema = z.object({
+      primary: TimeframeSchema.catch(current.timeframes.primary),
+      secondary: TimeframeSchema.catch(current.timeframes.secondary),
+    }).catch(current.timeframes);
+    const DisplaySaveSchema = z.object({
+      darkMode: z.boolean().catch(current.display.darkMode),
+      compactView: z.boolean().catch(current.display.compactView),
+      showAiSuggestions: z.boolean().catch(current.display.showAiSuggestions),
+    }).catch(current.display);
+    const normalized: Omit<UserSettings, 'updatedAt'> = {
+      notification: NotificationSaveSchema.parse(merged.notification),
+      timeframes: TimeframesSaveSchema.parse(merged.timeframes),
+      display: DisplaySaveSchema.parse(merged.display),
+    };
+
+    const data = toSettingsData(normalized);
     const row = await this.db.userSettings.upsert({
       where: { userId },
       create: { userId, ...data },

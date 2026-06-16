@@ -32,7 +32,7 @@ function normalizeNotificationScoreThreshold(scoreThreshold: number): number {
 
 /**
  * 旧 /api/settings で受けた通知設定を、現在の通知粒度基盤で実際に効く値へ正規化する。
- * API互換を保つため 70 未満を 400 にせず、保存前に実効下限へ丸める。
+ * API互換を保つため 70 未満を 400 Bad Request にせず、保存前に実効下限へ丸める。
  */
 export function normalizeSettingsUpdateForNotificationPreference(
   updates: UserSettingsUpdate
