@@ -413,6 +413,58 @@ describe('MatchingService', () => {
       expect(result.skipped).toBe(0);
     });
 
+    it('symbol が空でも集約通知本文にフォールバック名を表示する', async () => {
+      // symbol 欠落時も title/message の表示名を揃え、空文字の通知本文を出さない
+      const sendInApp = jest
+        .fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>()
+        .mockResolvedValue({ success: true, id: 'notif_symbol_empty' });
+      const evaluateWithPersistence = jest
+        .fn<() => Promise<{ shouldNotify: boolean; status: 'sent'; reasonSummary: string }>>()
+        .mockResolvedValue({ shouldNotify: true, status: 'sent', reasonSummary: 'スコア: 0.880' });
+      const hitControl = new SimultaneousHitControlService();
+      jest.spyOn(hitControl, 'control').mockImplementation((hits) =>
+        Promise.resolve({
+          toNotify: hits,
+          toSkip: [],
+          groupedBySymbol: new Map([['', hits]]),
+        })
+      );
+
+      const pipeline = new MatchingService({
+        inAppNotificationSender: {
+          sendInApp,
+          sendPush: jest.fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>().mockResolvedValue({ success: true }),
+        },
+        notificationTriggerService: {
+          evaluateWithPersistence,
+          invalidateNotificationLog: jest.fn<(id: string) => Promise<void>>(),
+        },
+        simultaneousHitControl: hitControl,
+        matchingPipelineRunRepository: buildRunRepo(),
+      });
+      jest
+        .spyOn(pipeline as unknown as { getNotePriority: (id: string) => Promise<number> }, 'getNotePriority')
+        .mockResolvedValue(5);
+      mockPipelineMatches(pipeline, [
+        createSideAMatch({ symbol: undefined }),
+        createSideAMatch({
+          id: 'match_test_empty_symbol_2',
+          historicalNoteId: 'note_side_a_empty_2',
+          marketSnapshotId: 'snap_empty_2',
+          symbol: undefined,
+        }),
+      ]);
+
+      await pipeline.runMatchingPipeline();
+
+      expect(sendInApp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: '同時ヒット: シンボル不明',
+          message: expect.stringContaining('シンボル不明で2件のノートが同時ヒットしました'),
+        })
+      );
+    });
+
     it('sendInApp が success:false のとき skipped + errors にし、先行ログを無効化して再試行可能にする', async () => {
       const sendInApp = jest
         .fn<(p: unknown) => Promise<{ success: boolean; id?: string }>>()

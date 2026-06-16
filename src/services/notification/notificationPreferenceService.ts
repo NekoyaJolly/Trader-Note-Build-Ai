@@ -206,7 +206,7 @@ function mergePreferenceChain(
 }
 
 /**
- * note スコープ → user スコープ → システム既定 の順で項目ごとにマージする (純粋関数)。
+ * 呼び出し側が指定した近いスコープ → user スコープ → システム既定の順で項目ごとにマージする (純粋関数)。
  * テスト容易性のため DB アクセスから分離。
  */
 export function mergePreferences(

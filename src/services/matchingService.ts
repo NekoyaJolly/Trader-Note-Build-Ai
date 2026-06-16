@@ -1060,7 +1060,7 @@ export class MatchingService {
     return {
       title: `同時ヒット: ${symbol}`,
       message:
-        `${symbolSummary.symbol}で${symbolSummary.totalCount}件のノートが同時ヒットしました。` +
+        `${symbol}で${symbolSummary.totalCount}件のノートが同時ヒットしました。` +
         `通知対象${symbolSummary.notifyCount}件。代表スコア: ${symbolSummary.scoreLabels.join(', ')}。` +
         `${skippedText}この通知: ${baseReason}`,
       reasonSummary: `同時ヒット ${symbolSummary.notifyCount}/${symbolSummary.totalCount}件 | ${baseReasonSummary}`,
