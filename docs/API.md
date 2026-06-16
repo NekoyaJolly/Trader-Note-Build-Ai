@@ -92,6 +92,8 @@ http://localhost:3100
 | `/api/notifications/:id` | GET/DELETE | auth | JWT | user/admin | none | no | DELETE yes | yes | owner check は TODO: confirm。 |
 | `/api/notifications/:id/read` | PUT | auth | JWT | user/admin | none | no | yes | yes | owner check は TODO: confirm。 |
 | `/api/notifications/check` | POST | auth | JWT | user/admin | none | no | yes | TODO: confirm | 通知チェック実行。 |
+| `/api/notifications/preferences` | GET/PUT | auth | JWT | user/admin | none | no | PUT yes | self | 通知粒度設定。scope=user/note/strategy、threshold/minMatchLevel/weightPreset/cooldownMinutes/maxPerDay を保存。 |
+| `/api/notifications/preferences/:id` | DELETE | auth | JWT | user/admin | none | no | yes | yes | 認証ユーザー所有の通知粒度設定のみ削除。 |
 | `/api/notifications/logs` | GET | auth | JWT | user/admin | none | no | no | yes | TradeNote.userId 経由で認証ユーザーの通知ログのみ返す。 |
 | `/api/notifications/logs/:id` | GET/DELETE | auth | JWT | user/admin | none | no | DELETE yes | yes | TradeNote.userId 経由で所有チェック。他ユーザー logId は 404。 |
 | `/api/orders/preset/:noteId` | GET | auth | JWT | user/admin | none | no | no | yes | noteId を認証ユーザーで絞る。他ユーザー noteId は 404。 |
@@ -873,6 +875,62 @@ Home では主に以下の `skipReasons` を市場データカバレッジ表示
 
 #### DELETE /api/notifications
 すべての通知をクリアします。
+
+---
+
+#### GET /api/notifications/preferences
+認証ユーザーの通知粒度設定を取得します。
+
+**応答:**
+```json
+{
+  "success": true,
+  "data": {
+    "preferences": [
+      {
+        "id": "uuid",
+        "scope": "user",
+        "noteId": null,
+        "profileId": null,
+        "strategyId": null,
+        "threshold": 0.75,
+        "minMatchLevel": "weak",
+        "weightPreset": "indicator_focused",
+        "cooldownMinutes": 60,
+        "maxPerDay": 30,
+        "createdAt": "2026-06-17T00:00:00.000Z",
+        "updatedAt": "2026-06-17T00:00:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+`weightPreset` は `indicator_focused` / `balanced` / `state_focused` のいずれかです。`null` はシステム既定 (`indicator_focused`) を意味します。
+
+---
+
+#### PUT /api/notifications/preferences
+通知粒度設定を upsert します。`null` はその項目を上位スコープ / システム既定へ戻す指定です。
+
+**リクエストボディ:**
+```json
+{
+  "scope": "user",
+  "threshold": 0.8,
+  "minMatchLevel": "medium",
+  "weightPreset": "balanced",
+  "cooldownMinutes": 120,
+  "maxPerDay": 20
+}
+```
+
+`scope=note` の場合は `noteId`、`scope=strategy` の場合は `strategyId` が必須です。
+
+---
+
+#### DELETE /api/notifications/preferences/:id
+認証ユーザーが所有する通知粒度設定を削除します。他ユーザーの設定 ID は `404` を返します。
 
 ---
 

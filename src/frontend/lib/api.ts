@@ -3165,6 +3165,8 @@ export async function fetchWinningPatterns(
 // ============================================
 
 /** 通知粒度設定の 1 行 (API レスポンス) */
+export type NotificationWeightPreset = "indicator_focused" | "balanced" | "state_focused";
+
 export interface NotificationPreference {
   id: string;
   scope: "user" | "profile" | "note" | "strategy";
@@ -3175,6 +3177,8 @@ export interface NotificationPreference {
   threshold: number | null;
   /** 通知する最小一致レベル。null = 既定 (weak) */
   minMatchLevel: "strong" | "medium" | "weak" | null;
+  /** レンズ層の重みプリセット。null = 既定 */
+  weightPreset: NotificationWeightPreset | null;
   /** 再通知クールダウン (分)。null = 既定 */
   cooldownMinutes: number | null;
   /** 24h 通知上限。null = 既定 */
@@ -3187,6 +3191,7 @@ export interface NotificationPreference {
 interface UpsertNotificationPreferenceFields {
   threshold?: number | null;
   minMatchLevel?: "strong" | "medium" | "weak" | null;
+  weightPreset?: NotificationWeightPreset | null;
   cooldownMinutes?: number | null;
   maxPerDay?: number | null;
 }

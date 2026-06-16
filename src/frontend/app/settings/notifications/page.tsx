@@ -20,6 +20,7 @@ import {
   upsertNotificationPreference,
   deleteNotificationPreference,
   type NotificationPreference,
+  type NotificationWeightPreset,
 } from "@/lib/api";
 
 /** 一致レベルの表示ラベル (システム既定 = weak 帯から通知) */
@@ -27,6 +28,20 @@ const LEVEL_LABELS: Record<string, string> = {
   strong: "Strong のみ (類似度 0.9 以上)",
   medium: "Medium 以上 (類似度 0.8 以上)",
   weak: "Weak 以上 (類似度 0.7 以上・既定)",
+};
+
+/** レンズ層の重みプリセット表示 */
+const WEIGHT_PRESET_LABELS: Record<NotificationWeightPreset, string> = {
+  indicator_focused: "指標重視",
+  balanced: "バランス",
+  state_focused: "状態重視",
+};
+
+/** プリセットが何を重視するかを UI で短く示す */
+const WEIGHT_PRESET_DESCRIPTIONS: Record<NotificationWeightPreset, string> = {
+  indicator_focused: "RSI / MACD / MA / BB などを重めに見る",
+  balanced: "状態レンズと指標レンズを同じ重さで見る",
+  state_focused: "相場状態・パターン側を重めに見る",
 };
 
 /**
@@ -46,6 +61,9 @@ function UserPreferenceForm({
       : ""
   );
   const [minMatchLevel, setMinMatchLevel] = useState<string>(preference?.minMatchLevel ?? "");
+  const [weightPreset, setWeightPreset] = useState<"" | NotificationWeightPreset>(
+    preference?.weightPreset ?? ""
+  );
   const [cooldownMinutes, setCooldownMinutes] = useState<string>(
     preference?.cooldownMinutes !== null && preference?.cooldownMinutes !== undefined
       ? String(preference.cooldownMinutes)
@@ -89,6 +107,7 @@ function UserPreferenceForm({
         scope: "user",
         threshold: thresholdValue,
         minMatchLevel: minMatchLevel === "" ? null : (minMatchLevel as "strong" | "medium" | "weak"),
+        weightPreset: weightPreset === "" ? null : weightPreset,
         cooldownMinutes: cooldownValue,
         maxPerDay: maxPerDayValue,
       });
@@ -160,6 +179,29 @@ function UserPreferenceForm({
           </select>
           <p className="text-xs text-gray-500 mt-1">
             レベルの下限としきい値の高い方が実際の発火条件になります
+          </p>
+        </div>
+
+        {/* レンズ層の重みプリセット */}
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-1" htmlFor="pref-weight-preset">
+            重みプリセット
+          </label>
+          <select
+            id="pref-weight-preset"
+            value={weightPreset}
+            onChange={(e) => setWeightPreset(e.target.value as "" | NotificationWeightPreset)}
+            className="w-72 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white focus:border-violet-500 focus:outline-none"
+          >
+            <option value="">既定 (指標重視)</option>
+            <option value="indicator_focused">{WEIGHT_PRESET_LABELS.indicator_focused}</option>
+            <option value="balanced">{WEIGHT_PRESET_LABELS.balanced}</option>
+            <option value="state_focused">{WEIGHT_PRESET_LABELS.state_focused}</option>
+          </select>
+          <p className="text-xs text-gray-500 mt-1">
+            {weightPreset === ""
+              ? WEIGHT_PRESET_DESCRIPTIONS.indicator_focused
+              : WEIGHT_PRESET_DESCRIPTIONS[weightPreset]}
           </p>
         </div>
 
@@ -274,6 +316,7 @@ function NoteOverrideList({
                   <span className="text-gray-400 ml-3">
                     {pref.threshold !== null && `しきい値 ${pref.threshold} `}
                     {pref.minMatchLevel !== null && `/ ${pref.minMatchLevel} 以上 `}
+                    {pref.weightPreset !== null && `/ ${WEIGHT_PRESET_LABELS[pref.weightPreset]} `}
                     {pref.cooldownMinutes !== null && `/ クールダウン ${pref.cooldownMinutes}分`}
                     {pref.maxPerDay !== null && `/ 24h上限 ${pref.maxPerDay}件`}
                   </span>

@@ -83,6 +83,7 @@ export const UpsertNotificationPreferenceSchema = z
     strategyId: z.string().uuid('有効なUUIDを指定してください').optional(),
     threshold: z.number().min(0, '0以上で指定してください').max(1, '1以下で指定してください').nullable().optional(),
     minMatchLevel: z.enum(['strong', 'medium', 'weak']).nullable().optional(),
+    weightPreset: z.enum(['indicator_focused', 'balanced', 'state_focused']).nullable().optional(),
     cooldownMinutes: z.number().int().min(1, '1分以上で指定してください').max(10080, '1週間以内で指定してください').nullable().optional(),
     maxPerDay: z.number().int().min(1).max(1000).nullable().optional(),
   })

@@ -22,8 +22,10 @@ import type { PrismaClient, NotificationPreference, SimilarityMatchLevel } from 
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../backend/db/client';
 import {
+  DEFAULT_WEIGHT_PRESET,
   DEFAULT_SIMILARITY_TRIGGER_THRESHOLD,
   DEFAULT_SIMILARITY_LEVELS,
+  type LensWeightPreset,
 } from '../../shared/similarity/similarityEngine';
 
 type NotificationPreferencePrismaClient = Pick<
@@ -48,7 +50,7 @@ type MergePreferenceScope = 'note' | 'strategy';
 
 type PreferenceMergeFields = Pick<
   NotificationPreference,
-  'threshold' | 'minMatchLevel' | 'cooldownMinutes' | 'maxPerDay'
+  'threshold' | 'minMatchLevel' | 'weightPreset' | 'cooldownMinutes' | 'maxPerDay'
 >;
 
 /**
@@ -60,6 +62,8 @@ export interface EffectiveNotificationPreference {
   threshold: number;
   /** 通知する最小一致レベル */
   minMatchLevel: SimilarityMatchLevel;
+  /** レンズ層の重みプリセット */
+  weightPreset: LensWeightPreset;
   /** 再通知クールダウン (ミリ秒) */
   cooldownMs: number;
   /** 24時間あたりの通知上限。null はここに来る前にシステム既定で埋める */
@@ -84,6 +88,7 @@ export interface UpsertPreferenceInput {
   strategyId?: string;
   threshold?: number | null;
   minMatchLevel?: SimilarityMatchLevel | null;
+  weightPreset?: LensWeightPreset | null;
   cooldownMinutes?: number | null;
   maxPerDay?: number | null;
 }
@@ -103,6 +108,7 @@ export function systemDefaultPreference(): EffectiveNotificationPreference {
   return {
     threshold: DEFAULT_SIMILARITY_TRIGGER_THRESHOLD,
     minMatchLevel: 'weak',
+    weightPreset: DEFAULT_WEIGHT_PRESET,
     cooldownMs: DEFAULT_COOLDOWN_MS,
     maxPerDay: DEFAULT_MAX_NOTIFICATIONS_PER_DAY,
     maxPerDaySource: 'system',
@@ -126,6 +132,7 @@ export function mergePreferences(
 
   const threshold = scopedPref?.threshold ?? userPref?.threshold ?? defaults.threshold;
   const minMatchLevel = scopedPref?.minMatchLevel ?? userPref?.minMatchLevel ?? defaults.minMatchLevel;
+  const weightPreset = scopedPref?.weightPreset ?? userPref?.weightPreset ?? defaults.weightPreset;
   const cooldownMinutes = scopedPref?.cooldownMinutes ?? userPref?.cooldownMinutes ?? null;
   const cooldownMs = cooldownMinutes !== null ? cooldownMinutes * 60 * 1000 : defaults.cooldownMs;
   const maxPerDay = scopedPref?.maxPerDay ?? userPref?.maxPerDay ?? defaults.maxPerDay;
@@ -140,7 +147,15 @@ export function mergePreferences(
   const levelFloor = DEFAULT_SIMILARITY_LEVELS[minMatchLevel];
   const effectiveThreshold = Math.max(threshold, levelFloor);
 
-  return { threshold, minMatchLevel, cooldownMs, maxPerDay, maxPerDaySource, effectiveThreshold };
+  return {
+    threshold,
+    minMatchLevel,
+    weightPreset,
+    cooldownMs,
+    maxPerDay,
+    maxPerDaySource,
+    effectiveThreshold,
+  };
 }
 
 /**
@@ -210,6 +225,7 @@ export class NotificationPreferenceService {
     const data = {
       ...(input.threshold !== undefined ? { threshold: input.threshold } : {}),
       ...(input.minMatchLevel !== undefined ? { minMatchLevel: input.minMatchLevel } : {}),
+      ...(input.weightPreset !== undefined ? { weightPreset: input.weightPreset } : {}),
       ...(input.cooldownMinutes !== undefined ? { cooldownMinutes: input.cooldownMinutes } : {}),
       ...(input.maxPerDay !== undefined ? { maxPerDay: input.maxPerDay } : {}),
     };
