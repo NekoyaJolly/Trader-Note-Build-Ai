@@ -1902,6 +1902,8 @@ export interface BacktestResult {
   id: string;
   /** ストラテジーID */
   strategyId: string;
+  /** 実行に使ったシンボル */
+  symbol: string;
   /** バージョン番号 */
   versionNumber: number;
   /** 実行日時 */

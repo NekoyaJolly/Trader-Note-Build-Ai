@@ -61,6 +61,17 @@ interface BacktestParams {
   maxPositions: number;
 }
 
+type WalkForwardMode = WalkForwardResult["type"];
+
+interface WalkForwardParams {
+  type: WalkForwardMode;
+  splitCount: number;
+  startDate: string;
+  endDate: string;
+  inSampleDays: number;
+  outOfSampleDays: number;
+}
+
 // BacktestHistoryItemはlib/api.tsからインポート
 
 // ============================================
@@ -124,6 +135,23 @@ function coverageSeverityLabel(severity: CoverageCheckResult["severity"]): strin
     case "critical":
       return "要取得";
   }
+}
+
+function walkForwardTypeLabel(type: WalkForwardResult["type"]): string {
+  switch (type) {
+    case "fixed_split":
+      return "固定分割";
+    case "rolling_window":
+      return "ローリング";
+  }
+}
+
+function formatRate(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function getWalkForwardSymbol(paramsSymbol: string, strategySymbol: string): string {
+  return paramsSymbol.trim() || strategySymbol;
 }
 
 /** トレード結果テーブル */
@@ -311,10 +339,13 @@ export default function StrategyBacktestPage() {
   const [activeTab, setActiveTab] = useState<"summary" | "trades" | "chart" | "history" | "walkforward" | "filter" | "montecarlo" | "pattern">("summary");
 
   // ウォークフォワードテストステート
-  const [walkForwardParams, setWalkForwardParams] = useState({
+  const [walkForwardParams, setWalkForwardParams] = useState<WalkForwardParams>({
+    type: "fixed_split",
     splitCount: 5,
     startDate: getDefaultStartDate(),
     endDate: getDefaultEndDate(),
+    inSampleDays: 30,
+    outOfSampleDays: 10,
   });
   const [walkForwardResult, setWalkForwardResult] = useState<WalkForwardResult | null>(null);
   const [walkForwardHistory, setWalkForwardHistory] = useState<WalkForwardResult[]>([]);
@@ -523,10 +554,15 @@ export default function StrategyBacktestPage() {
       setError(null);
 
       // バックテストパラメータの時間足をウォークフォワードにも適用
+      const wfSymbol = getWalkForwardSymbol(backtestParams.symbol, strategy?.symbol || '');
       const result = await runWalkForwardTest(strategyId, {
+        type: walkForwardParams.type,
+        symbol: wfSymbol,
         splitCount: walkForwardParams.splitCount,
         startDate: walkForwardParams.startDate,
         endDate: walkForwardParams.endDate,
+        inSampleDays: walkForwardParams.type === 'rolling_window' ? walkForwardParams.inSampleDays : undefined,
+        outOfSampleDays: walkForwardParams.type === 'rolling_window' ? walkForwardParams.outOfSampleDays : undefined,
         timeframe: backtestParams.stage1Timeframe, // 時間足を追加
         initialCapital: backtestParams.initialCapital,
         positionSize: backtestParams.lotSize,
@@ -622,6 +658,8 @@ export default function StrategyBacktestPage() {
       </div>
     );
   }
+
+  const walkForwardSymbol = getWalkForwardSymbol(backtestParams.symbol, strategy.symbol);
 
   return (
     <>
@@ -1764,24 +1802,86 @@ export default function StrategyBacktestPage() {
 
                       {/* ウォークフォワードパラメータ */}
                       <div className="bg-slate-700/50 rounded px-3 py-2 mb-3">
-                        <div className="flex items-center gap-3">
-                          <div>
-                            <label className="block text-[10px] text-gray-400">
-                              分割
-                            </label>
-                            <select
-                              value={walkForwardParams.splitCount}
-                              onChange={(e) => setWalkForwardParams(prev => ({
-                                ...prev,
-                                splitCount: parseInt(e.target.value)
-                              }))}
-                              className="bg-slate-600 border border-slate-500 rounded px-2 py-1 text-xs text-white w-16"
-                            >
-                              <option value={3}>3</option>
-                              <option value={4}>4</option>
-                              <option value={5}>5</option>
-                            </select>
-                          </div>
+                        <div className="flex flex-wrap items-center gap-2 mb-2">
+                          <button
+                            type="button"
+                            onClick={() => setWalkForwardParams(prev => ({ ...prev, type: 'fixed_split' }))}
+                            className={`px-2 py-1 rounded text-xs border transition-colors ${walkForwardParams.type === 'fixed_split'
+                              ? 'border-cyan-500/50 bg-cyan-600/30 text-cyan-300'
+                              : 'border-slate-600/60 bg-slate-800/40 text-gray-400 hover:text-gray-200'
+                              }`}
+                          >
+                            固定分割
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setWalkForwardParams(prev => ({ ...prev, type: 'rolling_window' }))}
+                            className={`px-2 py-1 rounded text-xs border transition-colors ${walkForwardParams.type === 'rolling_window'
+                              ? 'border-violet-500/50 bg-violet-600/30 text-violet-300'
+                              : 'border-slate-600/60 bg-slate-800/40 text-gray-400 hover:text-gray-200'
+                              }`}
+                          >
+                            ローリング
+                          </button>
+                          <span className="rounded border border-slate-600/60 bg-slate-800/50 px-2 py-1 text-[10px] text-gray-300">
+                            {walkForwardSymbol} / {backtestParams.stage1Timeframe}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-end gap-3">
+                          {walkForwardParams.type === 'fixed_split' ? (
+                            <div>
+                              <label className="block text-[10px] text-gray-400">
+                                分割
+                              </label>
+                              <select
+                                value={walkForwardParams.splitCount}
+                                onChange={(e) => setWalkForwardParams(prev => ({
+                                  ...prev,
+                                  splitCount: parseInt(e.target.value)
+                                }))}
+                                className="bg-slate-600 border border-slate-500 rounded px-2 py-1 text-xs text-white w-16"
+                              >
+                                <option value={3}>3</option>
+                                <option value={4}>4</option>
+                                <option value={5}>5</option>
+                              </select>
+                            </div>
+                          ) : (
+                            <>
+                              <div>
+                                <label className="block text-[10px] text-gray-400">
+                                  IS日数
+                                </label>
+                                <input
+                                  type="number"
+                                  min={5}
+                                  max={365}
+                                  value={walkForwardParams.inSampleDays}
+                                  onChange={(e) => setWalkForwardParams(prev => ({
+                                    ...prev,
+                                    inSampleDays: parseInt(e.target.value, 10) || 5
+                                  }))}
+                                  className="bg-slate-600 border border-slate-500 rounded px-2 py-1 text-xs text-white w-20"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] text-gray-400">
+                                  OOS日数
+                                </label>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={180}
+                                  value={walkForwardParams.outOfSampleDays}
+                                  onChange={(e) => setWalkForwardParams(prev => ({
+                                    ...prev,
+                                    outOfSampleDays: parseInt(e.target.value, 10) || 1
+                                  }))}
+                                  className="bg-slate-600 border border-slate-500 rounded px-2 py-1 text-xs text-white w-20"
+                                />
+                              </div>
+                            </>
+                          )}
                           <div>
                             <label className="block text-[10px] text-gray-400">
                               開始
@@ -1822,13 +1922,50 @@ export default function StrategyBacktestPage() {
                           </button>
                         </div>
                         <div className="text-[10px] text-gray-500 mt-1">
-                          IS: 70% / OOS: 30%
+                          {walkForwardParams.type === 'fixed_split'
+                            ? '固定分割: 実データ本数があれば 70% / 30% で分割'
+                            : `ローリング: ${walkForwardParams.outOfSampleDays}日ごとに前進`}
                         </div>
                       </div>
 
                       {/* ウォークフォワード結果 */}
                       {walkForwardResult && (
                         <div className="space-y-2">
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5">
+                            <MetricCard
+                              label="方式"
+                              value={walkForwardTypeLabel(walkForwardResult.type)}
+                              color={walkForwardResult.type === 'rolling_window' ? 'text-violet-300' : 'text-cyan-300'}
+                            />
+                            <MetricCard
+                              label="IS平均勝率"
+                              value={formatRate(walkForwardResult.summary.avgInSampleWinRate)}
+                              color="text-green-400"
+                            />
+                            <MetricCard
+                              label="OOS平均勝率"
+                              value={formatRate(walkForwardResult.summary.avgOutOfSampleWinRate)}
+                              color="text-blue-400"
+                            />
+                            <MetricCard
+                              label="平均乖離"
+                              value={formatRate(Math.abs(walkForwardResult.summary.avgWinRateDiff))}
+                              color={Math.abs(walkForwardResult.summary.avgWinRateDiff) > 0.1 ? 'text-red-400' : 'text-gray-200'}
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <MetricCard
+                              label="IS/OOS総トレード"
+                              value={`${walkForwardResult.summary.totalInSampleTrades}/${walkForwardResult.summary.totalOutOfSampleTrades}`}
+                            />
+                            <MetricCard
+                              label="実行分割"
+                              value={`${walkForwardResult.splits.length} / ${walkForwardResult.splitCount}`}
+                              color={walkForwardResult.splits.length > 0 ? 'text-gray-100' : 'text-yellow-400'}
+                            />
+                          </div>
+
                           {/* オーバーフィットスコア */}
                           <div className="bg-slate-700/50 rounded px-3 py-2">
                             <div className="flex items-center justify-between">
@@ -1886,14 +2023,14 @@ export default function StrategyBacktestPage() {
                                         </div>
                                       </td>
                                       <td className="px-3 py-2 text-center text-green-400">
-                                        {(split.inSample.winRate * 100).toFixed(1)}%
+                                        {formatRate(split.inSample.winRate)}
                                       </td>
                                       <td className="px-3 py-2 text-center text-blue-400">
-                                        {(split.outOfSample.winRate * 100).toFixed(1)}%
+                                        {formatRate(split.outOfSample.winRate)}
                                       </td>
                                       <td className={`px-3 py-2 text-center ${divergence > 0.1 ? "text-red-400" : "text-gray-400"
                                         }`}>
-                                        {(divergence * 100).toFixed(1)}%
+                                        {formatRate(divergence)}
                                       </td>
                                       <td className="px-3 py-2 text-center">
                                         {split.inSample.profitFactor?.toFixed(2) || "-"}
@@ -1929,7 +2066,7 @@ export default function StrategyBacktestPage() {
                                 onClick={() => setWalkForwardResult(wf)}
                               >
                                 <span className="text-gray-300">
-                                  {wf.type === 'fixed_split' ? '固定' : 'ローリング'} {wf.splitCount}分割
+                                  {walkForwardTypeLabel(wf.type)} {wf.splitCount}分割
                                 </span>
                                 <span className={`font-medium ${wf.overfitScore <= 0.2 ? "text-green-400" :
                                   wf.overfitScore <= 0.4 ? "text-yellow-400" :
