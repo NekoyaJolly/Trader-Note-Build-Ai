@@ -21,9 +21,12 @@ import {
   fetchAlertLogs,
   pauseAlert,
   resumeAlert,
-  StrategyAlert,
-  AlertLog,
-  AlertChannel,
+  fetchNotificationPreferences,
+  upsertNotificationPreference,
+  type StrategyAlert,
+  type AlertLog,
+  type AlertChannel,
+  type NotificationPreference,
 } from "@/lib/api";
 import type { Strategy } from "@/types/strategy";
 
@@ -36,6 +39,7 @@ export default function StrategyAlertsPage() {
   
   // アラート設定
   const [alert, setAlert] = useState<StrategyAlert | null>(null);
+  const [strategyPreference, setStrategyPreference] = useState<NotificationPreference | null>(null);
   
   // フォーム状態
   const [formData, setFormData] = useState({
@@ -44,6 +48,8 @@ export default function StrategyAlertsPage() {
     minMatchScore: 0.7,
     channels: ['in_app'] as AlertChannel[],
   });
+  // 空欄は StrategyAlert 本体の cooldownMinutes を使う。strategy scope は既存サービス側で適用済み。
+  const [preferenceCooldownMinutes, setPreferenceCooldownMinutes] = useState("");
   
   // アラート履歴
   const [logs, setLogs] = useState<AlertLog[]>([]);
@@ -70,6 +76,25 @@ export default function StrategyAlertsPage() {
       // アラート設定を取得
       const alertData = await fetchStrategyAlert(strategyId);
       setAlert(alertData);
+
+      try {
+        // 条件アラート用の通知粒度上書き (strategy scope) を取得
+        const preferences = await fetchNotificationPreferences();
+        const strategyScopedPreference =
+          preferences.find((pref) => pref.scope === "strategy" && pref.strategyId === strategyId) ?? null;
+        setStrategyPreference(strategyScopedPreference);
+        setPreferenceCooldownMinutes(
+          strategyScopedPreference?.cooldownMinutes !== null &&
+            strategyScopedPreference?.cooldownMinutes !== undefined
+            ? String(strategyScopedPreference.cooldownMinutes)
+            : ""
+        );
+      } catch (preferenceError) {
+        // 通知粒度の取得失敗だけでアラート設定編集を止めない
+        console.warn("通知粒度上書きの読み込みに失敗:", preferenceError);
+        setStrategyPreference(null);
+        setPreferenceCooldownMinutes("");
+      }
 
       if (alertData) {
         setFormData({
@@ -111,6 +136,46 @@ export default function StrategyAlertsPage() {
       }
       return { ...prev, channels: newChannels };
     });
+  };
+
+  /** strategy scope の通知粒度上書きを保存 */
+  const handlePreferenceSave = async () => {
+    const cooldownValue =
+      preferenceCooldownMinutes === "" ? null : Number(preferenceCooldownMinutes);
+    if (
+      cooldownValue !== null &&
+      (!Number.isInteger(cooldownValue) || cooldownValue < 1 || cooldownValue > 10080)
+    ) {
+      setSuccess(null);
+      setError("通知粒度クールダウンは 1〜10080 分の整数で指定してください");
+      return;
+    }
+
+    // 未作成かつ空欄の場合は、保存する上書きが無いので API を呼ばない
+    if (cooldownValue === null && strategyPreference === null) {
+      setError(null);
+      setSuccess("通知粒度はアラート設定値を使用します");
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setError(null);
+      setSuccess(null);
+      const savedPreference = await upsertNotificationPreference({
+        scope: "strategy",
+        strategyId,
+        cooldownMinutes: cooldownValue,
+      });
+      setStrategyPreference(savedPreference);
+      setSuccess("通知粒度の上書きを保存しました");
+      await loadData();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "通知粒度の保存に失敗しました";
+      setError(message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   /** アラート設定を保存 */
@@ -342,6 +407,47 @@ export default function StrategyAlertsPage() {
                     <span className="text-gray-200">Web Push通知</span>
                   </label>
                 </div>
+              </div>
+
+              {/* 通知粒度上書き */}
+              <div className="mb-6 rounded-lg border border-slate-700 bg-slate-900/40 p-4">
+                <div className="mb-3">
+                  <div className="text-sm font-medium text-gray-200">
+                    通知粒度上書き
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">
+                    空欄の場合は上のクールダウン時間を使います
+                  </p>
+                </div>
+                <label className="block text-sm text-gray-400 mb-1">
+                  上書きクールダウン（分）
+                </label>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <input
+                    type="number"
+                    min="1"
+                    max="10080"
+                    value={preferenceCooldownMinutes}
+                    onChange={(e) => setPreferenceCooldownMinutes(e.target.value)}
+                    placeholder={`${formData.cooldownMinutes}`}
+                    aria-label="ストラテジー通知粒度クールダウン"
+                    className="w-full sm:w-40 bg-slate-700 border border-slate-600 rounded px-3 py-2 text-white"
+                  />
+                  <button
+                    onClick={handlePreferenceSave}
+                    disabled={saving}
+                    className={`px-4 py-2 rounded font-medium transition-colors ${
+                      saving
+                        ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                        : 'bg-slate-600 hover:bg-slate-500 text-white'
+                    }`}
+                  >
+                    通知粒度を保存
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  現在の有効値: {preferenceCooldownMinutes === "" ? formData.cooldownMinutes : preferenceCooldownMinutes}分
+                </p>
               </div>
 
               {/* アクションボタン */}

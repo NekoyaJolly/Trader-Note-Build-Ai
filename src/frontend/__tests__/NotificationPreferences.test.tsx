@@ -57,9 +57,23 @@ const NOTE_PREF: NotificationPreference = {
   updatedAt: "2026-06-11T00:00:00Z",
 };
 
+const STRATEGY_PREF: NotificationPreference = {
+  id: "pref-strategy-1",
+  scope: "strategy",
+  noteId: null,
+  profileId: null,
+  strategyId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+  threshold: null,
+  minMatchLevel: null,
+  cooldownMinutes: 45,
+  maxPerDay: null,
+  createdAt: "2026-06-11T00:00:00Z",
+  updatedAt: "2026-06-11T00:00:00Z",
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(fetchNotificationPreferences).mockResolvedValue([USER_PREF, NOTE_PREF]);
+  vi.mocked(fetchNotificationPreferences).mockResolvedValue([USER_PREF, NOTE_PREF, STRATEGY_PREF]);
   vi.mocked(upsertNotificationPreference).mockResolvedValue(USER_PREF);
   vi.mocked(deleteNotificationPreference).mockResolvedValue(undefined);
 });
@@ -157,8 +171,23 @@ describe("通知粒度設定ページ (Phase β-2b)", () => {
     expect(screen.getByText(/しきい値 0\.9/)).toBeDefined();
     expect(screen.getByText(/24h上限 5件/)).toBeDefined();
 
-    fireEvent.click(screen.getByText("削除"));
+    fireEvent.click(
+      screen.getByRole("button", { name: "ノート 11111111 の通知粒度上書きを削除" })
+    );
 
     await waitFor(() => expect(deleteNotificationPreference).toHaveBeenCalledWith("pref-note-1"));
+  });
+
+  it("ストラテジー単位上書きが一覧され、削除で API が呼ばれる", async () => {
+    await renderPage();
+
+    expect(screen.getByText(/aaaaaaaa…/)).toBeDefined();
+    expect(screen.getByText("クールダウン 45分")).toBeDefined();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "ストラテジー aaaaaaaa の通知粒度上書きを削除" })
+    );
+
+    await waitFor(() => expect(deleteNotificationPreference).toHaveBeenCalledWith("pref-strategy-1"));
   });
 });

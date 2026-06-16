@@ -3175,15 +3175,31 @@ export interface NotificationPreference {
   updatedAt: string;
 }
 
-/** 通知粒度設定の upsert リクエスト (null = この項目を既定に戻す) */
-export interface UpsertNotificationPreferenceInput {
-  scope: "user" | "note";
-  noteId?: string;
+/** 通知粒度設定の upsert 共通フィールド (null = この項目を既定に戻す) */
+interface UpsertNotificationPreferenceFields {
   threshold?: number | null;
   minMatchLevel?: "strong" | "medium" | "weak" | null;
   cooldownMinutes?: number | null;
   maxPerDay?: number | null;
 }
+
+/** 通知粒度設定の upsert リクエスト。scope と対象 ID の対応を型で固定する */
+export type UpsertNotificationPreferenceInput =
+  | (UpsertNotificationPreferenceFields & {
+      scope: "user";
+      noteId?: never;
+      strategyId?: never;
+    })
+  | (UpsertNotificationPreferenceFields & {
+      scope: "note";
+      noteId: string;
+      strategyId?: never;
+    })
+  | (UpsertNotificationPreferenceFields & {
+      scope: "strategy";
+      noteId?: never;
+      strategyId: string;
+    });
 
 /**
  * 通知粒度設定の一覧を取得

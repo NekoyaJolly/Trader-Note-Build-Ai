@@ -5,6 +5,7 @@
  * 機能:
  * - ユーザー全体 (scope=user) の通知粒度設定: しきい値 / 一致レベル / クールダウン / 24h 上限
  * - ノート単位上書き (scope=note) の一覧と削除 (作成はノート詳細ページから)
+ * - ストラテジー単位上書き (scope=strategy) の一覧と削除 (作成はストラテジーアラート画面から)
  *
  * 設定が無い項目はシステム既定で動作する (null = 既定に戻す)。
  */
@@ -18,7 +19,7 @@ import {
   fetchNotificationPreferences,
   upsertNotificationPreference,
   deleteNotificationPreference,
-  NotificationPreference,
+  type NotificationPreference,
 } from "@/lib/api";
 
 /** 一致レベルの表示ラベル (システム既定 = weak 帯から通知) */
@@ -282,6 +283,100 @@ function NoteOverrideList({
                   size="sm"
                   onClick={() => handleDelete(pref.id)}
                   disabled={deletingId === pref.id}
+                  aria-label={
+                    pref.noteId
+                      ? `ノート ${pref.noteId.slice(0, 8)} の通知粒度上書きを削除`
+                      : "未紐付けノートの通知粒度上書きを削除"
+                  }
+                  className="text-gray-400 hover:text-red-400"
+                >
+                  {deletingId === pref.id ? "..." : "削除"}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * ストラテジー単位上書きの一覧
+ */
+function StrategyOverrideList({
+  preferences,
+  onDeleted,
+}: {
+  preferences: NotificationPreference[];
+  onDeleted: () => Promise<void>;
+}) {
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleDelete = async (id: string) => {
+    setDeletingId(id);
+    setError(null);
+    try {
+      await deleteNotificationPreference(id);
+      await onDeleted();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "削除に失敗しました");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>ストラテジー単位の上書き</CardTitle>
+        <CardDescription>
+          条件アラートのクールダウンをストラテジーごとに変えている設定。追加はアラート設定画面から行えます
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {error && (
+          <div className="mb-3 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+            {error}
+          </div>
+        )}
+        {preferences.length === 0 ? (
+          <p className="text-gray-500 text-sm">ストラテジー単位の上書きはありません</p>
+        ) : (
+          <div className="space-y-2">
+            {preferences.map((pref) => (
+              <div
+                key={pref.id}
+                className="flex items-center justify-between p-3 bg-slate-900/50 border border-slate-700/50 rounded-lg"
+              >
+                <div className="text-sm">
+                  {pref.strategyId ? (
+                    <a
+                      href={`/strategies/${pref.strategyId}/alerts`}
+                      className="text-violet-400 hover:underline"
+                    >
+                      ストラテジー {pref.strategyId.slice(0, 8)}…
+                    </a>
+                  ) : (
+                    <span className="text-gray-500">ストラテジー未紐付け</span>
+                  )}
+                  <span className="text-gray-400 ml-3">
+                    {pref.cooldownMinutes !== null
+                      ? `クールダウン ${pref.cooldownMinutes}分`
+                      : "アラート設定値を使用"}
+                  </span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleDelete(pref.id)}
+                  disabled={deletingId === pref.id}
+                  aria-label={
+                    pref.strategyId
+                      ? `ストラテジー ${pref.strategyId.slice(0, 8)} の通知粒度上書きを削除`
+                      : "未紐付けストラテジーの通知粒度上書きを削除"
+                  }
                   className="text-gray-400 hover:text-red-400"
                 >
                   {deletingId === pref.id ? "..." : "削除"}
@@ -323,6 +418,7 @@ export default function NotificationPreferencesPage() {
 
   const userPreference = preferences.find((p) => p.scope === "user") ?? null;
   const noteOverrides = preferences.filter((p) => p.scope === "note");
+  const strategyOverrides = preferences.filter((p) => p.scope === "strategy");
 
   if (isLoading) {
     return (
@@ -366,6 +462,7 @@ export default function NotificationPreferencesPage() {
           onSaved={loadData}
         />
         <NoteOverrideList preferences={noteOverrides} onDeleted={loadData} />
+        <StrategyOverrideList preferences={strategyOverrides} onDeleted={loadData} />
       </div>
     </div>
   );
