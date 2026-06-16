@@ -529,11 +529,11 @@ export default function SettingsPage() {
           <Slider
             value={settings.notification.scoreThreshold}
             onChange={(value) => updateSettings("notification", { scoreThreshold: value })}
-            min={50}
+            min={70}
             max={95}
             step={5}
             label="スコア閾値"
-            description="この値以上の一致度で通知"
+            description="通知粒度基盤の実効下限は70%"
             unit="%"
           />
           

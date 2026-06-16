@@ -11,17 +11,44 @@
 
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import type { UserSettings } from '../../services/userSettingsService';
-import { userSettingsService } from '../../services/userSettingsService';
+import type { UserSettings, UserSettingsUpdate } from '../../services/userSettingsService';
+import { UserSettingsService, userSettingsService } from '../../services/userSettingsService';
 import {
   NotificationPreferenceService,
   type UpsertPreferenceInput,
 } from '../../services/notification/notificationPreferenceService';
 import { validateBody } from '../../middleware/validateRequest';
 import { UpdateSettingsRequestSchema } from '../../schemas/api/settings';
+import { prisma } from '../db/client';
 
 const router = Router();
-const notificationPreferenceService = new NotificationPreferenceService();
+
+/** NotificationPreference の weak 下限と合わせる旧設定スライダーの実効下限。 */
+export const MIN_NOTIFICATION_SCORE_THRESHOLD = 70;
+
+function normalizeNotificationScoreThreshold(scoreThreshold: number): number {
+  return Math.max(scoreThreshold, MIN_NOTIFICATION_SCORE_THRESHOLD);
+}
+
+/**
+ * 旧 /api/settings で受けた通知設定を、現在の通知粒度基盤で実際に効く値へ正規化する。
+ * API互換を保つため 70 未満を 400 にせず、保存前に実効下限へ丸める。
+ */
+export function normalizeSettingsUpdateForNotificationPreference(
+  updates: UserSettingsUpdate
+): UserSettingsUpdate {
+  if (updates.notification?.scoreThreshold === undefined) {
+    return updates;
+  }
+
+  return {
+    ...updates,
+    notification: {
+      ...updates.notification,
+      scoreThreshold: normalizeNotificationScoreThreshold(updates.notification.scoreThreshold),
+    },
+  };
+}
 
 /**
  * 旧 /api/settings の通知スライダーを、現在の通知判定で実際に参照される
@@ -41,7 +68,7 @@ export function buildNotificationPreferenceSyncInput(
   let shouldSync = false;
 
   if (notification.scoreThreshold !== undefined) {
-    input.threshold = notification.scoreThreshold / 100;
+    input.threshold = normalizeNotificationScoreThreshold(notification.scoreThreshold) / 100;
     shouldSync = true;
   }
 
@@ -91,14 +118,19 @@ router.put(
   validateBody(UpdateSettingsRequestSchema),
   async (req: Request, res: Response) => {
     try {
-      const updates = req.body as Partial<UserSettings>;
+      const updates = normalizeSettingsUpdateForNotificationPreference(req.body as UserSettingsUpdate);
       const userId = req.user!.userId;
       const preferenceSyncInput = buildNotificationPreferenceSyncInput(updates.notification);
 
-      const savedSettings = await userSettingsService.saveSettings(userId, updates);
-      if (preferenceSyncInput !== null) {
-        await notificationPreferenceService.upsertPreference(userId, preferenceSyncInput);
-      }
+      const savedSettings = await prisma.$transaction(async (tx) => {
+        const settingsService = new UserSettingsService(tx);
+        const preferenceService = new NotificationPreferenceService(tx);
+        const saved = await settingsService.saveSettings(userId, updates);
+        if (preferenceSyncInput !== null) {
+          await preferenceService.upsertPreference(userId, preferenceSyncInput);
+        }
+        return saved;
+      });
       res.json({
         success: true,
         data: savedSettings,
@@ -120,7 +152,17 @@ router.put(
  */
 router.post('/reset', async (req: Request, res: Response) => {
   try {
-    const settings = await userSettingsService.resetToDefault(req.user!.userId);
+    const userId = req.user!.userId;
+    const settings = await prisma.$transaction(async (tx) => {
+      const settingsService = new UserSettingsService(tx);
+      const preferenceService = new NotificationPreferenceService(tx);
+      const resetSettings = await settingsService.resetToDefault(userId);
+      const preferenceSyncInput = buildNotificationPreferenceSyncInput(resetSettings.notification);
+      if (preferenceSyncInput !== null) {
+        await preferenceService.upsertPreference(userId, preferenceSyncInput);
+      }
+      return resetSettings;
+    });
     res.json({
       success: true,
       data: settings,

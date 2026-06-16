@@ -53,6 +53,20 @@ describe('UserSettingsService', () => {
     expect(settings.updatedAt).toBe('2026-06-04T00:00:00.000Z');
   });
 
+  it('旧UI由来の低い通知閾値は実効下限 70 に補正する', async () => {
+    mockFindUnique.mockResolvedValue({
+      userId: USER,
+      notification: { enabled: true, scoreThreshold: 50, maxPerDay: 3 },
+      timeframes: { primary: '15m', secondary: '1d' },
+      display: { darkMode: false, compactView: true, showAiSuggestions: false },
+      updatedAt: new Date('2026-06-04T00:00:00.000Z'),
+    });
+
+    const settings = await userSettingsService.loadSettings(USER);
+
+    expect(settings.notification).toEqual({ enabled: true, scoreThreshold: 70, maxPerDay: 3 });
+  });
+
   it('部分更新は既存値とマージして upsert される', async () => {
     // 既存値（loadSettings 経由で読まれる）
     mockFindUnique.mockResolvedValue({

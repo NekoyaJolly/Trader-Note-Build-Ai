@@ -15,7 +15,10 @@ import { requireMailSecurityToken } from '../../side-b/routes/mailRoutes';
 import { OrderController } from '../controllers/orderController';
 import { NotificationController } from '../controllers/notificationController';
 import notificationRoutes from '../api/notificationRoutes';
-import { buildNotificationPreferenceSyncInput } from '../api/settingsRoutes';
+import {
+  buildNotificationPreferenceSyncInput,
+  normalizeSettingsUpdateForNotificationPreference,
+} from '../api/settingsRoutes';
 import type { LatestMatchForNote } from '../repositories/matchResultRepository';
 import type { MarketData, OrderPreset, TradeNote } from '../../models/types';
 
@@ -310,7 +313,21 @@ describe('API 認証境界', () => {
       threshold: 0.85,
       maxPerDay: 12,
     });
+    expect(buildNotificationPreferenceSyncInput({ scoreThreshold: 50 })).toEqual({
+      scope: 'user',
+      threshold: 0.7,
+    });
     expect(buildNotificationPreferenceSyncInput({ enabled: false })).toBeNull();
+  });
+
+  it('/api/settings の旧通知スライダーは実効下限 70 に正規化する', () => {
+    expect(
+      normalizeSettingsUpdateForNotificationPreference({
+        notification: { enabled: true, scoreThreshold: 50, maxPerDay: 8 },
+      })
+    ).toEqual({
+      notification: { enabled: true, scoreThreshold: 70, maxPerDay: 8 },
+    });
   });
 
   it('注文プリセットは認証ユーザーの noteId として取得する', async () => {

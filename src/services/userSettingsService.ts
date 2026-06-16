@@ -15,7 +15,7 @@
  */
 
 import { z } from 'zod';
-import type { Prisma } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import { prisma } from '../backend/db/client';
 
 /** 時間足の許容値 */
@@ -27,7 +27,7 @@ export type Timeframe = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d' | '1w';
 export interface NotificationSettings {
   /** 通知の有効化 */
   enabled: boolean;
-  /** 一致スコア閾値 (0-100) */
+  /** 一致スコア閾値 (70-100)。通知粒度基盤の weak 下限に合わせる */
   scoreThreshold: number;
   /** 1日の最大通知数 */
   maxPerDay: number;
@@ -70,6 +70,21 @@ export interface UserSettings {
 }
 
 /**
+ * 設定更新入力。
+ * API はセクション単位の部分更新を受けるため、ネストした項目も optional にする。
+ */
+export interface UserSettingsUpdate {
+  /** 通知設定の部分更新 */
+  notification?: Partial<NotificationSettings>;
+  /** 時間足設定の部分更新 */
+  timeframes?: Partial<TimeframeSettings>;
+  /** 表示設定の部分更新 */
+  display?: Partial<DisplaySettings>;
+}
+
+type UserSettingsPrismaClient = Pick<PrismaClient, 'userSettings'>;
+
+/**
  * デフォルト設定
  */
 const DEFAULT_SETTINGS: Omit<UserSettings, 'updatedAt'> = {
@@ -92,11 +107,11 @@ const DEFAULT_SETTINGS: Omit<UserSettings, 'updatedAt'> = {
 const TimeframeSchema = z.enum(['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w']);
 
 // DB の JSON カラムは欠損フィールドをデフォルトで補完しつつ検証する (catch で堅牢化)。
-// 読み出し側も API リクエストと同じ範囲制約 (scoreThreshold 0-100 / maxPerDay 1-100) で
-// パースする。DB に異常値が入っても範囲外は catch でデフォルトへ補正する (Copilot review PR #338)。
+// 読み出し側も通知粒度基盤と同じ範囲制約 (scoreThreshold 70-100 / maxPerDay 1-100) で
+// パースする。DB に異常値や旧UI由来の低い閾値が入ってもデフォルトへ補正する。
 const NotificationSchema = z.object({
   enabled: z.boolean().catch(DEFAULT_SETTINGS.notification.enabled),
-  scoreThreshold: z.number().min(0).max(100).catch(DEFAULT_SETTINGS.notification.scoreThreshold),
+  scoreThreshold: z.number().min(70).max(100).catch(DEFAULT_SETTINGS.notification.scoreThreshold),
   maxPerDay: z.number().min(1).max(100).catch(DEFAULT_SETTINGS.notification.maxPerDay),
 }).catch(DEFAULT_SETTINGS.notification);
 
@@ -142,11 +157,13 @@ function toSettingsData(s: Omit<UserSettings, 'updatedAt'>): {
  * ユーザー設定サービス
  */
 export class UserSettingsService {
+  constructor(private readonly db: UserSettingsPrismaClient = prisma) {}
+
   /**
    * 設定を読み込む。未保存ユーザーはデフォルトを返す。
    */
   async loadSettings(userId: string): Promise<UserSettings> {
-    const row = await prisma.userSettings.findUnique({ where: { userId } });
+    const row = await this.db.userSettings.findUnique({ where: { userId } });
     if (!row) {
       return { ...DEFAULT_SETTINGS, updatedAt: new Date().toISOString() };
     }
@@ -161,7 +178,7 @@ export class UserSettingsService {
   /**
    * 設定を保存する (部分更新)。既存値とマージして upsert する。
    */
-  async saveSettings(userId: string, settings: Partial<UserSettings>): Promise<UserSettings> {
+  async saveSettings(userId: string, settings: UserSettingsUpdate): Promise<UserSettings> {
     const current = await this.loadSettings(userId);
     const merged: Omit<UserSettings, 'updatedAt'> = {
       notification: settings.notification
@@ -176,7 +193,7 @@ export class UserSettingsService {
     };
 
     const data = toSettingsData(merged);
-    const row = await prisma.userSettings.upsert({
+    const row = await this.db.userSettings.upsert({
       where: { userId },
       create: { userId, ...data },
       update: { ...data },
@@ -195,7 +212,7 @@ export class UserSettingsService {
    */
   async resetToDefault(userId: string): Promise<UserSettings> {
     const data = toSettingsData({ ...DEFAULT_SETTINGS });
-    const row = await prisma.userSettings.upsert({
+    const row = await this.db.userSettings.upsert({
       where: { userId },
       create: { userId, ...data },
       update: { ...data },

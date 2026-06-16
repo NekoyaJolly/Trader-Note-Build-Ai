@@ -26,6 +26,11 @@ import {
   DEFAULT_SIMILARITY_LEVELS,
 } from '../../shared/similarity/similarityEngine';
 
+type NotificationPreferencePrismaClient = Pick<
+  PrismaClient,
+  'notificationPreference' | 'tradeNote' | 'strategy'
+>;
+
 /** クールダウン既定 (NotificationTriggerService と同じ env を参照して一貫させる)。
  * env が不正値 (NaN / 非正数) の場合は安全な既定 1 時間にフォールバックする */
 const PARSED_COOLDOWN_MS = parseInt(process.env.NOTIFICATION_COOLDOWN_MS || '3600000', 10);
@@ -142,9 +147,9 @@ export function mergePreferences(
  * 通知粒度設定の CRUD + 解決サービス
  */
 export class NotificationPreferenceService {
-  private prisma: PrismaClient;
+  private prisma: NotificationPreferencePrismaClient;
 
-  constructor(prismaClient?: PrismaClient) {
+  constructor(prismaClient?: NotificationPreferencePrismaClient) {
     this.prisma = prismaClient || prisma;
   }
 
