@@ -893,13 +893,13 @@ Home では主に以下の `skipReasons` を市場データカバレッジ表示
         "noteId": null,
         "profileId": null,
         "strategyId": null,
-        "threshold": 0.75,
-        "minMatchLevel": "weak",
-        "weightPreset": "indicator_focused",
-        "cooldownMinutes": 60,
-        "maxPerDay": 30,
-        "createdAt": "2026-06-17T00:00:00.000Z",
-        "updatedAt": "2026-06-17T00:00:00.000Z"
+        "threshold": null,
+        "minMatchLevel": null,
+        "weightPreset": null,
+        "cooldownMinutes": null,
+        "maxPerDay": null,
+        "createdAt": "2026-06-11T00:00:00.000Z",
+        "updatedAt": "2026-06-11T00:00:00.000Z"
       }
     ]
   }
