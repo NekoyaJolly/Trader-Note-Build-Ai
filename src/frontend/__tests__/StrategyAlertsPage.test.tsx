@@ -11,8 +11,10 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { Strategy } from "@/types/strategy";
 import type { NotificationPreference, StrategyAlert } from "@/lib/api";
 
+const STRATEGY_ID = "11111111-1111-4111-8111-111111111111";
+
 vi.mock("next/navigation", () => ({
-  useParams: () => ({ id: "strategy-1" }),
+  useParams: () => ({ id: STRATEGY_ID }),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -40,7 +42,7 @@ import {
 } from "@/lib/api";
 
 const STRATEGY = {
-  id: "strategy-1",
+  id: STRATEGY_ID,
   name: "押し目買い",
   symbol: "USDJPY",
   timeframe: "15m",
@@ -70,7 +72,7 @@ const STRATEGY = {
 
 const ALERT: StrategyAlert = {
   id: "alert-1",
-  strategyId: "strategy-1",
+  strategyId: STRATEGY_ID,
   enabled: true,
   status: "enabled",
   cooldownMinutes: 60,
@@ -86,7 +88,7 @@ const STRATEGY_PREF: NotificationPreference = {
   scope: "strategy",
   noteId: null,
   profileId: null,
-  strategyId: "strategy-1",
+  strategyId: STRATEGY_ID,
   threshold: null,
   minMatchLevel: null,
   weightPreset: null,
@@ -126,7 +128,7 @@ describe("ストラテジーアラート設定画面", () => {
     await waitFor(() => expect(upsertNotificationPreference).toHaveBeenCalledTimes(1));
     expect(upsertNotificationPreference).toHaveBeenCalledWith({
       scope: "strategy",
-      strategyId: "strategy-1",
+      strategyId: STRATEGY_ID,
       cooldownMinutes: 30,
       maxPerDay: 6,
     });
@@ -144,7 +146,7 @@ describe("ストラテジーアラート設定画面", () => {
     fireEvent.change(cooldownInput, { target: { value: "0" } });
     fireEvent.click(screen.getByText("通知粒度を保存"));
 
-    expect(screen.getByText("通知粒度クールダウンは 1〜10080 分の整数で指定してください")).toBeDefined();
+    expect(screen.getByText("1分以上で指定してください")).toBeDefined();
     expect(screen.queryByText("通知粒度はアラート設定値を使用します")).toBeNull();
     expect(upsertNotificationPreference).not.toHaveBeenCalled();
   });
@@ -156,7 +158,7 @@ describe("ストラテジーアラート設定画面", () => {
     fireEvent.change(maxPerDayInput, { target: { value: "0" } });
     fireEvent.click(screen.getByText("通知粒度を保存"));
 
-    expect(screen.getByText("ストラテジー24h通知上限は 1〜1000 件の整数で指定してください")).toBeDefined();
+    expect(screen.getByText("1件以上で指定してください")).toBeDefined();
     expect(upsertNotificationPreference).not.toHaveBeenCalled();
   });
 

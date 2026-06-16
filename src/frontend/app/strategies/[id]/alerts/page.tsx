@@ -28,7 +28,9 @@ import {
   type AlertLog,
   type AlertChannel,
   type NotificationPreference,
+  type UpsertNotificationPreferenceInput,
 } from "@/lib/api";
+import { UpsertNotificationPreferenceSchema } from "../../../../../schemas/api/notification";
 import type { Strategy } from "@/types/strategy";
 
 export default function StrategyAlertsPage() {
@@ -151,22 +153,6 @@ export default function StrategyAlertsPage() {
     const cooldownValue =
       preferenceCooldownMinutes === "" ? null : Number(preferenceCooldownMinutes);
     const maxPerDayValue = preferenceMaxPerDay === "" ? null : Number(preferenceMaxPerDay);
-    if (
-      cooldownValue !== null &&
-      (!Number.isInteger(cooldownValue) || cooldownValue < 1 || cooldownValue > 10080)
-    ) {
-      setSuccess(null);
-      setError("通知粒度クールダウンは 1〜10080 分の整数で指定してください");
-      return;
-    }
-    if (
-      maxPerDayValue !== null &&
-      (!Number.isInteger(maxPerDayValue) || maxPerDayValue < 1 || maxPerDayValue > 1000)
-    ) {
-      setSuccess(null);
-      setError("ストラテジー24h通知上限は 1〜1000 件の整数で指定してください");
-      return;
-    }
 
     // 未作成かつ空欄の場合は、保存する上書きが無いので API を呼ばない
     if (cooldownValue === null && maxPerDayValue === null && strategyPreference === null) {
@@ -175,16 +161,24 @@ export default function StrategyAlertsPage() {
       return;
     }
 
+    const preferencePayload: UpsertNotificationPreferenceInput = {
+      scope: "strategy",
+      strategyId,
+      cooldownMinutes: cooldownValue,
+      maxPerDay: maxPerDayValue,
+    };
+    const validation = UpsertNotificationPreferenceSchema.safeParse(preferencePayload);
+    if (!validation.success) {
+      setSuccess(null);
+      setError(validation.error.issues[0]?.message ?? "通知粒度の入力値が不正です");
+      return;
+    }
+
     try {
       setSaving(true);
       setError(null);
       setSuccess(null);
-      const savedPreference = await upsertNotificationPreference({
-        scope: "strategy",
-        strategyId,
-        cooldownMinutes: cooldownValue,
-        maxPerDay: maxPerDayValue,
-      });
+      const savedPreference = await upsertNotificationPreference(preferencePayload);
       setStrategyPreference(savedPreference);
       setSuccess("通知粒度の上書きを保存しました");
       await loadData();

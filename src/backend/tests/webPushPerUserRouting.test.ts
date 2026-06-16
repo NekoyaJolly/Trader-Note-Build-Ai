@@ -21,6 +21,7 @@ import type { PrismaClient } from '@prisma/client';
 const mockAlertPrisma = {
   strategyAlert: {
     findUnique: jest.fn(),
+    findMany: jest.fn(),
     update: jest.fn(),
   },
   strategyAlertLog: {
@@ -143,14 +144,20 @@ describe('InAppNotificationSender.sendPush の per-user ルーティング (Phas
 // ============================================
 
 describe('strategyAlertService の Web Push per-user ルーティング (Phase β-1)', () => {
-  const makeAlert = (userId: string | null) => ({
+  const makeAlert = (
+    userId: string | null,
+    overrides: Partial<{
+      cooldownMinutes: number;
+      lastTriggeredAt: Date | null;
+    }> = {}
+  ) => ({
     id: 'alert-1',
     strategyId: 'strategy-1',
     enabled: true,
     status: 'enabled',
     minMatchScore: 0,
-    cooldownMinutes: 0,
-    lastTriggeredAt: null,
+    cooldownMinutes: overrides.cooldownMinutes ?? 0,
+    lastTriggeredAt: overrides.lastTriggeredAt ?? null,
     channels: ['web_push'],
     strategy: { name: 'テスト戦略', symbol: 'USDJPY', userId },
   });
@@ -158,6 +165,7 @@ describe('strategyAlertService の Web Push per-user ルーティング (Phase �
   beforeEach(() => {
     jest.clearAllMocks();
     mockAlertPrisma.notificationPreference.findMany.mockResolvedValue([] as never);
+    mockAlertPrisma.strategyAlert.findMany.mockResolvedValue([{ id: 'alert-1' }] as never);
     mockAlertPrisma.strategyAlertLog.create.mockResolvedValue({ id: 'log-1' } as never);
     mockAlertPrisma.strategyAlertLog.count.mockResolvedValue(0 as never);
     mockAlertPrisma.strategyAlert.update.mockResolvedValue({} as never);
@@ -211,9 +219,31 @@ describe('strategyAlertService の Web Push per-user ルーティング (Phase �
 
     expect(result.triggered).toBe(false);
     expect(result.skipReason).toContain('24時間上限到達');
+    expect(mockAlertPrisma.strategyAlert.findMany).toHaveBeenCalledWith({
+      where: { strategy: { userId: 'user-a-uuid' } },
+      select: { id: true },
+    });
     expect(mockAlertPrisma.strategyAlertLog.count).toHaveBeenCalledTimes(1);
     expect(mockWebPushForAlert.sendToUser).not.toHaveBeenCalled();
     expect(mockWebPushForAlert.broadcast).not.toHaveBeenCalled();
+  });
+
+  it('クールダウン中は24h上限カウントを実行せずにスキップする', async () => {
+    mockAlertPrisma.strategyAlert.findUnique.mockResolvedValue(
+      makeAlert('user-a-uuid', { cooldownMinutes: 60, lastTriggeredAt: new Date() }) as never
+    );
+
+    const result = await triggerAlert({
+      strategyId: 'strategy-1',
+      matchScore: 1.0,
+      indicatorValues: {},
+    });
+
+    expect(result.triggered).toBe(false);
+    expect(result.skipReason).toContain('クールダウン中');
+    expect(mockAlertPrisma.strategyAlert.findMany).not.toHaveBeenCalled();
+    expect(mockAlertPrisma.strategyAlertLog.count).not.toHaveBeenCalled();
+    expect(mockWebPushForAlert.sendToUser).not.toHaveBeenCalled();
   });
 
   it('strategy.userId が null (レガシー行) は broadcast にフォールバックする (境界値)', async () => {

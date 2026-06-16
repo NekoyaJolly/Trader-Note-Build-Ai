@@ -22,16 +22,30 @@ const preferenceService = new NotificationPreferenceService();
 /** 指定ユーザーのストラテジーアラート成功ログを 24h 上限判定用に数える */
 async function countRecentSuccessfulStrategyAlerts(userId: string, hours: number): Promise<number> {
   const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+  // 先にユーザー所有 alertId を引き、StrategyAlertLog の既存 index (alertId, triggeredAt) を活かす。
+  // alert.strategy.userId の relation 条件だけで count すると、triggeredAt 起点の広い走査になりやすい。
+  const alerts = await prisma.strategyAlert.findMany({
+    where: {
+      strategy: {
+        userId,
+      },
+    },
+    select: {
+      id: true,
+    },
+  });
+  if (alerts.length === 0) {
+    return 0;
+  }
+
   return await prisma.strategyAlertLog.count({
     where: {
+      alertId: {
+        in: alerts.map((alert) => alert.id),
+      },
       success: true,
       triggeredAt: {
         gte: since,
-      },
-      alert: {
-        strategy: {
-          userId,
-        },
       },
     },
   });
@@ -295,16 +309,6 @@ export async function triggerAlert(request: TriggerAlertRequest): Promise<Trigge
     alert.strategy.userId,
   );
 
-  if (alert.strategy.userId) {
-    const dailyCount = await countRecentSuccessfulStrategyAlerts(alert.strategy.userId, 24);
-    if (dailyCount >= effective.maxPerDay) {
-      return {
-        triggered: false,
-        skipReason: `24時間上限到達: ${dailyCount}/${effective.maxPerDay}件 (scope=${effective.maxPerDaySource})`,
-      };
-    }
-  }
-
   const effectiveCooldownMinutes = prefCooldownMinutes ?? alert.cooldownMinutes;
   if (alert.lastTriggeredAt) {
     const cooldownMs = effectiveCooldownMinutes * 60 * 1000;
@@ -316,6 +320,16 @@ export async function triggerAlert(request: TriggerAlertRequest): Promise<Trigge
       return {
         triggered: false,
         skipReason: `クールダウン中: あと${remainingMinutes}分`,
+      };
+    }
+  }
+
+  if (alert.strategy.userId) {
+    const dailyCount = await countRecentSuccessfulStrategyAlerts(alert.strategy.userId, 24);
+    if (dailyCount >= effective.maxPerDay) {
+      return {
+        triggered: false,
+        skipReason: `24時間上限到達: ${dailyCount}/${effective.maxPerDay}件 (scope=${effective.maxPerDaySource})`,
       };
     }
   }

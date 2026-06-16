@@ -85,7 +85,7 @@ export const UpsertNotificationPreferenceSchema = z
     minMatchLevel: z.enum(['strong', 'medium', 'weak']).nullable().optional(),
     weightPreset: z.enum(['indicator_focused', 'balanced', 'state_focused']).nullable().optional(),
     cooldownMinutes: z.number().int().min(1, '1分以上で指定してください').max(10080, '1週間以内で指定してください').nullable().optional(),
-    maxPerDay: z.number().int().min(1).max(1000).nullable().optional(),
+    maxPerDay: z.number().int('整数で指定してください').min(1, '1件以上で指定してください').max(1000, '1000件以下で指定してください').nullable().optional(),
   })
   .strict()
   .refine((d) => d.scope !== 'note' || d.noteId !== undefined, {
