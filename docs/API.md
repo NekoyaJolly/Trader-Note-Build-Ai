@@ -754,6 +754,46 @@ ID で特定のトレードノートを取得します。
 
 ---
 
+#### GET /api/matching/pipeline-runs/latest
+最新の matching pipeline 実行状況を取得します。Home の「マッチングの稼働状況」はこのレスポンスを使い、市場データ取得失敗や評価カバレッジ低下をユーザー向けに表示します。
+
+**応答:**
+```json
+{
+  "success": true,
+  "run": {
+    "runId": "uuid",
+    "trigger": "cron",
+    "status": "partial_failure",
+    "startedAt": "2026-06-16T00:00:00.000Z",
+    "finishedAt": "2026-06-16T00:00:02.000Z",
+    "durationMs": 2000,
+    "totalMatches": 0,
+    "notified": 0,
+    "skipped": 0,
+    "errorCount": 1,
+    "errors": [
+      "市場データ取得エラー(lens): symbol=USDJPY, timeframe=15m, EODHD timeout"
+    ],
+    "skipReasons": {
+      "market_data_unavailable": 1
+    },
+    "marketStatus": null
+  }
+}
+```
+
+Home では主に以下の `skipReasons` を市場データカバレッジ表示に使います。
+
+| reason code | 表示 | 意味 |
+|-------------|------|------|
+| `market_data_unavailable` | 市場データ未取得 | 評価対象の市場データ取得に失敗し、そのグループを評価対象から外した |
+| `lens_snapshot_missing` | ノート特徴量不足 | 有効ノートに LensSnapshot が無く、比較対象から外れた |
+| `lens_evaluation_error` | 評価エラー | レンズ評価中のエラーで一部評価が欠落した |
+| `missing_market_snapshot_id` | 市場スナップショット欠落 | MatchResult/Notification 作成に必要な snapshot ID が無く通知をスキップした |
+
+---
+
 ### 通知
 
 #### GET /api/notifications

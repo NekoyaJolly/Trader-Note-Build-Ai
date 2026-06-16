@@ -145,7 +145,7 @@ Side-A は「人間トレーダーのノーコード相棒」。完成形は **2
   - **Phase 1 仕様**: 実発注再開条件、confirmation token、idempotency、demo/live 表示、risk limit、symbol/volume 検証、失敗時ステータス、E2E シナリオは `docs/side-a/order-execution-safety.md` を正本とする。
   - **残**: Phase 2 の実発注再実装は今回のロードマップ実行範囲外。Phase 3/4/5 完了後に別途着手判断する。
 - [x] OrderPreset 信頼度の動的算出〔M〕 — **2026-06-16 実装**: 最新 MatchResult がある場合は一致スコアを主軸に、無い場合はノート情報量・特徴量カバレッジ・インジケーター根拠・価格近接度から保守的に算出。API/UI に `confidenceSource` / `confidenceReasons` を追加し、固定値ではなく算出根拠を確認できるようにした。
-- [ ] 市場データ失敗時のユーザー通知・カバレッジ可視化〔M〕
+- [x] 市場データ失敗時のユーザー通知・カバレッジ可視化〔M〕 — **2026-06-16 実装**: matching pipeline の `skipReasons` / `errors` を Home の稼働状況カードでユーザー向けに翻訳表示。`market_data_unavailable` を「市場データ未取得」、`lens_snapshot_missing` 等を評価カバレッジ注意として表示し、どの理由で通知・評価が欠落したかを確認できるようにした。
 - [ ] バックテスト可視化強化 / 複数シンボル / ローリングWF〔M〕
 - [ ] ノート統一(双方向昇格、Side-B materialize 実値化)〔M〕
 
