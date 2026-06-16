@@ -69,6 +69,8 @@ export interface LiveEvaluationStrategyResult {
   readonly triggered: boolean;
   /** 評価できなかった/発火しなかった理由 */
   readonly skipReason?: string;
+  /** 市場データ補完時の警告。評価継続できても運用上は観測対象にする */
+  readonly marketDataWarnings?: string[];
 }
 
 /** ライブ評価 1 実行分のサマリー */
@@ -85,6 +87,7 @@ export interface LiveEvaluationRunResult {
   /** スキップ理由 → 件数 */
   readonly skipped: Record<string, number>;
   readonly errors: string[];
+  readonly marketDataWarnings: string[];
   readonly strategies: LiveEvaluationStrategyResult[];
 }
 
@@ -128,6 +131,7 @@ export class LiveStrategyEvaluationService {
     const errors: string[] = [];
     const skipped: Record<string, number> = {};
     const strategies: LiveEvaluationStrategyResult[] = [];
+    const marketDataWarningSet = new Set<string>();
     const bumpSkip = (reason: string): void => {
       skipped[reason] = (skipped[reason] ?? 0) + 1;
     };
@@ -143,6 +147,19 @@ export class LiveStrategyEvaluationService {
         strategies.push(result);
         if (result.skipReason !== undefined) {
           bumpSkip(result.skipReason);
+        }
+        for (const warning of result.marketDataWarnings ?? []) {
+          marketDataWarningSet.add(warning);
+        }
+        if (isMarketDataSkipReason(result.skipReason)) {
+          const warningSuffix =
+            result.marketDataWarnings && result.marketDataWarnings.length > 0
+              ? `: ${result.marketDataWarnings.join(' / ')}`
+              : '';
+          errors.push(
+            `${result.strategyName} (${result.symbol} ${result.timeframe ?? 'unknown'}): ` +
+              `市場データ理由で評価スキップ (${result.skipReason})${warningSuffix}`
+          );
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -164,6 +181,7 @@ export class LiveStrategyEvaluationService {
       triggered: strategies.filter((s) => s.triggered).length,
       skipped,
       errors,
+      marketDataWarnings: [...marketDataWarningSet],
       strategies,
     };
     console.log(
@@ -171,6 +189,11 @@ export class LiveStrategyEvaluationService {
         `conditionMet=${result.conditionMet} triggered=${result.triggered} ` +
         `errors=${errors.length} durationMs=${result.durationMs}`
     );
+    if (result.marketDataWarnings.length > 0) {
+      console.warn(
+        `[LiveStrategyEval] 市場データ警告: ${result.marketDataWarnings.join(' / ')}`
+      );
+    }
     return result;
   }
 
@@ -215,14 +238,29 @@ export class LiveStrategyEvaluationService {
       barsCache.set(cacheKey, cached);
     }
     const bars = cached.bars;
+    const marketDataWarnings = cached.warning ? [`${strategy.symbol} ${timeframe}: ${cached.warning}`] : [];
     if (bars.length < MIN_REQUIRED_BARS) {
-      return { ...base, timeframe, evaluations: [], triggered: false, skipReason: 'insufficient_data' };
+      return {
+        ...base,
+        timeframe,
+        evaluations: [],
+        triggered: false,
+        skipReason: 'insufficient_data',
+        ...(marketDataWarnings.length > 0 ? { marketDataWarnings } : {}),
+      };
     }
     // 鮮度の最終ガード: 市場開場中なのに最終バーが古すぎる場合は誤発火を避けて評価しない
     const staleLimitMs = Math.max(6 * barMs, 2 * 60 * 60 * 1000);
     const lastBarTime = bars[bars.length - 1].timestamp.getTime();
     if (now.getTime() - lastBarTime > staleLimitMs) {
-      return { ...base, timeframe, evaluations: [], triggered: false, skipReason: 'stale_market_data' };
+      return {
+        ...base,
+        timeframe,
+        evaluations: [],
+        triggered: false,
+        skipReason: 'stale_market_data',
+        ...(marketDataWarnings.length > 0 ? { marketDataWarnings } : {}),
+      };
     }
 
     // === 指標系列の取得(バー列と同一範囲で index 整合を保証) ===
@@ -310,14 +348,31 @@ export class LiveStrategyEvaluationService {
         barsCache.set(viewCacheKey, viewCached);
       }
       const viewBars = viewCached.bars;
+      if (viewCached.warning) {
+        marketDataWarnings.push(`${strategy.symbol} ${tf}: ${viewCached.warning}`);
+      }
       if (viewBars.length < MIN_REQUIRED_BARS) {
-        return { ...base, timeframe, evaluations: [], triggered: false, skipReason: 'mtf_insufficient_data' };
+        return {
+          ...base,
+          timeframe,
+          evaluations: [],
+          triggered: false,
+          skipReason: 'mtf_insufficient_data',
+          ...(marketDataWarnings.length > 0 ? { marketDataWarnings } : {}),
+        };
       }
       // 鮮度ガード (基準足と同じ規則をビューの足幅でスケール)
       const viewStaleLimitMs = Math.max(6 * viewBarMs, 2 * 60 * 60 * 1000);
       const viewLastBarTime = viewBars[viewBars.length - 1].timestamp.getTime();
       if (now.getTime() - viewLastBarTime > viewStaleLimitMs) {
-        return { ...base, timeframe, evaluations: [], triggered: false, skipReason: 'mtf_stale_market_data' };
+        return {
+          ...base,
+          timeframe,
+          evaluations: [],
+          triggered: false,
+          skipReason: 'mtf_stale_market_data',
+          ...(marketDataWarnings.length > 0 ? { marketDataWarnings } : {}),
+        };
       }
       const viewSeries = await this.fetchIndicatorSeriesFn({
         strategyId: strategy.id,
@@ -416,6 +471,7 @@ export class LiveStrategyEvaluationService {
       timeframe,
       evaluations,
       triggered: triggerResult.triggered,
+      ...(marketDataWarnings.length > 0 ? { marketDataWarnings } : {}),
       ...(triggerResult.triggered || triggerResult.skipReason === undefined
         ? {}
         : { skipReason: `alert_${normalizeSkipReason(triggerResult.skipReason)}` }),
@@ -545,6 +601,16 @@ function normalizeSkipReason(reason: string): string {
     return 'not_configured';
   }
   return 'other';
+}
+
+/** 市場データの鮮度・カバレッジ不足による評価スキップかを判定する */
+function isMarketDataSkipReason(reason: string | undefined): boolean {
+  return (
+    reason === 'insufficient_data' ||
+    reason === 'stale_market_data' ||
+    reason === 'mtf_insufficient_data' ||
+    reason === 'mtf_stale_market_data'
+  );
 }
 
 /** 条件ツリーが状態(IF_THEN/SEQUENCE)を含むかを再帰判定する */

@@ -60,6 +60,22 @@ export interface MatchingPipelineRunResult {
 }
 
 /**
+ * マッチ収集段階の詳細結果。
+ *
+ * runMatchingPipeline は通知段階に入る前の市場データ取得失敗も運用上見える必要がある。
+ * そのため matches だけでなく、非致命エラーと skip reason 集計も内部的に引き回す。
+ */
+interface MatchCollectionResult {
+  matches: MatchResultDTO[];
+  errors: string[];
+  skipReasons: Record<string, number>;
+}
+
+function emptyMatchCollection(): MatchCollectionResult {
+  return { matches: [], errors: [], skipReasons: {} };
+}
+
+/**
  * MatchingService の依存性注入オプション。
  *
  * 通知パイプライン(runMatchingPipeline)のコラボレータをテストから差し替えられるようにする。
@@ -161,6 +177,11 @@ export class MatchingService {
    * DB統一: Prisma型を直接使用（FS型への変換をスキップ）
    */
   async checkForMatches(userId?: string, symbolFilter?: string): Promise<MatchResultDTO[]> {
+    const detail = await this.checkForMatchesDetailed(userId, symbolFilter);
+    return detail.matches;
+  }
+
+  private async checkForMatchesDetailed(userId?: string, symbolFilter?: string): Promise<MatchCollectionResult> {
     // 有効なノートのみを取得（Prisma型で直接取得）。
     // Phase α-4: userId 指定時 (手動チェック等の HTTP 経路) は所有ノートのみ評価。
     // cron パイプラインは未指定で全ユーザーのノートを評価する。
@@ -171,7 +192,7 @@ export class MatchingService {
     // マッチング対象がない場合は早期リターン
     if (notes.length === 0) {
       console.log('[MatchingService] 承認済みノートがありません。マッチングをスキップします。');
-      return [];
+      return emptyMatchCollection();
     }
 
     // Phase α-3 第2弾: 旧 12 次元ロールバック経路を廃止し、
@@ -190,18 +211,27 @@ export class MatchingService {
    */
   private async checkForMatchesWithLensEngine(
     notes: PrismaTradeNote[]
-  ): Promise<MatchResultDTO[]> {
+  ): Promise<MatchCollectionResult> {
     const matches: MatchResultDTO[] = [];
+    const errors: string[] = [];
+    const skipReasons: Record<string, number> = {};
+    const bumpSkipReason = (code: string): void => {
+      skipReasons[code] = (skipReasons[code] ?? 0) + 1;
+    };
 
     const detail = await this.lensNoteCoreService.evaluateNotesForMatching(notes);
     for (const evalError of detail.errors) {
       console.error('[MatchingService/Lens] 評価エラー:', evalError);
+      errors.push(`レンズ評価エラー: ${evalError}`);
+      bumpSkipReason('lens_evaluation_error');
     }
     if (detail.notesWithSnapshot < detail.activeNotes) {
+      const missingCount = detail.activeNotes - detail.notesWithSnapshot;
       console.warn(
-        `[MatchingService/Lens] lensSnapshot 未生成のノートが ${detail.activeNotes - detail.notesWithSnapshot} 件あります` +
+        `[MatchingService/Lens] lensSnapshot 未生成のノートが ${missingCount} 件あります` +
           ' (バックフィル scripts/migrate/backfill-lens-snapshots.ts の実行対象)'
       );
+      skipReasons['lens_snapshot_missing'] = (skipReasons['lens_snapshot_missing'] ?? 0) + missingCount;
     }
 
     // シンボル × 時間足でグループ化し、市場データ取得 + MarketSnapshot upsert を 1 回に抑える。
@@ -325,11 +355,15 @@ export class MatchingService {
           });
         }
       } catch (error) {
-        console.error(`${symbol} のマッチチェックエラー (lens):`, error);
+        const message = error instanceof Error ? error.message : String(error);
+        const errMsg = `市場データ取得エラー(lens): symbol=${symbol}, timeframe=${timeframe}, ${message}`;
+        errors.push(errMsg);
+        bumpSkipReason('market_data_unavailable');
+        console.error(`[MatchingService/Lens] ${errMsg}`, error);
       }
     }
 
-    return matches;
+    return { matches, errors, skipReasons };
   }
 
   /**
@@ -694,18 +728,28 @@ export class MatchingService {
    * 通知パイプラインは checkForMatchesWithControl() から統一的に呼ばれる。
    */
   async checkForAllMatches(symbolFilter?: string): Promise<MatchResultDTO[]> {
-    // Side-A と Side-B を並行実行
-    // Phase δ-1: symbolFilter 指定時 (リアルタイム) は両サイドをそのシンボルに絞る
-    const [sideAMatches, sideBMatches] = await Promise.all([
-      this.checkForMatches(undefined, symbolFilter),
+    const detail = await this.checkForAllMatchesDetailed(symbolFilter);
+    return detail.matches;
+  }
+
+  private async checkForAllMatchesDetailed(symbolFilter?: string): Promise<MatchCollectionResult> {
+    // Side-A と Side-B を並行実行する。
+    // Phase δ-1: symbolFilter 指定時 (リアルタイム) は両サイドをそのシンボルに絞る。
+    // Side-A は市場データ取得エラーを詳細として返すため、cron run の errors に載せる。
+    const [sideAResult, sideBMatches] = await Promise.all([
+      this.checkForMatchesDetailed(undefined, symbolFilter),
       this.checkForSideBMatches(symbolFilter),
     ]);
 
     console.log(
-      `[MatchingService] 統合マッチ結果: Side-A=${sideAMatches.length}, Side-B=${sideBMatches.length}`
+      `[MatchingService] 統合マッチ結果: Side-A=${sideAResult.matches.length}, Side-B=${sideBMatches.length}`
     );
 
-    return [...sideAMatches, ...sideBMatches];
+    return {
+      matches: [...sideAResult.matches, ...sideBMatches],
+      errors: sideAResult.errors,
+      skipReasons: sideAResult.skipReasons,
+    };
   }
 
   /**
@@ -725,20 +769,28 @@ export class MatchingService {
     const bumpSkipReason = (code: string): void => {
       skipReasons[code] = (skipReasons[code] ?? 0) + 1;
     };
+    const mergeSkipReasons = (source: Record<string, number>): void => {
+      for (const [code, count] of Object.entries(source)) {
+        skipReasons[code] = (skipReasons[code] ?? 0) + count;
+      }
+    };
     let notifiedCount = 0;
     let skippedCount = 0;
     let totalMatches = 0;
 
     try {
       // 1. 統合マッチング（Side-A + Side-B）。Phase δ-1: symbolFilter でシンボルスコープ可
-      const allMatches = await this.checkForAllMatches(options.symbolFilter);
+      const matchCollection = await this.checkForAllMatchesDetailed(options.symbolFilter);
+      errors.push(...matchCollection.errors);
+      mergeSkipReasons(matchCollection.skipReasons);
+      const allMatches = matchCollection.matches;
       totalMatches = allMatches.length;
 
       if (allMatches.length === 0) {
         console.log('[MatchingPipeline] マッチなし。パイプライン終了。');
         return this.finalizePipelineRun({
           runId, trigger, startedAt,
-          totalMatches: 0, notified: 0, skipped: 0, errors: [], skipReasons: {},
+          totalMatches: 0, notified: 0, skipped: 0, errors, skipReasons,
         });
       }
 

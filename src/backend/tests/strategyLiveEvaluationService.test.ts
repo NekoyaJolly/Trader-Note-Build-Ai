@@ -243,6 +243,28 @@ describe('LiveStrategyEvaluationService', () => {
     expect(triggerAlertFn).not.toHaveBeenCalled();
   });
 
+  test('OHLCV 補完失敗でデータ不足が残る場合は errors と marketDataWarnings に出す', async () => {
+    const shortBars = makeBars(20);
+    const { service, triggerAlertFn, fetchAndCacheOhlcvFn } = makeService({
+      bars: shortBars,
+      rsiValue: 25,
+    });
+    fetchAndCacheOhlcvFn.mockResolvedValueOnce({
+      success: false,
+      cachedCount: 0,
+      error: 'EODHD 429',
+    });
+
+    const result = await service.evaluateActiveStrategyAlerts();
+
+    expect(result.skipped['insufficient_data']).toBe(1);
+    expect(result.marketDataWarnings[0]).toContain('OHLCV 補完フェッチ失敗: EODHD 429');
+    expect(result.errors[0]).toContain('市場データ理由で評価スキップ (insufficient_data)');
+    expect(result.errors[0]).toContain('EODHD 429');
+    expect(result.strategies[0].marketDataWarnings?.[0]).toContain('EODHD 429');
+    expect(triggerAlertFn).not.toHaveBeenCalled();
+  });
+
   test('バー列と指標系列の長さ不一致は series_alignment_mismatch でスキップする', async () => {
     const { service, triggerAlertFn } = makeService({ rsiValue: 25, seriesLength: BARS - 5 });
 
