@@ -3177,8 +3177,9 @@ export interface NotificationPreference {
 
 /** 通知粒度設定の upsert リクエスト (null = この項目を既定に戻す) */
 export interface UpsertNotificationPreferenceInput {
-  scope: "user" | "note";
+  scope: "user" | "note" | "strategy";
   noteId?: string;
+  strategyId?: string;
   threshold?: number | null;
   minMatchLevel?: "strong" | "medium" | "weak" | null;
   cooldownMinutes?: number | null;

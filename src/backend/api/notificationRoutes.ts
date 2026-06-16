@@ -183,7 +183,7 @@ router.get('/preferences', async (req: Request, res: Response) => {
 
 /**
  * PUT /api/notifications/preferences
- * 通知粒度設定を upsert (scope=user / note)。
+ * 通知粒度設定を upsert (scope=user / note / strategy)。
  * 項目に null を渡すと「上位スコープ / システム既定に戻す」。
  */
 router.put(

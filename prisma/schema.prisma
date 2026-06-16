@@ -318,7 +318,7 @@ model NotificationPreference {
   minMatchLevel   SimilarityMatchLevel?
   /// 同一ノートの再通知クールダウン (分)。null = 既定 (NOTIFICATION_COOLDOWN_MS)
   cooldownMinutes Int?
-  /// 24 時間あたりの通知上限。null = 既定 (β-2a では未配線)
+  /// 24 時間あたりの通知上限。null = 既定。ノートマッチ通知では per-user カウントに適用する。
   maxPerDay       Int?
   createdAt       DateTime                    @default(now()) @db.Timestamptz(6)
   updatedAt       DateTime                    @updatedAt @db.Timestamptz(6)
