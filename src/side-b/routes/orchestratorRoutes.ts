@@ -37,6 +37,7 @@ import {
   createOrchestratorController,
 } from '../controllers/orchestratorController';
 import { requireRole } from '../../middleware/authMiddleware';
+import { getAiHealthSnapshot } from '../agent/aiHealth';
 
 export interface OrchestratorRouterOptions {
   /** RunLedgerService (省略時は default Prisma に接続) */
@@ -69,6 +70,14 @@ export function createOrchestratorRouter(
   router.post('/drafts/:id/reject', requireAdmin, (req, res) => { void controller.rejectDraft(req, res); });
   router.post('/drafts/:id/queue', requireAdmin, (req, res) => { void controller.queueDraft(req, res); });
   router.post('/drafts/:id/archive', requireAdmin, (req, res) => { void controller.archiveDraft(req, res); });
+
+  // AI 層の health signal。Side-B の AI 呼び出しが実際に成功しているかを 1 エンドポイントで確認できる。
+  // status='down'/'degraded' や lastSuccessAt が古い = 「動いてる風で実は死んでいる」を即検知するため。
+  router.get('/ai-health', (_req, res) => {
+    const snapshot = getAiHealthSnapshot();
+    const httpStatus = snapshot.status === 'down' ? 503 : 200;
+    res.status(httpStatus).json({ success: snapshot.status !== 'down', data: snapshot });
+  });
 
   return router;
 }
