@@ -38,6 +38,7 @@ import {
 } from '../controllers/orchestratorController';
 import { requireRole } from '../../middleware/authMiddleware';
 import { getAiHealthSnapshot } from '../agent/aiHealth';
+import { getOrchestrationFlow } from '../observability/orchestrationFlowService';
 
 export interface OrchestratorRouterOptions {
   /** RunLedgerService (省略時は default Prisma に接続) */
@@ -78,6 +79,20 @@ export function createOrchestratorRouter(
     const snapshot = getAiHealthSnapshot();
     const httpStatus = snapshot.status === 'down' ? 503 : 200;
     res.status(httpStatus).json({ success: snapshot.status !== 'down', data: snapshot });
+  });
+
+  // オーケストレーション可視化用の flow スナップショット (エージェント=ノード / ハンドオフ=エッジ)。
+  // 各段の生死をドメインテーブルから導出する。admin 限定 (内部状態の露出を防ぐ)。
+  router.get('/flow', requireAdmin, (_req, res) => {
+    void (async () => {
+      try {
+        const snapshot = await getOrchestrationFlow();
+        res.json({ success: true, data: snapshot });
+      } catch (error) {
+        console.error('[OrchestratorRoutes] flow 取得エラー:', error);
+        res.status(500).json({ success: false, error: 'flow スナップショットの取得に失敗しました' });
+      }
+    })();
   });
 
   return router;

@@ -17,6 +17,7 @@ import {
   GitCompare,
   CalendarClock,
   Dna,
+  Workflow,
 } from "lucide-react";
 
 /** ナビ項目の安定 ID（キー・分析用） */
@@ -25,6 +26,7 @@ export type SideBNavId =
   | "hypotheses"
   | "validation"
   | "agent"
+  | "flow"
   | "evolution"
   | "ai-notes"
   | "trades"
@@ -85,6 +87,15 @@ export const SIDE_B_WORKSPACE_ITEMS: readonly SideBNavEntry[] = [
     labelTab: "プラン",
     icon: Bot,
     order: 40,
+    showInAgentTabStrip: true,
+  },
+  {
+    id: "flow",
+    href: "/side-b/flow",
+    labelSidebar: "オーケストレーション",
+    labelTab: "フロー",
+    icon: Workflow,
+    order: 42,
     showInAgentTabStrip: true,
   },
   {
