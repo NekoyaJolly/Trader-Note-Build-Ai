@@ -16,8 +16,33 @@ export type PriceBarLike = {
   close: number;
 };
 
+export type TimestampedBarLike = {
+  timestamp: Date;
+};
+
 function isFinitePositive(n: number): boolean {
   return Number.isFinite(n) && n > 0;
+}
+
+/**
+ * 鮮度フィルタ: realtime WS が停止すると DB に古い足が「凍結」して残るため、`nowMs` から
+ * `maxAgeMs` より古い足を除外する。これにより panel が数日〜数ヶ月前の幽霊バーを live として
+ * 表示し続けるのを防ぐ (0 件になった場合は呼び出し側が EODHD ヒストリカルへフォールバックする)。
+ *
+ * - 純粋関数 (Date.now を内部で呼ばず nowMs を受け取る) としテスト容易性を保つ
+ * - maxAgeMs が不正 (0 以下 / 非有限) の場合はフィルタしない (安全側 = 全件返す)
+ */
+export function filterFreshBars<T extends TimestampedBarLike>(
+  bars: T[],
+  maxAgeMs: number,
+  nowMs: number
+): T[] {
+  if (!Number.isFinite(maxAgeMs) || maxAgeMs <= 0) return bars;
+  return bars.filter((bar) => {
+    const ts = bar.timestamp.getTime();
+    if (!Number.isFinite(ts)) return false;
+    return nowMs - ts <= maxAgeMs;
+  });
 }
 
 /**

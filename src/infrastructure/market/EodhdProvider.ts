@@ -82,6 +82,11 @@ export class EodhdProvider extends BaseMarketDataProvider {
 
   private client: EODHDClient | null = null;
   private ws: EODHDWebSocket | null = null;
+  // WS の open 確定フラグ。SDK は open イベントを公開しないため、最初の tick 受信を
+  // 「open 済み」の確証として扱う。open 前は ws.subscribe() (=send) が
+  // `InvalidStateError: Sent before connected` で失敗しうるので、未確定の間は
+  // 初期 symbols 経路 (reopenWithDesiredSymbols) で張り直す。
+  private wsReady = false;
   private tickCallbacks: TickCallback[] = [];
   private subscribedProviderSymbols: Set<string> = new Set();
   private readonly feed: WebSocketFeed;
@@ -375,7 +380,33 @@ export class EodhdProvider extends BaseMarketDataProvider {
     if (this.ws) {
       return true;
     }
+    // EODHD SDK の WS は open 後に「コンストラクタで渡した初期 symbols」を onopen 内で
+    // 自動購読する (race-free)。一方 ws.subscribe() は open 前に send すると
+    // `InvalidStateError: Sent before connected` を投げる。
+    // そこで socket 生成は「購読 symbol が確定してから」に遅延し、必ず初期 symbols 経路で
+    // 購読させる。symbol 未確定 (orchestrator が先に connect する) 段階では socket を作らず、
+    // 最初の addSymbols 時に openSocket() で初期 symbols 付きで張る。
+    if (this.subscribedProviderSymbols.size === 0) {
+      this.setConnectionState('connecting');
+      return true;
+    }
+    return this.openSocket();
+  }
+
+  /**
+   * 実際に EODHD WS を張る。`subscribedProviderSymbols` を初期 symbols として渡すことで、
+   * SDK が onopen で購読する正規経路に乗せ、open 前 subscribe のレースを避ける。
+   */
+  private openSocket(): boolean {
+    if (!this.client) {
+      this.setConnectionState('error', new Error('EODHD_API_KEY 未設定'));
+      return false;
+    }
+    if (this.ws) {
+      return true;
+    }
     this.setConnectionState('connecting');
+    this.wsReady = false;
     console.log(`[EodhdProvider] connecting feed=${this.feed}`);
     try {
       const initial = Array.from(this.subscribedProviderSymbols);
@@ -383,10 +414,12 @@ export class EodhdProvider extends BaseMarketDataProvider {
       ws.on('data', (tick) => this.handleTick(tick));
       ws.on('error', (err) => {
         console.error('[EodhdProvider] error:', err.message);
+        this.wsReady = false;
         this.setConnectionState('error', err);
       });
       ws.on('close', () => {
         console.log('[EodhdProvider] closed');
+        this.wsReady = false;
         this.setConnectionState('disconnected');
       });
       ws.on('reconnectFailed', () => {
@@ -394,7 +427,7 @@ export class EodhdProvider extends BaseMarketDataProvider {
       });
       this.ws = ws;
       this.setConnectionState('connected');
-      console.log('[EodhdProvider] connected');
+      console.log(`[EodhdProvider] connected (symbols=${initial.join(',') || 'none'})`);
       return true;
     } catch (err) {
       const error = err instanceof Error ? err : new Error('EODHD connect 失敗');
@@ -408,6 +441,7 @@ export class EodhdProvider extends BaseMarketDataProvider {
       this.ws.close();
       this.ws = null;
     }
+    this.wsReady = false;
     this.tickCallbacks = [];
     this.subscribedProviderSymbols.clear();
     this.setConnectionState('disconnected');
@@ -426,13 +460,51 @@ export class EodhdProvider extends BaseMarketDataProvider {
    */
   async addSymbols(symbols: string[]): Promise<void> {
     const providerSymbols = symbols.map((s) => this.toProviderSymbol(s));
+    const newOnes = providerSymbols.filter((ps) => !this.subscribedProviderSymbols.has(ps));
     for (const ps of providerSymbols) this.subscribedProviderSymbols.add(ps);
-    if (this.ws) {
-      this.ws.subscribe(providerSymbols);
-    } else {
-      // 未接続なら接続を開始 (初期 symbols として渡される)
-      await this.connect();
+    if (newOnes.length === 0) {
+      // 既存 symbol のみ → 何もしない (重複購読を避ける)
+      return;
     }
+    if (!this.ws) {
+      // socket 未生成 → 確定した symbols を初期 symbols として張る (SDK が onopen で購読)。
+      // これが「open 前 subscribe」レースを根絶する正規経路。connect() は symbols 確定後
+      // (size>0) は openSocket() を呼ぶため、ここは connect() に委譲する。
+      await this.connect();
+      return;
+    }
+    if (!this.wsReady) {
+      // socket はあるが open 未確定。ここで ws.subscribe() を呼ぶと open 前 send で
+      // `Sent before connected` になりうる (Copilot review PR #429 指摘)。確定した全 symbol を
+      // 初期 symbols として張り直し、SDK の onopen 購読経路 (race-free) に委ねる。
+      this.reopenWithDesiredSymbols();
+      return;
+    }
+    // open 確定済み → 新規 symbol をライブ購読。万一 send が失敗 (直前に切断等) しても
+    // 初期 symbols 経路で張り直してフォールバックする。
+    try {
+      this.ws.subscribe(newOnes);
+    } catch (err) {
+      console.warn(
+        `[EodhdProvider] ws.subscribe 失敗 → 初期 symbols 経路で張り直し: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      this.reopenWithDesiredSymbols();
+    }
+  }
+
+  /**
+   * 確定済みの購読 symbol 全体を初期 symbols として WS を張り直す。
+   * open 前 send (`Sent before connected`) を避けるための race-free 経路。SDK は
+   * コンストラクタで渡した初期 symbols を onopen 内で購読するため、open タイミングに
+   * 依存せず確実に購読が成立する。
+   */
+  private reopenWithDesiredSymbols(): void {
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+    this.wsReady = false;
+    this.openSocket();
   }
 
   async unsubscribeFromTicks(symbols: string[]): Promise<void> {
@@ -448,6 +520,8 @@ export class EodhdProvider extends BaseMarketDataProvider {
   // ===========================================
 
   private handleTick(raw: WebSocketTick): void {
+    // 最初の data 受信 = socket open の確証。以降 addSymbols は安全に ws.subscribe() できる。
+    this.wsReady = true;
     // Copilot review (PR #235) 指摘 6 対応: Zod schema で形状を narrow
     const parsed = WebSocketTickSchema.safeParse(raw);
     if (!parsed.success) {
