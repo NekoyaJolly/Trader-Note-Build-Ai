@@ -17,7 +17,7 @@
 import type { PrismaClient } from '@prisma/client';
 import { EventEmitter } from 'events';
 import { z } from 'zod';
-import { filterBarsByReferencePrice } from './realtimeSanity';
+import { filterBarsByReferencePrice, filterFreshBars } from './realtimeSanity';
 
 // ========================================
 // 型定義
@@ -692,15 +692,30 @@ export class RealtimeTickService extends EventEmitter {
       tickCount: b.tickCount,
     })).reverse();
 
+    // 鮮度ガード: realtime WS が停止すると DB には数日〜数ヶ月前の古い足が「凍結」して残る。
+    // これを live として返すと panel が幽霊バー (例: 2026-02 の固着足) を表示し続けるため、
+    // 足間隔の数倍より古い足は除外する。0 件になった場合は呼び出し側 (SSE) が EODHD
+    // ヒストリカルへフォールバックする (frontend は realtime bars を EODHD ローソク足の
+    // オーバーレイとして扱うため、空でも安全)。
+    const intervalSec = Number.parseInt(timeframe, 10) || this.config.barIntervalSeconds;
+    const maxAgeMs = Math.max(intervalSec * 3 * 1000, 10 * 60 * 1000);
+    const freshBars = filterFreshBars(mappedBars, maxAgeMs, Date.now());
+    if (freshBars.length < mappedBars.length) {
+      const newest = mappedBars[mappedBars.length - 1]?.timestamp.toISOString() ?? 'none';
+      console.log(
+        `[RealtimeTickService] 鮮度ガード: ${symbol}/${timeframe} 古い足 ${mappedBars.length - freshBars.length}/${mappedBars.length} 件を除外 (maxAge=${Math.round(maxAgeMs / 1000)}s, newest=${newest})`,
+      );
+    }
+
     // 参照価格がある場合（= 直近Tick/進行中バーが取れている）:
     // DBの汚染（スケール違い）を避けるため、参照価格に近いバーだけを返す
     // ※ ここで0件になった場合は、上位（Orchestrator）が Trendbar にフォールバックできる
     if (referencePrice !== undefined && Number.isFinite(referencePrice) && referencePrice > 0) {
-      return filterBarsByReferencePrice(mappedBars, referencePrice, ANOMALY_DEVIATION_THRESHOLD);
+      return filterBarsByReferencePrice(freshBars, referencePrice, ANOMALY_DEVIATION_THRESHOLD);
     }
 
     // 参照価格がない場合は、従来通り中央値ベースで異常値を除外
-    return this.filterAnomalousBars(mappedBars);
+    return this.filterAnomalousBars(freshBars);
   }
 
   /**

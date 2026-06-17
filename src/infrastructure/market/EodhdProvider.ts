@@ -375,6 +375,31 @@ export class EodhdProvider extends BaseMarketDataProvider {
     if (this.ws) {
       return true;
     }
+    // EODHD SDK の WS は open 後に「コンストラクタで渡した初期 symbols」を onopen 内で
+    // 自動購読する (race-free)。一方 ws.subscribe() は open 前に send すると
+    // `InvalidStateError: Sent before connected` を投げる。
+    // そこで socket 生成は「購読 symbol が確定してから」に遅延し、必ず初期 symbols 経路で
+    // 購読させる。symbol 未確定 (orchestrator が先に connect する) 段階では socket を作らず、
+    // 最初の addSymbols 時に openSocket() で初期 symbols 付きで張る。
+    if (this.subscribedProviderSymbols.size === 0) {
+      this.setConnectionState('connecting');
+      return true;
+    }
+    return this.openSocket();
+  }
+
+  /**
+   * 実際に EODHD WS を張る。`subscribedProviderSymbols` を初期 symbols として渡すことで、
+   * SDK が onopen で購読する正規経路に乗せ、open 前 subscribe のレースを避ける。
+   */
+  private openSocket(): boolean {
+    if (!this.client) {
+      this.setConnectionState('error', new Error('EODHD_API_KEY 未設定'));
+      return false;
+    }
+    if (this.ws) {
+      return true;
+    }
     this.setConnectionState('connecting');
     console.log(`[EodhdProvider] connecting feed=${this.feed}`);
     try {
@@ -394,7 +419,7 @@ export class EodhdProvider extends BaseMarketDataProvider {
       });
       this.ws = ws;
       this.setConnectionState('connected');
-      console.log('[EodhdProvider] connected');
+      console.log(`[EodhdProvider] connected (symbols=${initial.join(',') || 'none'})`);
       return true;
     } catch (err) {
       const error = err instanceof Error ? err : new Error('EODHD connect 失敗');
@@ -426,12 +451,20 @@ export class EodhdProvider extends BaseMarketDataProvider {
    */
   async addSymbols(symbols: string[]): Promise<void> {
     const providerSymbols = symbols.map((s) => this.toProviderSymbol(s));
+    const newOnes = providerSymbols.filter((ps) => !this.subscribedProviderSymbols.has(ps));
     for (const ps of providerSymbols) this.subscribedProviderSymbols.add(ps);
-    if (this.ws) {
-      this.ws.subscribe(providerSymbols);
-    } else {
-      // 未接続なら接続を開始 (初期 symbols として渡される)
+    if (!this.ws) {
+      // socket 未生成 → 確定した symbols を初期 symbols として張る (SDK が onopen で購読)。
+      // これが「open 前 subscribe」レースを根絶する正規経路。connect() は symbols 確定後
+      // (size>0) は openSocket() を呼ぶため、ここは connect() に委譲する。
       await this.connect();
+      return;
+    }
+    // socket が既にある (= open 済み) 場合のみ、新規 symbol をライブ購読で追加する。
+    // NOTE: open 直後・未 open の socket に対しては ws.subscribe() が send で失敗しうるが、
+    // 主経路 (orchestrator connect[空]→subscribe[1 symbol]) は上の openSocket 経路を通るため安全。
+    if (newOnes.length > 0) {
+      this.ws.subscribe(newOnes);
     }
   }
 

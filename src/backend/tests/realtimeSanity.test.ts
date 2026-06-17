@@ -8,6 +8,7 @@
 import {
   calculateMedian,
   filterBarsByReferencePrice,
+  filterFreshBars,
   getCloseStats,
   looksLikeMisScaledBars,
   type PriceBarLike,
@@ -55,6 +56,40 @@ describe('realtimeSanity', () => {
   test('looksLikeMisScaledBars: 一般的なFX/金属の短期レンジは false になる', () => {
     expect(looksLikeMisScaledBars([bar(4600), bar(4610), bar(4590), bar(4605)])).toBe(false);
     expect(looksLikeMisScaledBars([bar(1.08), bar(1.081), bar(1.079)])).toBe(false);
+  });
+
+  describe('filterFreshBars', () => {
+    const NOW = new Date('2026-06-17T20:00:00Z').getTime();
+    const tbar = (iso: string) => ({ timestamp: new Date(iso) });
+
+    test('maxAge より古い足 (凍結ゴースト) を除外し、新しい足は残す', () => {
+      const bars = [
+        tbar('2026-02-16T13:00:00Z'), // 数ヶ月前の凍結足
+        tbar('2026-06-17T19:00:00Z'), // 1 時間前
+        tbar('2026-06-17T19:58:00Z'), // 2 分前
+      ];
+      // maxAge = 45 分
+      const fresh = filterFreshBars(bars, 45 * 60 * 1000, NOW);
+      expect(fresh.map((b) => b.timestamp.toISOString())).toEqual([
+        '2026-06-17T19:58:00.000Z',
+      ]);
+    });
+
+    test('全件が古ければ空配列を返す (= 呼び出し側が EODHD へフォールバック)', () => {
+      const bars = [tbar('2026-02-16T13:00:00Z'), tbar('2026-05-15T01:53:00Z')];
+      expect(filterFreshBars(bars, 45 * 60 * 1000, NOW)).toEqual([]);
+    });
+
+    test('境界値 (ちょうど maxAge) は残す', () => {
+      const bars = [tbar('2026-06-17T19:15:00Z')]; // ちょうど 45 分前
+      expect(filterFreshBars(bars, 45 * 60 * 1000, NOW)).toHaveLength(1);
+    });
+
+    test('maxAgeMs が不正 (0 以下) なら全件返す (安全側)', () => {
+      const bars = [tbar('2020-01-01T00:00:00Z')];
+      expect(filterFreshBars(bars, 0, NOW)).toHaveLength(1);
+      expect(filterFreshBars(bars, -1, NOW)).toHaveLength(1);
+    });
   });
 });
 
