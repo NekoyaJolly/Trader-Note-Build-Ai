@@ -5,16 +5,19 @@
  * - 症状: `InvalidStateError: Sent before connected.` で購読が成立せず RealtimeOHLCV が凍結。
  * - 原因: orchestrator が空 symbols で先に connect → open 前の socket に ws.subscribe() を送出。
  * - 修正: socket 生成を「購読 symbol が確定する最初の subscribe」まで遅延し、必ず SDK の
- *   コンストラクタ初期 symbols 経路 (onopen で購読 = race-free) に乗せる。
- *
- * ここでは EODHD SDK を jest.mock でスタブ化し、上記の経路が守られているかを検証する。
+ *   コンストラクタ初期 symbols 経路 (onopen で購読 = race-free) に乗せる。さらに open 未確定の
+ *   間に symbol を追加する場合も ws.subscribe() を呼ばず、初期 symbols 経路で張り直す
+ *   (Copilot review PR #429 指摘)。
  */
 
 import type { TickData } from '../../infrastructure/market/IMarketDataProvider';
 
+type WsTick = { s: string; p: number; t: number };
+type WsListener = (arg: WsTick) => void;
+
 /** SDK が返す WebSocket クライアントのスタブ (provider が使う on/subscribe/unsubscribe/close のみ) */
 const wsMock = {
-  on: jest.fn(),
+  on: jest.fn<void, [string, WsListener]>(),
   subscribe: jest.fn<void, [string[]]>(),
   unsubscribe: jest.fn<void, [string[]]>(),
   close: jest.fn<void, []>(),
@@ -31,6 +34,14 @@ jest.mock('eodhd', () => ({
 }));
 
 import { EodhdProvider } from '../../infrastructure/market/EodhdProvider';
+
+/** wsMock.on に登録された 'data' リスナを呼び、tick 受信 (= open 確定) を模擬する */
+function emitTick(symbol = 'XAUUSD', price = 4300): void {
+  const dataCall = wsMock.on.mock.calls.find((c) => c[0] === 'data');
+  const listener = dataCall?.[1];
+  if (!listener) throw new Error('data listener が登録されていない');
+  listener({ s: symbol, p: price, t: 1_781_728_844_000 });
+}
 
 describe('EodhdProvider — realtime WS 購読 (Sent before connected レース対策)', () => {
   beforeEach(() => {
@@ -60,35 +71,51 @@ describe('EodhdProvider — realtime WS 購読 (Sent before connected レース�
     await provider.connect();
     await provider.subscribeToTicks(['XAU/USD'], noopTick);
 
-    // socket は初期 symbols 付きで 1 回だけ生成される
     expect(sdkMocks.websocket).toHaveBeenCalledTimes(1);
     const [feed, initialSymbols] = sdkMocks.websocket.mock.calls[0];
     expect(feed).toBe('forex');
     expect(initialSymbols).toEqual(['XAUUSD.FOREX']);
-
-    // open 前 socket への ws.subscribe() (= Sent before connected の原因) は呼ばれない
     expect(wsMock.subscribe).not.toHaveBeenCalled();
   });
 
-  it('接続後に新規 symbol を追加したときだけ ws.subscribe() をライブ購読で呼ぶ', async () => {
+  it('open 未確定のまま新規 symbol を追加したら、ws.subscribe() ではなく初期 symbols 経路で張り直す', async () => {
     const provider = new EodhdProvider({ apiToken: 'test-token' });
-    await provider.subscribeToTicks(['XAU/USD'], noopTick); // socket 生成 (初期 symbols)
+    await provider.subscribeToTicks(['XAU/USD'], noopTick); // socket 生成 (まだ tick 未受信 = open 未確定)
     expect(sdkMocks.websocket).toHaveBeenCalledTimes(1);
 
-    // 新規 symbol → 既に open 済みの socket に対して subscribe
     await provider.addSymbols(['EUR/USD']);
+
+    // open 前 send を避けるため ws.subscribe() は呼ばない
+    expect(wsMock.subscribe).not.toHaveBeenCalled();
+    // 旧 socket を閉じ、確定した全 symbol を初期 symbols として張り直す
+    expect(wsMock.close).toHaveBeenCalledTimes(1);
+    expect(sdkMocks.websocket).toHaveBeenCalledTimes(2);
+    const [, reopenSymbols] = sdkMocks.websocket.mock.calls[1];
+    expect(reopenSymbols).toEqual(['XAUUSD.FOREX', 'EURUSD.FOREX']);
+  });
+
+  it('open 確定後 (tick 受信後) は新規 symbol を ws.subscribe() でライブ購読する (張り直さない)', async () => {
+    const provider = new EodhdProvider({ apiToken: 'test-token' });
+    await provider.subscribeToTicks(['XAU/USD'], noopTick);
+    emitTick(); // 最初の tick = open 確定
+
+    await provider.addSymbols(['EUR/USD']);
+
     expect(wsMock.subscribe).toHaveBeenCalledTimes(1);
     expect(wsMock.subscribe).toHaveBeenCalledWith(['EURUSD.FOREX']);
-
-    // socket は再生成されない
+    // 張り直しは起きない
+    expect(wsMock.close).not.toHaveBeenCalled();
     expect(sdkMocks.websocket).toHaveBeenCalledTimes(1);
   });
 
-  it('既に購読済みの symbol を再追加しても ws.subscribe() は呼ばない (重複購読を避ける)', async () => {
+  it('既に購読済みの symbol を再追加しても ws.subscribe() も張り直しもしない', async () => {
     const provider = new EodhdProvider({ apiToken: 'test-token' });
     await provider.subscribeToTicks(['XAU/USD'], noopTick);
+    emitTick();
 
     await provider.addSymbols(['XAU/USD']); // 既存と同じ
     expect(wsMock.subscribe).not.toHaveBeenCalled();
+    expect(wsMock.close).not.toHaveBeenCalled();
+    expect(sdkMocks.websocket).toHaveBeenCalledTimes(1);
   });
 });
