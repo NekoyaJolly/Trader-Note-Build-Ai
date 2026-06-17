@@ -16,6 +16,7 @@
 
 import { z } from 'zod';
 import { config, resolveDefaultModel } from '../../config';
+import { recordAiSuccess, recordAiFailure } from './aiHealth';
 import type { McpToolDefinition } from '../skills/types';
 
 /**
@@ -404,28 +405,49 @@ export class AIProvider {
             body.tool_choice = 'auto';
         }
 
-        const response = await fetch(`${this.baseURL}/chat/completions`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${this.apiKey}`,
-            },
-            body: JSON.stringify(body),
-        });
+        // health signal: 全 AI 呼び出しの成否をここ (唯一の計測点 / choke point) で記録し、
+        // 失敗を黙殺させない (クォータ枯渇/レート制限/認証/接続失敗を理由別に集計)。
+        let response: Awaited<ReturnType<typeof fetch>>;
+        try {
+            response = await fetch(`${this.baseURL}/chat/completions`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${this.apiKey}`,
+                },
+                body: JSON.stringify(body),
+            });
+        } catch (err) {
+            // 接続失敗 (DNS/切断/タイムアウト) も health に記録してから再 throw する。
+            recordAiFailure({ status: null, body: err instanceof Error ? err.message : String(err), model: this.model });
+            throw err;
+        }
 
         if (!response.ok) {
             const errorBody = await response.text();
-            throw new Error(`AI API error: ${response.status} - ${errorBody}`);
+            recordAiFailure({ status: response.status, body: errorBody, model: this.model });
+            // 例外メッセージには本文全量を載せない (ログ肥大/情報露出回避)。本文は health に記録済み。
+            throw new Error(`AI API error: ${response.status} - ${errorBody.slice(0, 200)}`);
         }
 
         // 軽量 Zod スキーマでレスポンスを検証し、プロバイダ側の形式変化を runtime error で早期検知する。
         // type assertion ではキー欠落・型不一致が `undefined` の連鎖で隠れるため避ける (PR #149 Copilot レビュー (4))。
-        const rawData = await response.json();
+        // 空ボディ/不正 JSON で json() が throw する経路も「有効出力なし」= 失敗として health に記録する
+        // (黙殺させない目的を満たすため、parse 例外を握って record してから再 throw)。
+        const rawData = await response.json().catch((err) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            recordAiFailure({ status: response.status, body: `bad_response(json): ${msg}`, model: this.model });
+            throw new Error(`AI API レスポンス JSON パース失敗: ${msg}`);
+        });
         const parseResult = AIProviderResponseSchema.safeParse(rawData);
         if (!parseResult.success) {
+            // 2xx でも形式不正なら「有効出力なし」= 失敗として health に記録する。
+            recordAiFailure({ status: response.status, body: `bad_response: ${parseResult.error.message}`, model: this.model });
             throw new Error(`AI API レスポンス形式エラー: ${parseResult.error.message}`);
         }
         const data = parseResult.data;
+        // 有効なレスポンスが取れた = AI 層は生きている。
+        recordAiSuccess({ model: data.model ?? this.model });
 
         const choice = data.choices[0];
         // choices.min(1) を満たしていれば choice は存在する。message も schema 上必須。
