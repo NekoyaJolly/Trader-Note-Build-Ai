@@ -405,7 +405,7 @@ export class AIProvider {
             body.tool_choice = 'auto';
         }
 
-        // health signal: 全 AI 呼び出しの成否をここ (唯一の чокепоイント) で記録し、
+        // health signal: 全 AI 呼び出しの成否をここ (唯一の計測点 / choke point) で記録し、
         // 失敗を黙殺させない (クォータ枯渇/レート制限/認証/接続失敗を理由別に集計)。
         let response: Awaited<ReturnType<typeof fetch>>;
         try {
@@ -426,12 +426,19 @@ export class AIProvider {
         if (!response.ok) {
             const errorBody = await response.text();
             recordAiFailure({ status: response.status, body: errorBody, model: this.model });
-            throw new Error(`AI API error: ${response.status} - ${errorBody}`);
+            // 例外メッセージには本文全量を載せない (ログ肥大/情報露出回避)。本文は health に記録済み。
+            throw new Error(`AI API error: ${response.status} - ${errorBody.slice(0, 200)}`);
         }
 
         // 軽量 Zod スキーマでレスポンスを検証し、プロバイダ側の形式変化を runtime error で早期検知する。
         // type assertion ではキー欠落・型不一致が `undefined` の連鎖で隠れるため避ける (PR #149 Copilot レビュー (4))。
-        const rawData = await response.json();
+        // 空ボディ/不正 JSON で json() が throw する経路も「有効出力なし」= 失敗として health に記録する
+        // (黙殺させない目的を満たすため、parse 例外を握って record してから再 throw)。
+        const rawData = await response.json().catch((err) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            recordAiFailure({ status: response.status, body: `bad_response(json): ${msg}`, model: this.model });
+            throw new Error(`AI API レスポンス JSON パース失敗: ${msg}`);
+        });
         const parseResult = AIProviderResponseSchema.safeParse(rawData);
         if (!parseResult.success) {
             // 2xx でも形式不正なら「有効出力なし」= 失敗として health に記録する。

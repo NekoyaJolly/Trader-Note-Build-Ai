@@ -73,7 +73,8 @@ export function createOrchestratorRouter(
 
   // AI 層の health signal。Side-B の AI 呼び出しが実際に成功しているかを 1 エンドポイントで確認できる。
   // status='down'/'degraded' や lastSuccessAt が古い = 「動いてる風で実は死んでいる」を即検知するため。
-  router.get('/ai-health', (_req, res) => {
+  // モデル名/失敗 reason/本文 snippet 等の内部情報を返すため admin 限定で保護する (Copilot review PR #430)。
+  router.get('/ai-health', requireAdmin, (_req, res) => {
     const snapshot = getAiHealthSnapshot();
     const httpStatus = snapshot.status === 'down' ? 503 : 200;
     res.status(httpStatus).json({ success: snapshot.status !== 'down', data: snapshot });
