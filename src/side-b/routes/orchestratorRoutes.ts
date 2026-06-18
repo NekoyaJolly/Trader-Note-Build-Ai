@@ -36,7 +36,7 @@ import {
 import {
   createOrchestratorController,
 } from '../controllers/orchestratorController';
-import { requireRole } from '../../middleware/authMiddleware';
+import { requireRole, requireAuth } from '../../middleware/authMiddleware';
 import { getAiHealthSnapshot } from '../agent/aiHealth';
 import { getOrchestrationFlow } from '../observability/orchestrationFlowService';
 
@@ -75,7 +75,9 @@ export function createOrchestratorRouter(
   // AI 層の health signal。Side-B の AI 呼び出しが実際に成功しているかを 1 エンドポイントで確認できる。
   // status='down'/'degraded' や lastSuccessAt が古い = 「動いてる風で実は死んでいる」を即検知するため。
   // モデル名/失敗 reason/本文 snippet 等の内部情報を返すため admin 限定で保護する (Copilot review PR #430)。
-  router.get('/ai-health', requireAdmin, (_req, res) => {
+  // ログイン必須 (admin 不要)。内部状態を返すため完全公開はしないが、運用者が普段のログインで
+  // 見られるようにする (sole-user 運用、Nekoさん 要望 2026-06-18)。
+  router.get('/ai-health', requireAuth, (_req, res) => {
     const snapshot = getAiHealthSnapshot();
     const httpStatus = snapshot.status === 'down' ? 503 : 200;
     res.status(httpStatus).json({ success: snapshot.status !== 'down', data: snapshot });
@@ -83,7 +85,7 @@ export function createOrchestratorRouter(
 
   // オーケストレーション可視化用の flow スナップショット (エージェント=ノード / ハンドオフ=エッジ)。
   // 各段の生死をドメインテーブルから導出する。admin 限定 (内部状態の露出を防ぐ)。
-  router.get('/flow', requireAdmin, (_req, res) => {
+  router.get('/flow', requireAuth, (_req, res) => {
     void (async () => {
       try {
         const snapshot = await getOrchestrationFlow();
