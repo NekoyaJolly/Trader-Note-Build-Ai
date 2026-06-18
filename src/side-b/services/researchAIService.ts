@@ -128,6 +128,14 @@ const FX_RESEARCH_TOOL_ALLOWLIST: readonly string[] = [
 /** 自律ツール使用の最大反復回数 (コスト/暴走ガード)。 */
 const MAX_RESEARCH_TOOL_ITERATIONS = 5;
 
+/**
+ * tool 名が agentic 研究の read-only allowlist に含まれるか (実行拘束ガード、テスト用に export)。
+ * LLM が allowlist 外 (書込系) の tool 名を返しても invoke させないために invoke 直前で必ず使う。
+ */
+export function isAllowedResearchTool(name: string): boolean {
+  return FX_RESEARCH_TOOL_ALLOWLIST.includes(name);
+}
+
 /** agentic 研究時にシステムプロンプトへ付加する指示。 */
 function agenticResearchInstructions(symbol: string): string {
   return [
@@ -319,13 +327,25 @@ export class ResearchAIService {
         for (const call of resp.toolCalls) {
           toolCallCount += 1;
           let toolContent: string;
-          try {
-            const args = JSON.parse(call.function.arguments) as JsonValue;
-            const result = await registry.invoke(call.function.name, args);
-            toolContent = safeStringify(result);
-          } catch (toolErr) {
-            // ツール失敗は握って結果としてモデルに返す (黙殺しない・ループは継続)
-            toolContent = safeStringify({ ok: false, error: toolErr instanceof Error ? toolErr.message : String(toolErr) });
+          if (!isAllowedResearchTool(call.function.name)) {
+            // 実行拘束 (防御): chat({tools}) を allowlist で絞っていても LLM が allowlist 外
+            // (書込系 register_hypothesis / record_lesson 等) の tool 名を返し得るため、
+            // invoke の直前に必ず allowlist を検証し、許可外は実行せずエラーを返す。
+            console.warn(`[MarketAnalyst] agentic: 許可外 tool 呼び出しを拒否: ${call.function.name}`);
+            toolContent = safeStringify({ ok: false, error: `tool '${call.function.name}' は許可されていません (read-only allowlist 外)` });
+          } else {
+            try {
+              const args = JSON.parse(call.function.arguments) as JsonValue;
+              // callerAgent/callerReason を渡してツール実行を trace 可能にする。
+              const result = await registry.invoke(call.function.name, args, {
+                callerAgent: 'research',
+                callerReason: '認知解放: 自律リサーチ (read-only)',
+              });
+              toolContent = safeStringify(result);
+            } catch (toolErr) {
+              // ツール失敗は握って結果としてモデルに返す (黙殺しない・ループは継続)
+              toolContent = safeStringify({ ok: false, error: toolErr instanceof Error ? toolErr.message : String(toolErr) });
+            }
           }
           messages.push({ role: 'tool', content: toolContent, tool_call_id: call.id });
         }

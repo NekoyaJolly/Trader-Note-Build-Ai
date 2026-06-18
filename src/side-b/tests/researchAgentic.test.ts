@@ -4,7 +4,24 @@
  * 含み得るため、確実に MarketAnalysis JSON を抽出できることを担保する。
  */
 
-import { extractJsonContent } from '../services/researchAIService';
+import { extractJsonContent, isAllowedResearchTool } from '../services/researchAIService';
+
+describe('isAllowedResearchTool (実行拘束 allowlist)', () => {
+  it('FX 向け read-only ツールは許可', () => {
+    expect(isAllowedResearchTool('fetch_eodhd_news')).toBe(true);
+    expect(isAllowedResearchTool('fetch_eodhd_sentiments')).toBe(true);
+    expect(isAllowedResearchTool('fetch_eodhd_economic_events')).toBe(true);
+    expect(isAllowedResearchTool('fetch_eodhd_macro_indicator')).toBe(true);
+  });
+
+  it('書込系/allowlist 外ツールは拒否 (LLM が tool 名を捏造しても実行させない)', () => {
+    expect(isAllowedResearchTool('register_hypothesis')).toBe(false);
+    expect(isAllowedResearchTool('record_lesson')).toBe(false);
+    expect(isAllowedResearchTool('fetch_eodhd_fundamentals')).toBe(false); // 株専用は除外
+    expect(isAllowedResearchTool('')).toBe(false);
+    expect(isAllowedResearchTool('anything_else')).toBe(false);
+  });
+});
 
 describe('extractJsonContent', () => {
   it('素の JSON オブジェクトを parse', () => {
