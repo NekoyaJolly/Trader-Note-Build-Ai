@@ -22,7 +22,8 @@ import {
 import type { ResearchAIOutput , OHLCVSnapshot} from '../models/marketResearch';
 import { calculateExpiryDate } from '../models/marketResearch';
 import { getRelevantIndicatorContext } from '../knowledge';
-import { AIProvider } from '../agent/aiProvider';
+import { AIProvider, type ChatMessage } from '../agent/aiProvider';
+import { buildDefaultSkillRegistry } from '../skills';
 import { loadPromptWithGlobal } from '../prompts/loader';
 import { PromptRegistry } from '../prompts/registry/PromptRegistry';
 import { safeStringify } from '../../utils/safeStringify';
@@ -111,6 +112,44 @@ export interface ResearchAIResult {
 // ===========================================
 // サービスクラス
 // ===========================================
+
+/**
+ * 認知解放 (agentic) 研究で許可する read-only EODHD ツール。
+ * FX/メタル向けに macro/news/sentiment/economic に限定する (fundamentals/earnings は株専用で
+ * FX では null になるため除外。将来株を扱う時に追加)。
+ */
+const FX_RESEARCH_TOOL_ALLOWLIST: readonly string[] = [
+  'fetch_eodhd_news',
+  'fetch_eodhd_sentiments',
+  'fetch_eodhd_economic_events',
+  'fetch_eodhd_macro_indicator',
+];
+
+/** 自律ツール使用の最大反復回数 (コスト/暴走ガード)。 */
+const MAX_RESEARCH_TOOL_ITERATIONS = 5;
+
+/** agentic 研究時にシステムプロンプトへ付加する指示。 */
+function agenticResearchInstructions(symbol: string): string {
+  return [
+    '',
+    '## 自律リサーチ (tool use)',
+    `あなたは ${symbol} の市場分析にあたり、必要な外部情報を read-only ツールで自分で取得してよい:`,
+    '- fetch_eodhd_news / fetch_eodhd_sentiments: 関連ニュースとセンチメント',
+    '- fetch_eodhd_economic_events / fetch_eodhd_macro_indicator: 経済イベント・マクロ指標',
+    'どの情報が判断に必要かは自分で決めること。十分に集まったら **ツールを呼ばず**、',
+    '最終的な MarketAnalysis JSON のみを出力する (上記スキーマ厳守)。',
+    `ツール反復は最大 ${MAX_RESEARCH_TOOL_ITERATIONS} 回まで。取得できない情報は推測せず、その旨を踏まえて分析する。`,
+  ].join('\n');
+}
+
+/** ```json フェンスや前後テキストを除去して最初の JSON オブジェクトを parse する (テスト用に export)。 */
+export function extractJsonContent(content: string): JsonValue {
+  const cleaned = content.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  const slice = start >= 0 && end > start ? cleaned.slice(start, end + 1) : cleaned;
+  return JSON.parse(slice) as JsonValue;
+}
 
 /**
  * ResearchAIService 依存性 (テスト差し替え用)。reflectionAIService と同パターン。
@@ -216,6 +255,104 @@ export class ResearchAIService {
 
       return this.generateFallbackResult(input.symbol, ohlcvSnapshot);
     }
+  }
+
+  /**
+   * 市場分析を生成 (認知解放版 / agentic)。
+   *
+   * 事前注入された EODHD context を使う代わりに、エージェント自身が read-only ツールで
+   * 必要な外部情報を有界ループ内で自律取得する。出力契約 (ResearchAIResult) は
+   * generateResearch と同一に保ち、下流 Plan フェーズを変えない。失敗時は fallback。
+   */
+  async generateResearchAgentic(input: ResearchAIInput): Promise<ResearchAIResult> {
+    const ohlcvSnapshot = this.createOHLCVSnapshot(input.ohlcvData);
+
+    if (!this.apiKey) {
+      console.warn('[MarketAnalyst] APIキー未設定。agentic 研究を fallback。');
+      return this.generateFallbackResult(input.symbol, ohlcvSnapshot);
+    }
+
+    try {
+      return await this.runResearchToolLoop(input, ohlcvSnapshot);
+    } catch (error) {
+      console.error('[MarketAnalyst] agentic 研究エラー → fallback:', error);
+      return this.generateFallbackResult(input.symbol, ohlcvSnapshot);
+    }
+  }
+
+  /**
+   * read-only ツールの有界ループ。LLM が tool_calls を返す限りツールを実行して結果を返し、
+   * tool_calls 無し (最終回答) になったら MarketAnalysis JSON を検証して返す。
+   */
+  private async runResearchToolLoop(
+    input: ResearchAIInput,
+    ohlcvSnapshot: OHLCVSnapshot,
+  ): Promise<ResearchAIResult> {
+    const registry = buildDefaultSkillRegistry();
+    const tools = registry
+      .toMcpToolDefinitions()
+      .filter((t) => FX_RESEARCH_TOOL_ALLOWLIST.includes(t.name));
+
+    const provider = new AIProvider({ apiKey: this.apiKey, model: this.model, baseURL: this.baseURL });
+    const systemPrompt = await this.loadSystemPrompt();
+    const userPrompt = this.buildPrompt(input, ohlcvSnapshot);
+
+    const messages: ChatMessage[] = [
+      { role: 'system', content: systemPrompt + '\n' + agenticResearchInstructions(input.symbol) },
+      { role: 'user', content: userPrompt },
+    ];
+
+    let totalTokens = 0;
+    let toolCallCount = 0;
+
+    for (let iter = 0; iter < MAX_RESEARCH_TOOL_ITERATIONS; iter++) {
+      // tools と responseFormat:json_object は併用できないため、最終 JSON は extractJsonContent で抽出する。
+      const resp = await provider.chat(messages, {
+        temperature: 0.3,
+        maxTokens: AI_MAX_TOKENS.MEDIUM,
+        tools,
+      });
+      totalTokens += resp.tokenUsage;
+
+      if (resp.toolCalls.length > 0) {
+        messages.push({ role: 'assistant', content: resp.content, tool_calls: resp.toolCalls });
+        for (const call of resp.toolCalls) {
+          toolCallCount += 1;
+          let toolContent: string;
+          try {
+            const args = JSON.parse(call.function.arguments) as JsonValue;
+            const result = await registry.invoke(call.function.name, args);
+            toolContent = safeStringify(result);
+          } catch (toolErr) {
+            // ツール失敗は握って結果としてモデルに返す (黙殺しない・ループは継続)
+            toolContent = safeStringify({ ok: false, error: toolErr instanceof Error ? toolErr.message : String(toolErr) });
+          }
+          messages.push({ role: 'tool', content: toolContent, tool_call_id: call.id });
+        }
+        continue;
+      }
+
+      // tool_calls 無し = 最終回答。MarketAnalysis JSON を検証する。
+      if (!resp.content) {
+        throw new Error('agentic 研究: 最終応答が空');
+      }
+      const parsed = extractJsonContent(resp.content);
+      const marketAnalysis = validateMarketAnalysis(parsed);
+      const legacyFeatureVector = analysisToLegacyFeatureVector(marketAnalysis);
+      console.log(
+        `[MarketAnalyst] ${input.symbol} agentic 分析完了 (tools=${toolCallCount}, iters=${iter + 1}): ${marketAnalysis.regime}/${marketAnalysis.direction}/信頼度${marketAnalysis.confidence}%`,
+      );
+      return {
+        output: { featureVector: legacyFeatureVector },
+        marketAnalysis,
+        ohlcvSnapshot,
+        expiresAt: calculateExpiryDate(4),
+        tokenUsage: totalTokens,
+        model: resp.model,
+      };
+    }
+
+    throw new Error(`agentic 研究: 最大反復 ${MAX_RESEARCH_TOOL_ITERATIONS} 回到達 (tools=${toolCallCount})`);
   }
 
   /**
