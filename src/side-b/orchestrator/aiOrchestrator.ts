@@ -18,7 +18,6 @@
 
 import type {
   ResearchAIService,
-  ResearchAIInput,
   PlanAIService,
   PlanAIInput,
   UserTradingPreferences,
@@ -201,20 +200,21 @@ export class AIOrchestrator {
         }
       }
 
-      // Phase A: EODHD 外部要因 context を並列取得 (各失敗は graceful、OHLCV だけで継続可能)
-      const eodhdContexts = await fetchEodhdContextsForResearch(symbol);
-
-      // 2. Research AI 呼び出し
-      console.log(`[Orchestrator] Research AI 呼び出し`);
-      const aiInput: ResearchAIInput = {
-        symbol,
-        timeframe,
-        ohlcvData,
-        indicators: indicators,
-        ...eodhdContexts,
-      };
-
-      const aiResult = await this.researchAI.generateResearch(aiInput);
+      // 2. Research AI 呼び出し。
+      // RESEARCH_AGENTIC_ENABLED=true (認知解放): EODHD context を事前注入せず、エージェント自身が
+      //   read-only ツールで必要情報を有界ループ内で自律取得する。
+      // 既定 (false): 従来通り EODHD 外部要因 context を並列事前取得して注入する (各失敗は graceful)。
+      const agentic = process.env.RESEARCH_AGENTIC_ENABLED === 'true';
+      console.log(`[Orchestrator] Research AI 呼び出し (${agentic ? 'agentic/認知解放' : 'pre-injected'})`);
+      const aiResult = agentic
+        ? await this.researchAI.generateResearchAgentic({ symbol, timeframe, ohlcvData, indicators })
+        : await this.researchAI.generateResearch({
+            symbol,
+            timeframe,
+            ohlcvData,
+            indicators,
+            ...(await fetchEodhdContextsForResearch(symbol)),
+          });
 
       // 3. DB保存 (Phase A: ResearchOutput に marketAnalysis のみを構造化保存。
       //    featureVector は読み取り時に analysisToLegacyFeatureVector() で派生)
