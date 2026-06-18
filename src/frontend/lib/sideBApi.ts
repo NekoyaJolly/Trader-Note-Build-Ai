@@ -484,6 +484,8 @@ async function triggerEmergencyResume(): Promise<EmergencyResumeResponse> {
 export type FlowNodeStatus = "flowing" | "stale" | "dead" | "idle" | "unknown";
 /** エッジ(ハンドオフ)の状態。backend EdgeStatus と一致。 */
 export type FlowEdgeStatus = "flowing" | "broken" | "idle" | "stale" | "unknown";
+/** AI 層の health 状態。backend aiHealth.AiHealthStatus と一致 (string にせず union で固定)。 */
+export type FlowAiHealthStatus = "ok" | "degraded" | "down" | "idle";
 
 export interface FlowNodeView {
   id: string;
@@ -505,7 +507,7 @@ export interface OrchestrationFlowSnapshot {
   nodes: FlowNodeView[];
   edges: FlowEdgeView[];
   marketOpen: boolean;
-  aiHealthStatus: string;
+  aiHealthStatus: FlowAiHealthStatus;
   generatedAt: string;
 }
 

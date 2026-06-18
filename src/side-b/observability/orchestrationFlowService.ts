@@ -71,8 +71,11 @@ async function resolveLastActivity(): Promise<Record<FlowSignalKey, number | nul
     prisma.virtualTrade.findFirst({ where: { exitedAt: { not: null } }, orderBy: { exitedAt: 'desc' }, select: { exitedAt: true } }),
     prisma.edgeHypothesis.findFirst({ where: { source: 'discovery' }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
     prisma.edgeHypothesis.findFirst({ where: { source: 'ai_generated' }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
-    prisma.edgeHypothesis.findFirst({ where: { status: { in: ['screening_passed', 'testing', 'rejected', 'not_testable'] } }, orderBy: { statusUpdatedAt: 'desc' }, select: { statusUpdatedAt: true } }),
-    prisma.edgeHypothesis.findFirst({ where: { status: { in: ['confirmed', 'rejected'] } }, orderBy: { statusUpdatedAt: 'desc' }, select: { statusUpdatedAt: true } }),
+    // screening はステージ固有の出力 (ScreeningBacktestRun) を信号にする。EdgeHypothesis.statusUpdatedAt
+    // だと full validation の rejected 更新等で screening も更新扱いになり偽 green を生む (Copilot PR #431)。
+    prisma.screeningBacktestRun.findFirst({ orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
+    // full validation は lastTestedAt (confirmed/rejected かつ not null) でステージ分離する。
+    prisma.edgeHypothesis.findFirst({ where: { status: { in: ['confirmed', 'rejected'] }, lastTestedAt: { not: null } }, orderBy: { lastTestedAt: 'desc' }, select: { lastTestedAt: true } }),
     prisma.evolutionBacktestRun.findFirst({ orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
     prisma.edgeHypothesis.findFirst({ where: { status: 'confirmed' }, orderBy: { statusUpdatedAt: 'desc' }, select: { statusUpdatedAt: true } }),
     prisma.tradeNote.findFirst({ orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
@@ -86,8 +89,8 @@ async function resolveLastActivity(): Promise<Record<FlowSignalKey, number | nul
     trade_exit: tsOrNull(tradeExit ? { ts: tradeExit.exitedAt } : null),
     discovery: tsOrNull(discovery ? { ts: discovery.createdAt } : null),
     hypothesis: tsOrNull(hypothesis ? { ts: hypothesis.createdAt } : null),
-    screening: tsOrNull(screening ? { ts: screening.statusUpdatedAt } : null),
-    validation: tsOrNull(validation ? { ts: validation.statusUpdatedAt } : null),
+    screening: tsOrNull(screening ? { ts: screening.createdAt } : null),
+    validation: tsOrNull(validation ? { ts: validation.lastTestedAt } : null),
     evolution: tsOrNull(evolution ? { ts: evolution.createdAt } : null),
     edge_confirmed: tsOrNull(edgeConfirmed ? { ts: edgeConfirmed.statusUpdatedAt } : null),
     materialization: tsOrNull(materialization ? { ts: materialization.createdAt } : null),
