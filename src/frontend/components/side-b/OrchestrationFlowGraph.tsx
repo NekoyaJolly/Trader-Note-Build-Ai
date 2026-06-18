@@ -27,7 +27,7 @@ import type {
 /**
  * ノードの x/y 配置。横一直線 (幅2300×高160≒14:1) だと fitView が極端にズームアウトしてノードが
  * 豆粒になるため、パイプラインを 2 段に折り返した serpentine 配置にしてアスペクト比を ~2.5:1 に
- * 圧縮し、fitView 時のノードを読めるサイズにする。row1 (trade) は左→右、row2 (edge/evolution) は
+ * 圧縮し、fitView 時のノードを読めるサイズにする。row1 (trade) は左→右、row2 (edge/検証) は
  * discovery の下から右→左に折り返す。row3 は補助ノード (evolution/pdca/ai_layer)。
  */
 const COL = 210;
