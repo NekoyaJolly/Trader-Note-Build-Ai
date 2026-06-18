@@ -24,22 +24,31 @@ import type {
   FlowEdgeStatus,
 } from "@/lib/sideBApi";
 
-/** ノードの x/y 配置 (パイプライン順の手動レイアウト)。react-flow は fitView でパン/ズーム可。 */
+/**
+ * ノードの x/y 配置。横一直線 (幅2300×高160≒14:1) だと fitView が極端にズームアウトしてノードが
+ * 豆粒になるため、パイプラインを 2 段に折り返した serpentine 配置にしてアスペクト比を ~2.5:1 に
+ * 圧縮し、fitView 時のノードを読めるサイズにする。row1 (trade) は左→右、row2 (edge/evolution) は
+ * discovery の下から右→左に折り返す。row3 は補助ノード (evolution/pdca/ai_layer)。
+ */
+const COL = 210;
 const NODE_POSITIONS: Record<string, { x: number; y: number }> = {
-  top_level_orchestrator: { x: 0, y: 40 },
-  research: { x: 230, y: 40 },
-  plan: { x: 460, y: 40 },
-  virtual_trade: { x: 690, y: 40 },
-  trade_monitoring: { x: 920, y: 40 },
-  discovery: { x: 1150, y: 40 },
-  hypothesis_generator: { x: 1380, y: 40 },
-  screening: { x: 1610, y: 40 },
-  full_validation: { x: 1840, y: 40 },
-  edge_ledger: { x: 2070, y: 40 },
-  materialization: { x: 2300, y: 40 },
-  evolution: { x: 1840, y: 200 },
-  pdca: { x: 920, y: 230 },
-  ai_layer: { x: 0, y: 230 },
+  // row1 (y=40): 取引パイプライン 左→右
+  top_level_orchestrator: { x: 0 * COL, y: 40 },
+  research: { x: 1 * COL, y: 40 },
+  plan: { x: 2 * COL, y: 40 },
+  virtual_trade: { x: 3 * COL, y: 40 },
+  trade_monitoring: { x: 4 * COL, y: 40 },
+  discovery: { x: 5 * COL, y: 40 },
+  // row2 (y=210): エッジ/検証パイプライン discovery の下から右→左に折り返す
+  hypothesis_generator: { x: 5 * COL, y: 210 },
+  screening: { x: 4 * COL, y: 210 },
+  full_validation: { x: 3 * COL, y: 210 },
+  edge_ledger: { x: 2 * COL, y: 210 },
+  materialization: { x: 1 * COL, y: 210 },
+  // row3 (y=380): 補助 (evolution は edge_ledger へ / pdca はハブ / ai_layer は横断)
+  evolution: { x: 3 * COL, y: 380 },
+  pdca: { x: 4 * COL, y: 380 },
+  ai_layer: { x: 5 * COL, y: 380 },
 };
 
 const NODE_STATUS_STYLE: Record<FlowNodeStatus, { bg: string; border: string; label: string }> = {
@@ -119,14 +128,32 @@ export function OrchestrationFlowGraph({ snapshot }: { snapshot: OrchestrationFl
   );
 
   return (
-    <div style={{ width: "100%", height: 560 }} className="rounded-lg border border-gray-800 bg-[#0a0a0a]">
-      <ReactFlow nodes={nodes} edges={edges} fitView minZoom={0.2} proOptions={{ hideAttribution: true }}>
+    <div style={{ width: "100%", height: "72vh", minHeight: 520 }} className="rounded-lg border border-gray-800 bg-[#0a0a0a]">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        fitView
+        // 折り返しレイアウトで box が ~2.5:1 になったので padding を確保しつつ、maxZoom で
+        // 寄りすぎ・minZoom で引きすぎを抑える (ノードが読めるレンジに収める)。
+        fitViewOptions={{ padding: 0.18 }}
+        minZoom={0.3}
+        maxZoom={1.5}
+        // colorMode=dark で Controls / MiniMap を含めダークテーマ化 (白抜け解消)。
+        colorMode="dark"
+        proOptions={{ hideAttribution: true }}
+      >
         <Background color="#27272a" gap={20} />
         <Controls />
-        <MiniMap pannable zoomable nodeColor={(n) => {
-          const status = snapshot.nodes.find((x) => x.id === n.id)?.status ?? "unknown";
-          return NODE_STATUS_STYLE[status].border;
-        }} />
+        <MiniMap
+          pannable
+          zoomable
+          maskColor="rgba(0,0,0,0.6)"
+          style={{ backgroundColor: "#0a0a0a" }}
+          nodeColor={(n) => {
+            const status = snapshot.nodes.find((x) => x.id === n.id)?.status ?? "unknown";
+            return NODE_STATUS_STYLE[status].border;
+          }}
+        />
       </ReactFlow>
     </div>
   );
