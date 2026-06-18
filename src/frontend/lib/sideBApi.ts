@@ -476,6 +476,52 @@ async function triggerEmergencyResume(): Promise<EmergencyResumeResponse> {
   return request<EmergencyResumeResponse>("/emergency/resume", { method: "POST" });
 }
 
+// ===========================================
+// オーケストレーション flow 可視化 (GET /orchestrator/flow)
+// ===========================================
+
+/** ノードのライブ状態。backend orchestrationFlowStatus.FlowStatus と一致。 */
+export type FlowNodeStatus = "flowing" | "stale" | "dead" | "idle" | "unknown";
+/** エッジ(ハンドオフ)の状態。backend EdgeStatus と一致。 */
+export type FlowEdgeStatus = "flowing" | "broken" | "idle" | "stale" | "unknown";
+/** AI 層の health 状態。backend aiHealth.AiHealthStatus と一致 (string にせず union で固定)。 */
+export type FlowAiHealthStatus = "ok" | "degraded" | "down" | "idle";
+
+export interface FlowNodeView {
+  id: string;
+  label: string;
+  group: string;
+  status: FlowNodeStatus;
+  lastActivityMs: number | null;
+  produces: string;
+}
+
+export interface FlowEdgeView {
+  from: string;
+  to: string;
+  label: string;
+  status: FlowEdgeStatus;
+}
+
+export interface OrchestrationFlowSnapshot {
+  nodes: FlowNodeView[];
+  edges: FlowEdgeView[];
+  marketOpen: boolean;
+  aiHealthStatus: FlowAiHealthStatus;
+  generatedAt: string;
+}
+
+interface OrchestrationFlowResponse {
+  success: boolean;
+  data: OrchestrationFlowSnapshot;
+}
+
+/** オーケストレーション flow スナップショット (エージェント=ノード/ハンドオフ=エッジ + 生死)。 */
+async function getOrchestrationFlow(): Promise<OrchestrationFlowSnapshot> {
+  const res = await request<OrchestrationFlowResponse>("/orchestrator/flow");
+  return res.data;
+}
+
 
 // ===========================================
 // export
@@ -510,6 +556,7 @@ export const sideBApi = {
   getEvolutionRunCandidates,
   getOrchestratorRuns,
   getOrchestratorRunDetail,
+  getOrchestrationFlow,
   getEmergencyStatus,
   triggerEmergencyStop,
   triggerEmergencyResume,
